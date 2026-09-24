@@ -15,7 +15,8 @@ use super::*;
 /// - `schema`    = 表单定义（没有它，`form` 渲染器渲染不出任何字段）。
 #[tokio::test]
 async fn new_type_declares_the_landing_detail() {
-    let types = McpPlugin::default().root_new_types().await;
+    // 「根下可新建类型」是 provider 的异步自述（不在同步的 `PluginMeta` 上）
+    let types = McpPlugin::default().new_types().await;
     let form = types
         .iter()
         .find(|t| t.ext == PLUGIN_MCP)

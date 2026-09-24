@@ -12,8 +12,8 @@
 use super::entry;
 use crate::symbio_core::vdfs::host::{notify_change, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
-    VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNode,
-    VdfsProvider, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_EXT_ZIP,
+    VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider,
+    VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT,
 };
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -172,129 +172,116 @@ impl SingleFileVdfs {
 }
 
 /// 单文件型是一个**完整**的 provider：没有呈现差异的资源可以直接注册它。
+/// 自述（标题 / 图标 / 根访问位 / 根可新建类型）已并入 PluginMeta，由持有方提供。
 #[async_trait]
 impl VdfsProvider for SingleFileVdfs {
-    fn label(&self) -> Option<&str> {
-        Some(&self.label)
-    }
-
-    fn description(&self) -> Option<&str> {
-        Some("单文件型资源：每个条目一份主文件，条目内部不对外暴露。")
-    }
-
-    fn icon(&self) -> Option<&str> {
-        Some(self.kind.as_str())
-    }
-
-    /// 叶子清单：可列、可整包导入（因此根下可新建）
-    fn root_access(&self) -> VdfsAccess {
-        VdfsAccess::LIST
-    }
-
-    async fn root_new_types(&self) -> Vec<crate::symbio_core::vdfs_provider::VdfsNewType> {
-        use crate::symbio_core::vdfs_provider::VdfsNewType;
-        vec![VdfsNewType::new(VDFS_EXT_ZIP, format!("{}包", self.label))
-            .with_description("导入整包（.zip）——整目录覆盖同名条目")
-            .with_source(crate::symbio_core::vdfs_provider::VDFS_NEW_SOURCE_FILE)]
-    }
-
-    async fn list(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
-        if !path.is_empty() {
-            return Err(VdfsError::not_found(format!(
-                "单文件型条目没有子项：{path}"
-            )));
-        }
-        Ok(self
-            .entries()
-            .await?
-            .iter()
-            .map(|e| self.node_of(e))
-            .collect())
-    }
-
-    async fn stat(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
-        if path.is_empty() {
-            // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填
-            return Ok(VdfsNode::dir("", self.label.clone(), VdfsAccess::LIST));
-        }
-        Ok(self.node_of(&self.entry(&self.id_of(path)).await?))
-    }
-
-    async fn read(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
-        if path.is_empty() {
-            return Err(VdfsError::invalid("该路径是目录，不可读取内容"));
-        }
-        let id = self.id_of(path);
-        let text = self.read_text(&id).await?;
-        Ok(VdfsContent::text(path, text))
-    }
-
-    async fn write(
+    async fn dispatch(
         &self,
         _ctx: &VdfsContext,
         path: &str,
-        content: &VdfsContent,
-    ) -> VdfsResult<VdfsWriteResponse> {
-        if path.is_empty() {
-            return Err(VdfsError::invalid("单文件型条目只能写到条目地址上"));
-        }
-        let id = self.id_of(path);
-        let created = if content.binary {
-            let bytes = super::pack::decode_b64(content.b64.as_deref().unwrap_or_default())
-                .map_err(|e| VdfsError::invalid(e.0))?;
-            self.import_pack(&self.pack_name_of(path), &bytes).await?
-        } else {
-            self.write_text(&id, content.as_text().unwrap_or_default())
-                .await?
-        };
-        Ok(VdfsWriteResponse {
-            path: id,
-            created,
-            etag: None,
-        })
-    }
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
+        match req {
+            VdfsRequest::List { .. } => {
+                if !path.is_empty() {
+                    return Err(VdfsError::not_found(format!(
+                        "单文件型条目没有子项：{path}"
+                    )));
+                }
+                Ok(VdfsResponse::List(
+                    self.entries()
+                        .await?
+                        .iter()
+                        .map(|e| self.node_of(e))
+                        .collect(),
+                ))
+            }
 
-    async fn delete(&self, _ctx: &VdfsContext, path: &str, _recursive: bool) -> VdfsResult<()> {
-        if path.is_empty() {
-            return Err(VdfsError::Forbidden("不可删除挂载根".to_string()));
-        }
-        let id = self.id_of(path);
-        // 存在性校验：删不存在的条目应报 NotFound，而不是静默成功
-        self.entry(&id).await?;
-        self.remove(&id).await
-    }
+            VdfsRequest::Stat => {
+                if path.is_empty() {
+                    // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填
+                    return Ok(VdfsResponse::Stat(VdfsNode::dir(
+                        "",
+                        self.label.clone(),
+                        VdfsAccess::LIST,
+                    )));
+                }
+                Ok(VdfsResponse::Stat(
+                    self.node_of(&self.entry(&self.id_of(path)).await?),
+                ))
+            }
 
-    async fn action(
-        &self,
-        _ctx: &VdfsContext,
-        path: &str,
-        action: &str,
-        _payload: Option<&serde_json::Value>,
-    ) -> VdfsResult<VdfsActionResult> {
-        if action != VDFS_ACTION_EXPORT {
-            return Err(VdfsError::NotImplemented);
-        }
-        if path.is_empty() {
-            return Err(VdfsError::invalid("「导出」只对条目可用"));
-        }
-        let id = self.id_of(path);
-        let pack = self.export_pack(&id).await?;
-        let data = serde_json::to_value(&pack)
-            .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;
-        Ok(VdfsActionResult {
-            action: VDFS_ACTION_EXPORT.to_string(),
-            ok: true,
-            message: format!("已打包「{}」", pack.filename),
-            data: Some(data),
-        })
-    }
+            VdfsRequest::Read => {
+                if path.is_empty() {
+                    return Err(VdfsError::invalid("该路径是目录，不可读取内容"));
+                }
+                let id = self.id_of(path);
+                let text = self.read_text(&id).await?;
+                Ok(VdfsResponse::Read(VdfsContent::text(path, text)))
+            }
 
-    async fn watch(&self, _ctx: &VdfsContext, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
-        watch_changes(&self.kind, path, sink).await
-    }
+            VdfsRequest::Write { content } => {
+                if path.is_empty() {
+                    return Err(VdfsError::invalid("单文件型条目只能写到条目地址上"));
+                }
+                let id = self.id_of(path);
+                let created = if content.binary {
+                    let bytes = super::pack::decode_b64(content.b64.as_deref().unwrap_or_default())
+                        .map_err(|e| VdfsError::invalid(e.0))?;
+                    self.import_pack(&self.pack_name_of(path), &bytes).await?
+                } else {
+                    self.write_text(&id, content.as_text().unwrap_or_default())
+                        .await?
+                };
+                Ok(VdfsResponse::Write(VdfsWriteResponse {
+                    path: id,
+                    created,
+                    etag: None,
+                }))
+            }
 
-    async fn unwatch(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
-        unwatch_changes(&self.kind, path).await
+            VdfsRequest::Delete { recursive: _ } => {
+                if path.is_empty() {
+                    return Err(VdfsError::Forbidden("不可删除挂载根".to_string()));
+                }
+                let id = self.id_of(path);
+                // 存在性校验：删不存在的条目应报 NotFound，而不是静默成功
+                self.entry(&id).await?;
+                self.remove(&id).await?;
+                Ok(VdfsResponse::Unit)
+            }
+
+            VdfsRequest::Mkdir | VdfsRequest::Move { .. } => Err(VdfsError::NotImplemented),
+
+            VdfsRequest::Action { action, payload: _ } => {
+                if action != VDFS_ACTION_EXPORT {
+                    return Err(VdfsError::NotImplemented);
+                }
+                if path.is_empty() {
+                    return Err(VdfsError::invalid("「导出」只对条目可用"));
+                }
+                let id = self.id_of(path);
+                let pack = self.export_pack(&id).await?;
+                let data = serde_json::to_value(&pack)
+                    .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;
+                Ok(VdfsResponse::Action(VdfsActionResult {
+                    action: VDFS_ACTION_EXPORT.to_string(),
+                    ok: true,
+                    message: format!("已打包「{}」", pack.filename),
+                    data: Some(data),
+                }))
+            }
+
+            VdfsRequest::Watch { sink } => {
+                watch_changes(&self.kind, path, sink).await?;
+                Ok(VdfsResponse::Unit)
+            }
+
+            VdfsRequest::Unwatch => {
+                unwatch_changes(&self.kind, path).await?;
+                Ok(VdfsResponse::Unit)
+            }
+        }
     }
 }
 
@@ -320,7 +307,17 @@ mod tests {
         // 条目内部不进地址空间：主文件之外的文件列不出来
         std::fs::create_dir_all(s.entry_dir("p1").join("secret")).unwrap();
         std::fs::write(s.entry_dir("p1").join("secret/note.txt"), b"x").unwrap();
-        let err = s.list(&VdfsContext::empty(), "p1").await.unwrap_err();
+        let err = s
+            .dispatch(
+                &VdfsContext::empty(),
+                "p1",
+                VdfsRequest::List {
+                    limit: None,
+                    before: None,
+                },
+            )
+            .await
+            .unwrap_err();
         assert!(
             matches!(err, VdfsError::NotFound(_)),
             "单文件型不得暴露条目内部：{err:?}"
@@ -343,30 +340,64 @@ mod tests {
         let s = store_in(tmp.path());
         let ctx = VdfsContext::empty();
 
-        s.write(&ctx, "p1.model", &VdfsContent::text("", "{\"id\":\"p1\"}"))
+        let _ = s
+            .dispatch(
+                &ctx,
+                "p1.model",
+                VdfsRequest::Write {
+                    content: VdfsContent::text("", "{\"id\":\"p1\"}"),
+                },
+            )
             .await
             .unwrap();
         // 呈现扩展名不是地址的一部分
         assert_eq!(
-            s.read(&ctx, "p1").await.unwrap().as_text(),
+            s.dispatch(&ctx, "p1", VdfsRequest::Read)
+                .await
+                .unwrap()
+                .into_read()
+                .unwrap()
+                .as_text(),
             Some("{\"id\":\"p1\"}")
         );
-        let node = s.stat(&ctx, "p1.model").await.unwrap();
+        let node = s
+            .dispatch(&ctx, "p1.model", VdfsRequest::Stat)
+            .await
+            .unwrap()
+            .into_stat()
+            .unwrap();
         assert_eq!(node.name, "p1");
         assert_eq!(node.ext.as_deref(), Some("json"));
         assert_eq!(node.access, VdfsAccess::READ_WRITE);
 
-        let listed = s.list(&ctx, "").await.unwrap();
+        let listed = s
+            .dispatch(
+                &ctx,
+                "",
+                VdfsRequest::List {
+                    limit: None,
+                    before: None,
+                },
+            )
+            .await
+            .unwrap()
+            .into_list()
+            .unwrap();
         assert_eq!(
             listed.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(),
             vec!["p1"]
         );
 
         assert!(matches!(
-            s.delete(&ctx, "nope", false).await.unwrap_err(),
+            s.dispatch(&ctx, "nope", VdfsRequest::Delete { recursive: false })
+                .await
+                .unwrap_err(),
             VdfsError::NotFound(_)
         ));
-        s.delete(&ctx, "p1", false).await.unwrap();
+        let _ = s
+            .dispatch(&ctx, "p1", VdfsRequest::Delete { recursive: false })
+            .await
+            .unwrap();
         assert!(s.entries().await.unwrap().is_empty());
     }
 
@@ -401,14 +432,31 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let s = store_in(tmp.path());
         let ctx = VdfsContext::empty();
-        assert!(s.mkdir(&ctx, "d").await.unwrap_err().is_not_implemented());
         assert!(s
-            .move_item(&ctx, "a", "b")
+            .dispatch(&ctx, "d", VdfsRequest::Mkdir)
             .await
             .unwrap_err()
             .is_not_implemented());
         assert!(s
-            .action(&ctx, "p1", "test", None)
+            .dispatch(
+                &ctx,
+                "a",
+                VdfsRequest::Move {
+                    to: "b".to_string()
+                }
+            )
+            .await
+            .unwrap_err()
+            .is_not_implemented());
+        assert!(s
+            .dispatch(
+                &ctx,
+                "p1",
+                VdfsRequest::Action {
+                    action: "test".to_string(),
+                    payload: None
+                }
+            )
             .await
             .unwrap_err()
             .is_not_implemented());

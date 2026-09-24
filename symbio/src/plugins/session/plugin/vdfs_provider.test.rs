@@ -3,7 +3,7 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）：测试跟着被测试的实现走。
 
 use super::*;
-// trait 方法（list/stat/read/write/delete/watch/unwatch）需 trait 在作用域内才可解析
+// dispatch 是 VdfsProvider 的唯一入口（测试经文件尾的 LIST/STAT/… 请求常量调用）
 use crate::symbio_core::vdfs_provider::VdfsProvider;
 // 地址构造辅助：只被本测试用，故不经 `plugin.rs` 的共享面转出（那里会让
 // `unused_imports` 误报——它看不见「仅经 glob 链使用」的再导出）。
@@ -31,16 +31,18 @@ fn vctx() -> vdfs::VdfsContext {
 #[tokio::test]
 async fn vdfs_self_description_has_no_mount() {
     let (_dir, p) = fixture();
-    assert_eq!(p.label(), Some("会话"));
-    assert_eq!(p.icon(), Some("session"));
-    // 顺序由本 provider 的 order() 自持（**单一真相源**），
+    let meta = p.meta();
+    assert_eq!(meta.name, "会话");
+    assert_eq!(meta.icon.as_deref(), Some("session"));
+    // 顺序由本插件自述自持（**单一真相源**），
     // 使 `<根>` 左栏与详情恒等
-    assert_eq!(p.order(), 1);
-    assert_eq!(p.root_access().flags(), "l");
-    assert!(!p.root_access().traverse, "会话是叶子，不参与树遍历");
+    assert_eq!(meta.order, 1);
+    assert_eq!(meta.root_access.flags(), "l");
+    assert!(!meta.root_access.traverse, "会话是叶子，不参与树遍历");
 
-    // 根下可新建「会话」——类型清单即「新建」入口的唯一依据
-    let types = p.root_new_types().await;
+    // 根下可新建「会话」——类型清单即「新建」入口的唯一依据。
+    // 它不在同步的 `PluginMeta` 上（schema 需运行期汇流），由 provider 现场给。
+    let types = p.new_types().await;
     assert_eq!(types.len(), 1);
     assert_eq!(types[0].ext, vdfs::VDFS_EXT_SESSION);
     assert_eq!(types[0].title, "会话");
@@ -67,8 +69,8 @@ fn unique_id(tag: &str) -> String {
 async fn vdfs_list_unknown_session_is_not_found() {
     let (_dir, p) = fixture();
     let id = unique_id("no-such-session");
-    assert!(p.list(&vctx(), &id).await.is_err());
-    assert!(p.stat(&vctx(), &id).await.is_err());
+    assert!(p.dispatch(&vctx(), &id, LIST).await.is_err());
+    assert!(p.dispatch(&vctx(), &id, STAT).await.is_err());
 }
 
 /// `<id>` 的 `stat` 是**目录视图**（只给 `l`），但呈现必须与清单同源。
@@ -83,7 +85,12 @@ async fn vdfs_stat_session_is_dir_view_with_list_shape() {
     s.updated_at = 1_700_000_000;
     p.save_session(&s).await.unwrap();
 
-    let n = p.stat(&vctx(), &id).await.unwrap();
+    let n = p
+        .dispatch(&vctx(), &id, STAT)
+        .await
+        .unwrap()
+        .into_stat()
+        .unwrap();
     assert_eq!(n.name, id);
     assert_eq!(n.access.flags(), "l", "目录视图：可列，但不给新建入口");
     assert!(n.is_dir(), "被当目录访问时的视图");
@@ -110,8 +117,12 @@ async fn vdfs_watch_forwards_session_changes() {
         let _ = tx.send(c);
     });
 
-    p.watch(&vctx(), "", sink.clone()).await.unwrap();
-    p.watch(&vctx(), "", sink).await.unwrap();
+    p.dispatch(&vctx(), "", vdfs::VdfsRequest::Watch { sink: sink.clone() })
+        .await
+        .unwrap();
+    p.dispatch(&vctx(), "", vdfs::VdfsRequest::Watch { sink })
+        .await
+        .unwrap();
     assert_eq!(p.change_subs.subscriber_count(), 2);
     assert_eq!(p.change_subs.paths(), vec!["".to_string()]);
 
@@ -123,13 +134,13 @@ async fn vdfs_watch_forwards_session_changes() {
     assert!(got.data.is_none(), "资源信号无载荷");
     assert!(rx.try_recv().is_err(), "同一路径的重复订阅不得收到重复帧");
 
-    p.unwatch(&vctx(), "").await.unwrap();
+    p.dispatch(&vctx(), "", UNWATCH).await.unwrap();
     assert_eq!(
         p.change_subs.subscriber_count(),
         1,
         "取消一位仍有另一位，不得提前停投"
     );
-    p.unwatch(&vctx(), "").await.unwrap();
+    p.dispatch(&vctx(), "", UNWATCH).await.unwrap();
     assert!(
         !p.change_subs.has_subscribers(),
         "unwatch 必须把该路径彻底摘掉"
@@ -153,14 +164,24 @@ async fn config_document_is_reachable_but_not_a_session_list_item() {
     let (_dir, p) = fixture();
 
     // 可达：按真实文件名 stat / read
-    let node = p.stat(&vctx(), PLUGIN_FILE).await.unwrap();
+    let node = p
+        .dispatch(&vctx(), PLUGIN_FILE, STAT)
+        .await
+        .unwrap()
+        .into_stat()
+        .unwrap();
     assert_eq!(node.name, PLUGIN_FILE, "地址就是插件目录里的真实文件名");
     assert_eq!(node.ext.as_deref(), Some(vdfs::VDFS_EXT_FORM));
     assert_eq!(node.access.flags(), "rw");
     assert!(node.schema.is_some(), "定义随节点下发");
 
     // 不并列：清单里没有它
-    let items = p.list(&vctx(), "").await.unwrap();
+    let items = p
+        .dispatch(&vctx(), "", LIST)
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap();
     assert!(
         !items.iter().any(|n| n.name == PLUGIN_FILE),
         "会话清单里只应有会话，配置文件不该出现"
@@ -168,16 +189,26 @@ async fn config_document_is_reachable_but_not_a_session_list_item() {
 
     // 配置文件不是会话 id：按文件读，不按会话解析
     assert_eq!(
-        p.stat(&vctx(), PLUGIN_FILE).await.unwrap().name,
+        p.dispatch(&vctx(), PLUGIN_FILE, STAT)
+            .await
+            .unwrap()
+            .into_stat()
+            .unwrap()
+            .name,
         PLUGIN_FILE
     );
-    let content = p.read(&vctx(), PLUGIN_FILE).await.unwrap();
+    let content = p
+        .dispatch(&vctx(), PLUGIN_FILE, READ)
+        .await
+        .unwrap()
+        .into_read()
+        .unwrap();
     let cfg: SessionConfig = serde_json::from_str(content.text.as_deref().unwrap()).unwrap();
     assert_eq!(cfg.max_messages, SessionConfig::default().max_messages);
 
     // 文档没有子项，也不可删除
-    assert!(p.list(&vctx(), PLUGIN_FILE).await.is_err());
-    assert!(p.delete(&vctx(), PLUGIN_FILE, false).await.is_err());
+    assert!(p.dispatch(&vctx(), PLUGIN_FILE, LIST).await.is_err());
+    assert!(p.dispatch(&vctx(), PLUGIN_FILE, DEL).await.is_err());
 }
 
 /// 会话清单里的每一项都带**选项定义**（`schema`）——前端零额外请求即可渲染选项栏
@@ -190,13 +221,26 @@ async fn config_document_is_reachable_but_not_a_session_list_item() {
 async fn session_list_carries_the_option_definition() {
     let (_dir, p) = fixture();
     let created = p
-        .write(&vctx(), "", &vdfs::VdfsContent::text("", "").with_create())
+        .dispatch(
+            &vctx(),
+            "",
+            vdfs::VdfsRequest::Write {
+                content: vdfs::VdfsContent::text("", "").with_create(),
+            },
+        )
         .await
+        .unwrap()
+        .into_write()
         .unwrap();
     assert!(created.created);
     let id = created.path;
 
-    let items = p.list(&vctx(), "").await.unwrap();
+    let items = p
+        .dispatch(&vctx(), "", LIST)
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap();
     let node = items
         .iter()
         .find(|n| n.name == id)
@@ -216,14 +260,23 @@ async fn session_list_carries_the_option_definition() {
     // 当前值走 `attributes.metadata`（新形态的值载体）：写一次 metadata，
     // 清单节点上立刻能看到——「定义 + 值 + 落库」三条通路因此都在 VDFS 上闭环，
     // 不需要第二套协议（旧形态要 `options/list` + `session/update` 各一条，两条都已退役）
-    p.write(
+    p.dispatch(
         &vctx(),
         &id,
-        &vdfs::VdfsContent::text("", r#"{"metadata":{"risk_level":"high"}}"#),
+        vdfs::VdfsRequest::Write {
+            content: vdfs::VdfsContent::text("", r#"{"metadata":{"risk_level":"high"}}"#),
+        },
     )
     .await
+    .unwrap()
+    .into_write()
     .unwrap();
-    let items = p.list(&vctx(), "").await.unwrap();
+    let items = p
+        .dispatch(&vctx(), "", LIST)
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap();
     let node = items.iter().find(|n| n.name == id).expect("会话还在");
     assert_eq!(
         node.attributes["metadata"]["risk_level"],
@@ -247,12 +300,17 @@ async fn session_list_carries_the_option_definition() {
 async fn named_create_uses_the_address_as_the_session_id() {
     let (_dir, p) = fixture();
     let r = p
-        .write(
+        .dispatch(
             &vctx(),
             "cli-abc",
-            &vdfs::VdfsContent::text("", r#"{"metadata":{"workdir":"/w"}}"#).with_create(),
+            vdfs::VdfsRequest::Write {
+                content: vdfs::VdfsContent::text("", r#"{"metadata":{"workdir":"/w"}}"#)
+                    .with_create(),
+            },
         )
         .await
+        .unwrap()
+        .into_write()
         .unwrap();
     assert!(r.created, "具名目标不存在 ⇒ 就地创建");
     assert_eq!(r.path, "cli-abc", "新建的地址就是使用方写的那一个");
@@ -275,23 +333,35 @@ async fn named_create_uses_the_address_as_the_session_id() {
 async fn named_create_on_an_existing_session_merges_instead_of_duplicating() {
     let (_dir, p) = fixture();
     let first = p
-        .write(
+        .dispatch(
             &vctx(),
             "keep",
-            &vdfs::VdfsContent::text("", r#"{"metadata":{"workdir":"/old","agent_id":"a"}}"#)
+            vdfs::VdfsRequest::Write {
+                content: vdfs::VdfsContent::text(
+                    "",
+                    r#"{"metadata":{"workdir":"/old","agent_id":"a"}}"#,
+                )
                 .with_create(),
+            },
         )
         .await
+        .unwrap()
+        .into_write()
         .unwrap();
     assert!(first.created);
 
     let again = p
-        .write(
+        .dispatch(
             &vctx(),
             "keep",
-            &vdfs::VdfsContent::text("", r#"{"metadata":{"workdir":"/new"}}"#).with_create(),
+            vdfs::VdfsRequest::Write {
+                content: vdfs::VdfsContent::text("", r#"{"metadata":{"workdir":"/new"}}"#)
+                    .with_create(),
+            },
         )
         .await
+        .unwrap()
+        .into_write()
         .unwrap();
     assert!(!again.created, "已存在 ⇒ 覆盖，不是再建一个");
     assert_eq!(again.path, "keep");
@@ -308,7 +378,12 @@ async fn named_create_on_an_existing_session_merges_instead_of_duplicating() {
         "未提供的键保持不变（浅合并）"
     );
     assert_eq!(
-        p.list(&vctx(), "").await.unwrap().len(),
+        p.dispatch(&vctx(), "", LIST)
+            .await
+            .unwrap()
+            .into_list()
+            .unwrap()
+            .len(),
         1,
         "不该造出第二个会话"
     );
@@ -322,23 +397,34 @@ async fn named_create_on_an_existing_session_merges_instead_of_duplicating() {
 #[tokio::test]
 async fn write_merges_metadata_shallowly() {
     let (_dir, p) = fixture();
-    p.write(
+    p.dispatch(
         &vctx(),
         "s1",
-        &vdfs::VdfsContent::text(
-            "",
-            r#"{"metadata":{"workdir":"/old","agent_id":"keep-me"}}"#,
-        )
-        .with_create(),
+        vdfs::VdfsRequest::Write {
+            content: vdfs::VdfsContent::text(
+                "",
+                r#"{"metadata":{"workdir":"/old","agent_id":"keep-me"}}"#,
+            )
+            .with_create(),
+        },
     )
     .await
+    .unwrap()
+    .into_write()
     .unwrap();
-    p.write(
+    p.dispatch(
         &vctx(),
         "s1",
-        &vdfs::VdfsContent::text("", r#"{"metadata":{"workdir":"/new"},"title":"改名"}"#),
+        vdfs::VdfsRequest::Write {
+            content: vdfs::VdfsContent::text(
+                "",
+                r#"{"metadata":{"workdir":"/new"},"title":"改名"}"#,
+            ),
+        },
     )
     .await
+    .unwrap()
+    .into_write()
     .unwrap();
 
     let s = p.session_of("s1").await.unwrap();
@@ -358,7 +444,14 @@ async fn config_write_validates_before_applying() {
     let (_dir, p) = fixture();
     let before = p.config.read().await.max_messages;
     let bad = vdfs::VdfsContent::text("", r#"{"max_messages": 1}"#);
-    match p.write(&vctx(), PLUGIN_FILE, &bad).await {
+    match p
+        .dispatch(
+            &vctx(),
+            PLUGIN_FILE,
+            vdfs::VdfsRequest::Write { content: bad },
+        )
+        .await
+    {
         Err(vdfs::VdfsError::Invalid(v)) => assert_eq!(v.fields[0].field, "max_messages"),
         other => panic!("应为字段级校验错误，实得 {other:?}"),
     }
@@ -377,7 +470,12 @@ async fn memory_is_a_read_write_file_inside_the_session() {
     let path = format!("{id}/{}", crate::symbio_core::AGENTS_FILE);
 
     // ① 会话内部并列着记忆（它本来就是会话的一部分，不另开一条寻址）
-    let items = p.list(&vctx(), &id).await.unwrap();
+    let items = p
+        .dispatch(&vctx(), &id, LIST)
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap();
     let mem = items
         .iter()
         .find(|n| n.name == crate::symbio_core::AGENTS_FILE)
@@ -388,7 +486,12 @@ async fn memory_is_a_read_write_file_inside_the_session() {
     assert!(mem.description.is_some(), "列表里要能看出它是干什么的");
 
     // ② `stat` 与 `list` 同源（同一份形状，不是另写一份「详情版」）
-    let stat = p.stat(&vctx(), &path).await.unwrap();
+    let stat = p
+        .dispatch(&vctx(), &path, STAT)
+        .await
+        .unwrap()
+        .into_stat()
+        .unwrap();
     assert_eq!(stat.name, mem.name);
     assert_eq!(stat.access.flags(), mem.access.flags());
     assert_eq!(stat.size, mem.size);
@@ -396,42 +499,69 @@ async fn memory_is_a_read_write_file_inside_the_session() {
 
     // ③ 还没写过 → 空串（「还没写过」是记忆的正常状态，不是错误）
     assert_eq!(
-        p.read(&vctx(), &path).await.unwrap().text.as_deref(),
+        p.dispatch(&vctx(), &path, READ)
+            .await
+            .unwrap()
+            .into_read()
+            .unwrap()
+            .text
+            .as_deref(),
         Some("")
     );
 
     // ④ 写入 → 读回（写闸门在内核，本层不重复实现）
     let r = p
-        .write(
+        .dispatch(
             &vctx(),
             &path,
-            &vdfs::VdfsContent::text("", "本会话约定：所有时间用 UTC。"),
+            vdfs::VdfsRequest::Write {
+                content: vdfs::VdfsContent::text("", "本会话约定：所有时间用 UTC。"),
+            },
         )
         .await
+        .unwrap()
+        .into_write()
         .unwrap();
     assert!(r.created, "首次写入应报 created");
     assert_eq!(
-        p.read(&vctx(), &path).await.unwrap().text.as_deref(),
+        p.dispatch(&vctx(), &path, READ)
+            .await
+            .unwrap()
+            .into_read()
+            .unwrap()
+            .text
+            .as_deref(),
         Some("本会话约定：所有时间用 UTC。")
     );
     let again = p
-        .write(&vctx(), &path, &vdfs::VdfsContent::text("", "改主意了"))
+        .dispatch(
+            &vctx(),
+            &path,
+            vdfs::VdfsRequest::Write {
+                content: vdfs::VdfsContent::text("", "改主意了"),
+            },
+        )
         .await
+        .unwrap()
+        .into_write()
         .unwrap();
     assert!(!again.created, "覆盖写入不是 created");
 
     // ⑤ 记忆不可删除：要清空就写空内容（一次可读、可审、可撤销的显式动作）
     assert!(
         matches!(
-            p.delete(&vctx(), &path, false).await,
+            p.dispatch(&vctx(), &path, DEL).await,
             Err(vdfs::VdfsError::Forbidden(_))
         ),
         "删除即丢失本会话的长期约定，必须明确拒绝"
     );
-    assert!(p.read(&vctx(), &path).await.is_ok(), "拒绝删除后内容仍在");
+    assert!(
+        p.dispatch(&vctx(), &path, READ).await.is_ok(),
+        "拒绝删除后内容仍在"
+    );
 
     // ⑥ 记忆是文件：没有子项；更深层级也不解析
-    assert!(p.list(&vctx(), &path).await.is_err());
+    assert!(p.dispatch(&vctx(), &path, LIST).await.is_err());
 }
 
 /// 写入闸门取自 `SessionConfig`：配小 → 同一个写入被**拒绝**（而不是截断），
@@ -448,13 +578,25 @@ async fn memory_write_respects_the_configured_gate() {
     let path = format!("{id}/{}", crate::symbio_core::AGENTS_FILE);
 
     assert!(
-        p.write(&vctx(), &path, &vdfs::VdfsContent::text("", "12345"))
-            .await
-            .is_err(),
+        p.dispatch(
+            &vctx(),
+            &path,
+            vdfs::VdfsRequest::Write {
+                content: vdfs::VdfsContent::text("", "12345")
+            }
+        )
+        .await
+        .is_err(),
         "超出写入上限必须被拒绝"
     );
     assert_eq!(
-        p.read(&vctx(), &path).await.unwrap().text.as_deref(),
+        p.dispatch(&vctx(), &path, READ)
+            .await
+            .unwrap()
+            .into_read()
+            .unwrap()
+            .text
+            .as_deref(),
         Some(""),
         "被拒绝的写入不得留下半截内容"
     );
@@ -467,10 +609,16 @@ async fn memory_of_unknown_session_is_not_found() {
     let id = unique_id("memory-ghost");
     let path = format!("{id}/{}", crate::symbio_core::AGENTS_FILE);
 
-    assert!(p.stat(&vctx(), &path).await.is_err());
-    assert!(p.read(&vctx(), &path).await.is_err());
+    assert!(p.dispatch(&vctx(), &path, STAT).await.is_err());
+    assert!(p.dispatch(&vctx(), &path, READ).await.is_err());
     assert!(p
-        .write(&vctx(), &path, &vdfs::VdfsContent::text("", "x"))
+        .dispatch(
+            &vctx(),
+            &path,
+            vdfs::VdfsRequest::Write {
+                content: vdfs::VdfsContent::text("", "x")
+            }
+        )
         .await
         .is_err());
 }
@@ -487,11 +635,21 @@ async fn memory_write_notifies_subscribers() {
     let sink: vdfs::VdfsChangeSink = Arc::new(move |c| {
         let _ = tx.send(c);
     });
-    p.watch(&vctx(), &id, sink).await.unwrap();
-
-    p.write(&vctx(), &path, &vdfs::VdfsContent::text("", "记一笔"))
+    p.dispatch(&vctx(), &id, vdfs::VdfsRequest::Watch { sink })
         .await
         .unwrap();
+
+    p.dispatch(
+        &vctx(),
+        &path,
+        vdfs::VdfsRequest::Write {
+            content: vdfs::VdfsContent::text("", "记一笔"),
+        },
+    )
+    .await
+    .unwrap()
+    .into_write()
+    .unwrap();
 
     let got = rx.recv().await.expect("写入应投递一条变更");
     assert_eq!(
@@ -518,7 +676,12 @@ async fn new_session_id_is_a_short_guid() {
         create: true,
         ..vdfs::VdfsContent::text("", "{}")
     };
-    let r = p.write(&vctx(), "", &content).await.unwrap();
+    let r = p
+        .dispatch(&vctx(), "", vdfs::VdfsRequest::Write { content })
+        .await
+        .unwrap()
+        .into_write()
+        .unwrap();
     assert!(r.created);
 
     let id = r.path;
@@ -543,15 +706,19 @@ async fn new_session_ids_are_distinct() {
     let mut ids = std::collections::HashSet::new();
     for _ in 0..32 {
         let r = p
-            .write(
+            .dispatch(
                 &vctx(),
                 "",
-                &vdfs::VdfsContent {
-                    create: true,
-                    ..vdfs::VdfsContent::text("", "{}")
+                vdfs::VdfsRequest::Write {
+                    content: vdfs::VdfsContent {
+                        create: true,
+                        ..vdfs::VdfsContent::text("", "{}")
+                    },
                 },
             )
             .await
+            .unwrap()
+            .into_write()
             .unwrap();
         assert!(ids.insert(r.path.clone()), "id 重复：{}", r.path);
     }
@@ -598,8 +765,10 @@ async fn seed_messages(p: &SessionPlugin, id: &str, texts: &[&str]) {
 
 /// 转写列表里现有哪几条（经 VDFS 的 `消息` 列表，即使用方看到的那一份）。
 async fn transcript_ids(p: &SessionPlugin, id: &str) -> Vec<String> {
-    p.list(&vctx(), &message_dir_path(id))
+    p.dispatch(&vctx(), &message_dir_path(id), LIST)
         .await
+        .unwrap()
+        .into_list()
         .unwrap()
         .into_iter()
         .map(|n| n.name)
@@ -635,13 +804,17 @@ async fn truncate_removes_the_target_and_everything_after() {
     let seen = watch_changes(&p);
 
     let r = p
-        .action(
+        .dispatch(
             &vctx(),
             &message_path(&id, "m1"),
-            vdfs::VDFS_ACTION_TRUNCATE,
-            None,
+            vdfs::VdfsRequest::Action {
+                action: vdfs::VDFS_ACTION_TRUNCATE.to_string(),
+                payload: None,
+            },
         )
         .await
+        .unwrap()
+        .into_action()
         .unwrap();
     assert!(r.ok);
     assert_eq!(
@@ -683,13 +856,17 @@ async fn truncate_of_missing_target_changes_nothing() {
     let seen = watch_changes(&p);
 
     let r = p
-        .action(
+        .dispatch(
             &vctx(),
             &message_path(&id, "nope"),
-            vdfs::VDFS_ACTION_TRUNCATE,
-            None,
+            vdfs::VdfsRequest::Action {
+                action: vdfs::VDFS_ACTION_TRUNCATE.to_string(),
+                payload: None,
+            },
         )
         .await
+        .unwrap()
+        .into_action()
         .unwrap();
     assert!(r.ok, "目标不存在是**结果**，不是错误");
     assert_eq!(r.data, Some(json!([])), "回执是空列表");
@@ -709,13 +886,17 @@ async fn clear_empties_the_transcript_but_keeps_the_session() {
     let seen = watch_changes(&p);
 
     let r = p
-        .action(
+        .dispatch(
             &vctx(),
             &message_dir_path(&id),
-            vdfs::VDFS_ACTION_CLEAR,
-            None,
+            vdfs::VdfsRequest::Action {
+                action: vdfs::VDFS_ACTION_CLEAR.to_string(),
+                payload: None,
+            },
         )
         .await
+        .unwrap()
+        .into_action()
         .unwrap();
     assert!(r.ok);
     assert!(transcript_ids(&p, &id).await.is_empty(), "列表应清空");
@@ -730,7 +911,12 @@ async fn clear_empties_the_transcript_but_keeps_the_session() {
     );
 
     // 会话本体还在（清空不是删除会话）
-    let n = p.stat(&vctx(), &id).await.unwrap();
+    let n = p
+        .dispatch(&vctx(), &id, STAT)
+        .await
+        .unwrap()
+        .into_stat()
+        .unwrap();
     assert_eq!(n.name, id);
 }
 
@@ -752,7 +938,15 @@ async fn unknown_or_misplaced_action_is_not_implemented() {
     ] {
         assert!(
             matches!(
-                p.action(&vctx(), &path, action, None).await,
+                p.dispatch(
+                    &vctx(),
+                    &path,
+                    vdfs::VdfsRequest::Action {
+                        action: action.to_string(),
+                        payload: None
+                    }
+                )
+                .await,
                 Err(vdfs::VdfsError::NotImplemented)
             ),
             "{path} + {action} 应报 NotImplemented"
@@ -764,3 +958,14 @@ async fn unknown_or_misplaced_action_is_not_implemented() {
         "未实现的动作不得改动列表"
     );
 }
+
+// ==================== dispatch 请求形态（测试辅助） ====================
+
+const LIST: vdfs::VdfsRequest = vdfs::VdfsRequest::List {
+    limit: None,
+    before: None,
+};
+const STAT: vdfs::VdfsRequest = vdfs::VdfsRequest::Stat;
+const READ: vdfs::VdfsRequest = vdfs::VdfsRequest::Read;
+const DEL: vdfs::VdfsRequest = vdfs::VdfsRequest::Delete { recursive: false };
+const UNWATCH: vdfs::VdfsRequest = vdfs::VdfsRequest::Unwatch;

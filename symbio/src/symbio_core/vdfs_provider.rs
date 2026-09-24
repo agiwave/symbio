@@ -1,7 +1,11 @@
-//! 核心 VdfsProvider —— 统一资源访问的唯一契约（纯 object-safe trait）。
+//! 核心 VdfsProvider —— 统一资源访问的唯一契约（唯一接口：`dispatch`）。
 //!
 //! 本模块是 VDFS 的 **centerpiece**，只暴露**纯接口**：
-//! - [`VdfsProvider`] 收拢全部资源操作（列 / 读 / 写 / 删 / 建 / 移 / 订阅）；
+//! - [`VdfsProvider`] 只有一个方法 [`VdfsProvider::dispatch`]：
+//!   `dispatch(ctx, path, req)` —— **`path` 是第一个分发键**（先按地址找到资源域，
+//!   再由域内实现决定操作怎么落地），`req`（[`VdfsRequest`] 枚举）只携带**操作的
+//!   载荷**（写什么、删不递归、动作是什么……）；列 / 读 / 写 / 删 / 建 / 移 / 动作 /
+//!   订阅全部落在枚举变体上；
 //! - 每个资源域 = 一份 [`VdfsProvider`] 实现，`Arc<dyn VdfsProvider>` 是使用方与
 //!   实现方之间**唯一**的交换物；
 //! - 线上形状（`vdfs/*` 请求 / 响应信封、协议路径常量）定义在 vdfs 插件内部
@@ -256,6 +260,13 @@ impl VdfsNewType {
     /// 新元素的呈现描述（草稿详情页据此渲染出与落成后同一张详情）
     pub fn with_schema(mut self, schema: Value) -> Self {
         self.schema = Some(schema);
+        self
+    }
+
+    /// 同 [`Self::with_schema`]，但接受可缺省值（`None` = 不挂定义）——
+    /// 供「定义需运行期汇流、缓存值可能尚未就绪」的构造点使用
+    pub fn with_schema_opt(mut self, schema: Option<Value>) -> Self {
+        self.schema = schema;
         self
     }
 }
@@ -1158,208 +1169,259 @@ impl std::fmt::Debug for VdfsContext {
 /// 回调必须是**同步且非阻塞**的（宿主内部做派发）；provider 不得在其中做 IO。
 pub type VdfsChangeSink = Arc<dyn Fn(VdfsChange) + Send + Sync>;
 
+// ==================== 请求（唯一接口的操作载荷） ====================
+//
+// 操作的**地址不在这里**——它是 [`VdfsProvider::dispatch`] 的独立参数
+// `path`（本子树内相对路径，`""` = 自身根，已由分发方规范化、无穿越风险）。
+// 分发因此是**先 path 后操作**：转发方按 path 首段找到下一层（或域内实现按
+// path 段找到资源），再由 `req` 决定操作怎么落地；转发方**不需要**为了知道
+// 「把请求转给谁」而去 match 操作。
+//
+// `VdfsRequest` 只收拢**操作载荷**。唯一的例外是 [`VdfsRequest::Move`] 的 `to`：
+// 移动天然有**两个**地址，主地址（`from`）走 `path` 参数，目标地址随载荷携带，
+// 由 [`VdfsRequest::map_paths`] 与主地址一起翻译。
+//
+// ## 为什么是枚举而不是一排 trait 方法
+//
+// 曾经是 12 个方法（list / stat / read / write / …）。问题出在**纯转发型
+// provider**（容器、门面、作用域代理）身上：每新增一种操作，每个转发方都要补一个
+// 「拆路径 → 转发 → 回填路径」的方法，漏一个就是静默能力缺口。收敛成一个
+// `dispatch` 之后，「新增一种操作」落在枚举的一个变体上——所有实现体的 `match`
+// 编译期穷尽，漏译在结构上不可能；转发方剥掉首段、把剩余路径与请求整体递下去
+// 即可，与操作种类完全无关。
+//
+// ## 各操作的语义（原 trait 方法文档的归所）
+//
+// - [`VdfsRequest::Write`]：**实现方在此完成全部校验**（必填 / 范围 / 格式，失败
+//   返回 [`VdfsError::Invalid`]）。`path` 可指向**具名节点**，也可指向**目录自身**
+//   （`""` = 根）——后者是「新建」的机制形态：使用方只说建在哪个目录，名字由
+//   provider 生成并在 [`VdfsResponse::Write`] 的 `path` 里交回（那是使用方拿到
+//   新地址的**唯一**途径；漏填等于新建之后找不到新节点）。
+// - [`VdfsRequest::Write`] 的 `content.create` 是**使用方的写意图**（不存在时
+//   怎么办）：具名节点缺省**就地创建**——配置型资源的地址就是它的身份
+//   （`model` / `mcp` / `skill` 皆如此），只有「更新既有对象的字段」型语义才报
+//   [`VdfsError::NotFound`]；目录自身 + `create = false` 必报错（没有可覆盖的
+//   目标）。⚠️ `create` 只回答「目标不存在时怎么办」，**不改变内容的处理方式**——
+//   内容一律取自本次写入，不要实现成「忽略内容、落默认值」；唯一例外是内容为空
+//   （「先建一个，随后再填」），由 provider 落最小合法内容。
+// - [`VdfsRequest::Delete`]：`recursive` 仅对目录有意义。
+// - [`VdfsRequest::Move`]：主地址（`from`）= `path` 参数，`to` 随载荷；分发方保证
+//   同挂载点内（跨挂载由上层拒绝）。
+// - [`VdfsRequest::Action`]：动作是 **provider 自持的动词**（如 [`VDFS_ACTION_TEST`]
+//   「测试连接」），VDFS 只透传 `(路径, 动作标识, 载荷)`，**不解释语义**；未实现
+//   的动作返回 [`VdfsError::NotImplemented`]，消费方据此不给出入口。
+// - [`VdfsRequest::Watch`] / [`VdfsRequest::Unwatch`]：订阅指定子树的数据变更，
+//   检测到变化时调用 `sink`（[`VdfsChangeSink`]，同步非阻塞）。无实时能力的
+//   provider 应返回成功——与「无实时能力」并不冲突，语义是「订阅成功、无事件」。
+#[derive(Clone)]
+pub enum VdfsRequest {
+    /// 列出 `path` 目录的直接子节点（`l` 位）；`limit` / `before` 是**可选**的
+    /// 有界窗口，provider 不认就当没传（全量）——见 [`VDFS_PARAM_LIMIT`] /
+    /// [`VDFS_PARAM_BEFORE`]
+    List {
+        limit: Option<u32>,
+        before: Option<String>,
+    },
+    /// 读取 `path` 节点的元数据
+    Stat,
+    /// 读取 `path` 节点的内容（`r` 位）
+    Read,
+    /// 写入 `path` 节点——语义见本模块「各操作的语义」一节
+    Write { content: VdfsContent },
+    /// 删除 `path` 节点（`recursive` 仅对目录有意义）
+    Delete { recursive: bool },
+    /// 在 `path` 处新建目录
+    Mkdir,
+    /// 把 `path`（= from）移动 / 重命名为 `to`（分发方保证同挂载点内）
+    Move { to: String },
+    /// 对 `path` 节点执行**节点动作**（provider 自持的动词，VDFS 只透传）
+    Action {
+        action: String,
+        payload: Option<Value>,
+    },
+    /// 订阅 `path` 子树的数据变更；检测到变化时调用 `sink`
+    Watch { sink: VdfsChangeSink },
+    /// 取消订阅（与 [`VdfsRequest::Watch`] 严格配对）
+    Unwatch,
+}
+
+impl std::fmt::Debug for VdfsRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // sink 不可 Debug、载荷可能巨大：只印变体名
+        let name = match self {
+            Self::List { .. } => "List",
+            Self::Stat => "Stat",
+            Self::Read => "Read",
+            Self::Write { .. } => "Write",
+            Self::Delete { .. } => "Delete",
+            Self::Mkdir => "Mkdir",
+            Self::Move { .. } => "Move",
+            Self::Action { .. } => "Action",
+            Self::Watch { .. } => "Watch",
+            Self::Unwatch => "Unwatch",
+        };
+        f.write_str(name)
+    }
+}
+
+impl VdfsRequest {
+    /// 用 `f` 重写载荷内的**次要地址字段**（目前只有 [`Self::Move`] 的 `to`）。
+    ///
+    /// 主地址不在这里——它是 `dispatch` 的 `path` 参数，转发方直接以新相对路径
+    /// 调用即可。本方法的存在与 [`VdfsChange::map_paths`] 同一理由：**地址字段的
+    /// 翻译收进一个函数**，新增载荷内地址字段时漏译在结构上不可能。
+    pub fn map_paths(self, f: impl Fn(&str) -> String) -> Self {
+        match self {
+            Self::Move { to } => Self::Move { to: f(&to) },
+            other => other,
+        }
+    }
+}
+
+// ==================== 响应（唯一接口的出参） ====================
+
+/// [`VdfsProvider::dispatch`] 的响应：与请求变体一一对应。
+///
+/// [`VdfsResponse::Unit`] 承载「成功但没有产物」的操作（delete / mkdir /
+/// watch / unwatch——失败走 `Err`，成功无值可带）。响应里的 `path`（节点 /
+/// 内容 / 写入结果上的）一律是**本子树内**的相对路径（与请求的 `path` 参数
+/// 同坐标系），由分发方负责补成树内 / 展示口径。
+#[derive(Debug, Clone)]
+pub enum VdfsResponse {
+    /// [`VdfsRequest::List`]：直接子节点清单
+    List(Vec<VdfsNode>),
+    /// [`VdfsRequest::Stat`]：节点元数据
+    Stat(VdfsNode),
+    /// [`VdfsRequest::Read`]：节点内容
+    Read(VdfsContent),
+    /// [`VdfsRequest::Write`]：写入结果（`path` 必填——provider 生成的名字全靠它交回）
+    Write(VdfsWriteResponse),
+    /// [`VdfsRequest::Action`]：动作结果
+    Action(VdfsActionResult),
+    /// 成功无产物（delete / mkdir / watch / unwatch）
+    Unit,
+}
+
+impl VdfsResponse {
+    pub fn is_list(&self) -> bool {
+        matches!(self, Self::List(_))
+    }
+
+    pub fn is_stat(&self) -> bool {
+        matches!(self, Self::Stat(_))
+    }
+
+    pub fn is_read(&self) -> bool {
+        matches!(self, Self::Read(_))
+    }
+
+    pub fn is_write(&self) -> bool {
+        matches!(self, Self::Write(_))
+    }
+
+    pub fn is_action(&self) -> bool {
+        matches!(self, Self::Action(_))
+    }
+
+    pub fn is_unit(&self) -> bool {
+        matches!(self, Self::Unit)
+    }
+
+    // ---- 取值器：转发方 / 访问层从响应中取出与请求变体对应的载荷 ----
+    //
+    // 变体不匹配返回 `None`（实现方返回错型响应是 bug，由调用方决定报错方式），
+    // [`Self::Unit`] 一律视为「成功无产物」，调用方无需再写一臂。
+
+    /// [`Self::List`] → 子节点清单
+    pub fn into_list(self) -> Option<Vec<VdfsNode>> {
+        match self {
+            Self::List(v) => Some(v),
+            Self::Unit => Some(Vec::new()),
+            _ => None,
+        }
+    }
+
+    /// [`Self::Stat`] → 节点元数据
+    pub fn into_stat(self) -> Option<VdfsNode> {
+        match self {
+            Self::Stat(n) => Some(n),
+            _ => None,
+        }
+    }
+
+    /// [`Self::Read`] → 节点内容
+    pub fn into_read(self) -> Option<VdfsContent> {
+        match self {
+            Self::Read(c) => Some(c),
+            _ => None,
+        }
+    }
+
+    /// [`Self::Write`] → 写入结果
+    pub fn into_write(self) -> Option<VdfsWriteResponse> {
+        match self {
+            Self::Write(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    /// [`Self::Action`] → 动作结果
+    /// [`Self::Unit`] → `Some(())`（delete / mkdir / watch / unwatch 的成功回执）
+    pub fn into_unit(self) -> Option<()> {
+        match self {
+            Self::Unit => Some(()),
+            _ => None,
+        }
+    }
+
+    pub fn into_action(self) -> Option<VdfsActionResult> {
+        match self {
+            Self::Action(r) => Some(r),
+            _ => None,
+        }
+    }
+}
+
 // ==================== provider trait ====================
 
 /// VDFS provider —— 把一个资源域暴露为一棵可被使用的资源子树。
 ///
-/// **provider 不知道自己被挂在哪里**：挂载名由使用方在注册时选定（见模块文档），
-/// 因此 trait 上没有任何与挂载相关的成员。
+/// **provider 不知道自己被挂在哪里**：挂载名由使用方在注册时选定，trait 上没有
+/// 任何与挂载相关的成员；自述（标题 / 描述 / 顺序 / 图标 / 根访问位 / 根可新建
+/// 类型）由 [`crate::symbio_core::PluginMeta`] 承载（`Plugin::meta()`），不在本
+/// trait 上。
+///
+/// ## 唯一接口
+///
+/// [`Self::dispatch`] 收 `(ctx, path, req)`：**`path` 是第一个分发键**——实现方
+/// 先按它定位资源（转发型实现剥首段找下一层；叶子实现按段找自己的资源），再由
+/// `req` 决定操作怎么落地。实现方按变体 `match`，**只实现自己支持的操作**——
+/// 其余臂返回 [`VdfsError::NotImplemented`]，使用方据此隐藏对应入口。
 ///
 /// ## 实现约定
 ///
-/// - **只实现自己支持的操作**：其余保持 trait 默认（[`VdfsError::NotImplemented`]），
-///   使用方据此在能力判定中不暴露对应入口。
-/// - **`path` 是本子树内的相对路径**（`""` = 自身根），已规范化、无穿越风险。
-/// - **`access` 是能力声明**：使用方与消费者只看访问位，不做类型特判。
-/// - **校验归实现方**：写入的必填 / 范围 / 格式校验在 [`Self::write`] 内完成，
-///   失败返回 [`VdfsError::Invalid`]（可带字段级错误）。
+/// - **地址是本子树内的相对路径**（`""` = 自身根），已规范化、无穿越风险；
+/// - **`access` 是能力声明**：使用方与消费者只看访问位，不做类型特判；
+/// - **校验归实现方**：写入的必填 / 范围 / 格式校验在实现内完成（见
+///   [`VdfsRequest`] 的语义一节），失败返回 [`VdfsError::Invalid`]（可带字段级
+///   错误）；
 /// - **线程安全**：`&self` 可能被并发调用。
 #[async_trait]
 pub trait VdfsProvider: Send + Sync + 'static {
-    /// 展示标签（缺省由使用方用挂载名代替）
-    fn label(&self) -> Option<&str> {
-        None
-    }
+    /// 唯一入口：先按 `path` 定位资源域，再按 `req` 变体执行操作
+    /// （各操作语义见 [`VdfsRequest`] 的模块级文档）
+    async fn dispatch(
+        &self,
+        ctx: &VdfsContext,
+        path: &str,
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse>;
 
-    /// 语义说明（下发给前端与 LLM，帮助理解该子树的资源含义）
-    fn description(&self) -> Option<&str> {
-        None
-    }
-
-    /// 展示顺序（导航排序；小者靠前）
-    fn order(&self) -> i32 {
-        100
-    }
-
-    /// 图标名（使用方纯 UI 映射）
-    fn icon(&self) -> Option<&str> {
-        None
-    }
-
-    /// 自身根节点的**隐藏属性**（缺省不隐藏）
-    ///
-    /// 与 [`root_access`](Self::root_access) / [`root_status`](Self::root_status) /
-    /// [`root_new_types`](Self::root_new_types) 同构：描述 provider 的**根**
-    /// 这一层的元数据，由使用方在合成该目录节点时回填到 [`VdfsNode::hidden`]。
-    ///
-    /// 它不是什么新概念——provider 的根**本来就是一个目录节点**，
-    /// 所以「这个目录在父目录的列表里显示还是隐藏」由这条声明回答，
-    /// 与文件 / 目录的隐藏属性是同一件事（语义见 [`VdfsNode::hidden`]）。
-    fn root_hidden(&self) -> bool {
-        false
-    }
-
-    /// 自身根的访问位（缺省「可列目录」）
-    fn root_access(&self) -> VdfsAccess {
-        VdfsAccess::LIST
-    }
-
-    /// 自身根的状态
-    fn root_status(&self) -> &str {
-        VDFS_STATUS_ACTIVE
-    }
-
-    /// 自身根**可接受的新建类型**（缺省空 = 根下不可新建）。
-    ///
-    /// 与 [`Self::root_access`] / [`Self::root_status`] 同构：描述 provider 的
-    /// **根**（挂载点）这一层的元数据，由使用方在合成挂载点节点时回填。
-    /// 子树内更深层的目录在 [`Self::list`] / [`Self::stat`] 返回的节点上各自声明
-    /// [`VdfsNode::new_types`]。
-    ///
-    /// ## 为什么它是 `async`，而 `root_access` / `root_status` / `root_hidden` 不是
-    ///
-    /// 那三个是**静态属性**（访问位、状态词、隐藏位），provider 自己就知道。
-    /// 本方法却可能要给新类型附上 [`VdfsNewType::schema`]——而 schema 可能来自
-    /// **运行期收集**：会话的「新建表单」就是它的选项定义，要广播各插件汇流
-    /// （agent 的候选、model 的候选），那条收集链路是 async 的。
-    ///
-    /// 把「静态属性」与「可能需收集的自述」分成两种同步性，好过让需要收集的
-    /// provider 去搞一份会过期的缓存——缓存一旦与来源漂移，表现是「新建页少了
-    /// 几个选项」这种静默错误。
-    async fn root_new_types(&self) -> Vec<VdfsNewType> {
+    /// 挂载根下**可新建的类型清单**（异步：表单 schema 可能需要运行期汇流，
+    /// 如 session 的选项定义来自 options 广播——这是它不进同步 [`crate::symbio_core::PluginMeta`]
+    /// 的原因）。容器合成根/子目录节点时现场调用；默认空 = 根下不可新建。
+    async fn new_types(&self) -> Vec<VdfsNewType> {
         Vec::new()
-    }
-
-    /// 列出目录的直接子节点（`l` 位）
-    async fn list(&self, _ctx: &VdfsContext, _path: &str) -> VdfsResult<Vec<VdfsNode>> {
-        Err(VdfsError::NotImplemented)
-    }
-
-    /// 读取节点元数据
-    async fn stat(&self, _ctx: &VdfsContext, _path: &str) -> VdfsResult<VdfsNode> {
-        Err(VdfsError::NotImplemented)
-    }
-
-    /// 读取内容（`r` 位）
-    async fn read(&self, _ctx: &VdfsContext, _path: &str) -> VdfsResult<VdfsContent> {
-        Err(VdfsError::NotImplemented)
-    }
-
-    /// 写入内容（`w` 位）——**实现方在此完成全部校验**。
-    ///
-    /// ## 两种目标形态：具名节点 / 目录自身
-    ///
-    /// `path` 是本子树内的相对路径，它可以指向**两种东西**，实现方都必须考虑：
-    ///
-    /// - **具名节点**（`<名字>` 或 `<父>/<名字>`）：常规的「写这个节点」。
-    ///   它存在就覆盖，不存在则看 `create` 位（见下）。
-    /// - **目录自身**（`""` = 自身根，或任何指向目录的地址）：此时使用方**没有给名字**
-    ///   ——「新建一个，叫什么由你定」。这是「新建」在机制上的形态：使用方只说
-    ///   **建在哪个目录**，不说叫什么（名字是 provider 的私有知识，见
-    ///   [`VdfsNode::name`] 的「唯一标识」定位）。
-    ///
-    /// 因此**写目录自身不是错误**：provider 若支持在自己名下创建条目，就生成一个
-    /// 名字（id 归 provider）、落盘、并**在返回值里给出新节点的相对路径**——那是
-    /// 使用方唯一能拿到新地址的地方。不支持（如该目录没有可新建的类型）则照常报错。
-    ///
-    /// ## `create` 位 = 使用方的写意图
-    ///
-    /// | 目标 | `create = false` | `create = true` |
-    /// |---|---|---|
-    /// | 已存在 | 覆盖（`created = false`） | 覆盖（`created = false`） |
-    /// | 不存在 · **具名节点** | 写入型资源**就地创建**（`created = true`）；「更新既有对象的字段」型语义可报 [`VdfsError::NotFound`] | **创建**（`created = true`） |
-    /// | 不存在 · **目录自身** | 报错（没有可覆盖的目标，见上） | **创建**，名字由 provider 生成 |
-    ///
-    /// ⚠️ **具名 + 目标不存在时不要一律报 `NotFound`**：使用方要的是「给了名字就写得
-    /// 进去」——配置型资源的地址**就是它的身份**（`model` / `mcp` / `skill` 皆如此），
-    /// 不存在就建一个。只有「写的是某个**既有对象的一个字段**」（如会话 metadata）
-    /// 才该拒绝：没有对象就没有可更新的字段。
-    ///
-    /// 于是「保存一份还没落盘的草稿」与「新建一项」是同一个动作的两种意图，
-    /// 使用方无需先 `stat` 再决定写还是建——那会引入一次多余的往返与竞态。
-    ///
-    /// ⚠️ **`create` 只管「不存在时怎么办」，不改变内容的处理方式**：内容一律取自
-    /// [`VdfsContent`]（写目录自身时使用方可能给空内容，见下）。**不要**把
-    /// `create = true` 实现成「忽略使用方给的内容、一律落默认值」——那会让
-    /// 「在草稿详情页填好再保存」丢掉用户填的每一个字段。
-    ///
-    /// 唯一的例外是**内容为空**：那是「先建一个，随后再填」的合法形态
-    /// （新建会话、或使用方只想要一份可用的初始配置），此时由 provider 落一份
-    /// 自己的**最小合法内容**。
-    ///
-    ///
-    /// ## 返回值
-    ///
-    /// [`VdfsWriteResponse::path`] 必须是**本子树内**的路径（与 `list` 返回的节点
-    /// 同口径），使用方据此把结果翻译成展示地址并选中新节点。provider 生成了名字
-    /// 却不填 `path`，使用方就找不到刚建出来的东西。
-    async fn write(
-        &self,
-        _ctx: &VdfsContext,
-        _path: &str,
-        _content: &VdfsContent,
-    ) -> VdfsResult<VdfsWriteResponse> {
-        Err(VdfsError::NotImplemented)
-    }
-
-    /// 删除节点（`recursive` 仅对目录有意义）
-    async fn delete(&self, _ctx: &VdfsContext, _path: &str, _recursive: bool) -> VdfsResult<()> {
-        Err(VdfsError::NotImplemented)
-    }
-
-    /// 新建目录
-    async fn mkdir(&self, _ctx: &VdfsContext, _path: &str) -> VdfsResult<()> {
-        Err(VdfsError::NotImplemented)
-    }
-
-    /// 移动 / 重命名（分发层保证同挂载点内）
-    async fn move_item(&self, _ctx: &VdfsContext, _from: &str, _to: &str) -> VdfsResult<()> {
-        Err(VdfsError::NotImplemented)
-    }
-
-    /// 执行**节点动作**（如 [`VDFS_ACTION_TEST`]「测试连接」）。
-    ///
-    /// 与固定操作集（列 / 读 / 写 / 删 …）不同，动作是 **provider 自持的动词**：
-    /// VDFS 只把 `(节点路径, 动作标识, 载荷)` 透传给 provider，**不解释语义**；
-    /// 未实现的动作返回 [`VdfsError::NotImplemented`]，消费方据此不给出入口。
-    ///
-    /// 动作的**呈现**（按钮文案 / 忙态 / 图标）不属于本层：与 `ext` 一样由宿主
-    /// 方言决定（本宿主编在 `node.schema` 的详情定义里），VDFS 只负责把它送到
-    /// 该去的 provider。
-    async fn action(
-        &self,
-        _ctx: &VdfsContext,
-        _path: &str,
-        _action: &str,
-        _payload: Option<&Value>,
-    ) -> VdfsResult<VdfsActionResult> {
-        Err(VdfsError::NotImplemented)
-    }
-
-    /// 订阅指定子树的数据变更；检测到变化时调用 `sink`。
-    /// 默认 no-op：无实时能力的 provider 直接成功。
-    async fn watch(
-        &self,
-        _ctx: &VdfsContext,
-        _path: &str,
-        _sink: VdfsChangeSink,
-    ) -> VdfsResult<()> {
-        Ok(())
-    }
-
-    /// 取消订阅（与 [`Self::watch`] 严格配对）
-    async fn unwatch(&self, _ctx: &VdfsContext, _path: &str) -> VdfsResult<()> {
-        Ok(())
     }
 }
 
@@ -1659,52 +1721,77 @@ mod tests {
         assert!(empty.host::<u32>().is_none());
     }
 
-    /// 自描述全部有缺省：`impl VdfsProvider for P {}` 即可编译——
-    /// provider **不需要**提供任何目录名（目录名是使用方的事）
-    #[tokio::test]
-    async fn self_description_defaults_need_no_dir_name() {
-        struct P;
-        #[async_trait]
-        impl VdfsProvider for P {}
+    /// 唯一接口的最小契约：**path 是独立参数**（分发先按 path、再按操作）；
+    /// 载荷内的次要地址（`Move.to`）用 [`VdfsRequest::map_paths`] 翻译。
+    #[test]
+    fn request_carries_only_payload_and_map_paths_rewrites_to() {
+        let req = VdfsRequest::Move { to: "b".into() };
+        match req.map_paths(|p| format!("sub/{p}")) {
+            VdfsRequest::Move { to } => assert_eq!(to, "sub/b"),
+            _ => panic!("map_paths 不得改变变体"),
+        }
 
-        assert_eq!(P.label(), None, "label 缺省为空，由使用方以目录名代替");
-        assert_eq!(P.description(), None);
-        assert_eq!(P.icon(), None);
-        assert_eq!(P.order(), 100);
-        assert_eq!(P.root_access(), VdfsAccess::LIST);
-        assert_eq!(P.root_status(), VDFS_STATUS_ACTIVE);
-        assert!(P.root_new_types().await.is_empty(), "缺省根下不可新建");
+        // 非地址载荷原样保留
+        let req = VdfsRequest::List {
+            limit: Some(10),
+            before: None,
+        };
+        match req.map_paths(|p| format!("mount/{p}")) {
+            VdfsRequest::List { limit, .. } => {
+                assert_eq!(limit, Some(10));
+            }
+            _ => panic!("变体不变"),
+        }
     }
 
-    /// 未实现的操作返回 `NotImplemented`（使用方据此隐藏入口）
+    /// 「什么都不支持」的 provider：每个变体都显式 `NotImplemented`
+    /// （match 臂编译期穷尽——新增变体而不处理，编译器立刻指出每一个实现体）。
     #[tokio::test]
-    async fn unimplemented_ops_default_to_not_implemented() {
+    async fn unsupported_ops_report_not_implemented() {
         struct P;
+
         #[async_trait]
-        impl VdfsProvider for P {}
+        impl VdfsProvider for P {
+            async fn dispatch(
+                &self,
+                _ctx: &VdfsContext,
+                _path: &str,
+                _req: VdfsRequest,
+            ) -> VdfsResult<VdfsResponse> {
+                Err(VdfsError::NotImplemented)
+            }
+        }
 
         let ctx = VdfsContext::empty();
-        assert!(P.list(&ctx, "").await.unwrap_err().is_not_implemented());
-        assert!(P.stat(&ctx, "a").await.unwrap_err().is_not_implemented());
-        assert!(P.read(&ctx, "a").await.unwrap_err().is_not_implemented());
-        assert!(P
-            .write(&ctx, "a", &VdfsContent::text("a", "x"))
-            .await
-            .unwrap_err()
-            .is_not_implemented());
-        assert!(P
-            .delete(&ctx, "a", true)
-            .await
-            .unwrap_err()
-            .is_not_implemented());
-        assert!(P.mkdir(&ctx, "d").await.unwrap_err().is_not_implemented());
-        assert!(P
-            .move_item(&ctx, "a", "b")
-            .await
-            .unwrap_err()
-            .is_not_implemented());
-        // watch / unwatch 默认 no-op（无实时能力的 provider 也必须成功）
-        assert!(P.watch(&ctx, "", Arc::new(|_| {})).await.is_ok());
-        assert!(P.unwatch(&ctx, "").await.is_ok());
+        let sink: VdfsChangeSink = Arc::new(|_| {});
+        let reqs = [
+            VdfsRequest::List {
+                limit: None,
+                before: None,
+            },
+            VdfsRequest::Stat,
+            VdfsRequest::Read,
+            VdfsRequest::Write {
+                content: VdfsContent::text("a", "x"),
+            },
+            VdfsRequest::Delete { recursive: true },
+            VdfsRequest::Mkdir,
+            VdfsRequest::Move { to: "b".into() },
+            VdfsRequest::Action {
+                action: "test".into(),
+                payload: None,
+            },
+            VdfsRequest::Watch { sink: sink.clone() },
+            VdfsRequest::Unwatch,
+        ];
+        for req in reqs {
+            assert!(
+                P.dispatch(&ctx, "a", req)
+                    .await
+                    .unwrap_err()
+                    .is_not_implemented(),
+                "未支持的变体应报 NotImplemented"
+            );
+        }
     }
 }

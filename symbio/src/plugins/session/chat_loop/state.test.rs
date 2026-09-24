@@ -41,13 +41,7 @@ impl HookRecorder {
 #[async_trait]
 impl Plugin for HookRecorder {
     fn meta(&self) -> PluginMeta {
-        PluginMeta {
-            id: "test-hook-recorder".into(),
-            name: "test-hook-recorder".into(),
-            description: None,
-            version: None,
-            author: None,
-        }
+        PluginMeta::new("test-hook-recorder", "test-hook-recorder")
     }
 
     async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {

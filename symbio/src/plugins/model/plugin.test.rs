@@ -109,19 +109,54 @@ fn config_of_falls_back_to_the_path_segment() {
 async fn list_comes_from_the_memory_mirror() {
     let plugin = ModelPlugin::default();
     let ctx = VdfsContext::empty();
-    assert!(plugin.list(&ctx, "").await.unwrap().is_empty());
+    assert!(plugin
+        .dispatch(
+            &ctx,
+            "",
+            VdfsRequest::List {
+                limit: None,
+                before: None
+            }
+        )
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap()
+        .is_empty());
 
     plugin
         .entries
         .set("openai-1", serde_json::to_string(&sample()).unwrap());
     // 坏条目降级：列不出来，而不是列一个空壳
     plugin.entries.set("broken", "}}}");
-    let nodes = plugin.list(&ctx, "").await.unwrap();
+    let nodes = plugin
+        .dispatch(
+            &ctx,
+            "",
+            VdfsRequest::List {
+                limit: None,
+                before: None,
+            },
+        )
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap();
     assert_eq!(nodes.len(), 1);
     assert_eq!(nodes[0].name, "openai-1");
     assert_eq!(nodes[0].title, "我的 OpenAI");
     assert!(
-        plugin.list(&ctx, "openai-1").await.is_err(),
+        plugin
+            .dispatch(
+                &ctx,
+                "openai-1",
+                VdfsRequest::List {
+                    limit: None,
+                    before: None
+                }
+            )
+            .await
+            .is_err(),
         "叶子资源无子项"
     );
 }
@@ -136,7 +171,8 @@ async fn list_comes_from_the_memory_mirror() {
 /// - `schema`    = 表单定义（没有它，`form` 渲染器渲染不出任何字段）。
 #[tokio::test]
 async fn new_type_declares_the_landing_detail() {
-    let types = ModelPlugin::default().root_new_types().await;
+    // 「根下可新建类型」是 provider 的异步自述（不在同步的 `PluginMeta` 上）
+    let types = ModelPlugin::default().new_types().await;
     assert_eq!(types.len(), 1, "model 不支持整包导入");
     let t = &types[0];
     assert_eq!(t.ext, PLUGIN_MODEL, "呈现扩展名不变：id_of 仍按它剥后缀");

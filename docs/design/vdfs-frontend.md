@@ -282,8 +282,9 @@ pub struct VdfsNewType {
 ```
 
 - 挂在 `VdfsNode.new_types`（目录节点；文件节点为空、不序列化）。
-- provider **根**的类型清单经 trait 方法 `root_new_types()` 声明（与
-  `root_access` / `root_status` 同构），由容器在合成**子目录节点**时回填。
+- provider **根**的类型清单经 `VdfsProvider::new_types()`（async）声明，由容器在
+  合成**子目录节点**时现场取（它是挂载点自述里唯一动态的部分——session 的 schema
+  需运行期汇流，故不在同步的 `PluginMeta` 上）。
 
 ### 5.3 创建动作（协议不变）
 

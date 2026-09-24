@@ -1,6 +1,8 @@
 //! 插件核心 Trait（上下文注入版）
 
-use crate::symbio_core::vdfs_provider::VdfsProvider;
+use crate::symbio_core::vdfs::{
+    VdfsAccess, VdfsContext, VdfsError, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
+};
 use crate::symbio_core::SymbioKey;
 use crate::symbio_core::{lock_read, lock_write, InvokeResponse, PluginPayload};
 use async_trait::async_trait;
@@ -11,13 +13,59 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock, Weak};
 
 /// 插件元数据
+///
+/// 除身份（id / name / description / version / author）外，还承载本插件 **VDFS
+/// 挂载点的自述**：导航排序、图标、隐藏位、根访问位与「根下可新建类型」——
+/// 从前这些散落在 `VdfsProvider` trait 的七个小方法上，现在与身份同源：
+/// `Plugin::meta()` 是插件自述的**唯一**来源，容器合成挂载点目录节点时直接取用
+/// （`name` 即挂载点标题；无 VDFS 挂载的插件这些字段保持缺省，无副作用）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginMeta {
     pub id: String,
+    /// 挂载点标题（VDFS 目录节点的 `title`；同时是插件展示名）
     pub name: String,
     pub description: Option<String>,
     pub version: Option<String>,
     pub author: Option<String>,
+    /// 导航排序（小者靠前；缺省 100）
+    #[serde(default = "default_meta_order")]
+    pub order: i32,
+    /// 图标名（使用方纯 UI 映射；缺省无）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// 挂载点在父目录列表中的隐藏位（缺省不隐藏；语义与 [`VdfsNode::hidden`] 一致）
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
+    /// 挂载点（根目录）的访问位（缺省「可列目录」）
+    #[serde(default = "default_meta_root_access")]
+    pub root_access: VdfsAccess,
+    // 注：挂载点根下「可新建类型」（`new_types`）**有意不在这里**——session 的
+    // 表单 schema 需要运行期汇流（options 广播），而本结构是同步纯数据。
+    // 它走 `VdfsProvider::new_types()`（async，默认空）由容器现场取。
+}
+
+fn default_meta_order() -> i32 {
+    100
+}
+
+fn default_meta_root_access() -> VdfsAccess {
+    VdfsAccess::LIST
+}
+
+impl Default for PluginMeta {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            description: None,
+            version: None,
+            author: None,
+            order: default_meta_order(),
+            icon: None,
+            hidden: false,
+            root_access: default_meta_root_access(),
+        }
+    }
 }
 
 impl PluginMeta {
@@ -25,9 +73,7 @@ impl PluginMeta {
         Self {
             id: id.into(),
             name: name.into(),
-            description: None,
-            version: None,
-            author: None,
+            ..Default::default()
         }
     }
 
@@ -43,6 +89,30 @@ impl PluginMeta {
 
     pub fn with_author(mut self, author: impl Into<String>) -> Self {
         self.author = Some(author.into());
+        self
+    }
+
+    /// 导航排序（小者靠前）
+    pub fn with_order(mut self, order: i32) -> Self {
+        self.order = order;
+        self
+    }
+
+    /// 图标名（使用方纯 UI 映射）
+    pub fn with_icon(mut self, icon: impl Into<String>) -> Self {
+        self.icon = Some(icon.into());
+        self
+    }
+
+    /// 挂载点隐藏位（在父目录列表中不显示；可达性不受影响）
+    pub fn with_hidden(mut self, hidden: bool) -> Self {
+        self.hidden = hidden;
+        self
+    }
+
+    /// 挂载点（根目录）访问位
+    pub fn with_root_access(mut self, access: VdfsAccess) -> Self {
+        self.root_access = access;
         self
     }
 }
@@ -257,12 +327,36 @@ pub trait Plugin: Send + Sync + 'static {
     ///
     /// 默认 `None`：大多数插件不暴露 VDFS。容器（`Composite`）返回自己的
     /// `CompositeVdfs`；自身即 provider 的插件（session / model / mcp / skill /
-    /// setting / agent / …）返回 `self`。
+    /// setting / agent / …）返回 `self`（或插件内聚的 provider 句柄）。
     ///
     /// ⚠️ 这是 core 查询接口（`Plugin` trait），不引入任何插件间类型耦合——
     /// 调用方只依赖 `Arc<dyn Plugin>`，绝不依赖某个具体插件类型。
     fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn VdfsProvider>> {
         None
+    }
+
+    /// 把一次 VDFS 请求派发进本插件（**LLM 工具 / 协议层调用的唯一入口**）。
+    ///
+    /// 默认实现经 [`Self::get_vfs_provider`] 转发：自身即 provider 的插件什么都不
+    /// 用做；不暴露 VDFS 的插件得到 [`VdfsError::NotImplemented`]。拆成独立方法的
+    /// 理由：
+    ///
+    /// 1. **挂载名与目录名天然同一份**——容器、agent 作用域代理等「按目录名转发」
+    ///    的派发方不再需要为每个子插件先调 `get_vfs_provider` 再调 provider，
+    ///    一跳直达；
+    /// 2. 需要把 VDFS 实现拆进**独立 provider 结构**（高内聚、多文件）的插件
+    ///    （如 agent / session 的复合资源域）可同时实现两者，派发面与实现面分离；
+    /// 3. 转发型的「目录名 → 相对路径 + 子插件派发」不需要实例化任何中间结构。
+    async fn vdfs_dispatch(
+        self: Arc<Self>,
+        ctx: &VdfsContext,
+        path: &str,
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
+        match self.get_vfs_provider() {
+            Some(p) => p.dispatch(ctx, path, req).await,
+            None => Err(VdfsError::NotImplemented),
+        }
     }
 }
 

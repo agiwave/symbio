@@ -49,6 +49,7 @@
 
 use super::physical::PhysicalFs;
 use crate::symbio_core::vdfs_provider::*;
+use crate::symbio_core::vdfs_provider::{VdfsRequest, VdfsResponse};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -142,6 +143,17 @@ fn route(raw: &str) -> VdfsResult<Half> {
     Ok(half_of(&normalize_addr(raw)?))
 }
 
+/// 两个地址是否落在**同一半**（虚拟 / 物理）。
+///
+/// 只用于 [`VdfsRequest::Move`]——它是唯一有两个地址的操作，两端必须同半，
+/// 否则「移动」就变成了「跨存储搬运」，那是本层不提供的能力。
+fn same_half(a: &str, b: &str) -> bool {
+    matches!(
+        (half_of(a), half_of(b)),
+        (Half::Virtual(_), Half::Virtual(_)) | (Half::Physical(_), Half::Physical(_))
+    )
+}
+
 /// 统一文件系统：虚拟根 + 物理磁盘，对外是一张脸
 pub struct UnifiedFs {
     /// 虚拟层根（容器注册的 root 级 provider，树内相对路径）
@@ -186,129 +198,130 @@ impl UnifiedFs {
 
 #[async_trait]
 impl VdfsProvider for UnifiedFs {
-    fn label(&self) -> Option<&str> {
-        Some("文件系统")
-    }
-
-    fn description(&self) -> Option<&str> {
-        Some("虚拟根下是系统资源；其余地址是磁盘上的真实文件")
-    }
-
-    fn root_access(&self) -> VdfsAccess {
-        VdfsAccess::dir(true, true)
-    }
-
-    async fn list(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
+    /// 唯一入口：按 `path` 前缀分流（虚拟 / 物理），再把请求整体递下去。
+    ///
+    /// 主地址（`path` 参数）由本层剥前缀翻译；载荷内的次要地址（`Move.to`）经
+    /// [`VdfsRequest::map_paths`] 用同一套翻译规则改写，两处地址不会漂移。
+    async fn dispatch(
+        &self,
+        ctx: &VdfsContext,
+        path: &str,
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
+        // 两半之间不可移动：这是**唯一**有两个地址的操作，判定必须在翻译之前——
+        // 翻译会剥掉 `.vdfsv2` 前缀，「属于哪一半」的信息随之丢失，之后再判就晚了
+        // （且会静默地把「跨半」翻译成「同半内的一个相对地址」）。
+        if let VdfsRequest::Move { ref to } = req {
+            if !same_half(path, to) {
+                return Err(VdfsError::invalid(format!(
+                    "系统资源与磁盘文件之间不可移动：{path} → {to}"
+                )));
+            }
+        }
+        // 分流前先翻译载荷内的次要地址（用与主地址同一套前缀规则）
+        let req = req.map_paths(|p| match half_of(p) {
+            Half::Virtual(v) => v,
+            Half::Physical(p) => p,
+        });
         match route(path)? {
-            Half::Virtual(v) => {
-                let mut items = self.virtual_root.list(ctx, &v).await?;
+            Half::Virtual(v) => self.dispatch_virtual(ctx, &v, req).await,
+            Half::Physical(p) => self.physical.dispatch(ctx, &p, req).await,
+        }
+    }
+}
+
+impl UnifiedFs {
+    /// 虚拟半的派发：树内相对路径递给虚拟根，结果翻回展示口径。
+    ///
+    /// **只翻译已填的**：空 `path` 是「provider 未填」的信号，由访问层
+    /// （`host::fill_paths`）按请求地址回填；若在这里把它补成 `.vdfsv2`，
+    /// 信号即被破坏，子节点会被错认成根。
+    async fn dispatch_virtual(
+        &self,
+        ctx: &VdfsContext,
+        rel: &str,
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
+        let root = &self.virtual_root;
+        match req {
+            VdfsRequest::List { .. } => {
+                let mut items = root
+                    .dispatch(
+                        ctx,
+                        rel,
+                        VdfsRequest::List {
+                            limit: None,
+                            before: None,
+                        },
+                    )
+                    .await?
+                    .into_list()
+                    .ok_or_else(|| VdfsError::internal("响应类型不匹配"))?;
                 self.retag(&mut items);
-                Ok(items)
+                Ok(VdfsResponse::List(items))
             }
-            Half::Physical(p) => self.physical.list(ctx, &p).await,
-        }
-    }
-
-    async fn stat(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
-        match route(path)? {
-            Half::Virtual(v) => {
-                let mut n = self.virtual_root.stat(ctx, &v).await?;
+            VdfsRequest::Stat => {
+                let mut n = root
+                    .dispatch(ctx, rel, VdfsRequest::Stat)
+                    .await?
+                    .into_stat()
+                    .ok_or_else(|| VdfsError::internal("响应类型不匹配"))?;
                 Self::retag_one(&mut n);
-                Ok(n)
+                Ok(VdfsResponse::Stat(n))
             }
-            Half::Physical(p) => self.physical.stat(ctx, &p).await,
-        }
-    }
-
-    async fn read(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
-        match route(path)? {
-            Half::Virtual(v) => {
-                let mut c = self.virtual_root.read(ctx, &v).await?;
+            VdfsRequest::Read => {
+                let mut c = root
+                    .dispatch(ctx, rel, VdfsRequest::Read)
+                    .await?
+                    .into_read()
+                    .ok_or_else(|| VdfsError::internal("响应类型不匹配"))?;
                 if !c.path.is_empty() {
                     c.path = to_display(&c.path);
-                }
-                Ok(c)
+                } // `VdfsContent` 不是 `VdfsNode`，复用不了 `retag_one`
+                Ok(VdfsResponse::Read(c))
             }
-            Half::Physical(p) => self.physical.read(ctx, &p).await,
-        }
-    }
-
-    async fn write(
-        &self,
-        ctx: &VdfsContext,
-        path: &str,
-        content: &VdfsContent,
-    ) -> VdfsResult<VdfsWriteResponse> {
-        match route(path)? {
-            Half::Virtual(v) => {
-                let mut r = self.virtual_root.write(ctx, &v, content).await?;
+            VdfsRequest::Write { content } => {
+                let mut r = root
+                    .dispatch(ctx, rel, VdfsRequest::Write { content })
+                    .await?
+                    .into_write()
+                    .ok_or_else(|| VdfsError::internal("响应类型不匹配"))?;
                 if !r.path.is_empty() {
                     r.path = to_display(&r.path);
-                }
-                Ok(r)
+                } // 同上：写入结果也不是 `VdfsNode`
+                Ok(VdfsResponse::Write(r))
             }
-            Half::Physical(p) => self.physical.write(ctx, &p, content).await,
-        }
-    }
-
-    async fn delete(&self, ctx: &VdfsContext, path: &str, recursive: bool) -> VdfsResult<()> {
-        match route(path)? {
-            Half::Virtual(v) => self.virtual_root.delete(ctx, &v, recursive).await,
-            Half::Physical(p) => self.physical.delete(ctx, &p, recursive).await,
-        }
-    }
-
-    async fn mkdir(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
-        match route(path)? {
-            Half::Virtual(v) => self.virtual_root.mkdir(ctx, &v).await,
-            Half::Physical(p) => self.physical.mkdir(ctx, &p).await,
-        }
-    }
-
-    /// 同一半内可移动；虚拟 ↔ 物理之间不允许（两者不是同一个存储）
-    async fn move_item(&self, ctx: &VdfsContext, from: &str, to: &str) -> VdfsResult<()> {
-        match (route(from)?, route(to)?) {
-            (Half::Virtual(f), Half::Virtual(t)) => self.virtual_root.move_item(ctx, &f, &t).await,
-            (Half::Physical(f), Half::Physical(t)) => self.physical.move_item(ctx, &f, &t).await,
-            _ => Err(VdfsError::invalid(format!(
-                "不允许在系统资源与磁盘文件之间移动：{from} → {to}"
-            ))),
-        }
-    }
-
-    async fn action(
-        &self,
-        ctx: &VdfsContext,
-        path: &str,
-        action: &str,
-        payload: Option<&serde_json::Value>,
-    ) -> VdfsResult<VdfsActionResult> {
-        match route(path)? {
-            Half::Virtual(v) => self.virtual_root.action(ctx, &v, action, payload).await,
-            Half::Physical(p) => self.physical.action(ctx, &p, action, payload).await,
-        }
-    }
-
-    /// 只有虚拟层的资源会自发变更；物理层的订阅按 no-op 处理（trait 缺省）。
-    ///
-    /// 事件里的路径补成对外展示地址，消费者拿到的坐标系与请求时一致。
-    /// 用 [`VdfsChange::map_paths`] 一次覆盖全部路径（含 `node` 载荷内的路径），
-    /// 不逐字段重建——新增字段时不会漏转发。
-    async fn watch(&self, ctx: &VdfsContext, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
-        match route(path)? {
-            Half::Virtual(v) => {
+            VdfsRequest::Delete { recursive } => {
+                root.dispatch(ctx, rel, VdfsRequest::Delete { recursive })
+                    .await?;
+                Ok(VdfsResponse::Unit)
+            }
+            VdfsRequest::Mkdir => {
+                root.dispatch(ctx, rel, VdfsRequest::Mkdir).await?;
+                Ok(VdfsResponse::Unit)
+            }
+            VdfsRequest::Move { to } => {
+                root.dispatch(ctx, rel, VdfsRequest::Move { to }).await?;
+                Ok(VdfsResponse::Unit)
+            }
+            VdfsRequest::Action { action, payload } => {
+                root.dispatch(ctx, rel, VdfsRequest::Action { action, payload })
+                    .await
+            }
+            VdfsRequest::Watch { sink } => {
+                // 只有虚拟层的资源会自发变更。事件路径补成展示地址——订阅者看到的
+                // 坐标系与请求时一致。`map_paths` 一次覆盖全部路径（含载荷内的），
+                // 不逐字段重建。
                 let wrapped: VdfsChangeSink =
                     Arc::new(move |c: VdfsChange| sink(c.map_paths(to_display)));
-                self.virtual_root.watch(ctx, &v, wrapped).await
+                root.dispatch(ctx, rel, VdfsRequest::Watch { sink: wrapped })
+                    .await?;
+                Ok(VdfsResponse::Unit)
             }
-            Half::Physical(p) => self.physical.watch(ctx, &p, sink).await,
-        }
-    }
-
-    async fn unwatch(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
-        match route(path)? {
-            Half::Virtual(v) => self.virtual_root.unwatch(ctx, &v).await,
-            Half::Physical(p) => self.physical.unwatch(ctx, &p).await,
+            VdfsRequest::Unwatch => {
+                root.dispatch(ctx, rel, VdfsRequest::Unwatch).await?;
+                Ok(VdfsResponse::Unit)
+            }
         }
     }
 }
@@ -336,28 +349,33 @@ mod tests {
 
     #[async_trait]
     impl VdfsProvider for V {
-        async fn list(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
-            self.seen.lock().unwrap().push(path.to_string());
-            let mut n = VdfsNode::dir("session", "会话", VdfsAccess::dir(true, true));
-            n.path = "session".to_string();
-            Ok(vec![n])
-        }
-        async fn read(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
-            self.seen.lock().unwrap().push(path.to_string());
-            Ok(VdfsContent::text(path, "v"))
-        }
-        async fn write(
+        async fn dispatch(
             &self,
             _ctx: &VdfsContext,
             path: &str,
-            _c: &VdfsContent,
-        ) -> VdfsResult<VdfsWriteResponse> {
-            self.seen.lock().unwrap().push(path.to_string());
-            Ok(VdfsWriteResponse {
-                path: path.to_string(),
-                created: true,
-                etag: None,
-            })
+            req: VdfsRequest,
+        ) -> VdfsResult<VdfsResponse> {
+            match req {
+                VdfsRequest::List { .. } => {
+                    self.seen.lock().unwrap().push(path.to_string());
+                    let mut n = VdfsNode::dir("session", "会话", VdfsAccess::dir(true, true));
+                    n.path = "session".to_string();
+                    Ok(VdfsResponse::List(vec![n]))
+                }
+                VdfsRequest::Read => {
+                    self.seen.lock().unwrap().push(path.to_string());
+                    Ok(VdfsResponse::Read(VdfsContent::text(path, "v")))
+                }
+                VdfsRequest::Write { .. } => {
+                    self.seen.lock().unwrap().push(path.to_string());
+                    Ok(VdfsResponse::Write(VdfsWriteResponse {
+                        path: path.to_string(),
+                        created: true,
+                        etag: None,
+                    }))
+                }
+                _ => Err(VdfsError::NotImplemented),
+            }
         }
     }
 
@@ -379,13 +397,27 @@ mod tests {
 
     #[async_trait]
     impl VdfsProvider for P {
-        async fn list(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
-            self.seen.lock().unwrap().push(path.to_string());
-            Ok(vec![VdfsNode::file("a.txt", "a.txt", VdfsAccess::READ)])
-        }
-        async fn read(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
-            self.seen.lock().unwrap().push(path.to_string());
-            Ok(VdfsContent::text(path, "p"))
+        async fn dispatch(
+            &self,
+            _ctx: &VdfsContext,
+            path: &str,
+            req: VdfsRequest,
+        ) -> VdfsResult<VdfsResponse> {
+            match req {
+                VdfsRequest::List { .. } => {
+                    self.seen.lock().unwrap().push(path.to_string());
+                    Ok(VdfsResponse::List(vec![VdfsNode::file(
+                        "a.txt",
+                        "a.txt",
+                        VdfsAccess::READ,
+                    )]))
+                }
+                VdfsRequest::Read => {
+                    self.seen.lock().unwrap().push(path.to_string());
+                    Ok(VdfsResponse::Read(VdfsContent::text(path, "p")))
+                }
+                _ => Err(VdfsError::NotImplemented),
+            }
         }
     }
 
@@ -472,7 +504,19 @@ mod tests {
         let (f, v, p) = fs();
         let ctx = VdfsContext::empty();
 
-        let items = f.list(&ctx, ".vdfsv2").await.unwrap();
+        let items = f
+            .dispatch(
+                &ctx,
+                ".vdfsv2",
+                VdfsRequest::List {
+                    limit: None,
+                    before: None,
+                },
+            )
+            .await
+            .unwrap()
+            .into_list()
+            .unwrap();
         assert_eq!(v.seen(), vec![""], "根目录进树内口径是空串");
         assert_eq!(items[0].path, ".vdfsv2/session", "结果回到展示口径");
         assert!(p.seen().is_empty(), "不应触达物理层");
@@ -482,8 +526,14 @@ mod tests {
     async fn deep_virtual_address_keeps_dir_prefix() {
         let (f, v, _p) = fs();
         let c = f
-            .read(&VdfsContext::empty(), ".vdfsv2/session/abc")
+            .dispatch(
+                &VdfsContext::empty(),
+                ".vdfsv2/session/abc",
+                VdfsRequest::Read,
+            )
             .await
+            .unwrap()
+            .into_read()
             .unwrap();
         assert_eq!(v.seen(), vec!["session/abc"]);
         assert_eq!(c.path, ".vdfsv2/session/abc");
@@ -492,13 +542,34 @@ mod tests {
     #[tokio::test]
     async fn bare_address_goes_to_physical_untouched() {
         let (f, _v, p) = fs();
-        let items = f.list(&VdfsContext::empty(), "src").await.unwrap();
+        let items = f
+            .dispatch(
+                &VdfsContext::empty(),
+                "src",
+                VdfsRequest::List {
+                    limit: None,
+                    before: None,
+                },
+            )
+            .await
+            .unwrap()
+            .into_list()
+            .unwrap();
         assert_eq!(p.seen(), vec!["src"]);
         assert_eq!(items[0].name, "a.txt");
 
         // 空地址 = 工作目录根，不是虚拟根
         let (f2, v2, p2) = fs();
-        f2.list(&VdfsContext::empty(), "").await.unwrap();
+        f2.dispatch(
+            &VdfsContext::empty(),
+            "",
+            VdfsRequest::List {
+                limit: None,
+                before: None,
+            },
+        )
+        .await
+        .unwrap();
         assert_eq!(p2.seen(), vec![""]);
         assert!(v2.seen().is_empty());
     }
@@ -507,12 +578,16 @@ mod tests {
     async fn write_response_path_is_display_form() {
         let (f, v, _p) = fs();
         let r = f
-            .write(
+            .dispatch(
                 &VdfsContext::empty(),
                 ".vdfsv2/setting/x",
-                &VdfsContent::text("", "1"),
+                VdfsRequest::Write {
+                    content: VdfsContent::text("", "1"),
+                },
             )
             .await
+            .unwrap()
+            .into_write()
             .unwrap();
         assert_eq!(v.seen(), vec!["setting/x"]);
         assert_eq!(r.path, ".vdfsv2/setting/x");
@@ -524,7 +599,13 @@ mod tests {
     async fn move_between_halves_is_rejected() {
         let (f, v, p) = fs();
         let err = f
-            .move_item(&VdfsContext::empty(), "a.txt", ".vdfsv2/session/b")
+            .dispatch(
+                &VdfsContext::empty(),
+                "a.txt",
+                VdfsRequest::Move {
+                    to: ".vdfsv2/session/b".to_string(),
+                },
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, VdfsError::Invalid(_)), "两半之间不可移动");
@@ -537,7 +618,13 @@ mod tests {
         // P 未实现 move_item → 转发后由 trait 缺省报 NotImplemented，
         // 关键是地址按物理半原样送达
         let err = f
-            .move_item(&VdfsContext::empty(), "a.txt", "b.txt")
+            .dispatch(
+                &VdfsContext::empty(),
+                "a.txt",
+                VdfsRequest::Move {
+                    to: "b.txt".to_string(),
+                },
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, VdfsError::NotImplemented));
@@ -549,15 +636,17 @@ mod tests {
         struct W;
         #[async_trait]
         impl VdfsProvider for W {
-            async fn watch(
+            async fn dispatch(
                 &self,
                 _ctx: &VdfsContext,
                 _path: &str,
-                sink: VdfsChangeSink,
-            ) -> VdfsResult<()> {
-                sink(VdfsChange::bare("session/abc"));
-                sink(VdfsChange::bare("session/old"));
-                Ok(())
+                req: VdfsRequest,
+            ) -> VdfsResult<VdfsResponse> {
+                if let VdfsRequest::Watch { sink } = req {
+                    sink(VdfsChange::bare("session/abc"));
+                    sink(VdfsChange::bare("session/old"));
+                }
+                Ok(VdfsResponse::Unit)
             }
         }
         let f = UnifiedFs::with_physical(Arc::new(W) as DynVdfsProvider, P::new());
@@ -565,12 +654,14 @@ mod tests {
         type Captured = Arc<std::sync::Mutex<Vec<String>>>;
         let got: Captured = Arc::new(std::sync::Mutex::new(Vec::new()));
         let out = got.clone();
-        f.watch(
+        f.dispatch(
             &VdfsContext::empty(),
             ".vdfsv2/session",
-            Arc::new(move |c: VdfsChange| {
-                out.lock().unwrap().push(c.path); // grep-audit-allow S-002: temporary guard drops at this semicolon; await is outside the callback
-            }),
+            VdfsRequest::Watch {
+                sink: Arc::new(move |c: VdfsChange| {
+                    out.lock().unwrap().push(c.path); // grep-audit-allow S-002: temporary guard drops at this semicolon; await is outside the callback
+                }),
+            },
         )
         .await
         .unwrap();

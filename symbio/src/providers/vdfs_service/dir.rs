@@ -18,9 +18,9 @@
 use super::entry;
 use crate::symbio_core::vdfs::host::{notify_change, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
-    has_parent_segment, VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext,
-    VdfsError, VdfsNewType, VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse,
-    VDFS_ACTION_EXPORT, VDFS_EXT_ZIP, VDFS_NEW_SOURCE_FILE,
+    has_parent_segment, VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError,
+    VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse,
+    VDFS_ACTION_EXPORT,
 };
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -309,177 +309,166 @@ impl DirVdfs {
 
 /// 目录型是一个**完整**的 provider：条目内部天然就是真实文件，
 /// 无呈现差异的资源可以直接注册它（LLM 侧即可整树浏览）。
+///
+/// 自述（标题 / 图标 / 根访问位 / 根可新建类型）已并入 PluginMeta，
+/// 由持有本 store 的插件在 `Plugin::meta()` 中提供。
 #[async_trait]
 impl VdfsProvider for DirVdfs {
-    fn label(&self) -> Option<&str> {
-        Some(&self.label)
-    }
-
-    fn description(&self) -> Option<&str> {
-        Some("目录型资源：每个条目一个目录，条目内部可下钻浏览。")
-    }
-
-    fn icon(&self) -> Option<&str> {
-        Some(self.kind.as_str())
-    }
-
-    /// 条目内部有子结构 ⇒ 根可递归遍历
-    fn root_access(&self) -> VdfsAccess {
-        VdfsAccess::LIST_TRAVERSE
-    }
-
-    async fn root_new_types(&self) -> Vec<VdfsNewType> {
-        vec![VdfsNewType::new(VDFS_EXT_ZIP, format!("{}包", self.label))
-            .with_description("导入整包（.zip）——整目录覆盖同名条目")
-            .with_source(VDFS_NEW_SOURCE_FILE)]
-    }
-
-    async fn list(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
-        match entry::split_rel(path) {
-            None => Ok(self
-                .entries()
-                .await?
-                .iter()
-                .map(|e| self.node_of(e))
-                .collect()),
-            Some((id, rel)) => {
-                let id = self.id_of(id);
-                // 条目存在性先校验：不存在的条目应报 NotFound，而不是空目录
-                if !self.exists(&id) {
-                    return Err(VdfsError::not_found(format!("未找到条目「{id}」")));
-                }
-                self.list_inner(&id, rel).await
-            }
-        }
-    }
-
-    async fn stat(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
-        match entry::split_rel(path) {
-            // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填
-            None => Ok(VdfsNode::dir("", self.label.clone(), VdfsAccess::LIST)),
-            Some((id, "")) => Ok(self.node_of(&self.entry(&self.id_of(id)).await?)),
-            Some((id, rel)) => {
-                let id = self.id_of(id);
-                let name = rel.rsplit('/').next().unwrap_or(rel).to_string();
-                let target = self.checked_inner(&id, rel)?;
-                entry::tree_node(&target, &name).await
-            }
-        }
-    }
-
-    async fn read(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
-        let (id, rel) = entry::split_rel(path)
-            .ok_or_else(|| VdfsError::invalid("该路径是目录，不可读取内容"))?;
-        let id = self.id_of(id);
-        if rel.is_empty() {
-            return Ok(VdfsContent::text(path, self.read_text(&id).await?));
-        }
-        self.read_inner(&id, rel).await
-    }
-
-    async fn write(
+    async fn dispatch(
         &self,
         _ctx: &VdfsContext,
         path: &str,
-        content: &VdfsContent,
-    ) -> VdfsResult<VdfsWriteResponse> {
-        // 二进制写入 = 整包导入（规范 §3.3：导入不占第二个操作）
-        if content.binary {
-            let (id, _) = entry::split_rel(path)
-                .ok_or_else(|| VdfsError::invalid("整包只能导入到挂载根下的条目地址"))?;
-            let name = self.pack_name_of(id);
-            let bytes = super::pack::decode_b64(content.b64.as_deref().unwrap_or_default())
-                .map_err(|e| VdfsError::invalid(e.0))?;
-            let created = self.import_pack(&name, &bytes).await?;
-            return Ok(VdfsWriteResponse {
-                path: name,
-                created,
-                etag: None,
-            });
-        }
-        let (id, rel) = entry::split_rel(path)
-            .ok_or_else(|| VdfsError::invalid("目录型条目只能写到条目地址上"))?;
-        let id = self.id_of(id);
-        let created = self
-            .write_inner(&id, rel, content.as_text().unwrap_or_default())
-            .await?;
-        Ok(VdfsWriteResponse {
-            path: if rel.is_empty() {
-                id
-            } else {
-                format!("{id}/{rel}")
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
+        match req {
+            VdfsRequest::List { .. } => match entry::split_rel(path) {
+                None => Ok(VdfsResponse::List(
+                    self.entries()
+                        .await?
+                        .iter()
+                        .map(|e| self.node_of(e))
+                        .collect(),
+                )),
+                Some((id, rel)) => {
+                    let id = self.id_of(id);
+                    // 条目存在性先校验：不存在的条目应报 NotFound，而不是空目录
+                    if !self.exists(&id) {
+                        return Err(VdfsError::not_found(format!("未找到条目「{id}」")));
+                    }
+                    Ok(VdfsResponse::List(self.list_inner(&id, rel).await?))
+                }
             },
-            created,
-            etag: None,
-        })
-    }
 
-    async fn delete(&self, _ctx: &VdfsContext, path: &str, recursive: bool) -> VdfsResult<()> {
-        let (id, rel) = entry::split_rel(path)
-            .ok_or_else(|| VdfsError::Forbidden("不可删除挂载根".to_string()))?;
-        let id = self.id_of(id);
-        if rel.is_empty() {
-            // 存在性校验：删不存在的条目报 NotFound，而不是静默成功
-            self.entry(&id).await?;
-            if !recursive {
-                let inner = self.list_inner(&id, "").await?;
-                if inner.iter().any(|n| n.name != self.manifest) {
-                    return Err(VdfsError::invalid(format!(
-                        "条目「{id}」内部还有 {count} 个文件，需要 recursive=true",
-                        count = inner.len()
-                    )));
+            VdfsRequest::Stat => match entry::split_rel(path) {
+                // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填
+                None => Ok(VdfsResponse::Stat(VdfsNode::dir(
+                    "",
+                    self.label.clone(),
+                    VdfsAccess::LIST,
+                ))),
+                Some((id, "")) => Ok(VdfsResponse::Stat(
+                    self.node_of(&self.entry(&self.id_of(id)).await?),
+                )),
+                Some((id, rel)) => {
+                    let id = self.id_of(id);
+                    let name = rel.rsplit('/').next().unwrap_or(rel).to_string();
+                    let target = self.checked_inner(&id, rel)?;
+                    Ok(VdfsResponse::Stat(entry::tree_node(&target, &name).await?))
                 }
+            },
+
+            VdfsRequest::Read => {
+                let (id, rel) = entry::split_rel(path)
+                    .ok_or_else(|| VdfsError::invalid("该路径是目录，不可读取内容"))?;
+                let id = self.id_of(id);
+                let content = if rel.is_empty() {
+                    VdfsContent::text(path, self.read_text(&id).await?)
+                } else {
+                    self.read_inner(&id, rel).await?
+                };
+                Ok(VdfsResponse::Read(content))
             }
-            return self.remove(&id).await;
+
+            VdfsRequest::Write { content } => {
+                // 二进制写入 = 整包导入（规范 §3.3：导入不占第二个操作）
+                if content.binary {
+                    let (id, _) = entry::split_rel(path)
+                        .ok_or_else(|| VdfsError::invalid("整包只能导入到挂载根下的条目地址"))?;
+                    let name = self.pack_name_of(id);
+                    let bytes = super::pack::decode_b64(content.b64.as_deref().unwrap_or_default())
+                        .map_err(|e| VdfsError::invalid(e.0))?;
+                    let created = self.import_pack(&name, &bytes).await?;
+                    return Ok(VdfsResponse::Write(VdfsWriteResponse {
+                        path: name,
+                        created,
+                        etag: None,
+                    }));
+                }
+                let (id, rel) = entry::split_rel(path)
+                    .ok_or_else(|| VdfsError::invalid("目录型条目只能写到条目地址上"))?;
+                let id = self.id_of(id);
+                let created = self
+                    .write_inner(&id, rel, content.as_text().unwrap_or_default())
+                    .await?;
+                Ok(VdfsResponse::Write(VdfsWriteResponse {
+                    path: if rel.is_empty() {
+                        id
+                    } else {
+                        format!("{id}/{rel}")
+                    },
+                    created,
+                    etag: None,
+                }))
+            }
+
+            VdfsRequest::Delete { recursive } => {
+                let (id, rel) = entry::split_rel(path)
+                    .ok_or_else(|| VdfsError::Forbidden("不可删除挂载根".to_string()))?;
+                let id = self.id_of(id);
+                if rel.is_empty() {
+                    // 存在性校验：删不存在的条目报 NotFound，而不是静默成功
+                    self.entry(&id).await?;
+                    if !recursive {
+                        let inner = self.list_inner(&id, "").await?;
+                        if inner.iter().any(|n| n.name != self.manifest) {
+                            return Err(VdfsError::invalid(format!(
+                                "条目「{id}」内部还有 {count} 个文件，需要 recursive=true",
+                                count = inner.len()
+                            )));
+                        }
+                    }
+                    self.remove(&id).await?;
+                    return Ok(VdfsResponse::Unit);
+                }
+                self.remove_inner(&id, rel).await?;
+                Ok(VdfsResponse::Unit)
+            }
+
+            VdfsRequest::Mkdir => {
+                let (id, rel) = entry::split_rel(path)
+                    .ok_or_else(|| VdfsError::invalid("只能在挂载根下新建条目目录"))?;
+                let id = self.id_of(id);
+                if rel.is_empty() {
+                    return self.mkdir_entry(&id).await.map(|_| VdfsResponse::Unit);
+                }
+                let target = self.checked_inner(&id, rel)?;
+                tokio::fs::create_dir_all(&target)
+                    .await
+                    .map_err(|e| VdfsError::internal(format!("创建目录失败：{e}")))?;
+                notify_change(&self.kind, &id);
+                Ok(VdfsResponse::Unit)
+            }
+
+            VdfsRequest::Action { action, payload: _ } => {
+                if action != VDFS_ACTION_EXPORT {
+                    return Err(VdfsError::NotImplemented);
+                }
+                let (id, _) = entry::split_rel(path)
+                    .ok_or_else(|| VdfsError::invalid("「导出」只对条目可用"))?;
+                let id = self.id_of(id);
+                let pack = self.export_pack(&id).await?;
+                let data = serde_json::to_value(&pack)
+                    .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;
+                Ok(VdfsResponse::Action(VdfsActionResult {
+                    action: VDFS_ACTION_EXPORT.to_string(),
+                    ok: true,
+                    message: format!("已打包「{}」", pack.filename),
+                    data: Some(data),
+                }))
+            }
+
+            VdfsRequest::Move { .. } => Err(VdfsError::NotImplemented),
+
+            VdfsRequest::Watch { sink } => {
+                watch_changes(&self.kind, path, sink).await?;
+                Ok(VdfsResponse::Unit)
+            }
+
+            VdfsRequest::Unwatch => {
+                unwatch_changes(&self.kind, path).await?;
+                Ok(VdfsResponse::Unit)
+            }
         }
-        self.remove_inner(&id, rel).await
-    }
-
-    async fn mkdir(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
-        let (id, rel) = entry::split_rel(path)
-            .ok_or_else(|| VdfsError::invalid("只能在挂载根下新建条目目录"))?;
-        let id = self.id_of(id);
-        if rel.is_empty() {
-            return self.mkdir_entry(&id).await;
-        }
-        let target = self.checked_inner(&id, rel)?;
-        tokio::fs::create_dir_all(&target)
-            .await
-            .map_err(|e| VdfsError::internal(format!("创建目录失败：{e}")))?;
-        notify_change(&self.kind, &id);
-        Ok(())
-    }
-
-    async fn action(
-        &self,
-        _ctx: &VdfsContext,
-        path: &str,
-        action: &str,
-        _payload: Option<&serde_json::Value>,
-    ) -> VdfsResult<VdfsActionResult> {
-        if action != VDFS_ACTION_EXPORT {
-            return Err(VdfsError::NotImplemented);
-        }
-        let (id, _) =
-            entry::split_rel(path).ok_or_else(|| VdfsError::invalid("「导出」只对条目可用"))?;
-        let id = self.id_of(id);
-        let pack = self.export_pack(&id).await?;
-        let data = serde_json::to_value(&pack)
-            .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;
-        Ok(VdfsActionResult {
-            action: VDFS_ACTION_EXPORT.to_string(),
-            ok: true,
-            message: format!("已打包「{}」", pack.filename),
-            data: Some(data),
-        })
-    }
-
-    async fn watch(&self, _ctx: &VdfsContext, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
-        watch_changes(&self.kind, path, sink).await
-    }
-
-    async fn unwatch(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
-        unwatch_changes(&self.kind, path).await
     }
 }
 
@@ -498,29 +487,68 @@ mod tests {
         let s = store_in(&tmp.path().join("skill"));
         let ctx = VdfsContext::empty();
 
-        s.write(&ctx, "demo.skill", &VdfsContent::text("", "# demo"))
+        let _ = s
+            .dispatch(
+                &ctx,
+                "demo.skill",
+                VdfsRequest::Write {
+                    content: VdfsContent::text("", "# demo"),
+                },
+            )
             .await
             .unwrap();
         assert!(tmp.path().join("skill/demo/SKILL.md").exists());
 
         // 条目内部进地址空间：写一个附属文件，再从根下钻读回
-        s.write(
-            &ctx,
-            "demo/scripts/run.sh",
-            &VdfsContent::text("", "echo hi"),
-        )
-        .await
-        .unwrap();
+        let _ = s
+            .dispatch(
+                &ctx,
+                "demo/scripts/run.sh",
+                VdfsRequest::Write {
+                    content: VdfsContent::text("", "echo hi"),
+                },
+            )
+            .await
+            .unwrap();
         assert_eq!(
-            s.read(&ctx, "demo/scripts/run.sh").await.unwrap().as_text(),
+            s.dispatch(&ctx, "demo/scripts/run.sh", VdfsRequest::Read)
+                .await
+                .unwrap()
+                .into_read()
+                .unwrap()
+                .as_text(),
             Some("echo hi")
         );
-        let items = s.list(&ctx, "demo").await.unwrap();
+        let items = s
+            .dispatch(
+                &ctx,
+                "demo",
+                VdfsRequest::List {
+                    limit: None,
+                    before: None,
+                },
+            )
+            .await
+            .unwrap()
+            .into_list()
+            .unwrap();
         let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
         assert_eq!(names, vec!["scripts", "SKILL.md"], "目录在前、按名升序");
 
         // 根清单把条目呈现为**目录**（可下钻），不是叶子文件
-        let root = s.list(&ctx, "").await.unwrap();
+        let root = s
+            .dispatch(
+                &ctx,
+                "",
+                VdfsRequest::List {
+                    limit: None,
+                    before: None,
+                },
+            )
+            .await
+            .unwrap()
+            .into_list()
+            .unwrap();
         assert_eq!(root.len(), 1);
         assert!(root[0].is_dir());
         assert_eq!(root[0].name, "demo");
@@ -533,7 +561,12 @@ mod tests {
         let s = store_in(tmp.path());
         std::fs::create_dir_all(s.entry_dir("demo")).unwrap();
         std::fs::write(s.inner_path("demo", "img.bin"), [0u8, 159, 1, 2]).unwrap();
-        let c = s.read(&VdfsContext::empty(), "demo/img.bin").await.unwrap();
+        let c = s
+            .dispatch(&VdfsContext::empty(), "demo/img.bin", VdfsRequest::Read)
+            .await
+            .unwrap()
+            .into_read()
+            .unwrap();
         assert!(c.binary, "非 UTF-8 内容必须走二进制通道，而不是报错");
     }
 
@@ -543,23 +576,53 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let s = store_in(tmp.path());
         let ctx = VdfsContext::empty();
-        s.write(&ctx, "demo", &VdfsContent::text("", "# demo"))
+        let _ = s
+            .dispatch(
+                &ctx,
+                "demo",
+                VdfsRequest::Write {
+                    content: VdfsContent::text("", "# demo"),
+                },
+            )
             .await
             .unwrap();
-        s.write(&ctx, "demo/extra.txt", &VdfsContent::text("", "x"))
+        let _ = s
+            .dispatch(
+                &ctx,
+                "demo/extra.txt",
+                VdfsRequest::Write {
+                    content: VdfsContent::text("", "x"),
+                },
+            )
             .await
             .unwrap();
 
         let r = s
-            .action(&ctx, "demo", VDFS_ACTION_EXPORT, None)
+            .dispatch(
+                &ctx,
+                "demo",
+                VdfsRequest::Action {
+                    action: VDFS_ACTION_EXPORT.to_string(),
+                    payload: None,
+                },
+            )
             .await
+            .unwrap()
+            .into_action()
             .unwrap();
         assert!(r.ok);
         let b64 = r.data.unwrap()["b64"].as_str().unwrap().to_string();
         let bytes = super::super::pack::decode_b64(&b64).unwrap();
 
         // 换一个只含主文件的包导回：附属文件必须消失
-        s.write(&ctx, "other", &VdfsContent::text("", "# only"))
+        let _ = s
+            .dispatch(
+                &ctx,
+                "other",
+                VdfsRequest::Write {
+                    content: VdfsContent::text("", "# only"),
+                },
+            )
             .await
             .unwrap();
         let only = s.export_pack("other").await.unwrap();
@@ -580,14 +643,34 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let s = store_in(tmp.path());
         let ctx = VdfsContext::empty();
-        s.write(&ctx, "demo", &VdfsContent::text("", "# demo"))
+        let _ = s
+            .dispatch(
+                &ctx,
+                "demo",
+                VdfsRequest::Write {
+                    content: VdfsContent::text("", "# demo"),
+                },
+            )
             .await
             .unwrap();
-        s.write(&ctx, "demo/a.txt", &VdfsContent::text("", "x"))
+        let _ = s
+            .dispatch(
+                &ctx,
+                "demo/a.txt",
+                VdfsRequest::Write {
+                    content: VdfsContent::text("", "x"),
+                },
+            )
             .await
             .unwrap();
-        assert!(s.delete(&ctx, "demo", false).await.is_err());
-        s.delete(&ctx, "demo", true).await.unwrap();
+        assert!(s
+            .dispatch(&ctx, "demo", VdfsRequest::Delete { recursive: false })
+            .await
+            .is_err());
+        let _ = s
+            .dispatch(&ctx, "demo", VdfsRequest::Delete { recursive: true })
+            .await
+            .unwrap();
         assert!(!s.exists("demo"));
     }
 
@@ -596,9 +679,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let s = store_in(tmp.path());
         let ctx = VdfsContext::empty();
-        s.mkdir(&ctx, "demo").await.unwrap();
+        let _ = s.dispatch(&ctx, "demo", VdfsRequest::Mkdir).await.unwrap();
         assert!(matches!(
-            s.mkdir(&ctx, "demo").await.unwrap_err(),
+            s.dispatch(&ctx, "demo", VdfsRequest::Mkdir)
+                .await
+                .unwrap_err(),
             VdfsError::Conflict(_)
         ));
         // 空条目（无主文件）读不到内容，但列得出来
@@ -612,11 +697,34 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let s = store_in(tmp.path());
         let ctx = VdfsContext::empty();
-        s.write(&ctx, "demo.skill", &VdfsContent::text("", "# a"))
+        let _ = s
+            .dispatch(
+                &ctx,
+                "demo.skill",
+                VdfsRequest::Write {
+                    content: VdfsContent::text("", "# a"),
+                },
+            )
             .await
             .unwrap();
-        assert_eq!(s.read(&ctx, "demo").await.unwrap().as_text(), Some("# a"));
-        assert_eq!(s.stat(&ctx, "demo.skill").await.unwrap().name, "demo");
+        assert_eq!(
+            s.dispatch(&ctx, "demo", VdfsRequest::Read)
+                .await
+                .unwrap()
+                .into_read()
+                .unwrap()
+                .as_text(),
+            Some("# a")
+        );
+        assert_eq!(
+            s.dispatch(&ctx, "demo.skill", VdfsRequest::Stat)
+                .await
+                .unwrap()
+                .into_stat()
+                .unwrap()
+                .name,
+            "demo"
+        );
     }
 
     /// 广播频道按 `kind` 全局持有（同一 provider 会被每次 traverse 重新构造），
@@ -633,12 +741,15 @@ mod tests {
                 seen.lock().unwrap().push(c.path);
             })
         };
-        s.watch(&ctx, "", sink).await.unwrap();
+        let _ = s
+            .dispatch(&ctx, "", VdfsRequest::Watch { sink })
+            .await
+            .unwrap();
         s.write_text("demo", "# x").await.unwrap();
         // 广播是异步投递：给转发任务一点时间
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert_eq!(seen.lock().unwrap().as_slice(), ["demo"]);
-        s.unwatch(&ctx, "").await.unwrap();
+        let _ = s.dispatch(&ctx, "", VdfsRequest::Unwatch).await.unwrap();
         s.write_text("demo", "# y").await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert_eq!(seen.lock().unwrap().len(), 1, "unwatch 后不得再收到事件");
@@ -668,11 +779,19 @@ mod tests {
             r"demo/..\vdfs-sentinel",
         ] {
             for r in [
-                s.read(&ctx, bad).await.map(|_| ()),
-                s.write(&ctx, bad, &VdfsContent::text("", "pwned"))
+                s.dispatch(&ctx, bad, VdfsRequest::Read).await.map(|_| ()),
+                s.dispatch(
+                    &ctx,
+                    bad,
+                    VdfsRequest::Write {
+                        content: VdfsContent::text("", "pwned"),
+                    },
+                )
+                .await
+                .map(|_| ()),
+                s.dispatch(&ctx, bad, VdfsRequest::Delete { recursive: true })
                     .await
                     .map(|_| ()),
-                s.delete(&ctx, bad, true).await,
             ] {
                 assert!(r.is_err(), "反斜杠路径必须被拒绝：{bad}");
             }

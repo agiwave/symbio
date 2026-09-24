@@ -37,7 +37,6 @@ use std::sync::Arc;
 
 use crate::symbio_core::vdfs::{
     self, DynVdfsProvider, VdfsAccess, VdfsContext, VdfsError, VdfsNode, VdfsProvider, VdfsResult,
-    VdfsWriteResponse,
 };
 
 /// 无状态：本插件的全部内容就是一份**固定分区清单**（两个前端自持分区），
@@ -52,9 +51,11 @@ impl SettingPlugin {
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new("setting", "系统设置")
-            .with_description("设置管理插件")
+        PluginMeta::new("setting", "设置")
+            .with_description("本应用自身的设置，以及各插件配置文档的清单。")
             .with_version("0.1.0")
+            .with_order(6)
+            .with_icon("settings")
     }
 }
 
@@ -180,75 +181,61 @@ async fn config_entries(ctx: &VdfsContext) -> Vec<VdfsNode> {
 
 #[async_trait::async_trait]
 impl VdfsProvider for SettingPlugin {
-    fn label(&self) -> Option<&str> {
-        Some("设置")
-    }
-
-    fn description(&self) -> Option<&str> {
-        Some("本应用自身的设置，以及各插件配置文档的清单。")
-    }
-
-    fn order(&self) -> i32 {
-        6
-    }
-
-    fn icon(&self) -> Option<&str> {
-        Some("settings")
-    }
-
-    /// 分区清单固定、每一项都是叶子：可列，但不可递归遍历
-    fn root_access(&self) -> VdfsAccess {
-        VdfsAccess::LIST
-    }
-
-    /// 清单 = **各插件交出来的配置条目** + 自有分区。
-    ///
-    /// 顺序上插件配置在前、`appearance` / `about` 在后：前者是用户在设置页里真正要
-    /// 动手的东西，后者是应用自身的展示项，排尾不挡路。两段各自保序（插件段按声明
-    /// 注册顺序，分区段按 `SETTING_SECTIONS`）。
-    async fn list(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
-        if !path.is_empty() {
-            return Err(VdfsError::not_found(format!(
-                "设置分区是叶子节点，没有子项：{path}"
-            )));
-        }
-        let mut items = config_entries(ctx).await;
-        items.extend(SETTING_SECTIONS.iter().map(section_node));
-        Ok(items)
-    }
-
-    async fn stat(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
-        if path.is_empty() {
-            // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
-            return Ok(VdfsNode::dir("", "设置", self.root_access()));
-        }
-        section_of(path)
-            .map(section_node)
-            .ok_or_else(|| VdfsError::not_found(format!("未知设置分区：{path}")))
-    }
-
-    /// 本插件的分区都不是资源：取值在前端 store，VDFS 侧无正文可读
-    async fn read(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<vdfs::VdfsContent> {
-        let s = section_of(path)
-            .ok_or_else(|| VdfsError::not_found(format!("未知设置分区：{path}")))?;
-        Err(VdfsError::Forbidden(format!(
-            "分区 {} 的数据由前端状态自持，VDFS 侧无正文",
-            s.id
-        )))
-    }
-
-    async fn write(
+    async fn dispatch(
         &self,
-        _ctx: &VdfsContext,
+        ctx: &VdfsContext,
         path: &str,
-        _content: &vdfs::VdfsContent,
-    ) -> VdfsResult<VdfsWriteResponse> {
-        let s = section_of(path)
-            .ok_or_else(|| VdfsError::not_found(format!("未知设置分区：{path}")))?;
-        Err(VdfsError::Forbidden(format!(
-            "分区 {} 的数据由前端状态自持，VDFS 侧不可写",
-            s.id
-        )))
+        req: vdfs::VdfsRequest,
+    ) -> VdfsResult<vdfs::VdfsResponse> {
+        match req {
+            vdfs::VdfsRequest::List { .. } => {
+                if !path.is_empty() {
+                    return Err(VdfsError::not_found(format!(
+                        "设置分区是叶子节点，没有子项：{path}"
+                    )));
+                }
+                // 清单 = **各插件交出来的配置条目** + 自有分区。
+                //
+                // 顺序上插件配置在前、`appearance` / `about` 在后：前者是用户在设置页里真正要
+                // 动手的东西，后者是应用自身的展示项，排尾不挡路。两段各自保序（插件段按声明
+                // 注册顺序，分区段按 `SETTING_SECTIONS`）。
+                let mut items = config_entries(ctx).await;
+                items.extend(SETTING_SECTIONS.iter().map(section_node));
+                Ok(vdfs::VdfsResponse::List(items))
+            }
+            vdfs::VdfsRequest::Stat => {
+                if path.is_empty() {
+                    // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
+                    return Ok(vdfs::VdfsResponse::Stat(VdfsNode::dir(
+                        "",
+                        "设置",
+                        VdfsAccess::LIST,
+                    )));
+                }
+                section_of(path)
+                    .map(section_node)
+                    .ok_or_else(|| VdfsError::not_found(format!("未知设置分区：{path}")))
+                    .map(vdfs::VdfsResponse::Stat)
+            }
+            // 本插件的分区都不是资源：取值在前端 store，VDFS 侧无正文可读
+            vdfs::VdfsRequest::Read => {
+                let s = section_of(path)
+                    .ok_or_else(|| VdfsError::not_found(format!("未知设置分区：{path}")))?;
+                Err(VdfsError::Forbidden(format!(
+                    "分区 {} 的数据由前端状态自持，VDFS 侧无正文",
+                    s.id
+                )))
+            }
+            vdfs::VdfsRequest::Write { .. } => {
+                let s = section_of(path)
+                    .ok_or_else(|| VdfsError::not_found(format!("未知设置分区：{path}")))?;
+                Err(VdfsError::Forbidden(format!(
+                    "分区 {} 的数据由前端状态自持，VDFS 侧不可写",
+                    s.id
+                )))
+            }
+            _ => Err(VdfsError::not_found(format!("未知路径：{path}"))),
+        }
     }
 }
 
@@ -259,7 +246,19 @@ mod tests {
     #[tokio::test]
     async fn list_returns_sections_in_declared_order() {
         let plugin = SettingPlugin;
-        let items = plugin.list(&vctx(), "").await.unwrap();
+        let items = plugin
+            .dispatch(
+                &vctx(),
+                "",
+                vdfs::VdfsRequest::List {
+                    limit: None,
+                    before: None,
+                },
+            )
+            .await
+            .unwrap()
+            .into_list()
+            .unwrap();
 
         // 固定清单、按声明顺序（前端据此展示，不做二次排序）。
         // provider 返回的节点自带 `name`，全路径由分发层补挂载名后合成。
@@ -289,11 +288,17 @@ mod tests {
     #[tokio::test]
     async fn vdfs_self_description_has_no_mount() {
         let p = SettingPlugin;
-        assert_eq!(p.label(), Some("设置"));
-        assert_eq!(p.icon(), Some("settings"));
-        assert_eq!(p.order(), 6);
+        let meta = p.meta();
+        assert_eq!(meta.name, "设置");
+        assert_eq!(meta.icon.as_deref(), Some("settings"));
+        assert_eq!(meta.order, 6);
 
-        let root = p.stat(&vctx(), "").await.unwrap();
+        let root = p
+            .dispatch(&vctx(), "", vdfs::VdfsRequest::Stat)
+            .await
+            .unwrap()
+            .into_stat()
+            .unwrap();
         assert_eq!(root.name, "", "provider 不知道自己的挂载名");
         assert!(root.is_dir());
     }
@@ -302,12 +307,27 @@ mod tests {
     #[tokio::test]
     async fn sections_are_leaves_without_new_types() {
         let p = SettingPlugin;
-        assert_eq!(p.root_access(), VdfsAccess::LIST);
-        assert!(p.root_new_types().await.is_empty());
+        assert_eq!(p.meta().root_access, VdfsAccess::LIST);
+        assert!(p.new_types().await.is_empty());
 
-        let s = p.stat(&vctx(), "appearance").await.unwrap();
+        let s = p
+            .dispatch(&vctx(), "appearance", vdfs::VdfsRequest::Stat)
+            .await
+            .unwrap()
+            .into_stat()
+            .unwrap();
         assert!(!s.is_dir(), "分区是叶子文档");
-        assert!(p.list(&vctx(), "appearance").await.is_err());
+        assert!(p
+            .dispatch(
+                &vctx(),
+                "appearance",
+                vdfs::VdfsRequest::List {
+                    limit: None,
+                    before: None
+                },
+            )
+            .await
+            .is_err());
     }
 
     /// 前端自持分区在 VDFS 侧无正文：读写都明确拒绝（而非静默返回空）
@@ -315,17 +335,24 @@ mod tests {
     async fn frontend_owned_sections_reject_read_and_write() {
         let p = SettingPlugin;
         assert!(matches!(
-            p.read(&vctx(), "appearance").await,
+            p.dispatch(&vctx(), "appearance", vdfs::VdfsRequest::Read)
+                .await,
             Err(VdfsError::Forbidden(_))
         ));
         let c = vdfs::VdfsContent::text("", "{}");
         assert!(matches!(
-            p.write(&vctx(), "appearance", &c).await,
+            p.dispatch(
+                &vctx(),
+                "appearance",
+                vdfs::VdfsRequest::Write { content: c }
+            )
+            .await,
             Err(VdfsError::Forbidden(_))
         ));
         // 未知分区：NotFound 而非 Forbidden（区分「不存在」与「不可读写」）
         assert!(matches!(
-            p.stat(&vctx(), "session").await,
+            p.dispatch(&vctx(), "session", vdfs::VdfsRequest::Stat)
+                .await,
             Err(VdfsError::NotFound(_))
         ));
     }
@@ -358,7 +385,19 @@ mod tests {
     #[tokio::test]
     async fn list_puts_declared_plugin_configs_before_the_sections() {
         let p = SettingPlugin;
-        let items = p.list(&ctx_with_configs().await, "").await.unwrap();
+        let items = p
+            .dispatch(
+                &ctx_with_configs().await,
+                "",
+                vdfs::VdfsRequest::List {
+                    limit: None,
+                    before: None,
+                },
+            )
+            .await
+            .unwrap()
+            .into_list()
+            .unwrap();
 
         let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
         assert_eq!(names, vec!["web", "appearance", "about"]);
@@ -377,7 +416,19 @@ mod tests {
     #[tokio::test]
     async fn list_without_declarations_is_just_the_sections() {
         let p = SettingPlugin;
-        let items = p.list(&vctx(), "").await.unwrap();
+        let items = p
+            .dispatch(
+                &vctx(),
+                "",
+                vdfs::VdfsRequest::List {
+                    limit: None,
+                    before: None,
+                },
+            )
+            .await
+            .unwrap()
+            .into_list()
+            .unwrap();
         let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
         assert_eq!(names, vec!["appearance", "about"]);
     }

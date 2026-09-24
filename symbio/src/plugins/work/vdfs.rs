@@ -32,8 +32,8 @@ use super::memory::{MEMORY_DESCRIPTION, SEGMENT_TITLE};
 use super::plugin::WorkPlugin;
 use crate::symbio_core::vdfs::{host_ctx, notify_change, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
-    VdfsAccess, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider,
-    VdfsResult, VdfsWriteResponse,
+    VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider, VdfsRequest,
+    VdfsResponse, VdfsResult, VdfsWriteResponse,
 };
 use crate::symbio_core::{MemoryFile, NodeSpec, AGENTS_FILE, PLUGIN_FILE, PLUGIN_WORK};
 use async_trait::async_trait;
@@ -59,128 +59,98 @@ impl WorkPlugin {
 
 #[async_trait]
 impl VdfsProvider for WorkPlugin {
-    fn label(&self) -> Option<&str> {
-        Some(LABEL)
-    }
-
-    fn description(&self) -> Option<&str> {
-        Some("工作区记忆：跨会话保留的长期事实与约定，模型可读写。")
-    }
-
-    fn order(&self) -> i32 {
-        // 在既有挂载点之后（session 1 / model 2 / agent 3 / skill 4 / mcp 5 /
-        // setting 6 / local 7 / web 8 / gateway 9 / telegram 10）
-        11
-    }
-
-    fn icon(&self) -> Option<&str> {
-        Some(PLUGIN_WORK)
-    }
-
-    /// 根可列举 + 可递归遍历（记忆文件在根下，树视图要能走到它）
-    fn root_access(&self) -> VdfsAccess {
-        VdfsAccess::LIST_TRAVERSE
-    }
-
-    fn root_hidden(&self) -> bool {
-        true
-    }
-
-    /// 根下不可新建：记忆文件是**唯一且恒在**的那一个，没有第二种东西可建
-    async fn root_new_types(&self) -> Vec<crate::symbio_core::vdfs_provider::VdfsNewType> {
-        Vec::new()
-    }
-
-    async fn list(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
-        if !path.is_empty() {
-            return Err(VdfsError::not_found(format!(
-                "{LABEL}根下没有子目录：{path}"
-            )));
-        }
-        let store = self.store_from_ctx(ctx).await?;
-        // 无工作区：没有记忆可列（空表而非报错——「没有工作区」是正常状态）
-        if !store.has_scope() {
-            return Ok(Vec::new());
-        }
-        Ok(vec![memory_node(&store)])
-    }
-
-    async fn stat(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
-        let store = self.store_from_ctx(ctx).await?;
-        match path {
-            // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
-            "" => Ok(VdfsNode::dir("", LABEL, self.root_access())),
-            AGENTS_FILE => {
-                if !store.has_scope() {
-                    return Err(VdfsError::not_found(format!(
-                        "{LABEL}不可用：当前没有工作区"
-                    )));
-                }
-                Ok(memory_node(&store))
-            }
-            // 配置文档按真实文件名可达（列表里不并列，见模块文档）
-            PLUGIN_FILE => Ok(self.config_file().node()),
-            other => Err(VdfsError::not_found(format!("未知路径：{other}"))),
-        }
-    }
-
-    async fn read(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
-        let store = self.store_from_ctx(ctx).await?;
-        match path {
-            AGENTS_FILE => {
-                let text = store.read().map_err(VdfsError::internal)?;
-                Ok(VdfsContent::text(path, text))
-            }
-            PLUGIN_FILE => self.config_file().read(self.config_slot()).await,
-            other => Err(VdfsError::not_found(format!("未知路径：{other}"))),
-        }
-    }
-
-    async fn write(
+    async fn dispatch(
         &self,
         ctx: &VdfsContext,
         path: &str,
-        content: &VdfsContent,
-    ) -> VdfsResult<VdfsWriteResponse> {
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
         let store = self.store_from_ctx(ctx).await?;
-        match path {
-            AGENTS_FILE => {
-                if content.binary {
-                    return Err(VdfsError::invalid("工作区记忆是文本文件，不接受二进制内容"));
+        match req {
+            VdfsRequest::List { .. } => {
+                if !path.is_empty() {
+                    return Err(VdfsError::not_found(format!(
+                        "{LABEL}根下没有子目录：{path}"
+                    )));
                 }
-                let text = content.text.as_deref().unwrap_or_default();
-                let existed = store.exists();
-                // 容量闸门在内核里（`MemoryFile::write`）——本插件不重复实现
-                store.write(text).map_err(VdfsError::invalid)?;
-                notify_change(PLUGIN_WORK, AGENTS_FILE);
-                Ok(VdfsWriteResponse {
-                    path: path.to_string(),
-                    created: !existed,
-                    etag: None,
-                })
+                // 无工作区：没有记忆可列（空表而非报错——「没有工作区」是正常状态）
+                if !store.has_scope() {
+                    return Ok(VdfsResponse::List(Vec::new()));
+                }
+                Ok(VdfsResponse::List(vec![memory_node(&store)]))
             }
-            PLUGIN_FILE => self.config_file().apply(self.config_slot(), content).await,
-            other => Err(VdfsError::not_found(format!("未知路径：{other}"))),
+            VdfsRequest::Stat => match path {
+                // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
+                "" => Ok(VdfsResponse::Stat(VdfsNode::dir(
+                    "",
+                    LABEL,
+                    VdfsAccess::LIST_TRAVERSE,
+                ))),
+                AGENTS_FILE => {
+                    if !store.has_scope() {
+                        return Err(VdfsError::not_found(format!(
+                            "{LABEL}不可用：当前没有工作区"
+                        )));
+                    }
+                    Ok(VdfsResponse::Stat(memory_node(&store)))
+                }
+                // 配置文档按真实文件名可达（列表里不并列，见模块文档）
+                PLUGIN_FILE => Ok(VdfsResponse::Stat(self.config_file().node())),
+                other => Err(VdfsError::not_found(format!("未知路径：{other}"))),
+            },
+            VdfsRequest::Read => match path {
+                AGENTS_FILE => {
+                    let text = store.read().map_err(VdfsError::internal)?;
+                    Ok(VdfsResponse::Read(VdfsContent::text(path, text)))
+                }
+                PLUGIN_FILE => Ok(VdfsResponse::Read(
+                    self.config_file().read(self.config_slot()).await?,
+                )),
+                other => Err(VdfsError::not_found(format!("未知路径：{other}"))),
+            },
+            VdfsRequest::Write { content } => match path {
+                AGENTS_FILE => {
+                    if content.binary {
+                        return Err(VdfsError::invalid("工作区记忆是文本文件，不接受二进制内容"));
+                    }
+                    let text = content.text.as_deref().unwrap_or_default();
+                    let existed = store.exists();
+                    // 容量闸门在内核里（`MemoryFile::write`）——本插件不重复实现
+                    store.write(text).map_err(VdfsError::invalid)?;
+                    notify_change(PLUGIN_WORK, AGENTS_FILE);
+                    Ok(VdfsResponse::Write(VdfsWriteResponse {
+                        path: path.to_string(),
+                        created: !existed,
+                        etag: None,
+                    }))
+                }
+                PLUGIN_FILE => Ok(VdfsResponse::Write(
+                    self.config_file()
+                        .apply(self.config_slot(), &content)
+                        .await?,
+                )),
+                other => Err(VdfsError::not_found(format!("未知路径：{other}"))),
+            },
+            // 记忆**不可删除**（见模块文档）：要清空就写入空内容
+            VdfsRequest::Delete { .. } => {
+                if path.is_empty() {
+                    return Err(VdfsError::Forbidden(format!("不可删除挂载点：{path}")));
+                }
+                Err(VdfsError::Forbidden(format!(
+                    "{LABEL}不可删除（删除即丢失全部长期事实）。\
+                     如需清空，请向 `{AGENTS_FILE}` 写入空内容。"
+                )))
+            }
+            VdfsRequest::Watch { sink } => {
+                watch_changes(PLUGIN_WORK, path, sink).await?;
+                Ok(VdfsResponse::Unit)
+            }
+            VdfsRequest::Unwatch => {
+                unwatch_changes(PLUGIN_WORK, path).await?;
+                Ok(VdfsResponse::Unit)
+            }
+            _ => Err(VdfsError::NotImplemented),
         }
-    }
-
-    /// 记忆**不可删除**（见模块文档）：要清空就写入空内容
-    async fn delete(&self, _ctx: &VdfsContext, path: &str, _recursive: bool) -> VdfsResult<()> {
-        if path.is_empty() {
-            return Err(VdfsError::Forbidden(format!("不可删除挂载点：{path}")));
-        }
-        Err(VdfsError::Forbidden(format!(
-            "{LABEL}不可删除（删除即丢失全部长期事实）。\
-             如需清空，请向 `{AGENTS_FILE}` 写入空内容。"
-        )))
-    }
-
-    async fn watch(&self, _ctx: &VdfsContext, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
-        watch_changes(PLUGIN_WORK, path, sink).await
-    }
-
-    async fn unwatch(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
-        unwatch_changes(PLUGIN_WORK, path).await
     }
 }
 

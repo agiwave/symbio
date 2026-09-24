@@ -57,19 +57,35 @@ impl ToolVdfs {
         path: &str,
     ) -> VdfsResult<Vec<VdfsNode>> {
         let (fs, vctx) = self.fs(ctx).await;
-        fs.list(&vctx, path).await
+        fs.dispatch(
+            &vctx,
+            path,
+            VdfsRequest::List {
+                limit: None,
+                before: None,
+            },
+        )
+        .await?
+        .into_list()
+        .ok_or_else(|| VdfsError::internal("响应类型不匹配"))
     }
 
     /// 读取节点元数据
     pub async fn stat(&self, ctx: &Arc<dyn InvokeRequest>, path: &str) -> VdfsResult<VdfsNode> {
         let (fs, vctx) = self.fs(ctx).await;
-        fs.stat(&vctx, path).await
+        fs.dispatch(&vctx, path, VdfsRequest::Stat)
+            .await?
+            .into_stat()
+            .ok_or_else(|| VdfsError::internal("响应类型不匹配"))
     }
 
     /// 读取内容（`r` 位）
     pub async fn read(&self, ctx: &Arc<dyn InvokeRequest>, path: &str) -> VdfsResult<VdfsContent> {
         let (fs, vctx) = self.fs(ctx).await;
-        fs.read(&vctx, path).await
+        fs.dispatch(&vctx, path, VdfsRequest::Read)
+            .await?
+            .into_read()
+            .ok_or_else(|| VdfsError::internal("响应类型不匹配"))
     }
 
     /// 写入内容（`w` 位）
@@ -80,7 +96,16 @@ impl ToolVdfs {
         content: &VdfsContent,
     ) -> VdfsResult<VdfsWriteResponse> {
         let (fs, vctx) = self.fs(ctx).await;
-        fs.write(&vctx, path, content).await
+        fs.dispatch(
+            &vctx,
+            path,
+            VdfsRequest::Write {
+                content: content.clone(),
+            },
+        )
+        .await?
+        .into_write()
+        .ok_or_else(|| VdfsError::internal("响应类型不匹配"))
     }
 
     /// 删除节点
@@ -91,13 +116,19 @@ impl ToolVdfs {
         recursive: bool,
     ) -> VdfsResult<()> {
         let (fs, vctx) = self.fs(ctx).await;
-        fs.delete(&vctx, path, recursive).await
+        fs.dispatch(&vctx, path, VdfsRequest::Delete { recursive })
+            .await?
+            .into_unit()
+            .ok_or_else(|| VdfsError::internal("响应类型不匹配"))
     }
 
     /// 新建目录
     pub async fn mkdir(&self, ctx: &Arc<dyn InvokeRequest>, path: &str) -> VdfsResult<()> {
         let (fs, vctx) = self.fs(ctx).await;
-        fs.mkdir(&vctx, path).await
+        fs.dispatch(&vctx, path, VdfsRequest::Mkdir)
+            .await?
+            .into_unit()
+            .ok_or_else(|| VdfsError::internal("响应类型不匹配"))
     }
 
     /// 移动 / 重命名（同一半内；跨半由 [`UnifiedFs`] 拒绝）
@@ -108,7 +139,10 @@ impl ToolVdfs {
         to: &str,
     ) -> VdfsResult<()> {
         let (fs, vctx) = self.fs(ctx).await;
-        fs.move_item(&vctx, from, to).await
+        fs.dispatch(&vctx, from, VdfsRequest::Move { to: to.to_string() })
+            .await?
+            .into_unit()
+            .ok_or_else(|| VdfsError::internal("响应类型不匹配"))
     }
 
     /// 内容编辑——**组合操作**：read → 精确替换 → write，
@@ -167,43 +201,47 @@ mod tests {
 
     #[async_trait]
     impl VdfsProvider for Rec {
-        async fn list(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
-            self.note(path);
-            Ok(vec![VdfsNode::file("a.txt", "a.txt", VdfsAccess::READ)])
-        }
-
-        async fn read(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
-            self.note(path);
-            Ok(VdfsContent::text("", "hello"))
-        }
-
-        async fn write(
+        async fn dispatch(
             &self,
             _ctx: &VdfsContext,
             path: &str,
-            _content: &VdfsContent,
-        ) -> VdfsResult<VdfsWriteResponse> {
-            self.note(path);
-            Ok(VdfsWriteResponse {
-                path: String::new(),
-                created: true,
-                etag: None,
-            })
-        }
-
-        async fn delete(&self, _ctx: &VdfsContext, path: &str, _r: bool) -> VdfsResult<()> {
-            self.note(path);
-            Ok(())
-        }
-
-        async fn mkdir(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
-            self.note(path);
-            Ok(())
-        }
-
-        async fn move_item(&self, _ctx: &VdfsContext, from: &str, to: &str) -> VdfsResult<()> {
-            self.note(&format!("{from}→{to}"));
-            Ok(())
+            req: VdfsRequest,
+        ) -> VdfsResult<VdfsResponse> {
+            match req {
+                VdfsRequest::List { .. } => {
+                    self.note(path);
+                    Ok(VdfsResponse::List(vec![VdfsNode::file(
+                        "a.txt",
+                        "a.txt",
+                        VdfsAccess::READ,
+                    )]))
+                }
+                VdfsRequest::Read => {
+                    self.note(path);
+                    Ok(VdfsResponse::Read(VdfsContent::text("", "hello")))
+                }
+                VdfsRequest::Write { .. } => {
+                    self.note(path);
+                    Ok(VdfsResponse::Write(VdfsWriteResponse {
+                        path: String::new(),
+                        created: true,
+                        etag: None,
+                    }))
+                }
+                VdfsRequest::Delete { .. } => {
+                    self.note(path);
+                    Ok(VdfsResponse::Unit)
+                }
+                VdfsRequest::Mkdir => {
+                    self.note(path);
+                    Ok(VdfsResponse::Unit)
+                }
+                VdfsRequest::Move { to } => {
+                    self.note(&format!("{path}→{to}"));
+                    Ok(VdfsResponse::Unit)
+                }
+                _ => Err(VdfsError::NotImplemented),
+            }
         }
     }
 

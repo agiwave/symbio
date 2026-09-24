@@ -14,6 +14,7 @@
 use super::config::WorkConfig;
 use super::memory::{self, SEGMENT_NAME, SEGMENT_TITLE};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
+use crate::symbio_core::vdfs_provider::VdfsAccess;
 use crate::symbio_core::{
     announce_configurable, dir_from_ctx, ConfigFile, InvokeRequest, InvokeRequestExt,
     InvokeResponse, MemoryFile, Plugin, PluginError, PluginMeta, PluginPayload, AGENTS_FILE,
@@ -90,11 +91,15 @@ impl WorkPlugin {
 
     pub fn metadata() -> PluginMeta {
         PluginMeta::new(PLUGIN_WORK, SEGMENT_TITLE)
-            .with_description(
-                "把工作区记忆注入系统提示词，并提供其 VDFS 地址（虚拟根下的 `work/AGENTS.md`）\
-                 供模型与用户读写；写入与注入各有独立的容量上限",
-            )
+            .with_description("工作区记忆：跨会话保留的长期事实与约定，模型可读写。")
             .with_version("0.1.0")
+            // 在既有挂载点之后（session 1 / model 2 / agent 3 / skill 4 / mcp 5 /
+            // setting 6 / local 7 / web 8 / gateway 9 / telegram 10）
+            .with_order(11)
+            .with_icon(PLUGIN_WORK)
+            .with_hidden(true)
+            // 根可列举 + 可递归遍历（记忆文件在根下，树视图要能走到它）
+            .with_root_access(VdfsAccess::LIST_TRAVERSE)
     }
 
     /// 由请求上下文 + 生效配置构造记忆门面。

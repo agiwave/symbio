@@ -48,7 +48,7 @@ use crate::symbio_core::schemas::session::chat_message::{
 use crate::symbio_core::schemas::session::session_chat;
 use crate::symbio_core::vdfs::{vdfs_context, VdfsError};
 use crate::symbio_core::vdfs_provider::{
-    vdfs_change_of, VdfsContent, VdfsNode, VdfsProvider, VDFS_STATUS_WORKING,
+    vdfs_change_of, VdfsContent, VdfsNode, VdfsProvider, VdfsRequest, VDFS_STATUS_WORKING,
 };
 use crate::symbio_core::{
     AbortSignal, EventSink, ExecEnv, InvokeRequest, InvokeRequestExt, Plugin, PluginError,
@@ -479,16 +479,23 @@ async fn validate_subsession_exists(
         )
     })?;
     let addr = format!("{PLUGIN_SESSION}/{session_id}");
-    let exists = match provider.stat(&vdfs_context(ctx), &addr).await {
+    let exists = match provider
+        .dispatch(&vdfs_context(ctx), &addr, VdfsRequest::Stat)
+        .await
+    {
         // 节点存在且已有消息 ⇒ 续会话合法。`message_count` 由会话 provider 投影
         // （落库 ∪ 在途），与「消息列表非空」是同一判据。
-        Ok(node) => {
-            node.attributes
-                .get("message_count")
-                .and_then(Value::as_u64)
-                .unwrap_or(0)
-                > 0
-        }
+        Ok(resp) => match resp.into_stat() {
+            Some(node) => {
+                node.attributes
+                    .get("message_count")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0)
+                    > 0
+            }
+            // dispatch 成功但响应形状不符：按「节点不存在」处理（与旧缺省实现一致）
+            None => false,
+        },
         // 只把「节点不存在」读作「会话不存在」；存储故障等照实上抛——
         // 否则一次 IO 抖动会被讲成「LLM 编造了 id」。
         Err(VdfsError::NotFound(_)) => false,
@@ -533,10 +540,12 @@ async fn register_subsession(
     let addr = format!("{PLUGIN_SESSION}/{session_id}");
     let body = json!({ "metadata": metadata }).to_string();
     provider
-        .write(
+        .dispatch(
             &vdfs_context(ctx),
             &addr,
-            &VdfsContent::text("", body).with_create(),
+            VdfsRequest::Write {
+                content: VdfsContent::text("", body).with_create(),
+            },
         )
         .await?;
     Ok(())
@@ -857,7 +866,12 @@ async fn stat_node(
     ctx: &Arc<dyn InvokeRequest>,
     rel: &str,
 ) -> Option<VdfsNode> {
-    provider.as_ref()?.stat(&vdfs_context(ctx), rel).await.ok()
+    provider
+        .as_ref()?
+        .dispatch(&vdfs_context(ctx), rel, VdfsRequest::Stat)
+        .await
+        .ok()
+        .and_then(|r| r.into_stat())
 }
 
 /// 回读一个节点的**正文**。读不到（已删 / 无 provider）返回 `None`。
@@ -868,9 +882,10 @@ async fn read_text(
 ) -> Option<String> {
     let content = provider
         .as_ref()?
-        .read(&vdfs_context(ctx), rel)
+        .dispatch(&vdfs_context(ctx), rel, VdfsRequest::Read)
         .await
-        .ok()?;
+        .ok()
+        .and_then(|r| r.into_read())?;
     content.text
 }
 

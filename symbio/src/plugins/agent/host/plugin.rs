@@ -38,7 +38,7 @@ use crate::plugins::agent::host::manifest;
 use crate::plugins::agent::host::memory;
 use crate::plugins::agent::host::store::AgentDirStore;
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField, DetailOption};
-use crate::symbio_core::vdfs_provider::VdfsProvider;
+use crate::symbio_core::vdfs_provider::{VdfsAccess, VdfsProvider};
 use crate::symbio_core::{
     announce_configurable, create_object, dir_from_ctx, report_error, Capability,
     CapabilityVisitor, ConfigFile, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
@@ -368,13 +368,19 @@ impl AgentPlugin {
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new(PLUGIN_AGENT, "智能体（Agent 目录规范 v2）")
+        PluginMeta::new(PLUGIN_AGENT, "智能体")
             .with_description(
                 "智能体域：管理 Agent 实例（安装/导出/删除）与智能体自身的 AGENTS.md，\
                  会话绑定 Agent 时把它整棵插件树的能力并进会话（技能 / MCP 由目录里的\
                  插件实例自己解释）",
             )
             .with_version("0.1.0")
+            .with_order(3)
+            .with_icon(PLUGIN_AGENT)
+            // 根可列举 + 可递归遍历（agent 目录内部有子条目）。
+            // 「根下可新建类型」不在这里——agent 目录只能整包导入（没有「先建空壳
+            // 再填字段」的形态），清单由 provider 自持（见 `super::vdfs`）
+            .with_root_access(VdfsAccess::LIST_TRAVERSE)
     }
 
     /// 参与 `available_options` 收集：贡献「智能体」字段。

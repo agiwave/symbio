@@ -109,9 +109,12 @@ impl TelegramPlugin {
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new("telegram", "Telegram 集成")
-            .with_description("提供与 Telegram Bot 的连接和消息推送功能")
+        PluginMeta::new("telegram", "Telegram")
+            .with_description("Telegram Bot 的连接与推送配置。")
             .with_version("0.1.0")
+            .with_order(10)
+            .with_icon("send")
+            .with_hidden(true)
     }
 
     fn api_url(&self) -> Option<String> {
@@ -676,76 +679,53 @@ impl TelegramPlugin {
 
 #[async_trait]
 impl vdfs::VdfsProvider for TelegramPlugin {
-    fn label(&self) -> Option<&str> {
-        Some("Telegram")
-    }
-
-    fn description(&self) -> Option<&str> {
-        Some("Telegram Bot 的连接与推送配置。")
-    }
-
-    fn order(&self) -> i32 {
-        10
-    }
-
-    fn icon(&self) -> Option<&str> {
-        Some("send")
-    }
-
-    fn root_hidden(&self) -> bool {
-        true
-    }
-
-    /// 根下只有配置文件，不接受新建 / 建目录
-    fn root_access(&self) -> vdfs::VdfsAccess {
-        vdfs::VdfsAccess::LIST
-    }
-
-    async fn list(
+    async fn dispatch(
         &self,
         _ctx: &vdfs::VdfsContext,
         path: &str,
-    ) -> vdfs::VdfsResult<Vec<vdfs::VdfsNode>> {
-        if path.is_empty() {
-            return Ok(vec![self.config_file.node()]);
+        req: vdfs::VdfsRequest,
+    ) -> vdfs::VdfsResult<vdfs::VdfsResponse> {
+        match req {
+            vdfs::VdfsRequest::List { .. } => {
+                if path.is_empty() {
+                    return Ok(vdfs::VdfsResponse::List(vec![self.config_file.node()]));
+                }
+                Err(vdfs::VdfsError::not_found(format!(
+                    "Telegram是配置挂载点，没有子项：{path}"
+                )))
+            }
+            vdfs::VdfsRequest::Stat => {
+                if path.is_empty() {
+                    // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
+                    return Ok(vdfs::VdfsResponse::Stat(vdfs::VdfsNode::dir(
+                        "",
+                        "Telegram",
+                        vdfs::VdfsAccess::LIST,
+                    )));
+                }
+                if path == PLUGIN_FILE {
+                    return Ok(vdfs::VdfsResponse::Stat(self.config_file.node()));
+                }
+                Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
+            }
+            vdfs::VdfsRequest::Read => {
+                if path == PLUGIN_FILE {
+                    return Ok(vdfs::VdfsResponse::Read(
+                        self.config_file.read(&self.config).await?,
+                    ));
+                }
+                Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
+            }
+            vdfs::VdfsRequest::Write { content } => {
+                if path == PLUGIN_FILE {
+                    return Ok(vdfs::VdfsResponse::Write(
+                        self.config_file.apply(&self.config, &content).await?,
+                    ));
+                }
+                Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
+            }
+            _ => Err(vdfs::VdfsError::not_found(format!("未知路径：{path}"))),
         }
-        Err(vdfs::VdfsError::not_found(format!(
-            "Telegram 是配置挂载点，没有子项：{path}"
-        )))
-    }
-
-    async fn stat(&self, _ctx: &vdfs::VdfsContext, path: &str) -> vdfs::VdfsResult<vdfs::VdfsNode> {
-        if path.is_empty() {
-            // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
-            return Ok(vdfs::VdfsNode::dir("", "Telegram", self.root_access()));
-        }
-        if path == PLUGIN_FILE {
-            return Ok(self.config_file.node());
-        }
-        Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
-    }
-
-    async fn read(
-        &self,
-        _ctx: &vdfs::VdfsContext,
-        path: &str,
-    ) -> vdfs::VdfsResult<vdfs::VdfsContent> {
-        if path == PLUGIN_FILE {
-            return self.config_file.read(&self.config).await;
-        }
-        Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
-    }
-
-    async fn write(
-        &self,
-        _ctx: &vdfs::VdfsContext,
-        path: &str,
-        content: &vdfs::VdfsContent,
-    ) -> vdfs::VdfsResult<vdfs::VdfsWriteResponse> {
-        if path == PLUGIN_FILE {
-            return self.config_file.apply(&self.config, content).await;
-        }
-        Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
     }
 }
 

@@ -39,6 +39,7 @@ use super::protocol::*;
 use crate::symbio_core::event_bus::KIND_VDFS;
 use crate::symbio_core::vdfs::vdfs_context;
 use crate::symbio_core::vdfs_provider::*;
+use crate::symbio_core::vdfs_provider::{VdfsRequest, VdfsResponse};
 use crate::symbio_core::{
     CapabilityVisitor, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginPayload,
     CAPABILITY_VISITOR, WORKDIR,
@@ -60,19 +61,32 @@ struct EmptyVdfs;
 
 #[async_trait]
 impl VdfsProvider for EmptyVdfs {
-    async fn list(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
-        if path.is_empty() {
-            Ok(Vec::new())
-        } else {
-            Err(VdfsError::not_found(path))
-        }
-    }
-
-    async fn stat(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
-        if path.is_empty() {
-            Ok(VdfsNode::dir("", "系统", VdfsAccess::LIST_TRAVERSE))
-        } else {
-            Err(VdfsError::not_found(path))
+    async fn dispatch(
+        &self,
+        _ctx: &VdfsContext,
+        path: &str,
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
+        match req {
+            VdfsRequest::List { .. } => {
+                if path.is_empty() {
+                    Ok(VdfsResponse::List(Vec::new()))
+                } else {
+                    Err(VdfsError::not_found(path))
+                }
+            }
+            VdfsRequest::Stat => {
+                if path.is_empty() {
+                    Ok(VdfsResponse::Stat(VdfsNode::dir(
+                        "",
+                        "系统",
+                        VdfsAccess::LIST_TRAVERSE,
+                    )))
+                } else {
+                    Err(VdfsError::not_found(path))
+                }
+            }
+            _ => Err(VdfsError::not_found(path)),
         }
     }
 }
@@ -307,23 +321,37 @@ async fn list_at(
         c
     };
 
-    let mut items = root.list(&vctx, &addr).await?;
+    let mut items = root
+        .dispatch(
+            &vctx,
+            &addr,
+            VdfsRequest::List {
+                limit,
+                before: before.clone(),
+            },
+        )
+        .await?
+        .into_list()
+        .ok_or_else(|| VdfsError::internal("provider 响应类型不匹配"))?;
     fill_paths(&addr, &mut items);
 
     // 目录自身节点：provider 未实现 stat 时按目录形态兜底
-    let node = match root.stat(&vctx, &addr).await {
-        Ok(mut n) => {
-            if n.title.is_empty() {
-                n.title = n.name.clone();
+    let node = match root.dispatch(&vctx, &addr, VdfsRequest::Stat).await {
+        Ok(resp) => match resp.into_stat() {
+            Some(mut n) => {
+                if n.title.is_empty() {
+                    n.title = n.name.clone();
+                }
+                if n.ext.is_none() {
+                    n.ext = derive_ext(&n.name);
+                }
+                if n.path.is_empty() {
+                    n.path = addr.clone();
+                }
+                n
             }
-            if n.ext.is_none() {
-                n.ext = derive_ext(&n.name);
-            }
-            if n.path.is_empty() {
-                n.path = addr.clone();
-            }
-            n
-        }
+            None => dir_self(&addr),
+        },
         Err(_) => dir_self(&addr),
     };
 
@@ -341,7 +369,11 @@ async fn stat(
 ) -> InvokeResponse<PluginPayload> {
     let req: VdfsPathRequest = payload_or_default(ctx);
     let addr = normalize_addr(&req.path)?;
-    let mut n = root.stat(vctx, &addr).await?;
+    let mut n = root
+        .dispatch(vctx, &addr, VdfsRequest::Stat)
+        .await?
+        .into_stat()
+        .ok_or_else(|| VdfsError::internal("provider 响应类型不匹配"))?;
     if n.title.is_empty() {
         n.title = n.name.clone();
     }
@@ -361,7 +393,11 @@ async fn read(
 ) -> InvokeResponse<PluginPayload> {
     let req: VdfsPathRequest = payload_or_default(ctx);
     let addr = normalize_addr(&req.path)?;
-    let mut c = root.read(vctx, &addr).await?;
+    let mut c = root
+        .dispatch(vctx, &addr, VdfsRequest::Read)
+        .await?
+        .into_read()
+        .ok_or_else(|| VdfsError::internal("provider 响应类型不匹配"))?;
     if c.path.is_empty() {
         c.path = addr;
     }
@@ -380,7 +416,11 @@ async fn write(
         return Err(VdfsError::invalid("写入需要 text 或 b64 之一作为内容").into());
     }
     let content = req.to_content();
-    let mut r = root.write(vctx, &addr, &content).await?;
+    let mut r = root
+        .dispatch(vctx, &addr, VdfsRequest::Write { content })
+        .await?
+        .into_write()
+        .ok_or_else(|| VdfsError::internal("provider 响应类型不匹配"))?;
     if r.path.is_empty() {
         r.path = addr;
     }
@@ -394,7 +434,14 @@ async fn delete(
 ) -> InvokeResponse<PluginPayload> {
     let req: VdfsPathRequest = payload_or_default(ctx);
     let addr = normalize_addr(&req.path)?;
-    root.delete(vctx, &addr, req.recursive).await?;
+    root.dispatch(
+        vctx,
+        &addr,
+        VdfsRequest::Delete {
+            recursive: req.recursive,
+        },
+    )
+    .await?;
     Ok(PluginPayload::new(&VdfsDeleteResponse { path: addr }))
 }
 
@@ -405,7 +452,7 @@ async fn mkdir(
 ) -> InvokeResponse<PluginPayload> {
     let req: VdfsPathRequest = payload_or_default(ctx);
     let addr = normalize_addr(&req.path)?;
-    root.mkdir(vctx, &addr).await?;
+    root.dispatch(vctx, &addr, VdfsRequest::Mkdir).await?;
     Ok(PluginPayload::new(&VdfsWriteResponse {
         path: addr,
         created: true,
@@ -428,8 +475,17 @@ async fn action(
     }
     let addr = normalize_addr(&req.path)?;
     let res = root
-        .action(vctx, &addr, &req.action, req.payload.as_ref())
-        .await?;
+        .dispatch(
+            vctx,
+            &addr,
+            VdfsRequest::Action {
+                action: req.action,
+                payload: req.payload,
+            },
+        )
+        .await?
+        .into_action()
+        .ok_or_else(|| VdfsError::internal("provider 响应类型不匹配"))?;
     Ok(PluginPayload::new(&res))
 }
 
@@ -442,7 +498,8 @@ async fn move_item(
     let from = normalize_addr(&req.from)?;
     let to = normalize_addr(&req.to)?;
     // 「同一半内才可移动」由门面判定——本层只传地址
-    root.move_item(vctx, &from, &to).await?;
+    root.dispatch(vctx, &from, VdfsRequest::Move { to: to.clone() })
+        .await?;
     Ok(PluginPayload::new(&VdfsMoveResponse { from, to }))
 }
 
@@ -486,7 +543,11 @@ pub(crate) async fn edit_via(
         return Err(VdfsError::invalid("old_string 不能为空"));
     }
 
-    let raw = provider.read(vctx, rel).await?;
+    let raw = provider
+        .dispatch(vctx, rel, VdfsRequest::Read)
+        .await?
+        .into_read()
+        .ok_or_else(|| VdfsError::internal("provider 响应类型不匹配"))?;
     let Some(raw_content) = raw.text else {
         return Err(VdfsError::invalid("仅支持编辑文本内容（二进制不可编辑）"));
     };
@@ -533,7 +594,13 @@ pub(crate) async fn edit_via(
     let size = final_content.len();
 
     provider
-        .write(vctx, rel, &VdfsContent::text("", final_content))
+        .dispatch(
+            vctx,
+            rel,
+            VdfsRequest::Write {
+                content: VdfsContent::text("", final_content),
+            },
+        )
         .await?;
 
     Ok(VdfsEditResponse {
@@ -583,8 +650,20 @@ pub(crate) async fn search_via(
     queue.push_back(base.to_string());
 
     while let Some(dir) = queue.pop_front() {
-        let children = match provider.list(vctx, &dir).await {
-            Ok(c) => c,
+        let children = match provider
+            .dispatch(
+                vctx,
+                &dir,
+                VdfsRequest::List {
+                    limit: None,
+                    before: None,
+                },
+            )
+            .await
+        {
+            Ok(resp) => resp
+                .into_list()
+                .ok_or_else(|| VdfsError::internal("provider 响应类型不匹配"))?,
             // 单分支失败降级：不让一棵子树拖垮整个搜索
             Err(e) => {
                 crate::plugin_warn!("vdfs", "vdfs_search: 列出 {dir} 失败，已跳过: {e}");
@@ -654,9 +733,16 @@ async fn watch(
     let req: VdfsPathRequest = payload_or_default(ctx);
     let addr = normalize_addr(&req.path)?;
     if subscribe {
-        root.watch(vctx, &addr, event_bus_sink()).await?;
+        root.dispatch(
+            vctx,
+            &addr,
+            VdfsRequest::Watch {
+                sink: event_bus_sink(),
+            },
+        )
+        .await?;
     } else {
-        root.unwatch(vctx, &addr).await?;
+        root.dispatch(vctx, &addr, VdfsRequest::Unwatch).await?;
     }
     Ok(PluginPayload::new(
         &crate::symbio_core::schemas::common::SuccessResponse::default(),
@@ -686,8 +772,20 @@ async fn tree(
     queue.push_back((addr.clone(), 0));
 
     while let Some((dir, depth)) = queue.pop_front() {
-        let mut children = match root.list(vctx, &dir).await {
-            Ok(c) => c,
+        let mut children = match root
+            .dispatch(
+                vctx,
+                &dir,
+                VdfsRequest::List {
+                    limit: None,
+                    before: None,
+                },
+            )
+            .await
+        {
+            Ok(resp) => resp
+                .into_list()
+                .ok_or_else(|| VdfsError::internal("provider 响应类型不匹配"))?,
             // 单分支失败降级：不让一棵子树拖垮整个遍历
             Err(e) => {
                 crate::plugin_warn!("vdfs", "tree: 列出 {dir} 失败，已跳过: {e}");
@@ -777,111 +875,85 @@ mod tests {
 
     #[async_trait]
     impl VdfsProvider for Rec {
-        fn label(&self) -> Option<&str> {
-            Some("内存子树")
-        }
-        fn order(&self) -> i32 {
-            10
-        }
-        fn root_access(&self) -> VdfsAccess {
-            VdfsAccess::LIST_TRAVERSE
-        }
-
-        async fn list(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
-            self.note(path);
-            Ok(match path {
-                "" => vec![
-                    VdfsNode::file("a.txt", "A", VdfsAccess::READ_WRITE),
-                    VdfsNode::dir("sub", "子目录", VdfsAccess::LIST_TRAVERSE),
-                ],
-                "sub" => vec![VdfsNode::file("b.md", "B", VdfsAccess::READ)],
-                _ => return Err(VdfsError::not_found(format!("无此目录：{path}"))),
-            })
-        }
-
-        async fn stat(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
-            match path {
-                "a.txt" => Ok(VdfsNode::file("a.txt", "A", VdfsAccess::READ_WRITE)),
-                "sub" => Ok(VdfsNode::dir("sub", "子目录", VdfsAccess::LIST_TRAVERSE)),
-                "sub/b.md" => Ok(VdfsNode::file("b.md", "B", VdfsAccess::READ)),
-                _ => Err(VdfsError::not_found(path)),
-            }
-        }
-
-        async fn read(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
-            self.note(path);
-            match path {
-                "a.txt" => Ok(VdfsContent::text("", "hello")),
-                "sub/b.md" => Ok(VdfsContent::text("", "# b")),
-                _ => Err(VdfsError::Forbidden("目录不可读".into())),
-            }
-        }
-
-        async fn write(
+        async fn dispatch(
             &self,
             _ctx: &VdfsContext,
             path: &str,
-            content: &VdfsContent,
-        ) -> VdfsResult<VdfsWriteResponse> {
-            // 演示「provider 自持校验 + 字段级错误」
-            if content.text.as_deref() == Some("bad") {
-                return Err(VdfsError::Invalid(
-                    VdfsValidationError::new("内容不合法").with_field("text", "不允许 bad"),
-                ));
+            req: VdfsRequest,
+        ) -> VdfsResult<VdfsResponse> {
+            match req {
+                VdfsRequest::List { .. } => {
+                    self.note(path);
+                    Ok(VdfsResponse::List(match path {
+                        "" => vec![
+                            VdfsNode::file("a.txt", "A", VdfsAccess::READ_WRITE),
+                            VdfsNode::dir("sub", "子目录", VdfsAccess::LIST_TRAVERSE),
+                        ],
+                        "sub" => vec![VdfsNode::file("b.md", "B", VdfsAccess::READ)],
+                        _ => return Err(VdfsError::not_found(format!("无此目录：{path}"))),
+                    }))
+                }
+                VdfsRequest::Stat => Ok(VdfsResponse::Stat(match path {
+                    "a.txt" => VdfsNode::file("a.txt", "A", VdfsAccess::READ_WRITE),
+                    "sub" => VdfsNode::dir("sub", "子目录", VdfsAccess::LIST_TRAVERSE),
+                    "sub/b.md" => VdfsNode::file("b.md", "B", VdfsAccess::READ),
+                    _ => return Err(VdfsError::not_found(path)),
+                })),
+                VdfsRequest::Read => {
+                    self.note(path);
+                    match path {
+                        "a.txt" => Ok(VdfsResponse::Read(VdfsContent::text("", "hello"))),
+                        "sub/b.md" => Ok(VdfsResponse::Read(VdfsContent::text("", "# b"))),
+                        _ => Err(VdfsError::Forbidden("目录不可读".into())),
+                    }
+                }
+                VdfsRequest::Write { content } => {
+                    // 演示「provider 自持校验 + 字段级错误」
+                    if content.text.as_deref() == Some("bad") {
+                        return Err(VdfsError::Invalid(
+                            VdfsValidationError::new("内容不合法").with_field("text", "不允许 bad"),
+                        ));
+                    }
+                    Ok(VdfsResponse::Write(VdfsWriteResponse {
+                        path: String::new(),
+                        created: path == "new.txt",
+                        etag: Some("v1".into()),
+                    }))
+                }
+                VdfsRequest::Delete { .. } => {
+                    if path == "sub" || path == "a.txt" {
+                        Ok(VdfsResponse::Unit)
+                    } else {
+                        Err(VdfsError::Forbidden(format!("不允许删除 {path}")))
+                    }
+                }
+                VdfsRequest::Action { action, .. } => {
+                    self.note(&format!("action:{action}"));
+                    Ok(VdfsResponse::Action(VdfsActionResult {
+                        action: action.clone(),
+                        ok: true,
+                        message: format!("{path} 已执行 {action}"),
+                        data: None,
+                    }))
+                }
+                VdfsRequest::Move { to } => {
+                    // 只接受相对路径：组合根已剥掉子目录前缀
+                    if path == "a.txt" && to == "b.txt" {
+                        Ok(VdfsResponse::Unit)
+                    } else {
+                        Err(VdfsError::Forbidden(format!("不支持移动 {path} → {to}")))
+                    }
+                }
+                VdfsRequest::Watch { .. } => {
+                    self.note(path);
+                    Ok(VdfsResponse::Unit)
+                }
+                VdfsRequest::Unwatch => {
+                    self.note(path);
+                    Ok(VdfsResponse::Unit)
+                }
+                _ => Err(VdfsError::NotImplemented),
             }
-            Ok(VdfsWriteResponse {
-                path: String::new(),
-                created: path == "new.txt",
-                etag: Some("v1".into()),
-            })
-        }
-
-        async fn delete(&self, _ctx: &VdfsContext, path: &str, _r: bool) -> VdfsResult<()> {
-            if path == "sub" || path == "a.txt" {
-                Ok(())
-            } else {
-                Err(VdfsError::Forbidden(format!("不允许删除 {path}")))
-            }
-        }
-
-        async fn move_item(&self, _ctx: &VdfsContext, from: &str, to: &str) -> VdfsResult<()> {
-            // 只接受相对路径：组合根已剥掉子目录前缀
-            if from == "a.txt" && to == "b.txt" {
-                Ok(())
-            } else {
-                Err(VdfsError::Forbidden(format!("不支持移动 {from} → {to}")))
-            }
-        }
-
-        async fn action(
-            &self,
-            _ctx: &VdfsContext,
-            path: &str,
-            action: &str,
-            _payload: Option<&Value>,
-        ) -> VdfsResult<VdfsActionResult> {
-            self.note(&format!("action:{action}"));
-            Ok(VdfsActionResult {
-                action: action.to_string(),
-                ok: true,
-                message: format!("{path} 已执行 {action}"),
-                data: None,
-            })
-        }
-
-        async fn watch(
-            &self,
-            _ctx: &VdfsContext,
-            path: &str,
-            _sink: VdfsChangeSink,
-        ) -> VdfsResult<()> {
-            self.note(path);
-            Ok(())
-        }
-
-        async fn unwatch(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
-            self.note(path);
-            Ok(())
         }
     }
 
@@ -889,7 +961,16 @@ mod tests {
     struct Bare;
 
     #[async_trait]
-    impl VdfsProvider for Bare {}
+    impl VdfsProvider for Bare {
+        async fn dispatch(
+            &self,
+            _ctx: &VdfsContext,
+            _path: &str,
+            _req: VdfsRequest,
+        ) -> VdfsResult<VdfsResponse> {
+            Err(VdfsError::NotImplemented)
+        }
+    }
 
     /// 测试用 root 级 provider：首段 = 子目录名，委派给对应 provider（模拟 composite）
     struct TestRoot {
@@ -928,131 +1009,142 @@ mod tests {
 
     #[async_trait]
     impl VdfsProvider for TestRoot {
-        async fn list(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
+        async fn dispatch(
+            &self,
+            ctx: &VdfsContext,
+            path: &str,
+            req: VdfsRequest,
+        ) -> VdfsResult<VdfsResponse> {
+            // 根目录：可列 / 可 stat，其余拒绝
             let Some((d, _rel)) = split_dir(path) else {
-                return Ok(self
-                    .dirs
-                    .iter()
-                    .map(|(n, p)| {
-                        let mut x =
-                            VdfsNode::dir(n.to_string(), p.label().unwrap_or(n), p.root_access());
-                        x.path = n.to_string();
-                        x
-                    })
-                    .collect());
+                return match req {
+                    VdfsRequest::List { .. } => Ok(VdfsResponse::List(
+                        self.dirs
+                            .iter()
+                            .map(|(n, _p)| {
+                                let mut x = VdfsNode::dir(
+                                    n.to_string(),
+                                    "内存子树",
+                                    VdfsAccess::LIST_TRAVERSE,
+                                );
+                                x.path = n.to_string();
+                                x
+                            })
+                            .collect(),
+                    )),
+                    VdfsRequest::Stat => Ok(VdfsResponse::Stat(VdfsNode::dir(
+                        "",
+                        "系统",
+                        VdfsAccess::LIST_TRAVERSE,
+                    ))),
+                    _ => Err(VdfsError::invalid("根目录不是可操作节点")),
+                };
             };
             let (p, rel) = self.resolve(path)?;
-            let mut items = p.list(ctx, &rel).await?;
-            for it in items.iter_mut() {
-                if it.path.is_empty() {
-                    it.path = if rel.is_empty() {
-                        format!("{d}/{}", it.name)
+            let mismatch = || VdfsError::internal("响应类型不匹配");
+            match req {
+                VdfsRequest::List { .. } => {
+                    let mut items = p
+                        .dispatch(
+                            ctx,
+                            &rel,
+                            VdfsRequest::List {
+                                limit: None,
+                                before: None,
+                            },
+                        )
+                        .await?
+                        .into_list()
+                        .ok_or_else(mismatch)?;
+                    for it in items.iter_mut() {
+                        if it.path.is_empty() {
+                            it.path = if rel.is_empty() {
+                                format!("{d}/{}", it.name)
+                            } else {
+                                format!("{d}/{rel}/{}", it.name)
+                            };
+                        }
+                    }
+                    Ok(VdfsResponse::List(items))
+                }
+                VdfsRequest::Stat => {
+                    if rel.is_empty() {
+                        let mut n =
+                            VdfsNode::dir(d.to_string(), "内存子树", VdfsAccess::LIST_TRAVERSE);
+                        n.path = d.to_string();
+                        return Ok(VdfsResponse::Stat(n));
+                    }
+                    let mut n = p
+                        .dispatch(ctx, &rel, VdfsRequest::Stat)
+                        .await?
+                        .into_stat()
+                        .ok_or_else(mismatch)?;
+                    n.path = path.to_string();
+                    Ok(VdfsResponse::Stat(n))
+                }
+                VdfsRequest::Read => {
+                    if rel.is_empty() {
+                        return Err(VdfsError::Forbidden(
+                            "目录不是可读文件；请读取其子节点".to_string(),
+                        ));
+                    }
+                    p.dispatch(ctx, &rel, VdfsRequest::Read).await
+                }
+                VdfsRequest::Write { content } => {
+                    // 与生产容器同构：`rel` 为空 = 写在**挂载点目录自身**上（「新建」的
+                    // 机制形态），原样转发；provider 生成的名字要补回树内路径。
+                    let mut r = p
+                        .dispatch(ctx, &rel, VdfsRequest::Write { content })
+                        .await?
+                        .into_write()
+                        .ok_or_else(mismatch)?;
+                    if r.path.is_empty() {
+                        r.path = path.to_string();
+                    } else if !r.path.starts_with(&format!("{d}/")) {
+                        r.path = format!("{d}/{}", r.path);
+                    }
+                    Ok(VdfsResponse::Write(r))
+                }
+                VdfsRequest::Delete { recursive } => {
+                    if rel.is_empty() {
+                        return Err(VdfsError::Forbidden("目录不可删除".to_string()));
+                    }
+                    p.dispatch(ctx, &rel, VdfsRequest::Delete { recursive })
+                        .await?;
+                    Ok(VdfsResponse::Unit)
+                }
+                VdfsRequest::Mkdir => {
+                    if rel.is_empty() {
+                        return Err(VdfsError::invalid("目录已存在，无需创建"));
+                    }
+                    p.dispatch(ctx, &rel, VdfsRequest::Mkdir).await?;
+                    Ok(VdfsResponse::Unit)
+                }
+                VdfsRequest::Move { to } => {
+                    let (pt, rt) = self.resolve(&to)?;
+                    if rel.is_empty() || rt.is_empty() {
+                        return Err(VdfsError::Forbidden("目录不可移动".to_string()));
+                    }
+                    if std::sync::Arc::ptr_eq(p, pt) {
+                        p.dispatch(ctx, &rel, VdfsRequest::Move { to: rt }).await?;
+                        Ok(VdfsResponse::Unit)
                     } else {
-                        format!("{d}/{rel}/{}", it.name)
-                    };
+                        Err(VdfsError::invalid("不支持跨目录移动"))
+                    }
+                }
+                VdfsRequest::Action { action, payload } => {
+                    p.dispatch(ctx, &rel, VdfsRequest::Action { action, payload })
+                        .await
+                }
+                VdfsRequest::Watch { sink } => {
+                    p.dispatch(ctx, &rel, VdfsRequest::Watch { sink }).await?;
+                    Ok(VdfsResponse::Unit)
+                }
+                VdfsRequest::Unwatch => {
+                    p.dispatch(ctx, &rel, VdfsRequest::Unwatch).await?;
+                    Ok(VdfsResponse::Unit)
                 }
             }
-            Ok(items)
-        }
-
-        async fn stat(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
-            let Some((d, _rel)) = split_dir(path) else {
-                return Ok(VdfsNode::dir("", "系统", VdfsAccess::LIST_TRAVERSE));
-            };
-            let (p, rel) = self.resolve(path)?;
-            if rel.is_empty() {
-                let mut n = VdfsNode::dir(d.to_string(), p.label().unwrap_or(d), p.root_access());
-                n.path = d.to_string();
-                return Ok(n);
-            }
-            let mut n = p.stat(ctx, &rel).await?;
-            n.path = path.to_string();
-            Ok(n)
-        }
-
-        async fn read(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
-            let (p, rel) = self.resolve(path)?;
-            if rel.is_empty() {
-                return Err(VdfsError::Forbidden(
-                    "目录不是可读文件；请读取其子节点".to_string(),
-                ));
-            }
-            p.read(ctx, &rel).await
-        }
-
-        async fn write(
-            &self,
-            ctx: &VdfsContext,
-            path: &str,
-            content: &VdfsContent,
-        ) -> VdfsResult<VdfsWriteResponse> {
-            let (d, _) =
-                split_dir(path).ok_or_else(|| VdfsError::invalid("根目录不是可操作节点"))?;
-            let (p, rel) = self.resolve(path)?;
-            // 与生产容器同构：`rel` 为空 = 写在**挂载点目录自身**上（「新建」的
-            // 机制形态），原样转发给 provider 判定；provider 生成的名字要补回树内路径。
-            let mut r = p.write(ctx, &rel, content).await?;
-            if r.path.is_empty() {
-                r.path = path.to_string();
-            } else if !r.path.starts_with(&format!("{d}/")) {
-                r.path = format!("{d}/{}", r.path);
-            }
-            Ok(r)
-        }
-
-        async fn delete(&self, ctx: &VdfsContext, path: &str, recursive: bool) -> VdfsResult<()> {
-            let (p, rel) = self.resolve(path)?;
-            if rel.is_empty() {
-                return Err(VdfsError::Forbidden("目录不可删除".to_string()));
-            }
-            p.delete(ctx, &rel, recursive).await
-        }
-
-        async fn mkdir(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
-            let (p, rel) = self.resolve(path)?;
-            if rel.is_empty() {
-                return Err(VdfsError::invalid("目录已存在，无需创建"));
-            }
-            p.mkdir(ctx, &rel).await
-        }
-
-        async fn move_item(&self, ctx: &VdfsContext, from: &str, to: &str) -> VdfsResult<()> {
-            let (pf, rf) = self.resolve(from)?;
-            let (pt, rt) = self.resolve(to)?;
-            if rf.is_empty() || rt.is_empty() {
-                return Err(VdfsError::Forbidden("目录不可移动".to_string()));
-            }
-            if std::sync::Arc::ptr_eq(pf, pt) {
-                pf.move_item(ctx, &rf, &rt).await
-            } else {
-                Err(VdfsError::invalid("不支持跨目录移动"))
-            }
-        }
-
-        async fn action(
-            &self,
-            ctx: &VdfsContext,
-            path: &str,
-            action: &str,
-            payload: Option<&Value>,
-        ) -> VdfsResult<VdfsActionResult> {
-            let (p, rel) = self.resolve(path)?;
-            p.action(ctx, &rel, action, payload).await
-        }
-
-        async fn watch(
-            &self,
-            ctx: &VdfsContext,
-            path: &str,
-            sink: VdfsChangeSink,
-        ) -> VdfsResult<()> {
-            let (p, rel) = self.resolve(path)?;
-            p.watch(ctx, &rel, sink).await
-        }
-
-        async fn unwatch(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
-            let (p, rel) = self.resolve(path)?;
-            p.unwatch(ctx, &rel).await
         }
     }
 

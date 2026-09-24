@@ -211,9 +211,15 @@ impl SessionPlugin {
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new("session", "会话管理")
-            .with_description("提供会话历史和上下文管理")
+        PluginMeta::new("session", "会话")
+            .with_description(
+                "会话清单。每个会话是一份独立对话记录，可读 / 写 / 删；新建即创建一份新会话。",
+            )
             .with_version("0.3.0")
+            .with_order(1)
+            .with_icon("session")
+            // 会话是叶子文档：可列，不参与树遍历（会话内部的子结构另有容器语义）
+            .with_root_access(vdfs::VdfsAccess::LIST)
     }
 
     /// 静态工厂：从 InvokeRequest 构造 Plugin 实例

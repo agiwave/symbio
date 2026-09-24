@@ -65,9 +65,14 @@ impl SkillPlugin {
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new("skill", "技能插件")
-            .with_description("提供行业标准技能 (Skill) 加载与执行能力")
+        PluginMeta::new("skill", "技能")
+            .with_description("Skill 技能包（每项一份 SKILL.md），是可复用能力片段的唯一来源。")
             .with_version("0.2.0")
+            .with_order(4)
+            .with_icon(PLUGIN_SKILL)
+        // 「根下可新建类型」由 provider 自持（`VdfsProvider::new_types`，见下方
+        // `impl VdfsProvider for SkillPlugin`）——它是挂载点的动态自述，容器合成
+        // 根节点时现场取，不进这份同步纯数据
     }
 
     /// 为 LLM 工具（traverse / execute）加载技能
@@ -135,9 +140,9 @@ impl SkillPlugin {
 use crate::providers::vdfs_service::DirVdfs;
 use crate::symbio_core::vdfs::{from_plugin_error, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
-    VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
-    VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_EXT_FORM,
-    VDFS_EXT_ZIP, VDFS_NEW_SOURCE_FILE, VDFS_STATUS_ACTIVE,
+    VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
+    VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT,
+    VDFS_EXT_FORM, VDFS_EXT_ZIP, VDFS_NEW_SOURCE_FILE, VDFS_STATUS_ACTIVE,
 };
 
 const LABEL: &str = "技能";
@@ -277,28 +282,12 @@ fn new_manifest(id: &str) -> serde_json::Value {
 
 #[async_trait]
 impl VdfsProvider for SkillPlugin {
-    fn label(&self) -> Option<&str> {
-        Some(LABEL)
-    }
-
-    fn description(&self) -> Option<&str> {
-        Some("Skill 技能包（每项一份 SKILL.md），是可复用能力片段的唯一来源。")
-    }
-
-    fn order(&self) -> i32 {
-        4
-    }
-
-    fn icon(&self) -> Option<&str> {
-        Some(PLUGIN_SKILL)
-    }
-
     /// 根下可新建两类：表单新建 + 整包导入（zip）
     ///
     /// `ext = skill` 是**呈现扩展名**（`id_of` 按它剥地址后缀），落成后的节点
     /// `ext = form`——两者不同，故显式声明 `node_ext` 与详情定义（草稿详情页据此
     /// 渲染出与落成后同一张表单）。
-    async fn root_new_types(&self) -> Vec<VdfsNewType> {
+    async fn new_types(&self) -> Vec<VdfsNewType> {
         vec![
             VdfsNewType::new(PLUGIN_SKILL, LABEL)
                 .with_description(format!("新建{LABEL}（在详情页里填好，保存时一次写入）"))
@@ -310,141 +299,144 @@ impl VdfsProvider for SkillPlugin {
         ]
     }
 
-    async fn list(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
-        if !path.is_empty() {
-            return Err(VdfsError::not_found(format!(
-                "{LABEL}是叶子资源，没有子项：{path}"
-            )));
-        }
-        Ok(self
-            .store()
-            .entries()
-            .await?
-            .iter()
-            .map(|e| node_of(&e.id, e.raw.as_deref()))
-            .collect())
-    }
-
-    async fn stat(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
-        if path.is_empty() {
-            return Ok(VdfsNode::dir("", LABEL, VdfsAccess::LIST));
-        }
-        let e = self.store().entry(&id_of(path)).await?;
-        Ok(node_of(&e.id, e.raw.as_deref()))
-    }
-
-    /// 详情读的是**表单能填的形状**（config JSON），不是 Markdown 原文——
-    /// 原文由 `read(<id>/SKILL.md)` 这一真实地址给出（目录型天然支持）。
-    async fn read(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
-        if path.is_empty() {
-            return Err(VdfsError::invalid(format!(
-                "该路径是目录，不可读取内容：{path}"
-            )));
-        }
-        let text = self.store().read_text(&id_of(path)).await?;
-        let value = super::detail::skill_md_to_config(&text).unwrap_or_else(
-            || serde_json::json!({ "name": id_of(path), "description": "", "content": text }),
-        );
-        let body = serde_json::to_string_pretty(&value)
-            .map_err(|e| VdfsError::internal(format!("配置序列化失败：{e}")))?;
-        Ok(VdfsContent::text(path, body).with_mime("application/json"))
-    }
-
-    async fn write(
+    async fn dispatch(
         &self,
         _ctx: &VdfsContext,
         path: &str,
-        content: &VdfsContent,
-    ) -> VdfsResult<VdfsWriteResponse> {
-        let s = self.store();
-        // 二进制写入 = 整包导入（导入不是第二条协议，它就是「新建」的一种内容来源）。
-        // 导入的**名字来自目标地址末段**（使用方由文件名推导），所以必须有名字：
-        // 「无名字导入」无从命名，直接拒绝。
-        if content.binary {
-            if path.trim_matches('/').is_empty() {
-                return Err(VdfsError::invalid(format!(
-                    "{LABEL}整包导入需要目标名（地址末段）：{path}"
-                )));
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
+        match req {
+            VdfsRequest::List { .. } => {
+                if !path.is_empty() {
+                    return Err(VdfsError::not_found(format!(
+                        "{LABEL}是叶子资源，没有子项：{path}"
+                    )));
+                }
+                Ok(VdfsResponse::List(
+                    self.store()
+                        .entries()
+                        .await?
+                        .iter()
+                        .map(|e| node_of(&e.id, e.raw.as_deref()))
+                        .collect(),
+                ))
             }
-            let bytes = crate::providers::vdfs_service::decode_b64(
-                content.b64.as_deref().unwrap_or_default(),
-            )
-            .map_err(|e| VdfsError::invalid(e.0))?;
-            let name = import_name_of(path);
-            let created = s.import_pack(&name, &bytes).await?;
-            return Ok(VdfsWriteResponse {
-                path: name,
-                created,
-                etag: None,
-            });
+            VdfsRequest::Stat => {
+                if path.is_empty() {
+                    // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填
+                    return Ok(VdfsResponse::Stat(VdfsNode::dir(
+                        "",
+                        LABEL,
+                        VdfsAccess::LIST,
+                    )));
+                }
+                let e = self.store().entry(&id_of(path)).await?;
+                Ok(VdfsResponse::Stat(node_of(&e.id, e.raw.as_deref())))
+            }
+            // 详情读的是**表单能填的形状**（config JSON），不是 Markdown 原文——
+            // 原文由 `read(<id>/SKILL.md)` 这一真实地址给出（目录型天然支持）。
+            VdfsRequest::Read => {
+                if path.is_empty() {
+                    return Err(VdfsError::invalid(format!(
+                        "该路径是目录，不可读取内容：{path}"
+                    )));
+                }
+                let text = self.store().read_text(&id_of(path)).await?;
+                let value = super::detail::skill_md_to_config(&text).unwrap_or_else(|| {
+                    serde_json::json!({ "name": id_of(path), "description": "", "content": text })
+                });
+                let body = serde_json::to_string_pretty(&value)
+                    .map_err(|e| VdfsError::internal(format!("配置序列化失败：{e}")))?;
+                Ok(VdfsResponse::Read(
+                    VdfsContent::text(path, body).with_mime("application/json"),
+                ))
+            }
+            VdfsRequest::Write { content } => {
+                let s = self.store();
+                // 二进制写入 = 整包导入（导入不是第二条协议，它就是「新建」的一种内容来源）。
+                // 导入的**名字来自目标地址末段**（使用方由文件名推导），所以必须有名字：
+                // 「无名字导入」无从命名，直接拒绝。
+                if content.binary {
+                    if path.trim_matches('/').is_empty() {
+                        return Err(VdfsError::invalid(format!(
+                            "{LABEL}整包导入需要目标名（地址末段）：{path}"
+                        )));
+                    }
+                    let bytes = crate::providers::vdfs_service::decode_b64(
+                        content.b64.as_deref().unwrap_or_default(),
+                    )
+                    .map_err(|e| VdfsError::invalid(e.0))?;
+                    let name = import_name_of(path);
+                    let created = s.import_pack(&name, &bytes).await?;
+                    return Ok(VdfsResponse::Write(VdfsWriteResponse {
+                        path: name,
+                        created,
+                        etag: None,
+                    }));
+                }
+                // 无名字（写在挂载点目录自身）→ 「新建一项，名字由本插件生成」。
+                // 目录自身没有可覆盖的目标，因此必须有 create 意图（见 `VdfsRequest::Write`）。
+                let id = resolve_id(path, content.create)?;
+                let text = content.as_text().unwrap_or_default();
+                // `create` 只管「不存在时怎么办」，**不改变内容的处理方式**：草稿详情页
+                // 填好的字段必须原样落盘。唯一例外是**内容为空**——「先建一个，随后再填」
+                // 是合法形态，此时落一份最小内容。
+                let manifest = if content.create && text.trim().is_empty() {
+                    new_manifest(&id)
+                } else {
+                    serde_json::from_str::<serde_json::Value>(text)
+                        .map_err(|e| VdfsError::invalid(format!("manifest 不是合法 JSON：{e}")))?
+                };
+                // SKILL.md 是 Markdown：走**纯文本**写入，不能被 JSON 序列化
+                let normalized = validate_manifest(&id, &manifest).map_err(from_plugin_error)?;
+                let created = s.write_text(&id, &normalized).await?;
+                Ok(VdfsResponse::Write(VdfsWriteResponse {
+                    path: id,
+                    created,
+                    etag: None,
+                }))
+            }
+            VdfsRequest::Delete { .. } => {
+                if path.is_empty() {
+                    return Err(VdfsError::Forbidden(format!("不可删除挂载点：{path}")));
+                }
+                let s = self.store();
+                let id = id_of(path);
+                // 存在性校验：删除不存在的条目应报 NotFound 而非静默成功
+                s.entry(&id).await?;
+                s.remove(&id).await?;
+                Ok(VdfsResponse::Unit)
+            }
+            VdfsRequest::Action { action, .. } => {
+                if action != VDFS_ACTION_EXPORT {
+                    return Err(VdfsError::NotImplemented);
+                }
+                if path.is_empty() {
+                    return Err(VdfsError::invalid(format!(
+                        "「导出」只对{LABEL}条目可用：{path}"
+                    )));
+                }
+                let id = id_of(path);
+                let pack = self.store().export_pack(&id).await?;
+                let data = serde_json::to_value(&pack)
+                    .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;
+                Ok(VdfsResponse::Action(VdfsActionResult {
+                    action: action.clone(),
+                    ok: true,
+                    message: format!("已打包「{}」", pack.filename),
+                    data: Some(data),
+                }))
+            }
+            VdfsRequest::Watch { sink } => {
+                watch_changes(PLUGIN_SKILL, path, sink).await?;
+                Ok(VdfsResponse::Unit)
+            }
+            VdfsRequest::Unwatch => {
+                unwatch_changes(PLUGIN_SKILL, path).await?;
+                Ok(VdfsResponse::Unit)
+            }
+            _ => Err(VdfsError::NotImplemented),
         }
-        // 无名字（写在挂载点目录自身）→ 「新建一项，名字由本插件生成」。
-        // 目录自身没有可覆盖的目标，因此必须有 create 意图（见 `VdfsProvider::write`）。
-        let id = resolve_id(path, content.create)?;
-        let text = content.as_text().unwrap_or_default();
-        // `create` 只管「不存在时怎么办」，**不改变内容的处理方式**：草稿详情页
-        // 填好的字段必须原样落盘。唯一例外是**内容为空**——「先建一个，随后再填」
-        // 是合法形态，此时落一份最小内容。
-        let manifest = if content.create && text.trim().is_empty() {
-            new_manifest(&id)
-        } else {
-            serde_json::from_str::<serde_json::Value>(text)
-                .map_err(|e| VdfsError::invalid(format!("manifest 不是合法 JSON：{e}")))?
-        };
-        // SKILL.md 是 Markdown：走**纯文本**写入，不能被 JSON 序列化
-        let normalized = validate_manifest(&id, &manifest).map_err(from_plugin_error)?;
-        let created = s.write_text(&id, &normalized).await?;
-        Ok(VdfsWriteResponse {
-            path: id,
-            created,
-            etag: None,
-        })
-    }
-
-    async fn delete(&self, _ctx: &VdfsContext, path: &str, _recursive: bool) -> VdfsResult<()> {
-        if path.is_empty() {
-            return Err(VdfsError::Forbidden(format!("不可删除挂载点：{path}")));
-        }
-        let s = self.store();
-        let id = id_of(path);
-        // 存在性校验：删除不存在的条目应报 NotFound 而非静默成功
-        s.entry(&id).await?;
-        s.remove(&id).await
-    }
-
-    async fn action(
-        &self,
-        _ctx: &VdfsContext,
-        path: &str,
-        action: &str,
-        _payload: Option<&serde_json::Value>,
-    ) -> VdfsResult<VdfsActionResult> {
-        if action != VDFS_ACTION_EXPORT {
-            return Err(VdfsError::NotImplemented);
-        }
-        if path.is_empty() {
-            return Err(VdfsError::invalid(format!(
-                "「导出」只对{LABEL}条目可用：{path}"
-            )));
-        }
-        let id = id_of(path);
-        let pack = self.store().export_pack(&id).await?;
-        let data = serde_json::to_value(&pack)
-            .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;
-        Ok(VdfsActionResult {
-            action: VDFS_ACTION_EXPORT.to_string(),
-            ok: true,
-            message: format!("已打包「{}」", pack.filename),
-            data: Some(data),
-        })
-    }
-
-    async fn watch(&self, _ctx: &VdfsContext, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
-        watch_changes(PLUGIN_SKILL, path, sink).await
-    }
-
-    async fn unwatch(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
-        unwatch_changes(PLUGIN_SKILL, path).await
     }
 }
 

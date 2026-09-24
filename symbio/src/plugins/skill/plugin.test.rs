@@ -105,11 +105,28 @@ async fn store_roundtrip_through_the_dir_impl() {
     );
     assert_eq!(s.read_text("demo").await.unwrap(), md);
     assert!(
-        s.list(&ctx, "").await.unwrap()[0].is_dir(),
+        s.dispatch(
+            &ctx,
+            "",
+            VdfsRequest::List {
+                limit: None,
+                before: None
+            }
+        )
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap()[0]
+            .is_dir(),
         "条目内部可下钻"
     );
     assert_eq!(
-        s.read(&ctx, "demo/SKILL.md").await.unwrap().as_text(),
+        s.dispatch(&ctx, "demo/SKILL.md", VdfsRequest::Read)
+            .await
+            .unwrap()
+            .into_read()
+            .unwrap()
+            .as_text(),
         Some(md.as_str()),
         "原文地址读到的就是落盘原文"
     );
@@ -128,7 +145,8 @@ async fn new_type_declares_the_landing_detail() {
         config: Arc::new(RwLock::new(SkillConfig::default())),
         dir: PluginDir::of(PLUGIN_SKILL),
     };
-    let types = plugin.root_new_types().await;
+    // 「根下可新建类型」是 provider 的异步自述（不在同步的 `PluginMeta` 上）
+    let types = plugin.new_types().await;
     let form = types
         .iter()
         .find(|t| t.ext == PLUGIN_SKILL)

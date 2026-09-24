@@ -547,7 +547,7 @@ for (name, child) in children {
 - **子智能体挂载点穿越**：`agent/<id>` 是挂载点，`agent` 插件对 `RelPath::Agent`
   （首层）与 `RelPath::File`（子路径）均经 `sub_agent(id).get_vfs_provider()` 委托给
   子 composite 的 `CompositeVfs`，返回的相对地址再用挂载前缀 `agent/<id>` 提回全局路径；
-  `root_hidden` 等可见性过滤由子 composite 的 `list` 统一执行（分形、与系统根同构）。
+  `PluginMeta::hidden` 等可见性过滤由子 composite 统一执行（分形、与系统根同构）。
 
 `Plugin::get_vfs_provider` 默认 `None`（叶子插件 override 为 `Some(self)`，
 `Composite` override 为 `self.vdfs.clone()`）；`CapabilityVisitor` 上的 `get_vdfs_provider`
@@ -747,14 +747,16 @@ for (name, child) in children {
 
 ### 10.1 新增一类资源（= 新增一个子目录）
 
-1. 为模块实现 `VdfsProvider` —— **没有必填方法**：
-   - 自描述按需：`label`（缺省由使用方以目录名代替）/ `description` / `order`
-     / `root_access` / `root_status` / `root_new_types` / `root_hidden`；
-   - 数据操作按需实现 `list` / `stat` / `read` / `write` / `delete` / `mkdir`
-     / `move_item` / `action` / `watch` / `unwatch`；未实现者保持默认
-     （`NotImplemented`）。
-   - **不需要、也不应该提供自己的位置**（§2.4）——`impl VdfsProvider for X {}`
-     即可编译。
+1. 为模块实现 `VdfsProvider` —— **只有一个方法** `dispatch(ctx, path, req)`：
+   - **自述不在这个 trait 上**。展示名 / 描述 / `order` / `icon` / `hidden` /
+     `root_access` 由插件的 `PluginMeta`（`Plugin::meta()`）承载；「根下可新建
+     类型」走 `VdfsProvider::new_types()`（async —— session 的表单 schema 需运行期
+     汇流，故不能进那份同步纯数据）。
+   - 数据操作 = `VdfsRequest` 的变体（`List` / `Stat` / `Read` / `Write` /
+     `Delete` / `Mkdir` / `Move` / `Action` / `Watch` / `Unwatch`）；实现方按变体
+     `match`，只实现自己支持的操作，其余返回 `NotImplemented`（使用方据此隐藏
+     入口）。**match 编译期穷尽**——新增一种操作时漏译在结构上不可能。
+   - **不需要、也不应该提供自己的位置**（§2.4）。
 2. 同时接好两条发现链路（二者独立，不可只接其一）：
    - **系统链路**：在 `impl Plugin for X` 中 override `get_vfs_provider` 返回
      `Some(self)`（默认 `None`，不 override 则该模块不会出现在前端 / 子智能体树里）；
@@ -885,19 +887,19 @@ ctx**，同一次请求里稍后被委派的 provider（即本插件）据此读
 
 ### 13.2 组合容器（composite）——包含子目录列表的 provider
 
-- `composite` 实现 `VdfsProvider`（`CompositeVdfs`），`label = "系统"`、
-  `order = 0`、`root_access = lt`。**它没有任何根级别概念**：只是一个恰好包含
-  若干子目录的 provider（§10.2），当前服务 `<根>` 纯属装配安排。
-- 十个操作都是同一件事：现场调用 `children_of(ctx)` 取子目录清单，解析首段后
-  委派（`list` / `stat` / `read` / `write` / `delete` / `mkdir` / `move` /
-  `action` / `watch` / `unwatch`）。
+- `composite` 实现 `VdfsProvider`（`CompositeVdfs`），自述 `name = "系统"`、
+  `order = 0`、`root_access = lt`（在 `PluginMeta` 上）。**它没有任何根级别概念**：
+  只是一个恰好包含若干子目录的 provider（§10.2），当前服务 `<根>` 纯属装配安排。
+- `dispatch` 对**所有操作**做同一件事：现场调用 `children_of(ctx)` 取子目录清单，
+  剥掉 `path` 首段定位子 provider，再把**剩余路径与请求整体**递下去——与操作种类
+  完全无关，因此新增一种操作时本层不需要改动。
   **不缓存**——子插件集合由配置与生命周期决定，每次现取才与容器一致。
 - `children_of` 逐子插件经 `Plugin::get_vfs_provider()` **查询**（系统链路，非广播、
   不驱动 `traverse`），汇总为 `(目录名, provider)` 清单；目录名 = 实例表挂载名
   （按 `order` 升序）。
 - 守卫：自身目录与子目录根不可读 / 写 / 删 / 移、`mkdir` 已存在报错、
   跨子目录移动被拒、子节点路径回填树内全路径、事件相对路径补全（§5）。
-- 隐藏属性：合成子目录节点时把子 provider 的 `root_hidden()` 回填进
+- 隐藏属性：合成子目录节点时把子插件 `PluginMeta::hidden` 回填进
   `VdfsNode::hidden`，并据此过滤掉不该出现在清单里的子目录（§3.2）；委派回来的
   `list` 结果同样过滤——隐藏是**机制级**属性，不因节点来自哪个 provider 而异。
   `stat` 仍如实报告该属性（隐藏只影响列表，不影响可达性）。当前标为隐藏的是内容
@@ -995,7 +997,7 @@ ctx**，同一次请求里稍后被委派的 provider（即本插件）据此读
   其根 `agent/<id>` 是一个**挂载点**：钻进它即委托给子 composite 的 `CompositeVfs`
   （与系统根分形同构），内部资源**递归**寻址为 `agent/<id>/<子目录>/<相对路径>`，
   子目录名 = 子 composite 实例表的挂载名（即插件名，如 `skill` / `mcp` / `session` /
-  `model` / `setting` / …），可见性由子 composite 的 `root_hidden` 统一决定。
+  `model` / `setting` / …），可见性由子 composite 按 `PluginMeta::hidden` 统一决定。
 - **变更广播按类型全局持有**：`vdfs::host::notify_change` / `watch_changes` /
   `unwatch_changes`。落盘的写 / 删（`vdfs_service` 三实现内部）与目录自管型 provider
   都调 `notify_change`，使订阅方无需轮询；按 `kind` 而非 provider 实例持有，是因为

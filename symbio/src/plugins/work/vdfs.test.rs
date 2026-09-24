@@ -31,11 +31,16 @@ fn vctx(workdir: Option<&str>) -> VdfsContext {
 async fn root_node_leaves_its_name_to_the_caller() {
     let tmp = TempDir::new().unwrap();
     let p = plugin_without_workspace(&tmp);
-    let root = p.stat(&vctx(None), "").await.unwrap();
+    let root = p
+        .dispatch(&vctx(None), "", VdfsRequest::Stat)
+        .await
+        .unwrap()
+        .into_stat()
+        .unwrap();
     assert_eq!(root.name, "", "provider 不知道自己被挂在哪里");
     assert!(root.is_dir());
     assert_eq!(root.access, VdfsAccess::LIST_TRAVERSE);
-    assert!(p.root_new_types().await.is_empty(), "根下不可新建");
+    assert!(p.new_types().await.is_empty(), "根下不可新建");
 }
 
 #[tokio::test]
@@ -44,8 +49,17 @@ async fn root_lists_the_memory_file_and_nothing_else() {
     let p = plugin_without_workspace(&tmp);
     let ws = TempDir::new().unwrap();
     let nodes = p
-        .list(&vctx(Some(ws.path().to_string_lossy().as_ref())), "")
+        .dispatch(
+            &vctx(Some(ws.path().to_string_lossy().as_ref())),
+            "",
+            VdfsRequest::List {
+                limit: None,
+                before: None,
+            },
+        )
         .await
+        .unwrap()
+        .into_list()
         .unwrap();
 
     assert_eq!(nodes.len(), 1, "根下只列记忆文件（配置文档不并列）");
@@ -64,23 +78,53 @@ async fn root_lists_the_memory_file_and_nothing_else() {
 async fn no_workspace_lists_nothing() {
     let tmp = TempDir::new().unwrap();
     let p = plugin_without_workspace(&tmp);
-    assert!(p.list(&vctx(None), "").await.unwrap().is_empty());
+    assert!(p
+        .dispatch(
+            &vctx(None),
+            "",
+            VdfsRequest::List {
+                limit: None,
+                before: None
+            }
+        )
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap()
+        .is_empty());
     // 没有工作区 = 记忆这个资源不存在，而不是「空文件」
-    assert!(p.stat(&vctx(None), AGENTS_FILE).await.is_err());
+    assert!(p
+        .dispatch(&vctx(None), AGENTS_FILE, VdfsRequest::Stat)
+        .await
+        .is_err());
 }
 
 #[tokio::test]
 async fn config_document_is_reachable_by_its_real_file_name() {
     let tmp = TempDir::new().unwrap();
     let p = plugin_without_workspace(&tmp);
-    let node = p.stat(&vctx(None), PLUGIN_FILE).await.unwrap();
+    let node = p
+        .dispatch(&vctx(None), PLUGIN_FILE, VdfsRequest::Stat)
+        .await
+        .unwrap()
+        .into_stat()
+        .unwrap();
     assert_eq!(node.name, PLUGIN_FILE);
     assert!(node.access.read && node.access.write);
     // 但不在根列表里（列表只列业务内容）
     let ws = TempDir::new().unwrap();
     let listed = p
-        .list(&vctx(Some(ws.path().to_string_lossy().as_ref())), "")
+        .dispatch(
+            &vctx(Some(ws.path().to_string_lossy().as_ref())),
+            "",
+            VdfsRequest::List {
+                limit: None,
+                before: None,
+            },
+        )
         .await
+        .unwrap()
+        .into_list()
         .unwrap();
     assert!(listed.iter().all(|n| n.name != PLUGIN_FILE));
 }
@@ -91,9 +135,19 @@ async fn unknown_paths_are_not_found() {
     let p = plugin_without_workspace(&tmp);
     let ws = TempDir::new().unwrap();
     let c = vctx(Some(ws.path().to_string_lossy().as_ref()));
-    assert!(p.list(&c, "sub").await.is_err());
-    assert!(p.stat(&c, "nope.md").await.is_err());
-    assert!(p.read(&c, "nope.md").await.is_err());
+    assert!(p
+        .dispatch(
+            &c,
+            "sub",
+            VdfsRequest::List {
+                limit: None,
+                before: None
+            }
+        )
+        .await
+        .is_err());
+    assert!(p.dispatch(&c, "nope.md", VdfsRequest::Stat).await.is_err());
+    assert!(p.dispatch(&c, "nope.md", VdfsRequest::Read).await.is_err());
 }
 
 // ==================== 读写 ====================
@@ -105,7 +159,12 @@ async fn missing_memory_reads_as_empty() {
     let ws = TempDir::new().unwrap();
     let c = vctx(Some(ws.path().to_string_lossy().as_ref()));
 
-    let content = p.read(&c, AGENTS_FILE).await.unwrap();
+    let content = p
+        .dispatch(&c, AGENTS_FILE, VdfsRequest::Read)
+        .await
+        .unwrap()
+        .into_read()
+        .unwrap();
     assert_eq!(content.text.as_deref(), Some(""), "还没有记忆 ≠ 读失败");
 }
 
@@ -117,22 +176,39 @@ async fn write_then_read_roundtrips_and_reports_creation() {
     let c = vctx(Some(ws.path().to_string_lossy().as_ref()));
 
     let first = p
-        .write(&c, AGENTS_FILE, &VdfsContent::text(AGENTS_FILE, "偏好中文"))
+        .dispatch(
+            &c,
+            AGENTS_FILE,
+            VdfsRequest::Write {
+                content: VdfsContent::text(AGENTS_FILE, "偏好中文"),
+            },
+        )
         .await
+        .unwrap()
+        .into_write()
         .unwrap();
     assert!(first.created, "首次写入即创建");
 
     let again = p
-        .write(
+        .dispatch(
             &c,
             AGENTS_FILE,
-            &VdfsContent::text(AGENTS_FILE, "偏好中文 + 简洁"),
+            VdfsRequest::Write {
+                content: VdfsContent::text(AGENTS_FILE, "偏好中文 + 简洁"),
+            },
         )
         .await
+        .unwrap()
+        .into_write()
         .unwrap();
     assert!(!again.created, "覆盖写入不是创建");
 
-    let content = p.read(&c, AGENTS_FILE).await.unwrap();
+    let content = p
+        .dispatch(&c, AGENTS_FILE, VdfsRequest::Read)
+        .await
+        .unwrap()
+        .into_read()
+        .unwrap();
     assert_eq!(content.text.as_deref(), Some("偏好中文 + 简洁"));
     assert_eq!(content.size, "偏好中文 + 简洁".len() as u64);
 }
@@ -149,14 +225,22 @@ async fn oversized_write_is_rejected_by_the_capacity_gate() {
     let ws = TempDir::new().unwrap();
     let c = vctx(Some(ws.path().to_string_lossy().as_ref()));
 
-    p.write(&c, AGENTS_FILE, &VdfsContent::text(AGENTS_FILE, "12345678"))
-        .await
-        .unwrap();
+    p.dispatch(
+        &c,
+        AGENTS_FILE,
+        VdfsRequest::Write {
+            content: VdfsContent::text(AGENTS_FILE, "12345678"),
+        },
+    )
+    .await
+    .unwrap();
     let err = p
-        .write(
+        .dispatch(
             &c,
             AGENTS_FILE,
-            &VdfsContent::text(AGENTS_FILE, "123456789"),
+            VdfsRequest::Write {
+                content: VdfsContent::text(AGENTS_FILE, "123456789"),
+            },
         )
         .await
         .unwrap_err();
@@ -166,7 +250,13 @@ async fn oversized_write_is_rejected_by_the_capacity_gate() {
     );
     assert!(err.to_string().contains("超出容量上限"), "{err}");
     assert_eq!(
-        p.read(&c, AGENTS_FILE).await.unwrap().text.as_deref(),
+        p.dispatch(&c, AGENTS_FILE, VdfsRequest::Read)
+            .await
+            .unwrap()
+            .into_read()
+            .unwrap()
+            .text
+            .as_deref(),
         Some("12345678"),
         "被拒绝的写入不得改动文件"
     );
@@ -179,10 +269,12 @@ async fn binary_write_is_rejected() {
     let ws = TempDir::new().unwrap();
     let c = vctx(Some(ws.path().to_string_lossy().as_ref()));
     let err = p
-        .write(
+        .dispatch(
             &c,
             AGENTS_FILE,
-            &VdfsContent::binary(AGENTS_FILE, "AA==", 1),
+            VdfsRequest::Write {
+                content: VdfsContent::binary(AGENTS_FILE, "AA==", 1),
+            },
         )
         .await
         .unwrap_err();
@@ -197,20 +289,46 @@ async fn delete_is_forbidden_but_clearing_by_write_is_allowed() {
     let p = plugin_without_workspace(&tmp);
     let ws = TempDir::new().unwrap();
     let c = vctx(Some(ws.path().to_string_lossy().as_ref()));
-    p.write(&c, AGENTS_FILE, &VdfsContent::text(AGENTS_FILE, "内容"))
-        .await
-        .unwrap();
+    p.dispatch(
+        &c,
+        AGENTS_FILE,
+        VdfsRequest::Write {
+            content: VdfsContent::text(AGENTS_FILE, "内容"),
+        },
+    )
+    .await
+    .unwrap();
 
-    let err = p.delete(&c, AGENTS_FILE, false).await.unwrap_err();
+    let err = p
+        .dispatch(&c, AGENTS_FILE, VdfsRequest::Delete { recursive: false })
+        .await
+        .unwrap_err();
     assert!(matches!(err, VdfsError::Forbidden(_)), "{err:?}");
-    assert!(p.delete(&c, "", false).await.is_err(), "挂载点不可删");
+    assert!(
+        p.dispatch(&c, "", VdfsRequest::Delete { recursive: false })
+            .await
+            .is_err(),
+        "挂载点不可删"
+    );
 
     // 清空的正确姿势：写入空内容
-    p.write(&c, AGENTS_FILE, &VdfsContent::text(AGENTS_FILE, ""))
-        .await
-        .unwrap();
+    p.dispatch(
+        &c,
+        AGENTS_FILE,
+        VdfsRequest::Write {
+            content: VdfsContent::text(AGENTS_FILE, ""),
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(
-        p.read(&c, AGENTS_FILE).await.unwrap().text.as_deref(),
+        p.dispatch(&c, AGENTS_FILE, VdfsRequest::Read)
+            .await
+            .unwrap()
+            .into_read()
+            .unwrap()
+            .text
+            .as_deref(),
         Some("")
     );
 }

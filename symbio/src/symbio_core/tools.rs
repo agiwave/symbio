@@ -119,12 +119,11 @@ impl CapabilityVisitor for DefaultToolVisitor {
 
     async fn list_vdfs_providers(&self) -> Vec<(String, Arc<dyn VdfsProvider>)> {
         let slot = self.vdfs_providers.read().await;
-        let mut out: Vec<(String, Arc<dyn VdfsProvider>)> = slot
+        let out: Vec<(String, Arc<dyn VdfsProvider>)> = slot
             .iter()
             .map(|(name, p)| (name.clone(), p.clone()))
             .collect();
-        // 稳定排序：order 相同者保持注册顺序（IndexMap 保序）
-        out.sort_by_key(|(_, p)| p.order());
+        // 注册顺序即稳定顺序（导航排序归容器：按 `PluginMeta::order` 在合成目录时排）
         out
     }
 

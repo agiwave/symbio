@@ -346,7 +346,12 @@ async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
     let vctx = vdfs::vdfs_context(&ctx);
 
     // 钻进子智能体根：列 `agent/reviewer` 的「下一层」
-    let items = plugin.list(&vctx, "reviewer").await.unwrap();
+    let items = plugin
+        .dispatch(&vctx, "reviewer", LIST)
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap();
     let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
 
     // 1) 穿过挂载点：返回的是子 composite 视图（名字是资源入口，且路径带挂载段
@@ -391,7 +396,12 @@ async fn mount_root_lists_only_installed_agents() {
     let ctx = vdfs::vdfs_context(&host);
 
     let plugin = AgentPlugin::new();
-    let items = plugin.list(&ctx, "").await.unwrap();
+    let items = plugin
+        .dispatch(&ctx, "", LIST)
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap();
     let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
     assert_eq!(
         names,
@@ -400,7 +410,12 @@ async fn mount_root_lists_only_installed_agents() {
     );
 
     // 不进清单 ≠ 不可达：地址照旧可读（设置页那个入口指向它）
-    let n = plugin.stat(&ctx, "AGENTS.md").await.unwrap();
+    let n = plugin
+        .dispatch(&ctx, "AGENTS.md", STAT)
+        .await
+        .unwrap()
+        .into_stat()
+        .unwrap();
     assert_eq!(n.title, "全局指令");
 }
 
@@ -482,7 +497,12 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     let physical = agent_root.join("reviewer").join("work").join("AGENTS.md");
 
     // ① list：列出的是子 composite 的可见入口，路径是**树内相对**（不含根名）
-    let listed = plugin.list(&vctx, "reviewer").await.unwrap();
+    let listed = plugin
+        .dispatch(&vctx, "reviewer", LIST)
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap();
     assert!(
         !listed.is_empty()
             && listed
@@ -493,11 +513,16 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     );
 
     // ② stat / ③ list（子路径）：两者都穿过挂载点
-    plugin.stat(&vctx, "reviewer/work").await.unwrap();
-    plugin.list(&vctx, "reviewer/work").await.unwrap();
+    plugin.dispatch(&vctx, "reviewer/work", STAT).await.unwrap();
+    plugin.dispatch(&vctx, "reviewer/work", LIST).await.unwrap();
 
     // ④ read：读到的是**子树 provider 的数据**（工作区记忆），不是裸目录里的文件
-    let c = plugin.read(&vctx, "reviewer/work/AGENTS.md").await.unwrap();
+    let c = plugin
+        .dispatch(&vctx, "reviewer/work/AGENTS.md", READ)
+        .await
+        .unwrap()
+        .into_read()
+        .unwrap();
     assert_eq!(
         c.text.as_deref(),
         Some("工作区记忆内容"),
@@ -507,13 +532,15 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
 
     // ⑤ write：写进子树 provider（工作区记忆），**不得**落进智能体包
     plugin
-        .write(
+        .dispatch(
             &vctx,
             "reviewer/work/AGENTS.md",
-            &crate::symbio_core::vdfs_provider::VdfsContent::text(
-                "reviewer/work/AGENTS.md",
-                "改过的记忆",
-            ),
+            vdfs::VdfsRequest::Write {
+                content: crate::symbio_core::vdfs_provider::VdfsContent::text(
+                    "reviewer/work/AGENTS.md",
+                    "改过的记忆",
+                ),
+            },
         )
         .await
         .unwrap();
@@ -531,7 +558,7 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     // ⑥ delete：同样穿过挂载点 —— `work` 的记忆不可删除，这条**拒绝**来自子树 provider
     // （绕过挂载点时会是另一套错误：物理路径不存在）
     let err = plugin
-        .delete(&vctx, "reviewer/work/AGENTS.md", false)
+        .dispatch(&vctx, "reviewer/work/AGENTS.md", DEL)
         .await
         .unwrap_err();
     assert!(
@@ -542,7 +569,9 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     // ⑦ mkdir：可挂载子树内的新建交给子树裁决。子树里的 provider 目前都不支持在
     // 自己根下造目录（`NotImplemented`），因此这里**不断言成败**——只钉住外部可观测的
     // 一点：它不得绕过挂载点、把目录造进裸 agent 目录。
-    let mkdir_on_mount = plugin.mkdir(&vctx, "reviewer/skill/new-dir").await;
+    let mkdir_on_mount = plugin
+        .dispatch(&vctx, "reviewer/skill/new-dir", vdfs::VdfsRequest::Mkdir)
+        .await;
     assert!(
         !agent_root
             .join("reviewer")
@@ -553,7 +582,13 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     );
     // ⑧ move_item：跨挂载点的判据同样按前缀——不同 `<id>` 之间明确拒绝
     let cross = plugin
-        .move_item(&vctx, "reviewer/work/a.md", "other/work/a.md")
+        .dispatch(
+            &vctx,
+            "reviewer/work/a.md",
+            vdfs::VdfsRequest::Move {
+                to: "other/work/a.md".to_string(),
+            },
+        )
         .await;
     assert!(
         matches!(cross, Err(VdfsError::Invalid(_))),
@@ -564,3 +599,15 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     // 数据落点，以及 mkdir / move 的越界防护（这两者在子树里目前无 provider 实现，
     // 外部表现与未委托时相同，故只能钉住「不得落到裸目录」）。
 }
+
+// ==================== dispatch 请求形态（测试辅助） ====================
+
+use crate::symbio_core::vdfs_provider::VdfsRequest;
+
+const LIST: VdfsRequest = VdfsRequest::List {
+    limit: None,
+    before: None,
+};
+const STAT: VdfsRequest = VdfsRequest::Stat;
+const READ: VdfsRequest = VdfsRequest::Read;
+const DEL: VdfsRequest = VdfsRequest::Delete { recursive: false };

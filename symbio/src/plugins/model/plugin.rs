@@ -347,9 +347,16 @@ impl ModelPlugin {
 
 impl ModelPlugin {
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new("model", "MODEL 核心引擎")
-            .with_description("Universal MODEL Agent Engine (LLM API Router)")
+        PluginMeta::new("model", "模型")
+            .with_description(
+                "Model Provider 配置（每项一份 provider.json），是大模型接入的唯一来源。",
+            )
             .with_version("0.3.0")
+            .with_order(2)
+            .with_icon(PLUGIN_MODEL)
+        // 「根下可新建类型」由 provider 自持（`VdfsProvider::new_types`，见下方
+        // `impl VdfsProvider for ModelPlugin`）——它是挂载点的动态自述，容器合成
+        // 根节点时现场取，不进这份同步纯数据
     }
 
     /// 参与 `available_options` 收集：贡献「Model」字段。
@@ -458,9 +465,9 @@ impl Default for ModelPlugin {
 
 use crate::symbio_core::vdfs::{from_plugin_error, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
-    VdfsAccess, VdfsActionResult, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType,
-    VdfsNode, VdfsProvider, VdfsResult, VdfsWriteResponse, VDFS_ACTION_TEST, VDFS_EXT_FORM,
-    VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED,
+    VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
+    VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_TEST,
+    VDFS_EXT_FORM, VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED,
 };
 
 const LABEL: &str = "模型";
@@ -695,152 +702,136 @@ impl ModelPlugin {
 
 #[async_trait]
 impl VdfsProvider for ModelPlugin {
-    fn label(&self) -> Option<&str> {
-        Some(LABEL)
-    }
-
-    fn description(&self) -> Option<&str> {
-        Some("Model Provider 配置（每项一份 provider.json），是大模型接入的唯一来源。")
-    }
-
-    fn order(&self) -> i32 {
-        2
-    }
-
-    fn icon(&self) -> Option<&str> {
-        Some(PLUGIN_MODEL)
-    }
-
     /// 根下只能新建「模型」条目（model 不支持整包导入）
     ///
     /// `ext = model` 是**呈现扩展名**（`id_of` 按它剥地址后缀），落成后的节点
     /// `ext = form`——两者不同，故显式声明 `node_ext` 与详情定义：使用方据此
     /// 在「还没创建」时就能渲染出与落成后同一张表单（草稿详情页）。
-    async fn root_new_types(&self) -> Vec<VdfsNewType> {
+    async fn new_types(&self) -> Vec<VdfsNewType> {
         vec![VdfsNewType::new(PLUGIN_MODEL, LABEL)
             .with_description(format!("新建{LABEL}（在详情页里填好，保存时一次写入）"))
             .with_node_ext(VDFS_EXT_FORM)
             .with_schema(detail_definition())]
     }
 
-    async fn list(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
-        if !path.is_empty() {
-            return Err(VdfsError::not_found(format!(
-                "{LABEL}是叶子资源，没有子项：{path}"
-            )));
-        }
-        // 清单来自内存镜像（启动时自磁盘灌入，写 / 删后同步）
-        Ok(self.mirrored_nodes().await)
-    }
-
-    async fn stat(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
-        if path.is_empty() {
-            // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填
-            return Ok(VdfsNode::dir("", LABEL, VdfsAccess::LIST));
-        }
-        let id = Self::id_of(path);
-        let entry = self.store().entry(&id).await?;
-        let p = config_of(&id, entry.raw.as_deref().unwrap_or_default())
-            .ok_or_else(|| VdfsError::internal(format!("Provider「{id}」的清单不是合法配置")))?;
-        Ok(node_of(&p, entry.updated_at))
-    }
-
-    async fn read(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
-        if path.is_empty() {
-            return Err(VdfsError::invalid(format!(
-                "该路径是目录，不可读取内容：{path}"
-            )));
-        }
-        // 读磁盘原文：DetailForm 以它作预填输入，`is_default` 这类落盘标记因此
-        // 与磁盘严格一致（不在读取时重新推导）。
-        let text = self.store().read_text(&Self::id_of(path)).await?;
-        Ok(VdfsContent::text(path, text).with_mime("application/json"))
-    }
-
-    async fn write(
+    async fn dispatch(
         &self,
         _ctx: &VdfsContext,
         path: &str,
-        content: &VdfsContent,
-    ) -> VdfsResult<VdfsWriteResponse> {
-        if content.binary {
-            return Err(VdfsError::invalid(format!("{LABEL}不支持整包导入（zip）")));
-        }
-        let id = Self::resolve_id(path, content.create)?;
-        let text = content.as_text().unwrap_or_default();
-        // `create` 只管「不存在时怎么办」，**不改变内容的处理方式**：草稿详情页
-        // 填好的字段必须原样落盘（否则「填完再保存」等于白填）。唯一例外是
-        // **内容为空**——「先建一个，随后再填」是合法形态，此时落一份最小配置。
-        let manifest = if content.create && text.trim().is_empty() {
-            // 使用方只给了地址（或连名字都没有），最小配置由本插件自持
-            self.new_manifest(&id, &id)
-        } else {
-            serde_json::from_str::<Value>(text)
-                .map_err(|e| VdfsError::invalid(format!("manifest 不是合法 JSON：{e}")))?
-        };
-        let normalized = self
-            .validate_manifest(&id, &manifest)
-            .await
-            .map_err(from_plugin_error)?;
-        // 落盘（原子写 + 变更广播由 vdfs_service 承担）→ 再同步内存视图
-        let created = self.store().write_json(&id, &normalized).await?;
-        self.after_uploaded(&id, &normalized)
-            .await
-            .map_err(from_plugin_error)?;
-        Ok(VdfsWriteResponse {
-            path: id,
-            created,
-            etag: None,
-        })
-    }
-
-    async fn delete(&self, _ctx: &VdfsContext, path: &str, _recursive: bool) -> VdfsResult<()> {
-        if path.is_empty() {
-            return Err(VdfsError::Forbidden(format!("不可删除挂载点：{path}")));
-        }
-        let id = Self::id_of(path);
-        // 存在性校验：删除不存在的条目应报 NotFound 而非静默成功
-        self.config_on_disk(&id).await?;
-        self.store().remove(&id).await?;
-        self.after_deleted(&id).await;
-        Ok(())
-    }
-
-    async fn action(
-        &self,
-        _ctx: &VdfsContext,
-        path: &str,
-        action: &str,
-        _payload: Option<&Value>,
-    ) -> VdfsResult<VdfsActionResult> {
-        match action {
-            VDFS_ACTION_TEST => {
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
+        match req {
+            VdfsRequest::List { .. } => {
+                if !path.is_empty() {
+                    return Err(VdfsError::not_found(format!(
+                        "{LABEL}是叶子资源，没有子项：{path}"
+                    )));
+                }
+                // 清单来自内存镜像（启动时自磁盘灌入，写 / 删后同步）
+                Ok(VdfsResponse::List(self.mirrored_nodes().await))
+            }
+            VdfsRequest::Stat => {
                 if path.is_empty() {
-                    return Err(VdfsError::invalid(format!(
-                        "「测试连接」只对{LABEL}条目可用：{path}"
+                    // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填
+                    return Ok(VdfsResponse::Stat(VdfsNode::dir(
+                        "",
+                        LABEL,
+                        VdfsAccess::LIST,
                     )));
                 }
                 let id = Self::id_of(path);
-                // 存在性校验：测试不存在的条目应报 NotFound 而非成功
+                let entry = self.store().entry(&id).await?;
+                let p =
+                    config_of(&id, entry.raw.as_deref().unwrap_or_default()).ok_or_else(|| {
+                        VdfsError::internal(format!("Provider「{id}」的清单不是合法配置"))
+                    })?;
+                Ok(VdfsResponse::Stat(node_of(&p, entry.updated_at)))
+            }
+            VdfsRequest::Read => {
+                if path.is_empty() {
+                    return Err(VdfsError::invalid(format!(
+                        "该路径是目录，不可读取内容：{path}"
+                    )));
+                }
+                // 读磁盘原文：DetailForm 以它作预填输入，`is_default` 这类落盘标记因此
+                // 与磁盘严格一致（不在读取时重新推导）。
+                let text = self.store().read_text(&Self::id_of(path)).await?;
+                Ok(VdfsResponse::Read(
+                    VdfsContent::text(path, text).with_mime("application/json"),
+                ))
+            }
+            VdfsRequest::Write { content } => {
+                if content.binary {
+                    return Err(VdfsError::invalid(format!("{LABEL}不支持整包导入（zip）")));
+                }
+                let id = Self::resolve_id(path, content.create)?;
+                let text = content.as_text().unwrap_or_default();
+                // `create` 只管「不存在时怎么办」，**不改变内容的处理方式**：草稿详情页
+                // 填好的字段必须原样落盘（否则「填完再保存」等于白填）。唯一例外是
+                // **内容为空**——「先建一个，随后再填」是合法形态，此时落一份最小配置。
+                let manifest = if content.create && text.trim().is_empty() {
+                    // 使用方只给了地址（或连名字都没有），最小配置由本插件自持
+                    self.new_manifest(&id, &id)
+                } else {
+                    serde_json::from_str::<Value>(text)
+                        .map_err(|e| VdfsError::invalid(format!("manifest 不是合法 JSON：{e}")))?
+                };
+                let normalized = self
+                    .validate_manifest(&id, &manifest)
+                    .await
+                    .map_err(from_plugin_error)?;
+                // 落盘（原子写 + 变更广播由 vdfs_service 承担）→ 再同步内存视图
+                let created = self.store().write_json(&id, &normalized).await?;
+                self.after_uploaded(&id, &normalized)
+                    .await
+                    .map_err(from_plugin_error)?;
+                Ok(VdfsResponse::Write(VdfsWriteResponse {
+                    path: id,
+                    created,
+                    etag: None,
+                }))
+            }
+            VdfsRequest::Delete { .. } => {
+                if path.is_empty() {
+                    return Err(VdfsError::Forbidden(format!("不可删除挂载点：{path}")));
+                }
+                let id = Self::id_of(path);
+                // 存在性校验：删除不存在的条目应报 NotFound 而非静默成功
                 self.config_on_disk(&id).await?;
-                let (ok, detail) = self.test_of(&id).await.map_err(from_plugin_error)?;
-                Ok(VdfsActionResult {
-                    action: VDFS_ACTION_TEST.to_string(),
-                    ok,
-                    message: detail,
-                    data: None,
-                })
+                self.store().remove(&id).await?;
+                self.after_deleted(&id).await;
+                Ok(VdfsResponse::Unit)
+            }
+            VdfsRequest::Action { action, .. } => match action.as_str() {
+                VDFS_ACTION_TEST => {
+                    if path.is_empty() {
+                        return Err(VdfsError::invalid(format!(
+                            "「测试连接」只对{LABEL}条目可用：{path}"
+                        )));
+                    }
+                    let id = Self::id_of(path);
+                    // 存在性校验：测试不存在的条目应报 NotFound 而非成功
+                    self.config_on_disk(&id).await?;
+                    let (ok, detail) = self.test_of(&id).await.map_err(from_plugin_error)?;
+                    Ok(VdfsResponse::Action(VdfsActionResult {
+                        action: action.clone(),
+                        ok,
+                        message: detail,
+                        data: None,
+                    }))
+                }
+                _ => Err(VdfsError::NotImplemented),
+            },
+            VdfsRequest::Watch { sink } => {
+                watch_changes(PLUGIN_MODEL, path, sink).await?;
+                Ok(VdfsResponse::Unit)
+            }
+            VdfsRequest::Unwatch => {
+                unwatch_changes(PLUGIN_MODEL, path).await?;
+                Ok(VdfsResponse::Unit)
             }
             _ => Err(VdfsError::NotImplemented),
         }
-    }
-
-    async fn watch(&self, _ctx: &VdfsContext, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
-        watch_changes(PLUGIN_MODEL, path, sink).await
-    }
-
-    async fn unwatch(&self, _ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
-        unwatch_changes(PLUGIN_MODEL, path).await
     }
 }
 

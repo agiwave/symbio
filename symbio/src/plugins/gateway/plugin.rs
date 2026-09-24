@@ -121,9 +121,12 @@ impl GatewayPlugin {
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new(PLUGIN_GATEWAY, "网关")
-            .with_description("对外服务（入站）与连接方式（出站）的协议与参数配置")
+        PluginMeta::new(PLUGIN_GATEWAY, "开放接口")
+            .with_description("本应用如何被调用（入站，对外提供服务）。")
             .with_version("0.1.0")
+            .with_order(9)
+            .with_icon("plug")
+            .with_hidden(true)
     }
 
     async fn get_parent(&self) -> Option<Arc<dyn Plugin>> {
@@ -235,83 +238,53 @@ impl Plugin for GatewayPlugin {
 
 #[async_trait]
 impl vdfs::VdfsProvider for GatewayPlugin {
-    fn label(&self) -> Option<&str> {
-        Some("开放接口")
-    }
-
-    fn description(&self) -> Option<&str> {
-        Some("本应用如何被调用（入站，对外提供服务）。")
-    }
-
-    fn order(&self) -> i32 {
-        9
-    }
-
-    fn icon(&self) -> Option<&str> {
-        Some("plug")
-    }
-
-    /// **隐藏**：本挂载点的全部内容就是一份配置文档，没有用户资源可浏览，
-    /// 所以它在父目录的列表里不出现（与文件 / 目录的隐藏属性同一件事）。
-    /// 挂载本身照旧——按路径（`<根>/gateway/PLUGIN.yml`）仍完全可寻址。
-    fn root_hidden(&self) -> bool {
-        true
-    }
-
-    /// 根下只有配置文档，不接受新建 / 建目录
-    fn root_access(&self) -> vdfs::VdfsAccess {
-        vdfs::VdfsAccess::LIST
-    }
-
-    async fn list(
+    async fn dispatch(
         &self,
         _ctx: &vdfs::VdfsContext,
         path: &str,
-    ) -> vdfs::VdfsResult<Vec<vdfs::VdfsNode>> {
-        if path.is_empty() {
-            return Ok(vec![self.config_file.node()]);
+        req: vdfs::VdfsRequest,
+    ) -> vdfs::VdfsResult<vdfs::VdfsResponse> {
+        match req {
+            vdfs::VdfsRequest::List { .. } => {
+                if path.is_empty() {
+                    return Ok(vdfs::VdfsResponse::List(vec![self.config_file.node()]));
+                }
+                Err(vdfs::VdfsError::not_found(format!(
+                    "开放接口是配置挂载点，没有子项：{path}"
+                )))
+            }
+            vdfs::VdfsRequest::Stat => {
+                if path.is_empty() {
+                    // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
+                    return Ok(vdfs::VdfsResponse::Stat(vdfs::VdfsNode::dir(
+                        "",
+                        "开放接口",
+                        vdfs::VdfsAccess::LIST,
+                    )));
+                }
+                if path == PLUGIN_FILE {
+                    return Ok(vdfs::VdfsResponse::Stat(self.config_file.node()));
+                }
+                Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
+            }
+            vdfs::VdfsRequest::Read => {
+                if path == PLUGIN_FILE {
+                    return Ok(vdfs::VdfsResponse::Read(
+                        self.config_file.read(&self.config).await?,
+                    ));
+                }
+                Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
+            }
+            vdfs::VdfsRequest::Write { content } => {
+                if path == PLUGIN_FILE {
+                    let resp = self.config_file.apply(&self.config, &content).await?;
+                    self.apply_config().await;
+                    return Ok(vdfs::VdfsResponse::Write(resp));
+                }
+                Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
+            }
+            _ => Err(vdfs::VdfsError::not_found(format!("未知路径：{path}"))),
         }
-        Err(vdfs::VdfsError::not_found(format!(
-            "开放接口是配置挂载点，没有子项：{path}"
-        )))
-    }
-
-    async fn stat(&self, _ctx: &vdfs::VdfsContext, path: &str) -> vdfs::VdfsResult<vdfs::VdfsNode> {
-        if path.is_empty() {
-            // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
-            return Ok(vdfs::VdfsNode::dir("", "开放接口", self.root_access()));
-        }
-        if path == PLUGIN_FILE {
-            return Ok(self.config_file.node());
-        }
-        Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
-    }
-
-    async fn read(
-        &self,
-        _ctx: &vdfs::VdfsContext,
-        path: &str,
-    ) -> vdfs::VdfsResult<vdfs::VdfsContent> {
-        if path == PLUGIN_FILE {
-            return self.config_file.read(&self.config).await;
-        }
-        Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
-    }
-
-    /// 写入：校验 → 落内存 → 落自己的文件 → 广播，随后**重建监听**
-    /// （端口 / 开关 / 协议变更必须重建，这是本插件专有的副作用）
-    async fn write(
-        &self,
-        _ctx: &vdfs::VdfsContext,
-        path: &str,
-        content: &vdfs::VdfsContent,
-    ) -> vdfs::VdfsResult<vdfs::VdfsWriteResponse> {
-        if path != PLUGIN_FILE {
-            return Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")));
-        }
-        let resp = self.config_file.apply(&self.config, content).await?;
-        self.apply_config().await;
-        Ok(resp)
     }
 }
 
@@ -354,7 +327,19 @@ mod tests {
     #[tokio::test]
     async fn config_document_is_the_only_child_of_the_root() {
         let plugin = Arc::new(GatewayPlugin::new(None, GatewayConfig::default(), tdir()));
-        let items = plugin.list(&vctx(), "").await.unwrap();
+        let items = plugin
+            .dispatch(
+                &vctx(),
+                "",
+                vdfs::VdfsRequest::List {
+                    limit: None,
+                    before: None,
+                },
+            )
+            .await
+            .unwrap()
+            .into_list()
+            .unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].name, PLUGIN_FILE, "地址就是插件目录里的真实文件名");
         assert_eq!(items[0].title, "开放接口");
@@ -373,7 +358,12 @@ mod tests {
             ..GatewayConfig::default()
         };
         let plugin = Arc::new(GatewayPlugin::new(None, cfg, tdir()));
-        let content = plugin.read(&vctx(), PLUGIN_FILE).await.unwrap();
+        let content = plugin
+            .dispatch(&vctx(), PLUGIN_FILE, vdfs::VdfsRequest::Read)
+            .await
+            .unwrap()
+            .into_read()
+            .unwrap();
         let got: GatewayConfig = serde_json::from_str(content.text.as_deref().unwrap()).unwrap();
         assert!(got.inbound_enabled);
         assert_eq!(got.inbound_protocol, "http");
@@ -385,7 +375,14 @@ mod tests {
     async fn config_document_write_validates_before_applying() {
         let plugin = Arc::new(GatewayPlugin::new(None, GatewayConfig::default(), tdir()));
         let bad = vdfs::VdfsContent::text("", r#"{"inbound_port": 70000}"#);
-        match plugin.write(&vctx(), PLUGIN_FILE, &bad).await {
+        match plugin
+            .dispatch(
+                &vctx(),
+                PLUGIN_FILE,
+                vdfs::VdfsRequest::Write { content: bad },
+            )
+            .await
+        {
             Err(VdfsError::Invalid(v)) => assert_eq!(v.fields[0].field, "inbound_port"),
             other => panic!("应为字段级校验错误，实得 {other:?}"),
         }
@@ -407,6 +404,9 @@ mod tests {
         let plugin = Arc::new(GatewayPlugin::new(None, GatewayConfig::default(), tdir()));
         assert!(call(plugin.clone(), "bogus", None).await.is_err());
         // 配置文档之外无其它节点
-        assert!(plugin.stat(&vctx(), "bogus").await.is_err());
+        assert!(plugin
+            .dispatch(&vctx(), "bogus", vdfs::VdfsRequest::Stat)
+            .await
+            .is_err());
     }
 }

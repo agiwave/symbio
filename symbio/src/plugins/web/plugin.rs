@@ -102,9 +102,12 @@ impl WebPlugin {
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new("web", "网络工具集")
-            .with_description("提供 Web 搜索、网络请求等网络相关工具")
+        PluginMeta::new("web", "网络工具")
+            .with_description("Web 工具的启用、超时与搜索服务凭据。")
             .with_version("0.1.0")
+            .with_order(8)
+            .with_icon("globe")
+            .with_hidden(true)
     }
 }
 
@@ -168,79 +171,53 @@ impl Plugin for WebPlugin {
 
 #[async_trait]
 impl vdfs::VdfsProvider for WebPlugin {
-    fn label(&self) -> Option<&str> {
-        Some("网络工具")
-    }
-
-    fn description(&self) -> Option<&str> {
-        Some("Web 工具的启用、超时与搜索服务凭据。")
-    }
-
-    fn order(&self) -> i32 {
-        8
-    }
-
-    fn icon(&self) -> Option<&str> {
-        Some("globe")
-    }
-
-    /// **隐藏**：本挂载点的全部内容就是一份配置文档，没有用户资源可浏览，
-    /// 所以它在父目录的列表里不出现（与文件 / 目录的隐藏属性同一件事）。
-    /// 挂载本身照旧——按路径（`<根>/web/PLUGIN.yml`）仍完全可寻址。
-    fn root_hidden(&self) -> bool {
-        true
-    }
-
-    /// 根下只有配置文件，不接受新建 / 建目录
-    fn root_access(&self) -> vdfs::VdfsAccess {
-        vdfs::VdfsAccess::LIST
-    }
-
-    async fn list(
+    async fn dispatch(
         &self,
         _ctx: &vdfs::VdfsContext,
         path: &str,
-    ) -> vdfs::VdfsResult<Vec<vdfs::VdfsNode>> {
-        if path.is_empty() {
-            return Ok(vec![self.config_file.node()]);
+        req: vdfs::VdfsRequest,
+    ) -> vdfs::VdfsResult<vdfs::VdfsResponse> {
+        match req {
+            vdfs::VdfsRequest::List { .. } => {
+                if path.is_empty() {
+                    return Ok(vdfs::VdfsResponse::List(vec![self.config_file.node()]));
+                }
+                Err(vdfs::VdfsError::not_found(format!(
+                    "网络工具是配置挂载点，没有子项：{path}"
+                )))
+            }
+            vdfs::VdfsRequest::Stat => {
+                if path.is_empty() {
+                    // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
+                    return Ok(vdfs::VdfsResponse::Stat(vdfs::VdfsNode::dir(
+                        "",
+                        "网络工具",
+                        vdfs::VdfsAccess::LIST,
+                    )));
+                }
+                if path == PLUGIN_FILE {
+                    return Ok(vdfs::VdfsResponse::Stat(self.config_file.node()));
+                }
+                Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
+            }
+            vdfs::VdfsRequest::Read => {
+                if path == PLUGIN_FILE {
+                    return Ok(vdfs::VdfsResponse::Read(
+                        self.config_file.read(&self.config).await?,
+                    ));
+                }
+                Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
+            }
+            vdfs::VdfsRequest::Write { content } => {
+                if path == PLUGIN_FILE {
+                    return Ok(vdfs::VdfsResponse::Write(
+                        self.config_file.apply(&self.config, &content).await?,
+                    ));
+                }
+                Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
+            }
+            _ => Err(vdfs::VdfsError::not_found(format!("未知路径：{path}"))),
         }
-        Err(vdfs::VdfsError::not_found(format!(
-            "网络工具是配置挂载点，没有子项：{path}"
-        )))
-    }
-
-    async fn stat(&self, _ctx: &vdfs::VdfsContext, path: &str) -> vdfs::VdfsResult<vdfs::VdfsNode> {
-        if path.is_empty() {
-            // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
-            return Ok(vdfs::VdfsNode::dir("", "网络工具", self.root_access()));
-        }
-        if path == PLUGIN_FILE {
-            return Ok(self.config_file.node());
-        }
-        Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
-    }
-
-    async fn read(
-        &self,
-        _ctx: &vdfs::VdfsContext,
-        path: &str,
-    ) -> vdfs::VdfsResult<vdfs::VdfsContent> {
-        if path == PLUGIN_FILE {
-            return self.config_file.read(&self.config).await;
-        }
-        Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
-    }
-
-    async fn write(
-        &self,
-        _ctx: &vdfs::VdfsContext,
-        path: &str,
-        content: &vdfs::VdfsContent,
-    ) -> vdfs::VdfsResult<vdfs::VdfsWriteResponse> {
-        if path == PLUGIN_FILE {
-            return self.config_file.apply(&self.config, content).await;
-        }
-        Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
     }
 }
 

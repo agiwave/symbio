@@ -25,6 +25,7 @@
 //! 列目录条数上限。这些是**物理层专有**的规则，虚拟层没有对应物。
 
 use crate::symbio_core::vdfs_provider::*;
+use crate::symbio_core::vdfs_provider::{VdfsRequest, VdfsResponse};
 use async_trait::async_trait;
 use base64::Engine as _;
 use std::path::{Path, PathBuf};
@@ -273,9 +274,42 @@ impl PhysicalFs {
     }
 }
 
+/// 唯一入口 `dispatch`：按请求变体落到各私有操作上；地址（`path`）是独立参数，
+/// 分发先按 path 定位、再按操作落地。
 #[async_trait]
 impl VdfsProvider for PhysicalFs {
-    async fn list(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
+    async fn dispatch(
+        &self,
+        ctx: &VdfsContext,
+        path: &str,
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
+        match req {
+            VdfsRequest::List { .. } => Ok(VdfsResponse::List(self.do_list(ctx, path).await?)),
+            VdfsRequest::Stat => Ok(VdfsResponse::Stat(self.do_stat(ctx, path).await?)),
+            VdfsRequest::Read => Ok(VdfsResponse::Read(self.do_read(ctx, path).await?)),
+            VdfsRequest::Write { content } => Ok(VdfsResponse::Write(
+                self.do_write(ctx, path, &content).await?,
+            )),
+            VdfsRequest::Delete { recursive } => {
+                self.do_delete(ctx, path, recursive).await?;
+                Ok(VdfsResponse::Unit)
+            }
+            VdfsRequest::Mkdir => {
+                self.do_mkdir(ctx, path).await?;
+                Ok(VdfsResponse::Unit)
+            }
+            VdfsRequest::Move { to } => {
+                self.do_move(ctx, path, &to).await?;
+                Ok(VdfsResponse::Unit)
+            }
+            _ => Err(VdfsError::NotImplemented),
+        }
+    }
+}
+
+impl PhysicalFs {
+    async fn do_list(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
         let base = workdir(ctx)?;
         let target = join_target(&base, path);
         let resolved = self.guard_read(&base, &target).await?;
@@ -318,7 +352,7 @@ impl VdfsProvider for PhysicalFs {
         Ok(nodes)
     }
 
-    async fn stat(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
+    async fn do_stat(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
         let base = workdir(ctx)?;
         let target = join_target(&base, path);
         let resolved = self.guard_read(&base, &target).await?;
@@ -347,7 +381,7 @@ impl VdfsProvider for PhysicalFs {
         Ok(node)
     }
 
-    async fn read(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
+    async fn do_read(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
         let base = workdir(ctx)?;
         let target = join_target(&base, path);
         let resolved = self.guard_read(&base, &target).await?;
@@ -384,7 +418,7 @@ impl VdfsProvider for PhysicalFs {
         Ok(VdfsContent::text("", text))
     }
 
-    async fn write(
+    async fn do_write(
         &self,
         ctx: &VdfsContext,
         path: &str,
@@ -423,7 +457,7 @@ impl VdfsProvider for PhysicalFs {
         })
     }
 
-    async fn delete(&self, ctx: &VdfsContext, path: &str, recursive: bool) -> VdfsResult<()> {
+    async fn do_delete(&self, ctx: &VdfsContext, path: &str, recursive: bool) -> VdfsResult<()> {
         let base = workdir(ctx)?;
         let target = join_target(&base, path);
         let resolved = self.guard_read(&base, &target).await?;
@@ -460,7 +494,7 @@ impl VdfsProvider for PhysicalFs {
         Ok(())
     }
 
-    async fn mkdir(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
+    async fn do_mkdir(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<()> {
         let base = workdir(ctx)?;
         let target = join_target(&base, path);
         self.guard_write(&base, &target).await?;
@@ -470,7 +504,7 @@ impl VdfsProvider for PhysicalFs {
         Ok(())
     }
 
-    async fn move_item(&self, ctx: &VdfsContext, from: &str, to: &str) -> VdfsResult<()> {
+    async fn do_move(&self, ctx: &VdfsContext, from: &str, to: &str) -> VdfsResult<()> {
         let base = workdir(ctx)?;
         let src = join_target(&base, from);
         let dst = join_target(&base, to);
@@ -520,16 +554,29 @@ mod tests {
         let fs = PhysicalFs::new();
         let ctx = ctx_in(&base);
 
-        fs.write(&ctx, "a.txt", &VdfsContent::text("", "hello"))
-            .await
-            .unwrap();
-        let c = fs.read(&ctx, "a.txt").await.unwrap();
+        fs.dispatch(
+            &ctx,
+            "a.txt",
+            VdfsRequest::Write {
+                content: VdfsContent::text("", "hello"),
+            },
+        )
+        .await
+        .unwrap();
+        let VdfsResponse::Read(c) = fs.dispatch(&ctx, "a.txt", VdfsRequest::Read).await.unwrap()
+        else {
+            panic!("应为 Read 响应");
+        };
         assert_eq!(c.text.as_deref(), Some("hello"));
         // 相对与带前导斜杠的写法落在同一位置
-        assert_eq!(
-            fs.read(&ctx, "/a.txt").await.unwrap().text.as_deref(),
-            Some("hello")
-        );
+        let VdfsResponse::Read(c) = fs
+            .dispatch(&ctx, "/a.txt", VdfsRequest::Read)
+            .await
+            .unwrap()
+        else {
+            panic!("应为 Read 响应");
+        };
+        assert_eq!(c.text.as_deref(), Some("hello"));
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -539,10 +586,19 @@ mod tests {
         let fs = PhysicalFs::new();
         let ctx = ctx_in(&base);
 
-        let r = fs
-            .write(&ctx, "x/y/z.txt", &VdfsContent::text("", "deep"))
+        let VdfsResponse::Write(r) = fs
+            .dispatch(
+                &ctx,
+                "x/y/z.txt",
+                VdfsRequest::Write {
+                    content: VdfsContent::text("", "deep"),
+                },
+            )
             .await
-            .unwrap();
+            .unwrap()
+        else {
+            panic!("应为 Write 响应");
+        };
         assert!(r.created);
         assert!(base.join("x/y/z.txt").exists());
         let _ = std::fs::remove_dir_all(&base);
@@ -557,7 +613,20 @@ mod tests {
         std::fs::write(base.join("beta.txt"), "b").unwrap();
         std::fs::write(base.join("alpha.txt"), "a").unwrap();
 
-        let items = fs.list(&ctx, "").await.unwrap();
+        let VdfsResponse::List(items) = fs
+            .dispatch(
+                &ctx,
+                "",
+                VdfsRequest::List {
+                    limit: None,
+                    before: None,
+                },
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("应为 List 响应");
+        };
         let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
         assert_eq!(names, vec!["zeta", "alpha.txt", "beta.txt"]);
         assert!(items[0].is_dir());
@@ -572,7 +641,10 @@ mod tests {
         let ctx = ctx_in(&base);
         std::fs::create_dir_all(base.join("sub")).unwrap();
 
-        let err = fs.read(&ctx, "sub").await.unwrap_err();
+        let err = fs
+            .dispatch(&ctx, "sub", VdfsRequest::Read)
+            .await
+            .unwrap_err();
         assert!(matches!(err, VdfsError::Forbidden(_)));
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -585,8 +657,13 @@ mod tests {
         std::fs::create_dir_all(base.join("sub")).unwrap();
         std::fs::write(base.join("sub/in.txt"), "x").unwrap();
 
-        assert!(fs.delete(&ctx, "sub", false).await.is_err());
-        fs.delete(&ctx, "sub", true).await.unwrap();
+        assert!(fs
+            .dispatch(&ctx, "sub", VdfsRequest::Delete { recursive: false })
+            .await
+            .is_err());
+        fs.dispatch(&ctx, "sub", VdfsRequest::Delete { recursive: true })
+            .await
+            .unwrap();
         assert!(!base.join("sub").exists());
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -596,10 +673,24 @@ mod tests {
         let base = temp("mv");
         let fs = PhysicalFs::new();
         let ctx = ctx_in(&base);
-        fs.write(&ctx, "a.txt", &VdfsContent::text("", "x"))
-            .await
-            .unwrap();
-        fs.move_item(&ctx, "a.txt", "sub/b.txt").await.unwrap();
+        fs.dispatch(
+            &ctx,
+            "a.txt",
+            VdfsRequest::Write {
+                content: VdfsContent::text("", "x"),
+            },
+        )
+        .await
+        .unwrap();
+        fs.dispatch(
+            &ctx,
+            "a.txt",
+            VdfsRequest::Move {
+                to: "sub/b.txt".into(),
+            },
+        )
+        .await
+        .unwrap();
         assert!(!base.join("a.txt").exists());
         assert!(base.join("sub/b.txt").exists());
         let _ = std::fs::remove_dir_all(&base);
@@ -608,7 +699,17 @@ mod tests {
     #[tokio::test]
     async fn missing_workdir_param_is_internal_error() {
         let fs = PhysicalFs::new();
-        let err = fs.list(&VdfsContext::empty(), "").await.unwrap_err();
+        let err = fs
+            .dispatch(
+                &VdfsContext::empty(),
+                "",
+                VdfsRequest::List {
+                    limit: None,
+                    before: None,
+                },
+            )
+            .await
+            .unwrap_err();
         assert!(
             matches!(err, VdfsError::Internal(_)),
             "接线错误不是用户错误"
