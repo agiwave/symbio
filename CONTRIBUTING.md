@@ -145,8 +145,10 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
   且方向**不统一**，别记反：
   - `gate.d/_shared.mjs` 的 `BASELINE.rustTests` / `vitestFiles` / `vitestTests` 是**地板**——
     实际值**低于**基线直接**报红**（「有测试被删或失败」），**高于**基线只打黄字让你上调。
-  - `test-layout-audit.mjs` 的 `INLINE_TEST_BASELINE` 是**天花板**——实际值**高于**基线**报红**
-    （「新增内联测试不被接受」），**低于**基线只打黄字让你下调。
+  - `test-layout-audit.mjs` 的 `RATCHETS`（按 Rust crate 分别设 `files` / `tests` 两个**天花板**）——
+    实际值**高于**基线**报红**（「往源代码文件里加测试不被接受」），**低于**基线只打黄字让你下调。
+    它的判据是**测试函数数**而非模块名：`#[test]` / `#[tokio::test]` 无论写在哪个模块、哪个文件都数；
+    旧判据只认 `mod tests` 名字，于是 `turn.rs` 那种 `mod tool_call_tests { … }` 里的测试一个都数不到。
   两者共同点是：**漏了只打黄字，`gate.mjs` 仍然是绿的** ⇒ 「门禁通过」不等于收工。删代码、
   删文件、拆测试文件之后，请**逐个复跑** `scripts/*-audit.mjs` 并读它的警告；改常量时**在常量旁
   写明日期与原因**（`git log -S<常量名>` 能查到历次调整的判据）。

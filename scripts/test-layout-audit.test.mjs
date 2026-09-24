@@ -38,7 +38,7 @@ function rmTree(dir) {
   fs.rmdirSync(dir)
 }
 
-function audit(files, { strict = false } = {}) {
+function audit(files, { strict = false, ratchet = null } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'test-layout-'))
   try {
     for (const [rel, content] of Object.entries(files)) {
@@ -48,7 +48,12 @@ function audit(files, { strict = false } = {}) {
     }
     const result = spawnSync(
       process.execPath,
-      [script, `ROOT=${root}`, ...(strict ? ['--strict'] : [])],
+      [
+        script,
+        `ROOT=${root}`,
+        ...(strict ? ['--strict'] : []),
+        ...(ratchet ? [`--ratchet=${ratchet}`] : []),
+      ],
       { cwd: root, env: { ...process.env, NO_COLOR: '1' }, encoding: 'utf8', timeout: 30_000 }
     )
     assert.ifError(result.error)
@@ -80,38 +85,64 @@ test('找不到宿主文件 → ERROR', () => {
   assert.match(r.stdout, /找不到宿主/)
 })
 
-// ── 检查 2：内联在**文件中部** → 拆分时最容易把生产代码搬进测试文件 ──────
-test('内联 mod tests 在文件中部 → 警告（--strict 才失败）', () => {
+// ── 检查 2：测试模块在**文件中部** → 拆分时最容易把生产代码搬进测试文件 ────
+// 临时目录的基线是 0，放任何内联测试都会先触发棘轮 ERROR，故这里不断言退出码，
+// 只断言告警**确实发出**（退出码由下面的棘轮用例单独覆盖）。
+test('测试模块在文件中部 → 告警', () => {
   const files = { 'bar.rs': 'pub fn a() {}\nmod tests {\n    #[test]\n    fn t() {}\n}\npub fn b() {}\n' }
-  assert.equal(audit(files).status, 0)
-  assert.equal(audit(files, { strict: true }).status, 2)
+  assert.match(audit(files).stdout, /中部/)
 })
 
 // ── 统计口径：宿主的 `mod tests;` 声明**不是**内联 ────────────────────────
 // 旧版用 `/^\s*mod tests\b/m` 一把抓，把两类文件混算成一个"106"，既说不清已拆多少、
 // 也说不清剩多少未拆。这里直接断言两个数字，比断言退出码更精确。
-test('统计口径：宿主声明与真内联分开计', () => {
+test('统计口径：宿主声明与未拆分文件分开计', () => {
   const r = audit({
     'h0.rs': 'pub fn f() {}\n#[path = "h0.test.rs"]\nmod tests;\n',
     'h0.test.rs': '#[test]\nfn t() {}\n',
     'inline.rs': 'pub fn g() {}\nmod tests {\n    #[test]\n    fn t() {}\n}\n',
   })
   assert.match(r.stdout, /宿主声明 1/)
-  assert.match(r.stdout, /真内联 mod tests：1/)
+  assert.match(r.stdout, /含测试函数的生产文件：1/)
 })
 
-// ── 棘轮：真内联的文件数只降不升 ────────────────────────────────────────
-// 这是本次补上的判定。旧版对"根本没拆分"零判定 ⇒ 约定没有执行力。
-test('棘轮：真内联数超过基线 → ERROR', () => {
-  // 基线下调只会让本用例更容易红（棘轮只允许下调），故写死 54 是安全的。
-  // 这是本文件唯一需要造很多文件的用例——夹具成本换的是"约定真的有牙"。
+// ── 棘轮 ────────────────────────────────────────────────────────────────
+test('棘轮：未拆分文件数超过基线 → ERROR', () => {
   const files = {}
-  for (let i = 0; i < 54; i += 1) {
+  for (let i = 0; i < 3; i += 1) {
     files[`m${i}.rs`] = 'pub fn f() {}\nmod tests {\n    #[test]\n    fn t() {}\n}\n'
   }
   const r = audit(files)
   assert.equal(r.status, 1)
   assert.match(r.stdout, /基线/)
+})
+
+// ★ 本守卫存在的理由：旧判据**只数文件数**，于是「往一个已经有内联测试的存量
+//   文件里继续加测试」完全不红——而那恰恰是最容易发生的路径。
+//   这里用 `--ratchet` 把基线设成"现状"，再多加一个测试函数：
+//   文件数不变（1 == 1），只有测试函数数 1 → 2，守卫必须因此变红。
+test('棘轮：往已有内联测试的文件里再加一个测试 → ERROR（文件数不变也要红）', () => {
+  const one = { 'a.rs': 'pub fn f() {}\nmod tests {\n    #[test]\n    fn t1() {}\n}\n' }
+  assert.equal(audit(one, { ratchet: 'files=1,tests=1' }).status, 0, '基线等于现状时应通过')
+
+  const two = {
+    'a.rs': 'pub fn f() {}\nmod tests {\n    #[test]\n    fn t1() {}\n    #[test]\n    fn t2() {}\n}\n',
+  }
+  const r = audit(two, { ratchet: 'files=1,tests=1' })
+  assert.equal(r.status, 1, '文件数仍是 1，但测试函数 2 > 1 ⇒ 必须红')
+  assert.match(r.stdout, /测试函数 2 > 基线 1/)
+})
+
+// ★ 旧判据按**模块名**找（`^\s*mod tests\b[^{;]*\{`），因此 `symbio_core/turn.rs`
+//   那种 `mod tool_call_tests { … }` 里的测试一个都数不到。改按测试函数判之后，
+//   无论模块叫什么名字都会被数到。
+test('测试模块不叫 tests 也要被数到（旧判据漏的就是这条）', () => {
+  const files = {
+    'turn.rs': 'pub fn f() {}\n#[cfg(test)]\nmod tool_call_tests {\n    #[test]\n    fn t() {}\n}\n',
+  }
+  const r = audit(files, { ratchet: 'files=0,tests=0' })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /测试函数 1 > 基线 0/)
 })
 
 // ── 空树 / 真仓 ─────────────────────────────────────────────────────────
