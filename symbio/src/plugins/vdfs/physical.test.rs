@@ -214,3 +214,48 @@ fn blacklist_rejects_only_real_hits() {
     assert!(p.readable(Path::new("/etcfoo/a.txt"), &ws));
     let _ = std::fs::remove_dir_all(&ws);
 }
+
+/// 策略集成守卫补全：`..` 逃逸、完整黑名单清单、allowed_roots 前缀边界。
+///
+/// 规则本身在 `symbio_core::vdfs_provider` 只有一份（`has_parent_segment` /
+/// `path_within`），这里验的是 `FsPolicy` 把规则接对——任一处漏接，下面任一
+/// 断言都会红，从而暴露物理层安全边界被悄悄放开。
+#[test]
+fn policy_guards_traversal_blacklist_and_root_boundary() {
+    let ws = temp("guard");
+    let sibling = temp("guard-sibling"); // 与 ws 同父的兄弟目录，用于前缀边界
+
+    // 1) `..` 逃逸：任何段为 `..` 即拒（读与写同规则）
+    let p = FsPolicy::default();
+    assert!(!p.readable(Path::new("/tmp/ws/../etc/passwd"), &ws));
+    assert!(!p.writable(Path::new("a/../b.txt"), &ws));
+
+    // 2) 完整黑名单清单：默认六条前缀全部命中即拒（含 `~` 展开后的家目录路径）
+    for forbidden in [
+        "/etc/passwd",
+        "/root/.bashrc",
+        "/usr/bin/env",
+        shellexpand::tilde("~/.ssh/id_rsa").as_ref(),
+        shellexpand::tilde("~/.aws/credentials").as_ref(),
+    ] {
+        assert!(
+            !p.readable(Path::new(forbidden), &ws),
+            "黑名单应命中：{forbidden}"
+        );
+    }
+
+    // 3) allowed_roots 按路径段比较：兄弟目录不被误放行
+    let allowed = FsPolicy {
+        workspace_only: true,
+        allowed_roots: vec![ws.clone()],
+        ..Default::default()
+    };
+    assert!(allowed.readable(&ws.join("a.txt"), &ws));
+    assert!(
+        !allowed.readable(&sibling.join("a.txt"), &ws),
+        "allowed_roots 是路径段前缀，兄弟目录不得越权"
+    );
+
+    let _ = std::fs::remove_dir_all(&ws);
+    let _ = std::fs::remove_dir_all(&sibling);
+}
