@@ -188,12 +188,12 @@ impl VdfsProvider for SingleFileVdfs {
                         "单文件型条目没有子项：{path}"
                     )));
                 }
-                Ok(VdfsResponse::List(
+                Ok(VdfsResponse::list(
                     self.entries()
                         .await?
                         .iter()
                         .map(|e| self.node_of(e))
-                        .collect(),
+                        .collect::<Vec<VdfsNode>>(),
                 ))
             }
 
@@ -217,7 +217,7 @@ impl VdfsProvider for SingleFileVdfs {
                 }
                 let id = self.id_of(path);
                 let text = self.read_text(&id).await?;
-                Ok(VdfsResponse::Read(VdfsContent::text(path, text)))
+                Ok(VdfsResponse::Read(VdfsContent::text(text)))
             }
 
             VdfsRequest::Write { content } => {
@@ -234,7 +234,7 @@ impl VdfsProvider for SingleFileVdfs {
                         .await?
                 };
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
-                    path: id,
+                    name: None,
                     created,
                     etag: None,
                 }))

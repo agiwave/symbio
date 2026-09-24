@@ -763,7 +763,7 @@ pub(crate) fn session_content(
     });
     let text = serde_json::to_string_pretty(&payload)
         .map_err(|e| vdfs::VdfsError::internal(format!("会话序列化失败：{e}")))?;
-    Ok(vdfs::VdfsContent::text("", text).with_mime("application/json"))
+    Ok(vdfs::VdfsContent::text(text).with_mime("application/json"))
 }
 
 /// 具名新建时，**地址末段即会话 id**；写在挂载根（无名目标）返回 `None`。

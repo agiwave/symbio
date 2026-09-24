@@ -10,7 +10,7 @@
  *
  * | 类别 | 字段 | 谁生产 |
  * |---|---|---|
- * | 节点 | `node` | 页面（useVdfs 的选中节点） |
+ * | 条目 | `node` | 页面（useVdfs 的选中项 = `VdfsItem`） |
  * | 渲染数据 | `data` / `error` / `fieldErrors` / `saving` / `testing` | 页面 |
  * | 机制动作 | `mechanismActions` / `mechanismBusy` | 页面**单点算好**（useVdfs.mechanismActions） |
  *
@@ -23,11 +23,17 @@
  * 往 DOM 上写机制字段。声明全量 = 契约完整 = 不需要任何兜底。
  */
 
-import type { DetailAction, VdfsFieldError, VdfsNode } from '@/schemas/vdfs'
+import type { DetailAction, VdfsFieldError, VdfsItem } from '@/schemas/vdfs'
 
 export interface VdfsRendererProps {
-  /** 被呈现的节点（机制保证：渲染器只在有选中节点时挂载，故恒非空） */
-  node: VdfsNode
+  /**
+   * 被呈现的**条目**（机制保证：渲染器只在有选中项时挂载，故恒非空）。
+   *
+   * 是 `VdfsItem`（地址 + 节点）而不是 `VdfsNode`：渲染器要按地址回读 / 写回，
+   * 而纯节点不带地址。草稿（新建态）是唯一没有地址的一项——`path` 为空串，
+   * 判据见 `schemas/vdfs.isVdfsDraft`。
+   */
+  node: VdfsItem
   /**
    * 渲染器数据：form → 字段值对象；文本类（含 message 的正文）→ 文本；
    * 其余不传。形状由节点的 `ext` → 渲染器映射决定（`registry/vdfsTypes`）。

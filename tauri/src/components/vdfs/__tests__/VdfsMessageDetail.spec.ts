@@ -13,9 +13,9 @@
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import VdfsMessageDetail from '../VdfsMessageDetail.vue'
-import type { VdfsNode } from '@/schemas/vdfs'
+import type { VdfsItem } from '@/schemas/vdfs'
 
-function messageNode(partial: Partial<VdfsNode> = {}): VdfsNode {
+function messageNode(partial: Partial<VdfsItem> = {}): VdfsItem {
   return {
     path: '@vfs/session/abc/message/m1',
     name: 'm1',

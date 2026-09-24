@@ -1,9 +1,13 @@
 //! `vdfs_list` —— 列出目录下的直接子项（**面向 LLM：ignore 过滤 + 原生 dir_list 形状**）
 //!
 //! 移植自已下线的原生 `dir_list`：原生 `dir_list` 直接 `tokio::fs::read_dir` 遍历工作区；
-//! 本工具把「访问文件系统」改为「调用封装 provider 的 `list`」，拿到 `VdfsNode`
-//! 列表后做**与原生 `dir_list` 一致的 ignore 过滤**，封装成
-//! `{entries:[{name,type,size,modified}], truncated, count, message}` 形状。
+//! 本工具把「访问文件系统」改为「调用封装 provider 的 `list`」，拿到条目列表
+//! （[`VdfsItem`] = 地址 + `VdfsNode`）后做**与原生 `dir_list` 一致的 ignore 过滤**，
+//! 封装成 `{entries:[{name,type,size,modified}], truncated, count, message}` 形状。
+//!
+//! 条目地址在本工具里用不上（只报 `name`），所以只取 `item.node`。
+//!
+//! [`VdfsItem`]: crate::symbio_core::vdfs_provider::VdfsItem
 //!
 //! **虚拟目录 `.vdfsv2`**：系统资源类别统一挂接在此目录之下；对 `.vdfsv2` 列目录
 //! 即返回当前可访问的全部类别，无需独立工具。
@@ -80,7 +84,8 @@ impl Capability for ListTool {
             .collect();
 
         let mut entries: Vec<Value> = Vec::new();
-        for n in items {
+        for it in items {
+            let n = &it.node;
             if ignore_globs.iter().any(|g| g.matches(&n.name)) {
                 continue;
             }

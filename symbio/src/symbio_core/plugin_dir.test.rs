@@ -160,16 +160,16 @@ fn decode_validates_through_the_definition() {
         other => panic!("应为字段级校验错误，实得 {other:?}"),
     };
 
-    let bad = VdfsContent::text("", r#"{"port": 70000}"#);
+    let bad = VdfsContent::text(r#"{"port": 70000}"#);
     assert_eq!(field_of(f.decode(&bad).unwrap_err()), "port");
 
-    let missing = VdfsContent::text("", "{}");
+    let missing = VdfsContent::text("{}");
     assert_eq!(field_of(f.decode(&missing).unwrap_err()), "port");
 
-    let broken = VdfsContent::text("", "{oops");
+    let broken = VdfsContent::text("{oops");
     assert!(f.decode(&broken).is_err());
 
-    let ok = VdfsContent::text("", r#"{"port": 8080}"#);
+    let ok = VdfsContent::text(r#"{"port": 8080}"#);
     assert_eq!(f.decode(&ok).unwrap(), json!({ "port": 8080 }));
 }
 
@@ -197,17 +197,19 @@ async fn apply_writes_the_plugins_own_file() {
     let slot = RwLock::new(json!({ "port": 1 }));
 
     // 校验失败：内存与磁盘都不动
-    let bad = VdfsContent::text("", r#"{"port": 70000}"#);
+    let bad = VdfsContent::text(r#"{"port": 70000}"#);
     assert!(f.apply(&slot, &bad).await.is_err());
     assert_eq!(*slot.read().await, json!({ "port": 1 }));
     assert!(!f.dir().config_path().exists(), "校验未过不该落盘");
 
     // 成功：内存生效 + 文件落在自己的目录里
     let resp = f
-        .apply(&slot, &VdfsContent::text("", r#"{"port": 8080}"#))
+        .apply(&slot, &VdfsContent::text(r#"{"port": 8080}"#))
         .await
         .unwrap();
-    assert_eq!(resp.path, PLUGIN_FILE);
+    // 写的是具名地址（配置文档自己的路径），回执不带地址也不带名字
+    assert!(resp.name.is_none());
+    assert!(!resp.created, "覆盖已有配置文档不是「新建」");
     assert_eq!(*slot.read().await, json!({ "port": 8080 }));
 
     let text = std::fs::read_to_string(f.dir().config_path()).unwrap();

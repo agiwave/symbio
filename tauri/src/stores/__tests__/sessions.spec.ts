@@ -148,8 +148,8 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
   })
 
   it('新建会话 = 一次 vdfs/write 到会话挂载根；id 由后端生成，前端不编造', async () => {
-    // 后端返回的是**树内相对路径**（容器把挂载目录名补在前面），前端只取末段
-    vdfsApi.writeVdfs.mockResolvedValue({ path: 'session/s9', created: true })
+    // 匿名写的回执只给**名字**（`VdfsWriteResponse.name`）——地址由调用方拼
+    vdfsApi.writeVdfs.mockResolvedValue({ name: 's9', created: true })
     const store = useSessionsStore()
 
     const id = await store.createSession({ workdir: 'D:/work' })
@@ -165,8 +165,8 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
     expect(store.activeId).toBe('s9')
   })
 
-  it('后端没给出新地址时报错，而不是插一条 id 为空的会话', async () => {
-    vdfsApi.writeVdfs.mockResolvedValue({ path: '', created: true })
+  it('后端没给出新名字时报错，而不是插一条 id 为空的会话', async () => {
+    vdfsApi.writeVdfs.mockResolvedValue({ created: true })
     const store = useSessionsStore()
     await expect(store.createSession()).rejects.toThrow()
     expect(store.list).toHaveLength(0)
@@ -180,7 +180,7 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
   // ——正因如此，下面这些断言同时也是「只有一扇门」的护栏。
 
   it('懒创建是原子操作：排队的首条消息归属于刚建出来的那个 id', async () => {
-    vdfsApi.writeVdfs.mockResolvedValue({ path: 'session/s9', created: true })
+    vdfsApi.writeVdfs.mockResolvedValue({ name: 's9', created: true })
     const store = useSessionsStore()
     const img = { base64: 'AAA', mimeType: 'image/png', thumbnailUrl: 'blob:1' }
 
@@ -200,7 +200,7 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
   })
 
   it('邮箱按 id 匹配，别的会话取不走属于本会话的首条消息', async () => {
-    vdfsApi.writeVdfs.mockResolvedValue({ path: 'session/s9', created: true })
+    vdfsApi.writeVdfs.mockResolvedValue({ name: 's9', created: true })
     const store = useSessionsStore()
     await store.createSessionWithFirstMessage(undefined, { text: 'hi' })
 
@@ -209,12 +209,12 @@ describe('sessions store — VDFS 变更的清单收敛', () => {
   })
 
   it('创建失败不留半截队列项，也不污染邮箱里原有的那条', async () => {
-    vdfsApi.writeVdfs.mockResolvedValue({ path: 'session/s9', created: true })
+    vdfsApi.writeVdfs.mockResolvedValue({ name: 's9', created: true })
     const store = useSessionsStore()
     await store.createSessionWithFirstMessage(undefined, { text: '第一条' })
 
-    // 第二次创建失败（后端没回地址）
-    vdfsApi.writeVdfs.mockResolvedValue({ path: '', created: true })
+    // 第二次创建失败（后端没回名字）
+    vdfsApi.writeVdfs.mockResolvedValue({ created: true })
     await expect(
       store.createSessionWithFirstMessage(undefined, { text: '第二条' })
     ).rejects.toThrow()

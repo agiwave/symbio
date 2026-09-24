@@ -36,7 +36,7 @@ async fn writes_then_reads_back_relative_address() {
         &ctx,
         "a.txt",
         VdfsRequest::Write {
-            content: VdfsContent::text("", "hello"),
+            content: VdfsContent::text("hello"),
         },
     )
     .await
@@ -68,7 +68,7 @@ async fn write_creates_missing_parents() {
             &ctx,
             "x/y/z.txt",
             VdfsRequest::Write {
-                content: VdfsContent::text("", "deep"),
+                content: VdfsContent::text("deep"),
             },
         )
         .await
@@ -104,10 +104,10 @@ async fn list_puts_dirs_first_then_sorts_by_name() {
     else {
         panic!("应为 List 响应");
     };
-    let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
+    let names: Vec<&str> = items.iter().map(|it| it.node.name.as_str()).collect();
     assert_eq!(names, vec!["zeta", "alpha.txt", "beta.txt"]);
-    assert!(items[0].is_dir());
-    assert_eq!(items[1].size, Some(1));
+    assert!(items[0].node.is_dir());
+    assert_eq!(items[1].node.size, Some(1));
     let _ = std::fs::remove_dir_all(&base);
 }
 

@@ -354,9 +354,9 @@ impl ModelPlugin {
             .with_version("0.3.0")
             .with_order(2)
             .with_icon(PLUGIN_MODEL)
-        // 「根下可新建类型」由 provider 自持（`VdfsProvider::root_new_type`，见下方
-        // `impl VdfsProvider for ModelPlugin`）——它是挂载点的动态自述，容器合成
-        // 根节点时现场取，不进这份同步纯数据
+        // 「根下可新建类型」由 provider 自持（根节点自述里的 `VdfsNode::new_type`，
+        // 见下方 `impl VdfsProvider for ModelPlugin`）——它是挂载点的动态自述，容器
+        // 合成根节点时向 provider 发一次 `Stat` 现场取，不进这份同步纯数据
     }
 
     /// 参与 `available_options` 收集：贡献「Model」字段。
@@ -702,20 +702,6 @@ impl ModelPlugin {
 
 #[async_trait]
 impl VdfsProvider for ModelPlugin {
-    /// 根下只能新建「模型」条目（model 不支持整包导入，故无导入入口）
-    ///
-    /// `ext = model` 是**呈现扩展名**（`id_of` 按它剥地址后缀），落成后的节点
-    /// `ext = form`——两者不同，故显式声明 `node_ext` 与详情定义：使用方据此
-    /// 在「还没创建」时就能渲染出与落成后同一张表单（草稿详情页）。
-    async fn root_new_type(&self) -> Option<VdfsNewType> {
-        Some(
-            VdfsNewType::new(PLUGIN_MODEL, LABEL)
-                .with_description(format!("新建{LABEL}（在详情页里填好，保存时一次写入）"))
-                .with_node_ext(VDFS_EXT_FORM)
-                .with_schema(detail_definition()),
-        )
-    }
-
     async fn dispatch(
         &self,
         _ctx: &VdfsContext,
@@ -730,16 +716,27 @@ impl VdfsProvider for ModelPlugin {
                     )));
                 }
                 // 清单来自内存镜像（启动时自磁盘灌入，写 / 删后同步）
-                Ok(VdfsResponse::List(self.mirrored_nodes().await))
+                Ok(VdfsResponse::list(self.mirrored_nodes().await))
             }
             VdfsRequest::Stat => {
                 if path.is_empty() {
-                    // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填
-                    return Ok(VdfsResponse::Stat(VdfsNode::dir(
-                        "",
-                        LABEL,
-                        VdfsAccess::LIST,
-                    )));
+                    // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填。
+                    //
+                    // 根的自述里带着「可新建类型」：根下只能新建「模型」条目
+                    // （model 不支持整包导入，故无导入入口）。`ext = model` 是**呈现
+                    // 扩展名**（`id_of` 按它剥地址后缀），落成后的节点 `ext = form`
+                    // ——两者不同，故显式声明 `node_ext` 与详情定义：使用方据此在
+                    // 「还没创建」时就能渲染出与落成后同一张表单（草稿详情页）。
+                    return Ok(VdfsResponse::Stat(
+                        VdfsNode::dir("", LABEL, VdfsAccess::LIST).with_new_type(Some(
+                            VdfsNewType::new(PLUGIN_MODEL, LABEL)
+                                .with_description(format!(
+                                    "新建{LABEL}（在详情页里填好，保存时一次写入）"
+                                ))
+                                .with_node_ext(VDFS_EXT_FORM)
+                                .with_schema(detail_definition()),
+                        )),
+                    ));
                 }
                 let id = Self::id_of(path);
                 let entry = self.store().entry(&id).await?;
@@ -759,7 +756,7 @@ impl VdfsProvider for ModelPlugin {
                 // 与磁盘严格一致（不在读取时重新推导）。
                 let text = self.store().read_text(&Self::id_of(path)).await?;
                 Ok(VdfsResponse::Read(
-                    VdfsContent::text(path, text).with_mime("application/json"),
+                    VdfsContent::text(text).with_mime("application/json"),
                 ))
             }
             VdfsRequest::Write { content } => {
@@ -787,8 +784,11 @@ impl VdfsProvider for ModelPlugin {
                 self.after_uploaded(&id, &normalized)
                     .await
                     .map_err(from_plugin_error)?;
+                // 名字只在**匿名写**（打在挂载根上）时才需要交回：具名写的名字是
+                // 调用方自己给的（见 [`VdfsWriteResponse::name`]）。
+                let generated = path.trim_matches('/').is_empty().then_some(id);
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
-                    path: id,
+                    name: generated,
                     created,
                     etag: None,
                 }))

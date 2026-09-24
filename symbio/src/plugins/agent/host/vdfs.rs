@@ -43,8 +43,8 @@ use crate::symbio_core::vdfs::{
 };
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError,
-    VdfsNewType, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse,
-    VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_EXT_FORM,
+    VdfsItem, VdfsNewType, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
+    VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_EXT_FORM,
 };
 use crate::symbio_core::{dir_from_ctx, InvokeRequest, AGENTS_FILE, PLUGIN_AGENT, PLUGIN_FILE};
 use async_trait::async_trait;
@@ -257,33 +257,17 @@ impl AgentPlugin {
 
 #[async_trait]
 impl VdfsProvider for AgentPlugin {
-    /// 根下只有一种新建类型：智能体。
-    ///
-    /// 草稿页与落成后的条目是**同一张**详情（`node_ext = form` + 概览定义），
-    /// 因此「点添加」与「选中一项」在交互上没有第二种形态——差别只在草稿没有内容。
-    ///
-    /// 草稿上唯一可做的是**导入整包**，而它是详情页的一条动作
-    /// （[`VDFS_ACTION_IMPORT`]，与「导出」「删除」同级），**不是本结构的字段**：
-    /// 本结构只说「这类东西落成后长什么样」，创建语义归 provider（见 ADR-029）。
-    ///
-    /// 留在 provider 上而不进同步的 `PluginMeta` 的理由与 session 相同——它是挂载
-    /// 点的**动态自述**，由容器合成根节点时现场取。
-    async fn root_new_type(&self) -> Option<VdfsNewType> {
-        Some(
-            VdfsNewType::new(PLUGIN_AGENT, LABEL)
-                .with_description(format!("新建{LABEL}——在详情页里导入整包（.zip）"))
-                .with_node_ext(VDFS_EXT_FORM)
-                .with_schema_opt(
-                    serde_json::to_value(super::detail::agent_detail_definition()).ok(),
-                ),
-        )
-    }
-
     /// 唯一入口：**先按 `path` 定位资源域，再按 `req` 执行操作**。
     ///
     /// 配置文档（`PLUGIN.yml`）按真实文件名可达——先判路径再分流操作；其余全部经
     /// [`parse_rel_path`] 按 path 形状定域，各域逻辑收敛在下方私有方法里
     /// （派发面与实现面分离：本方法只做路由，域内怎么落盘是各方法自己的事）。
+    ///
+    /// ## 根的自述走 `Stat` 空路径
+    ///
+    /// 根下只有一种新建类型：智能体——它由 [`Self::stat_at`] 的 `Root` 臂给出，
+    /// 而**不是** trait 上的另一个方法。根与更深层的节点因此走同一条通道
+    /// （「描述这个节点」），使用方不必先知道某个节点是不是根（见 ADR-030）。
     async fn dispatch(
         &self,
         ctx: &VdfsContext,
@@ -339,7 +323,11 @@ impl VdfsProvider for AgentPlugin {
 
 impl AgentPlugin {
     /// 挂载根 = **装进来的智能体清单**；可挂载子智能体穿过挂载点看子 composite 视图
-    async fn list_at(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsNode>> {
+    ///
+    /// 返回的是**条目**（地址 + 节点）：穿过挂载点时子 composite 给的地址是它自己
+    /// 树内的相对地址，必须补上挂载前缀才能交给上层——这正是「地址属于列表」的
+    /// 一处实例（同一个节点在父树与子树里地址不同，节点本身没有地址）。
+    async fn list_at(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsItem>> {
         let host = host_ctx(ctx)?;
         let store = Self::store_of(&host);
         match parse_rel_path(path) {
@@ -352,7 +340,7 @@ impl AgentPlugin {
             RelPath::Root => Ok(store
                 .list()
                 .into_iter()
-                .map(|r| agent_dir_node(&r, &store))
+                .map(|r| VdfsItem::new(agent_dir_node(&r, &store)))
                 .collect()),
             // 指令是叶子节点
             RelPath::Instruction => Err(VdfsError::invalid(format!(
@@ -377,8 +365,8 @@ impl AgentPlugin {
                         .await?
                         .into_list()
                         .ok_or_else(mismatch)?;
-                    for n in &mut items {
-                        n.path = mount_path(&mount_rel, &n.path);
+                    for it in &mut items {
+                        it.path = mount_path(&mount_rel, &it.path);
                     }
                     return Ok(items);
                 }
@@ -402,7 +390,7 @@ impl AgentPlugin {
                         .filter(|e| e.path != AGENTS_FILE)
                         .map(|e| entry_node(&e)),
                 );
-                Ok(nodes)
+                Ok(nodes.into_iter().map(VdfsItem::new).collect())
             }
             // 记忆是叶子节点
             RelPath::Memory { .. } => Err(VdfsError::not_found(format!(
@@ -424,8 +412,8 @@ impl AgentPlugin {
                         .await?
                         .into_list()
                         .ok_or_else(mismatch)?;
-                    for n in &mut items {
-                        n.path = mount_path(&mount_rel, &n.path);
+                    for it in &mut items {
+                        it.path = mount_path(&mount_rel, &it.path);
                     }
                     return Ok(items);
                 }
@@ -441,19 +429,41 @@ impl AgentPlugin {
                     .list_files(&id, rel)
                     .map_err(|e| VdfsError::not_found(format!("列出目录失败：{e}")))?
                     .into_iter()
-                    .map(|e| entry_node(&e))
+                    .map(|e| VdfsItem::new(entry_node(&e)))
                     .collect())
             }
         }
     }
 
     /// `path` 域的节点元数据（配置文档已在 [`Self::dispatch`] 按路径先行分流）
+    ///
+    /// ## 根的自述（`RelPath::Root`）里带着「可新建类型」
+    ///
+    /// 草稿页与落成后的条目是**同一张**详情（`node_ext = form` + 概览定义），
+    /// 因此「点添加」与「选中一项」在交互上没有第二种形态——差别只在草稿没有内容。
+    ///
+    /// 草稿上唯一可做的是**导入整包**，而它是详情页的一条动作
+    /// （[`VDFS_ACTION_IMPORT`]，与「导出」「删除」同级），**不是类型里的字段**：
+    /// 类型只说「这类东西落成后长什么样」，创建语义归 provider（见 ADR-029）。
+    ///
+    /// 这一项不能进同步的 `PluginMeta`（`schema` 是 `serde_json::Value`，装配期
+    /// 就有，但别的 provider 可能要运行期汇流），因此它随**根节点自述**一起给出：
+    /// 容器合成挂载点节点时向本 provider 发一次 `Stat("")`，取走 `new_type`。
     async fn stat_at(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
         let host = host_ctx(ctx)?;
         let store = Self::store_of(&host);
         match parse_rel_path(path) {
             // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
-            RelPath::Root => Ok(VdfsNode::dir("", LABEL, VdfsAccess::LIST_TRAVERSE)),
+            RelPath::Root => Ok(
+                VdfsNode::dir("", LABEL, VdfsAccess::LIST_TRAVERSE).with_new_type(Some(
+                    VdfsNewType::new(PLUGIN_AGENT, LABEL)
+                        .with_description(format!("新建{LABEL}——在详情页里导入整包（.zip）"))
+                        .with_node_ext(VDFS_EXT_FORM)
+                        .with_schema_opt(
+                            serde_json::to_value(super::detail::agent_detail_definition()).ok(),
+                        ),
+                )),
+            ),
             // 本应用自身的指令（`{homedir}/AGENTS.md`）
             RelPath::Instruction => Ok(self.instruction_node().await),
             RelPath::Agent { id } => {
@@ -474,14 +484,12 @@ impl AgentPlugin {
             RelPath::File { id, rel } => {
                 let id = id_of(id);
                 // 可挂载的子智能体 → 穿过挂载点，stat 子 composite 内对应条目
-                if let Ok((p, sub, mount_rel)) = self.sub_vfs(ctx, &id).await {
-                    let mut n = p
+                if let Ok((p, sub, _mount_rel)) = self.sub_vfs(ctx, &id).await {
+                    return p
                         .dispatch(&sub, rel, VdfsRequest::Stat)
                         .await?
                         .into_stat()
-                        .ok_or_else(mismatch)?;
-                    n.path = mount_path(&mount_rel, &n.path);
-                    return Ok(n);
+                        .ok_or_else(mismatch);
                 }
                 let e = store
                     .stat_item(&id, rel)
@@ -503,7 +511,7 @@ impl AgentPlugin {
                     .await
                     .read()
                     .map_err(|e| VdfsError::not_found(format!("读取系统指令失败：{e}")))?;
-                Ok(VdfsContent::text(path, text))
+                Ok(VdfsContent::text(text))
             }
             // Agent 目录内的文件 / 子路径
             RelPath::File { id, rel } => {
@@ -512,20 +520,18 @@ impl AgentPlugin {
                 // （`<挂载点名>/<条目 id>/work/AGENTS.md` 读的是那个子树里 work 的记忆），
                 // 而不是裸 agent 目录里的同名物理文件。判定按**路径前缀**统一发生，
                 // 不按操作逐个枚举——漏一个操作就会出现「列得出、读不到」。
-                if let Ok((p, sub, mount_rel)) = self.sub_vfs(ctx, &id).await {
-                    let mut c = p
+                if let Ok((p, sub, _mount_rel)) = self.sub_vfs(ctx, &id).await {
+                    return p
                         .dispatch(&sub, rel, VdfsRequest::Read)
                         .await?
                         .into_read()
-                        .ok_or_else(mismatch)?;
-                    c.path = mount_path(&mount_rel, &c.path);
-                    return Ok(c);
+                        .ok_or_else(mismatch);
                 }
                 // 非可挂载目录（v1 / legacy 约定目录）：直读（沙箱在 store 里）
                 let text = store
                     .read_item(&id, rel)
                     .map_err(|e| VdfsError::not_found(format!("读取失败：{e}")))?;
-                Ok(VdfsContent::text(path, text))
+                Ok(VdfsContent::text(text))
             }
             // 智能体记忆：Agent 目录下的 `AGENTS.md`
             RelPath::Memory { id } => {
@@ -535,7 +541,7 @@ impl AgentPlugin {
                     .await
                     .read()
                     .map_err(|e| VdfsError::not_found(format!("读取智能体记忆失败：{e}")))?;
-                Ok(VdfsContent::text(path, text))
+                Ok(VdfsContent::text(text))
             }
             // Agent 条目本身：读的是**概览**（详情表单 `binding: info` 的输入）
             RelPath::Agent { id } => {
@@ -545,7 +551,7 @@ impl AgentPlugin {
                     .ok_or_else(|| VdfsError::not_found(format!("未找到{LABEL}「{id}」")))?;
                 let text = serde_json::to_string_pretty(&agent_dir_info(&r, &store))
                     .map_err(|e| VdfsError::internal(format!("概览序列化失败：{e}")))?;
-                Ok(VdfsContent::text(path, text).with_mime("application/json"))
+                Ok(VdfsContent::text(text).with_mime("application/json"))
             }
             RelPath::Root => Err(VdfsError::invalid(format!(
                 "该路径是目录，不可读取内容：{path}"
@@ -573,7 +579,7 @@ impl AgentPlugin {
             instr.write(text).map_err(VdfsError::invalid)?;
             notify_change(PLUGIN_AGENT, path);
             return Ok(VdfsWriteResponse {
-                path: path.to_string(),
+                name: None,
                 created: !existed,
                 etag: None,
             });
@@ -593,7 +599,7 @@ impl AgentPlugin {
             memory.write(text).map_err(VdfsError::invalid)?;
             notify_change(PLUGIN_AGENT, path);
             return Ok(VdfsWriteResponse {
-                path: path.to_string(),
+                name: None,
                 created: !existed,
                 etag: None,
             });
@@ -613,8 +619,8 @@ impl AgentPlugin {
             // 可挂载的子智能体 → 穿过挂载点：写进**子 composite 的视图**。
             // 这是「报成功却落进裸 agent 目录」那个回归的修复点——绕过挂载点会让
             // 写入既污染智能体包、又让子 composite 的 provider 完全没参与。
-            if let Ok((p, sub, mount_rel)) = self.sub_vfs(ctx, &id).await {
-                let mut r = p
+            if let Ok((p, sub, _mount_rel)) = self.sub_vfs(ctx, &id).await {
+                return p
                     .dispatch(
                         &sub,
                         rel,
@@ -624,9 +630,7 @@ impl AgentPlugin {
                     )
                     .await?
                     .into_write()
-                    .ok_or_else(mismatch)?;
-                r.path = mount_path(&mount_rel, &r.path);
-                return Ok(r);
+                    .ok_or_else(mismatch);
             }
             // 非可挂载目录（v1 / legacy 约定目录）：直写（路径沙箱 + 容量闸门在 store 里）
             let text = content.text.as_deref().unwrap_or("");
@@ -637,7 +641,7 @@ impl AgentPlugin {
                 .map_err(|e| VdfsError::invalid(format!("写入失败：{e}")))?;
             notify_change(PLUGIN_AGENT, path);
             return Ok(VdfsWriteResponse {
-                path: path.to_string(),
+                name: None,
                 created: !existed,
                 etag: None,
             });

@@ -75,9 +75,9 @@ impl VdfsProvider for WorkPlugin {
                 }
                 // 无工作区：没有记忆可列（空表而非报错——「没有工作区」是正常状态）
                 if !store.has_scope() {
-                    return Ok(VdfsResponse::List(Vec::new()));
+                    return Ok(VdfsResponse::list(Vec::<VdfsNode>::new()));
                 }
-                Ok(VdfsResponse::List(vec![memory_node(&store)]))
+                Ok(VdfsResponse::list(vec![memory_node(&store)]))
             }
             VdfsRequest::Stat => match path {
                 // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
@@ -101,7 +101,7 @@ impl VdfsProvider for WorkPlugin {
             VdfsRequest::Read => match path {
                 AGENTS_FILE => {
                     let text = store.read().map_err(VdfsError::internal)?;
-                    Ok(VdfsResponse::Read(VdfsContent::text(path, text)))
+                    Ok(VdfsResponse::Read(VdfsContent::text(text)))
                 }
                 PLUGIN_FILE => Ok(VdfsResponse::Read(
                     self.config_file().read(self.config_slot()).await?,
@@ -119,7 +119,7 @@ impl VdfsProvider for WorkPlugin {
                     store.write(text).map_err(VdfsError::invalid)?;
                     notify_change(PLUGIN_WORK, AGENTS_FILE);
                     Ok(VdfsResponse::Write(VdfsWriteResponse {
-                        path: path.to_string(),
+                        name: None,
                         created: !existed,
                         etag: None,
                     }))

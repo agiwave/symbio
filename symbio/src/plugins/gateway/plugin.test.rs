@@ -50,11 +50,14 @@ async fn config_document_is_the_only_child_of_the_root() {
         .into_list()
         .unwrap();
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0].name, PLUGIN_FILE, "地址就是插件目录里的真实文件名");
-    assert_eq!(items[0].title, "开放接口");
-    assert_eq!(items[0].ext.as_deref(), Some(vdfs::VDFS_EXT_FORM));
-    assert_eq!(items[0].access.flags(), "rw");
-    assert!(items[0].schema.is_some(), "定义随节点下发");
+    assert_eq!(
+        items[0].node.name, PLUGIN_FILE,
+        "条目名就是插件目录里的真实文件名"
+    );
+    assert_eq!(items[0].node.title, "开放接口");
+    assert_eq!(items[0].node.ext.as_deref(), Some(vdfs::VDFS_EXT_FORM));
+    assert_eq!(items[0].node.access.flags(), "rw");
+    assert!(items[0].node.schema.is_some(), "定义随节点下发");
 }
 
 /// 读：配置文档回当前配置（pretty JSON）
@@ -83,7 +86,7 @@ async fn config_document_reads_current_config() {
 #[tokio::test]
 async fn config_document_write_validates_before_applying() {
     let plugin = Arc::new(GatewayPlugin::new(None, GatewayConfig::default(), tdir()));
-    let bad = vdfs::VdfsContent::text("", r#"{"inbound_port": 70000}"#);
+    let bad = vdfs::VdfsContent::text(r#"{"inbound_port": 70000}"#);
     match plugin
         .dispatch(
             &vctx(),

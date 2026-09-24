@@ -107,10 +107,11 @@ export default defineCase('T15 子智能体空间自驱动：写 inbox → 空�
       text: '第一步：报告。',
     });
     assertEq(first.status, 200, `写收件箱应成功（${JSON.stringify(first.body)?.slice(0, 300)}）`);
-    const firstAddr = first.body?.data?.path;
+    // 回执只给**条目名**（匿名写由 provider 生成）；地址由调用方拿请求目录拼
+    const iid = first.body?.data?.name;
     assert(
-      typeof firstAddr === 'string' && firstAddr.endsWith('/inbox/' + firstAddr.split('/').pop()),
-      `回执应给出条目自身地址（实际 ${JSON.stringify(firstAddr)}）`,
+      typeof iid === 'string' && iid.length > 0,
+      `回执应给出条目名（实际 ${JSON.stringify(iid)}）`,
     );
 
     // ⑧ 忙则排队：第一轮（慢吐）已在跑时再入队两条 + 取消其中一条
@@ -123,14 +124,16 @@ export default defineCase('T15 子智能体空间自驱动：写 inbox → 空�
     assertEq([second.status, third.status], [200, 200], '忙碌期间的写入照样成功（入队即返回）');
 
     // 取消一条**排队中**的条目：delete 条目自身地址
-    const thirdAddr = third.body?.data?.path;
-    const cancelled = await cli.invoke('vdfs/delete', { path: thirdAddr });
+    const thirdName = third.body?.data?.name;
+    const cancelled = await cli.invoke('vdfs/delete', {
+      path: `${inboxAddr(root)}/${thirdName}`,
+    });
     assertEq(cancelled.status, 200, `取消排队中的条目（${JSON.stringify(cancelled.body)?.slice(0, 300)}）`);
 
     const queued = await cli.invoke('vdfs/list', { path: inboxAddr(root) });
     const queuedItems = queued.body?.data?.items ?? [];
     assert(
-      !queuedItems.some((n) => n.name === thirdAddr.split('/').pop()),
+      !queuedItems.some((n) => n.name === thirdName),
       '被取消的条目不应仍在队列里',
     );
 

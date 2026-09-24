@@ -544,7 +544,7 @@ async fn register_subsession(
             &vdfs_context(ctx),
             &addr,
             VdfsRequest::Write {
-                content: VdfsContent::text("", body).with_create(),
+                content: VdfsContent::text(body).with_create(),
             },
         )
         .await?;

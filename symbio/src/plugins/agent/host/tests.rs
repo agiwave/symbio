@@ -352,7 +352,7 @@ async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
         .unwrap()
         .into_list()
         .unwrap();
-    let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
+    let names: Vec<&str> = items.iter().map(|it| it.node.name.as_str()).collect();
 
     // 1) 穿过挂载点：返回的是子 composite 视图（名字是资源入口，且路径带挂载段
     //    `reviewer`），而不是裸目录（`AGENTS.md` / `manifest.yaml` / `skill` 目录）。
@@ -402,7 +402,7 @@ async fn mount_root_lists_only_installed_agents() {
         .unwrap()
         .into_list()
         .unwrap();
-    let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
+    let names: Vec<&str> = items.iter().map(|it| it.node.name.as_str()).collect();
     assert_eq!(
         names,
         vec!["com.acme.demo"],
@@ -443,8 +443,11 @@ async fn traverse_declares_config_and_instruction_in_settings() {
     plugin.traverse(String::new(), ctx).await.unwrap();
 
     let entries = configs.list_configurables().await;
-    let by_name: std::collections::HashMap<&str, &crate::symbio_core::vdfs_provider::VdfsNode> =
-        entries.iter().map(|n| (n.name.as_str(), n)).collect();
+    let by_name: std::collections::HashMap<&str, &crate::symbio_core::vdfs_provider::VdfsItem> =
+        entries
+            .iter()
+            .map(|it| (it.node.name.as_str(), it))
+            .collect();
     // 配置文档（name = 目录名 agent）
     assert!(
         by_name.contains_key("agent"),
@@ -455,8 +458,8 @@ async fn traverse_declares_config_and_instruction_in_settings() {
         .get("AGENTS.md")
         .expect("设置页应含系统指令条目（agent 列表里没有它）");
     assert_eq!(instr.path, "agent/AGENTS.md");
-    assert_eq!(instr.title, "全局指令");
-    assert_eq!(instr.ext.as_deref(), Some("md"));
+    assert_eq!(instr.node.title, "全局指令");
+    assert_eq!(instr.node.ext.as_deref(), Some("md"));
 }
 /// 子智能体挂载点穿越必须**九操作一致**：`agent/<id>/…` 下的每个操作都交给子
 /// composite，而不是「list / stat / delete 穿了，read / write 没穿」。
@@ -528,7 +531,6 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
         Some("工作区记忆内容"),
         "read 必须穿过挂载点（读到 work 挂载点的数据），实际：{c:?}"
     );
-    assert_eq!(c.path, "reviewer/work/AGENTS.md", "路径回填为树内相对地址");
 
     // ⑤ write：写进子树 provider（工作区记忆），**不得**落进智能体包
     plugin
@@ -536,10 +538,7 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
             &vctx,
             "reviewer/work/AGENTS.md",
             vdfs::VdfsRequest::Write {
-                content: crate::symbio_core::vdfs_provider::VdfsContent::text(
-                    "reviewer/work/AGENTS.md",
-                    "改过的记忆",
-                ),
+                content: crate::symbio_core::vdfs_provider::VdfsContent::text("改过的记忆"),
             },
         )
         .await

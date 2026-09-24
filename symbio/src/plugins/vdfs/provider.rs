@@ -50,12 +50,12 @@ impl ToolVdfs {
         (fs, vdfs_context(ctx).with_params(call_params(ctx)))
     }
 
-    /// 列出目录的直接子节点
+    /// 列出目录的直接子节点（**条目** = 地址 + 节点）
     pub async fn list(
         &self,
         ctx: &Arc<dyn InvokeRequest>,
         path: &str,
-    ) -> VdfsResult<Vec<VdfsNode>> {
+    ) -> VdfsResult<Vec<VdfsItem>> {
         let (fs, vctx) = self.fs(ctx).await;
         fs.dispatch(
             &vctx,

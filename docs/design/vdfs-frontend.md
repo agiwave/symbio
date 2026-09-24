@@ -285,9 +285,11 @@ pub struct VdfsNewType {
 ```
 
 - 挂在 `VdfsNode.new_type`（目录节点；缺省不序列化）。
-- provider **根**的类型经 `VdfsProvider::root_new_type()`（async）声明，由容器在
-  合成**子目录节点**时现场取（它是挂载点自述里唯一动态的部分——session 的 schema
-  需运行期汇流，故不在同步的 `PluginMeta` 上）。
+- provider **根**的类型挂在**根节点自己的自述**上（`Stat("")` 回包里的
+  `VdfsNode.new_type`），由容器合成**子目录节点**时现场取——与「更深层节点在
+  自己的 `list` 结果里带 `new_type`」是**同一条通道**，使用方不必先知道某个节点
+  是不是根。它是挂载点自述里唯一动态的部分（session 的 schema 需运行期汇流，
+  故不在同步的 `PluginMeta` 上）。
 
 ### 5.3 创建动作（协议不变）
 
@@ -297,7 +299,8 @@ pub struct VdfsNewType {
 新建类型 ext 的新元素，于当前目录 dir：
   目标地址 = dir                      // 目录自身：使用方不说叫什么
   vdfs/write { path: dir, text: <详情页填好的字段>, create: true }
-  → provider 生成 id，并在 VdfsWriteResponse.path 里给出新节点
+  → provider 生成 id，并在 VdfsWriteResponse.name 里给出新条目的名字
+    （地址由调用方用 dir + name 拼）
   → 使用方刷新后选中那一项（详情页从草稿态变成带内容的那一页）
 
 整包导入（详情页的 import 动作）：条目名由 provider 从**文件名**推导

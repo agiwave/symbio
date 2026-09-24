@@ -33,7 +33,7 @@ fn definition_covers_mcp_form_surface() {
     let ids: Vec<&str> = def.actions.iter().map(|a| a.id.as_str()).collect();
     assert!(ids.contains(&"test") && ids.contains(&"save") && ids.contains(&"delete"));
 
-    // 导入整包是**详情页动作**（不是 `root_new_type` 上的字段）：只在草稿态出现，
+    // 导入整包是**详情页动作**（不是 `new_type` 上的字段）：只在草稿态出现，
     // 载荷声明为一个本地 zip——使用方据此先取文件再执行。
     let import = def
         .actions

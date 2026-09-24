@@ -40,7 +40,7 @@ async fn root_node_leaves_its_name_to_the_caller() {
     assert_eq!(root.name, "", "provider 不知道自己被挂在哪里");
     assert!(root.is_dir());
     assert_eq!(root.access, VdfsAccess::LIST_TRAVERSE);
-    assert!(p.root_new_type().await.is_none(), "根下不可新建");
+    assert!(root.new_type.is_none(), "根下不可新建");
 }
 
 #[tokio::test]
@@ -63,7 +63,7 @@ async fn root_lists_the_memory_file_and_nothing_else() {
         .unwrap();
 
     assert_eq!(nodes.len(), 1, "根下只列记忆文件（配置文档不并列）");
-    let n = &nodes[0];
+    let n = &nodes[0].node;
     assert_eq!(n.name, AGENTS_FILE);
     assert_eq!(n.access, VdfsAccess::READ_WRITE);
     assert_eq!(
@@ -126,7 +126,7 @@ async fn config_document_is_reachable_by_its_real_file_name() {
         .unwrap()
         .into_list()
         .unwrap();
-    assert!(listed.iter().all(|n| n.name != PLUGIN_FILE));
+    assert!(listed.iter().all(|it| it.node.name != PLUGIN_FILE));
 }
 
 #[tokio::test]
@@ -180,7 +180,7 @@ async fn write_then_read_roundtrips_and_reports_creation() {
             &c,
             AGENTS_FILE,
             VdfsRequest::Write {
-                content: VdfsContent::text(AGENTS_FILE, "偏好中文"),
+                content: VdfsContent::text("偏好中文"),
             },
         )
         .await
@@ -194,7 +194,7 @@ async fn write_then_read_roundtrips_and_reports_creation() {
             &c,
             AGENTS_FILE,
             VdfsRequest::Write {
-                content: VdfsContent::text(AGENTS_FILE, "偏好中文 + 简洁"),
+                content: VdfsContent::text("偏好中文 + 简洁"),
             },
         )
         .await
@@ -229,7 +229,7 @@ async fn oversized_write_is_rejected_by_the_capacity_gate() {
         &c,
         AGENTS_FILE,
         VdfsRequest::Write {
-            content: VdfsContent::text(AGENTS_FILE, "12345678"),
+            content: VdfsContent::text("12345678"),
         },
     )
     .await
@@ -239,7 +239,7 @@ async fn oversized_write_is_rejected_by_the_capacity_gate() {
             &c,
             AGENTS_FILE,
             VdfsRequest::Write {
-                content: VdfsContent::text(AGENTS_FILE, "123456789"),
+                content: VdfsContent::text("123456789"),
             },
         )
         .await
@@ -273,7 +273,7 @@ async fn binary_write_is_rejected() {
             &c,
             AGENTS_FILE,
             VdfsRequest::Write {
-                content: VdfsContent::binary(AGENTS_FILE, "AA==", 1),
+                content: VdfsContent::binary("AA==", 1),
             },
         )
         .await
@@ -293,7 +293,7 @@ async fn delete_is_forbidden_but_clearing_by_write_is_allowed() {
         &c,
         AGENTS_FILE,
         VdfsRequest::Write {
-            content: VdfsContent::text(AGENTS_FILE, "内容"),
+            content: VdfsContent::text("内容"),
         },
     )
     .await
@@ -316,7 +316,7 @@ async fn delete_is_forbidden_but_clearing_by_write_is_allowed() {
         &c,
         AGENTS_FILE,
         VdfsRequest::Write {
-            content: VdfsContent::text(AGENTS_FILE, ""),
+            content: VdfsContent::text(""),
         },
     )
     .await

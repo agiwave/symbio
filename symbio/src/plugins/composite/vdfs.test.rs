@@ -21,15 +21,14 @@ impl VdfsProvider for LeafProvider {
         req: VdfsRequest,
     ) -> VdfsResult<VdfsResponse> {
         match req {
-            VdfsRequest::List { .. } => Ok(VdfsResponse::List(vec![VdfsNode::file(
+            VdfsRequest::List { .. } => Ok(VdfsResponse::list(vec![VdfsNode::file(
                 "a.txt",
                 "A",
                 VdfsAccess::READ,
             )])),
-            VdfsRequest::Read => Ok(VdfsResponse::Read(VdfsContent::text(
-                _path,
-                format!("leaf:{_path}"),
-            ))),
+            VdfsRequest::Read => Ok(VdfsResponse::Read(VdfsContent::text(format!(
+                "leaf:{_path}"
+            )))),
             _ => Err(VdfsError::NotImplemented),
         }
     }
@@ -173,19 +172,24 @@ async fn self_listing_shows_child_dirs_by_registered_name() {
     };
     assert_eq!(root.len(), 2);
     assert_eq!(
-        root.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(),
+        root.iter()
+            .map(|it| it.node.name.as_str())
+            .collect::<Vec<_>>(),
         vec!["beta", "alpha"],
         "目录名来自子插件自己的注册；顺序按 meta.order"
     );
-    assert_eq!(root[0].path, "beta");
-    assert_eq!(root[0].title, "乙");
-    assert_eq!(root[0].kind, VDFS_KIND_DIR);
+    // 本层**不填条目地址**（容器不知道自己被挂在哪里）——地址由访问层按
+    // 请求地址回填，见 `plugins/vdfs/host.rs::fill_paths`
+    assert!(root[0].path.is_empty(), "条目地址留给分发层");
+    assert_eq!(root[0].node.title, "乙");
+    assert_eq!(root[0].node.kind, VDFS_KIND_DIR);
 
     let VdfsResponse::Stat(root_node) = vdfs.dispatch(&ctx, "", VdfsRequest::Stat).await.unwrap()
     else {
         panic!("应为 Stat 响应");
     };
-    assert_eq!(root_node.path, "");
+    // 节点是纯自述：它不带地址，容器也不知道自己的挂载名
+    assert!(root_node.name.is_empty(), "挂载名由使用方在注册时选定");
     assert!(root_node.is_dir());
 }
 
@@ -226,7 +230,9 @@ async fn hidden_dirs_are_filtered_from_listing_but_still_reachable() {
         panic!("应为 List 响应");
     };
     assert_eq!(
-        root.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(),
+        root.iter()
+            .map(|it| it.node.name.as_str())
+            .collect::<Vec<_>>(),
         vec!["shown"]
     );
 
@@ -257,7 +263,8 @@ async fn hidden_dirs_are_filtered_from_listing_but_still_reachable() {
     else {
         panic!("应为 List 响应");
     };
-    assert_eq!(items[0].path, "masked/a.txt");
+    assert_eq!(items[0].node.name, "a.txt");
+    assert!(items[0].path.is_empty(), "条目地址留给分发层");
 }
 
 /// 隐藏属性是机制级的：子插件交回来的 `list` 里标了 `hidden` 的条目同样不出现
@@ -277,7 +284,7 @@ async fn hidden_children_from_any_provider_are_filtered() {
                 VdfsRequest::List { .. } => {
                     let mut masked = VdfsNode::file("secret.txt", "内部", VdfsAccess::READ);
                     masked.hidden = true;
-                    Ok(VdfsResponse::List(vec![
+                    Ok(VdfsResponse::list(vec![
                         VdfsNode::file("a.txt", "A", VdfsAccess::READ),
                         masked,
                     ]))
@@ -340,7 +347,10 @@ async fn hidden_children_from_any_provider_are_filtered() {
         panic!("应为 List 响应");
     };
     assert_eq!(
-        items.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(),
+        items
+            .iter()
+            .map(|it| it.node.name.as_str())
+            .collect::<Vec<_>>(),
         vec!["a.txt"],
         "机制级的隐藏属性与 provider 是谁无关"
     );
@@ -424,9 +434,10 @@ async fn distinct_mount_names_each_get_a_dir() {
     assert_eq!(root.len(), 2);
 }
 
-/// 子树内的路径被拆回相对路径交给叶子 provider，返回项回填树内全路径
+/// 子树内的路径被拆回相对路径交给叶子 provider；返回项**不带地址**，
+/// 由访问层按请求地址回填（本层不知道自己被挂在哪里）
 #[tokio::test]
-async fn delegates_relative_path_and_fills_full_path() {
+async fn delegates_relative_path_and_leaves_address_to_the_host() {
     let vdfs = container(vec![FakeChild {
         dir: "alpha",
         label: "甲",
@@ -450,7 +461,8 @@ async fn delegates_relative_path_and_fills_full_path() {
         panic!("应为 List 响应");
     };
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0].path, "alpha/a.txt", "相对路径被回填成树内全路径");
+    assert_eq!(items[0].node.name, "a.txt", "provider 交回的是相对形态");
+    assert!(items[0].path.is_empty(), "条目地址留给分发层");
 
     let VdfsResponse::Read(c) = vdfs
         .dispatch(&ctx, "alpha/a.txt", VdfsRequest::Read)
@@ -464,7 +476,6 @@ async fn delegates_relative_path_and_fills_full_path() {
         Some("leaf:a.txt"),
         "provider 收到的是相对路径"
     );
-    assert_eq!(c.path, "alpha/a.txt");
 }
 
 /// 无子插件 → 空树（自身目录仍可列出）
@@ -490,7 +501,7 @@ async fn empty_container_is_an_empty_vfs() {
     let VdfsResponse::Stat(n) = vdfs.dispatch(&ctx, "", VdfsRequest::Stat).await.unwrap() else {
         panic!("应为 Stat 响应");
     };
-    assert_eq!(n.path, "");
+    assert!(n.name.is_empty(), "容器不知道自己的挂载名");
 }
 
 /// 自身目录与子目录的守卫：不可读 / 删 / 移，mkdir 报已存在
@@ -520,7 +531,7 @@ async fn guards_self_and_child_dir_roots() {
             &ctx,
             "alpha",
             VdfsRequest::Write {
-                content: VdfsContent::text("", "x")
+                content: VdfsContent::text("x")
             }
         )
         .await
@@ -549,12 +560,13 @@ async fn guards_self_and_child_dir_roots() {
     ));
 }
 
-/// 写在挂载点目录自身：`rel` 原样（空串）转发，返回的新路径补成树内全路径
+/// 写在挂载点目录自身：`rel` 原样（空串）转发；回执里只有**名字**，没有地址
 ///
-/// 这是「新建 = 写目录自身」在容器层唯一要做的事——子插件生成名字后
-/// 必须能把新地址交回使用方。
+/// 「新建 = 写目录自身」在容器层唯一要做的事就是转发——新条目落在哪，由调用方拿
+/// 自己的请求地址 + 回执里的名字拼出来（见 `VdfsWriteResponse::name`）。容器不再
+/// 替子插件拼前缀：它连自己挂在哪里都不知道。
 #[tokio::test]
-async fn dir_root_write_is_forwarded_and_path_is_prefixed() {
+async fn dir_root_write_is_forwarded_verbatim() {
     /// 支持「无名字新建」的假 provider：只记录收到的 `rel`，返回自己生成的名字
     struct RootWritableProvider;
 
@@ -571,7 +583,7 @@ async fn dir_root_write_is_forwarded_and_path_is_prefixed() {
             };
             assert_eq!(path, "", "容器必须原样转发空 rel，而不是替子插件拼名字");
             Ok(VdfsResponse::Write(VdfsWriteResponse {
-                path: "generated-1".to_string(),
+                name: Some("generated-1".to_string()),
                 created: true,
                 etag: None,
             }))
@@ -584,7 +596,7 @@ async fn dir_root_write_is_forwarded_and_path_is_prefixed() {
             &host_ctx(),
             "rw",
             VdfsRequest::Write {
-                content: VdfsContent::text("", "{}").with_create(),
+                content: VdfsContent::text("{}").with_create(),
             },
         )
         .await
@@ -593,16 +605,20 @@ async fn dir_root_write_is_forwarded_and_path_is_prefixed() {
         panic!("应为 Write 响应");
     };
     assert!(r.created);
-    assert_eq!(r.path, "rw/generated-1", "相对路径被回填成树内全路径");
+    assert_eq!(
+        r.name.as_deref(),
+        Some("generated-1"),
+        "匿名写只交回名字；地址由调用方用请求地址拼"
+    );
 }
 
-/// 读回的内容路径同样补成树内全路径
+/// 读回的内容**不带地址**：内容总是「请求的那个节点」的内容
 ///
-/// 三个 form 型插件（model / mcp / skill）的 `read` 都把收到的相对路径原样回显
-/// （`VdfsContent::text(path, …)`），因此这条不是假想：漏补前缀，上层就会把它翻译
-/// 成 `<根>/<rel>`——一个并不存在的地址。
+/// 三个 form 型插件（model / mcp / skill）的 `read` 都把内容原样交回
+/// （`VdfsContent::text(…)`）。地址在请求里已经有了，回显没有信息量——从前容器
+/// 还替它们补前缀，那是「内容自带地址」时代的遗留。
 #[tokio::test]
-async fn read_content_path_is_prefixed_with_dir() {
+async fn read_content_carries_no_address() {
     struct EchoPathProvider;
 
     #[async_trait]
@@ -610,13 +626,13 @@ async fn read_content_path_is_prefixed_with_dir() {
         async fn dispatch(
             &self,
             _ctx: &VdfsContext,
-            path: &str,
+            _path: &str,
             req: VdfsRequest,
         ) -> VdfsResult<VdfsResponse> {
             let VdfsRequest::Read = req else {
                 return Err(VdfsError::NotImplemented);
             };
-            Ok(VdfsResponse::Read(VdfsContent::text(path, "{}")))
+            Ok(VdfsResponse::Read(VdfsContent::text("{}")))
         }
     }
 
@@ -628,10 +644,7 @@ async fn read_content_path_is_prefixed_with_dir() {
     else {
         panic!("应为 Read 响应");
     };
-    assert_eq!(
-        c.path, "echo/item.json",
-        "provider 回显的相对路径被补成树内全路径"
-    );
+    assert_eq!(c.text.as_deref(), Some("{}"));
 }
 
 /// 未知目录明确报错
@@ -718,10 +731,10 @@ impl VdfsProvider for EchoProvider {
             return Err(VdfsError::NotImplemented);
         };
         let parent = ctx.parent_addr();
-        Ok(VdfsResponse::Read(VdfsContent::text(
-            "",
-            format!("{}:{parent}/{path}", self.label),
-        )))
+        Ok(VdfsResponse::Read(VdfsContent::text(format!(
+            "{}:{parent}/{path}",
+            self.label
+        ))))
     }
 }
 
@@ -762,19 +775,20 @@ async fn sub_provider_fetched_via_trait_method() {
     );
 }
 
-// ==================== 嵌套 provider 的 `path` 口径 ====================
+// ==================== 条目地址不在本层回填 ====================
 //
-// `fill_node_paths` **只在 `path` 为空时**回填。于是「`path` 处在哪个坐标系」
-// 由**最后填充它的那一层**决定：子 provider 若按自身子树口径填过（嵌套 composite
-// 的常态——它也是容器），外层容器不会再补自己的挂载段。
+// 地址是「某一份列表」给条目的定位，按 `<请求地址>/<name>` 推导即可，由**访问层**
+// 统一回填（`plugins/vdfs/host.rs::fill_paths`）。容器**不碰**它——它连自己挂在
+// 哪里都不知道，自己填必然缺前缀（嵌套时就是缺外层那一段）。
 //
-// 本测试钉住这一实际行为，供机制收敛（把地址移出节点载荷）时对照。
+// 子 provider 只在「地址推不出来」时才自己填（`VdfsItem::path`，如设置页条目
+// 指向另一个挂载点）；那种地址只有拥有者知道，分发层**原样透出**。
 
-/// 按**自身子树**口径填 `path` 的 provider（模拟嵌套 composite）
-struct SubTreePather;
+/// 显式给了地址的 provider（模拟「地址跨挂载点」的设置页条目）
+struct ExplicitPather;
 
 #[async_trait]
-impl VdfsProvider for SubTreePather {
+impl VdfsProvider for ExplicitPather {
     async fn dispatch(
         &self,
         _ctx: &VdfsContext,
@@ -782,18 +796,18 @@ impl VdfsProvider for SubTreePather {
         req: VdfsRequest,
     ) -> VdfsResult<VdfsResponse> {
         match req {
-            VdfsRequest::List { .. } => Ok(VdfsResponse::List(vec![VdfsNode::dir(
+            VdfsRequest::List { .. } => Ok(VdfsResponse::list(vec![VdfsItem::new(VdfsNode::dir(
                 "inner",
                 "内层",
                 VdfsAccess::LIST,
-            )
-            .with_path("inner")])),
+            ))
+            .with_path("elsewhere/inner")])),
             _ => Err(VdfsError::NotImplemented),
         }
     }
 }
 
-/// 未填 `path` 的 provider（对照：容器按 `<挂载名>/<子名>` 回填）
+/// 未填地址的 provider（常态：地址由分发层推导）
 struct BlankPather;
 
 #[async_trait]
@@ -805,7 +819,7 @@ impl VdfsProvider for BlankPather {
         req: VdfsRequest,
     ) -> VdfsResult<VdfsResponse> {
         match req {
-            VdfsRequest::List { .. } => Ok(VdfsResponse::List(vec![VdfsNode::dir(
+            VdfsRequest::List { .. } => Ok(VdfsResponse::list(vec![VdfsNode::dir(
                 "inner",
                 "内层",
                 VdfsAccess::LIST,
@@ -816,32 +830,32 @@ impl VdfsProvider for BlankPather {
 }
 
 #[tokio::test]
-async fn container_backfills_only_blank_paths() {
+async fn container_leaves_item_addresses_untouched() {
     let ctx = host_ctx();
     let list = VdfsRequest::List {
         limit: None,
         before: None,
     };
 
-    // ① 空 `path` → 容器补成 `<挂载名>/<子名>`
+    // ① 未填 → 容器也不填（留给访问层按请求地址回填）
     let vdfs = container_of("outer", Arc::new(BlankPather));
     let VdfsResponse::List(items) = vdfs.dispatch(&ctx, "outer", list.clone()).await.unwrap()
     else {
         panic!("应为 List 响应");
     };
-    assert_eq!(
-        items.iter().map(|n| n.path.as_str()).collect::<Vec<_>>(),
-        vec!["outer/inner"]
+    assert!(
+        items.iter().all(|it| it.path.is_empty()),
+        "本层不填条目地址：交给访问层"
     );
 
-    // ② 子 provider 自己填过 → 容器**原样透出**，不补 `outer/` 段
-    let vdfs = container_of("outer", Arc::new(SubTreePather));
+    // ② 自己填过 → 原样透出（「地址推不出来」的条目，只有拥有者知道）
+    let vdfs = container_of("outer", Arc::new(ExplicitPather));
     let VdfsResponse::List(items) = vdfs.dispatch(&ctx, "outer", list).await.unwrap() else {
         panic!("应为 List 响应");
     };
     assert_eq!(
-        items.iter().map(|n| n.path.as_str()).collect::<Vec<_>>(),
-        vec!["inner"],
-        "容器不重写已填的 path —— 嵌套时缺一段地址"
+        items.iter().map(|it| it.path.as_str()).collect::<Vec<_>>(),
+        vec!["elsewhere/inner"],
+        "拥有者显式给的地址不被改写"
     );
 }

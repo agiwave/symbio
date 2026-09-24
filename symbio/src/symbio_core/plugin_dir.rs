@@ -420,7 +420,8 @@ impl ConfigFile {
             .map_err(|e| VdfsError::internal(format!("配置落盘失败：{e}")))?;
         self.announce();
         Ok(VdfsWriteResponse {
-            path: PLUGIN_FILE.to_string(),
+            // 具名写：写的就是本插件那份配置文档，名字是调用方给的
+            name: None,
             created: false,
             etag: None,
         })
@@ -450,7 +451,7 @@ impl ConfigFile {
 fn encode(value: &Value) -> VdfsResult<VdfsContent> {
     let text = serde_json::to_string_pretty(value)
         .map_err(|e| VdfsError::internal(format!("配置序列化失败：{e}")))?;
-    Ok(VdfsContent::text("", text).with_mime("application/json"))
+    Ok(VdfsContent::text(text).with_mime("application/json"))
 }
 
 #[cfg(test)]

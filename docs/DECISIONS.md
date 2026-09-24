@@ -1701,7 +1701,9 @@ VDFS 是**虚拟动态文件系统**（`d` = dynamic）——节点可能落盘�
 ## ADR-027: 可新建的东西**至多一种**——入口是类型下的可选分支，不是第二个类型
 
 **状态**：已接受（2026-09-24 实施完成）。**第 2、3 条已被 ADR-029 取代**——
-「整包导入」不再是一种入口形态，而是详情页上的一条动作。
+「整包导入」不再是一种入口形态，而是详情页上的一条动作；**第 4 条已被 ADR-030
+取代**——`path` 不在节点上，落在 `VdfsItem` 条目上（同一条「使用方回填」的口径，
+换了 owner）。
 
 **背景**
 
@@ -1886,6 +1888,70 @@ ADR-027 把「可新建类型」收敛为至多一个，同时把「整包导入
 - 基线：`rustTests` 926 → 928（新增解包往返与草稿态动作用例）、
   `vitestTests` 722 → 707——**净减是预期的**（删掉的是「选入口」状态机的用例），
   逐文件核对写在 `scripts/gate.d/_shared.mjs` 的对应注记里。
+
+---
+
+## ADR-030: 地址属于**条目**，不属于节点——`VdfsItem` 拆出，写回执只给**名字**
+
+**状态**：已接受（2026-09-24 实施完成）。
+
+**背景**
+
+`VdfsNode` 里有一个不属于它自己的字段：`path`。
+
+1. **地址是关系，不是属性**。它回答的是「这个节点在**某一份列表**里的位置」，
+   而同一个节点可以在不同列表里以不同地址出现——实证：设置页的一项指向插件自己
+   那份配置文档 `<目录名>/PLUGIN.yml`（落在**另一个挂载点**里），而同一份文档在
+   自己的目录里就叫 `PLUGIN.yml`。把 `path` 挂在节点上，等于宣称「一个节点只有
+   一个地址」。
+2. **于是每个 provider 都得知道自己在树里的位置**。`composite` 容器、虚拟层
+   `host`、三个存储实现（`dir` / `memory` / `single_file`）各自在拼
+   `<父地址>/<name>`——同一条推导写了五遍；拼不出来的地方就留空，再靠访问层
+   （`fill_paths`）补一次。**两处都在补**，口径各自维护，必然漂移。
+3. **`VdfsWriteResponse.path` 更含混**。具名写时它回传的是调用方刚给的地址
+   （把已知的东西还回去）；匿名写（打在目录自身上的那一次）时它是 provider 生成
+   的名字**混在地址里**——前端 `sessions.ts` 因此要 `split('/').pop()` 取末段，
+   还得额外挡「空路径 == 虚拟根」这个哨兵。
+
+**决策**
+
+1. **`VdfsNode` 去掉 `path`**——它是纯自述（`name` 已是父内的路径段）。
+2. **新增 `VdfsItem { path, #[serde(flatten)] node }`**：`vdfs/list` / `vdfs/tree`
+   的每一项都是它。**线格式与「带 `path` 的节点」逐字节相同**，故不改变任何既有
+   消费者读到的 JSON。
+3. **`path` 的回填只有一处**：provider 不填时，分发层按 `<父地址>/<name>` 推导
+   （`plugins/vdfs/host.rs` 的 `item_addr`）；只有「地址不是那个形状」时由拥有者
+   自己填（设置页条目是唯一实例）。
+4. **`VdfsContent` 去掉 `path`**——内容总是「请求的那个节点」的内容，地址在请求
+   里已经有了。
+5. **`VdfsWriteResponse.path` → `name: Option<String>`**：**仅匿名写有**，值是
+   [`VdfsNode::name`] 口径的路径段，不是地址——地址由调用方拿它和自己请求的那个
+   目录拼（它本来就知道请求的是哪个目录）。
+
+**理由**
+
+- **一条推导只写一处**：`<父地址>/<name>` 现在只在分发层出现。provider 不需要
+  知道自己在树里的位置——此前「留空 + 访问层再补」的两段式，本质是同一条规则
+  的两个副本。
+- **回执只给调用方不知道的那一个**：具名写回传地址是冗余；匿名写唯一的新信息是
+  provider 生成的**名字**。给名字而非地址，拼地址那一步本来就该由调用方做。
+- **线格式不变** ⇒ 这次拆分对任何既有消费者（含 CLI 与 e2e）都是**透明的**：
+  `{path, name, title, …}` 仍是同一个对象，只是 `path` 的 owner 从节点挪到了条目。
+
+**后果**
+
+- 后端：`VdfsNode` 14 → 13 字段；新增 `VdfsItem`（`path` + flatten 的节点）；
+  `VdfsContent` 7 → 6；`VdfsWriteResponse.path: String` → `name: Option<String>`；
+  `composite` / `host` / 三个存储实现里的拼接逻辑收敛到分发层的 `item_addr`
+  一处（`list` / `tree` / `search` 共用）。
+- 前端：`VdfsItem extends VdfsNode`；`VdfsListResponse.items: VdfsItem[]`，而
+  目录自身的 `node` 是纯 `VdfsNode`（它的地址就是响应里的 `path`）；
+  `emptyNode()` 不再带 `path`；`sessions.ts` 的 `vdfsBase(resp.path)` →
+  `resp.name`，「空地址 == 虚拟根」那道哨兵随之消失。
+- 守卫：`protocol-mirror-audit` 新增 `VdfsItem ↔ VdfsItem` 一对（两侧都 flatten，
+  故只比 `path`——节点字段由 `VdfsNode ↔ VdfsNode` 覆盖），D 组 18 → **19** 对。
+- 基线：`rustTests` 928、`vitestTests` 706 均**不变**（改的是形状归属，不是用例
+  数量）。
 
 ---
 

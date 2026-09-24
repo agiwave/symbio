@@ -185,14 +185,22 @@ export interface VdfsNewType {
 }
 
 /**
- * 虚拟文件系统节点。
+ * 虚拟文件系统节点（文件或目录）——**一份自述，不含地址**。
  *
  * 目录与文件不做类型区分：`access.list` 为真即可列（目录），`access.read` 为真
  * 即可读（文件）。`kind` 只承载场景语义，不得用于能力判定。
+ *
+ * ## 为什么这里没有 `path`
+ *
+ * 地址是**某一份列表**给这个节点的定位，不是节点自己的属性——同一个节点可以在
+ * 不同列表里以不同地址出现（实证：设置页的一项指向插件自己那份配置文档
+ * `<目录名>/PLUGIN.yml`，而同一份文档在自己的目录里就叫 `PLUGIN.yml`）。
+ * 于是地址落在**条目**上（{@link VdfsItem}），由分发层按 `<父地址>/<name>`
+ * 回填；需要「可寻址的一项」时用 `VdfsItem`。
+ *
+ * 与后端 `symbio_core::vdfs_provider::VdfsNode` 逐字同构（`scripts/protocol-mirror-audit.mjs` 校验）。
  */
 export interface VdfsNode {
-  /** 全路径（根锚点打头的虚拟地址，或工作目录相对地址，与后端展示口径一致） */
-  path: string
   /** 父节点内的唯一标识（路径段） */
   name: string
   title: string
@@ -224,9 +232,23 @@ export interface VdfsNode {
   [attribute: string]: unknown
 }
 
-/** 节点内容（文本或二进制，互斥） */
-export interface VdfsContent {
+/**
+ * 列表条目 = **地址 + 节点**（后端 `VdfsItem`）。
+ *
+ * 线格式与「带 `path` 的节点」逐字节相同（后端用 `#[serde(flatten)]`），所以
+ * 消费端读到的仍是同一个 `{path, name, title, …}`——地址只是**从节点挪到了条目上**。
+ *
+ * 清单（`VdfsListResponse.items` / `VdfsTreeResponse.nodes`）里给的每一项都是它：
+ * 那是唯一「知道自己在哪」的形态。目录自身的 `node` 字段是纯 {@link VdfsNode}，
+ * 因为它的地址在请求里已经有了。
+ */
+export interface VdfsItem extends VdfsNode {
+  /** 条目地址（展示口径：根锚点打头的虚拟地址，或工作目录相对地址） */
   path: string
+}
+
+/** 节点内容（文本或二进制，互斥）——**不带地址**（内容总是「请求的那个节点」的内容） */
+export interface VdfsContent {
   text?: string
   b64?: string
   binary: boolean
@@ -303,19 +325,26 @@ export const VDFS_ACTION_TRUNCATE = 'truncate'
 export const VDFS_ACTION_CLEAR = 'clear'
 
 export interface VdfsListResponse {
+  /** **本列表自身**的地址——唯一必须保留的地址字段：`vdfs/root` 的调用方无从知道根叫什么 */
   path: string
+  /** 目录自身节点（纯自述；它的地址就是上面的 `path`） */
   node: VdfsNode
-  items: VdfsNode[]
+  /** 条目（地址 + 节点） */
+  items: VdfsItem[]
 }
 
+/**
+ * 写入回执。
+ *
+ * **不带地址**：写哪儿是调用方自己说的（请求里就有）。唯一需要 provider 交回的
+ * 是**匿名写**（打在目录自身上的那一次）里它自己生成的名字——具名写为 `undefined`，
+ * 地址由调用方拿自己的请求地址 + 这个名字拼。
+ */
 export interface VdfsWriteResponse {
-  path: string
+  /** 匿名写时 provider 生成的名字（具名写为 undefined） */
+  name?: string
   created: boolean
   etag?: string
-}
-
-export interface VdfsDeleteResponse {
-  path: string
 }
 
 /** **重同步指令**：后端通道曾满，消费端可能漏了变更，请按自己的作用域重读。

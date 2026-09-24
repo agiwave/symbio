@@ -183,7 +183,7 @@ pub const VDFS_ACTION_CLEAR: &str = "clear";
 /// 目录**可接受的新建元素类型**——「新建」入口的类型。
 ///
 /// 一个目录（含 provider 根）**至多**声明一种自己能新建的元素类型
-/// （[`VdfsNode::new_type`] / [`VdfsProvider::root_new_type`] 都是 `Option`）：
+/// （[`VdfsNode::new_type`] 是 `Option`）：
 ///
 /// - `Some` → 显示添加入口；
 /// - `None` → 不显示添加入口（该目录由系统管理）。
@@ -428,15 +428,25 @@ impl<'de> Deserialize<'de> for VdfsAccess {
 
 // ==================== 节点 ====================
 
-/// 虚拟文件系统节点（文件或目录）。
+/// 虚拟文件系统节点（文件或目录）——**一份自述，不含地址**。
 ///
 /// 目录与文件共用同一结构：由 [`VdfsAccess`] 的 `l`（可列）与 `r`（可读）区分形态；
 /// `kind` 只承载**场景语义**（如 `session` / `model`），不参与机制判定。
+///
+/// ## 为什么这里没有 `path`
+///
+/// 地址是**某一份列表**给这个节点的定位，不是节点自己的属性——同一个节点可以在
+/// 不同列表里以不同地址出现。实证：设置页的一项指向插件自己那份配置文档
+/// （[`entry_of`] 给它的地址是 `<目录名>/PLUGIN.yml`，落在**另一个挂载点**里），
+/// 而同一份文档在自己的目录里就叫 `PLUGIN.yml`。若把 `path` 放进节点，这两个
+/// 列表就必须各造一个节点副本，且「谁填的」无从判定。
+///
+/// 于是地址落在**条目**上（[`VdfsItem`]：地址 + 节点），由分发层按
+/// `<父地址>/<name>` 回填，provider 只在「地址不是这个形状」时才自己填。
+///
+/// [`entry_of`]: crate::symbio_core::configurable::entry_of
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VdfsNode {
-    /// 全路径（**展示口径**，如 `<根>/session/abc`）；由分发层回填，provider 可留空
-    #[serde(default)]
-    pub path: String,
     /// 唯一标识：父节点内的路径段
     pub name: String,
     /// 展示标题（给人 / 给 LLM 看）
@@ -526,7 +536,6 @@ fn default_status() -> String {
 impl Default for VdfsNode {
     fn default() -> Self {
         Self {
-            path: String::new(),
             name: String::new(),
             title: String::new(),
             description: None,
@@ -567,11 +576,6 @@ impl VdfsNode {
             access,
             ..Default::default()
         }
-    }
-
-    pub fn with_path(mut self, path: impl Into<String>) -> Self {
-        self.path = path.into();
-        self
     }
 
     /// 显式指定呈现扩展名（覆盖 `name` 推导）
@@ -654,14 +658,70 @@ pub fn derive_ext(name: &str) -> Option<String> {
     Some(ext.to_ascii_lowercase())
 }
 
+// ==================== 列表条目 ====================
+
+/// 列表条目 = **地址 + 节点**。
+///
+/// 这是列表响应里元素的形状（[`VdfsResponse::List`] / `vdfs/list` / `vdfs/tree`），
+/// 也是「地址为什么不在 [`VdfsNode`] 里」的答案：地址属于**这一次列举**，不属于
+/// 节点——同一个节点可以在不同列表里以不同地址出现（见 [`VdfsNode`] 的文档）。
+///
+/// ## 线格式：与「带 path 的节点」逐字节相同
+///
+/// `node` 是 `#[serde(flatten)]` 的，因此线上形状仍是 `{path, name, title, …}`——
+/// 这一层拆分**不改变任何既有消费者读到的 JSON**。
+///
+/// ## 谁填 `path`
+///
+/// - **默认**：provider 不填，分发层按 `<父地址>/<name>` 回填（[`VdfsNode::name`]
+///   就是父节点内的路径段，所以这条推导总是成立）；
+/// - **例外**：地址不是那个形状时由 provider 自己填——设置页的条目指向插件自己
+///   那份配置文档（`<目录名>/PLUGIN.yml`，落在另一个挂载点里），这是当前唯一的
+///   实例，也是本字段必须存在（而不能由消费者自己拼）的理由。
+///
+/// 「留空」不等于「没有地址」：它表示「按推导填」，填这件事由分发层负责，provider
+/// 不需要知道自己在树里的位置。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VdfsItem {
+    /// 条目地址（展示口径）；空 = 由分发层按 `<父地址>/<name>` 回填
+    #[serde(default)]
+    pub path: String,
+    /// 节点自述（扁平展开到本条目上）
+    #[serde(flatten)]
+    pub node: VdfsNode,
+}
+
+impl VdfsItem {
+    /// 一个还没有地址的条目（绝大多数 provider 用这个——地址由分发层推导）
+    pub fn new(node: VdfsNode) -> Self {
+        Self {
+            path: String::new(),
+            node,
+        }
+    }
+
+    /// 显式给出地址（地址不是 `<父地址>/<name>` 时用）
+    pub fn with_path(mut self, path: impl Into<String>) -> Self {
+        self.path = path.into();
+        self
+    }
+}
+
+impl From<VdfsNode> for VdfsItem {
+    fn from(node: VdfsNode) -> Self {
+        Self::new(node)
+    }
+}
+
 // ==================== 内容 ====================
 
 /// 节点内容（文本或二进制，二者互斥）。
+///
+/// **不带地址**：内容总是「某个节点的」内容，而那个节点由本次调用的 `path` 参数
+/// 指认（[`VdfsProvider::dispatch`]）。读回来的内容里再写一遍请求地址，等于把
+/// 调用方已经知道的东西回传——消费者要的是正文。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VdfsContent {
-    /// 全路径
-    #[serde(default)]
-    pub path: String,
     /// 文本内容（`binary == false`）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
@@ -708,10 +768,9 @@ fn is_false(b: &bool) -> bool {
 
 impl VdfsContent {
     /// 文本内容
-    pub fn text(path: impl Into<String>, text: impl Into<String>) -> Self {
+    pub fn text(text: impl Into<String>) -> Self {
         let text = text.into();
         Self {
-            path: path.into(),
             size: text.len() as u64,
             text: Some(text),
             ..Default::default()
@@ -719,9 +778,8 @@ impl VdfsContent {
     }
 
     /// 二进制内容（base64）
-    pub fn binary(path: impl Into<String>, b64: impl Into<String>, size: u64) -> Self {
+    pub fn binary(b64: impl Into<String>, size: u64) -> Self {
         Self {
-            path: path.into(),
             b64: Some(b64.into()),
             binary: true,
             size,
@@ -754,9 +812,21 @@ impl VdfsContent {
 // ==================== 写入结果 ====================
 
 /// 写入结果 —— [`VdfsProvider::write`] 的返回值。
+///
+/// ## 为什么没有「写到哪了」的地址
+///
+/// 写入的目标地址是**调用方给的**（[`VdfsProvider::dispatch`] 的 `path` 参数），
+/// 回传它等于把调用方已经知道的东西还回去。唯一调用方不知道的是**匿名写**
+/// （打在目录自身上的那一次，见 [`VdfsRequest::Write`] 的两种目标形态）里
+/// provider 生成的**名字**——那正是 [`Self::name`] 承载的唯一信息。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VdfsWriteResponse {
-    pub path: String,
+    /// provider 生成的条目名（**仅匿名写有**；具名写为 `None`）
+    ///
+    /// 值是 [`VdfsNode::name`] 口径的**路径段**，不是地址：地址由调用方拿它和
+    /// 自己请求的那个目录拼（它本来就知道请求的是哪个目录）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub created: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub etag: Option<String>,
@@ -1215,8 +1285,8 @@ pub type VdfsChangeSink = Arc<dyn Fn(VdfsChange) + Send + Sync>;
 // - [`VdfsRequest::Write`]：**实现方在此完成全部校验**（必填 / 范围 / 格式，失败
 //   返回 [`VdfsError::Invalid`]）。`path` 可指向**具名节点**，也可指向**目录自身**
 //   （`""` = 根）——后者是「新建」的机制形态：使用方只说建在哪个目录，名字由
-//   provider 生成并在 [`VdfsResponse::Write`] 的 `path` 里交回（那是使用方拿到
-//   新地址的**唯一**途径；漏填等于新建之后找不到新节点）。
+//   provider 生成并在 [`VdfsWriteResponse::name`] 里交回（那是使用方拿到新名字的
+//   **唯一**途径；漏填等于新建之后找不到新节点）。
 // - [`VdfsRequest::Write`] 的 `content.create` 是**使用方的写意图**（不存在时
 //   怎么办）：具名节点缺省**就地创建**——配置型资源的地址就是它的身份
 //   （`model` / `mcp` / `skill` 皆如此），只有「更新既有对象的字段」型语义才报
@@ -1302,18 +1372,20 @@ impl std::fmt::Debug for VdfsRequest {
 /// [`VdfsProvider::dispatch`] 的响应：与请求变体一一对应。
 ///
 /// [`VdfsResponse::Unit`] 承载「成功但没有产物」的操作（delete / mkdir /
-/// watch / unwatch——失败走 `Err`，成功无值可带）。响应里的 `path`（节点 /
-/// 内容 / 写入结果上的）一律是**本子树内**的相对路径（与请求的 `path` 参数
-/// 同坐标系），由分发方负责补成树内 / 展示口径。
+/// watch / unwatch——失败走 `Err`，成功无值可带）。
+///
+/// **响应里不出现请求地址**：地址是调用方给的，回传没有信息量。唯一的例外是
+/// [`VdfsResponse::Write`] 的 [`VdfsWriteResponse::name`]——匿名写（打在目录
+/// 自身上的那一次）里 provider 生成的名字，调用方不可能知道。
 #[derive(Debug, Clone)]
 pub enum VdfsResponse {
-    /// [`VdfsRequest::List`]：直接子节点清单
-    List(Vec<VdfsNode>),
+    /// [`VdfsRequest::List`]：直接子节点清单（地址 + 节点，见 [`VdfsItem`]）
+    List(Vec<VdfsItem>),
     /// [`VdfsRequest::Stat`]：节点元数据
     Stat(VdfsNode),
     /// [`VdfsRequest::Read`]：节点内容
     Read(VdfsContent),
-    /// [`VdfsRequest::Write`]：写入结果（`path` 必填——provider 生成的名字全靠它交回）
+    /// [`VdfsRequest::Write`]：写入结果（匿名写时带 provider 生成的名字）
     Write(VdfsWriteResponse),
     /// [`VdfsRequest::Action`]：动作结果
     Action(VdfsActionResult),
@@ -1322,6 +1394,21 @@ pub enum VdfsResponse {
 }
 
 impl VdfsResponse {
+    /// 便捷构造：绝大多数 provider 的清单**没有地址知识**——条目地址由分发层按
+    /// `<父地址>/<name>` 回填，因此这里只收节点，包成无地址的 [`VdfsItem`]。
+    ///
+    /// 也接受已经造好的 [`VdfsItem`]（`T: Into<VdfsItem>`）——清单里混有
+    /// 「地址推得出来的条目」与「地址得自己填的条目」时不必手工拼两次。
+    ///
+    /// 地址不是那个形状时（设置页条目指向别的挂载点）才需要手工造 [`VdfsItem`]。
+    pub fn list<I, T>(nodes: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<VdfsItem>,
+    {
+        Self::List(nodes.into_iter().map(Into::into).collect())
+    }
+
     pub fn is_list(&self) -> bool {
         matches!(self, Self::List(_))
     }
@@ -1352,7 +1439,7 @@ impl VdfsResponse {
     // [`Self::Unit`] 一律视为「成功无产物」，调用方无需再写一臂。
 
     /// [`Self::List`] → 子节点清单
-    pub fn into_list(self) -> Option<Vec<VdfsNode>> {
+    pub fn into_list(self) -> Option<Vec<VdfsItem>> {
         match self {
             Self::List(v) => Some(v),
             Self::Unit => Some(Vec::new()),
@@ -1409,16 +1496,29 @@ impl VdfsResponse {
 /// 任何与挂载相关的成员；自述（标题 / 描述 / 顺序 / 图标 / 根访问位）由
 /// [`crate::symbio_core::PluginMeta`] 承载（`Plugin::meta()`）。
 ///
-/// 唯一例外是 [`Self::root_new_type`]——它同样属于「根的自述」，却**不能**进
-/// `PluginMeta`：表单 schema 可能需要运行期汇流（async），而 `PluginMeta` 是同步
-/// 纯数据。因此这一项留在本 trait 上，由容器合成根节点时现场取。
-///
 /// ## 唯一接口
 ///
 /// [`Self::dispatch`] 收 `(ctx, path, req)`：**`path` 是第一个分发键**——实现方
 /// 先按它定位资源（转发型实现剥首段找下一层；叶子实现按段找自己的资源），再由
 /// `req` 决定操作怎么落地。实现方按变体 `match`，**只实现自己支持的操作**——
 /// 其余臂返回 [`VdfsError::NotImplemented`]，使用方据此隐藏对应入口。
+///
+/// ## 自述一律走 `dispatch`，trait 上不再有第二条通道
+///
+/// 「根的自述」里有一项**进不了** `PluginMeta`：[`VdfsNode::new_type`] 的
+/// `schema` 可能要运行期汇流（如 session 的选项定义来自一次 options 广播），
+/// 而 `PluginMeta` 是同步纯数据。
+///
+/// 它的出口不是 trait 上的另一个方法，而是**节点自述本身**：容器合成挂载点节点
+/// 时，向该 provider 发一次 `dispatch(ctx, "", Stat)`——**provider 对空路径的
+/// `Stat` 就是它对自己根的描述**（这一条早就成立：各 provider 的根 `Stat` 都
+/// 返回「名字留空、由使用方回填」的根节点）。容器只从那份描述里取 `new_type`，
+/// 其余字段仍以 `PluginMeta` 为准。
+///
+/// 这样做的理由不是「少一个方法」，而是**通道只有一条才不会有第二种答案**：
+/// 根与更深层的节点（由 provider 自己在 `list` 里给出 [`VdfsNode::new_type`]）
+/// 走的是同一条路，使用方不必知道「这个节点是不是根」才能问它「你能新建什么」。
+/// 详见 `docs/DECISIONS.md` ADR-030。
 ///
 /// ## 实现约定
 ///
@@ -1438,22 +1538,6 @@ pub trait VdfsProvider: Send + Sync + 'static {
         path: &str,
         req: VdfsRequest,
     ) -> VdfsResult<VdfsResponse>;
-
-    /// **挂载根**可接受的新建元素类型（至多一种；`None` = 根下不可新建）。
-    ///
-    /// 名字带 `root_` 前缀，是因为它只描述**本 provider 的根目录**——而根节点
-    /// **不由 provider 产出**（容器合成，静态部分取自 `PluginMeta`），所以它没有
-    /// 别的渠道把这份自述交出去。这与 `PluginMeta::root_access` / `hidden` 同族：
-    /// 都是「根的自述」，只是这一项**不能进 `PluginMeta`**——表单 schema 可能需要
-    /// 运行期汇流（如 session 的选项定义来自 options 广播），而那是同步纯数据。
-    ///
-    /// provider 自己 `list` 出来的**子目录**若也可新建，由该目录节点自己的
-    /// [`VdfsNode::new_type`] 声明（容器只合成根，不碰更深层）。
-    ///
-    /// 容器合成根/子目录节点时现场调用；默认 `None`。
-    async fn root_new_type(&self) -> Option<VdfsNewType> {
-        None
-    }
 }
 
 /// 类型别名：便于使用方在容器里存放 `dyn VdfsProvider`

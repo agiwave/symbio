@@ -149,7 +149,7 @@ import {
 import {
   isVdfsDir,
   vdfsJoin,
-  type VdfsNode,
+  type VdfsItem,
 } from '@/schemas/vdfs'
 
 const props = defineProps<{
@@ -205,7 +205,7 @@ const {
  * 点中栏列表项：文件 → 选中（右栏详情）；目录 → 钻入其数据地址
  * （emit `open`，宿主通常 push 一个新地址页，同一控件承接）。
  */
-function onItemClick(n: VdfsNode) {
+function onItemClick(n: VdfsItem) {
   if (!isVdfsDir(n)) return void select(n)
   emit('open', n.path)
 }

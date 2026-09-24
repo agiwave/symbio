@@ -58,7 +58,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { isVdfsDraft, type DetailAction, type DetailDefinition, type VdfsNode } from '@/schemas/vdfs'
+import { isVdfsDraft, type DetailAction, type DetailDefinition, type VdfsItem } from '@/schemas/vdfs'
 import type { ImageAttachment } from '@/types'
 import { useSessionsStore } from '@/stores/sessions'
 import { useToast } from '@/composables/useToast'
@@ -67,8 +67,8 @@ import ChatMainPanel from '@/components/session/ChatMainPanel.vue'
 import ChatComposer from '@/components/chat/ChatComposer.vue'
 
 const props = defineProps<{
-  /** 会话节点（`<根>/session/<id>`）；无 id / 名字 = 新建草稿态 */
-  node: VdfsNode | null
+  /** 会话条目（`<根>/session/<id>`）；无地址 = 新建草稿态 */
+  node: VdfsItem | null
   /** 会话自有动作（浏览内部；由 VdfsSessionDetail 声明） */
   actions?: DetailAction[]
   /** 机制动作注入（页面单一定义点计算：删除等） */

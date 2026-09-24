@@ -233,13 +233,12 @@ impl DirVdfs {
         }
         match tokio::fs::read_to_string(&path).await {
             // `VdfsContent::text` 已按正文长度填好 size
-            Ok(text) => Ok(VdfsContent::text(rel, text)),
+            Ok(text) => Ok(VdfsContent::text(text)),
             Err(_) => {
                 let bytes = tokio::fs::read(&path)
                     .await
                     .map_err(|e| VdfsError::internal(format!("读取文件失败：{e}")))?;
                 Ok(VdfsContent::binary(
-                    rel,
                     super::pack::encode_b64(&bytes),
                     bytes.len() as u64,
                 ))
@@ -322,12 +321,12 @@ impl VdfsProvider for DirVdfs {
     ) -> VdfsResult<VdfsResponse> {
         match req {
             VdfsRequest::List { .. } => match entry::split_rel(path) {
-                None => Ok(VdfsResponse::List(
+                None => Ok(VdfsResponse::list(
                     self.entries()
                         .await?
                         .iter()
                         .map(|e| self.node_of(e))
-                        .collect(),
+                        .collect::<Vec<VdfsNode>>(),
                 )),
                 Some((id, rel)) => {
                     let id = self.id_of(id);
@@ -335,7 +334,7 @@ impl VdfsProvider for DirVdfs {
                     if !self.exists(&id) {
                         return Err(VdfsError::not_found(format!("未找到条目「{id}」")));
                     }
-                    Ok(VdfsResponse::List(self.list_inner(&id, rel).await?))
+                    Ok(VdfsResponse::list(self.list_inner(&id, rel).await?))
                 }
             },
 
@@ -362,7 +361,7 @@ impl VdfsProvider for DirVdfs {
                     .ok_or_else(|| VdfsError::invalid("该路径是目录，不可读取内容"))?;
                 let id = self.id_of(id);
                 let content = if rel.is_empty() {
-                    VdfsContent::text(path, self.read_text(&id).await?)
+                    VdfsContent::text(self.read_text(&id).await?)
                 } else {
                     self.read_inner(&id, rel).await?
                 };
@@ -383,7 +382,7 @@ impl VdfsProvider for DirVdfs {
                         .map_err(|e| VdfsError::invalid(e.0))?;
                     let created = self.import_pack(&name, &bytes).await?;
                     return Ok(VdfsResponse::Write(VdfsWriteResponse {
-                        path: name,
+                        name: None,
                         created,
                         etag: None,
                     }));
@@ -395,11 +394,7 @@ impl VdfsProvider for DirVdfs {
                     .write_inner(&id, rel, content.as_text().unwrap_or_default())
                     .await?;
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
-                    path: if rel.is_empty() {
-                        id
-                    } else {
-                        format!("{id}/{rel}")
-                    },
+                    name: None,
                     created,
                     etag: None,
                 }))

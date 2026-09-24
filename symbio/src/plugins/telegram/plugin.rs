@@ -688,7 +688,7 @@ impl vdfs::VdfsProvider for TelegramPlugin {
         match req {
             vdfs::VdfsRequest::List { .. } => {
                 if path.is_empty() {
-                    return Ok(vdfs::VdfsResponse::List(vec![self.config_file.node()]));
+                    return Ok(vdfs::VdfsResponse::list(vec![self.config_file.node()]));
                 }
                 Err(vdfs::VdfsError::not_found(format!(
                     "Telegram是配置挂载点，没有子项：{path}"

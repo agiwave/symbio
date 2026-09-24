@@ -61,7 +61,7 @@ async fn default_provider_ops_work_without_any_differential() {
             &ctx,
             "p1.model",
             VdfsRequest::Write {
-                content: VdfsContent::text("", "{\"id\":\"p1\"}"),
+                content: VdfsContent::text("{\"id\":\"p1\"}"),
             },
         )
         .await
@@ -100,7 +100,10 @@ async fn default_provider_ops_work_without_any_differential() {
         .into_list()
         .unwrap();
     assert_eq!(
-        listed.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(),
+        listed
+            .iter()
+            .map(|it| it.node.name.as_str())
+            .collect::<Vec<_>>(),
         vec!["p1"]
     );
 

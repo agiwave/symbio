@@ -67,7 +67,7 @@ impl VdfsProvider for Rec {
         match req {
             VdfsRequest::List { .. } => {
                 self.note(path);
-                Ok(VdfsResponse::List(match path {
+                Ok(VdfsResponse::list(match path {
                     "" => vec![
                         VdfsNode::file("a.txt", "A", VdfsAccess::READ_WRITE),
                         VdfsNode::dir("sub", "子目录", VdfsAccess::LIST_TRAVERSE),
@@ -85,8 +85,8 @@ impl VdfsProvider for Rec {
             VdfsRequest::Read => {
                 self.note(path);
                 match path {
-                    "a.txt" => Ok(VdfsResponse::Read(VdfsContent::text("", "hello"))),
-                    "sub/b.md" => Ok(VdfsResponse::Read(VdfsContent::text("", "# b"))),
+                    "a.txt" => Ok(VdfsResponse::Read(VdfsContent::text("hello"))),
+                    "sub/b.md" => Ok(VdfsResponse::Read(VdfsContent::text("# b"))),
                     _ => Err(VdfsError::Forbidden("目录不可读".into())),
                 }
             }
@@ -98,7 +98,7 @@ impl VdfsProvider for Rec {
                     ));
                 }
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
-                    path: String::new(),
+                    name: None,
                     created: path == "new.txt",
                     etag: Some("v1".into()),
                 }))
@@ -193,16 +193,13 @@ impl VdfsProvider for TestRoot {
         // 根目录：可列 / 可 stat，其余拒绝
         let Some((d, _rel)) = split_dir(path) else {
             return match req {
-                VdfsRequest::List { .. } => Ok(VdfsResponse::List(
+                VdfsRequest::List { .. } => Ok(VdfsResponse::list(
                     self.dirs
                         .iter()
                         .map(|(n, _p)| {
-                            let mut x =
-                                VdfsNode::dir(n.to_string(), "内存子树", VdfsAccess::LIST_TRAVERSE);
-                            x.path = n.to_string();
-                            x
+                            VdfsNode::dir(n.to_string(), "内存子树", VdfsAccess::LIST_TRAVERSE)
                         })
-                        .collect(),
+                        .collect::<Vec<VdfsNode>>(),
                 )),
                 VdfsRequest::Stat => Ok(VdfsResponse::Stat(VdfsNode::dir(
                     "",
@@ -213,45 +210,29 @@ impl VdfsProvider for TestRoot {
             };
         };
         let (p, rel) = self.resolve(path)?;
-        let mismatch = || VdfsError::internal("响应类型不匹配");
         match req {
+            // 与生产容器同构：**不填条目地址**（它不知道自己挂在哪），
+            // 地址由访问层按请求地址回填（`host::fill_paths`）
             VdfsRequest::List { .. } => {
-                let mut items = p
-                    .dispatch(
-                        ctx,
-                        &rel,
-                        VdfsRequest::List {
-                            limit: None,
-                            before: None,
-                        },
-                    )
-                    .await?
-                    .into_list()
-                    .ok_or_else(mismatch)?;
-                for it in items.iter_mut() {
-                    if it.path.is_empty() {
-                        it.path = if rel.is_empty() {
-                            format!("{d}/{}", it.name)
-                        } else {
-                            format!("{d}/{rel}/{}", it.name)
-                        };
-                    }
-                }
-                Ok(VdfsResponse::List(items))
+                p.dispatch(
+                    ctx,
+                    &rel,
+                    VdfsRequest::List {
+                        limit: None,
+                        before: None,
+                    },
+                )
+                .await
             }
             VdfsRequest::Stat => {
                 if rel.is_empty() {
-                    let mut n = VdfsNode::dir(d.to_string(), "内存子树", VdfsAccess::LIST_TRAVERSE);
-                    n.path = d.to_string();
-                    return Ok(VdfsResponse::Stat(n));
+                    return Ok(VdfsResponse::Stat(VdfsNode::dir(
+                        d.to_string(),
+                        "内存子树",
+                        VdfsAccess::LIST_TRAVERSE,
+                    )));
                 }
-                let mut n = p
-                    .dispatch(ctx, &rel, VdfsRequest::Stat)
-                    .await?
-                    .into_stat()
-                    .ok_or_else(mismatch)?;
-                n.path = path.to_string();
-                Ok(VdfsResponse::Stat(n))
+                p.dispatch(ctx, &rel, VdfsRequest::Stat).await
             }
             VdfsRequest::Read => {
                 if rel.is_empty() {
@@ -263,18 +244,9 @@ impl VdfsProvider for TestRoot {
             }
             VdfsRequest::Write { content } => {
                 // 与生产容器同构：`rel` 为空 = 写在**挂载点目录自身**上（「新建」的
-                // 机制形态），原样转发；provider 生成的名字要补回树内路径。
-                let mut r = p
-                    .dispatch(ctx, &rel, VdfsRequest::Write { content })
-                    .await?
-                    .into_write()
-                    .ok_or_else(mismatch)?;
-                if r.path.is_empty() {
-                    r.path = path.to_string();
-                } else if !r.path.starts_with(&format!("{d}/")) {
-                    r.path = format!("{d}/{}", r.path);
-                }
-                Ok(VdfsResponse::Write(r))
+                // 机制形态），原样转发。回执里的名字也不加工——地址由调用方用
+                // 自己的请求地址拼（`VdfsWriteResponse::name`）。
+                p.dispatch(ctx, &rel, VdfsRequest::Write { content }).await
             }
             VdfsRequest::Delete { recursive } => {
                 if rel.is_empty() {
@@ -363,10 +335,10 @@ async fn list_category_root_fills_paths_and_ext() {
     assert_eq!(data.node.name, "mem", "目录自身节点 = 类别根");
     assert_eq!(data.items.len(), 2);
     assert_eq!(data.items[0].path, ".vdfsv2/mem/a.txt");
-    assert_eq!(data.items[0].ext.as_deref(), Some("txt"));
+    assert_eq!(data.items[0].node.ext.as_deref(), Some("txt"));
     assert_eq!(data.items[1].path, ".vdfsv2/mem/sub");
-    assert!(data.items[1].is_dir());
-    assert!(data.items[1].ext.is_none());
+    assert!(data.items[1].node.is_dir());
+    assert!(data.items[1].node.ext.is_none());
 }
 
 /// 深层地址：门面在进出两处各做一次口径映射，provider 始终只见相对路径
@@ -381,7 +353,7 @@ async fn deep_virtual_paths_pass_through_relative() {
         vec!["sub"],
         "门面把 .vdfsv2/mem/sub 拆成相对路径 sub"
     );
-    assert_eq!(data.items[0].name, "b.md");
+    assert_eq!(data.items[0].node.name, "b.md");
     assert_eq!(data.items[0].path, ".vdfsv2/mem/sub/b.md");
     assert_eq!(data.node.name, "sub");
 }
@@ -412,10 +384,7 @@ async fn stat_read_and_backfill() {
     let resp = dispatch(&fs, VDFS_READ, &ctx).await.unwrap().unwrap();
     let c = resp.get::<VdfsContent>().unwrap();
     assert_eq!(c.text.as_deref(), Some("hello"));
-    assert_eq!(
-        c.path, ".vdfsv2/mem/a.txt",
-        "provider 未填 path，由访问层回填"
-    );
+    // 内容**不带地址**：地址在请求里已经有了，回显没有信息量
 
     let ctx = ctx_with(json!({ "path": ".vdfsv2/mem/sub/b.md" }));
     let n = dispatch(&fs, VDFS_STAT, &ctx)
@@ -424,7 +393,6 @@ async fn stat_read_and_backfill() {
         .unwrap()
         .get::<VdfsNode>()
         .unwrap();
-    assert_eq!(n.path, ".vdfsv2/mem/sub/b.md");
     assert_eq!(n.effective_ext().as_deref(), Some("md"));
     assert_eq!(n.access.flags(), "r");
 
@@ -459,7 +427,7 @@ async fn write_requires_content_and_maps_validation_fields() {
         .unwrap()
         .get::<VdfsWriteResponse>()
         .unwrap();
-    assert_eq!(w.path, ".vdfsv2/mem/a.txt");
+    assert!(w.name.is_none(), "具名写没有名字可交回");
     assert_eq!(w.etag.as_deref(), Some("v1"));
 
     // 字段级校验错误：载荷序列化为 JSON 置于错误文案位，可解析还原
@@ -735,6 +703,6 @@ async fn resolve_fs_fetches_root_via_trait_method() {
         .unwrap()
         .items;
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0].name, "mem");
+    assert_eq!(items[0].node.name, "mem");
     assert_eq!(items[0].path, ".vdfsv2/mem");
 }

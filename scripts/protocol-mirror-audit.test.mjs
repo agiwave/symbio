@@ -141,13 +141,14 @@ const PROTOCOL_RS_SRC = [
   'pub const VDFS_LIST: &str = "vdfs/list";',
 ].join('\n')
 
-/** 后端 vdfs_provider（A 组的另一常量源 + D 组 8 对结构体的后端侧） */
+/** 后端 vdfs_provider（A 组的另一常量源 + D 组 9 对结构体的后端侧） */
 const VDFS_PROVIDER_RS_SRC = [
   'pub const VDFS_KIND_MESSAGES: &str = "messages";',
   'pub const VDFS_EXT_SESSION: &str = "session";',
   'pub const VDFS_EXT_MESSAGE: &str = "message";',
   '',
   rsStruct('VdfsNode', 'path', 'name'),
+  rsStruct('VdfsItem', 'path'),
   rsStruct('VdfsChange', 'path', 'change'),
   rsStruct('VdfsAccess', 'read', 'write'),
   rsStruct('VdfsContent', 'path', 'text'),
@@ -167,6 +168,7 @@ const VDFS_TS_SRC = [
   "export const VDFS_EXT_MESSAGE = 'message'",
   '',
   tsIface('VdfsNode', 'path', 'name'),
+  tsIface('VdfsItem', 'path'),
   tsIface('VdfsChange', 'path', 'change'),
   tsIface('VdfsAccess', 'read', 'write'),
   tsIface('VdfsContent', 'path', 'text'),
@@ -359,7 +361,7 @@ test('全部一致 → 退出码 0', () => {
   assert.equal(r.status, 0, r.stdout)
   assert.match(
     r.stdout,
-    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 6 张闭集词表 \+ D 组 18 对结构体字段 \+ E 组 1 条跨栈导航头/,
+    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 6 张闭集词表 \+ D 组 19 对结构体字段 \+ E 组 1 条跨栈导航头/,
   )
 })
 

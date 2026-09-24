@@ -15,11 +15,15 @@ use super::*;
 /// - `schema`    = 表单定义（没有它，`form` 渲染器渲染不出任何字段）。
 #[tokio::test]
 async fn new_type_declares_the_landing_detail() {
-    // 「根下可新建类型」是 provider 的异步自述（不在同步的 `PluginMeta` 上）
-    let t = McpPlugin::default()
-        .root_new_type()
+    // 「根下可新建类型」挂在**根节点自己的自述**上（不在同步的 `PluginMeta` 上）：
+    // 走 `Stat("")`，与更深层节点同一条通道（`VdfsNode::new_type`）。
+    let root = McpPlugin::default()
+        .dispatch(&VdfsContext::empty(), "", VdfsRequest::Stat)
         .await
-        .expect("根下可新建 MCP Server");
+        .unwrap()
+        .into_stat()
+        .expect("根节点自述");
+    let t = root.new_type.expect("根下可新建 MCP Server");
     assert_eq!(t.ext, PLUGIN_MCP, "呈现扩展名是 MCP 自己的，不是包的");
     assert_eq!(
         t.node_ext.as_deref(),

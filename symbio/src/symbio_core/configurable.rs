@@ -9,9 +9,9 @@
 //! |---|---|---|
 //! | 能力 | [`crate::symbio_core::CapabilityVisitor`] | 可调用对象（工具 / 模型服务 / 提示词） |
 //! | 选项 | [`crate::symbio_core::OptionVisitor`] | 可展示的数据节点（会话输入区的可选项） |
-//! | 可配置 | [`ConfigurableVisitor`] | 「设置页里该怎么列这一份配置」的**节点** |
+//! | 可配置 | [`ConfigurableVisitor`] | 「设置页里该怎么列这一份配置」的**条目** |
 //!
-//! ## 为什么收集的是「一个节点」而不是「一个 provider」
+//! ## 为什么收集的是「一个条目」而不是「一个 provider」
 //!
 //! 声明说的是「**我有**配置、长这样」，不是「配置由我代管」——配置的读写仍归
 //! **拥有者**（插件配置 = 插件目录里的一个文件，见
@@ -25,6 +25,15 @@
 //! - **呈现扩展名与表单定义**：设置页据此把条目渲染成**同一个表单**——定义只有
 //!   一份来源（拥有者的 [`ConfigFile`](crate::symbio_core::plugin_dir::ConfigFile)），
 //!   列表只是把它转述出去。
+//!
+//! ## 为什么产物是 [`VdfsItem`] 而不是 [`VdfsNode`]
+//!
+//! 因为**地址在这里不可推导**。设置页的条目指向 `<目录名>/PLUGIN.yml`——那是一个
+//! **跨挂载点**的地址（文件在插件自己的目录里，条目却列在设置页这棵子树下）。
+//! 分发层回填地址的规则是 `<父地址>/<name>`，在这里会算成
+//! `setting/<目录名>`——一个根本不存在的位置。所以拥有者必须**连地址一起**交出来，
+//! 而地址属于「这一份列表」，不属于节点本身（节点是纯自述）。这就是 [`VdfsNode`]
+//! 不带 `path`、而 [`VdfsItem`] 带的理由；本文件是这条边界的**唯一现存实例**。
 //!
 //! 图标不在这里：VDFS 不下发图标，前端按 `kind:名字` 查自己的 UI 映射表
 //! （`registry/vdfsIcons.ts`，`setting:<目录名>` 已登记）。声明只带数据，
@@ -41,7 +50,7 @@
 //! 声明自带目录名，不存在归属歧义，所以容器可以让所有子插件注册进同一个实例。
 
 use crate::symbio_core::plugin_dir::{ConfigFile, PLUGIN_FILE};
-use crate::symbio_core::vdfs_provider::VdfsNode;
+use crate::symbio_core::vdfs_provider::VdfsItem;
 use crate::symbio_core::{InvokeRequest, InvokeRequestExt, CONFIG_VISITOR};
 use async_trait::async_trait;
 use indexmap::IndexMap;
@@ -55,15 +64,15 @@ use tokio::sync::RwLock;
 #[async_trait]
 pub trait ConfigurableVisitor: Send + Sync + 'static {
     /// 声明一条（同条目名覆盖）
-    async fn register_configurable(&self, node: VdfsNode);
+    async fn register_configurable(&self, item: VdfsItem);
 
     /// 列出已声明的条目（按注册顺序）
-    async fn list_configurables(&self) -> Vec<VdfsNode>;
+    async fn list_configurables(&self) -> Vec<VdfsItem>;
 }
 
 /// 默认可配置声明收集器：内存 IndexMap 实现，一次收集一个实例。
 pub struct DefaultConfigurableVisitor {
-    items: Arc<RwLock<IndexMap<String, VdfsNode>>>,
+    items: Arc<RwLock<IndexMap<String, VdfsItem>>>,
 }
 
 impl DefaultConfigurableVisitor {
@@ -82,12 +91,12 @@ impl Default for DefaultConfigurableVisitor {
 
 #[async_trait]
 impl ConfigurableVisitor for DefaultConfigurableVisitor {
-    async fn register_configurable(&self, node: VdfsNode) {
-        let key = node.name.clone();
-        self.items.write().await.insert(key, node);
+    async fn register_configurable(&self, item: VdfsItem) {
+        let key = item.node.name.clone();
+        self.items.write().await.insert(key, item);
     }
 
-    async fn list_configurables(&self) -> Vec<VdfsNode> {
+    async fn list_configurables(&self) -> Vec<VdfsItem> {
         self.items.read().await.values().cloned().collect()
     }
 }
@@ -108,19 +117,20 @@ pub async fn announce_configurable(ctx: &Arc<dyn InvokeRequest>, config: &Config
 ///
 /// 与 [`ConfigFile::node`] 的区别只有**名字与地址**：
 ///
-/// - `node()` 是「本插件目录里的那个文件」——名字 `PLUGIN.yml`，地址由容器回填；
+/// - `node()` 是「本插件目录里的那个文件」——名字 `PLUGIN.yml`，地址由分发层按
+///   `<父地址>/<name>` 回填；
 /// - 本函数给的是「设置列表里的一项」——名字用**目录名**（列表内唯一，前端按它
-///   查图标 `setting:<目录名>`），地址用**真实地址** `<目录名>/PLUGIN.yml`。
+///   查图标 `setting:<目录名>`），地址用**真实地址** `<目录名>/PLUGIN.yml`，
+///   必须显式带着，因为它跨挂载点、推不出来（见模块文档）。
 ///
 /// 其余（标题 / 呈现扩展名 / 表单定义 / 访问位）直接取配置文档自己的节点视图，
 /// 因此定义只有一份来源。`kind` 留空由**消费者**按自己所在的场景覆盖
 /// （设置页填 `setting`）——同一条声明换个地方列，场景标签就该换。
-pub fn entry_of(config: &ConfigFile) -> VdfsNode {
+pub fn entry_of(config: &ConfigFile) -> VdfsItem {
     let dir = config.dir().name();
     let mut n = config.node();
     n.name = dir.to_string();
-    n.path = format!("{dir}/{PLUGIN_FILE}");
-    n
+    VdfsItem::new(n).with_path(format!("{dir}/{PLUGIN_FILE}"))
 }
 
 #[cfg(test)]

@@ -355,7 +355,7 @@ fn request_variant_set_is_the_operation_surface() {
         VdfsRequest::Stat,
         VdfsRequest::Read,
         VdfsRequest::Write {
-            content: VdfsContent::text("a", "x"),
+            content: VdfsContent::text("x"),
         },
         VdfsRequest::Delete { recursive: false },
         VdfsRequest::Mkdir,
@@ -402,7 +402,7 @@ async fn unsupported_ops_report_not_implemented() {
         VdfsRequest::Stat,
         VdfsRequest::Read,
         VdfsRequest::Write {
-            content: VdfsContent::text("a", "x"),
+            content: VdfsContent::text("x"),
         },
         VdfsRequest::Delete { recursive: true },
         VdfsRequest::Mkdir,

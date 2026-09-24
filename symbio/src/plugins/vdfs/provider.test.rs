@@ -40,7 +40,7 @@ impl VdfsProvider for Rec {
         match req {
             VdfsRequest::List { .. } => {
                 self.note(path);
-                Ok(VdfsResponse::List(vec![VdfsNode::file(
+                Ok(VdfsResponse::list(vec![VdfsNode::file(
                     "a.txt",
                     "a.txt",
                     VdfsAccess::READ,
@@ -48,12 +48,12 @@ impl VdfsProvider for Rec {
             }
             VdfsRequest::Read => {
                 self.note(path);
-                Ok(VdfsResponse::Read(VdfsContent::text("", "hello")))
+                Ok(VdfsResponse::Read(VdfsContent::text("hello")))
             }
             VdfsRequest::Write { .. } => {
                 self.note(path);
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
-                    path: String::new(),
+                    name: None,
                     created: true,
                     etag: None,
                 }))
@@ -139,14 +139,14 @@ async fn workdir_reaches_the_physical_layer() {
 
     // 目录根：可列、不可读
     let items = vdfs.list(&ctx, "/").await.unwrap();
-    assert_eq!(items[0].name, "hello.txt");
+    assert_eq!(items[0].node.name, "hello.txt");
     assert!(matches!(
         vdfs.read(&ctx, "/").await.unwrap_err(),
         VdfsError::Forbidden(_)
     ));
 
     // 写入 / 建目录 / 删除走同一条物理通道
-    vdfs.write(&ctx, "sub/new.txt", &VdfsContent::text("", "x"))
+    vdfs.write(&ctx, "sub/new.txt", &VdfsContent::text("x"))
         .await
         .unwrap();
     assert!(dir.join("sub/new.txt").exists());

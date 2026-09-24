@@ -7,8 +7,9 @@
 //! 统一渲染（provider 声明 container_kinds 的条目，详情区顶部入口条），
 //! 不属于本定义。
 //!
-//! **草稿（新建）态用的是同一份定义**：`root_new_type` 把本定义作为 `schema`
-//! 下发，于是「点添加」与「选中一项」进的是同一张页。差别由动作的 `when` /
+//! **草稿（新建）态用的是同一份定义**：根节点自述里的 `new_type`
+//! （`VdfsNode::new_type`）把本定义作为 `schema` 下发，于是「点添加」与
+//! 「选中一项」进的是同一张页。差别由动作的 `when` /
 //! `disabled_when` 表达——草稿上只有「导入整包」可用（它正是新建智能体的
 //! 唯一入口），其余动作要么隐藏（`open-container`）要么禁用（导出 / 删除）。
 
@@ -70,7 +71,7 @@ pub fn agent_detail_definition() -> DetailDefinition {
             // 「导入整包」：VDFS 节点动作 `import`（vdfs/action）——**只在草稿
             // （新建）态**出现：条目 id 取自包内 manifest，落成后无从再导（要换
             // 内容就删掉重导）。它是「新建一个智能体」在详情页上的唯一入口，
-            // 与「导出」「删除」同级——不是 `root_new_type` 上的一个字段。
+            // 与「导出」「删除」同级——不是 `new_type` 上的一个字段。
             DetailAction {
                 id: crate::symbio_core::vdfs_provider::VDFS_ACTION_IMPORT.into(),
                 label: "导入整包".into(),

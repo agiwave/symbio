@@ -48,14 +48,12 @@ import {
   type SessionMetadata
 } from '@/services/session'
 import { writeVdfs } from '@/services/vdfs'
-import { vdfsRoot } from '@/schemas/vdfsRoot'
 import {
   VDFS_STATUS_WORKING,
   chimeKindOfOutcome,
   isFailedStatus,
   isWorkingStatus,
   sessionRuntimeOf,
-  vdfsBase,
   vdfsSessionAddr,
   type VdfsNode,
 } from '@/schemas/vdfs'
@@ -688,16 +686,16 @@ export const useSessionsStore = defineStore('sessions', () => {
       if (fallback) meta.workdir = fallback
     }
 
-    // 1. 后端生成 id：写会话挂载根 = 「新建一个会话，名字由 provider 定」
+    // 1. 后端生成 id：写会话挂载根 = 「新建一个会话，名字由 provider 定」。
+    //    匿名写的回执只给**名字**（`VdfsWriteResponse.name`），地址由调用方拼——
+    //    这里要的就是那一段 id。
     const resp = await writeVdfs(
       await ensureSessionMountDir(),
       JSON.stringify({ metadata: meta }),
       { create: true }
     )
-    const id = vdfsBase(resp.path)
-    // `vdfsBase` 对空路径返回**虚拟根**这个哨兵，因此空地址既不是 `''` 也不是
-    // 合法 id——必须显式挡掉，否则会插一条 id 为 `<根>` 的幽灵会话。
-    if (!id || id === vdfsRoot()) throw new Error('新建会话未返回地址（provider 未给出新节点路径）')
+    const id = resp.name
+    if (!id) throw new Error('新建会话未返回名字（provider 未给出新条目名）')
 
     // 2. 立即在本地插入"未持久化"条目（与后端写同一份 meta，保证
     //    ModelChatPanel onMounted 从本地 list.metadata 同步水合时拿得到草稿选择）

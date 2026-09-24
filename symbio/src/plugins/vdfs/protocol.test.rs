@@ -63,8 +63,12 @@ fn write_request_carries_create_intent() {
     assert!(v.get("create").is_none(), "false 不序列化");
 }
 
+/// 线格式不变：条目 = `{path, …节点字段}`（[`VdfsItem`] 用 `#[serde(flatten)]`）
+///
+/// 地址从**节点**移到**条目**上，线上形状一个字节没变——这是这次收敛能安全落地的
+/// 前提：所有既有消费者读到的仍是同一个 `{path, name, title, …}`。
 #[test]
-fn list_response_roundtrips_node_paths() {
+fn list_item_keeps_the_wire_shape() {
     let resp = VdfsListResponse {
         path: "/mem".into(),
         node: VdfsNode::dir(
@@ -72,14 +76,17 @@ fn list_response_roundtrips_node_paths() {
             "内存",
             crate::symbio_core::vdfs_provider::VdfsAccess::LIST,
         ),
-        items: vec![VdfsNode::file(
+        items: vec![VdfsItem::new(VdfsNode::file(
             "a.txt",
             "A",
             crate::symbio_core::vdfs_provider::VdfsAccess::READ,
-        )],
+        ))
+        .with_path("mem/a.txt")],
     };
     let v = serde_json::to_value(&resp).unwrap();
     assert_eq!(v["items"][0]["name"], serde_json::json!("a.txt"));
+    assert_eq!(v["items"][0]["path"], serde_json::json!("mem/a.txt"));
     let back: VdfsListResponse = serde_json::from_value(v).unwrap();
     assert_eq!(back.items.len(), 1);
+    assert_eq!(back.items[0].path, "mem/a.txt");
 }

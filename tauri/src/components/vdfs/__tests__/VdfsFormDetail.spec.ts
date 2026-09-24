@@ -16,9 +16,9 @@ import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import VdfsFormDetail from '../VdfsFormDetail.vue'
 import DetailForm from '../DetailForm.vue'
-import type { DetailAction, DetailDefinition, VdfsNode } from '@/schemas/vdfs'
+import type { DetailAction, DetailDefinition, VdfsItem } from '@/schemas/vdfs'
 
-function formNode(schema: Partial<DetailDefinition>): VdfsNode {
+function formNode(schema: Partial<DetailDefinition>): VdfsItem {
   return {
     path: '@vfs/model/p1',
     name: 'p1',
@@ -64,7 +64,7 @@ describe('VdfsFormDetail 传参基线（通道适配 + 直通）', () => {
     })
     const form = w.findComponent(DetailForm)
     expect(form.props('values')).toEqual({ base_url: 'https://api' })
-    // 节点原样下传（同一份 VdfsNode，不再映射成另一种摘要形状）
+    // 节点原样下传（同一份条目，不再映射成另一种摘要形状）
     expect(form.props('node')).toEqual(node)
   })
 })

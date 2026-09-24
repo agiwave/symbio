@@ -36,7 +36,8 @@ use crate::symbio_core::{
 use std::sync::Arc;
 
 use crate::symbio_core::vdfs::{
-    self, DynVdfsProvider, VdfsAccess, VdfsContext, VdfsError, VdfsNode, VdfsProvider, VdfsResult,
+    self, DynVdfsProvider, VdfsAccess, VdfsContext, VdfsError, VdfsItem, VdfsNode, VdfsProvider,
+    VdfsResult,
 };
 
 /// 无状态：本插件的全部内容就是一份**固定分区清单**（两个前端自持分区），
@@ -158,7 +159,7 @@ fn section_node(s: &SectionSpec) -> VdfsNode {
 /// 声明由容器在广播 `TRAVERSE_AVAILABLE_TOOLS` 时收集并写回请求 ctx
 /// （见 `plugins/composite/vdfs.rs::children_of`），所以这里既不需要反查插件目录，
 /// 也不需要硬编码任何插件名；收集器缺失时（例如容器没参与本次请求）静默为空。
-async fn config_entries(ctx: &VdfsContext) -> Vec<VdfsNode> {
+async fn config_entries(ctx: &VdfsContext) -> Vec<VdfsItem> {
     let Ok(host) = host_ctx(ctx) else {
         return Vec::new();
     };
@@ -169,12 +170,12 @@ async fn config_entries(ctx: &VdfsContext) -> Vec<VdfsNode> {
         .list_configurables()
         .await
         .into_iter()
-        .map(|mut n| {
-            n.kind = PLUGIN_SETTING.to_string();
+        .map(|mut it| {
+            it.node.kind = PLUGIN_SETTING.to_string();
             // 配置条目同样是**静态**的（它就是一份文档，没有运行态可言）——
             // 与分区一致地显式声明无状态，设置列表因此整列没有状态点。
-            n.status = vdfs::VDFS_STATUS_NONE.to_string();
-            n
+            it.node.status = vdfs::VDFS_STATUS_NONE.to_string();
+            it
         })
         .collect()
 }
@@ -200,8 +201,12 @@ impl VdfsProvider for SettingPlugin {
                 // 动手的东西，后者是应用自身的展示项，排尾不挡路。两段各自保序（插件段按声明
                 // 注册顺序，分区段按 `SETTING_SECTIONS`）。
                 let mut items = config_entries(ctx).await;
-                items.extend(SETTING_SECTIONS.iter().map(section_node));
-                Ok(vdfs::VdfsResponse::List(items))
+                items.extend(
+                    SETTING_SECTIONS
+                        .iter()
+                        .map(|s| VdfsItem::new(section_node(s))),
+                );
+                Ok(vdfs::VdfsResponse::list(items))
             }
             vdfs::VdfsRequest::Stat => {
                 if path.is_empty() {

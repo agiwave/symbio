@@ -136,14 +136,16 @@ export default defineCase(
         }),
         'vdfs/write(create)',
       );
-      const sessionPath = created.path;
-      assert(typeof sessionPath === 'string' && sessionPath.length > 0, '新建应返回会话地址');
+      // 匿名写（打在会话挂载根上）→ 回执只给**名字**（provider 生成的 id）；
+      // 地址由调用方拿自己的请求目录 + 这个名字拼
+      const sid = created.name;
+      assert(typeof sid === 'string' && sid.length > 0, '新建应回执会话名');
       assertEq(created.created, true, '新建应回执 created=true');
-      const sid = sessionPath.replace(/\/+$/, '').split('/').pop();
       assert(sid && sid !== 'session', `会话 id 应由 provider 生成（实得 ${sid}）`);
+      const sessionPath = `${mount}/${sid}`;
 
       const findItem = (list, what) => {
-        const item = (list.items ?? []).find((n) => n.path === sessionPath || n.name === sid);
+        const item = (list.items ?? []).find((n) => n.name === sid);
         assert(
           item,
           `${what} 的清单里应有会话 ${sid}（实际 ${JSON.stringify((list.items ?? []).map((n) => n.path))}）`,

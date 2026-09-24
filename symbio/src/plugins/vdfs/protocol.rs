@@ -12,7 +12,7 @@
 //!
 //! [`VdfsProvider`]: crate::symbio_core::vdfs_provider::VdfsProvider
 
-use crate::symbio_core::vdfs_provider::{VdfsContent, VdfsNode};
+use crate::symbio_core::vdfs_provider::{VdfsContent, VdfsItem, VdfsNode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -140,7 +140,6 @@ impl VdfsWriteRequest {
     pub fn to_content(&self) -> VdfsContent {
         match (&self.text, &self.b64) {
             (Some(t), _) => VdfsContent {
-                path: self.path.clone(),
                 size: t.len() as u64,
                 text: Some(t.clone()),
                 etag: self.etag.clone(),
@@ -148,7 +147,6 @@ impl VdfsWriteRequest {
                 ..Default::default()
             },
             (None, Some(b)) => VdfsContent {
-                path: self.path.clone(),
                 b64: Some(b.clone()),
                 binary: true,
                 etag: self.etag.clone(),
@@ -156,7 +154,6 @@ impl VdfsWriteRequest {
                 ..Default::default()
             },
             (None, None) => VdfsContent {
-                path: self.path.clone(),
                 etag: self.etag.clone(),
                 create: self.create,
                 ..Default::default()
@@ -191,36 +188,35 @@ pub struct VdfsSearchRequest {
 
 /// `vdfs/list` 响应；`vdfs/root` 复用同一形状——后者的 `path` 就是**根地址**
 /// （调用方没给地址，由宿主填上它自己挂的那个名字）。
+///
+/// `path` 是本响应**唯一**的地址字段，它存在的理由只有上面那一条：`vdfs/root`
+/// 的调用方无从知道根叫什么。`vdfs/list` 走同一形状，于是那里它等于回显请求
+/// 地址（同一份响应形状服务两个操作，不为回显单独造一个类型）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VdfsListResponse {
     /// 被列出目录的全路径（`vdfs/root` 时为虚拟根地址）
     pub path: String,
     /// 目录自身节点
     pub node: VdfsNode,
-    pub items: Vec<VdfsNode>,
+    /// 子条目（地址 + 节点，见 [`VdfsItem`]）
+    pub items: Vec<VdfsItem>,
 }
 
-/// `vdfs/tree` 响应（扁平节点列表，`path` 字段表达层级）
+/// `vdfs/tree` 响应（**扁平**条目列表——层级由每个条目的 `path` 表达）
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VdfsTreeResponse {
-    pub path: String,
-    pub nodes: Vec<VdfsNode>,
+    /// 子条目（扁平；`path` 是各自的全路径，据此还原层级）
+    #[serde(default)]
+    pub nodes: Vec<VdfsItem>,
     /// 是否因深度 / 数量上限被截断
     #[serde(default)]
     pub truncated: bool,
-}
-
-/// `vdfs/delete` 响应
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct VdfsDeleteResponse {
-    pub path: String,
 }
 
 /// `vdfs/edit` 响应 —— 编辑是**访问层的组合操作**（`read` → 精确替换 → `write`），
 /// **不属于 `VdfsProvider` trait**（provider 只出原子操作，组合逻辑只写一次）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VdfsEditResponse {
-    pub path: String,
     /// 实际替换次数（0 = 内容已为最新，无需修改）
     #[serde(default)]
     pub replaced: usize,

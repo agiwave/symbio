@@ -41,8 +41,16 @@ async fn vdfs_self_description_has_no_mount() {
     assert!(!meta.root_access.traverse, "会话是叶子，不参与树遍历");
 
     // 根下可新建「会话」——类型即「新建」入口的唯一依据。
-    // 它不在同步的 `PluginMeta` 上（schema 需运行期汇流），由 provider 现场给。
-    let t = p.root_new_type().await.expect("根下可新建会话");
+    // 它不在同步的 `PluginMeta` 上（schema 需运行期汇流），由 provider 在
+    // **根节点自己的自述**里现场给（`Stat("")`——与更深层节点同一条通道，
+    // 见 `VdfsNode::new_type`）。
+    let root = p
+        .dispatch(&vctx(), "", STAT)
+        .await
+        .unwrap()
+        .into_stat()
+        .expect("根节点自述");
+    let t = root.new_type.expect("根下可新建会话");
     assert_eq!(t.ext, vdfs::VDFS_EXT_SESSION);
     assert_eq!(t.title, "会话");
     // 草稿节点与落成后走**同一个渲染器**（`ext = session`，不是通用表单），
@@ -182,7 +190,7 @@ async fn config_document_is_reachable_but_not_a_session_list_item() {
         .into_list()
         .unwrap();
     assert!(
-        !items.iter().any(|n| n.name == PLUGIN_FILE),
+        !items.iter().any(|it| it.node.name == PLUGIN_FILE),
         "会话清单里只应有会话，配置文件不该出现"
     );
 
@@ -224,7 +232,7 @@ async fn session_list_carries_the_option_definition() {
             &vctx(),
             "",
             vdfs::VdfsRequest::Write {
-                content: vdfs::VdfsContent::text("", "").with_create(),
+                content: vdfs::VdfsContent::text("").with_create(),
             },
         )
         .await
@@ -232,7 +240,8 @@ async fn session_list_carries_the_option_definition() {
         .into_write()
         .unwrap();
     assert!(created.created);
-    let id = created.path;
+    // 匿名写（打在目录自身）→ provider 交回**自己生成的名字**；地址由调用方拼
+    let id = created.name.expect("匿名写必须交回新条目的名字");
 
     let items = p
         .dispatch(&vctx(), "", LIST)
@@ -242,10 +251,10 @@ async fn session_list_carries_the_option_definition() {
         .unwrap();
     let node = items
         .iter()
-        .find(|n| n.name == id)
+        .find(|it| it.node.name == id)
         .expect("清单里有这个会话");
 
-    let schema = node.schema.as_ref().expect("会话节点必须带选项定义");
+    let schema = node.node.schema.as_ref().expect("会话节点必须带选项定义");
     assert_eq!(schema["binding"], serde_json::json!("option"));
     assert_eq!(
         schema["title_fallback"],
@@ -263,7 +272,7 @@ async fn session_list_carries_the_option_definition() {
         &vctx(),
         &id,
         vdfs::VdfsRequest::Write {
-            content: vdfs::VdfsContent::text("", r#"{"metadata":{"risk_level":"high"}}"#),
+            content: vdfs::VdfsContent::text(r#"{"metadata":{"risk_level":"high"}}"#),
         },
     )
     .await
@@ -276,9 +285,12 @@ async fn session_list_carries_the_option_definition() {
         .unwrap()
         .into_list()
         .unwrap();
-    let node = items.iter().find(|n| n.name == id).expect("会话还在");
+    let node = items
+        .iter()
+        .find(|it| it.node.name == id)
+        .expect("会话还在");
     assert_eq!(
-        node.attributes["metadata"]["risk_level"],
+        node.node.attributes["metadata"]["risk_level"],
         serde_json::json!("high"),
         "写入的 metadata 必须原样出现在节点 attributes 上"
     );
@@ -303,8 +315,7 @@ async fn named_create_uses_the_address_as_the_session_id() {
             &vctx(),
             "cli-abc",
             vdfs::VdfsRequest::Write {
-                content: vdfs::VdfsContent::text("", r#"{"metadata":{"workdir":"/w"}}"#)
-                    .with_create(),
+                content: vdfs::VdfsContent::text(r#"{"metadata":{"workdir":"/w"}}"#).with_create(),
             },
         )
         .await
@@ -312,7 +323,10 @@ async fn named_create_uses_the_address_as_the_session_id() {
         .into_write()
         .unwrap();
     assert!(r.created, "具名目标不存在 ⇒ 就地创建");
-    assert_eq!(r.path, "cli-abc", "新建的地址就是使用方写的那一个");
+    assert!(
+        r.name.is_none(),
+        "具名写不回传地址：地址就是使用方写的那一个"
+    );
 
     let s = p.session_of("cli-abc").await.unwrap();
     assert_eq!(s.id, "cli-abc");
@@ -337,7 +351,6 @@ async fn named_create_on_an_existing_session_merges_instead_of_duplicating() {
             "keep",
             vdfs::VdfsRequest::Write {
                 content: vdfs::VdfsContent::text(
-                    "",
                     r#"{"metadata":{"workdir":"/old","agent_id":"a"}}"#,
                 )
                 .with_create(),
@@ -354,7 +367,7 @@ async fn named_create_on_an_existing_session_merges_instead_of_duplicating() {
             &vctx(),
             "keep",
             vdfs::VdfsRequest::Write {
-                content: vdfs::VdfsContent::text("", r#"{"metadata":{"workdir":"/new"}}"#)
+                content: vdfs::VdfsContent::text(r#"{"metadata":{"workdir":"/new"}}"#)
                     .with_create(),
             },
         )
@@ -363,7 +376,7 @@ async fn named_create_on_an_existing_session_merges_instead_of_duplicating() {
         .into_write()
         .unwrap();
     assert!(!again.created, "已存在 ⇒ 覆盖，不是再建一个");
-    assert_eq!(again.path, "keep");
+    assert!(again.name.is_none(), "具名写不回传地址");
 
     let s = p.session_of("keep").await.unwrap();
     assert_eq!(
@@ -401,7 +414,6 @@ async fn write_merges_metadata_shallowly() {
         "s1",
         vdfs::VdfsRequest::Write {
             content: vdfs::VdfsContent::text(
-                "",
                 r#"{"metadata":{"workdir":"/old","agent_id":"keep-me"}}"#,
             )
             .with_create(),
@@ -415,10 +427,7 @@ async fn write_merges_metadata_shallowly() {
         &vctx(),
         "s1",
         vdfs::VdfsRequest::Write {
-            content: vdfs::VdfsContent::text(
-                "",
-                r#"{"metadata":{"workdir":"/new"},"title":"改名"}"#,
-            ),
+            content: vdfs::VdfsContent::text(r#"{"metadata":{"workdir":"/new"},"title":"改名"}"#),
         },
     )
     .await
@@ -442,7 +451,7 @@ async fn write_merges_metadata_shallowly() {
 async fn config_write_validates_before_applying() {
     let (_dir, p) = fixture();
     let before = p.config.read().await.max_messages;
-    let bad = vdfs::VdfsContent::text("", r#"{"max_messages": 1}"#);
+    let bad = vdfs::VdfsContent::text(r#"{"max_messages": 1}"#);
     match p
         .dispatch(
             &vctx(),
@@ -477,12 +486,16 @@ async fn memory_is_a_read_write_file_inside_the_session() {
         .unwrap();
     let mem = items
         .iter()
-        .find(|n| n.name == crate::symbio_core::AGENTS_FILE)
+        .find(|it| it.node.name == crate::symbio_core::AGENTS_FILE)
         .expect("会话内部应列出记忆文件");
-    assert!(!mem.is_dir(), "记忆是文件，不是目录");
-    assert_eq!(mem.access.flags(), "rw", "模型与用户共用这一份，可读可写");
-    assert_eq!(mem.kind, PLUGIN_SESSION);
-    assert!(mem.description.is_some(), "列表里要能看出它是干什么的");
+    assert!(!mem.node.is_dir(), "记忆是文件，不是目录");
+    assert_eq!(
+        mem.node.access.flags(),
+        "rw",
+        "模型与用户共用这一份，可读可写"
+    );
+    assert_eq!(mem.node.kind, PLUGIN_SESSION);
+    assert!(mem.node.description.is_some(), "列表里要能看出它是干什么的");
 
     // ② `stat` 与 `list` 同源（同一份形状，不是另写一份「详情版」）
     let stat = p
@@ -491,10 +504,10 @@ async fn memory_is_a_read_write_file_inside_the_session() {
         .unwrap()
         .into_stat()
         .unwrap();
-    assert_eq!(stat.name, mem.name);
-    assert_eq!(stat.access.flags(), mem.access.flags());
-    assert_eq!(stat.size, mem.size);
-    assert_eq!(stat.description, mem.description);
+    assert_eq!(stat.name, mem.node.name);
+    assert_eq!(stat.access.flags(), mem.node.access.flags());
+    assert_eq!(stat.size, mem.node.size);
+    assert_eq!(stat.description, mem.node.description);
 
     // ③ 还没写过 → 空串（「还没写过」是记忆的正常状态，不是错误）
     assert_eq!(
@@ -514,7 +527,7 @@ async fn memory_is_a_read_write_file_inside_the_session() {
             &vctx(),
             &path,
             vdfs::VdfsRequest::Write {
-                content: vdfs::VdfsContent::text("", "本会话约定：所有时间用 UTC。"),
+                content: vdfs::VdfsContent::text("本会话约定：所有时间用 UTC。"),
             },
         )
         .await
@@ -537,7 +550,7 @@ async fn memory_is_a_read_write_file_inside_the_session() {
             &vctx(),
             &path,
             vdfs::VdfsRequest::Write {
-                content: vdfs::VdfsContent::text("", "改主意了"),
+                content: vdfs::VdfsContent::text("改主意了"),
             },
         )
         .await
@@ -581,7 +594,7 @@ async fn memory_write_respects_the_configured_gate() {
             &vctx(),
             &path,
             vdfs::VdfsRequest::Write {
-                content: vdfs::VdfsContent::text("", "12345")
+                content: vdfs::VdfsContent::text("12345")
             }
         )
         .await
@@ -615,7 +628,7 @@ async fn memory_of_unknown_session_is_not_found() {
             &vctx(),
             &path,
             vdfs::VdfsRequest::Write {
-                content: vdfs::VdfsContent::text("", "x")
+                content: vdfs::VdfsContent::text("x")
             }
         )
         .await
@@ -642,7 +655,7 @@ async fn memory_write_notifies_subscribers() {
         &vctx(),
         &path,
         vdfs::VdfsRequest::Write {
-            content: vdfs::VdfsContent::text("", "记一笔"),
+            content: vdfs::VdfsContent::text("记一笔"),
         },
     )
     .await
@@ -673,7 +686,7 @@ async fn new_session_id_is_a_short_guid() {
     let (_dir, p) = fixture();
     let content = vdfs::VdfsContent {
         create: true,
-        ..vdfs::VdfsContent::text("", "{}")
+        ..vdfs::VdfsContent::text("{}")
     };
     let r = p
         .dispatch(&vctx(), "", vdfs::VdfsRequest::Write { content })
@@ -683,7 +696,7 @@ async fn new_session_id_is_a_short_guid() {
         .unwrap();
     assert!(r.created);
 
-    let id = r.path;
+    let id = r.name.expect("匿名写必须交回新条目的名字");
     assert_eq!(id.len(), 8, "短 GUID 应为 8 位，实得 {id:?}");
     assert!(
         id.chars().all(|c| c.is_ascii_hexdigit()),
@@ -711,7 +724,7 @@ async fn new_session_ids_are_distinct() {
                 vdfs::VdfsRequest::Write {
                     content: vdfs::VdfsContent {
                         create: true,
-                        ..vdfs::VdfsContent::text("", "{}")
+                        ..vdfs::VdfsContent::text("{}")
                     },
                 },
             )
@@ -719,7 +732,8 @@ async fn new_session_ids_are_distinct() {
             .unwrap()
             .into_write()
             .unwrap();
-        assert!(ids.insert(r.path.clone()), "id 重复：{}", r.path);
+        let id = r.name.expect("匿名写必须交回新条目的名字");
+        assert!(ids.insert(id.clone()), "id 重复：{id}");
     }
     assert_eq!(ids.len(), 32);
 }
@@ -770,7 +784,7 @@ async fn transcript_ids(p: &SessionPlugin, id: &str) -> Vec<String> {
         .into_list()
         .unwrap()
         .into_iter()
-        .map(|n| n.name)
+        .map(|it| it.node.name)
         .collect()
 }
 

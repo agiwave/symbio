@@ -226,13 +226,13 @@ D:/tmp/a.txt     绝对路径                          ─┘
 `schemas/vdfsRoot`，`main.ts` 挂载前引导）。于是「改挂载名」= 改
 `VDFS_ADDR_ROOT` 一行 + 全项目零改动。
 
-### 3.2 节点
+### 3.2 节点与条目
 
-`VdfsNode` 是文件与目录的统一表达：
+`VdfsNode` 是文件与目录的统一表达——**一份自述，不含地址**：
 
 | 字段 | 语义 |
 |---|---|
-| `path` / `name` | 全路径（使用方回填） / 父内唯一标识（路径段） |
+| `name` | 父内唯一标识（路径段） |
 | `title` / `description` | 展示标题 / 语义说明（缺省 `title` = `name`） |
 | `kind` | **场景标签**（自由取值；构造器缺省给 `dir` / `file`，场景可覆盖）；机制不据此判定 |
 | `status` | `active` / `working` / `disabled` / `failed` / `unknown`；缺省 `active`，**空串 = 显式声明「无运行态」**（`VDFS_STATUS_NONE`，列表不画状态点）。词表权威处是 `symbio_core::vdfs_provider` 的 `VDFS_STATUS_*` <!-- vocab:VDFS_STATUS_ --> |
@@ -267,7 +267,7 @@ D:/tmp/a.txt     绝对路径                          ─┘
 `kind` 只有一个词表——「场景标签」，不存在「基础类型 + 场景类型」两套口径；目录性
 永远只由 `l` 位表达。
 
-**保留字段名**：`attributes` 会 flatten 到节点顶层，因此机制字段名是保留字，场景
+**保留字段名**：`attributes` 会 flatten 到条目顶层，因此机制字段名是保留字，场景
 扩展字段**不得**与之同名（否则扁平化后互相覆盖）：
 
 ```text
@@ -278,10 +278,26 @@ size  updated_at  children  binary  hidden  schema  new_type  attributes
 新增机制字段时须同步本节；场景侧的命名建议带上自己的前缀（如 `config_type`、
 `meta_tags`），但机制不做强制。
 
+#### 条目：地址属于列表，不属于节点
+
+`path` **不在** `VdfsNode` 上。地址是**某一份列表**给这个节点的定位，不是节点
+自己的属性——同一个节点可以在不同列表里以不同地址出现。实证：设置页的一项指向
+插件自己那份配置文档 `<目录名>/PLUGIN.yml`（落在**另一个挂载点**里），而同一份
+文档在自己的目录里就叫 `PLUGIN.yml`。
+
+于是清单里的每一项是 `VdfsItem`（`path` + `VdfsNode`，`#[serde(flatten)]`，
+**线格式与「带 `path` 的节点」逐字节相同**）：
+
+- 常规情况地址**由分发层按 `<父地址>/<name>` 回填**，provider 不填；
+- 只有「地址不是那个形状」时（设置页条目）才由**拥有者**自己填，分发层原样透出。
+
+读写 `stat` / `read` / `write` 回来的都是**纯节点**——地址在请求里已经有了。
+
 ### 3.3 内容
 
 `VdfsContent` 承载文本或二进制（互斥）：`text` 或 `b64`，由 `binary` 显式标注，
-不做猜测；`size` / `mime` / `etag`（乐观并发令牌，可选实现）。
+不做猜测；`size` / `mime` / `etag`（乐观并发令牌，可选实现）。**不带地址**——
+内容总是「请求的那个节点」的内容，地址在请求里已经有了。
 
 #### 写意图 `create` 与两种目标形态
 
@@ -292,8 +308,9 @@ size  updated_at  children  binary  hidden  schema  new_type  attributes
   ——「新建一个，叫什么由你定」。**这是「新建」在机制上的形态**：使用方只说
   建在哪个目录，不说叫什么（名字是 provider 的私有知识）。因此**写目录自身不是
   错误**：provider 生成一个名字（id 归 provider）、落盘、并**在
-  `VdfsWriteResponse.path` 里给出新节点的相对路径**——那是使用方唯一能拿到新地址
-  的地方。不支持（该目录没有可新建的类型）则照常报错。
+  `VdfsWriteResponse.name` 里给出那个名字**——这是唯一 provider 才知道的一件事。
+  地址由使用方拿自己的请求目录 + 这个名字拼（写文件不需要 API 回传完整路径）。
+  不支持（该目录没有可新建的类型）则照常报错。具名写回 `name: null`。
 
 `create` 位 = **使用方的写意图**：
 
@@ -411,7 +428,7 @@ core 不暴露**）：
 | `vdfs/edit` | `{path, old_string, new_string?}` | `VdfsEditResponse` | 精确字符串替换（**访问层组合操作**：`read` → 替换 → `write`） |
 | `vdfs/search` | `{path?, pattern}` | `VdfsSearchResult` | 文件名 Glob 搜索（**访问层组合操作**：递归 `list` + 过滤） |
 | `vdfs/write` | `{path, text\|b64, create?, etag?}` | `VdfsWriteResponse` | 写内容（`w`） |
-| `vdfs/delete` | `{path, recursive?}` | `VdfsDeleteResponse` | 删除 |
+| `vdfs/delete` | `{path, recursive?}` | `SuccessResponse` | 删除（**无载荷**：删哪儿是使用方自己说的） |
 | `vdfs/mkdir` | `{path}` | `VdfsWriteResponse` | 新建目录 |
 | `vdfs/watch` | `{path}` | `SuccessResponse` | 订阅该子树变更 |
 | `vdfs/unwatch` | `{path}` | `SuccessResponse` | 取消订阅（与 watch 配对） |
@@ -756,8 +773,10 @@ for (name, child) in children {
 1. 为模块实现 `VdfsProvider` —— **只有一个方法** `dispatch(ctx, path, req)`：
    - **自述不在这个 trait 上**。展示名 / 描述 / `order` / `icon` / `hidden` /
      `root_access` 由插件的 `PluginMeta`（`Plugin::meta()`）承载；「根下可新建
-     的那一种东西」走 `VdfsProvider::root_new_type()`（async —— session 的表单
-     schema 需运行期汇流，故不能进那份同步纯数据；缺省 `None` = 不可新建）。
+     的那一种东西」挂在**节点自述**的 `VdfsNode::new_type` 上——根经
+     `Stat("")` 取，更深层节点在自己的 `list` 里带，**同一条通道**
+     （session 的表单 schema 需运行期汇流，故不能进那份同步纯数据；
+     缺省 `None` = 不可新建。见 [ADR-030](../DECISIONS.md)）。
    - 数据操作 = `VdfsRequest` 的变体（`List` / `Stat` / `Read` / `Write` /
      `Delete` / `Mkdir` / `Action` / `Watch` / `Unwatch`）；实现方按变体
      `match`，只实现自己支持的操作，其余返回 `NotImplemented`（使用方据此隐藏

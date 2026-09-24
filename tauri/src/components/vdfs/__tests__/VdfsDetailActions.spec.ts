@@ -15,10 +15,10 @@ import { mount } from '@vue/test-utils'
 import VdfsTextDetail from '../VdfsTextDetail.vue'
 import VdfsReadonlyDetail from '../VdfsReadonlyDetail.vue'
 import VdfsSessionDetail from '../VdfsSessionDetail.vue'
-import type { DetailAction, VdfsNode } from '@/schemas/vdfs'
+import type { DetailAction, VdfsItem } from '@/schemas/vdfs'
 
 /** 一个可写资源节点 */
-function node(partial: Partial<VdfsNode> = {}): VdfsNode {
+function node(partial: Partial<VdfsItem> = {}): VdfsItem {
   return {
     path: '@vfs/model/p1',
     name: 'p1',
@@ -101,7 +101,7 @@ describe('VdfsSessionDetail 动作装配', () => {
     template: '<div class="session-stub" />',
   }
 
-  function mountSession(target: VdfsNode, mechanism: DetailAction[] = MECHANISM) {
+  function mountSession(target: VdfsItem, mechanism: DetailAction[] = MECHANISM) {
     return mount(VdfsSessionDetail, {
       props: { node: target, mechanismActions: mechanism, mechanismBusy: 'delete' },
       global: { stubs: { Session: SessionStub } },

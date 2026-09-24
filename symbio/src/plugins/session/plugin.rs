@@ -611,8 +611,8 @@ fn config_definition() -> DetailDefinition {
 // 会话是 VDFS 的第二个原生 provider：
 //
 // - **根 = 会话清单**：`<根>/session` 的目录内容即全部会话；根下可新建「会话」
-//   （`root_new_type`），**新建语义完全由本 provider 自持**——id 由 provider 生成、
-//   路径名作标题、经 `create` 写意图区分「新建」与「覆盖」；
+//   （根节点自述里的 `new_type`），**新建语义完全由本 provider 自持**——id 由
+//   provider 生成、路径名作标题、经 `create` 写意图区分「新建」与「覆盖」；
 // - **节点 = 单个会话**：`ext = session` → 前端聊天工作区渲染器（同一份详情实现
 //   只服务 VDFS 机制）；
 // - **实时**：会话的任何变更经 [`SessionPlugin::notify_change`] 广播 → `watch`

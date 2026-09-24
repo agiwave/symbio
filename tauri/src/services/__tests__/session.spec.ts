@@ -62,7 +62,7 @@ import {
   vdfsMessageAddr,
   vdfsMessagesAddr,
   vdfsSessionAddr,
-  type VdfsNode,
+  type VdfsItem,
 } from '@/schemas/vdfs'
 import { setVdfsRoot } from '@/schemas/vdfsRoot'
 
@@ -78,8 +78,8 @@ import {
   type SessionMessage,
 } from '../session'
 
-/** 构造一个会话节点（attributes 为 flatten 的场景字段） */
-function sessionNode(over: Partial<VdfsNode> = {}): VdfsNode {
+/** 构造一个会话**条目**（`path` + 节点自述；attributes 为 flatten 的场景字段） */
+function sessionItem(over: Partial<VdfsItem> = {}): VdfsItem {
   return {
     path: vdfsJoin('@vfs/session', 'abc'),
     name: 'abc',
@@ -93,10 +93,10 @@ function sessionNode(over: Partial<VdfsNode> = {}): VdfsNode {
   }
 }
 
-function mockList(items: VdfsNode[]) {
+function mockList(items: VdfsItem[]) {
   vi.mocked(listVdfs).mockResolvedValueOnce({
     path: vdfsJoin('@vfs', 'session'),
-    node: sessionNode({ name: 'session', title: '会话' }),
+    node: sessionItem({ name: 'session', title: '会话' }),
     items,
   })
 }
@@ -104,7 +104,7 @@ function mockList(items: VdfsNode[]) {
 describe('listSessions（<根>/session → SessionListItem）', () => {
   it('请求会话挂载点根，并映射全部字段', async () => {
     mockList([
-      sessionNode({
+      sessionItem({
         message_count: 12,
         metadata: { workdir: '/tmp/demo', title: 'T' },
         meta_tags: ['demo', '12 条'],
@@ -129,7 +129,7 @@ describe('listSessions（<根>/session → SessionListItem）', () => {
   })
 
   it('节点 status 原样透传（不压缩成布尔）；缺省字段回落空态', async () => {
-    mockList([sessionNode({ status: 'working', updated_at: undefined })])
+    mockList([sessionItem({ status: 'working', updated_at: undefined })])
 
     const [first] = await listSessions()
 
@@ -168,9 +168,9 @@ describe('listSessions（<根>/session → SessionListItem）', () => {
 
   it('挂载根下与资源并列的配置文件不进清单（按 ext 判据，不按名字特判）', async () => {
     mockList([
-      sessionNode({ name: 'abc' }),
+      sessionItem({ name: 'abc' }),
       // 本插件的配置文件：真实文件名 `PLUGIN.yml`，ext = form（见 docs/design/vdfs.md §3.4）
-      sessionNode({ name: 'PLUGIN.yml', title: '会话设置', ext: 'form' }),
+      sessionItem({ name: 'PLUGIN.yml', title: '会话设置', ext: 'form' }),
     ])
 
     const out = await listSessions()
@@ -182,7 +182,8 @@ describe('listSessions（<根>/session → SessionListItem）', () => {
 
 describe('deleteSession（会话级删除 → vdfs/delete）', () => {
   it('删除会话走 VDFS 地址，而不是旧 session/clear 路由', async () => {
-    vi.mocked(deleteVdfs).mockResolvedValueOnce({ path: vdfsSessionAddr(SCHEME.mountDir, 'abc') })
+    // 删除**无回执载荷**（删哪儿是调用方自己说的），故只解一个 void
+    vi.mocked(deleteVdfs).mockResolvedValueOnce(undefined)
 
     await deleteSession('abc')
 
@@ -200,7 +201,6 @@ describe('deleteSession（会话级删除 → vdfs/delete）', () => {
 describe('updateSession（会话 metadata → vdfs/write）', () => {
   it('metadata 写入走 VDFS 地址，载荷是 { metadata }', async () => {
     vi.mocked(writeVdfs).mockResolvedValueOnce({
-      path: vdfsSessionAddr(SCHEME.mountDir, 'abc'),
       created: false,
     })
 
@@ -215,7 +215,6 @@ describe('updateSession（会话 metadata → vdfs/write）', () => {
 
   it('title 与 metadata 同时给出时同帧写入（后端浅合并，两者互不覆盖）', async () => {
     vi.mocked(writeVdfs).mockResolvedValueOnce({
-      path: vdfsSessionAddr(SCHEME.mountDir, 'abc'),
       created: false,
     })
 
@@ -227,7 +226,6 @@ describe('updateSession（会话 metadata → vdfs/write）', () => {
 
   it('不给 title 时**不带**该键（否则后端会把标题清成空）', async () => {
     vi.mocked(writeVdfs).mockResolvedValueOnce({
-      path: vdfsSessionAddr(SCHEME.mountDir, 'abc'),
       created: false,
     })
 
@@ -241,7 +239,6 @@ describe('updateSession（会话 metadata → vdfs/write）', () => {
 describe('updateMessage（改写某条消息 → vdfs/write）', () => {
   it('写**单条消息**地址，载荷是消息 JSON', async () => {
     vi.mocked(writeVdfs).mockResolvedValueOnce({
-      path: vdfsMessageAddr(SCHEME, 'abc', 'm1'),
       created: false,
     })
 
@@ -258,7 +255,6 @@ describe('updateMessage（改写某条消息 → vdfs/write）', () => {
 
   it('地址取自 message.id —— 载荷与地址必须指同一条', async () => {
     vi.mocked(writeVdfs).mockResolvedValueOnce({
-      path: vdfsMessageAddr(SCHEME, 'abc', 'm7'),
       created: false,
     })
 

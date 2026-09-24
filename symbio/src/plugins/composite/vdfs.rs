@@ -17,10 +17,15 @@
 //! |---|---|
 //! | 列自身目录 | `dispatch(ctx, "", List)` 返回子目录清单（合成，无需子插件参与） |
 //! | 路径解析 | 首段 = 子目录名，其余 = 该子插件的**相对路径** |
-//! | 全路径回填 | 子节点 / 内容 / 写入响应的 `path` 补成 `<子目录>/<rel>` |
+//! | 地址翻译 | 把子插件的**相对地址**放进 `ctx` 的当前父地址，供其拼绝对地址 |
 //! | 子目录根守卫 | 子目录根不可读 / 删 / 移，也不可 mkdir（**写不在其中**） |
 //! | 跨子目录拒绝 | `move` 只允许在同一子目录内 |
 //! | 事件补全 | 子插件报出的相对路径补成树内全路径再交给上层 sink |
+//!
+//! **本层不填条目地址**：地址是「某一份列表」的定位（[`VdfsItem::path`]），
+//! 按 `<父地址>/<name>` 推导即可，由访问层（`plugins/vdfs/host.rs::fill_paths`）
+//! 用**请求地址**统一回填。本层若自己填，就必须知道自己的挂载前缀——而它不知道
+//! （composite 可被另一个 composite 包含），填出来的会缺前缀。
 //!
 //! 子目录节点的**自述**（标题 / 描述 / 访问位 / 隐藏位 / 可新建类型）取自子插件的
 //! [`PluginMeta`](crate::symbio_core::PluginMeta)——元数据的唯一来源，provider 上
@@ -83,21 +88,6 @@ fn child_path(dir: &str, rel: &str) -> String {
         (true, false) => rel.to_string(),
         (false, true) => dir.to_string(),
         (false, false) => format!("{dir}/{rel}"),
-    }
-}
-
-/// 回填机制级字段：`path`（树内全路径）、`ext`（缺省由 `name` 推导）、`title`（缺省同 name）
-fn fill_node_paths(dir: &str, base_rel: &str, nodes: &mut [VdfsNode]) {
-    for n in nodes.iter_mut() {
-        if n.path.is_empty() {
-            n.path = child_path(dir, &child_path(base_rel, &n.name));
-        }
-        if n.ext.is_none() {
-            n.ext = derive_ext(&n.name);
-        }
-        if n.title.is_empty() {
-            n.title = n.name.clone();
-        }
     }
 }
 
@@ -194,11 +184,10 @@ impl CompositeVdfs {
         n
     }
 
-    /// 子目录节点（`<dir>`）——合成的目录节点，静态自述取自子插件的 PluginMeta。
+    /// 子目录节点（`<dir>`）——合成的目录节点，**静态**自述取自子插件的 PluginMeta。
     ///
-    /// `new_type`（根可新建类型）**不在其中**：它属于根节点的自述，且可能依赖
-    /// 运行期汇流（session 的选项定义来自 options 广播），故走 provider 的 async
-    /// `root_new_type()` 现场取（见下方调用点）。
+    /// `new_type`（根可新建类型）**不在其中**：它要运行期取（见
+    /// [`Self::dir_node_full`]）。
     fn dir_node(dir: &str, p: &Arc<dyn Plugin>) -> VdfsNode {
         let meta: PluginMeta = p.meta();
         let mut n = VdfsNode::dir(
@@ -210,36 +199,35 @@ impl CompositeVdfs {
             },
             meta.root_access,
         );
-        n.path = dir.to_string();
         n.description = meta.description;
         // 子目录节点：它的隐藏属性来自子插件的根声明
         n.hidden = meta.hidden;
         n
     }
 
-    /// 子目录节点 + 动态自述（`new_type`）：异步现场取
-    async fn dir_node_full(dir: &str, p: &Arc<dyn Plugin>) -> VdfsNode {
+    /// 子目录节点 + **动态自述**（`new_type`）：问 provider「你的根长什么样」。
+    ///
+    /// 取法是向该 provider 发一次 `Stat`（空路径 = 它自己的根）——这与「更深层的
+    /// 节点在自己的 `list` 结果里带 [`VdfsNode::new_type`]」是**同一条通道**，
+    /// 使用方不必先知道某个节点是不是根，才能问它「你能新建什么」。
+    ///
+    /// 只取 `new_type`：其余字段仍以 [`PluginMeta`] 为准（那是静态自述的唯一来源，
+    /// 也是设置页等处已经在用的口径）。provider 没答上来时按「根下不可新建」处理
+    /// ——与 `new_type: None` 的语义一致。
+    async fn dir_node_full(sub: &VdfsContext, dir: &str, p: &Arc<dyn Plugin>) -> VdfsNode {
         let mut n = Self::dir_node(dir, p);
-        if let Some(provider) = p.clone().get_vfs_provider() {
-            n.new_type = provider.root_new_type().await.map(Box::new);
+        if let Ok(resp) = p.clone().vdfs_dispatch(sub, "", VdfsRequest::Stat).await {
+            if let Some(root_node) = resp.into_stat() {
+                n.new_type = root_node.new_type;
+            }
         }
         n
     }
 
-    /// 子插件返回的路径 → 树内全路径。
-    ///
-    /// 子插件只认**自身子树内的相对路径**，所以它回显的、或它为新条目生成的名字
-    /// 都只是 `<rel>`，必须补上 `<子目录>/` 才能交给上层（访问层还要再翻译成展示
-    /// 地址）。空串 = 「没填」（例如物理层无从表达新名字）→ 用**请求地址**兜底。
-    ///
-    /// ⚠️ 不能只在空串时兜底：`write` 的返回值是使用方得知「刚建出来的东西在哪」的
-    /// **唯一**途径。漏补即等于新建之后找不到新节点——前端只能停在草稿上。
-    fn fill_path(requested: &str, returned: &str) -> String {
-        if returned.is_empty() {
-            return requested.to_string();
-        }
-        let dir = split_first(requested).map(|(d, _)| d).unwrap_or("");
-        child_path(dir, returned)
+    /// 子目录自己的 ctx（父地址续接成该挂载点）——`dispatch_to` 与根列表共用一处
+    fn sub_ctx(ctx: &VdfsContext, dir: &str) -> VdfsContext {
+        ctx.clone()
+            .with_parent_addr(descend_addr(ctx.parent_addr(), dir))
     }
 
     /// 树内路径 → `(子目录名, 子插件, 相对路径)`；自身目录或无匹配时按错误返回
@@ -297,9 +285,7 @@ impl CompositeVdfs {
         path: &str,
     ) -> VdfsResult<(String, VdfsContext, Arc<dyn Plugin>, String)> {
         let (dir, p, rel) = Self::resolve(dirs, path)?;
-        let sub = ctx
-            .clone()
-            .with_parent_addr(descend_addr(ctx.parent_addr(), dir));
+        let sub = Self::sub_ctx(ctx, dir);
         Ok((dir.to_string(), sub, p.clone(), rel))
     }
 
@@ -336,11 +322,9 @@ impl VdfsProvider for CompositeVdfs {
                 VdfsRequest::List { .. } => {
                     let mut out = Vec::with_capacity(dirs.len());
                     for (d, p) in &dirs {
-                        out.push(Self::dir_node_full(d, p).await);
+                        out.push(Self::dir_node_full(&Self::sub_ctx(ctx, d), d, p).await);
                     }
-                    Ok(VdfsResponse::List(
-                        out.into_iter().filter(|n| !n.hidden).collect(),
-                    ))
+                    Ok(VdfsResponse::list(out.into_iter().filter(|n| !n.hidden)))
                 }
                 VdfsRequest::Stat => Ok(VdfsResponse::Stat(Self::self_node(&dirs))),
                 _ => Err(VdfsError::invalid(
@@ -368,23 +352,25 @@ impl VdfsProvider for CompositeVdfs {
                     .await?
                     .into_list()
                     .ok_or_else(mismatch)?;
-                fill_node_paths(&dir, &rel, &mut items);
+                // 地址与 `ext` / `title` 不在这里补——访问层按**请求地址**统一回填
+                // （见模块文档「本层不填条目地址」）。
                 // 隐藏属性是**机制级**的：任何子树里被标为 hidden 的子节点都不出现，
                 // 不因它来自哪个插件而异。
-                items.retain(|n| !n.hidden);
+                items.retain(|it| !it.node.hidden);
                 Ok(VdfsResponse::List(items))
             }
             VdfsRequest::Stat => {
                 if rel.is_empty() {
-                    return Ok(VdfsResponse::Stat(Self::dir_node_full(&dir, &p).await));
+                    return Ok(VdfsResponse::Stat(
+                        Self::dir_node_full(&sub, &dir, &p).await,
+                    ));
                 }
-                let mut n = p
+                let n = p
                     .clone()
                     .vdfs_dispatch(&sub, &rel, VdfsRequest::Stat)
                     .await?
                     .into_stat()
                     .ok_or_else(mismatch)?;
-                n.path = path.to_string();
                 Ok(VdfsResponse::Stat(n))
             }
             VdfsRequest::Read => {
@@ -393,29 +379,23 @@ impl VdfsProvider for CompositeVdfs {
                         "目录不是可读文件；请读取其子节点".to_string(),
                     ));
                 }
-                let mut c = p
+                let c = p
                     .clone()
                     .vdfs_dispatch(&sub, &rel, VdfsRequest::Read)
                     .await?
                     .into_read()
                     .ok_or_else(mismatch)?;
-                c.path = Self::fill_path(path, &c.path);
                 Ok(VdfsResponse::Read(c))
             }
             VdfsRequest::Write { content } => {
                 // `rel` 为空 = 写在**挂载点目录自身**上。这正是「新建」的机制形态：
-                // 使用方只说「建在哪个目录」，不说「叫什么」——名字由子插件生成。
-                // 是否支持由子插件判定，容器不做类型特判（与 `action` 对空 `rel`
-                // 的处理一致）。
-                let mut r = p
-                    .clone()
+                // 使用方只说「建在哪个目录」，不说「叫什么」——名字由子插件生成，
+                // 并经 [`VdfsWriteResponse::name`] 交回（容器不代拼地址：调用方本来
+                // 就知道它请求的是哪个目录）。是否支持由子插件判定，容器不做类型特判
+                // （与 `action` 对空 `rel` 的处理一致）。
+                p.clone()
                     .vdfs_dispatch(&sub, &rel, VdfsRequest::Write { content })
-                    .await?
-                    .into_write()
-                    .ok_or_else(mismatch)?;
-                // 子插件生成的名字（写在目录自身时）与它回显的相对路径都在这**一次**补齐。
-                r.path = Self::fill_path(path, &r.path);
-                Ok(VdfsResponse::Write(r))
+                    .await
             }
             VdfsRequest::Delete { recursive } => {
                 if rel.is_empty() {

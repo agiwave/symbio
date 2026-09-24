@@ -21,7 +21,7 @@ async fn entry_is_a_drillable_directory() {
             &ctx,
             "demo.skill",
             VdfsRequest::Write {
-                content: VdfsContent::text("", "# demo"),
+                content: VdfsContent::text("# demo"),
             },
         )
         .await
@@ -34,7 +34,7 @@ async fn entry_is_a_drillable_directory() {
             &ctx,
             "demo/scripts/run.sh",
             VdfsRequest::Write {
-                content: VdfsContent::text("", "echo hi"),
+                content: VdfsContent::text("echo hi"),
             },
         )
         .await
@@ -61,7 +61,7 @@ async fn entry_is_a_drillable_directory() {
         .unwrap()
         .into_list()
         .unwrap();
-    let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
+    let names: Vec<&str> = items.iter().map(|it| it.node.name.as_str()).collect();
     assert_eq!(names, vec!["scripts", "SKILL.md"], "目录在前、按名升序");
 
     // 根清单把条目呈现为**目录**（可下钻），不是叶子文件
@@ -79,9 +79,9 @@ async fn entry_is_a_drillable_directory() {
         .into_list()
         .unwrap();
     assert_eq!(root.len(), 1);
-    assert!(root[0].is_dir());
-    assert_eq!(root[0].name, "demo");
-    assert!(root[0].access.traverse);
+    assert!(root[0].node.is_dir());
+    assert_eq!(root[0].node.name, "demo");
+    assert!(root[0].node.access.traverse);
 }
 
 #[tokio::test]
@@ -110,7 +110,7 @@ async fn pack_roundtrip_replaces_whole_entry() {
             &ctx,
             "demo",
             VdfsRequest::Write {
-                content: VdfsContent::text("", "# demo"),
+                content: VdfsContent::text("# demo"),
             },
         )
         .await
@@ -120,7 +120,7 @@ async fn pack_roundtrip_replaces_whole_entry() {
             &ctx,
             "demo/extra.txt",
             VdfsRequest::Write {
-                content: VdfsContent::text("", "x"),
+                content: VdfsContent::text("x"),
             },
         )
         .await
@@ -149,7 +149,7 @@ async fn pack_roundtrip_replaces_whole_entry() {
             &ctx,
             "other",
             VdfsRequest::Write {
-                content: VdfsContent::text("", "# only"),
+                content: VdfsContent::text("# only"),
             },
         )
         .await
@@ -177,7 +177,7 @@ async fn delete_with_children_needs_recursive() {
             &ctx,
             "demo",
             VdfsRequest::Write {
-                content: VdfsContent::text("", "# demo"),
+                content: VdfsContent::text("# demo"),
             },
         )
         .await
@@ -187,7 +187,7 @@ async fn delete_with_children_needs_recursive() {
             &ctx,
             "demo/a.txt",
             VdfsRequest::Write {
-                content: VdfsContent::text("", "x"),
+                content: VdfsContent::text("x"),
             },
         )
         .await
@@ -231,7 +231,7 @@ async fn presentation_ext_is_not_part_of_the_address() {
             &ctx,
             "demo.skill",
             VdfsRequest::Write {
-                content: VdfsContent::text("", "# a"),
+                content: VdfsContent::text("# a"),
             },
         )
         .await
@@ -313,7 +313,7 @@ async fn inner_rel_rejects_separator_smuggling() {
                 &ctx,
                 bad,
                 VdfsRequest::Write {
-                    content: VdfsContent::text("", "pwned"),
+                    content: VdfsContent::text("pwned"),
                 },
             )
             .await

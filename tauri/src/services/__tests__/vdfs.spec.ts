@@ -132,10 +132,11 @@ describe('listVdfs / statVdfs / readVdfs 的失败口径', () => {
     logError.mockReset()
     mocked.mockRejectedValueOnce(new Error('ipc down'))
     const r = await listVdfs(READBACK_REASON.VDFS_BROWSER, vdfsJoin('@vfs', 'session'))
-    // 关键：不是 null，而是**同型**的空列表——调用方无需分支
+    // 关键：不是 null，而是**同型**的空列表——调用方无需分支。
+    // 地址只落在列表自身与条目上：目录节点 `node` 是纯自述，不带 `path`。
     expect(r).toEqual({
       path: vdfsJoin('@vfs', 'session'),
-      node: expect.objectContaining({ path: vdfsJoin('@vfs', 'session') }),
+      node: expect.objectContaining({ name: vdfsJoin('@vfs', 'session') }),
       items: [],
     })
     expect(logError).toHaveBeenCalled()

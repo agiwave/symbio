@@ -111,9 +111,9 @@ impl McpPlugin {
             .with_version("0.3.0")
             .with_order(5)
             .with_icon(PLUGIN_MCP)
-        // 「根下可新建类型」由 provider 自持（`VdfsProvider::root_new_type`，见下方
-        // `impl VdfsProvider for McpPlugin`）——它是挂载点的动态自述，容器合成根
-        // 节点时现场取，不进这份同步纯数据
+        // 「根下可新建类型」由 provider 自持（根节点自述里的 `VdfsNode::new_type`，
+        // 见下方 `impl VdfsProvider for McpPlugin`）——它是挂载点的动态自述，容器
+        // 合成根节点时向 provider 发一次 `Stat` 现场取，不进这份同步纯数据
     }
 
     /// 异步加载：从 `<本插件目录>/` 读取所有 MCP Server
@@ -335,25 +335,6 @@ fn new_manifest(id: &str) -> serde_json::Value {
 
 #[async_trait]
 impl VdfsProvider for McpPlugin {
-    /// 根下可新建**一种**类型：MCP Server。
-    ///
-    /// 草稿页与落成后的条目是**同一张**详情（`node_ext = form` + 详情定义），
-    /// 因此「点添加」与「选中一项」在交互上没有第二种形态——差别只在草稿没有内容，
-    /// 且此时**多出一条「导入整包」动作**（[`VDFS_ACTION_IMPORT`]，见
-    /// `detail::mcp_detail_definition`）。导入**不是本结构的字段**：本结构只说
-    /// 「这类东西落成后长什么样」（见 ADR-029）。
-    ///
-    /// `ext = mcp` 是**呈现扩展名**（`id_of` 按它剥地址后缀），落成后的节点
-    /// `ext = form`——两者不同，故显式声明 `node_ext` 与详情定义。
-    async fn root_new_type(&self) -> Option<VdfsNewType> {
-        Some(
-            VdfsNewType::new(PLUGIN_MCP, LABEL)
-                .with_description("新建 MCP Server（在详情页里填好，保存时一次写入）")
-                .with_node_ext(VDFS_EXT_FORM)
-                .with_schema(detail_definition()),
-        )
-    }
-
     async fn dispatch(
         &self,
         _ctx: &VdfsContext,
@@ -367,23 +348,39 @@ impl VdfsProvider for McpPlugin {
                         "{LABEL}是叶子资源，没有子项：{path}"
                     )));
                 }
-                Ok(VdfsResponse::List(
+                Ok(VdfsResponse::list(
                     self.store()
                         .entries()
                         .await?
                         .iter()
                         .map(|e| node_of(&e.id, e.raw.as_deref()))
-                        .collect(),
+                        .collect::<Vec<VdfsNode>>(),
                 ))
             }
             VdfsRequest::Stat => {
                 if path.is_empty() {
-                    // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填
-                    return Ok(VdfsResponse::Stat(VdfsNode::dir(
-                        "",
-                        LABEL,
-                        VdfsAccess::LIST,
-                    )));
+                    // 自身根：名字留空——provider 不知道自己的挂载名，由使用方回填。
+                    //
+                    // **根的自述里带着「可新建类型」**：根下可新建**一种**类型
+                    // （MCP Server），草稿页与落成后的条目是同一张详情（`node_ext = form`
+                    // + 详情定义），因此「点添加」与「选中一项」在交互上没有第二种
+                    // 形态——差别只在草稿没有内容，且此时**多出一条「导入整包」动作**
+                    // （[`VDFS_ACTION_IMPORT`]，见 `detail::mcp_detail_definition`）。
+                    // 导入**不是类型里的字段**：类型只说「这类东西落成后长什么样」
+                    // （见 ADR-029）。
+                    //
+                    // `ext = mcp` 是**呈现扩展名**（`id_of` 按它剥地址后缀），落成后的
+                    // 节点 `ext = form`——两者不同，故显式声明 `node_ext` 与详情定义。
+                    return Ok(VdfsResponse::Stat(
+                        VdfsNode::dir("", LABEL, VdfsAccess::LIST).with_new_type(Some(
+                            VdfsNewType::new(PLUGIN_MCP, LABEL)
+                                .with_description(
+                                    "新建 MCP Server（在详情页里填好，保存时一次写入）",
+                                )
+                                .with_node_ext(VDFS_EXT_FORM)
+                                .with_schema(detail_definition()),
+                        )),
+                    ));
                 }
                 let e = self.store().entry(&id_of(path)).await?;
                 Ok(VdfsResponse::Stat(node_of(&e.id, e.raw.as_deref())))
@@ -398,7 +395,7 @@ impl VdfsProvider for McpPlugin {
                 }
                 let text = self.store().read_text(&id_of(path)).await?;
                 Ok(VdfsResponse::Read(
-                    VdfsContent::text(path, text).with_mime("application/json"),
+                    VdfsContent::text(text).with_mime("application/json"),
                 ))
             }
             VdfsRequest::Write { content } => {
@@ -433,8 +430,11 @@ impl VdfsProvider for McpPlugin {
                 let created = store.write_json(&id, &normalized).await?;
                 // 落盘成功后把 server 从磁盘回灌到内存 config（并失效相关缓存）
                 self.reload_server_from_storage(&id).await?;
+                // 名字只在**匿名写**（打在挂载根上）时才需要交回：具名写的名字是
+                // 调用方自己给的（见 [`VdfsWriteResponse::name`]）。
+                let generated = path.trim_matches('/').is_empty().then_some(id);
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
-                    path: id,
+                    name: generated,
                     created,
                     etag: None,
                 }))

@@ -38,7 +38,7 @@ use crate::plugins::agent::host::manifest;
 use crate::plugins::agent::host::memory;
 use crate::plugins::agent::host::store::AgentDirStore;
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField, DetailOption};
-use crate::symbio_core::vdfs_provider::{VdfsAccess, VdfsProvider};
+use crate::symbio_core::vdfs_provider::{VdfsAccess, VdfsItem, VdfsProvider};
 use crate::symbio_core::{
     announce_configurable, create_object, dir_from_ctx, report_error, Capability,
     CapabilityVisitor, ConfigFile, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
@@ -559,9 +559,11 @@ impl Plugin for AgentPlugin {
         // 走的是既有 `ConfigurableVisitor` 通道——本插件只是多交一条节点，不动 symbio_core。
         if let Some(v) = ctx.get(CONFIG_VISITOR) {
             let mut n = self.instruction_node().await;
-            n.path = format!("{PLUGIN_AGENT}/{AGENTS_FILE}");
             n.ext = Some("md".to_string());
-            v.register_configurable(n).await;
+            v.register_configurable(
+                VdfsItem::new(n).with_path(format!("{PLUGIN_AGENT}/{AGENTS_FILE}")),
+            )
+            .await;
         }
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))

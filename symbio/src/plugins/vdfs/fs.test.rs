@@ -33,18 +33,20 @@ impl VdfsProvider for V {
         match req {
             VdfsRequest::List { .. } => {
                 self.seen.lock().unwrap().push(path.to_string());
-                let mut n = VdfsNode::dir("session", "会话", VdfsAccess::dir(true, true));
-                n.path = "session".to_string();
-                Ok(VdfsResponse::List(vec![n]))
+                let n = VdfsNode::dir("session", "会话", VdfsAccess::dir(true, true));
+                // 替身按**树内口径**给出条目地址——门面负责翻回展示口径
+                Ok(VdfsResponse::list(vec![
+                    VdfsItem::new(n).with_path("session")
+                ]))
             }
             VdfsRequest::Read => {
                 self.seen.lock().unwrap().push(path.to_string());
-                Ok(VdfsResponse::Read(VdfsContent::text(path, "v")))
+                Ok(VdfsResponse::Read(VdfsContent::text("v")))
             }
             VdfsRequest::Write { .. } => {
                 self.seen.lock().unwrap().push(path.to_string());
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
-                    path: path.to_string(),
+                    name: None,
                     created: true,
                     etag: None,
                 }))
@@ -81,7 +83,7 @@ impl VdfsProvider for P {
         match req {
             VdfsRequest::List { .. } => {
                 self.seen.lock().unwrap().push(path.to_string());
-                Ok(VdfsResponse::List(vec![VdfsNode::file(
+                Ok(VdfsResponse::list(vec![VdfsNode::file(
                     "a.txt",
                     "a.txt",
                     VdfsAccess::READ,
@@ -89,7 +91,7 @@ impl VdfsProvider for P {
             }
             VdfsRequest::Read => {
                 self.seen.lock().unwrap().push(path.to_string());
-                Ok(VdfsResponse::Read(VdfsContent::text(path, "p")))
+                Ok(VdfsResponse::Read(VdfsContent::text("p")))
             }
             _ => Err(VdfsError::NotImplemented),
         }
@@ -211,7 +213,8 @@ async fn deep_virtual_address_keeps_dir_prefix() {
         .into_read()
         .unwrap();
     assert_eq!(v.seen(), vec!["session/abc"]);
-    assert_eq!(c.path, ".vdfsv2/session/abc");
+    // 内容不带地址（内容总是「请求的那个节点」的内容），这里只验证请求侧口径
+    assert_eq!(c.text.as_deref(), Some("v"));
 }
 
 #[tokio::test]
@@ -231,7 +234,7 @@ async fn bare_address_goes_to_physical_untouched() {
         .into_list()
         .unwrap();
     assert_eq!(p.seen(), vec!["src"]);
-    assert_eq!(items[0].name, "a.txt");
+    assert_eq!(items[0].node.name, "a.txt");
 
     // 空地址 = 工作目录根，不是虚拟根
     let (f2, v2, p2) = fs();
@@ -249,23 +252,27 @@ async fn bare_address_goes_to_physical_untouched() {
     assert!(v2.seen().is_empty());
 }
 
+/// 写入回执**不带地址**，门面因此原样透出
+///
+/// 请求地址已经是调用方给的，回执里唯一可能有值的是 provider 生成的**名字**
+/// （匿名写，见 `VdfsWriteResponse::name`）——它不需要翻译。
 #[tokio::test]
-async fn write_response_path_is_display_form() {
+async fn write_response_is_passed_through_untouched() {
     let (f, v, _p) = fs();
     let r = f
         .dispatch(
             &VdfsContext::empty(),
             ".vdfsv2/setting/x",
             VdfsRequest::Write {
-                content: VdfsContent::text("", "1"),
+                content: VdfsContent::text("1"),
             },
         )
         .await
         .unwrap()
         .into_write()
         .unwrap();
-    assert_eq!(v.seen(), vec!["setting/x"]);
-    assert_eq!(r.path, ".vdfsv2/setting/x");
+    assert_eq!(v.seen(), vec!["setting/x"], "请求进树内口径");
+    assert!(r.name.is_none(), "具名写没有名字可交回");
 }
 
 // ==================== 两半之间不可穿越 ====================

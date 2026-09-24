@@ -205,7 +205,7 @@ pub fn mcp_detail_definition() -> DetailDefinition {
             // 「导入整包」：VDFS 节点动作 `import`（vdfs/action）——**只在草稿
             // （新建）态**出现：条目名取自包的文件名，落成后无从再导（要换内容
             // 就删掉重导）。它是与「在表单里填」并列的另一条创建路，也是详情页
-            // 的一条动作——不是 `root_new_type` 上的一个字段。
+            // 的一条动作——不是 `new_type` 上的一个字段。
             DetailAction {
                 id: crate::symbio_core::vdfs_provider::VDFS_ACTION_IMPORT.into(),
                 label: "导入整包".into(),

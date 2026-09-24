@@ -24,7 +24,6 @@ import {
   VDFS_WRITE,
   type VdfsActionResponse,
   type VdfsContent,
-  type VdfsDeleteResponse,
   type VdfsListResponse,
   type VdfsNode,
   type VdfsWriteResponse,
@@ -188,9 +187,14 @@ export function downloadBlob(filename: string, data: BlobPart, mime = 'applicati
   setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
-/** 删除节点（目录需 recursive） */
-export async function deleteVdfs(path: string, recursive = false): Promise<VdfsDeleteResponse> {
-  return callPlugin<VdfsDeleteResponse>(VDFS_DELETE, { path, recursive })
+/**
+ * 删除节点（目录需 recursive）。
+ *
+ * **无回执载荷**：删哪儿是调用方自己说的，回执里没有信息量（与 watch / unwatch
+ * 同形：成功即成功）。
+ */
+export async function deleteVdfs(path: string, recursive = false): Promise<void> {
+  await callPlugin(VDFS_DELETE, { path, recursive })
 }
 
 /**
@@ -231,9 +235,9 @@ export async function unwatchVdfs(path: string): Promise<void> {
   })
 }
 
+/** 列目录失败时的兜底节点：纯自述，**不带地址**（地址由 `VdfsListResponse.path` 承载） */
 function emptyNode(path: string): VdfsNode {
   return {
-    path,
     name: path,
     title: path,
     kind: 'dir',

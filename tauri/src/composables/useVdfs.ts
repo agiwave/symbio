@@ -66,6 +66,7 @@ import {
   type DetailAction,
   type VdfsChange,
   type VdfsFieldError,
+  type VdfsItem,
   type VdfsNewType,
   type VdfsNode,
 } from '@/schemas/vdfs'
@@ -103,8 +104,8 @@ export function useVdfs(opts: UseVdfsOptions) {
   const addr = opts.addr
 
   // ==================== 左栏导航（绑定地址的子目录清单） ====================
-  /** `addr` 的内容（其子目录 = 左栏导航项） */
-  const navDirs = ref<VdfsNode[]>([])
+  /** `addr` 的内容（其子目录 = 左栏导航项）；条目 = 地址 + 节点（`VdfsItem`） */
+  const navDirs = ref<VdfsItem[]>([])
 
   /** 选中的左栏子目录名；null = `addr` 无子目录（中栏显示 `addr` 自身内容） */
   const selectedName = ref<string | null>(null)
@@ -131,7 +132,8 @@ export function useVdfs(opts: UseVdfsOptions) {
   const title = computed(() => cwdNode.value?.title || cwdNode.value?.name || '资源')
 
   // ==================== 目录内容 ====================
-  const items = ref<VdfsNode[]>([])
+  /** 中栏条目 = 地址 + 节点；`cwdNode` 是**目录自身的自述**（纯节点，不带地址） */
+  const items = ref<VdfsItem[]>([])
   const cwdNode = shallowRef<VdfsNode | null>(null)
   const loading = ref(false)
   const loadError = ref('')
@@ -249,7 +251,13 @@ export function useVdfs(opts: UseVdfsOptions) {
   }
 
   // ==================== 选中项与详情 ====================
-  const selectedNode = shallowRef<VdfsNode | null>(null)
+  /**
+   * 当前选中项 = **条目**（地址 + 节点）或**草稿**。
+   *
+   * 草稿（新建态）还没有落盘，因此没有地址——`path` 是空串，这正是
+   * `isVdfsDraft` 的判据（见 `schemas/vdfs.isVdfsDraft`）。
+   */
+  const selectedNode = shallowRef<VdfsItem | null>(null)
   const selectedId = computed(() => selectedNode.value?.path ?? null)
 
   /** 详情渲染器（**前端选择详情页面的唯一入口**，按 ext 解析） */
@@ -353,7 +361,7 @@ export function useVdfs(opts: UseVdfsOptions) {
   }
 
   /** 选中节点并按其渲染器加载数据 */
-  async function select(node: VdfsNode | null) {
+  async function select(node: VdfsItem | null) {
     if (!node) {
       clearSelection()
       return
@@ -465,8 +473,8 @@ export function useVdfs(opts: UseVdfsOptions) {
    * 「保存一项已有资源」是同一个动作（同一条 `vdfs/write`），差别只有
    * 目标地址与 `create` 意图（目录自身没有可覆盖的目标，必须带 create）。
    *
-   * 写完落到 provider 在响应里给出的**新地址**上：新建的落点是刚建出来的
-   * 那一项，而不是那张已经失效的草稿。
+   * 写完落到 provider 在响应里给出的**新名字**上（`VdfsWriteResponse.name`；
+   * 只有匿名写才有它）——新建的落点是刚建出来的那一项，而不是那张已经失效的草稿。
    */
   async function write(payload: Record<string, unknown> | string): Promise<boolean> {
     const node = selectedNode.value
@@ -484,8 +492,10 @@ export function useVdfs(opts: UseVdfsOptions) {
       if (!draft) {
         await select(node)
       } else {
-        // 新建：选中 provider 建出来的那一项（响应 `path` 是展示口径，与清单同源）
-        const created = items.value.find((n) => n.path === resp.path)
+        // 新建：选中 provider 建出来的那一项。回执只给**名字**（匿名写由 provider
+        // 生成），地址由「当前目录 + 名字」构成——但中栏刚重载过，按名字找回即可
+        // （名字是目录内的路径段，唯一）。
+        const created = items.value.find((n) => n.name === resp.name)
         if (created) await select(created)
       }
       return true
@@ -613,8 +623,9 @@ export function useVdfs(opts: UseVdfsOptions) {
    * 其余呈现字段留空——「还没有的东西」不该假装有内容（用户第 2 点：新建时
    * 详情页是缺 id / 名字的，选中一项后才是带内容的那一页）。
    */
-  function draftNodeOf(type: VdfsNewType): VdfsNode {
+  function draftNodeOf(type: VdfsNewType): VdfsItem {
     return {
+      // 草稿**没有地址**（还没落盘）：空串即 `isVdfsDraft` 的判据
       path: '',
       name: '',
       title: '',

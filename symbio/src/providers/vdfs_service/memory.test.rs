@@ -28,7 +28,7 @@ async fn ops_mirror_the_disk_shapes() {
             &ctx,
             "p1.model",
             VdfsRequest::Write {
-                content: VdfsContent::text("", "{\"id\":\"p1\"}"),
+                content: VdfsContent::text("{\"id\":\"p1\"}"),
             },
         )
         .await
@@ -37,8 +37,11 @@ async fn ops_mirror_the_disk_shapes() {
         panic!("应为 Write 响应");
     };
     assert!(r.created);
-    assert_eq!(r.path, "p1");
-    // 呈现扩展名不是地址的一部分
+    // 具名写**不回传地址**：写哪儿是调用方自己说的；呈现扩展名也不是地址的一部分
+    assert!(
+        r.name.is_none(),
+        "名字是调用方给的，provider 没有新名字可交回"
+    );
     let VdfsResponse::Read(c) = m.dispatch(&ctx, "p1", VdfsRequest::Read).await.unwrap() else {
         panic!("应为 Read 响应");
     };
@@ -151,7 +154,7 @@ async fn unsupported_ops_stay_not_implemented() {
             &ctx,
             "p1",
             VdfsRequest::Write {
-                content: VdfsContent::binary("", "eA==", 1),
+                content: VdfsContent::binary("eA==", 1),
             },
         )
         .await

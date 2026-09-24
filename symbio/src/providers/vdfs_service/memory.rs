@@ -145,7 +145,7 @@ impl VdfsProvider for MemoryVdfs {
                     )));
                 }
                 let table = lock_read(&self.entries);
-                Ok(VdfsResponse::List(
+                Ok(VdfsResponse::list(
                     table
                         .iter()
                         .map(|(id, e)| {
@@ -156,7 +156,7 @@ impl VdfsProvider for MemoryVdfs {
                             n.updated_at = Some(e.updated_at);
                             n
                         })
-                        .collect(),
+                        .collect::<Vec<VdfsNode>>(),
                 ))
             }
 
@@ -188,7 +188,7 @@ impl VdfsProvider for MemoryVdfs {
                 let id = self.id_of(path);
                 let content = self
                     .get(&id)
-                    .map(|text| VdfsContent::text(path, text))
+                    .map(VdfsContent::text)
                     .ok_or_else(|| VdfsError::NotFound(format!("未找到条目「{id}」")))?;
                 Ok(VdfsResponse::Read(content))
             }
@@ -203,7 +203,7 @@ impl VdfsProvider for MemoryVdfs {
                 let id = self.id_of(path);
                 let created = self.set(&id, content.as_text().unwrap_or_default());
                 Ok(VdfsResponse::Write(VdfsWriteResponse {
-                    path: id,
+                    name: None,
                     created,
                     etag: None,
                 }))

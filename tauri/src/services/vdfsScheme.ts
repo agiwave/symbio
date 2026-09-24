@@ -8,8 +8,9 @@
  * 前端**不该**把它们写进自己的地址模板——写进去就是一份第二真相。
  *
  * 两者都能从数据里认出来，不需要任何字面量：
- * - **挂载目录**：composite 把 `root_new_type()` 挂到了挂载点节点上
- *   （`plugins/composite/vdfs.rs` 的 `dir_node`），会话 provider 声明的是
+ * - **挂载目录**：composite 把各 provider **根节点自述里的 `new_type`** 挂到了
+ *   挂载点节点上（`plugins/composite/vdfs.rs` 的 `dir_node_full`——它向 provider
+ *   发一次 `Stat("")` 取 `new_type`），会话 provider 声明的是
  *   `VdfsNewType::new(VDFS_EXT_SESSION, …)` ⇒ 列虚拟根，找 `new_type.ext`
  *   等于 `'session'` 的子节点即可。
  * - **转写段**：会话内部的子目录里，转写列表的 `kind` 是 `VDFS_KIND_MESSAGES`

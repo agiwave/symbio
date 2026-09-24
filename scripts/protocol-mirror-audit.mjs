@@ -275,6 +275,11 @@ const STRUCT_SETS = [
     ts: { file: VDFS_TS, interface: 'VdfsNode' },
   },
   {
+    what: 'VDFS 条目（地址 + 扁平展开的节点；两侧都 flatten，故这里只比 `path`——节点字段由上一对覆盖）',
+    rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsItem' },
+    ts: { file: VDFS_TS, interface: 'VdfsItem' },
+  },
+  {
     what: 'VDFS 变更',
     rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsChange' },
     ts: { file: VDFS_TS, interface: 'VdfsChange' },

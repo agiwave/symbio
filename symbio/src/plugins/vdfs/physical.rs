@@ -197,7 +197,7 @@ async fn count_children(dir: &Path) -> Option<u32> {
 ///
 /// 实现 [`VdfsProvider`] 只为复用同一套分发与组合逻辑（`edit` / `search` 由
 /// 访问层组合而成，不区分虚拟与物理）；它**不注册为挂载点**，因此
-/// `label` / `order` / `root_new_type` 这些「被合成进 `.vdfsv2` 时才有人读」的
+/// `label` / `order` / 根节点的 `new_type` 这些「被合成进 `.vdfsv2` 时才有人读」的
 /// 声明在这里没有意义，一律不覆盖。
 pub struct PhysicalFs {
     policy: FsPolicy,
@@ -285,7 +285,7 @@ impl VdfsProvider for PhysicalFs {
         req: VdfsRequest,
     ) -> VdfsResult<VdfsResponse> {
         match req {
-            VdfsRequest::List { .. } => Ok(VdfsResponse::List(self.do_list(ctx, path).await?)),
+            VdfsRequest::List { .. } => Ok(VdfsResponse::list(self.do_list(ctx, path).await?)),
             VdfsRequest::Stat => Ok(VdfsResponse::Stat(self.do_stat(ctx, path).await?)),
             VdfsRequest::Read => Ok(VdfsResponse::Read(self.do_read(ctx, path).await?)),
             VdfsRequest::Write { content } => Ok(VdfsResponse::Write(
@@ -405,13 +405,13 @@ impl PhysicalFs {
                 .await
                 .map_err(|e| VdfsError::internal(format!("读取文件失败：{e}")))?;
             let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-            return Ok(VdfsContent::binary("", b64, bytes.len() as u64).with_mime(mime));
+            return Ok(VdfsContent::binary(b64, bytes.len() as u64).with_mime(mime));
         }
 
         let text = tokio::fs::read_to_string(&resolved)
             .await
             .map_err(|e| VdfsError::internal(format!("读取文件失败（非文本？）：{e}")))?;
-        Ok(VdfsContent::text("", text))
+        Ok(VdfsContent::text(text))
     }
 
     async fn do_write(
@@ -447,7 +447,8 @@ impl PhysicalFs {
             .map_err(|e| VdfsError::internal(format!("写入文件失败：{e}")))?;
 
         Ok(VdfsWriteResponse {
-            path: String::new(),
+            // 具名写：名字是调用方给的（磁盘层没有「匿名新建」这一形态）
+            name: None,
             created,
             etag: Some(bytes.len().to_string()),
         })

@@ -22,20 +22,20 @@ async fn list_returns_sections_in_declared_order() {
         .unwrap();
 
     // 固定清单、按声明顺序（前端据此展示，不做二次排序）。
-    // provider 返回的节点自带 `name`，全路径由分发层补挂载名后合成。
-    let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
+    // provider 返回的条目自带 `name`，条目地址由分发层补挂载名后合成。
+    let names: Vec<&str> = items.iter().map(|it| it.node.name.as_str()).collect();
     assert_eq!(names, vec!["appearance", "about"]);
 
     // kind 标记为 setting；`name` 是地址段、`title` 是人读标签
     let first = &items[0];
-    assert_eq!(first.kind, PLUGIN_SETTING);
-    assert_eq!(first.name, "appearance");
-    assert_eq!(first.title, "外观");
+    assert_eq!(first.node.kind, PLUGIN_SETTING);
+    assert_eq!(first.node.name, "appearance");
+    assert_eq!(first.node.title, "外观");
 
     // 前端自持分区：`ext` 即分区 id —— 前端按 `ext → 渲染器` 的纯 UI
     // 映射回退到专属 editor（外观设置 / 关于）
-    assert_eq!(items[0].ext.as_deref(), Some("appearance"));
-    assert_eq!(items[1].ext.as_deref(), Some("about"));
+    assert_eq!(items[0].node.ext.as_deref(), Some("appearance"));
+    assert_eq!(items[1].node.ext.as_deref(), Some("about"));
 }
 
 // ==================== VDFS provider ====================
@@ -69,7 +69,14 @@ async fn vdfs_self_description_has_no_mount() {
 async fn sections_are_leaves_without_new_type() {
     let p = SettingPlugin;
     assert_eq!(p.meta().root_access, VdfsAccess::LIST);
-    assert!(p.root_new_type().await.is_none());
+    // 「根下可新建类型」挂在根节点自己的自述上（`Stat("")`），本插件恒为 `None`
+    let root = p
+        .dispatch(&vctx(), "", vdfs::VdfsRequest::Stat)
+        .await
+        .unwrap()
+        .into_stat()
+        .unwrap();
+    assert!(root.new_type.is_none(), "设置根下不可新建");
 
     let s = p
         .dispatch(&vctx(), "appearance", vdfs::VdfsRequest::Stat)
@@ -100,7 +107,7 @@ async fn frontend_owned_sections_reject_read_and_write() {
             .await,
         Err(VdfsError::Forbidden(_))
     ));
-    let c = vdfs::VdfsContent::text("", "{}");
+    let c = vdfs::VdfsContent::text("{}");
     assert!(matches!(
         p.dispatch(
             &vctx(),
@@ -160,17 +167,18 @@ async fn list_puts_declared_plugin_configs_before_the_sections() {
         .into_list()
         .unwrap();
 
-    let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
+    let names: Vec<&str> = items.iter().map(|it| it.node.name.as_str()).collect();
     assert_eq!(names, vec!["web", "appearance", "about"]);
 
     let web = &items[0];
-    assert_eq!(web.title, "网络工具");
-    // 地址指向**拥有者自己的文件**：读写不经过本插件，同一份配置只有一个地址
+    assert_eq!(web.node.title, "网络工具");
+    // 地址指向**拥有者自己的文件**：读写不经过本插件，同一份配置只有一个地址。
+    // 这条地址**跨挂载点**、推不出来，所以由拥有者显式带着（`VdfsItem::path`）。
     assert_eq!(web.path, "web/PLUGIN.yml");
     // 场景标签换成本列表的 kind（前端据此查图标 `setting:web`）
-    assert_eq!(web.kind, PLUGIN_SETTING);
-    assert_eq!(web.ext.as_deref(), Some("form"));
-    assert!(!web.is_dir(), "条目是文档，不是目录");
+    assert_eq!(web.node.kind, PLUGIN_SETTING);
+    assert_eq!(web.node.ext.as_deref(), Some("form"));
+    assert!(!web.node.is_dir(), "条目是文档，不是目录");
 }
 
 /// 没有声明通道时只列自有分区——本通道是增益，缺了不影响本插件工作
@@ -190,6 +198,6 @@ async fn list_without_declarations_is_just_the_sections() {
         .unwrap()
         .into_list()
         .unwrap();
-    let names: Vec<&str> = items.iter().map(|n| n.name.as_str()).collect();
+    let names: Vec<&str> = items.iter().map(|it| it.node.name.as_str()).collect();
     assert_eq!(names, vec!["appearance", "about"]);
 }

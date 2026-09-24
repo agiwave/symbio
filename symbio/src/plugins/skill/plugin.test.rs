@@ -125,6 +125,7 @@ async fn store_roundtrip_through_the_dir_impl() {
         .unwrap()
         .into_list()
         .unwrap()[0]
+            .node
             .is_dir(),
         "条目内部可下钻"
     );
@@ -156,8 +157,15 @@ async fn new_type_declares_the_landing_detail() {
         config: Arc::new(RwLock::new(SkillConfig::default())),
         dir: PluginDir::of(PLUGIN_SKILL),
     };
-    // 「根下可新建类型」是 provider 的异步自述（不在同步的 `PluginMeta` 上）
-    let t = plugin.root_new_type().await.expect("根下可新建「技能」");
+    // 「根下可新建类型」挂在**根节点自己的自述**上（不在同步的 `PluginMeta` 上）：
+    // 走 `Stat("")`，与更深层节点同一条通道（`VdfsNode::new_type`）。
+    let root = plugin
+        .dispatch(&VdfsContext::empty(), "", VdfsRequest::Stat)
+        .await
+        .unwrap()
+        .into_stat()
+        .expect("根节点自述");
+    let t = root.new_type.expect("根下可新建「技能」");
     assert_eq!(t.ext, PLUGIN_SKILL, "呈现扩展名是技能自己的，不是包的");
     assert_eq!(
         t.node_ext.as_deref(),

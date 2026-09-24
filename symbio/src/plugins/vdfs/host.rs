@@ -70,7 +70,7 @@ impl VdfsProvider for EmptyVdfs {
         match req {
             VdfsRequest::List { .. } => {
                 if path.is_empty() {
-                    Ok(VdfsResponse::List(Vec::new()))
+                    Ok(VdfsResponse::list(Vec::<VdfsNode>::new()))
                 } else {
                     Err(VdfsError::not_found(path))
                 }
@@ -196,20 +196,32 @@ fn child_path(base: &str, name: &str) -> String {
     }
 }
 
-/// 兜底回填：provider 未填 `path` / `ext` / `title` 时按请求地址补齐。
+/// 条目在**本次列表**里的地址。
+///
+/// provider 没填就按 `<父地址>/<name>` 推导——[`VdfsNode::name`] 就是父节点内的
+/// 路径段，所以这条推导总是成立；provider 填了（地址不在本目录下，如设置页条目
+/// 指向插件自己的配置文档）就用它填的。这条规则在**一处**实现，`list` / `tree` /
+/// `search` 三处消费共用——各写一份必然各漏一份。
+fn item_addr(base: &str, item: &VdfsItem) -> String {
+    if item.path.is_empty() {
+        child_path(base, &item.node.name)
+    } else {
+        item.path.clone()
+    }
+}
+
+/// 兜底回填：条目地址按 [`item_addr`] 补，节点上的 `ext` / `title` 按 `name` 补。
 ///
 /// 门面与虚拟层根本身已回填，这里是**协议通用兜底**——任何 provider 实现都可以
 /// 只填 `name` 与 `access`，其余由访问层补全。
-fn fill_paths(base: &str, nodes: &mut [VdfsNode]) {
-    for n in nodes.iter_mut() {
-        if n.path.is_empty() {
-            n.path = child_path(base, &n.name);
+fn fill_paths(base: &str, items: &mut [VdfsItem]) {
+    for it in items.iter_mut() {
+        it.path = item_addr(base, it);
+        if it.node.ext.is_none() {
+            it.node.ext = derive_ext(&it.node.name);
         }
-        if n.ext.is_none() {
-            n.ext = derive_ext(&n.name);
-        }
-        if n.title.is_empty() {
-            n.title = n.name.clone();
+        if it.node.title.is_empty() {
+            it.node.title = it.node.name.clone();
         }
     }
 }
@@ -221,9 +233,7 @@ fn dir_self(addr: &str) -> VdfsNode {
     } else {
         addr.rsplit('/').next().unwrap_or(addr).to_string()
     };
-    let mut n = VdfsNode::dir(name.clone(), name, VdfsAccess::dir(true, true));
-    n.path = addr.to_string();
-    n
+    VdfsNode::dir(name.clone(), name, VdfsAccess::dir(true, true))
 }
 
 // ==================== 统一分发 ====================
@@ -344,9 +354,6 @@ async fn list_at(
                 if n.ext.is_none() {
                     n.ext = derive_ext(&n.name);
                 }
-                if n.path.is_empty() {
-                    n.path = addr.clone();
-                }
                 n
             }
             None => dir_self(&addr),
@@ -379,9 +386,6 @@ async fn stat(
     if n.ext.is_none() {
         n.ext = derive_ext(&n.name);
     }
-    if n.path.is_empty() {
-        n.path = addr;
-    }
     Ok(PluginPayload::new(&n))
 }
 
@@ -392,14 +396,11 @@ async fn read(
 ) -> InvokeResponse<PluginPayload> {
     let req: VdfsPathRequest = payload_or_default(ctx);
     let addr = normalize_addr(&req.path)?;
-    let mut c = root
+    let c = root
         .dispatch(vctx, &addr, VdfsRequest::Read)
         .await?
         .into_read()
         .ok_or_else(|| VdfsError::internal("provider 响应类型不匹配"))?;
-    if c.path.is_empty() {
-        c.path = addr;
-    }
     Ok(PluginPayload::new(&c))
 }
 
@@ -415,17 +416,17 @@ async fn write(
         return Err(VdfsError::invalid("写入需要 text 或 b64 之一作为内容").into());
     }
     let content = req.to_content();
-    let mut r = root
+    let r = root
         .dispatch(vctx, &addr, VdfsRequest::Write { content })
         .await?
         .into_write()
         .ok_or_else(|| VdfsError::internal("provider 响应类型不匹配"))?;
-    if r.path.is_empty() {
-        r.path = addr;
-    }
     Ok(PluginPayload::new(&r))
 }
 
+/// `vdfs/delete` —— 成功无产物（与 `watch` / `unwatch` 同形）。
+///
+/// 不回传被删地址：那是调用方给的（见 [`VdfsResponse`] 的文档）。
 async fn delete(
     root: &DynVdfsProvider,
     vctx: &VdfsContext,
@@ -441,7 +442,9 @@ async fn delete(
         },
     )
     .await?;
-    Ok(PluginPayload::new(&VdfsDeleteResponse { path: addr }))
+    Ok(PluginPayload::new(
+        &crate::symbio_core::schemas::common::SuccessResponse::default(),
+    ))
 }
 
 async fn mkdir(
@@ -453,7 +456,7 @@ async fn mkdir(
     let addr = normalize_addr(&req.path)?;
     root.dispatch(vctx, &addr, VdfsRequest::Mkdir).await?;
     Ok(PluginPayload::new(&VdfsWriteResponse {
-        path: addr,
+        name: None,
         created: true,
         etag: None,
     }))
@@ -549,7 +552,6 @@ pub(crate) async fn edit_via(
 
     if old_normalized == new_normalized {
         return Ok(VdfsEditResponse {
-            path: rel.to_string(),
             replaced: 0,
             message: Some(format!("已检查 {rel}：内容已为最新，无需修改")),
         });
@@ -587,13 +589,12 @@ pub(crate) async fn edit_via(
             vctx,
             rel,
             VdfsRequest::Write {
-                content: VdfsContent::text("", final_content),
+                content: VdfsContent::text(final_content),
             },
         )
         .await?;
 
     Ok(VdfsEditResponse {
-        path: rel.to_string(),
         replaced: 1,
         message: Some(format!("已编辑 {rel}：替换了 1 处（{size} 字节）")),
     })
@@ -659,27 +660,24 @@ pub(crate) async fn search_via(
                 continue;
             }
         };
-        // 子地址 = 父目录 + 子名（`""` 基目录直接用子名，保持相对形态）
+        // 子地址 = 父目录 + 子名（`""` 基目录直接用子名，保持相对形态）；
+        // provider 显式给了地址的条目（如设置页条目指向别的挂载点）用它给的那个。
         let parent = dir.trim_end_matches('/').to_string();
         for child in children {
-            let child_addr = if parent.is_empty() {
-                child.name.clone()
-            } else {
-                format!("{parent}/{}", child.name)
-            };
+            let child_addr = item_addr(&parent, &child);
             // 匹配用「相对 base 的地址」，收集用完整地址
             let rel = child_addr
                 .strip_prefix(base_dir.as_str())
                 .map(|s| s.trim_start_matches('/'))
                 .unwrap_or(child_addr.as_str());
-            if !child.is_dir() && pat.matches(rel) {
+            if !child.node.is_dir() && pat.matches(rel) {
                 results.push(child_addr.clone());
                 if results.len() >= MAX_SEARCH_RESULTS {
                     truncated = true;
                     break;
                 }
             }
-            if child.access.traverse {
+            if child.node.access.traverse {
                 queue.push_back(child_addr);
             }
         }
@@ -753,7 +751,7 @@ async fn tree(
     let depth_limit = req.depth.unwrap_or(3); // 0 = 不限
     let count_limit = req.limit.unwrap_or(500).max(1) as usize;
 
-    let mut out: Vec<VdfsNode> = Vec::new();
+    let mut out: Vec<VdfsItem> = Vec::new();
     let mut truncated = false;
 
     // 队列元素 = (目录地址, 深度)
@@ -788,7 +786,8 @@ async fn tree(
                 truncated = true;
                 break;
             }
-            let descend = child.access.traverse && (depth_limit == 0 || depth + 1 < depth_limit);
+            let descend =
+                child.node.access.traverse && (depth_limit == 0 || depth + 1 < depth_limit);
             let path = child.path.clone();
             out.push(child);
             if descend {
@@ -801,7 +800,6 @@ async fn tree(
     }
 
     Ok(PluginPayload::new(&VdfsTreeResponse {
-        path: addr,
         nodes: out,
         truncated,
     }))

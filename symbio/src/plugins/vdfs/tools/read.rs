@@ -55,10 +55,7 @@ impl Capability for ReadTool {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let mut content = self.provider.read(&ctx, &path).await?;
-        if content.path.is_empty() {
-            content.path = path;
-        }
+        let content = self.provider.read(&ctx, &path).await?;
 
         // 二进制（图片等）原样透传：VdfsContent 已含 b64 + mime，由多模态链路消费
         if content.binary {
@@ -98,7 +95,8 @@ impl Capability for ReadTool {
 
         Ok(json!({
             "content": format!("{numbered}{summary}"),
-            "path": content.path,
+            // 回显的是**请求地址**：内容不带地址（内容总是「这个节点」的内容）
+            "path": path,
             "total_lines": total,
         }))
     }

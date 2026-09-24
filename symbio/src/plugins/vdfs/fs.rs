@@ -169,18 +169,15 @@ impl UnifiedFs {
     ///
     /// **只改非空 `path`**：空 `path` 是「provider 未填」的信号，由访问层
     /// （`host::fill_paths`）按请求地址回填成 `<父地址>/<子名>`；若在这里把它
-    /// 补成 `.vdfsv2`，信号即被破坏，子节点会被错认成根。本函数与 `stat` /
-    /// `read` / `write` 三处的回填口径因此完全一致：**只翻译已填的，不代填。**
-    fn retag(&self, nodes: &mut [VdfsNode]) {
-        for n in nodes.iter_mut() {
-            Self::retag_one(n);
-        }
-    }
-
-    /// 单个节点的口径翻译（`list` 与 `stat` 共用，避免两处口径漂移）
-    fn retag_one(n: &mut VdfsNode) {
-        if !n.path.is_empty() {
-            n.path = to_display(&n.path);
+    /// 补成 `.vdfsv2`，信号即被破坏，子节点会被错认成根。
+    ///
+    /// 地址落在**条目**上（[`VdfsItem`]），节点本身是纯自述——本函数因此只碰
+    /// `it.path`。
+    fn retag(&self, items: &mut [VdfsItem]) {
+        for it in items.iter_mut() {
+            if !it.path.is_empty() {
+                it.path = to_display(&it.path);
+            }
         }
     }
 }
@@ -205,7 +202,7 @@ impl VdfsProvider for UnifiedFs {
 }
 
 impl UnifiedFs {
-    /// 虚拟半的派发：树内相对路径递给虚拟根，结果翻回展示口径。
+    /// 虚拟半的派发：树内相对路径递给虚拟根，结果的**条目地址**翻回展示口径。
     ///
     /// **只翻译已填的**：空 `path` 是「provider 未填」的信号，由访问层
     /// （`host::fill_paths`）按请求地址回填；若在这里把它补成 `.vdfsv2`，
@@ -235,34 +232,27 @@ impl UnifiedFs {
                 Ok(VdfsResponse::List(items))
             }
             VdfsRequest::Stat => {
-                let mut n = root
+                let n = root
                     .dispatch(ctx, rel, VdfsRequest::Stat)
                     .await?
                     .into_stat()
                     .ok_or_else(|| VdfsError::internal("响应类型不匹配"))?;
-                Self::retag_one(&mut n);
                 Ok(VdfsResponse::Stat(n))
             }
             VdfsRequest::Read => {
-                let mut c = root
+                let c = root
                     .dispatch(ctx, rel, VdfsRequest::Read)
                     .await?
                     .into_read()
                     .ok_or_else(|| VdfsError::internal("响应类型不匹配"))?;
-                if !c.path.is_empty() {
-                    c.path = to_display(&c.path);
-                } // `VdfsContent` 不是 `VdfsNode`，复用不了 `retag_one`
                 Ok(VdfsResponse::Read(c))
             }
             VdfsRequest::Write { content } => {
-                let mut r = root
+                let r = root
                     .dispatch(ctx, rel, VdfsRequest::Write { content })
                     .await?
                     .into_write()
                     .ok_or_else(|| VdfsError::internal("响应类型不匹配"))?;
-                if !r.path.is_empty() {
-                    r.path = to_display(&r.path);
-                } // 同上：写入结果也不是 `VdfsNode`
                 Ok(VdfsResponse::Write(r))
             }
             VdfsRequest::Delete { recursive } => {
