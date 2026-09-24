@@ -908,10 +908,7 @@ pub async fn parse_sse_stream(
         buffer.extend_from_slice(&chunk);
 
         // ① 先把**完整的行**全部消化掉（一块里可能不止一行）
-        loop {
-            let Some(p) = buffer.iter().position(|&b| b == b'\n') else {
-                break;
-            };
+        while let Some(p) = buffer.iter().position(|&b| b == b'\n') {
             let line_bytes = buffer.drain(..p + 1).collect::<Vec<_>>();
             let line_str = String::from_utf8_lossy(&line_bytes);
             let trimmed = line_str.trim();

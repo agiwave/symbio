@@ -202,22 +202,18 @@ impl Renderer {
                     self.wrote_text = true;
                 }
             }
-            MessageType::Reasoning => {
-                if self.verbose && !delta.is_empty() && !self.quiet {
-                    // 推理内容走 stderr，避免污染 stdout 的正文流
-                    write_stderr(&format!("\x1b[2m{delta}\x1b[0m"));
-                }
+            MessageType::Reasoning if self.verbose && !delta.is_empty() && !self.quiet => {
+                // 推理内容走 stderr，避免污染 stdout 的正文流
+                write_stderr(&format!("\x1b[2m{delta}\x1b[0m"));
             }
-            MessageType::ToolCall => {
-                if self.tools_announced.insert(id.to_string()) {
-                    let name = name.unwrap_or_else(|| "tool".to_string());
-                    if !self.quiet {
-                        if self.wrote_text {
-                            write_stdout("\n");
-                            self.wrote_text = false;
-                        }
-                        write_stderr(&format!("⚙ 调用工具: {name} …"));
+            MessageType::ToolCall if self.tools_announced.insert(id.to_string()) => {
+                let name = name.unwrap_or_else(|| "tool".to_string());
+                if !self.quiet {
+                    if self.wrote_text {
+                        write_stdout("\n");
+                        self.wrote_text = false;
                     }
+                    write_stderr(&format!("⚙ 调用工具: {name} …"));
                 }
             }
             // Turn（组合节点）/ UserPrompt（需审批的交互卡）：无正文可渲染。

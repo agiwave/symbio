@@ -13,7 +13,7 @@ fn truncate_does_not_panic_on_multibyte_boundary() {
     for n in 0..s.len() {
         // 任何字节上限都必须安全返回，绝不 panic
         let out = truncate_bytes(&s, n, "…");
-        assert!(out.len() <= n.max(0) + 4, "n={n} 输出超长：{}", out.len());
+        assert!(out.len() <= n + 4, "n={n} 输出超长：{}", out.len());
     }
 }
 

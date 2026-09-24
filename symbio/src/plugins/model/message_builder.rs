@@ -159,12 +159,12 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                 if let Some(kids) = children.get(m.id.as_str()) {
                     for child in kids {
                         match child.msg_type {
-                            Some(MessageType::Reasoning) => {
+                            Some(MessageType::Reasoning)
                                 // 仅最近 N 条思考进入请求视图
-                                if retained_reasoning_turns.contains(m.id.as_str()) {
-                                    native.reasoning_content =
-                                        child.content.as_ref().map(|c| c.to_text());
-                                }
+                                if retained_reasoning_turns.contains(m.id.as_str()) =>
+                            {
+                                native.reasoning_content =
+                                    child.content.as_ref().map(|c| c.to_text());
                             }
                             Some(MessageType::Text) => {
                                 native.content = child.content.clone();
