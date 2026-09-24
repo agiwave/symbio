@@ -1,17 +1,16 @@
 /**
- * VdfsWorkbench — **提示态状态机**单测（happy-dom）
+ * VdfsWorkbench — **新建入口与动作转发**单测（happy-dom）
  *
- * 只测这一件事：详情槽里「选入口 / 选文件」两个瞬态的开合与路由。
- * 它们是本轮机制化的对象——此前是两个布尔（`creatingTyped` / `renaming`）加三个
- * 载荷 ref，互斥靠两个 `startXxx` 各自把对方复位来维持；现在是一个判别式
- * （`promptKind`）加两个载荷。互斥是**结构性的**，所以值得有断言钉住。
- * （`renaming` 那一支随 `vdfs/move` 整条下线了，故这里只剩两种提示。）
+ * 只测两件事：
  *
- * 顺带钉住两条对外约定：
- * - 入口清单**不再显示 `ext`**。`ext`（`session` / `form`）是渲染器键、机制细节
- *   ——与「列表徽标只给目录、不给文件 ext」是同一条约定，靠断言挡住它被加回来；
- * - **类型与入口是两件事**：一个目录只声明一类东西，但这类东西可以有两条入口
- *   （主入口 + 整包导入）。两条时才出现「选入口」这一步。
+ * - **「新建」按钮**：节点声明了可接受类型（`new_type`）时可见，点一下**直接
+ *   进入该类型的详情页**。没有「选方式」这一步——整包导入是详情页上的一条动作，
+ *   不是第二种新建入口（见 ADR-029）。这条约定曾经由一整个提示态状态机承担，
+ *   现在退化成一个无参调用，正因如此更值得钉住：它很容易被"顺手"加回去。
+ * - **动作转发**：渲染器上抛的动作按**载荷形状**分流——带 `File` 的走
+ *   `runPackAction`（如「导入整包」），其余走 `runAction`（如「导出」）。
+ *   控件不认识任何具体动作名，所以这条分流必须由断言钉住，否则「导入」会
+ *   悄悄退化成一条不带载荷的动作、或者前端又开始按动作名分支。
  *
  * 环境说明：`useVdfs` 被整体替换为可控桩（它经 `services/vdfs` 出站），
  * 渲染器登记表也被挡掉（那会把整条会话渲染链连同 Tauri 通道拉进来）。
@@ -23,7 +22,7 @@ import { mount, type VueWrapper } from '@vue/test-utils'
 import { computed, defineComponent, h, ref } from 'vue'
 
 const hoisted = vi.hoisted(() => {
-  const fns = { startNew: vi.fn(), createTypedFile: vi.fn() }
+  const fns = { startNew: vi.fn(), runAction: vi.fn(), runPackAction: vi.fn() }
   return { stub: {} as Record<string, unknown>, fns }
 })
 
@@ -35,40 +34,33 @@ vi.mock('@/registry/vdfsRenderers', () => ({}))
 import VdfsWorkbench from '../VdfsWorkbench.vue'
 import DetailShell from '../DetailShell.vue'
 import { registerVdfsRenderer } from '@/registry/vdfsTypes'
-import { vdfsNewEntries, type DetailAction, type VdfsNewType, type VdfsNode } from '@/schemas/vdfs'
+import type { DetailAction, VdfsNewType, VdfsNode } from '@/schemas/vdfs'
 
 /**
- * 详情渲染器桩：**机制动作（删除）由页面注入渲染器**，渲染器只管转呈
- * （见 `useVdfs.mechanismActions` → `DetailShell`）。所以机制动作这条入口
- * 只能在渲染器挂载时才存在——桩据此把它接出来，好让「提示态让位给渲染器 /
- * 渲染器让位给提示态」这条互斥通道可被触发（而不是去调组件内部函数）。
+ * 详情渲染器桩：它只做两件事——
+ *
+ * - 把页面注入的**机制动作**渲染出来（证明「机制动作经控件注入所有渲染器」
+ *   这条约定仍在：控件不自己渲染删除按钮）；
+ * - 作为**动作上抛的源头**（本文件要测的就是控件怎么接这一抛）。
+ *
+ * 用 `$emit` 直接触发而不是渲染按钮，是为了让用例只依赖「上抛了什么」，
+ * 不依赖渲染器内部长什么样——那是各渲染器自己的测试该管的事。
  */
 const RendererStub = defineComponent({
   name: 'RendererStub',
   props: { mechanismActions: { type: Array, default: () => [] } },
-  emits: ['delete'],
-  setup(props, { emit }) {
+  // 声明而非留给 fallthrough：`action` 是本桩要上抛的事件，不是要往下传的 attr
+  emits: ['action'],
+  setup(props) {
     return () =>
-      h(DetailShell, {
-        actions: props.mechanismActions as DetailAction[],
-        onRun: () => emit('delete'),
-      })
+      h(DetailShell, { actions: props.mechanismActions as DetailAction[] })
   },
 })
 // `session` 是本文件节点（`makeNode`）的渲染器键（ext → renderer 由 vdfsTypes 解析）
 registerVdfsRenderer('session', RendererStub)
 
-/** 单入口：只有表单新建 */
-const SESSION: VdfsNewType = { ext: 'session', title: '会话' }
-/** 单入口：主入口本身就是选文件（如 agent 整包） */
-const AGENT_IMPORT: VdfsNewType = { ext: 'zip', title: '智能体包', source: 'file' }
-/** 两入口：表单新建（主）+ 整包导入（备选）——skill / mcp 的形状 */
-const SKILL: VdfsNewType = {
-  ext: 'skill',
-  title: '技能',
-  node_ext: 'form',
-  import: { ext: 'zip', title: '技能包' },
-}
+/** 配置型：呈现 ext 是 skill、落成后节点 ext 是 form（详情是定义驱动表单） */
+const SKILL: VdfsNewType = { ext: 'skill', title: '技能', node_ext: 'form' }
 
 function makeNode(name: string): VdfsNode {
   return {
@@ -84,7 +76,6 @@ function makeNode(name: string): VdfsNode {
 
 /** 可控的 `useVdfs` 桩：只填本文件关心的那几个键，其余给空值 */
 function installStub(opts: { newType?: VdfsNewType | null; selected?: VdfsNode | null } = {}) {
-  const newType = opts.newType ?? null
   const selectedNode = ref<VdfsNode | null>(opts.selected ?? null)
   hoisted.stub = {
     navItems: computed(() => []),
@@ -117,127 +108,93 @@ function installStub(opts: { newType?: VdfsNewType | null; selected?: VdfsNode |
     mechanismBusyId: ref<string | null>(null),
     saveFields: vi.fn(),
     saveText: vi.fn(),
-    runAction: vi.fn(),
     removeSelected: vi.fn(),
-    // 入口由类型推导（与 useVdfs 同一条实现，见 schemas/vdfs.vdfsNewEntries）
-    newEntries: computed(() => vdfsNewEntries(newType)),
-    canCreate: computed(() => vdfsNewEntries(newType).length > 0),
+    // 可新建类型直接来自当前目录节点的自述（前端不做任何推导）
+    creatableType: computed(() => opts.newType ?? undefined),
+    canCreate: computed(() => Boolean(opts.newType)),
     draftSeq: ref(0),
     ...hoisted.fns,
   }
-}
-
-/** 按 `aria-label`（`VdfsActions` 对文字/图标按钮一律写入）或可见文案点按钮 */
-async function click(w: VueWrapper, label: string) {
-  const btn = w
-    .findAll('button')
-    .find((b) => b.attributes('aria-label') === label || b.text() === label)
-  if (!btn) {
-    throw new Error(`找不到按钮「${label}」；现有：${w.findAll('button').map((b) => b.text() || b.attributes('aria-label')).join(' | ')}`)
-  }
-  await btn.trigger('click')
-}
-
-/** 提示态动作行的可见文案（按渲染顺序） */
-function actionLabels(w: VueWrapper): string[] {
-  return w.findAll('.head-actions button').map((b) => b.attributes('aria-label') ?? '')
 }
 
 function bench() {
   return mount(VdfsWorkbench, { props: { addr: '@vfs' } })
 }
 
-/** header 上的「新建」按钮（title 随入口数变化） */
-async function clickNew(w: VueWrapper) {
-  const btn = w.findAll('button').find((b) => (b.attributes('title') ?? '').startsWith('新建'))
-  if (!btn) throw new Error('找不到「新建」按钮')
-  await btn.trigger('click')
+/** header 上的「新建」按钮 */
+function newButton(w: VueWrapper) {
+  return w.findAll('button').find((b) => (b.attributes('title') ?? '').startsWith('新建'))
+}
+
+/** 从渲染器桩上抛一个动作（`file` 有值 = 该动作声明了 `pack`） */
+async function emitAction(w: VueWrapper, id: string, file?: File) {
+  w.findComponent({ name: 'RendererStub' }).vm.$emit('action', id, file)
+  await w.vm.$nextTick()
 }
 
 beforeEach(() => {
   Object.values(hoisted.fns).forEach((f) => f.mockClear())
 })
 
-describe('VdfsWorkbench 提示态：选入口', () => {
-  it('两条入口时点「新建」进提示态：入口清单**就是**动作行，且不显示 ext', async () => {
+describe('VdfsWorkbench 新建入口', () => {
+  it('目录声明了可新建类型 ⇒ 按钮可见，标题带上类型名', () => {
     installStub({ newType: SKILL })
     const w = bench()
-    await clickNew(w)
 
-    // 入口清单与「取消」同处一行——没有另一套列表渲染
-    expect(actionLabels(w)).toEqual(['技能', '技能包', '取消'])
-    // `ext` 是渲染器键、机制细节，不得摆给用户看
-    expect(w.text()).not.toContain('skill')
-    expect(w.text()).not.toContain('zip')
+    const btn = newButton(w)
+    expect(btn, '声明了 new_type 就该有新建按钮').toBeTruthy()
+    expect(btn?.attributes('title')).toBe('新建 技能')
   })
 
-  it('选主入口 ⇒ 收起提示并进入该类型的详情页（startNew）', async () => {
+  it('未声明可新建类型 ⇒ 没有按钮（机制只认节点声明，不做任何回退）', () => {
+    installStub({ newType: null })
+    expect(newButton(bench())).toBeUndefined()
+  })
+
+  it('点「新建」**直接进详情页**：一次无参调用，没有"选方式"这一步', async () => {
     installStub({ newType: SKILL })
     const w = bench()
-    await clickNew(w)
-    await click(w, '技能')
+    await newButton(w)!.trigger('click')
 
-    expect(hoisted.fns.startNew).toHaveBeenCalledWith(SKILL)
-    // 提示态已收起：动作行不复存在（详情槽交回渲染器）
-    expect(w.find('.head-actions').exists()).toBe(false)
-  })
-
-  it('单入口（表单新建）⇒ 点「新建」跳过入口选择，直接落到那一条路', async () => {
-    installStub({ newType: SESSION })
-    const w = bench()
-    await clickNew(w)
-
-    expect(actionLabels(w)).toEqual([]) // 没有入口动作行
-    expect(hoisted.fns.startNew).toHaveBeenCalledWith(SESSION)
+    // 无参：类型由控件自己从当前目录节点读（`startNew` 内部读 `creatableType`），
+    // 于是「新建」只有一个入口形态，调用方无从表达"选哪个入口"
+    expect(hoisted.fns.startNew).toHaveBeenCalledWith()
+    expect(hoisted.fns.startNew).toHaveBeenCalledTimes(1)
+    // 没有第二跳：不存在"进了某个提示态、还要再选一次"的中间界面
+    expect(hoisted.fns.runAction).not.toHaveBeenCalled()
+    expect(hoisted.fns.runPackAction).not.toHaveBeenCalled()
   })
 })
 
-describe('VdfsWorkbench 提示态：从本地文件新建', () => {
-  it('选导入入口 ⇒ 进文件提示态：导入（未选文件时禁用）/ 上一步 / 取消', async () => {
-    installStub({ newType: SKILL })
+describe('VdfsWorkbench 动作转发：按**载荷形状**分流', () => {
+  it('不带文件的上抛 ⇒ runAction（如「导出」「测试连接」）', async () => {
+    installStub({ selected: makeNode('s1') })
     const w = bench()
-    await clickNew(w)
-    await click(w, '技能包')
+    await emitAction(w, 'export')
 
-    expect(actionLabels(w)).toEqual(['导入', '上一步', '取消'])
-    const importBtn = w.findAll('.head-actions button').find((b) => b.attributes('aria-label') === '导入')
-    expect(importBtn?.attributes('disabled'), '未选文件时导入不可点').toBeDefined()
+    expect(hoisted.fns.runAction).toHaveBeenCalledWith('export')
+    expect(hoisted.fns.runPackAction).not.toHaveBeenCalled()
   })
 
-  it('单入口且主入口即选文件 ⇒ 点「新建」直达文件提示态（无入口选择这一步）', async () => {
-    installStub({ newType: AGENT_IMPORT })
+  it('带 File 的上抛 ⇒ runPackAction（如「导入整包」）', async () => {
+    installStub({ selected: makeNode('s1') })
     const w = bench()
-    await clickNew(w)
+    const file = new File(['PK'], 'demo.zip', { type: 'application/zip' })
+    await emitAction(w, 'import', file)
 
-    expect(actionLabels(w)).toEqual(['导入', '取消']) // 单入口故无「上一步」
-  })
-
-  it('「上一步」回到入口选择；「取消」收起提示', async () => {
-    installStub({ newType: SKILL })
-    const w = bench()
-    await clickNew(w)
-    await click(w, '技能包')
-    expect(actionLabels(w)).toEqual(['导入', '上一步', '取消'])
-
-    await click(w, '上一步')
-    expect(actionLabels(w)).toEqual(['技能', '技能包', '取消'])
-
-    await click(w, '取消')
-    expect(w.find('.head-actions').exists()).toBe(false)
+    // 动作名与文件原样转交：控件不认识「导入」，只认「这个动作的载荷是文件」
+    expect(hoisted.fns.runPackAction).toHaveBeenCalledWith('import', file)
+    expect(hoisted.fns.runAction).not.toHaveBeenCalled()
   })
 })
 
-describe('VdfsWorkbench 提示态：与详情态互斥', () => {
-  it('提示态占用详情槽时，详情渲染器不挂载（同槽只有一个主人）', async () => {
-    installStub({ selected: makeNode('s1'), newType: SKILL })
+describe('VdfsWorkbench 详情槽', () => {
+  it('机制动作由页面算好、经控件注入渲染器（控件不自己渲染删除）', () => {
+    installStub({ selected: makeNode('s1') })
     const w = bench()
 
-    // 未开提示：详情渲染器在场（页面注入的机制动作可见）
-    expect(w.find('button[aria-label="删除"]').exists()).toBe(true)
-
-    // 开提示：渲染器让位——它的动作（含机制动作）随之消失，槽里只剩提示
-    await clickNew(w)
-    expect(w.find('button[aria-label="删除"]').exists()).toBe(false)
-    expect(actionLabels(w)).toEqual(['技能', '技能包', '取消'])
+    expect(w.findComponent({ name: 'RendererStub' }).props('mechanismActions')).toEqual([
+      { id: 'delete', label: '删除', style: 'secondary' },
+    ])
   })
 })

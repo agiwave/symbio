@@ -28,13 +28,15 @@
     <template #rail-footer><slot name="rail-footer" /></template>
 
     <template #header-actions>
-      <!-- 新建（节点声明了可接受的新建类型时可见；类型与入口由后端下发，前端不硬编码） -->
+      <!-- 新建（节点声明了可接受的新建类型时可见；类型由后端下发，前端不硬编码）。
+           点一下**直接进入该类型的详情页**（草稿态）——没有「选方式」这一步：
+           整包导入是详情页上的一条动作，不是第二种新建入口（见 ADR-029）。 -->
       <button
         v-if="canCreate"
         class="icon-btn"
-        :title="newEntries.length > 1 ? '新建（选择方式）' : `新建 ${newEntries[0]?.label ?? ''}`"
+        :title="`新建 ${creatableType?.title ?? ''}`"
         :disabled="loading || saving"
-        @click="startNewEntry"
+        @click="startNew()"
       >
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="12" y1="5" x2="12" y2="19" />
@@ -94,43 +96,6 @@
     </template>
 
     <template #detail>
-      <!-- ==================== 提示态（与详情态互斥） ====================
-           新建（选入口 / 选文件）是两种**瞬态交互**，都占用详情槽；
-           它们与「选中一项的详情」互斥——这个不变式由**一个判别式状态**
-           （`promptKind`）表达，而不是若干布尔各自在 startXxx 里互相复位
-           （漏一处就是两个提示叠在同一个槽里）。
-
-           两者都套 `DetailShell`：它本就是「详情槽内容的外壳」（标题行 +
-           动作行 + 错误行 + 内容）。提示不是例外——先前那两份手写提示外壳
-           （各自一套标题 / 动作行 / 错误行 / 忙态样式）是同一结构抄了两遍。 -->
-      <DetailShell
-        v-if="promptKind !== 'none'"
-        :title="promptTitle"
-        :actions="promptActions"
-        :busy="promptBusy"
-        :disabled="promptDisabled"
-        :error="detailError"
-        @run="onPromptAction"
-      >
-        <!-- 选入口：清单**就是**动作行（见 promptBar），此处只留一句引导。
-             ⚠️ 不再把 `ext` 显示出来：那是**渲染器键**（`session` / `form`），
-             属机制细节——与「列表徽标只给目录、不给文件 ext」是同一条约定。 -->
-        <p v-if="promptKind === 'entry'" class="prompt-hint">请选择新建方式</p>
-
-        <!-- 从本地文件新建：内容（字节）在打开提示之前就已齐备，故选文件即完成
-             ——唯一不进详情页的新建形态 -->
-        <template v-else>
-          <input
-            type="file"
-            class="prompt-input"
-            :accept="promptAccept"
-            @change="onPromptFile"
-          />
-          <p class="prompt-hint">写入地址：<code>{{ typedFilePreview }}</code></p>
-          <p v-if="promptDescription" class="prompt-hint">{{ promptDescription }}</p>
-        </template>
-      </DetailShell>
-
       <!-- 详情：渲染器由节点 ext 决定（唯一分发点）。**草稿（新建态）也走这里**
            ——同一个 ext 用同一个渲染器，因此「点新建」与「选中一项」在交互上
            没有第二种形态（key 对草稿另取，保证连续新建时重挂载）。
@@ -140,7 +105,7 @@
            （见 useVdfs.mechanismActions）。渲染器只声明**它自己特有**的动作。 -->
       <component
         :is="rendererComp"
-        v-else-if="selectedNode && rendererComp"
+        v-if="selectedNode && rendererComp"
         :key="selectedNode.path || `draft-${draftSeq}`"
         :node="selectedNode"
         :data="rendererData"
@@ -169,9 +134,7 @@
 import { computed } from 'vue'
 import Workbench from '@/components/common/Workbench.vue'
 import VdfsCard from '@/components/common/VdfsCard.vue'
-import DetailShell from './DetailShell.vue'
 import { useVdfs } from '@/composables/useVdfs'
-import { useVdfsPrompt } from '@/composables/useVdfsPrompt'
 import { getVdfsRenderer, isTextualRenderer, resolveVdfsRenderer } from '@/registry/vdfsTypes'
 // 装配渲染器组件（副作用导入：登记 ext → 组件；本控件是唯一消费方）
 import '@/registry/vdfsRenderers'
@@ -228,10 +191,10 @@ const {
   saveFields,
   saveText,
   runAction,
+  runPackAction,
   removeSelected,
   startNew,
-  createTypedFile,
-  newEntries,
+  creatableType,
   canCreate,
   draftSeq,
 } = useVdfs({ addr: computed(() => props.addr) })
@@ -296,49 +259,17 @@ function onDelete() {
 }
 
 /**
- * 节点动作（如「测试连接」）：标识由详情定义声明、由 provider 解释，
- * 控件只负责转发并呈现结果。
+ * 节点动作（如「测试连接」「导出」「导入整包」）：标识由详情定义声明、由
+ * provider 解释，控件只负责转发并呈现结果。
+ *
+ * `file` 只在动作声明了 `pack` 时带上（渲染器取到本地文件后上抛）——载荷怎么
+ * 编码是机制层的事，控件把它交给 `runPackAction`。于是「导入」（取文件）与
+ * 「导出」（给文件）在控件这一层恰是一对逆操作，两边都不认识对方的动作名。
  */
-function onAction(id: string) {
-  void runAction(id)
+function onAction(id: string, file?: File) {
+  if (file) void runPackAction(id, file)
+  else void runAction(id)
 }
-
-// ==================== 提示态（新建 / 导入） ====================
-//
-// 两种瞬态交互的**状态与动作装配**在 `useVdfsPrompt`（唯一实现）。本控件只把
-// `useVdfs` 的能力注入它，并把模板槽位接到它的返回值上——于是「提示态怎么收起 /
-// 这一步给哪些按钮」只有一份实现，不会随提示种类增多而自然演化。
-//
-// 它们互斥、且都不进「选中项的详情」通道，故用一个**判别式**表达：
-// `promptKind` 决定界面上是哪一个（`none` = 没有提示，详情槽交给渲染器）。
-// 旧写法是两个布尔（creatingTyped / renaming）加三个载荷 ref，互斥靠两个
-// startXxx 各自把对方复位来维持——那是不变式存在两种写法的典型。
-// （`renaming` 这一支随 `vdfs/move` 整条下线了，见 `useVdfsPrompt` 头注释。）
-//
-// 新建的两种形态，判据是**内容是否在打开详情页之前就已齐备**：
-// - 缺省：点新建 = **进入该类型的详情页**（草稿态，无 id / 名字）——名字要么
-//   在详情页里产生（如会话的首条消息），要么由后端生成（写目录自身，见 `write`）；
-// - 整包导入（`new:import`）：内容就是那份本地文件，选文件即完成（进详情页无事可做）。
-const {
-  promptKind,
-  promptTitle,
-  promptActions,
-  promptDisabled,
-  promptBusy,
-  promptAccept,
-  promptDescription,
-  typedFilePreview,
-  onPromptAction,
-  onPromptFile,
-  startNewEntry,
-} = useVdfsPrompt({
-  newEntries,
-  cwd,
-  saving,
-  error: detailError,
-  startNew,
-  createTypedFile,
-})
 
 /**
  * 详情渲染器完成资源创建后上报新节点的 **id**（如新建会话落库）：刷新清单并选中它。
@@ -399,41 +330,7 @@ async function onCreated(id: string) {
   color: var(--text-muted);
 }
 
-/* ============== 提示态（选入口 / 选文件）的**内容**样式 ==============
-   外壳（标题行 / 动作行 / 错误行 / 忙态）由 `DetailShell` 提供——提示不是详情槽
-   的例外。这里只剩两类提示各自的**内容**：一个文件选择框、若干说明文字。
-   故旧有的 .vdfs-prompt / .prompt-title / .prompt-actions 及整套 .type-choice-*
-   （类型列表已改为动作行，见 promptBar）都已删除。 */
-.prompt-input {
-  padding: 0.45rem 0.7rem;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  background: var(--surface-sunken);
-  color: var(--text-primary);
-  font-size: 0.85rem;
-}
-.prompt-input:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-subtle-bg);
-}
-/* 文件选择器（整包导入）沿用输入框的框体，但按原生控件排版 */
-.prompt-input[type='file'] {
-  width: 100%;
-  padding: 0.35rem 0.5rem;
-  font-size: 0.78rem;
-}
-.prompt-hint {
-  margin: 0;
-  font-size: 0.72rem;
-  color: var(--text-muted);
-}
-.prompt-hint code {
-  font-family: var(--font-mono);
-  background: var(--surface-sunken);
-  padding: 0.05rem 0.3rem;
-  border-radius: var(--radius-sm);
-}
+/* 空态里的失败说明（列表加载失败 ≠ 目录为空，见模板） */
 .prompt-error {
   margin: 0;
   font-size: 0.78rem;

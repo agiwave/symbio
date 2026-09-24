@@ -212,6 +212,17 @@
         />
       </BaseModal>
     </Teleport>
+
+    <!-- 动作载荷来自本地文件（DetailAction.pack）：原生文件选择器只能由渲染器唤起，
+         故这里挂一个不可见的 input，由 openPack 按需 click。 -->
+    <input
+      ref="packInput"
+      type="file"
+      class="pack-input"
+      tabindex="-1"
+      aria-hidden="true"
+      @change="onPackChange"
+    />
   </DetailShell>
 </template>
 
@@ -294,9 +305,13 @@ const emit = defineEmits<{
   'open-container': [kind: string]
   /**
    * **未在本渲染器内实现**的动作：原样上抛动作标识（如 VDFS 节点动作
-   * `export`）。动作语义归 provider，渲染器不做拦截——新增动作无需改动这里。
+   * `export` / `import`）。动作语义归 provider，渲染器不做拦截——新增动作
+   * 无需改动这里。
+   *
+   * `file` 只在动作声明了 `pack` 时带上（见下方「机制原生取值原语」）：那是
+   * **本地文件载荷**，本渲染器只能把它取到手，怎么编码由机制层决定。
    */
-  action: [id: string]
+  action: [id: string, file?: File]
   cancel: []
 }>()
 
@@ -356,6 +371,35 @@ function fieldDisabled(f: DetailField): boolean {
 async function onPick(f: DetailField) {
   const picked = await pickNative(f.pick as DetailPick | undefined)
   if (picked != null) form[f.key] = picked
+}
+
+// ==================== 机制原生取值原语（DetailAction.pack） ====================
+//
+// 与字段的 `pick` 同类：都表示「这一步要一个本地路径 / 文件，后端给不了」。
+// 区别在**取值去向**——`pick` 的结果是本字段的值（表单模型的一部分），
+// `pack` 的结果是**动作载荷**：本渲染器只把 `File` 原样上抛，载荷怎么编码
+// 是机制层的事（见 `useVdfs.runPackAction`），渲染器不认识任何具体动作。
+const packInput = ref<HTMLInputElement | null>(null)
+/** 正在等文件的动作 id（原生文件选择器是系统模态，一次只服务一个动作） */
+const pendingPack = ref('')
+
+function openPack(action: DetailAction) {
+  pendingPack.value = action.id
+  const el = packInput.value
+  if (!el) return
+  // 逐次设置而非绑在模板上：`accept` 要在 `click()` 之前就位，而模板更新是
+  // 异步的（此时 DOM 还没 patch）。
+  el.accept = action.pack ? `.${action.pack}` : ''
+  // 清空才能让「同一个文件连选两次」也触发 change（值未变时不发事件）
+  el.value = ''
+  el.click()
+}
+
+function onPackChange(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  const id = pendingPack.value
+  pendingPack.value = ''
+  if (file && id) emit('action', id, file)
 }
 
 // ==================== 结构化子对象（widget = form） ====================
@@ -556,8 +600,10 @@ function runAction(a: DetailAction) {
       emit('open-container', String((a.payload as Record<string, unknown> | undefined)?.kind ?? ''))
       return
     default:
-      // 未内置的动作：原样上抛（VDFS 节点动作走这里，如 `export`）
-      emit('action', a.id)
+      // 未内置的动作：原样上抛（VDFS 节点动作走这里，如 `export` / `import`）。
+      // 声明了 `pack` 的动作先取本地文件——载荷形状归机制层，本渲染器只交 File。
+      if (a.pack) openPack(a)
+      else emit('action', a.id)
   }
 }
 
@@ -934,6 +980,17 @@ watch(
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* 不可见的原生文件选择器（动作载荷要文件时由 openPack 唤起）。
+   不用 `display: none`：部分浏览器对它调 `click()` 不生效。 */
+.pack-input {
+  position: fixed;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .icon-btn {

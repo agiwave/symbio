@@ -29,9 +29,10 @@
  *
  * - **无面包屑**：路径即导航，层级靠左栏切目录 + 中栏点目录钻入 + 宿主返回键；
  * - **无「新建目录」按钮**：新建 = 新建一种**类型**（会话 / 模型 / …）；
- *   类型由当前目录节点声明（`new_type`，至多一个），它的入口最多两条
- *   （主入口 + 整包导入）——多于一条时先选入口，然后**直接进入该类型的详情页**
- *   （草稿态：无 id / 名字，与选中一项同一条通道，见 `startNew`）；
+ *   类型由当前目录节点声明（`new_type`，至多一个），点添加即**直接进入该类型的
+ *   详情页**（草稿态：无 id / 名字，与选中一项同一条通道，见 `startNew`）。
+ *   详情页上可能另有一条「导入整包」动作（由 `DetailAction.pack` 声明），
+ *   它取一个本地文件作为动作载荷——**不是第二种新建入口**，只是同一页上的动作；
  *   目录结构节点由后端 provider 自持，前端不暴露 mkdir 入口。
  *
  * ## 校验错误的消费约定（要点五的消费端）
@@ -50,7 +51,6 @@ import {
   readVdfs,
   runVdfsAction,
   writeVdfs,
-  writeVdfsBinary,
 } from '@/services/vdfs'
 import { READBACK_REASON } from '@/services/readback'
 import { subscribeVdfsChanged } from '@/services/eventBus'
@@ -59,7 +59,6 @@ import {
   actionFileOf,
   isVdfsDir,
   isVdfsDraft,
-  newFileNameOf,
   parseVdfsValidation,
   vdfsAccessOf,
   vdfsJoin,
@@ -67,10 +66,8 @@ import {
   type DetailAction,
   type VdfsChange,
   type VdfsFieldError,
-  type VdfsNewEntry,
   type VdfsNewType,
   type VdfsNode,
-  vdfsNewEntries,
 } from '@/schemas/vdfs'
 import {
   dirIconOf,
@@ -512,23 +509,27 @@ export function useVdfs(opts: UseVdfsOptions) {
   }
 
   /**
-   * 执行**节点动作**（如「测试连接」「导出」）。
+   * 执行**节点动作**（如「测试连接」「导入整包」「导出」）。
    *
    * 动作标识由详情定义声明、由 provider 解释，本层只负责把它送到
    * `vdfs/action` 并把结果（成功 / 失败 + 说明）呈现出来；**前端不认识
    * 任何具体动作**，新增动作无需改动这里。
    *
-   * 唯一例外是**文件载荷**：结果里带 `filename` + `b64` 就下载它（见
-   * `actionFileOf`）。这是形状判定而非动作判定——「导出」只是当前唯一
-   * 按此形状回传数据的动作。
+   * 唯一例外是**文件载荷**，且两个方向都是形状判定而非动作判定：
+   * - 结果里带 `filename` + `b64` → 下载它（见 `actionFileOf`，如「导出」）；
+   * - 动作声明了 `pack` → 载荷是一个本地文件（见 `runPackAction`，如「导入」）。
+   *
+   * 目标地址与 `write` 同一条规则：**草稿（新建态）打在当前目录上**——使用方
+   * 只说「在这个目录里做这件事」，名字 / 落点由 provider 决定。
    */
-  async function runAction(action: string): Promise<boolean> {
+  async function runAction(action: string, payload?: unknown): Promise<boolean> {
     const node = selectedNode.value
     if (!node) return false
+    const target = isVdfsDraft(node) ? cwd.value : node.path
     actionBusy.value = true
     detailError.value = ''
     try {
-      const r = await runVdfsAction(node.path, action)
+      const r = await runVdfsAction(target, action, payload)
       if (r?.ok) {
         showToast('success', r.message || '执行成功')
         const file = actionFileOf(r.data)
@@ -537,6 +538,11 @@ export function useVdfs(opts: UseVdfsOptions) {
         detailError.value = r?.message || '执行失败'
         showToast('error', detailError.value)
       }
+      // 动作可能改变条目集合（导入建出一条、清空删掉一片）→ 重拉收敛
+      await refresh()
+      // 草稿是**瞬态**：动作在草稿上成功 = 它已经落盘（如「导入整包」建出一条），
+      // 草稿页的使命到此结束——继续留着它，等于显示一个并不存在的资源的详情。
+      if (r?.ok && isVdfsDraft(node)) clearSelection()
       return r?.ok === true
     } catch (err) {
       detailError.value = captureError(err)
@@ -570,10 +576,10 @@ export function useVdfs(opts: UseVdfsOptions) {
     }
   }
 
-  // ==================== 可接受的新建类型与入口（§5） ====================
+  // ==================== 可接受的新建类型（§5） ====================
   //
   // 当前目录节点声明自己能新建**哪一类**东西（`new_type`，至多一个）；前端只
-  // 负责「选入口 + 进入详情页」，不认识任何具体类型——创建语义由 provider 自持。
+  // 负责「进入详情页」，不认识任何具体类型——创建语义由 provider 自持。
   // `<根>/session` 这类子目录节点由后端合成时携带其 `new_type`，因此无需任何
   // 「按目录名回退」的特判。
   //
@@ -581,17 +587,16 @@ export function useVdfs(opts: UseVdfsOptions) {
   // `ext` → 同一个渲染器 → 同一个保存入口。名字不由前端先问：它是 provider
   // 的私有知识，保存时由后端生成（写目录自身，见 `write`）。
   //
-  // 类型是「一类东西」，入口是「怎么把它造出来」：一个类型最多两条入口（主入口
-  // + 整包导入），推导集中在 `schemas/vdfs.vdfsNewEntries`（唯一实现）。
+  // 「导入整包」不在这里：它是**详情页上的一条动作**（由定义声明、经
+  // `DetailAction.pack` 表明载荷是一个本地文件），由 `runPackAction` 执行。
+  // 曾经它被表达成类型的第二种「入口形态」，于是前端要先问「选哪种方式」，
+  // 还得为类型补上 `source` / `import` 两个与呈现无关的字段（见 ADR-029）。
 
-  /** 当前目录可接受的新建类型（至多一个） */
+  /** 当前目录可接受的新建类型（至多一个；`undefined` = 该目录不可新建） */
   const creatableType = computed<VdfsNewType | undefined>(() => cwdNode.value?.new_type)
 
-  /** 当前目录的全部新建入口（空 = 不可新建） */
-  const newEntries = computed<VdfsNewEntry[]>(() => vdfsNewEntries(creatableType.value))
-
-  /** 是否有新建入口（添加按钮可见性；机制只认节点声明） */
-  const canCreate = computed(() => newEntries.value.length > 0)
+  /** 是否可新建（添加按钮可见性；机制只认节点声明） */
+  const canCreate = computed(() => Boolean(creatableType.value))
 
   /**
    * 草稿节点 = 「新建」的选中态：**没有 id、也没有名字**（判据见
@@ -619,6 +624,9 @@ export function useVdfs(opts: UseVdfsOptions) {
       ext: type.node_ext || type.ext,
       // 呈现描述随类型下发：草稿与落成后**同一张详情**（用户第 1 点）
       schema: type.schema,
+      // 类型自己的说明（如「在详情页里填好，保存时一次写入」）——草稿页据此
+      // 告诉用户这一步要做什么
+      description: type.description,
       // 图标键读 `config_type`（与清单项同源）——纯 UI 映射，草稿照给
       config_type: type.ext,
     }
@@ -633,39 +641,33 @@ export function useVdfs(opts: UseVdfsOptions) {
   const draftSeq = ref(0)
 
   /** 进入新建态：选中一张该类型的草稿节点（详情区按 `ext` 渲染） */
-  function startNew(type: VdfsNewType) {
+  function startNew() {
+    const type = creatableType.value
+    if (!type) return
     draftSeq.value += 1
     void select(draftNodeOf(type))
   }
 
   /**
-   * 按入口从**本地文件**新建（整包导入）：内容走二进制通道。
+   * 把一个**本地文件**作为动作载荷执行（`DetailAction.pack` 声明的动作）。
    *
-   * 这是「新建」里唯一**不进入详情页**的形态——因为内容（字节）在打开详情页
-   * 之前就已经齐了，没有「边看边填」的过程。目标名由**文件名**推导（主干 +
-   * 入口扩展名，见 `newFileNameOf`），一次写完即完成。
+   * 后端唤不起原生对话框、也拿不到用户刚选的文件，故「取文件」这一步只能由前端
+   * 做。载荷形状 `{filename, b64}` 与「导出」的结果同形（`actionFileOf` 认的那
+   * 一个）——两者对称，因此前端**不必认识「导入」这个动作**：它只认
+   * 「这个动作的载荷是一个文件」这个**形状**。
    *
-   * 扩展名取自**入口**而非类型：导入入口是包（`zip`），主入口是类型自己的
-   * 呈现扩展名——两者可能不同（见 `schemas/vdfs.vdfsNewEntries`）。
+   * 目标地址由 `runAction` 决定（草稿态 = 当前目录，与 `write` 同一条规则）。
    */
-  async function createTypedFile(entry: VdfsNewEntry, file: File): Promise<boolean> {
-    const target = vdfsJoin(cwd.value, newFileNameOf(file.name, entry.ext))
-    saving.value = true
-    detailError.value = ''
-    fieldErrors.value = []
+  async function runPackAction(action: string, file: File): Promise<boolean> {
+    let b64: string
     try {
-      const b64 = arrayBufferToBase64(await file.arrayBuffer())
-      await writeVdfsBinary(target, b64, { create: true })
-      showToast('success', `已导入「${file.name}」`)
-      await refresh()
-      return true
+      b64 = arrayBufferToBase64(await file.arrayBuffer())
     } catch (err) {
-      detailError.value = captureError(err)
-      showToast('error', `导入失败：${detailError.value}`)
+      detailError.value = `读取文件失败：${captureError(err)}`
+      showToast('error', detailError.value)
       return false
-    } finally {
-      saving.value = false
     }
+    return runAction(action, { filename: file.name, b64 })
   }
 
   // ==================== 实时（总线 vdfs 频道，非轮询） ====================
@@ -828,12 +830,11 @@ export function useVdfs(opts: UseVdfsOptions) {
     saveFields,
     saveText,
     runAction,
+    runPackAction,
     removeSelected,
     startNew,
     draftSeq,
-    createTypedFile,
     creatableType,
-    newEntries,
     canCreate,
   }
 }

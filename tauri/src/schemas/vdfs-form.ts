@@ -151,7 +151,8 @@ export interface DetailBadge {
 }
 
 /**
- * 动作按钮。id ∈ save|test|delete|set-default|open-container（payload.kind 指定子类别）或自定义。
+ * 动作按钮。id ∈ save|test|delete|set-default|open-container（payload.kind 指定子类别）、
+ * 或 provider 自持的 VDFS 节点动作（`import` / `export` / `truncate`…，经 `vdfs/action` 转发）。
  * icon：图标名（可选）——语义动作 id 自带默认图标映射；仅当需要区分同 id 多形态
  * （如「跳过校验保存」）或自定义动作需要图标时显式指定；未知图标名回落为文字按钮。
  */
@@ -163,6 +164,18 @@ export interface DetailAction {
   when?: DetailCondition
   disabled_when?: DetailCondition
   payload?: Record<string, unknown>
+  /**
+   * 本动作的载荷是一个**本地整包文件**（`{filename, b64}`）；值是包的后缀（如 `zip`）。
+   *
+   * 后端唤不起原生对话框、也拿不到用户刚选的文件，故这一步只能由前端做：声明了
+   * 它的动作在执行前先取一个本地文件，再把 `{filename, b64}` 作为载荷送出。
+   * 与字段的 `pick` 是同一类声明（「这一步需要原生能力」），区别在**取值去向**：
+   * 字段取到的是**路径**（写进字段值），动作取到的是**字节**（作为动作载荷）。
+   *
+   * 前端因此**不必认识「导入」这个动作**——它是形状判定（与 `actionFileOf`
+   * 对结果的文件载荷判定对称），新增取文件的动作无需改动前端。
+   */
+  pack?: string
   busy_label?: string
 }
 

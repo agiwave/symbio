@@ -161,3 +161,34 @@ fn pack_payload_is_a_file_shape() {
     assert_eq!(p.filename, "demo.zip");
     assert_eq!(decode_b64(&p.b64).unwrap(), b"hi".to_vec());
 }
+
+/// **出向与入向同形**：导出的包原样装进导入载荷，字段一个不多一个不少。
+///
+/// 这条是「导出 / 导入是一对逆向动作」在**载荷层**的落点：若哪天给其中一侧
+/// 加了字段（如 `id`），本用例会红——那意味着往返契约被单方面改了。
+#[test]
+fn unpack_mirrors_pack() {
+    let pack = VdfsPack::new("demo", b"hi");
+    let value = serde_json::to_value(&pack).unwrap();
+    // 去掉出向独有的 `id`（导入的 id 由 provider 决定）即是入向载荷
+    let mut obj = value.as_object().unwrap().clone();
+    obj.remove("id");
+    let unpack = VdfsUnpack::from_payload(Some(&serde_json::Value::Object(obj))).unwrap();
+    assert_eq!(unpack.filename, "demo.zip");
+    assert_eq!(unpack.bytes().unwrap(), b"hi".to_vec());
+    assert_eq!(unpack.name_of("demo-kind"), "demo");
+}
+
+/// 缺载荷 / 缺字段 / 非对象：都转为可读错误，不 panic
+#[test]
+fn unpack_rejects_malformed_payload() {
+    for bad in [
+        None,
+        Some(serde_json::json!("demo.zip")),
+        Some(serde_json::json!({ "filename": "demo.zip" })),
+        Some(serde_json::json!({ "b64": "aGk=" })),
+    ] {
+        let e = VdfsUnpack::from_payload(bad.as_ref()).unwrap_err();
+        assert!(e.0.contains("filename + b64"), "错误要说清缺什么：{}", e.0);
+    }
+}

@@ -370,7 +370,11 @@ impl VdfsProvider for DirVdfs {
             }
 
             VdfsRequest::Write { content } => {
-                // 二进制写入 = 整包导入（规范 §3.3：导入不占第二个操作）
+                // 二进制写入 = 把字节当成一个**整包**解到这个条目上。这是**存储层
+                // 原语**的语义：目录型条目没有「一份内容」可言，写字节就是解包。
+                // 对外的**入口形态**只有详情页的 `import` 动作
+                // （`VDFS_ACTION_IMPORT`）——它把包字节按 `VdfsUnpack` 装好再交给
+                // provider，见 `symbio_core::vdfs_provider` 的「节点动作」一节。
                 if content.binary {
                     let (id, _) = entry::split_rel(path)
                         .ok_or_else(|| VdfsError::invalid("整包只能导入到挂载根下的条目地址"))?;

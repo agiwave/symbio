@@ -234,25 +234,18 @@
 维持一份判据，而使用方（前端）拿到清单后仍要按 `ext` 反查渲染器——两处知识必然
 漂移。收敛为一个之后，「能不能建」是一个 `Option`，判据只有一个。
 
-**类型与入口是两件事**。类型 = 「一类东西」（至多一个）；入口 = 「怎么把它造
-出来」（至多两条）：
+**「新建」只有一条路：进入该类型的详情页**（草稿态）。
 
-| 入口 | 判据 | 动作 |
-|---|---|---|
-| **主入口** | 恒有 | `source = file` → 选文件；否则 → 进该类型的详情页（草稿态） |
-| **整包导入** | 类型声明了 `import` | 选文件（恒为 `source = file` 形态） |
-
-于是：一条入口 → 点添加直接落到那条路；两条入口 → 先**选入口**（清单就是动作行），
-选完落到上面两条之一。前端由 `vdfsNewEntries(newType)` 推导出这 1~2 条入口，
-动作 id 固定为 `new:type` / `new:import`。
-
-**选定主入口后：直接进入该类型的详情页**（草稿态）。
 这也是本机制与「选中一项」共用一条通道的原因：
 
 - **同一个渲染器**：草稿节点的 `ext` 与落成后**完全一致**；
 - **同一张详情**：草稿用类型声明的 `schema` 渲染出同一张表单；
 - **差别只有内容**：草稿**没有 id、也没有名字**（它还没落盘），选中一项则有；
-- 因此没有「第二种新建形态」——除了 `source = file` 那一条。
+- 于是点添加与选中一项进入的是**同一个详情页**，只有有没有内容之差。
+
+**整包导入不在这条路上**：它是详情页上的一条**动作**（`VDFS_ACTION_IMPORT`），
+与「导出」「删除」同级——不是第二种新建入口（见
+[DECISIONS.md](../DECISIONS.md) ADR-029）。
 
 名字**不由前端先问**：它是 provider 的私有知识（`id 归 provider`）。名字要么在
 详情页里产生（会话由**最后一条用户消息**派生标题——列表名跟随「最近在聊什么」，
@@ -264,23 +257,17 @@
 `node_ext`（落成后的渲染器键，缺省 = `ext`）与 `schema`（表单定义）。漏了
 `node_ext` 草稿会落到通用兜底，漏了 `schema` 会渲染出空表单。
 
-**内容来源**（`source`）：类型还可声明「写进去的内容从哪来」——
-
-- 缺省：在详情页里边看边填（先进入草稿详情，保存时一次写入）；
-- `file`：内容取自**本地文件**——使用方给文件选择器而不是详情页，目标名由文件名
-  推导，字节走 `vdfs/write` 的二进制（`b64`）通道。这是**唯一不进详情页**的形态，
-  因为内容在打开详情页之前就已经齐备（没有「边看边填」的过程）。
-
-于是**整包导入（zip）也是一种「新建」**，不新增协议操作。两种声明形态：
-
-- **主入口即选文件**：`source = file`（agent 包——本目录只有这一种造法）；
-- **导入是同一类型下的第二条入口**：`import = VdfsNewImport{ext, title, …}`
-  （skill / mcp——主入口是表单新建，导入是备选）。
+**「怎么把它造出来」不在这份声明里**：`VdfsNewType` 只回答「落成后长什么样」，
+它**没有** `source` 之类的字段——创建语义归 provider（见 §5.3），整包导入是
+详情页上的一条动作（ADR-029）。
 
 ### 5.2 域类型（后端）
 
 ```rust
 /// 目录可新建的**那一种**元素类型（至多一个；`None` = 不可新建）。
+///
+/// **纯呈现定义**：只说「落成后长什么样」，不说「怎么把它造出来」——
+/// 后者是详情页上的一条动作（`VDFS_ACTION_IMPORT`），不是这里的一个字段。
 pub struct VdfsNewType {
     /// 新元素**呈现扩展名**（地址末段后缀；id_of 按它剥 id，**不是**渲染器键）
     pub ext: String,
@@ -290,24 +277,10 @@ pub struct VdfsNewType {
     pub description: Option<String>,
     /// 图标名（纯 UI 映射）
     pub icon: Option<String>,
-    /// 内容来源：`None` = 在详情页里填；`Some("file")` = 选择本地文件
-    pub source: Option<String>,
     /// 新元素落成后的节点 ext（**渲染器键**）；缺省 = 与 ext 相同
     pub node_ext: Option<String>,
     /// 新元素的呈现描述（与 VdfsNode.schema 同义）——草稿详情页据此渲染
     pub schema: Option<Value>,
-    /// **备选的第二条入口**（整包导入）；缺省 = 只有主入口
-    pub import: Option<VdfsNewImport>,
-}
-
-/// 同一类型下的整包导入入口（「怎么造出来」的第二种形态）。
-pub struct VdfsNewImport {
-    /// 包地址末段后缀（`newFileNameOf` 按它剥建议名）
-    pub ext: String,
-    /// 导入入口展示标题（如「技能包」）
-    pub title: String,
-    /// 语义说明（缺省不显示）
-    pub description: Option<String>,
 }
 ```
 
@@ -327,9 +300,10 @@ pub struct VdfsNewImport {
   → provider 生成 id，并在 VdfsWriteResponse.path 里给出新节点
   → 使用方刷新后选中那一项（详情页从草稿态变成带内容的那一页）
 
-source = file（主入口或 import 入口）：名称来自文件名
-  目标地址 = vdfsJoin(dir, newFileNameOf(file.name, ext))   // 主干 + 入口扩展名
-  vdfs/write { path: 目标地址, b64: <文件字节 base64>, create: true }
+整包导入（详情页的 import 动作）：条目名由 provider 从**文件名**推导
+  动作地址 = dir                      // 同样是目录自身
+  vdfs/action { path: dir, action: "import", payload: {filename, b64} }
+  → provider 解包，按 pack_name_of(file.name) 定条目 id
 ```
 
 - **创建语义由 provider 自持**：文件系统 provider 落为文件；会话 provider 落为
@@ -347,10 +321,10 @@ source = file（主入口或 import 入口）：名称来自文件名
 
 | 层 | 职责 |
 |---|---|
-| `schemas/vdfs.ts` | `VdfsNewType`（含 `node_ext` / `schema` / `source` / `import`）+ `new_type` 字段 + `vdfsNewEntries`（类型 → 1~2 条入口）+ `newFileNameOf` |
-| `composables/useVdfs.ts` | `creatableType` / `newEntries` / `canCreate`；新建 = `startNew(type)` 选中一张**草稿节点**（`path === ''`）；`write` 对草稿打到 `cwd` 并带 `create: true`；`draftSeq` 是草稿的临时身份（`:key` 用） |
-| `composables/useVdfsPrompt.ts` | 提示态状态机：`entry`（选入口）/ `file`（选文件），两者共占详情槽 |
-| `components/vdfs/VdfsWorkbench.vue` | 添加按钮可见性 + 把提示态接到详情槽（**没有命名输入**） |
+| `schemas/vdfs.ts` | `VdfsNewType`（含 `node_ext` / `schema`）+ `new_type` 字段 + 动作常量（`VDFS_ACTION_IMPORT` / `VDFS_ACTION_EXPORT`）+ `actionFileOf`（认「结果里带文件」这个形状） |
+| `composables/useVdfs.ts` | `creatableType` / `canCreate`；新建 = `startNew()` 选中一张**草稿节点**（`path === ''`）；`write` 对草稿打到 `cwd` 并带 `create: true`；`runPackAction(action, file)` 把本地文件编成动作载荷 `{filename, b64}`；`draftSeq` 是草稿的临时身份（`:key` 用） |
+| `components/vdfs/DetailForm.vue` | 动作声明 `pack` 时唤起原生文件选择器，把 `File` 原样上抛（载荷编码归机制层） |
+| `components/vdfs/VdfsWorkbench.vue` | 添加按钮可见性 + 动作转发（按**载荷形状**分流：带 `File` → `runPackAction`，否则 → `runAction`） |
 
 **草稿节点**的形状（`draftNodeOf`）：`path: ''`、`name: ''`、`access: 'w'`，
 加上 `ext = type.node_ext ?? type.ext`、`schema = type.schema`、`kind = type.ext`
@@ -404,12 +378,12 @@ source = file（主入口或 import 入口）：名称来自文件名
 - 地址翻译**只允许**出现在 `services/vdfs.ts` 一处；页面与渲染器不得感知线路口径。
 - 前端**不得**硬编码资源类型、标签、能力或路径模板；只允许 `ext → 渲染器`、
   `子目录名 → 图标` 这类纯 UI 映射。
-- 新建入口**只能**由节点声明的 `new_type` 驱动（入口清单由 `vdfsNewEntries` 从它
-  推导）；前端不得凭 `kind` 或写死的类型表推断可新建性。
+- 新建入口**只能**由节点声明的 `new_type` 驱动（点添加 = 进该类型的详情页）；
+  前端不得凭 `kind` 或写死的类型表推断可新建性，也不得为「新建」另立第二种入口。
 - 新建类型的**详情呈现只能**由类型自己声明的 `node_ext` / `schema` 决定；前端不得
   按 `ext` 猜渲染器（`ext` 是地址后缀，不是渲染器键），也不得为某类资源写死表单。
 - 草稿节点（`path === ''`）与已落盘节点走**同一条详情通道**：同一个 `ext` 解析出
-  同一个渲染器。前端不得为「新建」另立第二种详情形态（`source = file` 除外）。
+  同一个渲染器。前端不得为「新建」另立第二种详情形态。
 - 动作入口**只能**由详情定义声明的 `actions` 驱动；前端只认**载荷形状**
   （如文件载荷 `filename` + `b64`），不认具体动作标识。
 - 列表项**不得**渲染机制字段（`ext` / `access` / `path` / `kind`）：它们是分发键、

@@ -127,7 +127,27 @@ export const BASELINE = {
   //      ⚠️ 删的是**形态**不是覆盖：被删守卫所守的形态（跨半 / 跨子目录移动）
   //      已随 `VdfsRequest::Move` 消失而**结构上不可能**，比运行时判前缀再拒绝更强。
   //      930 → 926 的缺口全部由上面这批解释，没有「测试被悄悄跳过」。
-  rustTests: 926,
+  // 928：**导入改走详情页动作 + `VdfsNewType` 收成纯呈现定义**（2026-09-24）
+  //      ——实测 928，**净 +2**。逐文件 diff（`git show HEAD:<f>` 数 `#[test]` /
+  //      `#[tokio::test]`）：
+  //        +2  `providers/vdfs_service/pack.test.rs`——新增 `unpack_mirrors_pack`
+  //            （出向 `VdfsPack` 序列化后去掉 `id` 即入向载荷，钉住往返契约）与
+  //            `unpack_rejects_malformed_payload`（`None` / 字符串 / 缺 `filename` /
+  //            缺 `b64` 一律报同一句）
+  //        +1  `plugins/agent/host/detail.test.rs`——新增 `import_is_offered_in_draft_only`
+  //            （同一份定义服务两种态：`when: {is_existing: false}` 成立、`true` 不成立）
+  //        −1  `plugins/mcp/plugin.test.rs`——`import_is_a_second_entry_of_the_same_type`
+  //            随「类型内不再有第二种入口」删除
+  //        0   `symbio_core/vdfs_provider.test.rs`——`new_type_carries_optional_import_entry`
+  //            改写为 `new_type_is_pure_presentation`（钉住序列化键集合恰好是呈现字段）
+  //        0   `plugins/skill/plugin.test.rs`——`import_name_of_strips_zip` 改写为
+  //            `unpack_name_comes_from_the_filename`（换成 `VdfsUnpack::name_of` 的载体）
+  //        0   `plugins/model/plugin.test.rs` / `plugins/session/plugin/vdfs_provider.test.rs`
+  //            / `plugins/mcp/detail.test.rs` / `plugins/skill/detail.test.rs`——只在既有
+  //            用例里删/加断言，条数不变
+  //      ⚠️ 净增是预期的：删掉的是「导入是一种入口形态」的用例，补上的是「导入是
+  //      动作」与「解包载荷往返」的用例——**换的是形态，不是覆盖**。
+  rustTests: 928,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *
@@ -244,8 +264,30 @@ export const BASELINE = {
   //            机制动作从 `[rename, delete]` 收成 `[delete]`，用例数与断言面不变。
   //        0   `composables/__tests__/useVdfs.spec.ts` / `services/__tests__/vdfsScheme.spec.ts`
   //            ——只删桩里的 `moveVdfs` 与改 `new_type` 取值。
-  vitestFiles: 50,
-  vitestTests: 722,
+  // 49 文件 / 706：**「选入口」状态机退役**（2026-09-24）——`vitestFiles` 50 → 49、
+  //      `vitestTests` 722 → **706**，**净 −16**。逐文件 diff（跑两次 `vitest run`
+  //      取逐文件条数再 `diff`，不是估算）：
+  //        −1 文件 / −16 用例  `composables/__tests__/useVdfsPrompt.spec.ts` 整个删除
+  //            ——`useVdfsPrompt` 本身退役：新建 = 直接进该类型的详情页（不再有
+  //            「选入口」），导入 = 详情页上的一条动作（取文件由渲染器的原生文件
+  //            选择器完成，不再有「选文件」提示态）。它测的正是这两个瞬态。
+  //        −1  `components/vdfs/__tests__/VdfsWorkbench.spec.ts`（7 → 6）——提示态
+  //            三条用例删除，改为四条：新建按钮可见性 / 「点新建 = 一次无参调用」
+  //            （没有第二跳）/ 动作按**载荷形状**分流（带 `File` → `runPackAction`）/
+  //            机制动作经控件注入渲染器
+  //        −2  `schemas/__tests__/vdfs.spec.ts`（31 → 29）——`newFileNameOf` 两条删除
+  //            （目标名改由 provider 侧的 `pack_name_of` 推导，前端不再持有这份知识）
+  //        −1  `services/__tests__/vdfs.spec.ts`（15 → 14）——`writeVdfsBinary` 一条
+  //            删除（二进制写不再有对外入口；`base64ToBytes` / `arrayBufferToBase64`
+  //            的互逆与分块边界用例原样保留）
+  //        +4  `composables/__tests__/useVdfs.spec.ts`（15 → 19）——新增四条草稿动作
+  //            用例（`File` ⇒ `{filename, b64}` / 落点是当前目录自身 / 成功 ⇒ 退出
+  //            草稿 / 失败 ⇒ 留在草稿页）；既有三条把 `startNew(type)` 改成无参调用
+  //      ⚠️ 净减是预期的：删掉的是「第二种新建入口」的整条交互链，而**新增的四条
+  //      钉住了替代它的那条通道**（动作载荷形状 + 落点 + 草稿退出）。三条
+  //      `startNew` 调用改形不计数（断言面不变，只是签名收窄）。
+  vitestFiles: 49,
+  vitestTests: 706,
 }
 
 export const VITEST_TIMEOUT_MS = 180_000

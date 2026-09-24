@@ -38,5 +38,5 @@ pub mod single_file;
 
 pub use dir::DirVdfs;
 pub use memory::MemoryVdfs;
-pub use pack::{decode_b64, VdfsPack};
+pub use pack::{VdfsPack, VdfsUnpack};
 pub use single_file::SingleFileVdfs;

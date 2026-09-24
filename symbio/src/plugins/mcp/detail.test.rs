@@ -32,4 +32,19 @@ fn definition_covers_mcp_form_surface() {
                                  // 动作：test/save/delete 全齐
     let ids: Vec<&str> = def.actions.iter().map(|a| a.id.as_str()).collect();
     assert!(ids.contains(&"test") && ids.contains(&"save") && ids.contains(&"delete"));
+
+    // 导入整包是**详情页动作**（不是 `root_new_type` 上的字段）：只在草稿态出现，
+    // 载荷声明为一个本地 zip——使用方据此先取文件再执行。
+    let import = def
+        .actions
+        .iter()
+        .find(|a| a.id == crate::symbio_core::vdfs_provider::VDFS_ACTION_IMPORT)
+        .expect("详情页要给出导入入口，否则草稿上无从导入");
+    assert_eq!(
+        import.pack.as_deref(),
+        Some(crate::symbio_core::vdfs_provider::VDFS_EXT_ZIP)
+    );
+    let when = import.when.as_ref().expect("导入只在草稿态");
+    assert!(when.holds(&serde_json::json!({ "is_existing": false })));
+    assert!(!when.holds(&serde_json::json!({ "is_existing": true })));
 }

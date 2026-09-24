@@ -20,7 +20,6 @@ import {
   isVdfsDir,
   isVdfsDraft,
   isVdfsSystemAddr,
-  newFileNameOf,
   parseVdfsValidation,
   sessionRuntimeOf,
   vdfsAccessOf,
@@ -153,22 +152,6 @@ describe('路径代数（根锚点口径）', () => {
     expect(vdfsBase('@vfs/setting/local')).toBe('local')
     expect(vdfsBase('@vfs/setting/')).toBe('setting')
     expect(vdfsBase(ROOT)).toBe(ROOT)
-  })
-})
-
-describe('newFileNameOf（整包导入的目标名）', () => {
-  it('保留原名主干 + 换成类型扩展名', () => {
-    expect(newFileNameOf('demo.zip', 'zip')).toBe('demo.zip')
-    // 多段扩展名只换最后一段（`pkg.tar.gz` → `pkg.tar.zip`）
-    expect(newFileNameOf('pkg.tar.gz', 'zip')).toBe('pkg.tar.zip')
-    // 无扩展名 / 类型无 ext
-    expect(newFileNameOf('README', 'zip')).toBe('README.zip')
-    expect(newFileNameOf('demo.zip', '')).toBe('demo')
-  })
-
-  it('隐藏文件（.gitignore）不作主干切割，路径只取末段', () => {
-    expect(newFileNameOf('.gitignore', 'zip')).toBe('.gitignore.zip')
-    expect(newFileNameOf('C:\\tmp\\dir\\demo.zip', 'zip')).toBe('demo.zip')
   })
 })
 

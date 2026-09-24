@@ -140,9 +140,9 @@ impl SkillPlugin {
 use crate::providers::vdfs_service::DirVdfs;
 use crate::symbio_core::vdfs::{from_plugin_error, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
-    VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewImport, VdfsNewType,
-    VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse,
-    VDFS_ACTION_EXPORT, VDFS_EXT_FORM, VDFS_EXT_ZIP, VDFS_STATUS_ACTIVE,
+    VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
+    VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT,
+    VDFS_ACTION_IMPORT, VDFS_EXT_FORM, VDFS_STATUS_ACTIVE,
 };
 
 const LABEL: &str = "技能";
@@ -185,11 +185,6 @@ fn resolve_id(path: &str, create: bool) -> VdfsResult<String> {
         )));
     }
     Ok(crate::providers::vdfs_service::entry::auto_id(PLUGIN_SKILL))
-}
-
-/// 导入的**建议名**：末段再去掉 `.zip`（新建地址是 `<name>.zip`）
-fn import_name_of(path: &str) -> String {
-    crate::providers::vdfs_service::entry::pack_name_of(path, PLUGIN_SKILL)
 }
 
 /// 主文件原文 → VDFS 节点（`ext = form` + 详情定义随节点 `schema` 下发）
@@ -284,23 +279,20 @@ fn new_manifest(id: &str) -> serde_json::Value {
 impl VdfsProvider for SkillPlugin {
     /// 根下可新建**一种**类型：技能。
     ///
-    /// 它有两个入口形态：**表单新建**（主入口，进草稿详情页）与**整包导入**
-    /// （备选入口，选本地 `.zip`）。两者落成的是同一形状的节点，故导入不另占
-    /// 类型位，挂在类型自己的 [`VdfsNewImport`] 上。
+    /// 草稿页与落成后的条目是**同一张**详情（`node_ext = form` + 详情定义），
+    /// 因此「点添加」与「选中一项」在交互上没有第二种形态——差别只在草稿没有内容，
+    /// 且此时**多出一条「导入整包」动作**（[`VDFS_ACTION_IMPORT`]，见
+    /// `detail::skill_detail_definition`）。导入**不是本结构的字段**：本结构只说
+    /// 「这类东西落成后长什么样」（见 ADR-029）。
     ///
     /// `ext = skill` 是**呈现扩展名**（`id_of` 按它剥地址后缀），落成后的节点
-    /// `ext = form`——两者不同，故显式声明 `node_ext` 与详情定义（草稿详情页据此
-    /// 渲染出与落成后同一张表单）。
+    /// `ext = form`——两者不同，故显式声明 `node_ext` 与详情定义。
     async fn root_new_type(&self) -> Option<VdfsNewType> {
         Some(
             VdfsNewType::new(PLUGIN_SKILL, LABEL)
                 .with_description(format!("新建{LABEL}（在详情页里填好，保存时一次写入）"))
                 .with_node_ext(VDFS_EXT_FORM)
-                .with_schema(detail_definition())
-                .with_import(
-                    VdfsNewImport::new(VDFS_EXT_ZIP, format!("{LABEL}包"))
-                        .with_description(format!("导入{LABEL}整包（.zip）——整目录覆盖同名条目")),
-                ),
+                .with_schema(detail_definition()),
         )
     }
 
@@ -358,26 +350,14 @@ impl VdfsProvider for SkillPlugin {
             }
             VdfsRequest::Write { content } => {
                 let s = self.store();
-                // 二进制写入 = 整包导入（导入不是第二条协议，它就是「新建」的一种内容来源）。
-                // 导入的**名字来自目标地址末段**（使用方由文件名推导），所以必须有名字：
-                // 「无名字导入」无从命名，直接拒绝。
+                // 二进制载荷**不再是创建通道**：整包导入已改走详情页动作
+                // （`VDFS_ACTION_IMPORT`，见下面的 `Action` 分支）。这里显式拒绝，
+                // 而不是让它落到文本分支——那会报「manifest 不是合法 JSON」，
+                // 让人以为是内容格式问题，而真正的原因是**用错了通道**。
                 if content.binary {
-                    if path.trim_matches('/').is_empty() {
-                        return Err(VdfsError::invalid(format!(
-                            "{LABEL}整包导入需要目标名（地址末段）：{path}"
-                        )));
-                    }
-                    let bytes = crate::providers::vdfs_service::decode_b64(
-                        content.b64.as_deref().unwrap_or_default(),
-                    )
-                    .map_err(|e| VdfsError::invalid(e.0))?;
-                    let name = import_name_of(path);
-                    let created = s.import_pack(&name, &bytes).await?;
-                    return Ok(VdfsResponse::Write(VdfsWriteResponse {
-                        path: name,
-                        created,
-                        etag: None,
-                    }));
+                    return Err(VdfsError::invalid(format!(
+                        "{LABEL}不接受二进制写入：整包导入请走 `{VDFS_ACTION_IMPORT}` 动作"
+                    )));
                 }
                 // 无名字（写在挂载点目录自身）→ 「新建一项，名字由本插件生成」。
                 // 目录自身没有可覆盖的目标，因此必须有 create 意图（见 `VdfsRequest::Write`）。
@@ -412,7 +392,32 @@ impl VdfsProvider for SkillPlugin {
                 s.remove(&id).await?;
                 Ok(VdfsResponse::Unit)
             }
-            VdfsRequest::Action { action, .. } => {
+            VdfsRequest::Action { action, payload } => {
+                // 「导入」落在**挂载根**上（草稿详情页那条动作就打在根上）：
+                // 条目名由包的文件名推导——使用方给不了名字，也就没有「导到哪个
+                // 名字下」这回事。其余动作（export）都作用在**已有条目**上。
+                if action == VDFS_ACTION_IMPORT {
+                    if !path.trim_matches('/').is_empty() {
+                        return Err(VdfsError::invalid(format!(
+                            "「导入」只对{LABEL}挂载根可用：{path}"
+                        )));
+                    }
+                    let pack =
+                        crate::providers::vdfs_service::VdfsUnpack::from_payload(payload.as_ref())
+                            .map_err(|e| VdfsError::invalid(e.0))?;
+                    let bytes = pack.bytes().map_err(|e| VdfsError::invalid(e.0))?;
+                    let name = pack.name_of(PLUGIN_SKILL);
+                    let created = self.store().import_pack(&name, &bytes).await?;
+                    return Ok(VdfsResponse::Action(VdfsActionResult {
+                        action,
+                        ok: true,
+                        message: format!(
+                            "{}{LABEL}「{name}」",
+                            if created { "已导入" } else { "已覆盖" }
+                        ),
+                        data: None,
+                    }));
+                }
                 if action != VDFS_ACTION_EXPORT {
                     return Err(VdfsError::NotImplemented);
                 }

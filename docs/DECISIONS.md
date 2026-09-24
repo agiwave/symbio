@@ -1700,7 +1700,8 @@ VDFS 是**虚拟动态文件系统**（`d` = dynamic）——节点可能落盘�
 
 ## ADR-027: 可新建的东西**至多一种**——入口是类型下的可选分支，不是第二个类型
 
-**状态**：已接受（2026-09-24 实施完成）。
+**状态**：已接受（2026-09-24 实施完成）。**第 2、3 条已被 ADR-029 取代**——
+「整包导入」不再是一种入口形态，而是详情页上的一条动作。
 
 **背景**
 
@@ -1818,6 +1819,73 @@ VDFS 是**虚拟动态文件系统**（`d` = dynamic）——节点可能落盘�
   逐文件核对写在 `scripts/gate.d/_shared.mjs` 的对应注记里。
 - `docs/CURRENT.md` 的协议操作表（13 个）与工具清单（9 个）由生成脚本自动跟随，
   不需要手改。
+
+---
+
+## ADR-029: 导入是**详情页动作**，不是类型入口——`VdfsNewType` 收成纯呈现定义
+
+**状态**：已接受（2026-09-24 实施完成）。取代 ADR-027 的第 2、3 条。
+
+**背景**
+
+ADR-027 把「可新建类型」收敛为至多一个，同时把「整包导入」表达成**类型内的
+第二种入口**（`VdfsNewType.import: Option<VdfsNewImport>`），前端据此先问
+「选哪种方式」。这一版留下三处不对称：
+
+1. **一对逆操作分在两个层级**。导出早已是 `vdfs/action` 上的 provider 自持动词
+   （`VDFS_ACTION_EXPORT`）；导入却占着 `VdfsNewType` 的一个字段——「打包出去」
+   与「解包进来」在协议上成了两件不同性质的事。
+2. **一个呈现结构承担了操作语义**。`VdfsNewType` 的其余字段
+   （`ext` / `title` / `icon` / `node_ext` / `schema`）全在回答「落成后长什么样」；
+   `source` / `import` 回答的却是「怎么把它造出来」。
+3. **`VdfsProvider` 上多出一个系统级接口**。为了把 `VdfsNewType` 交出去，trait 上
+   加了 `root_new_type()`——而该 trait 的模块文档写着「只暴露纯接口：
+   `VdfsProvider` 只有一个方法 `dispatch`」。更别扭的是**只有根**有这条通道：
+   任何非根节点若想自述「我这里能新建什么」，只能再开一个方法——而
+   `VdfsNode.new_type` 本来就长在节点上。
+
+**决策**
+
+1. **导入改走 `vdfs/action`**：新增 `VDFS_ACTION_IMPORT`（与 `VDFS_ACTION_EXPORT`
+   互为逆向），载荷是入向的 `VdfsUnpack{filename, b64}`——与出向的 `VdfsPack`
+   同形，只差出向独有的 `id`。
+2. **`VdfsNewType` 收成纯呈现定义**：只剩
+   `ext` / `title` / `description` / `icon` / `node_ext` / `schema`；
+   `source` / `import` / `VdfsNewImport` / `VDFS_NEW_SOURCE_FILE` 全部撤除。
+3. **新增 `DetailAction.pack`**：声明「本动作的载荷是一个本地文件」（值 = 包后缀）。
+   前端因此**不认识「导入」这个动作**——它只认「这个动作的载荷是文件」这个形状，
+   与「导出」侧认 `filename` + `b64` 的形状（`actionFileOf`）恰好对称。
+4. **动作的适用态由 `when` 表达**：导入声明 `when: {is_existing: false}`，只在
+   草稿（新建）态出现——同一份详情定义服务两种态，不靠第二份定义。
+5. **前端撤除「选入口」这一档**：`useVdfsPrompt` 整体退役——新建 = 直接进详情页；
+   导入 = 详情页上的一条动作，取文件由渲染器的原生文件选择器完成。
+
+**理由**
+
+- 「导入」与「删除」同级：都是「对某个地址做一件事」，占的是详情页的一条动作。
+  删除没有 `VdfsProvider::root_delete()`，导入也不该有 `root_new_type()`。
+- **形状判定优于动作判定**：`pack`（取文件）与 `actionFileOf`（给文件）是同一类
+  声明（「这一步需要原生能力」），前端只翻译形状、不解释动词 ⇒ 新增同类动作零
+  前端改动，且前端不再持有任何后端不认识的动词（`protocol-mirror-audit` 的
+  `LOCAL_ONLY` 因此清空）。
+- 撤除 `root_new_type()` 之后，`VdfsProvider` 回到「只有一个方法」——
+  模块文档那句从假话变回真话。
+
+**后果**
+
+- 后端：`VdfsNewType` 瘦身（≈250 → ≈150 字节，`VdfsNode` 里的 `Option<Box<_>>`
+  仍是 8 字节）；agent / mcp / skill 三个 provider 的 `write_at` 二进制分支改为
+  **显式拒绝并指向 `import` 动作**（目录型资源的存储层原语语义不变），各自新增
+  导入分支与详情动作声明；`VdfsPack` 旁新增入向的 `VdfsUnpack`。
+- 前端：`useVdfsPrompt.ts` 与其 spec 删除；`DetailForm` 新增 `pack` 动作的原生
+  文件选择器（`File` 原样上抛，载荷编码归机制层）；`useVdfs` 的 `createTypedFile`
+  → `runPackAction`；`newFileNameOf` 与 `writeVdfsBinary` 删除（目标名由 provider
+  侧的 `pack_name_of` 推导，二进制写不再有对外入口）。
+- 守卫：`protocol-mirror-audit` 的 D 组 19 → 18 对（`VdfsNewImport` 撤除）、
+  `LOCAL_ONLY` 清空；`DetailAction` 的 `pack` 两侧同步。
+- 基线：`rustTests` 926 → 928（新增解包往返与草稿态动作用例）、
+  `vitestTests` 722 → 707——**净减是预期的**（删掉的是「选入口」状态机的用例），
+  逐文件核对写在 `scripts/gate.d/_shared.mjs` 的对应注记里。
 
 ---
 

@@ -12,11 +12,19 @@ fn id_of_strips_presentation_extension() {
     assert_eq!(id_of("demo.skill"), "demo");
 }
 
-/// 导入建议名：新建地址是 `<name>.zip`，建议名即去掉 `.zip` 的 `<name>`
+/// 导入的**目标名**取自包的文件名（不是目标地址）——去掉 `.zip` 即得。
+///
+/// 导入改走详情页动作后，地址不再承载「导入到哪个名字下」（动作打在挂载根上），
+/// 名字改由载荷里的 `filename` 推导；`VdfsUnpack::name_of` 是这条推导的唯一实现。
 #[test]
-fn import_name_of_strips_zip() {
-    assert_eq!(import_name_of("demo.zip"), "demo");
-    assert_eq!(import_name_of("demo.skill"), "demo");
+fn unpack_name_comes_from_the_filename() {
+    let pack = |f: &str| crate::providers::vdfs_service::VdfsUnpack {
+        filename: f.into(),
+        b64: String::new(),
+    };
+    assert_eq!(pack("demo.zip").name_of(PLUGIN_SKILL), "demo");
+    assert_eq!(pack("demo.skill").name_of(PLUGIN_SKILL), "demo");
+    assert_eq!(pack("demo").name_of(PLUGIN_SKILL), "demo");
 }
 
 /// 摘要优先 YAML frontmatter：`name` 作标题、`description` 作摘要，
@@ -139,6 +147,9 @@ async fn store_roundtrip_through_the_dir_impl() {
 ///
 /// 与 model 同构：`ext = skill` 是**呈现扩展名**（`id_of` 按它剥地址后缀），
 /// 落成后的节点 `ext = form` ⇒ 必须显式声明 `node_ext` 与 `schema`。
+///
+/// 类型位**只描述落成后的样子**：整包导入是详情页的一条动作
+/// （`VDFS_ACTION_IMPORT`），不是这里的一个字段——故类型上没有任何导入痕迹。
 #[tokio::test]
 async fn new_type_declares_the_landing_detail() {
     let plugin = SkillPlugin {
@@ -147,20 +158,13 @@ async fn new_type_declares_the_landing_detail() {
     };
     // 「根下可新建类型」是 provider 的异步自述（不在同步的 `PluginMeta` 上）
     let t = plugin.root_new_type().await.expect("根下可新建「技能」");
-    assert_eq!(t.ext, PLUGIN_SKILL, "类型位是表单新建，不是整包导入");
+    assert_eq!(t.ext, PLUGIN_SKILL, "呈现扩展名是技能自己的，不是包的");
     assert_eq!(
         t.node_ext.as_deref(),
         Some(VDFS_EXT_FORM),
         "草稿必须与落成后用同一个渲染器"
     );
     assert!(t.schema.is_some(), "没有 schema，表单渲染不出任何字段");
-
-    // 整包导入是**同一类型的另一个入口**（不另占类型位）：内容取自本地文件、
-    // 落成后与表单新建同形，故包自己不声明 node_ext / schema（`VdfsNewImport`
-    // 上根本没有这两个字段——呈现由所属类型决定）
-    let pack = t.import.as_ref().expect("可导入整包");
-    assert_eq!(pack.ext, VDFS_EXT_ZIP);
-    assert_eq!(pack.title, "技能包");
 }
 
 /// 无名字新建 = 写挂载点目录自身：id 由本插件生成（用户第 3 点）。

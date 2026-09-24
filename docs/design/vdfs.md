@@ -316,23 +316,21 @@ size  updated_at  children  binary  hidden  schema  new_type  attributes
 填好再保存」丢掉用户填的每一个字段。唯一例外是**内容为空**（「先建一个，随后再
 填」，如新建会话）：此时由 provider 落一份自己的最小合法内容。
 
-**二进制写入 = 整包导入**：目录型资源（skill / agent 目录…）以新建类型声明「内容
-来自本地文件」，使用方选文件后走 `vdfs/write { create: true, b64 }`；provider 把它
-解释为**导入一个完整目录包**（语义自持，VDFS 不解释）。因此导入不额外占一个操作。
-两种声明形态（详见 [vdfs-frontend.md](vdfs-frontend.md) §5）：
+**导入 / 导出是一对逆向的节点动作**：两者都不新增操作，都走 `vdfs/action`，
+都只在详情页上占一条动作——与「删除」「测试连接」同级：
 
-- **主入口即选文件**：`VdfsNewType.source = file`（agent 包）；
-- **整包导入是同一类型下的第二条入口**：`VdfsNewType.import = VdfsNewImport{ext,…}`
-  （skill / mcp：主入口是表单新建，导入是备选）。
+- `export`：把条目打包成 zip，随 `VdfsActionResult.data` 回传
+  （载荷 `{id, filename, b64}`，与 `VdfsContent.b64` 同构）；
+- `import`：收一个 `{filename, b64}`（入向 `VdfsUnpack`，与出向 `VdfsPack` 同形），
+  由 provider 解释为「用这个包建出 / 覆盖本目录下的一份资源」。
 
-于是「一个目录能新建几类东西」与「这类东西有几条造出来的入口」是两件事：前者至多
-一个（`new_type`），后者至多两条。
+**导入不是「新建类型」的一种**，因此 `VdfsNewType` 里没有它的位置
+（见 [DECISIONS.md](../DECISIONS.md) ADR-029）。动作声明 `pack` 表明「载荷是一个
+本地文件」，使用方据此先取文件再执行；provider 不支持时返回 `NotImplemented`，
+使用方据此不给出入口（详见 [vdfs-frontend.md](vdfs-frontend.md) §5）。
 
-**导出是导入的逆动作**：它不新增第二个操作，而是一个**节点动作**——
-`vdfs/action { action: "export" }`，zip 随 `VdfsActionResult.data` 回传
-（载荷 `{id, filename, b64}`，与 `VdfsContent.b64` 同构）。provider 不支持
-时返回 `NotImplemented`，使用方据此不给出入口；支持与否由 provider 自陈，
-与「新建类型」同理（详见 [vdfs-frontend.md](vdfs-frontend.md) §5）。
+> 目录型资源的**存储层原语**仍接受二进制写入（`vdfs/write { b64 }` = 解包），
+> 但那是对内的原语，不是对外的入口形态——对外只有 `import` 动作一条路。
 
 ### 3.4 插件配置 = 插件目录里的一个文件（`PLUGIN.yml`）
 
@@ -616,7 +614,6 @@ for (name, child) in children {
   | `ext` | 呈现扩展名（地址后缀；`id_of` 剥 id 用） |
   | `node_ext` | 落成后的节点 `ext`（**渲染器键**）；缺省 = 与 `ext` 相同（会话即如此） |
   | `schema` | 落成后的节点 `schema`（`form` 渲染器所需的定义） |
-  | `import` | **备选的第二条入口**（整包导入，`VdfsNewImport{ext, title, description?}`）；缺省 = 只有主入口 |
 
   使用方据此在**还没创建**时就能渲染出该类型的详情页——草稿节点（无 id、无名字）
   用 `node_ext` 选渲染器、用 `schema` 出表单，于是「点新建」与「选中一项」进入的是

@@ -14,12 +14,12 @@ vi.mock('@/services/plugin', () => ({ callPlugin: vi.fn(), connectPlugin: vi.fn(
 vi.mock('@/utils/logger', () => ({ logger: { error: vi.fn(), warn: vi.fn(), debug: vi.fn(), info: vi.fn() } }))
 
 import { callPlugin } from '@/services/plugin'
-import { VDFS_ACTION, VDFS_WRITE, vdfsJoin } from '@/schemas/vdfs'
+import { VDFS_ACTION, vdfsJoin } from '@/schemas/vdfs'
 import { setVdfsRoot } from '@/schemas/vdfsRoot'
 
 // 合成根：与根名无关（见 schemas/__tests__/vdfs.spec.ts 的说明）
 setVdfsRoot('@vfs')
-import { arrayBufferToBase64, base64ToBytes, listVdfs, readVdfs, runVdfsAction, statVdfs, writeVdfsBinary } from '../vdfs'
+import { arrayBufferToBase64, base64ToBytes, listVdfs, readVdfs, runVdfsAction, statVdfs } from '../vdfs'
 import { READBACK_REASON } from '../readback'
 import { vdfsChangeInScope } from '../eventBus'
 import { logger } from '@/utils/logger'
@@ -69,28 +69,11 @@ describe('runVdfsAction（vdfs/action）', () => {
   })
 })
 
-describe('整包导入（vdfs/write 的二进制通道）', () => {
+describe('base64 编解码（文件载荷的两个方向）', () => {
   it('arrayBufferToBase64 与标准 base64 一致（含分块边界）', () => {
     const bytes = new Uint8Array(0x8000 + 5) // 跨过 32KB 分块
     for (let i = 0; i < bytes.length; i++) bytes[i] = i % 251
     expect(arrayBufferToBase64(bytes.buffer)).toBe(Buffer.from(bytes).toString('base64'))
-  })
-
-  it('writeVdfsBinary 原样发送 b64（后端据 b64 判定二进制）', async () => {
-    vi.mocked(callPlugin).mockResolvedValueOnce({ path: '@vfs/skill/demo.zip', created: true })
-    const r = await writeVdfsBinary(
-      vdfsJoin(vdfsJoin('@vfs', 'skill'), 'demo.zip'),
-      'UEsDBA==',
-      { create: true }
-    )
-
-    expect(r.created).toBe(true)
-    expect(lastCall().op).toBe(VDFS_WRITE)
-    expect(lastCall().payload).toEqual({
-      path: '@vfs/skill/demo.zip',
-      b64: 'UEsDBA==',
-      create: true,
-    })
   })
 
   it('base64ToBytes 与 arrayBufferToBase64 互逆（导出落地的字节必须原样）', () => {

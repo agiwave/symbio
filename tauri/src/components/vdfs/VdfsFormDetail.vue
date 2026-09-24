@@ -50,7 +50,7 @@
       @delete="$emit('delete')"
       @open-container="$emit('browse')"
       @test="$emit('action', 'test')"
-      @action="(id) => $emit('action', id)"
+      @action="(id, file) => $emit('action', id, file)"
     />
   </div>
 </template>
@@ -86,8 +86,11 @@ defineEmits<{
   /**
    * 执行**节点动作**（详情定义声明的动作，如「测试连接」）。
    * 本组件只把动作标识上抛——执行与结果呈现归页面层（`vdfs/action`）。
+   *
+   * `file` 只在动作声明了 `pack` 时带上（DetailForm 取到本地文件后原样交给
+   * 本层，本层再原样上抛）：载荷编码是机制层的事，中间两层都不认识它。
    */
-  (e: 'action', id: string): void
+  (e: 'action', id: string, file?: File): void
   /**
    * 进入节点内部（容器寻址：`<id>/<子类别>`）。由**详情定义**声明
    * （`open-container` 动作）触发——是否有内部结构是 provider 的知识，

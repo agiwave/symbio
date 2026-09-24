@@ -4,7 +4,7 @@
 //! - [`VdfsProvider`] 只有一个方法 [`VdfsProvider::dispatch`]：
 //!   `dispatch(ctx, path, req)` —— **`path` 是第一个分发键**（先按地址找到资源域，
 //!   再由域内实现决定操作怎么落地），`req`（[`VdfsRequest`] 枚举）只携带**操作的
-//!   载荷**（写什么、删不递归、动作是什么……）；列 / 读 / 写 / 删 / 建 / 移 / 动作 /
+//!   载荷**（写什么、删不递归、动作是什么……）；列 / 读 / 写 / 删 / 建 / 动作 /
 //!   订阅全部落在枚举变体上；
 //! - 每个资源域 = 一份 [`VdfsProvider`] 实现，`Arc<dyn VdfsProvider>` 是使用方与
 //!   实现方之间**唯一**的交换物；
@@ -121,10 +121,24 @@ pub const VDFS_EXT_ZIP: &str = "zip";
 /// 是当前的内置约定：
 ///
 /// - [`VDFS_ACTION_TEST`]「测试连接」——模型 / MCP 这类外部资源的连通性自检；
-/// - [`VDFS_ACTION_EXPORT`]「导出」——把整目录资源打包成一个 zip（结果随
-///   [`VdfsActionResult::data`] 返回，与导入的二进制写入互为逆向）；
+/// - [`VDFS_ACTION_EXPORT`]「导出」/ [`VDFS_ACTION_IMPORT`]「导入」——**一对逆向**
+///   动作：导出把整目录资源打包成一个 zip 随 [`VdfsActionResult::data`] 返回，
+///   导入把这样一个 zip 的字节写进目标地址。两者都是 provider 自持的动词，
+///   与 [`VdfsRequest::Write`] 同走 [`VdfsContent::b64`] 二进制通道，区别只在
+///   「谁发起、对哪个地址」：`write` 是通用写入，导入是**本目录的一种操作**；
 /// - [`VDFS_ACTION_TRUNCATE`] / [`VDFS_ACTION_CLEAR`]——列表类资源的**区间删除**：
 ///   前者删「该条及其之后」，后者清空整个列表。
+///
+/// ## 为什么「导入 / 导出」是动作而不是 `write` / `read`
+///
+/// 它们是**整目录包**的搬运，不是某个节点内容的读写：导出的产物**不属于**被导出的
+/// 目录（是它的快照），导入的输入也不属于目标目录（是别处的快照）。用 `read` /
+/// `write` 表达就得让「地址」同时承担「谁的内容」和「打包哪棵子树」两种含义；
+/// 动作把这件事交给 provider 自己解释，VDFS 只透传。
+///
+/// 反过来说，**它们也不该在 [`VdfsProvider`] 上另立接口**：导入是一次「对某个地址
+/// 做什么」的操作，与 [`VDFS_ACTION_TEST`] / [`VDFS_ACTION_EXPORT`] 同类——占的
+/// 是详情页的一条动作，而不是核心 trait 的一个方法。
 ///
 /// ## 为什么「截断 / 清空」是动作而不是 `delete`
 ///
@@ -148,8 +162,14 @@ pub const VDFS_EXT_ZIP: &str = "zip";
 /// 回执里的被删 id 列表（随 [`VdfsActionResult::data`]）是**权威**列表：
 /// 调用方据此幂等对齐本地视图，不依赖推送。
 pub const VDFS_ACTION_TEST: &str = "test";
-/// 节点动作标识：**导出**（打包下载；与「新建类型 `zip`」的导入互为逆向）
+/// 节点动作标识：**导出**（打包下载；与 [`VDFS_ACTION_IMPORT`] 互为逆向）
 pub const VDFS_ACTION_EXPORT: &str = "export";
+/// 节点动作标识：**导入**（整包写入；与 [`VDFS_ACTION_EXPORT`] 互为逆向）。
+///
+/// 载荷是一个 zip 的字节（[`VdfsContent::b64`] 通道），provider 把它解释为
+/// 「用这个包建出 / 覆盖本目录下的一份资源」——具体语义由 provider 自持。
+/// 与 [`VdfsRequest::Write`] 的区别见本模块「节点动作」一节的说明。
+pub const VDFS_ACTION_IMPORT: &str = "import";
 /// 节点动作标识：**截断**（列表资源：删除该条目**及其之后**的全部条目）。
 ///
 /// 结果里带被删条目的 id 列表（随 [`VdfsActionResult::data`]）——消费方用它做
@@ -177,8 +197,10 @@ pub const VDFS_ACTION_CLEAR: &str = "clear";
 /// 消费端必须先去重再判定，而任何「按类型」的判定（如 `vdfsScheme` 靠
 /// `ext = session` 认挂载点）都要遍历清单才能表达「是不是这种类型」。
 ///
-/// 现在两类入口各归其位：**类型**（本结构）描述落成后的节点，**导入入口**
-/// （[`VdfsNewImport`]）描述同一个类型的另一种内容来源。
+/// 现在只留**类型**这一层：本结构描述「这类东西落成后长什么样」，由 provider
+/// 自持。**导入不是类型的一种**，它是详情页上的一条动作
+/// （[`VDFS_ACTION_IMPORT`]），与 [`VDFS_ACTION_EXPORT`] / `delete` 同级——
+/// 见 `docs/DECISIONS.md` ADR-029。
 ///
 /// ## 两条独立的键：`ext` 与 `node_ext`
 ///
@@ -193,17 +215,12 @@ pub const VDFS_ACTION_CLEAR: &str = "clear";
 /// 两个键分开声明，是为了让使用方在**还没创建**时就能渲染出该类型的详情页
 /// （草稿节点：无 id、无名字，但渲染器与 `schema` 与落成后完全一致）。
 ///
-/// ## 内容来源 [`VdfsNewType::source`]
+/// ## 创建语义仍归 provider
 ///
-/// 「新建」在机制上就是一次 [`VdfsProvider::write`]（`create: true`），因此要说清
-/// **写进去的内容从哪来**——这是创建语义的一部分，由 provider 声明：
-///
-/// - `None`（默认）：在详情页里边看边填（先进入草稿详情，保存时一次写入）；
-/// - [`VDFS_NEW_SOURCE_FILE`]：内容取自**本地文件**，使用方给文件选择器，
-///   字节走 [`VdfsContent::b64`] 二进制通道（如 zip 整包导入）。
-///
-/// 本结构是**纯呈现元数据**：VDFS 只透传、不解释；具体创建语义由 provider 在
-/// [`VdfsProvider::write`] 中自持。
+/// 「新建」在机制上就是一次 [`VdfsProvider::write`]（`create: true`）。本结构
+/// 只声明**草稿长什么样**；具体写什么、怎么校验，由 provider 在 `write` 中自持。
+/// 需要「先选个本地包再落盘」这类**额外操作**时，那是详情页的动作
+/// （[`VDFS_ACTION_IMPORT`]），不是本结构的字段。
 ///
 /// [`VdfsProvider::write`]: VdfsProvider::write
 /// [`VdfsContent::b64`]: VdfsContent::b64
@@ -220,9 +237,6 @@ pub struct VdfsNewType {
     /// 图标名（使用方纯 UI 映射）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
-    /// 内容来源（见结构文档）：`None` = 在详情页里填；`"file"` = 选择本地文件
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
     /// 新元素落成后的 [`VdfsNode::ext`]（**详情渲染器键**）；缺省 = 与 [`ext`](Self::ext) 相同
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node_ext: Option<String>,
@@ -231,53 +245,6 @@ pub struct VdfsNewType {
     /// 由 provider 下发——草稿详情页据此渲染出与落成后**同一张**表单。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema: Option<Value>,
-    /// **备选的整包导入入口**（可选）：声明后，使用方在「新建」上额外给出
-    /// 「导入」形态——内容取自本地文件（见 [`VdfsNewImport`]）。
-    ///
-    /// 它与 [`source`](Self::source) 的分工：`source = file` 是**主入口本身就是
-    /// 选文件**（没有「边看边填」的过程，如 agent 整包）；本字段是**主入口之外
-    /// 再给一个导入入口**（主入口仍是表单，如 skill / mcp）。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub import: Option<VdfsNewImport>,
-}
-
-/// **整包导入入口**——同一个新建类型的另一种内容来源（[`VdfsNewType::import`]）。
-///
-/// 「整包导入」= 选一个本地文件，把它的字节写进目标地址；provider 把它解释为
-/// **导入一个完整目录包**（语义自持，VDFS 不解释）。它不额外占一个操作，
-/// 也不另立一种节点：导入落成的就是该类型声明的那个节点（`node_ext` / `schema`
-/// 与表单新建完全一致）。
-///
-/// 三处与 [`VdfsNewType`] 不同的地方只有「包」本身：
-/// - [`ext`](Self::ext) 是**包地址的后缀**（如 `zip`）——目标名由文件名推导
-///   （`demo.zip` → `demo`），provider 用 `entry::pack_name_of` 按它剥建议名；
-/// - [`title`](Self::title) 是导入入口自己的展示名（如「技能包」）；
-/// - 没有 `node_ext` / `schema`——落成后的呈现由所属类型决定，不由包决定。
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct VdfsNewImport {
-    /// 包地址末段的后缀（如 `zip`；`pack_name_of` 按它剥建议名）
-    pub ext: String,
-    /// 导入入口的展示标题（如「技能包」）
-    pub title: String,
-    /// 语义说明（缺省不显示）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-}
-
-impl VdfsNewImport {
-    /// 仅 ext + title 的最小构造
-    pub fn new(ext: impl Into<String>, title: impl Into<String>) -> Self {
-        Self {
-            ext: ext.into(),
-            title: title.into(),
-            description: None,
-        }
-    }
-
-    pub fn with_description(mut self, description: impl Into<String>) -> Self {
-        self.description = Some(description.into());
-        self
-    }
 }
 
 impl VdfsNewType {
@@ -288,10 +255,8 @@ impl VdfsNewType {
             title: title.into(),
             description: None,
             icon: None,
-            source: None,
             node_ext: None,
             schema: None,
-            import: None,
         }
     }
 
@@ -302,11 +267,6 @@ impl VdfsNewType {
 
     pub fn with_icon(mut self, icon: impl Into<String>) -> Self {
         self.icon = Some(icon.into());
-        self
-    }
-
-    pub fn with_source(mut self, source: impl Into<String>) -> Self {
-        self.source = Some(source.into());
         self
     }
 
@@ -328,18 +288,7 @@ impl VdfsNewType {
         self.schema = schema;
         self
     }
-
-    /// 追加**备选的整包导入入口**（主入口之外再给一条「导入」路径）
-    pub fn with_import(mut self, import: VdfsNewImport) -> Self {
-        self.import = Some(import);
-        self
-    }
 }
-
-/// 新建内容来源：**本地文件**（[`VdfsNewType::source`] 的取值之一）。
-///
-/// 声明它的类型意味着「新建 = 选一个本地文件，把它的字节写进目标地址」。
-pub const VDFS_NEW_SOURCE_FILE: &str = "file";
 
 // ==================== 访问位 ====================
 
@@ -552,13 +501,13 @@ pub struct VdfsNode {
     /// 仅目录节点有意义；文件节点恒为 `None`。纯呈现元数据，VDFS 不解释其创建语义。
     ///
     /// ⚠️ 它是**至多一种**（见 [`VdfsNewType`]）：一个目录接受的是**一类**东西。
-    /// 同一类型的多种入口形态由类型自己的 [`VdfsNewType::import`] 表达，不在这里
-    /// 堆成一张清单。
+    /// 同一个类型的多种落盘路径（表单填 / 整包导入）不是两种类型，后者是详情页
+    /// 上的一条动作（[`VDFS_ACTION_IMPORT`]），不在这里堆成一张清单。
     ///
-    /// `Box` 不是随手加的：`VdfsNewType` 带六个 `Option<String>` + `schema` +
-    /// 可选导入入口（≈250 字节），而 `VdfsNode` 是**全系统数量最多**的类型
+    /// `Box` 不是随手加的：`VdfsNewType` 带四个 `Option<String>` + `schema`
+    /// （≈150 字节），而 `VdfsNode` 是**全系统数量最多**的类型
     /// （每条消息 / 每个文件 / 每个目录都是它）。这个字段只有**挂载点目录**才有，
-    /// 内联进结构体等于给每个消息节点白背那 250 字节——`Option<Box<_>>` 是 8 字节。
+    /// 内联进结构体等于给每个消息节点白背那 150 字节——`Option<Box<_>>` 是 8 字节。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub new_type: Option<Box<VdfsNewType>>,
     /// 场景扩展字段（flatten）

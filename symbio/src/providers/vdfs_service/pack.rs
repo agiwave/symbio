@@ -1,8 +1,9 @@
 //! 整包（zip）导入 / 导出——目录型资源的「一个地址、一整个条目」通道
 //!
-//! 规范 §3.3：**二进制写入 = 整包导入**，**导出是导入的逆动作**（节点动作
-//! `action: "export"`）。两者都不新增操作，因此打包 / 解包也不该是第二条协议，
-//! 而是本层的一组工具 + 一个载荷形状 [`VdfsPack`]。
+//! **导出与导入是一对逆向的节点动作**（`action: "export"` / `action: "import"`，
+//! 见 `symbio_core/vdfs_provider` 的动作一节），两者都不新增操作，因此打包 /
+//! 解包也不该是第二条协议，而是本层的一组工具 + 一对载荷形状
+//! （出向 [`VdfsPack`] / 入向 [`VdfsUnpack`]）。
 //!
 //! 往返契约：[`zip_dir`] 以条目 id 作**唯一顶层目录**，[`extract_pack`] 端
 //! [`strip_common_root`] 恰好剥掉这一层——导出的包能原样导回。
@@ -12,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{Cursor, Read, Write};
 use std::path::Path;
 
-/// 整包载荷（VDFS 动作 `export` 的 `data`）
+/// 整包载荷的**出向**形态（VDFS 动作 `export` 的 `data`）
 ///
 /// 字段名与 [`VdfsContent::b64`](crate::symbio_core::vdfs_provider::VdfsContent) 同构——
 /// 前端据此把它当**文件载荷**处理（有 `filename` + `b64` 就下载），
@@ -34,6 +35,42 @@ impl VdfsPack {
             filename: format!("{id}.zip"),
             b64: encode_b64(bytes),
         }
+    }
+}
+
+/// 整包载荷的**入向**形态（VDFS 动作 `import` 的 `payload`）
+///
+/// 与 [`VdfsPack`] **同一形状**：导出与导入是一对逆向动作，载荷也对称——
+/// `filename` 让 provider 推导目标名、`b64` 是包字节。差别只有 `id`：
+/// 导出时它是被导出的条目，导入时**由 provider 决定**（agent 取自包内
+/// manifest、mcp / skill 取自 `filename`），使用方指定不了。
+///
+/// 使用方（前端）取不到用户刚选的本地文件字节，故这一步由它做：声明
+/// `DetailAction::pack` 的动作，使用方先取文件、按本形状装好载荷再执行动作。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VdfsUnpack {
+    /// 包的文件名（如 `demo.zip`）——provider 按它推导目标名
+    pub filename: String,
+    /// 包字节（base64）
+    pub b64: String,
+}
+
+impl VdfsUnpack {
+    /// 从动作载荷解出（形状不符时说清缺了什么，别让每个 provider 各写一遍）
+    pub fn from_payload(payload: Option<&serde_json::Value>) -> Result<Self, PackError> {
+        let p = payload.ok_or_else(|| PackError("导入需要整包载荷（filename + b64）".into()))?;
+        Self::deserialize(p)
+            .map_err(|e| PackError(format!("整包载荷不合法（需要 filename + b64）：{e}")))
+    }
+
+    /// 包字节（base64 → 字节）
+    pub fn bytes(&self) -> Result<Vec<u8>, PackError> {
+        decode_b64(&self.b64)
+    }
+
+    /// 由文件名推导的**目标条目名**（`demo.zip` → `demo`）
+    pub fn name_of(&self, kind: &str) -> String {
+        super::entry::pack_name_of(&self.filename, kind)
     }
 }
 

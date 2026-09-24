@@ -176,7 +176,6 @@ async fn new_type_declares_the_landing_detail() {
         .root_new_type()
         .await
         .expect("根下可新建「模型」");
-    assert!(t.import.is_none(), "model 不支持整包导入");
     assert_eq!(t.ext, PLUGIN_MODEL, "呈现扩展名不变：id_of 仍按它剥后缀");
     assert_eq!(
         t.node_ext.as_deref(),

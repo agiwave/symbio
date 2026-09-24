@@ -44,7 +44,7 @@ use crate::symbio_core::vdfs::{
 use crate::symbio_core::vdfs_provider::{
     VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError,
     VdfsNewType, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse,
-    VDFS_ACTION_EXPORT, VDFS_EXT_FORM, VDFS_EXT_ZIP, VDFS_NEW_SOURCE_FILE,
+    VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_EXT_FORM,
 };
 use crate::symbio_core::{dir_from_ctx, InvokeRequest, AGENTS_FILE, PLUGIN_AGENT, PLUGIN_FILE};
 use async_trait::async_trait;
@@ -257,19 +257,25 @@ impl AgentPlugin {
 
 #[async_trait]
 impl VdfsProvider for AgentPlugin {
-    /// 根下只有一种新建类型：整包导入（zip）。
+    /// 根下只有一种新建类型：智能体。
     ///
-    /// 它是**包**而不是表单——`write` 拒绝非二进制载荷（「只支持整包导入，不支持
-    /// 表单写入」），所以主入口本身就是选文件（`source = file`），不必再挂
-    /// [`VdfsNewImport`]（那用于「主入口是表单、另给一条导入路」的形态）。
+    /// 草稿页与落成后的条目是**同一张**详情（`node_ext = form` + 概览定义），
+    /// 因此「点添加」与「选中一项」在交互上没有第二种形态——差别只在草稿没有内容。
+    ///
+    /// 草稿上唯一可做的是**导入整包**，而它是详情页的一条动作
+    /// （[`VDFS_ACTION_IMPORT`]，与「导出」「删除」同级），**不是本结构的字段**：
+    /// 本结构只说「这类东西落成后长什么样」，创建语义归 provider（见 ADR-029）。
     ///
     /// 留在 provider 上而不进同步的 `PluginMeta` 的理由与 session 相同——它是挂载
     /// 点的**动态自述**，由容器合成根节点时现场取。
     async fn root_new_type(&self) -> Option<VdfsNewType> {
         Some(
-            VdfsNewType::new(VDFS_EXT_ZIP, format!("{LABEL}包"))
-                .with_description(format!("导入{LABEL}整包（.zip）——整目录覆盖同名条目"))
-                .with_source(VDFS_NEW_SOURCE_FILE),
+            VdfsNewType::new(PLUGIN_AGENT, LABEL)
+                .with_description(format!("新建{LABEL}——在详情页里导入整包（.zip）"))
+                .with_node_ext(VDFS_EXT_FORM)
+                .with_schema_opt(
+                    serde_json::to_value(super::detail::agent_detail_definition()).ok(),
+                ),
         )
     }
 
@@ -592,24 +598,14 @@ impl AgentPlugin {
                 etag: None,
             });
         }
-        // 整包导入：Agent **唯一的创建方式**（id 取自包内 manifest，忽略建议名）
+        // 二进制载荷**不再是创建通道**：整包导入已改走详情页动作
+        // （[`VDFS_ACTION_IMPORT`]，见 [`Self::action_at`]）。这里显式拒绝，而不是
+        // 让它落到下面的文本分支——那会报「不是合法 JSON」，让人以为是内容格式
+        // 问题，而真正的原因是**用错了通道**。
         if content.binary {
-            if !matches!(parse_rel_path(path), RelPath::Agent { .. }) {
-                return Err(VdfsError::invalid(format!(
-                    "{LABEL}整包只能导入到挂载根下：{path}"
-                )));
-            }
-            let bytes = vdfs_service::decode_b64(content.b64.as_deref().unwrap_or_default())
-                .map_err(|e| VdfsError::invalid(e.0))?;
-            let r = store
-                .import(&bytes, true)
-                .map_err(|e| VdfsError::invalid(format!("导入失败：{e}")))?;
-            notify_change(PLUGIN_AGENT, &r.id);
-            return Ok(VdfsWriteResponse {
-                path: r.id,
-                created: !r.replaced,
-                etag: None,
-            });
+            return Err(VdfsError::invalid(format!(
+                "{LABEL}不接受二进制写入：整包导入请走 `{VDFS_ACTION_IMPORT}` 动作"
+            )));
         }
         // Agent 目录内的文件 / 子路径写入
         if let RelPath::File { id, rel } = parse_rel_path(path) {
@@ -646,9 +642,9 @@ impl AgentPlugin {
                 etag: None,
             });
         }
-        // Agent 条目本身不可表单新建 / 覆盖（无「先建空壳」形态）
+        // Agent 条目本身不可直接写入（无「先建空壳」形态）：新建 = 导入整包动作
         Err(VdfsError::Forbidden(format!(
-            "{LABEL}只支持整包导入，不支持表单写入：{path}"
+            "{LABEL}条目不可直接写入：新建请走 `{VDFS_ACTION_IMPORT}` 动作：{path}"
         )))
     }
 
@@ -725,8 +721,13 @@ impl AgentPlugin {
         Err(VdfsError::NotImplemented)
     }
 
-    /// 节点动作：「导出」把 agent 目录打成 zip 随 `data` 回传
-    /// （与二进制写入的整包导入互为逆向）。
+    /// 节点动作：「导入」用整包在本目录建出一份资源、「导出」把 agent 目录打成
+    /// zip 随 `data` 回传——两者互为逆向（见 [`VDFS_ACTION_IMPORT`] /
+    /// [`VDFS_ACTION_EXPORT`]）。
+    ///
+    /// 「导入」落在**挂载根**上：草稿详情页上那条动作就打在根上，条目 id 取自
+    /// 包内 manifest——使用方给不了名字，也就没有「导到哪个名字下」这回事。
+    /// 「导出」落在**条目**上（要导出就得先有东西可导）。
     ///
     /// 条目内部的子路径若落在可挂载的子智能体里，同样穿过挂载点交给该子树
     /// （动作是 provider 自持的动词，容器/委托方只负责把地址转发到位）。
@@ -754,6 +755,28 @@ impl AgentPlugin {
                     .ok_or_else(mismatch);
             }
             return Err(VdfsError::NotImplemented);
+        }
+        if action == VDFS_ACTION_IMPORT {
+            if !matches!(parse_rel_path(path), RelPath::Root) {
+                return Err(VdfsError::invalid(format!(
+                    "「导入」只对{LABEL}挂载根可用：{path}"
+                )));
+            }
+            let pack = vdfs_service::VdfsUnpack::from_payload(payload)
+                .map_err(|e| VdfsError::invalid(e.0))?;
+            let bytes = pack.bytes().map_err(|e| VdfsError::invalid(e.0))?;
+            let host = host_ctx(ctx)?;
+            let store = Self::store_of(&host);
+            let r = store
+                .import(&bytes, true)
+                .map_err(|e| VdfsError::invalid(format!("导入失败：{e}")))?;
+            notify_change(PLUGIN_AGENT, &r.id);
+            return Ok(VdfsActionResult {
+                action: VDFS_ACTION_IMPORT.to_string(),
+                ok: true,
+                message: format!("已导入{LABEL}「{}」", r.id),
+                data: None,
+            });
         }
         if action != VDFS_ACTION_EXPORT {
             return Err(VdfsError::NotImplemented);

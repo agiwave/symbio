@@ -11,9 +11,13 @@
 //! - 提交值的校验 → [`DetailDefinition::validate`]，错误载荷即 `vdfs/write`
 //!   的字段级失败载荷（[`VdfsValidationError`]）。
 //!
-//! 能力判定不在本模块：可写性来自 **VDFS 访问位**，可新建 / 可导入来自 provider 的
-//! `root_access` / `root_new_type`，可测试与否来自 [`DetailDefinition::actions`]
-//! 里声明的动作。
+//! 能力判定不在本模块：可写性来自 **VDFS 访问位**，可新建来自 provider 的
+//! `root_access` / `root_new_type`；其余一律来自 [`DetailDefinition::actions`]
+//! 里声明的动作——**导入与导出都在这里**（[`VDFS_ACTION_IMPORT`] /
+//! [`VDFS_ACTION_EXPORT`]），它们与「测试连接」「删除」同级，没有特殊地位。
+//!
+//! [`VDFS_ACTION_IMPORT`]: crate::symbio_core::vdfs_provider::VDFS_ACTION_IMPORT
+//! [`VDFS_ACTION_EXPORT`]: crate::symbio_core::vdfs_provider::VDFS_ACTION_EXPORT
 
 use crate::symbio_core::vdfs_provider::{VdfsFieldError, VdfsValidationError};
 use serde::{Deserialize, Serialize};
@@ -209,12 +213,22 @@ pub struct DetailBadge {
 }
 
 /// 动作按钮。`id` ∈ save | test | delete | set-default | open-container
-/// （机制语义动作，前端接统一通道）或自定义（预留）；`payload` 合并进 save 负载
-/// （如 `skip_validation`）；`busy_label` 为进行中文案。
+/// （机制语义动作，前端接统一通道）或 provider 自持的 VDFS 节点动作
+/// （`import` / `export` / `truncate`……，经 `vdfs/action` 转发）；
+/// `payload` 合并进 save 负载（如 `skip_validation`）；`busy_label` 为进行中文案。
 ///
 /// `icon`：图标名（可选）。语义动作 id 自带默认图标映射（前端纯 UI 资产），
 /// 仅当同一动作需要区分形态（如同为 save 的「跳过校验保存」）或自定义
 /// 动作需要图标时才显式指定；未知图标名回落为文字按钮。
+///
+/// ## 载荷来自本地文件 [`DetailAction::pack`]
+///
+/// 「导入整包」这类动作的载荷是**一个本地文件的字节**。后端既唤不起原生
+/// 对话框、也拿不到用户刚选的文件，故这一步只能由使用方做：声明 `pack` 后，
+/// 使用方先取文件（`{filename, b64}`，见 `vdfs_service::VdfsUnpack`），再执行
+/// 本动作。与 [`DetailField::pick`] 是同一类声明（「这一步需要原生能力」），
+/// 区别在**取值去向**：字段取到的是**路径**（写进字段值），动作取到的是
+/// **字节**（作为动作载荷）。
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default)]
 pub struct DetailAction {
@@ -235,6 +249,10 @@ pub struct DetailAction {
     pub disabled_when: Option<DetailCondition>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payload: Option<serde_json::Value>,
+    /// 本动作的载荷是一个**本地整包文件**（`{filename, b64}`）；值是包的后缀
+    /// （如 `"zip"`），供使用方给文件选择器做过滤。缺省 = 动作载荷由调用方直接给。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pack: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub busy_label: Option<String>,
 }

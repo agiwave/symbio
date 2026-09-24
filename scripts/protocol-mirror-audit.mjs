@@ -139,22 +139,15 @@ const ALIASES = [
  *
  * 这是逃生舱：能进这里说明它**不是**跨栈契约，而是前端自己的概念。
  * 每条必须写明理由——「后端没有对应」这件事本身要经得起复核。
+ *
+ * **当前为空**，且这个状态是刚刚挣来的：曾经这里有两条
+ * （`VDFS_NEW_ENTRY_TYPE` / `VDFS_NEW_ENTRY_IMPORT`），它们是「新建」提示态里
+ * 那两个入口按钮的动作 id。整包导入改走详情页动作（`VDFS_ACTION_IMPORT`，
+ * 见 ADR-029）之后，前端不再有自己的动作词汇——**每一个动作名都由后端解释**，
+ * 于是没有任何一条常量需要留在这个逃生舱里。空着是对的：它意味着「前端不认识
+ * 任何后端不认识的动词」这条不变式现在是**结构性成立**的，不是靠登记维持的。
  */
-const LOCAL_ONLY = [
-  {
-    name: 'VDFS_NEW_ENTRY_TYPE',
-    what: '「新建」提示态里**主入口**的动作 id',
-    reason:
-      '提示态动作行的标识，不是协议词：后端只声明「这一种类型 + 可选导入入口」，' +
-      '把入口渲染成哪一行按钮、按什么 id 派发，是前端交互自己的事。' +
-      '后端无从解释 `new:type` 这个字符串。',
-  },
-  {
-    name: 'VDFS_NEW_ENTRY_IMPORT',
-    what: '「新建」提示态里**整包导入入口**的动作 id',
-    reason: '同上：与 `VDFS_NEW_ENTRY_TYPE` 同族的前端交互标识，非协议词。',
-  },
-]
+const LOCAL_ONLY = []
 
 // ==================== B. 缺席检查 ====================
 
@@ -300,11 +293,6 @@ const STRUCT_SETS = [
     what: 'VDFS 可新建类型',
     rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsNewType' },
     ts: { file: VDFS_TS, interface: 'VdfsNewType' },
-  },
-  {
-    what: 'VDFS 整包导入入口',
-    rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsNewImport' },
-    ts: { file: VDFS_TS, interface: 'VdfsNewImport' },
   },
   {
     what: 'VDFS 写入响应',

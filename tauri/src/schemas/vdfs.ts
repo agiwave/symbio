@@ -149,8 +149,15 @@ export interface VdfsAccess {
  * 对齐后端 `symbio_core/vdfs_provider.rs` 的 `VdfsNewType`。
  *
  * 一个目录接受的是**一类**东西（`session` 目录只收会话、`model` 目录只收模型），
- * 所以节点上声明的是 `new_type?: VdfsNewType` 而不是一张清单。同一类型的多种
- * **入口形态**由类型自己的 `import` 表达（见下），不在这里堆成多个类型。
+ * 所以节点上声明的是 `new_type?: VdfsNewType` 而不是一张清单。
+ *
+ * ## 它只说「落成后长什么样」
+ *
+ * 本结构是**纯呈现定义**：`ext` / `title` / `icon` / `node_ext` / `schema`。
+ * 「怎么把它造出来」不在这里——**导入整包是详情页上的一条动作**
+ * （`VDFS_ACTION_IMPORT`，载荷见 `DetailAction.pack`），与「导出」「删除」同级。
+ * 曾经它带 `source` / `import` 两个字段承载导入，那让一个呈现结构承担了操作语义，
+ * 也让 `VdfsProvider` 上多出一个系统级接口（见 `docs/DECISIONS.md` ADR-029）。
  *
  * ## 两条独立的键：`ext` 与 `node_ext`
  *
@@ -161,18 +168,6 @@ export interface VdfsAccess {
  *
  * 分开声明是为了让**草稿节点**（还没创建、无 id 无名字）能用上与该类型落成后
  * **完全相同**的渲染器与 `schema`——这正是「点新建与选中一项进入同一个详情页」。
- *
- * ## 主入口的内容来源 `source`
- *
- * `source` 说明**主入口写进去的内容从哪来**（后端声明、前端照做）：
- * 缺省 = 在详情页里边看边填；`'file'` = 主入口本身就是选一个本地文件
- * （如 agent 只有整包导入这一条路，没有表单新建）。
- *
- * ## 备选入口 `import`
- *
- * `import` 是**主入口之外**再给的一条「整包导入」路（如 skill / mcp：主入口是
- * 表单新建，另有导入）。两条入口落成的是**同一形状的节点**，所以它是同一个类型的
- * 两个按钮，不是两个类型。推导见 {@link vdfsNewEntries}。
  */
 export interface VdfsNewType {
   /** 新元素**呈现扩展名**（地址末段后缀；**不是**渲染器键） */
@@ -183,97 +178,10 @@ export interface VdfsNewType {
   description?: string
   /** 图标名（纯 UI 映射） */
   icon?: string
-  /** 主入口的内容来源（后端 `VDFS_NEW_SOURCE_FILE`）：'file' = 选择本地文件 */
-  source?: string
   /** 新元素落成后的节点 `ext`（**详情渲染器键**）；缺省 = 与 `ext` 相同 */
   node_ext?: string
   /** 新元素的呈现描述（与节点 `schema` 同义）；草稿详情页据此渲染出同一张详情 */
   schema?: unknown
-  /** 备选的**整包导入入口**；缺省 = 只有主入口 */
-  import?: VdfsNewImport
-}
-
-/**
- * 整包导入入口——同一新建类型的另一种内容来源（`VdfsNewType.import`）。
- *
- * 对齐后端 `symbio_core/vdfs_provider.rs` 的 `VdfsNewImport`。
- *
- * 恒为「选一个本地文件，把字节写进目标地址」：包地址末段后缀取 `ext`
- * （目标名由文件名推导，`demo.zip` → `demo`），落成后的呈现由所属类型决定
- * ——所以这里**没有** `node_ext` / `schema`。
- */
-export interface VdfsNewImport {
-  /** 包地址末段的后缀（如 `zip`；后端 `pack_name_of` 按它剥建议名） */
-  ext: string
-  /** 导入入口的展示标题（如「技能包」） */
-  title: string
-  /** 语义说明 */
-  description?: string
-}
-
-/** 新建内容来源：本地文件（后端 `VDFS_NEW_SOURCE_FILE`） */
-export const VDFS_NEW_SOURCE_FILE = 'file'
-
-/**
- * 「新建」的一个**入口形态**——由一个目录声明的类型推导出的 1~2 条。
- *
- * 类型是**一类东西**（至多一个），入口是**怎么把它造出来**：主入口（`import`
- * 缺省）按 `type.source` 决定「进详情页边看边填」还是「选本地文件」；备选入口
- * （`import` 存在）恒为「选本地文件导入整包」。
- *
- * 派生而不是新增协议字段：入口完全由类型决定（两条入口落成同一形状的节点），
- * 让后端再下发一份入口清单就是把同一个事实写两处。
- */
-export interface VdfsNewEntry {
-  /** 动作 id（`new:` 前缀，与 save / delete 等语义动作 id 不冲突） */
-  id: string
-  /** 入口展示名（主入口取 `type.title`，导入入口取 `import.title`） */
-  label: string
-  /** 该入口落成后的元素类型 */
-  type: VdfsNewType
-  /** 导入入口的包描述；缺省 = 主入口 */
-  import?: VdfsNewImport
-  /** 文件选择器与目标名用的扩展名（主入口取 `type.ext`，导入取 `import.ext`） */
-  ext: string
-  /** 入口说明（缺省不显示） */
-  description?: string
-  /** 内容是否取自本地文件（决定是否进入「选文件」提示态） */
-  fromFile: boolean
-}
-
-/** 动作 id：主入口 / 导入入口（固定两条，故不用 `ext` 派生 id） */
-export const VDFS_NEW_ENTRY_TYPE = 'new:type'
-export const VDFS_NEW_ENTRY_IMPORT = 'new:import'
-
-/**
- * 由一个目录声明的类型推导出它的全部新建入口（`None` → 空表 = 不可新建）。
- *
- * 顺序即呈现顺序：主入口在前，导入入口在后。
- */
-export function vdfsNewEntries(newType: VdfsNewType | null | undefined): VdfsNewEntry[] {
-  if (!newType) return []
-  const entries: VdfsNewEntry[] = [
-    {
-      id: VDFS_NEW_ENTRY_TYPE,
-      label: newType.title || newType.ext,
-      type: newType,
-      ext: newType.ext,
-      description: newType.description,
-      fromFile: newType.source === VDFS_NEW_SOURCE_FILE,
-    },
-  ]
-  if (newType.import) {
-    entries.push({
-      id: VDFS_NEW_ENTRY_IMPORT,
-      label: newType.import.title || newType.import.ext,
-      type: newType,
-      import: newType.import,
-      ext: newType.import.ext,
-      description: newType.import.description,
-      fromFile: true,
-    })
-  }
-  return entries
 }
 
 /**
@@ -308,7 +216,8 @@ export interface VdfsNode {
    * 本目录可接受的**新建元素类型**（至多一个；缺省 = 不可新建）。
    *
    * 一个目录接受的是**一类**东西——「可新建两类」是伪命题：那其实是同一个类型的
-   * 两种入口形态（见 {@link VdfsNewEntry}）。
+   * 两种落盘路径，而第二条（整包导入）是详情页上的一条**动作**，不是第二种类型
+   * （见 {@link VdfsNewType} 与 `docs/DECISIONS.md` ADR-029）。
    */
   new_type?: VdfsNewType
   /** 场景扩展字段（flatten 到顶层） */
@@ -367,6 +276,15 @@ export function actionFileOf(data: unknown): VdfsActionFile | null {
 export const VDFS_ACTION_TEST = 'test'
 /** 已知动作标识：导出打包（后端 `VDFS_ACTION_EXPORT`） */
 export const VDFS_ACTION_EXPORT = 'export'
+/**
+ * 已知动作标识：**导入整包**（后端 `VDFS_ACTION_IMPORT`）——与「导出」互为逆向。
+ *
+ * 它声明 `pack`（载荷是一个本地文件，见 `DetailAction.pack`），因此前端这一侧
+ * 只需「取文件 → 交给机制层编码」，**不认识这个动作本身**；反过来「导出」的
+ * 结果里带 `filename` + `b64`（见 `actionFileOf`），前端也只认那个形状。
+ * 两个方向都是形状判定，故新增同类动作无需改前端。
+ */
+export const VDFS_ACTION_IMPORT = 'import'
 /**
  * 已知动作标识：**截断**（后端 `VDFS_ACTION_TRUNCATE`）——列表资源删除
  * 「该条目及其之后」的全部条目，`data` 带回被删条目 id 列表。
@@ -483,23 +401,6 @@ export function vdfsJoin(dir: string, name: string): string {
   const d = normalizeDir(dir)
   const n = name.replace(/^\/+|\/+$/g, '')
   return n ? `${d}/${n}` : d
-}
-
-/**
- * 由本地文件名推导「新建名」：**保留原名主干 + 换成类型扩展名**。
- *
- * 服务于 `source = 'file'` 的新建类型（整包导入）：名称来自文件本身，
- * 扩展名由类型声明（`ext`），与后端「扩展名即类型」同口径。
- *
- * 例：`demo.zip` + `zip` → `demo.zip`；`pkg.tar.gz` + `zip` → `pkg.tar.zip`；
- * `README` + `zip` → `README.zip`。
- */
-export function newFileNameOf(fileName: string, ext: string): string {
-  // 个别环境给的是带路径的名字：只取末段
-  const base = fileName.split(/[\\/]/).pop() || fileName
-  const dot = base.lastIndexOf('.')
-  const stem = dot > 0 ? base.slice(0, dot) : base
-  return ext ? `${stem}.${ext}` : stem
 }
 
 /** 父目录（类别根的父 = 虚拟根；虚拟根的父 = 虚拟根） */

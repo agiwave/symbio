@@ -20,28 +20,13 @@ async fn new_type_declares_the_landing_detail() {
         .root_new_type()
         .await
         .expect("根下可新建 MCP Server");
-    assert_eq!(t.ext, PLUGIN_MCP, "类型位是表单新建，不是整包导入");
+    assert_eq!(t.ext, PLUGIN_MCP, "呈现扩展名是 MCP 自己的，不是包的");
     assert_eq!(
         t.node_ext.as_deref(),
         Some(VDFS_EXT_FORM),
         "草稿必须与落成后用同一个渲染器"
     );
     assert!(t.schema.is_some(), "没有 schema，表单渲染不出任何字段");
-}
-
-/// 整包导入是**同一类型的另一个入口**，不另占类型位（用户第 3 点）。
-///
-/// 它内容取自本地文件、落成后与表单新建同形，所以包自己不声明 `node_ext` /
-/// `schema`——呈现由所属类型决定。
-#[tokio::test]
-async fn import_is_a_second_entry_of_the_same_type() {
-    let t = McpPlugin::default().root_new_type().await.unwrap();
-    let pack = t.import.as_ref().expect("可导入整包");
-    assert_eq!(
-        pack.ext, VDFS_EXT_ZIP,
-        "包地址后缀（pack_name_of 按它剥建议名）"
-    );
-    assert_eq!(pack.title, "MCP 包");
 }
 
 /// 无名字新建 = 写挂载点目录自身：id 由本插件生成（用户第 3 点）。

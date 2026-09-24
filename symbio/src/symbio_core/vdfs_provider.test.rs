@@ -142,26 +142,41 @@ fn new_type_is_single_dir_scoped_and_omitted_when_absent() {
     );
 }
 
-/// 第二种入口形态：同一类型内挂**可选导入入口**，不额外占一个类型位
+/// 新建类型是**纯呈现定义**：只描述落成后的节点，不承载任何落盘路径。
+///
+/// 「导入」曾经是这里的第二种入口（`source` / `import` 两个字段）。它被移出核心
+/// trait、变成详情页的一条动作（[`VDFS_ACTION_IMPORT`]）后，本结构应当只剩
+/// 「草稿长什么样」这一件事——本用例把这条边界钉在**线上形状**上：序列化出来的
+/// 键集合必须恰好是呈现字段，多一个都说明有非呈现的东西漏回来了。
 #[test]
-fn new_type_carries_optional_import_entry() {
-    let plain = VdfsNewType::new("skill", "技能");
-    assert!(plain.import.is_none());
+fn new_type_is_pure_presentation() {
+    let t = VdfsNewType::new("skill", "技能")
+        .with_description("新建技能")
+        .with_node_ext(VDFS_EXT_FORM)
+        .with_schema(serde_json::json!({ "binding": "skill" }));
+    let v = serde_json::to_value(&t).unwrap();
+    // 排序后比对：`serde_json` 默认的 map 是键序无关的（BTreeMap），断言不该
+    // 依赖它——这里要比的是**键集合**，不是声明顺序。
+    let mut keys: Vec<String> = v
+        .as_object()
+        .expect("结构体必须序列化为对象")
+        .keys()
+        .map(|k| k.to_string())
+        .collect();
+    keys.sort();
+    let mut expected: Vec<String> = ["ext", "title", "description", "node_ext", "schema"]
+        .iter()
+        .map(|k| k.to_string())
+        .collect();
+    expected.sort();
+    assert_eq!(keys, expected, "新建类型只允许承载呈现字段");
 
-    let with_import = VdfsNewType::new("skill", "技能")
-        .with_import(VdfsNewImport::new("zip", "技能包").with_description("导入整包（.zip）"));
-    let v = serde_json::to_value(&with_import).unwrap();
-    assert_eq!(v["ext"], serde_json::json!("skill"), "类型位仍是主入口");
-    assert_eq!(v["import"]["ext"], serde_json::json!("zip"));
-    assert_eq!(v["import"]["title"], serde_json::json!("技能包"));
+    // 落盘路径不在这里：导入是动作，动作词与新建类型分属两处
+    assert_eq!(VDFS_ACTION_IMPORT, "import");
 
     let back: VdfsNewType = serde_json::from_value(v).unwrap();
-    assert_eq!(back.import.map(|i| i.title), Some("技能包".to_string()));
-    // 未声明导入时不序列化该字段
-    assert!(serde_json::to_value(&plain)
-        .unwrap()
-        .get("import")
-        .is_none());
+    assert_eq!(back.node_ext.as_deref(), Some(VDFS_EXT_FORM));
+    assert_eq!(back.schema.unwrap()["binding"], serde_json::json!("skill"));
 }
 
 /// 宿主方言的呈现描述经 `schema` 透传，VDFS 不解释其内容

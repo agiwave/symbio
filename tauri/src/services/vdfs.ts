@@ -188,19 +188,6 @@ export function downloadBlob(filename: string, data: BlobPart, mime = 'applicati
   setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
-/** 写二进制内容（base64） */
-export async function writeVdfsBinary(
-  path: string,
-  b64: string,
-  opts?: { create?: boolean }
-): Promise<VdfsWriteResponse> {
-  return callPlugin<VdfsWriteResponse>(VDFS_WRITE, {
-    path,
-    b64,
-    create: opts?.create,
-  })
-}
-
 /** 删除节点（目录需 recursive） */
 export async function deleteVdfs(path: string, recursive = false): Promise<VdfsDeleteResponse> {
   return callPlugin<VdfsDeleteResponse>(VDFS_DELETE, { path, recursive })

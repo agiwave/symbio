@@ -32,19 +32,21 @@ const mocks = vi.hoisted(() => ({
   readVdfs: vi.fn(),
   writeVdfs: vi.fn(),
   subscribeVdfsChanged: vi.fn(),
+  // 动作通道：草稿上的「导入整包」要走它（载荷编码 + 目标地址在下面两条用例里钉住）
+  runVdfsAction: vi.fn(),
+  arrayBufferToBase64: vi.fn(),
 }))
 
 vi.mock('@/services/vdfs', () => ({
   listVdfs: mocks.listVdfs,
   readVdfs: mocks.readVdfs,
   writeVdfs: mocks.writeVdfs,
+  runVdfsAction: mocks.runVdfsAction,
+  arrayBufferToBase64: mocks.arrayBufferToBase64,
   // 以下未被本用例触达，仅为满足模块导入
-  arrayBufferToBase64: vi.fn(),
   base64ToBytes: vi.fn(),
   deleteVdfs: vi.fn(),
   downloadBlob: vi.fn(),
-  runVdfsAction: vi.fn(),
-  writeVdfsBinary: vi.fn(),
 }))
 // 订阅入口整体替身：`subscribeVdfsChanged` 已把「总线频道 + 后端 watch 登记 +
 // 本地通道」三件事收在一处（它自己由 services/__tests__/eventBusWatch.spec.ts 覆盖），
@@ -380,28 +382,29 @@ describe('useVdfs 有界列表（中栏只取最新一页 + 加载更早）', ()
   })
 })
 
-describe('useVdfs 新建 = 选中一张草稿节点（与「选中一项」同一条详情通道）', () => {
-  const MODEL_DIR = `@vfs/model`
+const MODEL_DIR = `@vfs/model`
 
-  /** 目录声明的「可新建类型」：`ext` 是呈现扩展名，`node_ext` 才是渲染器键 */
-  const MODEL_NEW_TYPE = {
-    ext: 'model',
+/** 目录声明的「可新建类型」：`ext` 是呈现扩展名，`node_ext` 才是渲染器键 */
+const MODEL_NEW_TYPE = {
+  ext: 'model',
+  title: '模型',
+  node_ext: 'form',
+  schema: { sections: [{ title: null, collapsed: false, fields: [] }] },
+}
+
+function dirNode() {
+  return {
+    path: MODEL_DIR,
+    name: 'model',
     title: '模型',
-    node_ext: 'form',
-    schema: { sections: [{ title: null, collapsed: false, fields: [] }] },
+    kind: 'dir',
+    status: 'active',
+    access: 'l',
+    new_type: MODEL_NEW_TYPE,
   }
+}
 
-  function dirNode() {
-    return {
-      path: MODEL_DIR,
-      name: 'model',
-      title: '模型',
-      kind: 'dir',
-      status: 'active',
-      access: 'l',
-      new_type: MODEL_NEW_TYPE,
-    }
-  }
+describe('useVdfs 新建 = 选中一张草稿节点（与「选中一项」同一条详情通道）', () => {
 
   it('草稿节点没有 id / 名字，但渲染器与 schema 就是该类型落成后的那一套', async () => {
     mocks.listVdfs.mockResolvedValue({ path: MODEL_DIR, node: dirNode(), items: [] })
@@ -409,7 +412,7 @@ describe('useVdfs 新建 = 选中一张草稿节点（与「选中一项」同�
     await settle()
     expect(api.canCreate.value).toBe(true)
 
-    api.startNew(api.creatableType.value!)
+    api.startNew()
     await settle()
 
     const n = api.selectedNode.value!
@@ -429,7 +432,7 @@ describe('useVdfs 新建 = 选中一张草稿节点（与「选中一项」同�
     mocks.listVdfs.mockResolvedValue({ path: MODEL_DIR, node: dirNode(), items: [] })
     const { api, wrapper } = mountHost(MODEL_DIR)
     await settle()
-    api.startNew(api.creatableType.value!)
+    api.startNew()
     await settle()
 
     mocks.writeVdfs.mockResolvedValue({ path: `${MODEL_DIR}/model-a1b2c3d4`, created: true })
@@ -452,11 +455,74 @@ describe('useVdfs 新建 = 选中一张草稿节点（与「选中一项」同�
     const { api, wrapper } = mountHost(MODEL_DIR)
     await settle()
 
-    api.startNew(api.creatableType.value!)
+    api.startNew()
     const first = api.draftSeq.value
-    api.startNew(api.creatableType.value!)
+    api.startNew()
     expect(api.draftSeq.value).toBe(first + 1)
 
+    wrapper.unmount()
+  })
+})
+
+describe('useVdfs 草稿上的动作（「导入整包」）：载荷编码 + 落点 + 退出草稿', () => {
+  /** 挂到模型目录并进入草稿态（下面每条用例都从「一张开着的草稿」开始） */
+  async function draft() {
+    mocks.listVdfs.mockResolvedValue({ path: MODEL_DIR, node: dirNode(), items: [] })
+    const { api, wrapper } = mountHost(MODEL_DIR)
+    await settle()
+    api.startNew()
+    await settle()
+    return { api, wrapper }
+  }
+
+  it('File ⇒ `{filename, b64}`：编码这一步在前端，因为后端拿不到用户刚选的文件', async () => {
+    const { api, wrapper } = await draft()
+    mocks.arrayBufferToBase64.mockReturnValue('UEsDBA==')
+    mocks.runVdfsAction.mockResolvedValue({ action: 'import', ok: true, message: '已导入' })
+
+    const file = new File(['PK'], 'demo.zip')
+    // happy-dom 的 File 不保证实现 arrayBuffer（Node 侧 Blob 有），显式补上
+    Object.defineProperty(file, 'arrayBuffer', { value: async () => new ArrayBuffer(2) })
+
+    await api.runPackAction('import', file)
+
+    expect(mocks.runVdfsAction).toHaveBeenCalledWith(MODEL_DIR, 'import', {
+      filename: 'demo.zip',
+      b64: 'UEsDBA==',
+    })
+    wrapper.unmount()
+  })
+
+  it('动作打在**当前目录自身**，不是草稿的空地址（与 write 同一条落点规则）', async () => {
+    const { api, wrapper } = await draft()
+    mocks.runVdfsAction.mockResolvedValue({ action: 'import', ok: true, message: '已导入' })
+
+    await api.runAction('import', { filename: 'demo.zip', b64: 'UEsDBA==' })
+
+    const [path] = mocks.runVdfsAction.mock.calls[0] as [string]
+    expect(path, '使用方只说「在这个目录里做这件事」，名字/落点由 provider 决定').toBe(MODEL_DIR)
+    wrapper.unmount()
+  })
+
+  it('成功 ⇒ 退出草稿（草稿是瞬态：它已落盘，继续留着等于显示一个不存在的资源）', async () => {
+    const { api, wrapper } = await draft()
+    mocks.runVdfsAction.mockResolvedValue({ action: 'import', ok: true, message: '已导入' })
+
+    await api.runAction('import', { filename: 'demo.zip', b64: 'UEsDBA==' })
+
+    expect(api.selectedNode.value).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('失败 ⇒ 草稿留着（用户还在那一页上，可以换个文件重试）', async () => {
+    const { api, wrapper } = await draft()
+    mocks.runVdfsAction.mockResolvedValue({ action: 'import', ok: false, message: '包不合法' })
+
+    const ok = await api.runAction('import', { filename: 'bad.zip', b64: 'x' })
+
+    expect(ok).toBe(false)
+    expect(api.detailError.value).toBe('包不合法')
+    expect(api.selectedNode.value, '失败不得把用户踢出草稿页').not.toBeNull()
     wrapper.unmount()
   })
 })

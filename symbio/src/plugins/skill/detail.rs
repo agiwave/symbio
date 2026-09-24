@@ -141,8 +141,26 @@ pub fn skill_detail_definition() -> DetailDefinition {
                 busy_label: Some("保存中…".into()),
                 ..Default::default()
             },
+            // 「导入整包」：VDFS 节点动作 `import`（vdfs/action）——**只在草稿
+            // （新建）态**出现：条目名取自包的文件名，落成后无从再导（要换内容
+            // 就删掉重导）。它是与「在表单里填」并列的另一条创建路，也是详情页
+            // 的一条动作——不是 `root_new_type` 上的一个字段。
+            DetailAction {
+                id: crate::symbio_core::vdfs_provider::VDFS_ACTION_IMPORT.into(),
+                label: "导入整包".into(),
+                style: "secondary".into(),
+                when: Some(DetailCondition {
+                    key: "is_existing".into(),
+                    equals: Some(serde_json::json!(false)),
+                    ..Default::default()
+                }),
+                // 载荷是一个本地 zip：使用方先取文件再执行本动作
+                pack: Some(crate::symbio_core::vdfs_provider::VDFS_EXT_ZIP.into()),
+                busy_label: Some("导入中…".into()),
+                ..Default::default()
+            },
             // 「导出」：VDFS 节点动作 `export`（vdfs/action）→ provider 的
-            // `export_zip`；与「新建类型 zip」的导入互为逆向
+            // `export_zip`；与「导入整包」互为逆向
             DetailAction {
                 id: crate::symbio_core::vdfs_provider::VDFS_ACTION_EXPORT.into(),
                 label: "导出整包".into(),

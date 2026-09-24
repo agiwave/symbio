@@ -45,7 +45,6 @@ async fn vdfs_self_description_has_no_mount() {
     let t = p.root_new_type().await.expect("根下可新建会话");
     assert_eq!(t.ext, vdfs::VDFS_EXT_SESSION);
     assert_eq!(t.title, "会话");
-    assert!(t.import.is_none(), "会话无整包导入入口");
     // 草稿节点与落成后走**同一个渲染器**（`ext = session`，不是通用表单），
     // 故不声明 `node_ext`：新建会话直接进会话详情页
     assert!(t.node_ext.is_none());
