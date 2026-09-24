@@ -197,7 +197,7 @@ async fn count_children(dir: &Path) -> Option<u32> {
 ///
 /// 实现 [`VdfsProvider`] 只为复用同一套分发与组合逻辑（`edit` / `search` 由
 /// 访问层组合而成，不区分虚拟与物理）；它**不注册为挂载点**，因此
-/// `label` / `order` / `root_new_types` 这些「被合成进 `.vdfsv2` 时才有人读」的
+/// `label` / `order` / `root_new_type` 这些「被合成进 `.vdfsv2` 时才有人读」的
 /// 声明在这里没有意义，一律不覆盖。
 pub struct PhysicalFs {
     policy: FsPolicy,
@@ -297,10 +297,6 @@ impl VdfsProvider for PhysicalFs {
             }
             VdfsRequest::Mkdir => {
                 self.do_mkdir(ctx, path).await?;
-                Ok(VdfsResponse::Unit)
-            }
-            VdfsRequest::Move { to } => {
-                self.do_move(ctx, path, &to).await?;
                 Ok(VdfsResponse::Unit)
             }
             _ => Err(VdfsError::NotImplemented),
@@ -501,24 +497,6 @@ impl PhysicalFs {
         tokio::fs::create_dir_all(&target)
             .await
             .map_err(|e| VdfsError::internal(format!("创建目录失败：{e}")))?;
-        Ok(())
-    }
-
-    async fn do_move(&self, ctx: &VdfsContext, from: &str, to: &str) -> VdfsResult<()> {
-        let base = workdir(ctx)?;
-        let src = join_target(&base, from);
-        let dst = join_target(&base, to);
-        // 源需可读（存在 + 在范围内），目标需可写
-        self.guard_read(&base, &src).await?;
-        self.guard_write(&base, &dst).await?;
-        if let Some(parent) = dst.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| VdfsError::internal(format!("创建目录失败：{e}")))?;
-        }
-        tokio::fs::rename(&src, &dst)
-            .await
-            .map_err(|e| VdfsError::internal(format!("移动失败：{e}")))?;
         Ok(())
     }
 }

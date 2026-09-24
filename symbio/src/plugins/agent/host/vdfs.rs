@@ -257,14 +257,20 @@ impl AgentPlugin {
 
 #[async_trait]
 impl VdfsProvider for AgentPlugin {
-    /// 根下只有一种新建方式：整包导入（zip）。
+    /// 根下只有一种新建类型：整包导入（zip）。
+    ///
+    /// 它是**包**而不是表单——`write` 拒绝非二进制载荷（「只支持整包导入，不支持
+    /// 表单写入」），所以主入口本身就是选文件（`source = file`），不必再挂
+    /// [`VdfsNewImport`]（那用于「主入口是表单、另给一条导入路」的形态）。
     ///
     /// 留在 provider 上而不进同步的 `PluginMeta` 的理由与 session 相同——它是挂载
     /// 点的**动态自述**，由容器合成根节点时现场取。
-    async fn new_types(&self) -> Vec<VdfsNewType> {
-        vec![VdfsNewType::new(VDFS_EXT_ZIP, format!("{LABEL}包"))
-            .with_description(format!("导入{LABEL}整包（.zip）——整目录覆盖同名条目"))
-            .with_source(VDFS_NEW_SOURCE_FILE)]
+    async fn root_new_type(&self) -> Option<VdfsNewType> {
+        Some(
+            VdfsNewType::new(VDFS_EXT_ZIP, format!("{LABEL}包"))
+                .with_description(format!("导入{LABEL}整包（.zip）——整目录覆盖同名条目"))
+                .with_source(VDFS_NEW_SOURCE_FILE),
+        )
     }
 
     /// 唯一入口：**先按 `path` 定位资源域，再按 `req` 执行操作**。
@@ -308,10 +314,6 @@ impl VdfsProvider for AgentPlugin {
             }
             VdfsRequest::Mkdir => {
                 self.mkdir_at(ctx, path).await?;
-                Ok(VdfsResponse::Unit)
-            }
-            VdfsRequest::Move { to } => {
-                self.move_at(ctx, path, &to).await?;
                 Ok(VdfsResponse::Unit)
             }
             VdfsRequest::Action { action, payload } => Ok(VdfsResponse::Action(
@@ -719,46 +721,6 @@ impl AgentPlugin {
                     .into_unit()
                     .ok_or_else(mismatch);
             }
-        }
-        Err(VdfsError::NotImplemented)
-    }
-
-    /// 移动 / 重命名：**只在同一个可挂载的子智能体内部**生效。
-    ///
-    /// 跨挂载点移动没有意义（两侧是不同的 provider，甚至不同的存储），与
-    /// `CompositeVfs` 拒跨子目录同一口径；裸 agent 目录仍不支持。
-    async fn move_at(&self, ctx: &VdfsContext, from: &str, to: &str) -> VdfsResult<()> {
-        let (
-            RelPath::File {
-                id: from_id,
-                rel: from_rel,
-            },
-            RelPath::File {
-                id: to_id,
-                rel: to_rel,
-            },
-        ) = (parse_rel_path(from), parse_rel_path(to))
-        else {
-            return Err(VdfsError::NotImplemented);
-        };
-        let (from_id, to_id) = (id_of(from_id), id_of(to_id));
-        if from_id != to_id {
-            return Err(VdfsError::invalid(format!(
-                "不支持跨{LABEL}移动：{from} → {to}"
-            )));
-        }
-        if let Ok((p, sub, _mount_rel)) = self.sub_vfs(ctx, &from_id).await {
-            return p
-                .dispatch(
-                    &sub,
-                    from_rel,
-                    VdfsRequest::Move {
-                        to: to_rel.to_string(),
-                    },
-                )
-                .await?
-                .into_unit()
-                .ok_or_else(mismatch);
         }
         Err(VdfsError::NotImplemented)
     }

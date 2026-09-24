@@ -17,7 +17,7 @@
   选项（工作目录 / 智能体 / Model / 风险等级… 全部由后端在定义里声明）。
 
   定义与值的来源（三条通路，见 `docs/archive/session-options-unification.md` §3.2）：
-  - 定义：`<根>/session/<id>` 的 `node.schema`（已落盘）/ `new_types[session].schema`（草稿）；
+  - 定义：`<根>/session/<id>` 的 `node.schema`（已落盘）/ `new_type.schema`（草稿）；
   - 值：节点 `attributes.metadata`（键 = 字段 key）；
   - 落库：`vdfs/write(<根>/session/<id>, {"metadata": {<key>: <值>}})`。
 -->
@@ -101,7 +101,7 @@ const props = withDefaults(
   defineProps<{
     /** 当前会话 id；缺省 = 草稿态（新建会话前，选择缓冲后随创建写入） */
     sessionId?: string
-    /** 选项定义（`node.schema` / `new_types[session].schema`）；缺省 = 不渲染任何选项 */
+    /** 选项定义（`node.schema` / `new_type.schema`）；缺省 = 不渲染任何选项 */
     definition?: DetailDefinition | null
     /** 当前字段值（会话态 = 节点 `attributes.metadata`）；缺省 = 全部按定义缺省值显示 */
     values?: Record<string, unknown> | null

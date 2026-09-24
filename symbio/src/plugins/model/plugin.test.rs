@@ -172,9 +172,11 @@ async fn list_comes_from_the_memory_mirror() {
 #[tokio::test]
 async fn new_type_declares_the_landing_detail() {
     // 「根下可新建类型」是 provider 的异步自述（不在同步的 `PluginMeta` 上）
-    let types = ModelPlugin::default().new_types().await;
-    assert_eq!(types.len(), 1, "model 不支持整包导入");
-    let t = &types[0];
+    let t = ModelPlugin::default()
+        .root_new_type()
+        .await
+        .expect("根下可新建「模型」");
+    assert!(t.import.is_none(), "model 不支持整包导入");
     assert_eq!(t.ext, PLUGIN_MODEL, "呈现扩展名不变：id_of 仍按它剥后缀");
     assert_eq!(
         t.node_ext.as_deref(),

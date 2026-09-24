@@ -12,7 +12,7 @@
 //!   的字段级失败载荷（[`VdfsValidationError`]）。
 //!
 //! 能力判定不在本模块：可写性来自 **VDFS 访问位**，可新建 / 可导入来自 provider 的
-//! `root_access` / `root_new_types`，可测试与否来自 [`DetailDefinition::actions`]
+//! `root_access` / `root_new_type`，可测试与否来自 [`DetailDefinition::actions`]
 //! 里声明的动作。
 
 use crate::symbio_core::vdfs_provider::{VdfsFieldError, VdfsValidationError};

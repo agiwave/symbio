@@ -1408,8 +1408,8 @@ model / agent / skill / mcp / setting 分区都走这条。
 
 1. **选项 = 会话配置表单的字段**；选项栏 = `DetailDefinition` 的**第二种渲染形态**
    （与 `DetailForm` / `DetailShell` 并列），不是新协议。
-2. **定义随节点下发**：已落盘会话挂 `node.schema`，草稿态挂 `new_types[].schema`
-   （同一构造、两处投递）。不再有「取定义」的专用端点。
+2. **定义随节点下发**：已落盘会话挂 `node.schema`，草稿态挂 `new_type.schema`
+   （同一构造、两处投递；字段名见 [ADR-027](#adr-027-可新建的东西至多一种类型内挂可选导入入口)）。不再有「取定义」的专用端点。
 3. **当前值随节点**：`node.attributes.metadata`（线上是摊平后的顶层 `metadata`，
    见下「踩坑」）。
 4. **写回走 `vdfs/write(<根>/session/<id>, {"metadata": …})`**——
@@ -1695,6 +1695,129 @@ VDFS 是**虚拟动态文件系统**（`d` = dynamic）——节点可能落盘�
 - 取向与从前相反：新消息**排队**而不是抢占当前轮次。换来的是「没有调用方的空间也能被
   可靠驱动」这一条最硬的保证（e2e `t15-subagent-inbox` 覆盖 FIFO / 忙则排队 / 可取消 /
   子空间自带指令与模型）。
+
+---
+
+## ADR-027: 可新建的东西**至多一种**——入口是类型下的可选分支，不是第二个类型
+
+**状态**：已接受（2026-09-24 实施完成）。
+
+**背景**
+
+`VdfsNode.new_types: Vec<VdfsNewType>` 原是一份**清单**：一个目录可以声明「可接受
+的新建元素类型」若干种，前端拿到清单后让用户先选类型。它带来三处结构性的别扭：
+
+- **一个 provider = 一棵子树 = 一种资源**，「本目录能建的东西」自然只有一类。
+  清单形态下每个目录都要为「我到底能建几种」维持一份判据，而这份判据没有任何
+  使用方真正需要——前端拿到清单后仍要按 `ext` 反查渲染器，两处知识必然漂移。
+- **「几类东西」与「这类东西有几种造法」被压进了同一个轴**。skill / mcp 目录
+  真正有两件事：① 表单新建一类配置；② 整包导入一个 zip。原实现把 ② 表达成
+  **清单里的第二项**（`ext = zip` + `source = file`），于是「类型数」= 2，
+  而用户看到的是「新建 → 选类型」——把一个**造法**的选择说成了**类别**的选择。
+- **`VdfsNode.path` 的连带负担**（同一轮一并收敛，见下）。
+
+**决策**
+
+1. **`VdfsNode.new_type: Option<VdfsNewType>`**（`new_types` 清单退役）：
+   至多一个，`None` = 该目录不可新建。trait 方法
+   `VdfsProvider::new_types() -> Vec<_>` 随之收成
+   `root_new_type() -> Option<VdfsNewType>`（仍 async，仍不进 `PluginMeta`——
+   session 的表单 schema 需运行期汇流）。
+2. **类型与入口分离**。类型 = 「一类东西」（至多一个）；入口 = 「怎么把它造出来」
+   （至多两条）：**主入口**恒有，**整包导入**由类型内可选的
+   `import: Option<VdfsNewImport>{ext, title, description?}` 声明。
+   前端由 `vdfsNewEntries(newType)` 推导出 1~2 条入口，动作 id 固定为
+   `new:type` / `new:import`。
+3. **前端「选类型」这一档改造成「选入口」**：`useVdfsPrompt` 的判别式从
+   `'type'` 改为 `'entry'`，载荷从「类型」改为「入口」；因为类型只剩一个，
+   `ext` 已无法区分入口，动作 id 因此不再按 `ext` 派生。
+4. **`VdfsNode.path` 只作**展示口径**：它是「使用方回填」的字段，provider 一律
+   产出**树内相对地址**，由容器 / 门面补全为展示地址——provider **不得**据此做
+   特判（原先存在按完整 path 判前缀的实现，随本轮一并清理）。
+
+**理由**
+
+- 「至多一个」让「能不能建」退化成一个 `Option`，判据只有一个；
+  「能建什么」与「怎么建」各占一条轴，各自只有一个 owner。
+- 类型数 = 1 而入口数仍可为 2 ⇒ **UI 与能力零损失**：skill / mcp 仍是
+  「新建 → 选（表单新建 / 整包导入）」，只是这一步的语义从「选类型」正名为
+  「选入口」。agent 包仍是单入口（主入口即选文件，不挂 `import`）。
+- 收敛的是**声明**，不是行为：`vdfs/write { create: true }` 的两条目标形态
+  （具名 / 目录自身）与整包导入的字节通道一个字都没改。
+
+**后果**
+
+- 后端：`VdfsNewType` 新增 `import` 字段；`VdfsNode.new_types` → `new_type`；
+  五个 provider 的 `root_new_type()` 各自返回 `Some(...)`（agent 主入口即选文件、
+  skill / mcp 挂 `import`、model / session 单入口）。
+- 前端：`schemas/vdfs.ts` 新增 `VdfsNewImport` / `VdfsNewEntry` / `vdfsNewEntries`；
+  `useVdfs` 的 `creatableTypes` → `creatableType` + `newEntries`；
+  `useVdfsPrompt` 的 `'type'` 态 → `'entry'` 态。
+- `vdfsScheme` 的挂载点识别从「遍历类型清单找 session」简化为
+  `n.new_type?.ext === VDFS_EXT_SESSION`——判据变短是收敛的直接证据。
+- 本 ADR 同时**改名** ADR-024 引入的 `new_types[].schema` 为 `new_type.schema`
+  （同一构造、两处投递的决策不变，只换了标识符）。
+
+---
+
+## ADR-028: `VdfsRequest::Move` **不收**——移动是外层组合，不是核心原语
+
+**状态**：已接受（2026-09-24 实施完成，整条链下线）。
+
+**背景**
+
+`VdfsRequest` 是 `VdfsProvider::dispatch` 的**操作载荷**，而 `path` 是第一个分发键：
+**一个 provider = 一棵子树**。原实现里有一个例外——`Move { to }` 带**两个地址**
+（`path` 是源、`to` 是目标）。它的代价在跨子树时才显形：
+
+- **同一棵树内**移动 = 重命名，provider 能省事（物理盘直接 `rename`）；
+- **跨虚拟挂载树**时 `from` / `to` 分属两棵子树，「移动」就不再是原语，而是
+  `copy + delete`。trait 上的 `Move` 表达不出这件事，只能由某个 provider 假装
+  自己同时拥有两端——`composite` 就不得不先解析 `to` 属于哪个子目录、再拒绝
+  跨目录的情形，即**用错误表达能力的缺失**；
+- 于是 `Move` 只有**恰好一个**实现者能真做（物理盘 `rename`），其余一律
+  `NotImplemented`；而「用不了」的形态在 trait 上占着一个位置，还逼着每个
+  实现方写一条拒绝臂。
+
+**决策**
+
+1. **`VdfsRequest::Move` 删除**，且**不应加回来**。删除后 `VdfsRequest` 只收拢
+   操作载荷——**地址一律走 `path` 参数，载荷里没有任何地址字段**。
+2. **`VdfsRequest::map_paths` 随之删除**（它存在的唯一理由是翻译 `Move.to`）；
+   `VdfsChange::map_paths` **保留**——它是变更事件路径翻译的唯一入口
+   （见 ADR-015），与请求无关。
+3. **外层那条链一并下线**：协议操作 `vdfs/move`、LLM 工具 `vdfs_move`、
+   前端「重命名」入口与提示态。要用移动由**外层组合**（`copy + delete`），
+   当前外层**也不提供**——需要时再加，加在外层而不是核心 trait 上。
+
+**理由**
+
+- **删掉之后，一类错误在结构上不可能发生**：载荷里没有第二个地址，于是
+  「跨半移动」（物理 ↔ 虚拟）与「跨子目录移动」都没有可表达的形式。
+  原先那两条守卫（`UnifiedFs::same_half` 判定 + `composite` 的跨目录拒绝）与
+  它们的用例一起消失——**消失是因为要守的形态没了**，而不是为了过门禁而放宽。
+  这比「运行时判前缀再拒绝」是更强的保证。
+- 拒绝面收窄不等于能力收窄：`vdfs/move` 的唯一真实用途是物理盘 `rename`
+  （前端「重命名」）。而重命名在**配置型资源**上语义本就可疑——那些资源的
+  地址**就是它的身份**（`model` / `mcp` / `skill` 皆如此），改名等于换一个对象。
+  故「先不提供」是可接受的取舍，且方向正确：能力将来加在外层，核心层不受影响。
+- `VdfsRequest` 与 `VdfsChange` 从此各自只有一条翻译入口、各自只翻译一种东西
+  （请求：`path`；事件：全部路径字段）——两处 `map_paths` 只剩一处。
+
+**后果**
+
+- 后端：`vdfs/move` 常量与 `VdfsMoveRequest` / `VdfsMoveResponse` 删除；
+  `VDFS_OPS` 14 → 13；`tools/move.rs` 整个文件删除，工具集 10 → 9；
+  `UnifiedFs` 的 `dispatch` 退化为只做 `route(path)` 分流（无跨半判定）；
+  `PhysicalFs::do_move`、`ToolVdfs::move_item`、`CompositeVdfs` 的跨目录拒绝、
+  agent provider 的 `move_at` 全部删除。
+- 前端：`VDFS_MOVE` / `VdfsMoveResponse` / `moveVdfs` 删除；`useVdfs` 的
+  `mechanismActions` 只剩 `delete`（机制动作从两条收成一条）；
+  `useVdfsPrompt` 的 `'rename'` 态与它特有的 `watch(selectedNode)` 联动删除。
+- 基线：`rustTests` 930 → 926、`vitestTests` 727 → 722——**净减是预期的**，
+  逐文件核对写在 `scripts/gate.d/_shared.mjs` 的对应注记里。
+- `docs/CURRENT.md` 的协议操作表（13 个）与工具清单（9 个）由生成脚本自动跟随，
+  不需要手改。
 
 ---
 

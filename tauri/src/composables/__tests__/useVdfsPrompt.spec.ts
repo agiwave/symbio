@@ -2,89 +2,86 @@
  * useVdfsPrompt —— 提示态交互的单测（node 环境）
  *
  * 这个 composable 是 VdfsWorkbench 里那段内联状态机搬出来的版本。锁它的理由
- * 和搬出来的理由相同：**三种瞬态交互共占一个详情槽**，靠一个判别式互斥——
+ * 和搬出来的理由相同：**两种瞬态交互共占一个详情槽**，靠一个判别式互斥——
  * 一旦互斥被破坏，界面上就会同时出现两个提示（原先那种「若干布尔各自复位」
  * 的写法正是漏一处就叠一个）。
  *
- * 六个断言面：
+ * ## 类型与入口是两件事
+ *
+ * 一个目录只声明**一类**东西（`new_type`，至多一个），但这一类东西可以有**两条
+ * 入口**（主入口 + 整包导入，由 `VdfsNewType.import` 表达）。所以：
+ *
+ * - 一条入口 ⇒ 跳过选择，直接落到那条路；
+ * - 两条入口 ⇒ 先进「选入口」态（清单就是动作行）；
+ * - 没有类型 ⇒ 没有入口（添加按钮本就不可见，这里兜底不动作）。
+ *
+ * 五个断言面：
  * 1. **互斥**：任何时刻只有一个提示态，切换不叠加；
- * 2. **选类型的两条路**：单类型直接落详情页、多类型进选择态；
- *    `source = 'file'` 的类型走「选文件」而不是详情页；
- * 3. **动作行装配**：类型清单即动作行；「上一步」只在多类型时出现；
+ * 2. **入口推导与两条路**：`vdfsNewEntries` 的产物即入口；主入口按 `source`
+ *    分流（详情页 / 选文件），导入入口恒走选文件；
+ * 3. **动作行装配**：入口清单即动作行；「上一步」只在多入口时出现；
  *    未选文件时「导入」禁用（避免点了没反应）；
  * 4. **成败语义**：写操作成功则收起，失败则**保持**（否则用户看不到错误）；
- * 5. **重命名锚在选中项上**：选中被清空时提示自动收起；
- * 6. 进入提示态即清空上一条详情级错误（提示是新的开始，不继承旧错）。
+ * 5. 进入提示态即清空上一条详情级错误（提示是新的开始，不继承旧错）。
+ *
+ * （曾经还有第三种提示——重命名。它随 `vdfs/move` 整条下线了，连同
+ * 「锚在选中项上」的那条 `watch`。）
  */
 
 import { describe, expect, it } from 'vitest'
-import { effectScope, nextTick, ref, shallowRef } from 'vue'
+import { computed, effectScope, nextTick, ref } from 'vue'
 import { useVdfsPrompt } from '../useVdfsPrompt'
 import {
+  VDFS_NEW_ENTRY_IMPORT,
+  VDFS_NEW_ENTRY_TYPE,
   VDFS_NEW_SOURCE_FILE,
+  vdfsNewEntries,
+  type VdfsNewEntry,
   type VdfsNewType,
-  type VdfsNode,
 } from '@/schemas/vdfs'
 
 /** 造一个新建类型（只填判定要用到的键） */
-function type(ext: string, source?: string): VdfsNewType {
-  return { ext, title: ext, ...(source ? { source } : {}) }
+function type(ext: string, extra: Partial<VdfsNewType> = {}): VdfsNewType {
+  return { ext, title: ext, ...extra }
 }
 
-function node(name: string): VdfsNode {
-  return {
-    path: `@vfs/mcp/${name}`,
-    name,
-    title: name,
-    kind: 'mcp',
-    status: 'active',
-    access: 'rw',
-  } as VdfsNode
+/** 造一个「表单新建 + 整包导入」的类型（skill / mcp 的形状） */
+function typeWithImport(ext: string, packExt = 'zip'): VdfsNewType {
+  return type(ext, { import: { ext: packExt, title: `${ext}包` } })
 }
 
 interface Harness {
   p: ReturnType<typeof useVdfsPrompt>
-  types: ReturnType<typeof ref<VdfsNewType[]>>
-  selected: ReturnType<typeof shallowRef<VdfsNode | null>>
   error: ReturnType<typeof ref<string>>
   started: VdfsNewType[]
-  imported: Array<{ t: VdfsNewType; f: File }>
-  renamed: string[]
+  imported: Array<{ e: VdfsNewEntry; f: File }>
   /** 让「写后端」成功或失败 */
   succeed: ReturnType<typeof ref<boolean>>
 }
 
-function setup(types: VdfsNewType[], selectedNode: VdfsNode | null = null): Harness {
-  const t = ref(types)
-  const selected = shallowRef<VdfsNode | null>(selectedNode)
+function setup(newType: VdfsNewType | null): Harness {
   const error = ref('旧错误')
   const succeed = ref(true)
   const started: VdfsNewType[] = []
-  const imported: Array<{ t: VdfsNewType; f: File }> = []
-  const renamed: string[] = []
+  const imported: Array<{ e: VdfsNewEntry; f: File }> = []
 
-  // composable 内部有 watch，必须在 effect scope 里跑
+  // composable 内部用 computed 派生动作行，必须在 effect scope 里跑
   const scope = effectScope()
   const p = scope.run(() =>
     useVdfsPrompt({
-      creatableTypes: t,
+      newEntries: computed(() => vdfsNewEntries(newType)),
       cwd: ref('@vfs/mcp'),
-      selectedNode: selected,
       saving: ref(false),
       error,
       startNew: (x) => void started.push(x),
-      createTypedFile: async (x, f) => {
-        imported.push({ t: x, f })
-        return succeed.value
-      },
-      renameSelected: async (name) => {
-        renamed.push(name)
+      createTypedFile: async (e, f) => {
+        imported.push({ e, f })
         return succeed.value
       },
     }),
   )!
 
-  return { p, types: t, selected, error, started, imported, renamed, succeed }
+  return { p, error, started, imported, succeed }
 }
 
 /** 造一个假 File（node 环境没有真正的 File 语义，只需要 name） */
@@ -92,172 +89,165 @@ function file(name: string): File {
   return { name } as File
 }
 
+/** 触发一次「点新建」 */
+function clickNew(h: Harness) {
+  h.p.startNewEntry()
+}
+
 describe('useVdfsPrompt — 判别式互斥', () => {
   it('初始不占用详情槽', () => {
-    const { p } = setup([type('a'), type('b')])
-    expect(p.promptKind.value).toBe('none')
+    const h = setup(typeWithImport('skill'))
+    expect(h.p.promptKind.value).toBe('none')
   })
 
-  it('type 态下开 rename：只剩 rename，不叠加', () => {
-    const { p, selected } = setup([type('a'), type('b')], node('srv'))
-    p.startTypedNew()
-    expect(p.promptKind.value).toBe('type')
-    p.startRename()
-    expect(p.promptKind.value).toBe('rename')
-    // 载荷一并清空，不会残留上一次的草稿名
-    expect(p.promptDraft.value).toBe('srv')
-    expect(selected.value).not.toBeNull()
+  it('file 态下再点「新建」⇒ 回到入口态，不叠加两个提示', () => {
+    const h = setup(typeWithImport('skill'))
+    clickNew(h)
+    h.p.onPromptAction({ id: VDFS_NEW_ENTRY_IMPORT, label: 'skill包', style: 'secondary' })
+    expect(h.p.promptKind.value).toBe('file')
+
+    clickNew(h)
+    expect(h.p.promptKind.value).toBe('entry')
+    // 载荷一并清空：上一次选的文件不会跟到这一次
+    expect(h.p.promptFile.value).toBeNull()
   })
 
   it('进入提示态即清掉上一条详情级错误', () => {
-    const { p, error } = setup([type('a'), type('b')])
-    expect(error.value).toBe('旧错误')
-    p.startTypedNew()
-    expect(error.value).toBe('')
+    const h = setup(typeWithImport('skill'))
+    expect(h.error.value).toBe('旧错误')
+    clickNew(h)
+    expect(h.error.value).toBe('')
   })
 })
 
-describe('useVdfsPrompt — 选类型的两条路', () => {
-  it('恰好一种类型：跳过选择，直接落详情页（不占提示槽）', () => {
-    const { p, started } = setup([type('session')])
-    p.startTypedNew()
-    expect(started).toHaveLength(1)
-    expect(started[0]?.ext).toBe('session')
-    expect(p.promptKind.value).toBe('none')
+describe('useVdfsPrompt — 入口推导与两条路', () => {
+  it('无类型：没有入口，点新建不动作', () => {
+    const h = setup(null)
+    clickNew(h)
+    expect(h.p.promptKind.value).toBe('none')
+    expect(h.p.promptActions.value).toHaveLength(0)
+    expect(h.started).toHaveLength(0)
   })
 
-  it('多类型：进选择态，类型清单就是动作行', () => {
-    const { p, started } = setup([type('model'), type('agent')])
-    p.startTypedNew()
-    expect(p.promptKind.value).toBe('type')
-    expect(started).toHaveLength(0)
-    expect(p.promptActions.value.map((a) => a.id)).toEqual(['new:model', 'new:agent', 'cancel'])
-    expect(p.promptTitle.value).toBe('新建')
+  it('单入口（表单新建）：跳过选择，直接落详情页（不占提示槽）', () => {
+    const h = setup(type('session'))
+    clickNew(h)
+    expect(h.started.map((t) => t.ext)).toEqual(['session'])
+    expect(h.p.promptKind.value).toBe('none')
   })
 
-  it('source = file 的类型走「选文件」而不是详情页', () => {
-    const { p, started } = setup([type('zip', VDFS_NEW_SOURCE_FILE)])
-    p.startTypedNew()
-    expect(p.promptKind.value).toBe('file')
-    expect(started).toHaveLength(0)
+  it('单入口（主入口即选文件）：直接进「选文件」态', () => {
+    const h = setup(type('zip', { source: VDFS_NEW_SOURCE_FILE }))
+    clickNew(h)
+    expect(h.p.promptKind.value).toBe('file')
+    expect(h.started).toHaveLength(0)
   })
 
-  it('点类型动作 → 落到对应那一条路', () => {
-    const { p, started } = setup([type('model'), type('zip', VDFS_NEW_SOURCE_FILE)])
-    p.startTypedNew()
-    p.onPromptAction({ id: 'new:model', label: 'model', style: 'secondary' })
-    expect(started.map((t) => t.ext)).toEqual(['model'])
+  it('两入口（表单 + 整包导入）：先进选入口态，清单就是动作行', () => {
+    const h = setup(typeWithImport('skill'))
+    clickNew(h)
+    expect(h.p.promptKind.value).toBe('entry')
+    expect(h.started).toHaveLength(0)
+    expect(h.p.promptActions.value.map((a) => a.id)).toEqual([
+      VDFS_NEW_ENTRY_TYPE,
+      VDFS_NEW_ENTRY_IMPORT,
+      'cancel',
+    ])
+    // 展示名取入口自己的（主入口 = 类型名，导入入口 = 包名）
+    expect(h.p.promptActions.value.map((a) => a.label)).toEqual(['skill', 'skill包', '取消'])
+    expect(h.p.promptTitle.value).toBe('新建')
+  })
 
-    p.startTypedNew()
-    p.onPromptAction({ id: 'new:zip', label: 'zip', style: 'secondary' })
-    expect(p.promptKind.value).toBe('file')
+  it('点主入口 → 落详情页；点导入入口 → 进「选文件」态', () => {
+    const h = setup(typeWithImport('skill'))
+    clickNew(h)
+    h.p.onPromptAction({ id: VDFS_NEW_ENTRY_TYPE, label: 'skill', style: 'secondary' })
+    expect(h.started.map((t) => t.ext)).toEqual(['skill'])
+
+    clickNew(h)
+    h.p.onPromptAction({ id: VDFS_NEW_ENTRY_IMPORT, label: 'skill包', style: 'secondary' })
+    expect(h.p.promptKind.value).toBe('file')
+  })
+
+  it('导入入口的扩展名取包而不是类型（文件选择器与目标名都用它）', () => {
+    const h = setup(typeWithImport('skill'))
+    clickNew(h)
+    h.p.onPromptAction({ id: VDFS_NEW_ENTRY_IMPORT, label: 'skill包', style: 'secondary' })
+    expect(h.p.promptAccept.value).toBe('.zip')
+    expect(h.p.typedFilePreview.value).toBe('@vfs/mcp/<文件名>.zip')
+
+    h.p.onPromptFile({ target: { files: [file('demo.tar.gz')] } } as unknown as Event)
+    expect(h.p.typedFilePreview.value).toBe('@vfs/mcp/demo.tar.zip')
+  })
+
+  it('主入口的扩展名取类型自己的', () => {
+    const h = setup(type('zip', { source: VDFS_NEW_SOURCE_FILE }))
+    clickNew(h)
+    expect(h.p.promptAccept.value).toBe('.zip')
+    h.p.onPromptFile({ target: { files: [file('demo.zip')] } } as unknown as Event)
+    expect(h.p.typedFilePreview.value).toBe('@vfs/mcp/demo.zip')
   })
 })
 
 describe('useVdfsPrompt — 动作行装配与禁用', () => {
   it('未选文件时「导入」禁用，选了才可用', () => {
-    const { p } = setup([type('zip', VDFS_NEW_SOURCE_FILE)])
-    p.startTypedNew()
-    const ids = p.promptActions.value.map((a) => a.id)
-    expect(p.promptDisabled.value[ids.indexOf('import')]).toBe(true)
+    const h = setup(type('zip', { source: VDFS_NEW_SOURCE_FILE }))
+    clickNew(h)
+    const ids = h.p.promptActions.value.map((a) => a.id)
+    expect(h.p.promptDisabled.value[ids.indexOf('import')]).toBe(true)
 
-    p.onPromptFile({ target: { files: [file('a.zip')] } } as unknown as Event)
-    expect(p.promptDisabled.value[ids.indexOf('import')]).toBe(false)
+    h.p.onPromptFile({ target: { files: [file('a.zip')] } } as unknown as Event)
+    expect(h.p.promptDisabled.value[ids.indexOf('import')]).toBe(false)
   })
 
-  it('单类型时没有「上一步」（无处可退）', () => {
-    const { p } = setup([type('zip', VDFS_NEW_SOURCE_FILE)])
-    p.startTypedNew()
-    expect(p.promptActions.value.some((a) => a.id === 'back')).toBe(false)
+  it('单入口时没有「上一步」（无处可退）', () => {
+    const h = setup(type('zip', { source: VDFS_NEW_SOURCE_FILE }))
+    clickNew(h)
+    expect(h.p.promptActions.value.some((a) => a.id === 'back')).toBe(false)
   })
 
-  it('多类型时才有「上一步」，且点了回到选择态', () => {
-    const { p } = setup([type('zip', VDFS_NEW_SOURCE_FILE), type('model')])
-    p.startTypedNew()
-    p.onPromptAction({ id: 'new:zip', label: 'zip', style: 'secondary' })
-    expect(p.promptKind.value).toBe('file')
-    p.onPromptAction({ id: 'back', label: '上一步', style: 'secondary' })
-    expect(p.promptKind.value).toBe('type')
+  it('多入口时才有「上一步」，且点了回到选入口态', () => {
+    const h = setup(typeWithImport('skill'))
+    clickNew(h)
+    h.p.onPromptAction({ id: VDFS_NEW_ENTRY_IMPORT, label: 'skill包', style: 'secondary' })
+    expect(h.p.promptKind.value).toBe('file')
+    h.p.onPromptAction({ id: 'back', label: '上一步', style: 'secondary' })
+    expect(h.p.promptKind.value).toBe('entry')
   })
 
   it('取消：收起并把载荷清空', async () => {
-    const { p } = setup([type('model'), type('agent')])
-    p.startTypedNew()
-    p.onPromptAction({ id: 'cancel', label: '取消', style: 'secondary' })
-    expect(p.promptKind.value).toBe('none')
+    const h = setup(typeWithImport('skill'))
+    clickNew(h)
+    h.p.onPromptAction({ id: 'cancel', label: '取消', style: 'secondary' })
+    expect(h.p.promptKind.value).toBe('none')
     await nextTick()
-    expect(p.promptActions.value).toHaveLength(0)
+    expect(h.p.promptActions.value).toHaveLength(0)
   })
 })
 
 describe('useVdfsPrompt — 成败语义', () => {
-  it('导入成功则收起', async () => {
-    const { p, imported } = setup([type('zip', VDFS_NEW_SOURCE_FILE)])
-    p.startTypedNew()
-    p.onPromptFile({ target: { files: [file('a.zip')] } } as unknown as Event)
+  it('导入成功则收起（并把**入口**交给写动作，扩展名由它决定）', async () => {
+    const h = setup(typeWithImport('skill'))
+    clickNew(h)
+    h.p.onPromptAction({ id: VDFS_NEW_ENTRY_IMPORT, label: 'skill包', style: 'secondary' })
+    h.p.onPromptFile({ target: { files: [file('a.zip')] } } as unknown as Event)
     // onPromptAction 对异步动作是「发起即返回」，落地在微任务里
-    p.onPromptAction({ id: 'import', label: '导入', style: 'primary' })
+    h.p.onPromptAction({ id: 'import', label: '导入', style: 'primary' })
     await nextTick()
-    expect(imported).toHaveLength(1)
-    expect(p.promptKind.value).toBe('none')
+    expect(h.imported).toHaveLength(1)
+    expect(h.imported[0]?.e.ext).toBe('zip')
+    expect(h.imported[0]?.e.type.ext).toBe('skill')
+    expect(h.p.promptKind.value).toBe('none')
   })
 
   it('导入失败则保持提示态（否则用户看不到错误）', async () => {
-    const { p, succeed } = setup([type('zip', VDFS_NEW_SOURCE_FILE)])
-    succeed.value = false
-    p.startTypedNew()
-    p.onPromptFile({ target: { files: [file('a.zip')] } } as unknown as Event)
-    p.onPromptAction({ id: 'import', label: '导入', style: 'primary' })
+    const h = setup(typeWithImport('skill'))
+    h.succeed.value = false
+    clickNew(h)
+    h.p.onPromptAction({ id: VDFS_NEW_ENTRY_IMPORT, label: 'skill包', style: 'secondary' })
+    h.p.onPromptFile({ target: { files: [file('a.zip')] } } as unknown as Event)
+    h.p.onPromptAction({ id: 'import', label: '导入', style: 'primary' })
     await nextTick()
-    expect(p.promptKind.value).toBe('file')
-  })
-})
-
-describe('useVdfsPrompt — 重命名锚在选中项上', () => {
-  it('进入时预填当前名', () => {
-    const { p } = setup([type('a')], node('srv'))
-    p.startRename()
-    expect(p.promptKind.value).toBe('rename')
-    expect(p.promptDraft.value).toBe('srv')
-    expect(p.promptActions.value.map((a) => a.id)).toEqual(['confirm', 'cancel'])
-  })
-
-  it('成功则收起', async () => {
-    const { p, renamed } = setup([type('a')], node('srv'))
-    p.startRename()
-    await p.submitRename()
-    expect(renamed).toEqual(['srv'])
-    expect(p.promptKind.value).toBe('none')
-  })
-
-  it('失败则保持提示态', async () => {
-    const { p, succeed } = setup([type('a')], node('srv'))
-    succeed.value = false
-    p.startRename()
-    await p.submitRename()
-    expect(p.promptKind.value).toBe('rename')
-  })
-
-  it('选中项被清空 → 提示自动收起（没有选中项就无从改名）', async () => {
-    const { p, selected } = setup([type('a')], node('srv'))
-    p.startRename()
-    expect(p.promptKind.value).toBe('rename')
-    selected.value = null
-    await nextTick()
-    expect(p.promptKind.value).toBe('none')
-  })
-
-  it('选中项被清空不影响「选类型 / 选文件」（它们不锚在选中项上）', async () => {
-    const { p, selected } = setup([type('model'), type('agent')])
-    p.startTypedNew()
-    selected.value = null
-    await nextTick()
-    expect(p.promptKind.value).toBe('type')
-  })
-
-  it('没有选中项时 startRename 不进提示态', () => {
-    const { p } = setup([type('a')], null)
-    p.startRename()
-    expect(p.promptKind.value).toBe('none')
+    expect(h.p.promptKind.value).toBe('file')
   })
 })

@@ -156,17 +156,6 @@ async fn unsupported_ops_stay_not_implemented() {
     assert!(s
         .dispatch(
             &ctx,
-            "a",
-            VdfsRequest::Move {
-                to: "b".to_string()
-            }
-        )
-        .await
-        .unwrap_err()
-        .is_not_implemented());
-    assert!(s
-        .dispatch(
-            &ctx,
             "p1",
             VdfsRequest::Action {
                 action: "test".to_string(),

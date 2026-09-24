@@ -354,7 +354,7 @@ impl ModelPlugin {
             .with_version("0.3.0")
             .with_order(2)
             .with_icon(PLUGIN_MODEL)
-        // 「根下可新建类型」由 provider 自持（`VdfsProvider::new_types`，见下方
+        // 「根下可新建类型」由 provider 自持（`VdfsProvider::root_new_type`，见下方
         // `impl VdfsProvider for ModelPlugin`）——它是挂载点的动态自述，容器合成
         // 根节点时现场取，不进这份同步纯数据
     }
@@ -702,16 +702,18 @@ impl ModelPlugin {
 
 #[async_trait]
 impl VdfsProvider for ModelPlugin {
-    /// 根下只能新建「模型」条目（model 不支持整包导入）
+    /// 根下只能新建「模型」条目（model 不支持整包导入，故无导入入口）
     ///
     /// `ext = model` 是**呈现扩展名**（`id_of` 按它剥地址后缀），落成后的节点
     /// `ext = form`——两者不同，故显式声明 `node_ext` 与详情定义：使用方据此
     /// 在「还没创建」时就能渲染出与落成后同一张表单（草稿详情页）。
-    async fn new_types(&self) -> Vec<VdfsNewType> {
-        vec![VdfsNewType::new(PLUGIN_MODEL, LABEL)
-            .with_description(format!("新建{LABEL}（在详情页里填好，保存时一次写入）"))
-            .with_node_ext(VDFS_EXT_FORM)
-            .with_schema(detail_definition())]
+    async fn root_new_type(&self) -> Option<VdfsNewType> {
+        Some(
+            VdfsNewType::new(PLUGIN_MODEL, LABEL)
+                .with_description(format!("新建{LABEL}（在详情页里填好，保存时一次写入）"))
+                .with_node_ext(VDFS_EXT_FORM)
+                .with_schema(detail_definition()),
+        )
     }
 
     async fn dispatch(

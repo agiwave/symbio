@@ -66,10 +66,10 @@ async fn vdfs_self_description_has_no_mount() {
 
 /// 分区是叶子：不参与树遍历，也不接受新建
 #[tokio::test]
-async fn sections_are_leaves_without_new_types() {
+async fn sections_are_leaves_without_new_type() {
     let p = SettingPlugin;
     assert_eq!(p.meta().root_access, VdfsAccess::LIST);
-    assert!(p.new_types().await.is_empty());
+    assert!(p.root_new_type().await.is_none());
 
     let s = p
         .dispatch(&vctx(), "appearance", vdfs::VdfsRequest::Stat)

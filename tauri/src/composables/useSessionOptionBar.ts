@@ -4,7 +4,7 @@
  * ## 定位
  *
  * 会话输入区下方的「选项行」由后端**随会话节点下发定义**（`node.schema`；
- * 新建草稿态走 `<根>/session` 的 `new_types[].schema`）。本组合式函数实现**机制**：
+ * 新建草稿态走 `<根>/session` 的 `new_type.schema`）。本组合式函数实现**机制**：
  *
  * - 把定义里的字段拍平（`sections[].fields` → 一个有序数组）；
  * - 把一次字段选择落库 —— 会话态经 `vdfs/write(<根>/session/<id>, {"metadata": …})`
@@ -46,7 +46,7 @@ export interface UseSessionOptionBar {
 
 /**
  * @param sessionId  当前会话 id 的取值函数；返回空 = 草稿态（新建会话前）
- * @param definition 当前定义（会话节点 `schema` / `new_types[].schema`）
+ * @param definition 当前定义（会话节点 `schema` / `new_type.schema`）
  */
 export function useSessionOptionBar(opts: {
   sessionId: () => string | undefined

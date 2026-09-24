@@ -11,7 +11,7 @@
 //!
 //! ```text
 //! 定义   <根>/session/<id> → node.schema               = DetailDefinition { binding: "option", … }
-//!        <根>/session      → new_types[session].schema = 同一份
+//!        <根>/session      → new_type.schema          = 同一份
 //! 当前值 <根>/session/<id> → node.attributes.metadata  （键 = 定义里的字段 key）
 //! 落库   vdfs/write(<根>/session/<id>, {"metadata": {<字段 key>: <值>}})
 //! ```

@@ -28,13 +28,13 @@
     <template #rail-footer><slot name="rail-footer" /></template>
 
     <template #header-actions>
-      <!-- 新建（节点声明了可接受的新建类型时可见；类型由后端下发，前端不硬编码） -->
+      <!-- 新建（节点声明了可接受的新建类型时可见；类型与入口由后端下发，前端不硬编码） -->
       <button
         v-if="canCreate"
         class="icon-btn"
-        :title="creatableTypes.length > 1 ? '新建（选择类型）' : `新建 ${creatableTypes[0]?.title ?? ''}`"
+        :title="newEntries.length > 1 ? '新建（选择方式）' : `新建 ${newEntries[0]?.label ?? ''}`"
         :disabled="loading || saving"
-        @click="startTypedNew"
+        @click="startNewEntry"
       >
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="12" y1="5" x2="12" y2="19" />
@@ -95,12 +95,12 @@
 
     <template #detail>
       <!-- ==================== 提示态（与详情态互斥） ====================
-           新建（选类型 / 选文件）与重命名是三种**瞬态交互**，都占用详情槽；
+           新建（选入口 / 选文件）是两种**瞬态交互**，都占用详情槽；
            它们与「选中一项的详情」互斥——这个不变式由**一个判别式状态**
            （`promptKind`）表达，而不是若干布尔各自在 startXxx 里互相复位
            （漏一处就是两个提示叠在同一个槽里）。
 
-           三者都套 `DetailShell`：它本就是「详情槽内容的外壳」（标题行 +
+           两者都套 `DetailShell`：它本就是「详情槽内容的外壳」（标题行 +
            动作行 + 错误行 + 内容）。提示不是例外——先前那两份手写提示外壳
            （各自一套标题 / 动作行 / 错误行 / 忙态样式）是同一结构抄了两遍。 -->
       <DetailShell
@@ -112,14 +112,14 @@
         :error="detailError"
         @run="onPromptAction"
       >
-        <!-- 选类型：清单**就是**动作行（见 promptBar），此处只留一句引导。
-             ⚠️ 不再把 `t.ext` 显示出来：那是**渲染器键**（`session` / `form`），
+        <!-- 选入口：清单**就是**动作行（见 promptBar），此处只留一句引导。
+             ⚠️ 不再把 `ext` 显示出来：那是**渲染器键**（`session` / `form`），
              属机制细节——与「列表徽标只给目录、不给文件 ext」是同一条约定。 -->
-        <p v-if="promptKind === 'type'" class="prompt-hint">请选择要新建的类型</p>
+        <p v-if="promptKind === 'entry'" class="prompt-hint">请选择新建方式</p>
 
         <!-- 从本地文件新建：内容（字节）在打开提示之前就已齐备，故选文件即完成
              ——唯一不进详情页的新建形态 -->
-        <template v-else-if="promptKind === 'file'">
+        <template v-else>
           <input
             type="file"
             class="prompt-input"
@@ -129,27 +129,13 @@
           <p class="prompt-hint">写入地址：<code>{{ typedFilePreview }}</code></p>
           <p v-if="promptDescription" class="prompt-hint">{{ promptDescription }}</p>
         </template>
-
-        <!-- 重命名：单字段；回车与动作行的「确定」同一入口 -->
-        <template v-else>
-          <input
-            v-model="promptDraft"
-            class="prompt-input"
-            spellcheck="false"
-            @keyup.enter="submitRename"
-          />
-          <p class="prompt-hint">
-            由 <code>{{ selectedNode?.path }}</code> 移动至
-            <code>{{ renamePreview }}</code>
-          </p>
-        </template>
       </DetailShell>
 
       <!-- 详情：渲染器由节点 ext 决定（唯一分发点）。**草稿（新建态）也走这里**
            ——同一个 ext 用同一个渲染器，因此「点新建」与「选中一项」在交互上
            没有第二种形态（key 对草稿另取，保证连续新建时重挂载）。
 
-           机制动作（改名 / 删除）由**本控件**算一次后注入所有渲染器：它们是
+           机制动作（删除）由**本控件**算一次后注入所有渲染器：它们是
            「页面对任何已落盘可写节点都能做的默认动作」，不该由每个渲染器各算一遍
            （见 useVdfs.mechanismActions）。渲染器只声明**它自己特有**的动作。 -->
       <component
@@ -166,7 +152,6 @@
         :mechanism-busy="mechanismBusyId"
         @save="onSave"
         @delete="onDelete"
-        @rename="startRename"
         @action="onAction"
         @created="onCreated"
         @browse="browseInto"
@@ -246,10 +231,9 @@ const {
   removeSelected,
   startNew,
   createTypedFile,
-  creatableTypes,
+  newEntries,
   canCreate,
   draftSeq,
-  renameSelected,
 } = useVdfs({ addr: computed(() => props.addr) })
 
 // ==================== 钻入（emit，宿主决定呈现） ====================
@@ -319,29 +303,24 @@ function onAction(id: string) {
   void runAction(id)
 }
 
-// ==================== 提示态（选类型 / 选文件 / 重命名） ====================
+// ==================== 提示态（新建 / 导入） ====================
 //
-// 三者互斥、且都不进「选中项的详情」通道，故用一个**判别式**表达：
+// 两种瞬态交互的**状态与动作装配**在 `useVdfsPrompt`（唯一实现）。本控件只把
+// `useVdfs` 的能力注入它，并把模板槽位接到它的返回值上——于是「提示态怎么收起 /
+// 这一步给哪些按钮」只有一份实现，不会随提示种类增多而自然演化。
+//
+// 它们互斥、且都不进「选中项的详情」通道，故用一个**判别式**表达：
 // `promptKind` 决定界面上是哪一个（`none` = 没有提示，详情槽交给渲染器）。
 // 旧写法是两个布尔（creatingTyped / renaming）加三个载荷 ref，互斥靠两个
 // startXxx 各自把对方复位来维持——那是不变式存在两种写法的典型。
+// （`renaming` 这一支随 `vdfs/move` 整条下线了，见 `useVdfsPrompt` 头注释。）
 //
 // 新建的两种形态，判据是**内容是否在打开详情页之前就已齐备**：
 // - 缺省：点新建 = **进入该类型的详情页**（草稿态，无 id / 名字）——名字要么
 //   在详情页里产生（如会话的首条消息），要么由后端生成（写目录自身，见 `write`）；
-// - `source = file`：内容就是那份本地文件，选文件即完成（进详情页无事可做）。
-//
-// 多于一种类型时先让用户选类型，选完立刻落到上面两条之一。
-
-/** 详情槽当前显示的提示（`none` = 显示选中项的详情） */
-// ==================== 提示态（新建 / 导入 / 重命名） ====================
-//
-// 三种瞬态交互的**状态与动作装配**在 `useVdfsPrompt`（唯一实现）。本控件只把 `useVdfs`
-// 的能力注入它，并把模板槽位接到它的返回值上——于是「提示态怎么收起 /
-// 这一步给哪些按钮」只有一份实现，不会随提示种类增多而自然演化。
+// - 整包导入（`new:import`）：内容就是那份本地文件，选文件即完成（进详情页无事可做）。
 const {
   promptKind,
-  promptDraft,
   promptTitle,
   promptActions,
   promptDisabled,
@@ -349,21 +328,16 @@ const {
   promptAccept,
   promptDescription,
   typedFilePreview,
-  renamePreview,
   onPromptAction,
   onPromptFile,
-  startTypedNew,
-  startRename,
-  submitRename,
+  startNewEntry,
 } = useVdfsPrompt({
-  creatableTypes,
+  newEntries,
   cwd,
-  selectedNode,
   saving,
   error: detailError,
   startNew,
   createTypedFile,
-  renameSelected,
 })
 
 /**
@@ -425,9 +399,9 @@ async function onCreated(id: string) {
   color: var(--text-muted);
 }
 
-/* ============== 提示态（选类型 / 选文件 / 重命名）的**内容**样式 ==============
+/* ============== 提示态（选入口 / 选文件）的**内容**样式 ==============
    外壳（标题行 / 动作行 / 错误行 / 忙态）由 `DetailShell` 提供——提示不是详情槽
-   的例外。这里只剩三类提示各自的**内容**：一个输入框、若干说明文字。
+   的例外。这里只剩两类提示各自的**内容**：一个文件选择框、若干说明文字。
    故旧有的 .vdfs-prompt / .prompt-title / .prompt-actions 及整套 .type-choice-*
    （类型列表已改为动作行，见 promptBar）都已删除。 */
 .prompt-input {

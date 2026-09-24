@@ -269,41 +269,11 @@ async fn write_response_path_is_display_form() {
 }
 
 // ==================== 两半之间不可穿越 ====================
-
-#[tokio::test]
-async fn move_between_halves_is_rejected() {
-    let (f, v, p) = fs();
-    let err = f
-        .dispatch(
-            &VdfsContext::empty(),
-            "a.txt",
-            VdfsRequest::Move {
-                to: ".vdfsv2/session/b".to_string(),
-            },
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(err, VdfsError::Invalid(_)), "两半之间不可移动");
-    assert!(v.seen().is_empty() && p.seen().is_empty(), "判定在触达之前");
-}
-
-#[tokio::test]
-async fn move_within_physical_is_forwarded() {
-    let (f, _v, _p) = fs();
-    // P 未实现 move_item → 转发后由 trait 缺省报 NotImplemented，
-    // 关键是地址按物理半原样送达
-    let err = f
-        .dispatch(
-            &VdfsContext::empty(),
-            "a.txt",
-            VdfsRequest::Move {
-                to: "b.txt".to_string(),
-            },
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(err, VdfsError::NotImplemented));
-}
+//
+// 这里曾有两例：`move` 跨半被拒、`move` 同半被转发。移动整条下线后，**「跨半」
+// 在结构上不可能发生**——`VdfsRequest` 的载荷里不再有任何地址字段，一次分发只有
+// 一个地址，而它必然落在唯一的半边里。这比「运行时判一段前缀再拒绝」是更强的
+// 保证：守卫从代码里消失，因为要守的形态没了。故不再有用例。
 
 /// 事件路径同样回到展示口径：订阅者看到的坐标系与请求时一致
 #[tokio::test]

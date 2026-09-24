@@ -39,9 +39,9 @@ pub struct PluginMeta {
     /// 挂载点（根目录）的访问位（缺省「可列目录」）
     #[serde(default = "default_meta_root_access")]
     pub root_access: VdfsAccess,
-    // 注：挂载点根下「可新建类型」（`new_types`）**有意不在这里**——session 的
-    // 表单 schema 需要运行期汇流（options 广播），而本结构是同步纯数据。
-    // 它走 `VdfsProvider::new_types()`（async，默认空）由容器现场取。
+    // 注：挂载点根下「可新建类型」（`root_new_type`）**有意不在这里**——session
+    // 的表单 schema 需要运行期汇流（options 广播），而本结构是同步纯数据。
+    // 它走 `VdfsProvider::root_new_type()`（async，默认 `None`）由容器现场取。
 }
 
 fn default_meta_order() -> i32 {

@@ -457,8 +457,6 @@ impl VdfsProvider for DirVdfs {
                 }))
             }
 
-            VdfsRequest::Move { .. } => Err(VdfsError::NotImplemented),
-
             VdfsRequest::Watch { sink } => {
                 watch_changes(&self.kind, path, sink).await?;
                 Ok(VdfsResponse::Unit)

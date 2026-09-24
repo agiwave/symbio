@@ -29,9 +29,10 @@
  *
  * - **无面包屑**：路径即导航，层级靠左栏切目录 + 中栏点目录钻入 + 宿主返回键；
  * - **无「新建目录」按钮**：新建 = 新建一种**类型**（会话 / 模型 / …）；
- *   类型清单由当前目录节点声明（`new_types`），多类型时先选类型，然后
- *   **直接进入该类型的详情页**（草稿态：无 id / 名字，与选中一项同一条通道，
- *   见 `startNew`）；目录结构节点由后端 provider 自持，前端不暴露 mkdir 入口。
+ *   类型由当前目录节点声明（`new_type`，至多一个），它的入口最多两条
+ *   （主入口 + 整包导入）——多于一条时先选入口，然后**直接进入该类型的详情页**
+ *   （草稿态：无 id / 名字，与选中一项同一条通道，见 `startNew`）；
+ *   目录结构节点由后端 provider 自持，前端不暴露 mkdir 入口。
  *
  * ## 校验错误的消费约定（要点五的消费端）
  *
@@ -46,7 +47,6 @@ import {
   deleteVdfs,
   downloadBlob,
   listVdfs,
-  moveVdfs,
   readVdfs,
   runVdfsAction,
   writeVdfs,
@@ -59,7 +59,6 @@ import {
   actionFileOf,
   isVdfsDir,
   isVdfsDraft,
-  isVdfsSystemAddr,
   newFileNameOf,
   parseVdfsValidation,
   vdfsAccessOf,
@@ -68,8 +67,10 @@ import {
   type DetailAction,
   type VdfsChange,
   type VdfsFieldError,
+  type VdfsNewEntry,
   type VdfsNewType,
   type VdfsNode,
+  vdfsNewEntries,
 } from '@/schemas/vdfs'
 import {
   dirIconOf,
@@ -414,37 +415,33 @@ export function useVdfs(opts: UseVdfsOptions) {
 
   // ==================== 机制动作（单一定义点） ====================
   //
-  // 「删除」与「重命名」不是某个资源的私有动作，而是**任何已落盘且可写的节点**
-  // 都能做的默认动作。它们由本层算一次，经控件注入所有详情渲染器；渲染器只声明
-  // 自己特有的动作（save / reset / test / open-container…）。
+  // 「删除」不是某个资源的私有动作，而是**任何已落盘且可写的节点**都能做的默认
+  // 动作。它由本层算一次，经控件注入所有详情渲染器；渲染器只声明自己特有的动作
+  // （save / reset / test / open-container…）。
   //
   // 此前这组动作有 4 份实现（form / session / text / readonly 各算一遍，形态还
   // 有两种），而后端 `detail_definition.actions` 又对同一概念各声明一次——同一件
   // 事三个来源。收敛到此处后，**存在与否只有一个来源**；渲染器若要用更贴切的
   // 文案重新声明同名动作，由渲染器声明的那一份胜出（见 DetailShell.mergeActions）。
   //
-  // 判据只用**访问位**与**地址空间**，不涉及任何资源类型：
-  // - 可写位 `w` ⇒ 可删除；
-  // - 重命名 = 在同一地址空间内移动。只有物理半边（工作目录文件）由文件系统
-  //   provider 承载 `move`；虚拟半边（`<根>` 系统资源）的各插件 provider 一律
-  //   没有实现它，给入口只会换来一个必然报错的按钮——故只对物理地址给。
+  // 判据只用**访问位**：可写位 `w` ⇒ 可删除。
   //
-  // 草稿（新建态）两者都不给：还没落盘的东西既无从删除，也无从改名。
+  // **曾经还有「重命名」**（= 同一地址空间内移动），随 `vdfs/move` 整条下线了：
+  // 移动不是 VDFS 的核心原语（跨子树时它是 copy+delete，见 `VdfsRequest` 的
+  // 「没有 `Move`」一节），当前外层也没有提供。要加回来时它属于**访问层的组合
+  // 操作**，不是渲染器动作——别再从这里塞一个必然报错的按钮。
+  //
+  // 草稿（新建态）不给删除：还没落盘的东西无从删除。
 
   /** 页面对当前节点的默认动作集（渲染器自有的动作不在此列） */
   const mechanismActions = computed<DetailAction[]>(() => {
     const node = selectedNode.value
     if (!node || isVdfsDraft(node) || !vdfsAccessOf(node).write) return []
-    const out: DetailAction[] = []
-    if (!isVdfsSystemAddr(node.path)) {
-      out.push({ id: 'rename', label: '重命名', style: 'secondary' })
-    }
-    out.push({ id: 'delete', label: '删除', style: 'danger', busy_label: '删除中…' })
-    return out
+    return [{ id: 'delete', label: '删除', style: 'danger', busy_label: '删除中…' }]
   })
 
   /**
-   * 正在执行的机制动作 id（`'delete'` / `'rename'` / null）。
+   * 正在执行的机制动作 id（当前只有 `'delete'` / null）。
    *
    * 只驱动按钮的进行中文案（`busy_label`）与禁用态，不参与任何判据——「有写操作
    * 在途」那个更宽的概念是 `saving`，它还要锁住列表上的新建 / 刷新按钮。
@@ -573,22 +570,28 @@ export function useVdfs(opts: UseVdfsOptions) {
     }
   }
 
-  // ==================== 可接受的新建类型（§5） ====================
+  // ==================== 可接受的新建类型与入口（§5） ====================
   //
-  // 当前目录节点声明自己能新建哪些类型（`new_types`）；前端只负责「选类型 +
-  // 进入详情页」，不认识任何具体类型——创建语义由 provider 自持。
-  // `<根>/session` 这类子目录节点由后端合成时携带其 new_types，因此无需任何
+  // 当前目录节点声明自己能新建**哪一类**东西（`new_type`，至多一个）；前端只
+  // 负责「选入口 + 进入详情页」，不认识任何具体类型——创建语义由 provider 自持。
+  // `<根>/session` 这类子目录节点由后端合成时携带其 `new_type`，因此无需任何
   // 「按目录名回退」的特判。
   //
   // **新建 = 选中一张草稿节点**，与「选中一项」走同一条详情通道：同一个
   // `ext` → 同一个渲染器 → 同一个保存入口。名字不由前端先问：它是 provider
   // 的私有知识，保存时由后端生成（写目录自身，见 `write`）。
+  //
+  // 类型是「一类东西」，入口是「怎么把它造出来」：一个类型最多两条入口（主入口
+  // + 整包导入），推导集中在 `schemas/vdfs.vdfsNewEntries`（唯一实现）。
 
-  /** 当前目录可接受的新建类型 */
-  const creatableTypes = computed<VdfsNewType[]>(() => cwdNode.value?.new_types ?? [])
+  /** 当前目录可接受的新建类型（至多一个） */
+  const creatableType = computed<VdfsNewType | undefined>(() => cwdNode.value?.new_type)
 
-  /** 是否有可新建类型（添加按钮可见性；机制只认节点声明） */
-  const canCreate = computed(() => creatableTypes.value.length > 0)
+  /** 当前目录的全部新建入口（空 = 不可新建） */
+  const newEntries = computed<VdfsNewEntry[]>(() => vdfsNewEntries(creatableType.value))
+
+  /** 是否有新建入口（添加按钮可见性；机制只认节点声明） */
+  const canCreate = computed(() => newEntries.value.length > 0)
 
   /**
    * 草稿节点 = 「新建」的选中态：**没有 id、也没有名字**（判据见
@@ -636,14 +639,17 @@ export function useVdfs(opts: UseVdfsOptions) {
   }
 
   /**
-   * 按类型从**本地文件**新建（整包导入）：内容走二进制通道。
+   * 按入口从**本地文件**新建（整包导入）：内容走二进制通道。
    *
    * 这是「新建」里唯一**不进入详情页**的形态——因为内容（字节）在打开详情页
-   * 之前就已经齐了，没有「边看边填」的过程：`source = file` 的类型（如 `zip`
-   * 整包）目标名由**文件名**推导（主干 + 类型扩展名），一次写完即完成。
+   * 之前就已经齐了，没有「边看边填」的过程。目标名由**文件名**推导（主干 +
+   * 入口扩展名，见 `newFileNameOf`），一次写完即完成。
+   *
+   * 扩展名取自**入口**而非类型：导入入口是包（`zip`），主入口是类型自己的
+   * 呈现扩展名——两者可能不同（见 `schemas/vdfs.vdfsNewEntries`）。
    */
-  async function createTypedFile(type: VdfsNewType, file: File): Promise<boolean> {
-    const target = vdfsJoin(cwd.value, newFileNameOf(file.name, type.ext))
+  async function createTypedFile(entry: VdfsNewEntry, file: File): Promise<boolean> {
+    const target = vdfsJoin(cwd.value, newFileNameOf(file.name, entry.ext))
     saving.value = true
     detailError.value = ''
     fieldErrors.value = []
@@ -659,31 +665,6 @@ export function useVdfs(opts: UseVdfsOptions) {
       return false
     } finally {
       saving.value = false
-    }
-  }
-
-  /** 重命名选中节点（同一地址空间内移动） */
-  async function renameSelected(name: string): Promise<boolean> {
-    const node = selectedNode.value
-    const trimmed = name.trim()
-    if (!node || !trimmed || trimmed === node.name) return false
-    saving.value = true
-    mechanismBusyId.value = 'rename'
-    detailError.value = ''
-    try {
-      const to = vdfsJoin(vdfsParent(node.path), trimmed)
-      await moveVdfs(node.path, to)
-      showToast('success', `已重命名为「${trimmed}」`)
-      clearSelection()
-      await refresh()
-      return true
-    } catch (err) {
-      detailError.value = captureError(err)
-      showToast('error', `重命名失败：${detailError.value}`)
-      return false
-    } finally {
-      saving.value = false
-      mechanismBusyId.value = null
     }
   }
 
@@ -851,8 +832,8 @@ export function useVdfs(opts: UseVdfsOptions) {
     startNew,
     draftSeq,
     createTypedFile,
-    creatableTypes,
+    creatableType,
+    newEntries,
     canCreate,
-    renameSelected,
   }
 }

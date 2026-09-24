@@ -105,7 +105,7 @@ const hasId = computed(() => !isVdfsDraft(props.node))
  * 草稿态的选项定义 = 新建类型自带的 `schema`。
  *
  * 它是「点新建与选中一项进入同一详情页」这条约定在新形态下的落点：草稿节点由
- * `useVdfs.draftNodeOf` 按 `new_types[].schema` 构造，与会话节点上的 `schema`
+ * `useVdfs.draftNodeOf` 按 `new_type.schema` 构造，与会话节点上的 `schema`
  * **逐字节相同**（同一个构造函数产出），因此草稿选项栏与真实会话选项栏渲染的是
  * 同一份定义，只差「值还没有」。
  */

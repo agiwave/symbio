@@ -94,8 +94,6 @@ defineEmits<{
    * 前端只负责把动作转发给页面层 `browseInto`。
    */
   (e: 'browse'): void
-  /** 节点重命名由页面级内联栏承载；此处仅声明以对齐渲染器统一契约 */
-  (e: 'rename'): void
 }>()
 
 const access = computed(() => vdfsAccessOf(props.node))

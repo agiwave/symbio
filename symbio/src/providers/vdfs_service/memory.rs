@@ -220,9 +220,7 @@ impl VdfsProvider for MemoryVdfs {
                 Ok(VdfsResponse::Unit)
             }
 
-            VdfsRequest::Mkdir | VdfsRequest::Move { .. } | VdfsRequest::Action { .. } => {
-                Err(VdfsError::NotImplemented)
-            }
+            VdfsRequest::Mkdir | VdfsRequest::Action { .. } => Err(VdfsError::NotImplemented),
 
             VdfsRequest::Watch { sink } => {
                 watch_changes(&self.kind, path, sink).await?;

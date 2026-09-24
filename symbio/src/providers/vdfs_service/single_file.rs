@@ -251,7 +251,7 @@ impl VdfsProvider for SingleFileVdfs {
                 Ok(VdfsResponse::Unit)
             }
 
-            VdfsRequest::Mkdir | VdfsRequest::Move { .. } => Err(VdfsError::NotImplemented),
+            VdfsRequest::Mkdir => Err(VdfsError::NotImplemented),
 
             VdfsRequest::Action { action, payload: _ } => {
                 if action != VDFS_ACTION_EXPORT {

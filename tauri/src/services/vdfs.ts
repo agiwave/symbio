@@ -16,7 +16,6 @@ import {
   VDFS_ACTION,
   VDFS_DELETE,
   VDFS_LIST,
-  VDFS_MOVE,
   VDFS_READ,
   VDFS_ROOT_OP,
   VDFS_STAT,
@@ -27,7 +26,6 @@ import {
   type VdfsContent,
   type VdfsDeleteResponse,
   type VdfsListResponse,
-  type VdfsMoveResponse,
   type VdfsNode,
   type VdfsWriteResponse,
 } from '../schemas/vdfs'
@@ -224,11 +222,6 @@ export async function runVdfsAction(
     action,
     ...(payload === undefined ? {} : { payload }),
   })
-}
-
-/** 移动 / 重命名（同一地址空间内） */
-export async function moveVdfs(from: string, to: string): Promise<VdfsMoveResponse> {
-  return callPlugin<VdfsMoveResponse>(VDFS_MOVE, { from, to })
 }
 
 /**

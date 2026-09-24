@@ -14,7 +14,7 @@
 //! 2. **透传调用级参数**：把请求 ctx 的运行时状态（workdir）翻译成 provider 的
 //!    约定键（[`call_params`]），两条链路共用同一份翻译。
 //!
-//! 地址规则、两半分流、路径回填、根守卫、跨半移动拒绝**全部在 [`UnifiedFs`] 一处**，
+//! 地址规则、两半分流、路径回填、根守卫**全部在 [`UnifiedFs`] 一处**，
 //! 本文件不再重复实现——这也是它此前最需要的收敛：曾经在这里做的
 //! 「裸地址补 `local/` 前缀 → 再拆挂载名 → 按名取 provider」三步翻译，
 //! 现在只需要把地址原样交给门面。
@@ -126,20 +126,6 @@ impl ToolVdfs {
     pub async fn mkdir(&self, ctx: &Arc<dyn InvokeRequest>, path: &str) -> VdfsResult<()> {
         let (fs, vctx) = self.fs(ctx).await;
         fs.dispatch(&vctx, path, VdfsRequest::Mkdir)
-            .await?
-            .into_unit()
-            .ok_or_else(|| VdfsError::internal("响应类型不匹配"))
-    }
-
-    /// 移动 / 重命名（同一半内；跨半由 [`UnifiedFs`] 拒绝）
-    pub async fn move_item(
-        &self,
-        ctx: &Arc<dyn InvokeRequest>,
-        from: &str,
-        to: &str,
-    ) -> VdfsResult<()> {
-        let (fs, vctx) = self.fs(ctx).await;
-        fs.dispatch(&vctx, from, VdfsRequest::Move { to: to.to_string() })
             .await?
             .into_unit()
             .ok_or_else(|| VdfsError::internal("响应类型不匹配"))

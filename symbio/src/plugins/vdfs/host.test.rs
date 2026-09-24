@@ -119,14 +119,6 @@ impl VdfsProvider for Rec {
                     data: None,
                 }))
             }
-            VdfsRequest::Move { to } => {
-                // 只接受相对路径：组合根已剥掉子目录前缀
-                if path == "a.txt" && to == "b.txt" {
-                    Ok(VdfsResponse::Unit)
-                } else {
-                    Err(VdfsError::Forbidden(format!("不支持移动 {path} → {to}")))
-                }
-            }
             VdfsRequest::Watch { .. } => {
                 self.note(path);
                 Ok(VdfsResponse::Unit)
@@ -140,7 +132,8 @@ impl VdfsProvider for Rec {
     }
 }
 
-/// 极简 provider：验证「什么都不实现」也能被访问层容错
+/// 极简 provider：验证「什么都不实现」也能被访问层容错（见
+/// `unimplemented_ops_surface_as_not_implemented`）
 struct Bare;
 
 #[async_trait]
@@ -297,18 +290,6 @@ impl VdfsProvider for TestRoot {
                 }
                 p.dispatch(ctx, &rel, VdfsRequest::Mkdir).await?;
                 Ok(VdfsResponse::Unit)
-            }
-            VdfsRequest::Move { to } => {
-                let (pt, rt) = self.resolve(&to)?;
-                if rel.is_empty() || rt.is_empty() {
-                    return Err(VdfsError::Forbidden("目录不可移动".to_string()));
-                }
-                if std::sync::Arc::ptr_eq(p, pt) {
-                    p.dispatch(ctx, &rel, VdfsRequest::Move { to: rt }).await?;
-                    Ok(VdfsResponse::Unit)
-                } else {
-                    Err(VdfsError::invalid("不支持跨目录移动"))
-                }
             }
             VdfsRequest::Action { action, payload } => {
                 p.dispatch(ctx, &rel, VdfsRequest::Action { action, payload })
@@ -519,46 +500,30 @@ async fn dir_root_is_not_readable() {
     assert!(matches!(err, PluginError::Forbidden(_)));
 }
 
-/// 同类别内移动：展示地址进、相对路径到 provider
-#[tokio::test]
-async fn same_category_move_is_forwarded() {
-    let (fs, _) = fs_roots();
-    let ctx = ctx_with(json!({ "from": ".vdfsv2/mem/a.txt", "to": ".vdfsv2/mem/b.txt" }));
-    let resp = dispatch(&fs, VDFS_MOVE, &ctx).await.unwrap().unwrap();
-    let m = resp.get::<VdfsMoveResponse>().unwrap();
-    assert_eq!(m.from, ".vdfsv2/mem/a.txt");
-    assert_eq!(m.to, ".vdfsv2/mem/b.txt");
-}
+// 曾经这里有三个 `move` 用例（同类别转发 / 跨子目录拒绝 / 跨半拒绝）。移动整条
+// 下线后它们没有对应的不变式可钉（守卫与操作一起没了），故一并删除——**不要**
+// 因为「地址翻译」还想验而把它们改写成别的操作：那三例考的是 move 的地址解析，
+// 与 list / stat 的翻译口径无关，后者另有用例。
+//
+// 但「跨子目录移动」那例顺带覆盖的**另一件事**被单独留了下来（下一个用例）：
+// 一个只实现了一部分操作的 provider，其未实现的操作要以 `NotImplemented` 原样
+// 穿出门面。那是「新 provider 只要实现一部分就能挂上去」的前提。
 
-/// 跨子目录移动由组合根拒绝（门面只拦「两半之间」，子目录间归虚拟层自持）
+/// 「什么都不实现」的 provider：未实现的操作以 `NotImplemented` 原样穿出门面，
+/// 不变成内部错误、不 panic。
 #[tokio::test]
-async fn cross_category_move_is_rejected() {
-    let rec = Rec::new();
-    let a: DynVdfsProvider = rec.clone();
-    let b: DynVdfsProvider = Arc::new(Bare);
+async fn unimplemented_ops_surface_as_not_implemented() {
     let fs: DynVdfsProvider = Arc::new(UnifiedFs::with_physical(
         Arc::new(TestRoot {
-            dirs: vec![("mem", a), ("bare", b)],
+            dirs: vec![("bare", Arc::new(Bare))],
         }),
         Arc::new(PhysicalFs::new()),
     ));
-    let ctx = ctx_with(json!({ "from": ".vdfsv2/mem/a.txt", "to": ".vdfsv2/bare/a.txt" }));
-    assert!(matches!(
-        dispatch(&fs, VDFS_MOVE, &ctx).await.unwrap(),
-        Err(PluginError::ValidationError(_))
-    ));
-}
-
-/// 系统资源与磁盘文件之间不可移动（门面判定，先于触达任何一层）
-#[tokio::test]
-async fn cross_half_move_is_rejected() {
-    let (fs, rec) = fs_roots();
-    let ctx = ctx_with(json!({ "from": ".vdfsv2/mem/a.txt", "to": "b.txt" }));
-    assert!(matches!(
-        dispatch(&fs, VDFS_MOVE, &ctx).await.unwrap(),
-        Err(PluginError::ValidationError(_))
-    ));
-    assert!(rec.seen().is_empty(), "判定发生在触达 provider 之前");
+    let err = fs
+        .dispatch(&VdfsContext::empty(), ".vdfsv2/bare/x", VdfsRequest::Stat)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, VdfsError::NotImplemented), "实际：{err:?}");
 }
 
 #[tokio::test]

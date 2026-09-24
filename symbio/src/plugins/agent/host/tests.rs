@@ -580,24 +580,13 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
             .exists(),
         "mkdir 不得绕过挂载点落到裸 agent 目录，实际：{mkdir_on_mount:?}"
     );
-    // ⑧ move_item：跨挂载点的判据同样按前缀——不同 `<id>` 之间明确拒绝
-    let cross = plugin
-        .dispatch(
-            &vctx,
-            "reviewer/work/a.md",
-            vdfs::VdfsRequest::Move {
-                to: "other/work/a.md".to_string(),
-            },
-        )
-        .await;
-    assert!(
-        matches!(cross, Err(VdfsError::Invalid(_))),
-        "跨子智能体移动应被拒，实际：{cross:?}"
-    );
-    // ⑨ 九操作一致性的**判据**收在一处：`sub_vfs` 唯一决定「是否穿过挂载点」，
+    // ⑧ 操作一致性的**判据**收在一处：`sub_vfs` 唯一决定「是否穿过挂载点」，
     // 各操作只负责把结果交回去——本测试覆盖了 list / stat / read / write / delete 的
-    // 数据落点，以及 mkdir / move 的越界防护（这两者在子树里目前无 provider 实现，
-    // 外部表现与未委托时相同，故只能钉住「不得落到裸目录」）。
+    // 数据落点，以及 mkdir 的越界防护（它在子树里目前无 provider 实现，外部表现与
+    // 未委托时相同，故只能钉住「不得落到裸目录」）。
+    //
+    // 曾经还有 ⑨：`move` 跨 `<id>` 明确拒绝。移动整条下线后该断言随之删除——
+    // 不再有第二个地址可供越界。
 }
 
 // ==================== dispatch 请求形态（测试辅助） ====================

@@ -105,7 +105,29 @@ export const BASELINE = {
   //      （FIFO 顺序与地址身份 / 两种取消的分界 / **忙则排队** / 请求参数与 workdir
   //      随条目带走）+ `plugin/nodes.test.rs` 两条（收件箱写入的两种形状判别 /
   //      条目节点与消息节点同源）；另有两条既有用例随 `internal_dirs` 多一段而改数值。
-  rustTests: 930,
+  // 926：**VDFS 收敛 + `Move` 整条下线**（2026-09-24）——实测 926，**净 −4**。
+  //      逐文件 diff（`git show HEAD:<f>` 数 `#[test]` / `#[tokio::test]`，不是估算）：
+  //        −2  `plugins/vdfs/fs.test.rs`——跨半移动被拒 / 半内移动转发两条随
+  //            `UnifiedFs::dispatch` 不再分流删除（**跨半在结构上不可能发生**：
+  //            `VdfsRequest` 载荷里已没有第二个地址字段）
+  //        −2  `plugins/vdfs/host.test.rs`——三条 move 用例（同类别转发 / 跨类别拒绝 /
+  //            跨半拒绝）删除，补回一条 `unimplemented_ops_surface_as_not_implemented`
+  //            把「部分实现的 provider 未实现操作原样穿出」这条**原有不变式**重新钉住
+  //            （不提高要求，只是换载体——原载体 `Bare` 只被那三条用到）
+  //        −1  `plugins/vdfs/physical.test.rs`——`do_move` 的 rename 用例
+  //        −2  `plugins/vdfs/provider.test.rs`——`ToolVdfs::move_item` 的两条
+  //        +1  `plugins/composite/vdfs.test.rs`——`rejects_unknown_dir`（原用例删掉
+  //            跨目录 move 断言后，未知名一条留作纯拒绝面）
+  //        +1  `symbio_core/vdfs_provider.test.rs`——新增
+  //            `new_type_carries_optional_import_entry`（类型内挂可选导入入口）；
+  //            另有两处改名不计数（`request_variant_set_is_the_operation_surface`、
+  //            `new_type_is_single_dir_scoped_and_omitted_when_absent`）
+  //        +1  `plugins/mcp/plugin.test.rs`——原「新建类型」一条拆成「主入口」与
+  //            「导入是同一类型的第二条入口」两条
+  //      ⚠️ 删的是**形态**不是覆盖：被删守卫所守的形态（跨半 / 跨子目录移动）
+  //      已随 `VdfsRequest::Move` 消失而**结构上不可能**，比运行时判前缀再拒绝更强。
+  //      930 → 926 的缺口全部由上面这批解释，没有「测试被悄悄跳过」。
+  rustTests: 926,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *
@@ -205,8 +227,25 @@ export const BASELINE = {
   //      配套加了 `_resetEventBusForTest()`：状态挂在 `globalThis` 上会**跨 spec
   //      文件存活**，不复位就会读到别处留下的 `everConnected = true`，把首连误判成
   //      重连——该用例正是靠这个复位才可重复。
+  // 50 文件 / 722：**VDFS 收敛 + `Move` 整条下线**（2026-09-24）——`vitestFiles`
+  //      50 不变（改的都是既有 spec，没有新增文件）、`vitestTests` 727 → **722**
+  //      （**净 −5**，逐文件核对，不是估算）：
+  //        −3  `composables/__tests__/useVdfsPrompt.spec.ts`（19 → 16）——
+  //            「重命名锚在选中项上」整段（预填 / 成功收起 / 失败保持 / 选中清空即收起 /
+  //            没有选中项不进入）随 `startRename` / `submitRename` / `watch(selectedNode)`
+  //            一并删除；判别式互斥那组把「entry 态下开 rename」换成
+  //            「file 态下再点新建 ⇒ 回到 entry 态且载荷清空」——**互斥这条不变式仍在**，
+  //            只是换一个可达的切换路径来钉。
+  //        −2  `components/vdfs/__tests__/VdfsWorkbench.spec.ts`（9 → 7）——
+  //            「重命名提示预填原名」删除；「提示态占用详情槽时渲染器不挂载」改用
+  //            **机制动作 `delete`** 作代表（原来靠 `rename` 触发），
+  //            两条断言合成一条（渲染器让位 + 提示动作行就位）。
+  //        0   `components/vdfs/__tests__/VdfsDetailActions.spec.ts`——只把注入的
+  //            机制动作从 `[rename, delete]` 收成 `[delete]`，用例数与断言面不变。
+  //        0   `composables/__tests__/useVdfs.spec.ts` / `services/__tests__/vdfsScheme.spec.ts`
+  //            ——只删桩里的 `moveVdfs` 与改 `new_type` 取值。
   vitestFiles: 50,
-  vitestTests: 727,
+  vitestTests: 722,
 }
 
 export const VITEST_TIMEOUT_MS = 180_000

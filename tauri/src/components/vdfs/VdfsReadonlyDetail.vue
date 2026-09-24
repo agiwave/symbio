@@ -55,15 +55,13 @@ const props = defineProps<VdfsRendererProps>()
 const emit = defineEmits<{
   (e: 'save', payload: unknown): void
   (e: 'delete'): void
-  (e: 'rename'): void
 }>()
 
 const access = computed(() => vdfsAccessOf(props.node))
 
 /** 本渲染器无自有动作：机制动作原样上抛给页面执行 */
 function onAction(a: DetailAction): void {
-  if (a.id === 'rename') emit('rename')
-  else if (a.id === 'delete') emit('delete')
+  if (a.id === 'delete') emit('delete')
 }
 
 const accessText = computed(() => {
@@ -81,7 +79,7 @@ const updatedText = computed(() => formatDateTime(props.node.updated_at))
 /** 场景扩展字段（协议保留字段之外的项，即 flatten 到顶层的 attributes） */
 const RESERVED = new Set([
   'path', 'name', 'title', 'description', 'kind', 'status', 'access',
-  'ext', 'size', 'updated_at', 'children', 'binary', 'schema', 'new_types',
+  'ext', 'size', 'updated_at', 'children', 'binary', 'schema', 'new_type',
 ])
 const attributes = computed(() =>
   Object.entries(props.node)

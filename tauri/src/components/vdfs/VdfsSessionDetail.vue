@@ -43,7 +43,6 @@ defineEmits<{
   /** 进入会话内部（子会话 / 工作目录树）——由页面层 `browseInto(节点路径)` 完成 */
   (e: 'browse'): void
   (e: 'save', payload: unknown): void
-  (e: 'rename'): void
 }>()
 
 /** 会话自有动作：浏览内部（草稿态没有内部可浏览） */

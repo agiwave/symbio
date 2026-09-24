@@ -44,6 +44,9 @@ fn metas_are_llm_ready() {
 }
 
 /// 每个工具名与操作一一对应（工具集完整性）
+///
+/// **没有 `vdfs_move`**：移动整条下线了（见 `VdfsRequest` 的「没有 `Move`」一节）
+/// ——核心层不收「两个地址」的操作，要用移动由外层组合，当前外层没提供。
 #[test]
 fn tools_cover_all_ops() {
     let names: Vec<String> = vdfs_tools(empty_provider())
@@ -62,7 +65,6 @@ fn tools_cover_all_ops() {
             "vdfs_write",
             "vdfs_delete",
             "vdfs_mkdir",
-            "vdfs_move",
         ]
     );
 }

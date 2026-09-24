@@ -196,9 +196,9 @@ impl CompositeVdfs {
 
     /// 子目录节点（`<dir>`）——合成的目录节点，静态自述取自子插件的 PluginMeta。
     ///
-    /// `new_types`（根可新建类型）**不在其中**：它是根节点的动态清单能力，可能
-    /// 依赖运行期汇流（session 的选项定义来自 options 广播），故走 provider 的
-    /// async `new_types()` 现场取（见下方调用点）。
+    /// `new_type`（根可新建类型）**不在其中**：它属于根节点的自述，且可能依赖
+    /// 运行期汇流（session 的选项定义来自 options 广播），故走 provider 的 async
+    /// `root_new_type()` 现场取（见下方调用点）。
     fn dir_node(dir: &str, p: &Arc<dyn Plugin>) -> VdfsNode {
         let meta: PluginMeta = p.meta();
         let mut n = VdfsNode::dir(
@@ -217,11 +217,11 @@ impl CompositeVdfs {
         n
     }
 
-    /// 子目录节点 + 动态自述（`new_types`）：异步现场取
+    /// 子目录节点 + 动态自述（`new_type`）：异步现场取
     async fn dir_node_full(dir: &str, p: &Arc<dyn Plugin>) -> VdfsNode {
         let mut n = Self::dir_node(dir, p);
         if let Some(provider) = p.clone().get_vfs_provider() {
-            n.new_types = provider.new_types().await;
+            n.new_type = provider.root_new_type().await.map(Box::new);
         }
         n
     }
@@ -432,22 +432,6 @@ impl VdfsProvider for CompositeVdfs {
                 }
                 p.clone()
                     .vdfs_dispatch(&sub, &rel, VdfsRequest::Mkdir)
-                    .await?;
-                Ok(VdfsResponse::Unit)
-            }
-            VdfsRequest::Move { to } => {
-                // 跨子目录拒绝：`to` 也要先解析出所属子目录
-                let (to_dir, _, _, rt) = self.dispatch_to(ctx, &dirs, &to).await?;
-                if to_dir != dir {
-                    return Err(VdfsError::invalid(format!(
-                        "不支持跨目录移动：{dir} → {to_dir}"
-                    )));
-                }
-                if rel.is_empty() || rt.is_empty() {
-                    return Err(VdfsError::Forbidden("目录不可移动".to_string()));
-                }
-                p.clone()
-                    .vdfs_dispatch(&sub, &rel, VdfsRequest::Move { to: rt })
                     .await?;
                 Ok(VdfsResponse::Unit)
             }

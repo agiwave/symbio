@@ -145,33 +145,9 @@ async fn delete_dir_requires_recursive() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
-#[tokio::test]
-async fn move_renames_within_workdir() {
-    let base = temp("mv");
-    let fs = PhysicalFs::new();
-    let ctx = ctx_in(&base);
-    fs.dispatch(
-        &ctx,
-        "a.txt",
-        VdfsRequest::Write {
-            content: VdfsContent::text("", "x"),
-        },
-    )
-    .await
-    .unwrap();
-    fs.dispatch(
-        &ctx,
-        "a.txt",
-        VdfsRequest::Move {
-            to: "sub/b.txt".into(),
-        },
-    )
-    .await
-    .unwrap();
-    assert!(!base.join("a.txt").exists());
-    assert!(base.join("sub/b.txt").exists());
-    let _ = std::fs::remove_dir_all(&base);
-}
+// 曾经这里有一例 `move_renames_within_workdir`（物理盘用 `rename` 改名）。移动
+// 整条下线后 `PhysicalFs` 不再实现它——它正是「只有物理盘能真做」的那一个实现，
+// 也就是当初把 `Move` 放进 trait 的唯一理由。删掉它，正是这次收敛的目的。
 
 #[tokio::test]
 async fn missing_workdir_param_is_internal_error() {

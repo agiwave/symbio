@@ -8,10 +8,10 @@
  * 前端**不该**把它们写进自己的地址模板——写进去就是一份第二真相。
  *
  * 两者都能从数据里认出来，不需要任何字面量：
- * - **挂载目录**：composite 把 `root_new_types()` 挂到了挂载点节点上
+ * - **挂载目录**：composite 把 `root_new_type()` 挂到了挂载点节点上
  *   （`plugins/composite/vdfs.rs` 的 `dir_node`），会话 provider 声明的是
- *   `VdfsNewType::new(VDFS_EXT_SESSION, …)` ⇒ 列虚拟根，找 `new_types`
- *   里含 `ext === 'session'` 的子节点即可。
+ *   `VdfsNewType::new(VDFS_EXT_SESSION, …)` ⇒ 列虚拟根，找 `new_type.ext`
+ *   等于 `'session'` 的子节点即可。
  * - **转写段**：会话内部的子目录里，转写列表的 `kind` 是 `VDFS_KIND_MESSAGES`
  *   （稳定 ASCII 协议词，与展示名解耦）⇒ 列任一会话，找 `kind` 命中的子节点。
  *
@@ -84,9 +84,7 @@ export function resetVdfsSessionScheme(): void {
 export async function ensureSessionMountDir(): Promise<string> {
   if (cachedMountDir) return cachedMountDir
   const resp = await listVdfs(READBACK_REASON.BOOTSTRAP)
-  const hit = (resp.items ?? []).find((n) =>
-    (n.new_types ?? []).some((t) => t.ext === VDFS_EXT_SESSION),
-  )
+  const hit = (resp.items ?? []).find((n) => n.new_type?.ext === VDFS_EXT_SESSION)
   if (!hit) {
     // 注意：`listVdfs` 失败时是**吞掉异常返回空列表**的，所以这里可能是「真没有
     // 挂载点」，也可能是「列目录失败了」。两种都说出来——只报前一种会让人去查

@@ -634,9 +634,9 @@ async fn read_content_path_is_prefixed_with_dir() {
     );
 }
 
-/// 未知目录明确报错；跨子目录移动被拒
+/// 未知目录明确报错
 #[tokio::test]
-async fn rejects_unknown_and_cross_dir_moves() {
+async fn rejects_unknown_dir() {
     let vdfs = container(vec![
         FakeChild {
             dir: "alpha",
@@ -666,19 +666,9 @@ async fn rejects_unknown_and_cross_dir_moves() {
         .unwrap_err();
     assert!(matches!(err, VdfsError::NotFound(_)));
     assert!(err.to_string().contains("alpha"), "提示现有目录");
-
-    assert!(matches!(
-        vdfs.dispatch(
-            &ctx,
-            "alpha/a",
-            VdfsRequest::Move {
-                to: "beta/a".into()
-            }
-        )
-        .await
-        .unwrap_err(),
-        VdfsError::Invalid(_)
-    ));
+    // 这里曾断言「跨子目录移动被拒」——容器**用错误表达能力的缺失**（它先解析
+    // `to` 属于哪个子目录，再拒绝跨目录）。移动下线后这个形态连同那句断言一起
+    // 消失：载荷里没有第二个地址，容器无从也无需判定。
 }
 
 /// 宿主句柄缺失（provider 未随 symbio 上下文调用）→ 明确报错而非静默空树
@@ -769,5 +759,89 @@ async fn sub_provider_fetched_via_trait_method() {
     assert!(
         text.ends_with("/agent/x/f.md"),
         "父地址 + 相对路径 = 完整挂载点地址（根名无关）: {text}"
+    );
+}
+
+// ==================== 嵌套 provider 的 `path` 口径 ====================
+//
+// `fill_node_paths` **只在 `path` 为空时**回填。于是「`path` 处在哪个坐标系」
+// 由**最后填充它的那一层**决定：子 provider 若按自身子树口径填过（嵌套 composite
+// 的常态——它也是容器），外层容器不会再补自己的挂载段。
+//
+// 本测试钉住这一实际行为，供机制收敛（把地址移出节点载荷）时对照。
+
+/// 按**自身子树**口径填 `path` 的 provider（模拟嵌套 composite）
+struct SubTreePather;
+
+#[async_trait]
+impl VdfsProvider for SubTreePather {
+    async fn dispatch(
+        &self,
+        _ctx: &VdfsContext,
+        _path: &str,
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
+        match req {
+            VdfsRequest::List { .. } => Ok(VdfsResponse::List(vec![VdfsNode::dir(
+                "inner",
+                "内层",
+                VdfsAccess::LIST,
+            )
+            .with_path("inner")])),
+            _ => Err(VdfsError::NotImplemented),
+        }
+    }
+}
+
+/// 未填 `path` 的 provider（对照：容器按 `<挂载名>/<子名>` 回填）
+struct BlankPather;
+
+#[async_trait]
+impl VdfsProvider for BlankPather {
+    async fn dispatch(
+        &self,
+        _ctx: &VdfsContext,
+        _path: &str,
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
+        match req {
+            VdfsRequest::List { .. } => Ok(VdfsResponse::List(vec![VdfsNode::dir(
+                "inner",
+                "内层",
+                VdfsAccess::LIST,
+            )])),
+            _ => Err(VdfsError::NotImplemented),
+        }
+    }
+}
+
+#[tokio::test]
+async fn container_backfills_only_blank_paths() {
+    let ctx = host_ctx();
+    let list = VdfsRequest::List {
+        limit: None,
+        before: None,
+    };
+
+    // ① 空 `path` → 容器补成 `<挂载名>/<子名>`
+    let vdfs = container_of("outer", Arc::new(BlankPather));
+    let VdfsResponse::List(items) = vdfs.dispatch(&ctx, "outer", list.clone()).await.unwrap()
+    else {
+        panic!("应为 List 响应");
+    };
+    assert_eq!(
+        items.iter().map(|n| n.path.as_str()).collect::<Vec<_>>(),
+        vec!["outer/inner"]
+    );
+
+    // ② 子 provider 自己填过 → 容器**原样透出**，不补 `outer/` 段
+    let vdfs = container_of("outer", Arc::new(SubTreePather));
+    let VdfsResponse::List(items) = vdfs.dispatch(&ctx, "outer", list).await.unwrap() else {
+        panic!("应为 List 响应");
+    };
+    assert_eq!(
+        items.iter().map(|n| n.path.as_str()).collect::<Vec<_>>(),
+        vec!["inner"],
+        "容器不重写已填的 path —— 嵌套时缺一段地址"
     );
 }

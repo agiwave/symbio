@@ -470,7 +470,7 @@ impl Plugin for SessionPlugin {
             //                 也不必读回整份历史。见同文 §3.4.1。
             // - `options/list` —— **选项机制整体下线**（2026-09-23）：选项不再是
             //                 独立的节点协议，而是会话配置表单的字段，随
-            //                 `node.schema` / `new_types[].schema` 下发，值走
+            //                 `node.schema` / `new_type.schema` 下发，值走
             //                 `node.attributes.metadata`，写走 `vdfs/write`。
             //                 同一件事两条下发通道，而守卫不会因为「两边说的不一样」
             //                 变红。见 `docs/archive/session-options-unification.md`。
@@ -611,7 +611,7 @@ fn config_definition() -> DetailDefinition {
 // 会话是 VDFS 的第二个原生 provider：
 //
 // - **根 = 会话清单**：`<根>/session` 的目录内容即全部会话；根下可新建「会话」
-//   （`new_types`），**新建语义完全由本 provider 自持**——id 由 provider 生成、
+//   （`root_new_type`），**新建语义完全由本 provider 自持**——id 由 provider 生成、
 //   路径名作标题、经 `create` 写意图区分「新建」与「覆盖」；
 // - **节点 = 单个会话**：`ext = session` → 前端聊天工作区渲染器（同一份详情实现
 //   只服务 VDFS 机制）；

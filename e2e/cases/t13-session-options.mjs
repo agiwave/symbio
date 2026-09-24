@@ -5,7 +5,7 @@ import './_selfrun.mjs';
 // （`options/list` + `OptionNode`），已整体下线。现在它就是**会话配置表单的字段**：
 //
 //   定义   <根>/session/<id> → node.schema           （已落盘会话）
-//          <根>/session      → new_types[].schema    （新建草稿）
+//          <根>/session      → new_type.schema       （新建草稿）
 //   当前值 <根>/session/<id> → node 上的 metadata     （键 = 定义里的字段 key）
 //   落库   vdfs/write(<根>/session/<id>, { metadata: … })
 //
@@ -19,7 +19,7 @@ import './_selfrun.mjs';
 //
 // | 断言 | 意图 |
 // |---|---|
-// | 草稿定义挂在 `new_types[].schema` | 「新建会话」与「打开会话」进入的是同一份定义 |
+// | 草稿定义挂在 `new_type.schema` | 「新建会话」与「打开会话」进入的是同一份定义 |
 // | 清单里每一项的 `schema` 与草稿**逐字节相同** | 一处真相、两处投递 |
 // | 字段 key 含会话自有的四项、且各有 `widget` | 定义真的被收集到（不是空壳） |
 // | `create: true` 时 metadata 随创建写入 | 草稿态的选择不丢 |
@@ -106,12 +106,12 @@ export default defineCase(
       /** 列会话清单（定义与值都在 `items` 上；新建类型在 `node` 上） */
       const listMount = async (what) => dataOf(await cli.invoke('vdfs/list', { path: mount }), what);
 
-      // ② 草稿定义：`new_types[].schema`——新建会话前选项栏就要能完整渲染
+      // ② 草稿定义：`new_type.schema`——新建会话前选项栏就要能完整渲染
       const draftList = await listMount('vdfs/list(<根>/session)');
-      const sessionType = (draftList.node?.new_types ?? []).find((t) => t.ext === 'session');
+      const sessionType = draftList.node?.new_type;
       assert(
-        sessionType,
-        `会话挂载目录应声明可新建「会话」类型（实际 new_types: ${JSON.stringify(draftList.node?.new_types)}）`,
+        sessionType && sessionType.ext === 'session',
+        `会话挂载目录应声明可新建「会话」类型（实际 new_type: ${JSON.stringify(draftList.node?.new_type)}）`,
       );
       const draftSchema = sessionType.schema;
       assert(draftSchema, `新建类型应携带选项定义（schema），实际 ${JSON.stringify(sessionType)}`);
@@ -180,7 +180,7 @@ export default defineCase(
       const stat = dataOf(await cli.invoke('vdfs/stat', { path: sessionPath }), 'vdfs/stat');
       assert(
         stat.schema == null,
-        '`stat` 不应携带选项定义（定义只挂 list 与 new_types 两处；stat 是热路径，不跑全项目收集）',
+        '`stat` 不应携带选项定义（定义只挂 list 与 new_type 两处；stat 是热路径，不跑全项目收集）',
       );
       assertEq(stat.metadata?.mode, 'auto', '`stat` 应带回当前值（值随节点下发）');
 

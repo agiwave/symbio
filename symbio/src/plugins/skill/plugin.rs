@@ -70,7 +70,7 @@ impl SkillPlugin {
             .with_version("0.2.0")
             .with_order(4)
             .with_icon(PLUGIN_SKILL)
-        // 「根下可新建类型」由 provider 自持（`VdfsProvider::new_types`，见下方
+        // 「根下可新建类型」由 provider 自持（`VdfsProvider::root_new_type`，见下方
         // `impl VdfsProvider for SkillPlugin`）——它是挂载点的动态自述，容器合成
         // 根节点时现场取，不进这份同步纯数据
     }
@@ -140,9 +140,9 @@ impl SkillPlugin {
 use crate::providers::vdfs_service::DirVdfs;
 use crate::symbio_core::vdfs::{from_plugin_error, unwatch_changes, watch_changes};
 use crate::symbio_core::vdfs_provider::{
-    VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
-    VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT,
-    VDFS_EXT_FORM, VDFS_EXT_ZIP, VDFS_NEW_SOURCE_FILE, VDFS_STATUS_ACTIVE,
+    VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewImport, VdfsNewType,
+    VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse,
+    VDFS_ACTION_EXPORT, VDFS_EXT_FORM, VDFS_EXT_ZIP, VDFS_STATUS_ACTIVE,
 };
 
 const LABEL: &str = "技能";
@@ -282,21 +282,26 @@ fn new_manifest(id: &str) -> serde_json::Value {
 
 #[async_trait]
 impl VdfsProvider for SkillPlugin {
-    /// 根下可新建两类：表单新建 + 整包导入（zip）
+    /// 根下可新建**一种**类型：技能。
+    ///
+    /// 它有两个入口形态：**表单新建**（主入口，进草稿详情页）与**整包导入**
+    /// （备选入口，选本地 `.zip`）。两者落成的是同一形状的节点，故导入不另占
+    /// 类型位，挂在类型自己的 [`VdfsNewImport`] 上。
     ///
     /// `ext = skill` 是**呈现扩展名**（`id_of` 按它剥地址后缀），落成后的节点
     /// `ext = form`——两者不同，故显式声明 `node_ext` 与详情定义（草稿详情页据此
     /// 渲染出与落成后同一张表单）。
-    async fn new_types(&self) -> Vec<VdfsNewType> {
-        vec![
+    async fn root_new_type(&self) -> Option<VdfsNewType> {
+        Some(
             VdfsNewType::new(PLUGIN_SKILL, LABEL)
                 .with_description(format!("新建{LABEL}（在详情页里填好，保存时一次写入）"))
                 .with_node_ext(VDFS_EXT_FORM)
-                .with_schema(detail_definition()),
-            VdfsNewType::new(VDFS_EXT_ZIP, format!("{LABEL}包"))
-                .with_description(format!("导入{LABEL}整包（.zip）——整目录覆盖同名条目"))
-                .with_source(VDFS_NEW_SOURCE_FILE),
-        ]
+                .with_schema(detail_definition())
+                .with_import(
+                    VdfsNewImport::new(VDFS_EXT_ZIP, format!("{LABEL}包"))
+                        .with_description(format!("导入{LABEL}整包（.zip）——整目录覆盖同名条目")),
+                ),
+        )
     }
 
     async fn dispatch(

@@ -67,7 +67,6 @@ const props = defineProps<VdfsRendererProps>()
 defineEmits<{
   (e: 'save', payload: unknown): void
   (e: 'delete'): void
-  (e: 'rename'): void
 }>()
 
 /** 正文（由 `useVdfs` 的一次 `vdfs/read` 填充；本视图不做增量拼接） */

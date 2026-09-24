@@ -239,7 +239,7 @@ D:/tmp/a.txt     绝对路径                          ─┘
 | `access` | 访问位（§4），**机制唯一的能力依据** |
 | `ext` | 呈现扩展名——**前端据此选择详情页面**（§7） |
 | `size` / `updated_at` / `children` / `binary` | 元数据 |
-| `new_types` | 目录可接受的新建类型清单（§7 与 vdfs-frontend.md §5） |
+| `new_type` | 该目录可新建的**那一种**东西（可选，缺省 = 不可新建；§7 与 vdfs-frontend.md §5） |
 | `schema` | 不透明呈现描述（宿主方言，VDFS 透传） |
 | `attributes` | 场景扩展字段（flatten 到顶层） |
 
@@ -272,7 +272,7 @@ D:/tmp/a.txt     绝对路径                          ─┘
 
 ```text
 path  name  title  description  kind  status  access  ext
-size  updated_at  children  binary  hidden  schema  new_types  attributes
+size  updated_at  children  binary  hidden  schema  new_type  attributes
 ```
 
 新增机制字段时须同步本节；场景侧的命名建议带上自己的前缀（如 `config_type`、
@@ -316,11 +316,17 @@ size  updated_at  children  binary  hidden  schema  new_types  attributes
 填好再保存」丢掉用户填的每一个字段。唯一例外是**内容为空**（「先建一个，随后再
 填」，如新建会话）：此时由 provider 落一份自己的最小合法内容。
 
-**二进制写入 = 整包导入**：目录型资源（skill / agent 目录…）以新建类型
-`ext = zip` + `source = file` 声明「内容来自本地文件」，使用方选文件后走
-`vdfs/write { create: true, b64 }`；provider 把它解释为**导入一个完整目录包**
-（语义自持，VDFS 不解释）。因此导入不额外占一个操作（详见
-[vdfs-frontend.md](vdfs-frontend.md) §5）。
+**二进制写入 = 整包导入**：目录型资源（skill / agent 目录…）以新建类型声明「内容
+来自本地文件」，使用方选文件后走 `vdfs/write { create: true, b64 }`；provider 把它
+解释为**导入一个完整目录包**（语义自持，VDFS 不解释）。因此导入不额外占一个操作。
+两种声明形态（详见 [vdfs-frontend.md](vdfs-frontend.md) §5）：
+
+- **主入口即选文件**：`VdfsNewType.source = file`（agent 包）；
+- **整包导入是同一类型下的第二条入口**：`VdfsNewType.import = VdfsNewImport{ext,…}`
+  （skill / mcp：主入口是表单新建，导入是备选）。
+
+于是「一个目录能新建几类东西」与「这类东西有几条造出来的入口」是两件事：前者至多
+一个（`new_type`），后者至多两条。
 
 **导出是导入的逆动作**：它不新增第二个操作，而是一个**节点动作**——
 `vdfs/action { action: "export" }`，zip 随 `VdfsActionResult.data` 回传
@@ -409,7 +415,6 @@ core 不暴露**）：
 | `vdfs/write` | `{path, text\|b64, create?, etag?}` | `VdfsWriteResponse` | 写内容（`w`） |
 | `vdfs/delete` | `{path, recursive?}` | `VdfsDeleteResponse` | 删除 |
 | `vdfs/mkdir` | `{path}` | `VdfsWriteResponse` | 新建目录 |
-| `vdfs/move` | `{from, to}` | `VdfsMoveResponse` | 移动 / 重命名（同一半内） |
 | `vdfs/watch` | `{path}` | `SuccessResponse` | 订阅该子树变更 |
 | `vdfs/unwatch` | `{path}` | `SuccessResponse` | 取消订阅（与 watch 配对） |
 | `vdfs/action` | `{path, action, payload?}` | `VdfsActionResponse` | 执行**节点动作**（provider 自持动词；未实现返回 `NotImplemented`） |
@@ -433,13 +438,16 @@ core 不暴露**）：
 
 **门面 / 容器统一施加**（`UnifiedFs` 与 `CompositeVdfs`，与资源语义无关）：
 
-- 移动**跨半**（物理 ↔ 虚拟）在触达任何一层之前就被拒；
-- 虚拟层内：自身目录与子目录根不可**读 / 删 / 移**，也不可 `mkdir`；
+- 虚拟层内：自身目录与子目录根不可**读 / 删**，也不可 `mkdir`；
   ⚠️ **写不在其中**——写子目录根 = 写在**挂载点目录自身**上（§3.3「写目录自身」），
   容器一律转发给子 provider 判定，不做类型特判；
-- `move` 跨子目录被拒（只允许同一子目录内）；
 - 子节点 / 内容 / 写入响应的 `path` 回填为全路径（树内 → 展示口径）；
 - 变更事件的相对路径补全为展示地址。
+
+**移动不在协议里**：`VdfsRequest` 只收**操作载荷**，地址一律走 `path` 参数——载荷里
+没有第二个地址字段。跨虚拟挂载树的「移动」本质是 `copy + delete`，不是核心原语，
+故整条链（`vdfs/move` / `vdfs_move` 工具 / 前端重命名入口）都不提供；要用移动由
+**外层组合**（理由见 `symbio_core::vdfs_provider` 的「没有 `Move`」一节）。
 
 错误经 `VdfsError` 表达，桥层翻译为宿主错误（symbio → `PluginError`）。
 `VdfsError::Invalid(VdfsValidationError)` 的结构化字段级错误序列化为 JSON 置于
@@ -608,6 +616,7 @@ for (name, child) in children {
   | `ext` | 呈现扩展名（地址后缀；`id_of` 剥 id 用） |
   | `node_ext` | 落成后的节点 `ext`（**渲染器键**）；缺省 = 与 `ext` 相同（会话即如此） |
   | `schema` | 落成后的节点 `schema`（`form` 渲染器所需的定义） |
+  | `import` | **备选的第二条入口**（整包导入，`VdfsNewImport{ext, title, description?}`）；缺省 = 只有主入口 |
 
   使用方据此在**还没创建**时就能渲染出该类型的详情页——草稿节点（无 id、无名字）
   用 `node_ext` 选渲染器、用 `schema` 出表单，于是「点新建」与「选中一项」进入的是
@@ -750,12 +759,14 @@ for (name, child) in children {
 1. 为模块实现 `VdfsProvider` —— **只有一个方法** `dispatch(ctx, path, req)`：
    - **自述不在这个 trait 上**。展示名 / 描述 / `order` / `icon` / `hidden` /
      `root_access` 由插件的 `PluginMeta`（`Plugin::meta()`）承载；「根下可新建
-     类型」走 `VdfsProvider::new_types()`（async —— session 的表单 schema 需运行期
-     汇流，故不能进那份同步纯数据）。
+     的那一种东西」走 `VdfsProvider::root_new_type()`（async —— session 的表单
+     schema 需运行期汇流，故不能进那份同步纯数据；缺省 `None` = 不可新建）。
    - 数据操作 = `VdfsRequest` 的变体（`List` / `Stat` / `Read` / `Write` /
-     `Delete` / `Mkdir` / `Move` / `Action` / `Watch` / `Unwatch`）；实现方按变体
+     `Delete` / `Mkdir` / `Action` / `Watch` / `Unwatch`）；实现方按变体
      `match`，只实现自己支持的操作，其余返回 `NotImplemented`（使用方据此隐藏
      入口）。**match 编译期穷尽**——新增一种操作时漏译在结构上不可能。
+     （**没有 `Move`**：地址一律走 `path`，跨子树的移动是 `copy + delete` 而非
+     原语，要用移动由外层组合——见 §5「移动不在协议里」。）
    - **不需要、也不应该提供自己的位置**（§2.4）。
 2. 同时接好两条发现链路（二者独立，不可只接其一）：
    - **系统链路**：在 `impl Plugin for X` 中 override `get_vfs_provider` 返回
@@ -897,8 +908,11 @@ ctx**，同一次请求里稍后被委派的 provider（即本插件）据此读
 - `children_of` 逐子插件经 `Plugin::get_vfs_provider()` **查询**（系统链路，非广播、
   不驱动 `traverse`），汇总为 `(目录名, provider)` 清单；目录名 = 实例表挂载名
   （按 `order` 升序）。
-- 守卫：自身目录与子目录根不可读 / 写 / 删 / 移、`mkdir` 已存在报错、
-  跨子目录移动被拒、子节点路径回填树内全路径、事件相对路径补全（§5）。
+- 守卫：自身目录**除 `list` / `stat` 外一概拒绝**；子目录根不可读 / 删 / `mkdir`
+  （⚠️ **写不在其中**——写子目录根 = 写在挂载点目录自身，是「新建」的机制形态）、
+  `mkdir` 已存在报错、子节点路径回填树内全路径、事件相对路径补全（§5）。
+  **移动不在守卫里**：它不是「被拒绝」而是**不可表达**（`VdfsRequest` 没有第二个
+  地址字段），见 §5「移动不在协议里」。
 - 隐藏属性：合成子目录节点时把子插件 `PluginMeta::hidden` 回填进
   `VdfsNode::hidden`，并据此过滤掉不该出现在清单里的子目录（§3.2）；委派回来的
   `list` 结果同样过滤——隐藏是**机制级**属性，不因节点来自哪个 provider 而异。
@@ -932,7 +946,6 @@ ctx**，同一次请求里稍后被委派的 provider（即本插件）据此读
      （容器登记的组合视图）；`<根>` 本体 = 树内 `""`。
   2. **物理地址**（其余一切）：工作目录相对地址或绝对路径，原样交给
      `PhysicalFs`；workdir 经 `call_params` 透传，缺失即 `Internal`（接线错误）。
-  3. **跨半移动**：在分流阶段就拒绝，不触达任何一层。
 - **LLM 工具链路（`provider.rs` + `tools/`）**：vdfs 插件封装一个工具链路 provider
   `ToolVdfs`——它**持有 `CapabilityVisitor`**；`traverse` 广播中由 `plugin.rs`
   构造（`ToolVdfs::new(visitor)`）并把工具注册进同一个 visitor。每个工具
@@ -940,11 +953,11 @@ ctx**，同一次请求里稍后被委派的 provider（即本插件）据此读
   `Arc<ToolVdfs>`，`execute` 内只是「**对文件系统的操作改为对它的操作** + LLM 封装」
   （行号分页 / ignore 过滤 / 成功 message），不认识能力管理器、不走协议信封。
   工具：`vdfs_list` / `vdfs_tree` / `vdfs_stat` / `vdfs_read` /
-  `vdfs_edit` / `vdfs_search` / `vdfs_write` / `vdfs_delete` / `vdfs_mkdir` /
-  `vdfs_move`，共十个。工具描述中的地址口径：`<根>` = 系统资源（其子目录清单
+  `vdfs_edit` / `vdfs_search` / `vdfs_write` / `vdfs_delete` / `vdfs_mkdir`，
+  共九个。工具描述中的地址口径：`<根>` = 系统资源（其子目录清单
   由 `vdfs_list('<根>')` 发现），裸地址 = 会话工作目录。
 - **`ToolVdfs` 只做两件事**：取根（`root_of`）→ 交给 `UnifiedFs`；透传调用级
-  参数（`call_params`）。地址翻译、两半分流、路径回填、根守卫、跨半移动拒绝
+  参数（`call_params`）。地址翻译、两半分流、路径回填、根守卫
   全部在门面一处——**不存在**「裸地址补 `local/` 前缀 → 再拆挂载名 → 按名取
   provider」这类多步翻译。
 - **组合操作只写一次（`host::edit_via` / `host::search_via`）**：`VdfsProvider`

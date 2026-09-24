@@ -49,7 +49,7 @@
 
 ```
 定义   <根>/session/<id> → node.schema               = DetailDefinition { binding: "option", … }
-       <根>/session      → new_types[session].schema = 同一份
+       <根>/session      → new_type.schema           = 同一份
 当前值 <根>/session/<id> → node.attributes.metadata  （键 = 定义里的字段 key）
 落库   vdfs/write(<根>/session/<id>, {"metadata": {<字段 key>: <值>}})
 ```
@@ -63,12 +63,12 @@
 
 | 通路 | 载体 | 为什么在这里 |
 |---|---|---|
-| 定义 | `node.schema`（已落盘）/ `new_types[].schema`（草稿） | 与模型 / 智能体 / SKILL 的新建表单同一套下发方式——列表项自带 `schema`，谁手上有那个节点谁就能渲染 |
+| 定义 | `node.schema`（已落盘）/ `new_type.schema`（草稿） | 与模型 / 智能体 / SKILL 的新建表单同一套下发方式——列表项自带 `schema`，谁手上有那个节点谁就能渲染 |
 | 当前值 | `node.attributes.metadata` | 值本来就是会话状态；metadata 是它的既有归处 |
 | 落库 | `vdfs/write` | 会话的写通道早已统一到 VDFS；选项不该另开一条 |
 
 **定义只挂两处载体，`stat` 不挂**：`list`（清单，逐项复用同一份）与
-`root_new_types`（草稿）。`stat` 是热路径（每次变更通知都会重读），而定义要经一次
+`root_new_type`（草稿）。`stat` 是热路径（每次变更通知都会重读），而定义要经一次
 全项目广播（含 agent 目录扫描）——挂上去等于给热路径加一次目录 I/O。
 
 **定义与会话无关**：它只声明「有哪些字段、候选有哪些、什么条件禁用」，既不带当前
@@ -237,7 +237,7 @@ session ──collect_options(parent, ctx)──▶ parent.traverse(available_op
 
 新建会话前尚无 `session_id`，没有落库目标：
 
-- 定义来自 `<根>/session` 的 `new_types[session].schema`，与已落盘会话**同一份**，
+- 定义来自 `<根>/session` 的 `new_type.schema`，与已落盘会话**同一份**，
   选项栏照常完整渲染；
 - 用户的每次选择由 `useSessionOptionBar` 缓冲为 `draftMetadata`；
 - 创建会话时把该补丁**整体透传**给 `createSession(metadata)`，与后端浅合并语义

@@ -26,7 +26,7 @@
 | `setting` | `setting` | <根>/setting | — | `Plugin` · `VdfsProvider` | — | ✓ |
 | `skill` | `skill` | <根>/skill | `skill/execute` | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `telegram` | `telegram` | <根>/telegram | `telegram/get_updates` · `telegram/send` · `telegram/set_chat_id` · `telegram/start_listener` · `telegram/status` · `telegram/stop_listener` | `Plugin` | ✓ | ✓ |
-| `vdfs` | `vdfs` | — | （动态）`vdfs/<操作>`——按 `VDFS_OPS` 校验后分发（见 §3.2，14 个操作） | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
+| `vdfs` | `vdfs` | — | （动态）`vdfs/<操作>`——按 `VDFS_OPS` 校验后分发（见 §3.2，13 个操作） | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `web` | `web` | <根>/web | — | `Capability` · `Plugin` | ✓ | ✓ |
 | `work` | `work` | <根>/work | — | `Plugin` · `VdfsProvider` | ✓ | ✓ |
 
@@ -63,7 +63,6 @@
 | `vdfs_edit` | `vdfs` |  |
 | `vdfs_list` | `vdfs` |  |
 | `vdfs_mkdir` | `vdfs` |  |
-| `vdfs_move` | `vdfs` |  |
 | `vdfs_read` | `vdfs` |  |
 | `vdfs_search` | `vdfs` |  |
 | `vdfs_stat` | `vdfs` |  |
@@ -90,8 +89,8 @@
 
 ### 3.2 VDFS 操作（`plugins/vdfs/protocol.rs::VDFS_OPS`）
 
-- **前端链路**（14 个，计数有测试锁死）：`vdfs/root` · `vdfs/list` · `vdfs/tree` · `vdfs/stat` · `vdfs/read` · `vdfs/edit` · `vdfs/search` · `vdfs/write` · `vdfs/delete` · `vdfs/mkdir` · `vdfs/move` · `vdfs/watch` · `vdfs/unwatch` · `vdfs/action`
-- **LLM 工具链路**（10 个）：`vdfs_delete` · `vdfs_edit` · `vdfs_list` · `vdfs_mkdir` · `vdfs_move` · `vdfs_read` · `vdfs_search` · `vdfs_stat` · `vdfs_tree` · `vdfs_write`
+- **前端链路**（13 个，计数有测试锁死）：`vdfs/root` · `vdfs/list` · `vdfs/tree` · `vdfs/stat` · `vdfs/read` · `vdfs/edit` · `vdfs/search` · `vdfs/write` · `vdfs/delete` · `vdfs/mkdir` · `vdfs/watch` · `vdfs/unwatch` · `vdfs/action`
+- **LLM 工具链路**（9 个）：`vdfs_delete` · `vdfs_edit` · `vdfs_list` · `vdfs_mkdir` · `vdfs_read` · `vdfs_search` · `vdfs_stat` · `vdfs_tree` · `vdfs_write`
   （`watch` / `unwatch` / `action` 不经工具暴露，故两条链路不是一一对应）
 
 ## 4. 存储层事实（防「多存储后端」误读）
@@ -109,10 +108,10 @@
 
 | 范围 | 实现 | 测试 |
 |---|---|---|
-| `symbio/src` | 201 文件 / 53437 行 | 69 文件 / 23125 行 |
-| `cli/src` | 4 文件 / 1571 行 | 0 文件 / 78 行 |
+| `symbio/src` | 200 文件 / 53422 行 | 121 文件 / 23211 行 |
+| `cli/src` | 4 文件 / 1573 行 | 1 文件 / 80 行 |
 | `tauri/src-tauri/src` | 3 文件 / 445 行 | 0 文件 / 0 行 |
-| `tauri/src` | 95 文件 / 20036 行 | 50 文件 / 10505 行 |
+| `tauri/src` | 95 文件 / 20030 行 | 50 文件 / 10470 行 |
 
 ### 5.2 宿主接缝（前端到底有多大）
 
@@ -123,4 +122,4 @@
 
 ---
 
-> 生成时间：2026-09-24 01:23:54 UTC · 源：`git rev-parse HEAD` = `673bfa1`
+> 生成时间：2026-09-24 05:26:32 UTC · 源：`git rev-parse HEAD` = `97a87c1`

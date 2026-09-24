@@ -39,8 +39,6 @@ pub const VDFS_WRITE: &str = "vdfs/write";
 pub const VDFS_DELETE: &str = "vdfs/delete";
 /// 新建目录
 pub const VDFS_MKDIR: &str = "vdfs/mkdir";
-/// 移动 / 重命名
-pub const VDFS_MOVE: &str = "vdfs/move";
 /// 内容编辑（精确字符串替换）
 pub const VDFS_EDIT: &str = "vdfs/edit";
 /// 文件名模式搜索（glob）
@@ -64,7 +62,6 @@ pub const VDFS_OPS: &[&str] = &[
     VDFS_WRITE,
     VDFS_DELETE,
     VDFS_MKDIR,
-    VDFS_MOVE,
     VDFS_WATCH,
     VDFS_UNWATCH,
     VDFS_ACTION,
@@ -168,13 +165,6 @@ impl VdfsWriteRequest {
     }
 }
 
-/// 移动 / 重命名请求
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct VdfsMoveRequest {
-    pub from: String,
-    pub to: String,
-}
-
 /// 编辑请求（`vdfs/edit`）
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VdfsEditRequest {
@@ -224,13 +214,6 @@ pub struct VdfsTreeResponse {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VdfsDeleteResponse {
     pub path: String,
-}
-
-/// `vdfs/move` 响应
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct VdfsMoveResponse {
-    pub from: String,
-    pub to: String,
 }
 
 /// `vdfs/edit` 响应 —— 编辑是**访问层的组合操作**（`read` → 精确替换 → `write`），

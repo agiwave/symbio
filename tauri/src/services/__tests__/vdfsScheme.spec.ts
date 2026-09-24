@@ -3,7 +3,7 @@
  *
  * 这两项以前是前端写死的常量（`VDFS_SESSION_DIR` / `VDFS_SEG_MESSAGES`），
  * 现在改成按数据认出来。本单测锁住「按什么认」：
- * - 挂载目录按 `new_types` 里含 `ext = session` 认（provider 的自述，不是名字）；
+ * - 挂载目录按 `new_type.ext = session` 认（provider 的自述，不是名字）；
  * - 转写段按 `kind = VDFS_KIND_MESSAGES` 认（稳定协议词，不是展示名）。
  *
  * 之所以值得测：「认错」不报错，只会静默地把转写写到错的地址上——
@@ -43,11 +43,11 @@ function node(over: Partial<VdfsNode> & { name: string }): VdfsNode {
   }
 }
 
-/** 根清单：会话挂载点靠 `new_types` 自述「可新建 session」 */
+/** 根清单：会话挂载点靠 `new_type` 自述「可新建 session」 */
 function rootListing() {
   return [
-    node({ name: 'model', new_types: [{ ext: 'model', title: '模型' }] }),
-    node({ name: 'session', new_types: [{ ext: VDFS_EXT_SESSION, title: '会话' }] }),
+    node({ name: 'model', new_type: { ext: 'model', title: '模型' } }),
+    node({ name: 'session', new_type: { ext: VDFS_EXT_SESSION, title: '会话' } }),
   ]
 }
 
@@ -65,7 +65,7 @@ function sessionChildren() {
   ]
 }
 
-describe('ensureSessionMountDir：按 new_types 认挂载点', () => {
+describe('ensureSessionMountDir：按 new_type 认挂载点', () => {
   beforeEach(() => {
     resetVdfsSessionScheme()
     vdfs.listVdfs.mockReset()
@@ -170,7 +170,7 @@ describe('地址拼接：后端两种口径都不能拼重', () => {
       node: node({ name: '' }),
       // 真实口径：根清单里挂载点的 path 就是展示全路径
       items: [
-        node({ name: 'session', path: '@vfs/session', new_types: [{ ext: VDFS_EXT_SESSION, title: '会话' }] }),
+        node({ name: 'session', path: '@vfs/session', new_type: { ext: VDFS_EXT_SESSION, title: '会话' } }),
       ],
     })
 
@@ -182,7 +182,7 @@ describe('地址拼接：后端两种口径都不能拼重', () => {
       path: '@vfs',
       node: node({ name: '' }),
       items: [
-        node({ name: 'session', path: 'session', new_types: [{ ext: VDFS_EXT_SESSION, title: '会话' }] }),
+        node({ name: 'session', path: 'session', new_type: { ext: VDFS_EXT_SESSION, title: '会话' } }),
       ],
     })
 

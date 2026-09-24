@@ -7,7 +7,7 @@ use super::*;
 
 /// 「点新建」必须直接进入该类型的详情页（用户第 1 / 2 点）。
 ///
-/// 类型清单里的 `ext` 是**呈现扩展名**（`mcp`——`id_of` 按它剥地址后缀），
+/// 类型里的 `ext` 是**呈现扩展名**（`mcp`——`id_of` 按它剥地址后缀），
 /// 而落成后的节点 `ext = form`。两者不同，所以类型必须显式声明：
 ///
 /// - `node_ext` = 落成后的渲染器键（漏了它，草稿详情页落到 `fallback` 兜底，
@@ -16,25 +16,32 @@ use super::*;
 #[tokio::test]
 async fn new_type_declares_the_landing_detail() {
     // 「根下可新建类型」是 provider 的异步自述（不在同步的 `PluginMeta` 上）
-    let types = McpPlugin::default().new_types().await;
-    let form = types
-        .iter()
-        .find(|t| t.ext == PLUGIN_MCP)
+    let t = McpPlugin::default()
+        .root_new_type()
+        .await
         .expect("根下可新建 MCP Server");
+    assert_eq!(t.ext, PLUGIN_MCP, "类型位是表单新建，不是整包导入");
     assert_eq!(
-        form.node_ext.as_deref(),
+        t.node_ext.as_deref(),
         Some(VDFS_EXT_FORM),
         "草稿必须与落成后用同一个渲染器"
     );
-    assert!(form.schema.is_some(), "没有 schema，表单渲染不出任何字段");
+    assert!(t.schema.is_some(), "没有 schema，表单渲染不出任何字段");
+}
 
-    // 整包导入那条不进详情页（内容来自本地文件），因此不需要 node_ext
-    let pack = types
-        .iter()
-        .find(|t| t.ext == VDFS_EXT_ZIP)
-        .expect("可导入整包");
-    assert_eq!(pack.source.as_deref(), Some(VDFS_NEW_SOURCE_FILE));
-    assert!(pack.node_ext.is_none() && pack.schema.is_none());
+/// 整包导入是**同一类型的另一个入口**，不另占类型位（用户第 3 点）。
+///
+/// 它内容取自本地文件、落成后与表单新建同形，所以包自己不声明 `node_ext` /
+/// `schema`——呈现由所属类型决定。
+#[tokio::test]
+async fn import_is_a_second_entry_of_the_same_type() {
+    let t = McpPlugin::default().root_new_type().await.unwrap();
+    let pack = t.import.as_ref().expect("可导入整包");
+    assert_eq!(
+        pack.ext, VDFS_EXT_ZIP,
+        "包地址后缀（pack_name_of 按它剥建议名）"
+    );
+    assert_eq!(pack.title, "MCP 包");
 }
 
 /// 无名字新建 = 写挂载点目录自身：id 由本插件生成（用户第 3 点）。

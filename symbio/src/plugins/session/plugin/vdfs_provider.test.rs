@@ -40,21 +40,21 @@ async fn vdfs_self_description_has_no_mount() {
     assert_eq!(meta.root_access.flags(), "l");
     assert!(!meta.root_access.traverse, "会话是叶子，不参与树遍历");
 
-    // 根下可新建「会话」——类型清单即「新建」入口的唯一依据。
+    // 根下可新建「会话」——类型即「新建」入口的唯一依据。
     // 它不在同步的 `PluginMeta` 上（schema 需运行期汇流），由 provider 现场给。
-    let types = p.new_types().await;
-    assert_eq!(types.len(), 1);
-    assert_eq!(types[0].ext, vdfs::VDFS_EXT_SESSION);
-    assert_eq!(types[0].title, "会话");
+    let t = p.root_new_type().await.expect("根下可新建会话");
+    assert_eq!(t.ext, vdfs::VDFS_EXT_SESSION);
+    assert_eq!(t.title, "会话");
+    assert!(t.import.is_none(), "会话无整包导入入口");
     // 草稿节点与落成后走**同一个渲染器**（`ext = session`，不是通用表单），
     // 故不声明 `node_ext`：新建会话直接进会话详情页
-    assert!(types[0].node_ext.is_none());
+    assert!(t.node_ext.is_none());
 
     // 新建会话是**草稿态**：会话还不存在，没有节点可挂 `schema`，故定义挂在**类型**上
     // ——选项行在会话创建前就要完整渲染（草稿选择随 `create` 一次写入 metadata）。
     // 本 fixture 未装配容器 ⇒ 收集不到任何贡献方 ⇒ 字段表为空；但定义本身**不缺席**
     // （缺席会让前端把「草稿态」误当成「没有选项」）。
-    let schema = types[0].schema.as_ref().expect("新建类型必须带选项定义");
+    let schema = t.schema.as_ref().expect("新建类型必须带选项定义");
     assert_eq!(schema["binding"], serde_json::json!("option"));
     assert_eq!(schema["sections"][0]["fields"], serde_json::json!([]));
 }

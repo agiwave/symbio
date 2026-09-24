@@ -160,14 +160,25 @@ pub const VDFS_ACTION_CLEAR: &str = "clear";
 
 // ==================== 可接受的新建类型 ====================
 
-/// 目录**可接受的新建元素类型**——「新建」入口的类型清单元素。
+/// 目录**可接受的新建元素类型**——「新建」入口的类型。
 ///
-/// 一个目录（含 provider 根）声明自己能新建哪些类型；使用方据此决定
-/// 是否显示「添加」入口、以及是否先弹类型选择：
+/// 一个目录（含 provider 根）**至多**声明一种自己能新建的元素类型
+/// （[`VdfsNode::new_type`] / [`VdfsProvider::root_new_type`] 都是 `Option`）：
 ///
-/// - 清单非空 → 显示添加入口；
-/// - 多于一项 → 先选类型再命名；
-/// - 为空 → 不显示添加入口。
+/// - `Some` → 显示添加入口；
+/// - `None` → 不显示添加入口（该目录由系统管理）。
+///
+/// ## 为什么是「一种」而不是一张清单
+///
+/// 一个目录接受的是**一类**东西：`session` 目录只收会话、`model` 目录只收模型。
+/// 曾经这里是一张清单，于是 `skill` / `mcp` 各自登记了两项——但那是**同一个
+/// 资源类型的两种入口形态**（表单新建 / 整包导入），不是两种类型：落成后它们
+/// 是同一形状的节点、走同一个渲染器。把「入口形态」混进「类型清单」的代价是
+/// 消费端必须先去重再判定，而任何「按类型」的判定（如 `vdfsScheme` 靠
+/// `ext = session` 认挂载点）都要遍历清单才能表达「是不是这种类型」。
+///
+/// 现在两类入口各归其位：**类型**（本结构）描述落成后的节点，**导入入口**
+/// （[`VdfsNewImport`]）描述同一个类型的另一种内容来源。
 ///
 /// ## 两条独立的键：`ext` 与 `node_ext`
 ///
@@ -220,6 +231,53 @@ pub struct VdfsNewType {
     /// 由 provider 下发——草稿详情页据此渲染出与落成后**同一张**表单。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema: Option<Value>,
+    /// **备选的整包导入入口**（可选）：声明后，使用方在「新建」上额外给出
+    /// 「导入」形态——内容取自本地文件（见 [`VdfsNewImport`]）。
+    ///
+    /// 它与 [`source`](Self::source) 的分工：`source = file` 是**主入口本身就是
+    /// 选文件**（没有「边看边填」的过程，如 agent 整包）；本字段是**主入口之外
+    /// 再给一个导入入口**（主入口仍是表单，如 skill / mcp）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import: Option<VdfsNewImport>,
+}
+
+/// **整包导入入口**——同一个新建类型的另一种内容来源（[`VdfsNewType::import`]）。
+///
+/// 「整包导入」= 选一个本地文件，把它的字节写进目标地址；provider 把它解释为
+/// **导入一个完整目录包**（语义自持，VDFS 不解释）。它不额外占一个操作，
+/// 也不另立一种节点：导入落成的就是该类型声明的那个节点（`node_ext` / `schema`
+/// 与表单新建完全一致）。
+///
+/// 三处与 [`VdfsNewType`] 不同的地方只有「包」本身：
+/// - [`ext`](Self::ext) 是**包地址的后缀**（如 `zip`）——目标名由文件名推导
+///   （`demo.zip` → `demo`），provider 用 `entry::pack_name_of` 按它剥建议名；
+/// - [`title`](Self::title) 是导入入口自己的展示名（如「技能包」）；
+/// - 没有 `node_ext` / `schema`——落成后的呈现由所属类型决定，不由包决定。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct VdfsNewImport {
+    /// 包地址末段的后缀（如 `zip`；`pack_name_of` 按它剥建议名）
+    pub ext: String,
+    /// 导入入口的展示标题（如「技能包」）
+    pub title: String,
+    /// 语义说明（缺省不显示）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+impl VdfsNewImport {
+    /// 仅 ext + title 的最小构造
+    pub fn new(ext: impl Into<String>, title: impl Into<String>) -> Self {
+        Self {
+            ext: ext.into(),
+            title: title.into(),
+            description: None,
+        }
+    }
+
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
 }
 
 impl VdfsNewType {
@@ -233,6 +291,7 @@ impl VdfsNewType {
             source: None,
             node_ext: None,
             schema: None,
+            import: None,
         }
     }
 
@@ -267,6 +326,12 @@ impl VdfsNewType {
     /// 供「定义需运行期汇流、缓存值可能尚未就绪」的构造点使用
     pub fn with_schema_opt(mut self, schema: Option<Value>) -> Self {
         self.schema = schema;
+        self
+    }
+
+    /// 追加**备选的整包导入入口**（主入口之外再给一条「导入」路径）
+    pub fn with_import(mut self, import: VdfsNewImport) -> Self {
+        self.import = Some(import);
         self
     }
 }
@@ -481,12 +546,21 @@ pub struct VdfsNode {
     /// 因此接入方可以自由定义（JSON Schema、宿主自有表单定义……皆可）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema: Option<Value>,
-    /// 本目录可接受的新建元素类型（「新建」入口的类型清单）。
+    /// 本目录可接受的**新建元素类型**（「新建」入口的唯一依据）。
     ///
-    /// 空（缺省）= 不可新建；非空 → 使用方显示添加入口（多于一项时先选类型）。
-    /// 仅目录节点有意义；文件节点恒为空。纯呈现元数据，VDFS 不解释其创建语义。
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub new_types: Vec<VdfsNewType>,
+    /// `None`（缺省）= 不可新建；`Some` → 使用方显示添加入口。
+    /// 仅目录节点有意义；文件节点恒为 `None`。纯呈现元数据，VDFS 不解释其创建语义。
+    ///
+    /// ⚠️ 它是**至多一种**（见 [`VdfsNewType`]）：一个目录接受的是**一类**东西。
+    /// 同一类型的多种入口形态由类型自己的 [`VdfsNewType::import`] 表达，不在这里
+    /// 堆成一张清单。
+    ///
+    /// `Box` 不是随手加的：`VdfsNewType` 带六个 `Option<String>` + `schema` +
+    /// 可选导入入口（≈250 字节），而 `VdfsNode` 是**全系统数量最多**的类型
+    /// （每条消息 / 每个文件 / 每个目录都是它）。这个字段只有**挂载点目录**才有，
+    /// 内联进结构体等于给每个消息节点白背那 250 字节——`Option<Box<_>>` 是 8 字节。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_type: Option<Box<VdfsNewType>>,
     /// 场景扩展字段（flatten）
     #[serde(flatten)]
     pub attributes: serde_json::Map<String, Value>,
@@ -517,7 +591,7 @@ impl Default for VdfsNode {
             binary: false,
             hidden: false,
             schema: None,
-            new_types: Vec::new(),
+            new_type: None,
             attributes: serde_json::Map::new(),
         }
     }
@@ -563,15 +637,11 @@ impl VdfsNode {
         self
     }
 
-    /// 声明本目录可接受的新建类型（整表替换）
-    pub fn with_new_types(mut self, new_types: Vec<VdfsNewType>) -> Self {
-        self.new_types = new_types;
-        self
-    }
-
-    /// 追加一个可接受的新建类型
-    pub fn with_new_type(mut self, new_type: VdfsNewType) -> Self {
-        self.new_types.push(new_type);
+    /// 声明本目录可接受的**新建元素类型**（至多一种；`None` = 不可新建）
+    ///
+    /// 装箱在**这里**完成，调用方不必知道字段是 `Box`（理由见字段文档）。
+    pub fn with_new_type(mut self, new_type: Option<VdfsNewType>) -> Self {
+        self.new_type = new_type.map(Box::new);
         self
     }
 
@@ -1177,9 +1247,10 @@ pub type VdfsChangeSink = Arc<dyn Fn(VdfsChange) + Send + Sync>;
 // path 段找到资源），再由 `req` 决定操作怎么落地；转发方**不需要**为了知道
 // 「把请求转给谁」而去 match 操作。
 //
-// `VdfsRequest` 只收拢**操作载荷**。唯一的例外是 [`VdfsRequest::Move`] 的 `to`：
-// 移动天然有**两个**地址，主地址（`from`）走 `path` 参数，目标地址随载荷携带，
-// 由 [`VdfsRequest::map_paths`] 与主地址一起翻译。
+// `VdfsRequest` 只收拢**操作载荷**——**地址一律走 `path` 参数**，载荷里没有
+// 任何地址字段。这不是巧合，是刻意的：地址有两个（`from` / `to`）的操作无法
+// 在「一个 provider = 一棵子树」的模型下定义清楚——provider 只认自己子树内的
+// 相对路径，「移动」跨出子树就不再是本层能表达的动作。见下方「没有 `Move`」。
 //
 // ## 为什么是枚举而不是一排 trait 方法
 //
@@ -1205,14 +1276,30 @@ pub type VdfsChangeSink = Arc<dyn Fn(VdfsChange) + Send + Sync>;
 //   内容一律取自本次写入，不要实现成「忽略内容、落默认值」；唯一例外是内容为空
 //   （「先建一个，随后再填」），由 provider 落最小合法内容。
 // - [`VdfsRequest::Delete`]：`recursive` 仅对目录有意义。
-// - [`VdfsRequest::Move`]：主地址（`from`）= `path` 参数，`to` 随载荷；分发方保证
-//   同挂载点内（跨挂载由上层拒绝）。
 // - [`VdfsRequest::Action`]：动作是 **provider 自持的动词**（如 [`VDFS_ACTION_TEST`]
 //   「测试连接」），VDFS 只透传 `(路径, 动作标识, 载荷)`，**不解释语义**；未实现
 //   的动作返回 [`VdfsError::NotImplemented`]，消费方据此不给出入口。
 // - [`VdfsRequest::Watch`] / [`VdfsRequest::Unwatch`]：订阅指定子树的数据变更，
 //   检测到变化时调用 `sink`（[`VdfsChangeSink`]，同步非阻塞）。无实时能力的
 //   provider 应返回成功——与「无实时能力」并不冲突，语义是「订阅成功、无事件」。
+//
+// ## 没有 `Move`
+//
+// 曾经有 `Move { to }`，现已删除，且**不应加回来**。理由是模型层面的：
+//
+// - 一个 provider = **一棵子树**，它只认自己子树内的相对路径。于是「同一个
+//   provider 内移动」= 同一棵树内的重命名，provider 用原生能力（`rename`）能做得
+//   很省事——这是它唯一的价值；
+// - 但**跨虚拟挂载树**时，`from` 与 `to` 分属两棵子树，「移动」就不再是原语，
+//   而是 `copy + delete`。此时 trait 上的 `Move` 表达不出这件事，只能由某个
+//   provider 假装自己同时拥有两端（`composite` 就不得不先解析 `to` 属于哪个子
+//   目录、再拒绝跨目录的情形——即「用错误表达能力的缺失」）；
+// - 于是 `Move` 变成只有**恰好一个**实现者能真做（物理盘），其余实现者一律
+//   `NotImplemented`；而「复制 + 删除」这个真正的通用形态反而无处安放。
+//
+// 因此本层不收 `Move`：**要用移动，由外层组合**（读 + 写 + 删，或专门的重命名
+// 访问层操作）。当前外层**也没有提供**它——重命名入口与 `vdfs/move` 协议操作、
+// `vdfs_move` 工具一并下线，需要时再加，加在外层而不是这里。
 #[derive(Clone)]
 pub enum VdfsRequest {
     /// 列出 `path` 目录的直接子节点（`l` 位）；`limit` / `before` 是**可选**的
@@ -1232,8 +1319,6 @@ pub enum VdfsRequest {
     Delete { recursive: bool },
     /// 在 `path` 处新建目录
     Mkdir,
-    /// 把 `path`（= from）移动 / 重命名为 `to`（分发方保证同挂载点内）
-    Move { to: String },
     /// 对 `path` 节点执行**节点动作**（provider 自持的动词，VDFS 只透传）
     Action {
         action: String,
@@ -1255,26 +1340,11 @@ impl std::fmt::Debug for VdfsRequest {
             Self::Write { .. } => "Write",
             Self::Delete { .. } => "Delete",
             Self::Mkdir => "Mkdir",
-            Self::Move { .. } => "Move",
             Self::Action { .. } => "Action",
             Self::Watch { .. } => "Watch",
             Self::Unwatch => "Unwatch",
         };
         f.write_str(name)
-    }
-}
-
-impl VdfsRequest {
-    /// 用 `f` 重写载荷内的**次要地址字段**（目前只有 [`Self::Move`] 的 `to`）。
-    ///
-    /// 主地址不在这里——它是 `dispatch` 的 `path` 参数，转发方直接以新相对路径
-    /// 调用即可。本方法的存在与 [`VdfsChange::map_paths`] 同一理由：**地址字段的
-    /// 翻译收进一个函数**，新增载荷内地址字段时漏译在结构上不可能。
-    pub fn map_paths(self, f: impl Fn(&str) -> String) -> Self {
-        match self {
-            Self::Move { to } => Self::Move { to: f(&to) },
-            other => other,
-        }
     }
 }
 
@@ -1387,9 +1457,12 @@ impl VdfsResponse {
 /// VDFS provider —— 把一个资源域暴露为一棵可被使用的资源子树。
 ///
 /// **provider 不知道自己被挂在哪里**：挂载名由使用方在注册时选定，trait 上没有
-/// 任何与挂载相关的成员；自述（标题 / 描述 / 顺序 / 图标 / 根访问位 / 根可新建
-/// 类型）由 [`crate::symbio_core::PluginMeta`] 承载（`Plugin::meta()`），不在本
-/// trait 上。
+/// 任何与挂载相关的成员；自述（标题 / 描述 / 顺序 / 图标 / 根访问位）由
+/// [`crate::symbio_core::PluginMeta`] 承载（`Plugin::meta()`）。
+///
+/// 唯一例外是 [`Self::root_new_type`]——它同样属于「根的自述」，却**不能**进
+/// `PluginMeta`：表单 schema 可能需要运行期汇流（async），而 `PluginMeta` 是同步
+/// 纯数据。因此这一项留在本 trait 上，由容器合成根节点时现场取。
 ///
 /// ## 唯一接口
 ///
@@ -1417,11 +1490,20 @@ pub trait VdfsProvider: Send + Sync + 'static {
         req: VdfsRequest,
     ) -> VdfsResult<VdfsResponse>;
 
-    /// 挂载根下**可新建的类型清单**（异步：表单 schema 可能需要运行期汇流，
-    /// 如 session 的选项定义来自 options 广播——这是它不进同步 [`crate::symbio_core::PluginMeta`]
-    /// 的原因）。容器合成根/子目录节点时现场调用；默认空 = 根下不可新建。
-    async fn new_types(&self) -> Vec<VdfsNewType> {
-        Vec::new()
+    /// **挂载根**可接受的新建元素类型（至多一种；`None` = 根下不可新建）。
+    ///
+    /// 名字带 `root_` 前缀，是因为它只描述**本 provider 的根目录**——而根节点
+    /// **不由 provider 产出**（容器合成，静态部分取自 `PluginMeta`），所以它没有
+    /// 别的渠道把这份自述交出去。这与 `PluginMeta::root_access` / `hidden` 同族：
+    /// 都是「根的自述」，只是这一项**不能进 `PluginMeta`**——表单 schema 可能需要
+    /// 运行期汇流（如 session 的选项定义来自 options 广播），而那是同步纯数据。
+    ///
+    /// provider 自己 `list` 出来的**子目录**若也可新建，由该目录节点自己的
+    /// [`VdfsNode::new_type`] 声明（容器只合成根，不碰更深层）。
+    ///
+    /// 容器合成根/子目录节点时现场调用；默认 `None`。
+    async fn root_new_type(&self) -> Option<VdfsNewType> {
+        None
     }
 }
 

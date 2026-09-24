@@ -66,10 +66,6 @@ impl VdfsProvider for Rec {
                 self.note(path);
                 Ok(VdfsResponse::Unit)
             }
-            VdfsRequest::Move { to } => {
-                self.note(&format!("{path}→{to}"));
-                Ok(VdfsResponse::Unit)
-            }
             _ => Err(VdfsError::NotImplemented),
         }
     }
@@ -164,29 +160,8 @@ async fn workdir_reaches_the_physical_layer() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// 两半之间不可移动：物理 → 虚拟在触达任何一层之前就被拒
-#[tokio::test]
-async fn move_across_halves_is_rejected_before_dispatch() {
-    let rec = Rec::new();
-    let vdfs = tool_with_root(rec.clone()).await;
-    let err = vdfs
-        .move_item(&ctx(), "a.txt", ".vdfsv2/other/b.txt")
-        .await
-        .unwrap_err();
-    assert!(matches!(err, VdfsError::Invalid(_)), "应为 {err:?}");
-    assert!(rec.seen().is_empty(), "判定应先于触达");
-}
-
-/// 同一半内移动：地址原样送到虚拟层
-#[tokio::test]
-async fn move_within_virtual_is_forwarded() {
-    let rec = Rec::new();
-    let vdfs = tool_with_root(rec.clone()).await;
-    vdfs.move_item(&ctx(), ".vdfsv2/x/a", ".vdfsv2/x/b")
-        .await
-        .unwrap();
-    assert_eq!(rec.seen(), vec!["x/a→x/b"]);
-}
+// 曾经这里有两例 `move` 用例（跨半被拒 / 同半转发）。移动整条下线后
+// `ToolVdfs` 不再有 `move_item`，跨半也不再可能（载荷里没有第二个地址）。
 
 /// `..` 穿越在分流阶段就失败，两条链路共享同一条守卫
 #[tokio::test]

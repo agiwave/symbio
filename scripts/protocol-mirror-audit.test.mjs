@@ -152,6 +152,7 @@ const VDFS_PROVIDER_RS_SRC = [
   rsStruct('VdfsAccess', 'read', 'write'),
   rsStruct('VdfsContent', 'path', 'text'),
   rsStruct('VdfsNewType', 'ext', 'title'),
+  rsStruct('VdfsNewImport', 'ext', 'title', 'description'),
   rsStruct('VdfsWriteResponse', 'path', 'created'),
   rsStruct('VdfsFieldError', 'field', 'message'),
   rsStruct('VdfsValidationError', 'message', 'fields'),
@@ -171,6 +172,7 @@ const VDFS_TS_SRC = [
   tsIface('VdfsAccess', 'read', 'write'),
   tsIface('VdfsContent', 'path', 'text'),
   tsIface('VdfsNewType', 'ext', 'title'),
+  tsIface('VdfsNewImport', 'ext', 'title', 'description'),
   tsIface('VdfsWriteResponse', 'path', 'created'),
   tsIface('VdfsFieldError', 'field', 'message'),
   tsIface('VdfsValidationError', 'message', 'fields'),
@@ -359,7 +361,7 @@ test('全部一致 → 退出码 0', () => {
   assert.equal(r.status, 0, r.stdout)
   assert.match(
     r.stdout,
-    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 6 张闭集词表 \+ D 组 18 对结构体字段 \+ E 组 1 条跨栈导航头/,
+    /A 组 \d+ 条常量镜像 \+ B 组 2 项缺席检查 \+ C 组 6 张闭集词表 \+ D 组 19 对结构体字段 \+ E 组 1 条跨栈导航头/,
   )
 })
 

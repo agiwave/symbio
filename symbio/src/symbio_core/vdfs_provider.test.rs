@@ -108,31 +108,60 @@ fn node_is_dir_by_access_not_kind() {
     assert!(!VdfsNode::file("a.md", "a", VdfsAccess::READ).is_dir());
 }
 
-/// 可接受的新建类型：目录节点携带、文件节点为空、空表不序列化
+/// 可接受的新建类型：**至多一种**、目录节点携带、文件节点无、缺省不序列化
 #[test]
-fn new_types_are_dir_scoped_and_omitted_when_empty() {
+fn new_type_is_single_dir_scoped_and_omitted_when_absent() {
     let file = VdfsNode::file("a.md", "a", VdfsAccess::READ);
-    assert!(file.new_types.is_empty());
+    assert!(file.new_type.is_none());
     assert!(
         serde_json::to_value(&file)
             .unwrap()
-            .get("new_types")
+            .get("new_type")
             .is_none(),
-        "空表不得序列化（不污染文件节点）"
+        "缺省不得序列化（不污染文件节点）"
     );
 
-    let dir = VdfsNode::dir("session", "会话", VdfsAccess::LIST_WRITE_TRAVERSE)
-        .with_new_type(VdfsNewType::new("session", "会话").with_description("新建会话"));
-    let v = serde_json::to_value(&dir).unwrap();
-    assert_eq!(v["new_types"][0]["ext"], serde_json::json!("session"));
-    assert_eq!(v["new_types"][0]["title"], serde_json::json!("会话"));
-    assert_eq!(
-        v["new_types"][0]["description"],
-        serde_json::json!("新建会话")
+    let dir = VdfsNode::dir("session", "会话", VdfsAccess::LIST_WRITE_TRAVERSE).with_new_type(
+        Some(VdfsNewType::new("session", "会话").with_description("新建会话")),
     );
+    let v = serde_json::to_value(&dir).unwrap();
+    assert_eq!(v["new_type"]["ext"], serde_json::json!("session"));
+    assert_eq!(v["new_type"]["title"], serde_json::json!("会话"));
+    assert_eq!(v["new_type"]["description"], serde_json::json!("新建会话"));
+    // 不可新建 = 显式 `None`，序列化后与缺省同形
+    let none = VdfsNode::dir("x", "x", VdfsAccess::LIST).with_new_type(None);
+    assert!(serde_json::to_value(&none)
+        .unwrap()
+        .get("new_type")
+        .is_none());
+
     let back: VdfsNode = serde_json::from_value(v).unwrap();
-    assert_eq!(back.new_types.len(), 1);
-    assert_eq!(back.new_types[0].ext, "session");
+    assert_eq!(
+        back.new_type.as_ref().map(|t| t.ext.as_str()),
+        Some("session")
+    );
+}
+
+/// 第二种入口形态：同一类型内挂**可选导入入口**，不额外占一个类型位
+#[test]
+fn new_type_carries_optional_import_entry() {
+    let plain = VdfsNewType::new("skill", "技能");
+    assert!(plain.import.is_none());
+
+    let with_import = VdfsNewType::new("skill", "技能")
+        .with_import(VdfsNewImport::new("zip", "技能包").with_description("导入整包（.zip）"));
+    let v = serde_json::to_value(&with_import).unwrap();
+    assert_eq!(v["ext"], serde_json::json!("skill"), "类型位仍是主入口");
+    assert_eq!(v["import"]["ext"], serde_json::json!("zip"));
+    assert_eq!(v["import"]["title"], serde_json::json!("技能包"));
+
+    let back: VdfsNewType = serde_json::from_value(v).unwrap();
+    assert_eq!(back.import.map(|i| i.title), Some("技能包".to_string()));
+    // 未声明导入时不序列化该字段
+    assert!(serde_json::to_value(&plain)
+        .unwrap()
+        .get("import")
+        .is_none());
 }
 
 /// 宿主方言的呈现描述经 `schema` 透传，VDFS 不解释其内容
@@ -292,27 +321,42 @@ fn context_downcast_and_require() {
     assert!(empty.host::<u32>().is_none());
 }
 
-/// 唯一接口的最小契约：**path 是独立参数**（分发先按 path、再按操作）；
-/// 载荷内的次要地址（`Move.to`）用 [`VdfsRequest::map_paths`] 翻译。
+/// 唯一接口的最小契约：**path 是独立参数**（分发先按 path、再按操作），
+/// 载荷里**不含任何地址字段**。
+///
+/// 曾经这里断言的是 `Move.to` 会被 `map_paths` 一起翻译。`Move` 已下线（理由见
+/// `VdfsRequest` 的「没有 `Move`」一节），`VdfsRequest::map_paths` 随之删除——
+/// **载荷里再也没有地址字段**，于是这条不变式收缩成「变体集合 == 对外操作面」，
+/// 用 `Debug` 名钉住：加一个变体就是改一次对外能力，必须是有意的（协议操作表、
+/// LLM 工具清单、前端都要跟着动）。
 #[test]
-fn request_carries_only_payload_and_map_paths_rewrites_to() {
-    let req = VdfsRequest::Move { to: "b".into() };
-    match req.map_paths(|p| format!("sub/{p}")) {
-        VdfsRequest::Move { to } => assert_eq!(to, "sub/b"),
-        _ => panic!("map_paths 不得改变变体"),
-    }
-
-    // 非地址载荷原样保留
-    let req = VdfsRequest::List {
-        limit: Some(10),
-        before: None,
-    };
-    match req.map_paths(|p| format!("mount/{p}")) {
-        VdfsRequest::List { limit, .. } => {
-            assert_eq!(limit, Some(10));
-        }
-        _ => panic!("变体不变"),
-    }
+fn request_variant_set_is_the_operation_surface() {
+    let sink: VdfsChangeSink = Arc::new(|_| {});
+    let reqs = [
+        VdfsRequest::List {
+            limit: None,
+            before: None,
+        },
+        VdfsRequest::Stat,
+        VdfsRequest::Read,
+        VdfsRequest::Write {
+            content: VdfsContent::text("a", "x"),
+        },
+        VdfsRequest::Delete { recursive: false },
+        VdfsRequest::Mkdir,
+        VdfsRequest::Action {
+            action: "test".into(),
+            payload: None,
+        },
+        VdfsRequest::Watch { sink },
+        VdfsRequest::Unwatch,
+    ];
+    let names: Vec<String> = reqs.iter().map(|r| format!("{r:?}")).collect();
+    assert_eq!(
+        names,
+        ["List", "Stat", "Read", "Write", "Delete", "Mkdir", "Action", "Watch", "Unwatch",],
+        "操作面变化必须是有意的（无 Move：移动由外层组合，不在本层）"
+    );
 }
 
 /// 「什么都不支持」的 provider：每个变体都显式 `NotImplemented`
@@ -347,7 +391,6 @@ async fn unsupported_ops_report_not_implemented() {
         },
         VdfsRequest::Delete { recursive: true },
         VdfsRequest::Mkdir,
-        VdfsRequest::Move { to: "b".into() },
         VdfsRequest::Action {
             action: "test".into(),
             payload: None,

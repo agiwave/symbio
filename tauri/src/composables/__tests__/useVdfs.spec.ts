@@ -43,7 +43,6 @@ vi.mock('@/services/vdfs', () => ({
   base64ToBytes: vi.fn(),
   deleteVdfs: vi.fn(),
   downloadBlob: vi.fn(),
-  moveVdfs: vi.fn(),
   runVdfsAction: vi.fn(),
   writeVdfsBinary: vi.fn(),
 }))
@@ -400,7 +399,7 @@ describe('useVdfs 新建 = 选中一张草稿节点（与「选中一项」同�
       kind: 'dir',
       status: 'active',
       access: 'l',
-      new_types: [MODEL_NEW_TYPE],
+      new_type: MODEL_NEW_TYPE,
     }
   }
 
@@ -410,7 +409,7 @@ describe('useVdfs 新建 = 选中一张草稿节点（与「选中一项」同�
     await settle()
     expect(api.canCreate.value).toBe(true)
 
-    api.startNew(api.creatableTypes.value[0]!)
+    api.startNew(api.creatableType.value!)
     await settle()
 
     const n = api.selectedNode.value!
@@ -430,7 +429,7 @@ describe('useVdfs 新建 = 选中一张草稿节点（与「选中一项」同�
     mocks.listVdfs.mockResolvedValue({ path: MODEL_DIR, node: dirNode(), items: [] })
     const { api, wrapper } = mountHost(MODEL_DIR)
     await settle()
-    api.startNew(api.creatableTypes.value[0]!)
+    api.startNew(api.creatableType.value!)
     await settle()
 
     mocks.writeVdfs.mockResolvedValue({ path: `${MODEL_DIR}/model-a1b2c3d4`, created: true })
@@ -453,9 +452,9 @@ describe('useVdfs 新建 = 选中一张草稿节点（与「选中一项」同�
     const { api, wrapper } = mountHost(MODEL_DIR)
     await settle()
 
-    api.startNew(api.creatableTypes.value[0]!)
+    api.startNew(api.creatableType.value!)
     const first = api.draftSeq.value
-    api.startNew(api.creatableTypes.value[0]!)
+    api.startNew(api.creatableType.value!)
     expect(api.draftSeq.value).toBe(first + 1)
 
     wrapper.unmount()

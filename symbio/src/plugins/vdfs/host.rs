@@ -263,7 +263,6 @@ pub async fn dispatch_with(
         VDFS_WRITE => write(fs, &vctx, ctx).await,
         VDFS_DELETE => delete(fs, &vctx, ctx).await,
         VDFS_MKDIR => mkdir(fs, &vctx, ctx).await,
-        VDFS_MOVE => move_item(fs, &vctx, ctx).await,
         VDFS_EDIT => edit(fs, &vctx, ctx).await,
         VDFS_SEARCH => search(fs, &vctx, ctx).await,
         VDFS_WATCH | VDFS_UNWATCH => watch(fs, &vctx, ctx, path == VDFS_WATCH).await,
@@ -489,26 +488,16 @@ async fn action(
     Ok(PluginPayload::new(&res))
 }
 
-async fn move_item(
-    root: &DynVdfsProvider,
-    vctx: &VdfsContext,
-    ctx: &Arc<dyn InvokeRequest>,
-) -> InvokeResponse<PluginPayload> {
-    let req: VdfsMoveRequest = payload_or_default(ctx);
-    let from = normalize_addr(&req.from)?;
-    let to = normalize_addr(&req.to)?;
-    // 「同一半内才可移动」由门面判定——本层只传地址
-    root.dispatch(vctx, &from, VdfsRequest::Move { to: to.clone() })
-        .await?;
-    Ok(PluginPayload::new(&VdfsMoveResponse { from, to }))
-}
-
 // ==================== 组合操作（edit / search）====================
 //
-// provider 只出**原子操作**（list / stat / read / write / delete / mkdir / move）；
+// provider 只出**原子操作**（list / stat / read / write / delete / mkdir / action）；
 // 组合逻辑在访问层**只写一次**——前端协议入口用下面的 handler，LLM 工具链路
 // （`provider::ToolVdfs`）直接调用 `edit_via` / `search_via`，任何 `VdfsProvider`
 // 实现方都无需重复实现这些逻辑。
+//
+// 注意**移动不在其中**：它不是组合操作而是被整条下线了——理由见
+// `symbio_core::vdfs_provider` 的「没有 `Move`」一节（跨子树时它不是原语，
+// 由外层组合才是它的正确位置；当前外层也没提供）。
 
 /// 统一换行符为 `\n`（用于精确替换匹配，与原生 `file_edit` 一致）
 fn normalize_line_endings(s: &str) -> String {

@@ -73,7 +73,7 @@ withDefaults(
     /** 当前会话 id；缺省 = 草稿态（选项缓冲于机制内部，随创建写入） */
     sessionId?: string
     /**
-     * 选项定义（会话节点 `schema` / `new_types[session].schema`）。
+     * 选项定义（会话节点 `schema` / `new_type.schema`）。
      *
      * 定义**随节点下发**，故由调用方透传而不是在本组件里回读：会话详情页拿的是
      * `props.node.schema`，与会话树解耦的面板（`ModelChatPanel`）拿的是 store 会话

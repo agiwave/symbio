@@ -33,7 +33,6 @@ pub mod delete;
 pub mod edit;
 pub mod list;
 pub mod mkdir;
-pub mod r#move;
 pub mod read;
 pub mod search;
 pub mod stat;
@@ -97,8 +96,7 @@ pub fn vdfs_tools(provider: Arc<ToolVdfs>) -> Vec<Arc<dyn Capability>> {
         Arc::new(search::SearchTool::new(provider.clone())),
         Arc::new(write::WriteTool::new(provider.clone())),
         Arc::new(delete::DeleteTool::new(provider.clone())),
-        Arc::new(mkdir::MkdirTool::new(provider.clone())),
-        Arc::new(r#move::MoveTool::new(provider)),
+        Arc::new(mkdir::MkdirTool::new(provider)),
     ]
 }
 

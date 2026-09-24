@@ -47,7 +47,6 @@ const props = defineProps<VdfsRendererProps>()
 const emit = defineEmits<{
   (e: 'save', text: string): void
   (e: 'delete'): void
-  (e: 'rename'): void
 }>()
 
 const readonly = computed(() => !vdfsAccessOf(props.node).write)
@@ -69,11 +68,10 @@ const disabledFlags = computed(() =>
   actions.value.map((a) => (a.id === 'save' ? !dirty.value || readonly.value : false))
 )
 
-/** 自有动作就地处理；机制动作（rename / delete）原样上抛给页面 */
+/** 自有动作就地处理；机制动作（delete）原样上抛给页面 */
 function onAction(a: DetailAction): void {
   if (a.id === 'save') save()
   else if (a.id === 'reset') reset()
-  else if (a.id === 'rename') emit('rename')
   else if (a.id === 'delete') emit('delete')
 }
 

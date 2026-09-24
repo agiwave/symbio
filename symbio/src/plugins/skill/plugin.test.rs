@@ -146,23 +146,21 @@ async fn new_type_declares_the_landing_detail() {
         dir: PluginDir::of(PLUGIN_SKILL),
     };
     // 「根下可新建类型」是 provider 的异步自述（不在同步的 `PluginMeta` 上）
-    let types = plugin.new_types().await;
-    let form = types
-        .iter()
-        .find(|t| t.ext == PLUGIN_SKILL)
-        .expect("根下可新建「技能」");
+    let t = plugin.root_new_type().await.expect("根下可新建「技能」");
+    assert_eq!(t.ext, PLUGIN_SKILL, "类型位是表单新建，不是整包导入");
     assert_eq!(
-        form.node_ext.as_deref(),
+        t.node_ext.as_deref(),
         Some(VDFS_EXT_FORM),
         "草稿必须与落成后用同一个渲染器"
     );
-    assert!(form.schema.is_some(), "没有 schema，表单渲染不出任何字段");
-    // 整包导入那条不进详情页（内容来自本地文件），因此不需要 node_ext
-    let pack = types
-        .iter()
-        .find(|t| t.ext == VDFS_EXT_ZIP)
-        .expect("可导入整包");
-    assert!(pack.node_ext.is_none() && pack.schema.is_none());
+    assert!(t.schema.is_some(), "没有 schema，表单渲染不出任何字段");
+
+    // 整包导入是**同一类型的另一个入口**（不另占类型位）：内容取自本地文件、
+    // 落成后与表单新建同形，故包自己不声明 node_ext / schema（`VdfsNewImport`
+    // 上根本没有这两个字段——呈现由所属类型决定）
+    let pack = t.import.as_ref().expect("可导入整包");
+    assert_eq!(pack.ext, VDFS_EXT_ZIP);
+    assert_eq!(pack.title, "技能包");
 }
 
 /// 无名字新建 = 写挂载点目录自身：id 由本插件生成（用户第 3 点）。

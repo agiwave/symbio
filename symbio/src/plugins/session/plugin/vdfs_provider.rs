@@ -16,10 +16,12 @@ impl vdfs::VdfsProvider for SessionPlugin {
     /// 根下可新建「会话」——类型定义带**选项 schema**（运行期汇流，见
     /// [`Self::session_schema`]）。这是本插件自述中唯一动态的部分，故留在
     /// provider 上现场取，而不进同步的 `PluginMeta`。
-    async fn new_types(&self) -> Vec<vdfs::VdfsNewType> {
-        vec![vdfs::VdfsNewType::new(vdfs::VDFS_EXT_SESSION, "会话")
-            .with_description("新建会话")
-            .with_schema_opt(self.session_schema().await)]
+    async fn root_new_type(&self) -> Option<vdfs::VdfsNewType> {
+        Some(
+            vdfs::VdfsNewType::new(vdfs::VDFS_EXT_SESSION, "会话")
+                .with_description("新建会话")
+                .with_schema_opt(self.session_schema().await),
+        )
     }
 
     /// 唯一入口：**先按 `path` 定位资源域，再按 `req` 执行操作**。
@@ -1266,7 +1268,7 @@ impl SessionPlugin {
             .collect()
     }
 
-    /// 会话的选项定义（`node.schema` / `new_types[].schema` 的取值）。
+    /// 会话的选项定义（`node.schema` / `new_type.schema` 的取值）。
     ///
     /// 定义与「是哪个会话」无关（见 `options::SessionPlugin::build_option_definition`），
     /// 因此清单里每一项挂的是**同一份**——`VdfsNode::schema` 是 `Value`，逐项 clone

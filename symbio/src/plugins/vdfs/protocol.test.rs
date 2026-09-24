@@ -6,7 +6,7 @@ use super::*;
 
 #[test]
 fn ops_are_unique_and_prefixed() {
-    assert_eq!(VDFS_OPS.len(), 14, "新增协议操作请同步本计数与文档");
+    assert_eq!(VDFS_OPS.len(), 13, "新增协议操作请同步本计数与文档");
     for op in VDFS_OPS {
         assert!(op.starts_with("vdfs/"), "协议路径必须以 vdfs/ 开头：{op}");
     }

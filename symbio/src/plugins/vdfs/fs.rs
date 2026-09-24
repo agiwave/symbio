@@ -143,17 +143,6 @@ fn route(raw: &str) -> VdfsResult<Half> {
     Ok(half_of(&normalize_addr(raw)?))
 }
 
-/// 两个地址是否落在**同一半**（虚拟 / 物理）。
-///
-/// 只用于 [`VdfsRequest::Move`]——它是唯一有两个地址的操作，两端必须同半，
-/// 否则「移动」就变成了「跨存储搬运」，那是本层不提供的能力。
-fn same_half(a: &str, b: &str) -> bool {
-    matches!(
-        (half_of(a), half_of(b)),
-        (Half::Virtual(_), Half::Virtual(_)) | (Half::Physical(_), Half::Physical(_))
-    )
-}
-
 /// 统一文件系统：虚拟根 + 物理磁盘，对外是一张脸
 pub struct UnifiedFs {
     /// 虚拟层根（容器注册的 root 级 provider，树内相对路径）
@@ -200,29 +189,14 @@ impl UnifiedFs {
 impl VdfsProvider for UnifiedFs {
     /// 唯一入口：按 `path` 前缀分流（虚拟 / 物理），再把请求整体递下去。
     ///
-    /// 主地址（`path` 参数）由本层剥前缀翻译；载荷内的次要地址（`Move.to`）经
-    /// [`VdfsRequest::map_paths`] 用同一套翻译规则改写，两处地址不会漂移。
+    /// 请求载荷里没有地址字段（见 `VdfsRequest` 的「没有 `Move`」一节），所以
+    /// 本层只需翻译 `path` 这一个地址。
     async fn dispatch(
         &self,
         ctx: &VdfsContext,
         path: &str,
         req: VdfsRequest,
     ) -> VdfsResult<VdfsResponse> {
-        // 两半之间不可移动：这是**唯一**有两个地址的操作，判定必须在翻译之前——
-        // 翻译会剥掉 `.vdfsv2` 前缀，「属于哪一半」的信息随之丢失，之后再判就晚了
-        // （且会静默地把「跨半」翻译成「同半内的一个相对地址」）。
-        if let VdfsRequest::Move { ref to } = req {
-            if !same_half(path, to) {
-                return Err(VdfsError::invalid(format!(
-                    "系统资源与磁盘文件之间不可移动：{path} → {to}"
-                )));
-            }
-        }
-        // 分流前先翻译载荷内的次要地址（用与主地址同一套前缀规则）
-        let req = req.map_paths(|p| match half_of(p) {
-            Half::Virtual(v) => v,
-            Half::Physical(p) => p,
-        });
         match route(path)? {
             Half::Virtual(v) => self.dispatch_virtual(ctx, &v, req).await,
             Half::Physical(p) => self.physical.dispatch(ctx, &p, req).await,
@@ -298,10 +272,6 @@ impl UnifiedFs {
             }
             VdfsRequest::Mkdir => {
                 root.dispatch(ctx, rel, VdfsRequest::Mkdir).await?;
-                Ok(VdfsResponse::Unit)
-            }
-            VdfsRequest::Move { to } => {
-                root.dispatch(ctx, rel, VdfsRequest::Move { to }).await?;
                 Ok(VdfsResponse::Unit)
             }
             VdfsRequest::Action { action, payload } => {

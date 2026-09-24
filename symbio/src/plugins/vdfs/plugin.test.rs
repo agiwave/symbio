@@ -48,7 +48,7 @@ async fn list_unknown_dir_errors() {
     assert!(matches!(err, PluginError::NotFound(_)));
 }
 
-/// 工具集：每个 VDFS 操作恰好一个工具
+/// 工具集：每个 VDFS 操作恰好一个工具（无 `vdfs_move`——移动已整条下线）
 #[test]
 fn tools_cover_all_ops() {
     let visitor: Arc<dyn crate::symbio_core::CapabilityVisitor> =
@@ -69,7 +69,6 @@ fn tools_cover_all_ops() {
             "vdfs_write",
             "vdfs_delete",
             "vdfs_mkdir",
-            "vdfs_move",
         ]
     );
 }

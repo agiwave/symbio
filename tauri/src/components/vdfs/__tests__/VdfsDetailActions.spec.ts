@@ -7,7 +7,7 @@
  *
  * 为什么值得单独一测：规则收敛之后，最容易出的两种错都是「点下去才发现不对」——
  * 某个渲染器**又把机制动作自己拼了一遍**（同页两个删除按钮），或者**把注入项吞掉**
- * （重命名 / 删除整段消失）。两侧都断言，两个方向就都关上了。
+ * （删除整段消失）。两侧都断言，两个方向就都关上了。
  */
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest'
@@ -30,9 +30,8 @@ function node(partial: Partial<VdfsNode> = {}): VdfsNode {
   }
 }
 
-/** 页面注入的机制动作（任何已落盘可写节点都有：重命名 + 删除） */
+/** 页面注入的机制动作（任何已落盘可写节点都有：删除） */
 const MECHANISM: DetailAction[] = [
-  { id: 'rename', label: '重命名', style: 'secondary' },
   { id: 'delete', label: '删除', style: 'danger', busy_label: '删除中…' },
 ]
 
@@ -52,15 +51,13 @@ describe('VdfsTextDetail 动作装配', () => {
 
   it('自有动作（保存 / 还原）在前，机制动作经 divider 在后', () => {
     const w = mountText()
-    expect(titles(w)).toEqual(['保存', '还原', '重命名', '删除'])
+    expect(titles(w)).toEqual(['保存', '还原', '删除'])
     expect(w.find('.ea-divider').exists()).toBe(true)
   })
 
-  it('机制动作 rename / delete 原样上抛给页面（渲染器不自行处理）', async () => {
+  it('机制动作 delete 原样上抛给页面（渲染器不自行处理）', async () => {
     const w = mountText()
-    await w.find('button[title="重命名"]').trigger('click')
     await w.find('button[title="删除"]').trigger('click')
-    expect(w.emitted('rename')).toHaveLength(1)
     expect(w.emitted('delete')).toHaveLength(1)
     // 渲染器没有 save 被误触（自有动作未被机制动作带跑）
     expect(w.emitted('save')).toBeUndefined()
@@ -78,17 +75,15 @@ describe('VdfsReadonlyDetail 动作装配', () => {
     const w = mount(VdfsReadonlyDetail, {
       props: { node: node(), mechanismActions: MECHANISM },
     })
-    expect(titles(w)).toEqual(['重命名', '删除'])
+    expect(titles(w)).toEqual(['删除'])
     expect(w.find('.ea-divider').exists()).toBe(false)
   })
 
-  it('机制动作 rename / delete 原样上抛给页面', async () => {
+  it('机制动作 delete 原样上抛给页面', async () => {
     const w = mount(VdfsReadonlyDetail, {
       props: { node: node(), mechanismActions: MECHANISM },
     })
-    await w.find('button[title="重命名"]').trigger('click')
     await w.find('button[title="删除"]').trigger('click')
-    expect(w.emitted('rename')).toHaveLength(1)
     expect(w.emitted('delete')).toHaveLength(1)
   })
 
