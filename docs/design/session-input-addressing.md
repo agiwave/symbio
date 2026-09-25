@@ -104,7 +104,7 @@ address-less 的，而子智能体空间只有 address 可达。
 
 ## 5. 后端改动清单
 
-### 5.1 新增 `VDFS_ACTION_ABORT`（`symbio_core/vdfs_provider.rs`，与 `truncate` / `clear` 并列）
+### 5.1 新增 `VDFS_ACTION_ABORT`（`symbio_core/vdfs/words.rs`，与 `truncate` / `clear` 并列）
 
 `session_at` 的 `Action` 臂：
 
@@ -128,7 +128,7 @@ action(<A>/message/<mid>, <ResumeAction>)   payload: {args?, reason?, answer?, m
 `useChatConnection.resume` 里的 `session_busy` 分支同款）。
 
 需要 ctx：`messages_at` 已经收到 `ctx: &VdfsContext`，经 `host_ctx` 取回
-`InvokeRequest` 即可（与 `agent_run` 的 `register_subsession` 同款手法）。
+`PluginInvokeRequest` 即可（与 `agent_run` 的 `register_subsession` 同款手法）。
 
 ### 5.3 收件箱写入带上 `WORKDIR`
 

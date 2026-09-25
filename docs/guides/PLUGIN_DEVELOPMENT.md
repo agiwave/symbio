@@ -36,13 +36,13 @@ pub mod plugin;
 use async_trait::async_trait;
 use std::sync::Arc;
 use symbio::symbio_core::{
-    InvokeRequest, InvokeResponse, Plugin, PluginError, PluginMeta, PluginPayload,
+    PluginInvokeRequest, PluginInvokeResponse, Plugin, PluginError, PluginMeta, PluginPayload,
 };
 
 pub struct MyPlugin;
 
 impl MyPlugin {
-    pub fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
+    pub fn build(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         Arc::new(Self)
     }
 
@@ -61,8 +61,8 @@ impl Plugin for MyPlugin {
 
     async fn route(
         self: Arc<Self>,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(symbio::symbio_core::PATH).unwrap_or_default();
 
         match path.as_str() {
@@ -79,8 +79,8 @@ impl Plugin for MyPlugin {
     async fn traverse(
         self: Arc<Self>,
         path: String,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         if path == symbio::symbio_core::TRAVERSE_AVAILABLE_TOOLS {
             let tools = vec![
                 symbio::symbio_core::CapabilityMeta {
@@ -140,8 +140,8 @@ plugin_author: me            # 作者
 的 `SYSTEM_PLUGINS`——**这是唯一的清单点**，且它属于**构造者**（`composite` 是通用容器，
 可以嵌套，因此不内置任何清单）。
 
-> 配置读写走 `symbio_core::plugin_dir` 的 `PluginDir` + `ConfigFile`：插件持有自己的
-> `ConfigFile`，读 / 写**自己**的 `PLUGIN.yml`（`ConfigFile::apply` = 校验 → 落内存 →
+> 配置读写走 `symbio_core::plugin::dir` 的 `PluginDir` + `PluginConfigFile`：插件持有自己的
+> `PluginConfigFile`，读 / 写**自己**的 `PLUGIN.yml`（`PluginConfigFile::apply` = 校验 → 落内存 →
 > 落自己的文件 → 广播）。对外地址自动是 `<根>/my_plugin/PLUGIN.yml`，无需写任何路由。
 
 ---
@@ -153,8 +153,8 @@ plugin_author: me            # 作者
 ```rust
 async fn route(
     self: Arc<Self>,
-    ctx: Arc<dyn InvokeRequest>,
-) -> InvokeResponse<PluginPayload>
+    ctx: Arc<dyn PluginInvokeRequest>,
+) -> PluginInvokeResponse<PluginPayload>
 ```
 
 **上下文键**：
@@ -185,8 +185,8 @@ async fn route(
 async fn traverse(
     self: Arc<Self>,
     path: String,
-    ctx: Arc<dyn InvokeRequest>,
-) -> InvokeResponse<PluginPayload>
+    ctx: Arc<dyn PluginInvokeRequest>,
+) -> PluginInvokeResponse<PluginPayload>
 ```
 
 **用途**：
@@ -206,7 +206,7 @@ pub struct MyContainer {
 
 #[async_trait]
 impl Plugin for MyContainer {
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(self: Arc<Self>, ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
         let (current, sub_path) = path.split_once('/').map_or((path.as_str(), ""), |(a, b)| (a, b));
 
@@ -234,7 +234,7 @@ impl Plugin for MyContainer {
 ```rust
 use symbio::symbio_core::PluginChannel;
 
-async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+async fn route(self: Arc<Self>, ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse<PluginPayload> {
     let (my_channel, peer_channel) = PluginChannel::pair(64);
 
     tokio::spawn(async move {
@@ -296,7 +296,7 @@ mod tests {
     #[tokio::test]
     async fn test_greet() {
         let plugin = MyPlugin::new();
-        let ctx = Arc::new(SimpleRequest::new(None, None));
+        let ctx = Arc::new(PluginSimpleRequest::new(None, None));
         ctx.set(PATH, "greet");
         ctx.set(NAME, "World");
 

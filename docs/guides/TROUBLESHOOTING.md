@@ -178,7 +178,7 @@ curl -X POST ... -d '{"path": "_root"}'
    `plugin_name` 不要写进配置字段里（它们由 `PluginDir` 自动剥离 / 补回）
 3. 确认写入路径对：前端「设置」页点开对应条目，或直接 `vdfs/write`
    `<根>/<插件>/PLUGIN.yml`——两条路写的是**同一个文件**
-4. 配置改完**不需要重启**（`ConfigFile::apply` 落盘后广播）；只有少数副作用
+4. 配置改完**不需要重启**（`PluginConfigFile::apply` 落盘后广播）；只有少数副作用
    （如网关重建监听）由插件自己在写完后处理
 5. 若刚从旧版本升级：旧 `<homedir>/config.yaml` 已一次性迁移并改名
    `config.yaml.migrated`——查历史值看那个留档文件

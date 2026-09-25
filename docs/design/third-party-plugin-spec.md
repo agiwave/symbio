@@ -199,7 +199,7 @@ weather_units: metric
 
 **`frame` 与 `error.code` 都复用现有资产**：帧的三态（`data`/`error`/`end`）与
 `PluginFrame` 的两态（`Data`/`Error`）同构；`error.code` 直接用
-`ErrorCode`（`error.rs:38`）——**这是评审 P4 记录的「可直接复用」**。
+`PluginErrorCode`（`error.rs:38`）——**这是评审 P4 记录的「可直接复用」**。
 
 ### 5.2 线上可表达的上下文子集
 
@@ -248,7 +248,7 @@ weather_units: metric
 而是**返回 init 时缓存下来的声明**：
 
 ```rust
-async fn traverse(self: Arc<Self>, path: String, ctx: Arc<dyn InvokeRequest>) -> … {
+async fn traverse(self: Arc<Self>, path: String, ctx: Arc<dyn PluginInvokeRequest>) -> … {
     match path.as_str() {
         // 宿主遍历到本插件时，把「声明」原样交出去——与内置插件的回填同形
         "available_tools"    => Ok(PluginPayload::new(&self.declared.capabilities)),
@@ -287,13 +287,13 @@ async fn traverse(self: Arc<Self>, path: String, ctx: Arc<dyn InvokeRequest>) ->
 
 ```rust
 /// 装配后、开始服务前调用一次。默认无操作。
-async fn start(self: Arc<Self>, _ctx: Arc<dyn InvokeRequest>) -> Result<(), PluginError> { Ok(()) }
+async fn start(self: Arc<Self>, _ctx: Arc<dyn PluginInvokeRequest>) -> Result<(), PluginError> { Ok(()) }
 
 /// 停用 / 卸载 / 进程退出前调用。默认无操作。
 ///
 /// `reason` 区分三种情形（可恢复停用 / 卸载 / 全局收尾），
 /// 因为插件的处置可能不同（如卸载时是否保留数据）。
-async fn stop(self: Arc<Self>, _reason: StopReason) -> Result<(), PluginError> { Ok(()) }
+async fn stop(self: Arc<Self>, _reason: PluginStopReason) -> Result<(), PluginError> { Ok(()) }
 ```
 
 ### 调用点（现有动作的钩子接线）

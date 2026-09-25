@@ -260,7 +260,7 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 | `gateway/status` | 运行状态（是否启用、协议、监听地址与端口、是否已在监听） |
 
 > 配置就是 `<根>/gateway/PLUGIN.yml`（扁平键 `inbound_*`）；写入走 `vdfs/write` →
-> `ConfigFile::apply` 落盘后，本插件在自己的 `write` 里做副作用（**内部 stop + start 重建监听**）。
+> `PluginConfigFile::apply` 落盘后，本插件在自己的 `write` 里做副作用（**内部 stop + start 重建监听**）。
 > `gateway/*` 自身接口**恒走 native**（前端不经 HTTP 访问本插件）。
 
 安全：非回环地址需 `inbound_token` 鉴权（回环地址免鉴权）；`inbound_readonly` 开启后仅放行只读白名单
@@ -296,7 +296,7 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 > **命名空间是目录名 `hook`，不是 `hooks`。** 容器（`composite`）按**目录名**建实例表并在
 > `route` 里按它分发（「目录名 = 实例名」），所以目录名才是真正的路由前缀。
-> 真实的调用点见 `symbio_core::paths::HOOK_FIRE`。
+> 真实的调用点见 `symbio_core::keys::paths::HOOK_FIRE`。
 
 | 路径 | 用途 |
 |------|------|

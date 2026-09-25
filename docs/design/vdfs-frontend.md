@@ -4,7 +4,7 @@
 范围：Symbio 前端的「三栏资源页」——一套 `vdfs/*` 协议驱动全部资源页的呈现
 关联：
 `docs/design/vdfs.md`（**机制规范，权威**：接口、访问位、协议操作、分层）、
-`symbio/src/symbio_core/vdfs_provider.rs`（纯接口）、
+`symbio/src/symbio_core/vdfs/`（纯接口）、
 `symbio/src/plugins/vdfs/protocol.rs`（线路信封）、
 `tauri/src/schemas/vdfs.ts`（前端数据契约）、
 `tauri/src/composables/useVdfs.ts`（页面逻辑）、
@@ -50,7 +50,7 @@
 
 | 层 | 落点 | 说明 |
 |---|---|---|
-| 纯接口 | `symbio_core/vdfs_provider.rs` | `VdfsProvider` trait + 域类型 |
+| 纯接口 | `symbio_core/vdfs/` | `VdfsProvider` trait + 域类型 |
 | 宿主桥 | `symbio_core/vdfs/host.rs` | 上下文注入 + 错误翻译 |
 | 线路信封 | `plugins/vdfs/protocol.rs` | 14 个 `vdfs/*` 操作（闭集 `VDFS_OPS`；清单见 `docs/CURRENT.md` §3.2）+ 使用方形状 |
 | 访问层 | `plugins/vdfs/fs.rs` + `host.rs` | `<根>`/物理分流（UnifiedFs）+ 翻译操作 + 树遍历 + 事件投递 |

@@ -7,7 +7,7 @@
 错误码是 **ABI 的一部分**，跨版本禁止随意变更。
 
 ```rust
-// symbio_core/error.rs（节选）— PluginError 是枚举，非结构体
+// symbio_core/plugin/error.rs（节选）— PluginError 是枚举，非结构体
 pub enum PluginError {
     NotFound(String),          // -> "NOT_FOUND"
     NotImplemented,            // -> "NOT_IMPLEMENTED"

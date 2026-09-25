@@ -36,7 +36,7 @@
 > **为什么没有「原生对象」变体**：历史上有一个 `Native(Arc<dyn Any>)`（自述
 > 「进程内原生接口」），但它**从未有过构造点**——`Arc<dyn Any>` 恰恰是协议层
 > 表达不了的东西，唯二的匹配点只能写「拒绝跨传输」。进程内对象的透传走 `ctx`
-> 的扩展桶（`InvokeRequest::set_raw`），与载荷枚举无关：载荷描述「这次调用
+> 的扩展桶（`PluginInvokeRequest::set_raw`），与载荷枚举无关：载荷描述「这次调用
 > **返回**什么」，扩展桶描述「这次调用**带着**什么」。
 >
 > **交付分类只有一处**：`gateway::server::classify_payload` 把 3 态分成
@@ -74,7 +74,7 @@ let (my_channel, peer_channel) = PluginChannel::pair(64);
 
 ---
 
-## 路由上下文 (InvokeRequest)
+## 路由上下文 (PluginInvokeRequest)
 
 请求的上下文注入接口（trait 定义在 core，签名以代码为准）。标准键：
 
@@ -200,8 +200,8 @@ AI 增量与资源变更**不随请求返回**，而是经全局事件总线广�
 `event_bus/subscribe`（HTTP/WS 入口见 [design/http-api-transport.md](../design/http-api-transport.md) §5.3），
 之后持续收到 `{ type: "bus_event", data: { kind, session_id, data } }` 帧，**按 `kind` 分派**。
 
-`kind` 的闭集是 `system` / `vdfs` <!-- vocab:KIND_ -->，常量定义在
-`symbio_core::event_bus`（`KIND_SYSTEM` / `KIND_VDFS`）。**发布方一律引
+`kind` 的闭集是 `system` / `vdfs` <!-- vocab:EVENT_BUS_KIND_ -->，常量定义在
+`symbio_core::event_bus`（`EVENT_BUS_KIND_SYSTEM` / `EVENT_BUS_KIND_VDFS`）。**发布方一律引
 常量**——`kind` 是跨进程字符串，改名不会编译失败，只会让消费方静默失效（`grep-audit`
 的 S-009 拦裸字面量）：
 
@@ -270,7 +270,7 @@ SingleFileVdfs, MemoryVdfs}`。套一层 `dyn` 工厂只会把一次构造换成
 ### `PLUGIN.yml` 的保留键
 
 保留键属于**装配方**（容器 / 插件管理插件），插件自己的配置不得占用同名键。
-单一清单见 `symbio_core::plugin_dir::RESERVED_KEYS`——读写时的「剥离 / 保留」都遍历它。
+单一清单见 `symbio_core::plugin::dir::RESERVED_KEYS`——读写时的「剥离 / 保留」都遍历它。
 
 | 键 | 谁写 | 说明 |
 |---|---|---|

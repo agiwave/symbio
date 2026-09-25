@@ -318,7 +318,7 @@ ADR-010 删掉了「差异集中在一张 trait」的适配层，但落盘那一
   实现，差异（标题、状态、`ext`、`schema`、写前校验、写后内存同步）由调用点以普通
   Rust 参数显式传入。之所以也**不走** `create_object` 工厂：不存在第二种实现，
   套 `dyn` 只是把一次构造换成一次字符串查表。
-- **协议零改动**：`symbio_core/vdfs_provider.rs`（纯接口）与 `plugins/vdfs/*`
+- **协议零改动**：`symbio_core/vdfs/`（纯接口）与 `plugins/vdfs/*`
   （协议 / 访问层 / 物理层）本次**未修改**——这是对边界刻意的自我约束。
 
 **后果**：
@@ -883,7 +883,7 @@ Agent 本身就是一棵插件树，技能/MCP 复用宿主既有插件目录、
 
 前端 `tauri/src/schemas/` 与后端 `symbio_core` 之间是**手工镜像**：`chat_message.ts`
 与 `schemas/session/chat_message.rs` 逐字段对应，`schemas/vdfs.ts` 与
-`vdfs_provider.rs` / `plugins/vdfs/protocol.rs` 的常量逐字对应。第二轮前端机制化
+`vdfs/words.rs` / `plugins/vdfs/protocol.rs` 的常量逐字对应。第二轮前端机制化
 复核把"跨栈重复"列为剩余最大的一块，并给出两条路：
 
 - **生成侧**：引入 `ts-rs` / `schemars`，从 Rust 类型导出 TS；
@@ -1221,7 +1221,7 @@ ADR-020 的三批（E/F/G）把**数据面**收干净了——通道换成出口
 **后果**：
 
 - `PluginPayload::new(&json!{...})` 这个包装在 24 个工具里逐处消失；
-  `confirm_prompt_payload` / `execute_skill` 的返回从 `InvokeResponse<PluginPayload>`
+  `confirm_prompt_payload` / `execute_skill` 的返回从 `PluginInvokeResponse<PluginPayload>`
   收成 `Result<Value, _>`。
 - **CLI 端到端**（`--provider LMStudio`）7 个场景：普通流式对话 / 交互模式 `cmd`
   流式工具 / 交互模式 `ask_user`（编排层构造 `waiting_user_action`）/ 自动模式
@@ -1345,7 +1345,7 @@ core 里的契约，因为 A 看不见 B。
 1. **判定依据是依赖方数量**：只被一个模块依赖的内容一律**下沉回该模块**。
    不问「它够不够底层」，只问「除它之外，还有谁依赖」。
 2. 内容进 core 时，**在模块文档里写下依赖方对照表**：谁依赖、依赖哪个函数、
-   改它要同时改谁。`symbio_core/tool_name.rs` 是范本——它同时列出
+   改它要同时改谁。`symbio_core/capability/tool_name.rs` 是范本——它同时列出
    `to_wire`（被 `model` 插件依赖）与 `resolve`（被 `session` 插件依赖），
    并说明两者是**同一契约的两半**（改一个不改另一个 = 静默错位）。
 3. **模块文档里写反面例子**：`tool_name.rs` 明确记下「工具结果字段名读取器只有
@@ -1374,7 +1374,7 @@ core 里的契约，因为 A 看不见 B。
 
 **后果**：
 
-- `symbio_core::tool_name` 保留（**两个模块**依赖：`model` 出、`session` 入），
+- `symbio_core::capability::tool_name` 保留（**两个模块**依赖：`model` 出、`session` 入），
   且带依赖方对照表 + 反面例子。
 - `symbio_core::tool_result` 删除；`extract_result` 退回
   `session/tool_executor.rs`，就地升级为「判定顺序即约定」+ 两个字段名常量
@@ -1501,7 +1501,7 @@ VDFS 是**虚拟动态文件系统**（`d` = dynamic）——节点可能落盘�
 2. **S22–S25 + 批次 E/G**：会话运行态也并入转写流，与消息共用 `seq`；`VdfsChange`
    收窄为 `{path, change}` 三个取值。
 
-两次拆解的理由写在 `docs/design/vdfs.md` §9 与 `vdfs_provider.rs` 的「变更通知」小节：
+两次拆解的理由写在 `docs/design/vdfs.md` §9 与 `vdfs/change.rs` 的「变更通知」小节：
 
 - **频道没有流内序号**（丢帧不可检测）；
 - **载荷全量/增量混合**（消费端必须猜「这次是追加还是替换」）。
@@ -1616,7 +1616,7 @@ VDFS 是**虚拟动态文件系统**（`d` = dynamic）——节点可能落盘�
 `Transcript.seq` 的语义变更（帧序号 → 位置序号分配器）、逐文件改动清单与同批约束。
 
 **这次纠正的范围（不只本 ADR）**：把「顺序是投递属性」当成前提的**历史性理解错误**
-落在多处文档，已一并纠正——`docs/design/vdfs.md` §9、`vdfs_provider.rs` 的「变更通知」、
+落在多处文档，已一并纠正——`docs/design/vdfs.md` §9、`vdfs/change.rs` 的「变更通知」、
 `docs/reference/ROUTES.md`、`docs/design/http-api-transport.md` §5.3、
 `docs/architecture/PROTOCOLS.md` / `DATA_FLOW.md`、`docs/design/vdfs-frontend.md`、
 `session/docs/node-state-streaming.md`（§8 不变量 #10 / #20）、
@@ -2158,8 +2158,8 @@ ADR-026 已在**后端**解决了「空间怎么自驱动」（写 inbox 即入�
 1. trait 加两个**可选**钩子（有默认空实现 ⇒ 16 个内置 impl 一行不改、行为零变化）：
 
    ```rust
-   fn start(&self, ctx: Arc<dyn InvokeRequest>) -> Result<(), PluginError>;      // 同步
-   async fn stop(self: Arc<Self>, reason: StopReason) -> Result<(), PluginError>; // 异步
+   fn start(&self, ctx: Arc<dyn PluginInvokeRequest>) -> Result<(), PluginError>;      // 同步
+   async fn stop(self: Arc<Self>, reason: PluginStopReason) -> Result<(), PluginError>; // 异步
    ```
 
 2. **`start` 为什么是同步的**：装配路径是**同步**的——`HomePlugin::build` →
@@ -2175,7 +2175,7 @@ ADR-026 已在**后端**解决了「空间怎么自驱动」（写 inbox 即入�
 
    ⚠️ 二者不对称是**刻意的**，由各自的调用上下文决定，不是随手写的。
 
-4. `StopReason` 三态：`Disabled`（可恢复停用：目录与数据都保留）/ `Uninstalled`
+4. `PluginStopReason` 三态：`Disabled`（可恢复停用：目录与数据都保留）/ `Uninstalled`
    （卸载：目录随后被删除）/ `Shutdown`（全局收尾）。
    为什么区分：插件的**处置不同**——「卸载时是否保留自己的缓存 / 数据」是可恢复
    停用时不必做、卸载时必须当场决定的事；把它塞进一个布尔量，就会在插件里长出一堆
@@ -2222,7 +2222,7 @@ ADR-026 已在**后端**解决了「空间怎么自驱动」（写 inbox 即入�
   两类**收尾**本期**不接**——仓库当前没有任何进程退出钩子（`cli/` 与
   `tauri/src-tauri/` 都没有 `ctrlc` / `ExitRequested` 接线），新增它是独立的一件事
   （要动两个入口、且要决定「谁负责遍历整棵树发 stop」），与本次
-  「加钩子不改变现状」的目标冲突。它们与 `StopReason::Shutdown` 一并留待接线时做。
+  「加钩子不改变现状」的目标冲突。它们与 `PluginStopReason::Shutdown` 一并留待接线时做。
 
 ---
 

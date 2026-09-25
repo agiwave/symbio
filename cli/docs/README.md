@@ -20,4 +20,4 @@
 - **构建**：`cli/scripts/build-cli.mjs`（注入 C 工具链并归一化路径分隔符）
 
 > 设计铁律：CLI **不改动** `symbio/` 的任何一行代码、不改动协议。它只是把「请求 →
-> `SimpleRequest`」这一层适配从 Tauri IPC 换成进程内直连。
+> `PluginSimpleRequest`」这一层适配从 Tauri IPC 换成进程内直连。

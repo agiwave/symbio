@@ -17,7 +17,7 @@ Symbio 的设计核心是**分形插件架构 (Fractal Plugin Architecture)**。
 
 ### 2. 对称通信 (Symmetrical Communication)
 
-通过统一的 `route()` 入口，抹平同步调用、异步流式输出和双向会话的差异；用一个枚举覆盖 3 种载荷：`Empty` / `Data(SerializeData)` / `Session(PluginChannel)`。
+通过统一的 `route()` 入口，抹平同步调用、异步流式输出和双向会话的差异；用一个枚举覆盖 3 种载荷：`Empty` / `Data(PluginSerializeData)` / `Session(PluginChannel)`。
 
 ### 3. 能力路由 (Capability Routing)
 
@@ -31,8 +31,8 @@ Symbio 的设计核心是**分形插件架构 (Fractal Plugin Architecture)**。
 
 源码分三层，**权威清单在代码里**（各模块 `//!` 头注释写明自己是什么）：
 
-- **`symbio_core/` — 内核契约层**：`Plugin` / `InvokeRequest` / `PluginPayload`、能力系统
-  （`capability*`）、跨端 schema（`schemas/`）、资源访问契约（`vdfs_provider`）、模型契约
+- **`symbio_core/` — 内核契约层**：`Plugin` / `PluginInvokeRequest` / `PluginPayload`、能力系统
+  （`capability*`）、跨端 schema（`schemas/`）、资源访问契约（`vdfs`）、模型契约
   （`model_provider`）、上下文键（`keys`）等。**准入判据是「依赖方数量」，不是「够不够底层」**
   （[ADR-023](../DECISIONS.md)）。
   模块清单见 [`symbio_core/mod.rs`](../../symbio/src/symbio_core/mod.rs)。

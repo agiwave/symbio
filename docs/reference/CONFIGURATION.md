@@ -57,7 +57,7 @@ work:
 
 | 数据 | 位置 | 由谁决定 |
 |------|------|----------|
-| **插件配置** | `<homedir>/<插件>/PLUGIN.yml`（系统级插件在 `<homedir>/PLUGIN.yml`） | 配置的**拥有者**自己读写（`ConfigFile`）；地址 `<根>/<插件>/PLUGIN.yml`，**没有第二条配置协议** |
+| **插件配置** | `<homedir>/<插件>/PLUGIN.yml`（系统级插件在 `<homedir>/PLUGIN.yml`） | 配置的**拥有者**自己读写（`PluginConfigFile`）；地址 `<根>/<插件>/PLUGIN.yml`，**没有第二条配置协议** |
 | 插件资源（model / mcp / skill 等） | `<homedir>/<类别>/<id>/<主文件>` | 类别段名 = 插件名（如 `model/<id>/provider.json`、`mcp/<id>/server.json`、`skill/<id>/SKILL.md`）；由 `symbio/src/providers/vdfs_service/` 的集中实现读写，**不可配置、无第二种后端** |
 | 会话与其消息 | 会话自己的 store（`SessionStore`），非 `plugins/<类别>/<id>/` 资源布局 | 已收为**单一具体类型**：持久会话 = 磁盘 `<根>/<id>/{session.json, messages.json}`，临时会话 = 进程内驻留。`store_kind` / sqlite / memory 后端选型**已删除**（见 ADR-011 及 `session/store/mod.rs` 顶部「它不是什么」）|
 | Agent 目录 | agent 目录（工作区级 + 全局级双层，`AgentDirStore` 自管） | 工作区切换，不经 `vdfs_service` |
@@ -225,7 +225,7 @@ inbound_readonly: false
 
 | 配置 | 热加载方式 |
 |------|-----------|
-| 插件配置（`PLUGIN.yml`） | 一次 `vdfs/write` → `ConfigFile::apply` = **校验 → 落内存 → 落自己的文件 → 广播**，订阅方（前端 / LLM）随事件收敛；需要副作用的插件（如网关重建监听）在自己的 `write` 返回后执行 |
+| 插件配置（`PLUGIN.yml`） | 一次 `vdfs/write` → `PluginConfigFile::apply` = **校验 → 落内存 → 落自己的文件 → 广播**，订阅方（前端 / LLM）随事件收敛；需要副作用的插件（如网关重建监听）在自己的 `write` 返回后执行 |
 | 插件集合 | 容器**不缓存**子插件清单——每次现取（`children_of`），因此新增 / 移除插件目录即时可见 |
 | 资源条目 | 走 VDFS 的 `watch` / `unwatch` 事件，前端按路径防抖刷新（**禁止轮询**） |
 

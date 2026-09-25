@@ -3,7 +3,7 @@
 状态：现行规范（纯接口 + 统一文件系统 + 容器拓扑）
 范围：Symbio 全部「资源与数据访问」能力（前端 + 大语言模型）
 关联：
-`symbio/src/symbio_core/vdfs_provider.rs`（**纯接口，权威定义：`VdfsProvider` trait
+`symbio/src/symbio_core/vdfs/`（**纯接口，权威定义：`VdfsProvider` trait
 + 域类型 + 路径工具**）、
 `symbio/src/symbio_core/vdfs/host.rs`（symbio 桥：上下文注入 + 错误翻译）、
 `symbio/src/plugins/vdfs/protocol.rs`（线路信封：`vdfs/*` 请求响应 + 协议路径）、
@@ -81,7 +81,7 @@ VDFS 的核心是**一个包含全部资源操作的接口**——`VdfsProvider`
 **core 只暴露纯 object-safe trait**，协议适配与线路形状留在插件内部。
 
 ```
-symbio_core/vdfs_provider.rs   ← centerpiece：VdfsProvider trait
+symbio_core/vdfs/*.rs          ← centerpiece：VdfsProvider trait
                                   + 域类型（VdfsNode / VdfsContent / VdfsAccess /
                                     VdfsWriteResponse / VdfsError / VdfsChange）
                                   + VdfsContext + 路径工具 + 回填
@@ -103,7 +103,7 @@ trait 上收拢全部操作（列 / 读 / 写 / 删 / 建 / 移 / 订阅），�
 
 | 层 | 文件 | 允许依赖 | 说明 |
 |---|---|---|---|
-| 纯接口（centerpiece） | `symbio_core/vdfs_provider.rs` | `std` / `serde` / `serde_json` / `async_trait` | `VdfsProvider` trait、域类型、`VdfsContext`、路径工具、回填 |
+| 纯接口（centerpiece） | `symbio_core/vdfs/` | `std` / `serde` / `serde_json` / `async_trait` | `VdfsProvider` trait、域类型、`VdfsContext`、路径工具、回填 |
 | 宿主桥 | `symbio_core/vdfs/host.rs` | 宿主自有 | 上下文注入、`VdfsError` ↔ `PluginError` |
 | 线路信封 | `plugins/vdfs/protocol.rs` | 上面两层 | `vdfs/*` 请求 / 响应、协议路径常量与 `VDFS_OPS`（变更事件与 `VdfsChange` 同形） |
 | 地址分流 | `plugins/vdfs/fs.rs` | 上面两层 | `UnifiedFs`：`<根>` / 物理分流、口径映射、`normalize_addr` |
@@ -113,7 +113,7 @@ trait 上收拢全部操作（列 / 读 / 写 / 删 / 建 / 移 / 订阅），�
 
 硬约束：
 
-- **纯接口层不得出现 `use crate::…`**。`vdfs_provider.rs` 可原样抽出为独立
+- **纯接口层不得出现 `use crate::…`**。`vdfs/` 可原样抽出为独立
   crate，供任何宿主（不限于 symbio）复用。
 - **core 不暴露线路类型**：`VdfsPathRequest` / `VdfsListResponse` … 只存在于
   `plugins/vdfs/protocol.rs`，core 的任何 `pub` 面都不得出现它们。这是与
@@ -235,7 +235,7 @@ D:/tmp/a.txt     绝对路径                          ─┘
 | `name` | 父内唯一标识（路径段） |
 | `title` / `description` | 展示标题 / 语义说明（缺省 `title` = `name`） |
 | `kind` | **场景标签**（自由取值；构造器缺省给 `dir` / `file`，场景可覆盖）；机制不据此判定 |
-| `status` | `active` / `working` / `disabled` / `failed` / `unknown`；缺省 `active`，**空串 = 显式声明「无运行态」**（`VDFS_STATUS_NONE`，列表不画状态点）。词表权威处是 `symbio_core::vdfs_provider` 的 `VDFS_STATUS_*` <!-- vocab:VDFS_STATUS_ --> |
+| `status` | `active` / `working` / `disabled` / `failed` / `unknown`；缺省 `active`，**空串 = 显式声明「无运行态」**（`VDFS_STATUS_NONE`，列表不画状态点）。词表权威处是 `symbio_core::vdfs` 的 `VDFS_STATUS_*` <!-- vocab:VDFS_STATUS_ --> |
 | `access` | 访问位（§4），**机制唯一的能力依据** |
 | `ext` | 呈现扩展名——**前端据此选择详情页面**（§7） |
 | `size` / `updated_at` / `children` / `binary` | 元数据 |
@@ -378,7 +378,7 @@ size  updated_at  children  binary  hidden  schema  new_type  attributes
 - **定义与校验同源**：提交值交给 `DetailDefinition::validate`，失败即字段级
   `VdfsValidationError`（§8）。字段定义由**配置的拥有者**产出（默认值从该插件的
   `Default` 读出），不另写一份 schema 字面量。
-- **落盘就是写自己的文件**：`ConfigFile::apply` 的一条链是
+- **落盘就是写自己的文件**：`PluginConfigFile::apply` 的一条链是
   **校验 → 落内存 → 落自己的文件 → 广播**。没有 `save_config` 路由、没有切片推送、
   没有父插件参与——配置回到拥有者手上，父插件不认识任何子插件的配置。
 - **身份字段是保留键**：`plugin_provider`（工厂 id）/ `plugin_name`（实例名）与配置
@@ -386,9 +386,9 @@ size  updated_at  children  binary  hidden  schema  new_type  attributes
   装配方据此判定「这个目录是不是一个可加载的插件」：文件存在、可解析、且
   `plugin_provider` 指向一个已注册的工厂（见 §13.2）。
 - **副作用留在插件**：写完配置之后还要做什么（如网关重建监听）在插件自己的
-  `write` 里做——`ConfigFile::apply` 返回后再执行，机制不引入回调抽象。
-- **实现只写一次**：`symbio_core::plugin_dir` 的 `PluginDir`（目录 + 配置读写，
-  含遗留字段清理）与 `ConfigFile`（节点形状 + 定义校验 + 落盘）——
+  `write` 里做——`PluginConfigFile::apply` 返回后再执行，机制不引入回调抽象。
+- **实现只写一次**：`symbio_core::plugin::dir` 的 `PluginDir`（目录 + 配置读写，
+  含遗留字段清理）与 `PluginConfigFile`（节点形状 + 定义校验 + 落盘）——
   **值 + 一组函数**，不是 trait：没有注册表、没有回调。
 - **凭据在配置里**：配置文件与其它节点一样受访问位约束（`r`），即**可读**。
   对外暴露面（如网关的只读白名单）需自行拒绝落在 `<插件目录>/PLUGIN.yml` 上的读取。
@@ -462,7 +462,7 @@ core 不暴露**）：
 **移动不在协议里**：`VdfsRequest` 只收**操作载荷**，地址一律走 `path` 参数——载荷里
 没有第二个地址字段。跨虚拟挂载树的「移动」本质是 `copy + delete`，不是核心原语，
 故整条链（`vdfs/move` / `vdfs_move` 工具 / 前端重命名入口）都不提供；要用移动由
-**外层组合**（理由见 `symbio_core::vdfs_provider` 的「没有 `Move`」一节）。
+**外层组合**（理由见 `symbio_core::vdfs::request` 的「没有 `Move`」一节）。
 
 错误经 `VdfsError` 表达，桥层翻译为宿主错误（symbio → `PluginError`）。
 `VdfsError::Invalid(VdfsValidationError)` 的结构化字段级错误序列化为 JSON 置于
@@ -665,7 +665,7 @@ for (name, child) in children {
 - provider 在 `write` 内完成必填 / 范围 / 枚举 / 类型 / 跨字段校验，失败返回
   `VdfsError::Invalid(VdfsValidationError { message, fields })`。
 - **校验先于副作用**：校验不过时 provider 不得触达落盘或任何下游写入
-  （配置文件的 `ConfigFile::apply` 即「先 `decode` 校验 → 再落内存 → 最后落自己的
+  （配置文件的 `PluginConfigFile::apply` 即「先 `decode` 校验 → 再落内存 → 最后落自己的
   文件」；校验不过时内存与磁盘都不动）。
 - 前端据 `fields[].field` 逐字段提示，与 `schema` 中的字段键对齐。
 
@@ -829,7 +829,7 @@ for (name, child) in children {
   事件投递——`UnifiedFs` 只依赖纯接口，可原样带走）；
 - 容器的注册接线（子插件收集方式随宿主插件机制而变）。
 
-`symbio_core/vdfs_provider.rs`（纯接口）与 `plugins/vdfs/protocol.rs`（线路信封）
+`symbio_core/vdfs/`（纯接口）与 `plugins/vdfs/protocol.rs`（线路信封）
 **原样复用**——前者零宿主依赖，后者只依赖前者。
 
 ## 11. 与既有机制的关系
@@ -850,7 +850,7 @@ for (name, child) in children {
   子目录内部层级由各 provider 的 `list` 表达。
 - **资源存储（`providers/vdfs_service`）**：属于**宿主实现层**（与
   `providers/embedding` 同层），**不在** §2.1 / §2.2 的纯接口层里——
-  `symbio_core/vdfs_provider.rs` 只有 trait 与域类型，零 `use crate::`。
+  `symbio_core/vdfs/` 只有 trait 与域类型，零 `use crate::`。
   三个实现（`SingleFileVdfs` / `DirVdfs` / `MemoryVdfs`）本身就是**完整的
   `impl VdfsProvider`**，插件直接组合具体类型，**不走 `create_object` 工厂**
   （不存在第二种实现，套 `dyn` 只是把一次构造换成一次字符串查表）。
@@ -863,7 +863,7 @@ for (name, child) in children {
 ## 12. 一致性要求
 
 - 任何新的资源访问功能 **不得** 绕开 `vdfs/*` 新造私有协议。
-- `symbio_core/vdfs_provider.rs` **不得**引入 `crate::` 依赖；宿主专有类型一律经
+- `symbio_core/vdfs/` **不得**引入 `crate::` 依赖；宿主专有类型一律经
   `VdfsContext` 注入。
 - 线路类型（请求 / 响应信封、`VDFS_OPS`）**不得**上浮到 core；它们只属于
   `plugins/vdfs/protocol.rs`。
@@ -887,7 +887,7 @@ for (name, child) in children {
 - 消费者 **不得**按 `kind` 判定能力；只能依据 `access`。
 - 前端 **不得**硬编码资源类型清单、标签、路径模板、能力开关；只允许登记
   ext → 渲染器、子目录名 → 图标这类纯 UI 映射。
-- 接口变更先改 `vdfs_provider.rs`（trait 是 centerpiece），线路变更先改
+- 接口变更先改 `vdfs/provider.rs`（trait 是 centerpiece），线路变更先改
   `plugins/vdfs/protocol.rs`，再改访问层与前端两侧契约。
 
 ## 13. 范例（实例，非机制组成部分）
@@ -917,7 +917,7 @@ for (name, child) in children {
 provider 那样每个子插件一个：声明自带目录名，不存在归属歧义。收集结果**写回请求
 ctx**，同一次请求里稍后被委派的 provider（即本插件）据此读到清单，因此**无需反查
 插件目录、无需硬编码插件表、也不需要协议上的新字段**。条目由
-`entry_of(&ConfigFile)` 生成，标题 / `ext` / `schema` 都取自 `ConfigFile::node()`；
+`entry_of(&PluginConfigFile)` 生成，标题 / `ext` / `schema` 都取自 `PluginConfigFile::node()`；
 **图标不进协议**（前端 `kind:<目录名>` 的纯 UI 映射）。通道缺席时本插件照常只列
 自有分区。
 
@@ -946,7 +946,7 @@ ctx**，同一次请求里稍后被委派的 provider（即本插件）据此读
   `<根>/<插件>/PLUGIN.yml` 照常可寻址，也照常出现在设置页清单里）。
 - 在 `traverse` 中把该视图登记进 `register_vdfs_root` 槽位（§6.2）。
 
-**子插件从哪来：插件目录**（见 `symbio_core::plugin_dir`）。容器是**通用**容器
+**子插件从哪来：插件目录**（见 `symbio_core::plugin::dir`）。容器是**通用**容器
 （可以嵌套另一个容器），子项因此不来自父插件塞进来的配置表，而来自**扫描插件根**：
 
 - 布局：`<homedir>/<插件>/PLUGIN.yml`（配置）+ 该插件自己的数据 / 资源，

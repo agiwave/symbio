@@ -24,11 +24,11 @@
 
 | 机制 | 位置 | 本接口如何依托 |
 |---|---|---|
-| 分形路由唯一入口 | `root.route(ctx)`；入口参数是上下文键值对（`symbio_core/keys.rs`） | 服务只做"请求 → `SimpleRequest`"翻译，业务零改动 |
+| 分形路由唯一入口 | `root.route(ctx)`；入口参数是上下文键值对（`symbio_core/keys/`） | 服务只做"请求 → `PluginSimpleRequest`"翻译，业务零改动 |
 | 必需插件清单 | `plugins/home/plugin.rs` 的 `SYSTEM_PLUGINS`，经 ctx 键 `REQUIRED_PLUGINS` 随构造传入 | `gateway` 在清单内，容器据此补目录 / 配置文件并实例化（容器**不内置**任何清单） |
 | 插件构造 | `Composite::build` **扫描自己的目录（系统根）**，逐目录 `create_object`，并把插件自身目录经 `PLUGIN_DIR` 告知它 | 网关的开关就是它自己 `PLUGIN.yml` 里的 `inbound_enabled` |
-| 插件配置 | **没有第二条配置协议**：配置 = 插件目录里的 `PLUGIN.yml`（`<根>/gateway/PLUGIN.yml`），读写走 `vdfs/read` / `vdfs/write` | 网关只要把自己的 `ConfigFile` 声明出去即可被设置页与 LLM 同时读写 |
-| 设置页清单 | `ConfigurableVisitor` 收集通道（`symbio_core/configurable.rs`）：插件在 `traverse` 里 `announce_configurable` 一次 | 网关的「开放接口」自动出现在设置页，**前端零改动** |
+| 插件配置 | **没有第二条配置协议**：配置 = 插件目录里的 `PLUGIN.yml`（`<根>/gateway/PLUGIN.yml`），读写走 `vdfs/read` / `vdfs/write` | 网关只要把自己的 `PluginConfigFile` 声明出去即可被设置页与 LLM 同时读写 |
+| 设置页清单 | `ConfigurableVisitor` 收集通道（`symbio_core/capability/configurable.rs`）：插件在 `traverse` 里 `announce_configurable` 一次 | 网关的「开放接口」自动出现在设置页，**前端零改动** |
 | 设置页表单 | 由配置的**拥有者**产出 `DetailDefinition`（作为节点 `schema` 下发） | 网关表单由后端下发定义，前端表单渲染器自动渲染 |
 | 宿主级上下文注册表先例 | `HomedirRegistry`（`symbio_core/homedir.rs`） | 全局弱引用登记表的同款风格（见 §4.1 的 `parent` 转发） |
 | 连接管理 | `RouteConnectionManager`（tauri 宿主层，纯 tokio） | 宿主层用它管前端流式连接；网关在 WS 循环内自持连接生命周期 |
@@ -51,7 +51,7 @@ symbio/src/plugins/gateway/
 └── server.rs     // 手写 HTTP/1.1 + WebSocket：/api/v1/invoke、/api/v1/ws、/api/v1/health
 ```
 
-- 插件 id：`PLUGIN_GATEWAY = "gateway"`（`symbio_core/ids.rs`）。
+- 插件 id：`PLUGIN_GATEWAY = "gateway"`（`symbio_core/keys/ids.rs`）。
 - 配置键、默认值与只读白名单：见 [reference/CONFIGURATION.md](../reference/CONFIGURATION.md)「Gateway 插件」；设置页表单由**配置的拥有者**下发的 `DetailDefinition` 渲染。
 - **零新依赖、纯 Rust**（手写 HTTP/1.1 + WS 帧解析，不引 axum / tungstenite），与"无 C 编译"铁律一致。
 
@@ -76,14 +76,14 @@ home 级路径（`home/*`、`work/*`）由 `Composite`
 | 时机 | 行为 |
 |---|---|
 | `build(ctx)` | 读 config；`inbound_enabled` 且 `inbound_protocol = http` → `spawn` server（保存 `JoinHandle` + `CancellationToken`）；`native` 或关闭则不监听 |
-| 配置写入 | `vdfs/write` `<根>/gateway/PLUGIN.yml` → `ConfigFile::apply` 落盘 → 本插件在自己的 `write` 返回后 **stop 旧 server + start 新 server**（端口/开关变更必须重启监听，不能像普通配置那样只改内存） |
+| 配置写入 | `vdfs/write` `<根>/gateway/PLUGIN.yml` → `PluginConfigFile::apply` 落盘 → 本插件在自己的 `write` 返回后 **stop 旧 server + start 新 server**（端口/开关变更必须重启监听，不能像普通配置那样只改内存） |
 | `home/reload` | 插件实例被重建（worker composite 清空重建），旧实例 `Drop` → cancel token → 端口释放；新实例按新配置启动 |
 | `Drop` | `CancellationToken::cancel()` + `abort` task |
 | 客户端断开 | 连接读写半关闭 → 结束该会话的 pump 任务（**不** abort 后端任务，与 `tauri://destroyed` 行为一致：AI 继续跑完并持久化） |
 
 > ⚠️ 注意：改配置**不会**自动触发 `home/reload`（`reload` 只在切 homedir 时用）。
 > 所以"开关/端口热生效"必须由插件自己在写配置之后完成，这是插件自治，符合机制
-> ——机制不引入回调抽象，`ConfigFile::apply` 只管「校验 → 落内存 → 落自己的文件 →
+> ——机制不引入回调抽象，`PluginConfigFile::apply` 只管「校验 → 落内存 → 落自己的文件 →
 > 广播」。
 
 ---

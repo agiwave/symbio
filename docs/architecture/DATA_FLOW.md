@@ -37,7 +37,7 @@ sequenceDiagram
 | 6 | home 分发 | `symbio/src/plugins/home/plugin.rs` | 根插件 `home`：自身终结 `home/*`、`work/*`，其余转发 `worker` |
 | 7 | composite 分发 | `symbio/src/plugins/composite/` | `worker`（Composite）**扫描自己的目录**（其下一层目录即一个插件，每个一个 `PLUGIN.yml`）挂载**全部**子插件：`agent` / `session` / `model` / `local` / `web` / `skill` / `mcp` / `telegram` / `gateway` / `plugin_manager` / `hook` / `event_bus`；清单由构造者经 `REQUIRED_PLUGINS` 传入，容器不内置 |
 | 8 | 插件处理 | 各插件 `plugin.rs` 的 `route()` | 路径清单见 [ROUTES.md](../reference/ROUTES.md) |
-| 9 | 错误返回 | `symbio_core/error.rs` | 错误码对照 [ERROR_CODES.md](../reference/ERROR_CODES.md) |
+| 9 | 错误返回 | `symbio_core/plugin/error.rs` | 错误码对照 [ERROR_CODES.md](../reference/ERROR_CODES.md) |
 
 **排障口诀**：路径不对 → 查 #6/#7 挂载与 [ROUTES.md]；载荷不对 → 查 [PROTOCOLS.md] 的 Wire 协议；错误码不明 → 查 #9。
 
@@ -46,8 +46,8 @@ sequenceDiagram
 | # | 环节 | 代码位置 | 说明 |
 |---|------|---------|------|
 | 1 | 入口 | `symbio/src/plugins/session/plugin.rs` | 用户消息 = **`vdfs/write(<根>/session/<id>/inbox)`**；`chat/send` 只是它的薄包装（写即入队，空间自己消费，见 `session/inbox.rs` 与 ADR-026）。**会话编排权归 session**（见 `chat_pipeline.rs` 头注释） |
-| 2 | 能力收集 | `symbio/src/plugins/session/chat_pipeline.rs` | session 调 `collect_capabilities` → `parent.traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播收工具；**agent 仅当 `ctx[AGENT_ID]` 存在时贡献**（不选 agent 的会话照常运行）；收集期错误通道（`report_error` / `take_errors`）在 `symbio_core/capability_error.rs` |
-| 3 | 默认能力 | `symbio_core/tools.rs` | `DefaultToolVisitor`（从 agent 内部上浮的公共实现） |
+| 2 | 能力收集 | `symbio/src/plugins/session/chat_pipeline.rs` | session 调 `collect_capabilities` → `parent.traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播收工具；**agent 仅当 `ctx[AGENT_ID]` 存在时贡献**（不选 agent 的会话照常运行）；收集期错误通道（`report_error` / `take_errors`）在 `symbio_core/capability/error.rs` |
+| 3 | 默认能力 | `symbio_core/capability/tools.rs` | `DefaultToolVisitor`（从 agent 内部上浮的公共实现） |
 | 4 | 模型调用（单轮） | `symbio/src/plugins/model/bound_provider.rs` | `execute_turn` = **一次** LLM 调用：4 协议适配（OpenAI / Anthropic / Gemini / Ollama）+ SSE 解析 + 事件出口。`model` **不做轮次循环** |
 | 5 | 工具循环（轮次） | `symbio/src/plugins/session/chat_loop.rs`（`close_turn` → `process_tool_calls_async`） | 「LLM → 工具 → LLM」的循环归 **session**（`gate_turn` / `close_turn` 判定下一步）。工具实现方：`local` / `web` / `vdfs` / `mcp` / `skill` / `telegram` / `agent` 等 |
 | 6 | 前端显示 | `event_bus` 的 `KIND_VDFS` 变更（消费端先 `vdfs/watch` 登记） | **显示只由节点状态驱动**：消息是 `<根>/session/<id>/message/<mid>` 这个**文件**，会话运行态是会话节点（`<根>/session/<id>`）的 `status`——两者都是 VDFS 变更。`updated` 带 `delta` = 尾部追加（零回读）；无 `delta` = 回读。顺序是**节点属性**（`ChatMessage.seq`），与到达顺序无关。见 [`session/docs/node-state-streaming.md`](../../symbio/src/plugins/session/docs/node-state-streaming.md) §5.1 与 §11 |
@@ -105,7 +105,7 @@ sequenceDiagram
 | 会话状态不刷新（角标/停止按钮不动） | 链路二 #6：`emit_session_state` 是否被调（运行态的唯一出口）；前端对 `<根>/session/<id>` 的 `updated` 变更是否在收敛（运行态的唯一通道） |
 | 外部 HTTP 调用失败 | 链路三 #1/#2（health → 鉴权） |
 | 资源增删查异常 | 通用：资源访问链路（`vdfs/*`）#2/#3/#4 + [design/vdfs.md](../design/vdfs.md) §13.4 + `symbio/src/providers/vdfs_service/` |
-| 错误码含义 | [ERROR_CODES.md]（源：`symbio_core/error.rs`） |
+| 错误码含义 | [ERROR_CODES.md]（源：`symbio_core/plugin/error.rs`） |
 | 配置不生效 | [CONFIGURATION.md] + `plugin_manager` 插件（`<根>/plugin_manager` 的 `vdfs/list` / `vdfs/read`） |
 
 ---

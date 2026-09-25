@@ -19,7 +19,7 @@
 两者调用的是**同一套上下文键**（`PATH` / `PAYLOAD` / `SESSION_ID` / `WORKDIR` / …）
 与**同一份协议**，因此本 CLI 的引入**没有改动 `symbio/` 的任何一行代码，也没有动协议**。
 
-- 上行：`SimpleRequest` 装上下文 → `root.route(ctx)`（`Arc<dyn Plugin>` 进程内直连）
+- 上行：`PluginSimpleRequest` 装上下文 → `root.route(ctx)`（`Arc<dyn Plugin>` 进程内直连）
 - 下行：**两条连接，各归其域**——消息实时面订阅 **`session/stream`**（消息帧：
   `session_id` + 流内单调 `seq` + 一条 `ChatMessage`，按 `content` / `delta` / `status`
   直接落地到终端视图）；会话运行态
