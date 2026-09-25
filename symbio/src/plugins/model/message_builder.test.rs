@@ -5,7 +5,7 @@
 use super::*;
 
 use crate::symbio_core::schemas::session::chat_message::MessageStatus;
-use crate::symbio_core::turn::{build_assistant_messages, StreamChildIds, ToolCallInfo};
+use crate::symbio_core::llm::turn::{build_assistant_messages, StreamChildIds, ToolCallInfo};
 
 const TURN_ID: &str = "turn-0001";
 

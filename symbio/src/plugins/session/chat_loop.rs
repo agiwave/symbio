@@ -48,7 +48,7 @@ pub(crate) use self::io::{
 pub(crate) use self::state::{Gate, SessionContext, TurnExit, TurnRequest, TurnResult, TurnState};
 pub(crate) use self::turn::{close_turn, settle_reasoning};
 
-use super::chat_session::{ChatSession, PersistentChatSession, SESSION_HANDLE};
+use super::chat_session::{PersistentChatSession, SESSION_HANDLE};
 use super::model_chat;
 use crate::plugin_error;
 use crate::plugin_info;
@@ -57,7 +57,7 @@ use crate::symbio_core::schemas::{
     session::chat_message::{ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType},
     HookEvent,
 };
-use crate::symbio_core::turn::{
+use crate::symbio_core::llm::turn::{
     build_tool_message, emit_message, emit_removed, emit_state, short_id, ToolCallInfo, TurnOutput,
 };
 use crate::symbio_core::FinishReason;

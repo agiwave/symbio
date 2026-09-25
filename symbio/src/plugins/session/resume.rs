@@ -33,13 +33,13 @@
 //! `execute_tool_async` 直接复用，无需 session 层重复 `prepare_capability_manager`。
 
 use super::chat_loop::ChatOrchestrator;
-use super::chat_session::ChatSession;
+use super::chat_session::PersistentChatSession;
 use super::tool_executor::{apply_not_executed, execute_tool_async};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType, ResumeAction,
     ResumeRequest,
 };
-use crate::symbio_core::turn::{emit_message, emit_removed, emit_state, short_id};
+use crate::symbio_core::llm::turn::{emit_message, emit_removed, emit_state, short_id};
 use crate::symbio_core::{AbortSignal, EventSink, InvokeRequest, PluginError};
 use crate::{plugin_error, plugin_info};
 use serde_json::{json, Value};
@@ -69,7 +69,7 @@ pub async fn process_resume(
     ctx: &Arc<dyn InvokeRequest>,
     sink: &EventSink,
     abort: &AbortSignal,
-    session: &Arc<dyn ChatSession>,
+    session: &Arc<PersistentChatSession>,
     req: ResumeRequest,
 ) -> Result<ResumeOutcome, PluginError> {
     match req.action {
@@ -107,7 +107,7 @@ pub async fn process_resume(
 /// 注意：本函数不重新执行 LLM，仅清理 Failed Turn。LLM 请求由 chat_loop 的 turn 循环
 /// 在加载 session 历史后自动发起（用户原消息仍在历史中）。
 async fn process_retry_turn(
-    session: &Arc<dyn ChatSession>,
+    session: &Arc<PersistentChatSession>,
     sink: &EventSink,
     req: &ResumeRequest,
 ) -> Result<ResumeOutcome, PluginError> {
@@ -172,7 +172,7 @@ async fn process_tool_resume_action(
     ctx: &Arc<dyn InvokeRequest>,
     sink: &EventSink,
     abort: &AbortSignal,
-    session: &Arc<dyn ChatSession>,
+    session: &Arc<PersistentChatSession>,
     req: ResumeRequest,
 ) -> Result<ResumeOutcome, PluginError> {
     // 1. 加载会话消息

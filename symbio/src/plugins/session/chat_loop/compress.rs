@@ -628,7 +628,7 @@ pub(crate) async fn retry_compaction(
     ctx: &Arc<dyn InvokeRequest>,
     sink: &EventSink,
     abort: &AbortSignal,
-    session: &Arc<dyn ChatSession>,
+    session: &Arc<PersistentChatSession>,
     target_id: &str,
 ) -> Result<(), PluginError> {
     let mut messages = session.get_messages().await?;

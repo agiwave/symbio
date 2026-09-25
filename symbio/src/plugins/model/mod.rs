@@ -10,6 +10,8 @@
 //!   + `resolve_protocol_id` 与 `MODEL_PROTOCOL_*` 注册常量
 //! - `bound_provider`:  `BoundProvider`——绑定配置与协议实现，实现 core 纯
 //!   `ModelProvider` trait（session 的唯一模型契约）
+//! - `http`:            HTTP 重试机器（客户端单例 + 带中止的 POST，五态 `PostResult`）
+//! - `stream`:          SSE 流循环（字节流 → `TurnOutput`，流式子节点实时下发）
 //! - `plugin`:          Core ModelPlugin entry point + factory registration + provider 注册表
 //!
 //! 边界：会话循环（chat_loop / turn_processor / tool_executor / resume /
@@ -18,8 +20,10 @@
 
 mod bound_provider;
 mod detail;
+mod http;
 pub mod message_builder;
 mod model_providers;
 mod plugin;
 mod protocols;
+mod stream;
 mod types;

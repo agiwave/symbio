@@ -11,21 +11,19 @@ pub mod exec;
 mod homedir;
 mod ids;
 mod keys;
+pub mod llm;
 mod logger;
 mod memory;
-pub mod model_provider;
 pub mod option;
 mod paths;
 mod plugin;
 mod plugin_dir;
 pub mod providers;
 pub mod schemas;
-pub mod sse;
 mod text;
 pub mod tool_name;
 mod tools;
 mod transport;
-pub mod turn;
 pub mod vdfs;
 pub mod vdfs_provider;
 
@@ -34,7 +32,7 @@ pub use capability_error::{
 };
 pub use creator::{create_object, creator_ids, has_creator};
 pub use memory::{render_segment, InjectedMemory, MemoryFile, NodeSpec, SegmentSpec, AGENTS_FILE};
-pub use model_provider::{FinishReason, ModelProvider, ProtocolEvent, Usage};
+pub use llm::model_provider::{FinishReason, ModelProvider, ProtocolEvent, Usage};
 pub use option::{
     collect_options, DefaultOptionVisitor, OptionVisitor, TRAVERSE_AVAILABLE_OPTIONS,
 };
@@ -66,17 +64,16 @@ pub use plugin_dir::{
     PluginIdentity, KEY_API, KEY_AUTHOR, KEY_CAN_DISABLE, KEY_DESCRIPTION, KEY_ENABLED, KEY_GRANTS,
     KEY_NAME, KEY_PROVIDER, KEY_REQUIRED, KEY_TITLE, KEY_VERSION, PLUGIN_FILE, RESERVED_KEYS,
 };
-pub use sse::{PartialLineExtractor, SseLineParser};
+pub use llm::sse::{PartialLineExtractor, SseLineParser};
 pub use text::{floor_char_boundary, truncate_bytes};
 pub use tools::DefaultToolVisitor;
 pub use transport::{
     PluginChannel, PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire,
 };
-pub use turn::{
+pub use llm::turn::{
     build_assistant_messages, build_tool_message, emit_delta, emit_message, emit_removed,
-    emit_state, execute_post_with_abort, get_http_client, parse_sse_stream, removed_frame,
-    short_id, state_frame, PostResult, StreamChildIds, ToolCallAccumulator, ToolCallInfo,
-    TurnOutput,
+    emit_state, removed_frame, short_id, state_frame, StreamChildIds, ToolCallAccumulator,
+    ToolCallInfo, TurnOutput,
 };
 pub use vdfs::{
     DynVdfsProvider, VdfsAccess, VdfsChange, VdfsContent, VdfsError, VdfsNode, VdfsProvider,

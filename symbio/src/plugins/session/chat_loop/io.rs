@@ -75,7 +75,7 @@ pub(crate) async fn persist_messages(
 /// 时回退内存会话：复用 [`PersistentChatSession::detached`]（默认配置 + 内存存储后端），
 /// 不再另写一份 `ChatSession` 实现（审计 B1）——原先的 `FallbackChatSession` 与
 /// `EphemeralChatSession` 是同一契约的额外两份实现，缺孤儿清理与轮次窗口，与持久版行为漂移。
-pub(crate) async fn open_chat_session(ctx: &Arc<dyn InvokeRequest>) -> Arc<dyn ChatSession> {
+pub(crate) async fn open_chat_session(ctx: &Arc<dyn InvokeRequest>) -> Arc<PersistentChatSession> {
     if let Some(handle) = ctx.get(SESSION_HANDLE) {
         return handle.0.clone();
     }

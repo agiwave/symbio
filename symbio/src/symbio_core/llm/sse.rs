@@ -30,7 +30,7 @@
 //! 不再是 O(行长的平方)；字段名与转义规则全部留在协议层，core 不再认识任何
 //! 协议细节。
 
-use crate::symbio_core::model_provider::ProtocolEvent;
+use super::model_provider::ProtocolEvent;
 
 /// SSE 行解析契约（协议层实现）。
 pub trait SseLineParser: Send + Sync {

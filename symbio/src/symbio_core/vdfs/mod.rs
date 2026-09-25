@@ -16,7 +16,7 @@
 //! ```
 //!
 //! **core 只暴露纯接口**（[`crate::symbio_core::vdfs_provider`]），线上形状与
-//! 访问层都在 vdfs 插件内部——与 [`crate::symbio_core::model_provider`] 的组织
+//! 访问层都在 vdfs 插件内部——与 [`crate::symbio_core::llm::model_provider`] 的组织
 //! 方式一致（core = 纯 trait；协议适配在插件）。
 //!
 //! ## 谁拥有拓扑

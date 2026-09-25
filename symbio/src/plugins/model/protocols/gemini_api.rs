@@ -9,10 +9,10 @@ use super::super::model_providers::ModelProviderConfig;
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole};
 use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
 use super::{ModelProtocol, MODEL_PROTOCOL_GEMINI_API};
-use crate::symbio_core::sse::PartialLineExtractor;
+use crate::symbio_core::llm::sse::PartialLineExtractor;
 use crate::symbio_core::tool_name::to_wire;
-use crate::symbio_core::{
-    get_http_client, FinishReason, InvokeRequest, PluginError, ProtocolEvent, SseLineParser, Usage,
+use crate::plugins::model::http::get_http_client;
+use crate::symbio_core::{FinishReason, InvokeRequest, PluginError, ProtocolEvent, SseLineParser, Usage,
 };
 
 pub struct GeminiProtocol;

@@ -10,7 +10,7 @@
 //!   （chat_loop）在本轮结束时将会话置于 `AwaitingInput(user)`；用户答案以一条普通
 //!   `user` 消息回填后，新一轮会重跑该工具。详见 USER_INPUT_MECHANISM 设计文档。
 
-use crate::symbio_core::turn::{
+use crate::symbio_core::llm::turn::{
     build_tool_message, emit_message, emit_state, short_id, ToolCallInfo,
 };
 use crate::symbio_core::{dir_from_ctx, PLUGIN_SESSION};

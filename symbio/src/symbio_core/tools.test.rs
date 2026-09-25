@@ -5,7 +5,7 @@
 use super::*;
 
 use crate::symbio_core::schemas::session::chat_message::ChatMessage;
-use crate::symbio_core::turn::TurnOutput;
+use crate::symbio_core::llm::turn::TurnOutput;
 use crate::symbio_core::{CapabilityMeta, ExecEnv, PluginError};
 use async_trait::async_trait;
 

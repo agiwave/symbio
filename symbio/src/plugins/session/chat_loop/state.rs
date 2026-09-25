@@ -17,7 +17,7 @@ use super::*;
 /// - session 用于管理会话历史（滑动窗口/自动截断/持久化）
 pub(crate) struct SessionContext {
     pub messages: Vec<ChatMessage>,
-    pub session: Arc<dyn ChatSession>,
+    pub session: Arc<PersistentChatSession>,
 }
 
 /// 请求级不可变配置（`model_chat::Request` 的取值快照，全程只读）。
@@ -343,7 +343,7 @@ impl CompressionEmitter {
             // N → M 条"）是**首次也是唯一**一次上线。用状态帧剥掉正文，前端会一直
             // 停在占位文案上，直到重开会话才从存储读到结果（实测回归）。
             // 状态帧只适用于「正文已由 delta 逐帧上线」的节点。
-            tr.apply(crate::symbio_core::turn::message_frame(&node));
+            tr.apply(crate::symbio_core::llm::turn::message_frame(&node));
             tr.persisted(std::slice::from_ref(&node.id));
             node
         };
@@ -372,7 +372,7 @@ impl CompressionEmitter {
     /// 返回的那份——后者没有号（补号发生在存储临界区内的私有副本上）。
     pub async fn emit_persisted(&self, session_id: &str, node: &ChatMessage) {
         self.plugin
-            .transcript_apply(session_id, crate::symbio_core::turn::message_frame(node))
+            .transcript_apply(session_id, crate::symbio_core::llm::turn::message_frame(node))
             .await;
     }
 }

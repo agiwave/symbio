@@ -6,9 +6,7 @@
 use super::super::config::SessionConfig;
 use super::super::store::SessionStore;
 use super::super::types::Session;
-use super::{
-    ensure_durable_states, prune_historical_tool_calls, ChatSession, PersistentChatSession,
-};
+use super::{ensure_durable_states, prune_historical_tool_calls, PersistentChatSession};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageType,
 };

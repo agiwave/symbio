@@ -717,7 +717,7 @@ async fn relay_bridge(b: RelayBridge, sink: EventSink, abort: AbortSignal) -> Re
                     known.remove(&mid);
                     records.remove(&mid);
                     // 删除按 id 生效（不依赖父子锚点），原样转发。
-                    sink.emit(crate::symbio_core::turn::removed_frame(&mid)).await;
+                    sink.emit(crate::symbio_core::llm::turn::removed_frame(&mid)).await;
                     continue;
                 }
 

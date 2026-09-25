@@ -18,7 +18,7 @@ use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
-use crate::symbio_core::get_http_client;
+use crate::plugins::model::http::get_http_client;
 
 use super::super::model_providers::ModelProviderConfig;
 

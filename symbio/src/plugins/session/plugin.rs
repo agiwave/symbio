@@ -19,7 +19,7 @@
 //! 本文件保留：插件结构体与构造、内部能力（`impl SessionPlugin`）、协议路由与
 //! 能力注册（`impl Plugin`）、配置定义，以及各子模块的**共享面重导出**。
 
-use super::chat_session::ChatSession;
+use super::chat_session::PersistentChatSession;
 pub use super::config::SessionConfig;
 use super::types::{Session, SessionSummary};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
@@ -186,10 +186,10 @@ impl SessionPlugin {
     ) {
         let mut frames: Vec<cm::ChatMessage> = dropped
             .iter()
-            .map(|mid| crate::symbio_core::turn::removed_frame(mid))
+            .map(|mid| crate::symbio_core::llm::turn::removed_frame(mid))
             .collect();
         // 新的首条（压缩快照）：一条完整消息（身份 + 正文 + 终态同帧）。
-        frames.push(crate::symbio_core::turn::message_frame(head));
+        frames.push(crate::symbio_core::llm::turn::message_frame(head));
         self.transcript_apply_all(session_id, frames).await;
     }
 
@@ -218,7 +218,7 @@ impl SessionPlugin {
         messages: &[cm::ChatMessage],
     ) {
         for message in messages {
-            self.transcript_apply(session_id, crate::symbio_core::turn::message_frame(message))
+            self.transcript_apply(session_id, crate::symbio_core::llm::turn::message_frame(message))
                 .await;
         }
     }
@@ -354,7 +354,7 @@ impl SessionPlugin {
     pub(crate) async fn open_chat_session(
         &self,
         session_id: &str,
-    ) -> Result<Arc<dyn ChatSession>, PluginError> {
+    ) -> Result<Arc<PersistentChatSession>, PluginError> {
         let store = self.get_store().await?;
         Ok(Arc::new(super::chat_session::PersistentChatSession::new(
             session_id.to_string(),
@@ -637,6 +637,7 @@ fn config_definition() -> DetailDefinition {
 
 mod nodes;
 mod vdfs_provider;
+mod words;
 
 // 模块内共享面：`nodes` / `vdfs_provider` 经 `use super::*;` 取用，测试（`plugin.test.rs`）亦同。
 // 未被本文件引用的项由编译器 `unused_imports` 兜底。
@@ -644,7 +645,10 @@ pub(crate) use self::nodes::{
     inbox_dir_node, inbox_item_node, inbox_item_path, internal_dirs, message_node, message_of,
     message_path, message_text, messages_dir_node, ordered, overlay_live, parse_inbox_message,
     parse_session_path, session_content, session_id_from_new_path, session_node, transcript_window,
-    window_params, SessionRuntime, VdfsSessionPath, OUTCOME_ABORTED, OUTCOME_COMPLETED,
+    window_params, SessionRuntime, VdfsSessionPath,
+};
+pub(crate) use self::words::{
+    EXT_MESSAGE, EXT_SESSION, KIND_INBOX, KIND_MESSAGES, OUTCOME_ABORTED, OUTCOME_COMPLETED,
     OUTCOME_FAILED,
 };
 

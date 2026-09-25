@@ -51,7 +51,7 @@ async fn vdfs_self_description_has_no_mount() {
         .into_stat()
         .expect("根节点自述");
     let t = root.new_type.expect("根下可新建会话");
-    assert_eq!(t.ext, vdfs::VDFS_EXT_SESSION);
+    assert_eq!(t.ext, EXT_SESSION);
     assert_eq!(t.title, "会话");
     // 草稿节点与落成后走**同一个渲染器**（`ext = session`，不是通用表单），
     // 故不声明 `node_ext`：新建会话直接进会话详情页

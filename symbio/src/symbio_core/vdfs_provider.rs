@@ -59,49 +59,15 @@ pub const VDFS_KIND_DIR: &str = "dir";
 /// 节点基础类型：文件
 pub const VDFS_KIND_FILE: &str = "file";
 
-/// 场景类型：会话的**转写列表**（`<根>/session/<id>/<段>`）。
-///
-/// `kind` 是场景可自定义的（会话叶子自己就声明 `kind = "session"`），
-/// 这里给转写列表一个**稳定的 ASCII 语义类型**：它的 `name` / `title` 是
-/// 面向用户的展示名（可能随语言或文案调整），不能被消费者当成标识来认；
-/// 而 `kind` 是**协议词**——消费者按它发现「哪个子目录是转写」，不必硬编码段名。
-pub const VDFS_KIND_MESSAGES: &str = "messages";
-
-/// 场景类型：会话的**收件箱**（`<根>/session/<id>/inbox`）。
-///
-/// 与 [`VDFS_KIND_MESSAGES`] 同一手法：`name` / `title` 是展示名，`kind` 是协议词。
-/// 收件箱里的一条是**还没被消费的用户消息**，因此条目的 `ext` 沿用
-/// [`VDFS_EXT_MESSAGE`]（它就是一条消息），靠 `kind` 与会话转写里的消息区分开：
-/// 一个是"待发"，一个是"已发生"。
-pub const VDFS_KIND_INBOX: &str = "inbox";
-
-// ==================== 会话节点属性：上一轮结局（`attributes.outcome`） ====================
-//
-// 会话叶子用 `status` 表达「现在在不在跑」，用 `outcome` 表达「上一轮怎么结束的」。
-// 两者是同一份运行态投影出的两个属性（`SessionRuntime`），所以词表必须住在一起
-// ——消费方（前端、CLI、子智能体转播）读的是同一批字面量，谁都不许自己拼。
-//
-// 与 [`VDFS_STATUS_*`] 同处一处的理由：`outcome` 只在 `status != working` 时有
-// 意义（`working` 时结局作废），两者一起读才构成完整的运行态。
-
-/// 上一轮**正常结束**
-pub const VDFS_OUTCOME_COMPLETED: &str = "completed";
-/// 上一轮**被用户中止**（与 `completed` 区分：提示音音色、收尾文案不同）
-pub const VDFS_OUTCOME_ABORTED: &str = "aborted";
-/// 上一轮**以错误结束**——此时 `attributes.error` 带错误文案
-pub const VDFS_OUTCOME_FAILED: &str = "failed";
-
 // ==================== 呈现扩展名（约定，宿主可自行扩展） ====================
 //
 // 节点 `ext` 是宿主选择详情呈现方式的键。VDFS 只透传、不解释；
 // 以下是**约定俗成**的几个取值，宿主可自由增添自己的扩展名。
+// （会话域的两个扩展名 `session` / `message` 属会话词表，
+// 住在 `plugins/session/plugin/words.rs`，不在此登记。）
 
 /// 定义驱动表单（呈现描述放 `node.schema`）
 pub const VDFS_EXT_FORM: &str = "form";
-/// 会话工作区（实时对话流）
-pub const VDFS_EXT_SESSION: &str = "session";
-/// 单条对话消息（**列表项**：正文在内容里，结构在 `attributes` 里）
-pub const VDFS_EXT_MESSAGE: &str = "message";
 /// 纯文本编辑器
 pub const VDFS_EXT_TEXT: &str = "text";
 /// JSON 编辑器

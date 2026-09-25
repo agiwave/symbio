@@ -99,7 +99,7 @@ impl SessionPlugin {
                 // 这与从前相同（容器合成根节点时就要取这份自述），只是取法统一了。
                 Ok(vdfs::VdfsResponse::Stat(
                     vdfs::VdfsNode::dir("", "会话", vdfs::VdfsAccess::LIST).with_new_type(Some(
-                        vdfs::VdfsNewType::new(vdfs::VDFS_EXT_SESSION, "会话")
+                        vdfs::VdfsNewType::new(EXT_SESSION, "会话")
                             .with_description("新建会话")
                             .with_schema_opt(self.session_schema().await),
                     )),
@@ -1097,7 +1097,7 @@ impl SessionPlugin {
     async fn new_session_id(&self) -> String {
         let store = self.get_store().await.ok();
         for _ in 0..8 {
-            let id = crate::symbio_core::turn::short_id();
+            let id = crate::symbio_core::llm::turn::short_id();
             let taken = match &store {
                 Some(s) => s.session_dir(&id).is_some(),
                 None => false,
@@ -1243,7 +1243,7 @@ impl SessionPlugin {
         // 要说的事（不需要先删再建：删除帧表达的是"这个节点没了"，而编辑后它还在）。
         self.transcript_apply(
             session_id,
-            crate::symbio_core::turn::message_frame(&updated),
+            crate::symbio_core::llm::turn::message_frame(&updated),
         )
         .await;
         Ok(updated)
@@ -1282,7 +1282,7 @@ impl SessionPlugin {
         if !deleted_ids.is_empty() {
             let frames: Vec<cm::ChatMessage> = deleted_ids
                 .iter()
-                .map(|id| crate::symbio_core::turn::removed_frame(id))
+                .map(|id| crate::symbio_core::llm::turn::removed_frame(id))
                 .collect();
             self.transcript_apply_all(session_id, frames).await;
         }
@@ -1306,7 +1306,7 @@ impl SessionPlugin {
         // 变更：清空 = 逐条删除帧（理由见 truncate：清空重读会连保留的一起重传）。
         let frames: Vec<cm::ChatMessage> = ids
             .iter()
-            .map(|id| crate::symbio_core::turn::removed_frame(id))
+            .map(|id| crate::symbio_core::llm::turn::removed_frame(id))
             .collect();
         self.transcript_apply_all(session_id, frames).await;
         Ok(())

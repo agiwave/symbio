@@ -1,6 +1,6 @@
-//! 会话引擎：契约（`ChatSession`）+ 唯一实现（`PersistentChatSession`）。
+//! 会话引擎（[`PersistentChatSession`]，唯一实现）。
 //!
-//! 实现只有一个，"要不要持久化"的差异下沉到存储（`store::SessionStore` 的
+//! "要不要持久化"的差异下沉到存储（`store::SessionStore` 的
 //! `new` / `ephemeral` 两种构造）：内存态会话经 [`PersistentChatSession::detached`]
 //! 构造，因此与持久会话共享同一套孤儿清理、轮次窗口与配置读取语义（审计 B1）。
 //!
@@ -9,12 +9,15 @@
 //! - `prune_historical_tool_calls`（存储期工具链物理裁剪）由原 `context.rs`
 //!   并入——其唯一消费者就是本模块（体检备注 audit-5）。
 //!
-//! ## 契约为何归属 session 插件
+//! ## 为何归属 session 插件
 //!
-//! `ChatSession` / `ChatSessionHandle` / `SESSION_HANDLE` 的读写方全部在 session
-//! 插件内（编排器交付句柄 → chat_loop / resume / handlers 消费），不存在跨插件使用，
-//! 故从 `symbio_core` 下沉到本插件——核心架构只保留跨插件共享的抽象，不承载单一
-//! 模块的内部定义。
+//! `PersistentChatSession` / `ChatSessionHandle` / `SESSION_HANDLE` 的读写方全部
+//! 在 session 插件内（编排器交付句柄 → chat_loop / resume / handlers 消费），
+//! 不存在跨插件使用，故从 `symbio_core` 下沉到本插件——核心架构只保留跨插件
+//! 共享的抽象，不承载单一模块的内部定义。
+//!
+//! 曾经这里还有一个 `ChatSession` trait（唯一实现即本结构体）：单实现多态只会
+//! 多一层 `dyn` 分发与一份契约文档的两处维护，已去除——方法直接内聚在实现上。
 
 use super::config::{default_context_messages, SessionConfig};
 use super::store::SessionStore;
@@ -25,81 +28,15 @@ use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageType,
 };
 use crate::symbio_core::{PluginError, SymbioKey};
-use async_trait::async_trait;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-/// 会话引擎契约：消息的读写与轮次窗口视图。
-#[async_trait]
-pub trait ChatSession: Send + Sync + 'static {
-    async fn get_messages(&self) -> Result<Vec<ChatMessage>, PluginError>;
-
-    /// 获取进入 LLM 上下文的候选消息（存储视图：过滤 + 滑动轮次窗口）。
-    ///
-    /// 注意：工具级骨架化（fade / 保留策略）**不在此处**——那是请求视图层的职责，
-    /// 由模型插件 run_chat_loop 在构建每次请求时统一执行（build_request_view）。
-    async fn get_context_messages(
-        &self,
-        max_turns: Option<usize>,
-    ) -> Result<Vec<ChatMessage>, PluginError>;
-
-    /// 追加消息并落库，返回**落库后的权威副本**（含存储分配的 `seq` / `timestamp`）。
-    ///
-    /// ## 为什么回消息，而不是回条数
-    ///
-    /// `seq` 只在存储写入时分配（见 `docs/vdfs-session-messages.md` §3.4），调用方
-    /// 手里那条**没有号**——所以「每一条被落库的消息都必须发一次带存储 `seq` 的
-    /// 变更」这条不变量，只有在调用方能拿到权威副本时才成立。回条数等于让调用方
-    /// 拿不到可下发的载荷，于是"落库"与"换号"之间必然出现断口：前端留下转写分配的
-    /// 在途号（`1 << 50`），与存储号并存 ⇒ 排序错位（只有整份回读才恢复）。
-    ///
-    /// 返回的条目 = **实际留在存储里**的那些（按追加顺序）：被轮次窗口淘汰、或
-    /// 被写入期工具链裁剪动过的，以存储里的最终形态为准——交回一条存储里并不
-    /// 存在的消息，等于让前端"对齐"到幻影。
-    ///
-    /// 顺序与入参一致（不含被淘汰项）；落库失败则整体失败，不返回部分结果。
-    async fn append_messages(
-        &self,
-        messages: Vec<ChatMessage>,
-    ) -> Result<Vec<ChatMessage>, PluginError>;
-
-    async fn replace_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError>;
-
-    fn session_id(&self) -> &str;
-
-    fn line_threshold(&self) -> usize;
-
-    /// 内容节点淡化保护窗口：请求视图中最近 N 条内容节点（Text/Reasoning）保留原文。
-    ///
-    /// 对话末端锚点——保持模型对"最近在做什么/刚想了什么"的连续记忆。
-    /// 默认取 `SessionConfig` 的默认值，持久会话从配置读取（真源唯一）。
-    fn compress_keep_recent(&self) -> usize {
-        SessionConfig::default().compress_keep_recent
-    }
-
-    /// 老旧工具结果淡化（fade）的激活阈值：单轮请求的工具迭代轮数**超过**此值后，
-    /// 请求视图才把较早轮次的工具结果压成头尾摘要。
-    ///
-    /// 取代 `chat_loop` 中原有的硬编码常量 `FADE_ACTIVATE_ROUNDS`（审计 R3：fade
-    /// 参数与 `SessionConfig` 双源），真源统一为配置字段 `fade_activate_rounds`。
-    fn fade_activate_rounds(&self) -> usize {
-        SessionConfig::default().fade_activate_rounds
-    }
-
-    /// fade 的保留窗口：最近 N 个 user turn 的工具结果保持原文，更早的才淡化。
-    ///
-    /// 取代原硬编码常量 `FADE_KEEP_RECENT_TURNS`。
-    fn fade_keep_recent_turns(&self) -> usize {
-        SessionConfig::default().fade_keep_recent_turns
-    }
-}
-
-/// 会话引擎句柄（`session/open` 的返回载荷、`SESSION_HANDLE` 键的值类型）。
-pub struct ChatSessionHandle(pub Arc<dyn ChatSession>);
+/// 会话引擎句柄（`SESSION_HANDLE` 键的值类型）。
+pub struct ChatSessionHandle(pub Arc<PersistentChatSession>);
 
 impl ChatSessionHandle {
-    pub fn new(session: Arc<dyn ChatSession>) -> Self {
+    pub fn new(session: Arc<PersistentChatSession>) -> Self {
         Self(session)
     }
 }
@@ -297,9 +234,9 @@ impl PersistentChatSession {
     }
 }
 
-#[async_trait]
-impl ChatSession for PersistentChatSession {
-    async fn get_messages(&self) -> Result<Vec<ChatMessage>, PluginError> {
+impl PersistentChatSession {
+    /// 全量消息（按单调 `seq` 排序后的存储视图）。
+    pub(crate) async fn get_messages(&self) -> Result<Vec<ChatMessage>, PluginError> {
         let session = self.load_session().await?;
         let mut messages: Vec<_> = session.messages.to_vec();
         // 按**单调序号** `seq` 排序（稳定排序，缺失 seq 的旧数据排最后并保持插入顺序）。
@@ -315,7 +252,8 @@ impl ChatSession for PersistentChatSession {
         Ok(messages)
     }
 
-    async fn get_context_messages(
+    /// 获取进入 LLM 上下文的候选消息（存储视图：过滤 + 滑动轮次窗口）。
+    pub(crate) async fn get_context_messages(
         &self,
         max_turns: Option<usize>,
     ) -> Result<Vec<ChatMessage>, PluginError> {
@@ -347,7 +285,22 @@ impl ChatSession for PersistentChatSession {
         Ok(result)
     }
 
-    async fn append_messages(
+    /// 追加消息并落库，返回**落库后的权威副本**（含存储分配的 `seq` / `timestamp`）。
+    ///
+    /// ## 为什么回消息，而不是回条数
+    ///
+    /// `seq` 只在存储写入时分配（见 `docs/vdfs-session-messages.md` §3.4），调用方
+    /// 手里那条**没有号**——所以「每一条被落库的消息都必须发一次带存储 `seq` 的
+    /// 变更」这条不变量，只有在调用方能拿到权威副本时才成立。回条数等于让调用方
+    /// 拿不到可下发的载荷，于是"落库"与"换号"之间必然出现断口：前端留下转写分配的
+    /// 在途号（`1 << 50`），与存储号并存 ⇒ 排序错位（只有整份回读才恢复）。
+    ///
+    /// 返回的条目 = **实际留在存储里**的那些（按追加顺序）：被轮次窗口淘汰、或
+    /// 被写入期工具链裁剪动过的，以存储里的最终形态为准——交回一条存储里并不
+    /// 存在的消息，等于让前端"对齐"到幻影。
+    ///
+    /// 顺序与入参一致（不含被淘汰项）；落库失败则整体失败，不返回部分结果。
+    pub(crate) async fn append_messages(
         &self,
         messages: Vec<ChatMessage>,
     ) -> Result<Vec<ChatMessage>, PluginError> {
@@ -455,7 +408,7 @@ impl ChatSession for PersistentChatSession {
         Ok(persisted)
     }
 
-    async fn replace_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError> {
+    pub(crate) async fn replace_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError> {
         // 持久层写入不变量（见 `ensure_durable_states`）：瞬态状态不得落盘
         ensure_durable_states(&messages, "replace_messages")?;
         // 临界区：与 append / update 共用同一把 per-session 写锁（整份覆盖语义）
@@ -517,23 +470,29 @@ impl ChatSession for PersistentChatSession {
         self.save_session(&session).await
     }
 
-    fn session_id(&self) -> &str {
+    pub(crate) fn session_id(&self) -> &str {
         &self.session_id
     }
 
-    fn line_threshold(&self) -> usize {
+    pub(crate) fn line_threshold(&self) -> usize {
         self.cfg_or_default().compress_line_threshold
     }
 
-    fn compress_keep_recent(&self) -> usize {
+    /// 内容节点淡化保护窗口：请求视图中最近 N 条内容节点（Text/Reasoning）保留原文。
+    ///
+    /// 对话末端锚点——保持模型对"最近在做什么/刚想了什么"的连续记忆。
+    pub(crate) fn compress_keep_recent(&self) -> usize {
         self.cfg_or_default().compress_keep_recent
     }
 
-    fn fade_activate_rounds(&self) -> usize {
+    /// 老旧工具结果淡化（fade）的激活阈值：单轮请求的工具迭代轮数**超过**此值后，
+    /// 请求视图才把较早轮次的工具结果压成头尾摘要。
+    pub(crate) fn fade_activate_rounds(&self) -> usize {
         self.cfg_or_default().fade_activate_rounds
     }
 
-    fn fade_keep_recent_turns(&self) -> usize {
+    /// fade 的保留窗口：最近 N 个 user turn 的工具结果保持原文，更早的才淡化。
+    pub(crate) fn fade_keep_recent_turns(&self) -> usize {
         self.cfg_or_default().fade_keep_recent_turns
     }
 }

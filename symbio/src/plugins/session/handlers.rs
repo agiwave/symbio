@@ -31,7 +31,7 @@
 //! `truncate_messages` / `clear_messages`）——**搬移不是重写**：同一个操作只有
 //! 一份实现，正是本文件收缩的全部意义。
 
-use super::chat_session::{ChatSession, PersistentChatSession};
+use super::chat_session::PersistentChatSession;
 use super::plugin::SessionPlugin;
 use crate::symbio_core::PluginError;
 use std::sync::Arc;
@@ -86,13 +86,13 @@ impl SessionPlugin {
     pub async fn open_session_handle(
         &self,
         session_id: Option<String>,
-    ) -> Result<Arc<dyn ChatSession>, PluginError> {
+    ) -> Result<Arc<PersistentChatSession>, PluginError> {
         let snapshot = {
             let cfg = self.config.read().await;
             cfg.clone()
         };
 
-        let session: Arc<dyn ChatSession> = match session_id {
+        let session: Arc<PersistentChatSession> = match session_id {
             Some(sid) if !sid.is_empty() && !sid.starts_with("_t_") => {
                 let store = self.get_store().await?;
                 Arc::new(PersistentChatSession::new(sid, self.config.clone(), store))

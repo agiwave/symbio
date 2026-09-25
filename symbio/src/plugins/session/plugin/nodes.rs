@@ -39,13 +39,10 @@ pub(crate) struct SessionRuntime {
 
 /// 上一轮结局的词表：正常结束 / 用户中止 / 以错误结束。
 ///
-/// 定义在 `symbio_core`（与节点状态词 [`vdfs::VDFS_STATUS_WORKING`] 同处一处）——
-/// 会话节点 `attributes.outcome` 是**跨前端**的线上契约，进程内消费者（CLI）也要
-/// 按同一批字面量判读，因此这里只重导出，不另立一份。
-pub(crate) use crate::symbio_core::vdfs_provider::{
-    VDFS_OUTCOME_ABORTED as OUTCOME_ABORTED, VDFS_OUTCOME_COMPLETED as OUTCOME_COMPLETED,
-    VDFS_OUTCOME_FAILED as OUTCOME_FAILED,
-};
+/// 定义在会话自己的协议词表（`super::words`）——会话节点 `attributes.outcome`
+/// 是**跨前端**的线上契约，进程内消费者（CLI）也要按同一批字面量判读，
+/// 因此各取用方直接从词表导入，不另立一份。
+use super::words::OUTCOME_FAILED;
 
 impl SessionRuntime {
     /// 空闲：没在跑，也没有已知的上一轮结局
@@ -133,7 +130,7 @@ impl SessionRuntime {
 pub(crate) fn session_node(s: &SessionSummary, rt: &SessionRuntime) -> vdfs::VdfsNode {
     let mut n = vdfs::VdfsNode::file(&s.id, s.title.clone(), vdfs::VdfsAccess::READ_WRITE);
     n.kind = PLUGIN_SESSION.to_string();
-    n.ext = Some(vdfs::VDFS_EXT_SESSION.to_string());
+    n.ext = Some(EXT_SESSION.to_string());
     n.status = rt.status().to_string();
     n.updated_at = Some(s.updated_at);
     n.description = s.summary.clone();
@@ -302,7 +299,7 @@ pub(crate) const TITLE_MESSAGES: &str = "消息";
 /// （见 `tauri/src/services/vdfsScheme.ts::resolveMessagesSeg`）。
 pub(crate) fn messages_dir_node() -> vdfs::VdfsNode {
     let mut node = vdfs::VdfsNode::dir(SEG_MESSAGES, TITLE_MESSAGES, vdfs::VdfsAccess::LIST);
-    node.kind = vdfs::VDFS_KIND_MESSAGES.to_string();
+    node.kind = KIND_MESSAGES.to_string();
     node
 }
 
@@ -332,7 +329,7 @@ pub(crate) const TITLE_INBOX: &str = "收件箱";
 /// 收件箱目录节点（`list` 与 `stat` 共用同一份形状）
 pub(crate) fn inbox_dir_node() -> vdfs::VdfsNode {
     let mut node = vdfs::VdfsNode::dir(SEG_INBOX, TITLE_INBOX, vdfs::VdfsAccess::LIST);
-    node.kind = vdfs::VDFS_KIND_INBOX.to_string();
+    node.kind = KIND_INBOX.to_string();
     node
 }
 
@@ -404,7 +401,7 @@ pub(crate) fn parse_inbox_message(raw: &str) -> vdfs::VdfsResult<cm::ChatMessage
 /// 让列表里一眼看出这条还没被消费。
 pub(crate) fn inbox_item_node(item: &InboxItem) -> vdfs::VdfsNode {
     let mut n = message_node(&item.message);
-    n.kind = vdfs::VDFS_KIND_INBOX.to_string();
+    n.kind = KIND_INBOX.to_string();
     n.description = Some(match n.description {
         Some(d) => format!("待消费 · {d}"),
         None => "待消费".to_string(),
@@ -594,7 +591,7 @@ fn message_preview(m: &cm::ChatMessage) -> Option<String> {
 /// 单条消息 → VDFS 节点（**列表项**）
 pub(crate) fn message_node(m: &cm::ChatMessage) -> vdfs::VdfsNode {
     let mut n = vdfs::VdfsNode::file(&m.id, message_label(m), vdfs::VdfsAccess::READ);
-    n.ext = Some(vdfs::VDFS_EXT_MESSAGE.to_string());
+    n.ext = Some(EXT_MESSAGE.to_string());
     n.status = message_status(m).to_string();
     n.updated_at = m.timestamp;
     n.description = message_preview(m);

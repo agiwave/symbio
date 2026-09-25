@@ -30,7 +30,7 @@
 //! 这些字段的值不可信。它们只走完整行的 `SseLineParser::parse_line`。
 //! 因此本模块只回 `ContentDelta` / `ReasoningDelta` / `ToolCallDelta`。
 
-use crate::symbio_core::sse::PartialLineExtractor;
+use crate::symbio_core::llm::sse::PartialLineExtractor;
 use crate::symbio_core::ProtocolEvent;
 
 // ============ 协议侧实现的钩子 ============

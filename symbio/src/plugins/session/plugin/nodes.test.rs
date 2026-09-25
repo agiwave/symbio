@@ -253,7 +253,7 @@ fn inbox_item_node_reuses_message_shape() {
     };
     let n = inbox_item_node(&item);
     assert_eq!(n.name, "i1", "条目 id 就是地址末段");
-    assert_eq!(n.kind, vdfs::VDFS_KIND_INBOX);
+    assert_eq!(n.kind, KIND_INBOX);
     assert_eq!(
         n.effective_ext().as_deref(),
         Some("message"),
@@ -288,14 +288,14 @@ fn vdfs_internal_dirs_conditional() {
     // 不必把段名写进自己的地址模板（前端镜像守卫 X-002 校验的就是这个词）
     assert_eq!(
         without[0].kind,
-        vdfs::VDFS_KIND_MESSAGES,
+        KIND_MESSAGES,
         "转写列表的 kind 是稳定协议词，不随段名 / 展示名变化"
     );
     assert_eq!(without[1].name, SEG_INBOX, "收件箱恒在（消息的入队面）");
     assert_eq!(without[1].title, TITLE_INBOX, "展示名才是中文");
     assert_eq!(
         without[1].kind,
-        vdfs::VDFS_KIND_INBOX,
+        KIND_INBOX,
         "收件箱的 kind 是稳定协议词（与会话转写消息区分开）"
     );
     assert_eq!(without[2].name, workdir::SEG_SUB_SESSIONS);
