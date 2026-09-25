@@ -147,7 +147,22 @@ export const BASELINE = {
   //            用例里删/加断言，条数不变
   //      ⚠️ 净增是预期的：删掉的是「导入是一种入口形态」的用例，补上的是「导入是
   //      动作」与「解包载荷往返」的用例——**换的是形态，不是覆盖**。
-  rustTests: 928,
+  // 957（2026-09-25）：**两级一并补齐**，因为上一批漏了同步。
+  //      ① 上批 `b191963`（插件体系卫生改进）实测 **952**、基线仍记 928 ⇒ 滞后 24，
+  //        提交信息写了「952 通过」却没改这里的数字（与 `916 → 925` 那次同型）。
+  //      ② 本批（ADR-032：插件身份归 manifest）**+5**，逐条：
+  //        +4  `symbio_core/plugin_dir.test.rs`——身份四则
+  //            （从未落位 ⇒ 空 / 投影**只补缺失键**、用户改过的不覆盖 /
+  //             键都在 ⇒ 不碰文件 / 写配置不得冲掉身份与装配位）
+  //        +2  `plugins/composite/registry.test.rs`——
+  //            `identity_comes_from_manifest_even_when_not_mounted`
+  //            （这是 ADR-032 要锁的那条：**停用插件也有身份**）+
+  //            `mounting_seeds_the_identity_into_the_manifest`（走**真实** `mount_all`：
+  //            真目录 → 真工厂 → 真构造，锁住「装配期真的投影了」——只测
+  //            `seed_identity` 本身挡不住那条调用链断掉）
+  //      另有两条改名不计数：`unconstructed_entries_have_no_meta` ⇒
+  //      `identity_is_empty_for_never_seeded_dirs`（语义从「未构造」收窄为「从未落位」）。
+  rustTests: 958,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *
@@ -286,8 +301,12 @@ export const BASELINE = {
   //      ⚠️ 净减是预期的：删掉的是「第二种新建入口」的整条交互链，而**新增的四条
   //      钉住了替代它的那条通道**（动作载荷形状 + 落点 + 草稿退出）。三条
   //      `startNew` 调用改形不计数（断言面不变，只是签名收窄）。
+  // 49 文件 / 712（2026-09-25）：`vitestFiles` 不变、`vitestTests` 706 → **712**
+  //      —— **+6 全部来自上批 `b191963` 的漏同步**（该批提交信息写了「vitest 712」，
+  //      却没把这里的数字从 706 改上来）。本批（ADR-032）只动 Rust 侧与文档，
+  //      前端一行未改，因此这 6 条不属本批。
   vitestFiles: 49,
-  vitestTests: 706,
+  vitestTests: 712,
 }
 
 export const VITEST_TIMEOUT_MS = 180_000

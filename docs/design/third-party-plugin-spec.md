@@ -130,12 +130,21 @@ composite.mount_all()
 plugin_provider: "ext:stdio:./weather"   # 连接方式（值语法，见 §3.1）
 plugin_name: weather                     # 实例名（缺省 = 目录名）
 plugin_enabled: true                     # 装配位
+plugin_title: 天气                        # 身份：展示标题（ADR-032）
+plugin_description: 查天气的外部插件       # 身份：语义描述
+plugin_version: 1.2.0                    # 身份：版本
+plugin_author: someone@example.com       # 身份：作者
 plugin_api: "1"                          # 新增：要求的宿主插件 API 版本
 plugin_grants: [fs.read, net.http]       # 新增：宿主授予的能力（§7）
 
 # 以下仍是插件自己的配置字段（现状不变，宿主不解释）
 weather_units: metric
 ```
+
+**身份键（`plugin_title` / `plugin_description` / `plugin_version` /
+`plugin_author`）已在第一期落地**（ADR-032）：运行期唯一来源是 manifest，
+出厂声明（`Plugin::meta()`）只在装配期投影一次。对外部插件而言这尤其自然——
+它**没有** Rust 侧的实现可承载身份，manifest 是唯一可能的位置。
 
 **新增两个保留键，各有不可省的理由**：
 
@@ -322,7 +331,7 @@ init 响应（插件给） "needs": ["fs.read", "net.http", "proc.spawn"]  ← �
 只能全授（等于没约束）；只有「需要」没有「授予」，插件自己说了算（等于没权限）。
 两侧都有，才有「**授予 < 需要**」这个可检测、可审计的状态。
 
-### 能力清单（建议起步集）
+### 能力清单（已定案，闭集）
 
 | 能力 | 含义 | 风险 |
 |---|---|---|
@@ -331,10 +340,22 @@ init 响应（插件给） "needs": ["fs.read", "net.http", "proc.spawn"]  ← �
 | `proc.spawn` | 启动子进程 | 高 |
 | `env.read` | 读环境变量 | 中 |
 | `host.ctx` | 读 `metadata` 里的会话 / 追踪信息 | 低 |
+| `vdfs.read` / `vdfs.write` | 经宿主读写**共享资源空间**（会话 / 技能 / 记忆 / 其它插件的数据） | 高 |
+| `event.publish` | 向事件总线投递事件（可被其它插件与前端订阅） | 中 |
+
+**为什么是这九个而不是最小集**：前三项（`fs` / `net` / `proc`）是「进程能对外做什么」，
+后三项（`host.ctx` / `vdfs` / `event`）是「**插件能对宿主做什么**」——后者才是本体系
+真正的权限面：一个第三方插件若能任意写 VDFS，它就能改会话转写、改别人的配置、
+伪造记忆，**而它根本不需要碰文件系统**。只列前三项会让权限模型看起来完整、
+实际上漏掉最大的那一片。`event.publish` 单列（而非并入 `vdfs.write`）：投递事件是
+**广播**语义，影响面跨插件，与写一个文件不是同一类风险。
+
+闭集的意义：新增能力必须改本表 + 一条 ADR，**不允许插件自定义能力名**——
+否则「授予 ⊇ 需要」退化成字符串游戏。
 
 **与 `SecurityPolicy` 的关系**（评审 A4）：**分层共存，不替换**。
 `SecurityPolicy`（`local/policy/mod.rs:37`）管「local 插件**自己的工具**怎么安全执行」；
-本表管「**宿主**允不允许一个插件碰文件系统」。前者是插件内部的实现细节，
+本表管「**宿主**允不允许一个插件碰文件系统 / 共享空间」。前者是插件内部的实现细节，
 后者是装配契约。
 
 **强制点**：本期**只做声明与校验**（拒绝不匹配的 `init`），不做运行时沙箱
@@ -376,14 +397,19 @@ init 响应（插件给） "needs": ["fs.read", "net.http", "proc.spawn"]  ← �
 
 **顺序不是任意的**：前三期的每一项都是后一项的前置（§9 末尾说明依赖链）。
 
-### 第一期｜manifest 成形（不改运行时行为）
+### 第一期｜manifest 成形（不改运行时行为）—— **已完成**
 
-- **A6**：身份单源——`PluginMeta` 与 `PLUGIN.yml` 二选一（建议：身份归 manifest）；
-- **A5**：`PLUGIN.yml` 升级为 manifest（加 `plugin_api` / `plugin_grants` 两个保留键）；
-- **A4**：能力清单定案（§7 的表）；
-- 内置 16 个插件迁移到新 manifest。
+- ✅ **A6**：身份单源——身份归 manifest（ADR-032）；
+- ✅ **A5**：`PLUGIN.yml` 升级为 manifest（`plugin_api` / `plugin_grants` 两个保留键已定义）；
+- ✅ **A4**：能力清单定案（§7 的表，闭集九项）；
+- ✅ 内置 16 个插件**零改动**迁移（出厂身份声明仍在代码，装配期投影进 manifest——
+  见下方「已落地进度」的说明）。
 
 **验收**：`cargo test --lib` 全绿；门禁 38/38；内置插件行为**零变化**。
+
+> **「迁移」的含义**：内置插件的 `metadata()` 一行未改——出厂身份仍声明在代码里，
+> 只是消费方式从「运行期每次读 `meta()`」变成「装配期投影一次进 manifest」。
+> 因此这次迁移的产物是**机制**（保留键 + 投影 + 单源读取），不是 16 份手写 YAML。
 
 ### 第二期｜开放 provider 与生命周期（跑通一个外部插件）
 
@@ -427,7 +453,20 @@ init 响应（插件给） "needs": ["fs.read", "net.http", "proc.spawn"]  ← �
 | **P5** gateway 术语统一 | 「native」→「进程内（in-process）」，与协议层一词两义消除 |
 | **P7** 文档编号 | `PROTOCOLS.md` 重编号 |
 
-**待办**：A1 / A2 / A4 / A5 / A6 / P8（均需 ADR，见 §10）。
+**待办**：A1 / A2 / P8（均需 ADR，见 §10）。
+
+### 第一期落地物（ADR-032）
+
+| 项 | 落地物 |
+|---|---|
+| **A6** 身份单源 | `PluginDir::identity()` 从 manifest 读；`PluginEntry` 与 `dir_node` 都改走它 ⇒ **停用插件也有身份** |
+| **A5** manifest 升级 | `RESERVED_KEYS` 单一清单（读写都遍历它）；`plugin_api` / `plugin_grants` 键定义与解析 |
+| **A4** 能力闭集 | 九项（§7），定案 |
+| 出厂种子投影 | `PluginDir::seed_identity(&PluginMeta)`——装配期一次性，**只补缺失键**（不覆盖用户改过的值） |
+
+**下一期**：A1（provider 两级解析）——它同时是「删除 `PluginMeta` 身份字段」的前置
+（需要一张按工厂 id 索引的**静态自述注册表**，才能在不构造插件时拿到出厂身份，
+见 ADR-032「后果」）。
 
 ---
 
@@ -435,7 +474,7 @@ init 响应（插件给） "needs": ["fs.read", "net.http", "proc.spawn"]  ← �
 
 | # | 决策点 | 选项 | 本文倾向 |
 |---|---|---|---|
-| **D1** | 身份归谁（评审 A6） | 甲：归 manifest（`meta()` 瘦身） / 乙：归 `meta()` | **甲**（与 I1 自洽） |
+| **D1** | 身份归谁（评审 A6） | ✅ **已定案 = 甲**（ADR-032）：归 manifest，`meta()` 降为「出厂自述」 |
 | **D2** | 外部插件形态（§3.3） | stdio / HTTP / WASM / 动态库 | **stdio 首选 + HTTP 次选**，去掉动态库 |
 | **D3** | 权限强制程度（§7） | 仅声明校验 / 加运行时沙箱 | **仅声明校验**（stdio 已隔离） |
 | **D4** | 外部插件连接信息放哪（§4） | 扩展 `plugin_provider` 值语法 / 新增保留键 | **扩展值语法**（零新增键） |

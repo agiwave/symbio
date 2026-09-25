@@ -39,8 +39,9 @@ HTTP 传输文档里那句「路由是运行时分形分发，各插件内部 `m
 `SYSTEM_PLUGINS` 清单里写的也是目录名（`"hook"`，不是 `"hooks"`）。
 
 因此 **`PluginMeta::new` 的首参（`id`）必须等于插件目录名**。
-它不是路由前缀——`Plugin::meta()` 唯一生产消费方是 `composite/vdfs.rs`
-（读 `order`/`root_access`/`name`/`description`/`hidden` 聚合组合视图），
+它不是路由前缀——ADR-032 之后它只是**出厂 id**：插件的身份取自
+`PLUGIN.yml`，`Plugin::meta()` 剩下那半（挂载点呈现 `order` / `root_access` /
+`hidden`）由 `composite/vdfs.rs` 聚合组合视图；
 但生成器与文档会拿它当名字用，不一致就会产出幽灵路由。
 
 ### 规则三：过路由才设 `PATH`；直连方法**不设**

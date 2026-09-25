@@ -5,6 +5,7 @@
 use super::*;
 
 use crate::symbio_core::schemas::detail::{DetailField, DetailSection};
+use crate::symbio_core::PluginMeta;
 use serde_json::json;
 
 fn definition() -> DetailDefinition {
@@ -215,4 +216,100 @@ async fn apply_writes_the_plugins_own_file() {
     let text = std::fs::read_to_string(f.dir().config_path()).unwrap();
     assert!(text.contains("port: 8080"), "{text}");
     assert!(text.contains("plugin_provider: demo"), "{text}");
+}
+
+// ==================== 身份（ADR-032） ====================
+
+/// 从未落位过的目录（manifest 里没有身份键）→ 身份全空，消费方按目录名兜底
+#[test]
+fn identity_is_empty_when_never_seeded() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let d = dir_at(tmp.path());
+
+    assert_eq!(d.identity(), PluginIdentity::default());
+    assert_eq!(d.identity().title, "", "缺省不是目录名——兜底是消费方的事");
+}
+
+/// **出厂身份投影**：装配期把 `PluginMeta` 的身份补进 manifest
+///
+/// 只补缺失的键——manifest 是权威，用户改过的不被出厂声明覆盖。这条「单向投影」
+/// 正是「停用插件也有身份」的来路（停用不构造 ⇒ 装配期不会再投影一次）。
+#[test]
+fn seed_identity_fills_missing_keys_only() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let d = dir_at(tmp.path());
+    d.ensure_manifest().unwrap();
+
+    let meta = PluginMeta::new("demo", "演示插件")
+        .with_description("一句话说明")
+        .with_version("1.2.0")
+        .with_author("someone");
+
+    // 全缺失 → 全补
+    d.seed_identity(&meta).unwrap();
+    assert_eq!(
+        d.identity(),
+        PluginIdentity {
+            title: "演示插件".into(),
+            description: Some("一句话说明".into()),
+            version: Some("1.2.0".into()),
+            author: Some("someone".into()),
+        }
+    );
+
+    // 用户改过标题与描述 → 再投影不覆盖；版本被清掉 → 仍按出厂值补回
+    std::fs::write(
+        d.config_path(),
+        "plugin_provider: demo\nplugin_name: demo\nplugin_title: 我叫别的\nplugin_description: 我自己写的\n",
+    )
+    .unwrap();
+    d.seed_identity(&meta).unwrap();
+
+    let id = d.identity();
+    assert_eq!(id.title, "我叫别的", "manifest 是权威，出厂种子不覆盖");
+    assert_eq!(id.description.as_deref(), Some("我自己写的"));
+    assert_eq!(id.version.as_deref(), Some("1.2.0"), "缺失的键仍被补上");
+    assert_eq!(id.author.as_deref(), Some("someone"));
+}
+
+/// 键都在时**不碰文件**（无谓写盘会搅乱 mtime，变更通知的消费者只认真实变化）
+#[test]
+fn seed_identity_is_a_no_op_when_nothing_is_missing() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let d = dir_at(tmp.path());
+    let meta = PluginMeta::new("demo", "演示").with_version("1.0.0");
+
+    d.seed_identity(&meta).unwrap();
+    let before = std::fs::read_to_string(d.config_path()).unwrap();
+
+    d.seed_identity(&meta).unwrap();
+    assert_eq!(std::fs::read_to_string(d.config_path()).unwrap(), before);
+}
+
+/// 插件写自己的配置**不得冲掉身份与装配位**——它们不是配置
+///
+/// 否则「在设置页保存一次配置」就等于把停用的插件启用了，或把用户改过的标题
+/// 还原成出厂值。
+#[test]
+fn saving_config_preserves_identity_and_enabled() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let d = dir_at(tmp.path());
+
+    #[derive(serde::Serialize, serde::Deserialize, Default, PartialEq, Debug)]
+    struct C {
+        #[serde(default)]
+        port: u32,
+    }
+
+    d.ensure_manifest().unwrap();
+    d.seed_identity(&PluginMeta::new("demo", "演示").with_version("1.2.0"))
+        .unwrap();
+    d.set_enabled(false).unwrap();
+
+    d.save(&C { port: 8080 }).unwrap();
+
+    assert_eq!(d.identity().title, "演示", "身份随写保留");
+    assert_eq!(d.identity().version.as_deref(), Some("1.2.0"));
+    assert!(!d.enabled(), "装配位随写保留");
+    assert_eq!(d.load::<C>().unwrap(), Some(C { port: 8080 }));
 }

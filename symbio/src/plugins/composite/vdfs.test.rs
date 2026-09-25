@@ -8,7 +8,7 @@ use crate::symbio_core::vdfs::vdfs_context;
 use crate::symbio_core::{
     InvokeRequest, PluginError, PluginPayload, SimpleRequest, CAPABILITY_VISITOR,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
 /// 只暴露一个 `a.txt` 的 provider；目录名 / 顺序 / 隐藏由**假插件的 meta** 决定
@@ -124,20 +124,62 @@ impl Plugin for ProviderChild {
 ///
 /// 插件根用**真实缺省根**：这些测试不碰目录（`children_of` 只读实例表），
 /// 用不着为了造一棵假的目录树而引入临时目录。
-fn container_map(map: HashMap<String, Arc<dyn Plugin>>) -> CompositeVdfs {
+/// 一次性临时插件根（自增序号，供**容器 helper 内部**使用）
+///
+/// 与文件下方按 `tag` 命名的 [`temp_root`] 并存：那个供用例显式指名（一个 tag 一个
+/// 用例），这个供 helper 自动取号——`container()` 被多个用例调用，共用一个 tag 会让
+/// 并行测试互删目录。
+///
+/// 用真实 `homedir` 会让用例随用户环境漂——目录标题现在来自磁盘上的 manifest
+/// （ADR-032），必须由测试自己铺。
+fn fresh_root() -> PathBuf {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static N: AtomicU32 = AtomicU32::new(0);
+    let p = std::env::temp_dir().join(format!(
+        "symbio-vdfs-{}-{}",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_dir_all(&p);
+    std::fs::create_dir_all(&p).unwrap();
+    p
+}
+
+/// 造一份最小 `PLUGIN.yml`：装配方字段 + **身份**（标题即 `label`）
+fn put_manifest(root: &Path, dir: &str, title: &str) {
+    let d = root.join(dir);
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(
+        d.join(crate::symbio_core::PLUGIN_FILE),
+        format!("plugin_provider: {dir}\nplugin_name: {dir}\nplugin_title: {title}\n"),
+    )
+    .unwrap();
+}
+
+fn container_map_at(root: PathBuf, map: HashMap<String, Arc<dyn Plugin>>) -> CompositeVdfs {
     CompositeVdfs::new(Arc::new(PluginRegistry::with_instances(
         Arc::new(RwLock::new(map)),
-        crate::symbio_core::plugins_root(),
+        root,
         Vec::new(),
     )))
 }
 
+fn container_map(map: HashMap<String, Arc<dyn Plugin>>) -> CompositeVdfs {
+    container_map_at(fresh_root(), map)
+}
+
+/// 造容器：临时插件根 + 每个子插件一份带身份的 `PLUGIN.yml`
+///
+/// 子目录的**标题来自 manifest**（ADR-032），而 `order` / `hidden` 仍来自
+/// 假插件的 `meta()`——两类字段两个来源，正是本文件要锁住的契约。
 fn container(children: Vec<FakeChild>) -> CompositeVdfs {
+    let root = fresh_root();
     let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
     for c in children {
+        put_manifest(&root, c.dir, c.label);
         map.insert(c.dir.to_string(), Arc::new(c));
     }
-    container_map(map)
+    container_map_at(root, map)
 }
 
 /// 只含一个子插件的容器，子插件把 `provider` 暴露在 `dir` 下

@@ -235,22 +235,31 @@ impl CompositeVdfs {
         t
     }
 
-    /// 子目录节点（`<dir>`）——合成的目录节点，**静态**自述取自子插件的 PluginMeta。
+    /// 子目录节点（`<dir>`）——合成的目录节点。
+    ///
+    /// 两类字段**两个来源**（ADR-032）：
+    ///
+    /// - **身份**（`title` / `description`）来自该插件目录的 `PLUGIN.yml`
+    ///   （[`PluginRegistry::dir_of`] → `PluginDir::identity`）——与插件列表同一份，
+    ///   且停用也读得到（它只是不被构造）；
+    /// - **挂载点呈现**（`root_access` / `hidden`）来自子插件的 `PluginMeta`：
+    ///   它们描述「这个挂载点长什么样」，只有挂载了才成立。
     ///
     /// `new_type`（根可新建类型）**不在其中**：它要运行期取（见
     /// [`Self::dir_node_full`]）。
-    fn dir_node(dir: &str, p: &Arc<dyn Plugin>) -> VdfsNode {
+    fn dir_node(registry: &PluginRegistry, dir: &str, p: &Arc<dyn Plugin>) -> VdfsNode {
         let meta: PluginMeta = p.meta();
+        let identity = registry.dir_of(dir).identity();
         let mut n = VdfsNode::dir(
             dir.to_string(),
-            if meta.name.is_empty() {
+            if identity.title.is_empty() {
                 dir.to_string()
             } else {
-                meta.name.clone()
+                identity.title
             },
             meta.root_access,
         );
-        n.description = meta.description;
+        n.description = identity.description;
         // 子目录节点：它的隐藏属性来自子插件的根声明
         n.hidden = meta.hidden;
         n
@@ -262,11 +271,15 @@ impl CompositeVdfs {
     /// 节点在自己的 `list` 结果里带 [`VdfsNode::new_type`]」是**同一条通道**，
     /// 使用方不必先知道某个节点是不是根，才能问它「你能新建什么」。
     ///
-    /// 只取 `new_type`：其余字段仍以 [`PluginMeta`] 为准（那是静态自述的唯一来源，
-    /// 也是设置页等处已经在用的口径）。provider 没答上来时按「根下不可新建」处理
-    /// ——与 `new_type: None` 的语义一致。
-    async fn dir_node_full(sub: &VdfsContext, dir: &str, p: &Arc<dyn Plugin>) -> VdfsNode {
-        let mut n = Self::dir_node(dir, p);
+    /// 只取 `new_type`：其余字段仍以 [`dir_node`](Self::dir_node) 为准。provider
+    /// 没答上来时按「根下不可新建」处理——与 `new_type: None` 的语义一致。
+    async fn dir_node_full(
+        registry: &PluginRegistry,
+        sub: &VdfsContext,
+        dir: &str,
+        p: &Arc<dyn Plugin>,
+    ) -> VdfsNode {
+        let mut n = Self::dir_node(registry, dir, p);
         if let Ok(resp) = p.clone().vdfs_dispatch(sub, "", VdfsRequest::Stat).await {
             if let Some(root_node) = resp.into_stat() {
                 n.new_type = root_node.new_type;
@@ -472,7 +485,15 @@ impl VdfsProvider for CompositeVdfs {
                 VdfsRequest::List { .. } => {
                     let mut out = Vec::with_capacity(dirs.len());
                     for (d, p) in &dirs {
-                        out.push(Self::dir_node_full(&Self::sub_ctx(ctx, d), d, p).await);
+                        out.push(
+                            Self::dir_node_full(
+                                self.registry.as_ref(),
+                                &Self::sub_ctx(ctx, d),
+                                d,
+                                p,
+                            )
+                            .await,
+                        );
                     }
                     Ok(VdfsResponse::list(out.into_iter().filter(|n| !n.hidden)))
                 }
@@ -527,7 +548,7 @@ impl VdfsProvider for CompositeVdfs {
             VdfsRequest::Stat => {
                 if rel.is_empty() {
                     return Ok(VdfsResponse::Stat(
-                        Self::dir_node_full(&sub, &dir, &p).await,
+                        Self::dir_node_full(self.registry.as_ref(), &sub, &dir, &p).await,
                     ));
                 }
                 let n = p

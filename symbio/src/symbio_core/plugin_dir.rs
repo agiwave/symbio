@@ -51,16 +51,23 @@
 //! 一个 YAML 映射：
 //!
 //! ```yaml
-//! plugin_provider: web      # 身份字段：工厂 id（装配方据此构造）
-//! plugin_name: web          # 实例名；缺省 = 目录名
+//! plugin_provider: web      # 装配方：工厂 id（据此构造）
+//! plugin_name: web          # 装配方：实例名；缺省 = 目录名
+//! plugin_title: 网络工具      # 身份：展示标题（装配期从 Plugin::meta() 投影一次）
+//! plugin_description: …      # 身份：语义描述
+//! plugin_version: 0.1.0     # 身份：版本
 //! web_enabled: true         # 以下都是该插件自己的配置
 //! web_timeout: 30
 //! ```
 //!
 //! - **加载判据**（由装配方 `composite` 执行）：文件存在、可解析、且
 //!   `plugin_provider` 指向一个已注册的工厂（[`has_creator`](crate::symbio_core::has_creator)）。
-//! - **身份字段是保留键**：`plugin_provider` / `plugin_name` 不参与插件配置的
-//!   反序列化，插件配置也不得占用同名键（本模块在读写时自动剥离 / 补回）。
+//! - **保留键是装配方的**：见 [`RESERVED_KEYS`]（单一清单）——它们不参与插件配置的
+//!   反序列化（[`PluginDir::load`] 剥离），插件配置也不得占用同名键；写入时
+//!   （[`PluginDir::save`] 等）自动补回。
+//! - **身份键是 manifest 的**：出厂声明在 `Plugin::meta()`，装配期经
+//!   [`PluginDir::seed_identity`] 投影一次；此后 manifest 权威，运行期经
+//!   [`PluginDir::identity`] 读——**停用的插件因此也有身份**（ADR-032）。
 //!
 //! ## 职责划分（本方案的全部要点）
 //!
@@ -101,11 +108,16 @@ pub const PLUGIN_FILE: &str = "PLUGIN.yml";
 // 现已去掉——插件直接并列在系统根下。**「插件根 = 哪一层」只有本文件这一处定义**：
 // 依赖方一律走 [`plugins_root`] / [`dir_of`]，不要自己 `join` 目录段。
 
-/// 身份字段：工厂 id（构造插件用）
+// ==================== 保留键（单一清单见 `RESERVED_KEYS`） ====================
+//
+// 「保留键」= `PLUGIN.yml` 里属于**装配方**的键，插件自己的配置不得占用同名键。
+// 读写时的「剥离 / 保留」都遍历 [`RESERVED_KEYS`]，新增保留键只改那一处。
+
+/// 保留键：工厂 id（构造插件用）
 pub const KEY_PROVIDER: &str = "plugin_provider";
-/// 身份字段：实例名（缺省 = 目录名）
+/// 保留键：实例名（缺省 = 目录名）
 pub const KEY_NAME: &str = "plugin_name";
-/// **装配位**：`false` = 停用（缺省 / 键不存在 = 启用）
+/// 保留键（**装配位**）：`false` = 停用（缺省 / 键不存在 = 启用）
 ///
 /// 与 [`KEY_PROVIDER`] / [`KEY_NAME`] 同类——它不是插件自己的配置，而是
 /// **装配方对这个插件的状态**：停用的插件连同它的配置与数据一起留在插件根里，
@@ -123,22 +135,77 @@ pub const KEY_NAME: &str = "plugin_name";
 /// 而「停用」是一个**显式**动作。反过来（缺省停用）会让每一个新插件都先隐形。
 pub const KEY_ENABLED: &str = "plugin_enabled";
 
+// ==================== 身份键：manifest 是运行期唯一来源（ADR-032） ====================
+//
+// 出厂声明在 `Plugin::meta()`，装配期由容器经 [`PluginDir::seed_identity`] **投影**
+// 进 manifest（键缺失才写，用户改过的不覆盖）。此后 manifest 权威：插件列表、
+// 挂载点目录标题都读它（[`PluginDir::identity`]）。
+//
+// 因此**停用的插件也有身份**——它只是不被构造，不是不存在。这正是把身份从
+// `PluginMeta`（构造物）搬到这里的原因：`order` / `hidden` 那类「挂载点呈现」没有
+// 挂载点就无从谈起，而「这个插件叫什么」与它开没开无关。
+
+/// 身份键：展示标题 / 挂载点标题（原 `PluginMeta::name`）
+pub const KEY_TITLE: &str = "plugin_title";
+/// 身份键：语义描述（原 `PluginMeta::description`）
+pub const KEY_DESCRIPTION: &str = "plugin_description";
+/// 身份键：版本（原 `PluginMeta::version`）
+///
+/// 与另两个投影键（[`KEY_REQUIRED`] / [`KEY_CAN_DISABLE`]）不同，它是**真键**：
+/// 落在 manifest 里，只是顺带被投影进插件管理插件的表单模型——投影值与真值
+/// **同源**，不再绕经 `PluginMeta`。
+pub const KEY_VERSION: &str = "plugin_version";
+/// 身份键：作者（原 `PluginMeta::author`）
+pub const KEY_AUTHOR: &str = "plugin_author";
+
+// ==================== 第三方插件保留键（A5：本期只定义与解析，不强制） ====================
+
+/// 保留键：要求的**宿主插件 API 版本**（见 design/third-party-plugin-spec.md §4）
+///
+/// 宿主必须在**启动子进程之前**就知道「这个插件我认不认识」——否则要么盲目启动
+/// （可能挂），要么启动后才发现不兼容（已产生副作用）。
+pub const KEY_API: &str = "plugin_api";
+/// 保留键：宿主**授予**的能力（闭集见 design/third-party-plugin-spec.md §7）
+///
+/// 权限是**宿主**的决定，必须在宿主侧可审计。「插件**需要**什么」不在这里——
+/// 那是插件自己在 `init` 响应里声明的；两者分开，才能有「授予 < 需要」这个可检测状态。
+pub const KEY_GRANTS: &str = "plugin_grants";
+
+/// 全部保留键 —— **单一清单**
+///
+/// [`PluginDir::load`] 遍历它**剥离**（这些键不属于插件配置）；`save` /
+/// `set_enabled` / `remove_keys` 遍历它**保留**（写配置不得冲掉装配方的状态）。
+/// 新增一个保留键只需加进这里 + 定义常量。
+///
+/// 注意 [`KEY_REQUIRED`] / [`KEY_CAN_DISABLE`] **不在**此列：它们只注入表单模型、
+/// 从不落盘，因此不是 manifest 的键。
+pub const RESERVED_KEYS: &[&str] = &[
+    KEY_PROVIDER,
+    KEY_NAME,
+    KEY_ENABLED,
+    KEY_TITLE,
+    KEY_DESCRIPTION,
+    KEY_VERSION,
+    KEY_AUTHOR,
+    KEY_API,
+    KEY_GRANTS,
+];
+
 // ==================== 装配态在**配置表单模型**里的投影键 ====================
 //
 // 插件管理插件的条目表单，其模型就是那个插件的配置（`vdfs/read` 的结果）。但条目上
 // 的按钮（启用 / 停用 / 卸载）要按**装配态**显隐，而 `DetailAction.when` 只能对表单
 // 模型求值（见 `schemas/detail.rs`）——于是装配态得一并放进那份模型。
 //
-// 三个键与身份字段同前缀（`plugin_`）：它们在 `PLUGIN.yml` 里同样是**保留键**
-// （插件配置不得占用），而表单保存时只回传**定义声明过的字段**（见前端
-// `DetailForm.buildValues`），因此注入它们既不会显示成字段，也不会写进配置文件。
+// 这些键在 `PLUGIN.yml` 里同样是**保留键**（插件配置不得占用），而表单保存时只回传
+// **定义声明过的字段**（见前端 `DetailForm.buildValues`），因此注入它们既不会显示成
+// 字段，也不会写进配置文件。
 //
 // 键名与它投影的来源**逐字对应**，改一处就能顺着找到另一处：
-// `plugin_version` ← `PluginEntry::version`、`plugin_required` ← `PluginEntry::required`、
+// `plugin_version` ← `PluginEntry::version`（**即 [`KEY_VERSION`] 的真值**）、
+// `plugin_required` ← `PluginEntry::required`、
 // `plugin_can_disable` ← `UNDISABLABLE_PLUGINS` 的补集。
 
-/// 投影键：版本（`PluginEntry::version`；插件未被构造时为空串）
-pub const KEY_VERSION: &str = "plugin_version";
 /// 投影键：构造者是否声明为必需（`PluginEntry::required`）——必需即**不可删除**
 pub const KEY_REQUIRED: &str = "plugin_required";
 /// 投影键：是否允许停用（= 不在 [`crate::symbio_core::UNDISABLABLE_PLUGINS`] 里）
@@ -168,6 +235,29 @@ pub fn config_file_of(plugin: &str) -> PathBuf {
 pub fn dir_from_ctx(ctx: &dyn crate::symbio_core::InvokeRequest, plugin: &str) -> PluginDir {
     use crate::symbio_core::{InvokeRequestExt, PLUGIN_DIR};
     ctx.get(PLUGIN_DIR).unwrap_or_else(|| PluginDir::of(plugin))
+}
+
+// ==================== 插件身份 ====================
+
+/// 一个插件的**身份** —— 从 `PLUGIN.yml` 读出的四个身份键（ADR-032）
+///
+/// 与 [`PluginMeta`](crate::symbio_core::PluginMeta) 的关系：`PluginMeta` 是插件的
+/// **出厂自述**（代码里声明的），本结构是它的**落盘形态**（manifest 里的值）。
+/// 运行期一切消费（插件列表 / 挂载点目录节点）都读本结构——因此**停用的插件也有
+/// 身份**：它只是不被构造，不是不存在。
+///
+/// 各字段都可能缺省：manifest 缺失 / 不可解析 / **从未落位过**（新装但从未构造成功）
+/// 时全为空，消费方按目录名兜底。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PluginIdentity {
+    /// 展示标题 / 挂载点标题（缺省 → 消费方用目录名）
+    pub title: String,
+    /// 语义描述
+    pub description: Option<String>,
+    /// 版本
+    pub version: Option<String>,
+    /// 作者
+    pub author: Option<String>,
 }
 
 // ==================== 插件目录 ====================
@@ -269,15 +359,15 @@ impl PluginDir {
 
     /// 读插件配置；文件不存在 → `None`
     ///
-    /// 身份字段与装配位被剥离后再反序列化——它们属于「这是哪个插件、它开没开」，
-    /// 不属于配置。
+    /// **保留键被剥离**后再反序列化——它们属于「这是哪个插件、它叫什么、它开没开」，
+    /// 不属于配置。清单见 [`RESERVED_KEYS`]（一处定义，新增键不必改这里）。
     pub fn load<C: DeserializeOwned>(&self) -> Result<Option<C>, String> {
         let Some(mut map) = self.read_manifest()? else {
             return Ok(None);
         };
-        map.remove(KEY_PROVIDER);
-        map.remove(KEY_NAME);
-        map.remove(KEY_ENABLED);
+        for key in RESERVED_KEYS {
+            map.remove(*key);
+        }
         serde_json::from_value(Value::Object(map))
             .map(Some)
             .map_err(|e| {
@@ -286,6 +376,92 @@ impl PluginDir {
                     self.config_path().display()
                 )
             })
+    }
+
+    // ==================== 身份（ADR-032） ====================
+
+    /// 读本插件的身份 —— manifest 是运行期**唯一**来源
+    ///
+    /// 与 [`enabled`](Self::enabled) 同一口径：文件缺失 / 不可读 / 不可解析一律按
+    /// 「无身份」处理（各字段取缺省），由消费方按目录名兜底——「读不出来」不是本判据
+    /// 该报警的事。
+    ///
+    /// 之所以能从 manifest 读（而不问 `Plugin::meta()`）：**停用的插件不被构造**，
+    /// 而插件列表必须能显示它的名字。见 ADR-032。
+    pub fn identity(&self) -> PluginIdentity {
+        let map = self.read_manifest().ok().flatten().unwrap_or_default();
+        PluginIdentity {
+            title: string_of(&map, KEY_TITLE),
+            description: optional_string_of(&map, KEY_DESCRIPTION),
+            version: optional_string_of(&map, KEY_VERSION),
+            author: optional_string_of(&map, KEY_AUTHOR),
+        }
+    }
+
+    /// 装配期**一次性投影**出厂身份（`Plugin::meta()`）进 manifest
+    ///
+    /// **只补缺失的键**：manifest 是权威，用户改过的标题 / 描述不被出厂声明覆盖。
+    /// 键都在时**不碰文件**——无谓的写盘会搅乱 mtime，而变更通知的消费者只关心
+    /// 真正的变化。
+    ///
+    /// 调用点在容器的装配路径（子插件构造**成功之后**）——那时手里才有 `PluginMeta`。
+    /// 停用的插件不被构造、因此不会走到这里；它的身份早在首次装配时就已落位，
+    /// 这正是「停用后仍显示名字」的来路。
+    pub fn seed_identity(&self, meta: &crate::symbio_core::PluginMeta) -> Result<(), String> {
+        let mut map = self.read_manifest()?.unwrap_or_default();
+        let mut changed = false;
+
+        // 逐字段「缺失才补」——与 `identity()` 的字段一一对应，顺序即优先级
+        let seeds: [(&str, Option<&str>); 4] = [
+            (KEY_TITLE, Some(meta.name.as_str())),
+            (KEY_DESCRIPTION, meta.description.as_deref()),
+            (KEY_VERSION, meta.version.as_deref()),
+            (KEY_AUTHOR, meta.author.as_deref()),
+        ];
+        for (key, value) in seeds {
+            if map.contains_key(key) {
+                continue;
+            }
+            let Some(text) = value.filter(|s| !s.is_empty()) else {
+                continue;
+            };
+            map.insert(key.to_string(), Value::String(text.to_string()));
+            changed = true;
+        }
+
+        if !changed {
+            return Ok(());
+        }
+        self.carry_over_reserved(&mut map);
+        self.write_map(&map)
+    }
+
+    /// 写盘前的统一收尾：**保留键恒在**
+    ///
+    /// - `plugin_provider` / `plugin_name` 强制为当前值（实例名 = 目录名，由装配方
+    ///   决定，不由文件内容决定）；
+    /// - 其余保留键从**磁盘上的旧值**取回——插件写自己的配置时不得冲掉装配方的状态
+    ///   （身份 / 装配位 / 授予），否则「在设置页保存一次配置」就等于把停用的插件
+    ///   启用了，或把用户改过的标题还原成出厂值。
+    ///
+    /// ⚠️ 想**主动改**某个保留键的调用方（如 [`set_enabled`](Self::set_enabled)）
+    /// 必须在本方法**之后**写那一个键。
+    fn carry_over_reserved(&self, map: &mut Map<String, Value>) {
+        if let Ok(Some(existing)) = self.read_manifest() {
+            for key in RESERVED_KEYS {
+                if *key == KEY_PROVIDER || *key == KEY_NAME {
+                    continue; // 下面强制写当前值
+                }
+                if let Some(v) = existing.get(*key) {
+                    map.insert((*key).to_string(), v.clone());
+                }
+            }
+        }
+        map.insert(
+            KEY_PROVIDER.to_string(),
+            Value::String(self.provider.clone()),
+        );
+        map.insert(KEY_NAME.to_string(), Value::String(self.name.clone()));
     }
 
     // ==================== 装配位 ====================
@@ -304,32 +480,31 @@ impl PluginDir {
 
     /// 写装配位：`true` = 启用（摘掉键，保持文件干净）；`false` = 停用。
     ///
-    /// 只动这一个键，其余内容原样保留——身份字段恒在（手写的 manifest 可能漏了它们）。
+    /// 只动这一个键，其余内容原样保留（身份 / 授予等保留键经
+    /// [`carry_over_reserved`](Self::carry_over_reserved) 取回；手写的 manifest
+    /// 可能漏了身份字段，那里也会补上）。
     pub fn set_enabled(&self, enabled: bool) -> Result<(), String> {
         let mut map = self.read_manifest()?.unwrap_or_default();
+        // 顺序不能反：carry 会把磁盘上的旧 `plugin_enabled` 取回来
+        self.carry_over_reserved(&mut map);
         if enabled {
             map.remove(KEY_ENABLED);
         } else {
             map.insert(KEY_ENABLED.to_string(), Value::Bool(false));
         }
-        map.insert(
-            KEY_PROVIDER.to_string(),
-            Value::String(self.provider.clone()),
-        );
-        map.insert(KEY_NAME.to_string(), Value::String(self.name.clone()));
         self.write_map(&map)
     }
 
     // ==================== 写 ====================
 
-    /// 原子写插件配置（身份字段自动补回）
+    /// 原子写插件配置（保留键自动补回）
     ///
     /// 同步实现：配置文件只有几百字节，且 `composite::build` 本身在同步上下文里
     /// 补默认配置——一处实现能同时服务装配期与运行期，不值得为此分两份。
     ///
-    /// **装配位随写保留**：`plugin_enabled` 是保留键（见 [`KEY_ENABLED`]），
-    /// 插件写自己的配置时不得把它冲掉——否则「在设置页里保存一次配置」就等于
-    /// 悄悄把停用的插件启用了（或反之）。故写入前先读一次旧 manifest 取回它。
+    /// **保留键随写保留**（见 [`RESERVED_KEYS`]）：身份 / 装配位 / 授予都不是插件的
+    /// 配置，插件写自己的配置时不得把它们冲掉——否则「在设置页里保存一次配置」就等于
+    /// 悄悄把停用的插件启用了、或把用户改过的标题还原成出厂值。
     pub fn save<C: Serialize>(&self, value: &C) -> Result<(), String> {
         let mut map =
             match serde_json::to_value(value).map_err(|e| format!("配置序列化失败：{e}"))? {
@@ -338,16 +513,7 @@ impl PluginDir {
                     return Err(format!("配置必须是映射，实得 {other}"));
                 }
             };
-        map.insert(
-            KEY_PROVIDER.to_string(),
-            Value::String(self.provider.clone()),
-        );
-        map.insert(KEY_NAME.to_string(), Value::String(self.name.clone()));
-        if let Ok(Some(existing)) = self.read_manifest() {
-            if let Some(flag) = existing.get(KEY_ENABLED) {
-                map.insert(KEY_ENABLED.to_string(), flag.clone());
-            }
-        }
+        self.carry_over_reserved(&mut map);
         self.write_map(&map)
     }
 
@@ -386,12 +552,8 @@ impl PluginDir {
         if map.len() == before {
             return Ok(());
         }
-        // 身份字段恒在（手写的配置文件可能漏了它们）
-        map.insert(
-            KEY_PROVIDER.to_string(),
-            Value::String(self.provider.clone()),
-        );
-        map.insert(KEY_NAME.to_string(), Value::String(self.name.clone()));
+        // 保留键恒在（手写的配置文件可能漏了它们）
+        self.carry_over_reserved(&mut map);
         self.write_map(&map)
     }
 
@@ -416,21 +578,24 @@ impl PluginDir {
 /// 对照，得到「这个智能体由哪些插件组成、各自什么状态」。消费方（插件管理插件）
 /// 只读它、不自己扫目录——「有哪些插件」的判据（合格性 / 必需 / 启用）只有一份实现。
 ///
-/// ## 为什么标题可能是空的
+/// ## 身份从 manifest 读，不依赖「被构造」
 ///
-/// `title` / `description` / `version` 来自插件的 [`PluginMeta`]（`Plugin::meta()`），
-/// 而那是**构造物**：只有被构造出来的插件才答得上来。停用的插件**刻意不被构造**
-/// （见 [`KEY_ENABLED`]——它不该启动任何后台行为），因此这几个字段在那种情形下为空，
-/// 消费方按目录名兜底。
+/// `title` / `description` / `version` 来自 `PLUGIN.yml` 的身份键
+/// （[`PluginDir::identity`]），因此**停用的插件也有身份**——它只是不被构造，
+/// 不是不存在（ADR-032）。
 ///
-/// [`PluginMeta`]: crate::symbio_core::PluginMeta
+/// 字段仍可能为空：该目录**从未落位过**（新装 / 手写，但从未构造成功 ⇒ 出厂身份
+/// 还没被投影）。那时消费方按 `name`（目录名）兜底。
+///
+/// `order` 是另一回事：它是**挂载点呈现**（仍在 `PluginMeta` 上），没有挂载点就
+/// 无从谈起，因此停用时取缺省值——这与身份「必须在」正好相反，是刻意的。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PluginEntry {
     /// 插件名 = 目录名 = 挂载名（路由前缀）
     pub name: String,
     /// 工厂 id（`PLUGIN.yml` 的 `plugin_provider`）
     pub provider: String,
-    /// 展示标题（来自 `PluginMeta`；未构造时为空串，消费方按 `name` 兜底）
+    /// 展示标题（来自 manifest 的身份键；从未落位时为空串，消费方按 `name` 兜底）
     #[serde(default)]
     pub title: String,
     /// 语义描述（同上，可为空）
@@ -439,7 +604,7 @@ pub struct PluginEntry {
     /// 版本（同上，可为空）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
-    /// 导航排序（来自 `PluginMeta`；未构造时用缺省值，与 `PluginMeta` 同一口径）
+    /// 导航排序（**挂载点呈现**，来自 `PluginMeta`；未挂载时用缺省值，同一口径）
     #[serde(default = "default_entry_order")]
     pub order: i32,
     /// 构造者声明为必需（**不可删除**，但可停用）
@@ -583,6 +748,25 @@ fn encode(value: &Value) -> VdfsResult<VdfsContent> {
     let text = serde_json::to_string_pretty(value)
         .map_err(|e| VdfsError::internal(format!("配置序列化失败：{e}")))?;
     Ok(VdfsContent::text(text).with_mime("application/json"))
+}
+
+/// 取字符串值（缺失 / 非字符串 → 空串）
+fn string_of(map: &Map<String, Value>, key: &str) -> String {
+    match map.get(key) {
+        Some(Value::String(s)) => s.clone(),
+        _ => String::new(),
+    }
+}
+
+/// 取可选字符串值（缺失 / 非字符串 / 空串 → `None`）
+///
+/// 空串按「没有」处理：手写的 manifest 里 `plugin_version: ""` 与不写这个键
+/// 是同一个意思，消费方不该为前者多一个分支。
+fn optional_string_of(map: &Map<String, Value>, key: &str) -> Option<String> {
+    match map.get(key) {
+        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

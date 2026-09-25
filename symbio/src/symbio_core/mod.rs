@@ -63,7 +63,8 @@ pub use paths::*;
 pub use plugin::*;
 pub use plugin_dir::{
     config_file_of, dir_from_ctx, dir_of, plugins_root, ConfigFile, PluginDir, PluginEntry,
-    KEY_CAN_DISABLE, KEY_ENABLED, KEY_NAME, KEY_PROVIDER, KEY_REQUIRED, KEY_VERSION, PLUGIN_FILE,
+    PluginIdentity, KEY_API, KEY_AUTHOR, KEY_CAN_DISABLE, KEY_DESCRIPTION, KEY_ENABLED, KEY_GRANTS,
+    KEY_NAME, KEY_PROVIDER, KEY_REQUIRED, KEY_TITLE, KEY_VERSION, PLUGIN_FILE, RESERVED_KEYS,
 };
 pub use sse::{PartialLineExtractor, SseLineParser};
 pub use text::{floor_char_boundary, truncate_bytes};

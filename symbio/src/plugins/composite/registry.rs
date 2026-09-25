@@ -28,9 +28,15 @@
 //! ## 一个刻意的边界：停用的插件**不被构造**
 //!
 //! 停用不是「构造了但不显示」，而是**根本不构造**：它不启动任何后台行为
-//! （监听、定时任务、连接池），这正是用户按下「停用」时想要的东西。代价是
-//! 它的 `PluginMeta`（标题 / 版本 / 描述）也拿不到——[`PluginEntry`] 的
-//! 那几个字段因此可能为空，消费方按目录名兜底（见该结构文档）。
+//! （监听、定时任务、连接池），这正是用户按下「停用」时想要的东西。
+//!
+//! 这曾经带来一个代价：`PluginMeta` 是构造物，停用就拿不到标题 / 版本 / 描述，
+//! [`PluginEntry`] 的那几个字段因此为空、消费方按目录名兜底。**现已解决**：身份归
+//! `PLUGIN.yml`（ADR-032），装配期由 [`PluginRegistry::mount_child`] 把出厂身份
+//! **投影进 manifest 一次**，此后运行期只读 manifest——停用的插件照样有名字。
+//!
+//! 挂载点呈现（`order` / `hidden` / `root_access`）仍取自 `PluginMeta`，这是刻意的：
+//! 没有挂载点就没有这些属性，停用插件的 `order` 取缺省正是「它现在不在树里」的表达。
 //!
 //! 顺带一个后果：停用期间它的 `PLUGIN.yml` 不再经 VDFS 可达（提供者没被构造），
 //! 配置要等重新启用后才能改。这是「停用」的题中之义——**停用是把这个插件连同
@@ -120,8 +126,8 @@ impl PluginRegistry {
         self.required.iter().any(|n| n == name)
     }
 
-    /// 某插件的目录
-    fn dir_of(&self, name: &str) -> PluginDir {
+    /// 某插件的目录（**公开**：资源树合成挂载点节点时也要读它的身份，见 ADR-032）
+    pub fn dir_of(&self, name: &str) -> PluginDir {
         PluginDir::at(self.root.join(name), name)
     }
 
@@ -221,7 +227,7 @@ impl PluginRegistry {
     /// 插件从自己的目录里读。
     fn mount_child(&self, name: &str, provider: &str, dir: PluginDir) {
         let sub = SimpleRequest::child_of(&self.ctx, self.parent.clone());
-        sub.set(PLUGIN_DIR, dir);
+        sub.set(PLUGIN_DIR, dir.clone());
         let sub_context: Arc<dyn InvokeRequest> = Arc::new(sub);
 
         // 装配细节走 debug：每个子插件一行，十几个插件连成一串纯机械噪声，
@@ -230,6 +236,13 @@ impl PluginRegistry {
         crate::plugin_debug!("composite", "正在构造子插件 {name} -> {provider}");
         match create_object::<dyn Plugin>(provider, sub_context) {
             Some(plugin) => {
+                // **出厂身份投影**（ADR-032）：构造成功后才拿得到 `PluginMeta`，
+                // 于是就在这一刻把身份补进 manifest（只补缺失的键，用户改过的不动）。
+                // 此后运行期只读 manifest，停用插件因此也有名字——这条投影是
+                // 「停用不失身份」的**唯一**来路，别处不必再读 `meta()` 的身份字段。
+                if let Err(e) = dir.seed_identity(&plugin.meta()) {
+                    crate::plugin_warn!("composite", "插件身份落位失败 {name}：{e}");
+                }
                 lock_write(&self.instances).insert(name.to_string(), plugin);
             }
             None => {
@@ -257,17 +270,19 @@ impl PluginRegistry {
                 _ => continue,
             };
             let dir = dir.with_provider(&provider);
-            // 标题 / 描述 / 版本来自 `PluginMeta`，而它是**构造物**：停用的插件
-            // 刻意不被构造（见模块文档），因此这几个字段可能为空。
-            let meta = mounted.get(&name).map(|p| p.meta());
+            // 身份从 **manifest** 读（ADR-032）——停用的插件也有名字；只有从未
+            // 落位过的目录才为空，消费方按 `name` 兜底。
+            let identity = dir.identity();
+            // 排序用的 `order` 是**挂载点呈现**，仍取自构造物——没挂载就没有位置。
+            let order = mounted
+                .get(&name)
+                .map(|p| p.meta().order)
+                .unwrap_or_else(|| PluginMeta::default().order);
             out.push(PluginEntry {
-                title: meta.as_ref().map(|m| m.name.clone()).unwrap_or_default(),
-                description: meta.as_ref().and_then(|m| m.description.clone()),
-                version: meta.as_ref().and_then(|m| m.version.clone()),
-                order: meta
-                    .as_ref()
-                    .map(|m| m.order)
-                    .unwrap_or_else(|| PluginMeta::default().order),
+                title: identity.title,
+                description: identity.description,
+                version: identity.version,
+                order,
                 required: self.is_required(&name),
                 enabled: dir.enabled(),
                 mounted: mounted.contains_key(&name),

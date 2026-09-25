@@ -267,6 +267,25 @@ SingleFileVdfs, MemoryVdfs}`。套一层 `dyn` 工厂只会把一次构造换成
 实例化，并把该目录经 ctx 键 `PLUGIN_DIR` 告知插件（插件据此读写**自己的**配置）。
 容器**不内置任何清单**（它是通用容器，可以嵌套另一个容器）。
 
+### `PLUGIN.yml` 的保留键
+
+保留键属于**装配方**（容器 / 插件管理插件），插件自己的配置不得占用同名键。
+单一清单见 `symbio_core::plugin_dir::RESERVED_KEYS`——读写时的「剥离 / 保留」都遍历它。
+
+| 键 | 谁写 | 说明 |
+|---|---|---|
+| `plugin_provider` | 装配方 | 工厂 id（装配方据此构造） |
+| `plugin_name` | 装配方 | 实例名；缺省 = 目录名 |
+| `plugin_enabled` | 装配方 | 装配位；键不存在 = 启用 |
+| `plugin_title` / `plugin_description` / `plugin_version` / `plugin_author` | 装配期**一次性**投影 | 插件**身份**（运行期唯一来源，见 ADR-032） |
+| `plugin_api` | 插件作者手写 | 要求的宿主插件 API 版本（第三期起强制校验） |
+| `plugin_grants` | 宿主手写 | 宿主**授予**的能力闭集（第三方插件规范 §7） |
+
+**身份的投影方向是单向的**：出厂声明（`Plugin::meta()`）→ 装配期落进 manifest →
+此后 manifest 权威（用户可改），运行期一切消费（`PluginEntry`、挂载点目录节点）
+都读 manifest。因此**停用的插件也有身份**——它只是不被构造，而不是不存在
+（ADR-032）。
+
 新增插件只需：
 1. 把目录放到 `symbio/src/plugins/` 并实现 `Plugin`
 2. 调用 `submit_object_creator!` 注册工厂

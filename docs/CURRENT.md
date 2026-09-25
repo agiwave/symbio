@@ -39,7 +39,8 @@
 >   资源存储的**选型**（`SingleFileVdfs` / `DirVdfs` / `MemoryVdfs`）是实现细节，不在本表出现。
 > - **自有路由** = `async fn route()` 体内 `match` 臂的字符串（臂是**相对路径**，
 >   容器已剥掉首段，故此处补回**插件目录名**——容器按目录名建实例表并按它分发，
->   目录名才是真正的路由前缀；`PluginMeta` 首参不参与路由（唯一运行期消费方是 `composite/vdfs.rs`）。
+>   目录名才是真正的路由前缀；`PluginMeta` 首参不参与路由——它只是**出厂 id**，
+>   插件**身份**取自 `PLUGIN.yml`（见 [DECISIONS.md](./DECISIONS.md) ADR-032）。
 >   标「（动态）」的是按运行期规则分发、无法静态枚举的。
 >   漏项与歧义以 [ROUTES.md](./reference/ROUTES.md) 为准。
 > - **配置文件** = 该插件调用过 `announce_configurable`（配置就是 `<根>/<挂载点>/PLUGIN.yml`，
@@ -108,7 +109,7 @@
 
 | 范围 | 实现 | 测试 |
 |---|---|---|
-| `symbio/src` | 201 文件 / 55011 行 | 122 文件 / 24319 行 |
+| `symbio/src` | 201 文件 / 55249 行 | 122 文件 / 24548 行 |
 | `cli/src` | 4 文件 / 1569 行 | 1 文件 / 80 行 |
 | `tauri/src-tauri/src` | 3 文件 / 445 行 | 0 文件 / 0 行 |
 | `tauri/src` | 94 文件 / 20288 行 | 49 文件 / 10428 行 |
@@ -122,4 +123,4 @@
 
 ---
 
-> 生成时间：2026-09-25 09:25:24 UTC · 源：`git rev-parse HEAD` = `ecf0529`
+> 生成时间：2026-09-25 11:01:19 UTC · 源：`git rev-parse HEAD` = `b191963`

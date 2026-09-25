@@ -122,8 +122,19 @@ symbio::submit_object_creator!("my_plugin", MyPlugin::build, dyn Plugin);
 # ~/.symbio/my_plugin/PLUGIN.yml
 plugin_provider: my_plugin   # 工厂 id（submit_object_creator! 的第一个参数）
 plugin_name: my_plugin       # 实例名，缺省 = 目录名
+# ↓ 以下四个是**身份**保留键，由装配期从 Plugin::meta() 一次性投影（ADR-032）
+plugin_title: 我的插件        # 展示标题 / 挂载点标题
+plugin_description: 演示插件   # 语义描述
+plugin_version: 0.1.0        # 版本
+plugin_author: me            # 作者
 # ↓ 以下即本插件自己的配置字段，随你定义
 ```
+
+**身份不用手写**：装配期容器构造出插件后，会把 `Plugin::meta()` 里的身份**投影**
+进 manifest（键已存在则不动，因此你改过的值不会被覆盖）。此后 manifest 是权威——
+运行期的插件列表、挂载点目录标题都读它，所以**停用的插件也有身份**（它只是不被
+构造，不是不存在）。`meta()` 的另一半（`order` / `icon` / `hidden` / `root_access`）
+是**挂载点呈现**，只在运行期读，不投影——没有挂载点就没有这些属性。
 
 若要随系统启动（`home` 的必需插件清单），把插件名加进 `symbio/src/plugins/home/plugin.rs`
 的 `SYSTEM_PLUGINS`——**这是唯一的清单点**，且它属于**构造者**（`composite` 是通用容器，

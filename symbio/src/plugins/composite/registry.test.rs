@@ -8,7 +8,9 @@
 
 use super::*;
 
-use crate::symbio_core::{PLUGIN_LOCAL, PLUGIN_MANAGER, PLUGIN_SESSION};
+use crate::symbio_core::{
+    PluginError, PluginPayload, PLUGIN_LOCAL, PLUGIN_MANAGER, PLUGIN_SESSION,
+};
 use std::path::Path;
 
 /// 一次性临时插件根（目录名带进程号，避免并行测试互相踩）
@@ -72,9 +74,38 @@ async fn entries_cover_qualified_dirs_including_disabled_ones() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// 未构造的插件没有 `PluginMeta`：标题 / 描述 / 版本为空，消费方按目录名兜底
+/// **身份来自 manifest，不依赖被构造**（ADR-032）：未挂载也有名字
+///
+/// 这正是「停用后仍能在插件列表里看到它叫什么」的机制——停用不构造，而身份早已
+/// 在首次装配时落位。
 #[tokio::test]
-async fn unconstructed_entries_have_no_meta() {
+async fn identity_comes_from_manifest_even_when_not_mounted() {
+    let root = temp_root("identity");
+    put_plugin(
+        &root,
+        "alpha",
+        r#"{"plugin_provider": "alpha", "plugin_title": "甲",
+            "plugin_description": "第一个", "plugin_version": "2.0.0"}"#,
+    );
+
+    let entries = registry_at(&root, Vec::new()).entries();
+    assert_eq!(entries.len(), 1);
+    assert!(!entries[0].mounted, "没有实例 = 未挂载");
+    assert_eq!(entries[0].title, "甲", "未挂载也有身份");
+    assert_eq!(entries[0].description.as_deref(), Some("第一个"));
+    assert_eq!(entries[0].version.as_deref(), Some("2.0.0"));
+    assert_eq!(
+        entries[0].order,
+        PluginMeta::default().order,
+        "`order` 是挂载点呈现，未挂载时仍取缺省（与身份不同，这是刻意的）"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 从未落位过的目录（manifest 里没有身份键）：身份为空，消费方按目录名兜底
+#[tokio::test]
+async fn identity_is_empty_for_never_seeded_dirs() {
     let root = temp_root("nometa");
     put_plugin(&root, "alpha", r#"{"plugin_provider": "alpha"}"#);
 
@@ -83,14 +114,73 @@ async fn unconstructed_entries_have_no_meta() {
     assert_eq!(entries[0].title, "");
     assert_eq!(entries[0].description, None);
     assert_eq!(entries[0].version, None);
-    assert_eq!(
-        entries[0].order,
-        PluginMeta::default().order,
-        "与 PluginMeta 同一口径"
-    );
 
     let _ = std::fs::remove_dir_all(&root);
 }
+
+// ==================== 装配期：出厂身份落位（ADR-032） ====================
+
+/// 装配期**真的**把出厂身份投影进 manifest
+///
+/// 只测 `PluginDir::seed_identity` 本身不够——它由容器的装配路径调用，那条链断了，
+/// 身份就永远不落位（而「停用插件也有身份」全靠它）。所以这里走**真实**的
+/// `mount_all`：真目录 → 真工厂 → 真构造。
+#[tokio::test]
+async fn mounting_seeds_the_identity_into_the_manifest() {
+    let root = temp_root("seed");
+    put_plugin(
+        &root,
+        "seeded",
+        r#"{"plugin_provider": "symbio-test-seed"}"#,
+    );
+
+    let reg = registry_at(&root, Vec::new());
+    reg.mount_all();
+
+    assert!(
+        lock_read(reg.instances()).contains_key("seeded"),
+        "工厂已注册且未停用 ⇒ 应已构造"
+    );
+    let id = reg.dir_of("seeded").identity();
+    assert_eq!(id.title, "种子插件", "出厂身份落进 manifest");
+    assert_eq!(id.version.as_deref(), Some("9.9.9"));
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 装配期投影用的工厂插件：只为了在**真实** `mount_all` 里被构造一次
+struct SeedPlugin;
+
+impl SeedPlugin {
+    fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
+        Arc::new(Self)
+    }
+}
+
+#[async_trait::async_trait]
+impl Plugin for SeedPlugin {
+    fn meta(&self) -> PluginMeta {
+        PluginMeta::new("symbio-test-seed", "种子插件").with_version("9.9.9")
+    }
+
+    async fn route(
+        self: Arc<Self>,
+        _ctx: Arc<dyn InvokeRequest>,
+    ) -> crate::symbio_core::InvokeResponse<PluginPayload> {
+        Err(PluginError::NotFound("seed".to_string()))
+    }
+
+    async fn traverse(
+        self: Arc<Self>,
+        _path: String,
+        _ctx: Arc<dyn InvokeRequest>,
+    ) -> crate::symbio_core::InvokeResponse<PluginPayload> {
+        Ok(PluginPayload::Empty)
+    }
+}
+
+// 测试专用工厂：不占用任何生产 id，`installable()` 的断言因此不受影响
+crate::submit_object_creator!("symbio-test-seed", SeedPlugin::build, dyn Plugin);
 
 // ==================== 可安装清单 ====================
 

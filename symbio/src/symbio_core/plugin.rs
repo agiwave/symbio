@@ -12,13 +12,22 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock, Weak};
 
-/// 插件元数据
+/// 插件的**出厂自述**（ADR-032）—— 两半，消费方式**不同**
 ///
-/// 除身份（id / name / description / version / author）外，还承载本插件 **VDFS
-/// 挂载点的自述**：导航排序、图标、隐藏位、根访问位与「根下可新建类型」——
-/// 从前这些散落在 `VdfsProvider` trait 的七个小方法上，现在与身份同源：
-/// `Plugin::meta()` 是插件自述的**唯一**来源，容器合成挂载点目录节点时直接取用
-/// （`name` 即挂载点标题；无 VDFS 挂载的插件这些字段保持缺省，无副作用）。
+/// | 半 | 字段 | 消费方式 |
+/// |---|---|---|
+/// | **身份** | `id` / `name` / `description` / `version` / `author` | 装配期**一次性投影**进 `PLUGIN.yml`（[`PluginDir::seed_identity`](crate::symbio_core::PluginDir::seed_identity)），此后运行期读 manifest |
+/// | **挂载点呈现** | `order` / `icon` / `hidden` / `root_access` | 运行期读：`composite/vdfs.rs` 合成挂载点目录节点、`composite/registry.rs` 排序 |
+///
+/// 为什么分两半：**身份必须常在**（「这个插件叫什么」与它开没开无关，停用的插件
+/// 也要能在列表里显示名字），而**挂载点呈现只在挂载时成立**（没有挂载点，
+/// `order` / `hidden` 无从谈起）。前者因此落进 `PLUGIN.yml`（跟着目录走），
+/// 后者留在本结构（跟着构造物走）。
+///
+/// `name` 是**挂载点标题**（同时是插件展示名）：它投影成 manifest 的 `plugin_title`，
+/// 运行期的目录节点标题取自那里。
+///
+/// 无 VDFS 挂载的插件，挂载点呈现那半保持缺省，无副作用。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginMeta {
     pub id: String,
@@ -298,17 +307,25 @@ impl InvokeRequest for SimpleRequest {
 
 #[async_trait]
 pub trait Plugin: Send + Sync + 'static {
-    /// 插件元信息（身份声明）。
+    /// 插件的**出厂自述** —— 身份（种子）+ 挂载点呈现（见 ADR-032）
     ///
-    /// ⚠️ 唯一运行期消费方是 `composite/vdfs.rs`：它读 `order`（子插件目录排序）、
-    /// `root_access`（根节点权限）、`name`/`description`/`hidden`（构建子目录节点）
-    /// 来聚合组合视图；其余 `.meta()` 调用点命中的都是 `Capability::meta`（能力，
-    /// 而非插件）。插件的身份实际来自各自的 `PLUGIN.yml`（见 `plugin_dir`），
-    /// 配置面板读的也是那一份。
+    /// 两半的消费方式不同，别混：
     ///
-    /// 之所以仍留在 trait 上，是**刻意的决定而非遗忘**：它是插件契约的一部分
-    /// （每个 impl 都应能自报身份），删掉会波及全部插件实现，并从公开 trait 上
-    /// 摘掉一项能力。若将来确认要删，请连同各 impl 一并清理，不要只删这一行声明。
+    /// - **身份**（`name` / `description` / `version` / `author`）：只在**装配期**
+    ///   被读一次——容器构造出插件后经 `PluginDir::seed_identity` 投影进
+    ///   `PLUGIN.yml`（键缺失才写）。此后 manifest 是权威，运行期一律读
+    ///   `PluginDir::identity()`，因此**停用的插件也有身份**。
+    /// - **挂载点呈现**（`order` / `icon` / `hidden` / `root_access`）：运行期读，
+    ///   消费方是 `composite/vdfs.rs`（合成挂载点目录节点）与 `composite/registry.rs`
+    ///   （`order` 用于排序）。它们描述「这个挂载点长什么样」，没有挂载点就无从谈起，
+    ///   所以**不投影**。
+    ///
+    /// 其余 `.meta()` 调用点命中的都是 `Capability::meta`（能力，而非插件）。
+    ///
+    /// 之所以仍留在 trait 上、且身份字段**尚未删除**，是**刻意的**：删除它们需要
+    /// 「**不构造也能拿到出厂身份**」的能力——一张按工厂 id 索引的静态自述注册表，
+    /// 属第二期（provider 两级解析）的产物。本期先把**运行期消费路径**单源化。
+    /// 若将来确认要删，请连同各 impl 一并清理，不要只删这一行声明。
     fn meta(&self) -> PluginMeta;
 
     /// 分形路由入口：接收一个抽象的上下文对象，按需提取参数
