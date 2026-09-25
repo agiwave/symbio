@@ -143,7 +143,7 @@
 ### 4.1 左栏：导航（绑定地址的子目录清单）
 
 - **数据源**：`vdfs/list('<绑定地址>')` 的目录内容——绑定
-  `<根>` 时由访问层**合成**（见 [vdfs.md §13.3](./vdfs.md#133-vfs-插件vdfs访问层)），
+  `<根>` 时由访问层**合成**（见 [vdfs/README.md](../../symbio/src/plugins/vdfs/README.md)），
   返回普通目录节点集合（`kind = dir`），前端只做形状映射，
   **不消费** `vdfs/providers` 端点（该端点已随 `VdfsMountInfo` 一并删除）。
 - **每一项携带**：`name`（子目录名）、`title`（展示标题）、`icon`（纯 UI 映射）、

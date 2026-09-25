@@ -1,3 +1,4 @@
+<!-- doc-link-allow D-004: 注释边界一节以「曾经…已改为…」作为禁止写法的反例 -->
 # Contributing to Symbio
 
 感谢你考虑为 Symbio 贡献代码！本项目采用**分形插件架构 (Fractal Plugin Architecture)**，
@@ -21,7 +22,7 @@
 > **为什么只有 Linux 需要额外系统库**：TLS 后端是平台原生栈——Windows 用 SChannel、macOS 用
 > Security.framework，两者都是**纯 Rust FFI 绑定**（无 C 源、无需额外系统包）；只有 Linux 落到
 > 系统 OpenSSL，因此需要上面的开发包。Windows/macOS **无需 C/C++ 编译器**：最后一条 C 编译链
-> `onig_sys` 已随 `fastembed` 废弃、嵌入推理切到 `tract-onnx`（纯 Rust，[ADR-014](./docs/DECISIONS.md)）
+> `onig_sys` 已随 `fastembed` 废弃、嵌入推理切到 `ort`（预编译二进制，[ADR-016](./docs/DECISIONS.md)）
 > 退出依赖树；Linux 侧同理只剩编译 Rust 本身。
 
 ---
@@ -82,8 +83,8 @@ node scripts/gate.mjs --ci            # 对齐 CI（cargo test --workspace）
 `scripts/cli-binary.mjs`（门禁与 e2e 共用的唯一真相），是**内容指纹**而非「文件在不在」：
 `cli/src` + `symbio/src` 的全部源码与两个 crate 的清单算一个 sha256，构建成功后写成构建戳；
 使用前比对，不一致就先 `cargo build --release`（cargo 自己判增量）再写戳，`--check` 只判不建。
-「文件在就算新鲜」这个判据曾经存在过，代价是一份过期 exe 被一直用下去，e2e 报出**与眼前源码
-直接矛盾**的断言失败（源码里明明有的字段，运行时是 `undefined`），排查方向被引到源码上。
+「文件在就算新鲜」会把一份过期 exe 一直用下去，e2e 因此报出**与眼前源码直接矛盾**的断言失败
+（源码里明明有的字段，运行时是 `undefined`），排查方向被引到源码上——改用指纹判据就是为了消掉这个失败模式。
 
 **壳（Tauri）那一侧同理，而且更贵。** 它不会报错，只会让**日志**看起来来自当前源码：于是
 「日志里有一条源码中不存在的行」会被当成「代码没接上」，去读一遍代码。机制在
@@ -177,6 +178,12 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
   ——本仓库已数次出现「文档列的文件早已不存在」。
 - **过程文档必须归档**：一次性评审 / 迁移记录 / 已落地的实施方案一律 `git mv` 进
   `docs/archive/`（**模块目录同样适用**），由 `node scripts/doc-link-audit.mjs` 的 D-002 判定。
+- **活跃文档不得超过 800 行**（D-003，**无豁免**）：超限不是"需要解释的特例"，而是「内容该归
+  别人了」或「该拆篇了」的信号，按上面那张职责边界表处置。同一脚本的 D-004 另判**变更史残留**
+  （「曾经 / 修订 / 后记 / 测试基线 A → B」），历史一律归 `git log`。
+  ```bash
+  node scripts/doc-link-audit.mjs   # 四条规矩（链接 / 归档 / 行数 / 变更史），任一命中即失败
+  ```
 
 ### Rust 侧
 

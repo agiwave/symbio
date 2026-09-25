@@ -75,7 +75,7 @@ node --test --test-reporter=spec scripts/windows-restart-prepare.test.mjs script
 
 restart 测试用零依赖 Rust fixture 离线真实编译，目标为其独立进程，不是当前 Symbio。覆盖默认 dry-run、真实编译失败不杀、错误身份/hash/cancel 不杀（含 PowerShell 最后 gate）、真实停止/构建候选启动、cwd/含空格中文引号参数与日志、ready 跳过损坏源码构建、候选提前退出回退、存活窗口取消后终止候选再回退、后台启动器退出后监督子进程继续存活并完成、宿主祖先保护。测试最后清理专属 fixture 进程，保留文件证据。
 
-首次运行暴露当前 PowerShell 无法加载 `Get-FileHash`，已改为 .NET SHA256 后重新完整测试通过。回退路径同时确保 child 的 kill error 不被误当成退出事件。
+哈希校验走 .NET SHA256（不依赖 PowerShell 的 `Get-FileHash`）。回退路径确保 child 的 kill error 不被误当成退出事件。
 
 **没有进行真实 Symbio 切换、应用就绪或 heartbeat 恢复测试，未停止当前宿主。** 当前脚本还主动拒绝启动祖先作为目标，因此不是已完成的当前宿主自重启方案。
 

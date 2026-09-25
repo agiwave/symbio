@@ -101,15 +101,9 @@ trait 上收拢全部操作（列 / 读 / 写 / 删 / 建 / 移 / 订阅），�
 
 ### 2.2 分层与依赖
 
-| 层 | 文件 | 允许依赖 | 说明 |
-|---|---|---|---|
-| 纯接口（centerpiece） | `symbio_core/vdfs/` | `std` / `serde` / `serde_json` / `async_trait` | `VdfsProvider` trait、域类型、`VdfsContext`、路径工具、回填 |
-| 宿主桥 | `symbio_core/vdfs/host.rs` | 宿主自有 | 上下文注入、`VdfsError` ↔ `PluginError` |
-| 线路信封 | `plugins/vdfs/protocol.rs` | 上面两层 | `vdfs/*` 请求 / 响应、协议路径常量与 `VDFS_OPS`（变更事件与 `VdfsChange` 同形） |
-| 地址分流 | `plugins/vdfs/fs.rs` | 上面两层 | `UnifiedFs`：`<根>` / 物理分流、口径映射、`normalize_addr` |
-| 物理层 | `plugins/vdfs/physical.rs` | 上面两层 | 磁盘 IO + `FsPolicy`（白名单 / 符号链接 / 限额） |
-| 访问层 | `plugins/vdfs/host.rs` | 宿主自有 | 拆信封、翻译操作、树状遍历、事件总线投递 |
-| 拓扑 | `plugins/composite/vdfs.rs` | 宿主自有 | 逐子插件收集、组合成包含子目录列表的 provider |
+各层的文件与职责见 §2.1 清单。**只允许向下依赖**：纯接口层仅依赖
+`std` / `serde` / `serde_json` / `async_trait`（零 `use crate::…`）；宿主桥 / 访问层 /
+拓扑用宿主自有类型；线路信封 / 地址分流 / 物理层依赖其下两层。
 
 硬约束：
 
@@ -259,7 +253,7 @@ D:/tmp/a.txt     绝对路径                          ─┘
 哪个 provider 而异。缺省不隐藏（序列化时省略）。
 
 典型用法：内容只有一份配置文档、没有用户资源可浏览的目录
-（`<根>/web` / `<根>/local` / `<根>/gateway`，见 §13.2）不必出现在导航列表里，
+（如 `<根>/web` / `<根>/local` / `<根>/gateway`）不必出现在导航列表里，
 但它们仍按 `<根>/<插件>/PLUGIN.yml` 完全可寻址。
 
 `kind` 与目录性**无关**：`dir` / `file` 只是构造器（`VdfsNode::dir` / `file`）给出的
@@ -384,7 +378,8 @@ size  updated_at  children  binary  hidden  schema  new_type  attributes
 - **身份字段是保留键**：`plugin_provider`（工厂 id）/ `plugin_name`（实例名）与配置
   字段同处一个文件，但**不参与配置反序列化**（`PluginDir` 读写时自动剥离 / 补回）。
   装配方据此判定「这个目录是不是一个可加载的插件」：文件存在、可解析、且
-  `plugin_provider` 指向一个已注册的工厂（见 §13.2）。
+  `plugin_provider` 指向一个已注册的工厂（见
+  [composite/README.md](../../symbio/src/plugins/composite/README.md)）。
 - **副作用留在插件**：写完配置之后还要做什么（如网关重建监听）在插件自己的
   `write` 里做——`PluginConfigFile::apply` 返回后再执行，机制不引入回调抽象。
 - **实现只写一次**：`symbio_core::plugin::dir` 的 `PluginDir`（目录 + 配置读写，
@@ -392,7 +387,8 @@ size  updated_at  children  binary  hidden  schema  new_type  attributes
   **值 + 一组函数**，不是 trait：没有注册表、没有回调。
 - **凭据在配置里**：配置文件与其它节点一样受访问位约束（`r`），即**可读**。
   对外暴露面（如网关的只读白名单）需自行拒绝落在 `<插件目录>/PLUGIN.yml` 上的读取。
-- **设置页只是「指路」**：设置插件的清单里会出现这些配置文档（见 §13.1），但条目
+- **设置页只是「指路」**：设置插件的清单里会出现这些配置文档（见
+  [plugin_manager/README.md](../../symbio/src/plugins/plugin_manager/README.md)），但条目
   携带的是**它自己的真实地址**（`<插件目录>/PLUGIN.yml`），读写仍走拥有者——同一份
   配置只有一个地址，设置页不代理读写、也不复制一份。
 
@@ -416,28 +412,17 @@ size  updated_at  children  binary  hidden  schema  new_type  attributes
 ## 5. 协议操作
 
 `plugins/vdfs/protocol.rs` 的 `VDFS_OPS` 是唯一操作清单（**线路信封只存在于插件内，
-core 不暴露**）：
+core 不暴露**）；操作闭集见 [CURRENT.md](../CURRENT.md) §3.2，信封的线上形状以
+`protocol.rs` 为准。语义要点：
 
-| 操作 | 请求载荷 | 响应 | 说明 |
-|---|---|---|---|
-| `vdfs/root` | `{}`（**不给地址**） | `VdfsListResponse` | **进入地址空间**：列出虚拟根，回包 `path` 即根地址（消费方当运行期数据持有，见 §3.1「根名归属」） |
-| `vdfs/list` | `{path}` | `VdfsListResponse` | 列目录；`<根>` 返回系统子目录清单 |
-| `vdfs/tree` | `{path, depth?, limit?}` | `VdfsTreeResponse` | 递归遍历（只下钻 `t` 位目录） |
-| `vdfs/stat` | `{path}` | `VdfsNode` | 读元数据 |
-| `vdfs/read` | `{path}` | `VdfsContent` | 读内容（`r`） |
-| `vdfs/edit` | `{path, old_string, new_string?}` | `VdfsEditResponse` | 精确字符串替换（**访问层组合操作**：`read` → 替换 → `write`） |
-| `vdfs/search` | `{path?, pattern}` | `VdfsSearchResult` | 文件名 Glob 搜索（**访问层组合操作**：递归 `list` + 过滤） |
-| `vdfs/write` | `{path, text\|b64, create?, etag?}` | `VdfsWriteResponse` | 写内容（`w`） |
-| `vdfs/delete` | `{path, recursive?}` | `SuccessResponse` | 删除（**无载荷**：删哪儿是使用方自己说的） |
-| `vdfs/mkdir` | `{path}` | `VdfsWriteResponse` | 新建目录 |
-| `vdfs/watch` | `{path}` | `SuccessResponse` | 订阅该子树变更 |
-| `vdfs/unwatch` | `{path}` | `SuccessResponse` | 取消订阅（与 watch 配对） |
-| `vdfs/action` | `{path, action, payload?}` | `VdfsActionResponse` | 执行**节点动作**（provider 自持动词；未实现返回 `NotImplemented`） |
-
-**每个操作都是对「统一文件系统」的一次方法调用**，访问层不含任何资源语义。
-唯一由访问层自身实现的是 `vdfs/tree`——它按 `t` 位递归调用 `list`，属于
-**机制级**通用能力，不是场景逻辑。**不存在** `vdfs/providers` 这类挂载清单端点
-——`<根>` 的 `list` 就是子目录清单。
+- `vdfs/root` **不给地址**：回包 `path` 即根地址（消费方当运行期数据持有，§3.1）。
+- `vdfs/tree` 是访问层按 `t` 位递归 `list` 的**机制级**通用能力；`vdfs/edit`
+  （`read` → 精确替换 → `write`）与 `vdfs/search`（递归 `list` + Glob）是访问层的
+  **组合操作**，前端协议入口与 LLM 工具链路共用同一份实现。
+- `vdfs/action` 执行 provider 自持的**节点动作**，未实现返回 `NotImplemented`
+  （使用方据此隐藏入口）；`vdfs/watch` / `vdfs/unwatch` 严格配对（§9）。
+- **每个操作都是对「统一文件系统」的一次方法调用**，访问层不含任何资源语义；
+  **不存在** `vdfs/providers` 这类挂载清单端点——`<根>` 的 `list` 就是子目录清单。
 
 机制级守卫分两处（provider 都无需重复）：
 
@@ -503,16 +488,7 @@ fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn VdfsProvider>>;
 ```
 
 LLM 链路：插件在 `traverse` 的 `TRAVERSE_AVAILABLE_TOOLS` 分支里，**在注册工具的同一处**
-顺带注册自己的资源，目录名用插件名：
-
-```rust
-if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
-    // 工具…
-    let me: Arc<dyn VdfsProvider> = self.clone();
-    visitor.register_vdfs_provider(PLUGIN_MANAGER, me).await;   // 插件名即子目录名
-}
-```
-
+顺带注册自己的资源，目录名用插件名——`register_vdfs_provider(PLUGIN_MANAGER, self.clone())`。
 系统链路：资源插件在 `impl Plugin for X` 直接 `return Some(self)`，无需任何遍历或
 注册——容器 `children_of` 与前端 `resolve_fs` 取视图时直接调 `.get_vfs_provider()`。
 
@@ -540,33 +516,22 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
 ### 6.3 组合视图：容器如何聚合子插件
 
 容器**本身就是**「包含子目录列表的 provider」（`CompositeVdfs`，无任何中间结构）：
-逐子插件经 `Plugin::get_vfs_provider()` **查询**（非广播、非 `traverse` 驱动），
-目录名直接取实例表里的挂载名，天然归属该子插件：
-
-```rust
-for (name, child) in children {
-    if let Some(p) = child.get_vfs_provider() {
-        dirs.push((name, p));   // 目录名 = 实例表挂载名，天然归属该子插件
-    }
-}
-```
-
-（系统链路）容器经各子插件的 `get_vfs_provider()` 查询聚合，逐子插件查询（非广播）
-保证目录名天然归属、且不引入 `traverse` 驱动的副作用。
-**不缓存**——子插件集合由配置与生命周期决定，每次现取才与容器一致。
+逐子插件经 `Plugin::get_vfs_provider()` **查询**（系统链路，非广播、不驱动
+`traverse`），汇总为 `(目录名, provider)` 清单，目录名 = 实例表挂载名（按 `order`
+升序），天然归属该子插件。**不缓存**——子插件集合由配置与生命周期决定，每次现取
+才与容器一致。
 
 ### 6.4 两条消费链路，分别走各自通道
 
 **系统链路与 LLM 链路是两条独立的发现通道**，不共用同一次遍历广播：
 
-- **LLM 链路**：会话编排方 `collect_capabilities` → 广播 `traverse(TRAVERSE_AVAILABLE_TOOLS)`
+- **LLM 链路**：会话编排方 `collect_capabilities` 广播 `traverse(TRAVERSE_AVAILABLE_TOOLS)`
   → 容器经 `register_vdfs_root` 登记 `<根>` 服务者、各插件经 `register_vdfs_provider`
-  登记自身资源进入 `CAPABILITY_VISITOR` → 工具执行时 `tool_ctx` 携带该访问器 →
-  `vdfs_*` 工具经 `visitor.get_vdfs_root()` 取根，交给 `UnifiedFs`。
-- **系统链路（前端 / 子智能体挂载点穿越）**：`vdfs` 插件 / `agent` 插件拿到父插件
-  （`Arc<dyn Plugin>`）后，直接调 `parent.get_vfs_provider()` 取根，不广播、不依赖
-  `CAPABILITY_VISITOR`。`resolve_fs(parent, ctx)` 在 `ctx` 无能力管理器时即走此通道：
-  `parent.get_vfs_provider().unwrap_or_else(empty_root)`。
+  登记自身资源 → `tool_ctx` 携带该访问器 → `vdfs_*` 工具经 `visitor.get_vdfs_root()`
+  取根，交给 `UnifiedFs`。
+- **系统链路（前端 / 子智能体挂载点穿越）**：`vdfs` / `agent` 插件拿到父插件
+  （`Arc<dyn Plugin>`）后直接调 `parent.get_vfs_provider()` 取根，不广播、不依赖
+  `CAPABILITY_VISITOR`（`resolve_fs` 在 `ctx` 无能力管理器时即走此通道）。
 - **子智能体挂载点穿越**：`agent/<id>` 是挂载点，`agent` 插件对 `RelPath::Agent`
   （首层）与 `RelPath::File`（子路径）均经 `sub_agent(id).get_vfs_provider()` 委托给
   子 composite 的 `CompositeVfs`；`PluginMeta::hidden` 等可见性过滤由子 composite
@@ -581,14 +546,11 @@ for (name, child) in children {
     见 `agent/host/vdfs.rs::list_at` 与 `composite/vdfs.rs` 的
     `container_leaves_item_addresses_untouched`（同一条契约）。
 
-`Plugin::get_vfs_provider` 默认 `None`（叶子插件 override 为 `Some(self)`，
-`Composite` override 为 `self.vdfs.clone()`）；`CapabilityVisitor` 上的 `get_vdfs_provider`
-（按目录名取、供 LLM 工具）与它是**两套不同接口**，互不替代。
-
-两条链路因此经过**同一个 `UnifiedFs`**（不变量 5）——不存在第二处地址规则。
-取不到根（无组合容器）时虚拟层降级为**空目录**（`EmptyVdfs`）：`<根>` 可列出
-但无内容，具体路径 `NotFound`；物理层与它无关，照常可用。于是「系统没有资源」
-与「资源为空」表现一致，前端与 LLM 都不必特判。
+`Plugin::get_vfs_provider` 默认 `None`；`CapabilityVisitor::get_vdfs_provider`（按目录名
+取、供 LLM 工具）与它是**两套不同接口**，互不替代。两条链路因此经过**同一个
+`UnifiedFs`**（不变量 5）——不存在第二处地址规则。取不到根（无组合容器）时虚拟层
+降级为**空目录**（`EmptyVdfs`）：`<根>` 可列出但无内容，具体路径 `NotFound`；物理层
+与它无关，照常可用。于是「系统没有资源」与「资源为空」表现一致，前端与 LLM 都不必特判。
 
 ### 6.5 上下文携带
 
@@ -616,46 +578,23 @@ for (name, child) in children {
 
 ## 7. 前端机制：ext 决定详情页面
 
-后端下发的 `ext`（扩展名）是**前端选择详情渲染器的唯一键**：
+后端下发的 `ext`（扩展名）是**前端选择详情渲染器的唯一键**；扩展名缺省由 `name`
+推导（`a.md` → `md`），provider 可显式覆盖（设置分区显式声明 `form`）。机制只透传
+`ext` 与 `schema`（不透明 JSON，symbio 方言 = `DetailDefinition`），不解释它们。
+后端下发的 `ext` 与 `schema` 是唯一呈现契约：`form` → 定义驱动表单、`session` →
+会话工作区、`md` / `json` / `text` → 文本编辑器、其他 → 通用兜底。
 
-| `ext` | 渲染器 | 说明 |
-|---|---|---|
-| （目录，`l` 位） | 列表 / 树 | 中栏结构由访问位与 `t` 位决定 |
-| `form` | 定义驱动表单 | 解析 `node.schema`（不透明 JSON，symbio 方言 = DetailDefinition） |
-| `session` | 会话工作区 | 实时对话 |
-| `md` / `json` / `text` | 文本类编辑器 | 内容经 `vdfs/read` 获取 |
-| 其他 | 通用兜底 | 只读呈现 + 通用文本视图 |
+- 前端只持有**纯 UI 映射**（ext → 渲染器、子目录名 → 图标），不硬编码资源类型 /
+  标签 / 能力 / 路径模板。
+- **「新建」与「选中」进入同一个详情页**：父目录节点的 `new_type`（§3.2）用三个
+  字段描述**落成后的节点**——`ext` = 地址后缀（provider 按它剥条目 id）、
+  `node_ext` = **渲染器键**（缺省 = `ext`）、`schema` = `form` 渲染器所需的定义。
+  使用方据此在还没创建时就能渲染详情页；漏 `node_ext` 落通用兜底，漏 `schema`
+  渲染空表单。
 
-约定：
-
-- 扩展名**缺省由 `name` 推导**（`a.md` → `md`），provider 可显式覆盖
-  （设置分区名无扩展名，显式声明 `form`）。
-- **「新建」必须落到同一个渲染器**：新建类型的 `ext` 是**呈现扩展名**（地址末段
-  后缀，provider 用 `id_of` 按它剥条目 id），它**不**决定详情怎么渲染——
-  配置型资源（model / mcp / skill）落成后统一是 `ext = form`。因此
-  `VdfsNewType` 另有两个字段描述**落成后的节点**：
-
-  | 字段 | 语义 |
-  |---|---|
-  | `ext` | 呈现扩展名（地址后缀；`id_of` 剥 id 用） |
-  | `node_ext` | 落成后的节点 `ext`（**渲染器键**）；缺省 = 与 `ext` 相同（会话即如此） |
-  | `schema` | 落成后的节点 `schema`（`form` 渲染器所需的定义） |
-
-  使用方据此在**还没创建**时就能渲染出该类型的详情页——草稿节点（无 id、无名字）
-  用 `node_ext` 选渲染器、用 `schema` 出表单，于是「点新建」与「选中一项」进入的是
-  **同一个详情页**，差别只在有没有内容。漏了 `node_ext` 会落到通用兜底，
-  漏了 `schema` 会渲染出空表单。
-- 前端只持有**纯 UI 映射**（ext → 组件、子目录名 → 图标），不硬编码资源类型、
-  标签、能力或路径模板。分层：`schemas/vdfs.ts`（数据契约，零组件知识）→
-  `registry/vdfsTypes.ts`（ext → 渲染器标识，零组件导入）→
-  `registry/vdfsRenderers.ts`（标识 → 组件，唯一装配点）。
-- 页面：`views/VdfsView.vue`（路由 `/vdfs/:dir(.*)*`，可选多级 `dir` 支持深链），
-  页面逻辑全部在 `composables/useVdfs.ts`；左栏 = `<根>` 子目录导航（应用外壳
-  承担）、中栏 = 当前目录、右栏 = 按 `ext` 分发的渲染器。**一个 VdfsView 对应一个
-  vdfs 地址**：首页地址 = `<根>`（`/vdfs`），更深的地址都是 push 出来的页面
-  （左上角返回键回上一级）——详见 [vdfs-frontend.md](vdfs-frontend.md)。
-- 由此，整个前端逐渐收敛为「**通用资源状态查看 / 管理工具**」：
-  新增一类资源只需后端新增一个 provider，前端零页面开发。
+前端分层（`schemas/vdfs.ts` → `registry/vdfsTypes.ts` → `registry/vdfsRenderers.ts`）、
+页面与路由（`views/VdfsView.vue`，`/vdfs/:dir(.*)*`）以及「新增一类资源前端零页面
+开发」的完整契约，见 [vdfs-frontend.md](vdfs-frontend.md)。
 
 ## 8. 校验职责
 
@@ -692,18 +631,13 @@ for (name, child) in children {
   的 provider 直接成功，消费者退回手动拉取）。
 - **订阅登记按 `kind` 全局持有，投递是同步的**（`vdfs::host::ChangeSubscriptions`）：
   每个自管变更源的 provider 持有一份表实例，`watch` 记一条 `(path, sink)`、
-  `unwatch` 撤一条，变更点直接 `notify` 遍历投递——**没有中间广播通道、没有转发任务**。
-  中间广播通道不可取的道理有两条：它会在「无订阅者」时丢弃变更（前端尚未登记完的
-  启动窗口正好落在这里）；且任务生命周期要与 `unwatch` / 重连逐一配对，复杂度全部
-  落在机制侧却换不到任何保证。同步投递的另一半收益是**顺序确定**：变更点返回即投递
-  完成，不存在「已落盘但尚未转发」的中间态。
+  `unwatch` 撤一条，变更点直接 `notify` 遍历投递——**没有中间广播通道、没有转发任务**
+  （同步投递**顺序确定**：变更点返回即投递完成，不存在「已落盘但尚未转发」的中间态）。
+  表按 `kind` 而非实例持有——同一 provider 每次 `traverse` 都会新构造。
 - **重叠订阅按「最具体者优先」恰好一次**：同一条变更若同时落在 `…/abc` 与
-  `…/abc/message/m1` 两条订阅之下，只投给路径更长的那条。这里的「一次」指的是
-  **总线上的一次发布**——sink 的职责是把变更发进 `kind = "vdfs"` 频道，前端各消费者
-  再按自己的作用域前缀过滤（订 `<根>/session` 的清单同样收得到 `…/session/abc/message/m1`）。
-  因此收敛为一条不会让任何人漏收，反而避免了同一变更被发布两次。（表按 `kind`
-  全局持有，是因为同一 provider 每次 `traverse` 都会新构造，按实例持有会让订阅
-  与投递配不上对。）
+  `…/abc/message/m1` 两条订阅之下，只投给路径更长的那条。「一次」指**总线上的一次
+  发布**——sink 把变更发进 `kind = "vdfs"` 频道，前端各消费者再按自己的作用域前缀
+  过滤，因此收敛为一条不会让任何人漏收，也避免同一变更被发布两次。
 - 宿主侧投递分两跳，**各补一次它那层才知道的信息**：
   1. **容器**（`CompositeVdfs::watch`）把 provider 的相对路径**补成树内全路径**
      （`<子目录>/<rel>`）后交给上层 sink；
@@ -718,9 +652,8 @@ for (name, child) in children {
 - **`notify_change(kind, path)` 只发无载荷变更**（绝大多数资源信号长这样）。
   带业务载荷的变更由**生产者直接经它已持有的订阅表**投递
   （`ChangeSubscriptions::notify(&VdfsChange::with_data(path, data))`，
-  见 `session::transcript::Transcript::emit`）——带载荷是一个**显式动作**，
-  不是默认行为。**不存在** `notify_change_with_data` 这类对称门面——带载荷的
-  生产者本就持有订阅表，再包一层只是多一条没人调用的「能力」。
+  见 `session::transcript::Transcript::emit`）——带载荷是一个**显式动作**，不是
+  默认行为；**不存在** `notify_change_with_data` 这类对称门面。
 - **变更词汇：信封没有操作枚举**——形状是 `path` + 可选 `data`，
   语义全在 `data` 的字段上：
 
@@ -732,41 +665,26 @@ for (name, child) in children {
   | `VdfsNode` | 会话运行态（`emit_session_state`，与 `stat` 同源构造） | 全量节点视图就地落定，零回读 |
   | 缺失 | 全部资源信号（`notify_change`） | 「这条路径变了」——回读 / 重拉（幂等）；资源删除回读 `NotFound` 即删除 |
 
-  **`path` 恒为被变更节点自身的地址。** 会话是**容器**，其下是若干**并列的集合**
-  （消息 / 子会话 / 记忆 / 工作目录，后续还会有任务列表、请求队列……），因此集合项
-  的地址形状统一为 `<sid>/<集合段>/<项 id>`——消息的落点是 `<sid>/message/<mid>` 这个
-  **节点**，`path` 的末段就是它的身份（与 `data.id` 是同一个事实，以地址为准）。
-  **地址即身份**：末段就是节点的 id（与 `data.id` 是同一个事实，以地址为准），
-  因此消费端不需要「目录 + 载荷里的 id」这种二次寻址。若 `path` 指向**目录**而把
-  身份交给 `data.id`，`path` 的含义会随帧类型漂移（资源信号是节点自身、消息是它
-  所在的目录），且无法推广到第二类集合——每加一类集合都要在信封上新增「身份在哪」
-  的概念。无载荷变更的 `path` 同样是节点自身地址。
-  这与 `ChatMessage` 帧同源（`delta` 有 ⇒ 尾部追加、`content` 有 ⇒ 整条替换，
-  **语义由字段本身给出**，不从类型反推）。
+  **`path` 恒为被变更节点自身的地址**：会话是容器，其下是若干并列集合（消息 /
+  子会话 / 记忆 / 工作目录……），集合项地址统一为 `<sid>/<集合段>/<项 id>`——
+  末段就是节点身份（与 `data.id` 同一事实，以地址为准），因此无需「目录 + 载荷里的
+  id」这种二次寻址。无载荷变更的 `path` 同样是节点自身地址。
 
-  **`delta` 是传输形态，不是节点形态。** 节点正文的权威形态永远是 `read` 的产物
-  ——`Transcript::apply` 那句注释是全部要害：「图里只留累积后的 `content`：
-  `delta` 是传输形态，不是节点形态。」因此 `delta` 只描述「这一帧到达了哪些字符」，
-  **不描述「节点现在是什么」**。
+  **`delta` 是传输形态，不是节点形态**：节点正文的权威形态永远是 `read` 的产物
+  （图里只留累积后的 `content`），`delta` 只描述「这一帧到达了哪些字符」。
 
   **判据：一个变更取值（或载荷字段）必须有生产性生产者，否则它不是词汇的一部分。**
-  这条不是「洁癖」——它挡住三种具体后果：规范文档会撒谎、消费端会长出永不执行的
-  死分支、以及它会**诱导错误设计**。
-  `data.delta` 的生产者是消息域（`Transcript::apply` 对每条消息的正文增量）；
-  `data = VdfsNode` 的生产者是会话运行态（`Transcript::emit_session_state`）。
-
-  **为什么没有操作枚举**：操作枚举描述的「资源层面发生了什么」与 `data` 描述的
-  「业务数据变成了什么」是同一件事的两种说法，而消费端消费的只有后者——保留前者
-  只会让每个消费端都背一次「枚举 → 分派」的翻译。三条机制支撑它：
+  `data.delta` 的生产者是消息域（`Transcript::apply`）；`data = VdfsNode` 的生产者是
+  会话运行态（`Transcript::emit_session_state`）。**信封没有操作枚举**（理由与被
+  否决的方案见 [ADR-025](../DECISIONS.md)）——`data` 描述「业务数据变成了什么」才是
+  消费端消费的，操作枚举只会让每个消费端多背一次分派。三条机制支撑它：
 
   - **顺序是节点属性**：`ChatMessage.seq` 是消息在文件夹里的位置，前端按它排序，
     到达顺序与显示顺序无关（两个并行工具的变更混着到、后生成的先到，显示都正确）；
   - **载荷只给热路径**：逐 token 的增量帧全部带 `delta`，创建 / 终态 / 压缩等
-    低频帧才回读——载荷该不该有，取决于它落在热路径还是冷路径上；
+    低频帧才回读——取决于它落在热路径还是冷路径上；
   - **删除由既有词汇承担**：删掉的节点「载荷缺失 + 回读 `NotFound`」即删除，
     消息则是 `ChatMessage.status = removed`。
-
-  决策、被否决的方案及其理由见 [ADR-025](../DECISIONS.md)。
 
   - `map_paths` 仍是路径翻译的**唯一入口**（见 [ADR-015](../DECISIONS.md)）：
     使用方补挂载前缀时一律调它，不逐字段重建——后者会在新增路径字段时静默漏翻。
@@ -779,31 +697,26 @@ for (name, child) in children {
 
 ### 10.1 新增一类资源（= 新增一个子目录）
 
-1. 为模块实现 `VdfsProvider` —— **只有一个方法** `dispatch(ctx, path, req)`：
-   - **自述不在这个 trait 上**。展示名 / 描述 / `order` / `icon` / `hidden` /
-     `root_access` 由插件的 `PluginMeta`（`Plugin::meta()`）承载；「根下可新建
-     的那一种东西」挂在**节点自述**的 `VdfsNode::new_type` 上——根经
-     `Stat("")` 取，更深层节点在自己的 `list` 里带，**同一条通道**
-     （session 的表单 schema 需运行期汇流，故不能进那份同步纯数据；
-     缺省 `None` = 不可新建。见 [ADR-030](../DECISIONS.md)）。
-   - 数据操作 = `VdfsRequest` 的变体（`List` / `Stat` / `Read` / `Write` /
-     `Delete` / `Mkdir` / `Action` / `Watch` / `Unwatch`）；实现方按变体
-     `match`，只实现自己支持的操作，其余返回 `NotImplemented`（使用方据此隐藏
-     入口）。**match 编译期穷尽**——新增一种操作时漏译在结构上不可能。
-     （**没有 `Move`**：地址一律走 `path`，跨子树的移动是 `copy + delete` 而非
-     原语，要用移动由外层组合——见 §5「移动不在协议里」。）
-   - **不需要、也不应该提供自己的位置**（§2.4）。
-2. 同时接好两条发现链路（二者独立，不可只接其一）：
-   - **系统链路**：在 `impl Plugin for X` 中 override `get_vfs_provider` 返回
-     `Some(self)`（默认 `None`，不 override 则该模块不会出现在前端 / 子智能体树里）；
-   - **LLM 链路**：在插件 `traverse` 的 `TRAVERSE_AVAILABLE_TOOLS` 分支中
-     `register_vdfs_provider(目录名, provider)`；目录名用插件名（`PLUGIN_*`）。
+1. 实现 `VdfsProvider`（trait 只有一个方法 `dispatch(ctx, path, req)`）：
+   - 按 `VdfsRequest` 变体（`List` / `Stat` / `Read` / `Write` / `Delete` / `Mkdir` /
+     `Action` / `Watch` / `Unwatch`）`match`，只实现自己支持的操作，其余返回
+     `NotImplemented`（使用方据此隐藏入口）；**match 编译期穷尽**。
+     （**没有 `Move`**：地址一律走 `path`，跨子树移动是 `copy + delete`，见 §5。）
+   - **自述不在 trait 上**：展示名 / `order` / `icon` / `hidden` / `root_access` 放
+     `PluginMeta`；「根下可新建的那一种东西」放**节点自述** `VdfsNode::new_type`
+     （根经 `Stat("")` 取，更深层在自己的 `list` 里带，同一条通道；缺省 `None` =
+     不可新建。见 [ADR-030](../DECISIONS.md)）。
+   - **不提供、也不假设自己的位置**（§2.4）。
+2. 同时接好两条发现链路（独立，不可只接其一）：**系统链路** override
+   `Plugin::get_vfs_provider` 返回 `Some(self)`（默认 `None`）；**LLM 链路**在
+   `traverse(TRAVERSE_AVAILABLE_TOOLS)` 中 `register_vdfs_provider(插件名, provider)`
+   （§6.1）。
 3. 校验写在 `write` 里；呈现需求放在节点的 `ext` + `schema`。
 
-**零改动面**：访问层、门面（`UnifiedFs`）、物理层、前端（导航 / 列表 / 详情）、
-容器（`composite`）都无需改动——容器逐子插件经 `get_vfs_provider` 查询，新子目录
-自动出现在 `<根>` 之下，LLM 侧 `<根>/<插件名>/…` 自动可寻址。
-仅当需要一类全新的详情渲染器时才在前端登记一个 ext → 组件映射。
+**零改动面**：访问层、门面（`UnifiedFs`）、物理层、容器（`composite`）、前端
+（导航 / 列表 / 详情）都无需改动——新子目录自动出现在 `<根>` 之下、LLM 侧
+`<根>/<插件名>/…` 自动可寻址；仅当需要一类全新的详情渲染器时才在前端登记一个
+`ext` → 组件映射。工具与操作闭集见 [CURRENT.md](../CURRENT.md) §2 / §3。
 
 ### 10.2 新增一个容器层
 
@@ -834,212 +747,51 @@ for (name, child) in children {
 
 ## 11. 与既有机制的关系
 
-- **本地文件**：磁盘文件系统是 `UnifiedFs` 的**物理层**（`plugins/vdfs/physical.rs`
-  的 `PhysicalFs`），由 `FsPolicy` 守卫：读写白名单、解析符号链接后复验、
-  拒绝写 / 删符号链接、速率限制、读上限、列目录上限。裸地址（无 `<根>`
-  前缀）**直接**落在物理层，相对路径从工作目录开始；
-  行号分页、`ignore` 过滤、精确字符串替换（保持换行符风格）、文件名 Glob
-  均由访问层组合操作对齐。
-- **`CapabilityVisitor`**：承载「工具 + 模型服务 + 系统提示词 + VDFS 注册项 +
-  `<根>` 服务者槽位」。与**选项**（`OptionVisitor`）、
-  **可配置**（`ConfigurableVisitor`，§13.1）一样，都搭同一次 traverse 广播的
-  便车：三条通道平行，各有自己的 ctx 键与降级行为（收集器缺席 = 当作没人声明），
-  不新造广播、也不互相依赖。
-- **容器**：容器是「目录 + 拓扑」的自然落点——它实现 `VdfsProvider` 并被装配为
-  `<根>` 的服务者。容器**不必**认识任何具体资源：它只逐子插件收集，
-  子目录内部层级由各 provider 的 `list` 表达。
-- **资源存储（`providers/vdfs_service`）**：属于**宿主实现层**（与
-  `providers/embedding` 同层），**不在** §2.1 / §2.2 的纯接口层里——
-  `symbio_core/vdfs/` 只有 trait 与域类型，零 `use crate::`。
-  三个实现（`SingleFileVdfs` / `DirVdfs` / `MemoryVdfs`）本身就是**完整的
-  `impl VdfsProvider`**，插件直接组合具体类型，**不走 `create_object` 工厂**
-  （不存在第二种实现，套 `dyn` 只是把一次构造换成一次字符串查表）。
-  它与 VDFS 广播机制的**唯一接触点**是 `symbio_core::vdfs::host` 的
-  `notify_change` / `watch_changes` / `unwatch_changes`；此外它只是一份条目存储
-  （寻址 + 原子写 + zip 整包），不认识任何资源语义（§13.4）。
-- **详情定义**：`DetailDefinition` 是 symbio 的 `schema` **方言**，不属于 VDFS
-  协议本身——VDFS 只透传、不解释，因此不污染开放接口。
+- **本地文件**：磁盘文件系统是 `UnifiedFs` 的**物理层**（`PhysicalFs` + `FsPolicy`，
+  规则见 [vdfs/README.md](../../symbio/src/plugins/vdfs/README.md)）。裸地址（无 `<根>`
+  前缀）**直接**落在物理层，相对路径从工作目录开始；行号分页、`ignore` 过滤、精确
+  字符串替换（保持换行符风格）、文件名 Glob 均由访问层组合操作对齐。
+- **三条收集通道**：`CapabilityVisitor` 与 `OptionVisitor`、`ConfigurableVisitor`
+  搭同一次 `traverse` 广播的便车，各有自己的 ctx 键与降级行为（收集器缺席 = 当作
+  没人声明），不新造广播、也不互相依赖。
+- **容器**：实现 `VdfsProvider` 并被装配为 `<根>` 的服务者，只逐子插件收集；子目录
+  内部层级由各 provider 的 `list` 表达（§2.5）。
+- **资源存储（`providers/vdfs_service`）**：属**宿主实现层**，**不在** §2.1 / §2.2 的
+  纯接口层里；三型 `VdfsProvider` 实现（单文件 / 目录 / 内存）与磁盘布局见
+  [CURRENT.md](../CURRENT.md) §4，选型理由见 [DECISIONS.md](../DECISIONS.md)
+  ADR-010 / ADR-011。它与广播机制的**唯一接触点**是 `symbio_core::vdfs::host` 的
+  `notify_change` / `watch_changes` / `unwatch_changes`。
+- **详情定义**：`DetailDefinition` 是 symbio 的 `schema` **方言**，VDFS 只透传、不解释。
 
 ## 12. 一致性要求
 
 - 任何新的资源访问功能 **不得** 绕开 `vdfs/*` 新造私有协议。
-- `symbio_core/vdfs/` **不得**引入 `crate::` 依赖；宿主专有类型一律经
-  `VdfsContext` 注入。
-- 线路类型（请求 / 响应信封、`VDFS_OPS`）**不得**上浮到 core；它们只属于
-  `plugins/vdfs/protocol.rs`。
-- provider **不得**提供或假设自己的位置（trait 上无 `mount()` / `category()` /
-  root 概念）；只接收自身子树内的相对路径。
-- 子目录名**只**由使用方（消费者）给出，**不得**由 provider 自身决定：
-  LLM 链路在 `register_vdfs_provider(dir, …)` 处给出（约定 = 插件名），
-  系统链路由 composite 实例表的挂载名（经 `get_vfs_provider()` 取 provider 时
-  不带名，目录名由容器补）给出；凡这两处以外的「第二处命名来源」**不得**出现。
-- **地址规则只归门面**：`<根>` 前缀判别与两半分流**只允许**出现在
-  `UnifiedFs`；访问层、工具、provider、容器都**不得**重复实现地址判别或
-  前缀拼接。
-- **拓扑只归容器**：访问层与门面**不得**持有子目录表、不得解析虚拟路径首段；
-  「目录名 → 子树」的映射只允许出现在容器的组合视图与注册接线里。
-- **composite 不得出现根级别概念**：它的代码里不得有「自己是根」「只能有一个」
-  之类的假设；能否服务 `<根>` 只由装配（`register_vdfs_root` 槽位）决定。
-- 运行时状态（workdir 之类）**不得**进入 provider 的路径语义，只能经调用级参数
-  （§6.5）透传。
-- `<根>` 服务者**只能**经 `register_vdfs_root` 槽位装配；**不得**出现第二个
-  登记点。
-- 消费者 **不得**按 `kind` 判定能力；只能依据 `access`。
-- 前端 **不得**硬编码资源类型清单、标签、路径模板、能力开关；只允许登记
-  ext → 渲染器、子目录名 → 图标这类纯 UI 映射。
+- `symbio_core/vdfs/` **不得**引入 `crate::` 依赖；线路类型（请求 / 响应信封、
+  `VDFS_OPS`）**不得**上浮到 core；宿主专有类型与状态一律经 `VdfsContext` 注入。
+- provider **不得**提供或假设自己的位置（trait 上无 `mount()` / `category()` / root
+  概念），只接收自身子树内的相对路径。
+- 子目录名**只**由使用方给出（LLM 链路在 `register_vdfs_provider(dir, …)` 处，
+  系统链路取容器实例表的挂载名），**不得**出现第二处命名来源。
+- **地址规则只归门面**：`<根>` 前缀判别与两半分流只允许出现在 `UnifiedFs`。
+- **拓扑只归容器**：访问层与门面不得持有子目录表、不得解析虚拟路径首段。
+- **composite 不得出现根级别概念**：能否服务 `<根>` 只由装配（`register_vdfs_root`
+  槽位）决定。
+- 运行时状态（workdir 之类）**不得**进入 provider 的路径语义，只经调用级参数（§6.5）。
+- 消费者 **不得**按 `kind` 判定能力，只能依据 `access`。
+- 前端 **不得**硬编码资源类型 / 标签 / 路径模板 / 能力开关，只登记 ext → 渲染器、
+  子目录名 → 图标这类纯 UI 映射。
 - 接口变更先改 `vdfs/provider.rs`（trait 是 centerpiece），线路变更先改
   `plugins/vdfs/protocol.rs`，再改访问层与前端两侧契约。
 
 ## 13. 范例（实例，非机制组成部分）
 
-### 13.1 设置（plugin_manager）——自有分区 + 插件配置清单
+机制与具体子目录无关：下列实例的增删改不影响本规范效力，机制细节各由其模块 README 持有。
 
-- 注册名 = 插件名 `PLUGIN_MANAGER`（= `<根>/plugin_manager` 子目录）；`root_access = l`
-  （清单固定，每一项是叶子文档，不可 `t`）。provider 自身不含位置概念。
-- 本插件是**无状态 provider**：`SETTING_SECTIONS` 只登记 `appearance` / `about`
-  两个**前端状态自持**的分区（主题、版本信息等数据不在后端），`route` 恒
-  `NotFound`。
-- 分区节点：`access = r`、`ext` = 分区 id（前端据此直接渲染专属面板，§7）。
-  `read` / `write` 对它们恒 `Forbidden`——数据在前端 store。
-- 清单 = **各插件自己交出来的配置条目** + 自有分区。顺序上配置在前、`appearance` /
-  `about` 垫后：前者是用户在设置页里真正要动手的东西，后者是应用自身的展示项。
-  条目的 `kind = plugin_manager`、`name` = 插件目录名（前端图标键 `plugin_manager:<目录名>`）、
-  `path` = 该插件配置文档的**真实地址**（`<插件目录>/PLUGIN.yml`）。所以设置页只是
-  「指路」：点开读写的还是拥有者那份文件，本插件不代理读写、也不复制配置。
-- 各插件的配置归各插件自己的目录（§3.4），如
-  `<根>/session/PLUGIN.yml`、`<根>/local/PLUGIN.yml`；本插件只列条目、不代存，
-  **不存在** `plugin_manager/config/get` / `plugin_manager/config/set` 这类代理路由——
-  代理正是「同一份配置有两个地址」的根源。
+| § | 实例 | 它是一份什么 `VdfsProvider` | 机制细节 owner |
+|---|---|---|---|
+| 13.1 | 设置（plugin_manager） | 只读清单：自有分区 + 各插件配置条目 | [plugin_manager/README.md](../../symbio/src/plugins/plugin_manager/README.md) |
+| 13.2 | 组合容器（composite） | `CompositeVdfs`——恰好包含若干子目录的 provider | [composite/README.md](../../symbio/src/plugins/composite/README.md) |
+| 13.3 | VDFS 插件（vdfs） | 访问层 + 统一文件系统（`UnifiedFs`） | [vdfs/README.md](../../symbio/src/plugins/vdfs/README.md) |
+| 13.4 | 资源插件与资源存储 | session / model / skill / mcp / agent 各自 `impl VdfsProvider`；落盘共用 `providers/vdfs_service` 三型（单文件 / 目录 / 内存） | 各模块 README（[agent](../../symbio/src/plugins/agent/README.md) 等）；[DECISIONS.md](../DECISIONS.md) ADR-010 / ADR-011 |
 
-**可配置收集通道**（第三条收集通道，与能力 / 选项并列，见 §10.1）：插件在
-`traverse` 里调 `announce_configurable(&ctx, &self.config_file)`，声明「我有一份配置
-文档」。容器在 `children_of` 的那次广播里用一个**共享**收集器收下——不是像 VDFS
-provider 那样每个子插件一个：声明自带目录名，不存在归属歧义。收集结果**写回请求
-ctx**，同一次请求里稍后被委派的 provider（即本插件）据此读到清单，因此**无需反查
-插件目录、无需硬编码插件表、也不需要协议上的新字段**。条目由
-`entry_of(&PluginConfigFile)` 生成，标题 / `ext` / `schema` 都取自 `PluginConfigFile::node()`；
-**图标不进协议**（前端 `kind:<目录名>` 的纯 UI 映射）。通道缺席时本插件照常只列
-自有分区。
-
-### 13.2 组合容器（composite）——包含子目录列表的 provider
-
-- `composite` 实现 `VdfsProvider`（`CompositeVdfs`），自述 `name = "系统"`、
-  `order = 0`、`root_access = lt`（在 `PluginMeta` 上）。**它没有任何根级别概念**：
-  只是一个恰好包含若干子目录的 provider（§10.2），当前服务 `<根>` 纯属装配安排。
-- `dispatch` 对**所有操作**做同一件事：现场调用 `children_of(ctx)` 取子目录清单，
-  剥掉 `path` 首段定位子 provider，再把**剩余路径与请求整体**递下去——与操作种类
-  完全无关，因此新增一种操作时本层不需要改动。
-  **不缓存**——子插件集合由配置与生命周期决定，每次现取才与容器一致。
-- `children_of` 逐子插件经 `Plugin::get_vfs_provider()` **查询**（系统链路，非广播、
-  不驱动 `traverse`），汇总为 `(目录名, provider)` 清单；目录名 = 实例表挂载名
-  （按 `order` 升序）。
-- 守卫：自身目录**除 `list` / `stat` 外一概拒绝**；子目录根不可读 / 删 / `mkdir`
-  （⚠️ **写不在其中**——写子目录根 = 写在挂载点目录自身，是「新建」的机制形态）、
-  `mkdir` 已存在报错、子节点路径回填树内全路径、事件相对路径补全（§5）。
-  **移动不在守卫里**：它不是「被拒绝」而是**不可表达**（`VdfsRequest` 没有第二个
-  地址字段），见 §5「移动不在协议里」。
-- 隐藏属性：合成子目录节点时把子插件 `PluginMeta::hidden` 回填进
-  `VdfsNode::hidden`，并据此过滤掉不该出现在清单里的子目录（§3.2）；委派回来的
-  `list` 结果同样过滤——隐藏是**机制级**属性，不因节点来自哪个 provider 而异。
-  `stat` 仍如实报告该属性（隐藏只影响列表，不影响可达性）。当前标为隐藏的是内容
-  仅一份配置文档的目录：`gateway` / `web` / `telegram` / `local` / `work`（各自的配置地址
-  `<根>/<插件>/PLUGIN.yml` 照常可寻址，也照常出现在设置页清单里）。
-- 在 `traverse` 中把该视图登记进 `register_vdfs_root` 槽位（§6.2）。
-
-**子插件从哪来：插件目录**（见 `symbio_core::plugin::dir`）。容器是**通用**容器
-（可以嵌套另一个容器），子项因此不来自父插件塞进来的配置表，而来自**扫描插件根**：
-
-- 布局：`<homedir>/<插件>/PLUGIN.yml`（配置）+ 该插件自己的数据 / 资源，
-  同处一个目录，因此整个目录可直接拷贝移植。系统级插件（`home` / `composite`）的
-  目录是**系统根本身**，配置在 `<homedir>/PLUGIN.yml`。
-- 加载判据：目录下的 `PLUGIN.yml` 可解析、且 `plugin_provider` 指向已注册的工厂
-  （`has_creator`）。不合格的目录跳过并点名。
-- 构造者把**插件自身目录**经 ctx 键 `PLUGIN_DIR` 告知被构造的插件；插件据此自己
-  读写配置（§3.4），容器不碰它的配置。
-- 「必需插件」清单是**构造者的策略**，经 ctx 键 `REQUIRED_PLUGINS` 传入——容器
-  不内置任何清单。`home` 声明 `SYSTEM_PLUGINS` 并随构造传入。
-- 容器扫描的是**自己的目录**（`PluginDir::as_plugins_root`，= 系统根）：系统级插件
-  `home` 的目录就是系统根本身、不与业务插件并列，因此扫描不会构造出第二个 `home`
-  （否则自举成环）。
-
-### 13.3 VDFS 插件（vdfs）——访问层与统一文件系统
-
-- 路由：`vdfs/<op>` → `resolve_fs`（构造本次调用的 `UnifiedFs`）→
-  `dispatch_with` → 拆信封回包。
-- **地址规则（在 `fs.rs`，全项目唯一一份）**：
-  1. **虚拟地址**（`<根>` 独占首段）：剥前缀成树内相对路径交给虚拟层根
-     （容器登记的组合视图）；`<根>` 本体 = 树内 `""`。
-  2. **物理地址**（其余一切）：工作目录相对地址或绝对路径，原样交给
-     `PhysicalFs`；workdir 经 `call_params` 透传，缺失即 `Internal`（接线错误）。
-- **LLM 工具链路（`provider.rs` + `tools/`）**：vdfs 插件封装一个工具链路 provider
-  `ToolVdfs`——它**持有 `CapabilityVisitor`**；`traverse` 广播中由 `plugin.rs`
-  构造（`ToolVdfs::new(visitor)`）并把工具注册进同一个 visitor。每个工具
-  （`tools/` 下一工具一文件，均为框架原生 `Capability`）构造时持有这同一个
-  `Arc<ToolVdfs>`，`execute` 内只是「**对文件系统的操作改为对它的操作** + LLM 封装」
-  （行号分页 / ignore 过滤 / 成功 message），不认识能力管理器、不走协议信封。
-  工具：`vdfs_list` / `vdfs_tree` / `vdfs_stat` / `vdfs_read` /
-  `vdfs_edit` / `vdfs_search` / `vdfs_write` / `vdfs_delete` / `vdfs_mkdir`，
-  共九个。工具描述中的地址口径：`<根>` = 系统资源（其子目录清单
-  由 `vdfs_list('<根>')` 发现），裸地址 = 会话工作目录。
-- **`ToolVdfs` 只做两件事**：取根（`root_of`）→ 交给 `UnifiedFs`；透传调用级
-  参数（`call_params`）。地址翻译、两半分流、路径回填、根守卫
-  全部在门面一处——**不存在**「裸地址补 `local/` 前缀 → 再拆挂载名 → 按名取
-  provider」这类多步翻译。
-- **组合操作只写一次（`host::edit_via` / `host::search_via`）**：`VdfsProvider`
-  trait 只含**原子操作**——原生文件系统没有 edit / search 对应的原子调用，
-  读改写、遍历过滤属于组合逻辑，放 trait 里会逼每个实现方重复实现。二者
-  落在访问层各一份：编辑 = `read` → 精确替换 → `write`；搜索 = 递归 `list` +
-  Glob 过滤（安全规则经各层的 `read` / `write` / `list` 自持生效）。前端
-  协议入口（`vdfs/edit` / `vdfs/search` handler）与 LLM 工具链路（`ToolVdfs`）
-  共用同一份组合实现；`VdfsEditResponse` / `VdfsSearchResult` 因此归
-  `plugins/vdfs/protocol.rs`（访问层形状），不属于 core。
-- **物理层（`physical.rs`）**：`PhysicalFs` + `FsPolicy`——读写路径白名单、
-  解析符号链接后复验（防链接逃逸）、拒绝写入 / 删除符号链接、速率限制、
-  读上限 10MB、列目录上限 2000 项。`list` 目录在前、各自按名升序；
-  文件 `rw`、目录 `lwt`；图片扩展名映射为 `binary = true` + MIME，
-  `read` 返回 base64（多模态）。
-- 前端链路与工具链路构造**同一个 `UnifiedFs`**（虚拟层根同源、物理层同一块磁盘），
-  消费**同一批注册的 provider**，不存在第二套实现。
-
-### 13.4 会话 / 模型 / 技能 / MCP / 智能体——各插件直连 `VdfsProvider`
-
-- **每个资源插件自己就是 provider**：`session` / `model` / `skill` / `mcp` /
-  `agent` / `plugin_manager` 各自有一份 `impl VdfsProvider`，注册名 = 插件名。
-  中间**没有** trait 与适配器：`EntityProvider` / `EntityVdfsAdapter` 这类中间层、
-  `providers/storage_service` 与 `symbio_core::entities` 那组存储原语都**不存在**
-  （为什么直接收敛到 `VdfsProvider`，见 [DECISIONS](../DECISIONS.md) ADR-010 与 ADR-011）。
-- **跨插件共用的是 `providers/vdfs_service` 的三个 `VdfsProvider` 集中实现**
-  ——**三种拓扑、一份磁盘布局**（`<homedir>/<category>/<id>/<manifest>`，
-  因此换拓扑不动数据、换类别不碰协议）：
-
-  | 实现 | 一个条目 = | 条目内部 | 消费者 |
-  |---|---|---|---|
-  | `SingleFileVdfs`（`single_file.rs`） | 一份主文件 | **不外露**（叶子） | `model` |
-  | `DirVdfs`（`dir.rs`） | 一个目录 | 可下钻浏览，主文件承载条目内容 | `skill` / `mcp` |
-  | `MemoryVdfs`（`memory.rs`） | 进程内一条记录 | 无（不落盘） | `model` 的 VDFS 清单镜像 |
-
-  三者共用 `entry.rs` 的条目寻址与落盘原语（`category_dir` / `safe_segment` /
-  `entry_dir` / `split_rel` / `id_of` / `pack_name_of` / `Entry` + 读写删）；
-  zip / base64 与导出载荷 `VdfsPack { id, filename, b64 }` 在 `pack.rs`。
-  **差异（呈现、写前校验、写后内存同步）仍在各插件自己的 `impl` 里**，由调用点
-  以普通 Rust 参数传入——没有新 trait、没有适配器、没有注册表。用哪一型是挂载点
-  在构造时**声明**的（类别段名 = 插件名 = `PLUGIN_*`，主文件名 = 插件内部
-  `const MANIFEST`），不是机制去目录里看出来的。
-- **清单的真相源不止磁盘一种**：`model` 的列表来自内存（`MemoryVdfs` 镜像——启动时
-  从磁盘灌入、写盘成功后回灌，镜像与运行时注册表同一处更新）。内存型与磁盘两型的
-  操作语义同构、走同一条变更广播频道，消费者分不清也不必分清条目住在哪儿。
-- **「manifest 补齐 id」由各插件自己实现**：编辑链路只回纯字段值（id 由路径承载），
-  `model` / `mcp` 各有一份 `with_id`——那是该资源的写入语义，不是跨插件共享原语。
-- **目录自管的类型自己落盘**：agent 目录走 `AgentDirStore`（工作区级 + 全局级
-  双层），直接用 `import` / `export` / `delete`，**不经 vdfs_service**；
-  其根 `agent/<id>` 是一个**挂载点**：钻进它即委托给子 composite 的 `CompositeVfs`
-  （与系统根分形同构），内部资源**递归**寻址为 `agent/<id>/<子目录>/<相对路径>`，
-  子目录名 = 子 composite 实例表的挂载名（即插件名，如 `skill` / `mcp` / `session` /
-  `model` / `plugin_manager` / …），可见性由子 composite 按 `PluginMeta::hidden` 统一决定。
-- **变更广播按类型全局持有**：`vdfs::host::notify_change` / `watch_changes` /
-  `unwatch_changes`。落盘的写 / 删（`vdfs_service` 三实现内部）与目录自管型 provider
-  都调 `notify_change`，使订阅方无需轮询；按 `kind` 而非 provider 实例持有，是因为
-  同一 provider 会被多次构造（每次 `traverse` 一份），共享同一广播才能让订阅与投递
-  天然配对。**生命周期与运行时状态变化共用这一条 `kind = "vdfs"` 频道**（只有这一条）：
-  状态变化同样是一条**无载荷变更**，前端收到后重读 `vdfs/stat`
-  （§9 的不带载荷那一档）。
+> 拓扑见 [SYSTEM_MAP.md](../SYSTEM_MAP.md)；实例 × 挂载点的权威清单见 [CURRENT.md](../CURRENT.md)。

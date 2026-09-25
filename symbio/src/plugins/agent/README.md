@@ -21,17 +21,16 @@
 **智能体自身的指令**（`AGENTS.md`）。指令文件就躺在被扫描、被装配、被整包浏览的那些
 目录里——读写面与注入面落在同一个所有者上，`谁能读写它，谁负责注入它` 这条原则才完整。
 
-> 这件事曾经散在别处：`{homedir}/AGENTS.md` 由 `session` 临时读一遍注入（叫「全局指令」，
-> 只读、无地址、无容量），`<agentdir>/AGENTS.md` 则由子树里那个被宿主改指了作用域的
-> `work` 实例混在「工作区记忆」名下注入（还带着工作区的地址）。也一度试图整体收进
-> `plugin_manager`——但 `plugin_manager` 是**设置页的入口**（自有分区 + 各插件配置清单），
-> 不是任何内容文件的所有者。
+> 读写面散到别处都会破这条原则：`session` 只能只读地注入全局指令（无地址、无容量）；
+> 子树里的 `work` 实例会把智能体指令混进「工作区记忆」名下、还带着工作区的地址；
+> `plugin_manager` 是**设置页的入口**（自有分区 + 各插件配置清单），不是任何内容文件的所有者。
 
 ### 子 Agent 的默认插件清单
 
-子树挂**与父 Agent 同构的默认插件集**（见 `symbio_core::SUB_AGENT_PLUGINS`）——即系统
-全套插件去掉系统级单槽 `vdfs`，其余（`plugin_manager`、`event_bus`、`session`、`model`、`local`、
-`web`、`mcp`、`telegram`、`hook`、`agent`、`skill`、`gateway`、`work`）全部与父树一致。
+子树挂**与父 Agent 同构的默认插件集**（见 `symbio_core::SUB_AGENT_PLUGINS`）——与系统侧
+是**同一份清单**（`symbio_core::SYSTEM_AGENT_PLUGINS` 即它的别名）：`plugin_manager`、`event_bus`、
+`session`、`model`、`local`、`web`、`mcp`、`telegram`、`hook`、`agent`、`skill`、`gateway`、
+`vdfs`、`work`。`vdfs` 会随子树构造出实例，但其注册经 `SubAgentVisitor` 丢弃（VDFS 根单槽归根）。
 
 - `work` 在其中：子树 `WORKDIR` **继承父会话**（不再覆写成 Agent 目录），所以 `work` 注入的是
   工作区记忆，与系统侧读的是同一份语义、但落在子树自己的 `agent/<id>/work` 挂载点，无双重注入。

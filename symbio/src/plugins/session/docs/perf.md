@@ -21,8 +21,8 @@
 | H10 | 每 token 强制同步布局（读 `scrollHeight`） | 布局抖动 |
 | H11 | 整份 `fetchTranscript` | 打开即读全部历史 |
 
-**后端侧**：`vdfs/list <根>/session` 曾经要对每个会话读出并解析**含全部消息的**
-`session.json` —— 清单成本 = O(所有会话的全部历史)（见 §11）。
+**后端侧**：`vdfs/list <根>/session` 只读结构、不解析**含全部消息的** `session.json`——否则清单
+成本 = O(所有会话的全部历史)（见 §11）。
 
 ---
 

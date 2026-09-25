@@ -140,6 +140,72 @@ test('D-002：豁免写在第 15 行之后无效（只看头部自述）', () =>
   assert.equal(audit({ 'docs/design/late.md': late }).status, 1)
 })
 
+// ── D-003：行数预算（活跃文档 ≤ 800 行）────────────────────────────────
+// 钉住三件事：**会红**、**边界准确**（800 通过 / 801 失败）、**豁免只有 archive**。
+const longDoc = (lines) => `# 长文档\n${'正文\n'.repeat(lines - 1)}`
+
+test('D-003：801 行 → 失败（并报出超限行数）', () => {
+  const r = audit({ 'docs/big.md': longDoc(801) })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /D-003/)
+  assert.match(r.stdout, /docs\/big\.md/)
+})
+
+test('D-003：恰好 800 行 → 通过（上限是「不超过」）', () => {
+  assert.equal(audit({ 'docs/exact.md': longDoc(800) }).status, 0)
+})
+
+test('D-003：模块文档同样判（不只扫 docs/）', () => {
+  const r = audit({ 'symbio/src/plugins/foo/docs/big.md': longDoc(900) })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /symbio\/src\/plugins\/foo\/docs\/big\.md/)
+})
+
+test('D-003：根目录散落 md 同样判（README / CONTRIBUTING 也会臃肿）', () => {
+  const r = audit({ 'CONTRIBUTING.md': longDoc(900) })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /CONTRIBUTING\.md/)
+})
+
+test('D-003：examples/ 不判（是示例包内容，不是项目文档）', () => {
+  assert.equal(audit({ 'examples/pkg/docs/big.md': longDoc(900) }).status, 0)
+})
+
+test('D-003：docs/archive/ 不判（归档记录当时形态，改写等于篡改历史）', () => {
+  assert.equal(audit({ 'docs/archive/big.md': longDoc(2000) }).status, 0)
+})
+
+// ── D-004：变更史不得混入活跃文档 ───────────────────────────────────────
+test('D-004：正文出现变更史叙述 → 失败（报出文件:行号）', () => {
+  const r = audit({ 'docs/a.md': '# A\n\n## 决策\n\n这条路径曾经走的是另一条路。\n' })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /D-004/)
+  assert.match(r.stdout, /docs\/a\.md:5/)
+})
+
+test('D-004：结构式残留（后记 / 修订小节 / 测试基线 A → B）都判', () => {
+  for (const body of ['## 后记（2026-01-01）\n', '### 修订\n', 'rustTests 930 → 926\n']) {
+    const r = audit({ 'docs/a.md': `# A\n\n${body}` })
+    assert.equal(r.status, 1, `未判出：${body.trim()}`)
+  }
+})
+
+test('D-004：「不再 / 以前」这类现行语义常用词不误报', () => {
+  const r = audit({ 'docs/a.md': '# A\n\n资源不再走两套抽象；以前那种按事件类型分派的写法已无。\n' })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-004：头部豁免带理由 → 通过（定义该规矩的文档要能引用反例措辞）', () => {
+  const allowed =
+    '<!-- doc-link-allow D-004: 本文定义该规矩，需引用反例措辞 -->\n# A\n\n不写「曾经是什么」。\n'
+  assert.equal(audit({ 'docs/a.md': allowed }).status, 0)
+})
+
+test('D-004：豁免理由为空 → 仍失败（同 D-002 的口径）', () => {
+  const empty = '<!-- doc-link-allow D-004:   -->\n# A\n\n这条曾经存在过。\n'
+  assert.equal(audit({ 'docs/a.md': empty }).status, 1)
+})
+
 // ── 空树 ────────────────────────────────────────────────────────────────
 test('空树通过（守卫不是空转即红）', () => {
   assert.equal(audit({}).status, 0)

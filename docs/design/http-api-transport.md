@@ -216,12 +216,9 @@ GET /api/v1/health  → { "ok": true }
   `danger`）：**预留**，现行只有只读白名单一层。
 - 审计：`trace_id` 随 `metadata` 透传进上下文，invoke 记入 tracing。
 - **HTTPS**：不做。策略：默认纯 HTTP + 回环绑定；远程/HTTPS 交由外部反代（Caddy / ssh tunnel / cloudflared）。
-  > **2026-09-17 更新（[ADR-013](../DECISIONS.md)）**：本条**原先的理由已失效**。原理由是
-  > 「rustls 默认后端 aws-lc-rs 依赖 `aws-lc-sys`（C），与"无 C 编译"铁律冲突」——而 HTTP 出口的
-  > TLS 后端已改为**平台原生栈**（`native-tls`），`aws-lc-sys` 与整个 rustls 族已退出依赖树，
-  > **依赖不再是阻碍**。于是「网关自带 HTTPS」从"被依赖问题挡住"变成**一个可自由裁量的产品决策**：
-  > 现状行为不变（仍默认回环 HTTP + 外部反代）；若要开放，需另行设计证书配置面（签发方式 /
-  > 证书存放 / 与 `inbound_token` 的关系 / 绑定非回环时的取舍）——那是产品设计，不是依赖问题。
+  依赖不是阻碍——HTTP 出口的 TLS 走平台原生栈，不引入 C 编译（[ADR-013](../DECISIONS.md)）；若要让网关
+  自带 HTTPS，需另行设计证书配置面（签发方式 / 证书存放 / 与 `inbound_token` 的关系 / 绑定非回环时的
+  取舍）——那是产品决策，不是依赖问题。
 
 ---
 

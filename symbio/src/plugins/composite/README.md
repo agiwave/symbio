@@ -21,7 +21,13 @@
     目录名 = 实例表挂载名。
   - **LLM 链路**：在 `traverse(TRAVERSE_AVAILABLE_TOOLS)` 中经 `register_vdfs_root` 槽位
     登记该视图，供 `vdfs_*` 工具取根。
-  它没有任何「根级别」概念（见 `docs/design/vdfs.md` §2.5 / §6.4 / §13.2）。
+  它没有任何「根级别」概念（见 `docs/design/vdfs.md` §2.5 / §6.4）。
+- **分发与守卫**：`dispatch` 对**所有操作**做同一件事——现场 `children_of(ctx)` 取
+  子目录清单、剥掉 `path` 首段定位子 provider、把剩余路径与请求**整体**递下去（与
+  操作种类无关）。自身目录除 `list` / `stat` 外一概拒绝；子目录根不可读 / 删 / `mkdir`，
+  而**写子目录根**是「新建」的机制形态、一律转发给子 provider 判定；删除子目录根 =
+  卸载该插件（走注册表，必需插件由注册表拒绝）。合成子目录节点时把 `PluginMeta::hidden`
+  回填进 `VdfsNode::hidden` 并据此过滤清单（委派回来的 `list` 结果同样过滤）。
 - **对称性**：容器与叶子插件实现同一 `Plugin` Trait，接口完全一致。
 
 ## 关联

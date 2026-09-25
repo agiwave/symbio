@@ -50,6 +50,15 @@
 - **隐藏是机制级**：`VdfsNode.hidden` —— 列表不出现、可达性不变。
 - **路径守卫**：物理层黑名单 + 解析符号链接后复验（防链接逃逸）；写路径拒绝符号链接。
   Windows `canonicalize` 的 `\\?\` 前缀在比较前剥掉（`normalize_for_comparison`）。
+- **物理层策略与形状**：`FsPolicy` = `forbidden_paths` 黑名单 + 可选的
+  `workspace_only` / `allowed_roots`（缺省关闭 = 全盘可读、仅黑名单兜底）；
+  读上限 10MB、列目录上限 2000 项、非 UTF-8 名称跳过；`list` 目录在前、各自按名
+  升序，文件 `rw` / 目录 `wlt`；图片扩展名映射为 `binary = true` + MIME，`read`
+  返回 base64（多模态）。
+- **组合操作只写一次**：`VdfsProvider` 只含原子操作，`tree` / `edit` / `search`
+  由访问层组合（`host::edit_via` / `host::search_via`）——读改写、遍历过滤属组合
+  逻辑，放 trait 里会逼每个实现方重复实现；前端协议入口与 LLM 工具链路共用同一份
+  实现，`VdfsEditResponse` / `VdfsSearchResult` 因此属于访问层形状。
 
 ## 关联
 

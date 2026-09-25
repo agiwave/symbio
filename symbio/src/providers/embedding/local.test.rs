@@ -2,8 +2,7 @@
 //!
 //! 对应源文件: `local.rs`
 //!
-//! 数值对齐验证：fastembed → tract 的余弦相似度 0.999558 记录于 `docs/DECISIONS.md`
-//! ADR-014；tract → ort 的余弦相似度记录于 ADR-015。两者都是迁移 spike 阶段实测，
+//! 数值对齐验证是迁移 spike 阶段的实测结论（见 `docs/DECISIONS.md` ADR-016）：
 //! 参考管线（fastembed / tract）的依赖本体已移除，无法在单测中再跑。
 
 use super::*;
