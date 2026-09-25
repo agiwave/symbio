@@ -270,14 +270,25 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 ---
 
-## Setting 插件
+## Plugin_manager 插件（插件管理）
 
-**本插件无自有路由**。分区清单与取值分别由 `<根>/setting` 的 `vdfs/list` / `vdfs/read` 承担。
+**本插件无自有路由**。清单与取值分别由 `<根>/plugin_manager` 的 `vdfs/list` / `vdfs/read` 承担。
 
-清单 = **各插件交出来的配置条目 + 自有分区**（`appearance` / `about`）：前者由各插件在
-`traverse` 里经 `announce_configurable` 声明，容器用共享收集器收下并写回请求 ctx
-（见 [design/vdfs.md](../design/vdfs.md) §13.1）——因此**新增一个可配置插件不需要在本插件
-登记任何东西**；自有分区的数据在前端 store，`read` / `write` 对它们恒 `Forbidden`。
+它是本智能体**插件集合**的门面：清单 = **各插件交出来的配置条目 + 自有分区**
+（`appearance` / `about`）。前者由各插件在 `traverse` 里经 `announce_configurable` 声明，
+容器用共享收集器收下并写回请求 ctx（见 [design/vdfs.md](../design/vdfs.md) §13.1）——
+因此**新增一个可配置插件不需要在本插件登记任何东西**；自有分区的数据在前端 store，
+`read` / `write` 对它们恒 `Forbidden`。
+
+配置条目**不是第二种东西**：它就是那个插件的配置，入口挂在
+`<根>/plugin_manager/<插件名>`，读 / 写转发到容器根下的 `<插件名>/PLUGIN.yml`——
+同一份配置仍然只有一个**文件**、一份**定义**（拥有者给的那份）。
+
+装配动作（启用 / 停用 / 卸载）与「添加插件」也走这里，但**动词在容器**：本插件只把
+`Action(enable|disable)`（插件名进载荷）、`Delete(<插件名>)`、根上的 `Write`（安装）
+转发回所在容器（见 `composite/vdfs.rs` 的「插件注册表」一节）。必需插件（构造者经
+`REQUIRED_PLUGINS` 声明）**不可删除，但可停用**；界面底座插件（`UNDISABLABLE_PLUGINS`）
+连停用也拒绝——停掉它就没有界面再把它打开。
 
 ---
 

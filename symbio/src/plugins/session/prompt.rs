@@ -8,7 +8,7 @@
 //! 的 `work` 实例读可写版本。
 //!
 //! 现在按 **作用域归所有者** 收口：`{homedir}/AGENTS.md` 与 `<agentdir>/AGENTS.md`
-//! 都归 `setting` 插件（见 `plugins/setting/instruction.rs`），`work` 只认 `{workdir}`。
+//! 都归 `agent` 插件（见 `plugins/agent/host/instruction.rs`），`work` 只认 `{workdir}`。
 //!
 //! ## 时间上下文为什么挂在用户消息上
 //!

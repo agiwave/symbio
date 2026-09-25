@@ -542,7 +542,7 @@ impl Plugin for SessionPlugin {
             visitor.register_vdfs_provider(PLUGIN_SESSION, me).await;
 
             // 智能体自身的 `AGENTS.md`（`{homedir}` / `<agentdir>`）**不再在此注入**：
-            // 那是「智能体自身目录」这个作用域，归 setting 插件（谁能读写它，谁负责
+            // 那是「智能体自身目录」这个作用域，归 plugin_manager 插件（谁能读写它，谁负责
             // 注入它）。工作区 `AGENTS.md` 归 work 插件，本会话的 `AGENTS.md` 归本
             // 插件——三层各有一个所有者，见 `symbio_core::memory` 的模块文档。
 
@@ -564,7 +564,7 @@ crate::submit_object_creator!(PLUGIN_SESSION, SessionPlugin::build, dyn Plugin);
 /// 会话配置的定义 —— **定义由配置的拥有者产出**。
 ///
 /// 字段默认值一律从 [`SessionConfig::default()`] 读出，不写第二份字面量：
-/// 历史上定义寄居在 setting 插件里，schema 与 serde 各写一份默认值，出现过
+/// 历史上定义寄居在 plugin_manager 插件里，schema 与 serde 各写一份默认值，出现过
 /// `max_tool_rounds` schema=15 而 serde=65535 的漂移（面板显示的默认值与
 /// 实际行为不符）。不变式由 `config_definition_defaults_come_from_session_config`
 /// 锁定。

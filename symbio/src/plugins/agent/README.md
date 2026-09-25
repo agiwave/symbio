@@ -24,18 +24,18 @@
 > 这件事曾经散在别处：`{homedir}/AGENTS.md` 由 `session` 临时读一遍注入（叫「全局指令」，
 > 只读、无地址、无容量），`<agentdir>/AGENTS.md` 则由子树里那个被宿主改指了作用域的
 > `work` 实例混在「工作区记忆」名下注入（还带着工作区的地址）。也一度试图整体收进
-> `setting`——但 `setting` 是**设置页的入口**（自有分区 + 各插件配置清单），
+> `plugin_manager`——但 `plugin_manager` 是**设置页的入口**（自有分区 + 各插件配置清单），
 > 不是任何内容文件的所有者。
 
 ### 子 Agent 的默认插件清单
 
 子树挂**与父 Agent 同构的默认插件集**（见 `symbio_core::SUB_AGENT_PLUGINS`）——即系统
-全套插件去掉系统级单槽 `vdfs`，其余（`setting`、`event_bus`、`session`、`model`、`local`、
+全套插件去掉系统级单槽 `vdfs`，其余（`plugin_manager`、`event_bus`、`session`、`model`、`local`、
 `web`、`mcp`、`telegram`、`hook`、`agent`、`skill`、`gateway`、`work`）全部与父树一致。
 
 - `work` 在其中：子树 `WORKDIR` **继承父会话**（不再覆写成 Agent 目录），所以 `work` 注入的是
   工作区记忆，与系统侧读的是同一份语义、但落在子树自己的 `agent/<id>/work` 挂载点，无双重注入。
-- `setting` 在其中：`SubAgentVisitor` 把它前缀到 `agent/<id>/setting`，子 Agent 页因此有了
+- `plugin_manager` 在其中：`SubAgentVisitor` 把它前缀到 `agent/<id>/plugin_manager`，子 Agent 页因此有了
   设置入口，与父 Agent 对齐。
 - `agent` 在其中：子 Agent 也能在其目录内再挂子 Agent（`<id>/agent/<sub-id>` 递归）——分形。
 - `model` 在其中：子智能体有自己的模型服务。子树会话收集能力时以**子容器**为 parent，
@@ -86,7 +86,7 @@ agent 目录的寻址是**挂载点语义**而非平铺三段（`route()` 直接
 - `agent/<id>` 是挂载点；钻进它即**委托给子 composite 的 `CompositeVfs`**（与系统根
   分形同构，而非把子智能体资源并集进系统树的三段地址）。
 - 钻进后的清单由子 composite 的 `list("")` 返回自身子目录（session / model / mcp /
-  skill / setting / …，经 `root_hidden` 过滤后的可见项），地址**递归**为
+  skill / plugin_manager / …，经 `root_hidden` 过滤后的可见项），地址**递归**为
   `agent/<id>/<子目录>/<相对路径>`，没有固定的「子类别标签」三层。
 - 两条链路要分清：**LLM 链路**的子智能体能力经 `SubAgentVisitor` 加 `agent/<id>/`
   前缀并集进系统树（前缀可见）；**系统 / 前端链路**走挂载点穿越（`sub_agent(id)`
@@ -96,7 +96,7 @@ agent 目录的寻址是**挂载点语义**而非平铺三段（`route()` 直接
 
 - 会话编排与系统提示词的拼接 / 消费：`../session/README.md`
 - 另外几层记忆：`../work/README.md`（工作区）、`../session/README.md`（会话）、
-  `../setting/README.md`（设置入口，**不拥有任何记忆文件**）
+  `../plugin_manager/README.md`（设置入口，**不拥有任何记忆文件**）
 - 记忆内核（各层共用）：`symbio_core::memory`
 - Agent 目录规范：`docs/design/agent-directory-spec.md`
 - VDFS 机制（`<根>/agent` 挂载点由本插件自持 `impl VdfsProvider`）：`docs/design/vdfs.md` §13.4

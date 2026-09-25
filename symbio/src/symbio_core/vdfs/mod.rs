@@ -43,7 +43,7 @@
 //! [`VdfsProvider`]: crate::symbio_core::vdfs_provider::VdfsProvider
 //!
 //! 本模块（`vdfs`）是 symbio 侧的**薄桥**：把纯接口接到
-//! `InvokeRequest` / `PluginError` 上，供实现方（如 `setting` 插件）复用。
+//! `InvokeRequest` / `PluginError` 上，供实现方（如 `plugin_manager` 插件）复用。
 //! 换宿主只需重写这一个文件。
 //!
 //! ## 四条不变量

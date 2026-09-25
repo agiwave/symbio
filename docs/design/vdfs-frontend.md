@@ -104,7 +104,7 @@
 <根>                          # 首页地址：子目录清单（左栏导航同源）
 <根>/session                  # 会话目录的列表（下一级）
 <根>/session/<id>             # 会话详情
-<根>/setting/appearance       # 设置分区
+<根>/plugin_manager/appearance       # 设置分区
 ```
 
 这与大语言模型侧 `ToolVdfs` 的**虚拟地址前缀**（`VIRTUAL_PREFIX = "<根>/"`）

@@ -31,7 +31,7 @@ const router = createRouter({
         { path: 'mcp', redirect: () => '/vdfs/mcp' },
         { path: 'skill', redirect: () => '/vdfs/skill' },
         { path: 'agent', redirect: () => '/vdfs/agent' },
-        { path: 'settings', redirect: () => '/vdfs/setting' }
+        { path: 'settings', redirect: () => '/vdfs/plugin_manager' }
       ]
     },
     // 容器内部的整页入口不再需要：内部结构由 VDFS 的

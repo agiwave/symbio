@@ -1,4 +1,4 @@
-//! Home 插件模块 - 根插件，持有 work/agent/setting 子插件
+//! Home 插件模块 - 根插件，持有 work/agent/plugin_manager 子插件
 
 mod plugin;
 mod schemas;

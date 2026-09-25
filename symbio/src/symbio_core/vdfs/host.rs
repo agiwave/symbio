@@ -17,7 +17,7 @@
 //! [`crate::symbio_core::vdfs_provider`]；`vdfs/*` 的**分发**（收集挂载点、
 //! 路径解析、树状遍历、事件投递）是 vdfs 插件的职责，见 `plugins/vdfs/host.rs`。
 //!
-//! 本模块之所以留在 core，是因为**实现方**（如 `setting` 插件）是插件而非
+//! 本模块之所以留在 core，是因为**实现方**（如 `plugin_manager` 插件）是插件而非
 //! 宿主本身——它需要把宿主句柄从 [`VdfsContext`] 里取出、并把调用宿主服务
 //! 得到的 [`PluginError`] 翻回协议错误。让它去依赖 `plugins/vdfs` 会破坏
 //! 「插件之间不互相依赖」的分层。

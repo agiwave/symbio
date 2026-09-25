@@ -94,7 +94,7 @@ impl WorkPlugin {
             .with_description("工作区记忆：跨会话保留的长期事实与约定，模型可读写。")
             .with_version("0.1.0")
             // 在既有挂载点之后（session 1 / model 2 / agent 3 / skill 4 / mcp 5 /
-            // setting 6 / local 7 / web 8 / gateway 9 / telegram 10）
+            // plugin_manager 6 / local 7 / web 8 / gateway 9 / telegram 10）
             .with_order(11)
             .with_icon(PLUGIN_WORK)
             .with_hidden(true)

@@ -4,7 +4,7 @@
 //! 的主链路，全部进程内完成（tempdir + 内存 zip），不依赖真实文件系统布局。
 //!
 //! Agent 采用**目录即配置**布局（约定优于配置）：`manifest.yaml` + `AGENTS.md`
-//! + 能力插件目录（`skill/` `mcp/` `setting/`），存在即安装，无需在 manifest 里登记。
+//! + 能力插件目录（`skill/` `mcp/` `plugin_manager/`），存在即安装，无需在 manifest 里登记。
 
 use super::plugin::AgentPlugin;
 use super::store::AgentDirStore;
@@ -229,7 +229,7 @@ async fn nonconforming_agent_is_rejected_with_both_versions() {
 // v2：子 Agent 是一棵 composite 插件树（规范 `docs/design/agent-directory-spec.md`）
 // ---------------------------------------------------------------------
 // 验证三件事：manifest 声明 `agent-dir/v2` 的目录会被挂成插件树；它的注册经
-// 代理层带上来源前缀（与系统树不冲突）；它的 `setting` 实例把自己目录下的
+// 代理层带上来源前缀（与系统树不冲突）；它的 `plugin_manager` 实例把自己目录下的
 // `AGENTS.md` 注入成【智能体指令】。
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -246,7 +246,7 @@ async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
         "spec: \"agent-dir/v2\"\nid: \"reviewer\"\nname: \"评审\"\nversion: \"1.0.0\"\nrequires://n  spec: \"^2\"\n",
     )
     .unwrap();
-    // 人格 / 记忆：`<agentdir>/AGENTS.md`，由子树的 `setting` 实例读取并注入
+    // 人格 / 记忆：`<agentdir>/AGENTS.md`，由子树的 `plugin_manager` 实例读取并注入
     // （宿主不再把子树的 WORKDIR 改指本目录——`work` 只认工作区，那个覆写是错的）
     std::fs::write(sub.join("AGENTS.md"), "你是评审专家。").unwrap();
     // 一个技能：落在子 Agent **自己的** skill 插件目录下（有技能它才注册 read_skill）
@@ -361,7 +361,7 @@ async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
     assert!(
         names
             .iter()
-            .any(|n| matches!(*n, "session" | "mcp" | "skill" | "setting" | "agent")),
+            .any(|n| matches!(*n, "session" | "mcp" | "skill" | "plugin_manager" | "agent")),
         "子根应经子 composite 列出可见资源入口，实际：{names:?}"
     );
     //    ⚠️ 判据**不是**「条目路径带挂载段」：条目地址由访问层按请求地址回填，

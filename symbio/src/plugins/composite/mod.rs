@@ -5,4 +5,5 @@
 
 #[allow(clippy::module_inception)]
 mod composite;
+mod registry;
 mod vdfs;

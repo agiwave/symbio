@@ -18,7 +18,7 @@
 //! | 列自身目录 | `dispatch(ctx, "", List)` 返回子目录清单（合成，无需子插件参与） |
 //! | 路径解析 | 首段 = 子目录名，其余 = 该子插件的**相对路径** |
 //! | 地址翻译 | 把子插件的**相对地址**放进 `ctx` 的当前父地址，供其拼绝对地址 |
-//! | 子目录根守卫 | 子目录根不可读 / 删 / 移，也不可 mkdir（**写不在其中**） |
+//! | 子目录根守卫 | 子目录根不可读 / 移，也不可 mkdir；**删 = 卸载**（转注册表） |
 //! | 跨子目录拒绝 | `move` 只允许在同一子目录内 |
 //! | 事件补全 | 子插件报出的相对路径补成树内全路径再交给上层 sink |
 //!
@@ -31,13 +31,28 @@
 //! [`PluginMeta`](crate::symbio_core::PluginMeta)——元数据的唯一来源，provider 上
 //! 不再有 `label` / `order` / `root_*` 一族方法。
 //!
+//! ## 资源树与插件注册表：两个视图，刻意不共用 `List`
+//!
+//! 容器的根同时是两样东西，而它们**答的不是同一个问题**：
+//!
+//! - **资源树**（`List`）：`<根>` 下有哪些**可用**资源域。只有「已挂载**且**暴露
+//!   VDFS」的子插件在里面——`telegram` 没有 VDFS 视图，它不该在资源树里占一格；
+//! - **插件注册表**（`Action(plugins)`）：这个智能体由**哪些插件**组成。它要的是
+//!   全集：含没有 VDFS 视图的、含**已停用**的（否则用户看不到自己刚停用的那个，
+//!   也就永远点不回「启用」）。
+//!
+//! 两件事的成员集合不同，因此不能共用一个动词——把注册表塞进 `List`，资源树就会
+//! 多出一些点进去什么都没有的格子；把 `List` 收窄成注册表，没有 VDFS 的插件就会
+//! 从资源树里消失。动作名与回包形状见 `symbio_core::vdfs_provider` 的
+//! `VDFS_ACTION_PLUGINS` / `VDFS_PLUGINS_FIELD`。
+//!
 //! ## 它不是根，也没有任何「根」的概念
 //!
 //! composite 只是一个**恰好包含若干子目录的 provider**——它可以被别的目录包含，
 //! 子插件本身也可以是另一个 composite（嵌套时它同样只是普通 provider）。当前它
 //! 充当整个 `<根>` 的服务者，**只是装配时的安排**（使用方把它登记进了
 //! `register_vdfs_root` 槽位），不是本模块的属性；本文件不出现任何「根级别」
-//! 的概念与代码。
+//! 的概念与代码（`path == ""` 只是「本目录自身」，任何目录都可能是别的目录的子目录）。
 //!
 //! ## 为什么逐子插件单独广播
 //!
@@ -55,21 +70,23 @@
 //! 两条通道拿到的是同一个 `CompositeVdfs` 实例；拓扑知识因此不落在访问层。
 
 use super::composite::broadcast_collect;
+use super::registry::PluginRegistry;
+use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField, DetailOption};
 use crate::symbio_core::vdfs::{descend_addr, host_ctx};
 use crate::symbio_core::vdfs_provider::*;
 use crate::symbio_core::{
     ConfigurableVisitor, DefaultConfigurableVisitor, InvokeRequestExt, Plugin, PluginMeta,
-    CONFIG_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS,
+    CONFIG_VISITOR, PATH, PLUGIN_MANAGER, TRAVERSE_AVAILABLE_TOOLS,
 };
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// 容器的 VDFS（包含子目录列表的 provider，见模块文档）
 pub struct CompositeVdfs {
-    /// 与容器共享同一份子插件表（容器增删实例即时可见）
-    instances: Arc<RwLock<HashMap<String, Arc<dyn Plugin>>>>,
+    /// 插件集合：目录清单（资源树与注册表）与实例表都在它那里，
+    /// 运行期启停/安装/卸载也经它执行——本视图因此没有自己的状态。
+    registry: Arc<PluginRegistry>,
 }
 
 /// 拆分树内路径：`(首段, 其余)`；根（空路径）返回 `None`
@@ -92,8 +109,8 @@ fn child_path(dir: &str, rel: &str) -> String {
 }
 
 impl CompositeVdfs {
-    pub fn new(instances: Arc<RwLock<HashMap<String, Arc<dyn Plugin>>>>) -> Self {
-        Self { instances }
+    pub fn new(registry: Arc<PluginRegistry>) -> Self {
+        Self { registry }
     }
 
     /// 现场收集：取回各子插件的 `(目录名, 插件)`，按 meta 的 `order` 升序排序
@@ -112,17 +129,12 @@ impl CompositeVdfs {
     ///   [`Plugin::vdfs_dispatch`] 直接查询——这是系统链路的视角，目录名 = 子插件在
     ///   容器实例表里的挂载名（约定 = 插件名）。**不走 `CapabilityVisitor`**。
     /// - **配置声明**：仍是独立的 `CONFIG_VISITOR` 通道——逐子插件广播一次 `traverse`，
-    ///   子插件把各自的配置文档声明写回本次请求 ctx，被委派的设置插件据此知道「哪些
+    ///   子插件把各自的配置文档声明写回本次请求 ctx，插件管理插件据此知道「哪些
     ///   插件有配置文档」。
     async fn children_of(&self, ctx: &VdfsContext) -> VdfsResult<Vec<(String, Arc<dyn Plugin>)>> {
         let host = host_ctx(ctx)?;
-        let children: Vec<(String, Arc<dyn Plugin>)> = {
-            let guard = self.instances.read().await;
-            guard
-                .iter()
-                .map(|(name, p)| (name.clone(), Arc::clone(p)))
-                .collect()
-        };
+        // 实例表快照（`std::sync::RwLock`：临界区只有一次遍历，没有任何 await）
+        let children: Vec<(String, Arc<dyn Plugin>)> = self.registry.snapshot();
 
         // 可配置声明通道：与 VDFS 无关，仍逐子插件广播一次 `traverse`，但只挂
         // `CONFIG_VISITOR`——配置声明自带目录名，不存在归属歧义。
@@ -170,7 +182,11 @@ impl CompositeVdfs {
     }
 
     /// 自身节点（`""`）——合成的目录节点，子节点为各子插件子目录
-    fn self_node(dirs: &[(String, Arc<dyn Plugin>)]) -> VdfsNode {
+    ///
+    /// 它同时声明**根可新建什么**：一个插件（见 [`Self::install_new_type`]）。
+    /// 「根接受的东西 = 一个插件」不是新增的界面概念，而是 `new_type` 机制的本来
+    /// 用途——根就是插件根，在它下面新建一个东西，就是把一个插件装进来。
+    fn self_node(&self, dirs: &[(String, Arc<dyn Plugin>)]) -> VdfsNode {
         let mut n = VdfsNode::dir(
             "",
             "系统",
@@ -181,7 +197,42 @@ impl CompositeVdfs {
             },
         );
         n.description = Some("系统资源；子节点为各插件子目录".to_string());
+        n.new_type = Some(Box::new(self.install_new_type()));
         n
+    }
+
+    /// 根可新建的类型：**一个插件**（安装表单）
+    ///
+    /// 候选 = 已注册但当前未挂载的工厂（见 [`PluginRegistry::installable`]），落成
+    /// 动作就是根上的 `Write`（见 [`Self::install_plugin`]）——表单声明与执行者同在
+    /// 一处，因此**只有这一份**安装表单的定义；插件管理插件原样转发它（它的根是
+    /// 插件根在界面上的门面），不另写一张。
+    fn install_new_type(&self) -> VdfsNewType {
+        let options: Vec<DetailOption> = self
+            .registry
+            .installable()
+            .into_iter()
+            .map(|id| DetailOption {
+                value: id.to_string(),
+                label: id.to_string(),
+                description: None,
+            })
+            .collect();
+        let mut t = VdfsNewType::new(PLUGIN_MANAGER, "插件");
+        t.description = Some("从已注册的插件工厂里选一个装进本智能体".to_string());
+        // 落成后是一个**定义驱动的表单**节点（与新建态同一张详情，见 `VdfsNewType`）。
+        t.node_ext = Some(VDFS_EXT_FORM.to_string());
+        t.schema = serde_json::to_value(DetailDefinition::form(
+            "添加插件",
+            vec![DetailField::select(
+                PLUGIN_PROVIDER_FIELD,
+                "插件工厂",
+                options,
+                "",
+            )],
+        ))
+        .ok();
+        t
     }
 
     /// 子目录节点（`<dir>`）——合成的目录节点，**静态**自述取自子插件的 PluginMeta。
@@ -299,6 +350,105 @@ impl CompositeVdfs {
             .collect::<Vec<_>>()
             .join(", ")
     }
+
+    // ==================== 插件注册表（运行期） ====================
+    //
+    // 注册表的四个动词全部落在**本目录自己**（`path == ""`）上：列（`Action(plugins)`）、
+    // 启停（`Action(enable|disable)`）、安装（`Write`）。卸载落在**插件目录自身**
+    // （`Delete` 且相对路径为空）——「删掉这个目录」与「卸载这个插件」是同一件事。
+    //
+    // 为什么都挤在根上：容器的根就是**装配面**（插件根），根之下每一个子目录才是
+    // 一个插件。把动词挂到子目录上会与「该插件自己的动作」抢名字（`enable` 是装配
+    // 方的词，不是插件自己的动作）。
+    //
+    // **不发变更广播**：注册表是**装配态**，改它的人就是当前这个请求的发起者，
+    // 而调用方（前端 `runAction` / `write` / `removeSelected`）在动作返回后一律
+    // 重拉当前目录——它本来就会看到新状态。跨窗口同步装配态没有需求，为它接一条
+    // 容器级的订阅通道，是给机制加一份没人要的能力。
+
+    /// `Action(plugins)` —— 列出插件注册表（回包 `data[VDFS_PLUGINS_FIELD]`）
+    fn list_registry(&self, action: String) -> VdfsResult<VdfsResponse> {
+        let entries = self.registry.entries();
+        let total = entries.len();
+        let enabled = entries.iter().filter(|e| e.enabled).count();
+        Ok(VdfsResponse::Action(VdfsActionResult {
+            action,
+            ok: true,
+            message: format!("共 {total} 个插件，其中 {enabled} 个已启用"),
+            data: Some(serde_json::json!({ VDFS_PLUGINS_FIELD: entries })),
+        }))
+    }
+
+    /// `Action(enable|disable)` —— 启停一个插件（`payload.name` = 插件名）
+    ///
+    /// 名称取自**载荷**而不是路径：这个动作是「对注册表里某一项做点什么」，
+    /// 而注册表是根上的视图——路径上没有这一项（停用的插件不在资源树里，
+    /// 见模块文档「两个视图」）。
+    fn set_plugin_enabled(
+        &self,
+        action: String,
+        payload: Option<&serde_json::Value>,
+        enabled: bool,
+    ) -> VdfsResult<VdfsResponse> {
+        let name = payload
+            .and_then(|p| p.get(VDFS_PLUGIN_NAME_FIELD))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if name.is_empty() {
+            return Err(VdfsError::invalid(format!(
+                "「{action}」需要在载荷里给出插件名（{{\"{VDFS_PLUGIN_NAME_FIELD}\": \"…\"}}）"
+            )));
+        }
+        self.registry
+            .set_enabled(&name, enabled)
+            .map_err(VdfsError::invalid)?;
+        Ok(VdfsResponse::Action(VdfsActionResult {
+            action,
+            ok: true,
+            message: format!("已{}「{name}」", if enabled { "启用" } else { "停用" }),
+            data: None,
+        }))
+    }
+
+    /// 根上的 `Write` —— **安装**一个插件（内容 = 安装表单的字段值）
+    ///
+    /// 与「新建一项资源」是同一条机制形态（写目录自身、名字由 provider 生成）：
+    /// 使用方只说「往这个目录里加一个插件」，加的是谁由表单字段（`provider`）决定，
+    /// 落成后的名字经 [`VdfsWriteResponse::name`] 交回。
+    fn install_plugin(&self, content: &VdfsContent) -> VdfsResult<VdfsResponse> {
+        // 与「新建一项资源」同一条判据：写挂载点目录自身没有任何「已存在的目标」
+        // 可覆盖，`create` 是唯一说得通的意思（见 `VdfsContent::create`）。
+        if !content.create {
+            return Err(VdfsError::invalid(
+                "写插件根需要 create 意图：目录自身没有可覆盖的目标",
+            ));
+        }
+        let text = content
+            .as_text()
+            .ok_or_else(|| VdfsError::invalid("安装插件需要文本（JSON）内容"))?;
+        let value: serde_json::Value = serde_json::from_str(text)
+            .map_err(|e| VdfsError::invalid(format!("安装表单不是合法 JSON：{e}")))?;
+        let provider = value
+            .get(PLUGIN_PROVIDER_FIELD)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if provider.is_empty() {
+            return Err(VdfsError::invalid("请选择一个插件工厂"));
+        }
+        let name = self
+            .registry
+            .install(&provider)
+            .map_err(VdfsError::invalid)?;
+        Ok(VdfsResponse::Write(VdfsWriteResponse {
+            name: Some(name),
+            created: true,
+            etag: None,
+        }))
+    }
 }
 
 /// 全部操作都是同一件事：现场取子目录清单 → 按 `path` 首段解析 → 委派。
@@ -314,9 +464,9 @@ impl VdfsProvider for CompositeVdfs {
     ) -> VdfsResult<VdfsResponse> {
         let dirs = self.children_of(ctx).await?;
 
-        // 自身目录：容器是一个**纯目录**——可列 / 可 stat，其余拒绝。
-        // 隐藏属性在这里生效：`hidden` 的子目录不出现在清单里，但仍留在 `dirs`
-        // 中——目录本身照旧存在，按路径照常可寻址（见 `resolve`）。
+        // 自身目录：可列 / 可 stat / 可写（= 安装一个插件）/ 收注册表动词；
+        // 其余拒绝。隐藏属性在这里生效：`hidden` 的子目录不出现在清单里，但仍留在
+        // `dirs` 中——目录本身照旧存在，按路径照常可寻址（见 `resolve`）。
         if path.is_empty() {
             return match req {
                 VdfsRequest::List { .. } => {
@@ -326,7 +476,22 @@ impl VdfsProvider for CompositeVdfs {
                     }
                     Ok(VdfsResponse::list(out.into_iter().filter(|n| !n.hidden)))
                 }
-                VdfsRequest::Stat => Ok(VdfsResponse::Stat(Self::self_node(&dirs))),
+                VdfsRequest::Stat => Ok(VdfsResponse::Stat(self.self_node(&dirs))),
+                // 注册表动词（见上文「插件注册表（运行期）」）：列 / 启停 / 安装。
+                // 三者的**判据都是载荷里的插件名**，不是路径——注册表是根上的视图，
+                // 停用的插件在资源树里没有位置（模块文档「两个视图」）。
+                VdfsRequest::Action { action, .. } if action == VDFS_ACTION_PLUGINS => {
+                    self.list_registry(action)
+                }
+                VdfsRequest::Action { action, payload } if action == VDFS_ACTION_ENABLE => {
+                    self.set_plugin_enabled(action, payload.as_ref(), true)
+                }
+                VdfsRequest::Action { action, payload } if action == VDFS_ACTION_DISABLE => {
+                    self.set_plugin_enabled(action, payload.as_ref(), false)
+                }
+                // 根上的写 = **安装**：与「新建一项资源」同形（往目录里加一个东西，
+                // 名字由 provider 生成并经 `VdfsWriteResponse::name` 交回）。
+                VdfsRequest::Write { content } => self.install_plugin(&content),
                 _ => Err(VdfsError::invalid(
                     "目录不是可操作节点，请给出 <子目录>/... 路径",
                 )),
@@ -399,7 +564,12 @@ impl VdfsProvider for CompositeVdfs {
             }
             VdfsRequest::Delete { recursive } => {
                 if rel.is_empty() {
-                    return Err(VdfsError::Forbidden("目录不可删除".to_string()));
+                    // 「删掉这个目录」与「卸载这个插件」是同一件事——插件目录存在与否
+                    // 就是它装没装的**唯一凭据**（见 `registry.rs`）。必需插件由注册表
+                    // 拒绝：可以停用，但不可删除。`recursive` 不参与判定：卸载本就是整棵
+                    // 子树的事，注册表一次做完，调用方不需要先知道这棵树有多深。
+                    self.registry.uninstall(&dir).map_err(VdfsError::invalid)?;
+                    return Ok(VdfsResponse::Unit);
                 }
                 p.clone()
                     .vdfs_dispatch(&sub, &rel, VdfsRequest::Delete { recursive })

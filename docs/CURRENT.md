@@ -22,8 +22,8 @@
 | `local` | `local` | <根>/local | （动态）`local/<工具短名>`——按已注册工具名分发（与 §2 的工具清单同一份集合） | `Capability` · `Plugin` | ✓ | ✓ |
 | `mcp` | `mcp` | <根>/mcp | — | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `model` | `model` | <根>/model | （动态）已无自有路由（`execute_turn` 由 session 直连调用） | `ModelProvider` · `Plugin` · `VdfsProvider` | — | ✓ |
+| `plugin_manager` | `plugin_manager` | <根>/plugin_manager | — | `Plugin` · `VdfsProvider` | — | ✓ |
 | `session` | `session` | <根>/session | `session/chat/abort` · `session/chat/send` | `Capability` · `Plugin` | ✓ | ✓ |
-| `setting` | `setting` | <根>/setting | — | `Plugin` · `VdfsProvider` | — | ✓ |
 | `skill` | `skill` | <根>/skill | `skill/execute` | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `telegram` | `telegram` | <根>/telegram | `telegram/get_updates` · `telegram/send` · `telegram/set_chat_id` · `telegram/start_listener` · `telegram/status` · `telegram/stop_listener` | `Plugin` | ✓ | ✓ |
 | `vdfs` | `vdfs` | — | （动态）`vdfs/<操作>`——按 `VDFS_OPS` 校验后分发（见 §3.2，13 个操作） | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
@@ -97,7 +97,7 @@
 
 | 数据 | 位置 | 后端 |
 |---|---|---|
-| 资源型插件条目（agent / model / mcp / skill / setting …） | `<homedir>/<类别>/<id>/<主文件>` | `providers/vdfs_service/` 三型：`SingleFileVdfs` / `DirVdfs` / `MemoryVdfs` |
+| 资源型插件条目（agent / model / mcp / skill / plugin_manager …） | `<homedir>/<类别>/<id>/<主文件>` | `providers/vdfs_service/` 三型：`SingleFileVdfs` / `DirVdfs` / `MemoryVdfs` |
 | 会话与其消息 | `<homedir>/session/<id>/{session.json,messages.json}` | **单一具体类型** `SessionStore`（持久=磁盘布局 / 临时=进程内驻留）。曾有 `store_kind` × file/sqlite/memory 三后端选型，**已删除** |
 | Agent 目录 | `agent/<id>`（工作区级 + 全局级双层） | `AgentDirStore` 自管，不经 `vdfs_service`；虚拟视图以 `<vdfs_root>/agent/<id>` 进入 |
 | 插件配置（含会话配置） | `<homedir>/<插件>/PLUGIN.yml`（系统级在 `<homedir>/PLUGIN.yml`） | `ConfigFile` 自读写，**无第二种后端、无第二条配置协议** |
@@ -108,10 +108,10 @@
 
 | 范围 | 实现 | 测试 |
 |---|---|---|
-| `symbio/src` | 200 文件 / 53883 行 | 121 文件 / 23594 行 |
+| `symbio/src` | 201 文件 / 54917 行 | 122 文件 / 24319 行 |
 | `cli/src` | 4 文件 / 1569 行 | 1 文件 / 80 行 |
 | `tauri/src-tauri/src` | 3 文件 / 445 行 | 0 文件 / 0 行 |
-| `tauri/src` | 94 文件 / 20255 行 | 49 文件 / 10428 行 |
+| `tauri/src` | 94 文件 / 20288 行 | 49 文件 / 10428 行 |
 
 ### 5.2 宿主接缝（前端到底有多大）
 
@@ -122,4 +122,4 @@
 
 ---
 
-> 生成时间：2026-09-25 01:47:50 UTC · 源：`git rev-parse HEAD` = `5a7aef5`
+> 生成时间：2026-09-25 02:56:54 UTC · 源：`git rev-parse HEAD` = `c44016e`

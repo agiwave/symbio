@@ -59,7 +59,7 @@ pub(crate) fn request_of<T: DeserializeOwned + Default>(args: &Value) -> T {
 ///
 /// 与后端统一地址规则同一口径：`.vdfsv2` 打头 = 系统资源，其余 = 磁盘文件。
 pub const PATH_DESC: &str =
-    "路径（统一文件系统）。磁盘文件：相对路径从工作目录开始，如 'README.md'、'src/main.rs'；'/' 表示工作目录根；绝对路径直用，如 'D:/tmp/a.txt'。系统资源：以 '.vdfsv2' 打头，列 '.vdfsv2' 可枚举全部资源类别，'.vdfsv2/<类别>/...' 深入对应资源（如 '.vdfsv2/setting/appearance'）。";
+    "路径（统一文件系统）。磁盘文件：相对路径从工作目录开始，如 'README.md'、'src/main.rs'；'/' 表示工作目录根；绝对路径直用，如 'D:/tmp/a.txt'。系统资源：以 '.vdfsv2' 打头，列 '.vdfsv2' 可枚举全部资源类别，'.vdfsv2/<类别>/...' 深入对应资源（如 '.vdfsv2/plugin_manager/appearance'）。";
 
 /// 构造工具元数据骨架；子模块在自身 `meta()` 里直接调用，避免重复样板。
 pub fn tool(

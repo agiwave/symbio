@@ -20,7 +20,7 @@ describe('registerVdfsIcon / getVdfsIcon', () => {
   })
 
   it('主导航的六类资源均登记了独立图标', () => {
-    for (const kind of ['model', 'mcp', 'agent', 'skill', 'session', 'setting']) {
+    for (const kind of ['model', 'mcp', 'agent', 'skill', 'session', 'plugin_manager']) {
       expect(getVdfsIcon(kind)).toBeTruthy()
     }
   })
@@ -32,11 +32,11 @@ describe('registerVdfsIcon / getVdfsIcon', () => {
 })
 
 describe('getVdfsIconFor（项级图标分发）', () => {
-  it('设置清单的项级图标齐备（自有分区 + 各插件配置目录）', () => {
-    // 设置清单 = 自有分区（appearance / about）+ 各插件交出来的配置条目；
+  it('插件管理清单的项级图标齐备（自有分区 + 各插件配置目录）', () => {
+    // 清单 = 自有分区（appearance / about）+ 各插件的条目；
     // 条目的项级标识就是**插件目录名**（VdfsWorkbench 的 iconOf 缺省回落节点名）。
     for (const ext of ['appearance', 'about', 'session', 'local', 'web', 'gateway', 'telegram']) {
-      expect(getVdfsIconFor({ kind: 'setting', config_type: ext })).toBeTruthy()
+      expect(getVdfsIconFor({ kind: 'plugin_manager', config_type: ext })).toBeTruthy()
     }
   })
 

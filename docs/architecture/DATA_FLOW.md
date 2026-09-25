@@ -35,7 +35,7 @@ sequenceDiagram
 | 4 | 核心库入口 | `symbio/src/lib.rs` → `Routeable::route` | `self.plugins.route(&request)` |
 | 5 | 根组装 | `symbio/src/init.rs` → `create_root_plugin` | 根插件为 `home` |
 | 6 | home 分发 | `symbio/src/plugins/home/plugin.rs` | 根插件 `home`：自身终结 `home/*`、`work/*`，其余转发 `worker` |
-| 7 | composite 分发 | `symbio/src/plugins/composite/` | `worker`（Composite）**扫描自己的目录**（其下一层目录即一个插件，每个一个 `PLUGIN.yml`）挂载**全部**子插件：`agent` / `session` / `model` / `local` / `web` / `skill` / `mcp` / `telegram` / `gateway` / `setting` / `hook` / `event_bus`；清单由构造者经 `REQUIRED_PLUGINS` 传入，容器不内置 |
+| 7 | composite 分发 | `symbio/src/plugins/composite/` | `worker`（Composite）**扫描自己的目录**（其下一层目录即一个插件，每个一个 `PLUGIN.yml`）挂载**全部**子插件：`agent` / `session` / `model` / `local` / `web` / `skill` / `mcp` / `telegram` / `gateway` / `plugin_manager` / `hook` / `event_bus`；清单由构造者经 `REQUIRED_PLUGINS` 传入，容器不内置 |
 | 8 | 插件处理 | 各插件 `plugin.rs` 的 `route()` | 路径清单见 [ROUTES.md](../reference/ROUTES.md) |
 | 9 | 错误返回 | `symbio_core/error.rs` | 错误码对照 [ERROR_CODES.md](../reference/ERROR_CODES.md) |
 
@@ -106,7 +106,7 @@ sequenceDiagram
 | 外部 HTTP 调用失败 | 链路三 #1/#2（health → 鉴权） |
 | 资源增删查异常 | 通用：资源访问链路（`vdfs/*`）#2/#3/#4 + [design/vdfs.md](../design/vdfs.md) §13.4 + `symbio/src/providers/vdfs_service/` |
 | 错误码含义 | [ERROR_CODES.md]（源：`symbio_core/error.rs`） |
-| 配置不生效 | [CONFIGURATION.md] + `setting` 插件（`<根>/setting` 的 `vdfs/list` / `vdfs/read`） |
+| 配置不生效 | [CONFIGURATION.md] + `plugin_manager` 插件（`<根>/plugin_manager` 的 `vdfs/list` / `vdfs/read`） |
 
 ---
 

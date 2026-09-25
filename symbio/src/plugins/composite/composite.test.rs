@@ -4,7 +4,9 @@
 
 use super::*;
 
-use std::sync::Mutex;
+use crate::symbio_core::SimpleRequest;
+use std::collections::HashMap;
+use std::sync::{Mutex, RwLock};
 
 ///  在本作用域是泛型别名，测试里的 trait impl 需要具体化
 type InvokeResponse = crate::symbio_core::InvokeResponse<PluginPayload>;
@@ -65,6 +67,7 @@ impl Plugin for Probe {
     }
 }
 
+/// 实例表：容器与它的 VDFS 视图共用同一份（唯一持有者是 `PluginRegistry`）
 fn plugin_map(
     entries: Vec<(&str, Arc<dyn Plugin>)>,
 ) -> Arc<RwLock<HashMap<String, Arc<dyn Plugin>>>> {
@@ -76,12 +79,15 @@ fn plugin_map(
     ))
 }
 
+/// 造一个容器：与装配期**同一条路**——实例表进注册表，容器与它的 VDFS 因此共用
+/// 同一份（不再有「容器一份、视图另一份」的构造方式）
 fn composite_of(entries: Vec<(&str, Arc<dyn Plugin>)>) -> Arc<Composite> {
-    Arc::new(Composite {
-        instances: plugin_map(entries),
-        envs: HashMap::new(),
-        vdfs: Arc::new(CompositeVdfs::new(plugin_map(Vec::new()))),
-    })
+    let registry = Arc::new(PluginRegistry::with_instances(
+        plugin_map(entries),
+        crate::symbio_core::plugins_root(),
+        Vec::new(),
+    ));
+    Arc::new(Composite::with_registry(registry))
 }
 
 fn host() -> Arc<dyn InvokeRequest> {

@@ -32,7 +32,7 @@ pub mod vdfs_provider;
 pub use capability_error::{
     init_error_bucket, report_error, take_errors, CapabilityError, CAPABILITY_ERRORS,
 };
-pub use creator::{create_object, has_creator};
+pub use creator::{create_object, creator_ids, has_creator};
 pub use memory::{render_segment, InjectedMemory, MemoryFile, NodeSpec, SegmentSpec, AGENTS_FILE};
 pub use model_provider::{FinishReason, ModelProvider, ProtocolEvent, Usage};
 pub use option::{
@@ -62,8 +62,8 @@ pub use logger::*;
 pub use paths::*;
 pub use plugin::*;
 pub use plugin_dir::{
-    config_file_of, dir_from_ctx, dir_of, plugins_root, ConfigFile, PluginDir, KEY_NAME,
-    KEY_PROVIDER, PLUGIN_FILE,
+    config_file_of, dir_from_ctx, dir_of, plugins_root, ConfigFile, PluginDir, PluginEntry,
+    KEY_CAN_DISABLE, KEY_ENABLED, KEY_NAME, KEY_PROVIDER, KEY_REQUIRED, KEY_VERSION, PLUGIN_FILE,
 };
 pub use sse::{PartialLineExtractor, SseLineParser};
 pub use text::{floor_char_boundary, truncate_bytes};

@@ -24,7 +24,7 @@
 //! （§3.2 第 2 条）——这正是 v1 的失败之处：那时宿主为 agent 目录再写一遍技能与 MCP
 //! 的解析，两条链长期不同步。v2 的子树因此挂**与父 Agent 同构的默认插件集**（见
 //! [`crate::symbio_core::SUB_AGENT_PLUGINS`]）：仅去掉系统级单槽 `vdfs`（VDFS 根归
-//! 系统 Agent 独占），其余（含 `agent` 自身、`model`、`setting`、`work`）全部与
+//! 系统 Agent 独占），其余（含 `agent` 自身、`model`、`plugin_manager`、`work`）全部与
 //! 父树一致——UI 资源入口因此对齐。`model` 在子树里有实例：子智能体有自己的模型
 //! 服务（子树会话以子容器为 parent 收集，自行解析）；父会话收集期该注册才被
 //! `SubAgentVisitor` 丢弃（单槽防劫持）。

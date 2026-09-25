@@ -46,7 +46,7 @@
               └───────┬───────┘   └───────────────────┘
                       │ register_vdfs_provider(插件名, provider)   ← LLM 链路（CapabilityVisitor）
       ┌───────────────┬─────────────┼─────────────┬───────────────┐
- setting provider  session provider  model provider   …（各模块自持）
+ plugin_manager provider  session provider  model provider   …（各模块自持）
 ```
 > 上图只画了 **LLM 链路**的注册关系。系统链路（前端 / 子智能体挂载点穿越）**不经**
 > 此广播：拿到父插件（`Arc<dyn Plugin>`）后直接调 `get_vfs_provider()` 取根，详见 §6.4。
@@ -130,7 +130,7 @@ trait 上收拢全部操作（列 / 读 / 写 / 删 / 建 / 移 / 订阅），�
 
 ### 2.3 实现方为什么依赖 core 而不是插件
 
-实现方（如 `setting` 插件）是**插件**而非宿主本身，它需要两件宿主能力：
+实现方（如 `plugin_manager` 插件）是**插件**而非宿主本身，它需要两件宿主能力：
 从 `VdfsContext` 取回宿主句柄、把下游 `PluginError` 翻回 `VdfsError`。
 这两件事放在 `symbio_core::vdfs::host`（桥层），使实现方**只依赖 core**，
 不去依赖 `plugins/vdfs`——否则插件之间就产生了横向依赖。访问层（`dispatch`）
@@ -509,7 +509,7 @@ LLM 链路：插件在 `traverse` 的 `TRAVERSE_AVAILABLE_TOOLS` 分支里，**�
 if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
     // 工具…
     let me: Arc<dyn VdfsProvider> = self.clone();
-    visitor.register_vdfs_provider(PLUGIN_SETTING, me).await;   // 插件名即子目录名
+    visitor.register_vdfs_provider(PLUGIN_MANAGER, me).await;   // 插件名即子目录名
 }
 ```
 
@@ -892,9 +892,9 @@ for (name, child) in children {
 
 ## 13. 范例（实例，非机制组成部分）
 
-### 13.1 设置（setting）——自有分区 + 插件配置清单
+### 13.1 设置（plugin_manager）——自有分区 + 插件配置清单
 
-- 注册名 = 插件名 `PLUGIN_SETTING`（= `<根>/setting` 子目录）；`root_access = l`
+- 注册名 = 插件名 `PLUGIN_MANAGER`（= `<根>/plugin_manager` 子目录）；`root_access = l`
   （清单固定，每一项是叶子文档，不可 `t`）。provider 自身不含位置概念。
 - 本插件是**无状态 provider**：`SETTING_SECTIONS` 只登记 `appearance` / `about`
   两个**前端状态自持**的分区（主题、版本信息等数据不在后端），`route` 恒
@@ -903,12 +903,12 @@ for (name, child) in children {
   `read` / `write` 对它们恒 `Forbidden`——数据在前端 store。
 - 清单 = **各插件自己交出来的配置条目** + 自有分区。顺序上配置在前、`appearance` /
   `about` 垫后：前者是用户在设置页里真正要动手的东西，后者是应用自身的展示项。
-  条目的 `kind = setting`、`name` = 插件目录名（前端图标键 `setting:<目录名>`）、
+  条目的 `kind = plugin_manager`、`name` = 插件目录名（前端图标键 `plugin_manager:<目录名>`）、
   `path` = 该插件配置文档的**真实地址**（`<插件目录>/PLUGIN.yml`）。所以设置页只是
   「指路」：点开读写的还是拥有者那份文件，本插件不代理读写、也不复制配置。
 - 各插件的配置归各插件自己的目录（§3.4），如
   `<根>/session/PLUGIN.yml`、`<根>/local/PLUGIN.yml`；本插件只列条目、不代存，
-  **不存在** `setting/config/get` / `setting/config/set` 这类代理路由——
+  **不存在** `plugin_manager/config/get` / `plugin_manager/config/set` 这类代理路由——
   代理正是「同一份配置有两个地址」的根源。
 
 **可配置收集通道**（第三条收集通道，与能力 / 选项并列，见 §10.1）：插件在
@@ -1004,7 +1004,7 @@ ctx**，同一次请求里稍后被委派的 provider（即本插件）据此读
 ### 13.4 会话 / 模型 / 技能 / MCP / 智能体——各插件直连 `VdfsProvider`
 
 - **每个资源插件自己就是 provider**：`session` / `model` / `skill` / `mcp` /
-  `agent` / `setting` 各自有一份 `impl VdfsProvider`，注册名 = 插件名。
+  `agent` / `plugin_manager` 各自有一份 `impl VdfsProvider`，注册名 = 插件名。
   中间**没有** trait 与适配器：`EntityProvider` / `EntityVdfsAdapter` 这类中间层、
   `providers/storage_service` 与 `symbio_core::entities` 那组存储原语都**不存在**
   （为什么直接收敛到 `VdfsProvider`，见 [DECISIONS](../DECISIONS.md) ADR-010 与 ADR-011）。
@@ -1035,7 +1035,7 @@ ctx**，同一次请求里稍后被委派的 provider（即本插件）据此读
   其根 `agent/<id>` 是一个**挂载点**：钻进它即委托给子 composite 的 `CompositeVfs`
   （与系统根分形同构），内部资源**递归**寻址为 `agent/<id>/<子目录>/<相对路径>`，
   子目录名 = 子 composite 实例表的挂载名（即插件名，如 `skill` / `mcp` / `session` /
-  `model` / `setting` / …），可见性由子 composite 按 `PluginMeta::hidden` 统一决定。
+  `model` / `plugin_manager` / …），可见性由子 composite 按 `PluginMeta::hidden` 统一决定。
 - **变更广播按类型全局持有**：`vdfs::host::notify_change` / `watch_changes` /
   `unwatch_changes`。落盘的写 / 删（`vdfs_service` 三实现内部）与目录自管型 provider
   都调 `notify_change`，使订阅方无需轮询；按 `kind` 而非 provider 实例持有，是因为

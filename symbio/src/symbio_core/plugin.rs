@@ -330,7 +330,7 @@ pub trait Plugin: Send + Sync + 'static {
     ///
     /// 默认 `None`：大多数插件不暴露 VDFS。容器（`Composite`）返回自己的
     /// `CompositeVdfs`；自身即 provider 的插件（session / model / mcp / skill /
-    /// setting / agent / …）返回 `self`（或插件内聚的 provider 句柄）。
+    /// plugin_manager / agent / …）返回 `self`（或插件内聚的 provider 句柄）。
     ///
     /// ⚠️ 这是 core 查询接口（`Plugin` trait），不引入任何插件间类型耦合——
     /// 调用方只依赖 `Arc<dyn Plugin>`，绝不依赖某个具体插件类型。

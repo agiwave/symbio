@@ -1,4 +1,4 @@
-//! Home 插件 - 根插件，持有并调度所有顶级子插件 (work, agent, setting 等)
+//! Home 插件 - 根插件，持有并调度所有顶级子插件 (work, agent, plugin_manager 等)
 //!
 //! 采用分形路由架构：
 //! - 负责绝对路径路由的终结处理

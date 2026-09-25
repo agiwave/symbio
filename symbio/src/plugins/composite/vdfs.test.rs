@@ -8,6 +8,8 @@ use crate::symbio_core::vdfs::vdfs_context;
 use crate::symbio_core::{
     InvokeRequest, PluginError, PluginPayload, SimpleRequest, CAPABILITY_VISITOR,
 };
+use std::path::PathBuf;
+use std::sync::RwLock;
 
 /// 只暴露一个 `a.txt` 的 provider；目录名 / 顺序 / 隐藏由**假插件的 meta** 决定
 struct LeafProvider;
@@ -117,19 +119,32 @@ impl Plugin for ProviderChild {
     }
 }
 
+/// 由实例表造一个容器视图——与装配期同形：`PluginRegistry` 持有实例表，
+/// 视图只读它（视图本身没有状态）。
+///
+/// 插件根用**真实缺省根**：这些测试不碰目录（`children_of` 只读实例表），
+/// 用不着为了造一棵假的目录树而引入临时目录。
+fn container_map(map: HashMap<String, Arc<dyn Plugin>>) -> CompositeVdfs {
+    CompositeVdfs::new(Arc::new(PluginRegistry::with_instances(
+        Arc::new(RwLock::new(map)),
+        crate::symbio_core::plugins_root(),
+        Vec::new(),
+    )))
+}
+
 fn container(children: Vec<FakeChild>) -> CompositeVdfs {
     let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
     for c in children {
         map.insert(c.dir.to_string(), Arc::new(c));
     }
-    CompositeVdfs::new(Arc::new(RwLock::new(map)))
+    container_map(map)
 }
 
 /// 只含一个子插件的容器，子插件把 `provider` 暴露在 `dir` 下
 fn container_of(dir: &'static str, provider: Arc<dyn VdfsProvider>) -> CompositeVdfs {
     let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
     map.insert(dir.to_string(), Arc::new(ProviderChild { dir, provider }));
-    CompositeVdfs::new(Arc::new(RwLock::new(map)))
+    container_map(map)
 }
 
 fn host_ctx() -> VdfsContext {
@@ -331,7 +346,7 @@ async fn hidden_children_from_any_provider_are_filtered() {
 
     let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
     map.insert("mixed".to_string(), Arc::new(MixedChild));
-    let vdfs = CompositeVdfs::new(Arc::new(RwLock::new(map)));
+    let vdfs = container_map(map);
     let VdfsResponse::List(items) = vdfs
         .dispatch(
             &host_ctx(),
@@ -406,7 +421,7 @@ async fn distinct_mount_names_each_get_a_dir() {
             hidden: false,
         }),
     );
-    let vdfs = CompositeVdfs::new(Arc::new(RwLock::new(map)));
+    let vdfs = container_map(map);
     let ctx = host_ctx();
 
     let dirs = vdfs.children_of(&ctx).await.unwrap();
@@ -504,12 +519,15 @@ async fn empty_container_is_an_empty_vfs() {
     assert!(n.name.is_empty(), "容器不知道自己的挂载名");
 }
 
-/// 自身目录与子目录的守卫：不可读 / 删 / 移，mkdir 报已存在
+/// 自身目录与子目录的守卫：不可读 / 移，mkdir 报已存在
 ///
 /// ⚠️ **写不在此列**：写子目录根 = 写在**挂载点目录自身**上，那是「新建」的
 /// 机制形态（使用方只说建在哪个目录，不说叫什么）。容器**不做类型特判**，
 /// 一律转发给子插件判定——这里 `LeafProvider` 没实现 `write`，
 /// 所以落到 `NotImplemented`，而不是容器自己抛 `Forbidden`。
+///
+/// ⚠️ **删也不在此列**：「删掉这个目录」与「卸载这个插件」是同一件事，容器把它
+/// 转给注册表执行（见 [`deleting_child_dir_root_uninstalls_the_plugin`]）。
 #[tokio::test]
 async fn guards_self_and_child_dir_roots() {
     let vdfs = container(vec![FakeChild {
@@ -540,12 +558,6 @@ async fn guards_self_and_child_dir_roots() {
         "容器不替子插件判「目录自身能不能写」，只转发"
     );
     assert!(matches!(
-        vdfs.dispatch(&ctx, "alpha", VdfsRequest::Delete { recursive: true })
-            .await
-            .unwrap_err(),
-        VdfsError::Forbidden(_)
-    ));
-    assert!(matches!(
         vdfs.dispatch(&ctx, "alpha", VdfsRequest::Mkdir)
             .await
             .unwrap_err(),
@@ -558,6 +570,58 @@ async fn guards_self_and_child_dir_roots() {
             .unwrap_err(),
         VdfsError::Invalid(_)
     ));
+}
+
+// ==================== 子目录根的删除 = 卸载 ====================
+
+/// 一次性临时插件根（目录名带进程号，避免并行测试互相踩）
+fn temp_root(tag: &str) -> PathBuf {
+    let p = std::env::temp_dir().join(format!("symbio-composite-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&p);
+    std::fs::create_dir_all(&p).unwrap();
+    p
+}
+
+/// 删子目录根 = **卸载**：容器不再自己拦，而是转给注册表——插件目录随之消失。
+///
+/// 判据是「插件目录存在与否」而不是「资源树里有没有它」（见 `registry.rs`）：
+/// 所以 `recursive` 不参与判定，卸载本就是整棵子树的事。
+#[tokio::test]
+async fn deleting_child_dir_root_uninstalls_the_plugin() {
+    let root = temp_root("uninstall");
+    std::fs::create_dir_all(root.join("alpha")).unwrap();
+    std::fs::write(
+        root.join("alpha").join(crate::symbio_core::PLUGIN_FILE),
+        r#"{"plugin_provider": "alpha"}"#,
+    )
+    .unwrap();
+
+    let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
+    map.insert(
+        "alpha".to_string(),
+        Arc::new(FakeChild {
+            dir: "alpha",
+            label: "甲",
+            order: 1,
+            hidden: false,
+        }),
+    );
+    let vdfs = CompositeVdfs::new(Arc::new(PluginRegistry::with_instances(
+        Arc::new(RwLock::new(map)),
+        root.clone(),
+        Vec::new(),
+    )));
+
+    vdfs.dispatch(
+        &host_ctx(),
+        "alpha",
+        VdfsRequest::Delete { recursive: false },
+    )
+    .await
+    .unwrap();
+    assert!(!root.join("alpha").exists(), "卸载 = 删掉插件目录");
+
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 /// 写在挂载点目录自身：`rel` 原样（空串）转发；回执里只有**名字**，没有地址
@@ -750,7 +814,7 @@ async fn sub_provider_fetched_via_trait_method() {
             provider: Arc::new(EchoProvider { label: "outer" }),
         }),
     );
-    let vdfs = CompositeVdfs::new(Arc::new(RwLock::new(map)));
+    let vdfs = container_map(map);
     let ctx = host_ctx();
 
     // `get_vfs_provider` 直接给出 provider；`children_of` 用挂载名 "agent" 作目录名

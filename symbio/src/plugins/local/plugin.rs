@@ -23,7 +23,7 @@ use tokio::sync::RwLock;
 /// 本地工具配置的定义 —— **定义由配置的拥有者产出**。
 ///
 /// 字段真源即 [`LocalConfig`]：默认值从 `Default` 读出，不写第二份字面量
-/// （历史上定义寄居在 setting 插件里，schema 与 serde 各写一份默认值，
+/// （历史上定义寄居在 plugin_manager 插件里，schema 与 serde 各写一份默认值，
 /// 出现过面板显示值与实际行为不符的漂移）。
 fn config_definition() -> DetailDefinition {
     let d = LocalConfig::default();

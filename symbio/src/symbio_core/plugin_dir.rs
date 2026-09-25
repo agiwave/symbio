@@ -105,6 +105,44 @@ pub const PLUGIN_FILE: &str = "PLUGIN.yml";
 pub const KEY_PROVIDER: &str = "plugin_provider";
 /// 身份字段：实例名（缺省 = 目录名）
 pub const KEY_NAME: &str = "plugin_name";
+/// **装配位**：`false` = 停用（缺省 / 键不存在 = 启用）
+///
+/// 与 [`KEY_PROVIDER`] / [`KEY_NAME`] 同类——它不是插件自己的配置，而是
+/// **装配方对这个插件的状态**：停用的插件连同它的配置与数据一起留在插件根里，
+/// 只是容器不再构造它（因而它不启动任何后台行为，也不出现在资源树与能力集合里）。
+///
+/// ## 为什么是 `PLUGIN.yml` 里的一个保留键
+///
+/// 「一个插件 = 一个目录」，目录可以被整体搬走；装配位若另立一个文件，那个
+/// 不变量就变成「一个插件 = 一个目录 + 一个别处的标记」。写进同一份 manifest，
+/// 则搬走目录 = 连它的启停状态一起搬走。
+///
+/// ## 为什么默认是「启用」
+///
+/// 键**不存在**即启用。于是：新装 / 手写 / 从旧版本迁移来的插件天然可用，
+/// 而「停用」是一个**显式**动作。反过来（缺省停用）会让每一个新插件都先隐形。
+pub const KEY_ENABLED: &str = "plugin_enabled";
+
+// ==================== 装配态在**配置表单模型**里的投影键 ====================
+//
+// 插件管理插件的条目表单，其模型就是那个插件的配置（`vdfs/read` 的结果）。但条目上
+// 的按钮（启用 / 停用 / 卸载）要按**装配态**显隐，而 `DetailAction.when` 只能对表单
+// 模型求值（见 `schemas/detail.rs`）——于是装配态得一并放进那份模型。
+//
+// 三个键与身份字段同前缀（`plugin_`）：它们在 `PLUGIN.yml` 里同样是**保留键**
+// （插件配置不得占用），而表单保存时只回传**定义声明过的字段**（见前端
+// `DetailForm.buildValues`），因此注入它们既不会显示成字段，也不会写进配置文件。
+//
+// 键名与它投影的来源**逐字对应**，改一处就能顺着找到另一处：
+// `plugin_version` ← `PluginEntry::version`、`plugin_required` ← `PluginEntry::required`、
+// `plugin_can_disable` ← `UNDISABLABLE_PLUGINS` 的补集。
+
+/// 投影键：版本（`PluginEntry::version`；插件未被构造时为空串）
+pub const KEY_VERSION: &str = "plugin_version";
+/// 投影键：构造者是否声明为必需（`PluginEntry::required`）——必需即**不可删除**
+pub const KEY_REQUIRED: &str = "plugin_required";
+/// 投影键：是否允许停用（= 不在 [`crate::symbio_core::UNDISABLABLE_PLUGINS`] 里）
+pub const KEY_CAN_DISABLE: &str = "plugin_can_disable";
 
 /// 插件根 = **系统根本身**：一层目录 = 一个插件
 ///
@@ -231,13 +269,15 @@ impl PluginDir {
 
     /// 读插件配置；文件不存在 → `None`
     ///
-    /// 身份字段被剥离后再反序列化——它们属于「这是哪个插件」，不属于配置。
+    /// 身份字段与装配位被剥离后再反序列化——它们属于「这是哪个插件、它开没开」，
+    /// 不属于配置。
     pub fn load<C: DeserializeOwned>(&self) -> Result<Option<C>, String> {
         let Some(mut map) = self.read_manifest()? else {
             return Ok(None);
         };
         map.remove(KEY_PROVIDER);
         map.remove(KEY_NAME);
+        map.remove(KEY_ENABLED);
         serde_json::from_value(Value::Object(map))
             .map(Some)
             .map_err(|e| {
@@ -248,12 +288,48 @@ impl PluginDir {
             })
     }
 
+    // ==================== 装配位 ====================
+
+    /// 本插件是否启用（见 [`KEY_ENABLED`]）。
+    ///
+    /// 文件缺失 / 不可读 / 不可解析一律按**启用**处理：「读不出来」不该把一个插件
+    /// 静默停掉——那是装配期告警的职责，不是本判据的（否则一次磁盘故障会让整棵树
+    /// 的插件集体隐形，而日志里只有解析错误）。
+    pub fn enabled(&self) -> bool {
+        match self.read_manifest() {
+            Ok(Some(map)) => !matches!(map.get(KEY_ENABLED), Some(Value::Bool(false))),
+            _ => true,
+        }
+    }
+
+    /// 写装配位：`true` = 启用（摘掉键，保持文件干净）；`false` = 停用。
+    ///
+    /// 只动这一个键，其余内容原样保留——身份字段恒在（手写的 manifest 可能漏了它们）。
+    pub fn set_enabled(&self, enabled: bool) -> Result<(), String> {
+        let mut map = self.read_manifest()?.unwrap_or_default();
+        if enabled {
+            map.remove(KEY_ENABLED);
+        } else {
+            map.insert(KEY_ENABLED.to_string(), Value::Bool(false));
+        }
+        map.insert(
+            KEY_PROVIDER.to_string(),
+            Value::String(self.provider.clone()),
+        );
+        map.insert(KEY_NAME.to_string(), Value::String(self.name.clone()));
+        self.write_map(&map)
+    }
+
     // ==================== 写 ====================
 
     /// 原子写插件配置（身份字段自动补回）
     ///
     /// 同步实现：配置文件只有几百字节，且 `composite::build` 本身在同步上下文里
     /// 补默认配置——一处实现能同时服务装配期与运行期，不值得为此分两份。
+    ///
+    /// **装配位随写保留**：`plugin_enabled` 是保留键（见 [`KEY_ENABLED`]），
+    /// 插件写自己的配置时不得把它冲掉——否则「在设置页里保存一次配置」就等于
+    /// 悄悄把停用的插件启用了（或反之）。故写入前先读一次旧 manifest 取回它。
     pub fn save<C: Serialize>(&self, value: &C) -> Result<(), String> {
         let mut map =
             match serde_json::to_value(value).map_err(|e| format!("配置序列化失败：{e}"))? {
@@ -267,6 +343,11 @@ impl PluginDir {
             Value::String(self.provider.clone()),
         );
         map.insert(KEY_NAME.to_string(), Value::String(self.name.clone()));
+        if let Ok(Some(existing)) = self.read_manifest() {
+            if let Some(flag) = existing.get(KEY_ENABLED) {
+                map.insert(KEY_ENABLED.to_string(), flag.clone());
+            }
+        }
         self.write_map(&map)
     }
 
@@ -325,6 +406,56 @@ impl PluginDir {
         std::fs::write(&tmp, text).map_err(|e| format!("写入 {} 失败：{e}", tmp.display()))?;
         std::fs::rename(&tmp, &path).map_err(|e| format!("落盘 {} 失败：{e}", path.display()))
     }
+}
+
+// ==================== 插件注册表条目 ====================
+
+/// 插件注册表里的一条 —— **一个插件目录的观测结果**。
+///
+/// 由装配方（容器）产出：它扫插件根、读每个目录的 `PLUGIN.yml`、与自己的实例表
+/// 对照，得到「这个智能体由哪些插件组成、各自什么状态」。消费方（插件管理插件）
+/// 只读它、不自己扫目录——「有哪些插件」的判据（合格性 / 必需 / 启用）只有一份实现。
+///
+/// ## 为什么标题可能是空的
+///
+/// `title` / `description` / `version` 来自插件的 [`PluginMeta`]（`Plugin::meta()`），
+/// 而那是**构造物**：只有被构造出来的插件才答得上来。停用的插件**刻意不被构造**
+/// （见 [`KEY_ENABLED`]——它不该启动任何后台行为），因此这几个字段在那种情形下为空，
+/// 消费方按目录名兜底。
+///
+/// [`PluginMeta`]: crate::symbio_core::PluginMeta
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PluginEntry {
+    /// 插件名 = 目录名 = 挂载名（路由前缀）
+    pub name: String,
+    /// 工厂 id（`PLUGIN.yml` 的 `plugin_provider`）
+    pub provider: String,
+    /// 展示标题（来自 `PluginMeta`；未构造时为空串，消费方按 `name` 兜底）
+    #[serde(default)]
+    pub title: String,
+    /// 语义描述（同上，可为空）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// 版本（同上，可为空）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// 导航排序（来自 `PluginMeta`；未构造时用缺省值，与 `PluginMeta` 同一口径）
+    #[serde(default = "default_entry_order")]
+    pub order: i32,
+    /// 构造者声明为必需（**不可删除**，但可停用）
+    pub required: bool,
+    /// 装配位（见 [`KEY_ENABLED`]）
+    pub enabled: bool,
+    /// 是否已挂载（= `enabled` 且构造成功）
+    pub mounted: bool,
+}
+
+/// 与 [`crate::symbio_core::PluginMeta`] 的缺省 `order` **同一口径**（未构造的插件没有 meta）
+///
+/// 直接取 `PluginMeta::default().order` 而不是另写一个字面量：这两个数必须相等，
+/// 而「必须相等」的两个字面量迟早会不等。
+fn default_entry_order() -> i32 {
+    crate::symbio_core::PluginMeta::default().order
 }
 
 // ==================== 配置文件的 VDFS 呈现 ====================

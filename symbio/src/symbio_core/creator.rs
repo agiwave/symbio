@@ -79,6 +79,23 @@ impl ObjectCreatorRegistry {
     fn has(&self, id: &str) -> bool {
         self.entries.get().is_some_and(|m| m.contains_key(id))
     }
+
+    /// 指定 trait 的全部已注册 id（`type_id` 相符者；顺序不保证）
+    fn ids_of<T>(&self) -> Vec<&'static str>
+    where
+        T: ?Sized + Any + Send + Sync + 'static,
+    {
+        let want = TypeId::of::<T>();
+        self.entries
+            .get()
+            .map(|m| {
+                m.iter()
+                    .filter(|(_, e)| e.type_id == want)
+                    .map(|(id, _)| *id)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
 }
 
 // ============ 公共 API ============
@@ -105,6 +122,22 @@ where
 /// 判断指定 id 是否已注册构造函数
 pub fn has_creator(id: &str) -> bool {
     ObjectCreatorRegistry::global().has(id)
+}
+
+/// 指定 trait 的**全部已注册工厂 id**（顺序不保证，调用方需要稳定顺序时自行排序）。
+///
+/// 用途：「这个构建里能装哪些插件」——插件工厂全在编译期注册（[`submit_object_creator!`]），
+/// 运行时无法加载新代码，因此「安装一个插件」的可行语义只能是「为某个**已注册**的
+/// 工厂建出它的插件目录」。本函数是那份候选清单的唯一来源。
+///
+/// ⚠️ 按 `T` 过滤是必须的：注册表里同时住着插件工厂（`dyn Plugin`）、模型协议
+/// （`dyn ModelProtocol`）、嵌入服务（`dyn EmbeddingService`）……不滤型就会把
+/// 「OpenAI 协议」也列成可安装的插件。
+pub fn creator_ids<T>() -> Vec<&'static str>
+where
+    T: ?Sized + Any + Send + Sync + 'static,
+{
+    ObjectCreatorRegistry::global().ids_of::<T>()
 }
 
 /// 通用对象创建器注册宏

@@ -178,7 +178,7 @@ pub const REQUIRED_PLUGINS: RequiredPluginsKey = RequiredPluginsKey;
 /// 子 Agent 子树复用 [`SUB_AGENT_PLUGINS`]（本清单只多一个系统级单槽 `vdfs`）。
 /// 两处都集中在 `symbio_core`，改一处即父子一致，杜绝「两套清单」漂移。
 pub const SYSTEM_AGENT_PLUGINS: &[&str] = &[
-    "setting",
+    "plugin_manager",
     "event_bus",
     "model",
     "session",
@@ -214,7 +214,7 @@ pub const SYSTEM_AGENT_PLUGINS: &[&str] = &[
 ///   注册进**该次收集自己的**管理器，因此子会话用子智能体自己解析的模型。
 ///   父（系统）会话收集期，子树的 `model` 注册才经 `SubAgentVisitor` **丢弃**
 ///   （单槽，防子树模型劫持父会话——见 scope 模块文档）。
-/// - 其余插件（含 `agent` 自身、`setting`、`work`）都在列：子树因此与父树**结构相同**，
+/// - 其余插件（含 `agent` 自身、`plugin_manager`、`work`）都在列：子树因此与父树**结构相同**，
 ///   前端看到的资源入口（含设置入口）与父 Agent 对齐。
 ///
 /// ## 分形：任意层级复用同一常量
@@ -225,20 +225,35 @@ pub const SYSTEM_AGENT_PLUGINS: &[&str] = &[
 /// 都走同一条机制，且都同样只跳过 `vdfs` 单槽（单槽归系统 Agent，由
 /// `SubAgentVisitor` 在每一层丢弃）。
 pub const SUB_AGENT_PLUGINS: &[&str] = &[
-    "setting",   // 设置入口（子 Agent 页同样需要）
-    "event_bus", // 事件总线
-    "session",   // 会话
-    "model",     // 模型服务（子智能体自己的模型；子树会话自行解析）
-    "local",     // 本地文件
-    "web",       // 网络访问
-    "mcp",       // 工具
-    "telegram",  // 消息渠道
-    "hook",      // 钩子
-    "agent",     // 智能体（含子子 Agent —— 分形）
-    "skill",     // 技能
-    "gateway",   // 外部 API 网关
-    "vdfs",      // VDFS 根（单槽归系统 Agent）
-    "work",      // 工作区记忆（WORKDIR 继承父会话，不再双重注入）
+    "plugin_manager", // 插件管理与配置入口（子 Agent 页同样需要）
+    "event_bus",      // 事件总线
+    "session",        // 会话
+    "model",          // 模型服务（子智能体自己的模型；子树会话自行解析）
+    "local",          // 本地文件
+    "web",            // 网络访问
+    "mcp",            // 工具
+    "telegram",       // 消息渠道
+    "hook",           // 钩子
+    "agent",          // 智能体（含子子 Agent —— 分形）
+    "skill",          // 技能
+    "gateway",        // 外部 API 网关
+    "vdfs",           // VDFS 根（单槽归系统 Agent）
+    "work",           // 工作区记忆（WORKDIR 继承父会话，不再双重注入）
+];
+
+/// **不可停用的插件** —— 它们是**界面自身的底座**，不是普通功能。
+///
+/// 停用一个普通插件（如 `telegram`）少的是一个功能；停用这里的任何一个，少的是
+/// **整个界面**：前端所有资源页都经 `vdfs` 取数，插件清单与启停按钮都长在
+/// `plugin_manager` 的页面上。于是用户会看到一个再也点不到「启用」的界面，
+/// 只能去磁盘上改 `PLUGIN.yml`——那不是权限设计，是自断其路。
+///
+/// 因此它是一条**机制级**判据（与 [`SYSTEM_AGENT_PLUGINS`] 同处）：装配方（容器）
+/// 在执行停用前查它，而不是让每个插件自己声明「我不能被关」。插件的启停状态是
+/// 装配方的事（见 [`crate::symbio_core::KEY_ENABLED`]），这条规则也该住在同一处。
+pub const UNDISABLABLE_PLUGINS: &[&str] = &[
+    crate::symbio_core::PLUGIN_MANAGER, // 插件管理入口：停用它就再也点不到「启用」
+    crate::symbio_core::PLUGIN_VDFS,    // 资源访问层：停用它整棵资源树都取不到
 ];
 
 pub struct CapabilityVisitorKey;

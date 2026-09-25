@@ -332,6 +332,38 @@ export const VDFS_ACTION_CLEAR = 'clear'
  * 两个不同的对象上，因此是两个动词、两个地址。
  */
 export const VDFS_ACTION_ABORT = 'abort'
+/**
+ * 已知动作标识：**列出插件注册表**（后端 `VDFS_ACTION_PLUGINS`）——容器根的
+ * 自持动词，回包 `data.plugins` 是全部插件的条目（含没有 VDFS 的与已停用的）。
+ *
+ * 它答的不是「这里有哪些资源」（那是 `List`），而是「这个智能体由哪些插件组成」：
+ * 两个视图成员集合不同，因此不共用动词（见后端 `composite/vdfs.rs` 的
+ * 「资源树与插件注册表」）。前端不直接用它——插件管理插件的清单由后端合成，
+ * 这里登记它只是让协议词保持一份镜像。
+ */
+export const VDFS_ACTION_PLUGINS = 'plugins'
+/**
+ * 已知动作标识：**启用**（后端 `VDFS_ACTION_ENABLE`）——把停用的插件恢复为已挂载。
+ *
+ * 作用于容器根下的插件目录，插件名走**载荷**（`VDFS_PLUGIN_NAME_FIELD`）而不是
+ * 路径：注册表动词作用在「注册表里的某一项」上，而那一项在资源树里可能根本没有
+ * 位置（停用的插件不在资源树里）。
+ */
+export const VDFS_ACTION_ENABLE = 'enable'
+/**
+ * 已知动作标识：**停用**（后端 `VDFS_ACTION_DISABLE`）——插件连同配置与数据留在
+ * 插件根，但不再挂载（与「卸载」的区别正是删不删那些东西）。
+ */
+export const VDFS_ACTION_DISABLE = 'disable'
+/** [`VDFS_ACTION_PLUGINS`] 回包 `data` 的字段名（后端 `VDFS_PLUGINS_FIELD`） */
+export const VDFS_PLUGINS_FIELD = 'plugins'
+/**
+ * 启停载荷里的字段名：**插件名**（后端 `VDFS_PLUGIN_NAME_FIELD`）。
+ *
+ * 与动作标识分开命名是因为它们是两件事：动作标识是「问什么」，字段名是
+ * 「答/带成什么形状」。
+ */
+export const VDFS_PLUGIN_NAME_FIELD = 'name'
 
 export interface VdfsListResponse {
   /** **本列表自身**的地址——唯一必须保留的地址字段：`vdfs/root` 的调用方无从知道根叫什么 */
