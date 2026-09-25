@@ -86,6 +86,7 @@
 
 | 模块 | 文档 | 一句话职责 |
 |------|------|-----------|
+| symbio_core | [symbio_core/README.md](../symbio/src/symbio_core/README.md) | 内核契约层：命名与结构规范 + 域清单（trait / 协议类型 / 词表 / 纯工具） |
 | session | [plugins/session/README.md](../symbio/src/plugins/session/README.md) | 会话编排唯一入口：工具循环、提示词组装、上下文压缩 |
 | model | [plugins/model/README.md](../symbio/src/plugins/model/README.md) | 无状态单轮 LLM 网关（execute_turn），多协议适配 |
 | agent | [plugins/agent/README.md](../symbio/src/plugins/agent/README.md) | 智能体域唯一所有者：agent 目录库、子树装配、两作用域 `AGENTS.md` |
