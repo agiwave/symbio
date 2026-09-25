@@ -141,22 +141,32 @@ const PROTOCOL_RS_SRC = [
   'pub const VDFS_LIST: &str = "vdfs/list";',
 ].join('\n')
 
-/** 后端 vdfs_provider（A 组的另一常量源 + D 组 9 对结构体的后端侧） */
-const VDFS_PROVIDER_RS_SRC = [
+/** 后端 vdfs 词表（A 组的另一常量源；词表常量住在 `vdfs/words.rs`） */
+const VDFS_WORDS_RS_SRC = [
   'pub const VDFS_KIND_MESSAGES: &str = "messages";',
   'pub const VDFS_EXT_SESSION: &str = "session";',
   'pub const VDFS_EXT_MESSAGE: &str = "message";',
-  '',
-  rsStruct('VdfsNode', 'path', 'name'),
-  rsStruct('VdfsItem', 'path'),
-  rsStruct('VdfsChange', 'path', 'change'),
-  rsStruct('VdfsAccess', 'read', 'write'),
-  rsStruct('VdfsContent', 'path', 'text'),
-  rsStruct('VdfsNewType', 'ext', 'title'),
-  rsStruct('VdfsWriteResponse', 'path', 'created'),
-  rsStruct('VdfsFieldError', 'field', 'message'),
-  rsStruct('VdfsValidationError', 'message', 'fields'),
 ].join('\n')
+
+/**
+ * 后端 vdfs 域类型（D 组 9 对结构体的后端侧）——拆分后分散在 `vdfs/` 各文件，
+ * 夹具按真实文件路径分发。
+ */
+const VDFS_TYPES_RS = {
+  'symbio/src/symbio_core/vdfs/access.rs': [rsStruct('VdfsAccess', 'read', 'write')].join('\n'),
+  'symbio/src/symbio_core/vdfs/node.rs': [
+    rsStruct('VdfsNode', 'path', 'name'),
+    rsStruct('VdfsItem', 'path'),
+    rsStruct('VdfsNewType', 'ext', 'title'),
+  ].join('\n'),
+  'symbio/src/symbio_core/vdfs/content.rs': [rsStruct('VdfsContent', 'path', 'text')].join('\n'),
+  'symbio/src/symbio_core/vdfs/error.rs': [
+    rsStruct('VdfsFieldError', 'field', 'message'),
+    rsStruct('VdfsValidationError', 'message', 'fields'),
+  ].join('\n'),
+  'symbio/src/symbio_core/vdfs/request.rs': [rsStruct('VdfsWriteResponse', 'path', 'created')].join('\n'),
+  'symbio/src/symbio_core/vdfs/change.rs': [rsStruct('VdfsChange', 'path', 'change')].join('\n'),
+}
 
 /** 前端 vdfs.ts：只放后端有对应协议词 / 字段的——多放一个就命中「未登记」检查 */
 const VDFS_TS_SRC = [
@@ -308,11 +318,12 @@ const SESSION_META_TS_SRC = [
 
 /** 全部一致且不含禁用常量时的最小仓库（相对仓库根的路径 → 内容） */
 const BASE = {
-  'symbio/src/symbio_core/vdfs_provider.rs': VDFS_PROVIDER_RS_SRC,
+  'symbio/src/symbio_core/vdfs/words.rs': VDFS_WORDS_RS_SRC,
+  ...VDFS_TYPES_RS,
   'symbio/src/plugins/vdfs/protocol.rs': PROTOCOL_RS_SRC,
   // E 组：这条跨栈导航头指向真实存在的 `tauri/src/schemas/vdfs.ts`
-  'symbio/src/symbio_core/event_bus.rs':
-    '// Corresponding Frontend: tauri/src/schemas/vdfs.ts\npub const KIND_VDFS: &str = "vdfs";\n',
+  'symbio/src/symbio_core/event_bus/mod.rs':
+    '// Corresponding Frontend: tauri/src/schemas/vdfs.ts\npub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
   'tauri/src/schemas/vdfs.ts': VDFS_TS_SRC,
   [CHAT_RS]: CHAT_RS_SRC,
   [CHAT_TS]: CHAT_TS_SRC,
@@ -379,7 +390,7 @@ test('真实仓库当前状态通过（防本守卫在真仓库上误报）', ()
 
 test('后端改了转写列表的 kind、前端没跟 → 变红', () => {
   const r = mirror({
-    'symbio/src/symbio_core/vdfs_provider.rs': [
+    'symbio/src/symbio_core/vdfs/words.rs': [
       'pub const VDFS_KIND_MESSAGES: &str = "transcript";',
       'pub const VDFS_EXT_SESSION: &str = "session";',
       'pub const VDFS_EXT_MESSAGE: &str = "message";',
@@ -392,7 +403,7 @@ test('后端改了转写列表的 kind、前端没跟 → 变红', () => {
 
 test('后端改了会话 ext、前端没跟 → 变红', () => {
   const r = mirror({
-    'symbio/src/symbio_core/vdfs_provider.rs': [
+    'symbio/src/symbio_core/vdfs/words.rs': [
       'pub const VDFS_KIND_MESSAGES: &str = "messages";',
       'pub const VDFS_EXT_SESSION: &str = "conversation";',
       'pub const VDFS_EXT_MESSAGE: &str = "message";',
@@ -444,7 +455,7 @@ test('前端把常量改成别名（不再是第二份真相）→ 不红', () =
 })
 
 test('后端常量源文件被删 → 变红（不是静默跳过）', () => {
-  const r = mirror({ 'symbio/src/symbio_core/vdfs_provider.rs': null })
+  const r = mirror({ 'symbio/src/symbio_core/vdfs/words.rs': null })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /后端常量源不存在/)
 })
@@ -590,7 +601,7 @@ test('词表数组被改名 → 变红（不是静默跳过）', () => {
 
 // ==================== D 组：结构体字段 ====================
 
-const VDFS_PROVIDER = 'symbio/src/symbio_core/vdfs_provider.rs'
+const VDFS_NODE_RS = 'symbio/src/symbio_core/vdfs/node.rs'
 
 test('后端结构体字段改名、前端没跟 → 变红', () => {
   const r = mirror({
@@ -654,7 +665,7 @@ test('#[serde(flatten)] 的字段名不出现在线格式里 → 前端持有它
 })
 
 test('#[serde(rename)] → 比对的是**线格式名**，不是 Rust 字段名', () => {
-  const renamed = VDFS_PROVIDER_RS_SRC.replace(
+  const renamed = VDFS_TYPES_RS[VDFS_NODE_RS].replace(
     rsStruct('VdfsNode', 'path', 'name'),
     [
       'pub struct VdfsNode {',
@@ -665,13 +676,13 @@ test('#[serde(rename)] → 比对的是**线格式名**，不是 Rust 字段名'
     ].join('\n'),
   )
   // 前端仍写 `name`，而后端线格式是 `n` ⇒ 红
-  const r = mirror({ [VDFS_PROVIDER]: renamed })
+  const r = mirror({ [VDFS_NODE_RS]: renamed })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /前端持有后端不存在的字段：name/)
 
   // 前端改用线格式名 ⇒ 不红
   const r2 = mirror({
-    [VDFS_PROVIDER]: renamed,
+    [VDFS_NODE_RS]: renamed,
     'tauri/src/schemas/vdfs.ts': VDFS_TS_SRC.replace(
       tsIface('VdfsNode', 'path', 'name'),
       tsIface('VdfsNode', 'path', 'n'),
@@ -750,8 +761,8 @@ test('详情方言取值原语：后端改了 `DETAIL_PICK_*` 的取值 → 变�
 
 test('跨栈导航头指向不存在的文件 → 变红（前端改名后这条头就悬空了）', () => {
   const r = mirror({
-    'symbio/src/symbio_core/event_bus.rs':
-      '// Corresponding Frontend: tauri/src/protocols/chat_input.ts\npub const KIND_VDFS: &str = "vdfs";\n',
+    'symbio/src/symbio_core/event_bus/mod.rs':
+      '// Corresponding Frontend: tauri/src/protocols/chat_input.ts\npub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
   })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /目标不存在/)
@@ -760,12 +771,12 @@ test('跨栈导航头指向不存在的文件 → 变红（前端改名后这条
 test('跨栈导航头指向真实文件 → 不红', () => {
   const r = mirror()
   assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /✓ symbio\/src\/symbio_core\/event_bus\.rs:1 → tauri\/src\/schemas\/vdfs\.ts/)
+  assert.match(r.stdout, /✓ symbio\/src\/symbio_core\/event_bus\/mod\.rs:1 → tauri\/src\/schemas\/vdfs\.ts/)
 })
 
 test('没有任何跨栈导航头 → 不红（没写不违规，写了假指针才违规）', () => {
   const r = mirror({
-    'symbio/src/symbio_core/event_bus.rs': 'pub const KIND_VDFS: &str = "vdfs";\n',
+    'symbio/src/symbio_core/event_bus/mod.rs': 'pub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
   })
   assert.equal(r.status, 0, r.stdout)
   assert.match(r.stdout, /E 组 0 条跨栈导航头/)

@@ -46,12 +46,12 @@ function audit(files, { strict = false } = {}) {
 
 /** `symbio_core` 的最小事实源：工厂 id、协议端点、路由常量 */
 const CORE = {
-  'symbio/src/symbio_core/ids.rs': `pub const PLUGIN_SESSION: &str = "session";\n`,
+  'symbio/src/symbio_core/keys/ids.rs': `pub const PLUGIN_SESSION: &str = "session";\n`,
   'symbio/src/symbio_core/mod.rs':
     `pub const TRAVERSE_AVAILABLE_TOOLS: &str = "available_tools";\n`,
-  'symbio/src/symbio_core/option.rs':
+  'symbio/src/symbio_core/capability/option.rs':
     `pub const TRAVERSE_AVAILABLE_OPTIONS: &str = "available_options";\n`,
-  'symbio/src/symbio_core/paths.rs': `pub const SESSION_CHAT_SEND: &str = "session/chat/send";\n`,
+  'symbio/src/symbio_core/keys/paths.rs': `pub const SESSION_CHAT_SEND: &str = "session/chat/send";\n`,
 }
 
 /** 一个干净的最小插件：两条静态路由臂 + 只认 `available_tools` 的 traverse */
@@ -64,7 +64,7 @@ impl Plugin for SessionPlugin {
         PluginMeta::new(PLUGIN_SESSION, "会话管理")
     }
 
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(self: Arc<Self>, ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
         match path.as_str() {
             "chat/send" => Ok(PluginPayload::new(&1)),
@@ -73,7 +73,7 @@ impl Plugin for SessionPlugin {
         }
     }
 
-    async fn traverse(self: Arc<Self>, _path: String, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn traverse(self: Arc<Self>, _path: String, ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse<PluginPayload> {
         let sub_path = ctx.get(PATH).unwrap_or_default();
         if sub_path != TRAVERSE_AVAILABLE_TOOLS {
             return Err(PluginError::NotFound(sub_path));
@@ -135,7 +135,7 @@ test('E-003 命中：`set(PATH, "字面量")`', () => {
   const r = audit({
     ...CLEAN,
     'symbio/src/plugins/session/caller.rs':
-      `pub fn p(ctx: Arc<dyn InvokeRequest>) { ctx.set(PATH, "session/chat/send".to_string()); }\n`,
+      `pub fn p(ctx: Arc<dyn PluginInvokeRequest>) { ctx.set(PATH, "session/chat/send".to_string()); }\n`,
   })
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /E-003 .*caller\.rs:1/)
@@ -145,7 +145,7 @@ test('E-003 不误报：用常量（`SESSION_CHAT_SEND.to_string()`）', () => {
   const r = audit({
     ...CLEAN,
     'symbio/src/plugins/session/caller.rs':
-      `pub fn p(ctx: Arc<dyn InvokeRequest>) { ctx.set(PATH, SESSION_CHAT_SEND.to_string()); }\n`,
+      `pub fn p(ctx: Arc<dyn PluginInvokeRequest>) { ctx.set(PATH, SESSION_CHAT_SEND.to_string()); }\n`,
   })
   assert.equal(r.status, 0, r.stdout)
 })
@@ -154,7 +154,7 @@ test('E-003 豁免：带理由的 `plugin-entry-allow` 不再报', () => {
   const r = audit({
     ...CLEAN,
     'symbio/src/plugins/session/caller.rs':
-      `// plugin-entry-allow E-003: 这里刻意造一条非法路径验证兜底\npub fn p(ctx: Arc<dyn InvokeRequest>) { ctx.set(PATH, "session/chat/send".to_string()); }\n`,
+      `// plugin-entry-allow E-003: 这里刻意造一条非法路径验证兜底\npub fn p(ctx: Arc<dyn PluginInvokeRequest>) { ctx.set(PATH, "session/chat/send".to_string()); }\n`,
   })
   assert.equal(r.status, 0, r.stdout)
 })
@@ -163,7 +163,7 @@ test('E-003 豁免：理由为空的 `plugin-entry-allow` 视为未豁免', () =
   const r = audit({
     ...CLEAN,
     'symbio/src/plugins/session/caller.rs':
-      `// plugin-entry-allow E-003:\npub fn p(ctx: Arc<dyn InvokeRequest>) { ctx.set(PATH, "session/chat/send".to_string()); }\n`,
+      `// plugin-entry-allow E-003:\npub fn p(ctx: Arc<dyn PluginInvokeRequest>) { ctx.set(PATH, "session/chat/send".to_string()); }\n`,
   })
   assert.equal(r.status, 1, r.stdout)
 })
@@ -172,7 +172,7 @@ test('E-003 不误报：测试文件里的假路径不判', () => {
   const r = audit({
     ...CLEAN,
     'symbio/src/plugins/session/caller.test.rs':
-      `pub fn p(ctx: Arc<dyn InvokeRequest>) { ctx.set(PATH, "work/whatever".to_string()); }\n`,
+      `pub fn p(ctx: Arc<dyn PluginInvokeRequest>) { ctx.set(PATH, "work/whatever".to_string()); }\n`,
   })
   assert.equal(r.status, 0, r.stdout)
 })
@@ -280,14 +280,14 @@ test('形态识别：按工具名分发（`.find(|t| t.name()`）判为运行期
   const r = audit({
     ...CLEAN,
     'symbio/src/plugins/local/plugin.rs': `impl Plugin for LocalPlugin {
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(self: Arc<Self>, ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
         if let Some(tool) = self.tool_impls.iter().find(|t| t.name() == path) {
             return tool.execute(ctx).await;
         }
         Err(PluginError::NotFound(path))
     }
-    async fn traverse(self: Arc<Self>, _path: String, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn traverse(self: Arc<Self>, _path: String, ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse<PluginPayload> {
         let sub_path = ctx.get(PATH).unwrap_or_default();
         if sub_path != TRAVERSE_AVAILABLE_TOOLS {
             return Err(PluginError::NotFound(sub_path));
@@ -305,10 +305,10 @@ test('形态识别：`route` 恒 Err 判为「恒 NotFound」', () => {
   const r = audit({
     ...CLEAN,
     'symbio/src/plugins/work/plugin.rs': `impl Plugin for WorkPlugin {
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(self: Arc<Self>, ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse<PluginPayload> {
         Err(PluginError::NotFound(format!("work 无自有协议路由")))
     }
-    async fn traverse(self: Arc<Self>, _path: String, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn traverse(self: Arc<Self>, _path: String, ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse<PluginPayload> {
         let sub_path = ctx.get(PATH).unwrap_or_default();
         if sub_path != TRAVERSE_AVAILABLE_TOOLS {
             return Err(PluginError::NotFound(sub_path));
@@ -338,7 +338,7 @@ impl Plugin for TelegramPlugin {
         PluginMeta::new("telegram", "Telegram 集成")
     }
 
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(self: Arc<Self>, ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
         match path.as_str() {
             "send" => Ok(PluginPayload::new(&1)),
@@ -346,7 +346,7 @@ impl Plugin for TelegramPlugin {
         }
     }
 
-    async fn traverse(self: Arc<Self>, _path: String, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn traverse(self: Arc<Self>, _path: String, ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse<PluginPayload> {
         let sub_path = ctx.get(PATH).unwrap_or_default();
         if sub_path != TRAVERSE_AVAILABLE_TOOLS {
             return Err(PluginError::NotFound(sub_path));
@@ -412,7 +412,7 @@ pub struct CompositePlugin {}
 impl CompositePlugin {
     pub(crate) async fn broadcast_collect(
         plugin: Arc<dyn Plugin>,
-        ctx: Arc<dyn InvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
         who: &str,
     ) {
         let _ = (plugin, ctx, who);
@@ -466,7 +466,7 @@ test('提取正确性：`*.test.rs` 里的假 route 不参与臂提取', () => {
     // walk 先深度再同级，`chat_loop/state.test.rs` 会排在 `plugin.rs` 之前；
     // 不过滤掉它，session 会被误判成「恒 NotFound、零路由臂」。
     'symbio/src/plugins/session/chat_loop/state.test.rs': `impl Plugin for FakePlugin {
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(self: Arc<Self>, ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
         if ctx.get(PATH).as_deref() != Some("hook/fire") {
             return Err(PluginError::NotFound(path));
@@ -484,10 +484,10 @@ test('提取正确性：`*.test.rs` 里的假 route 不参与臂提取', () => {
 // ── E-008：文档词表必须与代码常量逐字一致 ──────────────────────────────
 //
 // 真实事故的形状：`docs/design/vdfs.md` §3.2 的 status 行一直写 `error`，而代码
-// 已把该词改名为 `failed`（理由见 `vdfs_provider.rs::VDFS_STATUS_FAILED`）——两边
+// 已把该词改名为 `failed`（理由见 `vdfs/words.rs::VDFS_STATUS_FAILED`）——两边
 // 各说各话，没有任何测试因此变红；而人读文档写的代码会照 `error` 写。
 const VOCAB_CORE = {
-  'symbio/src/symbio_core/vdfs_provider.rs':
+  'symbio/src/symbio_core/vdfs/words.rs':
     `pub const FOO_ONE: &str = "one";\npub const FOO_TWO: &str = "two";\n`,
 }
 const vocabDoc = (line) => ({ ...CLEAN, ...VOCAB_CORE, 'docs/design/vdfs.md': `${line}\n` })

@@ -9,7 +9,7 @@
  *  L4 Rust 侧 **R-001（判定型）**：`pub` 声明但全仓（含 cli / tauri / 前端）
  *     一次都没被提及。判据是「这个名字在整仓只出现一次（就是声明那行）」——
  *     `dead_code` lint 对 `pub` 项结构性失明（`symbio_core/mod.rs` 一句
- *     `pub use error::*` 就能让整批函数被当成对外 API），故需要这条补网。
+ *     `pub use plugin::*` 就能让整批函数被当成对外 API），故需要这条补网。
  *
  * 承认通道：确需保留但无 Rust 消费方的（消费方在前端 / 闭集成员），在声明行或
  * 紧邻其上一行写 `// dead-code-allow R-001: <理由>`；**理由不可为空**（空理由
@@ -215,7 +215,7 @@ if (!unusedExports) console.log('  （无全库无人用的导出）')
 // ── Rust 侧 R-001：`pub` 声明但全仓一次都没被提及（**判定型**）──
 //
 // 为什么需要：前端侧有 import 依赖图这张硬网；**Rust 侧一张都没有**。`dead_code`
-// lint 对 `pub` 项结构性失明——`symbio_core/mod.rs` 里一句 `pub use error::*`
+// lint 对 `pub` 项结构性失明——`symbio_core/mod.rs` 里一句 `pub use plugin::*`
 // 就足以让整批函数被当成"对外 API"，于是攒出过一批零调用的 helper（8 个锁/错误
 // 辅助函数，全仓含 cli / tauri 零引用）。
 //

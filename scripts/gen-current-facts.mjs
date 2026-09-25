@@ -32,7 +32,7 @@ import path from "node:path";
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, "..");
 const PLUGINS_DIR = path.join(ROOT, "symbio", "src", "plugins");
-const IDS_FILE = path.join(ROOT, "symbio", "src", "symbio_core", "ids.rs");
+const IDS_FILE = path.join(ROOT, "symbio", "src", "symbio_core", "keys", "ids.rs");
 const VDFS_PROTOCOL_FILE = path.join(PLUGINS_DIR, "vdfs", "protocol.rs");
 const OUT = path.join(ROOT, "docs", "CURRENT.md");
 
@@ -726,12 +726,12 @@ function render() {
   L.push(
     `| Agent 目录 | \`agent/<id>\`（工作区级 + 全局级双层） | \`AgentDirStore\` 自管，不经 \`vdfs_service\`；虚拟视图以 \`${vdfsRoot}/agent/<id>\` 进入 |`
   );
-  // ⚠️ 路径**不带 `plugins/` 层**：那一层早已废除（`symbio_core/plugin_dir.rs`
+  // ⚠️ 路径**不带 `plugins/` 层**：那一层早已废除（`symbio_core/plugin/dir.rs`
   // 顶部写明了理由与自举环），系统根下就是「一个插件一个目录」的扁平结构。
   // 这里曾长期写着 `<homedir>/plugins/<插件>/PLUGIN.yml`，与代码和 CONFIGURATION.md
   // 都不符——而本表自称「权威事实」，错了会被逐字抄进别处。
   L.push(
-    "| 插件配置（含会话配置） | `<homedir>/<插件>/PLUGIN.yml`（系统级在 `<homedir>/PLUGIN.yml`） | `ConfigFile` 自读写，**无第二种后端、无第二条配置协议** |"
+    "| 插件配置（含会话配置） | `<homedir>/<插件>/PLUGIN.yml`（系统级在 `<homedir>/PLUGIN.yml`） | `PluginConfigFile` 自读写，**无第二种后端、无第二条配置协议** |"
   );
   L.push("");
 

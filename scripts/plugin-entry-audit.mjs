@@ -4,7 +4,7 @@
  *
  * ## 它守的是什么
  *
- * `Plugin` trait 只有三个方法：`meta` / `route` / `traverse`（`symbio_core/plugin.rs`）。
+ * `Plugin` trait 只有三个方法：`meta` / `route` / `traverse`（`symbio_core/plugin/mod.rs`）。
  * 后两个是全仓**仅有的两条**跨插件寻址通道，而它们的地址是**字符串**——
  * 字符串不会因为改名而编译失败，只会静默地指向一个不存在的地方。
  *
@@ -14,7 +14,7 @@
  *   → `docs/CURRENT.md` 的生成器与两处文档照抄出 **`hooks/fire` 这类不存在的路由**；
  * - Telegram 用 `SESSION_CHAT`（`"session/chat"`）路由——**该路径不存在**，
  *   session 只认 `chat/send` / `chat/abort`，所以那处调用以前必定落到 `NotFound`；
- * - `symbio_core::paths` 里的 `AGENT_CHAT` / `AGENT_CREATE` 是**幽灵常量**：
+ * - `symbio_core::keys::paths` 里的 `AGENT_CHAT` / `AGENT_CREATE` 是**幽灵常量**：
  *   零调用方，而 `agent` 的 `route` 恒返回 `NotFound`——它们描述的路由不存在。
  *
  * 三处的共同点是：**没有任何测试会因此变红**。本脚本把它们写成可执行的规则。
@@ -25,7 +25,7 @@
  * |-------|---------------------------------------------------------------|--------|
  * | E-001 | `PluginMeta::new` 首参必须 == 插件目录名                        | 目录名才是路由前缀（`composite.rs`「目录名 = 实例名」）；首参不参与路由（ADR-032 之后它只是**出厂 id**，身份取自 `PLUGIN.yml`），不一致就会让文档写出幽灵路由 |
  * | E-002 | 代码里路由路径字面量的首段必须是插件目录名（或容器前缀 `worker`） | 抓「幽灵命名空间」：`hooks/...` 这种写错了前缀的路径 |
- * | E-003 | `set(PATH, "<字面量>")` 一律违规                                | 调用侧的绝对地址必须来自 `symbio_core::paths` 常量，否则改名不会编译失败 |
+ * | E-003 | `set(PATH, "<字面量>")` 一律违规                                | 调用侧的绝对地址必须来自 `symbio_core::keys::paths` 常量，否则改名不会编译失败 |
  * | E-004 | `traverse` 内不得出现 `available_tools` / `available_options` 字面量 | 协议端点只有两个，且必须是常量（`TRAVERSE_AVAILABLE_*`） |
  * | E-005 | 引用的路径必须对应到某条真实 `route` 臂                        | 抓「路径写错一截」：`session/chat` 少了 `/send` |
  * | E-006 | **权威清单**（`ROUTES.md` / `CURRENT.md` / 插件 README）里的路径前缀必须合法 | `hooks/fire` 只出现在文档里，只扫代码的守卫会完整地漏掉它 |
@@ -44,7 +44,7 @@
  *
  * ## 地址规则（本脚本的依据）
  *
- * 见 [`symbio/src/symbio_core/paths.rs`](../symbio/src/symbio_core/paths.rs) 的模块文档：
+ * 见 [`symbio/src/symbio_core/keys/paths.rs`](../symbio/src/symbio_core/keys/paths.rs) 的模块文档：
  * 地址只有「绝对地址」与「相对臂」两种形态，前缀是**插件目录名**，
  * 过路由才设 `PATH`，`traverse` 的 `PATH` 只有两个合法值。
  *
@@ -648,7 +648,7 @@ for (const abs of codeFiles) {
     const line = txt[i]
     const isConstDef = isRust && CONST_DEF_RE.test(line)
 
-    // E-003：调用侧不得写字面量 PATH（绝对地址必须来自 symbio_core::paths 常量）
+    // E-003：调用侧不得写字面量 PATH（绝对地址必须来自 symbio_core::keys::paths 常量）
     if (isRust && /\.set\(\s*(?:crate::symbio_core::)?PATH\s*,\s*"/.test(line)) {
       if (!exempted(raw, i, 'E-003')) {
         report(
@@ -656,7 +656,7 @@ for (const abs of codeFiles) {
           'error',
           rel(abs),
           i + 1,
-          `\`set(PATH, "<字面量>")\` —— 绝对地址必须取 \`symbio_core::paths\` 常量` +
+          `\`set(PATH, "<字面量>")\` —— 绝对地址必须取 \`symbio_core::keys::paths\` 常量` +
             `（字面量不会因改名而编译失败）`,
         )
       }
@@ -797,7 +797,7 @@ for (const abs of ROUTE_AUTHORITY_FILES) {
 //
 // 为什么需要：词表是**闭集**，而闭集的第二份真相最常驻在文档里。真实事故：
 // `docs/design/vdfs.md` §3.2 的 status 行一直写 `error`，而代码早已把该词改名为
-// `failed`（理由见 `vdfs_provider.rs::VDFS_STATUS_FAILED`）——两边各说各话，没有任何
+// `failed`（理由见 `vdfs/words.rs::VDFS_STATUS_FAILED`）——两边各说各话，没有任何
 // 测试因此变红。而人读文档写的代码会照 `error` 写，于是漂移**从文档流回代码**
 //（`schemas/options.rs` 里那枚 `OPTION_STATUS_ERROR = "error"` 就是这么活下来的；
 // 该文件已于 2026-09-23 随会话选项 schema 化删除，但这条例子的教训与文件无关）。

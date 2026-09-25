@@ -95,7 +95,7 @@ test('S-002-bonus ignores the pattern when it appears inside a comment', () => {
 
 // ── S-008：VdfsNode.status 不得用裸字面量 ──────────────────────────────
 // 词表只有 `VDFS_STATUS_*` 一套；裸字面量在改名时不会编译失败（该词表曾把
-// `error` 改名为 `failed`，留下过化石，见 vdfs_provider.rs::VDFS_STATUS_FAILED）。
+// `error` 改名为 `failed`，留下过化石，见 vdfs/words.rs::VDFS_STATUS_FAILED）。
 const statusSuspect = `fn node_of() -> VdfsNode {
     let mut n = VdfsNode::file();
     n.status = "active".to_string(); WAIVER

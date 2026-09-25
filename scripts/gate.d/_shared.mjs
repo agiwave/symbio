@@ -51,7 +51,7 @@ export const BASELINE = {
   //      `the_two_frame_kinds_are_not_confusable`（按 type 分派，不靠猜）。
   //      −1：`session_change`（带节点视图的 VDFS `updated`）已删除 ⇒ 其单测随之删除。
   // 912：帧解包收敛到 `symbio_core` 的公共入口（`transcript_stream::event_of` /
-  //      `is_resync`、`vdfs_provider::vdfs_change_of`）后补的契约用例——
+  //      `is_resync`、`vdfs::vdfs_change_of`）后补的契约用例——
   //      `vdfs_change_of` 三条（解信封 / 拒异 kind / 非 Data 帧不 panic）+
   //      背压标记一条（`event_of` 解不出、`is_resync` 认出）。
   // 915：批次 G（变更词汇收窄）**净增 0**——删掉「载荷按类型可选」的用例，换成三条
@@ -118,7 +118,7 @@ export const BASELINE = {
   //        −2  `plugins/vdfs/provider.test.rs`——`ToolVdfs::move_item` 的两条
   //        +1  `plugins/composite/vdfs.test.rs`——`rejects_unknown_dir`（原用例删掉
   //            跨目录 move 断言后，未知名一条留作纯拒绝面）
-  //        +1  `symbio_core/vdfs_provider.test.rs`——新增
+  //        +1  `symbio_core/vdfs/contract.test.rs`——新增
   //            `new_type_carries_optional_import_entry`（类型内挂可选导入入口）；
   //            另有两处改名不计数（`request_variant_set_is_the_operation_surface`、
   //            `new_type_is_single_dir_scoped_and_omitted_when_absent`）
@@ -138,7 +138,7 @@ export const BASELINE = {
   //            （同一份定义服务两种态：`when: {is_existing: false}` 成立、`true` 不成立）
   //        −1  `plugins/mcp/plugin.test.rs`——`import_is_a_second_entry_of_the_same_type`
   //            随「类型内不再有第二种入口」删除
-  //        0   `symbio_core/vdfs_provider.test.rs`——`new_type_carries_optional_import_entry`
+  //        0   `symbio_core/vdfs/contract.test.rs`——`new_type_carries_optional_import_entry`
   //            改写为 `new_type_is_pure_presentation`（钉住序列化键集合恰好是呈现字段）
   //        0   `plugins/skill/plugin.test.rs`——`import_name_of_strips_zip` 改写为
   //            `unpack_name_comes_from_the_filename`（换成 `VdfsUnpack::name_of` 的载体）
@@ -151,7 +151,7 @@ export const BASELINE = {
   //      ① 上批 `b191963`（插件体系卫生改进）实测 **952**、基线仍记 928 ⇒ 滞后 24，
   //        提交信息写了「952 通过」却没改这里的数字（与 `916 → 925` 那次同型）。
   //      ② 本批（ADR-032：插件身份归 manifest）**+5**，逐条：
-  //        +4  `symbio_core/plugin_dir.test.rs`——身份四则
+  //        +4  `symbio_core/plugin/dir.test.rs`——身份四则
   //            （从未落位 ⇒ 空 / 投影**只补缺失键**、用户改过的不覆盖 /
   //             键都在 ⇒ 不碰文件 / 写配置不得冲掉身份与装配位）
   //        +2  `plugins/composite/registry.test.rs`——

@@ -227,7 +227,7 @@ console.log()
 
 // ── S-008: VdfsNode.status 不得用裸字面量 ──────────────────────────────
 //
-// 词表只有一套：`symbio_core::vdfs_provider::VDFS_STATUS_*`（`docs/design/vdfs.md`
+// 词表只有一套：`symbio_core::vdfs::VDFS_STATUS_*`（`docs/design/vdfs.md`
 // §3.2）。裸字面量的危险不是拼错（那会立刻看见），而是**改名时不会编译失败**——
 // `status` 是跨进程边界的字符串，改了常量而漏掉字面量，前端只会静默认不出状态。
 //

@@ -92,7 +92,13 @@ const BAD = '✗'
 
 // ==================== A. 常量镜像 ====================
 
-const VDFS_PROVIDER_RS = 'symbio/src/symbio_core/vdfs_provider.rs'
+const VDFS_WORDS_RS = 'symbio/src/symbio_core/vdfs/words.rs'
+const VDFS_ACCESS_RS = 'symbio/src/symbio_core/vdfs/access.rs'
+const VDFS_NODE_RS = 'symbio/src/symbio_core/vdfs/node.rs'
+const VDFS_CONTENT_RS = 'symbio/src/symbio_core/vdfs/content.rs'
+const VDFS_ERROR_RS = 'symbio/src/symbio_core/vdfs/error.rs'
+const VDFS_REQUEST_RS = 'symbio/src/symbio_core/vdfs/request.rs'
+const VDFS_CHANGE_RS = 'symbio/src/symbio_core/vdfs/change.rs'
 const VDFS_PROTOCOL_RS = 'symbio/src/plugins/vdfs/protocol.rs'
 const VDFS_TS = 'tauri/src/schemas/vdfs.ts'
 
@@ -104,7 +110,7 @@ const RISK_LEVEL_RS = 'symbio/src/plugins/local/policy/policy_types.rs'
 const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
 
 /** 后端常量源：自动发现其中 `VDFS_*` 前缀的 `&str` 常量 */
-const RUST_CONST_FILES = [VDFS_PROVIDER_RS, VDFS_PROTOCOL_RS]
+const RUST_CONST_FILES = [VDFS_WORDS_RS, VDFS_PROTOCOL_RS]
 
 /** 前端常量源 */
 const TS_CONST_FILES = [VDFS_TS]
@@ -115,6 +121,11 @@ const TS_CONST_FILES = [VDFS_TS]
  * 为什么会有别名：前端有时要在名字里区分**用途**——`VDFS_ROOT_OP` 是"取根地址的
  * 那个 op"，名字里带 `OP` 才不会与 `schemas/vdfsRoot` 的根**地址**混淆；而后端
  * 只有一份常量名。名字不同 ⇒ 自动发现看不见它们，因此必须显式登记。
+ *
+ * 会话域的四条（`VDFS_KIND_MESSAGES` / `VDFS_KIND_INBOX` / `VDFS_EXT_SESSION` /
+ * `VDFS_EXT_MESSAGE`）属另一类：会话词表已**下沉**到会话插件
+ * （`plugins/session/plugin/words.rs`，内核词表不再持有），前端仍按旧名镜像它们。
+ * 指向那个文件即**继续受本组逐字比对**——下沉不该让镜像失去看守。
  */
 const ALIASES = [
   {
@@ -124,13 +135,33 @@ const ALIASES = [
   },
   {
     ts: 'VDFS_EVENT_KIND',
-    rust: { file: 'symbio/src/symbio_core/event_bus.rs', name: 'KIND_VDFS' },
+    rust: { file: 'symbio/src/symbio_core/event_bus/mod.rs', name: 'EVENT_BUS_KIND_VDFS' },
     what: 'VDFS 变更的总线频道名',
   },
   {
     ts: 'VDFS_BUS_RESYNC',
-    rust: { file: 'symbio/src/symbio_core/event_bus.rs', name: 'RESYNC_MARKER_TYPE' },
+    rust: { file: 'symbio/src/symbio_core/event_bus/mod.rs', name: 'EVENT_BUS_RESYNC_MARKER_TYPE' },
     what: '总线背压指令：通道曾满，消费端请重读作用域（不是一条变更）',
+  },
+  {
+    ts: 'VDFS_KIND_MESSAGES',
+    rust: { file: 'symbio/src/plugins/session/plugin/words.rs', name: 'KIND_MESSAGES' },
+    what: '会话转写列表的场景类型（消费端按它发现转写，不硬编码段名）',
+  },
+  {
+    ts: 'VDFS_KIND_INBOX',
+    rust: { file: 'symbio/src/plugins/session/plugin/words.rs', name: 'KIND_INBOX' },
+    what: '会话收件箱的场景类型（待发消息与已发生消息靠它区分）',
+  },
+  {
+    ts: 'VDFS_EXT_SESSION',
+    rust: { file: 'symbio/src/plugins/session/plugin/words.rs', name: 'EXT_SESSION' },
+    what: '会话工作区（实时对话流）的呈现扩展名',
+  },
+  {
+    ts: 'VDFS_EXT_MESSAGE',
+    rust: { file: 'symbio/src/plugins/session/plugin/words.rs', name: 'EXT_MESSAGE' },
+    what: '单条对话消息的呈现扩展名',
   },
 ]
 
@@ -271,47 +302,47 @@ const STRUCT_SETS = [
   },
   {
     what: 'VDFS 节点',
-    rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsNode' },
+    rust: { file: VDFS_NODE_RS, struct: 'VdfsNode' },
     ts: { file: VDFS_TS, interface: 'VdfsNode' },
   },
   {
     what: 'VDFS 条目（地址 + 扁平展开的节点；两侧都 flatten，故这里只比 `path`——节点字段由上一对覆盖）',
-    rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsItem' },
+    rust: { file: VDFS_NODE_RS, struct: 'VdfsItem' },
     ts: { file: VDFS_TS, interface: 'VdfsItem' },
   },
   {
     what: 'VDFS 变更',
-    rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsChange' },
+    rust: { file: VDFS_CHANGE_RS, struct: 'VdfsChange' },
     ts: { file: VDFS_TS, interface: 'VdfsChange' },
   },
   {
     what: 'VDFS 访问位',
-    rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsAccess' },
+    rust: { file: VDFS_ACCESS_RS, struct: 'VdfsAccess' },
     ts: { file: VDFS_TS, interface: 'VdfsAccess' },
   },
   {
     what: 'VDFS 节点内容',
-    rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsContent' },
+    rust: { file: VDFS_CONTENT_RS, struct: 'VdfsContent' },
     ts: { file: VDFS_TS, interface: 'VdfsContent' },
   },
   {
     what: 'VDFS 可新建类型',
-    rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsNewType' },
+    rust: { file: VDFS_NODE_RS, struct: 'VdfsNewType' },
     ts: { file: VDFS_TS, interface: 'VdfsNewType' },
   },
   {
     what: 'VDFS 写入响应',
-    rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsWriteResponse' },
+    rust: { file: VDFS_REQUEST_RS, struct: 'VdfsWriteResponse' },
     ts: { file: VDFS_TS, interface: 'VdfsWriteResponse' },
   },
   {
     what: 'VDFS 字段错误',
-    rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsFieldError' },
+    rust: { file: VDFS_ERROR_RS, struct: 'VdfsFieldError' },
     ts: { file: VDFS_TS, interface: 'VdfsFieldError' },
   },
   {
     what: 'VDFS 校验错误',
-    rust: { file: VDFS_PROVIDER_RS, struct: 'VdfsValidationError' },
+    rust: { file: VDFS_ERROR_RS, struct: 'VdfsValidationError' },
     ts: { file: VDFS_TS, interface: 'VdfsValidationError' },
   },
   {
