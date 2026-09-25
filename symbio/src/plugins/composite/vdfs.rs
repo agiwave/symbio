@@ -397,7 +397,7 @@ impl CompositeVdfs {
     /// 名称取自**载荷**而不是路径：这个动作是「对注册表里某一项做点什么」，
     /// 而注册表是根上的视图——路径上没有这一项（停用的插件不在资源树里，
     /// 见模块文档「两个视图」）。
-    fn set_plugin_enabled(
+    async fn set_plugin_enabled(
         &self,
         action: String,
         payload: Option<&serde_json::Value>,
@@ -416,6 +416,7 @@ impl CompositeVdfs {
         }
         self.registry
             .set_enabled(&name, enabled)
+            .await
             .map_err(VdfsError::invalid)?;
         Ok(VdfsResponse::Action(VdfsActionResult {
             action,
@@ -505,10 +506,10 @@ impl VdfsProvider for CompositeVdfs {
                     self.list_registry(action)
                 }
                 VdfsRequest::Action { action, payload } if action == VDFS_ACTION_ENABLE => {
-                    self.set_plugin_enabled(action, payload.as_ref(), true)
+                    self.set_plugin_enabled(action, payload.as_ref(), true).await
                 }
                 VdfsRequest::Action { action, payload } if action == VDFS_ACTION_DISABLE => {
-                    self.set_plugin_enabled(action, payload.as_ref(), false)
+                    self.set_plugin_enabled(action, payload.as_ref(), false).await
                 }
                 // 根上的写 = **安装**：与「新建一项资源」同形（往目录里加一个东西，
                 // 名字由 provider 生成并经 `VdfsWriteResponse::name` 交回）。
@@ -589,7 +590,10 @@ impl VdfsProvider for CompositeVdfs {
                     // 就是它装没装的**唯一凭据**（见 `registry.rs`）。必需插件由注册表
                     // 拒绝：可以停用，但不可删除。`recursive` 不参与判定：卸载本就是整棵
                     // 子树的事，注册表一次做完，调用方不需要先知道这棵树有多深。
-                    self.registry.uninstall(&dir).map_err(VdfsError::invalid)?;
+                    self.registry
+                        .uninstall(&dir)
+                        .await
+                        .map_err(VdfsError::invalid)?;
                     return Ok(VdfsResponse::Unit);
                 }
                 p.clone()

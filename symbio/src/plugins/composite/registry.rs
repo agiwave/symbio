@@ -44,8 +44,9 @@
 
 use crate::symbio_core::{
     create_object, creator_ids, has_creator, lock_read, lock_write, plugins_root, InvokeRequest,
-    InvokeRequestExt, Plugin, PluginDir, PluginEntry, PluginMeta, SimpleRequest, KEY_PROVIDER,
-    PLUGIN_DIR, PLUGIN_FILE, REQUIRED_PLUGINS, SYSTEM_LEVEL_PROVIDERS, UNDISABLABLE_PLUGINS,
+    InvokeRequestExt, Plugin, PluginDir, PluginEntry, PluginMeta, SimpleRequest, StopReason,
+    KEY_PROVIDER, PLUGIN_DIR, PLUGIN_FILE, REQUIRED_PLUGINS, SYSTEM_LEVEL_PROVIDERS,
+    UNDISABLABLE_PLUGINS,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -234,7 +235,7 @@ impl PluginRegistry {
         // 用户视角「启动刷屏」的主要来源。需要排查装配问题时 `--verbose` /
         // `SYMBIO_LOG=debug` 即可看到全量。
         crate::plugin_debug!("composite", "正在构造子插件 {name} -> {provider}");
-        match create_object::<dyn Plugin>(provider, sub_context) {
+        match create_object::<dyn Plugin>(provider, Arc::clone(&sub_context)) {
             Some(plugin) => {
                 // **出厂身份投影**（ADR-032）：构造成功后才拿得到 `PluginMeta`，
                 // 于是就在这一刻把身份补进 manifest（只补缺失的键，用户改过的不动）。
@@ -242,6 +243,13 @@ impl PluginRegistry {
                 // 「停用不失身份」的**唯一**来路，别处不必再读 `meta()` 的身份字段。
                 if let Err(e) = dir.seed_identity(&plugin.meta()) {
                     crate::plugin_warn!("composite", "插件身份落位失败 {name}：{e}");
+                }
+                // **生命周期钩子**（ADR-033）：装配后、开始服务前一次。
+                // 同步——装配路径里没有 async 上下文（见该 ADR）。
+                // 失败**不摘掉**插件：与 `provider_of` 同一口径——配了一半也要看得见，
+                // 摘掉它用户只看到「插件不见了」，留着则每次调用给出明确错误。
+                if let Err(e) = plugin.start(sub_context) {
+                    crate::plugin_error!("composite", "子插件启动失败 {}：{}", name, e);
                 }
                 lock_write(&self.instances).insert(name.to_string(), plugin);
             }
@@ -315,7 +323,10 @@ impl PluginRegistry {
     /// 写装配位并即时生效：`true` = 挂载，`false` = 卸载（实例表随之增删）。
     ///
     /// 界面底座插件（[`UNDISABLABLE_PLUGINS`]）拒绝停用——理由见该常量文档。
-    pub fn set_enabled(&self, name: &str, enabled: bool) -> Result<(), String> {
+    ///
+    /// 停用一侧会先调 [`Plugin::stop`](Plugin::stop)（ADR-033）：**摘实例之前**，
+    /// 让插件有一次清理的机会（关监听 / 停后台任务 / 落盘）。
+    pub async fn set_enabled(&self, name: &str, enabled: bool) -> Result<(), String> {
         if !enabled && UNDISABLABLE_PLUGINS.contains(&name) {
             return Err(format!(
                 "「{name}」是界面底座插件，停用后界面将无法再操作它（如需停用请直接改 {PLUGIN_FILE}）"
@@ -340,7 +351,16 @@ impl PluginRegistry {
                 }
             }
         } else {
-            lock_write(&self.instances).remove(name);
+            // 先摘出来再 await：写锁守卫不能跨 await（future 会失去 Send）。
+            let plugin = lock_write(&self.instances).remove(name);
+            if let Some(p) = plugin {
+                // ADR-033：摘出实例表**之后立即** stop（Disabled = 可恢复，目录与数据都还在）。
+                // 失败只告警、不阻断——用户按下「停用」就该生效，清理没做完不该反过来
+                // 让插件停不掉（那时插件只剩 `Drop`，而 `Drop` 不能 await）。
+                if let Err(e) = p.stop(StopReason::Disabled).await {
+                    crate::plugin_warn!("composite", "插件停用时清理失败 {name}：{e}");
+                }
+            }
         }
         Ok(())
     }
@@ -383,7 +403,10 @@ impl PluginRegistry {
     ///
     /// 只对**非必需**插件可用——必需插件是构造者声明的「这个智能体必须有它」，
     /// 用户能做的是停用（见 [`Self::set_enabled`]），不是删除。
-    pub fn uninstall(&self, name: &str) -> Result<(), String> {
+    ///
+    /// 顺序（ADR-033）：`stop(Uninstalled)` 在**删目录之前**——那是插件**最后**
+    /// 一次能写盘的机会。
+    pub async fn uninstall(&self, name: &str) -> Result<(), String> {
         if self.is_required(name) {
             return Err(format!("「{name}」是必需插件，不可删除（可以停用）"));
         }
@@ -391,7 +414,15 @@ impl PluginRegistry {
         if !dir.config_path().exists() && !lock_read(&self.instances).contains_key(name) {
             return Err(format!("未找到插件：{name}"));
         }
-        lock_write(&self.instances).remove(name);
+        // 与停用同一口径：清理失败只告警，删除继续——目录随后就没了，
+        // 再卡在这里只会留下一个「卸不掉」的僵尸。
+        // 先把实例摘出来再 await：写锁守卫不能跨 await（future 会失去 Send）。
+        let plugin = lock_write(&self.instances).remove(name);
+        if let Some(p) = plugin {
+            if let Err(e) = p.stop(StopReason::Uninstalled).await {
+                crate::plugin_warn!("composite", "插件卸载时清理失败 {name}：{e}");
+            }
+        }
         std::fs::remove_dir_all(dir.dir())
             .map_err(|e| format!("删除插件目录 {} 失败：{e}", dir.dir().display()))
     }

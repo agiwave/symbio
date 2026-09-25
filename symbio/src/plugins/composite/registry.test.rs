@@ -257,7 +257,7 @@ async fn disabling_an_undisablable_plugin_is_refused() {
     let reg = registry_at(&root, Vec::new());
 
     for name in UNDISABLABLE_PLUGINS {
-        let err = reg.set_enabled(name, false).unwrap_err();
+        let err = reg.set_enabled(name, false).await.unwrap_err();
         assert!(err.contains("界面底座"), "{name} 应被拒绝停用：{err}");
     }
 
@@ -275,7 +275,7 @@ async fn disabling_writes_the_flag_and_drops_the_instance() {
     let reg =
         PluginRegistry::with_instances(Arc::new(RwLock::new(instances)), root.clone(), Vec::new());
 
-    reg.set_enabled("alpha", false).unwrap();
+    reg.set_enabled("alpha", false).await.unwrap();
 
     assert!(
         !PluginDir::at(root.join("alpha"), "alpha").enabled(),
@@ -299,11 +299,11 @@ async fn uninstall_refuses_required_and_unknown_plugins() {
     put_plugin(&root, "alpha", r#"{"plugin_provider": "alpha"}"#);
     let reg = registry_at(&root, vec!["alpha".to_string()]);
 
-    let err = reg.uninstall("alpha").unwrap_err();
+    let err = reg.uninstall("alpha").await.unwrap_err();
     assert!(err.contains("必需插件"), "必需插件只能停用：{err}");
     assert!(root.join("alpha").exists(), "拒绝时不得动目录");
 
-    assert!(reg.uninstall("ghost").unwrap_err().contains("未找到插件"));
+    assert!(reg.uninstall("ghost").await.unwrap_err().contains("未找到插件"));
 
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -319,7 +319,7 @@ async fn uninstall_removes_the_instance_and_the_directory() {
     let reg =
         PluginRegistry::with_instances(Arc::new(RwLock::new(instances)), root.clone(), Vec::new());
 
-    reg.uninstall("alpha").unwrap();
+    reg.uninstall("alpha").await.unwrap();
     assert!(!root.join("alpha").exists(), "插件目录随之消失");
     assert!(!lock_read(reg.instances()).contains_key("alpha"));
 

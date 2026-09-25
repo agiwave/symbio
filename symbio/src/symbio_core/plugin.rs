@@ -4,7 +4,7 @@ use crate::symbio_core::vdfs::{
     VdfsAccess, VdfsContext, VdfsError, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
 };
 use crate::symbio_core::SymbioKey;
-use crate::symbio_core::{lock_read, lock_write, InvokeResponse, PluginPayload};
+use crate::symbio_core::{lock_read, lock_write, InvokeResponse, PluginError, PluginPayload};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -305,6 +305,21 @@ impl InvokeRequest for SimpleRequest {
     }
 }
 
+/// 插件被停下的**原因**（ADR-033）
+///
+/// 三态而不是一个布尔量：插件的**处置不同**——「卸载时是否保留自己的缓存 / 数据」
+/// 是可恢复停用时不必做、卸载时必须当场决定的事。塞进布尔量，就会在插件里长出一堆
+/// 「我这次到底是为什么被停」的旁门判断。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopReason {
+    /// 可恢复的停用——目录与数据**都在**，随时可以再启用
+    Disabled,
+    /// 卸载——调用方随后会删掉插件目录
+    Uninstalled,
+    /// 全局收尾（进程退出 / 整棵树被丢弃）
+    Shutdown,
+}
+
 #[async_trait]
 pub trait Plugin: Send + Sync + 'static {
     /// 插件的**出厂自述** —— 身份（种子）+ 挂载点呈现（见 ADR-032）
@@ -327,6 +342,30 @@ pub trait Plugin: Send + Sync + 'static {
     /// 属第二期（provider 两级解析）的产物。本期先把**运行期消费路径**单源化。
     /// 若将来确认要删，请连同各 impl 一并清理，不要只删这一行声明。
     fn meta(&self) -> PluginMeta;
+
+    /// 装配后、开始服务前调用一次（**同步**，见 ADR-033）
+    ///
+    /// 默认无操作——16 个内置插件因此一行不改、行为与加钩子前完全一致。
+    ///
+    /// 为什么是**同步**的：装配路径（`HomePlugin::build` → `Composite::build` →
+    /// `PluginRegistry::mount_all`）是同步的，工厂签名本身非 async，在那里 await
+    /// 不可用。需要异步初始化的插件（外部插件）走另外两步：**构造时同步 spawn
+    /// 子进程** + **首次调用前惰性完成 `init`**。
+    fn start(&self, _ctx: Arc<dyn InvokeRequest>) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    /// 停用 / 卸载 / 收尾时调用（**异步**，见 ADR-033）
+    ///
+    /// 默认无操作。调用点一律在**移除实例之前**（停用）或**删除目录之前**（卸载）——
+    /// 顺序反了就等于让插件在数据已经没了之后再去做清理；卸载时尤其致命，
+    /// 这是插件**最后**一次能写盘的机会。
+    ///
+    /// 为什么是**异步**的：全部调用点都已在 async 上下文，而清理本身需要 await
+    /// （发 shutdown 帧、等子进程退出、flush 落盘）——同步的 `Drop` 做不了这些。
+    async fn stop(self: Arc<Self>, _reason: StopReason) -> Result<(), PluginError> {
+        Ok(())
+    }
 
     /// 分形路由入口：接收一个抽象的上下文对象，按需提取参数
     async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload>;
