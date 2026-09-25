@@ -300,9 +300,11 @@ impl InvokeRequest for SimpleRequest {
 pub trait Plugin: Send + Sync + 'static {
     /// 插件元信息（身份声明）。
     ///
-    /// ⚠️ 目前**没有任何运行期消费方**：全仓 `.meta()` 的调用点命中的都是
-    /// `Capability::meta`（能力，而非插件）；插件的身份实际来自各自的 `PLUGIN.yml`
-    /// （见 `plugin_dir`），配置面板读的也是那一份。
+    /// ⚠️ 唯一运行期消费方是 `composite/vdfs.rs`：它读 `order`（子插件目录排序）、
+    /// `root_access`（根节点权限）、`name`/`description`/`hidden`（构建子目录节点）
+    /// 来聚合组合视图；其余 `.meta()` 调用点命中的都是 `Capability::meta`（能力，
+    /// 而非插件）。插件的身份实际来自各自的 `PLUGIN.yml`（见 `plugin_dir`），
+    /// 配置面板读的也是那一份。
     ///
     /// 之所以仍留在 trait 上，是**刻意的决定而非遗忘**：它是插件契约的一部分
     /// （每个 impl 都应能自报身份），删掉会波及全部插件实现，并从公开 trait 上

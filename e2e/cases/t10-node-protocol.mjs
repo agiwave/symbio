@@ -42,6 +42,7 @@ import {
   PROVIDER_ID,
   readMessagesJson,
   assertTranscriptInvariants,
+  assertSeqAnchorIsNodeAttribute,
 } from '../helpers.mjs';
 
 /** 终态词（与后端 `is_terminal` 同口径） */
@@ -156,16 +157,14 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
       `消息变更的落点应是 <会话>/${SEG_MESSAGES}/<mid>`,
     );
 
-    // ④' `seq` 是节点位置：同一节点的每一帧都是同一个值（逐帧递增的是"投递序号"，
-    //     那个概念在 S27 已随 `session/stream` 一起退役）
+    // ④' `seq` 是节点位置，不是投递序号（逐帧递增的那个概念已在 S27 随
+    //     `session/stream` 退役）。允许的形态是「在途号… → 权威号（其后全部帧）」：
+    //     号只在存储写入时分配，节点先以在途号上线、落库后由回包帧交回权威号
+    //     （§3.4 唯一的换号时机）。断言"逐帧完全相同"会把"从未落库"当成正确。
     for (const { mid } of ops) {
-      const seqs = rt
-        .framesOf(mid)
-        .map((f) => f.data?.seq)
-        .filter((s) => s != null);
-      assert(
-        new Set(seqs).size <= 1,
-        `节点 ${String(mid).slice(0, 8)} 的 seq 必须逐帧相同（位置不变）：实得 ${JSON.stringify(seqs)}`,
+      assertSeqAnchorIsNodeAttribute(
+        rt.framesOf(mid),
+        `节点 ${String(mid).slice(0, 8)}`,
       );
     }
 
@@ -288,7 +287,7 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     // ⑫ 凡是进入过非终态的节点，都必须以终态收场（不留永远转圈的「运行中」）。
     //
     // 判据是「进入过非终态」而不是「全部节点都必须有终态」：用户消息不参与状态机
-    // （后端 `emit_persisted_message` 发的是存储副本，落点即终态），这是**已知
+    // （后端落库回包发的是存储副本，落点即终态），这是**已知
     // 的协议空洞**（见评审记录），不在此把它钉成不变量。
     for (const [id] of nodes) {
       const frames = framesFor(id);

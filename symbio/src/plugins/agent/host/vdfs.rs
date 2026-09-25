@@ -46,7 +46,7 @@ use crate::symbio_core::vdfs_provider::{
     VdfsItem, VdfsNewType, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
     VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_EXT_FORM,
 };
-use crate::symbio_core::{dir_from_ctx, InvokeRequest, AGENTS_FILE, PLUGIN_AGENT, PLUGIN_FILE};
+use crate::symbio_core::{AGENTS_FILE, PLUGIN_AGENT, PLUGIN_FILE};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -106,6 +106,13 @@ fn id_of(path: &str) -> String {
 /// ⚠️ `mount_rel` 是**树内相对**前缀（本插件空间里的首段，见 `sub_vfs`），不是
 /// 地址空间里的绝对地址——带上根名会拼出 `<根>/<根>/…`（展示地址只在 `UnifiedFs`
 /// 出口翻译一次）。
+///
+/// ⚠️ **只用于变更帧路径（[`AgentPlugin::watch_at`]），不得用于条目地址。**
+/// 两者对「本层补的前缀」要求相反：变更帧的路径会被**每一层容器**继续
+/// `child_path` 续接（父 composite 补 `agent`、`UnifiedFs` 补根名），这里给的
+/// 相对前缀正是它要的；而**条目地址不会被容器续接**（见
+/// `composite/vdfs.rs::container_leaves_item_addresses_untouched`），填进去就是一个
+/// 少了外层挂载段的假地址——访问层见非空即不再回填。踩点见 [`AgentPlugin::list_at`]。
 fn mount_path(mount_rel: &str, rel: &str) -> String {
     match (mount_rel.is_empty(), rel.is_empty()) {
         (true, true) => String::new(),
@@ -184,14 +191,22 @@ fn entry_node(e: &FileEntry) -> VdfsNode {
 }
 
 impl AgentPlugin {
-    /// 依请求上下文构造 AgentDirStore（每次请求独立，与 route 入口一致）
+    /// Agent 目录底座（每次请求独立）
     ///
-    /// agent 目录根 = **本插件自己的目录**，取自父插件经 `PLUGIN_DIR` 传下的目录
-    /// （`dir_from_ctx`；缺省退回常规落位）——与 `AgentPlugin::build` 同源，
-    /// 这里不另拼一份 `<homedir>/…/agent`。
-    fn store_of(ctx: &Arc<dyn InvokeRequest>) -> AgentDirStore {
-        let dir = dir_from_ctx(&**ctx, PLUGIN_AGENT);
-        AgentDirStore::new(dir.dir())
+    /// 根 = **本插件自己持有的目录**（构造时由父插件经 `PLUGIN_DIR` 告知，落在
+    /// `config_file` 上）——与 [`AgentPlugin::sub_agent`] 取的是**同一份**。
+    ///
+    /// ⚠️ **不得改回「从请求上下文取」**（`dir_from_ctx(&**host, PLUGIN_AGENT)`）。
+    /// `PLUGIN_DIR` 只在**装配期**给出：`composite::build` 构造子插件时、
+    /// `AgentPlugin::sub_agent` 造子树时。请求上下文里没有它，于是 `dir_from_ctx`
+    /// 会回退到 `PluginDir::of(PLUGIN_AGENT)` = **全局 agent 根**——顶层恰好等于
+    /// 自己的目录（看不出错），**嵌套层则整层错位**：子智能体空间里列出的
+    /// 「智能体」其实是顶层清单，用户看到的是**它自己**（回归钉：
+    /// `host::tests::sub_agent_agent_list_is_scoped_to_its_own_space`）。
+    /// 同理，`RelPath::Agent` / `File` / `Memory` 各域在子空间里也都会读到全局
+    /// 的智能体包。
+    fn store(&self) -> AgentDirStore {
+        AgentDirStore::new(self.config_file().dir().dir())
     }
 
     /// 系统智能体自身指令 → VDFS 节点（`list` 与 `stat` 共用同一份形状）
@@ -328,8 +343,7 @@ impl AgentPlugin {
     /// 树内的相对地址，必须补上挂载前缀才能交给上层——这正是「地址属于列表」的
     /// 一处实例（同一个节点在父树与子树里地址不同，节点本身没有地址）。
     async fn list_at(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<Vec<VdfsItem>> {
-        let host = host_ctx(ctx)?;
-        let store = Self::store_of(&host);
+        let store = self.store();
         match parse_rel_path(path) {
             // 挂载根 = **装进来的智能体清单**，一样别的都没有。
             //
@@ -352,8 +366,21 @@ impl AgentPlugin {
                 // 子根与父（系统）根是同一份 `CompositeVfs`，因此同样按 `hidden`
                 // 只显示可见插件（gateway/web/telegram/local/work 等配置型挂载点不会
                 // 出现在侧边栏），父子两侧栏完全一致。
-                if let Ok((p, sub, mount_rel)) = self.sub_vfs(ctx, &id).await {
-                    let mut items = p
+                //
+                // ⚠️ **条目地址原样透出，本层不填**（与容器同一契约，见
+                // `composite/vdfs.rs::container_leaves_item_addresses_untouched`）：
+                // 条目地址要么由**拥有者**填成树内绝对地址，要么**留空**由访问层
+                // （`plugins/vdfs/host.rs::item_addr`）按请求地址回填——而请求地址
+                // 是完整地址，含本挂载点被挂在哪（`agent/`）。
+                //
+                // 本层**填不出**这个地址：`mount_rel` 只是本插件空间内的首段
+                // （不含 `agent/`），而 `mount_path` 对空 `rel` 返回的正是它——于是
+                // 访问层见到非空地址，认为「拥有者已填好」而**不再回填**，子空间里
+                // 列出的**每一条**都顶着子空间根地址（会话节点因此变成
+                // `<根>/<agent-id>`——那是个目录，前端点开会话即「读取会话转写失败」）。
+                // 变更帧不受影响：那条路每层容器都会续接（见 `mount_path`）。
+                if let Ok((p, sub, _mount_rel)) = self.sub_vfs(ctx, &id).await {
+                    return p
                         .dispatch(
                             &sub,
                             "",
@@ -364,11 +391,7 @@ impl AgentPlugin {
                         )
                         .await?
                         .into_list()
-                        .ok_or_else(mismatch)?;
-                    for it in &mut items {
-                        it.path = mount_path(&mount_rel, &it.path);
-                    }
-                    return Ok(items);
+                        .ok_or_else(mismatch);
                 }
                 // 回退（v1 / legacy 约定目录）：原始 agent 目录罗列
                 // 存在性校验：不存在的条目应报 NotFound 而非给出空清单
@@ -398,9 +421,11 @@ impl AgentPlugin {
             ))),
             RelPath::File { id, rel } => {
                 let id = id_of(id);
-                // 可挂载的子智能体 → 穿过挂载点，列出子 composite 内对应子树
-                if let Ok((p, sub, mount_rel)) = self.sub_vfs(ctx, &id).await {
-                    let mut items = p
+                // 可挂载的子智能体 → 穿过挂载点，列出子 composite 内对应子树。
+                // 条目地址的处理与上面 `RelPath::Agent` 臂**同一条**（原样透出，
+                // 本层不填）——理由与那次真实事故都写在那里，改一处必须改两处。
+                if let Ok((p, sub, _mount_rel)) = self.sub_vfs(ctx, &id).await {
+                    return p
                         .dispatch(
                             &sub,
                             rel,
@@ -411,11 +436,7 @@ impl AgentPlugin {
                         )
                         .await?
                         .into_list()
-                        .ok_or_else(mismatch)?;
-                    for it in &mut items {
-                        it.path = mount_path(&mount_rel, &it.path);
-                    }
-                    return Ok(items);
+                        .ok_or_else(mismatch);
                 }
                 let e = store
                     .stat_item(&id, rel)
@@ -450,8 +471,7 @@ impl AgentPlugin {
     /// 就有，但别的 provider 可能要运行期汇流），因此它随**根节点自述**一起给出：
     /// 容器合成挂载点节点时向本 provider 发一次 `Stat("")`，取走 `new_type`。
     async fn stat_at(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsNode> {
-        let host = host_ctx(ctx)?;
-        let store = Self::store_of(&host);
+        let store = self.store();
         match parse_rel_path(path) {
             // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
             RelPath::Root => Ok(
@@ -501,8 +521,7 @@ impl AgentPlugin {
 
     /// `path` 域的内容读取
     async fn read_at(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
-        let host = host_ctx(ctx)?;
-        let store = Self::store_of(&host);
+        let store = self.store();
         match parse_rel_path(path) {
             // 本应用自身的指令（`{homedir}/AGENTS.md`）
             RelPath::Instruction => {
@@ -566,8 +585,7 @@ impl AgentPlugin {
         path: &str,
         content: &VdfsContent,
     ) -> VdfsResult<VdfsWriteResponse> {
-        let host = host_ctx(ctx)?;
-        let store = Self::store_of(&host);
+        let store = self.store();
         // 系统智能体自身的指令写回（容量闸门在内核里，本插件不重复实现）
         if matches!(parse_rel_path(path), RelPath::Instruction) {
             if content.binary {
@@ -657,8 +675,7 @@ impl AgentPlugin {
         if path.is_empty() {
             return Err(VdfsError::Forbidden(format!("不可删除挂载点：{path}")));
         }
-        let host = host_ctx(ctx)?;
-        let store = Self::store_of(&host);
+        let store = self.store();
         // 系统指令不可删除（与各层记忆同一口径）：要清空就写入空内容
         if matches!(parse_rel_path(path), RelPath::Instruction) {
             return Err(VdfsError::Forbidden(format!(
@@ -769,8 +786,7 @@ impl AgentPlugin {
             let pack = vdfs_service::VdfsUnpack::from_payload(payload)
                 .map_err(|e| VdfsError::invalid(e.0))?;
             let bytes = pack.bytes().map_err(|e| VdfsError::invalid(e.0))?;
-            let host = host_ctx(ctx)?;
-            let store = Self::store_of(&host);
+            let store = self.store();
             let r = store
                 .import(&bytes, true)
                 .map_err(|e| VdfsError::invalid(format!("导入失败：{e}")))?;
@@ -790,8 +806,7 @@ impl AgentPlugin {
                 "「导出」只对{LABEL}条目可用：{path}"
             )));
         }
-        let host = host_ctx(ctx)?;
-        let store = Self::store_of(&host);
+        let store = self.store();
         let id = id_of(path);
         let bytes = store
             .export(&id)

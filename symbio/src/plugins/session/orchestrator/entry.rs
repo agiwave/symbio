@@ -401,19 +401,24 @@ impl SessionPlugin {
                         session.append_messages(vec![msg.clone()]).await
                     }
                     .await;
-                    if let Err(e) = appended {
-                        let msg = format!("追加用户消息到存储失败: {}", e);
-                        crate::plugin_error!("session", "{}", &msg);
-                        this_spawn
-                            .broadcast_error_with_idle(&state_spawn, msg)
-                            .await;
-                        return;
-                    }
+                    let persisted = match appended {
+                        Ok(p) => p,
+                        Err(e) => {
+                            let msg = format!("追加用户消息到存储失败: {}", e);
+                            crate::plugin_error!("session", "{}", &msg);
+                            this_spawn
+                                .broadcast_error_with_idle(&state_spawn, msg)
+                                .await;
+                            return;
+                        }
+                    };
                     // 用户消息也必须有变更出口：它原先只落库、不发任何 VDFS 变更，
                     // 于是前端只持有**本地乐观副本**（本地游标发的号），永远拿不到
                     // 存储分配的权威 `seq`——两套序号空间并存正是「排序偶尔错位、
-                    // 刷新才恢复」的根源（见 `emit_persisted_message` 的文档）。
-                    this_spawn.emit_persisted_message(&sid_spawn, &msg.id).await;
+                    // 刷新才恢复」的根源（见 `emit_persisted_messages` 的文档）。
+                    this_spawn
+                        .emit_persisted_messages(&sid_spawn, &persisted)
+                        .await;
                     // 自动命名：首个用户消息落盘后，尚无标题的会话从内容生成并持久化。
                     // 快照里已有标题 ⇒ 整趟跳过（`ensure_auto_title` 此时唯一的动作
                     // 是"读一遍会话 → 发现已有标题 → 返回"，见 `SessionSnapshot::has_title`）。
@@ -571,10 +576,11 @@ impl SessionPlugin {
                 .map(|s| s.to_string())
         });
         let session_id = resolve_required_session_id(&ctx, body_id.as_deref())?;
-        let state = self.active_mgr.get_or_create(&session_id).await;
-        self.handle_abort(&state).await;
+        // 与 `action(<会话地址>, "abort")` **同一个实现**（`abort_turn`）；本路由是
+        // 它的 address-less 别名，退役前不复制逻辑。
+        let stopped = self.abort_turn(&session_id).await;
         Ok(PluginPayload::new(&serde_json::json!({
-            "status": "aborted",
+            "status": if stopped { "aborted" } else { "idle" },
             "session_id": session_id
         })))
     }

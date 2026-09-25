@@ -64,7 +64,17 @@ export interface SessionNodeSink {
   applySessionState(id: string, node: VdfsNode): void
 }
 
-let _unsubscribe: (() => void) | null = null
+/**
+ * 已登记的会话挂载目录。
+ *
+ * **不只一份**：子智能体空间（`agent/<id>/…`）是一棵完整子树，内部有自己的
+ * `session` 挂载。只订根那一份会让子空间的会话节点变更**根本收不到**——
+ * 它的地址是 `<根>/agent/<id>/session/<sid>`，匹配不上根挂载的前缀。
+ * 「会话住在哪个空间」是地址的一部分，订阅因此按挂载目录逐份登记。
+ */
+const _mounts = new Set<string>()
+let _sink: SessionNodeSink | null = null
+let _unsubs: Array<() => void> = []
 let _listRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 防抖重拉：只给地址的无载荷资源变更，用于收敛排序与完整字段 */
@@ -78,38 +88,40 @@ function scheduleListRefresh(sink: SessionNodeSink): void {
   }, 800)
 }
 
+/**
+ * 登记一个会话挂载目录（幂等）。
+ *
+ * 进入子智能体空间、或选中该空间里的会话时调用——那棵子树的 `session` 挂载
+ * 到此才进入视野。已登记的目录重复调用是空操作。
+ */
+export async function registerSessionMount(mountDir: string): Promise<boolean> {
+  if (!mountDir || _mounts.has(mountDir)) return false
+  _mounts.add(mountDir)
+  if (_sink) _unsubs.push(subscribeMount(mountDir, _sink))
+  logger.info('[session-node-sync]', '登记会话挂载目录', mountDir)
+  return true
+}
+
 /** 停止会话节点同步（重复启动 / HMR / 测试时调用；无订阅则空操作） */
 export function stopSessionNodeSync(): void {
-  if (_unsubscribe) {
-    _unsubscribe()
-    _unsubscribe = null
-  }
+  for (const u of _unsubs) u()
+  _unsubs = []
   if (_listRefreshTimer) {
     clearTimeout(_listRefreshTimer)
     _listRefreshTimer = null
   }
+  _sink = null
 }
 
-/**
- * 启动会话节点同步（先停旧订阅再挂新的 → 进程内天然单订阅）。
- *
- * 与 `startTranscriptSync` 同构：重复启动不叠加监听器，而是替换。
- */
-export async function startSessionNodeSync(sink: SessionNodeSink): Promise<void> {
+/** 测试 / HMR 用：连已登记的挂载目录一起清空 */
+export function resetSessionNodeSyncMounts(): void {
   stopSessionNodeSync()
+  _mounts.clear()
+}
 
-  // 挂载目录是运行期数据（按「可新建 ext=session 的挂载点」认出来），不是常量
-  let mountDir: string
-  try {
-    mountDir = await ensureSessionMountDir()
-  } catch (err) {
-    // 解析不到就不订阅：宁可没有订阅，也不要订到一个拼错的 prefix 上
-    // （那样侧栏会静默不更新，比报错难查）。
-    logger.error('[session-node-sync]', '会话挂载目录解析失败，订阅未启动', err)
-    return
-  }
-
-  _unsubscribe = subscribeVdfsChanged(
+/** 为一个挂载目录挂订阅（每个目录一份：前缀不同，登记也不同） */
+function subscribeMount(mountDir: string, sink: SessionNodeSink): () => void {
+  return subscribeVdfsChanged(
     { prefix: mountDir, directChildren: true },
     (change) => {
       const id = vdfsBase(change.path)
@@ -142,4 +154,27 @@ export async function startSessionNodeSync(sink: SessionNodeSink): Promise<void>
     // 信号会让侧栏留下一个已经不存在的会话）。清单是幂等全量视图，整表重拉即权威收敛。
     () => scheduleListRefresh(sink),
   )
+}
+
+/**
+ * 启动会话节点同步（先停旧订阅再挂新的 → 进程内天然单订阅）。
+ *
+ * 与 `startTranscriptSync` 同构：重复启动不叠加监听器，而是替换。
+ */
+export async function startSessionNodeSync(sink: SessionNodeSink): Promise<void> {
+  stopSessionNodeSync()
+  _sink = sink
+
+  // 挂载目录是运行期数据（按「可新建 ext=session 的挂载点」认出来），不是常量
+  let mountDir: string
+  try {
+    mountDir = await ensureSessionMountDir()
+  } catch (err) {
+    // 解析不到就不订阅：宁可没有订阅，也不要订到一个拼错的 prefix 上
+    // （那样侧栏会静默不更新，比报错难查）。
+    logger.error('[session-node-sync]', '会话挂载目录解析失败，订阅未启动', err)
+    return
+  }
+  if (!_mounts.has(mountDir)) _mounts.add(mountDir)
+  _unsubs = [..._mounts].map((m) => subscribeMount(m, sink))
 }

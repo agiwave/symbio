@@ -438,8 +438,8 @@ async fn max_messages_zero_means_unlimited() {
 /// 这条不变量是「前端只有一套序号空间」的全部前提：前端为尚未落库的节点自己发
 /// 本地号，只有**落库回包**才能把它换成权威号。因此两件事都得成立，且都得钉住：
 ///
-/// 1. `get_messages()` 读回来的消息**带 `seq`**——`emit_persisted_message` 发的
-///    就是这份读回来的权威版本（发入参那条等于把「没有号」写进前端）；
+/// 1. `get_messages()` 读回来的消息**带 `seq`**——落库回包发的就是 `append_messages`
+///    交回的这份权威版本（发入参那条等于把「没有号」写进前端）；
 /// 2. 跨次追加**严格递增**：若新消息拿到比已有消息小的号，前端的顺序锚点就会
 ///    把新消息排到旧消息之前（“刚发的跑到中间去”）。
 ///
@@ -535,6 +535,92 @@ async fn append_messages_replaces_inflight_placeholder_seq() {
         .seq
         .expect("存储必须分配 seq");
     assert!(s3 > s2, "后续追加必须继续递增：compact1={s2} → u2={s3}");
+}
+
+/// 落库回包契约（`docs/vdfs-session-messages.md` §3.4）：`append_messages` 必须
+/// **把存储里的权威副本交回调用方**——带存储分配的 `seq` / `timestamp`，在途号已换掉。
+///
+/// 这条契约是正确性而非便利：`seq` 只在存储写入时分配，前端又只认存储号
+/// （`Transcript::apply` 仅在帧带 `seq` 时采用外来值）。调用方拿不到权威副本 ⇒
+/// 那条消息在前端**永远只有在途号** ⇒ 与存储号并存两套序号空间 ⇒ 排序错位
+/// （`user-user-assistant-assistant`，只有整份回读才恢复）。
+/// 端到端回归钉：`e2e/cases/t16-live-order.mjs`。
+#[tokio::test]
+async fn append_messages_returns_storage_authoritative_copies() {
+    let (session, _dir, _tmp) = setup().await;
+    let inflight = super::super::transcript::INFLIGHT_SEQ_BASE;
+
+    // 助手侧节点的真实形态：号是在途图发的；用户那条干净（本地乐观副本也没有号）
+    let mut assistant = plain_msg("a1");
+    assistant.seq = Some(inflight + 1);
+
+    let returned = session
+        .append_messages(vec![plain_msg("u1"), assistant])
+        .await
+        .expect("落库失败");
+
+    assert_eq!(
+        returned.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        vec!["u1", "a1"],
+        "交回的条数与顺序必须与入参一致"
+    );
+    for m in &returned {
+        let seq = m.seq.expect("交回的消息必须带存储分配的 seq");
+        assert!(
+            seq < inflight,
+            "交回的必须是存储号、不是在途号：{} = {seq}（在途号段从 {inflight} 起）",
+            m.id
+        );
+        assert!(
+            m.timestamp.unwrap_or(0) > 0,
+            "交回的消息必须带存储回填的 timestamp：{}",
+            m.id
+        );
+    }
+
+    // 与磁盘逐字段一致——回执不是入参副本（入参那份没有号）
+    let stored = session.get_messages().await.expect("读取存储消息失败");
+    for m in &returned {
+        let s = stored
+            .iter()
+            .find(|s| s.id == m.id)
+            .unwrap_or_else(|| panic!("交回的消息必须在存储中：{}", m.id));
+        assert_eq!(m.seq, s.seq, "交回的 seq 必须与存储一致：{}", m.id);
+        assert_eq!(
+            m.timestamp, s.timestamp,
+            "交回的 timestamp 必须与存储一致：{}",
+            m.id
+        );
+    }
+}
+
+/// 交回的是**留在存储里**的那些：被轮次窗口淘汰的不得出现在回执里。
+///
+/// 交回一条存储里并不存在的消息，等于让前端"对齐"到一个幻影——它的号在存储里
+/// 属于别人，之后每一次追加都会再错一次。
+#[tokio::test]
+async fn append_messages_omits_messages_dropped_by_turn_window() {
+    let config = SessionConfig {
+        max_messages: 1,
+        ..Default::default()
+    };
+    let (session, _dir, _tmp) = setup_with_config(config).await;
+
+    let returned = session
+        .append_messages(vec![plain_msg("u1"), plain_msg("u2"), plain_msg("u3")])
+        .await
+        .expect("落库失败");
+
+    assert_eq!(
+        returned.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        vec!["u3"],
+        "窗口只留最后 1 轮 ⇒ 回执里只应有 u3"
+    );
+    let stored = session.get_messages().await.expect("读取存储消息失败");
+    assert!(
+        !stored.iter().any(|m| m.id == "u1"),
+        "u1 应已被窗口淘汰（前置条件）"
+    );
 }
 
 /// 存储边界（整表重写）：在途号同样不得落库，且必须在 `assign_seq` **之前**摘掉。

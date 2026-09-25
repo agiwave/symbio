@@ -97,6 +97,59 @@ export default defineCase('T15 子智能体空间自驱动：写 inbox → 空�
     });
     assertEq(created.status, 200, `创建子智能体空间里的会话（${JSON.stringify(created.body)?.slice(0, 300)}）`);
 
+    // ── ①b 清单里的地址必须**可用**：会话条目地址 = 完整地址，且按它读得到转写
+    //
+    // 挂载点（`agent/<id>`）**不得**替访问层填条目地址——它不知道自己被挂在哪
+    // （`agent/`），填出来的会是一个少了外层挂载段的假地址，而访问层见到非空地址就
+    // 「不再回填」。表现：子空间里列出的**每一条**都顶着子空间根地址
+    // （`<根>/<agent-id>`，那是个目录），前端点开会话即「读取会话转写失败」。
+    //
+    // 只手工拼地址（`inboxAddr`）的用例对这条无感：必须**消费清单给的地址**才钉得住。
+    const sessionMount = `${root.replace(/\/+$/, '')}/agent/${AGENT_ID}/session`;
+    const mountList = await cli.invoke('vdfs/list', { path: sessionMount });
+    const listed = mountList.body?.data?.items ?? [];
+    const mine = listed.find((n) => n.name === SUB_SESSION);
+    assert(
+      mine,
+      `子空间的会话清单应含刚建的会话（实际 ${JSON.stringify(listed.map((n) => n.path))}）`,
+    );
+    assertEq(
+      mine.path,
+      `${sessionMount}/${SUB_SESSION}`,
+      '会话条目地址必须是完整地址（挂载点留空、访问层按请求地址回填）',
+    );
+    const reread = await cli.invoke('vdfs/read', { path: mine.path });
+    assertEq(
+      reread.status,
+      200,
+      `按清单给的地址读会话转写（${JSON.stringify(reread.body)?.slice(0, 300)}）`,
+    );
+
+    // ── ①c 子空间里的「智能体」清单必须是**它自己的**（该子智能体没有下级）
+    //
+    // agent 插件的作用域 = **它自己持有的目录**（装配期由父插件经 `PLUGIN_DIR`
+    // 告知）。若从**请求上下文**取，那里没有 `PLUGIN_DIR`，就会回退到**全局**
+    // agent 根——子空间里列出的「智能体」其实是顶层清单（含它自己），用户看到
+    // 的是「下一级智能体居然是自己」。顶层看不出这个错（回退值恰好等于自己的
+    // 目录），只有钻进嵌套层才显形。
+    const nestedAgentMount = `${root.replace(/\/+$/, '')}/agent/${AGENT_ID}/agent`;
+    const nestedList = await cli.invoke('vdfs/list', { path: nestedAgentMount });
+    assertEq(
+      nestedList.status,
+      200,
+      `列出子空间自己的智能体挂载点（${JSON.stringify(nestedList.body)?.slice(0, 300)}）`,
+    );
+    const nestedNames = (nestedList.body?.data?.items ?? []).map((n) => n.name);
+    assert(
+      !nestedNames.includes(AGENT_ID),
+      `子空间的智能体清单不得含它自己（目录回退到全局 agent 根的表现），实际：${JSON.stringify(nestedNames)}`,
+    );
+    assertEq(
+      nestedNames,
+      [],
+      `该子智能体没有下级智能体，清单应为空，实际：${JSON.stringify(nestedNames)}`,
+    );
+
     // ── ② 收件箱是会话内部的**一个普通集合**（与会话转写并列），地址可 stat
     const inboxStat = await cli.invoke('vdfs/stat', { path: inboxAddr(root) });
     assertEq(inboxStat.body?.data?.kind, 'inbox', `收件箱的 kind 是稳定协议词（${JSON.stringify(inboxStat.body)?.slice(0, 300)}）`);

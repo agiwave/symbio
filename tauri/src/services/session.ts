@@ -21,16 +21,23 @@
  * 本文件保留的只是**地址拼接 + 形状适配**（把 VDFS 域响应映射成 store 习惯的
  * 形状），没有任何协议知识——新增一种会话操作**不需要**在这里加路由。
  *
+ * ## 地址里的「哪个空间」是**参数**，不是常量
+ *
+ * 上表里的 `<根>/session` 只是**默认**挂载目录。子智能体空间
+ * （`<根>/agent/<id>/session`）是一棵完整子树、内部有自己的 `session` 挂载，
+ * 因此每个函数都收一个可选的 `mountDir`：省略 = 默认（根空间，行为与从前一致），
+ * 传入即作用于那个空间。**没有第二份实现**——同一个函数体按参数拼地址。
+ *
  * ## 发言为什么不在上表
  *
- * 发言不是写入也不是动作，是**一轮编排**（模型调用 → 工具执行 → 流式落库），
- * 入口仍是聊天协议（`CHAT_SEND`）。因此「往转写列表里放一条」在 VDFS 侧被显式
- * 拒绝——`write` 只改**既有**消息，`create` 意图一律驳回。
+ * 发言不是写入也不是动作，是**一轮编排**（模型调用 → 工具执行 → 流式落库）。
+ * 但它的**入口**同样是地址：往 `<A>/inbox/<iid>` 写一条即入队（ADR-026），
+ * 由空间自己在空闲时消费。见 `composables/useChatConnection`。
  */
 
 import { deleteVdfs, listVdfs, readVdfs, runVdfsAction, writeVdfs } from './vdfs'
 import { READBACK_REASON } from './readback'
-import { ensureSessionMountDir, ensureVdfsSessionScheme } from './vdfsScheme'
+import { ensureSessionMountDir, ensureSessionScheme } from './vdfsScheme'
 import {
   VDFS_ACTION_CLEAR,
   VDFS_ACTION_TRUNCATE,
@@ -68,13 +75,17 @@ export type { SessionMetadata } from '../schemas/session_meta'
  *
  * 不传 `limit` 时请求里**不带**窗口参数——后端行为与从前逐字节一致
  * （有界列表是可选能力，不是新契约）。
+ *
+ * `mountDir` 省略 = **默认挂载目录**（根空间那份，`ensureSessionMountDir()`），
+ * 与从前逐字节一致；子智能体空间传 `agent/<id>/session`。
  */
 export async function listSessions(
-  limit?: number
+  limit?: number,
+  mountDir?: string
 ): Promise<SessionList.SessionListItem[]> {
   // 不传 limit 时**单参调用**——请求形状必须与从前一致（多一个 undefined
   // 实参也会被 `toHaveBeenCalledWith` 认成「多传了一个参数」）
-  const path = await ensureSessionMountDir()
+  const path = mountDir ?? (await ensureSessionMountDir())
   const resp =
     limit === undefined
       ? await listVdfs(READBACK_REASON.LIST_REFRESH, path)
@@ -110,8 +121,8 @@ export async function listSessions(
  * 清单里找得到的会话上调用，因此这条差异在真实路径上不可达——而"删不存在的东西
  * 报错"比"静默成功"更诚实。
  */
-export async function deleteSession(sessionId: string): Promise<void> {
-  await deleteVdfs(vdfsSessionAddr(await ensureSessionMountDir(), sessionId))
+export async function deleteSession(sessionId: string, mountDir?: string): Promise<void> {
+  await deleteVdfs(vdfsSessionAddr(mountDir ?? (await ensureSessionMountDir()), sessionId))
 }
 
 /**
@@ -124,8 +135,11 @@ export async function deleteSession(sessionId: string): Promise<void> {
  * store 只需要 `ChatMessage[]`。读失败（空内容 / 非 JSON）在此就地转成错误，
  * 调用方不必各自写一遍 `JSON.parse` 的 try/catch。
  */
-export async function readSessionTranscript(sessionId: string): Promise<SessionMessage[]> {
-  const addr = vdfsSessionAddr(await ensureSessionMountDir(), sessionId)
+export async function readSessionTranscript(
+  sessionId: string,
+  mountDir?: string
+): Promise<SessionMessage[]> {
+  const addr = vdfsSessionAddr(mountDir ?? (await ensureSessionMountDir()), sessionId)
   const content = await readVdfs(READBACK_REASON.TRANSCRIPT_LOAD, addr)
   const text = content?.text
   if (!text) throw new Error(`读取会话转写失败：${addr}`)
@@ -165,8 +179,9 @@ export interface DeleteMessageResult {
  * `deleted_ids` 才是权威列表。见后端 `symbio_core::vdfs_provider` 的
  * `VDFS_ACTION_TRUNCATE` 文档。
  */
-export async function clearMessages(sessionId: string): Promise<void> {
-  await runVdfsAction(vdfsMessagesAddr(await ensureVdfsSessionScheme(), sessionId), VDFS_ACTION_CLEAR)
+export async function clearMessages(sessionId: string, mountDir?: string): Promise<void> {
+  const scheme = await ensureSessionScheme(mountDir)
+  await runVdfsAction(vdfsMessagesAddr(scheme, sessionId), VDFS_ACTION_CLEAR)
 }
 
 /**
@@ -184,10 +199,12 @@ export async function clearMessages(sessionId: string): Promise<void> {
  */
 export async function deleteMessage(
   sessionId: string,
-  messageId: string
+  messageId: string,
+  mountDir?: string
 ): Promise<DeleteMessageResult> {
+  const scheme = await ensureSessionScheme(mountDir)
   const res = await runVdfsAction(
-    vdfsMessageAddr(await ensureVdfsSessionScheme(), sessionId, messageId),
+    vdfsMessageAddr(scheme, sessionId, messageId),
     VDFS_ACTION_TRUNCATE
   )
   return {
@@ -208,12 +225,11 @@ export async function deleteMessage(
  */
 export async function updateMessage(
   sessionId: string,
-  message: SessionMessage
+  message: SessionMessage,
+  mountDir?: string
 ): Promise<void> {
-  await writeVdfs(
-    vdfsMessageAddr(await ensureVdfsSessionScheme(), sessionId, message.id),
-    JSON.stringify(message)
-  )
+  const scheme = await ensureSessionScheme(mountDir)
+  await writeVdfs(vdfsMessageAddr(scheme, sessionId, message.id), JSON.stringify(message))
 }
 
 /**
@@ -233,10 +249,11 @@ export async function updateMessage(
 export async function updateSession(
   sessionId: string,
   metadata: SessionMetadata,
-  title?: string
+  title?: string,
+  mountDir?: string
 ): Promise<void> {
   await writeVdfs(
-    vdfsSessionAddr(await ensureSessionMountDir(), sessionId),
+    vdfsSessionAddr(mountDir ?? (await ensureSessionMountDir()), sessionId),
     JSON.stringify({ metadata, ...(title ? { title } : {}) })
   )
 }

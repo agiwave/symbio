@@ -11,8 +11,12 @@
  *
  * | 地址 | 归属 |
  * |---|---|
- * | `<根>/session/<sid>` | 会话节点自身（运行态 / 资源）→ `stores/sessionNodeSync` |
- * | `<根>/session/<sid>/<集合段>/<项 id>` | 集合项；`<集合段>` 是消息段时归**本模块** |
+ * | `<挂载目录>/<sid>` | 会话节点自身（运行态 / 资源）→ `stores/sessionNodeSync` |
+ * | `<挂载目录>/<sid>/<集合段>/<项 id>` | 集合项；`<集合段>` 是消息段时归**本模块** |
+ *
+ * `<挂载目录>` **不止一份**：根空间是 `<根>/session`，子智能体空间是
+ * `<根>/agent/<id>/session`。转写变更按**已登记的挂载目录**取最长前缀匹配来归属，
+ * 只认根那一份会让子空间的消息变更整片收不到（`registerSessionMount` 见下）。
  *
  * 载荷是**帧本身**（与后端内存图收到的同一条 `ChatMessage`），语义全在字段上，
  * **没有操作枚举**：
@@ -70,7 +74,7 @@
 import { subscribeVdfsChanged } from '@/services/eventBus'
 import { statVdfs, readVdfs } from '@/services/vdfs'
 import { READBACK_REASON, type ReadbackReason } from '@/services/readback'
-import { ensureVdfsSessionScheme } from '@/services/vdfsScheme'
+import { ensureSessionScheme } from '@/services/vdfsScheme'
 import { type VdfsChange, type VdfsNode } from '@/schemas/vdfs'
 import {
   MESSAGE_STATUS_REMOVED,
@@ -100,10 +104,16 @@ const FLUSH_INTERVAL_MS = 48
 
 interface SyncState {
   sink: TranscriptSyncSink | null
-  unsubscribe: (() => void) | null
-  /** 地址方案缓存（mountDir + 消息段名） */
-  mountDir: string
-  messagesSeg: string
+  unsubscribes: Array<() => void>
+  /**
+   * **已登记的挂载目录 → 转写段名**。
+   *
+   * 不只一份：子智能体空间（`agent/<id>/…`）是一棵完整子树，内部有自己的
+   * `session` 挂载。只认根那一份会让子空间的消息变更**根本收不到**——它的
+   * 地址是 `<根>/agent/<id>/session/<sid>/message/<mid>`，匹配不上根挂载的前缀。
+   * 「会话住在哪个空间」是地址的一部分，因此按挂载目录登记，而不是全局一份。
+   */
+  mounts: Map<string, string>
   /** 会话 → 待落地的增量帧（保持到达顺序；flush 时按会话一次提交） */
   pending: Map<string, ChatMessage[]>
   flushTimer: ReturnType<typeof setTimeout> | null
@@ -126,9 +136,8 @@ interface SyncState {
 const _G = globalThis as typeof globalThis & { __symTranscriptSyncState?: SyncState }
 const S: SyncState = _G.__symTranscriptSyncState ?? (_G.__symTranscriptSyncState = {
   sink: null,
-  unsubscribe: null,
-  mountDir: '',
-  messagesSeg: '',
+  unsubscribes: [],
+  mounts: new Map(),
   pending: new Map(),
   flushTimer: null,
   deltaGen: new Map(),
@@ -137,10 +146,27 @@ const S: SyncState = _G.__symTranscriptSyncState ?? (_G.__symTranscriptSyncState
 // HMR：模块重载后复用旧 state 对象，新字段可能不存在——补齐而不是让它变成 undefined。
 S.deltaGen ??= new Map()
 S.seenSessions ??= new Set()
+S.unsubscribes ??= []
+S.mounts ??= new Map()
 
 /** 消息节点的展示地址（订阅 handler 的路径过滤与守卫键共用这一种拼法） */
-function messageAddr(sid: string, mid: string): string {
-  return `${S.mountDir}/${sid}/${S.messagesSeg}/${mid}`
+function messageAddr(mountDir: string, sid: string, mid: string): string {
+  return `${mountDir}/${sid}/${S.mounts.get(mountDir) ?? ''}/${mid}`
+}
+
+/**
+ * 变更地址落在哪个已登记的挂载目录下（没有就是不属于本消费端）。
+ *
+ * 取**最长**匹配：挂载目录互为前缀时（`<根>/session` 与 `<根>/session/…`
+ * 不会，但 `<根>/agent` 之下可能），最长匹配才是「属于谁」的正确答案。
+ */
+function mountOf(path: string): string | null {
+  let best: string | null = null
+  for (const m of S.mounts.keys()) {
+    if (!path.startsWith(`${m}/`)) continue
+    if (best === null || m.length > best.length) best = m
+  }
+  return best
 }
 
 /** 某消息路径当前的增量代际（没应用过 = 0） */
@@ -246,10 +272,15 @@ function messageOfNode(node: VdfsNode, text: string): ChatMessage | null {
  * 反推。它由调用点给定而不是本函数推断：两种触发在代码里就分得清（下面 ② / ⑤），
  * 到了这里只剩一个动作。
  */
-async function readMessage(sid: string, mid: string, reason: ReadbackReason): Promise<void> {
+async function readMessage(
+  mountDir: string,
+  sid: string,
+  mid: string,
+  reason: ReadbackReason,
+): Promise<void> {
   const sink = S.sink
   if (!sink) return
-  const addr = messageAddr(sid, mid)
+  const addr = messageAddr(mountDir, sid, mid)
   // 正文写入代际快照：读取期间若本端正文又变过（增量 / 全量），本地比这次响应新
   const gen = deltaGenOf(addr)
   try {
@@ -304,9 +335,13 @@ function dropQueuedDelta(sid: string, mid: string): void {
  */
 export function handleVdfsChange(change: VdfsChange): void {
   const sink = S.sink
-  if (!sink || !S.mountDir) return
+  if (!sink) return
   const path = change.path
-  if (!path || !path.startsWith(`${S.mountDir}/`)) return
+  if (!path) return
+  // 「属于哪个空间」由**地址**回答：登记过的挂载目录里取最长匹配。只认根那一份
+  // 会让子智能体空间（`agent/<id>/session/…`）的转写变更整片收不到。
+  const mountDir = mountOf(path)
+  if (!mountDir) return
 
   // 地址形状：`<mountDir>/<sid>/<集合段>/<项 id>`（恰三段）才是**集合项**。
   // 本模块只认**消息**这一类集合（`segs[1] === messagesSeg`）：
@@ -316,9 +351,9 @@ export function handleVdfsChange(change: VdfsChange): void {
   //   实时面的职责；
   // - 其余集合段（子会话 / 记忆 / 工作目录，以及后续的任务列表、请求队列……）
   //   各有各的消费端——本模块不认识它们，也不该假装认识。
-  const rel = path.slice(S.mountDir.length + 1)
+  const rel = path.slice(mountDir.length + 1)
   const segs = rel.split('/')
-  if (segs.length !== 3 || segs[1] !== S.messagesSeg) return
+  if (segs.length !== 3 || segs[1] !== S.mounts.get(mountDir)) return
   const sid = segs[0]
   const mid = segs[2]
   if (!sid || !mid) return
@@ -346,14 +381,14 @@ export function handleVdfsChange(change: VdfsChange): void {
   }
 
   // ② 增量帧：窄载荷（只有 `delta`），流式正文的主干道。
-  const addr = messageAddr(sid, mid)
+  const addr = messageAddr(mountDir, sid, mid)
   if (typeof msg.delta === 'string') {
     // 代际先于落地推进：回读的判定基准是「正文被写过几次」，与是否合帧无关
     S.deltaGen.set(addr, deltaGenOf(addr) + 1)
     enqueueDelta(sid, mid, msg.delta)
     if (sink.hasMessage(sid, mid)) return
     // 身份未知：增量先落（占位），回读补身份——返回时按代际决定取不取 content
-    void readMessage(sid, mid, READBACK_REASON.IDENTITY_UNKNOWN)
+    void readMessage(mountDir, sid, mid, READBACK_REASON.IDENTITY_UNKNOWN)
     return
   }
 
@@ -393,35 +428,46 @@ export function handleVdfsChange(change: VdfsChange): void {
     return
   }
 
-  void readMessage(sid, mid, READBACK_REASON.MISSING_BASELINE)
+  void readMessage(mountDir, sid, mid, READBACK_REASON.MISSING_BASELINE)
 }
 
 /**
- * 启动会话转写同步（先停旧订阅再挂新的 → 进程内天然单订阅）。
+ * 登记一个会话挂载目录（幂等）。
  *
- * @param sink 落地目标。**必须显式注入**（生产由应用外壳传 `useSessionsStore()`，
- *   测试可传普通对象）——本模块不认识 Pinia。
+ * 进入子智能体空间、或选中该空间里的会话时调用——那棵子树的 `session` 挂载
+ * 到此才进入视野，其下的消息变更（地址前缀与根那份**不同**）才开始被路由。
+ * 已登记的目录重复调用是空操作。
+ *
+ * 与 `sessionNodeSync.registerSessionMount` 是**两个消费端各自的登记**（一个管
+ * 会话节点、一个管转写），名字因此分开：同名的两个函数在接线处要靠别名区分，
+ * 而别名正是「谁登记了谁」这件事最容易读错的地方。
+ *
+ * 解析失败（该挂载下还没有任何会话 ⇒ 推导不出集合段）返回 `false`，调用方
+ * 在新建会话 / 清单刷新后补一次即可——与引导窗口同一套兜底。
  */
-export async function startSessionTranscriptSync(sink: TranscriptSyncSink): Promise<void> {
-  stopSessionTranscriptSync()
-  S.sink = sink
-
-  // 地址方案是运行期数据（段名是展示名，随后端下发），解析失败就不订阅：
-  // 宁可没有订阅，也不要订到一个拼错的 prefix 上。
+export async function registerTranscriptMount(mountDir: string): Promise<boolean> {
+  if (!mountDir || S.mounts.has(mountDir)) return false
+  let messagesSeg: string
   try {
-    const scheme = await ensureVdfsSessionScheme()
-    S.mountDir = scheme.mountDir
-    S.messagesSeg = scheme.messagesSeg
+    messagesSeg = (await ensureSessionScheme(mountDir)).messagesSeg
   } catch (err) {
-    logger.error('[transcript-sync]', '会话挂载目录解析失败，订阅未启动', err)
-    return
+    logger.warn('[transcript-sync]', `会话挂载目录 ${mountDir} 的转写段未解析`, err)
+    return false
   }
+  // 解析期间可能已被另一次调用登记（同一个目录并发进入）——后到者不重复挂
+  if (S.mounts.has(mountDir)) return false
+  S.mounts.set(mountDir, messagesSeg)
+  if (S.sink) S.unsubscribes.push(subscribeMount(mountDir, S.sink))
+  logger.info('[transcript-sync]', '登记会话挂载目录', mountDir)
+  return true
+}
 
-  // 订阅范围 = 会话挂载目录的**整棵子树**（清单订阅用 directChildren 只看叶子，
-  // 这里要看见消息项）。重同步：后端通道曾满 / 本端重连成功 ⇒ 按本端见过的会话
-  // 整份重读。
-  S.unsubscribe = subscribeVdfsChanged(
-    { prefix: S.mountDir },
+/** 为一个挂载目录挂订阅（每个目录一份：前缀不同，登记也不同） */
+function subscribeMount(mountDir: string, sink: TranscriptSyncSink): () => void {
+  return subscribeVdfsChanged(
+    // 订阅范围 = 会话挂载目录的**整棵子树**（消息项在 `<sid>/<集合段>/<项 id>`，
+    // 不在直接子节点上，故不能用 directChildren）。
+    { prefix: mountDir },
     handleVdfsChange,
     () => {
       logger.warn('[transcript-sync]', '收到重同步信号，整份重读在途会话')
@@ -434,22 +480,48 @@ export async function startSessionTranscriptSync(sink: TranscriptSyncSink): Prom
       }
     },
   )
-  logger.info('[transcript-sync]', '会话转写同步已启动', S.mountDir)
+}
+
+/**
+ * 启动会话转写同步（先停旧订阅再挂新的 → 进程内天然单订阅）。
+ *
+ * @param sink 落地目标。**必须显式注入**（生产由应用外壳传 `useSessionsStore()`，
+ *   测试可传普通对象）——本模块不认识 Pinia。
+ */
+export async function startSessionTranscriptSync(sink: TranscriptSyncSink): Promise<void> {
+  stopSessionTranscriptSync()
+  S.sink = sink
+
+  // 默认挂载目录（根空间那份）。地址方案是运行期数据（段名是展示名，随后端下发），
+  // 解析失败就不订阅：宁可没有订阅，也不要订到一个拼错的 prefix 上。
+  let mountDir: string
+  try {
+    mountDir = (await ensureSessionScheme()).mountDir
+  } catch (err) {
+    logger.error('[transcript-sync]', '会话挂载目录解析失败，订阅未启动', err)
+    return
+  }
+  // 已登记的其它空间（此前进入过子智能体空间）一并挂上——只挂根那份会让子空间
+  // 的转写变更整片收不到。
+  if (!S.mounts.has(mountDir)) {
+    const messagesSeg = (await ensureSessionScheme(mountDir)).messagesSeg
+    S.mounts.set(mountDir, messagesSeg)
+  }
+  S.unsubscribes = [...S.mounts.keys()].map((m) => subscribeMount(m, sink))
+  logger.info('[transcript-sync]', '会话转写同步已启动', [...S.mounts.keys()])
 }
 
 /** 停止会话转写同步（重复启动 / HMR / 测试时调用） */
 export function stopSessionTranscriptSync(): void {
-  if (S.unsubscribe) {
-    S.unsubscribe()
-    S.unsubscribe = null
-  }
+  for (const u of S.unsubscribes) u()
+  S.unsubscribes = []
   if (S.flushTimer) {
     clearTimeout(S.flushTimer)
     S.flushTimer = null
   }
   S.pending.clear()
   S.sink = null
-  // mountDir / messagesSeg 保留：地址方案与订阅无关，重启动省一次解析
+  // S.mounts 保留：地址方案与订阅无关，重启动省一次解析（`resetSessionTranscriptSyncForTest` 才清）
   // deltaGen 保留：代际是「路径级」事实，不随订阅生命周期作废
   S.seenSessions.clear()
 }
@@ -459,6 +531,5 @@ export function resetSessionTranscriptSyncForTest(): void {
   stopSessionTranscriptSync()
   S.deltaGen.clear()
   S.seenSessions.clear()
-  S.mountDir = ''
-  S.messagesSeg = ''
+  S.mounts.clear()
 }

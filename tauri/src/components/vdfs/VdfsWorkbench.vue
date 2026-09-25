@@ -131,7 +131,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import Workbench from '@/components/common/Workbench.vue'
 import VdfsCard from '@/components/common/VdfsCard.vue'
 import { useVdfs } from '@/composables/useVdfs'
@@ -147,10 +147,12 @@ import {
   cardTagsOf,
 } from '@/registry/vdfsCards'
 import {
+  VDFS_EXT_SESSION,
   isVdfsDir,
   vdfsJoin,
   type VdfsItem,
 } from '@/schemas/vdfs'
+import { useSessionsStore } from '@/stores/sessions'
 
 const props = defineProps<{
   /** 绑定的 vdfs 数据地址（如 `<根>` 或 `<根>/session/<id>`）；变化 = 整体重载 */
@@ -167,6 +169,7 @@ const {
   selectDir,
   selectedName,
   cwd,
+  cwdNode,
   title,
   items,
   loading,
@@ -198,6 +201,29 @@ const {
   canCreate,
   draftSeq,
 } = useVdfs({ addr: computed(() => props.addr) })
+
+// ==================== 当前空间声明 ====================
+//
+// 「能新建会话的目录」就是**会话挂载目录**——判据与 `services/vdfsScheme`
+// 认出根挂载用的是同一个（`new_type.ext === 'session'`），因此这里不需要任何
+// 段名字面量。会话挂载**不止一份**（根空间 / 各子智能体空间各一棵子树），
+// 所以「我在哪个空间」是个随目录变化的事实，而不是常量。
+//
+// 为什么由工作台声明：**新建态（草稿）没有地址**——草稿节点的 `path` 是空串，
+// 拿不到任何「住在哪个空间」的信息。而它是从**当前目录**进的（`startNew`），
+// 当前目录就是那个空间。于是把这条事实交给 store（清单读哪份、新建写哪份、
+// 发送落哪个 inbox 都按它寻址），草稿态的懒创建才不会建到根空间去。
+//
+// 选中一个**已存在**的会话时不必依赖它：那条路径的地址里本来就带着挂载目录
+// （`Session.vue` 传 `node.path` → `store.selectSession` 解析）。
+const sessionsStore = useSessionsStore()
+watch(
+  () => (cwdNode.value?.new_type?.ext === VDFS_EXT_SESSION ? cwd.value : ''),
+  (dir) => {
+    if (dir) sessionsStore.setSessionSpace(dir)
+  },
+  { immediate: true },
+)
 
 // ==================== 钻入（emit，宿主决定呈现） ====================
 

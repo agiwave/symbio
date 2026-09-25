@@ -108,9 +108,18 @@ import TurnPending from './message/TurnPending.vue'
 import ChatComposer from './chat/ChatComposer.vue'
 import BaseModal from './common/BaseModal.vue'
 
-// Props（多会话缩略窗口架构下，ModelChatPanel 只接收 sessionId）
+// Props（多会话缩略窗口架构下，ModelChatPanel 只接收会话身份）
 const props = defineProps<{
+  /** 会话 id（**地址末段**）：store 里所有以会话为键的状态（消息 / 运行态）都用它 */
   sessionId: string
+  /**
+   * 会话**完整地址** = `<挂载目录>/<id>`——跨进程寻址的唯一依据。
+   *
+   * 与 `sessionId` 并存而不是二选一：前者是 store 的键（字典查表），后者是
+   * **地址**（发言写哪个 inbox、中止打在哪个节点、恢复落在哪条消息）。两个空间
+   * 里可以有同名 id，只带 id 就等于把「住在哪个空间」丢掉。
+   */
+  sessionAddr: string
   onSendComplete?: () => void
   /** 内部 useChatConnection 的 isLoading 变化回调（用于跨组件状态同步） */
   onLoadingChange?: (loading: boolean) => void
@@ -132,6 +141,7 @@ const { scrollToBottom, smartScroll, handleScroll } = useChatScroll(messagesRef)
 
 const chat = useChatConnection({
   sessionId: props.sessionId,
+  sessionAddr: props.sessionAddr,
   onSendComplete: props.onSendComplete,
 })
 

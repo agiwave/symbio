@@ -44,7 +44,25 @@ pub trait ChatSession: Send + Sync + 'static {
         max_turns: Option<usize>,
     ) -> Result<Vec<ChatMessage>, PluginError>;
 
-    async fn append_messages(&self, messages: Vec<ChatMessage>) -> Result<usize, PluginError>;
+    /// 追加消息并落库，返回**落库后的权威副本**（含存储分配的 `seq` / `timestamp`）。
+    ///
+    /// ## 为什么回消息，而不是回条数
+    ///
+    /// `seq` 只在存储写入时分配（见 `docs/vdfs-session-messages.md` §3.4），调用方
+    /// 手里那条**没有号**——所以「每一条被落库的消息都必须发一次带存储 `seq` 的
+    /// 变更」这条不变量，只有在调用方能拿到权威副本时才成立。回条数等于让调用方
+    /// 拿不到可下发的载荷，于是"落库"与"换号"之间必然出现断口：前端留下转写分配的
+    /// 在途号（`1 << 50`），与存储号并存 ⇒ 排序错位（只有整份回读才恢复）。
+    ///
+    /// 返回的条目 = **实际留在存储里**的那些（按追加顺序）：被轮次窗口淘汰、或
+    /// 被写入期工具链裁剪动过的，以存储里的最终形态为准——交回一条存储里并不
+    /// 存在的消息，等于让前端"对齐"到幻影。
+    ///
+    /// 顺序与入参一致（不含被淘汰项）；落库失败则整体失败，不返回部分结果。
+    async fn append_messages(
+        &self,
+        messages: Vec<ChatMessage>,
+    ) -> Result<Vec<ChatMessage>, PluginError>;
 
     async fn replace_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError>;
 
@@ -329,7 +347,10 @@ impl ChatSession for PersistentChatSession {
         Ok(result)
     }
 
-    async fn append_messages(&self, messages: Vec<ChatMessage>) -> Result<usize, PluginError> {
+    async fn append_messages(
+        &self,
+        messages: Vec<ChatMessage>,
+    ) -> Result<Vec<ChatMessage>, PluginError> {
         // 持久层写入不变量（见 `ensure_durable_states`）：瞬态状态不得落盘
         ensure_durable_states(&messages, "append_messages")?;
         // 临界区：整段「读 → 改 → 整份写回」必须串行。会话写入是整份覆盖，
@@ -342,6 +363,10 @@ impl ChatSession for PersistentChatSession {
 
         // 分配单调序号：起点取当前会话已有最大 seq，保证追加的消息严格排在其后。
         let mut seq_cursor = cm::max_seq(&session.messages);
+
+        // 本次追加的 id（顺序 = 追加顺序）：末尾据此从落库结果里取回**权威副本**，
+        // 交给调用方做落库回包（见 trait 上 `append_messages` 的说明）。
+        let mut appended_ids: Vec<String> = Vec::with_capacity(messages.len());
 
         // 存储保持**完整原文**（架构原则，见 chat_loop「存储保持完整历史，视图逐轮裁剪」）：
         // 一切压缩均发生在"发给大模型之前"——L0 工具结果守卫在工具执行生产时刻、
@@ -366,6 +391,7 @@ impl ChatSession for PersistentChatSession {
                 }
             }
 
+            appended_ids.push(chat_msg.id.clone());
             session.messages.push(chat_msg);
         }
 
@@ -410,11 +436,23 @@ impl ChatSession for PersistentChatSession {
             }
         }
 
-        let count = session.messages.len();
         session.updated_at = now;
         self.save_session(&session).await?;
 
-        Ok(count)
+        // 落库回包（见 `docs/vdfs-session-messages.md` §3.4）：取**存储里的最终形态**
+        // 交回调用方下发。从 `session.messages` 取而非回传入参副本——上面两道写入期
+        // 变换（轮次窗口淘汰、工具链裁剪）可能已经动过它们，回执必须与磁盘逐字段一致。
+        // 已被淘汰的（批量追加超过窗口时可能发生）自然被滤掉：交回一条存储里并不
+        // 存在的消息，等于让前端"对齐"到一个幻影。
+        let appended: HashSet<&str> = appended_ids.iter().map(|s| s.as_str()).collect();
+        let persisted = session
+            .messages
+            .iter()
+            .filter(|m| appended.contains(m.id.as_str()))
+            .cloned()
+            .collect();
+
+        Ok(persisted)
     }
 
     async fn replace_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError> {

@@ -32,7 +32,7 @@ import { describe, expect, it, vi } from 'vitest'
  * 直接引用模块顶层的 `const` 会撞 TDZ。
  */
 const { SCHEME } = vi.hoisted(() => ({
-  SCHEME: { mountDir: '@vfs/session', messagesSeg: 'message' },
+  SCHEME: { mountDir: '@vfs/session', messagesSeg: 'message', inboxSeg: 'inbox' },
 }))
 
 // 服务层依赖 Tauri API 与本地存储，这里只测映射逻辑，故整体替身
@@ -45,9 +45,11 @@ vi.mock('@/services/vdfs', () => ({
 }))
 // 地址方案是**运行期数据**（列目录认出来）；单测不去列目录，直接注入协议夹具。
 // 夹具本身是断言的一部分：它把「删除/写入落在哪个地址」钉成字面量。
+// `ensureSessionScheme(mountDir?)` 省略参数 = 默认挂载目录那份（与
+// `ensureSessionMountDir()` 同源），传参 = 那个空间那份——两种都返回夹具。
 vi.mock('@/services/vdfsScheme', () => ({
   ensureSessionMountDir: vi.fn(async () => SCHEME.mountDir),
-  ensureVdfsSessionScheme: vi.fn(async () => SCHEME),
+  ensureSessionScheme: vi.fn(async () => SCHEME),
   vdfsSessionScheme: vi.fn(() => SCHEME),
 }))
 

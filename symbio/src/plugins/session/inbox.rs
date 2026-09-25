@@ -202,12 +202,22 @@ impl SessionPlugin {
             if state.inner.read().await.is_working {
                 continue;
             }
-            // 出队。写完即释放锁——`handle_chat_send_oneoff` 还会去写同一把锁
+            // 出队。写完即释放锁——`start_turn` 还会去写同一把锁。
+            //
+            // **出队要发一条变更**：条目已经不在队列里了，而不通知就等于告诉订阅方
+            // 「它还在」。变更是**无载荷**的（`bare`）——删掉的节点本就没有视图可带，
+            // 消费方按「载荷缺失 + 回读 NotFound」收敛（ADR-025 的删除表达）。
+            // 与 `cancel_inbox_item` 同一手法：两种「没了」对订阅方是同一件事。
             let item = {
                 let mut inner = state.inner.write().await;
                 inner.inbox.pop_front()
             };
             let Some(item) = item else { continue };
+            self.change_subs
+                .notify(&vdfs::VdfsChange::bare(inbox_item_path(
+                    &state.session_id,
+                    &item.id,
+                )));
 
             match self.clone().run_inbox_turn(&state.session_id, &item).await {
                 Ok(()) => started = true,

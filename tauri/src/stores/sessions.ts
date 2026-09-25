@@ -25,13 +25,24 @@
  * ## 关键状态
  *
  * - `list`           : SessionListItem[]（来自后端 list + 本地状态镜像合并）
- * - `activeId`       : 当前"详细窗口"展示的会话
+ * - `sessionSpace`   : 当前空间的**会话挂载目录**（根空间 `<根>/session`；
+ *                      子智能体空间 `<根>/agent/<id>/session`）——「会话住在哪个
+ *                      空间」是地址的一部分，清单 / 新建 / 发送都按它寻址
+ * - `sessionMounts`  : 会话 id → 它所在的挂载目录（按 id 反查空间，供叶子操作用）
+ * - `activeId`       : 当前"详细窗口"展示的会话（**地址末段**；地址见 `activeAddr`）
+ * - `activeAddr`     : 当前会话的完整地址 = `<挂载目录>/<id>`（输入 / 读取的落点）
  * - `sessionMessages`: 实时 messages map，key 是 sessionId，value 是 `{msgId: ChatMessage}`
  *                      写入：`sessionTranscriptSync`（VDFS 变更消费端）与 loadMessages
  *                      读取：ModelChatPanel（详细）
  * - `sessionStatuses`: 实时状态，key 是 sessionId
  *                      写入：`applySessionState`（节点视图帧）/ send 的乐观置位
  *                      读取：会话列表项状态展示（`<根>/session` 实例）
+ *
+ * **键为什么仍是 `sid` 而不是地址**：会话 id 由后端生成为短 guid
+ * （`plugin/vdfs_provider.rs::new_session_id`），跨空间全局唯一——于是「同一个
+ * 会话」在 store 里只有一份状态，而「它在哪个空间」作为**寻址信息**单独记在
+ * `sessionMounts` 上。把键换成地址不会多解决任何问题，只会让每个消费方都要先
+ * 解析一次地址才能查表。
  */
 
 import { defineStore } from 'pinia'
@@ -47,22 +58,23 @@ import {
   type SessionListItem,
   type SessionMetadata
 } from '@/services/session'
-import { writeVdfs } from '@/services/vdfs'
+import { writeVdfs, runVdfsAction } from '@/services/vdfs'
 import {
+  VDFS_ACTION_ABORT,
   VDFS_STATUS_WORKING,
   chimeKindOfOutcome,
   isFailedStatus,
   isWorkingStatus,
+  parseVdfsSessionAddr,
   sessionRuntimeOf,
   vdfsSessionAddr,
   type VdfsNode,
 } from '@/schemas/vdfs'
-import { setLastWorkdir, getLastWorkdir, callPlugin } from '@/services/plugin'
+import { setLastWorkdir, getLastWorkdir } from '@/services/plugin'
 import { publishVdfsChangedLocal } from '@/services/eventBus'
-import { ensureSessionMountDir, ensureVdfsSessionScheme } from '@/services/vdfsScheme'
+import { ensureSessionMountDir, ensureSessionScheme } from '@/services/vdfsScheme'
 import { playCompletionChime } from '@/services/completionChime'
 import { logger } from '@/utils/logger'
-import { CHAT_ABORT } from '@/constants/pluginPaths'
 import {
   MESSAGE_STATUS_REMOVED,
   type ChatMessage,
@@ -102,6 +114,70 @@ export const useSessionsStore = defineStore('sessions', () => {
   const activeId = ref<string | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
+
+  // ===== 空间维度（「会话住在哪个空间」是地址的一部分） =====
+  //
+  // 会话挂载目录**不是唯一的一份**：根空间是 `<根>/session`，子智能体空间是
+  // `<根>/agent/<id>/session`（一棵完整子树，内部有自己的 `session` 挂载）。
+  // 清单读哪个目录、新建写哪个目录、发送落在哪个 inbox，全都由它决定。
+  //
+  // 它**不是**「上次选中的会话的空间」那么简单——它同时是「我现在在哪个空间」，
+  // 因此有两个写入方，语义一致：选中一项（`selectSession`，从地址解析出来）与
+  // 进入一个会话挂载目录（`setSessionSpace`，由工作台按当前目录声明）。
+  /** 当前空间的会话挂载目录；空串 = 还没解析（一律回退默认挂载目录） */
+  const sessionSpace = ref<string>('')
+  /**
+   * 会话 id → 它所在的挂载目录。
+   *
+   * 为什么要按 id 反查而不是只用 `sessionSpace`：`list` 是**异步**收敛的，
+   * 切换空间期间旧条目仍在表里，而叶子操作（读 / 删 / 改 / 清空）可能正落在那
+   * 一条上。反查表让「这个会话属于哪个空间」成为一个**已确定的事实**，而不是
+   * 一个「现在正好在哪个空间」的猜测。
+   */
+  const sessionMounts = ref<Record<string, string>>({})
+
+  /**
+   * 某会话的挂载目录（叶子操作的寻址依据）。
+   *
+   * 反查不到时回退 `sessionSpace`——那是「用户此刻所在的空间」，比恒回退根空间
+   * 更接近事实（子空间里的会话地址就该是子空间的）。`undefined` 交给
+   * `services/session` 回退默认挂载目录。
+   */
+  function mountDirOf(id: string): string | undefined {
+    return sessionMounts.value[id] || sessionSpace.value || undefined
+  }
+
+  /** 记住一批会话所在的挂载目录（清单刷新 / 新建时调用） */
+  function rememberMounts(ids: string[], mountDir: string): void {
+    if (!mountDir || ids.length === 0) return
+    const next = { ...sessionMounts.value }
+    let changed = false
+    for (const id of ids) {
+      if (next[id] !== mountDir) {
+        next[id] = mountDir
+        changed = true
+      }
+    }
+    if (changed) sessionMounts.value = next
+  }
+
+  /**
+   * 声明「当前空间」= 这个会话挂载目录（幂等）。
+   *
+   * 由工作台在**当前目录自身声明可新建 `ext = session`** 时调用——判据与
+   * `vdfsScheme.ensureSessionMountDir` 认出根挂载用的是同一个（「能新建会话的
+   * 目录就是会话挂载」），因此这里不需要任何段名字面量。
+   *
+   * 变化时清空清单并重拉：清单是**空间内**的事实，换了空间旧的就不该继续显示
+   * （否则两个空间的会话会混在一张表里，而它们的 id 空间互不相干）。
+   */
+  function setSessionSpace(mountDir: string): void {
+    if (!mountDir || mountDir === sessionSpace.value) return
+    sessionSpace.value = mountDir
+    list.value = []
+    activeId.value = null
+    void refreshList()
+  }
 
   // 标题缓存（id -> title）
   const titles = ref<Record<string, string>>({})
@@ -603,6 +679,20 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   // ---- 计算属性 ----
   const activeListItem = computed(() => list.value.find(s => s.id === activeId.value) || null)
+  /**
+   * 当前会话的**完整地址**（`<挂载目录>/<id>`）——输入与读取的唯一落点。
+   *
+   * 会话在前端的身份是地址而不是裸 id（两个空间里可以有同名 id）。`activeId`
+   * 保留下来是因为 store 的状态字典仍以 id 为键（见模块头「键为什么仍是 sid」），
+   * 但**跨进程的每一次寻址都必须用这个地址**：发言写 `<activeAddr>/inbox`、
+   * 中止动作打在 `activeAddr` 上、读转写读 `activeAddr`。
+   */
+  const activeAddr = computed(() => {
+    const id = activeId.value
+    if (!id) return ''
+    const dir = mountDirOf(id)
+    return dir ? vdfsSessionAddr(dir, id) : ''
+  })
   const activeTitle = computed(() => {
     if (!activeId.value) return '会话'
     return titles.value[activeId.value] || activeListItem.value?.metadata?.title || '新对话'
@@ -621,12 +711,21 @@ export const useSessionsStore = defineStore('sessions', () => {
     loading.value = true
     error.value = null
     try {
-      const items = await listSessions()
+      // 清单读**当前空间**：根空间（默认挂载目录）或子智能体空间
+      // （`<根>/agent/<id>/session`）。`sessionSpace` 为空时交给服务层回退默认。
+      const mountDir = sessionSpace.value || undefined
+      const items = await listSessions(undefined, mountDir)
+      // 清单到手 ⇒ 本空间的挂载目录已确定（服务层刚解析出来的那个）
+      const dir = mountDir ?? (await ensureSessionMountDir())
+      if (!sessionSpace.value) sessionSpace.value = dir
+      // 「这个会话住在哪个空间」在此落定——叶子操作（读 / 删 / 改 / 清空 / 发送）
+      // 全靠它寻址，缺了就只能回退根空间（那正是「发到父智能体」的成因）。
+      rememberMounts(items.map((it) => it.id), dir)
       // 清单到手 ⇒ 若有会话，转写段现在推导得出来。补一次解析，关掉「引导窗口」
       // （方案未就绪时转写变更无法路由）。失败不打断清单刷新——零会话时会失败，
       // 那正是预期；等新建会话时再补。
       if (items.length > 0) {
-        void ensureVdfsSessionScheme().catch((e: unknown) =>
+        void ensureSessionScheme(dir).catch((e: unknown) =>
           logger.warn('[sessions]', '转写段解析失败', e),
         )
       }
@@ -674,9 +773,13 @@ export const useSessionsStore = defineStore('sessions', () => {
    * id 并把 metadata 一并落库 → 本地乐观插入条目（与后端写同一份 metadata，
    * 保证挂载即水合）→ 发布前端 created 事件（后端事件随后幂等收敛）。
    *
+   * **写的是「当前空间」的挂载根**（`sessionSpace`），不是恒定的根空间那一个：
+   * 在子智能体空间里点「新建会话」必须建到**那个**空间去——否则会话一建出来
+   * 就住错了地方，后面发送再对也没用。
+   *
    * 「新建」在机制上就是对**目录自身**的一次 `vdfs/write`（见后端
    * `VdfsProvider::write` 的两种目标形态）：id 是 provider 的私有知识，前端不预先
-   * 编造——它只需要知道「建在哪」（`<根>/session`），名字由后端给。
+   * 编造——它只需要知道「建在哪」（`<挂载目录>`），名字由后端给。
    */
   async function createSession(metadata?: Record<string, unknown>): Promise<string> {
     const meta = { created_via: 'ui', ...(metadata ?? {}) } as SessionMetadata
@@ -689,13 +792,16 @@ export const useSessionsStore = defineStore('sessions', () => {
     // 1. 后端生成 id：写会话挂载根 = 「新建一个会话，名字由 provider 定」。
     //    匿名写的回执只给**名字**（`VdfsWriteResponse.name`），地址由调用方拼——
     //    这里要的就是那一段 id。
+    const mountDir = sessionSpace.value || (await ensureSessionMountDir())
     const resp = await writeVdfs(
-      await ensureSessionMountDir(),
+      mountDir,
       JSON.stringify({ metadata: meta }),
       { create: true }
     )
     const id = resp.name
     if (!id) throw new Error('新建会话未返回名字（provider 未给出新条目名）')
+    // 刚建出来的会话住在**当前空间**——记下来，后续每一次寻址都靠它
+    rememberMounts([id], mountDir)
 
     // 2. 立即在本地插入"未持久化"条目（与后端写同一份 meta，保证
     //    ModelChatPanel onMounted 从本地 list.metadata 同步水合时拿得到草稿选择）
@@ -721,13 +827,11 @@ export const useSessionsStore = defineStore('sessions', () => {
     // 前端模式通知：以同构载荷即时告知其他页面（工作台清单等），不等后端事件往返；
     // 信封没有操作枚举（S27）——无载荷变更，其他页面按各自语义回读收敛；
     // 后端事件（`vdfs/write` 落库后广播）随后到达，各订阅方幂等收敛
-    publishVdfsChangedLocal({
-      path: vdfsSessionAddr(await ensureSessionMountDir(), id),
-    })
+    publishVdfsChangedLocal({ path: vdfsSessionAddr(mountDir, id) })
 
     // 新建完就有了会话 ⇒ 转写段现在推导得出来了。补一次解析，把「引导窗口」
     // （方案未就绪时转写变更无法路由）在第一次发言之前关掉。
-    void ensureVdfsSessionScheme().catch((e: unknown) =>
+    void ensureSessionScheme(mountDir).catch((e: unknown) =>
       logger.warn('[sessions]', '转写段解析失败（将在下次清单刷新时重试）', e),
     )
 
@@ -754,7 +858,27 @@ export const useSessionsStore = defineStore('sessions', () => {
     return id
   }
 
-  async function selectSession(id: string) {
+  /**
+   * 选中一个会话。
+   *
+   * 入参是**会话地址**（`<挂载目录>/<id>`，即详情页拿到的 `VdfsItem.path`）——
+   * 「选中哪一项」与「它在哪个空间」在机制上是同一个事实，所以只传一次。
+   * 传裸 id 也接受（兼容只碰根空间的调用方）：地址解析不出来时按「当前空间」处理。
+   *
+   * 从地址里解析出的挂载目录会被记进 `sessionMounts`，于是后续的读取 / 发送 /
+   * 删除都落回**同一个空间**——这正是「子空间里选中的会话，消息却发到父智能体」
+   * 那条链路的断点所在（地址在组件间传递时被丢成裸名字）。
+   */
+  async function selectSession(addr: string) {
+    const parsed = parseVdfsSessionAddr(addr)
+    const id = parsed?.id ?? addr
+    if (!id) return
+    if (parsed) {
+      // 先落空间再落选中：`setSessionSpace` 在空间变化时会清空清单与选中，
+      // 顺序反了会把刚设好的 activeId 抹掉。
+      setSessionSpace(parsed.mountDir)
+      rememberMounts([id], parsed.mountDir)
+    }
     activeId.value = id
     // 同步最近使用目录（仅作新建默认）。
     const wd = activeWorkdir.value
@@ -777,9 +901,13 @@ export const useSessionsStore = defineStore('sessions', () => {
   /**
    * 删除会话（连同其全部消息）。
    *
-   * 写入入口是 **VDFS**：`delete(<根>/session/<id>)`（`services/session.ts::deleteSession`
+   * 写入入口是 **VDFS**：`delete(<A>)`（`services/session.ts::deleteSession`
    * 只是它的具名包装）。后端 provider 的 `delete` 与曾经的 `session/clear` 路由
    * 共用同一份实现，因此这是一次入口替换，不是第二种删除方式。
+   *
+   * 「删除前先中止在途轮次」同样走地址：`action(<A>, "abort")`——**不再是**
+   * 全局路由 `chat/abort`（那条路由恒落在根实例上，对子空间的会话是个空操作，
+   * 还会在根实例里留下一个幽灵状态）。
    *
    * 本地清单的移除由 `removeSessionLocal` 完成（乐观收敛），后端 `deleted` 变更
    * 随后到达、各订阅方幂等收敛——两条路径行为一致。
@@ -787,18 +915,20 @@ export const useSessionsStore = defineStore('sessions', () => {
   async function deleteSession(id: string) {
     const target = list.value.find(s => s.id === id)
     if (!target) return
+    const mountDir = mountDirOf(id)
+    const addr = mountDir ? vdfsSessionAddr(mountDir, id) : ''
 
-    // 删除前先 abort 活跃任务
-    if (isWorkingStatus(target.status)) {
+    // 删除前先 abort 活跃任务（地址动作；回执 `ok:false` = 本来就没在跑，无需处理）
+    if (isWorkingStatus(target.status) && addr) {
       try {
-        await callPlugin(CHAT_ABORT, { session_id: id }, undefined, { session_id: id })
+        await runVdfsAction(addr, VDFS_ACTION_ABORT)
       } catch (e) {
         logger.warn('[sessions]', 'abort 失败', e)
       }
     }
 
     try {
-      await apiDeleteSession(id)
+      await apiDeleteSession(id, mountDir)
     } catch (e) {
       logger.error('[sessions]', 'deleteSession 失败', e)
       throw e
@@ -809,9 +939,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     // 前端模式通知：以同构载荷即时告知其他页面（工作台清单等），不等后端事件往返；
     // 信封没有操作枚举（S27）——无载荷变更，消费端回读 `NotFound` 即删除；
     // 后端事件随后到达，各订阅方幂等收敛
-    publishVdfsChangedLocal({
-      path: vdfsSessionAddr(await ensureSessionMountDir(), id),
-    })
+    if (addr) publishVdfsChangedLocal({ path: addr })
   }
 
   /**
@@ -827,6 +955,12 @@ export const useSessionsStore = defineStore('sessions', () => {
     const snext = { ...sessionSeq.value }
     delete snext[id]
     sessionSeq.value = snext
+    // 清理寻址镜像（会话没了，它的空间归属也就没有意义）
+    if (sessionMounts.value[id]) {
+      const mnext = { ...sessionMounts.value }
+      delete mnext[id]
+      sessionMounts.value = mnext
+    }
 
     if (activeId.value === id) {
       activeId.value = list.value[0]?.id ?? null
@@ -846,7 +980,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     const id = activeId.value
     // 1. 写后端
     try {
-      await updateSession(id, { workdir })
+      await updateSession(id, { workdir }, undefined, mountDirOf(id))
     } catch (e) {
       logger.error('[sessions]', 'setActiveWorkdir 失败', e)
       throw e
@@ -872,7 +1006,7 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   async function rename(id: string, title: string) {
     try {
-      await updateSession(id, { title }, title)
+      await updateSession(id, { title }, title, mountDirOf(id))
     } catch (e) {
       logger.error('[sessions]', 'rename 失败', e)
       throw e
@@ -929,7 +1063,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    */
   async function loadMessages(id: string): Promise<ChatMessage[]> {
     // 读入口是会话域的 VDFS 门面：文档形状的解析不在 store 里
-    const msgs = await readSessionTranscript(id)
+    const msgs = await readSessionTranscript(id, mountDirOf(id))
     hydrateFromHistory(id, msgs)
     // 同步 list message_count / updated_at
     const idx = list.value.findIndex(s => s.id === id)
@@ -1001,7 +1135,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     const removed = removeFrom(sessionId, messageId)
     syncMessageCount(sessionId)
     try {
-      const res = await apiDeleteMessage(sessionId, messageId)
+      const res = await apiDeleteMessage(sessionId, messageId, mountDirOf(sessionId))
       removeMessages(sessionId, res.deleted_ids)
     } catch (e) {
       logger.error('[sessions]', 'deleteMessage 失败', e)
@@ -1028,7 +1162,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     if (!message.id) return
     applyTranscriptMessage(sessionId, message)
     try {
-      await apiUpdateMessage(sessionId, message)
+      await apiUpdateMessage(sessionId, message, mountDirOf(sessionId))
     } catch (e) {
       logger.error('[sessions]', 'updateMessage 失败', e)
       throw e
@@ -1045,7 +1179,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     delete mnext[sessionId]
     commitMessages(mnext)
     try {
-      await apiClearMessages(sessionId)
+      await apiClearMessages(sessionId, mountDirOf(sessionId))
     } catch (e) {
       logger.error('[sessions]', 'clearMessages 失败', e)
       throw e
@@ -1130,6 +1264,9 @@ export const useSessionsStore = defineStore('sessions', () => {
     // state
     list,
     activeId,
+    // 空间维度：当前会话挂载目录 / 会话 → 空间的寻址镜像
+    sessionSpace,
+    sessionMounts,
     titles,
     loading,
     error,
@@ -1140,6 +1277,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     sessionStatuses,
     // computed
     activeListItem,
+    activeAddr,
     activeTitle,
     activeWorkdir,
     isActiveWorking,
@@ -1148,6 +1286,9 @@ export const useSessionsStore = defineStore('sessions', () => {
     refreshList,
     createSession,
     selectSession,
+    // 空间：由工作台按「当前目录能新建会话」声明（判据与挂载点识别同源）
+    setSessionSpace,
+    mountDirOf,
     deleteSession,
     // 后端 deleted 变更的落地口（与 deleteSession 的乐观移除同一实现，
     // 见 `sessionNodeSync`：两条路径行为一致）

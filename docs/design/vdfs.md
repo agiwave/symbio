@@ -569,8 +569,17 @@ for (name, child) in children {
   `parent.get_vfs_provider().unwrap_or_else(empty_root)`。
 - **子智能体挂载点穿越**：`agent/<id>` 是挂载点，`agent` 插件对 `RelPath::Agent`
   （首层）与 `RelPath::File`（子路径）均经 `sub_agent(id).get_vfs_provider()` 委托给
-  子 composite 的 `CompositeVfs`，返回的相对地址再用挂载前缀 `agent/<id>` 提回全局路径；
-  `PluginMeta::hidden` 等可见性过滤由子 composite 统一执行（分形、与系统根同构）。
+  子 composite 的 `CompositeVfs`；`PluginMeta::hidden` 等可见性过滤由子 composite
+  统一执行（分形、与系统根同构）。
+  - **变更帧路径**：子 provider 报的是子树相对地址，每层容器继续续接自己的挂载段
+    （`agent` 插件补 `<id>`、父 composite 补 `agent`、`UnifiedFs` 补根名），
+    合起来即 `agent/<id>/<子目录>/<相对路径>`。
+  - **条目地址不由挂载点填**：`agent/<id>` 是挂载点，它给出的前缀是**本插件空间内**
+    的相对段（不含 `agent`），填进条目地址就是一个少了外层挂载段的假地址——而访问层
+    见到非空地址即认为「拥有者已填好」、不再按请求地址回填。故委托回来的条目地址
+    **原样透出**（空则留空），由访问层按请求地址补全为完整地址。
+    见 `agent/host/vdfs.rs::list_at` 与 `composite/vdfs.rs` 的
+    `container_leaves_item_addresses_untouched`（同一条契约）。
 
 `Plugin::get_vfs_provider` 默认 `None`（叶子插件 override 为 `Some(self)`，
 `Composite` override 为 `self.vdfs.clone()`）；`CapabilityVisitor` 上的 `get_vdfs_provider`

@@ -231,6 +231,18 @@ impl ActiveSessionManager {
         }
     }
 
+    /// 取**已有**的活跃状态；没有就是没有（不新建）。
+    ///
+    /// ## 为什么需要它
+    ///
+    /// `get_or_create` 的"没有就建"对**控制类**动作是错的：中止一个本实例从未
+    /// 跑过的会话（典型是子智能体空间的会话被错投到根实例）会顺手造出一个
+    /// 永不释放的幽灵状态，而中止本身是空操作——调用方拿到"成功"，什么都没停。
+    /// 「这里有没有在跑的东西」必须是**可查询**的，而不是一问就自动变成有。
+    pub async fn get(&self, session_id: &str) -> Option<Arc<ActiveSessionState>> {
+        self.sessions.read().await.get(session_id).cloned()
+    }
+
     pub async fn get_or_create(&self, session_id: &str) -> Arc<ActiveSessionState> {
         let mut sessions = self.sessions.write().await;
         if let Some(state) = sessions.get(session_id) {

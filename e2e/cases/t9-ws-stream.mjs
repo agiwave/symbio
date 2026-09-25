@@ -39,6 +39,7 @@ import {
   PROVIDER_ID,
   readMessagesJson,
   assertTranscriptInvariants,
+  assertSeqAnchorIsNodeAttribute,
 } from '../helpers.mjs';
 
 const TERMINAL = new Set(['completed', 'failed', 'aborted', 'waiting_user_action']);
@@ -147,18 +148,19 @@ export default defineCase('T9 gateway WS 实时面：vdfs 变更帧序与增量�
       `末帧应为终态（实际 ${frames[frames.length - 1].data?.status}）`,
     );
 
-    // ⑧ `seq` 是**节点属性**（位置序号），不是投递序号：同一节点的每一帧都是同一个值。
+    // ⑧ `seq` 是**节点属性**（位置序号），不是投递序号。
     //    曾经 `seq` 是逐帧递增的流内序号，于是"顺序"成了投递属性——到达顺序一变
     //    （两条通道、乱序合并）就要靠补丁纠正。S27 后顺序由**单一订阅 FIFO** 给出。
+    //
+    //    允许的形态是「在途号… → 权威号（其后全部帧）」：号只在存储写入时分配，
+    //    节点先以在途号上线、落库后由回包帧交回权威号（§3.4 唯一的换号时机）。
+    //    断言「逐帧必须完全相同」会把"从未落库"当成正确——那正是本用例要拦的 bug。
     const seqsOfNode = frames.map((f) => f.data?.seq).filter((s) => s != null);
     assert(
       seqsOfNode.length > 0,
       `正文节点的帧应带位置序号 seq\n时间线:\n${timeline.join('\n')}`,
     );
-    assert(
-      new Set(seqsOfNode).size === 1,
-      `同一节点的 seq 必须逐帧相同（位置不变，变的是正文）：实得 ${JSON.stringify(seqsOfNode)}`,
-    );
+    assertSeqAnchorIsNodeAttribute(frames, 'T9 正文节点');
 
     // ⑨ 增量拼接 == 完整正文：不丢不重。
     //    首个分片随首帧以 `content` 下发（全量），其余分片是 `delta`；终态帧只带状态。

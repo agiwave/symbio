@@ -558,3 +558,55 @@ export function assertTranscriptInvariants(messages, label) {
     }
   }
 }
+
+/**
+ * 在途号起点（镜像 `symbio/src/plugins/session/transcript.rs::INFLIGHT_SEQ_BASE`）。
+ *
+ * 号分两段：**在途号**（转写在首次见到节点时分配，起点 1 << 50）与**权威号**
+ * （存储在写入时分配，"第几条消息"量级）。在途号永不落库。
+ */
+export const INFLIGHT_SEQ_BASE = 1 << 50;
+
+/**
+ * 断言一个节点流上的 `seq` 是**节点属性**、不是投递序号。
+ *
+ * `seq` 只在存储写入时分配（见
+ * `symbio/src/plugins/session/docs/vdfs-session-messages.md` §3.4），而节点是先以
+ * **在途号**上线的；落库后由一条带存储号的完整帧把它交回权威号——这是**唯一**的
+ * 换号时机。因此一条节点流的合法形态只有：
+ *
+ * ```text
+ * 在途号…（若干帧）→ 权威号（其后全部帧）
+ * ```
+ *
+ * 断言拦的是四类错误，它们各自对应一种真实事故：
+ * - **逐帧递增**：那是投递序号（S27 已随 `session/stream` 退役），顺序会退化成
+ *   到达属性——两条通道 / 乱序合并就要靠补丁纠正；
+ * - **权威号之间来回跳**：同一条消息以两种身份排在列表的两个位置；
+ * - **换号后又回到在途号**：某条帧把在途号当成了权威值发出去（前端会把它排到
+ *   全部历史之后）；
+ * - **多个权威号**：存储侧重复分配（`seq` 严格递增那条不变量已破）。
+ *
+ * ⚠️ **不要退化成「逐帧必须完全相同」**：助手侧节点在落库回包之前持的正是在途号，
+ * 逐帧相同只在上线后从未落库时才成立——那恰恰是 bug（前端永远拿不到权威号，
+ * 下一条用户消息会排到它前面，显示成 `user-user-assistant-assistant`）。
+ * 端到端回归：`e2e/cases/t16-live-order.mjs`。
+ */
+export function assertSeqAnchorIsNodeAttribute(frames, label) {
+  const seqs = frames.map((f) => f.data?.seq).filter((s) => s != null);
+  const authority = seqs.filter((s) => s < INFLIGHT_SEQ_BASE);
+  assert(
+    new Set(authority).size <= 1,
+    `${label}：权威 seq 至多一个（位置不变，变的是正文），实得 ${JSON.stringify(seqs)}`,
+  );
+  if (authority.length === 0) return;
+  const first = seqs.indexOf(authority[0]);
+  assert(
+    seqs.slice(first).every((s) => s === authority[0]),
+    `${label}：交回权威号之后不得再变（换号只有一次：在途 → 存储），实得 ${JSON.stringify(seqs)}`,
+  );
+  assert(
+    seqs.slice(0, first).every((s) => s >= INFLIGHT_SEQ_BASE),
+    `${label}：权威号之前只应出现在途号，实得 ${JSON.stringify(seqs)}`,
+  );
+}

@@ -37,6 +37,7 @@ import {
   PROVIDER_ID,
   readMessagesJson,
   assertTranscriptInvariants,
+  assertSeqAnchorIsNodeAttribute,
 } from '../helpers.mjs';
 
 const TERMINAL = new Set(['completed', 'failed', 'aborted', 'waiting_user_action']);
@@ -178,12 +179,10 @@ export default defineCase('T11 压缩节点协议：compression 节点的开始/
           `compression ${String(id).slice(0, 8)} 失败应带 meta.failure_kind（实际 meta=${JSON.stringify(final.meta)}）`,
         );
       }
-      // 位置序号是节点属性：同一压缩节点的每一帧都是同一个值
-      const seqs = frames.map((f) => f.data.seq).filter((s) => s != null);
-      assert(
-        new Set(seqs).size <= 1,
-        `compression ${String(id).slice(0, 8)} 的 seq 必须逐帧相同：实得 ${JSON.stringify(seqs)}`,
-      );
+      // 位置序号是节点属性：允许「在途号… → 权威号（其后全部帧）」一次换号——
+      // 压缩节点的号是 `begin` 时转写发的在途号，落库后由回包帧交回权威号
+      // （§3.4 唯一的换号时机）。断言"逐帧完全相同"会把"从未落库"当成正确。
+      assertSeqAnchorIsNodeAttribute(frames, `compression ${String(id).slice(0, 8)}`);
     }
 
     // ⑦ 位置语义：压缩是**根级**节点（与 user / turn 平级），且**早于**它所属的那个 Turn

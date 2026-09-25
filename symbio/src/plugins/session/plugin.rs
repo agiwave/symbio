@@ -65,6 +65,8 @@ pub struct SessionPlugin {
     /// 收件箱唤醒：入队时置位，常驻消费者据此醒来取件（见 `inbox` 模块）。
     /// 它是**唤醒**不是队列——队列本身在 `ActiveSessionStateInner::inbox`。
     pub(crate) inbox_wake: tokio::sync::Notify,
+    /// 自身的弱引用（在 [`Self::build`] 里回填；见 [`Self::me`]）。
+    self_ref: OnceCell<std::sync::Weak<SessionPlugin>>,
 }
 
 use super::store::SessionStore;
@@ -90,7 +92,24 @@ impl SessionPlugin {
             workdir_watches,
             change_subs,
             inbox_wake: tokio::sync::Notify::new(),
+            self_ref: OnceCell::new(),
         }
+    }
+
+    /// 取回 `Arc<Self>`（装配完成后恒可用）。
+    ///
+    /// ## 为什么需要它
+    ///
+    /// `VdfsProvider::dispatch` 拿到的是 `&self`，而「开跑一轮」（`start_turn`）要把
+    /// `Arc<Self>` 移进后台任务。没有这条自引用，provider 侧想触发运行就只能绕道
+    /// **路由**——而路由是 address-less 的（恒落根实例），那正是子智能体空间的消息
+    /// 被投到父空间的成因。有了它，「一次节点动作 → 本空间开跑」在 provider 内部
+    /// 就闭合了，不需要任何跨插件调用。
+    pub(crate) fn me(&self) -> Result<Arc<Self>, PluginError> {
+        self.self_ref
+            .get()
+            .and_then(|w| w.upgrade())
+            .ok_or_else(|| PluginError::InternalError("会话插件未完成装配（缺少自引用）".into()))
     }
 
     /// 广播一次会话变更（VDFS 实时链路的数据源）。
@@ -174,7 +193,7 @@ impl SessionPlugin {
         self.transcript_apply_all(session_id, frames).await;
     }
 
-    /// 把**存储中**的某条消息发布成一次完整快照，落库后调用。
+    /// 落库回包：把 `append_messages` 交回的**权威副本**逐条发布（`docs/vdfs-session-messages.md` §3.4）。
     ///
     /// ## 它补的是哪个窟窿
     ///
@@ -182,32 +201,26 @@ impl SessionPlugin {
     /// `orchestrator/entry.rs` 直连存储追加（`append_messages`）——前端手里只有
     /// 自己的**乐观副本**，其 `seq` 是本地游标发的号，永远拿不到存储分配的那个。
     ///
-    /// ## 为什么读回来再发，而不是把入参那条发出去
+    /// ## 为什么发 `append_messages` 交回的那份，而不是入参那份
     ///
     /// `append_messages` 在临界区内给消息补 `seq` 与 `timestamp`（只改它自己的
-    /// 副本），调用方手里那条仍然没有号。**发出去的载荷必须与存储一致**。
-    /// 因此这里从存储取回权威版本再发（每次用户发言一次读，频率与用户点击同阶）。
+    /// 副本），**调用方手里那条仍然没有号**——发它等于把「没有号」写进前端。
+    /// 因此它把落库后的权威副本交回（这也是它返回消息而非条数的唯一原因），
+    /// 这里逐条下发即可——不必再从存储读回来找。
     ///
-    /// 找不到该 id（并发删除等）就静默返回：存储里没有的东西不该被广播。
-    pub(crate) async fn emit_persisted_message(&self, session_id: &str, message_id: &str) {
-        let Ok(chat_session) = self.open_chat_session(session_id).await else {
-            return;
-        };
-        let Ok(messages) = chat_session.get_messages().await else {
-            return;
-        };
-        let Some(stored) = messages.iter().find(|m| m.id == message_id) else {
-            return;
-        };
-        // 用户消息此前只存在于前端的乐观副本；此帧是**存储权威版本**的完整消息
-        // （身份 + 正文 + 存储分配的 `seq` / `timestamp` + 终态）。
-        //
-        // 正文以 `content`（整条替换）而非 `delta` 下发，正是为了这里：持有乐观
-        // 副本的消费端**替换**成权威正文，而不是往自己那份后面再拼一遍。
-        // 这也是 `delta` / `content` 两个字段必须分开的原因——同一个消费端既可能
-        // 需要追加（流式），也可能需要替换（权威副本对齐），而帧必须自证是哪一种。
-        self.transcript_apply(session_id, crate::symbio_core::turn::message_frame(stored))
-            .await;
+    /// 正文以 `content`（整条替换）而非 `delta` 下发，正是为了这里：持有乐观
+    /// 副本的消费端**替换**成权威正文，而不是往自己那份后面再拼一遍。
+    /// 这也是 `delta` / `content` 两个字段必须分开的原因——同一个消费端既可能
+    /// 需要追加（流式），也可能需要替换（权威副本对齐），而帧必须自证是哪一种。
+    pub(crate) async fn emit_persisted_messages(
+        &self,
+        session_id: &str,
+        messages: &[cm::ChatMessage],
+    ) {
+        for message in messages {
+            self.transcript_apply(session_id, crate::symbio_core::turn::message_frame(message))
+                .await;
+        }
     }
 
     pub fn metadata() -> PluginMeta {
@@ -239,6 +252,8 @@ impl SessionPlugin {
         let parent = ctx.parent();
 
         let plugin = Arc::new(SessionPlugin::new(parent, config, dir));
+        // 自引用：provider 侧的「开跑一轮」需要 `Arc<Self>`（见 [`SessionPlugin::me`]）
+        let _ = plugin.self_ref.set(Arc::downgrade(&plugin));
 
         // 启动心跳任务调度器（后台常驻）。仅在存在 Tokio runtime 时启动，
         // 避免单元测试（无 runtime）中 `tokio::spawn` 触发 panic。

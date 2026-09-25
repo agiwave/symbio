@@ -11,7 +11,7 @@
  * （后端 `UnifiedFs` 一处分流），本层不再做任何地址翻译。
  */
 
-import { callPlugin } from './plugin'
+import { callPlugin, type PluginOptions } from './plugin'
 import {
   VDFS_ACTION,
   VDFS_DELETE,
@@ -134,18 +134,28 @@ export function readVdfs(reason: ReadbackReason, path: string): Promise<VdfsCont
  *
  * 校验失败时**抛错**（错误带字段级信息，用 parseVdfsValidation 还原），
  * 调用方据此逐字段提示——这是 provider 自持校验的消费端约定。
+ *
+ * `opts.ctx` 是**调用上下文**（`workdir` / `session_id` 等）。多数写入不需要它
+ * （目标地址已经说明了一切），但会话收件箱的写入需要：后端把它作为
+ * `start_turn` 回退链的第一档工作目录（`host_ctx(ctx).get(WORKDIR)`），
+ * 丢了它就只能靠会话 metadata——而「会话还没绑过 workdir」正是新建会话那一刻。
  */
 export async function writeVdfs(
   path: string,
   text: string,
-  opts?: { create?: boolean; etag?: string }
+  opts?: { create?: boolean; etag?: string; ctx?: PluginOptions }
 ): Promise<VdfsWriteResponse> {
-  return callPlugin<VdfsWriteResponse>(VDFS_WRITE, {
-    path,
-    text,
-    create: opts?.create,
-    etag: opts?.etag,
-  })
+  return callPlugin<VdfsWriteResponse>(
+    VDFS_WRITE,
+    {
+      path,
+      text,
+      create: opts?.create,
+      etag: opts?.etag,
+    },
+    undefined,
+    opts?.ctx
+  )
 }
 
 /**
@@ -202,17 +212,26 @@ export async function deleteVdfs(path: string, recursive = false): Promise<void>
  *
  * `action` 是 provider 自持的动词标识：本层只做地址传递，**不解释语义**，
  * 也不认识任何具体动作——按钮由详情定义声明、结果由 provider 回答。
+ *
+ * `ctx` 是调用上下文，与 [`writeVdfs`] 同款（少数动作需要它，如会话恢复需要
+ * 把 `mode` / `risk_level` 之外的运行上下文带给编排）。
  */
 export async function runVdfsAction(
   path: string,
   action: string,
-  payload?: unknown
+  payload?: unknown,
+  ctx?: PluginOptions
 ): Promise<VdfsActionResponse> {
-  return callPlugin<VdfsActionResponse>(VDFS_ACTION, {
-    path,
-    action,
-    ...(payload === undefined ? {} : { payload }),
-  })
+  return callPlugin<VdfsActionResponse>(
+    VDFS_ACTION,
+    {
+      path,
+      action,
+      ...(payload === undefined ? {} : { payload }),
+    },
+    undefined,
+    ctx
+  )
 }
 
 /**

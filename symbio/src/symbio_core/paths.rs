@@ -20,8 +20,9 @@
 //!
 //! 容器（`composite`）扫描插件根下的**一层目录**建实例表，键就是目录名
 //! （`composite.rs` 注释：「目录名 = 实例名」），`route` 也按它分发。因此目录名
-//! 才是真正的路由前缀。`PluginMeta::new` 的首参（`id`）**是只写字段**
-//! （`Plugin::meta()` 全仓无生产消费方），拿它当前缀会产出**不存在的路由**——
+//! 才是真正的路由前缀。`PluginMeta::new` 的首参（`id`）**不参与路由**——路由按目录名
+//! 分发，`PluginMeta` 唯一运行期消费方是 `composite/vdfs.rs`（读 `order`/`root_access`/
+//! `name`/`description`/`hidden` 聚合组合视图），拿 id 当前缀会产出**不存在的路由**——
 //! `hook` 插件写成 `"hooks"` 就曾让 `docs/CURRENT.md` 与两处文档照抄出 `hooks/fire`。
 //! 该不一致由 `scripts/plugin-entry-audit.mjs` 的 E-001 守住。
 //!

@@ -88,10 +88,15 @@ vi.mock('@/services/completionChime', () => ({
   playCompletionChime: chime.playCompletionChime,
 }))
 
-// 地址方案：注入夹具，避免真去列目录
+// 地址方案：注入夹具，避免真去列目录。
+// `ensureSessionScheme(mountDir?)` 忠实于生产契约：返回的 `mountDir` 就是请求的
+// 那个（省略 = 默认挂载目录那份）。
 vi.mock('@/services/vdfsScheme', () => ({
   ensureSessionMountDir: vi.fn(async () => SCHEME.mountDir),
-  ensureVdfsSessionScheme: vi.fn(async () => SCHEME),
+  ensureSessionScheme: vi.fn(async (mountDir?: string) => ({
+    ...SCHEME,
+    mountDir: mountDir ?? SCHEME.mountDir,
+  })),
   vdfsSessionScheme: vi.fn(() => SCHEME),
 }))
 
@@ -102,13 +107,13 @@ import { VDFS_STATUS_WORKING } from '@/schemas/vdfs'
 import { READBACK_REASON } from '@/services/readback'
 
 /**
- * 协议夹具：会话挂载目录与转写段是**运行期数据**（列目录认出来）。
+ * 协议夹具：会话挂载目录与两个集合段都是**运行期数据**（列目录认出来）。
  * 单测不去列目录，直接注入——断言仍把地址钉成字面量。
  *
  * `vi.hoisted`：`vi.mock` 工厂先于 import 执行，直接引用顶层 const 会撞 TDZ。
  */
 const { SCHEME } = vi.hoisted(() => ({
-  SCHEME: { mountDir: '@vfs/session', messagesSeg: 'message' },
+  SCHEME: { mountDir: '@vfs/session', messagesSeg: 'message', inboxSeg: 'inbox' },
 }))
 
 /** 投递一条变更（路径就是展示地址） */
@@ -348,6 +353,9 @@ describe('sessions store — 删除消息的级联（目标 + 其后全部）', 
   beforeEach(() => {
     setActivePinia(createPinia())
     sessionApi.deleteMessage.mockReset()
+    // 声明当前空间（生产侧由工作台按「当前目录能新建会话」声明）：叶子操作
+    // 因此按**地址**寻址——`mountDirOf` 取到的就是这个挂载目录。
+    useSessionsStore().setSessionSpace(SCHEME.mountDir)
   })
 
   it('从用户消息起截断：它及其后的全部消失，之前的一条不动', () => {
@@ -416,7 +424,8 @@ describe('sessions store — 删除消息的级联（目标 + 其后全部）', 
     await store.deleteMessage(SID, 'u2')
 
     expect(ids(store)).toEqual(['u1', 't1', 'a1'])
-    expect(sessionApi.deleteMessage).toHaveBeenCalledWith(SID, 'u2')
+    // 叶子操作按**地址**寻址：会话 id 之外还要带上它所在的挂载目录
+    expect(sessionApi.deleteMessage).toHaveBeenCalledWith(SID, 'u2', SCHEME.mountDir)
   })
 
   it('deleteMessage：写后端失败则回滚本地改动（没落库就不显示已删除）', async () => {
@@ -723,6 +732,9 @@ describe('sessions store — 会话运行态（节点视图帧）', () => {
     store = useSessionsStore()
     store.list.push({ id: SID, message_count: 0, updated_at: 0, status: 'active', metadata: {} } as never)
     chime.playCompletionChime.mockClear()
+    // 本组断言「这一帧不得触发整表重拉」，故调用计数必须从零起算
+    // （前面的用例声明「当前空间」时会正常触发一次清单刷新）
+    sessionApi.listSessions.mockClear()
     vdfsApi.statVdfs.mockReset()
     vdfsApi.readVdfs.mockResolvedValue({ text: '{"messages":[]}' })
   })

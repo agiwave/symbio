@@ -15,7 +15,8 @@
     发送首条消息时经 `createSessionWithFirstMessage` **一次 `vdfs/write`** 创建并
     落库——id 由后端生成）。
 
-  选中同步：机制选中（:key 重挂载）是唯一真相，watch node.name → store.selectSession。
+  选中同步：机制选中（:key 重挂载）是唯一真相，watch node.path（**地址**，
+  含「住在哪个空间」）→ store.selectSession。
   创建经 emit('created') 回到机制页面层。
 
   动作分两来源（合并与渲染都交给 ChatMainPanel 头部的一处）：
@@ -132,11 +133,15 @@ function onAction(a: DetailAction) {
 }
 
 // 机制选中是唯一真相：渲染器挂载/切换（:key 重挂载触发 watch）即选中该会话
-// 会话 id 就是节点名（路径末段：`<根>/session/<id>`）
+//
+// 传的是**地址**（`node.path`，即 `<挂载目录>/<id>`）而不是名字：会话在前端的
+// 身份是「空间 + id」，只传 id 会把「住在哪个空间」在这一跳丢掉——子智能体空间
+// 里选中的会话于是被当成根空间的会话，消息发到了父智能体。地址解析见
+// `schemas/vdfs.parseVdfsSessionAddr`。
 watch(
-  () => props.node?.name,
-  (id) => {
-    if (id) void store.selectSession(id)
+  () => props.node?.path,
+  (addr) => {
+    if (addr) void store.selectSession(addr)
   },
   { immediate: true }
 )

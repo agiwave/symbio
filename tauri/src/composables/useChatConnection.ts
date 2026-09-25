@@ -1,15 +1,37 @@
 import { shallowRef, computed, type ComputedRef, type InjectionKey } from 'vue'
-import { callPlugin } from '@/services/plugin'
+import { runVdfsAction, writeVdfs } from '@/services/vdfs'
+import { ensureSessionScheme } from '@/services/vdfsScheme'
 import { messageTextOf, type ChatMessage, type ResumeAction } from '@/schemas/chat_message'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
 import { isBlankContentNode, isInProgressMessage } from '@/stores/sessionTranscript'
-import { VDFS_STATUS_ACTIVE, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING } from '@/schemas/vdfs'
-import { CHAT_SEND, CHAT_ABORT } from '@/constants/pluginPaths'
+import {
+  VDFS_ACTION_ABORT,
+  VDFS_ACTION_CLEAR,
+  VDFS_STATUS_ACTIVE,
+  VDFS_STATUS_FAILED,
+  VDFS_STATUS_WORKING,
+  parseVdfsSessionAddr,
+  vdfsInboxAddr,
+  vdfsInboxItemAddr,
+  vdfsMessageAddr,
+  vdfsSessionAddr,
+  type VdfsSessionScheme,
+} from '@/schemas/vdfs'
 import { isWaitingStatus } from '@/registry/messageTypes'
 
 export interface UseChatConnectionOptions {
+  /** 会话 id（地址末段）：store 里所有以会话为键的状态都用它 */
   sessionId: string
+  /**
+   * 会话**完整地址** = `<挂载目录>/<id>`——三个输入动作的落点。
+   *
+   * 与 `sessionId` 并存：前者是地址（写哪个 inbox、中止哪个节点、恢复落在哪条
+   * 消息），后者是 store 的键。**只带 id 就等于把「住在哪个空间」丢掉**，
+   * 而路由是 address-less 的（`chat/send` 恒落在根实例上）——那正是
+   * 「子智能体空间里发的消息跑到了父智能体」的成因。
+   */
+  sessionAddr: string
   onSendComplete?: () => void
 }
 
@@ -55,9 +77,9 @@ export interface UseChatConnectionReturn {
   /** 发送一条消息。会话参数（智能体 / 模型 / 模式 / 风险等级）由后端按
    *  `session.metadata` 解析——选择动作统一经会话选项栏落库，故此处不透传。
    *
-   *  ⚠️ 它是**入队**：后端把这条消息写进会话收件箱（`<sid>/inbox`），由空间自己
-   *  在空闲时取出才落库。因此调用返回 ≠ 消息已进流——它出现在消息列表里，是
-   *  后端消费后发权威帧那一刻（前端不做乐观回显，见 `send` 实现）。
+   *  ⚠️ 它是**入队**：实现是往 `<A>/inbox/<消息 id>` **写一次**（ADR-026），
+   *  由那个空间自己在空闲时取出才落库。因此调用返回 ≠ 消息已进流——它出现在
+   *  消息列表里，是后端消费后发权威帧那一刻（前端不做乐观回显，见 `send` 实现）。
    *  等待期间的反馈是 working 状态（空白流 + working ⇒ 补一条等待骨架）。 */
   send: (message: ChatMessage) => void
   abort: () => void
@@ -105,6 +127,53 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
   const store = useSessionsStore()
 
   const { onSendComplete } = options
+
+  // ==================== 寻址：三个输入动作的唯一落点 ====================
+  //
+  // 会话的输入**没有协议路由**，全部表达为「对这个会话地址的一次写入 / 动作」：
+  //
+  //   send(msg)   → write(<A>/inbox/<msg.id>)            入队，空间空闲时自己消费
+  //   abort()     → action(<A>, "abort")                 中止正在跑的那一轮
+  //                 + action(<A>/inbox, "clear")         并清掉还没被消费的排队
+  //   resume(p)   → action(<A>/message/<p.targetId>, <动作>)   落在当时那条消息上
+  //
+  // 三条落点的分界与 ADR-026 已确立的口径一致，不新增概念：
+  // **会话节点** = 正在跑的这一轮；**inbox 条目** = 还没成为消息的消息；
+  // **message 条目** = 已经是转写里的一条消息。
+  //
+  // 段名（`inbox` / `message`）是**运行期数据**：由 provider 决定、按 `kind`
+  // 认出来（`services/vdfsScheme`），因此这里不持有任何段名字面量。
+
+  /**
+   * 某会话的地址 + 集合段方案。
+   *
+   * 会话地址优先用**调用方给的**（`options.sessionAddr`——从详情页一路传下来，
+   * 含「住在哪个空间」）；其它会话（子会话恢复）按 store 的寻址镜像反查。
+   * 段名一律现解析：它是展示名，写死一份就是第二份真相。
+   */
+  async function addressingOf(
+    sid: string
+  ): Promise<{ addr: string; scheme: VdfsSessionScheme } | null> {
+    const given = sid === options.sessionId ? options.sessionAddr : ''
+    const mountDir = given ? parseVdfsSessionAddr(given)?.mountDir : store.mountDirOf(sid)
+    if (!mountDir) {
+      logger.error('useChatConnection', `[${sid}] 无法确定会话所在的挂载目录，动作未发出`)
+      return null
+    }
+    try {
+      const scheme = await ensureSessionScheme(mountDir)
+      // 地址的挂载目录**只有一个来源**：解析出来的那个。`ensureSessionScheme`
+      // 的契约是「返回的 `mountDir` 就是请求的那个」，这里显式对齐一次——
+      // 否则「会话地址」与「inbox 地址」会各自从一处取值，两边一旦漂移就是
+      // 「消息写到了另一个空间」，而那正是本次要修的那类 bug。
+      return { addr: vdfsSessionAddr(mountDir, sid), scheme: { ...scheme, mountDir } }
+    } catch (err) {
+      // 段名解析不出来（该挂载下还没有任何会话可供推导）⇒ 没有可写的 inbox。
+      // 不猜段名：写到一个拼错的地址上比失败更难查。
+      logger.error('useChatConnection', `[${sid}] 会话地址方案未就绪（${mountDir}）`, err)
+      return null
+    }
+  }
 
   // 用于 `removeMessage`（本地用户主动删除一条消息的 UI 交互）
   const localOverrides = shallowRef<Record<string, Set<string>>>({}) // sessionId -> set of removed msgIds
@@ -302,15 +371,16 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
 
     // ⚠️ **不做乐观回显**（与从前相反，见下）。
     //
-    // 发言 = 往会话**收件箱**写一条（后端 `<sid>/inbox` 集合），落库发生在
+    // 发言 = 往会话**收件箱**写一条（`<A>/inbox/<消息 id>`），落库发生在
     // "被消费那一刻"：空间空闲时取出 → 追加存储 → 发一条权威帧。因此前端
     // **不抢先生成节点**——「消息出现在流里」就是"它已被处理"的唯一可观测证据，
     // 抢先画一条会让"已发出"与"已处理"在界面上无法区分（排队的消息看起来
     // 已经发完了）。等待期间的可视反馈由下面的 working 乐观置位给
     // （空白流 + working ⇒ `sessionLive.needsTypingRow` 会补一条等待骨架）。
     //
-    // `outgoing.id` 仍随请求带给后端：`enqueue` 沿用客户端 id，因此后端消费时
-    // 发出的**权威帧**与这条消息同 id（前端按 id 合并，不会出现两条）。
+    // `outgoing.id` 就是**队列条目的 id**（地址末段）：后端 `enqueue_inbox`
+    // 沿用调用方给的 id，因此消费时发出的**权威帧**与这条消息同 id
+    // （前端按 id 合并，不会出现两条）。
     //
     // 立即置为 working（让 UI 立即反映 send 已经发出）；
     // 同时清空会话级错误：新一轮交互开始，上一次失败不再"最新"。
@@ -319,28 +389,33 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     store.setSessionError(sid, null)
     store.setSessionStatus(sid, VDFS_STATUS_WORKING)
 
-    // 运行模式：取会话记忆值（= `session.metadata.mode` 的本地镜像，选择经选项机制落库）。
-    // 后端 orchestrator.handle_chat_send_oneoff 据此把 MODE 写入 chat ctx，
-    // ask_user / emit_confirm_prompt 等据此决定"产 user_prompt 节点"还是"返回友好错误"。
-    const mode = store.getSessionMode(sid)
-
-    // 执行风险等级：与 mode 同级别的回退链——会话记忆值 > 'medium'。
-    // 后端 orchestrator 据此把 RISK_LEVEL 写入 chat ctx，SecurityPolicy 三方法据此覆盖全局阈值。
-    const riskLevel = store.getSessionRiskLevel(sid)
+    const target = await addressingOf(sid)
+    if (!target) {
+      const errText = 'Send failed: 会话地址方案未就绪（无法定位收件箱）'
+      store.putStatus(sid, { status: VDFS_STATUS_FAILED, activity: '错误', outcome: 'failed' })
+      store.setSessionStatus(sid, VDFS_STATUS_FAILED)
+      store.setSessionError(sid, errText)
+      onSendComplete?.()
+      return
+    }
 
     try {
-      await callPlugin(CHAT_SEND, {
-        session_id: sid,
-        // 智能体 / 模型 provider 不在请求中透传：后端按 `session.metadata`
-        // （agent_id / provider_id）回退取值，选择动作统一经会话选项栏落库。
-        message: outgoing,
-        mode,
-        risk_level: riskLevel
-      }, 15000, {
-        // 用会话自身的 workdir（后端 orchestrator 已用 session.metadata.workdir 兜底）
-        workdir: store.getSessionWorkdir(sid) ?? '',
-        session_id: sid
-      })
+      // 写收件箱条目 = 入队。**地址即身份**：条目 id 取自地址末段
+      // （`outgoing.id`），正文就是那条消息本身（后端 `parse_inbox_message`
+      // 认 `ChatMessage` 字段子集）。
+      //
+      // ctx 带上会话自身的 workdir：后端把它作为 `start_turn` 回退链的第一档
+      // （`host_ctx(ctx).get(WORKDIR)`），会话还没绑过 workdir 时它是唯一的来源。
+      await writeVdfs(
+        vdfsInboxItemAddr(target.scheme, sid, outgoing.id),
+        JSON.stringify(outgoing),
+        {
+          ctx: {
+            workdir: store.getSessionWorkdir(sid) ?? '',
+            session_id: sid,
+          },
+        },
+      )
     } catch (err: any) {
       const errText = `Send failed: ${err.message || String(err)}`
       // 请求本身失败（transport 级）：收敛为「以错误结束」这个状态值。
@@ -361,18 +436,40 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     }
   }
 
+  /**
+   * 停止：**两个动作**，作用在两个不同的对象上。
+   *
+   * 1. `action(<A>, "abort")`——中止**正在跑的那一轮**（收敛在途 Turn）；
+   * 2. `action(<A>/inbox, "clear")`——清掉**还没被消费**的排队消息。
+   *
+   * 为什么必须成对：只 `abort` 不清队，消费者下一趟立刻取下一条继续跑，
+   * 用户看到的是「点了停止它又跑起来了」。为什么不给 `abort` 加一个
+   * `clear_inbox` 开关：机制动词保持单一职责，组合发生在调用方。
+   *
+   * 两者都**只发一次 IPC 且互不依赖**（`allSettled`）：其中一个失败不该让另一个
+   * 不发——「停了但队列没清」与「队列清了但没停」都是需要被如实报告的状态。
+   */
   function abort() {
     const sid = options.sessionId
     logger.info('useChatConnection', `[${sid}] aborting`)
-
-    callPlugin(CHAT_ABORT, {
-      session_id: sid
-    }, 5000, {
-      workdir: store.getSessionWorkdir(sid) ?? '',
-      session_id: sid
-    }).catch(err => {
-      logger.error('useChatConnection', 'Failed to abort:', err)
-    })
+    void (async () => {
+      const target = await addressingOf(sid)
+      if (!target) return
+      const ctx = { workdir: store.getSessionWorkdir(sid) ?? '', session_id: sid }
+      const [stopped, cleared] = await Promise.allSettled([
+        runVdfsAction(target.addr, VDFS_ACTION_ABORT, undefined, ctx),
+        runVdfsAction(vdfsInboxAddr(target.scheme, sid), VDFS_ACTION_CLEAR, undefined, ctx),
+      ])
+      if (stopped.status === 'rejected') {
+        logger.error('useChatConnection', 'Failed to abort:', stopped.reason)
+      } else if (!stopped.value.ok) {
+        // 「本来就没在跑」不是错误，但也不该静默——回执的文案直接可读
+        logger.warn('useChatConnection', `[${sid}] abort 未生效：${stopped.value.message}`)
+      }
+      if (cleared.status === 'rejected') {
+        logger.error('useChatConnection', 'Failed to clear inbox:', cleared.reason)
+      }
+    })()
   }
 
   function removeMessage(messageId: string) { markRemoved(messageId) }
@@ -380,7 +477,13 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
   /**
    * 会话恢复（retry_turn/retry_compaction/retry/approve/reject/supply/answer）。
    *
-   * 内部走统一 `CHAT_SEND` 接口的 `resume` 分支（与发送用户消息共用同一端点）。
+   * 内部走**消息节点上的动作**：`action(<A>/message/<targetId>, <动作>)`——
+   * 动作词就是 `ResumeAction` 的线上词形（snake_case），**不另造一套**：
+   * 它们是同一批语义，多一套就多一处漂移。
+   *
+   * 为什么不入队（不像发言那样写 inbox）：恢复必须落在**当时那条消息**上，
+   * 而队列项的 id 是新的；入队会丢掉锚点。见 ADR-026。
+   *
    * 后端语义（删除-重建模式）：
    * - retry_turn：删除 Failed Turn 及其所有子孙节点 → 重新走 LLM 请求
    * - retry_compaction：删除 Failed 压缩节点 → 重新执行一次上下文压缩
@@ -392,8 +495,8 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
    * 由 `sessionTranscriptSync` 与 `sessions.applyTranscriptMessages` 就地收敛。
    *
    * 会话参数：智能体 / 模型 provider 由后端 `resolve_session_params` 从
-   * `session.metadata` 回退解析；`mode` / `risk_level` 从会话记忆（metadata 的本地镜像）
-   * 随请求携带，由后端写入 chat ctx，continuation chat_loop 通过 `ctx.fork()` 继承。
+   * `session.metadata` 回退解析；`mode` / `risk_level` 随动作载荷携带
+   * （与发言不同——发言的载荷只能是一条 `ChatMessage`，恢复的载荷是自由的）。
    */
   async function resume(payload: ResumePayload) {
     const targetSid = payload.targetSessionId || options.sessionId
@@ -411,39 +514,42 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       store.setSessionStatus(sid, VDFS_STATUS_WORKING)
     }
 
-    // 运行模式 / 风险等级：与 send 同级别的回退链——会话记忆值 > 默认值。
-    // 后端 orchestrator.resolve_session_params 据此把 MODE / RISK_LEVEL 写入 chat ctx，
-    // continuation chat_loop 通过 ctx.fork() 继承。
+    // 运行模式 / 风险等级：与从前同级别的回退链——会话记忆值 > 默认值。
+    // 后端把 MODE / RISK_LEVEL 写入 chat ctx，continuation chat_loop 通过
+    // ctx.fork() 继承。
     const mode = store.getSessionMode(targetSid)
     const riskLevel = store.getSessionRiskLevel(targetSid)
 
+    const target = await addressingOf(targetSid)
+    if (!target) {
+      if (targetSid === sid) {
+        store.putStatus(sid, { status: VDFS_STATUS_FAILED, activity: '错误', outcome: 'failed' })
+        store.setSessionStatus(sid, VDFS_STATUS_FAILED)
+      }
+      return
+    }
+
     try {
-      const resp = await callPlugin<{ status?: string }>(
-        CHAT_SEND,
+      const resp = await runVdfsAction(
+        vdfsMessageAddr(target.scheme, targetSid, payload.targetId),
+        payload.action,
         {
-          session_id: targetSid,
-          // 智能体 / 模型 provider 不在此透传：后端 resolve_session_params 按
-          // `session.metadata`（agent_id / provider_id）回退取值。
+          args: payload.args ?? null,
+          reason: payload.reason ?? null,
+          answer: payload.answer ?? null,
           mode,
           risk_level: riskLevel,
-          resume: {
-            target_id: payload.targetId,
-            action: payload.action,
-            args: payload.args ?? null,
-            reason: payload.reason ?? null,
-            answer: payload.answer ?? null,
-          },
         },
-        15000,
         {
           workdir: store.getSessionWorkdir(targetSid) ?? '',
           session_id: targetSid,
         },
       )
-      // 防御性处理：后端 resume 分支有 is_working 守卫，忙碌时返回 session_busy
-      // （HTTP 200 成功响应，不会进 catch）。此时必须复位前端 working 状态，
-      // 否则 UI 会卡在"处理中…"且重试按钮不消失。
-      if (resp?.status === 'session_busy') {
+      // 防御性处理：后端 resume 臂有忙碌守卫，忙碌时回执 `ok:false` +
+      // `data.status = "session_busy"`（**不是**抛错，走不到 catch）。此时必须复位
+      // 前端 working 状态，否则 UI 会卡在"处理中…"且重试按钮不消失。
+      const busy = !resp.ok && (resp.data as { status?: string } | undefined)?.status === 'session_busy'
+      if (busy) {
         logger.warn('useChatConnection', `[${sid}] resume rejected: session_busy`)
         if (targetSid === sid) {
           // 「会话忙」是**当前事实**（空闲），不是失败：回落 `active`，
@@ -451,6 +557,9 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
           store.putStatus(sid, { status: VDFS_STATUS_ACTIVE, activity: '会话忙' })
           store.setSessionStatus(sid, VDFS_STATUS_ACTIVE)
         }
+      } else if (!resp.ok) {
+        // 其它「没做」的如实报告（如目标消息已不在）：不静默，也不冒充失败终态
+        logger.warn('useChatConnection', `[${sid}] resume 未生效：${resp.message}`)
       }
     } catch (err: any) {
       logger.error('useChatConnection', 'Failed to resume:', err)

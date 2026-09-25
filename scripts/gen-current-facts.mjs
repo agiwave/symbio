@@ -278,8 +278,9 @@ function extractToolNames(t, consts) {
  * ## 前缀取**目录名**，不取 `PluginMeta::new` 的首参
  *
  * 容器按**目录名**建实例表并在 `route` 里按它分发（`composite.rs`「目录名 = 实例名」），
- * 所以目录名才是真正的路由前缀。`PluginMeta` 首参曾长期被当作前缀用，而它是**只写字段**
- * （`Plugin::meta()` 全仓无生产消费方）——`hook` 插件写成 `"hooks"` 就由此产出了
+ * 所以目录名才是真正的路由前缀。`PluginMeta` 首参曾长期被当作前缀用，而它**不参与路由**
+ * （唯一运行期消费方是 `composite/vdfs.rs`，读 `order`/`root_access`/`name` 等聚合组合视图）
+ * ——`hook` 插件写成 `"hooks"` 就由此产出了
  * `hooks/fire` 这类**不存在的路由**，并被本表与三处文档照抄。改用目录名后，
  * 「生成器说出的路由」与「容器真正认的路由」同源；`plugin-entry-audit.mjs` 的 E-001
  * 另外把「`PluginMeta` 首参 == 目录名」钉住，使两者不会再分叉。
@@ -656,7 +657,7 @@ function render() {
   L.push(">   资源存储的**选型**（`SingleFileVdfs` / `DirVdfs` / `MemoryVdfs`）是实现细节，不在本表出现。");
   L.push("> - **自有路由** = `async fn route()` 体内 `match` 臂的字符串（臂是**相对路径**，");
   L.push(">   容器已剥掉首段，故此处补回**插件目录名**——容器按目录名建实例表并按它分发，");
-  L.push(">   目录名才是真正的路由前缀；`PluginMeta` 首参是只写字段，不参与路由。");
+  L.push(">   目录名才是真正的路由前缀；`PluginMeta` 首参不参与路由（唯一运行期消费方是 `composite/vdfs.rs`）。");
   L.push(">   标「（动态）」的是按运行期规则分发、无法静态枚举的。");
   L.push(">   漏项与歧义以 [ROUTES.md](./reference/ROUTES.md) 为准。");
   L.push("> - **配置文件** = 该插件调用过 `announce_configurable`（配置就是 `<根>/<挂载点>/PLUGIN.yml`，");

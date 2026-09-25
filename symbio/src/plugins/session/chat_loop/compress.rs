@@ -517,11 +517,19 @@ async fn compress_with_snapshot_core(
         let node = e.finish(&node_id, status, &text, kind).await;
         // 落库：压缩是会话里真实发生的一步，应当留下记录。否则用户刷新后只看到
         // "历史突然变短了"，却没有任何东西说明发生过什么。
-        if let Err(err) = context.session.append_messages(vec![node]).await {
-            plugin_warn!(
-                "session",
-                "[Compress] 压缩节点落库失败（前端已收到终态）: {err}"
-            );
+        match context.session.append_messages(vec![node]).await {
+            // 落库回包：`finish` 那一帧带的还是在途号，权威号靠这一帧换入（§3.4）。
+            Ok(persisted) => {
+                for m in &persisted {
+                    e.emit_persisted(context.session.session_id(), m).await;
+                }
+            }
+            Err(err) => {
+                plugin_warn!(
+                    "session",
+                    "[Compress] 压缩节点落库失败（前端已收到终态）: {err}"
+                );
+            }
         }
     }
     result
@@ -687,8 +695,16 @@ pub(crate) async fn retry_compaction(
                         None,
                     )
                     .await;
-                if let Err(err) = context.session.append_messages(vec![node]).await {
-                    plugin_warn!("session", "[Compress] 重试节点落库失败: {err}");
+                match context.session.append_messages(vec![node]).await {
+                    // 落库回包：同上，换回存储分配的权威 `seq`（§3.4）。
+                    Ok(persisted) => {
+                        for m in &persisted {
+                            em.emit_persisted(context.session.session_id(), m).await;
+                        }
+                    }
+                    Err(err) => {
+                        plugin_warn!("session", "[Compress] 重试节点落库失败: {err}");
+                    }
                 }
             }
         }

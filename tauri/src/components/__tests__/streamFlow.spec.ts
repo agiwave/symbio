@@ -258,7 +258,12 @@ describe('渲染层回归：增量必须进 DOM（不只进 store）', () => {
   const Panel = defineComponent({
     props: { sessionId: { type: String, required: true } },
     setup(props) {
-      const chat = useChatConnection({ sessionId: props.sessionId })
+      // `sessionAddr` 是会话的完整地址（`<挂载目录>/<id>`）；本组用例只走
+      // `messageTree` 派生，不发出站请求，故按根空间的形状合成一个即可。
+      const chat = useChatConnection({
+        sessionId: props.sessionId,
+        sessionAddr: `/root/session/${props.sessionId}`,
+      })
       return () =>
         chat.messageTree.value.map((n) => h(MessageNode, { node: n, depth: 0, key: n.id }))
     },
@@ -360,7 +365,12 @@ describe('渲染层回归：工具调用按帧即时可见（对照 e2e 实测�
   const Panel = defineComponent({
     props: { sessionId: { type: String, required: true } },
     setup(props) {
-      const chat = useChatConnection({ sessionId: props.sessionId })
+      // `sessionAddr` 是会话的完整地址（`<挂载目录>/<id>`）；本组用例只走
+      // `messageTree` 派生，不发出站请求，故按根空间的形状合成一个即可。
+      const chat = useChatConnection({
+        sessionId: props.sessionId,
+        sessionAddr: `/root/session/${props.sessionId}`,
+      })
       return () =>
         chat.messageTree.value.map((n) => h(MessageNode, { node: n, depth: 0, key: n.id }))
     },
@@ -437,7 +447,12 @@ describe('渲染层回归：收起态摘要在流式中显示最新内容', () =
   const Panel = defineComponent({
     props: { sessionId: { type: String, required: true } },
     setup(props) {
-      const chat = useChatConnection({ sessionId: props.sessionId })
+      // `sessionAddr` 是会话的完整地址（`<挂载目录>/<id>`）；本组用例只走
+      // `messageTree` 派生，不发出站请求，故按根空间的形状合成一个即可。
+      const chat = useChatConnection({
+        sessionId: props.sessionId,
+        sessionAddr: `/root/session/${props.sessionId}`,
+      })
       return () =>
         chat.messageTree.value.map((n) => h(MessageNode, { node: n, depth: 0, key: n.id }))
     },

@@ -834,7 +834,6 @@ content 是字符串 → output 是字符串 → success 是布尔 → 顶层是
 | workdir 解析 | `metadata.workdir` | 1（`ctx[WORKDIR]` 缺失时） |
 | `agent_id` 解析 | `metadata.agent_id` | 1 |
 | `ensure_auto_title` | `metadata.title` + `messages` | 1 |
-| `emit_persisted_message` | `messages`（只为找**一条**刚落库的消息） | 1 |
 | `append_messages`（用户消息落库） | `messages`（读-改-写，必需） | 1 |
 | `get_context_messages`（每轮） | `messages`（必需） | 1 |
 | `persist_messages`（收尾落库） | `messages`（读-改-写，必需） | 1 |
@@ -869,14 +868,14 @@ content 是字符串 → output 是字符串 → success 是布尔 → 顶层是
 
 | | 新建会话 | 已有标题的会话 |
 |---|---|---|
-| `load_session` 次数 | **7** | **6** |
+| `load_session` 次数 | **6** | **5** |
 
 - 已省：`agent_id` 那次读取（两种场景都省）；已有标题时 `ensure_auto_title` 那次也省；
   `ctx[WORKDIR]` 缺失时 workdir 那次也省。
 - **没省**：`ensure_auto_title` 在**新建会话**上仍要读一次——它要用刚落库的用户消息
   派生标题，读是必需的（跳过只会让会话永远没有标题）。
-- **没省**：`emit_persisted_message` 那次——它为拿存储分配的权威 `seq`，把整份消息读
-  出来只为找一条。要省它得改 `ChatSession::append_messages` 的返回值（让它把落库后的
-  消息带回），牵动 trait 与全部实现。
 - **不该省**：三处 `messages` 读取（两处写路径的读-改-写、一处每轮上下文）——
   它们必须在各自的时刻取最新值。
+- **不需要**：落库回包（把存储分配的权威 `seq` 交回实时面，见
+  [`vdfs-session-messages.md`](vdfs-session-messages.md) §3.4）**不另读一次**——
+  `append_messages` 把落库后的权威副本直接交回调用方，调用方拿到即发。

@@ -49,7 +49,7 @@ impl vdfs::VdfsProvider for SessionPlugin {
             VdfsSessionPath::Messages { id, mid } => {
                 self.messages_at(ctx, path, id, mid, req).await
             }
-            VdfsSessionPath::Inbox { id, iid } => self.inbox_at(path, id, iid, req).await,
+            VdfsSessionPath::Inbox { id, iid } => self.inbox_at(ctx, path, id, iid, req).await,
             VdfsSessionPath::SubSessions(id) => self.sub_sessions_at(path, id, req).await,
             VdfsSessionPath::SubSession { id, sub } => {
                 self.sub_session_at(path, id, sub, req).await
@@ -197,6 +197,32 @@ impl SessionPlugin {
                 self.unwatch_at_path(path).await?;
                 Ok(vdfs::VdfsResponse::Unit)
             }
+            // 节点动作：**中止**正在跑的那一轮。
+            //
+            // 落点是**会话节点自身**（`<sid>`），而不是 `<sid>/inbox`：在途那一轮
+            // 早已出队，它现在是转写里的消息；队列上的动作只该管「还没被消费的」
+            // （取消 = 删条目，清空 = `clear`）。两个动词作用在**两个不同的对象**上
+            // ，因此是两个地址——与 ADR-026 已确立的分界同一条。
+            vdfs::VdfsRequest::Action { action, .. } => match action.as_str() {
+                vdfs::VDFS_ACTION_ABORT => {
+                    // 存在性校验：会话不在就没有「它的一轮」可谈
+                    self.session_of(id).await?;
+                    let stopped = self.abort_turn(id).await;
+                    Ok(vdfs::VdfsResponse::Action(vdfs::VdfsActionResult {
+                        action: action.clone(),
+                        ok: stopped,
+                        // 「没在跑」不是错误，但也不报成功——报成功会让调用方以为
+                        // 停下来了（这正是 `chat/abort` 最坏的一面）。
+                        message: if stopped {
+                            "已中止当前轮次".to_string()
+                        } else {
+                            format!("该会话没有正在进行的轮次，无需中止：{path}")
+                        },
+                        data: Some(json!({ "session_id": id })),
+                    }))
+                }
+                _ => Err(vdfs::VdfsError::NotImplemented),
+            },
             _ => Err(vdfs::VdfsError::NotImplemented),
         }
     }
@@ -395,10 +421,11 @@ impl SessionPlugin {
                     truncate = vdfs::VDFS_ACTION_TRUNCATE,
                 )))
             }
-            // 节点动作：转写区段的两种**集合操作**（逐条下发移除帧的理由见各分支文档）。
-            vdfs::VdfsRequest::Action { action, .. } => {
-                match (mid, action.as_str()) {
-                    (Some(mid), vdfs::VDFS_ACTION_TRUNCATE) => {
+            // 节点动作：转写区段上有两类动词——两种**集合操作**（逐条下发移除帧的
+            // 理由见各分支文档）与**恢复**（落在单条消息上，见下）。
+            vdfs::VdfsRequest::Action { action, payload } => {
+                match (mid, action.as_str(), payload.as_ref()) {
+                    (Some(mid), vdfs::VDFS_ACTION_TRUNCATE, _) => {
                         let deleted_ids = self
                             .truncate_messages(id, mid)
                             .await
@@ -423,7 +450,7 @@ impl SessionPlugin {
                             data: Some(data),
                         }))
                     }
-                    (None, vdfs::VDFS_ACTION_CLEAR) => {
+                    (None, vdfs::VDFS_ACTION_CLEAR, _) => {
                         self.clear_messages(id)
                             .await
                             .map_err(vdfs::from_plugin_error)?;
@@ -432,6 +459,76 @@ impl SessionPlugin {
                             ok: true,
                             message: "已清空会话历史（会话本身与元数据保留）".to_string(),
                             data: None,
+                        }))
+                    }
+                    // ── 恢复（retry_turn / retry / approve / reject / supply /
+                    //    answer / retry_compaction）──
+                    //
+                    // 落点是**目标消息自身**（`<sid>/message/<mid>`）——与 `truncate`
+                    // 同一个位置：「对这条消息做点什么」的地址就是它自己。动作名直接
+                    // 取 `ResumeAction` 的线上词形（snake_case，跨栈契约已由
+                    // `resume_action_wire_words_are_snake_case` 钉住），**不另造一套**
+                    // ——同一批语义多一套名字就多一处漂移。
+                    //
+                    // 为什么它是动作而不是"写一条消息"：恢复不产生新用户消息，它
+                    // **落在当时那条消息上**（删除-重建）。入队会让它排到一堆新消息
+                    // 之后，等到被消费时候选早已被后续轮次改写，恢复语义当场失效。
+                    (Some(mid), word, payload) => {
+                        let Ok(resume_action) = serde_json::from_value::<cm::ResumeAction>(
+                            Value::String(word.to_string()),
+                        ) else {
+                            return Err(vdfs::VdfsError::NotImplemented);
+                        };
+                        self.session_of(id).await?;
+                        let p = payload.cloned().unwrap_or(Value::Null);
+                        let obj = p.as_object();
+                        let get_str = |k: &str| {
+                            obj.and_then(|o| o.get(k))
+                                .and_then(Value::as_str)
+                                .filter(|s| !s.is_empty())
+                                .map(str::to_string)
+                        };
+                        // 上下文**自己造**（与收件箱消费者的 `run_inbox_turn` 同款）：
+                        // 只带目标会话 id 与恢复请求。发起者的请求上下文刻意不沿用——
+                        // 它的 `SESSION_ID` 是发起者自己的会话（跨空间时二者不同）。
+                        let host = vdfs::host_ctx(ctx)?;
+                        let req_ctx = host.fork();
+                        req_ctx.set(SESSION_ID, id.to_string());
+                        let _ = req_ctx.set_payload(session_chat::Request {
+                            session_id: Some(id.to_string()),
+                            resume: Some(cm::ResumeRequest {
+                                target_id: mid.to_string(),
+                                action: resume_action,
+                                args: obj.and_then(|o| o.get("args")).cloned(),
+                                reason: get_str("reason"),
+                                answer: obj.and_then(|o| o.get("answer")).cloned(),
+                            }),
+                            mode: get_str("mode"),
+                            risk_level: get_str("risk_level"),
+                            ..session_chat::Request::default()
+                        });
+                        let resp = self
+                            .me()
+                            .map_err(vdfs::from_plugin_error)?
+                            .start_turn(req_ctx)
+                            .await
+                            .map_err(vdfs::from_plugin_error)?;
+                        let status = resp
+                            .get::<Value>()
+                            .ok()
+                            .and_then(|v| v.get("status").and_then(Value::as_str).map(String::from))
+                            .unwrap_or_default();
+                        Ok(vdfs::VdfsResponse::Action(vdfs::VdfsActionResult {
+                            action: action.clone(),
+                            // 忙碌时**明确回绝**：http 层是 200，只有 `ok` 能把这个
+                            // 事实带给调用方（前端据此把乐观置的 working 复位）。
+                            ok: status != "session_busy",
+                            message: if status == "session_busy" {
+                                format!("会话正在处理中，无法{action}：{path}")
+                            } else {
+                                format!("已在 {mid} 上执行 {action}")
+                            },
+                            data: Some(json!({ "session_id": id, "status": status })),
                         }))
                     }
                     _ => Err(vdfs::VdfsError::NotImplemented),
@@ -452,6 +549,7 @@ impl SessionPlugin {
     /// 收件箱（`<id>/inbox[/iid]`）：**待消费**的用户消息。
     async fn inbox_at(
         &self,
+        ctx: &vdfs::VdfsContext,
         path: &str,
         id: &str,
         iid: Option<&str>,
@@ -539,13 +637,20 @@ impl SessionPlugin {
                 self.session_of(id).await?;
                 let raw = content.text.as_deref().unwrap_or("");
                 let message = parse_inbox_message(raw)?;
+                // 工作目录取自**请求上下文**（与 `chat/send` 入队时同一来源）：
+                // 它是 `start_turn` 回退链的**第一档**（ctx > 会话 metadata > 报错），
+                // 丢了它就只能靠会话 metadata——而「会话还没绑过 workdir」正是新建
+                // 会话那一刻的常态。
+                let workdir = vdfs::host_ctx(ctx)
+                    .ok()
+                    .and_then(|h| h.get(crate::symbio_core::WORKDIR));
                 let item = self
                     .enqueue_inbox(
                         id,
                         iid.map(str::to_string),
                         message,
                         session_chat::Request::default(),
-                        None,
+                        workdir,
                     )
                     .await;
                 // 回执的 `name` 是**条目自己的名字**（不是请求地址的末段）：写收件箱
@@ -571,7 +676,9 @@ impl SessionPlugin {
                     } else {
                         Err(vdfs::VdfsError::not_found(format!(
                             "收件箱里没有待消费条目 {iid}\
-                             （已出队的那条已是会话里的消息，中止请走 chat/abort）：{path}"
+                             （已出队的那条已是会话里的消息，中止请走 \
+                             action(会话地址, \"{abort}\")）：{path}",
+                            abort = vdfs::VDFS_ACTION_ABORT
                         )))
                     }
                 }
@@ -581,7 +688,7 @@ impl SessionPlugin {
                 ))),
             },
             // 收件箱的 `clear`：**只取消还没被消费的**。已出队的那条已经是会话里的
-            // 消息，中止它走 `chat/abort`（与删除条目同款分界）。
+            // 消息，中止它走 `action(<会话地址>, "abort")`（与删除条目同款分界）。
             vdfs::VdfsRequest::Action { action, .. }
                 if iid.is_none() && action == vdfs::VDFS_ACTION_CLEAR =>
             {

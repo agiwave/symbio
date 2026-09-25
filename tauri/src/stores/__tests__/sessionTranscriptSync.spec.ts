@@ -23,7 +23,11 @@ vi.mock('@/services/eventBus', () => ({
   subscribeVdfsChanged: vi.fn(),
 }))
 vi.mock('@/services/vdfsScheme', () => ({
-  ensureVdfsSessionScheme: vi.fn(async () => ({ mountDir: '/root/session', messagesSeg: 'message' })),
+  ensureSessionScheme: vi.fn(async () => ({
+    mountDir: '/root/session',
+    messagesSeg: 'message',
+    inboxSeg: 'inbox',
+  })),
 }))
 vi.mock('@/utils/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), debug: vi.fn(), info: vi.fn() },

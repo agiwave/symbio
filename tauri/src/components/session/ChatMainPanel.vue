@@ -93,8 +93,9 @@
 
       <template v-else>
         <ModelChatPanel
-          :key="store.activeId ?? 'none'"
+          :key="store.activeAddr || 'none'"
           :sessionId="store.activeId ?? ''"
+          :sessionAddr="store.activeAddr"
         />
       </template>
     </main>

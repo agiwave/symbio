@@ -443,4 +443,24 @@ impl SessionPlugin {
         self.emit_session_state(state, SessionStateChange::aborted())
             .await;
     }
+
+    /// **中止某会话正在跑的那一轮**——`action(<A>, "abort")` 与 `chat/abort` 共用的
+    /// 唯一实现。
+    ///
+    /// 返回**是否真的中止了一个在途轮次**。`false` = 这个会话此刻没在跑（含「本
+    /// 实例从未跑过它」）：调用方把它翻成一句明确的话，而不是报成功——`chat/abort`
+    /// 最坏的一面就是「无论停没停都回 `aborted`」。
+    pub(crate) async fn abort_turn(&self, session_id: &str) -> bool {
+        // **只查不建**：`get_or_create` 在这里会为一个从未跑过的会话（典型是
+        // 子智能体空间的会话被错投到根实例）造一个永不释放的幽灵状态，而中止
+        // 本身是空操作——调用方拿到"成功"，什么都没停。
+        let Some(state) = self.active_mgr.get(session_id).await else {
+            return false;
+        };
+        if !state.inner.read().await.is_working {
+            return false;
+        }
+        self.handle_abort(&state).await;
+        true
+    }
 }

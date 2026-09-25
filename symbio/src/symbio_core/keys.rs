@@ -237,6 +237,7 @@ pub const SUB_AGENT_PLUGINS: &[&str] = &[
     "agent",     // 智能体（含子子 Agent —— 分形）
     "skill",     // 技能
     "gateway",   // 外部 API 网关
+    "vdfs",      // VDFS 根（单槽归系统 Agent）
     "work",      // 工作区记忆（WORKDIR 继承父会话，不再双重注入）
 ];
 

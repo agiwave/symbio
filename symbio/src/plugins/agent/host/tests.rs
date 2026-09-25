@@ -12,7 +12,7 @@ use crate::symbio_core::{vdfs, vdfs_provider::VdfsProvider};
 use crate::symbio_core::{
     CapabilityVisitor, ConfigurableVisitor, DefaultConfigurableVisitor, DefaultToolVisitor,
     InvokeRequest, InvokeRequestExt, Plugin, PluginDir, SimpleRequest, AGENT_ID,
-    CAPABILITY_VISITOR, CONFIG_VISITOR, PATH, PLUGIN_AGENT, PLUGIN_DIR, TRAVERSE_AVAILABLE_TOOLS,
+    CAPABILITY_VISITOR, CONFIG_VISITOR, PATH, PLUGIN_AGENT, TRAVERSE_AVAILABLE_TOOLS,
     VDFS_PARENT_ADDR, WORKDIR,
 };
 use std::path::Path;
@@ -322,7 +322,7 @@ async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
 /// 绕过了 `CompositeVfs` 的 `root_hidden` 过滤。
 #[tokio::test]
 async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
-    use crate::symbio_core::{PluginDir, PLUGIN_AGENT, PLUGIN_DIR};
+    use crate::symbio_core::{PluginDir, PLUGIN_AGENT};
 
     let tmp = tempfile::tempdir().unwrap();
     let agent_root = tmp.path().join("agent");
@@ -340,7 +340,9 @@ async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
     let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
     // 合成父地址：模拟容器转发时写入的当前父地址（不依赖真实挂载名）
     ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
-    ctx.set(PLUGIN_DIR, PluginDir::at(&agent_root, PLUGIN_AGENT));
+    // 请求上下文**不带 `PLUGIN_DIR`**——那是**装配期**的键（见
+    // `sub_agent_agent_list_is_scoped_to_its_own_space`）：插件的作用域由它**自己**
+    // 持有的目录决定，不由请求方喂。请求方塞一个进来，测的就不是生产形状了。
     ctx.set(AGENT_ID, "reviewer".to_string());
     ctx.set(WORKDIR, tmp.path().to_string_lossy().to_string());
     let vctx = vdfs::vdfs_context(&ctx);
@@ -354,18 +356,22 @@ async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
         .unwrap();
     let names: Vec<&str> = items.iter().map(|it| it.node.name.as_str()).collect();
 
-    // 1) 穿过挂载点：返回的是子 composite 视图（名字是资源入口，且路径带挂载段
-    //    `reviewer`），而不是裸目录（`AGENTS.md` / `manifest.yaml` / `skill` 目录）。
+    // 1) 穿过挂载点：返回的是子 composite 视图（名字是资源入口），而不是裸目录
+    //    （`AGENTS.md` / `manifest.yaml` / `skill` 目录）。
     assert!(
         names
             .iter()
             .any(|n| matches!(*n, "session" | "mcp" | "skill" | "setting" | "agent")),
         "子根应经子 composite 列出可见资源入口，实际：{names:?}"
     );
+    //    ⚠️ 判据**不是**「条目路径带挂载段」：条目地址由访问层按请求地址回填，
+    //    挂载点填不出来（它不知道自己被挂在哪，`mount_rel` 只是本插件空间内的
+    //    首段）——本层只会留空。见
+    //    `sub_agent_mount_crossing_is_uniform_across_operations` ①。
     assert!(
-        items.iter().all(|n| n.path.contains("reviewer")),
-        "子根路径应带挂载段 reviewer（证明穿越了挂载点），实际：{:?}",
-        items.iter().map(|n| &n.path).collect::<Vec<_>>()
+        items.iter().all(|it| it.path.is_empty()),
+        "条目地址应留空交访问层回填（挂载点不填地址），实际：{:?}",
+        items.iter().map(|it| &it.path).collect::<Vec<_>>()
     );
     // 2) 关键回归：`root_hidden` 的配置型挂载点不得出现在侧边栏（与系统根一致）
     for hidden in ["gateway", "web", "telegram", "local", "work"] {
@@ -390,12 +396,13 @@ async fn mount_root_lists_only_installed_agents() {
         .import(&build_agent_zip("com.acme.demo", "^2"), false)
         .unwrap();
 
+    // 请求上下文**不带 `PLUGIN_DIR`**（同 `sub_agent_agent_list_is_scoped_to_its_own_space`：
+    // 作用域来自插件自持的目录，不是请求方喂的）
     let host: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
-    host.set(PLUGIN_DIR, PluginDir::at(&agent_root, PLUGIN_AGENT));
     host.set(WORKDIR, workdir);
     let ctx = vdfs::vdfs_context(&host);
 
-    let plugin = AgentPlugin::new();
+    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_AGENT));
     let items = plugin
         .dispatch(&ctx, "", LIST)
         .await
@@ -473,7 +480,7 @@ async fn traverse_declares_config_and_instruction_in_settings() {
 #[tokio::test]
 async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     use crate::symbio_core::vdfs_provider::VdfsError;
-    use crate::symbio_core::{PluginDir, PLUGIN_AGENT, PLUGIN_DIR};
+    use crate::symbio_core::{PluginDir, PLUGIN_AGENT};
 
     let tmp = tempfile::tempdir().unwrap();
     let agent_root = tmp.path().join("agent");
@@ -491,7 +498,9 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_AGENT));
     let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
     ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
-    ctx.set(PLUGIN_DIR, PluginDir::at(&agent_root, PLUGIN_AGENT));
+    // 请求上下文**不带 `PLUGIN_DIR`**——那是**装配期**的键（见
+    // `sub_agent_agent_list_is_scoped_to_its_own_space`）：插件的作用域由它**自己**
+    // 持有的目录决定，不由请求方喂。请求方塞一个进来，测的就不是生产形状了。
     ctx.set(AGENT_ID, "reviewer".to_string());
     ctx.set(WORKDIR, tmp.path().to_string_lossy().to_string());
     let vctx = vdfs::vdfs_context(&ctx);
@@ -499,7 +508,15 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     // 物理落点（= 绕过挂载点时会写进去的那个目录）
     let physical = agent_root.join("reviewer").join("work").join("AGENTS.md");
 
-    // ① list：列出的是子 composite 的可见入口，路径是**树内相对**（不含根名）
+    // ① list：列出的是子 composite 的可见入口，**条目地址由访问层回填**——
+    //    本层是挂载点，**不得**填条目地址：它不知道自己被挂在哪（`agent/`），
+    //    填出来的会是一个少了外层挂载段的假地址，而访问层见到非空地址就
+    //    「不再回填」。
+    //
+    //    断言必须是**空**而不是「不含根名」：错误实现填的正是挂载段本身
+    //    （`reviewer`），它同样不含根名——用「不含根名」当判据会放过这个 bug，
+    //    而它的表现是子空间里列出的**每一条**都顶着子空间根地址
+    //    （`<根>/<agent-id>`，那是个目录），前端点开会话即「读取会话转写失败」。
     let listed = plugin
         .dispatch(&vctx, "reviewer", LIST)
         .await
@@ -507,12 +524,9 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
         .into_list()
         .unwrap();
     assert!(
-        !listed.is_empty()
-            && listed
-                .iter()
-                .all(|n| !n.path.contains(crate::plugins::vdfs::host::VDFS_ADDR_ROOT)),
-        "子根清单应为树内相对路径（根名只在 UnifiedFs 出口补），实际：{:?}",
-        listed.iter().map(|n| &n.path).collect::<Vec<_>>()
+        !listed.is_empty() && listed.iter().all(|it| it.path.is_empty()),
+        "挂载点不填条目地址（与容器同款契约：留空交访问层按请求地址回填），实际：{:?}",
+        listed.iter().map(|it| &it.path).collect::<Vec<_>>()
     );
 
     // ② stat / ③ list（子路径）：两者都穿过挂载点
@@ -586,6 +600,68 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     //
     // 曾经还有 ⑨：`move` 跨 `<id>` 明确拒绝。移动整条下线后该断言随之删除——
     // 不再有第二个地址可供越界。
+}
+
+/// 子智能体空间里的「智能体」清单必须**只反映那个空间自己**。
+///
+/// 生产态的请求上下文**不带 `PLUGIN_DIR`**——那个键只在**装配期**给出
+/// （`composite::build` 构造子插件时、[`AgentPlugin::sub_agent`] 造子树时）。
+/// 因此目录若从**请求上下文**取（`dir_from_ctx`），嵌套实例就会回退到
+/// `PluginDir::of(PLUGIN_AGENT)` = **全局 agent 根**：子空间里列出的「智能体」
+/// 其实是**顶层**清单，用户看到的是**它自己**。
+///
+/// 顶层看不出这个错，是因为回退值与它自己的目录**恰好相同**。这类「只在嵌套层
+/// 显形」的缺陷只能由一条**钻进嵌套层**的断言钉住——所以本用例刻意不在请求
+/// 上下文里塞 `PLUGIN_DIR`（其余用例塞了，等于绕开了生产态的真实形状）。
+///
+/// 判据取「清单里必须有子空间**自己**的那个下级智能体」而不是「清单必须为空」：
+/// 后者在全局 agent 根恰好为空时会**放过**这个 bug（错误实现在那里读到的是空清单，
+/// 与正确实现无从区分）。放一个只在子空间里存在的下级智能体，两种实现必然分岔。
+#[tokio::test]
+async fn sub_agent_agent_list_is_scoped_to_its_own_space() {
+    use crate::symbio_core::{PluginDir, PLUGIN_AGENT};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let agent_root = tmp.path().join("agent");
+    let sub = agent_root.join("reviewer");
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::write(
+        sub.join("manifest.yaml"),
+        "spec: \"agent-dir/v2\"\nid: \"reviewer\"\nname: \"评审\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^2\"\n",
+    )
+    .unwrap();
+    std::fs::write(sub.join("AGENTS.md"), "你是评审专家。").unwrap();
+    // 子空间里**真正**的下一级智能体：只存在于 `<sub>/agent/` 下
+    let inner = sub.join("agent").join("inner");
+    std::fs::create_dir_all(&inner).unwrap();
+    std::fs::write(
+        inner.join("manifest.yaml"),
+        "spec: \"agent-dir/v2\"\nid: \"inner\"\nname: \"内层\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^2\"\n",
+    )
+    .unwrap();
+
+    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_AGENT));
+
+    // 生产态请求上下文：只有宿主该有的键，**没有 `PLUGIN_DIR`**
+    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
+    ctx.set(WORKDIR, tmp.path().to_string_lossy().to_string());
+    let vctx = vdfs::vdfs_context(&ctx);
+
+    // 钻进子智能体，看它自己的「智能体」挂载点
+    let nested = plugin
+        .dispatch(&vctx, "reviewer/agent", LIST)
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap();
+    let ids: Vec<&str> = nested.iter().map(|it| it.node.name.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec!["inner"],
+        "子空间的智能体清单必须来自**它自己的** agent 目录（实际：{ids:?}）——\
+         出现顶层智能体（尤其它自己）即表示目录回退到了全局 agent 根"
+    );
 }
 
 // ==================== dispatch 请求形态（测试辅助） ====================

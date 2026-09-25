@@ -323,6 +323,15 @@ export const VDFS_ACTION_TRUNCATE = 'truncate'
  * 好让**同一个区段的删除只有一种入口形态**。
  */
 export const VDFS_ACTION_CLEAR = 'clear'
+/**
+ * 已知动作标识：**中止**（后端 `VDFS_ACTION_ABORT`）——停止该节点正在进行的
+ * 活动。会话节点（`<挂载目录>/<sid>`）上它表示「中止正在跑的那一轮」。
+ *
+ * 与「截断 / 清空」不同，它不是集合操作，而是**对一个进行中活动的控制**；
+ * 也**不**作用于排队中的条目（取消排队 = 删那条队列项）。两者作用在
+ * 两个不同的对象上，因此是两个动词、两个地址。
+ */
+export const VDFS_ACTION_ABORT = 'abort'
 
 export interface VdfsListResponse {
   /** **本列表自身**的地址——唯一必须保留的地址字段：`vdfs/root` 的调用方无从知道根叫什么 */
@@ -521,17 +530,30 @@ export function isVdfsDraft(node: { path?: string } | null | undefined): boolean
 export const VDFS_KIND_MESSAGES = 'messages'
 
 /**
+ * 收件箱的场景类型（后端 `VDFS_KIND_INBOX`）。
+ *
+ * 与 [`VDFS_KIND_MESSAGES`] 同款：段名是展示名（随后端文案可变），`kind`
+ * 才是对外承诺的标识。前端按它把收件箱从会话内部的若干并列集合里认出来。
+ */
+export const VDFS_KIND_INBOX = 'inbox'
+
+/**
  * 会话地址方案（**运行期数据**）。
  *
- * - `mountDir`    挂载目录地址（如 `<根>/session`）
+ * - `mountDir`    挂载目录地址（如 `<根>/session`、`agent/<id>/session`）
  * - `messagesSeg` 转写列表的段名（展示名，随后端下发）
+ * - `inboxSeg`    收件箱的段名（同上，按 `VDFS_KIND_INBOX` 认出）
  *
- * 解析见 `services/vdfsScheme.ensureVdfsSessionScheme()`。之所以是值而不是
- * 常量：`schemas/` 不允许反向依赖 `services/`，而这两项是列目录才能拿到的。
+ * 解析见 `services/vdfsScheme.ensureSessionScheme()`。之所以是值而不是
+ * 常量：`schemas/` 不允许反向依赖 `services/`，而这几项是列目录才能拿到的。
+ *
+ * **挂载目录不是唯一的**（子智能体空间各有一份 `session` 挂载），因此方案
+ * **按挂载目录**缓存，而不是全局一份——「会话住在哪个空间」是地址的一部分。
  */
 export interface VdfsSessionScheme {
   mountDir: string
   messagesSeg: string
+  inboxSeg: string
 }
 
 /**
@@ -555,6 +577,37 @@ export function vdfsMessageAddr(
   messageId: string,
 ): string {
   return vdfsJoin(vdfsMessagesAddr(s, sessionId), messageId)
+}
+
+/** 收件箱的地址：`<mountDir>/<id>/<收件箱段>` */
+export function vdfsInboxAddr(s: VdfsSessionScheme, sessionId: string): string {
+  return vdfsJoin(vdfsSessionAddr(s.mountDir, sessionId), s.inboxSeg)
+}
+
+/** 单条收件箱条目的地址：`<mountDir>/<id>/<收件箱段>/<iid>` */
+export function vdfsInboxItemAddr(
+  s: VdfsSessionScheme,
+  sessionId: string,
+  itemId: string,
+): string {
+  return vdfsJoin(vdfsInboxAddr(s, sessionId), itemId)
+}
+
+/**
+ * 会话地址 → `{ mountDir, id }`。
+ *
+ * 会话在前端的身份是**地址**（空间 + id），不是裸 id——两个空间里可以有同名
+ * id，而它们是两个不同的会话。所有「按地址拿到会话」的入口都走这一个解析，
+ * 不各自 `split('/')`。
+ */
+export function parseVdfsSessionAddr(addr: string): { mountDir: string; id: string } | null {
+  const t = addr.replace(/\/+$/, '')
+  const i = t.lastIndexOf('/')
+  if (i <= 0) return null
+  const mountDir = t.slice(0, i)
+  const id = t.slice(i + 1)
+  if (!mountDir || !id) return null
+  return { mountDir, id }
 }
 
 // ==================== 会话运行态（会话节点的场景属性） ====================

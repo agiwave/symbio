@@ -360,6 +360,21 @@ impl CompressionEmitter {
             .emit_transcript_rewritten(session_id, dropped, head)
             .await;
     }
+
+    /// 落库回包：把**存储分配的 `seq`** 交回实时面（`docs/vdfs-session-messages.md` §3.4）。
+    ///
+    /// [`Self::finish`] 发的那一帧带的是转写分配的**在途号**（`1 << 50`）——号只由
+    /// 存储在写入时分配，落库后必须再发一次权威副本才能换回。不回包的后果是静默的：
+    /// 该节点永远排在全部存储号之后，下一条用户消息（小存储号）会跳到它**前面**，
+    /// 前端于是看到压缩节点跑到对话末尾去。
+    ///
+    /// 载荷是 `append_messages` 交回的权威副本（`content` 整条替换），不是 `finish`
+    /// 返回的那份——后者没有号（补号发生在存储临界区内的私有副本上）。
+    pub async fn emit_persisted(&self, session_id: &str, node: &ChatMessage) {
+        self.plugin
+            .transcript_apply(session_id, crate::symbio_core::turn::message_frame(node))
+            .await;
+    }
 }
 
 pub struct ChatOrchestrator {

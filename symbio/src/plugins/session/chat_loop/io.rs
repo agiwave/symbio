@@ -25,6 +25,21 @@ pub(crate) async fn finalize_turn_root(sink: &EventSink, context: &SessionContex
     emit_state(sink, node).await;
 }
 
+/// 增量落库 + **落库回包**（把存储分配的权威 `seq` 交回实时面）。
+///
+/// ## 回包这一步不能省
+///
+/// `seq` 只在存储写入时分配；助手侧节点的号是转写建节点时发的**在途号**
+/// （`INFLIGHT_SEQ_BASE = 1 << 50`）。落库后若不回包，这些节点就**永远持在途号**：
+/// 用户消息经 `emit_persisted_messages` 拿到的是小存储号（1、2、3…），助手侧却是
+/// 1e15 量级——两套序号空间并存在同一棵树上，下一条用户消息会排到上一轮助手消息
+/// **之前**，前端于是显示 `user-user-assistant-assistant`（重开会话才恢复，因为整份
+/// 回读只走存储号）。这就是 §3.4 那条硬不变量「每一条被落库的消息都必须发一次变更
+/// （带存储分配的 `seq`）」的落地点。
+///
+/// 发的是 `append_messages` 交回的**存储权威副本**（`content` 整条替换），不是
+/// `context.messages` 里那份：后者没有号——`append_messages` 是在临界区内给它的
+/// 私有副本补号的，发它等于把「没有号」写进前端。
 pub(crate) async fn persist_messages(
     context: &SessionContext,
     last_saved: usize,
@@ -35,14 +50,21 @@ pub(crate) async fn persist_messages(
         return;
     }
 
-    if let Err(e) = context.session.append_messages(new_messages.to_vec()).await {
-        // 持久化失败（可恢复）：不静默吃错误，也不中断对话（消息仍在内存中，
-        // chat_loop 继续）。错误是**状态**不是事件——发 `Warn` 由消费循环写入
-        // 会话节点 `attributes.warning`，前端按状态渲染；新一轮请求开始时清除。
-        let msg = format!("消息持久化失败（消息仍在内存中）: {}", e);
-        plugin_warn!("session", "[Session] {}", msg);
-        // 告警是会话节点状态（VDFS watch 域），经出口的告警通道下发，不是消息帧。
-        sink.warn(Some(msg)).await;
+    match context.session.append_messages(new_messages.to_vec()).await {
+        Ok(persisted) => {
+            for message in persisted {
+                sink.emit(message).await;
+            }
+        }
+        Err(e) => {
+            // 持久化失败（可恢复）：不静默吃错误，也不中断对话（消息仍在内存中，
+            // chat_loop 继续）。错误是**状态**不是事件——发 `Warn` 由消费循环写入
+            // 会话节点 `attributes.warning`，前端按状态渲染；新一轮请求开始时清除。
+            let msg = format!("消息持久化失败（消息仍在内存中）: {}", e);
+            plugin_warn!("session", "[Session] {}", msg);
+            // 告警是会话节点状态（VDFS watch 域），经出口的告警通道下发，不是消息帧。
+            sink.warn(Some(msg)).await;
+        }
     }
 }
 

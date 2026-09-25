@@ -23,10 +23,13 @@ import { computed, defineComponent, h, ref } from 'vue'
 
 const hoisted = vi.hoisted(() => {
   const fns = { startNew: vi.fn(), runAction: vi.fn(), runPackAction: vi.fn() }
-  return { stub: {} as Record<string, unknown>, fns }
+  return { stub: {} as Record<string, unknown>, fns, sessions: { setSessionSpace: vi.fn() } }
 })
 
 vi.mock('@/composables/useVdfs', () => ({ useVdfs: () => hoisted.stub }))
+// 本控件只用到 store 的**一个**能力：声明「当前空间」（当前目录能新建会话时）。
+// 用桩而不是真 store，本文件的用例就不必为一个与新建/转发无关的机制架 Pinia。
+vi.mock('@/stores/sessions', () => ({ useSessionsStore: () => hoisted.sessions }))
 // 真实的渲染器登记表会把整条会话渲染链（连同 Tauri 通道）拉进来，故挡掉；
 // 需要「详情渲染器」在场的用例改用下面登记的桩（见 RendererStub）。
 vi.mock('@/registry/vdfsRenderers', () => ({}))
@@ -82,6 +85,10 @@ function installStub(opts: { newType?: VdfsNewType | null; selected?: VdfsNode |
     selectDir: vi.fn(),
     selectedName: ref<string | null>(null),
     cwd: ref('@vfs'),
+    // 当前目录节点：`new_type.ext = session` 时控件会声明「当前空间」
+    // （会话挂载目录），故桩里给它一个「不可新建」的目录节点——本文件测的是
+    // 新建入口与动作转发，空间声明不参与。
+    cwdNode: computed<VdfsNode | null>(() => null),
     title: computed(() => '资源'),
     items: ref<VdfsNode[]>([]),
     loading: ref(false),

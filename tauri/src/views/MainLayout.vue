@@ -19,16 +19,39 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, watch } from 'vue'
 import { RouterView } from 'vue-router'
-import { startSessionTranscriptSync } from '@/stores/sessionTranscriptSync'
-import { startSessionNodeSync } from '@/stores/sessionNodeSync'
+import { startSessionTranscriptSync, registerTranscriptMount } from '@/stores/sessionTranscriptSync'
+import { startSessionNodeSync, registerSessionMount } from '@/stores/sessionNodeSync'
 import { setChimeSettingsSource } from '@/services/completionChime'
 import { getWorkspacePath } from '@/services/home'
 import { useSessionsStore } from '@/stores/sessions'
 import { useSoundSettingsStore } from '@/stores/soundSettings'
 import { logger } from '@/utils/logger'
 import Toast from '@/components/common/Toast.vue'
+
+const sessions = useSessionsStore()
+
+/**
+ * 当前空间的会话挂载目录一变，就向两个实时消费端各登记一次。
+ *
+ * **为什么必须在这里**：会话挂载目录不止一份——子智能体空间
+ * （`<根>/agent/<id>/…`）是一棵完整子树，内部有自己的 `session` 挂载，其下
+ * 消息 / 会话节点的地址前缀与根那份**不同**。只订根那一份，子空间里跑起来的
+ * 会话在界面上永远不动（后端跑得再对也看不见）。
+ *
+ * 登记是**幂等**的，且允许在订阅启动**之前**调用（两个模块都把它记进自己的
+ * 登记表，启动时按表逐份订阅），因此这里不必关心与 `onMounted` 的先后。
+ */
+watch(
+  () => sessions.sessionSpace,
+  (dir) => {
+    if (!dir) return
+    void registerSessionMount(dir)
+    void registerTranscriptMount(dir)
+  },
+  { immediate: true },
+)
 
 onMounted(async () => {
   // 启动**会话转写同步**（VDFS 变更 → 会话 store；ADR-025）
@@ -51,7 +74,6 @@ onMounted(async () => {
   // 增量收的是**一批**而不是一条：同步层把 ~48ms 窗口内的增量帧按会话攒批，
   // 一批只做一次 store 提交与一次消息树重建——逐帧提交的代价是 O(历史条数 × 帧数)，
   // 长会话下那才是端到端的主要热点。回读结果**不等窗口**（身份 / 基线的权威来源）。
-  const sessions = useSessionsStore()
   void startSessionTranscriptSync({
     hasMessage: (sid, mid) => sessions.hasMessage(sid, mid),
     applyTranscriptMessages: (sid, msgs) => sessions.applyTranscriptMessages(sid, msgs),
@@ -79,7 +101,7 @@ onMounted(async () => {
   } catch (err) {
     logger.warn('MainLayout', '恢复全局工作区失败:', err)
   }
-  void useSessionsStore().refreshList()
+  void sessions.refreshList()
 })
 </script>
 

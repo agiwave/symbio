@@ -1955,4 +1955,98 @@ ADR-027 把「可新建类型」收敛为至多一个，同时把「整包导入
 
 ---
 
+## ADR-031: 会话的**输入**是地址上的写入 / 动作——路由不承担输入，`chat/send` 与 `chat/abort` 退役
+
+**背景**
+
+子智能体空间里发起会话后发消息，消息跑在**父智能体**的空间里；同一会话的「停止」
+点了没反应。三条根因，逐条可核对：
+
+1. **`chat/send` / `chat/abort` 是全局路由**，由根 composite 分发 ⇒ 落点恒为
+   **根** `SessionPlugin` 实例。子智能体空间有**自己的**实例
+   （`<根>/agent/<id>/session`），但它**没有路由入口**
+   （`agent/host/plugin.rs` 明确 `NotFound` 并指路 VDFS）。于是消息进的是根实例的
+   收件箱、由根实例消费——编排拿到的 `parent` 是根 composite，人格 / 工具 / 存储
+   全是父智能体的。`chat/abort` 更安静：根实例 `get_or_create(子 sid)` 造出一个
+   **空状态**，`handle_abort` 读到 `abort_signal = None` ⇒ 什么都不做，
+   还留下一个永生幽灵状态。
+2. **前端会话层按 id 寻址，且只认一个全局挂载目录**。`sessionTranscriptSync` 的
+   前缀匹配因此收不到子空间的变更地址（`<根>/agent/<id>/session/…` 匹配不上
+   `<根>/session`），即使后端跑对了，显示链路也断在这里；新建会话同样恒写到根空间。
+3. **输入面没有「哪个空间」这一维**：`chat/send` 的信封里只有一个裸 `session_id`。
+
+ADR-026 已在**后端**解决了「空间怎么自驱动」（写 inbox 即入队），但**入口那一跳
+没跟着改**：前端仍在调路由。所以问题不是「发送没走到 inbox」，而是
+**入口选错了**——路由是 address-less 的，而子智能体空间只有 address 可达。
+
+**决策**
+
+1. **会话的输入统一表达为「对这个会话地址的一次写入 / 动作」**，路由不再承担输入：
+
+   | 意图 | 地址操作 |
+   |---|---|
+   | 发一条用户消息 | `write(<A>/inbox/<iid>)` |
+   | 取消一条排队消息 | `delete(<A>/inbox/<iid>)` |
+   | 清空排队 | `action(<A>/inbox, "clear")` |
+   | 停止正在跑的那一轮 | `action(<A>, "abort")` |
+   | 重试 / 审批 / 补充 / 回答 | `action(<A>/message/<mid>, "<ResumeAction 线上词形>")` |
+
+   三条落点的分界沿用 ADR-026 已确立的口径，不新增概念：**会话节点** = 正在跑的
+   这一轮；**inbox 条目** = 还没成为消息的消息；**message 条目** = 已经是转写里的
+   一条消息。「停止」在 UI 上是**两个动作**（`abort` + `clear`），不给 `abort` 加
+   `clear_inbox` 开关——机制动词保持单一职责，组合发生在调用方。
+
+2. **前端会话的身份从「id」升级为「地址」**（挂载目录 + id）。挂载目录**不止一份**
+   （根空间 / 各子智能体空间各一棵完整子树），因此地址方案、订阅前缀、清单读取
+   全部按挂载目录分别登记。
+
+3. **用户消息的显示恒由后端通知驱动**：任何发送方（前端 / CLI / telegram / 心跳 /
+   子智能体）的消息都走同一条路进前端。
+
+**理由**
+
+- **地址是子空间唯一的可达方式**。`agent/<id>` 只在 agent 插件的 VDFS 视图里作为
+  挂载点存在，没有任何路由入口——「用路由送进子空间」在机制上不可能成立，
+  不是实现没写对。
+- **同一个事实只有一个来源**。「这个会话住在哪个空间」在地址里；把它拆成
+  「id（协议里）+ 空间（前端某处的全局变量）」，就是两个来源必然漂移。
+- **控制动作必须是可查询的，而不是会被创建出来的**。`abort` 走
+  `ActiveSessionManager::get`（不 `get_or_create`）：否则一次「停一个没在跑的
+  会话」会在表里留下一个永不释放的空状态。
+- **路由版与动作版共用同一份实现**（`abort_turn`），不复制——否则两个入口必然
+  分叉，而这次 bug 正是「路由能到、地址到不了」的分叉。
+
+**后果**
+
+- 后端：新增 `VDFS_ACTION_ABORT`；`messages_at` 新增 resume 臂；`abort_turn` 成为
+  `action(<A>,"abort")` 与 `chat/abort` 的**同一份**实现；`inbox_at` 收 `ctx` 并
+  把 `WORKDIR` 带进入队；`drain_inbox_once` 出队发一条无载荷变更（否则订阅方会
+  永久保留一个已消失的队列项）。
+- 后端：`SessionPlugin` 新增 `self_ref` / `me()`。`VdfsProvider::dispatch` 拿到的是
+  `&self`，而「开一轮」要 `Arc<Self>`——没有这条自引用，provider 侧触发就只能绕回
+  那条 address-less 的路由，**那正是 bug 本身**。
+- 前端：`vdfsScheme` 按挂载目录缓存并新增 `inboxSeg`（按 `kind` 认）；两个实时
+  消费端改为**一组**已登记挂载目录；`sessions` store 新增「当前空间」与
+  「id → 空间」的寻址镜像；`Session.vue` → `ChatMainPanel` → `ModelChatPanel`
+  传**地址**而不是名字；`useChatConnection` 三个动作改走地址。
+- **store 的键仍是会话 id**（不是地址）：id 由后端生成为短 guid，跨空间全局唯一，
+  因此「同一个会话」只有一份状态，「它在哪个空间」作为寻址信息单独记。
+- **代价（已知、不粉饰）**：
+  - 「停止」变成两次 IPC（低频操作，换机制动词的单一职责）；
+  - `<A>/inbox` 的写入正文是一条 `ChatMessage`，**带不了本次运行的选项**
+    （`mode` / `risk_level` / `include_history` / `provider_id`），由会话 metadata
+    回退。因此 `chat/send` 的退役**尚未完成**——见下一条；
+  - 前端会话键从 id 变地址是本次最大的一块改动（两个 sync + 一个 store + 三个
+    组件 + 一个 composable）。
+- **未完成（有意留下，需要自己的 ADR）**：`chat/send` / `chat/abort` 两条路由
+  **保留**。前端已无调用方；后端剩 CLI / telegram / `agent_run` / 心跳四处，
+  其中 `agent_run` 必须携带 `provider_id`（子会话 metadata 里没有它），而写入面
+  表达不了运行选项。**「地址写入要不要承载运行选项」是一次协议决定**，不顺手发明。
+  完整分析见 `docs/design/session-input-addressing.md` §5.6。
+- 守卫：`CURRENT.md` 的会话自有路由行**不变**（路由仍在）；`protocol-mirror-audit`
+  的 `VDFS_KIND_INBOX` 一组本就在（ADR-026 已加）。
+- 基线：`rustTests` 930、`vitestTests` 712。
+
+---
+
 > **维护原则**：每个架构决策必须记录在此，包括背景、决策、理由、后果。
