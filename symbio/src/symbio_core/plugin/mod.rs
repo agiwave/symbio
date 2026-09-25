@@ -10,9 +10,9 @@ pub use creator::{create_object, creator_ids, has_creator};
 // `submit_object_creator!` 宏（crate 根展开）经根的 `pub(crate)` 重导出取用
 pub(crate) use creator::{ObjectConstructor, Submit};
 pub use dir::{
-    config_file_of, dir_from_ctx, dir_of, plugins_root, PluginConfigFile, PluginDir, PluginEntry,
-    PluginIdentity, KEY_API, KEY_AUTHOR, KEY_CAN_DISABLE, KEY_DESCRIPTION, KEY_ENABLED, KEY_GRANTS,
-    KEY_NAME, KEY_PROVIDER, KEY_REQUIRED, KEY_TITLE, KEY_VERSION, PLUGIN_FILE, RESERVED_KEYS,
+    dir_from_ctx, expand_tilde_path, PluginConfigFile, PluginDir, PluginEntry, PluginIdentity,
+    KEY_API, KEY_AUTHOR, KEY_CAN_DISABLE, KEY_DESCRIPTION, KEY_ENABLED, KEY_GRANTS, KEY_NAME,
+    KEY_PROVIDER, KEY_REQUIRED, KEY_TITLE, KEY_VERSION, PLUGIN_FILE, RESERVED_KEYS,
 };
 pub use error::{PluginError, PluginErrorCode, PluginInvokeResponse};
 // 锁辅助函数刻意 `pub(crate)`（见 `error.rs::lock_read` 的说明），不进对外 API

@@ -1,4 +1,4 @@
-//! `symbio/src/symbio_core/homedir.rs` 的单元测试 —— 拆自源码末尾的测试模块。
+//! `plugins/home/homedir.rs` 的单元测试 —— 拆自源码末尾的测试模块。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 
@@ -102,25 +102,6 @@ fn test_normalize_homedir() {
     // 相对路径 → 相对 home 解析（兼容存量 bootstrap 中的相对路径写法）
     assert_eq!(normalize_homedir(".symbio").unwrap(), home.join(".symbio"));
     assert_eq!(normalize_homedir("foo/bar").unwrap(), home.join("foo/bar"));
-}
-
-#[test]
-fn test_expand_tilde() {
-    let p = expand_tilde_path(Path::new("~"));
-    assert_eq!(p, dirs::home_dir().unwrap());
-
-    let p = expand_tilde_path(Path::new("~/foo/bar"));
-    let expected = dirs::home_dir().unwrap().join("foo/bar");
-    assert_eq!(p, expected);
-
-    // 绝对路径不变
-    let abs = std::env::temp_dir().join("test");
-    let p = expand_tilde_path(&abs);
-    assert_eq!(p, abs);
-
-    // 普通相对路径直接返回
-    let p = expand_tilde_path(Path::new("relative/path"));
-    assert_eq!(p, PathBuf::from("relative/path"));
 }
 
 #[test]

@@ -103,11 +103,11 @@
 
 **状态**：已接受
 
-**决策**：`agent` 插件是智能体域的**唯一所有者**：托管 agent 目录、经 `<根>/agent` 的 `zip` 新建类型导入、并装配为子树。OAB v1 的**约定目录协议**（宿主硬编码解释 `prompts/` `skills/` `mcps/`）已被 `agent-dir/v2` 取代——**Agent 就是一棵插件树**：技能 / MCP 复用宿主既有的 `skill` / `mcp` 插件目录，人格改为根 `AGENTS.md`。
+**决策**：`agent` 插件是智能体域的**唯一所有者**：托管 agent 目录、经 `<根>/agent` 的 `zip` 新建类型导入、并装配为子树。目录协议是 `agent-dir/v2`——**Agent 就是一棵插件树**：技能 / MCP 复用宿主既有的 `skill` / `mcp` 插件目录，人格是根 `AGENTS.md`。宿主不解释任何「约定目录」：`manifest.yaml` 的 `spec` 与 `requires.spec` 同时满足 §10 门槛，才是唯一接入判据。
 
 **理由**：标准化打包与分发（zip）；可扩展（新增能力经 MCP 接入）；目录可整体搬走。
 
-**后果**：需维护 `agent-dir/v2` 规范（[design/agent-directory-spec.md](./design/agent-directory-spec.md)）；v1 规范归档于 [archive/open-agent-bundle-spec.md](./archive/open-agent-bundle-spec.md)。
+**后果**：需维护 `agent-dir/v2` 规范（[design/agent-directory-spec.md](./design/agent-directory-spec.md)）。
 
 ---
 

@@ -3,9 +3,8 @@ use crate::plugins::skill::loader::{load_skills_from_dirs_with_budget, LoadBudge
 use crate::plugins::skill::skill_tool::SkillExecuteTool;
 use crate::plugins::skill::types::{Skill, SkillConfig};
 use crate::symbio_core::{
-    dir_from_ctx, HomedirRegistry, Plugin, PluginDir, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_SKILL,
-    TRAVERSE_AVAILABLE_TOOLS,
+    dir_from_ctx, Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_SKILL, TRAVERSE_AVAILABLE_TOOLS,
 };
 use async_trait::async_trait;
 use std::path::Path;
@@ -19,42 +18,48 @@ pub struct SkillPlugin {
 }
 
 impl SkillPlugin {
-    /// 把 skill_dirs 里的 `{HOMEDIR}` 占位符解析为当前系统目录
-    fn resolve_skill_dirs_template(dirs: &mut [String]) {
-        // `{HOMEDIR}` 是**用户配置里的占位符**（配置文件可手改），其语义就是
-        // 「系统目录」，由 home 插件持有；这里只做替换，不代表本插件知道自己落在哪。
-        let homedir = HomedirRegistry::get()
-            .join("skills")
-            .to_string_lossy()
-            .to_string();
+    /// 把 skill_dirs 里的 `{HOMEDIR}` 占位符解析为**本作用域的系统根**
+    ///
+    /// ⚠️ 作用域根**由父插件经 `PLUGIN_DIR` 告知的目录推出**（本插件目录的上一级），
+    /// **不能**读全局 `HomedirRegistry`：子 Agent 里 skill 的挂载点是
+    /// `<agent dir>/skill`，读全局会指向系统级 `<homedir>/skills`——那是**父/系统**的
+    /// 技能目录，与 `load_skills_for_tool` 的「子树自包含」直接相抵。
+    fn resolve_skill_dirs_template(dirs: &mut [String], scope_root: &Path) {
+        let skills_dir = scope_root.join("skills").to_string_lossy().to_string();
         for d in dirs.iter_mut() {
             if d.contains("{HOMEDIR}/skills") {
-                *d = d.replace("{HOMEDIR}/skills", &homedir);
-            } else if d == "{HOMEDIR}/skills" {
-                *d = homedir.clone();
+                *d = d.replace("{HOMEDIR}/skills", &skills_dir);
             }
         }
     }
 
     /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
+        // 自己的目录由父插件经 `PLUGIN_DIR` 告知——先取它，再用它推作用域根。
+        let dir = dir_from_ctx(&*ctx, PLUGIN_SKILL);
+
         let mut config: SkillConfig = ctx
             .config()
             .and_then(|v| serde_json::from_value(v).ok())
             .unwrap_or_else(|| SkillConfig {
                 // 加载路径优先级：
                 // 1. 工作区级别：`.symbio/skills`（项目内）
-                // 2. 系统级别：`<本插件目录>`（symbio 系统级）
+                // 2. 本作用域级别：`{HOMEDIR}/skills`（= 本插件目录的上一级下的 skills）
                 // 3. 第三方工具兼容：`.qwen/skills`、`.sixth/skills`、`.qoder/skills`
                 skill_dirs: vec![".symbio/skills".to_string(), "{HOMEDIR}/skills".to_string()],
                 // 预算字段使用 SkillConfig::default() 的值
                 ..SkillConfig::default()
             });
 
-        // 解析 {HOMEDIR} 占位符
-        Self::resolve_skill_dirs_template(&mut config.skill_dirs);
+        // 作用域根 = 本插件目录的上一级（`<root>/skill` → `<root>`）。
+        // 与 `PluginDir` 同源：都由父插件告知，不由本插件查全局。
+        let scope_root = dir
+            .dir()
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| dir.dir().to_path_buf());
+        Self::resolve_skill_dirs_template(&mut config.skill_dirs, &scope_root);
 
-        let dir = dir_from_ctx(&*ctx, PLUGIN_SKILL);
         Arc::new(SkillPlugin::new(config, dir)) as Arc<dyn Plugin>
     }
 
@@ -190,8 +195,8 @@ fn resolve_id(path: &str, create: bool) -> VdfsResult<String> {
 
 /// 主文件原文 → VDFS 节点（`ext = form` + 详情定义随节点 `schema` 下发）
 ///
-/// 摘要优先 YAML frontmatter（name / description），无 frontmatter 时回落到旧的
-/// 标题 / Description 行解析；主文件缺失（`raw = None`）时降级为以 id 呈现的
+/// 摘要取自 YAML frontmatter（`name` / `description`）；没有 frontmatter 时标题
+/// 就是条目 id、无摘要。主文件缺失（`raw = None`）时降级为以 id 呈现的
 /// 占位条目——列表不得因单个坏条目而少一项或多失败。
 /// 详情定义（JSON 形态）——**唯一出处**：节点 `schema` 与新建类型 `schema` 都读它，
 /// 因此「点新建」的草稿表单与「选中一项」的详情表单是同一张。
@@ -208,7 +213,6 @@ fn node_of(id: &str, raw: Option<&str>) -> VdfsNode {
     n.status = VDFS_STATUS_ACTIVE.to_string();
     let Some(text) = raw else { return n };
 
-    // frontmatter 路径：名称 / 摘要
     if let Some((yaml, _body)) = super::detail::parse_skill_md(text) {
         if let Some(name) = yaml.get("name").and_then(|v| v.as_str()) {
             n.title = name.to_string();
@@ -216,38 +220,6 @@ fn node_of(id: &str, raw: Option<&str>) -> VdfsNode {
         if let Some(desc) = yaml.get("description").and_then(|v| v.as_str()) {
             n.description = Some(desc.to_string());
         }
-        return n;
-    }
-
-    // 旧格式回落：首行标题 + Description 行
-    let cleaned = text.trim();
-    let first_line = cleaned
-        .lines()
-        .next()
-        .unwrap_or("")
-        .trim()
-        .trim_start_matches('#')
-        .trim();
-    if !first_line.is_empty() {
-        n.title = first_line.to_string();
-    }
-    let mut summary = cleaned
-        .lines()
-        .find(|l| l.trim().starts_with("**Description**") || l.trim().starts_with("Description"))
-        .map(|l| {
-            l.trim()
-                .trim_start_matches("**Description**")
-                .trim()
-                .trim_start_matches("Description")
-                .trim()
-                .to_string()
-        })
-        .unwrap_or_default();
-    if summary.is_empty() {
-        summary = cleaned.chars().take(120).collect();
-    }
-    if !summary.is_empty() {
-        n.description = Some(summary);
     }
     n
 }

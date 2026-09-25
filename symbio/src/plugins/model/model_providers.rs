@@ -4,9 +4,9 @@
 //! - Model Provider 是"供应商 + 模型 + 协议 + 调用参数 + 限流设置"的完整可复用单元
 //! - 用户可以同时维护多个 Model Provider（例如 OpenAI、Anthropic、本地 Ollama 等），
 //!   每次对话可以选择其中一个使用
-//! - 配置以 `id` 为键保存在 `ModelProvidersConfig` 中，并提供 `default_provider_id` 标识默认
-//! - 本文件是 model 插件的**持久化 serde schema**（用户配置文件 JSON 字段名冻结，保持兼容）；
-//!   运行期契约为 core 的纯 `ModelProvider` trait，由 `bound_provider::BoundProvider`
+//! - 每个 Provider 以 `id` 为键落一份 `<本插件目录>/<id>/provider.json`；
+//!   `ModelProvidersConfig` 是它们的**运行期内存视图**（同一批配置 + 一个默认指向）
+//! - 运行期契约为 core 的纯 `ModelProvider` trait，由 `bound_provider::BoundProvider`
 //!   绑定本配置与协议实现后实现；管理字段（id/name/enabled 等）仅在本层存在
 
 use serde::{Deserialize, Serialize};
@@ -117,14 +117,12 @@ impl Default for ModelProviderConfig {
     }
 }
 
-/// Model Providers 注册表（多 Provider 容器）
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// Model Providers 注册表（多 Provider 容器，运行期内存视图）
+#[derive(Debug, Clone, Default)]
 pub struct ModelProvidersConfig {
     /// 所有 Provider，key 为 `ModelProviderConfig.id`
-    #[serde(default)]
     pub providers: HashMap<String, ModelProviderConfig>,
     /// 当前默认 Provider ID
-    #[serde(default)]
     pub default_provider_id: Option<String>,
 }
 

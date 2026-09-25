@@ -40,13 +40,13 @@ fn node_prefers_frontmatter() {
     assert!(n.schema.is_some(), "详情定义必须随节点下发");
 }
 
-/// 无 frontmatter 的旧格式回落：首行标题 + Description 行
+/// 无 frontmatter：标题回落条目 id、无摘要（不猜标题行）
 #[test]
-fn node_falls_back_to_legacy_heading() {
-    let md = "# 旧技能\n\n**Description** 旧格式描述\n";
+fn node_without_frontmatter_falls_back_to_the_id() {
+    let md = "# 没有 frontmatter\n\n正文\n";
     let n = node_of("old", Some(md));
-    assert_eq!(n.title, "旧技能");
-    assert_eq!(n.description.as_deref(), Some("旧格式描述"));
+    assert_eq!(n.title, "old");
+    assert!(n.description.is_none());
 }
 
 /// 主文件缺失（坏条目）降级为 id 占位，不阻断整张列表
@@ -155,7 +155,7 @@ async fn store_roundtrip_through_the_dir_impl() {
 async fn new_type_declares_the_landing_detail() {
     let plugin = SkillPlugin {
         config: Arc::new(RwLock::new(SkillConfig::default())),
-        dir: PluginDir::of(PLUGIN_SKILL),
+        dir: PluginDir::at(std::env::temp_dir().join("symbio-test/skill"), PLUGIN_SKILL),
     };
     // 「根下可新建类型」挂在**根节点自己的自述**上（不在同步的 `PluginMeta` 上）：
     // 走 `Stat("")`，与更深层节点同一条通道（`VdfsNode::new_type`）。
@@ -189,4 +189,19 @@ fn nameless_write_generates_an_id() {
     let id = resolve_id("", true).unwrap();
     assert!(id.starts_with("skill-"), "带类别前缀便于人读：{id}");
     assert_eq!(id.len(), "skill-".len() + 8, "随机段定长：{id}");
+}
+
+/// `{HOMEDIR}/skills` 必须解析为**本作用域**的系统根，而不是全局 homedir。
+///
+/// 回归：子 Agent 里 skill 挂在 `<agent dir>/skill`，作用域根是 `<agent dir>`；
+/// 早先这里读全局 `HomedirRegistry`，于是解析成系统级 `<homedir>/skills`——
+/// 父/系统作用域的技能目录，与 `load_skills_for_tool` 的「子树自包含」相抵。
+#[test]
+fn homedir_placeholder_resolves_to_scope_root() {
+    let scope_root = std::path::Path::new("scope_root");
+    let expected = scope_root.join("skills").to_string_lossy().to_string();
+    let mut dirs = vec!["{HOMEDIR}/skills".to_string(), "other".to_string()];
+    SkillPlugin::resolve_skill_dirs_template(&mut dirs, scope_root);
+    assert_eq!(dirs[0], expected, "占位符必须落在传入的作用域根下");
+    assert_eq!(dirs[1], "other", "无占位符的条目原样保留");
 }

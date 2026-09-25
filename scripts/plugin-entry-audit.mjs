@@ -31,6 +31,7 @@
  * | E-006 | **权威清单**（`ROUTES.md` / `CURRENT.md` / 插件 README）里的路径前缀必须合法 | `hooks/fire` 只出现在文档里，只扫代码的守卫会完整地漏掉它 |
  * | E-007 | 插件不得按**强引用**持有兄弟插件实例（`Arc<dyn Plugin>` 字段）  | 跨插件调用必须经 `ctx.parent()` 走容器；按值持有会绕过地址分发、并在插件重建后钉住旧实例（`telegram` 的 `llm_plugin` 就是这么烂掉的） |
  * | E-008 | 文档里标了 `<!-- vocab:PREFIX_ -->` 的**词表行**必须与代码常量逐字一致 | 闭集的第二份真相常驻文档：`vdfs.md` 的 status 行曾一直写 `error`，而代码早已改名为 `failed`——漂移会从文档**流回**代码 |
+ * | E-009 | 插件不得直接 `use crate::plugins::<兄弟插件>`              | 「插件之间互不可见」**不是**编译器保证的：`plugins` 是共同父模块，而 Rust 的私有可见性包含"定义模块的后代" ⇒ `plugins::mcp` 能路径到私有的 `plugins::web`。当前代码恰好为 0，但没有守卫，一次顺手 import 就能破坏它且不留红（`plugins/mod.rs` 的架构原则只是约定） |
  *
  * E-001 ~ E-004、E-007 与 E-008 是 **ERROR**（判据 airtight，可进 `--strict` 门禁）；
  * E-005 / E-006 是 **WARNING**（需要「动态命名空间」白名单配合，宁可先报给人看）。
@@ -221,6 +222,9 @@ function blankTestModules(txt) {
 
 // ── 文件收集 ─────────────────────────────────────────────────────────────
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', 'target', 'docs', 'archive'])
+
+/** 插件目录名：从文件绝对路径取 `plugins/` 下的首段 */
+const pluginDirOf = (abs) => path.relative(PLUGINS_DIR, abs).split(/[/\\]/)[0]
 
 function walk(dir, filter) {
   const out = []
@@ -696,6 +700,33 @@ for (const abs of codeFiles) {
       }
     }
 
+    // E-009：插件不得直接 `use crate::plugins::<兄弟插件>`
+    //
+    // 为什么需要：`plugins/mod.rs` 声称「所有 plugin 子模块都是私有，插件之间互相
+    // 不可见」——但 Rust 的私有可见性只到「定义模块**与它的后代**」。`plugins` 是共同
+    // 父模块，`plugins::mcp` 是它的后代 ⇒ `crate::plugins::web` 能被路径到并编译通过。
+    // 真正拦住它的是「没人这么写」，不是编译器——而这正是最容易被一次顺手 import 破坏、
+    // 且不会有任何测试变红的那类不变量（E-007 只管字段强持，管不到 import）。
+    //
+    // 注释已被 `readCode` 剥掉，故文档链接（[`web`](crate::plugins::web)）不会误报；
+    // 测试文件与内联测试模块也不参与（见 `isTestFile` / `blankTestModules`）。
+    if (isRust && isInPluginsDir(abs)) {
+      const ownDir = pluginDirOf(abs)
+      for (const m of line.matchAll(/crate\s*::\s*plugins\s*::\s*([a-z_][a-z0-9_]*)/g)) {
+        if (m[1] === ownDir) continue
+        if (exempted(raw, i, 'E-009')) continue
+        report(
+          'E-009',
+          'error',
+          rel(abs),
+          i + 1,
+          `\`crate::plugins::${m[1]}\` —— 插件不得直接引用兄弟插件模块；` +
+            `跨插件调用请用 \`ctx.parent()\` 取容器后 \`parent.route(ctx)\`，` +
+            `或经 \`symbio_core\` 的共享契约（见 \`symbio/src/plugins/mod.rs\` 的架构原则）`,
+        )
+      }
+    }
+
     // E-002 / E-005：路径字面量
     for (const m of line.matchAll(/"([^"\n]+)"|'([^'\n]+)'/g)) {
       const lit = m[1] ?? m[2]
@@ -921,6 +952,7 @@ const ruleNames = {
   'E-006': '权威清单前缀合法',
   'E-007': '不按值持有兄弟插件',
   'E-008': '文档词表 == 代码词表',
+  'E-009': '不直接引用兄弟插件模块',
 }
 for (const [rule, name] of Object.entries(ruleNames)) {
   const n = hitsByRule.get(rule) ?? 0

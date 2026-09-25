@@ -282,6 +282,7 @@ pub(crate) async fn close_turn(
         &turn.abort,
         ctx.clone(),
         &context.messages,
+        orchestrator.session_dir.dir(),
     )
     .await;
     turn.in_flight_tools.clear();

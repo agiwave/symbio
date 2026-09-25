@@ -1,7 +1,7 @@
 //! MODEL Plugin - Core implementation
 //!
 //! 负责：
-//! - 多 Model Provider 注册表（`ModelProvidersConfig`，持久化 serde schema）
+//! - 多 Model Provider 注册表（`ModelProvidersConfig`，运行期内存视图）
 //! - Provider 注册：traverse 时按上下文解析出唯一生效 Provider
 //!   （ctx[PROVIDER_ID] > 默认 > 首个启用），绑定配置与协议实现为
 //!   `BoundProvider`（core `ModelProvider` trait 的生产实现）注册进
@@ -27,14 +27,10 @@ use tokio::sync::RwLock;
 /// Provider 主文件名（磁盘布局：`<本插件目录>/<id>/provider.json`）
 const MANIFEST: &str = "provider.json";
 
-/// 跨条目的插件配置（`<本插件目录>/PLUGIN.yml`）—— **写入形态**
+/// 跨条目的插件配置（`<本插件目录>/PLUGIN.yml`）
 ///
-/// 只写**跨条目的状态**：单个 Provider 的明细是**资源**，落在
+/// 只存**跨条目的状态**：单个 Provider 的明细是**资源**，落在
 /// `<本插件目录>/<id>/provider.json`，不进配置文件。
-///
-/// 读取比写入**宽**：`build` 读的是 `ModelProvidersConfig`。旧形态曾把 Provider
-/// 明细整包存在这里（`providers` 键），读宽一次让既有的一次性迁移能照常把它们
-/// 搬成资源；搬完 `persist()` 把文件归一为只有跨条目状态——同一个事实不留两份。
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ModelConfig {
     #[serde(default)]
@@ -61,12 +57,13 @@ impl ModelPlugin {
     /// 加载策略（按优先级）：
     /// 1. **存储**：从 `<本插件目录>/<id>/provider.json` 加载所有 Provider
     /// 2. **跨条目配置**：`<本插件目录>/PLUGIN.yml` 里的 `default_provider_id`
-    ///    （旧形态里可能还带着 `providers` 明细，由 `load_from_storage` 搬成资源）
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         let dir = dir_from_ctx(&*ctx, PLUGIN_MODEL);
-        // 读宽：兼容旧形态里整包存在配置中的 Provider 明细
-        let providers_config: ModelProvidersConfig = match dir.load::<ModelProvidersConfig>() {
-            Ok(Some(c)) => c,
+        let providers_config: ModelProvidersConfig = match dir.load::<ModelConfig>() {
+            Ok(Some(cfg)) => ModelProvidersConfig {
+                default_provider_id: cfg.default_provider_id,
+                ..Default::default()
+            },
             Ok(None) => ModelProvidersConfig::default(),
             Err(e) => {
                 plugin_warn!("model", "读取自身配置失败，改用默认值：{e}");
@@ -76,7 +73,7 @@ impl ModelPlugin {
 
         let plugin = Arc::new(Self::new(providers_config, dir));
 
-        // 启动后异步触发：从存储加载（并触发首启动数据迁移）
+        // 启动后异步触发：从存储加载 Provider 明细
         let plugin_weak = Arc::downgrade(&plugin);
         let ctx_clone = ctx.clone();
         tokio::spawn(async move {
@@ -98,24 +95,9 @@ impl ModelPlugin {
 
     /// 异步加载：从存储拉取所有 Provider
     ///
-    /// 启动时调用此方法，**会**触发首启动数据迁移（从配置文件里的旧明细迁到新存储）。
-    /// `ctx` 保留给调用方兼容；迁移不依赖请求上下文。
+    /// 注册表与 VDFS 镜像一次性同构填充——两份视图同源，任一时刻不会各说各话。
     pub async fn load_from_storage(&self, _ctx: &Arc<dyn PluginInvokeRequest>) {
-        // 仅兼容迁移认识旧分类的历史落位。
-        let legacy = SingleFileVdfs::for_category("ai", MANIFEST);
-        self.load_with_legacy(&legacy).await;
-    }
-
-    async fn load_with_legacy(&self, legacy: &SingleFileVdfs) {
         let store = self.store();
-        // 无法枚举目标时不做迁移或清理。
-        if let Err(e) = store.entries().await {
-            plugin_warn!("model", "list models 失败: {e}");
-            return;
-        }
-        self.migrate_legacy_category(&store, legacy).await;
-        self.migrate_from_legacy_config(&store).await;
-        // 迁移后重新读取，不递归重入，也不以“目标为空”作为续迁条件。
         let entries = match store.entries().await {
             Ok(v) => v,
             Err(e) => {
@@ -124,7 +106,6 @@ impl ModelPlugin {
             }
         };
 
-        // 3. 加载存储内容（注册表 + VDFS 镜像一次性同构填充）
         let mut new_providers = std::collections::HashMap::new();
         let mut mirror = Vec::with_capacity(entries.len());
         let mut marked_default: Option<String> = None;
@@ -159,7 +140,7 @@ impl ModelPlugin {
             }
         }
 
-        // 4. 推算 default_provider_id（显式 is_default 标记 > 现有指向 > 首个可用）
+        // 推算 default_provider_id（显式 is_default 标记 > 现有指向 > 首个可用）
         let existing_default = self.providers.read().await.default_provider_id.clone();
         let default_id = marked_default
             .or(existing_default)
@@ -183,114 +164,6 @@ impl ModelPlugin {
         );
     }
 
-    /// 已有可解析目标是权威版本；坏文件/读失败不是“缺失”，不能覆盖。
-    /// 新写入必须回读一致，才算本次迁移成功。
-    async fn migrate_provider(store: &SingleFileVdfs, id: &str, text: &str) -> bool {
-        if crate::providers::vdfs_service::entry::safe_segment(id) != id
-            || serde_json::from_str::<ModelProviderConfig>(text).is_err()
-        {
-            plugin_warn!(
-                "model",
-                "迁移 provider {id} 失败：源格式或 id 不可用，保留源"
-            );
-            return false;
-        }
-        match store.read_text(id).await {
-            Ok(existing) => {
-                let valid = serde_json::from_str::<ModelProviderConfig>(&existing).is_ok();
-                if !valid {
-                    plugin_warn!(
-                        "model",
-                        "迁移 provider {id} 失败：目标不可解析，不覆盖并保留源"
-                    );
-                }
-                return valid;
-            }
-            Err(VdfsError::NotFound(_)) => {}
-            Err(e) => {
-                plugin_warn!("model", "迁移 provider {id} 读取目标失败：{e}，保留源");
-                return false;
-            }
-        }
-        if let Err(e) = store.write_text(id, text).await {
-            plugin_warn!("model", "迁移 provider {id} 写入失败：{e}，保留源");
-            return false;
-        }
-        match store.read_text(id).await {
-            Ok(written) if written == text => true,
-            _ => {
-                plugin_warn!("model", "迁移 provider {id} 回读确认失败，保留源");
-                false
-            }
-        }
-    }
-
-    /// 整批确认后才清理旧分类；失败保留全部源，下一次只补缺失项。
-    async fn migrate_legacy_category(&self, store: &SingleFileVdfs, legacy: &SingleFileVdfs) {
-        let entries = match legacy.entries().await {
-            Ok(entries) => entries,
-            Err(e) => {
-                plugin_warn!("model", "读取旧分类失败：{e}，保留源");
-                return;
-            }
-        };
-        let mut complete = true;
-        for e in &entries {
-            match e.raw.as_deref() {
-                Some(text) => complete &= Self::migrate_provider(store, &e.id, text).await,
-                None => {
-                    plugin_warn!("model", "读取旧 provider {} 失败，保留整批源", e.id);
-                    complete = false;
-                }
-            }
-        }
-        if complete {
-            for e in &entries {
-                if let Err(err) = legacy.remove(&e.id).await {
-                    plugin_warn!("model", "清理旧 provider {} 失败：{err}，下次重试", e.id);
-                }
-            }
-        }
-    }
-
-    /// 每次从磁盘旧配置续迁，不把运行期注册表误当成待迁移源。
-    async fn migrate_from_legacy_config(&self, store: &SingleFileVdfs) {
-        let manifest = match self.dir.read_manifest() {
-            Ok(Some(m)) if m.contains_key("providers") => m,
-            Ok(_) => return,
-            Err(e) => {
-                plugin_warn!("model", "读取旧配置失败：{e}，保留源");
-                return;
-            }
-        };
-        let current: ModelProvidersConfig = match serde_json::from_value(Value::Object(manifest)) {
-            Ok(c) => c,
-            Err(e) => {
-                plugin_warn!("model", "解析旧配置失败：{e}，保留源");
-                return;
-            }
-        };
-        let mut complete = true;
-        for (id, p) in &current.providers {
-            match serde_json::to_string_pretty(p) {
-                Ok(text) => complete &= Self::migrate_provider(store, id, &text).await,
-                Err(e) => {
-                    plugin_error!("model", format!("序列化 provider {id} 失败：{e}，保留源"));
-                    complete = false;
-                }
-            }
-        }
-        if complete {
-            // 所有明细均已确认落盘才允许清掉内嵌源。save 的原子写失败仍保留旧文件。
-            let cfg = ModelConfig {
-                default_provider_id: current.default_provider_id,
-            };
-            if let Err(e) = self.dir.save(&cfg) {
-                plugin_warn!("model", "迁移配置归一失败：{e}，保留源待重试");
-            }
-        }
-    }
-
     /// 主构造函数（Factory 机制使用）
     pub fn new(providers: ModelProvidersConfig, dir: PluginDir) -> Self {
         let entries = MemoryVdfs::new(PLUGIN_MODEL).with_label(LABEL);
@@ -309,19 +182,7 @@ impl ModelPlugin {
         let cfg = ModelConfig {
             default_provider_id: self.providers.read().await.default_provider_id.clone(),
         };
-        // 迁移未完成时，普通编辑 / set-default 也不能间接抹掉内嵌源。
-        let mut manifest = self
-            .dir
-            .read_manifest()
-            .map_err(PluginError::InternalError)?
-            .unwrap_or_default();
-        let result = if manifest.contains_key("providers") {
-            manifest.insert("default_provider_id".into(), json!(cfg.default_provider_id));
-            self.dir.save(&manifest)
-        } else {
-            self.dir.save(&cfg)
-        };
-        result.map_err(PluginError::InternalError)
+        self.dir.save(&cfg).map_err(PluginError::InternalError)
     }
 
     /// 验证给定的 Model Provider 配置（不写入状态）
@@ -445,9 +306,14 @@ fn provider_field(enabled: &[&ModelProviderConfig], effective: Option<&str>) -> 
     }
 }
 
+/// 无装配上下文的实例（仅测试）。目录给临时目录——**不读全局系统根**。
+#[cfg(test)]
 impl Default for ModelPlugin {
     fn default() -> Self {
-        Self::new(ModelProvidersConfig::default(), PluginDir::of(PLUGIN_MODEL))
+        Self::new(
+            ModelProvidersConfig::default(),
+            PluginDir::at(std::env::temp_dir().join("symbio-test/model"), PLUGIN_MODEL),
+        )
     }
 }
 

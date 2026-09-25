@@ -19,7 +19,7 @@ fn workspace_with_agent_dir() -> (TempDir, AgentDirStore) {
     std::fs::create_dir_all(agent_dir.join("prompts")).unwrap();
     std::fs::write(
         agent_dir.join("manifest.yaml"),
-        "spec: \"oab/v1\"\nid: \"b\"\nname: \"B\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^1\"\n",
+        "spec: \"agent-dir/v2\"\nid: \"b\"\nname: \"B\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^2\"\n",
     )
     .unwrap();
     assert!(store.get("b").is_some(), "前置：agent_dir 应被扫描到");

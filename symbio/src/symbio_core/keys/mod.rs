@@ -3,9 +3,17 @@
 mod ids;
 mod paths;
 
-// 域内子模块私有，公开面在此显式重导出
-pub use ids::*;
-pub use paths::*;
+// 域内子模块私有，公开面在此显式重导出（逐符号列出，可在一屏读完域的对外面）
+pub use ids::{
+    EMBEDDING_LOCAL, EMBEDDING_NOOP, PLUGIN_AGENT, PLUGIN_COMPOSITE, PLUGIN_EVENT_BUS,
+    PLUGIN_GATEWAY, PLUGIN_HOME, PLUGIN_HOOK, PLUGIN_LOCAL, PLUGIN_MANAGER, PLUGIN_MCP,
+    PLUGIN_MODEL, PLUGIN_SESSION, PLUGIN_SKILL, PLUGIN_TELEGRAM, PLUGIN_VDFS, PLUGIN_WEB,
+    PLUGIN_WORK, SYSTEM_LEVEL_PROVIDERS,
+};
+pub use paths::{
+    EVENT_BUS_SUBSCRIBE, HOOK_FIRE, SESSION_CHAT_ABORT, SESSION_CHAT_SEND, VDFS_ROOT, VDFS_UNWATCH,
+    VDFS_WATCH,
+};
 
 use serde_json::Value;
 use std::sync::Arc;
@@ -192,40 +200,26 @@ pub const REQUIRED_PLUGINS: RequiredPluginsKey = RequiredPluginsKey;
 
 /// 根（系统）Agent 挂载的**完整**插件清单 —— 父子的唯一真相源（机制级常量）。
 ///
-/// 子 Agent 子树复用 [`SUB_AGENT_PLUGINS`]（本清单只多一个系统级单槽 `vdfs`）。
-/// 两处都集中在 `symbio_core`，改一处即父子一致，杜绝「两套清单」漂移。
-pub const SYSTEM_AGENT_PLUGINS: &[&str] = &[
-    "plugin_manager",
-    "event_bus",
-    "model",
-    "session",
-    "local",
-    "web",
-    "mcp",
-    "telegram",
-    "hook",
-    "agent",
-    "skill",
-    "gateway",
-    "vdfs",
-    "work",
-];
+/// **当前与 [`SUB_AGENT_PLUGINS`] 逐项相同**，故直接取它——这里**不是**第二份手抄的
+/// 字面量。系统根与子 Agent 因此「结构一致、能力对齐」；两者的差异体现在**收集期
+/// 作用域**（`vdfs` 单槽、`model` 作用域，见 [`SUB_AGENT_PLUGINS`]），不在清单内容里。
+pub const SYSTEM_AGENT_PLUGINS: &[&str] = SUB_AGENT_PLUGINS;
 
-/// 子 Agent 子树挂载的「默认插件」清单 —— 与父（系统）Agent **同构**的机制级常量。
+/// 子 Agent 子树挂载的「默认插件」清单 —— 与父（系统）Agent **同构**的机制级常量，
+/// 也是本文件里插件清单的**唯一字面量**（[`SYSTEM_AGENT_PLUGINS`] 直接取它）。
 ///
 /// 子 Agent 是一棵 composite 插件树（与系统 Agent 同构，agent-directory-spec §1.1），
-/// 构造时经 ctx 键 [`REQUIRED_PLUGINS`] 告知容器「必须挂哪些插件」。这里集中声明清单，
-/// 作为 `symbio_core` 的唯一真相源；[`SYSTEM_AGENT_PLUGINS`] 直接复用其超集，
-/// 改一处即父子一致。
+/// 构造时经 ctx 键 [`REQUIRED_PLUGINS`] 告知容器「必须挂哪些插件」。
 ///
-/// ## 与 [`SYSTEM_AGENT_PLUGINS`] 的关系：只差一个系统级单槽
+/// ## 与 [`SYSTEM_AGENT_PLUGINS`] 的关系：**当前逐项相同**
 ///
-/// 本清单 = 系统完整清单去掉 `vdfs`：
+/// 两张清单现在是同一个集合，故系统侧直接别名到本常量，不存在需要手工同步的第二份
+/// 字面量。差异**不在清单里**，而在收集期的**作用域**：
 ///
-/// - `vdfs`（VDFS 根）是**单槽**注册，归系统 Agent 独占。
-///   子树里的对应注册经 [`crate::plugins::agent::host::scope::SubAgentVisitor`]
-///   丢弃（见其模块文档）；若在此列出，只会构造出无挂载点的空实例——既不生效、
-///   又徒增开销。故子树不重复挂。
+/// - `vdfs`（VDFS 根）是**单槽**注册，归系统 Agent 独占。子树**会构造**自己的
+///   `vdfs` 实例（故本清单在列），但它的**注册**经
+///   [`crate::plugins::agent::host::scope::SubAgentVisitor`] 在每一层丢弃
+///   （见其模块文档）——单槽归系统 Agent，子树重复注册不会生效。
 /// - `model` **在列**：子智能体有自己的模型服务——子树会话收集能力时以**子容器**
 ///   为 parent（`collect_capabilities(sub_composite, …)`），子树 `model` 实例
 ///   注册进**该次收集自己的**管理器，因此子会话用子智能体自己解析的模型。
@@ -233,6 +227,10 @@ pub const SYSTEM_AGENT_PLUGINS: &[&str] = &[
 ///   （单槽，防子树模型劫持父会话——见 scope 模块文档）。
 /// - 其余插件（含 `agent` 自身、`plugin_manager`、`work`）都在列：子树因此与父树**结构相同**，
 ///   前端看到的资源入口（含设置入口）与父 Agent 对齐。
+///
+/// 若将来两侧确需分叉，**在这里加只属于某一侧的字面量并写清理由**——不要恢复
+/// 「两张各写一遍、靠人同步」的形态：两份各自演化的清单会静默漂移（可以变成同一集合，
+/// 而各处注释仍在描述差异，没有任何测试会因此变红）。
 ///
 /// ## 分形：任意层级复用同一常量
 ///

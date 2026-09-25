@@ -68,9 +68,8 @@ async fn main() -> ExitCode {
     // 系统目录下没有任何模型条目时给出明确提示：此时插件树会退回内置默认值，
     // 通常表现为「没有任何可用 Provider」，属于最常见的一次性配置问题。
     //
-    // 注意这里看的是**模型条目目录**而不是某个配置文件：配置已回到插件目录
-    // （系统目录下 `model/<id>/provider.json`），旧的集中式 `config.yaml`
-    // 只会在首次迁移后被改名留档，不能再拿它当判据。
+    // 注意这里看的是**模型条目目录**而不是某个配置文件：配置就在插件自己的目录里
+    // （系统目录下 `model/<id>/provider.json`）。
     if !has_model_entry(&args.homedir) {
         eprintln!(
             "提示: 系统目录 {} 下没有模型配置（model/<id>/provider.json），\

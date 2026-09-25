@@ -156,10 +156,15 @@ impl WorkPlugin {
     }
 }
 
+/// 无装配上下文的实例（仅测试）。目录给临时目录——**不读全局系统根**。
+#[cfg(test)]
 impl Default for WorkPlugin {
     fn default() -> Self {
         Self::new(
-            crate::symbio_core::PluginDir::of(PLUGIN_WORK),
+            crate::symbio_core::PluginDir::at(
+                std::env::temp_dir().join("symbio-test/work"),
+                PLUGIN_WORK,
+            ),
             WorkConfig::default(),
         )
     }

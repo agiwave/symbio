@@ -1,37 +1,37 @@
-//! HomedirRegistry - 全局"系统目录"(homedir) 注册表
+//! HomedirRegistry —— 全局「系统目录」(homedir) 的**唯一所有者：`home` 插件**。
 //!
-//! ## 背景
+//! ## 归属：只有 home 需要知道 homedir
 //!
-//! 系统目录不能写死在源码里：用户必须能在运行时切换 homedir，
-//! 无需改代码或重新构建。
+//! 普通插件**不需要也不应该**知道 homedir。它们只认父插件经 `PLUGIN_DIR` 告知的
+//! **自己的目录**；容器（`composite`）也一样——它只知道自己的目录，那个目录在
+//! 顶层时**恰好**是 homedir，挂在子智能体下时就不是。
 //!
-//! 本模块提供：
-//! 1. **运行时配置** 的系统目录 homedir（默认 `~/.symbio`，可由前端切换）
-//! 2. **进程内全局单例** `HomedirRegistry::get()`，所有需要"系统根目录"的代码统一走这里
+//! 曾经的错误形态是：homedir 住在 `symbio_core`，于是任何插件都能"顺手"读全局
+//! 拿系统根。这在**子智能体**里必然指错目录——子树挂在 `<homedir>/agent/<id>/…`，
+//! 而全局读取给出的是系统级 `<homedir>/…`（父作用域）。因此本模块下沉到 home：
+//! 只有它这个「造出整棵树的根插件」才配知道 homedir，其余一律靠 `PLUGIN_DIR`。
+//!
+//! ## 系统目录不能写死在源码里
+//!
+//! 用户必须能在运行时切换 homedir，无需改代码或重新构建。本模块提供：
+//! 1. **运行时配置**的系统目录（默认 `~/.symbio`，可由前端切换）
+//! 2. **进程内全局单例** `HomedirRegistry::get()` —— **只应被 home 调用**；
 //! 3. **bootstrap 持久化**：把"上次使用的 homedir"写到 `~/.symbio_bootstrap`，
-//!    下次启动时自动恢复。这样 bootstrap 文件本身在固定位置（用户主目录），
+//!    下次启动时自动恢复。bootstrap 文件本身在固定位置（用户主目录），
 //!    不依赖 homedir 本身。
 //!
 //! 初始 homedir 优先级：`SYMBIO_HOMEDIR` 环境变量（最高，CLI `--homedir` 注入）
 //! 优先于 bootstrap 上次选择，再优先于默认 `~/.symbio`。环境变量必须最高，
 //! 否则显式指定的隔离系统目录（CI/容器/E2E）会被 bootstrap 记忆静默覆盖。
 //!
-//! ## 设计原则
-//!
-//! - **零侵入**：调用方经 `HomedirRegistry::get()` 取系统根目录，
-//!   即可获得 homedir 切换能力。
-//! - **默认可用**：不做任何配置时 homedir 为 `~/.symbio`。
-//! - **可测试**：`set()` / `reset_to_default()` 暴露给测试，验证 set/get 一致性。
-//! - **bootstrap 容错**：bootstrap 文件不存在 / 解析失败 / 路径不存在，
-//!   都回退到默认 `~/.symbio` 并打 warn 日志，不阻断应用启动。
-//!
 //! ## 限制
 //!
-//! - 由于 plugin 的 `build()` 是同步函数，无法在 `build` 内部从 PluginInvokeRequest 拿到
-//!   homedir 上下文（构造时还没建好 PluginInvokeRequest）。所以 homedir 必须是**进程级
-//!   全局变量**而不是请求级 context。这与 `dirs::home_dir()` 静态全局的设计一致。
+//! - 由于 plugin 的 `build()` 是同步函数，构造 home 时还没有父插件可告知目录，
+//!   也无法在 `build` 内部从 `PluginInvokeRequest` 拿 homedir 上下文。所以 homedir
+//!   必须是**进程级全局变量**——它正是整条 `PLUGIN_DIR` 传递链的**起点**。
 //! - 切换 homedir **不会**自动迁移数据（避免误删），由用户在 UI 显式选择。
 
+use crate::symbio_core::expand_tilde_path;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use tracing::{info, warn};
@@ -90,7 +90,7 @@ fn initial_homedir() -> PathBuf {
     load_from_bootstrap_or_default()
 }
 
-/// 计算默认 homedir（bootstrap 缺失/无效时的 fallback，以及 reset_to_default 的目标）
+/// 计算默认 homedir（bootstrap 缺失/无效时的 fallback）
 ///
 /// 优先级：
 /// 1. `SYMBIO_HOMEDIR` 环境变量（便于开发/CI/容器；reset 时尊重强制指定）
@@ -102,20 +102,6 @@ fn default_homedir() -> PathBuf {
         }
     }
     expand_tilde_path(Path::new(DEFAULT_HOMEDIR))
-}
-
-/// 展开 `~` 前缀到用户主目录
-pub fn expand_tilde_path(p: &Path) -> PathBuf {
-    let s = p.to_string_lossy();
-    if s == "~" {
-        return dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    }
-    if let Some(stripped) = s.strip_prefix("~/").or_else(|| s.strip_prefix("~\\")) {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(stripped);
-        }
-    }
-    PathBuf::from(s.as_ref())
 }
 
 /// bootstrap 文件路径：固定位于用户主目录下
@@ -191,13 +177,16 @@ fn load_from_bootstrap_or_default() -> PathBuf {
     }
 }
 
-/// 全局 homedir 注册表
+/// 全局 homedir 注册表 —— **只有 `home` 插件应调用它**
 pub struct HomedirRegistry;
 
 impl HomedirRegistry {
     /// 获取当前 homedir（一定不会 panic，且不需要可变借用）
     ///
     /// 首次调用会触发 `load_from_bootstrap_or_default()`，后续调用直接返回缓存值。
+    ///
+    /// ⚠️ **调用者只应是 `home`**：普通插件请用父插件经 `PLUGIN_DIR` 告知的
+    /// `PluginDir`，不要经此拿系统根（在子智能体里会指错作用域）。
     pub fn get() -> PathBuf {
         inner().lock().unwrap().current.clone()
     }
@@ -244,14 +233,6 @@ impl HomedirRegistry {
         Ok(old)
     }
 
-    /// 重置为默认 homedir（测试 / "恢复默认" 按钮使用）
-    pub fn reset_to_default() -> PathBuf {
-        let new_default = default_homedir();
-        // 不删 bootstrap 文件，直接覆盖
-        let _ = Self::set(new_default.clone());
-        new_default
-    }
-
     /// 返回 bootstrap 文件路径（供前端"在哪里存"提示）
     pub fn bootstrap_path_display() -> String {
         bootstrap_path()
@@ -261,4 +242,5 @@ impl HomedirRegistry {
 }
 
 #[cfg(test)]
+#[path = "homedir.test.rs"]
 mod tests;

@@ -93,7 +93,7 @@ test('干净树通过（exit 0）', () => {
   const r = audit(CLEAN)
   assert.equal(r.status, 0, r.stdout)
   // 条数不写死：规则表是唯一真相源，脚本从它推导（手写的「七条」加规则时必漂）
-  assert.match(r.stdout, /8 条规则全部通过/)
+  assert.match(r.stdout, /9 条规则全部通过/)
 })
 
 test('报告段给出每条路由的消费方计数', () => {
@@ -523,4 +523,68 @@ test('E-008 命中：标记的前缀在代码里没有同名常量（前缀写�
   const r = audit(vocabDoc('| `status` | `one` <!-- vocab:BAR_ --> |'))
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /BAR_/)
+})
+
+// ── E-009：插件不得直接 use 兄弟插件模块 ────────────────────────────────
+//
+// 真实形态：`plugins/mod.rs` 的架构原则说「插件之间互相不可见」，但 Rust 的私有
+// 可见性包含"定义模块的后代" ⇒ `plugins::mcp` 能路径到 `plugins::web`。当前代码为 0，
+// 但没有任何守卫；这条规则把它钉住。
+const E009_HIT = /\[ERROR\]\s+E-009\s+symbio\/src\/plugins\/mcp\/caller\.rs:\d/
+
+test('E-009 命中：`plugins/mcp` 里 `use crate::plugins::web::…`', () => {
+  const r = audit({
+    ...CLEAN,
+    'symbio/src/plugins/mcp/caller.rs': 'use crate::plugins::web::something;\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, E009_HIT)
+})
+
+test('E-009 不误报：引用自己的插件模块', () => {
+  const r = audit({
+    ...CLEAN,
+    'symbio/src/plugins/mcp/caller.rs': 'use crate::plugins::mcp::schemas::Foo;\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+  assert.doesNotMatch(r.stdout, E009_HIT)
+})
+
+test('E-009 不误报：文档链接（注释里的 `crate::plugins::web`）', () => {
+  const r = audit({
+    ...CLEAN,
+    'symbio/src/plugins/mcp/caller.rs':
+      '//! 与 [`web`](crate::plugins::web) 完全一致\npub fn f() {}\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+  assert.doesNotMatch(r.stdout, E009_HIT)
+})
+
+test('E-009 不误报：不在 `plugins/` 之下的同类引用（如 `cli/`）', () => {
+  const r = audit({
+    ...CLEAN,
+    'cli/src/client.rs': 'use crate::plugins::web::something;\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+  assert.doesNotMatch(r.stdout, E009_HIT)
+})
+
+test('E-009 豁免：带理由的 plugin-entry-allow 不再报', () => {
+  const r = audit({
+    ...CLEAN,
+    'symbio/src/plugins/mcp/caller.rs':
+      '// plugin-entry-allow E-009: 本插件是刻意的容器替身，需引用兄弟类型\nuse crate::plugins::web::something;\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+  assert.doesNotMatch(r.stdout, E009_HIT)
+})
+
+test('E-009 豁免理由为空视为未豁免', () => {
+  const r = audit({
+    ...CLEAN,
+    'symbio/src/plugins/mcp/caller.rs':
+      '// plugin-entry-allow E-009:\nuse crate::plugins::web::something;\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, E009_HIT)
 })

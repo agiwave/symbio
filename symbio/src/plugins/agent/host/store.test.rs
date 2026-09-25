@@ -56,6 +56,37 @@ fn path_sandbox_accepts_any_inner_path() {
     );
 }
 
+/// 挂载根清单只含**通过 §10 校验**的目录：解析得了但过不了门槛的不列。
+#[test]
+fn list_only_returns_dirs_passing_the_access_gate() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("global-agent");
+    let store = AgentDirStore::new(root.clone());
+    for (id, manifest) in [
+        (
+            "good",
+            "spec: \"agent-dir/v2\"\nid: \"good\"\nname: \"G\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^2\"\n",
+        ),
+        (
+            "old",
+            "spec: \"oab/v1\"\nid: \"old\"\nname: \"O\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^1\"\n",
+        ),
+        (
+            "noreq",
+            "spec: \"agent-dir/v2\"\nid: \"noreq\"\nname: \"N\"\nversion: \"1.0.0\"\n",
+        ),
+    ] {
+        std::fs::create_dir_all(root.join(id)).unwrap();
+        std::fs::write(root.join(id).join("manifest.yaml"), manifest).unwrap();
+    }
+    let ids: Vec<String> = store
+        .list()
+        .into_iter()
+        .map(|r| r.manifest.id.clone())
+        .collect();
+    assert_eq!(ids, vec!["good"], "只列通过门槛者，实际：{ids:?}");
+}
+
 #[test]
 fn path_sandbox_rejects_escapes() {
     for bad in [
@@ -78,31 +109,11 @@ fn workspace_store_with_agent_dir() -> (tempfile::TempDir, AgentDirStore) {
     std::fs::create_dir_all(agent_dir.join("prompts")).unwrap();
     std::fs::write(
         agent_dir.join("manifest.yaml"),
-        "spec: \"oab/v1\"\nid: \"b\"\nname: \"B\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^1\"\n",
+        "spec: \"agent-dir/v2\"\nid: \"b\"\nname: \"B\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^2\"\n",
     )
     .unwrap();
     assert!(store.get("b").is_some(), "前置：agent 目录应被扫描到");
     (dir, store)
-}
-
-/// 写入闸门：超限**拒绝**，且不留下半截内容
-#[test]
-fn write_item_rejects_oversized_content_without_touching_the_file() {
-    let (_dir, store) = workspace_store_with_agent_dir();
-
-    store
-        .write_item("b", "prompts/persona.md", "0123456789", 10)
-        .unwrap();
-    let err = store
-        .write_item("b", "prompts/persona.md", "0123456789X", 10)
-        .unwrap_err();
-    assert!(err.contains("超出容量上限"), "{err}");
-    assert!(err.contains("10"), "错误信息要带上限值：{err}");
-    assert_eq!(
-        store.read_item("b", "prompts/persona.md").unwrap(),
-        "0123456789",
-        "被拒绝的写入不得改动文件"
-    );
 }
 
 /// 智能体记忆**落位**在 agent 目录自己的目录（不是工作区目录），文件名与工作区级同名。

@@ -57,6 +57,20 @@ requires:
     buf.into_inner()
 }
 
+/// 内存 zip：只放一份 manifest（文件名与内容由调用方给）——导入门槛用例用。
+fn build_minimal_zip(manifest_name: &str, manifest: &str) -> Vec<u8> {
+    use std::io::Write as _;
+    let mut buf = std::io::Cursor::new(Vec::new());
+    {
+        let mut w = zip::ZipWriter::new(&mut buf);
+        let opts: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default();
+        w.start_file(manifest_name, opts).unwrap();
+        w.write_all(manifest.as_bytes()).unwrap();
+        w.finish().unwrap();
+    }
+    buf.into_inner()
+}
+
 /// 构造 traverse 所需的请求上下文（含 CAPABILITY_VISITOR）。
 fn ctx_with(
     workdir: Option<&str>,
@@ -243,7 +257,7 @@ async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
     std::fs::create_dir_all(&sub).unwrap();
     std::fs::write(
         sub.join("manifest.yaml"),
-        "spec: \"agent-dir/v2\"\nid: \"reviewer\"\nname: \"评审\"\nversion: \"1.0.0\"\nrequires://n  spec: \"^2\"\n",
+        "spec: \"agent-dir/v2\"\nid: \"reviewer\"\nname: \"评审\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^2\"\n",
     )
     .unwrap();
     // 人格 / 记忆：`<agentdir>/AGENTS.md`，由子树的 `plugin_manager` 实例读取并注入
@@ -330,7 +344,7 @@ async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
     std::fs::create_dir_all(&sub).unwrap();
     std::fs::write(
         sub.join("manifest.yaml"),
-        "spec: \"agent-dir/v2\"\nid: \"reviewer\"\nname: \"评审\"\nversion: \"1.0.0\"\nrequires://n  spec: \"^2\"\n",
+        "spec: \"agent-dir/v2\"\nid: \"reviewer\"\nname: \"评审\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^2\"\n",
     )
     .unwrap();
     std::fs::write(sub.join("AGENTS.md"), "你是评审专家。").unwrap();
@@ -660,6 +674,113 @@ async fn sub_agent_agent_list_is_scoped_to_its_own_space() {
         vec!["inner"],
         "子空间的智能体清单必须来自**它自己的** agent 目录（实际：{ids:?}）——\
          出现顶层智能体（尤其它自己）即表示目录回退到了全局 agent 根"
+    );
+}
+
+/// 导入即校验（§10）：spec 不符 / 缺 `requires.spec` / 缺 `name` 一律整包拒收；
+/// `manifest.yml`（规范名之外的容忍名）照常可导入。
+#[test]
+fn import_rejects_any_manifest_failing_the_access_gate() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = AgentDirStore::new(dir.path().join("agent"));
+    let base = "id: \"com.acme.x\"\nversion: \"1.0.0\"\n";
+    let old_spec = format!("spec: \"oab/v1\"\n{base}name: \"X\"\nrequires:\n  spec: \"^1\"\n");
+
+    for (what, manifest) in [
+        ("spec 不符", old_spec.clone()),
+        (
+            "缺 requires.spec",
+            format!("spec: \"agent-dir/v2\"\n{base}name: \"X\"\n"),
+        ),
+        (
+            "缺 name",
+            format!("spec: \"agent-dir/v2\"\n{base}requires:\n  spec: \"^2\"\n"),
+        ),
+    ] {
+        let err = store
+            .import(&build_minimal_zip("manifest.yaml", &manifest), false)
+            .unwrap_err();
+        assert!(err.contains("拒绝导入"), "{what} 应被拒收：{err}");
+    }
+
+    // §10 不得静默降级：版本门槛的错误信息写明双侧版本
+    let err = store
+        .import(&build_minimal_zip("manifest.yaml", &old_spec), false)
+        .unwrap_err();
+    assert!(err.contains("agent-dir/v2"), "{err}");
+
+    // 三名之内（`manifest.yml`）照常导入——判据是「过 §10」，不是文件名
+    assert!(store
+        .import(
+            &build_minimal_zip(
+                "manifest.yml",
+                "spec: \"agent-dir/v2\"\nid: \"com.acme.y\"\nname: \"Y\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^2\"\n",
+            ),
+            false,
+        )
+        .is_ok());
+}
+
+/// 不在挂载根清单里的目录（manifest 未过 §10 门槛）**一律不可浏览**：
+/// list / stat / read / write / delete 全部 `NotFound`，且**磁盘不落新文件**。
+///
+/// 「可列出」与「可挂载」共用同一判据（[`AgentDirStore::load_record`]），
+/// 因此不存在「列得出来、点进去却报别的错」的中间态。
+#[tokio::test]
+async fn non_mountable_agent_dir_is_not_browsable_at_all() {
+    use crate::symbio_core::VdfsError;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let agent_root = tmp.path().join("agent");
+    let sub = agent_root.join("legacyish");
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::write(
+        sub.join("manifest.yaml"),
+        "spec: \"oab/v1\"\nid: \"legacyish\"\nname: \"旧\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^1\"\n",
+    )
+    .unwrap();
+
+    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_AGENT));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
+    ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
+    let vctx = vdfs::vdfs_context(&ctx);
+
+    // 列不出来：挂载根清单里没有它
+    let listed = plugin
+        .dispatch(&vctx, "", LIST)
+        .await
+        .unwrap()
+        .into_list()
+        .unwrap();
+    assert!(
+        !listed.iter().any(|it| it.node.name == "legacyish"),
+        "未过门槛的目录不得出现在挂载根清单里"
+    );
+
+    for (what, path, req) in [
+        ("list", "legacyish", LIST),
+        ("list 子路径", "legacyish/foo", LIST),
+        ("stat", "legacyish/foo.md", STAT),
+        ("read", "legacyish/foo.md", READ),
+        (
+            "write",
+            "legacyish/foo.md",
+            VdfsRequest::Write {
+                content: crate::symbio_core::VdfsContent::text("x"),
+            },
+        ),
+        ("delete", "legacyish/foo.md", DEL),
+    ] {
+        let err = plugin
+            .dispatch(&vctx, path, req)
+            .await
+            .err()
+            .unwrap_or_else(|| panic!("{what} 应报 NotFound"));
+        assert!(matches!(err, VdfsError::NotFound(_)), "{what}：{err:?}");
+    }
+    assert!(
+        !sub.join("foo.md").exists(),
+        "被拒绝的写入不得在磁盘上落文件"
     );
 }
 

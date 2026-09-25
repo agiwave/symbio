@@ -21,19 +21,9 @@ use crate::symbio_core::{VdfsAccess, VdfsError, VdfsNode, VdfsResult};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// 类别根目录：`<category>` 段对应的目录
-///
-/// ⚠️ **生产代码不应调用它** —— 插件一律用父插件经 `PLUGIN_DIR` 告知的目录，
-/// 不按插件名反推自己落在哪。当前仅剩两处合法使用：
-/// ① 读旧版历史落位的数据迁移（model 的旧分类 `ai`）；② 测试构造。
-///
-/// **与插件目录是同一个目录**——一个插件 = 一个目录，配置（`PLUGIN.yml`）与资源
-/// 同处一处。因此这里直接委托 [`plugin_dir::dir_of`]，不另写一份路径规则。
-///
-/// 基址每次现取（不缓存）——`home/reload` 切换 homedir 后必须立刻生效。
-pub fn category_dir(category: &str) -> PathBuf {
-    crate::symbio_core::dir_of(category)
-}
+// 注：早先这里有 `category_dir(category)` = `<homedir>/<category>`，按插件名反推
+// 全局落位。homedir 已下沉到 `home` 插件独有，core 不再提供全局根，故删除——
+// 插件一律用父插件经 `PLUGIN_DIR` 告知的自己的目录（`PluginDir::at` 显式传入）。
 
 /// 把条目 id 转成安全的磁盘段名
 ///

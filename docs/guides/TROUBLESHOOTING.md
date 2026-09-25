@@ -180,8 +180,6 @@ curl -X POST ... -d '{"path": "_root"}'
    `<根>/<插件>/PLUGIN.yml`——两条路写的是**同一个文件**
 4. 配置改完**不需要重启**（`PluginConfigFile::apply` 落盘后广播）；只有少数副作用
    （如网关重建监听）由插件自己在写完后处理
-5. 若刚从旧版本升级：旧 `<homedir>/config.yaml` 已一次性迁移并改名
-   `config.yaml.migrated`——查历史值看那个留档文件
 
 ### 问题：API Key 无效
 
@@ -189,8 +187,8 @@ curl -X POST ... -d '{"path": "_root"}'
 
 **排查步骤**：
 1. 确认 API Key 未过期
-2. 检查 `provider_type` 与 Key 匹配
-3. 确认 `base_url` 正确 (使用代理时)
+2. 检查 `api_protocol` 与 Key 匹配
+3. 确认 `api_base` 正确 (使用代理时)
 
 ---
 

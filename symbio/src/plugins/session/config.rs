@@ -26,13 +26,15 @@ use serde::{Deserialize, Serialize};
 ///
 /// ## 存储目录
 ///
-/// Session 存储目录**不是**配置项，而是从 [`crate::symbio_core::HomedirRegistry`]
-/// 直接派生：`<本插件目录>`。
-/// 这样 session 存储始终跟随系统目录，与 homedir 切换逻辑天然契合。
+/// Session 存储目录**不是**配置项，而是本插件**自己的目录**（装配期由父插件经
+/// `PLUGIN_DIR` 告知）：`<本插件目录>`。
+/// 这样 session 存储始终跟随本实例所在的作用域，顶层时是系统级会话、子智能体下
+/// 是子树会话，无需任何全局查找。
 ///
 /// ## 已移除字段
 ///
-/// - `storage_dir`：存储根由 HomedirRegistry 统一决定，留着只会让人误以为可改路径；
+/// - `storage_dir`：存储根由父插件经 `PLUGIN_DIR` 告知、不可由配置改路径，
+///   留着只会让人误以为可改；
 /// - `session_id`：全仓零消费者、零赋值。配置本身即按会话目录存放（id 由目录名决定），
 ///   再在内容里存一份 id 属自指冗余。
 /// - `store_kind`（及其 `StoreKind` 枚举）：曾经用它在 `file` / `sqlite` / `memory`

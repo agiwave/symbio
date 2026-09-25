@@ -18,15 +18,15 @@
 //!
 //! ## 职责边界：只管目录，不解释内容
 //!
-//! v1 时代这里**解释** agent 目录内部：`prompts/` `skills/` `mcps/` 各有白名单布局，
-//! 条目按 `priority` 排序、MCP 配置按约定文件名探测……那等于在宿主里重写了一遍
-//! 技能系统与 MCP 客户端的解析，两条链长期不同步（规范 §3.2 第 2 条）。
+//! 解释 agent 目录内部（`prompts/` `skills/` `mcps/` 各有白名单布局、条目按
+//! `priority` 排序、MCP 配置按约定文件名探测……）等于在宿主里重写一遍技能系统与
+//! MCP 客户端的解析，两条链必然长期不同步（规范 §3.2 第 2 条）。
 //!
-//! v2 里 Agent 是**一棵插件树**，能力由目录里的插件实例自己解释。本模块因此降级
-//! 为**枚举 / 建目录 / 导入导出 + 通用文件读写**：
+//! Agent 是**一棵插件树**，能力由目录里的插件实例自己解释。本模块因此只做
+//! **枚举 / 建目录 / 导入导出**：
 //!
 //! - 只认 `manifest.yaml`（身份与兼容门槛，§5），不认任何能力目录；
-//! - 条目读写只做**路径沙箱**（§11.1），不校验「这个文件该长什么样」。
+//! - 条目枚举只做**路径沙箱**（§11.1），不校验「这个文件该长什么样」。
 //!
 //! ## 安全
 //!
@@ -77,9 +77,8 @@ pub struct ImportResult {
 
 /// Agent 目录内的一条文件记录（**通用**：不分类、不解释内容）
 ///
-/// v1 的 `条目类型` 带 `kind`（prompt / skill / mcp）与 `priority`——那是
-/// 宿主在替能力目录解释语义。v2 里能力由插件实例自己解释（§3.2），这里只回答
-/// 「有哪些文件、多大、是不是目录」。
+/// 不带 `kind`（prompt / skill / mcp）与 `priority`——那会变成宿主替能力目录解释
+/// 语义。能力由插件实例自己解释（§3.2），这里只回答「有哪些文件、多大、是不是目录」。
 #[derive(Debug, Clone, Serialize)]
 pub struct FileEntry {
     /// 相对 Agent 目录的路径（如 `skill/foo/SKILL.md`）
@@ -155,9 +154,17 @@ impl AgentDirStore {
         out
     }
 
-    /// 从 agent 目录加载记录（manifest 解析失败 → 跳过该目录并记日志）。
+    /// 从 agent 目录加载记录。
+    ///
+    /// **接入判据的唯一出处**：manifest 解析失败或未过 §10 门槛（`spec` 不是
+    /// `agent-dir/v2` / `requires.spec` 主版本不符 / id 或 name 不合规）都返回
+    /// `None`。列表与挂载因此同源——不存在「列得出来但挂不上」的目录。
     pub fn load_record(dir: &Path) -> Option<AgentDirRecord> {
         let manifest = manifest::load(dir)?;
+        if let Err(e) = manifest::validate(&manifest) {
+            crate::plugin_warn!("agent", "跳过 `{}`：{}", dir.display(), e);
+            return None;
+        }
         Some(AgentDirRecord {
             manifest: Arc::new(manifest),
             dir: dir.to_path_buf(),
@@ -280,11 +287,11 @@ impl AgentDirStore {
         Ok(record.dir.display().to_string())
     }
 
-    // ==================== Agent 目录内的通用文件读写 ====================
+    // ==================== Agent 目录内的通用文件枚举 ====================
     //
-    // 供宿主 UI 浏览 / 编辑 Agent 目录。安全模型：rel_path 先过
-    // [`normalize_item_path`]（路径沙箱，§11.1），再经 [`absolutize`] 逐段构建
-    // （免疫穿越），双重闸门。**不解释文件内容**——那属于对应的能力插件。
+    // 供宿主 UI 浏览 Agent 目录。安全模型：rel_path 先过 [`normalize_item_path`]
+    // （路径沙箱，§11.1），再经 [`absolutize`] 逐段构建（免疫穿越），双重闸门。
+    // **不解释文件内容**——那属于对应的能力插件，内容读写一律走子树 provider。
 
     /// 列出 Agent 目录（或其子目录）下的条目。
     ///
@@ -323,102 +330,6 @@ impl AgentDirStore {
         Ok(out)
     }
 
-    /// 取一条条目的元信息（不存在 / 逃逸 → `Err`）。
-    pub fn stat_item(&self, agent_id: &str, rel: &str) -> Result<FileEntry, String> {
-        let record = self
-            .get(agent_id)
-            .ok_or_else(|| format!("智能体 `{agent_id}` 不存在"))?;
-        let rel = normalize_item_path(rel)?;
-        let full = absolutize(&record.dir, &rel);
-        debug_assert!(full.starts_with(&record.dir));
-        let meta = std::fs::metadata(&full).map_err(|_| format!("条目不存在（`{rel}`）"))?;
-        Ok(FileEntry {
-            path: rel,
-            size: meta.len(),
-            is_dir: meta.is_dir(),
-        })
-    }
-
-    /// 条目在磁盘上的绝对路径（沙箱化后；供删除目录用）。
-    pub fn item_path(&self, agent_id: &str, rel: &str) -> Result<PathBuf, String> {
-        let record = self
-            .get(agent_id)
-            .ok_or_else(|| format!("智能体 `{agent_id}` 不存在"))?;
-        let rel = normalize_item_path(rel)?;
-        Ok(absolutize(&record.dir, &rel))
-    }
-
-    /// 读取 Agent 目录内的文件内容。
-    pub fn read_item(&self, agent_id: &str, rel_path: &str) -> Result<String, String> {
-        let record = self
-            .get(agent_id)
-            .ok_or_else(|| format!("智能体 `{agent_id}` 不存在"))?;
-        let rel_path = normalize_item_path(rel_path)?;
-        let full = absolutize(&record.dir, &rel_path);
-        debug_assert!(full.starts_with(&record.dir));
-        std::fs::read_to_string(&full)
-            .map_err(|e| format!("读取条目失败（{}）: {e}", full.display()))
-    }
-
-    /// 写入（创建/覆盖）Agent 目录内的文件；父目录自动创建。
-    ///
-    /// `max_bytes` 是**写入闸门**：条目内容超过上限直接拒绝，不截断——人格 / 技能是
-    /// 跨会话生效的东西，「以为写进去了、实际少了一段」是这里最坏的失败形态
-    /// （没有任何报错，只表现为智能体行为异常）。拒绝则是一次显式、可重试的失败。
-    pub fn write_item(
-        &self,
-        agent_id: &str,
-        rel_path: &str,
-        content: &str,
-        max_bytes: usize,
-    ) -> Result<(), String> {
-        let record = self
-            .get(agent_id)
-            .ok_or_else(|| format!("智能体 `{agent_id}` 不存在"))?;
-        let rel_path = normalize_item_path(rel_path)?;
-        if content.len() > max_bytes {
-            return Err(format!(
-                "条目内容超出容量上限：当前 {} 字节，上限 {max_bytes} 字节（{rel_path}）。\
-                 请精简后再写入。",
-                content.len()
-            ));
-        }
-        let full = absolutize(&record.dir, &rel_path);
-        debug_assert!(full.starts_with(&record.dir));
-        if let Some(parent) = full.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("创建目录失败（{}）: {e}", parent.display()))?;
-        }
-        std::fs::write(&full, content)
-            .map_err(|e| format!("写入条目失败（{}）: {e}", full.display()))
-    }
-
-    /// 删除 Agent 目录内的文件；所在目录因此变空则一并清理。
-    pub fn delete_item(&self, agent_id: &str, rel_path: &str) -> Result<(), String> {
-        let record = self
-            .get(agent_id)
-            .ok_or_else(|| format!("智能体 `{agent_id}` 不存在"))?;
-        let rel_path = normalize_item_path(rel_path)?;
-        let full = absolutize(&record.dir, &rel_path);
-        debug_assert!(full.starts_with(&record.dir));
-        if !full.is_file() {
-            return Err(format!("条目不存在（{}）", full.display()));
-        }
-        std::fs::remove_file(&full)
-            .map_err(|e| format!("删除条目失败（{}）: {e}", full.display()))?;
-        if let Some(parent) = full.parent() {
-            if parent != record.dir
-                && parent.starts_with(&record.dir)
-                && std::fs::read_dir(parent)
-                    .map(|mut d| d.next().is_none())
-                    .unwrap_or(false)
-            {
-                let _ = std::fs::remove_dir(parent);
-            }
-        }
-        Ok(())
-    }
-
     // ==================== 智能体记忆（Agent 根下的 `AGENTS.md`，§6） ====================
     //
     // 记忆是 Agent 根下的一个普通文件，与工作区级的 `{workdir}/AGENTS.md`
@@ -427,10 +338,8 @@ impl AgentDirStore {
     // 插件实例，本模块只负责回答「文件在哪」。
     //
     // ⚠️ 本模块**只负责回答「记忆文件在哪」**：读 / 写 / 两道容量闸门一律走内核
-    // （`symbio_core::memory::MemoryFile`）。此前这里自带一份 `read_memory` /
-    // `write_memory` 与自己的字节闸门，与 work / session 两层各写一份口径——
-    // 「超限是拒绝还是截断」「读不到算不算错误」一旦分叉，用户看到的行为就会随
-    // 「这条记忆属于哪一层」而变化。收口后三层共用同一份实现，本模块不再持有闸门。
+    // （`symbio_core::memory::MemoryFile`）——agent / work / session 三层共用同一份
+    // 实现，本模块不持有闸门。
 
     /// 智能体记忆文件：`<Agent 目录>/AGENTS.md`
     ///
@@ -442,7 +351,7 @@ impl AgentDirStore {
         Ok(record.dir.join(MEMORY_AGENTS_FILE))
     }
 
-    /// zip entry 名 → agent 目录内相对路径。    ///
+    /// zip entry 名 → agent 目录内相对路径。
     /// 支持两种打包布局：根目录直打包（`manifest.yaml`、`providers/...`）与
     /// 单顶层目录打包（`<agent_id>/manifest.yaml`、`<agent_id>/providers/...`）。
     /// 返回 `None` 表示跳过（目录项 / 顶层杂项）。

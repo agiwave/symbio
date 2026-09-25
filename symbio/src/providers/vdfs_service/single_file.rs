@@ -32,16 +32,9 @@ pub struct SingleFileVdfs {
 }
 
 impl SingleFileVdfs {
-    /// 按类别名建一个单文件型存储：类别段 = 子目录名 = 广播频道键
-    ///
-    /// ⚠️ **仅迁移 / 兼容旧落位使用**。插件的正常存储根是它自己的目录，应由调用方
-    /// 经 [`at`](Self::at) 显式传入；按名字反推落位等于让插件猜自己被放在哪。
-    /// 当前唯一使用者是 model 插件迁移旧分类 `ai` 的那段代码。
-    pub fn for_category(kind: impl Into<String>, manifest: impl Into<String>) -> Self {
-        let kind = kind.into();
-        let base = entry::category_dir(&kind);
-        Self::at(base, kind, manifest)
-    }
+    // 注：早先这里有 `for_category(kind)`——按类别名反推全局落位
+    //（`<homedir>/<kind>`）。homedir 下沉到 `home` 后 core 不再有全局根，
+    // 调用方（model 迁移旧分类）改为自己推出作用域根再走 [`at`](Self::at)。
 
     /// 显式指定类别根（生产路径：根 = 调用方的插件目录）
     pub fn at(

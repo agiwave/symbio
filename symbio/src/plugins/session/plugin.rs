@@ -2,14 +2,14 @@
 //!
 //! 提供会话历史和上下文管理。
 //!
-//! 存储路径：`<本插件目录>/`（从 [`HomedirRegistry`] 直接派生）。
-//! 不再使用 `storage_dir` 配置项，session 存储始终跟随系统目录。
+//! 存储路径：`<本插件目录>/`（装配期由父插件经 `PLUGIN_DIR` 告知）。
+//! 不再使用 `storage_dir` 配置项，session 存储始终跟随本实例的作用域。
 //! 会话本身携带 `metadata.workdir` 用于 MODEL 工具调用上下文。
 //!
-//! ## 系统目录 (homedir)
+//! ## 作用域
 //!
-//! Session 存储目录由 [`HomedirRegistry::get()`] 派生：`<本插件目录>`。
-//! 切换 homedir 后，新会话将写入新 homedir；存量数据**不会**自动迁移。
+//! Session 存储目录就是**本插件自己的目录**：顶层时它是系统级 `<homedir>/session`，
+//! 挂在子智能体下时是 `<子树>/session`。本插件不读、也不需要知道 homedir。
 //!
 //! ## 子模块分工（拆文件不拆行为）
 //!
@@ -291,13 +291,6 @@ impl SessionPlugin {
     /// 新插件实例的下一次 `get_store` 因此用新 homedir 下的目录。
     pub fn storage_dir(&self) -> PathBuf {
         self.config_file.dir().dir().to_path_buf()
-    }
-
-    /// **仅测试用**的回退：没有插件实例时（自由函数 / 单测）拿不到自己的目录，
-    /// 只能按插件名取常规落位。生产路径一律走 [`Self::storage_dir`]。
-    #[cfg(test)]
-    pub fn session_storage_dir() -> PathBuf {
-        crate::providers::vdfs_service::entry::category_dir(PLUGIN_SESSION)
     }
 
     /// 获取（或初始化）存储后端。全局单例，首次调用时创建。

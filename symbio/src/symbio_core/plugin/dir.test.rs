@@ -104,34 +104,6 @@ fn ensure_never_overwrites_existing_config() {
     assert_eq!(d.load::<C>().unwrap(), Some(C { port: 8080 }));
 }
 
-/// `remove_keys`：遗留字段清理后，身份字段仍在；键不存在则不动文件
-#[test]
-fn remove_keys_drops_legacy_fields_but_keeps_identity() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let d = dir_at(tmp.path());
-
-    // 旧形态：资源明细混在配置里
-    std::fs::write(
-        d.config_path(),
-        "plugin_provider: demo\nplugin_name: demo\nservers:\n  a: 1\n_storage: plugins/x\n",
-    )
-    .unwrap();
-
-    d.remove_keys(&["servers"]).unwrap();
-    let text = std::fs::read_to_string(d.config_path()).unwrap();
-    assert!(!text.contains("servers"), "{text}");
-    assert!(
-        text.contains("_storage: plugins/x"),
-        "未点名的键不动：{text}"
-    );
-    assert!(text.contains("plugin_provider: demo"), "{text}");
-
-    // 再摘一个不存在的键：文件不动
-    let before = std::fs::read_to_string(d.config_path()).unwrap();
-    d.remove_keys(&["nope"]).unwrap();
-    assert_eq!(std::fs::read_to_string(d.config_path()).unwrap(), before);
-}
-
 /// 节点：真实文件名 + `ext = form` + `rw` + `schema` 即定义
 #[test]
 fn config_node_is_a_form_document_named_by_the_real_file() {

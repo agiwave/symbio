@@ -75,11 +75,9 @@ fn mcp_server_config_deserializes_all_fields_snake_case() {
     assert!(!cfg.enabled);
 }
 
-/// TEST-F1.6：McpConfig 反序列化为空时为默认空 HashMap
+/// TEST-F1.6：McpConfig 缺省为空
 #[test]
 fn mcp_config_default_is_empty() {
     let cfg = McpConfig::default();
     assert!(cfg.servers.is_empty());
-    let v = serde_json::to_value(&cfg).unwrap();
-    assert_eq!(v, serde_json::json!({ "servers": {} }));
 }

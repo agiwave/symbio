@@ -162,7 +162,17 @@ export const BASELINE = {
   //            `seed_identity` 本身挡不住那条调用链断掉）
   //      另有两条改名不计数：`unconstructed_entries_have_no_meta` ⇒
   //      `identity_is_empty_for_never_seeded_dirs`（语义从「未构造」收窄为「从未落位」）。
-  rustTests: 958,
+  // 952：删「为兼容旧历史而存在」的代码（2026-09-26）——**净 −6 用例**（958 → 952）。
+  //      删掉的生产面：agent 的 `migrate.rs` 模块、model 的 `load_with_legacy` 一族
+  //      迁移方法、mcp 的 `migrate_from_legacy_config`、home 的 `migrate_legacy_config`、
+  //      skill 的旧标题回落、`PluginDir::remove_keys`；判据面则把「合法 Agent 目录」
+  //      收口到 `store::load_record` 一地（`manifest::load` + `manifest::validate`），
+  //      并据此删掉 vdfs 上 6 处「列不出来却能浏览」的回退分支。
+  //      −10：agent `migrate.test.rs` 整文件（2）、`write_item_rejects_oversized…`（1）、
+  //      model 6 条迁移保全、`remove_keys_drops_legacy_fields_but_keeps_identity`（1）。
+  //      +4：agent 新增「过不了 §10 门槛的整包拒收」「非 v2 目录一处也浏览不到」
+  //      「挂载根只列通过门槛者」，model 新增「启动加载填满注册表与镜像」。
+  rustTests: 952,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

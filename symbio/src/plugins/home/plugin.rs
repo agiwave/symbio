@@ -14,18 +14,16 @@
 //!
 //! 它构造的容器 `composite` 是它的**动态内置替身**，共用同一个系统根目录。
 //!
-//! ## 它不再管任何子插件的配置
+//! ## 它不管任何子插件的配置
 //!
-//! 过去所有插件的配置集中在 `<homedir>/config.yaml` 的 `symbio.plugins.<名>` 下，
-//! 由本插件合并落盘——于是「一个插件的配置」横跨三处（home 的合并、composite 的
-//! 分发、插件自己的读取），而配置却不在插件自己的目录里。
-//!
-//! 现在配置回到**拥有者**手上：每个插件目录里的 `PLUGIN.yml`，谁写谁读。
-//! 本插件只保留自己的应用级状态（工作区 / 最近记录）。
+//! 配置属于**拥有者**：每个插件目录里的 `PLUGIN.yml`，谁写谁读。本插件只保留
+//! 自己的应用级状态（工作区 / 最近记录）。「一个插件的配置」因此只有一个落位，
+//! 不存在集中合并这一层。
 
+use super::homedir::HomedirRegistry;
 use super::schemas::{home_reload, work_get_workspace};
 use crate::symbio_core::{
-    HomedirRegistry, Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, PATH, PLUGIN_COMPOSITE,
     PLUGIN_DIR, PLUGIN_HOME, REQUIRED_PLUGINS,
 };
@@ -40,10 +38,11 @@ use tokio::sync::RwLock;
 ///
 /// 系统（根）Agent 挂载的插件清单。
 ///
-/// 直接复用 `symbio_core` 的机制级常量 [`crate::symbio_core::SYSTEM_AGENT_PLUGINS`]
-/// （根 = 子 Agent 默认集 [`crate::symbio_core::SUB_AGENT_PLUGINS`] + 系统级单槽
-/// `vdfs`）。根比子树只多这一个单槽（VDFS 根由根独占，子树经 `SubAgentVisitor`
-/// 丢弃）——父子因此「结构一致、能力对齐」，且改一处即同步。
+/// 直接复用 `symbio_core` 的机制级常量 [`crate::symbio_core::SYSTEM_AGENT_PLUGINS`]，
+/// 后者即 [`crate::symbio_core::SUB_AGENT_PLUGINS`]（当前逐项相同，系统侧是别名、
+/// 不是第二份字面量）。父子因此「结构一致、能力对齐」；二者的差异在**收集期
+/// 作用域**（`vdfs` 单槽归根、`model` 单槽按收集方）而非清单内容——详见
+/// `SUB_AGENT_PLUGINS` 的文档。
 pub const SYSTEM_PLUGINS: &[&str] = crate::symbio_core::SYSTEM_AGENT_PLUGINS;
 
 /// Home 自己的插件目录 = **系统根** `<homedir>`
@@ -51,15 +50,8 @@ pub const SYSTEM_PLUGINS: &[&str] = crate::symbio_core::SYSTEM_AGENT_PLUGINS;
 /// 不落在插件根下：若落在那里（即系统根下再有一层 `home/`），容器扫描插件根时会把它当普通插件再构造一次，
 /// 那个 home 又去构造容器——自举环。系统级插件不参与扫描。
 fn home_dir() -> PluginDir {
-    PluginDir::system(PLUGIN_HOME)
-}
-
-/// 旧形态的集中式配置文件（迁移用；迁移后改名保留）
-///
-/// 位于系统根下——home 自己的目录就是系统根，所以从 [`home_dir`] 取，
-/// 不再另写一份全局路径。
-fn legacy_config_path() -> PathBuf {
-    home_dir().dir().join("config.yaml")
+    // home 是**唯一**知道 homedir 的插件：它的目录就是系统根。
+    PluginDir::at(HomedirRegistry::get(), PLUGIN_HOME)
 }
 
 /// Home 自己的配置（`<homedir>/PLUGIN.yml`）
@@ -105,10 +97,7 @@ impl HomePlugin {
             plugin_warn!("home", "补建自身插件目录失败：{}", e);
         }
 
-        // 1. 先做一次性迁移（旧 config.yaml → 各插件目录）
-        let legacy = Self::migrate_legacy_config();
-
-        // 2. 读自己的配置；首次启动（或刚从旧形态迁移过来）用迁移结果兜底
+        // 1. 读自己的配置
         let mut config: HomeConfig = match dir.load::<HomeConfig>() {
             Ok(Some(c)) => c,
             Ok(None) => HomeConfig::default(),
@@ -117,11 +106,6 @@ impl HomePlugin {
                 HomeConfig::default()
             }
         };
-        if let Some(legacy) = legacy {
-            if config.work.is_empty() {
-                config.work = legacy.work;
-            }
-        }
         config.ensure_defaults();
 
         let home = Arc::new(Self::new_with_config(config.clone(), ctx.clone()));
@@ -150,69 +134,6 @@ impl HomePlugin {
         }
 
         home as Arc<dyn Plugin>
-    }
-
-    /// 一次性迁移：把旧的集中式 `config.yaml` 拆到各插件目录
-    ///
-    /// 旧形态把所有插件的配置放在 `<homedir>/config.yaml` 的 `symbio.plugins.<名>`
-    /// 下。迁移把它逐项写到对应插件目录的 `PLUGIN.yml`——**目标已存在则跳过**，
-    /// 绝不覆盖用户的新配置。完成后把 `config.yaml` 改名为 `config.yaml.migrated`
-    /// 留档（不删），因此本方法天然只生效一次。
-    ///
-    /// 返回旧形态里属于 home 自己的 `work` 节点（由调用方决定是否采纳）。
-    fn migrate_legacy_config() -> Option<HomeConfig> {
-        let path = legacy_config_path();
-        if !path.exists() {
-            return None;
-        }
-
-        let parsed: Option<Value> = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|text| serde_yaml_ng::from_str(&text).ok());
-        let Some(symbio) = parsed.as_ref().and_then(|v| v.get("symbio")).cloned() else {
-            plugin_warn!("home", "旧配置无法解析，跳过迁移：{}", path.display());
-            return None;
-        };
-
-        // 1. 每个插件各写自己的 PLUGIN.yml
-        let mut moved = 0usize;
-        if let Some(plugins) = symbio.get("plugins").and_then(Value::as_object) {
-            for (name, value) in plugins {
-                let Value::Object(map) = value.clone() else {
-                    continue;
-                };
-                let dir = PluginDir::of(name);
-                if dir.config_path().exists() {
-                    continue; // 已有新配置：用户已经改过了，不动
-                }
-                match dir.save(&Value::Object(map)) {
-                    Ok(()) => moved += 1,
-                    Err(e) => plugin_warn!("home", "迁移插件配置失败 {name}：{e}"),
-                }
-            }
-        }
-
-        // 2. 旧 config.yaml 改名留档
-        let archived = path.with_extension("yaml.migrated");
-        match std::fs::rename(&path, &archived) {
-            Ok(()) => plugin_info!(
-                "home",
-                "配置迁移完成：{moved} 个插件的配置已写入各自目录，旧文件留档于 {}",
-                archived.display()
-            ),
-            Err(e) => plugin_warn!(
-                "home",
-                "配置迁移完成，但旧文件改名失败（下次启动会重跑迁移）：{e}"
-            ),
-        }
-
-        Some(HomeConfig {
-            work: symbio
-                .get("work")
-                .and_then(Value::as_object)
-                .cloned()
-                .unwrap_or_default(),
-        })
     }
 
     pub fn new(context: Arc<dyn PluginInvokeRequest>) -> Self {
@@ -405,8 +326,12 @@ impl HomePlugin {
             Some(self_weak),
         ));
 
-        // 告知容器它的目录：**系统根**（与 home 同一处），以及系统必备插件清单
-        sub_context.set(PLUGIN_DIR, PluginDir::system(PLUGIN_COMPOSITE));
+        // 告知容器它的目录（顶层时就是系统根），以及系统必备插件清单。
+        // 容器只知道这个目录；它把它当自己的插件根去扫描——不关心它是不是 homedir。
+        sub_context.set(
+            PLUGIN_DIR,
+            PluginDir::at(HomedirRegistry::get(), PLUGIN_COMPOSITE),
+        );
         sub_context.set(
             REQUIRED_PLUGINS,
             SYSTEM_PLUGINS.iter().map(|s| (*s).to_string()).collect(),
@@ -483,8 +408,7 @@ impl HomePlugin {
 
     /// 把内存中的配置**原子落盘**到自己的 `PLUGIN.yml`。
     ///
-    /// 只写**自己**的配置（工作区 / 最近记录）。过去这里还要合并所有子插件推来的
-    /// 配置切片；现在每个插件写自己的文件，本方法只剩「把自己这份存好」。
+    /// 只写**自己**的配置（工作区 / 最近记录）；每个插件各写自己的文件。
     pub async fn flush(&self) -> Result<(), PluginError> {
         self.flush_in(&home_dir()).await
     }

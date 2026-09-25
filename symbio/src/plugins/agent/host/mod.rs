@@ -5,12 +5,11 @@
 //! | 模块 | 职责 |
 //! |---|---|
 //! | [`plugin`] | 插件主体：`traverse` 里的托管（装配子 Agent 插件树）+ 门槛（manifest 校验）+ 指令注入 |
-//! | [`store`] | agent 目录存储：**本插件目录 / 工作区目录**两级、zip 导入（zip-slip 防护）、导出、条目读写 |
+//! | [`store`] | agent 目录存储：**本插件自己的目录**、zip 导入（zip-slip 防护）、导出、条目枚举 |
 //! | [`memory`] | **子智能体**自身的 `AGENTS.md`（`<agentdir>/AGENTS.md`）：落位、地址、注入 |
 //! | [`instruction`] | **系统智能体**自身的 `AGENTS.md`（`{homedir}/AGENTS.md`）：落位、地址、注入 |
-//! | [`config`] | 插件配置（条目写入上限 + 智能体指令的两道闸门，见 §「闸门」） |
+//! | [`config`] | 插件配置（智能体自身 `AGENTS.md` 的写入与注入两道闸门，见 §「闸门」） |
 //! | [`manifest`] | `manifest.yaml` 的读取与接入校验（§5 / §10） |
-//! | [`migrate`] | `oab/v1` 目录 → `agent-dir/v2` 的**就地幂等迁移**（§12） |
 //! | [`scope`] | `SubAgentVisitor` 代理层：把子树的注册加 `agent/<id>/` 前缀并进系统树（§8.2） |
 //! | [`subagent`] | `agent_run`（子智能体委托）能力 |
 //! | [`detail`] | agent 概览 / 详情表单的呈现定义 |
@@ -38,7 +37,6 @@
 //!
 //! Agent 目录里所有写入都由本插件执行，因此闸门取值只有一个来源（[`config`]）：
 //!
-//! - `item_max_bytes`：agent 目录内条目文件（提示词 / 技能 / MCP）的写入上限；
 //! - `memory_max_bytes` / `memory_inject_max_bytes`：智能体自身的 `AGENTS.md`
 //!   的写入与注入上限——**两个作用域共用一对**（它们是同一类东西，只是作用域不同）。
 //!
@@ -49,7 +47,6 @@ mod detail;
 pub mod instruction;
 pub mod manifest;
 pub mod memory;
-pub mod migrate;
 pub mod plugin;
 pub mod scope;
 pub mod store;

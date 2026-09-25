@@ -24,9 +24,8 @@
 //!   …
 //! ```
 //!
-//! 插件根**不额外嵌套一层**（早先是 `<homedir>/plugins/<插件>`）：那一层既不承载
-//! 语义、又让每个插件的路径深一段，而系统根下本来就是「一个插件一个目录」的扁平
-//! 结构，再加一层纯属重复。
+//! 插件根**不额外嵌套一层**：容器扫描的那一层既不承载语义、又让每个插件的路径深
+//! 一段，而装配根下本来就是「一个插件一个目录」的扁平结构，再加一层纯属重复。
 //!
 //! 这同时消掉一个自举环：若 `home` 住在 `<homedir>/home`，容器扫描插件根时会把它
 //! 当成普通插件再构造一次，而那个 `home` 又会构造容器……系统级插件不参与扫描。
@@ -36,10 +35,8 @@
 //! 插件**不知道、也不该知道**自己被放在哪。目录一律由容器经 `PLUGIN_DIR` 告知
 //! （[`dir_from_ctx`]），插件只持有 [`PluginDir`] 并向下传：
 //!
-//! - ❌ 不要 `HomedirRegistry::get().join("plugins").join(PLUGIN_X)`——按插件名反推
-//!   落位等于把「装配决策」写死进插件，插件挪个位置就全错；
-//! - ❌ 不要 [`crate::providers::vdfs_service::entry::category_dir`]——同上，它只留给
-//!   读旧版历史落位的数据迁移和测试；
+//! - ❌ 不要按插件名反推落位（`HomedirRegistry::get().join(PLUGIN_X)` 或等价的
+//!   「类别根 + 类别名」拼法）——那等于把「装配决策」写死进插件，插件挪个位置就全错；
 //! - ✅ 实例方法里用 `self.dir`；按 id 派生路径的**自由函数**则让调用方把根当参数
 //!   传进来（见 `plugins::session::paths`，`root` 是首个入参）。
 //!
@@ -75,11 +72,10 @@
 //! |---|---|
 //! | 容器（`composite`） | 发现插件目录、构造插件、把目录告知插件 |
 //! | 插件自己 | 读写自己的 `PLUGIN.yml` |
-//! | 父插件 | **什么都不负责**——不再持有 / 合并 / 转发子插件配置 |
+//! | 父插件 | **什么都不负责**——不持有 / 不合并 / 不转发子插件配置 |
 //!
-//! 过去配置集中在 `home` 的 `config.yaml`（`symbio.plugins.<名>`），父插件必须
-//! 认识「合并规则」、容器必须认识「分发规则」，而插件自己的配置却不在自己的目录里。
-//! 现在配置回到**拥有者**手上：插件目录里的一个文件，谁写谁读。
+//! 配置**回到拥有者手上**：插件目录里的一个文件，谁写谁读。父插件不必认识「合并
+//! 规则」，容器也不必认识「分发规则」。
 //!
 //! ## 与 VDFS 的关系
 //!
@@ -88,7 +84,6 @@
 //! 不向上推任何东西——「写完之后还要做什么」（重启监听 / 重建缓存）留在插件
 //! 自己的 `write` 里。
 
-use crate::symbio_core::homedir::HomedirRegistry;
 use crate::symbio_core::schemas::detail::DetailDefinition;
 use crate::symbio_core::vdfs::host::notify_change;
 use crate::symbio_core::{
@@ -103,10 +98,12 @@ use tokio::sync::RwLock;
 /// 插件配置文件名（插件目录下）
 pub const PLUGIN_FILE: &str = "PLUGIN.yml";
 
-// 注：早先这里有常量 `PLUGINS_DIR = "plugins"`，插件落位是 `<homedir>/plugins/<插件>`。
-// 那一层不承载语义（既非挂载点、也不参与寻址），只是把每个插件的路径都加深一段，
-// 现已去掉——插件直接并列在系统根下。**「插件根 = 哪一层」只有本文件这一处定义**：
-// 依赖方一律走 [`plugins_root`] / [`dir_of`]，不要自己 `join` 目录段。
+// 一个插件 = 一个目录：装配根下**不额外嵌套一层**（那一层既不承载语义、也不参与
+// 寻址，只把每个插件的路径都加深一段）。
+//
+// ⚠️ **core 不认识任何「系统根」**：插件的目录一律由父插件经 `PLUGIN_DIR` 告知
+//（[`dir_from_ctx`]）。这里**没有** `plugins_root` / `dir_of` 这类按插件名反推落位
+// 的函数——它们会读全局 homedir，在子智能体里必然指错作用域（homedir 归 `home` 独有）。
 
 // ==================== 保留键（单一清单见 `RESERVED_KEYS`） ====================
 //
@@ -174,7 +171,7 @@ pub const KEY_GRANTS: &str = "plugin_grants";
 /// 全部保留键 —— **单一清单**
 ///
 /// [`PluginDir::load`] 遍历它**剥离**（这些键不属于插件配置）；`save` /
-/// `set_enabled` / `remove_keys` 遍历它**保留**（写配置不得冲掉装配方的状态）。
+/// `set_enabled` 遍历它**保留**（写配置不得冲掉装配方的状态）。
 /// 新增一个保留键只需加进这里 + 定义常量。
 ///
 /// 注意 [`KEY_REQUIRED`] / [`KEY_CAN_DISABLE`] **不在**此列：它们只注入表单模型、
@@ -211,30 +208,40 @@ pub const KEY_REQUIRED: &str = "plugin_required";
 /// 投影键：是否允许停用（= 不在 [`crate::symbio_core::UNDISABLABLE_PLUGINS`] 里）
 pub const KEY_CAN_DISABLE: &str = "plugin_can_disable";
 
-/// 插件根 = **系统根本身**：一层目录 = 一个插件
-///
-/// 每次现取（不缓存）——`home/reload` 切换 homedir 后必须立刻生效。
-pub fn plugins_root() -> PathBuf {
-    HomedirRegistry::get()
-}
-
-/// 某插件的目录：`<homedir>/<插件>`
-pub fn dir_of(plugin: &str) -> PathBuf {
-    plugins_root().join(plugin)
-}
-
-/// 某插件的配置文件：`<homedir>/<插件>/PLUGIN.yml`
-pub fn config_file_of(plugin: &str) -> PathBuf {
-    dir_of(plugin).join(PLUGIN_FILE)
-}
-
 /// 从插件上下文读自己的目录（装配方经 [`PLUGIN_DIR`](crate::symbio_core::PLUGIN_DIR) 告知）
 ///
-/// 插件构造时的标准入口：`PLUGIN_DIR` 缺省（测试 / 未装配）退回常规落位
-/// `<插件根>/<插件>`——与装配态一致，插件自己不必知道两种情形。
+/// 插件构造时的**标准入口**：目录由父插件传下，插件不查任何全局落位。
+///
+/// **没有 `PLUGIN_DIR` 是装配缺陷**（调用方拿的是请求级 ctx 而非装配 ctx，
+/// 或父插件没传），因此这里**不回退**到任何「常规位置」——回退必然读全局
+/// homedir，在子智能体里指错作用域。运行时若需要自己的目录，用插件持有
+/// 的 `self.dir`（构造时经本函数取得），不要拿请求 ctx 再取一次。
 pub fn dir_from_ctx(ctx: &dyn crate::symbio_core::PluginInvokeRequest, plugin: &str) -> PluginDir {
     use crate::symbio_core::{PluginInvokeRequestExt, PLUGIN_DIR};
-    ctx.get(PLUGIN_DIR).unwrap_or_else(|| PluginDir::of(plugin))
+    match ctx.get(PLUGIN_DIR) {
+        Some(dir) => dir,
+        None => panic!(
+            "插件 `{plugin}` 缺少 PLUGIN_DIR：目录必须由父插件经 PLUGIN_DIR 告知\
+             （运行时请用插件持有的 self.dir，不要拿请求 ctx 再取）"
+        ),
+    }
+}
+
+/// 展开 `~` 前缀到用户主目录
+///
+/// **纯函数**：只读操作系统用户主目录（`dirs::home_dir`），不读任何全局「系统根」。
+/// 因此它可以留在 core 供各插件共用，而 `homedir` 注册表不能。
+pub fn expand_tilde_path(p: &Path) -> PathBuf {
+    let s = p.to_string_lossy();
+    if s == "~" {
+        return dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    }
+    if let Some(stripped) = s.strip_prefix("~/").or_else(|| s.strip_prefix("~\\")) {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(stripped);
+        }
+    }
+    PathBuf::from(s.as_ref())
 }
 
 // ==================== 插件身份 ====================
@@ -274,17 +281,10 @@ pub struct PluginDir {
 }
 
 impl PluginDir {
-    /// 常规情形：实例名 = 工厂 id = 目录名
-    pub fn of(plugin: impl Into<String>) -> Self {
-        let plugin = plugin.into();
-        Self {
-            dir: dir_of(&plugin),
-            name: plugin.clone(),
-            provider: plugin,
-        }
-    }
-
-    /// 显式指定目录（非常规落位 / 测试用）
+    /// 显式指定目录（唯一构造入口：目录一律由调用方给出）
+    ///
+    /// 目录来自父插件的 `PLUGIN_DIR`（[`dir_from_ctx`]）或测试构造里的临时目录；
+    /// core 不提供「按插件名反推落位」的 `of`——那会读全局 homedir。
     pub fn at(dir: impl Into<PathBuf>, name: impl Into<String>) -> Self {
         let name = name.into();
         Self {
@@ -292,15 +292,6 @@ impl PluginDir {
             provider: name.clone(),
             name,
         }
-    }
-
-    /// **系统级插件**的目录 = 系统根 `<homedir>` 本身
-    ///
-    /// `home` 与它构造的容器 `composite` 走这一条：系统根下的 `PLUGIN.yml` 是
-    /// `home` 的配置，容器只把系统根当**锚点**（它管辖的插件根就是系统根本身），
-    /// 容器自身没有配置、不写 manifest。
-    pub fn system(plugin: impl Into<String>) -> Self {
-        Self::at(HomedirRegistry::get(), plugin)
     }
 
     /// 把**本目录当成系统根**：插件根就是它自己（`<本目录>/<插件>`）
@@ -533,27 +524,6 @@ impl PluginDir {
             Value::String(self.provider.clone()),
         );
         map.insert(KEY_NAME.to_string(), Value::String(self.name.clone()));
-        self.write_map(&map)
-    }
-
-    /// 从配置文件里**摘掉**若干键（遗留字段清理）
-    ///
-    /// 一次性迁移用：旧形态把资源明细混在配置里（如 `model` 的 `providers`、
-    /// `mcp` 的 `servers`）。插件把它们迁成资源之后，这些键就不该再留在配置
-    /// 文件里——否则同一个事实有两份来源。键不存在则不动文件。
-    pub fn remove_keys(&self, keys: &[&str]) -> Result<(), String> {
-        let Some(mut map) = self.read_manifest()? else {
-            return Ok(());
-        };
-        let before = map.len();
-        for key in keys {
-            map.remove(*key);
-        }
-        if map.len() == before {
-            return Ok(());
-        }
-        // 保留键恒在（手写的配置文件可能漏了它们）
-        self.carry_over_reserved(&mut map);
         self.write_map(&map)
     }
 

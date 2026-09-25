@@ -12,28 +12,26 @@ use crate::symbio_core::{
     VDFS_PARENT_ADDR,
 };
 
-/// 验证 session 存储目录**只**从 HomedirRegistry 派生，不依赖 config；
-/// 且它就是宿主层的资源类别根（`category_dir(PLUGIN_SESSION)`）——
-/// 会话因此不再手拼一份 类别根布局。
+/// 会话存储根**只**来自构造时父插件经 `PLUGIN_DIR` 告知的插件目录——
+/// **不读全局 homedir**（那在子智能体里会指错作用域）。
 #[test]
-fn test_session_storage_dir_from_homedir() {
-    let dir = SessionPlugin::session_storage_dir();
-    let expected = crate::symbio_core::HomedirRegistry::get().join("session");
-    assert_eq!(dir, expected, "session_storage_dir 必须等于 <本插件目录>");
-    assert_eq!(
-        dir,
-        crate::providers::vdfs_service::entry::category_dir(PLUGIN_SESSION),
-        "会话存储根必须与 VDFS 资源类别根同一条构造式"
+fn test_session_storage_dir_comes_from_plugin_dir() {
+    let root = std::env::temp_dir().join("symbio-test-session-storage");
+    let plugin = SessionPlugin::new(
+        None,
+        SessionConfig::default(),
+        PluginDir::at(&root, PLUGIN_SESSION),
     );
+    assert_eq!(plugin.storage_dir(), root, "存储根必须等于被传入的插件目录");
     assert!(
-        dir.is_absolute(),
-        "session_storage_dir 必须是绝对路径: {}",
-        dir.display()
+        plugin.storage_dir().is_absolute(),
+        "必须是绝对路径: {}",
+        plugin.storage_dir().display()
     );
 }
 
 /// 验证 SessionConfig 不再包含已删除的死字段：
-/// - `storage_dir`（存储根由 HomedirRegistry 统一决定）
+/// - `storage_dir`（存储根 = 本插件自己的目录，经 `PLUGIN_DIR` 告知）
 /// - `session_id`（零消费者；id 由会话目录名决定，配置内自指冗余）
 #[test]
 fn test_session_config_has_no_dead_fields() {

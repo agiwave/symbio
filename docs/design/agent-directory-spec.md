@@ -346,25 +346,6 @@ Agent，不属于「一个 Agent 会什么」。
 
 ---
 
-## 12. 从 OAB v1 迁移
-
-| v1 | v2 | 说明 |
-|---|---|---|
-| `prompts/<n>.md` | 根 `AGENTS.md` | 多份合并为一份；`priority` 不再需要 |
-| `skills/<n>/SKILL.md` | `skill/` 插件目录 | 技能由宿主的技能系统接管 |
-| `mcps/<n>.yaml` | `mcp/` 插件目录 | MCP 声明由宿主的 MCP 客户端接管 |
-| `manifest.yaml` | `manifest.yaml` | `spec` **与** `requires.spec` 一并升到 `agent-dir/v2`，其余字段不变 |
-| `assets/` | 保留 | 不变 |
-
-宿主**可以**提供一次性迁移：把 v1 bundle 的三个约定目录转成对应的插件目录，
-`prompts/` 各片段按原 `priority` 升序拼接后写入根 `AGENTS.md`。
-
-> ⚠️ `requires.spec` **必须**与 `spec` 同行升级：它是 §10 的接入门槛，v1 目录写着
-> `^1`。只改 `spec` 会产出「格式是 v2、门槛仍要 v1」的自相矛盾清单——迁出来的
-> 目录会被 §10 拒绝，迁移等于白做。
-
----
-
 ## 附录 A：symbio 剖面
 
 > 本附录是**信息性**的，记录 symbio 作为宿主的具体做法，不构成规范要求。
@@ -400,11 +381,9 @@ Agent，不属于「一个 Agent 会什么」。
 装配子树、把整包内容暴露成 VDFS。子树的注册仍经作用域 visitor 加 `agent/<id>/`
 前缀（A.4），因此与系统侧不冲突。
 
-⚠️ **已废弃的做法**：早期为了让子树里的 `work` 实例拥有 `<agent dir>/AGENTS.md`，
-宿主动把子树的 `WORKDIR` 覆写成 Agent 目录。那是错的——`work` 的作用域语义是
+⚠️ 子树的 `WORKDIR` **不得**被覆写成 Agent 目录。`work` 的作用域语义是
 `{workdir}`，覆写使它名实不符，并与系统侧那个实例读同一份工作区文件、注入两次。
-子树现在**继承**父会话的 `WORKDIR`。旧装配留下的 `<agent dir>/work/PLUGIN.yml`
-会被改名成 `.disabled`（= 卸载，幂等且可逆）。
+子树**继承**父会话的 `WORKDIR`。
 
 ### A.4 并集的命名空间隔离
 

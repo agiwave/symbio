@@ -13,7 +13,7 @@
 use crate::symbio_core::{
     build_tool_message, emit_message, emit_state, short_id, TurnToolCallInfo,
 };
-use crate::symbio_core::{dir_from_ctx, PLUGIN_SESSION};
+
 use crate::symbio_core::{
     schemas::{
         hook::{HookEvent, HookOutput},
@@ -762,6 +762,9 @@ pub async fn process_tool_calls_async(
     abort: &ExecAbortSignal,
     ctx: Arc<dyn PluginInvokeRequest>,
     context_messages: &[ChatMessage],
+    // `session_dir` = **本插件自己的目录**（来自 orchestrator）：工具结果存档落在这里。
+    // 不从请求上下文反推——请求上下文不带 `PLUGIN_DIR`，子智能体下会指到父作用域。
+    session_dir: &std::path::Path,
 ) -> (Vec<ChatMessage>, Vec<ChatMessage>) {
     let mut tool_messages = Vec::new();
     // 父 ToolCall 终态——**完整消息**（发射端从权威转写取副本应用终态）。
@@ -983,13 +986,12 @@ pub async fn process_tool_calls_async(
             // （对应"单次工具调用内容太长"的压缩诉求；物理字节上限不再是唯一防线）。
             // 传入 session_id：存档跟随会话目录（tool_archives/），历史可取回不被 OS 清理。
             let guard_session = ctx.get(crate::symbio_core::SESSION_ID).unwrap_or_default();
-            // 会话存储根 = 本插件自己的目录（装配态由父插件经 `PLUGIN_DIR` 告知）
-            let storage_root = dir_from_ctx(&*ctx, PLUGIN_SESSION);
+            // 会话存储根 = 本插件自己的目录（由调用方从 orchestrator 传入）
             let guarded = guard_tool_result(
                 &final_res,
                 DEFAULT_TOOL_RESULT_TOKEN_CAP,
                 Some(&guard_session),
-                storage_root.dir(),
+                session_dir,
             );
             let mut tool_msg =
                 build_tool_message(&id, &guarded.text, Some(success), Some(result_msg_id));

@@ -55,21 +55,14 @@ pub struct McpPlugin {
 impl McpPlugin {
     /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
-        // 自己的目录由容器经 `PLUGIN_DIR` 告知；旧形态残留的 `servers` 明细可能还在
-        // 那里的 `PLUGIN.yml` 里，由 `load_from_storage` 搬成资源
+        // 自己的目录由容器经 `PLUGIN_DIR` 告知。本插件**没有跨条目配置**——配置
+        // 就是资源树（`<本插件目录>/<name>/server.json`），故不从 `PLUGIN.yml` 读
+        // 任何东西，`servers` 由下面的异步加载从磁盘灌入。
         let dir = dir_from_ctx(&*ctx, PLUGIN_MCP);
-        let config: McpConfig = match dir.load::<McpConfig>() {
-            Ok(Some(c)) => c,
-            Ok(None) => McpConfig::default(),
-            Err(e) => {
-                crate::plugin_warn!("mcp", "读取自身配置失败，改用默认值：{e}");
-                McpConfig::default()
-            }
-        };
 
-        let plugin = Arc::new(McpPlugin::new(config, dir));
+        let plugin = Arc::new(McpPlugin::new(McpConfig::default(), dir));
 
-        // 启动后异步预热：从存储加载（并触发首启动数据迁移）。
+        // 启动后异步预热：从存储加载。
         //
         // 走 `ensure_loaded` 而非直调 `load_from_storage`：两者是**同一份工作的两条入口**，
         // 直接调用会各加载一次——两次磁盘读、两条「加载了 N 个 MCP Server」（本插件
@@ -117,12 +110,9 @@ impl McpPlugin {
     }
 
     /// 异步加载：从 `<本插件目录>/` 读取所有 MCP Server
-    ///
-    /// - 若存储为空，则触发首启动迁移（从 ctx.config()）
     pub async fn load_from_storage(&self, _ctx: &Arc<dyn PluginInvokeRequest>) {
         let store = self.store();
 
-        // 1. 存储中的所有 MCP Server
         let entries = match store.entries().await {
             Ok(v) => v,
             Err(_e) => {
@@ -131,13 +121,6 @@ impl McpPlugin {
             }
         };
 
-        // 2. 如果存储为空，触发首启动迁移
-        if entries.is_empty() {
-            self.migrate_from_legacy_config(&store).await;
-            return;
-        }
-
-        // 3. 加载存储内容
         let mut new_servers = std::collections::HashMap::new();
         for e in &entries {
             match e
@@ -172,46 +155,16 @@ impl McpPlugin {
             *guard = true;
         }
     }
-
-    /// 首启动迁移：把配置文件里残留的旧 Server 明细迁到存储
-    ///
-    /// 旧形态把 Server 整包存在配置里（`PLUGIN.yml` 的 `servers` 键）。迁移把它们
-    /// 写成 `<本插件目录>/<id>/server.json`，随后把配置文件里这些遗留键摘掉——
-    /// 本插件**没有跨条目配置**（它的配置就是资源树），配置文件只剩身份字段。
-    async fn migrate_from_legacy_config(&self, store: &DirVdfs) {
-        let current = self.config.read().await.clone();
-        if current.servers.is_empty() {
-            return;
-        }
-
-        crate::plugin_info!(
-            "mcp",
-            "检测到旧 config 中的 MCP Servers，开始迁移到 <本插件目录>/"
-        );
-
-        for (id, s) in &current.servers {
-            let content = match serde_json::to_string_pretty(s) {
-                Ok(s) => s,
-                Err(_e) => {
-                    crate::plugin_error!("mcp", "序列化 server {id} 失败");
-                    continue;
-                }
-            };
-            if let Err(_e) = store.write_text(id, &content).await {
-                crate::plugin_error!("mcp", "迁移 server {id} 失败");
-            }
-        }
-
-        // 明细已是资源：配置文件里不该再留一份（`_storage` 是更早形态的遗留键）
-        if let Err(e) = self.dir.remove_keys(&["servers", "_storage"]) {
-            crate::plugin_warn!("mcp", "清理配置文件中的遗留字段失败：{e}");
-        }
-    }
 }
 
+/// 无装配上下文的实例（仅测试）。目录给临时目录——**不读全局系统根**。
+#[cfg(test)]
 impl Default for McpPlugin {
     fn default() -> Self {
-        Self::new(McpConfig::default(), PluginDir::of(PLUGIN_MCP))
+        Self::new(
+            McpConfig::default(),
+            PluginDir::at(std::env::temp_dir().join("symbio-test/mcp"), PLUGIN_MCP),
+        )
     }
 }
 

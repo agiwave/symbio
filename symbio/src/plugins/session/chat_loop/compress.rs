@@ -5,7 +5,6 @@
 //! "怎么压"只有一个实现。
 
 use super::*;
-use crate::symbio_core::{dir_from_ctx, PLUGIN_SESSION};
 
 /// 被动自动压缩（L1）：阈值判定 → 切分 → 收益护栏 → 交执行内核。
 ///
@@ -211,12 +210,13 @@ async fn compress_snapshot_inner(
     // 可回溯原则：压缩前把完整历史转存为 transcript，路径记入快照 meta。
     // 若跳过此步直接 replace_messages，被压掉的历史在物理层"凭空消失"，
     // 旧存档文件成为孤儿，事后无法审计。
-    // 会话存储根 = 本插件自己的目录（装配态由父插件经 `PLUGIN_DIR` 告知）
-    let storage_root = dir_from_ctx(&**ctx, PLUGIN_SESSION);
+    // 会话存储根 = **本插件自己的目录**（装配期由父插件经 `PLUGIN_DIR` 告知，
+    // 已落在 orchestrator 上）——不从请求上下文反推，也不读全局系统根。
+    let storage_root = orchestrator.session_dir.dir();
     let transcript_path = save_transcript_archive(
         &original_messages,
         context.session.session_id(),
-        storage_root.dir(),
+        storage_root,
     );
 
     // ── 输入超限预判（跳过注定失败的巨型请求，**但不裁剪历史**）──────────

@@ -21,9 +21,10 @@
 //! 不冲突（§8.2）。
 //!
 //! 能力（技能 / MCP / …）由 Agent 目录里的插件实例自己解释，**复用宿主已有的对应系统**
-//! （§3.2 第 2 条）——这正是 v1 的失败之处：那时宿主为 agent 目录再写一遍技能与 MCP
-//! 的解析，两条链长期不同步。v2 的子树因此挂**与父 Agent 同构的默认插件集**（见
-//! [`crate::symbio_core::SUB_AGENT_PLUGINS`]）：仅去掉系统级单槽 `vdfs`（VDFS 根归
+//! （§3.2 第 2 条）——宿主替 agent 目录再写一遍技能与 MCP 的解析，两条链必然长期不同步。
+//! 子树因此挂**与父 Agent 同构的默认插件集**（见
+//! [`crate::symbio_core::SUB_AGENT_PLUGINS`]，与系统侧是**同一份清单**）：子树会构造
+//! 自己的 `vdfs` 实例，但其注册经 `SubAgentVisitor` 在每一层丢弃（VDFS 根单槽归
 //! 系统 Agent 独占），其余（含 `agent` 自身、`model`、`plugin_manager`、`work`）全部与
 //! 父树一致——UI 资源入口因此对齐。`model` 在子树里有实例：子智能体有自己的模型
 //! 服务（子树会话以子容器为 parent 收集，自行解析）；父会话收集期该注册才被
@@ -59,14 +60,6 @@ fn config_definition() -> DetailDefinition {
         "智能体设置",
         vec![
             DetailField::number(
-                "item_max_bytes",
-                "条目写入上限（字节）",
-                "agent 目录内单个条目文件（提示词 / 技能 / MCP）的写入字节上限，超出会被拒绝",
-                1.0,
-                1_048_576.0,
-                json!(d.item_max_bytes),
-            ),
-            DetailField::number(
                 "memory_max_bytes",
                 "AGENTS.md 写入上限（字节）",
                 "智能体自身的 AGENTS.md（系统态与子智能体态共用一个数）的写入字节上限，超出会被拒绝",
@@ -86,25 +79,12 @@ fn config_definition() -> DetailDefinition {
     )
 }
 
-/// v2 规范标识（见 `docs/design/agent-directory-spec.md`）
+/// 规范标识（见 `docs/design/agent-directory-spec.md`）
 ///
-/// 子 Agent 目录只有在 `manifest.yaml` 声明了这个 `spec` 时才按 v2 装配（挂
-/// composite 插件树）。声明 `oab/v1` 的旧目录走 legacy 装配路径——两者按 manifest
-/// 分流，迁移只需改写 manifest 与目录（规范 §12）。
+/// 子 Agent 目录只有在 `manifest.yaml` 声明了这个 `spec`、且通过 §10 版本门槛时
+/// 才按 v2 装配（挂 composite 插件树）。**这是唯一的接入判据**——不是它的目录既
+/// 列不出来也挂不上（见 [`super::store::AgentDirStore::load_record`]）。
 pub(crate) const SPEC_V2: &str = "agent-dir/v2";
-
-/// v1 的规范标识（OAB 约定目录装配形态，见 [`super::migrate`]）
-pub(crate) const SPEC_V1: &str = "oab/v1";
-
-/// 读 Agent 目录下 `manifest.yaml` 的 `spec` 字段（读不到 / 解析不了 = `None`）
-fn manifest_spec(dir: &std::path::Path) -> Option<String> {
-    let text = std::fs::read_to_string(dir.join("manifest.yaml")).ok()?;
-    let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&text).ok()?;
-    value
-        .get("spec")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-}
 
 /// Agent 插件主结构（宿主接入层）。
 pub struct AgentPlugin {
@@ -144,14 +124,15 @@ impl AgentPlugin {
         }) as Arc<dyn Plugin>
     }
 
-    /// 无装配上下文的实例（测试 / 默认构造）：配置落常规位置，读写仍自洽。
+    /// 无装配上下文的实例（仅测试）：目录给临时目录——**不读全局系统根**。
+    #[cfg(test)]
     pub fn new() -> Self {
         Self {
             sub_agents: tokio::sync::RwLock::new(std::collections::HashMap::new()),
             router: None,
             config: Arc::new(RwLock::new(AgentConfig::default())),
             config_file: PluginConfigFile::new(
-                PluginDir::of(PLUGIN_AGENT),
+                PluginDir::at(std::env::temp_dir().join("symbio-test/agent"), PLUGIN_AGENT),
                 "智能体设置",
                 config_definition(),
             ),
@@ -169,11 +150,6 @@ impl AgentPlugin {
             config: Arc::new(RwLock::new(AgentConfig::default())),
             config_file: PluginConfigFile::new(dir, "智能体设置", config_definition()),
         }
-    }
-
-    /// 生效的条目写入上限（**写入闸门的唯一取值点**）
-    pub(crate) async fn item_max_bytes(&self) -> usize {
-        self.config.read().await.effective_item_max_bytes()
     }
 
     /// 依 agent 目录记录构造记忆门面（**子智能体态记忆的唯一构造点**）。
@@ -219,8 +195,8 @@ impl AgentPlugin {
     /// **惰性**：只在会话真的绑定它时才构造。全量预建会连带启动每个子 Agent 的
     /// MCP server，子 Agent 一多就撑不住（规范 §9.1）。
     ///
-    /// 返回 `None` = 该 id 不是 v2 子 Agent（目录不存在 / manifest 不是
-    /// `agent-dir/v2`）——调用方据此回退到 legacy 约定目录装配。
+    /// 返回 `None` = 该 id 不是可接入的 Agent（目录不存在 / manifest 缺失 /
+    /// 未过 §10 版本门槛）——列表与挂载共用同一判据，调用方无需区分这几种情况。
     pub(crate) async fn sub_agent(
         &self,
         id: &str,
@@ -235,24 +211,6 @@ impl AgentPlugin {
         let store = AgentDirStore::new(self.config_file.dir().dir());
         let record = store.get(id)?;
         let dir = record.dir.clone();
-
-        // v1 目录 → 就地迁移成 v2 后再装配。迁移是**幂等**的，且失败不阻断：
-        // 返回 `None` 让调用方拒接（§10），宁可显式报错，也不要在半迁移状态下继续。
-        if manifest_spec(&dir).as_deref() == Some(SPEC_V1) {
-            match super::migrate::migrate_v1_to_v2(&dir) {
-                Ok(true) => {
-                    crate::plugin_info!("agent", "已把 `{}` 从 oab/v1 迁移为 agent-dir/v2", id)
-                }
-                Ok(false) => {}
-                Err(e) => {
-                    crate::plugin_warn!("agent", "`{}` 的 v1→v2 迁移失败：{e}", id)
-                }
-            }
-        }
-
-        if manifest_spec(&dir).as_deref() != Some(SPEC_V2) {
-            return None;
-        }
 
         // 与 `home` 造 `worker` 同形：把目录（子 Agent 的根）与必需插件清单告知
         // 容器，其余交给 composite 扫描装配——子 Agent 与系统 Agent 因此结构相同。
@@ -279,9 +237,9 @@ impl AgentPlugin {
     ///
     /// ## 跨作用域必须改写上下文（与 `VDFS_PARENT_ADDR` 同理）
     ///
-    /// ⚠️ **不再改指 `WORKDIR`**：v2 早期为了让子树里的 `work` 拥有 `<agentdir>/AGENTS.md`，
-    /// 这里把 `WORKDIR` 覆写成了 Agent 目录——那是错的（`work` 只负责工作区信息，见
-    /// [`SUB_AGENT_PLUGINS`]）。子树的 `WORKDIR` 现在与父会话一致（继承）。
+    /// ⚠️ **不得改指 `WORKDIR`**：子树里的 `work` 只负责工作区信息（见
+    /// [`SUB_AGENT_PLUGINS`]），改指 Agent 目录会让它去解释 `<agentdir>/AGENTS.md`。
+    /// 子树的 `WORKDIR` 与父会话一致（继承）。
     ///
     /// ⚠️ **`AGENT_ID` 必须清空**：它是**会话级「选中的智能体」**，只由**拥有该 id 的
     /// 那个 store 的实例**解析（系统根实例的 store = `{homedir}/agent`）。子树里的
@@ -439,6 +397,7 @@ fn agent_field(agent_dirs: &[crate::plugins::agent::host::store::AgentDirRecord]
     }
 }
 
+#[cfg(test)]
 impl Default for AgentPlugin {
     fn default() -> Self {
         Self::new()
@@ -518,14 +477,13 @@ impl Plugin for AgentPlugin {
         // ── 已选择智能体 → 装配它的能力 ──
         if let Some(agent_id) = agent_id {
             match self.sub_agent(&agent_id, &ctx).await {
-                // v2：子 Agent 是一棵 composite 插件树，能力经代理层并集进来
+                // 子 Agent 是一棵 composite 插件树，能力经代理层并集进来
                 Some(tree) => {
                     self.forward_to_sub_agent(&tree, &agent_id, &ctx, &tool_visitor)
                         .await
                 }
                 // §10：不匹配必须拒绝接入，且不得静默降级为「无人格的通用助手」。
-                // 迁移（v1 → v2）已在 [`Self::sub_agent`] 里试过；走到这里说明目录
-                // 根本没有合规 manifest，错误信息写明双侧版本。
+                // 走到这里说明目录没有可接入的 manifest，错误信息写明双侧版本。
                 None => {
                     let dir = self.config_file.dir().dir().join(&agent_id);
                     let reason = match manifest::load(&dir) {

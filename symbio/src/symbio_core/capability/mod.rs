@@ -4,7 +4,7 @@ mod option;
 mod tool_name;
 mod tools;
 
-pub use error::*;
+pub use error::{init_error_bucket, report_error, take_errors, CapabilityError, CAPABILITY_ERRORS};
 
 // 域内子模块私有，公开面在此显式重导出
 pub use configurable::{
@@ -35,16 +35,6 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityCategory {
-    /// 记忆管理：save / retrieve / list 等
-    Memory,
-    /// 智能推理：causal / logical / analogical 等
-    Reasoning,
-    /// 目标规划：decompose / generate / track
-    Planning,
-    /// 元认知：reflect / evaluate_decision
-    Metacognition,
-    /// 学习优化：extract / merge / decay
-    Learning,
     /// 智能体协作：chat / handoff
     Chat,
     /// 核心能力：能力自身管理（UnifiedCapabilityTool）
@@ -71,11 +61,6 @@ impl CapabilityCategory {
     /// 集中维护一处，避免散落硬编码。
     pub fn default_display(&self) -> &'static str {
         match self {
-            Self::Memory => "记忆管理",
-            Self::Reasoning => "智能推理",
-            Self::Planning => "目标规划",
-            Self::Metacognition => "元认知",
-            Self::Learning => "学习优化",
             Self::Chat => "智能体协作",
             Self::Core => "核心能力",
             Self::Skill => "技能调用",

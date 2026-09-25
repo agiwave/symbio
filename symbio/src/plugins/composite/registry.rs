@@ -43,10 +43,10 @@
 //! 它的配置一起停下**，而不是把它留在树里只关掉行为。
 
 use crate::symbio_core::{
-    create_object, creator_ids, has_creator, lock_read, lock_write, plugins_root, Plugin,
-    PluginDir, PluginEntry, PluginInvokeRequest, PluginInvokeRequestExt, PluginMeta,
-    PluginSimpleRequest, PluginStopReason, KEY_PROVIDER, PLUGIN_DIR, PLUGIN_FILE, REQUIRED_PLUGINS,
-    SYSTEM_LEVEL_PROVIDERS, UNDISABLABLE_PLUGINS,
+    create_object, creator_ids, has_creator, lock_read, lock_write, Plugin, PluginDir, PluginEntry,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginMeta, PluginSimpleRequest, PluginStopReason,
+    KEY_PROVIDER, PLUGIN_DIR, PLUGIN_FILE, REQUIRED_PLUGINS, SYSTEM_LEVEL_PROVIDERS,
+    UNDISABLABLE_PLUGINS,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -75,10 +75,12 @@ pub struct PluginRegistry {
 impl PluginRegistry {
     /// 装配期构造：插件根 / 必需清单 / 构造上下文都来自 ctx
     pub fn new(ctx: Arc<dyn PluginInvokeRequest>, parent: Weak<dyn Plugin>) -> Self {
+        // 容器只知道**自己的目录**（父插件经 `PLUGIN_DIR` 告知）；顶层时它恰好是
+        // homedir，非顶层（子智能体）则不是。**没有全局回退**——容器不读 homedir。
         let root = ctx
             .get(PLUGIN_DIR)
             .map(|d| d.as_plugins_root())
-            .unwrap_or_else(plugins_root);
+            .expect("composite 需要父插件经 PLUGIN_DIR 告知自己的目录");
         let required = ctx.get(REQUIRED_PLUGINS).unwrap_or_default();
         Self {
             instances: Arc::new(RwLock::new(HashMap::new())),

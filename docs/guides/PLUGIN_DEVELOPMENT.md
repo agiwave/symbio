@@ -112,11 +112,10 @@ symbio::submit_object_creator!("my_plugin", MyPlugin::build, dyn Plugin);
 并把该目录经 ctx 键 `PLUGIN_DIR` 告知插件。
 
 > ⚠️ **插件不要推导自己的目录。** 目录一律用 `PLUGIN_DIR` 给的 `PluginDir`
-> （`dir_from_ctx(ctx, PLUGIN_X)` / `self.dir`），**不要** `HomedirRegistry::get()`
-> 再 `join("plugins")`、也不要 `entry::category_dir` 按插件名反推——那等于把「装配
-> 决策」写死进插件，挪个位置就全错。按 id 派生路径的自由函数请让调用方把根当入参
-> 传进来（见 `plugins/session/paths.rs`）。注释里写「本插件自己的目录」，不要写
-> `<homedir>/…` 具体路径。
+> （`dir_from_ctx(ctx, PLUGIN_X)` / `self.dir`），**不要**按插件名反推落位
+> （`HomedirRegistry::get()` 再 `join(...)` 之类）——那等于把「装配决策」写死进插件，
+> 挪个位置就全错。按 id 派生路径的自由函数请让调用方把根当入参传进来（见
+> `plugins/session/paths.rs`）。注释里写「本插件自己的目录」，不要写 `<homedir>/…` 具体路径。
 
 ```yaml
 # ~/.symbio/my_plugin/PLUGIN.yml

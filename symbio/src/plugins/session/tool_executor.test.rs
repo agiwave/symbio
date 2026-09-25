@@ -10,6 +10,12 @@ fn test_ctx() -> Arc<dyn PluginInvokeRequest> {
     Arc::new(PluginSimpleRequest::new(None, None))
 }
 
+/// 会话目录（测试用临时目录）——工具结果存档落在这里。
+/// 与生产态一致：它是**本插件自己的目录**，不是任何全局系统根。
+fn test_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("symbio-test/session-tool-executor")
+}
+
 // ==================== extract_result：判定顺序即约定 ====================
 //
 // 这组用例的作用是**钉住判定顺序**——它现在是 `extract_result` 文档里的表，
@@ -111,7 +117,7 @@ async fn missing_tool_call_id_is_recorded_as_failure() {
     }];
 
     let (msgs, updates) =
-        process_tool_calls_async(tcs, &None, &sink, &abort, test_ctx(), &[]).await;
+        process_tool_calls_async(tcs, &None, &sink, &abort, test_ctx(), &[], &test_dir()).await;
 
     assert_eq!(msgs.len(), 1, "必须生成失败结果子节点（而非跳过）");
     assert_eq!(msgs[0].role, Some(MessageRole::Tool));
@@ -152,7 +158,7 @@ async fn empty_tool_call_id_is_recorded_as_failure() {
     }];
 
     let (msgs, updates) =
-        process_tool_calls_async(tcs, &None, &sink, &abort, test_ctx(), &[]).await;
+        process_tool_calls_async(tcs, &None, &sink, &abort, test_ctx(), &[], &test_dir()).await;
 
     assert_eq!(msgs.len(), 1);
     assert_eq!(updates.len(), 1);
@@ -172,7 +178,7 @@ async fn missing_tool_name_is_recorded_as_failure() {
     }];
 
     let (msgs, updates) =
-        process_tool_calls_async(tcs, &None, &sink, &abort, test_ctx(), &[]).await;
+        process_tool_calls_async(tcs, &None, &sink, &abort, test_ctx(), &[], &test_dir()).await;
 
     assert_eq!(msgs.len(), 1);
     assert_eq!(msgs[0].parent_id.as_deref(), Some("tc-known"));
@@ -196,7 +202,7 @@ async fn unparseable_arguments_are_refused_not_executed() {
     }];
 
     let (msgs, updates) =
-        process_tool_calls_async(tcs, &None, &sink, &abort, test_ctx(), &[]).await;
+        process_tool_calls_async(tcs, &None, &sink, &abort, test_ctx(), &[], &test_dir()).await;
 
     assert_eq!(msgs.len(), 1, "必须生成失败结果子节点（而非跳过）");
     assert_eq!(msgs[0].role, Some(MessageRole::Tool));
@@ -303,6 +309,7 @@ async fn aborted_batch_terminates_every_tool_call() {
         &abort,
         test_ctx(),
         &tc_context(&["tc1", "tc2"]),
+        &test_dir(),
     )
     .await;
 
@@ -373,9 +380,16 @@ async fn interactive_break_leaves_result_for_skipped_calls() {
         },
     ];
 
-    let (msgs, updates) =
-        process_tool_calls_async(tcs, &None, &sink, &abort, ctx, &tc_context(&["tc1", "tc2"]))
-            .await;
+    let (msgs, updates) = process_tool_calls_async(
+        tcs,
+        &None,
+        &sink,
+        &abort,
+        ctx,
+        &tc_context(&["tc1", "tc2"]),
+        &test_dir(),
+    )
+    .await;
 
     assert_eq!(
         msgs.len(),

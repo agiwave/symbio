@@ -173,10 +173,11 @@ pub struct SymbioClient {
 impl SymbioClient {
     /// 启动进程内插件树并订阅事件总线。
     ///
-    /// `homedir` 通过 `SYMBIO_HOMEDIR` 环境变量注入 —— 这是 [`HomedirRegistry`]
-    /// 的最高优先级来源（高于 `~/.symbio_bootstrap` 与默认 `~/.symbio`），
-    /// 因此必须在任何 `HomedirRegistry::get()` 之前设置。插件树构造期就会读它
-    /// （home 读 `<homedir>/PLUGIN.yml`、session 派生存储目录），所以这里是"最早一刻"。
+    /// `homedir` 通过 `SYMBIO_HOMEDIR` 环境变量注入 —— 这是 `home` 插件的
+    /// `HomedirRegistry` 的最高优先级来源（高于 `~/.symbio_bootstrap` 与默认
+    /// `~/.symbio`），因此必须在 `home` 首次读取它之前设置。插件树构造期就会读它
+    /// （home 读 `<homedir>/PLUGIN.yml`，并把目录经 `PLUGIN_DIR` 传给子插件），
+    /// 所以这里是"最早一刻"。
     pub async fn start(
         homedir: &Path,
         workdir: &Path,

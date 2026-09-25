@@ -84,7 +84,8 @@ fn plugin_map(
 fn composite_of(entries: Vec<(&str, Arc<dyn Plugin>)>) -> Arc<Composite> {
     let registry = Arc::new(PluginRegistry::with_instances(
         plugin_map(entries),
-        crate::symbio_core::plugins_root(),
+        // 测试容器：根给一个临时目录，不经任何全局系统根。
+        std::env::temp_dir().join("symbio-composite-test"),
         Vec::new(),
     ));
     Arc::new(Composite::with_registry(registry))

@@ -394,6 +394,12 @@ pub struct ChatOrchestrator {
     /// 之所以是可选而非必填：`run_chat_loop` 的其它调用场景（单测）根本没有
     /// 会话状态与前端订阅者，让它们为「一个提示」去构造插件实例是本末倒置。
     pub compression: Option<Arc<CompressionEmitter>>,
+    /// **本插件自己的目录**（装配期由父插件经 `PLUGIN_DIR` 告知）。
+    ///
+    /// 会话存储 / 转写存档 / 工具结果存档都在这个目录下——它是「本实例的作用域」，
+    /// 顶层时恰好是系统根，挂在子智能体下时就不是。执行期**不再**从请求上下文
+    /// 反推：请求上下文不带 `PLUGIN_DIR`（那是装配期键），反推必然落到父作用域。
+    pub session_dir: crate::symbio_core::PluginDir,
 }
 
 impl ChatOrchestrator {
@@ -403,6 +409,7 @@ impl ChatOrchestrator {
         context_limit: u32,
         stop: Arc<StopSignal>,
         compression: Option<Arc<CompressionEmitter>>,
+        session_dir: crate::symbio_core::PluginDir,
     ) -> Self {
         Self {
             provider,
@@ -410,6 +417,7 @@ impl ChatOrchestrator {
             context_limit,
             stop,
             compression,
+            session_dir,
         }
     }
 

@@ -14,7 +14,6 @@
 | `~/.symbio/<插件>/PLUGIN.yml` | 各插件的配置（`session` / `model` / `web` / `local` / `gateway` / `telegram` …） |
 | `~/.symbio/<插件>/<id>/<主文件>` | 插件资源条目（`model/<id>/provider.json`、`mcp/<id>/server.json`、`skill/<id>/SKILL.md`…） |
 | `~/.symbio/agent/<id>/` | agent 目录（工作区级 + 全局级双层；`AgentDirStore` 自管） |
-| `~/.symbio/config.yaml.migrated` | 旧集中式配置的留档（首次迁移后改名，见下） |
 
 `PLUGIN.yml` 是一个 YAML 映射，其中两个**身份字段**——`plugin_provider`（工厂 id）与
 `plugin_name`（实例名，缺省 = 目录名）——**不参与配置反序列化**，由 `PluginDir` 读写时
@@ -40,13 +39,9 @@ work:
   recent_workspaces: []
 ```
 
-> **旧 `config.yaml` 已不存在**：首次启动时 `home` 把旧文件里 `symbio.plugins.*` 的每一项
-> 逐项写进各插件自己的 `PLUGIN.yml`（目标已存在则跳过），随后把旧文件改名
-> `config.yaml.migrated` 留档——天然只生效一次。
->
-> 旧文件里的 `plugins:`（插件挂载表）、`embedding:`、`logging:` 三个段**都没有新家**：
-> 插件挂载由**扫描插件目录**决定（容器不内置任何清单），嵌入服务与日志级别由代码默认值
-> / 环境变量决定，不再有集中配置项。
+**没有集中式配置**：不存在 `~/.symbio/config.yaml` 这类汇总文件，也没有
+`plugins:`（插件挂载表）、`embedding:`、`logging:` 段。插件挂载由**扫描插件目录**
+决定（容器不内置任何清单），嵌入服务与日志级别由代码默认值 / 环境变量决定。
 
 ---
 
@@ -81,50 +76,60 @@ work:
 |---|---|---|
 | `home` | `<根>/PLUGIN.yml` | `work.workdir` / `work.recent_workspaces` |
 | `session` | `<根>/session/PLUGIN.yml` | `max_messages` / `auto_compress` / `context_messages` / `max_tool_rounds` / `tool_context_window` / `fade_activate_rounds` / `fade_keep_recent_turns` / `compress_line_threshold` / `compress_keep_recent` / `enable_compact_tool` / `prune_tool_history` / `memory_max_bytes` / `memory_inject_max_bytes`（字段全表见 `session/config.rs::SessionConfig`；会话存储**无选型项**——已收为单一具体类型，见 ADR-011） |
-| `agent` | `<根>/agent/PLUGIN.yml` | `item_max_bytes` / `identity_inject_max_bytes` / `memory_max_bytes` / `memory_inject_max_bytes`（字段全表见 `agent/host/config.rs::AgentConfig`） |
+| `agent` | `<根>/agent/PLUGIN.yml` | `memory_max_bytes` / `memory_inject_max_bytes`（字段全表见 `agent/host/config.rs::AgentConfig`） |
 | `work` | `<根>/work/PLUGIN.yml` | `memory_enabled` / `memory_max_bytes` / `memory_inject_max_bytes`（字段全表见 `work/config.rs::WorkConfig`） |
 | `web` | `<根>/web/PLUGIN.yml` | `web_enabled` / `web_timeout` / `tavily_api_key` / `serper_api_key` |
 | `local` | `<根>/local/PLUGIN.yml` | `shell_enabled` / `file_enabled` / `shell_timeout` |
 | `gateway` | `<根>/gateway/PLUGIN.yml` | 见下 |
 | `telegram` | `<根>/telegram/PLUGIN.yml` | 见下 |
-| `model` | `<根>/model/PLUGIN.yml` | `default_provider_id`（**读宽写窄**：兼容旧形态遗留的 `providers` 明细，迁移后归一） |
+| `model` | `<根>/model/PLUGIN.yml` | `default_provider_id`（只有跨条目状态；每个 Provider 的明细是资源，见下） |
 | `mcp` | 无配置文档 | 配置就是它的资源树（`<根>/mcp/<id>`） |
 
 ### Model 插件
 
+跨条目状态只有默认指向，写在自己的 `PLUGIN.yml`：
+
+```yaml
+# ~/.symbio/model/PLUGIN.yml
+plugin_provider: model
+plugin_name: model
+default_provider_id: openai_main
+```
+
+每个 Provider 是一份**自己的**资源，落 `<根>/model/<id>/provider.json`：
+
 ```json
-// ~/.symbio/model/<id>/provider.json
+// ~/.symbio/model/openai_main/provider.json
 {
-  "default_provider_id": "openai_main",
-  "providers": {
-    "openai_main": {
-      "provider_type": "openai_chat",
-      "api_key": "sk-...",
-      "model": "gpt-4-turbo",
-      "base_url": "https://api.openai.com/v1",
-      "temperature": 0.7,
-      "max_tokens": 4096,
-      "min_interval_ms": 1000
-    },
-    "anthropic_backup": {
-      "provider_type": "anthropic_messages",
-      "api_key": "sk-ant-...",
-      "model": "claude-3-opus-20240229",
-      "base_url": "https://api.anthropic.com/v1"
-    }
-  }
+  "id": "openai_main",
+  "name": "OpenAI 主账号",
+  "provider": "openai",
+  "api_base": "https://api.openai.com/v1",
+  "api_key": "sk-...",
+  "model": "gpt-4o",
+  "api_protocol": "openai_responses",
+  "temperature": 0.7,
+  "max_tokens": 4096,
+  "rate_limit_ms": 1000,
+  "enabled": true
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `provider_type` | String | ✅ | `openai_chat` / `openai_responses` / `anthropic_messages` / `gemini_api` |
-| `api_key` | String | ✅ | API 密钥 |
+| `id` | String | ✅ | 条目 id（= 目录名；缺省由地址末段补全） |
+| `name` | String | ❌ | 展示名（缺省 `Default`，空串回落目录名） |
+| `provider` | String | ✅ | 供应商标识（`openai` / `anthropic` / `ollama` …） |
+| `api_base` | String | ✅ | API 端点 |
+| `api_key` | String | ❌ | API 密钥 |
 | `model` | String | ✅ | 模型名称 |
-| `base_url` | String | ❌ | 自定义 API 端点 (用于代理) |
-| `temperature` | Float | ❌ | 采样温度 |
-| `max_tokens` | Int | ❌ | 最大输出 token 数 |
-| `min_interval_ms` | Int | ❌ | 最小请求间隔 (限流) |
+| `api_protocol` | String | ❌ | `openai_chat` / `openai_responses` / `anthropic_messages` / `gemini_api`（缺省 `openai_responses`） |
+| `temperature` / `max_tokens` | Float / Int | ❌ | 采样温度 / 最大输出 token 数 |
+| `rate_limit_ms` | Int | ❌ | 最小请求间隔（限流），0 = 不限制 |
+| `enabled` | Bool | ❌ | 是否可被选为活动 Provider（缺省 `true`） |
+
+其余字段（`system_prompt` / `max_context_tokens` / `reserved_tokens` / `timeout_secs` /
+`store` / `reasoning`）全表见 `model/model_providers.rs::ModelProviderConfig`。
 
 ### MCP 插件
 

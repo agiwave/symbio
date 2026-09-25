@@ -32,8 +32,8 @@
 `session`、`model`、`local`、`web`、`mcp`、`telegram`、`hook`、`agent`、`skill`、`gateway`、
 `vdfs`、`work`。`vdfs` 会随子树构造出实例，但其注册经 `SubAgentVisitor` 丢弃（VDFS 根单槽归根）。
 
-- `work` 在其中：子树 `WORKDIR` **继承父会话**（不再覆写成 Agent 目录），所以 `work` 注入的是
-  工作区记忆，与系统侧读的是同一份语义、但落在子树自己的 `agent/<id>/work` 挂载点，无双重注入。
+- `work` 在其中：子树 `WORKDIR` **继承父会话**，所以 `work` 注入的是工作区记忆，
+  与系统侧读的是同一份语义、但落在子树自己的 `agent/<id>/work` 挂载点，无双重注入。
 - `plugin_manager` 在其中：`SubAgentVisitor` 把它前缀到 `agent/<id>/plugin_manager`，子 Agent 页因此有了
   设置入口，与父 Agent 对齐。
 - `agent` 在其中：子 Agent 也能在其目录内再挂子 Agent（`<id>/agent/<sub-id>` 递归）——分形。
@@ -43,10 +43,8 @@
 - `vdfs` 不在其中：VDFS 根是系统级单槽，归系统 Agent 独占，子树经 `SubAgentVisitor`
   丢弃对应注册；列在子树里只会构造出无挂载点的空实例。
 
-> 历史注：v2 早期宿主把子树 `WORKDIR` 覆写成 Agent 目录，导致 `work` 与系统侧注入同一份
-> `AGENTS.md`，曾用一个 `archive_retired_work_tree` 把旧 `<agentdir>/work/PLUGIN.yml` 改名
-> 卸载。该覆写已废弃（`WORKDIR` 改为继承），双重注入根因消除，`archive_retired_work_tree`
-> 随之退役。
+⚠️ 子树的 `WORKDIR` **不得**覆写成 Agent 目录：那会让 `work` 与系统侧注入同一份
+`AGENTS.md`（双重注入），且 `work` 的作用域名实不符。
 
 ## 智能体自身的 `AGENTS.md`（两个作用域）
 
@@ -72,9 +70,9 @@
 两者不可能相撞：agent id 首字符必须是小写字母或数字（§5.1），保留名以大写 `A` 开头。
 
 ⚠️ **`AgentDirStore` 不持有记忆的读写与闸门**：它只回答「记忆文件在哪」（`memory_path`）。
-此前它自带 `read_memory` / `write_memory` 与自己的字节闸门，与 work / session 两层各写一份
-口径——「超限是拒绝还是截断」「读不到算不算错误」一旦分叉，用户看到的行为就会随
-「这条记忆属于哪一层」而变化。收口后各层共用同一份实现。
+读 / 写 / 两道容量闸门一律走内核 `symbio_core::memory`，work / session / agent 三层共用
+同一份实现——否则「超限是拒绝还是截断」「读不到算不算错误」会随「这条记忆属于哪一层」
+而分叉。
 
 **不可删除**：要清空就写入空内容（两个作用域同一约定）。
 

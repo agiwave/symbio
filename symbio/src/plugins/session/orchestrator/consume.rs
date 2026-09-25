@@ -215,6 +215,9 @@ impl SessionPlugin {
             context_limit,
             stop.clone(),
             phase,
+            // 会话目录 = **本插件自己的目录**（装配期由父插件经 `PLUGIN_DIR` 告知），
+            // 不是任何全局系统根——子智能体下它指向子树，这正是作用域正确性的来源。
+            self.config_file.dir().clone(),
         ));
 
         let ctx_clone = chat_ctx.fork();

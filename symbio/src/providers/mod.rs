@@ -22,26 +22,17 @@
 //!
 //! ```text
 //! ~/.symbio/
-//! ├── config.yaml                              # 仅 home 自身配置（work / recent_workspaces）
-//! ├── session/                                 # ⭐ 一个插件 = 一个目录（配置+数据同处）
-//!     ├── model/<id>/provider.json             # Model Provider
-//!     ├── mcp/<id>/server.json                 # MCP Server
-//!     ├── skill/<id>/SKILL.md                  # Skill
-//!     └── session/<id>/session.json            # Session（自有 store，不经 vdfs_service）
+//! ├── PLUGIN.yml                               # 系统级插件（home）自身配置
+//! ├── <插件>/                                  # ⭐ 一个插件 = 一个目录（配置 + 数据同处）
+//! │   ├── PLUGIN.yml                           # 该插件自己的配置
+//! │   └── <id>/<主文件>                         # model/<id>/provider.json · mcp/<id>/server.json
+//! └── session/<id>/session.json               # Session（自有 store，不经 vdfs_service）
 //! ```
 //!
 //! **重要**：一个插件 = 系统根下的一个目录，**便于通过遍历
 //! `~/.symbio/` 即可知道加载了哪些插件**。
 //!
-//! ## 关于 workspace_service
-//!
-//! 历史上曾存在 `workspace_service` 模块（缓存全局"活跃 workdir"）。
-//! 现已删除：workdir 始终由前端在每个请求的 ctx.WORKDIR 中显式传递。
-//!
-//! ## 关于 storage_service
-//!
-//! `storage_service`（`StorageService` / `EntityStore` / `FileEntityStore`）已废除，
-//! 由 `vdfs_service` 取代——资源存储不再需要一套与 VDFS 并行的私有抽象。
+//! workdir 不在本层持有：它始终由前端在每个请求的 `ctx.WORKDIR` 中显式传递。
 
 mod embedding;
 pub(crate) mod vdfs_service;

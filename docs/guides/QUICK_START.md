@@ -41,16 +41,13 @@ npm run tauri dev
 或直接编辑配置文件：
 
 ```bash
-# ~/.symbio/model/<id>/provider.json
+# ~/.symbio/model/openai_main/provider.json
 {
-  "default_provider_id": "openai_main",
-  "providers": {
-    "openai_main": {
-      "provider_type": "openai_chat",
-      "api_key": "你的 API Key",
-      "model": "gpt-4-turbo"
-    }
-  }
+  "id": "openai_main",
+  "provider": "openai",
+  "api_base": "https://api.openai.com/v1",
+  "api_key": "你的 API Key",
+  "model": "gpt-4o"
 }
 ```
 
@@ -106,9 +103,7 @@ cargo clippy --lib --tests -- -D warnings
 └── cache/                    # 可重建的缓存（如代码索引）
 ```
 
-> 插件根**不额外嵌套一层**：系统根下就是「一个插件一个目录」的扁平结构
-> （`<homedir>/plugins/<插件>` 那种旧布局已废除）。
-> 旧版本升级上来的机器可能还留着一个 `config.yaml.migrated`：那是旧集中式配置的留档。
+> 插件根**不额外嵌套一层**：系统根下就是「一个插件一个目录」的扁平结构。
 
 ---
 

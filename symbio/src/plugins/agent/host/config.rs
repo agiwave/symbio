@@ -1,10 +1,9 @@
 //! agent 插件的配置（`<本插件目录>/PLUGIN.yml`）。
 //!
-//! 三个字段，与 work / session 几层同一套口径（**写侧拒绝、读侧截断**）：
+//! 两个字段，与 work / session 几层同一套口径（**写侧拒绝、读侧截断**）：
 //!
 //! | 字段 | 闸门 | 位置 | 超限行为 |
 //! |---|---|---|---|
-//! | `item_max_bytes` | Agent 目录内文件写入 | [`AgentDirStore::write_item`](super::store::AgentDirStore::write_item) | **拒绝** |
 //! | `memory_max_bytes` | 智能体自身的 `AGENTS.md` 写入 | [`MemoryFile::write`](crate::symbio_core::MemoryFile::write) | **拒绝** |
 //! | `memory_inject_max_bytes` | 智能体自身的 `AGENTS.md` 注入 | [`MemoryFile::inject`](crate::symbio_core::MemoryFile::inject) | **截断** + 告知地址 |
 //!
@@ -30,10 +29,6 @@ use serde::{Deserialize, Serialize};
 /// agent 插件配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
-    /// Agent 目录内单个文件的**写入**字节上限。
-    #[serde(default = "default_item_max_bytes")]
-    pub item_max_bytes: usize,
-
     /// 智能体自身的 `AGENTS.md`（两个作用域共用）的**写入**字节上限。
     #[serde(default = "default_memory_max_bytes")]
     pub memory_max_bytes: usize,
@@ -41,11 +36,6 @@ pub struct AgentConfig {
     /// 智能体自身的 `AGENTS.md`（两个作用域共用）注入系统提示词的**字节**上限。
     #[serde(default = "default_memory_inject_max_bytes")]
     pub memory_inject_max_bytes: usize,
-}
-
-/// 32 KiB：一个人格片段写到这里已经不是「片段」了
-fn default_item_max_bytes() -> usize {
-    32 * 1024
 }
 
 /// 16 KiB：与工作区记忆同一口径（两者是同一类东西，只是作用域不同）
@@ -61,7 +51,6 @@ fn default_memory_inject_max_bytes() -> usize {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            item_max_bytes: default_item_max_bytes(),
             memory_max_bytes: default_memory_max_bytes(),
             memory_inject_max_bytes: default_memory_inject_max_bytes(),
         }
@@ -69,11 +58,6 @@ impl Default for AgentConfig {
 }
 
 impl AgentConfig {
-    /// 生效的条目写入上限（下界 1 字节，避免配成 0 后一切写入都失败却看不出原因）
-    pub fn effective_item_max_bytes(&self) -> usize {
-        self.item_max_bytes.max(1)
-    }
-
     /// 生效的记忆写入上限
     pub fn effective_memory_max_bytes(&self) -> usize {
         self.memory_max_bytes.max(1)

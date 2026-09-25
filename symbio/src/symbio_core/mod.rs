@@ -5,7 +5,6 @@ mod clock;
 mod embedding;
 pub mod event_bus;
 pub mod exec;
-mod homedir;
 mod keys;
 pub mod llm;
 mod logger;
@@ -90,7 +89,8 @@ pub use clock::now_ms;
 pub use exec::{
     ExecAbortSignal, ExecEnv, ExecEventSink, ExecEventSinkProgress, ExecTranscriptWriter,
 };
-pub use homedir::{expand_tilde_path, HomedirRegistry, DEFAULT_HOMEDIR};
+// 注：homedir（系统根注册表）**不在 core**——它归 `home` 插件独有。core 只提供
+// 纯路径工具 `expand_tilde_path`（经 `plugin::dir` 重导出，不读任何全局系统根）。
 pub use logger::*;
 pub use memory::{
     render_segment, MemoryFile, MemoryInjection, MemoryNodeSpec, MemorySegmentSpec,

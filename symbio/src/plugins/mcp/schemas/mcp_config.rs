@@ -99,18 +99,14 @@ fn default_true() -> bool {
     true
 }
 
-/// MCP configuration - Single Source of Truth
+/// MCP configuration - 运行期内存视图
 ///
 /// 磁盘上每个 server 是**自己的目录条目**：`<本插件目录>/<name>/server.json`
-/// （见 `plugin.rs` 的 `MANIFEST`）。本结构是 `McpPlugin` 的**内存视图**，由插件
-/// 自己的 `PLUGIN.yml` 载入。
-///
-/// 其中 `servers` 是**旧形态的遗留键**（历史上 server 明细混在配置文件里）：
-/// 迁移时逐项写成 `<name>/server.json`，随后用 `PluginDir::remove_keys` 把该键摘掉，
-/// 因此新形态下恒为空——它保留只为兼容从旧版本升级上来的文件。
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// （见 `plugin.rs` 的 `MANIFEST`）。本结构只承载这些条目的内存视图，由
+/// [`load_from_storage`](crate::plugins::mcp::plugin::McpPlugin) 灌入、
+/// 写 / 删后同步——不落盘、也不读配置文件。
+#[derive(Debug, Clone, Default)]
 pub struct McpConfig {
-    #[serde(default)]
     pub servers: HashMap<String, McpServerConfig>,
 }
 
