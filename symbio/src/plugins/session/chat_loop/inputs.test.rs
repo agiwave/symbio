@@ -9,11 +9,11 @@
 //! - **全空才兜底**：兜底串只在「显式段与注册段都为空」时出现。
 
 use super::*;
-use crate::symbio_core::{CapabilityVisitor, DefaultToolVisitor, SimpleRequest};
+use crate::symbio_core::{CapabilityVisitor, DefaultToolVisitor, PluginSimpleRequest};
 
 /// 构造带 CAPABILITY_VISITOR 的上下文，按顺序注册 `prompts`
-async fn ctx_prompts(prompts: &[(&str, &str)]) -> Arc<dyn InvokeRequest> {
-    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+async fn ctx_prompts(prompts: &[(&str, &str)]) -> Arc<dyn PluginInvokeRequest> {
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     let visitor = Arc::new(DefaultToolVisitor::new());
     for (name, text) in prompts {
         visitor.register_system_prompt(name, text.to_string()).await;
@@ -69,7 +69,7 @@ async fn blank_explicit_prompt_is_ignored() {
 
 #[tokio::test]
 async fn fallback_without_visitor() {
-    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     let got = resolve_system_prompt(None, &ctx).await;
     assert_eq!(got, FALLBACK_SYSTEM_PROMPT);
 }

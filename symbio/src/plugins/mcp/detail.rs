@@ -207,19 +207,19 @@ pub fn mcp_detail_definition() -> DetailDefinition {
             // 就删掉重导）。它是与「在表单里填」并列的另一条创建路，也是详情页
             // 的一条动作——不是 `new_type` 上的一个字段。
             DetailAction {
-                id: crate::symbio_core::vdfs_provider::VDFS_ACTION_IMPORT.into(),
+                id: crate::symbio_core::VDFS_ACTION_IMPORT.into(),
                 label: "导入整包".into(),
                 style: "secondary".into(),
                 when: Some(cond("is_existing", Some(serde_json::json!(false)), None)),
                 // 载荷是一个本地 zip：使用方先取文件再执行本动作
-                pack: Some(crate::symbio_core::vdfs_provider::VDFS_EXT_ZIP.into()),
+                pack: Some(crate::symbio_core::VDFS_EXT_ZIP.into()),
                 busy_label: Some("导入中…".into()),
                 ..Default::default()
             },
             // 「导出」：VDFS 节点动作 `export`（vdfs/action）→ provider 的
             // `export_zip`；与「导入整包」互为逆向
             DetailAction {
-                id: crate::symbio_core::vdfs_provider::VDFS_ACTION_EXPORT.into(),
+                id: crate::symbio_core::VDFS_ACTION_EXPORT.into(),
                 label: "导出整包".into(),
                 style: "secondary".into(),
                 disabled_when: Some(cond("is_existing", Some(serde_json::json!(false)), None)),

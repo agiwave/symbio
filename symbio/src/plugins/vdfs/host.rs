@@ -36,19 +36,23 @@
 
 pub use super::fs::{normalize_addr, UnifiedFs, VDFS_ADDR_ROOT};
 use super::protocol::*;
-use crate::symbio_core::event_bus::KIND_VDFS;
-use crate::symbio_core::vdfs::vdfs_context;
-use crate::symbio_core::vdfs_provider::*;
-use crate::symbio_core::vdfs_provider::{VdfsRequest, VdfsResponse};
+use crate::symbio_core::vdfs_context;
+use crate::symbio_core::EVENT_BUS_KIND_VDFS;
 use crate::symbio_core::{
-    CapabilityVisitor, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginPayload,
-    CAPABILITY_VISITOR, WORKDIR,
+    derive_ext, has_parent_segment, DynVdfsProvider, VdfsAccess, VdfsChange, VdfsChangeSink,
+    VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNode, VdfsParams, VdfsProvider, VdfsResult,
+    VdfsWriteResponse, VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT, VDFS_PARAM_WORKDIR,
 };
+use crate::symbio_core::{
+    CapabilityVisitor, Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginPayload, CAPABILITY_VISITOR, WORKDIR,
+};
+use crate::symbio_core::{VdfsRequest, VdfsResponse};
 use async_trait::async_trait;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-// 变更事件的 `kind` 不自持：取自词表的家 `symbio_core::event_bus::KIND_VDFS`
+// 变更事件的 `kind` 不自持：取自词表的家 `symbio_core::event_bus::EVENT_BUS_KIND_VDFS`
 // （前端 `subscribe({ kind: 'vdfs' })`，见 PROTOCOLS.md §事件总线频道）。
 
 // ==================== 统一文件系统 ====================
@@ -115,7 +119,7 @@ pub async fn unified_fs(visitor: &Arc<dyn CapabilityVisitor>) -> DynVdfsProvider
 ///   虚拟层根，不广播、不依赖 `CapabilityVisitor`。两条链路拿到的是同一个根实例。
 pub async fn resolve_fs(
     parent: Option<&Arc<dyn Plugin>>,
-    ctx: &Arc<dyn InvokeRequest>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
 ) -> DynVdfsProvider {
     if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
         return unified_fs(&visitor).await;
@@ -139,14 +143,14 @@ pub async fn resolve_fs(
 ///
 /// **`delta` 原样带过**：它是**正文**不是路径，门面不该碰它（逐字段重建会把它丢掉，
 /// 且没有编译错误提示）。这也正是 `VdfsChange::map_paths` 存在的理由。
-/// 构造变更投递器：接到全局事件总线，下发前端（`kind = KIND_VDFS`）。
+/// 构造变更投递器：接到全局事件总线，下发前端（`kind = EVENT_BUS_KIND_VDFS`）。
 fn event_bus_sink() -> VdfsChangeSink {
     // 信封与 provider 侧形状重合（本层只补 `map_paths` 挂载名），**原样**投上总线——
     // 不再有一个「换信封」的翻译层（那层曾叫 `to_change_event` → `VdfsChangeEvent`，
     // 两者形状逐字相同，纯复制；S27 合并删除）。
     Arc::new(move |change: VdfsChange| {
         let data = serde_json::to_value(&change).unwrap_or(serde_json::Value::Null);
-        crate::symbio_core::event_bus::EventBus::try_publish(KIND_VDFS, None, data);
+        crate::symbio_core::EventBus::try_publish(EVENT_BUS_KIND_VDFS, None, data);
     })
 }
 
@@ -154,7 +158,7 @@ fn event_bus_sink() -> VdfsChangeSink {
 
 /// 读取请求载荷（缺省容忍空载荷）
 fn payload_or_default<T: serde::de::DeserializeOwned + Default + Clone + Send + Sync + 'static>(
-    ctx: &Arc<dyn InvokeRequest>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
 ) -> T {
     ctx.payload::<serde_json::Value>()
         .ok()
@@ -169,7 +173,7 @@ fn payload_or_default<T: serde::de::DeserializeOwned + Default + Clone + Send + 
 /// 这里是唯一的翻译点——provider 只认 [`VDFS_PARAM_WORKDIR`] 这类约定键，
 /// 不认识宿主 ctx 的键名（`WORKDIR` 等）。两条链路共用：前端协议入口与 LLM 工具
 /// 都把 workdir 送到同一个键上，物理层据此解析相对地址。
-pub fn call_params(ctx: &Arc<dyn InvokeRequest>) -> VdfsParams {
+pub fn call_params(ctx: &Arc<dyn PluginInvokeRequest>) -> VdfsParams {
     let mut params = VdfsParams::new();
     if let Some(workdir) = ctx.get(WORKDIR) {
         params.insert(
@@ -257,9 +261,9 @@ fn dir_self(addr: &str) -> VdfsNode {
 pub async fn dispatch_with(
     fs: &DynVdfsProvider,
     path: &str,
-    ctx: &Arc<dyn InvokeRequest>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
     params: VdfsParams,
-) -> Option<InvokeResponse<PluginPayload>> {
+) -> Option<PluginInvokeResponse<PluginPayload>> {
     if !VDFS_OPS.contains(&path) {
         return None;
     }
@@ -290,8 +294,8 @@ pub async fn dispatch_with(
 async fn root(
     fs: &DynVdfsProvider,
     vctx: &VdfsContext,
-    ctx: &Arc<dyn InvokeRequest>,
-) -> InvokeResponse<PluginPayload> {
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) -> PluginInvokeResponse<PluginPayload> {
     // 请求载荷忽略：本操作的定义就是「不给地址」（给了也不看，免得出现两套入参）
     let _ = payload_or_default::<VdfsPathRequest>(ctx);
     list_at(fs, vctx, VDFS_ADDR_ROOT.to_string(), None, None).await
@@ -300,8 +304,8 @@ async fn root(
 async fn list(
     root: &DynVdfsProvider,
     vctx: &VdfsContext,
-    ctx: &Arc<dyn InvokeRequest>,
-) -> InvokeResponse<PluginPayload> {
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) -> PluginInvokeResponse<PluginPayload> {
     let req: VdfsPathRequest = payload_or_default(ctx);
     let addr = normalize_addr(&req.path)?;
     let before = req.before.filter(|b| !b.is_empty());
@@ -315,7 +319,7 @@ async fn list_at(
     addr: String,
     limit: Option<u32>,
     before: Option<String>,
-) -> InvokeResponse<PluginPayload> {
+) -> PluginInvokeResponse<PluginPayload> {
     // 有界列表：把窗口参数放进**调用级参数袋**再分发。
     // 之所以用参数袋、而不是给 `VdfsProvider::list` 加参数，是为了让「不认识窗口」
     // 的 provider **完全不受影响**——它们不取这两个键，行为与从前逐字节一致。
@@ -371,8 +375,8 @@ async fn list_at(
 async fn stat(
     root: &DynVdfsProvider,
     vctx: &VdfsContext,
-    ctx: &Arc<dyn InvokeRequest>,
-) -> InvokeResponse<PluginPayload> {
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) -> PluginInvokeResponse<PluginPayload> {
     let req: VdfsPathRequest = payload_or_default(ctx);
     let addr = normalize_addr(&req.path)?;
     let mut n = root
@@ -392,8 +396,8 @@ async fn stat(
 async fn read(
     root: &DynVdfsProvider,
     vctx: &VdfsContext,
-    ctx: &Arc<dyn InvokeRequest>,
-) -> InvokeResponse<PluginPayload> {
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) -> PluginInvokeResponse<PluginPayload> {
     let req: VdfsPathRequest = payload_or_default(ctx);
     let addr = normalize_addr(&req.path)?;
     let c = root
@@ -407,8 +411,8 @@ async fn read(
 async fn write(
     root: &DynVdfsProvider,
     vctx: &VdfsContext,
-    ctx: &Arc<dyn InvokeRequest>,
-) -> InvokeResponse<PluginPayload> {
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) -> PluginInvokeResponse<PluginPayload> {
     let req: VdfsWriteRequest = payload_or_default(ctx);
     let addr = normalize_addr(&req.path)?;
     // 机制级守卫：写入必须携带内容（语义级校验归 provider）
@@ -430,8 +434,8 @@ async fn write(
 async fn delete(
     root: &DynVdfsProvider,
     vctx: &VdfsContext,
-    ctx: &Arc<dyn InvokeRequest>,
-) -> InvokeResponse<PluginPayload> {
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) -> PluginInvokeResponse<PluginPayload> {
     let req: VdfsPathRequest = payload_or_default(ctx);
     let addr = normalize_addr(&req.path)?;
     root.dispatch(
@@ -450,8 +454,8 @@ async fn delete(
 async fn mkdir(
     root: &DynVdfsProvider,
     vctx: &VdfsContext,
-    ctx: &Arc<dyn InvokeRequest>,
-) -> InvokeResponse<PluginPayload> {
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) -> PluginInvokeResponse<PluginPayload> {
     let req: VdfsPathRequest = payload_or_default(ctx);
     let addr = normalize_addr(&req.path)?;
     root.dispatch(vctx, &addr, VdfsRequest::Mkdir).await?;
@@ -469,8 +473,8 @@ async fn mkdir(
 async fn action(
     root: &DynVdfsProvider,
     vctx: &VdfsContext,
-    ctx: &Arc<dyn InvokeRequest>,
-) -> InvokeResponse<PluginPayload> {
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) -> PluginInvokeResponse<PluginPayload> {
     let req: VdfsActionRequest = payload_or_default(ctx);
     if req.action.trim().is_empty() {
         return Err(VdfsError::invalid("动作标识不能为空").into());
@@ -499,7 +503,7 @@ async fn action(
 // 实现方都无需重复实现这些逻辑。
 //
 // 注意**移动不在其中**：它不是组合操作而是被整条下线了——理由见
-// `symbio_core::vdfs_provider` 的「没有 `Move`」一节（跨子树时它不是原语，
+// `symbio_core::vdfs` 的「没有 `Move`」一节（跨子树时它不是原语，
 // 由外层组合才是它的正确位置；当前外层也没提供）。
 
 /// 统一换行符为 `\n`（用于精确替换匹配，与原生 `file_edit` 一致）
@@ -692,8 +696,8 @@ pub(crate) async fn search_via(
 async fn edit(
     root: &DynVdfsProvider,
     vctx: &VdfsContext,
-    ctx: &Arc<dyn InvokeRequest>,
-) -> InvokeResponse<PluginPayload> {
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) -> PluginInvokeResponse<PluginPayload> {
     let req: VdfsEditRequest = payload_or_default(ctx);
     let addr = normalize_addr(&req.path)?;
     let r = edit_via(root, vctx, &addr, &req.old_string, &req.new_string).await?;
@@ -703,8 +707,8 @@ async fn edit(
 async fn search(
     root: &DynVdfsProvider,
     vctx: &VdfsContext,
-    ctx: &Arc<dyn InvokeRequest>,
-) -> InvokeResponse<PluginPayload> {
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) -> PluginInvokeResponse<PluginPayload> {
     let req: VdfsSearchRequest = payload_or_default(ctx);
     let addr = normalize_addr(&req.path)?;
     let r = search_via(root, vctx, &addr, &req.pattern).await?;
@@ -714,9 +718,9 @@ async fn search(
 async fn watch(
     root: &DynVdfsProvider,
     vctx: &VdfsContext,
-    ctx: &Arc<dyn InvokeRequest>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
     subscribe: bool,
-) -> InvokeResponse<PluginPayload> {
+) -> PluginInvokeResponse<PluginPayload> {
     let req: VdfsPathRequest = payload_or_default(ctx);
     let addr = normalize_addr(&req.path)?;
     if subscribe {
@@ -744,8 +748,8 @@ async fn watch(
 async fn tree(
     root: &DynVdfsProvider,
     vctx: &VdfsContext,
-    ctx: &Arc<dyn InvokeRequest>,
-) -> InvokeResponse<PluginPayload> {
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) -> PluginInvokeResponse<PluginPayload> {
     let req: VdfsTreeRequest = payload_or_default(ctx);
     let addr = normalize_addr(&req.path)?;
     let depth_limit = req.depth.unwrap_or(3); // 0 = 不限

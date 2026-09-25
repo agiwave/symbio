@@ -42,7 +42,9 @@
 //! 空文件 / 文件不存在 → 该段整体省略（不产出空标题）：用户没写过指令时，
 //! 不该让每个会话都背一段没有内容的头信息。
 
-use crate::symbio_core::{MemoryFile, NodeSpec, SegmentSpec, AGENTS_FILE, PLUGIN_AGENT};
+use crate::symbio_core::{
+    MemoryFile, MemoryNodeSpec, MemorySegmentSpec, MEMORY_AGENTS_FILE, PLUGIN_AGENT,
+};
 use std::path::{Path, PathBuf};
 
 /// 系统提示词条目在收集器里的注册名（同名覆盖的键）
@@ -51,7 +53,7 @@ pub const SEGMENT_NAME: &str = "agent-instructions";
 /// 片段的标题（渲染为 `【全局指令】`）
 pub const SEGMENT_TITLE: &str = "全局指令";
 
-/// 指令文件挂在**本插件挂载点自身**（相对地址 = 文件名 [`AGENTS_FILE`]，
+/// 指令文件挂在**本插件挂载点自身**（相对地址 = 文件名 [`MEMORY_AGENTS_FILE`]，
 /// 与智能体列表并列的一个文件）。
 ///
 /// 需要协议级绝对地址的场合（提示词里印给模型的可编辑地址），由调用方经
@@ -74,7 +76,7 @@ pub fn host_dir(plugin_dir: &Path) -> PathBuf {
 
 /// 指令文件的落位：`{系统智能体目录}/AGENTS.md`
 pub fn file_path(host_dir: &Path) -> PathBuf {
-    host_dir.join(AGENTS_FILE)
+    host_dir.join(MEMORY_AGENTS_FILE)
 }
 
 /// 指令文件的记忆门面（内核）：两道闸门由 [`super::config::AgentConfig`] 给出
@@ -83,8 +85,8 @@ pub fn store(host_dir: &Path, write_max_bytes: usize, inject_max_bytes: usize) -
 }
 
 /// VDFS 节点规格 —— `list` 与 `stat` 共用，两条链路不会分叉
-pub fn node_spec() -> NodeSpec<'static> {
-    NodeSpec {
+pub fn node_spec() -> MemoryNodeSpec<'static> {
+    MemoryNodeSpec {
         title: SEGMENT_TITLE,
         // 场景标签用**所属插件**的场景名（与各层同一口径），不另造一个没有消费者的标签
         kind: PLUGIN_AGENT,
@@ -94,7 +96,7 @@ pub fn node_spec() -> NodeSpec<'static> {
 
 /// 系统提示词片段：**走内核排版**（地址 + 上限 + 当前 + 正文 + 截断提示）
 ///
-/// 本插件既暴露该地址（挂载点下的 [`AGENTS_FILE`]，绝对地址由调用方拼好传入），
+/// 本插件既暴露该地址（挂载点下的 [`MEMORY_AGENTS_FILE`]，绝对地址由调用方拼好传入），
 /// 也执行那道写入闸门——印出来的数字是真的。
 pub fn segment(store: &MemoryFile, address: &str) -> Result<Option<String>, String> {
     // 空文件 / 不存在 → 整段省略（内核的 `empty_hint` 是「空也要说一句」的用法，
@@ -102,7 +104,7 @@ pub fn segment(store: &MemoryFile, address: &str) -> Result<Option<String>, Stri
     if store.read()?.trim().is_empty() {
         return Ok(None);
     }
-    store.segment(&SegmentSpec {
+    store.segment(&MemorySegmentSpec {
         title: SEGMENT_TITLE,
         address,
         note: Some("对所有会话生效"),

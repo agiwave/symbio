@@ -12,7 +12,7 @@
 //!
 //! ```ignore
 //! // 在 vdfs 宿主中（一切资源的实时变更都走这一条）
-//! EventBus::try_publish(KIND_VDFS, None, change_json);
+//! EventBus::try_publish(EVENT_BUS_KIND_VDFS, None, change_json);
 //! ```
 //!
 //! `EventBus` 门面是 `symbio_core::event_bus::EventBus`（跨插件共享的核心设施），
@@ -26,14 +26,14 @@
 //! 灌入的事件帧，而 VDFS 变更的发布方传 `session_id = None`（身份在地址里），缓冲永远
 //! 为空——路由成了恒返回空数组的空壳。
 
-use crate::symbio_core::event_bus::{
-    build_envelope, register_subscriber, unregister_subscriber, EventBus, SubscribeRequest,
-    KIND_SYSTEM,
-};
 use crate::symbio_core::schemas::common::SimpleResponse;
 use crate::symbio_core::{
-    InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginChannel, PluginError,
-    PluginFrame, PluginMeta, PluginPayload, PLUGIN_EVENT_BUS,
+    build_envelope, register_subscriber, unregister_subscriber, EventBus, EventBusSubscribeRequest,
+    EVENT_BUS_KIND_SYSTEM,
+};
+use crate::symbio_core::{
+    Plugin, PluginChannel, PluginError, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_EVENT_BUS,
 };
 use async_trait::async_trait;
 use serde_json::json;
@@ -45,7 +45,7 @@ pub struct EventBusPlugin;
 
 impl EventBusPlugin {
     /// 工厂方法（满足 `submit_object_creator!` 协议）
-    pub fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
+    pub fn build(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         Arc::new(EventBusPlugin) as Arc<dyn Plugin>
     }
 
@@ -60,9 +60,9 @@ impl EventBusPlugin {
     /// 分配一个 connection_id，建立 PluginChannel，
     /// 返回 peer_channel 供 transport 通过 mpsc 推送到前端。
     pub async fn handle_subscribe(
-        _ctx: Arc<dyn InvokeRequest>,
-        _req: SubscribeRequest,
-    ) -> InvokeResponse<PluginPayload> {
+        _ctx: Arc<dyn PluginInvokeRequest>,
+        _req: EventBusSubscribeRequest,
+    ) -> PluginInvokeResponse<PluginPayload> {
         // 容量 4096。
         //
         // 这条频道承载**全部**实时面：消息正文的逐帧增量（`VdfsChange.delta`，热路径）
@@ -93,7 +93,7 @@ impl EventBusPlugin {
         let _ = mine
             .tx
             .send(PluginFrame::data(build_envelope(
-                KIND_SYSTEM,
+                EVENT_BUS_KIND_SYSTEM,
                 None,
                 json!({
                     "event": "connected",
@@ -112,13 +112,16 @@ impl Plugin for EventBusPlugin {
         Self::metadata()
     }
 
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(
+        self: Arc<Self>,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         match path {
             "subscribe" => {
-                let req: SubscribeRequest = ctx.payload()?;
+                let req: EventBusSubscribeRequest = ctx.payload()?;
                 EventBusPlugin::handle_subscribe(ctx, req).await
             }
             "ping" => {
@@ -138,8 +141,8 @@ impl Plugin for EventBusPlugin {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        _ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }

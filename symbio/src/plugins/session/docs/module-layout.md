@@ -282,7 +282,7 @@ orchestrator.test.rs      测试（S1 已外置；5 例全部测根文件的守�
 | 项 | 原计划 | 实际落位 | 理由 |
 |---|---|---|---|
 | `session_id_from_new_path` | `entities.rs` | `nodes.rs` | 它是**新建语义**（具名目标的地址末段即会话 id），属 VDFS 路径模型 |
-| `config_definition` | `entities.rs` | `plugin.rs` | 配置面，紧邻其唯一调用点 `ConfigFile::new(dir, "会话设置", …)` |
+| `config_definition` | `entities.rs` | `plugin.rs` | 配置面，紧邻其唯一调用点 `PluginConfigFile::new(dir, "会话设置", …)` |
 | `now_ms` | `entities.rs` | `plugin.rs` | 通用工具，模块根是它的自然归宿 |
 | `entities.rs` | 新建 | **不建** | 三个条目彼此无关，凑成一个 70 行文件反而降低内聚 |
 

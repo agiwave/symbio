@@ -8,10 +8,10 @@
 
 use super::plugin::AgentPlugin;
 use super::store::AgentDirStore;
-use crate::symbio_core::{vdfs, vdfs_provider::VdfsProvider};
+use crate::symbio_core::{vdfs, VdfsProvider};
 use crate::symbio_core::{
-    CapabilityVisitor, ConfigurableVisitor, DefaultConfigurableVisitor, DefaultToolVisitor,
-    InvokeRequest, InvokeRequestExt, Plugin, PluginDir, SimpleRequest, AGENT_ID,
+    CapabilityVisitor, ConfigurableVisitor, DefaultConfigurableVisitor, DefaultToolVisitor, Plugin,
+    PluginDir, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, AGENT_ID,
     CAPABILITY_VISITOR, CONFIG_VISITOR, PATH, PLUGIN_AGENT, TRAVERSE_AVAILABLE_TOOLS,
     VDFS_PARENT_ADDR, WORKDIR,
 };
@@ -61,8 +61,8 @@ requires:
 fn ctx_with(
     workdir: Option<&str>,
     agent_id: Option<&str>,
-) -> (Arc<dyn InvokeRequest>, Arc<DefaultToolVisitor>) {
-    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+) -> (Arc<dyn PluginInvokeRequest>, Arc<DefaultToolVisitor>) {
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     if let Some(w) = workdir {
         ctx.set(WORKDIR, w.to_string());
     }
@@ -259,11 +259,11 @@ async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
     .unwrap();
 
     // 构造插件：把 PLUGIN_DIR 指到 <tmp>/agent
-    let build_ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    let build_ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     build_ctx.set(PLUGIN_DIR, PluginDir::at(&agent_root, PLUGIN_AGENT));
     let plugin = AgentPlugin::build(build_ctx);
 
-    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
     // 合成父地址：模拟容器转发时写入的当前父地址（不依赖真实挂载名）
     ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
@@ -337,7 +337,7 @@ async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
 
     let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_AGENT));
 
-    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     // 合成父地址：模拟容器转发时写入的当前父地址（不依赖真实挂载名）
     ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
     // 请求上下文**不带 `PLUGIN_DIR`**——那是**装配期**的键（见
@@ -398,7 +398,7 @@ async fn mount_root_lists_only_installed_agents() {
 
     // 请求上下文**不带 `PLUGIN_DIR`**（同 `sub_agent_agent_list_is_scoped_to_its_own_space`：
     // 作用域来自插件自持的目录，不是请求方喂的）
-    let host: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    let host: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     host.set(WORKDIR, workdir);
     let ctx = vdfs::vdfs_context(&host);
 
@@ -450,11 +450,10 @@ async fn traverse_declares_config_and_instruction_in_settings() {
     plugin.traverse(String::new(), ctx).await.unwrap();
 
     let entries = configs.list_configurables().await;
-    let by_name: std::collections::HashMap<&str, &crate::symbio_core::vdfs_provider::VdfsItem> =
-        entries
-            .iter()
-            .map(|it| (it.node.name.as_str(), it))
-            .collect();
+    let by_name: std::collections::HashMap<&str, &crate::symbio_core::VdfsItem> = entries
+        .iter()
+        .map(|it| (it.node.name.as_str(), it))
+        .collect();
     // 配置文档（name = 目录名 agent）
     assert!(
         by_name.contains_key("agent"),
@@ -479,7 +478,7 @@ async fn traverse_declares_config_and_instruction_in_settings() {
 /// 会话工作区的记忆文件——看得见落点，才分得清「写了哪儿」。
 #[tokio::test]
 async fn sub_agent_mount_crossing_is_uniform_across_operations() {
-    use crate::symbio_core::vdfs_provider::VdfsError;
+    use crate::symbio_core::VdfsError;
     use crate::symbio_core::{PluginDir, PLUGIN_AGENT};
 
     let tmp = tempfile::tempdir().unwrap();
@@ -496,7 +495,7 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     std::fs::write(tmp.path().join("AGENTS.md"), "工作区记忆内容").unwrap();
 
     let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_AGENT));
-    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
     // 请求上下文**不带 `PLUGIN_DIR`**——那是**装配期**的键（见
     // `sub_agent_agent_list_is_scoped_to_its_own_space`）：插件的作用域由它**自己**
@@ -552,7 +551,7 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
             &vctx,
             "reviewer/work/AGENTS.md",
             vdfs::VdfsRequest::Write {
-                content: crate::symbio_core::vdfs_provider::VdfsContent::text("改过的记忆"),
+                content: crate::symbio_core::VdfsContent::text("改过的记忆"),
             },
         )
         .await
@@ -643,7 +642,7 @@ async fn sub_agent_agent_list_is_scoped_to_its_own_space() {
     let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_AGENT));
 
     // 生产态请求上下文：只有宿主该有的键，**没有 `PLUGIN_DIR`**
-    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
     ctx.set(WORKDIR, tmp.path().to_string_lossy().to_string());
     let vctx = vdfs::vdfs_context(&ctx);
@@ -666,7 +665,7 @@ async fn sub_agent_agent_list_is_scoped_to_its_own_space() {
 
 // ==================== dispatch 请求形态（测试辅助） ====================
 
-use crate::symbio_core::vdfs_provider::VdfsRequest;
+use crate::symbio_core::VdfsRequest;
 
 const LIST: VdfsRequest = VdfsRequest::List {
     limit: None,

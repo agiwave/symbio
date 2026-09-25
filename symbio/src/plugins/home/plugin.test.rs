@@ -4,7 +4,7 @@ fn isolated_home() -> HomePlugin {
     HomePlugin {
         instances: Arc::new(RwLock::new(HashMap::new())),
         config: Arc::new(RwLock::new(HomeConfig::default())),
-        context: Arc::new(SimpleRequest::new(None, None)),
+        context: Arc::new(PluginSimpleRequest::new(None, None)),
         self_weak: Arc::new(RwLock::new(None)),
     }
 }
@@ -116,8 +116,8 @@ fn ensure_defaults_is_idempotent_and_preserves_existing() {
 
 // ---- route 分发 ----
 
-fn ctx_at(path: &str) -> Arc<dyn InvokeRequest> {
-    let ctx = SimpleRequest::new(None, None);
+fn ctx_at(path: &str) -> Arc<dyn PluginInvokeRequest> {
+    let ctx = PluginSimpleRequest::new(None, None);
     ctx.set(PATH, path.to_string());
     Arc::new(ctx)
 }

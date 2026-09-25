@@ -15,7 +15,7 @@
 //! 返回 `tool_unavailable` 让 LLM 自行继续，避免无人值守时阻塞。
 
 use crate::symbio_core::{
-    Capability, CapabilityMeta, ExecEnv, InvokeRequest, InvokeRequestExt, PluginError,
+    Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -212,7 +212,7 @@ impl Capability for AskUserTool {
         &self,
         args: Value,
         _env: &ExecEnv,
-        ctx: Arc<dyn InvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         let prompt = match self.build_prompt_payload(&args) {
             Ok(p) => p,

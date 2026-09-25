@@ -6,7 +6,7 @@
 ## 定位：容器是权威，本插件是视图
 
 「这个智能体由哪些插件组成」是**容器的事实**：插件根下一层目录 = 一个插件
-（见 `symbio_core::plugin_dir`）。本插件**不自己扫目录**，也不持任何状态——它经
+（见 `symbio_core::plugin::dir`）。本插件**不自己扫目录**，也不持任何状态——它经
 `ctx.parent()` 取回所在容器的 VDFS 视图（`Composite::get_vfs_provider`），把容器的
 注册表条目列成清单，并把动词转发回容器执行：
 
@@ -31,7 +31,7 @@
   「启用」；
 - 一个条目**就是那个插件的配置**：入口挂在 `<根>/plugin_manager/<插件名>`，读 / 写
   转发到容器根下的 `<插件名>/PLUGIN.yml`——同一份配置仍然只有一个**文件**、一份
-  **定义**（拥有者给的那份，见 `symbio_core::configurable`）；
+  **定义**（拥有者给的那份，见 `symbio_core::capability::configurable`）；
 - 没有配置文档的插件（如 `telegram`）合成一张**只读概览**（`binding = info`），
   否则点开一片空白，连装配按钮都没有落脚处；
 - 本插件只补一个场景标签（`kind = plugin_manager`）——列表在哪儿，场景就是哪儿。
@@ -49,7 +49,7 @@
 
 `when` 只能对**表单模型**求值，而装配态不在配置正文里：`read` 因此把装配态叠成几个
 **投影键**（`plugin_enabled` / `plugin_required` / `plugin_can_disable` / `plugin_version`，
-见 `symbio_core::plugin_dir` 的同名常量），条件据此判定。
+见 `symbio_core::plugin::dir` 的同名常量），条件据此判定。
 
 动作**恒在定义里**（只靠条件显隐），不按当下状态增删：定义是节点的一部分，而状态一变
 调用方只会**重读正文**、不会重新取节点——按状态增删会让按钮停在旧状态上。
@@ -84,7 +84,7 @@
 - 装配判据与运行期增删：`symbio/src/plugins/composite/registry.rs`
 - 注册表动词（根上的 `Action(plugins|enable|disable)` / `Write` / `Delete`）：
   `symbio/src/plugins/composite/vdfs.rs`
-- 插件目录与配置：`symbio_core::plugin_dir`（`PLUGIN.yml` 的保留键）
-- 可配置声明通道：`symbio_core::configurable`（`ConfigurableVisitor` / `CONFIG_VISITOR`）
+- 插件目录与配置：`symbio_core::plugin::dir`（`PLUGIN.yml` 的保留键）
+- 可配置声明通道：`symbio_core::capability::configurable`（`ConfigurableVisitor` / `CONFIG_VISITOR`）
 - VDFS 机制：`docs/design/vdfs.md`（`DetailDefinition` 是 `ext = form` 节点的
   `schema` 方言；配置文件地址 = `<插件目录>/PLUGIN.yml`，见 §3.4 / §13.1）

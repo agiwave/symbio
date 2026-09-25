@@ -9,9 +9,10 @@
 //! 用户目录。需要真文件的用例一律用 `tempfile` 自建 [`MemoryFile`]。
 
 use super::*;
-use crate::symbio_core::vdfs::absolute_addr;
+use crate::symbio_core::absolute_addr;
 use crate::symbio_core::{
-    InvokeRequest, InvokeRequestExt, MemoryFile, SimpleRequest, PLUGIN_SESSION, VDFS_PARENT_ADDR,
+    MemoryFile, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, PLUGIN_SESSION,
+    VDFS_PARENT_ADDR,
 };
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -25,7 +26,7 @@ fn root() -> std::path::PathBuf {
 #[test]
 fn memory_lives_in_the_session_directory() {
     let p = memory_path(&root(), "abc");
-    assert_eq!(p.file_name().unwrap(), AGENTS_FILE);
+    assert_eq!(p.file_name().unwrap(), MEMORY_AGENTS_FILE);
     assert_eq!(p.parent().unwrap().file_name().unwrap(), "abc");
     assert_eq!(
         p.parent().unwrap().parent().unwrap().file_name().unwrap(),
@@ -64,7 +65,7 @@ fn session_id_is_sanitized_before_joining() {
 /// 于是不依赖真实挂载名（换名不必改测试）。
 #[test]
 fn address_composes_from_context_parent_and_rel() {
-    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(VDFS_PARENT_ADDR, "@vfs/session".to_string());
     assert_eq!(memory_rel_path("abc"), "abc/AGENTS.md");
     assert_eq!(
@@ -95,7 +96,7 @@ fn scope_carries_the_two_gates_into_the_kernel() {
     assert_eq!(m.path(), Some(memory_path(&root(), "abc").as_path()));
     assert_eq!(m.write_max_bytes(), 1234);
     assert_eq!(m.inject_max_bytes(), 321);
-    assert_eq!(m.file_name(), AGENTS_FILE);
+    assert_eq!(m.file_name(), MEMORY_AGENTS_FILE);
 }
 
 /// 条目规格：标题 / 地址 / 区分说明 / 空提示四样都在
@@ -120,7 +121,7 @@ fn segment_spec_is_the_session_layer_personality() {
 #[test]
 fn segment_round_trips_through_a_real_file() {
     let tmp = TempDir::new().unwrap();
-    let path = tmp.path().join(AGENTS_FILE);
+    let path = tmp.path().join(MEMORY_AGENTS_FILE);
     let m = MemoryFile::new(Some(path), 1024, 256);
     m.write("本会话约定：所有时间用 UTC。").unwrap();
 

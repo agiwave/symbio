@@ -71,15 +71,11 @@ fn write_request_carries_create_intent() {
 fn list_item_keeps_the_wire_shape() {
     let resp = VdfsListResponse {
         path: "/mem".into(),
-        node: VdfsNode::dir(
-            "mem",
-            "内存",
-            crate::symbio_core::vdfs_provider::VdfsAccess::LIST,
-        ),
+        node: VdfsNode::dir("mem", "内存", crate::symbio_core::VdfsAccess::LIST),
         items: vec![VdfsItem::new(VdfsNode::file(
             "a.txt",
             "A",
-            crate::symbio_core::vdfs_provider::VdfsAccess::READ,
+            crate::symbio_core::VdfsAccess::READ,
         ))
         .with_path("mem/a.txt")],
     };

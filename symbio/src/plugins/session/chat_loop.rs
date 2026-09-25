@@ -57,13 +57,14 @@ use crate::symbio_core::schemas::{
     session::chat_message::{ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType},
     HookEvent,
 };
-use crate::symbio_core::llm::turn::{
-    build_tool_message, emit_message, emit_removed, emit_state, short_id, ToolCallInfo, TurnOutput,
-};
-use crate::symbio_core::FinishReason;
+use crate::symbio_core::ModelFinishReason;
 use crate::symbio_core::{
-    AbortSignal, CapabilityMeta, EventSink, ExecEnv, InvokeRequest, InvokeRequestExt,
-    ModelProvider, Plugin, PluginError, Usage,
+    build_tool_message, emit_message, emit_removed, emit_state, short_id, TurnOutput,
+    TurnToolCallInfo,
+};
+use crate::symbio_core::{
+    CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, ModelProvider, ModelUsage, Plugin,
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -75,9 +76,9 @@ use super::tool_executor::{fire_hook, process_tool_calls_async};
 
 pub async fn run_chat_loop(
     orchestrator: &ChatOrchestrator,
-    ctx: Arc<dyn InvokeRequest>,
-    sink: EventSink,
-    abort: AbortSignal,
+    ctx: Arc<dyn PluginInvokeRequest>,
+    sink: ExecEventSink,
+    abort: ExecAbortSignal,
 ) -> Result<(), PluginError> {
     // ── 前步骤 ①：请求解析与请求级配置快照 ─────────────────────────────────
     let mut req: model_chat::Request = ctx.payload()?;
@@ -408,7 +409,7 @@ fn gate_turn(req: &TurnRequest, turn: &TurnState) -> Gate {
 async fn finish_turn(
     orchestrator: &ChatOrchestrator,
     context: &SessionContext,
-    sink: &EventSink,
+    sink: &ExecEventSink,
     turn: &TurnState,
     exit: TurnExit,
 ) -> Result<(), PluginError> {

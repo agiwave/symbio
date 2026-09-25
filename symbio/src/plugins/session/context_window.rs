@@ -8,7 +8,7 @@
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageType,
 };
-use crate::symbio_core::ToolContextRetention;
+use crate::symbio_core::CapabilityToolContextRetention;
 use std::collections::{HashMap, HashSet};
 
 use super::text_split::truncate_tokens;
@@ -335,12 +335,13 @@ fn anchor_of_args(args: &str) -> Option<String> {
 pub fn apply_layered_sliding_window(
     messages: &[ChatMessage],
     max_active_tool_calls: usize,
-    retention: &HashMap<String, ToolContextRetention>,
+    retention: &HashMap<String, CapabilityToolContextRetention>,
 ) -> Vec<ChatMessage> {
     // ── 收集全部 ToolCall（保序），计算两级"失效"判定 ──────────────────────
     // info:         ToolCall id → (全局序号, 工具短名, 自声明保留策略)
     // per_tool_seq: 工具短名 → 该工具的调用 id 序列（工具级保留策略用）
-    let mut info: HashMap<String, (usize, String, Option<ToolContextRetention>)> = HashMap::new();
+    let mut info: HashMap<String, (usize, String, Option<CapabilityToolContextRetention>)> =
+        HashMap::new();
     let mut per_tool_seq: HashMap<String, Vec<String>> = HashMap::new();
     for msg in messages {
         if msg.msg_type == Some(MessageType::ToolCall) {

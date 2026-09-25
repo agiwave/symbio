@@ -7,8 +7,9 @@
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField, DetailOption};
 use crate::symbio_core::vdfs;
 use crate::symbio_core::{
-    dir_from_ctx, ConfigFile, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginDir,
-    PluginError, PluginMeta, PluginPayload, PATH, PLUGIN_FILE, PLUGIN_GATEWAY,
+    dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH, PLUGIN_FILE,
+    PLUGIN_GATEWAY,
 };
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
@@ -82,7 +83,7 @@ fn config_definition() -> DetailDefinition {
 pub struct GatewayPlugin {
     config: Arc<RwLock<GatewayConfig>>,
     /// 配置文件的呈现与校验（`<根>/gateway/PLUGIN.yml`）——落盘写的是自己目录里的文件
-    config_file: ConfigFile,
+    config_file: PluginConfigFile,
     /// 父插件（worker composite）弱引用，用于转发请求
     parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
     /// 入站服务句柄（为空表示未启动）
@@ -90,8 +91,8 @@ pub struct GatewayPlugin {
 }
 
 impl GatewayPlugin {
-    /// 静态工厂：从 InvokeRequest 构造 Plugin 实例（submit_object_creator! 自注册）
-    pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
+    /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例（submit_object_creator! 自注册）
+    pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         let dir = dir_from_ctx(&*ctx, PLUGIN_GATEWAY);
         let config: GatewayConfig = match dir.load::<GatewayConfig>() {
             Ok(Some(c)) => c,
@@ -114,7 +115,7 @@ impl GatewayPlugin {
     pub fn new(parent: Option<Weak<dyn Plugin>>, config: GatewayConfig, dir: PluginDir) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
-            config_file: ConfigFile::new(dir, "开放接口", config_definition()),
+            config_file: PluginConfigFile::new(dir, "开放接口", config_definition()),
             parent: Arc::new(RwLock::new(parent)),
             server: Arc::new(RwLock::new(None)),
         }
@@ -191,13 +192,14 @@ impl Plugin for GatewayPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(
-        self: Arc<Self>,
-    ) -> Option<Arc<dyn crate::symbio_core::vdfs_provider::VdfsProvider>> {
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn crate::symbio_core::VdfsProvider>> {
         Some(self)
     }
 
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(
+        self: Arc<Self>,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
@@ -221,8 +223,8 @@ impl Plugin for GatewayPlugin {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
             // 本插件在 VDFS 上的全部内容 = 一个配置文档
             let me: vdfs::DynVdfsProvider = self.clone();

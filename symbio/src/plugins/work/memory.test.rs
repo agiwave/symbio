@@ -7,8 +7,10 @@
 //! 要消灭的成本。本文件只回答「工作区这一层」特有的问题。
 
 use super::*;
-use crate::symbio_core::vdfs::absolute_addr;
-use crate::symbio_core::{InvokeRequest, InvokeRequestExt, SimpleRequest, VDFS_PARENT_ADDR};
+use crate::symbio_core::absolute_addr;
+use crate::symbio_core::{
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, VDFS_PARENT_ADDR,
+};
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -19,13 +21,13 @@ const PARENT: &str = "@vfs/work";
 #[test]
 fn memory_is_the_workspace_root_agents_file() {
     let path = memory_path("/w");
-    assert_eq!(path, Path::new("/w").join(AGENTS_FILE));
+    assert_eq!(path, Path::new("/w").join(MEMORY_AGENTS_FILE));
     assert_eq!(path.file_name().unwrap(), "AGENTS.md");
     // 相对地址就是文件名本身（挂在挂载点自身）；绝对地址 = 上下文父地址 + 相对
-    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(VDFS_PARENT_ADDR, PARENT.to_string());
     assert_eq!(
-        absolute_addr(&ctx, AGENTS_FILE),
+        absolute_addr(&ctx, MEMORY_AGENTS_FILE),
         format!("{PARENT}/AGENTS.md")
     );
 }
@@ -60,7 +62,7 @@ fn scope_carries_the_two_gates_into_the_kernel() {
     assert_eq!(m.path(), Some(expected.as_path()));
     assert_eq!(m.write_max_bytes(), 1234);
     assert_eq!(m.inject_max_bytes(), 321);
-    assert_eq!(m.file_name(), AGENTS_FILE, "节点名 = 真实文件名");
+    assert_eq!(m.file_name(), MEMORY_AGENTS_FILE, "节点名 = 真实文件名");
 }
 
 /// 片段规格 = 本层的全部「个性」：标题 / 地址 / 空提示，且**没有**多余附加说明

@@ -18,18 +18,18 @@
 //!   `role=tool` + `status=Streaming`，正文以 `delta`（尾部追加）承载；
 //!   非后缀增长（stdout/stderr 交替、转义序列回退）时改用 `content`（整条替换）；
 //! - 进程结束后把完整输出作为 `Data` 返回，由 `tool_executor` 定稿为工具结果；
-//! - 中止（`AbortSignal`）/超时（`SHELL_TIMEOUT_SECS`）时 kill 子进程并收尸。
+//! - 中止（`ExecAbortSignal`）/超时（`SHELL_TIMEOUT_SECS`）时 kill 子进程并收尸。
 //!
 //! ## 为什么这里曾经很复杂
 //!
 //! 出口曾是「返回值里的 `PluginPayload::Session` 通道」——于是执行体**必须**
 //! `spawn` 到后台：executor 要先拿到 `Session(rx)` 才会开始消费，而 `execute()`
 //! 不返回就没人消费；输出超过通道容量（64 帧）时 pump 阻塞在 `send`、`execute()`
-//! 永不返回 ⇒ **死锁**。出口改成 `ctx` 注入的 `EventSink` 后，`emit` 不会阻塞在
+//! 永不返回 ⇒ **死锁**。出口改成 `ctx` 注入的 `ExecEventSink` 后，`emit` 不会阻塞在
 //! 无界背压上，「先返回还是先执行」这个顺序问题连同通道容量、`cancel_token`
 //! 克隆、「send 失败 ⇒ 消费端已消失」标志一起消失。
 //!
-//! 出口缺席（`route()` 直连调用，如 MCP 网关）⇒ `EventSink::of` 给 `Null`：
+//! 出口缺席（`route()` 直连调用，如 MCP 网关）⇒ `ExecEventSink::of` 给 `Null`：
 //! 同一份代码照跑，只是不发增量。
 use super::policy::{RiskLevel, SecurityPolicy};
 use super::system::{decode_output, validate_params};
@@ -37,8 +37,8 @@ use crate::symbio_core::{
     schemas::session::chat_message::{
         ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
     },
-    AbortSignal, Capability, CapabilityMeta, EventSink, ExecEnv, InvokeRequest, InvokeRequestExt,
-    PluginError,
+    Capability, CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -66,7 +66,7 @@ pub struct Response {
 /// 因此这里只接受编排层给的一对值。
 ///
 /// **缺席 = 直连调用**（`route()`，如 MCP 网关）：没有占位节点，也就不发增量快照——
-/// 与 [`EventSink::Null`] 是同一件事的两个面（都由「编排层是否在场」决定）。
+/// 与 [`ExecEventSink::Null`] 是同一件事的两个面（都由「编排层是否在场」决定）。
 #[derive(Debug, Clone)]
 struct SnapshotTarget {
     msg_id: String,
@@ -75,7 +75,7 @@ struct SnapshotTarget {
 
 impl SnapshotTarget {
     /// 从 ctx 读；任一 id 缺失 ⇒ `None`。
-    fn from_ctx(ctx: &dyn InvokeRequest) -> Option<Self> {
+    fn from_ctx(ctx: &dyn PluginInvokeRequest) -> Option<Self> {
         let msg_id = ctx
             .get(crate::symbio_core::RESULT_MSG_ID)
             .unwrap_or_default();
@@ -219,8 +219,8 @@ impl ShellTool {
         args: &Value,
         workdir: &str,
         threshold: RiskLevel,
-        sink: &EventSink,
-        abort: &AbortSignal,
+        sink: &ExecEventSink,
+        abort: &ExecAbortSignal,
         target: Option<&SnapshotTarget>,
     ) -> Result<Response, PluginError> {
         let (command, risk) = self.prepare(args, threshold)?;
@@ -366,8 +366,8 @@ fn pump_lines<R>(
     own: Arc<Mutex<String>>,
     other: Arc<Mutex<String>>,
     is_stderr: bool,
-    sink: EventSink,
-    abort: AbortSignal,
+    sink: ExecEventSink,
+    abort: ExecAbortSignal,
     target: Option<SnapshotTarget>,
 ) -> tokio::task::JoinHandle<()>
 where
@@ -517,7 +517,7 @@ impl Capability for ShellTool {
         &self,
         args: Value,
         _env: &ExecEnv,
-        ctx: Arc<dyn InvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         let workdir_str = ctx.get(crate::symbio_core::WORKDIR).ok_or_else(|| {
             PluginError::ValidationError("Missing workdir in context".to_string())
@@ -538,11 +538,11 @@ impl Capability for ShellTool {
             .unwrap_or(RiskLevel::Medium);
 
         // 执行期双原语 + 快照身份，全部由编排层经 ctx 注入；**缺席即降级**：
-        // `EventSink::Null`（不发增量）、永不中止的信号、`None` 快照身份。
+        // `ExecEventSink::Null`（不发增量）、永不中止的信号、`None` 快照身份。
         // 于是「会话里跑」与「被 route() 直连调用」共用同一条代码路径——
         // 不再有第二条分支、不再需要后台 spawn（没有通道容量可阻塞）。
-        let sink = EventSink::of(&*ctx);
-        let abort = AbortSignal::of(&*ctx);
+        let sink = ExecEventSink::of(&*ctx);
+        let abort = ExecAbortSignal::of(&*ctx);
         let target = SnapshotTarget::from_ctx(&*ctx);
 
         let resp = self

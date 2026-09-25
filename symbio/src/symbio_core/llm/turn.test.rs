@@ -11,7 +11,7 @@ use super::*;
 /// 节点 id 与 wire id 分离：节点 id 稳定，wire id 保留 provider 原值。
 #[test]
 fn empty_id_delta_does_not_overwrite_real_id() {
-    let mut acc = ToolCallAccumulator::default();
+    let mut acc = TurnToolCallAccumulator::default();
     let (node1, wire1, _, _, snapshot1) = acc.process_delta(
         0,
         Some("call_8f3a59f5f8e14258a427e432"),
@@ -49,7 +49,7 @@ fn empty_id_delta_does_not_overwrite_real_id() {
 /// 变孤儿）；wire id 为 None，请求构建回退节点 id。
 #[test]
 fn missing_id_gets_stable_generated_guid() {
-    let mut acc = ToolCallAccumulator::default();
+    let mut acc = TurnToolCallAccumulator::default();
     let (stream_id, wire, _, _, _) =
         acc.process_delta(0, None, Some("vdfs_list"), Some("{\"path\": \".\"}"));
     assert!(!stream_id.is_empty(), "流式期间即应有非空节点 id");
@@ -73,7 +73,7 @@ fn missing_id_gets_stable_generated_guid() {
 /// 纯空白 id 视为"不合法"，与缺失同等对待。
 #[test]
 fn whitespace_id_treated_as_missing() {
-    let mut acc = ToolCallAccumulator::default();
+    let mut acc = TurnToolCallAccumulator::default();
     let (node_id, _, _, _, _) = acc.process_delta(0, Some("   "), None, Some("{}"));
     assert!(!node_id.trim().is_empty());
 }
@@ -81,7 +81,7 @@ fn whitespace_id_treated_as_missing() {
 /// 空串 name 不得覆盖首个增量的合法 name（与 id 同理）。
 #[test]
 fn empty_name_delta_does_not_overwrite_real_name() {
-    let mut acc = ToolCallAccumulator::default();
+    let mut acc = TurnToolCallAccumulator::default();
     acc.process_delta(0, Some("call_x"), Some("cmd.exe"), Some(""));
     acc.process_delta(0, Some(""), Some(""), Some("{}"));
 
@@ -93,7 +93,7 @@ fn empty_name_delta_does_not_overwrite_real_name() {
 /// 多个并行工具调用（不同 index）互不干扰，各自持有独立的节点 id 与 wire id。
 #[test]
 fn parallel_tool_calls_keep_separate_ids() {
-    let mut acc = ToolCallAccumulator::default();
+    let mut acc = TurnToolCallAccumulator::default();
     acc.process_delta(0, Some("call_a"), Some("f1"), Some("{}"));
     acc.process_delta(1, Some("call_b"), Some("f2"), Some("{}"));
 
@@ -111,9 +111,9 @@ fn parallel_tool_calls_keep_separate_ids() {
 /// 的工具调用会更新到第一轮的老节点。
 #[test]
 fn reused_wire_id_across_turns_yields_distinct_node_ids() {
-    let mut turn1 = ToolCallAccumulator::default();
+    let mut turn1 = TurnToolCallAccumulator::default();
     let (node1, _, _, _, _) = turn1.process_delta(0, Some("call_0"), Some("f"), Some("{}"));
-    let mut turn2 = ToolCallAccumulator::default();
+    let mut turn2 = TurnToolCallAccumulator::default();
     let (node2, wire2, _, _, _) = turn2.process_delta(0, Some("call_0"), Some("f"), Some("{}"));
 
     assert_eq!(wire2, "call_0");
@@ -124,7 +124,7 @@ fn reused_wire_id_across_turns_yields_distinct_node_ids() {
 /// 必须视为 `{}` 且**不得**标记 parse_error，否则无参工具会被误拒。
 #[test]
 fn empty_arguments_treated_as_empty_object() {
-    let mut acc = ToolCallAccumulator::default();
+    let mut acc = TurnToolCallAccumulator::default();
     acc.process_delta(0, Some("call_e"), Some("vdfs_list"), Some(""));
     acc.process_delta(1, Some("call_w"), Some("vdfs_list"), Some("   "));
 
@@ -139,7 +139,7 @@ fn empty_arguments_treated_as_empty_object() {
 /// 合法 JSON 参数照常解析，parse_error 为 None。
 #[test]
 fn valid_arguments_parse_without_error() {
-    let mut acc = ToolCallAccumulator::default();
+    let mut acc = TurnToolCallAccumulator::default();
     acc.process_delta(
         0,
         Some("call_v"),
@@ -157,7 +157,7 @@ fn valid_arguments_parse_without_error() {
 /// 静默 `{}` 会让工具报「缺少必填参数」，模型看不懂原因便原样重试。
 #[test]
 fn truncated_arguments_flagged_not_silently_emptied() {
-    let mut acc = ToolCallAccumulator::default();
+    let mut acc = TurnToolCallAccumulator::default();
     let raw = r#"{"command": "cargo test"#;
     acc.process_delta(0, Some("call_t"), Some("cmd"), Some(raw));
 
@@ -176,7 +176,7 @@ fn truncated_arguments_flagged_not_silently_emptied() {
 /// 「整条替换」与「尾部追加」两种语义，接收端不必按节点类型去猜。
 #[test]
 fn only_first_args_fragment_requires_snapshot() {
-    let mut acc = ToolCallAccumulator::default();
+    let mut acc = TurnToolCallAccumulator::default();
     let (_, _, args1, _, snap1) =
         acc.process_delta(0, Some("call_s"), Some("vdfs_read"), Some("{\"pa"));
     let (_, _, args2, _, snap2) = acc.process_delta(0, None, None, Some("th\": \".\"}"));

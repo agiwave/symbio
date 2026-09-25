@@ -25,11 +25,11 @@ fn path_starts_with_normalized(base: &Path, prefix: &Path) -> bool {
 
 /// 检查路径是否是安全的（不含 `..` 段——**两种分隔符都算**）
 ///
-/// 规则本体在 [`symbio_core::vdfs_provider::has_parent_segment`]：shell 工具的
+/// 规则本体在 [`crate::symbio_core::vdfs::has_parent_segment`]：shell 工具的
 /// 路径守卫与 VDFS 物理层守卫必须是**同一条**规则，否则修了一处漏另一处。
 /// 这里保留函数名（本模块的公开 API），实现转发过去。
 pub fn is_safe_relative_path(path: &str) -> bool {
-    !crate::symbio_core::vdfs_provider::has_parent_segment(path)
+    !crate::symbio_core::has_parent_segment(path)
 }
 
 /// 工具执行安全策略
@@ -249,7 +249,7 @@ impl SecurityPolicy {
         }
         for forbidden in &self.forbidden_paths {
             let expanded = shellexpand::tilde(forbidden);
-            if crate::symbio_core::vdfs_provider::path_within(&path_str, expanded.as_ref()) {
+            if crate::symbio_core::path_within(&path_str, expanded.as_ref()) {
                 return false;
             }
         }

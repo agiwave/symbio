@@ -5,8 +5,8 @@
 
 use super::policy::SecurityPolicy;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, ExecEnv, InvokeRequest, InvokeRequestExt, InvokeResponse,
-    PluginError, AGENT_ID, SESSION_ID, WORKDIR,
+    Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginInvokeResponse, AGENT_ID, SESSION_ID, WORKDIR,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -37,7 +37,7 @@ impl TodoWriteTool {
         }
     }
 
-    async fn execute_inner(&self, args: &Value, key: &str) -> InvokeResponse<Value> {
+    async fn execute_inner(&self, args: &Value, key: &str) -> PluginInvokeResponse<Value> {
         let todos = args
             .get("todos")
             .and_then(|v| v.as_array())
@@ -157,7 +157,7 @@ impl Capability for TodoWriteTool {
             // 上下文保留策略（机制化声明）：任务清单每次全量写入，历史版本对后续
             // 推理无参考价值 → 仅保留最近一次调用的完整参数/结果。
             // 会话压缩层按 meta 通用执行，不对具体工具名特殊化。
-            context_retention: Some(crate::symbio_core::ToolContextRetention::LastOnly),
+            context_retention: Some(crate::symbio_core::CapabilityToolContextRetention::LastOnly),
             ..Default::default()
         }
     }
@@ -166,7 +166,7 @@ impl Capability for TodoWriteTool {
         &self,
         args: Value,
         _env: &ExecEnv,
-        ctx: Arc<dyn InvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         let session = ctx.get(SESSION_ID).unwrap_or_default();
         let wd = ctx.get(WORKDIR).unwrap_or_default();

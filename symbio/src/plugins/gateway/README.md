@@ -18,7 +18,7 @@
   `Empty`）与「长连接」（`Session`）——**两个入口共用它**，各自只保留真差异（HTTP 把
   `Session` 折叠为最后一帧、WS 双向转发；`Empty` 在 HTTP 写 `null`、在 WS 直接关连接）。
   从前这段分类在两个入口各写一遍，漏改一处就出现「HTTP 能调、WS 不能调」这类不对称。
-- **协议转换**：HTTP body → `InvokeRequest`（PATH/payload/SESSION_ID），响应 → `InvokeResponse<PluginPayload>`。
+- **协议转换**：HTTP body → `PluginInvokeRequest`（PATH/payload/SESSION_ID），响应 → `PluginInvokeResponse<PluginPayload>`。
 - **流式**：WS 场景下把 `Session(PluginChannel)` 帧逐条推送（不用 SSE——会话需双向通道）。
 - **鉴权与错误**：错误码遵循 `docs/reference/ERROR_CODES.md`。
 

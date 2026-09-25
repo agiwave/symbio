@@ -4,12 +4,12 @@
 
 use super::*;
 
-use crate::symbio_core::SimpleRequest;
+use crate::symbio_core::PluginSimpleRequest;
 use std::collections::HashMap;
 use std::sync::{Mutex, RwLock};
 
 ///  在本作用域是泛型别名，测试里的 trait impl 需要具体化
-type InvokeResponse = crate::symbio_core::InvokeResponse<PluginPayload>;
+type PluginInvokeResponse = crate::symbio_core::PluginInvokeResponse<PluginPayload>;
 
 // ==================== 嵌套容器的父地址转发 ====================
 //
@@ -46,7 +46,7 @@ impl Plugin for Probe {
         PluginMeta::new("probe", "probe")
     }
 
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse {
+    async fn route(self: Arc<Self>, ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse {
         self.seen_route
             .lock()
             .unwrap()
@@ -57,8 +57,8 @@ impl Plugin for Probe {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse {
         self.seen_traverse
             .lock()
             .unwrap()
@@ -90,8 +90,8 @@ fn composite_of(entries: Vec<(&str, Arc<dyn Plugin>)>) -> Arc<Composite> {
     Arc::new(Composite::with_registry(registry))
 }
 
-fn host() -> Arc<dyn InvokeRequest> {
-    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+fn host() -> Arc<dyn PluginInvokeRequest> {
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx
 }
 

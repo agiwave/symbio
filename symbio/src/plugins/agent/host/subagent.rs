@@ -4,7 +4,7 @@
 //!
 //! agent_run 与 file_read / shell 等工具完全同构：
 //! - 经 `traverse(available_tools)` 注册（Capability 机制，见 `super::plugin`）；
-//! - 子会话过程经**执行期出口** `EventSink`（由 ctx 注入，见 `symbio_core::exec`）
+//! - 子会话过程经**执行期出口** `ExecEventSink`（由 ctx 注入，见 `symbio_core::exec`）
 //!   转播到父视图，前端按普通流式工具渲染——工具**不返回通道**；
 //! - 子会话内工具需要用户审批时，产出 `user_prompt(WaitingUserAction)`——与
 //!   confirm 类工具走**同一套**审批机制：本工具把子会话的审批**转成载荷**
@@ -39,20 +39,20 @@
 //! 工具），随后同 4-5。父子关系始终由子会话存储元数据承载，无进程内状态。
 
 use super::store::AgentDirStore;
-use crate::symbio_core::event_bus::{register_subscriber, unregister_subscriber};
 use crate::symbio_core::schemas::session::chat_message::{message_of_node, SEG_MESSAGES};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType, ResumeAction,
     ResumeRequest,
 };
 use crate::symbio_core::schemas::session::session_chat;
-use crate::symbio_core::vdfs::{vdfs_context, VdfsError};
-use crate::symbio_core::vdfs_provider::{
+use crate::symbio_core::{register_subscriber, unregister_subscriber};
+use crate::symbio_core::{
     vdfs_change_of, VdfsContent, VdfsNode, VdfsProvider, VdfsRequest, VDFS_STATUS_WORKING,
 };
+use crate::symbio_core::{vdfs_context, VdfsError};
 use crate::symbio_core::{
-    AbortSignal, EventSink, ExecEnv, InvokeRequest, InvokeRequestExt, Plugin, PluginError,
-    PluginFrame, MODE, PATH, PLUGIN_SESSION, PROVIDER_ID, RISK_LEVEL, SESSION_CHAT_SEND,
+    ExecAbortSignal, ExecEnv, ExecEventSink, Plugin, PluginError, PluginFrame, PluginInvokeRequest,
+    PluginInvokeRequestExt, MODE, PATH, PLUGIN_SESSION, PROVIDER_ID, RISK_LEVEL, SESSION_CHAT_SEND,
     SESSION_ID, TOOL_CALL_ID, VDFS_ROOT, VDFS_UNWATCH, VDFS_WATCH,
 };
 use serde_json::{json, Value};
@@ -155,7 +155,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
         &self,
         args: Value,
         env: &ExecEnv,
-        ctx: Arc<dyn InvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         #[derive(serde::Deserialize, Clone)]
         struct RunRequest {
@@ -470,7 +470,7 @@ fn validate_working_dir(provided: &str) -> Result<String, PluginError> {
 /// 全在 `symbio_core`：线路形状（`vdfs/*` 的信封）不进本文件，也不新增插件间依赖。
 async fn validate_subsession_exists(
     parent: Arc<dyn Plugin>,
-    ctx: &Arc<dyn InvokeRequest>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
     session_id: &str,
 ) -> Result<(), PluginError> {
     let provider = parent.get_vfs_provider().ok_or_else(|| {
@@ -528,7 +528,7 @@ async fn validate_subsession_exists(
 /// 那个插件实例，子智能体分形子树里同样成立。
 async fn register_subsession(
     parent: Arc<dyn Plugin>,
-    ctx: &Arc<dyn InvokeRequest>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
     session_id: &str,
     metadata: &Value,
 ) -> Result<(), PluginError> {
@@ -578,7 +578,7 @@ struct RelayBridge {
     /// 进程内 VDFS 视图：回读消息节点（`stat` / `read`）
     provider: Option<Arc<dyn VdfsProvider>>,
     /// 回读用的请求上下文（`vdfs_context` 的原料）
-    invoke_ctx: Arc<dyn InvokeRequest>,
+    invoke_ctx: Arc<dyn PluginInvokeRequest>,
     /// 摘除订阅要用（`vdfs/unwatch` 与 `unregister_subscriber` 都要它）
     router: Arc<dyn Plugin>,
     /// 子会话的**展示地址**（`<根>/session/<sid>`）——判定变更归属
@@ -627,7 +627,7 @@ struct RelayBridge {
 ///
 /// 返回 [`RelayOutcome`]：最终答复（= 最后一条**已完成**的助手正文）/
 /// 待用户动作载荷 / 子会话错误。优先级与收口前一致——错误 > 待审批 > 文本。
-async fn relay_bridge(b: RelayBridge, sink: EventSink, abort: AbortSignal) -> RelayOutcome {
+async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSignal) -> RelayOutcome {
     let RelayBridge {
         mut bus_rx,
         provider,
@@ -717,7 +717,7 @@ async fn relay_bridge(b: RelayBridge, sink: EventSink, abort: AbortSignal) -> Re
                     known.remove(&mid);
                     records.remove(&mid);
                     // 删除按 id 生效（不依赖父子锚点），原样转发。
-                    sink.emit(crate::symbio_core::llm::turn::removed_frame(&mid)).await;
+                    sink.emit(crate::symbio_core::removed_frame(&mid)).await;
                     continue;
                 }
 
@@ -863,7 +863,7 @@ async fn relay_bridge(b: RelayBridge, sink: EventSink, abort: AbortSignal) -> Re
 /// 回读一个节点的**视图**（变更不带载荷，状态只能这么拿）。
 async fn stat_node(
     provider: &Option<Arc<dyn VdfsProvider>>,
-    ctx: &Arc<dyn InvokeRequest>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
     rel: &str,
 ) -> Option<VdfsNode> {
     provider
@@ -877,7 +877,7 @@ async fn stat_node(
 /// 回读一个节点的**正文**。读不到（已删 / 无 provider）返回 `None`。
 async fn read_text(
     provider: &Option<Arc<dyn VdfsProvider>>,
-    ctx: &Arc<dyn InvokeRequest>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
     rel: &str,
 ) -> Option<String> {
     let content = provider
@@ -897,7 +897,7 @@ async fn read_text(
 /// - **挂载段**是容器的分发键——目录名 = 实例名，故取 `PLUGIN_SESSION`。
 async fn session_vdfs_addr(
     parent: &Arc<dyn Plugin>,
-    ctx: &Arc<dyn InvokeRequest>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
     session_id: &str,
 ) -> Result<String, PluginError> {
     let c = ctx.fork();
@@ -931,7 +931,7 @@ async fn session_vdfs_addr(
 /// `<sid>/message/<mid>`——一条 `vdfs/watch` 同时收运行态与消息。
 async fn vdfs_watch(
     parent: &Arc<dyn Plugin>,
-    ctx: &Arc<dyn InvokeRequest>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
     addr: &str,
     subscribe: bool,
 ) {

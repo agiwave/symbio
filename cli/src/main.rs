@@ -16,11 +16,9 @@ use std::process::ExitCode;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use args::Command;
-use client::{Frame, SymbioClient};
+use client::{Frame, SymbioClient, SESSION_OUTCOME_ABORTED};
 use render::Renderer;
-use symbio::symbio_core::vdfs_provider::{
-    VDFS_OUTCOME_ABORTED, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,
-};
+use symbio::symbio_core::{VDFS_STATUS_FAILED, VDFS_STATUS_WORKING};
 
 /// CLI 只做「解析 → 启动 → 发送 → 渲染」，业务全在后端插件树里。
 ///
@@ -61,9 +59,9 @@ async fn main() -> ExitCode {
         .as_deref()
         .and_then(symbio::symbio_core::parse_level)
         .unwrap_or(if args.verbose {
-            symbio::symbio_core::LEVEL_DEBUG
+            symbio::symbio_core::LOG_LEVEL_DEBUG
         } else {
-            symbio::symbio_core::LEVEL_INFO
+            symbio::symbio_core::LOG_LEVEL_INFO
         });
     symbio::symbio_core::set_min_level(log_level);
 
@@ -185,7 +183,7 @@ async fn run_heartbeat_daemon(mut client: SymbioClient, args: &args::Args) -> Ex
                 eprintln!("✖ [{sid}] {err}");
             }
             _ if node.attributes.get("outcome").and_then(|v| v.as_str())
-                == Some(VDFS_OUTCOME_ABORTED) =>
+                == Some(SESSION_OUTCOME_ABORTED) =>
             {
                 eprintln!("■ [{sid}] 本轮被中止");
             }

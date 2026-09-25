@@ -36,7 +36,7 @@ fn delta_kind_follows_the_top_level_type() {
     assert!(!evs.is_empty());
     assert!(evs
         .iter()
-        .all(|e| matches!(e, ProtocolEvent::ContentDelta(_))));
+        .all(|e| matches!(e, ModelProtocolEvent::ContentDelta(_))));
 
     let mut ext = OpenaiResponsesProtocol
         .open_partial_line(REASONING)
@@ -45,7 +45,7 @@ fn delta_kind_follows_the_top_level_type() {
     assert!(!evs.is_empty());
     assert!(evs
         .iter()
-        .all(|e| matches!(e, ProtocolEvent::ReasoningDelta(_))));
+        .all(|e| matches!(e, ModelProtocolEvent::ReasoningDelta(_))));
 }
 
 /// **携带全量文本的事件必须排除**：增量吐出去前端会重复一遍，而完整行路径对这些

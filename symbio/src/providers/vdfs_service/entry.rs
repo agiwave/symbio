@@ -17,7 +17,7 @@
 //! [`DirVdfs`](super::dir::DirVdfs) / [`SingleFileVdfs`](super::single_file::SingleFileVdfs)
 //! 自己身上。
 
-use crate::symbio_core::vdfs_provider::{VdfsAccess, VdfsError, VdfsNode, VdfsResult};
+use crate::symbio_core::{VdfsAccess, VdfsError, VdfsNode, VdfsResult};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 

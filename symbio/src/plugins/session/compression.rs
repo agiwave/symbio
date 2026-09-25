@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
-use crate::symbio_core::{InvokeRequest, InvokeRequestExt};
+use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt};
 
 const COMPRESSION_TOKEN_THRESHOLD: f64 = 0.7;
 const COMPRESSION_PRESERVE_THRESHOLD: f64 = 0.3;
@@ -292,7 +292,10 @@ pub fn estimate_overhead_with_tools(
 ///
 /// 便捷包装：自行取一次工具清单后转交 [`estimate_overhead_with_tools`]。
 /// 调用方若已持有工具清单（如会话主循环），应直接调后者以免重复取。
-pub async fn estimate_request_overhead(system_prompt: &str, ctx: &Arc<dyn InvokeRequest>) -> usize {
+pub async fn estimate_request_overhead(
+    system_prompt: &str,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) -> usize {
     use crate::symbio_core::CAPABILITY_VISITOR;
 
     let tools = match ctx.get(CAPABILITY_VISITOR) {
@@ -583,7 +586,10 @@ const CONTEXT_NUDGE_TEXT: &str =
 pub fn build_request_view(
     messages: &[ChatMessage],
     window: usize,
-    retention: &std::collections::HashMap<String, crate::symbio_core::ToolContextRetention>,
+    retention: &std::collections::HashMap<
+        String,
+        crate::symbio_core::CapabilityToolContextRetention,
+    >,
     fade_active: bool,
     fade_keep_turns: usize,
     content_keep_recent: usize,

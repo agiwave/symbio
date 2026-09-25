@@ -39,7 +39,9 @@ pub mod stat;
 pub mod tree;
 pub mod write;
 
-use crate::symbio_core::{Capability, CapabilityCategory, CapabilityMeta, ToolContextRetention};
+use crate::symbio_core::{
+    Capability, CapabilityCategory, CapabilityMeta, CapabilityToolContextRetention,
+};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::sync::Arc;
@@ -67,7 +69,7 @@ pub fn tool(
     description: &str,
     parameters: serde_json::Value,
     examples: Vec<&str>,
-    retention: Option<ToolContextRetention>,
+    retention: Option<CapabilityToolContextRetention>,
 ) -> CapabilityMeta {
     CapabilityMeta {
         name: name.to_string(),

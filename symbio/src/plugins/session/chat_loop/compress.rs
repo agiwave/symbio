@@ -19,8 +19,8 @@ use crate::symbio_core::{dir_from_ctx, PLUGIN_SESSION};
 pub(crate) async fn auto_compress_process(
     orchestrator: &ChatOrchestrator,
     context: &mut SessionContext,
-    ctx: &Arc<dyn InvokeRequest>,
-    abort: &AbortSignal,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    abort: &ExecAbortSignal,
     overhead_tokens: usize,
     force: bool,
 ) -> Result<Option<usize>, CompressionFailure> {
@@ -197,8 +197,8 @@ impl CompressionFailure {
 async fn compress_snapshot_inner(
     orchestrator: &ChatOrchestrator,
     context: &mut SessionContext,
-    ctx: &Arc<dyn InvokeRequest>,
-    abort: &AbortSignal,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    abort: &ExecAbortSignal,
     compression_request: Vec<ChatMessage>,
     keep_messages: Vec<ChatMessage>,
     extra_hints: Option<&str>,
@@ -435,7 +435,7 @@ async fn compress_snapshot_inner(
 ///
 /// ## 为什么必须有这一步
 ///
-/// 压缩走的是 store 层的 `replace_messages`（`vdfs_provider` 的三条 VDFS 写路由
+/// 压缩走的是 store 层的 `replace_messages`（`vdfs` 的三条 VDFS 写路由
 /// 在 `replace_messages` 之后都要发变更，压缩这条路径原先漏了）。VDFS 变更流是
 /// 前端转写的**唯一**入口，漏发即前端永久停留在压缩前的列表上：
 /// 被压掉的历史仍在、快照不出现、被改号的消息仍持旧序号——而**没有任何机制会纠正**，
@@ -472,8 +472,8 @@ async fn emit_transcript_rewrite(
 async fn compress_with_snapshot_core(
     orchestrator: &ChatOrchestrator,
     context: &mut SessionContext,
-    ctx: &Arc<dyn InvokeRequest>,
-    abort: &AbortSignal,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    abort: &ExecAbortSignal,
     compression_request: Vec<ChatMessage>,
     keep_messages: Vec<ChatMessage>,
     extra_hints: Option<&str>,
@@ -555,8 +555,8 @@ fn summary_text(m: &ChatMessage) -> String {
 pub(crate) async fn run_context_compact(
     orchestrator: &ChatOrchestrator,
     context: &mut SessionContext,
-    ctx: &Arc<dyn InvokeRequest>,
-    abort: &AbortSignal,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    abort: &ExecAbortSignal,
     split_user_idx: usize,
     hints: Option<&str>,
 ) -> (bool, usize, usize) {
@@ -625,9 +625,9 @@ pub(crate) async fn run_context_compact(
 /// 会纠正它。
 pub(crate) async fn retry_compaction(
     orchestrator: &ChatOrchestrator,
-    ctx: &Arc<dyn InvokeRequest>,
-    sink: &EventSink,
-    abort: &AbortSignal,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    sink: &ExecEventSink,
+    abort: &ExecAbortSignal,
     session: &Arc<PersistentChatSession>,
     target_id: &str,
 ) -> Result<(), PluginError> {
@@ -750,7 +750,7 @@ async fn send_compression_request(
     system_prompt: &str,
     messages: &[ChatMessage],
     root_id: &str,
-    abort: &AbortSignal,
+    abort: &ExecAbortSignal,
 ) -> Result<ChatMessage, PluginError> {
     // 压缩是**内部 LLM 请求**，不是对话轮次：其流式事件（Turn 起始 / 思考 / 正文 delta）
     // 绝不能进入对话流——否则前端会多出一个永远停在"正在思考…"的空 Turn（压缩请求
@@ -761,12 +761,12 @@ async fn send_compression_request(
     // （出帧静默），rx 临时与主通道对调（入帧收真实 Abort）——因为当时「出口」
     // 只能是通道，「静默」只能靠换掉通道的一半来伪造。
     //
-    // 现在静默是**出口的一种取值**（[`EventSink::silent`]），而中止走**共享的
-    // [`AbortSignal`]**——压缩请求与对话轮次拿到的是同一个信号，用户停止时立即
+    // 现在静默是**出口的一种取值**（[`ExecEventSink::silent`]），而中止走**共享的
+    // [`ExecAbortSignal`]**——压缩请求与对话轮次拿到的是同一个信号，用户停止时立即
     // 感知，不需要「把 rx 临时移交主通道」这种所有权交换。整个 hack（含两个
     // `mem::replace` 与一个 drain task）因此消失，且「压缩绝不产生可见事件」
     // 从运行期约定变成类型上的选择。
-    let sink = EventSink::silent();
+    let sink = ExecEventSink::silent();
 
     // 压缩请求窗口日志：此窗口内出帧静默、消费循环收不到任何流式帧，
     // 若无日志，长压缩请求表现为"整段时间无任何输出"（用户视角的卡死）。
@@ -814,7 +814,7 @@ async fn send_compression_request(
 ///
 /// 注意：这里**绝不发射 Turn 帧**（不发 emit_streaming_start）。压缩是内部请求、
 /// 不是对话轮次——若误走真实出口会在前端留下永远"正在思考…"的空 Turn 骨架
-/// （每轮压缩尝试累积一个）。出口由调用方给定为 [`EventSink::silent`]，
+/// （每轮压缩尝试累积一个）。出口由调用方给定为 [`ExecEventSink::silent`]，
 /// 使"内部请求泄漏可见事件"这一类问题在结构上不可能发生。
 async fn run_compression_llm(
     orchestrator: &ChatOrchestrator,

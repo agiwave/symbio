@@ -7,13 +7,13 @@
 //!
 //! 条目地址在本工具里用不上（只报 `name`），所以只取 `item.node`。
 //!
-//! [`VdfsItem`]: crate::symbio_core::vdfs_provider::VdfsItem
+//! [`VdfsItem`]: crate::symbio_core::VdfsItem
 //!
 //! **虚拟目录 `.vdfsv2`**：系统资源类别统一挂接在此目录之下；对 `.vdfsv2` 列目录
 //! 即返回当前可访问的全部类别，无需独立工具。
 
 use super::{tool, ToolVdfs};
-use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, InvokeRequest, PluginError};
+use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -58,7 +58,7 @@ impl Capability for ListTool {
         &self,
         args: Value,
         _env: &ExecEnv,
-        ctx: Arc<dyn InvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         let raw = args;
         let path = raw

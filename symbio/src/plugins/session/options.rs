@@ -31,14 +31,14 @@
 //! `60` 心跳任务；新增贡献方取空闲号段。
 //!
 //! 号段只用于**收集层排序**，不下发：前端收到的是已排好序的字段数组
-//! （见 `symbio_core::option::OptionVisitor::register_option_field`）。
+//! （见 `symbio_core::capability::option::OptionVisitor::register_option_field`）。
 
 use super::plugin::SessionPlugin;
 use crate::symbio_core::schemas::detail::{
     DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
     DETAIL_PICK_DIRECTORY,
 };
-use crate::symbio_core::InvokeRequest;
+use crate::symbio_core::PluginInvokeRequest;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -72,7 +72,7 @@ impl SessionPlugin {
     /// 会话的**选项定义**（`binding = "option"`）——选项栏与会话详情页共用同一份。
     ///
     /// 载体有两处，内容同一份（一处真相、两处投递）：已落盘会话挂
-    /// [`VdfsNode::schema`](crate::symbio_core::vdfs_provider::VdfsNode::schema)，
+    /// [`VdfsNode::schema`](crate::symbio_core::VdfsNode::schema)，
     /// 新建草稿挂 `VdfsNewType::schema`。
     ///
     /// ## 为什么不需要请求上下文
@@ -89,8 +89,8 @@ impl SessionPlugin {
     /// 运行期数据，故不做缓存；若将来成为热点，正确的做法是在**机制层**给
     /// `VdfsProvider` 加「自述可缓存」的通用开关，而不是给会话开特例。
     pub(crate) async fn build_option_definition(&self) -> DetailDefinition {
-        let ctx: Arc<dyn InvokeRequest> =
-            Arc::new(crate::symbio_core::SimpleRequest::new(None, None));
+        let ctx: Arc<dyn PluginInvokeRequest> =
+            Arc::new(crate::symbio_core::PluginSimpleRequest::new(None, None));
         let parent = self.get_parent();
         let visitor = crate::symbio_core::collect_options(parent.as_ref(), &ctx).await;
         DetailDefinition {

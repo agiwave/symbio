@@ -14,7 +14,7 @@
 //! 本模块把这件事搬回协议层：core 只按 `\n` 切行，**协议**用 [`JsonLineExtractor`]
 //! 声明「这一行里哪个位置的字符串要增量吐」。
 //!
-//! ## 契约（与 `symbio_core::sse::PartialLineExtractor` 一致）
+//! ## 契约（与 `symbio_core::sse::SsePartialLineExtractor` 一致）
 //!
 //! - **只吃新增字节**：内部状态机逐字节推进，已处理过的不再看第二遍 ⇒ 总代价
 //!   O(行长)，不再是「每来一块重扫整行」。
@@ -30,8 +30,8 @@
 //! 这些字段的值不可信。它们只走完整行的 `SseLineParser::parse_line`。
 //! 因此本模块只回 `ContentDelta` / `ReasoningDelta` / `ToolCallDelta`。
 
-use crate::symbio_core::llm::sse::PartialLineExtractor;
-use crate::symbio_core::ProtocolEvent;
+use crate::symbio_core::ModelProtocolEvent;
+use crate::symbio_core::SsePartialLineExtractor;
 
 // ============ 协议侧实现的钩子 ============
 
@@ -83,7 +83,7 @@ pub trait PartialJsonSink: Send {
     fn begin_string(&mut self, path: &FieldPath<'_>) -> StrAction;
 
     /// 当前字符串的增量（**已按 JSON 转义规则解码**），把事件追加到 `out`。
-    fn text(&mut self, text: &str, out: &mut Vec<ProtocolEvent>);
+    fn text(&mut self, text: &str, out: &mut Vec<ModelProtocolEvent>);
 
     /// 一个标量（数字 / `true` / `false` / `null`）结束，`raw` 是原文。
     ///
@@ -246,7 +246,7 @@ impl<S: PartialJsonSink> JsonLineExtractor<S> {
     }
 
     /// 字符串结束：键则落到 `self.key`，值则交付尾巴。
-    fn end_string(&mut self, out: &mut Vec<ProtocolEvent>) {
+    fn end_string(&mut self, out: &mut Vec<ModelProtocolEvent>) {
         self.settle_surrogate();
         if self.reading_key {
             self.key.clear();
@@ -263,7 +263,7 @@ impl<S: PartialJsonSink> JsonLineExtractor<S> {
     }
 
     /// 把已解码的文本交给 sink（值才交；键在攒全文）。
-    fn flush_text(&mut self, out: &mut Vec<ProtocolEvent>) {
+    fn flush_text(&mut self, out: &mut Vec<ModelProtocolEvent>) {
         if self.reading_key || self.buf.is_empty() {
             return;
         }
@@ -409,7 +409,7 @@ impl<S: PartialJsonSink> JsonLineExtractor<S> {
 
     // ---- 主循环 ----
 
-    fn feed(&mut self, s: &str, out: &mut Vec<ProtocolEvent>) {
+    fn feed(&mut self, s: &str, out: &mut Vec<ModelProtocolEvent>) {
         let b = s.as_bytes();
         let mut i = 0usize;
         while i < b.len() {
@@ -536,8 +536,8 @@ impl<S: PartialJsonSink> JsonLineExtractor<S> {
     }
 }
 
-impl<S: PartialJsonSink + 'static> PartialLineExtractor for JsonLineExtractor<S> {
-    fn push(&mut self, bytes: &str, out: &mut Vec<ProtocolEvent>) {
+impl<S: PartialJsonSink + 'static> SsePartialLineExtractor for JsonLineExtractor<S> {
+    fn push(&mut self, bytes: &str, out: &mut Vec<ModelProtocolEvent>) {
         self.feed(bytes, out);
     }
 }
@@ -549,10 +549,10 @@ impl<S: PartialJsonSink + 'static> PartialLineExtractor for JsonLineExtractor<S>
 /// 只在字符边界切分——core 的 `utf8_chunk` 保证喂进来的永远是合法 UTF-8。
 #[cfg(test)]
 pub(crate) fn feed_chunked(
-    ext: &mut dyn PartialLineExtractor,
+    ext: &mut dyn SsePartialLineExtractor,
     line: &str,
     size: usize,
-) -> Vec<ProtocolEvent> {
+) -> Vec<ModelProtocolEvent> {
     let mut out = Vec::new();
     let mut start = 0;
     while start < line.len() {
@@ -568,12 +568,14 @@ pub(crate) fn feed_chunked(
 
 /// 把事件序列里的文本（内容 / 推理 / 工具参数）拼起来。
 #[cfg(test)]
-pub(crate) fn text_of(evs: &[ProtocolEvent]) -> String {
+pub(crate) fn text_of(evs: &[ModelProtocolEvent]) -> String {
     let mut s = String::new();
     for e in evs {
         match e {
-            ProtocolEvent::ContentDelta(t) | ProtocolEvent::ReasoningDelta(t) => s.push_str(t),
-            ProtocolEvent::ToolCallDelta(_, _, _, Some(a)) => s.push_str(a),
+            ModelProtocolEvent::ContentDelta(t) | ModelProtocolEvent::ReasoningDelta(t) => {
+                s.push_str(t)
+            }
+            ModelProtocolEvent::ToolCallDelta(_, _, _, Some(a)) => s.push_str(a),
             _ => {}
         }
     }
@@ -585,10 +587,10 @@ pub(crate) fn text_of(evs: &[ProtocolEvent]) -> String {
 /// 增量路径会把一段参数拆成多条事件（每块一条），而完整行路径只给一条——
 /// 比对前必须先合并，否则比的是「切了几块」而不是内容。
 #[cfg(test)]
-pub(crate) fn tool_args_of(evs: &[ProtocolEvent]) -> Vec<(usize, String)> {
+pub(crate) fn tool_args_of(evs: &[ModelProtocolEvent]) -> Vec<(usize, String)> {
     let mut out: Vec<(usize, String)> = Vec::new();
     for e in evs {
-        if let ProtocolEvent::ToolCallDelta(i, _, _, Some(a)) = e {
+        if let ModelProtocolEvent::ToolCallDelta(i, _, _, Some(a)) = e {
             match out.last_mut() {
                 Some((last, s)) if last == i => s.push_str(a),
                 _ => out.push((*i, a.clone())),

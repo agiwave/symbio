@@ -32,11 +32,11 @@
 
 use super::registry::PluginRegistry;
 use super::vdfs::CompositeVdfs;
-use crate::symbio_core::vdfs::descend_addr;
+use crate::symbio_core::descend_addr;
 use crate::symbio_core::{
-    lock_read, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginMeta,
-    PluginPayload, VdfsProvider, CAPABILITY_VISITOR, PATH, PLUGIN_COMPOSITE,
-    TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
+    lock_read, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginInvokeResponse, PluginMeta, PluginPayload, VdfsProvider, CAPABILITY_VISITOR, PATH,
+    PLUGIN_COMPOSITE, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
 };
 
 use std::sync::{Arc, Weak};
@@ -66,8 +66,8 @@ impl Composite {
         }
     }
 
-    /// 静态工厂：从 InvokeRequest 构造 Plugin 实例
-    pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
+    /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
+    pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         // 子插件的父引用要指向**本容器自己**，而它在 `Arc::new_cyclic` 之前还不存在
         // ——这正是那个构造器存在的理由（子插件经 `ctx.parent()` 回到容器；
         // 运行期挂载新插件时同样要用它，见 `PluginRegistry::mount_child`）。
@@ -99,7 +99,7 @@ crate::submit_object_creator!(PLUGIN_COMPOSITE, Composite::build, dyn Plugin);
 
 /// 向子插件**广播**一次收集；只有**真失败**才留痕。
 ///
-/// 收集是广播（契约见 `symbio_core/option.rs`）：宿主对每个子插件发一次问，由插件
+/// 收集是广播（契约见 `symbio_core/capability/option.rs`）：宿主对每个子插件发一次问，由插件
 /// 按 `ctx[PATH]` 自己决定贡不贡献。**不参与**的插件回答
 /// `NotFound("未知遍历路径: …")`，那是它的正常答复，不是失败——每个子插件都 warn
 /// 一次会把真正的失败埋进噪音里（启动期实测：同一条消息每个子插件各来两遍）。
@@ -113,7 +113,7 @@ crate::submit_object_creator!(PLUGIN_COMPOSITE, Composite::build, dyn Plugin);
 /// 第三处出现时最容易照抄错的那一半。
 pub(crate) async fn broadcast_collect(
     plugin: Arc<dyn Plugin>,
-    ctx: Arc<dyn InvokeRequest>,
+    ctx: Arc<dyn PluginInvokeRequest>,
     who: &str,
 ) {
     match plugin.traverse(String::new(), ctx).await {
@@ -137,7 +137,10 @@ impl Plugin for Composite {
         Self::metadata()
     }
 
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(
+        self: Arc<Self>,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
@@ -169,8 +172,8 @@ impl Plugin for Composite {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         // 装配安排：容器把自己的 vdfs 视图登记进访问层的单槽位（LLM 链路用）。
         // 这不是「容器是根」——composite 只是恰好包含若干子目录的 provider，
         // 能否出现在那里取决于装配，不是本模块的属性。系统链路取同一个根走的是

@@ -1,10 +1,10 @@
 //! V2.6 分形路由专用会话管理 (支持外部 ID)
 
-use symbio::symbio_core::PluginFrame;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use symbio::symbio_core::PluginFrame;
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -22,7 +22,7 @@ pub struct RouteConnection {
     /// 那些任务永不执行——订阅表就只能靠「下一次发布时探测 `tx.is_closed()`」兜底，
     /// 而那要求**之后还有发布**；没有发布就一直留着。
     ///
-    /// 会话主循环的中止走**另一条路**（`session/chat/abort` 路由 + `AbortSignal`），
+    /// 会话主循环的中止走**另一条路**（`session/chat/abort` 路由 + `ExecAbortSignal`），
     /// 与本令牌无关。因此关闭前端连接**不会**中止正在跑的那一轮对话——
     /// 这正是 `route_v2_close` 想要的语义（后端任务独立于前端连接继续运行）。
     pub cancel: CancellationToken,
@@ -91,7 +91,10 @@ impl RouteConnectionManager {
         tx: mpsc::Sender<PluginFrame>,
         cancel: CancellationToken,
     ) -> String {
-        let id = format!("route_conn_{}", self.next_id.fetch_add(1, Ordering::Relaxed));
+        let id = format!(
+            "route_conn_{}",
+            self.next_id.fetch_add(1, Ordering::Relaxed)
+        );
         self.register_fixed(id.clone(), tx, cancel).await;
         id
     }
@@ -128,7 +131,7 @@ impl RouteConnectionManager {
 
     /// 摘除连接并**取消其订阅令牌**（订阅表因此确定性地收口，不等下一次发布）。
     ///
-    /// 「不中止业务任务」的语义不变：本方法只碰订阅令牌，不碰会话的 `AbortSignal`。
+    /// 「不中止业务任务」的语义不变：本方法只碰订阅令牌，不碰会话的 `ExecAbortSignal`。
     pub async fn remove_connection(&self, id: &str) {
         let removed = self.connections.write().await.remove(id);
         match removed {

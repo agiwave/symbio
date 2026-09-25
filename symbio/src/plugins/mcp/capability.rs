@@ -17,7 +17,7 @@
 
 use crate::plugins::mcp::schemas::mcp_config::McpServerConfig;
 use crate::symbio_core::{
-    Capability, CapabilityCategory, CapabilityMeta, ExecEnv, InvokeRequest, PluginError,
+    Capability, CapabilityCategory, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest,
 };
 use async_trait::async_trait;
 use serde_json::Value;
@@ -83,7 +83,7 @@ impl Capability for McpToolCapability {
         &self,
         args: Value,
         _env: &ExecEnv,
-        _ctx: Arc<dyn InvokeRequest>,
+        _ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         let result = self
             .manager

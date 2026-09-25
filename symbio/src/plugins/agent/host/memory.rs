@@ -40,7 +40,9 @@
 //! 于是本插件不再自己写「超限怎么办」「截断怎么算」——那些口径全项目只有一份。
 
 use super::store::AgentDirStore;
-use crate::symbio_core::{MemoryFile, NodeSpec, SegmentSpec, AGENTS_FILE, PLUGIN_AGENT};
+use crate::symbio_core::{
+    MemoryFile, MemoryNodeSpec, MemorySegmentSpec, MEMORY_AGENTS_FILE, PLUGIN_AGENT,
+};
 
 /// 系统提示词条目在收集器里的注册名（同名覆盖的键）。
 ///
@@ -72,8 +74,8 @@ pub fn store(
 }
 
 /// VDFS 节点规格 —— `list` 与 `stat` 共用，两条链路不会分叉。
-pub fn node_spec() -> NodeSpec<'static> {
-    NodeSpec {
+pub fn node_spec() -> MemoryNodeSpec<'static> {
+    MemoryNodeSpec {
         title: SEGMENT_TITLE,
         // 场景标签与其它几层同一口径：用**所属插件**的场景名，而不是另造一个 `memory`
         // （`memory` 在前端未登记任何图标 / 渲染器，等于一个没有消费者的死标签）
@@ -87,9 +89,9 @@ pub fn node_spec() -> NodeSpec<'static> {
 /// 相对地址是常态：provider 全程只跟相对地址打交道。需要协议级绝对地址的场合
 /// （提示词里印给模型的可编辑地址），由调用方经
 /// `symbio_core::vdfs::absolute_addr(ctx, rel)` 用上下文的当前父地址拼出——
-/// 挂载点叫什么不归本插件。文件名取 [`AGENTS_FILE`]：不写第二份地址。
+/// 挂载点叫什么不归本插件。文件名取 [`MEMORY_AGENTS_FILE`]：不写第二份地址。
 pub fn rel_path(agent_id: &str) -> String {
-    format!("{agent_id}/{AGENTS_FILE}")
+    format!("{agent_id}/{MEMORY_AGENTS_FILE}")
 }
 
 /// 系统提示词片段：**走内核排版**（地址 + 上限 + 当前 + 正文 + 截断提示）。
@@ -104,7 +106,7 @@ pub fn segment(store: &MemoryFile, address: &str) -> Result<Option<String>, Stri
     if !store.has_scope() || store.read()?.trim().is_empty() {
         return Ok(None);
     }
-    store.segment(&SegmentSpec {
+    store.segment(&MemorySegmentSpec {
         title: SEGMENT_TITLE,
         address,
         // 点明与工作区那一份的关系：同名不同作用域，写混了模型会找错地方

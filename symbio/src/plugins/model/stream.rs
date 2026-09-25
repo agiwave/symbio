@@ -1,7 +1,7 @@
 //! SSE 流循环 —— 把响应字节流转成单轮产物（core `llm/` 契约的实现细节）。
 //!
 //! 只有 model 插件使用，故住在插件内而非 core `llm/`。core 只提供
-//! [`SseLineParser`](crate::symbio_core::llm::sse::SseLineParser) 行解析契约与
+//! [`SseLineParser`](crate::symbio_core::SseLineParser) 行解析契约与
 //! [`TurnOutput`] 产物结构；本模块负责按 `\n` 切分、按前缀截断去重、把协议事件
 //! 分发给 [`TurnOutput`] 并经 `sink` 实时下发流式子节点——**不认识任何协议字段名**。
 //!
@@ -11,14 +11,14 @@
 use crate::plugin_error;
 use crate::plugin_info;
 use crate::plugin_warn;
-use crate::symbio_core::exec::{AbortSignal, EventSink};
-use crate::symbio_core::llm::sse::{utf8_chunk, PartialLineExtractor, SseLineParser};
-use crate::symbio_core::llm::turn::{emit_delta, emit_message, short_id, TurnOutput};
-use crate::symbio_core::llm::model_provider::{ProtocolEvent, Usage};
+use crate::plugins::model::http::STREAM_IDLE_TIMEOUT;
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
-use crate::plugins::model::http::STREAM_IDLE_TIMEOUT;
+use crate::symbio_core::{emit_delta, emit_message, short_id, TurnOutput};
+use crate::symbio_core::{utf8_chunk, SseLineParser, SsePartialLineExtractor};
+use crate::symbio_core::{ExecAbortSignal, ExecEventSink};
+use crate::symbio_core::{ModelProtocolEvent, ModelUsage};
 use futures::StreamExt;
 use std::collections::HashMap;
 
@@ -37,7 +37,7 @@ const PARTIAL_LINE_MIN_BYTES: usize = 256;
 /// 长度截断，而增量路径每发一次就累加一次。
 ///
 /// 这套机制成立的前提是：增量路径吐出的文本**恰好是**完整行文本的前缀。
-/// 该不变量由协议层的提取器保证（见 `crate::symbio_core::llm::sse`）——它必须
+/// 该不变量由协议层的提取器保证（见 `crate::symbio_core::sse`）——它必须
 /// 与协议解析器用**同一套转义规则**，否则按前缀截断会吃字。
 #[derive(Default)]
 struct LineProgress {
@@ -51,19 +51,19 @@ impl LineProgress {
     ///
     /// 未结束的行里只有「字符串值还在长」这件事是确定的，`finish` / `usage` /
     /// `error` 这些字段在半截 JSON 里读到的值不可信——等完整行。
-    fn record(&mut self, ev: ProtocolEvent) -> Option<ProtocolEvent> {
+    fn record(&mut self, ev: ModelProtocolEvent) -> Option<ModelProtocolEvent> {
         match ev {
-            ProtocolEvent::ContentDelta(c) => {
+            ModelProtocolEvent::ContentDelta(c) => {
                 self.content += c.len();
-                Some(ProtocolEvent::ContentDelta(c))
+                Some(ModelProtocolEvent::ContentDelta(c))
             }
-            ProtocolEvent::ReasoningDelta(r) => {
+            ModelProtocolEvent::ReasoningDelta(r) => {
                 self.reasoning += r.len();
-                Some(ProtocolEvent::ReasoningDelta(r))
+                Some(ModelProtocolEvent::ReasoningDelta(r))
             }
-            ProtocolEvent::ToolCallDelta(idx, id, name, Some(a)) => {
+            ModelProtocolEvent::ToolCallDelta(idx, id, name, Some(a)) => {
                 *self.tool_args.entry(idx).or_insert(0) += a.len();
-                Some(ProtocolEvent::ToolCallDelta(idx, id, name, Some(a)))
+                Some(ModelProtocolEvent::ToolCallDelta(idx, id, name, Some(a)))
             }
             _ => None,
         }
@@ -76,7 +76,7 @@ impl LineProgress {
 /// 也能为「尚未结束的行」开一个增量提取器。本模块只负责按 `\n` 切分、按前缀截断
 /// 去重、把事件交给 `dispatch_and_track`——**不认识任何协议字段名**。
 ///
-/// 历史上这里收的是闭包 `Fn(&str) -> Vec<ProtocolEvent>`，增量提取则由内置的
+/// 历史上这里收的是闭包 `Fn(&str) -> Vec<ModelProtocolEvent>`，增量提取则由内置的
 /// 启发式解析器代劳（硬编码 `"content":"` / `"partial_json":"` 等字段名）。那套写法
 /// 有三重问题：加协议要改循环、增量与完整行两套转义规则（会吃字）、每块重扫整行
 /// （O(n²)）。契约拆成两个方法后，三件事一起解决。
@@ -86,8 +86,8 @@ impl LineProgress {
 pub async fn parse_sse_stream(
     response: reqwest::Response,
     root_id: &str,
-    sink: &EventSink,
-    abort: &AbortSignal,
+    sink: &ExecEventSink,
+    abort: &ExecAbortSignal,
     parser: &dyn SseLineParser,
 ) -> Result<TurnOutput, String> {
     let mut stream = response.bytes_stream();
@@ -116,11 +116,11 @@ pub async fn parse_sse_stream(
     // - `partial_gave_up`：本行已问过协议、答案是「不做」——不再重试，
     //   否则每一块都要把整行重扫一遍，正是收口前那个 O(n²)
     // - `partial_fed`：已喂给提取器的字节位置（只喂新增部分）
-    let mut partial: Option<Box<dyn PartialLineExtractor>> = None;
+    let mut partial: Option<Box<dyn SsePartialLineExtractor>> = None;
     let mut partial_gave_up = false;
     let mut partial_fed = 0usize;
     // 增量提取器产出事件的暂存区（跨块复用，见 ② 处说明）
-    let mut partial_out: Vec<ProtocolEvent> = Vec::new();
+    let mut partial_out: Vec<ModelProtocolEvent> = Vec::new();
 
     loop {
         // 空闲超时包裹：流若中途挂起（连接在、数据停），最多等 STREAM_IDLE_TIMEOUT
@@ -186,13 +186,13 @@ pub async fn parse_sse_stream(
                 for mut event in parser.parse_line(trimmed) {
                     // 扣除已经通过增量模式发送的部分
                     match event {
-                        ProtocolEvent::ContentDelta(ref mut c) if progress.content > 0 => {
+                        ModelProtocolEvent::ContentDelta(ref mut c) if progress.content > 0 => {
                             *c = safe_substring(c, progress.content);
                         }
-                        ProtocolEvent::ReasoningDelta(ref mut r) if progress.reasoning > 0 => {
+                        ModelProtocolEvent::ReasoningDelta(ref mut r) if progress.reasoning > 0 => {
                             *r = safe_substring(r, progress.reasoning);
                         }
-                        ProtocolEvent::ToolCallDelta(idx, _, _, Some(ref mut a)) => {
+                        ModelProtocolEvent::ToolCallDelta(idx, _, _, Some(ref mut a)) => {
                             if let Some(&len) = progress.tool_args.get(&idx) {
                                 *a = safe_substring(a, len);
                             }
@@ -300,18 +300,18 @@ pub async fn parse_sse_stream(
 /// ④「获取到第一条消息」日志：第一条文本/推理/工具调用内容事件到达时打点，
 /// 标志「模型已开始实际产出」。此后若卡死，可确定卡在「产出过程中」或「产出完成后」。
 async fn dispatch_and_track(
-    ev: ProtocolEvent,
+    ev: ModelProtocolEvent,
     root_id: &str,
-    sink: &EventSink,
+    sink: &ExecEventSink,
     out: &mut TurnOutput,
     first_content_logged: &mut bool,
     started: std::time::Instant,
 ) -> Result<(), String> {
     if !*first_content_logged {
         let kind = match &ev {
-            ProtocolEvent::ContentDelta(_) => Some("文本"),
-            ProtocolEvent::ReasoningDelta(_) => Some("推理"),
-            ProtocolEvent::ToolCallDelta(..) => Some("工具调用"),
+            ModelProtocolEvent::ContentDelta(_) => Some("文本"),
+            ModelProtocolEvent::ReasoningDelta(_) => Some("推理"),
+            ModelProtocolEvent::ToolCallDelta(..) => Some("工具调用"),
             _ => None,
         };
         if let Some(kind) = kind {
@@ -328,13 +328,13 @@ async fn dispatch_and_track(
 }
 
 async fn dispatch_protocol_event(
-    ev: ProtocolEvent,
+    ev: ModelProtocolEvent,
     root_id: &str,
-    sink: &EventSink,
+    sink: &ExecEventSink,
     out: &mut TurnOutput,
 ) -> Result<(), String> {
     match ev {
-        ProtocolEvent::ContentDelta(c) => {
+        ModelProtocolEvent::ContentDelta(c) => {
             // Filter out truly empty content, but preserve newlines for markdown formatting
             if c.is_empty() {
                 return Ok(());
@@ -362,7 +362,7 @@ async fn dispatch_protocol_event(
                 emit_delta(sink, &out.response_text_child_id, &c).await;
             }
         }
-        ProtocolEvent::ReasoningDelta(r) => {
+        ModelProtocolEvent::ReasoningDelta(r) => {
             // Filter out truly empty content, but preserve newlines for markdown formatting
             if r.is_empty() {
                 return Ok(());
@@ -387,7 +387,7 @@ async fn dispatch_protocol_event(
                 emit_delta(sink, &out.reasoning_child_id, &r).await;
             }
         }
-        ProtocolEvent::ToolCallDelta(idx, id, name, args) => {
+        ModelProtocolEvent::ToolCallDelta(idx, id, name, args) => {
             let (tc_id, wire_id, full_args, full_name, snapshot_required) = out
                 .tool_accumulator
                 .process_delta(idx, id.as_deref(), name.as_deref(), args.as_deref());
@@ -417,20 +417,20 @@ async fn dispatch_protocol_event(
                 emit_delta(sink, &tc_id, delta).await;
             }
         }
-        ProtocolEvent::ResponseId(id) => out.response_id = Some(id),
-        ProtocolEvent::Finish(f) => out.finish = f,
-        ProtocolEvent::Usage(u) => {
+        ModelProtocolEvent::ResponseId(id) => out.response_id = Some(id),
+        ModelProtocolEvent::Finish(f) => out.finish = f,
+        ModelProtocolEvent::Usage(u) => {
             // 同一响应可能多次收到 Usage（如 Anthropic 的 message_start + message_delta 分别携带
             // input/output tokens）。按字段合并，避免后者覆盖前者丢失数据。
             out.usage = Some(match out.usage {
-                Some(prev) => Usage {
+                Some(prev) => ModelUsage {
                     input: u.input.or(prev.input),
                     output: u.output.or(prev.output),
                 },
                 None => u,
             });
         }
-        ProtocolEvent::Error(e) => return Err(e),
+        ModelProtocolEvent::Error(e) => return Err(e),
     }
     Ok(())
 }

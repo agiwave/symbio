@@ -4,7 +4,7 @@
 
 use super::*;
 
-use crate::symbio_core::vdfs_provider::VdfsChange;
+use crate::symbio_core::VdfsChange;
 
 #[tokio::test]
 async fn ops_mirror_the_disk_shapes() {

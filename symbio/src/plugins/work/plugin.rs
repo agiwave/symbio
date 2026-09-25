@@ -14,11 +14,11 @@
 use super::config::WorkConfig;
 use super::memory::{self, SEGMENT_NAME, SEGMENT_TITLE};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
-use crate::symbio_core::vdfs_provider::VdfsAccess;
+use crate::symbio_core::VdfsAccess;
 use crate::symbio_core::{
-    announce_configurable, dir_from_ctx, ConfigFile, InvokeRequest, InvokeRequestExt,
-    InvokeResponse, MemoryFile, Plugin, PluginError, PluginMeta, PluginPayload, AGENTS_FILE,
-    CAPABILITY_VISITOR, PATH, PLUGIN_WORK, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
+    announce_configurable, dir_from_ctx, MemoryFile, Plugin, PluginConfigFile, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
+    CAPABILITY_VISITOR, MEMORY_AGENTS_FILE, PATH, PLUGIN_WORK, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
 };
 use async_trait::async_trait;
 use serde_json::json;
@@ -61,15 +61,15 @@ fn config_definition() -> DetailDefinition {
 /// 工作区记忆插件。
 #[derive(Clone)]
 pub struct WorkPlugin {
-    /// 生效配置（配置文档的写入经 [`ConfigFile::apply`] 落在这里）
+    /// 生效配置（配置文档的写入经 [`PluginConfigFile::apply`] 落在这里）
     config: Arc<RwLock<WorkConfig>>,
     /// 配置文件的呈现与校验（`<根>/work/PLUGIN.yml`）
-    config_file: ConfigFile,
+    config_file: PluginConfigFile,
 }
 
 impl WorkPlugin {
-    /// 静态工厂：从 InvokeRequest 构造 Plugin 实例
-    pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
+    /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
+    pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         let dir = dir_from_ctx(&*ctx, PLUGIN_WORK);
         let config: WorkConfig = match dir.load::<WorkConfig>() {
             Ok(Some(c)) => c,
@@ -85,7 +85,7 @@ impl WorkPlugin {
     pub fn new(dir: crate::symbio_core::PluginDir, config: WorkConfig) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
-            config_file: ConfigFile::new(dir, SEGMENT_TITLE, config_definition()),
+            config_file: PluginConfigFile::new(dir, SEGMENT_TITLE, config_definition()),
         }
     }
 
@@ -106,7 +106,7 @@ impl WorkPlugin {
     ///
     /// **作用域闸门**（`ctx[WORKDIR]` 缺失 / 空 → 无作用域）与**两道容量闸门**
     /// 都在这一处注入，因此调用点不必各自判断。
-    fn store_with(ctx: &Arc<dyn InvokeRequest>, cfg: &WorkConfig) -> MemoryFile {
+    fn store_with(ctx: &Arc<dyn PluginInvokeRequest>, cfg: &WorkConfig) -> MemoryFile {
         memory::store(
             ctx.get(WORKDIR).as_deref(),
             cfg.effective_max_bytes(),
@@ -115,16 +115,16 @@ impl WorkPlugin {
     }
 
     /// 依请求上下文构造记忆门面（闸门取自当前配置）
-    pub(crate) async fn store_of(&self, ctx: &Arc<dyn InvokeRequest>) -> MemoryFile {
+    pub(crate) async fn store_of(&self, ctx: &Arc<dyn PluginInvokeRequest>) -> MemoryFile {
         let cfg = self.config.read().await;
         Self::store_with(ctx, &cfg)
     }
     /// 配置文档（呈现 / 校验 / 落盘）——VDFS 侧读写的入口
-    pub(crate) fn config_file(&self) -> &ConfigFile {
+    pub(crate) fn config_file(&self) -> &PluginConfigFile {
         &self.config_file
     }
 
-    /// 配置槽位（[`ConfigFile::read`] / [`ConfigFile::apply`] 的读写对象）
+    /// 配置槽位（[`PluginConfigFile::read`] / [`PluginConfigFile::apply`] 的读写对象）
     pub(crate) fn config_slot(&self) -> &RwLock<WorkConfig> {
         &self.config
     }
@@ -135,7 +135,7 @@ impl WorkPlugin {
     /// 这不是故障，不该往收集期错误桶里塞东西。
     async fn contribute_prompt(
         &self,
-        ctx: &Arc<dyn InvokeRequest>,
+        ctx: &Arc<dyn PluginInvokeRequest>,
         visitor: &Arc<dyn crate::symbio_core::CapabilityVisitor>,
     ) {
         let cfg = self.config.read().await.clone();
@@ -144,7 +144,7 @@ impl WorkPlugin {
         }
         let store = Self::store_with(ctx, &cfg);
         // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
-        let address = crate::symbio_core::vdfs::absolute_addr(ctx, AGENTS_FILE);
+        let address = crate::symbio_core::absolute_addr(ctx, MEMORY_AGENTS_FILE);
         match store.segment(&memory::segment_spec(&address)) {
             Ok(Some(segment)) => {
                 visitor.register_system_prompt(SEGMENT_NAME, segment).await;
@@ -171,9 +171,7 @@ impl Plugin for WorkPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(
-        self: Arc<Self>,
-    ) -> Option<Arc<dyn crate::symbio_core::vdfs_provider::VdfsProvider>> {
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn crate::symbio_core::VdfsProvider>> {
         Some(self)
     }
 
@@ -181,19 +179,22 @@ impl Plugin for WorkPlugin {
     ///
     /// 记忆的读 / 写 / 编辑全部由 VDFS 承接（`<根>/work/AGENTS.md`）——
     /// 与 agent 插件同一取舍：宿主与模型走同一条链路，不为「记忆」再造一条协议。
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(
+        self: Arc<Self>,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
         Err(PluginError::NotFound(format!(
             "work 无自有协议路由 `{path}`：工作区记忆一律经 VDFS 访问（{}）",
-            crate::symbio_core::vdfs::absolute_addr(&ctx, AGENTS_FILE)
+            crate::symbio_core::absolute_addr(&ctx, MEMORY_AGENTS_FILE)
         )))
     }
 
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let sub_path = ctx.get(PATH).unwrap_or_default();
         if sub_path != TRAVERSE_AVAILABLE_TOOLS {
             return Err(PluginError::NotFound(format!("未知遍历路径: {sub_path}")));
@@ -201,7 +202,7 @@ impl Plugin for WorkPlugin {
 
         if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
             // ① VDFS 挂载点：记忆文件本体（模型与用户共用的编辑面）
-            let me: crate::symbio_core::vdfs::DynVdfsProvider = self.clone();
+            let me: crate::symbio_core::DynVdfsProvider = self.clone();
             visitor.register_vdfs_provider(PLUGIN_WORK, me).await;
 
             // ② 系统提示词：记忆注入（含地址与容量口径）

@@ -4,11 +4,11 @@
 
 use super::*;
 // dispatch 是 VdfsProvider 的唯一入口（测试经文件尾的 LIST/STAT/… 请求常量调用）
-use crate::symbio_core::vdfs_provider::VdfsProvider;
+use crate::symbio_core::VdfsProvider;
 // 地址构造辅助：只被本测试用，故不经 `plugin.rs` 的共享面转出（那里会让
 // `unused_imports` 误报——它看不见「仅经 glob 链使用」的再导出）。
 use crate::plugins::session::plugin::nodes::{message_dir_path, message_path};
-use crate::symbio_core::vdfs_provider::VdfsChange;
+use crate::symbio_core::VdfsChange;
 // 每例独占存储根；guard 在插件之后释放，失败时也会清理。
 fn fixture() -> (tempfile::TempDir, SessionPlugin) {
     let dir = tempfile::tempdir().unwrap();
@@ -475,7 +475,7 @@ async fn memory_is_a_read_write_file_inside_the_session() {
     let (_dir, p) = fixture();
     let id = unique_id("memory");
     p.save_session(&Session::new(&id)).await.unwrap();
-    let path = format!("{id}/{}", crate::symbio_core::AGENTS_FILE);
+    let path = format!("{id}/{}", crate::symbio_core::MEMORY_AGENTS_FILE);
 
     // ① 会话内部并列着记忆（它本来就是会话的一部分，不另开一条寻址）
     let items = p
@@ -486,7 +486,7 @@ async fn memory_is_a_read_write_file_inside_the_session() {
         .unwrap();
     let mem = items
         .iter()
-        .find(|it| it.node.name == crate::symbio_core::AGENTS_FILE)
+        .find(|it| it.node.name == crate::symbio_core::MEMORY_AGENTS_FILE)
         .expect("会话内部应列出记忆文件");
     assert!(!mem.node.is_dir(), "记忆是文件，不是目录");
     assert_eq!(
@@ -587,7 +587,7 @@ async fn memory_write_respects_the_configured_gate() {
     };
     let id = unique_id("memory-gate");
     p.save_session(&Session::new(&id)).await.unwrap();
-    let path = format!("{id}/{}", crate::symbio_core::AGENTS_FILE);
+    let path = format!("{id}/{}", crate::symbio_core::MEMORY_AGENTS_FILE);
 
     assert!(
         p.dispatch(
@@ -619,7 +619,7 @@ async fn memory_write_respects_the_configured_gate() {
 async fn memory_of_unknown_session_is_not_found() {
     let (_dir, p) = fixture();
     let id = unique_id("memory-ghost");
-    let path = format!("{id}/{}", crate::symbio_core::AGENTS_FILE);
+    let path = format!("{id}/{}", crate::symbio_core::MEMORY_AGENTS_FILE);
 
     assert!(p.dispatch(&vctx(), &path, STAT).await.is_err());
     assert!(p.dispatch(&vctx(), &path, READ).await.is_err());
@@ -641,7 +641,7 @@ async fn memory_write_notifies_subscribers() {
     let (_dir, p) = fixture();
     let id = unique_id("memory-notify");
     p.save_session(&Session::new(&id)).await.unwrap();
-    let path = format!("{id}/{}", crate::symbio_core::AGENTS_FILE);
+    let path = format!("{id}/{}", crate::symbio_core::MEMORY_AGENTS_FILE);
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<vdfs::VdfsChange>();
     let sink: vdfs::VdfsChangeSink = Arc::new(move |c| {
@@ -666,7 +666,7 @@ async fn memory_write_notifies_subscribers() {
     let got = rx.recv().await.expect("写入应投递一条变更");
     assert_eq!(
         got.path,
-        format!("{id}/{}", crate::symbio_core::AGENTS_FILE),
+        format!("{id}/{}", crate::symbio_core::MEMORY_AGENTS_FILE),
         "变更路径与 list 返回的节点地址同源"
     );
     assert!(got.data.is_none(), "资源信号无载荷（信封没有操作枚举）");

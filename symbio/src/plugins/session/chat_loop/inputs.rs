@@ -32,7 +32,7 @@ use super::*;
 /// 从未真正送达模型。
 pub(crate) async fn resolve_system_prompt(
     req_system_prompt: Option<&str>,
-    ctx: &Arc<dyn InvokeRequest>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
 ) -> String {
     let mut out = String::new();
 
@@ -108,9 +108,9 @@ pub(crate) struct TurnInputs {
 /// 5. 请求视图重建（`build_request_view` 唯一入口）
 pub(crate) async fn prepare_turn_inputs(
     orchestrator: &ChatOrchestrator,
-    ctx: &Arc<dyn InvokeRequest>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
     context: &mut SessionContext,
-    sink: &EventSink,
+    sink: &ExecEventSink,
     turn: &mut TurnState,
     req: &TurnRequest,
 ) -> Result<TurnInputs, TurnExit> {
@@ -151,11 +151,11 @@ pub(crate) async fn prepare_turn_inputs(
     //    保留策略，LastOnly/LastN → 更早调用的参数与结果替换为占位文案
     //    （ToolCall↔Tool 配对完整保留，不会造成大模型逻辑断联）；
     // 4) nudge：水位提醒请求级注入（不落库、不占轮次窗口的 User 计数）。
-    let retention: HashMap<String, crate::symbio_core::ToolContextRetention> = tools
+    let retention: HashMap<String, crate::symbio_core::CapabilityToolContextRetention> = tools
         .iter()
         .filter_map(|t| {
             t.context_retention
-                .filter(|r| !matches!(r, crate::symbio_core::ToolContextRetention::All))
+                .filter(|r| !matches!(r, crate::symbio_core::CapabilityToolContextRetention::All))
                 .map(|r| {
                     let short = t.name.rsplit('/').next().unwrap_or(&t.name);
                     (short.to_string(), r)
@@ -198,7 +198,7 @@ pub(crate) async fn prepare_turn_inputs(
 /// 返回：是否需要在请求视图末尾注入一次性水位提醒。
 pub(crate) async fn apply_compaction(
     orchestrator: &ChatOrchestrator,
-    ctx: &Arc<dyn InvokeRequest>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
     context: &mut SessionContext,
     turn: &mut TurnState,
     req: &TurnRequest,

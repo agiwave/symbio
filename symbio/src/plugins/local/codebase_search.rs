@@ -32,10 +32,10 @@
 //! 因此**索引不会把自己索引进去**（两重保险）。
 
 use super::policy::SecurityPolicy;
-use crate::symbio_core::providers::EmbeddingService;
+use crate::symbio_core::EmbeddingService;
 use crate::symbio_core::{
-    create_object, Capability, CapabilityMeta, ExecEnv, InvokeRequest, InvokeRequestExt,
-    InvokeResponse, PluginError, SimpleRequest, EMBEDDING_LOCAL,
+    create_object, Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginSimpleRequest, EMBEDDING_LOCAL,
 };
 use async_trait::async_trait;
 use grep::regex::RegexMatcherBuilder;
@@ -76,8 +76,9 @@ const SOURCE_EXTS: &[&str] = &[
 /// 单文件行数上限：超过这个长度的一律视为**生成物**（锁文件、词表、schema 转储），
 /// 不纳入索引。
 ///
-/// 阈值 5000 来自本仓的实测空档：最大的正常源码是 1640 行的 `vdfs_provider.rs`，
-/// 而 `tokenizer.json` 是 21,277 行、`package-lock.json` 是 7,249 行——两者之间
+/// 阈值 5000 来自本仓的实测空档：最大的正常源码是 VDFS 纯接口（原单文件
+/// 1640 行，现拆在 `symbio_core/vdfs/` 下），而 `tokenizer.json` 是 21,277 行、
+/// `package-lock.json` 是 7,249 行——两者之间
 /// 隔着数量级，5000 行能干净地把"人写的代码"和"工具吐的数据"分开。
 ///
 /// 索引这类文件不只是浪费（实测 `tokenizer.json` + `package-lock.json` 两个文件
@@ -210,7 +211,7 @@ impl CodebaseSearchTool {
         Self { security }
     }
 
-    async fn execute_inner(&self, args: &Value, workdir: &str) -> InvokeResponse<Value> {
+    async fn execute_inner(&self, args: &Value, workdir: &str) -> PluginInvokeResponse<Value> {
         let query = args
             .get("query")
             .and_then(|v| v.as_str())
@@ -233,7 +234,7 @@ impl CodebaseSearchTool {
 
         let workspace_dir = PathBuf::from(shellexpand::tilde(workdir).to_string());
 
-        let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+        let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
         let embed = create_object::<dyn EmbeddingService>(EMBEDDING_LOCAL, ctx);
 
         let mut results: Vec<Value> = Vec::new();
@@ -849,7 +850,7 @@ impl Capability for CodebaseSearchTool {
         &self,
         args: Value,
         _env: &ExecEnv,
-        ctx: Arc<dyn InvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         let workdir_str = ctx.get(crate::symbio_core::WORKDIR).ok_or_else(|| {
             PluginError::ValidationError("Missing workdir in context".to_string())

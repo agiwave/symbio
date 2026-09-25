@@ -4,7 +4,7 @@
 //! 「访问文件系统」改为调用封装 provider 的 `mkdir`。
 
 use super::{request_of, tool, ToolVdfs};
-use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, InvokeRequest, PluginError};
+use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -34,7 +34,7 @@ impl Capability for MkdirTool {
                 "required": ["path"]
             }),
             vec!["{\"path\":\"docs/notes\"}"],
-            Some(crate::symbio_core::ToolContextRetention::LastOnly),
+            Some(crate::symbio_core::CapabilityToolContextRetention::LastOnly),
         )
     }
 
@@ -42,7 +42,7 @@ impl Capability for MkdirTool {
         &self,
         args: Value,
         _env: &ExecEnv,
-        ctx: Arc<dyn InvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         let req: super::super::protocol::VdfsPathRequest = request_of(&args);
         self.provider.mkdir(&ctx, &req.path).await?;

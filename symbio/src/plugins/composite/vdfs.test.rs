@@ -4,9 +4,9 @@
 
 use super::*;
 
-use crate::symbio_core::vdfs::vdfs_context;
+use crate::symbio_core::{vdfs_context, VdfsItem, VDFS_KIND_DIR};
 use crate::symbio_core::{
-    InvokeRequest, PluginError, PluginPayload, SimpleRequest, CAPABILITY_VISITOR,
+    PluginError, PluginInvokeRequest, PluginPayload, PluginSimpleRequest, CAPABILITY_VISITOR,
 };
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
@@ -52,15 +52,15 @@ impl Plugin for FakeChild {
             .with_hidden(self.hidden)
     }
 
-    async fn route(self: Arc<Self>, _ctx: Arc<dyn InvokeRequest>) -> InvokeResponse {
+    async fn route(self: Arc<Self>, _ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse {
         Err(PluginError::NotFound(self.dir.to_string()))
     }
 
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse {
         if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
             if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
                 visitor
@@ -77,7 +77,7 @@ impl Plugin for FakeChild {
     }
 }
 
-type InvokeResponse = crate::symbio_core::InvokeResponse<PluginPayload>;
+type PluginInvokeResponse = crate::symbio_core::PluginInvokeResponse<PluginPayload>;
 
 /// 假子插件：把**给定的** provider 暴露在自己目录名下
 ///
@@ -94,15 +94,15 @@ impl Plugin for ProviderChild {
         PluginMeta::new(self.dir, self.dir)
     }
 
-    async fn route(self: Arc<Self>, _ctx: Arc<dyn InvokeRequest>) -> InvokeResponse {
+    async fn route(self: Arc<Self>, _ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse {
         Err(PluginError::NotFound(self.dir.to_string()))
     }
 
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse {
         if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
             if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
                 visitor
@@ -190,7 +190,7 @@ fn container_of(dir: &'static str, provider: Arc<dyn VdfsProvider>) -> Composite
 }
 
 fn host_ctx() -> VdfsContext {
-    let host: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    let host: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     vdfs_context(&host)
 }
 
@@ -359,15 +359,18 @@ async fn hidden_children_from_any_provider_are_filtered() {
             PluginMeta::new("mixed", "mixed")
         }
 
-        async fn route(self: Arc<Self>, _ctx: Arc<dyn InvokeRequest>) -> InvokeResponse {
+        async fn route(
+            self: Arc<Self>,
+            _ctx: Arc<dyn PluginInvokeRequest>,
+        ) -> PluginInvokeResponse {
             Err(PluginError::NotFound("mixed".into()))
         }
 
         async fn traverse(
             self: Arc<Self>,
             _path: String,
-            ctx: Arc<dyn InvokeRequest>,
-        ) -> InvokeResponse {
+            ctx: Arc<dyn PluginInvokeRequest>,
+        ) -> PluginInvokeResponse {
             if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
                 if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
                     visitor
@@ -379,9 +382,7 @@ async fn hidden_children_from_any_provider_are_filtered() {
         }
 
         // 系统链路：直接暴露 provider（与 LLM 链路经 `register_vdfs_provider` 注册互不冲突）
-        fn get_vfs_provider(
-            self: Arc<Self>,
-        ) -> Option<Arc<dyn crate::symbio_core::vdfs_provider::VdfsProvider>> {
+        fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn crate::symbio_core::VdfsProvider>> {
             Some(Arc::new(MixedProvider))
         }
     }

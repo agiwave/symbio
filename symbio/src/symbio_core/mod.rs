@@ -1,84 +1,103 @@
 //! 核心模块
 
 mod capability;
-mod capability_error;
 mod clock;
-mod configurable;
-pub(crate) mod creator;
-mod error;
+mod embedding;
 pub mod event_bus;
 pub mod exec;
 mod homedir;
-mod ids;
 mod keys;
 pub mod llm;
 mod logger;
 mod memory;
-pub mod option;
-mod paths;
 mod plugin;
-mod plugin_dir;
-pub mod providers;
 pub mod schemas;
 mod text;
-pub mod tool_name;
-mod tools;
-mod transport;
 pub mod vdfs;
-pub mod vdfs_provider;
 
-pub use capability_error::{
-    init_error_bucket, report_error, take_errors, CapabilityError, CAPABILITY_ERRORS,
+// ==================== LLM 契约 ====================
+// 模型接入（`model_provider`）、流式行解析（`sse`）与轮次状态机（`turn`）。
+pub use llm::model_provider::{ModelFinishReason, ModelProtocolEvent, ModelProvider, ModelUsage};
+pub use llm::sse::{SseLineParser, SsePartialLineExtractor};
+// 增量 UTF-8 切分是 `pub(crate)` 实现细节，仅流式插件经此取用
+pub(crate) use llm::sse::utf8_chunk;
+pub use llm::turn::{
+    build_assistant_messages, build_tool_message, emit_delta, emit_message, emit_removed,
+    emit_state, message_frame, removed_frame, short_id, state_frame, TurnOutput,
+    TurnStreamChildIds, TurnToolCallAccumulator, TurnToolCallInfo,
 };
-pub use creator::{create_object, creator_ids, has_creator};
-pub use memory::{render_segment, InjectedMemory, MemoryFile, NodeSpec, SegmentSpec, AGENTS_FILE};
-pub use llm::model_provider::{FinishReason, ModelProvider, ProtocolEvent, Usage};
-pub use option::{
-    collect_options, DefaultOptionVisitor, OptionVisitor, TRAVERSE_AVAILABLE_OPTIONS,
+
+// ==================== VDFS 契约 ====================
+// 统一资源访问面的全部公开符号（定义汇聚于 `vdfs` 模块）。
+// 词表常量：状态 / 基础类型 / 呈现扩展名 / 节点动作 / 调用级参数 / 注册表字段名
+pub use vdfs::{
+    PLUGIN_PROVIDER_FIELD, VDFS_ACTION_ABORT, VDFS_ACTION_CLEAR, VDFS_ACTION_DISABLE,
+    VDFS_ACTION_ENABLE, VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_ACTION_PLUGINS,
+    VDFS_ACTION_TEST, VDFS_ACTION_TRUNCATE, VDFS_EXT_DIR, VDFS_EXT_FORM, VDFS_EXT_JSON,
+    VDFS_EXT_MARKDOWN, VDFS_EXT_TEXT, VDFS_EXT_ZIP, VDFS_KIND_DIR, VDFS_KIND_FILE,
+    VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT, VDFS_PARAM_WORKDIR, VDFS_PLUGINS_FIELD,
+    VDFS_PLUGIN_NAME_FIELD, VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED, VDFS_STATUS_FAILED,
+    VDFS_STATUS_NONE, VDFS_STATUS_UNKNOWN, VDFS_STATUS_WORKING,
 };
-// 注意：submit_object_creator! 宏已通过 #[macro_export] 导出到 crate 根目录
+// 域类型：节点 / 内容 / 请求响应 / 错误 / 变更
+pub use vdfs::{
+    DynVdfsProvider, VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent,
+    VdfsContext, VdfsError, VdfsFieldError, VdfsItem, VdfsNewType, VdfsNode, VdfsParams,
+    VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsValidationError, VdfsWriteResponse,
+};
+// 契约函数与宿主桥
+pub use vdfs::{
+    derive_ext, from_plugin_error, has_parent_segment, host_ctx, notify_change, path_within,
+    unwatch_changes, vdfs_change_of, vdfs_context, watch_changes, ChangeSubscriptions,
+};
+// 地址机制（crate 内部装配用，不是公开契约）
+pub(crate) use vdfs::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
+
+// ==================== 事件总线 ====================
+pub use event_bus::{
+    build_envelope, register_subscriber, unregister_subscriber, EventBus, EventBusSubscribeRequest,
+    EVENT_BUS_KIND_SYSTEM, EVENT_BUS_KIND_VDFS,
+};
+
+// ==================== 服务抽象 ====================
+pub use embedding::{EmbeddingError, EmbeddingService};
+
+// ==================== 插件契约 ====================
 pub use capability::{
-    invoke_capability, Capability, CapabilityCategory, CapabilityMeta, CapabilityVisitor,
-    ToolContextRetention,
+    announce_configurable, collect_options, entry_of, invoke_capability, resolve, to_wire,
+    Capability, CapabilityCategory, CapabilityMeta, CapabilityToolContextRetention,
+    CapabilityVisitor, ConfigurableVisitor, DefaultConfigurableVisitor, DefaultOptionVisitor,
+    DefaultToolVisitor, OptionVisitor, TRAVERSE_AVAILABLE_OPTIONS,
 };
 // 工具结果 `failure_kind` 闭集：生产方（`local`）与消费方（`session`）分属不同插件，
 // 互相不可见，只能经这里共享。单独一行——它是模块而非类型。
 pub use capability::failure_kind;
-pub use clock::now_ms;
-pub use configurable::{
-    announce_configurable, entry_of, ConfigurableVisitor, DefaultConfigurableVisitor,
-};
-pub use error::*;
-pub use exec::{AbortSignal, EventSink, EventSinkProgress, ExecEnv, TranscriptWriter};
-// 锁辅助函数**刻意不走 `pub use error::*`**（见 `error.rs::lock_read` 的说明）：
-// 显式 `pub(crate)` 导入，既让全 crate 可用，又保留 `dead_code` 的可见性。
-pub(crate) use error::{lock_read, lock_write};
-pub use homedir::{expand_tilde_path, HomedirRegistry, DEFAULT_HOMEDIR};
-pub use ids::*;
-pub use keys::*;
-pub use logger::*;
-pub use paths::*;
 pub use plugin::*;
-pub use plugin_dir::{
-    config_file_of, dir_from_ctx, dir_of, plugins_root, ConfigFile, PluginDir, PluginEntry,
-    PluginIdentity, KEY_API, KEY_AUTHOR, KEY_CAN_DISABLE, KEY_DESCRIPTION, KEY_ENABLED, KEY_GRANTS,
-    KEY_NAME, KEY_PROVIDER, KEY_REQUIRED, KEY_TITLE, KEY_VERSION, PLUGIN_FILE, RESERVED_KEYS,
+// 注册表内部结构，供 `submit_object_creator!` 宏展开取用（crate 内可见）
+pub(crate) use plugin::{ObjectConstructor, Submit};
+// 注意：submit_object_creator! 宏已通过 #[macro_export] 导出到 crate 根目录
+
+// ==================== 键面 ====================
+pub use keys::*;
+
+// ==================== 基础设施 / 工具函数 ====================
+pub use capability::{
+    init_error_bucket, report_error, take_errors, CapabilityError, CAPABILITY_ERRORS,
 };
-pub use llm::sse::{PartialLineExtractor, SseLineParser};
+pub use clock::now_ms;
+// 锁辅助函数**刻意不进 `pub use plugin::*`**（见 `plugin/error.rs::lock_read` 的说明）：
+// 显式 `pub(crate)` 导入，既让全 crate 可用，又保留 `dead_code` 的可见性。
+pub use exec::{
+    ExecAbortSignal, ExecEnv, ExecEventSink, ExecEventSinkProgress, ExecTranscriptWriter,
+};
+pub use homedir::{expand_tilde_path, HomedirRegistry, DEFAULT_HOMEDIR};
+pub use logger::*;
+pub use memory::{
+    render_segment, MemoryFile, MemoryInjection, MemoryNodeSpec, MemorySegmentSpec,
+    MEMORY_AGENTS_FILE,
+};
+pub(crate) use plugin::{lock_read, lock_write};
 pub use text::{floor_char_boundary, truncate_bytes};
-pub use tools::DefaultToolVisitor;
-pub use transport::{
-    PluginChannel, PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire,
-};
-pub use llm::turn::{
-    build_assistant_messages, build_tool_message, emit_delta, emit_message, emit_removed,
-    emit_state, removed_frame, short_id, state_frame, StreamChildIds, ToolCallAccumulator,
-    ToolCallInfo, TurnOutput,
-};
-pub use vdfs::{
-    DynVdfsProvider, VdfsAccess, VdfsChange, VdfsContent, VdfsError, VdfsNode, VdfsProvider,
-    VdfsValidationError,
-};
 
 // 重导出 inventory 供 submit_object_creator! 宏使用
 pub use inventory;

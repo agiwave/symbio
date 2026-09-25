@@ -1,7 +1,7 @@
 //! HTTP 请求工具 - 实现 Tool trait
 
 use crate::symbio_core::{
-    Capability, CapabilityMeta, ExecEnv, InvokeRequest, InvokeResponse, PluginError,
+    Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeResponse,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -28,7 +28,7 @@ impl HttpRequestTool {
         }
     }
 
-    async fn execute_inner(&self, args: &Value) -> InvokeResponse<Value> {
+    async fn execute_inner(&self, args: &Value) -> PluginInvokeResponse<Value> {
         let url = args
             .get("url")
             .and_then(|v| v.as_str())
@@ -221,7 +221,7 @@ impl Capability for HttpRequestTool {
         &self,
         args: Value,
         _env: &ExecEnv,
-        _ctx: Arc<dyn InvokeRequest>,
+        _ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         let data = self.execute_inner(&args).await?;
         Ok(serde_json::to_value(&data)?)

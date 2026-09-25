@@ -61,9 +61,9 @@
 //!    顺带：`tract` 时代为绕开形状推断而写的"符号维 / 固定 seq 双策略"整套兜底
 //!    （`fixed_seq` / `pad_or_truncate`）随之删除——ORT 原生支持动态形状。
 
-use crate::symbio_core::providers::EmbeddingError;
-use crate::symbio_core::providers::EmbeddingService;
-use crate::symbio_core::{InvokeRequest, EMBEDDING_LOCAL, EMBEDDING_NOOP};
+use crate::symbio_core::EmbeddingError;
+use crate::symbio_core::EmbeddingService;
+use crate::symbio_core::{PluginInvokeRequest, EMBEDDING_LOCAL, EMBEDDING_NOOP};
 use async_trait::async_trait;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::{Session, SessionInputValue};
@@ -279,7 +279,7 @@ impl EmbeddingService for NoopEmbeddingService {
 
 // === 注册到通用对象创建机制 ===
 
-fn build_local(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn EmbeddingService> {
+fn build_local(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn EmbeddingService> {
     match LocalEmbeddingService::get_instance() {
         Ok(svc) => svc,
         Err(e) => {
@@ -294,7 +294,7 @@ fn build_local(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn EmbeddingService> {
     }
 }
 
-fn build_noop(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn EmbeddingService> {
+fn build_noop(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn EmbeddingService> {
     Arc::new(NoopEmbeddingService)
 }
 

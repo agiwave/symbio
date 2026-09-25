@@ -2,12 +2,12 @@
 //!
 //! 职责（协议无关、插件无关，供 session 与 model 双侧共同使用）：
 //! - 消息帧家族（[`emit_message`]/[`emit_delta`]/[`emit_state`]/[`emit_removed`]
-//!   与 `message_frame`/`state_frame`/`removed_frame`）：[`EventSink`]
+//!   与 `message_frame`/`state_frame`/`removed_frame`）：[`ExecEventSink`]
 //!   唯一写入点的帧语义（完整消息 / 增量 / 状态 / 删除）
-//! - 单轮产物（[`TurnOutput`] + [`ToolCallAccumulator`]）：
+//! - 单轮产物（[`TurnOutput`] + [`TurnToolCallAccumulator`]）：
 //!   `ModelProvider::execute_turn` 的返回类型（见 [`super::model_provider`]）
-//! - 消息构造家族（`short_id`/`StreamChildIds`/`build_assistant_messages`/`build_tool_message`）：
-//!   `TurnOutput::into_messages` 与 `ToolCallAccumulator` 直接依赖它，
+//! - 消息构造家族（`short_id`/`TurnStreamChildIds`/`build_assistant_messages`/`build_tool_message`）：
+//!   `TurnOutput::into_messages` 与 `TurnToolCallAccumulator` 直接依赖它，
 //!   孤儿规则要求定义与使用同处 core
 //!
 //! **HTTP 重试机器与 SSE 流循环不在这里**：它们只有 model 插件的
@@ -17,13 +17,13 @@
 //!
 //! ## 执行期只与两个原语打交道（不再与通道打交道）
 //!
-//! 本模块的帧函数只依赖 [`EventSink`]（出：节点事件），**不接受 `PluginChannel`**。
+//! 本模块的帧函数只依赖 [`ExecEventSink`]（出：节点事件），**不接受 `PluginChannel`**。
 //! 历史上两者都压在同一个通道上，进程内调用因此要付 serde 装箱 + 反序列化的往返
 //! 代价；现在「去哪」与「怎么中止」分别由两个语义单一的原语承担，`PluginChannel`
 //! 退回纯跨进程传输（见 `symbio_core::exec` 的模块文档）。
 
-use crate::symbio_core::exec::EventSink;
-use super::model_provider::{FinishReason, Usage};
+use super::model_provider::{ModelFinishReason, ModelUsage};
+use crate::symbio_core::exec::ExecEventSink;
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
@@ -38,7 +38,7 @@ use tracing::warn;
 /// 用在正文对接收端是**新的权威副本**的帧上：一次性节点（工具结果 / 用户消息
 /// 回填）的单帧完成、存储回执、压缩快照。流式节点的正文已由 [`emit_delta`]
 /// 逐帧传过，它的终态走 [`emit_converge`]，不在这里重发。
-pub async fn emit_message(sink: &EventSink, msg: ChatMessage) {
+pub async fn emit_message(sink: &ExecEventSink, msg: ChatMessage) {
     sink.emit(message_frame(&msg)).await;
 }
 
@@ -57,7 +57,7 @@ pub fn message_frame(m: &ChatMessage) -> ChatMessage {
 /// 发送一帧**增量**：`delta` 追加到目标节点正文尾部（流式热路径，O(delta)）。
 ///
 /// 目标未知时写入点用帧内信息建占位（帧自给自足，不依赖任何先行帧）。
-pub async fn emit_delta(sink: &EventSink, message_id: &str, delta: &str) {
+pub async fn emit_delta(sink: &ExecEventSink, message_id: &str, delta: &str) {
     sink.emit(ChatMessage {
         id: message_id.to_string(),
         delta: Some(delta.to_string()),
@@ -71,7 +71,7 @@ pub async fn emit_delta(sink: &EventSink, message_id: &str, delta: &str) {
 /// 流式节点的正文已由 [`emit_delta`] 逐帧上线，这里再带一次只是把同一段文字
 /// 二次传输（且会把权威副本的完整正文重新发一遍）。`content` / `delta` 一律
 /// 剥掉，免得调用方传了一条「内容齐全的副本」就顺手把它送上热路径。
-pub async fn emit_state(sink: &EventSink, msg: ChatMessage) {
+pub async fn emit_state(sink: &ExecEventSink, msg: ChatMessage) {
     sink.emit(state_frame(&msg)).await;
 }
 
@@ -79,7 +79,7 @@ pub async fn emit_state(sink: &EventSink, msg: ChatMessage) {
 ///
 /// 协议里没有 `remove` 操作——删除就是一次状态迁移，与出现、增长、完成同走
 /// 一条消息帧，接收端据此就地移除节点。
-pub async fn emit_removed(sink: &EventSink, message_id: &str) {
+pub async fn emit_removed(sink: &ExecEventSink, message_id: &str) {
     sink.emit(removed_frame(message_id)).await;
 }
 
@@ -125,7 +125,7 @@ struct AccumulatedToolCall {
 
 /// Tool call information
 #[derive(Debug, Clone)]
-pub struct ToolCallInfo {
+pub struct TurnToolCallInfo {
     /// 消息节点 id（会话内唯一）：流式帧 / 落库 / 工具结果锚定都用它。
     pub id: Option<String>,
     /// provider 原始 `tool_call_id`（wire id）。`None` = 供应商未提供，
@@ -150,11 +150,11 @@ pub struct ToolCallInfo {
 /// LLM APIs stream tool calls incrementally. This struct handles the accumulation
 /// so plugin authors don't need to manage index-based HashMaps.
 #[derive(Debug, Default)]
-pub struct ToolCallAccumulator {
+pub struct TurnToolCallAccumulator {
     calls: HashMap<usize, AccumulatedToolCall>,
 }
 
-impl ToolCallAccumulator {
+impl TurnToolCallAccumulator {
     /// Process a tool call delta from the API.
     ///
     /// 返回 `(node_id, wire_id, accumulated_args, name, snapshot_required)`：
@@ -234,10 +234,10 @@ impl ToolCallAccumulator {
 
     /// Get the list of completed tool calls.
     ///
-    /// 保证返回的每个 ToolCallInfo.id（节点 id）均为非空：正常情况下 process_delta
+    /// 保证返回的每个 TurnToolCallInfo.id（节点 id）均为非空：正常情况下 process_delta
     /// 已在首个增量确定，此处为幂等兜底——重复调用返回相同 id，**绝不**重新随机生成
     /// （chat_loop 与 into_messages 会各取一次，两次结果不一致会使工具结果子节点变孤儿）。
-    pub fn get_completed(&mut self) -> Vec<ToolCallInfo> {
+    pub fn get_completed(&mut self) -> Vec<TurnToolCallInfo> {
         self.calls
             .values_mut()
             .map(|call| {
@@ -269,7 +269,7 @@ impl ToolCallAccumulator {
                         }
                     }
                 };
-                ToolCallInfo {
+                TurnToolCallInfo {
                     id: Some(node_id),
                     wire_id,
                     name: call.name.clone(),
@@ -296,14 +296,14 @@ pub fn short_id() -> String {
 /// 在「会话存储」里是 id=B，会被上层判定为两条不同消息——于是失败收尾时
 /// id=A 的节点被当作"尚未落库的流式半截"补写进存储，同一个 Turn 下出现两份内容相同的文本节点。
 #[derive(Debug, Default, Clone)]
-pub struct StreamChildIds {
+pub struct TurnStreamChildIds {
     /// 回复正文子节点的流式 id（`TurnOutput::response_text_child_id`）
     pub text: Option<String>,
     /// 思考子节点的流式 id（`TurnOutput::reasoning_child_id`）
     pub reasoning: Option<String>,
 }
 
-impl StreamChildIds {
+impl TurnStreamChildIds {
     /// 空串视为「流式期间没有产生该节点」，规范化为 None。
     fn normalized(self) -> Self {
         Self {
@@ -324,10 +324,10 @@ impl StreamChildIds {
 pub fn build_assistant_messages(
     id: &str,
     content: &str,
-    tool_calls: &[ToolCallInfo],
+    tool_calls: &[TurnToolCallInfo],
     rid: Option<String>,
     reasoning: Option<String>,
-    child_ids: StreamChildIds,
+    child_ids: TurnStreamChildIds,
 ) -> Vec<ChatMessage> {
     let child_ids = child_ids.normalized();
     let mut msgs = Vec::new();
@@ -464,16 +464,16 @@ pub struct TurnOutput {
     pub text: String,
     pub reasoning: String,
     pub response_id: Option<String>,
-    pub tool_accumulator: ToolCallAccumulator,
+    pub tool_accumulator: TurnToolCallAccumulator,
     /// Short ID for the response text child node (consistent across delta updates)
     pub response_text_child_id: String,
     /// Short ID for the reasoning child node
     pub reasoning_child_id: String,
     /// 流结束原因（一次响应最多一次）。用于区分「自然结束」与「max_tokens 截断」
     /// （不区分即表现为「对话突然结束」）。默认 Stop。
-    pub finish: FinishReason,
+    pub finish: ModelFinishReason,
     /// 用量统计（provider 不一定给，故可选）。用于校准 token 估算器。
-    pub usage: Option<Usage>,
+    pub usage: Option<ModelUsage>,
 }
 
 impl TurnOutput {
@@ -505,7 +505,7 @@ impl TurnOutput {
             reasoning,
             // 复用流式期间已经广播给前端的子节点 id：落库节点与流式节点必须是同一身份，
             // 否则失败收尾时流式节点会被当成"未落库的半截"再补写一份（重复节点）。
-            StreamChildIds {
+            TurnStreamChildIds {
                 text: Some(self.response_text_child_id),
                 reasoning: Some(self.reasoning_child_id),
             },

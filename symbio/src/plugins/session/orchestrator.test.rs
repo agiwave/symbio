@@ -4,7 +4,7 @@
 //! `orchestrator.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
-use crate::symbio_core::vdfs::ChangeSubscriptions;
+use crate::symbio_core::ChangeSubscriptions;
 
 /// 向在途转写图注入一条消息（测试辅助：等价于旧的 live_messages.push）。
 async fn push_inflight(state: &Arc<ActiveSessionState>, message: cm::ChatMessage) {
@@ -12,12 +12,12 @@ async fn push_inflight(state: &Arc<ActiveSessionState>, message: cm::ChatMessage
 }
 
 /// 造一个已登记中止信号的会话状态（模拟消费循环入口的登记）。
-async fn armed_state() -> (Arc<ActiveSessionState>, AbortSignal) {
+async fn armed_state() -> (Arc<ActiveSessionState>, ExecAbortSignal) {
     let state = Arc::new(ActiveSessionState::with_session_id(
         "s1".into(),
         ChangeSubscriptions::default(),
     ));
-    let signal = AbortSignal::new();
+    let signal = ExecAbortSignal::new();
     state.inner.write().await.abort_signal = Some(signal.clone());
     (state, signal)
 }
@@ -73,7 +73,7 @@ async fn disarmed_guard_does_not_clobber_next_turn_registration() {
     guard.disarm().await;
 
     // 模拟下一轮：新的中止信号登记进来
-    let next = AbortSignal::new();
+    let next = ExecAbortSignal::new();
     state.inner.write().await.abort_signal = Some(next.clone());
 
     drop(guard); // 已 disarm 的旧守卫离开作用域
@@ -335,7 +335,7 @@ async fn converge_inflight_is_idempotent() {
 /// 中止入口的**端到端**契约（本次「通道 → 信号」改造的唯一对外行为面）。
 ///
 /// 收口前 `handle_abort` 往执行期通道投一帧 `ControlSignal::Abort`，执行方在
-/// `select!` 里收帧后自行置位标志；现在它直接置位**同一个** [`AbortSignal`] 对象。
+/// `select!` 里收帧后自行置位标志；现在它直接置位**同一个** [`ExecAbortSignal`] 对象。
 /// 外部可观察的结果必须逐条一致，本用例逐条锁定：
 /// 置位信号 → 注销登记 → 复位工作态 → 结局为 `aborted` → 在途根 Turn 定稿 `Aborted`。
 #[tokio::test]
@@ -353,7 +353,7 @@ async fn handle_abort_signals_registered_turn_and_converges() {
         sid.into(),
         ChangeSubscriptions::default(),
     ));
-    let signal = AbortSignal::new();
+    let signal = ExecAbortSignal::new();
     {
         let mut inner = state.inner.write().await;
         inner.abort_signal = Some(signal.clone());

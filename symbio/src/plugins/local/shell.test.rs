@@ -2,11 +2,11 @@
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`，见 `CONTRIBUTING.md`）。
 //!
-//! 出口是 `EventSink`，因此断言方式从「消费通道里的帧」变成「读记录型写入点里的
+//! 出口是 `ExecEventSink`，因此断言方式从「消费通道里的帧」变成「读记录型写入点里的
 //! 消息帧」——**不再需要构造通道**，也就不再有「谁先返回」的顺序问题。
 
 use super::*;
-use crate::symbio_core::{SimpleRequest, TranscriptWriter};
+use crate::symbio_core::{ExecTranscriptWriter, PluginSimpleRequest};
 
 /// 记录型写入点：把所有消息帧收进 `Vec`。
 struct RecordingWriter {
@@ -14,16 +14,16 @@ struct RecordingWriter {
 }
 
 #[async_trait]
-impl TranscriptWriter for RecordingWriter {
+impl ExecTranscriptWriter for RecordingWriter {
     async fn apply(&self, message: ChatMessage) {
         self.ops.lock().unwrap().push(message);
     }
 }
 
-fn recording_sink() -> (EventSink, Arc<std::sync::Mutex<Vec<ChatMessage>>>) {
+fn recording_sink() -> (ExecEventSink, Arc<std::sync::Mutex<Vec<ChatMessage>>>) {
     let ops = Arc::new(std::sync::Mutex::new(Vec::new()));
     (
-        EventSink::direct(Arc::new(RecordingWriter { ops: ops.clone() })),
+        ExecEventSink::direct(Arc::new(RecordingWriter { ops: ops.clone() })),
         ops,
     )
 }
@@ -31,17 +31,17 @@ fn recording_sink() -> (EventSink, Arc<std::sync::Mutex<Vec<ChatMessage>>>) {
 /// 构造执行期上下文。`target` 为 `None` ⇒ 模拟 `route()` 直连调用（无占位节点）。
 fn make_ctx(
     command: &str,
-    sink: EventSink,
+    sink: ExecEventSink,
     target: Option<(&str, &str)>,
-) -> Arc<dyn InvokeRequest> {
-    let req = SimpleRequest::new(None, None);
+) -> Arc<dyn PluginInvokeRequest> {
+    let req = PluginSimpleRequest::new(None, None);
     req.set(crate::symbio_core::WORKDIR, ".".to_string());
     if let Some((msg_id, tool_call_id)) = target {
         req.set(crate::symbio_core::RESULT_MSG_ID, msg_id.to_string());
         req.set(crate::symbio_core::TOOL_CALL_ID, tool_call_id.to_string());
     }
     req.set(crate::symbio_core::EVENT_SINK, sink);
-    req.set(crate::symbio_core::ABORT_SIGNAL, AbortSignal::new());
+    req.set(crate::symbio_core::ABORT_SIGNAL, ExecAbortSignal::new());
     // 用裸字面量而非 KEY_PAYLOAD：本行同时验证「桶名就是 "payload"」这一契约
     req.set_raw(
         "payload",
@@ -71,7 +71,7 @@ fn assert_all_snapshots_use_orchestrator_ids(
 /// 按生产路径调用工具：信封拆出 `args` / `env`，与 `invoke_capability` 同形。
 ///
 /// 测试只关心 `execute` 本身，故在这里复刻那一步拆解——工具侧不再自己读信封。
-async fn exec(tool: &ShellTool, ctx: Arc<dyn InvokeRequest>) -> Result<Value, PluginError> {
+async fn exec(tool: &ShellTool, ctx: Arc<dyn PluginInvokeRequest>) -> Result<Value, PluginError> {
     let args = ctx.payload::<Value>().unwrap_or(Value::Null);
     let env = ExecEnv::from_request(&*ctx);
     tool.execute(args, &env, ctx).await
@@ -90,7 +90,7 @@ async fn pump_emits_snapshot_with_orchestrator_ids() {
         Arc::new(Mutex::new(String::new())),
         false,
         sink,
-        AbortSignal::new(),
+        ExecAbortSignal::new(),
         Some(SnapshotTarget {
             msg_id: "res-1".into(),
             tool_call_id: "tc-1".into(),
@@ -120,7 +120,7 @@ async fn pump_without_target_accumulates_but_emits_nothing() {
         Arc::new(Mutex::new(String::new())),
         false,
         sink,
-        AbortSignal::new(),
+        ExecAbortSignal::new(),
         None,
     )
     .await
@@ -139,8 +139,8 @@ async fn pump_with_silent_sink_emits_nothing() {
         own.clone(),
         Arc::new(Mutex::new(String::new())),
         false,
-        EventSink::silent(),
-        AbortSignal::new(),
+        ExecEventSink::silent(),
+        ExecAbortSignal::new(),
         Some(SnapshotTarget {
             msg_id: "res-1".into(),
             tool_call_id: "tc-1".into(),
@@ -224,17 +224,17 @@ async fn execute_rejects_empty_command() {
 /// 两个 id 必须同行：缺任一即视为「直连调用」。
 #[tokio::test]
 async fn snapshot_target_requires_both_ids() {
-    let bare = SimpleRequest::new(None, None);
+    let bare = PluginSimpleRequest::new(None, None);
     assert!(SnapshotTarget::from_ctx(&bare).is_none());
 
-    let half = SimpleRequest::new(None, None);
+    let half = PluginSimpleRequest::new(None, None);
     half.set(crate::symbio_core::RESULT_MSG_ID, "res-1".to_string());
     assert!(
         SnapshotTarget::from_ctx(&half).is_none(),
         "只有 msg_id 不足以定位快照"
     );
 
-    let full = SimpleRequest::new(None, None);
+    let full = PluginSimpleRequest::new(None, None);
     full.set(crate::symbio_core::RESULT_MSG_ID, "res-1".to_string());
     full.set(crate::symbio_core::TOOL_CALL_ID, "tc-1".to_string());
     let t = SnapshotTarget::from_ctx(&full).expect("两个 id 齐备");
@@ -245,6 +245,9 @@ async fn snapshot_target_requires_both_ids() {
 /// 出口缺席 ⇒ 静默（`route()` 直连调用的默认）。
 #[test]
 fn event_sink_absent_means_silent() {
-    let bare = SimpleRequest::new(None, None);
-    assert_eq!(format!("{:?}", EventSink::of(&bare)), "EventSink::Null");
+    let bare = PluginSimpleRequest::new(None, None);
+    assert_eq!(
+        format!("{:?}", ExecEventSink::of(&bare)),
+        "ExecEventSink::Null"
+    );
 }

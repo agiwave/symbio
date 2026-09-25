@@ -9,9 +9,7 @@
 use super::*;
 
 use crate::symbio_core::schemas::detail::DetailDefinition;
-use crate::symbio_core::vdfs_provider::{
-    VdfsActionResult, VdfsNewType, VdfsWriteResponse, VDFS_STATUS_NONE,
-};
+use crate::symbio_core::{VdfsActionResult, VdfsNewType, VdfsWriteResponse, VDFS_STATUS_NONE};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -602,20 +600,20 @@ async fn missing_container_view_reports_internal_but_sections_still_work() {
 /// 造一份带可配置声明的请求 ctx（声明通常由容器在广播中收集，这里直接给）
 async fn ctx_with_configs() -> VdfsContext {
     use crate::symbio_core::{
-        entry_of, vdfs::vdfs_context, ConfigFile, ConfigurableVisitor, DefaultConfigurableVisitor,
-        PluginDir, SimpleRequest, CONFIG_VISITOR,
+        entry_of, vdfs::vdfs_context, ConfigurableVisitor, DefaultConfigurableVisitor,
+        PluginConfigFile, PluginDir, PluginSimpleRequest, CONFIG_VISITOR,
     };
 
     let visitor: Arc<dyn ConfigurableVisitor> = Arc::new(DefaultConfigurableVisitor::new());
     visitor
-        .register_configurable(entry_of(&ConfigFile::new(
+        .register_configurable(entry_of(&PluginConfigFile::new(
             PluginDir::at(std::env::temp_dir(), "web"),
             "网络工具",
             DetailDefinition::form("配置", Vec::new()),
         )))
         .await;
 
-    let host: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    let host: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     host.set(CONFIG_VISITOR, visitor);
     vdfs_context(&host)
 }

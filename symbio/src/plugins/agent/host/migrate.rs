@@ -33,7 +33,7 @@
 
 use super::manifest::SPEC_MAJOR;
 use super::plugin::{SPEC_V1, SPEC_V2};
-use crate::symbio_core::AGENTS_FILE;
+use crate::symbio_core::MEMORY_AGENTS_FILE;
 use std::path::Path;
 
 /// 执行迁移。返回是否真的做了迁移动作（幂等：已迁移 / 非 v1 目录 → `false`）
@@ -106,7 +106,7 @@ fn migrate_prompts_to_agents_md(dir: &Path) -> Result<bool, String> {
     if !prompts.is_dir() {
         return Ok(false);
     }
-    let target = dir.join(AGENTS_FILE);
+    let target = dir.join(MEMORY_AGENTS_FILE);
     if target.exists() {
         return Ok(false);
     }

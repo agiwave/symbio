@@ -5,7 +5,7 @@
 //! 拿到 `VdfsEditResponse` 后封装成原生 `file_edit` 的 `{success, message}` 形状。
 
 use super::{request_of, tool, ToolVdfs};
-use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, InvokeRequest, PluginError};
+use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -37,7 +37,7 @@ impl Capability for EditTool {
                 "required": ["path", "old_string"]
             }),
             vec!["{\"path\":\"src/main.rs\",\"old_string\":\"fn old()\",\"new_string\":\"fn new()\"}"],
-            Some(crate::symbio_core::ToolContextRetention::LastOnly),
+            Some(crate::symbio_core::CapabilityToolContextRetention::LastOnly),
         )
     }
 
@@ -45,7 +45,7 @@ impl Capability for EditTool {
         &self,
         args: Value,
         _env: &ExecEnv,
-        ctx: Arc<dyn InvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         let req: super::super::protocol::VdfsEditRequest = request_of(&args);
         let data = self

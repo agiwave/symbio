@@ -269,7 +269,7 @@ session:
     pub fn build_request_view(
         messages: &[ChatMessage],
         window: usize,
-        retention: &std::collections::HashMap<String, crate::symbio_core::ToolContextRetention>,
+        retention: &std::collections::HashMap<String, crate::symbio_core::CapabilityToolContextRetention>,
         fade_active: bool,
         fade_keep_turns: usize,
         content_keep_recent: usize,

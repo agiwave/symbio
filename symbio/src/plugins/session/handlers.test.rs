@@ -33,7 +33,7 @@
 //! 已退役的路由**不得被加回来**。
 
 use super::super::plugin::SessionPlugin;
-use crate::symbio_core::{InvokeRequest, SimpleRequest};
+use crate::symbio_core::{PluginInvokeRequest, PluginSimpleRequest};
 use serde_json::json;
 use std::sync::Arc;
 
@@ -48,9 +48,9 @@ fn fixture() -> (tempfile::TempDir, SessionPlugin) {
     (dir, plugin)
 }
 
-/// 构造带 payload 的请求上下文（`InvokeRequest::payload` 读的正是 `"payload"` 桶）。
-fn ctx_with(payload: serde_json::Value) -> Arc<dyn InvokeRequest> {
-    let req = SimpleRequest::new(None, None);
+/// 构造带 payload 的请求上下文（`PluginInvokeRequest::payload` 读的正是 `"payload"` 桶）。
+fn ctx_with(payload: serde_json::Value) -> Arc<dyn PluginInvokeRequest> {
+    let req = PluginSimpleRequest::new(None, None);
     req.extensions
         .write()
         .unwrap()
@@ -73,7 +73,7 @@ fn ctx_with(payload: serde_json::Value) -> Arc<dyn InvokeRequest> {
 /// `未知路径` 这条消息的出处。
 #[tokio::test]
 async fn session_clear_route_is_retired() {
-    use crate::symbio_core::{InvokeRequestExt, Plugin};
+    use crate::symbio_core::{Plugin, PluginInvokeRequestExt};
 
     let (_dir, p) = fixture();
     let ctx = ctx_with(json!({ "session_id": "s1" }));
@@ -101,7 +101,7 @@ async fn session_clear_route_is_retired() {
 /// 断言把「这些字符串不再被解析」钉住，否则它们会悄悄长回来。
 #[tokio::test]
 async fn migrated_session_routes_stay_retired() {
-    use crate::symbio_core::{InvokeRequestExt, Plugin};
+    use crate::symbio_core::{Plugin, PluginInvokeRequestExt};
 
     let (_dir, p) = fixture();
     let p = Arc::new(p);

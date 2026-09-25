@@ -4,13 +4,13 @@ use crate::AppState;
 use serde_json::Value;
 use std::sync::Arc;
 use symbio::symbio_core::{
-    PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire, SymbioKey,
+    PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire, KEY_PAYLOAD,
 };
 use tauri::Emitter;
 use tracing::{debug, error, info, warn};
 
 // 线路层消息容器（PluginMessageWire / PluginPayloadWire）统一定义于
-// `symbio_core::transport`，与 HTTP/WebSocket 网关入站共用同一份线上格式，
+// `symbio_core::plugin::transport`，与 HTTP/WebSocket 网关入站共用同一份线上格式，
 // 壳层不再重复定义（避免双份漂移）。
 
 #[tauri::command]
@@ -21,13 +21,17 @@ pub async fn route_v2(
     client_id: Option<String>,
 ) -> Result<PluginMessageWire, String> {
     // 从 metadata 中提取 path
-    let path = request.metadata.get("path")
+    let path = request
+        .metadata
+        .get("path")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    
+
     // 提取并记录 trace_id (如果存在)
-    let trace_id = request.metadata.get("trace_id")
+    let trace_id = request
+        .metadata
+        .get("trace_id")
         .and_then(|v| v.as_str())
         .unwrap_or("unknown")
         .to_string();
@@ -36,7 +40,9 @@ pub async fn route_v2(
     // 串起来，回答不了「谁发的、为什么发」——而同一个路由名常有多个调用方
     // （如 `vdfs/stat` 既是「实时面缺基线补读」也是「资源信号分辨删除」）。
     // 缺省 `-`：**恒打这个字段**，好让「有没有来源」本身可判、日志行形状稳定。
-    let origin = request.metadata.get("origin")
+    let origin = request
+        .metadata
+        .get("origin")
         .and_then(|v| v.as_str())
         .unwrap_or("-")
         .to_string();
@@ -46,23 +52,33 @@ pub async fn route_v2(
     // 创建插件上下文 (模拟 from_message 行为)
     let mut extensions = std::collections::HashMap::new();
 
-    // 存储 payload 到扩展桶
-    #[allow(deprecated)]
+    // 存储 payload 到扩展桶（桶名与 gateway 的 `build_ctx` 同一份契约）
     extensions.insert(
-        symbio::symbio_core::PAYLOAD.name().to_string(),
+        KEY_PAYLOAD.to_string(),
         std::sync::Arc::new(request.payload) as std::sync::Arc<dyn std::any::Any + Send + Sync>,
     );
-    
+
     // 存储 metadata 到扩展桶中
-    for (k, v) in request.metadata.as_object().unwrap_or(&serde_json::Map::new()) {
+    for (k, v) in request
+        .metadata
+        .as_object()
+        .unwrap_or(&serde_json::Map::new())
+    {
         if let Some(s) = v.as_str() {
-            extensions.insert(k.clone(), std::sync::Arc::new(s.to_string()) as std::sync::Arc<dyn std::any::Any + Send + Sync>);
+            extensions.insert(
+                k.clone(),
+                std::sync::Arc::new(s.to_string())
+                    as std::sync::Arc<dyn std::any::Any + Send + Sync>,
+            );
         } else {
-            extensions.insert(k.clone(), std::sync::Arc::new(v.clone()) as std::sync::Arc<dyn std::any::Any + Send + Sync>);
+            extensions.insert(
+                k.clone(),
+                std::sync::Arc::new(v.clone()) as std::sync::Arc<dyn std::any::Any + Send + Sync>,
+            );
         }
     }
-    
-    let context = Arc::new(symbio::symbio_core::SimpleRequest {
+
+    let context = Arc::new(symbio::symbio_core::PluginSimpleRequest {
         envs: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         extensions: std::sync::Arc::new(std::sync::RwLock::new(extensions)),
     });
@@ -90,7 +106,7 @@ pub async fn route_v2(
         }
         PluginPayload::Session(chan) => {
             // 连接的取消令牌：**只用于订阅表收口**（会话/总线插件的反注册任务在等它），
-            // 不用于中止业务任务——会话中止走 `session/chat/abort` + AbortSignal。
+            // 不用于中止业务任务——会话中止走 `session/chat/abort` + ExecAbortSignal。
             // 见 `route_connection::RouteConnection::cancel` 的说明。
             let cancel = chan.cancel_token.clone();
             // 注册连接: 优先使用前端指定的 ID (client_id) 避免握手竞态丢失首帧
@@ -121,30 +137,15 @@ pub async fn route_v2(
                 let _ = app.emit(&format!("{event_name}/eof"), ());
             });
 
-            Ok(PluginMessageWire { 
-                metadata, 
+            Ok(PluginMessageWire {
+                metadata,
                 payload: serde_json::to_value(PluginPayloadWire::Connection(conn_id)).unwrap(),
             })
         }
-        PluginPayload::Native(_) => {
-            // 与 gateway 的处置**保持一致**：`Native` 是「仅限进程内透传」的载荷，
-            // 跨传输边界（IPC / HTTP / WS）时没有任何可序列化形态。
-            //
-            // 曾经这里静默返回 `payload: null`，而 gateway 明确报错——同一个载荷在
-            // 两种传输下语义不同，前端只能把"后端返回了不可序列化的东西"当成
-            // "后端返回了空"。报错才有坐标：调用方立刻知道选错了返回类型。
-            //
-            // 现状：全仓**没有任何路由构造 `Native`**（只有两个消费端在防御性处理），
-            // 所以这条改动不改变任何可达路径的行为。
-            error!(trace_id = %trace_id, path = %path, "Native payload cannot cross a transport boundary");
-            Err("该路径返回进程内原生对象，不支持跨传输调用".to_string())
-        }
-        PluginPayload::Empty => {
-            Ok(PluginMessageWire {
-                metadata,
-                payload: Value::Null,
-            })
-        }
+        PluginPayload::Empty => Ok(PluginMessageWire {
+            metadata,
+            payload: Value::Null,
+        }),
     }
 }
 

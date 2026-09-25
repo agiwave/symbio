@@ -4,7 +4,7 @@
 范围：会话页输入区下方的「选项栏」与会话详情页的可修改项（**同一批字段、两种渲染形态**）
 关联：`docs/design/vdfs.md`（`node.schema` 详情方言）、
 `symbio/src/symbio_core/schemas/detail.rs`（`DetailDefinition` / `DetailField` 方言权威定义）、
-`symbio/src/symbio_core/option.rs`（收集机制 `OptionVisitor` / `collect_options`）、
+`symbio/src/symbio_core/capability/option.rs`（收集机制 `OptionVisitor` / `collect_options`）、
 `symbio/src/plugins/session/options.rs`（选项宿主：会话自有字段的声明）、
 `tauri/src/schemas/vdfs-form.ts`（前端方言 + 条件求值 / 紧凑取值规则）、
 `tauri/src/composables/useSessionOptionBar.ts` + `tauri/src/components/chat/ChatOptionBar.vue`

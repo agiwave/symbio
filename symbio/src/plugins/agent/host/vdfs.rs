@@ -38,15 +38,13 @@ use super::memory;
 use super::plugin::AgentPlugin;
 use super::store::{AgentDirRecord, AgentDirStore, FileEntry};
 use crate::providers::vdfs_service;
-use crate::symbio_core::vdfs::{
-    descend_addr, host_ctx, notify_change, unwatch_changes, watch_changes,
-};
-use crate::symbio_core::vdfs_provider::{
+use crate::symbio_core::{descend_addr, host_ctx, notify_change, unwatch_changes, watch_changes};
+use crate::symbio_core::{
     VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError,
     VdfsItem, VdfsNewType, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
     VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_EXT_FORM,
 };
-use crate::symbio_core::{AGENTS_FILE, PLUGIN_AGENT, PLUGIN_FILE};
+use crate::symbio_core::{MEMORY_AGENTS_FILE, PLUGIN_AGENT, PLUGIN_FILE};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -82,13 +80,13 @@ fn parse_rel_path(path: &str) -> RelPath<'_> {
     }
     // 保留名：挂载根下的 `AGENTS.md` 是**本应用自身**的指令，不是名为它的 agent 目录
     // （agent id 首字符必须是小写字母或数字，两者不可能相撞）
-    if p == AGENTS_FILE {
+    if p == MEMORY_AGENTS_FILE {
         return RelPath::Instruction;
     }
     match p.split_once('/') {
         None => RelPath::Agent { id: p },
         // 第二段是记忆文件名 → 记忆，而不是「名为 AGENTS.md 的普通文件」
-        Some((id, rest)) if rest == AGENTS_FILE => RelPath::Memory { id },
+        Some((id, rest)) if rest == MEMORY_AGENTS_FILE => RelPath::Memory { id },
         Some((id, rest)) => RelPath::File { id, rel: rest },
     }
 }
@@ -410,7 +408,7 @@ impl AgentPlugin {
                         .list_files(&id, "")
                         .map_err(|e| VdfsError::not_found(format!("列出目录失败：{e}")))?
                         .into_iter()
-                        .filter(|e| e.path != AGENTS_FILE)
+                        .filter(|e| e.path != MEMORY_AGENTS_FILE)
                         .map(|e| entry_node(&e)),
                 );
                 Ok(nodes.into_iter().map(VdfsItem::new).collect())
@@ -680,14 +678,14 @@ impl AgentPlugin {
         if matches!(parse_rel_path(path), RelPath::Instruction) {
             return Err(VdfsError::Forbidden(format!(
                 "系统指令不可删除（删除即丢失全部指令）。\
-                 如需清空，请向 `{AGENTS_FILE}` 写入空内容。"
+                 如需清空，请向 `{MEMORY_AGENTS_FILE}` 写入空内容。"
             )));
         }
         // 智能体记忆不可删除（与工作区记忆同一口径）：要清空就写入空内容
         if matches!(parse_rel_path(path), RelPath::Memory { .. }) {
             return Err(VdfsError::Forbidden(format!(
                 "智能体记忆不可删除（删除即丢失全部长期记忆）。\
-                 如需清空，请向 `{AGENTS_FILE}` 写入空内容。"
+                 如需清空，请向 `{MEMORY_AGENTS_FILE}` 写入空内容。"
             )));
         }
         // Agent 目录内的文件 / 子目录

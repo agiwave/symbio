@@ -11,8 +11,8 @@ use super::registry::{HookRegistration, HookRegistry};
 use crate::symbio_core::schemas::common::SimpleResponse;
 use crate::symbio_core::schemas::{HookEvent, HookOutput};
 use crate::symbio_core::{
-    InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginMeta,
-    PluginPayload, PLUGIN_HOOK,
+    Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginMeta, PluginPayload, PLUGIN_HOOK,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -33,8 +33,8 @@ pub struct HookFireRequest {
 }
 
 impl HooksPlugin {
-    /// 静态工厂：从 InvokeRequest 构造 Plugin 实例
-    pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
+    /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
+    pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         let parent = ctx.parent();
         Arc::new(HooksPlugin::new(parent)) as Arc<dyn Plugin>
     }
@@ -65,7 +65,10 @@ impl HooksPlugin {
             .with_version("0.1.0")
     }
 
-    async fn handle_fire(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<HookOutput> {
+    async fn handle_fire(
+        &self,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<HookOutput> {
         let req: HookFireRequest = ctx.payload()?;
         let workdir = ctx.get(crate::symbio_core::WORKDIR).unwrap_or_default();
 
@@ -83,7 +86,10 @@ impl HooksPlugin {
         Ok(result)
     }
 
-    async fn handle_register(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn handle_register(
+        &self,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let reg: HookRegistration = ctx.payload()?;
 
         self.registry.write().await.register(&reg).await;
@@ -91,7 +97,7 @@ impl HooksPlugin {
         Ok(PluginPayload::new(&SimpleResponse::ok()))
     }
 
-    async fn handle_list(&self) -> InvokeResponse<PluginPayload> {
+    async fn handle_list(&self) -> PluginInvokeResponse<PluginPayload> {
         let hooks = self.registry.read().await.list_hooks().await;
         Ok(PluginPayload::new(&hooks))
     }
@@ -108,7 +114,10 @@ impl Plugin for HooksPlugin {
         Self::metadata()
     }
 
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(
+        self: Arc<Self>,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
@@ -132,8 +141,8 @@ impl Plugin for HooksPlugin {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        _ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }

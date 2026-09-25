@@ -32,7 +32,7 @@
 //! `ctx[SESSION_ID]` 缺失 / 为空 → 什么都不注入。收集期拿不到会话 id 的广播
 //!（例如设置页的选项收集）不该凭空造一份记忆出来。
 
-use crate::symbio_core::{MemoryFile, SegmentSpec, AGENTS_FILE};
+use crate::symbio_core::{MemoryFile, MemorySegmentSpec, MEMORY_AGENTS_FILE};
 use std::path::PathBuf;
 
 /// 系统提示词条目在收集器里的注册名（同名覆盖的键）
@@ -47,7 +47,7 @@ pub const MEMORY_DESCRIPTION: &str =
 
 /// 会话记忆文件：`<会话目录>/AGENTS.md`
 pub fn memory_path(root: &std::path::Path, session_id: &str) -> PathBuf {
-    super::paths::session_dir(root, session_id).join(AGENTS_FILE)
+    super::paths::session_dir(root, session_id).join(MEMORY_AGENTS_FILE)
 }
 
 /// 记忆在 **provider 子树内**的相对路径（`<id>/AGENTS.md`）。
@@ -58,7 +58,7 @@ pub fn memory_path(root: &std::path::Path, session_id: &str) -> PathBuf {
 /// `symbio_core::vdfs::absolute_addr(ctx, rel)` 用上下文的当前父地址拼出——
 /// 挂载点叫什么不归本插件。
 pub fn memory_rel_path(session_id: &str) -> String {
-    format!("{session_id}/{AGENTS_FILE}")
+    format!("{session_id}/{MEMORY_AGENTS_FILE}")
 }
 
 /// 由会话 id 构造记忆门面（`None` / 空串 / 纯空白 = 无会话作用域）。
@@ -82,8 +82,8 @@ pub fn store(
 /// `address` 是**绝对地址**（调用方经 `absolute_addr` 从上下文父地址拼出，
 /// 返回 `String`，不能借给返回值长期持有）。排版由内核
 /// [`render_segment`](crate::symbio_core::render_segment) 统一决定。
-pub fn segment_spec(address: &str) -> SegmentSpec<'_> {
-    SegmentSpec {
+pub fn segment_spec(address: &str) -> MemorySegmentSpec<'_> {
+    MemorySegmentSpec {
         title: SEGMENT_TITLE,
         address,
         // 三层记忆同名不同域，不点明的话模型会把三件事写混

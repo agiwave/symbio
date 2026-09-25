@@ -42,7 +42,7 @@
 
 use super::plugin::message_path;
 use crate::symbio_core::schemas::session::chat_message as cm;
-use crate::symbio_core::vdfs::{ChangeSubscriptions, VdfsChange};
+use crate::symbio_core::{ChangeSubscriptions, VdfsChange};
 use crate::{plugin_debug, plugin_error, plugin_info};
 use indexmap::IndexMap;
 use std::sync::Arc;
@@ -681,7 +681,7 @@ impl Transcript {
     /// 它是本轮**更早**的正文，而本条变更说的是「这一轮结束了」。顺序反了，
     /// 前端会先收敛为已空闲、再补上一截正文（`sessionNodeSync` 在
     /// `working → 非 working` 迁移时就会清掉活动角标，节点却还在长）。
-    pub fn emit_session_state(&mut self, node: Option<crate::symbio_core::vdfs::VdfsNode>) {
+    pub fn emit_session_state(&mut self, node: Option<crate::symbio_core::VdfsNode>) {
         self.frame_no += 1;
         self.flush_pending();
         match &node {

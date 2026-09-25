@@ -24,8 +24,11 @@
 //! 见 [`FsPolicy`]：路径黑名单 + `..` 穿越拒绝 + 符号链接复验，另有读大小 /
 //! 列目录条数上限。这些是**物理层专有**的规则，虚拟层没有对应物。
 
-use crate::symbio_core::vdfs_provider::*;
-use crate::symbio_core::vdfs_provider::{VdfsRequest, VdfsResponse};
+use crate::symbio_core::{
+    has_parent_segment, path_within, VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode,
+    VdfsProvider, VdfsResult, VdfsValidationError, VdfsWriteResponse, VDFS_PARAM_WORKDIR,
+};
+use crate::symbio_core::{VdfsRequest, VdfsResponse};
 use async_trait::async_trait;
 use base64::Engine as _;
 use std::path::{Path, PathBuf};

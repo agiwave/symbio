@@ -48,8 +48,11 @@
 //! 新增一类资源不需要改动这里任何一行。
 
 use super::physical::PhysicalFs;
-use crate::symbio_core::vdfs_provider::*;
-use crate::symbio_core::vdfs_provider::{VdfsRequest, VdfsResponse};
+use crate::symbio_core::{
+    has_parent_segment, DynVdfsProvider, VdfsChange, VdfsChangeSink, VdfsContext, VdfsError,
+    VdfsItem, VdfsProvider, VdfsResult,
+};
+use crate::symbio_core::{VdfsRequest, VdfsResponse};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -135,7 +138,7 @@ fn half_of(addr: &str) -> Half {
 /// 拼接规则复用机制层的那一份（`join_addr`），本插件只提供根名——「根 + 相对」
 /// 的实现于是只有一处，本门面与其它插件的展示地址不会有第二种拼法。
 pub fn to_display(root_rel: &str) -> String {
-    crate::symbio_core::vdfs::join_addr(VDFS_ADDR_ROOT, root_rel)
+    crate::symbio_core::join_addr(VDFS_ADDR_ROOT, root_rel)
 }
 
 /// 解析地址并路由（所有操作的共同第一步）

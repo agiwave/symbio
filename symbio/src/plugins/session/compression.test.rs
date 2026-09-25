@@ -459,8 +459,8 @@ fn view_result(parent: &str, text: &str) -> ChatMessage {
 
 /// 构建短工具名 → 保留策略映射（模拟 chat_loop 运行时从 CapabilityVisitor 动态解析）
 fn view_retention(
-    entries: &[(&str, crate::symbio_core::ToolContextRetention)],
-) -> std::collections::HashMap<String, crate::symbio_core::ToolContextRetention> {
+    entries: &[(&str, crate::symbio_core::CapabilityToolContextRetention)],
+) -> std::collections::HashMap<String, crate::symbio_core::CapabilityToolContextRetention> {
     entries.iter().map(|(n, r)| (n.to_string(), *r)).collect()
 }
 
@@ -730,7 +730,7 @@ fn test_build_request_view_skeletonizes_with_retention() {
     // LastOnly：同工具仅保留最近一次调用（t1 应骨架化）
     let retention = view_retention(&[(
         "vdfs_read",
-        crate::symbio_core::ToolContextRetention::LastOnly,
+        crate::symbio_core::CapabilityToolContextRetention::LastOnly,
     )]);
     let view = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, false);
 
@@ -795,7 +795,7 @@ fn test_build_request_view_window_zero_disables_skeletonization() {
     ];
     let retention = view_retention(&[(
         "vdfs_read",
-        crate::symbio_core::ToolContextRetention::LastOnly,
+        crate::symbio_core::CapabilityToolContextRetention::LastOnly,
     )]);
     let view = build_request_view(&msgs, 0, &retention, false, 12, 3, 200, false);
     assert_eq!(view_text(&view[1]), r#"{"path":"old.txt"}"#);
@@ -816,7 +816,7 @@ fn test_build_request_view_nudge_comes_after_skeletonization() {
     ];
     let retention = view_retention(&[(
         "vdfs_read",
-        crate::symbio_core::ToolContextRetention::LastOnly,
+        crate::symbio_core::CapabilityToolContextRetention::LastOnly,
     )]);
     let view = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, true);
 

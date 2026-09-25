@@ -1,4 +1,4 @@
-//! 执行期事件出口的生产实现（[`TranscriptWriter`] → 转写唯一写入点）。
+//! 执行期事件出口的生产实现（[`ExecTranscriptWriter`] → 转写唯一写入点）。
 //!
 //! ## 为什么在编排层
 //!
@@ -26,8 +26,8 @@
 //!    消费循环因此可以退化为纯生命周期管理（见 [`super::consume`]）。
 
 use super::*;
-use crate::symbio_core::exec::TranscriptWriter;
 use crate::symbio_core::schemas::session::chat_message::ChatMessage;
+use crate::symbio_core::ExecTranscriptWriter;
 use async_trait::async_trait;
 
 /// 执行期事件出口：直连转写唯一写入点 + 会话级状态分派。
@@ -43,7 +43,7 @@ impl TranscriptSink {
 }
 
 #[async_trait]
-impl TranscriptWriter for TranscriptSink {
+impl ExecTranscriptWriter for TranscriptSink {
     async fn apply(&self, message: ChatMessage) {
         // 消息帧：进唯一写入点（内存图 → seq → 一行核心日志 → 发布）。
         self.state.transcript.lock().await.apply(message);

@@ -10,7 +10,7 @@
 use super::*;
 use crate::plugins::session::plugin::SessionConfig;
 use crate::symbio_core::schemas::session::session_chat;
-use crate::symbio_core::SimpleRequest;
+use crate::symbio_core::PluginSimpleRequest;
 
 fn plugin() -> Arc<SessionPlugin> {
     Arc::new(SessionPlugin::new(
@@ -174,7 +174,7 @@ async fn enqueue_carries_request_params_and_workdir() {
     assert!(item.params.resume.is_none());
 
     // 端到端侧的同一条规则：消费者造出的 ctx 只带目标会话 id 与 workdir
-    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(SESSION_ID, "s1".to_string());
     assert_eq!(ctx.get(SESSION_ID).as_deref(), Some("s1"));
     assert!(ctx.get(WORKDIR).is_none());

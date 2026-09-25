@@ -34,9 +34,9 @@ use crate::symbio_core::schemas::session::chat_message::ChatMessage;
 /// 2. 若截断发生在 `tool_calls` 的参数 JSON 中间，工具调用永远收集不完 →
 ///    `tools_done` 为空 → 循环按"无工具调用"正常退出——**用户看到的就是"对话突然结束"**。
 ///
-/// 只有拿到 `FinishReason`，`chat_loop` 才能区分"自然结束"与"被长度截断"，并触发自动续写或明确报错。
+/// 只有拿到 `ModelFinishReason`，`chat_loop` 才能区分"自然结束"与"被长度截断"，并触发自动续写或明确报错。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum FinishReason {
+pub enum ModelFinishReason {
     /// 自然结束
     #[default]
     Stop,
@@ -50,35 +50,39 @@ pub enum FinishReason {
     Other(String),
 }
 
-impl FinishReason {
+impl ModelFinishReason {
     /// 从 provider 的原始字符串归一化。`None` 视为自然结束。
     pub fn from_provider(raw: Option<&str>) -> Self {
         match raw.map(|s| s.trim()).unwrap_or("") {
-            "" | "stop" | "end_turn" | "STOP" | "stop_sequence" | "completed" => FinishReason::Stop,
-            "length" | "max_tokens" | "MAX_TOKENS" | "max_output_tokens" | "incomplete" => {
-                FinishReason::Length
+            "" | "stop" | "end_turn" | "STOP" | "stop_sequence" | "completed" => {
+                ModelFinishReason::Stop
             }
-            "tool_calls" | "tool_use" | "function_call" => FinishReason::ToolCalls,
-            "content_filter" | "SAFETY" | "RECITATION" | "refusal" => FinishReason::ContentFilter,
-            other => FinishReason::Other(other.to_string()),
+            "length" | "max_tokens" | "MAX_TOKENS" | "max_output_tokens" | "incomplete" => {
+                ModelFinishReason::Length
+            }
+            "tool_calls" | "tool_use" | "function_call" => ModelFinishReason::ToolCalls,
+            "content_filter" | "SAFETY" | "RECITATION" | "refusal" => {
+                ModelFinishReason::ContentFilter
+            }
+            other => ModelFinishReason::Other(other.to_string()),
         }
     }
 
     pub fn is_length(&self) -> bool {
-        matches!(self, FinishReason::Length)
+        matches!(self, ModelFinishReason::Length)
     }
 }
 
 /// 单次请求的用量（用于校准 token 估算；provider 不一定给，故全部可选）
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Usage {
+pub struct ModelUsage {
     pub input: Option<u32>,
     pub output: Option<u32>,
 }
 
 /// 标准协议事件 - 用于将不同提供商的流解析为统一格式
 #[derive(Debug, Clone)]
-pub enum ProtocolEvent {
+pub enum ModelProtocolEvent {
     /// 文本内容增量
     ContentDelta(String),
     /// 思考/推理过程增量
@@ -90,9 +94,9 @@ pub enum ProtocolEvent {
     /// 错误信息
     Error(String),
     /// 流结束原因（一轮响应最多出现一次）
-    Finish(FinishReason),
+    Finish(ModelFinishReason),
     /// 用量统计
-    Usage(Usage),
+    Usage(ModelUsage),
 }
 
 /// MODEL Provider —— 唯一模型契约（纯 object-safe trait）

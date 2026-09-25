@@ -26,8 +26,8 @@
 pub use crate::plugins::mcp::schemas::mcp_config::{McpConfig, McpServerConfig};
 use crate::providers::vdfs_service::DirVdfs;
 use crate::symbio_core::{
-    dir_from_ctx, Capability, CapabilityMeta, InvokeRequest, InvokeRequestExt, InvokeResponse,
-    Plugin, PluginDir, PluginError, PluginMeta, PluginPayload, PLUGIN_MCP,
+    dir_from_ctx, Capability, CapabilityMeta, Plugin, PluginDir, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_MCP,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -53,8 +53,8 @@ pub struct McpPlugin {
 }
 
 impl McpPlugin {
-    /// 静态工厂：从 InvokeRequest 构造 Plugin 实例
-    pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
+    /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
+    pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         // 自己的目录由容器经 `PLUGIN_DIR` 告知；旧形态残留的 `servers` 明细可能还在
         // 那里的 `PLUGIN.yml` 里，由 `load_from_storage` 搬成资源
         let dir = dir_from_ctx(&*ctx, PLUGIN_MCP);
@@ -119,7 +119,7 @@ impl McpPlugin {
     /// 异步加载：从 `<本插件目录>/` 读取所有 MCP Server
     ///
     /// - 若存储为空，则触发首启动迁移（从 ctx.config()）
-    pub async fn load_from_storage(&self, _ctx: &Arc<dyn InvokeRequest>) {
+    pub async fn load_from_storage(&self, _ctx: &Arc<dyn PluginInvokeRequest>) {
         let store = self.store();
 
         // 1. 存储中的所有 MCP Server
@@ -165,7 +165,7 @@ impl McpPlugin {
     ///
     /// 用于在 `route` / `traverse` 入口确保 `cfg.servers` 反映磁盘最新状态，
     /// 避免与 `build` 中 spawn 的异步加载发生时序竞争。
-    async fn ensure_loaded(&self, ctx: &Arc<dyn InvokeRequest>) {
+    async fn ensure_loaded(&self, ctx: &Arc<dyn PluginInvokeRequest>) {
         let mut guard = self.loaded.lock().await;
         if !*guard {
             self.load_from_storage(ctx).await;
@@ -225,8 +225,8 @@ impl Default for McpPlugin {
 // 本模块只剩 **mcp 特有的三件事**：详情定义随节点下发、transport 必填项校验、
 // 写后把 server 回灌进内存 config 与 manager 缓存。
 
-use crate::symbio_core::vdfs::{from_plugin_error, unwatch_changes, watch_changes};
-use crate::symbio_core::vdfs_provider::{
+use crate::symbio_core::{from_plugin_error, unwatch_changes, watch_changes};
+use crate::symbio_core::{
     VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
     VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT,
     VDFS_ACTION_IMPORT, VDFS_ACTION_TEST, VDFS_EXT_FORM, VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED,
@@ -593,17 +593,15 @@ impl Plugin for McpPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(
-        self: Arc<Self>,
-    ) -> Option<Arc<dyn crate::symbio_core::vdfs_provider::VdfsProvider>> {
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn crate::symbio_core::VdfsProvider>> {
         Some(self)
     }
 
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         self.ensure_loaded(&ctx).await;
 
         let sub_path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
@@ -620,7 +618,7 @@ impl Plugin for McpPlugin {
         };
 
         // 直接注册插件自身为 VDFS 挂载点（不经实体层与适配器）
-        let vdfs_provider: Arc<dyn crate::symbio_core::vdfs_provider::VdfsProvider> = self.clone();
+        let vdfs_provider: Arc<dyn crate::symbio_core::VdfsProvider> = self.clone();
         tool_visitor
             .register_vdfs_provider(PLUGIN_MCP, vdfs_provider)
             .await;
@@ -656,7 +654,10 @@ impl Plugin for McpPlugin {
 
     /// mcp 已无自有路由：每个 MCP Server 都是 VDFS 上的一个可寻址条目
     /// （`<根>/mcp/<name>`，见 `impl VdfsProvider`），配置因此没有第二条入口。
-    async fn route(self: Arc<Self>, _ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(
+        self: Arc<Self>,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         Err(PluginError::NotFound(format!(
             "{PLUGIN_MCP} 已无自有路由，请改用 VDFS 地址"
         )))

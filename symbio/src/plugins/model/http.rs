@@ -11,7 +11,7 @@
 use crate::plugin_error;
 use crate::plugin_info;
 use crate::plugin_warn;
-use crate::symbio_core::exec::AbortSignal;
+use crate::symbio_core::ExecAbortSignal;
 use std::sync::OnceLock;
 
 /// SSE 流空闲超时：两次数据块之间的最大间隔。
@@ -39,10 +39,10 @@ pub fn get_http_client() -> &'static reqwest::Client {
 /// 等到中止（`abort` 已置位则立即返回）。
 ///
 /// 收口前这里是一个 `select!` 三臂：100ms 轮询标志位 | 通道取消 | 收 Abort 帧。
-/// 现在只剩一条——`AbortSignal::abort` 置位的同时就唤醒等待者，**无需轮询**；
+/// 现在只剩一条——`ExecAbortSignal::abort` 置位的同时就唤醒等待者，**无需轮询**；
 /// 而「通道关闭 ⇒ 中止」的语义改由发起方在退出时显式调用 `abort()` 承担
 /// （隐式的 sender drop 换成一次命名调用，行为不变、意图更清楚）。
-async fn wait_for_abort_signal(abort: &AbortSignal) {
+async fn wait_for_abort_signal(abort: &ExecAbortSignal) {
     abort.cancelled().await;
 }
 
@@ -80,7 +80,7 @@ fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<std::time::
 }
 
 /// 退避等待期间持续响应中止信号，避免 abort 必须等满整个退避窗口。
-async fn sleep_with_abort(d: std::time::Duration, abort: &AbortSignal) {
+async fn sleep_with_abort(d: std::time::Duration, abort: &ExecAbortSignal) {
     tokio::select! {
         _ = tokio::time::sleep(d) => {}
         _ = abort.cancelled() => {}
@@ -113,7 +113,7 @@ pub async fn execute_post_with_abort(
     url: &str,
     headers: reqwest::header::HeaderMap,
     body: &[u8],
-    abort: &AbortSignal,
+    abort: &ExecAbortSignal,
 ) -> PostResult {
     // 限流/瞬时 5xx/网络抖动：有界重试 + 指数退避，避免一次瞬时错误就中断整轮对话。
     // 重试在同一 turn 内进行（复用同一个 root_id），不会额外产生 Turn/文本节点，

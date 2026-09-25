@@ -15,7 +15,7 @@ const MAX_CONTINUE_ROUNDS: u32 = 3;
 pub(crate) async fn settle_reasoning(
     orchestrator: &ChatOrchestrator,
     context: &mut SessionContext,
-    sink: &EventSink,
+    sink: &ExecEventSink,
     root_id: &str,
     mut out: TurnOutput,
 ) -> TurnResult {
@@ -67,8 +67,8 @@ pub(crate) async fn settle_reasoning(
 /// 使 `finish_turn` 的落库成为 no-op）。
 pub(crate) async fn close_turn(
     orchestrator: &ChatOrchestrator,
-    ctx: Arc<dyn InvokeRequest>,
-    sink: &EventSink,
+    ctx: Arc<dyn PluginInvokeRequest>,
+    sink: &ExecEventSink,
     context: &mut SessionContext,
     turn: &mut TurnState,
     result: TurnResult,
@@ -351,7 +351,7 @@ pub(crate) async fn close_turn(
 /// 2. 分母必须覆盖 provider 计入 `output_tokens` 的**全部**内容：文本 + 思考 +
 ///    工具调用名 + 参数 JSON。漏掉任一部分都会系统性低估估算值 → 校准比偏高
 ///    → 水位提前越过阈值 → 压缩被频繁触发。
-fn feedback_estimate(usage: Option<Usage>, out: &TurnOutput, tools: &[ToolCallInfo]) {
+fn feedback_estimate(usage: Option<ModelUsage>, out: &TurnOutput, tools: &[TurnToolCallInfo]) {
     let Some(u) = usage else { return };
     let tok = super::super::tokenizer::default_tokenizer();
     let mut estimated = tok.count_raw(&out.text) + tok.count_raw(&out.reasoning);

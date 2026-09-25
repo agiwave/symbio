@@ -29,10 +29,10 @@
 //! 同理，VDFS 挂载点走前缀而非覆盖：VDFS 是用户浏览 / 编辑面，子 Agent 的 `work`
 //! 若盖掉系统的 `work`，用户就改不到工作区记忆了——那是回归。
 
-use crate::symbio_core::vdfs::VdfsProvider;
+use crate::symbio_core::VdfsProvider;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, CapabilityVisitor, ExecEnv, InvokeRequest, InvokeResponse,
-    ModelProvider, PluginError, PluginPayload,
+    Capability, CapabilityMeta, CapabilityVisitor, ExecEnv, ModelProvider, PluginError,
+    PluginInvokeRequest, PluginInvokeResponse, PluginPayload,
 };
 use async_trait::async_trait;
 use serde_json::Value;
@@ -95,7 +95,7 @@ impl Capability for PrefixedCapability {
         &self,
         args: Value,
         env: &ExecEnv,
-        ctx: Arc<dyn InvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         // 装饰器只改名字，执行期环境与信封原样透传（不拆不装）。
         self.inner.execute(args, env, ctx).await
@@ -118,8 +118,8 @@ impl CapabilityVisitor for SubAgentVisitor {
     async fn invoke(
         &self,
         name: &str,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         self.inner.invoke(name, ctx).await
     }
 

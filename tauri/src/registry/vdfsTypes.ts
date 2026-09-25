@@ -4,7 +4,7 @@
  * 规范 §7：后端下发节点的 `ext`（扩展名）与资源类别名，前端据此选择
  * 详情渲染器与图标。**不得**在此硬编码资源类型清单、标签、能力或路径模板。
  *
- * 对应后端：symbio/src/symbio_core/vdfs_provider.rs（ext 约定）
+ * 对应后端：symbio/src/symbio_core/vdfs/node.rs（ext 约定）
  */
 
 import type { Component } from 'vue'

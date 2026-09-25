@@ -7,13 +7,15 @@
 
 use super::*;
 use crate::symbio_core::{
-    CapabilityVisitor, DefaultToolVisitor, InvokeRequestExt, AGENTS_FILE, VDFS_PARENT_ADDR,
+    CapabilityVisitor, DefaultToolVisitor, PluginInvokeRequestExt, MEMORY_AGENTS_FILE,
+    VDFS_PARENT_ADDR,
 };
 use tempfile::TempDir;
 
 /// 构造带能力收集器的上下文；`workdir` 为 `None` 即「没选工作区」
-fn ctx(workdir: Option<&str>) -> (Arc<dyn InvokeRequest>, Arc<DefaultToolVisitor>) {
-    let ctx: Arc<dyn InvokeRequest> = Arc::new(crate::symbio_core::SimpleRequest::new(None, None));
+fn ctx(workdir: Option<&str>) -> (Arc<dyn PluginInvokeRequest>, Arc<DefaultToolVisitor>) {
+    let ctx: Arc<dyn PluginInvokeRequest> =
+        Arc::new(crate::symbio_core::PluginSimpleRequest::new(None, None));
     if let Some(w) = workdir {
         ctx.set(WORKDIR, w.to_string());
     }
@@ -38,7 +40,7 @@ fn plugin(tmp: &TempDir, config: WorkConfig) -> Arc<WorkPlugin> {
 /// 工作区 + 一份 AGENTS.md
 fn workspace_with_memory(text: &str) -> TempDir {
     let ws = TempDir::new().unwrap();
-    std::fs::write(ws.path().join(AGENTS_FILE), text).unwrap();
+    std::fs::write(ws.path().join(MEMORY_AGENTS_FILE), text).unwrap();
     ws
 }
 
@@ -122,7 +124,8 @@ async fn disabled_memory_skips_injection_but_keeps_the_mount() {
 async fn plugin_has_no_own_routes() {
     let tmp = TempDir::new().unwrap();
     let p = plugin(&tmp, WorkConfig::default());
-    let ctx: Arc<dyn InvokeRequest> = Arc::new(crate::symbio_core::SimpleRequest::new(None, None));
+    let ctx: Arc<dyn PluginInvokeRequest> =
+        Arc::new(crate::symbio_core::PluginSimpleRequest::new(None, None));
     ctx.set(PATH, "work/whatever".to_string());
     let err = p.route(ctx).await.unwrap_err();
     assert!(

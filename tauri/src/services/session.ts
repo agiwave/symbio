@@ -176,7 +176,7 @@ export interface DeleteMessageResult {
  *
  * 实时通知**逐条下发**：每条被删的消息各发一条 `deleted` 变更（ADR-025 后消息的
  * 实时面就在 VDFS 变更上），消费端据此就地移除，不必整份重读；回执里的
- * `deleted_ids` 才是权威列表。见后端 `symbio_core::vdfs_provider` 的
+ * `deleted_ids` 才是权威列表。见后端 `symbio_core::vdfs` 的
  * `VDFS_ACTION_TRUNCATE` 文档。
  */
 export async function clearMessages(sessionId: string, mountDir?: string): Promise<void> {

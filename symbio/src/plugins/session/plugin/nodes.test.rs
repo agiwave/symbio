@@ -269,11 +269,13 @@ fn inbox_item_node_reuses_message_shape() {
 #[test]
 fn vdfs_internal_dirs_conditional() {
     let memory = || {
-        crate::symbio_core::MemoryFile::absent(1024, 256).node(&crate::symbio_core::NodeSpec {
-            title: "会话记忆",
-            kind: PLUGIN_SESSION,
-            description: "d",
-        })
+        crate::symbio_core::MemoryFile::absent(1024, 256).node(
+            &crate::symbio_core::MemoryNodeSpec {
+                title: "会话记忆",
+                kind: PLUGIN_SESSION,
+                description: "d",
+            },
+        )
     };
 
     let without = internal_dirs(false, memory());
@@ -287,21 +289,19 @@ fn vdfs_internal_dirs_conditional() {
     // 段名与展示名不是一回事，**标识**由 kind 承担：消费者按 kind 发现转写列表，
     // 不必把段名写进自己的地址模板（前端镜像守卫 X-002 校验的就是这个词）
     assert_eq!(
-        without[0].kind,
-        KIND_MESSAGES,
+        without[0].kind, KIND_MESSAGES,
         "转写列表的 kind 是稳定协议词，不随段名 / 展示名变化"
     );
     assert_eq!(without[1].name, SEG_INBOX, "收件箱恒在（消息的入队面）");
     assert_eq!(without[1].title, TITLE_INBOX, "展示名才是中文");
     assert_eq!(
-        without[1].kind,
-        KIND_INBOX,
+        without[1].kind, KIND_INBOX,
         "收件箱的 kind 是稳定协议词（与会话转写消息区分开）"
     );
     assert_eq!(without[2].name, workdir::SEG_SUB_SESSIONS);
     assert_eq!(
         without[3].name,
-        crate::symbio_core::AGENTS_FILE,
+        crate::symbio_core::MEMORY_AGENTS_FILE,
         "记忆恒在——它本来就是会话的一部分"
     );
     assert!(!without[3].is_dir(), "记忆是文件，不是目录");

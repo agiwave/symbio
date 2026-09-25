@@ -1,21 +1,21 @@
 //! 整包（zip）导入 / 导出——目录型资源的「一个地址、一整个条目」通道
 //!
 //! **导出与导入是一对逆向的节点动作**（`action: "export"` / `action: "import"`，
-//! 见 `symbio_core/vdfs_provider` 的动作一节），两者都不新增操作，因此打包 /
+//! 见 `symbio_core/vdfs` 的动作一节），两者都不新增操作，因此打包 /
 //! 解包也不该是第二条协议，而是本层的一组工具 + 一对载荷形状
 //! （出向 [`VdfsPack`] / 入向 [`VdfsUnpack`]）。
 //!
 //! 往返契约：[`zip_dir`] 以条目 id 作**唯一顶层目录**，[`extract_pack`] 端
 //! [`strip_common_root`] 恰好剥掉这一层——导出的包能原样导回。
 
-use crate::symbio_core::vdfs_provider::has_parent_segment;
+use crate::symbio_core::has_parent_segment;
 use serde::{Deserialize, Serialize};
 use std::io::{Cursor, Read, Write};
 use std::path::Path;
 
 /// 整包载荷的**出向**形态（VDFS 动作 `export` 的 `data`）
 ///
-/// 字段名与 [`VdfsContent::b64`](crate::symbio_core::vdfs_provider::VdfsContent) 同构——
+/// 字段名与 [`VdfsContent::b64`](crate::symbio_core::VdfsContent) 同构——
 /// 前端据此把它当**文件载荷**处理（有 `filename` + `b64` 就下载），
 /// 不认识「导出」这个动作本身。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,7 +86,7 @@ impl std::fmt::Display for PackError {
 
 impl std::error::Error for PackError {}
 
-impl From<PackError> for crate::symbio_core::vdfs_provider::VdfsError {
+impl From<PackError> for crate::symbio_core::VdfsError {
     fn from(e: PackError) -> Self {
         Self::Internal(e.0)
     }

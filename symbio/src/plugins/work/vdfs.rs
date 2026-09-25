@@ -30,19 +30,21 @@
 
 use super::memory::{MEMORY_DESCRIPTION, SEGMENT_TITLE};
 use super::plugin::WorkPlugin;
-use crate::symbio_core::vdfs::{host_ctx, notify_change, unwatch_changes, watch_changes};
-use crate::symbio_core::vdfs_provider::{
+use crate::symbio_core::{host_ctx, notify_change, unwatch_changes, watch_changes};
+use crate::symbio_core::{
+    MemoryFile, MemoryNodeSpec, MEMORY_AGENTS_FILE, PLUGIN_FILE, PLUGIN_WORK,
+};
+use crate::symbio_core::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider, VdfsRequest,
     VdfsResponse, VdfsResult, VdfsWriteResponse,
 };
-use crate::symbio_core::{MemoryFile, NodeSpec, AGENTS_FILE, PLUGIN_FILE, PLUGIN_WORK};
 use async_trait::async_trait;
 
 const LABEL: &str = SEGMENT_TITLE;
 
 /// 记忆文件 → 节点（`list` 与 `stat` 共用同一份形状，两条链路不会分叉）
 fn memory_node(store: &MemoryFile) -> VdfsNode {
-    store.node(&NodeSpec {
+    store.node(&MemoryNodeSpec {
         title: LABEL,
         kind: PLUGIN_WORK,
         description: MEMORY_DESCRIPTION,
@@ -86,7 +88,7 @@ impl VdfsProvider for WorkPlugin {
                     LABEL,
                     VdfsAccess::LIST_TRAVERSE,
                 ))),
-                AGENTS_FILE => {
+                MEMORY_AGENTS_FILE => {
                     if !store.has_scope() {
                         return Err(VdfsError::not_found(format!(
                             "{LABEL}不可用：当前没有工作区"
@@ -99,7 +101,7 @@ impl VdfsProvider for WorkPlugin {
                 other => Err(VdfsError::not_found(format!("未知路径：{other}"))),
             },
             VdfsRequest::Read => match path {
-                AGENTS_FILE => {
+                MEMORY_AGENTS_FILE => {
                     let text = store.read().map_err(VdfsError::internal)?;
                     Ok(VdfsResponse::Read(VdfsContent::text(text)))
                 }
@@ -109,7 +111,7 @@ impl VdfsProvider for WorkPlugin {
                 other => Err(VdfsError::not_found(format!("未知路径：{other}"))),
             },
             VdfsRequest::Write { content } => match path {
-                AGENTS_FILE => {
+                MEMORY_AGENTS_FILE => {
                     if content.binary {
                         return Err(VdfsError::invalid("工作区记忆是文本文件，不接受二进制内容"));
                     }
@@ -117,7 +119,7 @@ impl VdfsProvider for WorkPlugin {
                     let existed = store.exists();
                     // 容量闸门在内核里（`MemoryFile::write`）——本插件不重复实现
                     store.write(text).map_err(VdfsError::invalid)?;
-                    notify_change(PLUGIN_WORK, AGENTS_FILE);
+                    notify_change(PLUGIN_WORK, MEMORY_AGENTS_FILE);
                     Ok(VdfsResponse::Write(VdfsWriteResponse {
                         name: None,
                         created: !existed,
@@ -138,7 +140,7 @@ impl VdfsProvider for WorkPlugin {
                 }
                 Err(VdfsError::Forbidden(format!(
                     "{LABEL}不可删除（删除即丢失全部长期事实）。\
-                     如需清空，请向 `{AGENTS_FILE}` 写入空内容。"
+                     如需清空，请向 `{MEMORY_AGENTS_FILE}` 写入空内容。"
                 )))
             }
             VdfsRequest::Watch { sink } => {

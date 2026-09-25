@@ -12,7 +12,8 @@
 use super::plugin::SessionPlugin;
 use super::types::HeartbeatConfig;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, ExecEnv, InvokeRequest, InvokeRequestExt, PluginError, SESSION_ID,
+    Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    SESSION_ID,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -81,7 +82,7 @@ impl Capability for HeartbeatTool {
             ]),
             // 配置型写入：每次全量回显生效配置，历史版本对后续推理无参考价值
             // → 仅保留最近一次调用的完整参数/结果（机制化声明，压缩层通用执行）。
-            context_retention: Some(crate::symbio_core::ToolContextRetention::LastOnly),
+            context_retention: Some(crate::symbio_core::CapabilityToolContextRetention::LastOnly),
             ..Default::default()
         }
     }
@@ -90,7 +91,7 @@ impl Capability for HeartbeatTool {
         &self,
         args: Value,
         _env: &ExecEnv,
-        ctx: Arc<dyn InvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         let plugin = self
             .plugin

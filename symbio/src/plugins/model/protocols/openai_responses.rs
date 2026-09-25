@@ -9,10 +9,12 @@ use super::super::model_providers::ModelProviderConfig;
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole};
 use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
 use super::{sse_data, ModelProtocol, MODEL_PROTOCOL_OPENAI_RESPONSES};
-use crate::symbio_core::llm::sse::PartialLineExtractor;
-use crate::symbio_core::tool_name::to_wire;
 use crate::plugins::model::http::get_http_client;
-use crate::symbio_core::{FinishReason, InvokeRequest, PluginError, ProtocolEvent, SseLineParser, Usage,
+use crate::symbio_core::to_wire;
+use crate::symbio_core::SsePartialLineExtractor;
+use crate::symbio_core::{
+    ModelFinishReason, ModelProtocolEvent, ModelUsage, PluginError, PluginInvokeRequest,
+    SseLineParser,
 };
 use tracing::debug;
 
@@ -247,7 +249,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
 // === 行解析（core 契约） ===
 
 impl SseLineParser for OpenaiResponsesProtocol {
-    fn parse_line(&self, line: &str) -> Vec<ProtocolEvent> {
+    fn parse_line(&self, line: &str) -> Vec<ModelProtocolEvent> {
         let mut evs = Vec::new();
         let Some(data) = sse_data(line) else {
             return evs;
@@ -263,20 +265,20 @@ impl SseLineParser for OpenaiResponsesProtocol {
                 .and_then(|r| r.get("id"))
                 .and_then(|v| v.as_str())
             {
-                evs.push(ProtocolEvent::ResponseId(id.to_string()));
+                evs.push(ModelProtocolEvent::ResponseId(id.to_string()));
             }
 
             match json.get("type").and_then(|t| t.as_str()).unwrap_or("") {
                 // 文本增量 (兼容多种 delta 命名)
                 "response.text.delta" | "response.output_text.delta" => {
                     if let Some(d) = json.get("delta").and_then(|v| v.as_str()) {
-                        evs.push(ProtocolEvent::ContentDelta(d.to_string()));
+                        evs.push(ModelProtocolEvent::ContentDelta(d.to_string()));
                     }
                 }
                 // 推理增量
                 "response.reasoning_text.delta" => {
                     if let Some(d) = json.get("delta").and_then(|v| v.as_str()) {
-                        evs.push(ProtocolEvent::ReasoningDelta(d.to_string()));
+                        evs.push(ModelProtocolEvent::ReasoningDelta(d.to_string()));
                     }
                 }
                 // 工具调用增量参数
@@ -293,7 +295,7 @@ impl SseLineParser for OpenaiResponsesProtocol {
                         .get("delta")
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
-                    evs.push(ProtocolEvent::ToolCallDelta(idx, id, None, args));
+                    evs.push(ModelProtocolEvent::ToolCallDelta(idx, id, None, args));
                 }
                 // 工具调用完成 (有些模型直接在这里返回完整参数)
                 "response.function_call_arguments.done" => {
@@ -305,7 +307,7 @@ impl SseLineParser for OpenaiResponsesProtocol {
                         .get("arguments")
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
-                    evs.push(ProtocolEvent::ToolCallDelta(idx, None, None, args));
+                    evs.push(ModelProtocolEvent::ToolCallDelta(idx, None, None, args));
                 }
                 // 项目添加 (用于提取工具名称和 ID)
                 "response.output_item.added" => {
@@ -323,7 +325,7 @@ impl SseLineParser for OpenaiResponsesProtocol {
                                 .get("name")
                                 .and_then(|v| v.as_str())
                                 .map(|s| s.to_string());
-                            evs.push(ProtocolEvent::ToolCallDelta(idx, id, name, None));
+                            evs.push(ModelProtocolEvent::ToolCallDelta(idx, id, name, None));
                         }
                     }
                 }
@@ -333,7 +335,7 @@ impl SseLineParser for OpenaiResponsesProtocol {
                         .and_then(|e| e.get("message"))
                         .and_then(|v| v.as_str())
                     {
-                        evs.push(ProtocolEvent::Error(err.to_string()));
+                        evs.push(ModelProtocolEvent::Error(err.to_string()));
                     }
                 }
                 _ => {}
@@ -343,7 +345,9 @@ impl SseLineParser for OpenaiResponsesProtocol {
             // 事件中给出，而非每帧带 finish_reason）。
             if let Some(resp) = json.get("response") {
                 if let Some(fr) = resp.get("finish_reason").and_then(|v| v.as_str()) {
-                    evs.push(ProtocolEvent::Finish(FinishReason::from_provider(Some(fr))));
+                    evs.push(ModelProtocolEvent::Finish(
+                        ModelFinishReason::from_provider(Some(fr)),
+                    ));
                 }
                 if let Some(u) = resp.get("usage") {
                     let input = u
@@ -355,7 +359,7 @@ impl SseLineParser for OpenaiResponsesProtocol {
                         .and_then(|v| v.as_u64())
                         .map(|v| v as u32);
                     if input.is_some() || output.is_some() {
-                        evs.push(ProtocolEvent::Usage(Usage { input, output }));
+                        evs.push(ModelProtocolEvent::Usage(ModelUsage { input, output }));
                     }
                 }
             }
@@ -363,7 +367,7 @@ impl SseLineParser for OpenaiResponsesProtocol {
         evs
     }
 
-    fn open_partial_line(&self, _head: &str) -> Option<Box<dyn PartialLineExtractor>> {
+    fn open_partial_line(&self, _head: &str) -> Option<Box<dyn SsePartialLineExtractor>> {
         Some(Box::new(
             JsonLineExtractor::new(ResponsesPartial::default()),
         ))
@@ -429,17 +433,19 @@ impl PartialJsonSink for ResponsesPartial {
         }
     }
 
-    fn text(&mut self, t: &str, out: &mut Vec<ProtocolEvent>) {
+    fn text(&mut self, t: &str, out: &mut Vec<ModelProtocolEvent>) {
         if self.observing {
             self.etype.push_str(t);
             return;
         }
         match self.kind {
-            Some(ResponsesField::Content) => out.push(ProtocolEvent::ContentDelta(t.to_string())),
-            Some(ResponsesField::Reasoning) => {
-                out.push(ProtocolEvent::ReasoningDelta(t.to_string()))
+            Some(ResponsesField::Content) => {
+                out.push(ModelProtocolEvent::ContentDelta(t.to_string()))
             }
-            Some(ResponsesField::ToolArgs(i)) => out.push(ProtocolEvent::ToolCallDelta(
+            Some(ResponsesField::Reasoning) => {
+                out.push(ModelProtocolEvent::ReasoningDelta(t.to_string()))
+            }
+            Some(ResponsesField::ToolArgs(i)) => out.push(ModelProtocolEvent::ToolCallDelta(
                 i,
                 None,
                 None,
@@ -458,7 +464,7 @@ impl PartialJsonSink for ResponsesPartial {
 
 // === 注册到通用对象创建机制 ===
 
-fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn ModelProtocol> {
+fn build(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn ModelProtocol> {
     Arc::new(OpenaiResponsesProtocol)
 }
 

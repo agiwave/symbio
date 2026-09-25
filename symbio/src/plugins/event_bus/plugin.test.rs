@@ -4,10 +4,10 @@
 
 use super::*;
 
-use crate::symbio_core::SimpleRequest;
+use crate::symbio_core::PluginSimpleRequest;
 
-fn ctx(path: &str) -> Arc<dyn InvokeRequest> {
-    let req = SimpleRequest::new(None, None);
+fn ctx(path: &str) -> Arc<dyn PluginInvokeRequest> {
+    let req = PluginSimpleRequest::new(None, None);
     req.set(crate::symbio_core::PATH, path.to_string());
     Arc::new(req)
 }

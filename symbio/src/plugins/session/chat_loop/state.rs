@@ -75,8 +75,8 @@ pub(crate) struct TurnState {
     /// 用户中止信号（`provider.execute_turn` 与工具执行共享同一份）。
     ///
     /// 收口前是一个裸 `Arc<AtomicBool>`，外部置位要靠「往执行期通道投 Abort 帧」；
-    /// 现在是 [`AbortSignal`]——置位与唤醒是同一个动作，不再需要帧与轮询。
-    pub(crate) abort: AbortSignal,
+    /// 现在是 [`ExecAbortSignal`]——置位与唤醒是同一个动作，不再需要帧与轮询。
+    pub(crate) abort: ExecAbortSignal,
     /// 已完成的工具轮次（跨轮累加；软上限判定与 fade 判定都读它）
     pub(crate) tool_rounds: usize,
     /// 长度截断自动续写次数（跨轮累加）
@@ -130,8 +130,8 @@ pub(crate) enum Gate {
 /// 本轮推理产物（`TurnOutput` 被 `into_messages` 按值消费前取出的字段）。
 pub(crate) struct TurnResult {
     pub(crate) root_id: String,
-    pub(crate) tools_done: Vec<ToolCallInfo>,
-    pub(crate) finish: FinishReason,
+    pub(crate) tools_done: Vec<TurnToolCallInfo>,
+    pub(crate) finish: ModelFinishReason,
     pub(crate) had_tool: bool,
 }
 
@@ -155,12 +155,12 @@ pub struct StopSignal {
     parent: Option<Arc<dyn Plugin>>,
     /// Stop 钩子要投递的请求上下文（`fire_hook` 内部会再 fork 一份并设置
     /// PATH=payload，故此处持有的是原始 chat 上下文）。
-    ctx: Arc<dyn InvokeRequest>,
+    ctx: Arc<dyn PluginInvokeRequest>,
     fired: AtomicBool,
 }
 
 impl StopSignal {
-    pub fn new(parent: Option<Arc<dyn Plugin>>, ctx: Arc<dyn InvokeRequest>) -> Self {
+    pub fn new(parent: Option<Arc<dyn Plugin>>, ctx: Arc<dyn PluginInvokeRequest>) -> Self {
         Self {
             parent,
             ctx,
@@ -343,7 +343,7 @@ impl CompressionEmitter {
             // N → M 条"）是**首次也是唯一**一次上线。用状态帧剥掉正文，前端会一直
             // 停在占位文案上，直到重开会话才从存储读到结果（实测回归）。
             // 状态帧只适用于「正文已由 delta 逐帧上线」的节点。
-            tr.apply(crate::symbio_core::llm::turn::message_frame(&node));
+            tr.apply(crate::symbio_core::message_frame(&node));
             tr.persisted(std::slice::from_ref(&node.id));
             node
         };
@@ -372,7 +372,7 @@ impl CompressionEmitter {
     /// 返回的那份——后者没有号（补号发生在存储临界区内的私有副本上）。
     pub async fn emit_persisted(&self, session_id: &str, node: &ChatMessage) {
         self.plugin
-            .transcript_apply(session_id, crate::symbio_core::llm::turn::message_frame(node))
+            .transcript_apply(session_id, crate::symbio_core::message_frame(node))
             .await;
     }
 }
@@ -417,8 +417,8 @@ impl ChatOrchestrator {
         &self,
         root_id: &str,
         out: &TurnOutput,
-        tools: &[ToolCallInfo],
-        sink: &EventSink,
+        tools: &[TurnToolCallInfo],
+        sink: &ExecEventSink,
     ) {
         if out.is_reasoning_only(tools.len()) {
             // reasoning-only：模型只产生了 reasoning，没有独立的文本回复。

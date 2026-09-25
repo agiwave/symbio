@@ -27,4 +27,4 @@
 ## 关联
 
 - 架构哲学：`docs/architecture/OVERVIEW.md`
-- 注册机制：`symbio_core/creator.rs`（`submit_object_creator!`）
+- 注册机制：`symbio_core/plugin/creator.rs`（`submit_object_creator!`）

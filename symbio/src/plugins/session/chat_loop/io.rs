@@ -16,7 +16,11 @@ use super::*;
 /// `persist_messages` 即将落库的那份），不是手拼的半截快照：帧里带的身份、`meta`
 /// 与状态就是权威副本上那份，手拼会漏掉先前帧写下的场景字段。
 /// 节点不在转写里 = 本轮根本没建立过（异常路径），静默返回。
-pub(crate) async fn finalize_turn_root(sink: &EventSink, context: &SessionContext, root_id: &str) {
+pub(crate) async fn finalize_turn_root(
+    sink: &ExecEventSink,
+    context: &SessionContext,
+    root_id: &str,
+) {
     let Some(mut node) = context.messages.iter().find(|m| m.id == root_id).cloned() else {
         return;
     };
@@ -43,7 +47,7 @@ pub(crate) async fn finalize_turn_root(sink: &EventSink, context: &SessionContex
 pub(crate) async fn persist_messages(
     context: &SessionContext,
     last_saved: usize,
-    sink: &EventSink,
+    sink: &ExecEventSink,
 ) {
     let new_messages = &context.messages[last_saved..];
     if new_messages.is_empty() {
@@ -75,7 +79,9 @@ pub(crate) async fn persist_messages(
 /// 时回退内存会话：复用 [`PersistentChatSession::detached`]（默认配置 + 内存存储后端），
 /// 不再另写一份 `ChatSession` 实现（审计 B1）——原先的 `FallbackChatSession` 与
 /// `EphemeralChatSession` 是同一契约的额外两份实现，缺孤儿清理与轮次窗口，与持久版行为漂移。
-pub(crate) async fn open_chat_session(ctx: &Arc<dyn InvokeRequest>) -> Arc<PersistentChatSession> {
+pub(crate) async fn open_chat_session(
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) -> Arc<PersistentChatSession> {
     if let Some(handle) = ctx.get(SESSION_HANDLE) {
         return handle.0.clone();
     }
@@ -93,7 +99,7 @@ pub(crate) async fn open_chat_session(ctx: &Arc<dyn InvokeRequest>) -> Arc<Persi
 pub(crate) async fn fire_user_prompt_submit_hook(
     orchestrator: &ChatOrchestrator,
     context: &SessionContext,
-    ctx: &Arc<dyn InvokeRequest>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
 ) {
     let user_prompt = context
         .messages
@@ -110,7 +116,7 @@ pub(crate) async fn fire_user_prompt_submit_hook(
     .await;
 }
 
-pub(crate) async fn emit_streaming_start(sink: &EventSink, root_id: &str, turn: Option<usize>) {
+pub(crate) async fn emit_streaming_start(sink: &ExecEventSink, root_id: &str, turn: Option<usize>) {
     let meta = turn.map(|t| serde_json::json!({"turn": t}));
     // Turn 组合节点无正文：身份 + 状态一帧到位。
     sink.emit(ChatMessage {

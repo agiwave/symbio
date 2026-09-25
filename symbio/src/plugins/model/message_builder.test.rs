@@ -5,7 +5,7 @@
 use super::*;
 
 use crate::symbio_core::schemas::session::chat_message::MessageStatus;
-use crate::symbio_core::llm::turn::{build_assistant_messages, StreamChildIds, ToolCallInfo};
+use crate::symbio_core::{build_assistant_messages, TurnStreamChildIds, TurnToolCallInfo};
 
 const TURN_ID: &str = "turn-0001";
 
@@ -23,8 +23,8 @@ fn child_texts(msgs: &[ChatMessage], ty: MessageType) -> Vec<String> {
         .collect()
 }
 
-fn tool_call(name: &str) -> ToolCallInfo {
-    ToolCallInfo {
+fn tool_call(name: &str) -> TurnToolCallInfo {
+    TurnToolCallInfo {
         id: Some("tc-1".to_string()),
         wire_id: None,
         name: Some(name.to_string()),
@@ -95,7 +95,7 @@ fn reasoning_only_writes_single_text_child_without_reasoning_node() {
         &[],
         None,
         Some(reasoning.into()),
-        StreamChildIds::default(),
+        TurnStreamChildIds::default(),
     );
 
     // 恰好 2 个节点：Turn(根) + 1 个 Text 子节点
@@ -132,7 +132,7 @@ fn reasoning_only_ignores_surrounding_whitespace() {
         &[],
         None,
         Some(reasoning.into()),
-        StreamChildIds::default(),
+        TurnStreamChildIds::default(),
     );
 
     assert_eq!(msgs.len(), 2);
@@ -149,7 +149,7 @@ fn reasoning_with_distinct_reply_keeps_both_children() {
         &[],
         Some("resp-1".into()),
         Some("思考过程".into()),
-        StreamChildIds::default(),
+        TurnStreamChildIds::default(),
     );
 
     // Turn + Reasoning + Text
@@ -175,8 +175,14 @@ fn reasoning_with_distinct_reply_keeps_both_children() {
 /// 用例 C：无 reasoning 的纯文本回复 → Turn + Text
 #[test]
 fn plain_text_reply_has_no_reasoning_child() {
-    let msgs =
-        build_assistant_messages(TURN_ID, "你好", &[], None, None, StreamChildIds::default());
+    let msgs = build_assistant_messages(
+        TURN_ID,
+        "你好",
+        &[],
+        None,
+        None,
+        TurnStreamChildIds::default(),
+    );
     assert_eq!(msgs.len(), 2);
     assert_eq!(count_children(&msgs, MessageType::Reasoning), 0);
     assert_eq!(child_texts(&msgs, MessageType::Text), vec!["你好"]);
@@ -193,7 +199,7 @@ fn reasoning_with_tool_calls_keeps_reasoning_and_skips_empty_text() {
         &tools,
         None,
         Some("要先读文件".into()),
-        StreamChildIds::default(),
+        TurnStreamChildIds::default(),
     );
 
     // Turn + Reasoning + ToolCall
@@ -218,7 +224,7 @@ fn reasoning_only_flattens_to_single_assistant_message() {
         &[],
         None,
         Some(reasoning.into()),
-        StreamChildIds::default(),
+        TurnStreamChildIds::default(),
     );
 
     let natives = flatten_chat_messages(&msgs);
@@ -243,7 +249,7 @@ fn reasoning_with_reply_flattens_into_content_and_reasoning_content() {
         &[],
         None,
         Some("思考过程".into()),
-        StreamChildIds::default(),
+        TurnStreamChildIds::default(),
     );
 
     let natives = flatten_chat_messages(&msgs);
@@ -357,7 +363,7 @@ fn persisted_children_reuse_streaming_child_ids() {
         &[],
         None,
         Some("思考过程".into()),
-        StreamChildIds {
+        TurnStreamChildIds {
             text: Some("stream-text-id".into()),
             reasoning: Some("stream-reason-id".into()),
         },
@@ -387,7 +393,7 @@ fn reasoning_only_reuses_reasoning_stream_id() {
         &[],
         None,
         Some(reasoning.into()),
-        StreamChildIds {
+        TurnStreamChildIds {
             text: None,
             reasoning: Some("stream-reason-id".into()),
         },

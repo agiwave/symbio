@@ -28,8 +28,9 @@ use super::plugin::{SessionPlugin, OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_F
 use crate::plugin_debug;
 use crate::symbio_core::schemas::{session::chat_message as cm, session::session_chat};
 use crate::symbio_core::{
-    take_errors, AbortSignal, EventSink, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
-    PluginError, PluginPayload, MODE, PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
+    take_errors, ExecAbortSignal, ExecEventSink, Plugin, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload, MODE, PROVIDER_ID, RISK_LEVEL,
+    SESSION_ID, WORKDIR,
 };
 use broadcast::SessionStateChange;
 use serde_json::json;
@@ -54,7 +55,7 @@ use std::time::Duration;
 /// `docs/archive/legacy-route-migration.md` §5.1），此处保留它是因为这条注释记录的是
 /// **当时的修复范围**——把已删入口从历史里抹掉会让「为什么这个函数长这样」失去依据。
 pub(crate) fn resolve_required_session_id(
-    ctx: &Arc<dyn InvokeRequest>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
     fallback: Option<&str>,
 ) -> Result<String, PluginError> {
     let raw = ctx
@@ -89,7 +90,7 @@ pub(crate) fn resolve_required_session_id(
 /// （对已结束的 Turn 置位是幂等的空动作。）
 struct AbortGuard {
     state: Arc<ActiveSessionState>,
-    signal: AbortSignal,
+    signal: ExecAbortSignal,
     /// `false` 表示已清理，Drop 成为 no-op（正常路径走 `disarm` 同步清理，
     /// 避免多一次 spawn 调度延迟）。
     armed: bool,
@@ -97,7 +98,7 @@ struct AbortGuard {
 
 impl AbortGuard {
     /// 登记中止信号：`handle_abort` 凭此找到在途 Turn。
-    async fn register(state: Arc<ActiveSessionState>, signal: AbortSignal) -> Self {
+    async fn register(state: Arc<ActiveSessionState>, signal: ExecAbortSignal) -> Self {
         state.inner.write().await.abort_signal = Some(signal.clone());
         Self {
             state,

@@ -10,7 +10,7 @@ use super::types::HeartbeatConfig;
 use crate::symbio_core::now_ms;
 use crate::symbio_core::schemas::session::chat_message as cm;
 use crate::symbio_core::schemas::session::session_chat;
-use crate::symbio_core::{InvokeRequestExt, SimpleRequest, SESSION_ID};
+use crate::symbio_core::{PluginInvokeRequestExt, PluginSimpleRequest, SESSION_ID};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -173,12 +173,12 @@ impl SessionPlugin {
             resume: None,
         };
 
-        let ctx = SimpleRequest::new(None, None);
+        let ctx = PluginSimpleRequest::new(None, None);
         // 刻意**不设 `PATH`**：下面走的是直连方法调用（`self.handle_chat_send_oneoff`），
         // 不过路由，`PATH` 没有任何读者。这里曾写 `ctx.set(PATH, "chat/send")`——
         // 纯死赋值，而且值还是相对臂（相对臂只属于插件自己的 `match`，不该出现在调用侧）。
         // 编排侧的口径见 `orchestrator/entry.rs`：「chat_ctx 仅承载 payload（不再设置
-        // 跨插件 PATH）」。地址规则见 `symbio_core::paths` 模块文档。
+        // 跨插件 PATH）」。地址规则见 `symbio_core::keys::paths` 模块文档。
         ctx.set(SESSION_ID, session_id.to_string());
         if let Err(e) = ctx.set_payload(req) {
             crate::plugin_error!("session", "[Heartbeat] 触发失败：无法设置 payload: {}", e);

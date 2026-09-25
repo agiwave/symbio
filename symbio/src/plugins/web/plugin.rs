@@ -5,8 +5,9 @@ use super::{http_request::HttpRequestTool, web_fetch::WebFetchTool, web_search::
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::vdfs;
 use crate::symbio_core::{
-    dir_from_ctx, Capability, ConfigFile, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
-    PluginDir, PluginError, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_WEB,
+    dir_from_ctx, Capability, Plugin, PluginConfigFile, PluginDir, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
+    PLUGIN_FILE, PLUGIN_WEB,
 };
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
@@ -56,14 +57,14 @@ fn config_definition() -> DetailDefinition {
 pub struct WebPlugin {
     config: Arc<RwLock<WebConfig>>,
     /// 配置文件的呈现与校验（`<根>/web/PLUGIN.yml`）——落盘写的是本插件自己目录里的文件
-    config_file: ConfigFile,
+    config_file: PluginConfigFile,
     tool_impls: Arc<Vec<Arc<dyn Capability>>>,
     parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
 }
 
 impl WebPlugin {
-    /// 静态工厂：从 InvokeRequest 构造 Plugin 实例
-    pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
+    /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
+    pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         let dir = dir_from_ctx(&*ctx, PLUGIN_WEB);
         let config: WebConfig = match dir.load::<WebConfig>() {
             Ok(Some(c)) => c,
@@ -90,7 +91,7 @@ impl WebPlugin {
 
         Self {
             config: config_lock,
-            config_file: ConfigFile::new(dir, "网络工具", config_definition()),
+            config_file: PluginConfigFile::new(dir, "网络工具", config_definition()),
             tool_impls: Arc::new(tool_impls),
             parent: Arc::new(RwLock::new(parent)),
         }
@@ -117,13 +118,14 @@ impl Plugin for WebPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(
-        self: Arc<Self>,
-    ) -> Option<Arc<dyn crate::symbio_core::vdfs_provider::VdfsProvider>> {
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn crate::symbio_core::VdfsProvider>> {
         Some(self)
     }
 
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(
+        self: Arc<Self>,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
 
         if path.starts_with('/') {
@@ -141,8 +143,8 @@ impl Plugin for WebPlugin {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let sub_path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         if sub_path != crate::symbio_core::TRAVERSE_AVAILABLE_TOOLS {
             return Err(crate::symbio_core::PluginError::NotFound(format!(
@@ -160,7 +162,7 @@ impl Plugin for WebPlugin {
             visitor.register_vdfs_provider(PLUGIN_WEB, me).await;
         }
         // 顺带声明「本插件有一份配置文档」：设置页据此列出本项并指路到
-        // `<根>/web/PLUGIN.yml`（标签与配置节点共用同一个来源，见 `ConfigFile`）
+        // `<根>/web/PLUGIN.yml`（标签与配置节点共用同一个来源，见 `PluginConfigFile`）
         crate::symbio_core::announce_configurable(&ctx, &self.config_file).await;
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))

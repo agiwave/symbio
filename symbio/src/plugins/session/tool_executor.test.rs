@@ -4,10 +4,10 @@
 //! `tool_executor.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
-use crate::symbio_core::SimpleRequest;
+use crate::symbio_core::PluginSimpleRequest;
 
-fn test_ctx() -> Arc<dyn InvokeRequest> {
-    Arc::new(SimpleRequest::new(None, None))
+fn test_ctx() -> Arc<dyn PluginInvokeRequest> {
+    Arc::new(PluginSimpleRequest::new(None, None))
 }
 
 // ==================== extract_result：判定顺序即约定 ====================
@@ -100,9 +100,9 @@ fn result_field_constants_match_the_documented_order() {
 /// 节点不会成为"无结果 tool_call"（下轮请求 400）。
 #[tokio::test]
 async fn missing_tool_call_id_is_recorded_as_failure() {
-    let sink = EventSink::silent();
-    let abort = AbortSignal::new();
-    let tcs = vec![ToolCallInfo {
+    let sink = ExecEventSink::silent();
+    let abort = ExecAbortSignal::new();
+    let tcs = vec![TurnToolCallInfo {
         id: None,
         wire_id: None,
         name: Some("vdfs_list".into()),
@@ -141,9 +141,9 @@ async fn missing_tool_call_id_is_recorded_as_failure() {
 /// 空串 id 与缺失同等对待（"不合法"）。
 #[tokio::test]
 async fn empty_tool_call_id_is_recorded_as_failure() {
-    let sink = EventSink::silent();
-    let abort = AbortSignal::new();
-    let tcs = vec![ToolCallInfo {
+    let sink = ExecEventSink::silent();
+    let abort = ExecAbortSignal::new();
+    let tcs = vec![TurnToolCallInfo {
         id: Some(String::new()),
         wire_id: None,
         name: Some("vdfs_list".into()),
@@ -161,9 +161,9 @@ async fn empty_tool_call_id_is_recorded_as_failure() {
 /// 工具名缺失/非法 → 同样作为失败处理（结果挂到已知 id 上，结构完整）。
 #[tokio::test]
 async fn missing_tool_name_is_recorded_as_failure() {
-    let sink = EventSink::silent();
-    let abort = AbortSignal::new();
-    let tcs = vec![ToolCallInfo {
+    let sink = ExecEventSink::silent();
+    let abort = ExecAbortSignal::new();
+    let tcs = vec![TurnToolCallInfo {
         id: Some("tc-known".into()),
         wire_id: None,
         name: Some(String::new()),
@@ -185,9 +185,9 @@ async fn missing_tool_name_is_recorded_as_failure() {
 /// 而非静默以 `{}` 执行（那会让模型看到「缺少必填参数」后原样重试）。
 #[tokio::test]
 async fn unparseable_arguments_are_refused_not_executed() {
-    let sink = EventSink::silent();
-    let abort = AbortSignal::new();
-    let tcs = vec![ToolCallInfo {
+    let sink = ExecEventSink::silent();
+    let abort = ExecAbortSignal::new();
+    let tcs = vec![TurnToolCallInfo {
         id: Some("tc-broken".into()),
         wire_id: None,
         name: Some("cmd".into()),
@@ -276,18 +276,18 @@ fn tc_context(ids: &[&str]) -> Vec<ChatMessage> {
 /// 的占位兜底 ⇒ 模型看得见、用户看不见，于是它长期潜伏。两条断言必须同时在。
 #[tokio::test]
 async fn aborted_batch_terminates_every_tool_call() {
-    let sink = EventSink::silent();
-    let abort = AbortSignal::new();
+    let sink = ExecEventSink::silent();
+    let abort = ExecAbortSignal::new();
     abort.abort(); // 已中止：本批一个都不执行
     let tcs = vec![
-        ToolCallInfo {
+        TurnToolCallInfo {
             id: Some("tc1".into()),
             wire_id: None,
             name: Some("vdfs_list".into()),
             arguments: json!({ "path": "." }),
             parse_error: None,
         },
-        ToolCallInfo {
+        TurnToolCallInfo {
             id: Some("tc2".into()),
             wire_id: None,
             name: Some("vdfs_list".into()),
@@ -351,20 +351,20 @@ async fn aborted_batch_terminates_every_tool_call() {
 /// 的父节点、没有任何子节点，UI 上表现为「工具没有响应，会话却继续往后」。
 #[tokio::test]
 async fn interactive_break_leaves_result_for_skipped_calls() {
-    let sink = EventSink::silent();
-    let abort = AbortSignal::new();
+    let sink = ExecEventSink::silent();
+    let abort = ExecAbortSignal::new();
     // 交互模式 + 无 parent：第一个工具必然以失败告终，触发本批 break
     let ctx = test_ctx();
     ctx.set(crate::symbio_core::MODE, "interactive".to_string());
     let tcs = vec![
-        ToolCallInfo {
+        TurnToolCallInfo {
             id: Some("tc1".into()),
             wire_id: None,
             name: Some("vdfs_read".into()),
             arguments: json!({ "path": "a" }),
             parse_error: None,
         },
-        ToolCallInfo {
+        TurnToolCallInfo {
             id: Some("tc2".into()),
             wire_id: None,
             name: Some("vdfs_read".into()),
@@ -448,10 +448,10 @@ fn not_executed_patch_is_completed_not_failed() {
 ///
 /// 收口前这条语义由「`handle_abort` 往通道投一帧 `{"type":"abort"}`」承载，
 /// 因此测试要造帧、造通道、还要覆盖 cancel_token 与「通道关闭不算中止」两条边界。
-/// 现在中止只有一个原语（[`AbortSignal`]），一个用例即可锁死契约。
+/// 现在中止只有一个原语（[`ExecAbortSignal`]），一个用例即可锁死契约。
 #[tokio::test]
 async fn wait_tool_abort_returns_when_signalled() {
-    let abort = AbortSignal::new();
+    let abort = ExecAbortSignal::new();
     let waiter = abort.clone();
 
     let handle = tokio::spawn(async move { wait_tool_abort(&waiter).await });
@@ -466,7 +466,7 @@ async fn wait_tool_abort_returns_when_signalled() {
 /// 已置位的信号（上游已判定）→ 立即返回，不挂起。
 #[tokio::test]
 async fn wait_tool_abort_returns_immediately_when_already_aborted() {
-    let abort = AbortSignal::new();
+    let abort = ExecAbortSignal::new();
     abort.abort();
     tokio::time::timeout(
         std::time::Duration::from_millis(200),
@@ -484,7 +484,7 @@ async fn wait_tool_abort_returns_immediately_when_already_aborted() {
 /// 契约变成更直接的一句：**只有 `abort()` 能让它返回**。
 #[tokio::test]
 async fn wait_tool_abort_stays_pending_without_signal() {
-    let abort = AbortSignal::new();
+    let abort = ExecAbortSignal::new();
     let r = tokio::time::timeout(
         std::time::Duration::from_millis(300),
         wait_tool_abort(&abort),

@@ -144,8 +144,11 @@ fn config_definition_defaults_come_from_session_config() {
 // 注入的那一段长什么样。
 
 /// 构造带能力收集器的上下文；`session_id` 为 `None` 即「没有会话上下文」
-fn collect_ctx(session_id: Option<&str>) -> (Arc<dyn InvokeRequest>, Arc<DefaultToolVisitor>) {
-    let ctx: Arc<dyn InvokeRequest> = Arc::new(crate::symbio_core::SimpleRequest::new(None, None));
+fn collect_ctx(
+    session_id: Option<&str>,
+) -> (Arc<dyn PluginInvokeRequest>, Arc<DefaultToolVisitor>) {
+    let ctx: Arc<dyn PluginInvokeRequest> =
+        Arc::new(crate::symbio_core::PluginSimpleRequest::new(None, None));
     if let Some(sid) = session_id {
         ctx.set(SESSION_ID, sid.to_string());
     }
@@ -262,7 +265,7 @@ async fn session_memory_is_injected_verbatim() {
     let dir = p.storage_dir().join(&id);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
-        dir.join(crate::symbio_core::AGENTS_FILE),
+        dir.join(crate::symbio_core::MEMORY_AGENTS_FILE),
         "本会话约定：所有时间用 UTC。",
     )
     .unwrap();

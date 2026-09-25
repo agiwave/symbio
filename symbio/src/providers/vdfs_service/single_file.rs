@@ -10,8 +10,8 @@
 //! 有多份文件、需要浏览条目内部的资源用 [`DirVdfs`](super::dir::DirVdfs)。
 
 use super::entry;
-use crate::symbio_core::vdfs::host::{notify_change, unwatch_changes, watch_changes};
-use crate::symbio_core::vdfs_provider::{
+use crate::symbio_core::{notify_change, unwatch_changes, watch_changes};
+use crate::symbio_core::{
     VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider,
     VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT,
 };

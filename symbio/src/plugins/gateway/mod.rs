@@ -17,7 +17,7 @@
 //!
 //! 本插件**不定义任何新协议**。所有对外端点都是既有 Tauri 命令的一对一映射，
 //! 传输的是完全相同的 `PluginMessageWire` / `PluginPayloadWire` / `PluginFrame`。
-//! 入站服务（`server.rs`）仅做「行李搬运」：把 HTTP/WS 请求翻译成 `SimpleRequest`，
+//! 入站服务（`server.rs`）仅做「行李搬运」：把 HTTP/WS 请求翻译成 `PluginSimpleRequest`，
 //! 交给既有的分形路由（`parent.route(ctx)`），再把响应原样送回。
 mod config;
 mod plugin;

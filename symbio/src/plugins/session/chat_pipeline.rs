@@ -36,8 +36,8 @@
 //! 参与 traverse 的插件、读侧为 session 编排方，属跨插件契约）；本文件仅消费。
 
 use crate::symbio_core::{
-    init_error_bucket, CapabilityVisitor, DefaultToolVisitor, InvokeRequest, InvokeRequestExt,
-    Plugin, CAPABILITY_ERRORS, PATH, TRAVERSE_AVAILABLE_TOOLS,
+    init_error_bucket, CapabilityVisitor, DefaultToolVisitor, Plugin, PluginInvokeRequest,
+    PluginInvokeRequestExt, CAPABILITY_ERRORS, PATH, TRAVERSE_AVAILABLE_TOOLS,
 };
 use std::sync::Arc;
 
@@ -58,7 +58,7 @@ use std::sync::Arc;
 /// - 父插件缺失（单插件内嵌场景）时返回空管理器，而非报错。
 pub async fn collect_capabilities(
     parent: Option<&Arc<dyn Plugin>>,
-    ctx: &Arc<dyn InvokeRequest>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
 ) -> Arc<dyn CapabilityVisitor> {
     let manager: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
 
@@ -100,6 +100,9 @@ pub async fn collect_capabilities(
 ///
 /// 单独抽出的意义：让"收集"与"挂载"两件事在调用点显式成对出现，
 /// 避免漏挂导致 `Tool not found` 这类只在运行期才暴露的问题。
-pub fn attach_capabilities(ctx: &Arc<dyn InvokeRequest>, manager: Arc<dyn CapabilityVisitor>) {
+pub fn attach_capabilities(
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    manager: Arc<dyn CapabilityVisitor>,
+) {
     ctx.set(crate::symbio_core::CAPABILITY_VISITOR, manager);
 }

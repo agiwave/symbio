@@ -1,6 +1,6 @@
 //! Web 获取工具 - 实现 Tool trait
 
-use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, InvokeRequest, PluginError};
+use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -109,7 +109,7 @@ impl Capability for WebFetchTool {
         &self,
         args: Value,
         _env: &ExecEnv,
-        _ctx: Arc<dyn InvokeRequest>,
+        _ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         let result = self.execute_inner(args).await?;
         Ok(serde_json::to_value(&result)?)

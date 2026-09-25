@@ -39,7 +39,10 @@ fn rel_path_splits_agent_and_inner_path() {
 /// 而保留名以大写 `A` 开头。
 #[test]
 fn root_agents_md_is_the_host_instruction_not_an_agent_dir() {
-    assert!(matches!(parse_rel_path(AGENTS_FILE), RelPath::Instruction));
+    assert!(matches!(
+        parse_rel_path(MEMORY_AGENTS_FILE),
+        RelPath::Instruction
+    ));
     assert!(matches!(parse_rel_path("/AGENTS.md"), RelPath::Instruction));
     // 带子路径时不再命中保留名（那是一条指向不存在条目的普通 agent 目录路径）
     assert!(matches!(

@@ -9,10 +9,12 @@ use super::super::model_providers::ModelProviderConfig;
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole};
 use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
 use super::{ModelProtocol, MODEL_PROTOCOL_GEMINI_API};
-use crate::symbio_core::llm::sse::PartialLineExtractor;
-use crate::symbio_core::tool_name::to_wire;
 use crate::plugins::model::http::get_http_client;
-use crate::symbio_core::{FinishReason, InvokeRequest, PluginError, ProtocolEvent, SseLineParser, Usage,
+use crate::symbio_core::to_wire;
+use crate::symbio_core::SsePartialLineExtractor;
+use crate::symbio_core::{
+    ModelFinishReason, ModelProtocolEvent, ModelUsage, PluginError, PluginInvokeRequest,
+    SseLineParser,
 };
 
 pub struct GeminiProtocol;
@@ -239,7 +241,7 @@ impl ModelProtocol for GeminiProtocol {
 // === 行解析（core 契约） ===
 
 impl SseLineParser for GeminiProtocol {
-    fn parse_line(&self, line: &str) -> Vec<ProtocolEvent> {
+    fn parse_line(&self, line: &str) -> Vec<ModelProtocolEvent> {
         let mut evs = Vec::new();
         let trimmed = line.trim();
         // 处理 Gemini 可能的数组包裹格式
@@ -254,14 +256,14 @@ impl SseLineParser for GeminiProtocol {
                     if let Some(parts) = content.get("parts").and_then(|p| p.as_array()) {
                         for part in parts {
                             if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
-                                evs.push(ProtocolEvent::ContentDelta(text.into()));
+                                evs.push(ModelProtocolEvent::ContentDelta(text.into()));
                             }
                             if let Some(fc) = part.get("functionCall") {
                                 let name =
                                     fc.get("name").and_then(|v| v.as_str()).map(|s| s.into());
                                 let args = fc.get("args").map(|v| v.to_string());
                                 // Gemini 每次返回完整调用，因此生成新 ID
-                                evs.push(ProtocolEvent::ToolCallDelta(
+                                evs.push(ModelProtocolEvent::ToolCallDelta(
                                     0,
                                     Some(uuid::Uuid::new_v4().to_string()),
                                     name,
@@ -278,7 +280,9 @@ impl SseLineParser for GeminiProtocol {
                     .and_then(|c| c.get("finishReason"))
                     .and_then(|v| v.as_str())
                 {
-                    evs.push(ProtocolEvent::Finish(FinishReason::from_provider(Some(fr))));
+                    evs.push(ModelProtocolEvent::Finish(
+                        ModelFinishReason::from_provider(Some(fr)),
+                    ));
                 }
             }
 
@@ -293,14 +297,14 @@ impl SseLineParser for GeminiProtocol {
                     .and_then(|v| v.as_u64())
                     .map(|v| v as u32);
                 if input.is_some() || output.is_some() {
-                    evs.push(ProtocolEvent::Usage(Usage { input, output }));
+                    evs.push(ModelProtocolEvent::Usage(ModelUsage { input, output }));
                 }
             }
         }
         evs
     }
 
-    fn open_partial_line(&self, _head: &str) -> Option<Box<dyn PartialLineExtractor>> {
+    fn open_partial_line(&self, _head: &str) -> Option<Box<dyn SsePartialLineExtractor>> {
         Some(Box::new(JsonLineExtractor::new(GeminiPartial)))
     }
 }
@@ -323,14 +327,14 @@ impl PartialJsonSink for GeminiPartial {
         }
     }
 
-    fn text(&mut self, t: &str, out: &mut Vec<ProtocolEvent>) {
-        out.push(ProtocolEvent::ContentDelta(t.to_string()));
+    fn text(&mut self, t: &str, out: &mut Vec<ModelProtocolEvent>) {
+        out.push(ModelProtocolEvent::ContentDelta(t.to_string()));
     }
 }
 
 // === 注册到通用对象创建机制 ===
 
-fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn ModelProtocol> {
+fn build(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn ModelProtocol> {
     Arc::new(GeminiProtocol)
 }
 

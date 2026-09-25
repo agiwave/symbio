@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, ContentPart, MessageContent, MessageRole,
 };
-use crate::symbio_core::tool_name::to_wire;
+use crate::symbio_core::to_wire;
 pub use crate::symbio_core::CapabilityMeta;
 
 /// 工具调用定义
@@ -186,7 +186,7 @@ impl NativeMessage {
 
         if let Some(ref tool_calls) = self.tool_calls {
             // 工具名转线上形态（`/` `.` 等协议不允许的字符 → `__`，见
-            // `symbio_core::tool_name`）
+            // `symbio_core::capability::tool_name`）
             let api_tool_calls: Vec<serde_json::Value> = tool_calls
                 .iter()
                 .map(|tc| {

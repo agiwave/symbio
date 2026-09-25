@@ -23,19 +23,19 @@
 //!
 //! - [`SseLineParser::parse_line`]：完整行 → 事件（协议实现，等价于历史上的闭包）；
 //! - [`SseLineParser::open_partial_line`]：为未结束的行开一个**有状态**的
-//!   [`PartialLineExtractor`]，由协议决定「这一行值不值得增量提取」「取哪个字段」。
+//!   [`SsePartialLineExtractor`]，由协议决定「这一行值不值得增量提取」「取哪个字段」。
 //!   core 只负责：每收到新字节就 `push` 一次，把返回的增量原样转发。
 //!
 //! 增量提取器是**有状态**的（只对新增字节做功），因此总代价是 O(输入长度)，
 //! 不再是 O(行长的平方)；字段名与转义规则全部留在协议层，core 不再认识任何
 //! 协议细节。
 
-use super::model_provider::ProtocolEvent;
+use super::model_provider::ModelProtocolEvent;
 
 /// SSE 行解析契约（协议层实现）。
 pub trait SseLineParser: Send + Sync {
     /// 完整行（已含换行，调用方已 `trim`）→ 事件序列。
-    fn parse_line(&self, line: &str) -> Vec<ProtocolEvent>;
+    fn parse_line(&self, line: &str) -> Vec<ModelProtocolEvent>;
 
     /// 为一条**尚未结束**的行开一个增量提取器。
     ///
@@ -47,7 +47,7 @@ pub trait SseLineParser: Send + Sync {
     ///
     /// 实现方应当在**行首就能判断**（例如「这个事件类型携带全量文本，不能当增量」），
     /// 因为 core 只会调用它一次：返回 `None` 后本行不再重试。
-    fn open_partial_line(&self, head: &str) -> Option<Box<dyn PartialLineExtractor>> {
+    fn open_partial_line(&self, head: &str) -> Option<Box<dyn SsePartialLineExtractor>> {
         let _ = head;
         None
     }
@@ -64,9 +64,9 @@ pub trait SseLineParser: Send + Sync {
 /// 事件写进 `out`（调用方复用同一个 `Vec`，避免每块一次分配）：一次 `push`
 /// 可能产出**多个**事件——同一块里可能同时结束一个字段、开始下一个（例如
 /// 一个 SSE 行里 `content` 收尾紧接 `tool_calls[0].function.arguments` 开头）。
-pub trait PartialLineExtractor: Send {
+pub trait SsePartialLineExtractor: Send {
     /// 追加新收到的字节，把本次新增的事件追加到 `out`。
-    fn push(&mut self, bytes: &str, out: &mut Vec<ProtocolEvent>);
+    fn push(&mut self, bytes: &str, out: &mut Vec<ModelProtocolEvent>);
 }
 
 /// 从字节缓冲的 `from` 起取一段**UTF-8 边界对齐**的字符串。

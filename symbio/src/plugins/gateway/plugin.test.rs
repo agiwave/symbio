@@ -4,8 +4,10 @@
 
 use super::*;
 
-use crate::symbio_core::vdfs::{VdfsContext, VdfsError, VdfsProvider};
-use crate::symbio_core::{InvokeRequestExt, InvokeResponse, Plugin, PluginPayload, SimpleRequest};
+use crate::symbio_core::{
+    Plugin, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload, PluginSimpleRequest,
+};
+use crate::symbio_core::{VdfsContext, VdfsError, VdfsProvider};
 
 /// 以子插件直接收的**已剥离前缀**路径（如 `status`）调用 route，
 /// 模拟 home composite 转发后的行为。
@@ -13,8 +15,8 @@ async fn call(
     plugin: Arc<GatewayPlugin>,
     path: &str,
     payload: Option<serde_json::Value>,
-) -> InvokeResponse<PluginPayload> {
-    let ctx = SimpleRequest::new(None, None);
+) -> PluginInvokeResponse<PluginPayload> {
+    let ctx = PluginSimpleRequest::new(None, None);
     ctx.set(PATH, path.to_string());
     if let Some(p) = payload {
         ctx.set_payload(p).unwrap();

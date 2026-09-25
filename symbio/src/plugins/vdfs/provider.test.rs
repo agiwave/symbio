@@ -4,7 +4,10 @@
 
 use super::*;
 
-use crate::symbio_core::{DefaultToolVisitor, InvokeRequestExt, SimpleRequest, WORKDIR};
+use crate::symbio_core::{
+    DefaultToolVisitor, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR,
+};
+use crate::symbio_core::{VdfsAccess, VdfsContext, VdfsProvider, VdfsResponse};
 use async_trait::async_trait;
 use std::sync::Mutex;
 
@@ -79,8 +82,8 @@ async fn tool_with_root(root: Arc<Rec>) -> ToolVdfs {
     ToolVdfs::new(visitor)
 }
 
-fn ctx() -> Arc<dyn InvokeRequest> {
-    Arc::new(SimpleRequest::new(None, None))
+fn ctx() -> Arc<dyn PluginInvokeRequest> {
+    Arc::new(PluginSimpleRequest::new(None, None))
 }
 
 /// 虚拟地址：`.vdfsv2/<子目录>/…` 进虚拟层时剥成树内相对路径 `<子目录>/…`
@@ -130,7 +133,7 @@ async fn workdir_reaches_the_physical_layer() {
 
     let rec = Rec::new();
     let vdfs = tool_with_root(rec.clone()).await;
-    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(WORKDIR, dir.to_string_lossy().into_owned());
 
     let c = vdfs.read(&ctx, "hello.txt").await.unwrap();

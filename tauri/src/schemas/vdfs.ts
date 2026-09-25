@@ -1,7 +1,7 @@
 /**
  * VDFS 协议（前端侧类型契约）
  *
- * 域类型与常量对齐后端纯接口：symbio/src/symbio_core/vdfs_provider.rs
+ * 域类型与常量对齐后端纯接口：symbio/src/symbio_core/vdfs/
  * 操作路径/信封对齐后端线路层：symbio/src/plugins/vdfs/protocol.rs
  * 规范：docs/design/vdfs.md
  *
@@ -146,7 +146,7 @@ export interface VdfsAccess {
 /**
  * 目录可接受的**新建元素类型**（「新建」入口的类型）——**至多一个**。
  *
- * 对齐后端 `symbio_core/vdfs_provider.rs` 的 `VdfsNewType`。
+ * 对齐后端 `symbio_core/vdfs/node.rs` 的 `VdfsNewType`。
  *
  * 一个目录接受的是**一类**东西（`session` 目录只收会话、`model` 目录只收模型），
  * 所以节点上声明的是 `new_type?: VdfsNewType` 而不是一张清单。
@@ -198,7 +198,7 @@ export interface VdfsNewType {
  * 于是地址落在**条目**上（{@link VdfsItem}），由分发层按 `<父地址>/<name>`
  * 回填；需要「可寻址的一项」时用 `VdfsItem`。
  *
- * 与后端 `symbio_core::vdfs_provider::VdfsNode` 逐字同构（`scripts/protocol-mirror-audit.mjs` 校验）。
+ * 与后端 `symbio_core::vdfs::VdfsNode` 逐字同构（`scripts/protocol-mirror-audit.mjs` 校验）。
  */
 export interface VdfsNode {
   /** 父节点内的唯一标识（路径段） */
@@ -317,7 +317,7 @@ export const VDFS_ACTION_TRUNCATE = 'truncate'
  * 清掉全部条目。
  *
  * 为什么「截断 / 清空」是动作而不是 `delete`：见后端
- * `symbio_core::vdfs_provider` 的 `VDFS_ACTION_TRUNCATE` 文档——`delete` 是
+ * `symbio_core::vdfs` 的 `VDFS_ACTION_TRUNCATE` 文档——`delete` 是
  * **逐节点**语义，表达不了「从这里删到末尾」这类集合操作；而清空虽然也能用
  * `delete` 表达（`deleted` 落在列表目录上无歧义），仍与截断一起走动作，
  * 好让**同一个区段的删除只有一种入口形态**。
@@ -544,7 +544,7 @@ export function isVdfsDraft(node: { path?: string } | null | undefined): boolean
 //   <根>/session/<sid>/message/<mid>  单条消息（ext = message，`r`）
 //
 // 两个段名都由后端 provider 决定，**不是前端的知识**：
-// - 挂载段 `session`  —— 后端 `symbio_core::ids::PLUGIN_SESSION`，是 provider 注册时
+// - 挂载段 `session`  —— 后端 `symbio_core::keys::ids::PLUGIN_SESSION`，是 provider 注册时
 //   自选的挂载名（与 `model` / `skill` 等同族），前端按「挂载点声明可新建
 //   `ext = session`」把它**认出来**；
 // - 转写段 `消息`     —— 后端 `session::plugin::nodes::SEG_MESSAGES`，是 provider 的

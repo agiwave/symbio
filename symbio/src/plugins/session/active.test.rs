@@ -9,7 +9,7 @@
 //! 就是「反复失败不收敛」。
 
 use super::ActiveSessionState;
-use crate::symbio_core::vdfs::ChangeSubscriptions;
+use crate::symbio_core::ChangeSubscriptions;
 
 #[tokio::test]
 async fn skip_is_false_until_threshold_reached() {

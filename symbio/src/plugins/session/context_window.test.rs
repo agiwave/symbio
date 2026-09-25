@@ -43,8 +43,8 @@ fn text(content: &str) -> ChatMessage {
 
 /// 构建 短工具名 → 保留策略 映射（模拟会话循环运行时从 CapabilityVisitor 动态解析）
 fn retention_map(
-    entries: &[(&str, ToolContextRetention)],
-) -> HashMap<String, ToolContextRetention> {
+    entries: &[(&str, CapabilityToolContextRetention)],
+) -> HashMap<String, CapabilityToolContextRetention> {
     entries.iter().map(|(n, r)| (n.to_string(), *r)).collect()
 }
 
@@ -66,7 +66,7 @@ fn last_only_keeps_only_latest_call_of_same_tool() {
         tool_result("tc2", "ok"),
         text("第二轮"),
     ];
-    let ret = retention_map(&[("todo_write", ToolContextRetention::LastOnly)]);
+    let ret = retention_map(&[("todo_write", CapabilityToolContextRetention::LastOnly)]);
     let out = apply_layered_sliding_window(&messages, 15, &ret);
 
     let tc1 = out.iter().find(|m| m.id == "tc1").unwrap();
@@ -105,7 +105,7 @@ fn last_n_keeps_n_latest_calls() {
         tc_msg("a3", "local/search", r#"{"q":"3"}"#),
         tool_result("a3", "r3"),
     ];
-    let ret = retention_map(&[("search", ToolContextRetention::LastN(2))]);
+    let ret = retention_map(&[("search", CapabilityToolContextRetention::LastN(2))]);
     let out = apply_layered_sliding_window(&messages, 15, &ret);
 
     let a1 = out.iter().find(|m| m.id == "a1").unwrap();
@@ -176,7 +176,7 @@ fn retention_applies_even_within_global_window() {
         tool_result("p2", "ok"),
     ];
     // 全局窗口 15 足够大，但 LastOnly 仍骨架化 p1
-    let ret = retention_map(&[("todo_write", ToolContextRetention::LastOnly)]);
+    let ret = retention_map(&[("todo_write", CapabilityToolContextRetention::LastOnly)]);
     let out = apply_layered_sliding_window(&messages, 15, &ret);
     let p1 = out.iter().find(|m| m.id == "p1").unwrap();
     let p2 = out.iter().find(|m| m.id == "p2").unwrap();
@@ -205,7 +205,7 @@ fn last_only_latest_call_survives_beyond_global_window() {
         r#"{"todos":"清单 v3"}"#,
     ));
     messages.push(tool_result("latest", "已更新任务清单，共 3 项。"));
-    let ret = retention_map(&[("todo_write", ToolContextRetention::LastOnly)]);
+    let ret = retention_map(&[("todo_write", CapabilityToolContextRetention::LastOnly)]);
     let out = apply_layered_sliding_window(&messages, 15, &ret);
 
     // 无策略工具：全局窗口语义不变（前 6 条被骨架化）

@@ -10,8 +10,8 @@
 //!   （chat_loop）在本轮结束时将会话置于 `AwaitingInput(user)`；用户答案以一条普通
 //!   `user` 消息回填后，新一轮会重跑该工具。详见 USER_INPUT_MECHANISM 设计文档。
 
-use crate::symbio_core::llm::turn::{
-    build_tool_message, emit_message, emit_state, short_id, ToolCallInfo,
+use crate::symbio_core::{
+    build_tool_message, emit_message, emit_state, short_id, TurnToolCallInfo,
 };
 use crate::symbio_core::{dir_from_ctx, PLUGIN_SESSION};
 use crate::symbio_core::{
@@ -21,10 +21,11 @@ use crate::symbio_core::{
             ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
         },
     },
-    InvokeRequestExt,
+    PluginInvokeRequestExt,
 };
 use crate::symbio_core::{
-    AbortSignal, EventSink, InvokeRequest, Plugin, PluginError, PluginPayload, HOOK_FIRE,
+    ExecAbortSignal, ExecEventSink, Plugin, PluginError, PluginInvokeRequest, PluginPayload,
+    HOOK_FIRE,
 };
 use crate::{plugin_error, plugin_info, plugin_warn};
 use serde_json::{json, Value};
@@ -132,7 +133,7 @@ pub fn extract_result(data: &Value) -> String {
 pub async fn fire_hook(
     parent: &Option<Arc<dyn Plugin>>,
     event: HookEvent,
-    ctx: Arc<dyn InvokeRequest>,
+    ctx: Arc<dyn PluginInvokeRequest>,
 ) -> HookOutput {
     let p = match parent {
         Some(p) => p,
@@ -160,7 +161,7 @@ pub async fn fire_hook(
 
 /// 等待「用户中止」信号（工具执行期间）。
 ///
-/// 只有一个来源：[`AbortSignal`]。它由编排层创建、经 `ctx` 注入（键
+/// 只有一个来源：[`ExecAbortSignal`]。它由编排层创建、经 `ctx` 注入（键
 /// `symbio_core::ABORT_SIGNAL`），因此本函数不必再分辨「abort 帧 / 取消令牌 /
 /// 已置位标志」——`abort()` 一次调用同时置位与唤醒。
 ///
@@ -173,7 +174,7 @@ pub async fn fire_hook(
 /// drop。这与既有的硬超时分支语义一致（那条路同样是 drop），不引入新的副作用
 /// 类别；代价是工具可能留下半完成的副作用——但「用户按下停止」本就要求尽快放手，
 /// 而让它继续跑完 600s 才是更坏的选择。
-async fn wait_tool_abort(abort: &AbortSignal) {
+async fn wait_tool_abort(abort: &ExecAbortSignal) {
     abort.cancelled().await;
 }
 
@@ -258,10 +259,10 @@ pub async fn execute_tool_async(
     tool_name: &str,
     args: Value,
     tool_call_id: &str,
-    sink: &EventSink,
-    abort: &AbortSignal,
+    sink: &ExecEventSink,
+    abort: &ExecAbortSignal,
     result_msg_id: String,
-    ctx: Arc<dyn InvokeRequest>,
+    ctx: Arc<dyn PluginInvokeRequest>,
 ) -> (String, bool, Option<PendingPrompt>) {
     let started_at = std::time::Instant::now();
     plugin_info!(
@@ -300,7 +301,7 @@ pub async fn execute_tool_async(
         None => Vec::new(),
     };
     let resolved_name =
-        crate::symbio_core::tool_name::resolve(tool_name, known_names.iter().map(String::as_str))
+        crate::symbio_core::resolve(tool_name, known_names.iter().map(String::as_str))
             .map(str::to_string);
     // 解析失败**不猜**：按原样交给路由，由它给出诚实的 NotFound。
     // 反演猜错会调起**另一个工具**，那比报错坏得多。
@@ -510,7 +511,7 @@ pub async fn execute_tool_async(
 ///
 /// 两条消息分别加入 tool_messages / parent_updates，由调用方统一持久化。
 async fn record_protocol_failure(
-    sink: &EventSink,
+    sink: &ExecEventSink,
     tool_call_id: &str,
     error_text: &str,
     tool_messages: &mut Vec<ChatMessage>,
@@ -591,7 +592,11 @@ async fn record_protocol_failure(
 /// 同时写入 `meta.started_at`（毫秒）：前端据此显示"已运行 47s"——「运行中」是断言，
 /// 时长才是**判据**，用户靠它区分"还在跑"与"卡住了"。用节点属性承载而不是前端
 /// 自己计时，切会话/重连后时长仍然连续（前端计时会从零重来）。
-async fn emit_tool_running(sink: &EventSink, context_messages: &[ChatMessage], tool_call_id: &str) {
+async fn emit_tool_running(
+    sink: &ExecEventSink,
+    context_messages: &[ChatMessage],
+    tool_call_id: &str,
+) {
     // 完整快照：从权威转写取父 ToolCall 副本（id / 父子关系 / name / 参数都在），
     // 应用「运行中」状态与 meta.started_at 后整条广播。找不到 = 协议违例
     // （ToolCallDelta 必然先广播过完整节点），报错并跳过——不造半截节点。
@@ -621,7 +626,7 @@ async fn emit_tool_running(sink: &EventSink, context_messages: &[ChatMessage], t
 /// 父状态帧，结果子节点照常给出。返回值是已广播的完整消息，调用方把它
 /// 收进 `parent_updates` 供内存镜像同步与落库（整条替换，非补丁合并）。
 async fn emit_parent_finalized(
-    sink: &EventSink,
+    sink: &ExecEventSink,
     context_messages: &[ChatMessage],
     tool_call_id: &str,
     status: MessageStatus,
@@ -751,11 +756,11 @@ pub(super) fn not_executed_result(tool_call_id: &str, reason: &str) -> ChatMessa
 ///    见 [`not_executed_result`]。
 #[allow(clippy::too_many_arguments)]
 pub async fn process_tool_calls_async(
-    tool_calls: Vec<ToolCallInfo>,
+    tool_calls: Vec<TurnToolCallInfo>,
     parent: &Option<Arc<dyn Plugin>>,
-    sink: &EventSink,
-    abort: &AbortSignal,
-    ctx: Arc<dyn InvokeRequest>,
+    sink: &ExecEventSink,
+    abort: &ExecAbortSignal,
+    ctx: Arc<dyn PluginInvokeRequest>,
     context_messages: &[ChatMessage],
 ) -> (Vec<ChatMessage>, Vec<ChatMessage>) {
     let mut tool_messages = Vec::new();
@@ -816,7 +821,7 @@ pub async fn process_tool_calls_async(
         }
 
         // 工具调用 id 缺失/非法 → 作为工具调用失败处理（不跳过）。
-        // 正常情况下 ToolCallAccumulator 已保证 id 非空；此分支为兜底防御。
+        // 正常情况下 TurnToolCallAccumulator 已保证 id 非空；此分支为兜底防御。
         // 注意：兜底 id 仅用于挂载失败结果与父节点补丁（保持结构完整）。
         let id = match tc.id.as_ref() {
             Some(id) if !id.trim().is_empty() => id.clone(),

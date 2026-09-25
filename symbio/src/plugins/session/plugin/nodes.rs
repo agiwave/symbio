@@ -464,7 +464,7 @@ pub(crate) fn parse_session_path(path: &str) -> vdfs::VdfsResult<VdfsSessionPath
     let not_found = || vdfs::VdfsError::not_found(format!("会话内部不存在该路径：{path}"));
     match seg {
         // 记忆是**单个文件**：地址用真实文件名（`AGENTS.md`），没有更深层级
-        crate::symbio_core::AGENTS_FILE => match sub {
+        crate::symbio_core::MEMORY_AGENTS_FILE => match sub {
             None => Ok(VdfsSessionPath::Memory(id)),
             Some(_) => Err(vdfs::VdfsError::not_found(format!(
                 "记忆是文件，没有更深层级：{path}"

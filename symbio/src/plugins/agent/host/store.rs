@@ -35,7 +35,7 @@
 //!   才落盘；不合规整包拒收，不静默降级。
 
 use super::manifest::{self, AgentManifest};
-use crate::symbio_core::AGENTS_FILE;
+use crate::symbio_core::MEMORY_AGENTS_FILE;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -439,7 +439,7 @@ impl AgentDirStore {
         let record = self
             .get(agent_id)
             .ok_or_else(|| format!("智能体 `{agent_id}` 不存在"))?;
-        Ok(record.dir.join(AGENTS_FILE))
+        Ok(record.dir.join(MEMORY_AGENTS_FILE))
     }
 
     /// zip entry 名 → agent 目录内相对路径。    ///

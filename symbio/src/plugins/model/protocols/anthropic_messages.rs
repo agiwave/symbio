@@ -12,10 +12,12 @@ use super::super::model_providers::ModelProviderConfig;
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole};
 use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
 use super::{sse_data, ModelProtocol, MODEL_PROTOCOL_ANTHROPIC_MESSAGES};
-use crate::symbio_core::llm::sse::PartialLineExtractor;
-use crate::symbio_core::tool_name::to_wire;
 use crate::plugins::model::http::get_http_client;
-use crate::symbio_core::{FinishReason, InvokeRequest, PluginError, ProtocolEvent, SseLineParser, Usage,
+use crate::symbio_core::to_wire;
+use crate::symbio_core::SsePartialLineExtractor;
+use crate::symbio_core::{
+    ModelFinishReason, ModelProtocolEvent, ModelUsage, PluginError, PluginInvokeRequest,
+    SseLineParser,
 };
 use tracing::warn;
 
@@ -300,7 +302,7 @@ impl ModelProtocol for AnthropicProtocol {
 // === 行解析（core 契约） ===
 
 impl SseLineParser for AnthropicProtocol {
-    fn parse_line(&self, line: &str) -> Vec<ProtocolEvent> {
+    fn parse_line(&self, line: &str) -> Vec<ModelProtocolEvent> {
         let mut evs = Vec::new();
         if let Some(stripped) = line.strip_prefix("event:") {
             let mut etype = self.current_event_type.lock().unwrap();
@@ -325,14 +327,14 @@ impl SseLineParser for AnthropicProtocol {
 
             match etype.as_str() {
                 "message_start" => {
-                    // 携带 input_tokens（与 message_delta 的 output_tokens 合并为 Usage）
+                    // 携带 input_tokens（与 message_delta 的 output_tokens 合并为 ModelUsage）
                     if let Some(in_tok) = json
                         .get("message")
                         .and_then(|m| m.get("usage"))
                         .and_then(|u| u.get("input_tokens"))
                         .and_then(|v| v.as_u64())
                     {
-                        evs.push(ProtocolEvent::Usage(Usage {
+                        evs.push(ModelProtocolEvent::Usage(ModelUsage {
                             input: Some(in_tok as u32),
                             output: None,
                         }));
@@ -345,9 +347,9 @@ impl SseLineParser for AnthropicProtocol {
                         .and_then(|d| d.get("stop_reason"))
                         .and_then(|v| v.as_str())
                     {
-                        evs.push(ProtocolEvent::Finish(FinishReason::from_provider(Some(
-                            stop,
-                        ))));
+                        evs.push(ModelProtocolEvent::Finish(
+                            ModelFinishReason::from_provider(Some(stop)),
+                        ));
                     }
                     // 携带 output_tokens
                     if let Some(out_tok) = json
@@ -355,7 +357,7 @@ impl SseLineParser for AnthropicProtocol {
                         .and_then(|u| u.get("output_tokens"))
                         .and_then(|v| v.as_u64())
                     {
-                        evs.push(ProtocolEvent::Usage(Usage {
+                        evs.push(ModelProtocolEvent::Usage(ModelUsage {
                             input: None,
                             output: Some(out_tok as u32),
                         }));
@@ -364,7 +366,7 @@ impl SseLineParser for AnthropicProtocol {
                 "content_block_start" => {
                     if let Some(block) = json.get("content_block") {
                         if block["type"] == "tool_use" {
-                            evs.push(ProtocolEvent::ToolCallDelta(
+                            evs.push(ModelProtocolEvent::ToolCallDelta(
                                 json["index"].as_u64().unwrap_or(0) as usize,
                                 block.get("id").and_then(|v| v.as_str()).map(|s| s.into()),
                                 block.get("name").and_then(|v| v.as_str()).map(|s| s.into()),
@@ -379,13 +381,13 @@ impl SseLineParser for AnthropicProtocol {
                         match delta["type"].as_str() {
                             Some("text_delta") => {
                                 if let Some(t) = delta["text"].as_str() {
-                                    evs.push(ProtocolEvent::ContentDelta(t.into()));
+                                    evs.push(ModelProtocolEvent::ContentDelta(t.into()));
                                 }
                                 // 兼容性检查：某些提供商可能在 text_delta 中包含 reasoning_content
                                 if let Some(r) =
                                     delta.get("reasoning_content").and_then(|v| v.as_str())
                                 {
-                                    evs.push(ProtocolEvent::ReasoningDelta(r.into()));
+                                    evs.push(ModelProtocolEvent::ReasoningDelta(r.into()));
                                 }
                             }
                             Some("thinking_delta")
@@ -397,12 +399,12 @@ impl SseLineParser for AnthropicProtocol {
                                     .or_else(|| delta.get("reasoning"))
                                     .and_then(|v| v.as_str())
                                 {
-                                    evs.push(ProtocolEvent::ReasoningDelta(r.into()));
+                                    evs.push(ModelProtocolEvent::ReasoningDelta(r.into()));
                                 }
                             }
                             Some("input_json_delta") => {
                                 if let Some(p) = delta["partial_json"].as_str() {
-                                    evs.push(ProtocolEvent::ToolCallDelta(
+                                    evs.push(ModelProtocolEvent::ToolCallDelta(
                                         idx,
                                         None,
                                         None,
@@ -426,7 +428,7 @@ impl SseLineParser for AnthropicProtocol {
                         .and_then(|e| e.get("message"))
                         .and_then(|v| v.as_str())
                     {
-                        evs.push(ProtocolEvent::Error(m.into()));
+                        evs.push(ModelProtocolEvent::Error(m.into()));
                     }
                 }
                 _ => {}
@@ -435,7 +437,7 @@ impl SseLineParser for AnthropicProtocol {
         evs
     }
 
-    fn open_partial_line(&self, _head: &str) -> Option<Box<dyn PartialLineExtractor>> {
+    fn open_partial_line(&self, _head: &str) -> Option<Box<dyn SsePartialLineExtractor>> {
         Some(Box::new(
             JsonLineExtractor::new(AnthropicPartial::default()),
         ))
@@ -502,17 +504,19 @@ impl PartialJsonSink for AnthropicPartial {
         }
     }
 
-    fn text(&mut self, t: &str, out: &mut Vec<ProtocolEvent>) {
+    fn text(&mut self, t: &str, out: &mut Vec<ModelProtocolEvent>) {
         if self.observing {
             self.etype.push_str(t);
             return;
         }
         match self.kind {
-            Some(AnthropicField::Content) => out.push(ProtocolEvent::ContentDelta(t.to_string())),
-            Some(AnthropicField::Reasoning) => {
-                out.push(ProtocolEvent::ReasoningDelta(t.to_string()))
+            Some(AnthropicField::Content) => {
+                out.push(ModelProtocolEvent::ContentDelta(t.to_string()))
             }
-            Some(AnthropicField::ToolArgs(i)) => out.push(ProtocolEvent::ToolCallDelta(
+            Some(AnthropicField::Reasoning) => {
+                out.push(ModelProtocolEvent::ReasoningDelta(t.to_string()))
+            }
+            Some(AnthropicField::ToolArgs(i)) => out.push(ModelProtocolEvent::ToolCallDelta(
                 i,
                 None,
                 None,
@@ -531,7 +535,7 @@ impl PartialJsonSink for AnthropicPartial {
 
 // === 注册到通用对象创建机制 ===
 
-fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn ModelProtocol> {
+fn build(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn ModelProtocol> {
     Arc::new(AnthropicProtocol::new())
 }
 

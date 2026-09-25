@@ -5,30 +5,30 @@
 use super::*;
 
 use super::super::physical::PhysicalFs;
-use crate::symbio_core::vdfs_provider::VDFS_KIND_DIR;
 use crate::symbio_core::{
-    CapabilityVisitor, DefaultToolVisitor, PluginError, PluginMeta, SimpleRequest,
+    CapabilityVisitor, DefaultToolVisitor, PluginError, PluginMeta, PluginSimpleRequest,
 };
+use crate::symbio_core::{VdfsActionResult, VdfsValidationError, VDFS_KIND_DIR};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Mutex;
 
-fn ctx_with(payload: Value) -> Arc<dyn InvokeRequest> {
-    let ctx = Arc::new(SimpleRequest::new(None, None));
+fn ctx_with(payload: Value) -> Arc<dyn PluginInvokeRequest> {
+    let ctx = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set_payload(payload).unwrap();
     ctx
 }
 
-fn ctx_empty() -> Arc<dyn InvokeRequest> {
-    Arc::new(SimpleRequest::new(None, None))
+fn ctx_empty() -> Arc<dyn PluginInvokeRequest> {
+    Arc::new(PluginSimpleRequest::new(None, None))
 }
 
 /// 测试便捷：不带调用级参数的 [`dispatch_with`]（被测链路都不依赖 params）
 async fn dispatch(
     root: &DynVdfsProvider,
     path: &str,
-    ctx: &Arc<dyn InvokeRequest>,
-) -> Option<InvokeResponse<PluginPayload>> {
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) -> Option<PluginInvokeResponse<PluginPayload>> {
     dispatch_with(root, path, ctx, VdfsParams::new()).await
 }
 
@@ -570,7 +570,7 @@ async fn physical_half_reads_and_writes_disk() {
 
     let fs: DynVdfsProvider = Arc::new(UnifiedFs::new(empty_root()));
     let mk_ctx = |payload: Value| {
-        let c: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+        let c: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
         c.set(WORKDIR, dir.to_string_lossy().into_owned());
         c.set_payload(payload).unwrap();
         c
@@ -646,7 +646,7 @@ async fn resolve_fs_prefers_visitor_slot() {
     let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
     visitor.register_vdfs_root(root_with(&rec)).await;
 
-    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(CAPABILITY_VISITOR, visitor);
 
     let fs = resolve_fs(None, &ctx).await;
@@ -673,16 +673,16 @@ async fn resolve_fs_fetches_root_via_trait_method() {
 
         async fn route(
             self: Arc<Self>,
-            _ctx: Arc<dyn InvokeRequest>,
-        ) -> InvokeResponse<PluginPayload> {
+            _ctx: Arc<dyn PluginInvokeRequest>,
+        ) -> PluginInvokeResponse<PluginPayload> {
             Err(PluginError::NotFound("fake".into()))
         }
 
         async fn traverse(
             self: Arc<Self>,
             _path: String,
-            _ctx: Arc<dyn InvokeRequest>,
-        ) -> InvokeResponse<PluginPayload> {
+            _ctx: Arc<dyn PluginInvokeRequest>,
+        ) -> PluginInvokeResponse<PluginPayload> {
             Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
         }
 

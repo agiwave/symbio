@@ -1,7 +1,7 @@
 //! 嵌入服务实现层
 //!
 //! **本目录只放 `EmbeddingService` 的具体实现，不通过 `pub use` 暴露给 crate 外部。**
-//! trait 抽象在 [`crate::symbio_core::providers::embedding`]。
+//! trait 抽象在 [`EmbeddingService`](crate::symbio_core::EmbeddingService)。
 //! 各实现通过 `submit_object_creator!` 工厂注册，业务模块通过
 //! `create_object::<dyn EmbeddingService>(EMBEDDING_LOCAL, ctx)` 获取实例。
 

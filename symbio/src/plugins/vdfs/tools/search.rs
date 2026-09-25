@@ -6,7 +6,7 @@
 //! 形状（message 为结果列表 + 总计 + 截断提示）。
 
 use super::{request_of, tool, ToolVdfs};
-use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, InvokeRequest, PluginError};
+use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -47,7 +47,7 @@ impl Capability for SearchTool {
         &self,
         args: Value,
         _env: &ExecEnv,
-        ctx: Arc<dyn InvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         let req: super::super::protocol::VdfsSearchRequest = request_of(&args);
         let data = self.provider.search(&ctx, &req.path, &req.pattern).await?;

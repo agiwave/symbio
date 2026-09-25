@@ -408,7 +408,10 @@ impl PersistentChatSession {
         Ok(persisted)
     }
 
-    pub(crate) async fn replace_messages(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError> {
+    pub(crate) async fn replace_messages(
+        &self,
+        messages: Vec<ChatMessage>,
+    ) -> Result<(), PluginError> {
         // 持久层写入不变量（见 `ensure_durable_states`）：瞬态状态不得落盘
         ensure_durable_states(&messages, "replace_messages")?;
         // 临界区：与 append / update 共用同一把 per-session 写锁（整份覆盖语义）

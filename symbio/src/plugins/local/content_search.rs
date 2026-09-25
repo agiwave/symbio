@@ -6,8 +6,8 @@
 use super::policy::SecurityPolicy;
 use super::system::validate_params;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, ExecEnv, InvokeRequest, InvokeRequestExt, InvokeResponse,
-    PluginError,
+    Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginInvokeResponse,
 };
 use async_trait::async_trait;
 use bstr::ByteSlice;
@@ -35,7 +35,7 @@ impl ContentSearchTool {
         Self { security }
     }
 
-    async fn execute_inner(&self, args: &Value, workdir: &str) -> InvokeResponse<Value> {
+    async fn execute_inner(&self, args: &Value, workdir: &str) -> PluginInvokeResponse<Value> {
         validate_params(args, &["pattern"]).map_err(PluginError::ValidationError)?;
 
         let pattern = match args.get("pattern").and_then(|v| v.as_str()) {
@@ -464,7 +464,7 @@ impl Capability for ContentSearchTool {
         &self,
         args: Value,
         _env: &ExecEnv,
-        ctx: Arc<dyn InvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         let workdir_str = ctx.get(crate::symbio_core::WORKDIR).ok_or_else(|| {
             PluginError::ValidationError("Missing workdir in context".to_string())

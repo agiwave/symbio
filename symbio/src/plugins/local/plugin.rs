@@ -9,9 +9,9 @@ use super::{
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::vdfs;
 use crate::symbio_core::{
-    dir_from_ctx, Capability, CapabilityMeta, ConfigFile, ExecEnv, InvokeRequest, InvokeRequestExt,
-    InvokeResponse, Plugin, PluginDir, PluginError, PluginMeta, PluginPayload, PLUGIN_FILE,
-    PLUGIN_LOCAL,
+    dir_from_ctx, Capability, CapabilityMeta, ExecEnv, Plugin, PluginConfigFile, PluginDir,
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
+    PluginPayload, PLUGIN_FILE, PLUGIN_LOCAL,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -58,7 +58,7 @@ fn config_definition() -> DetailDefinition {
 ///
 /// 与 agent_id/provider_id/mode 同级别：随 chat_send 传输，由 orchestrator 写入 ctx。
 /// ctx 无值时默认 `Medium`（新会话尚未设置时的安全默认值）。
-fn risk_level_from_ctx(ctx: &Arc<dyn InvokeRequest>) -> RiskLevel {
+fn risk_level_from_ctx(ctx: &Arc<dyn PluginInvokeRequest>) -> RiskLevel {
     ctx.get(crate::symbio_core::RISK_LEVEL)
         .map(|s| match s.as_str() {
             "low" => RiskLevel::Low,
@@ -135,7 +135,7 @@ pub struct SecureToolWrapper {
 /// 因此：**闸门判两次，判定写一次**。
 fn approval_gate(
     security: &SecurityPolicy,
-    ctx: &Arc<dyn InvokeRequest>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
     tool_name: &str,
     tool_description: &str,
     args: &Value,
@@ -191,7 +191,7 @@ impl Capability for SecureToolWrapper {
         &self,
         args: Value,
         env: &ExecEnv,
-        ctx: Arc<dyn InvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         let meta = self.inner.meta();
         if let Some(payload) =
@@ -210,15 +210,15 @@ pub struct LocalPlugin {
     config: Arc<RwLock<LocalConfig>>,
     /// 配置文件的呈现与校验（`<根>/local/PLUGIN.yml`）——节点形状 / 校验 / 落盘
     /// 都在它手上，落盘写的是**本插件自己目录里的**文件
-    config_file: ConfigFile,
+    config_file: PluginConfigFile,
     tool_impls: Arc<Vec<Arc<dyn Capability>>>,
     parent: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
     security: Arc<SecurityPolicy>,
 }
 
 impl LocalPlugin {
-    /// 静态工厂：从 InvokeRequest 构造 Plugin 实例
-    pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
+    /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
+    pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         // 自己的目录由容器经 `PLUGIN_DIR` 告知；配置就存在那里的 PLUGIN.yml
         let dir = dir_from_ctx(&*ctx, PLUGIN_LOCAL);
         let config: LocalConfig = match dir.load::<LocalConfig>() {
@@ -255,7 +255,7 @@ impl LocalPlugin {
 
         Self {
             config: config_lock,
-            config_file: ConfigFile::new(dir, "本地工具", config_definition()),
+            config_file: PluginConfigFile::new(dir, "本地工具", config_definition()),
             tool_impls: Arc::new(tool_impls),
             parent: Arc::new(RwLock::new(parent)),
             security,
@@ -283,13 +283,14 @@ impl Plugin for LocalPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(
-        self: Arc<Self>,
-    ) -> Option<Arc<dyn crate::symbio_core::vdfs_provider::VdfsProvider>> {
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn crate::symbio_core::VdfsProvider>> {
         Some(self)
     }
 
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(
+        self: Arc<Self>,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
 
         if path.starts_with('/') {
@@ -321,8 +322,8 @@ impl Plugin for LocalPlugin {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let sub_path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         if sub_path != crate::symbio_core::TRAVERSE_AVAILABLE_TOOLS {
             return Err(crate::symbio_core::PluginError::NotFound(format!(
@@ -350,7 +351,7 @@ impl Plugin for LocalPlugin {
 // ==================== VDFS：配置文档（`<根>/local/PLUGIN.yml`） ====================
 //
 // 本插件只有配置、没有资源树，因此挂载根的内容恒为「一个配置文件」。
-// 节点形状、定义校验、落盘都在 [`ConfigFile`] 里，这里只做寻址分流。
+// 节点形状、定义校验、落盘都在 [`PluginConfigFile`] 里，这里只做寻址分流。
 // 地址就是**真实文件名** `PLUGIN.yml`——它是插件目录里的一个普通文件。
 
 #[async_trait]

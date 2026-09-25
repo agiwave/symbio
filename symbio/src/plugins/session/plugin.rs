@@ -25,11 +25,12 @@ use super::types::{Session, SessionSummary};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::schemas::session::{chat_message as cm, session_chat};
 use crate::symbio_core::vdfs;
-use crate::symbio_core::vdfs_provider::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
 use crate::symbio_core::{
-    dir_from_ctx, ConfigFile, InvokeRequest, InvokeRequestExt, InvokeResponse, MemoryFile, Plugin,
-    PluginDir, PluginError, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_SESSION, SESSION_ID,
+    dir_from_ctx, MemoryFile, Plugin, PluginConfigFile, PluginDir, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
+    PLUGIN_FILE, PLUGIN_SESSION, SESSION_ID,
 };
+use crate::symbio_core::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -41,7 +42,7 @@ use tokio::sync::{OnceCell, RwLock};
 pub struct SessionPlugin {
     pub(crate) config: Arc<RwLock<SessionConfig>>,
     /// 配置文件的呈现与校验（`<根>/session/PLUGIN.yml`）——落盘写自己目录里的文件
-    pub(crate) config_file: ConfigFile,
+    pub(crate) config_file: PluginConfigFile,
     /// 父插件引用（用于获取工具列表等）
     pub(crate) parent: Option<Weak<dyn Plugin>>,
     /// 活跃会话管理器 (V2 整合版：处理长连接与广播)
@@ -82,7 +83,7 @@ impl SessionPlugin {
         workdir_watches.set_vdfs_subs(change_subs.clone());
         Self {
             config: Arc::new(RwLock::new(config)),
-            config_file: ConfigFile::new(dir, "会话设置", config_definition()),
+            config_file: PluginConfigFile::new(dir, "会话设置", config_definition()),
             parent,
             active_mgr: Arc::new(super::active::ActiveSessionManager::new(
                 change_subs.as_ref().clone(),
@@ -186,10 +187,10 @@ impl SessionPlugin {
     ) {
         let mut frames: Vec<cm::ChatMessage> = dropped
             .iter()
-            .map(|mid| crate::symbio_core::llm::turn::removed_frame(mid))
+            .map(|mid| crate::symbio_core::removed_frame(mid))
             .collect();
         // 新的首条（压缩快照）：一条完整消息（身份 + 正文 + 终态同帧）。
-        frames.push(crate::symbio_core::llm::turn::message_frame(head));
+        frames.push(crate::symbio_core::message_frame(head));
         self.transcript_apply_all(session_id, frames).await;
     }
 
@@ -218,7 +219,7 @@ impl SessionPlugin {
         messages: &[cm::ChatMessage],
     ) {
         for message in messages {
-            self.transcript_apply(session_id, crate::symbio_core::llm::turn::message_frame(message))
+            self.transcript_apply(session_id, crate::symbio_core::message_frame(message))
                 .await;
         }
     }
@@ -235,8 +236,8 @@ impl SessionPlugin {
             .with_root_access(vdfs::VdfsAccess::LIST)
     }
 
-    /// 静态工厂：从 InvokeRequest 构造 Plugin 实例
-    pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
+    /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
+    pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         // 自己的目录由容器经 `PLUGIN_DIR` 告知；配置就存在那里的 PLUGIN.yml
         // （反序列化使用 #[serde(default)]，自动忽略 storage_dir 等已废弃字段）
         let dir = dir_from_ctx(&*ctx, PLUGIN_SESSION);
@@ -402,7 +403,7 @@ impl SessionPlugin {
     /// 不该往收集期错误桶里塞东西。
     async fn contribute_memory(
         &self,
-        ctx: &Arc<dyn InvokeRequest>,
+        ctx: &Arc<dyn PluginInvokeRequest>,
         visitor: &Arc<dyn crate::symbio_core::CapabilityVisitor>,
     ) {
         let sid = ctx.get(SESSION_ID).unwrap_or_default();
@@ -411,8 +412,7 @@ impl SessionPlugin {
             return;
         }
         // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
-        let address =
-            crate::symbio_core::vdfs::absolute_addr(ctx, &super::memory::memory_rel_path(&sid));
+        let address = crate::symbio_core::absolute_addr(ctx, &super::memory::memory_rel_path(&sid));
         match store.segment(&super::memory::segment_spec(&address)) {
             Ok(Some(segment)) => {
                 visitor
@@ -431,13 +431,14 @@ impl Plugin for SessionPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(
-        self: Arc<Self>,
-    ) -> Option<Arc<dyn crate::symbio_core::vdfs_provider::VdfsProvider>> {
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn crate::symbio_core::VdfsProvider>> {
         Some(self)
     }
 
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(
+        self: Arc<Self>,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
@@ -506,8 +507,8 @@ impl Plugin for SessionPlugin {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         // 选项收集：会话作为选项宿主贡献「自有选项」（工作目录 / 风险等级 /
         // 运行模式 / 心跳）。与其它插件同构——命中 available_options 时才注册，
         // 经统一的 OPTION_VISITOR 收集器汇流。

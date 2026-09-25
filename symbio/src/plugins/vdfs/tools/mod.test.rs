@@ -4,9 +4,9 @@
 
 use super::*;
 
-use crate::symbio_core::vdfs_provider::VDFS_PARAM_WORKDIR;
+use crate::symbio_core::VDFS_PARAM_WORKDIR;
 use crate::symbio_core::{
-    DefaultToolVisitor, InvokeRequest, InvokeRequestExt, SimpleRequest, WORKDIR,
+    DefaultToolVisitor, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR,
 };
 
 /// workdir 由宿主 ctx 翻译成 provider 参数；缺省时不带该键
@@ -15,7 +15,7 @@ use crate::symbio_core::{
 /// 依赖它把工作目录透传给 local provider——契约若被破坏，本地相对路径立即失效。
 #[test]
 fn workdir_is_translated_to_param() {
-    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     assert!(super::super::host::call_params(&ctx).is_empty());
 
     ctx.set(WORKDIR, "/tmp/ws".to_string());

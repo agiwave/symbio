@@ -28,7 +28,7 @@ use std::io::{self, Write};
 use symbio::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
-use symbio::symbio_core::vdfs_provider::VDFS_STATUS_WORKING;
+use symbio::symbio_core::VDFS_STATUS_WORKING;
 
 fn write_stdout(s: &str) {
     let mut out = io::stdout().lock();

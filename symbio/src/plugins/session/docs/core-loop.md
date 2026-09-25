@@ -164,7 +164,7 @@ struct TurnInputs {
 
 async fn prepare_turn_inputs(
     orchestrator: &ChatOrchestrator,
-    ctx: &Arc<dyn InvokeRequest>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
     context: &mut SessionContext,
     sink: &EventSink,
     turn: &mut TurnState,
@@ -200,7 +200,7 @@ async fn prepare_turn_inputs(
 /// 返回：是否需要在请求视图末尾注入一次性水位提醒。
 async fn apply_compaction(
     orchestrator: &ChatOrchestrator,
-    ctx: &Arc<dyn InvokeRequest>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
     context: &mut SessionContext,
     sink: &EventSink,
     turn: &mut TurnState,
@@ -286,7 +286,7 @@ struct TurnState {
 ```rust
 pub async fn run_chat_loop(
     orchestrator: &ChatOrchestrator,
-    ctx: Arc<dyn InvokeRequest>,
+    ctx: Arc<dyn PluginInvokeRequest>,
     sink: EventSink,          // 事件唯一出口（见 §6）
     abort: AbortSignal,       // 中止唯一入口（见 §6）
 ) -> Result<(), PluginError> {
@@ -459,8 +459,8 @@ end loop
 
 | 原语 | 方向 | 形状 | 位置 |
 |---|---|---|---|
-| `EventSink` | 出 | `Direct(Arc<dyn TranscriptWriter>)` \| `Null` | `symbio_core/exec.rs` |
-| `AbortSignal` | 入 | `Arc<AtomicBool>` + `CancellationToken` 合一 | `symbio_core/exec.rs` |
+| `EventSink` | 出 | `Direct(Arc<dyn TranscriptWriter>)` \| `Null` | `symbio_core/exec/mod.rs` |
+| `AbortSignal` | 入 | `Arc<AtomicBool>` + `CancellationToken` 合一 | `symbio_core/exec/mod.rs` |
 
 - **`EventSink::Direct`** 直连转写唯一写入点（`TranscriptSink` → `Transcript::apply`），
   进程内**零 serde**；**`EventSink::Null`** 是「本次调用不产生可见事件」的**类型级**表达
@@ -623,7 +623,7 @@ vdfs 网关、CLI / 前端客户端。执行期与它无关——执行期走 `E
 ### 9.1 形状：`ExecEnv` 具名化
 
 数据面统一之后，**签名**也统一：新增
-[`ExecEnv { sink, abort }`](../../../symbio_core/exec.rs)——「一次带中止的流式执行」
+[`ExecEnv { sink, abort }`](../../../symbio_core/exec/mod.rs)——「一次带中止的流式执行」
 的**出 / 入两个方向**，两处共用：
 
 ```text
@@ -638,10 +638,10 @@ ModelProvider::execute_turn(inputs, env) -> Result<TurnOutput, PluginError>
 
 ### 9.2 唯一「拆信封」的地方
 
-`invoke_capability(cap, ctx)`（`symbio_core/capability.rs`）是**唯一**把
+`invoke_capability(cap, ctx)`（`symbio_core/capability/mod.rs`）是**唯一**把
 `Result<Value, _>` 装回 `PluginPayload` 的地方。所有分发路径都必须经它：
 
-- `DefaultToolVisitor::invoke`（`symbio_core/tools.rs`）
+- `DefaultToolVisitor::invoke`（`symbio_core/capability/tools.rs`）
 - `LocalPlugin::route` 的工具分支（`local/plugin.rs`）
 - `WebPlugin::route` 的工具分支（`web/plugin.rs`）
 - 装饰器 `PrefixedCapability`（`agent/host/scope.rs`）与 `SecureToolWrapper`
@@ -674,7 +674,7 @@ invoke_capability(cap, ctx)
 
 ### 10.1 形状
 
-新增 [`symbio_core/sse.rs`](../../../symbio_core/sse.rs)：
+新增 [`symbio_core/llm/sse.rs`](../../../symbio_core/llm/sse.rs)：
 
 ```text
 trait SseLineParser {
@@ -753,7 +753,7 @@ gemini           ["candidates","content","parts","text"]                -> 内�
 `mcp.<server>.<tool>`（带**点**）/ `agent_<safe_id>_<tool>`）里，**没有一个含 `/`**，
 而真正违反协议字符集的是 MCP 的 `.`（OpenAI / Anthropic 只接受 `[A-Za-z0-9_-]`）。
 
-因此**名字的线上形态由一对具名函数定义**（`symbio_core/tool_name.rs`）：
+因此**名字的线上形态由一对具名函数定义**（`symbio_core/capability/tool_name.rs`）：
 
 ```rust
 pub fn to_wire(canonical: &str) -> String            // 字符集之外的字符一律 → "__"

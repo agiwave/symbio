@@ -3,16 +3,16 @@
 //! ## 与 core 的分工（重要）
 //!
 //! - **纯接口**（[`VdfsProvider`] trait 与其域类型）在 core：
-//!   `symbio_core::vdfs_provider`——那是 VDFS 的 centerpiece；
+//!   `symbio_core::vdfs`——那是 VDFS 的 centerpiece；
 //! - **线路格式**（请求 / 响应信封 + 协议路径常量）在本文件——只有 vdfs 插件
 //!   自己消费，**core 不暴露本文件的任何类型**。
 //!
 //! 这与 model 插件把 `ModelProtocol` 钩子与注册常量收在
 //! `plugins/model/protocols/` 的做法一致（见 `symbio_core::model_provider` 的模块文档）。
 //!
-//! [`VdfsProvider`]: crate::symbio_core::vdfs_provider::VdfsProvider
+//! [`VdfsProvider`]: crate::symbio_core::VdfsProvider
 
-use crate::symbio_core::vdfs_provider::{VdfsContent, VdfsItem, VdfsNode};
+use crate::symbio_core::{VdfsContent, VdfsItem, VdfsNode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -243,7 +243,7 @@ pub struct VdfsSearchResult {
 // （`super::fs::UnifiedFs`）把 [`VdfsChange`] **原样**投上总线
 // （`subscribe({ kind: 'vdfs' })`）。前端形状见 `tauri/src/schemas/vdfs.ts::VdfsChange`。
 //
-// [`VdfsChange`]: crate::symbio_core::vdfs_provider::VdfsChange
+// [`VdfsChange`]: crate::symbio_core::VdfsChange
 
 #[cfg(test)]
 #[path = "protocol.test.rs"]

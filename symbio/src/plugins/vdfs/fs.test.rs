@@ -4,7 +4,7 @@
 
 use super::*;
 
-use crate::symbio_core::vdfs_provider::VdfsContext;
+use crate::symbio_core::{VdfsAccess, VdfsContent, VdfsContext, VdfsNode, VdfsWriteResponse};
 
 /// 记录收到路径与形状的虚拟层替身
 struct V {

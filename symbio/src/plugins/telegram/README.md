@@ -36,7 +36,7 @@ Telegram Bot 集成插件：长轮询收发与"继续会话"交互。
 `bot_token` / `chat_id` / `streaming_enabled` / `poll_enabled` / `allowed_users`
 是**可寻址的配置文件**：`<根>/telegram/PLUGIN.yml`（`ext = form`，字段定义随节点
 `schema` 下发）。读写走 `vdfs/read` / `vdfs/write`，落盘就是本插件写自己目录里的
-那个文件（`ConfigFile::apply`）——不再有 `config/get` / `config/set` 路由，
+那个文件（`PluginConfigFile::apply`）——不再有 `config/get` / `config/set` 路由，
 也不再经父插件转发。
 
 ```yaml

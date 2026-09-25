@@ -3,7 +3,7 @@
 //! ## 它是什么
 //!
 //! 「这个智能体由哪些插件组成」是一个**事实**，事实的所在地是磁盘：插件根下的
-//! 一层目录 = 一个插件（见 `symbio_core::plugin_dir` 的模块文档）。本模块把那层
+//! 一层目录 = 一个插件（见 `symbio_core::plugin::dir` 的模块文档）。本模块把那层
 //! 目录 + 实例表收成一个对象，于是：
 //!
 //! | 谁 | 干什么 |
@@ -43,10 +43,10 @@
 //! 它的配置一起停下**，而不是把它留在树里只关掉行为。
 
 use crate::symbio_core::{
-    create_object, creator_ids, has_creator, lock_read, lock_write, plugins_root, InvokeRequest,
-    InvokeRequestExt, Plugin, PluginDir, PluginEntry, PluginMeta, SimpleRequest, StopReason,
-    KEY_PROVIDER, PLUGIN_DIR, PLUGIN_FILE, REQUIRED_PLUGINS, SYSTEM_LEVEL_PROVIDERS,
-    UNDISABLABLE_PLUGINS,
+    create_object, creator_ids, has_creator, lock_read, lock_write, plugins_root, Plugin,
+    PluginDir, PluginEntry, PluginInvokeRequest, PluginInvokeRequestExt, PluginMeta,
+    PluginSimpleRequest, PluginStopReason, KEY_PROVIDER, PLUGIN_DIR, PLUGIN_FILE, REQUIRED_PLUGINS,
+    SYSTEM_LEVEL_PROVIDERS, UNDISABLABLE_PLUGINS,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -66,7 +66,7 @@ pub struct PluginRegistry {
     /// 构造者声明的必需插件（目录必须存在；**不可删除**，但可停用）
     required: Vec<String>,
     /// 构造上下文：运行期挂载新插件时由它派生子上下文
-    ctx: Arc<dyn InvokeRequest>,
+    ctx: Arc<dyn PluginInvokeRequest>,
     /// 容器自身——子插件的父引用（子插件经 `ctx.parent()` 回到容器）。
     /// `None` = 独立构造（测试 / 无容器场景），此时被挂上的子插件没有父可回。
     parent: Option<Weak<dyn Plugin>>,
@@ -74,7 +74,7 @@ pub struct PluginRegistry {
 
 impl PluginRegistry {
     /// 装配期构造：插件根 / 必需清单 / 构造上下文都来自 ctx
-    pub fn new(ctx: Arc<dyn InvokeRequest>, parent: Weak<dyn Plugin>) -> Self {
+    pub fn new(ctx: Arc<dyn PluginInvokeRequest>, parent: Weak<dyn Plugin>) -> Self {
         let root = ctx
             .get(PLUGIN_DIR)
             .map(|d| d.as_plugins_root())
@@ -104,7 +104,7 @@ impl PluginRegistry {
             instances,
             root,
             required,
-            ctx: Arc::new(SimpleRequest::new(None, None)),
+            ctx: Arc::new(PluginSimpleRequest::new(None, None)),
             parent: None,
         }
     }
@@ -227,9 +227,9 @@ impl PluginRegistry {
     /// 子上下文只带两样东西：父引用与**自身目录**。配置不经 ctx 传递——
     /// 插件从自己的目录里读。
     fn mount_child(&self, name: &str, provider: &str, dir: PluginDir) {
-        let sub = SimpleRequest::child_of(&self.ctx, self.parent.clone());
+        let sub = PluginSimpleRequest::child_of(&self.ctx, self.parent.clone());
         sub.set(PLUGIN_DIR, dir.clone());
-        let sub_context: Arc<dyn InvokeRequest> = Arc::new(sub);
+        let sub_context: Arc<dyn PluginInvokeRequest> = Arc::new(sub);
 
         // 装配细节走 debug：每个子插件一行，十几个插件连成一串纯机械噪声，
         // 用户视角「启动刷屏」的主要来源。需要排查装配问题时 `--verbose` /
@@ -357,7 +357,7 @@ impl PluginRegistry {
                 // ADR-033：摘出实例表**之后立即** stop（Disabled = 可恢复，目录与数据都还在）。
                 // 失败只告警、不阻断——用户按下「停用」就该生效，清理没做完不该反过来
                 // 让插件停不掉（那时插件只剩 `Drop`，而 `Drop` 不能 await）。
-                if let Err(e) = p.stop(StopReason::Disabled).await {
+                if let Err(e) = p.stop(PluginStopReason::Disabled).await {
                     crate::plugin_warn!("composite", "插件停用时清理失败 {name}：{e}");
                 }
             }
@@ -372,7 +372,7 @@ impl PluginRegistry {
     /// - 已有插件目录（此前被停用）⇒ 写回启用位并挂载；
     /// - 没有插件目录（从未装过）⇒ 建出目录（只写身份字段）再挂载。
     ///
-    /// 名字 = 工厂 id：目录名 = 挂载名 = 实例名（见 `symbio_core::plugin_dir`）。
+    /// 名字 = 工厂 id：目录名 = 挂载名 = 实例名（见 `symbio_core::plugin::dir`）。
     /// 返回新挂上的插件名。
     pub fn install(&self, provider: &str) -> Result<String, String> {
         let provider = provider.trim();
@@ -419,7 +419,7 @@ impl PluginRegistry {
         // 先把实例摘出来再 await：写锁守卫不能跨 await（future 会失去 Send）。
         let plugin = lock_write(&self.instances).remove(name);
         if let Some(p) = plugin {
-            if let Err(e) = p.stop(StopReason::Uninstalled).await {
+            if let Err(e) = p.stop(PluginStopReason::Uninstalled).await {
                 crate::plugin_warn!("composite", "插件卸载时清理失败 {name}：{e}");
             }
         }

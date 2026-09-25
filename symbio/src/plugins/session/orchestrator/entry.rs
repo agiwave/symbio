@@ -93,7 +93,7 @@ impl SessionPlugin {
     /// 详见该字段的文档。
     async fn resolve_session_params(
         &self,
-        ctx: &Arc<dyn InvokeRequest>,
+        ctx: &Arc<dyn PluginInvokeRequest>,
         session_id: &str,
         req: &session_chat::Request,
     ) -> SessionSnapshot {
@@ -171,8 +171,8 @@ impl SessionPlugin {
     /// 响应立刻返回（`accepted`），流式事件由 VDFS 变更推送。
     pub async fn handle_chat_send_oneoff(
         self: Arc<Self>,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let req: session_chat::Request = ctx.payload()?;
         let session_id = resolve_required_session_id(&ctx, req.session_id.as_deref())?;
 
@@ -232,8 +232,8 @@ impl SessionPlugin {
     /// 与"真的开跑"有关的准备：参数解析、忙碌守卫、工作目录、能力收集、派发。
     pub(crate) async fn start_turn(
         self: Arc<Self>,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let req: session_chat::Request = ctx.payload()?;
 
         // 1. 统一 session_id 解析与校验（头 → 请求体 → 报错，见 resolve_required_session_id）
@@ -566,8 +566,8 @@ impl SessionPlugin {
     /// one-off 中止
     pub async fn handle_chat_abort_oneoff(
         self: Arc<Self>,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         // 会话 id：头 → 请求体（此前只看头，`unwrap_or("default")` 使其必然报错，
         // 令 RPC 直连调用方无法通过 payload 指定会话）
         let body_id = ctx.payload::<serde_json::Value>().ok().and_then(|v| {

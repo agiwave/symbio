@@ -5,7 +5,7 @@
 //! CLI 与 Tauri 前端的差别只在「传输层」：Tauri 走 `route_v2` IPC，本 CLI 直接
 //! 拿到 `Arc<dyn Plugin>` 根节点在**进程内**调用 `root.route(ctx)`。二者用的是
 //! 同一套上下文键（PATH / payload / SESSION_ID / WORKDIR / …），因此不需要任何
-//! 协议改动 —— 换传输 = 换「请求 → SimpleRequest」这一层适配。
+//! 协议改动 —— 换传输 = 换「请求 → PluginSimpleRequest」这一层适配。
 //!
 //! ## 下行通道：事件总线的 `vdfs` 频道
 //!
@@ -44,18 +44,19 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use symbio::init::create_root_plugin;
-use symbio::symbio_core::event_bus::{SubscribeRequest, KIND_VDFS, RESYNC_MARKER_TYPE};
+use symbio::symbio_core::event_bus::{
+    EventBusSubscribeRequest, EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE,
+};
 use symbio::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageType,
 };
 use symbio::symbio_core::schemas::session::session_chat;
-use symbio::symbio_core::vdfs_provider::{
-    vdfs_change_of, VdfsChange, VdfsNode, VDFS_OUTCOME_ABORTED, VDFS_STATUS_FAILED,
-    VDFS_STATUS_WORKING,
+use symbio::symbio_core::{
+    vdfs_change_of, VdfsChange, VdfsNode, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,
 };
 use symbio::symbio_core::{
-    InvokeRequestExt, Plugin, PluginFrame, PluginPayload, SimpleRequest, EVENT_BUS_SUBSCRIBE, PATH,
-    SESSION_ID, WORKDIR,
+    Plugin, PluginFrame, PluginInvokeRequestExt, PluginPayload, PluginSimpleRequest,
+    EVENT_BUS_SUBSCRIBE, PATH, SESSION_ID, WORKDIR,
 };
 
 use crate::render::Renderer;
@@ -89,6 +90,11 @@ const SESSION_SEG: &str = "session";
 /// 段名是 ASCII、展示名是中文（`title`），两者不是一回事：地址要能安全地进
 /// URL / 命令行 / 日志，中文只出现在 UI 上。
 const MESSAGES_SEG: &str = "message";
+
+/// 会话运行态中「本轮被中止」的 `outcome` 取值。机制层的 `OUTCOME_ABORTED` 是
+/// session 插件的内部词汇、不在 CLI 的可见面上，CLI 按地址契约自持一份——拼错
+/// 表现为「中止被当成正常收尾」，不会静默错乱（与 [`SESSION_SEG`] 同一理由）。
+pub(crate) const SESSION_OUTCOME_ABORTED: &str = "aborted";
 
 /// 留痕开关（`SYMBIO_ROUTE_LOG=1`）：出站 `route` 与**入站变更帧**都打到 stderr。
 ///
@@ -134,12 +140,12 @@ fn bus_frame_of(frame: PluginFrame) -> Option<Frame> {
     let is_resync = match &frame {
         PluginFrame::Data(v) => {
             let bus = v.get("data")?;
-            bus.get("kind").and_then(Value::as_str) == Some(KIND_VDFS)
+            bus.get("kind").and_then(Value::as_str) == Some(EVENT_BUS_KIND_VDFS)
                 && bus
                     .get("data")
                     .and_then(|d| d.get("type"))
                     .and_then(Value::as_str)
-                    == Some(RESYNC_MARKER_TYPE)
+                    == Some(EVENT_BUS_RESYNC_MARKER_TYPE)
         }
         _ => false,
     };
@@ -194,19 +200,19 @@ impl SymbioClient {
         //
         // 后端**广播**给全部订阅者，归属由信封的 `path` 给出（`<根>/session/<sid>/…`）：
         // 订阅一次覆盖所有会话，切会话不必重连。
-        let ctx = Arc::new(SimpleRequest::new(None, None));
+        let ctx = Arc::new(PluginSimpleRequest::new(None, None));
         // 绝对地址**取常量**，不写字面量：`set(PATH, "<字面量>")` 会让「路由改名」
         // 不产生任何编译错误，只在运行期表现为「订阅失败」——而失败的样子与
         // 「后端没发布」完全一样。这条由 `scripts/plugin-entry-audit.mjs` 的 E-003
         // 判定型守卫强制。
         //
         // 常量从 `symbio_core` **顶层**导入（`use symbio::symbio_core::EVENT_BUS_SUBSCRIBE`），
-        // 而不是 `symbio_core::paths::…`：`paths` 模块自身是私有的（`mod paths;`），
-        // 常量靠 `symbio_core/mod.rs` 的 `pub use paths::*;` 才对外可见。
-        // 这条路径写错过一次，症状是编译期的 E0603（`module 'paths' is private`）——
+        // 而不是 `symbio_core::keys::paths::…`：`keys` 域自身是私有的（`mod keys;`），
+        // 常量靠 `symbio_core/mod.rs` 的 `pub use keys::*;` 才对外可见。
+        // 这条路径写错过一次，症状是编译期的 E0603（`module 'keys' is private`）——
         // 好在它是**编译期**失败，不会静默。
         ctx.set(PATH, EVENT_BUS_SUBSCRIBE.to_string());
-        ctx.set_payload(SubscribeRequest {})
+        ctx.set_payload(EventBusSubscribeRequest {})
             .map_err(|e| format!("构造订阅载荷失败: {e}"))?;
         let mut stream = match Arc::clone(&root)
             .route(ctx)
@@ -266,7 +272,7 @@ impl SymbioClient {
     ///
     /// ## 为什么 `event_bus/subscribe` 还不够（这里踩过，且症状极具误导性）
     ///
-    /// 事件总线只是**广播口**：`EventBus::try_publish(KIND_VDFS, …)` 只投给已注册
+    /// 事件总线只是**广播口**：`EventBus::try_publish(EVENT_BUS_KIND_VDFS, …)` 只投给已注册
     /// 的总线订阅者，而**谁来 publish** 取决于 VDFS 那一侧有没有 sink。sink 由
     /// `vdfs/watch` 登记进 provider 的变更表（`ChangeSubscriptions::watch`）——
     /// 没有 watch 就没有 sink，也就没有任何帧会上总线。
@@ -303,7 +309,7 @@ impl SymbioClient {
         if route_log_enabled() {
             eprintln!("[route] {path}");
         }
-        let ctx = Arc::new(SimpleRequest::new(None, None));
+        let ctx = Arc::new(PluginSimpleRequest::new(None, None));
         ctx.set(PATH, path.to_string());
         ctx.set(WORKDIR, self.workdir.clone());
         if let Some(sid) = sid {
@@ -484,7 +490,7 @@ impl SymbioClient {
                     if let Some(node) = self.stat_node(&self.session_addr()).await {
                         if let Some(outcome) = Self::turn_end_of(&node) {
                             if node.attributes.get("outcome").and_then(Value::as_str)
-                                == Some(VDFS_OUTCOME_ABORTED)
+                                == Some(SESSION_OUTCOME_ABORTED)
                             {
                                 r.on_abort();
                             }
@@ -524,7 +530,7 @@ impl SymbioClient {
                         // 由 `outcome` 区分）。此刻本轮全部消息帧**已在它之前落地**——
                         // 单一订阅 FIFO 给出的保证，不是调度巧合。
                         if node.attributes.get("outcome").and_then(Value::as_str)
-                            == Some(VDFS_OUTCOME_ABORTED)
+                            == Some(SESSION_OUTCOME_ABORTED)
                         {
                             r.on_abort();
                         }

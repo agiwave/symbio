@@ -23,8 +23,8 @@
 
 use super::config::{is_readonly_allowed, GatewayConfig};
 use crate::symbio_core::{
-    InvokeRequest, Plugin, PluginChannel, PluginFrame, PluginMessageWire, PluginPayload,
-    PluginPayloadWire, SimpleRequest, KEY_PAYLOAD,
+    Plugin, PluginChannel, PluginFrame, PluginInvokeRequest, PluginMessageWire, PluginPayload,
+    PluginPayloadWire, PluginSimpleRequest, KEY_PAYLOAD,
 };
 use base64::Engine;
 use serde_json::Value;
@@ -498,8 +498,8 @@ async fn dispatch_once(
     }
 }
 
-/// 由 `PluginMessageWire` 构造与 `route_v2` 完全一致的 `SimpleRequest`
-fn build_ctx(msg: &PluginMessageWire) -> Arc<dyn InvokeRequest> {
+/// 由 `PluginMessageWire` 构造与 `route_v2` 完全一致的 `PluginSimpleRequest`
+fn build_ctx(msg: &PluginMessageWire) -> Arc<dyn PluginInvokeRequest> {
     let mut extensions: HashMap<String, Arc<dyn Any + Send + Sync>> = HashMap::new();
     extensions.insert(
         KEY_PAYLOAD.to_string(),
@@ -517,7 +517,7 @@ fn build_ctx(msg: &PluginMessageWire) -> Arc<dyn InvokeRequest> {
             }
         }
     }
-    Arc::new(SimpleRequest {
+    Arc::new(PluginSimpleRequest {
         envs: Arc::new(RwLock::new(HashMap::new())),
         extensions: Arc::new(RwLock::new(extensions)),
     })

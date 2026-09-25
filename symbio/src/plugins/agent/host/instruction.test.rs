@@ -16,7 +16,7 @@ fn host_dir_is_the_parent_of_the_plugin_dir() {
     assert_eq!(host_dir(&plugin_dir), Path::new("/homedir"));
     assert_eq!(
         file_path(&host_dir(&plugin_dir)),
-        Path::new("/homedir").join(AGENTS_FILE)
+        Path::new("/homedir").join(MEMORY_AGENTS_FILE)
     );
 }
 
@@ -102,7 +102,7 @@ fn node_shape_comes_from_the_kernel() {
     m.write("内容").unwrap();
 
     let n = m.node(&node_spec());
-    assert_eq!(n.name, AGENTS_FILE, "节点名 = 真实文件名");
+    assert_eq!(n.name, MEMORY_AGENTS_FILE, "节点名 = 真实文件名");
     assert_eq!(n.title, SEGMENT_TITLE);
     assert_eq!(n.kind, PLUGIN_AGENT, "场景标签用所属插件的场景名");
     assert_eq!(n.size, Some("内容".len() as u64));

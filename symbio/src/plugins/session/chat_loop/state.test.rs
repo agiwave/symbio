@@ -9,7 +9,7 @@
 //!   不 mock 内部函数），验证显式触发 / 生命周期兜底 / 二者叠加时的幂等性。
 
 use super::*;
-use crate::symbio_core::{InvokeResponse, PluginMeta, PluginPayload, SimpleRequest};
+use crate::symbio_core::{PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Mutex as StdMutex;
@@ -44,7 +44,10 @@ impl Plugin for HookRecorder {
         PluginMeta::new("test-hook-recorder", "test-hook-recorder")
     }
 
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(
+        self: Arc<Self>,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         if ctx.get(crate::symbio_core::PATH).as_deref() != Some("hook/fire") {
             *self.others.lock().unwrap() += 1;
             return Ok(PluginPayload::new(&Value::Null));
@@ -72,8 +75,8 @@ impl Plugin for HookRecorder {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        _ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         Ok(PluginPayload::new(&Value::Null))
     }
 }
@@ -89,7 +92,7 @@ fn text_msg(id: &str, text: &str) -> ChatMessage {
 fn recorder_signal() -> (Arc<StopSignal>, Arc<HookRecorder>) {
     let recorder = Arc::new(HookRecorder::default());
     let parent = Some(recorder.clone() as Arc<dyn Plugin>);
-    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     (Arc::new(StopSignal::new(parent, ctx)), recorder)
 }
 
@@ -165,7 +168,7 @@ async fn drop_emits_fallback_stop() {
 /// 无父插件（standalone 会话）：仍然置位 fired，且不产生任何外发/告警噪声。
 #[tokio::test]
 async fn signal_without_parent_stays_silent() {
-    let ctx: Arc<dyn InvokeRequest> = Arc::new(SimpleRequest::new(None, None));
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     let stop = Arc::new(StopSignal::new(None, ctx));
     assert!(stop.fire(&[text_msg("1", "x")]).await);
     assert!(stop.fired());

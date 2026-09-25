@@ -7,7 +7,7 @@
 //! 直接透传（已含 `b64` / `mime`，供多模态链路消费）。
 
 use super::{tool, ToolVdfs};
-use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, InvokeRequest, PluginError};
+use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -47,7 +47,7 @@ impl Capability for ReadTool {
         &self,
         args: Value,
         _env: &ExecEnv,
-        ctx: Arc<dyn InvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         let raw = args;
         let path = raw

@@ -1,6 +1,6 @@
 use crate::symbio_core::schemas::{session::chat_message as cm, session::session_chat};
-use crate::symbio_core::vdfs::ChangeSubscriptions;
-use crate::symbio_core::AbortSignal;
+use crate::symbio_core::ChangeSubscriptions;
+use crate::symbio_core::ExecAbortSignal;
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{atomic::AtomicU64, atomic::Ordering, Arc};
@@ -31,7 +31,7 @@ pub static REQUEST_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 /// ## 为什么**不存**发起者的请求上下文
 ///
 /// 消费者自己造一个干净上下文（只带目标会话 id 与工作目录），不复用发起者的
-/// `Arc<dyn InvokeRequest>`：发起者的头里带着**它自己**的 `SESSION_ID`，而跨空间
+/// `Arc<dyn PluginInvokeRequest>`：发起者的头里带着**它自己**的 `SESSION_ID`，而跨空间
 /// 写入（父会话 → 子智能体空间）时那个 id 与目标会话**不是同一个**——沿用它会
 /// 让消费者把消息投到发起者的会话上。工作目录因此单独存一份（它确实是本次请求的
 /// 信息，且不能从目标会话的 metadata 必然推出）。
@@ -58,7 +58,7 @@ pub struct ActiveSessionStateInner {
     ///
     /// `None` 的双重含义与收口前一致：既表示「当前没有在途 Turn」，也是
     /// `handle_abort` 判断 chat_loop 是否已收敛的判据。
-    pub abort_signal: Option<AbortSignal>,
+    pub abort_signal: Option<ExecAbortSignal>,
     pub last_content: String,
     pub last_tool_calls: Vec<Value>,
     /// 上一轮交互的**结局**（`completed` / `aborted` / `failed`）。
@@ -78,7 +78,7 @@ pub struct ActiveSessionStateInner {
     pub last_error: Option<String>,
     /// 会话级告警（可恢复，面向用户）：持久化失败 / 长度截断 / 工具轮次上限。
     ///
-    /// 它是**状态**不是事件：由出口的告警通道（`EventSink::warn`）写入、随会话节点
+    /// 它是**状态**不是事件：由出口的告警通道（`ExecEventSink::warn`）写入、随会话节点
     /// `attributes.warning` 下发，前端按状态渲染；新一轮请求开始（`Working`）时清除。
     /// 与 `last_error`（失败终态）不同：告警不改变运行态，会话照常运行。
     pub last_warning: Option<String>,

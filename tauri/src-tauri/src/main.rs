@@ -1,11 +1,11 @@
 mod commands;
 mod route_connection;
 
+use route_connection::RouteConnectionManager;
+use std::sync::Arc;
 use symbio::init::create_root_plugin;
 use symbio::symbio_core::Plugin;
-use route_connection::RouteConnectionManager;
-use tauri::{Manager, Listener};
-use std::sync::Arc;
+use tauri::{Listener, Manager};
 use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 

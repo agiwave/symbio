@@ -3,12 +3,13 @@ use super::types::{TelegramConfig, TelegramMessage};
 use super::typing::TypingGuard;
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::vdfs;
-use crate::symbio_core::InvokeRequestExt;
+use crate::symbio_core::PluginInvokeRequestExt;
 use crate::symbio_core::{
     dir_from_ctx,
     schemas::{common, session::session_chat},
-    CapabilityMeta, ConfigFile, InvokeRequest, InvokeResponse, Plugin, PluginDir, PluginError,
-    PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_TELEGRAM, SESSION_CHAT_SEND,
+    CapabilityMeta, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
+    PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_TELEGRAM,
+    SESSION_CHAT_SEND,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -65,7 +66,7 @@ fn config_definition() -> DetailDefinition {
 pub struct TelegramPlugin {
     config: Arc<RwLock<TelegramConfig>>,
     /// 配置文件的呈现与校验（`<根>/telegram/PLUGIN.yml`）
-    config_file: ConfigFile,
+    config_file: PluginConfigFile,
     client: reqwest::Client,
     /// 更新偏移量
     update_offset: Arc<AtomicI64>,
@@ -80,8 +81,8 @@ pub struct TelegramPlugin {
 }
 
 impl TelegramPlugin {
-    /// 静态工厂：从 InvokeRequest 构造 Plugin 实例
-    pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
+    /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
+    pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         let dir = dir_from_ctx(&*ctx, PLUGIN_TELEGRAM);
         let config: TelegramConfig = match dir.load::<TelegramConfig>() {
             Ok(Some(c)) => c,
@@ -99,7 +100,7 @@ impl TelegramPlugin {
     pub fn new(config: TelegramConfig, dir: PluginDir) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
-            config_file: ConfigFile::new(dir, "Telegram 设置", config_definition()),
+            config_file: PluginConfigFile::new(dir, "Telegram 设置", config_definition()),
             client: reqwest::Client::new(),
             update_offset: Arc::new(AtomicI64::new(0)),
             listener_token: Arc::new(RwLock::new(None)),
@@ -192,7 +193,7 @@ impl TelegramPlugin {
     }
 
     /// 处理发送消息
-    async fn handle_send(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
+    async fn handle_send(&self, ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse<Value> {
         let req: telegram_send::Request = ctx.payload()?;
 
         let chat_id = req
@@ -214,7 +215,7 @@ impl TelegramPlugin {
     }
 
     /// 获取更新
-    async fn handle_get_updates(&self) -> InvokeResponse<Value> {
+    async fn handle_get_updates(&self) -> PluginInvokeResponse<Value> {
         let api_url = self
             .api_url()
             .ok_or_else(|| PluginError::ValidationError("未配置 bot_token".to_string()))?;
@@ -283,7 +284,10 @@ impl TelegramPlugin {
     /// 原先的 `llm_plugin: Option<Arc<dyn Plugin>>` 参数是个从未生效的设计：
     /// 它只在传 `Some(..)` 时写入字段，而唯一调用点传的是 `None`，于是
     /// `process_update` 恒走「LLM 插件未配置」分支——**整条回复链路自始至终没通**。
-    async fn handle_start_listener(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
+    async fn handle_start_listener(
+        &self,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<Value> {
         // 检查是否已运行
         if self.listener_running.load(Ordering::SeqCst) {
             return Ok(json!({
@@ -370,7 +374,7 @@ impl TelegramPlugin {
     }
 
     /// 停止监听器
-    async fn handle_stop_listener(&self) -> InvokeResponse<Value> {
+    async fn handle_stop_listener(&self) -> PluginInvokeResponse<Value> {
         if let Ok(mut token) = self.listener_token.try_write() {
             if let Some(t) = token.take() {
                 t.cancel();
@@ -385,7 +389,7 @@ impl TelegramPlugin {
     }
 
     /// 状态
-    async fn handle_status(&self) -> InvokeResponse<Value> {
+    async fn handle_status(&self) -> PluginInvokeResponse<Value> {
         let config = self.config.try_read();
         let (has_token, has_chat, streaming, poll) = match config {
             Ok(c) => (
@@ -417,7 +421,7 @@ impl TelegramPlugin {
         config: &Arc<RwLock<TelegramConfig>>,
         update_offset: &Arc<AtomicI64>,
         latest_version: &Arc<RwLock<HashMap<String, u64>>>,
-        ctx: Arc<dyn InvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<(), String> {
         // 解析消息
         let message = update.get("message").ok_or("无消息")?;
@@ -500,7 +504,7 @@ impl TelegramPlugin {
                 let sub_ctx = ctx.fork();
                 // 路径取常量：此处曾写 `SESSION_CHAT`（`"session/chat"`）——**该路径不存在**，
                 // session 的 `route` 只认 `chat/send` / `chat/abort` 两条相对臂，
-                // 所以这里以前必定落到 `_ => NotFound`。见 `symbio_core::paths` 的地址规则。
+                // 所以这里以前必定落到 `_ => NotFound`。见 `symbio_core::keys::paths` 的地址规则。
                 sub_ctx.set(crate::symbio_core::PATH, SESSION_CHAT_SEND.to_string());
                 let _ = sub_ctx.set_payload(chat_input);
                 sub_ctx.set(crate::symbio_core::WORKDIR, ".".to_string());
@@ -591,17 +595,15 @@ impl Plugin for TelegramPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(
-        self: Arc<Self>,
-    ) -> Option<Arc<dyn crate::symbio_core::vdfs_provider::VdfsProvider>> {
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn crate::symbio_core::VdfsProvider>> {
         Some(self)
     }
 
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let sub_path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         if sub_path != crate::symbio_core::TRAVERSE_AVAILABLE_TOOLS {
             return Err(crate::symbio_core::PluginError::NotFound(format!(
@@ -621,7 +623,10 @@ impl Plugin for TelegramPlugin {
         Ok(PluginPayload::new(&Vec::<CapabilityMeta>::new()))
     }
 
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(
+        self: Arc<Self>,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
@@ -640,15 +645,18 @@ impl Plugin for TelegramPlugin {
 }
 
 impl TelegramPlugin {
-    async fn invoke_send(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
+    async fn invoke_send(&self, ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse<Value> {
         self.handle_send(ctx).await
     }
 
-    async fn invoke_get_updates(&self) -> InvokeResponse<Value> {
+    async fn invoke_get_updates(&self) -> PluginInvokeResponse<Value> {
         self.handle_get_updates().await
     }
 
-    async fn invoke_set_chat_id(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
+    async fn invoke_set_chat_id(
+        &self,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<Value> {
         let new_cfg: TelegramConfig = ctx.payload()?;
 
         if let Some(id) = new_cfg.chat_id {
@@ -659,15 +667,18 @@ impl TelegramPlugin {
         Ok(serde_json::to_value(common::SuccessResponse::default())?)
     }
 
-    async fn invoke_start_listener(&self, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<Value> {
+    async fn invoke_start_listener(
+        &self,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<Value> {
         self.handle_start_listener(ctx).await
     }
 
-    async fn invoke_stop_listener(&self) -> InvokeResponse<Value> {
+    async fn invoke_stop_listener(&self) -> PluginInvokeResponse<Value> {
         self.handle_stop_listener().await
     }
 
-    async fn invoke_status(&self) -> InvokeResponse<Value> {
+    async fn invoke_status(&self) -> PluginInvokeResponse<Value> {
         self.handle_status().await
     }
 }
@@ -675,7 +686,7 @@ impl TelegramPlugin {
 // ==================== VDFS：配置文档（`<根>/telegram/PLUGIN.yml`） ====================
 //
 // 本插件只有配置、没有资源树，因此挂载根的内容恒为「一个配置文件」。
-// 节点形状、定义校验、落盘都在 [`ConfigFile`] 里，这里只做寻址分流。
+// 节点形状、定义校验、落盘都在 [`PluginConfigFile`] 里，这里只做寻址分流。
 
 #[async_trait]
 impl vdfs::VdfsProvider for TelegramPlugin {

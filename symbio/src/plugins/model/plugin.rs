@@ -14,8 +14,9 @@ use super::protocols::resolve_protocol_id;
 use crate::providers::vdfs_service::{MemoryVdfs, SingleFileVdfs};
 use crate::symbio_core::schemas::detail::{DetailField, DetailOption};
 use crate::symbio_core::{
-    create_object, dir_from_ctx, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
-    PluginDir, PluginError, PluginMeta, PluginPayload, SimpleRequest, PLUGIN_MODEL,
+    create_object, dir_from_ctx, Plugin, PluginDir, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest,
+    PLUGIN_MODEL,
 };
 use crate::{plugin_error, plugin_info, plugin_warn};
 use async_trait::async_trait;
@@ -55,13 +56,13 @@ pub struct ModelPlugin {
 }
 
 impl ModelPlugin {
-    /// 静态工厂：从 InvokeRequest 构造 Plugin 实例
+    /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
     ///
     /// 加载策略（按优先级）：
     /// 1. **存储**：从 `<本插件目录>/<id>/provider.json` 加载所有 Provider
     /// 2. **跨条目配置**：`<本插件目录>/PLUGIN.yml` 里的 `default_provider_id`
     ///    （旧形态里可能还带着 `providers` 明细，由 `load_from_storage` 搬成资源）
-    pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
+    pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         let dir = dir_from_ctx(&*ctx, PLUGIN_MODEL);
         // 读宽：兼容旧形态里整包存在配置中的 Provider 明细
         let providers_config: ModelProvidersConfig = match dir.load::<ModelProvidersConfig>() {
@@ -99,7 +100,7 @@ impl ModelPlugin {
     ///
     /// 启动时调用此方法，**会**触发首启动数据迁移（从配置文件里的旧明细迁到新存储）。
     /// `ctx` 保留给调用方兼容；迁移不依赖请求上下文。
-    pub async fn load_from_storage(&self, _ctx: &Arc<dyn InvokeRequest>) {
+    pub async fn load_from_storage(&self, _ctx: &Arc<dyn PluginInvokeRequest>) {
         // 仅兼容迁移认识旧分类的历史落位。
         let legacy = SingleFileVdfs::for_category("ai", MANIFEST);
         self.load_with_legacy(&legacy).await;
@@ -304,7 +305,7 @@ impl ModelPlugin {
     ///
     /// 只写 `default_provider_id`：单个 Provider 的明细是资源，落在
     /// `<本插件目录>/<id>/provider.json`，不进配置文件。
-    async fn persist(&self) -> InvokeResponse<()> {
+    async fn persist(&self) -> PluginInvokeResponse<()> {
         let cfg = ModelConfig {
             default_provider_id: self.providers.read().await.default_provider_id.clone(),
         };
@@ -333,7 +334,7 @@ impl ModelPlugin {
     /// 直调 `ModelProtocol::ping`（最小代价请求探测 endpoint / key / model
     /// 可用性），`Ok(())` → 配置可用；`Err(e)` → 携带失败原因。
     async fn validate_config(config: &ModelProviderConfig) -> Option<String> {
-        let ctx = Arc::new(SimpleRequest::new(None, None));
+        let ctx = Arc::new(PluginSimpleRequest::new(None, None));
         let protocol_id = resolve_protocol_id(&config.api_protocol);
         let protocol = create_object::<dyn super::protocols::ModelProtocol>(protocol_id, ctx)
             .expect("MODEL protocol creator not found");
@@ -368,7 +369,7 @@ impl ModelPlugin {
     /// `docs/archive/session-options-unification.md` §6）。
     ///
     /// **不回填当前值**：值来自会话 `metadata.provider_id`，这里只声明候选与缺省。
-    async fn contribute_options(&self, ctx: &Arc<dyn InvokeRequest>) {
+    async fn contribute_options(&self, ctx: &Arc<dyn PluginInvokeRequest>) {
         let Some(visitor) = ctx.get(crate::symbio_core::OPTION_VISITOR) else {
             return;
         };
@@ -463,8 +464,8 @@ impl Default for ModelPlugin {
 // 分工与旧写法一致：`list` 读内存镜像，`stat` / `read` / `delete` / `action`
 // 读磁盘（真相源），避免镜像与磁盘在校验路径上出现分歧。
 
-use crate::symbio_core::vdfs::{from_plugin_error, unwatch_changes, watch_changes};
-use crate::symbio_core::vdfs_provider::{
+use crate::symbio_core::{from_plugin_error, unwatch_changes, watch_changes};
+use crate::symbio_core::{
     VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
     VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_TEST,
     VDFS_EXT_FORM, VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED,
@@ -666,7 +667,7 @@ impl ModelPlugin {
 
     /// 目标地址 → 条目 id（**唯一**判据，`write` 与测试共用）。
     ///
-    /// 两种目标形态见 [`VdfsProvider::write`](crate::symbio_core::vdfs_provider::VdfsProvider::write)：
+    /// 两种目标形态见 [`VdfsProvider::write`](crate::symbio_core::VdfsProvider::write)：
     /// 地址末段非空 ⇒ 名字由使用方给（`id_of` 按呈现扩展名剥后缀）；地址为空
     /// ⇒ **使用方没给名字**（写挂载点目录自身），id 由本插件生成——这正是
     /// 「点新建，直接进详情页填，保存时一次写入」的机制形态。
@@ -849,15 +850,16 @@ impl Plugin for ModelPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(
-        self: Arc<Self>,
-    ) -> Option<Arc<dyn crate::symbio_core::vdfs_provider::VdfsProvider>> {
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn crate::symbio_core::VdfsProvider>> {
         Some(self)
     }
 
     /// model 已无自有路由：配置的读写在 VDFS 上（`<根>/model/<id>` 的详情表单，
     /// 以及节点动作 `set-default`），跨条目状态写自己的 `<本插件目录>/PLUGIN.yml`。
-    async fn route(self: Arc<Self>, _ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(
+        self: Arc<Self>,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         Err(PluginError::NotFound(format!(
             "{PLUGIN_MODEL} 已无自有路由，请改用 VDFS 地址"
         )))
@@ -866,8 +868,8 @@ impl Plugin for ModelPlugin {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         // 模型能力纳入统一注册收集机制：与 local/web/mcp 插件注册工具同构。
         // 命中 TRAVERSE_AVAILABLE_TOOLS 时，按上下文解析出**唯一生效** Provider
         // （ctx[PROVIDER_ID] > default_provider_id > 首个 enabled），构造运行期

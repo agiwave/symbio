@@ -8,7 +8,7 @@
 
 use super::super::config::AgentConfig;
 use super::*;
-use crate::symbio_core::{VdfsAccess, AGENTS_FILE};
+use crate::symbio_core::{VdfsAccess, MEMORY_AGENTS_FILE};
 use tempfile::TempDir;
 
 /// 在本插件目录落一个最小 agent_dir（不经 zip：以下用例只关心记忆的落位与作用域）
@@ -50,9 +50,9 @@ fn memory_lives_next_to_the_agent_manifest() {
         m.path().unwrap(),
         dir.path().join("global-agent/b/AGENTS.md")
     );
-    assert_eq!(m.file_name(), AGENTS_FILE, "节点名 = 真实文件名");
+    assert_eq!(m.file_name(), MEMORY_AGENTS_FILE, "节点名 = 真实文件名");
     // 不是工作区根的那个 AGENTS.md —— 那是 work 插件的作用域
-    assert_ne!(m.path().unwrap(), dir.path().join(AGENTS_FILE));
+    assert_ne!(m.path().unwrap(), dir.path().join(MEMORY_AGENTS_FILE));
 }
 
 /// Agent 不存在 = **无作用域**，是正常状态而不是崩溃（VDFS 据此报 NotFound）
@@ -179,7 +179,7 @@ fn node_shape_comes_from_the_kernel() {
     m.write("内容").unwrap();
 
     let n = m.node(&node_spec());
-    assert_eq!(n.name, AGENTS_FILE, "节点名 = 真实文件名");
+    assert_eq!(n.name, MEMORY_AGENTS_FILE, "节点名 = 真实文件名");
     assert_eq!(n.title, SEGMENT_TITLE);
     assert_eq!(
         n.kind, PLUGIN_AGENT,

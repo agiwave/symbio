@@ -3,7 +3,7 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 
 use super::*;
-use crate::symbio_core::vdfs_provider::{VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT};
+use crate::symbio_core::{VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT};
 
 #[test]
 fn definition_is_info_overview_with_container_entry() {
@@ -50,7 +50,7 @@ fn import_is_offered_in_draft_only() {
 
     assert_eq!(
         import.pack.as_deref(),
-        Some(crate::symbio_core::vdfs_provider::VDFS_EXT_ZIP),
+        Some(crate::symbio_core::VDFS_EXT_ZIP),
         "导入的载荷是一个本地 zip：使用方据此取文件"
     );
     assert!(

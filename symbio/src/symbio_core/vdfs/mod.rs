@@ -5,9 +5,9 @@
 //! ## 模块边界（重要）
 //!
 //! ```text
-//! symbio_core/vdfs_provider.rs   纯接口：VdfsProvider trait + 域类型
+//! symbio_core/vdfs/*.rs          纯接口：VdfsProvider trait + 域类型（words / access / node / …）
 //! symbio_core/vdfs/host.rs       symbio 桥：上下文注入 + 错误翻译 + 变更广播
-//! symbio_core/vdfs/address.rs    当前父地址机制：根的静态声明 + 拼接
+//! symbio_core/vdfs/address.rs    当前父地址机制：根的静态声明 + 拼接 + 路径守卫
 //! providers/vdfs_service/        存储实现：单文件 / 目录 / 内存三种拓扑
 //! plugins/vdfs/protocol.rs       线路信封：vdfs/* 请求响应 + 协议路径常量
 //! plugins/vdfs/fs.rs             地址规则（根名在这里）+ 两半分流 + 展示口径映射
@@ -15,7 +15,7 @@
 //! plugins/composite/vdfs.rs      拓扑：包含子目录列表的 provider（子目录 = 子插件名）
 //! ```
 //!
-//! **core 只暴露纯接口**（[`crate::symbio_core::vdfs_provider`]），线上形状与
+//! **core 只暴露纯接口**（[`crate::symbio_core::vdfs`]），线上形状与
 //! 访问层都在 vdfs 插件内部——与 [`crate::symbio_core::llm::model_provider`] 的组织
 //! 方式一致（core = 纯 trait；协议适配在插件）。
 //!
@@ -40,10 +40,10 @@
 //! [`address::absolute_addr`] 用「上下文父地址 + 相对地址」拼出——不写死、
 //! 不问全局。
 //!
-//! [`VdfsProvider`]: crate::symbio_core::vdfs_provider::VdfsProvider
+//! [`VdfsProvider`]: crate::symbio_core::vdfs::VdfsProvider
 //!
 //! 本模块（`vdfs`）是 symbio 侧的**薄桥**：把纯接口接到
-//! `InvokeRequest` / `PluginError` 上，供实现方（如 `plugin_manager` 插件）复用。
+//! `PluginInvokeRequest` / `PluginError` 上，供实现方（如 `plugin_manager` 插件）复用。
 //! 换宿主只需重写这一个文件。
 //!
 //! ## 四条不变量
@@ -57,17 +57,50 @@
 //!    绝对地址一律从**上下文里的当前父地址 + 相对地址**拼接
 //!    （[`address::absolute_addr`]），不得持有根名。
 
+// ---- 纯接口子模块（宿主无关）----
+mod access;
+mod change;
+mod content;
+mod context;
+mod error;
+mod node;
+mod provider;
+mod request;
+mod words;
+
 pub mod address;
 pub mod host;
 
-// ---- 纯接口（宿主无关，定义在 `symbio_core::vdfs_provider`）----
-pub use super::vdfs_provider::*;
+// ---- 纯接口：词表常量 ----
+pub use words::{
+    PLUGIN_PROVIDER_FIELD, VDFS_ACTION_ABORT, VDFS_ACTION_CLEAR, VDFS_ACTION_DISABLE,
+    VDFS_ACTION_ENABLE, VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_ACTION_PLUGINS,
+    VDFS_ACTION_TEST, VDFS_ACTION_TRUNCATE, VDFS_EXT_DIR, VDFS_EXT_FORM, VDFS_EXT_JSON,
+    VDFS_EXT_MARKDOWN, VDFS_EXT_TEXT, VDFS_EXT_ZIP, VDFS_KIND_DIR, VDFS_KIND_FILE,
+    VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT, VDFS_PARAM_WORKDIR, VDFS_PLUGINS_FIELD,
+    VDFS_PLUGIN_NAME_FIELD, VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED, VDFS_STATUS_FAILED,
+    VDFS_STATUS_NONE, VDFS_STATUS_UNKNOWN, VDFS_STATUS_WORKING,
+};
+// ---- 纯接口：域类型 ----
+pub use access::VdfsAccess;
+pub use change::{vdfs_change_of, VdfsChange, VdfsChangeSink};
+pub use content::VdfsContent;
+pub use context::{VdfsContext, VdfsParams};
+pub use error::{VdfsError, VdfsFieldError, VdfsResult, VdfsValidationError};
+pub use node::{derive_ext, VdfsItem, VdfsNewType, VdfsNode};
+pub use provider::{DynVdfsProvider, VdfsProvider};
+pub use request::{VdfsActionResult, VdfsRequest, VdfsResponse, VdfsWriteResponse};
 
 // ---- 当前父地址机制（根声明 + 拼接；消费方全在本 crate 内）----
 pub(crate) use address::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
+// 路径守卫（`..` 段判定 / 前缀段比较）——shell 工具与 VDFS 物理层共用的同一条规则
+pub use address::{has_parent_segment, path_within};
 
 // ---- symbio 桥 ----
 pub use host::{
     from_plugin_error, host_ctx, notify_change, unwatch_changes, vdfs_context, watch_changes,
     ChangeSubscriptions,
 };
+
+#[cfg(test)]
+mod tests;

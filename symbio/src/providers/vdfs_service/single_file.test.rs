@@ -4,7 +4,7 @@
 
 use super::*;
 
-use crate::symbio_core::vdfs_provider::VdfsContent;
+use crate::symbio_core::VdfsContent;
 use std::path::Path;
 
 fn store_in(base: &Path) -> SingleFileVdfs {

@@ -39,8 +39,8 @@ use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType, ResumeAction,
     ResumeRequest,
 };
-use crate::symbio_core::llm::turn::{emit_message, emit_removed, emit_state, short_id};
-use crate::symbio_core::{AbortSignal, EventSink, InvokeRequest, PluginError};
+use crate::symbio_core::{emit_message, emit_removed, emit_state, short_id};
+use crate::symbio_core::{ExecAbortSignal, ExecEventSink, PluginError, PluginInvokeRequest};
 use crate::{plugin_error, plugin_info};
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -66,9 +66,9 @@ pub enum ResumeOutcome {
 /// `session` 用于加载/持久化会话消息。
 pub async fn process_resume(
     orchestrator: &ChatOrchestrator,
-    ctx: &Arc<dyn InvokeRequest>,
-    sink: &EventSink,
-    abort: &AbortSignal,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    sink: &ExecEventSink,
+    abort: &ExecAbortSignal,
     session: &Arc<PersistentChatSession>,
     req: ResumeRequest,
 ) -> Result<ResumeOutcome, PluginError> {
@@ -108,7 +108,7 @@ pub async fn process_resume(
 /// 在加载 session 历史后自动发起（用户原消息仍在历史中）。
 async fn process_retry_turn(
     session: &Arc<PersistentChatSession>,
-    sink: &EventSink,
+    sink: &ExecEventSink,
     req: &ResumeRequest,
 ) -> Result<ResumeOutcome, PluginError> {
     // 1. 加载会话消息
@@ -169,9 +169,9 @@ async fn process_retry_turn(
 /// 删除-重建模式：删除旧子节点 → 重新执行工具或生成结果 → 创建新子节点 → 更新父节点状态。
 async fn process_tool_resume_action(
     orchestrator: &ChatOrchestrator,
-    ctx: &Arc<dyn InvokeRequest>,
-    sink: &EventSink,
-    abort: &AbortSignal,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    sink: &ExecEventSink,
+    abort: &ExecAbortSignal,
     session: &Arc<PersistentChatSession>,
     req: ResumeRequest,
 ) -> Result<ResumeOutcome, PluginError> {
@@ -450,7 +450,7 @@ fn finalize_aborted_parent(
 ///
 /// 返回 `(result_text, success)`。
 ///
-/// 使用**静默出口**（[`EventSink::silent`]）而非主出口，因为 `execute_tool_async` 会以
+/// 使用**静默出口**（[`ExecEventSink::silent`]）而非主出口，因为 `execute_tool_async` 会以
 /// `result_msg_id` 发送流式更新和完成事件，若走主出口会与 `process_tool_resume_action`
 /// 自行构造的 `new_child`（不同 id）产生重复节点。丢弃中间更新，由调用方统一
 /// 构造最终结果子节点。
@@ -459,14 +459,14 @@ fn finalize_aborted_parent(
 /// 静默——那是「出口只能是通道」的产物；现在静默是出口的一种取值，两行代码即达意。
 async fn reexecute_tool(
     orchestrator: &ChatOrchestrator,
-    ctx: &Arc<dyn InvokeRequest>,
-    abort: &AbortSignal,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    abort: &ExecAbortSignal,
     tool_name: &str,
     args: Value,
     tool_call_id: &str,
 ) -> (String, bool) {
     let result_msg_id = short_id();
-    let silent = EventSink::silent();
+    let silent = ExecEventSink::silent();
 
     let (res, success, _captured) = execute_tool_async(
         &orchestrator.parent,

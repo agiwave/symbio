@@ -2,7 +2,7 @@
 //!
 //! ## 相对地址是常态，绝对地址是例外
 //!
-//! [`VdfsProvider`](crate::symbio_core::vdfs_provider::VdfsProvider) 收到的地址
+//! [`VdfsProvider`](crate::symbio_core::vdfs::VdfsProvider) 收到的地址
 //! 一律是**自身子树内的相对地址**（`""` = 自身根）——绝大多数访问只跟相对地址
 //! 打交道，从不需要知道自己在地址空间里的绝对位置。只有少数**协议级**场合需要
 //! 全局地址：提示词里印给模型的可编辑地址、错误信息里给用户指路等。
@@ -31,7 +31,7 @@
 
 use std::sync::Arc;
 
-use crate::symbio_core::{InvokeRequest, InvokeRequestExt, VDFS_PARENT_ADDR};
+use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt, VDFS_PARENT_ADDR};
 
 /// 地址空间根的**静态声明** —— 由 vdfs 插件提交（`inventory::submit!`）。
 ///
@@ -86,8 +86,40 @@ pub(crate) fn descend_addr(current: &str, name: &str) -> String {
 ///
 /// 只在少数协议级场合调用（提示词里印给模型的可编辑地址、错误信息指路等）；
 /// 上下文没有父地址（顶层请求 / 无 vdfs 装配）时退化为根相对地址。
-pub(crate) fn absolute_addr(ctx: &Arc<dyn InvokeRequest>, rel: &str) -> String {
+pub(crate) fn absolute_addr(ctx: &Arc<dyn PluginInvokeRequest>, rel: &str) -> String {
     join_addr(ctx.get(VDFS_PARENT_ADDR).unwrap_or_default().as_str(), rel)
+}
+
+// ==================== 路径判定（地址契约的唯一实现） ====================
+//
+// 下面三个函数是**地址规则**的实现，因此归本模块所有：任何按路径段比较、
+// 或需要收敛坐标系的场合都调用它们，不得各写一份。
+//
+// 历史教训：`..` 判定曾按「是否以 `../` 开头」实现，Windows 下
+// `src\..\..\..\Windows` 既不以 `../` 也不以 `..\` 开头，直接绕过守卫；
+// 黑名单前缀曾用裸 `starts_with("/etc")`，把 `/etcfoo` 一并误伤。
+// 两处 bug 同源——**按字符串前缀代替按路径段比较**。
+
+/// 路径中是否含 `..` 段——**两种分隔符都算**。
+///
+/// 只查 `/` 会让 Windows 的 `src\..\..\..\Windows` 绕过守卫；只查带分隔符的
+/// `../` / `..\` 前缀会放过 `a/..`（`..` 收尾）。因此按**段**判定，与分隔符无关。
+pub fn has_parent_segment(path: &str) -> bool {
+    path.split(['/', '\\']).any(|seg| seg == "..")
+}
+
+/// `path` 是否落在 `prefix` 之内——相等，或紧随一个分隔符。
+///
+/// 前缀必须按**路径段**比较：裸 `starts_with("/etc")` 会把 `/etcfoo` 误伤。
+pub fn path_within(path: &str, prefix: &str) -> bool {
+    let prefix = prefix.trim_end_matches(['/', '\\']);
+    if prefix.is_empty() {
+        return false;
+    }
+    match path.strip_prefix(prefix) {
+        Some(rest) => rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\'),
+        None => false,
+    }
 }
 
 #[cfg(test)]

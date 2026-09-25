@@ -8,7 +8,7 @@
 //!
 //! Home 是**系统根插件**：它的目录就是系统根 [`HomedirRegistry::get()`] 本身，
 //! 配置在 `<homedir>/PLUGIN.yml`——与其它插件**同一套规范**
-//! （见 [`plugin_dir`](crate::symbio_core::plugin_dir)），只是它住在系统根而不是
+//! （见 [`plugin_dir`](crate::symbio_core::plugin::dir)），只是它住在系统根而不是
 //! 业务插件**并列**在系统根下（它管辖的插件根就是系统根本身）。
 //! homedir 切换通过 `home/reload` 路由热重载实现。
 //!
@@ -25,9 +25,9 @@
 
 use super::schemas::{home_reload, work_get_workspace};
 use crate::symbio_core::{
-    HomedirRegistry, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginDir,
-    PluginError, PluginMeta, PluginPayload, SimpleRequest, PATH, PLUGIN_COMPOSITE, PLUGIN_DIR,
-    PLUGIN_HOME, REQUIRED_PLUGINS,
+    HomedirRegistry, Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, PATH, PLUGIN_COMPOSITE,
+    PLUGIN_DIR, PLUGIN_HOME, REQUIRED_PLUGINS,
 };
 use crate::{plugin_error, plugin_info, plugin_warn};
 use serde_json::Value;
@@ -92,14 +92,14 @@ pub struct HomePlugin {
     /// 自己的配置缓存（`<本插件目录>/PLUGIN.yml`）
     config: Arc<RwLock<HomeConfig>>,
     /// 插件上下文（用于动态创建子插件）
-    context: Arc<dyn InvokeRequest>,
+    context: Arc<dyn PluginInvokeRequest>,
     /// 自身的弱引用
     self_weak: Arc<RwLock<Option<Weak<dyn Plugin>>>>,
 }
 
 impl HomePlugin {
-    /// 静态工厂：从 InvokeRequest 构造 Plugin 实例
-    pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
+    /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
+    pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         let dir = home_dir();
         if let Err(e) = dir.ensure_manifest() {
             plugin_warn!("home", "补建自身插件目录失败：{}", e);
@@ -215,7 +215,7 @@ impl HomePlugin {
         })
     }
 
-    pub fn new(context: Arc<dyn InvokeRequest>) -> Self {
+    pub fn new(context: Arc<dyn PluginInvokeRequest>) -> Self {
         Self {
             instances: Arc::new(RwLock::new(HashMap::new())),
             config: Arc::new(RwLock::new(HomeConfig::default())),
@@ -225,7 +225,7 @@ impl HomePlugin {
     }
 
     /// 带初始配置的构造函数（工厂使用）
-    pub fn new_with_config(config: HomeConfig, context: Arc<dyn InvokeRequest>) -> Self {
+    pub fn new_with_config(config: HomeConfig, context: Arc<dyn PluginInvokeRequest>) -> Self {
         Self {
             instances: Arc::new(RwLock::new(HashMap::new())),
             config: Arc::new(RwLock::new(config)),
@@ -399,8 +399,11 @@ impl HomePlugin {
             .clone()
             .expect("HomePlugin self_weak not set");
 
-        // 子上下文继承父上下文的环境变量（收口在 `SimpleRequest::child_of`）
-        let sub_context = Arc::new(SimpleRequest::child_of(&self.context, Some(self_weak)));
+        // 子上下文继承父上下文的环境变量（收口在 `PluginSimpleRequest::child_of`）
+        let sub_context = Arc::new(PluginSimpleRequest::child_of(
+            &self.context,
+            Some(self_weak),
+        ));
 
         // 告知容器它的目录：**系统根**（与 home 同一处），以及系统必备插件清单
         sub_context.set(PLUGIN_DIR, PluginDir::system(PLUGIN_COMPOSITE));
@@ -510,7 +513,7 @@ impl HomePlugin {
 
 impl Default for HomePlugin {
     fn default() -> Self {
-        Self::new(Arc::new(SimpleRequest::new(None, None)))
+        Self::new(Arc::new(PluginSimpleRequest::new(None, None)))
     }
 }
 
@@ -522,7 +525,10 @@ impl Plugin for HomePlugin {
         Self::metadata()
     }
 
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(
+        self: Arc<Self>,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
@@ -642,8 +648,8 @@ impl Plugin for HomePlugin {
     async fn traverse(
         self: Arc<Self>,
         path: String,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let mut results = Vec::new();
         let instances = {
             let guard = self.instances.read().await;

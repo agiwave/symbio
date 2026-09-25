@@ -23,8 +23,8 @@ impl PartialJsonSink for Probe {
         }
     }
 
-    fn text(&mut self, t: &str, out: &mut Vec<ProtocolEvent>) {
-        out.push(ProtocolEvent::ContentDelta(t.to_string()));
+    fn text(&mut self, t: &str, out: &mut Vec<ModelProtocolEvent>) {
+        out.push(ModelProtocolEvent::ContentDelta(t.to_string()));
     }
 }
 
@@ -43,7 +43,7 @@ impl PartialJsonSink for ScalarProbe {
         StrAction::Skip
     }
 
-    fn text(&mut self, _t: &str, _out: &mut Vec<ProtocolEvent>) {}
+    fn text(&mut self, _t: &str, _out: &mut Vec<ModelProtocolEvent>) {}
 
     fn scalar(&mut self, path: &FieldPath<'_>, raw: &str) {
         self.log

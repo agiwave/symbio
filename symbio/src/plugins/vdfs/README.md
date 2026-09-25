@@ -55,6 +55,6 @@
 
 - 机制规范：[`docs/design/vdfs.md`](../../../../docs/design/vdfs.md)
 - 前端页面规范：[`docs/design/vdfs-frontend.md`](../../../../docs/design/vdfs-frontend.md)
-- 纯接口（trait + 域类型）：`symbio_core::vdfs_provider`
+- 纯接口（trait + 域类型）：`symbio_core::vdfs`
 - symbio 桥（上下文注入 / 错误翻译）：`symbio_core::vdfs::host`
 - 虚拟层拓扑（容器聚合 + 注册为根）：`../composite/README.md`

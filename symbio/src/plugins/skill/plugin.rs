@@ -3,8 +3,9 @@ use crate::plugins::skill::loader::{load_skills_from_dirs_with_budget, LoadBudge
 use crate::plugins::skill::skill_tool::SkillExecuteTool;
 use crate::plugins::skill::types::{Skill, SkillConfig};
 use crate::symbio_core::{
-    dir_from_ctx, HomedirRegistry, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
-    PluginDir, PluginError, PluginMeta, PluginPayload, PLUGIN_SKILL, TRAVERSE_AVAILABLE_TOOLS,
+    dir_from_ctx, HomedirRegistry, Plugin, PluginDir, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_SKILL,
+    TRAVERSE_AVAILABLE_TOOLS,
 };
 use async_trait::async_trait;
 use std::path::Path;
@@ -35,8 +36,8 @@ impl SkillPlugin {
         }
     }
 
-    /// 静态工厂：从 InvokeRequest 构造 Plugin 实例
-    pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
+    /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
+    pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         let mut config: SkillConfig = ctx
             .config()
             .and_then(|v| serde_json::from_value(v).ok())
@@ -138,8 +139,8 @@ impl SkillPlugin {
 // 标题/摘要/config）与写前的表单校验。
 
 use crate::providers::vdfs_service::DirVdfs;
-use crate::symbio_core::vdfs::{from_plugin_error, unwatch_changes, watch_changes};
-use crate::symbio_core::vdfs_provider::{
+use crate::symbio_core::{from_plugin_error, unwatch_changes, watch_changes};
+use crate::symbio_core::{
     VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
     VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT,
     VDFS_ACTION_IMPORT, VDFS_EXT_FORM, VDFS_STATUS_ACTIVE,
@@ -456,13 +457,14 @@ impl Plugin for SkillPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(
-        self: Arc<Self>,
-    ) -> Option<Arc<dyn crate::symbio_core::vdfs_provider::VdfsProvider>> {
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn crate::symbio_core::VdfsProvider>> {
         Some(self)
     }
 
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(
+        self: Arc<Self>,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         let path = path.strip_prefix('/').unwrap_or(&path);
 
@@ -565,8 +567,8 @@ impl Plugin for SkillPlugin {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let sub_path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
         if sub_path == TRAVERSE_AVAILABLE_TOOLS {
             let skills = self

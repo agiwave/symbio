@@ -9,8 +9,8 @@
 use super::*;
 // `traverse` 是 `Plugin` 的 trait 方法，需 trait 在作用域内才可解析
 use crate::symbio_core::Plugin;
-// `ctx.set(...)` 来自 `InvokeRequestExt`
-use crate::symbio_core::InvokeRequestExt;
+// `ctx.set(...)` 来自 `PluginInvokeRequestExt`
+use crate::symbio_core::PluginInvokeRequestExt;
 // 未装配容器时没有 PLUGIN_DIR，配置文件落盘目标指个临时目录
 use crate::plugins::session::test_dir;
 use std::collections::BTreeSet;
@@ -207,12 +207,12 @@ async fn option_definition_without_container_degrades_to_empty() {
 #[tokio::test]
 async fn session_contributes_option_fields_to_the_visitor() {
     use crate::symbio_core::{
-        DefaultOptionVisitor, OptionVisitor, SimpleRequest, OPTION_VISITOR, PATH,
+        DefaultOptionVisitor, OptionVisitor, PluginSimpleRequest, OPTION_VISITOR, PATH,
         TRAVERSE_AVAILABLE_OPTIONS,
     };
 
     let p = Arc::new(plugin());
-    let ctx = Arc::new(SimpleRequest::new(None, None)).fork();
+    let ctx = Arc::new(PluginSimpleRequest::new(None, None)).fork();
     ctx.set(PATH, TRAVERSE_AVAILABLE_OPTIONS.to_string());
     let visitor: Arc<dyn OptionVisitor> = Arc::new(DefaultOptionVisitor::new());
     ctx.set(OPTION_VISITOR, visitor.clone());

@@ -24,9 +24,12 @@
 use super::fs::UnifiedFs;
 use super::host::call_params;
 use super::protocol::{VdfsEditResponse, VdfsSearchResult};
-use crate::symbio_core::vdfs::vdfs_context;
-use crate::symbio_core::vdfs_provider::*;
-use crate::symbio_core::{CapabilityVisitor, InvokeRequest};
+use crate::symbio_core::vdfs_context;
+use crate::symbio_core::{CapabilityVisitor, PluginInvokeRequest};
+use crate::symbio_core::{
+    DynVdfsProvider, VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNode, VdfsRequest,
+    VdfsResult, VdfsWriteResponse,
+};
 use std::sync::Arc;
 
 /// VDFS 工具链路的封装 provider。
@@ -44,7 +47,7 @@ impl ToolVdfs {
     }
 
     /// 本次调用的统一文件系统（虚拟层根来自容器注册，物理层是磁盘）
-    async fn fs(&self, ctx: &Arc<dyn InvokeRequest>) -> (DynVdfsProvider, VdfsContext) {
+    async fn fs(&self, ctx: &Arc<dyn PluginInvokeRequest>) -> (DynVdfsProvider, VdfsContext) {
         let root = super::host::root_of(&self.visitor).await;
         let fs: DynVdfsProvider = Arc::new(UnifiedFs::new(root));
         (fs, vdfs_context(ctx).with_params(call_params(ctx)))
@@ -53,7 +56,7 @@ impl ToolVdfs {
     /// 列出目录的直接子节点（**条目** = 地址 + 节点）
     pub async fn list(
         &self,
-        ctx: &Arc<dyn InvokeRequest>,
+        ctx: &Arc<dyn PluginInvokeRequest>,
         path: &str,
     ) -> VdfsResult<Vec<VdfsItem>> {
         let (fs, vctx) = self.fs(ctx).await;
@@ -71,7 +74,11 @@ impl ToolVdfs {
     }
 
     /// 读取节点元数据
-    pub async fn stat(&self, ctx: &Arc<dyn InvokeRequest>, path: &str) -> VdfsResult<VdfsNode> {
+    pub async fn stat(
+        &self,
+        ctx: &Arc<dyn PluginInvokeRequest>,
+        path: &str,
+    ) -> VdfsResult<VdfsNode> {
         let (fs, vctx) = self.fs(ctx).await;
         fs.dispatch(&vctx, path, VdfsRequest::Stat)
             .await?
@@ -80,7 +87,11 @@ impl ToolVdfs {
     }
 
     /// 读取内容（`r` 位）
-    pub async fn read(&self, ctx: &Arc<dyn InvokeRequest>, path: &str) -> VdfsResult<VdfsContent> {
+    pub async fn read(
+        &self,
+        ctx: &Arc<dyn PluginInvokeRequest>,
+        path: &str,
+    ) -> VdfsResult<VdfsContent> {
         let (fs, vctx) = self.fs(ctx).await;
         fs.dispatch(&vctx, path, VdfsRequest::Read)
             .await?
@@ -91,7 +102,7 @@ impl ToolVdfs {
     /// 写入内容（`w` 位）
     pub async fn write(
         &self,
-        ctx: &Arc<dyn InvokeRequest>,
+        ctx: &Arc<dyn PluginInvokeRequest>,
         path: &str,
         content: &VdfsContent,
     ) -> VdfsResult<VdfsWriteResponse> {
@@ -111,7 +122,7 @@ impl ToolVdfs {
     /// 删除节点
     pub async fn delete(
         &self,
-        ctx: &Arc<dyn InvokeRequest>,
+        ctx: &Arc<dyn PluginInvokeRequest>,
         path: &str,
         recursive: bool,
     ) -> VdfsResult<()> {
@@ -123,7 +134,7 @@ impl ToolVdfs {
     }
 
     /// 新建目录
-    pub async fn mkdir(&self, ctx: &Arc<dyn InvokeRequest>, path: &str) -> VdfsResult<()> {
+    pub async fn mkdir(&self, ctx: &Arc<dyn PluginInvokeRequest>, path: &str) -> VdfsResult<()> {
         let (fs, vctx) = self.fs(ctx).await;
         fs.dispatch(&vctx, path, VdfsRequest::Mkdir)
             .await?
@@ -135,7 +146,7 @@ impl ToolVdfs {
     /// 逻辑只在访问层一份（[`host::edit_via`]），任何一层只出原子操作
     pub async fn edit(
         &self,
-        ctx: &Arc<dyn InvokeRequest>,
+        ctx: &Arc<dyn PluginInvokeRequest>,
         path: &str,
         old_string: &str,
         new_string: &str,
@@ -148,7 +159,7 @@ impl ToolVdfs {
     /// 递归 `list` + 模式过滤，逻辑只在访问层一份（[`host::search_via`]）
     pub async fn search(
         &self,
-        ctx: &Arc<dyn InvokeRequest>,
+        ctx: &Arc<dyn PluginInvokeRequest>,
         path: &str,
         pattern: &str,
     ) -> VdfsResult<VdfsSearchResult> {

@@ -4,14 +4,14 @@
 
 use super::*;
 
-use crate::symbio_core::SimpleRequest;
+use crate::symbio_core::PluginSimpleRequest;
 
 fn build_plugin() -> Arc<dyn Plugin> {
-    VdfsPlugin::build(Arc::new(SimpleRequest::new(None, None)))
+    VdfsPlugin::build(Arc::new(PluginSimpleRequest::new(None, None)))
 }
 
-fn ctx_with_path(path: &str) -> Arc<dyn InvokeRequest> {
-    let ctx = Arc::new(SimpleRequest::new(None, None));
+fn ctx_with_path(path: &str) -> Arc<dyn PluginInvokeRequest> {
+    let ctx = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(PATH, path.to_string());
     ctx
 }

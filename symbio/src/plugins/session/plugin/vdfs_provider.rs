@@ -286,7 +286,7 @@ impl SessionPlugin {
                 Err(vdfs::VdfsError::Forbidden(format!(
                     "会话记忆不可删除（删除即丢失本会话的长期约定）。\
                      如需清空，请向 `{}` 写入空内容。",
-                    crate::symbio_core::AGENTS_FILE
+                    crate::symbio_core::MEMORY_AGENTS_FILE
                 )))
             }
             vdfs::VdfsRequest::Watch { sink } => {
@@ -1097,7 +1097,7 @@ impl SessionPlugin {
     async fn new_session_id(&self) -> String {
         let store = self.get_store().await.ok();
         for _ in 0..8 {
-            let id = crate::symbio_core::llm::turn::short_id();
+            let id = crate::symbio_core::short_id();
             let taken = match &store {
                 Some(s) => s.session_dir(&id).is_some(),
                 None => false,
@@ -1241,11 +1241,8 @@ impl SessionPlugin {
         chat_session.replace_messages(messages).await?;
         // 变更：一条**完整消息**帧——`content` 的语义是整条替换，正是"这次编辑"
         // 要说的事（不需要先删再建：删除帧表达的是"这个节点没了"，而编辑后它还在）。
-        self.transcript_apply(
-            session_id,
-            crate::symbio_core::llm::turn::message_frame(&updated),
-        )
-        .await;
+        self.transcript_apply(session_id, crate::symbio_core::message_frame(&updated))
+            .await;
         Ok(updated)
     }
 
@@ -1282,7 +1279,7 @@ impl SessionPlugin {
         if !deleted_ids.is_empty() {
             let frames: Vec<cm::ChatMessage> = deleted_ids
                 .iter()
-                .map(|id| crate::symbio_core::llm::turn::removed_frame(id))
+                .map(|id| crate::symbio_core::removed_frame(id))
                 .collect();
             self.transcript_apply_all(session_id, frames).await;
         }
@@ -1306,7 +1303,7 @@ impl SessionPlugin {
         // 变更：清空 = 逐条删除帧（理由见 truncate：清空重读会连保留的一起重传）。
         let frames: Vec<cm::ChatMessage> = ids
             .iter()
-            .map(|id| crate::symbio_core::llm::turn::removed_frame(id))
+            .map(|id| crate::symbio_core::removed_frame(id))
             .collect();
         self.transcript_apply_all(session_id, frames).await;
         Ok(())
@@ -1410,7 +1407,7 @@ impl SessionPlugin {
     async fn memory_node_of(&self, id: &str) -> vdfs::VdfsNode {
         self.memory_store(id)
             .await
-            .node(&crate::symbio_core::NodeSpec {
+            .node(&crate::symbio_core::MemoryNodeSpec {
                 title: super::super::memory::SEGMENT_TITLE,
                 kind: PLUGIN_SESSION,
                 description: super::super::memory::MEMORY_DESCRIPTION,

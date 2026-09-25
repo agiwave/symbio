@@ -113,10 +113,13 @@ fn write_item_rejects_oversized_content_without_touching_the_file() {
 fn memory_lives_in_agent_dir() {
     let (dir, store) = workspace_store_with_agent_dir();
     let path = store.memory_path("b").unwrap();
-    assert_eq!(path, dir.path().join("global-agent/b").join(AGENTS_FILE));
+    assert_eq!(
+        path,
+        dir.path().join("global-agent/b").join(MEMORY_AGENTS_FILE)
+    );
     assert_eq!(path.file_name().unwrap(), "AGENTS.md");
     // 不是工作区根的那个 AGENTS.md
-    assert_ne!(path, dir.path().join(AGENTS_FILE));
+    assert_ne!(path, dir.path().join(MEMORY_AGENTS_FILE));
     // agent 目录不存在 → 明确报错（`memory::store` 据此构造「无作用域」门面）
     assert!(store.memory_path("nope").is_err());
 }

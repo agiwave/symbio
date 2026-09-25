@@ -9,10 +9,12 @@ use super::super::model_providers::ModelProviderConfig;
 use super::super::types::CapabilityMeta;
 use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
 use super::{sse_data, ModelProtocol, MODEL_PROTOCOL_OPENAI_CHAT};
-use crate::symbio_core::llm::sse::PartialLineExtractor;
-use crate::symbio_core::tool_name::to_wire;
 use crate::plugins::model::http::get_http_client;
-use crate::symbio_core::{FinishReason, InvokeRequest, PluginError, ProtocolEvent, SseLineParser, Usage,
+use crate::symbio_core::to_wire;
+use crate::symbio_core::SsePartialLineExtractor;
+use crate::symbio_core::{
+    ModelFinishReason, ModelProtocolEvent, ModelUsage, PluginError, PluginInvokeRequest,
+    SseLineParser,
 };
 
 pub struct OpenaiChatProtocol;
@@ -124,7 +126,7 @@ impl ModelProtocol for OpenaiChatProtocol {
 // === 行解析（core 契约） ===
 
 impl SseLineParser for OpenaiChatProtocol {
-    fn parse_line(&self, line: &str) -> Vec<ProtocolEvent> {
+    fn parse_line(&self, line: &str) -> Vec<ModelProtocolEvent> {
         let mut evs = Vec::new();
         if line.is_empty() {
             return evs;
@@ -135,7 +137,7 @@ impl SseLineParser for OpenaiChatProtocol {
             if line.trim().starts_with('{') {
                 if let Ok(json) = serde_json::from_str::<Value>(line) {
                     if let Some(err) = json.get("error") {
-                        evs.push(ProtocolEvent::Error(err.to_string()));
+                        evs.push(ModelProtocolEvent::Error(err.to_string()));
                     }
                 }
             }
@@ -148,10 +150,10 @@ impl SseLineParser for OpenaiChatProtocol {
             if let Some(choices) = json.get("choices").and_then(|c| c.as_array()) {
                 if let Some(delta) = choices.first().and_then(|c| c.get("delta")) {
                     if let Some(c) = delta.get("content").and_then(|v| v.as_str()) {
-                        evs.push(ProtocolEvent::ContentDelta(c.to_string()));
+                        evs.push(ModelProtocolEvent::ContentDelta(c.to_string()));
                     }
                     if let Some(r) = delta.get("reasoning_content").and_then(|v| v.as_str()) {
-                        evs.push(ProtocolEvent::ReasoningDelta(r.to_string()));
+                        evs.push(ModelProtocolEvent::ReasoningDelta(r.to_string()));
                     }
                     if let Some(tcs) = delta.get("tool_calls").and_then(|v| v.as_array()) {
                         for tc in tcs {
@@ -167,7 +169,7 @@ impl SseLineParser for OpenaiChatProtocol {
                                 .and_then(|f| f.get("arguments"))
                                 .and_then(|v| v.as_str())
                                 .map(|s| s.to_string());
-                            evs.push(ProtocolEvent::ToolCallDelta(idx, id, name, args));
+                            evs.push(ModelProtocolEvent::ToolCallDelta(idx, id, name, args));
                         }
                     }
                 }
@@ -181,12 +183,14 @@ impl SseLineParser for OpenaiChatProtocol {
                 .and_then(|c| c.get("finish_reason"))
                 .and_then(|v| v.as_str())
             {
-                evs.push(ProtocolEvent::Finish(FinishReason::from_provider(Some(fr))));
+                evs.push(ModelProtocolEvent::Finish(
+                    ModelFinishReason::from_provider(Some(fr)),
+                ));
             }
             // 用量：通常只在最后的 chunk 出现（需 stream_options.include_usage），
             // 拿不到也没关系——估算器照样工作，只是失去校准机会。
             if let Some(u) = json.get("usage") {
-                evs.push(ProtocolEvent::Usage(Usage {
+                evs.push(ModelProtocolEvent::Usage(ModelUsage {
                     input: u
                         .get("prompt_tokens")
                         .and_then(|v| v.as_u64())
@@ -198,13 +202,13 @@ impl SseLineParser for OpenaiChatProtocol {
                 }));
             }
             if let Some(err) = json.get("error") {
-                evs.push(ProtocolEvent::Error(err.to_string()));
+                evs.push(ModelProtocolEvent::Error(err.to_string()));
             }
         }
         evs
     }
 
-    fn open_partial_line(&self, _head: &str) -> Option<Box<dyn PartialLineExtractor>> {
+    fn open_partial_line(&self, _head: &str) -> Option<Box<dyn SsePartialLineExtractor>> {
         Some(Box::new(JsonLineExtractor::new(ChatPartial::default())))
     }
 }
@@ -243,11 +247,13 @@ impl PartialJsonSink for ChatPartial {
         }
     }
 
-    fn text(&mut self, t: &str, out: &mut Vec<ProtocolEvent>) {
+    fn text(&mut self, t: &str, out: &mut Vec<ModelProtocolEvent>) {
         match self.kind {
-            Some(ChatField::Content) => out.push(ProtocolEvent::ContentDelta(t.to_string())),
-            Some(ChatField::Reasoning) => out.push(ProtocolEvent::ReasoningDelta(t.to_string())),
-            Some(ChatField::ToolArgs(i)) => out.push(ProtocolEvent::ToolCallDelta(
+            Some(ChatField::Content) => out.push(ModelProtocolEvent::ContentDelta(t.to_string())),
+            Some(ChatField::Reasoning) => {
+                out.push(ModelProtocolEvent::ReasoningDelta(t.to_string()))
+            }
+            Some(ChatField::ToolArgs(i)) => out.push(ModelProtocolEvent::ToolCallDelta(
                 i,
                 None,
                 None,
@@ -260,7 +266,7 @@ impl PartialJsonSink for ChatPartial {
 
 // === 注册到通用对象创建机制 ===
 
-fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn ModelProtocol> {
+fn build(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn ModelProtocol> {
     Arc::new(OpenaiChatProtocol)
 }
 

@@ -12,15 +12,15 @@
 //!   的字段级失败载荷（[`VdfsValidationError`]）。
 //!
 //! 能力判定不在本模块：可写性来自 **VDFS 访问位**，可新建来自节点自述里的
-//! `new_type`（[`crate::symbio_core::vdfs_provider::VdfsNode::new_type`]——根与
+//! `new_type`（[`crate::symbio_core::vdfs::VdfsNode::new_type`]——根与
 //! 更深层节点同一条通道）；其余一律来自 [`DetailDefinition::actions`]
 //! 里声明的动作——**导入与导出都在这里**（[`VDFS_ACTION_IMPORT`] /
 //! [`VDFS_ACTION_EXPORT`]），它们与「测试连接」「删除」同级，没有特殊地位。
 //!
-//! [`VDFS_ACTION_IMPORT`]: crate::symbio_core::vdfs_provider::VDFS_ACTION_IMPORT
-//! [`VDFS_ACTION_EXPORT`]: crate::symbio_core::vdfs_provider::VDFS_ACTION_EXPORT
+//! [`VDFS_ACTION_IMPORT`]: crate::symbio_core::vdfs::VDFS_ACTION_IMPORT
+//! [`VDFS_ACTION_EXPORT`]: crate::symbio_core::vdfs::VDFS_ACTION_EXPORT
 
-use crate::symbio_core::vdfs_provider::{VdfsFieldError, VdfsValidationError};
+use crate::symbio_core::{VdfsFieldError, VdfsValidationError};
 use serde::{Deserialize, Serialize};
 
 // ==================== 详情页定义（definition-driven detail） ====================

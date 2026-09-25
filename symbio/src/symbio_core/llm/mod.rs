@@ -4,7 +4,7 @@
 //!
 //! | 模块 | 职责 |
 //! |---|---|
-//! | [`model_provider`] | [`ModelProvider`](self::ModelProvider) trait（session 唯一依赖的模型契约）+ 协议事件方言（[`ProtocolEvent`](self::ProtocolEvent) / `FinishReason` / `Usage`） |
+//! | [`model_provider`] | [`ModelProvider`](self::ModelProvider) trait（session 唯一依赖的模型契约）+ 协议事件方言（[`ModelProtocolEvent`](self::ModelProtocolEvent) / `ModelFinishReason` / `ModelUsage`） |
 //! | [`sse`] | SSE 行解析契约（[`SseLineParser`](self::SseLineParser)，model 协议适配器实现） |
 //! | [`turn`] | 单轮产物（`TurnOutput`）+ 消息帧原语（`emit_*` 家族）+ 消息构造家族（`build_*`） |
 //!
@@ -25,10 +25,10 @@ pub mod model_provider;
 pub mod sse;
 pub mod turn;
 
-pub use model_provider::{FinishReason, ModelProvider, ProtocolEvent, Usage};
-pub use sse::{PartialLineExtractor, SseLineParser};
+pub use model_provider::{ModelFinishReason, ModelProtocolEvent, ModelProvider, ModelUsage};
+pub use sse::{SseLineParser, SsePartialLineExtractor};
 pub use turn::{
     build_assistant_messages, build_tool_message, emit_delta, emit_message, emit_removed,
-    emit_state, removed_frame, short_id, state_frame, message_frame, StreamChildIds,
-    ToolCallAccumulator, ToolCallInfo, TurnOutput,
+    emit_state, message_frame, removed_frame, short_id, state_frame, TurnOutput,
+    TurnStreamChildIds, TurnToolCallAccumulator, TurnToolCallInfo,
 };

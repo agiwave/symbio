@@ -39,10 +39,10 @@
 //!
 //! 于是本插件不再自己写「超限怎么办」「截断怎么算」——那些口径全项目只有一份。
 
-use crate::symbio_core::{MemoryFile, SegmentSpec, AGENTS_FILE};
+use crate::symbio_core::{MemoryFile, MemorySegmentSpec, MEMORY_AGENTS_FILE};
 use std::path::{Path, PathBuf};
 
-/// 记忆文件挂在**本插件挂载点自身**（相对地址 = 文件名 [`AGENTS_FILE`]）。
+/// 记忆文件挂在**本插件挂载点自身**（相对地址 = 文件名 [`MEMORY_AGENTS_FILE`]）。
 ///
 /// 相对地址是常态：provider 全程只跟相对地址打交道。需要协议级绝对地址的场合
 /// （提示词里印给模型的可编辑地址），由调用方经
@@ -60,7 +60,7 @@ pub const MEMORY_DESCRIPTION: &str =
 
 /// 工作区记忆文件：`<workdir>/AGENTS.md`
 pub fn memory_path(workdir: &str) -> PathBuf {
-    Path::new(workdir).join(AGENTS_FILE)
+    Path::new(workdir).join(MEMORY_AGENTS_FILE)
 }
 
 /// 由工作目录构造记忆门面（`None` / 空串 / 纯空白 = 无工作区）。
@@ -79,8 +79,8 @@ pub fn store(workdir: Option<&str>, write_max_bytes: usize, inject_max_bytes: us
 /// `address` 由调用方算好传入（[`address`] 返回 `String`，不能借给返回值长期持有）。
 /// 排版（一行头信息 + 正文 + 空 / 截断提示）由内核
 /// [`render_segment`](crate::symbio_core::render_segment) 统一决定。
-pub fn segment_spec(address: &str) -> SegmentSpec<'_> {
-    SegmentSpec {
+pub fn segment_spec(address: &str) -> MemorySegmentSpec<'_> {
+    MemorySegmentSpec {
         title: SEGMENT_TITLE,
         address,
         // 工作区记忆没有需要区分的邻居（智能体记忆在它自己的地址下），故不加附加说明

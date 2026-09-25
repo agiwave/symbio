@@ -4,11 +4,11 @@
 //! `ask_user.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
-use crate::symbio_core::SimpleRequest;
+use crate::symbio_core::PluginSimpleRequest;
 
 /// 构造带 payload 与运行模式的请求上下文。
-fn ctx_with(args: Value, mode: &str) -> Arc<dyn InvokeRequest> {
-    let req = SimpleRequest::new(None, None);
+fn ctx_with(args: Value, mode: &str) -> Arc<dyn PluginInvokeRequest> {
+    let req = PluginSimpleRequest::new(None, None);
     req.set(crate::symbio_core::MODE, mode.to_string());
     // 用裸字面量而非 KEY_PAYLOAD：本行同时验证「桶名就是 "payload"」这一契约
     req.set_raw("payload", Arc::new(args));

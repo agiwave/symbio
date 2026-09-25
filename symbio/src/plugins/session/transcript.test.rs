@@ -596,10 +596,10 @@ fn clear_and_persisted_flush_the_trailing_run() {
 fn session_state_change_lands_on_the_session_leaf() {
     let (mut tr, seen) = transcript();
     tr.apply(text_msg("a", MessageStatus::Completed, "你好"));
-    let node = crate::symbio_core::vdfs::VdfsNode::file(
+    let node = crate::symbio_core::VdfsNode::file(
         "s1",
         "会话",
-        crate::symbio_core::vdfs::VdfsAccess::READ_WRITE,
+        crate::symbio_core::VdfsAccess::READ_WRITE,
     );
     tr.emit_session_state(Some(node));
 

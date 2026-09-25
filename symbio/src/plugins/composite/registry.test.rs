@@ -152,7 +152,7 @@ async fn mounting_seeds_the_identity_into_the_manifest() {
 struct SeedPlugin;
 
 impl SeedPlugin {
-    fn build(_ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
+    fn build(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         Arc::new(Self)
     }
 }
@@ -165,16 +165,16 @@ impl Plugin for SeedPlugin {
 
     async fn route(
         self: Arc<Self>,
-        _ctx: Arc<dyn InvokeRequest>,
-    ) -> crate::symbio_core::InvokeResponse<PluginPayload> {
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> crate::symbio_core::PluginInvokeResponse<PluginPayload> {
         Err(PluginError::NotFound("seed".to_string()))
     }
 
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        _ctx: Arc<dyn InvokeRequest>,
-    ) -> crate::symbio_core::InvokeResponse<PluginPayload> {
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> crate::symbio_core::PluginInvokeResponse<PluginPayload> {
         Ok(PluginPayload::Empty)
     }
 }
@@ -232,16 +232,16 @@ impl Plugin for NopPlugin {
 
     async fn route(
         self: Arc<Self>,
-        _ctx: Arc<dyn InvokeRequest>,
-    ) -> crate::symbio_core::InvokeResponse<crate::symbio_core::PluginPayload> {
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> crate::symbio_core::PluginInvokeResponse<crate::symbio_core::PluginPayload> {
         Err(crate::symbio_core::PluginError::NotFound("nop".to_string()))
     }
 
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        _ctx: Arc<dyn InvokeRequest>,
-    ) -> crate::symbio_core::InvokeResponse<crate::symbio_core::PluginPayload> {
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> crate::symbio_core::PluginInvokeResponse<crate::symbio_core::PluginPayload> {
         Ok(crate::symbio_core::PluginPayload::new(&Vec::<
             serde_json::Value,
         >::new()))
@@ -303,7 +303,11 @@ async fn uninstall_refuses_required_and_unknown_plugins() {
     assert!(err.contains("必需插件"), "必需插件只能停用：{err}");
     assert!(root.join("alpha").exists(), "拒绝时不得动目录");
 
-    assert!(reg.uninstall("ghost").await.unwrap_err().contains("未找到插件"));
+    assert!(reg
+        .uninstall("ghost")
+        .await
+        .unwrap_err()
+        .contains("未找到插件"));
 
     let _ = std::fs::remove_dir_all(&root);
 }

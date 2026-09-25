@@ -1,6 +1,6 @@
 use super::skill_response::SkillResponse;
 use crate::plugins::skill::types::Skill;
-use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, InvokeRequest, PluginError};
+use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::path::Path;
@@ -125,7 +125,7 @@ impl Capability for SkillExecuteTool {
         &self,
         args: Value,
         _env: &ExecEnv,
-        _ctx: Arc<dyn InvokeRequest>,
+        _ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         self.execute_skill(args)
     }

@@ -16,12 +16,12 @@
 //! MCP Server（`server.json` + 附属文件）。
 
 use super::entry;
-use crate::symbio_core::vdfs::host::{notify_change, unwatch_changes, watch_changes};
-use crate::symbio_core::vdfs_provider::{
+use crate::symbio_core::{
     has_parent_segment, VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError,
     VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse,
     VDFS_ACTION_EXPORT,
 };
+use crate::symbio_core::{notify_change, unwatch_changes, watch_changes};
 use async_trait::async_trait;
 use std::path::PathBuf;
 
@@ -373,7 +373,7 @@ impl VdfsProvider for DirVdfs {
                 // 原语**的语义：目录型条目没有「一份内容」可言，写字节就是解包。
                 // 对外的**入口形态**只有详情页的 `import` 动作
                 // （`VDFS_ACTION_IMPORT`）——它把包字节按 `VdfsUnpack` 装好再交给
-                // provider，见 `symbio_core::vdfs_provider` 的「节点动作」一节。
+                // provider，见 `symbio_core::vdfs` 的「节点动作」一节。
                 if content.binary {
                     let (id, _) = entry::split_rel(path)
                         .ok_or_else(|| VdfsError::invalid("整包只能导入到挂载根下的条目地址"))?;

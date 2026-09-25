@@ -38,15 +38,15 @@ use crate::plugins::agent::host::manifest;
 use crate::plugins::agent::host::memory;
 use crate::plugins::agent::host::store::AgentDirStore;
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField, DetailOption};
-use crate::symbio_core::vdfs_provider::{VdfsAccess, VdfsItem, VdfsProvider};
 use crate::symbio_core::{
     announce_configurable, create_object, dir_from_ctx, report_error, Capability,
-    CapabilityVisitor, ConfigFile, InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin,
-    PluginDir, PluginError, PluginMeta, PluginPayload, SimpleRequest, AGENTS_FILE, AGENT_ID,
-    CAPABILITY_VISITOR, CONFIG_VISITOR, PATH, PLUGIN_AGENT, PLUGIN_COMPOSITE, PLUGIN_DIR,
-    REQUIRED_PLUGINS, SUB_AGENT_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
-    WORKDIR,
+    CapabilityVisitor, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest,
+    AGENT_ID, CAPABILITY_VISITOR, CONFIG_VISITOR, MEMORY_AGENTS_FILE, PATH, PLUGIN_AGENT,
+    PLUGIN_COMPOSITE, PLUGIN_DIR, REQUIRED_PLUGINS, SUB_AGENT_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS,
+    TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
 };
+use crate::symbio_core::{VdfsAccess, VdfsItem, VdfsProvider};
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::Arc;
@@ -120,12 +120,12 @@ pub struct AgentPlugin {
     /// 生效配置（两道容量闸门的取值点）
     config: Arc<RwLock<AgentConfig>>,
     /// 配置文件的呈现与校验（`<根>/agent/PLUGIN.yml`）
-    config_file: ConfigFile,
+    config_file: PluginConfigFile,
 }
 
 impl AgentPlugin {
-    /// 静态工厂：从 InvokeRequest 构造 Plugin 实例（composite 配置驱动）。
-    pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
+    /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例（composite 配置驱动）。
+    pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         let router = ctx.parent();
         let dir = dir_from_ctx(&*ctx, PLUGIN_AGENT);
         let config: AgentConfig = match dir.load::<AgentConfig>() {
@@ -140,7 +140,7 @@ impl AgentPlugin {
             sub_agents: tokio::sync::RwLock::new(std::collections::HashMap::new()),
             router,
             config: Arc::new(RwLock::new(config)),
-            config_file: ConfigFile::new(dir, "智能体设置", config_definition()),
+            config_file: PluginConfigFile::new(dir, "智能体设置", config_definition()),
         }) as Arc<dyn Plugin>
     }
 
@@ -150,7 +150,7 @@ impl AgentPlugin {
             sub_agents: tokio::sync::RwLock::new(std::collections::HashMap::new()),
             router: None,
             config: Arc::new(RwLock::new(AgentConfig::default())),
-            config_file: ConfigFile::new(
+            config_file: PluginConfigFile::new(
                 PluginDir::of(PLUGIN_AGENT),
                 "智能体设置",
                 config_definition(),
@@ -167,7 +167,7 @@ impl AgentPlugin {
             sub_agents: tokio::sync::RwLock::new(std::collections::HashMap::new()),
             router: None,
             config: Arc::new(RwLock::new(AgentConfig::default())),
-            config_file: ConfigFile::new(dir, "智能体设置", config_definition()),
+            config_file: PluginConfigFile::new(dir, "智能体设置", config_definition()),
         }
     }
 
@@ -205,11 +205,11 @@ impl AgentPlugin {
     }
 
     /// 配置文档（VDFS 侧读写的入口）
-    pub(crate) fn config_file(&self) -> &ConfigFile {
+    pub(crate) fn config_file(&self) -> &PluginConfigFile {
         &self.config_file
     }
 
-    /// 配置槽位（[`ConfigFile::read`] / [`ConfigFile::apply`] 的读写对象）
+    /// 配置槽位（[`PluginConfigFile::read`] / [`PluginConfigFile::apply`] 的读写对象）
     pub(crate) fn config_slot(&self) -> &RwLock<AgentConfig> {
         &self.config
     }
@@ -224,7 +224,7 @@ impl AgentPlugin {
     pub(crate) async fn sub_agent(
         &self,
         id: &str,
-        ctx: &Arc<dyn InvokeRequest>,
+        ctx: &Arc<dyn PluginInvokeRequest>,
     ) -> Option<Arc<dyn Plugin>> {
         if let Some(tree) = self.sub_agents.read().await.get(id) {
             return Some(Arc::clone(tree));
@@ -256,7 +256,7 @@ impl AgentPlugin {
 
         // 与 `home` 造 `worker` 同形：把目录（子 Agent 的根）与必需插件清单告知
         // 容器，其余交给 composite 扫描装配——子 Agent 与系统 Agent 因此结构相同。
-        let sub_context = Arc::new(SimpleRequest::child_of(ctx, self.router.clone()));
+        let sub_context = Arc::new(PluginSimpleRequest::child_of(ctx, self.router.clone()));
         sub_context.set(PLUGIN_DIR, PluginDir::at(&dir, PLUGIN_COMPOSITE));
         sub_context.set(
             REQUIRED_PLUGINS,
@@ -299,7 +299,7 @@ impl AgentPlugin {
         &self,
         tree: &Arc<dyn Plugin>,
         id: &str,
-        ctx: &Arc<dyn InvokeRequest>,
+        ctx: &Arc<dyn PluginInvokeRequest>,
         visitor: &Arc<dyn CapabilityVisitor>,
     ) {
         let sub = ctx.fork();
@@ -327,13 +327,13 @@ impl AgentPlugin {
     async fn contribute_agent_memory(
         &self,
         id: &str,
-        ctx: &Arc<dyn InvokeRequest>,
+        ctx: &Arc<dyn PluginInvokeRequest>,
         visitor: &Arc<dyn CapabilityVisitor>,
     ) {
         let store = AgentDirStore::new(self.config_file.dir().dir());
         let memory = self.memory_store(&store, id).await;
         // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
-        let address = crate::symbio_core::vdfs::absolute_addr(ctx, &memory::rel_path(id));
+        let address = crate::symbio_core::absolute_addr(ctx, &memory::rel_path(id));
         match memory::segment(&memory, &address) {
             Ok(Some(text)) => {
                 visitor
@@ -350,12 +350,12 @@ impl AgentPlugin {
     /// 在系统层注入**系统智能体自身的** `AGENTS.md`（`{homedir}/AGENTS.md`）。
     async fn contribute_instruction(
         &self,
-        ctx: &Arc<dyn InvokeRequest>,
+        ctx: &Arc<dyn PluginInvokeRequest>,
         visitor: &Arc<dyn CapabilityVisitor>,
     ) {
         let store = self.instruction_store().await;
         // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
-        let address = crate::symbio_core::vdfs::absolute_addr(ctx, AGENTS_FILE);
+        let address = crate::symbio_core::absolute_addr(ctx, MEMORY_AGENTS_FILE);
         match instruction::segment(&store, &address) {
             Ok(Some(text)) => {
                 visitor
@@ -390,7 +390,7 @@ impl AgentPlugin {
     /// **不回填当前值**：「值 → 标签」由 `field.options` 承担，前端查表即得；当前值
     /// 来自会话 `metadata.agent_id`。因此这里既不读 `ctx[AGENT_ID]`，也不算
     /// `current_label`（见 `docs/archive/session-options-unification.md` §6）。
-    async fn contribute_options(&self, ctx: &Arc<dyn InvokeRequest>) {
+    async fn contribute_options(&self, ctx: &Arc<dyn PluginInvokeRequest>) {
         let Some(visitor) = ctx.get(crate::symbio_core::OPTION_VISITOR) else {
             return;
         };
@@ -451,17 +451,15 @@ impl Plugin for AgentPlugin {
         Self::metadata()
     }
 
-    fn get_vfs_provider(
-        self: Arc<Self>,
-    ) -> Option<Arc<dyn crate::symbio_core::vdfs_provider::VdfsProvider>> {
+    fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn crate::symbio_core::VdfsProvider>> {
         Some(self)
     }
 
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let sub_path = ctx.get(PATH).unwrap_or_default();
         match sub_path.as_str() {
             // 选项收集（与能力收集同一广播机制的第二通道）：贡献「智能体」选择项
@@ -561,7 +559,7 @@ impl Plugin for AgentPlugin {
             let mut n = self.instruction_node().await;
             n.ext = Some("md".to_string());
             v.register_configurable(
-                VdfsItem::new(n).with_path(format!("{PLUGIN_AGENT}/{AGENTS_FILE}")),
+                VdfsItem::new(n).with_path(format!("{PLUGIN_AGENT}/{MEMORY_AGENTS_FILE}")),
             )
             .await;
         }
@@ -574,12 +572,15 @@ impl Plugin for AgentPlugin {
     /// agent 目录的浏览 / 导入 / 删除 / 导出全部由 VDFS 承接（`<根>/agent/…`）：
     /// `vdfs/list` / `vdfs/write`（二进制 = 导入）/ `vdfs/delete` / 节点动作
     /// `export`。因此这里不再有任何路由——插件只对宿主暴露装配能力。
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(
+        self: Arc<Self>,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let path = ctx.get(PATH).unwrap_or_default();
         // 绝对地址 = 上下文父地址 + 相对地址（协议级指路信息，封装入口统一）
         Err(PluginError::NotFound(format!(
             "agent 无自有协议路由 `{path}`：agent 目录一律经 VDFS 访问（{}）",
-            crate::symbio_core::vdfs::absolute_addr(&ctx, &format!("{PLUGIN_AGENT}/…"))
+            crate::symbio_core::absolute_addr(&ctx, &format!("{PLUGIN_AGENT}/…"))
         )))
     }
 }

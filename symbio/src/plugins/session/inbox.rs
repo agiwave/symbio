@@ -38,7 +38,9 @@
 use super::active::InboxItem;
 use super::plugin::{inbox_item_node, inbox_item_path, SessionPlugin};
 use crate::symbio_core::schemas::{session::chat_message as cm, session::session_chat};
-use crate::symbio_core::{vdfs, InvokeRequest, InvokeRequestExt, PluginError, SESSION_ID, WORKDIR};
+use crate::symbio_core::{
+    vdfs, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, SESSION_ID, WORKDIR,
+};
 use std::sync::Arc;
 
 /// 忙等间隔：消费者发现会话在跑、或队列非空但本轮刚被拒时的轮询周期。
@@ -83,7 +85,7 @@ impl SessionPlugin {
         let id = id
             .filter(|s| !s.trim().is_empty())
             .or_else(|| (!message.id.trim().is_empty()).then(|| message.id.clone()))
-            .unwrap_or_else(crate::symbio_core::llm::turn::short_id);
+            .unwrap_or_else(crate::symbio_core::short_id);
         // 消息 id 与条目 id **是同一个值**：地址末段即身份，两处各生成一个会让
         // 「按地址取消息」在两套 id 之间对不上（见 `message_path` 的同款约定）。
         message.id = id.clone();
@@ -247,8 +249,8 @@ impl SessionPlugin {
         session_id: &str,
         item: &InboxItem,
     ) -> Result<(), PluginError> {
-        let ctx: Arc<dyn InvokeRequest> =
-            Arc::new(crate::symbio_core::SimpleRequest::new(None, None));
+        let ctx: Arc<dyn PluginInvokeRequest> =
+            Arc::new(crate::symbio_core::PluginSimpleRequest::new(None, None));
         ctx.set(SESSION_ID, session_id.to_string());
         if let Some(w) = &item.workdir {
             ctx.set(WORKDIR, w.clone());

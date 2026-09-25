@@ -8,7 +8,7 @@ pub fn initialize() {
 }
 
 pub async fn create_root_plugin() -> Arc<dyn Plugin> {
-    let context = Arc::new(crate::symbio_core::SimpleRequest::new(None, None));
+    let context = Arc::new(crate::symbio_core::PluginSimpleRequest::new(None, None));
 
     create_object::<dyn Plugin>(PLUGIN_HOME, context).expect(
         "home plugin creator not found. Make sure 'home' is registered via submit_object_creator!",

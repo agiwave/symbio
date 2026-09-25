@@ -6,7 +6,7 @@
 //! `PluginFrame::Data` 发进来，这里 `serde_json::from_value::<NodeOp>` 解回来，
 //! 再按变体分派到转写或会话状态。整套机制存在的原因是——**当时「出口」只能是通道**。
 //!
-//! 现在出口是 [`EventSink`]（进程内直连转写唯一写入点），中止是 [`AbortSignal`]，
+//! 现在出口是 [`ExecEventSink`]（进程内直连转写唯一写入点），中止是 [`ExecAbortSignal`]，
 //! 于是这里只剩**一件事**：管住一个 Turn 任务的生命周期。
 //!
 //! | 收口前 | 收口后 |
@@ -98,7 +98,7 @@ impl SessionPlugin {
     pub(super) async fn run_chat_loop_task(
         self: Arc<Self>,
         state: Arc<ActiveSessionState>,
-        chat_ctx: Arc<dyn InvokeRequest>,
+        chat_ctx: Arc<dyn PluginInvokeRequest>,
         session_id: String,
         parent: Arc<dyn Plugin>,
         provider_id: Option<String>,
@@ -201,11 +201,12 @@ impl SessionPlugin {
         // 出口：进程内直连转写唯一写入点。执行期的每一次节点变更直接落进
         // `Transcript::apply`（内存图 → seq → 一行核心日志 → 发布），不再经过
         // 「序列化成帧 → 反序列化回来」的往返。
-        let sink = EventSink::direct(Arc::new(TranscriptSink::new(self.clone(), state.clone())));
+        let sink =
+            ExecEventSink::direct(Arc::new(TranscriptSink::new(self.clone(), state.clone())));
         // 中止：本 Turn 唯一的入方向原语。登记进会话状态后，`handle_abort` 直接
         // 置位（无帧、无轮询）；守卫注销时一并置位——这正是收口前「消费循环
         // drop 掉通道 ⇒ 执行方中止」那条隐式语义的显式化。
-        let abort = AbortSignal::new();
+        let abort = ExecAbortSignal::new();
         let mut abort_guard = AbortGuard::register(state.clone(), abort.clone()).await;
 
         let orchestrator = Arc::new(super::super::chat_loop::ChatOrchestrator::new(
@@ -259,7 +260,7 @@ impl SessionPlugin {
                     "[ChatLoop] run_chat_loop 异常退出: {e} (code={})",
                     e.code()
                 );
-                // 分派依据为类型化错误码（ErrorCode::Aborted），不再对
+                // 分派依据为类型化错误码（PluginErrorCode::Aborted），不再对
                 // meta["code"] 做字符串字面量比较（session-mechanism-unification.md §4.2）。
                 if matches!(e, PluginError::Aborted) {
                     // 用户手动中止：在途 Turn 落库为 Aborted + error，前端据此渲染

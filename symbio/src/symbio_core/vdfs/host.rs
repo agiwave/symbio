@@ -2,8 +2,8 @@
 //!
 //! ⚠️ 这是 core 中**唯一**依赖宿主的部分。它只做三件事：
 //!
-//! 1. **上下文注入**：`Arc<dyn InvokeRequest>` ↔ [`VdfsContext`]
-//!    （provider 经 `ctx.require::<Arc<dyn InvokeRequest>>()` 取回宿主句柄）；
+//! 1. **上下文注入**：`Arc<dyn PluginInvokeRequest>` ↔ [`VdfsContext`]
+//!    （provider 经 `ctx.require::<Arc<dyn PluginInvokeRequest>>()` 取回宿主句柄）；
 //! 2. **错误翻译**：[`VdfsError`] ↔ [`PluginError`] 双向映射；
 //! 3. **变更广播**：挂载点写 / 删后 [`notify_change`]，`watch` 经
 //!    [`watch_changes`] 订阅后转发——前端因此无需轮询（**非**轮询实现）。
@@ -14,7 +14,7 @@
 //! ## 为什么只有这些
 //!
 //! 纯接口（[`VdfsProvider`] trait 与其域类型）在
-//! [`crate::symbio_core::vdfs_provider`]；`vdfs/*` 的**分发**（收集挂载点、
+//! [`crate::symbio_core::vdfs`]；`vdfs/*` 的**分发**（收集挂载点、
 //! 路径解析、树状遍历、事件投递）是 vdfs 插件的职责，见 `plugins/vdfs/host.rs`。
 //!
 //! 本模块之所以留在 core，是因为**实现方**（如 `plugin_manager` 插件）是插件而非
@@ -22,12 +22,10 @@
 //! 得到的 [`PluginError`] 翻回协议错误。让它去依赖 `plugins/vdfs` 会破坏
 //! 「插件之间不互相依赖」的分层。
 //!
-//! [`VdfsProvider`]: crate::symbio_core::vdfs_provider::VdfsProvider
+//! [`VdfsProvider`]: crate::symbio_core::vdfs::VdfsProvider
 
-use crate::symbio_core::vdfs_provider::{
-    VdfsChange, VdfsChangeSink, VdfsContext, VdfsError, VdfsResult, VdfsValidationError,
-};
-use crate::symbio_core::{InvokeRequest, PluginError};
+use super::{VdfsChange, VdfsChangeSink, VdfsContext, VdfsError, VdfsResult, VdfsValidationError};
+use crate::symbio_core::{PluginError, PluginInvokeRequest};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -69,13 +67,13 @@ pub fn from_plugin_error(e: PluginError) -> VdfsError {
 }
 
 /// 把 symbio 请求上下文装进不透明 [`VdfsContext`]
-pub fn vdfs_context(ctx: &Arc<dyn InvokeRequest>) -> VdfsContext {
+pub fn vdfs_context(ctx: &Arc<dyn PluginInvokeRequest>) -> VdfsContext {
     VdfsContext::new(ctx.clone())
 }
 
 /// 从 [`VdfsContext`] 取回 symbio 请求上下文
-pub fn host_ctx(ctx: &VdfsContext) -> VdfsResult<Arc<dyn InvokeRequest>> {
-    ctx.require::<Arc<dyn InvokeRequest>>().cloned()
+pub fn host_ctx(ctx: &VdfsContext) -> VdfsResult<Arc<dyn PluginInvokeRequest>> {
+    ctx.require::<Arc<dyn PluginInvokeRequest>>().cloned()
 }
 
 // ==================== 变更订阅表 ====================

@@ -43,7 +43,7 @@
 //!
 //! 两件事的成员集合不同，因此不能共用一个动词——把注册表塞进 `List`，资源树就会
 //! 多出一些点进去什么都没有的格子；把 `List` 收窄成注册表，没有 VDFS 的插件就会
-//! 从资源树里消失。动作名与回包形状见 `symbio_core::vdfs_provider` 的
+//! 从资源树里消失。动作名与回包形状见 `symbio_core::vdfs` 的
 //! `VDFS_ACTION_PLUGINS` / `VDFS_PLUGINS_FIELD`。
 //!
 //! ## 它不是根，也没有任何「根」的概念
@@ -72,11 +72,16 @@
 use super::composite::broadcast_collect;
 use super::registry::PluginRegistry;
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField, DetailOption};
-use crate::symbio_core::vdfs::{descend_addr, host_ctx};
-use crate::symbio_core::vdfs_provider::*;
+use crate::symbio_core::{descend_addr, host_ctx};
 use crate::symbio_core::{
-    ConfigurableVisitor, DefaultConfigurableVisitor, InvokeRequestExt, Plugin, PluginMeta,
+    ConfigurableVisitor, DefaultConfigurableVisitor, Plugin, PluginInvokeRequestExt, PluginMeta,
     CONFIG_VISITOR, PATH, PLUGIN_MANAGER, TRAVERSE_AVAILABLE_TOOLS,
+};
+use crate::symbio_core::{
+    VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError,
+    VdfsNewType, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse,
+    PLUGIN_PROVIDER_FIELD, VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE, VDFS_ACTION_PLUGINS,
+    VDFS_EXT_FORM, VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD,
 };
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -506,10 +511,12 @@ impl VdfsProvider for CompositeVdfs {
                     self.list_registry(action)
                 }
                 VdfsRequest::Action { action, payload } if action == VDFS_ACTION_ENABLE => {
-                    self.set_plugin_enabled(action, payload.as_ref(), true).await
+                    self.set_plugin_enabled(action, payload.as_ref(), true)
+                        .await
                 }
                 VdfsRequest::Action { action, payload } if action == VDFS_ACTION_DISABLE => {
-                    self.set_plugin_enabled(action, payload.as_ref(), false).await
+                    self.set_plugin_enabled(action, payload.as_ref(), false)
+                        .await
                 }
                 // 根上的写 = **安装**：与「新建一项资源」同形（往目录里加一个东西，
                 // 名字由 provider 生成并经 `VdfsWriteResponse::name` 交回）。

@@ -30,8 +30,8 @@
 
 use super::{fs::VDFS_ADDR_ROOT, host, protocol as p, provider::ToolVdfs, tools};
 use crate::symbio_core::{
-    InvokeRequest, InvokeRequestExt, InvokeResponse, Plugin, PluginError, PluginMeta,
-    PluginPayload, CAPABILITY_VISITOR, PATH, PLUGIN_VDFS, TRAVERSE_AVAILABLE_TOOLS,
+    Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH, PLUGIN_VDFS, TRAVERSE_AVAILABLE_TOOLS,
 };
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
@@ -39,7 +39,7 @@ use tokio::sync::RwLock;
 // 根名的静态声明：字面量只在本插件内（fs::VDFS_ADDR_ROOT），编译期随二进制
 // 生效——容器的转发点在任何实例构造之前就要用它。
 crate::symbio_core::inventory::submit! {
-    crate::symbio_core::vdfs::AddrRootDecl(VDFS_ADDR_ROOT)
+    crate::symbio_core::AddrRootDecl(VDFS_ADDR_ROOT)
 }
 
 /// VDFS 插件：把**容器注册的 VDFS 根**以一组 `vdfs/*` 操作暴露给前端与 LLM。
@@ -51,7 +51,7 @@ pub struct VdfsPlugin {
 
 impl VdfsPlugin {
     /// 静态工厂（`submit_object_creator!` 使用）
-    pub fn build(ctx: Arc<dyn InvokeRequest>) -> Arc<dyn Plugin> {
+    pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         let parent = ctx.parent();
         Arc::new(Self {
             parent: Arc::new(RwLock::new(parent)),
@@ -76,7 +76,10 @@ impl Plugin for VdfsPlugin {
         Self::metadata()
     }
 
-    async fn route(self: Arc<Self>, ctx: Arc<dyn InvokeRequest>) -> InvokeResponse<PluginPayload> {
+    async fn route(
+        self: Arc<Self>,
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         // 调用方可能给协议全名（`vdfs/list`），也可能给短名（`list`——容器已剥掉
         // `vdfs/` 前缀）。两种都归一成协议全名，使 `VDFS_OPS` 与实现共享同一定义。
         let raw = ctx.get(PATH).unwrap_or_default();
@@ -108,8 +111,8 @@ impl Plugin for VdfsPlugin {
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        ctx: Arc<dyn InvokeRequest>,
-    ) -> InvokeResponse<PluginPayload> {
+        ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse<PluginPayload> {
         let sub_path = ctx.get(PATH).unwrap_or_default();
         if sub_path != TRAVERSE_AVAILABLE_TOOLS {
             return Err(PluginError::NotFound(format!("未知遍历路径: {sub_path}")));
