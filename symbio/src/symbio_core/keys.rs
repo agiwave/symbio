@@ -9,6 +9,25 @@ pub trait SymbioKey {
     /// 该键对应的值类型
     type Value: Clone + Send + Sync + 'static;
 
+    /// 本键能否在**进程外**表达（跨进程可传输）
+    ///
+    /// - `true`（缺省）：值可序列化为字符串或 JSON，可进线上 `metadata`；
+    /// - `false`：进程内专用对象（trait object / 闭包 / 弱引用），无字符串形态。
+    ///
+    /// ## 为什么需要它
+    ///
+    /// 从前「这个键能不能跨进程」只能靠 `parse` 是否返回 `None` **倒推**，
+    /// 且那是个约定、不是可枚举的事实——要判断一次调用能否送到进程外插件，
+    /// 得逐个键去读注释。第三方插件体系的**准入判据**必须可机检，故把它提成
+    /// 类型事实：`SymbioKey::WIRE` 可被静态读取、可被守卫脚本核对。
+    ///
+    /// ## 与 `parse → None` 的关系
+    ///
+    /// 两者是**声明与结果**：`WIRE = false` ⇒ `parse` 必返 `None`（无字符串形态）。
+    /// 反向不成立——`parse → None` 不必然是 `WIRE = false`（如 `CONFIG` /
+    /// `PLUGIN_DIR` 的值可以序列化，只是不做「从字符串恢复」这件事）。
+    const WIRE: bool = true;
+
     /// 键的唯一名称（用于在 Map 中查找）
     fn name(&self) -> &'static str;
 
@@ -67,39 +86,30 @@ define_string_key!(ScopeKey, SCOPE, "scope");
 define_string_key!(ContentKey, CONTENT, "content");
 define_string_key!(DescriptionKey, DESCRIPTION, "description");
 
-// 消息载荷 Key (JSON Value)
-#[deprecated(
-    since = "3.1.0",
-    note = "请使用 ctx.payload::<T>() 或 ctx.set_payload() 代替，以保障编译期强类型安全"
-)]
-pub struct PayloadKey;
+// ==================== 载荷键 ====================
+//
+// `payload` 是**事实上的核心键**：`InvokeRequestExt::payload` / `set_payload`
+// 读写的就是它。但它**不是一个 `SymbioKey`**——它的值类型由调用方决定
+// （`payload::<T>()` 的 `T`），而 `SymbioKey` 要求一个固定的关联 `Value` 类型。
+//
+// 历史上这里有一个 `PayloadKey`（`Value` 型）+ `PAYLOAD` 常量，标着
+// `#[deprecated]`（指向 `ctx.payload::<T>()`）。那是一个**名不副实的标注**：
+// 该废弃的是「用 `PAYLOAD` 键直接存取 `Value` 这种用法」，不是 `payload`
+// 这个概念——后者恰恰是核心路径。于是它成了一个「废弃但仍被需要」的悬置
+// 常量，而真正的读写方（`plugin.rs` / `gateway`）为了规避告警，只好写**裸
+// 字符串** `"payload"`——正是 `grep-audit` S-009 想拦的形态。
+//
+// 现在收口为一个纯字符串常量：键名只有这一处定义，读写双方都引它。
 
-#[allow(deprecated)]
-impl SymbioKey for PayloadKey {
-    type Value = Value;
-    fn name(&self) -> &'static str {
-        "payload"
-    }
-    fn parse(&self, _s: &str) -> Option<Self::Value> {
-        None // Payload 通常不从字符串解析
-    }
-    fn format(&self, v: &Self::Value) -> String {
-        v.to_string()
-    }
-}
-
-#[allow(deprecated)]
-#[deprecated(
-    since = "3.1.0",
-    note = "请使用 ctx.payload::<T>() 或 ctx.set_payload() 代替，以保障编译期强类型安全"
-)]
-/// ⚠️ 仅作编译期占位；无任何运行期使用点。如需 payload 键，请走 `set_payload` / `payload()` 方法。
-pub const PAYLOAD: PayloadKey = PayloadKey;
+/// 载荷键名（`InvokeRequestExt::payload` / `set_payload` 读写的桶）
+pub const KEY_PAYLOAD: &str = "payload";
 
 // 父插件弱引用 Key (Option<Weak<dyn Plugin>>)
 pub struct ParentKey;
 impl SymbioKey for ParentKey {
     type Value = Option<std::sync::Weak<dyn crate::symbio_core::Plugin>>;
+    /// 进程内专用：`Weak<dyn Plugin>` 是进程内引用，无字符串 / JSON 形态
+    const WIRE: bool = false;
     fn name(&self) -> &'static str {
         "parent"
     }
@@ -259,6 +269,8 @@ pub const UNDISABLABLE_PLUGINS: &[&str] = &[
 pub struct CapabilityVisitorKey;
 impl SymbioKey for CapabilityVisitorKey {
     type Value = Arc<dyn crate::symbio_core::CapabilityVisitor>;
+    /// 进程内专用：trait object，无字符串 / JSON 形态
+    const WIRE: bool = false;
     fn name(&self) -> &'static str {
         "tool_visitor"
     }
@@ -276,6 +288,8 @@ pub const CAPABILITY_VISITOR: CapabilityVisitorKey = CapabilityVisitorKey;
 pub struct OptionVisitorKey;
 impl SymbioKey for OptionVisitorKey {
     type Value = Arc<dyn crate::symbio_core::OptionVisitor>;
+    /// 进程内专用：trait object，无字符串 / JSON 形态
+    const WIRE: bool = false;
     fn name(&self) -> &'static str {
         "option_visitor"
     }
@@ -294,6 +308,8 @@ pub const OPTION_VISITOR: OptionVisitorKey = OptionVisitorKey;
 pub struct ConfigurableVisitorKey;
 impl SymbioKey for ConfigurableVisitorKey {
     type Value = Arc<dyn crate::symbio_core::ConfigurableVisitor>;
+    /// 进程内专用：trait object，无字符串 / JSON 形态
+    const WIRE: bool = false;
     fn name(&self) -> &'static str {
         "configurable_visitor"
     }
@@ -326,6 +342,8 @@ pub const CONFIG_VISITOR: ConfigurableVisitorKey = ConfigurableVisitorKey;
 pub struct EventSinkKey;
 impl SymbioKey for EventSinkKey {
     type Value = crate::symbio_core::EventSink;
+    /// 进程内专用：闭包，无字符串 / JSON 形态
+    const WIRE: bool = false;
     fn name(&self) -> &'static str {
         "event_sink"
     }
@@ -346,6 +364,8 @@ pub const EVENT_SINK: EventSinkKey = EventSinkKey;
 pub struct AbortSignalKey;
 impl SymbioKey for AbortSignalKey {
     type Value = crate::symbio_core::AbortSignal;
+    /// 进程内专用：`CancellationToken`，无字符串 / JSON 形态
+    const WIRE: bool = false;
     fn name(&self) -> &'static str {
         "abort_signal"
     }

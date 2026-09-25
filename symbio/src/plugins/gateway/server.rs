@@ -23,8 +23,8 @@
 
 use super::config::{is_readonly_allowed, GatewayConfig};
 use crate::symbio_core::{
-    InvokeRequest, Plugin, PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire,
-    SimpleRequest,
+    InvokeRequest, Plugin, PluginChannel, PluginFrame, PluginMessageWire, PluginPayload,
+    PluginPayloadWire, SimpleRequest, KEY_PAYLOAD,
 };
 use base64::Engine;
 use serde_json::Value;
@@ -409,6 +409,47 @@ async fn read_request<R: AsyncRead + Unpin>(stream: &mut R) -> Result<HttpReques
 
 // ==================== 分派（与传输无关） ====================
 
+/// 进程内载荷的**交付分类**
+///
+/// `PluginPayload` 的 3 个变体按「怎么交付给对端」分成两类，分界就是本类型。
+enum PayloadDelivery {
+    /// 空载荷：无内容可交付
+    ///
+    /// 单列一个变体（而不是折叠进 `Once(Value::Null)`）是因为**两个入口对它的
+    /// 处置确实不同**：HTTP 把它写成 `null` 响应体，WS 直接关连接、不发数据帧。
+    /// 折叠会让 WS 从「静默关闭」变成「先发一个 null 帧再关」——那是行为变化，
+    /// 不是收口。收口的目标是**分类只有一份**，不是**把差异抹平**。
+    Empty,
+    /// 一次性响应：已经序列化好的载荷数据
+    Once(Value),
+    /// 长连接会话：**消费方式由调用方决定**
+    ///
+    /// HTTP 入口把它折叠为「最后一帧」（一次性语义），WS 入口做双向转发——
+    /// 这两种消费方式是**真差异**（HTTP 没有双向能力），故不强行统一；
+    /// 统一的只是**分类**：哪些载荷是长连接、哪些是一次性。
+    Stream(PluginChannel),
+}
+
+/// 把路由返回的载荷分类（`PluginPayload` 的 3 态在此穷尽）
+///
+/// 这是「进程内载荷 → 线上交付」的**唯一**分类实现。从前它写在两个传输入口里
+/// （HTTP 与 WS 各一份），于是新增 / 删除一个载荷变体要改三处（枚举 + 两个入口），
+/// 漏一处就出现「HTTP 能调、WS 不能调」这类**不对称**——而那种 bug 不会让任何
+/// 测试变红，只会在用户手里显形。
+///
+/// ⚠️ 本函数**无拒绝分支**：3 个变体全有去处。这正是删掉死变体 `Native` 之后的
+/// 收益——从前这里必须为它写一条「不支持跨传输」的 `Err`，让「载荷有几种形态」
+/// 这个基础问题没有唯一答案。
+fn classify_payload(payload: PluginPayload) -> Result<PayloadDelivery, String> {
+    match payload {
+        PluginPayload::Data(d) => Ok(PayloadDelivery::Once(
+            d.serialize().map_err(|e| e.to_string())?,
+        )),
+        PluginPayload::Empty => Ok(PayloadDelivery::Empty),
+        PluginPayload::Session(chan) => Ok(PayloadDelivery::Stream(chan)),
+    }
+}
+
 /// 把线路请求交给分形路由，返回线路响应
 ///
 /// 会话型响应在此消费到 EOF（或超时）后折叠为最后一帧数据，
@@ -430,14 +471,11 @@ async fn dispatch_once(
     let ctx = build_ctx(msg);
     let payload = router.clone().route(ctx).await.map_err(|e| e.to_string())?;
 
-    match payload {
-        PluginPayload::Data(d) => Ok(PluginPayloadWire::Data(
-            d.serialize().map_err(|e| e.to_string())?,
-        )),
-        PluginPayload::Empty => Ok(PluginPayloadWire::Data(Value::Null)),
-        PluginPayload::Native(_) => Err("该路径返回进程内原生对象，不支持跨传输调用".to_string()),
-        PluginPayload::Session(mut chan) => {
-            // 消费到 EOF，保留最后一帧；永不 EOF 的订阅由超时兜底。
+    match classify_payload(payload)? {
+        PayloadDelivery::Empty => Ok(PluginPayloadWire::Data(Value::Null)),
+        PayloadDelivery::Once(value) => Ok(PluginPayloadWire::Data(value)),
+        PayloadDelivery::Stream(mut chan) => {
+            // 一次性语义：消费到 EOF，保留最后一帧；永不 EOF 的订阅由超时兜底。
             //
             // 保留 `Arc` 而不是每帧 `(*v).clone()`：后者是整棵 JSON 树的深拷贝，
             // 在一个「只关心最后一帧」的循环里付 N 次深拷贝毫无意义。
@@ -464,7 +502,7 @@ async fn dispatch_once(
 fn build_ctx(msg: &PluginMessageWire) -> Arc<dyn InvokeRequest> {
     let mut extensions: HashMap<String, Arc<dyn Any + Send + Sync>> = HashMap::new();
     extensions.insert(
-        "payload".to_string(),
+        KEY_PAYLOAD.to_string(),
         Arc::new(msg.payload.clone()) as Arc<dyn Any + Send + Sync>,
     );
     if let Some(obj) = msg.metadata.as_object() {
@@ -545,8 +583,19 @@ async fn handle_ws(stream: TcpStream, router: Arc<dyn Plugin>, readonly: bool) {
     }
 
     let ctx = build_ctx(&msg);
-    match router.route(ctx).await {
-        Ok(PluginPayload::Session(chan)) => {
+    // 路由错误与载荷序列化错误合流为同一条错误帧路径——对 WS 而言两者无差别。
+    //
+    // 顺带修掉一处**既有的不一致**：从前本入口对 `Data` 的序列化失败用
+    // `unwrap_or(Value::Null)` **静默降级**，而 HTTP 入口（`dispatch_once`）是
+    // `?` **报错**。同一个载荷、两种传输，行为不同——这正是「分类写了两份」的
+    // 代价。收口后统一为报错（错误不该静默）。
+    let delivery = router
+        .route(ctx)
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(classify_payload);
+    match delivery {
+        Ok(PayloadDelivery::Stream(chan)) => {
             let (tx, mut rx) = (chan.tx, chan.rx);
             // 单任务 select：后端帧 → WS；WS 帧 → 后端（含 ping/pong、close）
             loop {
@@ -579,23 +628,14 @@ async fn handle_ws(stream: TcpStream, router: Arc<dyn Plugin>, readonly: bool) {
             }
             ws_close(&mut write_half).await;
         }
-        Ok(PluginPayload::Data(d)) => {
-            let value = d.serialize().unwrap_or(Value::Null);
+        Ok(PayloadDelivery::Once(value)) => {
             let frame = PluginFrame::data(value);
             let text = serde_json::to_string(&frame).unwrap_or_default();
             // 响应帧发不出去 = 对端已消失；关连接是唯一的后续动作，没有别的可做。
             let _ = ws_send_text(&mut write_half, &text).await; // grep-audit-allow S-002-bonus: 对端已消失，关连接即唯一后续
             ws_close(&mut write_half).await;
         }
-        Ok(PluginPayload::Empty) => {
-            ws_close(&mut write_half).await;
-        }
-        Ok(PluginPayload::Native(_)) => {
-            let _ = ws_send_text(
-                &mut write_half,
-                "{\"Error\":[\"该路径返回进程内原生对象，不支持跨传输调用\"]}",
-            )
-            .await;
+        Ok(PayloadDelivery::Empty) => {
             ws_close(&mut write_half).await;
         }
         Err(e) => {

@@ -449,6 +449,76 @@ pub struct ResumeRequest {
     pub answer: Option<Value>,
 }
 
+// ==================== 转写地址与节点投影 ====================
+//
+// 下面两项从 `plugins/session` 上移到 core：它们描述的是**跨插件的契约**，
+// 不是会话插件的内部实现。上移之前，`plugins/agent` 为了构造子会话转播桥，
+// 不得不 `use crate::plugins::session::plugin::{…}` —— 那是全仓**唯一**一处
+// 真跨插件引用，违反 `plugins/mod.rs` 声明的「插件独立原则」。
+//
+// 判据：一个符号该不该在 core，看**消费方是谁**——只要有一个消费方不是它所在
+// 的那个插件，它就不是那个插件的私事（与 ADR-023「准入判据 = 依赖方数量」同款）。
+
+/// 会话内部：转写列表的**路径段**（ASCII，进地址）。
+///
+/// 转写是**列表**：`<根>/session/<id>/message` 的每一项是一条消息，顺序由
+/// `seq`（唯一权威顺序锚点）决定。这个地址只服务**读面**（一次 `read` 拿整份
+/// 历史）与**写面**（`vdfs/action` 的截断 / 清空）。
+///
+/// **实时面不在这个目录上**：一条消息的流式 = 它**自己那个地址**
+/// （`<id>/message/<mid>`）上的 `delta` 增量，目录只承载列表。把实时面挂在目录上
+/// 会让 `path` 的含义随帧类型漂移，且无法推广到第二类集合——理由见
+/// `docs/DECISIONS.md` 的 ADR-025 追记。
+pub const SEG_MESSAGES: &str = "message";
+
+/// [`ChatMessage`] 的**逆投影**：VDFS 节点 + 正文 ⇒ 一条消息。
+///
+/// ## 为什么需要它
+///
+/// VDFS 变更**只在热路径上带载荷**：消息帧的 `data` 就是那条 `ChatMessage`
+/// （`delta` / `content` / `status`），而资源信号是**无载荷**的。因此「拿到一条
+/// 无载荷变更、要还原成消息」的消费端（如 agent 转播桥）只能 `stat` + `read`。
+///
+/// ## 为什么在 core
+///
+/// 它必须与「拼」（`plugins/session/plugin/nodes.rs::message_node`）**成对演进**：
+/// `attributes` 增字段时不可能只改一边。而消费方（agent 的转播桥）不是 session
+/// 插件——契约住 core，两侧都依赖它，就不会有一侧从对方内部「借」实现。
+///
+/// `None` = 节点状态词不在 [`MessageStatus`] 的词表里（正常不该发生；
+/// 发生即两侧已分叉，宁可丢这一条也不要造出一个状态错误的消息）。
+pub fn message_of_node(
+    node: &crate::symbio_core::vdfs::VdfsNode,
+    text: String,
+) -> Option<ChatMessage> {
+    /// attributes 里的值都是 `json!(..)` 塞进去的，原样反序列化即可回读类型。
+    fn attr<T: serde::de::DeserializeOwned>(
+        m: &serde_json::Map<String, Value>,
+        k: &str,
+    ) -> Option<T> {
+        serde_json::from_value(m.get(k).cloned()?).ok()
+    }
+    Some(ChatMessage {
+        id: node.name.clone(),
+        role: attr(&node.attributes, "role"),
+        msg_type: attr(&node.attributes, "type"),
+        name: attr(&node.attributes, "tool_name"),
+        parent_id: attr(&node.attributes, "parent_id"),
+        tool_call_id: attr(&node.attributes, "tool_call_id"),
+        seq: attr(&node.attributes, "seq"),
+        error: attr(&node.attributes, "error"),
+        // `message_node` 把「没有 meta」写成 `null`；这里还原成"没有"
+        meta: node
+            .attributes
+            .get("meta")
+            .cloned()
+            .filter(|v| !v.is_null()),
+        status: Some(MessageStatus::of(&node.status)?),
+        content: Some(MessageContent::Text(text)),
+        ..Default::default()
+    })
+}
+
 #[cfg(test)]
 #[path = "chat_message.test.rs"]
 mod tests;

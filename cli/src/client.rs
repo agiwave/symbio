@@ -4,7 +4,7 @@
 //!
 //! CLI 与 Tauri 前端的差别只在「传输层」：Tauri 走 `route_v2` IPC，本 CLI 直接
 //! 拿到 `Arc<dyn Plugin>` 根节点在**进程内**调用 `root.route(ctx)`。二者用的是
-//! 同一套上下文键（PATH / PAYLOAD / SESSION_ID / WORKDIR / …），因此不需要任何
+//! 同一套上下文键（PATH / payload / SESSION_ID / WORKDIR / …），因此不需要任何
 //! 协议改动 —— 换传输 = 换「请求 → SimpleRequest」这一层适配。
 //!
 //! ## 下行通道：事件总线的 `vdfs` 频道

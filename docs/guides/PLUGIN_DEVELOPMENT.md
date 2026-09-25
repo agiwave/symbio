@@ -148,12 +148,13 @@ async fn route(
 
 **上下文键**：
 - `PATH` - 目标路径
-- `PAYLOAD` - 请求数据
+- `payload` - 请求数据（桶名见 `symbio_core::KEY_PAYLOAD`）
 - `WORKDIR` - 工作区路径
 - `SESSION_ID` - 会话 ID
 
 **返回**：
 - `Ok(PluginPayload::Data(...))` - 一次性数据
+- `Ok(PluginPayload::Empty)` - 成功但无返回值
 - `Ok(PluginPayload::Session(channel))` - 流式会话（**跨进程传输**）
 - `Err(PluginError)` - 错误
 

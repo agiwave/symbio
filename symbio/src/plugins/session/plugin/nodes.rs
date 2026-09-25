@@ -287,17 +287,10 @@ fn cursor_id(before: &str) -> Option<&str> {
 // 场景实现复用 `workdir` 与子会话清单——VDFS 是这些能力的**唯一入口**，不再有
 // 并行的「容器页」路由。
 
-/// 会话内部：转写列表的**路径段**（ASCII，进地址）。
-///
-/// 转写是**列表**：`<根>/session/<id>/message` 的每一项是一条消息，顺序由
-/// `seq`（唯一权威顺序锚点）决定。这个地址只服务**读面**（一次 `read` 拿整份
-/// 历史）与**写面**（`vdfs/action` 的截断 / 清空）。
-///
-/// **实时面不在这个目录上**：一条消息的流式 = 它**自己那个地址**
-/// （`<id>/message/<mid>`）上的 `delta` 增量，目录只承载列表。把实时面挂在目录上
-/// 会让 `path` 的含义随帧类型漂移，且无法推广到第二类集合——理由见
-/// `docs/DECISIONS.md` 的 ADR-025 追记。
-pub(crate) const SEG_MESSAGES: &str = "message";
+// 转写路径段 [`SEG_MESSAGES`] 与节点逆投影 [`message_of_node`] 已上移到
+// `symbio_core::schemas::session::chat_message`——它们描述的是**跨插件契约**
+// （agent 的子会话转播桥也要用），不是本插件的私事。本模块继续按原名使用。
+use crate::symbio_core::schemas::session::chat_message::SEG_MESSAGES;
 
 /// 转写列表的**展示名**（`title`）。**只影响 UI**，不参与寻址。
 pub(crate) const TITLE_MESSAGES: &str = "消息";
@@ -629,47 +622,6 @@ pub(crate) fn message_node(m: &cm::ChatMessage) -> vdfs::VdfsNode {
         .attributes
         .insert("meta".to_string(), m.meta.clone().unwrap_or(Value::Null));
     n
-}
-
-/// [`message_node`] 的逆：VDFS 节点 + 正文 ⇒ 一条消息。
-///
-/// ## 为什么需要它
-///
-/// VDFS 变更**只在热路径上带载荷**：消息帧的 `data` 就是那条 `ChatMessage`
-/// （`delta` / `content` / `status`），而资源信号是**无载荷**的。因此「拿到一条
-/// 无载荷变更、要还原成消息」的消费端（如 agent 转播桥）只能 `stat` + `read`。
-/// 把「解」写在「拼」旁边，是为了让 `attributes` 增字段时不可能只改一边——
-/// 与 [`message_path`] / [`parse_session_path`] 同款纪律。
-///
-/// `None` = 节点状态词不在 [`cm::MessageStatus`] 的词表里（正常不该发生；
-/// 发生即两侧已分叉，宁可丢这一条也不要造出一个状态错误的消息）。
-pub(crate) fn message_of_node(node: &vdfs::VdfsNode, text: String) -> Option<cm::ChatMessage> {
-    /// attributes 里的值都是 `json!(..)` 塞进去的，原样反序列化即可回读类型。
-    fn attr<T: serde::de::DeserializeOwned>(
-        m: &serde_json::Map<String, Value>,
-        k: &str,
-    ) -> Option<T> {
-        serde_json::from_value(m.get(k).cloned()?).ok()
-    }
-    Some(cm::ChatMessage {
-        id: node.name.clone(),
-        role: attr(&node.attributes, "role"),
-        msg_type: attr(&node.attributes, "type"),
-        name: attr(&node.attributes, "tool_name"),
-        parent_id: attr(&node.attributes, "parent_id"),
-        tool_call_id: attr(&node.attributes, "tool_call_id"),
-        seq: attr(&node.attributes, "seq"),
-        error: attr(&node.attributes, "error"),
-        // `message_node` 把「没有 meta」写成 `null`；这里还原成"没有"
-        meta: node
-            .attributes
-            .get("meta")
-            .cloned()
-            .filter(|v| !v.is_null()),
-        status: Some(cm::MessageStatus::of(&node.status)?),
-        content: Some(cm::MessageContent::Text(text)),
-        ..Default::default()
-    })
 }
 
 /// 消息正文——**流式追加的正是它**。

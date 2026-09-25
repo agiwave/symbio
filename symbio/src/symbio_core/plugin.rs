@@ -161,14 +161,14 @@ pub trait InvokeRequestExt: InvokeRequest {
         self.get(crate::symbio_core::CONFIG)
     }
 
-    /// 直接将上下文中的 PAYLOAD 解析为指定的强类型 T（进程内零拷贝）
+    /// 直接将上下文中的载荷解析为指定的强类型 T（进程内零拷贝）
     ///
-    /// 优先尝试原生类型转换，失败时自动回退到 JSON 反序列化
-    #[allow(deprecated)]
+    /// 优先尝试原生类型转换，失败时自动回退到 JSON 反序列化。
+    /// 读写的桶名见 [`crate::symbio_core::KEY_PAYLOAD`]。
     fn payload<T: serde::de::DeserializeOwned + Clone + Send + Sync + 'static>(
         &self,
     ) -> Result<T, crate::symbio_core::PluginError> {
-        let key = "payload";
+        let key = crate::symbio_core::KEY_PAYLOAD;
         let any = self.get_raw(key).ok_or_else(|| {
             crate::symbio_core::PluginError::ValidationError(
                 "Missing payload in context".to_string(),
@@ -205,7 +205,7 @@ pub trait InvokeRequestExt: InvokeRequest {
         &self,
         value: T,
     ) -> Result<(), crate::symbio_core::PluginError> {
-        let key = "payload";
+        let key = crate::symbio_core::KEY_PAYLOAD;
         self.set_raw(key, Arc::new(value));
         Ok(())
     }

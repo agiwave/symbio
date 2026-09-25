@@ -17,7 +17,7 @@ Symbio 的设计核心是**分形插件架构 (Fractal Plugin Architecture)**。
 
 ### 2. 对称通信 (Symmetrical Communication)
 
-通过统一的 `route()` 入口，抹平同步调用、异步流式输出和双向会话的差异；用一个枚举覆盖 4 种载荷：`Empty` / `Data(SerializeData)` / `Native(Arc<dyn Any>)` / `Session(PluginChannel)`。
+通过统一的 `route()` 入口，抹平同步调用、异步流式输出和双向会话的差异；用一个枚举覆盖 3 种载荷：`Empty` / `Data(SerializeData)` / `Session(PluginChannel)`。
 
 ### 3. 能力路由 (Capability Routing)
 

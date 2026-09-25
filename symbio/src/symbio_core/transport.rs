@@ -2,7 +2,7 @@
 //! 插件双向分形路由协议
 //!
 //! 定义了统一的消息载荷模型 (PluginPayload) 和对称的消息容器 (PluginMessage)。
-//! 支持 JSON 数据、原生接口 (Native Interface) 和长连接会话。
+//! 支持 JSON 数据与长连接会话。
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -138,6 +138,23 @@ impl Clone for SerializeData {
 }
 
 /// 统一有效载荷
+///
+/// **3 态穷尽枚举**，按「怎么交付给对端」分成两类——分类点唯一
+/// （`plugins::gateway::server::classify_payload`）：
+/// - **一次性**：`Data` / `Empty` —— 可直接转成线上载荷；
+/// - **长连接**：`Session` —— 返回通道，后续用帧通信。
+///
+/// ## 为什么没有「原生对象」变体
+///
+/// 历史上这里有 `Native(Arc<dyn Any + Send + Sync>)`，自述「不可序列化的原生
+/// 接口，仅限进程内透传」。它**从未有过构造点**：唯二的匹配点都在 `gateway`，
+/// 且都是「拒绝跨传输」——因为 `Arc<dyn Any>` 恰恰是协议层表达不了的东西，
+/// 于是那两处只能写 `Err`。
+///
+/// 进程内对象的透传走的是**上下文扩展桶**（`InvokeRequest::set_raw`，见
+/// `SimpleRequest::extensions` 的注释），与载荷枚举无关。两者职责不同：
+/// 载荷枚举描述「这次调用**返回**什么」，扩展桶描述「这次调用**带着**什么」。
+/// `Native` 是后者误入前者的产物，故删除——协议层不再假装存在这条路径。
 #[derive(Default)]
 pub enum PluginPayload {
     /// 空载荷
@@ -145,8 +162,6 @@ pub enum PluginPayload {
     Empty,
     /// 可序列化的原生数据（延迟序列化，进程内零拷贝）
     Data(SerializeData),
-    /// 不可序列化的原生接口，仅限进程内透传
-    Native(Arc<dyn Any + Send + Sync>),
     /// 异步通道 (用于 Session 模式)
     Session(PluginChannel),
 }
@@ -171,7 +186,6 @@ impl PluginPayload {
                     .map_err(|e| format!("Failed to deserialize data: {}", e))
             }
             Self::Empty => Err("Cannot deserialize Empty payload".to_string()),
-            Self::Native(_) => Err("Cannot deserialize Native payload".to_string()),
             Self::Session(_) => Err("Cannot deserialize Session payload".to_string()),
         }
     }
@@ -181,7 +195,6 @@ impl PluginPayload {
         match self {
             Self::Data(obj) => obj.serialize(),
             Self::Empty => Ok(Value::Null),
-            Self::Native(_) => Err("Cannot serialize Native payload".to_string()),
             Self::Session(_) => Err("Cannot serialize Session payload".to_string()),
         }
     }
@@ -192,7 +205,6 @@ impl fmt::Debug for PluginPayload {
         match self {
             Self::Empty => write!(f, "Empty"),
             Self::Data(_) => write!(f, "Data(SerializeData)"),
-            Self::Native(_) => write!(f, "Interface(dyn Any)"),
             Self::Session(_) => write!(f, "Session(PluginChannel)"),
         }
     }

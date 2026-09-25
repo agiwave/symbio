@@ -21,7 +21,7 @@ sequenceDiagram
     RC->>LIB: route(request)
     LIB->>HOME: plugins.route(request)
     HOME->>P: 按路径前缀分发
-    P-->>HOME: PluginPayload（4 态）
+    P-->>HOME: PluginPayload（3 态）
     HOME-->>LIB: 响应/流式帧
     LIB-->>CMD: Result<PluginPayloadWire>
     CMD-->>FE: 返回值 / event 流式帧

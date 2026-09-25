@@ -642,10 +642,10 @@ mod vdfs_provider;
 // 未被本文件引用的项由编译器 `unused_imports` 兜底。
 pub(crate) use self::nodes::{
     inbox_dir_node, inbox_item_node, inbox_item_path, internal_dirs, message_node, message_of,
-    message_of_node, message_path, message_text, messages_dir_node, ordered, overlay_live,
-    parse_inbox_message, parse_session_path, session_content, session_id_from_new_path,
-    session_node, transcript_window, window_params, SessionRuntime, VdfsSessionPath,
-    OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED, SEG_MESSAGES,
+    message_path, message_text, messages_dir_node, ordered, overlay_live, parse_inbox_message,
+    parse_session_path, session_content, session_id_from_new_path, session_node, transcript_window,
+    window_params, SessionRuntime, VdfsSessionPath, OUTCOME_ABORTED, OUTCOME_COMPLETED,
+    OUTCOME_FAILED,
 };
 
 // 收件箱条目类型：`nodes` / `vdfs_provider` / `inbox` 经 `use super::*;` 取用

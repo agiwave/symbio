@@ -39,8 +39,8 @@
 //! 工具），随后同 4-5。父子关系始终由子会话存储元数据承载，无进程内状态。
 
 use super::store::AgentDirStore;
-use crate::plugins::session::plugin::{message_of_node, SEG_MESSAGES};
 use crate::symbio_core::event_bus::{register_subscriber, unregister_subscriber};
+use crate::symbio_core::schemas::session::chat_message::{message_of_node, SEG_MESSAGES};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType, ResumeAction,
     ResumeRequest,

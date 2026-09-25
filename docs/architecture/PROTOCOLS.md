@@ -19,7 +19,7 @@
 
 ## 载荷协议 (PluginPayload)
 
-`route()` 和 `traverse()` 的返回类型，是 **4 态穷尽枚举**（定义在 `symbio_core`，
+`route()` 和 `traverse()` 的返回类型，是 **3 态穷尽枚举**（定义在 `symbio_core`，
 变体名即下表左列）：
 
 ### 载荷类型
@@ -28,11 +28,21 @@
 |------|------|-----------|
 | `Empty` | 操作成功但无返回值 | `null` |
 | `Data` | 一次性返回的数据 | 跨进程 → JSON；进程内 → 零拷贝 |
-| `Native` | 进程内原生接口 | 不序列化，直接 downcast |
 | `Session` | 长连接流式会话 | 返回 channel，后续用帧通信 |
 
 > **构造与访问的签名以代码为准**：`PluginPayload::new` 自动推断载荷类型、
 > `payload.get::<T>()` 进程内零拷贝 downcast、`payload.serialize()` 强制 JSON。
+>
+> **为什么没有「原生对象」变体**：历史上有一个 `Native(Arc<dyn Any>)`（自述
+> 「进程内原生接口」），但它**从未有过构造点**——`Arc<dyn Any>` 恰恰是协议层
+> 表达不了的东西，唯二的匹配点只能写「拒绝跨传输」。进程内对象的透传走 `ctx`
+> 的扩展桶（`InvokeRequest::set_raw`），与载荷枚举无关：载荷描述「这次调用
+> **返回**什么」，扩展桶描述「这次调用**带着**什么」。
+>
+> **交付分类只有一处**：`gateway::server::classify_payload` 把 3 态分成
+> 「一次性」（`Data` / `Empty`）与「长连接」（`Session`），两个传输入口
+> （HTTP / WS）共用它，各自只保留**真差异**——HTTP 把 `Session` 折叠为最后一帧、
+> WS 做双向转发；`Empty` 在 HTTP 写 `null`、在 WS 直接关连接。
 
 ---
 
@@ -73,7 +83,7 @@ let (my_channel, peer_channel) = PluginChannel::pair(64);
 | 键 | 类型 | 用途 |
 |----|------|------|
 | `PATH` | String | 目标路径 (如 `session/chat/send`；资源类走 `vdfs/*` + `<根>/…` 地址) |
-| `PAYLOAD` | Value | 交互载荷数据 |
+| `payload` | 任意（调用方定） | 交互载荷数据（桶名见 `symbio_core::KEY_PAYLOAD`） |
 | `WORKDIR` | String | 当前工作区根路径 |
 | `SESSION_ID` | String | 会话唯一标识 |
 | `TRACE_ID` | String | 调用链追踪 ID |
@@ -84,6 +94,12 @@ let (my_channel, peer_channel) = PluginChannel::pair(64);
 | `NAME` | String | 通用名称字段 |
 | `SCOPE` | String | 作用域 |
 | `DESCRIPTION` | String | 描述 |
+
+> **哪些键能跨进程**：`SymbioKey::WIRE`（缺省 `true`）声明「本键能否在进程外表达」。
+> 标 `false` 的是 6 个**进程内专用**键——`parent`（`Weak<dyn Plugin>`）、
+> `tool_visitor` / `option_visitor` / `configurable_visitor`（trait object）、
+> `event_sink`（闭包）、`abort_signal`（`CancellationToken`）——它们的值无字符串 /
+> JSON 形态，`parse` 恒返 `None`。这是「一次调用能否送到进程外插件」的准入判据。
 
 ---
 
@@ -255,7 +271,7 @@ SingleFileVdfs, MemoryVdfs}`。套一层 `dyn` 工厂只会把一次构造换成
 1. 把目录放到 `symbio/src/plugins/` 并实现 `Plugin`
 2. 调用 `submit_object_creator!` 注册工厂
 3. 若要随系统启动，把插件名加进 `home::SYSTEM_PLUGINS`
-3. 在配置里挂载
+4. 在配置里挂载
 
 ---
 
