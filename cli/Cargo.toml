@@ -20,6 +20,3 @@ tokio = { version = "1.53.1", features = ["full"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 
-# 独立工作区：cli 与 tauri 并列，不隶属于 ../symbio 的 workspace。
-# 依此 cargo 不会向上查找父级 workspace，也就无需改动 ../symbio/Cargo.toml。
-[workspace]

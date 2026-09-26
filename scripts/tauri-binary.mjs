@@ -92,17 +92,14 @@ const LARGE_INPUT_BYTES = 1024 * 1024
 const STAMP_NAME = '.symbio-tauri.build-stamp'
 
 /**
- * 两个候选位置。
- *
- * 本仓当前 `tauri/src-tauri/.cargo/config.toml` **没有**重定向 `build.target-dir`
- * （CLI 侧那份有，见 `cli-binary.mjs` 的说明），产物就落在壳自己的 `target/` 下。
- * 但这里仍然两个 profile 都探：dev 走 debug、打包走 release，而「哪一份是你手上
- * 那个」不该由调用方猜。
+ * 壳二进制的落点：根 workspace 统一后，产物落在仓库根 `target/<profile>/`
+ * （不再在 `tauri/src-tauri/target/`）。两个 profile 都探：dev 走 debug、打包走
+ * release，而「哪一份是你手上那个」不该由调用方猜。
  *
  * ⚠️ debug 在前：dev 是日常路径，而「候选都还没构建出来」时默认要建的就是它。
  */
 export function tauriBinaryForProfile(repoRoot, profile) {
-  return path.join(repoRoot, 'tauri', 'src-tauri', 'target', profile, EXE)
+  return path.join(repoRoot, 'target', profile, EXE)
 }
 
 export function tauriBinaryCandidates(repoRoot) {

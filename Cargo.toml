@@ -1,0 +1,33 @@
+# 根 workspace：cli / symbio / tauri 三者共用仓库根的 target/，
+# symbio 只编译一次（此前三个独立 workspace 各编译一遍，约 70G 重复产物）。
+#
+# 工具链统一锁在根 rust-toolchain.toml（1.93.1），含 tauri——不再走 stable。
+# 单个 target 目录要求所有 crate 用同一个 rustc，否则会触发 E0514
+# （found crate compiled by incompatible version of rustc）/ 全量重编。
+[workspace]
+resolver = "2"
+members = [
+    "cli",
+    "symbio",
+    "tauri/src-tauri",
+]
+
+# —— 以下 profile 原散落在成员 crate，workspace 下只有根 manifest 的 profile 生效，
+#    故集中到这里，避免被 cargo 静默忽略（见下方各成员删去的同名块）。 ——
+
+# 测试构建提速（原 symbio）：测试二进制约 89MB（含 ort/ONNX），完整调试信息使
+# MSVC 链接长达 20+ 分钟。line-tables-only 保留行号表、去掉变量级调试信息，
+# 链接时间缩短一个量级。只影响 cargo test / cargo bench。
+[profile.test]
+debug = "line-tables-only"
+
+# 壳的发布/开发档位（原 tauri/src-tauri）。
+[profile.dev]
+incremental = false
+opt-level = 0
+
+[profile.release]
+opt-level = "s"
+
+[profile.release.package."*"]
+codegen-units = 1

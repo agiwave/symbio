@@ -215,7 +215,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            cli/target
+            target
           key: ${{ runner.os }}-cargo-e2e-${{ hashFiles('**/Cargo.lock') }}
 
       - name: E2E gate

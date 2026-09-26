@@ -59,19 +59,18 @@ const LARGE_INPUT_BYTES = 1024 * 1024
 const STAMP_NAME = '.symbio-cli.build-stamp'
 
 /**
- * 两个候选位置。
+ * 三个候选位置（按优先级：根 workspace 的 target 在前）。
  *
- * ⚠️ 产物落在哪个 target 目录**取决于本机 `cli/.cargo/config.toml`**——它被
- * `cli/.gitignore` 忽略（内容是机器相关的绝对路径），作用是把 `build.target-dir`
- * 指到 `../symbio/target` 以共享 symbio 已预热的依赖缓存（离线环境下没有第二次
- * 机会重新编译全部 C 依赖）。**因此不能写死任一位置**：有该配置时产物在
- * `symbio/target/`，没有时在 `cli/target/`——两个候选都探。
+ * 根 workspace 统一后，cli 的 release 二进制默认落在仓库根 `target/release/`
+ * （所有成员共用一个 target/）。旧位置的 `symbio/target/`、`cli/target/` 只在
+ * 过渡期（尚未清理的旧产物）可能存在，一并探测以避免「找不到即判定缺失」。
  *
  * 写死单一位置会让「二进制找不到 ⇒ 每次都判定缺失」与「e2e 拿不到二进制 ⇒
  * 全用例失败（且失败形态是 -1 + 空 stderr，与崩溃无法区分）」同时发生。
  */
 export function cliBinaryCandidates(repoRoot) {
   return [
+    path.join(repoRoot, 'target', 'release', EXE),
     path.join(repoRoot, 'symbio', 'target', 'release', EXE),
     path.join(repoRoot, 'cli', 'target', 'release', EXE),
   ]
@@ -128,12 +127,12 @@ export function cliBuildInputs(repoRoot) {
     files.push(...walkFiles(path.join(repoRoot, sub)))
   }
   for (const rel of [
+    'Cargo.toml',
+    'Cargo.lock',
     'cli/Cargo.toml',
-    'cli/Cargo.lock',
     'cli/build.rs',
     'cli/.cargo/config.toml',
     'symbio/Cargo.toml',
-    'symbio/Cargo.lock',
     'symbio/build.rs',
     'symbio/.cargo/config.toml',
   ]) {

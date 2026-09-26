@@ -1,0 +1,12 @@
+[toolchain]
+# 全仓统一工具链（根 workspace）。
+# 此前 symbio/ 与 cli/ 各有一份相同的 1.93.1，tauri 则走 CI 的 stable；
+# 统一到 1.93.1 后三者共用一个 target/，symbio 不再因编译器版本不同而
+# 被重复编译（避免 E0514 / 全量重编）。
+#
+# ⚠️ channel ≠ MSRV：本 channel 是「本机与 CI 固定使用」的版本；MSRV（最低
+#    支持版本）另由各 crate Cargo.toml 的 rust-version 与 clippy.toml 的 msrv
+#    声明（均为 1.91），由 ci.yml 的 msrv-check job 装 1.91.0 实编译验证。
+channel = "1.93.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
