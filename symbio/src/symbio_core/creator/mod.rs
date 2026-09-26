@@ -14,17 +14,10 @@
 //!
 //! ## 为什么它是**独立域**，而不是 `plugin` 的一部分
 //!
-//! 注册表按 `(id, TypeId)` 索引，调用方用 `creator_create_object::<T>()` 自选 `T`——机制本身
-//! 对「T 是什么」一无所知。当前注册点服务**三个互不相关的类型族**：
-//!
-//! | 类型族 | 注册点 |
-//! |---|---|
-//! | `dyn Plugin` | `plugins/*/plugin.rs` 的 `build`（16 个插件） |
-//! | `dyn ModelProtocol` | `plugins/model/protocols/*.rs` |
-//! | `dyn EmbeddingService` | `providers/embedding/local.rs` |
-//!
-//! 「插件」只是它的**第一个**客户，不是它的定义。`creator_create_object` / `creator_has` /
-//! `creator_ids` 也都按域前缀规则取名（`creator_`），名字与归属一致。
+//! 判据与不变量见 `docs/DECISIONS.md` ADR-036。一句话：注册表按 `(id, TypeId)` 索引，
+//! 调用方用 `creator_create_object::<T>()` 自选 `T`——机制对「T 是什么」一无所知，
+//! 而当前注册点服务三个互不相关的类型族（`dyn Plugin` / `dyn ModelProtocol` /
+//! `dyn EmbeddingService`）。「插件」只是它的**第一个**客户，不是它的定义。
 //!
 //! **唯一的插件耦合是构造入参**：`Arc<dyn PluginInvokeRequest>` 是「上下文」的角色
 //! （`ctx` 键、`payload`、`fork`），只是类型名带 `plugin`。故本域依赖 `plugin` 域
