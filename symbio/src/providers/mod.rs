@@ -1,6 +1,6 @@
 //! 通用服务实现层
 //!
-//! 各可插拔服务的**具体实现**在这里。抽象（trait）在 [`crate::symbio_core::embedding`]
+//! 各可插拔服务的**具体实现**在这里。抽象（trait）在 [`crate::symbio_core::EmbeddingService`]
 //! 与 [`crate::symbio_core::vdfs`]。
 //!
 //! ## 子模块

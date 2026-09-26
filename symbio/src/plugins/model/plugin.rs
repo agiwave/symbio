@@ -3,7 +3,7 @@
 //! 负责：
 //! - 多 Model Provider 注册表（`ModelProvidersConfig`，运行期内存视图）
 //! - Provider 注册：traverse 时按上下文解析出唯一生效 Provider
-//!   （ctx[PROVIDER_ID] > 默认 > 首个启用），绑定配置与协议实现为
+//!   （`ctx[PROVIDER_ID]` > 默认 > 首个启用），绑定配置与协议实现为
 //!   `BoundProvider`（core `ModelProvider` trait 的生产实现）注册进
 //!   CAPABILITY_VISITOR。本插件只做无状态 LLM 网关：chat 编排与限流属于
 //!   session 插件
@@ -47,7 +47,7 @@ pub struct ModelPlugin {
     /// VDFS 侧条目清单（内存镜像：`id → provider.json` 原文）
     ///
     /// 规范 §13.4：model 的列表来自内存。镜像与注册表**同一处更新**
-    /// （[`sync_mirror`](Self::sync_mirror)），因此不存在第二个写入者。
+    /// （[`after_uploaded`](Self::after_uploaded)），因此不存在第二个写入者。
     entries: MemoryVdfs,
 }
 
@@ -537,7 +537,7 @@ impl ModelPlugin {
 
     /// 目标地址 → 条目 id（**唯一**判据，`write` 与测试共用）。
     ///
-    /// 两种目标形态见 [`VdfsProvider::write`](crate::symbio_core::VdfsProvider::write)：
+    /// 两种目标形态见 [`VdfsRequest::Write`]：
     /// 地址末段非空 ⇒ 名字由使用方给（`id_of` 按呈现扩展名剥后缀）；地址为空
     /// ⇒ **使用方没给名字**（写挂载点目录自身），id 由本插件生成——这正是
     /// 「点新建，直接进详情页填，保存时一次写入」的机制形态。

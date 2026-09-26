@@ -22,7 +22,8 @@
 `plugins/model/PLUGIN.yml`，Provider 明细是资源、各存各的 `provider.json`。
 
 模型 provider **不设插件路由**：`<根>/model` 挂载点由本插件自己的 `impl VdfsProvider`
-提供——落盘走 `providers::vdfs_service::SingleFileVdfs`（一个条目 = 一份 `provider.json`，
+提供——落盘走 `providers` 出口的 `SingleFileVdfs`（实现住 `providers/vdfs_service/`；
+一个条目 = 一份 `provider.json`，
 条目内部不外露），清单走 `MemoryVdfs`（内存镜像：启动时从磁盘灌入、写盘成功后回灌）。
 字段定义随 VDFS 节点 `schema` 下发，连通性自检走节点动作 `vdfs/action { action: "test" }`。
 

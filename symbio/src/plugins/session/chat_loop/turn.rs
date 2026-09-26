@@ -1,7 +1,7 @@
 //! **单轮收尾**：推理产物并入上下文 → 工具分发 → 落库 → 流向判定。
 //!
 //! `close_turn` 是"单轮里发生了什么"的唯一实现；它的出口只有
-//! [`TurnFlow`](super::TurnFlow)，**不做终态收尾**（那是 `finish_turn` 的职责）。
+//! [`TurnFlow`]，**不做终态收尾**（那是 `finish_turn` 的职责）。
 
 use super::*;
 

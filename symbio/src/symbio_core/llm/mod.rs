@@ -4,7 +4,7 @@
 //!
 //! | 模块 | 职责 |
 //! |---|---|
-//! | [`model_provider`] | [`ModelProvider`](self::ModelProvider) trait（session 唯一依赖的模型契约）+ 结束原因与用量（`ModelFinishReason` / `ModelUsage`） |
+//! | [`model_provider`] | [`ModelProvider`] trait（session 唯一依赖的模型契约）+ 结束原因与用量（`ModelFinishReason` / `ModelUsage`） |
 //! | [`turn`] | 单轮产物（`TurnOutput`）+ 消息帧原语（`emit_*` 家族）+ 消息构造家族（`build_*`） |
 //!
 //! 依赖关系（单向）：

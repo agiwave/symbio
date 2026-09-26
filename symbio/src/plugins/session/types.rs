@@ -207,7 +207,7 @@ impl Session {
 /// 从会话消息内容自动生成会话标题（无显式命名时的兜底）。
 ///
 /// 规则：**最后一条**含文本的用户消息 → 首行 → 压缩连续空白 → 限长
-/// [`SESSION_TITLE_MAX_CHARS`] 字符（超长追加省略号）。找不到文本时返回 None。
+/// `SESSION_TITLE_MAX_CHARS` 字符（超长追加省略号）。找不到文本时返回 None。
 ///
 /// 取**最后一条**而非第一条：列表里的会话名该反映「最近在聊什么」，不该被
 /// 第一句话永久钉住。显式命名（`metadata.title`）仍然优先——用户自己起的名字
@@ -267,7 +267,7 @@ pub(crate) fn derive_session_title(messages: &[ChatMessage]) -> Option<String> {
 /// 会话心跳任务配置
 ///
 /// 存储于 `Session.metadata.heartbeat`，由前端"会话设置"写入。
-/// 后端 [`crate::plugins::session::SessionPlugin`] 的后台调度器据此在会话空闲
+/// 后端 [`crate::plugins::session::plugin::SessionPlugin`] 的后台调度器据此在会话空闲
 /// 指定时间后自动发起一次提示词对话。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeartbeatConfig {

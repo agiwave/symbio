@@ -9,7 +9,7 @@
 //! notify 的事件回调运行在它自己的**专属 OS 线程**上——不在 tokio runtime
 //! 上下文内，该线程上直接调用 `tokio::spawn` 会 panic（且 panic 穿越
 //! FFI 边界会直接 abort 进程）。因此 `start` 在 runtime 内捕获
-//! [`Handle`](tokio::runtime::Handle)，回调统一经 Handle 派发回 runtime
+//! [`Handle`]，回调统一经 Handle 派发回 runtime
 //! 执行，使用方的异步逻辑（sleep / spawn 等）得以正常工作。
 
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};

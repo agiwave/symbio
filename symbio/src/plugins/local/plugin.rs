@@ -121,7 +121,7 @@ fn config_definition() -> DetailDefinition {
     )
 }
 
-/// 从 ctx[RISK_LEVEL] 读取 per-session 风险等级阈值。
+/// 从 `ctx[RISK_LEVEL]` 读取 per-session 风险等级阈值。
 ///
 /// 与 agent_id/provider_id/mode 同级别：随 chat_send 传输，由 orchestrator 写入 ctx。
 /// ctx 无值时默认 `Medium`（新会话尚未设置时的安全默认值）。

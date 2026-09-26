@@ -16,13 +16,13 @@
 //!
 //! 数据模型速览：
 //!
-//! - 一切资源 = 目录树上的**节点**（[`VdfsNode`]），地址 = 树内相对路径
+//! - 一切资源 = 目录树上的**节点**（[`super::VdfsNode`]），地址 = 树内相对路径
 //!   `<目录>/<rel>`（全路径由使用方拼接、回填；provider 不知道自己被放在哪层目录下）；
-//! - 节点的能力 = 四个**访问位**（[`VdfsAccess`]：`r` 读 / `w` 写 / `l` 列 / `t` 遍历）；
-//! - 内容 = [`VdfsContent`]（文本 `text` 或二进制 `b64`，互斥）；
+//! - 节点的能力 = 四个**访问位**（[`super::VdfsAccess`]：`r` 读 / `w` 写 / `l` 列 / `t` 遍历）；
+//! - 内容 = [`super::VdfsContent`]（文本 `text` 或二进制 `b64`，互斥）；
 //! - 呈现 = 节点的 `ext`（扩展名）→ 使用方选渲染器；渲染器所需描述经 `schema` 透传；
-//! - 变更 = [`VdfsChange`]（子树内**相对路径** + 可选**业务载荷** `data`，
-//!   缺失 = 回读收敛），经 [`VdfsChangeSink`] 由使用方补成展示地址后投递。
+//! - 变更 = [`super::VdfsChange`]（子树内**相对路径** + 可选**业务载荷** `data`，
+//!   缺失 = 回读收敛），经 [`super::VdfsChangeSink`] 由使用方补成展示地址后投递。
 
 use async_trait::async_trait;
 use std::sync::Arc;

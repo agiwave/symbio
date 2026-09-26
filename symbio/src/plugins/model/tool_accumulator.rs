@@ -62,7 +62,7 @@ struct AccumulatedToolCall {
 /// **生命周期**：`process_delta`（多次）→ `finish`（恰好一次，按值消费）。
 /// `finish` 取 `self` 而非 `&mut self`，是为了让「收口只有一次」成为类型层面的事实
 /// ——旧版 `get_completed(&mut self)` 可以被反复调用，于是不得不写一条「重复调用返回
-/// 相同 id」的兜底；那条兜底实际不可达（见 [`finish`] 的注释）。
+/// 相同 id」的兜底；那条兜底实际不可达（见 [`TurnToolCallAccumulator::finish`] 的注释）。
 #[derive(Debug, Default)]
 pub(crate) struct TurnToolCallAccumulator {
     calls: HashMap<usize, AccumulatedToolCall>,

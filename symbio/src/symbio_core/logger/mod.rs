@@ -56,7 +56,7 @@ pub const LOG_LEVEL_ERROR: u8 = 3;
 /// 有订阅器时本闸门不参与（过滤交给 `EnvFilter`），因此对 App 行为零影响。
 static MIN_LEVEL: AtomicU8 = AtomicU8::new(LOG_LEVEL_INFO);
 
-/// 设置无订阅器路径的最低输出级别（越低越宽松）。见 [`MIN_LEVEL`]。
+/// 设置无订阅器路径的最低输出级别（越低越宽松）。见 `MIN_LEVEL`。
 pub fn logger_set_min_level(level: u8) {
     MIN_LEVEL.store(level, Ordering::Relaxed);
 }
@@ -79,7 +79,7 @@ pub fn logger_parse_level(name: &str) -> Option<u8> {
     }
 }
 
-/// 供日志宏判定的闸门：有订阅器时一律放行，否则比对本条级别与 [`MIN_LEVEL`]。
+/// 供日志宏判定的闸门：有订阅器时一律放行，否则比对本条级别与 `MIN_LEVEL`。
 #[inline]
 pub fn logger_level_enabled(level: u8) -> bool {
     if logger_is_initialized() {

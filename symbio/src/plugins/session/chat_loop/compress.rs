@@ -451,7 +451,7 @@ async fn compress_snapshot_inner(
 /// 因为两条链路互不校验（与 `plugin.rs` 消息级变更那三条路由同一个道理）。
 ///
 /// 只发 VDFS 变更、不发前端帧：消息通道已归 VDFS 一处（见 `docs/node-state-streaming.md`），
-/// 与 [`super::super::plugin::SessionPlugin::emit_message_updated`] 同款。
+/// 与 [`super::super::plugin::SessionPlugin::notify_change`] 同款。
 async fn emit_transcript_rewrite(
     orchestrator: &ChatOrchestrator,
     context: &SessionContext,

@@ -613,7 +613,7 @@ pub(crate) const MAX_SEARCH_RESULTS: usize = 1000;
 
 /// 文件名 Glob 搜索 = 递归 `list` + 模式过滤的组合。
 ///
-/// 沿 [`VdfsProvider::list`] 下钻（`t` 位控制、单分支失败跳过），对每个普通文件做
+/// 沿 [`VdfsRequest::List`] 下钻（`t` 位控制、单分支失败跳过），对每个普通文件做
 /// Glob 匹配；provider 的安全规则（访问位、路径守卫）经 `list` 自持生效。
 ///
 /// `base` 为搜索基地址（空 = 工作目录根）。**模式相对于 `base`**，**结果与 `base`
@@ -744,7 +744,7 @@ async fn watch(
     ))
 }
 
-/// 树状遍历：访问层统一实现（递归 [`VdfsProvider::list`]）。
+/// 树状遍历：访问层统一实现（递归 [`VdfsRequest::List`]）。
 ///
 /// provider 只需实现 `list`，并在目录节点的 `access` 上声明 `t` 位即可被遍历；
 /// 机制不含任何场景语义。这里**不需要认识目录拓扑**——地址本身就是递归的地址。

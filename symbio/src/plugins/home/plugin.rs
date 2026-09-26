@@ -8,7 +8,7 @@
 //!
 //! Home 是**系统根插件**：它的目录就是系统根 [`HomedirRegistry::get()`] 本身，
 //! 配置在 `<homedir>/PLUGIN.yml`——与其它插件**同一套规范**
-//! （见 [`plugin_dir`](crate::symbio_core::plugin::dir)），只是它住在系统根而不是
+//! （见 [`PluginConfigFile`](crate::symbio_core::PluginConfigFile)），只是它住在系统根而不是
 //! 业务插件**并列**在系统根下（它管辖的插件根就是系统根本身）。
 //! homedir 切换通过 `home/reload` 路由热重载实现。
 //!
@@ -171,7 +171,7 @@ impl HomePlugin {
     /// 4. 清空所有子插件实例
     /// 5. 重建 worker composite（子插件会从新 homedir 加载数据）
     ///
-    /// 注意：本方法**不**异步恢复 workdir（需要 Arc<Self> 才能 spawn task），
+    /// 注意：本方法**不**异步恢复 workdir（需要 `Arc<Self>` 才能 spawn task），
     /// 由 route handler 在 reload 完成后自行 spawn。
     ///
     /// 调用方应**先**关闭所有活跃 chat 会话（`RouteConnectionManager::remove_all`），

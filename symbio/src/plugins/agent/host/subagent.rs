@@ -512,7 +512,7 @@ async fn validate_subsession_exists(
 /// 登记子会话：经**进程内 VDFS 纯接口**在 `<挂载名>/<sid>` 上写一次。
 ///
 /// 带 `create` 意图 ⇒ 不存在则**就地创建**，且地址末段就是会话 id
-/// （[`VdfsProvider::write`] 的「两种目标形态」表）——子会话 id 因此仍由本文件
+/// （[`VdfsRequest::Write`] 的「两种目标形态」表）——子会话 id 因此仍由本文件
 /// 决定（它是 uuid，会出现在 `agent_run` 的 `session_id` 参数里）。
 ///
 /// ## 为什么不再 `route` 一条路由

@@ -5,7 +5,7 @@
 //! 重复实现 `safe_id` 或手工重建 `<本插件目录>` 前缀：
 //!
 //! - [`safe_id`]：session_id → 安全目录名。**规则本身不在本模块**——它是
-//!   宿主层 [`crate::providers::entry::safe_segment`]（所有 VDFS
+//!   宿主层 [`crate::providers::vdfs_safe_segment`]（所有 VDFS
 //!   资源条目共用的那一版，含 `.` / `..` 与控制字符防护），本模块只是会话侧的
 //!   入口。历史教训：同一替换逻辑曾在 store/file.rs、tool_result_guard.rs、
 //!   chat_loop.rs、chat_session.rs 各写一份，行为漂移风险高；收敛到插件内唯一

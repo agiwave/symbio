@@ -86,7 +86,7 @@ pub fn store(workdir: Option<&str>, write_max_bytes: usize, inject_max_bytes: us
 
 /// 片段规格 —— 本层的「个性」只有三样：标题、地址、空内容时说什么。
 ///
-/// `address` 由调用方算好传入（[`address`] 返回 `String`，不能借给返回值长期持有）。
+/// `address` 由调用方算好传入（`address` 返回 `String`，不能借给返回值长期持有）。
 /// 排版（一行头信息 + 正文 + 空 / 截断提示）由共享实现
 /// [`MemoryFile::segment`](crate::providers::MemoryFile::segment) 统一决定。
 pub fn segment_spec(address: &str) -> MemorySegmentSpec<'_> {

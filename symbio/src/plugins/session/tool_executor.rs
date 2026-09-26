@@ -196,7 +196,7 @@ pub struct PendingPrompt {
 
 /// 从工具返回的 `Data` 里读出「需要用户动作」的意图。
 ///
-/// 判据是 `failure_kind` 这个**约定字段**（[`failure_kind::is_pending`]），
+/// 判据是 `failure_kind` 这个**约定字段**（[`crate::symbio_core::failure_kind::is_pending`]），
 /// 不是靠猜 JSON 形状——[`extract_result`] 那种"从任意 JSON 里找 content/output"
 /// 的启发式可以接受（**结果文本本就没有契约**，见其文档），但**控制流**不能建立
 /// 在启发式上。
@@ -710,7 +710,7 @@ pub(super) fn apply_not_executed(parent: &mut ChatMessage, reason: &str) {
 /// 因此「**有调用必有结果**」这条不变量必须在**存储**里成立（本函数写入 `tool_messages`
 /// ⇒ 落库 + 广播 + 进下一轮上下文），而不是只在请求视图里成立。
 ///
-/// `reason` 与 [`not_executed_patch`] 同源（成因可区分，事后排查不必靠猜）：
+/// `reason` 与 [`apply_not_executed`] 同源（成因可区分，事后排查不必靠猜）：
 /// 中止 / 批次跳过。
 ///
 /// ## 为什么是 `Completed`

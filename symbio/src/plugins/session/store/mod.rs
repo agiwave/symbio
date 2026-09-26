@@ -18,11 +18,12 @@
 //! **对外**，会话只有 VDFS 一个入口（`<根>/session` 的清单 / `消息` / `子会话` /
 //! `工作目录`，见 `super::plugin` 的 `impl VdfsProvider`）；本模块是那个 provider 下面
 //! 的真相源。**对内**，它刻意**不**改用
-//! [`vdfs_service`](crate::providers::vdfs_service) 的三种集中实现：`DirVdfs` 会把条目
+//! `providers::vdfs_service` 的三种集中实现：`DirVdfs` 会把条目
 //! 内部原样变成对外地址（`session.json` / `messages/` / `tool_archives/` …），而会话
 //! 要求 `<id>` 是叶子、内部只以人读语义段呈现；且条目不是文件字节——`<id>/message/<mid>`
 //! 由整份 `Session` 派生，seq 分配与剔孤儿是会话专有的写入语义（在 `super::chat_session`）。
-//! 共用的只是**寻址**：根由调用方传入，id→段名取 [`safe_segment`]
+//! 共用的只是**寻址**：根由调用方传入，id→段名取
+//! [`crate::providers::vdfs_safe_segment`]
 //! （经 [`super::paths::safe_id`]），与资源条目同一份规则。判据见
 //! `docs/design/vdfs.md` §13.4（agent 目录是先例）。
 //!

@@ -181,7 +181,7 @@ fn id_of(path: &str) -> String {
 ///
 /// 末段非空 ⇒ 名字由使用方给；地址为空 ⇒ **使用方没给名字**（写挂载点目录自身，
 /// 即「点新建 → 在详情页填好 → 保存」），id 由本插件生成。目录自身没有可覆盖的
-/// 目标，所以必须带 `create` 意图（见 [`VdfsProvider::write`]）。
+/// 目标，所以必须带 `create` 意图（见 [`VdfsRequest::Write`]）。
 fn resolve_id(path: &str, create: bool) -> VdfsResult<String> {
     if !path.trim_matches('/').is_empty() {
         return Ok(id_of(path));

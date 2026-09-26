@@ -22,13 +22,13 @@
 //! | 跨子目录拒绝 | `move` 只允许在同一子目录内 |
 //! | 事件补全 | 子插件报出的相对路径补成树内全路径再交给上层 sink |
 //!
-//! **本层不填条目地址**：地址是「某一份列表」的定位（[`VdfsItem::path`]），
+//! **本层不填条目地址**：地址是「某一份列表」的定位（[`VdfsItem::path`](crate::symbio_core::VdfsItem::path)），
 //! 按 `<父地址>/<name>` 推导即可，由访问层（`plugins/vdfs/host.rs::fill_paths`）
 //! 用**请求地址**统一回填。本层若自己填，就必须知道自己的挂载前缀——而它不知道
 //! （composite 可被另一个 composite 包含），填出来的会缺前缀。
 //!
 //! 子目录节点的**自述**（标题 / 描述 / 访问位 / 隐藏位 / 可新建类型）取自子插件的
-//! [`PluginMeta`](crate::symbio_core::PluginMeta)——元数据的唯一来源，provider 上
+//! [`PluginMeta`]——元数据的唯一来源，provider 上
 //! 不再有 `label` / `order` / `root_*` 一族方法。
 //!
 //! ## 资源树与插件注册表：两个视图，刻意不共用 `List`

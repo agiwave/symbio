@@ -371,7 +371,7 @@ impl SecurityPolicy {
     /// - 工具风险等级 **>** 执行风险阈值 → 需要用户审批
     /// - 工具风险等级 **≤** 执行风险阈值 → 直接执行（自动批准）
     ///
-    /// `threshold` 来自 ctx[RISK_LEVEL]（per-session，由 orchestrator 从
+    /// `threshold` 来自 `ctx[RISK_LEVEL]`（per-session，由 orchestrator 从
     /// `session.metadata.risk_level` 或 `chat_send.risk_level` 写入，默认 medium）。
     pub fn check_tool_approval_needed(
         &self,

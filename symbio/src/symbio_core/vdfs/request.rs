@@ -9,7 +9,7 @@ use super::node::{VdfsItem, VdfsNode};
 
 // ==================== 写入结果 ====================
 
-/// 写入结果 —— [`VdfsRequest::Write`](super::VdfsRequest::Write) 的返回值。
+/// 写入结果 —— [`VdfsRequest::Write`] 的返回值。
 ///
 /// ## 为什么没有「写到哪了」的地址
 ///
@@ -32,7 +32,7 @@ pub struct VdfsWriteResponse {
 
 // ==================== 动作结果 ====================
 
-/// 动作结果 —— [`VdfsRequest::Action`](super::VdfsRequest::Action) 的返回值。
+/// 动作结果 —— [`VdfsRequest::Action`] 的返回值。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VdfsActionResult {
     /// 被执行的动作标识（回显，便于调用方配对请求）

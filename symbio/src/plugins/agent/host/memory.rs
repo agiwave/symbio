@@ -14,7 +14,8 @@
 //! ## 作用域闸门：**选中了智能体才有记忆**
 //!
 //! `ctx[AGENT_ID]` 缺失 / 为空 = 本次会话没选智能体 → 不装配子树，因此也不注册任何
-//! 智能体片段（分支在 [`super::plugin::AgentPlugin::traverse`]）。agent 目录不存在
+//! 智能体片段（分支在 `AgentPlugin` 的 [`Plugin::traverse`](crate::symbio_core::Plugin::traverse) 里）。
+//! agent 目录不存在
 //! （目录被删 / 被改名）同样构造出「无作用域」的 [`MemoryFile`]：读 → 明确报错、
 //! 注入 → `None`、写 → 明确报错，调用点不需要各自判断。
 //!

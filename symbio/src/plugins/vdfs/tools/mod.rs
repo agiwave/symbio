@@ -13,7 +13,7 @@
 //!
 //! 工具不认识能力管理器、不认识目录拓扑、不走协议信封——地址规则（`.vdfsv2`
 //! 前缀 = 虚拟，其余 = 磁盘）、两半分流、workdir 透传全部在 [`ToolVdfs`] 背后的
-//! [`UnifiedFs`](super::super::fs::UnifiedFs) 一处，与前端链路（`super::super::host`）
+//! [`UnifiedFs`](super::fs::UnifiedFs) 一处，与前端链路（`super::host`）
 //! 共用同一份实现，不存在第二套。
 //!
 //! ## 地址规则（实现在 `UnifiedFs`）
@@ -26,7 +26,7 @@
 //! ## provider 从哪来
 //!
 //! 工具注册广播（`traverse`）的 ctx 携带 `CAPABILITY_VISITOR`；`plugin.rs` 在那次
-//! 广播中构造 [`ToolVdfs::new(visitor)`] 并把工具注册进同一个 visitor。执行时
+//! 广播中构造 [`ToolVdfs::new`] 并把工具注册进同一个 visitor。执行时
 //! visitor 里已注册好全部挂载 provider（容器同时注册的组合根供前端链路使用）。
 
 pub mod delete;

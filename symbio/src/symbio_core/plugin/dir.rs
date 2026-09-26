@@ -478,7 +478,7 @@ impl PluginDir {
     /// 写装配位：`true` = 启用（摘掉键，保持文件干净）；`false` = 停用。
     ///
     /// 只动这一个键，其余内容原样保留（身份 / 授予等保留键经
-    /// [`carry_over_reserved`](Self::carry_over_reserved) 取回；手写的 manifest
+    /// `carry_over_reserved` 取回；手写的 manifest
     /// 可能漏了身份字段，那里也会补上）。
     pub fn set_enabled(&self, enabled: bool) -> Result<(), String> {
         let mut map = self.read_manifest()?.unwrap_or_default();

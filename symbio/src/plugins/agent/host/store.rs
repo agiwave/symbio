@@ -124,7 +124,7 @@ impl AgentDirStore {
     /// `global_root` = 本插件自己的目录。
     ///
     /// ⚠️ 这个目录**必须由调用方给**（装配态下来自父插件经 `PLUGIN_DIR` 传下的
-    /// [`PluginDir`]，见 `AgentPlugin::build`），本文件**不得**自己拼
+    /// [`PluginDir`](crate::symbio_core::PluginDir)，见 `AgentPlugin::build`），本文件**不得**自己拼
     /// `<homedir>/…/agent`：插件只认父插件告知的目录，这是「插件不认识全局布局」
     /// 这条约束的一部分——手拼就等于把布局知识复制一份，改布局时必然漏改。
     ///

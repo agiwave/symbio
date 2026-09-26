@@ -193,7 +193,7 @@ pub(crate) async fn prepare_turn_inputs(
 ///
 /// 那条路径由模型在任务阶段间隙自行发起，判定点在 `close_turn` 的工具拦截处
 /// （`run_context_compact`），**不走本函数**；两条路径共用同一执行内核
-/// [`compress_with_snapshot_core`]——"何时压"有两个入口，"怎么压"只有一个实现。
+/// `compress_with_snapshot_core`——"何时压"有两个入口，"怎么压"只有一个实现。
 ///
 /// 返回：是否需要在请求视图末尾注入一次性水位提醒。
 pub(crate) async fn apply_compaction(

@@ -79,7 +79,7 @@ fn is_wire_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '-'
 }
 
-/// 能力名 → 线上名：字符集之外的字符全部变 [`TOOL_NAME_WIRE_SEPARATOR`]。
+/// 能力名 → 线上名：字符集之外的字符全部变 `TOOL_NAME_WIRE_SEPARATOR`。
 ///
 /// 幂等：名字已落在字符集内时原样返回（今天绝大多数名字如此，
 /// `vdfs_read` → `vdfs_read`）。因此这个函数对**存量会话无害**——

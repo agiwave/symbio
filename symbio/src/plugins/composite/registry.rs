@@ -8,8 +8,8 @@
 //!
 //! | 谁 | 干什么 |
 //! |---|---|
-//! | 容器（[`super::Composite`]） | 持有本表；`route` / `traverse` 经它取实例 |
-//! | 容器的 VDFS（[`super::CompositeVdfs`]） | 持有本表；根上的注册表动词经它执行 |
+//! | 容器（[`super::composite::Composite`]） | 持有本表；`route` / `traverse` 经它取实例 |
+//! | 容器的 VDFS（[`super::vdfs::CompositeVdfs`]） | 持有本表；根上的注册表动词经它执行 |
 //! | 插件管理插件（`plugins::plugin_manager`） | **只读**它产出的 [`PluginEntry`]，不自己扫目录 |
 //!
 //! 三条判据因此只有一份实现（原先散在 `Composite::mount_from_plugin_dirs` 里，
@@ -17,7 +17,7 @@
 //!
 //! - **合格性**：[`PluginRegistry::provider_of`] 的三态（不是插件 / 可加载 / 配了一半）；
 //! - **必需**：构造者经 [`REQUIRED_PLUGINS`] 声明的清单（缺目录就补出来）；
-//! - **启用**：[`PLUGIN_KEY_ENABLED`]（`PLUGIN.yml` 里的装配位，缺省 = 启用）。
+//! - **启用**：[`PLUGIN_KEY_ENABLED`](crate::symbio_core::PLUGIN_KEY_ENABLED)（`PLUGIN.yml` 里的装配位，缺省 = 启用）。
 //!
 //! ## 为什么运行期能改，而不用重启
 //!
@@ -161,7 +161,7 @@ impl PluginRegistry {
     /// 装配：**插件目录是子项的唯一来源**
     ///
     /// 扫描 `<插件根>/*/`：配置**合格**（有 `PLUGIN.yml` 且 `plugin_provider` 指向
-    /// 一个已注册工厂）且**启用**（见 [`PLUGIN_KEY_ENABLED`]）的才构造。
+    /// 一个已注册工厂）且**启用**（见 [`PLUGIN_KEY_ENABLED`](crate::symbio_core::PLUGIN_KEY_ENABLED)）的才构造。
     pub fn mount_all(&self) {
         for name in self.dir_names() {
             let dir = self.dir_of(&name);
@@ -339,7 +339,7 @@ impl PluginRegistry {
     ///
     /// 界面底座插件（[`ASSEMBLY_UNDISABLABLE_PLUGINS`]）拒绝停用——理由见该常量文档。
     ///
-    /// 停用一侧会先调 [`Plugin::stop`](Plugin::stop)（ADR-033）：**摘实例之前**，
+    /// 停用一侧会先调 [`Plugin::stop`]（ADR-033）：**摘实例之前**，
     /// 让插件有一次清理的机会（关监听 / 停后台任务 / 落盘）。
     pub async fn set_enabled(&self, name: &str, enabled: bool) -> Result<(), String> {
         if !enabled && ASSEMBLY_UNDISABLABLE_PLUGINS.contains(&name) {

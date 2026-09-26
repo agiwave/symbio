@@ -21,7 +21,7 @@
 //!
 //! - **根之下有什么** = 容器的注册（`register_vdfs_root` / `register_vdfs_provider`）；
 //! - **根挂在哪个地址上** = 本插件的挂载规则（[`VDFS_ADDR_ROOT`]），经
-//!   [`AddrRootDecl`] **静态声明**——随二进制生效，早于任何插件实例构造，
+//!   [`crate::symbio_core::AddrRootDecl`] **静态声明**——随二进制生效，早于任何插件实例构造，
 //!   容器转发请求时据此改写子上下文的当前父地址（`symbio_core::vdfs::address`）。
 //!
 //! 因此「根改叫什么」只需改 [`VDFS_ADDR_ROOT`] 一行：其它插件的绝对地址一律

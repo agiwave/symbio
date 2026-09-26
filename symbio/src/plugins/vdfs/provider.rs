@@ -143,7 +143,7 @@ impl ToolVdfs {
     }
 
     /// 内容编辑——**组合操作**：read → 精确替换 → write，
-    /// 逻辑只在访问层一份（[`host::edit_via`]），任何一层只出原子操作
+    /// 逻辑只在访问层一份（[`super::host::edit_via`]），任何一层只出原子操作
     pub async fn edit(
         &self,
         ctx: &Arc<dyn PluginInvokeRequest>,
@@ -156,7 +156,7 @@ impl ToolVdfs {
     }
 
     /// 文件名 Glob 搜索（`path` 为可选搜索基目录）——**组合操作**：
-    /// 递归 `list` + 模式过滤，逻辑只在访问层一份（[`host::search_via`]）
+    /// 递归 `list` + 模式过滤，逻辑只在访问层一份（[`super::host::search_via`]）
     pub async fn search(
         &self,
         ctx: &Arc<dyn PluginInvokeRequest>,

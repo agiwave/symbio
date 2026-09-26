@@ -1,7 +1,7 @@
 //! SSE 流循环 —— 把响应字节流转成单轮产物（core `llm/` 契约的实现细节）。
 //!
 //! 只有 model 插件使用，故住在插件内而非 core `llm/`。行解析契约
-//! [`SseLineParser`] 与其实现方同处本插件（[`super::protocols::sse`]），core 只
+//! [`SseLineParser`] 与其实现方同处本插件（[`super::protocols`]），core 只
 //! 提供 [`TurnOutput`] 产物结构；本模块负责按 `\n` 切分、按前缀截断去重、把协议事件
 //! 分发给 [`TurnOutput`] 并经 `sink` 实时下发流式子节点——**不认识任何协议字段名**。
 //!

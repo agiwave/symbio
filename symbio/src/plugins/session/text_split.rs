@@ -72,7 +72,7 @@ pub(crate) fn truncate_tokens(text: &str, token_budget: usize) -> String {
 ///
 /// 计量器由调用方注入：生产方传 `default_tokenizer()`（与预算计算共用同一
 /// 校准口径）；本函数因此是**纯函数**——不读进程级校准状态，测试可用
-/// 确定性的 [`HeuristicTokenizer`] 复现任意切分结果（否则测试会因其他用例
+/// 确定性的 [`super::tokenizer::HeuristicTokenizer`] 复现任意切分结果（否则测试会因其他用例
 /// 的 usage 反馈漂移而 flaky，实测踩坑）。
 pub(crate) fn split_head_tail(
     text: &str,

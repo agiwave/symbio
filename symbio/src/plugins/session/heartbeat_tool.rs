@@ -25,7 +25,7 @@ const MIN_INTERVAL_SECS: u64 = 10;
 
 /// 心跳设置工具
 ///
-/// 由 [`SessionPlugin::traverse`] 按需创建并注册进 `CAPABILITY_VISITOR`；
+/// 由 `SessionPlugin` 的 [`Plugin::traverse`](crate::symbio_core::Plugin::traverse) 按需创建并注册进 `CAPABILITY_VISITOR`；
 /// 弱引用宿主插件，避免 插件 ↔ 工具 的 Arc 循环。
 pub struct HeartbeatTool {
     plugin: Weak<SessionPlugin>,

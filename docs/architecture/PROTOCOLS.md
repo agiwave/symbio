@@ -254,8 +254,8 @@ submit_object_creator!(PLUGIN_X, XPlugin::build, dyn Plugin);
 
 **资源存储不走工厂**：`providers/vdfs_service` 的三个实现（`SingleFileVdfs` /
 `DirVdfs` / `MemoryVdfs`）本身就是 `VdfsProvider`（接口在 core 已定，不会换），
-插件**直接组合具体类型**——`use crate::providers::vdfs_service::{DirVdfs,
-SingleFileVdfs, MemoryVdfs}`。套一层 `dyn` 工厂只会把一次构造换成一次字符串查表。
+插件**直接组合具体类型**——`use crate::providers::{DirVdfs, SingleFileVdfs,
+MemoryVdfs}`（`providers` 是唯一出口，子目录私有、不深引）。套一层 `dyn` 工厂只会把一次构造换成一次字符串查表。
 （历史上这里有一个工厂项 `"storage_service"`，随 `StorageService` / `EntityStore`
 一并废除；定位与依赖边界见 [design/vdfs.md](../design/vdfs.md) §11 与 §13.4。）
 

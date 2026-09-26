@@ -19,7 +19,7 @@
 //!
 //! 每个 MCP Server 是一个**目录型条目**：`<本插件目录>/<name>/server.json`
 //! （主文件 `server.json` + 可选附属文件），由
-//! [`DirVdfs`](crate::providers::DirVdfs) 承载落盘。
+//! [`DirVdfs`] 承载落盘。
 //! `McpConfig` 的内存视图（`servers: HashMap<name, McpServerConfig>`）
 //! 通过从磁盘加载/回写保持一致。
 
@@ -198,7 +198,7 @@ fn id_of(path: &str) -> String {
 ///
 /// 末段非空 ⇒ 名字由使用方给；地址为空 ⇒ **使用方没给名字**（写挂载点目录自身，
 /// 即「点新建 → 在详情页填好 → 保存」），id 由本插件生成。目录自身没有可覆盖的
-/// 目标，所以必须带 `create` 意图（见 [`VdfsProvider::write`]）。
+/// 目标，所以必须带 `create` 意图（见 [`VdfsRequest::Write`]）。
 fn resolve_id(path: &str, create: bool) -> VdfsResult<String> {
     if !path.trim_matches('/').is_empty() {
         return Ok(id_of(path));

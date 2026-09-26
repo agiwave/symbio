@@ -33,7 +33,7 @@ use super::words::{VDFS_KIND_DIR, VDFS_KIND_FILE, VDFS_STATUS_ACTIVE};
 /// ## 两条独立的键：`ext` 与 `node_ext`
 ///
 /// [`ext`](Self::ext) 是**呈现扩展名**——地址末段可能带的后缀，provider 用
-/// [`entry::id_of`] 一族按它剥出条目 id（`<根>/model/openai-1.model` → `openai-1`）。
+/// `entry::id_of` 一族按它剥出条目 id（`<根>/model/openai-1.model` → `openai-1`）。
 /// 它**不**决定详情怎么渲染：配置型资源（`model` / `mcp` / `skill`）落成后统一是
 /// `ext = form`，呈现扩展名只留在地址里。
 ///
@@ -49,8 +49,6 @@ use super::words::{VDFS_KIND_DIR, VDFS_KIND_FILE, VDFS_STATUS_ACTIVE};
 /// 只声明**草稿长什么样**；具体写什么、怎么校验，由 provider 在 `write` 中自持。
 /// 需要「先选个本地包再落盘」这类**额外操作**时，那是详情页的动作
 /// （[`VDFS_ACTION_IMPORT`](super::VDFS_ACTION_IMPORT)），不是本结构的字段。
-///
-/// [`entry::id_of`]: crate::providers::vdfs_id_of
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VdfsNewType {
     /// 新元素**呈现扩展名**（地址末段后缀，`id_of` 按它剥 id；**不是**渲染器键）
@@ -405,7 +403,7 @@ impl From<VdfsNode> for VdfsItem {
 
 /// serde 辅助：`false` 不序列化（保持线上形状与「缺省即 false」的字段兼容）
 ///
-/// 用于 [`VdfsNode::hidden`] 与 [`VdfsContent::create`] 这类**绝大多数情况为
+/// 用于 [`VdfsNode::hidden`] 与 [`VdfsContent::create`](super::VdfsContent::create) 这类**绝大多数情况为
 /// false** 的布尔位——省掉它们能让既有消费者的 JSON 形状一字不变。
 pub(super) fn is_false(b: &bool) -> bool {
     !*b
