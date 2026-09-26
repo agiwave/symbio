@@ -54,7 +54,7 @@ pub(crate) use vdfs::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
 // ==================== 事件总线 ====================
 pub use event_bus::{
     build_envelope, register_subscriber, unregister_subscriber, EventBus, EventBusSubscribeRequest,
-    EVENT_BUS_KIND_SYSTEM, EVENT_BUS_KIND_VDFS,
+    EVENT_BUS_KIND_SYSTEM, EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE,
 };
 
 // ==================== 服务抽象 ====================

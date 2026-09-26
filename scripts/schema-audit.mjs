@@ -18,10 +18,18 @@
  * 输出：控制台报告。零外部依赖，纯 Node 实现。
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative, sep, dirname } from 'node:path';
+import { join, relative, sep, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+// `--root=` 只为回归测试开的口子：测试在临时目录造一棵最小仓库，好让本脚本的判据
+// 能被「注入真实形状并断言报告正确」地验证。报告型脚本坏了没人发现（它不判失败），
+// 但它**会误导人去改本来没坏的东西**——实测事故：`schemas/hook` 被报成「仅 1 个外部
+// 消费文件」的下放候选，而它实际有 3 个消费文件（hook 插件自己走 `schemas::{HookEvent}`
+// 顶层再导出名，路径里没有子模块名，按「最长模块前缀」匹配得到 null ⇒ 消费方整个丢失）。
+const rootArg = process.argv.find((a) => a.startsWith('--root='));
+const ROOT = rootArg
+  ? resolve(rootArg.slice(7))
+  : join(dirname(fileURLToPath(import.meta.url)), '..');
 
 // ---------- 工具 ----------
 function walk(dir, exts, out = []) {
@@ -64,6 +72,44 @@ for (const f of backendSchemaFiles) {
   itemsByFile.set(f, names);
 }
 const allModKeys = new Set(backendSchemaFiles.map(moduleKeyOf).filter(Boolean));
+
+// 符号名 -> 定义它的模块（`schemas::X` 这种**顶层再导出名**的归属）
+//
+// 为什么需要：消费方可以写 `use ...::schemas::{HookEvent}`（走 `schemas/mod.rs` 的
+// `pub use hook::{HookEvent, HookOutput}`），而不是 `schemas::hook::HookEvent`。
+// 前者的路径里**根本没有子模块名**，只按「最长模块前缀」匹配会得到 `null` ⇒
+// 该消费方整个丢失。实测后果：`schemas/hook` 有 3 个消费模块（hook 自己 3 个文件 +
+// session），报告却写「仅 1 个外部消费文件」，把它列成**下放候选**——
+// 报告说假话，读的人会顺着去改本来没坏的东西。
+//
+// 只在该名字**唯一**归属一个模块时启用；同名多处定义（有歧义）时保守放弃。
+const nameToModule = new Map(); // name -> moduleKey（仅唯一时）
+{
+  const seen = new Map(); // name -> Set(moduleKey)
+  for (const [f, names] of itemsByFile) {
+    const key = moduleKeyOf(f);
+    if (!key) continue;
+    for (const { name } of names) {
+      if (!seen.has(name)) seen.set(name, new Set());
+      seen.get(name).add(key);
+    }
+  }
+  for (const [name, keys] of seen) if (keys.size === 1) nameToModule.set(name, [...keys][0]);
+}
+
+/**
+ * 把一条 `schemas::…` 引用路径归到某个模块。
+ * @param {string[]} parts 路径分段（已剥掉 `schemas::` 前缀与 `as` 别名）
+ * @returns {string|null} 模块 key
+ */
+function moduleOfRef(parts) {
+  for (let i = parts.length; i >= 1; i--) {
+    const cand = parts.slice(0, i).join('::');
+    if (allModKeys.has(cand)) return cand;
+  }
+  // 顶层再导出名（`schemas::HookEvent`）：按符号名的唯一定义归属
+  return nameToModule.get(parts[0]) ?? null;
+}
 
 // 全库扫描：schemas:: 路径引用 + 标识符出现
 // consumerFile -> Set(schemaModuleKey)
@@ -108,12 +154,7 @@ for (const f of backendFiles) {
         if (idx === -1) continue;
         const rest = full.slice(idx + 'schemas::'.length).split(' as ')[0].trim();
         if (!rest) continue;
-        const parts = rest.split('::');
-        let best = null;
-        for (let i = parts.length; i >= 1; i--) {
-          const cand = parts.slice(0, i).join('::');
-          if (allModKeys.has(cand)) { best = cand; break; }
-        }
+        const best = moduleOfRef(rest.split('::'));
         if (best) {
           if (!consumersByModule.has(best)) consumersByModule.set(best, new Map());
           const map = consumersByModule.get(best);
@@ -126,12 +167,7 @@ for (const f of backendFiles) {
     const re = /schemas::([A-Za-z0-9_]+(?:::[A-Za-z0-9_]+)*)/g;
     let m;
     while ((m = re.exec(src))) {
-      const parts = m[1].split('::');
-      let best = null;
-      for (let i = parts.length; i >= 1; i--) {
-        const cand = parts.slice(0, i).join('::');
-        if (allModKeys.has(cand)) { best = cand; break; }
-      }
+      const best = moduleOfRef(m[1].split('::'));
       if (best) {
         if (!consumersByModule.has(best)) consumersByModule.set(best, new Map());
         const map = consumersByModule.get(best);

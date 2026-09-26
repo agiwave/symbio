@@ -218,7 +218,7 @@ pub struct ChatMessage {
     /// ## 与 `content` 互斥，语义由字段本身给出
     ///
     /// 一帧里两者**绝不同时出现**——同帧携带即协议违例，唯一写入点
-    /// （[`crate::plugins::session::transcript::Transcript::apply`]）报错丢弃。
+    /// （`plugins/session/transcript.rs::Transcript::apply`）报错丢弃。
     /// 消费端因此永远不必从帧的形状里推断「该拼接还是该替换」：
     ///
     /// | 字段 | 语义 | 用在哪 |
@@ -487,10 +487,7 @@ pub const SEG_MESSAGES: &str = "message";
 ///
 /// `None` = 节点状态词不在 [`MessageStatus`] 的词表里（正常不该发生；
 /// 发生即两侧已分叉，宁可丢这一条也不要造出一个状态错误的消息）。
-pub fn message_of_node(
-    node: &crate::symbio_core::vdfs::VdfsNode,
-    text: String,
-) -> Option<ChatMessage> {
+pub fn message_of_node(node: &crate::symbio_core::VdfsNode, text: String) -> Option<ChatMessage> {
     /// attributes 里的值都是 `json!(..)` 塞进去的，原样反序列化即可回读类型。
     fn attr<T: serde::de::DeserializeOwned>(
         m: &serde_json::Map<String, Value>,

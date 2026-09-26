@@ -84,8 +84,8 @@
 //! 不向上推任何东西——「写完之后还要做什么」（重启监听 / 重建缓存）留在插件
 //! 自己的 `write` 里。
 
+use crate::symbio_core::notify_change;
 use crate::symbio_core::schemas::detail::DetailDefinition;
-use crate::symbio_core::vdfs::host::notify_change;
 use crate::symbio_core::{
     VdfsAccess, VdfsContent, VdfsError, VdfsNode, VdfsResult, VdfsWriteResponse, VDFS_EXT_FORM,
 };

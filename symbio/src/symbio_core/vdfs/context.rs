@@ -11,7 +11,7 @@ use super::error::{VdfsError, VdfsResult};
 /// 调用级自定义参数的键值表（**使用方注入 → provider 取用**）。
 ///
 /// 键名是**约定**而非类型：使用方与 provider 通过共享常量对齐（如
-/// [`VDFS_PARAM_WORKDIR`]）。之所以用 JSON 值而非类型化槽位，是为了让机制不依赖
+/// [`VDFS_PARAM_WORKDIR`](super::VDFS_PARAM_WORKDIR)）。之所以用 JSON 值而非类型化槽位，是为了让机制不依赖
 /// 任何具体资源语义——**新增一个约定参数不需要改动接口**。
 pub type VdfsParams = serde_json::Map<String, Value>;
 

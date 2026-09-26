@@ -27,7 +27,7 @@ use super::words::{VDFS_KIND_DIR, VDFS_KIND_FILE, VDFS_STATUS_ACTIVE};
 ///
 /// 现在只留**类型**这一层：本结构描述「这类东西落成后长什么样」，由 provider
 /// 自持。**导入不是类型的一种**，它是详情页上的一条动作
-/// （[`VDFS_ACTION_IMPORT`]），与 [`VDFS_ACTION_EXPORT`] / `delete` 同级——
+/// （[`VDFS_ACTION_IMPORT`](super::VDFS_ACTION_IMPORT)），与 [`VDFS_ACTION_EXPORT`](super::VDFS_ACTION_EXPORT) / `delete` 同级——
 /// 见 `docs/DECISIONS.md` ADR-029。
 ///
 /// ## 两条独立的键：`ext` 与 `node_ext`
@@ -45,13 +45,11 @@ use super::words::{VDFS_KIND_DIR, VDFS_KIND_FILE, VDFS_STATUS_ACTIVE};
 ///
 /// ## 创建语义仍归 provider
 ///
-/// 「新建」在机制上就是一次 [`VdfsProvider::write`]（`create: true`）。本结构
+/// 「新建」在机制上就是一次 [`VdfsRequest::Write`](super::VdfsRequest::Write)（`create: true`）。本结构
 /// 只声明**草稿长什么样**；具体写什么、怎么校验，由 provider 在 `write` 中自持。
 /// 需要「先选个本地包再落盘」这类**额外操作**时，那是详情页的动作
-/// （[`VDFS_ACTION_IMPORT`]），不是本结构的字段。
+/// （[`VDFS_ACTION_IMPORT`](super::VDFS_ACTION_IMPORT)），不是本结构的字段。
 ///
-/// [`VdfsProvider::write`]: VdfsProvider::write
-/// [`VdfsContent::b64`]: VdfsContent::b64
 /// [`entry::id_of`]: crate::providers::vdfs_service::entry::id_of
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VdfsNewType {
@@ -204,7 +202,7 @@ pub struct VdfsNode {
     ///
     /// ⚠️ 它是**至多一种**（见 [`VdfsNewType`]）：一个目录接受的是**一类**东西。
     /// 同一个类型的多种落盘路径（表单填 / 整包导入）不是两种类型，后者是详情页
-    /// 上的一条动作（[`VDFS_ACTION_IMPORT`]），不在这里堆成一张清单。
+    /// 上的一条动作（[`VDFS_ACTION_IMPORT`](super::VDFS_ACTION_IMPORT)），不在这里堆成一张清单。
     ///
     /// `Box` 不是随手加的：`VdfsNewType` 带四个 `Option<String>` + `schema`
     /// （≈150 字节），而 `VdfsNode` 是**全系统数量最多**的类型
@@ -354,7 +352,7 @@ pub fn derive_ext(name: &str) -> Option<String> {
 
 /// 列表条目 = **地址 + 节点**。
 ///
-/// 这是列表响应里元素的形状（[`VdfsResponse::List`] / `vdfs/list` / `vdfs/tree`），
+/// 这是列表响应里元素的形状（[`VdfsResponse::List`](super::VdfsResponse::List) / `vdfs/list` / `vdfs/tree`），
 /// 也是「地址为什么不在 [`VdfsNode`] 里」的答案：地址属于**这一次列举**，不属于
 /// 节点——同一个节点可以在不同列表里以不同地址出现（见 [`VdfsNode`] 的文档）。
 ///

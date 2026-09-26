@@ -20,7 +20,7 @@ pub const VDFS_STATUS_UNKNOWN: &str = "unknown";
 /// 静态资源（如设置分区）本来就没有「运行中 / 就绪」可言，给它画一个状态点
 /// 只是噪音。列表据此**不渲染状态点**（见 `docs/design/vdfs-frontend.md` §4.2）。
 ///
-/// 缺省仍是 `active`（见 [`default_status`]）：只有**显式**声明本值的节点才会
+/// 缺省仍是 `active`（见 `node.rs` 的 `default_status`）：只有**显式**声明本值的节点才会
 /// 失去状态点，因此这是「声明出来的无状态」，不是「忘了填」。
 pub const VDFS_STATUS_NONE: &str = "";
 
@@ -58,9 +58,9 @@ pub const VDFS_EXT_ZIP: &str = "zip";
 ///
 /// - [`VDFS_ACTION_TEST`]「测试连接」——模型 / MCP 这类外部资源的连通性自检；
 /// - [`VDFS_ACTION_EXPORT`]「导出」/ [`VDFS_ACTION_IMPORT`]「导入」——**一对逆向**
-///   动作：导出把整目录资源打包成一个 zip 随 [`VdfsActionResult::data`] 返回，
+///   动作：导出把整目录资源打包成一个 zip 随 [`VdfsActionResult::data`](super::VdfsActionResult::data) 返回，
 ///   导入把这样一个 zip 的字节写进目标地址。两者都是 provider 自持的动词，
-///   与 [`VdfsRequest::Write`] 同走 [`VdfsContent::b64`] 二进制通道，区别只在
+///   与 [`VdfsRequest::Write`](super::VdfsRequest::Write) 同走 [`VdfsContent::b64`](super::VdfsContent::b64) 二进制通道，区别只在
 ///   「谁发起、对哪个地址」：`write` 是通用写入，导入是**本目录的一种操作**；
 /// - [`VDFS_ACTION_TRUNCATE`] / [`VDFS_ACTION_CLEAR`]——列表类资源的**区间删除**：
 ///   前者删「该条及其之后」，后者清空整个列表。
@@ -72,13 +72,13 @@ pub const VDFS_EXT_ZIP: &str = "zip";
 /// `write` 表达就得让「地址」同时承担「谁的内容」和「打包哪棵子树」两种含义；
 /// 动作把这件事交给 provider 自己解释，VDFS 只透传。
 ///
-/// 反过来说，**它们也不该在 [`VdfsProvider`] 上另立接口**：导入是一次「对某个地址
+/// 反过来说，**它们也不该在 [`VdfsProvider`](super::VdfsProvider) 上另立接口**：导入是一次「对某个地址
 /// 做什么」的操作，与 [`VDFS_ACTION_TEST`] / [`VDFS_ACTION_EXPORT`] 同类——占的
 /// 是详情页的一条动作，而不是核心 trait 的一个方法。
 ///
 /// ## 为什么「截断 / 清空」是动作而不是 `delete`
 ///
-/// [`VdfsProvider::delete`] 的全局语义是「**这一个**节点没了」——它是**逐节点**
+/// [`VdfsRequest::Delete`](super::VdfsRequest::Delete) 的全局语义是「**这一个**节点没了」——它是**逐节点**
 /// 的。拿它表达「删一个节点却删掉了它后面所有」会成为一条**没人能预期的默认
 /// 行为**；而拿 `cascade: bool` 之类的
 /// 附加位区分，则让「是哪种删除」变成两个字段必须一起读。动作是 provider 自持的
@@ -95,20 +95,20 @@ pub const VDFS_EXT_ZIP: &str = "zip";
 /// 不需要认识「区间」这个概念。会话消息的落地形态见
 /// `session/plugin/vdfs_provider.rs::truncate_messages` / `clear_messages`。
 ///
-/// 回执里的被删 id 列表（随 [`VdfsActionResult::data`]）是**权威**列表：
+/// 回执里的被删 id 列表（随 [`VdfsActionResult::data`](super::VdfsActionResult::data)）是**权威**列表：
 /// 调用方据此幂等对齐本地视图，不依赖推送。
 pub const VDFS_ACTION_TEST: &str = "test";
 /// 节点动作标识：**导出**（打包下载；与 [`VDFS_ACTION_IMPORT`] 互为逆向）
 pub const VDFS_ACTION_EXPORT: &str = "export";
 /// 节点动作标识：**导入**（整包写入；与 [`VDFS_ACTION_EXPORT`] 互为逆向）。
 ///
-/// 载荷是一个 zip 的字节（[`VdfsContent::b64`] 通道），provider 把它解释为
+/// 载荷是一个 zip 的字节（[`VdfsContent::b64`](super::VdfsContent::b64) 通道），provider 把它解释为
 /// 「用这个包建出 / 覆盖本目录下的一份资源」——具体语义由 provider 自持。
-/// 与 [`VdfsRequest::Write`] 的区别见本模块「节点动作」一节的说明。
+/// 与 [`VdfsRequest::Write`](super::VdfsRequest::Write) 的区别见本模块「节点动作」一节的说明。
 pub const VDFS_ACTION_IMPORT: &str = "import";
 /// 节点动作标识：**截断**（列表资源：删除该条目**及其之后**的全部条目）。
 ///
-/// 结果里带被删条目的 id 列表（随 [`VdfsActionResult::data`]）——消费方用它做
+/// 结果里带被删条目的 id 列表（随 [`VdfsActionResult::data`](super::VdfsActionResult::data)）——消费方用它做
 /// 幂等对齐：本地若因锚点缺失而删窄了，据权威列表补齐。
 pub const VDFS_ACTION_TRUNCATE: &str = "truncate";
 /// 节点动作标识：**清空**（列表资源：保留容器本身，清掉全部条目）
@@ -138,7 +138,7 @@ pub const VDFS_ACTION_ABORT: &str = "abort";
 
 /// 节点动作标识：**列出插件注册表**（容器根的自持动词）。
 ///
-/// 回包见 [`VdfsActionResult::data`]：`{"plugins": [PluginEntry, …]}`。
+/// 回包见 [`VdfsActionResult::data`](super::VdfsActionResult::data)：`{"plugins": [PluginEntry, …]}`。
 pub const VDFS_ACTION_PLUGINS: &str = "plugins";
 /// 节点动作标识：**启用**（把停用的插件恢复为已挂载）。
 ///

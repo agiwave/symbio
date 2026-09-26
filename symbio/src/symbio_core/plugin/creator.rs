@@ -10,6 +10,30 @@
 //! - [`create_object`]
 //! - [`has_creator`]
 //! - 宏 `submit_object_creator!`
+//!
+//! ## 机制只做「按 id 装配」，不做「处理数据」
+//!
+//! 构造函数签名**只有 `ctx` 一个入口、没有参数位**，这是刻意的：本机制表达的是
+//! 「按 id 装出一个对象」，不是「让这个对象算一段数据」。后者由返回对象自己的方法承担，
+//! 数据经方法参数或 `ctx` 键进入。
+//!
+//! 由此推出与 `ctx` 键的分工——**每次调用变化的值走 `ctx` 键，按 id 选实现走本机制**。
+//! 完整判据（provider 化的三个条件）见 `docs/DECISIONS.md` ADR-035。
+//!
+//! ## ⚠️ 构造函数必须廉价（本机制的隐含契约）
+//!
+//! **`create_object` 不做缓存**——每次调用都执行一次构造函数，只在容器侧持有 `Arc`
+//! （`composite` 就是这么做的：`mount_child` 每个挂载点建一个实例，各带自己的 `ctx`）。
+//! 因此调用方可能反复调它，而每次的代价由**构造函数自己**决定。三种策略：
+//!
+//! | 情形 | 写法 | 范本 |
+//! |---|---|---|
+//! | 无状态（unit struct） | 直接 `Arc::new(Self)` | `plugins/model/protocols/*.rs` 的 `build` |
+//! | **构造昂贵**（建会话 / 载模型 / 开连接） | 实现**自己** `LazyLock` 单例，构造只 `Arc::clone` | `providers/embedding/local.rs` 的 `build_local` |
+//! | 每个挂载点必须独立（持目录 / 配置 / 状态） | 就让它每次新建——**这是 `dyn Plugin` 的语义** | `plugins/composite/registry.rs::mount_child` |
+//!
+//! **机制层不代管缓存**：`dyn Plugin` 的「每挂载点一实例」语义要求同一 id 在
+//! 不同子树下返回不同对象（见 ADR-035「被否决的方案」）。
 
 use crate::symbio_core::PluginInvokeRequest;
 use std::any::{Any, TypeId};
@@ -126,7 +150,7 @@ pub fn has_creator(id: &str) -> bool {
 
 /// 指定 trait 的**全部已注册工厂 id**（顺序不保证，调用方需要稳定顺序时自行排序）。
 ///
-/// 用途：「这个构建里能装哪些插件」——插件工厂全在编译期注册（[`submit_object_creator!`]），
+/// 用途：「这个构建里能装哪些插件」——插件工厂全在编译期注册（[`submit_object_creator!`](crate::submit_object_creator)），
 /// 运行时无法加载新代码，因此「安装一个插件」的可行语义只能是「为某个**已注册**的
 /// 工厂建出它的插件目录」。本函数是那份候选清单的唯一来源。
 ///

@@ -172,7 +172,13 @@ export const BASELINE = {
   //      model 6 条迁移保全、`remove_keys_drops_legacy_fields_but_keeps_identity`（1）。
   //      +4：agent 新增「过不了 §10 门槛的整包拒收」「非 v2 目录一处也浏览不到」
   //      「挂载根只列通过门槛者」，model 新增「启动加载填满注册表与镜像」。
-  rustTests: 952,
+  // 958：把上一条删掉的那 6 条**补回来**（2026-09-26）——952 → **958**，全部来自
+  //      `3a25987`（三处根因修复）：`plugins/local/policy/mod.test.rs` **+4**（限流
+  //      窗口 `checked_sub` 下溢的两条路径 × 正反例）与 `plugins/session/active.test.rs`
+  //      **+2**（压缩永久失败熔断）。逐文件核对方式：`git diff 45466fc..HEAD -- symbio/src`
+  //      数 `#[test]` / `#[tokio::test]` 的增删（+6 / −0），不是估算。
+  //      本格此前滞后一格：那批修复只跑了定向测试，基线没跟着改；本次门禁全量实测对齐。
+  rustTests: 958,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *
@@ -185,6 +191,22 @@ export const BASELINE = {
    * 8 = 2026-09-23 实测（`cd cli && cargo test`）。
    */
   cliRustTests: 8,
+  /**
+   * `tauri/src-tauri`（包名 `symbio-tauri`）的通过数（**只增不减**，判据同上）。
+   *
+   * 为什么单独立一格：这是**第三个独立 workspace**，`cargo test` 在 `symbio/` 或
+   * `cli/` 下都跑不到它。而它此前**完全不在门禁的扫描范围内**——不 fmt、不 check、
+   * 不 clippy、不 test，449 行 Rust 全靠「没人动它」。它 `use symbio::…`，是
+   * `symbio` 公开面的**跨 crate 消费方**：一次 API 改名可以让壳编译失败而门禁全绿。
+   * （`scripts/tauri-binary.mjs` 会构建壳，但它只在**手工**跑它时才构建，门禁只跑
+   * 它的回归测试，因此不算覆盖。）
+   *
+   * 0 = 2026-09-26 实测：壳自己没有用例（`cargo test` 打 `0 passed`）。基线取 0
+   * 意味着**棘轮此刻是惰性的**——它不拦任何东西，只在「有人加了用例」之后开始生效
+   * （那时门禁会提示更新本格）。真正守壳的是同一阶段里的 `check --tests` 与
+   * `clippy --all-targets`：抓的是编译期契约，那才是消费方最该被守的东西。
+   */
+  tauriRustTests: 0,
   // 47 spec 文件 / 661 → 683 → 687 → 689 → 724 → 726 用例。文件数与用例数均与平台无关（全仓 spec
   // 零平台分支、it.each 只遍历静态常量数组），照实测值钉死；逐批明细见对应提交
   // （`git log --grep=<批次/主题>`；本仓库不维护变更日志，变更历史即提交历史）。

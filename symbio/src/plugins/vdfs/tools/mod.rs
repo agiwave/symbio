@@ -68,11 +68,13 @@ pub(crate) fn ensure_required(args: &Value, field: &str) -> Result<(), PluginErr
     let present = args
         .get(field)
         .and_then(|v| v.as_str())
-        .map_or(false, |s| !s.is_empty());
+        .is_some_and(|s| !s.is_empty());
     if present {
         Ok(())
     } else {
-        Err(PluginError::ValidationError(format!("缺少必填参数: {field}")))
+        Err(PluginError::ValidationError(format!(
+            "缺少必填参数: {field}"
+        )))
     }
 }
 

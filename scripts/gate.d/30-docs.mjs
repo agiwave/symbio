@@ -19,7 +19,7 @@ const GUARDS = [
   'test-layout-audit',
   'dead-code-audit',
 ]
-// 不是审计脚本，而是共享库 / 门禁原语，只跑回归测试：
+// 不是**判定型**审计脚本，只跑回归测试（共享库 / 门禁原语 / 报告型脚本）：
 //   - `color` 带一道「scripts/ 下不得手写 ANSI」守卫；
 //   - `gate.d/_shared` 的 `autoWork` 是「自动执行的工作」原语。它的失效方式
 //     与守卫同源且更隐蔽：**看起来在修、其实没把修复带进提交**——本地跑一次门禁
@@ -34,7 +34,12 @@ const GUARDS = [
 //     指纹随输入变（含 `symbio/src`——整棵插件树被编译进壳）、
 //     「产物比构建戳旧」必须判不可信（构建失败时旧产物会看起来新鲜）、
 //     输入未变时不得重写戳（否则「什么都不用重建」会变成假警报）。
-const TEST_ONLY = ['color', 'gate.d/_shared', 'cli-binary', 'tauri-binary']
+//   - `schema-audit` 是**报告型**（见下 `REPORT_ONLY`），失效形态不是假绿灯而是
+//     **说假话**：把在用的模块列成「下放候选」，读的人顺着去改本来没坏的东西。
+//     实测事故：`schemas/hook` 被报成「仅 1 个外部消费文件」，而它实际有 3 个消费文件
+//     ——hook 插件走 `schemas::{HookEvent}` 顶层再导出名，路径里没有子模块名。
+//     报告不判失败 ⇒ 坏了没人发现，故它比判定型守卫**更需要**回归测试。
+const TEST_ONLY = ['color', 'gate.d/_shared', 'cli-binary', 'tauri-binary', 'schema-audit']
 // 报告型：只防崩溃（退出码恒 0，判定需人工复核），走日志不刷屏。
 const REPORT_ONLY = ['schema-audit']
 

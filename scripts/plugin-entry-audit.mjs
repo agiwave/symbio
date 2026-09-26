@@ -32,8 +32,9 @@
  * | E-007 | 插件不得按**强引用**持有兄弟插件实例（`Arc<dyn Plugin>` 字段）  | 跨插件调用必须经 `ctx.parent()` 走容器；按值持有会绕过地址分发、并在插件重建后钉住旧实例（`telegram` 的 `llm_plugin` 就是这么烂掉的） |
  * | E-008 | 文档里标了 `<!-- vocab:PREFIX_ -->` 的**词表行**必须与代码常量逐字一致 | 闭集的第二份真相常驻文档：`vdfs.md` 的 status 行曾一直写 `error`，而代码早已改名为 `failed`——漂移会从文档**流回**代码 |
  * | E-009 | 插件不得直接 `use crate::plugins::<兄弟插件>`              | 「插件之间互不可见」**不是**编译器保证的：`plugins` 是共同父模块，而 Rust 的私有可见性包含"定义模块的后代" ⇒ `plugins::mcp` 能路径到私有的 `plugins::web`。当前代码恰好为 0，但没有守卫，一次顺手 import 就能破坏它且不留红（`plugins/mod.rs` 的架构原则只是约定） |
+ * | E-010 | 消费方不得深引 `symbio_core::<域>::`（`schemas::` 除外）       | 根平铺导出是**唯一**的公开面（`symbio_core/README.md` §1.4）。深引会绕过它：一个符号从根导出里移除后，深引点**照样编译通过**（子模块还在），公开面于是变成两套而没有任何编译错误提示。这条规则此前**不存在**，于是烂到 14 处（`capability/mod.rs` ×5、`cli` 跨 crate 一处、core 内部两处……） |
  *
- * E-001 ~ E-004、E-007 与 E-008 是 **ERROR**（判据 airtight，可进 `--strict` 门禁）；
+ * E-001 ~ E-004、E-007 ~ E-010 是 **ERROR**（判据 airtight，可进 `--strict` 门禁）；
  * E-005 / E-006 是 **WARNING**（需要「动态命名空间」白名单配合，宁可先报给人看）。
  *
  * 报告段另给一张表：**每条路由 → 消费方计数**。`refs=0` 的行是「定义了但没人用」
@@ -475,7 +476,29 @@ const dirNames = new Set(pluginDirs.map((p) => p.dirName))
 
 // 常量表：先收全仓（`ids.rs` 的 `PLUGIN_*`、`paths.rs` 的路由常量、
 // 前端 `pluginPaths.ts` 的模板串链）
-const CODE_ROOTS = ['symbio/src', 'cli/src', 'tauri/src']
+//
+// `tauri/src-tauri/src` 也在列：它是第三个独立 cargo workspace，且**整棵插件树
+// 被编译进壳**——它引用内核的方式必须和 `symbio/src` 同一套规则（此前它不在任何
+// 扫描范围内，见 `gate.d/10-backend.mjs`）。
+const CODE_ROOTS = ['symbio/src', 'cli/src', 'tauri/src', 'tauri/src-tauri/src']
+
+// `symbio_core` 的**域**（README §2 的清单）——E-010 用它判断「这是不是一次深引」。
+// `schemas` 刻意不在列：它是 §1.4 明文允许的唯一深引（协议词汇表就是它的命名空间）。
+const CORE_DOMAINS = new Set([
+  'plugin',
+  'vdfs',
+  'llm',
+  'exec',
+  'event_bus',
+  'capability',
+  'memory',
+  'logger',
+  'clock',
+  'text',
+  'keys',
+  'assembly',
+  'embedding',
+])
 const codeFiles = CODE_ROOTS.flatMap((r) => walk(path.join(repoRoot, r), isCode))
 const consts = buildConstTable(codeFiles)
 // 同名前缀在**两侧可能不是同一套词表**：前端 `@/schemas/vdfs` 另有自己的
@@ -727,6 +750,41 @@ for (const abs of codeFiles) {
       }
     }
 
+    // E-010：消费方不得**深引** `symbio_core::<域>::`（`schemas::` 除外）
+    //
+    // 为什么需要：`symbio_core/README.md` §1.4 写着「一个出口（根平铺重导出）……
+    // 其余深路径（`symbio_core::plugin::dir::` 之类）视为不规范，应改为根平铺」
+    // ——但这条规则**没有任何守卫**，于是它烂到 14 处：`capability/mod.rs` ×5 的
+    // `crate::symbio_core::vdfs::VdfsProvider`、core 内部 `exec/mod.rs` 的
+    // `crate::symbio_core::keys::{…}`、跨 crate 的
+    // `cli` 的 `symbio::symbio_core::event_bus::{…}`……
+    //
+    // 深引的代价不是「不好看」：**根平铺导出是唯一的公开面**。深引会绕过它——
+    // 一个符号从根导出里被移除后，深引点**照样编译通过**（子模块还在，符号还是
+    // `pub`），于是公开面变成两套，且没有任何编译错误会告诉你哪一套是契约。
+    // 这与 E-009 同源：**靠约定的不变量不会自己维持**。
+    //
+    // 唯一的豁免是 `schemas::`（README §1.4 明文允许：协议 schema 的词汇表就是它的
+    // 命名空间，收敛成平铺反而丢失 `session::chat_message` 这类语义）。
+    //
+    // 注释已被 `readCode` 剥掉，故文档链接（`[`…`](crate::symbio_core::vdfs::X)`）
+    // 不会误报——但**测试文件要管**（`capability/tools.test.rs` 就是一处真实违规）。
+    if (isRust) {
+      const m = line.match(/\bsymbio_core\s*::\s*([a-z_][a-z0-9_]*)\s*::/)
+      if (m && CORE_DOMAINS.has(m[1]) && !exempted(raw, i, 'E-010')) {
+        report(
+          'E-010',
+          'error',
+          rel(abs),
+          i + 1,
+          `\`symbio_core::${m[1]}::\` —— 深引内核子模块；` +
+            `根平铺导出才是唯一的公开面，请写成 \`symbio_core::<符号>\`` +
+            `（\`schemas::\` 子树是唯一的例外，见 \`symbio_core/README.md\` §1.4）`,
+        )
+      }
+    }
+
+
     // E-002 / E-005：路径字面量
     for (const m of line.matchAll(/"([^"\n]+)"|'([^'\n]+)'/g)) {
       const lit = m[1] ?? m[2]
@@ -953,6 +1011,7 @@ const ruleNames = {
   'E-007': '不按值持有兄弟插件',
   'E-008': '文档词表 == 代码词表',
   'E-009': '不直接引用兄弟插件模块',
+  'E-010': '不深引内核子模块（根平铺导出）',
 }
 for (const [rule, name] of Object.entries(ruleNames)) {
   const n = hitsByRule.get(rule) ?? 0

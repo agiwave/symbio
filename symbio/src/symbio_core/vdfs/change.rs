@@ -124,9 +124,7 @@ pub fn vdfs_change_of(frame: &crate::symbio_core::PluginFrame) -> Option<VdfsCha
         return None;
     };
     let bus = v.get("data")?;
-    if bus.get("kind").and_then(Value::as_str)
-        != Some(crate::symbio_core::event_bus::EVENT_BUS_KIND_VDFS)
-    {
+    if bus.get("kind").and_then(Value::as_str) != Some(crate::symbio_core::EVENT_BUS_KIND_VDFS) {
         return None;
     }
     VdfsChange::deserialize(bus.get("data")?).ok()

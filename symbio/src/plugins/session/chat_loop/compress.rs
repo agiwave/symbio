@@ -98,7 +98,10 @@ pub(crate) async fn auto_compress_process(
         Err(f) => {
             if let Some(em) = &orchestrator.compression {
                 em.state
-                    .compression_record_failure(matches!(f, CompressionFailure::InputOverLimit { .. }))
+                    .compression_record_failure(matches!(
+                        f,
+                        CompressionFailure::InputOverLimit { .. }
+                    ))
                     .await;
             }
             Err(f)
@@ -717,7 +720,10 @@ pub(crate) async fn retry_compaction(
         Err(f) => {
             if let Some(em) = &orchestrator.compression {
                 em.state
-                    .compression_record_failure(matches!(f, CompressionFailure::InputOverLimit { .. }))
+                    .compression_record_failure(matches!(
+                        f,
+                        CompressionFailure::InputOverLimit { .. }
+                    ))
                     .await;
             }
             // 失败节点已由内核落库并广播（含 `meta.failure_kind` + 原因），这里只记日志

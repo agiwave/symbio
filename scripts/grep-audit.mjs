@@ -317,7 +317,9 @@ console.log()
 //   · `.vdfs` 裸名 / `.vdfs/…`（地址） / 带版本后缀的变体（`.vdfsv2`、`.vdfs2`）。
 //     **连字符后缀不判**（`.vdfs-card` 这类 CSS 类名是另一码事），
 //     其它字母数字后缀（`.vdfsx`）同样不判——按形状判根名，不猜意图。
-// 范围：仓内全部 .rs / .ts / .vue / .md（`scripts/` 工具自身除外）。
+// 范围：仓内全部 .rs / .ts / .vue / .md（`scripts/` 工具自身除外），
+//       **不含**构建产物与运行期数据目录（`.symbio` 等，见 `S010_SKIP_DIRS`）——
+//       审计对象是源码树；运行期数据不在版本控制里，模型往里写什么与规则无关。
 // 豁免（写在规则里，逐条留痕）：
 //   · `symbio/src/plugins/vdfs/**` —— 根名的所有者，字面量只允许在这里；
 //   · `docs/archive/**` —— 历史记录不改写，
@@ -331,7 +333,22 @@ const S010_TOKEN_RE = /(?<![A-Za-z0-9_.])\.vdfs(?:v?\d+)?(?![A-Za-z0-9_-])/g
 // 注释终止符 `-->` 不能充当理由（空理由视为未豁免的约定不能被它绕过）。
 const WAIVER_S010_RE = /grep-audit-allow S-010:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
 const S010_EXTS = new Set(['.rs', '.ts', '.vue', '.md'])
-const S010_SKIP_DIRS = new Set(['node_modules', 'target', 'dist', '.git', '.workbuddy', '.workbuddy-ai', '.venv'])
+// 跳过的是**非源码树**：构建产物 + 依赖 + 运行期数据目录。
+// `.symbio` 是运行期 homedir（插件树落在磁盘上的那份，见 `DEFAULT_HOMEDIR`），
+// 已被 `.gitignore` 忽略——**它不在版本控制里，也就不是本规则的对象**。
+// 漏掉它会让规则去审计「agent 自己写下的记忆」：实测一次会话把 `.vdfs` 字面量
+// 写进 `.symbio/session/<id>/AGENTS.md`（模型在正文里引用挂载路径），
+// 门禁于是因为**运行期数据**判红——源码一个字节没改。
+const S010_SKIP_DIRS = new Set([
+  'node_modules',
+  'target',
+  'dist',
+  '.git',
+  '.workbuddy',
+  '.workbuddy-ai',
+  '.symbio',
+  '.venv',
+])
 // 与 resolveScope 同策略：cwd 是仓库树就用 cwd（回归测试注入临时树），否则退回仓库根
 const S010_ROOT = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
 

@@ -47,6 +47,7 @@
 | [032](#adr-032-插件身份归-pluginymlpluginmeta-从元信息降为出厂自述) | 插件身份归 `PLUGIN.yml` | 现行（含未完成项） |
 | [033](#adr-033-生命周期钩子--start-同步stop-异步停用与卸载各给理由) | 生命周期钩子：`start` 同步、`stop` 异步 | 现行（含未完成项） |
 | [034](#adr-034-sse-行解析契约随流循环迁入-model-插件) | SSE 行解析契约随流循环迁入 `model` 插件 | 现行（**取代 ADR-022 的位置条款**） |
+| [035](#adr-035-provider-化的判据--三个条件与构造契约) | provider 化的三个条件与构造契约 | 现行 |
 
 ---
 
@@ -635,6 +636,60 @@
 - 新增协议只需动 `plugins/model/`，core 不受影响。
 - `symbio_core::llm::sse` 子模块消失；`symbio_core` 不再导出 `SseLineParser` / `SsePartialLineExtractor` / `ModelProtocolEvent` / `utf8_chunk`。
 - 若将来出现**第二个** SSE 消费者（例如另一类流式 provider），按 ADR-023 再上提到 core——判据不变，上提成本是一次编译期可检的搬迁。
+
+---
+
+## ADR-035: provider 化的判据 —— **三个条件与构造契约**
+
+**状态**：已接受。补充 [ADR-007](#adr-007-静态注册-inventory)（**怎么注册**）与 [ADR-023](#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层)（**住哪**），回答**该是什么形态**。
+
+**背景**：ADR-007 定了 `submit_object_creator!` + `inventory` 的静态注册，ADR-023 定了「依赖方 ≤ 1 就下沉回该模块」。两条都不回答这个问题：**一个被多个模块共享的功能，该做成 provider 契约，还是值对象 / 纯函数 / 全局单例？**
+
+实测现有三个 provider 家族，**三种复用策略各不相同，而没有任何一处写着该怎么选**：
+
+| 家族 | 构造代价 | 复用策略 | 策略写在哪 |
+|---|---|---|---|
+| `dyn Plugin` | 中等（持目录与配置） | **不复用**——每个挂载点一个独立实例 | `plugins/composite/registry.rs::mount_child` |
+| `dyn ModelProtocol` | 零（无状态 unit struct） | 不需要 | 无处（也不需要） |
+| `dyn EmbeddingService` | **昂贵**（ONNX 会话 + 341 MB 构建缓存） | 实现**自己** `LazyLock` 单例 | 只在 `providers/embedding/local.rs` 的一行注释里 |
+
+第三个家族的策略只活在注释里——下一个写昂贵 provider 的人若照抄 `ModelProtocol` 的 `build` 写法，就会**每次调用重建**，且不会有任何编译期或门禁提示。
+
+**决策**：
+
+1. **provider 化需同时满足三个条件**：
+   1. **调用方需要运行时多态**——≥2 个实现，且**编译期**不知道选哪个；
+   2. **无状态，或状态可共享**——一个 id 对应一个对象语义；
+   3. **功能是「按 id 装配对象」而不是「处理一段数据」**（理由见下）。
+2. **构造契约：构造函数必须廉价。** 需要单例的实现在**自己内部**建（范本：`providers/embedding/local.rs` 的 `LazyLock`）；`create_object` **不做缓存**。
+3. **`ctx` 键与 `create_object` 是两条互不替代的通道**：
+
+   | | `ctx` 键（`SymbioKey`） | `create_object` |
+   |---|---|---|
+   | 装什么 | **每次调用变化**的**值** | **按 id 装配**的**对象** |
+   | 生命周期 | 一次 traverse / 一次工具调用 | 由持有者决定 |
+   | 例 | `EVENT_SINK` · `ABORT_SIGNAL` · `CAPABILITY_ERRORS` · `PLUGIN_DIR` | `dyn Plugin` · `dyn ModelProtocol` · `dyn EmbeddingService` |
+   | `ctx` 的角色 | 就是它本身 | 仅作**构造上下文**（参数袋） |
+
+   判据一句话：**每次调用都不一样的值走 `ctx` 键；按 id 选一个实现走 `create_object`。**
+
+**理由**：
+
+- 决策 1.3 有**签名级证据**：`type ObjectConstructor = fn(Arc<dyn PluginInvokeRequest>) -> Box<dyn Any + Send + Sync>`（`symbio_core/plugin/creator.rs`）——**没有参数位**。机制表达得了「按 id 装配」，表达不了「让这个对象处理这段数据」；后者只能由返回对象自己的方法承担，数据经 `ctx` 键或方法参数进入。
+- 决策 2 的「实现自持单例」不是权宜：**构造代价是实现的私事**。机制若代管，就必须知道「哪些实现昂贵」，而那正是 ADR-007「不针对任何具体类型做特殊化」要避免的知识。
+- 决策 3 划清边界后，`ExecTranscriptWriter` 的形态才有解释：core 定义 trait（`ExecEventSink::Direct` 要调它，不能反向依赖 session 的 `Transcript`），但**不走 `create_object`**——它的出口是「**这一次执行**的记录器」，是每次调用变化的值，故走 `ctx` 键（`ExecEventSinkKey`）。
+
+**被否决的方案**：
+
+- **给 `create_object` 加统一缓存（按 id 缓存 `Arc<dyn Any>`）**：**会破坏分形挂载**。[`SUB_AGENT_PLUGINS`](#adr-001-分形插件架构) 让**每一棵**子 Agent 子树都挂 `model` / `session` / `local`……同一个 provider id 因此在系统树与每棵子树下**各有一个挂载点**，各自的 `ctx` 带各自的 `PLUGIN_DIR`；缓存后所有子树会拿到**同一个**实例（且是第一个挂载点的 ctx），子智能体的模型服务与工作区记忆会全部串到父树上。收益仅是省一次 `Arc::clone`——而昂贵构造已由实现方用 `LazyLock` 解决。
+- **把 core 的共享内核（`memory` / `clock` / `text` / `logger`）硬抽 trait**：都不满足决策 1 的前两条——没有第二实现，`dyn` 只是把一次构造换成一次字符串查表（`memory/mod.rs` 有专节论证；[ADR-011](#adr-011-资源存储--vdfsprovider-的集中实现) 对 `VdfsProvider` 记的正是同一判据的反面：**不存在第二种实现时不套 `dyn`**）。
+- **合并 `clock` 与 `text` 为「业务无关工具域」**：任何**有判别力**的合并判据都会把 `clock` 排除——`text` 是**纯函数**（输入决定输出），`clock` 是**非确定性来源**（无输入，输出随系统时钟变化）。要么判据松到能装下两者（那就成了杂物抽屉，`keys` 一度收下插件清单正是前车之鉴，见 [ADR-023](#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层) 的「依赖方数量」判据所修的那一类错放），要么判据有判别力（`clock` 随即被排除）。而合并的收益只是少一个目录 + 少一行 README——不足以换掉「一个域名自证内容」这条性质。
+
+**后果与不变量**：
+
+- 新增共享功能时**先过三条件**；三条件不全成立一律用值对象 / 纯函数 / 全局单例，**不硬抽 trait**。
+- 新增 provider 时**构造必须廉价**；昂贵实现自持单例，范本指向 `providers/embedding/local.rs`。
+- 不变量：`symbio_core` 里**每一处含具体逻辑的域都有 ≥2 个消费方**，且模块文档写明了「为什么是内核而不是 provider」。此条可由 `grep` 复核。
 
 ---
 

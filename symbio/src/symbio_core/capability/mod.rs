@@ -202,7 +202,7 @@ pub async fn invoke_capability(
 ///
 /// `failure_kind` 落在消息 `meta`（JSON）里，与 `error` 这类**信息性**取值同一个
 /// 字段。它是给渲染层看的字符串，不是 Rust 侧的判别联合；强行枚举会把「信息性
-/// 标记」升级成「必须穷举的状态」。真正的判据只有一条，见 [`is_pending`]。
+/// 标记」升级成「必须穷举的状态」。真正的判据只有一条，见 [`failure_kind::is_pending`]。
 pub mod failure_kind {
     /// 工具失败（信息性：错误结果回传 LLM 继续，不暂停会话）
     pub const ERROR: &str = "error";
@@ -281,7 +281,7 @@ pub trait CapabilityVisitor: Send + Sync + 'static {
     ///
     /// ## 名字是覆盖键，不是分类
     ///
-    /// 同名覆盖（[`IndexMap`] 语义）用于「同一段文字注册两次时取后者」，不承担任何
+    /// 同名覆盖（`IndexMap` 语义）用于「同一段文字注册两次时取后者」，不承担任何
     /// 分类职责——不要用命名前缀去表达「这是人格」「这是记忆」。
     async fn register_system_prompt(&self, name: &str, prompt: String);
 
@@ -314,7 +314,7 @@ pub trait CapabilityVisitor: Send + Sync + 'static {
     async fn register_vdfs_provider(
         &self,
         _name: &str,
-        _provider: Arc<dyn crate::symbio_core::vdfs::VdfsProvider>,
+        _provider: Arc<dyn crate::symbio_core::VdfsProvider>,
     ) {
     }
 
@@ -322,7 +322,7 @@ pub trait CapabilityVisitor: Send + Sync + 'static {
     /// （语义与 [`Self::list_system_prompts`] 的 `(name, prompt)` 一致）
     async fn list_vdfs_providers(
         &self,
-    ) -> Vec<(String, Arc<dyn crate::symbio_core::vdfs::VdfsProvider>)> {
+    ) -> Vec<(String, Arc<dyn crate::symbio_core::VdfsProvider>)> {
         Vec::new()
     }
 
@@ -330,7 +330,7 @@ pub trait CapabilityVisitor: Send + Sync + 'static {
     async fn get_vdfs_provider(
         &self,
         _name: &str,
-    ) -> Option<Arc<dyn crate::symbio_core::vdfs::VdfsProvider>> {
+    ) -> Option<Arc<dyn crate::symbio_core::VdfsProvider>> {
         None
     }
 
@@ -345,11 +345,10 @@ pub trait CapabilityVisitor: Send + Sync + 'static {
     /// `traverse` 分支里注册根，会话链路与前端链路因此拿到同一个根。
     ///
     /// 默认 no-op —— 不是容器的实现方无需关心。
-    async fn register_vdfs_root(&self, _provider: Arc<dyn crate::symbio_core::vdfs::VdfsProvider>) {
-    }
+    async fn register_vdfs_root(&self, _provider: Arc<dyn crate::symbio_core::VdfsProvider>) {}
 
     /// 取 VDFS 根 provider；无容器注册时为 `None`（等价于「系统里没有资源」）
-    async fn get_vdfs_root(&self) -> Option<Arc<dyn crate::symbio_core::vdfs::VdfsProvider>> {
+    async fn get_vdfs_root(&self) -> Option<Arc<dyn crate::symbio_core::VdfsProvider>> {
         None
     }
 }

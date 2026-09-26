@@ -44,11 +44,11 @@ use super::request::{VdfsRequest, VdfsResponse};
 /// [`Self::dispatch`] 收 `(ctx, path, req)`：**`path` 是第一个分发键**——实现方
 /// 先按它定位资源（转发型实现剥首段找下一层；叶子实现按段找自己的资源），再由
 /// `req` 决定操作怎么落地。实现方按变体 `match`，**只实现自己支持的操作**——
-/// 其余臂返回 [`VdfsError::NotImplemented`]，使用方据此隐藏对应入口。
+/// 其余臂返回 [`VdfsError::NotImplemented`](super::VdfsError::NotImplemented)，使用方据此隐藏对应入口。
 ///
 /// ## 自述一律走 `dispatch`，trait 上不再有第二条通道
 ///
-/// 「根的自述」里有一项**进不了** `PluginMeta`：[`VdfsNode::new_type`] 的
+/// 「根的自述」里有一项**进不了** `PluginMeta`：[`VdfsNode::new_type`](super::VdfsNode::new_type) 的
 /// `schema` 可能要运行期汇流（如 session 的选项定义来自一次 options 广播），
 /// 而 `PluginMeta` 是同步纯数据。
 ///
@@ -59,7 +59,7 @@ use super::request::{VdfsRequest, VdfsResponse};
 /// 其余字段仍以 `PluginMeta` 为准。
 ///
 /// 这样做的理由不是「少一个方法」，而是**通道只有一条才不会有第二种答案**：
-/// 根与更深层的节点（由 provider 自己在 `list` 里给出 [`VdfsNode::new_type`]）
+/// 根与更深层的节点（由 provider 自己在 `list` 里给出 [`VdfsNode::new_type`](super::VdfsNode::new_type)）
 /// 走的是同一条路，使用方不必知道「这个节点是不是根」才能问它「你能新建什么」。
 /// 详见 `docs/DECISIONS.md` ADR-030。
 ///
@@ -68,7 +68,7 @@ use super::request::{VdfsRequest, VdfsResponse};
 /// - **地址是本子树内的相对路径**（`""` = 自身根），已规范化、无穿越风险；
 /// - **`access` 是能力声明**：使用方与消费者只看访问位，不做类型特判；
 /// - **校验归实现方**：写入的必填 / 范围 / 格式校验在实现内完成（见
-///   [`VdfsRequest`] 的语义一节），失败返回 [`VdfsError::Invalid`]（可带字段级
+///   [`VdfsRequest`] 的语义一节），失败返回 [`VdfsError::Invalid`](super::VdfsError::Invalid)（可带字段级
 ///   错误）；
 /// - **线程安全**：`&self` 可能被并发调用。
 #[async_trait]

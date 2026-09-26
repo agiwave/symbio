@@ -18,6 +18,15 @@ import { fileURLToPath } from 'node:url'
 
 const script = fileURLToPath(new URL('./plugin-entry-audit.mjs', import.meta.url))
 
+// 规则条数**从脚本自己推导**，不手写。
+// 原先这里写死 `/9 条规则全部通过/`，而紧邻的注释却声称「条数不写死：规则表是唯一
+// 真相源，脚本从它推导」——注释与代码说的是两件事。后果：加一条规则（E-010）就让
+// 这条测试红，而它红的原因是**数字过时**，不是规则坏了；于是下一个人会去改数字，
+// 顺手把「规则集不能缩小」这层意思也一起改掉。派生出来的数字两头都对。
+const DECLARED_RULES = [...fs.readFileSync(script, 'utf8').matchAll(/^ {2}'(E-\d+)':/gm)].map(
+  (m) => m[1],
+)
+
 /**
  * 在临时目录里搭一棵最小仓库树并跑审计。
  *
@@ -92,8 +101,9 @@ const CLEAN = {
 test('干净树通过（exit 0）', () => {
   const r = audit(CLEAN)
   assert.equal(r.status, 0, r.stdout)
-  // 条数不写死：规则表是唯一真相源，脚本从它推导（手写的「七条」加规则时必漂）
-  assert.match(r.stdout, /9 条规则全部通过/)
+  // 条数从脚本的规则表推导（见上方 `DECLARED_RULES`）——手写数字会在加规则时漂
+  assert.ok(DECLARED_RULES.length > 0, '规则表没解析出来，判据本身坏了')
+  assert.match(r.stdout, new RegExp(`${DECLARED_RULES.length} 条规则全部通过`))
 })
 
 test('报告段给出每条路由的消费方计数', () => {
@@ -587,4 +597,86 @@ test('E-009 豁免理由为空视为未豁免', () => {
   })
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, E009_HIT)
+})
+
+// ── E-010：消费方不得深引 `symbio_core::<域>::` ─────────────────────────
+//
+// 真实形态：`symbio_core/README.md` §1.4 规定「根平铺导出是唯一出口」，但这条规则
+// 此前**没有任何守卫**，于是烂到 14 处。深引的代价不是「不好看」——根导出是唯一的
+// 公开面，符号从根移除后深引点照样编译通过，公开面于是变成两套。
+const E010_HIT = /\[ERROR\]\s+E-010\s+\S+:\d/
+
+test('E-010 命中：插件里 `crate::symbio_core::<域>::…`', () => {
+  const r = audit({
+    ...CLEAN,
+    'symbio/src/plugins/mcp/caller.rs': 'use crate::symbio_core::vdfs::VdfsProvider;\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, E010_HIT)
+})
+
+test('E-010 命中：跨 crate 的 `symbio::symbio_core::<域>::…`（cli）', () => {
+  const r = audit({
+    ...CLEAN,
+    'cli/src/client.rs': 'use symbio::symbio_core::event_bus::EventBus;\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, E010_HIT)
+})
+
+test('E-010 命中：壳侧 `tauri/src-tauri` 也管（整棵插件树编译进壳）', () => {
+  const r = audit({
+    ...CLEAN,
+    'tauri/src-tauri/src/commands.rs': 'use symbio::symbio_core::plugin::Plugin;\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, E010_HIT)
+})
+
+test('E-010 不误报：`schemas::` 是 §1.4 明文允许的唯一深引', () => {
+  const r = audit({
+    ...CLEAN,
+    'symbio/src/plugins/mcp/caller.rs':
+      'use crate::symbio_core::schemas::session::chat_message::ChatMessage;\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+  assert.doesNotMatch(r.stdout, E010_HIT)
+})
+
+test('E-010 不误报：文档链接（注释里的深引路径）', () => {
+  const r = audit({
+    ...CLEAN,
+    'symbio/src/plugins/mcp/caller.rs':
+      '//! 见 [`VdfsProvider`](crate::symbio_core::vdfs::VdfsProvider)。\npub fn f() {}\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+  assert.doesNotMatch(r.stdout, E010_HIT)
+})
+
+test('E-010 不误报：根平铺写法（`symbio_core::<符号>`）', () => {
+  const r = audit({
+    ...CLEAN,
+    'symbio/src/plugins/mcp/caller.rs':
+      'use crate::symbio_core::{VdfsProvider, VdfsNode};\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+  assert.doesNotMatch(r.stdout, E010_HIT)
+})
+
+test('E-010 豁免：带理由的 plugin-entry-allow 不再报；空理由仍报', () => {
+  const withReason = audit({
+    ...CLEAN,
+    'symbio/src/plugins/mcp/caller.rs':
+      '// plugin-entry-allow E-010: 本文件要按子模块路径重导出\nuse crate::symbio_core::vdfs::VdfsProvider;\n',
+  })
+  assert.equal(withReason.status, 0, withReason.stdout)
+  assert.doesNotMatch(withReason.stdout, E010_HIT)
+
+  const emptyReason = audit({
+    ...CLEAN,
+    'symbio/src/plugins/mcp/caller.rs':
+      '// plugin-entry-allow E-010:\nuse crate::symbio_core::vdfs::VdfsProvider;\n',
+  })
+  assert.equal(emptyReason.status, 1, emptyReason.stdout)
+  assert.match(emptyReason.stdout, E010_HIT)
 })

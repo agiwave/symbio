@@ -21,10 +21,10 @@ pub use transport::{
     PluginChannel, PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire,
 };
 
-use crate::symbio_core::vdfs::{
+use crate::symbio_core::SymbioKey;
+use crate::symbio_core::{
     VdfsAccess, VdfsContext, VdfsError, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
 };
-use crate::symbio_core::SymbioKey;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -62,7 +62,7 @@ pub struct PluginMeta {
     /// 图标名（使用方纯 UI 映射；缺省无）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
-    /// 挂载点在父目录列表中的隐藏位（缺省不隐藏；语义与 [`VdfsNode::hidden`] 一致）
+    /// 挂载点在父目录列表中的隐藏位（缺省不隐藏；语义与 [`VdfsNode::hidden`](crate::symbio_core::VdfsNode::hidden) 一致）
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,
     /// 挂载点（根目录）的访问位（缺省「可列目录」）

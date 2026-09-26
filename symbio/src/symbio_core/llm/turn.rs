@@ -38,10 +38,10 @@
 //! 退回纯跨进程传输（见 `symbio_core::exec` 的模块文档）。
 
 use super::model_provider::{ModelFinishReason, ModelUsage};
-use crate::symbio_core::exec::ExecEventSink;
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
+use crate::symbio_core::ExecEventSink;
 use serde_json::Value;
 use std::collections::HashMap;
 use tracing::warn;
@@ -52,7 +52,7 @@ use tracing::warn;
 ///
 /// 用在正文对接收端是**新的权威副本**的帧上：一次性节点（工具结果 / 用户消息
 /// 回填）的单帧完成、存储回执、压缩快照。流式节点的正文已由 [`emit_delta`]
-/// 逐帧传过，它的终态走 [`emit_converge`]，不在这里重发。
+/// 逐帧传过，它的终态走 [`emit_state`]，不在这里重发。
 pub async fn emit_message(sink: &ExecEventSink, msg: ChatMessage) {
     sink.emit(message_frame(&msg)).await;
 }
