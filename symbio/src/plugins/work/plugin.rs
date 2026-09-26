@@ -16,10 +16,10 @@ use super::memory::{self, SEGMENT_NAME, SEGMENT_TITLE};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::VdfsAccess;
 use crate::symbio_core::{
-    announce_configurable, dir_from_ctx, MemoryFile, Plugin, PluginConfigFile, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
-    CAPABILITY_VISITOR, MEMORY_AGENTS_FILE, PATH, PLUGIN_ID_WORK, TRAVERSE_AVAILABLE_TOOLS,
-    WORKDIR,
+    capability_announce_configurable, plugin_dir_from_ctx, MemoryFile, Plugin, PluginConfigFile,
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
+    PluginPayload, CAPABILITY_VISITOR, MEMORY_AGENTS_FILE, PATH, PLUGIN_ID_WORK,
+    TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
 };
 use async_trait::async_trait;
 use serde_json::json;
@@ -71,7 +71,7 @@ pub struct WorkPlugin {
 impl WorkPlugin {
     /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
-        let dir = dir_from_ctx(&*ctx, PLUGIN_ID_WORK);
+        let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_WORK);
         let config: WorkConfig = match dir.load::<WorkConfig>() {
             Ok(Some(c)) => c,
             Ok(None) => WorkConfig::default(),
@@ -216,7 +216,7 @@ impl Plugin for WorkPlugin {
         }
 
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
-        announce_configurable(&ctx, &self.config_file).await;
+        capability_announce_configurable(&ctx, &self.config_file).await;
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }

@@ -101,7 +101,7 @@ impl VdfsChange {
 /// **VDFS 变更唯一的解包入口**——CLI 与 agent 转播桥都走这里。
 ///
 /// 输入是 `event_bus` 投递的一帧，信封形状由
-/// `event_bus::build_envelope` 定义：
+/// `event_bus::event_bus_build_envelope` 定义：
 ///
 /// ```text
 /// { type: "bus_event", data: { kind, session_id, data: <VdfsChange> } }

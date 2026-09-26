@@ -19,7 +19,7 @@ use std::borrow::Cow;
 ///
 /// 若发生截断（原串更长），返回值末尾带 `suffix`（通常是 `…`）；
 /// 未截断时原样返回。`max_bytes` 为 0 时返回空串（不 panic）。
-pub fn truncate_bytes<'a>(s: &'a str, max_bytes: usize, suffix: &str) -> Cow<'a, str> {
+pub fn text_truncate_bytes<'a>(s: &'a str, max_bytes: usize, suffix: &str) -> Cow<'a, str> {
     if s.len() <= max_bytes {
         return Cow::Borrowed(s);
     }
@@ -34,7 +34,7 @@ pub fn truncate_bytes<'a>(s: &'a str, max_bytes: usize, suffix: &str) -> Cow<'a,
 /// 按字节上限安全截断，**不带**省略号后缀：返回合法前缀切片。
 ///
 /// 用于"必须仍是原串子串"的场景（如按字节预算分块发送）。
-pub fn floor_char_boundary(s: &str, max_bytes: usize) -> usize {
+pub fn text_floor_char_boundary(s: &str, max_bytes: usize) -> usize {
     if max_bytes >= s.len() {
         return s.len();
     }

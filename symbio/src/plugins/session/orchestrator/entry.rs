@@ -466,7 +466,7 @@ impl SessionPlugin {
 
             // 收集期硬错误（如会话绑定了不存在的智能体）→ 中止并明确报错，
             // 绝不静默降级成"没有人格的通用助手"。
-            if let Some(first) = take_errors(&chat_ctx).await.into_iter().next() {
+            if let Some(first) = capability_take_errors(&chat_ctx).await.into_iter().next() {
                 let msg = format!("[{}] {}", first.plugin, first.message);
                 crate::plugin_error!("session", "能力收集失败: {}", &msg);
                 this_spawn
@@ -590,7 +590,7 @@ impl SessionPlugin {
     /// 在首个用户消息落盘后调用；规则与 [`super::super::types::Session::display_title`]
     /// 一致（首条用户文本消息首行、限长）。
     ///
-    /// 落盘后发一条 VDFS 变更（`notify_change`）——标题变更不该因发起者不同而走
+    /// 落盘后发一条 VDFS 变更（`vdfs_notify_change`）——标题变更不该因发起者不同而走
     /// 不同链路。VDFS 变更同时到达两类订阅者：会话清单 store 与左栏导航，二者都
     /// 按 path 重读 `vdfs/stat` 取得最新标题，因此这里无需（也无法）在事件里携带载荷。
     pub(crate) async fn ensure_auto_title(&self, session_id: &str) {
@@ -612,14 +612,14 @@ impl SessionPlugin {
         if let Some(obj) = session.metadata.as_object_mut() {
             obj.insert("title".to_string(), json!(title));
         }
-        session.updated_at = crate::symbio_core::now_ms();
+        session.updated_at = crate::symbio_core::clock_now_ms();
         if self.save_session(&session).await.is_err() {
             return;
         }
 
         // 标题变更 = 该会话节点的一次**资源信号**（粗粒度）：消费方重拉清单即收敛
         // （自动命名与手动改名走同一条链路，不因发起者不同而分流）。
-        // 不带节点视图：见 `plugin::notify_change`——资源信号不值得让每个消费端
+        // 不带节点视图：见 `symbio_core::vdfs_notify_change`——资源信号不值得让每个消费端
         // 都背一次逐字段合并；运行态才走带视图的 `emit_session_state`。
         self.notify_change(session_id);
     }

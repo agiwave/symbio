@@ -343,7 +343,7 @@ impl CompressionEmitter {
             // N → M 条"）是**首次也是唯一**一次上线。用状态帧剥掉正文，前端会一直
             // 停在占位文案上，直到重开会话才从存储读到结果（实测回归）。
             // 状态帧只适用于「正文已由 delta 逐帧上线」的节点。
-            tr.apply(crate::symbio_core::message_frame(&node));
+            tr.apply(crate::symbio_core::llm_message_frame(&node));
             tr.persisted(std::slice::from_ref(&node.id));
             node
         };
@@ -372,7 +372,7 @@ impl CompressionEmitter {
     /// 返回的那份——后者没有号（补号发生在存储临界区内的私有副本上）。
     pub async fn emit_persisted(&self, session_id: &str, node: &ChatMessage) {
         self.plugin
-            .transcript_apply(session_id, crate::symbio_core::message_frame(node))
+            .transcript_apply(session_id, crate::symbio_core::llm_message_frame(node))
             .await;
     }
 }
@@ -431,7 +431,7 @@ impl ChatOrchestrator {
         if out.is_reasoning_only(tools.len()) {
             // reasoning-only：模型只产生了 reasoning，没有独立的文本回复。
             //
-            // 同一段 reasoning 在落库时由 build_assistant_messages 以「Text 响应子节点」承载
+            // 同一段 reasoning 在落库时由 llm_build_assistant_messages 以「Text 响应子节点」承载
             // （effective_text 对「无文本回复」的回退语义）。因此这里**绝不能**再额外广播一个
             // content=reasoning 的 Text 节点——否则前端会同时持有「Reasoning 子节点」与
             // 「Text 响应子节点」两份相同内容，表现为：
@@ -443,7 +443,7 @@ impl ChatOrchestrator {
             // 才补发一个 Text 节点兜底（此时不存在 Reasoning 节点，不会造成重复）。
             if !out.reasoning_child_id.is_empty() {
                 // 该节点已由 ReasoningDelta 逐帧上线过正文，这里只迁状态。
-                emit_state(
+                llm_emit_state(
                     sink,
                     ChatMessage {
                         id: out.reasoning_child_id.clone(),
@@ -458,13 +458,13 @@ impl ChatOrchestrator {
                 .await;
             } else {
                 let resp_id = if out.response_text_child_id.is_empty() {
-                    short_id()
+                    llm_short_id()
                 } else {
                     out.response_text_child_id.clone()
                 };
                 // 兜底路径：这个 Text 节点是**新建**的（reasoning-only 时没有正文
                 // 子节点），正文必须随帧上线 ⇒ 完整消息帧。
-                emit_message(
+                llm_emit_message(
                     sink,
                     ChatMessage {
                         id: resp_id,
@@ -486,7 +486,7 @@ impl ChatOrchestrator {
 
         // Mark reasoning child as completed
         if !out.reasoning.is_empty() && !out.reasoning_child_id.is_empty() {
-            emit_state(
+            llm_emit_state(
                 sink,
                 ChatMessage {
                     id: out.reasoning_child_id.clone(),
@@ -503,7 +503,7 @@ impl ChatOrchestrator {
 
         // Mark response text child as completed (exists if there was text content)
         if !out.text.is_empty() && !out.response_text_child_id.is_empty() {
-            emit_state(
+            llm_emit_state(
                 sink,
                 ChatMessage {
                     id: out.response_text_child_id.clone(),

@@ -376,7 +376,7 @@ function analyzePlugin(dirName, ids) {
     for (const mm of t.matchAll(/register_vdfs_provider\(\s*([^,\n]+)/g)) {
       mounts.add(resolveArg(mm[1], ids));
     }
-    if (t.includes("announce_configurable(")) hasConfig = true;
+    if (t.includes("capability_announce_configurable(")) hasConfig = true;
     for (const n of extractToolNames(t, consts)) tools.add(n);
     for (const mm of t.matchAll(
       /impl\s+(?:<[^>]*>\s*)?([A-Z][A-Za-z0-9_]*)(?:<[^>]*>)?\s+for\s+/g
@@ -685,7 +685,7 @@ function render() {
   L.push(">   插件**身份**取自 `PLUGIN.yml`（见 [DECISIONS.md](./DECISIONS.md) ADR-032）。");
   L.push(">   标「（动态）」的是按运行期规则分发、无法静态枚举的。");
   L.push(">   漏项与歧义以 [ROUTES.md](./reference/ROUTES.md) 为准。");
-  L.push("> - **配置文件** = 该插件调用过 `announce_configurable`（配置就是 `<根>/<挂载点>/PLUGIN.yml`，");
+  L.push("> - **配置文件** = 该插件调用过 `capability_announce_configurable`（配置就是 `<根>/<挂载点>/PLUGIN.yml`，");
   L.push(">   读写走 `vdfs/read` / `vdfs/write`，**没有配置专用路由**）。");
   L.push("");
 

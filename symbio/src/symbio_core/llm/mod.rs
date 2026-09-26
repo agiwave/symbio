@@ -27,7 +27,7 @@ pub mod turn;
 
 pub use model_provider::{ModelFinishReason, ModelProvider, ModelUsage};
 pub use turn::{
-    build_assistant_messages, build_tool_message, emit_delta, emit_message, emit_removed,
-    emit_state, message_frame, removed_frame, short_id, state_frame, TurnOutput,
-    TurnStreamChildIds, TurnToolCallAccumulator, TurnToolCallInfo,
+    llm_build_assistant_messages, llm_build_tool_message, llm_emit_delta, llm_emit_message,
+    llm_emit_removed, llm_emit_state, llm_message_frame, llm_removed_frame, llm_short_id,
+    llm_state_frame, TurnOutput, TurnStreamChildIds, TurnToolCallAccumulator, TurnToolCallInfo,
 };

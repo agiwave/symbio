@@ -51,7 +51,7 @@ pub use super::provider::ToolVdfs;
 
 /// 把**已拆好的调用参数**解析为具体请求类型（缺省容忍空载荷）。
 ///
-/// 参数由 `symbio_core::invoke_capability` 从信封拆出后作为入参给出，
+/// 参数由 `symbio_core::capability_invoke` 从信封拆出后作为入参给出，
 /// 因此这里不再自己回读 `ctx.payload()`——「拆信封」只有一处。
 pub(crate) fn request_of<T: DeserializeOwned + Default>(args: &Value) -> T {
     serde_json::from_value::<T>(args.clone()).unwrap_or_default()

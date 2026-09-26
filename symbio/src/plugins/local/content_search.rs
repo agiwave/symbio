@@ -129,7 +129,7 @@ impl ContentSearchTool {
                     // 安全截断：搜索结果正文常含中文，裸 `&[..N]` 会 panic 在字符边界内
                     format!(
                         "{}...\n\n[输出已截断：超过 {} 字节]",
-                        crate::symbio_core::truncate_bytes(&result, MAX_OUTPUT_BYTES, ""),
+                        crate::symbio_core::text_truncate_bytes(&result, MAX_OUTPUT_BYTES, ""),
                         MAX_OUTPUT_BYTES
                     )
                 } else {

@@ -47,7 +47,7 @@ pub const EVENT_BUS_KIND_SYSTEM: &str = "system";
 /// VDFS 变更频道 —— **资源实时的唯一频道**。
 ///
 /// 不由本模块发布：一切资源的生命周期与状态变化都是 VDFS 变更，由 provider 写成功后
-/// 调 `symbio_core::vdfs::host::notify_change`，经 `watch` 的 sink
+/// 调 `symbio_core::vdfs::host::vdfs_notify_change`，经 `watch` 的 sink
 /// （`plugins/vdfs/host.rs::event_bus_sink`）原样投到总线上（规范 §9；信封与 `VdfsChange` 形状重合，S27 起不再有独立的 `VdfsChangeEvent`）。
 ///
 /// 常量放这里而非 vdfs 插件，是贯彻上面那条「闭集只有一个家」——发布方只是引用者。
@@ -100,12 +100,12 @@ static RESYNC_INFLIGHT: LazyLock<DashMap<String, ()>> = LazyLock::new(DashMap::n
 pub struct EventBusSubscribeRequest {}
 
 /// 注册一个订阅者发送端（由 `event_bus` 插件在建立连接时调用）
-pub fn register_subscriber(connection_id: String, tx: mpsc::Sender<PluginFrame>) {
+pub fn event_bus_register_subscriber(connection_id: String, tx: mpsc::Sender<PluginFrame>) {
     SUBSCRIBERS.insert(connection_id, tx);
 }
 
 /// 反注册订阅者（连接断开时调用）
-pub fn unregister_subscriber(connection_id: &str) {
+pub fn event_bus_unregister_subscriber(connection_id: &str) {
     SUBSCRIBERS.remove(connection_id);
     SLOW_WARNED_AT.remove(connection_id);
     RESYNC_INFLIGHT.remove(connection_id);
@@ -145,8 +145,8 @@ impl EventBus {
     /// 本次把同一条纠正补到本频道。）
     pub fn try_publish(kind: &str, session_id: Option<&str>, data: Value) {
         // 载荷按**所有权**搬进信封（零拷贝），整个信封只分配两个小 Map：
-        // 出帧路径上因此**没有任何整树遍历**，见 `build_envelope`。
-        let frame = PluginFrame::data(build_envelope(kind, session_id, data));
+        // 出帧路径上因此**没有任何整树遍历**，见 `event_bus_build_envelope`。
+        let frame = PluginFrame::data(event_bus_build_envelope(kind, session_id, data));
 
         // 先收集再处理（DashMap 迭代期不删除）。
         let mut gone: Vec<String> = Vec::new();
@@ -160,7 +160,7 @@ impl EventBus {
             }
         }
         for id in gone {
-            unregister_subscriber(&id);
+            event_bus_unregister_subscriber(&id);
         }
         for (id, tx) in full {
             warn_slow_once(&id);
@@ -186,7 +186,7 @@ impl EventBus {
 /// 若写成 `json!({ "data": { ..., "data": data } })`，那份 `data` 会被 serde
 /// **完整遍历一遍再重建**——出帧路径上凭空多一次整树分配 + 拷贝。
 /// 直接建 `Map` 并把 `Value` 移动进去则零遍历、零拷贝。
-pub fn build_envelope(kind: &str, session_id: Option<&str>, data: Value) -> Value {
+pub fn event_bus_build_envelope(kind: &str, session_id: Option<&str>, data: Value) -> Value {
     let mut inner = Map::with_capacity(3);
     inner.insert("kind".to_string(), Value::String(kind.to_string()));
     inner.insert(

@@ -28,9 +28,9 @@ use super::plugin::{SessionPlugin, OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_F
 use crate::plugin_debug;
 use crate::symbio_core::schemas::{session::chat_message as cm, session::session_chat};
 use crate::symbio_core::{
-    take_errors, ExecAbortSignal, ExecEventSink, Plugin, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload, MODE, PROVIDER_ID, RISK_LEVEL,
-    SESSION_ID, WORKDIR,
+    capability_take_errors, ExecAbortSignal, ExecEventSink, Plugin, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload, MODE,
+    PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
 };
 use broadcast::SessionStateChange;
 use serde_json::json;

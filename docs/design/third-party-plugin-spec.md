@@ -79,9 +79,9 @@ plugin_provider: "ext:http:http://127.0.0.1:8080" → External(Http)    ← 新�
 **关键性质**：
 
 1. **零新增保留键**——只扩展 `plugin_provider` 的**值语法**，键本身不变。
-   这直接服务于「减少新加机制」：`PLUGIN.yml` 的骨架、`has_creator` 判据、
+   这直接服务于「减少新加机制」：`PLUGIN.yml` 的骨架、`creator_has` 判据、
    `PluginEntry` 结构都不动，只多一条解析分支。
-2. **内置路径行为完全不变**——无 `ext:` 前缀即走现有 `create_object`，
+2. **内置路径行为完全不变**——无 `ext:` 前缀即走现有 `creator_create_object`，
    一个字节都不改。
 3. **解析发生在装配方**（`composite`），与「谁构造插件」同处——不引入新角色。
 
@@ -90,7 +90,7 @@ plugin_provider: "ext:http:http://127.0.0.1:8080" → External(Http)    ← 新�
 ```
 composite.mount_all()
   └─ 逐目录读 PLUGIN.yml
-       ├─ plugin_provider = "web"                 → create_object("web")      → Arc<dyn Plugin>
+       ├─ plugin_provider = "web"                 → creator_create_object("web")      → Arc<dyn Plugin>
        └─ plugin_provider = "ext:stdio:./weather" → ExternalPlugin::spawn(..)  → Arc<dyn Plugin>
                                                                                      ↑
                                                               容器从这里往后完全一致

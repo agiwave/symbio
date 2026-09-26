@@ -13,7 +13,7 @@ fn error_translation_roundtrip() {
         PluginError::NotImplemented
     ));
     assert!(matches!(
-        from_plugin_error(PluginError::Forbidden("f".into())),
+        vdfs_from_plugin_error(PluginError::Forbidden("f".into())),
         VdfsError::Forbidden(_)
     ));
 
@@ -30,7 +30,7 @@ fn error_translation_roundtrip() {
         other => panic!("应为校验错误，实为 {other:?}"),
     };
     assert_eq!(
-        from_plugin_error(PluginError::ValidationError(text)),
+        vdfs_from_plugin_error(PluginError::ValidationError(text)),
         VdfsError::Invalid(payload)
     );
 }
@@ -41,11 +41,11 @@ fn host_ctx_downcasts_invoke_request() {
     use crate::symbio_core::PluginSimpleRequest;
     let host: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     let vctx = vdfs_context(&host);
-    let back = host_ctx(&vctx).expect("应取回宿主句柄");
+    let back = vdfs_host_ctx(&vctx).expect("应取回宿主句柄");
     assert!(Arc::ptr_eq(&host, &back));
 
     // 宿主句柄不可 `Debug`，故不能用 `unwrap_err`（它要求 Ok 侧可 Debug）
-    let err = match host_ctx(&VdfsContext::new(1u8)) {
+    let err = match vdfs_host_ctx(&VdfsContext::new(1u8)) {
         Ok(_) => panic!("宿主类型不匹配时应报错"),
         Err(e) => e,
     };

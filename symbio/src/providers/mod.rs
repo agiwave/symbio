@@ -6,7 +6,7 @@
 //! ## 子模块
 //!
 //! - `embedding`：[`crate::symbio_core::EmbeddingService`] 的实现
-//!   （经工厂 `create_object::<dyn EmbeddingService>(...)` 取用）
+//!   （经工厂 `creator_create_object::<dyn EmbeddingService>(...)` 取用）
 //! - `vdfs_service`：**基于 `VdfsProvider` 接口的集中实现**（单文件 / 目录 / 内存）
 //!
 //! ## 两种接线方式，各自说清理由

@@ -108,11 +108,11 @@ symbio::submit_object_creator!("my_plugin", MyPlugin::build, dyn Plugin);
 ### 4. 让它被装配
 
 **不需要在任何地方登记**：容器**扫描自己的目录**（= 系统根，其下一层目录即一个插件），
-逐目录读 `PLUGIN.yml`，`plugin_provider` 指向已注册的工厂（`has_creator`）即实例化，
+逐目录读 `PLUGIN.yml`，`plugin_provider` 指向已注册的工厂（`creator_has`）即实例化，
 并把该目录经 ctx 键 `PLUGIN_DIR` 告知插件。
 
 > ⚠️ **插件不要推导自己的目录。** 目录一律用 `PLUGIN_DIR` 给的 `PluginDir`
-> （`dir_from_ctx(ctx, PLUGIN_X)` / `self.dir`），**不要**按插件名反推落位
+> （`plugin_dir_from_ctx(ctx, PLUGIN_X)` / `self.dir`），**不要**按插件名反推落位
 > （`HomedirRegistry::get()` 再 `join(...)` 之类）——那等于把「装配决策」写死进插件，
 > 挪个位置就全错。按 id 派生路径的自由函数请让调用方把根当入参传进来（见
 > `plugins/session/paths.rs`）。注释里写「本插件自己的目录」，不要写 `<homedir>/…` 具体路径。
@@ -173,7 +173,7 @@ async fn route(
 > 不要用它回传事件：出口与中止由**执行期环境** `ExecEnv` 承载，作为 `execute` 的
 > 显式参数给出（`env.sink()` / `env.abort()`），事件直接 `sink.apply(message)`（一条
 > `ChatMessage`；会话级告警走 `sink.warn(...)` 独立通道）。
-> 工具侧不再自己读信封里的键——`ExecEnv` 由分发点 `symbio_core::invoke_capability`
+> 工具侧不再自己读信封里的键——`ExecEnv` 由分发点 `symbio_core::capability_invoke`
 > 从 `ctx` 装配（缺席 ⇒ 静默 / 永不中止，故 `route()` 直连调用照常可用）。
 > 理由与代价见 [ADR-020](../DECISIONS.md)、[ADR-021](../DECISIONS.md) 与
 > [`session/docs/core-loop.md`](../../symbio/src/plugins/session/docs/core-loop.md) §7、§9。

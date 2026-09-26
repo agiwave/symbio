@@ -104,14 +104,14 @@ pub(crate) fn absolute_addr(ctx: &Arc<dyn PluginInvokeRequest>, rel: &str) -> St
 ///
 /// 只查 `/` 会让 Windows 的 `src\..\..\..\Windows` 绕过守卫；只查带分隔符的
 /// `../` / `..\` 前缀会放过 `a/..`（`..` 收尾）。因此按**段**判定，与分隔符无关。
-pub fn has_parent_segment(path: &str) -> bool {
+pub fn vdfs_has_parent_segment(path: &str) -> bool {
     path.split(['/', '\\']).any(|seg| seg == "..")
 }
 
 /// `path` 是否落在 `prefix` 之内——相等，或紧随一个分隔符。
 ///
 /// 前缀必须按**路径段**比较：裸 `starts_with("/etc")` 会把 `/etcfoo` 误伤。
-pub fn path_within(path: &str, prefix: &str) -> bool {
+pub fn vdfs_path_within(path: &str, prefix: &str) -> bool {
     let prefix = prefix.trim_end_matches(['/', '\\']);
     if prefix.is_empty() {
         return false;

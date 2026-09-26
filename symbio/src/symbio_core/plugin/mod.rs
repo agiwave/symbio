@@ -1,6 +1,5 @@
 //! 插件核心 Trait（上下文注入版）
 
-mod creator;
 mod dir;
 mod error;
 mod ids;
@@ -9,14 +8,12 @@ mod transport;
 mod traverse;
 
 // 域内子模块私有，公开面在此显式重导出
-pub use creator::{create_object, creator_ids, has_creator};
-// `submit_object_creator!` 宏（crate 根展开）经根的 `pub(crate)` 重导出取用
-pub(crate) use creator::{ObjectConstructor, Submit};
 pub use dir::{
-    dir_from_ctx, expand_tilde_path, PluginConfigFile, PluginDir, PluginEntry, PluginIdentity,
-    PLUGIN_FILE, PLUGIN_KEY_API, PLUGIN_KEY_AUTHOR, PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_DESCRIPTION,
-    PLUGIN_KEY_ENABLED, PLUGIN_KEY_GRANTS, PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER,
-    PLUGIN_KEY_REQUIRED, PLUGIN_KEY_TITLE, PLUGIN_KEY_VERSION, PLUGIN_RESERVED_KEYS,
+    plugin_dir_from_ctx, plugin_expand_tilde_path, PluginConfigFile, PluginDir, PluginEntry,
+    PluginIdentity, PLUGIN_FILE, PLUGIN_KEY_API, PLUGIN_KEY_AUTHOR, PLUGIN_KEY_CAN_DISABLE,
+    PLUGIN_KEY_DESCRIPTION, PLUGIN_KEY_ENABLED, PLUGIN_KEY_GRANTS, PLUGIN_KEY_NAME,
+    PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED, PLUGIN_KEY_TITLE, PLUGIN_KEY_VERSION,
+    PLUGIN_RESERVED_KEYS,
 };
 pub use error::{PluginError, PluginErrorCode, PluginInvokeResponse};
 // 锁辅助函数刻意 `pub(crate)`（见 `error.rs::lock_read` 的说明），不进对外 API

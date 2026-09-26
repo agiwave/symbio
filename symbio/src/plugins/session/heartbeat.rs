@@ -7,7 +7,7 @@
 
 use super::plugin::SessionPlugin;
 use super::types::HeartbeatConfig;
-use crate::symbio_core::now_ms;
+use crate::symbio_core::clock_now_ms;
 use crate::symbio_core::schemas::session::chat_message as cm;
 use crate::symbio_core::schemas::session::session_chat;
 use crate::symbio_core::{PluginInvokeRequestExt, PluginSimpleRequest, SESSION_ID};
@@ -56,7 +56,7 @@ impl SessionPlugin {
     /// 时刻）；此锚点仅作为回合零写盘异常退出时的防热循环下限。
     pub(crate) async fn mark_activity(&self, session_id: &str) {
         let mut map = self.heartbeat_state.write().await;
-        map.insert(session_id.to_string(), now_ms());
+        map.insert(session_id.to_string(), clock_now_ms());
     }
 
     /// 心跳调度器主循环（在 [`SessionPlugin`] 构建时以 `tokio::spawn` 启动，常驻运行）。
@@ -88,7 +88,7 @@ impl SessionPlugin {
                 }
             };
 
-            let now = now_ms();
+            let now = clock_now_ms();
             // 每轮扫描最多触发有限个会话：避免启动时大量超时间隔的旧会话
             // 在同一 tick 内瞬间并发打爆模型服务（惊群），让其随 tick 自然错峰。
             let mut fired = 0usize;
@@ -145,7 +145,7 @@ impl SessionPlugin {
     /// 构造一条用户消息（心跳提示词）并复用统一入口 [`SessionPlugin::handle_chat_send_oneoff`]
     /// 的发送链路。`include_history=false` 时本次发送不加载历史会话信息。
     pub(crate) async fn trigger_heartbeat(self: Arc<Self>, session_id: &str, hb: &HeartbeatConfig) {
-        let now = now_ms();
+        let now = clock_now_ms();
         let user_msg = cm::ChatMessage {
             id: format!("hb_{}_{}", session_id, now),
             role: Some(cm::MessageRole::User),

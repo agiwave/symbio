@@ -308,8 +308,8 @@ impl HomePlugin {
     /// 每个插件从自己的目录读配置。容器是 home 的**动态内置替身**，因此拿到的
     /// 也是系统根目录——它据此定位插件根 `<系统根>/plugins`。
     pub fn rebuild_worker_sync(&self) -> Result<(), PluginError> {
-        use crate::symbio_core::has_creator;
-        if !has_creator(PLUGIN_ID_COMPOSITE) {
+        use crate::symbio_core::creator_has;
+        if !creator_has(PLUGIN_ID_COMPOSITE) {
             return Ok(());
         }
 
@@ -339,7 +339,7 @@ impl HomePlugin {
         );
 
         let worker_plugin: Arc<dyn Plugin> =
-            crate::symbio_core::create_object::<dyn Plugin>("composite", sub_context)
+            crate::symbio_core::creator_create_object::<dyn Plugin>("composite", sub_context)
                 .expect("composite creator registered but failed to construct");
         self.add_instance_sync("worker".to_string(), worker_plugin);
         plugin_info!(

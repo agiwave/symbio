@@ -411,9 +411,9 @@ export const VDFS_BUS_RESYNC = 'resync'
  *  |---|---|---|
  *  | `ChatMessage`（含 `delta`） | 消息域（`Transcript::apply`） | **按字段落地，零回读**：`delta` 追加 / `content` 替换 / `status = removed` 移除 |
  *  | `ChatMessage`（全量） | 同上（首帧发合并后的全量副本） | **零回读**就地替换该消息 |
- *  | `ChatMessage`（只有状态） | 同上（`state_frame` 剥掉了正文） | 本地已有 ⇒ 零回读迁移状态；身份未知 ⇒ 回读补基线 |
+ *  | `ChatMessage`（只有状态） | 同上（`llm_state_frame` 剥掉了正文） | 本地已有 ⇒ 零回读迁移状态；身份未知 ⇒ 回读补基线 |
  *  | `VdfsNode` | 会话运行态（`emit_session_state`） | 就地收敛节点状态，零回读 |
- *  | 缺失 | 全部资源信号（`notify_change`） | 回读 / 重拉（幂等）；对资源删除，回读 `NotFound` 即删除 |
+ *  | 缺失 | 全部资源信号（`vdfs_notify_change`） | 回读 / 重拉（幂等）；对资源删除，回读 `NotFound` 即删除 |
  *
  *  **path 的含义**：**恒为被变更节点自身的地址**。会话是**容器**，其下是若干**并列的
  *  集合**（消息 / 子会话 / 记忆 / 工作目录，后续还会有任务列表、请求队列……），因此

@@ -203,13 +203,13 @@ pub(crate) async fn close_turn(
             // 标准工具广播模式（与 process_tool_calls_async 一致）：
             // 前端实时可见 context_compact 的结果子节点与父节点状态——
             // 先广播 Tool 结果子节点，再广播父 ToolCall 的完整终态快照。
-            let mut tool_msg = build_tool_message(&call_id, &result_text, Some(ok), None);
+            let mut tool_msg = llm_build_tool_message(&call_id, &result_text, Some(ok), None);
             if !ok {
                 // 失败属信息性：结果以 Completed 定格（父节点同为 Completed），
                 // 与普通工具结果的处理保持一致，避免孤儿 Failed 节点
                 tool_msg.status = Some(MessageStatus::Completed);
             }
-            emit_message(sink, tool_msg.clone()).await;
+            llm_emit_message(sink, tool_msg.clone()).await;
             // 父节点终态：从权威转写取完整副本应用终态（找不到 = 协议违例，跳过）。
             if let Some(mut parent) = context.messages.iter().find(|m| m.id == call_id).cloned() {
                 parent.status = Some(MessageStatus::Completed);
@@ -223,7 +223,7 @@ pub(crate) async fn close_turn(
                     }
                 }
                 parent.meta = Some(meta);
-                emit_state(sink, parent.clone()).await;
+                llm_emit_state(sink, parent.clone()).await;
                 parent_updates.push(parent);
             } else {
                 plugin_error!(
@@ -238,14 +238,14 @@ pub(crate) async fn close_turn(
         for extra in compact_calls.iter().skip(1) {
             if let Some(cid) = &extra.id {
                 // 同批多余调用同样走标准广播模式（跳过说明属信息性结果，定格 Completed）
-                let mut tool_msg = build_tool_message(
+                let mut tool_msg = llm_build_tool_message(
                     cid,
                     "Skipped: another context_compact call in this batch was executed.",
                     Some(false),
                     None,
                 );
                 tool_msg.status = Some(MessageStatus::Completed);
-                emit_message(sink, tool_msg.clone()).await;
+                llm_emit_message(sink, tool_msg.clone()).await;
                 if let Some(mut parent) = context.messages.iter().find(|m| m.id == *cid).cloned() {
                     parent.status = Some(MessageStatus::Completed);
                     let mut meta = parent.meta.clone().unwrap_or_else(|| serde_json::json!({}));
@@ -255,7 +255,7 @@ pub(crate) async fn close_turn(
                         obj.insert("skipped".into(), serde_json::json!(true));
                     }
                     parent.meta = Some(meta);
-                    emit_state(sink, parent.clone()).await;
+                    llm_emit_state(sink, parent.clone()).await;
                     parent_updates.push(parent);
                 } else {
                     plugin_error!(

@@ -7,7 +7,7 @@
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField, DetailOption};
 use crate::symbio_core::vdfs;
 use crate::symbio_core::{
-    dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
+    plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH, PLUGIN_FILE,
     PLUGIN_ID_GATEWAY,
 };
@@ -93,7 +93,7 @@ pub struct GatewayPlugin {
 impl GatewayPlugin {
     /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例（submit_object_creator! 自注册）
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
-        let dir = dir_from_ctx(&*ctx, PLUGIN_ID_GATEWAY);
+        let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_GATEWAY);
         let config: GatewayConfig = match dir.load::<GatewayConfig>() {
             Ok(Some(c)) => c,
             Ok(None) => GatewayConfig::default(),
@@ -231,7 +231,7 @@ impl Plugin for GatewayPlugin {
             visitor.register_vdfs_provider(PLUGIN_ID_GATEWAY, me).await;
         }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
-        crate::symbio_core::announce_configurable(&ctx, &self.config_file).await;
+        crate::symbio_core::capability_announce_configurable(&ctx, &self.config_file).await;
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }

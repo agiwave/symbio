@@ -184,7 +184,7 @@ fn body(text: &str, truncated: bool) -> MemoryInjection {
 /// 写法（先读后写）
 #[test]
 fn segment_carries_address_capacity_and_write_discipline() {
-    let s = render_segment(&spec(), &body("用户偏好中文回答。", false), 16384);
+    let s = memory_render_segment(&spec(), &body("用户偏好中文回答。", false), 16384);
 
     assert!(s.contains("【工作区记忆】"), "要有一眼认出的标题: {s}");
     assert!(s.contains(ADDR), "要给出可编辑地址: {s}");
@@ -198,7 +198,7 @@ fn segment_carries_address_capacity_and_write_discipline() {
 #[test]
 fn head_info_is_one_line_and_overhead_stays_small() {
     let text = "正文";
-    let s = render_segment(&spec(), &body(text, false), 16384);
+    let s = memory_render_segment(&spec(), &body(text, false), 16384);
 
     assert_eq!(s.lines().count(), 2, "一行头信息 + 正文，不加别的: {s}");
     let overhead = s.len() - text.len();
@@ -210,10 +210,10 @@ fn head_info_is_one_line_and_overhead_stays_small() {
 
 #[test]
 fn note_is_optional_and_lands_in_the_head() {
-    let plain = render_segment(&spec(), &body("x", false), 1024);
+    let plain = memory_render_segment(&spec(), &body("x", false), 1024);
     assert!(!plain.contains("相互独立"));
 
-    let noted = render_segment(
+    let noted = memory_render_segment(
         &MemorySegmentSpec {
             note: Some("与【工作区记忆】相互独立"),
             ..spec()
@@ -228,7 +228,7 @@ fn note_is_optional_and_lands_in_the_head() {
 /// 空内容恰恰是最需要「你可以往里写」的时候 —— 但只用一句话
 #[test]
 fn empty_memory_still_teaches_how_to_remember() {
-    let s = render_segment(&spec(), &body("", false), 1024);
+    let s = memory_render_segment(&spec(), &body("", false), 1024);
     assert!(s.contains("暂无内容"), "要点明现在还没有内容: {s}");
     assert!(s.contains("vdfs_write"), "要教它怎么写入: {s}");
     assert!(!s.contains("已截断"), "空内容不得谎报截断: {s}");
@@ -238,7 +238,7 @@ fn empty_memory_still_teaches_how_to_remember() {
 /// 截断必须**明确告知**：否则模型会以为看到的就是全部
 #[test]
 fn truncated_memory_says_so_and_points_at_the_address() {
-    let s = render_segment(&spec(), &body("前一半", true), 1024);
+    let s = memory_render_segment(&spec(), &body("前一半", true), 1024);
     assert!(s.contains("已截断"), "要说明只看到了一部分: {s}");
     assert!(s.contains("256"), "要说清截到了多少字节: {s}");
     assert!(s.contains("vdfs_read"), "要指路去读全文: {s}");

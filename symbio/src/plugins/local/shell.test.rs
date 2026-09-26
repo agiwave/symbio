@@ -68,7 +68,7 @@ fn assert_all_snapshots_use_orchestrator_ids(
     }
 }
 
-/// 按生产路径调用工具：信封拆出 `args` / `env`，与 `invoke_capability` 同形。
+/// 按生产路径调用工具：信封拆出 `args` / `env`，与 `capability_invoke` 同形。
 ///
 /// 测试只关心 `execute` 本身，故在这里复刻那一步拆解——工具侧不再自己读信封。
 async fn exec(tool: &ShellTool, ctx: Arc<dyn PluginInvokeRequest>) -> Result<Value, PluginError> {

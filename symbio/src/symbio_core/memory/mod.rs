@@ -103,12 +103,12 @@ impl MemoryInjection {
     /// 按字节预算截断一份文本，边界回退到最近的 UTF-8 字符位置。
     ///
     /// 按**字节**而非字符计预算：上下文窗口与磁盘都按字节算，按字符计会在多字节
-    /// 文本上系统性低估占用。边界回退复用 [`floor_char_boundary`]
+    /// 文本上系统性低估占用。边界回退复用 [`text_floor_char_boundary`]
     /// （全项目唯一的「安全字节切片」实现，不在此另写一份）。
     ///
-    /// [`floor_char_boundary`]: crate::symbio_core::floor_char_boundary
+    /// [`text_floor_char_boundary`]: crate::symbio_core::text_floor_char_boundary
     pub fn cut(text: &str, budget_bytes: usize) -> Self {
-        let end = crate::symbio_core::floor_char_boundary(text, budget_bytes);
+        let end = crate::symbio_core::text_floor_char_boundary(text, budget_bytes);
         Self {
             text: text[..end].to_string(),
             truncated: end < text.len(),
@@ -279,7 +279,11 @@ impl MemoryFile {
         let Some(body) = self.inject()? else {
             return Ok(None);
         };
-        Ok(Some(render_segment(spec, &body, self.write_max_bytes)))
+        Ok(Some(memory_render_segment(
+            spec,
+            &body,
+            self.write_max_bytes,
+        )))
     }
 
     /// VDFS 节点 —— `list` 与 `stat` **共用同一份形状**，两条链路不会分叉。
@@ -314,7 +318,7 @@ impl MemoryFile {
 ///
 /// 内容为空 → `empty_hint`（此时最需要「你可以往里写」）；被截断 → 明确告知截到多少
 /// 字节并指路读全文。**空内容不得谎报截断**，截断也不得沉默。
-pub fn render_segment(
+pub fn memory_render_segment(
     spec: &MemorySegmentSpec,
     body: &MemoryInjection,
     write_max_bytes: usize,

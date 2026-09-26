@@ -30,7 +30,9 @@
 
 use super::memory::{MEMORY_DESCRIPTION, SEGMENT_TITLE};
 use super::plugin::WorkPlugin;
-use crate::symbio_core::{host_ctx, notify_change, unwatch_changes, watch_changes};
+use crate::symbio_core::{
+    vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes,
+};
 use crate::symbio_core::{
     MemoryFile, MemoryNodeSpec, MEMORY_AGENTS_FILE, PLUGIN_FILE, PLUGIN_ID_WORK,
 };
@@ -54,7 +56,7 @@ fn memory_node(store: &MemoryFile) -> VdfsNode {
 impl WorkPlugin {
     /// 依宿主上下文构造记忆门面（工作目录经 `ctx[WORKDIR]`，两道闸门取自配置）
     async fn store_from_ctx(&self, ctx: &VdfsContext) -> VdfsResult<MemoryFile> {
-        let host = host_ctx(ctx)?;
+        let host = vdfs_host_ctx(ctx)?;
         Ok(self.store_of(&host).await)
     }
 }
@@ -119,7 +121,7 @@ impl VdfsProvider for WorkPlugin {
                     let existed = store.exists();
                     // 容量闸门在内核里（`MemoryFile::write`）——本插件不重复实现
                     store.write(text).map_err(VdfsError::invalid)?;
-                    notify_change(PLUGIN_ID_WORK, MEMORY_AGENTS_FILE);
+                    vdfs_notify_change(PLUGIN_ID_WORK, MEMORY_AGENTS_FILE);
                     Ok(VdfsResponse::Write(VdfsWriteResponse {
                         name: None,
                         created: !existed,
@@ -144,11 +146,11 @@ impl VdfsProvider for WorkPlugin {
                 )))
             }
             VdfsRequest::Watch { sink } => {
-                watch_changes(PLUGIN_ID_WORK, path, sink).await?;
+                vdfs_watch_changes(PLUGIN_ID_WORK, path, sink).await?;
                 Ok(VdfsResponse::Unit)
             }
             VdfsRequest::Unwatch => {
-                unwatch_changes(PLUGIN_ID_WORK, path).await?;
+                vdfs_unwatch_changes(PLUGIN_ID_WORK, path).await?;
                 Ok(VdfsResponse::Unit)
             }
             _ => Err(VdfsError::NotImplemented),

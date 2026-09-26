@@ -22,7 +22,7 @@
 use super::config::{default_context_messages, SessionConfig};
 use super::store::SessionStore;
 use crate::plugin_info;
-use crate::symbio_core::now_ms;
+use crate::symbio_core::clock_now_ms;
 use crate::symbio_core::schemas::session::chat_message as cm;
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageType,
@@ -310,7 +310,7 @@ impl PersistentChatSession {
         // 两次并发追加各自读到同一份旧数据、各自写回，后写的会整份覆盖先写的。
         let _write = self.store.lock_writes(&self.session_id).await;
         let mut session = self.load_session().await?;
-        let now = now_ms();
+        let now = clock_now_ms();
 
         let cfg = self.config.read().await;
 
@@ -417,7 +417,7 @@ impl PersistentChatSession {
         // 临界区：与 append / update 共用同一把 per-session 写锁（整份覆盖语义）
         let _write = self.store.lock_writes(&self.session_id).await;
         let mut session = self.load_session().await?;
-        let now = now_ms();
+        let now = clock_now_ms();
         // 回填缺失的 timestamp 与 seq：replace 会整体重写消息列表，若保留 `None`，
         // `get_messages` 只能靠"哨兵 + 稳定排序"兜底，容易打乱"父先于子"的顺序。
         // seq 的分配规则见 `assign_seq`：**既有序号一律原样保留**，只补缺号；

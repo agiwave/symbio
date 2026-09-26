@@ -4,7 +4,7 @@
  * 复现并钉住用户报告的症状：「工具调用结果一直缺失，会话一直往下走时工具一直处于
  * 进行中；刷新后正确」——即**实时模式下丢信息**。
  *
- * 方法：按后端真实变更序（与 `turn.rs::emit_message` / `emit_delta` / `emit_state`、
+ * 方法：按后端真实变更序（与 `turn.rs::llm_emit_message` / `llm_emit_delta` / `llm_emit_state`、
  * `chat_loop/state.rs`、`tool_executor.rs` 的广播点逐条对齐；经 ADR-025 迁移后，
  * 这些广播点发的是 **VDFS 变更**，前端由 `stores/sessionTranscriptSync` 消费）驱动
  * 真实 store 的落地口，然后断言终态：
@@ -51,7 +51,7 @@ import type { ChatMessage } from '@/schemas/chat_message'
 const SID = 'sess1'
 const TURN = 'turn1'
 const REASON = 'reason1'
-const TC = 'tc1' // ToolCall 节点 id（accumulator 的 node_id，8 字符 short_id 形态）
+const TC = 'tc1' // ToolCall 节点 id（accumulator 的 node_id，8 字符 llm_short_id 形态）
 const RESULT = 'r1' // 结果子节点 id（uuid）
 
 /** 驱动一条落地帧：与 `sessionTranscriptSync` 消费端交给 store 的形状一致 */
@@ -140,7 +140,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
     // ── 10. Turn root 终态（finalize_turn_root：**子树收敛之后**才发出）──
     // 此前它在 `finalize_assistant_turn`（LLM 流结束那一刻）发出，比子树早整整
     // 一个执行窗口——容器"已完成"而其中的工具调用仍在运行。现在移到 `close_turn`
-    // 归来之后；发出的即 `build_assistant_messages` 构建的那条（pending 落库的
+    // 归来之后；发出的即 `llm_build_assistant_messages` 构建的那条（pending 落库的
     // 同一份），因此不带流式占位期的 `meta.turn`。
     feed({ id: TURN, role: 'assistant', type: 'turn', status: 'completed' })
 

@@ -189,7 +189,7 @@ impl HeartbeatTool {
         } else {
             session.metadata = json!({ "heartbeat": hb_json });
         }
-        session.updated_at = crate::symbio_core::now_ms();
+        session.updated_at = crate::symbio_core::clock_now_ms();
     }
 }
 

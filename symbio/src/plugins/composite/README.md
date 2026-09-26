@@ -6,7 +6,7 @@
 ## 机制
 
 - **目录驱动**：扫描**自己的目录**（父插件经 ctx 键 `PLUGIN_DIR` 告知它的目录；
-  其下一层目录即一个插件），每个子目录经 `ObjectCreatorRegistry`（`create_object`）
+  其下一层目录即一个插件），每个子目录经 `ObjectCreatorRegistry`（`creator_create_object`）
   实例化并挂载。
   加载判据 = 目录下的 `PLUGIN.yml` 可解析且 `plugin_provider` 指向已注册的工厂。
   「必需插件」清单由**构造者**经 ctx 键 `REQUIRED_PLUGINS` 传入（`home` 传的是
@@ -33,4 +33,4 @@
 ## 关联
 
 - 架构哲学：`docs/architecture/OVERVIEW.md`
-- 注册机制：`symbio_core/plugin/creator.rs`（`submit_object_creator!`）
+- 注册机制：`symbio_core/creator/`（`submit_object_creator!`）

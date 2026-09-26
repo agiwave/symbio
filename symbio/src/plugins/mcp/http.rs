@@ -495,7 +495,7 @@ impl super::manager::McpManager {
             // 安全截断：错误文本常含中文（server 返回本地化消息），
             // 裸 `&[..200]` 会 panic 在字符边界内。
             let truncated = if error_text.len() > 200 {
-                let end = crate::symbio_core::floor_char_boundary(&error_text, 200);
+                let end = crate::symbio_core::text_floor_char_boundary(&error_text, 200);
                 format!("{}...", &error_text[..end])
             } else {
                 error_text

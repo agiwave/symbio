@@ -22,7 +22,7 @@ fn safe_names_pass_through_unchanged() {
         "agent_run",
         "agent_com_acme_code-reviewer_read_skill",
     ] {
-        assert_eq!(to_wire(name), name, "{name} 不该被改写");
+        assert_eq!(capability_to_wire(name), name, "{name} 不该被改写");
     }
 }
 
@@ -30,7 +30,7 @@ fn safe_names_pass_through_unchanged() {
 fn mcp_dotted_names_become_wire_safe() {
     // MCP 的名字带 `.`，OpenAI / Anthropic 的字符集不允许——这正是收口前
     // 漏掉的那个字符（旧代码只替换 `/`，`.` 原样送给模型）。
-    let wire = to_wire("mcp.filesystem.read_file");
+    let wire = capability_to_wire("mcp.filesystem.read_file");
     assert_eq!(wire, "mcp__filesystem__read_file");
     assert!(
         wire.chars().all(is_wire_char),
@@ -40,19 +40,19 @@ fn mcp_dotted_names_become_wire_safe() {
 
 #[test]
 fn any_illegal_char_maps_to_the_separator() {
-    assert_eq!(to_wire("a/b"), "a__b");
-    assert_eq!(to_wire("a:b"), "a__b");
-    assert_eq!(to_wire("a.b.c"), "a__b__c");
+    assert_eq!(capability_to_wire("a/b"), "a__b");
+    assert_eq!(capability_to_wire("a:b"), "a__b");
+    assert_eq!(capability_to_wire("a.b.c"), "a__b__c");
     // 连续非法字符各自成段（不做压缩）——保证「一个非法字符 → 一段分隔符」
     // 这条规则简单到可以预测
-    assert_eq!(to_wire("a/.b"), "a____b");
+    assert_eq!(capability_to_wire("a/.b"), "a____b");
 }
 
 #[test]
 fn to_wire_is_idempotent_on_wire_names() {
     // 线上名再走一次编码不该继续变化（否则「编码两次」会静默产生第三个名字）
-    let wire = to_wire("mcp.filesystem.read_file");
-    assert_eq!(to_wire(&wire), wire);
+    let wire = capability_to_wire("mcp.filesystem.read_file");
+    assert_eq!(capability_to_wire(&wire), wire);
 }
 
 #[test]
@@ -60,25 +60,25 @@ fn resolve_prefers_the_literal_name() {
     // `a__b` 既可能是 `a.b` 的线上形态，也可能本身就是 `a__b`。
     // 字面名赢——歧义有确定答案，而不是「看注册顺序」。
     let known = ["a.b", "a__b"];
-    assert_eq!(resolve("a__b", known), Some("a__b"));
+    assert_eq!(capability_resolve("a__b", known), Some("a__b"));
 
     // 反过来，只有投影候选时也能命中
     let known = ["a.b"];
-    assert_eq!(resolve("a__b", known), Some("a.b"));
+    assert_eq!(capability_resolve("a__b", known), Some("a.b"));
 }
 
 #[test]
 fn resolve_is_order_independent_for_literal_matches() {
     // 字面名排在投影候选**之后**也要赢（不是「先到先得」）
     let known = ["a.b", "c", "a__b"];
-    assert_eq!(resolve("a__b", known), Some("a__b"));
+    assert_eq!(capability_resolve("a__b", known), Some("a__b"));
 }
 
 #[test]
 fn resolve_returns_none_for_unknown_names() {
     // 解析失败必须是 None——调用方据此报错，而不是回退到字符串反演
-    assert_eq!(resolve("nope", ["shell", "vdfs_read"]), None);
-    assert_eq!(resolve("", ["shell"]), None);
+    assert_eq!(capability_resolve("nope", ["shell", "vdfs_read"]), None);
+    assert_eq!(capability_resolve("", ["shell"]), None);
 }
 
 #[test]
@@ -91,7 +91,11 @@ fn resolve_round_trips_every_real_name_shape() {
         "agent_reviewer_read_skill",
     ];
     for name in known {
-        let wire = to_wire(name);
-        assert_eq!(resolve(&wire, known), Some(name), "{name} 往返失败");
+        let wire = capability_to_wire(name);
+        assert_eq!(
+            capability_resolve(&wire, known),
+            Some(name),
+            "{name} 往返失败"
+        );
     }
 }

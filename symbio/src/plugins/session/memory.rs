@@ -81,7 +81,7 @@ pub fn store(
 ///
 /// `address` 是**绝对地址**（调用方经 `absolute_addr` 从上下文父地址拼出，
 /// 返回 `String`，不能借给返回值长期持有）。排版由内核
-/// [`render_segment`](crate::symbio_core::render_segment) 统一决定。
+/// [`memory_render_segment`](crate::symbio_core::memory_render_segment) 统一决定。
 pub fn segment_spec(address: &str) -> MemorySegmentSpec<'_> {
     MemorySegmentSpec {
         title: SEGMENT_TITLE,

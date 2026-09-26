@@ -39,15 +39,15 @@
 //!
 //! ## 装配态一变就广播
 //!
-//! `act` / `install` / `uninstall` 成功后各广播一次变更（[`notify_change`]）：条目集合
+//! `act` / `install` / `uninstall` 成功后各广播一次变更（[`vdfs_notify_change`]）：条目集合
 //! 与当前选中项的**动作集**都变了，订阅方据此重拉并重读当前项（前端 `useVdfs` 的既有
-//! 收敛路径），按钮因此不会停在旧状态上。订阅走 [`watch_changes`]（本插件是自管变更源）。
+//! 收敛路径），按钮因此不会停在旧状态上。订阅走 [`vdfs_watch_changes`]（本插件是自管变更源）。
 
 use crate::symbio_core::schemas::detail::{
     DetailAction, DetailCondition, DetailDefinition, DetailField, DetailSection,
 };
 use crate::symbio_core::{
-    host_ctx, notify_change, unwatch_changes, watch_changes, DynVdfsProvider,
+    vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes, DynVdfsProvider,
 };
 use crate::symbio_core::{
     Plugin, PluginEntry, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
@@ -355,7 +355,7 @@ impl PluginManagerPlugin {
     /// 只有拥有者说得出来（见 `symbio_core::capability::configurable`）。收集器缺失时（例如容器
     /// 没参与本次请求）静默为空：没有它条目照样列得出，只是少一份表单定义。
     async fn config_entries(ctx: &VdfsContext) -> Vec<VdfsItem> {
-        let Ok(host) = host_ctx(ctx) else {
+        let Ok(host) = vdfs_host_ctx(ctx) else {
             return Vec::new();
         };
         let Some(visitor) = host.get(CONFIGURABLE_VISITOR) else {
@@ -541,10 +541,10 @@ impl PluginManagerPlugin {
 
     /// 广播一次变更：本目录下 `<name>` 这一条（新增 / 移除 / 状态变了）不再是旧样子。
     ///
-    /// 这是**既有机制**（`notify_change` → 前端 `useVdfs` 的防抖重拉 + 重读当前项），
+    /// 这是**既有机制**（`vdfs_notify_change` → 前端 `useVdfs` 的防抖重拉 + 重读当前项），
     /// 不是为启停新开的一条通道：装配态变了本来就该让订阅方知道。
     fn announce(&self, name: &str) {
-        notify_change(PLUGIN_ID_MANAGER, name);
+        vdfs_notify_change(PLUGIN_ID_MANAGER, name);
     }
 }
 
@@ -599,11 +599,11 @@ impl VdfsProvider for PluginManagerPlugin {
         match &req {
             VdfsRequest::Watch { sink } => {
                 let sink = sink.clone();
-                watch_changes(PLUGIN_ID_MANAGER, path, sink).await?;
+                vdfs_watch_changes(PLUGIN_ID_MANAGER, path, sink).await?;
                 return Ok(VdfsResponse::Unit);
             }
             VdfsRequest::Unwatch => {
-                unwatch_changes(PLUGIN_ID_MANAGER, path).await?;
+                vdfs_unwatch_changes(PLUGIN_ID_MANAGER, path).await?;
                 return Ok(VdfsResponse::Unit);
             }
             _ => {}

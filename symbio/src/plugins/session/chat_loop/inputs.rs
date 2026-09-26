@@ -137,7 +137,7 @@ pub(crate) async fn prepare_turn_inputs(
         apply_compaction(orchestrator, ctx, context, turn, req, overhead_tokens).await?;
 
     // ── ④ Turn 根节点流式占位 ────────────────────────────────────────────
-    let root_id: String = short_id();
+    let root_id: String = llm_short_id();
     emit_streaming_start(sink, &root_id, Some(turn.tool_rounds)).await;
 
     // ── ⑤ 请求视图（唯一入口 build_request_view）──────────────────────────

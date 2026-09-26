@@ -43,10 +43,10 @@
 //! 它的配置一起停下**，而不是把它留在树里只关掉行为。
 
 use crate::symbio_core::{
-    create_object, creator_ids, has_creator, lock_read, lock_write, Plugin, PluginDir, PluginEntry,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginMeta, PluginSimpleRequest, PluginStopReason,
-    ASSEMBLY_UNDISABLABLE_PLUGINS, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_ID_COMPOSITE, PLUGIN_ID_HOME,
-    PLUGIN_KEY_PROVIDER, REQUIRED_PLUGINS,
+    creator_create_object, creator_has, creator_ids, lock_read, lock_write, Plugin, PluginDir,
+    PluginEntry, PluginInvokeRequest, PluginInvokeRequestExt, PluginMeta, PluginSimpleRequest,
+    PluginStopReason, ASSEMBLY_UNDISABLABLE_PLUGINS, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_ID_COMPOSITE,
+    PLUGIN_ID_HOME, PLUGIN_KEY_PROVIDER, REQUIRED_PLUGINS,
 };
 use serde_json::Value;
 
@@ -178,7 +178,7 @@ impl PluginRegistry {
                     continue;
                 }
             };
-            if !has_creator(&provider) {
+            if !creator_has(&provider) {
                 crate::plugin_warn!(
                     "composite",
                     "跳过插件目录（未找到 Provider）{name} -> {provider}"
@@ -250,7 +250,7 @@ impl PluginRegistry {
         // 用户视角「启动刷屏」的主要来源。需要排查装配问题时 `--verbose` /
         // `SYMBIO_LOG=debug` 即可看到全量。
         crate::plugin_debug!("composite", "正在构造子插件 {name} -> {provider}");
-        match create_object::<dyn Plugin>(provider, Arc::clone(&sub_context)) {
+        match creator_create_object::<dyn Plugin>(provider, Arc::clone(&sub_context)) {
             Some(plugin) => {
                 // **出厂身份投影**（ADR-032）：构造成功后才拿得到 `PluginMeta`，
                 // 于是就在这一刻把身份补进 manifest（只补缺失的键，用户改过的不动）。
@@ -357,7 +357,7 @@ impl PluginRegistry {
 
         if enabled {
             if !lock_read(&self.instances).contains_key(name) {
-                if !has_creator(&provider) {
+                if !creator_has(&provider) {
                     return Err(format!("未注册的插件工厂：{provider}"));
                 }
                 self.mount_child(name, &provider, dir);
@@ -397,7 +397,7 @@ impl PluginRegistry {
         if SYSTEM_LEVEL_PROVIDERS.contains(&provider) {
             return Err(format!("「{provider}」是系统级插件，不可作为子插件装配"));
         }
-        if !has_creator(provider) {
+        if !creator_has(provider) {
             return Err(format!("未注册的插件工厂：{provider}"));
         }
         if lock_read(&self.instances).contains_key(provider) {

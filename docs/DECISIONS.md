@@ -48,6 +48,7 @@
 | [033](#adr-033-生命周期钩子--start-同步stop-异步停用与卸载各给理由) | 生命周期钩子：`start` 同步、`stop` 异步 | 现行（含未完成项） |
 | [034](#adr-034-sse-行解析契约随流循环迁入-model-插件) | SSE 行解析契约随流循环迁入 `model` 插件 | 现行（**取代 ADR-022 的位置条款**） |
 | [035](#adr-035-provider-化的判据--三个条件与构造契约) | provider 化的三个条件与构造契约 | 现行 |
+| [036](#adr-036-对象创建机制独立成域--它是系统级反射机制不是插件专属) | 对象创建机制独立成 `creator` 域 | 现行 |
 
 ---
 
@@ -146,7 +147,7 @@
 **理由**：
 - **不再有两套并行的资源访问抽象**：存储实现本身就是 `VdfsProvider`，「一类资源 = 一份存储抽象 + 一份翻译」收缩为「一类资源 = 一次挂载点选型」。
 - **换拓扑不动数据、换类别不碰协议**：三型差别只在访问拓扑。
-- **不是重蹈 `EntityProvider` 覆辙**（ADR-010）：这里**没有**通用钩子 trait、没有注册表、没有适配器去猜资源形状。三个各自**完整**的具体实现，差异（标题、状态、`ext`、`schema`、写前校验、写后内存同步）由调用点以普通 Rust 参数显式传入。也**不走** `create_object` 工厂——不存在第二种实现，套 `dyn` 只是把一次构造换成一次字符串查表。
+- **不是重蹈 `EntityProvider` 覆辙**（ADR-010）：这里**没有**通用钩子 trait、没有注册表、没有适配器去猜资源形状。三个各自**完整**的具体实现，差异（标题、状态、`ext`、`schema`、写前校验、写后内存同步）由调用点以普通 Rust 参数显式传入。也**不走** `creator_create_object` 工厂——不存在第二种实现，套 `dyn` 只是把一次构造换成一次字符串查表。
 
 **后果与不变量**：
 - **三种拓扑必须显式选**：挂载点声明用哪一型、主文件叫什么（类别段名 = 插件名 = `PLUGIN_*`，主文件名 = 插件内部 `const MANIFEST`）；机制不去目录里猜。选错表现为「条目内部不该外露却外露」这类可见问题，而不是静默错乱。
@@ -345,7 +346,7 @@
 
 2. **差别只剩 `ctx`，且这是真实差异**：工具是**被路由、被注册**的（要转发 `session/chat/send`、要解析 VDFS 挂载、要读会话身份），所以还需要信封；模型执行不被路由，也就没有信封。不强行抹平。
 3. **`Capability::execute` 返回 `Result<Value, _>`**，不再经 `PluginPayload` 那层多态载荷——工具从来只用 `Data` 一个变体。
-4. **`invoke_capability(cap, ctx)` 是唯一「拆信封」的地方**：`args = payload ?? Null`、`env = ExecEnv::from_request(ctx)`、结果装回 `PluginPayload`。装饰器（`PrefixedCapability` / `SecureToolWrapper`）**不拆不装**，原样透传。
+4. **`capability_invoke(cap, ctx)` 是唯一「拆信封」的地方**：`args = payload ?? Null`、`env = ExecEnv::from_request(ctx)`、结果装回 `PluginPayload`。装饰器（`PrefixedCapability` / `SecureToolWrapper`）**不拆不装**，原样透传。
 5. **`ExecEnv::from_request` 的缺席语义照搬 ADR-020**：没有 `EVENT_SINK` ⇒ `Null` 出口，没有 `ABORT_SIGNAL` ⇒ 永不中止。因此 `route()` 直连调用仍然**自然静默**，「有没有出口」仍不需要第二条调用路径。
 
 **理由**：「统一」的判据是**调用方能否只看签名就正确调用**；**拆信封只该有一处**（多态载荷是路由层的形态，工具不该为它付代价）；**保留 `ctx` 是承认真实差异**，不是妥协——硬把 `ctx` 塞进 `ExecEnv` 会把「这次调用从哪条路径来」与「这次调用要怎么跑」重新混成一团。
@@ -661,27 +662,27 @@
    1. **调用方需要运行时多态**——≥2 个实现，且**编译期**不知道选哪个；
    2. **无状态，或状态可共享**——一个 id 对应一个对象语义；
    3. **功能是「按 id 装配对象」而不是「处理一段数据」**（理由见下）。
-2. **构造契约：构造函数必须廉价。** 需要单例的实现在**自己内部**建（范本：`providers/embedding/local.rs` 的 `LazyLock`）；`create_object` **不做缓存**。
-3. **`ctx` 键与 `create_object` 是两条互不替代的通道**：
+2. **构造契约：构造函数必须廉价。** 需要单例的实现在**自己内部**建（范本：`providers/embedding/local.rs` 的 `LazyLock`）；`creator_create_object` **不做缓存**。
+3. **`ctx` 键与 `creator_create_object` 是两条互不替代的通道**：
 
-   | | `ctx` 键（`SymbioKey`） | `create_object` |
+   | | `ctx` 键（`SymbioKey`） | `creator_create_object` |
    |---|---|---|
    | 装什么 | **每次调用变化**的**值** | **按 id 装配**的**对象** |
    | 生命周期 | 一次 traverse / 一次工具调用 | 由持有者决定 |
    | 例 | `EVENT_SINK` · `ABORT_SIGNAL` · `CAPABILITY_ERRORS` · `PLUGIN_DIR` | `dyn Plugin` · `dyn ModelProtocol` · `dyn EmbeddingService` |
    | `ctx` 的角色 | 就是它本身 | 仅作**构造上下文**（参数袋） |
 
-   判据一句话：**每次调用都不一样的值走 `ctx` 键；按 id 选一个实现走 `create_object`。**
+   判据一句话：**每次调用都不一样的值走 `ctx` 键；按 id 选一个实现走 `creator_create_object`。**
 
 **理由**：
 
-- 决策 1.3 有**签名级证据**：`type ObjectConstructor = fn(Arc<dyn PluginInvokeRequest>) -> Box<dyn Any + Send + Sync>`（`symbio_core/plugin/creator.rs`）——**没有参数位**。机制表达得了「按 id 装配」，表达不了「让这个对象处理这段数据」；后者只能由返回对象自己的方法承担，数据经 `ctx` 键或方法参数进入。
+- 决策 1.3 有**签名级证据**：`type ObjectConstructor = fn(Arc<dyn PluginInvokeRequest>) -> Box<dyn Any + Send + Sync>`（`symbio_core/creator/mod.rs`）——**没有参数位**。机制表达得了「按 id 装配」，表达不了「让这个对象处理这段数据」；后者只能由返回对象自己的方法承担，数据经 `ctx` 键或方法参数进入。
 - 决策 2 的「实现自持单例」不是权宜：**构造代价是实现的私事**。机制若代管，就必须知道「哪些实现昂贵」，而那正是 ADR-007「不针对任何具体类型做特殊化」要避免的知识。
-- 决策 3 划清边界后，`ExecTranscriptWriter` 的形态才有解释：core 定义 trait（`ExecEventSink::Direct` 要调它，不能反向依赖 session 的 `Transcript`），但**不走 `create_object`**——它的出口是「**这一次执行**的记录器」，是每次调用变化的值，故走 `ctx` 键（`ExecEventSinkKey`）。
+- 决策 3 划清边界后，`ExecTranscriptWriter` 的形态才有解释：core 定义 trait（`ExecEventSink::Direct` 要调它，不能反向依赖 session 的 `Transcript`），但**不走 `creator_create_object`**——它的出口是「**这一次执行**的记录器」，是每次调用变化的值，故走 `ctx` 键（`ExecEventSinkKey`）。
 
 **被否决的方案**：
 
-- **给 `create_object` 加统一缓存（按 id 缓存 `Arc<dyn Any>`）**：**会破坏分形挂载**。[`ASSEMBLY_SUB_AGENT_PLUGINS`](#adr-001-分形插件架构) 让**每一棵**子 Agent 子树都挂 `model` / `session` / `local`……同一个 provider id 因此在系统树与每棵子树下**各有一个挂载点**，各自的 `ctx` 带各自的 `PLUGIN_DIR`；缓存后所有子树会拿到**同一个**实例（且是第一个挂载点的 ctx），子智能体的模型服务与工作区记忆会全部串到父树上。收益仅是省一次 `Arc::clone`——而昂贵构造已由实现方用 `LazyLock` 解决。
+- **给 `creator_create_object` 加统一缓存（按 id 缓存 `Arc<dyn Any>`）**：**会破坏分形挂载**。[`ASSEMBLY_SUB_AGENT_PLUGINS`](#adr-001-分形插件架构) 让**每一棵**子 Agent 子树都挂 `model` / `session` / `local`……同一个 provider id 因此在系统树与每棵子树下**各有一个挂载点**，各自的 `ctx` 带各自的 `PLUGIN_DIR`；缓存后所有子树会拿到**同一个**实例（且是第一个挂载点的 ctx），子智能体的模型服务与工作区记忆会全部串到父树上。收益仅是省一次 `Arc::clone`——而昂贵构造已由实现方用 `LazyLock` 解决。
 - **把 core 的共享内核（`memory` / `clock` / `text` / `logger`）硬抽 trait**：都不满足决策 1 的前两条——没有第二实现，`dyn` 只是把一次构造换成一次字符串查表（`memory/mod.rs` 有专节论证；[ADR-011](#adr-011-资源存储--vdfsprovider-的集中实现) 对 `VdfsProvider` 记的正是同一判据的反面：**不存在第二种实现时不套 `dyn`**）。
 - **合并 `clock` 与 `text` 为「业务无关工具域」**：任何**有判别力**的合并判据都会把 `clock` 排除——`text` 是**纯函数**（输入决定输出），`clock` 是**非确定性来源**（无输入，输出随系统时钟变化）。要么判据松到能装下两者（那就成了杂物抽屉，`keys` 一度收下插件清单正是前车之鉴，见 [ADR-023](#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层) 的「依赖方数量」判据所修的那一类错放），要么判据有判别力（`clock` 随即被排除）。而合并的收益只是少一个目录 + 少一行 README——不足以换掉「一个域名自证内容」这条性质。
 
@@ -690,6 +691,46 @@
 - 新增共享功能时**先过三条件**；三条件不全成立一律用值对象 / 纯函数 / 全局单例，**不硬抽 trait**。
 - 新增 provider 时**构造必须廉价**；昂贵实现自持单例，范本指向 `providers/embedding/local.rs`。
 - 不变量：`symbio_core` 里**每一处含具体逻辑的域都有 ≥2 个消费方**，且模块文档写明了「为什么是内核而不是 provider」。此条可由 `grep` 复核。
+
+---
+
+## ADR-036: 对象创建机制独立成域 —— 它是系统级反射机制，不是插件专属
+
+**状态**：已接受。补充 [ADR-007](#adr-007-静态注册-inventory)（**怎么注册**）、[ADR-023](#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层)（**住哪**）与 [ADR-035](#adr-035-provider-化的判据--三个条件与构造契约)（**该是什么形态**），回答**归哪个域**。
+
+**背景**：`create_object` / `has_creator` / `creator_ids` / `submit_object_creator!` 与注册表内部结构住在 `plugin` 域。三条已有 ADR 都没有决定这件事——ADR-007 定静态注册的手段、ADR-023 定「依赖方 ≤ 1 就下沉」、ADR-035 引用它作为「按 id 装配」的机制，**没有一条说它属于 `plugin`**。它住 `plugin` 只是因为最先服务的类型族恰好是 `dyn Plugin`。
+
+而注册点实际服务**三个互不相关的类型族**：
+
+| 类型族 | 注册点 | 所属域 / 层 |
+|---|---|---|
+| `dyn Plugin` | `plugins/*/plugin.rs` 的 `build`（16 个插件） | `plugin` 契约 |
+| `dyn ModelProtocol` | `plugins/model/protocols/*.rs` | `model` 插件 |
+| `dyn EmbeddingService` | `providers/embedding/local.rs` | `embedding` 域 |
+
+**决策**：
+
+1. **独立成 `creator` 域**：目录 `symbio_core/creator/`，公开面 `creator_create_object` / `creator_has` / `creator_ids`，加 `submit_object_creator!` 宏（`#[macro_export]`，导出到 crate 根）。
+2. **归属判据是「它描述什么」，不是「谁先用了它」**（README §1.2「放置也是同一条规则的一部分」）。注册表描述的是「按 id 装配任意类型对象」，与「插件」这个具体类型族无关。
+3. **前缀 `creator_`**；`plugin` 域不再有任何对象工厂符号。
+
+**理由**：
+
+- **签名里没有 `Plugin`**：`type ObjectConstructor = fn(Arc<dyn PluginInvokeRequest>) -> Box<dyn Any + Send + Sync>`（`symbio_core/creator/mod.rs`）——注册表按 `(id, TypeId)` 索引，对类型族**完全无知**。它对类型族的唯一了解是「可以被 `Box<dyn Any>` 装下」。
+- **留在 `plugin` 会让 `embedding` / `model` 依赖 `plugin` 的一个与插件无关的符号**——`plugin` 于是成了它们的事实依赖，域间图多出一条没有语义的边。
+- **「一域一前缀」的必然结果**：`PLUGIN_` 已属于 `plugin`（工厂 id `PLUGIN_ID_*`、清单键 `PLUGIN_KEY_*`、路由地址 `ROUTE_*`）。对象创建注册表若也叫 `PLUGIN_*`，「插件」这个词就同时指「插件」与「任意对象的装配」——正是 [ADR-023](#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层) 记的那类「一个前缀两种东西」。
+
+**被否决的方案**：
+
+- **留在 `plugin`，只改名 `PLUGIN_CREATE_OBJECT`**：前缀对了，但「`embedding` 的嵌入服务工厂住在 `plugin` 域」这件事仍然没有解释。改名只解决「名字读不出归属」，不解决「放错了域」。
+- **并入 `keys`**：`keys` 只收「类型安全上下文键」（ADR-023），注册表是**行为**不是取值凭据。同类错放已被修过一次——插件清单曾收进 `keys`。
+- **与 `keys` 合成一个 `registry` 域**：两者的判别力不同（「取值的凭据」vs「按 id 装配对象」），唯一能同时装下两者的判据是「都是查表」——那是杂物抽屉式判据，与 ADR-035 否决「合并 `clock` 与 `text`」的理由同源。
+
+**后果与不变量**：
+
+- 新增「按 id 装配任意类型对象」的需求一律进 `creator`；不新开域，也不挂回 `plugin`。
+- 不变量：**`creator` 的公开签名里不得出现任何具体类型族**（`Plugin` / `ModelProtocol` / `EmbeddingService`）。`ObjectConstructor` 的签名即证据，可由 `grep` 复核。
+- 域间图新增 `creator` 节点，依赖方向为 `creator → plugin`（只用 `PluginInvokeRequest` 作构造上下文），**无环**。
 
 ---
 

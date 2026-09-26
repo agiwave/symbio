@@ -12,7 +12,7 @@
  * **落地语义与渲染结果**，不是传输，故直接驱动 store 的落地口）。
  *
  * 注意**不再有整条替换的 `upsert`**：状态迁移帧只带身份 + 状态（与后端
- * `state_frame` 同构），落地是**合并**——这正是要锚定的新语义（旧协议下这种部分帧
+ * `llm_state_frame` 同构），落地是**合并**——这正是要锚定的新语义（旧协议下这种部分帧
  * 会把 `type` / `parent_id` 一并抹掉，节点随即失去渲染语义）。
  */
 import { describe, expect, it, beforeEach, vi } from 'vitest'
@@ -76,7 +76,7 @@ function toolCall(
   return { id, parent_id: parent, role: 'assistant', type: 'tool_call', name, status, content: args }
 }
 /**
- * 状态帧：只带身份 + 状态，**不带正文**（与后端 `state_frame` 同构）。
+ * 状态帧：只带身份 + 状态，**不带正文**（与后端 `llm_state_frame` 同构）。
  *
  * 旧协议下这种部分帧会把 `type` / `parent_id` / `content` 一并抹掉；新协议下是
  * **合并**——这里刻意用最小帧，正是要钉住「状态迁移不吞身份与正文」这条不变式。
@@ -331,7 +331,7 @@ describe('渲染层回归：增量必须进 DOM（不只进 store）', () => {
       })
     await nextTick()
     expect(w.text()).toContain('思考中')
-    // 最小状态帧（后端 `state_frame` 同构）：不带正文，落地是合并
+    // 最小状态帧（后端 `llm_state_frame` 同构）：不带正文，落地是合并
     feed({ id: 'R1', status: 'completed' })
     await nextTick()
     expect(w.text(), '定稿后不再显示「思考中」').not.toContain('思考中')

@@ -107,6 +107,26 @@ export function declaredIn(file) {
 }
 
 /**
+ * 直接声明在某个 `.rs` 文件里的**子模块**名（`mod X;` / `pub mod X {`）。
+ *
+ * 为什么要单独识别模块：`pub use capability::failure_kind;` 是**模块**重导出，
+ * 而模块名是小写 snake_case——`kindOf` 会把它当成**函数**。`failure_kind` 就是这样
+ * 被误报成「函数缺域前缀」的（实为子命名空间，见 `core-naming-audit.mjs` 的口径）。
+ * 「名字形态」推断对**符号**成立，对**命名空间**不成立——命名空间不是符号。
+ */
+export function declaredModules(file) {
+  const out = new Set()
+  if (!fs.existsSync(file)) return out
+  const src = stripComments(fs.readFileSync(file, 'utf8'))
+  for (const m of src.matchAll(
+    /^[ \t]*(?:pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*[;{]/gm,
+  )) {
+    out.add(m[1])
+  }
+  return out
+}
+
+/**
  * 按 Rust 命名约定推断符号种类。
  *
  * 为什么用形态而不是解析 `pub struct` / `pub const`：重导出链（`plugin/mod.rs` 的
@@ -126,10 +146,12 @@ export function kindOf(name) {
 /**
  * 枚举 `symbio_core` 的公开面。
  *
- * 返回 `{ coreRel, coreDir, domains, symbols }`：
- *   - `domains`：13 个域目录名（`Set`）
+ * 返回 `{ coreRel, coreDir, domains, symbols, modules }`：
+ *   - `domains`：域目录名（`Set`）
  *   - `symbols`：`Map<符号名, 域>`；`'(root)'` = 直接声明在根 `mod.rs`，
  *     `'(explicit)'` = 根显式列名重导出且未标出域
+ *   - `modules`：`symbols` 里其实是**子模块**（命名空间）的那些名字。判定型守卫
+ *     必须跳过它们——命名空间不是符号，前缀规则对它不适用（见 `declaredModules`）
  */
 export function collectCoreSurface(root) {
   const coreRel = 'symbio/src/symbio_core'
@@ -160,5 +182,17 @@ export function collectCoreSurface(root) {
     for (const n of declaredIn(domMod)) symbols.set(n, domain)
   }
 
-  return { coreRel, coreDir, domains, symbols }
+  // 子模块：域 `mod.rs` 里 `mod X;` / `pub mod X {` 声明过的名字。只对**能定位到域**
+  // 的符号判——`(root)` / `(explicit)` 没有域，也就没有子模块可查。
+  const modCache = new Map()
+  const modules = new Set()
+  for (const [name, domain] of symbols) {
+    if (domain === '(root)' || domain === '(explicit)') continue
+    if (!modCache.has(domain)) {
+      modCache.set(domain, declaredModules(path.join(coreDir, domain, 'mod.rs')))
+    }
+    if (modCache.get(domain).has(name)) modules.add(name)
+  }
+
+  return { coreRel, coreDir, domains, symbols, modules }
 }

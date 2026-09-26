@@ -49,7 +49,7 @@
 
 use super::physical::PhysicalFs;
 use crate::symbio_core::{
-    has_parent_segment, DynVdfsProvider, VdfsChange, VdfsChangeSink, VdfsContext, VdfsError,
+    vdfs_has_parent_segment, DynVdfsProvider, VdfsChange, VdfsChangeSink, VdfsContext, VdfsError,
     VdfsItem, VdfsProvider, VdfsResult,
 };
 use crate::symbio_core::{VdfsRequest, VdfsResponse};
@@ -93,10 +93,10 @@ pub fn normalize_addr(raw: &str) -> VdfsResult<String> {
     //
     // 只按 `/` 分段会被 Windows 形式的 `demo/..\..\escaped` 绕过——`\` 同样是
     // 路径分隔符，下游 `Path::join` 会照着它解析。规则本体在机制层
-    // [`has_parent_segment`]，此处**复用而非再写一份**：本文件开头的地址规则
+    // [`vdfs_has_parent_segment`]，此处**复用而非再写一份**：本文件开头的地址规则
     // 说明早已定下「分段比较」，历史 bug 正是「按字符串前缀 / 单一分隔符代替
     // 按路径段比较」。
-    if has_parent_segment(raw) {
+    if vdfs_has_parent_segment(raw) {
         return Err(VdfsError::invalid(format!(
             "VDFS 地址不允许向上穿越：{raw}"
         )));
@@ -108,7 +108,7 @@ pub fn normalize_addr(raw: &str) -> VdfsResult<String> {
             continue;
         }
         // 第二道：覆盖被空白包裹的 `..`（`" .. "`）——逐段 `trim()` 才暴露它，
-        // 上面的 `has_parent_segment` 按原样分段看不到。
+        // 上面的 `vdfs_has_parent_segment` 按原样分段看不到。
         if seg == ".." {
             return Err(VdfsError::invalid(format!(
                 "VDFS 地址不允许向上穿越：{raw}"

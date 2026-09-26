@@ -137,7 +137,7 @@ export function readVdfs(reason: ReadbackReason, path: string): Promise<VdfsCont
  *
  * `opts.ctx` 是**调用上下文**（`workdir` / `session_id` 等）。多数写入不需要它
  * （目标地址已经说明了一切），但会话收件箱的写入需要：后端把它作为
- * `start_turn` 回退链的第一档工作目录（`host_ctx(ctx).get(WORKDIR)`），
+ * `start_turn` 回退链的第一档工作目录（`vdfs_host_ctx(ctx).get(WORKDIR)`），
  * 丢了它就只能靠会话 metadata——而「会话还没绑过 workdir」正是新建会话那一刻。
  */
 export async function writeVdfs(

@@ -114,7 +114,7 @@ async fn vdfs_stat_session_is_dir_view_with_list_shape() {
     );
 }
 
-/// 实时：`watch` 登记的 sink 在 `notify_change` 时**同步**收到变更；
+/// 实时：`watch` 登记的 sink 在 `vdfs_notify_change` 时**同步**收到变更；
 /// `unwatch` 按引用计数摘除（严格配对，归零才真正停投）
 #[tokio::test]
 async fn vdfs_watch_forwards_session_changes() {
@@ -164,7 +164,7 @@ async fn vdfs_watch_forwards_session_changes() {
 /// 配置文件是 `ext = form` 的可写文档，**但它不在会话清单里**。
 ///
 /// 「清单 = 业务列表」：`<根>/session` 下应当只有会话。配置文件进设置菜单走
-/// 的是 ConfigurableVisitor 那条通道（`announce_configurable`），不靠清单并列
+/// 的是 ConfigurableVisitor 那条通道（`capability_announce_configurable`），不靠清单并列
 /// ——否则列表底部会多出一个「设置」项。可达性不受影响：`stat` / `read` 照常。
 #[tokio::test]
 async fn config_document_is_reachable_but_not_a_session_list_item() {
@@ -678,7 +678,7 @@ async fn memory_write_notifies_subscribers() {
 ///
 /// 会话 id 直接出现在用户视野里——它是 VDFS 目录名（`.symbio/session/<id>`），
 /// 列表与地址栏都要读。此前是 36 字符带连字符的完整 UUID，与项目既有的两处
-/// 短 id 约定（`turn::short_id` / `vdfs_service::entry::auto_id`）不一致。
+/// 短 id 约定（`turn::llm_short_id` / `vdfs_service::entry::auto_id`）不一致。
 ///
 /// 这条测试盯的是**形状**：一旦有人改回长 UUID，这里立刻红。
 #[tokio::test]

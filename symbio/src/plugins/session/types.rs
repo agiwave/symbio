@@ -125,7 +125,7 @@ pub struct Session {
 
 impl Session {
     pub fn new(id: impl Into<String>) -> Self {
-        let now = crate::symbio_core::now_ms();
+        let now = crate::symbio_core::clock_now_ms();
         Self {
             id: id.into(),
             messages: Vec::new(),

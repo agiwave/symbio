@@ -106,7 +106,7 @@
 | 1 | `Plugin` trait 实现 | `route` 分发 / `traverse`（能力收集）/ 生命周期 |
 | 2 | `VdfsProvider` 实现 | 会话节点树：`list` / `stat` / `read` / `write` / `delete` / `watch` |
 | 3 | VDFS 节点构造辅助 | `session_node` / `parse_session_path` / `VdfsSessionPath` / `internal_dirs` / `message_node` / `message_label` / `ordered` / `overlay_live` / `transcript_window` / `cursor_id` / …（**25 个函数**） |
-| 4 | 会话实体杂务 | `now_ms` / `session_id_from_new_path` / `config_definition` |
+| 4 | 会话实体杂务 | `clock_now_ms` / `session_id_from_new_path` / `config_definition` |
 
 （`cleanup_crashed_sessions` 已删除：持久层写入不变量 `ensure_durable_states`
 拒绝瞬态状态落盘后，磁盘上只存在终态，崩溃恢复不再需要修复器。）
@@ -143,7 +143,7 @@ chat_loop.test.rs       测试（+ `inputs.test.rs` / `state.test.rs`）        
 
 ```text
 plugin.rs                SessionPlugin 定义 + impl SessionPlugin + impl Plugin +
-                         配置定义 / now_ms + 模块声明与共享面 re-export            ~523
+                         配置定义 / clock_now_ms + 模块声明与共享面 re-export            ~523
 plugin/nodes.rs          VDFS 节点构造 / 路径模型 / 消息投影（纯函数，不持有 self）  ~501
 plugin/vdfs_provider.rs  impl VdfsProvider + 其私有辅助（impl SessionPlugin 第二块） ~512
 plugin.test.rs           测试（S1 已外置；S3 后按实现文件再拆为 3 份）                 137
@@ -273,7 +273,7 @@ orchestrator.test.rs      测试（S1 已外置；5 例全部测根文件的守�
 
 | 文件 | 行数 | 内容 |
 |---|---:|---|
-| `plugin.rs` | 523 | 结构体 / `impl SessionPlugin` / `impl Plugin` / `config_definition` / `now_ms` / 模块声明与 re-export |
+| `plugin.rs` | 523 | 结构体 / `impl SessionPlugin` / `impl Plugin` / `config_definition` / `clock_now_ms` / 模块声明与 re-export |
 | `plugin/nodes.rs` | 501 | 23 个纯函数：路径模型 7 + 节点构造 6 + 消息投影 10 |
 | `plugin/vdfs_provider.rs` | 512 | `impl VdfsProvider`（415 行）+ `impl SessionPlugin` 私有辅助（7 个只读函数） |
 
@@ -283,7 +283,7 @@ orchestrator.test.rs      测试（S1 已外置；5 例全部测根文件的守�
 |---|---|---|---|
 | `session_id_from_new_path` | `entities.rs` | `nodes.rs` | 它是**新建语义**（具名目标的地址末段即会话 id），属 VDFS 路径模型 |
 | `config_definition` | `entities.rs` | `plugin.rs` | 配置面，紧邻其唯一调用点 `PluginConfigFile::new(dir, "会话设置", …)` |
-| `now_ms` | `entities.rs` | `plugin.rs` | 通用工具，模块根是它的自然归宿 |
+| `clock_now_ms` | `entities.rs` | `plugin.rs` | 通用工具，模块根是它的自然归宿 |
 | `entities.rs` | 新建 | **不建** | 三个条目彼此无关，凑成一个 70 行文件反而降低内聚 |
 
 **保真校验**（口径同 §4.2）：旧 `plugin.rs` 994 条归一化代码行 vs. 新三文件 1011 条，
@@ -294,18 +294,18 @@ re-export 块脚手架；注释行差异 30 条全部是新增模块头，**零�
 **本次新增的可见性/路径经验**：
 
 - 被父模块 `pub(crate) use` 重导出的条目必须是 `pub(crate)`（§4.2 已记）；
-  **只被本模块子级使用**的（如 `now_ms`）保持私有即可——子模块经 `use super::*;`
+  **只被本模块子级使用**的（如 `clock_now_ms`）保持私有即可——子模块经 `use super::*;`
   可看到父模块的**私有**条目。
 - `super::X::` 加深一层：`nodes.rs` 7 处、`vdfs_provider.rs` 12 处
   （`super::workdir::` → `super::super::workdir::`）。
 - 父模块 `use` 清单中**只被子模块使用**的导入**不会**触发 `unused_imports`
   ——子模块的 glob 导入算作使用（S2/S3 两次验证）。
 
-**遗留（已收口）**：`plugin.rs` 的 `now_ms()` 与 `heartbeat.rs` 的
-`pub(crate) fn now_ms()` 曾是**两份等价实现**（前者 `SystemTime`、后者
-`time::OffsetDateTime`）。已由后续提交 `242ed9e` 收敛为 `symbio_core::clock::now_ms`
-单一实现（见本文 §4.6 归因表末行）；session 侧现无任何 `fn now_ms` 定义，
-19 处调用一律走 `crate::symbio_core::now_ms`。
+**遗留（已收口）**：`plugin.rs` 的 `clock_now_ms()` 与 `heartbeat.rs` 的
+`pub(crate) fn clock_now_ms()` 曾是**两份等价实现**（前者 `SystemTime`、后者
+`time::OffsetDateTime`）。已由后续提交 `242ed9e` 收敛为 `symbio_core::clock::clock_now_ms`
+单一实现（见本文 §4.6 归因表末行）；session 侧现无任何 `fn clock_now_ms` 定义，
+19 处调用一律走 `crate::symbio_core::clock_now_ms`。
 
 **全程硬约束**：
 
@@ -391,7 +391,7 @@ mod tests;
 | `super::` 加深导致 rustfmt 重新折行 | 8 行（4 条语句） | 路径变长超 `max_width=100` ⇒ 单行拆成 2~3 行；归一化能折叠 `super::super::`，但**无法把已拆开的行重新粘回** |
 | `impl SessionPlugin` 由 1 块拆成 4 块 | 6 行（`impl` ×3 + `}` ×3） | 结构性差异，符合预期 |
 | 根文件新增模块分工表注释 | 1 行 | `// 子模块：impl SessionPlugin 按职责分块…` |
-| 后续 `now_ms` 收敛提交（`242ed9e`） | −1 行 | `session.updated_at = (time::…);`（2 行）→ `now_ms()`（1 行），非本次拆分引入 |
+| 后续 `clock_now_ms` 收敛提交（`242ed9e`） | −1 行 | `session.updated_at = (time::…);`（2 行）→ `clock_now_ms()`（1 行），非本次拆分引入 |
 
 ⚠️ **教训**：保真校验必须**在 `cargo fmt` 之后复测一遍**——`super::` 加深会改变行宽，
 进而触发折行，使「逐字未改」的结论在格式化后不再严格成立。归因表比「差集为 0」

@@ -44,7 +44,7 @@
 //! 与 `register_vdfs_provider` 完全相同：插件在自己的
 //! [`TRAVERSE_AVAILABLE_TOOLS`](crate::symbio_core::TRAVERSE_AVAILABLE_TOOLS)
 //! 分支里顺带声明，一次广播同时喂饱两条链路。插件侧只有一个入口
-//! [`announce_configurable`]，条目形状在那里统一构造，各插件不必各写一遍。
+//! [`capability_announce_configurable`]，条目形状在那里统一构造，各插件不必各写一遍。
 //!
 //! 与 VDFS provider 的**逐子插件独立收集器**不同，本通道用**共享收集器**：
 //! 声明自带目录名，不存在归属歧义，所以容器可以让所有子插件注册进同一个实例。
@@ -103,13 +103,16 @@ impl ConfigurableVisitor for DefaultConfigurableVisitor {
 
 /// 在 `traverse` 里声明「本插件有一份配置文档」——**插件侧的唯一入口**。
 ///
-/// 传入插件自己的 [`PluginConfigFile`]，条目形状由本函数统一构造（见 [`entry_of`]）。
+/// 传入插件自己的 [`PluginConfigFile`]，条目形状由本函数统一构造（见 [`capability_entry_of`]）。
 /// 收集器不存在时静默跳过：本通道是**增益**，没有它插件照常工作，
 /// 只是设置页列不出它。收集器由容器在广播前放进 `ctx`，见
 /// `plugins/composite/vdfs.rs::children_of`。
-pub async fn announce_configurable(ctx: &Arc<dyn PluginInvokeRequest>, config: &PluginConfigFile) {
+pub async fn capability_announce_configurable(
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    config: &PluginConfigFile,
+) {
     if let Some(v) = ctx.get(CONFIGURABLE_VISITOR) {
-        v.register_configurable(entry_of(config)).await;
+        v.register_configurable(capability_entry_of(config)).await;
     }
 }
 
@@ -126,7 +129,7 @@ pub async fn announce_configurable(ctx: &Arc<dyn PluginInvokeRequest>, config: &
 /// 其余（标题 / 呈现扩展名 / 表单定义 / 访问位）直接取配置文档自己的节点视图，
 /// 因此定义只有一份来源。`kind` 留空由**消费者**按自己所在的场景覆盖
 /// （设置页填 `plugin_manager`）——同一条声明换个地方列，场景标签就该换。
-pub fn entry_of(config: &PluginConfigFile) -> VdfsItem {
+pub fn capability_entry_of(config: &PluginConfigFile) -> VdfsItem {
     let dir = config.dir().name();
     let mut n = config.node();
     n.name = dir.to_string();

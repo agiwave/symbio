@@ -34,7 +34,7 @@
 use super::policy::SecurityPolicy;
 use crate::symbio_core::EmbeddingService;
 use crate::symbio_core::{
-    create_object, Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest,
+    creator_create_object, Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginSimpleRequest, EMBEDDING_LOCAL,
 };
 use async_trait::async_trait;
@@ -235,7 +235,7 @@ impl CodebaseSearchTool {
         let workspace_dir = PathBuf::from(shellexpand::tilde(workdir).to_string());
 
         let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
-        let embed = create_object::<dyn EmbeddingService>(EMBEDDING_LOCAL, ctx);
+        let embed = creator_create_object::<dyn EmbeddingService>(EMBEDDING_LOCAL, ctx);
 
         let mut results: Vec<Value> = Vec::new();
         let mut mode = "keyword_fallback";

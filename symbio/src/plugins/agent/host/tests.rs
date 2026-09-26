@@ -126,7 +126,7 @@ async fn agent_import_traverse_and_memory() {
         .unwrap();
 
     // 收集期错误桶应为空（装配成功）
-    let errors = crate::symbio_core::take_errors(&ctx).await;
+    let errors = crate::symbio_core::capability_take_errors(&ctx).await;
     assert!(errors.is_empty(), "不应有收集期错误: {errors:?}");
 
     // agent_run 无条件注册；子 Agent 的技能工具带来源前缀进来
@@ -205,7 +205,7 @@ async fn version_mismatch_agent_is_rejected_and_unbound_session_is_silent() {
     let plugin = Arc::new(AgentPlugin::new());
     let (ctx, manager) = ctx_with(None, None);
     plugin.traverse(String::new(), ctx.clone()).await.unwrap();
-    let errors = crate::symbio_core::take_errors(&ctx).await;
+    let errors = crate::symbio_core::capability_take_errors(&ctx).await;
     assert!(errors.is_empty(), "未绑定会话不应有收集期错误: {errors:?}");
     let caps = manager.list_capability().await;
     assert_eq!(caps.len(), 1, "仅注册 agent_run: {caps:?}");
@@ -230,7 +230,7 @@ async fn nonconforming_agent_is_rejected_with_both_versions() {
     let (ctx, _manager) = ctx_with(Some(workdir), Some("ghost"));
     plugin.traverse(String::new(), ctx.clone()).await.unwrap();
 
-    let errors = crate::symbio_core::take_errors(&ctx).await;
+    let errors = crate::symbio_core::capability_take_errors(&ctx).await;
     assert_eq!(errors.len(), 1, "应有且仅有一条拒绝接入: {errors:?}");
     assert!(
         errors[0].message.contains("拒绝接入") && errors[0].message.contains("agent-dir/v2"),
@@ -619,7 +619,7 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
 ///
 /// 生产态的请求上下文**不带 `PLUGIN_DIR`**——那个键只在**装配期**给出
 /// （`composite::build` 构造子插件时、[`AgentPlugin::sub_agent`] 造子树时）。
-/// 因此目录若从**请求上下文**取（`dir_from_ctx`），嵌套实例就会回退到
+/// 因此目录若从**请求上下文**取（`plugin_dir_from_ctx`），嵌套实例就会回退到
 /// `PluginDir::of(PLUGIN_ID_AGENT)` = **全局 agent 根**：子空间里列出的「智能体」
 /// 其实是**顶层**清单，用户看到的是**它自己**。
 ///

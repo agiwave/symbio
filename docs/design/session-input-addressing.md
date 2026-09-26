@@ -127,14 +127,14 @@ action(<A>/message/<mid>, <ResumeAction>)   payload: {args?, reason?, answer?, m
 忙碌 ⇒ 回执 `ok:false` + `session_busy`（前端据此复位 working，与现在
 `useChatConnection.resume` 里的 `session_busy` 分支同款）。
 
-需要 ctx：`messages_at` 已经收到 `ctx: &VdfsContext`，经 `host_ctx` 取回
+需要 ctx：`messages_at` 已经收到 `ctx: &VdfsContext`，经 `vdfs_host_ctx` 取回
 `PluginInvokeRequest` 即可（与 `agent_run` 的 `register_subsession` 同款手法）。
 
 ### 5.3 收件箱写入带上 `WORKDIR`
 
 `inbox_at`（`vdfs_provider.rs:520`）现在传 `params = Request::default()`、
 `workdir = None`，而 `chat/send` 传的是 `ctx.get(WORKDIR)`。走 VDFS 就丢了这个回退源。
-改：`inbox_at` 接 `ctx`，入队时传 `host_ctx(ctx).get(WORKDIR)`。
+改：`inbox_at` 接 `ctx`，入队时传 `vdfs_host_ctx(ctx).get(WORKDIR)`。
 （`mode` / `risk_level` / `provider_id` 不补——它们由会话 metadata 解析，
 `start_turn` 的回退链已覆盖，且前端早已不在请求里透传 agent/provider。）
 

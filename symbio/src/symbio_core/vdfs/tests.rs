@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 /// **信封契约**：`vdfs_change_of` 必须能解出 `event_bus` 产出的帧。
 ///
-/// 信封在测试里**手搓**（不调 `event_bus::build_envelope`）：它是跨模块契约，
+/// 信封在测试里**手搓**（不调 `event_bus::event_bus_build_envelope`）：它是跨模块契约，
 /// 测试要独立于产帧方来钉形状——产帧方改了形状而这里没跟着改，本用例必须红。
 /// 这正是 telegram 侧那次事故的形态（产帧方与解帧方各写一份，漂移无人发现）。
 #[test]
@@ -86,11 +86,11 @@ fn contains_and_constructors() {
 
 #[test]
 fn derive_ext_from_name() {
-    assert_eq!(derive_ext("config.json").as_deref(), Some("json"));
-    assert_eq!(derive_ext("prompts/a.MD").as_deref(), Some("md"));
-    assert_eq!(derive_ext("noext"), None);
-    assert_eq!(derive_ext(".env"), None);
-    assert_eq!(derive_ext("a."), None);
+    assert_eq!(vdfs_derive_ext("config.json").as_deref(), Some("json"));
+    assert_eq!(vdfs_derive_ext("prompts/a.MD").as_deref(), Some("md"));
+    assert_eq!(vdfs_derive_ext("noext"), None);
+    assert_eq!(vdfs_derive_ext(".env"), None);
+    assert_eq!(vdfs_derive_ext("a."), None);
 }
 
 #[test]
@@ -296,32 +296,32 @@ fn map_paths_is_the_single_translation_point() {
 /// `..` 判定按**路径段**，与分隔符无关。
 #[test]
 fn parent_segment_is_separator_agnostic() {
-    assert!(has_parent_segment("../etc/passwd"));
-    assert!(has_parent_segment(".."));
-    assert!(has_parent_segment("a/../b"));
+    assert!(vdfs_has_parent_segment("../etc/passwd"));
+    assert!(vdfs_has_parent_segment(".."));
+    assert!(vdfs_has_parent_segment("a/../b"));
     // `..` 收尾：按前缀实现的旧判定会放过
-    assert!(has_parent_segment("a/.."));
+    assert!(vdfs_has_parent_segment("a/.."));
     // Windows 分隔符：按 `../` 前缀实现的旧判定会放过
-    assert!(has_parent_segment(r"src\..\..\..\Windows"));
-    assert!(has_parent_segment(r"..\etc"));
+    assert!(vdfs_has_parent_segment(r"src\..\..\..\Windows"));
+    assert!(vdfs_has_parent_segment(r"..\etc"));
     // 含 `..` 但不是独立段 → 合法
-    assert!(!has_parent_segment("a/..b/c"));
-    assert!(!has_parent_segment("src/main.rs"));
+    assert!(!vdfs_has_parent_segment("a/..b/c"));
+    assert!(!vdfs_has_parent_segment("src/main.rs"));
 }
 
 /// 前缀判定按**路径段**——`/etcfoo` 不在 `/etc` 之内。
 #[test]
 fn path_within_respects_segment_boundary() {
-    assert!(path_within("/etc", "/etc"));
-    assert!(path_within("/etc/passwd", "/etc"));
-    assert!(path_within(r"C:\Users\a\.ssh\id", r"C:\Users\a\.ssh"));
+    assert!(vdfs_path_within("/etc", "/etc"));
+    assert!(vdfs_path_within("/etc/passwd", "/etc"));
+    assert!(vdfs_path_within(r"C:\Users\a\.ssh\id", r"C:\Users\a\.ssh"));
     // 裸 starts_with 会误伤这两个
-    assert!(!path_within("/etcfoo", "/etc"));
-    assert!(!path_within("/etc2/x", "/etc"));
-    assert!(!path_within("/usr/local", "/etc"));
+    assert!(!vdfs_path_within("/etcfoo", "/etc"));
+    assert!(!vdfs_path_within("/etc2/x", "/etc"));
+    assert!(!vdfs_path_within("/usr/local", "/etc"));
     // 前缀尾部多余的斜杠不影响判定
-    assert!(path_within("/etc/passwd", "/etc/"));
-    assert!(!path_within("/anything", ""));
+    assert!(vdfs_path_within("/etc/passwd", "/etc/"));
+    assert!(!vdfs_path_within("/anything", ""));
 }
 
 #[test]

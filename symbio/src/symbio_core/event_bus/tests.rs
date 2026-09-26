@@ -26,7 +26,7 @@ async fn full_channel_keeps_subscription() {
     let _g = SERIAL.lock().await;
     let (tx, mut rx) = mpsc::channel(1);
     let id = "test_full_keeps_subscription".to_string();
-    register_subscriber(id.clone(), tx);
+    event_bus_register_subscriber(id.clone(), tx);
 
     EventBus::try_publish(EVENT_BUS_KIND_VDFS, None, json!({ "n": 1 })); // 填满容量 1
     EventBus::try_publish(EVENT_BUS_KIND_VDFS, None, json!({ "n": 2 })); // Full
@@ -36,7 +36,7 @@ async fn full_channel_keeps_subscription() {
         "通道满只允许丢帧，不得摘除订阅"
     );
     assert!(rx.try_recv().is_ok(), "满之前的帧应已送达");
-    unregister_subscriber(&id);
+    event_bus_unregister_subscriber(&id);
 }
 
 /// 对端断开（`Closed`）才摘除——消费者走了，留着只泄漏。
@@ -45,7 +45,7 @@ async fn closed_channel_is_unregistered() {
     let _g = SERIAL.lock().await;
     let (tx, rx) = mpsc::channel(4);
     let id = "test_closed_is_unregistered".to_string();
-    register_subscriber(id.clone(), tx);
+    event_bus_register_subscriber(id.clone(), tx);
     drop(rx);
 
     EventBus::try_publish(EVENT_BUS_KIND_VDFS, None, json!({}));
@@ -80,7 +80,7 @@ async fn full_channel_eventually_receives_resync_marker() {
     let _g = SERIAL.lock().await;
     let (tx, mut rx) = mpsc::channel(1);
     let id = "test_resync_delivered".to_string();
-    register_subscriber(id.clone(), tx);
+    event_bus_register_subscriber(id.clone(), tx);
 
     EventBus::try_publish(EVENT_BUS_KIND_VDFS, None, json!({ "n": 1 }));
     EventBus::try_publish(EVENT_BUS_KIND_VDFS, None, json!({ "n": 2 })); // Full → 触发补送
@@ -106,7 +106,7 @@ async fn full_channel_eventually_receives_resync_marker() {
         saw_marker,
         "满通道后必须补送 resync 标记，否则消费端无从自愈"
     );
-    unregister_subscriber(&id);
+    event_bus_unregister_subscriber(&id);
 }
 
 /// 从通道里挑出带指定 `tag` 的帧，返回**载荷的 `Arc`**。
@@ -136,8 +136,8 @@ async fn fan_out_shares_one_payload_allocation() {
     let (tx1, mut rx1) = mpsc::channel(512);
     let (tx2, mut rx2) = mpsc::channel(512);
     let (id1, id2) = (format!("{tag}-a"), format!("{tag}-b"));
-    register_subscriber(id1.clone(), tx1);
-    register_subscriber(id2.clone(), tx2);
+    event_bus_register_subscriber(id1.clone(), tx1);
+    event_bus_register_subscriber(id2.clone(), tx2);
 
     EventBus::try_publish(EVENT_BUS_KIND_VDFS, None, json!({ "tag": tag }));
 
@@ -148,6 +148,6 @@ async fn fan_out_shares_one_payload_allocation() {
         "两个订阅者必须共享同一份载荷分配；拿到两份说明扇出路径在做深拷贝"
     );
 
-    unregister_subscriber(&id1);
-    unregister_subscriber(&id2);
+    event_bus_unregister_subscriber(&id1);
+    event_bus_unregister_subscriber(&id2);
 }

@@ -5,7 +5,7 @@ use super::{http_request::HttpRequestTool, web_fetch::WebFetchTool, web_search::
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::vdfs;
 use crate::symbio_core::{
-    dir_from_ctx, Capability, Plugin, PluginConfigFile, PluginDir, PluginError,
+    plugin_dir_from_ctx, Capability, Plugin, PluginConfigFile, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
     PLUGIN_FILE, PLUGIN_ID_WEB,
 };
@@ -65,7 +65,7 @@ pub struct WebPlugin {
 impl WebPlugin {
     /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
-        let dir = dir_from_ctx(&*ctx, PLUGIN_ID_WEB);
+        let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_WEB);
         let config: WebConfig = match dir.load::<WebConfig>() {
             Ok(Some(c)) => c,
             Ok(None) => WebConfig::default(),
@@ -135,7 +135,7 @@ impl Plugin for WebPlugin {
         }
 
         if let Some(tool) = self.tool_impls.iter().find(|t| t.name() == path) {
-            return crate::symbio_core::invoke_capability(tool.as_ref(), ctx).await;
+            return crate::symbio_core::capability_invoke(tool.as_ref(), ctx).await;
         }
         Err(PluginError::NotFound(format!("路径不存在: {path}")))
     }
@@ -163,7 +163,7 @@ impl Plugin for WebPlugin {
         }
         // 顺带声明「本插件有一份配置文档」：设置页据此列出本项并指路到
         // `<根>/web/PLUGIN.yml`（标签与配置节点共用同一个来源，见 `PluginConfigFile`）
-        crate::symbio_core::announce_configurable(&ctx, &self.config_file).await;
+        crate::symbio_core::capability_announce_configurable(&ctx, &self.config_file).await;
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }

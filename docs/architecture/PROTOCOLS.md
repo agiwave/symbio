@@ -245,11 +245,11 @@ AI 增量与资源变更**不随请求返回**，而是经全局事件总线广�
 submit_object_creator!(PLUGIN_X, XPlugin::build, dyn Plugin);
 ```
 
-宏利用 [`inventory`](https://docs.rs/inventory) 在编译期把构造函数注册到全局 `ObjectCreatorRegistry`。宿主首次调用 `create_object::<dyn Plugin>(id, ctx)` 时惰性收集完毕，**无需手动注册**。
+宏利用 [`inventory`](https://docs.rs/inventory) 在编译期把构造函数注册到全局 `ObjectCreatorRegistry`。宿主首次调用 `creator_create_object::<dyn Plugin>(id, ctx)` 时惰性收集完毕，**无需手动注册**。
 
 ### 工厂只给「有第二种实现」的服务
 
-`create_object::<dyn T>(名字, ctx)` 的价值是**换实现不改调用方**，因此只有可替换的
+`creator_create_object::<dyn T>(名字, ctx)` 的价值是**换实现不改调用方**，因此只有可替换的
 宿主服务登记工厂项（`dyn Plugin`、`dyn EmbeddingService`）。
 
 **资源存储不走工厂**：`providers/vdfs_service` 的三个实现（`SingleFileVdfs` /
@@ -263,7 +263,7 @@ SingleFileVdfs, MemoryVdfs}`。套一层 `dyn` 工厂只会把一次构造换成
 
 `home` 构造 `worker`（Composite）时经 ctx 键 `REQUIRED_PLUGINS` 传入**必需插件清单**
 （`home::SYSTEM_PLUGINS`）；容器据此**扫描自己的目录**（其下一层目录即一个插件）——逐目录读
-`PLUGIN.yml`，`plugin_provider` 指向已注册工厂（`has_creator`）即 `create_object`
+`PLUGIN.yml`，`plugin_provider` 指向已注册工厂（`creator_has`）即 `creator_create_object`
 实例化，并把该目录经 ctx 键 `PLUGIN_DIR` 告知插件（插件据此读写**自己的**配置）。
 容器**不内置任何清单**（它是通用容器，可以嵌套另一个容器）。
 

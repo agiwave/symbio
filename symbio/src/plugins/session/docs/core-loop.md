@@ -465,7 +465,7 @@ let abort = env.abort();
 
 出口是**执行期**的，与「这次调用从哪条路径来」无关（同一个 `shell` 既可能被编排层调用
 而有出口，也可能被 `route()` 直连而无出口 ⇒ 静默）；用 `env` 承载，工具不必记键名，
-装配收口在 `invoke_capability` 一处（§9）。
+装配收口在 `capability_invoke` 一处（§9）。
 
 ### 7.2 「工具只声明意图，节点归编排层」
 
@@ -547,7 +547,7 @@ enum RelayOutcome {
 ### 8.3 执行期链路
 
 ```text
-invoke_capability(cap, ctx)                 ← 唯一「拆信封」点（§9）
+capability_invoke(cap, ctx)                 ← 唯一「拆信封」点（§9）
   ├─ args = ctx.payload::<Value>() ?? Null
   ├─ env  = ExecEnv::from_request(&*ctx)    ← 出口 + 中止，缺席 ⇒ 静默 / 永不中止
   └─ cap.execute(args, &env, ctx)
@@ -583,7 +583,7 @@ ModelProvider::execute_turn(inputs, env) -> Result<TurnOutput, PluginError>
 
 ### 9.2 唯一「拆信封」的地方
 
-`invoke_capability(cap, ctx)`（`symbio_core/capability/mod.rs`）是**唯一**把
+`capability_invoke(cap, ctx)`（`symbio_core/capability/mod.rs`）是**唯一**把
 `Result<Value, _>` 装回 `PluginPayload` 的地方。所有分发路径都必须经它：
 
 - `DefaultToolVisitor::invoke`（`symbio_core/capability/tools.rs`）
@@ -689,7 +689,7 @@ gemini           ["candidates","content","parts","text"]                -> 内�
 因此**名字的线上形态由一对具名函数定义**（`symbio_core/capability/tool_name.rs`）：
 
 ```rust
-pub fn to_wire(canonical: &str) -> String            // 字符集之外的字符一律 → "__"
+pub fn capability_to_wire(canonical: &str) -> String            // 字符集之外的字符一律 → "__"
 pub fn resolve<'a>(wire: &str, known: impl IntoIterator<Item = &'a str>) -> Option<&'a str>
 ```
 
@@ -700,7 +700,7 @@ pub fn resolve<'a>(wire: &str, known: impl IntoIterator<Item = &'a str>) -> Opti
 - 命中判据是「解析成功」而不是「按线上名查表」——带非法字符的名字按线上名永远查不到，
   会白走一遍 `route` 回落。
 
-**为什么在 core**：`to_wire`（`model` 出）与 `resolve`（`session` 入）是同一份契约的两半，
+**为什么在 core**：`capability_to_wire`（`model` 出）与 `resolve`（`session` 入）是同一份契约的两半，
 两个插件互相不可见，core 是唯一共同可见处——准入规则见
 [`docs/DECISIONS.md`](../../../../../docs/DECISIONS.md) ADR-023。
 

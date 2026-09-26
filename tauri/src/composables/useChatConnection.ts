@@ -405,7 +405,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       // 认 `ChatMessage` 字段子集）。
       //
       // ctx 带上会话自身的 workdir：后端把它作为 `start_turn` 回退链的第一档
-      // （`host_ctx(ctx).get(WORKDIR)`），会话还没绑过 workdir 时它是唯一的来源。
+      // （`vdfs_host_ctx(ctx).get(WORKDIR)`），会话还没绑过 workdir 时它是唯一的来源。
       await writeVdfs(
         vdfsInboxItemAddr(target.scheme, sid, outgoing.id),
         JSON.stringify(outgoing),

@@ -316,7 +316,7 @@ impl ShellTool {
         let mut full = compose_output(&stdout_text, &stderr_text);
         // 最终截断：落在字符边界上，避免中文输出被硬切导致 panic
         if full.len() > MAX_OUTPUT_BYTES {
-            full.truncate(crate::symbio_core::floor_char_boundary(
+            full.truncate(crate::symbio_core::text_floor_char_boundary(
                 &full,
                 MAX_OUTPUT_BYTES,
             ));
@@ -397,7 +397,7 @@ where
                         // （避免 cat 大文件把内存打爆；最终帧无需再截断）
                         if a.len() < MAX_OUTPUT_BYTES {
                             let remain = MAX_OUTPUT_BYTES - a.len();
-                            let take = crate::symbio_core::floor_char_boundary(&line, remain);
+                            let take = crate::symbio_core::text_floor_char_boundary(&line, remain);
                             if take > 0 {
                                 a.push_str(&line[..take]);
                             }

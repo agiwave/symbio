@@ -9,19 +9,19 @@ use super::*;
 /// 级别名解析：四档 + 两个别名；无法识别 → `None`（调用方保持现值，不误伤）。
 #[test]
 fn parse_level_maps_names_and_rejects_junk() {
-    assert_eq!(parse_level("debug"), Some(LOG_LEVEL_DEBUG));
-    assert_eq!(parse_level("info"), Some(LOG_LEVEL_INFO));
-    assert_eq!(parse_level("warn"), Some(LOG_LEVEL_WARN));
-    assert_eq!(parse_level("error"), Some(LOG_LEVEL_ERROR));
+    assert_eq!(logger_parse_level("debug"), Some(LOG_LEVEL_DEBUG));
+    assert_eq!(logger_parse_level("info"), Some(LOG_LEVEL_INFO));
+    assert_eq!(logger_parse_level("warn"), Some(LOG_LEVEL_WARN));
+    assert_eq!(logger_parse_level("error"), Some(LOG_LEVEL_ERROR));
     // `trace` 归 debug（本系统无更细档位）、`off` 归 error（等价于「几乎不输出」）
-    assert_eq!(parse_level("trace"), Some(LOG_LEVEL_DEBUG));
-    assert_eq!(parse_level("off"), Some(LOG_LEVEL_ERROR));
+    assert_eq!(logger_parse_level("trace"), Some(LOG_LEVEL_DEBUG));
+    assert_eq!(logger_parse_level("off"), Some(LOG_LEVEL_ERROR));
     // 大小写与首尾空白不敏感——环境变量是手写的
-    assert_eq!(parse_level("  DEBUG "), Some(LOG_LEVEL_DEBUG));
-    assert_eq!(parse_level("Warning"), Some(LOG_LEVEL_WARN));
+    assert_eq!(logger_parse_level("  DEBUG "), Some(LOG_LEVEL_DEBUG));
+    assert_eq!(logger_parse_level("Warning"), Some(LOG_LEVEL_WARN));
     // 不认识的词不改变现状
-    assert_eq!(parse_level("verbose"), None);
-    assert_eq!(parse_level(""), None);
+    assert_eq!(logger_parse_level("verbose"), None);
+    assert_eq!(logger_parse_level(""), None);
 }
 
 /// 闸门：默认 INFO 下 debug 静默；放开到 DEBUG 后放行；更严的级别不被放开影响。
@@ -31,26 +31,26 @@ fn parse_level_maps_names_and_rejects_junk() {
 #[test]
 fn gate_is_info_by_default_and_opens_for_debug() {
     // 装了订阅器时过闸由 `EnvFilter` 负责，本闸门恒放行——在这种二进制里无力断言。
-    if is_logger_initialized() {
+    if logger_is_initialized() {
         return;
     }
 
-    set_min_level(LOG_LEVEL_INFO);
-    assert!(!level_enabled(LOG_LEVEL_DEBUG), "默认不得输出 debug");
-    assert!(level_enabled(LOG_LEVEL_INFO), "默认必须输出 info");
-    assert!(level_enabled(LOG_LEVEL_WARN));
-    assert!(level_enabled(LOG_LEVEL_ERROR));
+    logger_set_min_level(LOG_LEVEL_INFO);
+    assert!(!logger_level_enabled(LOG_LEVEL_DEBUG), "默认不得输出 debug");
+    assert!(logger_level_enabled(LOG_LEVEL_INFO), "默认必须输出 info");
+    assert!(logger_level_enabled(LOG_LEVEL_WARN));
+    assert!(logger_level_enabled(LOG_LEVEL_ERROR));
 
-    set_min_level(LOG_LEVEL_DEBUG);
-    assert!(level_enabled(LOG_LEVEL_DEBUG), "放开后 debug 应可见");
+    logger_set_min_level(LOG_LEVEL_DEBUG);
+    assert!(logger_level_enabled(LOG_LEVEL_DEBUG), "放开后 debug 应可见");
 
     // 更严的级别（error）不受 debug 放开影响：error 仍可见，info 被挡
-    set_min_level(LOG_LEVEL_ERROR);
-    assert!(!level_enabled(LOG_LEVEL_INFO));
-    assert!(!level_enabled(LOG_LEVEL_DEBUG));
-    assert!(level_enabled(LOG_LEVEL_ERROR));
+    logger_set_min_level(LOG_LEVEL_ERROR);
+    assert!(!logger_level_enabled(LOG_LEVEL_INFO));
+    assert!(!logger_level_enabled(LOG_LEVEL_DEBUG));
+    assert!(logger_level_enabled(LOG_LEVEL_ERROR));
 
     // 复位：避免污染同二进制内的其它用例
-    set_min_level(LOG_LEVEL_INFO);
-    assert_eq!(min_level(), LOG_LEVEL_INFO);
+    logger_set_min_level(LOG_LEVEL_INFO);
+    assert_eq!(logger_min_level(), LOG_LEVEL_INFO);
 }

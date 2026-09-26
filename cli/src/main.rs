@@ -57,13 +57,13 @@ async fn main() -> ExitCode {
     let log_level = std::env::var("SYMBIO_LOG")
         .ok()
         .as_deref()
-        .and_then(symbio::symbio_core::parse_level)
+        .and_then(symbio::symbio_core::logger_parse_level)
         .unwrap_or(if args.verbose {
             symbio::symbio_core::LOG_LEVEL_DEBUG
         } else {
             symbio::symbio_core::LOG_LEVEL_INFO
         });
-    symbio::symbio_core::set_min_level(log_level);
+    symbio::symbio_core::logger_set_min_level(log_level);
 
     // 系统目录下没有任何模型条目时给出明确提示：此时插件树会退回内置默认值，
     // 通常表现为「没有任何可用 Provider」，属于最常见的一次性配置问题。

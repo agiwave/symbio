@@ -46,7 +46,7 @@ sequenceDiagram
 | # | 环节 | 代码位置 | 说明 |
 |---|------|---------|------|
 | 1 | 入口 | `symbio/src/plugins/session/plugin.rs` | 用户消息 = **`vdfs/write(<根>/session/<id>/inbox)`**；`chat/send` 只是它的薄包装（写即入队，空间自己消费，见 `session/inbox.rs` 与 ADR-026）。**会话编排权归 session**（见 `chat_pipeline.rs` 头注释） |
-| 2 | 能力收集 | `symbio/src/plugins/session/chat_pipeline.rs` | session 调 `collect_capabilities` → `parent.traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播收工具；**agent 仅当 `ctx[AGENT_ID]` 存在时贡献**（不选 agent 的会话照常运行）；收集期错误通道（`report_error` / `take_errors`）在 `symbio_core/capability/error.rs` |
+| 2 | 能力收集 | `symbio/src/plugins/session/chat_pipeline.rs` | session 调 `collect_capabilities` → `parent.traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播收工具；**agent 仅当 `ctx[AGENT_ID]` 存在时贡献**（不选 agent 的会话照常运行）；收集期错误通道（`capability_report_error` / `capability_take_errors`）在 `symbio_core/capability/error.rs` |
 | 3 | 默认能力 | `symbio_core/capability/tools.rs` | `DefaultToolVisitor`（从 agent 内部上浮的公共实现） |
 | 4 | 模型调用（单轮） | `symbio/src/plugins/model/bound_provider.rs` | `execute_turn` = **一次** LLM 调用：4 协议适配（OpenAI / Anthropic / Gemini / Ollama）+ SSE 解析 + 事件出口。`model` **不做轮次循环** |
 | 5 | 工具循环（轮次） | `symbio/src/plugins/session/chat_loop.rs`（`close_turn` → `process_tool_calls_async`） | 「LLM → 工具 → LLM」的循环归 **session**（`gate_turn` / `close_turn` 判定下一步）。工具实现方：`local` / `web` / `vdfs` / `mcp` / `skill` / `telegram` / `agent` 等 |
@@ -80,11 +80,11 @@ sequenceDiagram
 | 1 | 协议入口 | `plugins/vdfs`（`host.rs` 分发 + `protocol.rs` 载荷） | 操作闭集见 [CURRENT.md](../CURRENT.md) §3.2（`VDFS_OPS`，测试锁计数） |
 | 2 | 地址分流 | `plugins/vdfs/fs.rs`（`UnifiedFs`） | `<根>` 独占首段 → 虚拟层（容器组合视图）；其余 → 物理层 `physical.rs`（工作目录 / 绝对路径的真实文件） |
 | 3 | 子目录来源 | `plugins/composite/vdfs.rs` 逐子插件收集，委派给各插件自持的 `impl VdfsProvider` | 子目录名 = 插件名（约定，由注册方选定）；能力只来自访问位 `r` / `w` / `l` / `t` |
-| 4 | **落盘在哪一层** | `providers/vdfs_service`（`DirVdfs` / `SingleFileVdfs` / `MemoryVdfs` + `entry.rs` / `pack.rs`） | 虚拟层再往下的一跳：条目寻址与原子落盘（`<homedir>/<类别>/<id>/<manifest>`）、整包 zip / base64、变更广播。**不在** core 协议层，也**不走** `create_object` 工厂。目录自管的资源（agent 目录走 `AgentDirStore`、session 走自己的 `SessionStore`）不进这一层 |
+| 4 | **落盘在哪一层** | `providers/vdfs_service`（`DirVdfs` / `SingleFileVdfs` / `MemoryVdfs` + `entry.rs` / `pack.rs`） | 虚拟层再往下的一跳：条目寻址与原子落盘（`<homedir>/<类别>/<id>/<manifest>`）、整包 zip / base64、变更广播。**不在** core 协议层，也**不走** `creator_create_object` 工厂。目录自管的资源（agent 目录走 `AgentDirStore`、session 走自己的 `SessionStore`）不进这一层 |
 | 5 | 机制详解 | [design/vdfs.md](../design/vdfs.md)（§11 / §13.4）、[design/vdfs-frontend.md](../design/vdfs-frontend.md) | 机制规范与前端页面规范 |
 
 **排障口诀**：列不出 / 读不到 → 查 #2 地址分流与 #3 收集结果；写盘没生效 / 前端不刷新
-→ 查 #4（`vdfs_service` 的写入与 `notify_change` 广播）；物理路径被拒 → 查 #2 的 `FsPolicy`。
+→ 查 #4（`vdfs_service` 的写入与 `vdfs_notify_change` 广播）；物理路径被拒 → 查 #2 的 `FsPolicy`。
 
 ## 全链路追踪
 

@@ -25,8 +25,8 @@
 //! 列目录条数上限。这些是**物理层专有**的规则，虚拟层没有对应物。
 
 use crate::symbio_core::{
-    has_parent_segment, path_within, VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode,
-    VdfsProvider, VdfsResult, VdfsValidationError, VdfsWriteResponse, VDFS_PARAM_WORKDIR,
+    vdfs_has_parent_segment, vdfs_path_within, VdfsAccess, VdfsContent, VdfsContext, VdfsError,
+    VdfsNode, VdfsProvider, VdfsResult, VdfsValidationError, VdfsWriteResponse, VDFS_PARAM_WORKDIR,
 };
 use crate::symbio_core::{VdfsRequest, VdfsResponse};
 use async_trait::async_trait;
@@ -88,15 +88,15 @@ impl Default for FsPolicy {
 }
 
 impl FsPolicy {
-    /// 两道守卫都走机制层的地址规则（[`has_parent_segment`] / [`path_within`]），
+    /// 两道守卫都走机制层的地址规则（[`vdfs_has_parent_segment`] / [`vdfs_path_within`]），
     /// 不在此另写一份——访问层与物理层必须同一条规则，否则修了一处漏另一处。
     fn path_allowed(&self, path: &Path, workspace_dir: &Path) -> bool {
         let s = path.to_string_lossy();
-        if has_parent_segment(&s) {
+        if vdfs_has_parent_segment(&s) {
             return false;
         }
         for forbidden in &self.forbidden_paths {
-            if path_within(&s, shellexpand::tilde(forbidden).as_ref()) {
+            if vdfs_path_within(&s, shellexpand::tilde(forbidden).as_ref()) {
                 return false;
             }
         }

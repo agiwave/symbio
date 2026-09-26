@@ -7,7 +7,7 @@
 //! `vdfs_service` 的三种拓扑都是「`<本插件目录>/<条目 id>/…`」这一固定落位，
 //! 而 Agent 要同时看见工作目录与系统目录两层，寻址规则本身是 Agent 语义的一部分。
 //!
-//! 相同的是**广播**：落盘后一律走 `vdfs::notify_change`，与 `vdfs_service` 三个
+//! 相同的是**广播**：落盘后一律走 `vdfs::vdfs_notify_change`，与 `vdfs_service` 三个
 //! 实现投的是同一条频道，订阅方无需区分资源住在哪儿。
 //!
 //! ## 呈现：整棵目录树，不分类
@@ -37,7 +37,9 @@ use super::memory;
 use super::plugin::AgentPlugin;
 use super::store::{AgentDirRecord, AgentDirStore};
 use crate::providers::vdfs_service;
-use crate::symbio_core::{descend_addr, host_ctx, notify_change, unwatch_changes, watch_changes};
+use crate::symbio_core::{
+    descend_addr, vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes,
+};
 use crate::symbio_core::{
     VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError,
     VdfsItem, VdfsNewType, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
@@ -175,7 +177,7 @@ impl AgentPlugin {
     /// 根 = **本插件自己持有的目录**（构造时由父插件经 `PLUGIN_DIR` 告知，落在
     /// `config_file` 上）——与 [`AgentPlugin::sub_agent`] 取的是**同一份**。
     ///
-    /// ⚠️ **不得改回「从请求上下文取」**（`dir_from_ctx(&**host, PLUGIN_ID_AGENT)`）。
+    /// ⚠️ **不得改回「从请求上下文取」**（`plugin_dir_from_ctx(&**host, PLUGIN_ID_AGENT)`）。
     /// `PLUGIN_DIR` 只在**装配期**给出：`composite::build` 构造子插件时、
     /// `AgentPlugin::sub_agent` 造子树时。请求上下文里没有它，而 core 已**不再**
     /// 提供任何全局回退（全局 agent 根那套已随 homedir 下沉到 `home` 删除）——
@@ -229,7 +231,7 @@ impl AgentPlugin {
         ctx: &VdfsContext,
         id: &str,
     ) -> VdfsResult<(Arc<dyn VdfsProvider>, VdfsContext, String)> {
-        let host = host_ctx(ctx)?;
+        let host = vdfs_host_ctx(ctx)?;
         let tree = self
             .sub_agent(id, &host)
             .await
@@ -522,7 +524,7 @@ impl AgentPlugin {
             let existed = instr.exists();
             let text = content.text.as_deref().unwrap_or_default();
             instr.write(text).map_err(VdfsError::invalid)?;
-            notify_change(PLUGIN_ID_AGENT, path);
+            vdfs_notify_change(PLUGIN_ID_AGENT, path);
             return Ok(VdfsWriteResponse {
                 name: None,
                 created: !existed,
@@ -542,7 +544,7 @@ impl AgentPlugin {
             let existed = memory.exists();
             let text = content.text.as_deref().unwrap_or_default();
             memory.write(text).map_err(VdfsError::invalid)?;
-            notify_change(PLUGIN_ID_AGENT, path);
+            vdfs_notify_change(PLUGIN_ID_AGENT, path);
             return Ok(VdfsWriteResponse {
                 name: None,
                 created: !existed,
@@ -617,7 +619,7 @@ impl AgentPlugin {
         store
             .delete(&id)
             .map_err(|e| VdfsError::invalid(format!("删除{LABEL}失败：{e}")))?;
-        notify_change(PLUGIN_ID_AGENT, &id);
+        vdfs_notify_change(PLUGIN_ID_AGENT, &id);
         Ok(())
     }
 
@@ -688,7 +690,7 @@ impl AgentPlugin {
             let r = store
                 .import(&bytes, true)
                 .map_err(|e| VdfsError::invalid(format!("导入失败：{e}")))?;
-            notify_change(PLUGIN_ID_AGENT, &r.id);
+            vdfs_notify_change(PLUGIN_ID_AGENT, &r.id);
             return Ok(VdfsActionResult {
                 action: VDFS_ACTION_IMPORT.to_string(),
                 ok: true,
@@ -740,7 +742,7 @@ impl AgentPlugin {
                     .ok_or_else(mismatch);
             }
         }
-        watch_changes(PLUGIN_ID_AGENT, path, sink).await
+        vdfs_watch_changes(PLUGIN_ID_AGENT, path, sink).await
     }
 
     /// 取消订阅：与 `watch_at` 同一条判定——**成对**才配对得上计数
@@ -756,7 +758,7 @@ impl AgentPlugin {
                     .ok_or_else(mismatch);
             }
         }
-        unwatch_changes(PLUGIN_ID_AGENT, path).await
+        vdfs_unwatch_changes(PLUGIN_ID_AGENT, path).await
     }
 }
 

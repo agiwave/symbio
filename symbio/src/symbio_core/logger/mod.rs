@@ -57,19 +57,19 @@ pub const LOG_LEVEL_ERROR: u8 = 3;
 static MIN_LEVEL: AtomicU8 = AtomicU8::new(LOG_LEVEL_INFO);
 
 /// 设置无订阅器路径的最低输出级别（越低越宽松）。见 [`MIN_LEVEL`]。
-pub fn set_min_level(level: u8) {
+pub fn logger_set_min_level(level: u8) {
     MIN_LEVEL.store(level, Ordering::Relaxed);
 }
 
 /// 当前最低输出级别。
-pub fn min_level() -> u8 {
+pub fn logger_min_level() -> u8 {
     MIN_LEVEL.load(Ordering::Relaxed)
 }
 
 /// 解析级别名（`debug` / `info` / `warn` / `error`，大小写与首尾空白不敏感）。
 ///
 /// `trace` 归到 `debug`、`off` 归到 `error`——本系统只有四档，不需要更细的映射。
-pub fn parse_level(name: &str) -> Option<u8> {
+pub fn logger_parse_level(name: &str) -> Option<u8> {
     match name.trim().to_ascii_lowercase().as_str() {
         "debug" | "trace" => Some(LOG_LEVEL_DEBUG),
         "info" => Some(LOG_LEVEL_INFO),
@@ -81,15 +81,15 @@ pub fn parse_level(name: &str) -> Option<u8> {
 
 /// 供日志宏判定的闸门：有订阅器时一律放行，否则比对本条级别与 [`MIN_LEVEL`]。
 #[inline]
-pub fn level_enabled(level: u8) -> bool {
-    if is_logger_initialized() {
+pub fn logger_level_enabled(level: u8) -> bool {
+    if logger_is_initialized() {
         return true;
     }
-    level >= min_level()
+    level >= logger_min_level()
 }
 
 /// 初始化日志系统，通过 RUST_LOG 环境变量配置
-pub fn init_logger() {
+pub fn logger_init() {
     if LOGGER_INITIALIZED.set(()).is_err() {
         return; // 已初始化
     }
@@ -104,7 +104,7 @@ pub fn init_logger() {
 }
 
 /// 检查是否已初始化
-pub fn is_logger_initialized() -> bool {
+pub fn logger_is_initialized() -> bool {
     LOGGER_INITIALIZED.get().is_some()
 }
 
@@ -112,9 +112,9 @@ pub fn is_logger_initialized() -> bool {
 #[macro_export]
 macro_rules! plugin_info {
     ($plugin:expr, $($arg:tt)*) => {
-        if $crate::symbio_core::is_logger_initialized() {
+        if $crate::symbio_core::logger_is_initialized() {
             tracing::info!(plugin = %$plugin, $($arg)*);
-        } else if $crate::symbio_core::level_enabled($crate::symbio_core::LOG_LEVEL_INFO) {
+        } else if $crate::symbio_core::logger_level_enabled($crate::symbio_core::LOG_LEVEL_INFO) {
             eprintln!("[{} INFO] {}", $plugin, format_args!($($arg)*));
         }
     };
@@ -124,9 +124,9 @@ macro_rules! plugin_info {
 #[macro_export]
 macro_rules! plugin_debug {
     ($plugin:expr, $($arg:tt)*) => {
-        if $crate::symbio_core::is_logger_initialized() {
+        if $crate::symbio_core::logger_is_initialized() {
             tracing::debug!(plugin = %$plugin, $($arg)*);
-        } else if $crate::symbio_core::level_enabled($crate::symbio_core::LOG_LEVEL_DEBUG) {
+        } else if $crate::symbio_core::logger_level_enabled($crate::symbio_core::LOG_LEVEL_DEBUG) {
             eprintln!("[{} DEBUG] {}", $plugin, format_args!($($arg)*));
         }
     };
@@ -136,9 +136,9 @@ macro_rules! plugin_debug {
 #[macro_export]
 macro_rules! plugin_warn {
     ($plugin:expr, $($arg:tt)*) => {
-        if $crate::symbio_core::is_logger_initialized() {
+        if $crate::symbio_core::logger_is_initialized() {
             tracing::warn!(plugin = %$plugin, $($arg)*);
-        } else if $crate::symbio_core::level_enabled($crate::symbio_core::LOG_LEVEL_WARN) {
+        } else if $crate::symbio_core::logger_level_enabled($crate::symbio_core::LOG_LEVEL_WARN) {
             eprintln!("[{} WARN] {}", $plugin, format_args!($($arg)*));
         }
     };
@@ -149,17 +149,17 @@ macro_rules! plugin_warn {
 macro_rules! plugin_error {
     // 支持带格式化参数的形式: plugin_error!("name", "fmt {}", arg)
     ($plugin:expr, $fmt:literal, $($arg:tt)*) => {
-        if $crate::symbio_core::is_logger_initialized() {
+        if $crate::symbio_core::logger_is_initialized() {
             tracing::error!(plugin = %$plugin, $fmt, $($arg)*);
-        } else if $crate::symbio_core::level_enabled($crate::symbio_core::LOG_LEVEL_ERROR) {
+        } else if $crate::symbio_core::logger_level_enabled($crate::symbio_core::LOG_LEVEL_ERROR) {
             eprintln!("[{} ERROR] {}", $plugin, format_args!($fmt, $($arg)*));
         }
     };
     // 支持单表达式形式: plugin_error!("name", format!(...)) 或 plugin_error!("name", "msg")
     ($plugin:expr, $err:expr) => {
-        if $crate::symbio_core::is_logger_initialized() {
+        if $crate::symbio_core::logger_is_initialized() {
             tracing::error!(plugin = %$plugin, error = ?$err);
-        } else if $crate::symbio_core::level_enabled($crate::symbio_core::LOG_LEVEL_ERROR) {
+        } else if $crate::symbio_core::logger_level_enabled($crate::symbio_core::LOG_LEVEL_ERROR) {
             eprintln!("[{} ERROR] {}", $plugin, $err);
         }
     };

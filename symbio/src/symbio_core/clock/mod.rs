@@ -20,6 +20,6 @@
 //! `time::OffsetDateTime` 的解析产生歧义（同 `plugin.rs` 不能用 `mod vdfs` 的陷阱）。
 
 /// 当前时间的 Unix 毫秒时间戳（UTC）。
-pub fn now_ms() -> i64 {
+pub fn clock_now_ms() -> i64 {
     (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
 }

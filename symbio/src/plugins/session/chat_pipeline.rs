@@ -36,8 +36,8 @@
 //! 参与 traverse 的插件、读侧为 session 编排方，属跨插件契约）；本文件仅消费。
 
 use crate::symbio_core::{
-    init_error_bucket, CapabilityVisitor, DefaultToolVisitor, Plugin, PluginInvokeRequest,
-    PluginInvokeRequestExt, CAPABILITY_ERRORS, PATH, TRAVERSE_AVAILABLE_TOOLS,
+    capability_init_error_bucket, CapabilityVisitor, DefaultToolVisitor, Plugin,
+    PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_ERRORS, PATH, TRAVERSE_AVAILABLE_TOOLS,
 };
 use std::sync::Arc;
 
@@ -69,7 +69,7 @@ pub async fn collect_capabilities(
     let traverse_ctx = ctx.fork();
     traverse_ctx.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
     traverse_ctx.set(crate::symbio_core::CAPABILITY_VISITOR, manager.clone());
-    init_error_bucket(&traverse_ctx);
+    capability_init_error_bucket(&traverse_ctx);
 
     if let Err(e) = parent
         .clone()
@@ -92,9 +92,9 @@ pub async fn collect_capabilities(
     manager
 }
 
-// 错误通道（CapabilityError / CAPABILITY_ERRORS / report_error / take_errors）
+// 错误通道（CapabilityError / CAPABILITY_ERRORS / capability_report_error / capability_take_errors）
 // 见 `crate::symbio_core::capability_error`：写侧是任意参与 traverse 的插件，
-// 读侧是 session 编排方（orchestrator 在收集结束后 `take_errors` 统一裁决）。
+// 读侧是 session 编排方（orchestrator 在收集结束后 `capability_take_errors` 统一裁决）。
 
 /// 把能力管理器挂到请求上下文，供 model 插件的 chat_loop / tool_executor 取用。
 ///

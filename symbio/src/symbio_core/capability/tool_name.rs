@@ -16,8 +16,8 @@
 //!
 //! | 函数 | 依赖方 | 位置 |
 //! |---|---|---|
-//! | [`to_wire`] | `model` 插件（4 个协议的请求序列化）+ 本模块的 [`resolve`] | core |
-//! | [`resolve`] | `session` 插件（`tool_executor` 把模型给的名字认回来） | core |
+//! | [`capability_to_wire`] | `model` 插件（4 个协议的请求序列化）+ 本模块的 [`capability_resolve`] | core |
+//! | [`capability_resolve`] | `session` 插件（`tool_executor` 把模型给的名字认回来） | core |
 //!
 //! 两者是**同一份契约的两半**（出方向与入方向必须成对，改一个不改另一个就是静默
 //! 错位），因此放在一起。而它们能落在 core，是因为**跨模块**：名字由 `model` 发出、
@@ -51,12 +51,12 @@
 //!
 //! ## 现在
 //!
-//! - 出方向：[`to_wire`] —— 字符集之外的字符一律变 `__`，**一个具名函数**；
-//! - 入方向：[`resolve`] —— 在**已知名字集合**里找出谁映射到这个名字，
+//! - 出方向：[`capability_to_wire`] —— 字符集之外的字符一律变 `__`，**一个具名函数**；
+//! - 入方向：[`capability_resolve`] —— 在**已知名字集合**里找出谁映射到这个名字，
 //!   不做字符串反演。
 //!
 //! 入方向为什么必须查表：`a__b` 既可能是 `a.b` 的线上形态，也可能本身就是
-//! `a__b`。字符串分不出这两种，注册表可以——[`resolve`] **精确匹配优先**，
+//! `a__b`。字符串分不出这两种，注册表可以——[`capability_resolve`] **精确匹配优先**，
 //! 于是「字面名」永远赢过「投影名」，歧义有一个确定的答案而不是一个猜测。
 
 /// 线上形态里代替非法字符的序列。
@@ -65,7 +65,7 @@
 /// `vdfs__read` 比 `vdfs_2fread` 可读得多，而模型的工具选择质量直接受名字可读性
 /// 影响。代价是不可逆——所以入方向查表（见模块文档）。
 ///
-/// **不对外导出**：它是 [`to_wire`] 的实现细节，唯一的出方向使用点就在本文件。
+/// **不对外导出**：它是 [`capability_to_wire`] 的实现细节，唯一的出方向使用点就在本文件。
 /// 入方向不做字符串反演（查表），前端也不解析线上名（只把 `tool_name` 当展示串），
 /// 因此没有第二个消费方——`pub` 只会让人以为它是契约的一部分。
 /// 需要它成为契约时（如新增第二个出方向实现），再连同「入方向查表」的约定一起导出。
@@ -85,9 +85,9 @@ fn is_wire_char(c: char) -> bool {
 /// `vdfs_read` → `vdfs_read`）。因此这个函数对**存量会话无害**——
 /// 名字没变，落库的 `ToolCall.name` 也就没变。
 ///
-/// 不保证单射（`a.b` 与 `a__b` 都得到 `a__b`）——歧义由 [`resolve`] 在
+/// 不保证单射（`a.b` 与 `a__b` 都得到 `a__b`）——歧义由 [`capability_resolve`] 在
 /// 注册表里消解，不由本函数承担。
-pub fn to_wire(canonical: &str) -> String {
+pub fn capability_to_wire(canonical: &str) -> String {
     if canonical.chars().all(is_wire_char) {
         // 快路径：绝大多数名字无需分配新串（`to_string` 仍是一次拷贝，
         // 但省掉了逐字符判断与拼接）
@@ -108,19 +108,22 @@ pub fn to_wire(canonical: &str) -> String {
 ///
 /// 语义：
 /// 1. `known` 里有**字面相等**的名字 → 返回它（精确匹配优先，歧义到此为止）；
-/// 2. 否则返回第一个 `to_wire(name) == wire` 的名字；
+/// 2. 否则返回第一个 `capability_to_wire(name) == wire` 的名字；
 /// 3. 都没有 → `None`（**不猜**）。
 ///
 /// 返回 `None` 的调用方应当**报错**而不是回退到「把名字反演一下试试」：
 /// 解析失败意味着这个名字不在注册表里，任何反演都只能解析到另一个名字，
 /// 而「调起另一个工具」比「报错」坏得多。
-pub fn resolve<'a>(wire: &str, known: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
+pub fn capability_resolve<'a>(
+    wire: &str,
+    known: impl IntoIterator<Item = &'a str>,
+) -> Option<&'a str> {
     let mut projected = None;
     for name in known {
         if name == wire {
             return Some(name);
         }
-        if projected.is_none() && to_wire(name) == wire {
+        if projected.is_none() && capability_to_wire(name) == wire {
             projected = Some(name);
         }
     }

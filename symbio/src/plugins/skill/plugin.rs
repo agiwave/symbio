@@ -3,8 +3,9 @@ use crate::plugins::skill::loader::{load_skills_from_dirs_with_budget, LoadBudge
 use crate::plugins::skill::skill_tool::SkillExecuteTool;
 use crate::plugins::skill::types::{Skill, SkillConfig};
 use crate::symbio_core::{
-    dir_from_ctx, Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_ID_SKILL, TRAVERSE_AVAILABLE_TOOLS,
+    plugin_dir_from_ctx, Plugin, PluginDir, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_ID_SKILL,
+    TRAVERSE_AVAILABLE_TOOLS,
 };
 use async_trait::async_trait;
 use std::path::Path;
@@ -36,7 +37,7 @@ impl SkillPlugin {
     /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         // 自己的目录由父插件经 `PLUGIN_DIR` 告知——先取它，再用它推作用域根。
-        let dir = dir_from_ctx(&*ctx, PLUGIN_ID_SKILL);
+        let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_SKILL);
 
         let mut config: SkillConfig = ctx
             .config()
@@ -144,7 +145,7 @@ impl SkillPlugin {
 // 标题/摘要/config）与写前的表单校验。
 
 use crate::providers::vdfs_service::DirVdfs;
-use crate::symbio_core::{from_plugin_error, unwatch_changes, watch_changes};
+use crate::symbio_core::{vdfs_from_plugin_error, vdfs_unwatch_changes, vdfs_watch_changes};
 use crate::symbio_core::{
     VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
     VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT,
@@ -345,7 +346,8 @@ impl VdfsProvider for SkillPlugin {
                         .map_err(|e| VdfsError::invalid(format!("manifest 不是合法 JSON：{e}")))?
                 };
                 // SKILL.md 是 Markdown：走**纯文本**写入，不能被 JSON 序列化
-                let normalized = validate_manifest(&id, &manifest).map_err(from_plugin_error)?;
+                let normalized =
+                    validate_manifest(&id, &manifest).map_err(vdfs_from_plugin_error)?;
                 let created = s.write_text(&id, &normalized).await?;
                 // 名字只在**匿名写**（打在挂载根上）时才需要交回：具名写的名字是
                 // 调用方自己给的（见 [`VdfsWriteResponse::name`]）。
@@ -413,11 +415,11 @@ impl VdfsProvider for SkillPlugin {
                 }))
             }
             VdfsRequest::Watch { sink } => {
-                watch_changes(PLUGIN_ID_SKILL, path, sink).await?;
+                vdfs_watch_changes(PLUGIN_ID_SKILL, path, sink).await?;
                 Ok(VdfsResponse::Unit)
             }
             VdfsRequest::Unwatch => {
-                unwatch_changes(PLUGIN_ID_SKILL, path).await?;
+                vdfs_unwatch_changes(PLUGIN_ID_SKILL, path).await?;
                 Ok(VdfsResponse::Unit)
             }
             _ => Err(VdfsError::NotImplemented),

@@ -10,7 +10,7 @@
 //! 有多份文件、需要浏览条目内部的资源用 [`DirVdfs`](super::dir::DirVdfs)。
 
 use super::entry;
-use crate::symbio_core::{notify_change, unwatch_changes, watch_changes};
+use crate::symbio_core::{vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes};
 use crate::symbio_core::{
     VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider,
     VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT,
@@ -113,7 +113,7 @@ impl SingleFileVdfs {
             }
             Err(e) => return Err(e),
         }
-        notify_change(&self.kind, id);
+        vdfs_notify_change(&self.kind, id);
         Ok(())
     }
 
@@ -160,7 +160,7 @@ impl SingleFileVdfs {
     fn announce(&self, id: &str, _created: bool) {
         // 信封没有操作枚举（S27）：「新建还是更新」不单独成字段——
         // 消费端回读即得当前状态，不需要为它保留一个分派键。
-        notify_change(&self.kind, id);
+        vdfs_notify_change(&self.kind, id);
     }
 }
 
@@ -266,12 +266,12 @@ impl VdfsProvider for SingleFileVdfs {
             }
 
             VdfsRequest::Watch { sink } => {
-                watch_changes(&self.kind, path, sink).await?;
+                vdfs_watch_changes(&self.kind, path, sink).await?;
                 Ok(VdfsResponse::Unit)
             }
 
             VdfsRequest::Unwatch => {
-                unwatch_changes(&self.kind, path).await?;
+                vdfs_unwatch_changes(&self.kind, path).await?;
                 Ok(VdfsResponse::Unit)
             }
         }

@@ -7,7 +7,7 @@
 //! 因此 `DefaultToolVisitor` 必须作为共享设施定义在 core，不得放进任何插件的私有模块。
 
 use crate::symbio_core::{
-    invoke_capability, Capability, CapabilityMeta, CapabilityVisitor, ModelProvider, PluginError,
+    capability_invoke, Capability, CapabilityMeta, CapabilityVisitor, ModelProvider, PluginError,
     PluginInvokeRequest, PluginInvokeResponse, PluginPayload, VdfsProvider,
 };
 use async_trait::async_trait;
@@ -78,7 +78,7 @@ impl CapabilityVisitor for DefaultToolVisitor {
         };
 
         match tool {
-            Some(tool) => invoke_capability(tool.as_ref(), ctx).await,
+            Some(tool) => capability_invoke(tool.as_ref(), ctx).await,
             None => Err(PluginError::NotFound(format!("Tool not found: {name}"))),
         }
     }

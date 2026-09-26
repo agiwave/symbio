@@ -87,19 +87,19 @@ pub use change::{vdfs_change_of, VdfsChange, VdfsChangeSink};
 pub use content::VdfsContent;
 pub use context::{VdfsContext, VdfsParams};
 pub use error::{VdfsError, VdfsFieldError, VdfsResult, VdfsValidationError};
-pub use node::{derive_ext, VdfsItem, VdfsNewType, VdfsNode};
+pub use node::{vdfs_derive_ext, VdfsItem, VdfsNewType, VdfsNode};
 pub use provider::{DynVdfsProvider, VdfsProvider};
 pub use request::{VdfsActionResult, VdfsRequest, VdfsResponse, VdfsWriteResponse};
 
 // ---- 当前父地址机制（根声明 + 拼接；消费方全在本 crate 内）----
 pub(crate) use address::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
 // 路径守卫（`..` 段判定 / 前缀段比较）——shell 工具与 VDFS 物理层共用的同一条规则
-pub use address::{has_parent_segment, path_within};
+pub use address::{vdfs_has_parent_segment, vdfs_path_within};
 
 // ---- symbio 桥 ----
 pub use host::{
-    from_plugin_error, host_ctx, notify_change, unwatch_changes, vdfs_context, watch_changes,
-    VdfsChangeSubscriptions,
+    vdfs_context, vdfs_from_plugin_error, vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes,
+    vdfs_watch_changes, VdfsChangeSubscriptions,
 };
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-//! 通用对象创建注册表
+//! 通用对象创建注册表 —— **按 id 装配任意类型对象**
 //!
 //! 完全通用的对象构造机制：
 //! - 构造函数统一签名：`fn(Arc<dyn PluginInvokeRequest>) -> Box<dyn Any + Send + Sync>`
@@ -7,9 +7,28 @@
 //! - 不针对任何具体类型做特殊化
 //!
 //! 公共 API（导出至 `symbio_core`）：
-//! - [`create_object`]
-//! - [`has_creator`]
+//! - [`creator_create_object`]
+//! - [`creator_has`]
+//! - [`creator_ids`]
 //! - 宏 `submit_object_creator!`
+//!
+//! ## 为什么它是**独立域**，而不是 `plugin` 的一部分
+//!
+//! 注册表按 `(id, TypeId)` 索引，调用方用 `creator_create_object::<T>()` 自选 `T`——机制本身
+//! 对「T 是什么」一无所知。当前注册点服务**三个互不相关的类型族**：
+//!
+//! | 类型族 | 注册点 |
+//! |---|---|
+//! | `dyn Plugin` | `plugins/*/plugin.rs` 的 `build`（16 个插件） |
+//! | `dyn ModelProtocol` | `plugins/model/protocols/*.rs` |
+//! | `dyn EmbeddingService` | `providers/embedding/local.rs` |
+//!
+//! 「插件」只是它的**第一个**客户，不是它的定义。`creator_create_object` / `creator_has` /
+//! `creator_ids` 也都按域前缀规则取名（`creator_`），名字与归属一致。
+//!
+//! **唯一的插件耦合是构造入参**：`Arc<dyn PluginInvokeRequest>` 是「上下文」的角色
+//! （`ctx` 键、`payload`、`fork`），只是类型名带 `plugin`。故本域依赖 `plugin` 域
+//! （单向，`plugin` 不反向依赖本域）。
 //!
 //! ## 机制只做「按 id 装配」，不做「处理数据」
 //!
@@ -22,7 +41,7 @@
 //!
 //! ## ⚠️ 构造函数必须廉价（本机制的隐含契约）
 //!
-//! **`create_object` 不做缓存**——每次调用都执行一次构造函数，只在容器侧持有 `Arc`
+//! **`creator_create_object` 不做缓存**——每次调用都执行一次构造函数，只在容器侧持有 `Arc`
 //! （`composite` 就是这么做的：`mount_child` 每个挂载点建一个实例，各带自己的 `ctx`）。
 //! 因此调用方可能反复调它，而每次的代价由**构造函数自己**决定。三种策略：
 //!
@@ -124,7 +143,7 @@ impl ObjectCreatorRegistry {
 
 // ============ 公共 API ============
 //
-// 注册表会在第一次调用 `create_object` 或 `has_creator` 时自动惰性初始化。
+// 注册表会在第一次调用 `creator_create_object` 或 `creator_has` 时自动惰性初始化。
 // 无需手动调用任何 init 函数。
 
 /// 按 trait 创建对象
@@ -134,9 +153,9 @@ impl ObjectCreatorRegistry {
 /// - 返回 `Some(Arc<T>)` 成功，`None` 未注册或 TypeId 不匹配
 ///
 /// ```ignore
-/// let plugin: Arc<dyn Plugin> = create_object("home", ctx).unwrap();
+/// let plugin: Arc<dyn Plugin> = creator_create_object("home", ctx).unwrap();
 /// ```
-pub fn create_object<T>(id: &str, ctx: Arc<dyn PluginInvokeRequest>) -> Option<Arc<T>>
+pub fn creator_create_object<T>(id: &str, ctx: Arc<dyn PluginInvokeRequest>) -> Option<Arc<T>>
 where
     T: ?Sized + Any + Send + Sync + 'static,
 {
@@ -144,7 +163,7 @@ where
 }
 
 /// 判断指定 id 是否已注册构造函数
-pub fn has_creator(id: &str) -> bool {
+pub fn creator_has(id: &str) -> bool {
     ObjectCreatorRegistry::global().has(id)
 }
 
@@ -168,7 +187,7 @@ where
 ///
 /// - 构造函数签名：`fn(Arc<dyn PluginInvokeRequest>) -> Arc<T>`
 /// - `$target` 是 `T` 本身（具体类型或 `dyn Trait`）
-/// - 运行时通过 `create_object::<T>()` 取得对象
+/// - 运行时通过 `creator_create_object::<T>()` 取得对象
 ///
 /// ```ignore
 /// // 返回 Arc<ConcreteType>

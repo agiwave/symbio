@@ -158,7 +158,7 @@ describe('消息帧：语义全在 data 的字段上（信封没有操作枚举�
     spy.has['s1/m1'] = true
     await startSessionTranscriptSync(spy.sink)
 
-    // `state_frame` 剥掉了正文：载荷只有身份 + 状态，本地正文就是权威前缀
+    // `llm_state_frame` 剥掉了正文：载荷只有身份 + 状态，本地正文就是权威前缀
     dispatch!(frame('s1', 'm1', { id: 'm1', status: 'completed', seq: 3 }))
     await settle()
 

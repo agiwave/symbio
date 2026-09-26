@@ -36,7 +36,7 @@ pub struct CapabilityError {
 // 不定义它：键面归键域，机制归本域。
 
 /// 初始化错误桶（由能力收集管线调用；重复调用无副作用）
-pub fn init_error_bucket(ctx: &Arc<dyn PluginInvokeRequest>) {
+pub fn capability_init_error_bucket(ctx: &Arc<dyn PluginInvokeRequest>) {
     if ctx.get(CAPABILITY_ERRORS).is_none() {
         ctx.set(CAPABILITY_ERRORS, Arc::new(Mutex::new(Vec::new())));
     }
@@ -46,12 +46,12 @@ pub fn init_error_bucket(ctx: &Arc<dyn PluginInvokeRequest>) {
 ///
 /// 只用于"会话无法继续"的硬错误（如选定的智能体不存在）。
 /// 可降级的软故障（某个 MCP server 连不上）应当只记日志，不调用本函数。
-pub async fn report_error(
+pub async fn capability_report_error(
     ctx: &Arc<dyn PluginInvokeRequest>,
     plugin: &str,
     message: impl Into<String>,
 ) {
-    init_error_bucket(ctx);
+    capability_init_error_bucket(ctx);
     if let Some(bucket) = ctx.get(CAPABILITY_ERRORS) {
         bucket.lock().await.push(CapabilityError {
             plugin: plugin.to_string(),
@@ -61,7 +61,7 @@ pub async fn report_error(
 }
 
 /// 取出并清空所有收集期错误
-pub async fn take_errors(ctx: &Arc<dyn PluginInvokeRequest>) -> Vec<CapabilityError> {
+pub async fn capability_take_errors(ctx: &Arc<dyn PluginInvokeRequest>) -> Vec<CapabilityError> {
     match ctx.get(CAPABILITY_ERRORS) {
         Some(bucket) => std::mem::take(&mut *bucket.lock().await),
         None => Vec::new(),

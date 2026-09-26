@@ -78,7 +78,7 @@ pub fn store(workdir: Option<&str>, write_max_bytes: usize, inject_max_bytes: us
 ///
 /// `address` 由调用方算好传入（[`address`] 返回 `String`，不能借给返回值长期持有）。
 /// 排版（一行头信息 + 正文 + 空 / 截断提示）由内核
-/// [`render_segment`](crate::symbio_core::render_segment) 统一决定。
+/// [`memory_render_segment`](crate::symbio_core::memory_render_segment) 统一决定。
 pub fn segment_spec(address: &str) -> MemorySegmentSpec<'_> {
     MemorySegmentSpec {
         title: SEGMENT_TITLE,

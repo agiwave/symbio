@@ -15,7 +15,7 @@ use super::sse::{SseLineParser, SsePartialLineExtractor};
 use super::ModelProtocolEvent;
 use super::{description_for_llm, sse_data, ModelProtocol, MODEL_PROTOCOL_ANTHROPIC_MESSAGES};
 use crate::plugins::model::http::get_http_client;
-use crate::symbio_core::to_wire;
+use crate::symbio_core::capability_to_wire;
 use crate::symbio_core::{ModelFinishReason, ModelUsage, PluginError, PluginInvokeRequest};
 use tracing::warn;
 
@@ -256,7 +256,7 @@ impl ModelProtocol for AnthropicProtocol {
             req["tools"] = json!(tools
                 .iter()
                 .map(|t| json!({
-                    "name": to_wire(&t.name),
+                    "name": capability_to_wire(&t.name),
                     "description": description_for_llm(t),
                     "input_schema": t.input_schema
                 }))

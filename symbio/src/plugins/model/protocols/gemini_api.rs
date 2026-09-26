@@ -12,7 +12,7 @@ use super::sse::{SseLineParser, SsePartialLineExtractor};
 use super::ModelProtocolEvent;
 use super::{description_for_llm, ModelProtocol, MODEL_PROTOCOL_GEMINI_API};
 use crate::plugins::model::http::get_http_client;
-use crate::symbio_core::to_wire;
+use crate::symbio_core::capability_to_wire;
 use crate::symbio_core::{ModelFinishReason, ModelUsage, PluginError, PluginInvokeRequest};
 
 pub struct GeminiProtocol;
@@ -126,7 +126,7 @@ impl ModelProtocol for GeminiProtocol {
                 // ⚠ 已知缺陷（本批未修）：`functionResponse.name` 按 Gemini 规范应当
                 // 是**函数名**，这里填的是 `tool_call_id`。两者不等，严格实现会报错。
                 // 修它需要把工具名带到 role=Tool 的消息上（`ChatMessage.name` 目前
-                // 由 `build_tool_message` 留空），是一次独立的协议改动，故不夹带在
+                // 由 `llm_build_tool_message` 留空），是一次独立的协议改动，故不夹带在
                 // 名字编解码这一批里。此处的 `replace` 也不再保留——工具调用 id 不是
                 // 能力名，对它做线上形态换算没有意义。
                 parts.push(json!({
@@ -156,7 +156,7 @@ impl ModelProtocol for GeminiProtocol {
         if !tools.is_empty() {
             req["tools"] = json!([{
                 "functionDeclarations": tools.iter().map(|t| json!({
-                    "name": to_wire(&t.name),
+                    "name": capability_to_wire(&t.name),
                     "description": description_for_llm(t),
                     "parameters": t.input_schema
                 })).collect::<Vec<_>>()

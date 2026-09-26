@@ -86,7 +86,7 @@ fn archive_full_text(
 
 /// 写入指定目录并执行清理（目录由调用方解析；拆出便于测试注入目录）。
 fn archive_into_dir(text: &str, token_count: usize, dir: &std::path::Path) -> Option<String> {
-    let now = crate::symbio_core::now_ms();
+    let now = crate::symbio_core::clock_now_ms();
     let file_name = format!(
         "tool_{}_{}_{}.txt",
         now,

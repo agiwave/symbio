@@ -361,7 +361,7 @@ pub(crate) fn parse_inbox_message(raw: &str) -> vdfs::VdfsResult<cm::ChatMessage
             msg_type: Some(cm::MessageType::Text),
             content: Some(cm::MessageContent::Text(raw.to_string())),
             status: Some(cm::MessageStatus::Completed),
-            timestamp: Some(crate::symbio_core::now_ms()),
+            timestamp: Some(crate::symbio_core::clock_now_ms()),
             ..Default::default()
         });
     }

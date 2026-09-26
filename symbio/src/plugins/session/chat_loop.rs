@@ -59,8 +59,8 @@ use crate::symbio_core::schemas::{
 };
 use crate::symbio_core::ModelFinishReason;
 use crate::symbio_core::{
-    build_tool_message, emit_message, emit_removed, emit_state, short_id, TurnOutput,
-    TurnToolCallInfo,
+    llm_build_tool_message, llm_emit_message, llm_emit_removed, llm_emit_state, llm_short_id,
+    TurnOutput, TurnToolCallInfo,
 };
 use crate::symbio_core::{
     CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, ModelProvider, ModelUsage, Plugin,
@@ -275,7 +275,7 @@ pub async fn run_chat_loop(
                     .iter()
                     .filter(|m| m.status == Some(MessageStatus::Streaming))
                 {
-                    emit_removed(&sink, &m.id).await;
+                    llm_emit_removed(&sink, &m.id).await;
                 }
                 context
                     .messages

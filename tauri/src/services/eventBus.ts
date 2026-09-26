@@ -392,7 +392,7 @@ function setVdfsWatch(path: string, delta: 1 | -1): void {
 // ===== 前端模式：页面间本地通知（与后端事件同构） =====
 //
 // 清单同步有两种模式，同步器经同一订阅入口（subscribeVdfsChanged）收敛：
-// - 后端消息模式（主通道）：后端增删改节点 → `notify_change` → 事件总线，
+// - 后端消息模式（主通道）：后端增删改节点 → `vdfs_notify_change` → 事件总线，
 //   跨窗口一致的唯一事实源；
 // - 前端模式（乐观更新）：操作发起方已本地变更数据（如 store 内直接改 list），
 //   经 publishVdfsChangedLocal 以**同构载荷**即时通知其他页面，不等事件往返；

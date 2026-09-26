@@ -40,12 +40,13 @@ use crate::plugins::agent::host::memory;
 use crate::plugins::agent::host::store::AgentDirStore;
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField, DetailOption};
 use crate::symbio_core::{
-    announce_configurable, create_object, dir_from_ctx, report_error, Capability,
-    CapabilityVisitor, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest,
-    AGENT_ID, ASSEMBLY_SUB_AGENT_PLUGINS, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR,
-    MEMORY_AGENTS_FILE, PATH, PLUGIN_DIR, PLUGIN_ID_AGENT, PLUGIN_ID_COMPOSITE, REQUIRED_PLUGINS,
-    TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
+    capability_announce_configurable, capability_report_error, creator_create_object,
+    plugin_dir_from_ctx, Capability, CapabilityVisitor, Plugin, PluginConfigFile, PluginDir,
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
+    PluginPayload, PluginSimpleRequest, AGENT_ID, ASSEMBLY_SUB_AGENT_PLUGINS, CAPABILITY_VISITOR,
+    CONFIGURABLE_VISITOR, MEMORY_AGENTS_FILE, PATH, PLUGIN_DIR, PLUGIN_ID_AGENT,
+    PLUGIN_ID_COMPOSITE, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
+    WORKDIR,
 };
 use crate::symbio_core::{VdfsAccess, VdfsItem, VdfsProvider};
 use async_trait::async_trait;
@@ -107,7 +108,7 @@ impl AgentPlugin {
     /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例（composite 配置驱动）。
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         let router = ctx.parent();
-        let dir = dir_from_ctx(&*ctx, PLUGIN_ID_AGENT);
+        let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_AGENT);
         let config: AgentConfig = match dir.load::<AgentConfig>() {
             Ok(Some(c)) => c,
             Ok(None) => AgentConfig::default(),
@@ -228,7 +229,7 @@ impl AgentPlugin {
         );
 
         crate::plugin_info!("agent", "装配子 Agent `{}` -> {}", id, dir.display());
-        let tree = create_object::<dyn Plugin>(PLUGIN_ID_COMPOSITE, sub_context)?;
+        let tree = creator_create_object::<dyn Plugin>(PLUGIN_ID_COMPOSITE, sub_context)?;
         self.sub_agents
             .write()
             .await
@@ -502,7 +503,7 @@ impl Plugin for AgentPlugin {
                             manifest::SPEC_MAJOR
                         ),
                     };
-                    report_error(
+                    capability_report_error(
                         &ctx,
                         PLUGIN_ID_AGENT,
                         format!("智能体 `{agent_id}` 拒绝接入：{reason}"),
@@ -513,7 +514,7 @@ impl Plugin for AgentPlugin {
         }
 
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
-        announce_configurable(&ctx, &self.config_file).await;
+        capability_announce_configurable(&ctx, &self.config_file).await;
 
         // 系统智能体自身的指令（`<根>/agent/AGENTS.md`）也是「本 agent 的修改」，
         // 因此进**设置**而非 agent 列表：复用挂载根里那份指令节点，按设置列表口径补

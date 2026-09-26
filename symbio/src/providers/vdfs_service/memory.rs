@@ -3,7 +3,7 @@
 //! 存在的理由：**清单的真相源不止磁盘一种**。规范 §13.4 早就点明了这条差异——
 //! 「model 的列表来自内存」。旧写法是每个插件自己拿 `RwLock<HashMap<..>>` 再手写
 //! 一遍列 / 读 / 写 / 删 / 广播；本型把这份 plumbing 收进来，语义与磁盘两型
-//! **完全同构**（同一套 `VdfsProvider` 操作、同一条 `notify_change` 广播频道），
+//! **完全同构**（同一套 `VdfsProvider` 操作、同一条 `vdfs_notify_change` 广播频道），
 //! 因此消费者分不清也不必分清条目住在哪儿。
 //!
 //! 典型用法：
@@ -13,9 +13,9 @@
 //!   [`SingleFileVdfs`](super::single_file::SingleFileVdfs) 灌入，写盘成功后回灌
 //!   ——列表读走内存，落盘走另一型。
 
-use crate::symbio_core::now_ms;
+use crate::symbio_core::clock_now_ms;
 use crate::symbio_core::{lock_read, lock_write};
-use crate::symbio_core::{notify_change, unwatch_changes, watch_changes};
+use crate::symbio_core::{vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes};
 use crate::symbio_core::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider, VdfsRequest,
     VdfsResponse, VdfsResult, VdfsWriteResponse,
@@ -84,18 +84,18 @@ impl MemoryVdfs {
                 id,
                 MemEntry {
                     text: text.into(),
-                    updated_at: now_ms(),
+                    updated_at: clock_now_ms(),
                 },
             )
         };
-        notify_change(&self.kind, id);
+        vdfs_notify_change(&self.kind, id);
         created
     }
 
     /// 整表替换（静默）——启动时从磁盘镜像一份清单的标准动作
     pub fn replace_all(&self, items: impl IntoIterator<Item = (String, String)>) {
         let mut table = BTreeMap::new();
-        let stamp = now_ms();
+        let stamp = clock_now_ms();
         for (id, text) in items {
             table.insert(
                 id,
@@ -112,7 +112,7 @@ impl MemoryVdfs {
     pub fn remove(&self, id: &str) -> bool {
         let removed = lock_write(&self.entries).remove(id).is_some();
         if removed {
-            notify_change(&self.kind, id);
+            vdfs_notify_change(&self.kind, id);
         }
         removed
     }
@@ -223,12 +223,12 @@ impl VdfsProvider for MemoryVdfs {
             VdfsRequest::Mkdir | VdfsRequest::Action { .. } => Err(VdfsError::NotImplemented),
 
             VdfsRequest::Watch { sink } => {
-                watch_changes(&self.kind, path, sink).await?;
+                vdfs_watch_changes(&self.kind, path, sink).await?;
                 Ok(VdfsResponse::Unit)
             }
 
             VdfsRequest::Unwatch => {
-                unwatch_changes(&self.kind, path).await?;
+                vdfs_unwatch_changes(&self.kind, path).await?;
                 Ok(VdfsResponse::Unit)
             }
         }

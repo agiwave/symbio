@@ -649,7 +649,7 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
   前端 `subscribe({ kind: 'vdfs' })` 按 `path` 前缀与**载荷形状**自行分流：
   `data` 含 `delta` 的消息帧**就地追加**（零回读），`data` 为节点视图的运行态帧
   就地落定，无载荷变更防抖重拉。
-- **`notify_change(kind, path)` 只发无载荷变更**（绝大多数资源信号长这样）。
+- **`vdfs_notify_change(kind, path)` 只发无载荷变更**（绝大多数资源信号长这样）。
   带业务载荷的变更由**生产者直接经它已持有的订阅表**投递
   （`VdfsChangeSubscriptions::notify(&VdfsChange::with_data(path, data))`，
   见 `session::transcript::Transcript::emit`）——带载荷是一个**显式动作**，不是
@@ -663,7 +663,7 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
   | `ChatMessage`（全量：`content` / 状态 / 身份） | 同上（首帧发图里合并后的全量副本） | 整条替换 / 状态迁移，按字段落地 |
   | `ChatMessage`（`status = removed`） | 同上 | 就地移除——删除是**消息词汇里的状态** |
   | `VdfsNode` | 会话运行态（`emit_session_state`，与 `stat` 同源构造） | 全量节点视图就地落定，零回读 |
-  | 缺失 | 全部资源信号（`notify_change`） | 「这条路径变了」——回读 / 重拉（幂等）；资源删除回读 `NotFound` 即删除 |
+  | 缺失 | 全部资源信号（`vdfs_notify_change`） | 「这条路径变了」——回读 / 重拉（幂等）；资源删除回读 `NotFound` 即删除 |
 
   **`path` 恒为被变更节点自身的地址**：会话是容器，其下是若干并列集合（消息 /
   子会话 / 记忆 / 工作目录……），集合项地址统一为 `<sid>/<集合段>/<项 id>`——
@@ -760,7 +760,7 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
   纯接口层里；三型 `VdfsProvider` 实现（单文件 / 目录 / 内存）与磁盘布局见
   [CURRENT.md](../CURRENT.md) §4，选型理由见 [DECISIONS.md](../DECISIONS.md)
   ADR-010 / ADR-011。它与广播机制的**唯一接触点**是 `symbio_core::vdfs::host` 的
-  `notify_change` / `watch_changes` / `unwatch_changes`。
+  `vdfs_notify_change` / `vdfs_watch_changes` / `vdfs_unwatch_changes`。
 - **详情定义**：`DetailDefinition` 是 symbio 的 `schema` **方言**，VDFS 只透传、不解释。
 
 ## 12. 一致性要求

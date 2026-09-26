@@ -26,23 +26,32 @@
    本层符号在全仓按根平铺导入（见第 4 条）——`EventSink` 这种名字在 `plugins/model/*`
    里读起来无从知道它属于谁。
 
-   **默认手段**是域名前缀，三条细则：
+   **默认手段**是域名前缀，三类符号都要：
 
    | 符号 | 形态 | 例 |
    |---|---|---|
    | 类型 / trait | 域名（PascalCase）+ 语义 | `ExecEventSink` · `VdfsNode` · `MemoryFile` · `CapabilityMeta` |
    | 常量 / 静态量 | 域名（SCREAMING_SNAKE）+ 语义 | `VDFS_ACTION_ABORT` · `EVENT_BUS_KIND_VDFS` · `ASSEMBLY_SUB_AGENT_PLUGINS` |
-   | 函数 / 自由函数 | **不强求**前缀 | `resolve` · `to_wire` · `create_object` · `now_ms` |
+   | 函数 / 自由函数 | 域名（snake_case）+ 语义 | `clock_now_ms` · `vdfs_notify_change` · `capability_resolve` · `creator_create_object` |
 
-   函数的导入行已经带着模块路径，前缀只是噪音。
+   **函数也要前缀，理由与类型 / 常量完全相同**：本层符号在全仓按根平铺导入（第 4 条），
+   导入行里**没有**域路径——`use crate::symbio_core::{vdfs_host_ctx, vdfs_notify_change}`
+   读不出它们属于谁。前缀**只写一次**：原名里已经出现**完整的域词**（词级，不是子串）
+   就把它去掉再拼前缀（`init_logger` → `logger_init`、`invoke_capability` →
+   `capability_invoke`、`has_creator` → `creator_has`）；否则直接拼（`create_object` →
+   `creator_create_object`）。判据始终是「名字以 `<域名>_` 开头」，可机械核对。
 
    **三条被登记的替代手段**——它们与域名前缀**同等正式**，不是「例外」：
 
    | 手段 | 何时用 | 实例 |
    |---|---|---|
-   | **子命名空间** | 域内按主题分了文件，且主题名比域名更有信息量 | `llm`：`Model*`（`model_provider.rs`）· `Turn*`（`turn.rs`）。`capability`：`Configurable*`（`configurable.rs`）· `Option*`（`option.rs`）· `Tool*`（`tools.rs`）。`plugin`：`ROUTE_*`（`route.rs`）· `TRAVERSE_*`（`traverse.rs`） |
+   | **子命名空间** | 域内按主题分了文件，且主题名比域名更有信息量 | `llm`：`Model*`（`model_provider.rs`）· `Turn*`（`turn.rs`）。`capability`：`Configurable*`（`configurable.rs`）· `Option*`（`option.rs`）· `Tool*`（`tools.rs`），外加**模块**形态的 `failure_kind`。`plugin`：`ROUTE_*`（`route.rs`）· `TRAVERSE_*`（`traverse.rs`） |
    | **后缀** | 该域的类型名有一个比域名更强的类别词 | `keys` 的 `…Key`（`PathKey`）——`KeyPath` 会读成「键的路径」，语义反了 |
    | **登记缩写** | 域名的大写形式冗余且不增加信息 | `logger` → `LOG_`（`LOG_LEVEL_INFO` 已足够定位） |
+
+   子命名空间有两种形态：**类型前缀**（`Model*` / `ROUTE_*`）与**模块**（`failure_kind`）。
+   模块是**命名空间，不是符号**——它的名字是主题，前缀规则对它不适用。`core-naming-audit`
+   识别模块并跳过；跳过时**计数**，因为静默跳过会让「公开面里有什么」出现看不见的口子。
 
    判据始终是「**调用点读不读得出归属**」，不是「字面是否等于目录名」：
 
@@ -75,7 +84,7 @@
    协议 schema 的词汇表就是它的命名空间，收敛成平铺反而丢失 `session::chat_message`
    这类语义。其余深路径（`symbio_core::plugin::dir::` 之类）视为不规范，应改为根平铺。
 
-### 域前缀对照表（全 14 域 —— 新增符号照此取名）
+### 域前缀对照表（全 15 域 —— 新增符号照此取名）
 
 这张表是第 2 条的**唯一执行口径**：拿不准新符号叫什么，先在这里查它的域。
 「—」= 该域没有这一类符号（不是「不用前缀」）。**一个前缀只属于一个域。**
@@ -83,22 +92,23 @@
 
 <!-- core-naming:modifiers Dyn,Default -->
 
-| 域 | 类型 / trait | 常量 / 静态量 | 备注 |
-|---|---|---|---|
-| `assembly` | — | `ASSEMBLY_` | 本域只有两个常量 |
-| `capability` | `Capability`；子命名空间 `Configurable*` · `Option*` · `Tool*` | — | 无常量；三个子命名空间各有对应文件 |
-| `clock` | — | — | 只有 `now_ms` 一个函数 |
-| `embedding` | `Embedding` | `EMBEDDING_` | 服务 id 在 `embedding/ids.rs` |
-| `event_bus` | `EventBus` | `EVENT_BUS_` | |
-| `exec` | `Exec` | — | 本域无常量 |
-| `keys` | `…Key`（**后缀**） | **裸名**（实例） | 只有键：类型带 `Key` 后缀、实例裸名。**本域不收字符串常量** |
-| `llm` | 子命名空间 `Model*` · `Turn*` | — | 对应 `model_provider.rs` / `turn.rs` |
-| `logger` | — | `LOG_`（登记缩写） | |
-| `memory` | `Memory` | `MEMORY_` | |
-| `plugin` | `Plugin` | `PLUGIN_`；子命名空间 `ROUTE_*` · `TRAVERSE_*` | `PLUGIN_` 下细分：`PLUGIN_ID_*`（工厂 id）· `PLUGIN_KEY_*`（清单键）· `PLUGIN_FILE` · `PLUGIN_PAYLOAD_KEY` |
-| `schemas` | 协议词 | 协议词 | 命名空间就是协议本身，见 §3 |
-| `text` | — | — | 只有两个纯函数 |
-| `vdfs` | `Vdfs` | `VDFS_` | |
+| 域 | 类型 / trait | 常量 / 静态量 | 函数 / 自由函数 | 备注 |
+|---|---|---|---|---|
+| `assembly` | — | `ASSEMBLY_` | — | 本域只有两个常量 |
+| `capability` | `Capability`；子命名空间 `Configurable*` · `Option*` · `Tool*` | — | `capability_` | 无常量；三个子命名空间各有对应文件 |
+| `clock` | — | — | `clock_` | 只有一个函数 |
+| `creator` | — | — | `creator_` | 通用对象创建注册表：按 id 装配**任意**类型对象，见 §2 |
+| `embedding` | `Embedding` | `EMBEDDING_` | — | 服务 id 在 `embedding/ids.rs` |
+| `event_bus` | `EventBus` | `EVENT_BUS_` | `event_bus_` | |
+| `exec` | `Exec` | — | — | 本域无常量 |
+| `keys` | `…Key`（**后缀**） | **裸名**（实例） | — | 只有键：类型带 `Key` 后缀、实例裸名。**本域不收字符串常量** |
+| `llm` | 子命名空间 `Model*` · `Turn*` | — | `llm_` | 对应 `model_provider.rs` / `turn.rs` |
+| `logger` | — | `LOG_`（登记缩写） | `logger_` | 常量用登记缩写，函数用全名——两者不混 |
+| `memory` | `Memory` | `MEMORY_` | `memory_` | |
+| `plugin` | `Plugin` | `PLUGIN_`；子命名空间 `ROUTE_*` · `TRAVERSE_*` | `plugin_` | `PLUGIN_` 下细分：`PLUGIN_ID_*`（工厂 id）· `PLUGIN_KEY_*`（清单键）· `PLUGIN_FILE` · `PLUGIN_PAYLOAD_KEY` |
+| `schemas` | 协议词 | 协议词 | 协议词 | 命名空间就是协议本身，见 §3 |
+| `text` | — | — | `text_` | 只有两个纯函数 |
+| `vdfs` | `Vdfs` | `VDFS_` | `vdfs_` | |
 
 > 判据始终是「**调用点读不读得出归属**」，表只是把结论固化。所以 `logger` 用 `LOG_`
 > 而不是 `LOGGER_`（多出来的四个字母不增加任何信息）；而 `plugin` 域里 `PLUGIN_ID_*` /
@@ -120,18 +130,19 @@
 | 域 | 职责 | 关键符号 | 子路径 |
 |---|---|---|---|
 | `assembly` | 装配策略：一棵标准插件树挂哪些插件、哪些插件不许被停用 | `ASSEMBLY_SUB_AGENT_PLUGINS` · `ASSEMBLY_UNDISABLABLE_PLUGINS` | — |
-| `capability` | 能力系统：LLM 可见工具与插件遍历面 | `Capability` · `CapabilityMeta` · `CapabilityVisitor` · `CapabilityCategory` · `CapabilityToolContextRetention` · `invoke_capability` · 详情**三**表（`ConfigurableVisitor` / `OptionVisitor` / `DefaultToolVisitor`）· `resolve` / `to_wire` · `failure_kind` · 错误桶读写（`CapabilityError` / `report_error` / `take_errors`；**桶的键** `CAPABILITY_ERRORS` 住在 `keys`） | `configurable` · `error` · `option` · `tool_name` · `tools` |
-| `clock` | 全项目「当前时间（Unix 毫秒）」唯一实现 | `now_ms` | — |
+| `capability` | 能力系统：LLM 可见工具与插件遍历面 | `Capability` · `CapabilityMeta` · `CapabilityVisitor` · `CapabilityCategory` · `CapabilityToolContextRetention` · `capability_invoke` · 详情**三**表（`ConfigurableVisitor` / `OptionVisitor` / `DefaultToolVisitor`）· `capability_resolve` / `capability_to_wire` · `failure_kind` · 错误桶读写（`CapabilityError` / `capability_report_error` / `capability_take_errors`；**桶的键** `CAPABILITY_ERRORS` 住在 `keys`） | `configurable` · `error` · `option` · `tool_name` · `tools` |
+| `clock` | 全项目「当前时间（Unix 毫秒）」唯一实现 | `clock_now_ms` | — |
+| `creator` | 通用对象创建注册表：按 id 装配**任意**类型对象（见 [ADR-036](../../../docs/DECISIONS.md)） | `creator_create_object` · `creator_has` · `creator_ids` | — |
 | `embedding` | 嵌入服务的**抽象**（实现在 `src/providers/embedding`） | `EmbeddingService` · `EmbeddingError` · `EMBEDDING_LOCAL` / `EMBEDDING_NOOP` | `ids` |
 | `event_bus` | 跨插件全局发布设施门面 + 频道词表 | `EventBus` · `EventBusSubscribeRequest` · `EVENT_BUS_KIND_SYSTEM` · `EVENT_BUS_KIND_VDFS` · `EVENT_BUS_RESYNC_MARKER_TYPE` | — |
 | `exec` | 执行期原语：事件出口（出）与中止信号（入） | `ExecEventSink` · `ExecAbortSignal` · `ExecEnv` · `ExecTranscriptWriter` | — |
 | `keys` | **类型安全上下文键**（只有键：trait + 类型 + 实例） | `SymbioKey` 及其实例（`PATH` · `WORKDIR` · `ID` · `NAME` · `PLUGIN_DIR` · `CAPABILITY_VISITOR` · `CAPABILITY_ERRORS` …） | — |
 | `llm` | 模型服务的唯一契约面（协议无关、插件无关）——只留 session 与 model **两侧共用**的符号 | `ModelProvider` · `ModelFinishReason` · `ModelUsage` · `TurnOutput` · `TurnToolCallAccumulator` · `TurnStreamChildIds` · `TurnToolCallInfo` · `emit_*` / `build_*` 家族 | `model_provider` · `turn` |
 | `logger` | 结构化日志与级别闸门 | 日志宏 · `LOG_LEVEL_*`（`MIN_LEVEL` 是**私有**静态量，不是公开面） | — |
-| `memory` | 「单文件长期记忆」共用内核（各层记忆同一份实现） | `MemoryFile` · `MemoryInjection` · `MemoryNodeSpec` · `MemorySegmentSpec` · `render_segment` · `MEMORY_AGENTS_FILE` | — |
-| `plugin` | 插件核心契约：trait、信封、错误、目录、对象工厂、身份与地址 | `Plugin` · `PluginMeta` · `PluginInvokeRequest` / `PluginInvokeResponse` · `PluginError` / `PluginErrorCode` · `PluginChannel` / `PluginFrame` / `PluginPayload` / `PLUGIN_PAYLOAD_KEY` · `PluginDir` / `PluginConfigFile` / `PluginEntry` · `create_object` · `PLUGIN_ID_*`（工厂 id）· `PLUGIN_KEY_*` / `PLUGIN_FILE`（清单）· `ROUTE_*`（路由地址）· `TRAVERSE_AVAILABLE_*`（遍历端点） | `creator` · `dir` · `error` · `ids` · `route` · `transport` · `traverse` |
+| `memory` | 「单文件长期记忆」共用内核（各层记忆同一份实现） | `MemoryFile` · `MemoryInjection` · `MemoryNodeSpec` · `MemorySegmentSpec` · `memory_render_segment` · `MEMORY_AGENTS_FILE` | — |
+| `plugin` | 插件核心契约：trait、信封、错误、目录、身份与地址 | `Plugin` · `PluginMeta` · `PluginInvokeRequest` / `PluginInvokeResponse` · `PluginError` / `PluginErrorCode` · `PluginChannel` / `PluginFrame` / `PluginPayload` / `PLUGIN_PAYLOAD_KEY` · `PluginDir` / `PluginConfigFile` / `PluginEntry` · `PLUGIN_ID_*`（工厂 id）· `PLUGIN_KEY_*` / `PLUGIN_FILE`（清单）· `ROUTE_*`（路由地址）· `TRAVERSE_AVAILABLE_*`（遍历端点） | `dir` · `error` · `ids` · `route` · `transport` · `traverse` |
 | `schemas` | 跨端协议 schema（前端逐字段镜像） | `ChatMessage` · `HookEvent` · `SuccessResponse` · 详情表 schema | `common` · `detail` · `hook` · `session` |
-| `text` | 字符串安全截断（避免按字节切多字节字符 panic） | `truncate_bytes` · `floor_char_boundary` | — |
+| `text` | 字符串安全截断（避免按字节切多字节字符 panic） | `text_truncate_bytes` · `text_floor_char_boundary` | — |
 | `vdfs` | 统一资源访问契约（规范见 [design/vdfs.md](../../../docs/design/vdfs.md)） | `VdfsProvider` · `VdfsNode` · `VdfsRequest` / `VdfsResponse` · `VdfsError` · `VdfsChangeSubscriptions` · `VDFS_*` 词表 | `address` · `host` |
 
 > `capability` / `embedding` / `llm` / `plugin` / `schemas` 的第四列是**协作者视角**的子路径，

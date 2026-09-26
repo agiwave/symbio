@@ -217,8 +217,8 @@ fn blacklist_rejects_only_real_hits() {
 
 /// 策略集成守卫补全：`..` 逃逸、完整黑名单清单、allowed_roots 前缀边界。
 ///
-/// 规则本身在 `symbio_core::vdfs` 只有一份（`has_parent_segment` /
-/// `path_within`），这里验的是 `FsPolicy` 把规则接对——任一处漏接，下面任一
+/// 规则本身在 `symbio_core::vdfs` 只有一份（`vdfs_has_parent_segment` /
+/// `vdfs_path_within`），这里验的是 `FsPolicy` 把规则接对——任一处漏接，下面任一
 /// 断言都会红，从而暴露物理层安全边界被悄悄放开。
 #[test]
 fn policy_guards_traversal_blacklist_and_root_boundary() {

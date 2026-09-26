@@ -12,7 +12,7 @@ use super::sse::{SseLineParser, SsePartialLineExtractor};
 use super::ModelProtocolEvent;
 use super::{description_for_llm, sse_data, ModelProtocol, MODEL_PROTOCOL_OPENAI_RESPONSES};
 use crate::plugins::model::http::get_http_client;
-use crate::symbio_core::to_wire;
+use crate::symbio_core::capability_to_wire;
 use crate::symbio_core::{ModelFinishReason, ModelUsage, PluginError, PluginInvokeRequest};
 use tracing::debug;
 
@@ -188,7 +188,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
                 .iter()
                 .map(|t| json!({
                     "type": "function",
-                    "name": to_wire(&t.name),
+                    "name": capability_to_wire(&t.name),
                     "description": description_for_llm(t),
                     "parameters": t.input_schema
                 }))

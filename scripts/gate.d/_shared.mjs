@@ -36,7 +36,7 @@ import { stripAnsi, yellow } from '../color.mjs'
  *      `ChatMessage` 上，告警下沉为 `TranscriptWriter::warn`；转写核心日志的「纯增量」
  *      折行（`DeltaLogCoalescer`）与请求级会话快照的回退判据一并落地。相应新增/重排了
  *      消息合并、删除帧、压缩终态、转写往返、折行边界（`seq`/图不受影响）、快照回退
- *      判据等用例（含一处 `state_frame` → `message_frame` 回归修复的锁定用例）。
+ *      判据等用例（含一处 `llm_state_frame` → `llm_message_frame` 回归修复的锁定用例）。
  * 881：v1→v2 迁移 + 节点状态流 S20~S23 + 压缩消息流化 + 中止收口终态化 + 协议
  *      增量提取器逐字节回归 + tool_name 线上名投影 + MCP camelCase/载荷语义网 +
  *      extract_result 判定顺序。逐批明细见对应提交（`git log --grep=<批次/主题>`；

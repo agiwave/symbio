@@ -18,7 +18,7 @@ fn config() -> PluginConfigFile {
 /// 条目 = 配置文档的节点视图，但**名字与地址按列表口径**改掉
 #[test]
 fn entry_keeps_the_document_view_but_relabels_it() {
-    let it = entry_of(&config());
+    let it = capability_entry_of(&config());
 
     // 地址 = 真实地址（跨挂载点，推不出来，所以由拥有者显式交出）
     assert_eq!(it.path, "web/PLUGIN.yml");
@@ -35,14 +35,15 @@ fn entry_keeps_the_document_view_but_relabels_it() {
 #[tokio::test]
 async fn register_keeps_order_and_overwrites_same_name() {
     let v = DefaultConfigurableVisitor::new();
-    v.register_configurable(entry_of(&config())).await;
-    v.register_configurable(entry_of(&PluginConfigFile::new(
+    v.register_configurable(capability_entry_of(&config()))
+        .await;
+    v.register_configurable(capability_entry_of(&PluginConfigFile::new(
         PluginDir::at(std::env::temp_dir(), "session"),
         "会话设置",
         DetailDefinition::default(),
     )))
     .await;
-    v.register_configurable(entry_of(&PluginConfigFile::new(
+    v.register_configurable(capability_entry_of(&PluginConfigFile::new(
         PluginDir::at(std::env::temp_dir(), "web"),
         "网络工具（改）",
         DetailDefinition::default(),

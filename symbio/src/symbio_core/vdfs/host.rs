@@ -5,8 +5,8 @@
 //! 1. **上下文注入**：`Arc<dyn PluginInvokeRequest>` ↔ [`VdfsContext`]
 //!    （provider 经 `ctx.require::<Arc<dyn PluginInvokeRequest>>()` 取回宿主句柄）；
 //! 2. **错误翻译**：[`VdfsError`] ↔ [`PluginError`] 双向映射；
-//! 3. **变更广播**：挂载点写 / 删后 [`notify_change`]，`watch` 经
-//!    [`watch_changes`] 订阅后转发——前端因此无需轮询（**非**轮询实现）。
+//! 3. **变更广播**：挂载点写 / 删后 [`vdfs_notify_change`]，`watch` 经
+//!    [`vdfs_watch_changes`] 订阅后转发——前端因此无需轮询（**非**轮询实现）。
 //!    转发由 [`VdfsChangeSubscriptions`] 统一收敛：**一条变更只会出总线一次**
 //!    （命中多条相关订阅时也只调用一个投递器），同一路径的多位订阅者
 //!    按引用计数配对 `watch` / `unwatch`。
@@ -52,7 +52,7 @@ impl From<VdfsError> for PluginError {
 }
 
 /// [`PluginError`] → [`VdfsError`]（provider 调宿主服务后翻译回协议错误）
-pub fn from_plugin_error(e: PluginError) -> VdfsError {
+pub fn vdfs_from_plugin_error(e: PluginError) -> VdfsError {
     match e {
         PluginError::NotFound(m) => VdfsError::NotFound(m),
         PluginError::NotImplemented => VdfsError::NotImplemented,
@@ -72,7 +72,7 @@ pub fn vdfs_context(ctx: &Arc<dyn PluginInvokeRequest>) -> VdfsContext {
 }
 
 /// 从 [`VdfsContext`] 取回 symbio 请求上下文
-pub fn host_ctx(ctx: &VdfsContext) -> VdfsResult<Arc<dyn PluginInvokeRequest>> {
+pub fn vdfs_host_ctx(ctx: &VdfsContext) -> VdfsResult<Arc<dyn PluginInvokeRequest>> {
     ctx.require::<Arc<dyn PluginInvokeRequest>>().cloned()
 }
 
@@ -82,7 +82,7 @@ pub fn host_ctx(ctx: &VdfsContext) -> VdfsResult<Arc<dyn PluginInvokeRequest>> {
 ///
 /// ## 为什么「一条变更只出总线一次」是必须的
 ///
-/// 广播源是整棵子树共用的（[`notify_change`] 不按路径分流），而投递的终点是**一个
+/// 广播源是整棵子树共用的（[`vdfs_notify_change`] 不按路径分流），而投递的终点是**一个
 /// 全局广播出口**（`plugins/vdfs/host.rs::event_bus_sink` → `EventBus::try_publish`
 /// 推给全部前端连接）。因此两条**重叠**的订阅（会话清单订 `<根>/session`、转写订
 /// `<根>/session/<id>/message`）若各投一次，同一条变更就会在总线上出现两次——
@@ -254,18 +254,18 @@ fn hub_of(kind: &str) -> Arc<VdfsChangeSubscriptions> {
 /// `notify_change_with_data` 门面：它没有生产者（带载荷的只有会话域，而会话域
 /// 拿的是订阅表本身），而留一个没人调用的「能力」比没有更糟——文档会照着它写，
 /// 读者会以为存在第二条投递路径。
-pub fn notify_change(kind: &str, path: &str) {
+pub fn vdfs_notify_change(kind: &str, path: &str) {
     hub_of(kind).notify(&VdfsChange::bare(path));
 }
 
 /// 订阅某挂载点的变更（`VdfsProvider::watch` 的实现体）；变化发生时调用 `sink`。
-pub async fn watch_changes(kind: &str, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
+pub async fn vdfs_watch_changes(kind: &str, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
     hub_of(kind).watch(path, sink);
     Ok(())
 }
 
-/// 取消订阅（`VdfsProvider::unwatch` 的实现体；与 [`watch_changes`] 严格配对）
-pub async fn unwatch_changes(kind: &str, path: &str) -> VdfsResult<()> {
+/// 取消订阅（`VdfsProvider::unwatch` 的实现体；与 [`vdfs_watch_changes`] 严格配对）
+pub async fn vdfs_unwatch_changes(kind: &str, path: &str) -> VdfsResult<()> {
     hub_of(kind).unwatch(path);
     Ok(())
 }

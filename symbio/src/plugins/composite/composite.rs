@@ -104,8 +104,8 @@ crate::submit_object_creator!(PLUGIN_ID_COMPOSITE, Composite::build, dyn Plugin)
 /// `NotFound("未知遍历路径: …")`，那是它的正常答复，不是失败——每个子插件都 warn
 /// 一次会把真正的失败埋进噪音里（启动期实测：同一条消息每个子插件各来两遍）。
 ///
-/// 真正的收集期失败另有**专门通道**：`capability_error.rs` 的 `report_error` /
-/// `take_errors`（session 编排方在收集结束后统一裁决）。拿 `traverse` 的返回值当
+/// 真正的收集期失败另有**专门通道**：`capability_error.rs` 的 `capability_report_error` /
+/// `capability_take_errors`（session 编排方在收集结束后统一裁决）。拿 `traverse` 的返回值当
 /// 失败信号，是把「路由层的回答」误当成「收集层的结果」——这两层不该由同一个
 /// `Err` 表达。
 ///

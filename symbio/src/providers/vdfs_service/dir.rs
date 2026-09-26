@@ -17,11 +17,11 @@
 
 use super::entry;
 use crate::symbio_core::{
-    has_parent_segment, VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError,
+    vdfs_has_parent_segment, VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError,
     VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse,
     VDFS_ACTION_EXPORT,
 };
-use crate::symbio_core::{notify_change, unwatch_changes, watch_changes};
+use crate::symbio_core::{vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes};
 use async_trait::async_trait;
 use std::path::PathBuf;
 
@@ -81,7 +81,7 @@ impl DirVdfs {
     /// [`inner_path`](Self::inner_path) 是裸拼接口径：条目 id 由
     /// [`safe_segment`](entry::safe_segment) 保证安全，但 `rel` 此前**未经任何
     /// 校验**。虚拟地址只以 `/` 分段，因此合法的 `rel` 必须既不含 `..` 段
-    /// （`\` 也是分隔符，见 [`has_parent_segment`]），也不含 `\`——否则
+    /// （`\` 也是分隔符，见 [`vdfs_has_parent_segment`]），也不含 `\`——否则
     /// Windows 会把 `demo/..\..\escaped.txt` 解析到条目目录之外，而
     /// [`remove_inner`](Self::remove_inner) 用的是 `remove_dir_all`。
     ///
@@ -89,7 +89,7 @@ impl DirVdfs {
     /// 但 provider 可能经其它访问路径被复用（解包、直接构造），不能假设上游
     /// 一定校验过。
     fn checked_inner(&self, id: &str, rel: &str) -> VdfsResult<PathBuf> {
-        if has_parent_segment(rel) || rel.contains('\\') {
+        if vdfs_has_parent_segment(rel) || rel.contains('\\') {
             return Err(VdfsError::invalid(format!(
                 "条目内路径不允许向上穿越或含反斜杠：{rel}"
             )));
@@ -146,7 +146,7 @@ impl DirVdfs {
             }
             Err(e) => return Err(e),
         }
-        notify_change(&self.kind, id);
+        vdfs_notify_change(&self.kind, id);
         Ok(())
     }
 
@@ -295,14 +295,14 @@ impl DirVdfs {
                 .await
                 .map_err(|e| VdfsError::internal(format!("删除文件失败：{e}")))?;
         }
-        notify_change(&self.kind, id);
+        vdfs_notify_change(&self.kind, id);
         Ok(())
     }
 
     fn announce(&self, id: &str, _created: bool) {
         // 信封没有操作枚举（S27）：「新建还是更新」不再单独成字段——
         // 消费端回读即得当前状态，不需要为它保留一个分派键。
-        notify_change(&self.kind, id);
+        vdfs_notify_change(&self.kind, id);
     }
 }
 
@@ -434,7 +434,7 @@ impl VdfsProvider for DirVdfs {
                 tokio::fs::create_dir_all(&target)
                     .await
                     .map_err(|e| VdfsError::internal(format!("创建目录失败：{e}")))?;
-                notify_change(&self.kind, &id);
+                vdfs_notify_change(&self.kind, &id);
                 Ok(VdfsResponse::Unit)
             }
 
@@ -457,12 +457,12 @@ impl VdfsProvider for DirVdfs {
             }
 
             VdfsRequest::Watch { sink } => {
-                watch_changes(&self.kind, path, sink).await?;
+                vdfs_watch_changes(&self.kind, path, sink).await?;
                 Ok(VdfsResponse::Unit)
             }
 
             VdfsRequest::Unwatch => {
-                unwatch_changes(&self.kind, path).await?;
+                vdfs_unwatch_changes(&self.kind, path).await?;
                 Ok(VdfsResponse::Unit)
             }
         }

@@ -11,7 +11,7 @@
 //!   `user` 消息回填后，新一轮会重跑该工具。详见 USER_INPUT_MECHANISM 设计文档。
 
 use crate::symbio_core::{
-    build_tool_message, emit_message, emit_state, short_id, TurnToolCallInfo,
+    llm_build_tool_message, llm_emit_message, llm_emit_state, llm_short_id, TurnToolCallInfo,
 };
 
 use crate::symbio_core::{
@@ -45,7 +45,7 @@ fn args_summary(args: &Value, max_chars: usize) -> String {
     if s.len() <= max_chars {
         s
     } else {
-        let end = crate::symbio_core::floor_char_boundary(&s, max_chars);
+        let end = crate::symbio_core::text_floor_char_boundary(&s, max_chars);
         format!("{}…(len={})", &s[..end], s.len())
     }
 }
@@ -218,7 +218,7 @@ fn pending_prompt_from(data: &Value) -> Option<PendingPrompt> {
 
 /// 由载荷构造 user_prompt 节点（`WaitingUserAction`）。
 ///
-/// **本文件是工具结果节点的唯一写入者**：普通结果（`build_tool_message`）与
+/// **本文件是工具结果节点的唯一写入者**：普通结果（`llm_build_tool_message`）与
 /// 等待用户（本函数）都出自这里，两者共享同一套 id 约定
 /// （`id = result_msg_id`、`parent_id = tool_call_id`）。
 fn build_user_prompt_message(
@@ -287,7 +287,7 @@ pub async fn execute_tool_async(
     // 一定是非法字符变的」时才成立，而它错得没有声音——解析到一个不存在的工具，
     // 报错信息还指着另一个名字。
     //
-    // 投影函数（`tool_name::to_wire`）在 core，因为**两个模块**依赖它：model 侧
+    // 投影函数（`tool_name::capability_to_wire`）在 core，因为**两个模块**依赖它：model 侧
     // 4 个协议要把名字发出去，本处要把它认回来。而「认回来」这一步（下面的
     // 解析）只有本模块需要，故留在本模块，不上 trait、不进 core。
     let tool_visitor = ctx.get(crate::symbio_core::CAPABILITY_VISITOR);
@@ -301,7 +301,7 @@ pub async fn execute_tool_async(
         None => Vec::new(),
     };
     let resolved_name =
-        crate::symbio_core::resolve(tool_name, known_names.iter().map(String::as_str))
+        crate::symbio_core::capability_resolve(tool_name, known_names.iter().map(String::as_str))
             .map(str::to_string);
     // 解析失败**不猜**：按原样交给路由，由它给出诚实的 NotFound。
     // 反演猜错会调起**另一个工具**，那比报错坏得多。
@@ -519,7 +519,7 @@ async fn record_protocol_failure(
     context_messages: &[ChatMessage],
 ) {
     let result_msg_id = uuid::Uuid::new_v4().to_string();
-    let mut tool_msg = build_tool_message(
+    let mut tool_msg = llm_build_tool_message(
         tool_call_id,
         &format!("Error: {error_text}"),
         Some(false),
@@ -529,12 +529,12 @@ async fn record_protocol_failure(
     // 过滤，导致"孤儿 tool 结果"使下一轮 LLM 请求非法）。
     tool_msg.status = Some(MessageStatus::Completed);
 
-    emit_message(sink, tool_msg.clone()).await;
+    llm_emit_message(sink, tool_msg.clone()).await;
 
     // 父 ToolCall 终态——**完整快照**，两种情形：
     // - id 合法但 name/参数非法：ToolCallDelta 已广播过完整节点（在权威转写里），
     //   取副本应用终态；
-    // - id 本身缺失（兜底 short_id）：不存在任何父节点——构造**完整**的 ToolCall
+    // - id 本身缺失（兜底 llm_short_id）：不存在任何父节点——构造**完整**的 ToolCall
     //   终态节点（name/参数为 None 是诚实表达），`close_turn` 会把它补进转写并
     //   落库，结果子节点因此有真实的父节点，不再悬空。
     let parent_update = match context_messages.iter().find(|m| m.id == tool_call_id) {
@@ -563,7 +563,7 @@ async fn record_protocol_failure(
             ..Default::default()
         },
     };
-    emit_state(sink, parent_update.clone()).await;
+    llm_emit_state(sink, parent_update.clone()).await;
 
     plugin_info!(
         "session",
@@ -612,10 +612,13 @@ async fn emit_tool_running(
     running.status = Some(MessageStatus::Streaming);
     let mut meta = running.meta.clone().unwrap_or_else(|| json!({}));
     if let Some(obj) = meta.as_object_mut() {
-        obj.insert("started_at".into(), json!(crate::symbio_core::now_ms()));
+        obj.insert(
+            "started_at".into(),
+            json!(crate::symbio_core::clock_now_ms()),
+        );
     }
     running.meta = Some(meta);
-    emit_state(sink, running).await;
+    llm_emit_state(sink, running).await;
 }
 
 /// 把父 ToolCall 的**完整副本**定稿为终态并广播。
@@ -657,7 +660,7 @@ async fn emit_parent_finalized(
     full.error = error;
     // 终态帧只带状态 / 元数据 / 错误，**不带正文**：ToolCall 的参数正文已在
     // 流式阶段以 delta 逐帧上线。
-    emit_state(sink, full.clone()).await;
+    llm_emit_state(sink, full.clone()).await;
     Some(full)
 }
 
@@ -722,7 +725,7 @@ pub(super) fn not_executed_result(tool_call_id: &str, reason: &str) -> ChatMessa
               同批剩余调用被一并跳过。需要时请重新发起这一次调用。"
             .to_string(),
     };
-    let mut msg = build_tool_message(tool_call_id, &text, Some(false), None);
+    let mut msg = llm_build_tool_message(tool_call_id, &text, Some(false), None);
     // 与 `record_protocol_failure` 同口径：失败属**信息性**，结果以 Completed
     // 留在上下文（标 Failed 会被上下文过滤，并让前端多渲染一条 ⚠）。
     msg.status = Some(MessageStatus::Completed);
@@ -835,7 +838,7 @@ pub async fn process_tool_calls_async(
                 );
                 record_protocol_failure(
                     sink,
-                    &short_id(),
+                    &llm_short_id(),
                     "模型未返回有效的工具调用 ID（协议错误）",
                     &mut tool_messages,
                     &mut parent_updates,
@@ -917,7 +920,7 @@ pub async fn process_tool_calls_async(
                 "[Tool] BLOCKED by PreToolUse hook: {}",
                 block_msg
             );
-            let tool_msg = build_tool_message(
+            let tool_msg = llm_build_tool_message(
                 &id,
                 &format!("Blocked: {block_msg}"),
                 Some(false),
@@ -994,7 +997,7 @@ pub async fn process_tool_calls_async(
                 session_dir,
             );
             let mut tool_msg =
-                build_tool_message(&id, &guarded.text, Some(success), Some(result_msg_id));
+                llm_build_tool_message(&id, &guarded.text, Some(success), Some(result_msg_id));
             if guarded.truncated {
                 let mut meta = tool_msg.meta.clone().unwrap_or_else(|| json!({}));
                 meta["tool_result_truncated"] = json!(true);
@@ -1027,7 +1030,7 @@ pub async fn process_tool_calls_async(
                 .unwrap_or(crate::symbio_core::failure_kind::NEEDS_APPROVAL)
                 .to_string();
 
-            emit_message(sink, tool_msg.clone()).await;
+            llm_emit_message(sink, tool_msg.clone()).await;
 
             // 父 ToolCall 置 WaitingUserAction（完整快照；meta.failure_kind 供 resume 提取）
             if let Some(parent_update) = emit_parent_finalized(
@@ -1048,7 +1051,7 @@ pub async fn process_tool_calls_async(
         } else {
             // 广播工具结果子节点：**一次性节点单帧完成**——内容以 delta 首次传输，
             // 与状态、meta 同帧（meta 一并带全：截断标记 / 存档路径不再只活在存储里）。
-            emit_message(sink, tool_msg.clone()).await;
+            llm_emit_message(sink, tool_msg.clone()).await;
 
             // 标记父节点最终状态（完整快照）：
             // - 成功 => Completed
@@ -1091,7 +1094,7 @@ pub async fn process_tool_calls_async(
         // 先结果、后父状态）。只发父节点补丁会让卡片有请求、无响应——
         // 那正是「工具没有响应节点，会话却继续往后」的成因。
         let result_msg = not_executed_result(id, "not_executed");
-        emit_message(sink, result_msg.clone()).await;
+        llm_emit_message(sink, result_msg.clone()).await;
         if let Some(parent_update) = emit_parent_finalized(
             sink,
             context_messages,

@@ -79,7 +79,7 @@
 
 | 无载荷的来源 | 若回读 `stat` |
 | --- | --- |
-| 资源信号（标题 / metadata / 创建，见后端 `plugin::notify_change`） | 会话还在、`status` 没变 ⇒ 空转 |
+| 资源信号（标题 / metadata / 创建，见后端 `symbio_core::vdfs_notify_change`） | 会话还在、`status` 没变 ⇒ 空转 |
 | `emit_session_state` 取不到视图（**唯一原因**：会话已不在） | `stat` 同样 `NotFound` ⇒ 仍然丢弃 |
 
 无载荷一律丢弃、不回读；**回读只挂在 `Frame::Resync` 上**——后端明示可能漏帧时才回读一次，

@@ -28,8 +28,8 @@
 
 use crate::symbio_core::schemas::common::SimpleResponse;
 use crate::symbio_core::{
-    build_envelope, register_subscriber, unregister_subscriber, EventBus, EventBusSubscribeRequest,
-    EVENT_BUS_KIND_SYSTEM,
+    event_bus_build_envelope, event_bus_register_subscriber, event_bus_unregister_subscriber,
+    EventBus, EventBusSubscribeRequest, EVENT_BUS_KIND_SYSTEM,
 };
 use crate::symbio_core::{
     Plugin, PluginChannel, PluginError, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
@@ -74,7 +74,7 @@ impl EventBusPlugin {
 
         // 注册到全局表
         let connection_id = Uuid::new_v4().to_string();
-        register_subscriber(connection_id.clone(), mine.tx.clone());
+        event_bus_register_subscriber(connection_id.clone(), mine.tx.clone());
 
         // 异步清理：mine.rx 结束时自动反注册
         let conn_id_for_cleanup = connection_id.clone();
@@ -83,16 +83,16 @@ impl EventBusPlugin {
             let _rx = mine.rx;
             // 等待 cancellation / 关闭信号（PluginChannel 的 cancel_token 会被断开时触发）
             mine.cancel_token.cancelled().await;
-            unregister_subscriber(&conn_id_for_cleanup);
+            event_bus_unregister_subscriber(&conn_id_for_cleanup);
         });
 
         // 立即推送一个 connected 事件。
         //
-        // 信封走 `build_envelope`（形状的唯一构建入口），不自己拼 `json!`：
+        // 信封走 `event_bus_build_envelope`（形状的唯一构建入口），不自己拼 `json!`：
         // 手拼的那份在形状漂移时不会有任何编译错误。
         let _ = mine
             .tx
-            .send(PluginFrame::data(build_envelope(
+            .send(PluginFrame::data(event_bus_build_envelope(
                 EVENT_BUS_KIND_SYSTEM,
                 None,
                 json!({

@@ -62,9 +62,9 @@
 
 ## 装配态一变就广播
 
-`act` / `install` / `uninstall` 成功后各广播一次变更（`notify_change`）：条目集合与
+`act` / `install` / `uninstall` 成功后各广播一次变更（`vdfs_notify_change`）：条目集合与
 当前选中项的**动作集**都变了，订阅方据此重拉并重读当前项（前端 `useVdfs` 的既有收敛
-路径），按钮因此不会停在旧状态上。订阅走 `watch_changes`（本插件是自管变更源）。
+路径），按钮因此不会停在旧状态上。订阅走 `vdfs_watch_changes`（本插件是自管变更源）。
 
 ## 自有分区（`appearance` / `about`）
 

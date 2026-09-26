@@ -33,7 +33,7 @@
 //! ## 插件不认识全局布局
 //!
 //! 插件**不知道、也不该知道**自己被放在哪。目录一律由容器经 `PLUGIN_DIR` 告知
-//! （[`dir_from_ctx`]），插件只持有 [`PluginDir`] 并向下传：
+//! （[`plugin_dir_from_ctx`]），插件只持有 [`PluginDir`] 并向下传：
 //!
 //! - ❌ 不要按插件名反推落位（`HomedirRegistry::get().join(PLUGIN_X)` 或等价的
 //!   「类别根 + 类别名」拼法）——那等于把「装配决策」写死进插件，插件挪个位置就全错；
@@ -58,7 +58,7 @@
 //! ```
 //!
 //! - **加载判据**（由装配方 `composite` 执行）：文件存在、可解析、且
-//!   `plugin_provider` 指向一个已注册的工厂（[`has_creator`](crate::symbio_core::has_creator)）。
+//!   `plugin_provider` 指向一个已注册的工厂（[`creator_has`](crate::symbio_core::creator_has)）。
 //! - **保留键是装配方的**：见 [`PLUGIN_RESERVED_KEYS`]（单一清单）——它们不参与插件配置的
 //!   反序列化（[`PluginDir::load`] 剥离），插件配置也不得占用同名键；写入时
 //!   （[`PluginDir::save`] 等）自动补回。
@@ -84,8 +84,8 @@
 //! 不向上推任何东西——「写完之后还要做什么」（重启监听 / 重建缓存）留在插件
 //! 自己的 `write` 里。
 
-use crate::symbio_core::notify_change;
 use crate::symbio_core::schemas::detail::DetailDefinition;
+use crate::symbio_core::vdfs_notify_change;
 use crate::symbio_core::{
     VdfsAccess, VdfsContent, VdfsError, VdfsNode, VdfsResult, VdfsWriteResponse, VDFS_EXT_FORM,
 };
@@ -102,7 +102,7 @@ pub const PLUGIN_FILE: &str = "PLUGIN.yml";
 // 寻址，只把每个插件的路径都加深一段）。
 //
 // ⚠️ **core 不认识任何「系统根」**：插件的目录一律由父插件经 `PLUGIN_DIR` 告知
-//（[`dir_from_ctx`]）。这里**没有** `plugins_root` / `dir_of` 这类按插件名反推落位
+//（[`plugin_dir_from_ctx`]）。这里**没有** `plugins_root` / `dir_of` 这类按插件名反推落位
 // 的函数——它们会读全局 homedir，在子智能体里必然指错作用域（homedir 归 `home` 独有）。
 
 // ==================== 保留键（单一清单见 `PLUGIN_RESERVED_KEYS`） ====================
@@ -216,7 +216,10 @@ pub const PLUGIN_KEY_CAN_DISABLE: &str = "plugin_can_disable";
 /// 或父插件没传），因此这里**不回退**到任何「常规位置」——回退必然读全局
 /// homedir，在子智能体里指错作用域。运行时若需要自己的目录，用插件持有
 /// 的 `self.dir`（构造时经本函数取得），不要拿请求 ctx 再取一次。
-pub fn dir_from_ctx(ctx: &dyn crate::symbio_core::PluginInvokeRequest, plugin: &str) -> PluginDir {
+pub fn plugin_dir_from_ctx(
+    ctx: &dyn crate::symbio_core::PluginInvokeRequest,
+    plugin: &str,
+) -> PluginDir {
     use crate::symbio_core::{PluginInvokeRequestExt, PLUGIN_DIR};
     match ctx.get(PLUGIN_DIR) {
         Some(dir) => dir,
@@ -231,7 +234,7 @@ pub fn dir_from_ctx(ctx: &dyn crate::symbio_core::PluginInvokeRequest, plugin: &
 ///
 /// **纯函数**：只读操作系统用户主目录（`dirs::home_dir`），不读任何全局「系统根」。
 /// 因此它可以留在 core 供各插件共用，而 `homedir` 注册表不能。
-pub fn expand_tilde_path(p: &Path) -> PathBuf {
+pub fn plugin_expand_tilde_path(p: &Path) -> PathBuf {
     let s = p.to_string_lossy();
     if s == "~" {
         return dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -283,7 +286,7 @@ pub struct PluginDir {
 impl PluginDir {
     /// 显式指定目录（唯一构造入口：目录一律由调用方给出）
     ///
-    /// 目录来自父插件的 `PLUGIN_DIR`（[`dir_from_ctx`]）或测试构造里的临时目录；
+    /// 目录来自父插件的 `PLUGIN_DIR`（[`plugin_dir_from_ctx`]）或测试构造里的临时目录；
     /// core 不提供「按插件名反推落位」的 `of`——那会读全局 homedir。
     pub fn at(dir: impl Into<PathBuf>, name: impl Into<String>) -> Self {
         let name = name.into();
@@ -715,7 +718,7 @@ impl PluginConfigFile {
 
     /// 广播「配置已更新」（前端据此刷新）
     pub fn announce(&self) {
-        notify_change(self.dir.name(), PLUGIN_FILE);
+        vdfs_notify_change(self.dir.name(), PLUGIN_FILE);
     }
 }
 

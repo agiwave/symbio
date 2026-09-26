@@ -4,14 +4,17 @@ mod option;
 mod tool_name;
 mod tools;
 
-pub use error::{init_error_bucket, report_error, take_errors, CapabilityError};
+pub use error::{
+    capability_init_error_bucket, capability_report_error, capability_take_errors, CapabilityError,
+};
 
 // 域内子模块私有，公开面在此显式重导出
 pub use configurable::{
-    announce_configurable, entry_of, ConfigurableVisitor, DefaultConfigurableVisitor,
+    capability_announce_configurable, capability_entry_of, ConfigurableVisitor,
+    DefaultConfigurableVisitor,
 };
 pub use option::OptionVisitor;
-pub use tool_name::{resolve, to_wire};
+pub use tool_name::{capability_resolve, capability_to_wire};
 pub use tools::DefaultToolVisitor;
 
 use crate::symbio_core::{
@@ -154,7 +157,7 @@ pub trait Capability: Send + Sync + 'static {
     ///
     /// 返回**工具结果本身**（任意 JSON），不再经 `PluginPayload` 那层多态载荷：
     /// 工具从来只用 `Data` 一个变体，其余三个（`Empty` / `Native` / `Session`）
-    /// 是路由层的形态，与工具无关。信封 ↔ 结果的换算收口在 [`invoke_capability`]。
+    /// 是路由层的形态，与工具无关。信封 ↔ 结果的换算收口在 [`capability_invoke`]。
     async fn execute(
         &self,
         args: Value,
@@ -174,7 +177,7 @@ pub trait Capability: Send + Sync + 'static {
 ///
 /// 参数缺席（信封里没有 payload）⇒ `Value::Null`：与收口前各工具自己的
 /// `unwrap_or(Value::Null)` 口径一致，由工具自己给出「缺少必填参数」的报错。
-pub async fn invoke_capability(
+pub async fn capability_invoke(
     cap: &dyn Capability,
     ctx: Arc<dyn PluginInvokeRequest>,
 ) -> PluginInvokeResponse<PluginPayload> {

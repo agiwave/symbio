@@ -12,7 +12,7 @@ use super::*;
 /// （LLM 流结束那一刻）会早整整一个执行窗口，前端于是看到"轮次已完成、其中的
 /// 工具调用仍在运行"。
 ///
-/// 发的是**权威转写里的那条节点**（`build_assistant_messages` 的产物，也是
+/// 发的是**权威转写里的那条节点**（`llm_build_assistant_messages` 的产物，也是
 /// `persist_messages` 即将落库的那份），不是手拼的半截快照：帧里带的身份、`meta`
 /// 与状态就是权威副本上那份，手拼会漏掉先前帧写下的场景字段。
 /// 节点不在转写里 = 本轮根本没建立过（异常路径），静默返回。
@@ -26,7 +26,7 @@ pub(crate) async fn finalize_turn_root(
     };
     node.status = Some(MessageStatus::Completed);
     // Turn 是组合节点（仅分组、无正文）⇒ 状态帧。
-    emit_state(sink, node).await;
+    llm_emit_state(sink, node).await;
 }
 
 /// 增量落库 + **落库回包**（把存储分配的权威 `seq` 交回实时面）。

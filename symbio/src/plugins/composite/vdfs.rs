@@ -72,7 +72,7 @@
 use super::composite::broadcast_collect;
 use super::registry::PluginRegistry;
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField, DetailOption};
-use crate::symbio_core::{descend_addr, host_ctx};
+use crate::symbio_core::{descend_addr, vdfs_host_ctx};
 use crate::symbio_core::{
     ConfigurableVisitor, DefaultConfigurableVisitor, Plugin, PluginInvokeRequestExt, PluginMeta,
     CONFIGURABLE_VISITOR, PATH, PLUGIN_ID_MANAGER, TRAVERSE_AVAILABLE_TOOLS,
@@ -137,7 +137,7 @@ impl CompositeVdfs {
     ///   子插件把各自的配置文档声明写回本次请求 ctx，插件管理插件据此知道「哪些
     ///   插件有配置文档」。
     async fn children_of(&self, ctx: &VdfsContext) -> VdfsResult<Vec<(String, Arc<dyn Plugin>)>> {
-        let host = host_ctx(ctx)?;
+        let host = vdfs_host_ctx(ctx)?;
         // 实例表快照（`std::sync::RwLock`：临界区只有一次遍历，没有任何 await）
         let children: Vec<(String, Arc<dyn Plugin>)> = self.registry.snapshot();
 

@@ -575,7 +575,7 @@ impl SymbioClient {
     ///
     /// | 无载荷的来源 | 回读的结果 |
     /// |---|---|
-    /// | 资源信号（标题 / metadata / 创建，见 `plugin::notify_change`） | 会话还在，`status` 没变 ⇒ 空转 |
+    /// | 资源信号（标题 / metadata / 创建，见 `symbio_core::vdfs_notify_change`） | 会话还在，`status` 没变 ⇒ 空转 |
     /// | `emit_session_state` 取不到视图（**唯一原因**：会话已不在） | `stat` 同样 `NotFound` ⇒ 仍然丢弃 |
     ///
     /// 也就是说：那次回读**永远改变不了结论**，却是一笔真实请求——实测每会话一次

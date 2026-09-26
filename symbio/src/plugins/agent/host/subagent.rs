@@ -45,7 +45,7 @@ use crate::symbio_core::schemas::session::chat_message::{
     ResumeRequest,
 };
 use crate::symbio_core::schemas::session::session_chat;
-use crate::symbio_core::{register_subscriber, unregister_subscriber};
+use crate::symbio_core::{event_bus_register_subscriber, event_bus_unregister_subscriber};
 use crate::symbio_core::{
     vdfs_change_of, VdfsContent, VdfsNode, VdfsProvider, VdfsRequest, VDFS_STATUS_WORKING,
 };
@@ -322,11 +322,11 @@ impl crate::symbio_core::Capability for AgentRunCapability {
         // 判据是会话节点的 `status`，而它是**回读**来的——回读永远最新且幂等。
         let (bus_tx, bus_rx) = tokio::sync::mpsc::channel::<PluginFrame>(4096);
         let conn_id = format!("agent-run-{child_session_id}");
-        register_subscriber(conn_id.clone(), bus_tx);
+        event_bus_register_subscriber(conn_id.clone(), bus_tx);
         let session_addr = match session_vdfs_addr(&parent, &ctx, &child_session_id).await {
             Ok(addr) => addr,
             Err(e) => {
-                unregister_subscriber(&conn_id);
+                event_bus_unregister_subscriber(&conn_id);
                 return Err(e);
             }
         };
@@ -352,7 +352,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
         if let Err(e) = parent.clone().route(send_ctx).await {
             // 委托失败：清理订阅，错误直接作为工具结果回传
             vdfs_watch(&parent, &ctx, &session_addr, false).await;
-            unregister_subscriber(&conn_id);
+            event_bus_unregister_subscriber(&conn_id);
             return Err(e);
         }
 
@@ -441,7 +441,7 @@ fn validate_working_dir(provided: &str) -> Result<String, PluginError> {
             "Invalid working_dir '{provided}': `..` components are forbidden."
         )));
     }
-    let expanded = crate::symbio_core::expand_tilde_path(std::path::Path::new(trimmed));
+    let expanded = crate::symbio_core::plugin_expand_tilde_path(std::path::Path::new(trimmed));
     if !expanded.is_absolute() {
         return Err(PluginError::ValidationError(format!(
             "Invalid working_dir '{provided}': must be an absolute path. \
@@ -578,7 +578,7 @@ struct RelayBridge {
     provider: Option<Arc<dyn VdfsProvider>>,
     /// 回读用的请求上下文（`vdfs_context` 的原料）
     invoke_ctx: Arc<dyn PluginInvokeRequest>,
-    /// 摘除订阅要用（`vdfs/unwatch` 与 `unregister_subscriber` 都要它）
+    /// 摘除订阅要用（`vdfs/unwatch` 与 `event_bus_unregister_subscriber` 都要它）
     router: Arc<dyn Plugin>,
     /// 子会话的**展示地址**（`<根>/session/<sid>`）——判定变更归属
     session_addr: String,
@@ -716,7 +716,7 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                     known.remove(&mid);
                     records.remove(&mid);
                     // 删除按 id 生效（不依赖父子锚点），原样转发。
-                    sink.emit(crate::symbio_core::removed_frame(&mid)).await;
+                    sink.emit(crate::symbio_core::llm_removed_frame(&mid)).await;
                     continue;
                 }
 
@@ -835,7 +835,7 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
 
     // 摘除订阅（与注册严格配对）：先关闸门（引用计数），再从总线摘除收件端
     vdfs_watch(&router, &invoke_ctx, &session_addr, false).await;
-    unregister_subscriber(&conn_id);
+    event_bus_unregister_subscriber(&conn_id);
 
     // ── 结局判定：错误 > 待审批 > 文本（与收口前逐字一致）──
     if let Some(err) = relay_error {

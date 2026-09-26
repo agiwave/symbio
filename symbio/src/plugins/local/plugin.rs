@@ -9,7 +9,7 @@ use super::{
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField, DetailOption};
 use crate::symbio_core::vdfs;
 use crate::symbio_core::{
-    dir_from_ctx, Capability, CapabilityMeta, ExecEnv, Plugin, PluginConfigFile, PluginDir,
+    plugin_dir_from_ctx, Capability, CapabilityMeta, ExecEnv, Plugin, PluginConfigFile, PluginDir,
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
     PluginPayload, PLUGIN_FILE, PLUGIN_ID_LOCAL,
 };
@@ -287,7 +287,7 @@ impl LocalPlugin {
     /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         // 自己的目录由容器经 `PLUGIN_DIR` 告知；配置就存在那里的 PLUGIN.yml
-        let dir = dir_from_ctx(&*ctx, PLUGIN_ID_LOCAL);
+        let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_LOCAL);
         let config: LocalConfig = match dir.load::<LocalConfig>() {
             Ok(Some(c)) => c,
             Ok(None) => LocalConfig::default(),
@@ -380,9 +380,9 @@ impl Plugin for LocalPlugin {
                 return Ok(PluginPayload::new(&payload));
             }
 
-            // 信封 ↔ 结果换算收口在 `invoke_capability`：本处与
+            // 信封 ↔ 结果换算收口在 `capability_invoke`：本处与
             // `CapabilityVisitor::invoke` 走同一条拆信封路径。
-            return crate::symbio_core::invoke_capability(tool.as_ref(), ctx).await;
+            return crate::symbio_core::capability_invoke(tool.as_ref(), ctx).await;
         }
         Err(PluginError::NotFound(format!("路径不存在: {path}")))
     }
@@ -410,7 +410,7 @@ impl Plugin for LocalPlugin {
             visitor.register_vdfs_provider(PLUGIN_ID_LOCAL, me).await;
         }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
-        crate::symbio_core::announce_configurable(&ctx, &self.config_file).await;
+        crate::symbio_core::capability_announce_configurable(&ctx, &self.config_file).await;
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }

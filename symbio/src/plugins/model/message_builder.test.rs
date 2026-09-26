@@ -5,7 +5,7 @@
 use super::*;
 
 use crate::symbio_core::schemas::session::chat_message::MessageStatus;
-use crate::symbio_core::{build_assistant_messages, TurnStreamChildIds, TurnToolCallInfo};
+use crate::symbio_core::{llm_build_assistant_messages, TurnStreamChildIds, TurnToolCallInfo};
 
 const TURN_ID: &str = "turn-0001";
 
@@ -89,7 +89,7 @@ fn tool_call_args_passthrough_as_string_without_reserialize() {
 fn reasoning_only_writes_single_text_child_without_reasoning_node() {
     let reasoning = "我先分析一下用户的问题，然后给出结论。";
 
-    let msgs = build_assistant_messages(
+    let msgs = llm_build_assistant_messages(
         TURN_ID,
         reasoning,
         &[],
@@ -126,7 +126,7 @@ fn reasoning_only_ignores_surrounding_whitespace() {
     let reasoning = "思考内容";
     let content = "\n  思考内容  \n";
 
-    let msgs = build_assistant_messages(
+    let msgs = llm_build_assistant_messages(
         TURN_ID,
         content,
         &[],
@@ -143,7 +143,7 @@ fn reasoning_only_ignores_surrounding_whitespace() {
 /// 用例 B：普通场景（reasoning + 独立文本回复）→ Reasoning 与 Text 各一份，内容不同
 #[test]
 fn reasoning_with_distinct_reply_keeps_both_children() {
-    let msgs = build_assistant_messages(
+    let msgs = llm_build_assistant_messages(
         TURN_ID,
         "正常回复",
         &[],
@@ -175,7 +175,7 @@ fn reasoning_with_distinct_reply_keeps_both_children() {
 /// 用例 C：无 reasoning 的纯文本回复 → Turn + Text
 #[test]
 fn plain_text_reply_has_no_reasoning_child() {
-    let msgs = build_assistant_messages(
+    let msgs = llm_build_assistant_messages(
         TURN_ID,
         "你好",
         &[],
@@ -193,7 +193,7 @@ fn plain_text_reply_has_no_reasoning_child() {
 #[test]
 fn reasoning_with_tool_calls_keeps_reasoning_and_skips_empty_text() {
     let tools = vec![tool_call("read_file")];
-    let msgs = build_assistant_messages(
+    let msgs = llm_build_assistant_messages(
         TURN_ID,
         "",
         &tools,
@@ -218,7 +218,7 @@ fn reasoning_with_tool_calls_keeps_reasoning_and_skips_empty_text() {
 #[test]
 fn reasoning_only_flattens_to_single_assistant_message() {
     let reasoning = "只有思考";
-    let msgs = build_assistant_messages(
+    let msgs = llm_build_assistant_messages(
         TURN_ID,
         reasoning,
         &[],
@@ -243,7 +243,7 @@ fn reasoning_only_flattens_to_single_assistant_message() {
 /// 用例 F：普通 reasoning + 文本 扁平化后 content 与 reasoning_content 各归其位
 #[test]
 fn reasoning_with_reply_flattens_into_content_and_reasoning_content() {
-    let msgs = build_assistant_messages(
+    let msgs = llm_build_assistant_messages(
         TURN_ID,
         "正常回复",
         &[],
@@ -352,12 +352,12 @@ fn flatten_keeps_only_recent_reasoning_in_request_view() {
 
 /// 落库节点必须复用流式子节点 id。
 ///
-/// 若两处各自 `short_id()`，存储层的定稿节点（id=B，内容全量）与会话层累积的流式节点
+/// 若两处各自 `llm_short_id()`，存储层的定稿节点（id=B，内容全量）与会话层累积的流式节点
 /// （id=A，内容增量合并）会被判定为两条不同消息；失败收尾时 id=A 被当作"尚未落库的
 /// 流式半截"补写进存储 → 同一个 Turn 下出现两份内容相同的文本节点。
 #[test]
 fn persisted_children_reuse_streaming_child_ids() {
-    let msgs = build_assistant_messages(
+    let msgs = llm_build_assistant_messages(
         TURN_ID,
         "正常回复",
         &[],
@@ -387,7 +387,7 @@ fn persisted_children_reuse_streaming_child_ids() {
 #[test]
 fn reasoning_only_reuses_reasoning_stream_id() {
     let reasoning = "只有思考";
-    let msgs = build_assistant_messages(
+    let msgs = llm_build_assistant_messages(
         TURN_ID,
         reasoning,
         &[],

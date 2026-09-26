@@ -5,7 +5,7 @@ use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::vdfs;
 use crate::symbio_core::PluginInvokeRequestExt;
 use crate::symbio_core::{
-    dir_from_ctx,
+    plugin_dir_from_ctx,
     schemas::{common, session::session_chat},
     CapabilityMeta, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
     PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_ID_TELEGRAM,
@@ -83,7 +83,7 @@ pub struct TelegramPlugin {
 impl TelegramPlugin {
     /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
-        let dir = dir_from_ctx(&*ctx, PLUGIN_ID_TELEGRAM);
+        let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_TELEGRAM);
         let config: TelegramConfig = match dir.load::<TelegramConfig>() {
             Ok(Some(c)) => c,
             Ok(None) => TelegramConfig::default(),
@@ -629,7 +629,7 @@ impl Plugin for TelegramPlugin {
             visitor.register_vdfs_provider(PLUGIN_ID_TELEGRAM, me).await;
         }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
-        crate::symbio_core::announce_configurable(&ctx, &self.config_file).await;
+        crate::symbio_core::capability_announce_configurable(&ctx, &self.config_file).await;
 
         Ok(PluginPayload::new(&Vec::<CapabilityMeta>::new()))
     }

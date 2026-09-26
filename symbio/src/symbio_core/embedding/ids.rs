@@ -1,7 +1,7 @@
 //! 嵌入服务 id —— 全局对象注册表里的**嵌入服务身份**
 //!
 //! 与插件工厂 id 同源（`plugin::ids`）：经 `submit_object_creator!` 注册到全局注册表，
-//! 业务侧用 `create_object::<dyn EmbeddingService>(EMBEDDING_LOCAL, ctx)` 取实例。
+//! 业务侧用 `creator_create_object::<dyn EmbeddingService>(EMBEDDING_LOCAL, ctx)` 取实例。
 //!
 //! ## 命名：`EMBEDDING_<服务名>`
 //!

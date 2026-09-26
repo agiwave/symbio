@@ -26,8 +26,9 @@
 pub use crate::plugins::mcp::schemas::mcp_config::{McpConfig, McpServerConfig};
 use crate::providers::vdfs_service::DirVdfs;
 use crate::symbio_core::{
-    dir_from_ctx, Capability, CapabilityMeta, Plugin, PluginDir, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_ID_MCP,
+    plugin_dir_from_ctx, Capability, CapabilityMeta, Plugin, PluginDir, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
+    PLUGIN_ID_MCP,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -58,7 +59,7 @@ impl McpPlugin {
         // 自己的目录由容器经 `PLUGIN_DIR` 告知。本插件**没有跨条目配置**——配置
         // 就是资源树（`<本插件目录>/<name>/server.json`），故不从 `PLUGIN.yml` 读
         // 任何东西，`servers` 由下面的异步加载从磁盘灌入。
-        let dir = dir_from_ctx(&*ctx, PLUGIN_ID_MCP);
+        let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_MCP);
 
         let plugin = Arc::new(McpPlugin::new(McpConfig::default(), dir));
 
@@ -178,7 +179,7 @@ impl Default for McpPlugin {
 // 本模块只剩 **mcp 特有的三件事**：详情定义随节点下发、transport 必填项校验、
 // 写后把 server 回灌进内存 config 与 manager 缓存。
 
-use crate::symbio_core::{from_plugin_error, unwatch_changes, watch_changes};
+use crate::symbio_core::{vdfs_from_plugin_error, vdfs_unwatch_changes, vdfs_watch_changes};
 use crate::symbio_core::{
     VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
     VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_EXPORT,
@@ -381,7 +382,7 @@ impl VdfsProvider for McpPlugin {
                 // 「条目 id 由路径承载」：编辑链路下发的 manifest 不含 id，校验前先补齐
                 // （`validate_manifest` 会反序列化到 id 必填的结构体）
                 let manifest = with_id(&manifest, &id);
-                let normalized = validate_manifest(&manifest).map_err(from_plugin_error)?;
+                let normalized = validate_manifest(&manifest).map_err(vdfs_from_plugin_error)?;
                 let created = store.write_json(&id, &normalized).await?;
                 // 落盘成功后把 server 从磁盘回灌到内存 config（并失效相关缓存）
                 self.reload_server_from_storage(&id).await?;
@@ -480,11 +481,11 @@ impl VdfsProvider for McpPlugin {
                 }
             }
             VdfsRequest::Watch { sink } => {
-                watch_changes(PLUGIN_ID_MCP, path, sink).await?;
+                vdfs_watch_changes(PLUGIN_ID_MCP, path, sink).await?;
                 Ok(VdfsResponse::Unit)
             }
             VdfsRequest::Unwatch => {
-                unwatch_changes(PLUGIN_ID_MCP, path).await?;
+                vdfs_unwatch_changes(PLUGIN_ID_MCP, path).await?;
                 Ok(VdfsResponse::Unit)
             }
             _ => Err(VdfsError::NotImplemented),

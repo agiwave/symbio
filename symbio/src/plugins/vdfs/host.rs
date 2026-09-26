@@ -39,9 +39,10 @@ use super::protocol::*;
 use crate::symbio_core::vdfs_context;
 use crate::symbio_core::EVENT_BUS_KIND_VDFS;
 use crate::symbio_core::{
-    derive_ext, has_parent_segment, DynVdfsProvider, VdfsAccess, VdfsChange, VdfsChangeSink,
-    VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNode, VdfsParams, VdfsProvider, VdfsResult,
-    VdfsWriteResponse, VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT, VDFS_PARAM_WORKDIR,
+    vdfs_derive_ext, vdfs_has_parent_segment, DynVdfsProvider, VdfsAccess, VdfsChange,
+    VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNode, VdfsParams,
+    VdfsProvider, VdfsResult, VdfsWriteResponse, VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT,
+    VDFS_PARAM_WORKDIR,
 };
 use crate::symbio_core::{
     CapabilityVisitor, Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
@@ -223,7 +224,7 @@ fn fill_paths(base: &str, items: &mut [VdfsItem]) {
     for it in items.iter_mut() {
         it.path = item_addr(base, it);
         if it.node.ext.is_none() {
-            it.node.ext = derive_ext(&it.node.name);
+            it.node.ext = vdfs_derive_ext(&it.node.name);
         }
         if it.node.title.is_empty() {
             it.node.title = it.node.name.clone();
@@ -359,7 +360,7 @@ async fn list_at(
                     n.title = n.name.clone();
                 }
                 if n.ext.is_none() {
-                    n.ext = derive_ext(&n.name);
+                    n.ext = vdfs_derive_ext(&n.name);
                 }
                 n
             }
@@ -391,7 +392,7 @@ async fn stat(
         n.title = n.name.clone();
     }
     if n.ext.is_none() {
-        n.ext = derive_ext(&n.name);
+        n.ext = vdfs_derive_ext(&n.name);
     }
     Ok(PluginPayload::new(&n))
 }
@@ -632,7 +633,7 @@ pub(crate) async fn search_via(
     // 与物理层、shell 策略共用同一条规则（按段判定，与分隔符无关）：
     // 原先的 `contains("../") || contains("..\\") || == ".."` 会放过 `a/..`
     // 这种 `..` 收尾的写法——三处各写一份，就必然三处各漏一处。
-    if has_parent_segment(pattern) {
+    if vdfs_has_parent_segment(pattern) {
         return Err(VdfsError::invalid(
             "不允许在 Glob 模式中使用路径遍历 ('..')。",
         ));

@@ -39,7 +39,7 @@ use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType, ResumeAction,
     ResumeRequest,
 };
-use crate::symbio_core::{emit_message, emit_removed, emit_state, short_id};
+use crate::symbio_core::{llm_emit_message, llm_emit_removed, llm_emit_state, llm_short_id};
 use crate::symbio_core::{ExecAbortSignal, ExecEventSink, PluginError, PluginInvokeRequest};
 use crate::{plugin_error, plugin_info};
 use serde_json::{json, Value};
@@ -150,7 +150,7 @@ async fn process_retry_turn(
 
     // 6. 广播删除（每个被删除的消息一条 `status = removed` 的删除帧）
     for msg in &deleted_messages {
-        emit_removed(sink, &msg.id).await;
+        llm_emit_removed(sink, &msg.id).await;
     }
 
     plugin_info!(
@@ -239,10 +239,13 @@ async fn process_tool_resume_action(
                 running.status = Some(MessageStatus::Streaming);
                 let mut meta = running.meta.clone().unwrap_or_else(|| json!({}));
                 if let Some(obj) = meta.as_object_mut() {
-                    obj.insert("started_at".into(), json!(crate::symbio_core::now_ms()));
+                    obj.insert(
+                        "started_at".into(),
+                        json!(crate::symbio_core::clock_now_ms()),
+                    );
                 }
                 running.meta = Some(meta);
-                emit_state(sink, running).await;
+                llm_emit_state(sink, running).await;
             }
             None => {
                 plugin_error!(
@@ -327,7 +330,7 @@ async fn process_tool_resume_action(
                 e
             );
         }
-        emit_state(sink, parent_update).await;
+        llm_emit_state(sink, parent_update).await;
         return Ok(ResumeOutcome::Done);
     }
 
@@ -335,8 +338,8 @@ async fn process_tool_resume_action(
     messages.remove(child_idx);
 
     // 7. 创建新子节点（新 id，Text 类型，工具结果）
-    let new_child_id = short_id();
-    let now_ts = crate::symbio_core::now_ms();
+    let new_child_id = llm_short_id();
+    let now_ts = crate::symbio_core::clock_now_ms();
     let new_child = ChatMessage {
         id: new_child_id.clone(),
         parent_id: Some(req.target_id.clone()),
@@ -394,9 +397,9 @@ async fn process_tool_resume_action(
 
     // 10. 广播：旧子删除（`status = removed`）+ 新子完整消息（正文首次上线）
     //     + 父节点完整消息（supply 可能改写了它的 args 正文 ⇒ 整条替换）
-    emit_removed(sink, &old_child_id).await;
-    emit_message(sink, new_child).await;
-    emit_message(sink, updated_parent).await;
+    llm_emit_removed(sink, &old_child_id).await;
+    llm_emit_message(sink, new_child).await;
+    llm_emit_message(sink, updated_parent).await;
 
     // 11. 成功 → Continue；失败 → Done
     if final_success {
@@ -465,7 +468,7 @@ async fn reexecute_tool(
     args: Value,
     tool_call_id: &str,
 ) -> (String, bool) {
-    let result_msg_id = short_id();
+    let result_msg_id = llm_short_id();
     let silent = ExecEventSink::silent();
 
     let (res, success, _captured) = execute_tool_async(

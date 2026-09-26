@@ -3,7 +3,7 @@
 //! 这是 `providers/`（具体实现层）之上的**抽象接口层**：trait 在此定义，
 //! 具体实现（Local / Noop 等）放在 `src/providers/embedding`，
 //! 并通过通用对象创建机制自注册到 `local` / `noop` id，
-//! 业务模块用 `create_object::<dyn EmbeddingService>(EMBEDDING_LOCAL, ctx)` 获取实例。
+//! 业务模块用 `creator_create_object::<dyn EmbeddingService>(EMBEDDING_LOCAL, ctx)` 获取实例。
 //!
 //! 所有插件通过 `dyn EmbeddingService` 访问嵌入能力，
 //! **不**直接引用 `crate::providers::embedding::LocalEmbeddingService` 等具体实现。
@@ -12,7 +12,7 @@
 //!
 //! - **抽象在 symbio_core**：所有可插拔服务的 trait 都在这里定义
 //! - **实现在 `providers/`**：trait 的具体实现放在 `src/providers/`
-//! - **统一工厂**：所有服务的实例都通过 `create_object::<dyn XXXService>(...)` 获取
+//! - **统一工厂**：所有服务的实例都通过 `creator_create_object::<dyn XXXService>(...)` 获取
 //! - **不依赖具体实现**：业务模块只 `use` 这里的 trait，不 `use` `providers::xxx` 的具体类型
 //!
 //! 这里只保留**存在第二种实现**的服务抽象。历史上的 `storage`

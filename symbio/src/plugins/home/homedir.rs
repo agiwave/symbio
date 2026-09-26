@@ -31,14 +31,14 @@
 //!   必须是**进程级全局变量**——它正是整条 `PLUGIN_DIR` 传递链的**起点**。
 //! - 切换 homedir **不会**自动迁移数据（避免误删），由用户在 UI 显式选择。
 
-use crate::symbio_core::expand_tilde_path;
+use crate::symbio_core::plugin_expand_tilde_path;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use tracing::{info, warn};
 
 /// 默认 homedir
 ///
-/// 使用 `~/.symbio` 形式，调用 [`expand_tilde_path`] 时会展开为
+/// 使用 `~/.symbio` 形式，调用 [`plugin_expand_tilde_path`] 时会展开为
 /// `<user_home>/.symbio`（**绝对路径**）。
 pub const DEFAULT_HOMEDIR: &str = "~/.symbio";
 
@@ -98,10 +98,10 @@ fn initial_homedir() -> PathBuf {
 fn default_homedir() -> PathBuf {
     if let Ok(env_p) = std::env::var("SYMBIO_HOMEDIR") {
         if !env_p.trim().is_empty() {
-            return expand_tilde_path(Path::new(&env_p));
+            return plugin_expand_tilde_path(Path::new(&env_p));
         }
     }
-    expand_tilde_path(Path::new(DEFAULT_HOMEDIR))
+    plugin_expand_tilde_path(Path::new(DEFAULT_HOMEDIR))
 }
 
 /// bootstrap 文件路径：固定位于用户主目录下
@@ -122,7 +122,7 @@ fn normalize_homedir(raw: &str) -> Option<PathBuf> {
     if trimmed.is_empty() {
         return None;
     }
-    let expanded = expand_tilde_path(Path::new(trimmed));
+    let expanded = plugin_expand_tilde_path(Path::new(trimmed));
     if expanded.is_absolute() {
         return Some(expanded);
     }

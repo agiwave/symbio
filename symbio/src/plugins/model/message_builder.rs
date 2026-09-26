@@ -364,7 +364,7 @@ fn find_tool_result<'a>(
         .copied()
 }
 
-// ChatMessage 构造（build_assistant_messages / build_tool_message / short_id /
+// ChatMessage 构造（llm_build_assistant_messages / llm_build_tool_message / llm_short_id /
 // TurnStreamChildIds）实现在 symbio_core::llm::turn：本文件仅测试消费，由 tests 模块
 // 直接引用 core（避免 lib 侧 unused import 警告）
 

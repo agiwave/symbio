@@ -9,7 +9,7 @@
 //! - 只读辅助：转写（含在途消息）、存在性校验、实时工作状态、工作目录、子会话。
 
 use super::*;
-use crate::symbio_core::now_ms;
+use crate::symbio_core::clock_now_ms;
 
 #[async_trait]
 impl vdfs::VdfsProvider for SessionPlugin {
@@ -78,7 +78,7 @@ impl SessionPlugin {
                 let sessions = self
                     .list_sessions_window(limit, before)
                     .await
-                    .map_err(vdfs::from_plugin_error)?;
+                    .map_err(vdfs::vdfs_from_plugin_error)?;
                 // 选项定义与「是哪个会话」无关 ⇒ 一次算好，清单里逐项复用
                 let schema = self.session_schema().await;
                 Ok(vdfs::VdfsResponse::list(
@@ -186,7 +186,7 @@ impl SessionPlugin {
                 self.session_of(id).await?;
                 self.delete_session_internal(id)
                     .await
-                    .map_err(vdfs::from_plugin_error)?;
+                    .map_err(vdfs::vdfs_from_plugin_error)?;
                 Ok(vdfs::VdfsResponse::Unit)
             }
             vdfs::VdfsRequest::Watch { sink } => {
@@ -396,7 +396,7 @@ impl SessionPlugin {
                     })?;
                     self.patch_message(id, mid, &patch)
                         .await
-                        .map_err(vdfs::from_plugin_error)?;
+                        .map_err(vdfs::vdfs_from_plugin_error)?;
                     Ok(vdfs::VdfsResponse::Write(vdfs::VdfsWriteResponse {
                         name: None,
                         created: false,
@@ -429,7 +429,7 @@ impl SessionPlugin {
                         let deleted_ids = self
                             .truncate_messages(id, mid)
                             .await
-                            .map_err(vdfs::from_plugin_error)?;
+                            .map_err(vdfs::vdfs_from_plugin_error)?;
                         // 回执带**权威**的被删 id 列表：消费方本地若因锚点缺失而删窄了，
                         // 据它补齐（`vdfs/delete` 只回 `{path}`，带不回这个）。
                         let data = serde_json::to_value(&deleted_ids).map_err(|e| {
@@ -453,7 +453,7 @@ impl SessionPlugin {
                     (None, vdfs::VDFS_ACTION_CLEAR, _) => {
                         self.clear_messages(id)
                             .await
-                            .map_err(vdfs::from_plugin_error)?;
+                            .map_err(vdfs::vdfs_from_plugin_error)?;
                         Ok(vdfs::VdfsResponse::Action(vdfs::VdfsActionResult {
                             action: action.clone(),
                             ok: true,
@@ -491,7 +491,7 @@ impl SessionPlugin {
                         // 上下文**自己造**（与收件箱消费者的 `run_inbox_turn` 同款）：
                         // 只带目标会话 id 与恢复请求。发起者的请求上下文刻意不沿用——
                         // 它的 `SESSION_ID` 是发起者自己的会话（跨空间时二者不同）。
-                        let host = vdfs::host_ctx(ctx)?;
+                        let host = vdfs::vdfs_host_ctx(ctx)?;
                         let req_ctx = host.fork();
                         req_ctx.set(SESSION_ID, id.to_string());
                         let _ = req_ctx.set_payload(session_chat::Request {
@@ -509,10 +509,10 @@ impl SessionPlugin {
                         });
                         let resp = self
                             .me()
-                            .map_err(vdfs::from_plugin_error)?
+                            .map_err(vdfs::vdfs_from_plugin_error)?
                             .start_turn(req_ctx)
                             .await
-                            .map_err(vdfs::from_plugin_error)?;
+                            .map_err(vdfs::vdfs_from_plugin_error)?;
                         let status = resp
                             .get::<Value>()
                             .ok()
@@ -641,7 +641,7 @@ impl SessionPlugin {
                 // 它是 `start_turn` 回退链的**第一档**（ctx > 会话 metadata > 报错），
                 // 丢了它就只能靠会话 metadata——而「会话还没绑过 workdir」正是新建
                 // 会话那一刻的常态。
-                let workdir = vdfs::host_ctx(ctx)
+                let workdir = vdfs::vdfs_host_ctx(ctx)
                     .ok()
                     .and_then(|h| h.get(crate::symbio_core::WORKDIR));
                 let item = self
@@ -723,11 +723,14 @@ impl SessionPlugin {
         match req {
             vdfs::VdfsRequest::List { .. } => {
                 self.session_of(id).await?;
-                let store = self.get_store().await.map_err(vdfs::from_plugin_error)?;
+                let store = self
+                    .get_store()
+                    .await
+                    .map_err(vdfs::vdfs_from_plugin_error)?;
                 let subs = store
                     .list_sub_sessions(id)
                     .await
-                    .map_err(vdfs::from_plugin_error)?;
+                    .map_err(vdfs::vdfs_from_plugin_error)?;
                 // 子会话也是会话：同一份选项定义
                 let schema = self.session_schema().await;
                 Ok(vdfs::VdfsResponse::list(
@@ -795,7 +798,7 @@ impl SessionPlugin {
                 self.sub_session_of(id, sub).await?;
                 self.delete_session_internal(sub)
                     .await
-                    .map_err(vdfs::from_plugin_error)?;
+                    .map_err(vdfs::vdfs_from_plugin_error)?;
                 Ok(vdfs::VdfsResponse::Unit)
             }
             vdfs::VdfsRequest::Watch { sink } => {
@@ -825,7 +828,7 @@ impl SessionPlugin {
                 self.workdir_watches.ensure_watch(&workdir, id);
                 super::super::workdir::list_children(&workdir, Some(rel))
                     .await
-                    .map_err(vdfs::from_plugin_error)
+                    .map_err(vdfs::vdfs_from_plugin_error)
                     .map(vdfs::VdfsResponse::list)
             }
             vdfs::VdfsRequest::Stat => {
@@ -837,7 +840,7 @@ impl SessionPlugin {
                 }
                 super::super::workdir::read_node(&workdir, rel)
                     .await
-                    .map_err(vdfs::from_plugin_error)
+                    .map_err(vdfs::vdfs_from_plugin_error)
                     .map(vdfs::VdfsResponse::Stat)
             }
             vdfs::VdfsRequest::Read => {
@@ -849,7 +852,7 @@ impl SessionPlugin {
                 let workdir = self.workdir_of(id).await?;
                 let text = super::super::workdir::read_content(&workdir, rel)
                     .await
-                    .map_err(vdfs::from_plugin_error)?;
+                    .map_err(vdfs::vdfs_from_plugin_error)?;
                 Ok(vdfs::VdfsResponse::Read(vdfs::VdfsContent::text(text)))
             }
             vdfs::VdfsRequest::Write { content } => {
@@ -861,7 +864,7 @@ impl SessionPlugin {
                 let text = content.text.as_deref().unwrap_or("");
                 super::super::workdir::write_node(&workdir, rel, text)
                     .await
-                    .map_err(vdfs::from_plugin_error)?;
+                    .map_err(vdfs::vdfs_from_plugin_error)?;
                 self.workdir_watches.ensure_watch(&workdir, id);
                 Ok(vdfs::VdfsResponse::Write(vdfs::VdfsWriteResponse {
                     name: None,
@@ -878,7 +881,7 @@ impl SessionPlugin {
                 let workdir = self.workdir_of(id).await?;
                 super::super::workdir::delete_node(&workdir, rel)
                     .await
-                    .map_err(vdfs::from_plugin_error)?;
+                    .map_err(vdfs::vdfs_from_plugin_error)?;
                 Ok(vdfs::VdfsResponse::Unit)
             }
             vdfs::VdfsRequest::Watch { sink } => {
@@ -987,10 +990,10 @@ impl SessionPlugin {
             meta.entry("created_via".to_string())
                 .or_insert_with(|| Value::String("vdfs".to_string()));
             session.metadata = Value::Object(meta);
-            session.updated_at = now_ms();
+            session.updated_at = clock_now_ms();
             self.save_session(&session)
                 .await
-                .map_err(vdfs::from_plugin_error)?;
+                .map_err(vdfs::vdfs_from_plugin_error)?;
             self.notify_change(&id);
             return Ok(vdfs::VdfsResponse::Write(vdfs::VdfsWriteResponse {
                 name: anonymous.then_some(id),
@@ -1018,12 +1021,12 @@ impl SessionPlugin {
         };
         // 浅合并 —— `Session::merge_metadata_object` 是 metadata 写入的**唯一**实现。
         session.merge_metadata_object(&value);
-        session.updated_at = now_ms();
+        session.updated_at = clock_now_ms();
         self.save_session(&session)
             .await
-            .map_err(vdfs::from_plugin_error)?;
+            .map_err(vdfs::vdfs_from_plugin_error)?;
         // 资源变更（标题 / metadata）走粗粒度信号：消费方重拉清单收敛。
-        // 不带节点视图，见 `plugin::notify_change`。
+        // 不带节点视图，见 `symbio_core::vdfs_notify_change`。
         self.notify_change(&id);
         Ok(vdfs::VdfsResponse::Write(vdfs::VdfsWriteResponse {
             name: None,
@@ -1035,7 +1038,7 @@ impl SessionPlugin {
     /// 订阅：把 sink 登记进本插件的变更订阅表（`unwatch` 时按引用计数摘除）。
     ///
     /// provider 是**变更源的持有者**，因此这里不需要轮询——写入 / 删除路径
-    /// 直接投递（见 [`SessionPlugin::notify_change`]）。投递在机制层收敛为
+    /// 直接投递（见 [`SessionPlugin::vdfs_notify_change`]）。投递在机制层收敛为
     /// **恰好一次**：重叠订阅（清单订根 + 转写订子树）不会把同一条变更投两遍。
     ///
     /// ## 路径不在这里收敛（容易看错，特此写明）
@@ -1083,7 +1086,7 @@ impl SessionPlugin {
     /// 带连字符），既难读也难抄。
     ///
     /// 项目早已有一致的短 id 约定，这里只是不再例外：
-    /// - `symbio_core::turn::short_id()`（消息节点 id）
+    /// - `symbio_core::turn::llm_short_id()`（消息节点 id）
     /// - `vdfs_service::entry::auto_id()`（无名字新建的条目 id，`<kind>-<8位>`）
     ///
     /// 后端**没有任何地方** `Uuid::parse_str` 会话 id（已全仓核对），因此改格式安全；
@@ -1097,7 +1100,7 @@ impl SessionPlugin {
     async fn new_session_id(&self) -> String {
         let store = self.get_store().await.ok();
         for _ in 0..8 {
-            let id = crate::symbio_core::short_id();
+            let id = crate::symbio_core::llm_short_id();
             let taken = match &store {
                 Some(s) => s.session_dir(&id).is_some(),
                 None => false,
@@ -1241,7 +1244,7 @@ impl SessionPlugin {
         chat_session.replace_messages(messages).await?;
         // 变更：一条**完整消息**帧——`content` 的语义是整条替换，正是"这次编辑"
         // 要说的事（不需要先删再建：删除帧表达的是"这个节点没了"，而编辑后它还在）。
-        self.transcript_apply(session_id, crate::symbio_core::message_frame(&updated))
+        self.transcript_apply(session_id, crate::symbio_core::llm_message_frame(&updated))
             .await;
         Ok(updated)
     }
@@ -1279,7 +1282,7 @@ impl SessionPlugin {
         if !deleted_ids.is_empty() {
             let frames: Vec<cm::ChatMessage> = deleted_ids
                 .iter()
-                .map(|id| crate::symbio_core::removed_frame(id))
+                .map(|id| crate::symbio_core::llm_removed_frame(id))
                 .collect();
             self.transcript_apply_all(session_id, frames).await;
         }
@@ -1303,7 +1306,7 @@ impl SessionPlugin {
         // 变更：清空 = 逐条删除帧（理由见 truncate：清空重读会连保留的一起重传）。
         let frames: Vec<cm::ChatMessage> = ids
             .iter()
-            .map(|id| crate::symbio_core::removed_frame(id))
+            .map(|id| crate::symbio_core::llm_removed_frame(id))
             .collect();
         self.transcript_apply_all(session_id, frames).await;
         Ok(())
@@ -1314,10 +1317,10 @@ impl SessionPlugin {
     pub(crate) async fn session_of(&self, id: &str) -> vdfs::VdfsResult<Session> {
         self.get_store()
             .await
-            .map_err(vdfs::from_plugin_error)?
+            .map_err(vdfs::vdfs_from_plugin_error)?
             .load_session_checked(id)
             .await
-            .map_err(vdfs::from_plugin_error)?
+            .map_err(vdfs::vdfs_from_plugin_error)?
             .ok_or_else(|| vdfs::VdfsError::not_found(format!("会话不存在：{id}")))
     }
 
@@ -1420,11 +1423,14 @@ impl SessionPlugin {
         id: &str,
         sub: &str,
     ) -> vdfs::VdfsResult<super::super::types::Session> {
-        let store = self.get_store().await.map_err(vdfs::from_plugin_error)?;
+        let store = self
+            .get_store()
+            .await
+            .map_err(vdfs::vdfs_from_plugin_error)?;
         let session = store
             .load_session(sub)
             .await
-            .map_err(vdfs::from_plugin_error)?;
+            .map_err(vdfs::vdfs_from_plugin_error)?;
         if session.id == sub && session.parent_session_id() == Some(id) {
             Ok(session)
         } else {

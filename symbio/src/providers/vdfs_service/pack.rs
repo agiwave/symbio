@@ -8,7 +8,7 @@
 //! 往返契约：[`zip_dir`] 以条目 id 作**唯一顶层目录**，[`extract_pack`] 端
 //! [`strip_common_root`] 恰好剥掉这一层——导出的包能原样导回。
 
-use crate::symbio_core::has_parent_segment;
+use crate::symbio_core::vdfs_has_parent_segment;
 use serde::{Deserialize, Serialize};
 use std::io::{Cursor, Read, Write};
 use std::path::Path;
@@ -191,7 +191,7 @@ pub fn parse_pack(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, PackError> {
             continue;
         }
         // 路径穿越防线：包内条目只允许落在目标目录**之内**（zip-slip）
-        if has_parent_segment(&rel) {
+        if vdfs_has_parent_segment(&rel) {
             return Err(PackError(format!("zip 条目越出目标目录：{rel}")));
         }
         let mut buf = Vec::new();
@@ -263,7 +263,7 @@ fn normalize_pack_path(p: &str) -> String {
         .to_string()
 }
 
-// 解包侧的路径穿越防线复用协议层的 `has_parent_segment`（按**段**判定，`/` 与
+// 解包侧的路径穿越防线复用协议层的 `vdfs_has_parent_segment`（按**段**判定，`/` 与
 // `\` 都算）：zip 条目是**包内自带**的路径，不经过请求地址那条守卫，所以必须
 // 自己判一次；但**规则本体只该有一份**，这里不再另写实现。
 

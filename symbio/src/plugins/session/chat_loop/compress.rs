@@ -276,7 +276,7 @@ async fn compress_snapshot_inner(
 
     // 专用压缩 system 提示词（模板只在本次请求出现，与主对话隔离）
     let compression_prompt = compression::get_compression_prompt();
-    let root_id = short_id();
+    let root_id = llm_short_id();
     let summary = match send_compression_request(
         orchestrator,
         &compression_prompt,
@@ -320,7 +320,7 @@ async fn compress_snapshot_inner(
     if validated.is_none() {
         // 重试：附纠正指令，要求严格按 XML 结构输出
         let retry_msg = ChatMessage {
-            id: short_id(),
+            id: llm_short_id(),
             role: Some(MessageRole::User),
             msg_type: Some(MessageType::Text),
             content: Some(MessageContent::Text(
@@ -336,7 +336,7 @@ async fn compress_snapshot_inner(
             orchestrator,
             &compression_prompt,
             &context.messages,
-            &short_id(),
+            &llm_short_id(),
             abort,
         )
         .await;
@@ -489,7 +489,7 @@ async fn compress_with_snapshot_core(
     log_tag: &str,
 ) -> Result<Option<usize>, CompressionFailure> {
     // 压缩节点的 id 在**包装层**生成：这里才有发射器，而内层只管压缩逻辑。
-    let node_id = short_id();
+    let node_id = llm_short_id();
     let before = context.messages.len();
     if let Some(e) = &orchestrator.compression {
         e.begin(&node_id).await;
@@ -658,7 +658,7 @@ pub(crate) async fn retry_compaction(
     messages.retain(|m| m.id != target_id);
     session.replace_messages(messages).await?;
     // 删除帧：`status = removed`，一次状态迁移。
-    emit_removed(sink, target_id).await;
+    llm_emit_removed(sink, target_id).await;
 
     // 压缩本身则必须跑在与**自动路径完全同一份视图**上：`get_context_messages`
     // 会做三层清理（滤 Failed / 剔孤儿 / content 归一）并施加轮次窗口，
@@ -694,7 +694,7 @@ pub(crate) async fn retry_compaction(
             // 删掉了，若就这么返回，用户点"重试"的结果是"节点消失了，什么都没发生"。
             // 补一条 Completed 说明，让这次点击有交代。
             if let Some(em) = &orchestrator.compression {
-                let node_id = short_id();
+                let node_id = llm_short_id();
                 em.begin(&node_id).await;
                 let node = em
                     .finish(

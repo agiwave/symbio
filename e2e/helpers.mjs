@@ -354,7 +354,7 @@ export async function subscribeSessionRealtime(cli, { sessionId, gatewayPort }) 
   ws.on('message', (data) => {
     try {
       const frame = JSON.parse(data.toString());
-      // 信封：`PluginFrame::Data(build_envelope(kind, sid, data))`
+      // 信封：`PluginFrame::Data(event_bus_build_envelope(kind, sid, data))`
       const env = frame?.Data?.type === 'bus_event' ? frame.Data.data : null;
       if (!env || env.kind !== 'vdfs') return;
       const change = env.data; // `{ path, data? }`

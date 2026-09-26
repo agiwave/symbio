@@ -14,9 +14,9 @@ use super::protocols::resolve_protocol_id;
 use crate::providers::vdfs_service::{MemoryVdfs, SingleFileVdfs};
 use crate::symbio_core::schemas::detail::{DetailField, DetailOption};
 use crate::symbio_core::{
-    create_object, dir_from_ctx, Plugin, PluginDir, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest,
-    PLUGIN_ID_MODEL,
+    creator_create_object, plugin_dir_from_ctx, Plugin, PluginDir, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
+    PluginSimpleRequest, PLUGIN_ID_MODEL,
 };
 use crate::{plugin_error, plugin_info, plugin_warn};
 use async_trait::async_trait;
@@ -58,7 +58,7 @@ impl ModelPlugin {
     /// 1. **存储**：从 `<本插件目录>/<id>/provider.json` 加载所有 Provider
     /// 2. **跨条目配置**：`<本插件目录>/PLUGIN.yml` 里的 `default_provider_id`
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
-        let dir = dir_from_ctx(&*ctx, PLUGIN_ID_MODEL);
+        let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_MODEL);
         let providers_config: ModelProvidersConfig = match dir.load::<ModelConfig>() {
             Ok(Some(cfg)) => ModelProvidersConfig {
                 default_provider_id: cfg.default_provider_id,
@@ -197,8 +197,9 @@ impl ModelPlugin {
     async fn validate_config(config: &ModelProviderConfig) -> Option<String> {
         let ctx = Arc::new(PluginSimpleRequest::new(None, None));
         let protocol_id = resolve_protocol_id(&config.api_protocol);
-        let protocol = create_object::<dyn super::protocols::ModelProtocol>(protocol_id, ctx)
-            .expect("MODEL protocol creator not found");
+        let protocol =
+            creator_create_object::<dyn super::protocols::ModelProtocol>(protocol_id, ctx)
+                .expect("MODEL protocol creator not found");
 
         match protocol.ping(config).await {
             Ok(()) => None,
@@ -333,7 +334,7 @@ impl Default for ModelPlugin {
 // 分工与旧写法一致：`list` 读内存镜像，`stat` / `read` / `delete` / `action`
 // 读磁盘（真相源），避免镜像与磁盘在校验路径上出现分歧。
 
-use crate::symbio_core::{from_plugin_error, unwatch_changes, watch_changes};
+use crate::symbio_core::{vdfs_from_plugin_error, vdfs_unwatch_changes, vdfs_watch_changes};
 use crate::symbio_core::{
     VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
     VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_TEST,
@@ -650,12 +651,12 @@ impl VdfsProvider for ModelPlugin {
                 let normalized = self
                     .validate_manifest(&id, &manifest)
                     .await
-                    .map_err(from_plugin_error)?;
+                    .map_err(vdfs_from_plugin_error)?;
                 // 落盘（原子写 + 变更广播由 vdfs_service 承担）→ 再同步内存视图
                 let created = self.store().write_json(&id, &normalized).await?;
                 self.after_uploaded(&id, &normalized)
                     .await
-                    .map_err(from_plugin_error)?;
+                    .map_err(vdfs_from_plugin_error)?;
                 // 名字只在**匿名写**（打在挂载根上）时才需要交回：具名写的名字是
                 // 调用方自己给的（见 [`VdfsWriteResponse::name`]）。
                 let generated = path.trim_matches('/').is_empty().then_some(id);
@@ -686,7 +687,7 @@ impl VdfsProvider for ModelPlugin {
                     let id = Self::id_of(path);
                     // 存在性校验：测试不存在的条目应报 NotFound 而非成功
                     self.config_on_disk(&id).await?;
-                    let (ok, detail) = self.test_of(&id).await.map_err(from_plugin_error)?;
+                    let (ok, detail) = self.test_of(&id).await.map_err(vdfs_from_plugin_error)?;
                     Ok(VdfsResponse::Action(VdfsActionResult {
                         action: action.clone(),
                         ok,
@@ -697,11 +698,11 @@ impl VdfsProvider for ModelPlugin {
                 _ => Err(VdfsError::NotImplemented),
             },
             VdfsRequest::Watch { sink } => {
-                watch_changes(PLUGIN_ID_MODEL, path, sink).await?;
+                vdfs_watch_changes(PLUGIN_ID_MODEL, path, sink).await?;
                 Ok(VdfsResponse::Unit)
             }
             VdfsRequest::Unwatch => {
-                unwatch_changes(PLUGIN_ID_MODEL, path).await?;
+                vdfs_unwatch_changes(PLUGIN_ID_MODEL, path).await?;
                 Ok(VdfsResponse::Unit)
             }
             _ => Err(VdfsError::NotImplemented),
@@ -776,7 +777,7 @@ impl Plugin for ModelPlugin {
             match providers.resolve(requested.as_deref()).cloned() {
                 Some(p) => {
                     let protocol_id = resolve_protocol_id(&p.api_protocol);
-                    match create_object::<dyn super::protocols::ModelProtocol>(
+                    match creator_create_object::<dyn super::protocols::ModelProtocol>(
                         protocol_id,
                         ctx.clone(),
                     ) {

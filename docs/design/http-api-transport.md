@@ -26,9 +26,9 @@
 |---|---|---|
 | 分形路由唯一入口 | `root.route(ctx)`；入口参数是上下文键值对（`symbio_core/keys/`） | 服务只做"请求 → `PluginSimpleRequest`"翻译，业务零改动 |
 | 必需插件清单 | `plugins/home/plugin.rs` 的 `SYSTEM_PLUGINS`，经 ctx 键 `REQUIRED_PLUGINS` 随构造传入 | `gateway` 在清单内，容器据此补目录 / 配置文件并实例化（容器**不内置**任何清单） |
-| 插件构造 | `Composite::build` **扫描自己的目录（系统根）**，逐目录 `create_object`，并把插件自身目录经 `PLUGIN_DIR` 告知它 | 网关的开关就是它自己 `PLUGIN.yml` 里的 `inbound_enabled` |
+| 插件构造 | `Composite::build` **扫描自己的目录（系统根）**，逐目录 `creator_create_object`，并把插件自身目录经 `PLUGIN_DIR` 告知它 | 网关的开关就是它自己 `PLUGIN.yml` 里的 `inbound_enabled` |
 | 插件配置 | **没有第二条配置协议**：配置 = 插件目录里的 `PLUGIN.yml`（`<根>/gateway/PLUGIN.yml`），读写走 `vdfs/read` / `vdfs/write` | 网关只要把自己的 `PluginConfigFile` 声明出去即可被设置页与 LLM 同时读写 |
-| 设置页清单 | `ConfigurableVisitor` 收集通道（`symbio_core/capability/configurable.rs`）：插件在 `traverse` 里 `announce_configurable` 一次 | 网关的「开放接口」自动出现在设置页，**前端零改动** |
+| 设置页清单 | `ConfigurableVisitor` 收集通道（`symbio_core/capability/configurable.rs`）：插件在 `traverse` 里 `capability_announce_configurable` 一次 | 网关的「开放接口」自动出现在设置页，**前端零改动** |
 | 设置页表单 | 由配置的**拥有者**产出 `DetailDefinition`（作为节点 `schema` 下发） | 网关表单由后端下发定义，前端表单渲染器自动渲染 |
 | 宿主级上下文注册表先例 | `HomedirRegistry`（`symbio_core/homedir.rs`） | 全局弱引用登记表的同款风格（见 §4.1 的 `parent` 转发） |
 | 连接管理 | `RouteConnectionManager`（tauri 宿主层，纯 tokio） | 宿主层用它管前端流式连接；网关在 WS 循环内自持连接生命周期 |

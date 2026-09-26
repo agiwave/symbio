@@ -14,7 +14,7 @@
 //!   - 各服务的**抽象**在 `symbio_core::embedding`
 //!   - 各服务的**实现**在 `src/providers/`
 //!   - 各服务通过 `submit_object_creator!` 工厂注册
-//!   - 业务模块通过 `create_object::<dyn XXXService>(...)` 获取实例
+//!   - 业务模块通过 `creator_create_object::<dyn XXXService>(...)` 获取实例
 //!   - **不**通过 `pub use` 暴露给 crate 外部
 
 pub mod init;

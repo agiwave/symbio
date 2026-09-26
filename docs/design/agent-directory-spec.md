@@ -355,7 +355,7 @@ Agent，不属于「一个 Agent 会什么」。
 - 插件容器 = `composite` 插件；系统根由 `home` 经 `PLUGIN_DIR` 告知它；
 - 子 Agent 树由 `agent` 插件构造，做法与 `home` 构造 `worker` 完全同形：
   设 `PLUGIN_DIR = <agent dir>`、设 `REQUIRED_PLUGINS = ["mcp","skill"]`，
-  再 `create_object("composite", …)`；
+  再 `creator_create_object("composite", …)`；
 - `composite` 只扫一层目录，因此 `agent/<id>` 不会被系统树误扫（§9 第 5 条）。
 
 ### A.2 能力插件的自证

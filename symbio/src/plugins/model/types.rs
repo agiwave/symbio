@@ -2,10 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::symbio_core::capability_to_wire;
 pub use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, ContentPart, MessageContent, MessageRole,
 };
-use crate::symbio_core::to_wire;
 pub use crate::symbio_core::CapabilityMeta;
 
 /// 工具调用定义
@@ -200,7 +200,7 @@ impl NativeMessage {
                         "id": tc.id,
                         "type": tc.kind.as_ref().unwrap_or(&"function".to_string()),
                         "function": {
-                            "name": to_wire(&tc.name),
+                            "name": capability_to_wire(&tc.name),
                             "arguments": args_str
                         }
                     })
@@ -254,7 +254,10 @@ impl NativeMessage {
                 let mut item = serde_json::Map::new();
                 item.insert("type".to_string(), serde_json::json!("function_call"));
                 item.insert("status".to_string(), serde_json::json!("completed"));
-                item.insert("name".to_string(), serde_json::json!(to_wire(&tc.name)));
+                item.insert(
+                    "name".to_string(),
+                    serde_json::json!(capability_to_wire(&tc.name)),
+                );
                 item.insert(
                     "call_id".to_string(),
                     serde_json::json!(tc.id.as_ref().cloned().unwrap_or_default()),

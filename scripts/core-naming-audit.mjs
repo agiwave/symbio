@@ -21,14 +21,19 @@
  *
  * | 编号  | 规则 | 为什么 |
  * |---|---|---|
- * | N-001 | 类型 / 常量的名字必须匹配**所属域**登记的前缀 | 「符号带域前缀」是 §1.2 的核心；匹配不上 ⇒ 调用点读不出归属 |
+ * | N-001 | 类型 / 常量 / **函数**的名字必须匹配**所属域**登记的前缀 | 「符号带域前缀」是 §1.2 的核心；匹配不上 ⇒ 调用点读不出归属 |
  * | N-002 | 一个前缀只能被**一个**域登记 | 「一域一前缀」——两个域共用前缀 = 一个前缀两种东西，调用点反而更难读 |
  * | N-003 | 符号用了**别的域**的前缀时，按「错放」报（比 N-001 更具体） | `KEY_PROVIDER` 住 `plugin` 却用 `keys` 的前缀：它要么改名，要么搬家——报出「该前缀属于谁」才能让人一次改对 |
  * | N-004 | 每个域目录都必须在表里登记，反之亦然 | 新增域却不登记前缀 ⇒ 该域符号无人核对；表里留一个不存在的域 ⇒ 表在说假话 |
- * | N-005 | 公开面里不得有**无归属域**的类型 / 常量 | 根 `mod.rs` 直接声明的符号没有域 ⇒ 无法核对前缀（函数不在此列，见下） |
+ * | N-005 | 公开面里不得有**无归属域**的类型 / 常量 / 函数 | 根 `mod.rs` 直接声明的符号没有域 ⇒ 无法核对前缀 |
  *
- * **函数不判**：§1.2 明文「函数 / 自由函数不强求前缀」——导入行已经带着模块路径，
- * 前缀只是噪音。
+ * **函数也要前缀**：§1.2 给函数的豁免理由曾是「导入行已经带着模块路径」——但 §1.4 要求
+ * 根平铺重导出，导入行形如 `use crate::symbio_core::{vdfs_host_ctx, vdfs_notify_change}`，
+ * **路径里没有域**。理由是假的，而「调用点自证归属」这条判据对函数适用得一模一样。
+ * 故函数与类型 / 常量同规：名字以 `<域名>_`（snake_case）开头。
+ *
+ * 唯一的例外是**外部 crate 重导出**（`pub use inventory;`）——那不是本层的符号，
+ * 没有域可言，登记在 `CRATE_REEXPORTS` 里（见下）。
  *
  * ## 它承认的三件事（不是「豁免」，是 §1.2 / §3 登记的规则）
  *
@@ -53,6 +58,11 @@
  * ## 已知边界
  *
  * - 判据是**名字形态**（`kindOf` 用 Rust 命名约定推断 const / type / fn），不是 AST。
+ * - **子模块（命名空间）不判**：`pub use capability::failure_kind;` 是**模块**重导出，
+ *   而模块名是小写 snake_case ⇒ `kindOf` 会把它读成「函数」。`failure_kind` 就这样被
+ *   误报过一轮「函数缺域前缀」——它其实是 §1.2 登记的子命名空间，名字是**主题**，
+ *   比域名更有信息量。模块在 `core-surface.mjs` 的 `declaredModules` 里识别，本脚本
+ *   **跳过但计数**（静默跳过会让公开面出现看不见的口子）。
  * - 只判 `symbio_core` 的**根平铺公开面**，与 `core-surface-audit` 共用
  *   [`core-surface.mjs`](./core-surface.mjs) 的同一份口径——两者必须对「公开面是什么」
  *   给出同一个答案。
@@ -141,6 +151,7 @@ function readRules() {
 
   const rules = new Map()
   let inTable = false
+  let headerChecked = false
   for (let i = head; i < lines.length; i++) {
     const line = lines[i]
     if (!line.trim().startsWith('|')) {
@@ -148,24 +159,47 @@ function readRules() {
       continue
     }
     const cells = line.split('|').slice(1, -1).map((x) => x.trim())
-    if (cells.length < 3) continue
-    if (cells[0] === '域' || /^[-: ]+$/.test(cells[0])) continue
+    if (cells[0] === '域') {
+      // 表头必须**恰好**是五列，且第四列是「函数 / 自由函数」。
+      // 少一列时 `cells[3]` 会落到「备注」上 ⇒ 每个函数都被判成「该域没有这一类符号」，
+      // 规则源明明读歪了却报得理直气壮。这是「规则源不可解析必须红」的一个具体面。
+      if (cells.length < 5 || !cells[3].includes('函数')) {
+        throw new Error(
+          'README §1.2 的表头不是五列（须为 域 / 类型 / 常量 / 函数 / 备注）—— ' +
+            `实际读到：${cells.map((c) => `\`${c}\``).join(' | ')}`,
+        )
+      }
+      headerChecked = true
+      continue
+    }
+    if (/^[-: ]+$/.test(cells[0])) continue
     const domain = cells[0].replace(/`/g, '').trim()
     if (!domain) continue
     inTable = true
-    rules.set(domain, { typeSpec: parseSpec(cells[1]), constSpec: parseSpec(cells[2]) })
+    rules.set(domain, {
+      typeSpec: parseSpec(cells[1]),
+      constSpec: parseSpec(cells[2]),
+      fnSpec: parseSpec(cells[3]),
+    })
   }
+  if (!headerChecked) throw new Error('README §1.2 的表缺少表头行（`| 域 | … |`）')
   if (!rules.size) throw new Error('README §1.2 的表没有解析出任何域')
   return { rules, modifiers }
 }
 
 // ── 词级前缀匹配 ─────────────────────────────────────────────────────────
 
-const CONST_RE = /^[A-Z][A-Z0-9_]*$/
-
-/** 把名字切成词：常量按 `_`，类型按 CamelCase（`DynVdfsProvider` → `[Dyn,Vdfs,Provider]`） */
+/**
+ * 把名字切成词。
+ *
+ * - **含下划线的**（常量 `EVENT_BUS_KIND` / 函数 `clock_now_ms`）→ 按 `_` 切；
+ * - **不含下划线的**（类型 `DynVdfsProvider`）→ 按 CamelCase 切。
+ *
+ * 函数必须是这一支：`capability_invoke` 若不切词，整串当一个词，就永远匹配不上
+ * 前缀 `capability_`——守卫会变成「函数一律违规」，然后被人用豁免喂到失效。
+ */
 function words(name) {
-  if (CONST_RE.test(name)) return name.split('_').filter(Boolean)
+  if (name.includes('_')) return name.split('_').filter(Boolean)
   return name.match(/[A-Z][a-z0-9]*/g) ?? [name]
 }
 
@@ -226,7 +260,7 @@ for (const d of [...rules.keys()].sort()) {
 // N-002：前缀跨域复用
 const prefixOwner = new Map() // 前缀 → 域[]
 for (const [d, r] of rules) {
-  for (const spec of [r.typeSpec, r.constSpec]) {
+  for (const spec of [r.typeSpec, r.constSpec, r.fnSpec]) {
     if (spec.kind !== 'prefix') continue
     for (const p of spec.prefixes) {
       if (!prefixOwner.has(p)) prefixOwner.set(p, [])
@@ -248,37 +282,54 @@ for (const [p, ds] of [...prefixOwner].sort()) {
 // 全部登记前缀的扁平表（用于 N-003 报「该前缀属于谁」）
 const allPrefixes = []
 for (const [d, r] of rules) {
-  for (const spec of [r.typeSpec, r.constSpec]) {
+  for (const spec of [r.typeSpec, r.constSpec, r.fnSpec]) {
     if (spec.kind !== 'prefix') continue
     for (const p of spec.prefixes) allPrefixes.push({ prefix: p, domain: d })
   }
 }
 
+/**
+ * **外部 crate 重导出**：`pub use inventory;`。
+ *
+ * `submit_object_creator!` 宏展开要写 `$crate::symbio_core::inventory::submit!`，
+ * 所以 `inventory` 必须能在 `symbio_core::` 下路径到。但它**不是本层的符号**——
+ * 没有域，也没有域前缀可言。登记在这里而不是「静默跳过」：静默跳过会让
+ * 「谁在公开面里」这件事出现一个看不见的口子。
+ */
+const CRATE_REEXPORTS = new Set(['inventory'])
+
 // N-001 / N-003 / N-005：逐个公开符号
 const rows = [...surface.symbols].sort((a, b) => a[0].localeCompare(b[0]))
-let checked = 0
-let skippedFn = 0
+const KIND_LABEL = { type: '类型', const: '常量', fn: '函数' }
+const SPEC_OF = { type: 'typeSpec', const: 'constSpec', fn: 'fnSpec' }
+const counts = { type: 0, const: 0, fn: 0, mod: 0 }
 for (const [name, domain] of rows) {
   const kind = kindOf(name)
-  if (kind === 'fn') {
-    skippedFn++
+  // 子模块（命名空间）**不是符号**：它的名字是**主题**，适用 §1.2 的「子命名空间」
+  // 手段，不适用域前缀。`pub use capability::failure_kind;` 这种重导出会让
+  // `kindOf` 把它读成「小写 ⇒ 函数」——形态推断对符号成立、对命名空间不成立。
+  // 跳过的同时**计数**：静默跳过会让「公开面里有什么」出现一个看不见的口子。
+  if (surface.modules.has(name)) {
+    counts.mod++
     continue
   }
-  // N-005：无归属域（根 mod.rs 直接声明 / 根显式重导出且未标域）
+  // N-005：无归属域。`(root)` = 直接声明在根 mod.rs（**是我们的符号**，必须进域）；
+  // `(explicit)` = 根显式列名重导出且 head 不是域（通常是外部 crate 重导出）。
   if (domain === '(root)' || domain === '(explicit)') {
+    if (CRATE_REEXPORTS.has(name)) continue
     report(
       'N-005',
       `symbio_core/mod.rs`,
-      `\`${name}\`（${kind}）没有归属域 —— 请移入对应域，` +
+      `\`${name}\`（${KIND_LABEL[kind]}）没有归属域 —— 请移入对应域，` +
         `否则「符号带域前缀」无从核对`,
     )
     continue
   }
   const rule = rules.get(domain)
   if (!rule) continue // N-004 已报过，不重复刷屏
-  checked++
-  const spec = kind === 'type' ? rule.typeSpec : rule.constSpec
-  const what = kind === 'type' ? '类型' : '常量'
+  counts[kind]++
+  const spec = rule[SPEC_OF[kind]]
+  const what = KIND_LABEL[kind]
 
   if (spec.kind === 'exempt' || spec.kind === 'bare') continue
 
@@ -328,8 +379,8 @@ for (const [name, domain] of rows) {
 console.log('')
 console.log(
   dim(
-    `── 命名核对：${checked} 个类型/常量 · ${skippedFn} 个函数（不判）· ` +
-      `${rules.size} 个域 · ${modifiers.size} 个限定词 ──`,
+    `── 命名核对：${counts.type} 类型 + ${counts.const} 常量 + ${counts.fn} 函数 + ` +
+      `${counts.mod} 子模块 · ${rules.size} 个域 · ${modifiers.size} 个限定词 ──`,
   ),
 )
 for (const [rule, name] of Object.entries(RULE_NAMES)) {

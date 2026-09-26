@@ -16,7 +16,7 @@ use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
 use crate::symbio_core::ModelUsage;
-use crate::symbio_core::{emit_delta, emit_message, short_id, TurnOutput};
+use crate::symbio_core::{llm_emit_delta, llm_emit_message, llm_short_id, TurnOutput};
 use crate::symbio_core::{ExecAbortSignal, ExecEventSink};
 use futures::StreamExt;
 use std::collections::HashMap;
@@ -345,8 +345,8 @@ async fn dispatch_protocol_event(
             // 后续增量：显式 Append 窄帧，消费循环按 id 追加——不重发整条，
             // 也不需要消费端从「补丁形状」里猜这是追加还是替换。
             if out.response_text_child_id.is_empty() {
-                out.response_text_child_id = short_id();
-                emit_message(
+                out.response_text_child_id = llm_short_id();
+                llm_emit_message(
                     sink,
                     ChatMessage {
                         id: out.response_text_child_id.clone(),
@@ -360,7 +360,7 @@ async fn dispatch_protocol_event(
                 )
                 .await;
             } else {
-                emit_delta(sink, &out.response_text_child_id, &c).await;
+                llm_emit_delta(sink, &out.response_text_child_id, &c).await;
             }
         }
         ModelProtocolEvent::ReasoningDelta(r) => {
@@ -370,8 +370,8 @@ async fn dispatch_protocol_event(
             }
             out.reasoning.push_str(&r);
             if out.reasoning_child_id.is_empty() {
-                out.reasoning_child_id = short_id();
-                emit_message(
+                out.reasoning_child_id = llm_short_id();
+                llm_emit_message(
                     sink,
                     ChatMessage {
                         id: out.reasoning_child_id.clone(),
@@ -385,7 +385,7 @@ async fn dispatch_protocol_event(
                 )
                 .await;
             } else {
-                emit_delta(sink, &out.reasoning_child_id, &r).await;
+                llm_emit_delta(sink, &out.reasoning_child_id, &r).await;
             }
         }
         ModelProtocolEvent::ToolCallDelta(idx, id, name, args) => {
@@ -399,7 +399,7 @@ async fn dispatch_protocol_event(
             // - 身份字段变化（新建节点 / 首次定名）→ 完整快照（`Upsert`）；
             // - 纯参数增长 → 窄追加（`Append`，O(delta)），接收端尾部拼接。
             if snapshot_required {
-                emit_message(
+                llm_emit_message(
                     sink,
                     ChatMessage {
                         id: tc_id.clone(),
@@ -415,7 +415,7 @@ async fn dispatch_protocol_event(
                 )
                 .await;
             } else if let Some(delta) = args.as_deref().filter(|d| !d.is_empty()) {
-                emit_delta(sink, &tc_id, delta).await;
+                llm_emit_delta(sink, &tc_id, delta).await;
             }
         }
         ModelProtocolEvent::ResponseId(id) => out.response_id = Some(id),

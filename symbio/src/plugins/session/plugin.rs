@@ -26,7 +26,7 @@ use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::schemas::session::{chat_message as cm, session_chat};
 use crate::symbio_core::vdfs;
 use crate::symbio_core::{
-    dir_from_ctx, MemoryFile, Plugin, PluginConfigFile, PluginDir, PluginError,
+    plugin_dir_from_ctx, MemoryFile, Plugin, PluginConfigFile, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
     PLUGIN_FILE, PLUGIN_ID_SESSION, SESSION_ID,
 };
@@ -187,10 +187,10 @@ impl SessionPlugin {
     ) {
         let mut frames: Vec<cm::ChatMessage> = dropped
             .iter()
-            .map(|mid| crate::symbio_core::removed_frame(mid))
+            .map(|mid| crate::symbio_core::llm_removed_frame(mid))
             .collect();
         // 新的首条（压缩快照）：一条完整消息（身份 + 正文 + 终态同帧）。
-        frames.push(crate::symbio_core::message_frame(head));
+        frames.push(crate::symbio_core::llm_message_frame(head));
         self.transcript_apply_all(session_id, frames).await;
     }
 
@@ -219,7 +219,7 @@ impl SessionPlugin {
         messages: &[cm::ChatMessage],
     ) {
         for message in messages {
-            self.transcript_apply(session_id, crate::symbio_core::message_frame(message))
+            self.transcript_apply(session_id, crate::symbio_core::llm_message_frame(message))
                 .await;
         }
     }
@@ -240,7 +240,7 @@ impl SessionPlugin {
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         // 自己的目录由容器经 `PLUGIN_DIR` 告知；配置就存在那里的 PLUGIN.yml
         // （反序列化使用 #[serde(default)]，自动忽略 storage_dir 等已废弃字段）
-        let dir = dir_from_ctx(&*ctx, PLUGIN_ID_SESSION);
+        let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_SESSION);
         let config: SessionConfig = match dir.load::<SessionConfig>() {
             Ok(Some(c)) => c,
             Ok(None) => SessionConfig::default(),
@@ -546,7 +546,7 @@ impl Plugin for SessionPlugin {
             self.contribute_memory(&ctx, &visitor).await;
         }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
-        crate::symbio_core::announce_configurable(&ctx, &self.config_file).await;
+        crate::symbio_core::capability_announce_configurable(&ctx, &self.config_file).await;
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }

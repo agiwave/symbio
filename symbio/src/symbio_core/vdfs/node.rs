@@ -127,14 +127,14 @@ impl VdfsNewType {
 ///
 /// 地址是**某一份列表**给这个节点的定位，不是节点自己的属性——同一个节点可以在
 /// 不同列表里以不同地址出现。实证：设置页的一项指向插件自己那份配置文档
-/// （[`entry_of`] 给它的地址是 `<目录名>/PLUGIN.yml`，落在**另一个挂载点**里），
+/// （[`capability_entry_of`] 给它的地址是 `<目录名>/PLUGIN.yml`，落在**另一个挂载点**里），
 /// 而同一份文档在自己的目录里就叫 `PLUGIN.yml`。若把 `path` 放进节点，这两个
 /// 列表就必须各造一个节点副本，且「谁填的」无从判定。
 ///
 /// 于是地址落在**条目**上（[`VdfsItem`]：地址 + 节点），由分发层按
 /// `<父地址>/<name>` 回填，provider 只在「地址不是这个形状」时才自己填。
 ///
-/// [`entry_of`]: crate::symbio_core::entry_of
+/// [`capability_entry_of`]: crate::symbio_core::capability_entry_of
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VdfsNode {
     /// 唯一标识：父节点内的路径段
@@ -334,12 +334,12 @@ impl VdfsNode {
         self.ext
             .clone()
             .filter(|e| !e.trim().is_empty())
-            .or_else(|| derive_ext(&self.name))
+            .or_else(|| vdfs_derive_ext(&self.name))
     }
 }
 
 /// 由名字推导扩展名（`prompts/a.md` → `md`；无扩展名 → `None`）
-pub fn derive_ext(name: &str) -> Option<String> {
+pub fn vdfs_derive_ext(name: &str) -> Option<String> {
     let base = name.rsplit('/').next().unwrap_or(name);
     let (stem, ext) = base.rsplit_once('.')?;
     if stem.is_empty() || ext.is_empty() {

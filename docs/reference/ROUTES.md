@@ -275,7 +275,7 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 **本插件无自有路由**。清单与取值分别由 `<根>/plugin_manager` 的 `vdfs/list` / `vdfs/read` 承担。
 
 它是本智能体**插件集合**的门面：清单 = **各插件交出来的配置条目 + 自有分区**
-（`appearance` / `about`）。前者由各插件在 `traverse` 里经 `announce_configurable` 声明，
+（`appearance` / `about`）。前者由各插件在 `traverse` 里经 `capability_announce_configurable` 声明，
 容器用共享收集器收下并写回请求 ctx（见 [design/vdfs.md](../design/vdfs.md) §13.1）——
 因此**新增一个可配置插件不需要在本插件登记任何东西**；自有分区的数据在前端 store，
 `read` / `write` 对它们恒 `Forbidden`。
