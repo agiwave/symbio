@@ -10,10 +10,25 @@
 //!   `TurnOutput::into_messages` 与 `TurnToolCallAccumulator` 直接依赖它，
 //!   孤儿规则要求定义与使用同处 core
 //!
+//! ## 依赖方对照表（ADR-023 决策 2）
+//!
+//! 本模块**全部符号都是两侧共用**的，没有单消费方残留。两个最容易被误判为
+//! 「只有一侧认」的符号，实测如下——**按类型名 grep 会漏掉它们**，因为消费点走的是
+//! `TurnOutput` 的**字段访问**（`.tool_accumulator`）而非类型名：
+//!
+//! | 符号 | 消费方 | 消费方式 |
+//! |---|---|---|
+//! | [`TurnToolCallAccumulator`] | model（`stream.rs` 逐块 `process_delta`）· session（`chat_loop/turn.rs` 读 `get_completed` / `had_any_tool_call`）· 本模块（`TurnOutput::into_messages`） | 经 `TurnOutput.tool_accumulator` 字段访问 |
+//! | [`TurnStreamChildIds`] | model（`message_builder.test.rs`）· 本模块（[`build_assistant_messages`] 的形参、`into_messages` 的构造点） | 作为**多消费方函数的形参类型** |
+//!
+//! 两者都不能下沉：前者有 **2 个跨插件**消费方；后者是多消费方函数
+//! [`build_assistant_messages`] 的签名组成部分——沉到任一侧，另一侧就调不动该函数
+//! （插件间禁止互引，`plugin-entry-audit` E-009）。
+//!
 //! **HTTP 重试机器与 SSE 流循环不在这里**：它们只有 model 插件的
 //! `execute_turn` 使用（实现细节而非契约），住在 `plugins/model/`
-//! （`http.rs` / `stream.rs`）。与本模块同层的两个兄弟模块：
-//! [`super::model_provider`]（trait 与协议事件方言）、[`super::sse`]（行解析契约）。
+//! （`http.rs` / `stream.rs`），行解析契约同处该插件（`protocols/sse.rs`）。
+//! 与本模块同层的兄弟模块：[`super::model_provider`]（trait 与结束原因 / 用量）。
 //!
 //! ## 执行期只与两个原语打交道（不再与通道打交道）
 //!

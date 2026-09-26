@@ -23,8 +23,9 @@
 //! 错位），因此放在一起。而它们能落在 core，是因为**跨模块**：名字由 `model` 发出、
 //! 由 `session` 认回，两个插件互相不可见，只有 core 是共同可见处。
 //!
-//! 对照：[`crate::symbio_core::llm::sse`] 的 `SseLineParser` 是同样的形状——**契约**在
-//! core、**字段名与实现**在拥有它的层。本模块里没有任何协议字段名，只有字符集与
+//! 对照：[`ModelProvider`](crate::symbio_core::ModelProvider) 是同样的形状——**契约**在
+//! core（session 只认这个 trait），**协议字段名与实现**在 model 插件
+//! （`plugins/model/protocols/` 的四个适配器）。本模块里没有任何协议字段名，只有字符集与
 //! 分隔符这两个「契约本身」的参数。
 //!
 //! 反面例子（**故意没进 core**）：工具结果的字段名读取器

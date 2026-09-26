@@ -8,14 +8,12 @@ use std::sync::Arc;
 use super::super::model_providers::ModelProviderConfig;
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole};
 use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
-use super::{ModelProtocol, MODEL_PROTOCOL_GEMINI_API};
+use super::sse::{SseLineParser, SsePartialLineExtractor};
+use super::ModelProtocolEvent;
+use super::{description_for_llm, ModelProtocol, MODEL_PROTOCOL_GEMINI_API};
 use crate::plugins::model::http::get_http_client;
 use crate::symbio_core::to_wire;
-use crate::symbio_core::SsePartialLineExtractor;
-use crate::symbio_core::{
-    ModelFinishReason, ModelProtocolEvent, ModelUsage, PluginError, PluginInvokeRequest,
-    SseLineParser,
-};
+use crate::symbio_core::{ModelFinishReason, ModelUsage, PluginError, PluginInvokeRequest};
 
 pub struct GeminiProtocol;
 
@@ -159,7 +157,7 @@ impl ModelProtocol for GeminiProtocol {
             req["tools"] = json!([{
                 "functionDeclarations": tools.iter().map(|t| json!({
                     "name": to_wire(&t.name),
-                    "description": t.description_for_llm(),
+                    "description": description_for_llm(t),
                     "parameters": t.input_schema
                 })).collect::<Vec<_>>()
             }]);

@@ -7,10 +7,14 @@
 //! `dyn ModelProvider`。
 //!
 //! 本模块同时承载：
+//! - `ModelProtocolEvent`：协议适配器产出的**统一事件方言**——它是
+//!   [`sse::SseLineParser::parse_line`] 的返回类型，由 `super::stream` 的流循环消费
 //! - `MODEL_PROTOCOL_*` 注册常量（插件内部实现细节，不外泄）
 //! - `resolve_protocol_id`：`api_protocol` 别名 → 注册 id 的解析（含兜底）
 //! - 各协议实现（openai_chat / openai_responses / anthropic_messages / gemini_api）
 //!   与 OpenAI 兼容网关的上下文探测（context_probe）
+//! - [`sse`]：`SseLineParser` / `SsePartialLineExtractor` 行解析契约
+//!   （2026-09-26 由 `symbio_core::llm::sse` 迁入，理由见该文件文档头）
 //!
 //! 协议的连通性验证统一为 `ModelProtocol::ping` 直调。
 
@@ -20,10 +24,14 @@ mod gemini_api;
 mod openai_chat;
 mod openai_responses;
 mod partial_json;
+mod sse;
+
+pub(crate) use sse::utf8_chunk;
+pub use sse::{SseLineParser, SsePartialLineExtractor};
 
 use crate::plugin_warn;
 use crate::symbio_core::schemas::session::chat_message::ChatMessage;
-use crate::symbio_core::{CapabilityMeta, PluginError, SseLineParser};
+use crate::symbio_core::{CapabilityMeta, ModelFinishReason, ModelUsage, PluginError};
 use async_trait::async_trait;
 use reqwest::header::HeaderMap;
 use serde_json::Value;
@@ -76,16 +84,65 @@ pub fn sse_data(line: &str) -> Option<&str> {
     Some(rest.trim_end())
 }
 
+/// LLM 可见的工具描述：把 `CapabilityMeta.examples` 追加到 description 之后。
+///
+/// ## 为什么在 model 而不在 core
+///
+/// 「examples 要送达 LLM」是**协议适配层的组装细节**：core 的 `CapabilityMeta`
+/// 只声明 examples 存在，是否拼、以什么措辞拼，由各协议决定——四个协议的请求体
+/// 形状本就不同。此前它是 `CapabilityMeta` 上的一个方法，但消费方只有本模块的
+/// 四个协议实现，按「依赖方数量」判据（ADR-023）下沉到这里。
+///
+/// 无 examples 时直接返回原 description，零开销。
+pub fn description_for_llm(meta: &CapabilityMeta) -> String {
+    match &meta.examples {
+        Some(exs) if !exs.is_empty() => {
+            format!("{}\n\n示例：\n{}", meta.description, exs.join("\n"))
+        }
+        _ => meta.description.clone(),
+    }
+}
+
+/// 标准协议事件 —— 把不同提供商的流解析成**统一方言**。
+///
+/// ## 依赖方对照表（ADR-023 决策 2）
+///
+/// | 角色 | 谁 |
+/// |---|---|
+/// | 生产方 | `anthropic_messages` · `gemini_api` · `openai_chat` · `openai_responses`（完整行）；`partial_json::JsonLineExtractor`（未结束行的增量） |
+/// | 消费方 | `super::stream::parse_sse_stream`（唯一消费者，把事件折进 `TurnOutput` 并实时下发子节点） |
+///
+/// **两个角色同处 model 插件**，所以本枚举不进 `symbio_core`——它是插件内部方言，
+/// 不是跨模块契约。对外（session）可见的只有 `ModelProvider::execute_turn` 的返回
+/// 类型 `TurnOutput`，协议细节被刻意挡在 trait 之后。
+#[derive(Debug, Clone)]
+pub enum ModelProtocolEvent {
+    /// 文本内容增量
+    ContentDelta(String),
+    /// 思考/推理过程增量
+    ReasoningDelta(String),
+    /// 工具调用增量 (index, id, name, arguments_delta)
+    ToolCallDelta(usize, Option<String>, Option<String>, Option<String>),
+    /// 响应 ID (用于 OpenAI Responses API)
+    ResponseId(String),
+    /// 错误信息
+    Error(String),
+    /// 流结束原因（一轮响应最多出现一次）
+    Finish(ModelFinishReason),
+    /// 用量统计
+    Usage(ModelUsage),
+}
+
 /// 协议适配钩子 —— model 插件私有契约。
 ///
 /// 钩子签名一律收 `&ModelProviderConfig`（持久化配置 schema），不收
 /// `&ModelProvider`（配置 + 协议实例的运行期聚合体）：协议实现只读配置字段，
 /// 与绑定方式解耦。
 ///
-/// **行解析不在这里**：它以 `SseLineParser` 为父 trait——core 的
-/// `parse_sse_stream` 只认那个契约（完整行 + 未结束行的增量提取），而它属于
-/// 「core 定义、协议实现」，不是 model 插件的私有抽象。这样 core 不必认识
-/// 任何协议字段名，协议也不必经过 model 插件的中转。
+/// **行解析在 [`sse`]**：本 trait 以 [`SseLineParser`] 为父 trait，而
+/// `super::stream::parse_sse_stream` 只认那个契约（完整行 + 未结束行的增量提取）。
+/// 契约与四个协议实现同处本模块，于是「谁实现、谁消费」都在一屏之内；
+/// 内核因此不必认识任何协议字段名（ADR-022），也不必承载协议抽象。
 #[async_trait]
 pub trait ModelProtocol: SseLineParser + Send + Sync {
     /// 请求目标 URL（含路径）

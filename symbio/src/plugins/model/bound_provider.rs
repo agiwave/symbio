@@ -20,13 +20,13 @@ use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::schemas::session::chat_message::ChatMessage;
 use crate::symbio_core::TurnOutput;
-use crate::symbio_core::{CapabilityMeta, ExecEnv, ModelProvider, PluginError, SseLineParser};
+use crate::symbio_core::{CapabilityMeta, ExecEnv, ModelProvider, PluginError};
 use async_trait::async_trait;
 use std::sync::Arc;
 
 use super::http::{endpoint_label, execute_post_with_abort, PostResult};
 use super::model_providers::ModelProviderConfig;
-use super::protocols::ModelProtocol;
+use super::protocols::{ModelProtocol, SseLineParser};
 use super::stream::parse_sse_stream;
 
 /// 持久化配置与协议实现的运行期绑定体（model 插件对 core 契约的唯一生产实现）

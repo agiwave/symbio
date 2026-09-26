@@ -30,8 +30,8 @@ use std::sync::Arc;
 /// 设计原则：
 /// - `CapabilityCategory` 是**机制化的语义标签**，与具体语言无关
 /// - `CapabilityMeta.category: Option<CapabilityCategory>` 是唯一分类字段
-/// - 渲染层（`render_category`）按 `ctx.get("lang")` 选择本地化字符串
 /// - 分类只能用本枚举的变体表达（不接受字符串字面量），编译器强制这一点
+/// - **不携带展示文案**：本枚举只承载语义，本地化与呈现由消费方自己决定
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityCategory {
@@ -54,24 +54,6 @@ pub enum CapabilityCategory {
     /// 未分类：兜底
     #[default]
     Other,
-}
-
-impl CapabilityCategory {
-    /// 默认本地化展示（中文）。后续可改为按 ctx.get("lang") 切换。
-    /// 集中维护一处，避免散落硬编码。
-    pub fn default_display(&self) -> &'static str {
-        match self {
-            Self::Chat => "智能体协作",
-            Self::Core => "核心能力",
-            Self::Skill => "技能调用",
-            Self::FileOperation => "文件操作",
-            Self::Network => "网络搜索",
-            Self::SystemOperation => "系统操作",
-            Self::Mcp => "MCP 工具",
-            Self::Resource => "资源管理",
-            Self::Other => "其他",
-        }
-    }
 }
 
 /// 工具上下文保留策略（会话机制化属性）
@@ -151,32 +133,6 @@ impl CapabilityMeta {
     /// 读取生效的上下文保留策略（未声明视为 `All`）
     pub fn effective_context_retention(&self) -> CapabilityToolContextRetention {
         self.context_retention.unwrap_or_default()
-    }
-
-    /// 渲染本地化 category 文本
-    ///
-    /// 未来扩展点：当 `ctx.get("lang")` 可用时按语言切换
-    /// （返回 `Cow<str>` 即可避免为中文/英文双重分配）。
-    /// 当前阶段：直接返回 `default_display()`，兜底 `Other`。
-    pub fn render_category(&self) -> &str {
-        match self.category {
-            Some(k) => k.default_display(),
-            None => CapabilityCategory::Other.default_display(),
-        }
-    }
-
-    /// 渲染 LLM 可见的 description（自动追加 examples）
-    ///
-    /// 协议层（openMODEL / anthropic / gemini）只需调用本方法，
-    /// 即可让所有工具的 `examples` 字段真正送达 LLM。
-    /// 无 examples 时直接返回原 description，零开销。
-    pub fn description_for_llm(&self) -> String {
-        match &self.examples {
-            Some(exs) if !exs.is_empty() => {
-                format!("{}\n\n示例：\n{}", self.description, exs.join("\n"))
-            }
-            _ => self.description.clone(),
-        }
     }
 }
 

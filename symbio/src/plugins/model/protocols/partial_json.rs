@@ -6,20 +6,20 @@
 //! 我们希望「正文还在增长」这件事立刻反映到前端：不等换行，先把 `delta.content`
 //! 这类**字符串字段**里已经确定的部分吐出去。
 //!
-//! 历史上这件事由 core 内置的启发式解析器代劳——在整行里搜 `"content":"` 之类的
-//! 字面量。那套写法把协议字段名泄漏进了 core（加协议要改 core）、与协议解析器各
+//! 历史上这件事由内核内置的启发式解析器代劳——在整行里搜 `"content":"` 之类的
+//! 字面量。那套写法把协议字段名泄漏进了内核（加协议要改内核）、与协议解析器各
 //! 自实现一遍 JSON 转义（两套规则 → 完整行按前缀截断时**吃字**）、且每收到一块就
 //! 把整行重扫一遍（O(行长²)）。
 //!
-//! 本模块把这件事搬回协议层：core 只按 `\n` 切行，**协议**用 [`JsonLineExtractor`]
-//! 声明「这一行里哪个位置的字符串要增量吐」。
+//! 本模块把这件事搬回协议层：`stream::parse_sse_stream` 只按 `\n` 切行，**协议**用
+//! [`JsonLineExtractor`] 声明「这一行里哪个位置的字符串要增量吐」。
 //!
-//! ## 契约（与 `symbio_core::sse::SsePartialLineExtractor` 一致）
+//! ## 契约（与 `super::sse::SsePartialLineExtractor` 一致）
 //!
 //! - **只吃新增字节**：内部状态机逐字节推进，已处理过的不再看第二遍 ⇒ 总代价
 //!   O(行长)，不再是「每来一块重扫整行」。
 //! - **解码规则与 `serde_json` 对齐**：本模块自己实现 JSON 字符串转义解码
-//!   （`\n` / `\uXXXX` / 代理对…）。这是硬要求——core 把已发出的长度记成前缀，
+//!   （`\n` / `\uXXXX` / 代理对…）。这是硬要求——流循环把已发出的长度记成前缀，
 //!   完整行到达时按前缀截断，两边解码不一致就会重复或吃字。
 //! - **绝不吐半截**：被切断的多字节字符、不完整的转义序列（`\` 结尾、`\u12`）一律
 //!   留到下一块再产出。
@@ -30,8 +30,8 @@
 //! 这些字段的值不可信。它们只走完整行的 `SseLineParser::parse_line`。
 //! 因此本模块只回 `ContentDelta` / `ReasoningDelta` / `ToolCallDelta`。
 
-use crate::symbio_core::ModelProtocolEvent;
-use crate::symbio_core::SsePartialLineExtractor;
+use super::sse::SsePartialLineExtractor;
+use super::ModelProtocolEvent;
 
 // ============ 协议侧实现的钩子 ============
 
@@ -602,12 +602,9 @@ pub(crate) fn tool_args_of(evs: &[ModelProtocolEvent]) -> Vec<(usize, String)> {
 
 /// **一致性不变量**：任意块边界下增量提取出的文本，必须等于整行解析出的文本。
 ///
-/// 这是本模块存在的全部理由——core 按前缀截断去重，两边对不上就会重复或吃字。
+/// 这是本模块存在的全部理由——流循环按前缀截断去重，两边对不上就会重复或吃字。
 #[cfg(test)]
-pub(crate) fn assert_partial_matches_full_line(
-    p: &dyn crate::symbio_core::SseLineParser,
-    line: &str,
-) {
+pub(crate) fn assert_partial_matches_full_line(p: &dyn super::sse::SseLineParser, line: &str) {
     let full = text_of(&p.parse_line(line));
     for chunk in 1..=line.len() {
         let mut ext = p.open_partial_line(line).expect("本协议应实现增量提取");
@@ -621,10 +618,7 @@ pub(crate) fn assert_partial_matches_full_line(
 
 /// 同上，但比对工具调用参数（下标 + 文本）。
 #[cfg(test)]
-pub(crate) fn assert_tool_args_match_full_line(
-    p: &dyn crate::symbio_core::SseLineParser,
-    line: &str,
-) {
+pub(crate) fn assert_tool_args_match_full_line(p: &dyn super::sse::SseLineParser, line: &str) {
     let full = tool_args_of(&p.parse_line(line));
     for chunk in 1..=line.len() {
         let mut ext = p.open_partial_line(line).expect("本协议应实现增量提取");

@@ -69,6 +69,17 @@ static RESYNC_INFLIGHT: LazyLock<DashMap<String, ()>> = LazyLock::new(DashMap::n
 
 /// 订阅请求。
 ///
+/// ## 依赖方对照表（ADR-023 决策 2）
+///
+/// | 角色 | 谁 |
+/// |---|---|
+/// | 生产方 | `cli`（`cli/src/client.rs` 构造并发往 `event_bus/subscribe`） |
+/// | 消费方 | `plugins/event_bus`（`plugin.rs` 把路由载荷反序列化成它） |
+///
+/// 两侧**分属不同 crate 且互相不可见**（cli 是独立 crate，只能经 `symbio` 的公开面
+/// = `symbio_core` 取用），core 是唯一共同可见处——这正是它不能下沉的原因，
+/// 与 `schemas::session::session_chat` 同构。
+///
 /// ## 为什么是空结构体（不是遗漏）
 ///
 /// 这里原本有一个 `kinds: Option<Vec<String>>`（「限定只接收某些 kind 的事件」），
@@ -194,6 +205,10 @@ pub fn build_envelope(kind: &str, session_id: Option<&str>, data: Value) -> Valu
 }
 
 /// resync 标记的判别值（消费端按 `data.data.type` 识别）。
+///
+/// **两侧分属不同 crate**：生产方是 core 自身的 `resync_marker`，消费方是 `cli`
+/// （`cli/src/client.rs` 判别该字段）——是**线上字面量**，改名不会编译失败、只会让
+/// 消费方的判别静默失效，故留在本层（与 `keys::paths` 的地址常量同类，ADR-023）。
 ///
 /// 与已退役的转写流的 `transcript_resync` 同构：都是「你可能漏了帧，
 /// 请按自己的作用域重读」的指令。这里**不改用 `VdfsChange` 的形状**——那是

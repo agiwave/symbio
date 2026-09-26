@@ -45,10 +45,23 @@
 use crate::symbio_core::{
     create_object, creator_ids, has_creator, lock_read, lock_write, Plugin, PluginDir, PluginEntry,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginMeta, PluginSimpleRequest, PluginStopReason,
-    KEY_PROVIDER, PLUGIN_DIR, PLUGIN_FILE, REQUIRED_PLUGINS, SYSTEM_LEVEL_PROVIDERS,
+    KEY_PROVIDER, PLUGIN_COMPOSITE, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_HOME, REQUIRED_PLUGINS,
     UNDISABLABLE_PLUGINS,
 };
 use serde_json::Value;
+
+/// **系统级插件工厂**：它们的目录就是**系统根本身**，与业务插件**并列**而非包含其中。
+///
+/// 「系统级插件不参与容器扫描」这条规则的**唯一实现**：
+///
+/// - 装配期：容器扫描插件根时，扫到的目录里不会有它们（它们的目录就是根）；
+/// - 运行期：它们**不作为可安装插件**出现在插件注册表里——把 `home` 装成一个
+///   子插件，系统里就会出现第二个根。
+///
+/// 判据：只被本模块消费（`installable` 排除、`install` 拒绝），故按 ADR-023 的
+/// 依赖方判据从 `symbio_core::keys::ids` 下沉到**执行它的地方**——规则的 owner
+/// 与实现同处，不再隔着两层。
+const SYSTEM_LEVEL_PROVIDERS: &[&str] = &[PLUGIN_HOME, PLUGIN_COMPOSITE];
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock, Weak};

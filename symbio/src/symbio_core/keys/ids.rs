@@ -51,19 +51,8 @@ pub const PLUGIN_VDFS: &str = "vdfs";
 /// Event Bus 插件工厂（统一事件总线）
 pub const PLUGIN_EVENT_BUS: &str = "event_bus";
 
-// ============ 系统级插件工厂 ============
-
-/// **系统级插件工厂**：它们的目录就是**系统根本身**，与业务插件**并列**而非包含其中。
-///
-/// 「系统级插件不参与容器扫描」这条规则原先只写在
-/// [`crate::symbio_core::plugin::dir`] 的模块文档里（散文），这里给出它的**唯一实现**：
-///
-/// - 装配期：容器扫描插件根时，扫到的目录里不会有它们（它们的目录就是根）；
-/// - 运行期：它们**不作为可安装插件**出现在插件注册表里——把 `home` 装成一个
-///   子插件，系统里就会出现第二个根。
-///
-/// [`PLUGIN_HOME`]: crate::symbio_core::PLUGIN_HOME
-pub const SYSTEM_LEVEL_PROVIDERS: &[&str] = &[PLUGIN_HOME, PLUGIN_COMPOSITE];
+// 注：`SYSTEM_LEVEL_PROVIDERS`（「系统级插件不参与容器扫描」）不在这里——它只被
+// `plugins/composite` 一个模块消费，按 ADR-023 的依赖方判据已下沉到该模块。
 
 // （原「Agent 能力 id」区已整体移除：`agent_chat` / `agent_identity` /
 //  `agent_cognition` / `agent_create` 是 OAB v1 的能力对象 id，随 v1 装配实现一并

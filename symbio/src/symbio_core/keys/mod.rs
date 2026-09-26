@@ -1,4 +1,17 @@
 //! SymbioKey - 类型安全的键定义
+//!
+//! ## 命名规则（`symbio_core/README.md` §3 豁免表的判据）
+//!
+//! 本域里两种形态**互不重叠**，所以裸名不是「风格不统一」，而是一条有判别力的规则：
+//!
+//! | 形态 | 写成 | 例 |
+//! |---|---|---|
+//! | 字符串常量 —— **名字**（跨进程 / 跨文件的字面量） | **带前缀** | `PLUGIN_SESSION` · `KEY_PAYLOAD`（本文件）· `VDFS_ROOT`（`paths`）· `EMBEDDING_LOCAL`（`ids`） |
+//! | `SymbioKey` **实例** —— **键对象**（`ctx.get(&…)` 的凭据） | **裸名** | `PATH` · `ID` · `CAPABILITY_VISITOR` · `PARENT` |
+//!
+//! 消费形态也不同：字符串是**值**（`name == KEY_PAYLOAD`），实例是**取值的凭据**。
+//! 新增时照上表选形态——实例用裸名（类型名已带 `Key` 后缀，常量再加前缀会读成
+//! 「键的键」：`ctx.get(&KEY_PATH)`），字面量带前缀。
 
 mod ids;
 mod paths;
@@ -8,7 +21,7 @@ pub use ids::{
     EMBEDDING_LOCAL, EMBEDDING_NOOP, PLUGIN_AGENT, PLUGIN_COMPOSITE, PLUGIN_EVENT_BUS,
     PLUGIN_GATEWAY, PLUGIN_HOME, PLUGIN_HOOK, PLUGIN_LOCAL, PLUGIN_MANAGER, PLUGIN_MCP,
     PLUGIN_MODEL, PLUGIN_SESSION, PLUGIN_SKILL, PLUGIN_TELEGRAM, PLUGIN_VDFS, PLUGIN_WEB,
-    PLUGIN_WORK, SYSTEM_LEVEL_PROVIDERS,
+    PLUGIN_WORK,
 };
 pub use paths::{
     EVENT_BUS_SUBSCRIBE, HOOK_FIRE, SESSION_CHAT_ABORT, SESSION_CHAT_SEND, VDFS_ROOT, VDFS_UNWATCH,
@@ -198,78 +211,8 @@ impl SymbioKey for RequiredPluginsKey {
 }
 pub const REQUIRED_PLUGINS: RequiredPluginsKey = RequiredPluginsKey;
 
-/// 根（系统）Agent 挂载的**完整**插件清单 —— 父子的唯一真相源（机制级常量）。
-///
-/// **当前与 [`SUB_AGENT_PLUGINS`] 逐项相同**，故直接取它——这里**不是**第二份手抄的
-/// 字面量。系统根与子 Agent 因此「结构一致、能力对齐」；两者的差异体现在**收集期
-/// 作用域**（`vdfs` 单槽、`model` 作用域，见 [`SUB_AGENT_PLUGINS`]），不在清单内容里。
-pub const SYSTEM_AGENT_PLUGINS: &[&str] = SUB_AGENT_PLUGINS;
-
-/// 子 Agent 子树挂载的「默认插件」清单 —— 与父（系统）Agent **同构**的机制级常量，
-/// 也是本文件里插件清单的**唯一字面量**（[`SYSTEM_AGENT_PLUGINS`] 直接取它）。
-///
-/// 子 Agent 是一棵 composite 插件树（与系统 Agent 同构，agent-directory-spec §1.1），
-/// 构造时经 ctx 键 [`REQUIRED_PLUGINS`] 告知容器「必须挂哪些插件」。
-///
-/// ## 与 [`SYSTEM_AGENT_PLUGINS`] 的关系：**当前逐项相同**
-///
-/// 两张清单现在是同一个集合，故系统侧直接别名到本常量，不存在需要手工同步的第二份
-/// 字面量。差异**不在清单里**，而在收集期的**作用域**：
-///
-/// - `vdfs`（VDFS 根）是**单槽**注册，归系统 Agent 独占。子树**会构造**自己的
-///   `vdfs` 实例（故本清单在列），但它的**注册**经
-///   [`crate::plugins::agent::host::scope::SubAgentVisitor`] 在每一层丢弃
-///   （见其模块文档）——单槽归系统 Agent，子树重复注册不会生效。
-/// - `model` **在列**：子智能体有自己的模型服务——子树会话收集能力时以**子容器**
-///   为 parent（`collect_capabilities(sub_composite, …)`），子树 `model` 实例
-///   注册进**该次收集自己的**管理器，因此子会话用子智能体自己解析的模型。
-///   父（系统）会话收集期，子树的 `model` 注册才经 `SubAgentVisitor` **丢弃**
-///   （单槽，防子树模型劫持父会话——见 scope 模块文档）。
-/// - 其余插件（含 `agent` 自身、`plugin_manager`、`work`）都在列：子树因此与父树**结构相同**，
-///   前端看到的资源入口（含设置入口）与父 Agent 对齐。
-///
-/// 若将来两侧确需分叉，**在这里加只属于某一侧的字面量并写清理由**——不要恢复
-/// 「两张各写一遍、靠人同步」的形态：两份各自演化的清单会静默漂移（可以变成同一集合，
-/// 而各处注释仍在描述差异，没有任何测试会因此变红）。
-///
-/// ## 分形：任意层级复用同一常量
-///
-/// 本常量被 `plugins/agent` 的 `sub_agent` 用于构造**每一棵**子树。若某天子 Agent
-/// 也能在其目录内再挂子 Agent（`<id>/agent/<sub-id>` 递归），同一常量 + 同一套构造
-/// 逻辑自动套用——不存在「支持子 Agent 却不支持子 Agent 的子 Agent」的特例：任何一层
-/// 都走同一条机制，且都同样只跳过 `vdfs` 单槽（单槽归系统 Agent，由
-/// `SubAgentVisitor` 在每一层丢弃）。
-pub const SUB_AGENT_PLUGINS: &[&str] = &[
-    "plugin_manager", // 插件管理与配置入口（子 Agent 页同样需要）
-    "event_bus",      // 事件总线
-    "session",        // 会话
-    "model",          // 模型服务（子智能体自己的模型；子树会话自行解析）
-    "local",          // 本地文件
-    "web",            // 网络访问
-    "mcp",            // 工具
-    "telegram",       // 消息渠道
-    "hook",           // 钩子
-    "agent",          // 智能体（含子子 Agent —— 分形）
-    "skill",          // 技能
-    "gateway",        // 外部 API 网关
-    "vdfs",           // VDFS 根（单槽归系统 Agent）
-    "work",           // 工作区记忆（WORKDIR 继承父会话，不再双重注入）
-];
-
-/// **不可停用的插件** —— 它们是**界面自身的底座**，不是普通功能。
-///
-/// 停用一个普通插件（如 `telegram`）少的是一个功能；停用这里的任何一个，少的是
-/// **整个界面**：前端所有资源页都经 `vdfs` 取数，插件清单与启停按钮都长在
-/// `plugin_manager` 的页面上。于是用户会看到一个再也点不到「启用」的界面，
-/// 只能去磁盘上改 `PLUGIN.yml`——那不是权限设计，是自断其路。
-///
-/// 因此它是一条**机制级**判据（与 [`SYSTEM_AGENT_PLUGINS`] 同处）：装配方（容器）
-/// 在执行停用前查它，而不是让每个插件自己声明「我不能被关」。插件的启停状态是
-/// 装配方的事（见 [`crate::symbio_core::KEY_ENABLED`]），这条规则也该住在同一处。
-pub const UNDISABLABLE_PLUGINS: &[&str] = &[
-    crate::symbio_core::PLUGIN_MANAGER, // 插件管理入口：停用它就再也点不到「启用」
-    crate::symbio_core::PLUGIN_VDFS,    // 资源访问层：停用它整棵资源树都取不到
-];
+// 注：插件**装配策略**常量（子树清单、不可停用清单）不在本域——它们不是上下文键，
+// 已迁到 `symbio_core::assembly`（见该模块文档的判据说明）。
 
 pub struct CapabilityVisitorKey;
 impl SymbioKey for CapabilityVisitorKey {

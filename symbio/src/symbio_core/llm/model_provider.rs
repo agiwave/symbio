@@ -5,11 +5,23 @@
 //! - session 只依赖本 trait（经 `Arc<dyn ModelProvider>` 持有），对协议适配
 //!   细节零感知；
 //! - 协议适配（`ModelProtocol` 钩子 trait、`resolve_protocol_id`、
-//!   `MODEL_PROTOCOL_*` 注册常量、`ReasoningConfig`）定义在 model 插件内部
+//!   `MODEL_PROTOCOL_*` 注册常量、`ReasoningConfig`、协议事件方言
+//!   `ModelProtocolEvent`、行解析契约 `SseLineParser`）定义在 model 插件内部
 //!   （`plugins/model/protocols/`），core 不暴露这些类型；
 //! - model 插件的 `BoundProvider`（持久化配置 + 协议钩子实现的绑定）是本
 //!   trait 的生产实现：`execute_turn` 五态机、`effective_context_tokens`
 //!   收敛、ping 等完整行为均由其提供。
+//!
+//! ## 依赖方对照表（ADR-023 决策 2）
+//!
+//! | 符号 | 谁依赖 | 依赖什么 |
+//! |---|---|---|
+//! | [`ModelProvider`] | session（`chat_loop` 经 `Arc<dyn ModelProvider>` 驱动）· model（`BoundProvider` 实现） | `execute_turn` / `effective_context_tokens` / 身份与限流方法 |
+//! | [`ModelFinishReason`] | session（区分「自然结束」与 `max_tokens` 截断）· model（`TurnOutput::finish` 的赋值方） | `from_provider` / `is_length` |
+//! | [`ModelUsage`] | model（上报）· session（校准 token 估算） | 字段读取 |
+//!
+//! 三个符号都是**会话引擎 ↔ 模型**两侧共用的，故留在本层；同一文件里
+//! 只有一侧认的协议词汇（事件方言、行解析契约）已随之迁出，见上一条。
 //!
 //! 依赖关系：
 //! - model 插件在 traverse 中按上下文（用户选中的模型）注册唯一生效的
@@ -78,25 +90,6 @@ impl ModelFinishReason {
 pub struct ModelUsage {
     pub input: Option<u32>,
     pub output: Option<u32>,
-}
-
-/// 标准协议事件 - 用于将不同提供商的流解析为统一格式
-#[derive(Debug, Clone)]
-pub enum ModelProtocolEvent {
-    /// 文本内容增量
-    ContentDelta(String),
-    /// 思考/推理过程增量
-    ReasoningDelta(String),
-    /// 工具调用增量 (index, id, name, arguments_delta)
-    ToolCallDelta(usize, Option<String>, Option<String>, Option<String>),
-    /// 响应 ID (用于 OpenAI Responses API)
-    ResponseId(String),
-    /// 错误信息
-    Error(String),
-    /// 流结束原因（一轮响应最多出现一次）
-    Finish(ModelFinishReason),
-    /// 用量统计
-    Usage(ModelUsage),
 }
 
 /// MODEL Provider —— 唯一模型契约（纯 object-safe trait）

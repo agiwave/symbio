@@ -36,14 +36,15 @@ use tokio::sync::RwLock;
 
 /// 系统必备插件：**home 的策略**，随构造交给容器。
 ///
-/// 系统（根）Agent 挂载的插件清单。
-///
-/// 直接复用 `symbio_core` 的机制级常量 [`crate::symbio_core::SYSTEM_AGENT_PLUGINS`]，
-/// 后者即 [`crate::symbio_core::SUB_AGENT_PLUGINS`]（当前逐项相同，系统侧是别名、
-/// 不是第二份字面量）。父子因此「结构一致、能力对齐」；二者的差异在**收集期
-/// 作用域**（`vdfs` 单槽归根、`model` 单槽按收集方）而非清单内容——详见
+/// 系统（根）Agent 挂载的插件清单。**当前与子 Agent 子树逐项相同**，故直接取
+/// `symbio_core` 的 [`SUB_AGENT_PLUGINS`](crate::symbio_core::SUB_AGENT_PLUGINS)
+/// ——这里**不是**第二份手抄的字面量。父子因此「结构一致、能力对齐」；二者的差异在
+/// **收集期作用域**（`vdfs` 单槽归根、`model` 单槽按收集方）而非清单内容——详见
 /// `SUB_AGENT_PLUGINS` 的文档。
-pub const SYSTEM_PLUGINS: &[&str] = crate::symbio_core::SYSTEM_AGENT_PLUGINS;
+///
+/// 若将来两侧确需分叉，**在这里加只属于系统侧的字面量并写清理由**——不要恢复
+/// 「两张各写一遍、靠人同步」的形态（两份各自演化的清单会静默漂移，且没有测试会变红）。
+pub const SYSTEM_PLUGINS: &[&str] = crate::symbio_core::SUB_AGENT_PLUGINS;
 
 /// Home 自己的插件目录 = **系统根** `<homedir>`
 ///

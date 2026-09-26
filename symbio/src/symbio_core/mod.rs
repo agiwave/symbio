@@ -1,5 +1,6 @@
 //! 核心模块
 
+mod assembly;
 mod capability;
 mod clock;
 mod embedding;
@@ -15,11 +16,9 @@ mod text;
 pub mod vdfs;
 
 // ==================== LLM 契约 ====================
-// 模型接入（`model_provider`）、流式行解析（`sse`）与轮次状态机（`turn`）。
-pub use llm::model_provider::{ModelFinishReason, ModelProtocolEvent, ModelProvider, ModelUsage};
-pub use llm::sse::{SseLineParser, SsePartialLineExtractor};
-// 增量 UTF-8 切分是 `pub(crate)` 实现细节，仅流式插件经此取用
-pub(crate) use llm::sse::utf8_chunk;
+// 模型接入（`model_provider`）与单轮产物 / 帧原语（`turn`）。
+// 行解析契约与协议事件方言只有 model 插件使用，住在 `plugins/model/protocols/`。
+pub use llm::model_provider::{ModelFinishReason, ModelProvider, ModelUsage};
 pub use llm::turn::{
     build_assistant_messages, build_tool_message, emit_delta, emit_message, emit_removed,
     emit_state, message_frame, removed_frame, short_id, state_frame, TurnOutput,
@@ -78,6 +77,10 @@ pub(crate) use plugin::{ObjectConstructor, Submit};
 
 // ==================== 键面 ====================
 pub use keys::*;
+
+// ==================== 装配策略 ====================
+// 「一棵标准插件树挂哪些插件」「哪些插件不许被停用」——不是键、不是 id，见 assembly 模块文档。
+pub use assembly::{SUB_AGENT_PLUGINS, UNDISABLABLE_PLUGINS};
 
 // ==================== 基础设施 / 工具函数 ====================
 pub use capability::{

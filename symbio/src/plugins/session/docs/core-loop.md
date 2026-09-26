@@ -610,7 +610,7 @@ payload）⇒ `Value::Null`，仍由工具自己给出「缺少必填参数」�
 
 ### 10.1 形状
 
-新增 [`symbio_core/llm/sse.rs`](../../../symbio_core/llm/sse.rs)：
+新增 [`plugins/model/protocols/sse.rs`](../../../plugins/model/protocols/sse.rs)：
 
 ```text
 trait SseLineParser {
@@ -625,14 +625,14 @@ trait PartialLineExtractor {
 
 - **默认 `None` 是合法降级**：不实现增量提取的协议一行代码都不用写，代价只是「等换行」。
 - `push` 一次可以吐**多个**事件：同一块里可能一个字段收尾紧接下一个字段开头。
-- `open_partial_line` 由 core **每行只问一次**：答 `None` 就记下、本行不再重试。
+- `open_partial_line` 由流循环**每行只问一次**：答 `None` 就记下、本行不再重试。
 
 `utf8_chunk(buf, from)` 把「UTF-8 边界对齐」写进契约：被切断的多字节字符**不消费**，
 留给下一次 `push`。SSE 分块由 TCP 决定，一个中文字符横跨两块是常态；若用
 `from_utf8_lossy` 各替换出一个 U+FFFD，而完整行给出的是真字符，按前缀截断会吃字。
 
-core 侧只做：按 `\n` 切行 → 交给 `parse_line` → 按前缀截断去重（`LineProgress`）
-→ 尾巴交给提取器。
+流循环侧（[`plugins/model/stream.rs`](../../../plugins/model/stream.rs)）只做：按 `\n` 切行
+→ 交给 `parse_line` → 按前缀截断去重（`LineProgress`）→ 尾巴交给提取器。
 
 ### 10.2 协议层：`JsonLineExtractor`
 
@@ -652,7 +652,7 @@ gemini           ["candidates","content","parts","text"]                -> 内�
 ```
 
 `ModelProtocol` 以 `SseLineParser` 为**父 trait**，故 `BoundProvider::execute_turn` 直接把
-协议实例交给 `parse_sse_stream`——core 与协议之间无闭包中转。
+协议实例交给 `parse_sse_stream`——流循环与协议之间无闭包中转。
 
 ### 10.3 保住的语义
 

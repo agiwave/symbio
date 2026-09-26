@@ -1,4 +1,29 @@
-//! SSE 行解析契约：**core 只按行切分，协议层负责「这一行是什么」**。
+//! SSE 行解析契约：**本层只按行切分，协议实现负责「这一行是什么」**。
+//!
+//! ## 位置：为什么在 model 插件里，而不在 `symbio_core`
+//!
+//! 本契约原先住在 `symbio_core::llm::sse`（[ADR-022](../../../../../docs/DECISIONS.md)：
+//! 「契约在 core，字段名在协议层」）。当时按行切分的循环 `parse_sse_stream` 也在 core，
+//! 于是 core 是**两侧共同可见的中立地**。后来该循环作为「实现细节而非契约」下沉到
+//! [`super::super::stream`]，契约的**唯一消费方**随之离开 core，本文件随即变成
+//! **单模块契约**（见下方依赖方对照表）。
+//!
+//! 按 [ADR-023](../../../../../docs/DECISIONS.md) 的准入判据（**依赖方数量**：
+//! 只被一个模块依赖的内容一律下沉回该模块），它应与实现方、消费方同处一个模块——
+//! 即本插件。位置变更记录在 [ADR-034](../../../../../docs/DECISIONS.md)；
+//! ADR-022 的**形状**决策（拆成两个方法、UTF-8 边界对齐写进契约、
+//! 字段名与转义规则全留协议层、`ModelProtocol` 以 `SseLineParser` 为父 trait）**全部不变**。
+//!
+//! ## 依赖方对照表（ADR-023 决策 2）
+//!
+//! | 角色 | 谁 | 用哪个符号 |
+//! |---|---|---|
+//! | 实现方 | `anthropic_messages` · `gemini_api` · `openai_chat` · `openai_responses` | [`SseLineParser`]（`parse_line` / `open_partial_line`） |
+//! | 实现方 | `partial_json::JsonLineExtractor` | [`SsePartialLineExtractor`] |
+//! | 消费方 | `super::super::stream::parse_sse_stream` | 两个 trait + [`utf8_chunk`] |
+//! | 消费方 | `super::super::bound_provider` | 把协议实例交给流循环 |
+//!
+//! **改本文件的签名要同时改上表全部位置**；上表之外无消费方——这正是它不在 core 的理由。
 //!
 //! ## 为什么需要这两个 trait
 //!
@@ -9,7 +34,7 @@
 //! 第 2 种情况不能拿 `serde_json` 去解（JSON 被截断了）。历史上 core 为此内置了
 //! 一个**启发式解析器**（`try_parse_partial_sse_line`），里面硬编码了
 //! `"content":"` / `"reasoning_content":"` / `"partial_json":"` / `"text":"` /
-//! `"arguments":"` 五个字段名——**协议知识泄漏进了 core**。后果有三：
+//! `"arguments":"` 五个字段名——**协议知识泄漏进了内核**。后果有三：
 //!
 //! - **加协议要改 core**：新协议（如 Gemini 的 `parts[].text`）能不能增量提取，
 //!   取决于 core 里那张表有没有它的字段；
@@ -24,13 +49,12 @@
 //! - [`SseLineParser::parse_line`]：完整行 → 事件（协议实现，等价于历史上的闭包）；
 //! - [`SseLineParser::open_partial_line`]：为未结束的行开一个**有状态**的
 //!   [`SsePartialLineExtractor`]，由协议决定「这一行值不值得增量提取」「取哪个字段」。
-//!   core 只负责：每收到新字节就 `push` 一次，把返回的增量原样转发。
+//!   流循环只负责：每收到新字节就 `push` 一次，把返回的增量原样转发。
 //!
 //! 增量提取器是**有状态**的（只对新增字节做功），因此总代价是 O(输入长度)，
-//! 不再是 O(行长的平方)；字段名与转义规则全部留在协议层，core 不再认识任何
-//! 协议细节。
+//! 不再是 O(行长)的平方；字段名与转义规则全部留在协议层，内核不再认识任何协议细节。
 
-use super::model_provider::ModelProtocolEvent;
+use super::ModelProtocolEvent;
 
 /// SSE 行解析契约（协议层实现）。
 pub trait SseLineParser: Send + Sync {
@@ -41,12 +65,12 @@ pub trait SseLineParser: Send + Sync {
     ///
     /// `head` 是这一行到目前为止已收到的全部字节（UTF-8 边界已对齐）。
     ///
-    /// 返回 `None` ⇒ **本行不做增量提取**：core 会一直等到换行再走
+    /// 返回 `None` ⇒ **本行不做增量提取**：流循环会一直等到换行再走
     /// [`Self::parse_line`]。这是合法且正确的降级（只是首字延迟变大），
     /// 因此不实现增量提取的协议无需任何额外代码——默认实现就是 `None`。
     ///
     /// 实现方应当在**行首就能判断**（例如「这个事件类型携带全量文本，不能当增量」），
-    /// 因为 core 只会调用它一次：返回 `None` 后本行不再重试。
+    /// 因为流循环只会调用它一次：返回 `None` 后本行不再重试。
     fn open_partial_line(&self, head: &str) -> Option<Box<dyn SsePartialLineExtractor>> {
         let _ = head;
         None
@@ -55,10 +79,10 @@ pub trait SseLineParser: Send + Sync {
 
 /// 单行增量提取器：逐段吃进原始字节，吐出**本次新增**的增量事件。
 ///
-/// 契约（实现方必须保证，core 依赖它）：
+/// 契约（实现方必须保证，流循环依赖它）：
 /// - `push` 的入参是**自上次 push 之后新增的字节**，不重复、不遗漏；
 /// - 产出的增量必须与 [`SseLineParser::parse_line`] 对**同一完整行**给出的文本
-///   **逐字节一致地拼接**——core 会把已发出的长度记为前缀，完整行到达时按该
+///   **逐字节一致地拼接**——流循环会把已发出的长度记为前缀，完整行到达时按该
 ///   前缀截断。二者不一致就会重复或丢字。
 ///
 /// 事件写进 `out`（调用方复用同一个 `Vec`，避免每块一次分配）：一次 `push`

@@ -11,14 +11,12 @@ use std::sync::Mutex;
 use super::super::model_providers::ModelProviderConfig;
 use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole};
 use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
-use super::{sse_data, ModelProtocol, MODEL_PROTOCOL_ANTHROPIC_MESSAGES};
+use super::sse::{SseLineParser, SsePartialLineExtractor};
+use super::ModelProtocolEvent;
+use super::{description_for_llm, sse_data, ModelProtocol, MODEL_PROTOCOL_ANTHROPIC_MESSAGES};
 use crate::plugins::model::http::get_http_client;
 use crate::symbio_core::to_wire;
-use crate::symbio_core::SsePartialLineExtractor;
-use crate::symbio_core::{
-    ModelFinishReason, ModelProtocolEvent, ModelUsage, PluginError, PluginInvokeRequest,
-    SseLineParser,
-};
+use crate::symbio_core::{ModelFinishReason, ModelUsage, PluginError, PluginInvokeRequest};
 use tracing::warn;
 
 pub struct AnthropicProtocol {
@@ -259,7 +257,7 @@ impl ModelProtocol for AnthropicProtocol {
                 .iter()
                 .map(|t| json!({
                     "name": to_wire(&t.name),
-                    "description": t.description_for_llm(),
+                    "description": description_for_llm(t),
                     "input_schema": t.input_schema
                 }))
                 .collect::<Vec<_>>());

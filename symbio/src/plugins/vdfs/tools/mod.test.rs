@@ -38,8 +38,9 @@ fn metas_are_llm_ready() {
         assert!(!m.description.is_empty());
         assert_eq!(m.category, Some(CapabilityCategory::Resource));
         assert!(m.input_schema.get("type").is_some());
-        // examples 会经 description_for_llm 追加给 LLM
-        assert!(m.description_for_llm().contains("示例"));
+        // examples 由协议适配层（model）追加给 LLM —— 此处只校验「声明了 examples」，
+        // 拼接格式归 model 的 `description_for_llm` 自己测（core 不再承载该格式）。
+        assert!(m.examples.as_ref().is_some_and(|e| !e.is_empty()));
     }
 }
 

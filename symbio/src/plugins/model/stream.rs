@@ -1,8 +1,8 @@
 //! SSE 流循环 —— 把响应字节流转成单轮产物（core `llm/` 契约的实现细节）。
 //!
-//! 只有 model 插件使用，故住在插件内而非 core `llm/`。core 只提供
-//! [`SseLineParser`](crate::symbio_core::SseLineParser) 行解析契约与
-//! [`TurnOutput`] 产物结构；本模块负责按 `\n` 切分、按前缀截断去重、把协议事件
+//! 只有 model 插件使用，故住在插件内而非 core `llm/`。行解析契约
+//! [`SseLineParser`] 与其实现方同处本插件（[`super::protocols::sse`]），core 只
+//! 提供 [`TurnOutput`] 产物结构；本模块负责按 `\n` 切分、按前缀截断去重、把协议事件
 //! 分发给 [`TurnOutput`] 并经 `sink` 实时下发流式子节点——**不认识任何协议字段名**。
 //!
 //! 生命周期日志（请求发起 → 响应头 → 首块 → 首条内容 → 流结束）让卡死可定位到阶段，
@@ -15,12 +15,13 @@ use crate::plugins::model::http::STREAM_IDLE_TIMEOUT;
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
+use crate::symbio_core::ModelUsage;
 use crate::symbio_core::{emit_delta, emit_message, short_id, TurnOutput};
-use crate::symbio_core::{utf8_chunk, SseLineParser, SsePartialLineExtractor};
 use crate::symbio_core::{ExecAbortSignal, ExecEventSink};
-use crate::symbio_core::{ModelProtocolEvent, ModelUsage};
 use futures::StreamExt;
 use std::collections::HashMap;
+
+use super::protocols::{utf8_chunk, ModelProtocolEvent, SseLineParser, SsePartialLineExtractor};
 
 /// 未结束的行超过这个长度才尝试增量提取。
 ///
