@@ -288,6 +288,48 @@ fn test_compression_prompt_has_reconciliation_and_hygiene_rules() {
     );
 }
 
+/// 模板回归锚点（OpenCode 对标增量）：
+/// 1. <next_step> 节在场——恢复后第一步动作必须有专属槽位（仅列条目不给
+///    动作会降低恢复质量）；
+/// 2. key_knowledge 的 Decision: 前缀约定——决策+被否方案+理由必须结构化
+///    呈现，不能淹没在事实清单里；
+/// 3. 无工具声明——摘要模型是裸 LLM 调用，"列问题前先验证"必须降级为
+///    "保留区原文可答则直接作答"，否则规则不可执行；
+/// 4. open_questions 区分「等待输入」与「待调查」两种恢复行为。
+#[test]
+fn test_compression_prompt_has_next_step_decision_and_no_tool_rules() {
+    let prompt = get_compression_prompt();
+    assert!(
+        prompt.contains("<next_step>"),
+        "模板缺少 next_step 节（恢复后第一步动作）"
+    );
+    assert!(
+        prompt.contains("Prefix each decision with \"Decision:\""),
+        "模板缺少 Decision: 前缀约定（决策需含被否方案与理由）"
+    );
+    assert!(
+        prompt.contains("You have no tool access during compaction"),
+        "模板缺少无工具声明（压缩是裸 LLM 调用，验证类规则必须可执行）"
+    );
+    assert!(
+        prompt.contains("waiting-on-input"),
+        "模板缺少 open_questions 的等待输入/待调查区分"
+    );
+}
+
+/// 落库渲染必须与模板分节结构同步：新增 <next_step> 节后，渲染映射若缺失，
+/// 原始 XML 标签会残留在历史消息里，诱导后续对话模仿同类标签输出。
+#[test]
+fn test_render_snapshot_for_history_maps_next_step() {
+    let xml = extract_snapshot(
+        "<state_snapshot>\n<next_step>\n- 先跑测试\n</next_step>\n</state_snapshot>",
+    )
+    .unwrap();
+    let rendered = render_snapshot_for_history(&xml);
+    assert!(rendered.contains("【下一步】"));
+    assert!(!rendered.contains("<next_step>"));
+}
+
 /// 模板回归锚点：可再生事实的**指针化**，以及内核提示词的**去项目化**。
 ///
 /// 事故一（为什么要有指针化规则）：某轮压缩把「session store kinds =

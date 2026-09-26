@@ -204,7 +204,17 @@ export const BASELINE = {
   //      `debug_assert!` 守前置条件）；`close_turn` 的 `finish.is_length() && had_tool`
   //      分支与 `TurnResult.had_tool` 字段（该意图已由 `tool_executor.rs` 的
   //      `parse_error` 分支承担，且更靠前——拒绝执行 + 以协议错误回报模型）。
-  rustTests: 959,
+  // 961：ADR-038 单消费方符号下沉（2026-09-26）——**净 0**（959 → 959），逐文件核对：
+  //        −5  `symbio_core/llm/turn.test.rs` 整文件删除（构造器与 `impl TurnOutput`
+  //            随迁 `plugins/session/message_build.rs`）。
+  //        −7  `plugins/model/message_builder.test.rs`（21 → 14）——用例 A / A2 / B /
+  //            C / D 与两条流式 id 复用回归迁出；E / F 两条合同测试改本地同形状 fixture。
+  //        +12 `plugins/session/message_build.test.rs`（新建）——上两条之和。
+  //            计数口径不变（ADR-023 不豁免测试），迁的是**消费方那一侧**的 fixture。
+  //      同批 +2（959 → **961**）：`plugins/session/compression.test.rs`（37 → 39）——
+  //        压缩快照模板新增 `<next_step>` 节与 `Decision:` 前缀约定（含渲染映射回归），
+  //        与本次下沉无关，一并实测入基线。
+  rustTests: 961,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

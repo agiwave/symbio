@@ -72,12 +72,13 @@ Signal-to-noise rules (apply while writing the snapshot):
 - Reconcile before output: a previous snapshot found in the history is unverified INPUT, not ground truth. When newer findings contradict an inherited item, correct or drop it; never copy old <key_knowledge> forward unchecked — an error that enters a snapshot survives every later generation.
 - Each fact appears exactly once across ALL sections. If the same fact fits multiple sections, place it in the most relevant one and do not repeat it.
 - Record conclusions and outcomes, not process metrics. Drop line numbers, byte counts, read ranges, raw dumps, and step-by-step command transcripts; keep the final state and what it implies for future work.
-- <key_knowledge> holds only facts and constraints that still bind FUTURE work. Drop test-writing trivia, closed-issue aftermath notes, and volatile numbers (test counts, file sizes); state invariants instead ("full suite + clippy clean", not a passing count).
+- <key_knowledge> holds only facts and constraints that still bind FUTURE work. Drop test-writing trivia, closed-issue aftermath notes, and volatile numbers (test counts, file sizes); state invariants instead ("full suite + clippy clean", not a passing count). Prefix each decision with "Decision:" — state the chosen option, the alternatives rejected, and why they were rejected.
 - Distinguish REGENERABLE from CONVERSATION-ONLY before writing a fact down. A fact is regenerable when the repo or environment can be asked again for it — inventories of modules, directories, endpoints, dependencies, counts, layouts, and anything an auto-generated reference already states. For those, name the source and how to refresh it instead of copying entries: the source is regenerated from truth and is always fresher than a summary of a summary, while a copied entry silently rots yet still reads as authoritative. Spend the freed space on what is not regenerable.
 - What ONLY this conversation could reveal MUST be kept in full: user preferences and explicit directives, decisions together with the alternatives rejected and why, dead ends and why they failed, tooling quirks learned the hard way, and the reasoning behind an in-flight choice. Pointer-ising regenerable facts is never a licence to lose judgement.
 - <completed_items>: one line per item — the outcome and where it landed. If an item leaves a lasting constraint, that constraint belongs in <key_knowledge>; the how-it-was-done narrative stays in the transcript.
 - Compress each error to ONE line: the conclusion plus its root cause. Keep errors ONLY if they still constrain future actions (an unresolved failure, a known pitfall); drop errors that were already fixed and whose fix is recorded in <completed_items>.
-- Before listing a question in <open_questions>, if it can be verified with a single cheap tool call (reading a file, running a quick command), perform that verification during this compaction and record the confirmed answer instead.
+- Before listing a question in <open_questions>, if the retained history already answers it, record the confirmed answer instead. You have no tool access during compaction; if verification requires an external check, say so explicitly.
+- In <open_questions>, distinguish waiting-on-input items (blocked on the user or an external dependency — name what is awaited) from items needing investigation (state what to check first).
 - If a todo list exists in the conversation, reference its item IDs/titles in <in_progress_items> instead of restating full descriptions; the agent retains live access to the list.
 
 The structure MUST be as follows:
@@ -102,6 +103,10 @@ The structure MUST be as follows:
     <in_progress_items>
         Items currently in progress or pending completion.
     </in_progress_items>
+
+    <next_step>
+        A single line describing the immediate action the agent should take first upon resuming.
+    </next_step>
 
     <open_questions>
         Questions that remain unanswered or issues that need to be addressed.
@@ -660,6 +665,8 @@ pub fn render_snapshot_for_history(snapshot_text: &str) -> String {
         .replace("</completed_items>", "")
         .replace("<in_progress_items>", "【进行中】")
         .replace("</in_progress_items>", "")
+        .replace("<next_step>", "【下一步】")
+        .replace("</next_step>", "")
         .replace("<open_questions>", "【待确认问题】")
         .replace("</open_questions>", "")
         .trim()
