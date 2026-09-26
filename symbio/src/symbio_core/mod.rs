@@ -20,9 +20,8 @@ pub mod vdfs;
 // 行解析契约与协议事件方言只有 model 插件使用，住在 `plugins/model/protocols/`。
 pub use llm::model_provider::{ModelFinishReason, ModelProvider, ModelUsage};
 pub use llm::turn::{
-    llm_build_assistant_messages, llm_build_tool_message, llm_emit_delta, llm_emit_message,
-    llm_emit_removed, llm_emit_state, llm_message_frame, llm_removed_frame, llm_short_id,
-    llm_state_frame, TurnOutput, TurnStreamChildIds, TurnToolCallInfo,
+    llm_emit_message, llm_message_frame, llm_removed_frame, llm_short_id, TurnOutput,
+    TurnToolCallInfo,
 };
 
 // ==================== VDFS 契约 ====================

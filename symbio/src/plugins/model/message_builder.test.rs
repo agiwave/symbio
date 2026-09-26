@@ -1,35 +1,53 @@
 //! `symbio/src/plugins/model/message_builder.rs` 的单元测试 —— 拆自源码末尾的测试模块。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
+//!
+//! ## 落库树在这里是**本地 fixture**
+//!
+//! 真正的构造器（`llm_build_assistant_messages` / `TurnStreamChildIds` /
+//! `TurnOutput::into_messages`）生产上只有 session 一个消费方，已随 ADR-038 从
+//! `symbio_core::llm::turn` 下沉到 `plugins/session/message_build.rs`；
+//! 插件之间禁止互引（`plugin-entry-audit` E-009），本文件不能再调它。
+//!
+//! 于是两侧**各锁一半**，形状靠注释互指：
+//! - 形状（构造器产出什么）→ `plugins/session/message_build.test.rs` 的
+//!   用例 A / A2 / B / C / D 与流式 id 复用回归；
+//! - 视图（给定同形状的树怎么扁平化）→ 本文件的用例 E / F 及其余 flatten 用例。
 
 use super::*;
 
 use crate::symbio_core::schemas::session::chat_message::MessageStatus;
-use crate::symbio_core::{llm_build_assistant_messages, TurnStreamChildIds, TurnToolCallInfo};
 
 const TURN_ID: &str = "turn-0001";
 
-/// 统计某类型子节点（parent_id == TURN_ID）数量
-fn count_children(msgs: &[ChatMessage], ty: MessageType) -> usize {
-    msgs.iter()
-        .filter(|m| m.parent_id.as_deref() == Some(TURN_ID) && m.msg_type == Some(ty.clone()))
-        .count()
+/// 本地构造一棵落库树（Turn 根 + 传入的子节点），形状同
+/// `llm_build_assistant_messages` 的产物——形状契约见文件头说明。
+fn turn_tree(children: Vec<ChatMessage>) -> Vec<ChatMessage> {
+    let mut msgs = vec![ChatMessage {
+        id: TURN_ID.to_string(),
+        parent_id: None,
+        role: Some(MessageRole::Assistant),
+        msg_type: Some(MessageType::Turn),
+        content: None,
+        status: Some(MessageStatus::Completed),
+        timestamp: Some(1),
+        ..Default::default()
+    }];
+    msgs.extend(children);
+    msgs
 }
 
-fn child_texts(msgs: &[ChatMessage], ty: MessageType) -> Vec<String> {
-    msgs.iter()
-        .filter(|m| m.parent_id.as_deref() == Some(TURN_ID) && m.msg_type == Some(ty.clone()))
-        .map(|m| m.content.as_ref().map(|c| c.to_text()).unwrap_or_default())
-        .collect()
-}
-
-fn tool_call(name: &str) -> TurnToolCallInfo {
-    TurnToolCallInfo {
-        id: Some("tc-1".to_string()),
-        wire_id: None,
-        name: Some(name.to_string()),
-        arguments: serde_json::json!({ "k": "v" }),
-        parse_error: None,
+/// 落库树的一个子节点（`parent_id` 指向 [`TURN_ID`]）。
+fn child(id: &str, ty: MessageType, text: &str) -> ChatMessage {
+    ChatMessage {
+        id: id.to_string(),
+        parent_id: Some(TURN_ID.to_string()),
+        role: Some(MessageRole::Assistant),
+        msg_type: Some(ty),
+        content: Some(MessageContent::Text(text.into())),
+        status: Some(MessageStatus::Completed),
+        timestamp: Some(1),
+        ..Default::default()
     }
 }
 
@@ -80,152 +98,20 @@ fn tool_call_args_passthrough_as_string_without_reserialize() {
     );
 }
 
-/// 用例 A（回归：storage factor≈2 重复）
-///
-/// reasoning-only 场景（无独立文本回复，`effective_text` 回退为 reasoning）：
-/// 只能落 `Turn` + 一个 `Text` 子节点；**绝不能**再生成 `Reasoning` 子节点，
-/// 否则同一段 reasoning 在存储层出现两份（历史会话打开显示重复两份）。
-#[test]
-fn reasoning_only_writes_single_text_child_without_reasoning_node() {
-    let reasoning = "我先分析一下用户的问题，然后给出结论。";
-
-    let msgs = llm_build_assistant_messages(
-        TURN_ID,
-        reasoning,
-        &[],
-        None,
-        Some(reasoning.into()),
-        TurnStreamChildIds::default(),
-    );
-
-    // 恰好 2 个节点：Turn(根) + 1 个 Text 子节点
-    assert_eq!(msgs.len(), 2, "reasoning-only 应只落 Turn + Text 两个节点");
-
-    // 根节点
-    assert_eq!(msgs[0].id, TURN_ID);
-    assert_eq!(msgs[0].msg_type, Some(MessageType::Turn));
-    assert_eq!(msgs[0].parent_id, None);
-    assert!(msgs[0].content.is_none(), "Turn 为组合节点，不携带内容");
-
-    // 关键防复发断言：不存在任何 Reasoning 子节点
-    assert_eq!(
-        count_children(&msgs, MessageType::Reasoning),
-        0,
-        "reasoning-only 不得生成 Reasoning 子节点（否则与 Text 子节点内容重复）"
-    );
-
-    // 唯一的 Text 子节点承载 reasoning 内容，且只出现一次
-    let texts = child_texts(&msgs, MessageType::Text);
-    assert_eq!(texts.len(), 1, "Text 子节点应恰好一个");
-    assert_eq!(texts[0], reasoning);
-}
-
-/// 用例 A2：reasoning 与正文仅首尾空白不同，仍应判定为 reasoning-only（trim 比较）
-#[test]
-fn reasoning_only_ignores_surrounding_whitespace() {
-    let reasoning = "思考内容";
-    let content = "\n  思考内容  \n";
-
-    let msgs = llm_build_assistant_messages(
-        TURN_ID,
-        content,
-        &[],
-        None,
-        Some(reasoning.into()),
-        TurnStreamChildIds::default(),
-    );
-
-    assert_eq!(msgs.len(), 2);
-    assert_eq!(count_children(&msgs, MessageType::Reasoning), 0);
-    assert_eq!(count_children(&msgs, MessageType::Text), 1);
-}
-
-/// 用例 B：普通场景（reasoning + 独立文本回复）→ Reasoning 与 Text 各一份，内容不同
-#[test]
-fn reasoning_with_distinct_reply_keeps_both_children() {
-    let msgs = llm_build_assistant_messages(
-        TURN_ID,
-        "正常回复",
-        &[],
-        Some("resp-1".into()),
-        Some("思考过程".into()),
-        TurnStreamChildIds::default(),
-    );
-
-    // Turn + Reasoning + Text
-    assert_eq!(msgs.len(), 3);
-    assert_eq!(msgs[0].msg_type, Some(MessageType::Turn));
-
-    let reasonings = child_texts(&msgs, MessageType::Reasoning);
-    let texts = child_texts(&msgs, MessageType::Text);
-    assert_eq!(reasonings, vec!["思考过程".to_string()]);
-    assert_eq!(texts, vec!["正常回复".to_string()]);
-    assert_ne!(reasonings[0], texts[0], "两个子节点内容必须不同");
-
-    // response_id 只挂在 Text 响应节点上
-    let text_child = msgs
-        .iter()
-        .find(|m| m.msg_type == Some(MessageType::Text))
-        .unwrap();
-    assert_eq!(text_child.response_id.as_deref(), Some("resp-1"));
-    assert_eq!(text_child.role, Some(MessageRole::Assistant));
-    assert_eq!(text_child.status, Some(MessageStatus::Completed));
-}
-
-/// 用例 C：无 reasoning 的纯文本回复 → Turn + Text
-#[test]
-fn plain_text_reply_has_no_reasoning_child() {
-    let msgs = llm_build_assistant_messages(
-        TURN_ID,
-        "你好",
-        &[],
-        None,
-        None,
-        TurnStreamChildIds::default(),
-    );
-    assert_eq!(msgs.len(), 2);
-    assert_eq!(count_children(&msgs, MessageType::Reasoning), 0);
-    assert_eq!(child_texts(&msgs, MessageType::Text), vec!["你好"]);
-}
-
-/// 用例 D：有 reasoning + 无文本 + 有工具调用（非 reasoning-only）
-/// → 保留 Reasoning 子节点，且不生成空 Text 节点
-#[test]
-fn reasoning_with_tool_calls_keeps_reasoning_and_skips_empty_text() {
-    let tools = vec![tool_call("read_file")];
-    let msgs = llm_build_assistant_messages(
-        TURN_ID,
-        "",
-        &tools,
-        None,
-        Some("要先读文件".into()),
-        TurnStreamChildIds::default(),
-    );
-
-    // Turn + Reasoning + ToolCall
-    assert_eq!(msgs.len(), 3);
-    assert_eq!(count_children(&msgs, MessageType::Reasoning), 1);
-    assert_eq!(
-        count_children(&msgs, MessageType::Text),
-        0,
-        "空白正文不得生成 Text 节点"
-    );
-    assert_eq!(count_children(&msgs, MessageType::ToolCall), 1);
-}
-
 /// 用例 E：reasoning-only 落库结果扁平化后，LLM 请求里内容只出现一次
 /// （防止重复内容顺着 request 包再放大一次）
+///
+/// 输入是本地 fixture：reasoning-only 的落库形状 = Turn + 单个 Text 子节点。
+/// 「构造器不生成 Reasoning 子节点」这半边锁在
+/// `plugins/session/message_build.test.rs` 的用例 A（见文件头说明）。
 #[test]
 fn reasoning_only_flattens_to_single_assistant_message() {
     let reasoning = "只有思考";
-    let msgs = llm_build_assistant_messages(
-        TURN_ID,
+    let msgs = turn_tree(vec![child(
+        "turn-0001-reason",
+        MessageType::Text,
         reasoning,
-        &[],
-        None,
-        Some(reasoning.into()),
-        TurnStreamChildIds::default(),
-    );
+    )]);
 
     let natives = flatten_chat_messages(&msgs);
     assert_eq!(natives.len(), 1, "应只产生一条 assistant native message");
@@ -241,16 +127,15 @@ fn reasoning_only_flattens_to_single_assistant_message() {
 }
 
 /// 用例 F：普通 reasoning + 文本 扁平化后 content 与 reasoning_content 各归其位
+///
+/// 输入是本地 fixture（Turn + Reasoning + Text 三节点）；三节点的产出形状锁在
+/// `plugins/session/message_build.test.rs` 的用例 B（见文件头说明）。
 #[test]
 fn reasoning_with_reply_flattens_into_content_and_reasoning_content() {
-    let msgs = llm_build_assistant_messages(
-        TURN_ID,
-        "正常回复",
-        &[],
-        None,
-        Some("思考过程".into()),
-        TurnStreamChildIds::default(),
-    );
+    let msgs = turn_tree(vec![
+        child("turn-0001-reason", MessageType::Reasoning, "思考过程"),
+        child("turn-0001-text", MessageType::Text, "正常回复"),
+    ]);
 
     let natives = flatten_chat_messages(&msgs);
     assert_eq!(natives.len(), 1);
@@ -346,64 +231,6 @@ fn flatten_keeps_only_recent_reasoning_in_request_view() {
         by_content("回复三").reasoning_content.as_deref(),
         Some("思考三")
     );
-}
-
-// ── 回归测试：锁定以下高危行为 ────────────────────────────────────────
-
-/// 落库节点必须复用流式子节点 id。
-///
-/// 若两处各自 `llm_short_id()`，存储层的定稿节点（id=B，内容全量）与会话层累积的流式节点
-/// （id=A，内容增量合并）会被判定为两条不同消息；失败收尾时 id=A 被当作"尚未落库的
-/// 流式半截"补写进存储 → 同一个 Turn 下出现两份内容相同的文本节点。
-#[test]
-fn persisted_children_reuse_streaming_child_ids() {
-    let msgs = llm_build_assistant_messages(
-        TURN_ID,
-        "正常回复",
-        &[],
-        None,
-        Some("思考过程".into()),
-        TurnStreamChildIds {
-            text: Some("stream-text-id".into()),
-            reasoning: Some("stream-reason-id".into()),
-        },
-    );
-
-    let text_child = msgs
-        .iter()
-        .find(|m| m.msg_type == Some(MessageType::Text))
-        .expect("应生成 Text 子节点");
-    let reasoning_child = msgs
-        .iter()
-        .find(|m| m.msg_type == Some(MessageType::Reasoning))
-        .expect("应生成 Reasoning 子节点");
-
-    assert_eq!(text_child.id, "stream-text-id");
-    assert_eq!(reasoning_child.id, "stream-reason-id");
-}
-
-/// reasoning-only 场景：正文由 reasoning 承载（不生成 Reasoning 子节点），
-/// 落库的 Text 节点应复用 reasoning 的流式 id——流式层定稿的正是该节点。
-#[test]
-fn reasoning_only_reuses_reasoning_stream_id() {
-    let reasoning = "只有思考";
-    let msgs = llm_build_assistant_messages(
-        TURN_ID,
-        reasoning,
-        &[],
-        None,
-        Some(reasoning.into()),
-        TurnStreamChildIds {
-            text: None,
-            reasoning: Some("stream-reason-id".into()),
-        },
-    );
-
-    let text_child = msgs
-        .iter()
-        .find(|m| m.msg_type == Some(MessageType::Text))
-        .expect("reasoning-only 应生成唯一 Text 子节点");
-    assert_eq!(text_child.id, "stream-reason-id");
 }
 
 /// 孤儿 tool 结果（parent 指向已被 get_context_messages 过滤掉的 tool_call）不得进入

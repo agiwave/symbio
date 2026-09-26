@@ -248,7 +248,7 @@ impl SessionPlugin {
             transcript
                 .lock()
                 .await
-                .apply(crate::symbio_core::llm_state_frame(&m));
+                .apply(crate::plugins::session::frames::llm_state_frame(&m));
         }
 
         // 7. 本轮在途图随之作废：权威副本已由上面的 `replace_messages` 回到存储，
@@ -361,7 +361,7 @@ impl SessionPlugin {
                 .transcript
                 .lock()
                 .await
-                .apply(crate::symbio_core::llm_state_frame(&m));
+                .apply(crate::plugins::session::frames::llm_state_frame(&m));
         }
 
         // 权威副本已回到存储，在途图作废（与 `persist_failure` 步骤 7 同一理由）。

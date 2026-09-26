@@ -1,63 +1,27 @@
-//! 单轮 LLM 产物与消息帧原语（core `llm/` 契约层的共享面）。
+//! 单轮 LLM 产物与**共享帧原语**（core `llm/` 契约层的共享面）。
 //!
-//! 职责（协议无关、插件无关，供 session 与 model 双侧共同使用）：
-//! - 消息帧家族（[`llm_emit_message`]/[`llm_emit_delta`]/[`llm_emit_state`]/[`llm_emit_removed`]
-//!   与 `llm_message_frame`/`llm_state_frame`/`llm_removed_frame`）：[`ExecEventSink`]
-//!   唯一写入点的帧语义（完整消息 / 增量 / 状态 / 删除）
+//! 职责（协议无关、插件无关）：
 //! - 单轮产物（[`TurnOutput`]）：`ModelProvider::execute_turn` 的返回类型
-//!   （见 [`super::model_provider`]）
-//! - 工具调用信息（[`TurnToolCallInfo`]）：[`TurnOutput::tool_calls`] 的元素类型，
-//!   同时是 [`llm_build_assistant_messages`] 的形参类型
-//! - 消息构造家族（`llm_short_id`/`TurnStreamChildIds`/`llm_build_assistant_messages`/`llm_build_tool_message`）：
-//!   `TurnOutput::into_messages` 直接依赖它，孤儿规则要求定义与使用同处 core
+//!   （见 [`super::model_provider`]）——**只装结果，不装过程**
+//! - 工具调用信息（[`TurnToolCallInfo`]）：[`TurnOutput::tool_calls`] 的元素类型
+//! - 共享帧原语：[`llm_emit_message`]（完整消息）与 [`llm_removed_frame`]（删除）
+//!   ——**两个以上模块**共用的帧构造 / 发射点
+//! - id 原语 [`llm_short_id`]：消息节点 id 的统一格式（流式累积与落库共用）
 //!
-//! ## 依赖方对照表（ADR-023 决策 2）
-//!
-//! 本模块**全部符号都是两侧共用**的，没有单消费方残留：
-//!
-//! | 符号 | 消费方 | 消费方式 |
-//! |---|---|---|
-//! | [`TurnToolCallInfo`] | model（`stream.rs` 生产 · `message_builder.test.rs` 构造）· session（`tool_executor.rs` 形参 · `chat_loop` 读字段）· 本模块（[`llm_build_assistant_messages`] 的形参 · [`TurnOutput::tool_calls`] 的元素类型） | 作为**多消费方函数的形参类型** |
-//! | [`TurnStreamChildIds`] | model（`message_builder.test.rs`）· 本模块（[`llm_build_assistant_messages`] 的形参、`into_messages` 的构造点） | 作为**多消费方函数的形参类型** |
-//!
-//! 两者都不能下沉：它们是多消费方函数 [`llm_build_assistant_messages`] 的签名组成部分
-//! ——沉到任一侧，另一侧就调不动该函数（插件间禁止互引，`plugin-entry-audit` E-009）。
-//!
-//! **工具调用的累积过程不在这里**：把分片攒成一次调用的状态机
-//! （`TurnToolCallAccumulator`）只有 model 插件的 `stream.rs` 驱动，住在
-//! `plugins/model/tool_accumulator.rs`。本模块只承载它的**产物形态**
-//! （[`TurnOutput::tool_calls`]）——「过程」是实现，「结果」才是契约。
-//!
-//! 这条边界此前是模糊的：累积器曾住在本模块，理由是「`TurnOutput::into_messages`
-//! 依赖它」。那是**循环论证**——`into_messages` 依赖它，只因为 `TurnOutput` 把它当
-//! 字段带着。字段换成结果形态后，依赖自己就消失了（ADR-023 开头点名的正是这种推理）。
-//!
-//! **HTTP 重试机器与 SSE 流循环不在这里**：它们只有 model 插件的
-//! `execute_turn` 使用（实现细节而非契约），住在 `plugins/model/`
-//! （`http.rs` / `stream.rs`），行解析契约同处该插件（`protocols/sse.rs`）。
-//! 与本模块同层的兄弟模块：[`super::model_provider`]（trait 与结束原因 / 用量）。
-//!
-//! ## 执行期只与两个原语打交道（不再与通道打交道）
-//!
-//! 本模块的帧函数只依赖 [`ExecEventSink`]（出：节点事件），**不接受 `PluginChannel`**。
-//! 历史上两者都压在同一个通道上，进程内调用因此要付 serde 装箱 + 反序列化的往返
-//! 代价；现在「去哪」与「怎么中止」分别由两个语义单一的原语承担，`PluginChannel`
-//! 退回纯跨进程传输（见 `symbio_core::exec` 的模块文档）。
 
 use super::model_provider::{ModelFinishReason, ModelUsage};
-use crate::symbio_core::schemas::session::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
-};
+use crate::symbio_core::schemas::session::chat_message::{ChatMessage, MessageStatus};
 use crate::symbio_core::ExecEventSink;
 use serde_json::Value;
 
-// 执行期出口与中止（唯一两个原语）
+// 执行期出口（共享的完整消息帧）
 
 /// 发送一条**完整消息**（`content` = 整条替换，幂等）。
 ///
 /// 用在正文对接收端是**新的权威副本**的帧上：一次性节点（工具结果 / 用户消息
-/// 回填）的单帧完成、存储回执、压缩快照。流式节点的正文已由 [`llm_emit_delta`]
-/// 逐帧传过，它的终态走 [`llm_emit_state`]，不在这里重发。
+/// 回填）的单帧完成、存储回执、压缩快照。流式节点的正文已由 `llm_emit_delta`
+/// （`plugins/model/stream.rs`）逐帧传过，它的终态走 `llm_emit_state`
+/// （`plugins/session/frames.rs`），不在这里重发。
 pub async fn llm_emit_message(sink: &ExecEventSink, msg: ChatMessage) {
     sink.emit(llm_message_frame(&msg)).await;
 }
@@ -68,49 +32,6 @@ pub async fn llm_emit_message(sink: &ExecEventSink, msg: ChatMessage) {
 /// 带状态」这条约定只在这里实现一次。
 pub fn llm_message_frame(m: &ChatMessage) -> ChatMessage {
     let mut frame = m.clone();
-    if frame.status.is_none() {
-        frame.status = Some(MessageStatus::Completed);
-    }
-    frame
-}
-
-/// 发送一帧**增量**：`delta` 追加到目标节点正文尾部（流式热路径，O(delta)）。
-///
-/// 目标未知时写入点用帧内信息建占位（帧自给自足，不依赖任何先行帧）。
-pub async fn llm_emit_delta(sink: &ExecEventSink, message_id: &str, delta: &str) {
-    sink.emit(ChatMessage {
-        id: message_id.to_string(),
-        delta: Some(delta.to_string()),
-        ..Default::default()
-    })
-    .await;
-}
-
-/// 发送一帧**状态**：身份 + 状态 + 元数据 + 错误，**不带正文**。
-///
-/// 流式节点的正文已由 [`llm_emit_delta`] 逐帧上线，这里再带一次只是把同一段文字
-/// 二次传输（且会把权威副本的完整正文重新发一遍）。`content` / `delta` 一律
-/// 剥掉，免得调用方传了一条「内容齐全的副本」就顺手把它送上热路径。
-pub async fn llm_emit_state(sink: &ExecEventSink, msg: ChatMessage) {
-    sink.emit(llm_state_frame(&msg)).await;
-}
-
-/// 发送一帧**删除**：`status = removed`。
-///
-/// 协议里没有 `remove` 操作——删除就是一次状态迁移，与出现、增长、完成同走
-/// 一条消息帧，接收端据此就地移除节点。
-pub async fn llm_emit_removed(sink: &ExecEventSink, message_id: &str) {
-    sink.emit(llm_removed_frame(message_id)).await;
-}
-
-/// 由一条完整消息派生**状态帧**：身份 + 状态 + 元数据 + 错误，**不带正文**。
-///
-/// 直接写转写（`Transcript::apply`，不经出口）的收口路径也用它——那些节点的
-/// 正文早已由 `delta` 逐帧上线，重发一遍只是把同一段文字二次传输。
-pub fn llm_state_frame(m: &ChatMessage) -> ChatMessage {
-    let mut frame = m.clone();
-    frame.content = None;
-    frame.delta = None;
     if frame.status.is_none() {
         frame.status = Some(MessageStatus::Completed);
     }
@@ -150,180 +71,11 @@ pub struct TurnToolCallInfo {
     pub parse_error: Option<String>,
 }
 
-// 消息构造（ChatMessage 家族）
+// id 原语（消息节点 id 的统一格式，两侧共用）
 
 /// 生成长度短的 ID（8 字符，取 UUID v4 前缀）
 pub fn llm_short_id() -> String {
     uuid::Uuid::new_v4().to_string()[..8].to_string()
-}
-
-/// 流式期间已经广播给前端的子节点 id。
-///
-/// **落库时必须复用这些 id**：流式层（`parse_sse_stream` 的 `emit_update`）
-/// 与存储层（`llm_build_assistant_messages`）是同一批节点的两个视图。若两层各自
-/// `llm_short_id()` 生成新 id，同一个文本子节点在「前端流式快照」里是 id=A、
-/// 在「会话存储」里是 id=B，会被上层判定为两条不同消息——于是失败收尾时
-/// id=A 的节点被当作"尚未落库的流式半截"补写进存储，同一个 Turn 下出现两份内容相同的文本节点。
-#[derive(Debug, Default, Clone)]
-pub struct TurnStreamChildIds {
-    /// 回复正文子节点的流式 id（`TurnOutput::response_text_child_id`）
-    pub text: Option<String>,
-    /// 思考子节点的流式 id（`TurnOutput::reasoning_child_id`）
-    pub reasoning: Option<String>,
-}
-
-impl TurnStreamChildIds {
-    /// 空串视为「流式期间没有产生该节点」，规范化为 None。
-    fn normalized(self) -> Self {
-        Self {
-            text: self.text.filter(|s| !s.is_empty()),
-            reasoning: self.reasoning.filter(|s| !s.is_empty()),
-        }
-    }
-}
-
-/// 构造助手消息组（基于 Turn / ToolCall 的分型层级结构）。
-///
-/// 结构：
-/// - `Turn`(根级, `Assistant` 组合)：与 `User` 互为兄弟
-///   ├─ `Reasoning`(子)
-///   ├─ `Text`(回复, 子)
-/// - `ToolCall`(`Assistant` 组合, 子)：自身 `content` 携带请求参数（JSON 文本）
-///   └─ `Text`(响应结果, `Tool`, 子)  ← 由 `llm_build_tool_message` 补充
-pub fn llm_build_assistant_messages(
-    id: &str,
-    content: &str,
-    tool_calls: &[TurnToolCallInfo],
-    rid: Option<String>,
-    reasoning: Option<String>,
-    child_ids: TurnStreamChildIds,
-) -> Vec<ChatMessage> {
-    let child_ids = child_ids.normalized();
-    let mut msgs = Vec::new();
-    let timestamp = crate::symbio_core::clock_now_ms();
-
-    // ── Turn 消息（根级，与 User 互为兄弟）───────────────────────────────
-    msgs.push(ChatMessage {
-        id: id.to_string(),
-        parent_id: None,
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Turn),
-        content: None,
-        status: Some(MessageStatus::Completed),
-        timestamp: Some(timestamp),
-        ..Default::default()
-    });
-
-    // ── Reasoning 消息（parent_id=turn_id）──────────────────────────────
-    // 仅当 reasoning 与回复正文为「不同内容」（即存在独立的文本回复）时才单独生成思考子节点。
-    // reasoning-only 场景下 `reasoning` 已通过 `content`（effective_text 对「无文本回复」的回退）
-    // 承载于下方的 Text 子节点；若此处再生成 Reasoning 子节点，同一段内容会在存储层出现两份
-    // （factor=2：表现为历史会话里重复两份、流式期间"层层叠加"）。
-    let reasoning_only = reasoning
-        .as_ref()
-        .map(|r| !r.trim().is_empty() && r.trim() == content.trim())
-        .unwrap_or(false);
-    if let Some(r) = reasoning {
-        if !r.trim().is_empty() && !reasoning_only {
-            msgs.push(ChatMessage {
-                id: child_ids.reasoning.clone().unwrap_or_else(llm_short_id),
-                parent_id: Some(id.to_string()),
-                role: Some(MessageRole::Assistant),
-                msg_type: Some(MessageType::Reasoning),
-                content: Some(MessageContent::Text(r)),
-                status: Some(MessageStatus::Completed),
-                timestamp: Some(timestamp),
-                ..Default::default()
-            });
-        }
-    }
-
-    // ── Response 文本消息（parent_id=turn_id）───────────────────────────
-    // 仅在存在非空白文本内容时添加，避免产生仅含 \n\n 的空节点
-    if !content.trim().is_empty() {
-        // reasoning-only 场景下这块内容在流式层是以 Reasoning 子节点的形式存在的
-        // （`finalize_assistant_turn` 会把 `reasoning_child_id` 定稿），因此优先复用
-        // reasoning 的流式 id，保证存储层与流式层的节点身份一致。
-        let text_child_id = if reasoning_only {
-            child_ids
-                .reasoning
-                .clone()
-                .or_else(|| child_ids.text.clone())
-        } else {
-            child_ids.text.clone()
-        };
-        msgs.push(ChatMessage {
-            id: text_child_id.unwrap_or_else(llm_short_id),
-            parent_id: Some(id.to_string()),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Text),
-            content: Some(MessageContent::Text(content.into())),
-            status: Some(MessageStatus::Completed),
-            timestamp: Some(timestamp),
-            response_id: rid,
-            ..Default::default()
-        });
-    }
-
-    // ── ToolCall 消息（parent_id=turn_id，组合节点）──────────────────────
-    // ToolCall 组合节点自身携带请求参数（content = JSON 文本），不设独立的请求子节点。
-    // `id` 是节点 id（与流式帧一致），provider 的 wire id 存 `tool_call_id`。
-    for tc in tool_calls {
-        let tc_id = tc.id.clone().unwrap_or_else(llm_short_id);
-        // 解析失败时落库**残破原文**而非占位 `{}`：存储层保真，事后能看出模型
-        // 究竟发了什么（截断在哪一字符），而不是留下一个看似合法的假空参数。
-        let args_text = match &tc.parse_error {
-            Some(raw) => raw.clone(),
-            None => tc.arguments.to_string(),
-        };
-        msgs.push(ChatMessage {
-            id: tc_id.clone(),
-            parent_id: Some(id.to_string()),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::ToolCall),
-            name: tc.name.clone(),
-            content: Some(MessageContent::Text(args_text)),
-            status: Some(MessageStatus::Completed),
-            timestamp: Some(timestamp),
-            tool_call_id: tc.wire_id.clone(),
-            ..Default::default()
-        });
-    }
-
-    msgs
-}
-
-/// 构造工具执行结果消息（role: Tool，msg_type: Text，parent_id 指向 tool_call）。
-/// 响应结果作为 `ToolCall` 的直接 `Text`(`Tool`) 子节点（组合节点可选，故不包 Turn）。
-///
-/// **重要**：结果子节点的 `status` 必须与实际执行结果一致——
-/// 成功 `Completed`、失败 `Failed`。若失败结果被标成 `Completed`，
-/// 当下一轮 `get_context_messages` 过滤掉 `Failed`
-/// 的 `ToolCall` 父节点时，这个"孤儿"`role=Tool` 结果子节点（其 `tool_call_id`
-/// 指向已被删除的 tool_call）会被保留下来，使新一轮 LLM 请求携带非法
-/// `tool_call_id` → 请求包出错（"发给大语言模型的数据包会出错"）。
-pub fn llm_build_tool_message(
-    tool_call_id: &str,
-    content: &str,
-    success: Option<bool>,
-    msg_id: Option<String>,
-) -> ChatMessage {
-    let success = success.unwrap_or(true);
-    ChatMessage {
-        id: msg_id.unwrap_or_else(llm_short_id),
-        parent_id: Some(tool_call_id.into()),
-        role: Some(MessageRole::Tool),
-        msg_type: Some(MessageType::Text),
-        content: Some(MessageContent::Text(content.into())),
-        status: Some(if success {
-            MessageStatus::Completed
-        } else {
-            MessageStatus::Failed
-        }),
-        meta: Some(serde_json::json!({ "success": success })),
-        timestamp: Some(crate::symbio_core::clock_now_ms()),
-        ..Default::default()
-    }
 }
 
 // 单轮产物
@@ -333,6 +85,12 @@ pub fn llm_build_tool_message(
 /// **只装结果，不装过程**：工具调用的分片累积是 model 插件的实现细节
 /// （`plugins/model/tool_accumulator.rs`），收口后才以 [`Self::tool_calls`] 的形态
 /// 交给 session。于是「一轮请求产出了什么」这个契约面里不含任何状态机。
+///
+/// **三个读方法不在本模块**：`is_reasoning_only` / `effective_text` /
+/// `into_messages`（落库视图）定义在 `plugins/session/message_build.rs`——
+/// 它们的外部消费方只有 session，且 `into_messages` 依赖那侧的
+/// `llm_build_assistant_messages`。固有实现可落在同一 crate 的任意模块，
+/// 调用方不需要 import 实现所在处。
 #[derive(Default)]
 pub struct TurnOutput {
     pub text: String,
@@ -340,8 +98,8 @@ pub struct TurnOutput {
     pub response_id: Option<String>,
     /// 本轮完成的工具调用（**结果形态**）。
     ///
-    /// [`Self::is_reasoning_only`] / [`Self::effective_text`] / [`Self::into_messages`]
-    /// 一律读这里，不再由调用方另行传 `n_tools`——「有几个工具」与「是哪些工具」是同一
+    /// `is_reasoning_only` / `effective_text` / `into_messages` 一律读这里，
+    /// 不再由调用方另行传 `n_tools`——「有几个工具」与「是哪些工具」是同一
     /// 件事，分两处传入迟早会不一致。
     pub tool_calls: Vec<TurnToolCallInfo>,
     /// Short ID for the response text child node (consistent across delta updates)
@@ -354,48 +112,3 @@ pub struct TurnOutput {
     /// 用量统计（provider 不一定给，故可选）。用于校准 token 估算器。
     pub usage: Option<ModelUsage>,
 }
-
-impl TurnOutput {
-    /// 本轮只有思考、没有独立文本回复，且**没有**工具调用。
-    ///
-    /// 有工具调用时不算：此时 reasoning 需要作为独立子节点保留。
-    pub fn is_reasoning_only(&self) -> bool {
-        self.text.trim().is_empty() && !self.reasoning.is_empty() && self.tool_calls.is_empty()
-    }
-
-    /// 有效正文：reasoning-only 时回退为 reasoning（见 [`Self::is_reasoning_only`]）。
-    pub fn effective_text(&self) -> &str {
-        if self.is_reasoning_only() {
-            &self.reasoning
-        } else {
-            &self.text
-        }
-    }
-
-    /// 按值消费本产物，落库为助手消息组（Turn + 子节点）。
-    pub fn into_messages(self, root_id: &str) -> Vec<ChatMessage> {
-        let effective = self.effective_text().to_owned();
-        let reasoning = if self.reasoning.is_empty() {
-            None
-        } else {
-            Some(self.reasoning)
-        };
-        llm_build_assistant_messages(
-            root_id,
-            &effective,
-            &self.tool_calls,
-            self.response_id,
-            reasoning,
-            // 复用流式期间已经广播给前端的子节点 id：落库节点与流式节点必须是同一身份，
-            // 否则失败收尾时流式节点会被当成"未落库的半截"再补写一份（重复节点）。
-            TurnStreamChildIds {
-                text: Some(self.response_text_child_id),
-                reasoning: Some(self.reasoning_child_id),
-            },
-        )
-    }
-}
-
-#[cfg(test)]
-#[path = "turn.test.rs"]
-mod tests;

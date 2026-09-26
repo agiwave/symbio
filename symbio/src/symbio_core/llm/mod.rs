@@ -5,7 +5,14 @@
 //! | 模块 | 职责 |
 //! |---|---|
 //! | [`model_provider`] | [`ModelProvider`] trait（session 唯一依赖的模型契约）+ 结束原因与用量（`ModelFinishReason` / `ModelUsage`） |
-//! | [`turn`] | 单轮产物（`TurnOutput`）+ 消息帧原语（`emit_*` 家族）+ 消息构造家族（`build_*`） |
+//! | [`turn`] | 单轮产物（`TurnOutput` · `TurnToolCallInfo`）+ 共享帧原语（`llm_emit_message` / `llm_message_frame` / `llm_removed_frame`）与 id 原语 `llm_short_id` |
+//!
+//! **只被一个插件消费的部分不在本层**（[ADR-023](../../../docs/DECISIONS.md) 的依赖方数量判据，[ADR-038](../../../docs/DECISIONS.md) 逐条执行）：
+//! 落库视图与消息构造（`llm_build_assistant_messages` / `llm_build_tool_message` /
+//! `TurnStreamChildIds` / `TurnOutput` 的三个方法）在 `plugins/session/message_build.rs`，
+//! 状态帧与删除帧的发射口在 `plugins/session/frames.rs`，增量帧 `llm_emit_delta`
+//! 在 `plugins/model/stream.rs`。留守的六个导出逐个都有两个以上消费方
+//! （`llm_message_frame` 是登记在案的例外），逐条判据与被否决的方案见 ADR-038。
 //!
 //! 依赖关系（单向）：
 //!
@@ -20,14 +27,13 @@
 //! （`plugins/model/protocols/sse.rs`）、协议事件方言
 //! （`plugins/model/protocols/mod.rs` 的 `ModelProtocolEvent`）都只有 model
 //! 插件使用，按「依赖方数量」判据（[ADR-023](../../../docs/DECISIONS.md)）住在
-//! 该插件内。本层只留**两侧共用**的契约与数据结构。
+//! 该插件内。本层只留**多消费方**共用的契约与数据结构。
 
 pub mod model_provider;
 pub mod turn;
 
 pub use model_provider::{ModelFinishReason, ModelProvider, ModelUsage};
 pub use turn::{
-    llm_build_assistant_messages, llm_build_tool_message, llm_emit_delta, llm_emit_message,
-    llm_emit_removed, llm_emit_state, llm_message_frame, llm_removed_frame, llm_short_id,
-    llm_state_frame, TurnOutput, TurnStreamChildIds, TurnToolCallInfo,
+    llm_emit_message, llm_message_frame, llm_removed_frame, llm_short_id, TurnOutput,
+    TurnToolCallInfo,
 };

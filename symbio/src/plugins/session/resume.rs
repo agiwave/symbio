@@ -34,12 +34,13 @@
 
 use super::chat_loop::ChatOrchestrator;
 use super::chat_session::PersistentChatSession;
+use super::frames::{llm_emit_removed, llm_emit_state};
 use super::tool_executor::{apply_not_executed, execute_tool_async};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType, ResumeAction,
     ResumeRequest,
 };
-use crate::symbio_core::{llm_emit_message, llm_emit_removed, llm_emit_state, llm_short_id};
+use crate::symbio_core::{llm_emit_message, llm_short_id};
 use crate::symbio_core::{ExecAbortSignal, ExecEventSink, PluginError, PluginInvokeRequest};
 use crate::{plugin_error, plugin_info};
 use serde_json::{json, Value};

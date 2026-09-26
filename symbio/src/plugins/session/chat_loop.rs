@@ -58,10 +58,7 @@ use crate::symbio_core::schemas::{
     HookEvent,
 };
 use crate::symbio_core::ModelFinishReason;
-use crate::symbio_core::{
-    llm_build_tool_message, llm_emit_message, llm_emit_removed, llm_emit_state, llm_short_id,
-    TurnOutput, TurnToolCallInfo,
-};
+use crate::symbio_core::{llm_emit_message, llm_short_id, TurnOutput, TurnToolCallInfo};
 use crate::symbio_core::{
     CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, ModelProvider, ModelUsage, Plugin,
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
@@ -72,6 +69,8 @@ use std::sync::Arc;
 
 use super::compression;
 use super::config::SessionConfig;
+use super::frames::{llm_emit_removed, llm_emit_state};
+use super::message_build::llm_build_tool_message;
 use super::tool_executor::{fire_hook, process_tool_calls_async};
 
 pub async fn run_chat_loop(

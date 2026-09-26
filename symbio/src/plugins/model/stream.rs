@@ -16,7 +16,7 @@ use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
 use crate::symbio_core::ModelUsage;
-use crate::symbio_core::{llm_emit_delta, llm_emit_message, llm_short_id, TurnOutput};
+use crate::symbio_core::{llm_emit_message, llm_short_id, TurnOutput};
 use crate::symbio_core::{ExecAbortSignal, ExecEventSink};
 use futures::StreamExt;
 use std::collections::HashMap;
@@ -28,6 +28,23 @@ use super::tool_accumulator::TurnToolCallAccumulator;
 ///
 /// 太短时开提取器没有意义（下一块多半就把整行补齐了），反而多付一次字段扫描。
 const PARTIAL_LINE_MIN_BYTES: usize = 256;
+
+/// 发送一帧**增量**：`delta` 追加到目标节点正文尾部（流式热路径，O(delta)）。
+///
+/// 目标未知时写入点用帧内信息建占位（帧自给自足，不依赖任何先行帧）。
+///
+/// 原住 `symbio_core::llm::turn`（帧家族），按 ADR-023 的「依赖方数量」判据随
+/// **唯一调用点**迁到本模块（ADR-038）：只有这里的流循环发增量帧。终态帧走
+/// session 的 `llm_emit_state`（`plugins/session/frames.rs`），完整消息帧走 core 的
+/// `llm_emit_message`——三者同一套帧语义，位置由消费方数量决定。
+async fn llm_emit_delta(sink: &ExecEventSink, message_id: &str, delta: &str) {
+    sink.emit(ChatMessage {
+        id: message_id.to_string(),
+        delta: Some(delta.to_string()),
+        ..Default::default()
+    })
+    .await;
+}
 
 /// 当前「未结束行」已经发送给前端的增量长度（按字段分别记）。
 ///

@@ -49,6 +49,8 @@
 | [034](#adr-034-sse-行解析契约随流循环迁入-model-插件) | SSE 行解析契约随流循环迁入 `model` 插件 | 现行（**取代 ADR-022 的位置条款**） |
 | [035](#adr-035-provider-化的判据--三个条件与构造契约) | provider 化的三个条件与构造契约 | 现行 |
 | [036](#adr-036-对象创建机制独立成域--它是系统级反射机制不是插件专属) | 对象创建机制独立成 `creator` 域 | 现行 |
+| [037](#adr-037-实现可以离开-core--记忆整体迁往-providers) | **实现**可以离开 core：记忆整块迁 `providers` | 现行 |
+| [038](#adr-038-帧与消息构造家族按依赖方数量下沉) | 帧与消息构造家族按依赖方数量下沉插件 | 现行（**取代 [ADR-034](#adr-034-sse-行解析契约随流循环迁入-model-插件) 决策 2 的位置条款**） |
 
 ---
 
@@ -609,7 +611,7 @@
 
 ## ADR-034: SSE 行解析契约随流循环**迁入 `model` 插件**
 
-**状态**：已接受。**取代 [ADR-022](#adr-022-sse-增量解析契约在-core字段名在协议层) 决策 1 / 决策 6 中的「位置」条款**。
+**状态**：已接受。**取代 [ADR-022](#adr-022-sse-增量解析契约在-core字段名在协议层) 决策 1 / 决策 6 中的「位置」条款**；决策 2 里「`turn` 装帧 / 消息构造家族」的**位置条款**已被 [ADR-038](#adr-038-帧与消息构造家族按依赖方数量下沉) 取代（形状不变）。
 
 **背景**：[ADR-022](#adr-022-sse-增量解析契约在-core字段名在协议层) 把 SSE 增量解析拆成两个方法（`parse_line` / `open_partial_line`），并把契约放在 core——当时的理由是「**core 负责按 `\n` 切行**，协议层负责『这一行是什么』」，即 core 是两侧共同可见的中立地。
 
@@ -764,6 +766,30 @@
 - 含具体逻辑的东西**默认住 `providers/`**；留在 core 的必须有「没有第二个住处」的理由——`event_bus` 的全局订阅表、`logger` 的进程级闸门属此类（**进程级单例**，不属任何插件）。
 - 不变量：**core 的公开面里不得出现任何一层记忆的文件名**。此条可由 `grep MEMORY` 复核。
 - 新增第四层记忆只需在自己的插件里定一个文件名常量，不触碰 core，也不触碰另三层。
+
+---
+
+## ADR-038: 帧与消息构造家族按依赖方数量下沉
+
+**状态**：已接受。**取代 [ADR-034](#adr-034-sse-行解析契约随流循环迁入-model-插件) 决策 2 的位置条款**。
+
+**背景**：`turn.rs` 末尾的依赖方表一度以「本模块全部符号两侧共用」收尾——那是按**文件**数出来的：同一文件里既有两侧共用的 `llm_emit_message`，也有生产代码里只有 session 一个消费方的 `llm_build_assistant_messages`（唯一链路 `session/chat_loop/turn.rs` → `TurnOutput::into_messages`，model 那 9 处引用全在测试 fixture 里）。[ADR-023](#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层) 数的是**符号**的依赖方，文件不是依赖单位。
+
+**决策**：
+
+1. **落 session**：`llm_build_assistant_messages` / `llm_build_tool_message` / `TurnStreamChildIds` / `impl TurnOutput::{into_messages, is_reasoning_only, effective_text}` → `plugins/session/message_build.rs`；`llm_emit_state` / `llm_state_frame` / `llm_emit_removed` → `plugins/session/frames.rs`——两者生产消费方都只有 session。
+2. **落 model**：`llm_emit_delta` → `plugins/model/stream.rs`，唯一调用点就是那里的流循环热路径。
+3. **测试 fixture 随消费方走**：model 的 `message_builder.test.rs` 改为本地构造同形状的树，两侧各锁一半（落库形状在 `plugins/session/message_build.test.rs`，扁平化视图在 model 侧）。fixture 计入依赖方（ADR-023 不豁免测试），不迁就永远停在「1 生产 + 1 测试」。
+4. **留守六个**：`llm_emit_message` / `llm_removed_frame` / `llm_short_id` / `TurnToolCallInfo` / `TurnOutput` 各有两个以上消费方；`llm_message_frame` 是登记在案的**例外**——外部只有 session，但它与 core 自己的 `llm_emit_message` 同进退，「完整消息必然带状态」只在一处实现。
+
+**理由**：
+
+- **住哪由调用链决定**：`into_messages` 若住 model，session 就得跨插件引用 model（E-009 禁止；固有实现不需 `use`，躲得过审计也仍是隐性依赖）。唯一生产消费方是谁，就住哪。
+- **搬迁是一次编译期可检的移动**：固有 impl 可落在同 crate 任意模块，调用方不必 import 实现处，故调用点零改动。
+
+**被否决的方案**：**只改文档、代码不动**（修得掉那句失实声明，修不掉「文件里躺着单消费方符号」——按文件豁免等于给 core 留一个「顺手放」的口子，[ADR-037](#adr-037-实现可以离开-core--记忆整体迁往-providers) 堵的正是同类）；**下沉 model**（生产消费方不是 model，且会新造一条 session→model 的边）。
+
+**后果与不变量**：`symbio_core` 根平铺导出收窄为六个符号——去处写在 `symbio_core/llm/mod.rs` 的模块表，理由写在本条，两者不互相复述。判据不变：任一留守符号的依赖方降到 1 就同样下沉，`llm_message_frame` 不构成先例；跨插件引用构造器即 E-009 违例。
 
 ---
 

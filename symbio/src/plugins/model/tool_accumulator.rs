@@ -15,8 +15,8 @@
 //!
 //! | 符号 | 住哪 | 理由 |
 //! |---|---|---|
-//! | [`TurnToolCallInfo`] | `symbio_core` | `llm_build_assistant_messages` 的**形参类型**，两侧共用 |
-//! | `llm_short_id` | `symbio_core` | 消息构造家族共用的 id 原语 |
+//! | [`TurnToolCallInfo`] | `symbio_core` | `TurnOutput::tool_calls` 的**元素类型**：本插件产出、session（`tool_executor` · 落库）消费，两个插件共用 |
+//! | `llm_short_id` | `symbio_core` | 消息节点 id 的统一格式：本模块（`entry.node_id`）与 session 的消息构造共用 |
 //! | [`TurnToolCallAccumulator`] | 本模块 | 只有 `stream.rs` 驱动 |
 //!
 //! ## 三条不变量

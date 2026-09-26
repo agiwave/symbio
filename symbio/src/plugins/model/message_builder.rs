@@ -364,9 +364,11 @@ fn find_tool_result<'a>(
         .copied()
 }
 
-// ChatMessage 构造（llm_build_assistant_messages / llm_build_tool_message / llm_short_id /
-// TurnStreamChildIds）实现在 symbio_core::llm::turn：本文件仅测试消费，由 tests 模块
-// 直接引用 core（避免 lib 侧 unused import 警告）
+// ChatMessage 的**构造**不在本插件：`llm_build_assistant_messages` /
+// `llm_build_tool_message` / `TurnStreamChildIds` / `TurnOutput::into_messages`
+// 生产上只有 session 一个消费方，已随 ADR-038 从 `symbio_core::llm::turn` 下沉到
+// `plugins/session/message_build.rs`。本文件是**读侧**（存储树 → 请求包），
+// 测试用同形状的本地 fixture（理由见 tests 模块文件头）。
 
 #[cfg(test)]
 #[path = "message_builder.test.rs"]
