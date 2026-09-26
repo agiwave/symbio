@@ -11,7 +11,7 @@
 use super::bound_provider::BoundProvider;
 use super::model_providers::{ModelProviderConfig, ModelProvidersConfig};
 use super::protocols::resolve_protocol_id;
-use crate::providers::vdfs_service::{MemoryVdfs, SingleFileVdfs};
+use crate::providers::{MemoryVdfs, SingleFileVdfs};
 use crate::symbio_core::schemas::detail::{DetailField, DetailOption};
 use crate::symbio_core::{
     creator_create_object, plugin_dir_from_ctx, Plugin, PluginDir, PluginError,
@@ -326,7 +326,7 @@ impl Default for ModelPlugin {
 // 本插件**直接实现 `VdfsProvider`**：VDFS 是唯一协议、唯一地址空间，列 / 读 /
 // 写 / 删 / 动作的语义都在这里表达。
 //
-// 存储不自建抽象：落盘走 `providers::vdfs_service::SingleFileVdfs`（一个条目 =
+// 存储不自建抽象：落盘走 `providers::SingleFileVdfs`（一个条目 =
 // 一份 `provider.json`），清单走 `MemoryVdfs`（内存镜像，规范 §13.4「model 的列表
 // 来自内存」）。于是本模块只剩 **model 特有的三件事**：详情定义随节点下发、
 // 写前的连接校验、写后对 chat 侧注册表与内存镜像的同步。
@@ -532,7 +532,7 @@ impl ModelPlugin {
 
     /// 路径末段 → 条目 id（去掉 `.<kind>` 呈现扩展名）
     fn id_of(path: &str) -> String {
-        crate::providers::vdfs_service::entry::id_of(path, PLUGIN_ID_MODEL)
+        crate::providers::vdfs_id_of(path, PLUGIN_ID_MODEL)
     }
 
     /// 目标地址 → 条目 id（**唯一**判据，`write` 与测试共用）。
@@ -551,9 +551,7 @@ impl ModelPlugin {
                 "写{LABEL}挂载根需要 create 意图：目录自身没有可覆盖的目标"
             )));
         }
-        Ok(crate::providers::vdfs_service::entry::auto_id(
-            PLUGIN_ID_MODEL,
-        ))
+        Ok(crate::providers::vdfs_auto_id(PLUGIN_ID_MODEL))
     }
 
     /// 连接测试（复用 `validate_provider`）：失败也返回 `Ok`，由 `message` 承载原因

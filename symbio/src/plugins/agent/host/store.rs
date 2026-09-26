@@ -348,7 +348,7 @@ impl AgentDirStore {
     // 插件实例，本模块只负责回答「文件在哪」。
     //
     // ⚠️ 本模块**只负责回答「记忆文件在哪」**：读 / 写 / 两道容量闸门一律走共享实现
-    // （`providers::memory::MemoryFile`）——agent / work / session 三层共用同一份
+    // （`providers::MemoryFile`）——agent / work / session 三层共用同一份
     // 实现，本模块不持有闸门。
 
     /// 智能体记忆文件：`<Agent 目录>/AGENTS.md`

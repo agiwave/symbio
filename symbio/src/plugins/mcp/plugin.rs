@@ -19,12 +19,12 @@
 //!
 //! 每个 MCP Server 是一个**目录型条目**：`<本插件目录>/<name>/server.json`
 //! （主文件 `server.json` + 可选附属文件），由
-//! [`DirVdfs`](crate::providers::vdfs_service::DirVdfs) 承载落盘。
+//! [`DirVdfs`](crate::providers::DirVdfs) 承载落盘。
 //! `McpConfig` 的内存视图（`servers: HashMap<name, McpServerConfig>`）
 //! 通过从磁盘加载/回写保持一致。
 
 pub use crate::plugins::mcp::schemas::mcp_config::{McpConfig, McpServerConfig};
-use crate::providers::vdfs_service::DirVdfs;
+use crate::providers::DirVdfs;
 use crate::symbio_core::{
     plugin_dir_from_ctx, Capability, CapabilityMeta, Plugin, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
@@ -174,7 +174,7 @@ impl Default for McpPlugin {
 // 本插件**直接实现 `VdfsProvider`**：VDFS 是唯一协议、唯一地址空间，列 / 读 /
 // 写 / 删 / 动作的语义都在这里表达。
 //
-// 存储走 `providers::vdfs_service::DirVdfs`（一个 server = 一个目录，主文件
+// 存储走 `providers::DirVdfs`（一个 server = 一个目录，主文件
 // `server.json`）——条目寻址、原子写、mtime、整包 zip、变更广播都在集中实现里。
 // 本模块只剩 **mcp 特有的三件事**：详情定义随节点下发、transport 必填项校验、
 // 写后把 server 回灌进内存 config 与 manager 缓存。
@@ -191,7 +191,7 @@ const LABEL: &str = "MCP";
 
 /// 路径末段 → 条目 id（去掉 `.mcp` 呈现扩展名）
 fn id_of(path: &str) -> String {
-    crate::providers::vdfs_service::entry::id_of(path, PLUGIN_ID_MCP)
+    crate::providers::vdfs_id_of(path, PLUGIN_ID_MCP)
 }
 
 /// 目标地址 → 条目 id（`write` 与测试共用的**唯一**判据）。
@@ -208,9 +208,7 @@ fn resolve_id(path: &str, create: bool) -> VdfsResult<String> {
             "写{LABEL}挂载根需要 create 意图：目录自身没有可覆盖的目标"
         )));
     }
-    Ok(crate::providers::vdfs_service::entry::auto_id(
-        PLUGIN_ID_MCP,
-    ))
+    Ok(crate::providers::vdfs_auto_id(PLUGIN_ID_MCP))
 }
 
 /// 主文件原文 → VDFS 节点（`ext = form` + 详情定义随节点 `schema` 下发）
@@ -417,9 +415,8 @@ impl VdfsProvider for McpPlugin {
                             "「导入」只对{LABEL}挂载根可用：{path}"
                         )));
                     }
-                    let pack =
-                        crate::providers::vdfs_service::VdfsUnpack::from_payload(payload.as_ref())
-                            .map_err(|e| VdfsError::invalid(e.0))?;
+                    let pack = crate::providers::VdfsUnpack::from_payload(payload.as_ref())
+                        .map_err(|e| VdfsError::invalid(e.0))?;
                     let bytes = pack.bytes().map_err(|e| VdfsError::invalid(e.0))?;
                     let name = pack.name_of(PLUGIN_ID_MCP);
                     let created = self.store().import_pack(&name, &bytes).await?;

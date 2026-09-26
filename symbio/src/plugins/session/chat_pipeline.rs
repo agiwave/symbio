@@ -35,7 +35,7 @@
 //! 仍留在 `symbio_core` 的是**收集期错误通道**（`capability_error.rs`：写侧为任意
 //! 参与 traverse 的插件、读侧为 session 编排方，属跨插件契约）；本文件仅消费。
 
-use crate::providers::collectors::DefaultToolVisitor;
+use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{
     capability_init_error_bucket, CapabilityVisitor, Plugin, PluginInvokeRequest,
     PluginInvokeRequestExt, CAPABILITY_ERRORS, PATH, TRAVERSE_AVAILABLE_TOOLS,

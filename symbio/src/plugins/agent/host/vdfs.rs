@@ -36,7 +36,7 @@ use super::instruction;
 use super::memory;
 use super::plugin::AgentPlugin;
 use super::store::{AgentDirRecord, AgentDirStore, AGENT_MEMORY_FILE};
-use crate::providers::vdfs_service;
+use crate::providers::{vdfs_id_of, VdfsPack, VdfsUnpack};
 use crate::symbio_core::{
     descend_addr, vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes,
 };
@@ -94,7 +94,7 @@ fn parse_rel_path(path: &str) -> RelPath<'_> {
 
 /// 路径末段 → 条目 id（去掉 `.agent` 呈现扩展名）
 fn id_of(path: &str) -> String {
-    vdfs_service::entry::id_of(path, PLUGIN_ID_AGENT)
+    vdfs_id_of(path, PLUGIN_ID_AGENT)
 }
 
 /// 把子 composite 返回的**子树相对路径**提升为本插件空间内的路径。
@@ -683,8 +683,7 @@ impl AgentPlugin {
                     "「导入」只对{LABEL}挂载根可用：{path}"
                 )));
             }
-            let pack = vdfs_service::VdfsUnpack::from_payload(payload)
-                .map_err(|e| VdfsError::invalid(e.0))?;
+            let pack = VdfsUnpack::from_payload(payload).map_err(|e| VdfsError::invalid(e.0))?;
             let bytes = pack.bytes().map_err(|e| VdfsError::invalid(e.0))?;
             let store = self.store();
             let r = store
@@ -711,7 +710,7 @@ impl AgentPlugin {
         let bytes = store
             .export(&id)
             .map_err(|e| VdfsError::not_found(format!("导出失败：{e}")))?;
-        let pack = vdfs_service::VdfsPack::new(&id, &bytes);
+        let pack = VdfsPack::new(&id, &bytes);
         let data = serde_json::to_value(&pack)
             .map_err(|e| VdfsError::internal(format!("导出结果序列化失败: {e}")))?;
         Ok(VdfsActionResult {

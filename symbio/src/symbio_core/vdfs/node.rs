@@ -50,7 +50,7 @@ use super::words::{VDFS_KIND_DIR, VDFS_KIND_FILE, VDFS_STATUS_ACTIVE};
 /// 需要「先选个本地包再落盘」这类**额外操作**时，那是详情页的动作
 /// （[`VDFS_ACTION_IMPORT`](super::VDFS_ACTION_IMPORT)），不是本结构的字段。
 ///
-/// [`entry::id_of`]: crate::providers::vdfs_service::entry::id_of
+/// [`entry::id_of`]: crate::providers::vdfs_id_of
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VdfsNewType {
     /// 新元素**呈现扩展名**（地址末段后缀，`id_of` 按它剥 id；**不是**渲染器键）

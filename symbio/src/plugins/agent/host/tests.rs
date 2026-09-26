@@ -8,7 +8,7 @@
 
 use super::plugin::AgentPlugin;
 use super::store::AgentDirStore;
-use crate::providers::collectors::{DefaultConfigurableVisitor, DefaultToolVisitor};
+use crate::providers::{DefaultConfigurableVisitor, DefaultToolVisitor};
 use crate::symbio_core::{vdfs, VdfsProvider};
 use crate::symbio_core::{
     CapabilityVisitor, ConfigurableVisitor, Plugin, PluginDir, PluginInvokeRequest,

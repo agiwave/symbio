@@ -206,7 +206,7 @@ async fn option_definition_without_container_degrades_to_empty() {
 /// 而不会有任何编译错误。
 #[tokio::test]
 async fn session_contributes_option_fields_to_the_visitor() {
-    use crate::providers::collectors::DefaultOptionVisitor;
+    use crate::providers::DefaultOptionVisitor;
     use crate::symbio_core::{
         OptionVisitor, PluginSimpleRequest, OPTION_VISITOR, PATH, TRAVERSE_AVAILABLE_OPTIONS,
     };

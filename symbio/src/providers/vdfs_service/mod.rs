@@ -20,7 +20,8 @@
 //!
 //! `symbio_core::vdfs` 是**纯接口**（只依赖 std / serde / async_trait，
 //! 可原样抽出为独立 crate）；带 tokio IO 与 homedir 的**实现**属于宿主基础设施，
-//! 归本层。插件通过 `crate::providers::vdfs_service::*` 组合它们。
+//! 归本层。插件经 [`crate::providers`] 的出口取用它们（`DirVdfs` / `SingleFileVdfs` /
+//! `MemoryVdfs`），**不深引**本目录的子模块。
 //!
 //! ## 与「废除实体机制」的关系
 //!
@@ -30,13 +31,26 @@
 //! 差异（标题、状态、`ext`、`schema`、写前校验、写后内存同步）仍留在各插件，
 //! 由它们在调用点以普通 Rust 参数传入，不经过任何通用钩子。
 
-pub mod dir;
-pub mod entry;
-pub mod memory;
-pub mod pack;
-pub mod single_file;
+// ⭐ 子模块一律私有（与 `providers/embedding` 同一约定）：**本文件是唯一出口**，
+// 消费方按出口取符号，不深引子树（深引会让出口形同虚设——改内部结构就要改所有调用点）。
+// 四条线各自说清为什么要外露：
+mod dir;
+mod entry;
+mod memory;
+mod pack;
+mod single_file;
 
-pub use dir::DirVdfs;
-pub use memory::MemoryVdfs;
-pub use pack::{VdfsPack, VdfsUnpack};
-pub use single_file::SingleFileVdfs;
+/// 三种访问拓扑（一个条目 = 一份主文件 / 一个目录 / 内存一条记录）
+pub(crate) use dir::DirVdfs;
+pub(crate) use memory::MemoryVdfs;
+pub(crate) use single_file::SingleFileVdfs;
+
+/// 整包导入导出：zip 落盘 + base64 编解码。插件的节点动作 `import` / `export`
+/// 直接要这两个类型，故进出口。
+pub(crate) use pack::{VdfsPack, VdfsUnpack};
+
+/// 条目 id / 段名规则：地址解析（`id_of`）与落盘（`safe_segment`）、以及
+/// 「无名字新建条目」的 id 生成（`auto_id`）是**多个插件共用的同一条口径**
+/// ——各插件自己写一份就会出现「同一个 id 在两个插件里被安全化成两种样子」。
+/// 名字太泛（`id_of` 单独读不出归属），故经 [`crate::providers`] 平铺时带 `vdfs_` 前缀。
+pub(crate) use entry::{auto_id, id_of, safe_segment};

@@ -6,7 +6,7 @@
 //! 只影响注入、不影响 VDFS 挂载点。
 
 use super::*;
-use crate::providers::collectors::DefaultToolVisitor;
+use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{CapabilityVisitor, PluginInvokeRequestExt, VDFS_PARENT_ADDR};
 use tempfile::TempDir;
 

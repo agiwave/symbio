@@ -30,7 +30,7 @@
 
 use super::memory::{MEMORY_DESCRIPTION, SEGMENT_TITLE, WORK_MEMORY_FILE};
 use super::plugin::WorkPlugin;
-use crate::providers::memory::{MemoryFile, MemoryNodeSpec};
+use crate::providers::{MemoryFile, MemoryNodeSpec};
 use crate::symbio_core::{
     vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes,
 };

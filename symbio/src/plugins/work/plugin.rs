@@ -13,7 +13,7 @@
 
 use super::config::WorkConfig;
 use super::memory::{self, SEGMENT_NAME, SEGMENT_TITLE, WORK_MEMORY_FILE};
-use crate::providers::memory::MemoryFile;
+use crate::providers::MemoryFile;
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::VdfsAccess;
 use crate::symbio_core::{

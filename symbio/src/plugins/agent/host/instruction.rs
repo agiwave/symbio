@@ -43,7 +43,7 @@
 //! 不该让每个会话都背一段没有内容的头信息。
 
 use super::store::AGENT_MEMORY_FILE;
-use crate::providers::memory::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
+use crate::providers::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
 use crate::symbio_core::PLUGIN_ID_AGENT;
 use std::path::{Path, PathBuf};
 

@@ -39,7 +39,7 @@
 //!
 //! 于是本插件不再自己写「超限怎么办」「截断怎么算」——那些口径全项目只有一份。
 
-use crate::providers::memory::{MemoryFile, MemorySegmentSpec};
+use crate::providers::{MemoryFile, MemorySegmentSpec};
 use std::path::{Path, PathBuf};
 
 /// 工作区记忆文件名 —— `AGENTS.md`（**本插件自己的**约定，不是跨插件契约）。
@@ -88,7 +88,7 @@ pub fn store(workdir: Option<&str>, write_max_bytes: usize, inject_max_bytes: us
 ///
 /// `address` 由调用方算好传入（[`address`] 返回 `String`，不能借给返回值长期持有）。
 /// 排版（一行头信息 + 正文 + 空 / 截断提示）由共享实现
-/// [`memory_render_segment`](crate::providers::memory::memory_render_segment) 统一决定。
+/// [`MemoryFile::segment`](crate::providers::MemoryFile::segment) 统一决定。
 pub fn segment_spec(address: &str) -> MemorySegmentSpec<'_> {
     MemorySegmentSpec {
         title: SEGMENT_TITLE,

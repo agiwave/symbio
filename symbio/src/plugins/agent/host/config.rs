@@ -4,8 +4,8 @@
 //!
 //! | 字段 | 闸门 | 位置 | 超限行为 |
 //! |---|---|---|---|
-//! | `memory_max_bytes` | 智能体自身的 `AGENTS.md` 写入 | [`MemoryFile::write`](crate::providers::memory::MemoryFile::write) | **拒绝** |
-//! | `memory_inject_max_bytes` | 智能体自身的 `AGENTS.md` 注入 | [`MemoryFile::inject`](crate::providers::memory::MemoryFile::inject) | **截断** + 告知地址 |
+//! | `memory_max_bytes` | 智能体自身的 `AGENTS.md` 写入 | [`MemoryFile::write`](crate::providers::MemoryFile::write) | **拒绝** |
+//! | `memory_inject_max_bytes` | 智能体自身的 `AGENTS.md` 注入 | [`MemoryFile::inject`](crate::providers::MemoryFile::inject) | **截断** + 告知地址 |
 //!
 //! 「智能体自身的 `AGENTS.md`」有**两个作用域**：系统态 `{homedir}/AGENTS.md`
 //! （对所有会话生效，用户可在设置页编辑）与子智能体态 `<agentdir>/AGENTS.md`

@@ -34,7 +34,7 @@
 //! （见 `symbio_core::capability::option::OptionVisitor::register_option_field`）。
 
 use super::plugin::SessionPlugin;
-use crate::providers::collectors::DefaultOptionVisitor;
+use crate::providers::DefaultOptionVisitor;
 use crate::symbio_core::schemas::detail::{
     DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
     DETAIL_PICK_DIRECTORY,

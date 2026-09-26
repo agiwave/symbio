@@ -18,7 +18,7 @@ fn id_of_strips_presentation_extension() {
 /// 名字改由载荷里的 `filename` 推导；`VdfsUnpack::name_of` 是这条推导的唯一实现。
 #[test]
 fn unpack_name_comes_from_the_filename() {
-    let pack = |f: &str| crate::providers::vdfs_service::VdfsUnpack {
+    let pack = |f: &str| crate::providers::VdfsUnpack {
         filename: f.into(),
         b64: String::new(),
     };

@@ -42,7 +42,7 @@
 //! `ctx[SESSION_ID]` 缺失 / 为空 → 什么都不注入。收集期拿不到会话 id 的广播
 //!（例如设置页的选项收集）不该凭空造一份记忆出来。
 
-use crate::providers::memory::{MemoryFile, MemorySegmentSpec};
+use crate::providers::{MemoryFile, MemorySegmentSpec};
 use std::path::PathBuf;
 
 /// 会话记忆文件名 —— `MEMORY.md`（**本插件自己的**约定，不是跨插件契约）。
@@ -98,7 +98,7 @@ pub fn store(
 ///
 /// `address` 是**绝对地址**（调用方经 `absolute_addr` 从上下文父地址拼出，
 /// 返回 `String`，不能借给返回值长期持有）。排版由共享实现
-/// [`memory_render_segment`](crate::providers::memory::memory_render_segment) 统一决定。
+/// [`MemoryFile::segment`](crate::providers::MemoryFile::segment) 统一决定。
 pub fn segment_spec(address: &str) -> MemorySegmentSpec<'_> {
     MemorySegmentSpec {
         title: SEGMENT_TITLE,

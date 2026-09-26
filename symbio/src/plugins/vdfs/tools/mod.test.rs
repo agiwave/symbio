@@ -4,7 +4,7 @@
 
 use super::*;
 
-use crate::providers::collectors::DefaultToolVisitor;
+use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::VDFS_PARAM_WORKDIR;
 use crate::symbio_core::{
     PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR,

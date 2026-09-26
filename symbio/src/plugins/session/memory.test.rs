@@ -9,7 +9,7 @@
 //! 用户目录。需要真文件的用例一律用 `tempfile` 自建 [`MemoryFile`]。
 
 use super::*;
-use crate::providers::memory::MemoryFile;
+use crate::providers::MemoryFile;
 use crate::symbio_core::absolute_addr;
 use crate::symbio_core::{
     PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, PLUGIN_ID_SESSION,

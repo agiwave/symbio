@@ -508,7 +508,7 @@ pub(crate) fn parse_session_path(path: &str) -> vdfs::VdfsResult<VdfsSessionPath
 /// 会话内部的虚拟子项（工作目录按会话是否声明 workdir 决定是否出现）。
 ///
 /// `memory` 由调用方构造好传入（形状由共享实现
-/// [`MemoryFile::node`](crate::providers::memory::MemoryFile::node) 产出，
+/// [`MemoryFile::node`](crate::providers::MemoryFile::node) 产出，
 /// `list` 与 `stat` 因此共用同一份形状）；它是个**文件**，与各目录并列——
 /// 记忆本来就是会话的一部分，不该另开一条寻址。
 ///

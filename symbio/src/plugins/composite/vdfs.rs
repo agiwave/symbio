@@ -87,7 +87,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::providers::collectors::DefaultConfigurableVisitor;
+use crate::providers::DefaultConfigurableVisitor;
 
 /// 容器的 VDFS（包含子目录列表的 provider，见模块文档）
 pub struct CompositeVdfs {

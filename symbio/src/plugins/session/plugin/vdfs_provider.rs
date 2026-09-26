@@ -1405,13 +1405,13 @@ impl SessionPlugin {
 
     /// 会话记忆 → VDFS 节点。
     ///
-    /// 形状由共享实现 [`MemoryFile::node`](crate::providers::memory::MemoryFile::node) 产出，
+    /// 形状由共享实现 [`MemoryFile::node`](crate::providers::MemoryFile::node) 产出，
     /// `list`（经 `internal_dirs`）与 `stat`
     /// **共用同一份**——「列表里的和点开的不是同一个东西」这类 bug 因此写不出来。
     async fn memory_node_of(&self, id: &str) -> vdfs::VdfsNode {
         self.memory_store(id)
             .await
-            .node(&crate::providers::memory::MemoryNodeSpec {
+            .node(&crate::providers::MemoryNodeSpec {
                 title: super::super::memory::SEGMENT_TITLE,
                 kind: PLUGIN_ID_SESSION,
                 description: super::super::memory::MEMORY_DESCRIPTION,

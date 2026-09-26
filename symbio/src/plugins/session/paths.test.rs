@@ -39,7 +39,7 @@ fn safe_id_is_the_same_rule_as_vdfs_entry_segments() {
     ] {
         assert_eq!(
             safe_id(id),
-            crate::providers::vdfs_service::entry::safe_segment(id),
+            crate::providers::vdfs_safe_segment(id),
             "id `{id}` 的会话段名与资源段名必须同解"
         );
     }

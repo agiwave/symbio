@@ -139,12 +139,12 @@ impl SkillPlugin {
 // 本插件**直接实现 `VdfsProvider`**：VDFS 是唯一协议、唯一地址空间，列 / 读 /
 // 写 / 删 / 动作的语义都在这里表达。
 //
-// 存储走 `providers::vdfs_service::DirVdfs`（一个技能 = 一个目录，主文件
+// 存储走 `providers::DirVdfs`（一个技能 = 一个目录，主文件
 // `SKILL.md`）：条目寻址、原子写、mtime、整包 zip、变更广播都在集中实现里，
 // 本模块只剩 **skill 特有的两件事**——SKILL.md 的摘要解析（frontmatter →
 // 标题/摘要/config）与写前的表单校验。
 
-use crate::providers::vdfs_service::DirVdfs;
+use crate::providers::DirVdfs;
 use crate::symbio_core::{vdfs_from_plugin_error, vdfs_unwatch_changes, vdfs_watch_changes};
 use crate::symbio_core::{
     VdfsAccess, VdfsActionResult, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode,
@@ -174,7 +174,7 @@ fn store(dir: &PluginDir) -> DirVdfs {
 
 /// 路径末段 → 条目 id（去掉 `.skill` 呈现扩展名）
 fn id_of(path: &str) -> String {
-    crate::providers::vdfs_service::entry::id_of(path, PLUGIN_ID_SKILL)
+    crate::providers::vdfs_id_of(path, PLUGIN_ID_SKILL)
 }
 
 /// 目标地址 → 条目 id（`write` 与测试共用的**唯一**判据）。
@@ -191,9 +191,7 @@ fn resolve_id(path: &str, create: bool) -> VdfsResult<String> {
             "写{LABEL}挂载根需要 create 意图：目录自身没有可覆盖的目标"
         )));
     }
-    Ok(crate::providers::vdfs_service::entry::auto_id(
-        PLUGIN_ID_SKILL,
-    ))
+    Ok(crate::providers::vdfs_auto_id(PLUGIN_ID_SKILL))
 }
 
 /// 主文件原文 → VDFS 节点（`ext = form` + 详情定义随节点 `schema` 下发）
@@ -379,9 +377,8 @@ impl VdfsProvider for SkillPlugin {
                             "「导入」只对{LABEL}挂载根可用：{path}"
                         )));
                     }
-                    let pack =
-                        crate::providers::vdfs_service::VdfsUnpack::from_payload(payload.as_ref())
-                            .map_err(|e| VdfsError::invalid(e.0))?;
+                    let pack = crate::providers::VdfsUnpack::from_payload(payload.as_ref())
+                        .map_err(|e| VdfsError::invalid(e.0))?;
                     let bytes = pack.bytes().map_err(|e| VdfsError::invalid(e.0))?;
                     let name = pack.name_of(PLUGIN_ID_SKILL);
                     let created = self.store().import_pack(&name, &bytes).await?;

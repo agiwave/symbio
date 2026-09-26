@@ -163,7 +163,7 @@ impl AgentPlugin {
         &self,
         agent_dirs: &AgentDirStore,
         agent_id: &str,
-    ) -> crate::providers::memory::MemoryFile {
+    ) -> crate::providers::MemoryFile {
         let cfg = self.config.read().await;
         memory::store(
             agent_dirs,
@@ -174,7 +174,7 @@ impl AgentPlugin {
     }
 
     /// 系统智能体自身指令的门面（**系统态的唯一构造点**，落位见 [`super::instruction`]）
-    pub(crate) async fn instruction_store(&self) -> crate::providers::memory::MemoryFile {
+    pub(crate) async fn instruction_store(&self) -> crate::providers::MemoryFile {
         let cfg = self.config.read().await;
         instruction::store(
             &instruction::host_dir(self.config_file.dir().dir()),

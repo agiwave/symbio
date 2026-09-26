@@ -40,7 +40,7 @@
 //! 于是本插件不再自己写「超限怎么办」「截断怎么算」——那些口径全项目只有一份。
 
 use super::store::{AgentDirStore, AGENT_MEMORY_FILE};
-use crate::providers::memory::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
+use crate::providers::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
 use crate::symbio_core::PLUGIN_ID_AGENT;
 
 /// 系统提示词条目在收集器里的注册名（同名覆盖的键）。

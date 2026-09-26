@@ -22,7 +22,7 @@
 use super::chat_session::PersistentChatSession;
 pub use super::config::SessionConfig;
 use super::types::{Session, SessionSummary};
-use crate::providers::memory::MemoryFile;
+use crate::providers::MemoryFile;
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::schemas::session::{chat_message as cm, session_chat};
 use crate::symbio_core::vdfs;

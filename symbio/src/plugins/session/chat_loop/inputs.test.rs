@@ -9,7 +9,7 @@
 //! - **全空才兜底**：兜底串只在「显式段与注册段都为空」时出现。
 
 use super::*;
-use crate::providers::collectors::DefaultToolVisitor;
+use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{CapabilityVisitor, PluginSimpleRequest};
 
 /// 构造带 CAPABILITY_VISITOR 的上下文，按顺序注册 `prompts`

@@ -1,6 +1,6 @@
 //! 「单文件长期记忆」的实现 —— 各层记忆**同一份口径**。
 //!
-//! > ⚠️ **与 [`crate::providers::vdfs_service::MemoryVdfs`] 无关**：那个 `memory` 是
+//! > ⚠️ **与 `providers/vdfs_service` 的「内存后端 VDFS」无关**：那个 `memory` 是
 //! > 「**内存**后端」的 VDFS（运行期驻留、不落盘）；本模块的 `memory` 是「**长期记忆**
 //! > 文件」（落盘、要给模型读写，文件名各层自定）。两个词都取「memory」的常见义，但指的是
 //! > 完全不同的东西——读代码时先看路径（`providers/memory/` vs `providers/vdfs_service/memory.rs`）。

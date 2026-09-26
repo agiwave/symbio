@@ -273,8 +273,8 @@ fn vdfs_internal_dirs_conditional() {
     let memory = || {
         let path = std::path::PathBuf::from("abc")
             .join(crate::plugins::session::memory::SESSION_MEMORY_FILE);
-        crate::providers::memory::MemoryFile::new(Some(path), 1024, 256).node(
-            &crate::providers::memory::MemoryNodeSpec {
+        crate::providers::MemoryFile::new(Some(path), 1024, 256).node(
+            &crate::providers::MemoryNodeSpec {
                 title: "会话记忆",
                 kind: PLUGIN_ID_SESSION,
                 description: "d",

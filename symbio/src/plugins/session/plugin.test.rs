@@ -7,7 +7,7 @@
 use super::*;
 // 未装配容器时没有 PLUGIN_DIR，配置文件落盘目标指个临时目录
 use crate::plugins::session::test_dir;
-use crate::providers::collectors::DefaultToolVisitor;
+use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{
     CapabilityVisitor, CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
 };
