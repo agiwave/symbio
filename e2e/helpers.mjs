@@ -315,7 +315,7 @@ export const SEG_MESSAGES = 'message';
  * ## 为什么两步缺一不可（这里踩过，且症状极具误导性）
  *
  * 事件总线只是**广播口**：`EventBus::try_publish(KIND_VDFS, …)` 只投给已注册的
- * 订阅者，而"有没有变更要投"取决于 provider 的 `ChangeSubscriptions` —— sink 由
+ * 订阅者，而"有没有变更要投"取决于 provider 的 `VdfsChangeSubscriptions` —— sink 由
  * `vdfs/watch` 登记。**只 subscribe 不 watch，一条变更都收不到**：不报错、不断连、
  * 帧数为零，看起来就像"模型没有产出内容"。判据：订阅后跑一轮对话，若一条
  * `vdfs` 帧都没有，就是这里少了一半。

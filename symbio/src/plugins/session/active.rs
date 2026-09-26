@@ -1,6 +1,6 @@
 use crate::symbio_core::schemas::{session::chat_message as cm, session::session_chat};
-use crate::symbio_core::ChangeSubscriptions;
 use crate::symbio_core::ExecAbortSignal;
+use crate::symbio_core::VdfsChangeSubscriptions;
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{atomic::AtomicU64, atomic::Ordering, Arc};
@@ -131,7 +131,7 @@ pub struct ActiveSessionState {
 
 impl Default for ActiveSessionState {
     fn default() -> Self {
-        Self::new(ChangeSubscriptions::default())
+        Self::new(VdfsChangeSubscriptions::default())
     }
 }
 
@@ -139,12 +139,12 @@ impl ActiveSessionState {
     /// `changes` 是**本 provider 自持的那张 VDFS 变更表**——转写的实时面投给它。
     /// 不收它、让 `Transcript` 自己去取全局表，会投到没有订阅者的那张表上
     /// （见 `Transcript::new` 的说明）。
-    pub fn new(changes: ChangeSubscriptions) -> Self {
+    pub fn new(changes: VdfsChangeSubscriptions) -> Self {
         Self::with_session_id(String::new(), changes)
     }
 
     /// 带 session_id 的构造函数
-    pub fn with_session_id(session_id: String, changes: ChangeSubscriptions) -> Self {
+    pub fn with_session_id(session_id: String, changes: VdfsChangeSubscriptions) -> Self {
         Self {
             request_id: AtomicU64::new(0),
             session_id: session_id.clone(),
@@ -242,11 +242,11 @@ pub struct ActiveSessionManager {
     /// VDFS 变更表句柄：**每一份**新建的 `ActiveSessionState` 都把自己的
     /// `Transcript` 接到这张表上。共享句柄而非各建一张——`vdfs/watch` 登记的是
     /// 插件那一张（`SessionPlugin::change_subs`），别的表上没有订阅者。
-    changes: ChangeSubscriptions,
+    changes: VdfsChangeSubscriptions,
 }
 
 impl ActiveSessionManager {
-    pub fn new(changes: ChangeSubscriptions) -> Self {
+    pub fn new(changes: VdfsChangeSubscriptions) -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             changes,

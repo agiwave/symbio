@@ -30,6 +30,7 @@ pub use paths::{
 
 use serde_json::Value;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 /// 项目全局通用的 Key 特征
 /// 支持类型安全的值获取与设置
@@ -325,3 +326,35 @@ impl SymbioKey for ExecAbortSignalKey {
     }
 }
 pub const ABORT_SIGNAL: ExecAbortSignalKey = ExecAbortSignalKey;
+
+/// 能力收集期**错误桶** Key —— 第五条进程内收集通道
+/// （能力 = 可调用对象；选项 = 可展示的数据节点；可配置 = 「我有配置文档」；
+/// 出口 = 「本次调用的可见事件往这里写」；**错误** = 「本次收集有致命错误」）。
+///
+/// 写侧是**任何参与 `traverse` 的插件**（当前为 agent 插件报子智能体装配硬错误），
+/// 读侧是 session 编排方（`plugins/session/chat_pipeline.rs`）。两侧分属不同插件、
+/// 互相不可见，故键面定义在本域；机制的完整论述见 `capability/error.rs` 的模块文档。
+///
+/// ## 为什么 `parse → None` 且 `WIRE = false`
+///
+/// 与 [`CAPABILITY_VISITOR`] / [`OPTION_VISITOR`] / [`CONFIG_VISITOR`] / [`EVENT_SINK`]
+/// 同款，但这里**两条都要写**：值是 `Arc<Mutex<Vec<..>>>`，`CapabilityError` 也没有
+/// `Serialize` ⇒ 它连「进程外表达」都不成立，故 `WIRE = false`。
+/// （`CONFIG` / `PLUGIN_DIR` 只需 `parse → None`：它们的值本身可序列化，
+/// 只是不做「从字符串恢复」这件事——`WIRE` 与 `parse` 是**声明与结果**，不是同一条。）
+pub struct CapabilityErrorsKey;
+impl SymbioKey for CapabilityErrorsKey {
+    type Value = Arc<Mutex<Vec<crate::symbio_core::CapabilityError>>>;
+    /// 进程内专用：`Arc<Mutex<..>>` 无字符串 / JSON 形态
+    const WIRE: bool = false;
+    fn name(&self) -> &'static str {
+        "capability_errors"
+    }
+    fn parse(&self, _s: &str) -> Option<Self::Value> {
+        None
+    }
+    fn format(&self, _v: &Self::Value) -> String {
+        "capability_errors".to_string()
+    }
+}
+pub const CAPABILITY_ERRORS: CapabilityErrorsKey = CapabilityErrorsKey;

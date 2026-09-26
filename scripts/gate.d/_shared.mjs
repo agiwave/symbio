@@ -93,7 +93,7 @@ export const BASELINE = {
   //      背景：`CompressionEmitter::finish` 把在途节点原样交给落库，存储水位被抬进
   //      在途号段，两个计数器在同一区间各自递增 ⇒ 撞号（同一会话里用户消息与压缩
   //      节点各持 `1099511627781`，e2e T8 的「seq 严格递增」当场失败）。
-  // 924：会话实时投递合帧 + `ChangeSubscriptions::notify` 语义澄清（2026-09-23）
+  // 924：会话实时投递合帧 + `VdfsChangeSubscriptions::notify` 语义澄清（2026-09-23）
   //      ——实测 924。**+4 用例**为本批新增：`session/transcript.test.rs` 三条
   //      （相邻同节点纯增量合成一帧 / 切换节点即开新窗口 / 运行态帧先冲出待投增量）
   //      + `symbio_core/vdfs/host.rs` 一条（**无关键订阅**一条都收不到）；

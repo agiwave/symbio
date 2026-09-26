@@ -51,9 +51,9 @@ use crate::symbio_core::{
 };
 use crate::symbio_core::{
     Plugin, PluginEntry, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, CAPABILITY_VISITOR, CONFIG_VISITOR,
-    KEY_CAN_DISABLE, KEY_ENABLED, KEY_NAME, KEY_PROVIDER, KEY_REQUIRED, KEY_VERSION, PLUGIN_FILE,
-    PLUGIN_MANAGER, UNDISABLABLE_PLUGINS,
+    PluginInvokeResponse, PluginMeta, PluginPayload, ASSEMBLY_UNDISABLABLE_PLUGINS,
+    CAPABILITY_VISITOR, CONFIG_VISITOR, KEY_CAN_DISABLE, KEY_ENABLED, KEY_NAME, KEY_PROVIDER,
+    KEY_REQUIRED, KEY_VERSION, PLUGIN_FILE, PLUGIN_MANAGER,
 };
 use crate::symbio_core::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNode, VdfsProvider, VdfsRequest,
@@ -229,7 +229,7 @@ fn management_actions() -> Vec<DetailAction> {
             busy_label: Some("启用中…".to_string()),
             ..Default::default()
         },
-        // 停用：已启用**且**允许停用时可见（界面底座插件拒绝停用，见 `UNDISABLABLE_PLUGINS`）
+        // 停用：已启用**且**允许停用时可见（界面底座插件拒绝停用，见 `ASSEMBLY_UNDISABLABLE_PLUGINS`）
         DetailAction {
             id: VDFS_ACTION_DISABLE.to_string(),
             label: "停用".to_string(),
@@ -438,7 +438,7 @@ impl PluginManagerPlugin {
         obj.insert(KEY_REQUIRED.to_string(), Value::Bool(entry.required));
         obj.insert(
             KEY_CAN_DISABLE.to_string(),
-            Value::Bool(!UNDISABLABLE_PLUGINS.contains(&entry.name.as_str())),
+            Value::Bool(!ASSEMBLY_UNDISABLABLE_PLUGINS.contains(&entry.name.as_str())),
         );
         obj.insert(
             KEY_VERSION.to_string(),

@@ -2,7 +2,7 @@
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）：测试跟着被测试的实现走。
 //!
-//! 投递的观测方式：给 `Transcript` 一张带 sink 的 `ChangeSubscriptions`，sink 把
+//! 投递的观测方式：给 `Transcript` 一张带 sink 的 `VdfsChangeSubscriptions`，sink 把
 //! 每条变更收进数组。断言的是**投递出去的形状**（`path` = 那条消息节点自身的地址、
 //! `data` = 那条 `ChatMessage`），而不是内部字段——形状才是线上契约。
 //!
@@ -49,8 +49,8 @@ fn removed_msg(id: &str) -> cm::ChatMessage {
 /// 一张**带收件盒**的变更表：`seen` 收到每一条被投递的变更。
 ///
 /// 订阅路径取 `""`（provider 根）——`related` 对空串恒命中，因此所有变更都会进来。
-fn sink_subs() -> (ChangeSubscriptions, Arc<Mutex<Vec<VdfsChange>>>) {
-    let subs = ChangeSubscriptions::default();
+fn sink_subs() -> (VdfsChangeSubscriptions, Arc<Mutex<Vec<VdfsChange>>>) {
+    let subs = VdfsChangeSubscriptions::default();
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = seen.clone();
     subs.watch(

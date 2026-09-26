@@ -42,7 +42,7 @@
 
 - `启用`：停用时可见；
 - `停用`：已启用**且**允许停用时可见（界面底座插件拒绝停用，见
-  `symbio_core::keys::UNDISABLABLE_PLUGINS`）；
+  `symbio_core::ASSEMBLY_UNDISABLABLE_PLUGINS`）；
 - `卸载`（`id = delete`）：非必需时可见。**这个 id 是刻意的**：它就是前端机制动作的
   同名动作，因此声明它既换了文案（「删除」→「卸载」），也顶掉了兜底那一个——
   必需插件于是连按钮都不出现，而不是点了才报错。

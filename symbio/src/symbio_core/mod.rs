@@ -46,7 +46,7 @@ pub use vdfs::{
 // 契约函数与宿主桥
 pub use vdfs::{
     derive_ext, from_plugin_error, has_parent_segment, host_ctx, notify_change, path_within,
-    unwatch_changes, vdfs_change_of, vdfs_context, watch_changes, ChangeSubscriptions,
+    unwatch_changes, vdfs_change_of, vdfs_context, watch_changes, VdfsChangeSubscriptions,
 };
 // 地址机制（crate 内部装配用，不是公开契约）
 pub(crate) use vdfs::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
@@ -62,10 +62,10 @@ pub use embedding::{EmbeddingError, EmbeddingService};
 
 // ==================== 插件契约 ====================
 pub use capability::{
-    announce_configurable, collect_options, entry_of, invoke_capability, resolve, to_wire,
-    Capability, CapabilityCategory, CapabilityMeta, CapabilityToolContextRetention,
-    CapabilityVisitor, ConfigurableVisitor, DefaultConfigurableVisitor, DefaultOptionVisitor,
-    DefaultToolVisitor, OptionVisitor, TRAVERSE_AVAILABLE_OPTIONS,
+    announce_configurable, entry_of, invoke_capability, resolve, to_wire, Capability,
+    CapabilityCategory, CapabilityMeta, CapabilityToolContextRetention, CapabilityVisitor,
+    ConfigurableVisitor, DefaultConfigurableVisitor, DefaultToolVisitor, OptionVisitor,
+    TRAVERSE_AVAILABLE_OPTIONS,
 };
 // 工具结果 `failure_kind` 闭集：生产方（`local`）与消费方（`session`）分属不同插件，
 // 互相不可见，只能经这里共享。单独一行——它是模块而非类型。
@@ -80,12 +80,12 @@ pub use keys::*;
 
 // ==================== 装配策略 ====================
 // 「一棵标准插件树挂哪些插件」「哪些插件不许被停用」——不是键、不是 id，见 assembly 模块文档。
-pub use assembly::{SUB_AGENT_PLUGINS, UNDISABLABLE_PLUGINS};
+pub use assembly::{ASSEMBLY_SUB_AGENT_PLUGINS, ASSEMBLY_UNDISABLABLE_PLUGINS};
 
 // ==================== 基础设施 / 工具函数 ====================
-pub use capability::{
-    init_error_bucket, report_error, take_errors, CapabilityError, CAPABILITY_ERRORS,
-};
+// 注：`CAPABILITY_ERRORS`（错误桶键）不在这里——它是 `SymbioKey` 实例，
+// 随 `pub use keys::*` 一并平铺（键面只有一个定义处，见 `keys/mod.rs`）。
+pub use capability::{init_error_bucket, report_error, take_errors, CapabilityError};
 pub use clock::now_ms;
 // 锁辅助函数**刻意不进 `pub use plugin::*`**（见 `plugin/error.rs::lock_read` 的说明）：
 // 显式 `pub(crate)` 导入，既让全 crate 可用，又保留 `dead_code` 的可见性。

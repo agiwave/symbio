@@ -287,7 +287,7 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 装配动作（启用 / 停用 / 卸载）与「添加插件」也走这里，但**动词在容器**：本插件只把
 `Action(enable|disable)`（插件名进载荷）、`Delete(<插件名>)`、根上的 `Write`（安装）
 转发回所在容器（见 `composite/vdfs.rs` 的「插件注册表」一节）。必需插件（构造者经
-`REQUIRED_PLUGINS` 声明）**不可删除，但可停用**；界面底座插件（`UNDISABLABLE_PLUGINS`）
+`REQUIRED_PLUGINS` 声明）**不可删除，但可停用**；界面底座插件（`ASSEMBLY_UNDISABLABLE_PLUGINS`）
 连停用也拒绝——停掉它就没有界面再把它打开。
 
 ---

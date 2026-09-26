@@ -62,7 +62,7 @@ pub struct SessionPlugin {
     ///
     /// 用 `Arc` 而非内联值：工作目录监听器（后台任务）也要投递进同一批订阅者，
     /// 需要共享所有权。
-    pub(crate) change_subs: Arc<vdfs::ChangeSubscriptions>,
+    pub(crate) change_subs: Arc<vdfs::VdfsChangeSubscriptions>,
     /// 收件箱唤醒：入队时置位，常驻消费者据此醒来取件（见 `inbox` 模块）。
     /// 它是**唤醒**不是队列——队列本身在 `ActiveSessionStateInner::inbox`。
     pub(crate) inbox_wake: tokio::sync::Notify,
@@ -76,7 +76,7 @@ impl SessionPlugin {
     /// 主构造函数（Factory 机制使用）
     pub fn new(parent: Option<Weak<dyn Plugin>>, config: SessionConfig, dir: PluginDir) -> Self {
         // 变更订阅表：provider 自持一份，工作目录监听器共享同一份（见下方注入）
-        let change_subs = Arc::new(vdfs::ChangeSubscriptions::default());
+        let change_subs = Arc::new(vdfs::VdfsChangeSubscriptions::default());
         // 目录树场景同时服务 VDFS：文件变化经**同一张订阅表**转发给 `<根>`
         // 订阅方，VDFS 侧不必另开一套监听（实时链路在机制层合流）。
         let workdir_watches = super::workdir::WorkdirWatchManager::default();

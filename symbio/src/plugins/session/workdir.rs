@@ -13,8 +13,8 @@
 //! 路径白名单同风格）。
 
 use crate::symbio_core::PluginError;
-use crate::symbio_core::{ChangeSubscriptions, VdfsChange};
 use crate::symbio_core::{VdfsAccess, VdfsNode};
+use crate::symbio_core::{VdfsChange, VdfsChangeSubscriptions};
 use dashmap::DashMap;
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -258,7 +258,7 @@ pub async fn delete_node(workdir: &str, rel: &str) -> Result<(), PluginError> {
 /// 关注它的容器（会话）引用计数维持——不同会话的工作目录各自监听，共享
 /// 工作目录的多个会话共享同一监听，最后一个订阅方释放后监听停止。
 /// 文件变化时把容器 id 翻译成 VDFS 路径，投进会话订阅者共用的那张变更表
-/// （[`ChangeSubscriptions::notify`]），驱动前端树视图与详情编辑器按 §3.3
+/// （[`VdfsChangeSubscriptions::notify`]），驱动前端树视图与详情编辑器按 §3.3
 /// 防抖重载。机制层只约定「这个地址变了」语义，不感知文件细节。
 ///
 /// **释放采用世代守卫的延迟释放**：unwatch 经网络在途，可能在快速
@@ -281,10 +281,10 @@ pub struct WorkdirWatchManager {
     /// VDFS 变更订阅表（可选，由 VDFS provider 构造期注入）。
     ///
     /// 同一份目录树场景只服务 VDFS 机制：文件变化时把容器 id 翻译成 VDFS 路径
-    /// 再投递进**会话订阅者共用的那张表**（[`ChangeSubscriptions::notify`]），
+    /// 再投递进**会话订阅者共用的那张表**（[`VdfsChangeSubscriptions::notify`]），
     /// 使 `<根>` 页面不必另开一套监听。投递在表内收敛为恰好一次，
     /// 与前端订阅了几条路径无关。
-    vdfs_subs: std::sync::Mutex<Option<Arc<ChangeSubscriptions>>>,
+    vdfs_subs: std::sync::Mutex<Option<Arc<VdfsChangeSubscriptions>>>,
 }
 
 /// (workdir, container) 的世代守卫键
@@ -298,7 +298,7 @@ impl WorkdirWatchManager {
     /// 未注入时（provider 尚未构造）目录树变化无处可投——VDFS 是工作目录
     /// 变化的**唯一**实时出口，不再有第二条频道；注入后按容器翻译成
     /// [`VdfsChange`] 投进去，`<根>` 页面即可实时刷新。
-    pub fn set_vdfs_subs(&self, subs: Arc<ChangeSubscriptions>) {
+    pub fn set_vdfs_subs(&self, subs: Arc<VdfsChangeSubscriptions>) {
         if let Ok(mut slot) = self.vdfs_subs.lock() {
             *slot = Some(subs);
         }
@@ -484,7 +484,7 @@ const VOLATILE_DIRS: &[&str] = &[
 /// 匹配，只有把每条路径带上各自的容器 id，对应会话的那条订阅才会命中。
 /// 未注入订阅表时静默跳过。
 fn publish_vdfs_change(
-    subs: &Option<Arc<ChangeSubscriptions>>,
+    subs: &Option<Arc<VdfsChangeSubscriptions>>,
     containers: &DashMap<String, Vec<(String, u64)>>,
     workdir: &str,
     rel: &str,

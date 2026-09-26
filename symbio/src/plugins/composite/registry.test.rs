@@ -250,13 +250,13 @@ impl Plugin for NopPlugin {
 
 // ==================== 停用：界面底座插件不可关 ====================
 
-/// 界面底座插件（[`UNDISABLABLE_PLUGINS`]）拒绝停用——停掉它就没有界面再把它打开
+/// 界面底座插件（[`ASSEMBLY_UNDISABLABLE_PLUGINS`]）拒绝停用——停掉它就没有界面再把它打开
 #[tokio::test]
 async fn disabling_an_undisablable_plugin_is_refused() {
     let root = temp_root("undisablable");
     let reg = registry_at(&root, Vec::new());
 
-    for name in UNDISABLABLE_PLUGINS {
+    for name in ASSEMBLY_UNDISABLABLE_PLUGINS {
         let err = reg.set_enabled(name, false).await.unwrap_err();
         assert!(err.contains("界面底座"), "{name} 应被拒绝停用：{err}");
     }

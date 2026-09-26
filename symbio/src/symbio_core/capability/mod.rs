@@ -4,15 +4,13 @@ mod option;
 mod tool_name;
 mod tools;
 
-pub use error::{init_error_bucket, report_error, take_errors, CapabilityError, CAPABILITY_ERRORS};
+pub use error::{init_error_bucket, report_error, take_errors, CapabilityError};
 
 // 域内子模块私有，公开面在此显式重导出
 pub use configurable::{
     announce_configurable, entry_of, ConfigurableVisitor, DefaultConfigurableVisitor,
 };
-pub use option::{
-    collect_options, DefaultOptionVisitor, OptionVisitor, TRAVERSE_AVAILABLE_OPTIONS,
-};
+pub use option::{OptionVisitor, TRAVERSE_AVAILABLE_OPTIONS};
 pub use tool_name::{resolve, to_wire};
 pub use tools::DefaultToolVisitor;
 

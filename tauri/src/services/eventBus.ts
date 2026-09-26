@@ -95,7 +95,7 @@ interface EventBusState {
   /**
    * 已向后端登记的路径 → 引用计数。
    *
-   * 后端 `vdfs/watch` 是按路径引用计数的（`ChangeSubscriptions`），前端必须
+   * 后端 `vdfs/watch` 是按路径引用计数的（`VdfsChangeSubscriptions`），前端必须
    * 一一对应地登记与摘除，否则要么重复投递（叠字）、要么提前摘掉别人的订阅。
    */
   vdfsWatchCounts: Map<string, number>
@@ -309,7 +309,7 @@ export function vdfsChangeInScope(scope: VdfsChangeScope, path: string): boolean
  *
  * ## 向后端登记 watch（本函数不可省的一半）
  *
- * 后端只向**登记过路径**的订阅者投递变更（`vdfs/watch` → `ChangeSubscriptions`）。
+ * 后端只向**登记过路径**的订阅者投递变更（`vdfs/watch` → `VdfsChangeSubscriptions`）。
  * 只 `subscribe` 总线而不登记，等于在一条没人开闸的频道上等事件——前端模式
  * （`publishVdfsChangedLocal`）照常工作、单测照常通过，接上真实后端后**一条
  * 变更都收不到**。因此这里按作用域前缀登记，并在最后一个订阅者撤走时摘除。

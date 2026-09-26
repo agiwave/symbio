@@ -8,7 +8,7 @@
 //!   在途消息此前没有号（只能靠 `timestamp` 兜底，同毫秒即并列），现在**创建时**就分配
 //!   （见 [`INFLIGHT_SEQ_BASE`]）。它是**节点属性**，不是投递属性——消费端按它排序，
 //!   与变更的到达顺序无关。
-//! - **变更投递**：每个变更投给 `kind = "vdfs"` 的订阅表（[`ChangeSubscriptions`]），
+//! - **变更投递**：每个变更投给 `kind = "vdfs"` 的订阅表（[`VdfsChangeSubscriptions`]），
 //!   落点是**那条消息节点自身的地址** `<id>/message/<mid>`，载荷就是这条 `ChatMessage`
 //!   （正文增长 = `delta`、整条替换 = `content`、删除 = `status = removed`）。
 //!   **语义全在字段上，没有操作枚举**——这与 `ChatMessage` 帧自己的设计同源。
@@ -42,7 +42,7 @@
 
 use super::plugin::message_path;
 use crate::symbio_core::schemas::session::chat_message as cm;
-use crate::symbio_core::{ChangeSubscriptions, VdfsChange};
+use crate::symbio_core::{VdfsChange, VdfsChangeSubscriptions};
 use crate::{plugin_debug, plugin_error, plugin_info};
 use indexmap::IndexMap;
 use std::sync::Arc;
@@ -126,7 +126,7 @@ pub struct Transcript {
     nodes: IndexMap<String, cm::ChatMessage>,
     /// 变更投递表——**必须是 session provider 的那一份**（不是全局 `hub_of`）：
     /// `vdfs/watch` 登记的是那张表，投到别处等于没人收到。
-    changes: Arc<ChangeSubscriptions>,
+    changes: Arc<VdfsChangeSubscriptions>,
     /// 待投递的**纯增量窗口**（见 [`Self::deliver`]）。
     pending: Option<PendingDelta>,
     /// 日志合并器（**只影响日志**，不参与序号与投递）。
@@ -314,7 +314,7 @@ impl Transcript {
     /// `changes` 必须是 **session provider 自持的那一张表**（插件的
     /// `change_subs`）：`vdfs/watch` 登记的就是它，投到全局 `hub_of(kind)` 上等于
     /// 没人收到——那张表上没有本 provider 的订阅者。
-    pub fn new(session_id: String, changes: Arc<ChangeSubscriptions>) -> Self {
+    pub fn new(session_id: String, changes: Arc<VdfsChangeSubscriptions>) -> Self {
         Self {
             session_id,
             next_seq: INFLIGHT_SEQ_BASE,

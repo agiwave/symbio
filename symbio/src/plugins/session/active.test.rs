@@ -10,11 +10,11 @@
 //! 历史只增不减，半开重试注定复现，故单独用永久标志跳过（见 `record_failure`）。
 
 use super::ActiveSessionState;
-use crate::symbio_core::ChangeSubscriptions;
+use crate::symbio_core::VdfsChangeSubscriptions;
 
 #[tokio::test]
 async fn skip_is_false_until_threshold_reached() {
-    let st = ActiveSessionState::with_session_id("s".into(), ChangeSubscriptions::default());
+    let st = ActiveSessionState::with_session_id("s".into(), VdfsChangeSubscriptions::default());
     // 阈值前：不跳过，仍尝试
     assert!(!st.compression_should_skip().await);
     st.compression_record_failure(false).await;
@@ -28,7 +28,7 @@ async fn skip_is_false_until_threshold_reached() {
 
 #[tokio::test]
 async fn success_resets_the_counter() {
-    let st = ActiveSessionState::with_session_id("s".into(), ChangeSubscriptions::default());
+    let st = ActiveSessionState::with_session_id("s".into(), VdfsChangeSubscriptions::default());
     st.compression_record_failure(false).await;
     st.compression_record_failure(false).await;
     st.compression_record_failure(false).await;
@@ -43,7 +43,7 @@ async fn success_resets_the_counter() {
 
 #[tokio::test]
 async fn cooldown_is_observed_after_open() {
-    let st = ActiveSessionState::with_session_id("s".into(), ChangeSubscriptions::default());
+    let st = ActiveSessionState::with_session_id("s".into(), VdfsChangeSubscriptions::default());
     // 推到开闸
     st.compression_record_failure(false).await;
     st.compression_record_failure(false).await;
@@ -66,7 +66,7 @@ async fn cooldown_is_observed_after_open() {
 /// 永久失败（历史超限）第一次就跳过，且不等阈值/冷却——重试注定复现。
 #[tokio::test]
 async fn permanent_failure_skips_immediately() {
-    let st = ActiveSessionState::with_session_id("s".into(), ChangeSubscriptions::default());
+    let st = ActiveSessionState::with_session_id("s".into(), VdfsChangeSubscriptions::default());
     st.compression_record_failure(true).await;
     assert!(
         st.compression_should_skip().await,
@@ -77,7 +77,7 @@ async fn permanent_failure_skips_immediately() {
 /// 永久失败只能被「成功」清除——模拟用户清理历史后压缩重新可行。
 #[tokio::test]
 async fn permanent_failure_is_cleared_by_success_only() {
-    let st = ActiveSessionState::with_session_id("s".into(), ChangeSubscriptions::default());
+    let st = ActiveSessionState::with_session_id("s".into(), VdfsChangeSubscriptions::default());
     st.compression_record_failure(true).await;
     // 再记一次瞬时失败：不得解除永久跳过
     st.compression_record_failure(false).await;

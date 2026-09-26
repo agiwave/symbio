@@ -275,7 +275,7 @@ impl SymbioClient {
     ///
     /// 事件总线只是**广播口**：`EventBus::try_publish(EVENT_BUS_KIND_VDFS, …)` 只投给已注册
     /// 的总线订阅者，而**谁来 publish** 取决于 VDFS 那一侧有没有 sink。sink 由
-    /// `vdfs/watch` 登记进 provider 的变更表（`ChangeSubscriptions::watch`）——
+    /// `vdfs/watch` 登记进 provider 的变更表（`VdfsChangeSubscriptions::watch`）——
     /// 没有 watch 就没有 sink，也就没有任何帧会上总线。
     ///
     /// S27 把两条下行通道并成一条（`session/stream` 退役、会话实时面迁到 `vdfs`

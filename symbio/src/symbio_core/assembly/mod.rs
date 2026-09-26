@@ -16,8 +16,8 @@
 //!
 //! | 常量 | 消费方 |
 //! |---|---|
-//! | [`SUB_AGENT_PLUGINS`] | `plugins/home`（系统树）· `plugins/agent`（子 Agent 树） |
-//! | [`UNDISABLABLE_PLUGINS`] | `plugins/composite`（执行停用前查）· `plugins/plugin_manager`（界面置灰） |
+//! | [`ASSEMBLY_SUB_AGENT_PLUGINS`] | `plugins/home`（系统树）· `plugins/agent`（子 Agent 树） |
+//! | [`ASSEMBLY_UNDISABLABLE_PLUGINS`] | `plugins/composite`（执行停用前查）· `plugins/plugin_manager`（界面置灰） |
 //!
 //! 只被**一个**模块依赖的两条已按同判据下沉：系统树的插件清单并入 `plugins/home` 的
 //! `SYSTEM_PLUGINS`（原本只是本清单的纯别名，无第二份字面量），
@@ -63,7 +63,7 @@
 /// 逻辑自动套用——不存在「支持子 Agent 却不支持子 Agent 的子 Agent」的特例：任何一层
 /// 都走同一条机制，且都同样只跳过 `vdfs` 单槽（单槽归系统 Agent，由
 /// `SubAgentVisitor` 在每一层丢弃）。
-pub const SUB_AGENT_PLUGINS: &[&str] = &[
+pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
     "plugin_manager", // 插件管理与配置入口（子 Agent 页同样需要）
     "event_bus",      // 事件总线
     "session",        // 会话
@@ -87,10 +87,10 @@ pub const SUB_AGENT_PLUGINS: &[&str] = &[
 /// `plugin_manager` 的页面上。于是用户会看到一个再也点不到「启用」的界面，
 /// 只能去磁盘上改 `PLUGIN.yml`——那不是权限设计，是自断其路。
 ///
-/// 因此它是一条**机制级**判据（与 [`SUB_AGENT_PLUGINS`] 同处）：装配方（容器）
+/// 因此它是一条**机制级**判据（与 [`ASSEMBLY_SUB_AGENT_PLUGINS`] 同处）：装配方（容器）
 /// 在执行停用前查它，而不是让每个插件自己声明「我不能被关」。插件的启停状态是
 /// 装配方的事（见 [`crate::symbio_core::KEY_ENABLED`]），这条规则也该住在同一处。
-pub const UNDISABLABLE_PLUGINS: &[&str] = &[
+pub const ASSEMBLY_UNDISABLABLE_PLUGINS: &[&str] = &[
     crate::symbio_core::PLUGIN_MANAGER, // 插件管理入口：停用它就再也点不到「启用」
     crate::symbio_core::PLUGIN_VDFS,    // 资源访问层：停用它整棵资源树都取不到
 ];

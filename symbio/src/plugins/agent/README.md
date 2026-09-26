@@ -27,10 +27,10 @@
 
 ### 子 Agent 的默认插件清单
 
-子树挂**与父 Agent 同构的默认插件集**（见 `symbio_core::SUB_AGENT_PLUGINS`）——与系统侧
-是**同一份清单**（`symbio_core::SYSTEM_AGENT_PLUGINS` 即它的别名）：`plugin_manager`、`event_bus`、
-`session`、`model`、`local`、`web`、`mcp`、`telegram`、`hook`、`agent`、`skill`、`gateway`、
-`vdfs`、`work`。`vdfs` 会随子树构造出实例，但其注册经 `SubAgentVisitor` 丢弃（VDFS 根单槽归根）。
+子树挂**与父 Agent 同构的默认插件集**（见 `symbio_core::ASSEMBLY_SUB_AGENT_PLUGINS`）——与系统侧
+是**同一份清单**：`home` 的 `SYSTEM_PLUGINS` 直接取这个常量，**不是第二份手抄**。清单内容不在此
+复述（复述即重复，改一次要动两处），要看得去常量定义或 `docs/CURRENT.md` §1。`vdfs` 会随子树
+构造出实例，但其注册经 `SubAgentVisitor` 丢弃（VDFS 根单槽归根）。
 
 - `work` 在其中：子树 `WORKDIR` **继承父会话**，所以 `work` 注入的是工作区记忆，
   与系统侧读的是同一份语义、但落在子树自己的 `agent/<id>/work` 挂载点，无双重注入。

@@ -4,7 +4,7 @@
 //! `orchestrator.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
-use crate::symbio_core::ChangeSubscriptions;
+use crate::symbio_core::VdfsChangeSubscriptions;
 
 /// 向在途转写图注入一条消息（测试辅助：等价于旧的 live_messages.push）。
 async fn push_inflight(state: &Arc<ActiveSessionState>, message: cm::ChatMessage) {
@@ -15,7 +15,7 @@ async fn push_inflight(state: &Arc<ActiveSessionState>, message: cm::ChatMessage
 async fn armed_state() -> (Arc<ActiveSessionState>, ExecAbortSignal) {
     let state = Arc::new(ActiveSessionState::with_session_id(
         "s1".into(),
-        ChangeSubscriptions::default(),
+        VdfsChangeSubscriptions::default(),
     ));
     let signal = ExecAbortSignal::new();
     state.inner.write().await.abort_signal = Some(signal.clone());
@@ -215,7 +215,7 @@ async fn converge_inflight_finalizes_live_buffer_nodes() {
     // 在途侧：Turn 下未落库的 reasoning(Streaming) 与一个父不存在的孤儿
     let state = Arc::new(ActiveSessionState::with_session_id(
         sid.into(),
-        ChangeSubscriptions::default(),
+        VdfsChangeSubscriptions::default(),
     ));
     push_inflight(
         &state,
@@ -274,7 +274,7 @@ async fn converge_inflight_marks_root_turn_aborted_and_children_completed() {
     // 父存在性判据按序检查，与真实广播顺序一致。
     let state = Arc::new(ActiveSessionState::with_session_id(
         sid.into(),
-        ChangeSubscriptions::default(),
+        VdfsChangeSubscriptions::default(),
     ));
     push_inflight(&state, turn_node("turn-live", cm::MessageStatus::Streaming)).await;
     push_inflight(
@@ -321,7 +321,7 @@ async fn converge_inflight_is_idempotent() {
 
     let state = Arc::new(ActiveSessionState::with_session_id(
         sid.into(),
-        ChangeSubscriptions::default(),
+        VdfsChangeSubscriptions::default(),
     ));
     push_inflight(&state, node("turn", None, cm::MessageStatus::Streaming)).await;
     assert_eq!(p.converge_inflight(&state, sid, "用户中止").await, 1);
@@ -351,7 +351,7 @@ async fn handle_abort_signals_registered_turn_and_converges() {
 
     let state = Arc::new(ActiveSessionState::with_session_id(
         sid.into(),
-        ChangeSubscriptions::default(),
+        VdfsChangeSubscriptions::default(),
     ));
     let signal = ExecAbortSignal::new();
     {
@@ -417,7 +417,7 @@ async fn aborted_and_completed_outcomes_are_distinct() {
         .unwrap();
     let state = Arc::new(ActiveSessionState::with_session_id(
         sid.into(),
-        ChangeSubscriptions::default(),
+        VdfsChangeSubscriptions::default(),
     ));
 
     p.emit_session_state(&state, SessionStateChange::aborted())

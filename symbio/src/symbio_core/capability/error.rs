@@ -18,7 +18,7 @@
 //! 调用（子智能体的嵌套会话经路由 `session/chat/send` 复用同一管线，
 //! 不由 agent 直接驱动），因此定义在 session 插件内。
 
-use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt, SymbioKey};
+use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_ERRORS};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -31,24 +31,9 @@ pub struct CapabilityError {
     pub message: String,
 }
 
-/// 收集期错误桶在 `PluginInvokeRequest` 中的类型安全键
-pub struct CapabilityErrorsKey;
-
-impl SymbioKey for CapabilityErrorsKey {
-    type Value = Arc<Mutex<Vec<CapabilityError>>>;
-    fn name(&self) -> &'static str {
-        "capability_errors"
-    }
-    fn parse(&self, _s: &str) -> Option<Self::Value> {
-        None
-    }
-    fn format(&self, _v: &Self::Value) -> String {
-        "capability_errors".to_string()
-    }
-}
-
-/// 收集期错误桶键常量
-pub const CAPABILITY_ERRORS: CapabilityErrorsKey = CapabilityErrorsKey;
+// 错误桶的**键**（`CapabilityErrorsKey` 与 `CAPABILITY_ERRORS`）住在 `symbio_core::keys`
+// ——所有 `SymbioKey` 实例的唯一定义处（见 `keys/mod.rs` 的域说明）。本模块只用它，
+// 不定义它：键面归键域，机制归本域。
 
 /// 初始化错误桶（由能力收集管线调用；重复调用无副作用）
 pub fn init_error_bucket(ctx: &Arc<dyn PluginInvokeRequest>) {

@@ -113,7 +113,7 @@ impl SessionPlugin {
     ///
     /// ## 与消息变更的关系：同一张表，不靠顺序
     ///
-    /// 两者都投到 session provider 的那张 `ChangeSubscriptions`（消息投
+    /// 两者都投到 session provider 的那张 `VdfsChangeSubscriptions`（消息投
     /// `<sid>/message/<mid>`、运行态投 `<sid>`）。到达顺序**没有**机制保证，也
     /// **不需要**：`ChatMessage.seq` 决定显示顺序（节点属性），而「本轮是否结束」
     /// 由会话节点自己的 `status` 决定——消费端回读即得，不依赖谁先到。

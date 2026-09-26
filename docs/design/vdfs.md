@@ -629,7 +629,7 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
   由消费者按路径前缀自行过滤——`list` / `stat` 亦然，坐标系因此始终只有一个。
 - 消费能力由访问位与 provider 实现共同决定；默认 `watch` 为 no-op（无实时能力
   的 provider 直接成功，消费者退回手动拉取）。
-- **订阅登记按 `kind` 全局持有，投递是同步的**（`vdfs::host::ChangeSubscriptions`）：
+- **订阅登记按 `kind` 全局持有，投递是同步的**（`vdfs::host::VdfsChangeSubscriptions`）：
   每个自管变更源的 provider 持有一份表实例，`watch` 记一条 `(path, sink)`、
   `unwatch` 撤一条，变更点直接 `notify` 遍历投递——**没有中间广播通道、没有转发任务**
   （同步投递**顺序确定**：变更点返回即投递完成，不存在「已落盘但尚未转发」的中间态）。
@@ -651,7 +651,7 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
   就地落定，无载荷变更防抖重拉。
 - **`notify_change(kind, path)` 只发无载荷变更**（绝大多数资源信号长这样）。
   带业务载荷的变更由**生产者直接经它已持有的订阅表**投递
-  （`ChangeSubscriptions::notify(&VdfsChange::with_data(path, data))`，
+  （`VdfsChangeSubscriptions::notify(&VdfsChange::with_data(path, data))`，
   见 `session::transcript::Transcript::emit`）——带载荷是一个**显式动作**，不是
   默认行为；**不存在** `notify_change_with_data` 这类对称门面。
 - **变更词汇：信封没有操作枚举**——形状是 `path` + 可选 `data`，

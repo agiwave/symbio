@@ -55,7 +55,7 @@ fn host_ctx_downcasts_invoke_request() {
 /// 同一路径重复订阅：计数累加，取消一次仍在（其余订阅者不受影响）
 #[tokio::test]
 async fn repeated_watch_on_same_path_is_counted() {
-    let subs = ChangeSubscriptions::default();
+    let subs = VdfsChangeSubscriptions::default();
     let seen = Arc::new(Mutex::new(Vec::new()));
     for _ in 0..2 {
         let s = seen.clone();
@@ -88,7 +88,7 @@ async fn repeated_watch_on_same_path_is_counted() {
 /// 订阅路径的**具体程度**有语义——它没有。
 #[tokio::test]
 async fn overlapping_subscriptions_deliver_once() {
-    let subs = ChangeSubscriptions::default();
+    let subs = VdfsChangeSubscriptions::default();
     let broad = Arc::new(Mutex::new(Vec::new()));
     let narrow = Arc::new(Mutex::new(Vec::new()));
     {
@@ -128,7 +128,7 @@ async fn overlapping_subscriptions_deliver_once() {
 /// 无相关订阅者时 `notify` 不投递（连通配的窄订阅也不该收到远亲变更）
 #[tokio::test]
 async fn unrelated_subscription_gets_nothing() {
-    let subs = ChangeSubscriptions::default();
+    let subs = VdfsChangeSubscriptions::default();
     let seen = Arc::new(Mutex::new(Vec::new()));
     {
         let s = seen.clone();
@@ -145,7 +145,7 @@ async fn unrelated_subscription_gets_nothing() {
 /// 无订阅者时 `notify` 直接返回（不遍历、不投递）
 #[tokio::test]
 async fn notify_without_subscribers_is_noop() {
-    let subs = ChangeSubscriptions::default();
+    let subs = VdfsChangeSubscriptions::default();
     subs.notify(&VdfsChange::bare("a"));
     assert_eq!(subs.subscriber_count(), 0);
 }

@@ -39,9 +39,24 @@ const GUARDS = [
 //     实测事故：`schemas/hook` 被报成「仅 1 个外部消费文件」，而它实际有 3 个消费文件
 //     ——hook 插件走 `schemas::{HookEvent}` 顶层再导出名，路径里没有子模块名。
 //     报告不判失败 ⇒ 坏了没人发现，故它比判定型守卫**更需要**回归测试。
-const TEST_ONLY = ['color', 'gate.d/_shared', 'cli-binary', 'tauri-binary', 'schema-audit']
+//   - `core-surface-audit` 同样是报告型，同样说假话的形态：**少算消费方** ⇒ 在用的
+//     符号被列成「下放候选」。开发时真踩了两次，两条都写成了回归测试：① 三条
+//     `pub use <域>::*` 撞进同一个 Map 键 ⇒ 公开面从 251 掉到 134，`PLUGIN_*` /
+//     `PathKey` / `PluginStopReason` 全部消失；② `symbio/src` 直属文件（`lib.rs` /
+//     `plugins/mod.rs`）被跳过 ⇒ 只在注册表里被用到的符号被算成 **0 个消费方**。
+//     「数不到」与「真的没人用」是两件事。
+const TEST_ONLY = [
+  'color',
+  'gate.d/_shared',
+  'cli-binary',
+  'tauri-binary',
+  'schema-audit',
+  'core-surface-audit',
+]
 // 报告型：只防崩溃（退出码恒 0，判定需人工复核），走日志不刷屏。
-const REPORT_ONLY = ['schema-audit']
+// 刻意 `echo: 'none'`：这份报告的候选会长期存在（大部分是签名组成部分与自引用），
+// 每次门禁都刷一遍只会训练人忽略它。要看结论就单独跑一次脚本。
+const REPORT_ONLY = ['schema-audit', 'core-surface-audit']
 
 export default {
   id: 'docs',

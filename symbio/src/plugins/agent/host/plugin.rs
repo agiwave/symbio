@@ -23,7 +23,7 @@
 //! 能力（技能 / MCP / …）由 Agent 目录里的插件实例自己解释，**复用宿主已有的对应系统**
 //! （§3.2 第 2 条）——宿主替 agent 目录再写一遍技能与 MCP 的解析，两条链必然长期不同步。
 //! 子树因此挂**与父 Agent 同构的默认插件集**（见
-//! [`crate::symbio_core::SUB_AGENT_PLUGINS`]，与系统侧是**同一份清单**）：子树会构造
+//! [`crate::symbio_core::ASSEMBLY_SUB_AGENT_PLUGINS`]，与系统侧是**同一份清单**）：子树会构造
 //! 自己的 `vdfs` 实例，但其注册经 `SubAgentVisitor` 在每一层丢弃（VDFS 根单槽归
 //! 系统 Agent 独占），其余（含 `agent` 自身、`model`、`plugin_manager`、`work`）全部与
 //! 父树一致——UI 资源入口因此对齐。`model` 在子树里有实例：子智能体有自己的模型
@@ -43,8 +43,8 @@ use crate::symbio_core::{
     announce_configurable, create_object, dir_from_ctx, report_error, Capability,
     CapabilityVisitor, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest,
-    AGENT_ID, CAPABILITY_VISITOR, CONFIG_VISITOR, MEMORY_AGENTS_FILE, PATH, PLUGIN_AGENT,
-    PLUGIN_COMPOSITE, PLUGIN_DIR, REQUIRED_PLUGINS, SUB_AGENT_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS,
+    AGENT_ID, ASSEMBLY_SUB_AGENT_PLUGINS, CAPABILITY_VISITOR, CONFIG_VISITOR, MEMORY_AGENTS_FILE,
+    PATH, PLUGIN_AGENT, PLUGIN_COMPOSITE, PLUGIN_DIR, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS,
     TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
 };
 use crate::symbio_core::{VdfsAccess, VdfsItem, VdfsProvider};
@@ -218,7 +218,10 @@ impl AgentPlugin {
         sub_context.set(PLUGIN_DIR, PluginDir::at(&dir, PLUGIN_COMPOSITE));
         sub_context.set(
             REQUIRED_PLUGINS,
-            SUB_AGENT_PLUGINS.iter().map(|s| (*s).to_string()).collect(),
+            ASSEMBLY_SUB_AGENT_PLUGINS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect(),
         );
 
         crate::plugin_info!("agent", "装配子 Agent `{}` -> {}", id, dir.display());
@@ -238,7 +241,7 @@ impl AgentPlugin {
     /// ## 跨作用域必须改写上下文（与 `VDFS_PARENT_ADDR` 同理）
     ///
     /// ⚠️ **不得改指 `WORKDIR`**：子树里的 `work` 只负责工作区信息（见
-    /// [`SUB_AGENT_PLUGINS`]），改指 Agent 目录会让它去解释 `<agentdir>/AGENTS.md`。
+    /// [`ASSEMBLY_SUB_AGENT_PLUGINS`]），改指 Agent 目录会让它去解释 `<agentdir>/AGENTS.md`。
     /// 子树的 `WORKDIR` 与父会话一致（继承）。
     ///
     /// ⚠️ **`AGENT_ID` 必须清空**：它是**会话级「选中的智能体」**，只由**拥有该 id 的

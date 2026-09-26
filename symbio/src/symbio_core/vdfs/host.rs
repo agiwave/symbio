@@ -7,7 +7,7 @@
 //! 2. **错误翻译**：[`VdfsError`] ↔ [`PluginError`] 双向映射；
 //! 3. **变更广播**：挂载点写 / 删后 [`notify_change`]，`watch` 经
 //!    [`watch_changes`] 订阅后转发——前端因此无需轮询（**非**轮询实现）。
-//!    转发由 [`ChangeSubscriptions`] 统一收敛：**一条变更只会出总线一次**
+//!    转发由 [`VdfsChangeSubscriptions`] 统一收敛：**一条变更只会出总线一次**
 //!    （命中多条相关订阅时也只调用一个投递器），同一路径的多位订阅者
 //!    按引用计数配对 `watch` / `unwatch`。
 //!
@@ -112,7 +112,7 @@ pub fn host_ctx(ctx: &VdfsContext) -> VdfsResult<Arc<dyn PluginInvokeRequest>> {
 /// `watch` / `unwatch` 由**视图生命周期**驱动，而两个视图可以订同一个路径
 /// （两个窗口 / 两个组件）。计数让「取消」只关掉自己那一层：归零才真正摘掉。
 #[derive(Default)]
-pub struct ChangeSubscriptions {
+pub struct VdfsChangeSubscriptions {
     /// 被订阅路径 → （引用计数, 投递器）。投递器以**最新**登记的那条为准。
     /// 包在 `Arc` 里是为了让 `Clone` 得到**同一张表**的句柄（见下方 `impl Clone`）。
     by_path: Arc<Mutex<HashMap<String, (u32, VdfsChangeSink)>>>,
@@ -131,7 +131,7 @@ fn related(subscribed: &str, changed: &str) -> bool {
 
 /// 克隆得到的是**同一张表**（共享 `Arc`）——变更源与它的旁路（如工作目录监听
 /// 任务）各自持一份句柄、投递进同一批订阅者，正是引用计数表要支持的用法。
-impl Clone for ChangeSubscriptions {
+impl Clone for VdfsChangeSubscriptions {
     fn clone(&self) -> Self {
         Self {
             by_path: self.by_path.clone(),
@@ -139,7 +139,7 @@ impl Clone for ChangeSubscriptions {
     }
 }
 
-impl ChangeSubscriptions {
+impl VdfsChangeSubscriptions {
     /// 登记一条订阅；返回 `true` 表示这是该路径的**首个**订阅者
     /// （调用方可据此做一次性副作用，如接入文件系统监听）。
     pub fn watch(&self, path: &str, sink: VdfsChangeSink) -> bool {
@@ -230,14 +230,14 @@ impl ChangeSubscriptions {
 ///
 /// 按**类型**（`kind`）而非 provider 实例持有——同一类型的 provider 可能被多次
 /// 构造（每次 `traverse` 一份），共享同一张表才能让订阅与投递天然配对。
-fn hub_of(kind: &str) -> Arc<ChangeSubscriptions> {
-    static HUBS: OnceLock<Mutex<HashMap<String, Arc<ChangeSubscriptions>>>> = OnceLock::new();
+fn hub_of(kind: &str) -> Arc<VdfsChangeSubscriptions> {
+    static HUBS: OnceLock<Mutex<HashMap<String, Arc<VdfsChangeSubscriptions>>>> = OnceLock::new();
     let hubs = HUBS.get_or_init(|| Mutex::new(HashMap::new()));
     let mut m = hubs.lock().unwrap();
     if let Some(h) = m.get(kind) {
         return h.clone();
     }
-    let hub = Arc::new(ChangeSubscriptions::default());
+    let hub = Arc::new(VdfsChangeSubscriptions::default());
     m.insert(kind.to_string(), hub.clone());
     hub
 }
@@ -249,7 +249,7 @@ fn hub_of(kind: &str) -> Arc<ChangeSubscriptions> {
 ///
 /// **它只发无载荷变更**（`VdfsChange::bare`）——绝大多数资源信号长这样。带业务
 /// 载荷的变更（消息帧 / 节点视图）由**生产者直接经它已持有的订阅表**投递：
-/// `ChangeSubscriptions::notify(&VdfsChange::with_data(path, data))`，见
+/// `VdfsChangeSubscriptions::notify(&VdfsChange::with_data(path, data))`，见
 /// `session::transcript::Transcript::publish`。这里**刻意不提供**对称的
 /// `notify_change_with_data` 门面：它没有生产者（带载荷的只有会话域，而会话域
 /// 拿的是订阅表本身），而留一个没人调用的「能力」比没有更糟——文档会照着它写，

@@ -96,7 +96,7 @@ pub const VDFS_ROOT: &str = "vdfs/root";
 ///
 /// 调用方：`agent/host/subagent.rs`（Run 转播登记）与前端
 /// `tauri/src/schemas/vdfs.ts::VDFS_WATCH` + `services/vdfs.ts`（本轮渲染）。
-/// 后端只向**登记过路径**的订阅者投递变更（`core/vdfs/host::ChangeSubscriptions`），
+/// 后端只向**登记过路径**的订阅者投递变更（`core/vdfs/host::VdfsChangeSubscriptions`），
 /// 因此这是「能收到 VDFS 变更」的前置条件：只订阅全局总线而不登记 watch，
 /// 等于在一条没人开闸的频道上等事件（一条也收不到）。
 #[allow(dead_code)] // dead-code-allow R-001: 调用方在前端 schemas/vdfs.ts + services/vdfs.ts，路由真实存在

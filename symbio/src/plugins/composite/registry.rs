@@ -45,8 +45,8 @@
 use crate::symbio_core::{
     create_object, creator_ids, has_creator, lock_read, lock_write, Plugin, PluginDir, PluginEntry,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginMeta, PluginSimpleRequest, PluginStopReason,
-    KEY_PROVIDER, PLUGIN_COMPOSITE, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_HOME, REQUIRED_PLUGINS,
-    UNDISABLABLE_PLUGINS,
+    ASSEMBLY_UNDISABLABLE_PLUGINS, KEY_PROVIDER, PLUGIN_COMPOSITE, PLUGIN_DIR, PLUGIN_FILE,
+    PLUGIN_HOME, REQUIRED_PLUGINS,
 };
 use serde_json::Value;
 
@@ -337,12 +337,12 @@ impl PluginRegistry {
 
     /// 写装配位并即时生效：`true` = 挂载，`false` = 卸载（实例表随之增删）。
     ///
-    /// 界面底座插件（[`UNDISABLABLE_PLUGINS`]）拒绝停用——理由见该常量文档。
+    /// 界面底座插件（[`ASSEMBLY_UNDISABLABLE_PLUGINS`]）拒绝停用——理由见该常量文档。
     ///
     /// 停用一侧会先调 [`Plugin::stop`](Plugin::stop)（ADR-033）：**摘实例之前**，
     /// 让插件有一次清理的机会（关监听 / 停后台任务 / 落盘）。
     pub async fn set_enabled(&self, name: &str, enabled: bool) -> Result<(), String> {
-        if !enabled && UNDISABLABLE_PLUGINS.contains(&name) {
+        if !enabled && ASSEMBLY_UNDISABLABLE_PLUGINS.contains(&name) {
             return Err(format!(
                 "「{name}」是界面底座插件，停用后界面将无法再操作它（如需停用请直接改 {PLUGIN_FILE}）"
             ));

@@ -201,11 +201,11 @@ pub const RESERVED_KEYS: &[&str] = &[
 // 键名与它投影的来源**逐字对应**，改一处就能顺着找到另一处：
 // `plugin_version` ← `PluginEntry::version`（**即 [`KEY_VERSION`] 的真值**）、
 // `plugin_required` ← `PluginEntry::required`、
-// `plugin_can_disable` ← `UNDISABLABLE_PLUGINS` 的补集。
+// `plugin_can_disable` ← `ASSEMBLY_UNDISABLABLE_PLUGINS` 的补集。
 
 /// 投影键：构造者是否声明为必需（`PluginEntry::required`）——必需即**不可删除**
 pub const KEY_REQUIRED: &str = "plugin_required";
-/// 投影键：是否允许停用（= 不在 [`crate::symbio_core::UNDISABLABLE_PLUGINS`] 里）
+/// 投影键：是否允许停用（= 不在 [`crate::symbio_core::ASSEMBLY_UNDISABLABLE_PLUGINS`] 里）
 pub const KEY_CAN_DISABLE: &str = "plugin_can_disable";
 
 /// 从插件上下文读自己的目录（装配方经 [`PLUGIN_DIR`](crate::symbio_core::PLUGIN_DIR) 告知）

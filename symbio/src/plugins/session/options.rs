@@ -38,9 +38,14 @@ use crate::symbio_core::schemas::detail::{
     DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
     DETAIL_PICK_DIRECTORY,
 };
-use crate::symbio_core::PluginInvokeRequest;
+use crate::symbio_core::{
+    OptionVisitor, Plugin, PluginInvokeRequest, PluginInvokeRequestExt, OPTION_VISITOR, PATH,
+    TRAVERSE_AVAILABLE_OPTIONS,
+};
+use indexmap::IndexMap;
 use serde_json::{json, Value};
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// 会话自有选项的展示顺序（号段见模块文档）
 const ORDER_WORKDIR: i32 = 10;
@@ -92,7 +97,7 @@ impl SessionPlugin {
         let ctx: Arc<dyn PluginInvokeRequest> =
             Arc::new(crate::symbio_core::PluginSimpleRequest::new(None, None));
         let parent = self.get_parent();
-        let visitor = crate::symbio_core::collect_options(parent.as_ref(), &ctx).await;
+        let visitor = collect_options(parent.as_ref(), &ctx).await;
         DetailDefinition {
             // 「值来自外部（节点 metadata），提交只回纯字段值」——与心跳表单同一绑定
             binding: "option".to_string(),
@@ -105,6 +110,87 @@ impl SessionPlugin {
             ..Default::default()
         }
     }
+}
+
+// ==================== 选项收集机制（宿主侧） ====================
+//
+// 本段原是 `symbio_core/capability/option.rs` 的后半：**默认收集器 + 遍历管线**。
+// 下沉到这里的判据是 ADR-023 的「依赖方数量」——契约（`OptionVisitor` trait 与
+// `TRAVERSE_AVAILABLE_OPTIONS` 端点字面量）两侧都认，留在 core；而「谁来收集」
+// 只有会话宿主一个答案。这与它的平行物 `collect_capabilities` 同处一地
+// （那个一直在 `chat_pipeline.rs` 里，从未进过 core）。
+
+/// 默认选项收集器：内存 IndexMap 实现，一次收集一个实例。
+pub struct DefaultOptionVisitor {
+    fields: Arc<RwLock<IndexMap<String, (i32, DetailField)>>>,
+}
+
+impl DefaultOptionVisitor {
+    pub fn new() -> Self {
+        Self {
+            fields: Arc::new(RwLock::new(IndexMap::new())),
+        }
+    }
+}
+
+impl Default for DefaultOptionVisitor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait::async_trait]
+impl OptionVisitor for DefaultOptionVisitor {
+    async fn register_option_field(&self, order: i32, field: DetailField) {
+        let key = field.key.clone();
+        let mut fields = self.fields.write().await;
+        fields.insert(key, (order, field));
+    }
+
+    async fn list_option_fields(&self) -> Vec<DetailField> {
+        let fields = self.fields.read().await;
+        let mut out: Vec<(i32, DetailField)> = fields.values().cloned().collect();
+        // 稳定排序：order 相同者保持注册顺序（IndexMap 保序）
+        out.sort_by_key(|(order, _)| *order);
+        out.into_iter().map(|(_, field)| field).collect()
+    }
+}
+
+/// 向所有插件广播「贡献选项」，返回装配好的选项收集器。
+///
+/// 调用方（选项宿主 = 本插件）需在 `ctx` 中预先设置好各插件判定
+/// 所需的上下文键——通常是**运行期可枚举的数据源**（如 agent 目录、Provider
+/// 表）的定位依据，贡献插件据此算出**候选集**。
+///
+/// ⚠️ 「当前选中值」**不在**这里回填：值随会话节点 `attributes.metadata` 下发，
+/// 定义只声明「有哪些字段与候选」（`docs/archive/session-options-unification.md`
+/// §3.2 / §6）。所以宿主不需要为回填值而注入会话状态。
+///
+/// 失败降级语义与 `collect_capabilities`（`chat_pipeline.rs`）一致：
+/// 父插件缺失返回空收集器，单个插件 traverse 失败只记日志。
+pub async fn collect_options(
+    parent: Option<&Arc<dyn Plugin>>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) -> Arc<dyn OptionVisitor> {
+    let visitor: Arc<dyn OptionVisitor> = Arc::new(DefaultOptionVisitor::new());
+
+    let Some(parent) = parent else {
+        return visitor;
+    };
+
+    let traverse_ctx = ctx.fork();
+    traverse_ctx.set(PATH, TRAVERSE_AVAILABLE_OPTIONS.to_string());
+    traverse_ctx.set(OPTION_VISITOR, visitor.clone());
+
+    if let Err(e) = parent.clone().traverse(String::new(), traverse_ctx).await {
+        crate::plugin_warn!(
+            "session",
+            "collect_options: traverse 失败（选项集可能不完整）: {:?}",
+            e
+        );
+    }
+
+    visitor
 }
 
 // ==================== 字段声明（`node.schema`） ====================

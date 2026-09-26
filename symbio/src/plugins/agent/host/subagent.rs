@@ -924,7 +924,7 @@ async fn session_vdfs_addr(
 /// 失败只告警不中断：登记的收益是「能收到中间帧」，而失败的最坏结果是转播
 /// 看不到过程（最终文本仍由收尾帧给出）——为此把整个委托判失败不成比例。
 ///
-/// 订阅**只需一个地址**（会话叶子）：`ChangeSubscriptions::notify` 的「相关」判定
+/// 订阅**只需一个地址**（会话叶子）：`VdfsChangeSubscriptions::notify` 的「相关」判定
 /// 是同一子树（自身 / 祖先 / 后代），因此 `<sid>` 的订阅天然覆盖
 /// `<sid>/message/<mid>`——一条 `vdfs/watch` 同时收运行态与消息。
 async fn vdfs_watch(

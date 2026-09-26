@@ -413,7 +413,7 @@ async fn read_forwards_the_owners_config_text() {
 
 /// 界面底座插件：可停用与否由**投影键**表达，删除与否由必需位表达
 ///
-/// 插件管理插件自己就是底座（[`UNDISABLABLE_PLUGINS`]）：它必需、不可停用、
+/// 插件管理插件自己就是底座（[`ASSEMBLY_UNDISABLABLE_PLUGINS`]）：它必需、不可停用、
 /// 因而两个破坏性动作都不出现——但定义里**恒在**，只是条件不成立。
 #[tokio::test]
 async fn undisablable_required_plugin_hides_both_destructive_actions() {

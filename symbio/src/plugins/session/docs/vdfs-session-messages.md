@@ -211,7 +211,7 @@ read(<根>/session/<sid>/message/<mid>)
 
 ### 4.0 变更**不重放**——因此消费端必须能自愈
 
-本频道**没有帧序号**，丢帧本身不可检测；`ChangeSubscriptions::notify` 在订阅表为空时
+本频道**没有帧序号**，丢帧本身不可检测；`VdfsChangeSubscriptions::notify` 在订阅表为空时
 **直接返回**（订阅登记是 fire-and-forget 的异步动作）。**丢一次不会重来**，消费端
 不能假设「变更一定到齐」。已知的丢帧有两处，都由消费端兜底：
 

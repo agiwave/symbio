@@ -99,7 +99,7 @@ pub use address::{has_parent_segment, path_within};
 // ---- symbio 桥 ----
 pub use host::{
     from_plugin_error, host_ctx, notify_change, unwatch_changes, vdfs_context, watch_changes,
-    ChangeSubscriptions,
+    VdfsChangeSubscriptions,
 };
 
 #[cfg(test)]
