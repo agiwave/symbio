@@ -79,7 +79,7 @@ work:
 | `agent` | `<根>/agent/PLUGIN.yml` | `memory_max_bytes` / `memory_inject_max_bytes`（字段全表见 `agent/host/config.rs::AgentConfig`） |
 | `work` | `<根>/work/PLUGIN.yml` | `memory_enabled` / `memory_max_bytes` / `memory_inject_max_bytes`（字段全表见 `work/config.rs::WorkConfig`） |
 | `web` | `<根>/web/PLUGIN.yml` | `web_enabled` / `web_timeout` / `tavily_api_key` / `serper_api_key` |
-| `local` | `<根>/local/PLUGIN.yml` | `shell_enabled` / `file_enabled` / `shell_timeout` |
+| `local` | `<根>/local/PLUGIN.yml` | `shell_enabled` / `file_enabled` / `shell_timeout` / `autonomy`（readonly\|supervised\|full，默认 full）/ `workspace_only` / `allowed_commands`（**空 = 不限制**）/ `forbidden_paths` / `allowed_roots` / `max_actions_per_hour`（**0 = 不限流**）/ `require_approval_for_medium_risk` / `block_high_risk_commands`（字段全表见 `local/local_config.rs::LocalConfig`） |
 | `gateway` | `<根>/gateway/PLUGIN.yml` | 见下 |
 | `telegram` | `<根>/telegram/PLUGIN.yml` | 见下 |
 | `model` | `<根>/model/PLUGIN.yml` | `default_provider_id`（只有跨条目状态；每个 Provider 的明细是资源，见下） |

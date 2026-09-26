@@ -40,7 +40,7 @@ pub mod tree;
 pub mod write;
 
 use crate::symbio_core::{
-    Capability, CapabilityCategory, CapabilityMeta, CapabilityToolContextRetention,
+    Capability, CapabilityCategory, CapabilityMeta, CapabilityToolContextRetention, PluginError,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -55,6 +55,25 @@ pub use super::provider::ToolVdfs;
 /// 因此这里不再自己回读 `ctx.payload()`——「拆信封」只有一处。
 pub(crate) fn request_of<T: DeserializeOwned + Default>(args: &Value) -> T {
     serde_json::from_value::<T>(args.clone()).unwrap_or_default()
+}
+
+/// 校验 schema 声明为 `required` 的**字符串**参数确实存在且非空。
+///
+/// `request_of` 的 `unwrap_or_default` 会把缺失字段吞成空串/空结构——空 path
+/// 落到物理层恰好解析成工作目录根本身，产生「目录不可读：C:\…\」这类与真实
+/// 原因无关的误导性错误（实测会话 `09d74431`：LLM 在超限上下文下吐出空参数，
+/// `vdfs_read` 收到 `{}` 后一路静默走到物理层才炸）。schema 说了 required，
+/// 执行侧就要兑现它。
+pub(crate) fn ensure_required(args: &Value, field: &str) -> Result<(), PluginError> {
+    let present = args
+        .get(field)
+        .and_then(|v| v.as_str())
+        .map_or(false, |s| !s.is_empty());
+    if present {
+        Ok(())
+    } else {
+        Err(PluginError::ValidationError(format!("缺少必填参数: {field}")))
+    }
 }
 
 /// 统一的路径参数说明（所有工具的 schema 共享同一套语义，避免 LLM 误用）

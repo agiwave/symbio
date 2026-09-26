@@ -44,6 +44,7 @@ impl Capability for MkdirTool {
         _env: &ExecEnv,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
+        super::ensure_required(&args, "path")?;
         let req: super::super::protocol::VdfsPathRequest = request_of(&args);
         self.provider.mkdir(&ctx, &req.path).await?;
 

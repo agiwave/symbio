@@ -50,10 +50,11 @@ impl Capability for ReadTool {
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         let raw = args;
+        super::ensure_required(&raw, "path")?;
         let path = raw
             .get("path")
             .and_then(|v| v.as_str())
-            .unwrap_or("")
+            .unwrap_or_default()
             .to_string();
         let content = self.provider.read(&ctx, &path).await?;
 

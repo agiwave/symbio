@@ -49,6 +49,7 @@ impl Capability for SearchTool {
         _env: &ExecEnv,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
+        super::ensure_required(&args, "pattern")?;
         let req: super::super::protocol::VdfsSearchRequest = request_of(&args);
         let data = self.provider.search(&ctx, &req.path, &req.pattern).await?;
 

@@ -50,6 +50,7 @@ impl Capability for TreeTool {
         _env: &ExecEnv,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
+        super::ensure_required(&args, "path")?;
         let req: super::super::protocol::VdfsTreeRequest = request_of(&args);
         let depth_limit = req.depth.unwrap_or(3); // 0 = 不限
         let count_limit = req.limit.unwrap_or(500).max(1) as usize;

@@ -47,6 +47,7 @@ impl Capability for EditTool {
         _env: &ExecEnv,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
+        super::ensure_required(&args, "path")?;
         let req: super::super::protocol::VdfsEditRequest = request_of(&args);
         let data = self
             .provider

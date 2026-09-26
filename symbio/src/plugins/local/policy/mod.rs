@@ -32,118 +32,83 @@ pub fn is_safe_relative_path(path: &str) -> bool {
     !crate::symbio_core::has_parent_segment(path)
 }
 
-/// 工具执行安全策略
+/// 策略规则（可运行期热更的部分；动作计数独立在 `tracker`）。
+///
+/// 字段与 local 插件的配置文档（`LocalConfig`）一一对应——配置文档是人类入口，
+/// 这里是运行期真源。默认值即「全放开」：这是内置插件自己工具的执行策略，不是
+/// 宿主对插件的授权（那个分层见 third-party-plugin-spec）——限制的价值在「用户
+/// 想收紧时有的收」，而非默认替用户做主。实测会话 `09d74431`：默认限流 100 次/
+/// 小时把 cmd 通道锁死近一小时、325 次调用被拒，全是自伤。
 #[derive(Debug, Clone)]
-pub struct SecurityPolicy {
+pub struct PolicyRules {
     pub autonomy: AutonomyLevel,
     pub workspace_only: bool,
+    /// 命令白名单；**空 = 不限制**（沿用 telegram `allowed_users`「空 = 不限制」
+    /// 惯例）。结构性拒绝（命令替换 / 引号未闭合）不受此影响——那些在
+    /// [`split_subcommands`] 里，与白名单无关。
     pub allowed_commands: Vec<String>,
     pub forbidden_paths: Vec<String>,
     pub allowed_roots: Vec<PathBuf>,
+    /// 每小时动作上限；**0 = 不限流**。
     pub max_actions_per_hour: u32,
     pub require_approval_for_medium_risk: bool,
     pub block_high_risk_commands: bool,
+}
+
+impl Default for PolicyRules {
+    fn default() -> Self {
+        Self {
+            autonomy: AutonomyLevel::Full,
+            workspace_only: false,
+            allowed_commands: Vec::new(),
+            forbidden_paths: Vec::new(),
+            allowed_roots: Vec::new(),
+            max_actions_per_hour: 0,
+            require_approval_for_medium_risk: false,
+            block_high_risk_commands: false,
+        }
+    }
+}
+
+/// 工具执行安全策略
+#[derive(Debug)]
+pub struct SecurityPolicy {
+    /// 规则本体（内部 `RwLock` 持有：配置文档写入即热更，无需重启）
+    rules: std::sync::RwLock<PolicyRules>,
     pub tracker: ActionTracker,
+}
+
+impl Clone for SecurityPolicy {
+    fn clone(&self) -> Self {
+        Self {
+            rules: std::sync::RwLock::new(self.rules().clone()),
+            tracker: self.tracker.clone(),
+        }
+    }
 }
 
 impl Default for SecurityPolicy {
     fn default() -> Self {
+        Self::new(PolicyRules::default())
+    }
+}
+
+impl SecurityPolicy {
+    pub fn new(rules: PolicyRules) -> Self {
         Self {
-            autonomy: AutonomyLevel::Supervised,
-            workspace_only: false,
-            allowed_commands: vec![
-                // 版本控制 / 语言工具链
-                "git".into(),
-                "npm".into(),
-                "npx".into(),
-                "pnpm".into(),
-                "yarn".into(),
-                "node".into(),
-                "bun".into(),
-                "cargo".into(),
-                "rustc".into(),
-                "rustup".into(),
-                "go".into(),
-                "dotnet".into(),
-                "python3".into(),
-                "python".into(),
-                "pip".into(),
-                "pip3".into(),
-                "flutter".into(),
-                "dart".into(),
-                "R".into(),
-                "Rscript".into(),
-                // Shell 包装器：保留能力（Windows 下模型确实要靠它跑命令），
-                // 但风险固定为 High（见 SHELL_WRAPPERS）——内层脚本对白名单
-                // 不可见，默认 Medium 阈值下必须审批
-                "powershell".into(),
-                "pwsh".into(),
-                "cmd".into(),
-                // 文本 / 文件查看
-                "echo".into(),
-                "date".into(),
-                "ls".into(),
-                "cat".into(),
-                "head".into(),
-                "tail".into(),
-                "grep".into(),
-                "find".into(),
-                "findstr".into(),
-                "pwd".into(),
-                "wc".into(),
-                "metadata".into(),
-                "diff".into(),
-                "sort".into(),
-                "uniq".into(),
-                "sed".into(),
-                "awk".into(),
-                // 文件操作（rm/cp/mv/touch/ln 为 Medium/High 风险，
-                // 仍受 command_risk_level + 审批阈值约束，仅消除误报）
-                "cp".into(),
-                "mv".into(),
-                "touch".into(),
-                "ln".into(),
-                "rm".into(),
-                "tar".into(),
-                "zip".into(),
-                "unzip".into(),
-                // Windows 常用命令
-                "dir".into(),
-                "type".into(),
-                "where".into(),
-                "which".into(),
-                "cd".into(),
-                "copy".into(),
-                "xcopy".into(),
-                "move".into(),
-                "del".into(),
-                "mkdir".into(),
-                "rmdir".into(),
-                "cls".into(),
-                "ver".into(),
-                "systeminfo".into(),
-                "tasklist".into(),
-                "taskkill".into(),
-                "ipconfig".into(),
-                "netstat".into(),
-                "ping".into(),
-                "whoami".into(),
-                "hostname".into(),
-            ],
-            forbidden_paths: vec![
-                "/etc".into(),
-                "/root".into(),
-                "/usr".into(),
-                "~/.ssh".into(),
-                "~/.gnupg".into(),
-                "~/.aws".into(),
-            ],
-            allowed_roots: Vec::new(),
-            max_actions_per_hour: 100,
-            require_approval_for_medium_risk: true,
-            block_high_risk_commands: true,
+            rules: std::sync::RwLock::new(rules),
             tracker: ActionTracker::new(),
         }
+    }
+
+    /// 短临界区读取；锁中毒视为可恢复（持锁方只在赋值瞬间持写锁）
+    fn rules(&self) -> std::sync::RwLockReadGuard<'_, PolicyRules> {
+        self.rules.read().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// 运行期热更规则（配置文档写入后调用；无需重启）
+    pub fn update_rules(&self, rules: PolicyRules) {
+        *self.rules.write().unwrap_or_else(|p| p.into_inner()) = rules;
     }
 }
 
@@ -211,6 +176,10 @@ fn split_subcommands(command: &str) -> Result<Vec<String>, String> {
                 '$' if chars.peek() == Some(&'(') => {
                     return Err(format!("不允许命令替换：{command}"))
                 }
+                // fd 重定向（`2>&1` / `1>&2`）：`&` 是重定向语法的一部分，不是
+                // 分隔符——当分隔符会把后面的 `1` 切成独立「命令」，整条命令被
+                // 误拒（实测会话 `09d74431` 有 43 次这样的假阳性拒绝）。
+                '&' if current.ends_with('>') => current.push(c),
                 ';' | '&' | '|' | '\n' | '\r' => {
                     let seg = current.trim();
                     if !seg.is_empty() {
@@ -242,37 +211,37 @@ impl SecurityPolicy {
         path: P,
         workspace_dir: &Path,
     ) -> bool {
+        let r = self.rules();
         let path = path.as_ref();
         let path_str = path.to_string_lossy();
         if !is_safe_relative_path(&path_str) {
             return false;
         }
-        for forbidden in &self.forbidden_paths {
+        for forbidden in &r.forbidden_paths {
             let expanded = shellexpand::tilde(forbidden);
             if crate::symbio_core::path_within(&path_str, expanded.as_ref()) {
                 return false;
             }
         }
-        if !self.workspace_only {
+        if !r.workspace_only {
             return true;
         }
         if !path.is_absolute() {
             return true;
         }
         path_starts_with_normalized(path, workspace_dir)
-            || self
-                .allowed_roots
+            || r.allowed_roots
                 .iter()
-                .any(|r| path_starts_with_normalized(path, r))
+                .any(|root| path_starts_with_normalized(path, root))
     }
 
-    /// 白名单判定：**每一个子命令**的首词都必须命中允许列表。
+    /// 白名单判定：**每一个子命令**的首词都必须命中允许列表；**空白名单 = 不限制**。
     ///
     /// `_threshold` 刻意不参与判定——白名单管「能跑什么」，风险阈值管「跑之前
     /// 要不要审批」，两者正交。早先这里有 `threshold == High ⇒ 放行一切` 的
     /// 旁路，它让白名单在高危模式下**整体失效**（连命令替换都被放过）。
     pub fn is_command_allowed(&self, command: &str, _threshold: RiskLevel) -> bool {
-        if self.autonomy == AutonomyLevel::ReadOnly {
+        if self.rules().autonomy == AutonomyLevel::ReadOnly {
             return false;
         }
         match split_subcommands(command) {
@@ -282,17 +251,22 @@ impl SecurityPolicy {
         }
     }
 
-    /// 单个子命令是否命中白名单（比归一化后的首词）
+    /// 单个子命令是否命中白名单（比归一化后的首词）；**空白名单 = 不限制**
     fn segment_is_allowed(&self, segment: &str) -> bool {
+        let r = self.rules();
+        if r.allowed_commands.is_empty() {
+            return true;
+        }
         let base_cmd = segment.split_whitespace().next().unwrap_or("");
         let cmd_name = normalize_base_command(base_cmd);
-        self.allowed_commands
+        r.allowed_commands
             .iter()
             .any(|allowed| allowed == cmd_name || allowed == base_cmd)
     }
 
     pub fn is_rate_limited(&self) -> bool {
-        self.tracker.is_at_limit(self.max_actions_per_hour)
+        let max = self.rules().max_actions_per_hour;
+        self.tracker.is_at_limit(max)
     }
 
     pub fn record_action(&self) {
@@ -366,18 +340,19 @@ impl SecurityPolicy {
         if threshold == RiskLevel::High {
             return Ok(risk);
         }
+        let r = self.rules();
         match risk {
             RiskLevel::High => {
-                if self.block_high_risk_commands {
+                if r.block_high_risk_commands {
                     return Err("高风险命令被策略阻止".into());
                 }
-                if self.autonomy == AutonomyLevel::Supervised && !approved {
+                if r.autonomy == AutonomyLevel::Supervised && !approved {
                     return Err("高风险命令需要显式批准".into());
                 }
             }
             RiskLevel::Medium => {
-                if self.autonomy == AutonomyLevel::Supervised
-                    && self.require_approval_for_medium_risk
+                if r.autonomy == AutonomyLevel::Supervised
+                    && r.require_approval_for_medium_risk
                     && !approved
                 {
                     return Err("中等风险命令需要批准".into());

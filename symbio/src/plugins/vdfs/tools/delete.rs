@@ -48,6 +48,7 @@ impl Capability for DeleteTool {
         _env: &ExecEnv,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
+        super::ensure_required(&args, "path")?;
         let req: super::super::protocol::VdfsPathRequest = request_of(&args);
         self.provider.delete(&ctx, &req.path, req.recursive).await?;
 

@@ -47,6 +47,7 @@ impl Capability for WriteTool {
         _env: &ExecEnv,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
+        super::ensure_required(&args, "path")?;
         let req: super::super::protocol::VdfsWriteRequest = request_of(&args);
         let content = req.to_content();
         let data = self.provider.write(&ctx, &req.path, &content).await?;

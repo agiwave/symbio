@@ -91,6 +91,12 @@ pub struct ActiveSessionStateInner {
     pub auto_compress_failures: u32,
     /// 熔断开闸时刻（`None` = 未开闸）。用于冷却判断。
     pub auto_compress_circuit_opened_at: Option<std::time::Instant>,
+    /// **永久失败标志**：历史已超出模型上下文上限（`input_over_limit`）。
+    ///
+    /// 与瞬时失败不同——历史只增不减，这类失败**注定复现**，重试没有意义；
+    /// 熔断的半开重试对它必然再失败。置位后自动压缩一律跳过，直到下一次
+    /// 压缩**成功**（例如用户手动清理历史后）才清除。
+    pub auto_compress_over_limit: bool,
     /// **收件箱**：待消费的用户请求队列（FIFO）。
     ///
     /// 它是「用户消息」的唯一入队形态（见 [`InboxItem`]），也是 VDFS 集合
@@ -152,6 +158,7 @@ impl ActiveSessionState {
                 last_warning: None,
                 auto_compress_failures: 0,
                 auto_compress_circuit_opened_at: None,
+                auto_compress_over_limit: false,
                 inbox: VecDeque::new(),
             }),
             transcript: Arc::new(Mutex::new(super::transcript::Transcript::new(
@@ -171,8 +178,15 @@ impl ActiveSessionState {
     /// 判定：连续失败达到阈值即认为"这次 LLM 压缩注定失败"——继续重试只是每轮
     /// 白等数分钟。开闸后冷却期内一律跳过；冷却结束放行一次（半开），由这次
     /// 成功与否决定是否复位或重开。
+    ///
+    /// **永久失败优先**：历史超限（`input_over_limit`）不参与半开重试——它不是
+    /// 瞬时错误，冷却到期后的重试注定再失败（实测会话 `09d74431` 冷却到期后
+    /// 每轮都白跑一次），故该标志置位期间一律跳过。
     pub async fn compression_should_skip(&self) -> bool {
         let inner = self.inner.read().await;
+        if inner.auto_compress_over_limit {
+            return true;
+        }
         if inner.auto_compress_failures < Self::COMPRESS_CIRCUIT_LIMIT {
             return false;
         }
@@ -184,18 +198,26 @@ impl ActiveSessionState {
         }
     }
 
-    /// 记录一次自动压缩**成功**：清零失败计数与开闸时刻。
+    /// 记录一次自动压缩**成功**：清零失败计数、开闸时刻与永久失败标志。
     /// 任何路径的压缩成功都调用——熔断只在"连续失败"时维持。
     pub async fn compression_record_success(&self) {
         let mut inner = self.inner.write().await;
         inner.auto_compress_failures = 0;
         inner.auto_compress_circuit_opened_at = None;
+        inner.auto_compress_over_limit = false;
     }
 
     /// 记录一次自动压缩**失败**：计数 +1；首次达到阈值时记下开闸时刻。
     /// 冷却期内失败不刷新开闸时刻（避免「每次失败都重置冷却」导致永不重试）。
-    pub async fn compression_record_failure(&self) {
+    ///
+    /// `permanent`：是否永久失败（`input_over_limit`——历史只增不减，重试注定
+    /// 复现）。为真时置 [`ActiveSessionStateInner::auto_compress_over_limit`]，
+    /// 此后跳过不再有半开重试。
+    pub async fn compression_record_failure(&self, permanent: bool) {
         let mut inner = self.inner.write().await;
+        if permanent {
+            inner.auto_compress_over_limit = true;
+        }
         inner.auto_compress_failures += 1;
         if inner.auto_compress_failures >= Self::COMPRESS_CIRCUIT_LIMIT
             && inner.auto_compress_circuit_opened_at.is_none()

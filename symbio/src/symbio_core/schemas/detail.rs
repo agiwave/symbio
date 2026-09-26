@@ -355,6 +355,11 @@ impl DetailField {
         Self::base(key, label, "text", description)
     }
 
+    /// 列表字段（多行文本、每行一项；存储为字符串数组，校验见 `validate` 的 "list" 分支）
+    pub fn list(key: &str, label: &str, description: &str) -> Self {
+        Self::base(key, label, "list", description)
+    }
+
     /// 下拉字段（静态候选）
     pub fn select(key: &str, label: &str, options: Vec<DetailOption>, default: &str) -> Self {
         Self {

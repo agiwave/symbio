@@ -1,12 +1,12 @@
 //! Local Tools 插件实现
 
 pub use super::local_config::LocalConfig;
-use super::policy::{RiskLevel, SecurityPolicy};
+use super::policy::{AutonomyLevel, RiskLevel, SecurityPolicy};
 use super::{
     ask_user::AskUserTool, codebase_search::CodebaseSearchTool, content_search::ContentSearchTool,
     shell::ShellTool, todo_write::TodoWriteTool,
 };
-use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
+use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField, DetailOption};
 use crate::symbio_core::vdfs;
 use crate::symbio_core::{
     dir_from_ctx, Capability, CapabilityMeta, ExecEnv, Plugin, PluginConfigFile, PluginDir,
@@ -49,6 +49,73 @@ fn config_definition() -> DetailDefinition {
                 1.0,
                 3600.0,
                 json!(d.shell_timeout),
+            ),
+            DetailField::select(
+                "autonomy",
+                "自主级别",
+                vec![
+                    DetailOption {
+                        value: "readonly".into(),
+                        label: "只读（禁止一切命令）".into(),
+                        description: None,
+                    },
+                    DetailOption {
+                        value: "supervised".into(),
+                        label: "监督（危险操作需批准）".into(),
+                        description: None,
+                    },
+                    DetailOption {
+                        value: "full".into(),
+                        label: "完全自主".into(),
+                        description: None,
+                    },
+                ],
+                match d.autonomy {
+                    AutonomyLevel::ReadOnly => "readonly",
+                    AutonomyLevel::Supervised => "supervised",
+                    AutonomyLevel::Full => "full",
+                },
+            ),
+            DetailField::number(
+                "max_actions_per_hour",
+                "每小时动作上限",
+                "Shell 调用频次上限，0 = 不限流",
+                0.0,
+                1_000_000.0,
+                json!(d.max_actions_per_hour),
+            ),
+            DetailField::toggle(
+                "require_approval_for_medium_risk",
+                "中风险命令需审批",
+                "监督模式下中风险命令（mkdir/mv/cp 等）需用户批准",
+                d.require_approval_for_medium_risk,
+            ),
+            DetailField::toggle(
+                "block_high_risk_commands",
+                "阻止高风险命令",
+                "直接拒绝高风险命令（rm/shutdown 等），不提供审批机会",
+                d.block_high_risk_commands,
+            ),
+            DetailField::toggle(
+                "workspace_only",
+                "限制读取在工作区内",
+                "开启后绝对路径读取仅限工作区与下方白名单根目录",
+                d.workspace_only,
+            ),
+            DetailField::list(
+                "allowed_commands",
+                "命令白名单",
+                "每行一个命令名（支持 npm.cmd / python.exe 形态）；留空 = 不限制",
+            ),
+            DetailField::list(
+                "forbidden_paths",
+                "路径黑名单",
+                "每行一个路径，支持 ~ 展开；留空 = 不限制",
+            ),
+            DetailField::list(
+                "allowed_roots",
+                "额外允许的读取根目录",
+                "每行一个绝对路径，仅在「限制读取在工作区内」开启时生效",
             ),
         ],
     )
@@ -236,7 +303,8 @@ impl LocalPlugin {
     }
 
     pub fn new(parent: Option<Weak<dyn Plugin>>, config: LocalConfig, dir: PluginDir) -> Self {
-        let security = Arc::new(SecurityPolicy::default());
+        // 策略来自配置文档（默认全放开，见 PolicyRules::default 的说明）
+        let security = Arc::new(SecurityPolicy::new(config.policy_rules()));
         let config_lock = Arc::new(RwLock::new(config));
 
         let shell = Arc::new(ShellTool::new(Arc::clone(&security)));
@@ -395,9 +463,12 @@ impl vdfs::VdfsProvider for LocalPlugin {
             }
             vdfs::VdfsRequest::Write { content } => {
                 if path == PLUGIN_FILE {
-                    return Ok(vdfs::VdfsResponse::Write(
-                        self.config_file.apply(&self.config, &content).await?,
-                    ));
+                    let resp = self.config_file.apply(&self.config, &content).await?;
+                    // 策略热更：apply 已把新配置写进 slot，同步刷到运行中的
+                    // SecurityPolicy（限流 / 白名单 / 审批开关即时生效，无需重启）
+                    self.security
+                        .update_rules(self.config.read().await.policy_rules());
+                    return Ok(vdfs::VdfsResponse::Write(resp));
                 }
                 Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
             }

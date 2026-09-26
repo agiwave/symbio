@@ -43,6 +43,7 @@ impl Capability for StatTool {
         _env: &ExecEnv,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
+        super::ensure_required(&args, "path")?;
         let req: super::super::protocol::VdfsPathRequest = request_of(&args);
         let node = self.provider.stat(&ctx, &req.path).await?;
         Ok(serde_json::to_value(&node)?)

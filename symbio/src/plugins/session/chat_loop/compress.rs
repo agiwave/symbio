@@ -97,7 +97,9 @@ pub(crate) async fn auto_compress_process(
         Ok(None) => Ok(None),
         Err(f) => {
             if let Some(em) = &orchestrator.compression {
-                em.state.compression_record_failure().await;
+                em.state
+                    .compression_record_failure(matches!(f, CompressionFailure::InputOverLimit { .. }))
+                    .await;
             }
             Err(f)
         }
@@ -205,26 +207,18 @@ async fn compress_snapshot_inner(
 ) -> Result<Option<usize>, CompressionFailure> {
     // 保存原始历史：压缩失败时回滚，绝不能让压缩请求残留在上下文里。
     let original_messages = context.messages.clone();
-    let _ = fire_hook(&orchestrator.parent, HookEvent::PreCompact, ctx.clone()).await; // grep-audit-allow S-002-bonus: fire_hook 返回 HookOutput 非 Result，无错误可丢（见其文档）
 
-    // 可回溯原则：压缩前把完整历史转存为 transcript，路径记入快照 meta。
-    // 若跳过此步直接 replace_messages，被压掉的历史在物理层"凭空消失"，
-    // 旧存档文件成为孤儿，事后无法审计。
-    // 会话存储根 = **本插件自己的目录**（装配期由父插件经 `PLUGIN_DIR` 告知，
-    // 已落在 orchestrator 上）——不从请求上下文反推，也不读全局系统根。
-    let storage_root = orchestrator.session_dir.dir();
-    let transcript_path = save_transcript_archive(
-        &original_messages,
-        context.session.session_id(),
-        storage_root,
-    );
-
-    // ── 输入超限预判（跳过注定失败的巨型请求，**但不裁剪历史**）──────────
+    // ── 输入超限预判（**前移到一切副作用之前**，跳过注定失败的巨型请求）──────
     // LLM 摘要请求的请求体**就携带完整待压缩历史**——若历史本身已超 Provider
     // 有效输入上限，摘要请求必然 400（"Input token exceed the limit"），
     // 且每轮自动压缩都会重发这条注定失败的巨型请求：压缩永不收敛、每轮开头
-    // 多一段漫长的无响应。预判命中时**跳过这次 doomed 请求**（这是预判的唯一
-    // 收益），然后如实报错。
+    // 多一段漫长的无响应。预判命中时**跳过这次 doomed 请求**（这是预判的
+    // 唯一收益），然后如实报错。
+    //
+    // 预判必须在 PreCompact 钩子与 transcript 转存**之前**：前者有外部副作用，
+    // 后者会把完整历史写成 0.87MB 级的存档文件——注定失败的压缩没有转存价值，
+    // 实测会话 `09d74431` 因此攒下 18 份共 15MB 的废档。此前这段检查位于转存
+    // 之后，属时序缺陷。
     //
     // 此前这里走的是"本地机械兜底截断"（尾部保留 + 说明头，不依赖 LLM）并
     // **回报成功**：压缩节点显示"已压缩上下文（N → M 条）"，用户看到的是历史
@@ -251,14 +245,26 @@ async fn compress_snapshot_inner(
             overhead_tokens,
             effective_limit
         );
-        // 历史一条不动（此时 `context.messages` 尚未被替换为压缩请求，赋值只为把
-        // "失败即原样"这条不变式写在代码里，而非依赖上面的时序）
-        context.messages = original_messages;
+        // 预判位于任何副作用之前，`context.messages` 仍是原始历史，无需回滚
         return Err(CompressionFailure::InputOverLimit {
             pending: pending_tokens + overhead_tokens,
             limit: effective_limit,
         });
     }
+
+    let _ = fire_hook(&orchestrator.parent, HookEvent::PreCompact, ctx.clone()).await; // grep-audit-allow S-002-bonus: fire_hook 返回 HookOutput 非 Result，无错误可丢（见其文档）
+
+    // 可回溯原则：压缩前把完整历史转存为 transcript，路径记入快照 meta。
+    // 若跳过此步直接 replace_messages，被压掉的历史在物理层"凭空消失"，
+    // 旧存档文件成为孤儿，事后无法审计。
+    // 会话存储根 = **本插件自己的目录**（装配期由父插件经 `PLUGIN_DIR` 告知，
+    // 已落在 orchestrator 上）——不从请求上下文反推，也不读全局系统根。
+    let storage_root = orchestrator.session_dir.dir();
+    let transcript_path = save_transcript_archive(
+        &original_messages,
+        context.session.session_id(),
+        storage_root,
+    );
 
     // 压缩请求的**全部内容**：待压缩历史（正常对话形态）+ 末尾压缩指令。
     // provider 的 `flatten_chat_messages` 会把它投影成模型该看的对话，
@@ -710,7 +716,9 @@ pub(crate) async fn retry_compaction(
         }
         Err(f) => {
             if let Some(em) = &orchestrator.compression {
-                em.state.compression_record_failure().await;
+                em.state
+                    .compression_record_failure(matches!(f, CompressionFailure::InputOverLimit { .. }))
+                    .await;
             }
             // 失败节点已由内核落库并广播（含 `meta.failure_kind` + 原因），这里只记日志
             plugin_warn!("session", "[Compress] 用户重试仍失败: {f}");

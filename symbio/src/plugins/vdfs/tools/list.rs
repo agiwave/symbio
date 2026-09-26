@@ -61,10 +61,11 @@ impl Capability for ListTool {
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
         let raw = args;
+        super::ensure_required(&raw, "path")?;
         let path = raw
             .get("path")
             .and_then(|v| v.as_str())
-            .unwrap_or("")
+            .unwrap_or_default()
             .to_string();
         let items = self.provider.list(&ctx, &path).await?;
 
