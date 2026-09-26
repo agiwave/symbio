@@ -9,7 +9,7 @@
 use super::*;
 
 use crate::symbio_core::{
-    PluginError, PluginPayload, PLUGIN_LOCAL, PLUGIN_MANAGER, PLUGIN_SESSION,
+    PluginError, PluginPayload, PLUGIN_ID_LOCAL, PLUGIN_ID_MANAGER, PLUGIN_ID_SESSION,
 };
 use std::path::Path;
 
@@ -204,13 +204,13 @@ async fn installable_excludes_mounted_and_system_level() {
             "系统级工厂不可作为子插件装配：{system}"
         );
     }
-    assert!(!ids.contains(&PLUGIN_LOCAL), "已挂载的不在候选里");
+    assert!(!ids.contains(&PLUGIN_ID_LOCAL), "已挂载的不在候选里");
     assert!(
-        ids.contains(&PLUGIN_SESSION),
+        ids.contains(&PLUGIN_ID_SESSION),
         "已注册未挂载的工厂应在候选里"
     );
     assert!(
-        ids.contains(&PLUGIN_MANAGER),
+        ids.contains(&PLUGIN_ID_MANAGER),
         "插件管理插件在注册表眼里也是普通工厂：它没被挂载时同样可添加"
     );
     assert!(

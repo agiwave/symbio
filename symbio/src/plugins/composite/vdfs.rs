@@ -75,13 +75,13 @@ use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField, DetailO
 use crate::symbio_core::{descend_addr, host_ctx};
 use crate::symbio_core::{
     ConfigurableVisitor, DefaultConfigurableVisitor, Plugin, PluginInvokeRequestExt, PluginMeta,
-    CONFIG_VISITOR, PATH, PLUGIN_MANAGER, TRAVERSE_AVAILABLE_TOOLS,
+    CONFIGURABLE_VISITOR, PATH, PLUGIN_ID_MANAGER, TRAVERSE_AVAILABLE_TOOLS,
 };
 use crate::symbio_core::{
     VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError,
     VdfsNewType, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse,
-    PLUGIN_PROVIDER_FIELD, VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE, VDFS_ACTION_PLUGINS,
-    VDFS_EXT_FORM, VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD,
+    VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE, VDFS_ACTION_PLUGINS, VDFS_EXT_FORM,
+    VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD, VDFS_PLUGIN_PROVIDER_FIELD,
 };
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -133,7 +133,7 @@ impl CompositeVdfs {
     /// - **VDFS 子目录**：经 core 的 [`Plugin::get_vfs_provider`] /
     ///   [`Plugin::vdfs_dispatch`] 直接查询——这是系统链路的视角，目录名 = 子插件在
     ///   容器实例表里的挂载名（约定 = 插件名）。**不走 `CapabilityVisitor`**。
-    /// - **配置声明**：仍是独立的 `CONFIG_VISITOR` 通道——逐子插件广播一次 `traverse`，
+    /// - **配置声明**：仍是独立的 `CONFIGURABLE_VISITOR` 通道——逐子插件广播一次 `traverse`，
     ///   子插件把各自的配置文档声明写回本次请求 ctx，插件管理插件据此知道「哪些
     ///   插件有配置文档」。
     async fn children_of(&self, ctx: &VdfsContext) -> VdfsResult<Vec<(String, Arc<dyn Plugin>)>> {
@@ -142,12 +142,12 @@ impl CompositeVdfs {
         let children: Vec<(String, Arc<dyn Plugin>)> = self.registry.snapshot();
 
         // 可配置声明通道：与 VDFS 无关，仍逐子插件广播一次 `traverse`，但只挂
-        // `CONFIG_VISITOR`——配置声明自带目录名，不存在归属歧义。
-        let configs: Arc<dyn ConfigurableVisitor> = match host.get(CONFIG_VISITOR) {
+        // `CONFIGURABLE_VISITOR`——配置声明自带目录名，不存在归属歧义。
+        let configs: Arc<dyn ConfigurableVisitor> = match host.get(CONFIGURABLE_VISITOR) {
             Some(v) => v,
             None => {
                 let v: Arc<dyn ConfigurableVisitor> = Arc::new(DefaultConfigurableVisitor::new());
-                host.set(CONFIG_VISITOR, v.clone());
+                host.set(CONFIGURABLE_VISITOR, v.clone());
                 v
             }
         };
@@ -163,7 +163,7 @@ impl CompositeVdfs {
             // 配置声明：独立通道，照旧遍历（不改机制）
             let sub = host.fork();
             sub.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
-            sub.set(CONFIG_VISITOR, configs.clone());
+            sub.set(CONFIGURABLE_VISITOR, configs.clone());
             broadcast_collect(child.clone(), sub, &format!("{name} 的配置声明")).await;
         }
 
@@ -223,14 +223,14 @@ impl CompositeVdfs {
                 description: None,
             })
             .collect();
-        let mut t = VdfsNewType::new(PLUGIN_MANAGER, "插件");
+        let mut t = VdfsNewType::new(PLUGIN_ID_MANAGER, "插件");
         t.description = Some("从已注册的插件工厂里选一个装进本智能体".to_string());
         // 落成后是一个**定义驱动的表单**节点（与新建态同一张详情，见 `VdfsNewType`）。
         t.node_ext = Some(VDFS_EXT_FORM.to_string());
         t.schema = serde_json::to_value(DetailDefinition::form(
             "添加插件",
             vec![DetailField::select(
-                PLUGIN_PROVIDER_FIELD,
+                VDFS_PLUGIN_PROVIDER_FIELD,
                 "插件工厂",
                 options,
                 "",
@@ -450,7 +450,7 @@ impl CompositeVdfs {
         let value: serde_json::Value = serde_json::from_str(text)
             .map_err(|e| VdfsError::invalid(format!("安装表单不是合法 JSON：{e}")))?;
         let provider = value
-            .get(PLUGIN_PROVIDER_FIELD)
+            .get(VDFS_PLUGIN_PROVIDER_FIELD)
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default()
             .trim()

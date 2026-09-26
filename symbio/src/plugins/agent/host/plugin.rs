@@ -43,9 +43,9 @@ use crate::symbio_core::{
     announce_configurable, create_object, dir_from_ctx, report_error, Capability,
     CapabilityVisitor, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest,
-    AGENT_ID, ASSEMBLY_SUB_AGENT_PLUGINS, CAPABILITY_VISITOR, CONFIG_VISITOR, MEMORY_AGENTS_FILE,
-    PATH, PLUGIN_AGENT, PLUGIN_COMPOSITE, PLUGIN_DIR, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS,
-    TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
+    AGENT_ID, ASSEMBLY_SUB_AGENT_PLUGINS, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR,
+    MEMORY_AGENTS_FILE, PATH, PLUGIN_DIR, PLUGIN_ID_AGENT, PLUGIN_ID_COMPOSITE, REQUIRED_PLUGINS,
+    TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
 };
 use crate::symbio_core::{VdfsAccess, VdfsItem, VdfsProvider};
 use async_trait::async_trait;
@@ -107,7 +107,7 @@ impl AgentPlugin {
     /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例（composite 配置驱动）。
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         let router = ctx.parent();
-        let dir = dir_from_ctx(&*ctx, PLUGIN_AGENT);
+        let dir = dir_from_ctx(&*ctx, PLUGIN_ID_AGENT);
         let config: AgentConfig = match dir.load::<AgentConfig>() {
             Ok(Some(c)) => c,
             Ok(None) => AgentConfig::default(),
@@ -132,7 +132,10 @@ impl AgentPlugin {
             router: None,
             config: Arc::new(RwLock::new(AgentConfig::default())),
             config_file: PluginConfigFile::new(
-                PluginDir::at(std::env::temp_dir().join("symbio-test/agent"), PLUGIN_AGENT),
+                PluginDir::at(
+                    std::env::temp_dir().join("symbio-test/agent"),
+                    PLUGIN_ID_AGENT,
+                ),
                 "智能体设置",
                 config_definition(),
             ),
@@ -215,7 +218,7 @@ impl AgentPlugin {
         // 与 `home` 造 `worker` 同形：把目录（子 Agent 的根）与必需插件清单告知
         // 容器，其余交给 composite 扫描装配——子 Agent 与系统 Agent 因此结构相同。
         let sub_context = Arc::new(PluginSimpleRequest::child_of(ctx, self.router.clone()));
-        sub_context.set(PLUGIN_DIR, PluginDir::at(&dir, PLUGIN_COMPOSITE));
+        sub_context.set(PLUGIN_DIR, PluginDir::at(&dir, PLUGIN_ID_COMPOSITE));
         sub_context.set(
             REQUIRED_PLUGINS,
             ASSEMBLY_SUB_AGENT_PLUGINS
@@ -225,7 +228,7 @@ impl AgentPlugin {
         );
 
         crate::plugin_info!("agent", "装配子 Agent `{}` -> {}", id, dir.display());
-        let tree = create_object::<dyn Plugin>(PLUGIN_COMPOSITE, sub_context)?;
+        let tree = create_object::<dyn Plugin>(PLUGIN_ID_COMPOSITE, sub_context)?;
         self.sub_agents
             .write()
             .await
@@ -329,7 +332,7 @@ impl AgentPlugin {
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new(PLUGIN_AGENT, "智能体")
+        PluginMeta::new(PLUGIN_ID_AGENT, "智能体")
             .with_description(
                 "智能体域：管理 Agent 实例（安装/导出/删除）与智能体自身的 AGENTS.md，\
                  会话绑定 Agent 时把它整棵插件树的能力并进会话（技能 / MCP 由目录里的\
@@ -337,7 +340,7 @@ impl AgentPlugin {
             )
             .with_version("0.1.0")
             .with_order(3)
-            .with_icon(PLUGIN_AGENT)
+            .with_icon(PLUGIN_ID_AGENT)
             // 根可列举 + 可递归遍历（agent 目录内部有子条目）。
             // 「根下可新建类型」不在这里——agent 目录只能整包导入（没有「先建空壳
             // 再填字段」的形态），清单由 provider 自持（见 `super::vdfs`）
@@ -462,7 +465,7 @@ impl Plugin for AgentPlugin {
         {
             let vdfs_provider: Arc<dyn VdfsProvider> = self.clone();
             tool_visitor
-                .register_vdfs_provider(PLUGIN_AGENT, vdfs_provider)
+                .register_vdfs_provider(PLUGIN_ID_AGENT, vdfs_provider)
                 .await;
         }
 
@@ -501,7 +504,7 @@ impl Plugin for AgentPlugin {
                     };
                     report_error(
                         &ctx,
-                        PLUGIN_AGENT,
+                        PLUGIN_ID_AGENT,
                         format!("智能体 `{agent_id}` 拒绝接入：{reason}"),
                     )
                     .await;
@@ -516,11 +519,11 @@ impl Plugin for AgentPlugin {
         // 因此进**设置**而非 agent 列表：复用挂载根里那份指令节点，按设置列表口径补
         // 真实地址（读写仍落在本插件的 AGENTS.md 上，设置页只列入口、不代管）。
         // 走的是既有 `ConfigurableVisitor` 通道——本插件只是多交一条节点，不动 symbio_core。
-        if let Some(v) = ctx.get(CONFIG_VISITOR) {
+        if let Some(v) = ctx.get(CONFIGURABLE_VISITOR) {
             let mut n = self.instruction_node().await;
             n.ext = Some("md".to_string());
             v.register_configurable(
-                VdfsItem::new(n).with_path(format!("{PLUGIN_AGENT}/{MEMORY_AGENTS_FILE}")),
+                VdfsItem::new(n).with_path(format!("{PLUGIN_ID_AGENT}/{MEMORY_AGENTS_FILE}")),
             )
             .await;
         }
@@ -541,9 +544,9 @@ impl Plugin for AgentPlugin {
         // 绝对地址 = 上下文父地址 + 相对地址（协议级指路信息，封装入口统一）
         Err(PluginError::NotFound(format!(
             "agent 无自有协议路由 `{path}`：agent 目录一律经 VDFS 访问（{}）",
-            crate::symbio_core::absolute_addr(&ctx, &format!("{PLUGIN_AGENT}/…"))
+            crate::symbio_core::absolute_addr(&ctx, &format!("{PLUGIN_ID_AGENT}/…"))
         )))
     }
 }
 
-crate::submit_object_creator!(PLUGIN_AGENT, AgentPlugin::build, dyn Plugin);
+crate::submit_object_creator!(PLUGIN_ID_AGENT, AgentPlugin::build, dyn Plugin);

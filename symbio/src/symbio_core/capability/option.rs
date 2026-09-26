@@ -16,12 +16,16 @@
 //!
 //! ## 本模块只有**契约**：收集器实现与收集管线都在 session
 //!
-//! 本域提供两样东西，都是**多消费方**的：
+//! 本域只提供一个符号，且它是**多消费方**的：
 //!
 //! | 符号 | 消费方 | 为什么在这里 |
 //! |---|---|---|
 //! | [`OptionVisitor`] | session（实现默认收集器 + 读产物）· agent · model（各自在 `traverse` 里注册字段） | 它是上下文键 `OPTION_VISITOR` 的**值类型**；键在 core，值类型只能同在 core |
-//! | [`TRAVERSE_AVAILABLE_OPTIONS`] | session（发起 traverse）· agent · model（判定「本次是选项收集」） | **协议端点**字面量：跨插件按它对齐，插件之间互不可见 |
+//!
+//! 端点字面量
+//! [`TRAVERSE_AVAILABLE_OPTIONS`](crate::symbio_core::TRAVERSE_AVAILABLE_OPTIONS)
+//! **不在这里**：它属于 `Plugin::traverse` 的契约，与 `TRAVERSE_AVAILABLE_TOOLS` 同处
+//! `plugin::traverse`——同一份协议的两个端点该住在一起。本域只是那条通道的**产出方之一**。
 //!
 //! 而**收集器实现**（`DefaultOptionVisitor`）与**收集管线**（`collect_options`）
 //! 只有 session 一个消费方，按「依赖方数量」判据（[ADR-023](../../../../docs/DECISIONS.md)）
@@ -60,9 +64,6 @@
 //! - 单插件失败只记日志，不中断收集。
 
 use crate::symbio_core::schemas::detail::DetailField;
-
-/// 遍历可用选项的常量路径（与 `TRAVERSE_AVAILABLE_TOOLS` 平行）
-pub const TRAVERSE_AVAILABLE_OPTIONS: &str = "available_options";
 
 /// 选项收集器 —— 各插件在 `traverse` 中把选项注册进来。
 ///

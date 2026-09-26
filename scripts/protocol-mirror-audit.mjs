@@ -130,8 +130,18 @@ const TS_CONST_FILES = [VDFS_TS]
 const ALIASES = [
   {
     ts: 'VDFS_ROOT_OP',
-    rust: { file: 'symbio/src/plugins/vdfs/protocol.rs', name: 'VDFS_ROOT' },
+    rust: { file: 'symbio/src/symbio_core/plugin/route.rs', name: 'ROUTE_VDFS_ROOT' },
     what: '进入地址空间：列出虚拟根（不给地址）',
+  },
+  {
+    ts: 'VDFS_WATCH',
+    rust: { file: 'symbio/src/symbio_core/plugin/route.rs', name: 'ROUTE_VDFS_WATCH' },
+    what: '订阅某地址的变更（跨插件可见，故常量归 core 的 `plugin/route.rs`）',
+  },
+  {
+    ts: 'VDFS_UNWATCH',
+    rust: { file: 'symbio/src/symbio_core/plugin/route.rs', name: 'ROUTE_VDFS_UNWATCH' },
+    what: '取消订阅某地址的变更（跨插件可见，故常量归 core 的 `plugin/route.rs`）',
   },
   {
     ts: 'VDFS_EVENT_KIND',

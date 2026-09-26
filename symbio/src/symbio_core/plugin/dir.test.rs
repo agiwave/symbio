@@ -95,8 +95,8 @@ fn ensure_never_overwrites_existing_config() {
     // 目录都不存在时也能补出来；只有身份字段 → 缺省字段由插件自己的 Default 兜底
     d.ensure_manifest().unwrap();
     let manifest = d.read_manifest().unwrap().unwrap();
-    assert_eq!(manifest[KEY_PROVIDER], json!("demo"));
-    assert_eq!(manifest[KEY_NAME], json!("demo"));
+    assert_eq!(manifest[PLUGIN_KEY_PROVIDER], json!("demo"));
+    assert_eq!(manifest[PLUGIN_KEY_NAME], json!("demo"));
     assert_eq!(d.load::<C>().unwrap(), Some(C::default()));
 
     d.save(&C { port: 8080 }).unwrap();

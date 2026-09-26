@@ -11,15 +11,15 @@
 use super::*;
 use crate::symbio_core::absolute_addr;
 use crate::symbio_core::{
-    MemoryFile, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, PLUGIN_SESSION,
-    VDFS_PARENT_ADDR,
+    MemoryFile, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
+    PLUGIN_ID_SESSION, VDFS_PARENT_ADDR,
 };
 use std::sync::Arc;
 use tempfile::TempDir;
 
 /// 测试用会话存储根（只算路径，不落盘）
 fn root() -> std::path::PathBuf {
-    std::path::Path::new("/symbio-test").join(PLUGIN_SESSION)
+    std::path::Path::new("/symbio-test").join(PLUGIN_ID_SESSION)
 }
 
 /// 落位在会话目录下，与 `session.json` / `messages.json` 同级
@@ -30,7 +30,7 @@ fn memory_lives_in_the_session_directory() {
     assert_eq!(p.parent().unwrap().file_name().unwrap(), "abc");
     assert_eq!(
         p.parent().unwrap().parent().unwrap().file_name().unwrap(),
-        PLUGIN_SESSION,
+        PLUGIN_ID_SESSION,
         "会话目录的父目录就是 session 存储根"
     );
 }

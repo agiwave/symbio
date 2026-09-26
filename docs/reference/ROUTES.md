@@ -296,7 +296,7 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 > **命名空间是目录名 `hook`，不是 `hooks`。** 容器（`composite`）按**目录名**建实例表并在
 > `route` 里按它分发（「目录名 = 实例名」），所以目录名才是真正的路由前缀。
-> 真实的调用点见 `symbio_core::keys::paths::HOOK_FIRE`。
+> 真实的调用点见 `symbio_core::plugin::route::HOOK_FIRE`。
 
 | 路径 | 用途 |
 |------|------|

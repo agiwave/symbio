@@ -33,7 +33,7 @@ use crate::symbio_core::{
 };
 use crate::symbio_core::{
     Plugin, PluginChannel, PluginError, PluginFrame, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_EVENT_BUS,
+    PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_ID_EVENT_BUS,
 };
 use async_trait::async_trait;
 use serde_json::json;
@@ -50,7 +50,7 @@ impl EventBusPlugin {
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new(PLUGIN_EVENT_BUS, "Event Bus")
+        PluginMeta::new(PLUGIN_ID_EVENT_BUS, "Event Bus")
             .with_description("统一事件总线：单连接订阅所有插件事件")
             .with_version("0.1.0")
     }
@@ -147,7 +147,7 @@ impl Plugin for EventBusPlugin {
     }
 }
 
-crate::submit_object_creator!(PLUGIN_EVENT_BUS, EventBusPlugin::build, dyn Plugin);
+crate::submit_object_creator!(PLUGIN_ID_EVENT_BUS, EventBusPlugin::build, dyn Plugin);
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]

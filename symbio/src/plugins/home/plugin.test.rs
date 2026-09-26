@@ -12,7 +12,7 @@ fn isolated_home() -> HomePlugin {
 #[tokio::test]
 async fn workspace_save_failure_keeps_previous_memory_and_disk() {
     let temp = tempfile::tempdir().unwrap();
-    let dir = PluginDir::at(temp.path(), PLUGIN_HOME);
+    let dir = PluginDir::at(temp.path(), PLUGIN_ID_HOME);
     let home = isolated_home();
     home.set_workspace_in("previous", &dir).await.unwrap();
     let before = home.config.read().await.work.clone();
@@ -42,7 +42,7 @@ async fn workspace_save_failure_keeps_previous_memory_and_disk() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_workspace_updates_and_flush_keep_disk_and_memory_consistent() {
     let temp = tempfile::tempdir().unwrap();
-    let dir = PluginDir::at(temp.path(), PLUGIN_HOME);
+    let dir = PluginDir::at(temp.path(), PLUGIN_ID_HOME);
     let home = Arc::new(isolated_home());
     let barrier = Arc::new(tokio::sync::Barrier::new(17));
     let mut tasks = Vec::new();

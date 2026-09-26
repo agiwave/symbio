@@ -182,7 +182,7 @@ fn node_shape_comes_from_the_kernel() {
     assert_eq!(n.name, MEMORY_AGENTS_FILE, "节点名 = 真实文件名");
     assert_eq!(n.title, SEGMENT_TITLE);
     assert_eq!(
-        n.kind, PLUGIN_AGENT,
+        n.kind, PLUGIN_ID_AGENT,
         "场景标签用所属插件，不另造一个没有消费者的 `memory`"
     );
     assert_eq!(n.size, Some("内容".len() as u64));

@@ -4,7 +4,7 @@ use crate::plugins::skill::skill_tool::SkillExecuteTool;
 use crate::plugins::skill::types::{Skill, SkillConfig};
 use crate::symbio_core::{
     dir_from_ctx, Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_SKILL, TRAVERSE_AVAILABLE_TOOLS,
+    PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_ID_SKILL, TRAVERSE_AVAILABLE_TOOLS,
 };
 use async_trait::async_trait;
 use std::path::Path;
@@ -36,7 +36,7 @@ impl SkillPlugin {
     /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         // 自己的目录由父插件经 `PLUGIN_DIR` 告知——先取它，再用它推作用域根。
-        let dir = dir_from_ctx(&*ctx, PLUGIN_SKILL);
+        let dir = dir_from_ctx(&*ctx, PLUGIN_ID_SKILL);
 
         let mut config: SkillConfig = ctx
             .config()
@@ -75,7 +75,7 @@ impl SkillPlugin {
             .with_description("Skill 技能包（每项一份 SKILL.md），是可复用能力片段的唯一来源。")
             .with_version("0.2.0")
             .with_order(4)
-            .with_icon(PLUGIN_SKILL)
+            .with_icon(PLUGIN_ID_SKILL)
         // 「根下可新建类型」由 provider 自持（根节点自述里的 `VdfsNode::new_type`，
         // 见下方 `impl VdfsProvider for SkillPlugin`）——它是挂载点的动态自述，容器
         // 合成根节点时向 provider 发一次 `Stat` 现场取，不进这份同步纯数据
@@ -168,12 +168,12 @@ impl SkillPlugin {
 /// 根 = **本插件自己的目录**（构造时由父插件经 `PLUGIN_DIR` 告知）——
 /// 这里不按插件名反推落位，插件不知道、也不该知道自己被放在哪。
 fn store(dir: &PluginDir) -> DirVdfs {
-    DirVdfs::at(dir.dir(), PLUGIN_SKILL, MANIFEST).with_label(LABEL)
+    DirVdfs::at(dir.dir(), PLUGIN_ID_SKILL, MANIFEST).with_label(LABEL)
 }
 
 /// 路径末段 → 条目 id（去掉 `.skill` 呈现扩展名）
 fn id_of(path: &str) -> String {
-    crate::providers::vdfs_service::entry::id_of(path, PLUGIN_SKILL)
+    crate::providers::vdfs_service::entry::id_of(path, PLUGIN_ID_SKILL)
 }
 
 /// 目标地址 → 条目 id（`write` 与测试共用的**唯一**判据）。
@@ -190,7 +190,9 @@ fn resolve_id(path: &str, create: bool) -> VdfsResult<String> {
             "写{LABEL}挂载根需要 create 意图：目录自身没有可覆盖的目标"
         )));
     }
-    Ok(crate::providers::vdfs_service::entry::auto_id(PLUGIN_SKILL))
+    Ok(crate::providers::vdfs_service::entry::auto_id(
+        PLUGIN_ID_SKILL,
+    ))
 }
 
 /// 主文件原文 → VDFS 节点（`ext = form` + 详情定义随节点 `schema` 下发）
@@ -207,7 +209,7 @@ fn detail_definition() -> serde_json::Value {
 
 fn node_of(id: &str, raw: Option<&str>) -> VdfsNode {
     let mut n = VdfsNode::file(id, id, VdfsAccess::READ_WRITE);
-    n.kind = PLUGIN_SKILL.to_string();
+    n.kind = PLUGIN_ID_SKILL.to_string();
     n.ext = Some(VDFS_EXT_FORM.to_string());
     n.schema = Some(detail_definition());
     n.status = VDFS_STATUS_ACTIVE.to_string();
@@ -288,7 +290,7 @@ impl VdfsProvider for SkillPlugin {
                     // 的节点 `ext = form`——两者不同，故显式声明 `node_ext` 与详情定义。
                     return Ok(VdfsResponse::Stat(
                         VdfsNode::dir("", LABEL, VdfsAccess::LIST).with_new_type(Some(
-                            VdfsNewType::new(PLUGIN_SKILL, LABEL)
+                            VdfsNewType::new(PLUGIN_ID_SKILL, LABEL)
                                 .with_description(format!(
                                     "新建{LABEL}（在详情页里填好，保存时一次写入）"
                                 ))
@@ -379,7 +381,7 @@ impl VdfsProvider for SkillPlugin {
                         crate::providers::vdfs_service::VdfsUnpack::from_payload(payload.as_ref())
                             .map_err(|e| VdfsError::invalid(e.0))?;
                     let bytes = pack.bytes().map_err(|e| VdfsError::invalid(e.0))?;
-                    let name = pack.name_of(PLUGIN_SKILL);
+                    let name = pack.name_of(PLUGIN_ID_SKILL);
                     let created = self.store().import_pack(&name, &bytes).await?;
                     return Ok(VdfsResponse::Action(VdfsActionResult {
                         action,
@@ -411,11 +413,11 @@ impl VdfsProvider for SkillPlugin {
                 }))
             }
             VdfsRequest::Watch { sink } => {
-                watch_changes(PLUGIN_SKILL, path, sink).await?;
+                watch_changes(PLUGIN_ID_SKILL, path, sink).await?;
                 Ok(VdfsResponse::Unit)
             }
             VdfsRequest::Unwatch => {
-                unwatch_changes(PLUGIN_SKILL, path).await?;
+                unwatch_changes(PLUGIN_ID_SKILL, path).await?;
                 Ok(VdfsResponse::Unit)
             }
             _ => Err(VdfsError::NotImplemented),
@@ -560,7 +562,7 @@ impl Plugin for SkillPlugin {
             if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
                 let vdfs_provider: Arc<dyn VdfsProvider> = self.clone();
                 tool_visitor
-                    .register_vdfs_provider(PLUGIN_SKILL, vdfs_provider)
+                    .register_vdfs_provider(PLUGIN_ID_SKILL, vdfs_provider)
                     .await;
             }
         }
@@ -568,7 +570,7 @@ impl Plugin for SkillPlugin {
     }
 }
 
-crate::submit_object_creator!(PLUGIN_SKILL, SkillPlugin::build, dyn Plugin);
+crate::submit_object_creator!(PLUGIN_ID_SKILL, SkillPlugin::build, dyn Plugin);
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]

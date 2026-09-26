@@ -32,7 +32,13 @@ import path from "node:path";
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, "..");
 const PLUGINS_DIR = path.join(ROOT, "symbio", "src", "plugins");
-const IDS_FILE = path.join(ROOT, "symbio", "src", "symbio_core", "keys", "ids.rs");
+// 插件工厂 id 的 owner 是 `plugin` 域（`symbio_core/plugin/ids.rs`）——它们描述的是
+// 「哪个插件」，不是「哪个键」，故不随 `keys` 域走（见 `symbio_core/README.md` §1.2
+// 的「放置也是同一条规则的一部分」）。
+const IDS_FILE = path.join(ROOT, "symbio", "src", "symbio_core", "plugin", "ids.rs");
+// 跨插件可见的路由地址（`vdfs/root` / `vdfs/watch` / `vdfs/unwatch`）归 core 的
+// `plugin/route.rs`——它们不是 vdfs 插件私有，见 `plugins/vdfs/protocol.rs` 模块文档。
+const ROUTE_FILE = path.join(ROOT, "symbio", "src", "symbio_core", "plugin", "route.rs");
 const VDFS_PROTOCOL_FILE = path.join(PLUGINS_DIR, "vdfs", "protocol.rs");
 const OUT = path.join(ROOT, "docs", "CURRENT.md");
 
@@ -218,7 +224,7 @@ function parseConsts(txt, map) {
   return map;
 }
 
-/** ids.rs：`pub const PLUGIN_LOCAL: &str = "local";` → Map 常量名 → 值 */
+/** ids.rs：`pub const PLUGIN_ID_LOCAL: &str = "local";` → Map 常量名 → 值 */
 function parseIds(txt) {
   const m = new Map();
   for (const mm of txt.matchAll(/pub const (PLUGIN_[A-Z_]+)\s*:\s*&str\s*=\s*"([^"]+)"/g)) {
@@ -227,15 +233,32 @@ function parseIds(txt) {
   return m;
 }
 
+/** `symbio_core/plugin/route.rs`：跨插件可见的路由地址常量（`ROUTE_*`） */
+function parseRouteConsts() {
+  const m = new Map();
+  const txt = readFileSync(ROUTE_FILE, "utf8");
+  for (const mm of txt.matchAll(/pub const (ROUTE_[A-Z_]+)\s*:\s*&str\s*=\s*"([^"]+)"/g)) {
+    m.set(mm[1], mm[2]);
+  }
+  return m;
+}
+
 /** vdfs/protocol.rs：协议操作常量 + `VDFS_OPS` 清单（按声明顺序） */
 function parseVdfsOps(txt) {
-  const consts = new Map();
+  // 名字有两种来源：`VDFS_*` 在本文件定义，`ROUTE_VDFS_*` 跨插件可见、归 core
+  // （见 `plugins/vdfs/protocol.rs` 模块文档的「三个例外」）。
+  const consts = new Map(parseRouteConsts());
   for (const mm of txt.matchAll(/pub const (VDFS_[A-Z_]+)\s*:\s*&str\s*=\s*"([^"]+)"/g)) {
     consts.set(mm[1], mm[2]);
   }
   const block = txt.match(/pub const VDFS_OPS\s*:\s*&\[&str\]\s*=\s*&\[([\s\S]*?)\];/);
   if (!block) return [];
-  return [...block[1].matchAll(/\b(VDFS_[A-Z_]+)\b/g)].map((m) => consts.get(m[1])).filter(Boolean);
+  // 必须同时认 `ROUTE_VDFS_*`：只写 `\bVDFS_` 时，`ROUTE_VDFS_ROOT` 里的 `VDFS`
+  // 前面是 `_`（词字符），**没有词边界** ⇒ 匹配不上 ⇒ 三个路由从事实表里静默消失
+  // （操作计数还跟着变少，看起来像「操作被删了」，而不是「抽取漏了」）。
+  return [...block[1].matchAll(/\b((?:ROUTE_)?VDFS_[A-Z_]+)\b/g)]
+    .map((m) => consts.get(m[1]))
+    .filter(Boolean);
 }
 
 /** 解析 `PluginMeta::new(X` / `register_vdfs_provider(X` 的第一个实参 */

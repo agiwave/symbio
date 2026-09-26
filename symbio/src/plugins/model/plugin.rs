@@ -16,7 +16,7 @@ use crate::symbio_core::schemas::detail::{DetailField, DetailOption};
 use crate::symbio_core::{
     create_object, dir_from_ctx, Plugin, PluginDir, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest,
-    PLUGIN_MODEL,
+    PLUGIN_ID_MODEL,
 };
 use crate::{plugin_error, plugin_info, plugin_warn};
 use async_trait::async_trait;
@@ -58,7 +58,7 @@ impl ModelPlugin {
     /// 1. **存储**：从 `<本插件目录>/<id>/provider.json` 加载所有 Provider
     /// 2. **跨条目配置**：`<本插件目录>/PLUGIN.yml` 里的 `default_provider_id`
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
-        let dir = dir_from_ctx(&*ctx, PLUGIN_MODEL);
+        let dir = dir_from_ctx(&*ctx, PLUGIN_ID_MODEL);
         let providers_config: ModelProvidersConfig = match dir.load::<ModelConfig>() {
             Ok(Some(cfg)) => ModelProvidersConfig {
                 default_provider_id: cfg.default_provider_id,
@@ -90,7 +90,7 @@ impl ModelPlugin {
     /// 根 = **本插件自己的目录**（构造时由父插件经 `PLUGIN_DIR` 告知）——
     /// 这里不按插件名反推落位，插件不知道、也不该知道自己被放在哪。
     fn store(&self) -> SingleFileVdfs {
-        SingleFileVdfs::at(self.dir.dir(), PLUGIN_MODEL, MANIFEST).with_label(LABEL)
+        SingleFileVdfs::at(self.dir.dir(), PLUGIN_ID_MODEL, MANIFEST).with_label(LABEL)
     }
 
     /// 异步加载：从存储拉取所有 Provider
@@ -166,7 +166,7 @@ impl ModelPlugin {
 
     /// 主构造函数（Factory 机制使用）
     pub fn new(providers: ModelProvidersConfig, dir: PluginDir) -> Self {
-        let entries = MemoryVdfs::new(PLUGIN_MODEL).with_label(LABEL);
+        let entries = MemoryVdfs::new(PLUGIN_ID_MODEL).with_label(LABEL);
         Self {
             providers: Arc::new(RwLock::new(providers)),
             dir,
@@ -215,7 +215,7 @@ impl ModelPlugin {
             )
             .with_version("0.3.0")
             .with_order(2)
-            .with_icon(PLUGIN_MODEL)
+            .with_icon(PLUGIN_ID_MODEL)
         // 「根下可新建类型」由 provider 自持（根节点自述里的 `VdfsNode::new_type`，
         // 见下方 `impl VdfsProvider for ModelPlugin`）——它是挂载点的动态自述，容器
         // 合成根节点时向 provider 发一次 `Stat` 现场取，不进这份同步纯数据
@@ -312,7 +312,10 @@ impl Default for ModelPlugin {
     fn default() -> Self {
         Self::new(
             ModelProvidersConfig::default(),
-            PluginDir::at(std::env::temp_dir().join("symbio-test/model"), PLUGIN_MODEL),
+            PluginDir::at(
+                std::env::temp_dir().join("symbio-test/model"),
+                PLUGIN_ID_MODEL,
+            ),
         )
     }
 }
@@ -351,7 +354,7 @@ fn detail_definition() -> Value {
 /// 差异，`vdfs_service` 不知道也不该知道。
 fn node_of(p: &ModelProviderConfig, updated_at: Option<i64>) -> VdfsNode {
     let mut n = VdfsNode::file(&p.id, p.name.clone(), VdfsAccess::READ_WRITE);
-    n.kind = PLUGIN_MODEL.to_string();
+    n.kind = PLUGIN_ID_MODEL.to_string();
     n.ext = Some(VDFS_EXT_FORM.to_string());
     n.schema = Some(detail_definition());
     n.status = if p.enabled {
@@ -528,7 +531,7 @@ impl ModelPlugin {
 
     /// 路径末段 → 条目 id（去掉 `.<kind>` 呈现扩展名）
     fn id_of(path: &str) -> String {
-        crate::providers::vdfs_service::entry::id_of(path, PLUGIN_MODEL)
+        crate::providers::vdfs_service::entry::id_of(path, PLUGIN_ID_MODEL)
     }
 
     /// 目标地址 → 条目 id（**唯一**判据，`write` 与测试共用）。
@@ -547,7 +550,9 @@ impl ModelPlugin {
                 "写{LABEL}挂载根需要 create 意图：目录自身没有可覆盖的目标"
             )));
         }
-        Ok(crate::providers::vdfs_service::entry::auto_id(PLUGIN_MODEL))
+        Ok(crate::providers::vdfs_service::entry::auto_id(
+            PLUGIN_ID_MODEL,
+        ))
     }
 
     /// 连接测试（复用 `validate_provider`）：失败也返回 `Ok`，由 `message` 承载原因
@@ -596,7 +601,7 @@ impl VdfsProvider for ModelPlugin {
                     // 「还没创建」时就能渲染出与落成后同一张表单（草稿详情页）。
                     return Ok(VdfsResponse::Stat(
                         VdfsNode::dir("", LABEL, VdfsAccess::LIST).with_new_type(Some(
-                            VdfsNewType::new(PLUGIN_MODEL, LABEL)
+                            VdfsNewType::new(PLUGIN_ID_MODEL, LABEL)
                                 .with_description(format!(
                                     "新建{LABEL}（在详情页里填好，保存时一次写入）"
                                 ))
@@ -692,11 +697,11 @@ impl VdfsProvider for ModelPlugin {
                 _ => Err(VdfsError::NotImplemented),
             },
             VdfsRequest::Watch { sink } => {
-                watch_changes(PLUGIN_MODEL, path, sink).await?;
+                watch_changes(PLUGIN_ID_MODEL, path, sink).await?;
                 Ok(VdfsResponse::Unit)
             }
             VdfsRequest::Unwatch => {
-                unwatch_changes(PLUGIN_MODEL, path).await?;
+                unwatch_changes(PLUGIN_ID_MODEL, path).await?;
                 Ok(VdfsResponse::Unit)
             }
             _ => Err(VdfsError::NotImplemented),
@@ -708,7 +713,7 @@ impl VdfsProvider for ModelPlugin {
 #[path = "plugin.test.rs"]
 mod tests;
 
-crate::submit_object_creator!(PLUGIN_MODEL, ModelPlugin::build, dyn Plugin);
+crate::submit_object_creator!(PLUGIN_ID_MODEL, ModelPlugin::build, dyn Plugin);
 
 #[async_trait]
 impl Plugin for ModelPlugin {
@@ -727,7 +732,7 @@ impl Plugin for ModelPlugin {
         _ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
         Err(PluginError::NotFound(format!(
-            "{PLUGIN_MODEL} 已无自有路由，请改用 VDFS 地址"
+            "{PLUGIN_ID_MODEL} 已无自有路由，请改用 VDFS 地址"
         )))
     }
 
@@ -759,7 +764,7 @@ impl Plugin for ModelPlugin {
             // 列 / 读 / 写 / 删 / 动作直接由 `impl VdfsProvider for ModelPlugin` 承载
             let vdfs_provider: Arc<dyn VdfsProvider> = self.clone();
             tool_visitor
-                .register_vdfs_provider(PLUGIN_MODEL, vdfs_provider)
+                .register_vdfs_provider(PLUGIN_ID_MODEL, vdfs_provider)
                 .await;
 
             let providers = self.providers.read().await;
@@ -786,7 +791,7 @@ impl Plugin for ModelPlugin {
                             tool_visitor.register_model_provider(provider).await;
                             if let Some(sp) = &system_prompt {
                                 tool_visitor
-                                    .register_system_prompt(PLUGIN_MODEL, sp.clone())
+                                    .register_system_prompt(PLUGIN_ID_MODEL, sp.clone())
                                     .await;
                             }
                         }

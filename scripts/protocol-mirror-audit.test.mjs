@@ -135,10 +135,20 @@ const CHAT_TS_SRC = [
   tsIface('ChatMessage', 'id', 'parent_id'),
 ].join('\n')
 
-/** 后端常量源之一（A 组的自动发现范围 + `VDFS_ROOT` 别名目标） */
+/** 后端 vdfs 插件私有常量源（A 组的自动发现范围） */
 const PROTOCOL_RS_SRC = [
-  'pub const VDFS_ROOT: &str = "vdfs/root";',
   'pub const VDFS_LIST: &str = "vdfs/list";',
+].join('\n')
+
+/**
+ * 跨插件可见的路由常量源（core 的 `plugin/route.rs`）。
+ *
+ * `vdfs/root` / `vdfs/watch` / `vdfs/unwatch` 三个路由**跨插件可见**，故常量归 core
+ * 且按「一域一前缀」改名 `ROUTE_VDFS_*`——它们不再住在 vdfs 插件里，前端仍按
+ * `VDFS_*` 镜像，因此别名目标指向本文件（见 `protocol-mirror-audit.mjs` 的 `ALIASES`）。
+ */
+const ROUTE_RS_SRC = [
+  'pub const ROUTE_VDFS_ROOT: &str = "vdfs/root";',
 ].join('\n')
 
 /** 后端 vdfs 词表（A 组的另一常量源；词表常量住在 `vdfs/words.rs`） */
@@ -321,6 +331,7 @@ const BASE = {
   'symbio/src/symbio_core/vdfs/words.rs': VDFS_WORDS_RS_SRC,
   ...VDFS_TYPES_RS,
   'symbio/src/plugins/vdfs/protocol.rs': PROTOCOL_RS_SRC,
+  'symbio/src/symbio_core/plugin/route.rs': ROUTE_RS_SRC,
   // E 组：这条跨栈导航头指向真实存在的 `tauri/src/schemas/vdfs.ts`
   'symbio/src/symbio_core/event_bus/mod.rs':
     '// Corresponding Frontend: tauri/src/schemas/vdfs.ts\npub const EVENT_BUS_KIND_VDFS: &str = "vdfs";\n',
@@ -417,7 +428,6 @@ test('后端改了会话 ext、前端没跟 → 变红', () => {
 test('后端改了 op 路由（自动发现，无需登记）→ 变红', () => {
   const r = mirror({
     'symbio/src/plugins/vdfs/protocol.rs': [
-      'pub const VDFS_ROOT: &str = "vdfs/root";',
       'pub const VDFS_LIST: &str = "vdfs/ls";',
     ].join('\n'),
   })
@@ -425,16 +435,16 @@ test('后端改了 op 路由（自动发现，无需登记）→ 变红', () => 
   assert.match(r.stdout, /VDFS_LIST/)
 })
 
-test('后端改了别名目标（VDFS_ROOT）→ 变红，且报出别名关系', () => {
+test('后端改了别名目标（`ROUTE_VDFS_ROOT`）→ 变红，且报出别名关系', () => {
+  // 别名目标住在 core 的 `plugin/route.rs`（跨插件可见的路由归 core）。
   const r = mirror({
-    'symbio/src/plugins/vdfs/protocol.rs': [
-      'pub const VDFS_ROOT: &str = "vdfs/rooted";',
-      'pub const VDFS_LIST: &str = "vdfs/list";',
+    'symbio/src/symbio_core/plugin/route.rs': [
+      'pub const ROUTE_VDFS_ROOT: &str = "vdfs/rooted";',
     ].join('\n'),
   })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /VDFS_ROOT_OP/)
-  assert.match(r.stdout, /VDFS_ROOT/)
+  assert.match(r.stdout, /ROUTE_VDFS_ROOT/)
 })
 
 test('前端持有后端没有的 VDFS_* 常量且未登记 → 变红（不许静默漏网）', () => {

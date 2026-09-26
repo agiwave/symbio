@@ -18,6 +18,14 @@ const GUARDS = [
   'doc-link-audit',
   'test-layout-audit',
   'dead-code-audit',
+  // `core-naming-audit` 把 `symbio_core/README.md` §1.2 的**域前缀对照表**当作规则源
+  // 解析，逐个核对公开符号的前缀是否落在所属域登记的前缀里。它守的是「规范」本身：
+  // 此前那张表**没有任何脚本在判**，于是漂移了三处（`PLUGIN_PROVIDER_FIELD` 住 `vdfs`
+  // 却姓 `PLUGIN`、`KEY_PROVIDER` 住 `plugin` 却用 `keys` 的前缀、插件工厂 id 住 `keys`
+  // 却姓 `PLUGIN`）。它的失效形态有两种，都要靠回归测试钉住：
+  // ① **规则源读不出来**（表被改写/搬走）却仍亮绿灯——绿灯只说明没检查；
+  // ② **前缀比对写宽了**（按字面 contains 而非按词）⇒ 误报一片，最后被人用豁免喂到失效。
+  'core-naming-audit',
 ]
 // 不是**判定型**审计脚本，只跑回归测试（共享库 / 门禁原语 / 报告型脚本）：
 //   - `color` 带一道「scripts/ 下不得手写 ANSI」守卫；

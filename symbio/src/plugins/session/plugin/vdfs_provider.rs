@@ -1409,7 +1409,7 @@ impl SessionPlugin {
             .await
             .node(&crate::symbio_core::MemoryNodeSpec {
                 title: super::super::memory::SEGMENT_TITLE,
-                kind: PLUGIN_SESSION,
+                kind: PLUGIN_ID_SESSION,
                 description: super::super::memory::MEMORY_DESCRIPTION,
             })
     }

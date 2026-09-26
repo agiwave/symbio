@@ -55,22 +55,22 @@ function audit(files, { strict = false } = {}) {
 
 /** `symbio_core` 的最小事实源：工厂 id、协议端点、路由常量 */
 const CORE = {
-  'symbio/src/symbio_core/keys/ids.rs': `pub const PLUGIN_SESSION: &str = "session";\n`,
-  'symbio/src/symbio_core/mod.rs':
-    `pub const TRAVERSE_AVAILABLE_TOOLS: &str = "available_tools";\n`,
-  'symbio/src/symbio_core/capability/option.rs':
+  'symbio/src/symbio_core/plugin/ids.rs': `pub const PLUGIN_ID_SESSION: &str = "session";\n`,
+  'symbio/src/symbio_core/plugin/traverse.rs':
+    `pub const TRAVERSE_AVAILABLE_TOOLS: &str = "available_tools";\n` +
     `pub const TRAVERSE_AVAILABLE_OPTIONS: &str = "available_options";\n`,
-  'symbio/src/symbio_core/keys/paths.rs': `pub const SESSION_CHAT_SEND: &str = "session/chat/send";\n`,
+  'symbio/src/symbio_core/plugin/route.rs':
+    `pub const ROUTE_SESSION_CHAT_SEND: &str = "session/chat/send";\n`,
 }
 
 /** 一个干净的最小插件：两条静态路由臂 + 只认 `available_tools` 的 traverse */
-const PLUGIN = `use crate::symbio_core::{PluginError, PluginMeta, PATH, PLUGIN_SESSION, TRAVERSE_AVAILABLE_TOOLS};
+const PLUGIN = `use crate::symbio_core::{PluginError, PluginMeta, PATH, PLUGIN_ID_SESSION, TRAVERSE_AVAILABLE_TOOLS};
 
 pub struct SessionPlugin;
 
 impl Plugin for SessionPlugin {
     fn meta(&self) -> PluginMeta {
-        PluginMeta::new(PLUGIN_SESSION, "会话管理")
+        PluginMeta::new(PLUGIN_ID_SESSION, "会话管理")
     }
 
     async fn route(self: Arc<Self>, ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse<PluginPayload> {
@@ -116,7 +116,7 @@ test('报告段给出每条路由的消费方计数', () => {
 test('E-001 命中：meta 首参写成 "sessions" 而目录是 session', () => {
   const r = audit({
     ...CLEAN,
-    'symbio/src/plugins/session/plugin.rs': PLUGIN.replace('PluginMeta::new(PLUGIN_SESSION', 'PluginMeta::new("sessions"'),
+    'symbio/src/plugins/session/plugin.rs': PLUGIN.replace('PluginMeta::new(PLUGIN_ID_SESSION', 'PluginMeta::new("sessions"'),
   })
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /E-001 .*plugins\/session\/plugin\.rs/)
@@ -132,7 +132,7 @@ test('E-002 命中：代码里引用 meta id 当命名空间（`sessions/update`
   const r = audit({
     ...CLEAN,
     // meta 首参错写成 sessions ⇒ `sessions` 成了一个「幽灵命名空间」
-    'symbio/src/plugins/session/plugin.rs': PLUGIN.replace('PluginMeta::new(PLUGIN_SESSION', 'PluginMeta::new("sessions"'),
+    'symbio/src/plugins/session/plugin.rs': PLUGIN.replace('PluginMeta::new(PLUGIN_ID_SESSION', 'PluginMeta::new("sessions"'),
     'symbio/src/plugins/session/caller.rs':
       `pub fn p() -> String { "sessions/update".to_string() }\n`,
   })
@@ -151,11 +151,11 @@ test('E-003 命中：`set(PATH, "字面量")`', () => {
   assert.match(r.stdout, /E-003 .*caller\.rs:1/)
 })
 
-test('E-003 不误报：用常量（`SESSION_CHAT_SEND.to_string()`）', () => {
+test('E-003 不误报：用常量（`ROUTE_SESSION_CHAT_SEND.to_string()`）', () => {
   const r = audit({
     ...CLEAN,
     'symbio/src/plugins/session/caller.rs':
-      `pub fn p(ctx: Arc<dyn PluginInvokeRequest>) { ctx.set(PATH, SESSION_CHAT_SEND.to_string()); }\n`,
+      `pub fn p(ctx: Arc<dyn PluginInvokeRequest>) { ctx.set(PATH, ROUTE_SESSION_CHAT_SEND.to_string()); }\n`,
   })
   assert.equal(r.status, 0, r.stdout)
 })
@@ -247,7 +247,7 @@ test('E-006 命中：ROUTES.md 里写了 `sessions/update`', () => {
     {
       ...CLEAN,
       'symbio/src/plugins/session/plugin.rs': PLUGIN.replace(
-        'PluginMeta::new(PLUGIN_SESSION',
+        'PluginMeta::new(PLUGIN_ID_SESSION',
         'PluginMeta::new("sessions"',
       ),
       'docs/reference/ROUTES.md': '| `sessions/update` | 合并写入 |\n',
@@ -275,7 +275,7 @@ test('E-006 不误报：非权威文档不判', () => {
     {
       ...CLEAN,
       'symbio/src/plugins/session/plugin.rs': PLUGIN.replace(
-        'PluginMeta::new(PLUGIN_SESSION',
+        'PluginMeta::new(PLUGIN_ID_SESSION',
         'PluginMeta::new("sessions"',
       ),
       'symbio/src/plugins/session/docs/legacy.md': '历史入口：`sessions/update` 已下线。\n',

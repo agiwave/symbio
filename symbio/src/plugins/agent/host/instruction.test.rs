@@ -12,7 +12,7 @@ use crate::symbio_core::VdfsAccess;
 /// 系统智能体目录 = 本插件目录的父目录（容器的装配规则，不需要额外上下文键）
 #[test]
 fn host_dir_is_the_parent_of_the_plugin_dir() {
-    let plugin_dir = Path::new("/homedir").join(PLUGIN_AGENT);
+    let plugin_dir = Path::new("/homedir").join(PLUGIN_ID_AGENT);
     assert_eq!(host_dir(&plugin_dir), Path::new("/homedir"));
     assert_eq!(
         file_path(&host_dir(&plugin_dir)),
@@ -104,7 +104,7 @@ fn node_shape_comes_from_the_kernel() {
     let n = m.node(&node_spec());
     assert_eq!(n.name, MEMORY_AGENTS_FILE, "节点名 = 真实文件名");
     assert_eq!(n.title, SEGMENT_TITLE);
-    assert_eq!(n.kind, PLUGIN_AGENT, "场景标签用所属插件的场景名");
+    assert_eq!(n.kind, PLUGIN_ID_AGENT, "场景标签用所属插件的场景名");
     assert_eq!(n.size, Some("内容".len() as u64));
     assert!(n.updated_at.is_some(), "节点要用它做排序");
     assert_eq!(n.access, VdfsAccess::READ_WRITE, "指令文件恒可读写");

@@ -11,7 +11,7 @@ use crate::symbio_core::vdfs;
 use crate::symbio_core::{
     dir_from_ctx, Capability, CapabilityMeta, ExecEnv, Plugin, PluginConfigFile, PluginDir,
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
-    PluginPayload, PLUGIN_FILE, PLUGIN_LOCAL,
+    PluginPayload, PLUGIN_FILE, PLUGIN_ID_LOCAL,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -287,7 +287,7 @@ impl LocalPlugin {
     /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         // 自己的目录由容器经 `PLUGIN_DIR` 告知；配置就存在那里的 PLUGIN.yml
-        let dir = dir_from_ctx(&*ctx, PLUGIN_LOCAL);
+        let dir = dir_from_ctx(&*ctx, PLUGIN_ID_LOCAL);
         let config: LocalConfig = match dir.load::<LocalConfig>() {
             Ok(Some(c)) => c,
             Ok(None) => LocalConfig::default(),
@@ -407,7 +407,7 @@ impl Plugin for LocalPlugin {
             }
             // 与工具共用同一次能力广播：本插件在 VDFS 上的全部内容 = 一个配置文档
             let me: vdfs::DynVdfsProvider = self.clone();
-            visitor.register_vdfs_provider(PLUGIN_LOCAL, me).await;
+            visitor.register_vdfs_provider(PLUGIN_ID_LOCAL, me).await;
         }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
         crate::symbio_core::announce_configurable(&ctx, &self.config_file).await;
@@ -477,7 +477,7 @@ impl vdfs::VdfsProvider for LocalPlugin {
     }
 }
 
-crate::submit_object_creator!(PLUGIN_LOCAL, LocalPlugin::build, dyn Plugin);
+crate::submit_object_creator!(PLUGIN_ID_LOCAL, LocalPlugin::build, dyn Plugin);
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]

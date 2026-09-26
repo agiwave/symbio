@@ -31,7 +31,7 @@
 use super::{fs::VDFS_ADDR_ROOT, host, protocol as p, provider::ToolVdfs, tools};
 use crate::symbio_core::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
-    PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH, PLUGIN_VDFS, TRAVERSE_AVAILABLE_TOOLS,
+    PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH, PLUGIN_ID_VDFS, TRAVERSE_AVAILABLE_TOOLS,
 };
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
@@ -131,7 +131,7 @@ impl Plugin for VdfsPlugin {
     }
 }
 
-crate::submit_object_creator!(PLUGIN_VDFS, VdfsPlugin::build, dyn Plugin);
+crate::submit_object_creator!(PLUGIN_ID_VDFS, VdfsPlugin::build, dyn Plugin);
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]

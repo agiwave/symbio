@@ -22,9 +22,9 @@ fn unpack_name_comes_from_the_filename() {
         filename: f.into(),
         b64: String::new(),
     };
-    assert_eq!(pack("demo.zip").name_of(PLUGIN_SKILL), "demo");
-    assert_eq!(pack("demo.skill").name_of(PLUGIN_SKILL), "demo");
-    assert_eq!(pack("demo").name_of(PLUGIN_SKILL), "demo");
+    assert_eq!(pack("demo.zip").name_of(PLUGIN_ID_SKILL), "demo");
+    assert_eq!(pack("demo.skill").name_of(PLUGIN_ID_SKILL), "demo");
+    assert_eq!(pack("demo").name_of(PLUGIN_ID_SKILL), "demo");
 }
 
 /// 摘要优先 YAML frontmatter：`name` 作标题、`description` 作摘要，
@@ -99,7 +99,7 @@ fn new_manifest_passes_validation() {
 #[tokio::test]
 async fn store_roundtrip_through_the_dir_impl() {
     let tmp = tempfile::tempdir().unwrap();
-    let s = DirVdfs::at(tmp.path().join("skill"), PLUGIN_SKILL, MANIFEST);
+    let s = DirVdfs::at(tmp.path().join("skill"), PLUGIN_ID_SKILL, MANIFEST);
     let ctx = VdfsContext::empty();
 
     let md = validate_manifest("demo", &new_manifest("demo")).unwrap();
@@ -155,7 +155,10 @@ async fn store_roundtrip_through_the_dir_impl() {
 async fn new_type_declares_the_landing_detail() {
     let plugin = SkillPlugin {
         config: Arc::new(RwLock::new(SkillConfig::default())),
-        dir: PluginDir::at(std::env::temp_dir().join("symbio-test/skill"), PLUGIN_SKILL),
+        dir: PluginDir::at(
+            std::env::temp_dir().join("symbio-test/skill"),
+            PLUGIN_ID_SKILL,
+        ),
     };
     // 「根下可新建类型」挂在**根节点自己的自述**上（不在同步的 `PluginMeta` 上）：
     // 走 `Stat("")`，与更深层节点同一条通道（`VdfsNode::new_type`）。
@@ -166,7 +169,7 @@ async fn new_type_declares_the_landing_detail() {
         .into_stat()
         .expect("根节点自述");
     let t = root.new_type.expect("根下可新建「技能」");
-    assert_eq!(t.ext, PLUGIN_SKILL, "呈现扩展名是技能自己的，不是包的");
+    assert_eq!(t.ext, PLUGIN_ID_SKILL, "呈现扩展名是技能自己的，不是包的");
     assert_eq!(
         t.node_ext.as_deref(),
         Some(VDFS_EXT_FORM),

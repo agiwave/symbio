@@ -12,7 +12,7 @@ use super::*;
 fn codebase_search_is_registered() {
     let dir = PluginDir::at(
         std::env::temp_dir().join("symbio-local-plugin-tool-list"),
-        PLUGIN_LOCAL,
+        PLUGIN_ID_LOCAL,
     );
     let plugin = LocalPlugin::new(None, LocalConfig::default(), dir);
     let names: Vec<String> = plugin.tool_impls.iter().map(|t| t.name()).collect();

@@ -27,7 +27,7 @@ fn vctx() -> vdfs::VdfsContext {
 }
 
 /// provider 自描述：**不含挂载名**——挂载名由使用方在注册时选定
-/// （见 `traverse` 里的 `register_vdfs_provider(PLUGIN_SESSION, ..)`）
+/// （见 `traverse` 里的 `register_vdfs_provider(PLUGIN_ID_SESSION, ..)`）
 #[tokio::test]
 async fn vdfs_self_description_has_no_mount() {
     let (_dir, p) = fixture();
@@ -494,7 +494,7 @@ async fn memory_is_a_read_write_file_inside_the_session() {
         "rw",
         "模型与用户共用这一份，可读可写"
     );
-    assert_eq!(mem.node.kind, PLUGIN_SESSION);
+    assert_eq!(mem.node.kind, PLUGIN_ID_SESSION);
     assert!(mem.node.description.is_some(), "列表里要能看出它是干什么的");
 
     // ② `stat` 与 `list` 同源（同一份形状，不是另写一份「详情版」）

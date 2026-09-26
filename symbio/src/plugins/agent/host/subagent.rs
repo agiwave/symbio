@@ -52,8 +52,9 @@ use crate::symbio_core::{
 use crate::symbio_core::{vdfs_context, VdfsError};
 use crate::symbio_core::{
     ExecAbortSignal, ExecEnv, ExecEventSink, Plugin, PluginError, PluginFrame, PluginInvokeRequest,
-    PluginInvokeRequestExt, MODE, PATH, PLUGIN_SESSION, PROVIDER_ID, RISK_LEVEL, SESSION_CHAT_SEND,
-    SESSION_ID, TOOL_CALL_ID, VDFS_ROOT, VDFS_UNWATCH, VDFS_WATCH,
+    PluginInvokeRequestExt, MODE, PATH, PLUGIN_ID_SESSION, PROVIDER_ID, RISK_LEVEL,
+    ROUTE_SESSION_CHAT_SEND, ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH, SESSION_ID,
+    TOOL_CALL_ID,
 };
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -335,7 +336,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
         // mode / risk_level / provider_id 随请求显式继承（resolve_session_params
         // 的回退链是 req > metadata > 默认，ctx 键会被覆盖，必须走 req 字段）。
         let send_ctx = ctx.fork();
-        send_ctx.set(PATH, SESSION_CHAT_SEND.to_string());
+        send_ctx.set(PATH, ROUTE_SESSION_CHAT_SEND.to_string());
         send_ctx.set(SESSION_ID, child_session_id.clone());
         let _ = send_ctx.set_payload(session_chat::Request {
             session_id: Some(child_session_id.clone()),
@@ -374,7 +375,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
                 router: parent.clone(),
                 invoke_ctx: ctx.clone(),
                 session_addr,
-                rel_base: format!("{PLUGIN_SESSION}/{child_session_id}"),
+                rel_base: format!("{PLUGIN_ID_SESSION}/{child_session_id}"),
                 conn_id,
                 child_session_id,
                 agent_id,
@@ -476,7 +477,7 @@ async fn validate_subsession_exists(
             "agent_run 无法取得本作用域的 VDFS 视图（容器未暴露 provider）".to_string(),
         )
     })?;
-    let addr = format!("{PLUGIN_SESSION}/{session_id}");
+    let addr = format!("{PLUGIN_ID_SESSION}/{session_id}");
     let exists = match provider
         .dispatch(&vdfs_context(ctx), &addr, VdfsRequest::Stat)
         .await
@@ -535,7 +536,7 @@ async fn register_subsession(
             "agent_run 无法取得本作用域的 VDFS 视图（容器未暴露 provider）".to_string(),
         )
     })?;
-    let addr = format!("{PLUGIN_SESSION}/{session_id}");
+    let addr = format!("{PLUGIN_ID_SESSION}/{session_id}");
     let body = json!({ "metadata": metadata }).to_string();
     provider
         .dispatch(
@@ -892,14 +893,14 @@ async fn read_text(
 /// 两个段各有归属，都不许在这里写死：
 /// - **根名**归 vdfs 插件（仓级守卫 S-010 禁止它出现在别处），经 `vdfs/root`
 ///   取回后当**运行期数据**持有（前端 `schemas/vdfsRoot` 同款做法）；
-/// - **挂载段**是容器的分发键——目录名 = 实例名，故取 `PLUGIN_SESSION`。
+/// - **挂载段**是容器的分发键——目录名 = 实例名，故取 `PLUGIN_ID_SESSION`。
 async fn session_vdfs_addr(
     parent: &Arc<dyn Plugin>,
     ctx: &Arc<dyn PluginInvokeRequest>,
     session_id: &str,
 ) -> Result<String, PluginError> {
     let c = ctx.fork();
-    c.set(PATH, VDFS_ROOT.to_string());
+    c.set(PATH, ROUTE_VDFS_ROOT.to_string());
     let resp = parent
         .clone()
         .route(c)
@@ -916,7 +917,7 @@ async fn session_vdfs_addr(
         .ok_or_else(|| {
             PluginError::InternalError(format!("vdfs/root 未返回根地址，无法订阅子会话变更: {v}"))
         })?;
-    Ok(format!("{root}/{PLUGIN_SESSION}/{session_id}"))
+    Ok(format!("{root}/{PLUGIN_ID_SESSION}/{session_id}"))
 }
 
 /// 登记 / 摘除一条 VDFS 订阅（与 `vdfs/watch` 的引用计数严格配对）。
@@ -936,7 +937,12 @@ async fn vdfs_watch(
     let c = ctx.fork();
     c.set(
         PATH,
-        if subscribe { VDFS_WATCH } else { VDFS_UNWATCH }.to_string(),
+        if subscribe {
+            ROUTE_VDFS_WATCH
+        } else {
+            ROUTE_VDFS_UNWATCH
+        }
+        .to_string(),
     );
     let _ = c.set_payload(json!({ "path": addr }));
     if let Err(e) = parent.clone().route(c).await {

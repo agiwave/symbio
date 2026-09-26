@@ -25,7 +25,7 @@
 //! | 消费者 | 拿到的形态 |
 //! |---|---|
 //! | 其它插件要印一个可编辑地址（提示词里的「地址：…」） | **上下文父地址 + 相对地址**（`absolute_addr`）：转发时由容器写入，插件不持有根名 |
-//! | 前端要进入地址空间 | `vdfs/root`（[`crate::plugins::vdfs::protocol::VDFS_ROOT`]）：**不给地址**就能列出根，回包里的 `path` 即根地址 |
+//! | 前端要进入地址空间 | `vdfs/root`（[`crate::symbio_core::ROUTE_VDFS_ROOT`]）：**不给地址**就能列出根，回包里的 `path` 即根地址 |
 //!
 //! 「改挂载名」因此只需改本文件这一行。
 //!
@@ -63,7 +63,7 @@ use std::sync::Arc;
 ///
 /// - 其它插件要印可编辑地址 → 用**上下文父地址**拼相对地址（core 的
 ///   `absolute_addr`，转发时容器已写入父地址），本插件之外无人认识这个名字；
-/// - 前端要进入地址空间 → `vdfs/root`（[`super::protocol::VDFS_ROOT`]），
+/// - 前端要进入地址空间 → `vdfs/root`（[`crate::symbio_core::ROUTE_VDFS_ROOT`]），
 ///   回包里的 `path` 即根地址，前端把它当**运行期数据**持有。
 ///
 /// 根名同时经 `AddrRootDecl` 静态声明（编译期随二进制生效，容器装配子插件

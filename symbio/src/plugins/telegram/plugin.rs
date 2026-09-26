@@ -8,8 +8,8 @@ use crate::symbio_core::{
     dir_from_ctx,
     schemas::{common, session::session_chat},
     CapabilityMeta, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
-    PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_TELEGRAM,
-    SESSION_CHAT_SEND,
+    PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_ID_TELEGRAM,
+    ROUTE_SESSION_CHAT_SEND,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -83,7 +83,7 @@ pub struct TelegramPlugin {
 impl TelegramPlugin {
     /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
-        let dir = dir_from_ctx(&*ctx, PLUGIN_TELEGRAM);
+        let dir = dir_from_ctx(&*ctx, PLUGIN_ID_TELEGRAM);
         let config: TelegramConfig = match dir.load::<TelegramConfig>() {
             Ok(Some(c)) => c,
             Ok(None) => TelegramConfig::default(),
@@ -504,8 +504,11 @@ impl TelegramPlugin {
                 let sub_ctx = ctx.fork();
                 // 路径取常量：此处曾写 `SESSION_CHAT`（`"session/chat"`）——**该路径不存在**，
                 // session 的 `route` 只认 `chat/send` / `chat/abort` 两条相对臂，
-                // 所以这里以前必定落到 `_ => NotFound`。见 `symbio_core::keys::paths` 的地址规则。
-                sub_ctx.set(crate::symbio_core::PATH, SESSION_CHAT_SEND.to_string());
+                // 所以这里以前必定落到 `_ => NotFound`。见 `symbio_core::plugin::route` 的地址规则。
+                sub_ctx.set(
+                    crate::symbio_core::PATH,
+                    ROUTE_SESSION_CHAT_SEND.to_string(),
+                );
                 let _ = sub_ctx.set_payload(chat_input);
                 sub_ctx.set(crate::symbio_core::WORKDIR, ".".to_string());
                 sub_ctx.set(crate::symbio_core::SESSION_ID, chat_id.clone());
@@ -591,7 +594,7 @@ impl Default for TelegramPlugin {
             TelegramConfig::default(),
             PluginDir::at(
                 std::env::temp_dir().join("symbio-test/telegram"),
-                PLUGIN_TELEGRAM,
+                PLUGIN_ID_TELEGRAM,
             ),
         )
     }
@@ -623,7 +626,7 @@ impl Plugin for TelegramPlugin {
         // 与工具共用同一次能力广播：本插件在 VDFS 上的全部内容 = 一个配置文档
         if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
             let me: vdfs::DynVdfsProvider = self.clone();
-            visitor.register_vdfs_provider(PLUGIN_TELEGRAM, me).await;
+            visitor.register_vdfs_provider(PLUGIN_ID_TELEGRAM, me).await;
         }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
         crate::symbio_core::announce_configurable(&ctx, &self.config_file).await;
@@ -748,4 +751,4 @@ impl vdfs::VdfsProvider for TelegramPlugin {
     }
 }
 
-crate::submit_object_creator!(PLUGIN_TELEGRAM, TelegramPlugin::build, dyn Plugin);
+crate::submit_object_creator!(PLUGIN_ID_TELEGRAM, TelegramPlugin::build, dyn Plugin);

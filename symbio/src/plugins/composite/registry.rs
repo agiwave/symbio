@@ -17,7 +17,7 @@
 //!
 //! - **合格性**：[`PluginRegistry::provider_of`] 的三态（不是插件 / 可加载 / 配了一半）；
 //! - **必需**：构造者经 [`REQUIRED_PLUGINS`] 声明的清单（缺目录就补出来）；
-//! - **启用**：[`KEY_ENABLED`]（`PLUGIN.yml` 里的装配位，缺省 = 启用）。
+//! - **启用**：[`PLUGIN_KEY_ENABLED`]（`PLUGIN.yml` 里的装配位，缺省 = 启用）。
 //!
 //! ## 为什么运行期能改，而不用重启
 //!
@@ -45,8 +45,8 @@
 use crate::symbio_core::{
     create_object, creator_ids, has_creator, lock_read, lock_write, Plugin, PluginDir, PluginEntry,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginMeta, PluginSimpleRequest, PluginStopReason,
-    ASSEMBLY_UNDISABLABLE_PLUGINS, KEY_PROVIDER, PLUGIN_COMPOSITE, PLUGIN_DIR, PLUGIN_FILE,
-    PLUGIN_HOME, REQUIRED_PLUGINS,
+    ASSEMBLY_UNDISABLABLE_PLUGINS, PLUGIN_DIR, PLUGIN_FILE, PLUGIN_ID_COMPOSITE, PLUGIN_ID_HOME,
+    PLUGIN_KEY_PROVIDER, REQUIRED_PLUGINS,
 };
 use serde_json::Value;
 
@@ -59,9 +59,9 @@ use serde_json::Value;
 ///   子插件，系统里就会出现第二个根。
 ///
 /// 判据：只被本模块消费（`installable` 排除、`install` 拒绝），故按 ADR-023 的
-/// 依赖方判据从 `symbio_core::keys::ids` 下沉到**执行它的地方**——规则的 owner
+/// 依赖方判据从 `symbio_core::plugin::ids` 下沉到**执行它的地方**——规则的 owner
 /// 与实现同处，不再隔着两层。
-const SYSTEM_LEVEL_PROVIDERS: &[&str] = &[PLUGIN_HOME, PLUGIN_COMPOSITE];
+const SYSTEM_LEVEL_PROVIDERS: &[&str] = &[PLUGIN_ID_HOME, PLUGIN_ID_COMPOSITE];
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock, Weak};
@@ -161,7 +161,7 @@ impl PluginRegistry {
     /// 装配：**插件目录是子项的唯一来源**
     ///
     /// 扫描 `<插件根>/*/`：配置**合格**（有 `PLUGIN.yml` 且 `plugin_provider` 指向
-    /// 一个已注册工厂）且**启用**（见 [`KEY_ENABLED`]）的才构造。
+    /// 一个已注册工厂）且**启用**（见 [`PLUGIN_KEY_ENABLED`]）的才构造。
     pub fn mount_all(&self) {
         for name in self.dir_names() {
             let dir = self.dir_of(&name);
@@ -231,9 +231,9 @@ impl PluginRegistry {
         let Some(manifest) = dir.read_manifest()? else {
             return Ok(None);
         };
-        match manifest.get(KEY_PROVIDER) {
+        match manifest.get(PLUGIN_KEY_PROVIDER) {
             Some(Value::String(p)) if !p.is_empty() => Ok(Some(p.clone())),
-            _ => Err(format!("{PLUGIN_FILE} 未声明 {KEY_PROVIDER}")),
+            _ => Err(format!("{PLUGIN_FILE} 未声明 {PLUGIN_KEY_PROVIDER}")),
         }
     }
 

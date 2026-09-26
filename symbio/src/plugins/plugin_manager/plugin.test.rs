@@ -102,7 +102,7 @@ impl VdfsProvider for FakeRegistry {
             VdfsRequest::Stat => {
                 // 容器根的可新建类型：安装表单由**执行安装的那一层**声明，本插件转发它
                 let mut n = VdfsNode::dir("", "系统", VdfsAccess::LIST);
-                let mut t = VdfsNewType::new(PLUGIN_MANAGER, "插件");
+                let mut t = VdfsNewType::new(PLUGIN_ID_MANAGER, "插件");
                 t.description = Some("从已注册的插件工厂里选一个装进本智能体".to_string());
                 n.new_type = Some(Box::new(t));
                 Ok(VdfsResponse::Stat(n))
@@ -195,7 +195,7 @@ async fn read_model(p: &PluginManagerPlugin, ctx: &VdfsContext, name: &str) -> V
 async fn metadata_is_the_plugin_manager() {
     let p = plugin_without_registry();
     let meta = p.meta();
-    assert_eq!(PLUGIN_MANAGER, "plugin_manager", "插件管理插件的挂载名");
+    assert_eq!(PLUGIN_ID_MANAGER, "plugin_manager", "插件管理插件的挂载名");
     assert_eq!(meta.name, "插件管理");
     assert_eq!(meta.icon.as_deref(), Some("settings"));
     assert_eq!(meta.order, 6);
@@ -214,7 +214,7 @@ async fn root_new_type_is_forwarded_from_the_container() {
 
     let root = stat(&p, &vctx(), "").await;
     let t = root.new_type.expect("容器声明了可新建类型，应转发过来");
-    assert_eq!(t.ext, PLUGIN_MANAGER);
+    assert_eq!(t.ext, PLUGIN_ID_MANAGER);
     assert_eq!(t.title, "插件");
 
     // 容器不可达时按「不可新建」处理：少一个入口，好过给一个必然报错的入口
@@ -238,7 +238,7 @@ async fn list_puts_plugin_entries_before_own_sections() {
     assert_eq!(names, vec!["alpha", "beta", "appearance", "about"]);
 
     // 条目是定义驱动的表单文档，不是目录
-    assert_eq!(items[0].node.kind, PLUGIN_MANAGER);
+    assert_eq!(items[0].node.kind, PLUGIN_ID_MANAGER);
     assert_eq!(items[0].node.ext.as_deref(), Some(VDFS_EXT_FORM));
     assert!(!items[0].node.is_dir(), "条目是文档，不是目录");
 
@@ -283,7 +283,10 @@ async fn entries_without_config_get_a_readonly_overview() {
         .flat_map(|s| s.fields.iter())
         .map(|f| f.key.as_str())
         .collect();
-    assert_eq!(fields, vec![KEY_NAME, KEY_PROVIDER, KEY_VERSION]);
+    assert_eq!(
+        fields,
+        vec![PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER, PLUGIN_KEY_VERSION]
+    );
 
     // 标题回落链：配置标题（无）→ 插件元数据的名字
     assert_eq!(stat(&p, &vctx(), "beta").await.title, "beta 的名字");
@@ -355,18 +358,18 @@ async fn entry_actions_cover_enable_disable_and_uninstall() {
 
     assert_eq!(
         action_of(&d, VDFS_ACTION_ENABLE).when,
-        Some(cond_equals(KEY_ENABLED, Value::Bool(false)))
+        Some(cond_equals(PLUGIN_KEY_ENABLED, Value::Bool(false)))
     );
     assert_eq!(
         action_of(&d, VDFS_ACTION_DISABLE).when,
         Some(cond_all(vec![
-            cond_equals(KEY_ENABLED, Value::Bool(true)),
-            cond_equals(KEY_CAN_DISABLE, Value::Bool(true)),
+            cond_equals(PLUGIN_KEY_ENABLED, Value::Bool(true)),
+            cond_equals(PLUGIN_KEY_CAN_DISABLE, Value::Bool(true)),
         ]))
     );
     assert_eq!(
         action_of(&d, "delete").when,
-        Some(cond_equals(KEY_REQUIRED, Value::Bool(false)))
+        Some(cond_equals(PLUGIN_KEY_REQUIRED, Value::Bool(false)))
     );
     assert_eq!(action_of(&d, "delete").label, "卸载");
 }
@@ -383,12 +386,15 @@ async fn read_injects_projection_keys() {
     let p = plugin_with(fake);
 
     let m = read_model(&p, &vctx(), "alpha").await;
-    assert_eq!(m[KEY_NAME], Value::String("alpha".to_string()));
-    assert_eq!(m[KEY_PROVIDER], Value::String("alpha_factory".to_string()));
-    assert_eq!(m[KEY_ENABLED], Value::Bool(true));
-    assert_eq!(m[KEY_REQUIRED], Value::Bool(false));
-    assert_eq!(m[KEY_CAN_DISABLE], Value::Bool(true));
-    assert_eq!(m[KEY_VERSION], Value::String("1.0.0".to_string()));
+    assert_eq!(m[PLUGIN_KEY_NAME], Value::String("alpha".to_string()));
+    assert_eq!(
+        m[PLUGIN_KEY_PROVIDER],
+        Value::String("alpha_factory".to_string())
+    );
+    assert_eq!(m[PLUGIN_KEY_ENABLED], Value::Bool(true));
+    assert_eq!(m[PLUGIN_KEY_REQUIRED], Value::Bool(false));
+    assert_eq!(m[PLUGIN_KEY_CAN_DISABLE], Value::Bool(true));
+    assert_eq!(m[PLUGIN_KEY_VERSION], Value::String("1.0.0".to_string()));
 }
 
 /// 配置正文照常转发：条目不是第二种东西，它就是那份配置在管理页里的入口
@@ -408,7 +414,7 @@ async fn read_forwards_the_owners_config_text() {
         Value::String("fast".to_string()),
         "拥有者的字段原样带出"
     );
-    assert_eq!(m[KEY_ENABLED], Value::Bool(true), "投影键叠在其上");
+    assert_eq!(m[PLUGIN_KEY_ENABLED], Value::Bool(true), "投影键叠在其上");
 }
 
 /// 界面底座插件：可停用与否由**投影键**表达，删除与否由必需位表达
@@ -418,19 +424,19 @@ async fn read_forwards_the_owners_config_text() {
 #[tokio::test]
 async fn undisablable_required_plugin_hides_both_destructive_actions() {
     let fake = Arc::new(FakeRegistry::new(vec![entry(
-        PLUGIN_MANAGER,
-        PLUGIN_MANAGER,
+        PLUGIN_ID_MANAGER,
+        PLUGIN_ID_MANAGER,
         true,
         true,
     )]));
     let p = plugin_with(fake);
 
-    let m = read_model(&p, &vctx(), PLUGIN_MANAGER).await;
-    assert_eq!(m[KEY_REQUIRED], Value::Bool(true));
-    assert_eq!(m[KEY_CAN_DISABLE], Value::Bool(false));
+    let m = read_model(&p, &vctx(), PLUGIN_ID_MANAGER).await;
+    assert_eq!(m[PLUGIN_KEY_REQUIRED], Value::Bool(true));
+    assert_eq!(m[PLUGIN_KEY_CAN_DISABLE], Value::Bool(false));
 
     // 条件对这份模型求值：停用与卸载都不显示（`holds` 的判据见 `schemas/detail.rs`）
-    let d = definition_of(&stat(&p, &vctx(), PLUGIN_MANAGER).await);
+    let d = definition_of(&stat(&p, &vctx(), PLUGIN_ID_MANAGER).await);
     let disable = action_of(&d, VDFS_ACTION_DISABLE).when.clone().unwrap();
     let delete = action_of(&d, "delete").when.clone().unwrap();
     assert!(!disable.holds(&m), "底座插件不可停用");
@@ -514,7 +520,7 @@ async fn sections_are_leaves_without_read_or_write() {
     let p = plugin_without_registry();
     let s = stat(&p, &vctx(), "appearance").await;
     assert!(!s.is_dir(), "分区是叶子文档");
-    assert_eq!(s.kind, PLUGIN_MANAGER);
+    assert_eq!(s.kind, PLUGIN_ID_MANAGER);
     assert_eq!(s.status, VDFS_STATUS_NONE, "静态分区没有「运行中」可言");
 
     // 数据在前端 store：读写都明确拒绝（而非静默返回空）
@@ -592,7 +598,7 @@ async fn missing_container_view_reports_internal_but_sections_still_work() {
         "取不到容器视图是内部状态问题，不是「路径不对」：{err:?}"
     );
 
-    assert!(stat(&p, &vctx(), "appearance").await.kind == PLUGIN_MANAGER);
+    assert!(stat(&p, &vctx(), "appearance").await.kind == PLUGIN_ID_MANAGER);
 }
 
 // ==================== 配置声明通道 ====================
@@ -601,7 +607,7 @@ async fn missing_container_view_reports_internal_but_sections_still_work() {
 async fn ctx_with_configs() -> VdfsContext {
     use crate::symbio_core::{
         entry_of, vdfs::vdfs_context, ConfigurableVisitor, DefaultConfigurableVisitor,
-        PluginConfigFile, PluginDir, PluginSimpleRequest, CONFIG_VISITOR,
+        PluginConfigFile, PluginDir, PluginSimpleRequest, CONFIGURABLE_VISITOR,
     };
 
     let visitor: Arc<dyn ConfigurableVisitor> = Arc::new(DefaultConfigurableVisitor::new());
@@ -614,6 +620,6 @@ async fn ctx_with_configs() -> VdfsContext {
         .await;
 
     let host: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
-    host.set(CONFIG_VISITOR, visitor);
+    host.set(CONFIGURABLE_VISITOR, visitor);
     vdfs_context(&host)
 }

@@ -171,7 +171,7 @@ pub const VDFS_PLUGIN_NAME_FIELD: &str = "name";
 /// 不加 `VDFS_` 前缀是刻意的：它属于**表单字段**词汇（与 `DetailField` 的其它 key
 /// 同域），不是 VDFS 协议词——前端持有它也不会进入协议镜像守卫的比对范围
 /// （那组只认 `VDFS_*`）。
-pub const PLUGIN_PROVIDER_FIELD: &str = "provider";
+pub const VDFS_PLUGIN_PROVIDER_FIELD: &str = "provider";
 
 // ==================== 调用级参数（约定键名） ====================
 

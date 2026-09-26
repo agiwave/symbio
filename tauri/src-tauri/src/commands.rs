@@ -4,7 +4,7 @@ use crate::AppState;
 use serde_json::Value;
 use std::sync::Arc;
 use symbio::symbio_core::{
-    PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire, KEY_PAYLOAD,
+    PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire, PLUGIN_PAYLOAD_KEY,
 };
 use tauri::Emitter;
 use tracing::{debug, error, info, warn};
@@ -54,7 +54,7 @@ pub async fn route_v2(
 
     // 存储 payload 到扩展桶（桶名与 gateway 的 `build_ctx` 同一份契约）
     extensions.insert(
-        KEY_PAYLOAD.to_string(),
+        PLUGIN_PAYLOAD_KEY.to_string(),
         std::sync::Arc::new(request.payload) as std::sync::Arc<dyn std::any::Any + Send + Sync>,
     );
 

@@ -36,7 +36,7 @@ use crate::symbio_core::descend_addr;
 use crate::symbio_core::{
     lock_read, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, VdfsProvider, CAPABILITY_VISITOR, PATH,
-    PLUGIN_COMPOSITE, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
+    PLUGIN_ID_COMPOSITE, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
 };
 
 use std::sync::{Arc, Weak};
@@ -89,13 +89,13 @@ impl Composite {
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new(PLUGIN_COMPOSITE, "通用插件容器")
+        PluginMeta::new(PLUGIN_ID_COMPOSITE, "通用插件容器")
             .with_description("通用的插件容器，可以管理子插件实例，支持嵌套")
             .with_version("0.1.0")
     }
 }
 
-crate::submit_object_creator!(PLUGIN_COMPOSITE, Composite::build, dyn Plugin);
+crate::submit_object_creator!(PLUGIN_ID_COMPOSITE, Composite::build, dyn Plugin);
 
 /// 向子插件**广播**一次收集；只有**真失败**才留痕。
 ///

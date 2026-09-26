@@ -14,7 +14,7 @@
  *   → `docs/CURRENT.md` 的生成器与两处文档照抄出 **`hooks/fire` 这类不存在的路由**；
  * - Telegram 用 `SESSION_CHAT`（`"session/chat"`）路由——**该路径不存在**，
  *   session 只认 `chat/send` / `chat/abort`，所以那处调用以前必定落到 `NotFound`；
- * - `symbio_core::keys::paths` 里的 `AGENT_CHAT` / `AGENT_CREATE` 是**幽灵常量**：
+ * - `symbio_core::plugin::route` 里的 `AGENT_CHAT` / `AGENT_CREATE` 是**幽灵常量**：
  *   零调用方，而 `agent` 的 `route` 恒返回 `NotFound`——它们描述的路由不存在。
  *
  * 三处的共同点是：**没有任何测试会因此变红**。本脚本把它们写成可执行的规则。
@@ -25,7 +25,7 @@
  * |-------|---------------------------------------------------------------|--------|
  * | E-001 | `PluginMeta::new` 首参必须 == 插件目录名                        | 目录名才是路由前缀（`composite.rs`「目录名 = 实例名」）；首参不参与路由（ADR-032 之后它只是**出厂 id**，身份取自 `PLUGIN.yml`），不一致就会让文档写出幽灵路由 |
  * | E-002 | 代码里路由路径字面量的首段必须是插件目录名（或容器前缀 `worker`） | 抓「幽灵命名空间」：`hooks/...` 这种写错了前缀的路径 |
- * | E-003 | `set(PATH, "<字面量>")` 一律违规                                | 调用侧的绝对地址必须来自 `symbio_core::keys::paths` 常量，否则改名不会编译失败 |
+ * | E-003 | `set(PATH, "<字面量>")` 一律违规                                | 调用侧的绝对地址必须来自 `symbio_core::plugin::route` 常量，否则改名不会编译失败 |
  * | E-004 | `traverse` 内不得出现 `available_tools` / `available_options` 字面量 | 协议端点只有两个，且必须是常量（`TRAVERSE_AVAILABLE_*`） |
  * | E-005 | 引用的路径必须对应到某条真实 `route` 臂                        | 抓「路径写错一截」：`session/chat` 少了 `/send` |
  * | E-006 | **权威清单**（`ROUTES.md` / `CURRENT.md` / 插件 README）里的路径前缀必须合法 | `hooks/fire` 只出现在文档里，只扫代码的守卫会完整地漏掉它 |
@@ -46,7 +46,7 @@
  *
  * ## 地址规则（本脚本的依据）
  *
- * 见 [`symbio/src/symbio_core/keys/paths.rs`](../symbio/src/symbio_core/keys/paths.rs) 的模块文档：
+ * 见 [`symbio/src/symbio_core/plugin/route.rs`](../symbio/src/symbio_core/plugin/route.rs) 的模块文档：
  * 地址只有「绝对地址」与「相对臂」两种形态，前缀是**插件目录名**，
  * 过路由才设 `PATH`，`traverse` 的 `PATH` 只有两个合法值。
  *
@@ -289,7 +289,7 @@ const rel = (abs) => path.relative(repoRoot, abs).split(path.sep).join('/')
 // ── 常量表：`NAME` → 字符串值（Rust `const` / TS `export const`）──────────
 //
 // 需要它是因为「引用一条路由」有两种写法：直接写字面量，或经常量
-// （`SESSION_CHAT_SEND` / `CHAT_ABORT`）。只查字面量会**漏报**，
+// （`ROUTE_SESSION_CHAT_SEND` / `CHAT_ABORT`）。只查字面量会**漏报**，
 // 而漏报会让审计给出「这条路由没人用」的错误结论——2026-09-18 第一版
 // 手查就踩过：`session/chat/abort` 字面量计数为 0，实际前端一直在用。
 function buildConstTable(files) {
@@ -298,7 +298,7 @@ function buildConstTable(files) {
     const txt = readCode(abs)
     if (abs.endsWith('.rs')) {
       // `&str` 与 `&'static str` 都要认——只写 `&'?static\s+str` 会漏掉前者，
-      // 于是 `pub const PLUGIN_AGENT: &str = "agent";` 整表取不到，
+      // 于是 `pub const PLUGIN_ID_AGENT: &str = "agent";` 整表取不到，
       // E-001 会把每个用常量声明 meta 的插件都报成「未取到首参」。
       for (const m of txt.matchAll(
         /const\s+([A-Z][A-Z0-9_]*)\s*:\s*&\s*(?:'static\s+)?str\s*=\s*"([^"\n]*)"/g,
@@ -474,7 +474,7 @@ function discoverPlugins() {
 const pluginDirs = discoverPlugins()
 const dirNames = new Set(pluginDirs.map((p) => p.dirName))
 
-// 常量表：先收全仓（`ids.rs` 的 `PLUGIN_*`、`paths.rs` 的路由常量、
+// 常量表：先收全仓（`plugin/ids.rs` 的 `PLUGIN_ID_*`、`plugin/route.rs` 的 `ROUTE_*`、
 // 前端 `pluginPaths.ts` 的模板串链）
 //
 // `tauri/src-tauri/src` 也在列：它是第三个独立 cargo workspace，且**整棵插件树
@@ -675,7 +675,7 @@ for (const abs of codeFiles) {
     const line = txt[i]
     const isConstDef = isRust && CONST_DEF_RE.test(line)
 
-    // E-003：调用侧不得写字面量 PATH（绝对地址必须来自 symbio_core::keys::paths 常量）
+    // E-003：调用侧不得写字面量 PATH（绝对地址必须来自 symbio_core::plugin::route 常量）
     if (isRust && /\.set\(\s*(?:crate::symbio_core::)?PATH\s*,\s*"/.test(line)) {
       if (!exempted(raw, i, 'E-003')) {
         report(
@@ -683,7 +683,7 @@ for (const abs of codeFiles) {
           'error',
           rel(abs),
           i + 1,
-          `\`set(PATH, "<字面量>")\` —— 绝对地址必须取 \`symbio_core::keys::paths\` 常量` +
+          `\`set(PATH, "<字面量>")\` —— 绝对地址必须取 \`symbio_core::plugin::route\` 常量` +
             `（字面量不会因改名而编译失败）`,
         )
       }

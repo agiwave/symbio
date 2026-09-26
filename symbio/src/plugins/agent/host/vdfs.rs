@@ -43,7 +43,7 @@ use crate::symbio_core::{
     VdfsItem, VdfsNewType, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
     VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_EXT_FORM,
 };
-use crate::symbio_core::{MEMORY_AGENTS_FILE, PLUGIN_AGENT, PLUGIN_FILE};
+use crate::symbio_core::{MEMORY_AGENTS_FILE, PLUGIN_FILE, PLUGIN_ID_AGENT};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -92,7 +92,7 @@ fn parse_rel_path(path: &str) -> RelPath<'_> {
 
 /// 路径末段 → 条目 id（去掉 `.agent` 呈现扩展名）
 fn id_of(path: &str) -> String {
-    vdfs_service::entry::id_of(path, PLUGIN_AGENT)
+    vdfs_service::entry::id_of(path, PLUGIN_ID_AGENT)
 }
 
 /// 把子 composite 返回的**子树相对路径**提升为本插件空间内的路径。
@@ -156,7 +156,7 @@ fn agent_dir_node(r: &AgentDirRecord, store: &AgentDirStore) -> VdfsNode {
         r.manifest.name.clone()
     };
     let mut n = VdfsNode::file(id, title, VdfsAccess::READ);
-    n.kind = PLUGIN_AGENT.to_string();
+    n.kind = PLUGIN_ID_AGENT.to_string();
     n.ext = Some(VDFS_EXT_FORM.to_string());
     n.schema = serde_json::to_value(super::detail::agent_detail_definition()).ok();
     if !r.manifest.description.is_empty() {
@@ -175,7 +175,7 @@ impl AgentPlugin {
     /// 根 = **本插件自己持有的目录**（构造时由父插件经 `PLUGIN_DIR` 告知，落在
     /// `config_file` 上）——与 [`AgentPlugin::sub_agent`] 取的是**同一份**。
     ///
-    /// ⚠️ **不得改回「从请求上下文取」**（`dir_from_ctx(&**host, PLUGIN_AGENT)`）。
+    /// ⚠️ **不得改回「从请求上下文取」**（`dir_from_ctx(&**host, PLUGIN_ID_AGENT)`）。
     /// `PLUGIN_DIR` 只在**装配期**给出：`composite::build` 构造子插件时、
     /// `AgentPlugin::sub_agent` 造子树时。请求上下文里没有它，而 core 已**不再**
     /// 提供任何全局回退（全局 agent 根那套已随 homedir 下沉到 `home` 删除）——
@@ -415,7 +415,7 @@ impl AgentPlugin {
             // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
             RelPath::Root => Ok(
                 VdfsNode::dir("", LABEL, VdfsAccess::LIST_TRAVERSE).with_new_type(Some(
-                    VdfsNewType::new(PLUGIN_AGENT, LABEL)
+                    VdfsNewType::new(PLUGIN_ID_AGENT, LABEL)
                         .with_description(format!("新建{LABEL}——在详情页里导入整包（.zip）"))
                         .with_node_ext(VDFS_EXT_FORM)
                         .with_schema_opt(
@@ -522,7 +522,7 @@ impl AgentPlugin {
             let existed = instr.exists();
             let text = content.text.as_deref().unwrap_or_default();
             instr.write(text).map_err(VdfsError::invalid)?;
-            notify_change(PLUGIN_AGENT, path);
+            notify_change(PLUGIN_ID_AGENT, path);
             return Ok(VdfsWriteResponse {
                 name: None,
                 created: !existed,
@@ -542,7 +542,7 @@ impl AgentPlugin {
             let existed = memory.exists();
             let text = content.text.as_deref().unwrap_or_default();
             memory.write(text).map_err(VdfsError::invalid)?;
-            notify_change(PLUGIN_AGENT, path);
+            notify_change(PLUGIN_ID_AGENT, path);
             return Ok(VdfsWriteResponse {
                 name: None,
                 created: !existed,
@@ -617,7 +617,7 @@ impl AgentPlugin {
         store
             .delete(&id)
             .map_err(|e| VdfsError::invalid(format!("删除{LABEL}失败：{e}")))?;
-        notify_change(PLUGIN_AGENT, &id);
+        notify_change(PLUGIN_ID_AGENT, &id);
         Ok(())
     }
 
@@ -688,7 +688,7 @@ impl AgentPlugin {
             let r = store
                 .import(&bytes, true)
                 .map_err(|e| VdfsError::invalid(format!("导入失败：{e}")))?;
-            notify_change(PLUGIN_AGENT, &r.id);
+            notify_change(PLUGIN_ID_AGENT, &r.id);
             return Ok(VdfsActionResult {
                 action: VDFS_ACTION_IMPORT.to_string(),
                 ok: true,
@@ -740,7 +740,7 @@ impl AgentPlugin {
                     .ok_or_else(mismatch);
             }
         }
-        watch_changes(PLUGIN_AGENT, path, sink).await
+        watch_changes(PLUGIN_ID_AGENT, path, sink).await
     }
 
     /// 取消订阅：与 `watch_at` 同一条判定——**成对**才配对得上计数
@@ -756,7 +756,7 @@ impl AgentPlugin {
                     .ok_or_else(mismatch);
             }
         }
-        unwatch_changes(PLUGIN_AGENT, path).await
+        unwatch_changes(PLUGIN_ID_AGENT, path).await
     }
 }
 

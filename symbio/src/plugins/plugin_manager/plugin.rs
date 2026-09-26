@@ -52,8 +52,9 @@ use crate::symbio_core::{
 use crate::symbio_core::{
     Plugin, PluginEntry, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, ASSEMBLY_UNDISABLABLE_PLUGINS,
-    CAPABILITY_VISITOR, CONFIG_VISITOR, KEY_CAN_DISABLE, KEY_ENABLED, KEY_NAME, KEY_PROVIDER,
-    KEY_REQUIRED, KEY_VERSION, PLUGIN_FILE, PLUGIN_MANAGER,
+    CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, PLUGIN_FILE, PLUGIN_ID_MANAGER,
+    PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER,
+    PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION,
 };
 use crate::symbio_core::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNode, VdfsProvider, VdfsRequest,
@@ -99,7 +100,7 @@ fn section_of(id: &str) -> Option<&'static SectionSpec> {
 /// [`VDFS_STATUS_NONE`]: crate::symbio_core::VDFS_STATUS_NONE
 fn section_node(s: &SectionSpec) -> VdfsNode {
     let mut n = VdfsNode::file(s.id, s.label, VdfsAccess::READ);
-    n.kind = PLUGIN_MANAGER.to_string();
+    n.kind = PLUGIN_ID_MANAGER.to_string();
     n.ext = Some(s.id.to_string());
     n.status = crate::symbio_core::VDFS_STATUS_NONE.to_string();
     n
@@ -168,7 +169,7 @@ fn entry_node(entry: &PluginEntry, config: Option<VdfsItem>) -> VdfsNode {
     }
 
     let mut n = VdfsNode::file(entry.name.clone(), title, VdfsAccess::READ_WRITE);
-    n.kind = PLUGIN_MANAGER.to_string();
+    n.kind = PLUGIN_ID_MANAGER.to_string();
     n.ext = Some(VDFS_EXT_FORM.to_string());
     n.description = config
         .as_ref()
@@ -202,9 +203,9 @@ fn overview_definition(entry: &PluginEntry) -> DetailDefinition {
             title: None,
             collapsed: false,
             fields: vec![
-                static_field(KEY_NAME, "插件名"),
-                static_field(KEY_PROVIDER, "插件工厂"),
-                static_field(KEY_VERSION, "版本"),
+                static_field(PLUGIN_KEY_NAME, "插件名"),
+                static_field(PLUGIN_KEY_PROVIDER, "插件工厂"),
+                static_field(PLUGIN_KEY_VERSION, "版本"),
             ],
         }],
         ..Default::default()
@@ -225,7 +226,7 @@ fn management_actions() -> Vec<DetailAction> {
             id: VDFS_ACTION_ENABLE.to_string(),
             label: "启用".to_string(),
             style: "primary".to_string(),
-            when: Some(cond_equals(KEY_ENABLED, Value::Bool(false))),
+            when: Some(cond_equals(PLUGIN_KEY_ENABLED, Value::Bool(false))),
             busy_label: Some("启用中…".to_string()),
             ..Default::default()
         },
@@ -235,8 +236,8 @@ fn management_actions() -> Vec<DetailAction> {
             label: "停用".to_string(),
             style: "secondary".to_string(),
             when: Some(cond_all(vec![
-                cond_equals(KEY_ENABLED, Value::Bool(true)),
-                cond_equals(KEY_CAN_DISABLE, Value::Bool(true)),
+                cond_equals(PLUGIN_KEY_ENABLED, Value::Bool(true)),
+                cond_equals(PLUGIN_KEY_CAN_DISABLE, Value::Bool(true)),
             ])),
             busy_label: Some("停用中…".to_string()),
             ..Default::default()
@@ -246,7 +247,7 @@ fn management_actions() -> Vec<DetailAction> {
             id: "delete".to_string(),
             label: "卸载".to_string(),
             style: "danger".to_string(),
-            when: Some(cond_equals(KEY_REQUIRED, Value::Bool(false))),
+            when: Some(cond_equals(PLUGIN_KEY_REQUIRED, Value::Bool(false))),
             busy_label: Some("卸载中…".to_string()),
             ..Default::default()
         },
@@ -280,7 +281,7 @@ impl PluginManagerPlugin {
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new(PLUGIN_MANAGER, "插件管理")
+        PluginMeta::new(PLUGIN_ID_MANAGER, "插件管理")
             .with_description("本智能体的插件：启用 / 停用 / 添加 / 卸载，以及各插件的配置。")
             .with_version("0.1.0")
             .with_order(6)
@@ -348,7 +349,7 @@ impl PluginManagerPlugin {
             .ok_or_else(|| VdfsError::not_found(format!("未找到插件：{name}")))
     }
 
-    /// 各插件自己交出来的配置声明（`CONFIG_VISITOR` 通道，容器广播时收集）。
+    /// 各插件自己交出来的配置声明（`CONFIGURABLE_VISITOR` 通道，容器广播时收集）。
     ///
     /// 条目自带**真实地址**与呈现定义，本插件只按插件名对上号——「这份配置长什么样」
     /// 只有拥有者说得出来（见 `symbio_core::capability::configurable`）。收集器缺失时（例如容器
@@ -357,7 +358,7 @@ impl PluginManagerPlugin {
         let Ok(host) = host_ctx(ctx) else {
             return Vec::new();
         };
-        let Some(visitor) = host.get(CONFIG_VISITOR) else {
+        let Some(visitor) = host.get(CONFIGURABLE_VISITOR) else {
             return Vec::new();
         };
         visitor.list_configurables().await
@@ -429,19 +430,22 @@ impl PluginManagerPlugin {
         let obj = model
             .as_object_mut()
             .ok_or_else(|| VdfsError::internal("插件配置的顶层必须是映射"))?;
-        obj.insert(KEY_NAME.to_string(), Value::String(entry.name.clone()));
         obj.insert(
-            KEY_PROVIDER.to_string(),
+            PLUGIN_KEY_NAME.to_string(),
+            Value::String(entry.name.clone()),
+        );
+        obj.insert(
+            PLUGIN_KEY_PROVIDER.to_string(),
             Value::String(entry.provider.clone()),
         );
-        obj.insert(KEY_ENABLED.to_string(), Value::Bool(entry.enabled));
-        obj.insert(KEY_REQUIRED.to_string(), Value::Bool(entry.required));
+        obj.insert(PLUGIN_KEY_ENABLED.to_string(), Value::Bool(entry.enabled));
+        obj.insert(PLUGIN_KEY_REQUIRED.to_string(), Value::Bool(entry.required));
         obj.insert(
-            KEY_CAN_DISABLE.to_string(),
+            PLUGIN_KEY_CAN_DISABLE.to_string(),
             Value::Bool(!ASSEMBLY_UNDISABLABLE_PLUGINS.contains(&entry.name.as_str())),
         );
         obj.insert(
-            KEY_VERSION.to_string(),
+            PLUGIN_KEY_VERSION.to_string(),
             Value::String(entry.version.clone().unwrap_or_default()),
         );
 
@@ -540,7 +544,7 @@ impl PluginManagerPlugin {
     /// 这是**既有机制**（`notify_change` → 前端 `useVdfs` 的防抖重拉 + 重读当前项），
     /// 不是为启停新开的一条通道：装配态变了本来就该让订阅方知道。
     fn announce(&self, name: &str) {
-        notify_change(PLUGIN_MANAGER, name);
+        notify_change(PLUGIN_ID_MANAGER, name);
     }
 }
 
@@ -570,18 +574,18 @@ impl Plugin for PluginManagerPlugin {
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
         // 与工具共用同一次能力广播，把自己注册为一份 VDFS 资源。
-        // 挂载名由**使用方**（此处即本插件）选定：约定用插件名（`PLUGIN_MANAGER`），
+        // 挂载名由**使用方**（此处即本插件）选定：约定用插件名（`PLUGIN_ID_MANAGER`），
         // 插件名在宿主内唯一，天然就是合格的挂载名。provider 自身不含此概念。
         // 会话链路（LLM 工具）与前端链路因此拿到同一份 (挂载名, 实现) 集合。
         if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
             let me: DynVdfsProvider = self.clone();
-            visitor.register_vdfs_provider(PLUGIN_MANAGER, me).await;
+            visitor.register_vdfs_provider(PLUGIN_ID_MANAGER, me).await;
         }
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }
 
-crate::submit_object_creator!(PLUGIN_MANAGER, PluginManagerPlugin::build, dyn Plugin);
+crate::submit_object_creator!(PLUGIN_ID_MANAGER, PluginManagerPlugin::build, dyn Plugin);
 
 #[async_trait::async_trait]
 impl VdfsProvider for PluginManagerPlugin {
@@ -595,11 +599,11 @@ impl VdfsProvider for PluginManagerPlugin {
         match &req {
             VdfsRequest::Watch { sink } => {
                 let sink = sink.clone();
-                watch_changes(PLUGIN_MANAGER, path, sink).await?;
+                watch_changes(PLUGIN_ID_MANAGER, path, sink).await?;
                 return Ok(VdfsResponse::Unit);
             }
             VdfsRequest::Unwatch => {
-                unwatch_changes(PLUGIN_MANAGER, path).await?;
+                unwatch_changes(PLUGIN_ID_MANAGER, path).await?;
                 return Ok(VdfsResponse::Unit);
             }
             _ => {}

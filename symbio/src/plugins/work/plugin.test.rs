@@ -32,7 +32,7 @@ fn ctx(workdir: Option<&str>) -> (Arc<dyn PluginInvokeRequest>, Arc<DefaultToolV
 
 fn plugin(tmp: &TempDir, config: WorkConfig) -> Arc<WorkPlugin> {
     Arc::new(WorkPlugin::new(
-        crate::symbio_core::PluginDir::at(tmp.path(), PLUGIN_WORK),
+        crate::symbio_core::PluginDir::at(tmp.path(), PLUGIN_ID_WORK),
         config,
     ))
 }
@@ -59,7 +59,7 @@ async fn no_workspace_injects_nothing() {
         "没选工作区时不得注入任何记忆"
     );
     // 但挂载点照旧交出：挂载点的存在不依赖某次请求的作用域
-    assert!(visitor.get_vdfs_provider(PLUGIN_WORK).await.is_some());
+    assert!(visitor.get_vdfs_provider(PLUGIN_ID_WORK).await.is_some());
 }
 
 #[tokio::test]
@@ -113,7 +113,7 @@ async fn disabled_memory_skips_injection_but_keeps_the_mount() {
 
     assert!(visitor.list_system_prompts().await.is_empty());
     assert!(
-        visitor.get_vdfs_provider(PLUGIN_WORK).await.is_some(),
+        visitor.get_vdfs_provider(PLUGIN_ID_WORK).await.is_some(),
         "关掉注入不等于关掉编辑面"
     );
 }

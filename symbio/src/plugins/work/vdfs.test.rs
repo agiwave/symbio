@@ -73,7 +73,7 @@ async fn root_lists_the_memory_file_and_nothing_else() {
         Some("md"),
         "文件名即呈现扩展名"
     );
-    assert_eq!(n.kind, PLUGIN_WORK);
+    assert_eq!(n.kind, PLUGIN_ID_WORK);
 }
 
 #[tokio::test]

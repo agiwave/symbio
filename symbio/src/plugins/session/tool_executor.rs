@@ -25,7 +25,7 @@ use crate::symbio_core::{
 };
 use crate::symbio_core::{
     ExecAbortSignal, ExecEventSink, Plugin, PluginError, PluginInvokeRequest, PluginPayload,
-    HOOK_FIRE,
+    ROUTE_HOOK_FIRE,
 };
 use crate::{plugin_error, plugin_info, plugin_warn};
 use serde_json::{json, Value};
@@ -143,7 +143,7 @@ pub async fn fire_hook(
     let session_id = ctx.get(crate::symbio_core::SESSION_ID).unwrap_or_default();
 
     let hook_ctx = ctx.fork();
-    hook_ctx.set(crate::symbio_core::PATH, HOOK_FIRE.to_string());
+    hook_ctx.set(crate::symbio_core::PATH, ROUTE_HOOK_FIRE.to_string());
     let _ = hook_ctx.set_payload(json!({
         "session_id": session_id,
         "event": serde_json::to_value(&event).unwrap_or(json!({})),

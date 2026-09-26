@@ -544,7 +544,7 @@ export function isVdfsDraft(node: { path?: string } | null | undefined): boolean
 //   <根>/session/<sid>/message/<mid>  单条消息（ext = message，`r`）
 //
 // 两个段名都由后端 provider 决定，**不是前端的知识**：
-// - 挂载段 `session`  —— 后端 `symbio_core::keys::ids::PLUGIN_SESSION`，是 provider 注册时
+// - 挂载段 `session`  —— 后端 `symbio_core::plugin::ids::PLUGIN_ID_SESSION`，是 provider 注册时
 //   自选的挂载名（与 `model` / `skill` 等同族），前端按「挂载点声明可新建
 //   `ext = session`」把它**认出来**；
 // - 转写段 `消息`     —— 后端 `session::plugin::nodes::SEG_MESSAGES`，是 provider 的

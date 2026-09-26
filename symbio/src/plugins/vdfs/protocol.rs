@@ -7,24 +7,27 @@
 //! - **线路格式**（请求 / 响应信封 + 协议路径常量）在本文件——只有 vdfs 插件
 //!   自己消费，**core 不暴露本文件的任何类型**。
 //!
+//! ⚠️ **三个例外**：`vdfs/root` / `vdfs/watch` / `vdfs/unwatch` **跨插件可见**
+//! （`agent` 拼 Run 根地址、`cli` 订阅 vdfs 频道、前端按它们发请求），因此它们的
+//! 常量**归 core**（`symbio_core::ROUTE_VDFS_*`），本文件只引用、不重复定义——
+//! 同一路由两份常量就是「一个事实两个 owner」，必然漂移。
+//!
 //! 这与 model 插件把 `ModelProtocol` 钩子与注册常量收在
 //! `plugins/model/protocols/` 的做法一致（见 `symbio_core::model_provider` 的模块文档）。
 //!
 //! [`VdfsProvider`]: crate::symbio_core::VdfsProvider
 
-use crate::symbio_core::{VdfsContent, VdfsItem, VdfsNode};
+use crate::symbio_core::{
+    VdfsContent, VdfsItem, VdfsNode, ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 // ==================== 协议操作路径 ====================
+//
+// 三个跨插件可见的路径（`vdfs/root` / `vdfs/watch` / `vdfs/unwatch`）不在此定义
+// —— 它们归 `symbio_core::ROUTE_VDFS_*`（见模块文档的「三个例外」）。
 
-/// **进入地址空间**：列出虚拟根——**不给地址**。
-///
-/// 根叫什么归本插件（`fs::VDFS_ADDR_ROOT`），消费方不该知道它。于是需要一个
-/// 「无地址入参」的入口：回包（[`VdfsListResponse`]）里的 `path` 即**根地址**，
-/// 消费方拿到后把它当**运行期数据**持有，之后一律从父地址往下拼（像目录一样），
-/// 不再问根。前端启动期调一次即可。
-pub const VDFS_ROOT: &str = "vdfs/root";
 /// 列目录（一级）
 pub const VDFS_LIST: &str = "vdfs/list";
 /// 树状遍历（递归；节点的 `t` 位控制可遍历性）
@@ -43,16 +46,12 @@ pub const VDFS_MKDIR: &str = "vdfs/mkdir";
 pub const VDFS_EDIT: &str = "vdfs/edit";
 /// 文件名模式搜索（glob）
 pub const VDFS_SEARCH: &str = "vdfs/search";
-/// 订阅指定路径的数据变更
-pub const VDFS_WATCH: &str = "vdfs/watch";
-/// 取消订阅（与 watch 配对）
-pub const VDFS_UNWATCH: &str = "vdfs/unwatch";
 /// 执行**节点动作**（provider 自持的动词，如「测试连接」）
 pub const VDFS_ACTION: &str = "vdfs/action";
 
 /// 全部 VDFS 操作（宿主据此判定是否为本协议请求）
 pub const VDFS_OPS: &[&str] = &[
-    VDFS_ROOT,
+    ROUTE_VDFS_ROOT,
     VDFS_LIST,
     VDFS_TREE,
     VDFS_STAT,
@@ -62,8 +61,8 @@ pub const VDFS_OPS: &[&str] = &[
     VDFS_WRITE,
     VDFS_DELETE,
     VDFS_MKDIR,
-    VDFS_WATCH,
-    VDFS_UNWATCH,
+    ROUTE_VDFS_WATCH,
+    ROUTE_VDFS_UNWATCH,
     VDFS_ACTION,
 ];
 

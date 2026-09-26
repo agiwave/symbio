@@ -10,7 +10,7 @@ use crate::symbio_core::PluginSimpleRequest;
 fn ctx_with(args: Value, mode: &str) -> Arc<dyn PluginInvokeRequest> {
     let req = PluginSimpleRequest::new(None, None);
     req.set(crate::symbio_core::MODE, mode.to_string());
-    // 用裸字面量而非 KEY_PAYLOAD：本行同时验证「桶名就是 "payload"」这一契约
+    // 用裸字面量而非 PLUGIN_PAYLOAD_KEY：本行同时验证「桶名就是 "payload"」这一契约
     req.set_raw("payload", Arc::new(args));
     Arc::new(req)
 }

@@ -51,7 +51,7 @@
 
 use crate::symbio_core::VdfsItem;
 use crate::symbio_core::{PluginConfigFile, PLUGIN_FILE};
-use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt, CONFIG_VISITOR};
+use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt, CONFIGURABLE_VISITOR};
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use std::sync::Arc;
@@ -108,7 +108,7 @@ impl ConfigurableVisitor for DefaultConfigurableVisitor {
 /// 只是设置页列不出它。收集器由容器在广播前放进 `ctx`，见
 /// `plugins/composite/vdfs.rs::children_of`。
 pub async fn announce_configurable(ctx: &Arc<dyn PluginInvokeRequest>, config: &PluginConfigFile) {
-    if let Some(v) = ctx.get(CONFIG_VISITOR) {
+    if let Some(v) = ctx.get(CONFIGURABLE_VISITOR) {
         v.register_configurable(entry_of(config)).await;
     }
 }

@@ -20,21 +20,19 @@
  * 所以本脚本只**列出**候选，判定由人做（判据见 `symbio_core/README.md` §4 四问）。
  * 退出码恒 0 —— 但正因如此它**更需要回归测试**（`core-surface-audit.test.mjs`）。
  *
- * ## 计数口径（四条，都影响结果，别凭直觉）
+ * ## 计数口径
  *
- * 1. **按「模块」不按「文件」**：`symbio/src/plugins/<名>/` 下任意深度的文件都算
- *    同一个消费方。`cli/` 与 `tauri/src-tauri/` 各算**一个**跨 crate 消费方
- *    （它们是独立 crate，与 ADR-023 里 `EventBusSubscribeRequest` 的保留理由同源）。
- * 2. **剥注释后再匹配**：文档注释里提到一个符号不代表依赖它。
- *    ⚠️ 这条会**漏报字段访问型消费点**（见上面 `TurnToolCallAccumulator` 的例子）——
- *    所以「0 个消费方」只说明**名字没出现**，动手前先确认它是不是只经字段被用到。
- * 3. **一个文件都不能跳过**：`symbio/src/` 直属文件（`lib.rs`、`plugins/mod.rs` 这类
- *    **不在插件子目录里**的）也算消费方。第一版把它们跳过了，于是「只在注册表里被
- *    用到」的符号被算成 0 —— `PluginErrorCode` / `PluginIdentity` 一族全部假报。
- *    **「数不到」与「真的没人用」是两件事。**
- * 4. **公开面 = 根 `mod.rs` 的重导出**，不是「域目录下所有 `pub`」：私有子模块里的
- *    `pub` 从 crate 外够不着（`TOOL_NAME_WIRE_SEPARATOR` 就是这种），把域内所有
- *    `pub` 都算进来会凭空多出一批「零消费方」。
+ * **口径与解析收在 [`core-surface.mjs`](./core-surface.mjs)**，本脚本与
+ * `core-naming-audit.mjs` 共用同一份「公开面是什么」的答案——各写一份必然演化成
+ * 两套口径（报告说 A、判定说 B）。四条口径的全文见该模块文件头，摘要：
+ *
+ * 1. 按「模块」不按「文件」数消费方；`cli/` 与 `tauri/src-tauri/` 各算**一个**
+ *    跨 crate 消费方。
+ * 2. 剥注释后再匹配 —— 这会**漏报字段访问型消费点**（见上面 `TurnToolCallAccumulator`
+ *    的例子），所以「0 个消费方」只说明**名字没出现**。
+ * 3. 一个文件都不能跳过：`symbio/src/` 直属文件也算消费方。**「数不到」与「真的没人
+ *    用」是两件事。**
+ * 4. 公开面 = 根 `mod.rs` 的重导出，不是「域目录下所有 `pub`」。
  *
  * ## 用法
  *   node scripts/core-surface-audit.mjs            # 报告
@@ -46,6 +44,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, yellow, green, dim } from './color.mjs'
+import { walk, stripComments, collectCoreSurface } from './core-surface.mjs'
 
 const argv = process.argv.slice(2)
 const VERBOSE = argv.includes('--verbose')
@@ -55,7 +54,6 @@ const ROOT = rootArg
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 const CORE_REL = 'symbio/src/symbio_core'
-const CORE = path.join(ROOT, CORE_REL)
 
 /** 跨 crate 消费方：整个 crate 算一个单位（它们是独立 crate，与插件模块不可比） */
 const CROSS_CRATE = [
@@ -63,115 +61,22 @@ const CROSS_CRATE = [
   { rel: 'tauri/src-tauri/src', label: 'tauri-shell' },
 ]
 
-function* walk(dir) {
-  let entries
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true })
-  } catch {
-    return
-  }
-  for (const e of entries) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) yield* walk(p)
-    else yield p
-  }
-}
-
-/** 去掉块注释与行注释（文档注释里引用符号不算依赖） */
-function stripComments(src) {
-  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-}
-
-/**
- * 从 `pub use …;` 语句里抽名字。
- *
- * ⚠️ **通配必须收集成一个数组，不能用 Map 的固定键**（这里错过一次）：
- * 根 `mod.rs` 有 `pub use plugin::*` / `pub use keys::*` / `pub use logger::*`
- * **三条**通配，用 `map.set('*', …)` 会让后一条覆盖前一条 —— 于是 `PLUGIN_*`、
- * `PathKey`、`PluginStopReason`、`KEY_*` 全部凭空消失，公开面少算 85 个符号。
- * 返回 `{ names, globs }`，`globs` 是「域 → 该域被通配导入」的数组。
- */
-function parsePubUses(source, domains) {
-  const names = new Map()
-  const globs = []
-  for (const m of stripComments(source).matchAll(/^[ \t]*pub use\s+([^;]+);/gm)) {
-    const body = m[1].trim()
-    const head = body.split('::')[0].trim()
-    const domain = domains.has(head) ? head : null
-    const brace = body.match(/\{([\s\S]*)\}/)
-    if (brace) {
-      for (const part of brace[1].split(',')) {
-        const name = part.trim().split(/\s+as\s+/).pop().trim()
-        if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) names.set(name, domain)
-      }
-      continue
-    }
-    if (/::\s*\*\s*$/.test(body)) {
-      globs.push(domain ?? head)
-      continue
-    }
-    const name = body.split('::').pop().trim()
-    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) names.set(name, domain)
-  }
-  return { names, globs }
-}
-
-/** 直接声明在某个 .rs 文件里的 `pub` 符号 */
-function declaredIn(file) {
-  const out = new Set()
-  if (!fs.existsSync(file)) return out
-  const src = stripComments(fs.readFileSync(file, 'utf8'))
-  for (const m of src.matchAll(
-    /^pub\s+(?:struct|enum|trait|union|type|const|static|fn)\s+([A-Za-z_][A-Za-z0-9_]*)/gm,
-  )) {
-    out.add(m[1])
-  }
-  // 宏生成的公开符号：`keys` 的 26 个字符串键（`define_string_key!(PathKey, PATH, "path")`）
-  // 与它们的键类型都不带 `pub` 关键字，正则扫不到 —— 而它们恰是**消费方最多**的一批。
-  // 这里按宏的形参位置取（`($类型, $常量, $键名)`），换宏就得跟着改。
-  for (const m of src.matchAll(
-    /^[ \t]*define_string_key!\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)/gm,
-  )) {
-    out.add(m[1])
-    out.add(m[2])
-  }
-  return out
-}
-
-const rootMod = path.join(CORE, 'mod.rs')
-if (!fs.existsSync(rootMod)) {
-  console.error(red(`✗ 找不到 ${path.relative(ROOT, rootMod)}`))
+let surface
+try {
+  surface = collectCoreSurface(ROOT)
+} catch (e) {
+  console.error(red(`✗ ${e.message}`))
   process.exit(1)
 }
-
-const domains = new Set(
-  fs
-    .readdirSync(CORE, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
-    .map((e) => e.name),
-)
-
-const rootSource = fs.readFileSync(rootMod, 'utf8')
-const rootUses = parsePubUses(rootSource, domains)
-
-/** 名字 → 定义域（`(root)` = 直接声明在根 mod.rs） */
-const symbols = new Map()
-for (const [name, domain] of rootUses.names) symbols.set(name, domain ?? '(explicit)')
-for (const n of declaredIn(rootMod)) symbols.set(n, '(root)')
-
-// 展开通配：`pub use <域>::*` ⇒ 该域 mod.rs 的重导出 + 直接声明（不含私有子模块里的 pub）
-for (const domain of rootUses.globs) {
-  const domMod = path.join(CORE, domain, 'mod.rs')
-  if (!fs.existsSync(domMod)) continue
-  const dom = parsePubUses(fs.readFileSync(domMod, 'utf8'), domains)
-  for (const [n] of dom.names) if (!symbols.has(n)) symbols.set(n, domain)
-  for (const n of declaredIn(domMod)) symbols.set(n, domain)
-}
+const symbols = surface.symbols
 
 // ==================== 数消费方 ====================
 
 /**
  * 文件 → 消费方单位。**永远返回一个单位，绝不返回 null**（口径 3）。
+ *
+ * 返回 `null` 会让调用方 `continue` 跳过该文件，于是定义在那里的符号被算成
+ * 「0 个消费方」——`PluginErrorCode` / `PluginIdentity` 一族就这样被假报过。
  */
 function unitOf(rel) {
   const norm = rel.split(path.sep).join('/')
@@ -214,11 +119,12 @@ const rows = allNames.map((name) => ({
 }))
 
 /**
- * 自引用：插件 id 常量（`PLUGIN_<X>` / `EMBEDDING_<X>`）被**同名插件**使用。
- * 这是**正常**的——常量就是那个插件自己的名字，不该算「下放候选」。
+ * 自引用：插件 id 常量（`PLUGIN_ID_<X>`）与嵌入服务 id（`EMBEDDING_<X>`）被
+ * **同名插件 / provider** 使用。这是**正常**的——常量就是它自己的名字，不该算
+ * 「下放候选」。
  */
 function isSelfReference(r) {
-  const m = r.name.match(/^(?:PLUGIN|EMBEDDING)_([A-Z]+)$/)
+  const m = r.name.match(/^(?:PLUGIN_ID|EMBEDDING)_([A-Z]+)$/)
   if (!m || r.units.length !== 1) return false
   const slug = m[1].toLowerCase()
   return r.units[0] === `plugins/${slug}` || r.units[0] === `providers/${slug}`
@@ -252,7 +158,7 @@ for (const r of zero.sort(byName)) {
 }
 
 if (VERBOSE) {
-  console.log(`\n--- 自引用（插件 id 常量被它自己用；正常，不必处置）---`)
+  console.log(`\n--- 自引用（插件 id / 嵌入服务 id 被它自己用；正常，不必处置）---`)
   for (const r of selfRef.sort(byName)) {
     console.log(`  ${(r.domain ?? '?').padEnd(12)} ${r.name.padEnd(32)} -> ${r.units.join(', ')}`)
   }

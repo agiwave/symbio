@@ -55,8 +55,8 @@ use symbio::symbio_core::{
     EventBusSubscribeRequest, EVENT_BUS_KIND_VDFS, EVENT_BUS_RESYNC_MARKER_TYPE,
 };
 use symbio::symbio_core::{
-    Plugin, PluginFrame, PluginInvokeRequestExt, PluginPayload, PluginSimpleRequest,
-    EVENT_BUS_SUBSCRIBE, PATH, SESSION_ID, WORKDIR,
+    Plugin, PluginFrame, PluginInvokeRequestExt, PluginPayload, PluginSimpleRequest, PATH,
+    ROUTE_EVENT_BUS_SUBSCRIBE, SESSION_ID, WORKDIR,
 };
 
 use crate::render::Renderer;
@@ -76,7 +76,7 @@ fn gen_id(prefix: &str) -> String {
     format!("{prefix}{millis:x}{n:x}")
 }
 
-/// 会话域的**挂载段名**（ASCII）。机制层的 `PLUGIN_SESSION` 不在 CLI 的可见面上，
+/// 会话域的**挂载段名**（ASCII）。机制层的 `PLUGIN_ID_SESSION` 不在 CLI 的可见面上，
 /// CLI 按地址契约自持一份——与 [`MESSAGES_SEG`] 同一理由、同一约定。
 ///
 /// 三处用到它（订阅 `<根>/session`、识别会话节点 `<根>/session/<sid>`、
@@ -207,12 +207,12 @@ impl SymbioClient {
         // 「后端没发布」完全一样。这条由 `scripts/plugin-entry-audit.mjs` 的 E-003
         // 判定型守卫强制。
         //
-        // 常量从 `symbio_core` **顶层**导入（`use symbio::symbio_core::EVENT_BUS_SUBSCRIBE`），
-        // 而不是 `symbio_core::keys::paths::…`：`keys` 域自身是私有的（`mod keys;`），
+        // 常量从 `symbio_core` **顶层**导入（`use symbio::symbio_core::ROUTE_EVENT_BUS_SUBSCRIBE`），
+        // 而不是 `symbio_core::plugin::route::…`：`keys` 域自身是私有的（`mod keys;`），
         // 常量靠 `symbio_core/mod.rs` 的 `pub use keys::*;` 才对外可见。
         // 这条路径写错过一次，症状是编译期的 E0603（`module 'keys' is private`）——
         // 好在它是**编译期**失败，不会静默。
-        ctx.set(PATH, EVENT_BUS_SUBSCRIBE.to_string());
+        ctx.set(PATH, ROUTE_EVENT_BUS_SUBSCRIBE.to_string());
         ctx.set_payload(EventBusSubscribeRequest {})
             .map_err(|e| format!("构造订阅载荷失败: {e}"))?;
         let mut stream = match Arc::clone(&root)
@@ -292,7 +292,7 @@ impl SymbioClient {
     async fn watch_session_changes(&self) -> Result<(), String> {
         let addr = format!("{}/{SESSION_SEG}", self.root_addr.trim_end_matches('/'));
         // 路由字面量：`VDFS_WATCH` 常量是前端在用的那份，Rust 侧自持字面量
-        // （与上面 `EVENT_BUS_SUBSCRIBE` 取常量的理由不同：这里是**插件内的相对臂
+        // （与上面 `ROUTE_EVENT_BUS_SUBSCRIBE` 取常量的理由不同：这里是**插件内的相对臂
         // 消费方**，写错表现为 `vdfs/watch` 路由不存在 → 订阅失败，不会静默）。
         self.route("vdfs/watch", json!({ "path": addr }), None)
             .await?;

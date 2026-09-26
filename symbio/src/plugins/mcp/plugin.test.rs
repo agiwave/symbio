@@ -24,7 +24,7 @@ async fn new_type_declares_the_landing_detail() {
         .into_stat()
         .expect("根节点自述");
     let t = root.new_type.expect("根下可新建 MCP Server");
-    assert_eq!(t.ext, PLUGIN_MCP, "呈现扩展名是 MCP 自己的，不是包的");
+    assert_eq!(t.ext, PLUGIN_ID_MCP, "呈现扩展名是 MCP 自己的，不是包的");
     assert_eq!(
         t.node_ext.as_deref(),
         Some(VDFS_EXT_FORM),

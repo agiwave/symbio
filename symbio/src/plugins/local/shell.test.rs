@@ -42,7 +42,7 @@ fn make_ctx(
     }
     req.set(crate::symbio_core::EVENT_SINK, sink);
     req.set(crate::symbio_core::ABORT_SIGNAL, ExecAbortSignal::new());
-    // 用裸字面量而非 KEY_PAYLOAD：本行同时验证「桶名就是 "payload"」这一契约
+    // 用裸字面量而非 PLUGIN_PAYLOAD_KEY：本行同时验证「桶名就是 "payload"」这一契约
     req.set_raw(
         "payload",
         Arc::new(json!({ "command": command, "approved": true })),

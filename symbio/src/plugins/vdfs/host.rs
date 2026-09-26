@@ -48,6 +48,7 @@ use crate::symbio_core::{
     PluginPayload, CAPABILITY_VISITOR, WORKDIR,
 };
 use crate::symbio_core::{VdfsRequest, VdfsResponse};
+use crate::symbio_core::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
 use async_trait::async_trait;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -269,7 +270,7 @@ pub async fn dispatch_with(
     }
     let vctx = vdfs_context(ctx).with_params(params);
     let resp = match path {
-        VDFS_ROOT => root(fs, &vctx, ctx).await,
+        ROUTE_VDFS_ROOT => root(fs, &vctx, ctx).await,
         VDFS_LIST => list(fs, &vctx, ctx).await,
         VDFS_TREE => tree(fs, &vctx, ctx).await,
         VDFS_STAT => stat(fs, &vctx, ctx).await,
@@ -279,7 +280,9 @@ pub async fn dispatch_with(
         VDFS_MKDIR => mkdir(fs, &vctx, ctx).await,
         VDFS_EDIT => edit(fs, &vctx, ctx).await,
         VDFS_SEARCH => search(fs, &vctx, ctx).await,
-        VDFS_WATCH | VDFS_UNWATCH => watch(fs, &vctx, ctx, path == VDFS_WATCH).await,
+        ROUTE_VDFS_WATCH | ROUTE_VDFS_UNWATCH => {
+            watch(fs, &vctx, ctx, path == ROUTE_VDFS_WATCH).await
+        }
         VDFS_ACTION => action(fs, &vctx, ctx).await,
         _ => unreachable!("VDFS_OPS 与分发分支必须一一对应"),
     };

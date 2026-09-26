@@ -84,7 +84,7 @@ fn session_node_carries_renderer_ext_and_presentation() {
     let idle = session_node(&SessionSummary::of(&s), &SessionRuntime::idle(None));
     assert_eq!(idle.name, "abc");
     assert_eq!(idle.effective_ext().as_deref(), Some("session"));
-    assert_eq!(idle.kind, PLUGIN_SESSION);
+    assert_eq!(idle.kind, PLUGIN_ID_SESSION);
     assert_eq!(idle.status, vdfs::VDFS_STATUS_ACTIVE);
     assert_eq!(idle.updated_at, Some(1_700_000_000_000));
     assert_eq!(idle.access.flags(), "rw", "会话可读可写");
@@ -272,7 +272,7 @@ fn vdfs_internal_dirs_conditional() {
         crate::symbio_core::MemoryFile::absent(1024, 256).node(
             &crate::symbio_core::MemoryNodeSpec {
                 title: "会话记忆",
-                kind: PLUGIN_SESSION,
+                kind: PLUGIN_ID_SESSION,
                 description: "d",
             },
         )

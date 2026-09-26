@@ -3,7 +3,10 @@
 mod creator;
 mod dir;
 mod error;
+mod ids;
+mod route;
 mod transport;
+mod traverse;
 
 // 域内子模块私有，公开面在此显式重导出
 pub use creator::{create_object, creator_ids, has_creator};
@@ -11,15 +14,27 @@ pub use creator::{create_object, creator_ids, has_creator};
 pub(crate) use creator::{ObjectConstructor, Submit};
 pub use dir::{
     dir_from_ctx, expand_tilde_path, PluginConfigFile, PluginDir, PluginEntry, PluginIdentity,
-    KEY_API, KEY_AUTHOR, KEY_CAN_DISABLE, KEY_DESCRIPTION, KEY_ENABLED, KEY_GRANTS, KEY_NAME,
-    KEY_PROVIDER, KEY_REQUIRED, KEY_TITLE, KEY_VERSION, PLUGIN_FILE, RESERVED_KEYS,
+    PLUGIN_FILE, PLUGIN_KEY_API, PLUGIN_KEY_AUTHOR, PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_DESCRIPTION,
+    PLUGIN_KEY_ENABLED, PLUGIN_KEY_GRANTS, PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER,
+    PLUGIN_KEY_REQUIRED, PLUGIN_KEY_TITLE, PLUGIN_KEY_VERSION, PLUGIN_RESERVED_KEYS,
 };
 pub use error::{PluginError, PluginErrorCode, PluginInvokeResponse};
 // 锁辅助函数刻意 `pub(crate)`（见 `error.rs::lock_read` 的说明），不进对外 API
 pub(crate) use error::{lock_read, lock_write};
+pub use ids::{
+    PLUGIN_ID_AGENT, PLUGIN_ID_COMPOSITE, PLUGIN_ID_EVENT_BUS, PLUGIN_ID_GATEWAY, PLUGIN_ID_HOME,
+    PLUGIN_ID_HOOK, PLUGIN_ID_LOCAL, PLUGIN_ID_MANAGER, PLUGIN_ID_MCP, PLUGIN_ID_MODEL,
+    PLUGIN_ID_SESSION, PLUGIN_ID_SKILL, PLUGIN_ID_TELEGRAM, PLUGIN_ID_VDFS, PLUGIN_ID_WEB,
+    PLUGIN_ID_WORK,
+};
+pub use route::{
+    ROUTE_EVENT_BUS_SUBSCRIBE, ROUTE_HOOK_FIRE, ROUTE_SESSION_CHAT_ABORT, ROUTE_SESSION_CHAT_SEND,
+    ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH,
+};
 pub use transport::{
     PluginChannel, PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire,
 };
+pub use traverse::{TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS};
 
 use crate::symbio_core::SymbioKey;
 use crate::symbio_core::{
@@ -149,6 +164,19 @@ impl PluginMeta {
 
 // PluginInvokeRequest Trait & PluginSimpleRequest
 
+/// 载荷键名 —— 上下文里那个**由调用方定类型**的桶
+///
+/// `PluginInvokeRequestExt::payload` / `set_payload` 读写的就是它。它**不是一个
+/// [`SymbioKey`]**：值类型由调用方决定（`payload::<T>()` 的 `T`），而 `SymbioKey`
+/// 要求一个固定的关联 `Value` 类型——故这里是纯字符串常量，不是键实例。
+///
+/// 归属本域：它描述的是信封里那个载荷桶，与 [`PluginPayload`] 是同一概念面；
+/// `keys` 域只收 `SymbioKey` 的实例与类型。
+///
+/// 只有一个定义处，读写双方都引它——`grep-audit` 的 S-009 拦的正是「绕开常量写裸
+/// 字符串 `"payload"`」那种形态。
+pub const PLUGIN_PAYLOAD_KEY: &str = "payload";
+
 /// 插件上下文接口 - Symbio 架构的“血液”
 ///
 /// 采用类型擦除模式，支持跨层级的能力注入与透传
@@ -193,11 +221,11 @@ pub trait PluginInvokeRequestExt: PluginInvokeRequest {
     /// 直接将上下文中的载荷解析为指定的强类型 T（进程内零拷贝）
     ///
     /// 优先尝试原生类型转换，失败时自动回退到 JSON 反序列化。
-    /// 读写的桶名见 [`crate::symbio_core::KEY_PAYLOAD`]。
+    /// 读写的桶名见 [`crate::symbio_core::PLUGIN_PAYLOAD_KEY`]。
     fn payload<T: serde::de::DeserializeOwned + Clone + Send + Sync + 'static>(
         &self,
     ) -> Result<T, crate::symbio_core::PluginError> {
-        let key = crate::symbio_core::KEY_PAYLOAD;
+        let key = crate::symbio_core::PLUGIN_PAYLOAD_KEY;
         let any = self.get_raw(key).ok_or_else(|| {
             crate::symbio_core::PluginError::ValidationError(
                 "Missing payload in context".to_string(),
@@ -234,7 +262,7 @@ pub trait PluginInvokeRequestExt: PluginInvokeRequest {
         &self,
         value: T,
     ) -> Result<(), crate::symbio_core::PluginError> {
-        let key = crate::symbio_core::KEY_PAYLOAD;
+        let key = crate::symbio_core::PLUGIN_PAYLOAD_KEY;
         self.set_raw(key, Arc::new(value));
         Ok(())
     }

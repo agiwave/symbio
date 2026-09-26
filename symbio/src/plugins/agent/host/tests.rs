@@ -12,7 +12,7 @@ use crate::symbio_core::{vdfs, VdfsProvider};
 use crate::symbio_core::{
     CapabilityVisitor, ConfigurableVisitor, DefaultConfigurableVisitor, DefaultToolVisitor, Plugin,
     PluginDir, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, AGENT_ID,
-    CAPABILITY_VISITOR, CONFIG_VISITOR, PATH, PLUGIN_AGENT, TRAVERSE_AVAILABLE_TOOLS,
+    CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, PATH, PLUGIN_ID_AGENT, TRAVERSE_AVAILABLE_TOOLS,
     VDFS_PARENT_ADDR, WORKDIR,
 };
 use std::path::Path;
@@ -116,7 +116,7 @@ async fn agent_import_traverse_and_memory() {
     // 插件作用域到导入目录，使「发现根 == 导入位置」（与生产态 `PLUGIN_DIR` 语义一致）
     let plugin = Arc::new(AgentPlugin::new_with_dir(PluginDir::at(
         dir.path().join("agent"),
-        PLUGIN_AGENT,
+        PLUGIN_ID_AGENT,
     )));
     let (ctx, manager) = ctx_with(Some(workdir), Some("com.symbio.test-fixture"));
     plugin
@@ -249,7 +249,7 @@ async fn nonconforming_agent_is_rejected_with_both_versions() {
 
 #[tokio::test]
 async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
-    use crate::symbio_core::{PluginDir, PLUGIN_AGENT, PLUGIN_DIR};
+    use crate::symbio_core::{PluginDir, PLUGIN_DIR, PLUGIN_ID_AGENT};
 
     let tmp = tempfile::tempdir().unwrap();
     let agent_root = tmp.path().join("agent");
@@ -274,7 +274,7 @@ async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
 
     // 构造插件：把 PLUGIN_DIR 指到 <tmp>/agent
     let build_ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
-    build_ctx.set(PLUGIN_DIR, PluginDir::at(&agent_root, PLUGIN_AGENT));
+    build_ctx.set(PLUGIN_DIR, PluginDir::at(&agent_root, PLUGIN_ID_AGENT));
     let plugin = AgentPlugin::build(build_ctx);
 
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
@@ -336,7 +336,7 @@ async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
 /// 绕过了 `CompositeVfs` 的 `root_hidden` 过滤。
 #[tokio::test]
 async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
-    use crate::symbio_core::{PluginDir, PLUGIN_AGENT};
+    use crate::symbio_core::{PluginDir, PLUGIN_ID_AGENT};
 
     let tmp = tempfile::tempdir().unwrap();
     let agent_root = tmp.path().join("agent");
@@ -349,7 +349,7 @@ async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
     .unwrap();
     std::fs::write(sub.join("AGENTS.md"), "你是评审专家。").unwrap();
 
-    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_AGENT));
+    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_ID_AGENT));
 
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     // 合成父地址：模拟容器转发时写入的当前父地址（不依赖真实挂载名）
@@ -416,7 +416,7 @@ async fn mount_root_lists_only_installed_agents() {
     host.set(WORKDIR, workdir);
     let ctx = vdfs::vdfs_context(&host);
 
-    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_AGENT));
+    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_ID_AGENT));
     let items = plugin
         .dispatch(&ctx, "", LIST)
         .await
@@ -459,7 +459,7 @@ async fn traverse_declares_config_and_instruction_in_settings() {
     let plugin = Arc::new(AgentPlugin::new());
     let (ctx, _manager) = ctx_with(Some(&workdir), Some("com.acme.demo"));
     let configs: Arc<dyn ConfigurableVisitor> = Arc::new(DefaultConfigurableVisitor::new());
-    ctx.set(CONFIG_VISITOR, Arc::clone(&configs));
+    ctx.set(CONFIGURABLE_VISITOR, Arc::clone(&configs));
 
     plugin.traverse(String::new(), ctx).await.unwrap();
 
@@ -493,7 +493,7 @@ async fn traverse_declares_config_and_instruction_in_settings() {
 #[tokio::test]
 async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     use crate::symbio_core::VdfsError;
-    use crate::symbio_core::{PluginDir, PLUGIN_AGENT};
+    use crate::symbio_core::{PluginDir, PLUGIN_ID_AGENT};
 
     let tmp = tempfile::tempdir().unwrap();
     let agent_root = tmp.path().join("agent");
@@ -508,7 +508,7 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     // 父会话的工作区记忆：子树 `work` 挂载点读写的就是它
     std::fs::write(tmp.path().join("AGENTS.md"), "工作区记忆内容").unwrap();
 
-    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_AGENT));
+    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_ID_AGENT));
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
     // 请求上下文**不带 `PLUGIN_DIR`**——那是**装配期**的键（见
@@ -620,7 +620,7 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
 /// 生产态的请求上下文**不带 `PLUGIN_DIR`**——那个键只在**装配期**给出
 /// （`composite::build` 构造子插件时、[`AgentPlugin::sub_agent`] 造子树时）。
 /// 因此目录若从**请求上下文**取（`dir_from_ctx`），嵌套实例就会回退到
-/// `PluginDir::of(PLUGIN_AGENT)` = **全局 agent 根**：子空间里列出的「智能体」
+/// `PluginDir::of(PLUGIN_ID_AGENT)` = **全局 agent 根**：子空间里列出的「智能体」
 /// 其实是**顶层**清单，用户看到的是**它自己**。
 ///
 /// 顶层看不出这个错，是因为回退值与它自己的目录**恰好相同**。这类「只在嵌套层
@@ -632,7 +632,7 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
 /// 与正确实现无从区分）。放一个只在子空间里存在的下级智能体，两种实现必然分岔。
 #[tokio::test]
 async fn sub_agent_agent_list_is_scoped_to_its_own_space() {
-    use crate::symbio_core::{PluginDir, PLUGIN_AGENT};
+    use crate::symbio_core::{PluginDir, PLUGIN_ID_AGENT};
 
     let tmp = tempfile::tempdir().unwrap();
     let agent_root = tmp.path().join("agent");
@@ -653,7 +653,7 @@ async fn sub_agent_agent_list_is_scoped_to_its_own_space() {
     )
     .unwrap();
 
-    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_AGENT));
+    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_ID_AGENT));
 
     // 生产态请求上下文：只有宿主该有的键，**没有 `PLUGIN_DIR`**
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
@@ -740,7 +740,7 @@ async fn non_mountable_agent_dir_is_not_browsable_at_all() {
     )
     .unwrap();
 
-    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_AGENT));
+    let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_ID_AGENT));
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
     let vctx = vdfs::vdfs_context(&ctx);

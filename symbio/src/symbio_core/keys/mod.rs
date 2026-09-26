@@ -1,32 +1,31 @@
-//! SymbioKey - 类型安全的键定义
+//! SymbioKey —— 类型安全的**上下文键**
 //!
-//! ## 命名规则（`symbio_core/README.md` §3 豁免表的判据）
+//! ## 本域只放上下文键
 //!
-//! 本域里两种形态**互不重叠**，所以裸名不是「风格不统一」，而是一条有判别力的规则：
+//! 一个键有两半：**类型**（`PathKey`，实现 [`SymbioKey`]）与**实例**（`PATH`，
+//! `ctx.get(&PATH)` 的凭据）。实例一律定义在本域——**放置也是命名规则的一部分**：
+//! 机制与它的键分家（如 `capability/error.rs` 只放错误桶的读写函数，桶的键
+//! `CAPABILITY_ERRORS` 住这里）。
+//!
+//! ## 命名：两种形态，互不重叠
 //!
 //! | 形态 | 写成 | 例 |
 //! |---|---|---|
-//! | 字符串常量 —— **名字**（跨进程 / 跨文件的字面量） | **带前缀** | `PLUGIN_SESSION` · `KEY_PAYLOAD`（本文件）· `VDFS_ROOT`（`paths`）· `EMBEDDING_LOCAL`（`ids`） |
-//! | `SymbioKey` **实例** —— **键对象**（`ctx.get(&…)` 的凭据） | **裸名** | `PATH` · `ID` · `CAPABILITY_VISITOR` · `PARENT` |
+//! | 键**类型**（`SymbioKey` 的实现） | `…Key`（**后缀**） | `PathKey` · `CapabilityVisitorKey` |
+//! | 键**实例**（该类型的唯一实例） | **裸名** | `PATH` · `ID` · `PLUGIN_DIR` · `CAPABILITY_VISITOR` |
 //!
-//! 消费形态也不同：字符串是**值**（`name == KEY_PAYLOAD`），实例是**取值的凭据**。
-//! 新增时照上表选形态——实例用裸名（类型名已带 `Key` 后缀，常量再加前缀会读成
-//! 「键的键」：`ctx.get(&KEY_PATH)`），字面量带前缀。
-
-mod ids;
-mod paths;
-
-// 域内子模块私有，公开面在此显式重导出（逐符号列出，可在一屏读完域的对外面）
-pub use ids::{
-    EMBEDDING_LOCAL, EMBEDDING_NOOP, PLUGIN_AGENT, PLUGIN_COMPOSITE, PLUGIN_EVENT_BUS,
-    PLUGIN_GATEWAY, PLUGIN_HOME, PLUGIN_HOOK, PLUGIN_LOCAL, PLUGIN_MANAGER, PLUGIN_MCP,
-    PLUGIN_MODEL, PLUGIN_SESSION, PLUGIN_SKILL, PLUGIN_TELEGRAM, PLUGIN_VDFS, PLUGIN_WEB,
-    PLUGIN_WORK,
-};
-pub use paths::{
-    EVENT_BUS_SUBSCRIBE, HOOK_FIRE, SESSION_CHAT_ABORT, SESSION_CHAT_SEND, VDFS_ROOT, VDFS_UNWATCH,
-    VDFS_WATCH,
-};
+//! 后缀与裸名不是「风格不统一」，而是**有判别力**的一条规则：类型名带 `Key` 后缀
+//! ⇒ 归属本域一眼可辨；实例名不加前缀 ⇒ `ctx.get(&PATH)` 不会读成「键的键」
+//! （`ctx.get(&KEY_PATH)` 才是那个坏形态）。
+//!
+//! 新增时照上表选形态：先定类型（`XxxKey`），再给实例（裸名，直接描述语义）。
+//!
+//! ## 不在本域的东西
+//!
+//! 本域**只收上下文键**。跨进程 / 跨文件的字面量按「它描述什么」归各自的域——
+//! 插件 id 归 `plugin::ids`，路由地址归 `plugin::route`，遍历端点归 `plugin::traverse`，
+//! 嵌入服务 id 归 `embedding::ids`，信封载荷键归 `plugin`。判据见
+//! `symbio_core/README.md` §1.2。
 
 use serde_json::Value;
 use std::sync::Arc;
@@ -114,24 +113,6 @@ define_string_key!(KindKey, KIND, "kind");
 define_string_key!(ScopeKey, SCOPE, "scope");
 define_string_key!(ContentKey, CONTENT, "content");
 define_string_key!(DescriptionKey, DESCRIPTION, "description");
-
-// ==================== 载荷键 ====================
-//
-// `payload` 是**事实上的核心键**：`PluginInvokeRequestExt::payload` / `set_payload`
-// 读写的就是它。但它**不是一个 `SymbioKey`**——它的值类型由调用方决定
-// （`payload::<T>()` 的 `T`），而 `SymbioKey` 要求一个固定的关联 `Value` 类型。
-//
-// 历史上这里有一个 `PayloadKey`（`Value` 型）+ `PAYLOAD` 常量，标着
-// `#[deprecated]`（指向 `ctx.payload::<T>()`）。那是一个**名不副实的标注**：
-// 该废弃的是「用 `PAYLOAD` 键直接存取 `Value` 这种用法」，不是 `payload`
-// 这个概念——后者恰恰是核心路径。于是它成了一个「废弃但仍被需要」的悬置
-// 常量，而真正的读写方（`plugin.rs` / `gateway`）为了规避告警，只好写**裸
-// 字符串** `"payload"`——正是 `grep-audit` S-009 想拦的形态。
-//
-// 现在收口为一个纯字符串常量：键名只有这一处定义，读写双方都引它。
-
-/// 载荷键名（`PluginInvokeRequestExt::payload` / `set_payload` 读写的桶）
-pub const KEY_PAYLOAD: &str = "payload";
 
 // 父插件弱引用 Key (Option<Weak<dyn Plugin>>)
 pub struct ParentKey;
@@ -269,7 +250,7 @@ impl SymbioKey for ConfigurableVisitorKey {
         "configurable_visitor".to_string()
     }
 }
-pub const CONFIG_VISITOR: ConfigurableVisitorKey = ConfigurableVisitorKey;
+pub const CONFIGURABLE_VISITOR: ConfigurableVisitorKey = ConfigurableVisitorKey;
 
 /// 执行期**事件出口** Key —— 第四条进程内通道
 /// （能力 = 可调用对象；选项 = 可展示的数据节点；可配置 = 「我有配置文档」；
@@ -285,7 +266,7 @@ pub const CONFIG_VISITOR: ConfigurableVisitorKey = ConfigurableVisitorKey;
 ///
 /// ## 为什么 `parse → None`
 ///
-/// 与 [`CAPABILITY_VISITOR`] / [`OPTION_VISITOR`] / [`CONFIG_VISITOR`] 同款：
+/// 与 [`CAPABILITY_VISITOR`] / [`OPTION_VISITOR`] / [`CONFIGURABLE_VISITOR`] 同款：
 /// 进程内专用，没有字符串形态。`parse` 返回 `None` 是**刻意的**——它声明
 /// 「本键不参与任何跨进程/字符串化的往返」，而不是「尚未实现」。
 pub struct ExecEventSinkKey;
@@ -337,7 +318,7 @@ pub const ABORT_SIGNAL: ExecAbortSignalKey = ExecAbortSignalKey;
 ///
 /// ## 为什么 `parse → None` 且 `WIRE = false`
 ///
-/// 与 [`CAPABILITY_VISITOR`] / [`OPTION_VISITOR`] / [`CONFIG_VISITOR`] / [`EVENT_SINK`]
+/// 与 [`CAPABILITY_VISITOR`] / [`OPTION_VISITOR`] / [`CONFIGURABLE_VISITOR`] / [`EVENT_SINK`]
 /// 同款，但这里**两条都要写**：值是 `Arc<Mutex<Vec<..>>>`，`CapabilityError` 也没有
 /// `Serialize` ⇒ 它连「进程外表达」都不成立，故 `WIRE = false`。
 /// （`CONFIG` / `PLUGIN_DIR` 只需 `parse → None`：它们的值本身可序列化，

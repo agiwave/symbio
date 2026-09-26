@@ -178,7 +178,7 @@ impl SessionPlugin {
         // 不过路由，`PATH` 没有任何读者。这里曾写 `ctx.set(PATH, "chat/send")`——
         // 纯死赋值，而且值还是相对臂（相对臂只属于插件自己的 `match`，不该出现在调用侧）。
         // 编排侧的口径见 `orchestrator/entry.rs`：「chat_ctx 仅承载 payload（不再设置
-        // 跨插件 PATH）」。地址规则见 `symbio_core::keys::paths` 模块文档。
+        // 跨插件 PATH）」。地址规则见 `symbio_core::plugin::route` 模块文档。
         ctx.set(SESSION_ID, session_id.to_string());
         if let Err(e) = ctx.set_payload(req) {
             crate::plugin_error!("session", "[Heartbeat] 触发失败：无法设置 payload: {}", e);

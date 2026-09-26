@@ -30,7 +30,7 @@ const SLOW_WARN_THROTTLE: Duration = Duration::from_secs(5);
 /// 事件类型（`kind`）词表 —— **发布方一律引本常量，不要写裸字面量**。
 ///
 /// 为什么要有它：`kind` 是**跨进程边界的字符串**，改名不会编译失败，只会让消费方
-/// 的分发静默失效（与 `symbio_core::keys::paths` 同一类风险）。发布点曾直接写
+/// 的分发静默失效（与 `symbio_core::plugin::route` 同一类风险）。发布点曾直接写
 /// `"session"` / `"system"`，于是这两个常量声明出来后无人引用——正是
 /// `chat_message.rs` 那段「枚举改名时就会出现不一致」警告的形状。
 ///
@@ -208,7 +208,7 @@ pub fn build_envelope(kind: &str, session_id: Option<&str>, data: Value) -> Valu
 ///
 /// **两侧分属不同 crate**：生产方是 core 自身的 `resync_marker`，消费方是 `cli`
 /// （`cli/src/client.rs` 判别该字段）——是**线上字面量**，改名不会编译失败、只会让
-/// 消费方的判别静默失效，故留在本层（与 `keys::paths` 的地址常量同类，ADR-023）。
+/// 消费方的判别静默失效，故留在本层（与 `plugin::route` 的地址常量同类，ADR-023）。
 ///
 /// 与已退役的转写流的 `transcript_resync` 同构：都是「你可能漏了帧，
 /// 请按自己的作用域重读」的指令。这里**不改用 `VdfsChange` 的形状**——那是

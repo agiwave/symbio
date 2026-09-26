@@ -7,7 +7,7 @@ use crate::symbio_core::vdfs;
 use crate::symbio_core::{
     dir_from_ctx, Capability, Plugin, PluginConfigFile, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
-    PLUGIN_FILE, PLUGIN_WEB,
+    PLUGIN_FILE, PLUGIN_ID_WEB,
 };
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
@@ -65,7 +65,7 @@ pub struct WebPlugin {
 impl WebPlugin {
     /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
-        let dir = dir_from_ctx(&*ctx, PLUGIN_WEB);
+        let dir = dir_from_ctx(&*ctx, PLUGIN_ID_WEB);
         let config: WebConfig = match dir.load::<WebConfig>() {
             Ok(Some(c)) => c,
             Ok(None) => WebConfig::default(),
@@ -159,7 +159,7 @@ impl Plugin for WebPlugin {
             }
             // 与工具共用同一次能力广播：本插件在 VDFS 上的全部内容 = 一个配置文档
             let me: vdfs::DynVdfsProvider = self.clone();
-            visitor.register_vdfs_provider(PLUGIN_WEB, me).await;
+            visitor.register_vdfs_provider(PLUGIN_ID_WEB, me).await;
         }
         // 顺带声明「本插件有一份配置文档」：设置页据此列出本项并指路到
         // `<根>/web/PLUGIN.yml`（标签与配置节点共用同一个来源，见 `PluginConfigFile`）
@@ -223,4 +223,4 @@ impl vdfs::VdfsProvider for WebPlugin {
     }
 }
 
-crate::submit_object_creator!(PLUGIN_WEB, WebPlugin::build, dyn Plugin);
+crate::submit_object_creator!(PLUGIN_ID_WEB, WebPlugin::build, dyn Plugin);

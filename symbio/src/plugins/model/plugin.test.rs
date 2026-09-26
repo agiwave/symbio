@@ -48,7 +48,7 @@ fn node_carries_presentation_differential() {
     let n = node_of(&sample(), Some(123));
     assert_eq!(n.name, "openai-1");
     assert_eq!(n.title, "我的 OpenAI");
-    assert_eq!(n.kind, PLUGIN_MODEL);
+    assert_eq!(n.kind, PLUGIN_ID_MODEL);
     assert_eq!(n.ext.as_deref(), Some(VDFS_EXT_FORM));
     assert_eq!(n.status, VDFS_STATUS_ACTIVE);
     assert_eq!(n.description.as_deref(), Some("gpt-4o"));
@@ -180,7 +180,7 @@ async fn new_type_declares_the_landing_detail() {
         .into_stat()
         .expect("根节点自述");
     let t = root.new_type.expect("根下可新建「模型」");
-    assert_eq!(t.ext, PLUGIN_MODEL, "呈现扩展名不变：id_of 仍按它剥后缀");
+    assert_eq!(t.ext, PLUGIN_ID_MODEL, "呈现扩展名不变：id_of 仍按它剥后缀");
     assert_eq!(
         t.node_ext.as_deref(),
         Some(VDFS_EXT_FORM),

@@ -9,7 +9,7 @@ use crate::symbio_core::vdfs;
 use crate::symbio_core::{
     dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH, PLUGIN_FILE,
-    PLUGIN_GATEWAY,
+    PLUGIN_ID_GATEWAY,
 };
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
@@ -93,7 +93,7 @@ pub struct GatewayPlugin {
 impl GatewayPlugin {
     /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例（submit_object_creator! 自注册）
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
-        let dir = dir_from_ctx(&*ctx, PLUGIN_GATEWAY);
+        let dir = dir_from_ctx(&*ctx, PLUGIN_ID_GATEWAY);
         let config: GatewayConfig = match dir.load::<GatewayConfig>() {
             Ok(Some(c)) => c,
             Ok(None) => GatewayConfig::default(),
@@ -122,7 +122,7 @@ impl GatewayPlugin {
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new(PLUGIN_GATEWAY, "开放接口")
+        PluginMeta::new(PLUGIN_ID_GATEWAY, "开放接口")
             .with_description("本应用如何被调用（入站，对外提供服务）。")
             .with_version("0.1.0")
             .with_order(9)
@@ -228,7 +228,7 @@ impl Plugin for GatewayPlugin {
         if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
             // 本插件在 VDFS 上的全部内容 = 一个配置文档
             let me: vdfs::DynVdfsProvider = self.clone();
-            visitor.register_vdfs_provider(PLUGIN_GATEWAY, me).await;
+            visitor.register_vdfs_provider(PLUGIN_ID_GATEWAY, me).await;
         }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
         crate::symbio_core::announce_configurable(&ctx, &self.config_file).await;
@@ -290,7 +290,7 @@ impl vdfs::VdfsProvider for GatewayPlugin {
     }
 }
 
-crate::submit_object_creator!(PLUGIN_GATEWAY, GatewayPlugin::build, dyn Plugin);
+crate::submit_object_creator!(PLUGIN_ID_GATEWAY, GatewayPlugin::build, dyn Plugin);
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]

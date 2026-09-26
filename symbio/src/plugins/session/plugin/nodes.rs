@@ -129,7 +129,7 @@ impl SessionRuntime {
 /// 是它的两个场景属性（消费者据此选提示音音色、渲染会话级错误条）。
 pub(crate) fn session_node(s: &SessionSummary, rt: &SessionRuntime) -> vdfs::VdfsNode {
     let mut n = vdfs::VdfsNode::file(&s.id, s.title.clone(), vdfs::VdfsAccess::READ_WRITE);
-    n.kind = PLUGIN_SESSION.to_string();
+    n.kind = PLUGIN_ID_SESSION.to_string();
     n.ext = Some(EXT_SESSION.to_string());
     n.status = rt.status().to_string();
     n.updated_at = Some(s.updated_at);

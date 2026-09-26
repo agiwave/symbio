@@ -498,8 +498,11 @@ async fn unimplemented_ops_surface_as_not_implemented() {
 async fn watch_unwatch_forward_relative_path() {
     let (fs, rec) = fs_roots();
     let ctx = ctx_with(json!({ "path": ".vdfsv2/mem/sub" }));
-    assert!(dispatch(&fs, VDFS_WATCH, &ctx).await.unwrap().is_ok());
-    assert!(dispatch(&fs, VDFS_UNWATCH, &ctx).await.unwrap().is_ok());
+    assert!(dispatch(&fs, ROUTE_VDFS_WATCH, &ctx).await.unwrap().is_ok());
+    assert!(dispatch(&fs, ROUTE_VDFS_UNWATCH, &ctx)
+        .await
+        .unwrap()
+        .is_ok());
     assert_eq!(rec.seen(), vec!["sub", "sub"], "provider 收到相对路径");
 }
 

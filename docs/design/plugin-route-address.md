@@ -58,7 +58,7 @@ HTTP 传输文档里那句「路由是运行时分形分发，各插件内部 `m
 
 `TRAVERSE_AVAILABLE_TOOLS`（`symbio_core/mod.rs`）与
 `TRAVERSE_AVAILABLE_OPTIONS`（`symbio_core/capability/option.rs`）。
-它们是**协议端点**，不是插件路径，因此不进 `symbio_core::keys::paths`。
+它们是**协议端点**，不是插件路径，因此不进 `symbio_core::plugin::route`。
 
 处理哪个、不处理哪个由插件自己决定：不贡献选项的插件对 `available_options`
 返回 `NotFound` 是**正确**行为（`collect_options` 会忽略该子树的错误）。
@@ -82,11 +82,11 @@ HTTP 传输文档里那句「路由是运行时分形分发，各插件内部 `m
 
 | 位置 | 收什么 |
 |---|---|
-| `symbio_core::keys::paths` | **有真实调用方的绝对地址**（`&'static str`），命名 `<PLUGIN>_<OP>` |
+| `symbio_core::plugin::route` | **有真实调用方的绝对地址**（`&'static str`），命名 `<PLUGIN>_<OP>` |
 | 前端 `tauri/src/constants/pluginPaths.ts` | 同一批地址的前端侧常量（模板串链，含 `worker/` 前缀） |
-| 定义它的模块 | **相对臂**常量（不带 `worker/` 前缀）；新增时照此落位，别塞进 `keys/paths.rs` |
+| 定义它的模块 | **相对臂**常量（不带 `worker/` 前缀）；新增时照此落位，别塞进 `plugin/route.rs` |
 
-`keys/paths.rs` **不为「将来可能用到」的路由预置常量**。
+`plugin/route.rs` **不为「将来可能用到」的路由预置常量**。
 
 ## 3. 守卫：`scripts/plugin-entry-audit.mjs`
 
@@ -125,7 +125,7 @@ E-007 有四条豁免，逐条对应仓里的真实形态：`Weak`（向上引�
 
 - [`docs/reference/ROUTES.md`](../reference/ROUTES.md) 是**人工维护**的路由清单，
   E-006 就是守它的（`CURRENT.md` 由代码生成，必然一致，不需要守）。
-- [`symbio_core/keys/paths.rs`](../../symbio/src/symbio_core/keys/paths.rs) 的模块文档是
+- [`symbio_core/plugin/route.rs`](../../symbio/src/symbio_core/plugin/route.rs) 的模块文档是
   地址规则的**权威表述**，本文 §2 是它的展开。
 - [`http-api-transport.md`](./http-api-transport.md) §7 讨论了「给 `Plugin` trait
   加 `manifest()` 自动聚合路由清单」的方案。若将来落地，E-006 的判据会从

@@ -10,7 +10,7 @@ pub use error::{init_error_bucket, report_error, take_errors, CapabilityError};
 pub use configurable::{
     announce_configurable, entry_of, ConfigurableVisitor, DefaultConfigurableVisitor,
 };
-pub use option::{OptionVisitor, TRAVERSE_AVAILABLE_OPTIONS};
+pub use option::OptionVisitor;
 pub use tool_name::{resolve, to_wire};
 pub use tools::DefaultToolVisitor;
 

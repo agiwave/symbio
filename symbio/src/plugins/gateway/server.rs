@@ -24,7 +24,7 @@
 use super::config::{is_readonly_allowed, GatewayConfig};
 use crate::symbio_core::{
     Plugin, PluginChannel, PluginFrame, PluginInvokeRequest, PluginMessageWire, PluginPayload,
-    PluginPayloadWire, PluginSimpleRequest, KEY_PAYLOAD,
+    PluginPayloadWire, PluginSimpleRequest, PLUGIN_PAYLOAD_KEY,
 };
 use base64::Engine;
 use serde_json::Value;
@@ -502,7 +502,7 @@ async fn dispatch_once(
 fn build_ctx(msg: &PluginMessageWire) -> Arc<dyn PluginInvokeRequest> {
     let mut extensions: HashMap<String, Arc<dyn Any + Send + Sync>> = HashMap::new();
     extensions.insert(
-        KEY_PAYLOAD.to_string(),
+        PLUGIN_PAYLOAD_KEY.to_string(),
         Arc::new(msg.payload.clone()) as Arc<dyn Any + Send + Sync>,
     );
     if let Some(obj) = msg.metadata.as_object() {

@@ -24,8 +24,8 @@ use super::homedir::HomedirRegistry;
 use super::schemas::{home_reload, work_get_workspace};
 use crate::symbio_core::{
     Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, PATH, PLUGIN_COMPOSITE,
-    PLUGIN_DIR, PLUGIN_HOME, REQUIRED_PLUGINS,
+    PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, PATH, PLUGIN_DIR,
+    PLUGIN_ID_COMPOSITE, PLUGIN_ID_HOME, REQUIRED_PLUGINS,
 };
 use crate::{plugin_error, plugin_info, plugin_warn};
 use serde_json::Value;
@@ -52,7 +52,7 @@ pub const SYSTEM_PLUGINS: &[&str] = crate::symbio_core::ASSEMBLY_SUB_AGENT_PLUGI
 /// 那个 home 又去构造容器——自举环。系统级插件不参与扫描。
 fn home_dir() -> PluginDir {
     // home 是**唯一**知道 homedir 的插件：它的目录就是系统根。
-    PluginDir::at(HomedirRegistry::get(), PLUGIN_HOME)
+    PluginDir::at(HomedirRegistry::get(), PLUGIN_ID_HOME)
 }
 
 /// Home 自己的配置（`<homedir>/PLUGIN.yml`）
@@ -309,7 +309,7 @@ impl HomePlugin {
     /// 也是系统根目录——它据此定位插件根 `<系统根>/plugins`。
     pub fn rebuild_worker_sync(&self) -> Result<(), PluginError> {
         use crate::symbio_core::has_creator;
-        if !has_creator(PLUGIN_COMPOSITE) {
+        if !has_creator(PLUGIN_ID_COMPOSITE) {
             return Ok(());
         }
 
@@ -331,7 +331,7 @@ impl HomePlugin {
         // 容器只知道这个目录；它把它当自己的插件根去扫描——不关心它是不是 homedir。
         sub_context.set(
             PLUGIN_DIR,
-            PluginDir::at(HomedirRegistry::get(), PLUGIN_COMPOSITE),
+            PluginDir::at(HomedirRegistry::get(), PLUGIN_ID_COMPOSITE),
         );
         sub_context.set(
             REQUIRED_PLUGINS,
@@ -442,7 +442,7 @@ impl Default for HomePlugin {
     }
 }
 
-crate::submit_object_creator!(PLUGIN_HOME, HomePlugin::build, dyn Plugin);
+crate::submit_object_creator!(PLUGIN_ID_HOME, HomePlugin::build, dyn Plugin);
 
 #[async_trait::async_trait]
 impl Plugin for HomePlugin {

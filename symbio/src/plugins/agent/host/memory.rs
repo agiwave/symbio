@@ -41,7 +41,7 @@
 
 use super::store::AgentDirStore;
 use crate::symbio_core::{
-    MemoryFile, MemoryNodeSpec, MemorySegmentSpec, MEMORY_AGENTS_FILE, PLUGIN_AGENT,
+    MemoryFile, MemoryNodeSpec, MemorySegmentSpec, MEMORY_AGENTS_FILE, PLUGIN_ID_AGENT,
 };
 
 /// 系统提示词条目在收集器里的注册名（同名覆盖的键）。
@@ -79,7 +79,7 @@ pub fn node_spec() -> MemoryNodeSpec<'static> {
         title: SEGMENT_TITLE,
         // 场景标签与其它几层同一口径：用**所属插件**的场景名，而不是另造一个 `memory`
         // （`memory` 在前端未登记任何图标 / 渲染器，等于一个没有消费者的死标签）
-        kind: PLUGIN_AGENT,
+        kind: PLUGIN_ID_AGENT,
         description: MEMORY_DESCRIPTION,
     }
 }

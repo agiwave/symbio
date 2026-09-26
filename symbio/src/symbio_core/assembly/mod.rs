@@ -23,9 +23,9 @@
 //! `SYSTEM_PLUGINS`（原本只是本清单的纯别名，无第二份字面量），
 //! `SYSTEM_LEVEL_PROVIDERS` → `plugins/composite`。
 //!
-//! ## 与 `keys::ids` 的分工
+//! ## 与 `plugin::ids` 的分工
 //!
-//! - `keys::ids`：**单个**对象的注册 id（插件工厂 / 服务）；
+//! - `plugin::ids`：**单个**对象的注册 id（插件工厂 / 服务）；
 //! - 本域：**一组**插件的装配策略。两者都以插件名为字面量，但一个是「这个插件叫什么」，
 //!   一个是「这批插件怎么装」——问题不同，owner 也不同。
 
@@ -89,8 +89,8 @@ pub const ASSEMBLY_SUB_AGENT_PLUGINS: &[&str] = &[
 ///
 /// 因此它是一条**机制级**判据（与 [`ASSEMBLY_SUB_AGENT_PLUGINS`] 同处）：装配方（容器）
 /// 在执行停用前查它，而不是让每个插件自己声明「我不能被关」。插件的启停状态是
-/// 装配方的事（见 [`crate::symbio_core::KEY_ENABLED`]），这条规则也该住在同一处。
+/// 装配方的事（见 [`crate::symbio_core::PLUGIN_KEY_ENABLED`]），这条规则也该住在同一处。
 pub const ASSEMBLY_UNDISABLABLE_PLUGINS: &[&str] = &[
-    crate::symbio_core::PLUGIN_MANAGER, // 插件管理入口：停用它就再也点不到「启用」
-    crate::symbio_core::PLUGIN_VDFS,    // 资源访问层：停用它整棵资源树都取不到
+    crate::symbio_core::PLUGIN_ID_MANAGER, // 插件管理入口：停用它就再也点不到「启用」
+    crate::symbio_core::PLUGIN_ID_VDFS,    // 资源访问层：停用它整棵资源树都取不到
 ];

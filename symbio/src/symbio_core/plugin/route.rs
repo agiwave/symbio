@@ -1,4 +1,4 @@
-//! 全项目调用路径（route path）统一常量
+//! 跨插件调用路径（route path）统一常量
 //!
 //! # 地址规则
 //!
@@ -36,7 +36,7 @@
 //!
 //! [`TRAVERSE_AVAILABLE_TOOLS`](crate::symbio_core::TRAVERSE_AVAILABLE_TOOLS) 与
 //! [`TRAVERSE_AVAILABLE_OPTIONS`](crate::symbio_core::TRAVERSE_AVAILABLE_OPTIONS)。
-//! 它们是**协议端点**，不是插件路径，因此不进本模块。
+//! 它们是**协议端点**，不是插件路径，因此不进本模块——住在 [`super::traverse`]。
 //!
 //! # 本模块的职责与边界
 //!
@@ -46,14 +46,19 @@
 //! - **IDE 友好**：跳转即可看到所有可用路径。
 //!
 //! **不为「将来可能用到」的路由预置常量**——那正是本模块 2026-09-18 清掉的那类腐烂
-//! （见 [`HOOK_FIRE`] 上方关于 `AGENT_CHAT` 的说明）。当前无调用方的路由由审计脚本
-//! 报告，由人决定去留，而不是先给它们一个体面的常量名。
+//! （见 [`ROUTE_HOOK_FIRE`] 上方关于 `AGENT_CHAT` 的说明）。当前无调用方的路由由审计
+//! 脚本报告，由人决定去留，而不是先给它们一个体面的常量名。
 //!
-//! 与 [`ids`](crate::symbio_core::keys::ids) 的差别：
-//! - `ids` 描述「注册到注册表的对象 id」（插件工厂、capability、协议）；
+//! 与 [`plugin::ids`](crate::symbio_core::plugin::ids) 的差别：
+//! - `ids` 描述「注册到注册表的对象 id」（插件工厂、服务）；
 //! - 本模块描述「运行期跨插件调用的路由路径」（`<插件目录名>/<子路径>`）。
 //!
-//! 命名约定：`<PLUGIN>_<OPERATION>` 形式，全部大写下划线。
+//! # 命名：`ROUTE_<插件目录名>_<操作>`
+//!
+//! 标识符去掉 `ROUTE_` 前缀后，必须**逐字等于值的大写形式**（`/` → `_`）：
+//! `ROUTE_SESSION_CHAT_SEND` ↔ `"session/chat/send"`。于是「常量名 ↔ 值」可机械核对，
+//! 由 `scripts/core-naming-audit.mjs` 检查——这条规则同时也是本模块存在的理由
+//! （防止路径漂移）的守卫。
 
 // ============ Session 插件 ============
 /// session/chat/send — 发起一轮对话（**统一编排入口**）
@@ -62,9 +67,9 @@
 /// 心跳（`session/heartbeat.rs`，直连）、Telegram 通道都汇到这里。
 ///
 /// 注意不是 `session/chat`：那个路径**不存在**（session 的 `route` 只认
-/// `chat/send` 与 `chat/abort` 两条相对臂）。Telegram 曾用它，见下方 [`HOOK_FIRE`]
-/// 同类的记录。
-pub const SESSION_CHAT_SEND: &str = "session/chat/send";
+/// `chat/send` 与 `chat/abort` 两条相对臂）。Telegram 曾用它，见下方
+/// [`ROUTE_HOOK_FIRE`] 同类的记录。
+pub const ROUTE_SESSION_CHAT_SEND: &str = "session/chat/send";
 
 /// session/chat/abort — 中止进行中的一轮
 ///
@@ -78,19 +83,19 @@ pub const SESSION_CHAT_SEND: &str = "session/chat/send";
 /// 一条可检索的登记。这条理由由 `#[allow(dead_code)]` 同行注明，供
 /// `scripts/dead-code-audit.mjs` 识别为**刻意保留**而非漏删。
 #[allow(dead_code)] // dead-code-allow R-001: 唯一调用方在前端 pluginPaths.ts::CHAT_ABORT，路由真实存在
-pub const SESSION_CHAT_ABORT: &str = "session/chat/abort";
+pub const ROUTE_SESSION_CHAT_ABORT: &str = "session/chat/abort";
 
 // ============ VDFS 插件 ============
 /// vdfs/root — **进入地址空间**：取根地址，调用方不给地址。
 ///
 /// 调用方：Rust 侧 `agent/host/subagent.rs`（拼 Run 的 VDFS 根地址）、前端
 /// `tauri/src/schemas/vdfs.ts::VDFS_ROOT`（启动期取根当运行期数据，
-/// `services/vdfsScheme.ts` 据此拼会话地址）。保留登记的理由与 [`SESSION_CHAT_ABORT`] 相同
-/// ——「前端认识的后端路由」在后端也应有一条可检索的常量；且**根名只归 vdfs 插件**
-/// （`plugins/vdfs/fs.rs::VDFS_ADDR_ROOT`，仓级守卫 S-010 禁止它在别处出现），
-/// 故消费方一律取运行期值、不写字面量。
+/// `services/vdfsScheme.ts` 据此拼会话地址）。保留登记的理由与
+/// [`ROUTE_SESSION_CHAT_ABORT`] 相同——「前端认识的后端路由」在后端也应有一条可检索的
+/// 常量；且**根名只归 vdfs 插件**（`plugins/vdfs/fs.rs::VDFS_ADDR_ROOT`，仓级守卫
+/// S-010 禁止它在别处出现），故消费方一律取运行期值、不写字面量。
 #[allow(dead_code)] // dead-code-allow R-001: 调用方在前端 schemas/vdfs.ts + services/vdfsScheme.ts，路由真实存在
-pub const VDFS_ROOT: &str = "vdfs/root";
+pub const ROUTE_VDFS_ROOT: &str = "vdfs/root";
 
 /// vdfs/watch — 订阅一棵地址子树的变更。
 ///
@@ -100,14 +105,14 @@ pub const VDFS_ROOT: &str = "vdfs/root";
 /// 因此这是「能收到 VDFS 变更」的前置条件：只订阅全局总线而不登记 watch，
 /// 等于在一条没人开闸的频道上等事件（一条也收不到）。
 #[allow(dead_code)] // dead-code-allow R-001: 调用方在前端 schemas/vdfs.ts + services/vdfs.ts，路由真实存在
-pub const VDFS_WATCH: &str = "vdfs/watch";
+pub const ROUTE_VDFS_WATCH: &str = "vdfs/watch";
 
-/// vdfs/unwatch — 取消订阅（与 [`VDFS_WATCH`] 严格配对）。
+/// vdfs/unwatch — 取消订阅（与 [`ROUTE_VDFS_WATCH`] 严格配对）。
 ///
 /// 引用计数归零才真正摘除，多余一次 `unwatch` 是安全的空操作；
 /// 但**漏掉**它会留下幽灵订阅（后端持续投递、消费者早已不在）。
 #[allow(dead_code)] // dead-code-allow R-001: 调用方在前端 schemas/vdfs.ts + services/vdfs.ts，路由真实存在
-pub const VDFS_UNWATCH: &str = "vdfs/unwatch";
+pub const ROUTE_VDFS_UNWATCH: &str = "vdfs/unwatch";
 
 // ============ Event Bus 插件 ============
 /// event_bus/subscribe — 建立进程内帧订阅连接
@@ -115,7 +120,7 @@ pub const VDFS_UNWATCH: &str = "vdfs/unwatch";
 /// 调用方有两处：Rust 侧 `cli/src/client.rs`（订阅 `vdfs` 频道），以及前端
 /// `tauri/src/constants/pluginPaths.ts::EVENT_BUS_SUBSCRIBE` + `services/eventBus.ts`
 /// ——两边都拿 `PluginFrame::Data` 收会话帧。
-pub const EVENT_BUS_SUBSCRIBE: &str = "event_bus/subscribe";
+pub const ROUTE_EVENT_BUS_SUBSCRIBE: &str = "event_bus/subscribe";
 
 // ============ Hook 插件 ============
 /// hook/fire — 触发命名 hook
@@ -128,9 +133,9 @@ pub const EVENT_BUS_SUBSCRIBE: &str = "event_bus/subscribe";
 /// **被本模块删掉的两个常量（2026-09-18）**：`AGENT_CHAT = "agent/chat"` 与
 /// `AGENT_CREATE = "agent/create"`。它们全仓**零调用方**，而且描述的路径**根本不存在**
 /// ——`agent` 插件的 `route` 恒返回 `NotFound`（agent 目录一律经 VDFS 访问），
-/// 子智能体派生走的是 [`SESSION_CHAT_SEND`]。
+/// 子智能体派生走的是 [`ROUTE_SESSION_CHAT_SEND`]。
 ///
 /// 留着它们比没有更糟：`AGENT_CHAT` 的文档曾写着「子智能体会话执行入口
 /// （仅 agent_run 能力内部调用）」，而**没有任何代码那样调用**——这正是本模块
-/// 存在的理由（防止路径漂移）被反过来利用的样子。`paths.rs` 只收有真实调用方的路径。
-pub const HOOK_FIRE: &str = "hook/fire";
+/// 存在的理由（防止路径漂移）被反过来利用的样子。本模块只收有真实调用方的路径。
+pub const ROUTE_HOOK_FIRE: &str = "hook/fire";

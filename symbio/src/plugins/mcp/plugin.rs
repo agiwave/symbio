@@ -27,7 +27,7 @@ pub use crate::plugins::mcp::schemas::mcp_config::{McpConfig, McpServerConfig};
 use crate::providers::vdfs_service::DirVdfs;
 use crate::symbio_core::{
     dir_from_ctx, Capability, CapabilityMeta, Plugin, PluginDir, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_MCP,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_ID_MCP,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -58,7 +58,7 @@ impl McpPlugin {
         // 自己的目录由容器经 `PLUGIN_DIR` 告知。本插件**没有跨条目配置**——配置
         // 就是资源树（`<本插件目录>/<name>/server.json`），故不从 `PLUGIN.yml` 读
         // 任何东西，`servers` 由下面的异步加载从磁盘灌入。
-        let dir = dir_from_ctx(&*ctx, PLUGIN_MCP);
+        let dir = dir_from_ctx(&*ctx, PLUGIN_ID_MCP);
 
         let plugin = Arc::new(McpPlugin::new(McpConfig::default(), dir));
 
@@ -95,7 +95,7 @@ impl McpPlugin {
     /// 根 = **本插件自己的目录**（构造时由父插件经 `PLUGIN_DIR` 告知）——
     /// 这里不按插件名反推落位，插件不知道、也不该知道自己被放在哪。
     fn store(&self) -> DirVdfs {
-        DirVdfs::at(self.dir.dir(), PLUGIN_MCP, MANIFEST).with_label(LABEL)
+        DirVdfs::at(self.dir.dir(), PLUGIN_ID_MCP, MANIFEST).with_label(LABEL)
     }
 
     pub fn metadata() -> PluginMeta {
@@ -103,7 +103,7 @@ impl McpPlugin {
             .with_description("MCP server 配置（每项一份 server.json），是工具的唯一来源。")
             .with_version("0.3.0")
             .with_order(5)
-            .with_icon(PLUGIN_MCP)
+            .with_icon(PLUGIN_ID_MCP)
         // 「根下可新建类型」由 provider 自持（根节点自述里的 `VdfsNode::new_type`，
         // 见下方 `impl VdfsProvider for McpPlugin`）——它是挂载点的动态自述，容器
         // 合成根节点时向 provider 发一次 `Stat` 现场取，不进这份同步纯数据
@@ -163,7 +163,7 @@ impl Default for McpPlugin {
     fn default() -> Self {
         Self::new(
             McpConfig::default(),
-            PluginDir::at(std::env::temp_dir().join("symbio-test/mcp"), PLUGIN_MCP),
+            PluginDir::at(std::env::temp_dir().join("symbio-test/mcp"), PLUGIN_ID_MCP),
         )
     }
 }
@@ -190,7 +190,7 @@ const LABEL: &str = "MCP";
 
 /// 路径末段 → 条目 id（去掉 `.mcp` 呈现扩展名）
 fn id_of(path: &str) -> String {
-    crate::providers::vdfs_service::entry::id_of(path, PLUGIN_MCP)
+    crate::providers::vdfs_service::entry::id_of(path, PLUGIN_ID_MCP)
 }
 
 /// 目标地址 → 条目 id（`write` 与测试共用的**唯一**判据）。
@@ -207,7 +207,9 @@ fn resolve_id(path: &str, create: bool) -> VdfsResult<String> {
             "写{LABEL}挂载根需要 create 意图：目录自身没有可覆盖的目标"
         )));
     }
-    Ok(crate::providers::vdfs_service::entry::auto_id(PLUGIN_MCP))
+    Ok(crate::providers::vdfs_service::entry::auto_id(
+        PLUGIN_ID_MCP,
+    ))
 }
 
 /// 主文件原文 → VDFS 节点（`ext = form` + 详情定义随节点 `schema` 下发）
@@ -223,7 +225,7 @@ fn detail_definition() -> serde_json::Value {
 
 fn node_of(id: &str, raw: Option<&str>) -> VdfsNode {
     let mut n = VdfsNode::file(id, id, VdfsAccess::READ_WRITE);
-    n.kind = PLUGIN_MCP.to_string();
+    n.kind = PLUGIN_ID_MCP.to_string();
     n.ext = Some(VDFS_EXT_FORM.to_string());
     n.schema = Some(detail_definition());
     let Some(server) = raw.and_then(|c| serde_json::from_str::<McpServerConfig>(c).ok()) else {
@@ -326,7 +328,7 @@ impl VdfsProvider for McpPlugin {
                     // 节点 `ext = form`——两者不同，故显式声明 `node_ext` 与详情定义。
                     return Ok(VdfsResponse::Stat(
                         VdfsNode::dir("", LABEL, VdfsAccess::LIST).with_new_type(Some(
-                            VdfsNewType::new(PLUGIN_MCP, LABEL)
+                            VdfsNewType::new(PLUGIN_ID_MCP, LABEL)
                                 .with_description(
                                     "新建 MCP Server（在详情页里填好，保存时一次写入）",
                                 )
@@ -418,7 +420,7 @@ impl VdfsProvider for McpPlugin {
                         crate::providers::vdfs_service::VdfsUnpack::from_payload(payload.as_ref())
                             .map_err(|e| VdfsError::invalid(e.0))?;
                     let bytes = pack.bytes().map_err(|e| VdfsError::invalid(e.0))?;
-                    let name = pack.name_of(PLUGIN_MCP);
+                    let name = pack.name_of(PLUGIN_ID_MCP);
                     let created = self.store().import_pack(&name, &bytes).await?;
                     self.reload_server_from_storage(&name).await?;
                     return Ok(VdfsResponse::Action(VdfsActionResult {
@@ -478,11 +480,11 @@ impl VdfsProvider for McpPlugin {
                 }
             }
             VdfsRequest::Watch { sink } => {
-                watch_changes(PLUGIN_MCP, path, sink).await?;
+                watch_changes(PLUGIN_ID_MCP, path, sink).await?;
                 Ok(VdfsResponse::Unit)
             }
             VdfsRequest::Unwatch => {
-                unwatch_changes(PLUGIN_MCP, path).await?;
+                unwatch_changes(PLUGIN_ID_MCP, path).await?;
                 Ok(VdfsResponse::Unit)
             }
             _ => Err(VdfsError::NotImplemented),
@@ -573,7 +575,7 @@ impl Plugin for McpPlugin {
         // 直接注册插件自身为 VDFS 挂载点（不经实体层与适配器）
         let vdfs_provider: Arc<dyn crate::symbio_core::VdfsProvider> = self.clone();
         tool_visitor
-            .register_vdfs_provider(PLUGIN_MCP, vdfs_provider)
+            .register_vdfs_provider(PLUGIN_ID_MCP, vdfs_provider)
             .await;
 
         let cfg = self.config.read().await.clone();
@@ -612,12 +614,12 @@ impl Plugin for McpPlugin {
         _ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
         Err(PluginError::NotFound(format!(
-            "{PLUGIN_MCP} 已无自有路由，请改用 VDFS 地址"
+            "{PLUGIN_ID_MCP} 已无自有路由，请改用 VDFS 地址"
         )))
     }
 }
 
-crate::submit_object_creator!(PLUGIN_MCP, McpPlugin::build, dyn Plugin);
+crate::submit_object_creator!(PLUGIN_ID_MCP, McpPlugin::build, dyn Plugin);
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]

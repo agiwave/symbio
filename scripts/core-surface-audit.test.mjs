@@ -6,7 +6,7 @@
 //
 //   1. **多条通配互相覆盖**：根 `mod.rs` 有 `pub use plugin::*` / `keys::*` / `logger::*`
 //      三条通配，第一版把它们存进同一个 Map 键 `'*'` ⇒ 后一条盖掉前一条，
-//      公开面从 251 个掉到 134 个，`PLUGIN_*` / `PathKey` / `PluginStopReason` / `KEY_*`
+//      公开面从 251 个掉到 134 个，`PLUGIN_ID_*` / `PathKey` / `PluginStopReason` / `PLUGIN_KEY_*`
 //      全部凭空消失。
 //   2. **`symbio/src` 直属文件被跳过**：`lib.rs` / `plugins/mod.rs` 这类**不在插件子目录里**
 //      的文件当时返回 `null` 单位被整体跳过 ⇒ 「只在注册表里被用到」的符号被算成
@@ -105,11 +105,13 @@ test('宏生成的键计入公开面（它们没有 `pub` 关键字）', () => {
 })
 
 test('插件 id 常量被它自己的插件用，不算下放候选', () => {
-  // `PLUGIN_ALPHA` 就是 `plugins/alpha` 自己的名字，它用自己天经地义。
+  // `PLUGIN_ID_ALPHA` 就是 `plugins/alpha` 自己的名字，它用自己天经地义。
+  // 注意形态是 `PLUGIN_ID_<X>` —— 这是「一域一前缀」收口后的名字：插件工厂 id
+  // 住 `plugin` 域，用 `PLUGIN_ID_` 细分前缀，不再与清单键的 `PLUGIN_KEY_` 混用。
   const out = audit({
-    'symbio/src/symbio_core/mod.rs': 'pub use keys::*;\n',
-    'symbio/src/symbio_core/keys/mod.rs': 'pub const PLUGIN_ALPHA: &str = "alpha";\n',
-    'symbio/src/plugins/alpha/x.rs': 'fn f() { let _ = PLUGIN_ALPHA; }\n',
+    'symbio/src/symbio_core/mod.rs': 'pub use plugin::*;\n',
+    'symbio/src/symbio_core/plugin/ids.rs': 'pub const PLUGIN_ID_ALPHA: &str = "alpha";\n',
+    'symbio/src/plugins/alpha/x.rs': 'fn f() { let _ = PLUGIN_ID_ALPHA; }\n',
   })
-  assert.doesNotMatch(out, /PLUGIN_ALPHA\s+->/, out)
+  assert.doesNotMatch(out, /PLUGIN_ID_ALPHA\s+->/, out)
 })

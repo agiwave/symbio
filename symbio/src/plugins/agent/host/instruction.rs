@@ -43,7 +43,7 @@
 //! 不该让每个会话都背一段没有内容的头信息。
 
 use crate::symbio_core::{
-    MemoryFile, MemoryNodeSpec, MemorySegmentSpec, MEMORY_AGENTS_FILE, PLUGIN_AGENT,
+    MemoryFile, MemoryNodeSpec, MemorySegmentSpec, MEMORY_AGENTS_FILE, PLUGIN_ID_AGENT,
 };
 use std::path::{Path, PathBuf};
 
@@ -89,7 +89,7 @@ pub fn node_spec() -> MemoryNodeSpec<'static> {
     MemoryNodeSpec {
         title: SEGMENT_TITLE,
         // 场景标签用**所属插件**的场景名（与各层同一口径），不另造一个没有消费者的标签
-        kind: PLUGIN_AGENT,
+        kind: PLUGIN_ID_AGENT,
         description: DESCRIPTION,
     }
 }

@@ -488,7 +488,7 @@ fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn VdfsProvider>>;
 ```
 
 LLM 链路：插件在 `traverse` 的 `TRAVERSE_AVAILABLE_TOOLS` 分支里，**在注册工具的同一处**
-顺带注册自己的资源，目录名用插件名——`register_vdfs_provider(PLUGIN_MANAGER, self.clone())`。
+顺带注册自己的资源，目录名用插件名——`register_vdfs_provider(PLUGIN_ID_MANAGER, self.clone())`。
 系统链路：资源插件在 `impl Plugin for X` 直接 `return Some(self)`，无需任何遍历或
 注册——容器 `children_of` 与前端 `resolve_fs` 取视图时直接调 `.get_vfs_provider()`。
 

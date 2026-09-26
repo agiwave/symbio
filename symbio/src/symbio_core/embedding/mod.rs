@@ -25,6 +25,10 @@
 //! workdir 始终由前端在每个请求的 ctx.WORKDIR 中显式传递，
 //! 后端不维护全局"活跃 workdir"缓存，因此不设 `WorkspaceService` 抽象。
 
+mod ids;
+
+pub use ids::{EMBEDDING_LOCAL, EMBEDDING_NOOP};
+
 use async_trait::async_trait;
 use thiserror::Error;
 

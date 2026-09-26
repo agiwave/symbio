@@ -28,7 +28,7 @@ use crate::symbio_core::vdfs;
 use crate::symbio_core::{
     dir_from_ctx, MemoryFile, Plugin, PluginConfigFile, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
-    PLUGIN_FILE, PLUGIN_SESSION, SESSION_ID,
+    PLUGIN_FILE, PLUGIN_ID_SESSION, SESSION_ID,
 };
 use crate::symbio_core::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
 use async_trait::async_trait;
@@ -240,7 +240,7 @@ impl SessionPlugin {
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         // 自己的目录由容器经 `PLUGIN_DIR` 告知；配置就存在那里的 PLUGIN.yml
         // （反序列化使用 #[serde(default)]，自动忽略 storage_dir 等已废弃字段）
-        let dir = dir_from_ctx(&*ctx, PLUGIN_SESSION);
+        let dir = dir_from_ctx(&*ctx, PLUGIN_ID_SESSION);
         let config: SessionConfig = match dir.load::<SessionConfig>() {
             Ok(Some(c)) => c,
             Ok(None) => SessionConfig::default(),
@@ -529,11 +529,11 @@ impl Plugin for SessionPlugin {
             }
         }
         // VDFS 挂载点：与会话工具共用同一次能力广播，把自己注册为一份 VDFS 资源。
-        // 挂载名由使用方（此处即本插件）选定——约定用插件名（`PLUGIN_SESSION`），
+        // 挂载名由使用方（此处即本插件）选定——约定用插件名（`PLUGIN_ID_SESSION`），
         // 插件名在宿主内唯一，天然就是合格的挂载名；provider 自身不含此概念。
         if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
             let me: vdfs::DynVdfsProvider = self.clone();
-            visitor.register_vdfs_provider(PLUGIN_SESSION, me).await;
+            visitor.register_vdfs_provider(PLUGIN_ID_SESSION, me).await;
 
             // 智能体自身的 `AGENTS.md`（`{homedir}` / `<agentdir>`）**不再在此注入**：
             // 那是「智能体自身目录」这个作用域，归 plugin_manager 插件（谁能读写它，谁负责
@@ -551,7 +551,7 @@ impl Plugin for SessionPlugin {
     }
 }
 
-crate::submit_object_creator!(PLUGIN_SESSION, SessionPlugin::build, dyn Plugin);
+crate::submit_object_creator!(PLUGIN_ID_SESSION, SessionPlugin::build, dyn Plugin);
 
 // ==================== 配置文档（`<根>/session/PLUGIN.yml`） ====================
 

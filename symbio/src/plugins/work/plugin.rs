@@ -18,7 +18,8 @@ use crate::symbio_core::VdfsAccess;
 use crate::symbio_core::{
     announce_configurable, dir_from_ctx, MemoryFile, Plugin, PluginConfigFile, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
-    CAPABILITY_VISITOR, MEMORY_AGENTS_FILE, PATH, PLUGIN_WORK, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
+    CAPABILITY_VISITOR, MEMORY_AGENTS_FILE, PATH, PLUGIN_ID_WORK, TRAVERSE_AVAILABLE_TOOLS,
+    WORKDIR,
 };
 use async_trait::async_trait;
 use serde_json::json;
@@ -70,7 +71,7 @@ pub struct WorkPlugin {
 impl WorkPlugin {
     /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
-        let dir = dir_from_ctx(&*ctx, PLUGIN_WORK);
+        let dir = dir_from_ctx(&*ctx, PLUGIN_ID_WORK);
         let config: WorkConfig = match dir.load::<WorkConfig>() {
             Ok(Some(c)) => c,
             Ok(None) => WorkConfig::default(),
@@ -90,13 +91,13 @@ impl WorkPlugin {
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new(PLUGIN_WORK, SEGMENT_TITLE)
+        PluginMeta::new(PLUGIN_ID_WORK, SEGMENT_TITLE)
             .with_description("工作区记忆：跨会话保留的长期事实与约定，模型可读写。")
             .with_version("0.1.0")
             // 在既有挂载点之后（session 1 / model 2 / agent 3 / skill 4 / mcp 5 /
             // plugin_manager 6 / local 7 / web 8 / gateway 9 / telegram 10）
             .with_order(11)
-            .with_icon(PLUGIN_WORK)
+            .with_icon(PLUGIN_ID_WORK)
             .with_hidden(true)
             // 根可列举 + 可递归遍历（记忆文件在根下，树视图要能走到它）
             .with_root_access(VdfsAccess::LIST_TRAVERSE)
@@ -163,7 +164,7 @@ impl Default for WorkPlugin {
         Self::new(
             crate::symbio_core::PluginDir::at(
                 std::env::temp_dir().join("symbio-test/work"),
-                PLUGIN_WORK,
+                PLUGIN_ID_WORK,
             ),
             WorkConfig::default(),
         )
@@ -208,7 +209,7 @@ impl Plugin for WorkPlugin {
         if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
             // ① VDFS 挂载点：记忆文件本体（模型与用户共用的编辑面）
             let me: crate::symbio_core::DynVdfsProvider = self.clone();
-            visitor.register_vdfs_provider(PLUGIN_WORK, me).await;
+            visitor.register_vdfs_provider(PLUGIN_ID_WORK, me).await;
 
             // ② 系统提示词：记忆注入（含地址与容量口径）
             self.contribute_prompt(&ctx, &visitor).await;
@@ -221,7 +222,7 @@ impl Plugin for WorkPlugin {
     }
 }
 
-crate::submit_object_creator!(PLUGIN_WORK, WorkPlugin::build, dyn Plugin);
+crate::submit_object_creator!(PLUGIN_ID_WORK, WorkPlugin::build, dyn Plugin);
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]

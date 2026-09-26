@@ -20,7 +20,7 @@ fn test_session_storage_dir_comes_from_plugin_dir() {
     let plugin = SessionPlugin::new(
         None,
         SessionConfig::default(),
-        PluginDir::at(&root, PLUGIN_SESSION),
+        PluginDir::at(&root, PLUGIN_ID_SESSION),
     );
     assert_eq!(plugin.storage_dir(), root, "存储根必须等于被传入的插件目录");
     assert!(
@@ -195,7 +195,7 @@ async fn no_session_context_injects_no_memory() {
         "没有会话 id 时不得凭空造一份记忆出来"
     );
     // 但挂载点照旧交出：挂载点的存在不依赖某次请求的作用域
-    assert!(visitor.get_vdfs_provider(PLUGIN_SESSION).await.is_some());
+    assert!(visitor.get_vdfs_provider(PLUGIN_ID_SESSION).await.is_some());
 }
 
 /// 空串 / 纯空白的会话 id 与「没有会话」同解（闸门在 `store` 一处收口）

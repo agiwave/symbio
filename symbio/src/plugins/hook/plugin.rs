@@ -12,7 +12,7 @@ use crate::symbio_core::schemas::common::SimpleResponse;
 use crate::symbio_core::schemas::{HookEvent, HookOutput};
 use crate::symbio_core::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
-    PluginMeta, PluginPayload, PLUGIN_HOOK,
+    PluginMeta, PluginPayload, PLUGIN_ID_HOOK,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -53,14 +53,14 @@ impl HooksPlugin {
     /// 容器（`composite`）按**目录名**建实例表并在 `route` 里按它分发
     /// （见 `composite.rs`「目录名 = 实例名」），因此目录名才是真正的路由前缀。
     ///
-    /// 这里曾写死 `"hooks"`——与目录名 `hook`、工厂 id `PLUGIN_HOOK` 都不一致。
+    /// 这里曾写死 `"hooks"`——与目录名 `hook`、工厂 id `PLUGIN_ID_HOOK` 都不一致。
     /// `Plugin::meta()` 唯一生产消费方是 `composite/vdfs.rs`（读 `order`/`root_access`/
     /// `name`/`description`/`hidden` 聚合组合视图），但路由按目录名分发、
     /// `PluginMeta.id` 不参与路由，所以那个错名**不影响路由**，却足以让
     /// `docs/CURRENT.md` 的生成器与三处文档写出 `hooks/fire` 这类**不存在的路由**。
-    /// 改用 `PLUGIN_HOOK` 后三者对齐，由 `scripts/plugin-entry-audit.mjs` 的 E-001 守住。
+    /// 改用 `PLUGIN_ID_HOOK` 后三者对齐，由 `scripts/plugin-entry-audit.mjs` 的 E-001 守住。
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new(PLUGIN_HOOK, "钩子插件")
+        PluginMeta::new(PLUGIN_ID_HOOK, "钩子插件")
             .with_description("提供事件钩子机制，支持插件间事件订阅与触发")
             .with_version("0.1.0")
     }
@@ -147,4 +147,4 @@ impl Plugin for HooksPlugin {
     }
 }
 
-crate::submit_object_creator!(PLUGIN_HOOK, HooksPlugin::build, dyn Plugin);
+crate::submit_object_creator!(PLUGIN_ID_HOOK, HooksPlugin::build, dyn Plugin);
