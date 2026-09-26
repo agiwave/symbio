@@ -37,16 +37,15 @@ use crate::plugins::agent::host::config::AgentConfig;
 use crate::plugins::agent::host::instruction;
 use crate::plugins::agent::host::manifest;
 use crate::plugins::agent::host::memory;
-use crate::plugins::agent::host::store::AgentDirStore;
+use crate::plugins::agent::host::store::{AgentDirStore, AGENT_MEMORY_FILE};
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField, DetailOption};
 use crate::symbio_core::{
     capability_announce_configurable, capability_report_error, creator_create_object,
     plugin_dir_from_ctx, Capability, CapabilityVisitor, Plugin, PluginConfigFile, PluginDir,
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
     PluginPayload, PluginSimpleRequest, AGENT_ID, ASSEMBLY_SUB_AGENT_PLUGINS, CAPABILITY_VISITOR,
-    CONFIGURABLE_VISITOR, MEMORY_AGENTS_FILE, PATH, PLUGIN_DIR, PLUGIN_ID_AGENT,
-    PLUGIN_ID_COMPOSITE, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
-    WORKDIR,
+    CONFIGURABLE_VISITOR, PATH, PLUGIN_DIR, PLUGIN_ID_AGENT, PLUGIN_ID_COMPOSITE, REQUIRED_PLUGINS,
+    TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
 };
 use crate::symbio_core::{VdfsAccess, VdfsItem, VdfsProvider};
 use async_trait::async_trait;
@@ -158,13 +157,13 @@ impl AgentPlugin {
 
     /// 依 agent 目录记录构造记忆门面（**子智能体态记忆的唯一构造点**）。
     ///
-    /// 内核只认「上限是多少」，不关心它从哪个配置来；agent 目录不存在 → 无作用域，
+    /// 共享实现只认「上限是多少」，不关心它从哪个配置来；agent 目录不存在 → 无作用域，
     /// 之后读 / 注入 / 写三条路各自降级，调用点不需要重复判断。
     pub(crate) async fn memory_store(
         &self,
         agent_dirs: &AgentDirStore,
         agent_id: &str,
-    ) -> crate::symbio_core::MemoryFile {
+    ) -> crate::providers::memory::MemoryFile {
         let cfg = self.config.read().await;
         memory::store(
             agent_dirs,
@@ -175,7 +174,7 @@ impl AgentPlugin {
     }
 
     /// 系统智能体自身指令的门面（**系统态的唯一构造点**，落位见 [`super::instruction`]）
-    pub(crate) async fn instruction_store(&self) -> crate::symbio_core::MemoryFile {
+    pub(crate) async fn instruction_store(&self) -> crate::providers::memory::MemoryFile {
         let cfg = self.config.read().await;
         instruction::store(
             &instruction::host_dir(self.config_file.dir().dir()),
@@ -320,7 +319,7 @@ impl AgentPlugin {
     ) {
         let store = self.instruction_store().await;
         // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
-        let address = crate::symbio_core::absolute_addr(ctx, MEMORY_AGENTS_FILE);
+        let address = crate::symbio_core::absolute_addr(ctx, AGENT_MEMORY_FILE);
         match instruction::segment(&store, &address) {
             Ok(Some(text)) => {
                 visitor
@@ -524,7 +523,7 @@ impl Plugin for AgentPlugin {
             let mut n = self.instruction_node().await;
             n.ext = Some("md".to_string());
             v.register_configurable(
-                VdfsItem::new(n).with_path(format!("{PLUGIN_ID_AGENT}/{MEMORY_AGENTS_FILE}")),
+                VdfsItem::new(n).with_path(format!("{PLUGIN_ID_AGENT}/{AGENT_MEMORY_FILE}")),
             )
             .await;
         }

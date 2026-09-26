@@ -271,7 +271,7 @@ fn cursor_id(before: &str) -> Option<&str> {
 // 其内部结构（记忆 / 转写 / 子会话 / 工作目录树）作为**会话同名目录**挂在会话之下：
 //
 //   <id>                  → 会话叶子（聊天详情）
-//   <id>/AGENTS.md         → 会话记忆（**单个文件**，读写；见 `super::super::memory`）
+//   <id>/MEMORY.md         → 会话记忆（**单个文件**，读写；见 `super::super::memory`）
 //   <id>/message[/<mid>]   → 转写列表 / 单条消息（**列表项**）
 //   <id>/inbox[/<iid>]     → 收件箱（待消费用户消息，写即入队）
 //   <id>/subsession[/<sub>]→ 子会话清单 / 单个子会话（查看 · 删除）
@@ -433,7 +433,7 @@ pub(crate) enum VdfsSessionPath<'a> {
     Root,
     /// `<id>`：单个会话（叶子）
     Session(&'a str),
-    /// `<id>/AGENTS.md`：会话记忆（**单个文件**，可读写）
+    /// `<id>/MEMORY.md`：会话记忆（**单个文件**，可读写）
     Memory(&'a str),
     /// `<id>/message[/<mid>]`：转写列表 / 单条消息；`mid` 空 = 列表本身
     Messages { id: &'a str, mid: Option<&'a str> },
@@ -463,8 +463,8 @@ pub(crate) fn parse_session_path(path: &str) -> vdfs::VdfsResult<VdfsSessionPath
     };
     let not_found = || vdfs::VdfsError::not_found(format!("会话内部不存在该路径：{path}"));
     match seg {
-        // 记忆是**单个文件**：地址用真实文件名（`AGENTS.md`），没有更深层级
-        crate::symbio_core::MEMORY_AGENTS_FILE => match sub {
+        // 记忆是**单个文件**：地址用真实文件名（`MEMORY.md`），没有更深层级
+        crate::plugins::session::memory::SESSION_MEMORY_FILE => match sub {
             None => Ok(VdfsSessionPath::Memory(id)),
             Some(_) => Err(vdfs::VdfsError::not_found(format!(
                 "记忆是文件，没有更深层级：{path}"
@@ -507,7 +507,8 @@ pub(crate) fn parse_session_path(path: &str) -> vdfs::VdfsResult<VdfsSessionPath
 
 /// 会话内部的虚拟子项（工作目录按会话是否声明 workdir 决定是否出现）。
 ///
-/// `memory` 由调用方构造好传入（形状由内核 [`MemoryFile::node`] 产出，
+/// `memory` 由调用方构造好传入（形状由共享实现
+/// [`MemoryFile::node`](crate::providers::memory::MemoryFile::node) 产出，
 /// `list` 与 `stat` 因此共用同一份形状）；它是个**文件**，与各目录并列——
 /// 记忆本来就是会话的一部分，不该另开一条寻址。
 ///

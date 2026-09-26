@@ -7,9 +7,9 @@
 use super::*;
 // 未装配容器时没有 PLUGIN_DIR，配置文件落盘目标指个临时目录
 use crate::plugins::session::test_dir;
+use crate::providers::collectors::DefaultToolVisitor;
 use crate::symbio_core::{
-    CapabilityVisitor, DefaultToolVisitor, CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS,
-    VDFS_PARENT_ADDR,
+    CapabilityVisitor, CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
 };
 
 /// 会话存储根**只**来自构造时父插件经 `PLUGIN_DIR` 告知的插件目录——
@@ -135,9 +135,9 @@ fn config_definition_defaults_come_from_session_config() {
     );
 }
 
-// ==================== 会话记忆（`<根>/session/<id>/AGENTS.md`）====================
+// ==================== 会话记忆（`<根>/session/<id>/MEMORY.md`）====================
 //
-// 机制（读写 / 限容 / 截断 / 排版）已在 `symbio_core::memory.test.rs` 与
+// 机制（读写 / 限容 / 截断 / 排版）已在 `providers/memory/tests.rs` 与
 // `session/memory.test.rs` 钉住；这里只测**收集期**这一侧：什么情况下注入、
 // 注入的那一段长什么样。
 
@@ -230,7 +230,7 @@ async fn empty_memory_still_teaches_where_and_how_big() {
     let seg = memory_segment(&visitor).await.expect("有会话就应注入");
     assert!(seg.contains("【会话记忆】"), "{seg}");
     assert!(
-        seg.contains(&format!("@vfs/session/{id}/AGENTS.md")),
+        seg.contains(&format!("@vfs/session/{id}/MEMORY.md")),
         "地址必须真实可达：{seg}"
     );
     assert!(
@@ -263,7 +263,7 @@ async fn session_memory_is_injected_verbatim() {
     let dir = p.storage_dir().join(&id);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
-        dir.join(crate::symbio_core::MEMORY_AGENTS_FILE),
+        dir.join(crate::plugins::session::memory::SESSION_MEMORY_FILE),
         "本会话约定：所有时间用 UTC。",
     )
     .unwrap();

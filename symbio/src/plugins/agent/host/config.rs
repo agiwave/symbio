@@ -4,8 +4,8 @@
 //!
 //! | 字段 | 闸门 | 位置 | 超限行为 |
 //! |---|---|---|---|
-//! | `memory_max_bytes` | 智能体自身的 `AGENTS.md` 写入 | [`MemoryFile::write`](crate::symbio_core::MemoryFile::write) | **拒绝** |
-//! | `memory_inject_max_bytes` | 智能体自身的 `AGENTS.md` 注入 | [`MemoryFile::inject`](crate::symbio_core::MemoryFile::inject) | **截断** + 告知地址 |
+//! | `memory_max_bytes` | 智能体自身的 `AGENTS.md` 写入 | [`MemoryFile::write`](crate::providers::memory::MemoryFile::write) | **拒绝** |
+//! | `memory_inject_max_bytes` | 智能体自身的 `AGENTS.md` 注入 | [`MemoryFile::inject`](crate::providers::memory::MemoryFile::inject) | **截断** + 告知地址 |
 //!
 //! 「智能体自身的 `AGENTS.md`」有**两个作用域**：系统态 `{homedir}/AGENTS.md`
 //! （对所有会话生效，用户可在设置页编辑）与子智能体态 `<agentdir>/AGENTS.md`
@@ -20,9 +20,9 @@
 //! 模型以为改好了、实际少了一块——这种失败没有任何报错，只能靠「拒绝」
 //! 把它变成一次显式的、可重试的失败。
 //!
-//! ⚠️ 读写与闸门本身**不落在本插件**：都在内核（`symbio_core::memory`），与
+//! ⚠️ 读写与闸门本身**不落在本插件**：都在共享实现（`providers/memory`），与
 //! work / session 几层共用同一份实现。本插件只提供落位与地址，配置在这里的作用是
-//! **把闸门取值喂给内核**。
+//! **把闸门取值喂给共享实现**。
 
 use serde::{Deserialize, Serialize};
 

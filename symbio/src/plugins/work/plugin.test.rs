@@ -6,10 +6,8 @@
 //! 只影响注入、不影响 VDFS 挂载点。
 
 use super::*;
-use crate::symbio_core::{
-    CapabilityVisitor, DefaultToolVisitor, PluginInvokeRequestExt, MEMORY_AGENTS_FILE,
-    VDFS_PARENT_ADDR,
-};
+use crate::providers::collectors::DefaultToolVisitor;
+use crate::symbio_core::{CapabilityVisitor, PluginInvokeRequestExt, VDFS_PARENT_ADDR};
 use tempfile::TempDir;
 
 /// 构造带能力收集器的上下文；`workdir` 为 `None` 即「没选工作区」
@@ -40,7 +38,7 @@ fn plugin(tmp: &TempDir, config: WorkConfig) -> Arc<WorkPlugin> {
 /// 工作区 + 一份 AGENTS.md
 fn workspace_with_memory(text: &str) -> TempDir {
     let ws = TempDir::new().unwrap();
-    std::fs::write(ws.path().join(MEMORY_AGENTS_FILE), text).unwrap();
+    std::fs::write(ws.path().join(WORK_MEMORY_FILE), text).unwrap();
     ws
 }
 

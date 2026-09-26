@@ -2,13 +2,13 @@
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //!
-//! 记忆的**机制**（读写 / 两道闸门 / 节点形状）由 `symbio_core::memory`
+//! 记忆的**机制**（读写 / 两道闸门 / 节点形状）由 `providers/memory`
 //! 自己测；这里钉的是**本层的个性**：落在哪、Agent 不存在时怎么降级、
 //! 片段里的地址与闸门是不是真的（读写面与注入面同属本插件，印出来的数字必须能执行）。
 
 use super::super::config::AgentConfig;
 use super::*;
-use crate::symbio_core::{VdfsAccess, MEMORY_AGENTS_FILE};
+use crate::symbio_core::VdfsAccess;
 use tempfile::TempDir;
 
 /// 在本插件目录落一个最小 agent_dir（不经 zip：以下用例只关心记忆的落位与作用域）
@@ -50,9 +50,13 @@ fn memory_lives_next_to_the_agent_manifest() {
         m.path().unwrap(),
         dir.path().join("global-agent/b/AGENTS.md")
     );
-    assert_eq!(m.file_name(), MEMORY_AGENTS_FILE, "节点名 = 真实文件名");
+    assert_eq!(
+        m.file_name(),
+        Some(AGENT_MEMORY_FILE),
+        "节点名 = 真实文件名"
+    );
     // 不是工作区根的那个 AGENTS.md —— 那是 work 插件的作用域
-    assert_ne!(m.path().unwrap(), dir.path().join(MEMORY_AGENTS_FILE));
+    assert_ne!(m.path().unwrap(), dir.path().join(AGENT_MEMORY_FILE));
 }
 
 /// Agent 不存在 = **无作用域**，是正常状态而不是崩溃（VDFS 据此报 NotFound）
@@ -83,10 +87,10 @@ fn memory_roundtrips() {
     assert_eq!(m.read().unwrap(), text);
 }
 
-// ==================== 两道闸门由内核执行（本层不重复实现） ====================
+// ==================== 两道闸门由共享实现执行（本层不重复实现） ====================
 
 #[test]
-fn write_gate_is_enforced_by_the_kernel() {
+fn write_gate_is_enforced_by_the_shared_impl() {
     let (_dir, agent_dirs) = workspace_with_agent_dir();
     let m = store(&agent_dirs, "b", 4, 256);
 
@@ -95,7 +99,7 @@ fn write_gate_is_enforced_by_the_kernel() {
     assert_eq!(m.read().unwrap(), "", "被拒绝的写入不得留下半截内容");
 }
 
-/// 注入闸门由内核执行：超预算截断，并在片段里指路（片段形状由内核测）
+/// 注入闸门由共享实现执行：超预算截断，并在片段里指路（片段形状由共享实现测）
 #[test]
 fn inject_gate_truncates() {
     let (_dir, agent_dirs) = workspace_with_agent_dir();
@@ -130,7 +134,7 @@ fn empty_memory_is_not_injected() {
     assert_eq!(segment(&gone, "@vfs/agent/nope/AGENTS.md").unwrap(), None);
 }
 
-/// 有内容 → 内核排版：标题 + **真实地址** + 「本智能体私有」+ 写入闸门
+/// 有内容 → 共享实现排版：标题 + **真实地址** + 「本智能体私有」+ 写入闸门
 ///
 /// 地址与闸门都由本插件给出、也由本插件执行（整包浏览面负责 agent_dir 目录里
 /// 所有文件的写入），所以印出来的数字是真的。
@@ -157,7 +161,7 @@ fn segment_carries_title_address_and_gates() {
     assert!(seg.contains("该智能体记住：先写测试。"), "{seg}");
 }
 
-/// 注入超预算 → 截断并在片段里指路（截断口径取自内核，本层不另写一份）
+/// 注入超预算 → 截断并在片段里指路（截断口径取自共享实现，本层不另写一份）
 #[test]
 fn segment_truncates_over_the_inject_budget() {
     let (_dir, agent_dirs) = workspace_with_agent_dir();
@@ -171,15 +175,15 @@ fn segment_truncates_over_the_inject_budget() {
 
 // ==================== VDFS 节点 ====================
 
-/// 节点形状由内核决定 —— 与 work / session 两层同源，不在这里手搓一份
+/// 节点形状由共享实现决定 —— 与 work / session 两层同源，不在这里手搓一份
 #[test]
-fn node_shape_comes_from_the_kernel() {
+fn node_shape_comes_from_the_shared_impl() {
     let (_dir, agent_dirs) = workspace_with_agent_dir();
     let m = store_of(&agent_dirs, "b");
     m.write("内容").unwrap();
 
     let n = m.node(&node_spec());
-    assert_eq!(n.name, MEMORY_AGENTS_FILE, "节点名 = 真实文件名");
+    assert_eq!(n.name, AGENT_MEMORY_FILE, "节点名 = 真实文件名");
     assert_eq!(n.title, SEGMENT_TITLE);
     assert_eq!(
         n.kind, PLUGIN_ID_AGENT,

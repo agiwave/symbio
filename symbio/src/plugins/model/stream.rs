@@ -22,6 +22,7 @@ use futures::StreamExt;
 use std::collections::HashMap;
 
 use super::protocols::{utf8_chunk, ModelProtocolEvent, SseLineParser, SsePartialLineExtractor};
+use super::tool_accumulator::TurnToolCallAccumulator;
 
 /// 未结束的行超过这个长度才尝试增量提取。
 ///
@@ -94,6 +95,9 @@ pub async fn parse_sse_stream(
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::<u8>::new();
     let mut out = TurnOutput::default();
+    // 工具调用的分片累积器**只在本插件内活着**：它是流式状态机（过程），
+    // 收口后才把结果（`Vec<TurnToolCallInfo>`）写进 `out.tool_calls` 交出去。
+    let mut tool_acc = TurnToolCallAccumulator::default();
 
     // ── 生命周期日志与卡死防护 ──────────────────────────────────────────
     // 让每轮 SSE 流在控制台留下完整轨迹：何时建立、首字节何时到达、首条内容
@@ -205,6 +209,7 @@ pub async fn parse_sse_stream(
                         root_id,
                         sink,
                         &mut out,
+                        &mut tool_acc,
                         &mut first_content_logged,
                         started,
                     )
@@ -254,6 +259,7 @@ pub async fn parse_sse_stream(
                         root_id,
                         sink,
                         &mut out,
+                        &mut tool_acc,
                         &mut first_content_logged,
                         started,
                     )
@@ -264,14 +270,15 @@ pub async fn parse_sse_stream(
         }
     }
 
+    // 收口：分片累积器按值消费，产物以**结果形态**写回单轮产物。
+    // 位置在日志之前——下面的「空流」判据要看 `tool_calls`，它必须已经就位。
+    out.tool_calls = tool_acc.finish();
+
     // ③ 流结束日志：正常结束 / 中止 / 空流，均带统计信息。
     // 若此处之后长时间无下文（工具执行/下一轮请求），可据此定位卡死发生在「流结束后」阶段。
     if abort.is_aborted() {
         // 中止已在上方记录，此处不重复。
-    } else if out.text.is_empty()
-        && out.reasoning.is_empty()
-        && !out.tool_accumulator.had_any_tool_call()
-    {
+    } else if out.text.is_empty() && out.reasoning.is_empty() && out.tool_calls.is_empty() {
         plugin_warn!(
             "model",
             "[LLM] 流结束但未产出任何内容（空流，{} chunks / {} bytes, 耗时 {:?}, finish={:?}）——上游可能返回了错误页或空响应",
@@ -289,7 +296,7 @@ pub async fn parse_sse_stream(
             total_bytes,
             out.text.len(),
             out.reasoning.len(),
-            out.tool_accumulator.get_completed().len(),
+            out.tool_calls.len(),
             out.finish
         );
     }
@@ -305,6 +312,7 @@ async fn dispatch_and_track(
     root_id: &str,
     sink: &ExecEventSink,
     out: &mut TurnOutput,
+    tool_acc: &mut TurnToolCallAccumulator,
     first_content_logged: &mut bool,
     started: std::time::Instant,
 ) -> Result<(), String> {
@@ -325,7 +333,7 @@ async fn dispatch_and_track(
             );
         }
     }
-    dispatch_protocol_event(ev, root_id, sink, out).await
+    dispatch_protocol_event(ev, root_id, sink, out, tool_acc).await
 }
 
 async fn dispatch_protocol_event(
@@ -333,6 +341,7 @@ async fn dispatch_protocol_event(
     root_id: &str,
     sink: &ExecEventSink,
     out: &mut TurnOutput,
+    tool_acc: &mut TurnToolCallAccumulator,
 ) -> Result<(), String> {
     match ev {
         ModelProtocolEvent::ContentDelta(c) => {
@@ -389,9 +398,8 @@ async fn dispatch_protocol_event(
             }
         }
         ModelProtocolEvent::ToolCallDelta(idx, id, name, args) => {
-            let (tc_id, wire_id, full_args, full_name, snapshot_required) = out
-                .tool_accumulator
-                .process_delta(idx, id.as_deref(), name.as_deref(), args.as_deref());
+            let (tc_id, wire_id, full_args, full_name, snapshot_required) =
+                tool_acc.process_delta(idx, id.as_deref(), name.as_deref(), args.as_deref());
 
             // ToolCall 组合节点：自身 content 即**请求参数**（不设独立的请求子节点，
             // 见 `docs/node-state-streaming.md` §2.2）。两条路径与 Text / Reasoning

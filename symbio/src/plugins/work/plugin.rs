@@ -12,14 +12,14 @@
 //! 模型不知道它存在，等于没有。
 
 use super::config::WorkConfig;
-use super::memory::{self, SEGMENT_NAME, SEGMENT_TITLE};
+use super::memory::{self, SEGMENT_NAME, SEGMENT_TITLE, WORK_MEMORY_FILE};
+use crate::providers::memory::MemoryFile;
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::VdfsAccess;
 use crate::symbio_core::{
-    capability_announce_configurable, plugin_dir_from_ctx, MemoryFile, Plugin, PluginConfigFile,
-    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
-    PluginPayload, CAPABILITY_VISITOR, MEMORY_AGENTS_FILE, PATH, PLUGIN_ID_WORK,
-    TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
+    capability_announce_configurable, plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
+    CAPABILITY_VISITOR, PATH, PLUGIN_ID_WORK, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
 };
 use async_trait::async_trait;
 use serde_json::json;
@@ -145,7 +145,7 @@ impl WorkPlugin {
         }
         let store = Self::store_with(ctx, &cfg);
         // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
-        let address = crate::symbio_core::absolute_addr(ctx, MEMORY_AGENTS_FILE);
+        let address = crate::symbio_core::absolute_addr(ctx, WORK_MEMORY_FILE);
         match store.segment(&memory::segment_spec(&address)) {
             Ok(Some(segment)) => {
                 visitor.register_system_prompt(SEGMENT_NAME, segment).await;
@@ -192,7 +192,7 @@ impl Plugin for WorkPlugin {
         let path = ctx.get(PATH).unwrap_or_default();
         Err(PluginError::NotFound(format!(
             "work 无自有协议路由 `{path}`：工作区记忆一律经 VDFS 访问（{}）",
-            crate::symbio_core::absolute_addr(&ctx, MEMORY_AGENTS_FILE)
+            crate::symbio_core::absolute_addr(&ctx, WORK_MEMORY_FILE)
         )))
     }
 

@@ -3,7 +3,7 @@
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //!
-//! 内核的机制（读写 / 两道闸门 / 排版形状）由 `symbio_core::memory` 自己测；
+//! 共享实现的机制（读写 / 两道闸门 / 排版形状）由 `providers/memory` 自己测；
 //! 这里钉的是**本层的个性**：目录从哪来、地址怎么拼出来、空文件怎么降级。
 
 use super::*;
@@ -16,13 +16,13 @@ fn host_dir_is_the_parent_of_the_plugin_dir() {
     assert_eq!(host_dir(&plugin_dir), Path::new("/homedir"));
     assert_eq!(
         file_path(&host_dir(&plugin_dir)),
-        Path::new("/homedir").join(MEMORY_AGENTS_FILE)
+        Path::new("/homedir").join(AGENT_MEMORY_FILE)
     );
 }
 
-/// 落位就是那个文件：读写走内核，两道闸门生效
+/// 落位就是那个文件：读写走共享实现，两道闸门生效
 #[test]
-fn instruction_roundtrips_through_the_kernel() {
+fn instruction_roundtrips_through_the_shared_impl() {
     let tmp = tempfile::TempDir::new().unwrap();
     let host = tmp.path().join("homedir");
     let m = store(&host, 1024, 128);
@@ -37,7 +37,7 @@ fn instruction_roundtrips_through_the_kernel() {
     m.write("只改必要之处").unwrap();
     assert_eq!(m.read().unwrap(), "只改必要之处");
 
-    // 写入闸门在内核里（本插件不重复实现）
+    // 写入闸门在共享实现里（本插件不重复实现）
     let err = m.write(&"x".repeat(2048)).unwrap_err();
     assert!(err.contains("超出容量上限"), "{err}");
 }
@@ -62,7 +62,7 @@ fn empty_instruction_is_not_injected() {
     );
 }
 
-/// 有内容 → 内核排版：标题 + **真实地址** + 上限 + 「对所有会话生效」
+/// 有内容 → 共享实现排版：标题 + **真实地址** + 上限 + 「对所有会话生效」
 #[test]
 fn segment_carries_title_address_and_gates() {
     let tmp = tempfile::TempDir::new().unwrap();
@@ -82,7 +82,7 @@ fn segment_carries_title_address_and_gates() {
     assert!(seg.contains("只改必要之处"), "{seg}");
 }
 
-/// 注入超预算 → 截断并在片段里指路（截断口径取自内核，本层不另写一份）
+/// 注入超预算 → 截断并在片段里指路（截断口径取自共享实现，本层不另写一份）
 #[test]
 fn segment_truncates_over_the_inject_budget() {
     let tmp = tempfile::TempDir::new().unwrap();
@@ -94,15 +94,15 @@ fn segment_truncates_over_the_inject_budget() {
     assert!(seg.contains("vdfs_read"), "截断必须指路取全文：{seg}");
 }
 
-/// 节点形状由内核决定 —— 与另外几层同源，不在这里手搓一份
+/// 节点形状由共享实现决定 —— 与另外几层同源，不在这里手搓一份
 #[test]
-fn node_shape_comes_from_the_kernel() {
+fn node_shape_comes_from_the_shared_impl() {
     let tmp = tempfile::TempDir::new().unwrap();
     let m = store(tmp.path(), 1024, 128);
     m.write("内容").unwrap();
 
     let n = m.node(&node_spec());
-    assert_eq!(n.name, MEMORY_AGENTS_FILE, "节点名 = 真实文件名");
+    assert_eq!(n.name, AGENT_MEMORY_FILE, "节点名 = 真实文件名");
     assert_eq!(n.title, SEGMENT_TITLE);
     assert_eq!(n.kind, PLUGIN_ID_AGENT, "场景标签用所属插件的场景名");
     assert_eq!(n.size, Some("内容".len() as u64));

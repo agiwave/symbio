@@ -15,7 +15,7 @@
 //! （`stat` / `read` / `write` 都认 `PLUGIN.yml`），隐藏的是「列表里的位置」，
 //! 不是可达性。
 //!
-//! ## 节点的形状由内核产出
+//! ## 节点的形状由共享实现产出
 //!
 //! `list` 与 `stat` 共用 [`MemoryFile::node`] 这一份形状（名称 / 标题 / kind /
 //! 大小 / mtime / 描述），因此两条链路不会分叉——从前「列表里的和点开的不是同一个
@@ -26,20 +26,19 @@
 //! 记忆是挂载点的唯一内容，也是**累积型**资源：`delete` 一次就抹掉全部长期事实，
 //! 而抹掉之后没有任何东西能把它找回来。要清空就写入空内容——那是一次可读、可审、
 //! 可撤销（有版本控制时）的显式动作。因此 `delete` 明确拒绝，而不是「允许但危险」。
-//! （这条与 agent / session 的记忆层**完全一致**，是内核级的约定。）
+//! （这条与 agent / session 的记忆层**完全一致**，是共享实现级的约定。）
 
-use super::memory::{MEMORY_DESCRIPTION, SEGMENT_TITLE};
+use super::memory::{MEMORY_DESCRIPTION, SEGMENT_TITLE, WORK_MEMORY_FILE};
 use super::plugin::WorkPlugin;
+use crate::providers::memory::{MemoryFile, MemoryNodeSpec};
 use crate::symbio_core::{
     vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes,
-};
-use crate::symbio_core::{
-    MemoryFile, MemoryNodeSpec, MEMORY_AGENTS_FILE, PLUGIN_FILE, PLUGIN_ID_WORK,
 };
 use crate::symbio_core::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider, VdfsRequest,
     VdfsResponse, VdfsResult, VdfsWriteResponse,
 };
+use crate::symbio_core::{PLUGIN_FILE, PLUGIN_ID_WORK};
 use async_trait::async_trait;
 
 const LABEL: &str = SEGMENT_TITLE;
@@ -90,7 +89,7 @@ impl VdfsProvider for WorkPlugin {
                     LABEL,
                     VdfsAccess::LIST_TRAVERSE,
                 ))),
-                MEMORY_AGENTS_FILE => {
+                WORK_MEMORY_FILE => {
                     if !store.has_scope() {
                         return Err(VdfsError::not_found(format!(
                             "{LABEL}不可用：当前没有工作区"
@@ -103,7 +102,7 @@ impl VdfsProvider for WorkPlugin {
                 other => Err(VdfsError::not_found(format!("未知路径：{other}"))),
             },
             VdfsRequest::Read => match path {
-                MEMORY_AGENTS_FILE => {
+                WORK_MEMORY_FILE => {
                     let text = store.read().map_err(VdfsError::internal)?;
                     Ok(VdfsResponse::Read(VdfsContent::text(text)))
                 }
@@ -113,15 +112,15 @@ impl VdfsProvider for WorkPlugin {
                 other => Err(VdfsError::not_found(format!("未知路径：{other}"))),
             },
             VdfsRequest::Write { content } => match path {
-                MEMORY_AGENTS_FILE => {
+                WORK_MEMORY_FILE => {
                     if content.binary {
                         return Err(VdfsError::invalid("工作区记忆是文本文件，不接受二进制内容"));
                     }
                     let text = content.text.as_deref().unwrap_or_default();
                     let existed = store.exists();
-                    // 容量闸门在内核里（`MemoryFile::write`）——本插件不重复实现
+                    // 容量闸门在共享实现里（`MemoryFile::write`）——本插件不重复实现
                     store.write(text).map_err(VdfsError::invalid)?;
-                    vdfs_notify_change(PLUGIN_ID_WORK, MEMORY_AGENTS_FILE);
+                    vdfs_notify_change(PLUGIN_ID_WORK, WORK_MEMORY_FILE);
                     Ok(VdfsResponse::Write(VdfsWriteResponse {
                         name: None,
                         created: !existed,
@@ -142,7 +141,7 @@ impl VdfsProvider for WorkPlugin {
                 }
                 Err(VdfsError::Forbidden(format!(
                     "{LABEL}不可删除（删除即丢失全部长期事实）。\
-                     如需清空，请向 `{MEMORY_AGENTS_FILE}` 写入空内容。"
+                     如需清空，请向 `{WORK_MEMORY_FILE}` 写入空内容。"
                 )))
             }
             VdfsRequest::Watch { sink } => {

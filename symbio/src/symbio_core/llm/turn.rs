@@ -4,26 +4,33 @@
 //! - 消息帧家族（[`llm_emit_message`]/[`llm_emit_delta`]/[`llm_emit_state`]/[`llm_emit_removed`]
 //!   与 `llm_message_frame`/`llm_state_frame`/`llm_removed_frame`）：[`ExecEventSink`]
 //!   唯一写入点的帧语义（完整消息 / 增量 / 状态 / 删除）
-//! - 单轮产物（[`TurnOutput`] + [`TurnToolCallAccumulator`]）：
-//!   `ModelProvider::execute_turn` 的返回类型（见 [`super::model_provider`]）
+//! - 单轮产物（[`TurnOutput`]）：`ModelProvider::execute_turn` 的返回类型
+//!   （见 [`super::model_provider`]）
+//! - 工具调用信息（[`TurnToolCallInfo`]）：[`TurnOutput::tool_calls`] 的元素类型，
+//!   同时是 [`llm_build_assistant_messages`] 的形参类型
 //! - 消息构造家族（`llm_short_id`/`TurnStreamChildIds`/`llm_build_assistant_messages`/`llm_build_tool_message`）：
-//!   `TurnOutput::into_messages` 与 `TurnToolCallAccumulator` 直接依赖它，
-//!   孤儿规则要求定义与使用同处 core
+//!   `TurnOutput::into_messages` 直接依赖它，孤儿规则要求定义与使用同处 core
 //!
 //! ## 依赖方对照表（ADR-023 决策 2）
 //!
-//! 本模块**全部符号都是两侧共用**的，没有单消费方残留。两个最容易被误判为
-//! 「只有一侧认」的符号，实测如下——**按类型名 grep 会漏掉它们**，因为消费点走的是
-//! `TurnOutput` 的**字段访问**（`.tool_accumulator`）而非类型名：
+//! 本模块**全部符号都是两侧共用**的，没有单消费方残留：
 //!
 //! | 符号 | 消费方 | 消费方式 |
 //! |---|---|---|
-//! | [`TurnToolCallAccumulator`] | model（`stream.rs` 逐块 `process_delta`）· session（`chat_loop/turn.rs` 读 `get_completed` / `had_any_tool_call`）· 本模块（`TurnOutput::into_messages`） | 经 `TurnOutput.tool_accumulator` 字段访问 |
+//! | [`TurnToolCallInfo`] | model（`stream.rs` 生产 · `message_builder.test.rs` 构造）· session（`tool_executor.rs` 形参 · `chat_loop` 读字段）· 本模块（[`llm_build_assistant_messages`] 的形参 · [`TurnOutput::tool_calls`] 的元素类型） | 作为**多消费方函数的形参类型** |
 //! | [`TurnStreamChildIds`] | model（`message_builder.test.rs`）· 本模块（[`llm_build_assistant_messages`] 的形参、`into_messages` 的构造点） | 作为**多消费方函数的形参类型** |
 //!
-//! 两者都不能下沉：前者有 **2 个跨插件**消费方；后者是多消费方函数
-//! [`llm_build_assistant_messages`] 的签名组成部分——沉到任一侧，另一侧就调不动该函数
-//! （插件间禁止互引，`plugin-entry-audit` E-009）。
+//! 两者都不能下沉：它们是多消费方函数 [`llm_build_assistant_messages`] 的签名组成部分
+//! ——沉到任一侧，另一侧就调不动该函数（插件间禁止互引，`plugin-entry-audit` E-009）。
+//!
+//! **工具调用的累积过程不在这里**：把分片攒成一次调用的状态机
+//! （`TurnToolCallAccumulator`）只有 model 插件的 `stream.rs` 驱动，住在
+//! `plugins/model/tool_accumulator.rs`。本模块只承载它的**产物形态**
+//! （[`TurnOutput::tool_calls`]）——「过程」是实现，「结果」才是契约。
+//!
+//! 这条边界此前是模糊的：累积器曾住在本模块，理由是「`TurnOutput::into_messages`
+//! 依赖它」。那是**循环论证**——`into_messages` 依赖它，只因为 `TurnOutput` 把它当
+//! 字段带着。字段换成结果形态后，依赖自己就消失了（ADR-023 开头点名的正是这种推理）。
 //!
 //! **HTTP 重试机器与 SSE 流循环不在这里**：它们只有 model 插件的
 //! `execute_turn` 使用（实现细节而非契约），住在 `plugins/model/`
@@ -43,8 +50,6 @@ use crate::symbio_core::schemas::session::chat_message::{
 };
 use crate::symbio_core::ExecEventSink;
 use serde_json::Value;
-use std::collections::HashMap;
-use tracing::warn;
 
 // 执行期出口与中止（唯一两个原语）
 
@@ -121,22 +126,7 @@ pub fn llm_removed_frame(message_id: &str) -> ChatMessage {
     }
 }
 
-// 工具调用增量累积
-
-#[derive(Debug, Default, Clone)]
-struct AccumulatedToolCall {
-    /// provider 原始 `tool_call_id`（wire id）。供应商未返回（或全空白）时为 `None`，
-    /// 此时请求构建回退用节点 id。
-    id: Option<String>,
-    /// 消息节点 id：**首个增量到达时分配**，会话内唯一。
-    ///
-    /// 许多 OpenAI 兼容网关**跨轮复用** `call_0` / `call_xxx` 这类短 id；若直接把
-    /// wire id 当节点 id，第二轮的同 id 工具调用会更新到第一轮的老节点（后端
-    /// `Vec` 存储不撞、前端按 id 的 map 撞——"后端正常、前端显示混乱"的根源）。
-    node_id: String,
-    name: Option<String>,
-    arguments: String,
-}
+// 工具调用信息（**结果形态**——累积过程在 `plugins/model/tool_accumulator.rs`）
 
 /// Tool call information
 #[derive(Debug, Clone)]
@@ -150,7 +140,7 @@ pub struct TurnToolCallInfo {
     pub arguments: Value,
     /// 参数 JSON **非空且解析失败**时的原始文本；其余情况为 `None`。
     ///
-    /// 存在理由：`get_completed` 早先对解析失败静默回退 `{}`，于是「参数被
+    /// 存在理由：累积器早先对解析失败静默回退 `{}`，于是「参数被
     /// max_tokens 截断、参数残破」与「无参工具的空参数」在下游长得一模一样——
     /// 工具收到空参后报「缺少必填参数」，模型误以为调用合法而原样重试，
     /// 形成卡思考死循环。此字段把「解析失败」这一事实显式携带到执行侧，
@@ -158,142 +148,6 @@ pub struct TurnToolCallInfo {
     ///
     /// `None` 且 `arguments == {}` 是合法的：无参工具的空串/纯空白参数。
     pub parse_error: Option<String>,
-}
-
-/// Accumulates incremental tool call deltas.
-///
-/// LLM APIs stream tool calls incrementally. This struct handles the accumulation
-/// so plugin authors don't need to manage index-based HashMaps.
-#[derive(Debug, Default)]
-pub struct TurnToolCallAccumulator {
-    calls: HashMap<usize, AccumulatedToolCall>,
-}
-
-impl TurnToolCallAccumulator {
-    /// Process a tool call delta from the API.
-    ///
-    /// 返回 `(node_id, wire_id, accumulated_args, name, snapshot_required)`：
-    /// - `node_id`：消息节点 id（**首个增量分配，会话内唯一**）——流式帧与落库都用它；
-    /// - `wire_id`：provider 的原始 tool_call_id（未提供时等于 `node_id`）——
-    ///   仅在构建 LLM 请求包时使用；
-    /// - `accumulated_args`：**迄今累积**的参数 JSON；
-    /// - `name`：工具名（空串增量不覆盖已定名）；
-    /// - `snapshot_required`：本次增量是否改动了节点的**身份字段**（新建节点 / 首次定名）。
-    ///   是 → 调用方必须发**完整快照**（`Upsert`，身份与内容一次给全）；
-    ///   否 → 只是正文增长，调用方发**窄追加**（`Append`，O(delta)）。
-    ///
-    /// 这条划分与 Text / Reasoning 子节点**同构**：帧面只有两种语义——「整条替换」与
-    /// 「尾部追加」——由覆盖方式决定，而不是由接收端去猜。
-    pub fn process_delta(
-        &mut self,
-        index: usize,
-        id: Option<&str>,
-        name: Option<&str>,
-        args_delta: Option<&str>,
-    ) -> (String, String, String, Option<String>, bool) {
-        let entry = self.calls.entry(index).or_default();
-
-        // 节点 id 在诞生时确定并写入 entry：流式广播、落库（llm_build_assistant_messages）、
-        // 执行（process_tool_calls_async）三处使用同一节点 id。
-        let is_new_node = entry.node_id.is_empty();
-        if is_new_node {
-            entry.node_id = llm_short_id();
-        }
-        // 新建节点必须发快照（接收端尚无此节点）；首次定名亦然——身份字段
-        // （name / tool_call_id / 父子）只随快照下发，之后的增量只带参数片段。
-        let mut snapshot_required = is_new_node;
-
-        // 仅接受非空 id/name：
-        // 部分 OpenAI 兼容网关（如实测 apinex qwen-3.8-max）只在首个增量携带合法 id，
-        // 后续增量重复发送 `id:""`。若用空值覆盖，会把首个增量的合法 id 冲掉，
-        // 最终得到 Some("") → 工具调用被误判为 id 缺失而被跳过。
-        if let Some(id) = id.filter(|s| !s.trim().is_empty()) {
-            entry.id = Some(id.to_string());
-        }
-        if let Some(name) = name.filter(|s| !s.trim().is_empty()) {
-            if entry.name.is_none() {
-                snapshot_required = true;
-            }
-            entry.name = Some(name.to_string());
-        }
-
-        let node_id = entry.node_id.clone();
-        // 供应商始终未返回 id（缺失或全为空串）时，wire id 回退为节点 id——
-        // 请求包里的 tool_call 与 tool 结果引用同一节点 id，依然自洽。
-        let wire_id = entry
-            .id
-            .clone()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| node_id.clone());
-
-        if let Some(delta) = args_delta {
-            entry.arguments.push_str(delta);
-        }
-
-        (
-            node_id,
-            wire_id,
-            entry.arguments.clone(),
-            entry.name.clone(),
-            snapshot_required,
-        )
-    }
-
-    /// 本次响应是否出现过任何工具调用增量（无论其参数是否完整）。
-    ///
-    /// 用于区分「纯文本被 `max_tokens` 截断」与「工具调用参数 JSON 被截断」：
-    /// 前者可安全自动续写，后者参数已残破、续写无法修复，必须显式报错。
-    pub fn had_any_tool_call(&self) -> bool {
-        !self.calls.is_empty()
-    }
-
-    /// Get the list of completed tool calls.
-    ///
-    /// 保证返回的每个 TurnToolCallInfo.id（节点 id）均为非空：正常情况下 process_delta
-    /// 已在首个增量确定，此处为幂等兜底——重复调用返回相同 id，**绝不**重新随机生成
-    /// （chat_loop 与 into_messages 会各取一次，两次结果不一致会使工具结果子节点变孤儿）。
-    pub fn get_completed(&mut self) -> Vec<TurnToolCallInfo> {
-        self.calls
-            .values_mut()
-            .map(|call| {
-                if call.node_id.is_empty() {
-                    call.node_id = llm_short_id();
-                }
-                let node_id = call.node_id.clone();
-                // wire id：供应商提供了合法 id 才携带；否则 None（请求构建回退节点 id）
-                let wire_id = call.id.clone().filter(|s| !s.trim().is_empty());
-                // 参数解析：区分三种情况，**绝不**把解析失败伪装成空参数。
-                //  - 空串/纯空白：无参工具的合法形态（`from_str("")` 必失败），视为 `{}`；
-                //  - 合法 JSON：照常使用；
-                //  - 非空且非法：参数已残破（典型为 max_tokens 截断），保留原文交给
-                //    parse_error，由执行侧拒绝执行——静默 `{}` 会让工具报「缺少必填
-                //    参数」，模型看不懂原因便原样重试，卡死在思考循环里。
-                let raw = call.arguments.as_str();
-                let (args, parse_error) = if raw.trim().is_empty() {
-                    (serde_json::json!({}), None)
-                } else {
-                    match serde_json::from_str::<Value>(raw) {
-                        Ok(v) => (v, None),
-                        Err(e) => {
-                            warn!(
-                                error = %e,
-                                raw_arguments = %raw,
-                                "tool call arguments JSON invalid — refusing to execute"
-                            );
-                            (serde_json::json!({}), Some(call.arguments.clone()))
-                        }
-                    }
-                };
-                TurnToolCallInfo {
-                    id: Some(node_id),
-                    wire_id,
-                    name: call.name.clone(),
-                    arguments: args,
-                    parse_error,
-                }
-            })
-            .collect()
-    }
 }
 
 // 消息构造（ChatMessage 家族）
@@ -474,12 +328,22 @@ pub fn llm_build_tool_message(
 
 // 单轮产物
 
+/// 一轮 LLM 请求的**产物**（`ModelProvider::execute_turn` 的返回类型）。
+///
+/// **只装结果，不装过程**：工具调用的分片累积是 model 插件的实现细节
+/// （`plugins/model/tool_accumulator.rs`），收口后才以 [`Self::tool_calls`] 的形态
+/// 交给 session。于是「一轮请求产出了什么」这个契约面里不含任何状态机。
 #[derive(Default)]
 pub struct TurnOutput {
     pub text: String,
     pub reasoning: String,
     pub response_id: Option<String>,
-    pub tool_accumulator: TurnToolCallAccumulator,
+    /// 本轮完成的工具调用（**结果形态**）。
+    ///
+    /// [`Self::is_reasoning_only`] / [`Self::effective_text`] / [`Self::into_messages`]
+    /// 一律读这里，不再由调用方另行传 `n_tools`——「有几个工具」与「是哪些工具」是同一
+    /// 件事，分两处传入迟早会不一致。
+    pub tool_calls: Vec<TurnToolCallInfo>,
     /// Short ID for the response text child node (consistent across delta updates)
     pub response_text_child_id: String,
     /// Short ID for the reasoning child node
@@ -492,30 +356,34 @@ pub struct TurnOutput {
 }
 
 impl TurnOutput {
-    pub fn is_reasoning_only(&self, n_tools: usize) -> bool {
-        self.text.trim().is_empty() && !self.reasoning.is_empty() && n_tools == 0
+    /// 本轮只有思考、没有独立文本回复，且**没有**工具调用。
+    ///
+    /// 有工具调用时不算：此时 reasoning 需要作为独立子节点保留。
+    pub fn is_reasoning_only(&self) -> bool {
+        self.text.trim().is_empty() && !self.reasoning.is_empty() && self.tool_calls.is_empty()
     }
 
-    pub fn effective_text(&self, n_tools: usize) -> &str {
-        if self.is_reasoning_only(n_tools) {
+    /// 有效正文：reasoning-only 时回退为 reasoning（见 [`Self::is_reasoning_only`]）。
+    pub fn effective_text(&self) -> &str {
+        if self.is_reasoning_only() {
             &self.reasoning
         } else {
             &self.text
         }
     }
 
-    pub fn into_messages(mut self, root_id: &str, n_tools: usize) -> Vec<ChatMessage> {
-        let effective = self.effective_text(n_tools).to_owned();
+    /// 按值消费本产物，落库为助手消息组（Turn + 子节点）。
+    pub fn into_messages(self, root_id: &str) -> Vec<ChatMessage> {
+        let effective = self.effective_text().to_owned();
         let reasoning = if self.reasoning.is_empty() {
             None
         } else {
             Some(self.reasoning)
         };
-        let tools = self.tool_accumulator.get_completed();
         llm_build_assistant_messages(
             root_id,
             &effective,
-            &tools,
+            &self.tool_calls,
             self.response_id,
             reasoning,
             // 复用流式期间已经广播给前端的子节点 id：落库节点与流式节点必须是同一身份，

@@ -62,7 +62,7 @@
 | 片段标题 | 【全局指令】 | 【智能体记忆】 |
 | 片段里的地址 | 挂载根下那个文件 | 整包浏览里那个文件 |
 
-两个作用域的读写、两道闸门、片段排版、节点形状**共用内核**（`symbio_core::memory`）；
+两个作用域的读写、两道闸门、片段排版、节点形状**共用一份实现**（`providers/memory`）；
 本插件只提供「落位 + 标题 + 地址 + 空提示 + 闸门取值」。片段里的地址与闸门都是
 **本插件自己会执行的**，因此印出来的数字是真的。
 
@@ -70,8 +70,8 @@
 两者不可能相撞：agent id 首字符必须是小写字母或数字（§5.1），保留名以大写 `A` 开头。
 
 ⚠️ **`AgentDirStore` 不持有记忆的读写与闸门**：它只回答「记忆文件在哪」（`memory_path`）。
-读 / 写 / 两道容量闸门一律走内核 `symbio_core::memory`，work / session / agent 三层共用
-同一份实现——否则「超限是拒绝还是截断」「读不到算不算错误」会随「这条记忆属于哪一层」
+读 / 写 / 两道容量闸门一律走共享实现 `providers/memory`，work / session / agent 三层共用
+同一份——否则「超限是拒绝还是截断」「读不到算不算错误」会随「这条记忆属于哪一层」
 而分叉。
 
 **不可删除**：要清空就写入空内容（两个作用域同一约定）。
@@ -94,6 +94,6 @@ agent 目录的寻址是**挂载点语义**而非平铺三段（`route()` 直接
 - 会话编排与系统提示词的拼接 / 消费：`../session/README.md`
 - 另外几层记忆：`../work/README.md`（工作区）、`../session/README.md`（会话）、
   `../plugin_manager/README.md`（设置入口，**不拥有任何记忆文件**）
-- 记忆内核（各层共用）：`symbio_core::memory`
+- 记忆的共享实现（各层共用）：`providers/memory`
 - Agent 目录规范：`docs/design/agent-directory-spec.md`
 - VDFS 机制（`<根>/agent` 挂载点由本插件自持 `impl VdfsProvider`）：`docs/design/vdfs.md` §13.4

@@ -246,12 +246,12 @@ test('S-010 is not fooled by lookalike tokens (browser route / import paths)', (
 })
 
 test('S-010 skips runtime data dirs (`.symbio` homedir), not just build output', () => {
-  // 实测事故：一次会话把 `.vdfs` 写进 `.symbio/session/<id>/AGENTS.md`（模型在
+  // 实测事故：一次会话把 `.vdfs` 写进 `.symbio/session/<id>/MEMORY.md`（模型在
   // 正文里引用挂载路径），门禁因**运行期数据**判红——源码一个字节没改。
   // `.symbio/` 是运行期 homedir 且被 `.gitignore` 忽略，不属本规则对象。
   const r = s010Audit({
     'symbio/src/plugins/vdfs/fs.rs': '', // 标记：这是一个仓库树
-    '.symbio/session/09d74431/AGENTS.md': '会话落在 `.vdfs/session/<id>` 之下。\n',
+    '.symbio/session/09d74431/MEMORY.md': '会话落在 `.vdfs/session/<id>` 之下。\n',
   })
   assert.equal(r.status, 0, '运行期数据目录不应参与源码审计')
 })
@@ -260,7 +260,7 @@ test('S-010 still fires inside the repo tree when runtime dirs are present', () 
   // 反例守卫：跳过 `.symbio` 不能顺手把整棵树放过去。
   const r = s010Audit({
     'symbio/src/plugins/vdfs/fs.rs': '', // 标记：这是一个仓库树
-    '.symbio/session/09d74431/AGENTS.md': '会话落在 `.vdfs/session/<id>` 之下。\n',
+    '.symbio/session/09d74431/MEMORY.md': '会话落在 `.vdfs/session/<id>` 之下。\n',
     'docs/guides/x.md': S010_SUSPECT_MD,
   })
   assert.equal(r.status, 1)

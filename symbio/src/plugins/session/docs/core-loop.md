@@ -586,7 +586,7 @@ ModelProvider::execute_turn(inputs, env) -> Result<TurnOutput, PluginError>
 `capability_invoke(cap, ctx)`（`symbio_core/capability/mod.rs`）是**唯一**把
 `Result<Value, _>` 装回 `PluginPayload` 的地方。所有分发路径都必须经它：
 
-- `DefaultToolVisitor::invoke`（`symbio_core/capability/tools.rs`）
+- `DefaultToolVisitor::invoke`（`providers/collectors/tool_visitor.rs`）
 - `LocalPlugin::route` 的工具分支（`local/plugin.rs`）
 - `WebPlugin::route` 的工具分支（`web/plugin.rs`）
 - 装饰器 `PrefixedCapability`（`agent/host/scope.rs`）与 `SecureToolWrapper`

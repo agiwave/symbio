@@ -82,7 +82,7 @@ session:
   # 6. 水位提醒与主动压缩
   enable_compact_tool: false     # 是否启用 55% Token 水位提醒 (nudge) 注入与 context_compact 主动压缩工具 (默认关闭，须手动开启；关闭后仅保留 70% 自动压缩兜底)
   
-  # 7. 会话记忆（<会话目录>/AGENTS.md，可编辑地址 <根>/session/<id>/AGENTS.md）
+  # 7. 会话记忆（<会话目录>/MEMORY.md，可编辑地址 <根>/session/<id>/MEMORY.md）
   memory_max_bytes: 16384        # 单次**写入**的字节上限，超出直接拒绝（不截断、不部分写入）
   memory_inject_max_bytes: 4096  # 每轮**注入**系统提示词的字节上限，超出部分截断并指路 vdfs_read 取全文
 ```
@@ -314,8 +314,8 @@ session:
 会话记忆是**本会话自己钉住的约定与结论**：轮次一多，早期的结论会被压缩、淡化乃至淘汰出上下文；会话记忆的价值恰恰在于**不随上下文水位消失**。
 
 ```text
-{homedir}/session/<会话 id>/AGENTS.md     记忆本体（与 session.json / messages.json 同目录）
-<根>/session/<会话 id>/AGENTS.md                 可编辑地址（模型与用户共用）
+{homedir}/session/<会话 id>/MEMORY.md     记忆本体（与 session.json / messages.json 同目录）
+<根>/session/<会话 id>/MEMORY.md                 可编辑地址（模型与用户共用）
 ```
 
 它与转写（`messages.json`）的分工：转写是**流水**（说过什么），会话记忆是**从这个会话里提炼出来的、不许被压缩掉的那几条**。它不是「对话摘要」（那是压缩快照的活），也不是「跨会话的经验」（那该写进工作区或智能体记忆）。
@@ -325,10 +325,10 @@ session:
 | 层 | 所有者插件 | 物理落位 | VDFS 地址 |
 |---|---|---|---|
 | 工作区 | work | `{workdir}/AGENTS.md` | `<根>/work/AGENTS.md` |
-| **会话** | **session** | **`{会话目录}/AGENTS.md`** | **`<根>/session/<id>/AGENTS.md`** |
+| **会话** | **session** | **`{会话目录}/MEMORY.md`** | **`<根>/session/<id>/MEMORY.md`** |
 | 智能体 | agent | `{agent 目录}/AGENTS.md` | `<根>/agent/<id>/AGENTS.md` |
 
-三层形态相同、**共用 `symbio_core::memory` 一份内核**——两道闸门（写侧拒绝 / 读侧截断）与「谁能读写它，谁负责注入它」的归属原则及理由见该模块文档注释；本插件只提供会话这一层的「个性」：落位、地址、标题、空内容提示、两道闸门开多大（`memory_max_bytes` / `memory_inject_max_bytes`）。
+三层形态相同、**共用 `providers/memory` 一份实现**——两道闸门（写侧拒绝 / 读侧截断）与「谁能读写它，谁负责注入它」的归属原则及理由见该模块文档注释；本插件只提供会话这一层的「个性」：落位、地址、标题、空内容提示、两道闸门开多大（`memory_max_bytes` / `memory_inject_max_bytes`）。
 
 **本插件不再读 `{workdir}/AGENTS.md`**——那是 work 的工作区记忆。
 
@@ -342,7 +342,7 @@ session:
 
 | 注册名 | 内容 | 形态 |
 |---|---|---|
-| `session-memory` | 本会话的 `AGENTS.md`（**会话记忆**） | 可读写：有地址、两道闸门 |
+| `session-memory` | 本会话的 `MEMORY.md`（**会话记忆**） | 可读写：有地址、两道闸门 |
 
 > 智能体自身的 `AGENTS.md`（两个作用域）归 `agent` 插件，不经本通道——见 [`../agent/README.md`](../agent/README.md)。
 
@@ -351,11 +351,11 @@ session:
 会话记忆挂在**会话节点之下**，与 `消息` / `子会话` / `工作目录` 并列——它本来就是会话的一部分，不另开一条寻址：
 
 ```text
-<根>/session/<id>/AGENTS.md     rw    记忆（文件；写受闸门约束）
+<根>/session/<id>/MEMORY.md     rw    记忆（文件；写受闸门约束）
 ```
 
-- `list` 与 `stat` **共用内核产出的同一份形状**，两条链路不会分叉；
-- 写入经 `vdfs_notify_change` 投递变更（路径 `<id>/AGENTS.md`，与列表地址同源）；
+- `list` 与 `stat` **共用共享实现产出的同一份形状**，两条链路不会分叉；
+- 写入经 `vdfs_notify_change` 投递变更（路径 `<id>/MEMORY.md`，与列表地址同源）；
 - **不可删除**（`delete` 恒 `Forbidden`）：删除即丢失本会话的长期约定，而抹掉之后没有东西能把它找回来。要清空就写入空内容——那是一次可读、可审、可撤销的显式动作。
 
 ### 作用域闸门

@@ -768,7 +768,7 @@ for (const abs of codeFiles) {
     // 命名空间，收敛成平铺反而丢失 `session::chat_message` 这类语义）。
     //
     // 注释已被 `readCode` 剥掉，故文档链接（`[`…`](crate::symbio_core::vdfs::X)`）
-    // 不会误报——但**测试文件要管**（`capability/tools.test.rs` 就是一处真实违规）。
+    // 不会误报——但**测试文件要管**（测试文件里的深引同样违规）。
     if (isRust) {
       const m = line.match(/\bsymbio_core\s*::\s*([a-z_][a-z0-9_]*)\s*::/)
       if (m && CORE_DOMAINS.has(m[1]) && !exempted(raw, i, 'E-010')) {

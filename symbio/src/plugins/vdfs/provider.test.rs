@@ -4,9 +4,8 @@
 
 use super::*;
 
-use crate::symbio_core::{
-    DefaultToolVisitor, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR,
-};
+use crate::providers::collectors::DefaultToolVisitor;
+use crate::symbio_core::{PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR};
 use crate::symbio_core::{VdfsAccess, VdfsContext, VdfsProvider, VdfsResponse};
 use async_trait::async_trait;
 use std::sync::Mutex;

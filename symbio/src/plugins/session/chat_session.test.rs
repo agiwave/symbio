@@ -6,7 +6,9 @@
 use super::super::config::SessionConfig;
 use super::super::store::SessionStore;
 use super::super::types::Session;
-use super::{ensure_durable_states, prune_historical_tool_calls, PersistentChatSession};
+use super::{
+    assign_seq, ensure_durable_states, max_seq, prune_historical_tool_calls, PersistentChatSession,
+};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageType,
 };
@@ -690,4 +692,99 @@ fn durable_layer_rejects_stream_delta() {
 
     // 同一条消息去掉 delta（正文落在 content）后必须放行
     assert!(ensure_durable_states(&[plain_msg("m1")], "append_messages").is_ok());
+}
+
+// ==================== 序号分配（`max_seq` / `assign_seq`）====================
+//
+// 自 `symbio_core/schemas/session/chat_message.test.rs` 迁入：`seq` **字段**是跨栈
+// schema（留 core），而「怎么补号」是会话存储的实现策略（随 `assign_seq` 迁到这里）。
+//
+// 前置条件（见 `assign_seq` 文档）：无号项只出现在**开头**或**末尾**。下面每条用例的
+// 输入都取自某个真实调用点的列表形态，不是随手构造的数组。
+
+fn msg(id: &str, seq: Option<i64>) -> ChatMessage {
+    ChatMessage {
+        id: id.to_string(),
+        seq,
+        ..Default::default()
+    }
+}
+
+/// 正常路径**不得**重排：数组顺序本就等于 seq 顺序时，既有序号原样保留，
+/// 只有末尾的缺号项续接水位。修单调性不能以"每次落库都重排历史"为代价。
+#[test]
+fn assign_seq_leaves_already_ordered_seqs_untouched() {
+    let mut msgs = vec![msg("a", Some(5)), msg("b", Some(6)), msg("c", None)];
+    assign_seq(&mut msgs, 0);
+    assert_eq!(msgs[0].seq, Some(5), "已有序的历史不得被改写");
+    assert_eq!(msgs[1].seq, Some(6));
+    assert_eq!(msgs[2].seq, Some(7), "缺号者续接水位");
+}
+
+/// **压缩契约**：`base` 高于既有序号时，既有序号依然一个都不许动。
+///
+/// 这正是实测会话 `mtmae8j2wxam4dhrei` 的病态：`replace_messages` 传
+/// `base = max_seq(旧列表)`（868），而新列表是 `[快照(槽位 630), 保留区(631..642)]`。
+/// 旧实现从 868 起步，把保留区整段抬到 870..881；正确行为是原样保留。
+#[test]
+fn assign_seq_never_rewrites_existing_seqs_even_when_base_is_higher() {
+    let old = vec![msg("old", Some(868))];
+    let mut msgs = vec![
+        msg("snapshot", Some(630)), // 快照接替被压缩内容的槽位：keep[0].seq - 1
+        msg("keep1", Some(631)),
+        msg("keep2", Some(632)),
+    ];
+    assign_seq(&mut msgs, max_seq(&old));
+    assert_eq!(msgs[0].seq, Some(630), "快照的槽位序号必须原样保留");
+    assert_eq!(
+        msgs[1].seq,
+        Some(631),
+        "保留区序号必须原样保留（压缩不改号）"
+    );
+    assert_eq!(msgs[2].seq, Some(632));
+}
+
+/// 全新列表（无任何既有序号）才使用 `base`：整批新节点接在旧水位之后。
+#[test]
+fn assign_seq_uses_base_only_for_fresh_lists() {
+    let mut msgs = vec![msg("n1", None), msg("n2", None)];
+    assign_seq(&mut msgs, 868);
+    assert_eq!(msgs[0].seq, Some(869));
+    assert_eq!(msgs[1].seq, Some(870));
+}
+
+/// 空列表（`clear_messages` 传 `Vec::new()`）：无号可补，水位原样回传。
+///
+/// 这条锁的是「清空历史」这条路：若实现改成"无论如何先 +1"，清空就会把会话水位
+/// 推高一格，下一次追加的号与前端手里的号出现空档。
+#[test]
+fn assign_seq_on_empty_list_returns_base() {
+    let mut msgs: Vec<ChatMessage> = Vec::new();
+    assert_eq!(assign_seq(&mut msgs, 868), 868);
+}
+
+/// 开头段有**多个**无号项时，整段落在首号之前且沿数组递增。
+///
+/// 逐个"往上找空位"会先占用首号本身、把既有序号顶成下一个号；正确做法是
+/// 整段一次算好（`首号 − k … 首号 − 1`）。
+#[test]
+fn assign_seq_places_leading_run_below_first_existing() {
+    let mut msgs = vec![msg("s1", None), msg("s2", None), msg("keep", Some(95))];
+    assign_seq(&mut msgs, 100);
+    assert_eq!(msgs[0].seq, Some(93));
+    assert_eq!(msgs[1].seq, Some(94));
+    assert_eq!(msgs[2].seq, Some(95), "既有序号不得被开头段顶走");
+}
+
+/// 末尾段接在末号之后——本轮在途追加 / 恢复时新建子节点的常规路径。
+///
+/// `base` 取 `max_seq(旧列表)`（与 `replace_messages` 的真实调用形态一致）且**高于**
+/// 末号：末尾段仍须接在**末号**之后，不得跳到 `base`。
+#[test]
+fn assign_seq_places_trailing_run_after_last_existing() {
+    let old = vec![msg("old1", Some(5)), msg("old2", Some(6))];
+    let mut msgs = vec![msg("a", Some(5)), msg("inflight", None)];
+    assign_seq(&mut msgs, max_seq(&old));
+    assert_eq!(msgs[0].seq, Some(5));
+    assert_eq!(msgs[1].seq, Some(6));
 }

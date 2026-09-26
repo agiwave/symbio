@@ -852,7 +852,7 @@ async fn run_compression_llm(
         return Err(PluginError::Aborted);
     }
 
-    let effective = out.effective_text(0).to_owned();
+    let effective = out.effective_text().to_owned();
     if effective.is_empty() {
         return Err(PluginError::InternalError(
             // 语义说明：压缩摘要请求的 SSE 流正常结束，但未产出任何文本/推理内容

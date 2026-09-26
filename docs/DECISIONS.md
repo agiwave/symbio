@@ -683,14 +683,15 @@
 **被否决的方案**：
 
 - **给 `creator_create_object` 加统一缓存（按 id 缓存 `Arc<dyn Any>`）**：**会破坏分形挂载**。[`ASSEMBLY_SUB_AGENT_PLUGINS`](#adr-001-分形插件架构) 让**每一棵**子 Agent 子树都挂 `model` / `session` / `local`……同一个 provider id 因此在系统树与每棵子树下**各有一个挂载点**，各自的 `ctx` 带各自的 `PLUGIN_DIR`；缓存后所有子树会拿到**同一个**实例（且是第一个挂载点的 ctx），子智能体的模型服务与工作区记忆会全部串到父树上。收益仅是省一次 `Arc::clone`——而昂贵构造已由实现方用 `LazyLock` 解决。
-- **把 core 的共享内核（`memory` / `clock` / `text` / `logger`）硬抽 trait**：都不满足决策 1 的前两条——没有第二实现，`dyn` 只是把一次构造换成一次字符串查表（`memory/mod.rs` 有专节论证；[ADR-011](#adr-011-资源存储--vdfsprovider-的集中实现) 对 `VdfsProvider` 记的正是同一判据的反面：**不存在第二种实现时不套 `dyn`**）。
+- **把 core 的共享内核（`clock` / `text` / `logger`）硬抽 trait**：都不满足决策 1 的前两条——没有第二实现，`dyn` 只是把一次构造换成一次字符串查表（[ADR-011](#adr-011-资源存储--vdfsprovider-的集中实现) 对 `VdfsProvider` 记的正是同一判据的反面：**不存在第二种实现时不套 `dyn`**）。记忆曾属同一家族，现已**整块**迁出 core（[ADR-037](#adr-037-实现可以离开-core--记忆整体迁往-providers)），其「不抽 trait」的论证随实现去了 `providers/memory/mod.rs`。
 - **合并 `clock` 与 `text` 为「业务无关工具域」**：任何**有判别力**的合并判据都会把 `clock` 排除——`text` 是**纯函数**（输入决定输出），`clock` 是**非确定性来源**（无输入，输出随系统时钟变化）。要么判据松到能装下两者（那就成了杂物抽屉，`keys` 一度收下插件清单正是前车之鉴，见 [ADR-023](#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层) 的「依赖方数量」判据所修的那一类错放），要么判据有判别力（`clock` 随即被排除）。而合并的收益只是少一个目录 + 少一行 README——不足以换掉「一个域名自证内容」这条性质。
 
 **后果与不变量**：
 
 - 新增共享功能时**先过三条件**；三条件不全成立一律用值对象 / 纯函数 / 全局单例，**不硬抽 trait**。
 - 新增 provider 时**构造必须廉价**；昂贵实现自持单例，范本指向 `providers/embedding/local.rs`。
-- 不变量：`symbio_core` 里**每一处含具体逻辑的域都有 ≥2 个消费方**，且模块文档写明了「为什么是内核而不是 provider」。此条可由 `grep` 复核。
+- 不变量：`symbio_core` 里**每一处含具体逻辑的域都有 ≥2 个消费方**，且模块文档写明了「为什么在 core 而不是 provider」。此条可由 `grep` 复核。
+- 反过来也成立：**「够底层」「被多个模块用」都不构成留在 core 的理由**——判据是 [ADR-023](#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层) 的**依赖方向**与 core README §0 的**契约 / 实现**之分。记忆的整块实现（**含文件名**）已据此迁往 `providers/memory`（[ADR-037](#adr-037-实现可以离开-core--记忆整体迁往-providers)）。
 
 ---
 
@@ -731,6 +732,38 @@
 - 新增「按 id 装配任意类型对象」的需求一律进 `creator`；不新开域，也不挂回 `plugin`。
 - 不变量：**`creator` 的公开签名里不得出现任何具体类型族**（`Plugin` / `ModelProtocol` / `EmbeddingService`）。`ObjectConstructor` 的签名即证据，可由 `grep` 复核。
 - 域间图新增 `creator` 节点，依赖方向为 `creator → plugin`（只用 `PluginInvokeRequest` 作构造上下文），**无环**。
+
+---
+
+## ADR-037: **实现**可以离开 core —— 记忆整体迁往 providers
+
+**状态**：已接受。补充 [ADR-023](#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层)（**住哪**）与 [ADR-035](#adr-035-provider-化的判据--三个条件与构造契约)（**什么形态**），回答**含具体逻辑的实现该不该留 core**。
+
+**背景**：`symbio_core/memory` 一度是本层少数「含具体逻辑」的域：`MemoryFile` 的读写、两道容量闸门、片段排版、节点形状，外加一个三层共用的文件名常量 `MEMORY_AGENTS_FILE`。它留在 core 的理由是「三层都用」——work / session / agent 各构造一个 `MemoryFile` 指向自己的作用域。ADR-035 判的是**形态**（要不要 `dyn`），没有回答**住处**；于是「被多个模块共享」被当成了「留 core」的充分理由。
+
+**决策**：
+
+1. **整块迁往 `providers/memory`**（方式 B：具体类型直接组合，不套 `dyn`）。它不隶属任何单个插件——若住其中任何一个，另两个就得跨插件引用，违反「插件之间不直接相互引用」。
+2. **core 里什么都不留——包括文件名**。文件名归各插件自己：`work::memory::WORK_MEMORY_FILE` / `session::memory::SESSION_MEMORY_FILE` / `agent::host::store::AGENT_MEMORY_FILE`。
+3. **共享实现不认识文件名**：`MemoryFile::file_name()` 从**路径末段**推导，无兜底字面量（无作用域即无名，`Option<&str>`）。
+
+**理由**：
+
+- **「共享」不是「留 core」的判据，依赖方向才是**。core 是**契约层**（traits、协议类型、词表常量、纯工具函数）；记忆是**实现**，消费方是三个插件。按 ADR-023 的判据，它该住在**谁都够得着、又不属于任何人**的地方，即 `providers/`。
+- **统一文件名缺乏约束力**：三层各写各的文件，改一层不影响另两层。把「都用同一个名字」登记成 core 契约，等于把**没有共享价值**的事写成契约——只会让「改一层」变成「改三层」。
+- **`AGENTS.md` 的行业约定只对「目录」成立**：它说的是「工作区目录 / agent 目录里的指令与记忆」（`design/agent-directory-spec.md` §6）。**会话目录不是 agent 目录**，用该名名不副实，故会话层改 `MEMORY.md`——这不是破例，是**没有约定可对齐**。
+
+**被否决的方案**：
+
+- **只搬实现、文件名留 core（作为「跨插件地址约定」）**：文件名是**各层的个性**，不是契约；且它会让 core 继续为「三层碰巧同名」背书——一旦有一层改名（会话正是如此），core 的常量立刻变成错的那个。
+- **把 `MemoryFile` 改走 VDFS**（消掉 `std::fs`，复用统一资源访问面）：三个宿主的 VDFS provider 本身就是 `MemoryFile` 的**薄适配器**（`Read`/`Write` 直接委托 `store.read()` / `store.write()`）。让它再走 VDFS 会**递归**（`MemoryFile::write` → VDFS 路由 → 本插件 provider → `MemoryFile::write`）。写入通道本就只有一条，无需改。
+- **给记忆硬抽 trait**：见 ADR-035 决策 1（无第二实现时不套 `dyn`）。
+
+**后果与不变量**：
+
+- 含具体逻辑的东西**默认住 `providers/`**；留在 core 的必须有「没有第二个住处」的理由——`event_bus` 的全局订阅表、`logger` 的进程级闸门属此类（**进程级单例**，不属任何插件）。
+- 不变量：**core 的公开面里不得出现任何一层记忆的文件名**。此条可由 `grep MEMORY` 复核。
+- 新增第四层记忆只需在自己的插件里定一个文件名常量，不触碰 core，也不触碰另三层。
 
 ---
 

@@ -5,9 +5,8 @@
 use super::*;
 
 use super::super::physical::PhysicalFs;
-use crate::symbio_core::{
-    CapabilityVisitor, DefaultToolVisitor, PluginError, PluginMeta, PluginSimpleRequest,
-};
+use crate::providers::collectors::DefaultToolVisitor;
+use crate::symbio_core::{CapabilityVisitor, PluginError, PluginMeta, PluginSimpleRequest};
 use crate::symbio_core::{VdfsActionResult, VdfsValidationError, VDFS_KIND_DIR};
 use async_trait::async_trait;
 use serde_json::{json, Value};

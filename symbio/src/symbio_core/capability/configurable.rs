@@ -53,9 +53,7 @@ use crate::symbio_core::VdfsItem;
 use crate::symbio_core::{PluginConfigFile, PLUGIN_FILE};
 use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt, CONFIGURABLE_VISITOR};
 use async_trait::async_trait;
-use indexmap::IndexMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// 可配置声明收集器 —— 各插件在 `traverse` 中把「设置页该怎么列我的配置」交出来。
 ///
@@ -68,37 +66,6 @@ pub trait ConfigurableVisitor: Send + Sync + 'static {
 
     /// 列出已声明的条目（按注册顺序）
     async fn list_configurables(&self) -> Vec<VdfsItem>;
-}
-
-/// 默认可配置声明收集器：内存 IndexMap 实现，一次收集一个实例。
-pub struct DefaultConfigurableVisitor {
-    items: Arc<RwLock<IndexMap<String, VdfsItem>>>,
-}
-
-impl DefaultConfigurableVisitor {
-    pub fn new() -> Self {
-        Self {
-            items: Arc::new(RwLock::new(IndexMap::new())),
-        }
-    }
-}
-
-impl Default for DefaultConfigurableVisitor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait]
-impl ConfigurableVisitor for DefaultConfigurableVisitor {
-    async fn register_configurable(&self, item: VdfsItem) {
-        let key = item.node.name.clone();
-        self.items.write().await.insert(key, item);
-    }
-
-    async fn list_configurables(&self) -> Vec<VdfsItem> {
-        self.items.read().await.values().cloned().collect()
-    }
 }
 
 /// 在 `traverse` 里声明「本插件有一份配置文档」——**插件侧的唯一入口**。

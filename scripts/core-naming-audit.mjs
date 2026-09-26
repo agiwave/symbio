@@ -38,7 +38,7 @@
  * ## 它承认的三件事（不是「豁免」，是 §1.2 / §3 登记的规则）
  *
  * - **限定词**：名字可以带一个限定词前缀，限定词不算域前缀。
- *   `DynVdfsProvider` = `Dyn` + `VdfsProvider`；`DefaultToolVisitor` = `Default` + `ToolVisitor`。
+ *   `DynVdfsProvider` = `Dyn` + `VdfsProvider`；`DefaultVdfsVisitor` = `Default` + `VdfsVisitor`。
  *   限定词表由 README 里的 `<!-- core-naming:modifiers … -->` 标记持有（与 E-008 的
  *   `<!-- vocab:… -->` 同一约定：**标了才认，没标不猜**）。
  * - **后缀**：`keys` 域的类型用 `…Key` 后缀（`PathKey`）——`KeyPath` 会读成「键的路径」，

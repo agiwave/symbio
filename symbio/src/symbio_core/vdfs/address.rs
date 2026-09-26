@@ -55,7 +55,7 @@ pub(crate) fn declared_addr_root() -> Option<&'static str> {
 
 /// 纯核：`join_addr(parent, rel)` —— 把相对地址接到父地址上，拼出绝对地址。
 ///
-/// - `join_addr("@root/session", "abc/AGENTS.md")` → `@root/session/abc/AGENTS.md`
+/// - `join_addr("@root/session", "abc/MEMORY.md")` → `@root/session/abc/MEMORY.md`
 /// - `join_addr("session", "x")` → `session/x`（父地址本身也可以是相对的）
 /// - `join_addr("", "x")` → `x`（无父可接：原样返回相对地址，见模块文档的降级说明）
 pub(crate) fn join_addr(parent: &str, rel: &str) -> String {

@@ -4,9 +4,10 @@
 
 use super::*;
 
+use crate::providers::collectors::DefaultToolVisitor;
 use crate::symbio_core::VDFS_PARAM_WORKDIR;
 use crate::symbio_core::{
-    DefaultToolVisitor, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, WORKDIR,
 };
 
 /// workdir 由宿主 ctx 翻译成 provider 参数；缺省时不带该键

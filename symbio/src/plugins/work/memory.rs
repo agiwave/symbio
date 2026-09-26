@@ -1,4 +1,4 @@
-//! 工作区记忆的**落位与地址** —— 机制在内核（`symbio_core::memory`）。
+//! 工作区记忆的**落位与地址** —— 机制在共享实现（`providers/memory`）。
 //!
 //! ## 落位：工作区根目录的 `AGENTS.md`
 //!
@@ -29,20 +29,30 @@
 //! 系统提示词基座），结果是同一份内容进两次上下文、而模型改不动它。现在按
 //! **谁能读写它，谁负责注入它**收口——session 不再碰这个文件。
 //!
-//! ## 本模块与内核的分工
+//! ## 本模块与共享实现的分工
 //!
 //! | 谁 | 负责 |
 //! |---|---|---|
-//! | `symbio_core::memory` | 读写、两道容量闸门、片段排版、VDFS 节点 |
+//! | `providers/memory` | 读写、两道容量闸门、片段排版、VDFS 节点 |
 //! | 本模块 | 落位、VDFS 地址、片段标题、空内容提示 |
 //! | [`super::config`] | 两道闸门各开多大 |
 //!
 //! 于是本插件不再自己写「超限怎么办」「截断怎么算」——那些口径全项目只有一份。
 
-use crate::symbio_core::{MemoryFile, MemorySegmentSpec, MEMORY_AGENTS_FILE};
+use crate::providers::memory::{MemoryFile, MemorySegmentSpec};
 use std::path::{Path, PathBuf};
 
-/// 记忆文件挂在**本插件挂载点自身**（相对地址 = 文件名 [`MEMORY_AGENTS_FILE`]）。
+/// 工作区记忆文件名 —— `AGENTS.md`（**本插件自己的**约定，不是跨插件契约）。
+///
+/// 刻意对齐行业惯例（给编码智能体的工作区级指令文件，与 `CLAUDE.md`、`.cursorrules`
+/// 同一族）：收益是记忆**不属于 symbio**——换任何支持该约定的工具它照样生效，它就躺在
+/// 工作区里，能被 `git` 版本化、能被 review、能被协作者读到。
+///
+/// 另外两层记忆各有各的文件名（会话用 `MEMORY.md`、智能体目录沿用 `AGENTS.md`）：
+/// 它们**互不干涉**，不共享同一个文件，也就没有理由共享同一个字面量。
+pub const WORK_MEMORY_FILE: &str = "AGENTS.md";
+
+/// 记忆文件挂在**本插件挂载点自身**（相对地址 = 文件名 [`WORK_MEMORY_FILE`]）。
 ///
 /// 相对地址是常态：provider 全程只跟相对地址打交道。需要协议级绝对地址的场合
 /// （提示词里印给模型的可编辑地址），由调用方经
@@ -60,12 +70,12 @@ pub const MEMORY_DESCRIPTION: &str =
 
 /// 工作区记忆文件：`<workdir>/AGENTS.md`
 pub fn memory_path(workdir: &str) -> PathBuf {
-    Path::new(workdir).join(MEMORY_AGENTS_FILE)
+    Path::new(workdir).join(WORK_MEMORY_FILE)
 }
 
 /// 由工作目录构造记忆门面（`None` / 空串 / 纯空白 = 无工作区）。
 ///
-/// 两道闸门在此注入：内核只认「上限是多少」，不关心它从哪个配置来。
+/// 两道闸门在此注入：共享实现只认「上限是多少」，不关心它从哪个配置来。
 pub fn store(workdir: Option<&str>, write_max_bytes: usize, inject_max_bytes: usize) -> MemoryFile {
     let path = workdir
         .map(str::trim)
@@ -77,8 +87,8 @@ pub fn store(workdir: Option<&str>, write_max_bytes: usize, inject_max_bytes: us
 /// 片段规格 —— 本层的「个性」只有三样：标题、地址、空内容时说什么。
 ///
 /// `address` 由调用方算好传入（[`address`] 返回 `String`，不能借给返回值长期持有）。
-/// 排版（一行头信息 + 正文 + 空 / 截断提示）由内核
-/// [`memory_render_segment`](crate::symbio_core::memory_render_segment) 统一决定。
+/// 排版（一行头信息 + 正文 + 空 / 截断提示）由共享实现
+/// [`memory_render_segment`](crate::providers::memory::memory_render_segment) 统一决定。
 pub fn segment_spec(address: &str) -> MemorySegmentSpec<'_> {
     MemorySegmentSpec {
         title: SEGMENT_TITLE,

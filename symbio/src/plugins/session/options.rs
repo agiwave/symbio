@@ -34,6 +34,7 @@
 //! （见 `symbio_core::capability::option::OptionVisitor::register_option_field`）。
 
 use super::plugin::SessionPlugin;
+use crate::providers::collectors::DefaultOptionVisitor;
 use crate::symbio_core::schemas::detail::{
     DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
     DETAIL_PICK_DIRECTORY,
@@ -42,10 +43,8 @@ use crate::symbio_core::{
     OptionVisitor, Plugin, PluginInvokeRequest, PluginInvokeRequestExt, OPTION_VISITOR, PATH,
     TRAVERSE_AVAILABLE_OPTIONS,
 };
-use indexmap::IndexMap;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// 会话自有选项的展示顺序（号段见模块文档）
 const ORDER_WORKDIR: i32 = 10;
@@ -114,47 +113,13 @@ impl SessionPlugin {
 
 // ==================== 选项收集机制（宿主侧） ====================
 //
-// 本段原是 `symbio_core/capability/option.rs` 的后半：**默认收集器 + 遍历管线**。
-// 下沉到这里的判据是 ADR-023 的「依赖方数量」——契约（`OptionVisitor` trait 与
-// `TRAVERSE_AVAILABLE_OPTIONS` 端点字面量）两侧都认，留在 core；而「谁来收集」
-// 只有会话宿主一个答案。这与它的平行物 `collect_capabilities` 同处一地
-// （那个一直在 `chat_pipeline.rs` 里，从未进过 core）。
-
-/// 默认选项收集器：内存 IndexMap 实现，一次收集一个实例。
-pub struct DefaultOptionVisitor {
-    fields: Arc<RwLock<IndexMap<String, (i32, DetailField)>>>,
-}
-
-impl DefaultOptionVisitor {
-    pub fn new() -> Self {
-        Self {
-            fields: Arc::new(RwLock::new(IndexMap::new())),
-        }
-    }
-}
-
-impl Default for DefaultOptionVisitor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait::async_trait]
-impl OptionVisitor for DefaultOptionVisitor {
-    async fn register_option_field(&self, order: i32, field: DetailField) {
-        let key = field.key.clone();
-        let mut fields = self.fields.write().await;
-        fields.insert(key, (order, field));
-    }
-
-    async fn list_option_fields(&self) -> Vec<DetailField> {
-        let fields = self.fields.read().await;
-        let mut out: Vec<(i32, DetailField)> = fields.values().cloned().collect();
-        // 稳定排序：order 相同者保持注册顺序（IndexMap 保序）
-        out.sort_by_key(|(order, _)| *order);
-        out.into_iter().map(|(_, field)| field).collect()
-    }
-}
+// 本段原是 `symbio_core/capability/option.rs` 的后半：**收集管线**。下沉到这里的判据是
+// ADR-023 的「依赖方数量」——契约（`OptionVisitor` trait 与 `TRAVERSE_AVAILABLE_OPTIONS`
+// 端点字面量）两侧都认，留在 core；而「谁来收集」只有会话宿主一个答案。
+// 这与它的平行物 `collect_capabilities` 同处一地（那个一直在 `chat_pipeline.rs` 里）。
+//
+// 收集器**实现**（`DefaultOptionVisitor`）不在这里——它的写入者是全体插件，
+// 不隶属于任何宿主，故住 `crate::providers::collectors`（见该模块文档的判据）。
 
 /// 向所有插件广播「贡献选项」，返回装配好的选项收集器。
 ///

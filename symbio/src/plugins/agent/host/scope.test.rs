@@ -9,7 +9,7 @@ fn tool_name_uses_protocol_safe_chars() {
     // agent id 允许 `.`（工具名不许，进 function-calling 协议）→ 压成 `_`；
     // `-` 在协议允许集内（`[A-Za-z0-9_-]`），保留以维持可读。
     let v = SubAgentVisitor::new(
-        Arc::new(crate::symbio_core::DefaultToolVisitor::new()),
+        Arc::new(crate::providers::collectors::DefaultToolVisitor::new()),
         "com.acme.code-reviewer",
     );
     assert_eq!(
@@ -28,7 +28,7 @@ fn tool_name_uses_protocol_safe_chars() {
 #[test]
 fn seg_keeps_id_readable() {
     let v = SubAgentVisitor::new(
-        Arc::new(crate::symbio_core::DefaultToolVisitor::new()),
+        Arc::new(crate::providers::collectors::DefaultToolVisitor::new()),
         "reviewer",
     );
     assert_eq!(v.seg("work"), "agent/reviewer/work");

@@ -18,7 +18,7 @@
 
 文档是**下沉**的，所以「某条约定写在哪」要靠检索而不是靠记：
 `node scripts/doc-find.mjs <关键词>` 会同时搜 `*.md` 与源码里的 `//!` / `///`
-（相当一部分机制就写在模块文档注释里，如 `symbio_core::memory`）。
+（相当一部分机制就写在模块文档注释里，如 `providers::memory`）。
 **知识只写一处**——不要以摘要形式复制到别处，复制必然漂移。
 
 示例：会话上下文压缩的 L0-L6 分层总览在 [session/docs/context-compression-design.md](../symbio/src/plugins/session/docs/context-compression-design.md)，各层阈值与代码实现在 [session/README.md](../symbio/src/plugins/session/README.md)——**会话相关的一切文档都在 `symbio/src/plugins/session/docs/` 内**；系统级目录只保留跨模块规范（如 [design/vdfs.md](./design/vdfs.md)）。

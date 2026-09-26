@@ -2,20 +2,20 @@ mod configurable;
 mod error;
 mod option;
 mod tool_name;
-mod tools;
 
 pub use error::{
     capability_init_error_bucket, capability_report_error, capability_take_errors, CapabilityError,
 };
 
 // 域内子模块私有，公开面在此显式重导出
+//
+// 注：三个 `Default*Visitor`（能力 / 选项 / 可配置声明收集器的内存实现）**不在本域**——
+// 它们是契约的默认实现，写入者是全体插件，故住 `crate::providers::collectors`。
 pub use configurable::{
     capability_announce_configurable, capability_entry_of, ConfigurableVisitor,
-    DefaultConfigurableVisitor,
 };
 pub use option::OptionVisitor;
 pub use tool_name::{capability_resolve, capability_to_wire};
-pub use tools::DefaultToolVisitor;
 
 use crate::symbio_core::{
     ExecEnv, ModelProvider, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,

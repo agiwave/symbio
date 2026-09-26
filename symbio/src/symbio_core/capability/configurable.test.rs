@@ -1,6 +1,8 @@
 //! `symbio/src/symbio_core/capability/configurable.rs` 的单元测试 —— 拆自源码末尾的测试模块。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
+//! 收集器本身的两条随默认实现迁到 `providers/collectors/configurable_visitor.test.rs`；
+//! 本文件只留**契约**（`capability_entry_of` 的产物形状）。
 
 use super::*;
 
@@ -29,39 +31,4 @@ fn entry_keeps_the_document_view_but_relabels_it() {
     assert_eq!(it.node.ext.as_deref(), Some("form"));
     assert!(it.node.schema.is_some());
     assert!(it.node.access.read && it.node.access.write);
-}
-
-/// 同目录名覆盖，槽位不变（IndexMap 保序）
-#[tokio::test]
-async fn register_keeps_order_and_overwrites_same_name() {
-    let v = DefaultConfigurableVisitor::new();
-    v.register_configurable(capability_entry_of(&config()))
-        .await;
-    v.register_configurable(capability_entry_of(&PluginConfigFile::new(
-        PluginDir::at(std::env::temp_dir(), "session"),
-        "会话设置",
-        DetailDefinition::default(),
-    )))
-    .await;
-    v.register_configurable(capability_entry_of(&PluginConfigFile::new(
-        PluginDir::at(std::env::temp_dir(), "web"),
-        "网络工具（改）",
-        DetailDefinition::default(),
-    )))
-    .await;
-
-    let list = v.list_configurables().await;
-    assert_eq!(
-        list.iter()
-            .map(|it| it.node.name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["web", "session"]
-    );
-    assert_eq!(list[0].node.title, "网络工具（改）");
-}
-
-#[tokio::test]
-async fn empty_visitor_lists_nothing() {
-    let v = DefaultConfigurableVisitor::new();
-    assert!(v.list_configurables().await.is_empty());
 }

@@ -22,13 +22,14 @@
 use super::chat_session::PersistentChatSession;
 pub use super::config::SessionConfig;
 use super::types::{Session, SessionSummary};
+use crate::providers::memory::MemoryFile;
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::schemas::session::{chat_message as cm, session_chat};
 use crate::symbio_core::vdfs;
 use crate::symbio_core::{
-    plugin_dir_from_ctx, MemoryFile, Plugin, PluginConfigFile, PluginDir, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
-    PLUGIN_FILE, PLUGIN_ID_SESSION, SESSION_ID,
+    plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_FILE,
+    PLUGIN_ID_SESSION, SESSION_ID,
 };
 use crate::symbio_core::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
 use async_trait::async_trait;
@@ -357,9 +358,9 @@ impl SessionPlugin {
         )))
     }
 
-    // ==================== 会话记忆（`<根>/session/<id>/AGENTS.md`）====================
+    // ==================== 会话记忆（`<根>/session/<id>/MEMORY.md`）====================
     //
-    // 机制在 `symbio_core::memory`（三层记忆同一份实现），本插件只有「个性」：
+    // 机制在 `providers/memory`（三层记忆同一份实现），本插件只有「个性」：
     // 落位在会话目录、地址挂在会话节点下、两道闸门取自 [`SessionConfig`]。
     // 归属原则是「谁能读写它，谁负责注入它」——工作区记忆归 work，本层只认会话。
 
@@ -537,11 +538,11 @@ impl Plugin for SessionPlugin {
 
             // 智能体自身的 `AGENTS.md`（`{homedir}` / `<agentdir>`）**不再在此注入**：
             // 那是「智能体自身目录」这个作用域，归 plugin_manager 插件（谁能读写它，谁负责
-            // 注入它）。工作区 `AGENTS.md` 归 work 插件，本会话的 `AGENTS.md` 归本
-            // 插件——三层各有一个所有者，见 `symbio_core::memory` 的模块文档。
+            // 注入它）。工作区 `AGENTS.md` 归 work 插件，本会话的 `MEMORY.md` 归本
+            // 插件——三层各有一个所有者，见 `providers/memory` 的模块文档。
 
-            // 会话记忆（`<根>/session/<id>/AGENTS.md`）：**本会话私有**，可读写、有地址、
-            // 有两道容量闸门——因此它归内核那套机制，本插件只负责「落位 + 标题 + 地址」。
+            // 会话记忆（`<根>/session/<id>/MEMORY.md`）：**本会话私有**，可读写、有地址、
+            // 有两道容量闸门——因此它归共享实现那套机制，本插件只负责「落位 + 标题 + 地址」。
             // 作用域闸门在 `contribute_memory` 内一处收口（无 `ctx[SESSION_ID]` 即不注入）。
             self.contribute_memory(&ctx, &visitor).await;
         }
@@ -598,7 +599,7 @@ fn config_definition() -> DetailDefinition {
             DetailField::number(
                 "memory_max_bytes",
                 "记忆写入上限（字节）",
-                "会话记忆文件（每个会话自己的 `AGENTS.md`）单次写入的字节上限，超出会被拒绝",
+                "会话记忆文件（每个会话自己的 `MEMORY.md`）单次写入的字节上限，超出会被拒绝",
                 1.0,
                 1_048_576.0,
                 json!(d.memory_max_bytes),

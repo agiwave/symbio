@@ -13,6 +13,7 @@
 //!   `ModelProvider` trait（session 的唯一模型契约）
 //! - `http`:            HTTP 重试机器（客户端单例 + 带中止的 POST，五态 `PostResult`）
 //! - `stream`:          SSE 流循环（字节流 → `TurnOutput`，流式子节点实时下发）
+//! - `tool_accumulator`: 工具调用增量累积（分片 → 完整调用的状态机，收口为 `TurnOutput.tool_calls`）
 //! - `plugin`:          Core ModelPlugin entry point + factory registration + provider 注册表
 //!
 //! 边界：会话循环（chat_loop / turn_processor / tool_executor / resume /
@@ -29,4 +30,5 @@ mod model_providers;
 mod plugin;
 mod protocols;
 mod stream;
+mod tool_accumulator;
 mod types;

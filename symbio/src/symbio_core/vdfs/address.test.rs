@@ -10,8 +10,8 @@ fn join_addr_normalizes_both_sides() {
     assert_eq!(join_addr("@root", ""), "@root");
     assert_eq!(join_addr("@root/", "/"), "@root");
     assert_eq!(
-        join_addr("@root/session", "abc/AGENTS.md"),
-        "@root/session/abc/AGENTS.md"
+        join_addr("@root/session", "abc/MEMORY.md"),
+        "@root/session/abc/MEMORY.md"
     );
     assert_eq!(join_addr("@root/session/", "/abc/"), "@root/session/abc");
     assert_eq!(join_addr("", "session/x"), "session/x");

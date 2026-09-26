@@ -227,7 +227,7 @@ impl SessionPlugin {
         }
     }
 
-    /// 会话记忆（`<id>/AGENTS.md`）：单个文件，形状由内核产出。
+    /// 会话记忆（`<id>/MEMORY.md`）：单个文件，形状由共享实现产出。
     async fn memory_at(
         &self,
         path: &str,
@@ -245,7 +245,7 @@ impl SessionPlugin {
                 Ok(vdfs::VdfsResponse::Stat(self.memory_node_of(id).await))
             }
             vdfs::VdfsRequest::Read => {
-                // 会话记忆（`<根>/session/<id>/AGENTS.md`）：正文即文件全文。
+                // 会话记忆（`<根>/session/<id>/MEMORY.md`）：正文即文件全文。
                 // 文件不存在 → 空串（不是错误）——「还没写过」是记忆的正常状态。
                 self.session_of(id).await?;
                 let text = self
@@ -256,7 +256,7 @@ impl SessionPlugin {
                 Ok(vdfs::VdfsResponse::Read(vdfs::VdfsContent::text(text)))
             }
             vdfs::VdfsRequest::Write { content } => {
-                // 会话记忆：**纯文本**写入（容量闸门在内核 `MemoryFile::write`，本插件不重复实现）
+                // 会话记忆：**纯文本**写入（容量闸门在共享实现 `MemoryFile::write`，本插件不重复实现）
                 if content.binary {
                     return Err(vdfs::VdfsError::invalid(
                         "会话记忆是文本文件，不接受二进制内容",
@@ -280,13 +280,13 @@ impl SessionPlugin {
                 }))
             }
             vdfs::VdfsRequest::Delete { .. } => {
-                // 记忆**不可删除**（与 work / agent 的记忆层同一内核约定）：
+                // 记忆**不可删除**（与 work / agent 的记忆层同一共享实现约定）：
                 // 删除即丢失本会话的长期约定，且没有东西能把它找回来。要清空就写入空内容
                 // ——那是一次可读、可审、可撤销的显式动作。
                 Err(vdfs::VdfsError::Forbidden(format!(
                     "会话记忆不可删除（删除即丢失本会话的长期约定）。\
                      如需清空，请向 `{}` 写入空内容。",
-                    crate::symbio_core::MEMORY_AGENTS_FILE
+                    crate::plugins::session::memory::SESSION_MEMORY_FILE
                 )))
             }
             vdfs::VdfsRequest::Watch { sink } => {
@@ -1405,12 +1405,13 @@ impl SessionPlugin {
 
     /// 会话记忆 → VDFS 节点。
     ///
-    /// 形状由内核 [`MemoryFile::node`] 产出，`list`（经 `internal_dirs`）与 `stat`
+    /// 形状由共享实现 [`MemoryFile::node`](crate::providers::memory::MemoryFile::node) 产出，
+    /// `list`（经 `internal_dirs`）与 `stat`
     /// **共用同一份**——「列表里的和点开的不是同一个东西」这类 bug 因此写不出来。
     async fn memory_node_of(&self, id: &str) -> vdfs::VdfsNode {
         self.memory_store(id)
             .await
-            .node(&crate::symbio_core::MemoryNodeSpec {
+            .node(&crate::providers::memory::MemoryNodeSpec {
                 title: super::super::memory::SEGMENT_TITLE,
                 kind: PLUGIN_ID_SESSION,
                 description: super::super::memory::MEMORY_DESCRIPTION,

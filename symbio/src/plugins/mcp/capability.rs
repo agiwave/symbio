@@ -12,7 +12,7 @@
 //! ## 生命周期
 //!
 //! - 创建：每次 `traverse` 时构造
-//! - 销毁：随 `tool_visitor`（通常是 `DefaultToolVisitor`）一起被丢弃
+//! - 销毁：随 `tool_visitor`（通常是 `providers::collectors::DefaultToolVisitor`）一起被丢弃
 //! - **不持有**任何 stdio 进程 / http 连接（按需 lazy 加载）
 
 use crate::plugins::mcp::schemas::mcp_config::McpServerConfig;

@@ -47,7 +47,7 @@ sequenceDiagram
 |---|------|---------|------|
 | 1 | 入口 | `symbio/src/plugins/session/plugin.rs` | 用户消息 = **`vdfs/write(<根>/session/<id>/inbox)`**；`chat/send` 只是它的薄包装（写即入队，空间自己消费，见 `session/inbox.rs` 与 ADR-026）。**会话编排权归 session**（见 `chat_pipeline.rs` 头注释） |
 | 2 | 能力收集 | `symbio/src/plugins/session/chat_pipeline.rs` | session 调 `collect_capabilities` → `parent.traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播收工具；**agent 仅当 `ctx[AGENT_ID]` 存在时贡献**（不选 agent 的会话照常运行）；收集期错误通道（`capability_report_error` / `capability_take_errors`）在 `symbio_core/capability/error.rs` |
-| 3 | 默认能力 | `symbio_core/capability/tools.rs` | `DefaultToolVisitor`（从 agent 内部上浮的公共实现） |
+| 3 | 默认能力 | `symbio/src/providers/collectors/tool_visitor.rs` | `DefaultToolVisitor`——`CapabilityVisitor` 契约（`symbio_core/capability/mod.rs`）的**内存默认实现**。收集器的写入者是全体插件，故归实现层而非任何宿主 |
 | 4 | 模型调用（单轮） | `symbio/src/plugins/model/bound_provider.rs` | `execute_turn` = **一次** LLM 调用：4 协议适配（OpenAI / Anthropic / Gemini / Ollama）+ SSE 解析 + 事件出口。`model` **不做轮次循环** |
 | 5 | 工具循环（轮次） | `symbio/src/plugins/session/chat_loop.rs`（`close_turn` → `process_tool_calls_async`） | 「LLM → 工具 → LLM」的循环归 **session**（`gate_turn` / `close_turn` 判定下一步）。工具实现方：`local` / `web` / `vdfs` / `mcp` / `skill` / `telegram` / `agent` 等 |
 | 6 | 前端显示 | `event_bus` 的 `KIND_VDFS` 变更（消费端先 `vdfs/watch` 登记） | **显示只由节点状态驱动**：消息是 `<根>/session/<id>/message/<mid>` 这个**文件**，会话运行态是会话节点（`<根>/session/<id>`）的 `status`——两者都是 VDFS 变更。`updated` 带 `delta` = 尾部追加（零回读）；无 `delta` = 回读。顺序是**节点属性**（`ChatMessage.seq`），与到达顺序无关。见 [`session/docs/node-state-streaming.md`](../../symbio/src/plugins/session/docs/node-state-streaming.md) §5.1 与 §11 |

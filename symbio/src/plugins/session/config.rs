@@ -105,9 +105,9 @@ pub struct SessionConfig {
     ///   UI 可回看全部历史；此时存储层仅剩 `max_messages` 的 FIFO 轮次淘汰。
     #[serde(default = "default_prune_tool_history")]
     pub prune_tool_history: bool,
-    /// 会话记忆（`<会话目录>/AGENTS.md`）的**写入**字节上限。
+    /// 会话记忆（`<会话目录>/MEMORY.md`）的**写入**字节上限。
     ///
-    /// 与 `symbio_core::memory` 的两道闸门口径一致：超限**拒绝**（不截断、不部分
+    /// 与 `providers/memory` 的两道闸门口径一致：超限**拒绝**（不截断、不部分
     /// 写入）——静默丢内容是最坏的一类失败，拒绝则把判断权交回模型。
     #[serde(default = "default_memory_max_bytes")]
     pub memory_max_bytes: usize,

@@ -17,25 +17,24 @@ pub(crate) async fn settle_reasoning(
     context: &mut SessionContext,
     sink: &ExecEventSink,
     root_id: &str,
-    mut out: TurnOutput,
+    out: TurnOutput,
 ) -> TurnResult {
-    let tools_done = out.tool_accumulator.get_completed();
-    // 提前取出本轮的结束原因 / 用量 / 是否出现过工具调用 / 文本子节点 id，
+    let tools_done = out.tool_calls.clone();
+    // 提前取出本轮的结束原因 / 用量 / 文本子节点 id，
     // 因为 `out.into_messages` 会按值消费 out，之后无法再读这些字段。
-    let had_tool = out.tool_accumulator.had_any_tool_call();
     let finish = out.finish.clone();
     let usage = out.usage;
     let rtid = out.response_text_child_id.clone();
     let rrid = out.reasoning_child_id.clone();
 
     orchestrator
-        .finalize_assistant_turn(root_id, &out, &tools_done, sink)
+        .finalize_assistant_turn(root_id, &out, sink)
         .await;
 
     // 用 provider 返回的真实用量滚动校准 token 估算。
-    feedback_estimate(usage, &out, &tools_done);
+    feedback_estimate(usage, &out);
 
-    let new_msgs = out.into_messages(root_id, tools_done.len());
+    let new_msgs = out.into_messages(root_id);
     // 工具上下文保留策略：策略不 Stamp 到节点 meta 持久化，
     // 由 run_chat_loop 在构建 LLM 请求前从 CapabilityVisitor 动态解析，
     // 节点 name 即 LLM 可见工具名，与声明名直接匹配。
@@ -56,7 +55,6 @@ pub(crate) async fn settle_reasoning(
         root_id: root_id.to_string(),
         tools_done,
         finish,
-        had_tool,
     }
 }
 
@@ -78,14 +76,18 @@ pub(crate) async fn close_turn(
         root_id,
         tools_done,
         finish,
-        had_tool,
     } = result;
     let root_id = root_id.as_str();
 
     if tools_done.is_empty() {
         // 本轮无工具调用 —— 正常收尾，除非是被长度截断。
-        if finish.is_length() && !had_tool {
-            // 纯文本被 max_tokens 截断且参数完整 → 自动续写：
+        //
+        // 本块内「无工具调用」是既定事实（外层条件），故被截断的只可能是纯文本。
+        // 「工具参数被截断」不在此处处理：那条路径由 `tool_executor.rs` 的
+        // `parse_error` 分支承担（拒绝执行 + 以协议错误回报模型），比这里补一句
+        // 面向用户的告警更靠前、信息量更大。
+        if finish.is_length() {
+            // 纯文本被 max_tokens 截断 → 自动续写：
             // 已产出的（截断）文本已作为 assistant 消息进入上下文，下一轮请求时模型会
             // 自然从断点继续。最多续写 MAX_CONTINUE_ROUNDS 次，避免失控死循环。
             if turn.continuation_count < MAX_CONTINUE_ROUNDS {
@@ -106,15 +108,6 @@ pub(crate) async fn close_turn(
                 MAX_CONTINUE_ROUNDS
             )))
             .await;
-        } else if finish.is_length() && had_tool {
-            // 工具调用参数 JSON 被长度截断：参数残破无法通过续写修复，
-            // 该次调用已丢弃 → 明确报错而非静默结束（会话级告警状态）。
-            sink
-                .warn(Some(
-                    "输出在工具调用参数中途达到长度上限而中断。请提高单次输出预算，或把大任务拆小后重试。"
-                        .to_string(),
-                ))
-                .await;
         }
         plugin_info!(
             "session",
@@ -352,11 +345,11 @@ pub(crate) async fn close_turn(
 /// 2. 分母必须覆盖 provider 计入 `output_tokens` 的**全部**内容：文本 + 思考 +
 ///    工具调用名 + 参数 JSON。漏掉任一部分都会系统性低估估算值 → 校准比偏高
 ///    → 水位提前越过阈值 → 压缩被频繁触发。
-fn feedback_estimate(usage: Option<ModelUsage>, out: &TurnOutput, tools: &[TurnToolCallInfo]) {
+fn feedback_estimate(usage: Option<ModelUsage>, out: &TurnOutput) {
     let Some(u) = usage else { return };
     let tok = super::super::tokenizer::default_tokenizer();
     let mut estimated = tok.count_raw(&out.text) + tok.count_raw(&out.reasoning);
-    for tc in tools {
+    for tc in &out.tool_calls {
         if let Some(name) = tc.name.as_ref().filter(|n| !n.is_empty()) {
             estimated += tok.count_raw(name);
         }

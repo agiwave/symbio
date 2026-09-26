@@ -10,7 +10,6 @@ pub mod exec;
 mod keys;
 pub mod llm;
 mod logger;
-mod memory;
 mod plugin;
 pub mod schemas;
 mod text;
@@ -23,7 +22,7 @@ pub use llm::model_provider::{ModelFinishReason, ModelProvider, ModelUsage};
 pub use llm::turn::{
     llm_build_assistant_messages, llm_build_tool_message, llm_emit_delta, llm_emit_message,
     llm_emit_removed, llm_emit_state, llm_message_frame, llm_removed_frame, llm_short_id,
-    llm_state_frame, TurnOutput, TurnStreamChildIds, TurnToolCallAccumulator, TurnToolCallInfo,
+    llm_state_frame, TurnOutput, TurnStreamChildIds, TurnToolCallInfo,
 };
 
 // ==================== VDFS 契约 ====================
@@ -67,8 +66,7 @@ pub use embedding::{EmbeddingError, EmbeddingService, EMBEDDING_LOCAL, EMBEDDING
 pub use capability::{
     capability_announce_configurable, capability_entry_of, capability_invoke, capability_resolve,
     capability_to_wire, Capability, CapabilityCategory, CapabilityMeta,
-    CapabilityToolContextRetention, CapabilityVisitor, ConfigurableVisitor,
-    DefaultConfigurableVisitor, DefaultToolVisitor, OptionVisitor,
+    CapabilityToolContextRetention, CapabilityVisitor, ConfigurableVisitor, OptionVisitor,
 };
 // 工具结果 `failure_kind` 闭集：生产方（`local`）与消费方（`session`）分属不同插件，
 // 互相不可见，只能经这里共享。单独一行——它是模块而非类型。
@@ -106,10 +104,10 @@ pub use exec::{
 // 注：homedir（系统根注册表）**不在 core**——它归 `home` 插件独有。core 只提供
 // 纯路径工具 `plugin_expand_tilde_path`（经 `plugin::dir` 重导出，不读任何全局系统根）。
 pub use logger::*;
-pub use memory::{
-    memory_render_segment, MemoryFile, MemoryInjection, MemoryNodeSpec, MemorySegmentSpec,
-    MEMORY_AGENTS_FILE,
-};
+// 注：记忆（`MemoryFile` / 两道闸门 / 片段渲染 / 节点形状）**整块不在 core**——
+// 实现不隶属任何单个插件（work / session / agent 各用一个作用域），故归
+// `providers/memory`（方式 B，不套 `dyn`）。**连文件名也不在 core**：三层各自
+// 定义自己的文件名常量（`work::memory::WORK_MEMORY_FILE` 等），core 不设统一约定。
 pub(crate) use plugin::{lock_read, lock_write};
 pub use text::{text_floor_char_boundary, text_truncate_bytes};
 

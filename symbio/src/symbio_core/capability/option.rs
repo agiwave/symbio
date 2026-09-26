@@ -27,14 +27,18 @@
 //! **不在这里**：它属于 `Plugin::traverse` 的契约，与 `TRAVERSE_AVAILABLE_TOOLS` 同处
 //! `plugin::traverse`——同一份协议的两个端点该住在一起。本域只是那条通道的**产出方之一**。
 //!
-//! 而**收集器实现**（`DefaultOptionVisitor`）与**收集管线**（`collect_options`）
-//! 只有 session 一个消费方，按「依赖方数量」判据（[ADR-023](../../../../docs/DECISIONS.md)）
-//! 已下沉到 `plugins/session/options.rs` —— 与它们的平行物 `collect_capabilities`
-//! 同处一地（后者一直在 session 的 `chat_pipeline.rs` 里）。
+//! 而**收集器实现**（`DefaultOptionVisitor`）住 `providers/collectors/`——
+//! 它的**写入者是全体插件**（在 `traverse` 里注册字段），安装它的宿主只是其中之一，
+//! 故不隶属于任何插件；契约（trait）在 core，无策略的内存实现在实现层。
+//! **收集管线**（`collect_options`）只有 session 一个消费方，按「依赖方数量」判据
+//! （[ADR-023](../../../../docs/DECISIONS.md)）已下沉到 `plugins/session/options.rs`
+//! —— 与它的平行物 `collect_capabilities` 同处一地（后者一直在 session 的
+//! `chat_pipeline.rs` 里）。
 //!
 //! ```text
-//! 在 core：契约（trait + 端点字面量）      ← 两侧都认
-//! 在 session：装配（默认实现 + 遍历管线）   ← 只有宿主认
+//! 在 core：契约（trait + 端点字面量）        ← 两侧都认
+//! 在 providers：默认实现（内存收集器）        ← 写入者是全体插件，无宿主归属
+//! 在 session：收集管线（collect_options）    ← 只有宿主认
 //! ```
 //!
 //! ## 产物是 `DetailField`，不是自成一体的节点类型

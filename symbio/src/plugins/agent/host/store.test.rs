@@ -118,7 +118,7 @@ fn workspace_store_with_agent_dir() -> (tempfile::TempDir, AgentDirStore) {
 
 /// 智能体记忆**落位**在 agent 目录自己的目录（不是工作区目录），文件名与工作区级同名。
 ///
-/// 读写与两道容量闸门不在这里测——它们已收口到内核，用例在
+/// 读写与两道容量闸门不在这里测——它们已收口到共享实现，用例在
 /// `agent/host/memory.test.rs`（本模块只回答「记忆文件在哪」）。
 #[test]
 fn memory_lives_in_agent_dir() {
@@ -126,11 +126,11 @@ fn memory_lives_in_agent_dir() {
     let path = store.memory_path("b").unwrap();
     assert_eq!(
         path,
-        dir.path().join("global-agent/b").join(MEMORY_AGENTS_FILE)
+        dir.path().join("global-agent/b").join(AGENT_MEMORY_FILE)
     );
     assert_eq!(path.file_name().unwrap(), "AGENTS.md");
     // 不是工作区根的那个 AGENTS.md
-    assert_ne!(path, dir.path().join(MEMORY_AGENTS_FILE));
+    assert_ne!(path, dir.path().join(AGENT_MEMORY_FILE));
     // agent 目录不存在 → 明确报错（`memory::store` 据此构造「无作用域」门面）
     assert!(store.memory_path("nope").is_err());
 }

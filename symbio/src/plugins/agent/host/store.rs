@@ -35,10 +35,20 @@
 //!   才落盘；不合规整包拒收，不静默降级。
 
 use super::manifest::{self, AgentManifest};
-use crate::symbio_core::MEMORY_AGENTS_FILE;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+/// 智能体记忆 / 指令文件名 —— `AGENTS.md`（**本插件自己的**约定，不是跨插件契约）。
+///
+/// 本插件管着两个作用域，两者都是「**某个智能体自身的 `AGENTS.md`**」，故共用这一个
+/// 常量：系统智能体（`{homedir}/AGENTS.md`）与子智能体（`<agent dir>/AGENTS.md`）。
+///
+/// 刻意对齐行业惯例（Agent 目录的指令 / 记忆文件，见
+/// `docs/design/agent-directory-spec.md` §6）：收益是记忆**不属于 symbio**——随 agent
+/// 目录整包分发，换个工具照样生效。会话那一层不适用这条约定（会话目录不是 agent
+/// 目录），因此它用自己的 `MEMORY.md`，**不**与本常量统一。
+pub const AGENT_MEMORY_FILE: &str = "AGENTS.md";
 
 /// Agent 在 store 中的记录（清单 + 位置 + 来源）
 #[derive(Debug, Clone)]
@@ -333,12 +343,12 @@ impl AgentDirStore {
     // ==================== 智能体记忆（Agent 根下的 `AGENTS.md`，§6） ====================
     //
     // 记忆是 Agent 根下的一个普通文件，与工作区级的 `{workdir}/AGENTS.md`
-    // **同名同语义**（见 `symbio_core::memory`）——放哪个作用域就管哪个作用域。
+    // **同名同语义**（见 `providers/memory`）——放哪个作用域就管哪个作用域。
     // §6.2：一个作用域只有一个所有者；v2 里 Agent 作用域的所有者是它的 `work`
     // 插件实例，本模块只负责回答「文件在哪」。
     //
-    // ⚠️ 本模块**只负责回答「记忆文件在哪」**：读 / 写 / 两道容量闸门一律走内核
-    // （`symbio_core::memory::MemoryFile`）——agent / work / session 三层共用同一份
+    // ⚠️ 本模块**只负责回答「记忆文件在哪」**：读 / 写 / 两道容量闸门一律走共享实现
+    // （`providers::memory::MemoryFile`）——agent / work / session 三层共用同一份
     // 实现，本模块不持有闸门。
 
     /// 智能体记忆文件：`<Agent 目录>/AGENTS.md`
@@ -348,7 +358,7 @@ impl AgentDirStore {
         let record = self
             .get(agent_id)
             .ok_or_else(|| format!("智能体 `{agent_id}` 不存在"))?;
-        Ok(record.dir.join(MEMORY_AGENTS_FILE))
+        Ok(record.dir.join(AGENT_MEMORY_FILE))
     }
 
     /// zip entry 名 → agent 目录内相对路径。

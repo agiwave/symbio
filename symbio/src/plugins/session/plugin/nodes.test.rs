@@ -130,7 +130,7 @@ fn session_node_projects_runtime_state() {
     );
 }
 
-/// 会话内部寻址（S6/S16）：`<id>` / `<id>/AGENTS.md` / `<id>/message[/<mid>]` /
+/// 会话内部寻址（S6/S16）：`<id>` / `<id>/MEMORY.md` / `<id>/message[/<mid>]` /
 /// `<id>/subsession[/<sub>]` / `<id>/workdir[/<rel>]`。
 /// 未知区段与越界层级一律 NotFound——不给半通不通的路径留口子。
 #[test]
@@ -141,11 +141,11 @@ fn vdfs_internal_path_parsing() {
     assert!(matches!(parse_session_path("abc").unwrap(), Session("abc")));
     // 会话记忆：单个文件，地址用真实文件名
     assert!(matches!(
-        parse_session_path("abc/AGENTS.md").unwrap(),
+        parse_session_path("abc/MEMORY.md").unwrap(),
         Memory("abc")
     ));
     assert!(
-        parse_session_path("abc/AGENTS.md/deeper").is_err(),
+        parse_session_path("abc/MEMORY.md/deeper").is_err(),
         "记忆是文件，没有更深层级"
     );
     // 转写列表：目录本身与列表项两级
@@ -268,9 +268,13 @@ fn inbox_item_node_reuses_message_shape() {
 /// 工作目录按会话是否声明 workdir 出现。
 #[test]
 fn vdfs_internal_dirs_conditional() {
+    // 有作用域才有节点名（无作用域 = 没有文件 = 没有名字，共享实现如实返回空名）。
+    // 这里按生产路径的形态构造：给一个真实落位，节点名就是它的文件名。
     let memory = || {
-        crate::symbio_core::MemoryFile::absent(1024, 256).node(
-            &crate::symbio_core::MemoryNodeSpec {
+        let path = std::path::PathBuf::from("abc")
+            .join(crate::plugins::session::memory::SESSION_MEMORY_FILE);
+        crate::providers::memory::MemoryFile::new(Some(path), 1024, 256).node(
+            &crate::providers::memory::MemoryNodeSpec {
                 title: "会话记忆",
                 kind: PLUGIN_ID_SESSION,
                 description: "d",
@@ -301,7 +305,7 @@ fn vdfs_internal_dirs_conditional() {
     assert_eq!(without[2].name, workdir::SEG_SUB_SESSIONS);
     assert_eq!(
         without[3].name,
-        crate::symbio_core::MEMORY_AGENTS_FILE,
+        crate::plugins::session::memory::SESSION_MEMORY_FILE,
         "记忆恒在——它本来就是会话的一部分"
     );
     assert!(!without[3].is_dir(), "记忆是文件，不是目录");

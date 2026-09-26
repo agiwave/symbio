@@ -40,7 +40,7 @@
 //! - `memory_max_bytes` / `memory_inject_max_bytes`：智能体自身的 `AGENTS.md`
 //!   的写入与注入上限——**两个作用域共用一对**（它们是同一类东西，只是作用域不同）。
 //!
-//! 闸门的**执行**全在内核（`symbio_core::memory`），与 work / session 几层同源。
+//! 闸门的**执行**全在共享实现（`providers/memory`），与 work / session 几层同源。
 
 mod config;
 mod detail;

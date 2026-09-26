@@ -1,11 +1,16 @@
-//! 「单文件长期记忆」的共用内核 —— 各层记忆**同一份实现**。
+//! 「单文件长期记忆」的实现 —— 各层记忆**同一份口径**。
+//!
+//! > ⚠️ **与 [`crate::providers::vdfs_service::MemoryVdfs`] 无关**：那个 `memory` 是
+//! > 「**内存**后端」的 VDFS（运行期驻留、不落盘）；本模块的 `memory` 是「**长期记忆**
+//! > 文件」（落盘、要给模型读写，文件名各层自定）。两个词都取「memory」的常见义，但指的是
+//! > 完全不同的东西——读代码时先看路径（`providers/memory/` vs `providers/vdfs_service/memory.rs`）。
 //!
 //! ## 几层是同一件事的几个作用域
 //!
 //! | 层 | 读写面（VDFS 地址） | 注入者 | 物理落位 |
 //! |---|---|---|---|
 //! | 工作区 | work（`<根>/work/AGENTS.md`） | work | `{workdir}/AGENTS.md` |
-//! | 会话 | session（`<根>/session/<id>/AGENTS.md`） | session | `{会话目录}/AGENTS.md` |
+//! | 会话 | session（`<根>/session/<id>/MEMORY.md`） | session | `{会话目录}/MEMORY.md` |
 //! | 系统智能体 | agent（`<根>/agent/AGENTS.md`） | agent | `{homedir}/AGENTS.md` |
 //! | 子智能体 | agent（`<根>/agent/<id>/AGENTS.md`） | agent | `<agentdir>/AGENTS.md` |
 //!
@@ -14,17 +19,36 @@
 //! 「读不到算不算错误」这类判断一旦分叉，用户看到的行为就会随「这条记忆属于哪一层」
 //! 而变化，而用户根本无从知道差异从哪来。
 //!
-//! ## 边界：内核收「**有地址、要限容**」的东西
+//! ## 为什么在 providers 而不是 symbio_core
+//!
+//! 判据是**「谁拥有它」**，不是「它够不够底层」（见
+//! [ADR-023](../../../docs/DECISIONS.md)、[ADR-035](../../../docs/DECISIONS.md)）：
+//!
+//! - 它**不隶属任何单个插件**：work / session / agent 三个插件各自构造一个 `MemoryFile`
+//!   指向自己的作用域。若它住其中任何一个插件（思路 1），另两个就得跨插件引用，违反
+//!   「插件之间不直接相互引用」。⇒ 归 `providers/`（思路 2）。
+//! - 它是**实现**而不是契约：没有任何一处需要 `dyn MemoryProvider`——三个插件在
+//!   **编译期**就知道自己要用哪种记忆。故走**方式 B**（具体类型直接组合，见
+//!   [`crate::providers`] 的两种接线方式），**不进** `creator_create_object`。
+//!   硬抽 trait 只会把一次构造换成一次字符串查表（[ADR-035](../../../docs/DECISIONS.md)）。
+//!
+//! **core 里什么都不留**——本模块的**整个**概念面都搬来了 `providers/`：实现、两道闸门、
+//! 片段排版、节点形状，以及**文件名**。文件名尤其不该由 core 统一：三层各写各的文件、
+//! 互不干涉，共享一个字面量只是把「改一层」变成「改三层」。
+//! 各层自己的名字定义在各自插件里（`work::memory::WORK_MEMORY_FILE` /
+//! `session::memory::SESSION_MEMORY_FILE` / `agent::host::store::AGENT_MEMORY_FILE`）。
+//!
+//! ## 边界：本模块收「**有地址、要限容**」的东西
 //!
 //! 判据是一条可检验的线：
 //!
-//! > 内核收「模型能自己改的东西」（要有地址、要限容）；
-//! > 没有地址的只读片段走普通注册即可，硬塞进来只会让内核多出一堆「可选字段」。
+//! > 收「模型能自己改的东西」（要有地址、要限容）；
+//! > 没有地址的只读片段走普通注册即可，硬塞进来只会多出一堆「可选字段」。
 //!
 //! ⚠️ 这条线划的是**形态**，不是「谁的名字听起来像指令」：`{homedir}/AGENTS.md`
-//! 一度以「只读指令」的身份**不在**内核里（宿主只读它、不给地址、不设容量），
+//! 一度以「只读指令」的身份**不在**本模块里（宿主只读它、不给地址、不设容量），
 //! 但它现在有地址（`<根>/agent/AGENTS.md`）与两道闸门、在设置页可编辑，
-//! 于是它**进了内核**。反过来，模型插件注册的人格片段没有地址，就永远不进内核。
+//! 于是它**进了本模块**。反过来，模型插件注册的人格片段没有地址，就永远不进来。
 //!
 //! ## 归属：一个作用域只有一个所有者
 //!
@@ -38,20 +62,9 @@
 //! 两份智能体 `AGENTS.md`（系统态 / 子智能体态）**都归 agent**——它同时给出读写面
 //! （`<根>/agent/…`）与注入面，因此印在片段里的地址与闸门都是**它自己会执行**的。
 //!
-//! ## 为什么是内核而不是 provider（trait）
-//!
-//! 「provider」的前提是**调用方需要多态**（运行时替换实现）：`VdfsProvider` 有
-//! file / sqlite / memory 三后端，`ModelProvider` 有各家模型，它们必须是 trait。
-//! 记忆不是——work / session / agent 在**编译期**就知道自己要用哪种记忆，
-//! 全项目没有一处需要 `dyn MemoryProvider`。硬抽 trait 只会多一层间接。
-//!
-//! 所以这里给的是**值对象 + 纯函数**：内核负责「一个记忆文件怎么读写、怎么限容、
-//! 怎么渲染成片段、长成什么节点」，插件负责「它是哪个作用域、落在哪、叫什么、
-//! 地址是什么、闸门开多大」。
-//!
 //! ## 个性不进来
 //!
-//! 内核**不认识**「全局」「工作区」「会话」「智能体」这些词——它们只以 `path` /
+//! 本模块**不认识**「全局」「工作区」「会话」「智能体」这些词——它们只以 `path` /
 //! `address` / `title` 的形式出现在参数里。凡是需要判断「这是哪一层」的逻辑，
 //! 一律留在插件里。人格（`agent` 的多文件装配）也不进来：它不是单文件记忆。
 //!
@@ -68,19 +81,19 @@
 //! 读侧截断的理由：记忆文件可以比注入预算大（写入上限通常远大于注入预算），
 //! 超出部分靠模型按地址 `vdfs_read` 读取。两者取值不同才有意义。
 //!
-//! ## 文件名的行业约定
+//! ## 本模块**不认识**文件名
 //!
-//! 三层都叫 `AGENTS.md`，**放在哪个作用域就管哪个作用域**。对齐行业惯例
-//! （给编码智能体的指令 / 记忆文件，与 `CLAUDE.md`、`.cursorrules` 同一族）的收益是
-//! 记忆**不属于 symbio**：能被 `git` 版本化、能被 review、换个工具照样生效。
+//! 名字由**各层自己**给：本模块只拿到一个完整路径（`path`），节点名从路径末段推导
+//! （[`MemoryFile::file_name`]），**没有**任何硬编码的兜底文件名。三层各叫各的——
+//! 工作区与智能体目录沿用行业通行的 `AGENTS.md`，会话用 `MEMORY.md`——正是因为
+//! 「叫什么」是**各层的个性**，不是共享口径：三层各写各的文件、互不干涉，共享一个
+//! 文件名常量只把「改一层」变成「改三层」，换不来任何一致性
+//! （[ADR-037](../../../docs/DECISIONS.md)）。
 //!
-//! 它不是「配置」：宿主不解析内容，只做三件事——**注入**、**限容**、**给地址**。
+//! 名字也不是「配置」：宿主不解析内容，只做三件事——**注入**、**限容**、**给地址**。
 
-use super::{VdfsAccess, VdfsNode};
+use crate::symbio_core::{VdfsAccess, VdfsNode};
 use std::path::{Path, PathBuf};
-
-/// 记忆文件名 —— 三层共用同一个名字（跨插件约定，见模块文档）
-pub const MEMORY_AGENTS_FILE: &str = "AGENTS.md";
 
 /// 注入用正文的产物 —— 「按预算截断」这一步的全部信息。
 ///
@@ -174,26 +187,37 @@ impl MemoryFile {
         self.path.is_some()
     }
 
-    /// 记忆文件路径（无作用域 → `None`）
+    /// 记忆文件路径（无作用域 → `None`）。
+    ///
+    /// **仅测试**：生产路径不需要它——落位由构造方决定，读写由本类型自己完成。
+    /// 三个插件的「落位」用例要断言「文件落在哪」，那是**插件个性**的测试接缝。
+    #[cfg(test)]
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
 
-    /// 文件名（节点名从这里来——**地址用真实文件名**，不另传一份字面量）
-    pub fn file_name(&self) -> &str {
+    /// 文件名 —— 节点名从这里来（**地址用真实文件名**，不另传一份字面量）。
+    ///
+    /// 无作用域 → `None`：没有文件，就没有名字。本模块**没有**兜底文件名
+    /// （叫什么由各层自己定，见模块文档），所以这里如实返回 `None`。
+    pub fn file_name(&self) -> Option<&str> {
         self.path
             .as_deref()
             .and_then(Path::file_name)
             .and_then(|s| s.to_str())
-            .unwrap_or(MEMORY_AGENTS_FILE)
     }
 
-    /// 写入闸门取值
+    /// 写入闸门取值。
+    ///
+    /// **仅测试**：闸门的**效果**（超限拒绝 / 超预算截断）已由本类型的读写路径与
+    /// `tests.rs` 覆盖；插件侧的用例用它断言「配置值确实透传进来了」。
+    #[cfg(test)]
     pub fn write_max_bytes(&self) -> usize {
         self.write_max_bytes
     }
 
-    /// 注入闸门取值
+    /// 注入闸门取值（**仅测试**，同 `write_max_bytes`）
+    #[cfg(test)]
     pub fn inject_max_bytes(&self) -> usize {
         self.inject_max_bytes
     }
@@ -287,8 +311,16 @@ impl MemoryFile {
     }
 
     /// VDFS 节点 —— `list` 与 `stat` **共用同一份形状**，两条链路不会分叉。
+    ///
+    /// 节点名取**真实文件名**（[`file_name`]），因此只应在**有作用域**时调用：
+    /// 无作用域没有文件，也就没有名字。三个插件的调用点都在 `has_scope()` 之后——
+    /// 这里对无作用域退回空名，与 `instruction::host_dir` 对「取不到父目录」的处理
+    /// 同一口径：理论上不该发生，但降级比 panic 好。
+    ///
+    /// [`file_name`]: MemoryFile::file_name
     pub fn node(&self, spec: &MemoryNodeSpec) -> VdfsNode {
-        let mut n = VdfsNode::file(self.file_name(), spec.title, VdfsAccess::READ_WRITE);
+        let name = self.file_name().unwrap_or_default();
+        let mut n = VdfsNode::file(name, spec.title, VdfsAccess::READ_WRITE);
         n.kind = spec.kind.to_string();
         n.size = Some(self.size());
         n.updated_at = self.updated_at();

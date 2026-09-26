@@ -72,7 +72,7 @@
 <根>/session/<sid>                            会话节点        ← 运行态的承载者
 <根>/session/<sid>/message                    转写列表（集合）
 <根>/session/<sid>/message/<mid>              消息节点（列表项）
-<根>/session/<sid>/AGENTS.md                  会话记忆（文件）
+<根>/session/<sid>/MEMORY.md                  会话记忆（文件）
 <根>/session/<sid>/subsession[/<sub>]         子会话清单 / 子会话节点
 <根>/session/<sid>/workdir[/<rel>]            工作目录树
 ```

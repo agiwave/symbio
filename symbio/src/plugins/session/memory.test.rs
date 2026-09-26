@@ -2,17 +2,18 @@
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //!
-//! 内核行为（读写、拒绝、截断、片段排版）已在 `symbio_core::memory.test.rs` 钉住，
+//! 共享实现的行为（读写、拒绝、截断、片段排版）已在 `providers/memory/tests.rs` 钉住，
 //! 这里**刻意不重复**。本文件只回答「会话这一层」特有的问题。
 //!
 //! ⚠️ 只做**路径计算**，不落盘：`memory_path` 走的是真实 homedir，写进去会污染
 //! 用户目录。需要真文件的用例一律用 `tempfile` 自建 [`MemoryFile`]。
 
 use super::*;
+use crate::providers::memory::MemoryFile;
 use crate::symbio_core::absolute_addr;
 use crate::symbio_core::{
-    MemoryFile, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
-    PLUGIN_ID_SESSION, VDFS_PARENT_ADDR,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, PLUGIN_ID_SESSION,
+    VDFS_PARENT_ADDR,
 };
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -26,7 +27,7 @@ fn root() -> std::path::PathBuf {
 #[test]
 fn memory_lives_in_the_session_directory() {
     let p = memory_path(&root(), "abc");
-    assert_eq!(p.file_name().unwrap(), MEMORY_AGENTS_FILE);
+    assert_eq!(p.file_name().unwrap(), SESSION_MEMORY_FILE);
     assert_eq!(p.parent().unwrap().file_name().unwrap(), "abc");
     assert_eq!(
         p.parent().unwrap().parent().unwrap().file_name().unwrap(),
@@ -67,10 +68,10 @@ fn session_id_is_sanitized_before_joining() {
 fn address_composes_from_context_parent_and_rel() {
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(VDFS_PARENT_ADDR, "@vfs/session".to_string());
-    assert_eq!(memory_rel_path("abc"), "abc/AGENTS.md");
+    assert_eq!(memory_rel_path("abc"), "abc/MEMORY.md");
     assert_eq!(
         absolute_addr(&ctx, &memory_rel_path("abc")),
-        "@vfs/session/abc/AGENTS.md",
+        "@vfs/session/abc/MEMORY.md",
         "绝对地址 = 上下文父地址 + 相对地址"
     );
 }
@@ -88,22 +89,22 @@ fn no_session_means_no_scope() {
     }
 }
 
-/// 有会话 id 时落位正确，且两道闸门原样交给内核
+/// 有会话 id 时落位正确，且两道闸门原样交给共享实现
 #[test]
-fn scope_carries_the_two_gates_into_the_kernel() {
+fn scope_carries_the_two_gates_into_the_shared_impl() {
     let m = store(&root(), Some("abc"), 1234, 321);
     assert!(m.has_scope());
     assert_eq!(m.path(), Some(memory_path(&root(), "abc").as_path()));
     assert_eq!(m.write_max_bytes(), 1234);
     assert_eq!(m.inject_max_bytes(), 321);
-    assert_eq!(m.file_name(), MEMORY_AGENTS_FILE);
+    assert_eq!(m.file_name(), Some(SESSION_MEMORY_FILE));
 }
 
 /// 条目规格：标题 / 地址 / 区分说明 / 空提示四样都在
 #[test]
 fn segment_spec_is_the_session_layer_personality() {
     // 合成绝对地址（真实值由调用点的 absolute_addr 拼出）
-    let address = "@vfs/session/abc/AGENTS.md";
+    let address = "@vfs/session/abc/MEMORY.md";
     let s = segment_spec(address);
 
     assert_eq!(s.title, "会话记忆");
@@ -121,11 +122,11 @@ fn segment_spec_is_the_session_layer_personality() {
 #[test]
 fn segment_round_trips_through_a_real_file() {
     let tmp = TempDir::new().unwrap();
-    let path = tmp.path().join(MEMORY_AGENTS_FILE);
+    let path = tmp.path().join(SESSION_MEMORY_FILE);
     let m = MemoryFile::new(Some(path), 1024, 256);
     m.write("本会话约定：所有时间用 UTC。").unwrap();
 
-    let address = "@vfs/session/abc/AGENTS.md";
+    let address = "@vfs/session/abc/MEMORY.md";
     let seg = m.segment(&segment_spec(address)).unwrap().unwrap();
     assert!(seg.contains("【会话记忆】"), "{seg}");
     assert!(seg.contains(address), "地址要下发: {seg}");

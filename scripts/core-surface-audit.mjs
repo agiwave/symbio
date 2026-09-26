@@ -6,9 +6,11 @@
  *
  * ADR-023 的判据是**依赖方数量**：「只被一个模块依赖的内容一律下沉回该模块」。
  * 这条规则写在 `symbio_core/README.md` 与 ADR 里，但**此前没有任何脚本在判它** ——
- * 2026-09-26 那次审计是靠人工逐条 grep 的，且当场就漏报了（`TurnToolCallAccumulator`
- * 的真实消费方 `plugins/model/stream.rs` 走的是**字段访问** `.tool_accumulator`，
- * 类型名根本不出现 ⇒ 按类型名 grep 数不到）。
+ * 2026-09-26 那次审计是靠人工逐条 grep 的，且当场就漏报了：`TurnToolCallAccumulator`
+ * （当时住 `symbio_core::llm::turn`）的真实消费方 `plugins/model/stream.rs` 走的是
+ * **字段访问** `.tool_accumulator`，类型名根本不出现 ⇒ 按类型名 grep 数不到。
+ * （该符号其后已随 core 收口迁出 `symbio_core`，现住 `plugins/model/tool_accumulator.rs`。
+ * 仍记在这里，是因为它正是下面口径 2「字段访问型消费点」这个警告的来历。）
  *
  * 本脚本把那次人工统计固化成可重复执行的报告。
  *

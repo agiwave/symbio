@@ -1,4 +1,4 @@
-//! 智能体记忆的**落位、地址与注入** —— 机制在内核（`symbio_core::memory`）。
+//! 智能体记忆的**落位、地址与注入** —— 机制在共享实现（`providers/memory`）。
 //!
 //! ## 落位：agent 目录自己的目录
 //!
@@ -29,20 +29,19 @@
 //! **系统智能体**那一份（`{homedir}/AGENTS.md`）归 [`super::instruction`]。
 //! 两个作用域同属智能体域，因此都在本插件里——读写面与注入面于是落在同一个所有者上。
 //!
-//! ## 本模块与内核的分工
+//! ## 本模块与共享实现的分工
 //!
 //! | 谁 | 负责 |
 //! |---|---|---|
-//! | `symbio_core::memory` | 读写、两道容量闸门、片段排版、VDFS 节点形状 |
+//! | `providers/memory` | 读写、两道容量闸门、片段排版、VDFS 节点形状 |
 //! | 本模块 | 落位、VDFS 地址、片段标题、空内容提示 |
 //! | [`super::config`] | 两道闸门各开多大 |
 //!
 //! 于是本插件不再自己写「超限怎么办」「截断怎么算」——那些口径全项目只有一份。
 
-use super::store::AgentDirStore;
-use crate::symbio_core::{
-    MemoryFile, MemoryNodeSpec, MemorySegmentSpec, MEMORY_AGENTS_FILE, PLUGIN_ID_AGENT,
-};
+use super::store::{AgentDirStore, AGENT_MEMORY_FILE};
+use crate::providers::memory::{MemoryFile, MemoryNodeSpec, MemorySegmentSpec};
+use crate::symbio_core::PLUGIN_ID_AGENT;
 
 /// 系统提示词条目在收集器里的注册名（同名覆盖的键）。
 ///
@@ -59,7 +58,7 @@ pub const MEMORY_DESCRIPTION: &str =
 
 /// 由 agent 目录记录构造记忆门面（agent 目录不存在 → **无作用域**）。
 ///
-/// 两道闸门在此注入：内核只认「上限是多少」，不关心它从哪个配置来。
+/// 两道闸门在此注入：共享实现只认「上限是多少」，不关心它从哪个配置来。
 /// 作用域判断也在此一次收口，之后读 / 注入 / 写三条路各自降级。
 pub fn store(
     agent_dirs: &AgentDirStore,
@@ -89,19 +88,19 @@ pub fn node_spec() -> MemoryNodeSpec<'static> {
 /// 相对地址是常态：provider 全程只跟相对地址打交道。需要协议级绝对地址的场合
 /// （提示词里印给模型的可编辑地址），由调用方经
 /// `symbio_core::vdfs::absolute_addr(ctx, rel)` 用上下文的当前父地址拼出——
-/// 挂载点叫什么不归本插件。文件名取 [`MEMORY_AGENTS_FILE`]：不写第二份地址。
+/// 挂载点叫什么不归本插件。文件名取 [`AGENT_MEMORY_FILE`]：不写第二份地址。
 pub fn rel_path(agent_id: &str) -> String {
-    format!("{agent_id}/{MEMORY_AGENTS_FILE}")
+    format!("{agent_id}/{AGENT_MEMORY_FILE}")
 }
 
-/// 系统提示词片段：**走内核排版**（地址 + 上限 + 当前 + 正文 + 截断提示）。
+/// 系统提示词片段：**走共享实现排版**（地址 + 上限 + 当前 + 正文 + 截断提示）。
 ///
 /// 地址与闸门都由本插件给出、也由本插件执行（整包浏览面负责 agent 目录里所有文件的
 /// 写入），所以这里是**唯一**需要印写入闸门的地方——印出来的数字是真的。
 ///
 /// 无作用域（agent 目录不存在）→ `None`：静默跳过，不往收集期错误桶里塞东西。
 pub fn segment(store: &MemoryFile, address: &str) -> Result<Option<String>, String> {
-    // 空文件 / 不存在 → 整段省略（内核的 `empty_hint` 是「空也要说一句」的用法，
+    // 空文件 / 不存在 → 整段省略（共享实现的 `empty_hint` 是「空也要说一句」的用法，
     // 这里不需要：没写过记忆时不该每轮都背一段头信息）
     if !store.has_scope() || store.read()?.trim().is_empty() {
         return Ok(None);

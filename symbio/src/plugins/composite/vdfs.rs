@@ -74,8 +74,8 @@ use super::registry::PluginRegistry;
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField, DetailOption};
 use crate::symbio_core::{descend_addr, vdfs_host_ctx};
 use crate::symbio_core::{
-    ConfigurableVisitor, DefaultConfigurableVisitor, Plugin, PluginInvokeRequestExt, PluginMeta,
-    CONFIGURABLE_VISITOR, PATH, PLUGIN_ID_MANAGER, TRAVERSE_AVAILABLE_TOOLS,
+    ConfigurableVisitor, Plugin, PluginInvokeRequestExt, PluginMeta, CONFIGURABLE_VISITOR, PATH,
+    PLUGIN_ID_MANAGER, TRAVERSE_AVAILABLE_TOOLS,
 };
 use crate::symbio_core::{
     VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError,
@@ -86,6 +86,8 @@ use crate::symbio_core::{
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+use crate::providers::collectors::DefaultConfigurableVisitor;
 
 /// 容器的 VDFS（包含子目录列表的 provider，见模块文档）
 pub struct CompositeVdfs {

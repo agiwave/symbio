@@ -132,7 +132,6 @@ pub(crate) struct TurnResult {
     pub(crate) root_id: String,
     pub(crate) tools_done: Vec<TurnToolCallInfo>,
     pub(crate) finish: ModelFinishReason,
-    pub(crate) had_tool: bool,
 }
 
 /// Stop 钩子的幂等触发器。
@@ -425,10 +424,9 @@ impl ChatOrchestrator {
         &self,
         root_id: &str,
         out: &TurnOutput,
-        tools: &[TurnToolCallInfo],
         sink: &ExecEventSink,
     ) {
-        if out.is_reasoning_only(tools.len()) {
+        if out.is_reasoning_only() {
             // reasoning-only：模型只产生了 reasoning，没有独立的文本回复。
             //
             // 同一段 reasoning 在落库时由 llm_build_assistant_messages 以「Text 响应子节点」承载

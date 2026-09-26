@@ -19,5 +19,5 @@
 
 pub mod init;
 mod plugins;
-pub(crate) mod providers;
+mod providers;
 pub mod symbio_core;

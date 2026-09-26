@@ -52,7 +52,7 @@ async fn list_unknown_dir_errors() {
 #[test]
 fn tools_cover_all_ops() {
     let visitor: Arc<dyn crate::symbio_core::CapabilityVisitor> =
-        Arc::new(crate::symbio_core::DefaultToolVisitor::new());
+        Arc::new(crate::providers::collectors::DefaultToolVisitor::new());
     let names: Vec<String> = tools::vdfs_tools(Arc::new(ToolVdfs::new(visitor)))
         .iter()
         .map(|t| t.name())

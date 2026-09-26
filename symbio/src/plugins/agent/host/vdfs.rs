@@ -16,7 +16,7 @@
 //! 三类容器等于宿主替能力目录解释语义（每类一套路径白名单、新建模板与默认正文），
 //! 改一处要改三处，且与宿主的技能系统 / MCP 客户端天然不同步。
 //!
-//! 唯一的例外是根下的 `AGENTS.md`（§6 人格与记忆），它走内核的
+//! 唯一的例外是根下的 `AGENTS.md`（§6 人格与记忆），它走共享实现的
 //! `MemoryFile::node`（带容量闸门），与工作区记忆同一口径。
 //!
 //! ## 挂载根只列「装进来的智能体」
@@ -35,7 +35,7 @@
 use super::instruction;
 use super::memory;
 use super::plugin::AgentPlugin;
-use super::store::{AgentDirRecord, AgentDirStore};
+use super::store::{AgentDirRecord, AgentDirStore, AGENT_MEMORY_FILE};
 use crate::providers::vdfs_service;
 use crate::symbio_core::{
     descend_addr, vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes,
@@ -45,7 +45,7 @@ use crate::symbio_core::{
     VdfsItem, VdfsNewType, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
     VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_EXT_FORM,
 };
-use crate::symbio_core::{MEMORY_AGENTS_FILE, PLUGIN_FILE, PLUGIN_ID_AGENT};
+use crate::symbio_core::{PLUGIN_FILE, PLUGIN_ID_AGENT};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -63,7 +63,7 @@ enum RelPath<'a> {
     Agent {
         id: &'a str,
     },
-    /// 人格与记忆：`<条目 id>/AGENTS.md`（§6，走内核记忆门面，不是普通文件）
+    /// 人格与记忆：`<条目 id>/AGENTS.md`（§6，走共享实现记忆门面，不是普通文件）
     Memory {
         id: &'a str,
     },
@@ -81,13 +81,13 @@ fn parse_rel_path(path: &str) -> RelPath<'_> {
     }
     // 保留名：挂载根下的 `AGENTS.md` 是**本应用自身**的指令，不是名为它的 agent 目录
     // （agent id 首字符必须是小写字母或数字，两者不可能相撞）
-    if p == MEMORY_AGENTS_FILE {
+    if p == AGENT_MEMORY_FILE {
         return RelPath::Instruction;
     }
     match p.split_once('/') {
         None => RelPath::Agent { id: p },
         // 第二段是记忆文件名 → 记忆，而不是「名为 AGENTS.md 的普通文件」
-        Some((id, rest)) if rest == MEMORY_AGENTS_FILE => RelPath::Memory { id },
+        Some((id, rest)) if rest == AGENT_MEMORY_FILE => RelPath::Memory { id },
         Some((id, rest)) => RelPath::File { id, rel: rest },
     }
 }
@@ -515,7 +515,7 @@ impl AgentPlugin {
         content: &VdfsContent,
     ) -> VdfsResult<VdfsWriteResponse> {
         let store = self.store();
-        // 系统智能体自身的指令写回（容量闸门在内核里，本插件不重复实现）
+        // 系统智能体自身的指令写回（容量闸门在共享实现里，本插件不重复实现）
         if matches!(parse_rel_path(path), RelPath::Instruction) {
             if content.binary {
                 return Err(VdfsError::invalid("AGENTS.md 是文本文件，不接受二进制内容"));
@@ -531,7 +531,7 @@ impl AgentPlugin {
                 etag: None,
             });
         }
-        // 智能体记忆写回（容量闸门在内核里，本插件不重复实现）
+        // 智能体记忆写回（容量闸门在共享实现里，本插件不重复实现）
         if let RelPath::Memory { id } = parse_rel_path(path) {
             if content.binary {
                 return Err(VdfsError::invalid("智能体记忆是文本文件，不接受二进制内容"));
@@ -594,14 +594,14 @@ impl AgentPlugin {
         if matches!(parse_rel_path(path), RelPath::Instruction) {
             return Err(VdfsError::Forbidden(format!(
                 "系统指令不可删除（删除即丢失全部指令）。\
-                 如需清空，请向 `{MEMORY_AGENTS_FILE}` 写入空内容。"
+                 如需清空，请向 `{AGENT_MEMORY_FILE}` 写入空内容。"
             )));
         }
         // 智能体记忆不可删除（与工作区记忆同一口径）：要清空就写入空内容
         if matches!(parse_rel_path(path), RelPath::Memory { .. }) {
             return Err(VdfsError::Forbidden(format!(
                 "智能体记忆不可删除（删除即丢失全部长期记忆）。\
-                 如需清空，请向 `{MEMORY_AGENTS_FILE}` 写入空内容。"
+                 如需清空，请向 `{AGENT_MEMORY_FILE}` 写入空内容。"
             )));
         }
         // Agent 目录内的文件 / 子目录

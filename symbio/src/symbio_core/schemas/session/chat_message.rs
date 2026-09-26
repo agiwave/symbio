@@ -266,6 +266,13 @@ pub struct ChatMessage {
     ///
     /// `seq` 由会话存储在**写入时**分配（Lamport 计数器：从已有最大 seq 续上），
     /// 单调递增且永不并列，因此能无损恢复插入顺序，且跨调用、跨进程重启都不回退。
+    ///
+    /// **字段在本层，分配策略不在**：本结构是**跨栈 schema**（前端逐字段镜像），
+    /// 故 `seq` 必须在这里；而「怎么分配、什么时候补号、整表重写时谁让位」是
+    /// 会话存储的实现策略，住在 session 插件的 `chat_session.rs`
+    /// （`max_seq` / `assign_seq`，与两条写入路径 `append_messages` /
+    /// `replace_messages` 同处一文件）。core 只声明**存在一个顺序锚点**，
+    /// 不规定它怎么被算出来。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seq: Option<i64>,
 
@@ -287,106 +294,6 @@ pub struct ChatMessage {
     /// OpenAI Responses 的 `call_id` 链）。历史数据无此字段：请求构建回退节点 id。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
-}
-
-/// 取一批消息中已有的最大 `seq`，作为后续分配的起点（Lamport 计数器的当前水位）。
-pub fn max_seq(messages: &[ChatMessage]) -> i64 {
-    messages.iter().filter_map(|m| m.seq).max().unwrap_or(0)
-}
-
-/// 按切片顺序为消息补发 `seq`（只补缺号），返回分配后的新水位。
-///
-/// # 两条不变式（顺序与稳定，缺一不可）
-///
-/// 1. **顺序**：`seq` 沿数组严格递增——调用方（`replace_messages`）的契约是
-///    「数组顺序即权威顺序」，`ordered()` 靠 `seq` 复现它；
-/// 2. **稳定**：**已带 `seq` 的消息一律原样保留**，绝不因为一次整表重写而改号。
-///
-/// 第 2 条不是可有可无的洁癖：`seq` 是**消费者（前端）手里的顺序锚点**。
-/// 前端在流式阶段就按本地游标给消息排好了序，整表重写若把既有消息改成新号，
-/// 两边就各持一套互不相容的序号——同一条消息在「有后端序号」与「有本地序号」
-/// 两种形态下会排到列表的两个位置，压缩后顺序看起来就乱了。
-///
-/// # 填号方向：无号项从**相邻的既有序号**向外让位
-///
-/// `base` 只在**新列表完全没有既有序号**时才用得上（整批新节点的场景，
-/// 接在旧水位之后即可）。只要列表里已经有序号，无号项就按它在数组中的位置
-/// 分三段处理——**每一段都朝"不越过既有序号"的方向让位**：
-///
-/// | 位置 | 取值 | 理由 |
-/// |---|---|---|
-/// | 开头（压缩快照接替被压掉的历史） | `首号 − k … 首号 − 1`（**往下**） | 往上找会越过首号，快照反而排到保留区**之后** |
-/// | 末尾（本轮在途追加） | `末号 + 1 …`（往上） | 与既有历史接续，不抢前面的号 |
-/// | 夹缝（两个既有序号之间） | `前驱 + 1 …`（往上） | 间隙足够时不会撞上后驱 |
-///
-/// **为什么开头那一段必须整体往下、且一次算好**：逐个"往上找空位"会先占用
-/// 首号本身，把既有序号顶成下一个号——正是"seq 随压缩改变"的直接来源。
-/// 由 `首号` 是最小序号可知 `首号 − k … 首号 − 1` 全部落在既有序号**之外**，
-/// 因此这一段天然不可能撞号，也不需要逐个探测。
-///
-/// 旧实现从 `base` 起向上无条件填号，于是 L2 压缩这种「前缀重写」必然被改号：
-/// 新列表是 `[快照, 保留区…]`，快照无 seq 拿到 `base+1`（成了**最大**），
-/// 保留区沿用旧**低**序号却因 `existing > cursor` 不成立而被逐个改号——
-/// 实测会话 `mtmae8j2wxam4dhrei` 的保留区因此从 `631..642` 被抬到 `870..881`。
-/// 顺序虽然被"修"对了，代价却是整段历史的序号全部重排。
-///
-/// 真正的修法也在调用方：压缩时给快照显式指定**被压缩内容的槽位序号**
-/// （`keep[0].seq - 1`，见 `chat_loop::compress`），使新列表**本来就单调**。
-/// 于是本函数退化为"只填缺号"，既有序号一个不动——顺序与稳定同时成立。
-///
-/// 兜底：夹缝容不下无号项时（`前驱` 与 `后驱` 之间没有空号），按"前驱 + 1"会
-/// 越过 `后驱`，破坏数组顺序。此时**顺序不变式优先**——整表按数组顺序重排
-/// （与旧实现同口径）。该输入在真实路径上不可达（快照在开头、在途追加在末尾），
-/// 但"静默破坏顺序"比"多一次改号"更糟，故显式兜底而不是放任。
-pub fn assign_seq(messages: &mut [ChatMessage], base: i64) -> i64 {
-    // 全列表无号（整批新节点）：接在调用方水位之后——`base` 的唯一用途
-    let Some(first) = messages.iter().filter_map(|m| m.seq).min() else {
-        let mut cursor = base;
-        for m in messages.iter_mut() {
-            cursor += 1;
-            m.seq = Some(cursor);
-        }
-        return cursor;
-    };
-
-    // ① 开头连续的无号项：整体落在 `首号` 之前（`首号` 是最小号 ⇒ 必不撞号）
-    let head = messages.iter().take_while(|m| m.seq.is_none()).count();
-    for (cursor, m) in (first - head as i64..).zip(messages.iter_mut().take(head)) {
-        m.seq = Some(cursor);
-    }
-
-    // ② 其余无号项：从「前驱 + 1」往上找空位。前驱初始取 `base`，但列表首项
-    //    要么是刚填好的开头段、要么是既有序号，第一轮就会把水位拉到它上面。
-    let mut taken: std::collections::HashSet<i64> = messages.iter().filter_map(|m| m.seq).collect();
-    let mut cursor = base;
-    for m in messages.iter_mut() {
-        match m.seq {
-            // 既有序号：原样保留（**绝不改号**），并作为新的前驱水位
-            Some(existing) => cursor = existing,
-            None => {
-                let mut candidate = cursor + 1;
-                while taken.contains(&candidate) {
-                    candidate += 1;
-                }
-                m.seq = Some(candidate);
-                taken.insert(candidate);
-                cursor = candidate;
-            }
-        }
-    }
-
-    // ③ 夹缝容不下时的兜底：顺序不变式优先于稳定不变式（数组顺序是权威）
-    if messages.windows(2).any(|w| w[0].seq >= w[1].seq) {
-        let start = first - head as i64;
-        let mut cursor = start - 1;
-        for m in messages.iter_mut() {
-            cursor += 1;
-            m.seq = Some(cursor);
-        }
-        return cursor;
-    }
-
-    cursor
 }
 
 /// 会话恢复动作。

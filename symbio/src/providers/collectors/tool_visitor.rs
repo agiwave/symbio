@@ -1,10 +1,11 @@
-//! 能力管理器的默认实现（跨插件共享设施）
+//! 默认能力收集器 —— [`CapabilityVisitor`] 的内存实现
 //!
-//! ## 为什么放在 `symbio_core`
+//! ## 为什么在 `providers/` 而不是 `symbio_core`
 //!
-//! 插件之间**互相不可见**（`plugins/mod.rs` 的架构约束），只能依赖 `symbio_core`。
-//! 会话编排（session 插件）需要自行构造 `CapabilityVisitor` 来收集各插件贡献的工具，
-//! 因此 `DefaultToolVisitor` 必须作为共享设施定义在 core，不得放进任何插件的私有模块。
+//! 本类型的**写入者是全体插件**（经 `ctx` 的 `CAPABILITY_VISITOR` 键注册工具 / 模型服务 /
+//! 系统提示词 / VDFS 挂载点），安装它的宿主（session 的 `collect_capabilities`）只是
+//! 其中之一。它不是任何插件的内部物，故按「不存在第二种实现的机制底座直接组合具体类型」
+//! 落在实现层——完整判据见 [`crate::providers::collectors`] 的模块文档。
 
 use crate::symbio_core::{
     capability_invoke, Capability, CapabilityMeta, CapabilityVisitor, ModelProvider, PluginError,
@@ -144,5 +145,5 @@ impl CapabilityVisitor for DefaultToolVisitor {
 }
 
 #[cfg(test)]
-#[path = "tools.test.rs"]
+#[path = "tool_visitor.test.rs"]
 mod tests;

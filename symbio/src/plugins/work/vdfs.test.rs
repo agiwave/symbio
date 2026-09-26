@@ -66,7 +66,7 @@ async fn root_lists_the_memory_file_and_nothing_else() {
 
     assert_eq!(nodes.len(), 1, "根下只列记忆文件（配置文档不并列）");
     let n = &nodes[0].node;
-    assert_eq!(n.name, MEMORY_AGENTS_FILE);
+    assert_eq!(n.name, WORK_MEMORY_FILE);
     assert_eq!(n.access, VdfsAccess::READ_WRITE);
     assert_eq!(
         n.effective_ext().as_deref(),
@@ -96,7 +96,7 @@ async fn no_workspace_lists_nothing() {
         .is_empty());
     // 没有工作区 = 记忆这个资源不存在，而不是「空文件」
     assert!(p
-        .dispatch(&vctx(None), MEMORY_AGENTS_FILE, VdfsRequest::Stat)
+        .dispatch(&vctx(None), WORK_MEMORY_FILE, VdfsRequest::Stat)
         .await
         .is_err());
 }
@@ -162,7 +162,7 @@ async fn missing_memory_reads_as_empty() {
     let c = vctx(Some(ws.path().to_string_lossy().as_ref()));
 
     let content = p
-        .dispatch(&c, MEMORY_AGENTS_FILE, VdfsRequest::Read)
+        .dispatch(&c, WORK_MEMORY_FILE, VdfsRequest::Read)
         .await
         .unwrap()
         .into_read()
@@ -180,7 +180,7 @@ async fn write_then_read_roundtrips_and_reports_creation() {
     let first = p
         .dispatch(
             &c,
-            MEMORY_AGENTS_FILE,
+            WORK_MEMORY_FILE,
             VdfsRequest::Write {
                 content: VdfsContent::text("偏好中文"),
             },
@@ -194,7 +194,7 @@ async fn write_then_read_roundtrips_and_reports_creation() {
     let again = p
         .dispatch(
             &c,
-            MEMORY_AGENTS_FILE,
+            WORK_MEMORY_FILE,
             VdfsRequest::Write {
                 content: VdfsContent::text("偏好中文 + 简洁"),
             },
@@ -206,7 +206,7 @@ async fn write_then_read_roundtrips_and_reports_creation() {
     assert!(!again.created, "覆盖写入不是创建");
 
     let content = p
-        .dispatch(&c, MEMORY_AGENTS_FILE, VdfsRequest::Read)
+        .dispatch(&c, WORK_MEMORY_FILE, VdfsRequest::Read)
         .await
         .unwrap()
         .into_read()
@@ -229,7 +229,7 @@ async fn oversized_write_is_rejected_by_the_capacity_gate() {
 
     p.dispatch(
         &c,
-        MEMORY_AGENTS_FILE,
+        WORK_MEMORY_FILE,
         VdfsRequest::Write {
             content: VdfsContent::text("12345678"),
         },
@@ -239,7 +239,7 @@ async fn oversized_write_is_rejected_by_the_capacity_gate() {
     let err = p
         .dispatch(
             &c,
-            MEMORY_AGENTS_FILE,
+            WORK_MEMORY_FILE,
             VdfsRequest::Write {
                 content: VdfsContent::text("123456789"),
             },
@@ -252,7 +252,7 @@ async fn oversized_write_is_rejected_by_the_capacity_gate() {
     );
     assert!(err.to_string().contains("超出容量上限"), "{err}");
     assert_eq!(
-        p.dispatch(&c, MEMORY_AGENTS_FILE, VdfsRequest::Read)
+        p.dispatch(&c, WORK_MEMORY_FILE, VdfsRequest::Read)
             .await
             .unwrap()
             .into_read()
@@ -273,7 +273,7 @@ async fn binary_write_is_rejected() {
     let err = p
         .dispatch(
             &c,
-            MEMORY_AGENTS_FILE,
+            WORK_MEMORY_FILE,
             VdfsRequest::Write {
                 content: VdfsContent::binary("AA==", 1),
             },
@@ -293,7 +293,7 @@ async fn delete_is_forbidden_but_clearing_by_write_is_allowed() {
     let c = vctx(Some(ws.path().to_string_lossy().as_ref()));
     p.dispatch(
         &c,
-        MEMORY_AGENTS_FILE,
+        WORK_MEMORY_FILE,
         VdfsRequest::Write {
             content: VdfsContent::text("内容"),
         },
@@ -304,7 +304,7 @@ async fn delete_is_forbidden_but_clearing_by_write_is_allowed() {
     let err = p
         .dispatch(
             &c,
-            MEMORY_AGENTS_FILE,
+            WORK_MEMORY_FILE,
             VdfsRequest::Delete { recursive: false },
         )
         .await
@@ -320,7 +320,7 @@ async fn delete_is_forbidden_but_clearing_by_write_is_allowed() {
     // 清空的正确姿势：写入空内容
     p.dispatch(
         &c,
-        MEMORY_AGENTS_FILE,
+        WORK_MEMORY_FILE,
         VdfsRequest::Write {
             content: VdfsContent::text(""),
         },
@@ -328,7 +328,7 @@ async fn delete_is_forbidden_but_clearing_by_write_is_allowed() {
     .await
     .unwrap();
     assert_eq!(
-        p.dispatch(&c, MEMORY_AGENTS_FILE, VdfsRequest::Read)
+        p.dispatch(&c, WORK_MEMORY_FILE, VdfsRequest::Read)
             .await
             .unwrap()
             .into_read()

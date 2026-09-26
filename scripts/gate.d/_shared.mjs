@@ -178,7 +178,33 @@ export const BASELINE = {
   //      **+2**（压缩永久失败熔断）。逐文件核对方式：`git diff 45466fc..HEAD -- symbio/src`
   //      数 `#[test]` / `#[tokio::test]` 的增删（+6 / −0），不是估算。
   //      本格此前滞后一格：那批修复只跑了定向测试，基线没跟着改；本次门禁全量实测对齐。
-  rustTests: 958,
+  // 960：共享内核收口 P2（2026-09-26）——**净 +2**（958 → 960），工具调用累积器
+  //      `TurnToolCallAccumulator` 从 `symbio_core/llm/turn.rs` 迁到
+  //      `plugins/model/tool_accumulator.rs`，测试**净迁移 0**（10 条随迁、4 条留 core），
+  //      新增两条锁住本次收口的形状不变式：
+  //        +1  `plugins/model/tool_accumulator.test.rs` 的 `finish_sorts_by_wire_index`
+  //            ——`finish` 按 wire index 升序收口（`HashMap` 迭代顺序随进程随机，
+  //            不排序则同一批工具的执行顺序在两次运行间漂移）。
+  //        +1  `symbio_core/llm/turn.test.rs` 的
+  //            `into_messages_carries_tool_calls_from_the_result_field`
+  //            ——`TurnOutput.tool_calls`（结果形态）是落库的唯一来源，节点 id 必须
+  //            原样落成 ToolCall 子节点（此前 id 由 `get_completed()` 二次产生）。
+  // 959：共享内核收口 P3（2026-09-26）——**净 −1**（960 → 959），`max_seq` / `assign_seq`
+  //      从 `symbio_core/schemas/session/chat_message.rs` 迁到
+  //      `plugins/session/chat_session.rs`（`seq` **字段**是跨栈 schema、留 core；
+  //      「怎么补号」是存储写入边界的策略，消费者只有 `chat_session.rs` 内部）。
+  //      逐文件核对（`git show HEAD:… | grep -c`，不是估算）：
+  //        −7  `symbio_core/schemas/session/chat_message.test.rs`（10 → 3）
+  //            —— 7 条 `assign_seq_*` 随实现迁出，core 只剩 3 条契约用例。
+  //        +6  `plugins/session/chat_session.test.rs`（19 → 25）
+  //            —— 5 条迁入（顺序 / 稳定 / base 语义 / 开头段 / 末尾段）
+  //               + 1 条新增 `assign_seq_on_empty_list_returns_base`。
+  //      同批还删了两处死代码（不增减用例）：`assign_seq` 的「夹缝无号项 → 整表重排」
+  //      兜底（输入不可达，且修法本身破坏「既有序号原样保留」不变式，改由末尾
+  //      `debug_assert!` 守前置条件）；`close_turn` 的 `finish.is_length() && had_tool`
+  //      分支与 `TurnResult.had_tool` 字段（该意图已由 `tool_executor.rs` 的
+  //      `parse_error` 分支承担，且更靠前——拒绝执行 + 以协议错误回报模型）。
+  rustTests: 959,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

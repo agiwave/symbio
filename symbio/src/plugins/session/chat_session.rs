@@ -5,7 +5,8 @@
 //! 构造，因此与持久会话共享同一套孤儿清理、轮次窗口与配置读取语义（审计 B1）。
 //!
 //! - 持久化实现委托 `super::store::SessionStore` 落库；不落盘面向 `_t_` 临时会话。
-//! - 滑动窗口、孤儿剔除、时间戳回填等纯函数均在本文件。
+//! - 滑动窗口、孤儿剔除、时间戳回填、**序号分配**（`max_seq` / `assign_seq`）等纯函数
+//!   均在本文件——它们是**存储写入边界**的策略，与两条写入路径同处一文件便于对照。
 //! - `prune_historical_tool_calls`（存储期工具链物理裁剪）由原 `context.rs`
 //!   并入——其唯一消费者就是本模块（体检备注 audit-5）。
 //!
@@ -159,6 +160,103 @@ fn backfill_timestamps(messages: Vec<ChatMessage>, now: i64) -> Vec<ChatMessage>
             m
         })
         .collect()
+}
+
+/// 取一批消息中已有的最大 `seq`，作为后续分配的起点（Lamport 计数器的当前水位）。
+fn max_seq(messages: &[ChatMessage]) -> i64 {
+    messages.iter().filter_map(|m| m.seq).max().unwrap_or(0)
+}
+
+/// 按切片顺序为消息补发 `seq`（**只补缺号**），返回分配后的新水位。
+///
+/// 自 `symbio_core::schemas::session::chat_message` 迁入。`seq` **字段**是跨栈 schema
+/// （前端逐字段镜像，必须留 core，见该字段文档）；而「怎么补号」是会话存储的实现策略
+/// ——调用点只有本文件的 `replace_messages` 一处，故与它的兄弟 `append_messages`
+/// （另一条分配路径）同处一文件，两条路径可以直接对照着读。
+///
+/// # 三条不变式（前两条由本函数保证，第三条由调用方保证）
+///
+/// 1. **顺序**：`seq` 沿数组严格递增——调用方的契约是「数组顺序即权威顺序」，
+///    `get_messages` 的排序靠 `seq` 复现它；
+/// 2. **稳定**：**已带 `seq` 的消息一律原样保留**，绝不因为一次整表重写而改号。
+///    第 2 条不是洁癖：`seq` 是**消费者（前端）手里的顺序锚点**。前端在流式阶段就按
+///    本地游标排好了序，整表重写若把既有消息改成新号，两边就各持一套互不相容的序号
+///    ——同一条消息会排到列表的两个位置，压缩后顺序看起来就乱了；
+/// 3. **前置条件**：无号项只出现在**开头**或**末尾**，不夹在两个既有序号之间。
+///    `replace_messages` 的全部调用点都满足：压缩 → 快照在**开头**（且已带槽位号）；
+///    追加 / 补写 / 恢复 / 清空 → 新节点在**末尾**。违反会被函数末尾的
+///    `debug_assert!` 当场拦下。
+///
+/// # 填号方向：无号项朝「不越过既有序号」的方向让位
+///
+/// `base` 只在**新列表完全没有既有序号**时才用得上（整批新节点 / 清空后重建）。
+/// 只要列表里已经有序号：
+///
+/// | 位置 | 取值 | 理由 |
+/// |---|---|---|
+/// | 开头（压缩快照接替被压掉的历史） | `首号 − k … 首号 − 1`（**往下**） | 往上找会越过首号，快照反而排到保留区**之后** |
+/// | 末尾（在途追加 / 恢复时新建的子节点） | `末号 + 1 …`（往上） | 与既有历史接续，不抢前面的号 |
+///
+/// **为什么开头那一段必须整体往下、且一次算好**：逐个「往上找空位」会先占用首号
+/// 本身，把既有序号顶成下一个号——正是「seq 随压缩改变」的直接来源。由 `首号` 是最小
+/// 序号可知 `首号 − k … 首号 − 1` 全部落在既有序号**之外**，故这一段天然不可能撞号，
+/// 也不需要逐个探测。
+///
+/// 旧实现从 `base` 起向上无条件填号，于是 L2 压缩这种「前缀重写」必然被改号：新列表是
+/// `[快照, 保留区…]`，快照无 seq 拿到 `base+1`（成了**最大**），保留区沿用旧**低**序号
+/// 却因 `existing > cursor` 不成立而被逐个改号——实测会话 `mtmae8j2wxam4dhrei` 的保留区
+/// 因此从 `631..642` 被抬到 `870..881`。顺序虽然被「修」对了，代价却是整段历史的序号
+/// 全部重排。
+///
+/// 真正的修法也在调用方：压缩时给快照显式指定**被压缩内容的槽位序号**
+/// （`keep[0].seq - 1`，见 `compression::slot_seq`），使新列表**本来就单调**。
+/// 于是本函数退化为「只补缺号」，既有序号一个不动。
+///
+/// **已删除的兜底**：旧版还有一段「夹缝容不下无号项时整表按数组顺序重排」，它只在
+/// 「无号项夹在两个既有序号之间」时触发——那正是上面的前置条件所排除的输入（该分支
+/// 自带的文档也写着「该输入在真实路径上不可达」）。且它的「修法」是**整表改号**，
+/// 本身就破坏第 2 条不变式：为一个不可达输入保留一条有害分支，不如把前置条件写成断言。
+fn assign_seq(messages: &mut [ChatMessage], base: i64) -> i64 {
+    // 全列表无号（整批新节点 / 清空后重建）：接在调用方水位之后——`base` 的唯一用途
+    let Some(first) = messages.iter().filter_map(|m| m.seq).min() else {
+        let mut cursor = base;
+        for m in messages.iter_mut() {
+            cursor += 1;
+            m.seq = Some(cursor);
+        }
+        return cursor;
+    };
+
+    // ① 开头连续的无号项：整体落在 `首号` 之前（`首号` 是最小号 ⇒ 必不撞号）
+    let head = messages.iter().take_while(|m| m.seq.is_none()).count();
+    for (cursor, m) in (first - head as i64..).zip(messages.iter_mut().take(head)) {
+        m.seq = Some(cursor);
+    }
+
+    // ② 其余无号项：接在**前驱**之后。前置条件保证这里只会遇到末尾连续段，而既有序号
+    //    全部在它之前 ⇒ `前驱 + 1` 必未被占用，无需探测空位（旧版的 `taken` 集合与
+    //    「往上找空位」循环正是为夹缝场景写的，已随兜底一起删除）。
+    //    前驱水位初值取 `base` 只有形式意义：循环首项必是既有序号（`head` 是**最大**
+    //    连续无号前缀），故它在第一轮就被覆盖。
+    let mut cursor = base;
+    for m in messages.iter_mut() {
+        match m.seq {
+            // 既有序号：原样保留（**绝不改号**），并作为新的前驱水位
+            Some(existing) => cursor = existing,
+            None => {
+                cursor += 1;
+                m.seq = Some(cursor);
+            }
+        }
+    }
+
+    debug_assert!(
+        messages.windows(2).all(|w| w[0].seq < w[1].seq),
+        "assign_seq 的前置条件被破坏：无号项只允许出现在开头或末尾（实得 {:?}）",
+        messages.iter().map(|m| m.seq).collect::<Vec<_>>()
+    );
+
+    cursor
 }
 
 // PersistentChatSession
@@ -315,7 +413,7 @@ impl PersistentChatSession {
         let cfg = self.config.read().await;
 
         // 分配单调序号：起点取当前会话已有最大 seq，保证追加的消息严格排在其后。
-        let mut seq_cursor = cm::max_seq(&session.messages);
+        let mut seq_cursor = max_seq(&session.messages);
 
         // 本次追加的 id（顺序 = 追加顺序）：末尾据此从落库结果里取回**权威副本**，
         // 交给调用方做落库回包（见 trait 上 `append_messages` 的说明）。
@@ -434,7 +532,7 @@ impl PersistentChatSession {
                 m.seq = None;
             }
         }
-        cm::assign_seq(&mut messages, cm::max_seq(&session.messages));
+        assign_seq(&mut messages, max_seq(&session.messages));
         // 孤儿存档：`replace_messages` 整体重写消息列表（L2 语义压缩 /
         // Streaming 清理），被丢弃消息引用的 L0 `tool_archives/` 存档随之失去引用。
         // 此处**只统计不删除**（审计 A3）：归档的磁盘生命周期由 `tool_result_guard`

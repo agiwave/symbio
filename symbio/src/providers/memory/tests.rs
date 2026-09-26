@@ -1,6 +1,6 @@
-//! `symbio_core/memory.rs` 的单元测试 —— 三层记忆共用的那一份口径。
+//! `providers/memory/mod.rs` 的单元测试 —— 三层记忆共用的那一份口径。
 //!
-//! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
+//! 与实现**同级**分文件（约定：`mod.rs` + `tests.rs`）。
 //!
 //! 这里钉的是**所有层都必须一致**的行为，因此每条都对应一个「一旦分叉就会让用户
 //! 困惑」的问题：
@@ -10,22 +10,28 @@
 //! - 「当前」报的是文件总量，不是这一轮给了多少；
 //! - 无作用域是**正常状态**（不注入），不是错误；
 //! - 片段头信息只占一行（它每轮都要付 token）。
+//!
+//! 文件名刻意取一个**不是** `AGENTS.md` 的值：本模块不认识文件名（各层自己定，
+//! 见模块文档），测试用别的名字才**证明**这一点——若哪天有人把某个具体文件名
+//! 硬编码回来，这里的用例会立刻红。
 
-use super::*;
+use super::{
+    memory_render_segment, MemoryFile, MemoryInjection, MemoryNodeSpec, MemorySegmentSpec,
+};
+use crate::symbio_core::VdfsAccess;
 use tempfile::TempDir;
 
-/// 测试用**合成地址**：内核只负责「把调用方给的地址印进片段」，不认识任何地址方案
+/// 测试用**合成文件名**：本模块不认识任何真实层的名字，用例自己带一个。
+const FILE_NAME: &str = "NOTES.md";
+
+/// 测试用**合成地址**：本模块只负责「把调用方给的地址印进片段」，不认识任何地址方案
 /// （虚拟根叫什么、工作目录在哪都不归它）。用一个明显不是真实根名的前缀，
-/// 使「内核里混进了真实的挂载规则」这类回归在测试里必然暴露。
-const ADDR: &str = "@vfs/work/AGENTS.md";
+/// 使「模块里混进了真实的挂载规则」这类回归在测试里必然暴露。
+const ADDR: &str = "@vfs/work/NOTES.md";
 
 /// 临时目录里的一个记忆文件
 fn file_in(tmp: &TempDir, write_max: usize, inject_max: usize) -> MemoryFile {
-    MemoryFile::new(
-        Some(tmp.path().join(MEMORY_AGENTS_FILE)),
-        write_max,
-        inject_max,
-    )
+    MemoryFile::new(Some(tmp.path().join(FILE_NAME)), write_max, inject_max)
 }
 
 fn spec() -> MemorySegmentSpec<'static> {
@@ -81,8 +87,8 @@ fn absent_scope_is_a_normal_state() {
     // 注入是 None —— 静默跳过，不往收集期错误桶里塞东西
     assert_eq!(m.inject().unwrap(), None);
     assert_eq!(m.segment(&spec()).unwrap(), None);
-    // 节点名仍有兜底（地址用真实文件名）
-    assert_eq!(m.file_name(), MEMORY_AGENTS_FILE);
+    // 无文件 → 无名字（本模块没有兜底文件名）
+    assert_eq!(m.file_name(), None);
 }
 
 // ==================== 读写 ====================
@@ -274,7 +280,7 @@ fn node_shape_is_shared_by_list_and_stat() {
         description: "本工作区的长期记忆",
     });
 
-    assert_eq!(n.name, MEMORY_AGENTS_FILE, "节点名 = 真实文件名");
+    assert_eq!(n.name, FILE_NAME, "节点名 = 真实文件名");
     assert_eq!(n.title, "工作区记忆");
     assert_eq!(n.kind, "work");
     assert_eq!(n.size, Some("内容".len() as u64));

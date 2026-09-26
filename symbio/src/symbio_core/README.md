@@ -1,15 +1,15 @@
 # symbio_core —— 内核契约层：命名与结构规范
 
 本目录是**内核契约层 + 跨插件共享内核**：放跨插件共享的 trait、协议类型、词表常量、
-纯工具函数，以及**被多个模块消费的共享机制**（如 `memory` 的记忆文件内核、`logger`
+纯工具函数，以及**被多个模块消费的共享机制**（如 `event_bus` 的全局订阅表、`logger`
 的结构化日志与级别闸门）。判据只有一个——**依赖方数量**：只被一个模块依赖的内容一律下沉回该
 模块，不论它「够不够底层」（见 [ADR-023](../../../docs/DECISIONS.md)）。
 本文是该目录**命名与结构**的唯一 owner。
 
 > 「不放实现」是**方向**而非字面事实：域里既有纯契约（`vdfs` / `capability` / `llm`
-> 的 trait 面），也有共享实现（`memory` 的值对象 + 纯函数、`event_bus` 的全局订阅表）。
+> 的 trait 面），也有共享实现（`event_bus` 的全局订阅表、`logger` 的进程级闸门）。
 > 判据是「谁依赖它」，不是「它抽象不抽象」——把共享机制硬抽成 trait
-> 只会多一层间接（见 [`memory/mod.rs`](./memory/mod.rs) 的论述）。
+> 只会多一层间接（见 [ADR-035](../../../docs/DECISIONS.md)）。
 
 各域职责、域清单与豁免词表在下面的 §1–§3；单个域的机制写在它的 `mod.rs` 文档头里
 （本文不复述）。
@@ -30,7 +30,7 @@
 
    | 符号 | 形态 | 例 |
    |---|---|---|
-   | 类型 / trait | 域名（PascalCase）+ 语义 | `ExecEventSink` · `VdfsNode` · `MemoryFile` · `CapabilityMeta` |
+   | 类型 / trait | 域名（PascalCase）+ 语义 | `ExecEventSink` · `VdfsNode` · `PluginDir` · `CapabilityMeta` |
    | 常量 / 静态量 | 域名（SCREAMING_SNAKE）+ 语义 | `VDFS_ACTION_ABORT` · `EVENT_BUS_KIND_VDFS` · `ASSEMBLY_SUB_AGENT_PLUGINS` |
    | 函数 / 自由函数 | 域名（snake_case）+ 语义 | `clock_now_ms` · `vdfs_notify_change` · `capability_resolve` · `creator_create_object` |
 
@@ -45,7 +45,7 @@
 
    | 手段 | 何时用 | 实例 |
    |---|---|---|
-   | **子命名空间** | 域内按主题分了文件，且主题名比域名更有信息量 | `llm`：`Model*`（`model_provider.rs`）· `Turn*`（`turn.rs`）。`capability`：`Configurable*`（`configurable.rs`）· `Option*`（`option.rs`）· `Tool*`（`tools.rs`），外加**模块**形态的 `failure_kind`。`plugin`：`ROUTE_*`（`route.rs`）· `TRAVERSE_*`（`traverse.rs`） |
+   | **子命名空间** | 域内按主题分了文件，且主题名比域名更有信息量 | `llm`：`Model*`（`model_provider.rs`）· `Turn*`（`turn.rs`）。`capability`：`Configurable*`（`configurable.rs`）· `Option*`（`option.rs`）· `Tool*`（`tool_name.rs`），外加**模块**形态的 `failure_kind`。`plugin`：`ROUTE_*`（`route.rs`）· `TRAVERSE_*`（`traverse.rs`） |
    | **后缀** | 该域的类型名有一个比域名更强的类别词 | `keys` 的 `…Key`（`PathKey`）——`KeyPath` 会读成「键的路径」，语义反了 |
    | **登记缩写** | 域名的大写形式冗余且不增加信息 | `logger` → `LOG_`（`LOG_LEVEL_INFO` 已足够定位） |
 
@@ -84,7 +84,7 @@
    协议 schema 的词汇表就是它的命名空间，收敛成平铺反而丢失 `session::chat_message`
    这类语义。其余深路径（`symbio_core::plugin::dir::` 之类）视为不规范，应改为根平铺。
 
-### 域前缀对照表（全 15 域 —— 新增符号照此取名）
+### 域前缀对照表（全 14 域 —— 新增符号照此取名）
 
 这张表是第 2 条的**唯一执行口径**：拿不准新符号叫什么，先在这里查它的域。
 「—」= 该域没有这一类符号（不是「不用前缀」）。**一个前缀只属于一个域。**
@@ -104,7 +104,6 @@
 | `keys` | `…Key`（**后缀**） | **裸名**（实例） | — | 只有键：类型带 `Key` 后缀、实例裸名。**本域不收字符串常量** |
 | `llm` | 子命名空间 `Model*` · `Turn*` | — | `llm_` | 对应 `model_provider.rs` / `turn.rs` |
 | `logger` | — | `LOG_`（登记缩写） | `logger_` | 常量用登记缩写，函数用全名——两者不混 |
-| `memory` | `Memory` | `MEMORY_` | `memory_` | |
 | `plugin` | `Plugin` | `PLUGIN_`；子命名空间 `ROUTE_*` · `TRAVERSE_*` | `plugin_` | `PLUGIN_` 下细分：`PLUGIN_ID_*`（工厂 id）· `PLUGIN_KEY_*`（清单键）· `PLUGIN_FILE` · `PLUGIN_PAYLOAD_KEY` |
 | `schemas` | 协议词 | 协议词 | 协议词 | 命名空间就是协议本身，见 §3 |
 | `text` | — | — | `text_` | 只有两个纯函数 |
@@ -119,6 +118,7 @@
 > **不算**域前缀：`DynVdfsProvider` = `Dyn` + `VdfsProvider`，`DefaultToolVisitor` =
 > `Default` + `ToolVisitor`。限定词表放在标记里而不是散文里，是为了让守卫能**解析**它
 > （与 `plugin-entry-audit` 的 `<!-- vocab:… -->` 同一约定：**标了才认，没标不猜**）。
+> （`DefaultToolVisitor` 已随收集器默认实现迁到 `providers/collectors/`，此处只作**词法**示例。）
 >
 > 这张表由 `scripts/core-naming-audit.mjs` **机械核对**：它枚举本层公开面，逐个检查前缀
 > 是否落在所属域登记的前缀里（并按「词」比对，`VDFS_PLUGIN_PROVIDER_FIELD` 不会因为含
@@ -130,16 +130,15 @@
 | 域 | 职责 | 关键符号 | 子路径 |
 |---|---|---|---|
 | `assembly` | 装配策略：一棵标准插件树挂哪些插件、哪些插件不许被停用 | `ASSEMBLY_SUB_AGENT_PLUGINS` · `ASSEMBLY_UNDISABLABLE_PLUGINS` | — |
-| `capability` | 能力系统：LLM 可见工具与插件遍历面 | `Capability` · `CapabilityMeta` · `CapabilityVisitor` · `CapabilityCategory` · `CapabilityToolContextRetention` · `capability_invoke` · 详情**三**表（`ConfigurableVisitor` / `OptionVisitor` / `DefaultToolVisitor`）· `capability_resolve` / `capability_to_wire` · `failure_kind` · 错误桶读写（`CapabilityError` / `capability_report_error` / `capability_take_errors`；**桶的键** `CAPABILITY_ERRORS` 住在 `keys`） | `configurable` · `error` · `option` · `tool_name` · `tools` |
+| `capability` | 能力系统：LLM 可见工具与插件遍历面 | `Capability` · `CapabilityMeta` · `CapabilityCategory` · `CapabilityToolContextRetention` · `capability_invoke` · 收集**三**表契约（`CapabilityVisitor` / `OptionVisitor` / `ConfigurableVisitor`；三者的**默认实现**住 `providers/collectors`）· `capability_resolve` / `capability_to_wire` · `failure_kind` · 错误桶读写（`CapabilityError` / `capability_report_error` / `capability_take_errors`；**桶的键** `CAPABILITY_ERRORS` 住在 `keys`） | `configurable` · `error` · `option` · `tool_name` |
 | `clock` | 全项目「当前时间（Unix 毫秒）」唯一实现 | `clock_now_ms` | — |
 | `creator` | 通用对象创建注册表：按 id 装配**任意**类型对象（见 [ADR-036](../../../docs/DECISIONS.md)） | `creator_create_object` · `creator_has` · `creator_ids` | — |
 | `embedding` | 嵌入服务的**抽象**（实现在 `src/providers/embedding`） | `EmbeddingService` · `EmbeddingError` · `EMBEDDING_LOCAL` / `EMBEDDING_NOOP` | `ids` |
 | `event_bus` | 跨插件全局发布设施门面 + 频道词表 | `EventBus` · `EventBusSubscribeRequest` · `EVENT_BUS_KIND_SYSTEM` · `EVENT_BUS_KIND_VDFS` · `EVENT_BUS_RESYNC_MARKER_TYPE` | — |
 | `exec` | 执行期原语：事件出口（出）与中止信号（入） | `ExecEventSink` · `ExecAbortSignal` · `ExecEnv` · `ExecTranscriptWriter` | — |
 | `keys` | **类型安全上下文键**（只有键：trait + 类型 + 实例） | `SymbioKey` 及其实例（`PATH` · `WORKDIR` · `ID` · `NAME` · `PLUGIN_DIR` · `CAPABILITY_VISITOR` · `CAPABILITY_ERRORS` …） | — |
-| `llm` | 模型服务的唯一契约面（协议无关、插件无关）——只留 session 与 model **两侧共用**的符号 | `ModelProvider` · `ModelFinishReason` · `ModelUsage` · `TurnOutput` · `TurnToolCallAccumulator` · `TurnStreamChildIds` · `TurnToolCallInfo` · `emit_*` / `build_*` 家族 | `model_provider` · `turn` |
+| `llm` | 模型服务的唯一契约面（协议无关、插件无关）——只留 session 与 model **两侧共用**的符号 | `ModelProvider` · `ModelFinishReason` · `ModelUsage` · `TurnOutput`（`tool_calls` 是**结果形态**；累积过程住 `plugins/model/tool_accumulator.rs`）· `TurnStreamChildIds` · `TurnToolCallInfo` · `emit_*` / `build_*` 家族 | `model_provider` · `turn` |
 | `logger` | 结构化日志与级别闸门 | 日志宏 · `LOG_LEVEL_*`（`MIN_LEVEL` 是**私有**静态量，不是公开面） | — |
-| `memory` | 「单文件长期记忆」共用内核（各层记忆同一份实现） | `MemoryFile` · `MemoryInjection` · `MemoryNodeSpec` · `MemorySegmentSpec` · `memory_render_segment` · `MEMORY_AGENTS_FILE` | — |
 | `plugin` | 插件核心契约：trait、信封、错误、目录、身份与地址 | `Plugin` · `PluginMeta` · `PluginInvokeRequest` / `PluginInvokeResponse` · `PluginError` / `PluginErrorCode` · `PluginChannel` / `PluginFrame` / `PluginPayload` / `PLUGIN_PAYLOAD_KEY` · `PluginDir` / `PluginConfigFile` / `PluginEntry` · `PLUGIN_ID_*`（工厂 id）· `PLUGIN_KEY_*` / `PLUGIN_FILE`（清单）· `ROUTE_*`（路由地址）· `TRAVERSE_AVAILABLE_*`（遍历端点） | `dir` · `error` · `ids` · `route` · `transport` · `traverse` |
 | `schemas` | 跨端协议 schema（前端逐字段镜像） | `ChatMessage` · `HookEvent` · `SuccessResponse` · 详情表 schema | `common` · `detail` · `hook` · `session` |
 | `text` | 字符串安全截断（避免按字节切多字节字符 panic） | `text_truncate_bytes` · `text_floor_char_boundary` | — |

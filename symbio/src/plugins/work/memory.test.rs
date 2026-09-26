@@ -2,8 +2,8 @@
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //!
-//! 内核行为（读写、拒绝、截断、片段排版）已在 `symbio_core::memory.test.rs` 钉住，
-//! 这里**刻意不重复**——重复测一遍只会让内核改口径时要改两处，那正是抽内核
+//! 共享实现的行为（读写、拒绝、截断、片段排版）已在 `providers/memory/tests.rs` 钉住，
+//! 这里**刻意不重复**——重复测一遍只会让共享实现改口径时要改两处，那正是抽共享实现
 //! 要消灭的成本。本文件只回答「工作区这一层」特有的问题。
 
 use super::*;
@@ -21,13 +21,13 @@ const PARENT: &str = "@vfs/work";
 #[test]
 fn memory_is_the_workspace_root_agents_file() {
     let path = memory_path("/w");
-    assert_eq!(path, Path::new("/w").join(MEMORY_AGENTS_FILE));
+    assert_eq!(path, Path::new("/w").join(WORK_MEMORY_FILE));
     assert_eq!(path.file_name().unwrap(), "AGENTS.md");
     // 相对地址就是文件名本身（挂在挂载点自身）；绝对地址 = 上下文父地址 + 相对
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(VDFS_PARENT_ADDR, PARENT.to_string());
     assert_eq!(
-        absolute_addr(&ctx, MEMORY_AGENTS_FILE),
+        absolute_addr(&ctx, WORK_MEMORY_FILE),
         format!("{PARENT}/AGENTS.md")
     );
 }
@@ -50,9 +50,9 @@ fn no_workspace_means_no_scope() {
     }
 }
 
-/// 有工作区时落位就在工作区根，且两道闸门原样交给内核
+/// 有工作区时落位就在工作区根，且两道闸门原样交给共享实现
 #[test]
-fn scope_carries_the_two_gates_into_the_kernel() {
+fn scope_carries_the_two_gates_into_the_shared_impl() {
     let tmp = TempDir::new().unwrap();
     let wd = tmp.path().to_string_lossy().to_string();
     let m = store(Some(&wd), 1234, 321);
@@ -62,7 +62,7 @@ fn scope_carries_the_two_gates_into_the_kernel() {
     assert_eq!(m.path(), Some(expected.as_path()));
     assert_eq!(m.write_max_bytes(), 1234);
     assert_eq!(m.inject_max_bytes(), 321);
-    assert_eq!(m.file_name(), MEMORY_AGENTS_FILE, "节点名 = 真实文件名");
+    assert_eq!(m.file_name(), Some(WORK_MEMORY_FILE), "节点名 = 真实文件名");
 }
 
 /// 片段规格 = 本层的全部「个性」：标题 / 地址 / 空提示，且**没有**多余附加说明

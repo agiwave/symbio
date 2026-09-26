@@ -8,12 +8,13 @@
 
 use super::plugin::AgentPlugin;
 use super::store::AgentDirStore;
+use crate::providers::collectors::{DefaultConfigurableVisitor, DefaultToolVisitor};
 use crate::symbio_core::{vdfs, VdfsProvider};
 use crate::symbio_core::{
-    CapabilityVisitor, ConfigurableVisitor, DefaultConfigurableVisitor, DefaultToolVisitor, Plugin,
-    PluginDir, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, AGENT_ID,
-    CAPABILITY_VISITOR, CONFIGURABLE_VISITOR, PATH, PLUGIN_ID_AGENT, TRAVERSE_AVAILABLE_TOOLS,
-    VDFS_PARENT_ADDR, WORKDIR,
+    CapabilityVisitor, ConfigurableVisitor, Plugin, PluginDir, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginSimpleRequest, AGENT_ID, CAPABILITY_VISITOR,
+    CONFIGURABLE_VISITOR, PATH, PLUGIN_ID_AGENT, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
+    WORKDIR,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -167,7 +168,7 @@ async fn agent_import_traverse_and_memory() {
     );
 
     // ── 3b. 记忆落位：Agent 自己的目录，不是工作区根 ──
-    // 读写走内核（`MemoryFile`），本插件只提供落位
+    // 读写走共享实现（`MemoryFile`），本插件只提供落位
     let memory = plugin.memory_store(&store, "com.symbio.test-fixture").await;
     memory.write("该智能体记住：先写测试。").unwrap();
     assert_eq!(

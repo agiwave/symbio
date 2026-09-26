@@ -40,7 +40,7 @@ fn rel_path_splits_agent_and_inner_path() {
 #[test]
 fn root_agents_md_is_the_host_instruction_not_an_agent_dir() {
     assert!(matches!(
-        parse_rel_path(MEMORY_AGENTS_FILE),
+        parse_rel_path(AGENT_MEMORY_FILE),
         RelPath::Instruction
     ));
     assert!(matches!(parse_rel_path("/AGENTS.md"), RelPath::Instruction));

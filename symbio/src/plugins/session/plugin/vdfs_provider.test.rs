@@ -466,16 +466,19 @@ async fn config_write_validates_before_applying() {
     assert_eq!(p.config.read().await.max_messages, before);
 }
 
-// ==================== 会话记忆（`<根>/session/<id>/AGENTS.md`）====================
+// ==================== 会话记忆（`<根>/session/<id>/MEMORY.md`）====================
 
 /// 会话记忆是会话内部的一个**可读写文件**：与三个目录并列、`stat` 与 `list` 同源、
-/// 写后读得回、**不可删除**（与 work / agent 的记忆层同一内核约定）。
+/// 写后读得回、**不可删除**（与 work / agent 的记忆层同一共享实现约定）。
 #[tokio::test]
 async fn memory_is_a_read_write_file_inside_the_session() {
     let (_dir, p) = fixture();
     let id = unique_id("memory");
     p.save_session(&Session::new(&id)).await.unwrap();
-    let path = format!("{id}/{}", crate::symbio_core::MEMORY_AGENTS_FILE);
+    let path = format!(
+        "{id}/{}",
+        crate::plugins::session::memory::SESSION_MEMORY_FILE
+    );
 
     // ① 会话内部并列着记忆（它本来就是会话的一部分，不另开一条寻址）
     let items = p
@@ -486,7 +489,7 @@ async fn memory_is_a_read_write_file_inside_the_session() {
         .unwrap();
     let mem = items
         .iter()
-        .find(|it| it.node.name == crate::symbio_core::MEMORY_AGENTS_FILE)
+        .find(|it| it.node.name == crate::plugins::session::memory::SESSION_MEMORY_FILE)
         .expect("会话内部应列出记忆文件");
     assert!(!mem.node.is_dir(), "记忆是文件，不是目录");
     assert_eq!(
@@ -521,7 +524,7 @@ async fn memory_is_a_read_write_file_inside_the_session() {
         Some("")
     );
 
-    // ④ 写入 → 读回（写闸门在内核，本层不重复实现）
+    // ④ 写入 → 读回（写闸门在共享实现，本层不重复实现）
     let r = p
         .dispatch(
             &vctx(),
@@ -587,7 +590,10 @@ async fn memory_write_respects_the_configured_gate() {
     };
     let id = unique_id("memory-gate");
     p.save_session(&Session::new(&id)).await.unwrap();
-    let path = format!("{id}/{}", crate::symbio_core::MEMORY_AGENTS_FILE);
+    let path = format!(
+        "{id}/{}",
+        crate::plugins::session::memory::SESSION_MEMORY_FILE
+    );
 
     assert!(
         p.dispatch(
@@ -619,7 +625,10 @@ async fn memory_write_respects_the_configured_gate() {
 async fn memory_of_unknown_session_is_not_found() {
     let (_dir, p) = fixture();
     let id = unique_id("memory-ghost");
-    let path = format!("{id}/{}", crate::symbio_core::MEMORY_AGENTS_FILE);
+    let path = format!(
+        "{id}/{}",
+        crate::plugins::session::memory::SESSION_MEMORY_FILE
+    );
 
     assert!(p.dispatch(&vctx(), &path, STAT).await.is_err());
     assert!(p.dispatch(&vctx(), &path, READ).await.is_err());
@@ -635,13 +644,16 @@ async fn memory_of_unknown_session_is_not_found() {
         .is_err());
 }
 
-/// 记忆写入经订阅表投递变更（与 `list` 的节点地址同一坐标系：`<id>/AGENTS.md`）
+/// 记忆写入经订阅表投递变更（与 `list` 的节点地址同一坐标系：`<id>/MEMORY.md`）
 #[tokio::test]
 async fn memory_write_notifies_subscribers() {
     let (_dir, p) = fixture();
     let id = unique_id("memory-notify");
     p.save_session(&Session::new(&id)).await.unwrap();
-    let path = format!("{id}/{}", crate::symbio_core::MEMORY_AGENTS_FILE);
+    let path = format!(
+        "{id}/{}",
+        crate::plugins::session::memory::SESSION_MEMORY_FILE
+    );
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<vdfs::VdfsChange>();
     let sink: vdfs::VdfsChangeSink = Arc::new(move |c| {
@@ -666,7 +678,10 @@ async fn memory_write_notifies_subscribers() {
     let got = rx.recv().await.expect("写入应投递一条变更");
     assert_eq!(
         got.path,
-        format!("{id}/{}", crate::symbio_core::MEMORY_AGENTS_FILE),
+        format!(
+            "{id}/{}",
+            crate::plugins::session::memory::SESSION_MEMORY_FILE
+        ),
         "变更路径与 list 返回的节点地址同源"
     );
     assert!(got.data.is_none(), "资源信号无载荷（信封没有操作枚举）");

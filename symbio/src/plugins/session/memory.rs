@@ -1,14 +1,24 @@
-//! 会话记忆 —— **本会话自己的** `AGENTS.md`（机制在内核 `symbio_core::memory`）。
+//! 会话记忆 —— **本会话自己的** `MEMORY.md`（机制在共享实现 `providers/memory`）。
 //!
 //! ## 落位与地址
 //!
 //! ```text
-//! <本插件目录>/<会话 id>/AGENTS.md     记忆本体
-//! <父地址>/<会话 id>/AGENTS.md      可编辑地址（父地址 = 上下文里的当前父地址）
+//! <本插件目录>/<会话 id>/MEMORY.md     记忆本体
+//! <父地址>/<会话 id>/MEMORY.md      可编辑地址（父地址 = 上下文里的当前父地址）
 //! ```
 //!
 //! 与 `session.json` / `messages.json` 同一目录——它就是这个会话的一部分，
 //! 随会话一起删除。
+//!
+//! ## 为什么这一层**不**叫 `AGENTS.md`
+//!
+//! 工作区记忆与智能体记忆都用 `AGENTS.md`，那是因为 `AGENTS.md` 的行业约定说的是
+//! **「工作区目录 / agent 目录里的指令与记忆」**——一个目录对应一个「谁」。
+//! **会话目录不是 agent 目录**：它没有「一个智能体住在这里」这回事，名字挂在
+//! `<id>/` 这种一次性目录下，叫 `AGENTS.md` 名不副实（读的人会以为这是个 agent 目录）。
+//!
+//! 而且三层记忆各写各的文件、互不干涉——**没有共享，就没有统一的理由**。把
+//! 「都用同一个文件名」登记成契约，只会让改一层要动三层。
 //!
 //! ## 它跟另外两层记忆是不是重复了？
 //!
@@ -32,8 +42,15 @@
 //! `ctx[SESSION_ID]` 缺失 / 为空 → 什么都不注入。收集期拿不到会话 id 的广播
 //!（例如设置页的选项收集）不该凭空造一份记忆出来。
 
-use crate::symbio_core::{MemoryFile, MemorySegmentSpec, MEMORY_AGENTS_FILE};
+use crate::providers::memory::{MemoryFile, MemorySegmentSpec};
 use std::path::PathBuf;
+
+/// 会话记忆文件名 —— `MEMORY.md`（**本插件自己的**约定，不是跨插件契约）。
+///
+/// 刻意**不**沿用 `AGENTS.md`：那条行业约定指的是「工作区目录 / agent 目录里的指令与
+/// 记忆」，而会话目录不是 agent 目录（见模块文档「为什么这一层不叫 `AGENTS.md`」）。
+/// 名字取「记忆」，说的是它真正装的东西。
+pub const SESSION_MEMORY_FILE: &str = "MEMORY.md";
 
 /// 系统提示词条目在收集器里的注册名（同名覆盖的键）
 pub const SEGMENT_NAME: &str = "session-memory";
@@ -45,12 +62,12 @@ pub const SEGMENT_TITLE: &str = "会话记忆";
 pub const MEMORY_DESCRIPTION: &str =
     "本会话自己的长期约定（跨轮次保留，不被上下文压缩淘汰）：钉住的结论、约束、待办。";
 
-/// 会话记忆文件：`<会话目录>/AGENTS.md`
+/// 会话记忆文件：`<会话目录>/MEMORY.md`
 pub fn memory_path(root: &std::path::Path, session_id: &str) -> PathBuf {
-    super::paths::session_dir(root, session_id).join(MEMORY_AGENTS_FILE)
+    super::paths::session_dir(root, session_id).join(SESSION_MEMORY_FILE)
 }
 
-/// 记忆在 **provider 子树内**的相对路径（`<id>/AGENTS.md`）。
+/// 记忆在 **provider 子树内**的相对路径（`<id>/MEMORY.md`）。
 ///
 /// 相对地址是常态：provider 全程只跟相对地址打交道（变更发射用它构造
 /// `VdfsChange::path`，与 `list` 返回的节点地址严格一致）。需要协议级绝对地址
@@ -58,12 +75,12 @@ pub fn memory_path(root: &std::path::Path, session_id: &str) -> PathBuf {
 /// `symbio_core::vdfs::absolute_addr(ctx, rel)` 用上下文的当前父地址拼出——
 /// 挂载点叫什么不归本插件。
 pub fn memory_rel_path(session_id: &str) -> String {
-    format!("{session_id}/{MEMORY_AGENTS_FILE}")
+    format!("{session_id}/{SESSION_MEMORY_FILE}")
 }
 
 /// 由会话 id 构造记忆门面（`None` / 空串 / 纯空白 = 无会话作用域）。
 ///
-/// 两道闸门在此注入：内核只认「上限是多少」，不关心它从哪个配置来。
+/// 两道闸门在此注入：共享实现只认「上限是多少」，不关心它从哪个配置来。
 pub fn store(
     root: &std::path::Path,
     session_id: Option<&str>,
@@ -80,8 +97,8 @@ pub fn store(
 /// 条目规格 —— 本层的「个性」只有三样：标题、地址、空内容时说什么。
 ///
 /// `address` 是**绝对地址**（调用方经 `absolute_addr` 从上下文父地址拼出，
-/// 返回 `String`，不能借给返回值长期持有）。排版由内核
-/// [`memory_render_segment`](crate::symbio_core::memory_render_segment) 统一决定。
+/// 返回 `String`，不能借给返回值长期持有）。排版由共享实现
+/// [`memory_render_segment`](crate::providers::memory::memory_render_segment) 统一决定。
 pub fn segment_spec(address: &str) -> MemorySegmentSpec<'_> {
     MemorySegmentSpec {
         title: SEGMENT_TITLE,
