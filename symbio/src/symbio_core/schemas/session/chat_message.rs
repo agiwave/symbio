@@ -234,7 +234,7 @@ pub struct ChatMessage {
     /// - 存储方向：`content` 是「全部」。
     ///
     /// 「delta 永不落盘」不是发射方的自律，而是持久层的不变量——
-    /// `chat_session::ensure_durable_states` 在写入点直接拒绝携带 `delta` 的消息。
+    /// `chat_session::write::ensure_durable_states` 在写入点直接拒绝携带 `delta` 的消息。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delta: Option<String>,
 

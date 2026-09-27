@@ -192,7 +192,7 @@ session:
     * 系统将从该 `User` 消息起点开始，返回**完整且未遭打碎的最近 $N$ 轮历史对话**。
   * **动态语义压缩**：当滑动窗口内的对话历史 Token 预估值超过大模型上下文限制的 **70%** 时，且 `auto_compress` 开启，系统将自动对老旧历史进行 LLM 语义合并。
 * **Rust 实现策略**：
-  * **Turn 对齐获取 (`plugins/session/chat_session.rs`)**：
+  * **Turn 对齐获取 (`plugins/session/chat_session/read.rs`)**：
     * `ChatSession::get_context_messages` 中先做三层清理（过滤 `Failed` 消息、剔除孤儿节点、content 归一兜底），再以 `context_messages` (可通过参数显式覆盖) 调用 `sliding_window` 实现 User 消息轮次级对齐：
 
     ```rust
@@ -236,7 +236,7 @@ session:
   * 被删除消息若关联 `.txt` 存档文件，存档文件同步物理删除，杜绝磁盘文件泄露。
   * **只保留完整的 User / Assistant 文本对话**，本地存储长期维持在极简规模。
 * **Rust 实现策略**：
-  * **物理清理 (`plugins/session/chat_session.rs` 内的 `prune_historical_tool_calls`，保存消息时调用；该函数只被 session 插件消费，定义在 session 插件内)**：
+  * **物理清理 (`plugins/session/chat_session/write.rs` 内的 `prune_historical_tool_calls`，保存消息时调用；该函数只被 session 插件消费，定义在 session 插件内)**：
 
     ```rust
     // keep_turns = 配置的 context_messages（默认 6）：
@@ -368,11 +368,11 @@ session:
 
 | 策略维度 | 核心控制参数 | 执行时机 | 动作目标 | 底层实现文件 |
 | :--- | :--- | :--- | :--- | :--- |
-| **存储级轮数裁剪** | `max_messages` | `append_messages` 保存时 | FIFO 截断超出的最老对话轮（0 = 不限制），不动归档文件 | `plugins/session/chat_session.rs` |
+| **存储级轮数裁剪** | `max_messages` | `append_messages` 保存时 | FIFO 截断超出的最老对话轮（0 = 不限制），不动归档文件 | `plugins/session/chat_session/write.rs` |
 | **单轮工具软上限** | `max_tool_rounds` | `run_chat_loop` | 默认 0 = 无上限；显式调低时达到上限提示后正常退出（非熔断），支持续跑 | `plugins/session/chat_loop.rs` |
 | **超大内容节点淡化** | `compress_line_threshold`<br>`compress_keep_recent` | `build_request_view` 每轮请求前 | B1 保护窗口（末条 + 最近 3 个内容节点）之外的超大正文/思考按行数（>200）或 token（>2048）头尾摘要淡化；存储恒为完整原文，不落库幂等 | `plugins/session/context/view.rs` |
-| **加载轮次对齐 + 宏观语义快照合并** | `context_messages` / `auto_compress` | `get_context_messages` 加载时 / `prepare_compression` 请求前 | 三层清理后按最近 6 个 User 消息对齐截取完整轮次；70% Token 溢出时用 XML 状态快照合并（保留最近 30%） | `plugins/session/chat_session.rs`<br>`plugins/session/context.rs` |
-| **存储期历史工具链物理裁剪** | `context_messages`（分水岭）<br>`prune_tool_history`（开关） | `append_messages` 保存时 | 物理删除分水岭之前（默认最近 `context_messages` 轮内保留）的 Tool / ToolCall / Reasoning 及其子节点；**只删节点不删归档文件**（归档由 L0 `tool_result_guard` 滚动回收）；内存临时会话跳过此裁剪 | `plugins/session/chat_session.rs`（`prune_historical_tool_calls`） |
+| **加载轮次对齐 + 宏观语义快照合并** | `context_messages` / `auto_compress` | `get_context_messages` 加载时 / `prepare_compression` 请求前 | 三层清理后按最近 6 个 User 消息对齐截取完整轮次；70% Token 溢出时用 XML 状态快照合并（保留最近 30%） | `plugins/session/chat_session/read.rs`<br>`plugins/session/context.rs` |
+| **存储期历史工具链物理裁剪** | `context_messages`（分水岭）<br>`prune_tool_history`（开关） | `append_messages` 保存时 | 物理删除分水岭之前（默认最近 `context_messages` 轮内保留）的 Tool / ToolCall / Reasoning 及其子节点；**只删节点不删归档文件**（归档由 L0 `tool_result_guard` 滚动回收）；内存临时会话跳过此裁剪 | `plugins/session/chat_session/write.rs`（`prune_historical_tool_calls`） |
 | **请求视图层动态剪裁** | `tool_context_window` + fade/nudge | `build_request_view` 每轮请求前 | ① 内容节点淡化（每轮无条件）→ ② >40 轮激活老旧工具结果淡化（保留最近 12 轮）→ ③ 窗口（15）外工具明细骨架化为带语义摘要 + 取回指引的占位符（配对保留，声明 `context_retention` 的工具最新 N 次豁免窗口）→ ④ 55% 水位提醒；全部不落库幂等 | `plugins/session/context/view.rs`<br>`plugins/session/context/window.rs` |
 
 通过这套精心设计的**六维协同策略**，Symbio 构建了"存储层（写入时 L0 工具守卫 + 保存时 `max_messages` FIFO / `prune_historical_tool_calls` 生命周期裁剪 + L2 语义快照落库，内容节点恒为完整原文）→ 加载层（`context_messages` 轮次窗口对齐）→ 请求视图层（`build_request_view` 内容淡化/工具淡化/骨架化/水位提醒，不落库幂等）→ 语义压缩层（`auto_compress` 语义合并）"四层递进的上下文治理链路（"何时落库"判据见第 3 节决策表），实现了高保真度的会话还原、高度清爽的本地数据持久化，并在大模型面前维持了极低 Token 开销与绝对安全的行为控制屏障。

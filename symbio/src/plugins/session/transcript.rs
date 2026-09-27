@@ -101,7 +101,7 @@ pub(crate) const INFLIGHT_SEQ_BASE: i64 = 1 << 50;
 /// [`INFLIGHT_SEQ_BASE`] 起。两者之间隔着 ~1e15 的空档，「`>= INFLIGHT_SEQ_BASE`」
 /// 因此等价于「不是权威号」。
 ///
-/// 它是**存储边界**的守卫（`chat_session::append_messages` / `replace_messages`）：
+/// 它是**存储边界**的守卫（`chat_session::write::append_messages` / `replace_messages`）：
 /// 权威号只能由存储分配，带进来的在途号一律摘掉、重新分配。这条不变式放在边界上
 /// 而不是各调用点上，是因为写入路径有五条以上，而"记得清号"是典型会漏的一类约定
 /// ——漏掉的后果是**静默的**：号看起来都正常，直到两个计数器撞上才暴露。
