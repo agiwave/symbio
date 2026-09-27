@@ -112,15 +112,15 @@
 | `symbio/src` | 224 文件 / 55851 行 | 127 文件 / 24815 行 |
 | `cli/src` | 4 文件 / 1573 行 | 1 文件 / 80 行 |
 | `tauri/src-tauri/src` | 3 文件 / 449 行 | 0 文件 / 0 行 |
-| `tauri/src` | 94 文件 / 20288 行 | 49 文件 / 10429 行 |
+| `tauri/src` | 94 文件 / 20269 行 | 49 文件 / 10429 行 |
 
 ### 5.2 宿主接缝（前端到底有多大）
 
-- **Tauri IPC**：注册 3 个 command —— `route_v2` · `route_v2_send` · `route_v2_close`（`tauri/src-tauri/src/main.rs::generate_handler!`；`commands.rs` 内另有未注册的历史 `#[tauri::command]` 函数，不计入接缝）
+- **Tauri IPC**：注册 3 个 command —— `route_v2` · `route_v2_send` · `route_v2_close`（`tauri/src-tauri/src/main.rs::generate_handler!`）
 - **前端路由**：9 条 route，其中真实组件 2 个（`MainLayout` · `VdfsView`）；其余为旧地址 `redirect`。即「一台控件承载全部资源类型」在代码里可数。
 - **Gateway 端点**：`GET /api/v1/health` · `POST /api/v1/invoke` + WS 升级（任意 path，首帧 = `PluginMessageWire`）（提取自 `gateway/server.rs` 的 `req.path.starts_with`）
 - **CLI 面**：进程选项 13 个长 + 7 个短（`--message` · `--session` · `--provider` · `--mode` · `--workdir` · `--homedir` · `--agent` · `--repl` · `--heartbeat` · `--quiet` · `--verbose` · `--help` · `--version`）；交互模式内置命令 7 个（`/help` · `/new` · `/session` · `/provider` · `/workdir` · `/exit` · `/quit`）。无子命令树、不依赖 clap，权威来源是 `cli/src/args.rs` 的 `HELP`。
 
 ---
 
-> 生成时间：2026-09-27 12:01:27 UTC · 源：`git rev-parse HEAD` = `3607265`
+> 生成时间：2026-09-27 12:11:52 UTC · 源：`git rev-parse HEAD` = `662484d`

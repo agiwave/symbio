@@ -508,6 +508,26 @@ function tauriCommands() {
     .filter(Boolean);
 }
 
+/** `#[tauri::command]` 声明总数（与 generate_handler 注册数对比——差值才是「未注册历史函数」，不许硬编码） */
+function tauriCommandDeclared() {
+  const dir = path.join(ROOT, "tauri", "src-tauri", "src");
+  let n = 0;
+  const walk = (d) => {
+    for (const ent of readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, ent.name);
+      if (ent.isDirectory()) walk(p);
+      else if (ent.name.endsWith(".rs"))
+        n += (readFileSync(p, "utf8").match(/#\[tauri::command\]/g) ?? []).length;
+    }
+  };
+  try {
+    walk(dir);
+  } catch {
+    /* 目录缺失按 0 计，由差值分支自然处理 */
+  }
+  return n;
+}
+
 /** 前端 router：route 条数与真实组件数（redirect 不算组件——视图收敛程度是可数的事实） */
 function tauriViews() {
   const file = path.join(ROOT, "tauri", "src", "router", "index.ts");
@@ -774,10 +794,14 @@ function render() {
   L.push("### 5.2 宿主接缝（前端到底有多大）");
   L.push("");
   const ipc = tauriCommands();
+  const unregisteredN = tauriCommandDeclared() - ipc.length;
   L.push(
     `- **Tauri IPC**：注册 ${ipc.length} 个 command —— ${fmtList(ipc)}（` +
-      "`tauri/src-tauri/src/main.rs::generate_handler!`；`commands.rs` 内另有未注册的" +
-      "历史 `#[tauri::command]` 函数，不计入接缝）"
+      "`tauri/src-tauri/src/main.rs::generate_handler!`" +
+      (unregisteredN > 0
+        ? `；另有 ${unregisteredN} 个已声明未注册的 \`#[tauri::command]\`，不计入接缝`
+        : "") +
+      "）"
   );
   const views = tauriViews();
   L.push(
