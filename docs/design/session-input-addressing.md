@@ -3,7 +3,7 @@
 > **状态：已落 ADR-031，§5.1–5.4 与 §6.1–6.5 已实施**（实施清单与未落地项见 §8）。
 >
 > 本文回答「会话的**输入**（发消息 / 停止 / 重试审批）应该落在哪」。
-> 「收件箱怎么消费」见 `symbio/src/plugins/session/inbox.rs` 与 ADR-026；
+> 「收件箱怎么消费」见 `symbio/src/plugins/session/transcript/inbox.rs` 与 ADR-026；
 > 「实时面怎么投递」见 ADR-025 与 `docs/design/vdfs.md` §9。本文不复述它们。
 
 ---

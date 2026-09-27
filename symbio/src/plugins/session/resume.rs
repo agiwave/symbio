@@ -34,8 +34,8 @@
 
 use super::chat_loop::ChatOrchestrator;
 use super::chat_session::PersistentChatSession;
-use super::frames::{llm_emit_removed, llm_emit_state};
 use super::tool_executor::{apply_not_executed, execute_tool_async};
+use super::transcript::{llm_emit_removed, llm_emit_state};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType, ResumeAction,
     ResumeRequest,

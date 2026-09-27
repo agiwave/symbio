@@ -777,7 +777,7 @@
 
 **决策**：
 
-1. **落 session**：`llm_build_assistant_messages` / `llm_build_tool_message` / `TurnStreamChildIds` / `impl TurnOutput::{into_messages, is_reasoning_only, effective_text}` → `plugins/session/message_build.rs`；`llm_emit_state` / `llm_state_frame` / `llm_emit_removed` → `plugins/session/frames.rs`——两者生产消费方都只有 session。
+1. **落 session**：`llm_build_assistant_messages` / `llm_build_tool_message` / `TurnStreamChildIds` / `impl TurnOutput::{into_messages, is_reasoning_only, effective_text}` → `plugins/session/message_build.rs`；`llm_emit_state` / `llm_state_frame` / `llm_emit_removed` → `plugins/session/transcript/frames.rs`——两者生产消费方都只有 session。
 2. **落 model**：`llm_emit_delta` → `plugins/model/stream.rs`，唯一调用点就是那里的流循环热路径。
 3. **测试 fixture 随消费方走**：model 的 `message_builder.test.rs` 改为本地构造同形状的树，两侧各锁一半（落库形状在 `plugins/session/message_build.test.rs`，扁平化视图在 model 侧）。fixture 计入依赖方（ADR-023 不豁免测试），不迁就永远停在「1 生产 + 1 测试」。
 4. **留守六个**：`llm_emit_message` / `llm_removed_frame` / `llm_short_id` / `TurnToolCallInfo` / `TurnOutput` 各有两个以上消费方；`llm_message_frame` 是登记在案的**例外**——外部只有 session，但它与 core 自己的 `llm_emit_message` 同进退，「完整消息必然带状态」只在一处实现。

@@ -550,7 +550,7 @@ ToolCall 合成占位 tool 结果而**始终合法**——于是「模型看得�
     同帧携带两者是**协议违例**（写入点报错丢弃——不发布、不落地）。追加对正文 /
     思考 / **工具参数** / **工具响应**一律成立（后端构造帧只有三处：
     `symbio_core::llm::turn::llm_message_frame`（完整消息）/
-    `plugins/session/frames.rs::llm_state_frame`（剥正文的状态帧）/
+    `plugins/session/transcript/frames.rs::llm_state_frame`（剥正文的状态帧）/
     `plugins/model/stream.rs::llm_emit_delta`（增量）；工具参数与 Text / Reasoning 同构，
     工具响应透传子会话的增量帧。三个位置由消费方数量决定，见 ADR-038）。
     消费端按 `type` / `role` 猜"该追加还是该替换"是错误来源：实测曾把

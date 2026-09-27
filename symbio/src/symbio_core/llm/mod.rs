@@ -10,7 +10,7 @@
 //! **只被一个插件消费的部分不在本层**（[ADR-023](../../../docs/DECISIONS.md) 的依赖方数量判据，[ADR-038](../../../docs/DECISIONS.md) 逐条执行）：
 //! 落库视图与消息构造（`llm_build_assistant_messages` / `llm_build_tool_message` /
 //! `TurnStreamChildIds` / `TurnOutput` 的三个方法）在 `plugins/session/message_build.rs`，
-//! 状态帧与删除帧的发射口在 `plugins/session/frames.rs`，增量帧 `llm_emit_delta`
+//! 状态帧与删除帧的发射口在 `plugins/session/transcript/frames.rs`，增量帧 `llm_emit_delta`
 //! 在 `plugins/model/stream.rs`。留守的六个导出逐个都有两个以上消费方
 //! （`llm_message_frame` 是登记在案的例外），逐条判据与被否决的方案见 ADR-038。
 //!

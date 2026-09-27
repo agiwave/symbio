@@ -48,6 +48,13 @@ use indexmap::IndexMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+mod frames;
+mod inbox;
+
+// 域内门面：状态帧 / 删除帧的构造与发射经 `transcript::X` 取用，调用方不感知
+// 域内文件划分（域内子模块经 `use super::*` 取用门面）。
+pub use self::frames::{llm_emit_removed, llm_emit_state, llm_state_frame};
+
 /// 投递合帧窗口（毫秒）——相邻的**同节点纯增量**在此窗口内合成一帧（见
 /// [`Transcript::deliver`]）。
 ///
