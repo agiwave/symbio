@@ -43,7 +43,7 @@
 | 上下文治理 | `context.rs` + `context/{pipeline,view,window,prompt}.rs` | 「发给大模型之前」的全部处理：压缩策略与执行流水线（压缩内核 `compress_with_snapshot_core` 的唯一落点是 `context/pipeline.rs`）、请求视图四步剪裁、工具骨架化、压缩提示词协议 |
 | 会话读写 | `chat_session.rs` + `chat_session/{read,write}.rs` | 读路径：三层清理与 `User` 轮次对齐的上下文装配；写路径：保存边界（轮数对齐裁剪 / 历史工具链裁剪 / 归档配对清理） |
 | 变更入口 | `commands.rs` | 会话与消息的**写语义**：新建 / 覆盖 / 删除会话，改写 / 截断 / 清空消息。VDFS（`write` / `delete` / `action`）与编排入口都只是它的调用方——「谁能改会话」的答案只在这一处（模块头说明它为什么仍在 `impl SessionPlugin` 上） |
-| 转写 | `transcript.rs` + `transcript/{frames,inbox}.rs` | 消息级变更的**唯一写入点与发射器**、状态帧与删除帧出口、收件箱入队与消费挑选 |
+| 转写 | `transcript.rs` + `transcript/{frames,deliver,inbox}.rs` | 消息级变更的**唯一写入点与发射器**、帧构造 / 日志合并 / 合帧窗口（`deliver.rs`）、状态帧与删除帧出口、收件箱入队与消费挑选 |
 | 持久化 | `store/mod.rs` | 一种磁盘布局、两种驻留方式；没有可切换的存储后端 |
 | 工具执行 | `tools.rs` + `tools/{tool_executor,tool_result_guard,heartbeat_tool}.rs` | 模型侧工具从分发到结果处理的全链路、L0 结果守卫与滚动存档、心跳任务工具；域根 `tools.rs` 是对编排层的门面 |
 | 能力与选项收集 | `capabilities.rs` | `collect_capabilities`（工具）与 `collect_options`（选项字段）两个 traverse 收集器，同处一地 |
@@ -87,6 +87,10 @@ X/mod.rs + X/tests.rs      模块文件是 mod.rs 的（如 store/、heartbeat/�
 
 - **一个实现文件对应一个测试文件**：测试跟着它测的实现走，不许一个测试文件
   同时测几个实现，也不许几个测试文件测同一个实现。
+- **测试跟着可观察行为走，不跟着文件走**：域内子模块若只是**纯机械**（类型与
+  纯函数，没有独立于域根的对外行为，如 `transcript/deliver.rs`），其行为由**域
+  边界测试文件**覆盖、不另立测试文件——另立就得把域根的测试夹具复制一份，
+  两份夹具才是真的漂移点。判据是「这个子模块对外表现出过**独立的**行为吗」。
 - `#[path]` / 同级 `tests.rs` **不改变模块路径**（仍是 `X::tests`），故
   `use super::*;` 的语义与内联 `mod tests { … }` 完全一致——拆分与搬移是纯文件操作。
 - 新增测试**不写进生产文件**：棘轮看的是生产文件里的测试函数数，加一个就红。
