@@ -1,8 +1,8 @@
 //! 模型服务限流器 —— 按 provider_id 记录"上次发起请求的时间"的最小请求间隔节流。
 //!
-//! Phase sink：自 `symbio_core/rate_limit.rs` 下沉至 session 插件——E-② 后
-//! 该限流器的唯一消费者是 session 编排层（`orchestrator.rs`，发起 LLM 请求前
-//! 节流），属单一模块私有设施，不再置于 core 共享层。
+//! Phase sink：自 `symbio_core/rate_limit.rs` 下沉——E-② 后该限流器的唯一消费者是
+//! 消费循环（`orchestrator/consume.rs`，发起 LLM 请求前节流），因此文件就落在
+//! `orchestrator/` 里，而不是 session 根级。
 
 use std::collections::HashMap;
 use std::sync::LazyLock;

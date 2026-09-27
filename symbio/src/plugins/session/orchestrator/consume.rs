@@ -193,7 +193,7 @@ impl SessionPlugin {
         };
 
         // Provider 级限流（RATE_LIMITER 归属 session 插件，0 表示不限流）
-        super::super::rate_limit::RATE_LIMITER
+        super::rate_limit::RATE_LIMITER
             .wait(provider.provider_id(), provider.rate_limit_ms())
             .await;
 

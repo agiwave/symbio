@@ -20,7 +20,7 @@ use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::fs_watcher::FsWatcher;
+use self::fs_watcher::FsWatcher;
 use super::types::Session;
 
 /// 工作目录树节点的 kind（场景自定；机制层仅透传，不参与能力判定）
@@ -503,6 +503,8 @@ fn publish_vdfs_change(
         }
     }
 }
+
+mod fs_watcher;
 
 #[cfg(test)]
 mod tests;

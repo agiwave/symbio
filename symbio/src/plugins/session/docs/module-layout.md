@@ -33,7 +33,7 @@
 |---|---|
 | `mod.rs` | 模块声明与公共面收敛 |
 | `plugin.rs` + `plugin/{nodes,vdfs_provider,words}.rs` | 插件装配：路由分发、`traverse` 能力收集、VDFS 会话节点树与路径模型、会话域协议词表 |
-| `orchestrator.rs` + `orchestrator/{entry,consume,broadcast,failure,sink}.rs` | 会话编排：两个 one-off 入口与自动命名、Turn 消费循环、状态广播唯一出口、失败收口、执行期事件落地 |
+| `orchestrator.rs` + `orchestrator/{entry,consume,broadcast,failure,sink,rate_limit}.rs` | 会话编排：两个 one-off 入口与自动命名、Turn 消费循环、状态广播唯一出口、失败收口、执行期事件落地、发送限流（唯一消费方是 `consume`） |
 | `chat_loop.rs` + `chat_loop/{state,inputs,turn,io}.rs` | 主循环骨架、状态与契约、输入准备与压缩响应、单轮尾结算、循环内的落库与广播出口 |
 | `handlers.rs` | `SessionPlugin` 仅剩的非路由内部函数（会话与消息的增删改查全部经 VDFS 地址完成） |
 
@@ -49,7 +49,7 @@
 | 能力与选项收集 | `capabilities.rs` | `collect_capabilities`（工具）与 `collect_options`（选项字段）两个 traverse 收集器，同处一地 |
 | 心跳 | `heartbeat/mod.rs` | 空闲扫描与触发调度（15 秒节拍、错峰与每 tick 上限） |
 | 选项 | `options/mod.rs` | 会话自有选项的字段声明（`build_option_definition`；收集器在 `capabilities.rs`） |
-| 工作目录 | `workdir/mod.rs` | 会话工作目录的 VDFS 实现（`<根>/session/<id>/workdir/<rel>`） |
+| 工作目录 | `workdir/{mod,fs_watcher}.rs` | 会话工作目录的 VDFS 实现（`<根>/session/<id>/workdir/<rel>`）与其下的文件系统监听 |
 | 会话记忆 | `memory.rs` | 本会话自己的 `MEMORY.md`：落位、地址、两道闸门与系统提示词注册段（机制在 `providers/memory`） |
 | 请求构造 | `message_build.rs` | 发给 LLM 的请求消息数组与工具结果节点构造 |
 | 会话恢复 | `resume.rs` | 会话恢复与历史重写 |
@@ -58,9 +58,13 @@
 ### 1.3 支撑单件（一文件一职责）
 
 `config.rs`（配置真源）· `paths.rs`（地址 ↔ 目录映射）· `prompt.rs`（时间上下文装配）·
-`tokenizer.rs` / `text_split.rs`（Token 估算与头尾切分）· `rate_limit.rs`（发送限流）·
-`fs_watcher.rs`（文件系统监听）· `model_chat.rs`（Model 推理请求协议结构）·
+`tokenizer.rs` / `text_split.rs`（Token 估算与头尾切分）·
+`model_chat.rs`（Model 推理请求协议结构）·
 `types.rs`（`Session` 实体与共享类型）。
+
+> 「一文件一职责」不等于「文件越碎越好」：单消费方的小件落在**消费方所在域**
+> （`rate_limit.rs` 在 `orchestrator/`、`fs_watcher.rs` 在 `workdir/`），只有被多个
+> 域共享、或本身独立成域的支撑件才留在根级。
 
 > 依赖方向由审计守着：编排层可以引用领域层，领域层不得反向引用编排层
 > （`plugin.rs` / `orchestrator/` / `chat_loop/` 即编排层）。跨插件引用规则

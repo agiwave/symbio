@@ -220,6 +220,7 @@ mod broadcast;
 mod consume;
 mod entry;
 mod failure;
+mod rate_limit;
 mod sink;
 
 #[cfg(test)]
