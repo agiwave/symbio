@@ -1,4 +1,4 @@
-//! Session 插件的路径派生 —— 会话 ID 到文件系统目录的映射入口。
+//! Session 插件的路径派生 —— 会话寻址的**双向映射入口**。
 //!
 //! Session 插件内所有"落盘到会话目录"的组件（存储后端、L0 工具结果守卫、
 //! L3 transcript 转存）都必须经由本模块拼路径，禁止各自
@@ -13,6 +13,11 @@
 //! - [`session_dir`] / [`session_subdir`]：会话目录与会话内子目录。
 //!   **根由调用方给**（装配态即本插件自己的目录，由父插件经 `PLUGIN_DIR` 告知）——
 //!   本模块只做「id → 目录名」这一段，不认识任何全局布局。
+//! - [`session_id_from_new_path`]：**反向**的那一段——VDFS 写地址 → 会话 id
+//!   （具名新建时「地址末段即身份」，写挂载根这种无名目标交 provider 生成）。
+//!   它与上面的「id → 目录名」是同一套寻址规则的两个方向，故同处一模块；
+//!   原先住在 `plugin/nodes.rs` 的路径模型里（见该模块头），归位理由是
+//!   消费方在**领域层**（会话的写语义要按地址定 id），而领域层不引用汇编层。
 
 /// 会话内固定子目录名：L0 工具结果全文存档。
 pub const TOOL_ARCHIVES_SUBDIR: &str = "tool_archives";
@@ -55,6 +60,28 @@ pub(crate) fn session_subdir(
     subdir: &str,
 ) -> std::path::PathBuf {
     session_dir(root, session_id).join(subdir)
+}
+
+/// 具名新建时，**地址末段即会话 id**；写在挂载根（无名目标）返回 `None`。
+///
+/// 「**有名字**时 id 来自地址（使用方给），**没名字**时 id 由 provider 生成」是
+/// VDFS 的**通用**规则，两处规范同义：`providers/vdfs_service/entry.rs::id_of`
+/// 的注释，以及 [`crate::symbio_core::vdfs::VdfsRequest::Write`] 的「两种目标形态」
+/// 表（具名节点 + 不存在 ⇒ **就地创建**；只有目录自身才「名字由 provider 生成」）。
+///
+/// ## 为什么不剥 `.session` 后缀
+///
+/// 会话寻址里扩展名**从来不是**地址的一部分，也**从来不被剥除**：
+/// `Session(id)` 直接把末段当 id 用（`parse_session_path` → `session_of`）。
+/// 只在这里剥会造出「同一个 id 有两种写法、其中一种只在新建时成立」的怪状态，
+/// 比不剥更糟。
+pub(crate) fn session_id_from_new_path(path: &str) -> Option<String> {
+    let base = path.rsplit('/').next().unwrap_or(path).trim();
+    if base.is_empty() {
+        None
+    } else {
+        Some(base.to_string())
+    }
 }
 
 #[cfg(test)]

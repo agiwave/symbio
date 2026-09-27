@@ -71,3 +71,28 @@ fn session_subdir_appends_under_safe_session_dir() {
         vec!["a_b".to_string(), "tool_archives".to_string()]
     );
 }
+
+/// 具名新建：**地址末段即会话 id**；无名目标（挂载根 / 空末段）⇒ `None`（provider 生成）
+///
+/// 与 `safe_id` 的方向相反，但同属一套寻址规则（见本模块头）。
+#[test]
+fn session_id_from_new_path_uses_the_address_as_identity() {
+    assert_eq!(
+        session_id_from_new_path("我的会话").as_deref(),
+        Some("我的会话")
+    );
+    assert_eq!(
+        session_id_from_new_path("dir/我的会话").as_deref(),
+        Some("我的会话")
+    );
+    // 不剥扩展名：会话寻址里 `.session` 不是地址的一部分（见函数文档）
+    assert_eq!(
+        session_id_from_new_path("abc.session").as_deref(),
+        Some("abc.session")
+    );
+    // 无名目标 ⇒ 交给 provider 生成
+    assert_eq!(session_id_from_new_path(""), None);
+    assert_eq!(session_id_from_new_path("/"), None);
+    assert_eq!(session_id_from_new_path("dir/"), None);
+    assert_eq!(session_id_from_new_path("   "), None);
+}

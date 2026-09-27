@@ -3,7 +3,9 @@
 //! 三组**纯函数**，都不持有 `self`：
 //! - **路径模型**：[`VdfsSessionPath`] / [`parse_session_path`] / [`SEG_MESSAGES`] /
 //!   [`SEG_INBOX`] / [`message_dir_path`] / [`message_path`] / [`inbox_item_path`] /
-//!   [`internal_dirs`] / [`session_id_from_new_path`]
+//!   [`internal_dirs`]
+//!   （会话寻址的另一半——「VDFS 写地址 → 会话 id」——不在此处，见
+//!   `session/paths.rs`：那条规则属**领域层**，而本模块是汇编层的投影）
 //! - **节点构造**：[`session_node`] / [`message_node`] / [`inbox_dir_node`] /
 //!   [`inbox_item_node`] / [`transcript_window`] / [`window_params`] /
 //!   `MAX_PARENT_STEPS` / `cursor_id`
@@ -714,28 +716,6 @@ pub(crate) fn session_content(
     let text = serde_json::to_string_pretty(&payload)
         .map_err(|e| vdfs::VdfsError::internal(format!("会话序列化失败：{e}")))?;
     Ok(vdfs::VdfsContent::text(text).with_mime("application/json"))
-}
-
-/// 具名新建时，**地址末段即会话 id**；写在挂载根（无名目标）返回 `None`。
-///
-/// 「**有名字**时 id 来自地址（使用方给），**没名字**时 id 由 provider 生成」是
-/// VDFS 的**通用**规则，两处规范同义：`providers/vdfs_service/entry.rs::id_of`
-/// 的注释，以及 [`vdfs::VdfsRequest::Write`] 的「两种目标形态」表
-/// （具名节点 + 不存在 ⇒ **就地创建**；只有目录自身才「名字由 provider 生成」）。
-///
-/// ## 为什么不剥 `.session` 后缀
-///
-/// 会话寻址里扩展名**从来不是**地址的一部分，也**从来不被剥除**：
-/// `Session(id)` 直接把末段当 id 用（`parse_session_path` → `session_of`）。
-/// 只在这里剥会造出「同一个 id 有两种写法、其中一种只在新建时成立」的怪状态，
-/// 比不剥更糟。
-pub(crate) fn session_id_from_new_path(path: &str) -> Option<String> {
-    let base = path.rsplit('/').next().unwrap_or(path).trim();
-    if base.is_empty() {
-        None
-    } else {
-        Some(base.to_string())
-    }
 }
 
 #[cfg(test)]

@@ -12,6 +12,7 @@
 //!   `delete_session_internal`（会话本体与子会话两条 `Delete` 分支共用）。
 
 use super::*;
+use crate::plugins::session::paths::session_id_from_new_path;
 use crate::symbio_core::clock_now_ms;
 
 #[async_trait]
