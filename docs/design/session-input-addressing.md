@@ -155,7 +155,7 @@ action(<A>/message/<mid>, <ResumeAction>)   payload: {args?, reason?, answer?, m
 | 前端 | `callPlugin(CHAT_SEND / CHAT_ABORT)` | §6 的地址操作 |
 | `cli/src/client.rs` | `session/chat/send` | `vdfs/write(<根>/session/<sid>/inbox)`（CLI 已会用 `vdfs/write` 建会话） |
 | `plugins/telegram/plugin.rs:471` | `session/chat/send` | 同上；地址经 `vdfs/root` 拼（与 `agent_run::session_vdfs_addr` 同款） |
-| `session/heartbeat.rs:197` | 直连 `handle_chat_send_oneoff` | 直连 `enqueue_inbox` |
+| `session/heartbeat/mod.rs:197` | 直连 `handle_chat_send_oneoff` | 直连 `enqueue_inbox` |
 | `agent/host/subagent.rs:338` | `parent.route(SESSION_CHAT_SEND)` | `parent.get_vfs_provider()` 写 `session/<sid>/inbox`（与它自己的 `register_subsession` 同款） |
 | e2e t7 / t9 / t10 / t11 / t14 | 走路由 | 走地址（t15 已是范本） |
 
@@ -181,7 +181,7 @@ self.enqueue_inbox(&session_id, None, message, params, ctx.get(WORKDIR)).await;
 
 | 调用方 | 除消息外还要带什么 | 丢了会怎样 |
 |---|---|---|
-| `session/heartbeat.rs` | `include_history`、`mode: "auto"` | 心跳变交互模式，遇到需交互的工具会**产卡阻塞**（无人值守） |
+| `session/heartbeat/mod.rs` | `include_history`、`mode: "auto"` | 心跳变交互模式，遇到需交互的工具会**产卡阻塞**（无人值守） |
 | `agent/host/subagent.rs` | `provider_id`、`mode`、`risk_level` | 子会话的 provider 回退到自己的 metadata；而 `register_subsession` 只写了 `agent_id` / `workdir` ⇒ **子会话没有 provider** |
 | `telegram` / CLI | 无 | 无影响 |
 

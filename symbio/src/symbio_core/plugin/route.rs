@@ -64,7 +64,7 @@
 /// session/chat/send — 发起一轮对话（**统一编排入口**）
 ///
 /// 这是全仓**唯一**的会话发言入口。子智能体派生（`agent/host/subagent.rs`）、
-/// 心跳（`session/heartbeat.rs`，直连）、Telegram 通道都汇到这里。
+/// 心跳（`session/heartbeat/mod.rs`，直连）、Telegram 通道都汇到这里。
 ///
 /// 注意不是 `session/chat`：那个路径**不存在**（session 的 `route` 只认
 /// `chat/send` 与 `chat/abort` 两条相对臂）。Telegram 曾用它，见下方

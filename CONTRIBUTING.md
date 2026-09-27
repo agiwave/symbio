@@ -203,15 +203,15 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
 测试**独立成文件**，且与**被测试的实现文件同级**、同名加 `.test` 后缀：
 
 ```text
-workdir.rs          实现
-workdir.test.rs     它的测试（同级，不放子目录）
+capabilities.rs          实现
+capabilities.test.rs     它的测试（同级，不放子目录）
 ```
 
 父文件末尾用 `#[path]` 指向同级测试文件：
 
 ```rust
 #[cfg(test)]
-#[path = "workdir.test.rs"]
+#[path = "capabilities.test.rs"]
 mod tests;
 ```
 

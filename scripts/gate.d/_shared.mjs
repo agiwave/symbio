@@ -70,7 +70,7 @@ export const BASELINE = {
   //        +4  `plugins/session/plugin/vdfs_provider.test.rs`——1 条属 S2
   //            （`session_list_carries_the_option_definition`），3 条属 S6
   //            （具名新建地址末段即 id / 命中已存在则覆盖 / 覆盖分支浅合并）
-  //        +3  `plugins/session/options.test.rs`——产物换成 `DetailField` 后的锚点
+  //        +3  `plugins/session/options/tests.rs`——产物换成 `DetailField` 后的锚点
   //            （字段 key 就是解析链读的 metadata 键；心跳子表单缺省值与子对象同源）
   //        +2  `symbio_core/schemas/detail.rs`——`DETAIL_PICKS` 与方言补充
   //        -1  `plugins/session/handlers.test.rs`——「两条路径一致性」随路由退役删除，

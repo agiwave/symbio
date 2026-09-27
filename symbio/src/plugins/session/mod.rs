@@ -1,8 +1,8 @@
 //! Session 插件模块
 
 mod active;
+mod capabilities;
 mod chat_loop;
-mod chat_pipeline;
 mod chat_session;
 pub(crate) mod config;
 mod context;

@@ -25,5 +25,5 @@
 
 ## 关联
 
-- 工具收集管线：`plugins/session/chat_pipeline.rs`
+- 工具收集管线：`plugins/session/capabilities.rs`
 - 压缩守卫：`../session/README.md` 策略③ / `symbio/src/plugins/session/docs/context-compression-design.md`

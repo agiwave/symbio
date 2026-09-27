@@ -5,7 +5,7 @@
 关联：`docs/design/vdfs.md`（`node.schema` 详情方言）、
 `symbio/src/symbio_core/schemas/detail.rs`（`DetailDefinition` / `DetailField` 方言权威定义）、
 `symbio/src/symbio_core/capability/option.rs`（收集机制 `OptionVisitor` / `collect_options`）、
-`symbio/src/plugins/session/options.rs`（选项宿主：会话自有字段的声明）、
+`symbio/src/plugins/session/options/mod.rs`（选项宿主：会话自有字段的声明）、
 `tauri/src/schemas/vdfs-form.ts`（前端方言 + 条件求值 / 紧凑取值规则）、
 `tauri/src/composables/useSessionOptionBar.ts` + `tauri/src/components/chat/ChatOptionBar.vue`
 （前端唯一实现）、
@@ -74,7 +74,7 @@
 **定义与会话无关**：它只声明「有哪些字段、候选有哪些、什么条件禁用」，既不带当前
 值，也不问「是哪个会话」。因此同一份定义在「新建草稿」与「已落盘会话」两个载体上
 **逐字节相同**，`default` 也始终表示「后端的缺省回落」而非当前值
-（`plugins/session/options.rs::build_option_definition` 用**空的请求上下文**收集，
+（`plugins/session/options/mod.rs::build_option_definition` 用**空的请求上下文**收集，
 签名里没有 `ctx`）。
 
 ## 3. 定义方言（复用 `DetailDefinition`）
@@ -109,7 +109,7 @@
 - **草稿节点没有任何属性**。判定「已有对话历史」必须用 `truthy: true`
   （对缺席键求值 `false`），**不能**用 `not_equals: 0`（对缺席键求值 `true`
   ——那会让新建会话一上来就把工作目录锁死）。这是这条规则最容易踩的坑，
-  已在 `plugins/session/options.test.rs` 钉死。
+  已在 `plugins/session/options/tests.rs` 钉死。
 
 求值与紧凑取值的唯一实现在 `tauri/src/schemas/vdfs-form.ts`
 （`evalDetailCondition` / `compactFieldText`），纵向表单与选项栏**共用**，防两形态漂移。
@@ -311,7 +311,7 @@ session ──collect_options(parent, ctx)──▶ parent.traverse(available_op
 | `symbio_core/schemas/options.rs`（`OptionNode` / `OptionAction` / `OptionType` / `OptionDisplay` / `OptionsRequest` / `OptionsResponse` / `OPTIONS_LIST` / `SESSION_STATE_ENDPOINT` / `OPTION_PICK_*`） | **已删除**（`OPTION_PICK_*` 迁 `detail.rs` 的 `DETAIL_PICK_*`；节点类型由 `DetailField` 取代） |
 | `worker/session/options/list` 路由与 `handle_list_options` | **已删除**（子层懒加载一并取消：候选只有一层） |
 | `OptionVisitor::register_option` / `register_batch` / `list_options` | **已删除**（只剩 `register_option_field` / `list_option_fields`） |
-| `plugins/session/options.rs` 的 `*_option()` 节点构造器、`apply_chat_bar_display_defaults`、`inject_session_scope`、`find_node` | **已删除** |
+| `plugins/session/options/mod.rs` 的 `*_option()` 节点构造器、`apply_chat_bar_display_defaults`、`inject_session_scope`、`find_node` | **已删除** |
 | agent / model 的 `contribute_options` 旧节点分支与 `current_label` 回填 | **已删除** |
 | 前端 `schemas/options.ts` / `services/options.ts` / `composables/useSessionOptions.ts` / `registry/optionIcons.ts` | **已删除**（图标并入 `registry/vdfsIcons.ts`） |
 

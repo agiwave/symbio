@@ -30,10 +30,9 @@
 //! 而**收集器实现**（`DefaultOptionVisitor`）住 `providers/collectors/`——
 //! 它的**写入者是全体插件**（在 `traverse` 里注册字段），安装它的宿主只是其中之一，
 //! 故不隶属于任何插件；契约（trait）在 core，无策略的内存实现在实现层。
-//! **收集管线**（`collect_options`）只有 session 一个消费方，按「依赖方数量」判据
-//! （[ADR-023](../../../../docs/DECISIONS.md)）已下沉到 `plugins/session/options.rs`
-//! —— 与它的平行物 `collect_capabilities` 同处一地（后者一直在 session 的
-//! `chat_pipeline.rs` 里）。
+//! **收集管线**（`collect_options` / `collect_capabilities`）只有 session 一个消费方，
+//! 按「依赖方数量」判据（[ADR-023](../../../../docs/DECISIONS.md)）下沉到
+//! `plugins/session/capabilities.rs`——两者是同一件事的两半，同处一地。
 //!
 //! ```text
 //! 在 core：契约（trait + 端点字面量）        ← 两侧都认
@@ -74,14 +73,15 @@ use crate::symbio_core::schemas::detail::DetailField;
 /// 语义与 [`crate::symbio_core::CapabilityVisitor`] 一致：按 id 去重、
 /// 后者覆盖（保留先注册的槽位），列表按 `order` 稳定排序。
 ///
-/// 实现（默认收集器）在 `plugins/session/options.rs`：本 trait 只有**一个**
-/// 实现，而它只被会话宿主使用——实现跟着宿主走，契约留在两侧都能看见的地方。
+/// 实现（默认收集器）在 `providers/collectors/option_visitor.rs`：本 trait 只有
+/// **一个**实现；收集**管线**（唯一消费方 = 会话宿主）在
+/// `plugins/session/capabilities.rs`，契约留在两侧都能看见的地方。
 #[async_trait::async_trait]
 pub trait OptionVisitor: Send + Sync + 'static {
     /// 注册一个选项字段（同 `key` 覆盖）。
     ///
     /// `order` **不下发**：它只是跨插件排序用的号段约定（插件之间不可见，只能
-    /// 约定数字，见 `plugins/session/options.rs` 模块文档），收集层用完即弃。
+    /// 约定数字，见 `plugins/session/options/mod.rs` 模块文档），收集层用完即弃。
     /// 前端收到的是一个**已排好序**的数组——数组序 = 展示序，比「各自按 order
     /// 再排一次」是更强的保证。
     async fn register_option_field(&self, order: i32, field: DetailField);

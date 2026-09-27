@@ -19,8 +19,8 @@
 //! 方法声明顺序无语义）。
 
 use super::active::{ActiveSessionState, REQUEST_ID_COUNTER};
+use super::capabilities::{attach_capabilities, collect_capabilities};
 use super::chat_loop::StopSignal;
-use super::chat_pipeline::{attach_capabilities, collect_capabilities};
 use super::model_chat;
 // 运行态的结局常量与变更类型：子模块经 `use super::*;` 取用（`consume` / `entry`
 // / 本文件都要用），因此在这里导入一次，而不是各子模块各导一遍。

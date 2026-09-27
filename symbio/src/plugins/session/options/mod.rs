@@ -33,16 +33,13 @@
 //! 号段只用于**收集层排序**，不下发：前端收到的是已排好序的字段数组
 //! （见 `symbio_core::capability::option::OptionVisitor::register_option_field`）。
 
+use super::capabilities::collect_options;
 use super::plugin::SessionPlugin;
-use crate::providers::DefaultOptionVisitor;
 use crate::symbio_core::schemas::detail::{
     DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
     DETAIL_PICK_DIRECTORY,
 };
-use crate::symbio_core::{
-    OptionVisitor, Plugin, PluginInvokeRequest, PluginInvokeRequestExt, OPTION_VISITOR, PATH,
-    TRAVERSE_AVAILABLE_OPTIONS,
-};
+use crate::symbio_core::PluginInvokeRequest;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -111,52 +108,11 @@ impl SessionPlugin {
     }
 }
 
-// ==================== 选项收集机制（宿主侧） ====================
+// ==================== 选项收集器已迁出 ====================
 //
-// 本段原是 `symbio_core/capability/option.rs` 的后半：**收集管线**。下沉到这里的判据是
-// ADR-023 的「依赖方数量」——契约（`OptionVisitor` trait 与 `TRAVERSE_AVAILABLE_OPTIONS`
-// 端点字面量）两侧都认，留在 core；而「谁来收集」只有会话宿主一个答案。
-// 这与它的平行物 `collect_capabilities` 同处一地（那个一直在 `chat_pipeline.rs` 里）。
-//
-// 收集器**实现**（`DefaultOptionVisitor`）不在这里——它的写入者是全体插件，
-// 不隶属于任何宿主，故住 `crate::providers::collectors`（见该模块文档的判据）。
-
-/// 向所有插件广播「贡献选项」，返回装配好的选项收集器。
-///
-/// 调用方（选项宿主 = 本插件）需在 `ctx` 中预先设置好各插件判定
-/// 所需的上下文键——通常是**运行期可枚举的数据源**（如 agent 目录、Provider
-/// 表）的定位依据，贡献插件据此算出**候选集**。
-///
-/// ⚠️ 「当前选中值」**不在**这里回填：值随会话节点 `attributes.metadata` 下发，
-/// 定义只声明「有哪些字段与候选」（`docs/archive/session-options-unification.md`
-/// §3.2 / §6）。所以宿主不需要为回填值而注入会话状态。
-///
-/// 失败降级语义与 `collect_capabilities`（`chat_pipeline.rs`）一致：
-/// 父插件缺失返回空收集器，单个插件 traverse 失败只记日志。
-pub async fn collect_options(
-    parent: Option<&Arc<dyn Plugin>>,
-    ctx: &Arc<dyn PluginInvokeRequest>,
-) -> Arc<dyn OptionVisitor> {
-    let visitor: Arc<dyn OptionVisitor> = Arc::new(DefaultOptionVisitor::new());
-
-    let Some(parent) = parent else {
-        return visitor;
-    };
-
-    let traverse_ctx = ctx.fork();
-    traverse_ctx.set(PATH, TRAVERSE_AVAILABLE_OPTIONS.to_string());
-    traverse_ctx.set(OPTION_VISITOR, visitor.clone());
-
-    if let Err(e) = parent.clone().traverse(String::new(), traverse_ctx).await {
-        crate::plugin_warn!(
-            "session",
-            "collect_options: traverse 失败（选项集可能不完整）: {:?}",
-            e
-        );
-    }
-
-    visitor
-}
+// 选项收集机制（宿主侧）的 `collect_options` 与其平行物 `collect_capabilities`
+// 同处一地，见 `super::capabilities`——判据是「一域一文件」：两个 traverse 收集器
+// 是同一件事的两半，不应分居两文件。
 
 // ==================== 字段声明（`node.schema`） ====================
 //
@@ -383,5 +339,4 @@ fn heartbeat_definition() -> DetailDefinition {
 }
 
 #[cfg(test)]
-#[path = "options.test.rs"]
 mod tests;

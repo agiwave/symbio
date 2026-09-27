@@ -1,7 +1,7 @@
 //! `options` 模块的单元测试。
 //!
-//! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`，见 `CONTRIBUTING.md`）：
-//! `options.rs` 只保留生产代码，测试全部放本文件。
+//! 与实现**同级**分文件（`options/mod.rs` + 同级 `tests.rs`，见 `CONTRIBUTING.md`）：
+//! `mod.rs` 只保留生产代码，测试全部放本文件。
 //!
 //! 这里锁的是「会话自有 4 项」这份**声明**：字段 key（= 会话解析链读取的 metadata
 //! 键）、号段顺序（= UI 顺序）、以及各字段的 widget 与锁定/缺省语义。
@@ -226,20 +226,4 @@ async fn session_contributes_option_fields_to_the_visitor() {
         .map(|f| f.key)
         .collect();
     assert_eq!(keys, vec!["workdir", "risk_level", "mode", "heartbeat"]);
-}
-
-// ==================== 收集管线（宿主侧） ====================
-//
-// 原在 `symbio_core/capability/option.test.rs`，随 `collect_options` 一起搬来。
-// 测的是**无父插件时的降级**，不是契约——契约由 `OptionVisitor` 的文档钉住。
-//
-// 收集器**本身**的两条（排序 / 去重）随默认实现迁到
-// `providers/collectors/option_visitor.test.rs`。
-
-#[tokio::test]
-async fn collect_without_parent_returns_empty() {
-    let ctx: Arc<dyn PluginInvokeRequest> =
-        Arc::new(crate::symbio_core::PluginSimpleRequest::new(None, None));
-    let v = collect_options(None, &ctx).await;
-    assert!(v.list_option_fields().await.is_empty());
 }

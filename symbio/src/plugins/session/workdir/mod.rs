@@ -505,5 +505,4 @@ fn publish_vdfs_change(
 }
 
 #[cfg(test)]
-#[path = "workdir.test.rs"]
 mod tests;

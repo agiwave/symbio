@@ -1,8 +1,8 @@
 //! 心跳设置工具 —— session 插件内聚实现
 //!
 //! 心跳机制的全部环节都在 session 插件内闭环：
-//! - 配置存储：`Session.metadata.heartbeat`（[`HeartbeatConfig`]，`heartbeat.rs`）
-//! - 后台调度：`heartbeat.rs` 的调度循环（随插件树构建启动，常驻运行）
+//! - 配置存储：`Session.metadata.heartbeat`（[`HeartbeatConfig`]，`heartbeat/mod.rs`）
+//! - 后台调度：`heartbeat/mod.rs` 的调度循环（随插件树构建启动，常驻运行）
 //! - 触发执行：`trigger_heartbeat` 复用 chat/send 统一入口
 //!
 //! 本工具是这套机制的**设置入口**：模型在会话内调用它启用/调整/停用本会话

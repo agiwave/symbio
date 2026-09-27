@@ -5,7 +5,7 @@
 //! 立刻中止并明确报错——最典型的就是"会话绑定了一个不存在的智能体"。
 //!
 //! 解决：收集期错误写入 ctx 上的一个共享桶，由编排方（session 插件的能力收集管线
-//! `plugins/session/chat_pipeline.rs`）在收集结束后统一取用判定。
+//! `plugins/session/capabilities.rs`）在收集结束后统一取用判定。
 //!
 //! ## 归属规则
 //!

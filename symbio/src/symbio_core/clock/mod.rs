@@ -7,7 +7,7 @@
 //! | 位置 | 写法 |
 //! |---|---|
 //! | `symbio_core/turn.rs`（2 处内联） | `time::OffsetDateTime` |
-//! | `plugins/session/heartbeat.rs` | `time::OffsetDateTime` |
+//! | `plugins/session/heartbeat/mod.rs` | `time::OffsetDateTime` |
 //! | `plugins/session/plugin.rs` | `SystemTime` + `unwrap_or(0)` |
 //! | `providers/vdfs_service/memory.rs` | `SystemTime` + `unwrap_or(0)` |
 //!

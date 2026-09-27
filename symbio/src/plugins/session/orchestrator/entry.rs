@@ -8,7 +8,7 @@
 //! - `ensure_auto_title`：首个用户消息落盘后的自动命名（顺带发 VDFS 变更）。
 //!
 //! 可见性：`handle_chat_send_oneoff` / `handle_chat_abort_oneoff` 被 `plugin.rs`
-//! 的路由与 `heartbeat.rs` 跨模块调用（原本即 `pub`）。
+//! 的路由与 `heartbeat/mod.rs` 跨模块调用（原本即 `pub`）。
 
 use super::super::plugin::{append_and_publish, PublishTarget};
 use super::super::types::Session;

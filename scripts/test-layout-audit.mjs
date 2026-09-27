@@ -3,8 +3,8 @@
  * test-layout-audit — Rust 测试文件布局审计（取代「记在记忆里的布局约定」）
  *
  * 约定（原先靠人记，现在由本脚本判）：
- *   - 测试独立成文件、同级同名加 `.test`：`workdir.rs` + `workdir.test.rs`，
- *     宿主文件**末尾**声明 `#[cfg(test)] #[path = "workdir.test.rs"] mod tests;`
+ *   - 测试独立成文件、同级同名加 `.test`：`capabilities.rs` + `capabilities.test.rs`，
+ *     宿主文件**末尾**声明 `#[cfg(test)] #[path = "capabilities.test.rs"] mod tests;`
  *   - 宿主是 `mod.rs` 的，测试放同级 `tests.rs`（`#[path = "tests.rs"]`）
  *   - 拆出测试文件前**必须**确认 `mod tests` 是否在文件末尾——在中部时按
  *     「取到文件尾」切会把生产代码搬进测试文件（`model/plugin.rs` 踩过）

@@ -85,7 +85,7 @@ node D:/Bing/symbio/scripts/windows-restart-prepare.mjs --config D:/SymbioPrepar
 
 代码依据：
 
-- `symbio/src/plugins/session/heartbeat.rs`：配置在 `Session.metadata.heartbeat`，循环扫描已启用且空闲的会话，15 秒扫描，带错峰与每 tick 上限。
+- `symbio/src/plugins/session/heartbeat/mod.rs`：配置在 `Session.metadata.heartbeat`，循环扫描已启用且空闲的会话，15 秒扫描，带错峰与每 tick 上限。
 - `symbio/src/plugins/session/plugin.rs`：有 Tokio runtime 时启动 heartbeat 循环；启动清理会把上次遗留的 `Streaming` 消息标成 `Failed`（“会话因重启中断”），`WaitingUserAction` 保留供用户 resume。
 - `cli/src/main.rs`：`--heartbeat` 模式保持 CLI 存活来承载后端调度器，并非恢复任意已中断调用栈。
 

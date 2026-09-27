@@ -1,7 +1,7 @@
 //! `workdir` 模块的单元测试。
 //!
-//! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`，见 `CONTRIBUTING.md`）：
-//! `workdir.rs` 只保留生产代码，测试全部放本文件。
+//! 与实现**同级**分文件（`workdir/mod.rs` + 同级 `tests.rs`，见 `CONTRIBUTING.md`）：
+//! `mod.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
 use serde_json::json;

@@ -237,7 +237,7 @@ vdfs/list { path: "<id>/message", limit: 30, before: "<id>/message/<mid>" }
 | `store/mod.rs` | 两个文件形状 + 读写 + 投影 + 兜底 + 迁移 |
 | `types.rs` | `SessionSummary`；`derive_session_summary` / `session_meta_tags` 移入 |
 | `plugin.rs` | `session_node` / `nodes_of_sessions` 改收 `&SessionSummary` |
-| `heartbeat.rs` / 崩溃清理 | 仍走**全量** `list_sessions()`（它们确实要读消息） |
+| `heartbeat/mod.rs` / 崩溃清理 | 仍走**全量** `list_sessions()`（它们确实要读消息） |
 
 **不动**：内存中 `Session.messages` 语义、VDFS 对外地址、前端协议。
 拆的是**磁盘布局**，不是契约。

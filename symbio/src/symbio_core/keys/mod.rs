@@ -313,7 +313,7 @@ pub const ABORT_SIGNAL: ExecAbortSignalKey = ExecAbortSignalKey;
 /// 出口 = 「本次调用的可见事件往这里写」；**错误** = 「本次收集有致命错误」）。
 ///
 /// 写侧是**任何参与 `traverse` 的插件**（当前为 agent 插件报子智能体装配硬错误），
-/// 读侧是 session 编排方（`plugins/session/chat_pipeline.rs`）。两侧分属不同插件、
+/// 读侧是 session 编排方（`plugins/session/capabilities.rs`）。两侧分属不同插件、
 /// 互相不可见，故键面定义在本域；机制的完整论述见 `capability/error.rs` 的模块文档。
 ///
 /// ## 为什么 `parse → None` 且 `WIRE = false`

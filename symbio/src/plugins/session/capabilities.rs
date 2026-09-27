@@ -1,4 +1,8 @@
-//! 会话能力收集管线（session 插件内部设施）
+//! 会话收集器 —— 工具能力与选项字段的 traverse 收集（session 插件内部设施）
+//!
+//! 两个收集器是**同一件事的两半**（`collect_capabilities` 收工具、
+//! `collect_options` 收选项字段），同处本文件；「收集机制」的契约
+//! （`CapabilityVisitor` / `OptionVisitor` 与端点字面量）留在 `symbio_core`。
 //!
 //! ## 背景
 //!
@@ -35,10 +39,11 @@
 //! 仍留在 `symbio_core` 的是**收集期错误通道**（`capability_error.rs`：写侧为任意
 //! 参与 traverse 的插件、读侧为 session 编排方，属跨插件契约）；本文件仅消费。
 
-use crate::providers::DefaultToolVisitor;
+use crate::providers::{DefaultOptionVisitor, DefaultToolVisitor};
 use crate::symbio_core::{
-    capability_init_error_bucket, CapabilityVisitor, Plugin, PluginInvokeRequest,
-    PluginInvokeRequestExt, CAPABILITY_ERRORS, PATH, TRAVERSE_AVAILABLE_TOOLS,
+    capability_init_error_bucket, CapabilityVisitor, OptionVisitor, Plugin, PluginInvokeRequest,
+    PluginInvokeRequestExt, CAPABILITY_ERRORS, OPTION_VISITOR, PATH, TRAVERSE_AVAILABLE_OPTIONS,
+    TRAVERSE_AVAILABLE_TOOLS,
 };
 use std::sync::Arc;
 
@@ -107,3 +112,55 @@ pub fn attach_capabilities(
 ) {
     ctx.set(crate::symbio_core::CAPABILITY_VISITOR, manager);
 }
+
+// ==================== 选项收集机制（宿主侧） ====================
+//
+// 本段原是 `symbio_core/capability/option.rs` 的后半：**收集管线**。下沉到这里的判据是
+// ADR-023 的「依赖方数量」——契约（`OptionVisitor` trait 与 `TRAVERSE_AVAILABLE_OPTIONS`
+// 端点字面量）两侧都认，留在 core；而「谁来收集」只有会话宿主一个答案。
+// 它与平行物 `collect_capabilities` 是**同一件事的两半**（工具 / 选项各一半），
+// 故两者同处本文件，不因历史路径而分居。
+//
+// 收集器**实现**（`DefaultOptionVisitor`）不在这里——它的写入者是全体插件，
+// 不隶属于任何宿主，故住 `crate::providers::collectors`（见该模块文档的判据）。
+
+/// 向所有插件广播「贡献选项」，返回装配好的选项收集器。
+///
+/// 调用方（选项宿主 = 本插件）需在 `ctx` 中预先设置好各插件判定
+/// 所需的上下文键——通常是**运行期可枚举的数据源**（如 agent 目录、Provider
+/// 表）的定位依据，贡献插件据此算出**候选集**。
+///
+/// ⚠️ 「当前选中值」**不在**这里回填：值随会话节点 `attributes.metadata` 下发，
+/// 定义只声明「有哪些字段与候选」（`docs/archive/session-options-unification.md`
+/// §3.2 / §6）。所以宿主不需要为回填值而注入会话状态。
+///
+/// 失败降级语义与 `collect_capabilities`（本文件）一致：
+/// 父插件缺失返回空收集器，单个插件 traverse 失败只记日志。
+pub async fn collect_options(
+    parent: Option<&Arc<dyn Plugin>>,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+) -> Arc<dyn OptionVisitor> {
+    let visitor: Arc<dyn OptionVisitor> = Arc::new(DefaultOptionVisitor::new());
+
+    let Some(parent) = parent else {
+        return visitor;
+    };
+
+    let traverse_ctx = ctx.fork();
+    traverse_ctx.set(PATH, TRAVERSE_AVAILABLE_OPTIONS.to_string());
+    traverse_ctx.set(OPTION_VISITOR, visitor.clone());
+
+    if let Err(e) = parent.clone().traverse(String::new(), traverse_ctx).await {
+        crate::plugin_warn!(
+            "session",
+            "collect_options: traverse 失败（选项集可能不完整）: {:?}",
+            e
+        );
+    }
+
+    visitor
+}
+
+#[cfg(test)]
+#[path = "capabilities.test.rs"]
+mod tests;
