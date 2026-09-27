@@ -83,7 +83,7 @@ let (my_channel, peer_channel) = PluginChannel::pair(64);
 | 键 | 类型 | 用途 |
 |----|------|------|
 | `PATH` | String | 目标路径 (如 `session/chat/send`；资源类走 `vdfs/*` + `<根>/…` 地址) |
-| `payload` | 任意（调用方定） | 交互载荷数据（桶名见 `symbio_core::KEY_PAYLOAD`） |
+| `payload` | 任意（调用方定） | 交互载荷数据（桶名见 `symbio_core::PLUGIN_PAYLOAD_KEY`） |
 | `WORKDIR` | String | 当前工作区根路径 |
 | `SESSION_ID` | String | 会话唯一标识 |
 | `TRACE_ID` | String | 调用链追踪 ID |
@@ -270,7 +270,7 @@ MemoryVdfs}`（`providers` 是唯一出口，子目录私有、不深引）。�
 ### `PLUGIN.yml` 的保留键
 
 保留键属于**装配方**（容器 / 插件管理插件），插件自己的配置不得占用同名键。
-单一清单见 `symbio_core::plugin::dir::RESERVED_KEYS`——读写时的「剥离 / 保留」都遍历它。
+单一清单见 `symbio_core::plugin::dir::PLUGIN_RESERVED_KEYS`——读写时的「剥离 / 保留」都遍历它。
 
 | 键 | 谁写 | 说明 |
 |---|---|---|

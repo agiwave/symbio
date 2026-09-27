@@ -158,7 +158,7 @@ async fn route(
 
 **上下文键**：
 - `PATH` - 目标路径
-- `payload` - 请求数据（桶名见 `symbio_core::KEY_PAYLOAD`）
+- `payload` - 请求数据（桶名见 `symbio_core::PLUGIN_PAYLOAD_KEY`）
 - `WORKDIR` - 工作区路径
 - `SESSION_ID` - 会话 ID
 
