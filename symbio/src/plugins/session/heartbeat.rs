@@ -6,15 +6,91 @@
 //! 心跳任务配置存储于 `Session.metadata.heartbeat`，由前端"会话设置"写入。
 
 use super::plugin::SessionPlugin;
-use super::types::HeartbeatConfig;
 use crate::symbio_core::clock_now_ms;
 use crate::symbio_core::schemas::session::chat_message as cm;
 use crate::symbio_core::schemas::session::session_chat;
 use crate::symbio_core::{PluginInvokeRequestExt, PluginSimpleRequest, SESSION_ID};
+use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
+
+// ==================== 心跳配置（`Session.metadata.heartbeat`） ====================
+
+/// 会话心跳任务配置
+///
+/// 存储于 `Session.metadata.heartbeat`，由前端"会话设置"写入。
+/// 后端 [`crate::plugins::session::plugin::SessionPlugin`] 的后台调度器据此在会话空闲
+/// 指定时间后自动发起一次提示词对话。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeartbeatConfig {
+    /// 是否启用心跳任务
+    #[serde(default)]
+    pub enabled: bool,
+    /// 启动间隔（秒）：会话空闲达到该时长后触发一次心跳
+    #[serde(default = "default_heartbeat_interval")]
+    pub interval_seconds: u64,
+    /// 心跳任务提示词（每次触发时作为一条用户消息发送给模型）
+    #[serde(default)]
+    pub prompt: String,
+    /// 启动心跳时是否携带历史会话信息
+    /// - `true`（默认）：心跳消息作为普通对话追加，模型能看到历史
+    /// - `false`：本次发送不加载任何历史（"无上下文"心跳）
+    #[serde(default = "default_heartbeat_include_history")]
+    pub include_history: bool,
+}
+
+fn default_heartbeat_interval() -> u64 {
+    300
+}
+
+fn default_heartbeat_include_history() -> bool {
+    true
+}
+
+impl Default for HeartbeatConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            interval_seconds: default_heartbeat_interval(),
+            prompt: String::new(),
+            include_history: default_heartbeat_include_history(),
+        }
+    }
+}
+
+impl HeartbeatConfig {
+    /// 从会话 metadata 解析心跳配置。字段缺失时返回默认（未启用）配置。
+    pub fn from_metadata(metadata: &serde_json::Value) -> Self {
+        let Some(obj) = metadata.get("heartbeat").and_then(|v| v.as_object()) else {
+            return Self::default();
+        };
+        let enabled = obj
+            .get("enabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let interval_seconds = obj
+            .get("interval_seconds")
+            .and_then(|v| v.as_u64())
+            .unwrap_or_else(default_heartbeat_interval);
+        let prompt = obj
+            .get("prompt")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let include_history = obj
+            .get("include_history")
+            .and_then(|v| v.as_bool())
+            .unwrap_or_else(default_heartbeat_include_history);
+        Self {
+            enabled,
+            interval_seconds,
+            prompt,
+            include_history,
+        }
+    }
+}
 
 /// 心跳调度器扫描间隔（秒）
 const HEARTBEAT_TICK_SECS: u64 = 15;

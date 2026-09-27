@@ -1,12 +1,14 @@
 //! `impl VdfsProvider for SessionPlugin` 及其**私有辅助**。
 //!
-//! 自 `plugin.rs` 原样搬移（拆文件不拆行为）。职责：
+//! 职责：
 //! - [`vdfs::VdfsProvider::dispatch`] 是唯一入口：**先按 `path` 定位资源域，再按
 //!   `req` 执行操作**——`parse_session_path` 的每个域各有一个 `*_at` 私有方法，
 //!   dispatch 只做路由，域内怎么读写是各方法自己的事；
-//! - 域方法全部**转发既有会话能力**（SessionStore + 会话 metadata 合并），
-//!   不新造协议；
-//! - 只读辅助：转写（含在途消息）、存在性校验、实时工作状态、工作目录、子会话。
+//! - 读侧：域方法**转发既有会话能力**（SessionStore + 会话 metadata 合并），不新造协议
+//!   ——转写（含在途消息）、存在性校验、实时工作状态、工作目录、子会话；
+//! - 写侧只有四条，且都是既有能力的落地，不是新入口：消息域三个动作
+//!   （`patch_message` / `truncate_messages` / `clear_messages`，本文件末尾第二个
+//!   `impl SessionPlugin`）与会话本体的 `session_upsert`。
 
 use super::*;
 use crate::symbio_core::clock_now_ms;

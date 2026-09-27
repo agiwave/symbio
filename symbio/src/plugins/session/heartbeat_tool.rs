@@ -1,7 +1,7 @@
 //! 心跳设置工具 —— session 插件内聚实现
 //!
 //! 心跳机制的全部环节都在 session 插件内闭环：
-//! - 配置存储：`Session.metadata.heartbeat`（[`HeartbeatConfig`]，types.rs）
+//! - 配置存储：`Session.metadata.heartbeat`（[`HeartbeatConfig`]，`heartbeat.rs`）
 //! - 后台调度：`heartbeat.rs` 的调度循环（随插件树构建启动，常驻运行）
 //! - 触发执行：`trigger_heartbeat` 复用 chat/send 统一入口
 //!
@@ -9,8 +9,8 @@
 //! 的心跳任务。实现上直接读写本插件的会话存储（get_or_create_session /
 //! save_session），不经任何跨模块路由——机制与设置工具同插件，零跨模块依赖。
 
+use super::heartbeat::HeartbeatConfig;
 use super::plugin::SessionPlugin;
-use super::types::HeartbeatConfig;
 use crate::symbio_core::{
     Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     SESSION_ID,

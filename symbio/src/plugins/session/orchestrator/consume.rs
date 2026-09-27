@@ -1,22 +1,12 @@
-//! 消费循环：`run_chat_loop` 的启动、等待与终态收尾。
+//! Turn 任务的宿主层：`run_chat_loop` 的启动、等待与终态收尾。
 //!
-//! ## 收口后：这里不再是「消费循环」
+//! ## 这里只做一件事：管住一个 Turn 任务的生命周期
 //!
-//! 收口前，本模块是执行期的**帧消费器**：`run_chat_loop` 把消息节点事件序列化成
-//! `PluginFrame::Data` 发进来，这里 `serde_json::from_value::<NodeOp>` 解回来，
-//! 再按变体分派到转写或会话状态。整套机制存在的原因是——**当时「出口」只能是通道**。
+//! 出口是 [`ExecEventSink`]（进程内直连转写唯一写入点），中止是 [`ExecAbortSignal`]，
+//! 因此本模块不消费任何帧：一次 `spawn` → 直接 `await` 它的 `JoinHandle`，
+//! 由 `select!` 三臂决定谁先回来（任务结束 / 1800s 看门狗 / 状态被接管）。
 //!
-//! 现在出口是 [`ExecEventSink`]（进程内直连转写唯一写入点），中止是 [`ExecAbortSignal`]，
-//! 于是这里只剩**一件事**：管住一个 Turn 任务的生命周期。
-//!
-//! | 收口前 | 收口后 |
-//! |---|---|
-//! | `spawn` 外层任务 → 内层 `spawn` → `join` → 把结果投回通道 → 本循环再收 | 一次 `spawn`，直接 `await` 它的 `JoinHandle` |
-//! | 每帧 `from_value::<NodeOp>` + 变体分派 | 不存在（分派已随出口一起内联） |
-//! | `keepalive` sender 防误判通道关闭 | 不存在（中止是信号，不是通道关闭） |
-//! | `recv` 超时 + 每帧查 `is_working` | `select!` 三臂：任务结束 / 看门狗 / 状态被接管 |
-//!
-//! ## 出口结局与收尾（与收口前逐条对齐）
+//! ## 出口结局与收尾
 //!
 //! | 结局 | 收尾 |
 //! |---|---|
@@ -468,3 +458,7 @@ impl SessionPlugin {
         true
     }
 }
+
+#[cfg(test)]
+#[path = "consume.test.rs"]
+mod tests;

@@ -445,54 +445,12 @@ impl Plugin for SessionPlugin {
         match path {
             "chat/send" => return self.handle_chat_send_oneoff(ctx).await,
             "chat/abort" => return self.handle_chat_abort_oneoff(ctx).await,
-            // ==================== `stream` 已于 2026-09-23 退役（ADR-025）====================
-            //
-            // 会话实时面（消息流式 + 会话运行态）**迁回 VDFS 变更**：
-            // `event_bus/subscribe` + `vdfs/watch` 两步，与历史面是同一条
-            // `vdfs/watch`。它是唯一一条「因为问题不存在而退役」的路由——它存在的
-            // 三条理由（需要流内序号 / 需要背压恢复 / 需要免回读）逐条失效，
-            // 而「顺序是节点属性而非投递属性」这一条纠正同时推翻了它与它的前身。
-            // 详见 `docs/archive/session-realtime-vdfs-watch.md`。
-            // ==================== 本表只留「不是数据 CRUD」的路由 ====================
-            //
-            // 会话与消息的增删改查**全部**经 VDFS 地址完成（`vdfs/list|read|write|
-            // action|delete`），因此下面这些曾经存在的路由已退役——它们每一个都是
-            // VDFS 侧同一能力的第二份实现，会各自漂移：
-            //
-            // - `append`   —— 消息追加的唯一入口是聊天协议（`chat/send`），编排自身的
-            //                 落库走引擎直连（`open_chat_session` + `append_messages`）。
-            //                 旧形态是「为一次数据追加搭 invoke 信封」，纯开销。
-            // - `open`     —— 返回的是**进程内句柄**，而句柄交付早已改由编排器直接塞进
-            //                 `chat_ctx`（`SESSION_HANDLE`），不走路由。
-            // - `clear`    —— 删除会话的唯一入口是 `delete(<根>/session/<id>)`。
-            // - `chat/clear_messages`  —— `action(<id>/message, "clear")`。
-            // - `chat/delete_message`  —— `action(<id>/message/<mid>, "truncate")`。
-            // - `chat/update_message`  —— `write(<id>/message/<mid>)`。
-            // - `heartbeat/trigger`    —— **不是迁到 VDFS，而是能力整体取消**：它唯一的
-            //                 入口是选项面板上的「立即心跳」按钮（`invoke` 型选项），
-            //                 而那个按钮的作用与「在输入框里直接发一条消息」完全重复
-            //                 ——心跳的实质就是往会话发一轮提示词。留着它等于给同一件事
-            //                 两个入口，且按钮那个还绕开了对话本身。
-            //                 见 `options.rs::heartbeat_option` 的说明。
-            // - `get_messages`  —— 存在性校验改走**进程内 VDFS 纯接口**
-            //                 （`Plugin::get_vfs_provider()` + `stat(<挂载名>/<sid>)`）：
-            //                 「在不在」是资源问题，不该为它占一条会话专用读协议，
-            //                 也不必读回整份历史。见同文 §3.4.1。
-            // - `options/list` —— **选项机制整体下线**（2026-09-23）：选项不再是
-            //                 独立的节点协议，而是会话配置表单的字段，随
-            //                 `node.schema` / `new_type.schema` 下发，值走
-            //                 `node.attributes.metadata`，写走 `vdfs/write`。
-            //                 同一件事两条下发通道，而守卫不会因为「两边说的不一样」
-            //                 变红。见 `docs/archive/session-options-unification.md`。
-            // - `update`   —— **会话 metadata 的写入入口收敛为 `vdfs/write`**
-            //                 （2026-09-23）：它唯一比 VDFS 多出来的东西是「客户端
-            //                 指定会话 id」，而 VDFS 对**具名目标 + 不存在**的约定
-            //                 就是「就地创建，名字即身份」（见 `VdfsProvider::write`
-            //                 的 `create` 位表）——那条理由因此消失。CLI 改走
-            //                 `vdfs/write(<根>/session/<id>, {create:true, metadata})`，
-            //                 一次调用同时覆盖新建与改元数据。见
-            //                 `docs/archive/legacy-route-migration.md` §3.5。
-            //
+            // 本表只留「不是数据 CRUD」的路由：会话与消息的增删改查**全部**经 VDFS
+            // 地址完成（`vdfs/list|read|write|action|delete`）。在路由上再开一条数据面
+            // 入口 = 同一能力的第二份实现，两条实现会各自漂移——判据与逐条退役记录见
+            // `docs/archive/legacy-route-migration.md`（`stream` 见
+            // `docs/archive/session-realtime-vdfs-watch.md`；选项三条见
+            // `docs/archive/session-options-unification.md`）。
             // 剩下的都不是 CRUD：前两条是**编排 / 控制**。
             _ => return Err(PluginError::NotFound(format!("未知路径: {path}"))),
         }

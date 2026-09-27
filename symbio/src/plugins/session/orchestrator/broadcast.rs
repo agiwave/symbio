@@ -161,3 +161,7 @@ impl SessionPlugin {
         state.transcript.lock().await.emit_session_state(node);
     }
 }
+
+#[cfg(test)]
+#[path = "broadcast.test.rs"]
+mod tests;

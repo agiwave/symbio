@@ -141,5 +141,3 @@ pub(crate) async fn emit_streaming_start(sink: &ExecEventSink, root_id: &str, tu
 pub(crate) async fn fire_stop_hook(orchestrator: &ChatOrchestrator, messages: &[ChatMessage]) {
     orchestrator.stop.fire(messages).await;
 }
-
-// ── 测试（实现与测试分文件）────────────────────────────────────────────

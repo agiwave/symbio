@@ -871,3 +871,7 @@ async fn run_compression_llm(
         ..Default::default()
     })
 }
+
+#[cfg(test)]
+#[path = "compress.test.rs"]
+mod tests;

@@ -388,3 +388,7 @@ fn subtree_of(messages: &[cm::ChatMessage], root: &str) -> std::collections::Has
     }
     ids
 }
+
+#[cfg(test)]
+#[path = "failure.test.rs"]
+mod tests;
