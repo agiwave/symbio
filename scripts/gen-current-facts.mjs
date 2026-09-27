@@ -28,6 +28,7 @@ import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { scopeRow as sharedScopeRow } from "./line-count.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -398,97 +399,12 @@ function analyzePlugin(dirName, ids) {
   };
 }
 
-// ================= 规模与宿主接缝的提取 =================
-
-/** 目录遍历时跳过的名字（构建产物 / 依赖 / 版本库） */
-const SCOPE_SKIP = ["target", "vendor", "node_modules", "dist", ".git"];
-
-/** 递归收集指定后缀的文件（测试文件按 `*.test.rs` / `*.spec.*` 单独归类，不混进实现） */
-function walkScope(dir, exts, isTest) {
-  const out = [];
-  let ents;
-  try {
-    ents = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-  for (const e of ents) {
-    const p = path.join(dir, e.name);
-    if (e.isDirectory()) {
-      if (SCOPE_SKIP.includes(e.name)) continue;
-      out.push(...walkScope(p, exts, isTest));
-      continue;
-    }
-    const test = e.name.endsWith(".test.rs") || e.name.endsWith(".spec.ts") || e.name === "tests.rs";
-    if (!exts.some((x) => e.name.endsWith(x)) || test !== isTest) continue;
-    out.push(p);
-  }
-  return out;
-}
-
-function countLines(files) {
-  let n = 0;
-  for (const f of files) n += readFileSync(f, "utf8").split("\n").length - 1;
-  return n;
-}
-
-/**
- * `.rs` 文件的实现/测试行数归属。
- *
- * 为什么需要：`#[cfg(test)] mod tests { … }` 是**内联**在实现文件里的，按"整文件"
- * 归类会把测试行算进实现（实测：`symbio/src` 的实现行因此虚高约 7.5k，测试行虚低
- * 同量，会让人误判测试密度）。独立测试文件（`*.test.rs` / `tests.rs`）本来就被
- * `walkScope` 分开了，这里只处理内联模块。
- *
- * 返回仍按**行数**（换行符个数）计，与 `countLines` 同口径。
- */
-function splitRustLines(files) {
-  let impl = 0;
-  let test = 0;
-  for (const f of files) {
-    const txt = readFileSync(f, "utf8");
-    const total = txt.split("\n").length - 1;
-    let inlineTest = 0;
-    for (const [s, e] of testModuleSpans(txt)) {
-      inlineTest += txt.slice(s, e).split("\n").length - 1;
-    }
-    impl += total - inlineTest;
-    test += inlineTest;
-  }
-  return { impl, test };
-}
-
-/**
- * 一个统计范围：`dir` 相对仓库根，`exts` 参与统计的后缀。
- *
- * ⚠️ `dir` 会**原样进生成物**（§5.1 表格首列），故调用方必须给**正斜杠字面量**，
- * 不得用 `path.join` —— 后者在 Windows 上产出 `symbio\src`、在 Linux 上产出
- * `symbio/src`，同一份代码在两平台生成出不同内容；CI（Linux）的 `--check`
- * 因「Windows 提交的生成物 vs Linux 重生成」逐字比对而必红。
- * 真实文件访问仍走 `path.join`（正斜杠在 Windows 上同样可解析）。
- */
-function scopeRow(dir, exts) {
-  const impl = walkScope(path.join(ROOT, dir), exts, false);
-  const test = walkScope(path.join(ROOT, dir), exts, true);
-  // `.rs` 的内联测试模块按归属从「实现」移入「测试」；其它后缀没有这个概念
-  const split = exts.includes(".rs")
-    ? splitRustLines(impl)
-    : { impl: countLines(impl), test: 0 };
-  return {
-    dir,
-    implFiles: impl.length,
-    implLines: split.impl,
-    testFiles: test.length,
-    testLines: countLines(test) + split.test,
-  };
-}
-
 function scopeRows() {
   return [
-    scopeRow("symbio/src", [".rs"]),
-    scopeRow("cli/src", [".rs"]),
-    scopeRow("tauri/src-tauri/src", [".rs"]),
-    scopeRow("tauri/src", [".ts", ".vue"]),
+    sharedScopeRow(ROOT, "symbio/src", [".rs"]),
+    sharedScopeRow(ROOT, "cli/src", [".rs"]),
+    sharedScopeRow(ROOT, "tauri/src-tauri/src", [".rs"]),
+    sharedScopeRow(ROOT, "tauri/src", [".ts", ".vue"]),
   ];
 }
 
