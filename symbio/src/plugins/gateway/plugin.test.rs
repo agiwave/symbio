@@ -6,6 +6,7 @@ use super::*;
 
 use crate::symbio_core::{
     Plugin, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload, PluginSimpleRequest,
+    PLUGIN_FILE,
 };
 use crate::symbio_core::{VdfsContext, VdfsError, VdfsProvider};
 

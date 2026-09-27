@@ -7,7 +7,7 @@ use crate::symbio_core::vdfs;
 use crate::symbio_core::{
     plugin_dir_from_ctx, Capability, Plugin, PluginConfigFile, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
-    PLUGIN_FILE, PLUGIN_ID_WEB,
+    PLUGIN_ID_WEB,
 };
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
@@ -170,56 +170,20 @@ impl Plugin for WebPlugin {
 }
 
 // ==================== VDFS：配置文档（`<根>/web/PLUGIN.yml`） ====================
+//
+// 本插件在 VDFS 上的全部内容 = 一个配置文档，故实现 [`PluginConfigMount`] 即可——
+// 四臂 dispatch 由机制侧提供（见 `symbio_core::PluginConfigMount`），本处只声明差异。
 
-#[async_trait]
-impl vdfs::VdfsProvider for WebPlugin {
-    async fn dispatch(
-        &self,
-        _ctx: &vdfs::VdfsContext,
-        path: &str,
-        req: vdfs::VdfsRequest,
-    ) -> vdfs::VdfsResult<vdfs::VdfsResponse> {
-        match req {
-            vdfs::VdfsRequest::List { .. } => {
-                if path.is_empty() {
-                    return Ok(vdfs::VdfsResponse::list(vec![self.config_file.node()]));
-                }
-                Err(vdfs::VdfsError::not_found(format!(
-                    "网络工具是配置挂载点，没有子项：{path}"
-                )))
-            }
-            vdfs::VdfsRequest::Stat => {
-                if path.is_empty() {
-                    // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
-                    return Ok(vdfs::VdfsResponse::Stat(vdfs::VdfsNode::dir(
-                        "",
-                        "网络工具",
-                        vdfs::VdfsAccess::LIST,
-                    )));
-                }
-                if path == PLUGIN_FILE {
-                    return Ok(vdfs::VdfsResponse::Stat(self.config_file.node()));
-                }
-                Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
-            }
-            vdfs::VdfsRequest::Read => {
-                if path == PLUGIN_FILE {
-                    return Ok(vdfs::VdfsResponse::Read(
-                        self.config_file.read(&self.config).await?,
-                    ));
-                }
-                Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
-            }
-            vdfs::VdfsRequest::Write { content } => {
-                if path == PLUGIN_FILE {
-                    return Ok(vdfs::VdfsResponse::Write(
-                        self.config_file.apply(&self.config, &content).await?,
-                    ));
-                }
-                Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
-            }
-            _ => Err(vdfs::VdfsError::not_found(format!("未知路径：{path}"))),
-        }
+impl crate::symbio_core::PluginConfigMount for WebPlugin {
+    type Config = WebConfig;
+    const TITLE: &'static str = "网络工具";
+
+    fn config_file(&self) -> &PluginConfigFile {
+        &self.config_file
+    }
+
+    fn config_slot(&self) -> &RwLock<WebConfig> {
+        &self.config
     }
 }
 

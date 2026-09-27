@@ -2,13 +2,44 @@
 /**
  * doc-link-audit — 文档相对链接审计
  *
- * 用途：**活跃文档体检**——四条机械可判定的规矩，每条都对应一类「没人看着就必然腐烂」的文档病：
+ * 用途：**活跃文档体检**——五条机械可判定的规矩，每条都对应一类「没人看着就必然腐烂」的文档病：
  *
  *   D-001 站内相对链接：文档移动 / 归档（`git mv`）最容易留下静默坏链——阅读时才发现，
  *     而它本可以在提交前被机械地查出来。
  *   D-002 过程文档必须归档：靠文档**头部自述**判定（一次性评审 / 体检 / 已落地实施方案）。
  *   D-003 行数预算：活跃文档 **不得超过 `MAX_DOC_LINES`**。
  *   D-004 变更史不得混入活跃文档正文：历史归 `git log` 与 `archive/`。
+ *   D-006 反引号里的文件路径：正文用 `` `path/to/x.md` `` 指路时，目标必须存在。
+ *
+ * D-006 存在的理由（它是 D-001 的**盲区补丁**）：D-001 只认 Markdown 链接语法
+ *   `[文字](目标)`，而本仓正文里指路**更常**写成行内反引号（"详见 `docs/design/vdfs.md`"）。
+ *   这种写法 D-001 一个字都看不到——实测 `tauri/docs/FRONTEND.md` 首段引用的
+ *   `docs/design/frontend-ui-ux-prd.md` 与 `-design.md` **两个文件均不存在**，
+ *   而 D-001 报「失效 0 条」已经很久了。**守卫报 0 不等于没有坏链，只等于它看不见。**
+ *
+ * D-006 的两条防误报设计（缺任一条都会让规则被豁免喂到失效）：
+ *   ① **双根解析**：`docs/DECISIONS.md` 这类路径在模块 README 里是**相对仓库根**
+ *      写的，在 `docs/` 内部又是相对当前文件——先试文件目录、再试仓库根，任一命中即通过。
+ *      实测把失败数从 34 降到 9。
+ *   ② **只判定「不含 `./` `../` 且至少含一个 `/`」的路径**：无斜杠的（`` `README.md` ``）
+ *      无法判定相对谁；显式相对路径（`../x.md`）另行处理。实测 193 次出现里只有
+ *      79 次进入判定——剩余 114 次是说明性文字（`` `x.md` `` / `` `CHANGELOG.md` ``），
+ *      判定它们会让守卫满屏误报。
+ *
+ * **给豁免**（与 D-001 / D-003 的「不给豁免」不同）：本规则是**启发式**——
+ *   缩写式引用（`` `session/docs/core-loop.md` `` 指 `symbio/src/plugins/session/docs/core-loop.md`）
+ *   与「示意性路径」（`` `.vite/license.md` ``）在文本上与真断链无法区分。
+ *   硬判会让作者被迫改写正确的简写，故提供豁免
+ *   `<!-- doc-link-allow D-006: 理由 -->`（理由不可为空，同 D-002 / D-004）。
+ *
+ *   **豁免分档**（从头部注释升级而来，理由是实测暴露的两个缺口）：
+ *   · **行内**：写在**同一行**（或该行**前一行**）的豁免注释，只豁免**本行**的反引号路径。
+ *     规则文档（`session/docs/README.md` 用 `` `docs/x.md` `` 举例说明路径怎么写）
+ *     与缺陷记录（`frontend-ui-ux-plan.md` 引用两个已不存在的文件名，以记录"已修"）
+ *     都属此类——它们的"坏路径"是**内容**，不是**入链**。
+ *   · **全文**：写在头部（前 `DOCTYPE_HEAD_LINES` 行）的豁免注释，豁免**整篇**。
+ *     实测全文豁免会被滥用（一篇讲文档规矩的文章给整篇挂豁免，等于规则对它失效），
+ *     故只在确需时用；行内豁免覆盖绝大多数真实场景。
  *
  * D-003 存在的理由（为什么是「行数」这个粗指标）：文档臃肿不是美学问题，而是**职责失守的
  *   可观测代理**。实测 `docs/design/vdfs.md` 涨到 1045 行时，超出的部分是 §13「范例」——
@@ -41,15 +72,17 @@
  *   node scripts/doc-link-audit.mjs --root=<dir> # 换仓库根（回归测试用）
  *
  * 退出码：
- *   0 = 四条规矩全过
+ *   0 = 五条规矩全过
  *   1 = 有命中（**默认即失败**，不需要 `--strict`
  *       ——2026-09-20 前失效链接只在 `--strict` 下失败，而门禁从不带该参数 ⇒ 从未真的红过）
  *
  * 豁免：
  *   整体豁免 `docs/archive/`（唯一例外，不做逐条留痕）；
  *   D-002 / D-004 另有头部注释豁免（`<!-- doc-link-allow D-00X: 理由 -->`，理由不可为空）；
+ *   D-006 的豁免**分两档**——行内（本行或前一行，只豁免该行）/ 全文（须为文件首行非空内容）；
  *   D-001 / D-003 **不给豁免**——「目标文件是否存在」与「行数是否超限」都是精确判定，
- *   没有需要解释的中间态。
+ *   没有需要解释的中间态。（D-006 与 D-001 的差别就在这：前者判的是反引号文本，
+ *   与「缩写」「示意」在字面上不可分，故必须留豁免出口。）
  *
  * 与仓库约定一致：纯 Node 实现，不依赖 bash / ripgrep，Windows / macOS / Linux 通用。
  */
@@ -184,6 +217,90 @@ function waivedD004(text) {
   return WAIVER_D004_RE.test(head)
 }
 
+// ==================== D-006：反引号里的文件路径 ====================
+/**
+ * 行内反引号包着的路径（`` `docs/x.md` `` / `` `../a/b.md` ``）。
+ *
+ * 字符集限 ASCII 路径字符：本仓不存在中文文件名，放宽只会误吃正文里的
+ * 其它反引号片段（如 `` `a.b/c.md` `` 这类伪路径）。
+ */
+const BACKTICK_PATH = /`([A-Za-z0-9_][A-Za-z0-9_./-]*\.md)`/g
+const WAIVER_D006_RE = /<!--\s*doc-link-allow\s+D-006\s*:\s*(\S.*?)\s*-->/
+
+/**
+ * 该反引号路径是否**可判定**——不可判定的直接跳过（防误报的第一道闸）。
+ *
+ * - 不含 `/`：相对谁无法确定（`` `README.md` `` / `` `CHANGELOG.md` `` 常是泛指）；
+ * - 以 `/` 开头：是绝对文件系统路径或路由，不是仓库内相对路径；
+ * - 含通配星号 / `...`：是模式或省略写法。
+ */
+function isJudgeableBacktickPath(t) {
+  if (!t.includes('/')) return false
+  if (t.startsWith('/')) return false
+  if (t.includes('*') || t.includes('...')) return false
+  return true
+}
+
+/**
+ * 双根解析（防误报的第二道闸）：先当**相对当前文件**，再当**相对仓库根**，
+ * 任一命中即视为存在。
+ *
+ * 为什么必须双根：本仓两种写法都合法且在用——
+ *   · `docs/` 内部互相引用走相对（`./vdfs.md`）
+ *   · 模块 README 引用系统文档走仓库根（`docs/DECISIONS.md`）
+ * 只认一种会把另一种全部误报（实测：单根时 34 条失败，双根后 9 条）。
+ */
+function backtickPathExists(fromFile, t) {
+  const relToFile = path.resolve(path.dirname(fromFile), t)
+  if (fs.existsSync(relToFile)) return true
+  const relToRoot = path.resolve(repoRoot, t)
+  return fs.existsSync(relToRoot)
+}
+
+/**
+ * 该行是否被**行内豁免**覆盖：本行或**前一行**带 `<!-- doc-link-allow D-006: 理由 -->`。
+ *
+ * 取两行是为了让注释既可以写在被豁免内容之前（Markdown 里更常见，因为注释
+ * 混在正文行内会打断排版），也可以写在同行（`<!-- ... -->` 与反引号共存）。
+ */
+function waivedD006Line(lines, i) {
+  if (WAIVER_D006_RE.test(lines[i])) return true
+  return i > 0 && WAIVER_D006_RE.test(lines[i - 1])
+}
+
+/**
+ * **全文豁免只在它是文件第一行非空内容时生效**（实测教训）。
+ *
+ * 起初「头部 15 行内出现注释 ⇒ 豁免整篇」，结果行内豁免**永远不可达**：
+ * 一段开头就写行内豁免的文档，整篇都被放行——测试 `D-006 行内豁免` 因此蒙混过关，
+ * 真实的 `session/docs/README.md`（第 43 行举例）也会被整篇豁免，规则对它失效。
+ * 判据改为「注释之前没有别的内容」：这样「整篇豁免」是文件的**首行声明**，
+ * 而出现在正文中间的同类注释自然退化为行内作用域。
+ */
+function waivedD006Whole(text) {
+  for (const line of text.split('\n').slice(0, DOCTYPE_HEAD_LINES)) {
+    if (line.trim() === '') continue
+    return WAIVER_D006_RE.test(line)
+  }
+  return false
+}
+
+/** 正文里**判不出存在**的反引号路径（行号 + 路径），最多报 `limit` 处 */
+function backtickHits(file, text, limit = 8) {
+  const hits = []
+  const lines = text.split('\n')
+  for (let i = 0; i < lines.length && hits.length < limit; i++) {
+    if (waivedD006Line(lines, i)) continue
+    for (const m of lines[i].matchAll(BACKTICK_PATH)) {
+      const t = m[1]
+      if (!isJudgeableBacktickPath(t)) continue
+      backtickChecked += 1
+      if (!backtickPathExists(file, t)) hits.push({ line: i + 1, target: t })
+    }
+  }
+  return hits
+}
+
 /** 递归 docs/ 下的 .md（目录不存在 ⇒ 空数组） */
 function walkDocs(dir, out = []) {
   let entries
@@ -268,7 +385,9 @@ const BODY_ROOTS = ['docs', 'symbio/src', 'tauri', 'cli']
 const misplaced = []
 const oversized = []
 const historical = []
+const backtickBad = []
 let docsScanned = 0
+let backtickChecked = 0
 
 function scanBody(file) {
   const rel = path.relative(repoRoot, file).split(path.sep).join('/')
@@ -285,6 +404,11 @@ function scanBody(file) {
   if (!waivedD004(text)) {
     const hits = historyHits(text)
     if (hits.length > 0) historical.push({ rel, hits })
+  }
+
+  if (!waivedD006Whole(text)) {
+    const dead = backtickHits(file, text)
+    if (dead.length > 0) backtickBad.push({ rel, dead })
   }
 }
 
@@ -349,4 +473,24 @@ if (historical.length > 0) {
   console.log('      头部写 `<!-- doc-link-allow D-004: 理由 -->`（理由不可为空）。')
 }
 
-process.exit(bad.length > 0 || misplaced.length > 0 || oversized.length > 0 || historical.length > 0 ? 1 : 0)
+// ---- D-006：反引号里的文件路径 ----
+console.log(`D-006 反引号路径：判定 ${backtickChecked} 条，失效 ${backtickBad.length} 篇`)
+for (const { rel, dead } of backtickBad) {
+  for (const d of dead) console.log(`  ✗ ${rel}:${d.line}  \`${d.target}\`  不存在`)
+}
+if (backtickBad.length > 0) {
+  console.log('\n提示：行内反引号写出的文件路径 D-001 看不见（它只认 `[文字](目标)`）。两种处置：')
+  console.log('      · 真断链 → 改正路径（多为文件移动 / 改名后未更新入链）；')
+  console.log('      · 缩写 / 示意性路径（如 `session/docs/core-loop.md` 指插件内同名文件）→')
+  console.log('        改为完整路径，或头部写 `<!-- doc-link-allow D-006: 理由 -->`（理由不可为空）。')
+}
+
+process.exit(
+  bad.length > 0 ||
+    misplaced.length > 0 ||
+    oversized.length > 0 ||
+    historical.length > 0 ||
+    backtickBad.length > 0
+    ? 1
+    : 0
+)

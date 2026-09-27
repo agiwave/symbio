@@ -117,7 +117,7 @@
 > 因此子智能体空间这类**没有调用方**的会话也能被驱动——写它的收件箱即可。
 > 新增消息触发一整轮编排（在空间空闲时由空间自己消费）；而**改写与删除**是普通的 VDFS
 > 节点操作——判据是「触发不触发编排」，不是「碰不碰消息」。两者都在
-> [`session/docs/vdfs-session-messages.md`](../../symbio/src/plugins/session/docs/vdfs-session-messages.md)。
+> [`symbio/src/plugins/session/docs/vdfs-session-messages.md`](../../symbio/src/plugins/session/docs/vdfs-session-messages.md)。
 
 ### 聊天流程
 
@@ -147,7 +147,7 @@
 | `anthropic_messages` | Anthropic | `/v1/messages` |
 | `gemini_api` | Google | `generateContent` |
 
-> 协议适配内化于 `plugins/model/protocols/`，机制见 `plugins/model/README.md`；
+> 协议适配内化于 `symbio/src/plugins/model/protocols/`，机制见 `symbio/src/plugins/model/README.md`；
 > 为什么支持多协议见 [ADR-004](../DECISIONS.md)。
 
 ---

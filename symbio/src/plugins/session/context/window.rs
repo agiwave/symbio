@@ -21,6 +21,12 @@ use super::super::tokenizer::truncate_tokens;
 /// 64 token（≈128 字符）可列出 8 个典型文件名，仍是"一句话摘要"的量级。
 const SKELETON_DIGEST_TOKEN_CAP: usize = 64;
 
+/// 摘要里**单个条目名 / 单个键值**的 token 上限。与 [`SKELETON_DIGEST_TOKEN_CAP`]
+/// 是两件事：后者是整个摘要的预算（能列几条），本常量是单项的预算（一条写多长）。
+/// 骨架化时条目名与 `key=value` 的取值都套同一上限——原先三处各写字面量 `24`，
+/// 同值却无关联声明，改一处会漏另两处。24 token（≈48 字符）够装典型文件名/短取值。
+const ENTRY_NAME_TOKEN_CAP: usize = 24;
+
 /// 判断工具结果是否为失败结果。
 ///
 /// 结构化优先：`meta.success == false` 或 `meta.failure_kind` 存在即为失败
@@ -129,11 +135,11 @@ const DIGEST_AFFIX_CHAR_RESERVE: usize = 24;
 /// 单名预算 24 token，与摘要条目字段口径一致。
 fn entry_name(item: &serde_json::Value) -> Option<String> {
     match item {
-        serde_json::Value::String(s) => Some(truncate_tokens(s, 24)),
+        serde_json::Value::String(s) => Some(truncate_tokens(s, ENTRY_NAME_TOKEN_CAP)),
         serde_json::Value::Object(obj) => ["name", "path", "file", "title", "id"]
             .iter()
             .find_map(|k| obj.get(*k).and_then(|v| v.as_str()))
-            .map(|s| truncate_tokens(s, 24)),
+            .map(|s| truncate_tokens(s, ENTRY_NAME_TOKEN_CAP)),
         _ => None,
     }
 }
@@ -291,7 +297,10 @@ fn anchor_of_args(args: &str) -> Option<String> {
     for key in ANCHOR_PARAM_KEYS {
         if let Some(v) = obj.get(*key).and_then(|v| v.as_str()) {
             if !v.trim().is_empty() {
-                return Some(format!("{key}={}", truncate_tokens(v, 24)));
+                return Some(format!(
+                    "{key}={}",
+                    truncate_tokens(v, ENTRY_NAME_TOKEN_CAP)
+                ));
             }
         }
     }

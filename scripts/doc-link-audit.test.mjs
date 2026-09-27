@@ -206,6 +206,86 @@ test('D-004：豁免理由为空 → 仍失败（同 D-002 的口径）', () => 
   assert.equal(audit({ 'docs/a.md': empty }).status, 1)
 })
 
+// ── D-006：反引号里的文件路径（D-001 的盲区补丁）─────────────────────────
+// D-001 只认 `[文字](目标)`，而本仓正文**更常**用行内反引号指路。实测
+// `tauri/docs/FRONTEND.md` 首段引用的两个文件都不存在，D-001 却报「失效 0 条」
+// 很久了——**守卫报 0 不等于没有坏链，只等于它看不见**。这组用例钉住它会红。
+test('D-006：反引号指向不存在的路径 → 失败（D-001 看不见这类）', () => {
+  const r = audit({ 'docs/a.md': '# A\n\n详见 `docs/nope.md`。\n' })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /D-006/)
+  assert.match(r.stdout, /docs\/nope\.md/)
+})
+
+test('D-006：双根解析——相对当前文件命中即通过', () => {
+  assert.equal(
+    audit({ 'docs/a.md': '# A\n\n见 `./b.md`。\n', 'docs/b.md': '# B\n' }).status,
+    0,
+    '相对当前文件应命中'
+  )
+})
+
+test('D-006：双根解析——相对仓库根命中即通过（模块 README 引用系统文档的写法）', () => {
+  assert.equal(
+    audit({
+      'symbio/src/plugins/foo/README.md': '# Foo\n\n见 `docs/DECISIONS.md`。\n',
+      'docs/DECISIONS.md': '# 决策\n',
+    }).status,
+    0,
+    '相对仓库根应命中'
+  )
+})
+
+test('D-006：不可判定的写法一律跳过（无斜杠 / 通配 / 省略号 / 绝对路径）', () => {
+  const r = audit({
+    'docs/a.md': [
+      '# A',
+      '',
+      '泛指 `README.md`；通配 `plugins/*/README.md`；',
+      '省略 `a/b/...md`；绝对 `/etc/x.md`；纯锚 · 无路径 `foo.md`。',
+      '',
+    ].join('\n'),
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-006：缩写引用 → 失败（启发式判不准，故必须带豁免出口）', () => {
+  const r = audit({ 'docs/a.md': '# A\n\n见 `session/docs/core-loop.md`。\n' })
+  assert.equal(r.status, 1)
+})
+
+test('D-006：行内豁免（写在被豁免行的前一行）→ 通过，且不影响其它行', () => {
+  const r = audit({
+    'docs/a.md': [
+      '# A',
+      '',
+      '<!-- doc-link-allow D-006: 此处引用示意性路径 -->',
+      '示意：`docs/not-real.md`',
+      '但下面这条是真断链：`docs/really-nope.md`',
+      '',
+    ].join('\n'),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /really-nope\.md/)
+  assert.doesNotMatch(r.stdout, /not-real\.md/, '被豁免的行不应出现在报告里')
+})
+
+test('D-006：全文豁免（头部注释）→ 整篇通过', () => {
+  const r = audit({
+    'docs/a.md': '<!-- doc-link-allow D-006: 本文举例说明路径写法，路径均非入链 -->\n# A\n\n`docs/x.md`\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-006：豁免理由为空 → 仍失败（同 D-002 / D-004 的口径）', () => {
+  const r = audit({ 'docs/a.md': '# A\n\n<!-- doc-link-allow D-006:   -->\n见 `docs/nope.md`。\n' })
+  assert.equal(r.status, 1)
+})
+
+test('D-006：docs/archive/ 整体豁免（归档记录当时形态，改写等于篡改历史）', () => {
+  assert.equal(audit({ 'docs/archive/old.md': '# 旧\n\n见 `docs/gone.md`。\n' }).status, 0)
+})
+
 // ── 空树 ────────────────────────────────────────────────────────────────
 test('空树通过（守卫不是空转即红）', () => {
   assert.equal(audit({}).status, 0)

@@ -1,6 +1,6 @@
 # 前端架构
 
-> 前端 UI/UX 需求与设计详见 `docs/design/frontend-ui-ux-prd.md` 与 `docs/design/frontend-ui-ux-design.md`（根 docs/）。本文只写前端代码结构与机制。
+> 前端 UI/UX 需求与设计方案详见 `docs/design/frontend-ui-ux-plan.md`（根 docs/）。本文只写前端代码结构与机制。
 
 ## 技术栈
 

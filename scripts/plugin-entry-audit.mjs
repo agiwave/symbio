@@ -33,8 +33,9 @@
  * | E-008 | 文档里标了 `<!-- vocab:PREFIX_ -->` 的**词表行**必须与代码常量逐字一致 | 闭集的第二份真相常驻文档：`vdfs.md` 的 status 行曾一直写 `error`，而代码早已改名为 `failed`——漂移会从文档**流回**代码 |
  * | E-009 | 插件不得直接 `use crate::plugins::<兄弟插件>`              | 「插件之间互不可见」**不是**编译器保证的：`plugins` 是共同父模块，而 Rust 的私有可见性包含"定义模块的后代" ⇒ `plugins::mcp` 能路径到私有的 `plugins::web`。当前代码恰好为 0，但没有守卫，一次顺手 import 就能破坏它且不留红（`plugins/mod.rs` 的架构原则只是约定） |
  * | E-010 | 消费方不得深引 `symbio_core::<域>::`（`schemas::` 除外）       | 根平铺导出是**唯一**的公开面（`symbio_core/README.md` §1.4）。深引会绕过它：一个符号从根导出里移除后，深引点**照样编译通过**（子模块还在），公开面于是变成两套而没有任何编译错误提示。这条规则此前**不存在**，于是烂到 14 处（`capability/mod.rs` ×5、`cli` 跨 crate 一处、core 内部两处……） |
+ * | E-011 | 纯配置挂载点插件不得手写 `impl VdfsProvider`                    | 「挂载根 = 一份配置文档」的插件（`CONFIG_MOUNT_PLUGINS`）四臂 dispatch 骨架逐字相同，机制侧已提供唯一实现（`symbio_core::PluginConfigMount` 的泛型 blanket impl）。手写一份 = 把同一段语义复制出去：四份副本改一条错误文案要改四处，新增插件「记得抄对每条分支」是纯人肉负担。本条与行数棘轮互补——棘轮在**事后**度量规模，本条在**事前**禁止把已收口的语义再摊开 |
  *
- * E-001 ~ E-004、E-007 ~ E-010 是 **ERROR**（判据 airtight，可进 `--strict` 门禁）；
+ * E-001 ~ E-004、E-007 ~ E-011 是 **ERROR**（判据 airtight，可进 `--strict` 门禁）；
  * E-005 / E-006 是 **WARNING**（需要「动态命名空间」白名单配合，宁可先报给人看）。
  *
  * 报告段另给一张表：**每条路由 → 消费方计数**。`refs=0` 的行是「定义了但没人用」
@@ -76,6 +77,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, yellow, green, dim } from './color.mjs'
+import { blankComments, matchBrace, blankTestModules } from './rust-scan.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const defaultRoot = path.resolve(scriptDir, '..')
@@ -95,130 +97,6 @@ function report(rule, severity, file, line, message) {
   if (severity === 'error') errors++
   else warnings++
   hitsByRule.set(rule, (hitsByRule.get(rule) ?? 0) + 1)
-}
-
-// ── 去注释（保留行结构，因此行号仍然准确）────────────────────────────────
-//
-// 逐字符扫描并跟踪字符串状态，而不是按行 `split('//')`：后者会把字符串里的 `//`
-// 当成注释起点，把该行后半段整段吃掉 —— 那是**漏报**，比误报更危险。
-// 三种注释形式都要剥：`//`、`/* */`、以及 **`<!-- -->`**（`.vue` 的组件文档写在
-// 顶部 HTML 注释里，而那正是最常出现路径字面量的地方；不剥它会把满篇文档判成违规，
-// 一个只会误报的守卫最后一定会被人用豁免注释喂到失效）。
-function stripComments(source) {
-  const out = []
-  let line = ''
-  let inBlock = false
-  let inHtml = false
-  let quote = null
-  for (let i = 0; i < source.length; i++) {
-    const c = source[i]
-    const n = source[i + 1]
-    if (c === '\n') {
-      out.push(line)
-      line = ''
-      quote = null
-      continue
-    }
-    if (inBlock) {
-      if (c === '*' && n === '/') {
-        inBlock = false
-        i++
-      }
-      continue
-    }
-    if (inHtml) {
-      if (c === '-' && n === '-' && source[i + 2] === '>') {
-        inHtml = false
-        i += 2
-      }
-      continue
-    }
-    if (quote) {
-      line += c
-      if (c === '\\') {
-        line += n ?? ''
-        i++
-      } else if (c === quote) {
-        quote = null
-      }
-      continue
-    }
-    if (c === '/' && n === '*') {
-      inBlock = true
-      i++
-      continue
-    }
-    if (c === '<' && n === '!' && source[i + 2] === '-' && source[i + 3] === '-') {
-      inHtml = true
-      i += 3
-      continue
-    }
-    if (c === '/' && n === '/') {
-      i++
-      while (i + 1 < source.length && source[i + 1] !== '\n') i++
-      continue
-    }
-    if (c === "'" || c === '"' || c === '`') quote = c
-    line += c
-  }
-  out.push(line)
-  return out
-}
-
-/** 从 `{` 起做字符串感知的花括号配对，返回对应 `}` 的下标（失败返回文本末尾） */
-function matchBrace(txt, openIdx) {
-  let depth = 0
-  let quote = null
-  for (let i = openIdx; i < txt.length; i++) {
-    const c = txt[i]
-    if (quote) {
-      if (c === '\\') i++
-      else if (c === quote) quote = null
-      continue
-    }
-    if (c === "'" || c === '"' || c === '`') {
-      quote = c
-      continue
-    }
-    if (c === '{') depth++
-    else if (c === '}') {
-      depth--
-      if (depth === 0) return i
-    }
-  }
-  return txt.length
-}
-
-/**
- * 把 `#[cfg(test)] mod … { … }` 的内容**抹成空白但保留换行**。
- *
- * 为什么不直接删掉：删掉会把后面的代码整体上移，**行号全错**——而报告里的
- * `file:line` 是给人去核对的唯一线索。抹成空白后，索引与原始行一一对应，
- * 豁免注释（写在原始行上）也能按同一个下标取到。
- */
-function blankTestModules(txt) {
-  const MARKER = '#[cfg(test)]'
-  const out = []
-  let i = 0
-  for (;;) {
-    const idx = txt.indexOf(MARKER, i)
-    if (idx < 0) {
-      out.push(txt.slice(i))
-      return out.join('')
-    }
-    out.push(txt.slice(i, idx))
-    const after = txt.slice(idx + MARKER.length)
-    const modHead = after.match(/^\s*(?:#\[[^\]]*\]\s*)*mod\s+[A-Za-z0-9_]+\s*\{/)
-    if (modHead) {
-      const open = idx + MARKER.length + modHead[0].length - 1
-      const end = Math.max(matchBrace(txt, open) + 1, open + 1)
-      const span = txt.slice(idx, end)
-      out.push(span.replace(/[^\n]/g, ' '))
-      i = end
-    } else {
-      i = idx + MARKER.length
-    }
-  }
 }
 
 // ── 文件收集 ─────────────────────────────────────────────────────────────
@@ -268,10 +146,16 @@ const isTestFile = (p) =>
 /** 生产 `.rs`（用于提取插件事实） */
 const isProdRs = (p) => isRs(p) && !isTestFile(p)
 
-/** 读文件并返回「去注释后的文本」（行号与原始文件一致） */
+/**
+ * 读文件并返回「去注释后的文本」（**行号与原始文件一致**）。
+ *
+ * 用 `blankComments` 而非 `stripComments`：报告里的 `file:line` 要指回原文件，
+ * 且豁免注释写在原始行上——注释只能**抹成空白**，不能整段删掉（否则行号全错）。
+ * `.vue` 走 `html` 开关剥 HTML 注释（组件文档写在顶部 HTML 注释里）。
+ */
 function readCode(abs) {
   const raw = fs.readFileSync(abs, 'utf8')
-  let txt = stripComments(raw).join('\n')
+  let txt = blankComments(raw, { html: abs.endsWith('.vue') }).join('\n')
   if (abs.endsWith('.rs')) txt = blankTestModules(txt)
   return txt
 }
@@ -279,7 +163,7 @@ function readCode(abs) {
 /** 读文件并返回 { raw, code } 两套行——**豁免看 raw，判定看 code** */
 function readLines(abs) {
   const raw = fs.readFileSync(abs, 'utf8').split(/\r?\n/)
-  let code = stripComments(raw.join('\n'))
+  let code = blankComments(raw.join('\n'), { html: abs.endsWith('.vue') })
   if (abs.endsWith('.rs')) code = blankTestModules(code.join('\n')).split('\n')
   return { raw, code }
 }
@@ -368,6 +252,16 @@ const DYNAMIC_DISPATCH = /parse_path\(|\.find\(\|t\| t\.name\(\)|VDFS_OPS/
 
 // ── 插件事实提取 ─────────────────────────────────────────────────────────
 const PLUGINS_DIR = path.join(repoRoot, 'symbio', 'src', 'plugins')
+
+/**
+ * 纯配置挂载点插件（挂载根下只有一份 `PLUGIN.yml`）——E-011 的适用范围。
+ *
+ * 这些插件应当实现 `symbio_core::PluginConfigMount`（四臂 dispatch 由机制侧提供），
+ * 而不是各自手写 `impl VdfsProvider`。**名单即「哪些插件的挂载根确实只有一份配置」
+ * 的事实表**：新插件两者之一必居其一——要么加进本名单并实现 `PluginConfigMount`，
+ * 要么它有资源条（条目 CRUD / 动态子节点），那就不属于这里。
+ */
+const CONFIG_MOUNT_PLUGINS = new Set(['gateway', 'local', 'telegram', 'web'])
 
 /** 该绝对路径是否落在 `plugins/` 之下（E-007 的适用范围） */
 const isInPluginsDir = (abs) => abs.startsWith(PLUGINS_DIR + path.sep)
@@ -784,6 +678,33 @@ for (const abs of codeFiles) {
       }
     }
 
+    // E-011：纯配置挂载点插件不得手写 `dispatch`
+    //
+    // 「挂载根 = 一份配置文档」的插件（见 `symbio_core::PluginConfigMount`）四臂
+    // dispatch 骨架逐字相同，机制侧已提供**唯一**实现（泛型 blanket impl）。手写
+    // 一份就是把同一段语义复制出去——四份副本改一条错误文案要改四处，且新增插件
+    // 「记得抄对每条分支」是纯人肉负担。
+    //
+    // 判据（airtight，可进 --strict）：插件目录名落在 `CONFIG_MOUNT_PLUGINS` 时，
+    // 其 `plugin.rs` 里不得出现 `impl … VdfsProvider for …`——应当改实现
+    // `PluginConfigMount`。这条不是「风格」：它守的是**差异只声明一次**。
+    //
+    // 该名单是**闭集且需要守卫**：新插件若同样是纯配置挂载点，把它加进来；若它有
+    // 资源条（条目 CRUD / 动态子节点），说明它**不该**用 `PluginConfigMount`，也
+    // 就**不该**在本名单里——名单即「哪些插件的挂载根确实只有一份配置」的事实表。
+    if (isRust && CONFIG_MOUNT_PLUGINS.has(pluginDirOf(abs))) {
+      if (/impl\s+[\w:]*\s*VdfsProvider\s+for\s+/.test(line) && !exempted(raw, i, 'E-011')) {
+        report(
+          'E-011',
+          'error',
+          rel(abs),
+          i + 1,
+          '`impl VdfsProvider` —— 纯配置挂载点插件应实现 `PluginConfigMount`，' +
+            '四臂 dispatch 由机制侧提供（见 `symbio_core::PluginConfigMount`）',
+        )
+      }
+    }
+
 
     // E-002 / E-005：路径字面量
     for (const m of line.matchAll(/"([^"\n]+)"|'([^'\n]+)'/g)) {
@@ -1012,6 +933,7 @@ const ruleNames = {
   'E-008': '文档词表 == 代码词表',
   'E-009': '不直接引用兄弟插件模块',
   'E-010': '不深引内核子模块（根平铺导出）',
+  'E-011': '配置挂载点不手写 dispatch',
 }
 for (const [rule, name] of Object.entries(ruleNames)) {
   const n = hitsByRule.get(rule) ?? 0

@@ -29,6 +29,7 @@ import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { scopeRow as sharedScopeRow } from "./line-count.mjs";
+import { stripComments, stripTestModules } from "./rust-scan.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -62,42 +63,6 @@ function collectRs(dir) {
   return out;
 }
 
-/**
- * 去注释（字符串感知）。
- *
- * 朴素的 `//.*$` 正则会砍掉**字符串里的** `//`（`"https://api.openai.com/v1"`
- * 会被截断），既破坏事实提取，也会让后续花括号配对错位——故按字符扫描，
- * 遇到字符串字面量整体复制、只在串外识别注释。
- */
-function stripComments(txt) {
-  let out = "";
-  for (let p = 0; p < txt.length; p++) {
-    const c = txt[p];
-    if (c === '"') {
-      const end = skipString(txt, p);
-      // 进度保证：解析结果必须至少吃掉当前字符
-      if (end > p) {
-        out += txt.slice(p, end + 1);
-        p = end;
-        continue;
-      }
-    } else if (c === "/" && txt[p + 1] === "/") {
-      const end = txt.indexOf("\n", p);
-      if (end < 0) break;
-      out += "\n";
-      p = end;
-      continue;
-    } else if (c === "/" && txt[p + 1] === "*") {
-      const end = txt.indexOf("*/", p + 2);
-      if (end < 0) break;
-      p = end + 1;
-      continue;
-    }
-        out += c;
-  }
-  return out;
-}
-
 const VDFS_FS_FILE = path.join(PLUGINS_DIR, "vdfs", "fs.rs");
 
 /**
@@ -110,111 +75,6 @@ function vdfsAddrRoot() {
   const m = src.match(/pub const VDFS_ADDR_ROOT:\s*&str\s*=\s*"([^"]+)"/);
   if (!m) throw new Error("cannot extract VDFS_ADDR_ROOT from plugins/vdfs/fs.rs");
   return m[1];
-}
-
-
-/**
- * 去掉 `#[cfg(test)]` 测试模块（`#[cfg(test)] mod tests { … }`）。
- *
- * 为什么需要：测试里的 `CapabilityMeta` / `PluginMeta`（如 vdfs/host.rs 的假容器
- * `PluginMeta::new("fake", …)`）不是生产事实，不剔除会污染事实表
- * （实测踩坑：`vdfs` 的注册名被抽成 `fake`）。
- *
- * 为什么不能"从第一个 `#[cfg(test)]` 直接截断到文件尾"：仓库里存在
- * **测试模块之后还有生产代码**的文件（如 `model/plugin.rs`：`mod tests` 在中段，
- * `traverse` 里的挂载点注册在其后）——截断会把生产事实一起丢掉
- * （实测踩坑：`model` 的 `<根>/model` 挂载点消失；`<根>` = vdfs 插件声明的挂载根名）
- *
- * 故按**花括号配对**精确剔除模块体，并对字符串字面量做感知（测试代码里
- * `format!("{{}}")` 这类字面量括号会让朴素配对错位）。
- */
-/**
- * 收集 `#[cfg(test)]` 测试模块占据的字符区间 `[start, end)`。
- *
- * 扫描逻辑的**唯一真源**：`stripTestModules`（提取事实时剔除测试代码）与
- * `splitRustLines`（统计行数时把内联测试归属到"测试"列）都建立在它之上。
- */
-function testModuleSpans(txt) {
-  const MARKER = "#[cfg(test)]";
-  const spans = [];
-  let i = 0;
-  for (;;) {
-    const idx = txt.indexOf(MARKER, i);
-    if (idx < 0) return spans;
-    const after = txt.slice(idx + MARKER.length);
-    const modHead = after.match(/^\s*(?:#\[[^\]]*\]\s*)*mod\s+[A-Za-z0-9_]+\s*\{/);
-    // 进度保证：无论匹配是否成功，i 都必须严格前进（否则死循环）
-    if (modHead) {
-      const open = idx + MARKER.length + modHead[0].length - 1;
-      const end = Math.max(matchBrace(txt, open) + 1, open + 1);
-      spans.push([idx, end]);
-      i = end;
-    } else {
-      // 不是模块（如 `#[cfg(test)] use …;`）——只吞掉标记本身，保留后续代码
-      i = idx + MARKER.length;
-    }
-  }
-}
-
-/** 剔除上面那些区间，其余文本原样保留（顺序拼接即等价于"挖掉"） */
-function stripTestModules(txt) {
-  const spans = testModuleSpans(txt);
-  if (spans.length === 0) return txt;
-  let out = "";
-  let i = 0;
-  for (const [s, e] of spans) {
-    out += txt.slice(i, s);
-    i = e;
-  }
-  return out + txt.slice(i);
-}
-
-/** 从 `{` 起做字符串感知的花括号配对，返回对应 `}` 的下标（失败返回文本末尾） */
-function matchBrace(txt, openIdx) {
-  let depth = 0;
-  for (let p = openIdx; p < txt.length; p++) {
-    const c = txt[p];
-    if (c === '"') {
-      p = skipString(txt, p);
-      continue;
-    }
-    if (c === "{") depth++;
-    else if (c === "}") {
-      depth--;
-      if (depth === 0) return p;
-    }
-  }
-  return txt.length - 1;
-}
-
-/**
- * 跳过字符串字面量，返回闭引号（或原始串收尾分隔符末位）的下标。
- *
- * 只**向前**扫描：返回值恒 ≥ `start`，调用方据此推进扫描位置；
- * 一旦返回更小的下标（曾用"向前 lastIndexOf 找 r" 的实现），
- * 外层扫描就会原地打转（实测踩坑：生成器死循环）。
- */
-function skipString(txt, start) {
-  // 原始字符串判定：开引号紧跟在 `r` 或 `r###` 之后（`r"…"` / `r#"…"#` / `br#"…"#`）
-  let hashes = 0;
-  let j = start - 1;
-  while (j >= 0 && txt[j] === "#") {
-    hashes++;
-    j--;
-  }
-  if (j >= 0 && txt[j] === "r") {
-    const close = '"' + "#".repeat(hashes);
-    const end = txt.indexOf(close, start + 1);
-    return end < 0 ? txt.length - 1 : end + close.length - 1;
-  }
-  for (let p = start + 1; p < txt.length; p++) {
-    if (txt[p] === "\\") {
-      p++;
-      continue;
-    }
-    if (txt[p] === '"') return p;
-  }
-  return txt.length - 1;
 }
 
 /** 收集文件内的 `const X: &str = "…"` 常量（用于解析 `name: CONST.to_string()`） */

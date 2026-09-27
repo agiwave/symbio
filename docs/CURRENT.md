@@ -60,15 +60,8 @@
 | `context_compact` | `session` | 主动压缩上下文（开关打开时才暴露给模型） |
 | `heartbeat` | `session` | 会话心跳配置 |
 | `read_skill` | `skill` | 读取技能定义 |
-| `vdfs_delete` | `vdfs` |  |
-| `vdfs_edit` | `vdfs` |  |
 | `vdfs_list` | `vdfs` |  |
-| `vdfs_mkdir` | `vdfs` |  |
 | `vdfs_read` | `vdfs` |  |
-| `vdfs_search` | `vdfs` |  |
-| `vdfs_stat` | `vdfs` |  |
-| `vdfs_tree` | `vdfs` |  |
-| `vdfs_write` | `vdfs` |  |
 | `http_request` | `web` | HTTP 请求 |
 | `web_fetch` | `web` | 网页抓取 |
 | `web_search` | `web` | 网页搜索 |
@@ -91,7 +84,7 @@
 ### 3.2 VDFS 操作（`plugins/vdfs/protocol.rs::VDFS_OPS`）
 
 - **前端链路**（13 个，计数有测试锁死）：`vdfs/root` · `vdfs/list` · `vdfs/tree` · `vdfs/stat` · `vdfs/read` · `vdfs/edit` · `vdfs/search` · `vdfs/write` · `vdfs/delete` · `vdfs/mkdir` · `vdfs/watch` · `vdfs/unwatch` · `vdfs/action`
-- **LLM 工具链路**（9 个）：`vdfs_delete` · `vdfs_edit` · `vdfs_list` · `vdfs_mkdir` · `vdfs_read` · `vdfs_search` · `vdfs_stat` · `vdfs_tree` · `vdfs_write`
+- **LLM 工具链路**（2 个）：`vdfs_list` · `vdfs_read`
   （`watch` / `unwatch` / `action` 不经工具暴露，故两条链路不是一一对应）
 
 ## 4. 存储层事实（防「多存储后端」误读）
@@ -109,7 +102,7 @@
 
 | 范围 | 实现 | 测试 |
 |---|---|---|
-| `symbio/src` | 224 文件 / 55851 行 | 127 文件 / 24815 行 |
+| `symbio/src` | 218 文件 / 55775 行 | 127 文件 / 24816 行 |
 | `cli/src` | 4 文件 / 1573 行 | 1 文件 / 80 行 |
 | `tauri/src-tauri/src` | 3 文件 / 449 行 | 0 文件 / 0 行 |
 | `tauri/src` | 94 文件 / 20269 行 | 49 文件 / 10429 行 |
@@ -123,4 +116,4 @@
 
 ---
 
-> 生成时间：2026-09-27 12:11:52 UTC · 源：`git rev-parse HEAD` = `662484d`
+> 生成时间：2026-09-27 16:10:17 UTC · 源：`git rev-parse HEAD` = `3582e02`

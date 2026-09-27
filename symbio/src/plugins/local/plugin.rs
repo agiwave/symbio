@@ -11,7 +11,7 @@ use crate::symbio_core::vdfs;
 use crate::symbio_core::{
     plugin_dir_from_ctx, Capability, CapabilityMeta, ExecEnv, Plugin, PluginConfigFile, PluginDir,
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
-    PluginPayload, PLUGIN_FILE, PLUGIN_ID_LOCAL,
+    PluginPayload, PLUGIN_ID_LOCAL,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -419,61 +419,28 @@ impl Plugin for LocalPlugin {
 // ==================== VDFS：配置文档（`<根>/local/PLUGIN.yml`） ====================
 //
 // 本插件只有配置、没有资源树，因此挂载根的内容恒为「一个配置文件」。
-// 节点形状、定义校验、落盘都在 [`PluginConfigFile`] 里，这里只做寻址分流。
+// 节点形状、定义校验、落盘都在 [`PluginConfigFile`] 里；四臂寻址分流由机制侧
+// 提供（见 `symbio_core::PluginConfigMount`），本处只声明差异与写后副作用。
 // 地址就是**真实文件名** `PLUGIN.yml`——它是插件目录里的一个普通文件。
 
 #[async_trait]
-impl vdfs::VdfsProvider for LocalPlugin {
-    async fn dispatch(
-        &self,
-        _ctx: &vdfs::VdfsContext,
-        path: &str,
-        req: vdfs::VdfsRequest,
-    ) -> vdfs::VdfsResult<vdfs::VdfsResponse> {
-        match req {
-            vdfs::VdfsRequest::List { .. } => {
-                if path.is_empty() {
-                    return Ok(vdfs::VdfsResponse::list(vec![self.config_file.node()]));
-                }
-                Err(vdfs::VdfsError::not_found(format!(
-                    "本地工具是配置挂载点，没有子项：{path}"
-                )))
-            }
-            vdfs::VdfsRequest::Stat => {
-                if path.is_empty() {
-                    // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
-                    return Ok(vdfs::VdfsResponse::Stat(vdfs::VdfsNode::dir(
-                        "",
-                        "本地工具",
-                        vdfs::VdfsAccess::LIST,
-                    )));
-                }
-                if path == PLUGIN_FILE {
-                    return Ok(vdfs::VdfsResponse::Stat(self.config_file.node()));
-                }
-                Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
-            }
-            vdfs::VdfsRequest::Read => {
-                if path == PLUGIN_FILE {
-                    return Ok(vdfs::VdfsResponse::Read(
-                        self.config_file.read(&self.config).await?,
-                    ));
-                }
-                Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
-            }
-            vdfs::VdfsRequest::Write { content } => {
-                if path == PLUGIN_FILE {
-                    let resp = self.config_file.apply(&self.config, &content).await?;
-                    // 策略热更：apply 已把新配置写进 slot，同步刷到运行中的
-                    // SecurityPolicy（限流 / 白名单 / 审批开关即时生效，无需重启）
-                    self.security
-                        .update_rules(self.config.read().await.policy_rules());
-                    return Ok(vdfs::VdfsResponse::Write(resp));
-                }
-                Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
-            }
-            _ => Err(vdfs::VdfsError::not_found(format!("未知路径：{path}"))),
-        }
+impl crate::symbio_core::PluginConfigMount for LocalPlugin {
+    type Config = super::local_config::LocalConfig;
+    const TITLE: &'static str = "本地工具";
+
+    fn config_file(&self) -> &PluginConfigFile {
+        &self.config_file
+    }
+
+    fn config_slot(&self) -> &RwLock<Self::Config> {
+        &self.config
+    }
+
+    /// 策略热更：`apply` 已把新配置写进 slot，这里同步刷到运行中的
+    /// `SecurityPolicy`（限流 / 白名单 / 审批开关即时生效，无需重启）。
+    async fn after_write(&self) {
+        self.security
+            .update_rules(self.config.read().await.policy_rules());
     }
 }
 

@@ -52,7 +52,7 @@
 
 > **职责边界：`PluginChannel` 只管跨进程传输，不承担执行期协议。**
 > 执行层（LLM 单轮 / 工具调用）与宿主层之间的出口 / 入口是 `EventSink` / `AbortSignal`
-> （[ADR-020](../DECISIONS.md)；机制见 [`session/docs/core-loop.md`](../../symbio/src/plugins/session/docs/core-loop.md) §6）——
+> （[ADR-020](../DECISIONS.md)；机制见 [`symbio/src/plugins/session/docs/core-loop.md`](../../symbio/src/plugins/session/docs/core-loop.md) §6）——
 > 因此**帧里不存在中止帧**。本文件不复述该分离。
 
 ### 通道生命周期
@@ -189,7 +189,7 @@ pub enum PluginPayloadWire {
 3. **终止判据**：会话节点 `status` 离开 `working`（结局在 `attributes.outcome` / `error`），
    它必然排在**本轮全部消息帧之后**（同一 FIFO）。
 
-> 机制与不变量见 [`session/docs/vdfs-session-messages.md`](../../symbio/src/plugins/session/docs/vdfs-session-messages.md)；
+> 机制与不变量见 [`symbio/src/plugins/session/docs/vdfs-session-messages.md`](../../symbio/src/plugins/session/docs/vdfs-session-messages.md)；
 > 旧形态（`PluginPayload::Session(channel)` + `PluginFrame::Data(done)`）已随 ADR-025 退役。
 
 ---

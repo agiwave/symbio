@@ -40,6 +40,7 @@
 
 - **路径书写**：本目录内引用同目录文档用 `./x.md`，引用插件 `README.md` 用 `../README.md`，
   引用系统级文档用 `../../../../../docs/...`。代码注释里的文档路径统一用**仓库根相对**写法
+  <!-- doc-link-allow D-006: 以下两个反引号路径是"路径该怎么写"的示意，并非入链 -->
   （`symbio/src/plugins/session/docs/x.md`），插件内部注释可用 `docs/x.md`。
 - **新增文档**：放本目录，并在上表登记一行；改完跑 `node scripts/doc-link-audit.mjs --strict`。
 - **历史实施记录**不写在这里，进 `docs/archive/implementation-logs/`。

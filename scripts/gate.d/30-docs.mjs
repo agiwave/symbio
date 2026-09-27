@@ -68,8 +68,14 @@ const GUARDS = [
 //     `PathKey` / `PluginStopReason` 全部消失；② `symbio/src` 直属文件（`lib.rs` /
 //     `plugins/mod.rs`）被跳过 ⇒ 只在注册表里被用到的符号被算成 **0 个消费方**。
 //     「数不到」与「真的没人用」是两件事。
+//   - `rust-scan` 是**共享扫描库**，被 `plugin-entry-audit` 与 `gen-current-facts`
+//     共同引用。它的失效形态是本仓最危险的一类：**写错不报错，只静默漏报**——
+//     朴素实现在字符串里的 `//`、`format!("{{}}")` 的字面量括号、未跨行的引号上
+//     都会翻车，而后果是「生成器说某条路由不存在，其实是抽漏了」。回归测试对每种
+//     翻车输入各钉一条。
 const TEST_ONLY = [
   'color',
+  'rust-scan',
   'gate.d/_shared',
   'cli-binary',
   'tauri-binary',

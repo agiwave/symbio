@@ -8,8 +8,7 @@ use crate::symbio_core::{
     plugin_dir_from_ctx,
     schemas::{common, session::session_chat},
     CapabilityMeta, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
-    PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_FILE, PLUGIN_ID_TELEGRAM,
-    ROUTE_SESSION_CHAT_SEND,
+    PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_ID_TELEGRAM, ROUTE_SESSION_CHAT_SEND,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -700,54 +699,16 @@ impl TelegramPlugin {
 // 节点形状、定义校验、落盘都在 [`PluginConfigFile`] 里，这里只做寻址分流。
 
 #[async_trait]
-impl vdfs::VdfsProvider for TelegramPlugin {
-    async fn dispatch(
-        &self,
-        _ctx: &vdfs::VdfsContext,
-        path: &str,
-        req: vdfs::VdfsRequest,
-    ) -> vdfs::VdfsResult<vdfs::VdfsResponse> {
-        match req {
-            vdfs::VdfsRequest::List { .. } => {
-                if path.is_empty() {
-                    return Ok(vdfs::VdfsResponse::list(vec![self.config_file.node()]));
-                }
-                Err(vdfs::VdfsError::not_found(format!(
-                    "Telegram是配置挂载点，没有子项：{path}"
-                )))
-            }
-            vdfs::VdfsRequest::Stat => {
-                if path.is_empty() {
-                    // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
-                    return Ok(vdfs::VdfsResponse::Stat(vdfs::VdfsNode::dir(
-                        "",
-                        "Telegram",
-                        vdfs::VdfsAccess::LIST,
-                    )));
-                }
-                if path == PLUGIN_FILE {
-                    return Ok(vdfs::VdfsResponse::Stat(self.config_file.node()));
-                }
-                Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
-            }
-            vdfs::VdfsRequest::Read => {
-                if path == PLUGIN_FILE {
-                    return Ok(vdfs::VdfsResponse::Read(
-                        self.config_file.read(&self.config).await?,
-                    ));
-                }
-                Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
-            }
-            vdfs::VdfsRequest::Write { content } => {
-                if path == PLUGIN_FILE {
-                    return Ok(vdfs::VdfsResponse::Write(
-                        self.config_file.apply(&self.config, &content).await?,
-                    ));
-                }
-                Err(vdfs::VdfsError::not_found(format!("未知路径：{path}")))
-            }
-            _ => Err(vdfs::VdfsError::not_found(format!("未知路径：{path}"))),
-        }
+impl crate::symbio_core::PluginConfigMount for TelegramPlugin {
+    type Config = TelegramConfig;
+    const TITLE: &'static str = "Telegram";
+
+    fn config_file(&self) -> &PluginConfigFile {
+        &self.config_file
+    }
+
+    fn config_slot(&self) -> &RwLock<TelegramConfig> {
+        &self.config
     }
 }
 

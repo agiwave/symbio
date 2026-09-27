@@ -87,8 +87,10 @@
 use crate::symbio_core::schemas::detail::DetailDefinition;
 use crate::symbio_core::vdfs_notify_change;
 use crate::symbio_core::{
-    VdfsAccess, VdfsContent, VdfsError, VdfsNode, VdfsResult, VdfsWriteResponse, VDFS_EXT_FORM,
+    VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsProvider, VdfsRequest,
+    VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_EXT_FORM,
 };
+use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -719,6 +721,131 @@ impl PluginConfigFile {
     /// 广播「配置已更新」（前端据此刷新）
     pub fn announce(&self) {
         vdfs_notify_change(self.dir.name(), PLUGIN_FILE);
+    }
+}
+
+// ==================== 纯配置挂载点：dispatch 的机制侧实现 ====================
+
+/// **纯配置挂载点**插件（挂载根下只有一份 `PLUGIN.yml`）的 VDFS 呈现契约。
+///
+/// ## 为什么有这条 trait
+///
+/// 「挂载根 = 一份配置文档」是最常见的插件形状（gateway / local / telegram / web …），
+/// 而它的 `VdfsProvider::dispatch` 骨架**逐字相同**——`List` / `Stat` / `Read` / `Write`
+/// 四臂的分支、错误文案、空路径语义全部一致，各插件唯一真正不同的是：
+///
+/// 1. **挂载点标题**（「网络工具」/「开放接口」/ …）；
+/// 2. **可选的后置副作用**（如网关写配置后重启监听、本地工具写配置后热更策略）。
+///
+/// 此前每个插件各自手抄那四臂——四份副本，改一条错误文案要改四处，且新增插件
+/// 时「记得抄对每一条分支」是纯人肉负担。[`PluginConfigFile`] 的文档早已描述
+/// 这条路径，只是把展开工作留给了插件；本 trait 把它**收口成机制**：
+/// 实现方只声明差异，四臂只写一次。
+///
+/// ## 用法
+///
+/// ```ignore
+/// impl PluginConfigMount for WebPlugin {
+///     type Config = WebConfig;
+///     const TITLE: &'static str = "网络工具";
+///     fn config_file(&self) -> &PluginConfigFile { &self.config_file }
+///     fn config_slot(&self) -> &RwLock<WebConfig> { &self.config }
+/// }
+/// // 不再手写 `impl VdfsProvider for WebPlugin`——下面这行由本模块提供。
+/// ```
+///
+/// 需要副作用的插件（网关 / 本地工具）**额外**覆写 [`Self::after_write`]：
+/// `apply` 已完成「校验 → 落内存 → 落盘 → 广播」，副作用在它之后跑，
+/// 因此「热更没生效」不可能来自顺序问题。
+///
+/// ## 边界（有意不做的事）
+///
+/// 挂载根下**不止一份配置**、或有资源条的插件（model / skill / mcp / agent /
+/// work / session / plugin_manager）**不适用**本 trait——它们的 `dispatch` 携带
+/// 真实资源语义（条目 CRUD、动态子节点、订阅）。硬套会让机制去猜插件语义，
+/// 那正是本仓反复拒绝的方向（见 ADR-023）。
+#[async_trait]
+pub trait PluginConfigMount: Send + Sync + 'static {
+    /// 配置结构体（本插件的 `PLUGIN.yml` 反序列化目标）
+    type Config: Serialize + serde::de::DeserializeOwned + Send + Sync;
+
+    /// 挂载点根节点的标题（如「网络工具」）——**只在这一处声明**。
+    ///
+    /// 它与 [`PluginConfigFile::label`] 是两件事：后者是**配置文件节点**的标题
+    /// （如「网络工具设置」），前者是**挂载根**的标题。二者常被写成同一族词，
+    /// 但语义不同，故各留一个来源，不强行合并。
+    const TITLE: &'static str;
+
+    /// 本插件的配置呈现与校验（`<根>/<插件>/PLUGIN.yml`）
+    fn config_file(&self) -> &PluginConfigFile;
+
+    /// 本插件的配置槽（`apply` 的写入目标）
+    fn config_slot(&self) -> &RwLock<Self::Config>;
+
+    /// 写配置成功后的副作用（缺省无）。
+    ///
+    /// 触发时机：`apply` 返回**之后**——此时新配置已进槽、已落盘、已广播。
+    /// 错误不影响写入结果（副作用是尽力而为的收敛动作，如重启监听）；
+    /// 失败只记日志，因为「配置已生效但热更失败」比「整个写失败」更接近真相。
+    async fn after_write(&self) {}
+}
+
+/// 见 [`PluginConfigMount`]：四臂骨架的**唯一**实现。
+///
+/// 这是本仓唯一一处把「配置挂载点」翻译成 VDFS 操作的地方——四个插件共享它，
+/// 因此它们的 `List` / `Stat` / `Read` / `Write` 行为**在构造上不可能漂移**。
+#[async_trait]
+impl<T: PluginConfigMount + ?Sized> VdfsProvider for T {
+    async fn dispatch(
+        &self,
+        _ctx: &VdfsContext,
+        path: &str,
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
+        let file = self.config_file();
+        let not_found = || VdfsError::not_found(format!("未知路径：{path}"));
+        match req {
+            // 挂载根下恒为「一个配置文件」：空路径列它，非空路径无子项
+            VdfsRequest::List { .. } => {
+                if path.is_empty() {
+                    return Ok(VdfsResponse::list(vec![file.node()]));
+                }
+                Err(VdfsError::not_found(format!(
+                    "{}是配置挂载点，没有子项：{path}",
+                    Self::TITLE
+                )))
+            }
+            // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填
+            VdfsRequest::Stat => {
+                if path.is_empty() {
+                    return Ok(VdfsResponse::Stat(VdfsNode::dir(
+                        "",
+                        Self::TITLE,
+                        VdfsAccess::LIST,
+                    )));
+                }
+                if path == PLUGIN_FILE {
+                    return Ok(VdfsResponse::Stat(file.node()));
+                }
+                Err(not_found())
+            }
+            VdfsRequest::Read => {
+                if path == PLUGIN_FILE {
+                    return Ok(VdfsResponse::Read(file.read(self.config_slot()).await?));
+                }
+                Err(not_found())
+            }
+            VdfsRequest::Write { content } => {
+                if path == PLUGIN_FILE {
+                    let resp = file.apply(self.config_slot(), &content).await?;
+                    // 副作用在 apply 之后：新配置已进槽 / 已落盘 / 已广播
+                    self.after_write().await;
+                    return Ok(VdfsResponse::Write(resp));
+                }
+                Err(not_found())
+            }
+            _ => Err(not_found()),
+        }
     }
 }
 

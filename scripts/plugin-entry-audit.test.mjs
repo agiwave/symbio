@@ -680,3 +680,61 @@ test('E-010 豁免：带理由的 plugin-entry-allow 不再报；空理由仍报
   assert.equal(emptyReason.status, 1, emptyReason.stdout)
   assert.match(emptyReason.stdout, E010_HIT)
 })
+
+// ── E-011：纯配置挂载点插件不得手写 `impl VdfsProvider` ──────────────────
+//
+// 真实形态：gateway / local / telegram / web 四臂 dispatch 骨架逐字相同，机制侧
+// 已提供唯一实现（`symbio_core::PluginConfigMount`）。手写一份就是把同一段语义
+// 复制出去。判据靠 `CONFIG_MOUNT_PLUGINS` 名单——名单即「挂载根只有一份配置」的事实表。
+const E011_HIT = /\[ERROR\]\s+E-011\s+\S+:\d/
+
+test('E-011 命中：名单内的插件手写 `impl VdfsProvider`', () => {
+  const r = audit({
+    ...CLEAN,
+    'symbio/src/plugins/web/plugin.rs':
+      'use crate::symbio_core::VdfsProvider;\n' +
+      'impl VdfsProvider for WebPlugin {\n    async fn dispatch(&self) {}\n}\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, E011_HIT)
+})
+
+test('E-011 不误报：名单内的插件实现 `PluginConfigMount`（正确形态）', () => {
+  const r = audit({
+    ...CLEAN,
+    'symbio/src/plugins/web/plugin.rs':
+      'impl crate::symbio_core::PluginConfigMount for WebPlugin {\n' +
+      '    type Config = WebConfig;\n}\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+  assert.doesNotMatch(r.stdout, E011_HIT)
+})
+
+test('E-011 不误报：名单外的插件（有资源条）照常手写 `impl VdfsProvider`', () => {
+  const r = audit({
+    ...CLEAN,
+    'symbio/src/plugins/mcp/plugin.rs':
+      'impl VdfsProvider for McpPlugin {\n    async fn dispatch(&self) {}\n}\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+  assert.doesNotMatch(r.stdout, E011_HIT)
+})
+
+test('E-011 豁免：带理由的 plugin-entry-allow 不再报；空理由仍报', () => {
+  const body =
+    'impl VdfsProvider for WebPlugin {\n    async fn dispatch(&self) {}\n}\n'
+  const withReason = audit({
+    ...CLEAN,
+    'symbio/src/plugins/web/plugin.rs':
+      `// plugin-entry-allow E-011: 本插件需要解释动态子节点\n${body}`,
+  })
+  assert.equal(withReason.status, 0, withReason.stdout)
+  assert.doesNotMatch(withReason.stdout, E011_HIT)
+
+  const emptyReason = audit({
+    ...CLEAN,
+    'symbio/src/plugins/web/plugin.rs': `// plugin-entry-allow E-011:\n${body}`,
+  })
+  assert.equal(emptyReason.status, 1, emptyReason.stdout)
+  assert.match(emptyReason.stdout, E011_HIT)
+})

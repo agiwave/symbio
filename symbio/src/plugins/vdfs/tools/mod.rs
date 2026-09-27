@@ -28,16 +28,20 @@
 //! 工具注册广播（`traverse`）的 ctx 携带 `CAPABILITY_VISITOR`；`plugin.rs` 在那次
 //! 广播中构造 [`ToolVdfs::new`] 并把工具注册进同一个 visitor。执行时
 //! visitor 里已注册好全部挂载 provider（容器同时注册的组合根供前端链路使用）。
+//!
+//! ## 同形工具走表（[`spec`]）
+//!
+//! 九个工具里，**七个**是「转发到 provider 的某个方法 + 包一层回执」的同形体，
+//! 差异只有「名字 / 描述 / schema / 示例 / 保留策略 / 调哪个方法」六样。
+//! 它们由 [`spec::SPECS`] 一张表驱动，`Capability` 实现**只有一份**
+//! （[`spec::VdfsTool`]）——不再一个工具一个文件。
+//!
+//! `read`（行号 + 分页）与 `list`（ignore glob 过滤 + 目录优先排序）带
+//! **表装不下的呈现加工**，保留为独立文件（判据是「有没有真逻辑」，不是行数）。
 
-pub mod delete;
-pub mod edit;
 pub mod list;
-pub mod mkdir;
 pub mod read;
-pub mod search;
-pub mod stat;
-pub mod tree;
-pub mod write;
+pub mod spec;
 
 use crate::symbio_core::{
     Capability, CapabilityCategory, CapabilityMeta, CapabilityToolContextRetention, PluginError,
@@ -108,18 +112,29 @@ pub fn tool(
     }
 }
 
-/// 构造全部 VDFS 工具：每个工具持有**同一个**封装 provider（无状态，可复用）
+/// 构造全部 VDFS 工具：每个工具持有**同一个**封装 provider（无状态，可复用）。
+///
+/// 顺序固定（`tools_cover_all_ops` 测试锁死）：表装不下的两个（`list` / `read`）
+/// 手动插入到它们在原清单里的位置，其余七条由 [`spec::SPECS`] 按表序展开。
 pub fn vdfs_tools(provider: Arc<ToolVdfs>) -> Vec<Arc<dyn Capability>> {
+    let by_name = |name: &str| -> Arc<dyn Capability> {
+        let s = spec::SPECS
+            .iter()
+            .find(|s| s.name == name)
+            .unwrap_or_else(|| panic!("规格表缺少工具 {name}"));
+        Arc::new(spec::VdfsTool::new(provider.clone(), s))
+    };
+
     vec![
-        Arc::new(list::ListTool::new(provider.clone())),
-        Arc::new(tree::TreeTool::new(provider.clone())),
-        Arc::new(stat::StatTool::new(provider.clone())),
-        Arc::new(read::ReadTool::new(provider.clone())),
-        Arc::new(edit::EditTool::new(provider.clone())),
-        Arc::new(search::SearchTool::new(provider.clone())),
-        Arc::new(write::WriteTool::new(provider.clone())),
-        Arc::new(delete::DeleteTool::new(provider.clone())),
-        Arc::new(mkdir::MkdirTool::new(provider)),
+        Arc::new(list::ListTool::new(provider.clone())), // 1. vdfs_list
+        by_name("vdfs_tree"),                            // 2. vdfs_tree
+        by_name("vdfs_stat"),                            // 3. vdfs_stat
+        Arc::new(read::ReadTool::new(provider.clone())), // 4. vdfs_read
+        by_name("vdfs_edit"),                            // 5. vdfs_edit
+        by_name("vdfs_search"),                          // 6. vdfs_search
+        by_name("vdfs_write"),                           // 7. vdfs_write
+        by_name("vdfs_delete"),                          // 8. vdfs_delete
+        by_name("vdfs_mkdir"),                           // 9. vdfs_mkdir
     ]
 }
 

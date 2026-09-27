@@ -40,25 +40,33 @@ const STRICT = process.argv.includes("--strict");
  */
 export const LINE_BUDGET_BASELINES = {
   // ── 插件层（symbio/src/plugins/*） ──
+  // 2026-09-27：gateway / local / telegram / web 改实现 `PluginConfigMount`（四臂 dispatch
+  // 收口到 symbio_core），四处共减 ~137 行；core 因新增该机制 +128 行。
+  // 2026-09-27：vdfs 的七个同形工具改由 `tools/spec.rs` 一张表驱动（唯一 Capability
+  // 实现），删掉七个逐字复制的工具文件，减 ~75 行（机制行数不变）。
+  // 2026-09-27：session 基线由 16802 校正为 16811。原值与实测差 ~9 行：基线是在
+  // 更早的 `cargo fmt` 之前记录的，fmt 在 `session` 树内累积了净增。本次用精确实测
+  // 而非推算重设（`context/window.rs` 三处硬编码 `24` 提为 `ENTRY_NAME_TOKEN_CAP`，
+  // 该文件净 -4 行：16815（未改）→ 16811（改后））。
   "symbio/src/plugins/agent": { maxLines: 3667, exts: [".rs"] },
   "symbio/src/plugins/composite": { maxLines: 1330, exts: [".rs"] },
   "symbio/src/plugins/event_bus": { maxLines: 164, exts: [".rs"] },
-  "symbio/src/plugins/gateway": { maxLines: 1219, exts: [".rs"] },
+  "symbio/src/plugins/gateway": { maxLines: 1190, exts: [".rs"] },
   "symbio/src/plugins/home": { maxLines: 928, exts: [".rs"] },
   "symbio/src/plugins/hook": { maxLines: 467, exts: [".rs"] },
-  "symbio/src/plugins/local": { maxLines: 3493, exts: [".rs"] },
+  "symbio/src/plugins/local": { maxLines: 3460, exts: [".rs"] },
   "symbio/src/plugins/mcp": { maxLines: 2897, exts: [".rs"] },
   "symbio/src/plugins/model": { maxLines: 6212, exts: [".rs"] },
   "symbio/src/plugins/plugin_manager": { maxLines: 666, exts: [".rs"] },
-  "symbio/src/plugins/session": { maxLines: 16802, exts: [".rs"] },
+  "symbio/src/plugins/session": { maxLines: 16811, exts: [".rs"] },
   "symbio/src/plugins/skill": { maxLines: 1470, exts: [".rs"] },
-  "symbio/src/plugins/telegram": { maxLines: 926, exts: [".rs"] },
-  "symbio/src/plugins/vdfs": { maxLines: 3087, exts: [".rs"] },
-  "symbio/src/plugins/web": { maxLines: 1064, exts: [".rs"] },
+  "symbio/src/plugins/telegram": { maxLines: 887, exts: [".rs"] },
+  "symbio/src/plugins/vdfs": { maxLines: 3012, exts: [".rs"] },
+  "symbio/src/plugins/web": { maxLines: 1028, exts: [".rs"] },
   "symbio/src/plugins/work": { maxLines: 627, exts: [".rs"] },
 
   // ── 内核与驱动层（symbio/src/*） ──
-  "symbio/src/symbio_core": { maxLines: 8016, exts: [".rs"] },
+  "symbio/src/symbio_core": { maxLines: 8143, exts: [".rs"] },
   "symbio/src/providers": { maxLines: 2732, exts: [".rs"] },
 
   // ── 宿主与工具层 ──
