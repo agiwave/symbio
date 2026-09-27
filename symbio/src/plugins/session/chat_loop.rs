@@ -1,7 +1,7 @@
 //! SESSION 聊天主循环
 //!
 //! 本文件只保留**主循环骨架**，其余按职责拆到子模块
-//! （切分依据见 `docs/module-layout.md` §3.1）：
+//! （切分依据见 `docs/module-layout.md` §0 五判据与 §1.1 编排层落点）：
 //!
 //! ```text
 //! 前步骤 ① 请求快照 ② 开会话 ③ TurnState+容器 ④ resume
