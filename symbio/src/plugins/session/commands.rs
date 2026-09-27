@@ -18,9 +18,8 @@
 //! 转写出口）。Rust 允许 inherent impl 分散在 crate 内任意模块，本仓一贯如此
 //! （`orchestrator/` / `chat_loop/` / `plugin/vdfs_provider.rs` 都各有自己的块）。
 //! 因此本域**唯一**允许引用汇编层的符号是 `SessionPlugin` **类型本身**：
-//! 不得引用 `plugin` 域的函数 / 常量（那条边界由 `scripts/session-layout-audit.mjs`
-//! 的 S-001 判定）。领域对「插件状态容器」的读取经它自己的 `pub(crate)` 字段与方法，
-//! 而不是经汇编层的入口。
+//! 不得引用 `plugin` 域的函数 / 常量——领域对「插件状态容器」的读取经它自己的
+//! `pub(crate)` 字段与方法，而不是经汇编层的入口。
 //!
 //! ## 测试在哪
 //!
