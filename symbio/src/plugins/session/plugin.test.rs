@@ -1,8 +1,12 @@
-//! `plugin.rs` 模块根的单元测试（结构体 / `impl Plugin` / 配置定义）。
+//! `plugin.rs` 模块根的单元测试（结构体 / `impl Plugin` / 路由分发 / 配置定义）。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`，见 `CONTRIBUTING.md`）：测试跟着
 //! **被测试的实现文件**走——`plugin/nodes.rs` 与 `plugin/vdfs_provider.rs` 的测试
 //! 分别在 `plugin/nodes.test.rs`、`plugin/vdfs_provider.test.rs`。
+//!
+//! 末尾一节锁**已退役路由不得被加回来**：被测对象是 [`Plugin::route`] 的默认分支，
+//! 因此住在本文件（原 `handlers.test.rs` 的全部内容——handlers 解散后路由表
+//! 只剩 `plugin.rs` 一处）。
 
 use super::*;
 // 未装配容器时没有 PLUGIN_DIR，配置文件落盘目标指个临时目录
@@ -279,4 +283,109 @@ async fn session_memory_is_injected_verbatim() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ==================== 退役路由：不得被加回来 ====================
+//
+// 被测对象是 `Plugin::route` 的默认分支（`plugin.rs`），所以这里只造插件 + 一个
+// 带 `PATH` 的请求上下文：路由在碰任何存储之前就该报错，因此不给它独占存储根。
+
+/// 构造带 payload 的请求上下文（`PluginInvokeRequest::payload` 读的正是 `"payload"` 桶）。
+fn ctx_with(payload: serde_json::Value) -> Arc<dyn PluginInvokeRequest> {
+    let req = crate::symbio_core::PluginSimpleRequest::new(None, None);
+    req.extensions
+        .write()
+        .unwrap()
+        .insert("payload".to_string(), Arc::new(payload));
+    Arc::new(req)
+}
+
+/// `session/clear` 路由已退役：删除会话的唯一入口是
+/// `vdfs/delete(<根>/session/<id>)`。
+///
+/// 为什么值得锁：退役一条路由**不会**让任何既有测试变红——调用方全改完了，剩下的
+/// 只是一个不再被解析的字符串。若哪天有人"顺手"把它加回来，同一件事就又有了两个
+/// 入口、两条会各自漂移的实现，而没有任何测试会覆盖它们的一致性。
+///
+/// 断言**错误消息**而不只是错误类型：变异测试时发现，把 `"clear"` 加回去却让它
+/// 返回 `NotFound` 也能骗过"只查类型"的断言——而那种写法与"没有这条路由"行为完全
+/// 相同，根本不是回归。真正要锁的是「`clear` 落到了**默认分支**」，那正是
+/// `未知路径` 这条消息的出处。
+#[tokio::test]
+async fn session_clear_route_is_retired() {
+    let p = Arc::new(SessionPlugin::new(
+        None,
+        SessionConfig::default(),
+        test_dir(),
+    ));
+    let ctx = ctx_with(serde_json::json!({ "session_id": "s1" }));
+    ctx.set(PATH, "clear".to_string());
+
+    let err = Plugin::route(p, ctx)
+        .await
+        .expect_err("session/clear 已退役，不该再被解析");
+
+    match err {
+        PluginError::NotFound(msg) => assert!(
+            msg.contains("未知路径"),
+            "clear 应落到默认分支（未知路径），实际消息：{msg}"
+        ),
+        other => panic!("应报 NotFound（未知路径），实际：{other:?}"),
+    }
+}
+
+/// 已退役的会话路由**不得被加回来**：2026-09-18 迁往 VDFS 的五条 + 2026-09-23 的
+/// `get_messages`（存在性校验改走进程内 VDFS 纯接口 `get_vfs_provider` + `stat`）
+/// 与 `update`（会话 metadata 写入收敛为 `vdfs/write`）。
+///
+/// 每条路径现在都有一个 VDFS 入口（映射见 `docs/archive/legacy-route-migration.md`）。
+/// 与 `session/clear` 同理：退役不会让任何既有测试变红，因此需要一条**正向**的
+/// 断言把「这些字符串不再被解析」钉住，否则它们会悄悄长回来。
+#[tokio::test]
+async fn migrated_session_routes_stay_retired() {
+    let p = Arc::new(SessionPlugin::new(
+        None,
+        SessionConfig::default(),
+        test_dir(),
+    ));
+    for (path, successor) in [
+        // 内部调用已改为直连引擎；「发言」始终只走聊天协议
+        ("append", "open_chat_session + append_messages"),
+        // 无消费方，整条链路（路由 + 实现 + schema）已删
+        ("open", "（无替代：本就不需要）"),
+        ("chat/update_message", "vdfs/write(<sid>/message/<mid>)"),
+        (
+            "chat/delete_message",
+            "vdfs/action(<sid>/message/<mid>, \"truncate\")",
+        ),
+        (
+            "chat/clear_messages",
+            "vdfs/action(<sid>/message, \"clear\")",
+        ),
+        (
+            "get_messages",
+            "进程内 vdfs/stat（get_vfs_provider + stat(<挂载名>/<sid>)）",
+        ),
+        // 客户端指定会话 id 由「具名目标 + create」承担，不再需要专用路由
+        (
+            "update",
+            "vdfs/write(<根>/session/<id>, {create:true, metadata})",
+        ),
+    ] {
+        let ctx = ctx_with(serde_json::json!({ "session_id": "s1" }));
+        ctx.set(PATH, path.to_string());
+
+        let err = Plugin::route(Arc::clone(&p), ctx)
+            .await
+            .expect_err("已退役的路由不该再被解析");
+
+        match err {
+            PluginError::NotFound(msg) => assert!(
+                msg.contains("未知路径"),
+                "{path} 应落到默认分支（未知路径），实际消息：{msg}\
+                 （它的后继是 {successor}）"
+            ),
+            other => panic!("{path} 应报 NotFound（未知路径），实际：{other:?}"),
+        }
+    }
 }

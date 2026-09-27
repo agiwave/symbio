@@ -627,6 +627,45 @@ impl SessionPlugin {
         // 都背一次逐字段合并；运行态才走带视图的 `emit_session_state`。
         self.notify_change(session_id);
     }
+
+    /// 按 session_id 构造会话引擎实例（唯一构造实现）。
+    ///
+    /// - `_t_` 前缀 → 内存 ephemeral 会话；
+    /// - 非空 id → 持久会话；
+    /// - None/空 → 内存 ephemeral 会话（固定 id `"ephemeral"`）。
+    ///
+    /// 两类会话共用 [`PersistentChatSession`]，差异只在存储后端（审计 B1）；
+    /// ephemeral 会话的配置取当前值的快照（内存会话不随 `session/config` 变更而变）。
+    ///
+    /// 消费方**只有一处**：下方 [`Self::handle_chat_send_oneoff`] 向 chat_ctx 交付
+    /// 会话句柄（`SESSION_HANDLE`，交付失败时 model 侧兜底内存会话）。曾经还有一个
+    /// `session/open` 路由消费它（对外返回进程内句柄），已退役——进程内句柄不该
+    /// 有对外路由。
+    pub async fn open_session_handle(
+        &self,
+        session_id: Option<String>,
+    ) -> Result<Arc<super::super::chat_session::PersistentChatSession>, PluginError> {
+        use super::super::chat_session::PersistentChatSession;
+
+        let snapshot = {
+            let cfg = self.config.read().await;
+            cfg.clone()
+        };
+
+        let session: Arc<PersistentChatSession> = match session_id {
+            Some(sid) if !sid.is_empty() && !sid.starts_with("_t_") => {
+                let store = self.get_store().await?;
+                Arc::new(PersistentChatSession::new(sid, self.config.clone(), store))
+            }
+            // `_t_` 前缀与空/缺省 id：内存临时会话，配置取当前值快照。
+            // 固定 id "ephemeral"（审计 B2）：随机 id 会让压缩前的 transcript
+            // 转存落到永不复现的目录名下，成为无法关联的孤儿存档。
+            Some(sid) => Arc::new(PersistentChatSession::detached(sid, snapshot)),
+            None => Arc::new(PersistentChatSession::detached("ephemeral", snapshot)),
+        };
+
+        Ok(session)
+    }
 }
 
 #[cfg(test)]

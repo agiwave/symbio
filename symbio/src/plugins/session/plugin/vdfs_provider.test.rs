@@ -403,9 +403,8 @@ async fn named_create_on_an_existing_session_merges_instead_of_duplicating() {
 
 /// 覆盖分支：metadata 浅合并 + 显式 `title` 写进 `metadata.title`。
 ///
-/// 原 `handlers.test.rs::session_update_and_vdfs_write_agree_on_metadata` 的契约
-/// （两条写入路径产出逐字相同的 metadata）随 `session/update` 退役失去意义——
-/// 只剩一条路径，分歧在结构上写不出来。契约本身搬来这里继续守着。
+/// 合并语义只有这一处（`session/update` 路由已退役，`vdfs/write` 是唯一写入路径），
+/// 分歧在结构上写不出来，因此这里直接断言合并行为本身。
 #[tokio::test]
 async fn write_merges_metadata_shallowly() {
     let (_dir, p) = fixture();

@@ -32,10 +32,9 @@
 | 落点 | 职责 |
 |---|---|
 | `mod.rs` | 模块声明与公共面收敛 |
-| `plugin.rs` + `plugin/{nodes,vdfs_provider,words}.rs` | 插件装配：路由分发、`traverse` 能力收集、VDFS 会话节点树与路径模型、会话域协议词表 |
+| `plugin.rs` + `plugin/{nodes,vdfs_provider,words}.rs` | 插件装配：路由分发与**退役路由的防回潮断言**、`traverse` 能力收集、VDFS 会话节点树与路径模型、会话域协议词表 |
 | `orchestrator.rs` + `orchestrator/{entry,consume,broadcast,failure,sink,rate_limit}.rs` | 会话编排：两个 one-off 入口与自动命名、Turn 消费循环、状态广播唯一出口、失败收口、执行期事件落地、发送限流（唯一消费方是 `consume`） |
 | `chat_loop.rs` + `chat_loop/{state,inputs,turn,io}.rs` | 主循环骨架、状态与契约、输入准备与压缩响应、单轮尾结算、循环内的落库与广播出口 |
-| `handlers.rs` | `SessionPlugin` 仅剩的非路由内部函数（会话与消息的增删改查全部经 VDFS 地址完成） |
 
 ### 1.2 领域层
 

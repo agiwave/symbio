@@ -6,9 +6,10 @@
 //!   dispatch 只做路由，域内怎么读写是各方法自己的事；
 //! - 读侧：域方法**转发既有会话能力**（SessionStore + 会话 metadata 合并），不新造协议
 //!   ——转写（含在途消息）、存在性校验、实时工作状态、工作目录、子会话；
-//! - 写侧只有四条，且都是既有能力的落地，不是新入口：消息域三个动作
+//! - 写侧只有五条，且都是既有能力的落地，不是新入口：消息域三个动作
 //!   （`patch_message` / `truncate_messages` / `clear_messages`，本文件末尾第二个
-//!   `impl SessionPlugin`）与会话本体的 `session_upsert`。
+//!   `impl SessionPlugin`）、会话本体的 `session_upsert`，以及同一实现的
+//!   `delete_session_internal`（会话本体与子会话两条 `Delete` 分支共用）。
 
 use super::*;
 use crate::symbio_core::clock_now_ms;
@@ -1311,6 +1312,43 @@ impl SessionPlugin {
             .map(|id| crate::symbio_core::llm_removed_frame(id))
             .collect();
         self.transcript_apply_all(session_id, frames).await;
+        Ok(())
+    }
+
+    /// 删除会话的统一内部实现（abort 活跃任务 → 清活跃条目 → 存储删除）。
+    ///
+    /// 唯一入口是 [`vdfs::VdfsProvider::dispatch`] 的两条 `Delete` 分支（会话本体
+    /// 与 `sub_session_at` 的子会话），两者语义相同，共用这一份实现。
+    ///
+    /// ## 为什么没有第二条删除路径
+    ///
+    /// 曾经的 `session/clear` 路由是它的第二个消费方，已退役——两个入口对同一件事
+    /// 就是两条会各自漂移的实现，VDFS 侧本来就已经完整具备这个能力。
+    pub(crate) async fn delete_session_internal(
+        &self,
+        session_id: &str,
+    ) -> Result<(), PluginError> {
+        // 删除前先 abort 该会话的活跃任务
+        let state = self.active_mgr.get_or_create(session_id).await;
+        {
+            // 置位即中止（无帧、无 await）：与 `handle_abort` 走同一个原语。
+            let mut inner = state.inner.write().await;
+            if let Some(signal) = inner.abort_signal.take() {
+                signal.abort();
+            }
+        }
+        // 清理活跃条目
+        self.active_mgr.sessions.write().await.remove(session_id);
+
+        let store = self.get_store().await?;
+        store.delete_session(session_id).await?;
+
+        // VDFS 实时链路（provider 侧变更广播 → watch 的 sink → 总线 kind="vdfs"）：
+        // 前端据此把该会话从清单移除。session/clear 与 VDFS 删除两条删除路径共用此处。
+        // 作用域按**路径前缀**分流（子会话落在 `<sid>/subsession/…` 之下），因此这里
+        // 不再需要实体时代的 `parent_id` 载荷——也不必为发事件多读一次盘。
+        self.notify_change(session_id);
+
         Ok(())
     }
 
