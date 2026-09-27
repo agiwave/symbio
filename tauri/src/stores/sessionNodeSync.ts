@@ -113,12 +113,6 @@ export function stopSessionNodeSync(): void {
   _sink = null
 }
 
-/** 测试 / HMR 用：连已登记的挂载目录一起清空 */
-export function resetSessionNodeSyncMounts(): void {
-  stopSessionNodeSync()
-  _mounts.clear()
-}
-
 /** 为一个挂载目录挂订阅（每个目录一份：前缀不同，登记也不同） */
 function subscribeMount(mountDir: string, sink: SessionNodeSink): () => void {
   return subscribeVdfsChanged(

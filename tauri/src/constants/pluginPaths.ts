@@ -23,27 +23,14 @@
  *
  * ## 前缀口径（容易搞错，写清楚）
  *
- * - `worker/` 前缀 = 走 worker composite 的**会话域**路由（session 及它的子能力
- *   chat / stream）。历史上也写过无前缀的 `session/...`（session 插件同时挂在
- *   home composite 下），已统一收敛到 `worker/`。
- * - **其余插件按插件名直接寻址**（`home/...` / `work/...` / `event_bus/...` /
- *   `gateway/...`）：它们挂在 home composite 下，不带 `worker/` 前缀。
- *   因此「所有路径都用 worker/ 前缀」是**错的**，本文件里两类共存。
+ * - **按插件名直接寻址**（`home/...` / `work/...` / `event_bus/...` / `gateway/...`）：
+ *   它们挂在 home composite 下，不带 `worker/` 前缀——「所有路径都用 `worker/`
+ *   前缀」是**错的**。
+ * - 会话域（`chat/send` / `chat/abort`）**不在本表**：`worker/` 前缀的会话常量
+ *   因全库无引用已随死代码清理移除（调用链不经本表寻址），本表只剩上面一类。
  *
  * 路由的权威清单（含后端侧）见 `docs/reference/ROUTES.md`。
  */
-
-const W = 'worker' as const
-
-/** 会话插件根路径 */
-export const SESSION_PATH = `${W}/session` as const
-
-/** 聊天能力根路径（send / abort） */
-export const CHAT_PATH = `${SESSION_PATH}/chat` as const
-
-/** 聊天子能力 */
-export const CHAT_SEND = `${CHAT_PATH}/send` as const
-export const CHAT_ABORT = `${CHAT_PATH}/abort` as const
 
 // ==================== 事件总线 ====================
 
