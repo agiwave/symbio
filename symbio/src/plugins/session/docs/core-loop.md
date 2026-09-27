@@ -51,7 +51,7 @@
              + close_turn / settle_reasoning       chat_loop/turn.rs
              + prepare_turn_inputs / apply_compaction   chat_loop/inputs.rs
              + auto_compress_process / compress_with_snapshot_core
-               / run_context_compact               chat_loop/compress.rs
+               / run_context_compact               context/pipeline.rs
              + persist_messages / open_chat_session / emit_streaming_start
                / fire_*_hook                        chat_loop/io.rs
              + process_tool_calls_async            tool_executor.rs

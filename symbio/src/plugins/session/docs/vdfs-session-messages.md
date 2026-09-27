@@ -162,7 +162,7 @@ read(<根>/session/<sid>/message/<mid>)
 |---|---|
 | 助手侧增量落库（`chat_loop/io.rs::persist_messages`） | `EventSink::emit`（逐条权威副本） |
 | 用户发言（`orchestrator/entry.rs`） | `SessionPlugin::emit_persisted_messages` |
-| 压缩节点（`chat_loop/compress.rs`） | `CompressionEmitter::emit_persisted` |
+| 压缩节点（`context/pipeline.rs`） | `CompressionEmitter::emit_persisted` |
 
 `content` 整条替换（而不是 `delta`）：持有乐观副本 / 在途副本的消费端要**替换**成
 权威正文，而不是往自己那份后面再拼一遍。这也是 `delta` / `content` 两个字段必须

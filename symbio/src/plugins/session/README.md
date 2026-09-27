@@ -74,7 +74,7 @@ session:
   context_messages: 6            # 发送给 AI 的对话上下文滑动窗口轮数 (以 User 消息轮次对齐截取；也是存储期 prune 的保留分水岭)
   
   # 5. 工具滑动窗口策略
-  tool_context_window: 15        # LLM 推理上下文中保留完整明细的最近工具调用数量 (超出者骨架化为带语义摘要与取回指引的占位符（规模 + 条目名/首行 + 定位锚点 + `Re-run <tool>` 指引，见 `context_window.rs`）；声明 context_retention 保留策略的工具其最新调用豁免此窗口；0 = 关闭骨架化)
+  tool_context_window: 15        # LLM 推理上下文中保留完整明细的最近工具调用数量 (超出者骨架化为带语义摘要与取回指引的占位符（规模 + 条目名/首行 + 定位锚点 + `Re-run <tool>` 指引，见 `context/window.rs`）；声明 context_retention 保留策略的工具其最新调用豁免此窗口；0 = 关闭骨架化)
   fade_activate_rounds: 40       # 单轮工具迭代超过该轮数后，激活"老旧工具结果淡化"（请求视图层）
   fade_keep_recent_turns: 12     # 工具淡化时保留完整结果最近轮数（窗口外的更旧结果做头尾摘要）
   prune_tool_history: true       # 是否在落库时物理裁剪 context_messages 分水岭之前的历史工具链（Tool/ToolCall/Reasoning 及其子节点；只删节点不删归档；内存临时会话自动跳过）
@@ -177,7 +177,7 @@ session:
     * Token 路径（单行超长 JSON/URL/base64 绕过行数检测时）：按 2048 token 预算做头 60% / 尾 40% 切分，占位说明"该早期内容已在请求视图中淡化以控制上下文长度，完整原文保留于会话存储"。
   * 淡化仅在视图内存中生效（节点标记 `meta.content_faded`），**不写存档文件、不回写存储**；视图每轮从存储重建，天然幂等。
 * **Rust 实现策略**：
-  * 在 `plugins/session/compression.rs` 的 `fade_aged_content_nodes` 中实现，由 `build_request_view` 作为第一步调用（完整调用代码见第 6 节）。内容淡化不产生任何存档文件；`meta.archive_path` 只由 L0 工具结果守卫写入（指向 `tool_archives/`），深历史信息由第 4 节的 L2 语义快照承接。存档配对清理见 `append_messages`/`prune_historical_tool_calls`/`replace_messages`——后者在 L2 语义压缩或紧急截断整体重写消息列表时，删除"旧列表引用且新列表不再引用"的孤儿存档。
+  * 在 `plugins/session/context/view.rs` 的 `fade_aged_content_nodes` 中实现，由 `build_request_view` 作为第一步调用（完整调用代码见第 6 节）。内容淡化不产生任何存档文件；`meta.archive_path` 只由 L0 工具结果守卫写入（指向 `tool_archives/`），深历史信息由第 4 节的 L2 语义快照承接。存档配对清理见 `append_messages`/`prune_historical_tool_calls`/`replace_messages`——后者在 L2 语义压缩或紧急截断整体重写消息列表时，删除"旧列表引用且新列表不再引用"的孤儿存档。
 
 ---
 
@@ -210,7 +210,7 @@ session:
     messages[start_idx..].to_vec()
     ```
 
-  * **语义合并 (`plugins/session/compression.rs`)**：
+  * **语义合并 (`plugins/session/context.rs`)**：
     * 每次大模型执行 Turn 之前，`prepare_compression`（配合 `should_start_compression` 的 Token 估计检测）会检测 Token 估计值。如果超标，它会将历史会话（保留最近 30% 活跃明细）打包发送给一个背景 LLM，并使用特殊的 System Prompt 提炼出高密度的 **`<state_snapshot>` XML 状态快照**：
 
     ```xml
@@ -262,7 +262,7 @@ session:
   * **第三步：工具明细骨架化 (Layered Sliding Window)**。全局窗口 `tool_context_window`（默认 **15**，按 ToolCall 个数计数）约束**未声明保留策略**（`All`）的工具；从**当轮**工具列表实时解析每个工具的能力声明（`context_retention`：`LastOnly` / `LastN(n)`，按工具短名——名称最后一个 `/` 之后的部分——匹配），**声明了策略的工具其最近 N 次调用即使滚出全局窗口也完整保留**（LastOnly=最新 1 次），策略保留优先于全局窗口——否则 todo 清单等"只有最新一次有意义"的工具会在长会话中丢失最新状态，引发大模型重复写入。窗口外的调用参数与结果替换为占位文案并**保留语义摘要**（失败结果：错误类型 + 工具名 + 首行原因；成功结果：JSON 列表给规模 + 前若干条目名、文本给首个有内容行，单条摘要上限 64 Token，且摘要收尾不受预算截断；无法提取摘要时退回纯占位文案），占位符另附**取回指引**（`Re-run <tool> to get the full output.`——核对成本由此变成一次可预期的工具调用），**骨架化的 ToolCall 参数保留定位锚点回声**（`path`/`command`/`url`/`pattern` 等关键参数截断回显于占位符，约 10 Token/条——否则"读过某文件第 N 行"这类摘要因缺失文件路径而无法回溯），**只骨架化、不删除，且 ToolCall↔Tool 配对与 parent_id 完整保留**，不会造成大模型逻辑断联。
   * **第四步：Token 水位提醒 (Nudge)**。当上下文 Token 估计值达到模型上下文限制的 **55%**（`CONTEXT_NUDGE_THRESHOLD`）且 `enable_compact_tool` 开启时，向视图末尾追加一条 `meta.kind = "context_nudge"` 的 User 提醒，引导大模型主动调用 `context_compact` 工具；**请求级注入、每个请求最多一次**，不落库、不占用轮次窗口的 User 计数，也不会在前端以用户消息形式出现。
 * **Rust 实现策略**：
-  * 唯一入口为 `plugins/session/compression.rs` 的 `build_request_view`，由 `plugins/session/chat_loop.rs` 主循环**每轮请求构建前**调用（骨架化实现 `apply_layered_sliding_window` 位于 `plugins/session/context_window.rs`；归属：`context_window.rs` 与 `chat_session.rs` 均为 session 插件私有，core 不依赖它们）：
+  * 唯一入口为 `plugins/session/context/view.rs` 的 `build_request_view`，由 `plugins/session/chat_loop.rs` 主循环**每轮请求构建前**调用（骨架化实现 `apply_layered_sliding_window` 位于 `plugins/session/context/window.rs`；归属：`context/window.rs` 与 `chat_session.rs` 均为 session 插件私有，core 不依赖它们）：
 
     ```rust
     pub fn build_request_view(
@@ -370,10 +370,10 @@ session:
 | :--- | :--- | :--- | :--- | :--- |
 | **存储级轮数裁剪** | `max_messages` | `append_messages` 保存时 | FIFO 截断超出的最老对话轮（0 = 不限制），不动归档文件 | `plugins/session/chat_session.rs` |
 | **单轮工具软上限** | `max_tool_rounds` | `run_chat_loop` | 默认 0 = 无上限；显式调低时达到上限提示后正常退出（非熔断），支持续跑 | `plugins/session/chat_loop.rs` |
-| **超大内容节点淡化** | `compress_line_threshold`<br>`compress_keep_recent` | `build_request_view` 每轮请求前 | B1 保护窗口（末条 + 最近 3 个内容节点）之外的超大正文/思考按行数（>200）或 token（>2048）头尾摘要淡化；存储恒为完整原文，不落库幂等 | `plugins/session/compression.rs` |
-| **加载轮次对齐 + 宏观语义快照合并** | `context_messages` / `auto_compress` | `get_context_messages` 加载时 / `prepare_compression` 请求前 | 三层清理后按最近 6 个 User 消息对齐截取完整轮次；70% Token 溢出时用 XML 状态快照合并（保留最近 30%） | `plugins/session/chat_session.rs`<br>`plugins/session/compression.rs` |
+| **超大内容节点淡化** | `compress_line_threshold`<br>`compress_keep_recent` | `build_request_view` 每轮请求前 | B1 保护窗口（末条 + 最近 3 个内容节点）之外的超大正文/思考按行数（>200）或 token（>2048）头尾摘要淡化；存储恒为完整原文，不落库幂等 | `plugins/session/context/view.rs` |
+| **加载轮次对齐 + 宏观语义快照合并** | `context_messages` / `auto_compress` | `get_context_messages` 加载时 / `prepare_compression` 请求前 | 三层清理后按最近 6 个 User 消息对齐截取完整轮次；70% Token 溢出时用 XML 状态快照合并（保留最近 30%） | `plugins/session/chat_session.rs`<br>`plugins/session/context.rs` |
 | **存储期历史工具链物理裁剪** | `context_messages`（分水岭）<br>`prune_tool_history`（开关） | `append_messages` 保存时 | 物理删除分水岭之前（默认最近 `context_messages` 轮内保留）的 Tool / ToolCall / Reasoning 及其子节点；**只删节点不删归档文件**（归档由 L0 `tool_result_guard` 滚动回收）；内存临时会话跳过此裁剪 | `plugins/session/chat_session.rs`（`prune_historical_tool_calls`） |
-| **请求视图层动态剪裁** | `tool_context_window` + fade/nudge | `build_request_view` 每轮请求前 | ① 内容节点淡化（每轮无条件）→ ② >40 轮激活老旧工具结果淡化（保留最近 12 轮）→ ③ 窗口（15）外工具明细骨架化为带语义摘要 + 取回指引的占位符（配对保留，声明 `context_retention` 的工具最新 N 次豁免窗口）→ ④ 55% 水位提醒；全部不落库幂等 | `plugins/session/compression.rs`<br>`plugins/session/context_window.rs` |
+| **请求视图层动态剪裁** | `tool_context_window` + fade/nudge | `build_request_view` 每轮请求前 | ① 内容节点淡化（每轮无条件）→ ② >40 轮激活老旧工具结果淡化（保留最近 12 轮）→ ③ 窗口（15）外工具明细骨架化为带语义摘要 + 取回指引的占位符（配对保留，声明 `context_retention` 的工具最新 N 次豁免窗口）→ ④ 55% 水位提醒；全部不落库幂等 | `plugins/session/context/view.rs`<br>`plugins/session/context/window.rs` |
 
 通过这套精心设计的**六维协同策略**，Symbio 构建了"存储层（写入时 L0 工具守卫 + 保存时 `max_messages` FIFO / `prune_historical_tool_calls` 生命周期裁剪 + L2 语义快照落库，内容节点恒为完整原文）→ 加载层（`context_messages` 轮次窗口对齐）→ 请求视图层（`build_request_view` 内容淡化/工具淡化/骨架化/水位提醒，不落库幂等）→ 语义压缩层（`auto_compress` 语义合并）"四层递进的上下文治理链路（"何时落库"判据见第 3 节决策表），实现了高保真度的会话还原、高度清爽的本地数据持久化，并在大模型面前维持了极低 Token 开销与绝对安全的行为控制屏障。
 

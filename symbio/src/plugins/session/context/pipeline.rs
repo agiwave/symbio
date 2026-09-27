@@ -1,4 +1,7 @@
-//! **压缩流水线**：自动语义压缩（L2）与主动 `context_compact` 工具共用的实现。
+//! 压缩执行流水线：自动语义压缩（L2）与主动 `context_compact` 工具共用的实现。
+//!
+//! 本模块是 `context` 域唯一的**执行层**（LLM 请求 / 落库 / 广播）；域内其余兄弟
+//! 模块（门面 / `view` / `prompt`）均为无副作用的纯策略。
 //!
 //! 两条入口（[`auto_compress_process`] / [`run_context_compact`]）共用
 //! [`compress_with_snapshot_core`] 这一个执行内核——"何时压"有两个入口，
@@ -6,9 +9,18 @@
 
 use super::*;
 
+use super::super::chat_loop::{ChatOrchestrator, SessionContext};
+use super::super::chat_session::PersistentChatSession;
+use super::super::frames::llm_emit_removed;
+use super::super::tool_executor::fire_hook;
+use crate::plugin_warn;
+use crate::symbio_core::schemas::session::chat_message::{MessageContent, MessageStatus};
+use crate::symbio_core::schemas::HookEvent;
+use crate::symbio_core::{llm_short_id, ExecAbortSignal, ExecEnv, ExecEventSink, PluginError};
+
 /// 被动自动压缩（L1）：阈值判定 → 切分 → 收益护栏 → 交执行内核。
 ///
-/// `force` 为 `compression::should_start_compression` 的公开契约（跳过阈值）。
+/// `force` 为 `super::should_start_compression` 的公开契约（跳过阈值）。
 /// 自动路径恒为 `false`（自动压缩必须走阈值）；`true` 只由**用户主动重试**
 /// （`retry_compaction`）传入——此时同时**绕过熔断**：熔断约束的是"每轮自动白等
 /// 一次注定失败的请求"，用户点重试是他的明确意愿，不该被冷却挡住。
@@ -48,27 +60,23 @@ pub(crate) async fn auto_compress_process(
         }
     }
 
-    if !compression::should_start_compression(
-        &context.messages,
-        effective_context_limit,
-        force,
-        overhead,
-    ) {
+    if !super::should_start_compression(&context.messages, effective_context_limit, force, overhead)
+    {
         return Ok(None);
     }
 
     let (compression_request, history_to_compress, history_to_keep) =
-        match compression::prepare_compression(&context.messages) {
+        match super::prepare_compression(&context.messages) {
             Some(v) => v,
             None => return Ok(None),
         };
 
-    // 压缩收益护栏（门槛的唯一出处：`compression::has_compaction_payoff`）
+    // 压缩收益护栏（门槛的唯一出处：`super::has_compaction_payoff`）
     let compress_tokens: usize = history_to_compress
         .iter()
-        .map(compression::estimate_message_tokens)
+        .map(super::estimate_message_tokens)
         .sum();
-    if !compression::has_compaction_payoff(compress_tokens) {
+    if !super::has_compaction_payoff(compress_tokens) {
         return Ok(None);
     }
 
@@ -233,10 +241,10 @@ async fn compress_snapshot_inner(
     // **不含 `keep_messages`**：保留区根本不发往模型，把它算进来只会高估请求体，
     // 让本可成功的 LLM 摘要被误判成"注定超限"。
     let overhead_tokens =
-        compression::estimate_request_overhead(&compression::get_compression_prompt(), ctx).await;
+        super::estimate_request_overhead(&super::get_compression_prompt(), ctx).await;
     let pending_tokens: usize = compression_request
         .iter()
-        .map(compression::estimate_message_tokens)
+        .map(super::estimate_message_tokens)
         .sum();
     let effective_limit = orchestrator.context_limit as usize;
     if pending_tokens + overhead_tokens > effective_limit {
@@ -275,7 +283,7 @@ async fn compress_snapshot_inner(
     context.messages = compression_request;
 
     // 专用压缩 system 提示词（模板只在本次请求出现，与主对话隔离）
-    let compression_prompt = compression::get_compression_prompt();
+    let compression_prompt = super::get_compression_prompt();
     let root_id = llm_short_id();
     let summary = match send_compression_request(
         orchestrator,
@@ -316,7 +324,7 @@ async fn compress_snapshot_inner(
     // 仍失败则保留原历史，不把未验证原文作为快照落库。
     // 只检查非空是不够的——模型输出散文/scratchpad 泄漏/截断时，
     // 残缺内容会原样成为唯一记忆。
-    let mut validated = compression::extract_snapshot(&summary_text(&summary));
+    let mut validated = super::extract_snapshot(&summary_text(&summary));
     if validated.is_none() {
         // 重试：附纠正指令，要求严格按 XML 结构输出
         let retry_msg = ChatMessage {
@@ -341,7 +349,7 @@ async fn compress_snapshot_inner(
         )
         .await;
         if let Ok(s) = retry {
-            if let Some(snapshot) = compression::extract_snapshot(&summary_text(&s)) {
+            if let Some(snapshot) = super::extract_snapshot(&summary_text(&s)) {
                 validated = Some(snapshot);
             }
         }
@@ -358,17 +366,17 @@ async fn compress_snapshot_inner(
     context.messages.clear();
 
     // 落库前渲染为纯文本分节（历史中不残留 XML 标签，切断格式模仿链）
-    let snapshot_display = compression::render_snapshot_for_history(&snapshot_text);
+    let snapshot_display = super::render_snapshot_for_history(&snapshot_text);
     // 快照消息：meta 记录压缩标记、压缩后估算（迟滞依据）、转存路径。
     // post_tokens 口径 = 压缩完成后的内容水位（快照 + 保留区内容，不含请求级
     // overhead），与 should_start_compression 迟滞比较的读取侧对齐。若只算快照、
     // 漏掉保留区，迟滞地板被低估 → 压缩后很快再次越线 → 循环压缩。
-    let post_tokens = compression::estimate_message_tokens(&ChatMessage {
+    let post_tokens = super::estimate_message_tokens(&ChatMessage {
         content: Some(MessageContent::Text(snapshot_display.clone())),
         ..Default::default()
     }) + keep_messages
         .iter()
-        .map(compression::estimate_message_tokens)
+        .map(super::estimate_message_tokens)
         .sum::<usize>();
     let mut meta = serde_json::json!({
         "compacted": true,
@@ -385,10 +393,8 @@ async fn compress_snapshot_inner(
 
     // 快照指纹 —— 记录压缩协议版本与提示词指纹，
     // 使"提示词强化是否生效"可从产物侧（快照 meta）验证。
-    meta["protocol_version"] =
-        serde_json::json!(super::super::compression::COMPRESSION_PROTOCOL_VERSION);
-    meta["prompt_fingerprint"] =
-        serde_json::json!(super::super::compression::compression_prompt_fingerprint());
+    meta["protocol_version"] = serde_json::json!(super::COMPRESSION_PROTOCOL_VERSION);
+    meta["prompt_fingerprint"] = serde_json::json!(super::compression_prompt_fingerprint());
 
     // 被压掉的那一段（`original_messages` 的前缀）与快照的**槽位序号**。
     // 槽位号 = 保留区首条 seq − 1 ⇒ 新列表天然单调，`assign_seq` 只补缺号，
@@ -400,7 +406,7 @@ async fn compress_snapshot_inner(
             .min(original_messages.len());
         &original_messages[..cut]
     };
-    let snapshot_seq = compression::snapshot_slot_seq(compressed, &keep_messages);
+    let snapshot_seq = super::snapshot_slot_seq(compressed, &keep_messages);
 
     let snapshot_message = ChatMessage {
         id: root_id.to_string(),
@@ -575,17 +581,14 @@ pub(crate) async fn run_context_compact(
 
     // 待压缩历史 = [.., split_user_idx)，当前用户指令起的任务上下文整体留在保留区
     let history: Vec<ChatMessage> = context.messages[..split_user_idx].to_vec();
-    let before_tokens: usize = history
-        .iter()
-        .map(compression::estimate_message_tokens)
-        .sum();
-    // 压缩收益护栏（门槛的唯一出处：`compression::has_compaction_payoff`）
-    if !compression::has_compaction_payoff(before_tokens) {
+    let before_tokens: usize = history.iter().map(super::estimate_message_tokens).sum();
+    // 压缩收益护栏（门槛的唯一出处：`super::has_compaction_payoff`）
+    if !super::has_compaction_payoff(before_tokens) {
         return (false, before_tokens, before_tokens);
     }
 
     let keep_messages: Vec<ChatMessage> = context.messages[split_user_idx..].to_vec();
-    let compression_request = compression::build_compression_request(&history, hints);
+    let compression_request = super::build_compression_request(&history, hints);
 
     // 压缩流水线与被动自动压缩共用同一核心（transcript 转存 → LLM 压缩请求 →
     // 快照校验/纠正重试 → meta 构造 → 保留区拼接落库）；失败已在核心内
@@ -671,7 +674,7 @@ pub(crate) async fn retry_compaction(
     // 请求级固定开销与自动路径同源（压缩提示词 + 工具定义）：口径不一致会让
     // "是否超限"的预判比自动路径乐观，重试的结论就与首次失败对不上。
     let overhead_tokens =
-        compression::estimate_request_overhead(&compression::get_compression_prompt(), ctx).await;
+        super::estimate_request_overhead(&super::get_compression_prompt(), ctx).await;
     let outcome = auto_compress_process(
         orchestrator,
         &mut context,
@@ -837,8 +840,6 @@ async fn run_compression_llm(
     root_id: &str,
     env: &ExecEnv,
 ) -> Result<ChatMessage, PluginError> {
-    use crate::symbio_core::schemas::session::chat_message::MessageContent;
-
     let abort = env.abort();
 
     // 压缩路径与对话轮次共用同一模型契约：provider.execute_turn（tools 为空）。
@@ -873,5 +874,5 @@ async fn run_compression_llm(
 }
 
 #[cfg(test)]
-#[path = "compress.test.rs"]
+#[path = "pipeline.test.rs"]
 mod tests;

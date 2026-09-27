@@ -59,7 +59,7 @@ pub enum ResumeOutcome {
 ///
 /// 由 `run_chat_loop` 在 turn 循环前调用。根据 `req.action` 分发：
 /// - `RetryTurn`：LLM 失败重试，调用 `process_retry_turn`
-/// - `RetryCompaction`：压缩失败重试，调用 `chat_loop::compress::retry_compaction`
+/// - `RetryCompaction`：压缩失败重试，调用 `context::retry_compaction`
 /// - 其他：工具调用恢复，调用 `process_tool_resume_action`
 ///
 /// `ctx` 应已由 agent chat handler 设置好 `CAPABILITY_VISITOR`。
@@ -79,7 +79,7 @@ pub async fn process_resume(
         // 与切分/内核的私有面）。完成后一律 `Done`——压缩不是对话轮次，没有
         // "续写"可言；与其它 resume 出口一样，失败节点（若有）留下等下次 resume。
         ResumeAction::RetryCompaction => {
-            super::chat_loop::compress::retry_compaction(
+            super::context::retry_compaction(
                 orchestrator,
                 ctx,
                 sink,

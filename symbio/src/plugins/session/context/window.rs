@@ -1,7 +1,7 @@
 //! 上下文窗口策略纯函数 —— 历史工具调用的分层滑窗骨架化。
 //!
 //! Phase sink：自 `symbio_core/context_window.rs` 下沉至 session 插件——E-② 后
-//! 该纯函数的唯一消费者是 session 请求视图构建（`compression.rs::build_request_view`），
+//! 该纯函数的唯一消费者是 session 请求视图构建（`context::view::build_request_view`），
 //! "跨插件共享"的前提（model 构建 request view）已随 Phase E-② 循环族下沉消失，
 //! 属单一模块私有设施，不再置于 core 共享层。
 
@@ -11,7 +11,7 @@ use crate::symbio_core::schemas::session::chat_message::{
 use crate::symbio_core::CapabilityToolContextRetention;
 use std::collections::{HashMap, HashSet};
 
-use super::text_split::truncate_tokens;
+use super::super::text_split::truncate_tokens;
 
 /// 骨架化结果摘要的 token 预算（成功/失败摘要共用上限）。
 ///
@@ -486,5 +486,5 @@ pub fn apply_layered_sliding_window(
 }
 
 #[cfg(test)]
-#[path = "context_window.test.rs"]
+#[path = "window.test.rs"]
 mod tests;

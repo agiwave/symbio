@@ -129,7 +129,7 @@ pub(crate) async fn close_turn(
         tools_done.into_iter().partition(|tc| {
             tc.name
                 .as_deref()
-                .map(|n| n == compression::CONTEXT_COMPACT_TOOL_NAME)
+                .map(|n| n == context::CONTEXT_COMPACT_TOOL_NAME)
                 .unwrap_or(false)
         })
     } else {
@@ -145,7 +145,7 @@ pub(crate) async fn close_turn(
         // 那样用户指令与 Turn 根会被压进快照，保留区只剩 parent 悬空的
         // ToolCall → provider 400。
         // 返回 0 时 run_context_compact 以 split==0 视为中止，安全。
-        let split_user_idx = compression::find_turn_user_split_idx(&context.messages, root_id);
+        let split_user_idx = context::find_turn_user_split_idx(&context.messages, root_id);
         let first = compact_calls.first().cloned();
         if let Some(first) = first {
             let call_id = first.id.clone().unwrap_or_default();

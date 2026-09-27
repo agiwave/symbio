@@ -1,7 +1,7 @@
-//! `chat_loop::compress` 的单元测试。
+//! `context::pipeline` 的单元测试。
 //!
 //! 与实现分文件（`X.rs` + `X.test.rs`，约定见 `CONTRIBUTING.md`）：
-//! `compress.rs` 只保留生产代码，测试全在本文件。
+//! `pipeline.rs` 只保留生产代码，测试全在本文件。
 
 use super::*;
 

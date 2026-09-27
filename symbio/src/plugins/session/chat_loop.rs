@@ -21,15 +21,16 @@
 //! - [`state`]    会话上下文 / 请求快照 / 单轮状态 / 闸门结果 / 退出原因 / 编排器
 //! - [`inputs`]   收口 ②③：提示词与工具的唯一收集点、压缩的唯一响应点
 //! - [`turn`]     单轮收尾：推理并入 → 工具分发 → 落库 → 流向
-//! - [`compress`] 压缩流水线（自动语义压缩与主动 context_compact 共用内核）
 //! - [`io`]       副作用出口：落库 / 广播 / 流式占位 / 开会话 / 生命周期钩子
+//!
+//! 压缩流水线（自动语义压缩与主动 `context_compact` 共用内核）归
+//! `super::context::pipeline`——上下文治理属**领域**，本文件只保留编排。
 //!
 //! 设计说明：
 //! - 统一从会话服务获取消息历史，不区分有状态/无状态协议
 //! - 具体协议实现层决定如何使用这些历史（有状态协议可能只使用部分或不使用）
 //! - 请求中只包含当前要发送的单条消息（single_message）
 
-pub(crate) mod compress;
 mod inputs;
 mod io;
 mod state;
@@ -39,7 +40,6 @@ mod turn;
 pub use self::state::{ChatOrchestrator, CompressionEmitter, StopSignal};
 
 // 模块内共享面：子模块经 `use super::*;` 取用，测试亦同（`gate_tests` 等）。
-pub(crate) use self::compress::{auto_compress_process, run_context_compact};
 pub(crate) use self::inputs::prepare_turn_inputs;
 pub(crate) use self::io::{
     emit_streaming_start, finalize_turn_root, fire_stop_hook, fire_user_prompt_submit_hook,
@@ -47,6 +47,7 @@ pub(crate) use self::io::{
 };
 pub(crate) use self::state::{Gate, SessionContext, TurnExit, TurnRequest, TurnResult, TurnState};
 pub(crate) use self::turn::{close_turn, settle_reasoning};
+pub(crate) use super::context::{auto_compress_process, run_context_compact};
 
 use super::chat_session::{PersistentChatSession, SESSION_HANDLE};
 use super::model_chat;
@@ -67,8 +68,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use super::compression;
 use super::config::SessionConfig;
+use super::context;
 use super::frames::{llm_emit_removed, llm_emit_state};
 use super::message_build::llm_build_tool_message;
 use super::tool_executor::{fire_hook, process_tool_calls_async};

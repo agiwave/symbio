@@ -124,12 +124,12 @@ pub(crate) async fn prepare_turn_inputs(
 
     // ── ② 请求级固定开销：一轮只算一次，供下方压缩（阈值与提醒）共用
     //        （收口前两处各算一次，且各自要重新取一遍工具清单）────────────────
-    let overhead_tokens = compression::estimate_overhead_with_tools(&system_prompt, &tools);
+    let overhead_tokens = context::estimate_overhead_with_tools(&system_prompt, &tools);
 
     // 主动压缩工具：仅当工具压缩启用时暴露给模型（独立于自动压缩开关）。
     // 执行不走 CapabilityVisitor 分发，由 `close_turn` 拦截处理（需要编排器内部链路）。
     if req.enable_compact_tool {
-        tools.push(compression::context_compact_tool_meta());
+        tools.push(context::context_compact_tool_meta());
     }
 
     // ── ③ 压缩（收口 ③：自动语义压缩 + 水位提醒，唯一响应点）───────────────
@@ -162,7 +162,7 @@ pub(crate) async fn prepare_turn_inputs(
                 })
         })
         .collect();
-    let request_view = compression::build_request_view(
+    let request_view = context::build_request_view(
         &context.messages,
         req.tool_context_window,
         &retention,
@@ -246,8 +246,7 @@ pub(crate) async fn apply_compaction(
         return Ok(false);
     }
     let effective_limit = orchestrator.context_limit as usize;
-    if !compression::should_emit_context_nudge(&context.messages, effective_limit, overhead_tokens)
-    {
+    if !context::should_emit_context_nudge(&context.messages, effective_limit, overhead_tokens) {
         return Ok(false);
     }
     turn.nudged_this_request = true;
