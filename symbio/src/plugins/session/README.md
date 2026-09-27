@@ -11,7 +11,7 @@ Session 插件是 Symbio 架构中的**会话持久化与编排中心**，也是
 
 ## 一、 系统架构数据流图 (Architecture & Data Flow)
 
-下列架构图展示了一个完整的“用户请求 -> Session (编排入口) -> 进程内会话循环 (视图组装/推理/工具) -> 数据库持久化”的生命周期：
+下列架构图展示了一个完整的“用户请求 -> Session (编排入口) -> 进程内会话循环 (视图组装/推理/工具) -> 磁盘持久化（会话目录）”的生命周期：
 
 ```mermaid
 flowchart TD
@@ -33,7 +33,7 @@ flowchart TD
 
     LoopCheck -- Yes --> EndTurn[12. 助理回答定格]
     EndTurn --> SaveFinal[13. 将助理与工具结果回写 Session]
-    SaveFinal --> SQLite[(会话数据库 / SQLite)]
+    SaveFinal --> Disk[(会话目录<br>&lt;homedir&gt;/session/&lt;id&gt;/<br>session.json + messages.json)]
 ```
 
 ---
@@ -101,7 +101,7 @@ session:
   * 当存储的对话轮数超出阈值时，自动从会话开头执行 FIFO 裁剪，移除最老的多余对话轮次。**只删消息节点、不动 `tool_archives/` 归档文件**：归档的磁盘生命周期由 `tool_result_guard` 的滚动淘汰（每会话保留最新 N 个文件）专职负责，避免 `max_messages` 成为静默删文件的破坏性操作。
   * **智能对齐**：此策略确保物理保存下来的会话，其起始消息也总是以一个完整的 `User` 消息起始，从而绝对避免了历史反序列化对齐失败的问题。
 * **Rust 实现策略**：
-  * 在 `SessionPlugin::invoke_append` 中，扫描 `User` 消息索引并执行轮数对齐物理截断，确保物理存储也总是以 `User` 消息为开端：
+  * 在 `chat_session/write.rs` 的 `append_messages`（**存储写入边界**）中，扫描 `User` 消息索引并执行轮数对齐物理截断，确保物理存储也总是以 `User` 消息为开端：
 
     ```rust
     let max_turns = cfg.max_messages; // 0 = 不限制
