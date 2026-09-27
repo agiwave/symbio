@@ -26,6 +26,16 @@ const GUARDS = [
   // ① **规则源读不出来**（表被改写/搬走）却仍亮绿灯——绿灯只说明没检查；
   // ② **前缀比对写宽了**（按字面 contains 而非按词）⇒ 误报一片，最后被人用豁免喂到失效。
   'core-naming-audit',
+  // `doc-symbol-audit`（D-005）判「**现行文档指认的 Rust 符号确实存在**」：
+  // 反引号内 ≥2 段的 `module::symbol` / `Type::method` 形态，取末段查整词
+  // 是否出现在 .rs 语料（359 文件 / 203 条指认）。这类失效读者看得见、守卫
+  // 看不见：doc-link 只管链接、gen-current-facts 只生成结构表，都不校验散文
+  // 里的符号指认——校准日一次就抓出五处改名残留（`KEY_PAYLOAD` →
+  // `PLUGIN_PAYLOAD_KEY`、`HOOK_FIRE` → `ROUTE_HOOK_FIRE` 等，先修后建）。
+  // 豁免出口只对应「文档说的是历史」：`DECISIONS.md`/`archive` 整体排除、
+  // 行内历史词、`<!-- doc-symbol-allow: 理由 -->` 承认通道（空理由不算）。
+  // 回归测试双向钉住：违规必须变红，注释/单段词/ADR 不得误报，范围读不出必须 exit 1。
+  'doc-symbol-audit',
 ]
 // 不是**判定型**审计脚本，只跑回归测试（共享库 / 门禁原语 / 报告型脚本）：
 //   - `color` 带一道「scripts/ 下不得手写 ANSI」守卫；
