@@ -16,8 +16,8 @@
 //! 与既有压缩层（L2 自动摘要 / L3 请求视图骨架化）的边界：本层只处理**单条**结果，是"语义上限"；
 //! 物理字节上限（shell/fetch 1MB 等）是最后一道防线，二者不冲突。
 
-use super::super::text_split::{split_head_tail, HeadTailSplit};
 use super::super::tokenizer::{default_tokenizer, Tokenizer};
+use super::super::tokenizer::{split_head_tail, HeadTailSplit};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -133,7 +133,7 @@ fn prune_archive_dir(dir: &std::path::Path, keep: usize) {
 ///
 /// 两者唯一的差异是占位符文案（guard 附带存档取回指引，summarize 提示重跑工具），
 /// 预算切分（60%/40%）、omit 计算、三段拼接逻辑完全一致 —— 收敛于此，防止漂移。
-/// 切分机制本体在 `text_split::split_head_tail`（头偏 60/40 的策略在此处选择）。
+/// 切分机制本体在 `tokenizer::split_head_tail`（头偏 60/40 的策略在此处选择）。
 fn assemble_head_tail_summary(text: &str, budget_tokens: usize, placeholder: String) -> String {
     let head_budget = ((budget_tokens as f64) * 0.6) as usize;
     let tail_budget = budget_tokens.saturating_sub(head_budget);

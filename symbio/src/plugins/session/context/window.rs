@@ -11,7 +11,7 @@ use crate::symbio_core::schemas::session::chat_message::{
 use crate::symbio_core::CapabilityToolContextRetention;
 use std::collections::{HashMap, HashSet};
 
-use super::super::text_split::truncate_tokens;
+use super::super::tokenizer::truncate_tokens;
 
 /// 骨架化结果摘要的 token 预算（成功/失败摘要共用上限）。
 ///
@@ -115,7 +115,7 @@ const JSON_DIGEST_PARSE_LIMIT: usize = 64 * 1024;
 /// 列出前若干条定位名后，同一份摘要即可支撑一次完整建模，代价约为几十 token。
 const JSON_DIGEST_MAX_NAMES: usize = 8;
 
-/// 条目名列表的字符预算推导率：`text_split::truncate_tokens` 的截断口径是
+/// 条目名列表的字符预算推导率：`tokenizer::truncate_tokens` 的截断口径是
 /// **token × 2 → 字符上限**（保守代理，CJK 1 字 ≈ 1 token 时仍成立）。
 /// 摘要自身的上限由该口径决定，故条目名预算必须按同一口径推导，
 /// 否则 names 列表会被截在半个名字上（实测踩坑：8 个名字被砍成 `entry7.md,…`，

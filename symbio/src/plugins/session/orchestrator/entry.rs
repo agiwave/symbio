@@ -528,7 +528,7 @@ impl SessionPlugin {
                 // （`prompt` 不持久化，每轮发送重新生成，模型始终知道"现在几点、在哪个工作区"）。
                 let single = user_msg_spawn.map(|mut m| {
                     if m.role == Some(cm::MessageRole::User) {
-                        m.prompt = Some(super::super::prompt::temporal_context(Some(
+                        m.prompt = Some(super::super::message_build::temporal_context(Some(
                             w_clone.as_str(),
                         )));
                     }

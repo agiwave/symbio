@@ -13,7 +13,6 @@ mod model_chat;
 mod options;
 mod orchestrator;
 pub(crate) mod paths;
-pub(crate) mod prompt;
 mod resume;
 mod tokenizer;
 mod transcript;
@@ -22,7 +21,6 @@ mod transcript;
 // reexport 引入 unused_imports 警告）。
 pub(crate) mod plugin;
 mod store;
-mod text_split;
 mod tools;
 pub(crate) mod types;
 mod workdir;

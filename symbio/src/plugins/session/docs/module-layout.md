@@ -50,14 +50,14 @@
 | 选项 | `options/mod.rs` | 会话自有选项的字段声明（`build_option_definition`；收集器在 `capabilities.rs`） |
 | 工作目录 | `workdir/{mod,fs_watcher}.rs` | 会话工作目录的 VDFS 实现（`<根>/session/<id>/workdir/<rel>`）与其下的文件系统监听 |
 | 会话记忆 | `memory.rs` | 本会话自己的 `MEMORY.md`：落位、地址、两道闸门与系统提示词注册段（机制在 `providers/memory`） |
-| 请求构造 | `message_build.rs` | 发给 LLM 的请求消息数组与工具结果节点构造 |
+| 请求构造 | `message_build.rs` | 发给 LLM 的请求消息数组与工具结果节点构造，及挂在用户消息 `prompt` 上的时间上下文 |
 | 会话恢复 | `resume.rs` | 会话恢复与历史重写 |
 | 运行态 | `active.rs` | 进程内运行态注册表：待消费请求、请求 id、中止信号、变更订阅 |
 
 ### 1.3 支撑单件（一文件一职责）
 
-`config.rs`（配置真源）· `paths.rs`（地址 ↔ 目录映射）· `prompt.rs`（时间上下文装配）·
-`tokenizer.rs` / `text_split.rs`（Token 估算与头尾切分）·
+`config.rs`（配置真源）· `paths.rs`（地址 ↔ 目录映射）·
+`tokenizer.rs`（Token 估算与头尾切分——切分由计量驱动，签名里就有 `&dyn Tokenizer`）·
 `model_chat.rs`（Model 推理请求协议结构）·
 `types.rs`（`Session` 实体与共享类型）。
 
