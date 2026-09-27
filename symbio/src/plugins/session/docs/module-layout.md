@@ -73,6 +73,21 @@
 > 的规则表（那是唯一定义处；[`plugin-route-address.md`](../../../../../docs/design/plugin-route-address.md)
 > 只收地址类规则 E-001 ~ E-007）。
 
+**存量豁免（登记于此，只减不增）**——领域层当前仍引用的编排层符号及归位方向。
+评审新 PR 时对照此表：表外的领域层 → 编排层引用即违例。
+
+| 文件 | 符号 | 归位方向 |
+|---|---|---|
+| `context/pipeline.rs` | `append_and_publish`、`ChatOrchestrator`、`SessionContext` | 落库回包出口并入 commands 域；压缩流水线与主循环的循环依赖改签名 |
+| `resume.rs` | `ChatOrchestrator` | 恢复入口由编排层注入回调，领域层不再命名编排类型 |
+| `transcript.rs` | `message_path` | 归位 paths 域（寻址规则同源） |
+| `transcript/inbox.rs` | `inbox_item_node`、`inbox_item_path` | inbox 域自持（条目的地址与节点视图） |
+| `transcript/inbox.test.rs` | `SessionConfig` | 真源在 `config.rs`（plugin 只是 re-export），测试直引真源即消 |
+
+`SessionPlugin` **类型本身**不入表：inherent impl 分布在领域层文件是全仓惯例
+（`commands.rs` / `heartbeat` / `options` 皆如此），见 `symbio/src/plugins/mod.rs`
+的架构原则。
+
 ---
 
 ## 2. 测试布局
