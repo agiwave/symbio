@@ -54,7 +54,7 @@
                / run_context_compact               context/pipeline.rs
              + persist_messages / open_chat_session / emit_streaming_start
                / fire_*_hook                        chat_loop/io.rs
-             + process_tool_calls_async            tool_executor.rs
+             + process_tool_calls_async            tools/tool_executor.rs
 ```
 
 **职责边界**：③ 不持有终态落库职责——终态唯一落库点在 ② 的消费循环。后步骤**不存在**：
@@ -365,7 +365,7 @@ pub async fn run_chat_loop(
 ### 4.2 必须保留的语义
 
 1. `interactive` 模式下「前一个工具待审批 / 失败 → 中止本批剩余」
-   （`tool_executor.rs`）——顺序语义；
+   （`tools/tool_executor.rs`）——顺序语义；
 2. `record_protocol_failure` 为 id / name 非法的调用合成失败结果，
    保证「没有悬空 ToolCall」这一不变式；
 3. 工具执行的超时判据是**出口的发射计数**（`EventSinkProgress`，挂在出口上——
@@ -706,7 +706,7 @@ pub fn resolve<'a>(wire: &str, known: impl IntoIterator<Item = &'a str>) -> Opti
 
 ### 11.2 工具结果：顺序即约定
 
-`extract_result` **留在 `session/tool_executor.rs`**（唯一消费方是它自己），
+`extract_result` **留在 `session/tools/tool_executor.rs`**（唯一消费方是它自己），
 判定顺序是**契约**（模块文档的表 + 两个字段名常量 + 用例钉住）：
 
 ```text

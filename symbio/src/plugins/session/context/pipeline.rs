@@ -12,7 +12,7 @@ use super::*;
 use super::super::chat_loop::{ChatOrchestrator, SessionContext};
 use super::super::chat_session::PersistentChatSession;
 use super::super::plugin::append_and_publish;
-use super::super::tool_executor::fire_hook;
+use super::super::tools::fire_hook;
 use super::super::transcript::llm_emit_removed;
 use crate::plugin_warn;
 use crate::symbio_core::schemas::session::chat_message::{MessageContent, MessageStatus};

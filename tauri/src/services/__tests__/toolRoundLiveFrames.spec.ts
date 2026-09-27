@@ -5,7 +5,7 @@
  * 进行中；刷新后正确」——即**实时模式下丢信息**。
  *
  * 方法：按后端真实变更序（与 `llm::turn::llm_emit_message` / `session/frames.rs::llm_emit_state` /
- * `model/stream.rs::llm_emit_delta`、`chat_loop/state.rs`、`tool_executor.rs` 的广播点逐条对齐；
+ * `model/stream.rs::llm_emit_delta`、`chat_loop/state.rs`、`tools/tool_executor.rs` 的广播点逐条对齐；
  * 经 ADR-025 迁移后，
  * 这些广播点发的是 **VDFS 变更**，前端由 `stores/sessionTranscriptSync` 消费）驱动
  * 真实 store 的落地口，然后断言终态：

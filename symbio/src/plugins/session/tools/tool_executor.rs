@@ -10,8 +10,8 @@
 //!   （chat_loop）在本轮结束时将会话置于 `AwaitingInput(user)`；用户答案以一条普通
 //!   `user` 消息回填后，新一轮会重跑该工具。详见 USER_INPUT_MECHANISM 设计文档。
 
-use super::message_build::llm_build_tool_message;
-use super::transcript::llm_emit_state;
+use super::super::message_build::llm_build_tool_message;
+use super::super::transcript::llm_emit_state;
 use crate::symbio_core::{llm_emit_message, llm_short_id, TurnToolCallInfo};
 
 use crate::symbio_core::{
@@ -682,10 +682,11 @@ async fn emit_parent_finalized(
 /// 与既有口径一致——工具失败属**信息性**，父节点一律 `Completed`，
 /// 差异由 `meta.failure_kind` 承载。
 ///
-/// 可见性 `pub(super)`：`resume.rs` 要用同一份定义，否则同一语义会长出第二个写法。
+/// 可见性 `pub`：`resume.rs`（跨域，经 `tools` 域门面取用）要用同一份定义，
+/// 否则同一语义会长出第二个写法。
 /// 就地应用于**完整消息副本**（发射端自己组装好终态快照再广播），不再返回
 /// 「只有 id + status 的补丁」——那需要接收端猜意图，正是已删除的补丁语义。
-pub(super) fn apply_not_executed(parent: &mut ChatMessage, reason: &str) {
+pub fn apply_not_executed(parent: &mut ChatMessage, reason: &str) {
     parent.status = Some(MessageStatus::Completed);
     let mut meta = parent.meta.clone().unwrap_or_else(|| json!({}));
     if let Some(obj) = meta.as_object_mut() {

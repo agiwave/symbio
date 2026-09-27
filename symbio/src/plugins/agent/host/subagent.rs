@@ -8,7 +8,7 @@
 //!   转播到父视图，前端按普通流式工具渲染——工具**不返回通道**；
 //! - 子会话内工具需要用户审批时，产出 `user_prompt(WaitingUserAction)`——与
 //!   confirm 类工具走**同一套**审批机制：本工具把子会话的审批**转成载荷**
-//!   （`failure_kind` + `prompt`）回传，节点由 `session/tool_executor` 以统一 id
+//!   （`failure_kind` + `prompt`）回传，节点由 `session/tools/tool_executor` 以统一 id
 //!   构造（工具不得自造节点身份，见 `tool_executor::PendingPrompt`）；
 //! - 无注册表、无唤醒队列、无前端专属概念。"子会话"只是本工具的内部实现：
 //!   一个由 session 插件托管、按 `metadata.parent_session_id` 归档到父会话
@@ -391,7 +391,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
         match outcome {
             RelayOutcome::Done(text) => Ok(json!({ "content": text })),
             // 待用户动作：只回传**意图载荷**（`failure_kind` + `prompt`），
-            // 节点由 `session/tool_executor` 以统一 id 构造。
+            // 节点由 `session/tools/tool_executor` 以统一 id 构造。
             RelayOutcome::Pending {
                 text,
                 prompt,

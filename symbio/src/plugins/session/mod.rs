@@ -8,7 +8,6 @@ pub(crate) mod config;
 mod context;
 mod handlers;
 mod heartbeat;
-mod heartbeat_tool;
 mod memory;
 mod message_build;
 mod model_chat;
@@ -27,8 +26,7 @@ mod fs_watcher;
 pub(crate) mod plugin;
 mod store;
 mod text_split;
-mod tool_executor;
-mod tool_result_guard;
+mod tools;
 pub(crate) mod types;
 mod workdir;
 

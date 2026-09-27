@@ -212,7 +212,7 @@ impl ShellTool {
     /// 返回 [`Response`]（`exit_code` / `output` / `risk_level`）。
     ///
     /// `output` 这个**字段名是约定**：编排层按它取正文回传 LLM
-    /// （读取侧在 `session/tool_executor.rs::extract_result`）。改名等于改约定。
+    /// （读取侧在 `session/tools/tool_executor.rs::extract_result`）。改名等于改约定。
     #[allow(clippy::too_many_arguments)]
     async fn execute_streaming(
         &self,

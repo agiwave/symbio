@@ -71,7 +71,7 @@ use std::sync::Arc;
 use super::config::SessionConfig;
 use super::context;
 use super::message_build::llm_build_tool_message;
-use super::tool_executor::{fire_hook, process_tool_calls_async};
+use super::tools::{fire_hook, process_tool_calls_async};
 use super::transcript::{llm_emit_removed, llm_emit_state};
 
 pub async fn run_chat_loop(

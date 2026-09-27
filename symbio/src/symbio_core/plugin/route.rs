@@ -126,7 +126,7 @@ pub const ROUTE_EVENT_BUS_SUBSCRIBE: &str = "event_bus/subscribe";
 /// hook/fire — 触发命名 hook
 ///
 /// 前缀是**目录名 `hook`**（不是 `PluginMeta` 曾写的 `"hooks"`）。
-/// 唯一调用方 `session/tool_executor.rs::fire_hook`（PreToolUse / Stop 等生命周期点）。
+/// 唯一调用方 `session/tools/tool_executor.rs::fire_hook`（PreToolUse / Stop 等生命周期点）。
 ///
 /// ---
 ///

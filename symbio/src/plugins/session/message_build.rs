@@ -5,7 +5,7 @@
 //!
 //! | 符号 | 消费方 |
 //! |---|---|
-//! | [`llm_build_tool_message`] | `tool_executor.rs`（工具结果节点的唯一写入者）· `chat_loop/turn.rs` |
+//! | [`llm_build_tool_message`] | `tools/tool_executor.rs`（工具结果节点的唯一写入者）· `chat_loop/turn.rs` |
 //! | [`llm_build_assistant_messages`] | 本文件的 [`TurnOutput::into_messages`]（`chat_loop/turn.rs` 唯一调用点） |
 //! | [`TurnStreamChildIds`] | 同上——落库复用流式期已广播的子节点 id |
 //! | [`TurnOutput::into_messages`] / [`TurnOutput::is_reasoning_only`] / [`TurnOutput::effective_text`] | `chat_loop/{turn,state,compress}.rs` |

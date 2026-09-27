@@ -37,7 +37,7 @@ pub fn fade_aged_tool_results(messages: &mut [ChatMessage], keep_recent_turns: u
             if let Some(MessageContent::Text(t)) = &m.content {
                 if tok.count(t) > FADE_BUDGET {
                     m.content = Some(MessageContent::Text(
-                        super::super::tool_result_guard::summarize_tool_result(t, FADE_BUDGET),
+                        super::super::tools::summarize_tool_result(t, FADE_BUDGET),
                     ));
                     let mut meta = m.meta.clone().unwrap_or_else(|| serde_json::json!({}));
                     meta["tool_result_faded"] = serde_json::json!(true);
@@ -59,7 +59,7 @@ pub fn fade_aged_tool_results(messages: &mut [ChatMessage], keep_recent_turns: u
 ///
 /// 触发条件（与旧存档压缩门控同构）：行数超 `line_threshold` **或** token 超
 /// [`MESSAGE_TOKEN_CAP`]。行数触发走按行 head/tail 切分（[`line_head_tail`]），
-/// token 触发走 [`super::super::tool_result_guard::summarize_head_tail`]（与工具淡化同一机制本体，仅占位文案
+/// token 触发走 [`super::super::tools::summarize_head_tail`]（与工具淡化同一机制本体，仅占位文案
 /// 不同：内容节点无法"重新运行"，指向会话存储中的完整原文）。
 ///
 /// 只作用于传入的视图副本（由 [`build_request_view`] 每轮从存储重建），存储层
@@ -119,7 +119,7 @@ pub fn fade_aged_content_nodes(
                 continue;
             }
             let faded = if over_tokens {
-                super::super::tool_result_guard::summarize_head_tail(
+                super::super::tools::summarize_head_tail(
                     t,
                     MESSAGE_TOKEN_CAP,
                     "该早期内容已在请求视图中淡化以控制上下文长度，完整原文保留于会话存储。",
@@ -137,7 +137,7 @@ pub fn fade_aged_content_nodes(
 
 /// 行数超限的按行 head/tail 切分（短行密集、token 未超预算的内容）：
 /// 保留头 `line_threshold/4` 行与尾同量行，中段以省略标记占位。
-/// 与 token 路径（[`super::super::tool_result_guard::summarize_head_tail`]）同构：头少尾多（结论在尾部）。
+/// 与 token 路径（[`super::super::tools::summarize_head_tail`]）同构：头少尾多（结论在尾部）。
 fn line_head_tail(text: &str, line_threshold: usize) -> String {
     let lines: Vec<&str> = text.lines().collect();
     let total = lines.len();

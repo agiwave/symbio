@@ -16,8 +16,8 @@
 //! 与既有压缩层（L2 自动摘要 / L3 请求视图骨架化）的边界：本层只处理**单条**结果，是"语义上限"；
 //! 物理字节上限（shell/fetch 1MB 等）是最后一道防线，二者不冲突。
 
-use super::text_split::{split_head_tail, HeadTailSplit};
-use super::tokenizer::{default_tokenizer, Tokenizer};
+use super::super::text_split::{split_head_tail, HeadTailSplit};
+use super::super::tokenizer::{default_tokenizer, Tokenizer};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -45,7 +45,11 @@ fn resolve_archive_dir(root: &Path, session_id: Option<&str>) -> Option<PathBuf>
     if let Some(sid) = session_id {
         if !sid.trim().is_empty() {
             // 路径派生统一走 paths 模块（safe_id / 会话根目录的唯一权威实现）
-            let dir = super::paths::session_subdir(root, sid, super::paths::TOOL_ARCHIVES_SUBDIR);
+            let dir = super::super::paths::session_subdir(
+                root,
+                sid,
+                super::super::paths::TOOL_ARCHIVES_SUBDIR,
+            );
             if std::fs::create_dir_all(&dir).is_ok() {
                 return Some(dir);
             }
@@ -137,7 +141,7 @@ fn assemble_head_tail_summary(text: &str, budget_tokens: usize, placeholder: Str
         text,
         head_budget,
         tail_budget,
-        super::tokenizer::default_tokenizer(),
+        super::super::tokenizer::default_tokenizer(),
     );
 
     let mut out = String::with_capacity(head.len() + tail.len() + placeholder.len());
@@ -181,7 +185,10 @@ pub fn guard_tool_result(
     // 统一取回入口 local/file_read + 统一分段参数 offset/limit」。
     // 取回指引文案唯一来源：paths::RETRIEVAL_HINT。
     let archive_hint = match &archive_path {
-        Some(p) => format!("完整输出已存档至: {p}{}", super::paths::RETRIEVAL_HINT),
+        Some(p) => format!(
+            "完整输出已存档至: {p}{}",
+            super::super::paths::RETRIEVAL_HINT
+        ),
         None => "完整输出未存档（存档目录不可写）".to_string(),
     };
     let placeholder = format!("{} {archive_hint} ...]", omit_placeholder_prefix(omit));
@@ -210,7 +217,7 @@ pub fn summarize_tool_result(text: &str, budget_tokens: usize) -> String {
 
 /// 请求视图级 head/tail 摘要（**无存档**）：token 超预算时保留头尾、中段以
 /// `omit_note` 占位。工具结果淡化与内容节点淡化共用的机制本体。
-pub(crate) fn summarize_head_tail(text: &str, budget_tokens: usize, omit_note: &str) -> String {
+pub fn summarize_head_tail(text: &str, budget_tokens: usize, omit_note: &str) -> String {
     let tok = default_tokenizer();
     let n = tok.count(text);
     if n <= budget_tokens {

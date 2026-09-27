@@ -533,9 +533,9 @@ impl Plugin for SessionPlugin {
         {
             if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
                 visitor
-                    .register(Arc::new(super::heartbeat_tool::HeartbeatTool::new(
-                        Arc::downgrade(&self),
-                    )))
+                    .register(Arc::new(super::tools::HeartbeatTool::new(Arc::downgrade(
+                        &self,
+                    ))))
                     .await;
             }
         }

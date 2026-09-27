@@ -29,14 +29,14 @@
 //! 分隔符这两个「契约本身」的参数。
 //!
 //! 反面例子（**故意没进 core**）：工具结果的字段名读取器
-//! （`session/tool_executor.rs::extract_result`）只有一个消费方，留在原地。
+//! （`session/tools/tool_executor.rs::extract_result`）只有一个消费方，留在原地。
 //! 「工具结果字段名」这条跨插件约定因此只能以文档形式存在——这是自觉保留的张力，
 //! 不是疏漏，详见该函数的文档。
 //!
 //! ## 收口前的问题
 //!
 //! 换算曾以 `name.replace("/", "__")` 的形式散在 10 处（4 个协议各 1~2 处、
-//! `model/types.rs` 2 处、`session/tool_executor.rs` 1 处），入方向则是
+//! `model/types.rs` 2 处、`session/tools/tool_executor.rs` 1 处），入方向则是
 //! `tool_name.replace("__", "/")`。三个后果：
 //!
 //! 1. **只处理了一个字符**：今天**没有任何**能力名含 `/`（实有名字是

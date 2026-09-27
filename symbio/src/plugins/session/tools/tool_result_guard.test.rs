@@ -1,7 +1,7 @@
 //! `tool_result_guard` 模块的单元测试。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`，见 `CONTRIBUTING.md`）：
-//! `tool_result_guard.rs` 只保留生产代码，测试全部放本文件。
+//! `tools/tool_result_guard.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
 

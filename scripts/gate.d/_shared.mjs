@@ -202,7 +202,7 @@ export const BASELINE = {
   //      同批还删了两处死代码（不增减用例）：`assign_seq` 的「夹缝无号项 → 整表重排」
   //      兜底（输入不可达，且修法本身破坏「既有序号原样保留」不变式，改由末尾
   //      `debug_assert!` 守前置条件）；`close_turn` 的 `finish.is_length() && had_tool`
-  //      分支与 `TurnResult.had_tool` 字段（该意图已由 `tool_executor.rs` 的
+  //      分支与 `TurnResult.had_tool` 字段（该意图已由 `tools/tool_executor.rs` 的
   //      `parse_error` 分支承担，且更靠前——拒绝执行 + 以协议错误回报模型）。
   // 961：ADR-038 单消费方符号下沉（2026-09-26）——**净 0**（959 → 959），逐文件核对：
   //        −5  `symbio_core/llm/turn.test.rs` 整文件删除（构造器与 `impl TurnOutput`

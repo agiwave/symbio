@@ -3,7 +3,7 @@
 //! 支持单问题（question）或批量问题（questions[]，1~4 个，对齐 Trae）。
 //!
 //! **本工具不构造节点**：它只返回 `failure_kind = needs_interaction` 加 `prompt` 载荷，
-//! 由编排层（`session/tool_executor.rs`）构造 `user_prompt` 节点
+//! 由编排层（`session/tools/tool_executor.rs`）构造 `user_prompt` 节点
 //! （status = WaitingUserAction，id = 工具结果占位节点 id）并将会话置于
 //! `AwaitingInput(user)`；用户答案以一条普通 `user` 消息（`meta.responds_to` 指向该节点）
 //! 回填后，新一轮会重跑本工具并拿到答案。options 自动补充 "Other" 选项。
@@ -235,7 +235,7 @@ impl Capability for AskUserTool {
         }
 
         // 只回答「要问用户什么」——`prompt` 载荷 + `failure_kind`。
-        // **user_prompt 节点由编排层构造**（`session/tool_executor.rs`）：它拥有
+        // **user_prompt 节点由编排层构造**（`session/tools/tool_executor.rs`）：它拥有
         // `result_msg_id`（节点身份）与父 ToolCall 终态，是工具结果节点的唯一写入者。
         //
         // 历史上这里建一条 Session 通道、发一个 Upsert 帧、drop tx 再返回 rx，

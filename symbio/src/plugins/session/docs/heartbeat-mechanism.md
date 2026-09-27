@@ -7,7 +7,7 @@
 心跳 = 会话空闲超过阈值后，自动以「心跳提示词」注入一轮用户消息，驱动 agent 无人工介入地执行周期任务。由三部分组成：
 
 1. **调度器**（`symbio/src/plugins/session/heartbeat.rs`）：每个运行中的 symbio 进程每 15s 扫描本 store 全部会话，对「已启用 + 空闲满阈值」的会话触发心跳。
-2. **设置工具**（`symbio/src/plugins/session/heartbeat_tool.rs`）：agent 在对话中可调用 `heartbeat` 工具对本会话 set/get/cancel。
+2. **设置工具**（`symbio/src/plugins/session/tools/heartbeat_tool.rs`）：agent 在对话中可调用 `heartbeat` 工具对本会话 set/get/cancel。
 3. **CLI 守护模式**（`symbio-cli --heartbeat`）：无人值守驻留进程，专司心跳触发与状态渲染。
 
 ## 语义契约（不变式）

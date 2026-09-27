@@ -1,7 +1,7 @@
 //! `heartbeat_tool` 模块的单元测试。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`，见 `CONTRIBUTING.md`）：
-//! `heartbeat_tool.rs` 只保留生产代码，测试全部放本文件。
+//! `tools/heartbeat_tool.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
 

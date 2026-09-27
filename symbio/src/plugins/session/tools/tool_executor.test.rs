@@ -1,7 +1,7 @@
 //! `tool_executor` 模块的单元测试。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`，见 `CONTRIBUTING.md`）：
-//! `tool_executor.rs` 只保留生产代码，测试全部放本文件。
+//! `tools/tool_executor.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
 use crate::symbio_core::PluginSimpleRequest;

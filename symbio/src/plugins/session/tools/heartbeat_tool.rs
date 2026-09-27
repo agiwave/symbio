@@ -9,8 +9,8 @@
 //! 的心跳任务。实现上直接读写本插件的会话存储（get_or_create_session /
 //! save_session），不经任何跨模块路由——机制与设置工具同插件，零跨模块依赖。
 
-use super::heartbeat::HeartbeatConfig;
-use super::plugin::SessionPlugin;
+use super::super::heartbeat::HeartbeatConfig;
+use super::super::plugin::SessionPlugin;
 use crate::symbio_core::{
     Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     SESSION_ID,
@@ -182,7 +182,7 @@ impl HeartbeatTool {
     ///
     /// updated_at 即调度器的磁盘侧空闲基准：进程重启后内存活动表清空，
     /// 调度器以 updated_at 追补判定，重启不丢心跳节奏。
-    fn write_back(session: &mut super::types::Session, hb: &HeartbeatConfig) {
+    fn write_back(session: &mut super::super::types::Session, hb: &HeartbeatConfig) {
         let hb_json = serde_json::to_value(hb).unwrap_or_else(|_| json!({}));
         if let Some(obj) = session.metadata.as_object_mut() {
             obj.insert("heartbeat".to_string(), hb_json);
