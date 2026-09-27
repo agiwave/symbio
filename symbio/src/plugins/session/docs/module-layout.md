@@ -42,6 +42,7 @@
 |---|---|---|
 | 上下文治理 | `context.rs` + `context/{pipeline,view,window,prompt}.rs` | 「发给大模型之前」的全部处理：压缩策略与执行流水线（压缩内核 `compress_with_snapshot_core` 的唯一落点是 `context/pipeline.rs`）、请求视图四步剪裁、工具骨架化、压缩提示词协议 |
 | 会话读写 | `chat_session.rs` + `chat_session/{read,write}.rs` | 读路径：三层清理与 `User` 轮次对齐的上下文装配；写路径：保存边界（轮数对齐裁剪 / 历史工具链裁剪 / 归档配对清理） |
+| 变更入口 | `commands.rs` | 会话与消息的**写语义**：新建 / 覆盖 / 删除会话，改写 / 截断 / 清空消息。VDFS（`write` / `delete` / `action`）与编排入口都只是它的调用方——「谁能改会话」的答案只在这一处（模块头说明它为什么仍在 `impl SessionPlugin` 上） |
 | 转写 | `transcript.rs` + `transcript/{frames,inbox}.rs` | 消息级变更的**唯一写入点与发射器**、状态帧与删除帧出口、收件箱入队与消费挑选 |
 | 持久化 | `store/mod.rs` | 一种磁盘布局、两种驻留方式；没有可切换的存储后端 |
 | 工具执行 | `tools.rs` + `tools/{tool_executor,tool_result_guard,heartbeat_tool}.rs` | 模型侧工具从分发到结果处理的全链路、L0 结果守卫与滚动存档、心跳任务工具；域根 `tools.rs` 是对编排层的门面 |

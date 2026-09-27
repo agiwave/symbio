@@ -4,6 +4,7 @@ mod active;
 mod capabilities;
 mod chat_loop;
 mod chat_session;
+mod commands;
 pub(crate) mod config;
 mod context;
 mod heartbeat;

@@ -93,7 +93,7 @@ pub const VDFS_EXT_ZIP: &str = "zip";
 /// 移除帧走 provider 自己的变更通道（与它的增 / 改变更同一条）：从机制看，被删的
 /// 就是那一个条目——「删这一段」与「删这一个」在**单条**变更上完全同形，机制因此
 /// 不需要认识「区间」这个概念。会话消息的落地形态见
-/// `session/plugin/vdfs_provider.rs::truncate_messages` / `clear_messages`。
+/// `plugins/session/commands.rs::truncate_messages` / `clear_messages`（写语义域）。
 ///
 /// 回执里的被删 id 列表（随 [`VdfsActionResult::data`](super::VdfsActionResult::data)）是**权威**列表：
 /// 调用方据此幂等对齐本地视图，不依赖推送。
