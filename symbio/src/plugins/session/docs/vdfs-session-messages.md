@@ -129,7 +129,7 @@ read(<根>/session/<sid>/message/<mid>)
 因此 `replace_messages` 的契约是**只补缺号**（`assign_seq`）：无号项从**相邻的既有序号
 向外让位**——开头段整体落在首号之前（往下）、末尾段接在末号之后（往上）、夹缝用间隙；
 **既有序号一个都不改**。压缩（前缀重写）的列表是 `[快照, 保留区…]`，快照的槽位序号由
-调用方显式给出（`compression::snapshot_slot_seq` = `保留区首条 seq − 1`），使新列表
+调用方显式给出（`context::snapshot_slot_seq` = `保留区首条 seq − 1`），使新列表
 **本来就单调**，`assign_seq` 于是退化为"只填缺号"。
 
 ### 3.4 落库回包 = 交回权威序号（因此「每条落库消息都必须有出口」）
@@ -154,15 +154,19 @@ read(<根>/session/<sid>/message/<mid>)
 在途号（`1 << 50 + n`），于是第二轮的用户消息排到了第一轮的助手消息**之前**，
 界面显示成 `user-user-assistant-assistant`（端到端回归：`e2e/cases/t16-live-order.mjs`）。
 
-**这条不变量的落地点是「谁落库、谁发帧」**：`append_messages` 把落库后的权威副本
+**这条不变量的落地点是「落库」与「发帧」绑在同一个函数里**：`append_messages` 把落库后的权威副本
 交回调用方（它返回消息而非条数的唯一原因——号是临界区内补在私有副本上的，调用方
-手里那条没有号），每个落库调用点随即下发：
+手里那条没有号），而「落库 → 逐条下发权威副本」整段动作只有**一个实现**
+（`plugin.rs::append_and_publish`）。三条落库路径不再各写各的回包，只声明**走哪条通道**：
 
-| 落库调用点 | 出口 |
+| 落库路径 | 通道 |
 |---|---|
-| 助手侧增量落库（`chat_loop/io.rs::persist_messages`） | `EventSink::emit`（逐条权威副本） |
-| 用户发言（`orchestrator/entry.rs`） | `SessionPlugin::emit_persisted_messages` |
-| 压缩节点（`context/pipeline.rs`） | `CompressionEmitter::emit_persisted` |
+| 助手侧增量落库（`chat_loop/io.rs::persist_messages`） | `PublishTarget::Sink`（帧直投 `ExecEventSink`） |
+| 用户发言（`orchestrator/entry.rs`） | `PublishTarget::Transcript`（按会话 id 解析转写） |
+| 压缩节点（`context/pipeline.rs`） | 同上（经 `CompressionEmitter::target`） |
+
+落库**失败**时不下发：错误的呈现由调用方决定——三条路径的降级各不相同（主循环发
+`Warn` 继续、编排广播失败结局并中断、压缩只记日志），那是各自的领域判定。
 
 `content` 整条替换（而不是 `delta`）：持有乐观副本 / 在途副本的消费端要**替换**成
 权威正文，而不是往自己那份后面再拼一遍。这也是 `delta` / `content` 两个字段必须

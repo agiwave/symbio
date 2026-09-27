@@ -12,6 +12,7 @@ use super::*;
 use super::super::chat_loop::{ChatOrchestrator, SessionContext};
 use super::super::chat_session::PersistentChatSession;
 use super::super::frames::llm_emit_removed;
+use super::super::plugin::append_and_publish;
 use super::super::tool_executor::fire_hook;
 use crate::plugin_warn;
 use crate::symbio_core::schemas::session::chat_message::{MessageContent, MessageStatus};
@@ -530,21 +531,20 @@ async fn compress_with_snapshot_core(
             Err(f) => (MessageStatus::Failed, f.message(), Some(f.kind())),
         };
         let node = e.finish(&node_id, status, &text, kind).await;
-        // 落库：压缩是会话里真实发生的一步，应当留下记录。否则用户刷新后只看到
-        // "历史突然变短了"，却没有任何东西说明发生过什么。
-        match context.session.append_messages(vec![node]).await {
-            // 落库回包：`finish` 那一帧带的还是在途号，权威号靠这一帧换入（§3.4）。
-            Ok(persisted) => {
-                for m in &persisted {
-                    e.emit_persisted(context.session.session_id(), m).await;
-                }
-            }
-            Err(err) => {
-                plugin_warn!(
-                    "session",
-                    "[Compress] 压缩节点落库失败（前端已收到终态）: {err}"
-                );
-            }
+        // 落库 + 落库回包：压缩是会话里真实发生的一步，应当留下记录。否则用户刷新后
+        // 只看到"历史突然变短了"，却没有任何东西说明发生过什么。回包那一步换入
+        // `finish` 帧还缺的存储权威号（§3.4）；失败只记日志——前端已收到终态。
+        if let Err(err) = append_and_publish(
+            &context.session,
+            vec![node],
+            e.target(context.session.session_id()),
+        )
+        .await
+        {
+            plugin_warn!(
+                "session",
+                "[Compress] 压缩节点落库失败（前端已收到终态）: {err}"
+            );
         }
     }
     result
@@ -707,16 +707,12 @@ pub(crate) async fn retry_compaction(
                         None,
                     )
                     .await;
-                match context.session.append_messages(vec![node]).await {
-                    // 落库回包：同上，换回存储分配的权威 `seq`（§3.4）。
-                    Ok(persisted) => {
-                        for m in &persisted {
-                            em.emit_persisted(context.session.session_id(), m).await;
-                        }
-                    }
-                    Err(err) => {
-                        plugin_warn!("session", "[Compress] 重试节点落库失败: {err}");
-                    }
+                let sid = context.session.session_id();
+                // 落库 + 回包：同上，换回存储分配的权威 `seq`（§3.4）。
+                if let Err(err) =
+                    append_and_publish(&context.session, vec![node], em.target(sid)).await
+                {
+                    plugin_warn!("session", "[Compress] 重试节点落库失败: {err}");
                 }
             }
         }

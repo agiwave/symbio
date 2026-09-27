@@ -169,7 +169,7 @@ async fn prepare_turn_inputs(
 - `retention` **不进** `TurnInputs`——它只是 `build_request_view` 的一个入参，
   由 `tools` 就地派生后立即消费，暴露到边界只多一份需要维护的中间态。
 - `overhead_tokens` 是函数内局部量：只被本步内的自动压缩阈值与水位提醒消费，
-  **一轮只算一次**（`compression::estimate_overhead_with_tools(system_prompt, &tools)`
+  **一轮只算一次**（`context::estimate_overhead_with_tools(system_prompt, &tools)`
   复用已收集的工具清单，不让 visitor 注册表被查三遍）。
 
 每轮收集本身**不触发 I/O**（`list_capability` / `list_system_prompts` 均为纯内存读
@@ -205,7 +205,7 @@ async fn apply_compaction(
 
 - **水位响应**（auto + nudge）→ 唯一入口 `apply_compaction`；
 - **执行内核** → `compress_with_snapshot_core`（唯一实现）；
-- **收益护栏** → `compression::has_compaction_payoff`（门槛语义只有这一个出处）；
+- **收益护栏** → `context::has_compaction_payoff`（门槛语义只有这一个出处）；
 - **「何时压」仍有两个入口**（水位触发 / 模型主动）——这是产品语义决定的，不合并；
   被合并的是「怎么压」（1 个实现）与「水位怎么响应」（1 个入口）。
 

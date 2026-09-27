@@ -187,17 +187,13 @@ impl Drop for WorkingGuard {
         let crash_msg = "会话处理异常中断（后台任务崩溃），请重试".to_string();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                // 仅当本会话仍在进行中时才复位。
+                // 仅当本会话仍在进行中时才复位（写点见 `reset_working`：它比
+                // `emit_session_state` 那次复位更早一步，让崩溃收尾期间就已空闲）。
                 // 注：旧的「同 request_id 才复位」检查依赖 ActiveSessionStateInner.request_id，
                 // 字段已重构到 WorkingGuard.request_id（per-request）；
                 // 此处直接靠 `is_working` 兜底：若本会话已被新一轮请求接管，
                 // 持久化失败会自然被 persist_failure 内部的版本检查拦截。
-                {
-                    let mut inner = state.inner.write().await;
-                    if inner.is_working {
-                        inner.is_working = false;
-                    }
-                }
+                state.reset_working().await;
                 // 把"仍在进行中"的 AI 消息持久化为 Failed + 错误原因
                 // （切回会话时能看到上次失败的终态，目标 3）。
                 plugin
@@ -211,15 +207,9 @@ impl Drop for WorkingGuard {
                 // 运行态收敛为「以错误结束」：`status = failed` + `attributes.error`
                 // 随节点视图一并下发，前端因此不需要"事件 + 启发式"就能显示错误条；
                 // 这也就是「崩溃后 UI 立即看到错误」的全部机制（没有第二条 Error 事件）。
-                plugin
-                    .emit_session_state(
-                        &state,
-                        SessionStateChange::Finished {
-                            outcome: OUTCOME_FAILED,
-                            error: Some(crash_msg),
-                        },
-                    )
-                    .await;
+                // 与消费循环的失败支路同一个出口（`broadcast_error_with_idle`），
+                // 不在这里手写一份 `Finished { outcome: failed }`。
+                plugin.broadcast_error_with_idle(&state, crash_msg).await;
             });
         }
     }

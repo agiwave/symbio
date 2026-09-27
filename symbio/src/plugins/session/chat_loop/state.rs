@@ -7,6 +7,7 @@
 //! `resume.rs` 经 `chat_loop::X` 引用）故为 `pub`；其余为 `pub(super)`——
 //! 只在 `chat_loop` 及其子模块内可见。
 
+use super::super::plugin::PublishTarget;
 use super::*;
 
 /// MODEL 会话上下文
@@ -360,19 +361,23 @@ impl CompressionEmitter {
             .await;
     }
 
-    /// 落库回包：把**存储分配的 `seq`** 交回实时面（`docs/vdfs-session-messages.md` §3.4）。
+    /// 落库回包用的**发布通道**（[`PublishTarget::Transcript`]：按会话 id 现场解析转写）。
     ///
-    /// [`Self::finish`] 发的那一帧带的是转写分配的**在途号**（`1 << 50`）——号只由
-    /// 存储在写入时分配，落库后必须再发一次权威副本才能换回。不回包的后果是静默的：
-    /// 该节点永远排在全部存储号之后，下一条用户消息（小存储号）会跳到它**前面**，
-    /// 前端于是看到压缩节点跑到对话末尾去。
+    /// 「落库 → 逐条下发权威副本」整段动作在 `plugin::append_and_publish`（§3.4 的
+    /// 唯一落地点）里，这里只负责给出通道——压缩域没有自己的 `ExecEventSink`，
+    /// 压缩期的出帧是被静音的（见模块头）。
     ///
-    /// 载荷是 `append_messages` 交回的权威副本（`content` 整条替换），不是 `finish`
-    /// 返回的那份——后者没有号（补号发生在存储临界区内的私有副本上）。
-    pub async fn emit_persisted(&self, session_id: &str, node: &ChatMessage) {
-        self.plugin
-            .transcript_apply(session_id, crate::symbio_core::llm_message_frame(node))
-            .await;
+    /// 载荷是 `append_messages` 交回的**权威副本**（`content` 整条替换），不是 `finish`
+    /// 返回的那份——后者没有号（补号发生在存储临界区内的私有副本上）。`finish` 发的
+    /// 那一帧带的是转写分配的**在途号**（`1 << 50`），号只由存储在写入时分配，
+    /// 落库后必须再发一次权威副本才能换回。不回包的后果是静默的：该节点永远排在
+    /// 全部存储号之后，下一条用户消息（小存储号）会跳到它**前面**，前端于是看到
+    /// 压缩节点跑到对话末尾去。
+    pub(crate) fn target<'a>(&'a self, session_id: &'a str) -> PublishTarget<'a> {
+        PublishTarget::Transcript {
+            plugin: &self.plugin,
+            session_id,
+        }
     }
 }
 

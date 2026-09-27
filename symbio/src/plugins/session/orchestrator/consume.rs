@@ -77,6 +77,36 @@ impl SessionPlugin {
         self.broadcast_error_with_idle(state, err).await;
     }
 
+    /// Turn 任务三条**失败出口**（业务错误 / panic·取消 / 看门狗）的统一收尾。
+    ///
+    /// 这三条支路原是逐字重复的四步，顺序契约只写在注释里；漏一步的后果各不相同
+    /// 且都是静默的，所以把它写进函数体：
+    ///
+    /// 1. `persist_failure` **早于**广播——否则前端先收到 Error、节点却还是在途态；
+    /// 2. `broadcast_error_with_idle` 负责复位 `is_working` + 广播 Error + idle
+    ///    （不复位会让后续 resume 被 `session_busy` 守卫静默拒绝）；
+    /// 3. `guard.done = true`——漏置位则 `WorkingGuard::drop` 再跑一遍崩溃恢复，
+    ///    同一失败被重复落库、前端收到两条 Error；
+    /// 4. `abort_guard.disarm()`——注销中止信号登记，不留到下一轮。
+    ///
+    /// 调用方在本函数返回后**自行 `return`**：保留三条支路「就地 return」的形状，
+    /// 以免下一条新增支路顺着往下走到统一收尾里去（那会再发一条 idle）。
+    async fn teardown_failed_turn(
+        &self,
+        state: &Arc<ActiveSessionState>,
+        session_id: &str,
+        collected: &Arc<tokio::sync::Mutex<crate::plugins::session::transcript::Transcript>>,
+        guard: &mut WorkingGuard,
+        abort_guard: &mut AbortGuard,
+        error: String,
+    ) {
+        self.persist_failure(session_id, collected, &error, cm::MessageStatus::Failed)
+            .await;
+        self.broadcast_error_with_idle(state, error).await;
+        guard.done = true;
+        abort_guard.disarm().await;
+    }
+
     /// 统一的 chat_loop 任务执行器（`handle_chat_message` 与 continuation 共用）。
     ///
     /// 职责：
@@ -274,21 +304,17 @@ impl SessionPlugin {
                     exit_state = SessionStateChange::aborted();
                 } else {
                     // 业务级失败：把"仍在进行中"的 AI 消息持久化为 Failed + 错误原因，
-                    // 这样切回会话时能看到上次失败的终态。
-                    self.persist_failure(
+                    // 这样切回会话时能看到上次失败的终态；随后复位 `is_working` +
+                    // 广播 Error + idle（不复位的后果见 `teardown_failed_turn`）。
+                    self.teardown_failed_turn(
+                        &state,
                         &session_id,
                         &transcript,
-                        &e.to_string(),
-                        cm::MessageStatus::Failed,
+                        &mut guard,
+                        &mut abort_guard,
+                        e.to_string(),
                     )
                     .await;
-                    // 复位 is_working + 广播 Error + 广播 idle：
-                    // 必须复位 is_working，否则后续 resume 请求会被
-                    // `handle_chat_send_oneoff` 的 session_busy 守卫静默拒绝，
-                    // 导致用户点重试无任何反应（LLM 失败重试不生效 bug 的根因）。
-                    self.broadcast_error_with_idle(&state, e.to_string()).await;
-                    guard.done = true;
-                    abort_guard.disarm().await;
                     return;
                 }
             }
@@ -311,11 +337,15 @@ impl SessionPlugin {
                     );
                     format!("Chat loop task failed: {detail}")
                 };
-                self.persist_failure(&session_id, &transcript, &msg, cm::MessageStatus::Failed)
-                    .await;
-                self.broadcast_error_with_idle(&state, msg).await;
-                guard.done = true;
-                abort_guard.disarm().await;
+                self.teardown_failed_turn(
+                    &state,
+                    &session_id,
+                    &transcript,
+                    &mut guard,
+                    &mut abort_guard,
+                    msg,
+                )
+                .await;
                 return;
             }
             TurnOutcome::Watchdog => {
@@ -324,11 +354,15 @@ impl SessionPlugin {
                     1800
                 );
                 crate::plugin_error!("session", "[Consume] {}", &msg);
-                self.persist_failure(&session_id, &transcript, &msg, cm::MessageStatus::Failed)
-                    .await;
-                self.broadcast_error_with_idle(&state, msg).await;
-                guard.done = true;
-                abort_guard.disarm().await;
+                self.teardown_failed_turn(
+                    &state,
+                    &session_id,
+                    &transcript,
+                    &mut guard,
+                    &mut abort_guard,
+                    msg,
+                )
+                .await;
                 return;
             }
             TurnOutcome::Superseded => {
@@ -347,12 +381,8 @@ impl SessionPlugin {
         // 在返回前就已把本轮消息落库——转写的权威副本已经回到存储，继续叠加在途
         // 副本只会让同一条消息出现两次。
         transcript.lock().await.clear();
-        {
-            let mut inner = state.inner.write().await;
-            if inner.is_working {
-                inner.is_working = false;
-            }
-        }
+        // 提前复位 `is_working`（在 `emit_session_state` 之前，理由见该方法的说明）。
+        state.reset_working().await;
         guard.done = true;
         abort_guard.disarm().await;
         // 正常收尾：运行态收敛为「上一轮结束」。结局由 `exit_state` 决定——
@@ -402,6 +432,10 @@ impl SessionPlugin {
             }
         }
 
+        // 复位与注销**同一个临界区内**完成：中止信号登记是 `handle_abort` 判断
+        // 「在途 Turn 还在不在」的唯一判据，与「已空闲」必须一起可见——拆成两次
+        // 写就会有中间态（已空闲但仍登记着信号 / 已注销却仍显示在跑）。
+        // 这里刻意不走 `reset_working`（那个方法只复位运行态、且是条件写）。
         {
             let mut inner = state.inner.write().await;
             inner.is_working = false;

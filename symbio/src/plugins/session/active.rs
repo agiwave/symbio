@@ -168,6 +168,23 @@ impl ActiveSessionState {
         }
     }
 
+    /// **提前复位** `is_working`（不发变更、不动运行态的其余字段）——手写复位的唯一写点。
+    ///
+    /// 与 `emit_session_state(Finished)`（`orchestrator::broadcast`）内部那次复位是
+    /// **两处、也仅有两处**写点：那次随节点视图一起下发（顺序是「先写状态 → 再发变更」），
+    /// 而本方法供「先复位、后收尾」的路径使用——收尾还要做几件事（清在途图 / 注销中止
+    /// 信号 / `persist_failure`），这几步期间必须已经不处于 `is_working`，否则并发进来的
+    /// `chat/send` 会被 `session_busy` 守卫静默拒绝（用户点重试无任何反应）。
+    ///
+    /// 幂等：已是 `false` 时不写。复位**不带**变更投递——那一步由收尾处的
+    /// `emit_session_state` 完成，两者合起来才是「运行态收敛」。
+    pub async fn reset_working(&self) {
+        let mut inner = self.inner.write().await;
+        if inner.is_working {
+            inner.is_working = false;
+        }
+    }
+
     /// 自动压缩熔断阈值：连续失败达到此数即开闸跳过。
     pub const COMPRESS_CIRCUIT_LIMIT: u32 = 3;
     /// 开闸后的冷却时长：期间跳过自动压缩；冷却结束允许一次重试（半开）。

@@ -2,6 +2,7 @@
 //!
 //! 集中在此的目的：让主循环与单轮逻辑只表达"做什么"，把"写到哪里"收在一处。
 
+use super::super::plugin::{append_and_publish, PublishTarget};
 use super::*;
 
 /// 封根 Turn：广播本轮组合节点的终态（**唯一**发射点）。
@@ -35,7 +36,7 @@ pub(crate) async fn finalize_turn_root(
 ///
 /// `seq` 只在存储写入时分配；助手侧节点的号是转写建节点时发的**在途号**
 /// （`INFLIGHT_SEQ_BASE = 1 << 50`）。落库后若不回包，这些节点就**永远持在途号**：
-/// 用户消息经 `emit_persisted_messages` 拿到的是小存储号（1、2、3…），助手侧却是
+/// 用户消息经 `append_and_publish`（`plugin.rs`）拿到的是小存储号（1、2、3…），助手侧却是
 /// 1e15 量级——两套序号空间并存在同一棵树上，下一条用户消息会排到上一轮助手消息
 /// **之前**，前端于是显示 `user-user-assistant-assistant`（重开会话才恢复，因为整份
 /// 回读只走存储号）。这就是 §3.4 那条硬不变量「每一条被落库的消息都必须发一次变更
@@ -54,12 +55,14 @@ pub(crate) async fn persist_messages(
         return;
     }
 
-    match context.session.append_messages(new_messages.to_vec()).await {
-        Ok(persisted) => {
-            for message in persisted {
-                sink.emit(message).await;
-            }
-        }
+    match append_and_publish(
+        &context.session,
+        new_messages.to_vec(),
+        PublishTarget::Sink(sink),
+    )
+    .await
+    {
+        Ok(()) => {}
         Err(e) => {
             // 持久化失败（可恢复）：不静默吃错误，也不中断对话（消息仍在内存中，
             // chat_loop 继续）。错误是**状态**不是事件——发 `Warn` 由消费循环写入

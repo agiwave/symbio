@@ -284,7 +284,7 @@ session:
         }
         if window > 0 && !retention.is_empty() {
             // ③ 工具明细骨架化
-            view = super::context_window::apply_layered_sliding_window(
+            view = super::window::apply_layered_sliding_window(
                 &view,
                 window,
                 retention,
