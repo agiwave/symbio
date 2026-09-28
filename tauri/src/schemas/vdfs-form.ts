@@ -298,6 +298,51 @@ export function compactFieldText(f: DetailField, value: unknown): string {
 export const DETAIL_ACTION_DIVIDER: DetailAction = { id: 'divider', label: '', style: 'divider' }
 
 /**
+ * 「进入下一级」这一动作的 id。
+ *
+ * 它是**纯导航**而非对资源的操作，因而在动作区里位置固定、且与其余动作隔开
+ * （见下 `NEXT_LEVEL_ACTIONS`）——「往下一层」和「对这东西做点什么」是两种意图，
+ * 混在一排里用户会按错。
+ */
+export const DETAIL_ACTION_OPEN_CONTAINER = 'open-container'
+
+/** 落在动作区**最右端**、以「进入下一级」形态呈现的动作 id 集合 */
+const NEXT_LEVEL_ACTIONS = new Set<string>([DETAIL_ACTION_OPEN_CONTAINER])
+
+/**
+ * 重排动作区：把「进入下一级」类的动作**移到最右**，其余保持原相对顺序。
+ *
+ * 三个数组等长且按索引对齐，故必须整体置换——只动 `actions` 会让忙态错位。
+ *
+ * 为什么由机制做而不是各渲染器自己排：`open-container` 可能来自**两处**（渲染器
+ * 自有动作，或后端详情定义声明的动作），若交给渲染器排，同一条规则就要在两处
+ * 各写一遍、且后端加的动作排不到位置。位置是机制知识，不是资源知识。
+ */
+function moveNextLevelLast<T extends { actions: DetailAction[]; busy: boolean[]; disabled: boolean[] }>(
+  merged: T
+): T {
+  const idx = merged.actions
+    .map((a, i) => (NEXT_LEVEL_ACTIONS.has(a.id) ? i : -1))
+    .filter((i) => i >= 0)
+  if (!idx.length || idx[idx.length - 1] === merged.actions.length - 1) return merged
+  const at = idx[idx.length - 1]
+  return {
+    ...merged,
+    actions: moveToEnd(merged.actions, at),
+    busy: moveToEnd(merged.busy, at),
+    disabled: moveToEnd(merged.disabled, at),
+  }
+}
+
+/** 把第 `i` 项摘出并追加到末尾（返回新数组，不改原数组） */
+function moveToEnd<T>(arr: T[], i: number): T[] {
+  const out = arr.slice()
+  const [item] = out.splice(i, 1)
+  out.push(item)
+  return out
+}
+
+/**
  * 把「渲染器自有动作」与「机制动作」装配成一行动作区。
  *
  * 动作来自两个来源，职责不同：`own` 随资源形态而变（save / reset / test /
@@ -305,12 +350,17 @@ export const DETAIL_ACTION_DIVIDER: DetailAction = { id: 'divider', label: '', s
  * 都能做的默认动作（重命名 / 删除），由页面单点算好
  * （`useVdfs.mechanismActions`）——渲染器不该各算一遍。
  *
- * 规则只有两条，因此只有这一份实现：
+ * 规则只有三条，因此只有这一份实现：
  *
  * 1. 两段之间插一个 `DETAIL_ACTION_DIVIDER`（视觉分组）；
  * 2. **同 id 时渲染器声明的那一份胜出** —— 渲染器对「这是哪个动作」更具体
  *    （如后端详情定义给 `delete` 配了更贴切的文案），机制只负责保证它存在。
  *    于是「定义声明了 delete」与「机制兜底提供 delete」不会渲染成两个按钮。
+ *
+ * 装配完成后还有一步**位置**收口（`moveNextLevelLast`）：「进入下一级」类动作
+ * 一律挪到最右端——它是导航，不是对资源的操作，位置固定才能形成肌肉记忆。
+ * 这条规则不写在各渲染器里，是因为 `open-container` 可能来自渲染器、也可能来自
+ * 后端详情定义：交由机制重排，后端新增的动作才排得到位置。
  *
  * 返回的三个数组**等长且按索引对齐**（`VdfsActions` 的入参形状）：自有动作的
  * 忙态取自调用方给的等长数组；机制动作同时最多只有一个在跑，故按 id 判定。
@@ -344,7 +394,7 @@ export function mergeDetailActions(
       disabled.push(false)
     }
   }
-  return { actions, busy, disabled }
+  return moveNextLevelLast({ actions, busy, disabled })
 }
 
 // ==================== 预设联动（机制唯一实现） ====================

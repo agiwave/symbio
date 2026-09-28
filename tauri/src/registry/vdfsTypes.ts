@@ -7,9 +7,7 @@
  * 对应后端：symbio/src/symbio_core/vdfs/node.rs（ext 约定）
  */
 
-import type { Component } from 'vue'
 import { createRendererRegistry } from './factory'
-import { getVdfsIcon } from './vdfsIcons'
 import {
   VDFS_EXT_DIR,
   VDFS_EXT_FORM,
@@ -127,13 +125,4 @@ export function resolveVdfsRenderer(node: VdfsNode | null | undefined): VdfsRend
   const ext = vdfsExtOf(node)?.toLowerCase()
   if (!ext) return 'fallback'
   return EXT_RENDERERS[ext] ?? 'fallback'
-}
-
-/**
- * `<根>` 子目录图标：复用 VDFS 图标注册表（子目录名与资源类别 kind 同名的场景，如
- * `setting` / `model` / `session` / `agent` / `skill` / `mcp`）。
- * 未命中返回 undefined（视图回退默认图标）。
- */
-export function dirIconOf(name: string): Component | undefined {
-  return getVdfsIcon(name)
 }

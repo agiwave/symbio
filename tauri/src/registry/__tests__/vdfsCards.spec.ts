@@ -129,13 +129,20 @@ describe('cardTagsOf', () => {
 })
 
 describe('cardIconOf', () => {
-  it('目录按目录名查图标', () => {
-    expect(cardIconOf(node({ access: DIR, name: 'session' }))).toBeTruthy()
-    expect(cardIconOf(node({ access: DIR, name: 'model' }))).toBeTruthy()
+  it('目录按**协议 kind** 优先（kind 是稳定协议词，段名会随地址模型变）', () => {
+    // kind 命中时，段名是什么都不影响
+    expect(cardIconOf(node({ access: DIR, kind: 'subsession', name: 'whatever' }))).toBeTruthy()
   })
 
-  it('目录名未登记 → undefined（由卡片决定不画，而不是画个错的）', () => {
-    expect(cardIconOf(node({ access: DIR, name: 'no-such-dir-xyz' }))).toBeUndefined()
+  it('目录 kind 未登记时回退目录名（`<根>` 挂载点只有名字、没有 kind）', () => {
+    expect(cardIconOf(node({ access: DIR, kind: 'unknown-kind', name: 'session' }))).toBeTruthy()
+    expect(cardIconOf(node({ access: DIR, kind: 'unknown-kind', name: 'model' }))).toBeTruthy()
+  })
+
+  it('kind 与目录名都未登记 → undefined（由卡片决定不画，而不是画个错的）', () => {
+    expect(
+      cardIconOf(node({ access: DIR, kind: 'no-such-kind-xyz', name: 'no-such-dir-xyz' }))
+    ).toBeUndefined()
   })
 
   it('文件优先按 config_type（项级扩展名）查图标', () => {

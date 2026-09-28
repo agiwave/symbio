@@ -74,10 +74,29 @@
 - 方案（**不新建任何控件**）：
   1. `/` 重定向 `/vdfs` → `/vdfs/session`（同一个 `VdfsView` + 同一个 `VdfsWorkbench` 承接，
      只是绑定地址从 `<根>` 变成 `<根>/session`）；
-  2. 恢复上次选中：把 `lastAddr` 与 appearance 同源落盘，冷启动直达上次会话；
+  2. ~~恢复上次选中：把 `lastAddr` 与 appearance 同源落盘，冷启动直达上次会话~~
+     **已下线（2026-09-28）**——见下方「为什么不做」；
   3. rail 里 session 的**首位语义由后端目录顺序下发**，前端不硬编码（保住「新增资源零开发」）。
-- 落点：`router/index.ts`、`schemas/vdfsAddress.ts`、`stores/appearance.ts`
+- 落点：`router/index.ts`、`schemas/vdfsAddress.ts`
 - 架构：✅ 零冲突
+
+> #### 为什么不做「回到上次浏览的地址」（2026-09-28 结论）
+>
+> 本项第 2 条曾落地为 `stores/nav.ts` + 守卫的一级「有位置记忆 ⇒ 回上次地址」，
+> 现已**整体删除**（`router/index.ts::coldStartPath` 的注释是权威说明）。两个理由：
+>
+> 1. **判据拿不到真实的入口地址**：打包后的 webview 里 `location.pathname` 不是 `/`，
+>    守卫的 `to.path !== '/'` 每次提前 return，记忆从未被读过；
+> 2. **修好判据后它反而"正确地做错事"**：用户退出某智能体内部、重启后又被送回
+>    该智能体——那正是他上次停留的地方，还原**成功了**，只是他要的不是这个。
+>
+> 判「该不该回上次」需要一个稳定的**中性位置**概念，而 VDFS 地址是**分形**的
+> （子空间与根空间的挂载名完全同名，实测 `/vdfs/session/<id>` 与 `/vdfs/agent/<id>`
+> 结构相同），纯地址形状分不出两者。
+>
+> **它真正缺的是「回到中性位置」的入口**——那属于导航模型（左栏/中栏切换时把
+> 地址带回挂载目录，或给一个显式的退出子空间入口），不属于落点机制。若日后要做，
+> 从那里入手，不要再加落点判据。
 
 **P0-2 首次启动引导（onboarding）**
 - 症状：README 写着「首次启动后在左侧模型面板新建条目填入 API Key」，界面零引导 →
@@ -174,3 +193,118 @@
 <!-- doc-link-allow D-006: 本节引用的三个文件名**均不存在**——前两个是已修缺陷的被引述内容，第三个是"将来要立"的占位，都不是入链 -->
 `tauri/docs/FRONTEND.md` 顶部引用了 `docs/design/frontend-ui-ux-prd.md` 与 `docs/design/frontend-ui-ux-design.md`，**两个文件均不存在**。
 **已修（2026-09-27）**：改为指向本文。视觉细则若将来要立，另建 `frontend-ui-ux-design.md` 并在本文登记。
+
+---
+
+## 7. 已落地（2026-09-27，第一批）
+
+> 本节记**已实现的事实**，与前六节的**提案**分开——提案会变，事实由代码决定。
+> 逐条对应上文的编号；未列出的项仍属提案，**不要**当既成事实引用。
+
+| 编号 | 内容 | 实现落点 |
+|---|---|---|
+| （用户点名） | 详情页「进入下一级」入口**恒在最右**、图标改为「进入」形 | 位置由 `mergeDetailActions`（`schemas/vdfs-form.ts`）统一重排；图标在 `registry/vdfsIcons.ts`；左间距在 `VdfsActions.vue` |
+| P2-2（部分） | 列表筛选（当前目录内，纯投影） | `useVdfs.ts` 的 `filteredItems` / `filterEmpty` / `filterTruncated` + `VdfsWorkbench.vue` 输入与空态 |
+| P1-5 / P0-1（部分） | 导航态持久化（浏览器地址级，根不记） | `stores/nav.ts` + `router/index.ts` 默认重定向 + `MainLayout.vue` |
+| P0-3（部分） | 空候选给出可执行去向（不深链具体目录） | `ChatOptionBar.vue` |
+| P3（两小项） | 骨架屏替代「加载中…」文字；消息节点头键盘可达 | `components/common/SkeletonBlock.vue`、`VdfsCardSkeleton.vue`；`NodeShell.vue` 的 `role="button"` + 键位 |
+
+**明确仍未做**（提案状态不变）：P0-2 引导、P1-1 命令面板、P1-2 快捷键体系、
+P1-3 长会话渲染、P1-4 多开、P2-1 上下文水位、P2-3 授权分级、P2-4 用量成本、P2-5 分支切换。
+
+**落地时确立的两条判据**（后续同类改动沿用）：
+
+1. **位置是机制知识，不是资源知识**。「进入下一级」可能来自渲染器、也可能来自后端
+   详情定义，故右置只能在 `mergeDetailActions` 做；交给各渲染器排，后端新增的动作就
+   排不到位置。同理，`actions` / `busy` / `disabled` **三个数组必须一起置换**。
+2. **筛选是「在当前页里找」，全库搜索是「在整库里找」，两者不能混**。把 `vdfs/search`
+   接进中栏会在结果不落在当前目录时摧毁「点目录即钻入」的空间心智；全库搜索的归属是
+   命令面板（P1-1）。
+
+---
+
+## 8. 已落地（2026-09-27，第二批）
+
+| 内容 | 实现落点 |
+|---|---|
+| 会话头部的「进入下一级」移到**最右** | `ChatMainPanel.vue`：动作区移到最后一位并加左分隔线（`.header-actions`）。**注意**：第一批的改动只覆盖了 `VdfsActions` 内部排序，而会话头部的动作区在 `ChatMainPanel` 自己的 DOM 顺序里排在按钮之前——位置由**两处**共同决定 |
+| 「清空历史」整体下线（前后端） | 前端：`ChatMainPanel.vue` 按钮/对话框/handler、`stores/sessions.clearMessages`、`services/session.clearMessages`；后端：`vdfs_provider.rs` 转写区段的 `(None, CLEAR)` 分支、`commands.rs::clear_messages`。`VDFS_ACTION_CLEAR` 本人保留（收件箱仍在用） |
+| 会话内部导航图标语义化 | 后端 `workdir/mod.rs` 补 `KIND_SUB_SESSIONS` / `KIND_WORKDIR`（协议词）；前端 `registry/vdfsIcons.ts` 登记 `messages` / `inbox` / `subsession` / `dir` 四张独立图标 |
+
+**第二批确立的判据**：
+
+1. **一个功能下线要连着它的「替代入口」一起删**。「清空历史」在 VDFS 上的形态是
+   `action(…/message, "clear")`，而它与 `delete(<根>/session/<id>)` 在用户眼里是同一件事的两条路。
+   只删 UI 会把「重叠」留在协议层，下一个人照样能把它接回来。
+2. **动作动词按对象收窄，不按词面复用**。`clear` 现在只剩收件箱一个语义（取消排队），
+   转写区段上不再有它——`truncate` 是那里唯一的集合动词。
+3. **「图标优先顺序」要用「具体 vs 笼统」判，不是「类型 vs 实例」判**。列表卡片早已是
+   「项级 → kind → 名字」三级回退，侧栏却只有名字一级，于是插件管理插件的各分区在左栏
+   全是文件夹（见 §9）。修的时候**不能再想当然地「kind 优先」**——`<根>` 挂载点的
+   `kind` 全是 `dir`，kind 优先会让它们整排退成同一张图（§9.3 是完整事故记录）。
+4. **每个用例自带超时值，按满负载耗时给**。`coldStart.spec.ts` 每个用例都重载 router
+   依赖图（约 2.4s），贴着 5s 默认超时，全量并发时随机变红。给超时值而不是加 `retry`
+   ——后者会把真实的性能回归也一起吞掉。
+
+---
+
+## 9. 已修：图标查找收成唯一实现 `iconForNode`（**含一次回归事故**）
+
+### 9.1 收敛前的问题
+
+「同一个问题在三处各有各的写法」：
+
+| 查表点 | 收敛前的回退链 | 问题 |
+|---|---|---|
+| 列表卡片 `cardIconOf` | 项级 `kind:ext` → kind → 目录名 | 完整，是**正确形态** |
+| 侧栏 `useVdfs.navItems` | 目录名（一级） | **缺项级**：`plugin_manager` 的分区（`config_type = appearance / session / …`）在左栏全部退成文件夹 |
+| 详情子表单 `DetailForm` | 无 | 字段图标走 `fieldIcon()`（emoji 表），与上面两条链完全无关 |
+
+**根因**：三处各自实现了「取图标」这件事，没有单一实现。
+
+### 9.2 修法
+
+`registry/vdfsIcons.ts` 提供**唯一**的节点取图标函数 `iconForNode(node)`，
+`cardIconOf` 与 `useVdfs.navItems` 都改为调用它；此前的中间层
+`getVdfsIcon` / `getVdfsIconFor` / `dirIconOf` **全部删除**（留着就还会有人
+从它们那里另走一条回退）。回退链**具体在前、笼统在后**：
+
+```
+1. kind:config_type   项级（最具体）
+2. config_type        配置键（裸分区名，如 appearance）
+3. name               名单级（<根> 挂载点：session / model / …）
+4. kind               类型级（笼统容器：dir / file，最后兜底）
+```
+
+### 9.3 事故：把「kind 优先」当成了修法（**留作判据**）
+
+改第一版时把侧栏第一跳写成 `getVdfsIcon(n.kind) ?? …`（kind 优先，名字兜底
+被 `getVdfsIconFor` 内部的 `icons[kind]` 回退**提前截胡**）。后果：
+
+- `<根>` 的六个挂载点由 `VdfsNode::dir(...)` 产出，`kind` **全是 `"dir"`**
+  （`VDFS_KIND_DIR`；后端自测 `composite/vdfs.test.rs` 即断言此值）；
+- 于是六项**全部**命中 `dir` 那张图 → 主界面左栏「会话 / 模型 / 智能体 / MCP /
+  技能 / 插件管理」整排退成同一个默认文件夹。
+
+**判据**：`kind` 的取值分两类——**具体的身份**（`session` / `model` /
+`plugin_manager:appearance`）与**笼统的容器形态**（`dir` / `file`）。
+「优先」只对前者成立；后者对区分同类成员**零信息量**，永远该排在最后。
+顺序不是实现细节，**顺序就是这条规则的实现**。
+
+### 9.4 护栏
+
+| 用例 | 钉住什么 |
+|---|---|
+| `registry/__tests__/vdfsIcons.spec.ts` | 回退链各步的命中与未命中；夹具用**真实** `kind: 'dir'` |
+| `composables/__tests__/useVdfs.spec.ts` | 让真实挂载点形状流过真实 `navItems`，断言六项图标**互不相同** |
+| 同上（第二条） | `cardIconOf` 与 `navItems` 对同一节点取**同一张**图 |
+
+两处都做过**反证**：删掉「名字兜底」那一步，用例即红并报
+「expected 1 to be 6」（六项退成一张图）——与用户所见症状一致。
+
+⚠️ 夹具里的 `kind` **必须是 `'dir'`**，不能图省事写空串：后端从不发空 kind，
+用不存在的形状做夹具，真回归来了照样是绿的。
+
+**这条与 §8 判据 3 是同一件事的两半**：判据 3 说的是「项级优先」，本节说的是
+「优先顺序要在**同一个地方**实现一次」。
+

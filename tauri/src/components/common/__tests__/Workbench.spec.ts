@@ -148,13 +148,16 @@ describe('Workbench — 中栏', () => {
       slots: { empty: '<span class="e">没有内容</span>' },
     })
     expect(w.find('.empty-state .e').exists()).toBe(true)
-    expect(w.find('.loading-state').exists()).toBe(false)
+    expect(w.find('.list-skeleton').exists()).toBe(false)
   })
 
-  it('列表无内容 + 无 empty 插槽 + loading → 加载态', () => {
+  it('列表无内容 + 无 empty 插槽 + loading → 骨架卡加载态', () => {
     const w = mount(Workbench, { props: { hasListContent: false, loading: true } })
     expect(w.find('.empty-state').exists()).toBe(false)
-    expect(w.find('.loading-state').text()).toBe('加载中…')
+    // 骨架而非纯文字：形状与真实卡片一致，数据到达时不重排
+    expect(w.find('.list-skeleton').exists()).toBe(true)
+    expect(w.findAll('.vdfs-card-skeleton').length).toBeGreaterThan(1)
+    expect(w.find('.list-skeleton').attributes('aria-busy')).toBe('true')
   })
 
   it('列表无内容且不在加载 → 两个态都不显示（不是空白占位）', () => {
@@ -164,7 +167,7 @@ describe('Workbench — 中栏', () => {
     })
     // 有 empty 插槽时仍显示空态——此例验证 loading=false 时不会误报加载中
     expect(w.find('.empty-state').exists()).toBe(true)
-    expect(w.find('.loading-state').exists()).toBe(false)
+    expect(w.find('.list-skeleton').exists()).toBe(false)
   })
 
   it('列表有内容 → 空态与加载态都让位', () => {
@@ -174,6 +177,90 @@ describe('Workbench — 中栏', () => {
     })
     expect(w.find('.row').exists()).toBe(true)
     expect(w.find('.empty-state').exists()).toBe(false)
-    expect(w.find('.loading-state').exists()).toBe(false)
+    expect(w.find('.list-skeleton').exists()).toBe(false)
+  })
+})
+
+/**
+ * 中栏收起（列表为空且右栏是新建详情）。
+ *
+ * 这是用户报的「三栏里的列表栏为空时，应该直接显示详情（新建）」。收起条件
+ * 是**四条的合取**，所以逐条钉住"少一个就不能收"——只测最理想的那一路等于
+ * 没测：任何一条写反，用户看到的都是「栏位乱闪」或「该说的话说不出来」。
+ *
+ * 特别记一条**被否掉的判据**：第一版写的是"宿主没提供 empty 插槽才收起"，
+ * 而 `VdfsWorkbench` 无条件声明该插槽 ⇒ 那条判据恒为假、收起永不发生。
+ * 所以下面有一条专门钉「有 empty 插槽也照样能收」。
+ *
+ * 另记一条**被否掉的写法**：收起时给根元素挂个 `.list-hidden` 标记类。它没有任何
+ * CSS 定义（`style-audit` 因此报错），且没有消费方——收起这件事已经由
+ * `.workbench-list` **不存在**表达完了，标记类是纯噪声。断言一律查中栏本身。
+ */
+describe('Workbench — 列表为空时收起中栏', () => {
+  it('空列表 + 草稿详情 + 可新建 → 中栏整个不渲染，详情铺满', () => {
+    const w = mount(Workbench, {
+      props: { hasListContent: false, loading: false, hasDetail: true, hasDraft: true, canCreate: true },
+      slots: { detail: '<div class="d">详情</div>' },
+    })
+    expect(w.find('.workbench-list').exists()).toBe(false)
+    // 详情仍在（收的是列表，不是详情）
+    expect(w.find('.workbench-detail .d').exists()).toBe(true)
+  })
+
+  it('★ 有 empty 插槽**照样**收起（被否掉的旧判据：该插槽在本项目恒存在）', () => {
+    const w = mount(Workbench, {
+      props: { hasListContent: false, hasDetail: true, hasDraft: true, canCreate: true },
+      slots: { empty: '<span class="e">暂无子目录</span>', detail: '<div class="d">详情</div>' },
+    })
+    expect(w.find('.workbench-list').exists()).toBe(false)
+  })
+
+  it('右栏不是草稿（选了某个已有条目）→ 不收起，空目录的解释必须留着', () => {
+    const w = mount(Workbench, {
+      props: { hasListContent: false, hasDetail: true, hasDraft: false, canCreate: true },
+      slots: { empty: '<span class="e">此目录为空</span>', detail: '<div class="d">详情</div>' },
+    })
+    expect(w.find('.workbench-list').exists()).toBe(true)
+    expect(w.find('.empty-state .e').exists()).toBe(true)
+  })
+
+  it('不可新建（目录由系统管理）→ 不收起，那句说明是唯一的解释', () => {
+    const w = mount(Workbench, {
+      props: { hasListContent: false, hasDetail: true, hasDraft: true, canCreate: false },
+      slots: { empty: '<span class="e">该目录由系统管理</span>', detail: '<div class="d">详情</div>' },
+    })
+    expect(w.find('.workbench-list').exists()).toBe(true)
+  })
+
+  it('加载中 → 不收起（否则「正在取」会被读成「什么都没有」，数据到了整栏弹回）', () => {
+    const w = mount(Workbench, {
+      props: { hasListContent: false, loading: true, hasDetail: true, hasDraft: true, canCreate: true },
+      slots: { detail: '<div class="d">详情</div>' },
+    })
+    expect(w.find('.workbench-list').exists()).toBe(true)
+    expect(w.find('.list-skeleton').exists()).toBe(true)
+  })
+
+  it('右栏也没内容（hasDetail=false）→ 不收起（两边都空时收起 = 整屏空白）', () => {
+    const w = mount(Workbench, {
+      props: { hasListContent: false, loading: false, hasDetail: false, hasDraft: true, canCreate: true },
+    })
+    expect(w.find('.workbench-list').exists()).toBe(true)
+  })
+
+  it('hasDetail / hasDraft 缺省为 false ⇒ 不声明它们的宿主一律不收栏（默认必须保守）', () => {
+    const w = mount(Workbench, { props: { hasListContent: false } })
+    expect(w.find('.workbench-list').exists()).toBe(true)
+    // 只声明 hasDetail（右栏有内容）也不够 —— 还得右栏那张是草稿
+    const w2 = mount(Workbench, { props: { hasListContent: false, hasDetail: true } })
+    expect(w2.find('.workbench-list').exists()).toBe(true)
+  })
+
+  it('列表有内容 → 永远不收起', () => {
+    const w = mount(Workbench, {
+      props: { hasListContent: true, hasDetail: true, hasDraft: true, canCreate: true, loading: true },
+      slots: { list: '<div class="row">一行</div>' },
+    })
+    expect(w.find('.workbench-list').exists()).toBe(true)
   })
 })

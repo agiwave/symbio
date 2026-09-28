@@ -441,3 +441,58 @@ describe('MessageNode：分派器路由与内容形态', () => {
     expect(pre.html()).toContain('json-key')
   })
 })
+
+/**
+ * 节点头的键盘可达性。
+ *
+ * 此前节点头是裸 `div` + `@click`：Tab 键永远走不到它，键盘用户无法展开
+ * 任何工具调用或思考过程——折叠控件不可达等于内容不可达。
+ *
+ * 这里锁住三件事：可聚焦（tabindex）、有开关语义（role / aria-expanded）、
+ * 键盘能真的触发折叠。三条都是「不测就悄悄退化」的类型：视觉上看不出差别。
+ */
+describe('MessageNode：节点头键盘可达性', () => {
+  const toolMsg = () =>
+    msg({ id: 'tc1', type: 'tool_call', status: 'completed', name: 'shell', content: '{}', children: [] })
+
+  it('节点头可聚焦且带开关语义（role / tabindex / aria-expanded）', () => {
+    const w = mountNode(toolMsg())
+    const head = w.find('.node-head')
+
+    expect(head.attributes('role')).toBe('button')
+    expect(head.attributes('tabindex')).toBe('0')
+    // 默认收起 ⇒ aria-expanded=false，且标签文案说明按下会发生什么
+    expect(head.attributes('aria-expanded')).toBe('false')
+    expect(head.attributes('aria-label')).toContain('展开')
+  })
+
+  it('Enter 与 Space 都能切换折叠，且 aria-expanded 随之更新', async () => {
+    const w = mountNode(toolMsg())
+    const head = w.find('.node-head')
+    expect(w.find('.node-body').exists()).toBe(false)
+
+    await head.trigger('keydown', { key: 'Enter' })
+    expect(w.find('.node-body').exists()).toBe(true)
+    expect(w.find('.node-head').attributes('aria-expanded')).toBe('true')
+
+    await w.find('.node-head').trigger('keydown', { key: ' ' })
+    expect(w.find('.node-body').exists()).toBe(false)
+    expect(w.find('.node-head').attributes('aria-expanded')).toBe('false')
+  })
+
+  it('悬停操作按钮带可读名称（键盘与读屏都能识别）', async () => {
+    const w = mountNode(toolMsg())
+    const acts = w.findAll('.node-act')
+    expect(acts.length).toBeGreaterThan(0)
+    for (const b of acts) {
+      expect(b.attributes('aria-label'), '图标按钮必须有无障碍名称').toBeTruthy()
+    }
+  })
+
+  it('操作按钮的点击不冒泡成折叠切换（否则点删除会顺手展开卡片）', async () => {
+    const w = mountNode(msg({ id: 'm1', type: 'text', status: 'completed', content: 'hi' }))
+    const before = w.find('.node-body').exists()
+    await w.find('.node-act').trigger('click')
+    expect(w.find('.node-body').exists()).toBe(before)
+  })
+})

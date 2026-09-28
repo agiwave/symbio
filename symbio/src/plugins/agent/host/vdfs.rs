@@ -124,6 +124,21 @@ fn mount_path(mount_rel: &str, rel: &str) -> String {
 // ==================== 节点合成 ====================
 
 /// Agent 概览（`read` 与详情表单共用的信息载荷）
+///
+/// ## 「已装能力」为什么是**结构化**的，而不是一句拼接好的话
+///
+/// 从前这里把子目录列表 `join("、")` 成一个字符串塞进 `capabilities`。那是把
+/// **数据的形状**在源头就压平了：详情页只能原样显示那句话，既分不出「哪一类
+/// 能力有几个条目」，也没法给某一类挂图标 / 计数 / 单独成行。
+///
+/// 现在按类别出**结构化**值（`{类别名: 条目数}`），前端 `DetailForm.staticDisplay`
+/// **本就**能渲染对象（`k v` 逐项）与数组（`、` 连接），因此这一步**不需要**任何
+/// 前端改动——后端不再替前端决定怎么摆，只如实交出结构（用户要求：能后端驱动的
+/// 优先后端驱动；「能力 > 元数据」）。
+///
+/// 类别名**不做白名单**：agent 目录里挂了什么就是什么（见 `agent/README.md`
+/// 「钻进后的清单由子 composite 的 `list("")` 返回自身子目录」）。写死一张
+/// 类别表会与真实来源形成两份真相——这正是本函数头一段要避免的事。
 fn agent_dir_info(r: &AgentDirRecord, store: &AgentDirStore) -> serde_json::Value {
     // 「装了哪些能力」由**目录**回答（§4.1：目录里有就表示已安装）；宿主按类别
     // 点数会与真实的能力来源形成两份真相。
@@ -142,8 +157,33 @@ fn agent_dir_info(r: &AgentDirRecord, store: &AgentDirStore) -> serde_json::Valu
         "requires_spec": r.manifest.requires.spec,
         "scope": r.source.as_str(),
         "dir": r.dir.to_string_lossy(),
-        "capabilities": capabilities.join("、"),
+        // 能力类别 → 该类下的条目数。类别来自目录本身，不预设清单。
+        "capabilities": capability_counts(&r.manifest.id, store, &capabilities),
+        // 类别的**名字清单**（有序，供只读展示与「装了哪几类」的一句话概括）
+        "capability_kinds": capabilities,
+        // 类别总数：一句话说清「装了几类」
+        "capability_count": capabilities.len(),
     })
+}
+
+/// 每个能力类别下的条目数（`{类别名: 条目数}`）。
+///
+/// 取不到子目录时给 `null` 而不是 `0`——「数不了」与「这一类是空的」是两件事，
+/// 后者不应该出现在一个能力类别上（空的类别本就不该在列表里）。
+fn capability_counts(
+    agent_id: &str,
+    store: &AgentDirStore,
+    kinds: &[String],
+) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for kind in kinds {
+        let n = store
+            .list_files(agent_id, kind)
+            .map(|entries| entries.len())
+            .ok();
+        map.insert(kind.clone(), serde_json::json!(n));
+    }
+    serde_json::Value::Object(map)
 }
 
 /// Agent 记录 → VDFS 节点（只读概览表单：`ext = form` + 定义随 `schema` 下发）

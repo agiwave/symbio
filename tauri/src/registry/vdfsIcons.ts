@@ -44,18 +44,51 @@ export function registerVdfsIcon(kind: string, icon: Component): void {
   icons[kind] = icon
 }
 
-export function getVdfsIcon(kind: string): Component | undefined {
-  return icons[kind]
-}
-
-/** 项级图标查找：优先 `kind:ext`，回退 kind */
-export function getVdfsIconFor(target: VdfsIconTarget): Component | undefined {
-  const ext = extOf(target)
-  if (ext) {
-    const keyed = icons[`${target.kind}:${ext}`]
-    if (keyed) return keyed
-  }
-  return icons[target.kind]
+/**
+ * **取图标这件事的唯一实现**（侧栏 / 列表卡片 / 任何要按节点出图的地方都调它）。
+ *
+ * ## 回退链：**具体在前、笼统在后**
+ *
+ * 1. `kind:config_type` —— 项级（同一 kind 下按分区/扩展名分图）
+ * 2. `config_type`      —— 配置键（部分分区把图标登记在**裸分区名**上：
+ *                          `appearance` / `session` / `about` …）
+ * 3. `name`             —— 名单级（`<根>` 挂载点：`session` / `model` / …）
+ * 4. `kind`             —— 类型级（**笼统的容器形态**：`dir` / `file`，最后兜底）
+ *
+ * ## 顺序就是规则本身（**改动前必读**）
+ *
+ * `kind` 的取值分两类：**具体的身份**（`session` / `model` …）与**笼统的容器
+ * 形态**（`dir` / `file`）。「优先」只对前者成立——后者对区分同类成员**零信息量**。
+ *
+ * `<根>` 的六个挂载点由 `VdfsNode::dir(...)` 产出，`kind` **全是 `"dir"`**
+ * （后端自测 `composite/vdfs.test.rs` 断言了此值）。曾把顺序写成 kind 优先，
+ * 六个挂载点**全部**命中 `dir` 那张图 → 主界面左栏整排退成同一个默认文件夹。
+ * 完整事故记录见 `docs/design/frontend-ui-ux-plan.md` §9。
+ *
+ * 从前还有两个中间层 `getVdfsIcon` / `getVdfsIconFor`，各自带一条「回退到
+ * `icons[kind]`」的尾巴——那条尾巴会抢先命中笼统 kind，把名字查询挡死。已删除，
+ * **别再引入**：多一个入口就多一处能写错顺序的地方。
+ *
+ * 护栏见 `registry/__tests__/vdfsIcons.spec.ts`（夹具必须用真实 `kind: 'dir'`）
+ * 与 `composables/__tests__/useVdfs.spec.ts`（六个挂载点图标须互不相同）。
+ *
+ * @param node  任何带 `kind` / `name` / 可选 `config_type` 的节点
+ * @returns     命中的图标组件；全未命中返回 `undefined`（由调用方决定兜底）
+ */
+export function iconForNode(node: {
+  kind?: string
+  name?: string
+  config_type?: unknown
+}): Component | undefined {
+  const kind = node.kind ?? ''
+  const name = node.name ?? ''
+  const ext = extOf(node as VdfsIconTarget)
+  return (
+    (ext ? icons[`${kind}:${ext}`] : undefined) ?? // 1. 项级
+    (ext ? icons[ext] : undefined) ?? //             2. 配置键（名字空间）
+    (name ? icons[name] : undefined) ?? //           3. 名单级（挂载点）
+    (kind ? icons[kind] : undefined) //              4. 类型级（笼统容器，最后兜）
+  )
 }
 
 // ============ 动作图标（DetailAction icon/id → SVG path，纯 UI 映射） ============
@@ -78,9 +111,14 @@ const ACTION_ICONS: Record<string, string> = {
   // 设为默认（星标）
   'set-default':
     '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
-  // 浏览节点内部（同名目录下的子结构）（外部链接）
+  // 浏览节点内部 —— 进入**下一级**（同名目录下的子结构）
+  //
+  // 语义是「往下钻一层」，不是「跳到站外」：原先是外部链接形（方框 + 右上箭头），
+  // 与「分享 / 在新窗口打开」同形，用户会读成把资源发出去。改为「进入」形
+  // （圆 + 右向 chevron），与左上角返回键（左向 chevron）恰好是一对逆操作，
+  // 且与列表项「点目录即钻入」的心智一致。
   'open-container':
-    '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
+    '<circle cx="12" cy="12" r="9"/><polyline points="10.5 8.5 14 12 10.5 15.5"/>',
 }
 
 /** 动作图标 SVG path（icon 名优先于动作 id；无映射返回 undefined → 文字按钮） */
@@ -210,6 +248,16 @@ registerVdfsIcon(
 )
 // 「目录树」子类别的树节点图标（provider 场景登记；树按节点 kind +
 // config_type（directory/file）做项级分发，机制本身不含文件语义）
+//
+// **kind 级 `dir` 也要登记**：树节点恒带 `config_type`（走项级键），但树**根**
+// （`<sid>/workdir`）不带——它落到 kind 级。不登记就会退成文件夹兜底，
+// 于是「工作目录」在侧栏与其他区段混作一谈。
+registerVdfsIcon(
+  'dir',
+  svgIcon(
+    '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/>'
+  )
+)
 registerVdfsIcon(
   'dir:directory',
   svgIcon(
@@ -252,5 +300,37 @@ registerVdfsIcon(
   'skill',
   svgIcon(
     '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>'
+  )
+)
+
+// ============ 会话内部区段的 kind 级图标 ============
+//
+// 进到 `<根>/session/<id>` 之后，左栏列出的是会话自己的四五个区段。它们**没有**
+// 顶层 kind 同名的段名可用（段名是 `message` / `inbox` / `MEMORY.md` /
+// `subsession` / `workdir`），因此按 kind 登记——后端 `words.rs` 把 `messages` /
+// `inbox` 声明为协议词，`workdir/mod.rs` 为另两个区段补了同样的词。
+//
+// 这四张图各自要说清「这一栏是干什么的」，不能共用文件夹兜底：
+// 用户在会话里的第一眼就是这排图标，四个一样的图标等于没有导航。
+
+/** 转写列表（`kind = messages`）：对话气泡——已经发生的一问一答 */
+registerVdfsIcon(
+  'messages',
+  svgIcon(
+    '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>'
+  )
+)
+/** 收件箱（`kind = inbox`）：信封——还没被消费的那句 */
+registerVdfsIcon(
+  'inbox',
+  svgIcon(
+    '<path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><polyline points="22 7 12 13 2 7"/>'
+  )
+)
+/** 子会话（`kind = subsession`）：分叉的对话——本会话派出去的分支 */
+registerVdfsIcon(
+  'subsession',
+  svgIcon(
+    '<circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M6 9v3a3 3 0 0 0 3 3h6"/><polyline points="15 12 18 15 15 18"/>'
   )
 )

@@ -153,10 +153,6 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
   两者共同点是：**漏了只打黄字，`gate.mjs` 仍然是绿的** ⇒ 「门禁通过」不等于收工。删代码、
   删文件、拆测试文件之后，请**逐个复跑** `scripts/*-audit.mjs` 并读它的警告；改常量时**在常量旁
   写明日期与原因**（`git log -S<常量名>` 能查到历次调整的判据）。
-- ⚠️ **本仓库的提交会被自动推送到远端**（`origin` = GitHub）：`git commit` 之后
-  `origin/main` 立即前移（reflog 记 `update by push`），推送方**不是** `scripts/commit.mjs`
-  （它明确不 push），而是本机环境侧的同步。含义是**没有「先提交错了再 amend」的余地**——
-  提交前必须真的确认内容无误，amend 只会再造一段分叉的远端历史。
 - ⚠️ `.workbuddy-ai/` 被 gitignore：**不要提交、不要删除**。仓库另有 `.workbuddy/`（旧 harness 遗留）——以 `.workbuddy-ai/` 为准。
 
 ---

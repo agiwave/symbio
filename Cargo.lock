@@ -4219,7 +4219,7 @@ dependencies = [
 
 [[package]]
 name = "symbio"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -4275,7 +4275,7 @@ dependencies = [
 
 [[package]]
 name = "symbio-tauri"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "futures",
  "serde",

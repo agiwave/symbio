@@ -13,6 +13,13 @@
 
   busy / disabled 为与 actions 等长的标记数组（按索引对齐，允许同 id
   多动作各自具备进行中/禁用状态）。
+
+  ## 「进入下一级」的位置与形态
+
+  `open-container`（进入节点同名目录）是**导航**，不是对资源的操作。它的位置
+  由 `mergeDetailActions` 保证恒在行尾，本组件再加一段左侧留白把它与前排操作
+  按钮分开；图标也换成「进入」形（见 registry/vdfsIcons 的 ACTION_ICONS）。
+  两件事都属机制，各渲染器不需要各自处理。
 -->
 <template>
   <template v-for="(a, i) in actions" :key="a.id + ':' + i">
@@ -21,7 +28,7 @@
       v-else
       type="button"
       class="ea-btn"
-      :class="[a.style, { 'is-text': !iconOf(a) }]"
+      :class="[a.style, { 'is-text': !iconOf(a), 'is-next-level': isNextLevel(a) }]"
       :title="tooltip(a, i)"
       :aria-label="tooltip(a, i)"
       :disabled="isDisabled(i)"
@@ -47,6 +54,7 @@
 
 <script setup lang="ts">
 import type { DetailAction } from '@/schemas/vdfs'
+import { DETAIL_ACTION_OPEN_CONTAINER } from '@/schemas/vdfs'
 import { getActionIcon } from '@/registry/vdfsIcons'
 
 const props = defineProps<{
@@ -59,6 +67,16 @@ const props = defineProps<{
 }>()
 
 defineEmits<{ (e: 'run', action: DetailAction): void }>()
+
+/**
+ * 「进入下一级」类动作：与「对资源做点什么」的按钮之间隔开一段距离。
+ *
+ * 位置由 `mergeDetailActions` 保证（恒在最右），这里只负责视觉上把它摘出来——
+ * 相邻 0.4rem 的间距会让「进入」读成又一个操作按钮，拉开到 0.75rem 才像导航件。
+ */
+function isNextLevel(a: DetailAction): boolean {
+  return a.id === DETAIL_ACTION_OPEN_CONTAINER
+}
 
 function iconOf(a: DetailAction): string | undefined {
   return getActionIcon(a)
@@ -116,6 +134,13 @@ function isDisabled(i: number): boolean {
 .ea-btn.danger:hover:not(:disabled) { background: var(--danger-bg); color: var(--danger-solid); }
 /* 文字回落按钮（无图标映射） */
 .ea-btn.is-text { padding: 0 0.55rem; }
+
+/*
+ * 「进入下一级」：位置已恒在行尾（机制重排），这里只把它从操作按钮里摘出来。
+ * 用 margin 而非 gap——间距只加在它前面这一侧，行尾不留多余空白。
+ */
+.ea-btn.is-next-level { margin-left: 0.75rem; }
+.ea-btn.is-next-level + .ea-btn { margin-left: 0; }
 
 .ea-divider {
   display: inline-block;

@@ -24,7 +24,7 @@
  */
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { defineComponent, nextTick, ref } from 'vue'
+import { defineComponent, nextTick, ref, type Ref } from 'vue'
 import { mount } from '@vue/test-utils'
 
 const mocks = vi.hoisted(() => ({
@@ -60,9 +60,12 @@ import { useVdfs } from '../useVdfs'
 import {
   VDFS_EXT_MESSAGE,
   type VdfsChange,
+  type VdfsItem,
   type VdfsNode,
 } from '@/schemas/vdfs'
 import { setVdfsRoot } from '@/schemas/vdfsRoot'
+// 卡片侧取图标（与左栏必须同源）——回归用例把两处结果对起来
+import { cardIconOf } from '@/registry/vdfsCards'
 // 回读理由是**词表**（独立模块，未被替身），断言按它取值——替身里不抄第二份
 import { READBACK_REASON } from '@/services/readback'
 
@@ -97,17 +100,23 @@ function listReturns(items: VdfsNode[]) {
   })
 }
 
-/** 挂一个宿主组件，让 useVdfs 有组件实例（onBeforeUnmount / watch 需要） */
-function mountHost(addr: string) {
+/**
+ * 挂一个宿主组件，让 useVdfs 有组件实例（onBeforeUnmount / watch 需要）。
+ *
+ * `addr` 传 `Ref` 是为了**换地址**的用例：换绑定地址（切侧边栏 / push 新地址页）
+ * 是同一份数据逻辑内部的迁徙，不是重新挂载，必须能原地改它才测得出来。
+ */
+function mountHost(addr: string | Ref<string>) {
   let api!: ReturnType<typeof useVdfs>
+  const addrRef = typeof addr === 'string' ? ref(addr) : addr
   const Host = defineComponent({
     setup() {
-      api = useVdfs({ addr: ref(addr) })
+      api = useVdfs({ addr: addrRef })
       return () => null
     },
   })
   const wrapper = mount(Host)
-  return { api, wrapper }
+  return { api, wrapper, addrRef }
 }
 
 /** 取出 useVdfs 交给订阅入口的变更回调（订阅入口收裸 VdfsChange，总线信封的解包在它内部） */
@@ -464,6 +473,80 @@ describe('useVdfs 新建 = 选中一张草稿节点（与「选中一项」同�
   })
 })
 
+/**
+ * 「右栏显示的必须属于当前目录」——换目录时旧选中项必须作废。
+ *
+ * 用户报的现象：切了侧边栏类别，详情页还是**上一个类别**的内容。它有两个入口，
+ * 本组钉的是**归属**这一条（另一个是控件侧「草稿类型取自刚读回来的目录自述」，
+ * 见 `VdfsWorkbench.spec` 的换目录用例）：
+ *
+ * - 换目录时若只看「旧选中项还在不在已加载的列表里」，要等列表回来才判得出，
+ *   中间那一拍右栏仍是旧的；
+ * - 且那个判据在**还有更早分页**时根本判不了（`hasMore` ⇒ 不敢判它没了），
+ *   于是旧选中项能一直挂着——正是这个漏洞让详情页"不跟着变"。
+ *
+ * 归属判据（`isVdfsUnder`）在目录变的**那一刻**就能判，不看列表。
+ */
+describe('useVdfs 换目录 ⇒ 旧选中项失效', () => {
+  const AGENT_DIR = `@vfs/agent`
+
+  /** 智能体目录里的一个条目（选中它 ⇒ 右栏是智能体详情） */
+  function agentItem(): VdfsItem {
+    return {
+      path: `${AGENT_DIR}/a1`,
+      name: 'a1',
+      title: '智能体一',
+      kind: 'agent',
+      status: 'active',
+      access: 'rw',
+      ext: 'form',
+    }
+  }
+
+  it('★ 换绑定地址 ⇒ 上一个目录的选中项立刻作废（不等列表回来）', async () => {
+    mocks.listVdfs.mockResolvedValue({
+      path: AGENT_DIR,
+      node: { ...dirNode(), path: AGENT_DIR, name: 'agent', title: '智能体' },
+      items: [agentItem()],
+    })
+    const addrRef = ref<string>(AGENT_DIR)
+    const { api, wrapper } = mountHost(addrRef)
+    await settle()
+    await api.select(agentItem())
+    expect(api.selectedNode.value?.path).toBe(`${AGENT_DIR}/a1`)
+
+    addrRef.value = MODEL_DIR
+    await nextTick()
+
+    expect(
+      api.selectedNode.value,
+      '换目录后右栏不得还挂着上一个目录的条目（用户报的「详情页不跟着变」）',
+    ).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('仍在当前目录之下 ⇒ 不清（刷新不该把用户的选中刷掉）', async () => {
+    const item: VdfsItem = {
+      path: `${MODEL_DIR}/m1`,
+      name: 'm1',
+      title: '模型一',
+      kind: 'model',
+      status: 'active',
+      access: 'rw',
+      ext: 'form',
+    }
+    mocks.listVdfs.mockResolvedValue({ path: MODEL_DIR, node: dirNode(), items: [item] })
+    const { api, wrapper } = mountHost(MODEL_DIR)
+    await settle()
+    await api.select(item)
+
+    await api.refresh()
+
+    expect(api.selectedNode.value, '条目还在当前目录 ⇒ 刷新不得清空选中').not.toBeNull()
+    wrapper.unmount()
+  })
+})
+
 describe('useVdfs 草稿上的动作（「导入整包」）：载荷编码 + 落点 + 退出草稿', () => {
   /** 挂到模型目录并进入草稿态（下面每条用例都从「一张开着的草稿」开始） */
   async function draft() {
@@ -523,6 +606,103 @@ describe('useVdfs 草稿上的动作（「导入整包」）：载荷编码 + �
     expect(ok).toBe(false)
     expect(api.detailError.value).toBe('包不合法')
     expect(api.selectedNode.value, '失败不得把用户踢出草稿页').not.toBeNull()
+    wrapper.unmount()
+  })
+})
+
+/**
+ * 左栏导航图标（回归）
+ *
+ * ## 坏掉的是什么
+ *
+ * 主界面左栏是 `useVdfs({ addr: '<根>' })` 渲染的：六个挂载点
+ * （会话 / 模型 / 智能体 / MCP / 技能 / 插件管理）整排图标。
+ *
+ * ## 怎么会整排一起坏
+ *
+ * `<根>` 的挂载点节点由后端 `composite/vdfs.rs::dir_node()` 用
+ * `VdfsNode::dir(...)` 造 —— 它的 `kind` 恒为 **`"dir"`**（`VDFS_KIND_DIR`），
+ * 且**不带 `config_type`**。挂载点的图标却是登记在**裸名字**上的
+ * （`session` / `model` / …，见 `vdfsIcons.ts` 的「主导航 kind 级图标」一节）。
+ *
+ * 于是「先查 kind、查不到就收手」的写法对这六个会**全部**落空：`kind="dir"`
+ * 查不到、`config_type` 又没有，六个不同的图标一起退成同一个默认文件夹。
+ *
+ * ## 为什么这条用例必须走 useVdfs 而不是只测 iconForNode
+ *
+ * `iconForNode` 的单测能钉住查找链本身，钉不住**调用点**：回归恰恰出在调用点
+ * 换成了另一条链（`dirIconOf(n.name)` → 只查 kind）。这里让真实节点形状流过
+ * 真实的 `navItems`，调用点一旦再改回单级查找就会红。
+ */
+describe('useVdfs 左栏导航图标（回归：挂载点 kind 恒为 dir，必须按名字兜底）', () => {
+  const ROOT_DIR = '@vfs'
+
+  /**
+   * `<根>` 的挂载点目录节点 —— **形状照抄后端 `VdfsNode::dir(...)`**：
+   * `kind = "dir"`、没有 `config_type`，身份只有 `name` / `title`。
+   *
+   * ⚠️ 这里**不能**写成 `kind: ''`：后端从来不发空 kind，用它做夹具等于测一个
+   * 不存在的形状，真回归来了照样绿。夹具失真比没有夹具更危险。
+   */
+  function mountPoint(name: string, title: string): VdfsNode {
+    return { path: `${ROOT_DIR}/${name}`, name, title, kind: 'dir', status: '', access: 'l' }
+  }
+
+  const SIX_MOUNTS: Array<[string, string]> = [
+    ['session', '会话'],
+    ['model', '模型'],
+    ['agent', '智能体'],
+    ['mcp', 'MCP'],
+    ['skill', '技能'],
+    ['plugin_manager', '插件管理'],
+  ]
+
+  it('六个主导航挂载点各得一张**非空且互不相同**的图标', async () => {
+    mocks.listVdfs.mockResolvedValue({
+      path: ROOT_DIR,
+      node: { path: ROOT_DIR, name: '', title: '系统', kind: 'dir', status: '', access: 'l' },
+      items: SIX_MOUNTS.map(([name, title]) => mountPoint(name, title)),
+    })
+
+    const { api, wrapper } = mountHost(ROOT_DIR)
+    await settle()
+
+    const items = api.navItems.value
+    expect(items, '左栏 = 绑定地址的六个子目录').toHaveLength(SIX_MOUNTS.length)
+
+    const missing = items.filter((it) => !it.icon).map((it) => it.key)
+    expect(
+      missing,
+      `这些挂载点取不到图标（会整排退成同一个默认图）：${missing.join(', ')}`,
+    ).toEqual([])
+
+    expect(
+      new Set(items.map((it) => it.icon)).size,
+      `图标重复 ⇒ 又退成了同一个默认图：[${items.map((it) => `${it.key}=${it.icon ? 'ok' : 'null'}`).join(', ')}]`,
+    ).toBe(items.length)
+
+    wrapper.unmount()
+  })
+
+  it('卡片与左栏取**同一张**图标（同一个资源不允许两处不同图）', async () => {
+    mocks.listVdfs.mockResolvedValue({
+      path: ROOT_DIR,
+      node: { path: ROOT_DIR, name: '', title: '系统', kind: 'dir', status: '', access: 'l' },
+      items: SIX_MOUNTS.map(([name, title]) => mountPoint(name, title)),
+    })
+
+    const { api, wrapper } = mountHost(ROOT_DIR)
+    await settle()
+
+    const byKey = new Map(api.navItems.value.map((it) => [it.key, it.icon]))
+    for (const [name] of SIX_MOUNTS) {
+      const node = mountPoint(name, name)
+      expect(
+        cardIconOf(node),
+        `「${name}」在卡片与左栏必须同图 —— 这正是从前两处各写一遍回退链的症状`,
+      ).toBe(byKey.get(name))
+    }
+
     wrapper.unmount()
   })
 })

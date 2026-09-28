@@ -108,10 +108,11 @@ describe('VdfsSessionDetail 动作装配', () => {
     })
   }
 
-  it('自有动作只有「浏览内部」；草稿（新建态）没有内部可浏览，故不给', () => {
+  it('自有动作只有「进入下一级」；草稿（新建态）没有内部可进入，故不给', () => {
     const w = mountSession(node({ kind: 'session', ext: 'session' }))
     const actions = w.findComponent(SessionStub).props('actions') as DetailAction[]
     expect(actions.map((a) => a.id)).toEqual(['open-container'])
+    expect(actions[0].label).toBe('进入下一级')
     expect(actions[0].payload).toEqual({ kind: 'session' })
 
     // 草稿没有地址 ⇒ 没有「同名目录」可进入

@@ -17,7 +17,24 @@
 -->
 <template>
   <div class="msg" :class="[typeClass, statusClass, isUser ? 'user' : '', nested ? 'nested' : '']">
-    <div v-if="!facets.responseText" class="node-head" :class="headClass" @click="toggle">
+    <!--
+      节点头 = 折叠开关。用 button 语义而非 div+click：键盘可达是折叠控件的
+      底线（此前是裸 div，Tab 永远走不到，只能用鼠标展开工具调用）。
+      用 role="button" 而不是换成 <button> 元素：头部里有嵌套的 <button>
+      （编辑 / 重试 / 删除），button 不能嵌套 button。
+    -->
+    <div
+      v-if="!facets.responseText"
+      class="node-head"
+      :class="headClass"
+      role="button"
+      tabindex="0"
+      :aria-expanded="effectiveOpen"
+      :aria-label="`${title}，${effectiveOpen ? '收起' : '展开'}`"
+      @click="toggle"
+      @keydown.enter.prevent="toggle"
+      @keydown.space.prevent="toggle"
+    >
       <span class="node-icon">{{ icon }}</span>
       <span class="node-title">{{ title }}</span>
       <span v-if="isHeartbeat" class="node-heartbeat" title="系统心跳任务自动发送">♥ 心跳</span>
@@ -36,11 +53,11 @@
         }}<span v-if="isRunningAction && runningDuration" class="tag-elapsed">{{ runningDuration }}</span>
       </span>
       <span v-if="showsLiveBadge" class="node-live">回复中…</span>
-      <!-- 悬停操作：用户消息可编辑；失败工具可就地重试；仅 root 级节点可删除 -->
+      <!-- 悬停 / 键盘聚焦操作：用户消息可编辑；失败工具可就地重试；仅 root 级节点可删除 -->
       <span class="node-actions" @click.stop>
-        <button v-if="isUser" class="node-act" title="编辑" @click.stop="emit('edit', node.id)">✎</button>
-        <button v-if="canRetry" class="node-act" title="重试此工具" @click.stop="emit('retry', node.id)">↻</button>
-        <button v-if="!node.parent_id" class="node-act" title="删除" @click.stop="emit('delete', node.id)">🗑</button>
+        <button v-if="isUser" class="node-act" title="编辑" :aria-label="'编辑'" @click.stop="emit('edit', node.id)">✎</button>
+        <button v-if="canRetry" class="node-act" title="重试此工具" :aria-label="'重试此工具'" @click.stop="emit('retry', node.id)">↻</button>
+        <button v-if="!node.parent_id" class="node-act" title="删除" :aria-label="'删除'" @click.stop="emit('delete', node.id)">🗑</button>
       </span>
     </div>
 
@@ -213,6 +230,16 @@ const runningDuration = computed(() => {
 .node-head:hover {
   background: rgba(99, 102, 241, 0.06);
 }
+
+/*
+ * 键盘焦点环：只在键盘导航时出现（`:focus-visible`），鼠标点击不画。
+ * 用 outline 而非 box-shadow——面板与消息气泡各有底色，outline 永远画在最上层，
+ * 不会像 box-shadow 那样被相邻元素的背景盖住。
+ */
+.node-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 /* 用户消息整体右对齐；头像置于文字右侧（主流 IM 习惯），折叠箭头在最右。
    用 order 重排而非 row-reverse，避免箭头被推到最左。 */
 .node-head.user {
@@ -304,8 +331,9 @@ const runningDuration = computed(() => {
   color: var(--color-chip-sub-fg);
 }
 
-/* ── 悬停操作（编辑 / 重试 / 删除）──
-   默认隐藏，鼠标悬停整条消息时显示在头部右侧。
+/* ── 悬停 / 聚焦操作（编辑 / 重试 / 删除）──
+   默认隐藏，鼠标悬停整条消息、或节点头获得键盘焦点时显示在头部右侧。
+   后者不可省：键盘用户 Tab 到头部却看不到操作按钮，等于这些操作对他不存在。
    用 @click.stop 阻止冒泡触发头部折叠。 */
 .node-actions {
   display: none;
@@ -314,7 +342,8 @@ const runningDuration = computed(() => {
   margin-left: 0.25rem;
   flex-shrink: 0;
 }
-.msg:hover > .node-head .node-actions {
+.msg:hover > .node-head .node-actions,
+.node-head:focus-within .node-actions {
   display: inline-flex;
 }
 .node-tag {

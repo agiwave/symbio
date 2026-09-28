@@ -280,6 +280,14 @@ fn vdfs_internal_dirs_conditional() {
         "收件箱的 kind 是稳定协议词（与会话转写消息区分开）"
     );
     assert_eq!(without[2].name, workdir::SEG_SUB_SESSIONS);
+    // 侧栏与卡片按 kind 取图标（前端 `registry/vdfsIcons` 按它查表）。
+    // 没有 kind 的两个区段此前只能退成文件夹兜底——四个一样的图标，
+    // 等于会话内部没有导航。
+    assert_eq!(
+        without[2].kind,
+        workdir::KIND_SUB_SESSIONS,
+        "子会话区段的 kind 是稳定协议词，不随段名变化"
+    );
     assert_eq!(
         without[3].name,
         crate::plugins::session::memory::SESSION_MEMORY_FILE,
@@ -295,6 +303,11 @@ fn vdfs_internal_dirs_conditional() {
     let with = internal_dirs(true, memory());
     assert_eq!(with.len(), 5);
     assert_eq!(with[4].name, workdir::SEG_WORKDIR);
+    assert_eq!(
+        with[4].kind,
+        workdir::KIND_WORKDIR,
+        "工作目录区段的 kind 与目录树节点同词（同一类资源的两种位置）"
+    );
     assert!(
         with[4].is_dir() && !with[4].access.write,
         "工作目录是只读目录（不提供新建）"

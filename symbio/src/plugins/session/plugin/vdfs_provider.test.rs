@@ -752,25 +752,27 @@ async fn new_session_ids_are_distinct() {
     assert_eq!(ids.len(), 32);
 }
 
-// ==================== 转写区段（`<根>/session/<id>/message`）的三个入口 ====================
+// ==================== 转写区段（`<根>/session/<id>/message`）的两个入口 ====================
 //
-// 消息的**改写 / 截断 / 清空**曾经各有专用路由（`chat/update_message` /
-// `chat/delete_message` / `chat/clear_messages`），2026-09-18 迁到 VDFS：
+// 消息的**改写 / 截断**曾经各有专用路由（`chat/update_message` /
+// `chat/delete_message`），2026-09-18 迁到 VDFS：
 //
 // | 操作 | 入口 | 落到 VDFS 变更上的形状 |
 // |---|---|---|
 // | 改写某条 | `write(<id>/message/<mid>)` | 该消息一条变更（**不带**载荷 ⇒ 消费端回读） |
 // | 删该条及其后 | `action(<id>/message/<mid>, "truncate")` | 被删的各一条移除帧 + 回执带被删 id |
-// | 清空历史 | `action(<id>/message, "clear")` | 每条一条移除帧 |
+//
+// 「清空历史」（`action(<id>/message, "clear")`）曾经是第三条：它与「删除会话」
+// 在用户眼里是同一件事的两种做法（都让这一屏变空），留着只会让人在两条重叠的
+// 路径之间犹豫，因此整体下线——转写区段上只剩 `truncate` 这一个集合动词。
 //
 // 消息域的实时面与历史面合流为同一条 `vdfs/watch`（ADR-025）。断言面是
-// 「投递了几条变更、每条说了什么」（`watch_changes`）：截断与清空三例各自钉住
-// 这正是当前机制要守的边界（删除**逐条**下发，消费端不必整份重读；
-// 什么都没删**一条都不发**）。
+// 「投递了几条变更、每条说了什么」（`watch_changes`）：截断一例钉住这正是当前
+// 机制要守的边界（删除**逐条**下发，消费端不必整份重读；什么都没删**一条都不发**）。
 //
-// 本段锁定这三条路径的**对外行为**，并盯住三条不该被打破的边界：
+// 本段锁定这两条路径的**对外行为**，并盯住两条不该被打破的边界：
 // `create` 意图（新增消息 = 发言，入口只有聊天协议）、`delete`（逐节点语义，
-// 表达不了这两种集合操作）、以及「什么都没删 ⇒ 不发变更」。
+// 表达不了这种集合操作）。
 
 /// 造一个带 N 条消息的会话：id 为 `m0..mN`、`seq` 单调（顺序的唯一权威锚点）。
 async fn seed_messages(p: &SessionPlugin, id: &str, texts: &[&str]) {
@@ -904,49 +906,6 @@ async fn truncate_of_missing_target_changes_nothing() {
     );
 }
 
-/// 清空：消息全没了，**会话本体保留**（id / metadata / 工作目录）。
-#[tokio::test]
-async fn clear_empties_the_transcript_but_keeps_the_session() {
-    let (_dir, p) = fixture();
-    let id = unique_id("msg-clear");
-    seed_messages(&p, &id, &["一", "二", "三"]).await;
-    let seen = watch_changes(&p);
-
-    let r = p
-        .dispatch(
-            &vctx(),
-            &message_dir_path(&id),
-            vdfs::VdfsRequest::Action {
-                action: vdfs::VDFS_ACTION_CLEAR.to_string(),
-                payload: None,
-            },
-        )
-        .await
-        .unwrap()
-        .into_action()
-        .unwrap();
-    assert!(r.ok);
-    assert!(transcript_ids(&p, &id).await.is_empty(), "列表应清空");
-
-    let changes = seen.lock().unwrap().clone();
-    assert_eq!(changes.len(), 3, "清空＝逐条删除帧");
-    assert!(
-        changes
-            .iter()
-            .all(|c| c.data.as_ref().is_some_and(|v| v["status"] == "removed")),
-        "每一条都是 removed 状态载荷（信封无 deleted）"
-    );
-
-    // 会话本体还在（清空不是删除会话）
-    let n = p
-        .dispatch(&vctx(), &id, STAT)
-        .await
-        .unwrap()
-        .into_stat()
-        .unwrap();
-    assert_eq!(n.name, id);
-}
-
 /// 动作不认识、或动作放错地址：`NotImplemented`（消费方据此**不给出入口**），
 /// 而不是「成功但什么都没做」。
 #[tokio::test]
@@ -958,8 +917,6 @@ async fn unknown_or_misplaced_action_is_not_implemented() {
     for (path, action) in [
         // 动作标识不认识
         (message_path(&id, "m0"), "explode"),
-        // 动作对、地址不对：`clear` 落在单条消息上
-        (message_path(&id, "m0"), vdfs::VDFS_ACTION_CLEAR),
         // 动作对、地址不对：`truncate` 落在列表目录上
         (message_dir_path(&id), vdfs::VDFS_ACTION_TRUNCATE),
     ] {

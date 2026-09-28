@@ -411,19 +411,16 @@ impl SessionPlugin {
             },
             vdfs::VdfsRequest::Delete { .. } => {
                 // 转写区段（列表与单条）**不可 delete**：`delete` 的全局语义是
-                // 「**这一个**节点没了」，而转写有两种**集合**删除语义，各有自己的动作：
-                // 「从这里到末尾全没了」是 [`vdfs::VDFS_ACTION_TRUNCATE`]（落在起始消息上）、
-                // 「整个列表空了」是 [`vdfs::VDFS_ACTION_CLEAR`]（落在列表目录上）。
-                // 动作不共用一个动词——理由见 `VDFS_ACTION_TRUNCATE` 的文档。
+                // 「**这一个**节点没了」，而「从这条删到末尾」是一种**区间**语义，
+                // 有它自己的动作——[`vdfs::VDFS_ACTION_TRUNCATE`]（落在起始消息上）。
+                // 动作承载这类集合操作——理由见 `VDFS_ACTION_TRUNCATE` 的文档。
                 Err(vdfs::VdfsError::Forbidden(format!(
-                    "转写区段不可 delete：清空列表请用 action(\"{clear}\")，\
-                     删除某条及其之后请用 action(\"{truncate}\")：{path}",
-                    clear = vdfs::VDFS_ACTION_CLEAR,
+                    "转写区段不可 delete：删除某条及其之后请用 action(\"{truncate}\")：{path}",
                     truncate = vdfs::VDFS_ACTION_TRUNCATE,
                 )))
             }
-            // 节点动作：转写区段上有两类动词——两种**集合操作**（逐条下发移除帧的
-            // 理由见各分支文档）与**恢复**（落在单条消息上，见下）。
+            // 节点动作：转写区段上只有两类动词——**区间删除**
+            // （`truncate`，落在单条消息上）与**恢复**（见下）。
             vdfs::VdfsRequest::Action { action, payload } => {
                 match (mid, action.as_str(), payload.as_ref()) {
                     (Some(mid), vdfs::VDFS_ACTION_TRUNCATE, _) => {
@@ -449,17 +446,6 @@ impl SessionPlugin {
                             ok: true,
                             message,
                             data: Some(data),
-                        }))
-                    }
-                    (None, vdfs::VDFS_ACTION_CLEAR, _) => {
-                        self.clear_messages(id)
-                            .await
-                            .map_err(vdfs::vdfs_from_plugin_error)?;
-                        Ok(vdfs::VdfsResponse::Action(vdfs::VdfsActionResult {
-                            action: action.clone(),
-                            ok: true,
-                            message: "已清空会话历史（会话本身与元数据保留）".to_string(),
-                            data: None,
                         }))
                     }
                     // ── 恢复（retry_turn / retry / approve / reject / supply /

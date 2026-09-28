@@ -40,7 +40,20 @@
     <!-- 候选菜单（一层；`select` 的扁平候选） -->
     <Transition name="dropdown">
       <div v-if="openField" class="opt-menu" :style="{ left: `${menuLeft}px` }" @click.stop>
-        <div v-if="!menuOptions.length" class="menu-hint">暂无可选项</div>
+        <!-- 候选为空是**可达状态**（还没配模型 / 还没建技能），不是异常。
+             只说「暂无可选项」用户会困惑于"那我该做什么"，故补一句去向。
+
+             去向只能指到**配置总入口**，不能指到某个具体目录：字段定义里没有
+             「本字段的候选来自哪个挂载点」这一信息（那是后端 provider 的知识，
+             前端硬编码字段名 → 目录的映射就会在新增资源类型时悄悄失效）。
+             指到根目录 = 把"该去哪一类里找"交还给用户，且永不失效。 -->
+        <div v-if="!menuOptions.length" class="menu-hint">
+          <p class="hint-title">暂无可选项</p>
+          <p class="hint-desc">需要先在「资源」里配置，再来这里选择</p>
+          <button class="hint-action" type="button" @click="goConfigure">
+            前往资源管理
+          </button>
+        </div>
         <template v-else>
           <button
             v-for="o in menuOptions"
@@ -82,7 +95,8 @@
  * 出站只在 `useSessionOptionBar.save`（写会话 metadata）与 `services/nativePick`
  * （原生取值原语）两处。
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
+import { routerKey } from 'vue-router'
 import OptionFormDialog from './OptionFormDialog.vue'
 import { useSessionOptionBar } from '@/composables/useSessionOptionBar'
 import { fieldIcon } from '@/registry/vdfsIcons'
@@ -116,6 +130,31 @@ const { fields, busy, draftMetadata, save } = useSessionOptionBar({
   definition: () => props.definition,
 })
 const { showToast } = useToast()
+
+/**
+ * 路由**可选**取用。
+ *
+ * `useRouter()` 在无 router 时会 `console.warn`，而选项栏是通用机制件，会被单测
+ * （无 router）与将来的嵌入式场景直接挂载。为一个「点了空候选才走到」的跳转，
+ * 不值得给整个组件加挂载前置条件——故直接按 vue-router 的注入键取，取不到就
+ * 静默降级为不跳转，其余功能照常。
+ *
+ * 键必须用 vue-router 导出的 `routerKey`（`InjectionKey<Router>`）。字符串
+ * `'$router'` 是 Vue 2 时代的写法，在 vue-router 5 下取不到值；且因为 `inject`
+ * 的泛型被显式断言，类型检查也发现不了——只有运行时才暴露。
+ */
+const router = inject(routerKey, null)
+
+/**
+ * 候选为空的去向：跳资源管理首页（VDFS 根）。
+ *
+ * 不深链到某个具体目录——字段定义里没有「候选来自哪个挂载点」这条信息，前端
+ * 硬编码「模型字段 → /vdfs/model」会随后端新增资源类型而悄悄失效（而失效形态
+ * 是"点了跳到空目录"，最难被发现）。指到根是永远成立的那一档。
+ */
+function goConfigure() {
+  if (router) void router.push('/vdfs')
+}
 
 /**
  * 供新建会话（草稿态）流程取用：选项行在无会话时累积的 metadata 补丁。
@@ -339,10 +378,38 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 }
 
 .menu-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
   padding: var(--space-4);
   text-align: center;
   color: var(--text-muted);
   font-size: var(--font-size-sm);
+}
+
+.hint-title {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.hint-desc {
+  margin: 0;
+  font-size: var(--font-size-xs);
+}
+
+.hint-action {
+  padding: 0.3rem 0.85rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.hint-action:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent);
 }
 
 .menu-item {

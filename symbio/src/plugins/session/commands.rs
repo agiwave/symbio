@@ -210,11 +210,10 @@ impl SessionPlugin {
         uuid::Uuid::new_v4().to_string()
     }
 
-    // ==================== 消息的三个变更操作（VDFS 入口的实现） ====================
+    // ==================== 消息的两个变更操作（VDFS 入口的实现） ====================
     //
-    // 这三个方法是 `write(<id>/message/<mid>)` / `action(truncate)` /
-    // `action(clear)` 的**唯一实现**。它们曾经各有一个专用路由
-    // （`chat/update_message` / `chat/delete_message` / `chat/clear_messages`），
+    // 这两个方法是 `write(<id>/message/<mid>)` / `action(truncate)` 的**唯一实现**。
+    // 它们曾经各有一个专用路由（`chat/update_message` / `chat/delete_message`），
     // 逻辑就在那三个 invoke 里——迁到 VDFS 时整体搬过来，不是重写一遍：
     // 「同一个操作两份实现」正是本轮要消灭的东西。
     //
@@ -364,29 +363,6 @@ impl SessionPlugin {
             self.transcript_apply_all(session_id, frames).await;
         }
         Ok(deleted_ids)
-    }
-
-    /// 清空会话消息（`action(<id>/message, "clear")` 的实现）。
-    ///
-    /// 与 `delete(<id>)`（删除整个会话）不同：这里只把 `session.messages` 整体替换为
-    /// 空，会话本体 / 元数据 / 工作目录 / 标题继续存在。UI 的「清空历史」走此路径。
-    pub(crate) async fn clear_messages(&self, session_id: &str) -> Result<(), PluginError> {
-        let chat_session = self.open_chat_session(session_id).await?;
-        // 先取 id 再清空（清空后读回的是空列表，顺序反了就删无可发）。
-        let ids: Vec<String> = chat_session
-            .get_messages()
-            .await?
-            .iter()
-            .map(|m| m.id.clone())
-            .collect();
-        chat_session.replace_messages(Vec::new()).await?;
-        // 变更：清空 = 逐条删除帧（理由见 truncate：清空重读会连保留的一起重传）。
-        let frames: Vec<cm::ChatMessage> = ids
-            .iter()
-            .map(|id| crate::symbio_core::llm_removed_frame(id))
-            .collect();
-        self.transcript_apply_all(session_id, frames).await;
-        Ok(())
     }
 
     // ==================== 会话本体的删除（会话本体与子会话两条 Delete 分支共用） ====================

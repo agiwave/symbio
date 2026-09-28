@@ -108,7 +108,6 @@
 | 改 metadata / 标题 | `vdfs/write(<根>/session/<id>)` |
 | 改写某条消息 | `vdfs/write(<根>/session/<id>/message/<mid>)` |
 | 删该条及其后 | `vdfs/action(…/message/<mid>, "truncate")` |
-| 清空历史 | `vdfs/action(…/message, "clear")` |
 | 列待消费的用户消息（收件箱） | `vdfs/list(<根>/session/<id>/inbox)` |
 | **发一条用户消息 / 取消一条排队中的消息** | `vdfs/write(…/inbox[/<iid>])` / `vdfs/delete(…/inbox/<iid>)` |
 | 清空待消费队列 | `vdfs/action(…/inbox, "clear")` |
@@ -349,7 +348,7 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 | `session/clear` | `vdfs/delete(<根>/session/<id>)` |
 | `session/chat/update_message` | `vdfs/write(…/message/<mid>)` |
 | `session/chat/delete_message` | `vdfs/action(…/message/<mid>, "truncate")` |
-| `session/chat/clear_messages` | `vdfs/action(…/message, "clear")` |
+| `session/chat/clear_messages` | **无替代**：清空与「删除会话」重叠，已整体下线 |
 | `session/get_messages` | 进程内 VDFS 纯接口探测（`stat("<挂载名>/<会话id>")`） |
 | `session/options/list` | 会话配置表单字段（`node.schema` / `node.attributes.metadata`） |
 | `session/stream` | `event_bus` 的 `vdfs` 频道 |

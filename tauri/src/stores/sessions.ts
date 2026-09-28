@@ -52,7 +52,6 @@ import {
   deleteSession as apiDeleteSession,
   updateSession,
   readSessionTranscript,
-  clearMessages as apiClearMessages,
   deleteMessage as apiDeleteMessage,
   updateMessage as apiUpdateMessage,
   type SessionListItem,
@@ -1169,25 +1168,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
   }
 
-  /**
-   * 清空当前会话的全部历史消息（保留会话本身 / 元数据）。
-   * - 清空前端局部状态
-   * - 调用后端 `chat/clear_messages` 持久化
-   */
-  async function clearMessages(sessionId: string): Promise<void> {
-    const mnext = { ...sessionMessages.value }
-    delete mnext[sessionId]
-    commitMessages(mnext)
-    try {
-      await apiClearMessages(sessionId, mountDirOf(sessionId))
-    } catch (e) {
-      logger.error('[sessions]', 'clearMessages 失败', e)
-      throw e
-    }
-    syncMessageCount(sessionId)
-  }
-
-  /** 同步 list 中某会话的 message_count / updated_at（删除 / 清空后调用） */
+  /** 同步 list 中某会话的 message_count / updated_at（删除后调用） */
   function syncMessageCount(sessionId: string) {
     const idx = list.value.findIndex((s) => s.id === sessionId)
     if (idx >= 0) {
@@ -1300,10 +1281,9 @@ export const useSessionsStore = defineStore('sessions', () => {
     isSessionWorking,
     isSessionFailed,
     loadMessages,
-    // 历史管理（删除 / 编辑 / 清空）
+    // 历史管理（删除 / 编辑）
     deleteMessage,
     updateMessage,
-    clearMessages,
     // 多会话实时状态 helpers
     getSessionMessages,
     getSessionStatus,

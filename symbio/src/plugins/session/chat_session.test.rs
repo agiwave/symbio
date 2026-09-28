@@ -752,10 +752,10 @@ fn assign_seq_uses_base_only_for_fresh_lists() {
     assert_eq!(msgs[1].seq, Some(870));
 }
 
-/// 空列表（`clear_messages` 传 `Vec::new()`）：无号可补，水位原样回传。
+/// 空列表（`replace_messages(Vec::new())`）：无号可补，水位原样回传。
 ///
-/// 这条锁的是「清空历史」这条路：若实现改成"无论如何先 +1"，清空就会把会话水位
-/// 推高一格，下一次追加的号与前端手里的号出现空档。
+/// 这条锁的是「把整份转写替换成空」这条路：若实现改成"无论如何先 +1"，替换就会把
+/// 会话水位推高一格，下一次追加的号与前端手里的号出现空档。
 #[test]
 fn assign_seq_on_empty_list_returns_base() {
     let mut msgs: Vec<ChatMessage> = Vec::new();

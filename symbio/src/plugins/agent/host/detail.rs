@@ -1,11 +1,17 @@
 //! Agent 详情页定义 —— 只读概览（`info` 绑定）
 //!
-//! 概览字段（版本/来源层级/安装目录/已装能力目录）+ `import` / `open-container` /
-//! `export` / `delete` 动作。「装了哪些能力」由**目录**回答（§4.1），不按类别
-//! 点数——点数会与真实的能力来源形成两份真相。
-//! 「管理内部条目」入口由页面机制
-//! 统一渲染（provider 声明 container_kinds 的条目，详情区顶部入口条），
-//! 不属于本定义。
+//! 概览分两段：**已装能力**（在前）+ **元数据**（在后）——「能力 > 元数据」：进这一页
+//! 的人先想知道「这个智能体能干什么」。「装了哪些能力」由**目录**回答（§4.1），
+//! 不按类别点数——点数会与真实的能力来源形成两份真相。
+//!
+//! 能力那段的三个字段都读 `agent_dir_info` 交出的**结构化**值
+//! （`capability_count` / `capabilities`〔类别→条目数〕/ `capability_kinds`），
+//! 不是一句在源头就拼接好的话——详情页才能按需摆放（用户要求：能后端驱动的
+//! 优先后端驱动）。
+//!
+//! 另有 `import` / `open-container` / `export` / `delete` 动作。「管理内部条目」
+//! 入口由页面机制统一渲染（provider 声明 container_kinds 的条目，详情区顶部
+//! 入口条），不属于本定义。
 //!
 //! **草稿（新建）态用的是同一份定义**：根节点自述里的 `new_type`
 //! （`VdfsNode::new_type`）把本定义作为 `schema` 下发，于是「点添加」与
@@ -36,8 +42,33 @@ pub fn agent_detail_definition() -> DetailDefinition {
         name_from: vec![],
         id_from: vec![],
         sections: vec![
+            // **能力在前、元数据在后**（「能力 > 元数据」）：进这一页的人先想知道
+            // 「这个智能体能干什么」，而不是「它从哪装的、装在哪」。
             DetailSection {
-                title: None,
+                title: Some("已装能力".into()),
+                collapsed: false,
+                fields: vec![
+                    // 一句话概括「装了几类」——`staticDisplay` 对数字直接显示
+                    DetailField {
+                        full_width: false,
+                        ..field("capability_count", "能力类别数", "static")
+                    },
+                    // 类别 → 条目数（对象值，前端 `staticDisplay` 逐项展开为 `k v`）。
+                    // 键来自目录本身、不预设：agent 目录挂了什么就列什么。
+                    DetailField {
+                        full_width: true,
+                        description: Some("每一类下列出的条目数".into()),
+                        ..field("capabilities", "各类能力条目数", "static")
+                    },
+                    // 类别名清单（数组值，前端以「、」连接）
+                    DetailField {
+                        full_width: true,
+                        ..field("capability_kinds", "已装能力类别", "static")
+                    },
+                ],
+            },
+            DetailSection {
+                title: Some("元数据".into()),
                 collapsed: false,
                 fields: vec![
                     field("version", "版本", "static"),
@@ -56,13 +87,11 @@ pub fn agent_detail_definition() -> DetailDefinition {
                         ],
                         ..field("scope", "来源层级", "static")
                     },
-                    field("dir", "安装目录", "static"),
+                    DetailField {
+                        full_width: true,
+                        ..field("dir", "安装目录", "static")
+                    },
                 ],
-            },
-            DetailSection {
-                title: Some("已装能力".into()),
-                collapsed: false,
-                fields: vec![field("capabilities", "能力目录", "static")],
             },
         ],
         presets: None,

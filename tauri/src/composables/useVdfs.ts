@@ -59,6 +59,7 @@ import {
   actionFileOf,
   isVdfsDir,
   isVdfsDraft,
+  isVdfsUnder,
   parseVdfsValidation,
   vdfsAccessOf,
   vdfsJoin,
@@ -71,12 +72,12 @@ import {
   type VdfsNode,
 } from '@/schemas/vdfs'
 import {
-  dirIconOf,
   isTextualRenderer,
   rendererReadsNodeText,
   resolveVdfsRenderer,
   type VdfsRenderer,
 } from '@/registry/vdfsTypes'
+import { iconForNode } from '@/registry/vdfsIcons'
 import { useToast } from '@/composables/useToast'
 import { useGenerationGuard } from '@/composables/useGenerationGuard'
 import { logger } from '@/utils/logger'
@@ -115,14 +116,21 @@ export function useVdfs(opts: UseVdfsOptions) {
     selectedName.value ? vdfsJoin(addr.value, selectedName.value) : addr.value
   )
 
-  /** 左栏导航 = `addr` 的子目录（图标为纯 UI 映射），高亮 = 选中项 */
+  /**
+   * 左栏导航 = `addr` 的子目录（图标为纯 UI 映射），高亮 = 选中项。
+   *
+   * 图标查找**必须与列表卡片同一函数**（[`iconForNode`]，回退链与其顺序规则见该
+   * 函数文档）。这一行曾引发重大回归：`<根>` 的挂载点 `kind` 全是 `"dir"`，
+   * 按 kind 优先会让六个挂载点整排退成同一张默认图——完整记录见
+   * `docs/design/frontend-ui-ux-plan.md` §9。护栏见本文件同目录的 spec。
+   */
   const navItems = computed<WorkbenchRailItem[]>(() =>
     navDirs.value
       .filter(isVdfsDir)
       .map((n) => ({
         key: n.name,
         label: n.title || n.name,
-        icon: dirIconOf(n.name) ?? null,
+        icon: iconForNode(n) ?? null,
         description: n.description,
         active: n.name === selectedName.value,
       }))
@@ -248,6 +256,78 @@ export function useVdfs(opts: UseVdfsOptions) {
     selectedMemo.set(addr.value, name)
     clearSelection()
     await refresh()
+  }
+
+  // ==================== 换目录 ⇒ 旧选中项失效 ====================
+  //
+  // 右栏显示的必须是**当前目录**里的东西。目录一换（切左栏类别 / 换绑定地址），
+  // 上一个目录的选中项立刻作废——否则右栏会一直挂着别的目录的详情（用户报的
+  // 「切了侧边栏，详情页还是上一个类别的内容」）。
+  //
+  // 判据是**归属**（选中项的地址是否落在当前目录之下），不是「它还在不在已加载的
+  // 列表里」：后者要等列表回来才判得出（中间那一拍右栏仍是旧的），且在还有更早
+  // 分页时根本判不了——那正是旧选中项能一直挂着的漏洞。
+  //
+  // 草稿不受影响：它还没有地址（`isVdfsDraft`），归属对它无意义。
+  watch(
+    () => cwd.value,
+    (dir) => {
+      const sel = selectedNode.value
+      if (!sel || isVdfsDraft(sel)) return
+      if (isVdfsUnder(sel.path, dir)) return
+      clearSelection()
+    },
+  )
+
+  // ==================== 列表筛选 ====================
+  //
+  // 只筛**已加载**的条目，不发请求。
+  //
+  // 为什么不接 `vdfs/search`：那是**全库**搜索（后端 ripgrep 式内容检索），
+  // 与「在当前目录这一页里找那一项」是两件事。前者结果不保证在当前目录里，
+  // 混进中栏会让「点目录即钻入」的空间心智立刻失效。全库搜索属于命令面板
+  // （`vdfs/search` 另有用武之地），不是列表筛选。
+  //
+  // 于是与分页**不冲突**：筛选是纯投影，`items` 与游标一律不动。代价是
+  // 「只筛已加载的那些」（未加载的更早页里可能有命中）——这一点必须对用户
+  // 说出来，否则「搜不到」会被读成「不存在」。故 `filterTruncated` 单独暴露。
+
+  /** 筛选词（大小写不敏感的**子串**匹配：中文没有词边界，分词反而搜不到） */
+  const filter = ref('')
+
+  /** 归一化筛选词（去首尾空白；空 = 不过滤） */
+  const activeFilter = computed(() => filter.value.trim().toLowerCase())
+
+  /** 过滤后的列表（`items` 的纯投影，不改底层数据） */
+  const filteredItems = computed<VdfsItem[]>(() => {
+    const q = activeFilter.value
+    if (!q) return items.value
+    return items.value.filter((n) => nodeMatchesFilter(n, q))
+  })
+
+  /** 筛选是否命中为 0（区分「目录为空」与「筛掉了」——两者提示不同） */
+  const filterEmpty = computed(
+    () => Boolean(activeFilter.value) && items.value.length > 0 && filteredItems.value.length === 0
+  )
+
+  /**
+   * 「结果可能不全」：正在筛选 + 还有更早的页没加载。
+   *
+   * 此时列表下方的「加载更早」仍然是唯一能把命中捞出来的手段，故控件要
+   * 在筛选态下保留它（而不是像普通空态那样只说「没有匹配项」）。
+   */
+  const filterTruncated = computed(() => Boolean(activeFilter.value) && hasMore.value)
+
+  /** 条目是否命中筛选词（标题 / 名称 / 描述 + 标签，任一子串命中即算） */
+  function nodeMatchesFilter(n: VdfsItem, q: string): boolean {
+    if (n.name.toLowerCase().includes(q)) return true
+    if (n.title?.toLowerCase().includes(q)) return true
+    if (n.description?.toLowerCase().includes(q)) return true
+    // `meta_tags` 走 VdfsNode 的索引签名（类型是 unknown），故先做形状判定再取值——
+    // 后端脏数据（非数组 / 数组里混非字符串）必须被静默忽略，不能让它把整次筛选炸掉。
+    const tags = n.meta_tags
+    if (!Array.isArray(tags)) return false
+    return tags.some((t) => typeof t === 'string' && t.toLowerCase().includes(q))
   }
 
   // ==================== 选中项与详情 ====================
@@ -821,6 +901,12 @@ export function useVdfs(opts: UseVdfsOptions) {
     loadMore,
     reload,
     select,
+    // 列表筛选（纯投影，不与分页冲突）
+    filter,
+    activeFilter,
+    filteredItems,
+    filterEmpty,
+    filterTruncated,
     // 选中 / 详情
     selectedNode,
     selectedId,

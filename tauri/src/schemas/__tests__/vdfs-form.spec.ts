@@ -6,11 +6,13 @@
  *
  * 这两段此前在 DetailForm / VdfsFormDetail / 各渲染器里**各算了一遍**（G1），
  * 同一份去重规则散在三处，改一处漏两处的概率不为零。现在是唯一实现，故直接
- * 对它下断言——规则只有两条，且都是「错了不报错、只多画或少画一个按钮」的类型：
+ * 对它下断言——规则只有三条，且都是「错了不报错、只多画或少画一个按钮」的类型：
  *
  * 1. 两段之间插一个 divider（视觉分组；缺了会把两段读成同一组）；
  * 2. **同 id 时渲染器声明的那一份胜出** —— 否则「详情定义自带 delete」与
- *    「机制兜底的 delete」会渲染成两个删除按钮（重复入口，点哪个都说不清）。
+ *    「机制兜底的 delete」会渲染成两个删除按钮（重复入口，点哪个都说不清）；
+ * 3. **「进入下一级」恒在行尾** —— 它是导航不是操作，位置固定才形成肌肉记忆
+ *    （见下方第二个 describe）。
  *
  * 另有三条排序/对齐约定：自有动作在前、机制动作用单个 id 表达忙态、返回的三个
  * 数组等长（`VdfsActions` 的入参形状）。
@@ -89,6 +91,52 @@ describe('mergeDetailActions 装配与去重', () => {
 
     expect(r.actions.map((a) => a.id)).toEqual(['save'])
     expect(r.actions.some((a) => a.id === 'divider')).toBe(false)
+  })
+})
+
+/**
+ * 「进入下一级」（`open-container`）的**位置**收口。
+ *
+ * 它是导航而非对资源的操作，故恒在动作区最右端。这条规则必须由机制保证而不是
+ * 各渲染器自己排：该动作可能来自渲染器自有动作，也可能来自后端详情定义声明的
+ * 动作——后端加的行为也要排得到位置。错了不报错，只表现为「入口在中间，
+ * 用户按错」（它此前与「分享」同形同位置，正是这么被读错的）。
+ */
+describe('mergeDetailActions：进入下一级恒在最右', () => {
+  const open: DetailAction = { id: 'open-container', label: '进入下一级', style: 'primary' }
+  const openFromDef: DetailAction = { id: 'open-container', label: '进入下一级', style: 'secondary' }
+
+  it('自有动作段里排在最前 → 被挪到行尾，忙/禁用标记跟着一起搬', () => {
+    // 真实形态：会话详情 = [进入下一级] + 机制注入的删除
+    const r = mergeDetailActions([open], [del('删除')], [true], [true])
+
+    expect(r.actions.map((a) => a.id)).toEqual(['divider', 'delete', 'open-container'])
+    // 关键：标记跟着动作走，不能只搬动作（否则忙态错位到别人头上）
+    const busyById = Object.fromEntries(r.actions.map((a, i) => [a.id, r.busy[i]]))
+    const disabledById = Object.fromEntries(r.actions.map((a, i) => [a.id, r.disabled[i]]))
+    expect(busyById['open-container']).toBe(true)
+    expect(busyById.delete).toBe(false)
+    expect(disabledById['open-container']).toBe(true)
+    expect(r.busy).toHaveLength(r.actions.length)
+  })
+
+  it('夹在自有动作中间（如定义声明的位置）也照样挪到行尾', () => {
+    const r = mergeDetailActions([save, openFromDef, test], [])
+
+    expect(r.actions.map((a) => a.id)).toEqual(['save', 'test', 'open-container'])
+  })
+
+  it('已在行尾时不重排（避免无意义的数组重建）', () => {
+    const own = [save, open]
+    const r = mergeDetailActions(own, [])
+
+    expect(r.actions.map((a) => a.id)).toEqual(['save', 'open-container'])
+  })
+
+  it('没有该动作时其余顺序一字不动', () => {
+    const r = mergeDetailActions([save, test], [rename])
+
+    expect(r.actions.map((a) => a.id)).toEqual(['save', 'test', 'divider', 'rename'])
   })
 })
 

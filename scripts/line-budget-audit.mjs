@@ -48,7 +48,16 @@ export const LINE_BUDGET_BASELINES = {
   // 更早的 `cargo fmt` 之前记录的，fmt 在 `session` 树内累积了净增。本次用精确实测
   // 而非推算重设（`context/window.rs` 三处硬编码 `24` 提为 `ENTRY_NAME_TOKEN_CAP`，
   // 该文件净 -4 行：16815（未改）→ 16811（改后））。
-  "symbio/src/plugins/agent": { maxLines: 3667, exts: [".rs"] },
+  // 2026-09-27：`clear_messages` 整体下线（与「删除会话」功能重叠），session 基线
+  // 收紧 16811 → 16790（净 -21）。
+  // 2026-09-27：智能体详情重设计（方案 A，后端驱动）——`agent/host/vdfs.rs` 的
+  // `agent_dir_info` 由「能力拼成一个字符串」改为**结构化下发**（`capabilities`
+  // 计数对象 + `capability_kinds` 清单 + `capability_count`），新增
+  // `capability_counts()`；`agent/host/detail.rs` 把「已装能力」段提到元数据之前
+  // 并按新字段重写；`vdfs.test.rs` 加夹具与 3 条用例。基线 3667 → 3736（+69）。
+  // 前端零改动：`DetailForm.staticDisplay` 本就支持数组与对象（数组 `join('、')`、
+  // 对象逐项 `k v`），故结构化值直接可渲染。
+  "symbio/src/plugins/agent": { maxLines: 3736, exts: [".rs"] },
   "symbio/src/plugins/composite": { maxLines: 1330, exts: [".rs"] },
   "symbio/src/plugins/event_bus": { maxLines: 164, exts: [".rs"] },
   "symbio/src/plugins/gateway": { maxLines: 1190, exts: [".rs"] },
@@ -58,7 +67,7 @@ export const LINE_BUDGET_BASELINES = {
   "symbio/src/plugins/mcp": { maxLines: 2897, exts: [".rs"] },
   "symbio/src/plugins/model": { maxLines: 6212, exts: [".rs"] },
   "symbio/src/plugins/plugin_manager": { maxLines: 666, exts: [".rs"] },
-  "symbio/src/plugins/session": { maxLines: 16811, exts: [".rs"] },
+  "symbio/src/plugins/session": { maxLines: 16790, exts: [".rs"] },
   "symbio/src/plugins/skill": { maxLines: 1470, exts: [".rs"] },
   "symbio/src/plugins/telegram": { maxLines: 887, exts: [".rs"] },
   "symbio/src/plugins/vdfs": { maxLines: 3012, exts: [".rs"] },
@@ -72,7 +81,56 @@ export const LINE_BUDGET_BASELINES = {
   // ── 宿主与工具层 ──
   "cli/src": { maxLines: 1573, exts: [".rs"] },
   "tauri/src-tauri/src": { maxLines: 449, exts: [".rs"] },
-  "tauri/src": { maxLines: 20269, exts: [".ts", ".vue"] },
+  // 2026-09-27：前端 UI/UX 优化 +662 行（20269 → 20931）。
+  // 新增三个生产文件（骨架屏两件 + 导航记忆 store）229 行；其余为既有件的机制扩展：
+  // `VdfsActions.vue`（进入下一级动作右置与视觉分隔）、`VdfsWorkbench.vue`（列表筛选 UI）、
+  // `useVdfs.ts`（筛选投影）、`vdfs-form.ts`（`mergeDetailActions` 排序规则）、
+  // `NodeShell.vue`（节点头键盘可达 + aria）。测试代码不计入本口径
+  // （`*.spec.ts` 与内联测试模块另行统计，本轮 +19 个用例）。
+  // 2026-09-27（同日第二笔）：+134 行（20931 → 21065）。三件事：
+  // ① `VdfsWorkbench.vue` 自动开新会话草稿（三条边界 + 注释是本笔的主要行数）；
+  // ② `router/index.ts` 冷启动落点改为「无记忆 ⇒ 会话目录」，异步解析必须走
+  //    `beforeEach`（vue-router 的 redirect 不接受 Promise），故多一层守卫与注释；
+  // ③ `Workbench.vue` 详情区毛玻璃（`@supports` 回退）+ `tokens.css` 玻璃令牌两态。
+  // 另 `VdfsWorkbench.vue` 的「新建」按钮由透明 icon-btn 改为填充主题色。
+  // 2026-09-27（同日第三笔）：+3 行（21065 → 21068）。图标查找收敛为唯一实现
+  // `registry/vdfsIcons.ts::iconForNode`，并**删除**两个中间层
+  // （`getVdfsIcon` / `getVdfsIconFor` / `vdfsTypes.ts::dirIconOf`）——净增几乎为零，
+  // 剩下的 +3 是新增的「名单级」兜底步骤（`<根>` 挂载点 `kind` 恒为 `dir`，
+  // 没有这一步它们会整排退成同一张默认图）+ 该步骤的注释。详见
+  // `docs/design/frontend-ui-ux-plan.md` §9。
+  // 2026-09-27（同日第四笔）：+103 行（21068 → 21171），两件事：
+  //   ① **冷启动守卫在打包环境下不执行**（`router/index.ts`）：判据由
+  //      `to.path !== '/'` 改为路由名（打包后 webview 的 `pathname` 不是 `/`，
+  //      旧判据每次提前 return），并加兜底路由 `:unknown(.*)*` → `/`（无它时
+  //      那种地址渲染成空白页）；`coldStart.spec` 加 3 条把「首段不是 `/`」
+  //      搬进单测。⚠️ 这两处**不随「回上次地址」下线而撤销**——它们修的是
+  //      「守卫会不会执行」与「陌生地址会不会白屏」，是落点本身的前提。
+  //   ② **列表为空时收起中栏**（`common/Workbench.vue` + `vdfs/VdfsWorkbench.vue`）：
+  //      容器加 `hasDetail` / `hasDraft` / `canCreate` 三个 prop 与 `showList`
+  //      判据，控件侧新增 `hasDetail` / `isDraftSelected` 两个 computed 往上传。
+  //      注释已按「够用即可」压缩过一轮——别为了压数字把判据的理由删掉，那几条
+  //      正是这份代码里最容易被人"优化"回去的部分。
+  // 2026-09-28：收紧 21171 → **21097**（净 −74）。「回上次地址」整条下线：
+  //      删 `stores/nav.ts`（-73，与其单测同批删除）、`MainLayout.vue` 的
+  //      `nav.remember` watch 与随之不再使用的 `useRoute`（-7）、
+  //      `router/index.ts` 的记忆分支（-9），另 `coldStartPath` 与守卫的注释
+  //      改写为「为什么不再回上次地址」（+15）——**这 15 行不能省**：它是本机制
+  //      唯一留下的「为什么被删掉」的记录，省了下一轮就会有人把它加回来。
+  // 2026-09-28（同日第二笔）：收紧 21097 → **21096**（净 −1）。收起中栏的上游
+  //      「进入可新建目录 ⇒ 自动备一张草稿」改成**类型无关**（去掉
+  //      `creatableType.ext === 'session'` 这个写死的判断）：代码 −1 行、注释
+  //      原地改写为「为什么不得出现类型名」。注释**没有变长**——那句「为什么」
+  //      已经写在本文件的 spec 与 `gate.d/_shared.mjs` 基线里，此处不再复述。
+  // 2026-09-28（同日第三笔）：+41 行（21096 → 21137）。修「切侧边栏 ⇒ 详情页不跟着
+  //      变」，加了**两条与类型无关的机制**，注释占其中大半（它们是这类"写了却看不
+  //      出为什么"的代码里唯一能防回退的部分）：
+  //      ① `schemas/vdfs.ts::isVdfsUnder`（+17）：「选中项是否还属于当前目录」的
+  //         归属判据——换目录时按它立刻作废旧选中项（判「还在不在列表里」要等列表
+  //         回来，且有更早分页时判不了，那正是旧选中项能一直挂着的漏洞）。
+  //      ② `useVdfs.ts` 的换目录清理 watch（+21）。
+  //      ③ 控件侧自动开草稿的监听源由 `cwd` 改为 `cwdNode`（+3 注释）。
+  "tauri/src": { maxLines: 21137, exts: [".ts", ".vue"] },
 };
 
 export function runAudit({ root = repoRoot, baselines = LINE_BUDGET_BASELINES, strict = STRICT } = {}) {

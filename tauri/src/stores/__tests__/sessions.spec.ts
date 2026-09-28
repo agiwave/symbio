@@ -65,7 +65,6 @@ vi.mock('@/services/session', () => ({
   deleteSession: vi.fn(),
   updateSession: vi.fn(),
   readSessionTranscript: sessionApi.readSessionTranscript,
-  clearMessages: vi.fn(),
   deleteMessage: sessionApi.deleteMessage,
   updateMessage: vi.fn(),
 }))

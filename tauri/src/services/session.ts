@@ -39,12 +39,10 @@ import { deleteVdfs, listVdfs, readVdfs, runVdfsAction, writeVdfs } from './vdfs
 import { READBACK_REASON } from './readback'
 import { ensureSessionMountDir, ensureSessionScheme } from './vdfsScheme'
 import {
-  VDFS_ACTION_CLEAR,
   VDFS_ACTION_TRUNCATE,
   VDFS_EXT_SESSION,
   vdfsExtOf,
   vdfsMessageAddr,
-  vdfsMessagesAddr,
   vdfsSessionAddr,
 } from '@/schemas/vdfs'
 import { ChatMessage as SessionMessage } from '../schemas/chat_message'
@@ -166,30 +164,11 @@ export interface DeleteMessageResult {
 }
 
 /**
- * 清空会话历史消息（保留会话本身 / 工作目录 / 标题等元数据）。
- *
- * **走 VDFS**：`action(<根>/session/<id>/message, "clear")`。
- *
- * 为什么是 `action` 而不是 `delete`：`delete` 的语义是**逐节点**的「这一个没了」，
- * 表达不了截断那类集合操作；而转写区段的删除因此统一走动作——**同一个区段的删除
- * 只有一种入口形态**，使用者不必记「哪种删除走哪个入口」。
- *
- * 实时通知**逐条下发**：每条被删的消息各发一条 `deleted` 变更（ADR-025 后消息的
- * 实时面就在 VDFS 变更上），消费端据此就地移除，不必整份重读；回执里的
- * `deleted_ids` 才是权威列表。见后端 `symbio_core::vdfs` 的
- * `VDFS_ACTION_TRUNCATE` 文档。
- */
-export async function clearMessages(sessionId: string, mountDir?: string): Promise<void> {
-  const scheme = await ensureSessionScheme(mountDir)
-  await runVdfsAction(vdfsMessagesAddr(scheme, sessionId), VDFS_ACTION_CLEAR)
-}
-
-/**
  * 删除单条会话消息（连同其之后的所有消息一并删除）。
  *
  * **走 VDFS**：`action(<根>/session/<id>/message/<mid>, "truncate")`。语义是
  * 「从这条到列表末尾全没了」，不是「删这一个」——VDFS 的变更词汇里**没有**对应
- * 取值，这类操作一条变更都不发（理由见 `clearMessages`）。
+ * 取值，这类操作一条变更都不发（理由见 `DeleteMessageResult` 的说明）。
  *
  * 目标消息不存在时后端返回空列表且**不发变更**——「什么都没删」不该在 VDFS 上
  * 留下痕迹。回执照常返回，调用方的幂等对齐因此是空操作。

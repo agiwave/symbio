@@ -11,7 +11,7 @@
   动作来自两个来源，职责不同，合并规则只有一份实现
   （`schemas/vdfs-form.mergeDetailActions`）：
 
-  - `actions` —— **渲染器自有**动作（save / reset / test / open-container…），
+  - `actions` —— **渲染器自有**动作（save / reset / test / 进入下一级…），
     随该资源的形态而变，由渲染器声明；
   - `mechanism-actions` —— **机制级**默认动作（重命名 / 删除），由页面单点算好
     （`useVdfs.mechanismActions`），对所有已落盘可写节点一致。
@@ -30,6 +30,11 @@
   默认形态：shell 自带内边距并随内容滚动（文本 / 只读 / 消息详情）。
   `panel` 形态：无内边距、不滚动、标题行自带下边框与背景，滚动交给内容区
   （定义驱动表单，它的表体自己滚）。
+
+  ## 「进入下一级」的位置
+
+  合并结果里 `open-container` 恒在动作区最右端（`mergeDetailActions` 重排），
+  shell 不必也不该再排一次。
 -->
 <template>
   <div class="detail-shell" :class="{ 'is-panel': panel }">

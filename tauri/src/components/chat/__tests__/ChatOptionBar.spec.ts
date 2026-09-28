@@ -324,3 +324,58 @@ describe('ChatOptionBar：定义缺席', () => {
     expect(w.find('.chat-option-bar').exists()).toBe(true)
   })
 })
+
+describe('ChatOptionBar：空候选的去向', () => {
+  /** 一份 `select` 候选为空、且**当前没有选中值**的定义（未设置无缺省 ⇒ 文本走 fallback） */
+  function noOptionsDefinition(): DetailDefinition {
+    return {
+      binding: 'option',
+      sections: [
+        {
+          collapsed: false,
+          fields: [{ key: 'model', label: '模型', widget: 'select', options: [] }],
+        },
+      ],
+    }
+  }
+
+  it('空候选 ⇒ 给出可执行去向，而不是只报「暂无可选项」', async () => {
+    const w = mount(ChatOptionBar, { props: { definition: noOptionsDefinition() } })
+    await w.find('button.option-btn').trigger('click')
+
+    expect(w.find('.menu-hint').exists()).toBe(true)
+    expect(w.find('.hint-action').exists()).toBe(true)
+    // 只说「暂无可选项」用户不知道下一步做什么，故必须带一个动作按钮
+    expect(w.find('.hint-action').text()).toBeTruthy()
+  })
+
+  it('无 router 环境下点击去向按钮不抛错（降级为不跳转）', async () => {
+    const w = mount(ChatOptionBar, { props: { definition: noOptionsDefinition() } })
+    await w.find('button.option-btn').trigger('click')
+
+    // 选项栏是通用机制件，会被无 router 的场景直接挂载；取不到 router 必须静默降级
+    await expect(w.find('.hint-action').trigger('click')).resolves.toBeUndefined()
+  })
+
+  it('有 router 时点击去向按钮真的跳转（注入键必须是 vue-router 的 routerKey）', async () => {
+    // 用真实 router 装配：字符串键 `'$router'`（Vue 2 写法）在这里会取到 null，
+    // 表现为「点了没反应」且类型检查发现不了——本用例专门钉住这一点。
+    const { createRouter, createMemoryHistory } = await import('vue-router')
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/vdfs', component: { template: '<div/>' } }],
+    })
+    await router.push('/')
+    await router.isReady()
+
+    const w = mount(ChatOptionBar, {
+      props: { definition: noOptionsDefinition() },
+      global: { plugins: [router] },
+    })
+    await w.find('button.option-btn').trigger('click')
+    await w.find('.hint-action').trigger('click')
+    await flushPromises()
+
+    expect(router.currentRoute.value.path).toBe('/vdfs')
+  })
+})

@@ -19,6 +19,8 @@
 
   VDFS 的三栏页面 = VdfsWorkbench 控件（components/vdfs）+ useVdfs 数据逻辑
   （绑定数据地址，自取左栏/中栏/详情）。规范：docs/design/vdfs.md。
+
+  **列表为空且右栏正铺着新建详情**时中栏整栏收起（判据见 `showList`）。
 -->
 <template>
   <div class="workbench">
@@ -60,7 +62,11 @@
     </nav>
 
     <!-- 第二栏：列表 -->
-    <aside class="workbench-list" :style="{ width: `${listWidth}px` }">
+    <!-- 列表**为空且非加载/非空态**时整栏收起：此时中栏能给的只有空白，
+         留着它只是把详情挤窄。判据取"真的没有可选项且有详情可看"——见
+         `showList`。空态（`empty` 插槽）与加载骨架**不收起**：前者是内容
+         （「此目录为空 / 没有匹配」必须说出来），后者是过渡，收起都会闪。 -->
+    <aside v-if="showList" class="workbench-list" :style="{ width: `${listWidth}px` }">
       <header class="panel-header">
         <h3 class="panel-title">{{ title }}</h3>
         <div class="header-actions">
@@ -73,7 +79,11 @@
       <div v-if="!hasListContent && $slots.empty" class="empty-state">
         <slot name="empty" />
       </div>
-      <div v-else-if="!hasListContent && loading" class="loading-state">加载中…</div>
+      <!-- 加载态用骨架卡而非纯文字：形状与列表内容一致，数据到达是"填充"
+           而不是"重排"（纯文字态与内容态高度不等，一到就跳） -->
+      <div v-else-if="!hasListContent && loading" class="list-skeleton" aria-busy="true">
+        <VdfsCardSkeleton v-for="i in SKELETON_COUNT" :key="i" :title-width="skeletonTitleWidth(i)" />
+      </div>
     </aside>
 
     <!-- 第三栏：详情 -->
@@ -85,6 +95,19 @@
 
 <script setup lang="ts">
 import type { Component } from 'vue'
+import { computed } from 'vue'
+import VdfsCardSkeleton from './VdfsCardSkeleton.vue'
+
+/**
+ * 骨架卡的数量与宽度变化。
+ *
+ * 5 张足以铺满中栏一屏（`min-width` 13.75rem 下一张卡约 3.5rem 高），
+ * 再多只是徒增动画开销。宽度按固定序列错开——等宽的骨架排在一起像表格，
+ * 错开才读得出「这是一列内容」。
+ */
+const SKELETON_COUNT = 5
+const SKELETON_WIDTHS = ['58%', '72%', '46%', '66%', '54%']
+const skeletonTitleWidth = (i: number): string => SKELETON_WIDTHS[(i - 1) % SKELETON_WIDTHS.length]
 
 /**
  * 侧栏导航项（宿主与容器之间的纯 UI 契约）。
@@ -105,7 +128,7 @@ export interface WorkbenchRailItem {
   active?: boolean
 }
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     /** 侧边栏类别项（后端下发的 VDFS 挂载点清单；不传 = 本页无侧边栏） */
     railItems?: WorkbenchRailItem[]
@@ -113,10 +136,29 @@ withDefaults(
     title?: string
     /** 中栏宽度（px） */
     listWidth?: number
-    /** 中栏列表是否已有内容（控制空/加载态是否渲染） */
+    /**
+     * 中栏列表是否已有内容（控制空态/加载骨架的显隐，并作为「有无可选项」的事实）。
+     */
     hasListContent?: boolean
     /** 中栏加载中 */
     loading?: boolean
+    /**
+     * 右栏是否有可看内容（已选中一项 / 详情加载中）。
+     *
+     * 缺省 `false`（不收栏）——激进的那一支必须由宿主显式选择：只有宿主知道
+     * 右栏渲染的是真内容还是「← 选择一个资源」的占位符。
+     */
+    hasDetail?: boolean
+    /**
+     * 选中的是否为**草稿（新建态）**。
+     *
+     * 与 `canCreate` 一起构成收栏判据：草稿已占右栏时，中栏那句「暂无子目录／
+     * 点击右上角新建」是重复信息，收起它换来更宽的详情。非草稿（用户在看已有
+     * 条目）或不可新建时保留中栏——那两处的空态解释必须留着。
+     */
+    hasDraft?: boolean
+    /** 当前目录可新建（空态文案与收栏判据共用） */
+    canCreate?: boolean
   }>(),
   {
     railItems: undefined,
@@ -124,7 +166,32 @@ withDefaults(
     listWidth: 260,
     hasListContent: false,
     loading: false,
+    hasDetail: false,
+    hasDraft: false,
+    canCreate: false,
   }
+)
+
+/**
+ * 中栏是否该显示。**只有一种情形会收起**：列表没有可选项，且右栏正显示一张
+ * **新建详情**（`hasDraft && canCreate`）——空目录里能做的只有新建，而新建详情
+ * 已经铺在右栏，中栏那句「暂无子目录／点击右上角新建」只是把详情挤窄。
+ *
+ * 其余一切情形都保留中栏：有可选项（中栏是主导航）、加载中（收起会把"正在取"
+ * 变成"什么都没有"，数据到了整栏弹回）、右栏空（收起 = 整屏空白）、以及
+ * **非草稿的空目录**（用户在看已有条目或在浏览目录，那句「此目录为空」
+ * 「该目录由系统管理」是他此刻唯一的解释）。
+ *
+ * ⚠️ 别改回「宿主没提供 `empty` 插槽才收起」：`VdfsWorkbench` **无条件**声明该
+ * 插槽（空态文案是它的正常内容），那条判据在本项目**恒为假**、收起永不发生。
+ * 该不该让位取决于右栏是不是那张新建详情，与宿主声明了哪些插槽无关。
+ */
+const showList = computed(
+  () =>
+    props.hasListContent ||
+    props.loading ||
+    !props.hasDetail ||
+    !(props.hasDraft && props.canCreate)
 )
 
 defineEmits<{
@@ -222,16 +289,25 @@ defineEmits<{
   opacity: 0.7;
 }
 
-.loading-state {
+/* 加载骨架：与 .vdfs-list 同内边距，卡片横坐标与真实列表一致 */
+.list-skeleton {
   flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-  font-size: 0.8rem;
+  overflow: hidden;
+  padding: 0.25rem 0;
 }
 
 /* ============== 第三栏：详情 ============== */
+/* 详情区用**毛玻璃**而非纯色面板：它是三栏里最"深"的一层，背后是页面底与
+   已经被切换掉的列表内容，透出一点背景能让层级关系自明（而不是三块等重的白板）。
+
+   ⚠️ 两个必要条件，缺一毛玻璃就等于白设：
+   1. **父层必须有非不透明背景**（`.workbench` 的 `--surface-page` 已满足）；
+      若整条链路都是不透明色，`backdrop-filter` 无从"模糊"任何东西。
+   2. **`background` 必须带 alpha**（`--surface-glass` 是 rgba）——不透明底会把
+      模糊结果整个盖住，看起来和纯色一模一样，这类"写了没用"最难发现。
+
+   不支持 `backdrop-filter` 的环境退回不透明面板色（`@supports` 兜底）：
+   那种环境上半透明只会显得脏。 */
 .workbench-detail {
   flex: 1 1 auto;
   min-width: 0;
@@ -239,5 +315,13 @@ defineEmits<{
   flex-direction: column;
   overflow: hidden;
   background: var(--surface-panel);
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .workbench-detail {
+    background: var(--surface-glass);
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    backdrop-filter: blur(var(--glass-blur));
+  }
 }
 </style>

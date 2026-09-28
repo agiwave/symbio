@@ -30,8 +30,7 @@
 import type { Component } from 'vue'
 import { isVdfsDir, type VdfsNode } from '@/schemas/vdfs'
 import { relativeTime } from '@/utils/time'
-import { dirIconOf } from '@/registry/vdfsTypes'
-import { getVdfsIcon, getVdfsIconFor } from '@/registry/vdfsIcons'
+import { iconForNode } from '@/registry/vdfsIcons'
 
 /** 卡片状态点取值（与 `VdfsCard` 的 `status` prop 同域） */
 export type CardStatus = 'active' | 'working' | 'disabled' | 'warning' | 'error' | 'muted'
@@ -109,19 +108,14 @@ export function cardTagsOf(n: VdfsNode): CardTag[] {
 }
 
 /**
- * 图标：目录按**目录名**映射；文件按「kind + 项级扩展名」查项级图标，
- * 再回退 kind 级。全部是纯 UI 映射（VDFS 不下发图标）。
+ * 图标：把节点交给 `iconForNode`（取图标这件事的唯一实现，回退链见其文档）。
  *
- * 项级标识读节点顶层的 `config_type`（后端 flatten 下发），缺省回落节点名。
+ * 本函数只是**卡片这一侧的壳**：以前它自己写了一遍「项级 → kind → 名字」，
+ * 侧栏另写了一遍（且只有一级），于是同一种资源在两处显示成不同的图标。
+ * 现在两处调的是同一个函数，不再有「哪一处才是对的」这个问题。
+ *
  * 查不到时返回 `undefined`——由 `VdfsCard` 决定此时不画图标。
  */
 export function cardIconOf(n: VdfsNode): Component | undefined {
-  if (isVdfsDir(n)) return dirIconOf(n.name) ?? undefined
-  const ext = typeof n.config_type === 'string' && n.config_type ? n.config_type : n.name
-  return (
-    getVdfsIconFor({ kind: n.kind, config_type: ext }) ??
-    getVdfsIcon(n.kind) ??
-    dirIconOf(n.kind) ??
-    undefined
-  )
+  return iconForNode(n)
 }

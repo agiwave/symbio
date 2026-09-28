@@ -26,6 +26,19 @@ use super::types::Session;
 /// 工作目录树节点的 kind（场景自定；机制层仅透传，不参与能力判定）
 pub const TREE_KIND: &str = "dir";
 
+/// 会话内部：子会话清单的 kind（`<sid>/subsession` 自身，不是它里面的树节点）。
+///
+/// 与 [`KIND_MESSAGES`](crate::plugins::session::plugin::words::KIND_MESSAGES) /
+/// [`KIND_INBOX`](crate::plugins::session::plugin::words::KIND_INBOX) 同一手法：
+/// `name` / `title` 是展示名，`kind` 是**协议词**。侧栏与卡片按它取图标，
+/// 因此不必把段名（`subsession`）写进任何消费方的判据里。
+pub const KIND_SUB_SESSIONS: &str = "subsession";
+/// 会话内部：工作目录树的 kind（`<sid>/workdir` 自身）。
+///
+/// 复用 [`TREE_KIND`]：工作目录里展开就是一棵树，消费者按同一个词发现它们，
+/// 「树根」与「树节点」是同一类资源在同一场景下的两种位置。
+pub const KIND_WORKDIR: &str = TREE_KIND;
+
 /// 子类别的项级图标分发键（前端 `registry/vdfsIcons` 按 `config_type` 取图）
 const ATTR_CONFIG_TYPE: &str = "config_type";
 
@@ -44,20 +57,24 @@ pub const TITLE_WORKDIR: &str = "工作目录";
 /// 日志与文件名，不受编码 / 输入法影响。段名与展示名的配对因此与段本身同处——
 /// 新增一类集合不必在两处同步改字符串。
 pub fn sub_sessions_dir_node() -> crate::symbio_core::VdfsNode {
-    crate::symbio_core::VdfsNode::dir(
+    let mut n = crate::symbio_core::VdfsNode::dir(
         SEG_SUB_SESSIONS,
         TITLE_SUB_SESSIONS,
         crate::symbio_core::VdfsAccess::LIST,
-    )
+    );
+    n.kind = KIND_SUB_SESSIONS.to_string();
+    n
 }
 
 /// 工作目录树根节点（`list` 与 `stat` 共用同一份形状）。理由同上。
 pub fn workdir_dir_node() -> crate::symbio_core::VdfsNode {
-    crate::symbio_core::VdfsNode::dir(
+    let mut n = crate::symbio_core::VdfsNode::dir(
         SEG_WORKDIR,
         TITLE_WORKDIR,
         crate::symbio_core::VdfsAccess::LIST,
-    )
+    );
+    n.kind = KIND_WORKDIR.to_string();
+    n
 }
 
 /// 从会话元数据取工作目录（缺失/为空 = 该会话无 tree 数据）

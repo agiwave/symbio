@@ -6,9 +6,10 @@
 
   ## 动作归属
 
-  - **浏览内部**（自有）：会话的内部结构（子会话 / 工作目录树）在 VDFS 上是
-    「会话同名目录」，由页面层 `browseInto` 进入。纯导航、只读能力，与访问位
-    无关，恒可见；草稿（新建态）没有内部可浏览，故不给。
+  - **进入下一级**（自有，id = `open-container`）：会话的内部结构（子会话 /
+    工作目录树）在 VDFS 上是「会话同名目录」，由页面层 `browseInto` 进入。
+    纯导航、只读能力，与访问位无关，恒可见；草稿（新建态）没有内部可进入，故不给。
+    位置由机制固定在动作区最右端（`mergeDetailActions`），本组件不参与排序。
   - **重命名 / 删除**（机制）：由页面按访问位单点算好，经 `mechanism-actions`
     注入——本组件不再自己算一遍（那曾是同一组动作的第 2 份实现）。
     会话是 `<根>` 系统资源，机制因此只注入「删除」，重命名由聊天头部按
@@ -45,10 +46,10 @@ defineEmits<{
   (e: 'save', payload: unknown): void
 }>()
 
-/** 会话自有动作：浏览内部（草稿态没有内部可浏览） */
+/** 会话自有动作：进入下一级（草稿态没有内部可进入） */
 const actions = computed<DetailAction[]>(() =>
   isVdfsDraft(props.node)
     ? []
-    : [{ id: 'open-container', label: '浏览内部', style: 'primary', payload: { kind: 'session' } }]
+    : [{ id: 'open-container', label: '进入下一级', style: 'primary', payload: { kind: 'session' } }]
 )
 </script>

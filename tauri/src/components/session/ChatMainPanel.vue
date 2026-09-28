@@ -20,44 +20,27 @@
         </template>
       </div>
       <div class="header-right">
-        <!-- 动作区 = 会话自有动作（浏览内部）+ 机制动作（删除），
-             去重合并由机制唯一实现（schemas/vdfs-form.mergeDetailActions） -->
-        <VdfsActions
-          v-if="merged.actions.length"
-          :actions="merged.actions"
-          :busy="merged.busy"
-          @run="(a) => emit('action', a)"
-        />
-        <button class="header-btn" title="清空历史" @click="confirmClear.visible = true">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M3 6h18" />
-            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-            <path d="M10 11v6" />
-            <path d="M14 11v6" />
-          </svg>
-        </button>
         <button class="header-btn" title="重命名" @click="startRename">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 20h9" />
             <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
           </svg>
         </button>
+        <!-- 动作区 = 会话自有动作（进入下一级）+ 机制动作（删除），
+             去重合并由机制唯一实现（schemas/vdfs-form.mergeDetailActions）。
+             **排在最后**：写在本区末位，机制再把「进入下一级」归到行尾
+             （`mergeDetailActions`），于是它落在整个头部的最右端——
+             它是本页唯一的**导航**出口，与前面「作用于本页」的动作（重命名 /
+             删除）语义不同，用左边框分隔开。 -->
+        <VdfsActions
+          v-if="merged.actions.length"
+          class="header-actions"
+          :actions="merged.actions"
+          :busy="merged.busy"
+          @run="(a) => emit('action', a)"
+        />
       </div>
     </header>
-
-    <!-- 破坏性操作统一走自定义对话框（不用 window.confirm：同样是阻塞 + 主题脱节） -->
-    <ConfirmDialog
-      v-model:visible="confirmClear.visible"
-      title="清空历史"
-      message="确定要清空当前会话的全部历史消息吗？此操作不可撤销。"
-      confirm-text="清空"
-      icon="⚠"
-      icon-kind="danger"
-      danger
-      :loading="confirmClear.busy"
-      @confirm="onClearHistory"
-    />
 
     <main class="chat-body">
       <template v-if="!hasActive">
@@ -103,18 +86,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useSessionsStore } from '@/stores/sessions'
 import { logger } from '@/utils/logger'
 import EmptyWorkdirState from './EmptyWorkdirState.vue'
 import ModelChatPanel from '../ModelChatPanel.vue'
 import VdfsActions from '@/components/vdfs/VdfsActions.vue'
-import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { useGenerationGuard } from '@/composables/useGenerationGuard'
 import { mergeDetailActions, type DetailAction } from '@/schemas/vdfs'
 
 const props = defineProps<{
-  /** 会话自有动作（如「浏览内部」），由 Session ← VdfsSessionDetail 声明 */
+  /** 会话自有动作（如「进入下一级」），由 Session ← VdfsSessionDetail 声明 */
   actions?: DetailAction[]
   /** 机制动作注入（页面单一定义点计算：删除等），与自身按钮并排渲染 */
   mechanismActions?: DetailAction[]
@@ -245,23 +227,6 @@ async function submitRename() {
   if (!title || title === store.activeTitle) return
   await store.rename(id, title)
 }
-
-/** 清空历史的确认态（破坏性操作统一走 ConfirmDialog） */
-const confirmClear = reactive({ visible: false, busy: false })
-
-/** 清空当前会话的全部历史消息（保留会话本身） */
-async function onClearHistory() {
-  if (!store.activeId) return
-  confirmClear.busy = true
-  try {
-    await store.clearMessages(store.activeId)
-    confirmClear.visible = false
-  } catch (e) {
-    logger.error('ChatMainPanel', '清空历史失败', e)
-  } finally {
-    confirmClear.busy = false
-  }
-}
 </script>
 
 <style scoped>
@@ -324,7 +289,17 @@ async function onClearHistory() {
 
 .header-right {
   display: flex;
+  align-items: center;
   gap: 0.25rem;
+}
+
+/* 动作区（进入下一级 / 删除）与前面「作用于本页」的小图标按钮之间画一道分隔：
+   它们是本页唯一的**导航**出口，语义与重命名不同，不该读成同一排工具。
+   `align-self: stretch` 让分隔线跟着头部高度走，而不是跟着按钮走。 */
+.header-actions {
+  margin-left: 0.5rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid var(--border-default);
 }
 
 .header-btn {

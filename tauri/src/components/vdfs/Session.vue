@@ -7,7 +7,7 @@
   `vdfs/delete`。本组件只承载会话的"详情差异化"：
 
   - node 有 id（选中态）：聊天工作区 = ChatMainPanel（工作目录的层级浏览不在
-    详情页——经机制动作「浏览内部」进入会话同名目录
+    详情页——经机制动作「进入下一级」进入会话同名目录
     `<id>/workdir[/<rel>]`，与子会话并列，见 docs/design/vdfs.md）；
   - node 无 id（机制「新建」态 = **草稿节点**，见 `useVdfs.startNew`）：新建会话
     引导——输入区与现有会话完全一致（`ChatComposer` 草稿态：目录/Agent/模型/模式/
@@ -20,7 +20,7 @@
   创建经 emit('created') 回到机制页面层。
 
   动作分两来源（合并与渲染都交给 ChatMainPanel 头部的一处）：
-  - **自有**（`actions`）= 「浏览内部」——进入会话同名目录，纯导航；
+  - **自有**（`actions`）= 「进入下一级」——进入会话同名目录，纯导航；
   - **机制**（`mechanismActions`）= 删除，由页面按访问位单点算好注入。
 
   详情页只有专属渲染器 / 机制化两种形态，机制动作一律在详情页内部渲染，
@@ -70,7 +70,7 @@ import ChatComposer from '@/components/chat/ChatComposer.vue'
 const props = defineProps<{
   /** 会话条目（`<根>/session/<id>`）；无地址 = 新建草稿态 */
   node: VdfsItem | null
-  /** 会话自有动作（浏览内部；由 VdfsSessionDetail 声明） */
+  /** 会话自有动作（进入下一级；由 VdfsSessionDetail 声明） */
   actions?: DetailAction[]
   /** 机制动作注入（页面单一定义点计算：删除等） */
   mechanismActions?: DetailAction[]

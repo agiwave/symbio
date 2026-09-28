@@ -20,7 +20,10 @@
   <Workbench
     :rail-items="navItems"
     :title="title"
-    :has-list-content="items.length > 0"
+    :has-list-content="filteredItems.length > 0"
+    :has-detail="hasDetail"
+    :has-draft="isDraftSelected"
+    :can-create="canCreate"
     :loading="loading"
     @rail-select="selectDir"
   >
@@ -30,15 +33,20 @@
     <template #header-actions>
       <!-- 新建（节点声明了可接受的新建类型时可见；类型由后端下发，前端不硬编码）。
            点一下**直接进入该类型的详情页**（草稿态）——没有「选方式」这一步：
-           整包导入是详情页上的一条动作，不是第二种新建入口（见 ADR-029）。 -->
+           整包导入是详情页上的一条动作，不是第二种新建入口（见 ADR-029）。
+
+           视觉上它是本栏**唯一的主操作**（填充主题色），与「刷新」这类次要图标
+           按钮明确分开：此前两者同为透明 icon-btn，用户要读 tooltip 才知道哪个
+           能建东西；而「没内容时该做什么」正是最需要一眼看出的时刻。 -->
       <button
         v-if="canCreate"
-        class="icon-btn"
+        class="new-btn"
         :title="`新建 ${creatableType?.title ?? ''}`"
+        :aria-label="`新建 ${creatableType?.title ?? ''}`"
         :disabled="loading || saving"
         @click="startNew()"
       >
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round">
           <line x1="12" y1="5" x2="12" y2="19" />
           <line x1="5" y1="12" x2="19" y2="12" />
         </svg>
@@ -52,11 +60,36 @@
     </template>
 
     <template #list>
+      <!-- 筛选框：只在**当前目录有内容**时出现。
+           空目录给一个搜索框是噪音——没有东西可筛，它只会让用户以为"可以搜库"。
+           筛选是纯客户端投影（见 useVdfs 的说明），不发请求、不动分页游标。 -->
+      <div v-if="items.length > 0" class="vdfs-filter">
+        <input
+          v-model="filter"
+          class="vdfs-filter-input"
+          type="search"
+          placeholder="筛选当前目录…"
+          spellcheck="false"
+          aria-label="筛选当前目录条目"
+          @keydown.esc="filter = ''"
+        />
+        <button
+          v-if="filter"
+          class="filter-clear"
+          type="button"
+          title="清除筛选"
+          aria-label="清除筛选"
+          @click="filter = ''"
+        >
+          ×
+        </button>
+      </div>
+
       <div class="vdfs-list" role="listbox" aria-label="资源列表" @scroll.passive="onListScroll">
         <!-- 徽标只给目录（子项数）。⚠️ 文件不给徽标：`ext` 是**渲染器键**
              （`form` / `session` 之类），属机制细节，不该出现在给用户看的列表里。 -->
         <VdfsCard
-          v-for="n in items"
+          v-for="n in filteredItems"
           :key="n.path"
           :title="n.title || n.name"
           :subtitle="n.description"
@@ -70,8 +103,10 @@
           :is-active="selectedId === n.path"
           @click="onItemClick(n)"
         />
-        <!-- 有界列表的收尾：滚到底自动续页，也留一个显式入口 -->
-        <div v-if="hasMore" class="list-more">
+        <!-- 有界列表的收尾：滚到底自动续页，也留一个显式入口。
+             ⚠️ 筛选态下**必须保留**：命中可能落在更早的页里，去掉这个入口
+             就会把「还没找到」误报成「不存在」。 -->
+        <div v-if="hasMore && filteredItems.length > 0" class="list-more">
           <button
             v-if="!loadingMore"
             class="more-btn"
@@ -88,6 +123,12 @@
     <template #empty>
       <!-- 列表加载失败与「目录为空」是两件事：前者必须说出来，否则会被读成「没有数据」 -->
       <p v-if="loadError" class="prompt-error">{{ loadError }}</p>
+      <!-- 「筛掉了」与「本来就没有」也是两件事：前者要告诉用户还有更早的页可捞 -->
+      <template v-else-if="filterEmpty">
+        <p>没有匹配「{{ activeFilter }}」的条目</p>
+        <p v-if="filterTruncated" class="hint">还有更早的条目未加载，可能在其中</p>
+        <button class="empty-action" type="button" @click="filter = ''">清除筛选</button>
+      </template>
       <template v-else>
         <p>{{ selectedName ? '此目录为空' : '暂无子目录' }}</p>
         <p v-if="canCreate" class="hint">点击右上角「新建」添加</p>
@@ -122,7 +163,12 @@
         @browse="browseInto"
       />
 
-      <div v-else-if="loadingDetail" class="vdfs-placeholder">加载中…</div>
+      <!-- 详情加载中：骨架按"标题 + 若干字段行"的形状占位，与表单详情同构，
+           数据到达时是填充而不是重排 -->
+      <div v-else-if="loadingDetail" class="vdfs-detail-skeleton" aria-busy="true">
+        <SkeletonBlock :width="'38%'" :height="0.95" />
+        <SkeletonBlock v-for="i in DETAIL_SKELETON_ROWS" :key="i" :lines="1" :height="0.85" />
+      </div>
       <div v-else class="vdfs-placeholder">
         <p>← 选择一个资源查看/编辑</p>
       </div>
@@ -134,6 +180,7 @@
 import { computed, watch } from 'vue'
 import Workbench from '@/components/common/Workbench.vue'
 import VdfsCard from '@/components/common/VdfsCard.vue'
+import SkeletonBlock from '@/components/common/SkeletonBlock.vue'
 import { useVdfs } from '@/composables/useVdfs'
 import { getVdfsRenderer, isTextualRenderer, resolveVdfsRenderer } from '@/registry/vdfsTypes'
 // 装配渲染器组件（副作用导入：登记 ext → 组件；本控件是唯一消费方）
@@ -149,6 +196,7 @@ import {
 import {
   VDFS_EXT_SESSION,
   isVdfsDir,
+  isVdfsDraft,
   vdfsJoin,
   type VdfsItem,
 } from '@/schemas/vdfs'
@@ -172,6 +220,11 @@ const {
   cwdNode,
   title,
   items,
+  filteredItems,
+  filter,
+  activeFilter,
+  filterEmpty,
+  filterTruncated,
   loading,
   loadError,
   hasMore,
@@ -225,6 +278,42 @@ watch(
   { immediate: true },
 )
 
+// ==================== 进入「可新建」的目录时自动备好一张草稿 ====================
+//
+// 空目录里唯一能做的事就是新建，而新建详情已经铺在右栏 ⇒ 中栏整栏收起（判据在
+// `common/Workbench.vue` 的 `showList`）。这里只负责**把那张草稿备好**。
+//
+// ⚠️ 监听源是**刚读回来的目录自述**（`cwdNode`），**不是**目录地址（`cwd`）。换目录
+// 时 `cwd` 立刻变、`cwdNode` 要等 `refresh()` 回来才更新，中间那一拍 `creatableType`
+// 还是**上一栏**的——拿它开草稿，就把上一类的详情页开到了这一栏上（用户报的「模型
+// 页显示智能体详情、会话页显示模型详情」，一步滞后）。草稿的类型只能来自当前目录
+// 自己的自述。
+//
+// ⚠️ 判据**不得出现类型名**：曾写成 `creatableType.ext === 'session'`，结果只有会话
+// 页有草稿、其余类型永远收不了栏。类型只由目录自述 `new_type` 决定。
+//
+// 两条边界：① 用户还没选中任何东西（不抢深链进来的选择）；② 每个目录只开一次
+// （否则清空选中 / 删掉刚选中的项之后草稿会"复活"）。
+let autoDraftDone = false
+watch(
+  () => cwdNode.value,
+  (node) => {
+    if (autoDraftDone || !node?.new_type) return
+    if (selectedNode.value) return
+    autoDraftDone = true
+    startNew()
+  },
+  { immediate: true },
+)
+
+// 换目录时重置「已自动开过」的标记：新目录是新的上下文，理应各自开一份。
+watch(
+  () => cwd.value,
+  () => {
+    autoDraftDone = false
+  },
+)
+
 // ==================== 钻入（emit，宿主决定呈现） ====================
 
 /**
@@ -261,6 +350,29 @@ function browseInto() {
 }
 
 // ==================== 详情装配 ====================
+
+/** 详情骨架的字段行数（表单详情一般是 4-6 行，取中间偏少，避免满载时反而更长） */
+const DETAIL_SKELETON_ROWS = 5
+
+/**
+ * 右栏是否有可看的东西（供容器判「列表为空时能否收起中栏」）：有选中项且有渲染器，
+ * 或详情正在加载。**「已选中但渲染器未登记」不算**——那种情况右栏最终落在占位符
+ * 上，保留中栏反而给了用户换一个选项的余地。
+ */
+const hasDetail = computed(() => {
+  if (loadingDetail.value) return true
+  return Boolean(selectedNode.value && rendererComp.value)
+})
+
+/**
+ * 右栏那张详情是不是**新建草稿**——收栏判据的最后一环（见
+ * `common/Workbench.vue` 的 `showList`）。
+ *
+ * 判据取 `isVdfsDraft`（**没有 path**），与资源类型无关：模型 / 技能 / 会话的
+ * 草稿都该让中栏，而那些类型各有自己的 `ext`，按类型判必然漏。
+ */
+const isDraftSelected = computed(() => isVdfsDraft(selectedNode.value))
+
 /** 当前渲染器组件（未登记 → null，视图回退占位） */
 const rendererComp = computed(() => {
   if (!selectedNode.value) return null
@@ -322,6 +434,98 @@ async function onCreated(id: string) {
 </script>
 
 <style scoped>
+/* ============== 新建（本栏唯一主操作） ============== */
+/* 填充主题色：与同排的次要图标按钮（透明底）拉开层级。
+   尺寸沿用 `.icon-btn` 的 1.625rem 方形，故两者基线对齐、不撑高 header。 */
+.new-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.625rem;
+  height: 1.625rem;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+.new-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.new-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ============== 筛选 ============== */
+.vdfs-filter {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 0.4rem 0.5rem 0.2rem;
+  flex-shrink: 0;
+}
+
+.vdfs-filter-input {
+  width: 100%;
+  padding: 0.3rem 1.6rem 0.3rem 0.6rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-family: inherit;
+}
+.vdfs-filter-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.vdfs-filter-input::placeholder {
+  color: var(--text-muted);
+}
+/* 去掉 type=search 的原生清除叉：自绘的 × 才有焦点态与主题色 */
+.vdfs-filter-input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.filter-clear {
+  position: absolute;
+  right: 0.85rem;
+  width: 1.1rem;
+  height: 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.filter-clear:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* 空态里的「清除筛选」是恢复路径：不能只有一个说明而没有出口 */
+.empty-action {
+  margin-top: 0.5rem;
+  padding: 0.3rem 0.85rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.empty-action:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
 /* ============== 列表 ============== */
 .vdfs-list {
   flex: 1;
@@ -371,5 +575,14 @@ async function onCreated(id: string) {
   justify-content: center;
   color: var(--text-muted);
   font-size: 0.85rem;
+}
+
+/* 详情骨架：内边距与 DetailShell 默认形态对齐（0.75rem 1rem），
+   故骨架与真实详情的内容起点一致，加载完成时不横向跳位 */
+.vdfs-detail-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 0.75rem 1rem;
 }
 </style>

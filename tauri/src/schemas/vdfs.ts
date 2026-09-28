@@ -321,6 +321,10 @@ export const VDFS_ACTION_TRUNCATE = 'truncate'
  * **逐节点**语义，表达不了「从这里删到末尾」这类集合操作；而清空虽然也能用
  * `delete` 表达（`deleted` 落在列表目录上无歧义），仍与截断一起走动作，
  * 好让**同一个区段的删除只有一种入口形态**。
+ *
+ * 前端当前只在**收件箱**（`<根>/session/<id>/inbox`）上用它取消排队中的消息。
+ * 会话转写区段上的清空已下线：它与「删除会话」（`vdfs/delete`）在用户眼里
+ * 是同一件事的两种做法，留着只会让人在两条重叠的路径之间犹豫。
  */
 export const VDFS_ACTION_CLEAR = 'clear'
 /**
@@ -533,6 +537,24 @@ export function isVdfsSystemAddr(path: string): boolean {
  */
 export function isVdfsDraft(node: { path?: string } | null | undefined): boolean {
   return !node?.path
+}
+
+/**
+ * `path` 是否落在 `dir` **之下**（含 `dir` 自身）。
+ *
+ * 「这个选中项还属不属于当前目录」的判据：目录一换（切左栏类别 / 换绑定地址），
+ * 旧选中项必须立刻作废，否则右栏会一直挂着**上一个目录**的详情（「切了侧边栏，
+ * 详情页还是别的类别的内容」）。
+ *
+ * 为什么按**归属**判而不是按「它还在不在已加载的列表里」判：后者要等列表回来才
+ * 判得出（中间那一拍右栏还是旧的），且在有更早分页时根本判不了。
+ *
+ * ⚠️ 必须按**段**判（等于 `dir` 或以 `dir/` 打头）：裸 `startsWith(dir)` 会把
+ * `@vfs/session-2/x` 误判为 `@vfs/session` 的后代。
+ */
+export function isVdfsUnder(path: string | null | undefined, dir: string): boolean {
+  if (!path || !dir) return false
+  return path === dir || path.startsWith(`${dir}/`)
 }
 
 // ==================== 会话转写地址（地址代数的会话特例） ====================

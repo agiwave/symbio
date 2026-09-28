@@ -20,6 +20,7 @@ import {
   isVdfsDir,
   isVdfsDraft,
   isVdfsSystemAddr,
+  isVdfsUnder,
   parseVdfsValidation,
   sessionRuntimeOf,
   vdfsAccessOf,
@@ -112,6 +113,30 @@ describe('isVdfsDraft（草稿 == 没有路径）', () => {
   it('一旦落盘（有非空 path）就不是草稿——名字不是判据', () => {
     expect(isVdfsDraft({ path: '@vfs/model/gpt4' })).toBe(false)
     expect(isVdfsDraft({ path: 'notes/a.md' })).toBe(false)
+  })
+})
+
+describe('isVdfsUnder（选中项是否还属于当前目录）', () => {
+  it('自身与任意深度的后代都算「在其之下」', () => {
+    expect(isVdfsUnder('@vfs/session', '@vfs/session')).toBe(true)
+    expect(isVdfsUnder('@vfs/session/abc', '@vfs/session')).toBe(true)
+    expect(isVdfsUnder('@vfs/session/abc/message/m1', '@vfs/session')).toBe(true)
+  })
+
+  it('兄弟 / 父辈 / 别处都不算', () => {
+    expect(isVdfsUnder('@vfs/model/gpt4', '@vfs/session')).toBe(false)
+    expect(isVdfsUnder('@vfs', '@vfs/session')).toBe(false)
+  })
+
+  it('★ 前缀相近但**不是**同一段：不得按裸 startsWith 误判', () => {
+    expect(isVdfsUnder('@vfs/session-2/x', '@vfs/session')).toBe(false)
+    expect(isVdfsUnder('@vfs/sessionx', '@vfs/session')).toBe(false)
+  })
+
+  it('空路径 / 空目录一律不算（调用方不必先判空）', () => {
+    expect(isVdfsUnder('', '@vfs/session')).toBe(false)
+    expect(isVdfsUnder(undefined, '@vfs/session')).toBe(false)
+    expect(isVdfsUnder('@vfs/session/abc', '')).toBe(false)
   })
 })
 

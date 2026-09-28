@@ -6,10 +6,10 @@
  * 会话侧栏的标题 / 工作目录 / 运行中状态全部依赖它，一旦后端字段名或前端取值
  * 方式漂移，表现为**静默退化**（侧栏拿不到 workdir、停止按钮失效），很难肉眼发现。
  *
- * 另锁定**全部五个写入落点**——它们曾经各有专用路由（`session/clear` /
- * `session/update` / `chat/update_message` / `chat/delete_message` /
- * `chat/clear_messages`），2026-09-18 起全部并入 VDFS（`session/update`
- * 于 2026-09-23 最后一条退役，会话与消息的 CRUD 至此全在 VDFS 上）：
+ * 另锁定**全部四个写入落点**——它们曾经各有专用路由（`session/clear` /
+ * `session/update` / `chat/update_message` / `chat/delete_message`），
+ * 2026-09-18 起全部并入 VDFS（`session/update` 于 2026-09-23 最后一条退役，
+ * 会话与消息的 CRUD 至此全在 VDFS 上）：
  *
  * | 操作 | 落点 |
  * |---|---|
@@ -17,7 +17,9 @@
  * | 改 metadata / 标题 | `vdfs/write(<根>/session/<id>)` |
  * | 改写某条消息 | `vdfs/write(…/message/<mid>)` |
  * | 删该条及其后 | `vdfs/action(…/message/<mid>, "truncate")` |
- * | 清空历史 | `vdfs/action(…/message, "clear")` |
+ *
+ * 「清空历史」（`chat/clear_messages` → `vdfs/action(…/message, "clear")`）
+ * 不在表内：它与「删除会话」重叠，已整体下线。
  *
  * 若哪天有人把路由改回去，这里会红。断言**地址**而不只是"调用了某个函数"：
  * 地址拼错（比如少了会话 id）在真实环境里表现为删错会话，是灾难级的。
@@ -57,12 +59,10 @@ import { deleteVdfs, listVdfs, runVdfsAction, writeVdfs } from '@/services/vdfs'
 // 回读理由是**词表**（独立模块，未被替身），断言按它取值——替身里不抄第二份
 import { READBACK_REASON } from '../readback'
 import {
-  VDFS_ACTION_CLEAR,
   VDFS_ACTION_TRUNCATE,
   isWorkingStatus,
   vdfsJoin,
   vdfsMessageAddr,
-  vdfsMessagesAddr,
   vdfsSessionAddr,
   type VdfsItem,
 } from '@/schemas/vdfs'
@@ -71,7 +71,6 @@ import { setVdfsRoot } from '@/schemas/vdfsRoot'
 // 合成根：与根名无关（见 schemas/__tests__/vdfs.spec.ts 的说明）
 setVdfsRoot('@vfs')
 import {
-  clearMessages,
   deleteMessage,
   deleteSession,
   listSessions,
@@ -316,29 +315,5 @@ describe('deleteMessage（删该条及其后 → action("truncate")）', () => {
     })
 
     await expect(deleteMessage('abc', 'gone')).resolves.toEqual({ deleted_ids: [] })
-  })
-})
-
-describe('clearMessages（清空历史 → action("clear")）', () => {
-  it('地址是**消息列表目录**（不是单条、也不是会话本体），动作是 clear', async () => {
-    vi.mocked(runVdfsAction).mockResolvedValueOnce({
-      action: VDFS_ACTION_CLEAR,
-      ok: true,
-      message: '已清空会话历史',
-    })
-
-    await clearMessages('abc')
-
-    expect(vi.mocked(runVdfsAction)).toHaveBeenCalledWith(
-      vdfsMessagesAddr(SCHEME, 'abc'),
-      VDFS_ACTION_CLEAR
-    )
-    // 少一层就清到会话本体（元数据 / 标题一并没了），多一层就不是列表
-    expect(vdfsMessagesAddr(SCHEME, 'abc')).toBe('@vfs/session/abc/message')
-  })
-
-  it('失败向上抛（调用方据此不做本地清空）', async () => {
-    vi.mocked(runVdfsAction).mockRejectedValueOnce(new Error('Forbidden'))
-    await expect(clearMessages('abc')).rejects.toThrow('Forbidden')
   })
 })
