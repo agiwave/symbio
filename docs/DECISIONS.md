@@ -752,21 +752,11 @@
 
 ## ADR-038: 帧与消息构造家族按依赖方数量下沉
 
-**状态**：已接受。**取代 [ADR-034](#adr-034-sse-行解析契约随流循环迁入-model-插件) 决策 2 的位置条款**。
+**状态**：已接受。**取代 [ADR-034](#adr-034-sse-行解析契约随流循环迁入-model-插件) 决策 2 的位置条款**。**背景**：`turn.rs` 末尾的依赖方表一度以「本模块全部符号两侧共用」收尾——那是按**文件**数出来的：同一文件里既有两侧共用的 `llm_emit_message`，也有生产代码里只有 session 一个消费方的 `llm_build_assistant_messages`（唯一链路 `session/chat_loop/turn.rs` → `TurnOutput::into_messages`，model 那 9 处引用全在测试 fixture 里）。[ADR-023](#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层) 数的是**符号**的依赖方，文件不是依赖单位。
 
-**背景**：`turn.rs` 末尾的依赖方表一度以「本模块全部符号两侧共用」收尾——那是按**文件**数出来的：同一文件里既有两侧共用的 `llm_emit_message`，也有生产代码里只有 session 一个消费方的 `llm_build_assistant_messages`（唯一链路 `session/chat_loop/turn.rs` → `TurnOutput::into_messages`，model 那 9 处引用全在测试 fixture 里）。[ADR-023](#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层) 数的是**符号**的依赖方，文件不是依赖单位。
+**决策**：①**落 session**：`llm_build_assistant_messages` / `llm_build_tool_message` / `TurnStreamChildIds` / `impl TurnOutput::{into_messages, is_reasoning_only, effective_text}` → `plugins/session/message_build.rs`；`llm_emit_state` / `llm_state_frame` / `llm_emit_removed` → `plugins/session/transcript/frames.rs`——两者生产消费方都只有 session。②**落 model**：`llm_emit_delta` → `plugins/model/stream.rs`，唯一调用点就是那里的流循环热路径。③**测试 fixture 随消费方走**：model 的 `message_builder.test.rs` 改为本地构造同形状的树，两侧各锁一半（落库形状在 `plugins/session/message_build.test.rs`，扁平化视图在 model 侧）；fixture 计入依赖方（ADR-023 不豁免测试），不迁就永远停在「1 生产 + 1 测试」。④**留守六个**：`llm_emit_message` / `llm_removed_frame` / `llm_short_id` / `TurnToolCallInfo` / `TurnOutput` 各有两个以上消费方；`llm_message_frame` 是登记在案的**例外**——外部只有 session，但它与 core 自己的 `llm_emit_message` 同进退，「完整消息必然带状态」只在一处实现。
 
-**决策**：
-
-1. **落 session**：`llm_build_assistant_messages` / `llm_build_tool_message` / `TurnStreamChildIds` / `impl TurnOutput::{into_messages, is_reasoning_only, effective_text}` → `plugins/session/message_build.rs`；`llm_emit_state` / `llm_state_frame` / `llm_emit_removed` → `plugins/session/transcript/frames.rs`——两者生产消费方都只有 session。
-2. **落 model**：`llm_emit_delta` → `plugins/model/stream.rs`，唯一调用点就是那里的流循环热路径。
-3. **测试 fixture 随消费方走**：model 的 `message_builder.test.rs` 改为本地构造同形状的树，两侧各锁一半（落库形状在 `plugins/session/message_build.test.rs`，扁平化视图在 model 侧）。fixture 计入依赖方（ADR-023 不豁免测试），不迁就永远停在「1 生产 + 1 测试」。
-4. **留守六个**：`llm_emit_message` / `llm_removed_frame` / `llm_short_id` / `TurnToolCallInfo` / `TurnOutput` 各有两个以上消费方；`llm_message_frame` 是登记在案的**例外**——外部只有 session，但它与 core 自己的 `llm_emit_message` 同进退，「完整消息必然带状态」只在一处实现。
-
-**理由**：
-
-- **住哪由调用链决定**：`into_messages` 若住 model，session 就得跨插件引用 model（E-009 禁止；固有实现不需 `use`，躲得过审计也仍是隐性依赖）。唯一生产消费方是谁，就住哪。
-- **搬迁是一次编译期可检的移动**：固有 impl 可落在同 crate 任意模块，调用方不必 import 实现处，故调用点零改动。
+**理由**：**住哪由调用链决定**——`into_messages` 若住 model，session 就得跨插件引用 model（E-009 禁止；固有实现不需 `use`，躲得过审计也仍是隐性依赖），唯一生产消费方是谁就住哪；**搬迁是一次编译期可检的移动**——固有 impl 可落在同 crate 任意模块，调用方不必 import 实现处，故调用点零改动。
 
 **被否决的方案**：**只改文档、代码不动**（修得掉那句失实声明，修不掉「文件里躺着单消费方符号」——按文件豁免等于给 core 留一个「顺手放」的口子，[ADR-037](#adr-037-实现可以离开-core--记忆整体迁往-providers) 堵的正是同类）；**下沉 model**（生产消费方不是 model，且会新造一条 session→model 的边）。
 
@@ -787,6 +777,20 @@
 **被否决的方案**：**按行数阈值机械切分**（行数不表达职责，切出来仍是按现状切几刀，维持 ADR-017 对这条的否决）；**只外置测试、不动生产划分**（能解决混放，解决不了跨文件连锁——连锁恰恰都长在生产代码的职责缝上）；**一次性整体重组**（diff 无法审阅，且把搬移风险与行为风险混在一次变更里；改为分阶段纯搬移，每阶段独立验收提交）。
 
 **后果与不变量**：新增职责先归域，无域可归的进编排层或最贴近的既有域，不新建「杂物」文件。与 [ADR-023](#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层)（core 准入 = 依赖方数量）互补：本条管 **session 域内**的落位，ADR-023 管 **core 与插件之间**的落位——同源的判据（职责与依赖方），不同的作用面。既有单一实现约束不因重组放松（压缩内核、回合收口、消费循环等的唯一落点），清单见 `symbio/src/plugins/session/docs/core-loop.md`。判据约束**新代码与被触碰代码的落位**，不冻结现状、不触发顺手搬迁；域边界将来若不合适，改的是归属，不是机制。
+
+---
+
+## ADR-040: `work` 并入 `memory`——记忆的两个作用域同属一个所有者
+
+**状态**：已接受。**背景**：记忆迁出 `agent` 插件后，智能体记忆归 `memory`、工作区记忆仍由独立的 `work` 承载——同一种东西的两个作用域（同一个 `MemoryFile` 实现、同一条「谁能读写它，谁负责注入它」原则），却分属两个插件：两个挂载点、两份配置、两套逐行同构的代码；实质差异只有落位（`{宿主目录}/AGENTS.md` vs `{workdir}/AGENTS.md`）与作用域来源（装配恒有 vs 会话可有）。
+
+**决策**：①`work` 整体并入 `memory`，`<根>/memory` 一个挂载点住两份记忆——`AGENTS.md`（智能体腿，分形）+ `WORKSPACE.md`（工作区腿）；`PLUGIN_ID_WORK`、装配清单条目与 `plugins/work/` 整体删除。②**挂载名 ≠ 物理名**：两腿物理文件同名（都是 `AGENTS.md`，工作区腿保住「工作区目录里的 `AGENTS.md`」行业约定），挂载内必须用名字区分归属——共享实现新增 `MemoryNodeSpec.name` 覆盖（`None` = 用真实文件名），工作区节点以 `WORKSPACE.md` 挂载。③配置按作用域分组：`MemoryConfig` 智能体两字段 + 工作区三字段；只有工作区有注入开关（继承原 `WorkConfig.memory_enabled` 语义——关掉只影响注入，编辑面照旧）。④空文件策略两腿各自保留：智能体腿空文件整段省略，工作区腿空文件**照注**（带「暂无内容」提示）——前者是给模型读的档案，后者要教会模型建立记忆。
+
+**理由**：机制同构的两个作用域由两个插件承载，产出两份同构代码与两处配置，没有一处需要独立演进；而模型改记忆要先回答「这是智能体记忆还是工作区记忆」才能选对挂载点——这个问题挂载点本不该问。收进一个所有者后，`<根>/memory` 一个地址覆盖全部长期记忆，作用域区分交给挂载名与注入段名（`memory` / `workspace-memory`），语义清晰且无法漏改。
+
+**被否决的方案**：**双挂载点（保留 `<根>/work`）**——现状即如此，收益为零；**挂载内子目录布局**（`<根>/memory/{agent,workspace}/AGENTS.md`）——多一层目录只为区分归属，而挂载名本身就能区分，还让「一层目录 = 一个插件」的容器规则多出一层无意义嵌套；**保留 `work` 名、只搬实现**——插件名与职责不符（「工作」≠「工作区记忆」），且工作区切换控制面早已归 `home`，名字留下只会继续误导。
+
+**后果与不变量**：不变量：**「谁能读写它，谁负责注入它」**——两个作用域收进同一个所有者，原则不变，只是不再跨插件复述。智能体腿作用域来自**装配**（`host_dir = plugin_dir.parent()`，恒存在），工作区腿来自**会话**（`ctx[WORKDIR]`，可选——无工作区则不注入、列表缺席、stat 404）。物理落位不变（`{宿主目录}/AGENTS.md` 与 `{workdir}/AGENTS.md`），行业约定不因合并而破；子树工作区腿继承父会话 `WORKDIR`（`docs/design/agent-directory-spec.md` 附录 A.3 的覆写警告继续成立）。插件排序槽位（order 11）由 `memory` 接替，前端图标按挂载点名 `memory` 注册。
 
 ---
 

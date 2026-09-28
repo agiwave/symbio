@@ -276,6 +276,7 @@ fn node_shape_is_shared_by_list_and_stat() {
 
     let n = m.node(&MemoryNodeSpec {
         title: "工作区记忆",
+        name: None,
         kind: "work",
         description: "本工作区的长期记忆",
     });

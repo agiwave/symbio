@@ -1055,6 +1055,7 @@ impl SessionPlugin {
             .await
             .node(&crate::providers::MemoryNodeSpec {
                 title: super::super::memory::SEGMENT_TITLE,
+                name: None,
                 kind: PLUGIN_ID_SESSION,
                 description: super::super::memory::MEMORY_DESCRIPTION,
             })

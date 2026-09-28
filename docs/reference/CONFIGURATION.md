@@ -76,8 +76,8 @@ work:
 |---|---|---|
 | `home` | `<根>/PLUGIN.yml` | `work.workdir` / `work.recent_workspaces` |
 | `session` | `<根>/session/PLUGIN.yml` | `max_messages` / `auto_compress` / `context_messages` / `max_tool_rounds` / `tool_context_window` / `fade_activate_rounds` / `fade_keep_recent_turns` / `compress_line_threshold` / `compress_keep_recent` / `enable_compact_tool` / `prune_tool_history` / `memory_max_bytes` / `memory_inject_max_bytes`（字段全表见 `session/config.rs::SessionConfig`；会话存储**无选型项**——已收为单一具体类型，见 ADR-011） |
-| `agent` | `<根>/agent/PLUGIN.yml` | `memory_max_bytes` / `memory_inject_max_bytes`（字段全表见 `agent/host/config.rs::AgentConfig`） |
-| `work` | `<根>/work/PLUGIN.yml` | `memory_enabled` / `memory_max_bytes` / `memory_inject_max_bytes`（字段全表见 `work/config.rs::WorkConfig`） |
+| `memory` | `<根>/memory/PLUGIN.yml` | `workspace_enabled` / `workspace_max_bytes` / `workspace_inject_max_bytes`（工作区作用域）+ `memory_max_bytes` / `memory_inject_max_bytes`（智能体作用域）；字段全表见 `memory/config.rs::MemoryConfig` |
+| `setting` | `<根>/setting/PLUGIN.yml` | `display_name` / `description` / `reply_language` / `verbosity`（字段全表见 `setting/config.rs::SettingConfig`） |
 | `web` | `<根>/web/PLUGIN.yml` | `web_enabled` / `web_timeout` / `tavily_api_key` / `serper_api_key` |
 | `local` | `<根>/local/PLUGIN.yml` | `shell_enabled` / `file_enabled` / `shell_timeout` / `autonomy`（readonly\|supervised\|full，默认 full）/ `workspace_only` / `allowed_commands`（**空 = 不限制**）/ `forbidden_paths` / `allowed_roots` / `max_actions_per_hour`（**0 = 不限流**）/ `require_approval_for_medium_risk` / `block_high_risk_commands`（字段全表见 `local/local_config.rs::LocalConfig`） |
 | `gateway` | `<根>/gateway/PLUGIN.yml` | 见下 |

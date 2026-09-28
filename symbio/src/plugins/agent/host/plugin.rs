@@ -1,83 +1,63 @@
 //! agent 插件 —— Agent 目录规范 v2 的宿主接入层。
 //!
-//! ## 定位（规范 §3.2 宿主）
+//! ## 定位（规范 §3.2 宿主）：**只管子智能体的目录与连接**
 //!
-//! 本插件是**智能体域的唯一所有者**，做三件事：
+//! 本插件是「**别处装进来的智能体**」域的唯一所有者，做两件事：
 //!
 //! - **托管**：为 `{homedir}/agent/<id>/` 下每个 Agent 构造一棵 composite 插件树
 //!   （与系统 Agent 同构，§1.1），收集期把它的注册经 [`super::scope::SubAgentVisitor`]
 //!   代理并进系统树（并集，§8.2）；
 //! - **门槛**：manifest 不合 §5 / §10 时**拒绝接入**并明确报错——绝不静默降级成
-//!   "没有人格的通用助手"；
-//! - **智能体自身的 `AGENTS.md`**：系统态 = `{homedir}/AGENTS.md`（[`super::instruction`]），
-//!   子智能体态 = `<agentdir>/AGENTS.md`（[`super::memory`]）。两者都归本插件——
-//!   读写面（`<根>/agent/…`）与注入面因此落在同一个所有者上。
+//!   "没有人格的通用助手"。
+//!
+//! ## 边界：本插件**不拥有**当前智能体自身的东西
+//!
+//! 「当前智能体自身」的两样东西各有自己的插件，本插件一律不碰：
+//!
+//! | 东西 | 归谁 | 地址 |
+//! |---|---|---|
+//! | 智能体自身的记忆（`AGENTS.md`） | `memory` | `<根>/memory/AGENTS.md` |
+//! | 智能体自身的信息设置 | `setting` | `<根>/setting/PLUGIN.yml` |
+//!
+//! 它们都是**分形**的：子树里各有自己的实例，落位由「本插件目录的父目录」推出。
+//! 从前本插件用 `instruction` / `memory` 两个模块兼管这两个作用域（外加一份配置
+//! 承载两道容量闸门），于是 `agent` 一边管「装进来的智能体」、一边管「自己是谁」——
+//! 两件事各有一套落位与闸门，却挤在同一个插件里。现在这条线按**归属**划开：
+//! 本插件只回答「有哪些智能体、怎么把它们连进来」。
 //!
 //! ⚠️ **指令文件不由子树里的插件实例解释**：子树按 agent 目录扫描，其中 `agent`
 //! 实例只负责「再下一级子 Agent」（`<id>/agent/<sub-id>` 递归，即分形），并不解释
-//! 本目录自身的指令——本目录的 `AGENTS.md` 仍归本插件（见 [`super::memory`]）。而本插件
-//! 恰恰是「认识 Agent 目录」的那个插件：它扫描目录、装配子树、把整包内容暴露成 VDFS、
-//! 并注入对应 `AGENTS.md`，全在职责内。子树的注册经作用域 visitor 加前缀，故与系统侧
-//! 不冲突（§8.2）。
+//! 本目录自身的指令——本目录的 `AGENTS.md` 归子树里的 `memory` 实例。而本插件
+//! 恰恰是「认识 Agent 目录」的那个插件：它扫描目录、装配子树、把整包内容暴露成
+//! VDFS，全在职责内。子树的注册经作用域 visitor 加前缀，故与系统侧不冲突（§8.2）。
 //!
 //! 能力（技能 / MCP / …）由 Agent 目录里的插件实例自己解释，**复用宿主已有的对应系统**
 //! （§3.2 第 2 条）——宿主替 agent 目录再写一遍技能与 MCP 的解析，两条链必然长期不同步。
 //! 子树因此挂**与父 Agent 同构的默认插件集**（见
 //! [`crate::symbio_core::ASSEMBLY_SUB_AGENT_PLUGINS`]，与系统侧是**同一份清单**）：子树会构造
 //! 自己的 `vdfs` 实例，但其注册经 `SubAgentVisitor` 在每一层丢弃（VDFS 根单槽归
-//! 系统 Agent 独占），其余（含 `agent` 自身、`model`、`plugin_manager`、`work`）全部与
-//! 父树一致——UI 资源入口因此对齐。`model` 在子树里有实例：子智能体有自己的模型
-//! 服务（子树会话以子容器为 parent 收集，自行解析）；父会话收集期该注册才被
-//! `SubAgentVisitor` 丢弃（单槽防劫持）。
+//! 系统 Agent 独占），其余（含 `agent` 自身、`model`、`plugin_manager`、
+//! `memory`、`setting`）全部与父树一致——UI 资源入口因此对齐。`model` 在子树里有
+//! 实例：子智能体有自己的模型服务（子树会话以子容器为 parent 收集，自行解析）；
+//! 父会话收集期该注册才被 `SubAgentVisitor` 丢弃（单槽防劫持）。
 //!
 //! 会话未选择智能体（`ctx[AGENT_ID]` 为空）时不装配任何 Agent，但 **agent_run
 //! （子智能体委托）始终注册**。
 
-use crate::plugins::agent::host::config::AgentConfig;
-use crate::plugins::agent::host::instruction;
 use crate::plugins::agent::host::manifest;
-use crate::plugins::agent::host::memory;
-use crate::plugins::agent::host::store::{AgentDirStore, AGENT_MEMORY_FILE};
-use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField, DetailOption};
+use crate::plugins::agent::host::store::AgentDirStore;
+use crate::symbio_core::schemas::detail::{DetailField, DetailOption};
 use crate::symbio_core::{
-    capability_announce_configurable, capability_report_error, creator_create_object,
-    plugin_dir_from_ctx, Capability, CapabilityVisitor, Plugin, PluginConfigFile, PluginDir,
-    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
-    PluginPayload, PluginSimpleRequest, AGENT_ID, ASSEMBLY_SUB_AGENT_PLUGINS, CAPABILITY_VISITOR,
-    CONFIGURABLE_VISITOR, PATH, PLUGIN_DIR, PLUGIN_ID_AGENT, PLUGIN_ID_COMPOSITE, REQUIRED_PLUGINS,
-    TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
+    capability_report_error, creator_create_object, descend_addr, plugin_dir_from_ctx, Capability,
+    CapabilityVisitor, Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, AGENT_ID,
+    ASSEMBLY_SUB_AGENT_PLUGINS, CAPABILITY_VISITOR, PATH, PLUGIN_DIR, PLUGIN_ID_AGENT,
+    PLUGIN_ID_COMPOSITE, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
+    VDFS_PARENT_ADDR, WORKDIR,
 };
-use crate::symbio_core::{VdfsAccess, VdfsItem, VdfsProvider};
+use crate::symbio_core::{VdfsAccess, VdfsProvider};
 use async_trait::async_trait;
-use serde_json::json;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-
-/// 配置表单的定义 —— 默认值从 [`AgentConfig::default`] 读出，不写第二份字面量
-fn config_definition() -> DetailDefinition {
-    let d = AgentConfig::default();
-    DetailDefinition::form(
-        "智能体设置",
-        vec![
-            DetailField::number(
-                "memory_max_bytes",
-                "AGENTS.md 写入上限（字节）",
-                "智能体自身的 AGENTS.md（系统态与子智能体态共用一个数）的写入字节上限，超出会被拒绝",
-                1.0,
-                1_048_576.0,
-                json!(d.memory_max_bytes),
-            ),
-            DetailField::number(
-                "memory_inject_max_bytes",
-                "AGENTS.md 注入上限（字节）",
-                "每轮注入系统提示词的 AGENTS.md 正文字节上限，超出部分截断并指路 vdfs_read 取全文",
-                1.0,
-                1_048_576.0,
-                json!(d.memory_inject_max_bytes),
-            ),
-        ],
-    )
-}
 
 /// 规范标识（见 `docs/design/agent-directory-spec.md`）
 ///
@@ -97,10 +77,11 @@ pub struct AgentPlugin {
     /// 凭它把 `session/chat/send` 等请求路由给兄弟插件——工具 ctx 经 chat
     /// loop 一路 fork，自身并不携带路由入口。
     router: Option<std::sync::Weak<dyn Plugin>>,
-    /// 生效配置（两道容量闸门的取值点）
-    config: Arc<RwLock<AgentConfig>>,
-    /// 配置文件的呈现与校验（`<根>/agent/PLUGIN.yml`）
-    config_file: PluginConfigFile,
+    /// 本插件目录（agent 目录的**唯一发现根**；由父插件经 `PLUGIN_DIR` 告知）
+    ///
+    /// 同时是 `AgentDirStore` 的根与子树装配的起点——两个用途同一份，避免
+    /// 「发现根」与「装配根」漂移。
+    dir: PluginDir,
 }
 
 impl AgentPlugin {
@@ -108,38 +89,27 @@ impl AgentPlugin {
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
         let router = ctx.parent();
         let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_AGENT);
-        let config: AgentConfig = match dir.load::<AgentConfig>() {
-            Ok(Some(c)) => c,
-            Ok(None) => AgentConfig::default(),
-            Err(e) => {
-                crate::plugin_warn!("agent", "读取自身配置失败，改用默认值：{e}");
-                AgentConfig::default()
-            }
-        };
-        Arc::new(Self {
+        Arc::new(Self::new_with(dir, router)) as Arc<dyn Plugin>
+    }
+
+    pub fn new_with(dir: PluginDir, router: Option<std::sync::Weak<dyn Plugin>>) -> Self {
+        Self {
             sub_agents: tokio::sync::RwLock::new(std::collections::HashMap::new()),
             router,
-            config: Arc::new(RwLock::new(config)),
-            config_file: PluginConfigFile::new(dir, "智能体设置", config_definition()),
-        }) as Arc<dyn Plugin>
+            dir,
+        }
     }
 
     /// 无装配上下文的实例（仅测试）：目录给临时目录——**不读全局系统根**。
     #[cfg(test)]
     pub fn new() -> Self {
-        Self {
-            sub_agents: tokio::sync::RwLock::new(std::collections::HashMap::new()),
-            router: None,
-            config: Arc::new(RwLock::new(AgentConfig::default())),
-            config_file: PluginConfigFile::new(
-                PluginDir::at(
-                    std::env::temp_dir().join("symbio-test/agent"),
-                    PLUGIN_ID_AGENT,
-                ),
-                "智能体设置",
-                config_definition(),
+        Self::new_with(
+            PluginDir::at(
+                std::env::temp_dir().join("symbio-test/agent"),
+                PLUGIN_ID_AGENT,
             ),
-        }
+            None,
+        )
     }
 
     /// 测试用：把插件作用域到指定目录（等价于生产态由 `PLUGIN_DIR` 告知的目录）。
@@ -147,50 +117,12 @@ impl AgentPlugin {
     /// 仅用于单测——让「导入位置」与「发现根」落在同一目录，验证导入→发现→装配链路。
     #[cfg(test)]
     pub fn new_with_dir(dir: PluginDir) -> Self {
-        Self {
-            sub_agents: tokio::sync::RwLock::new(std::collections::HashMap::new()),
-            router: None,
-            config: Arc::new(RwLock::new(AgentConfig::default())),
-            config_file: PluginConfigFile::new(dir, "智能体设置", config_definition()),
-        }
+        Self::new_with(dir, None)
     }
 
-    /// 依 agent 目录记录构造记忆门面（**子智能体态记忆的唯一构造点**）。
-    ///
-    /// 共享实现只认「上限是多少」，不关心它从哪个配置来；agent 目录不存在 → 无作用域，
-    /// 之后读 / 注入 / 写三条路各自降级，调用点不需要重复判断。
-    pub(crate) async fn memory_store(
-        &self,
-        agent_dirs: &AgentDirStore,
-        agent_id: &str,
-    ) -> crate::providers::MemoryFile {
-        let cfg = self.config.read().await;
-        memory::store(
-            agent_dirs,
-            agent_id,
-            cfg.effective_memory_max_bytes(),
-            cfg.effective_memory_inject_bytes(),
-        )
-    }
-
-    /// 系统智能体自身指令的门面（**系统态的唯一构造点**，落位见 [`super::instruction`]）
-    pub(crate) async fn instruction_store(&self) -> crate::providers::MemoryFile {
-        let cfg = self.config.read().await;
-        instruction::store(
-            &instruction::host_dir(self.config_file.dir().dir()),
-            cfg.effective_memory_max_bytes(),
-            cfg.effective_memory_inject_bytes(),
-        )
-    }
-
-    /// 配置文档（VDFS 侧读写的入口）
-    pub(crate) fn config_file(&self) -> &PluginConfigFile {
-        &self.config_file
-    }
-
-    /// 配置槽位（[`PluginConfigFile::read`] / [`PluginConfigFile::apply`] 的读写对象）
-    pub(crate) fn config_slot(&self) -> &RwLock<AgentConfig> {
-        &self.config
+    /// 本插件目录 = agent 目录的唯一发现根
+    pub(crate) fn dir(&self) -> &PluginDir {
+        &self.dir
     }
 
     /// 取得（必要时构造）子 Agent 的插件树
@@ -211,7 +143,7 @@ impl AgentPlugin {
 
         // agent 目录只由本插件自己的目录决定（与 workdir 无关）；嵌套子 Agent 的目录
         // 由 composite 经 `PLUGIN_DIR` 自动作用域到 `<subtree>/agent`，分形天然正确。
-        let store = AgentDirStore::new(self.config_file.dir().dir());
+        let store = AgentDirStore::new(self.dir().dir());
         let record = store.get(id)?;
         let dir = record.dir.clone();
 
@@ -241,7 +173,7 @@ impl AgentPlugin {
     /// 注册经 [`super::scope::SubAgentVisitor`] 代理（加来源前缀），因此与系统树的
     /// 同名注册**不冲突**，两份都生效——并集，且结果与遍历顺序无关。
     ///
-    /// ## 跨作用域必须改写上下文（与 `VDFS_PARENT_ADDR` 同理）
+    /// ## 跨作用域必须改写上下文（与系统链路的 `VDFS_PARENT_ADDR` 同理）
     ///
     /// ⚠️ **不得改指 `WORKDIR`**：子树里的 `work` 只负责工作区信息（见
     /// [`ASSEMBLY_SUB_AGENT_PLUGINS`]），改指 Agent 目录会让它去解释 `<agentdir>/AGENTS.md`。
@@ -256,9 +188,12 @@ impl AgentPlugin {
     /// 故此处显式清空 = 「本作用域无选中」。委托子智能体不走本键，走 `agent_run`
     /// 的显式 `agent_id` 参数（它按自己的 store 解析）。
     ///
-    /// 本插件另在这里注入**该智能体自己的 `AGENTS.md`**（`<agentdir>/AGENTS.md`）——
-    /// 子树里虽有 `agent` 实例（分形），但它管的是 `<agentdir>/agent/<sub-id>` 一层；
-    /// 认识 `<agentdir>/AGENTS.md`（智能体自身记忆）这一层的只有本插件（见模块文档）。
+    /// ⚠️ **`VDFS_PARENT_ADDR` 必须续接 `<id>`**：子树里的插件（`memory` / `work` / …）
+    /// 在收集期拼「给模型看的可编辑地址」，靠的就是上下文里的当前父地址。子树的挂载
+    /// 点是 `<根>/agent/<id>`，而本插件自己的父地址只到 `<根>/agent`——不续接就会拼出
+    /// `<根>/agent/memory/AGENTS.md`（一个不存在的地址），模型按它 `vdfs_read` 必然
+    /// 落空。系统链路（[`super::vdfs`] 的 `sub_vfs`）本来就是这么续的，两条链路因此
+    /// 说同一个地址。
     async fn forward_to_sub_agent(
         &self,
         tree: &Arc<dyn Plugin>,
@@ -271,70 +206,24 @@ impl AgentPlugin {
         // 清空而非继承：父作用域的选中 id 由**父**的 store 解析；带进来只会被本层的
         // `agent` 实例当成自己的子目录选择（见上方文档）。
         sub.set(AGENT_ID, String::new());
+        // 续接而非继承：子树挂在 `<根>/agent/<id>` 下（见上方文档）。
+        sub.set(
+            VDFS_PARENT_ADDR,
+            descend_addr(&ctx.get(VDFS_PARENT_ADDR).unwrap_or_default(), id),
+        );
         let scoped: Arc<dyn CapabilityVisitor> =
             Arc::new(super::scope::SubAgentVisitor::new(Arc::clone(visitor), id));
         sub.set(CAPABILITY_VISITOR, scoped.clone());
-
-        // 智能体自己的指令 / 记忆：读出来注入（段名经作用域 visitor 加 `agent/<id>/`
-        // 前缀），与本插件在系统层的注册互不干扰。
-        self.contribute_agent_memory(id, ctx, &scoped).await;
 
         if let Err(e) = tree.clone().traverse(String::new(), sub).await {
             crate::plugin_warn!("agent", "子 Agent `{id}` 能力收集失败：{e:?}");
         }
     }
 
-    /// 注入**某个子智能体**自己的 `AGENTS.md`（`<agentdir>/AGENTS.md`）。
-    ///
-    /// 空文件 / agent 目录不存在 / 读取失败 → 静默跳过——「还没写过」不是故障，
-    /// 不该往收集期错误桶里塞东西。
-    async fn contribute_agent_memory(
-        &self,
-        id: &str,
-        ctx: &Arc<dyn PluginInvokeRequest>,
-        visitor: &Arc<dyn CapabilityVisitor>,
-    ) {
-        let store = AgentDirStore::new(self.config_file.dir().dir());
-        let memory = self.memory_store(&store, id).await;
-        // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
-        let address = crate::symbio_core::absolute_addr(ctx, &memory::rel_path(id));
-        match memory::segment(&memory, &address) {
-            Ok(Some(text)) => {
-                visitor
-                    .register_system_prompt(memory::SEGMENT_NAME, text)
-                    .await
-            }
-            Ok(None) => {}
-            Err(e) => {
-                crate::plugin_warn!("agent", "读取 `{id}` 的 AGENTS.md 失败，本轮不注入：{e}")
-            }
-        }
-    }
-
-    /// 在系统层注入**系统智能体自身的** `AGENTS.md`（`{homedir}/AGENTS.md`）。
-    async fn contribute_instruction(
-        &self,
-        ctx: &Arc<dyn PluginInvokeRequest>,
-        visitor: &Arc<dyn CapabilityVisitor>,
-    ) {
-        let store = self.instruction_store().await;
-        // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
-        let address = crate::symbio_core::absolute_addr(ctx, AGENT_MEMORY_FILE);
-        match instruction::segment(&store, &address) {
-            Ok(Some(text)) => {
-                visitor
-                    .register_system_prompt(instruction::SEGMENT_NAME, text)
-                    .await
-            }
-            Ok(None) => {}
-            Err(e) => crate::plugin_warn!("agent", "读取系统指令失败，本轮不注入：{e}"),
-        }
-    }
-
     pub fn metadata() -> PluginMeta {
         PluginMeta::new(PLUGIN_ID_AGENT, "智能体")
             .with_description(
-                "智能体域：管理 Agent 实例（安装/导出/删除）与智能体自身的 AGENTS.md，\
+                "智能体域：管理装进来的 Agent 目录（安装/导出/删除）与它们的连接，\
                  会话绑定 Agent 时把它整棵插件树的能力并进会话（技能 / MCP 由目录里的\
                  插件实例自己解释）",
             )
@@ -362,7 +251,7 @@ impl AgentPlugin {
         // 展示顺序号段约定：20 = 智能体（见 session::options 模块文档）
         const ORDER: i32 = 20;
 
-        let store = AgentDirStore::new(self.config_file.dir().dir());
+        let store = AgentDirStore::new(self.dir().dir());
         let agent_dirs = store.list();
 
         visitor
@@ -454,14 +343,11 @@ impl Plugin for AgentPlugin {
             return Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()));
         };
 
-        // ── 系统智能体自身的指令（`{homedir}/AGENTS.md`）──
-        // 与「选不选智能体」无关：它对**所有会话**生效，因此无条件注入。
-        self.contribute_instruction(&ctx, &tool_visitor).await;
-
         // ── VDFS 挂载点（`<根>/agent`）──
         // 本插件自身就是 provider：agent 目录由 AgentDirStore 自管目录（本插件自己的
         // 目录，与 workdir 无关），列 / 读 / 写（整包导入）/ 删 / 导出 直接由
         // `impl VdfsProvider for AgentPlugin` 承载（见 `super::vdfs`）。
+        // 智能体自身的记忆 / 设置不在这里——它们各有自己的插件与挂载点。
         {
             let vdfs_provider: Arc<dyn VdfsProvider> = self.clone();
             tool_visitor
@@ -470,11 +356,11 @@ impl Plugin for AgentPlugin {
         }
 
         // ── agent_run：无条件注册 ──
-        let store = AgentDirStore::new(self.config_file.dir().dir());
+        let store = AgentDirStore::new(self.dir().dir());
         tool_visitor
             .register_batch(vec![super::subagent::AgentRunCapability::new(
                 workdir.clone(),
-                self.config_file.dir().dir().to_path_buf(),
+                self.dir().dir().to_path_buf(),
                 super::subagent::format_agent_dirs_brief(&store.list()),
                 self.router.clone(),
             ) as Arc<dyn Capability>])
@@ -491,7 +377,7 @@ impl Plugin for AgentPlugin {
                 // §10：不匹配必须拒绝接入，且不得静默降级为「无人格的通用助手」。
                 // 走到这里说明目录没有可接入的 manifest，错误信息写明双侧版本。
                 None => {
-                    let dir = self.config_file.dir().dir().join(&agent_id);
+                    let dir = self.dir().dir().join(&agent_id);
                     let reason = match manifest::load(&dir) {
                         Some(m) => manifest::validate(&m).unwrap_err(),
                         None => format!(
@@ -510,22 +396,6 @@ impl Plugin for AgentPlugin {
                     .await;
                 }
             }
-        }
-
-        // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
-        capability_announce_configurable(&ctx, &self.config_file).await;
-
-        // 系统智能体自身的指令（`<根>/agent/AGENTS.md`）也是「本 agent 的修改」，
-        // 因此进**设置**而非 agent 列表：复用挂载根里那份指令节点，按设置列表口径补
-        // 真实地址（读写仍落在本插件的 AGENTS.md 上，设置页只列入口、不代管）。
-        // 走的是既有 `ConfigurableVisitor` 通道——本插件只是多交一条节点，不动 symbio_core。
-        if let Some(v) = ctx.get(CONFIGURABLE_VISITOR) {
-            let mut n = self.instruction_node().await;
-            n.ext = Some("md".to_string());
-            v.register_configurable(
-                VdfsItem::new(n).with_path(format!("{PLUGIN_ID_AGENT}/{AGENT_MEMORY_FILE}")),
-            )
-            .await;
         }
 
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))

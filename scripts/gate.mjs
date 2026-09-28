@@ -42,7 +42,12 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { red, green, yellow, dim, bold, stripAnsi } from './color.mjs'
 
-const scriptDir = path.dirname(fileURLToPath(import.meta.url))
+// realpathSync.**native** 规范化盘符大小写：启动 cwd 可能以小写盘符传入（会话
+// 环境实测 `d:\...`；JS 版 realpathSync 与 libuv 一致地**保留**输入大小写，只有
+// native 版走 GetFinalPathNameByHandle 返回 NTFS 真实大小写）。小写路径若一路
+// 传给子任务，vitest v4 的 root 与模块真实路径大小写不一致 ⇒ 同一模块被当两个
+// 副本，worker 单例失效，全部 spec 报「failed to find the runner」——2026-09-28 实测。
+const scriptDir = fs.realpathSync.native(path.dirname(fileURLToPath(import.meta.url)))
 const repoRoot = path.resolve(scriptDir, '..')
 const logDir = path.join(repoRoot, '.workbuddy-ai', 'gate-logs')
 

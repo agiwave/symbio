@@ -20,7 +20,7 @@ import {
 } from '../helpers.mjs';
 
 /** 构造者声明的必需插件（`home::SYSTEM_PLUGINS`）中的一组代表 */
-const REQUIRED_PLUGINS = ['agent', 'local', 'mcp', 'model', 'session', 'skill', 'vdfs', 'work'];
+const REQUIRED_PLUGINS = ['agent', 'local', 'mcp', 'model', 'session', 'skill', 'vdfs', 'memory'];
 
 /** 从 `PLUGIN.yml` 正文里取一个顶层标量（剥掉可选的 YAML 引号） */
 function yamlValue(text, key) {

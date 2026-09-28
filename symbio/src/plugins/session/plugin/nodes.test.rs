@@ -253,6 +253,7 @@ fn vdfs_internal_dirs_conditional() {
         crate::providers::MemoryFile::new(Some(path), 1024, 256).node(
             &crate::providers::MemoryNodeSpec {
                 title: "会话记忆",
+                name: None,
                 kind: PLUGIN_ID_SESSION,
                 description: "d",
             },

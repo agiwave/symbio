@@ -229,7 +229,11 @@ export const BASELINE = {
   //        +1 `symbio_core/schemas/detail.test.rs`：`absent_constraints_do_not_serialize_as_null`
   //           ——三个约束位缺席时不写 `null`（写成 `null` ⇒ 整条恒假、界面静默
   //           少一个动作，T13 清单节「进入下一级」曾整条消失）。
-  rustTests: 969,
+  // 2026-09-28：969 → **976**（+7）。`work` 并入 `memory`（ADR-040）：memory 插件
+  //           重写/新增 4 件测试（plugin 9 例 / vdfs 11 例 / workspace 8 例 / config 4 例），
+  //           work 的旧测试随目录删除（净变化 +7）；agent 侧穿越用例改指工作区腿、
+  //           config.test 补 `workspace_enabled` 字段。
+  rustTests: 976,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

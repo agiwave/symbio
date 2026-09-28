@@ -100,37 +100,3 @@ fn path_sandbox_rejects_escapes() {
         assert!(normalize_item_path(bad).is_err(), "should reject `{bad}`");
     }
 }
-
-/// 在本插件目录落一个最小 agent 目录（不经 zip：以下用例只关心写入闸门）
-fn workspace_store_with_agent_dir() -> (tempfile::TempDir, AgentDirStore) {
-    let dir = tempfile::TempDir::new().unwrap();
-    let store = AgentDirStore::new(dir.path().join("global-agent"));
-    let agent_dir = dir.path().join("global-agent").join("b");
-    std::fs::create_dir_all(agent_dir.join("prompts")).unwrap();
-    std::fs::write(
-        agent_dir.join("manifest.yaml"),
-        "spec: \"agent-dir/v2\"\nid: \"b\"\nname: \"B\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^2\"\n",
-    )
-    .unwrap();
-    assert!(store.get("b").is_some(), "前置：agent 目录应被扫描到");
-    (dir, store)
-}
-
-/// 智能体记忆**落位**在 agent 目录自己的目录（不是工作区目录），文件名与工作区级同名。
-///
-/// 读写与两道容量闸门不在这里测——它们已收口到共享实现，用例在
-/// `agent/host/memory.test.rs`（本模块只回答「记忆文件在哪」）。
-#[test]
-fn memory_lives_in_agent_dir() {
-    let (dir, store) = workspace_store_with_agent_dir();
-    let path = store.memory_path("b").unwrap();
-    assert_eq!(
-        path,
-        dir.path().join("global-agent/b").join(AGENT_MEMORY_FILE)
-    );
-    assert_eq!(path.file_name().unwrap(), "AGENTS.md");
-    // 不是工作区根的那个 AGENTS.md
-    assert_ne!(path, dir.path().join(AGENT_MEMORY_FILE));
-    // agent 目录不存在 → 明确报错（`memory::store` 据此构造「无作用域」门面）
-    assert!(store.memory_path("nope").is_err());
-}

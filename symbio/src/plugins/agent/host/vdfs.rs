@@ -16,27 +16,21 @@
 //! 三类容器等于宿主替能力目录解释语义（每类一套路径白名单、新建模板与默认正文），
 //! 改一处要改三处，且与宿主的技能系统 / MCP 客户端天然不同步。
 //!
-//! 唯一的例外是根下的 `AGENTS.md`（§6 人格与记忆），它走共享实现的
-//! `MemoryFile::node`（带容量闸门），与工作区记忆同一口径。
+//! 于是挂载点内**没有任何保留名**：`AGENTS.md` 若出现在 `<id>` 下，就是那个包里的
+//! 一个普通文件（内容由子树自己的 `memory` 实例解释，本插件不代读）。
 //!
 //! ## 挂载根只列「装进来的智能体」
 //!
 //! 挂载根清单 = 各 agent 目录（装进来的子智能体），与 session / model 列表同一口径。
-//! `<挂载点名>/agent/AGENTS.md` 也挂在这棵树上，但它**不在清单里**——它是**本应用
-//! （系统智能体）自身**的指令（目录名由各模块按自身挂载规则决定），
-//! 属于「本 agent 的修改」，入口在**设置页**（`traverse` 里经 `ConfigurableVisitor`
-//! 注册，读写仍落在本插件的地址上），混在 agent 列表里会被读成某个包。
-//!
-//! 与 agent 目录无关的那三个字母 `AGENTS.md` 因此是挂载根下的**保留名**；agent id 的
-//! 字符集要求首字符是小写字母或数字，不可能与之相撞（§5.1）。
+//! **当前智能体自身**的东西不在本挂载点里：记忆在 `<根>/memory/AGENTS.md`、设置在
+//! `<根>/setting/PLUGIN.yml`——它们各有自己的插件与挂载点（分形，子树里各有一份）。
 //!
 //! 外部访问一律走 `<根>/agent/…`。
 
-use super::instruction;
-use super::memory;
 use super::plugin::AgentPlugin;
-use super::store::{AgentDirRecord, AgentDirStore, AGENT_MEMORY_FILE};
+use super::store::{AgentDirRecord, AgentDirStore};
 use crate::providers::{vdfs_id_of, VdfsPack, VdfsUnpack};
+use crate::symbio_core::PLUGIN_ID_AGENT;
 use crate::symbio_core::{
     descend_addr, vdfs_host_ctx, vdfs_notify_change, vdfs_unwatch_changes, vdfs_watch_changes,
 };
@@ -45,7 +39,6 @@ use crate::symbio_core::{
     VdfsItem, VdfsNewType, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult,
     VdfsWriteResponse, VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_EXT_FORM,
 };
-use crate::symbio_core::{PLUGIN_FILE, PLUGIN_ID_AGENT};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -57,14 +50,8 @@ const LABEL: &str = "智能体";
 #[derive(Debug)]
 enum RelPath<'a> {
     Root,
-    /// 系统智能体自身的指令：挂载根下的 `AGENTS.md`（与 agent 目录无关，见模块文档）
-    Instruction,
     /// Agent 本身（`<id>`）
     Agent {
-        id: &'a str,
-    },
-    /// 人格与记忆：`<条目 id>/AGENTS.md`（§6，走共享实现记忆门面，不是普通文件）
-    Memory {
         id: &'a str,
     },
     /// Agent 目录内的文件 / 子目录；`rel` 可含 `/`
@@ -79,15 +66,8 @@ fn parse_rel_path(path: &str) -> RelPath<'_> {
     if p.is_empty() {
         return RelPath::Root;
     }
-    // 保留名：挂载根下的 `AGENTS.md` 是**本应用自身**的指令，不是名为它的 agent 目录
-    // （agent id 首字符必须是小写字母或数字，两者不可能相撞）
-    if p == AGENT_MEMORY_FILE {
-        return RelPath::Instruction;
-    }
     match p.split_once('/') {
         None => RelPath::Agent { id: p },
-        // 第二段是记忆文件名 → 记忆，而不是「名为 AGENTS.md 的普通文件」
-        Some((id, rest)) if rest == AGENT_MEMORY_FILE => RelPath::Memory { id },
         Some((id, rest)) => RelPath::File { id, rel: rest },
     }
 }
@@ -211,7 +191,7 @@ impl AgentPlugin {
     /// Agent 目录底座（每次请求独立）
     ///
     /// 根 = **本插件自己持有的目录**（构造时由父插件经 `PLUGIN_DIR` 告知，落在
-    /// `config_file` 上）——与 [`AgentPlugin::sub_agent`] 取的是**同一份**。
+    /// [`AgentPlugin::dir`] 上）——与 [`AgentPlugin::sub_agent`] 取的是**同一份**。
     ///
     /// ⚠️ **不得改回「从请求上下文取」**（`plugin_dir_from_ctx(&**host, PLUGIN_ID_AGENT)`）。
     /// `PLUGIN_DIR` 只在**装配期**给出：`composite::build` 构造子插件时、
@@ -219,19 +199,9 @@ impl AgentPlugin {
     /// 提供任何全局回退（全局 agent 根那套已随 homedir 下沉到 `home` 删除）——
     /// 拿请求 ctx 取只会 panic 或错位：子智能体空间里列出的「智能体」会变成顶层
     /// 清单（回归钉：`host::tests::sub_agent_agent_list_is_scoped_to_its_own_space`）。
-    /// 同理，`RelPath::Agent` / `File` / `Memory` 各域在子空间里也都会读到全局
-    /// 的智能体包。
+    /// 同理，`RelPath::Agent` / `File` 两域在子空间里也都会读到全局的智能体包。
     fn store(&self) -> AgentDirStore {
-        AgentDirStore::new(self.config_file().dir().dir())
-    }
-
-    /// 系统智能体自身指令 → VDFS 节点（`list` 与 `stat` 共用同一份形状）。
-    ///
-    /// `traverse` 也用它拼设置页条目：调用方拿到节点后改 `path` 为真实地址即可。
-    pub(crate) async fn instruction_node(&self) -> VdfsNode {
-        self.instruction_store()
-            .await
-            .node(&instruction::node_spec())
+        AgentDirStore::new(self.dir().dir())
     }
 
     /// 穿过挂载点：取子智能体（`<id>`）的 VDFS 视图。
@@ -290,9 +260,11 @@ impl AgentPlugin {
 impl VdfsProvider for AgentPlugin {
     /// 唯一入口：**先按 `path` 定位资源域，再按 `req` 执行操作**。
     ///
-    /// 配置文档（`PLUGIN.yml`）按真实文件名可达——先判路径再分流操作；其余全部经
-    /// [`parse_rel_path`] 按 path 形状定域，各域逻辑收敛在下方私有方法里
+    /// 全部经 [`parse_rel_path`] 按 path 形状定域，各域逻辑收敛在下方私有方法里
     /// （派发面与实现面分离：本方法只做路由，域内怎么落盘是各方法自己的事）。
+    ///
+    /// 本插件**没有配置文档**（`PLUGIN.yml`）：智能体自身的记忆闸门随 `memory` 走，
+    /// 装进来的智能体没有宿主级开关，故挂载点内没有那个保留文件名可达。
     ///
     /// ## 根的自述走 `Stat` 空路径
     ///
@@ -305,23 +277,6 @@ impl VdfsProvider for AgentPlugin {
         path: &str,
         req: VdfsRequest,
     ) -> VdfsResult<VdfsResponse> {
-        // 配置文档按**真实文件名**可达（列表里不并列，进设置走 ConfigurableVisitor）
-        if path.trim_matches('/') == PLUGIN_FILE {
-            return match req {
-                VdfsRequest::Stat => Ok(VdfsResponse::Stat(self.config_file().node())),
-                VdfsRequest::Read => Ok(VdfsResponse::Read(
-                    self.config_file().read(self.config_slot()).await?,
-                )),
-                VdfsRequest::Write { content } => Ok(VdfsResponse::Write(
-                    self.config_file()
-                        .apply(self.config_slot(), &content)
-                        .await?,
-                )),
-                _ => Err(VdfsError::invalid(format!(
-                    "该路径是文件，不支持此操作：{path}"
-                ))),
-            };
-        }
         match req {
             VdfsRequest::List { .. } => Ok(VdfsResponse::List(self.list_at(ctx, path).await?)),
             VdfsRequest::Stat => Ok(VdfsResponse::Stat(self.stat_at(ctx, path).await?)),
@@ -363,19 +318,13 @@ impl AgentPlugin {
         match parse_rel_path(path) {
             // 挂载根 = **装进来的智能体清单**，一样别的都没有。
             //
-            // 本应用自身的指令（`<根>/agent/AGENTS.md`）也挂在这棵树上，但它是
-            // **本应用自身的设置**，不是装进来的智能体——混在这张列表里会让人
-            // 把它读成某个包。它的入口在设置页（见 `super::plugin` 的 `traverse`），
-            // 地址（`<根>/agent/AGENTS.md`）照旧可达，只是不在这里列出。
+            // 当前智能体自身的记忆 / 设置不在这里——它们各有自己的挂载点
+            // （`memory` / `setting`），混进这张列表会被读成某个包。
             RelPath::Root => Ok(store
                 .list()
                 .into_iter()
                 .map(|r| VdfsItem::new(agent_dir_node(&r, &store)))
                 .collect()),
-            // 指令是叶子节点
-            RelPath::Instruction => Err(VdfsError::invalid(format!(
-                "该路径是文件，不可列举：{path}"
-            ))),
             RelPath::Agent { id } => {
                 let id = id_of(id);
                 // 可挂载的 v2 子智能体 → 穿过挂载点，列出**子 composite 的根视图**。
@@ -408,10 +357,6 @@ impl AgentPlugin {
                 .into_list()
                 .ok_or_else(mismatch)
             }
-            // 记忆是叶子节点
-            RelPath::Memory { .. } => Err(VdfsError::not_found(format!(
-                "智能体记忆是叶子节点，没有子项：{path}"
-            ))),
             RelPath::File { id, rel } => {
                 let id = id_of(id);
                 // 可挂载的子智能体 → 穿过挂载点，列出子 composite 内对应子树。
@@ -433,7 +378,7 @@ impl AgentPlugin {
         }
     }
 
-    /// `path` 域的节点元数据（配置文档已在 [`Self::dispatch`] 按路径先行分流）
+    /// `path` 域的节点元数据
     ///
     /// ## 根的自述（`RelPath::Root`）里带着「可新建类型」
     ///
@@ -461,22 +406,12 @@ impl AgentPlugin {
                         ),
                 )),
             ),
-            // 本应用自身的指令（`{homedir}/AGENTS.md`）
-            RelPath::Instruction => Ok(self.instruction_node().await),
             RelPath::Agent { id } => {
                 let id = id_of(id);
                 let r = store
                     .get(&id)
                     .ok_or_else(|| VdfsError::not_found(format!("未找到{LABEL}「{id}」")))?;
                 Ok(agent_dir_node(&r, &store))
-            }
-            RelPath::Memory { id } => {
-                let id = id_of(id);
-                let memory = self.memory_store(&store, &id).await;
-                if !memory.has_scope() {
-                    return Err(VdfsError::not_found(format!("未找到{LABEL}「{id}」")));
-                }
-                Ok(memory.node(&memory::node_spec()))
             }
             RelPath::File { id, rel } => {
                 let id = id_of(id);
@@ -495,15 +430,6 @@ impl AgentPlugin {
     async fn read_at(&self, ctx: &VdfsContext, path: &str) -> VdfsResult<VdfsContent> {
         let store = self.store();
         match parse_rel_path(path) {
-            // 本应用自身的指令（`{homedir}/AGENTS.md`）
-            RelPath::Instruction => {
-                let text = self
-                    .instruction_store()
-                    .await
-                    .read()
-                    .map_err(|e| VdfsError::not_found(format!("读取系统指令失败：{e}")))?;
-                Ok(VdfsContent::text(text))
-            }
             // Agent 目录内的文件 / 子路径
             RelPath::File { id, rel } => {
                 let id = id_of(id);
@@ -516,16 +442,6 @@ impl AgentPlugin {
                     .await?
                     .into_read()
                     .ok_or_else(mismatch)
-            }
-            // 智能体记忆：Agent 目录下的 `AGENTS.md`
-            RelPath::Memory { id } => {
-                let id = id_of(id);
-                let text = self
-                    .memory_store(&store, &id)
-                    .await
-                    .read()
-                    .map_err(|e| VdfsError::not_found(format!("读取智能体记忆失败：{e}")))?;
-                Ok(VdfsContent::text(text))
             }
             // Agent 条目本身：读的是**概览**（详情表单 `binding: info` 的输入）
             RelPath::Agent { id } => {
@@ -543,50 +459,13 @@ impl AgentPlugin {
         }
     }
 
-    /// `path` 域的写入（配置文档已在 [`Self::dispatch`] 按路径先行分流）
+    /// `path` 域的写入
     async fn write_at(
         &self,
         ctx: &VdfsContext,
         path: &str,
         content: &VdfsContent,
     ) -> VdfsResult<VdfsWriteResponse> {
-        let store = self.store();
-        // 系统智能体自身的指令写回（容量闸门在共享实现里，本插件不重复实现）
-        if matches!(parse_rel_path(path), RelPath::Instruction) {
-            if content.binary {
-                return Err(VdfsError::invalid("AGENTS.md 是文本文件，不接受二进制内容"));
-            }
-            let instr = self.instruction_store().await;
-            let existed = instr.exists();
-            let text = content.text.as_deref().unwrap_or_default();
-            instr.write(text).map_err(VdfsError::invalid)?;
-            vdfs_notify_change(PLUGIN_ID_AGENT, path);
-            return Ok(VdfsWriteResponse {
-                name: None,
-                created: !existed,
-                etag: None,
-            });
-        }
-        // 智能体记忆写回（容量闸门在共享实现里，本插件不重复实现）
-        if let RelPath::Memory { id } = parse_rel_path(path) {
-            if content.binary {
-                return Err(VdfsError::invalid("智能体记忆是文本文件，不接受二进制内容"));
-            }
-            let id = id_of(id);
-            let memory = self.memory_store(&store, &id).await;
-            if !memory.has_scope() {
-                return Err(VdfsError::not_found(format!("未找到{LABEL}「{id}」")));
-            }
-            let existed = memory.exists();
-            let text = content.text.as_deref().unwrap_or_default();
-            memory.write(text).map_err(VdfsError::invalid)?;
-            vdfs_notify_change(PLUGIN_ID_AGENT, path);
-            return Ok(VdfsWriteResponse {
-                name: None,
-                created: !existed,
-                etag: None,
-            });
-        }
         // 二进制载荷**不再是创建通道**：整包导入已改走详情页动作
         // （[`VDFS_ACTION_IMPORT`]，见 [`Self::action_at`]）。这里显式拒绝，而不是
         // 让它落到下面的文本分支——那会报「不是合法 JSON」，让人以为是内容格式
@@ -620,26 +499,12 @@ impl AgentPlugin {
         )))
     }
 
-    /// 删除：系统指令与智能体记忆不可删（要清空就写入空内容）
+    /// 删除：挂载点本身不可删（子路径的裁决交给子树 provider）
     async fn delete_at(&self, ctx: &VdfsContext, path: &str, recursive: bool) -> VdfsResult<()> {
         if path.is_empty() {
             return Err(VdfsError::Forbidden(format!("不可删除挂载点：{path}")));
         }
         let store = self.store();
-        // 系统指令不可删除（与各层记忆同一口径）：要清空就写入空内容
-        if matches!(parse_rel_path(path), RelPath::Instruction) {
-            return Err(VdfsError::Forbidden(format!(
-                "系统指令不可删除（删除即丢失全部指令）。\
-                 如需清空，请向 `{AGENT_MEMORY_FILE}` 写入空内容。"
-            )));
-        }
-        // 智能体记忆不可删除（与工作区记忆同一口径）：要清空就写入空内容
-        if matches!(parse_rel_path(path), RelPath::Memory { .. }) {
-            return Err(VdfsError::Forbidden(format!(
-                "智能体记忆不可删除（删除即丢失全部长期记忆）。\
-                 如需清空，请向 `{AGENT_MEMORY_FILE}` 写入空内容。"
-            )));
-        }
         // Agent 目录内的文件 / 子目录
         if let RelPath::File { id, rel } = parse_rel_path(path) {
             let id = id_of(id);

@@ -232,11 +232,12 @@ Agent 目录下的 `AGENTS.md` 承载两样东西：**它是谁**（人格）与
 2. 该所有者**必须**按作用域区分文件——「系统 Agent 自己的那份」与
    「每个子 Agent 各自那份」是**两个作用域、两份文件**，不得用一份文件兼任。
 
-⚠️ **不得靠改指其它插件的作用域来实现第 2 条。** 例如「把子 Agent 树里某个
-以工作区为作用域的插件实例改指到 `<agent dir>`」这种办法，会让那个插件的名字与
-它实际管的东西对不上（`work` 只认 `{workdir}`），于是同一份文件被两个所有者
-各注入一次。正确做法是由**托管 Agent 目录的那个宿主插件**（§9）统一解释
-`<agent dir>/AGENTS.md`——它本来就在扫描这个目录。symbio 的具体做法见附录 A.3。
+⚠️ **不得靠改指其它插件的作用域来实现第 2 条。** 例如「把子 Agent 树里
+`memory` 的工作区腿改指到 `<agent dir>`」这种办法，会让它名实不符（工作区腿
+只认 `{workdir}`，见 A.3），于是同一份文件被两个所有者各注入一次。正确做法是
+**分形**：同一个插件在每棵树里各有一个实例，实例从**自己目录的父目录**推导
+智能体作用域——实例落在 `<agent dir>` 之下，它的作用域自然就是 `<agent dir>`。
+symbio 的具体做法见附录 A.3。
 
 ---
 
@@ -356,7 +357,8 @@ Agent，不属于「一个 Agent 会什么」。
 
 - 插件容器 = `composite` 插件；系统根由 `home` 经 `PLUGIN_DIR` 告知它；
 - 子 Agent 树由 `agent` 插件构造，做法与 `home` 构造 `worker` 完全同形：
-  设 `PLUGIN_DIR = <agent dir>`、设 `REQUIRED_PLUGINS = ["mcp","skill"]`，
+  设 `PLUGIN_DIR = <agent dir>`、设 `REQUIRED_PLUGINS = ASSEMBLY_SUB_AGENT_PLUGINS`
+  （与系统树共享同一份清单——`memory` / `setting` 的分形实例由它带进子树），
   再 `creator_create_object("composite", …)`；
 - `composite` 只扫一层目录，因此 `agent/<id>` 不会被系统树误扫（§9 第 5 条）。
 
@@ -365,27 +367,27 @@ Agent，不属于「一个 Agent 会什么」。
 一层目录是一个插件：目录下的 `PLUGIN.yml` 可被解析、且 `plugin_provider` 指向一个
 已注册的工厂，即为合格的能力插件。无 `PLUGIN.yml` 的目录静默跳过（它不是插件）。
 
-### A.3 两份 `AGENTS.md` 归 `agent` 插件
+### A.3 两份 `AGENTS.md` 归 `memory` 插件
 
-`agent` 插件是**智能体域的唯一所有者**，它同时掌握两个作用域的文件：
+`memory` 插件是记忆的唯一所有者（智能体记忆 + 工作区记忆，两作用域同住
+`<根>/memory` 一个挂载点），它以**分形**同时覆盖两个作用域的智能体记忆：
 
 | 作用域 | 物理落位 | 可编辑地址 | 片段标题 |
 |---|---|---|---|
-| 系统 Agent（宿主自身） | `{homedir}/AGENTS.md` | `<根>/agent/AGENTS.md` | 【全局指令】 |
-| 子 Agent | `<agent dir>/AGENTS.md` | `<根>/agent/<id>/AGENTS.md` | 【智能体记忆】 |
+| 系统 Agent（宿主自身） | `{homedir}/AGENTS.md` | `<根>/memory/AGENTS.md` | 【智能体记忆】 |
+| 子 Agent | `<agent dir>/AGENTS.md` | `<根>/agent/<id>/memory/AGENTS.md` | 【智能体记忆】 |
 
-两条落位都不需要新的上下文键：系统那一份取自**本插件目录的父目录**（容器规则是
-「一层目录 = 一个插件，插件并列在智能体目录下」，本插件在 `<homedir>/agent`）；
-子 Agent 那一份由 `AgentDirStore` 解析（工作区级 + 全局级双层发现）。
+两条落位都不需要新的上下文键：智能体腿的作用域取自**本插件目录的父目录**（容器
+规则是「一层目录 = 一个插件，插件并列在智能体目录下」——系统实例落在
+`<homedir>/memory`，子树实例落在 `<agent dir>/memory`）。两个作用域由**同一个
+插件的两个实例**天然分开：实例从自己目录的父目录取作用域，谁也不必认识谁的
+目录。子树的注册仍经作用域 visitor 加 `agent/<id>/` 前缀（A.4），因此与系统侧
+不冲突。工作区腿（挂载名 `WORKSPACE.md`，物理 `{workdir}/AGENTS.md`）同住这个
+挂载点，作用域来自会话而非装配。
 
-**为什么是它而不是子树里的某个插件实例**：子树按 agent 目录扫描，里面没有 `agent`
-实例（否则自我嵌套）；而「认识 Agent 目录」的恰恰是本插件——它已经在扫描该目录、
-装配子树、把整包内容暴露成 VDFS。子树的注册仍经作用域 visitor 加 `agent/<id>/`
-前缀（A.4），因此与系统侧不冲突。
-
-⚠️ 子树的 `WORKDIR` **不得**被覆写成 Agent 目录。`work` 的作用域语义是
-`{workdir}`，覆写使它名实不符，并与系统侧那个实例读同一份工作区文件、注入两次。
-子树**继承**父会话的 `WORKDIR`。
+⚠️ 子树的 `WORKDIR` **不得**被覆写成 Agent 目录。`memory` 工作区腿的作用域
+语义是 `{workdir}`，覆写使它名实不符，并与系统侧那个实例读同一份工作区文件、
+注入两次。子树**继承**父会话的 `WORKDIR`。
 
 ### A.4 并集的命名空间隔离
 

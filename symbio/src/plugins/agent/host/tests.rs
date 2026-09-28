@@ -1,20 +1,22 @@
-//! host 层端到端测试：Agent 导入 → traverse 装配 → 记忆落位 → 导出 → 删除。
+//! host 层端到端测试：Agent 导入 → traverse 装配 → 子树能力并进 → 导出 → 删除。
 //!
 //! 覆盖规范 §4（目录结构）/ §5（manifest）/ §8（装配语义）/ §10（版本接入门槛）
 //! 的主链路，全部进程内完成（tempdir + 内存 zip），不依赖真实文件系统布局。
 //!
 //! Agent 采用**目录即配置**布局（约定优于配置）：`manifest.yaml` + `AGENTS.md`
 //! + 能力插件目录（`skill/` `mcp/` `plugin_manager/`），存在即安装，无需在 manifest 里登记。
+//!
+//! 智能体自身的 `AGENTS.md` 不归本插件（归 `memory`，分形）——本层只验证「它的
+//! 注入确实发生在本插件撑起的那棵子树上」，落位与闸门的用例在 `plugins/memory`。
 
 use super::plugin::AgentPlugin;
 use super::store::AgentDirStore;
-use crate::providers::{DefaultConfigurableVisitor, DefaultToolVisitor};
+use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{vdfs, VdfsProvider};
 use crate::symbio_core::{
-    CapabilityVisitor, ConfigurableVisitor, Plugin, PluginDir, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginSimpleRequest, AGENT_ID, CAPABILITY_VISITOR,
-    CONFIGURABLE_VISITOR, PATH, PLUGIN_ID_AGENT, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
-    WORKDIR,
+    CapabilityVisitor, Plugin, PluginDir, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginSimpleRequest, AGENT_ID, CAPABILITY_VISITOR, PATH, PLUGIN_ID_AGENT,
+    TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -96,7 +98,7 @@ fn ctx_with(
 }
 
 #[tokio::test]
-async fn agent_import_traverse_and_memory() {
+async fn agent_import_traverse_and_export() {
     let dir = tempfile::tempdir().unwrap();
     let workdir = dir.path().to_str().unwrap();
 
@@ -143,15 +145,15 @@ async fn agent_import_traverse_and_memory() {
         caps.iter().map(|c| &c.name).collect::<Vec<_>>()
     );
 
-    // ── 3. 系统提示词：子 Agent 自身的 AGENTS.md 由**本插件**注入 ──
-    // 子树里没有 `agent` 实例，而认识 Agent 目录的正是本插件；段名经作用域 visitor
-    // 加 `agent/<id>/` 前缀，因此与系统侧的同名条目互不覆盖
+    // ── 3. 系统提示词：子 Agent 自身的 AGENTS.md 由**子树里的 memory 实例**注入 ──
+    // 本插件不再兼管智能体自身的记忆（那是 `memory` 插件，分形）：段名经作用域
+    // visitor 加 `agent/<id>/` 前缀，与系统侧的 `memory` 条目并集且不撞名。
     let segments = manager.list_system_prompts().await;
     let names: Vec<&str> = segments.iter().map(|(n, _)| n.as_str()).collect();
-    const OWN_SEGMENT: &str = "agent/com.symbio.test-fixture/agent-memory";
+    const OWN_SEGMENT: &str = "agent/com.symbio.test-fixture/memory";
     assert!(
         names.contains(&OWN_SEGMENT),
-        "智能体自身的 AGENTS.md 应由本插件带前缀注入: {names:?}"
+        "子智能体自身的 AGENTS.md 应由子树的 memory 实例带前缀注入: {names:?}"
     );
     let injected = segments
         .iter()
@@ -162,23 +164,17 @@ async fn agent_import_traverse_and_memory() {
         injected.contains("你是全栈开发人格"),
         "注入内容应来自该 agent 目录自己的 AGENTS.md: {injected}"
     );
+    // 地址必须落在**子树的 memory 挂载点**下（父地址续接 `<id>` 的回归钉）：
+    // 少续一段就会拼成 `@vfs/agent/memory/AGENTS.md`——一个不存在的地址。
     assert!(
-        injected.contains("@vfs/agent/com.symbio.test-fixture/AGENTS.md"),
-        "片段应指路整包浏览面里的那个地址: {injected}"
+        injected.contains("@vfs/agent/com.symbio.test-fixture/memory/AGENTS.md"),
+        "片段应指路子树 memory 挂载点下的那个地址: {injected}"
     );
-
-    // ── 3b. 记忆落位：Agent 自己的目录，不是工作区根 ──
-    // 读写走共享实现（`MemoryFile`），本插件只提供落位
-    let memory = plugin.memory_store(&store, "com.symbio.test-fixture").await;
-    memory.write("该智能体记住：先写测试。").unwrap();
-    assert_eq!(
-        memory.path().unwrap(),
-        Path::new(&result.dir).join("AGENTS.md"),
-        "智能体记忆落在 Agent 目录"
-    );
+    // 本插件不再碰那份文件：它仍躺在 agent 目录里，工作区根不受影响
     assert!(
-        !Path::new(workdir).join("AGENTS.md").exists(),
-        "智能体记忆不得落到工作区根（那是 work 插件的作用域）"
+        Path::new(&result.dir).join("AGENTS.md").exists()
+            && !Path::new(workdir).join("AGENTS.md").exists(),
+        "智能体记忆归 `memory`（落在 Agent 目录），不是工作区根（那是 work 的作用域）"
     );
 
     // ── 4. 导出（打包下载语义）──
@@ -244,8 +240,8 @@ async fn nonconforming_agent_is_rejected_with_both_versions() {
 // v2：子 Agent 是一棵 composite 插件树（规范 `docs/design/agent-directory-spec.md`）
 // ---------------------------------------------------------------------
 // 验证三件事：manifest 声明 `agent-dir/v2` 的目录会被挂成插件树；它的注册经
-// 代理层带上来源前缀（与系统树不冲突）；它的 `plugin_manager` 实例把自己目录下的
-// `AGENTS.md` 注入成【智能体指令】。
+// 代理层带上来源前缀（与系统树不冲突）；它自己的 `AGENTS.md` 由子树里的 `memory`
+// 实例注入成【智能体记忆】（本插件不再兼管这一层）。
 // ═══════════════════════════════════════════════════════════════════════════
 
 #[tokio::test]
@@ -261,7 +257,7 @@ async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
         "spec: \"agent-dir/v2\"\nid: \"reviewer\"\nname: \"评审\"\nversion: \"1.0.0\"\nrequires:\n  spec: \"^2\"\n",
     )
     .unwrap();
-    // 人格 / 记忆：`<agentdir>/AGENTS.md`，由子树的 `plugin_manager` 实例读取并注入
+    // 人格 / 记忆：`<agentdir>/AGENTS.md`，由子树里的 `memory` 实例读取并注入
     // （宿主不再把子树的 WORKDIR 改指本目录——`work` 只认工作区，那个覆写是错的）
     std::fs::write(sub.join("AGENTS.md"), "你是评审专家。").unwrap();
     // 一个技能：落在子 Agent **自己的** skill 插件目录下（有技能它才注册 read_skill）
@@ -292,11 +288,11 @@ async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
 
     plugin.traverse(String::new(), ctx).await.unwrap();
 
-    // 1) 子 Agent 的 AGENTS.md 由本插件注入，段名带来源前缀
-    //    （与系统侧的 `agent-memory` / `agent-instructions` 不冲突）
+    // 1) 子 Agent 的 AGENTS.md 由子树里的 `memory` 实例注入，段名带来源前缀
+    //    （`memory` 在系统树里也有一份，前缀正是两者并集且不撞名的原因）
     let prompts = manager.list_system_prompts().await;
     let names: Vec<String> = prompts.iter().map(|(n, _)| n.clone()).collect();
-    const OWN_SEGMENT: &str = "agent/reviewer/agent-memory";
+    const OWN_SEGMENT: &str = "agent/reviewer/memory";
     assert!(
         names.contains(&OWN_SEGMENT.to_string()),
         "子 Agent 的注册应带来源前缀，实际：{names:?}"
@@ -307,10 +303,12 @@ async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
         .map(|(_, t)| t.as_str())
         .unwrap();
     assert!(injected.contains("你是评审专家"), "{injected}");
-    // 地址指向本插件的整包浏览面，且**印出真实写入闸门**（闸门由本插件执行）
+    // 地址落在**子树的 memory 挂载点**下：`<父地址续接 id>/memory/AGENTS.md`。
+    // 少续一段（`@vfs/agent/memory/AGENTS.md`）就是个不存在的地址——那条回归钉
+    // 正是 `AgentPlugin::forward_to_sub_agent` 续接 `VDFS_PARENT_ADDR` 的理由。
     assert!(
-        injected.contains("@vfs/agent/reviewer/AGENTS.md"),
-        "片段应指路整包浏览面里的地址: {injected}"
+        injected.contains("@vfs/agent/reviewer/memory/AGENTS.md"),
+        "片段应指路子树 memory 挂载点下的地址: {injected}"
     );
     assert!(
         injected.contains("本智能体私有，与【工作区记忆】相互独立"),
@@ -389,7 +387,7 @@ async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
         items.iter().map(|it| &it.path).collect::<Vec<_>>()
     );
     // 2) 关键回归：`root_hidden` 的配置型挂载点不得出现在侧边栏（与系统根一致）
-    for hidden in ["gateway", "web", "telegram", "local", "work"] {
+    for hidden in ["gateway", "web", "telegram", "local", "setting"] {
         assert!(
             !names.contains(&hidden),
             "子根不应列出 root_hidden 的 {hidden}（与系统根一致），实际：{names:?}"
@@ -428,60 +426,23 @@ async fn mount_root_lists_only_installed_agents() {
     assert_eq!(
         names,
         vec!["com.acme.demo"],
-        "挂载根只有装进来的智能体，系统指令不在此列：{names:?}"
+        "挂载根只有装进来的智能体：{names:?}"
     );
 
-    // 不进清单 ≠ 不可达：地址照旧可读（设置页那个入口指向它）
-    let n = plugin
-        .dispatch(&ctx, "AGENTS.md", STAT)
-        .await
-        .unwrap()
-        .into_stat()
-        .unwrap();
-    assert_eq!(n.title, "全局指令");
-}
-
-/// 设置页收到两条 agent 条目：配置文档（`agent/PLUGIN.yml`）+ 系统自身指令
-/// （`agent/AGENTS.md`）——两条地址都指向本插件，读写仍落在本插件文件上。
-#[tokio::test]
-async fn traverse_declares_config_and_instruction_in_settings() {
-    let tmp = tempfile::tempdir().unwrap();
-    let workdir = tmp.path().to_string_lossy().to_string();
-    let agent_root = tmp.path().join("agent");
-    std::fs::create_dir_all(&agent_root).unwrap();
-    // 系统智能体自身的指令：挂在 agent 目录的**父目录**（homedir）
-    std::fs::write(tmp.path().join("AGENTS.md"), "你是系统智能体。").unwrap();
-
-    let store = AgentDirStore::new(agent_root.clone());
-    store
-        .import(&build_agent_zip("com.acme.demo", "^2"), false)
-        .unwrap();
-
-    let plugin = Arc::new(AgentPlugin::new());
-    let (ctx, _manager) = ctx_with(Some(&workdir), Some("com.acme.demo"));
-    let configs: Arc<dyn ConfigurableVisitor> = Arc::new(DefaultConfigurableVisitor::new());
-    ctx.set(CONFIGURABLE_VISITOR, Arc::clone(&configs));
-
-    plugin.traverse(String::new(), ctx).await.unwrap();
-
-    let entries = configs.list_configurables().await;
-    let by_name: std::collections::HashMap<&str, &crate::symbio_core::VdfsItem> = entries
-        .iter()
-        .map(|it| (it.node.name.as_str(), it))
-        .collect();
-    // 配置文档（name = 目录名 agent）
+    // 本插件**没有配置文档**：智能体自身的记忆闸门随 `memory` 走，装进来的智能体
+    // 没有宿主级开关——`PLUGIN.yml` 在这里不是一条可达路径。
     assert!(
-        by_name.contains_key("agent"),
-        "应含 agent 配置文档：{by_name:?}"
+        plugin.dispatch(&ctx, "PLUGIN.yml", STAT).await.is_err(),
+        "agent 挂载点不再有配置文档（闸门归 memory）"
     );
-    // 系统自身指令（name = AGENTS.md，地址指向本插件）
-    let instr = by_name
-        .get("AGENTS.md")
-        .expect("设置页应含系统指令条目（agent 列表里没有它）");
-    assert_eq!(instr.path, "agent/AGENTS.md");
-    assert_eq!(instr.node.title, "全局指令");
-    assert_eq!(instr.node.ext.as_deref(), Some("md"));
+    // 挂载根下**没有保留名**：`AGENTS.md` 不再是「本应用自身的指令」（那份文件归
+    // `memory`），它在这里只是一个不存在的 agent id。
+    assert!(
+        plugin.dispatch(&ctx, "AGENTS.md", STAT).await.is_err(),
+        "挂载根下不应有 AGENTS.md 保留名（智能体自身记忆归 memory）"
+    );
 }
+
 /// 子智能体挂载点穿越必须**九操作一致**：`agent/<id>/…` 下的每个操作都交给子
 /// composite，而不是「list / stat / delete 穿了，read / write 没穿」。
 ///
@@ -489,8 +450,10 @@ async fn traverse_declares_config_and_instruction_in_settings() {
 /// 的同名物理文件（对只在虚拟视图里存在的路径必然 NotFound），`write` 会**报成功
 /// 却把文件撒进智能体包**。
 ///
-/// 断言用的是**数据落点**而不是「有没有报错」：`work` 挂载点在子树里读/写的是父
-/// 会话工作区的记忆文件——看得见落点，才分得清「写了哪儿」。
+/// 断言用的是**数据落点**而不是「有没有报错」：`memory` 挂载点的**工作区腿**
+/// （`WORKSPACE.md`）在子树里读/写的是父会话工作区的记忆文件——看得见落点，
+/// 才分得清「写了哪儿」。选工作区腿而不是智能体腿，是因为后者的物理文件
+/// （`<agentdir>/AGENTS.md`）与裸目录同位，分辨不出「绕没绕过挂载点」。
 #[tokio::test]
 async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     use crate::symbio_core::VdfsError;
@@ -506,7 +469,7 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     )
     .unwrap();
     std::fs::write(sub.join("AGENTS.md"), "你是评审专家。").unwrap();
-    // 父会话的工作区记忆：子树 `work` 挂载点读写的就是它
+    // 父会话的工作区记忆：子树 `memory` 挂载点的工作区腿读写的就是它
     std::fs::write(tmp.path().join("AGENTS.md"), "工作区记忆内容").unwrap();
 
     let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_ID_AGENT));
@@ -519,8 +482,12 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     ctx.set(WORKDIR, tmp.path().to_string_lossy().to_string());
     let vctx = vdfs::vdfs_context(&ctx);
 
-    // 物理落点（= 绕过挂载点时会写进去的那个目录）
-    let physical = agent_root.join("reviewer").join("work").join("AGENTS.md");
+    // 物理陷阱（= 绕过挂载点时会写进去的那个路径）：子树里**不存在** `memory/`
+    // 子目录——工作区记忆的真实落点在工作区根，两者分离才有判别力
+    let trap = agent_root
+        .join("reviewer")
+        .join("memory")
+        .join("WORKSPACE.md");
 
     // ① list：列出的是子 composite 的可见入口，**条目地址由访问层回填**——
     //    本层是挂载点，**不得**填条目地址：它不知道自己被挂在哪（`agent/`），
@@ -544,12 +511,19 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     );
 
     // ② stat / ③ list（子路径）：两者都穿过挂载点
-    plugin.dispatch(&vctx, "reviewer/work", STAT).await.unwrap();
-    plugin.dispatch(&vctx, "reviewer/work", LIST).await.unwrap();
+    plugin
+        .dispatch(&vctx, "reviewer/memory", STAT)
+        .await
+        .unwrap();
+    plugin
+        .dispatch(&vctx, "reviewer/memory", LIST)
+        .await
+        .unwrap();
 
-    // ④ read：读到的是**子树 provider 的数据**（工作区记忆），不是裸目录里的文件
+    // ④ read：读到的是**子树 provider 的数据**（工作区记忆，落点在工作区根），
+    //    不是裸目录里的文件（`reviewer/memory/WORKSPACE.md` 在裸目录里不存在）
     let c = plugin
-        .dispatch(&vctx, "reviewer/work/AGENTS.md", READ)
+        .dispatch(&vctx, "reviewer/memory/WORKSPACE.md", READ)
         .await
         .unwrap()
         .into_read()
@@ -557,14 +531,14 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     assert_eq!(
         c.text.as_deref(),
         Some("工作区记忆内容"),
-        "read 必须穿过挂载点（读到 work 挂载点的数据），实际：{c:?}"
+        "read 必须穿过挂载点（读到 memory 挂载点工作区腿的数据），实际：{c:?}"
     );
 
     // ⑤ write：写进子树 provider（工作区记忆），**不得**落进智能体包
     plugin
         .dispatch(
             &vctx,
-            "reviewer/work/AGENTS.md",
+            "reviewer/memory/WORKSPACE.md",
             vdfs::VdfsRequest::Write {
                 content: crate::symbio_core::VdfsContent::text("改过的记忆"),
             },
@@ -574,18 +548,18 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     assert_eq!(
         std::fs::read_to_string(tmp.path().join("AGENTS.md")).unwrap(),
         "改过的记忆",
-        "写入应交给子树的 work 挂载点"
+        "写入应交给子树 memory 挂载点的工作区腿（物理落点 = 工作区根）"
     );
     assert!(
-        !physical.exists(),
+        !trap.exists(),
         "写入不得绕过挂载点落到裸 agent 目录：{}",
-        physical.display()
+        trap.display()
     );
 
-    // ⑥ delete：同样穿过挂载点 —— `work` 的记忆不可删除，这条**拒绝**来自子树 provider
+    // ⑥ delete：同样穿过挂载点 —— 记忆不可删除，这条**拒绝**来自子树 provider
     // （绕过挂载点时会是另一套错误：物理路径不存在）
     let err = plugin
-        .dispatch(&vctx, "reviewer/work/AGENTS.md", DEL)
+        .dispatch(&vctx, "reviewer/memory/WORKSPACE.md", DEL)
         .await
         .unwrap_err();
     assert!(

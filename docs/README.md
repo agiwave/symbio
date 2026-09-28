@@ -102,7 +102,7 @@ D-006 是 D-001 的盲区补丁：D-001 只认 Markdown 链接语法（方括号
 | symbio_core | [symbio_core/README.md](../symbio/src/symbio_core/README.md) | 内核契约层：命名与结构规范 + 域清单（trait / 协议类型 / 词表 / 纯工具） |
 | session | [plugins/session/README.md](../symbio/src/plugins/session/README.md) | 会话编排唯一入口：工具循环、提示词组装、上下文压缩 |
 | model | [plugins/model/README.md](../symbio/src/plugins/model/README.md) | 无状态单轮 LLM 网关（execute_turn），多协议适配 |
-| agent | [plugins/agent/README.md](../symbio/src/plugins/agent/README.md) | 智能体域唯一所有者：agent 目录库、子树装配、两作用域 `AGENTS.md` |
+| agent | [plugins/agent/README.md](../symbio/src/plugins/agent/README.md) | 智能体域唯一所有者：agent 目录库、子树装配、子智能体委托（agent_run） |
 | mcp | [plugins/mcp/README.md](../symbio/src/plugins/mcp/README.md) | MCP 外部工具接入与能力注册 |
 | skill | [plugins/skill/README.md](../symbio/src/plugins/skill/README.md) | 技能脚本（loader/plugin）发现与装载 |
 | local | [plugins/local/README.md](../symbio/src/plugins/local/README.md) | 本地原生工具（shell / 内容与语义搜索 / 任务清单）；文件操作已迁 VDFS |
@@ -110,7 +110,8 @@ D-006 是 D-001 的盲区补丁：D-001 只认 Markdown 链接语法（方括号
 | web | [plugins/web/README.md](../symbio/src/plugins/web/README.md) | 网页抓取/搜索工具 |
 | home | [plugins/home/README.md](../symbio/src/plugins/home/README.md) | 根插件：持应用级状态（`<homedir>/PLUGIN.yml`），构造 worker(Composite) 并传入必需插件清单 |
 | composite | [plugins/composite/README.md](../symbio/src/plugins/composite/README.md) | 子插件容器：扫描自己的目录（其下一层目录即一个插件）+ 路径合并分发 |
-| work | [plugins/work/README.md](../symbio/src/plugins/work/README.md) | 工作区记忆：注入 `{workdir}/AGENTS.md`，可经 `<根>/work` 编辑 |
+| memory | [plugins/memory/README.md](../symbio/src/plugins/memory/README.md) | 记忆（两个作用域）：智能体自身（分形 `{宿主目录}/AGENTS.md`）+ 工作区（`{workdir}/AGENTS.md`），经 `<根>/memory` 编辑 |
+| setting | [plugins/setting/README.md](../symbio/src/plugins/setting/README.md) | 当前智能体自身的信息设置：档案（名字 / 描述）+ 偏好（语言 / 详略） |
 | gateway | [plugins/gateway/README.md](../symbio/src/plugins/gateway/README.md) | HTTP/WS 入站网关 |
 | plugin_manager | [plugins/plugin_manager/README.md](../symbio/src/plugins/plugin_manager/README.md) | 插件管理入口：列全部插件 + 启用/停用/添加/卸载 + 各插件配置条目 + 自有分区（appearance/about） |
 | hook | [plugins/hook/README.md](../symbio/src/plugins/hook/README.md) | 生命周期钩子 |

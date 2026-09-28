@@ -72,17 +72,30 @@ export const LINE_BUDGET_BASELINES = {
   // 并按新字段重写；`vdfs.test.rs` 加夹具与 3 条用例。基线 3667 → 3736（+69）。
   // 前端零改动：`DetailForm.staticDisplay` 本就支持数组与对象（数组 `join('、')`、
   // 对象逐项 `k v`），故结构化值直接可渲染。
-  "symbio/src/plugins/agent": { maxLines: 3736, exts: [".rs"] },
+  // 2026-09-28：**收紧 -613 行**（3736 → **3123**）。`agent` 切分：智能体自身功能
+  // （记忆 / 配置 / 指令）整体迁出——记忆归 `memory` 插件（ADR-040 之后它还带工作区腿），
+  // `agent` 只管 agent 目录库、子树装配与 `agent_run` 委托；`config.rs` / `instruction.rs` /
+  // `memory.rs` 及其测试删除，子树装配清单改用共享 `ASSEMBLY_SUB_AGENT_PLUGINS`。
+  "symbio/src/plugins/agent": { maxLines: 3123, exts: [".rs"] },
   "symbio/src/plugins/composite": { maxLines: 1330, exts: [".rs"] },
   "symbio/src/plugins/event_bus": { maxLines: 164, exts: [".rs"] },
   "symbio/src/plugins/gateway": { maxLines: 1190, exts: [".rs"] },
   "symbio/src/plugins/home": { maxLines: 928, exts: [".rs"] },
   "symbio/src/plugins/hook": { maxLines: 467, exts: [".rs"] },
   "symbio/src/plugins/local": { maxLines: 3460, exts: [".rs"] },
+  // 2026-09-28：新增 **992 行**（首个基线，不含测试）。`memory` 插件 = 智能体记忆 +
+  // 工作区记忆两个作用域（原 `work` 插件并入，见 ADR-040）：共享实现 + 挂载名覆盖 +
+  // 五字段配置 + 双腿注入 + VDFS 挂载点。
+  "symbio/src/plugins/memory": { maxLines: 992, exts: [".rs"] },
   "symbio/src/plugins/mcp": { maxLines: 2897, exts: [".rs"] },
   "symbio/src/plugins/model": { maxLines: 6212, exts: [".rs"] },
   "symbio/src/plugins/plugin_manager": { maxLines: 666, exts: [".rs"] },
-  "symbio/src/plugins/session": { maxLines: 17013, exts: [".rs"] },
+  // 2026-09-28：+1 行（17013 → **17014**）。`MemoryNodeSpec` 新增 `name` 覆盖字段
+  // （ADR-040 挂载名 ≠ 物理名），session 侧两处构造点各补 `name: None`。
+  "symbio/src/plugins/session": { maxLines: 17014, exts: [".rs"] },
+  // 2026-09-28：新增 **427 行**（首个基线，不含测试）。`setting` 插件：当前智能体
+  // 自身的信息设置（档案 + 偏好），分形（系统树 + 每棵子树各一份）。
+  "symbio/src/plugins/setting": { maxLines: 427, exts: [".rs"] },
   "symbio/src/plugins/skill": { maxLines: 1470, exts: [".rs"] },
   "symbio/src/plugins/telegram": { maxLines: 887, exts: [".rs"] },
   // 2026-09-28：+18 行（3012 → **3030**）。列表**检索入口**的服务端回答：
@@ -90,7 +103,6 @@ export const LINE_BUDGET_BASELINES = {
   // 与 `list_at` 里给目录节点补 `search` 的三行。
   "symbio/src/plugins/vdfs": { maxLines: 3030, exts: [".rs"] },
   "symbio/src/plugins/web": { maxLines: 1028, exts: [".rs"] },
-  "symbio/src/plugins/work": { maxLines: 627, exts: [".rs"] },
 
   // ── 内核与驱动层（symbio/src/*） ──
   // 2026-09-28：+89 行（8143 → **8232**）。三件事：
@@ -101,8 +113,12 @@ export const LINE_BUDGET_BASELINES = {
   //    少一个动作——一次真回归换来判据）；
   // ③ `vdfs/node.rs` 的 `VdfsNode::search` 声明位（三级语义 + 为什么在节点上而
   //    不在列表响应上）。
-  "symbio/src/symbio_core": { maxLines: 8232, exts: [".rs"] },
-  "symbio/src/providers": { maxLines: 2732, exts: [".rs"] },
+  // 2026-09-28：+6 行（8232 → **8238**）。`PLUGIN_ID_WORK` 删除、`PLUGIN_ID_MEMORY`
+  // 注释与 `symbio_core/mod.rs` 插件域注释更新（work 并入 memory，ADR-040）。
+  "symbio/src/symbio_core": { maxLines: 8238, exts: [".rs"] },
+  // 2026-09-28：+13 行（2732 → **2745**）。`providers/memory` 的 `MemoryNodeSpec`
+  // 新增 `name` 覆盖字段（挂载名 ≠ 物理名）与 `MemoryFile::node` 解析更新，测试同步。
+  "symbio/src/providers": { maxLines: 2745, exts: [".rs"] },
 
   // ── 宿主与工具层 ──
   "cli/src": { maxLines: 1573, exts: [".rs"] },
@@ -181,7 +197,9 @@ export const LINE_BUDGET_BASELINES = {
   //      `VdfsWorkbench.vue` 的筛选框按服务端声明显隐。注释占大半：阀值不得由各
   //      前端自判、`null` 不得当约束——都是「不写就会被下一轮优化掉」的判据。
   //      测试代码不计入本口径。
-  "tauri/src": { maxLines: 22204, exts: [".ts", ".vue"] },
+  // 2026-09-28：+7 行（22204 → **22211**）。`vdfsIcons.ts` 注册 `memory` 挂载点图标
+  // （work 从未登记过图标，其删除不产生抵扣；合并见 ADR-040）。
+  "tauri/src": { maxLines: 22211, exts: [".ts", ".vue"] },
 };
 
 export function runAudit({ root = repoRoot, baselines = LINE_BUDGET_BASELINES, strict = STRICT } = {}) {

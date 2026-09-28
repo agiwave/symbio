@@ -24,19 +24,20 @@
 //! 判据是**「谁拥有它」**，不是「它够不够底层」（见
 //! [ADR-023](../../../docs/DECISIONS.md)、[ADR-035](../../../docs/DECISIONS.md)）：
 //!
-//! - 它**不隶属任何单个插件**：work / session / agent 三个插件各自构造一个 `MemoryFile`
-//!   指向自己的作用域。若它住其中任何一个插件（思路 1），另两个就得跨插件引用，违反
+//! - 它**不隶属任何单个插件**：memory / session 两个插件各自构造一个 `MemoryFile`
+//!   指向自己的作用域（memory 插件一个实例就构造两个——智能体与工作区各一）。
+//!   若它住其中任何一个插件（思路 1），另一些就得跨插件引用，违反
 //!   「插件之间不直接相互引用」。⇒ 归 `providers/`（思路 2）。
-//! - 它是**实现**而不是契约：没有任何一处需要 `dyn MemoryProvider`——三个插件在
+//! - 它是**实现**而不是契约：没有任何一处需要 `dyn MemoryProvider`——插件在
 //!   **编译期**就知道自己要用哪种记忆。故走**方式 B**（具体类型直接组合，见
 //!   [`crate::providers`] 的两种接线方式），**不进** `creator_create_object`。
 //!   硬抽 trait 只会把一次构造换成一次字符串查表（[ADR-035](../../../docs/DECISIONS.md)）。
 //!
 //! **core 里什么都不留**——本模块的**整个**概念面都搬来了 `providers/`：实现、两道闸门、
-//! 片段排版、节点形状，以及**文件名**。文件名尤其不该由 core 统一：三层各写各的文件、
-//! 互不干涉，共享一个字面量只是把「改一层」变成「改三层」。
-//! 各层自己的名字定义在各自插件里（`work::memory::WORK_MEMORY_FILE` /
-//! `session::memory::SESSION_MEMORY_FILE` / `agent::host::store::AGENT_MEMORY_FILE`）。
+//! 片段排版、节点形状，以及**文件名**。文件名尤其不该由 core 统一：各层各写各的文件、
+//! 互不干涉，共享一个字面量只是把「改一层」变成「改几层」。
+//! 各层自己的名字定义在各自插件里（`memory::memory::MEMORY_FILE` /
+//! `memory::workspace::WORK_MEMORY_FILE` / `session::memory::SESSION_MEMORY_FILE`）。
 //!
 //! ## 边界：本模块收「**有地址、要限容**」的东西
 //!
@@ -58,9 +59,10 @@
 //! - **模糊**：同一个文件被一处叫「指令」（只读）、另一处叫「记忆」（可写），
 //!   用户看不出该往哪写。
 //!
-//! 因此 `{workdir}/AGENTS.md` **只归 work**——session 不再读它，哪怕它叫「指令」；
-//! 两份智能体 `AGENTS.md`（系统态 / 子智能体态）**都归 agent**——它同时给出读写面
-//! （`<根>/agent/…`）与注入面，因此印在片段里的地址与闸门都是**它自己会执行**的。
+//! 因此 `{workdir}/AGENTS.md` 与两份智能体 `AGENTS.md`（系统态 / 子智能体态）
+//! **都归 memory**——它同时给出读写面（`<根>/memory/…`）与注入面，工作区与智能体
+//! 两个作用域同属这一个所有者，因此印在片段里的地址与闸门都是**它自己会执行**的；
+//! session 不再读工作区那份，哪怕它叫「指令」。
 //!
 //! ## 个性不进来
 //!
@@ -149,6 +151,12 @@ pub struct MemorySegmentSpec<'a> {
 pub struct MemoryNodeSpec<'a> {
     /// 展示标题
     pub title: &'a str,
+    /// 节点名覆盖（`None` = 用真实文件名）。
+    ///
+    /// **什么时候需要覆盖**：同一挂载点里住两份记忆（智能体 / 工作区）而它们的
+    /// 物理文件同名（都叫 `AGENTS.md`）时，挂载里的名字必须能区分「这份记忆是谁的」
+    /// ——挂载名是模型与界面的寻址面，物理名是磁盘上的行业约定，两者不必相同。
+    pub name: Option<&'a str>,
     /// 场景类型（`kind` 只承载场景语义，不参与机制判定）
     pub kind: &'a str,
     /// 语义描述
@@ -319,7 +327,12 @@ impl MemoryFile {
     ///
     /// [`file_name`]: MemoryFile::file_name
     pub fn node(&self, spec: &MemoryNodeSpec) -> VdfsNode {
-        let name = self.file_name().unwrap_or_default();
+        // 节点名：规格给了覆盖就用覆盖（挂载名），否则用真实文件名
+        let name = spec
+            .name
+            .map(String::from)
+            .or_else(|| self.file_name().map(String::from))
+            .unwrap_or_default();
         let mut n = VdfsNode::file(name, spec.title, VdfsAccess::READ_WRITE);
         n.kind = spec.kind.to_string();
         n.size = Some(self.size());

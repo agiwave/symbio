@@ -56,8 +56,10 @@ pub const PLUGIN_ID_SESSION: &str = "session";
 pub const PLUGIN_ID_MCP: &str = "mcp";
 /// Local 插件工厂
 pub const PLUGIN_ID_LOCAL: &str = "local";
-/// Work 插件工厂（工作区记忆）
-pub const PLUGIN_ID_WORK: &str = "work";
+/// Memory 插件工厂（记忆：智能体自身 + 工作区，两个作用域）
+pub const PLUGIN_ID_MEMORY: &str = "memory";
+/// Setting 插件工厂（智能体自身的信息设置）
+pub const PLUGIN_ID_SETTING: &str = "setting";
 /// Hook 插件工厂
 pub const PLUGIN_ID_HOOK: &str = "hook";
 /// VDFS 插件工厂（虚拟文件系统宿主）

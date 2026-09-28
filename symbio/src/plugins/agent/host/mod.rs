@@ -1,14 +1,11 @@
 //! agent 插件的宿主接入层 —— Agent 目录规范 v2（`agent-dir/v2`）的实现。
 //!
-//! ## 职责（规范 §3.2 宿主）
+//! ## 职责（规范 §3.2 宿主）：只管**装进来的**智能体
 //!
 //! | 模块 | 职责 |
 //! |---|---|
-//! | [`plugin`] | 插件主体：`traverse` 里的托管（装配子 Agent 插件树）+ 门槛（manifest 校验）+ 指令注入 |
+//! | [`plugin`] | 插件主体：装配子 Agent 插件树（托管）+ manifest 门槛 + 选项与委托能力 |
 //! | [`store`] | agent 目录存储：**本插件自己的目录**、zip 导入（zip-slip 防护）、导出、条目枚举 |
-//! | [`memory`] | **子智能体**自身的 `AGENTS.md`（`<agentdir>/AGENTS.md`）：落位、地址、注入 |
-//! | [`instruction`] | **系统智能体**自身的 `AGENTS.md`（`{homedir}/AGENTS.md`）：落位、地址、注入 |
-//! | [`config`] | 插件配置（智能体自身 `AGENTS.md` 的写入与注入两道闸门，见 §「闸门」） |
 //! | [`manifest`] | `manifest.yaml` 的读取与接入校验（§5 / §10） |
 //! | [`scope`] | `SubAgentVisitor` 代理层：把子树的注册加 `agent/<id>/` 前缀并进系统树（§8.2） |
 //! | [`subagent`] | `agent_run`（子智能体委托）能力 |
@@ -19,34 +16,34 @@
 //! `vdfs/list`、`vdfs/write`（二进制）、`vdfs/delete`、节点动作 `export` 承担，
 //! 原 `agent 目录/*` 协议已下线。
 //!
-//! ## 本插件是智能体域的**唯一所有者**
+//! ## 本插件是**外部智能体域**的唯一所有者
 //!
-//! 「拥有智能体」在这套架构里包含三件同源的事，它们必须在同一个插件里：
+//! 「拥有装进来的智能体」在这套架构里是两件同源的事，它们必须在同一个插件里：
 //!
 //! 1. **智能体库**：扫描 / 导入 / 导出 / 删除 agent 目录（[`store`]）；
-//! 2. **智能体的装配**：把 agent 目录挂成插件树并收集其能力（[`plugin`] / [`scope`]）；
-//! 3. **智能体自身的指令**：`{homedir}/AGENTS.md` 与 `<agentdir>/AGENTS.md`
-//!    （[`instruction`] / [`memory`]）。
+//! 2. **智能体的装配**：把 agent 目录挂成插件树并收集其能力（[`plugin`] / [`scope`]）。
 //!
-//! 第 3 件事曾经散落在别处（`session` 读系统那一份，子树的 `work` 实例读 agent 目录那一份），
-//! 也一度试图收进 `plugin_manager`——但 `plugin_manager` 是**设置页的入口**（自有分区 + 各插件配置清单），
-//! 不是任何内容文件的所有者。指令属于智能体域，于是回到本插件：
-//! **读写面与注入面落在同一个所有者上**。
+//! ## 边界：**当前智能体自身**的东西不归本插件
 //!
-//! ## 闸门
+//! 「当前智能体自身」的两样东西各有自己的插件，它们都是**分形**的（系统树与每棵
+//! 子树各有一份实例），本插件一律不碰：
 //!
-//! Agent 目录里所有写入都由本插件执行，因此闸门取值只有一个来源（[`config`]）：
+//! | 东西 | 归谁 | 地址 |
+//! |---|---|---|
+//! | 智能体自身的记忆（`AGENTS.md`） | `memory` | `<根>/memory/AGENTS.md` |
+//! | 智能体自身的信息设置 | `setting` | `<根>/setting/PLUGIN.yml` |
 //!
-//! - `memory_max_bytes` / `memory_inject_max_bytes`：智能体自身的 `AGENTS.md`
-//!   的写入与注入上限——**两个作用域共用一对**（它们是同一类东西，只是作用域不同）。
+//! 读写面与注入面因此落在同一个所有者上——`memory` 既注入提示词又持有挂载点，
+//! 本插件只回答「有哪些智能体、怎么把它们连进来」。
 //!
-//! 闸门的**执行**全在共享实现（`providers/memory`），与 work / session 几层同源。
+//! ## 闸门不在本插件
+//!
+//! 智能体自身 `AGENTS.md` 的写入与注入两道闸门随那份记忆一起归 `memory`（配置落在
+//! `<根>/memory/PLUGIN.yml`）。它们的**执行**在共享实现（`providers/memory`），与
+//! work / session 几层同源——本插件不持有任何容量闸门。
 
-mod config;
 mod detail;
-pub mod instruction;
 pub mod manifest;
-pub mod memory;
 pub mod plugin;
 pub mod scope;
 pub mod store;

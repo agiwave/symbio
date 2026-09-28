@@ -104,9 +104,9 @@ pub use exec::{
 // 纯路径工具 `plugin_expand_tilde_path`（经 `plugin::dir` 重导出，不读任何全局系统根）。
 pub use logger::*;
 // 注：记忆（`MemoryFile` / 两道闸门 / 片段渲染 / 节点形状）**整块不在 core**——
-// 实现不隶属任何单个插件（work / session / agent 各用一个作用域），故归
-// `providers/memory`（方式 B，不套 `dyn`）。**连文件名也不在 core**：三层各自
-// 定义自己的文件名常量（`work::memory::WORK_MEMORY_FILE` 等），core 不设统一约定。
+// 实现不隶属任何单个插件（memory / session 各用一个或多个作用域），故归
+// `providers/memory`（方式 B，不套 `dyn`）。**连文件名也不在 core**：各作用域
+// 定义自己的文件名常量（`memory::memory::MEMORY_FILE` 等），core 不设统一约定。
 pub(crate) use plugin::{lock_read, lock_write};
 pub use text::{text_floor_char_boundary, text_truncate_bytes};
 
