@@ -834,3 +834,77 @@ describe('useVdfs 挂载层左栏（类别清单）', () => {
     wrapper.unmount()
   })
 })
+
+/**
+ * 列表检索入口的可见性**由服务端声明**（`node.search`）。
+ *
+ * 前端不再自判「条目够不够多」：那是一条阈值，各前端各判一份必然分叉；且
+ * 「有内容就给搜索框」会让用户把它读成「可以搜库」（它只筛当前这页已加载的条目）。
+ * provider 可覆盖机制阀值（`VdfsNode::search`），响应里因此总是明确布尔。
+ */
+describe('useVdfs 列表检索入口（服务端声明 `search`）', () => {
+  /** 目录节点带服务端声明；`undefined` = 未表态（`stat` 上就是如此） */
+  function listWith(items: VdfsNode[], search: boolean | undefined) {
+    mocks.listVdfs.mockResolvedValue({
+      path: MSG_DIR,
+      node: { ...msgNode('__dir'), access: 'l', ext: undefined, search },
+      items,
+    })
+  }
+
+  it('声明 true 才启用；未表态 / false 一律不启用', async () => {
+    listWith([msgNode('m1')], undefined)
+    const a = mountHost(MSG_DIR)
+    await settle()
+    expect(a.api.searchable.value, '未声明的功能不自己长出来').toBe(false)
+    a.wrapper.unmount()
+
+    vi.resetAllMocks()
+    mocks.subscribeVdfsChanged.mockReturnValue(() => {})
+    listWith([msgNode('m1')], false)
+    const b = mountHost(MSG_DIR)
+    await settle()
+    expect(b.api.searchable.value, '服务端明确不启用').toBe(false)
+    b.wrapper.unmount()
+  })
+
+  it('声明 true 时筛选是纯投影：只筛已加载条目的名称 / 标题 / 描述 / 标签', async () => {
+    listWith([msgNode('m1', '苹果'), msgNode('m2', '香蕉')], true)
+    const { api, wrapper } = mountHost(MSG_DIR)
+    await settle()
+
+    expect(api.searchable.value).toBe(true)
+    api.filter.value = '香'
+    await nextTick()
+    expect(api.filteredItems.value.map((n) => n.name)).toEqual(['m2'])
+    // 底层数据与游标不动（筛选不是重读）
+    expect(api.items.value.map((n) => n.name)).toEqual(['m1', 'm2'])
+    expect(api.filterEmpty.value).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('入口从启用变为不启用时清掉筛选词（否则列表被一个看不见的词过滤）', async () => {
+    vi.useFakeTimers()
+    try {
+      listWith([msgNode('m1', '苹果'), msgNode('m2', '香蕉')], true)
+      const { api, wrapper } = mountHost(MSG_DIR)
+      await settle()
+      api.filter.value = '香'
+      await nextTick()
+      expect(api.filteredItems.value).toHaveLength(1)
+
+      // 服务端收回入口（换到条目很少的目录 / provider 覆盖），重拉收敛
+      listWith([msgNode('m1', '苹果'), msgNode('m2', '香蕉')], false)
+      emitChange({ path: MSG_DIR })
+      await vi.advanceTimersByTimeAsync(500)
+      await settle()
+
+      expect(api.searchable.value).toBe(false)
+      expect(api.filter.value, '看不见的筛选词必须清掉').toBe('')
+      expect(api.filteredItems.value).toHaveLength(2)
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

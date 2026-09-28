@@ -120,6 +120,27 @@ describe('VdfsSessionDetail 动作装配', () => {
     ],
   }
 
+  /**
+   * **逐字节抄自实跑回包**的另一种形状：缺席的约束位被序列化成 `null`。
+   *
+   * 判据必须对两种形状同答——「动作因一个 `null` 而整条消失」正是实测到的
+   * 静默回归（会话详情的「进入下一级」），而前后端的序列化选择各自可能变，
+   * 消费侧不能只对一种形状成立。
+   */
+  const SESSION_DEFINITION_WITH_NULLS = {
+    binding: 'option',
+    sections: [],
+    actions: [
+      {
+        id: 'open-container',
+        label: '进入下一级',
+        style: 'primary',
+        payload: { kind: 'session' },
+        when: { key: 'is_existing', equals: true, not_equals: null, truthy: null },
+      },
+    ],
+  }
+
   function sessionNode(partial: Partial<VdfsItem> = {}): VdfsItem {
     return node({ kind: 'session', ext: 'session', schema: SESSION_DEFINITION, ...partial })
   }
@@ -141,6 +162,14 @@ describe('VdfsSessionDetail 动作装配', () => {
     // 草稿没有地址 ⇒ `mechanismDetailValueOf` 给出 is_existing=false ⇒ 定义里的动作不出现
     const draft = mountSession(sessionNode({ path: '', name: '' }))
     expect(draft.findComponent(SessionStub).props('actions')).toEqual([])
+  })
+
+  it('定义的 `when` 带 null 占位时同样出现（线上形状回归）', () => {
+    const w = mountSession(
+      node({ kind: 'session', ext: 'session', schema: SESSION_DEFINITION_WITH_NULLS })
+    )
+    const actions = w.findComponent(SessionStub).props('actions') as DetailAction[]
+    expect(actions.map((a) => a.id)).toEqual(['open-container'])
   })
 
   it('节点没有定义时不凭空造动作（渲染器不认识任何具体动作名）', () => {

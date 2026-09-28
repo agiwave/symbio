@@ -95,7 +95,9 @@ impl ExecEventSinkProgress {
 /// 生产者（`ModelProvider::execute_turn` / 工具执行）只调 [`Self::emit`]，
 /// 不感知事件最终去哪：
 /// - [`ExecEventSink::Direct`]：进程内直连转写唯一写入点（零 serde 往返）；
-/// - [`ExecEventSink::Null`]：静默——内部请求（上下文压缩）刻意不产生任何可见帧。
+/// - [`ExecEventSink::Null`]：静默——内部请求刻意不产生任何可见帧；
+/// - [`ExecEventSink::Filtered`]：直连但先过一道白名单（同进程内直连，只是帧
+///   可以被改写或吞掉）。
 ///
 /// 跨进程（前端实时面）不走本类型：那是 `PluginPayload::Session` 的职责，
 /// 两者是**不同的面**，不要合并。
@@ -111,6 +113,20 @@ pub enum ExecEventSink {
     /// 的 hack 实现（`compress.rs` 里的 `std::mem::replace(&mut channel.rx, dummy_rx)`），
     /// 现在是一个显式的出口选择。
     Null,
+    /// **过滤桥**：进程内直连转写唯一写入点，但每帧先过一道白名单——
+    /// 判定拿到**可变**的帧，返回 `false` ⇒ 吞掉（与 [`Self::Null`] 完全同义），
+    /// 返回 `true` ⇒ 按改写后的帧进转写。
+    ///
+    /// 用途唯一且明确——**上下文压缩**的摘要请求：它必须保持「不产生任何可见
+    /// 节点」（Turn 骨架帧照旧吞掉，见 [`Self::Null`] 的说明），但摘要正文的
+    /// 逐帧增量需要改道到**压缩节点**上实时可见（改道由判定就地完成）。在这
+    /// 一个窗口里，「静默」与「流式」都不是整段成立的：骨架必须静、增量必须流，
+    /// 于是出口必须能表达「逐帧决策」，而不是逐窗口二选一。
+    Filtered(
+        Arc<dyn Fn(&mut ChatMessage) -> bool + Send + Sync>,
+        Arc<dyn ExecTranscriptWriter>,
+        ExecEventSinkProgress,
+    ),
 }
 
 impl ExecEventSink {
@@ -122,6 +138,15 @@ impl ExecEventSink {
     /// 静默出口（内部请求专用）。
     pub fn silent() -> Self {
         Self::Null
+    }
+
+    /// 过滤桥出口：帧经 `allow` 白名单（可改写 / 可吞）后进转写唯一写入点。
+    /// 用途见 [`Self::Filtered`]。
+    pub fn filtered(
+        allow: Arc<dyn Fn(&mut ChatMessage) -> bool + Send + Sync>,
+        writer: Arc<dyn ExecTranscriptWriter>,
+    ) -> Self {
+        Self::Filtered(allow, writer, ExecEventSinkProgress::default())
     }
 
     /// 从请求上下文取出口；**缺席 ⇒ 静默**。
@@ -140,6 +165,7 @@ impl ExecEventSink {
     pub fn progress(&self) -> ExecEventSinkProgress {
         match self {
             Self::Direct(_, progress) => progress.clone(),
+            Self::Filtered(_, _, progress) => progress.clone(),
             Self::Null => ExecEventSinkProgress::default(),
         }
     }
@@ -155,6 +181,15 @@ impl ExecEventSink {
                 progress.bump();
                 writer.apply(message).await
             }
+            // 白名单拿到可变的帧：吞掉（false）＝什么都没发生；放行（true）＝
+            // 按改写后的帧进转写（改道就是在这里完成的）。
+            ExecEventSink::Filtered(allow, writer, progress) => {
+                let mut message = message;
+                if allow(&mut message) {
+                    progress.bump();
+                    writer.apply(message).await;
+                }
+            }
             ExecEventSink::Null => {}
         }
     }
@@ -165,6 +200,9 @@ impl ExecEventSink {
     pub async fn warn(&self, warning: Option<String>) {
         match self {
             ExecEventSink::Direct(writer, _) => writer.warn(warning).await,
+            // 桥面向「只发增量帧」的窄用途：不做会话级告警分派（与 `Null` 同义）。
+            // 需要告警的执行期走 `Direct`，不走桥。
+            ExecEventSink::Filtered(..) => {}
             ExecEventSink::Null => {}
         }
     }
@@ -174,6 +212,7 @@ impl std::fmt::Debug for ExecEventSink {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ExecEventSink::Direct(..) => f.write_str("ExecEventSink::Direct"),
+            ExecEventSink::Filtered(..) => f.write_str("ExecEventSink::Filtered"),
             ExecEventSink::Null => f.write_str("ExecEventSink::Null"),
         }
     }

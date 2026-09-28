@@ -123,6 +123,9 @@ function installStub(
     title: computed(() => '资源'),
     items,
     filteredItems,
+    // 筛选入口是否在场：与真实现**同源** —— `cwdNode.search === true`（服务端
+    // 声明，裁决在 list 响应里已做好）。前端不自判「条目够不够多」。
+    searchable: computed(() => cwdNode.value?.search === true),
     filter,
     activeFilter: computed(() => filter.value.trim().toLowerCase()),
     filterEmpty: computed(
@@ -260,9 +263,14 @@ describe('VdfsWorkbench 详情槽', () => {
 /**
  * 列表筛选。
  *
- * 筛选是**纯客户端投影**（只筛已加载的条目，不发请求、不动分页游标）——
- * 这条边界值得钉住，因为它很容易被"优化"成接 `vdfs/search`：那是全库内容检索，
- * 结果不保证落在当前目录里，一旦混进中栏，「点目录即钻入」的空间心智就没了。
+ * **入口可见性由服务端声明**：`cwdNode.search` 来自 list 响应——条目够不够多、
+ * 值不值得检索，这个裁决在后端统一做（阈值见 plugins/vdfs/host.rs），控件只认
+ * 声明：未表态（search 缺席，如 stat 上的节点）与明确 false 一律不给。这条边界
+ * 值得钉住，它很容易被"顺手"改回 `items.length > 0`——那等于前端又自己长出一条
+ * 裁决，而且一个筛不出东西的搜索框会让用户以为"可以搜库"：筛选是**纯客户端
+ * 投影**（只筛已加载条目，不发请求、不动分页游标），不是全库内容检索
+ * （`vdfs/search` 的结果不保证落在当前目录里，混进中栏会破坏「点目录即钻入」
+ * 的空间心智）。
  *
  * 同时钉住三种空态的区分：目录为空 / 筛掉了 / 加载失败——它们的下一步动作
  * 完全不同（新建 / 清筛选 / 重试），说成一句就是把用户晾在原地。
@@ -270,8 +278,23 @@ describe('VdfsWorkbench 详情槽', () => {
 describe('VdfsWorkbench 列表筛选', () => {
   const list = () => [makeNode('alpha'), makeNode('beta'), makeNode('gamma')]
 
-  it('有内容时出现筛选框；输入即收窄列表（大小写不敏感）', async () => {
-    installStub({ items: list() })
+  /** 当前目录节点：`search` 是 list 响应里的裁决（缺席 = 服务端未表态） */
+  function dirNode(search?: boolean): VdfsNode {
+    const node: VdfsNode = {
+      path: '@vfs/session',
+      name: 'session',
+      title: '会话',
+      kind: 'dir',
+      status: 'active',
+      access: 'rw',
+      ext: 'dir',
+    }
+    if (search !== undefined) node.search = search
+    return node
+  }
+
+  it('服务端声明 search: true ⇒ 出现筛选框；输入即收窄列表（大小写不敏感）', async () => {
+    installStub({ items: list(), cwdNode: dirNode(true) })
     const w = bench()
     const input = w.find('.vdfs-filter-input')
     expect(input.exists()).toBe(true)
@@ -282,13 +305,23 @@ describe('VdfsWorkbench 列表筛选', () => {
     expect(w.find('.vdfs-card').text()).toContain('beta')
   })
 
-  it('目录为空时不给筛选框（没有东西可筛，它只会误导成"可以搜库"）', () => {
-    installStub({ items: [] })
+  it('★ 服务端未表态（search 缺席）⇒ 不给筛选框（没有声明的功能不自己长出来）', () => {
+    installStub({ items: list(), cwdNode: dirNode() })
     expect(bench().find('.vdfs-filter-input').exists()).toBe(false)
   })
 
+  it('★ 有内容但服务端明确不启用（false）⇒ 仍不给筛选框（不是「有东西就可筛」）', () => {
+    installStub({ items: list(), cwdNode: dirNode(false) })
+    expect(bench().find('.vdfs-filter-input').exists()).toBe(false)
+  })
+
+  it('★ 空目录但服务端声明启用 ⇒ 筛选框仍在（前端不二次裁决条目数）', () => {
+    installStub({ items: [], cwdNode: dirNode(true) })
+    expect(bench().find('.vdfs-filter-input').exists()).toBe(true)
+  })
+
   it('筛掉全部结果 ⇒ 空态说明是"没有匹配"并给出清除入口（而非「此目录为空」）', async () => {
-    installStub({ items: list() })
+    installStub({ items: list(), cwdNode: dirNode(true) })
     const w = bench()
     await w.find('.vdfs-filter-input').setValue('zzz')
 
@@ -300,7 +333,7 @@ describe('VdfsWorkbench 列表筛选', () => {
   })
 
   it('Esc 与 × 都能清除筛选', async () => {
-    installStub({ items: list() })
+    installStub({ items: list(), cwdNode: dirNode(true) })
     const w = bench()
     await w.find('.vdfs-filter-input').setValue('alpha')
     expect(w.findAll('.vdfs-card')).toHaveLength(1)

@@ -301,6 +301,31 @@ describe('evalDetailCondition（作用域由调用方给）', () => {
     expect(evalDetailCondition({ key: 'a', equals: ['x'] }, scopeOf({ a: ['x'] }))).toBe(true)
     expect(evalDetailCondition({ key: 'a', equals: ['x'] }, scopeOf({ a: ['y'] }))).toBe(false)
   })
+
+  /**
+   * 线上形状的**真实样本**（取自已实跑的后端回包）：缺席的约束位被序列化成
+   * `null`。把它当约束会让「只有 equals」或「只有 truthy」的条件恒假——
+   * 实测后果是会话详情的「进入下一级」整条消失（无报错、无日志）。
+   */
+  it('缺席的约束位写成 null 时与缺席同义（服务端可能这么发）', () => {
+    const wire = { key: 'is_existing', equals: true, not_equals: null, truthy: null }
+    expect(evalDetailCondition(wire, scopeOf({ is_existing: true }))).toBe(true)
+
+    const onlyTruthy = { key: 'message_count', equals: null, not_equals: null, truthy: true }
+    expect(evalDetailCondition(onlyTruthy, scopeOf({ message_count: 3 }))).toBe(true)
+    expect(evalDetailCondition(onlyTruthy, scopeOf({ message_count: 0 }))).toBe(false)
+
+    const onlyNotEquals = { key: 'a', equals: null, not_equals: 0, truthy: null }
+    expect(evalDetailCondition(onlyNotEquals, scopeOf({ a: 2 }))).toBe(true)
+    expect(evalDetailCondition(onlyNotEquals, scopeOf({ a: 0 }))).toBe(false)
+  })
+
+  it('false / 0 / 空串是**合法取值**，不得被当成缺席', () => {
+    expect(evalDetailCondition({ key: 'a', equals: false }, scopeOf({ a: false }))).toBe(true)
+    expect(evalDetailCondition({ key: 'a', equals: false }, scopeOf({ a: true }))).toBe(false)
+    expect(evalDetailCondition({ key: 'a', equals: 0 }, scopeOf({ a: 0 }))).toBe(true)
+    expect(evalDetailCondition({ key: 'a', equals: '' }, scopeOf({ a: '' }))).toBe(true)
+  })
 })
 
 describe('compactFieldText（选项栏按钮文本的唯一规则）', () => {

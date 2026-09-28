@@ -305,6 +305,17 @@ async fn root(
     list_at(fs, vctx, VDFS_ADDR_ROOT.to_string(), None, None).await
 }
 
+/// 列表检索入口的**机制阀值**：条目数达到它才认为「这份清单值得检索」。
+///
+/// 为什么需要它（而不是「有内容就给搜索框」）：一屏能摆下的卡片就十来张，
+/// 少于这个量时用户一眼看完，搜索框不但帮不上忙，还会被读成「可以搜库」——
+/// 而它实际只筛当前这页已加载的条目（见 `tauri/docs/INTERACTION.md` 的
+/// 「刻意不做」）。
+///
+/// 阀值住在服务端（而不是各前端），因此网页端 / 桌面端 / CLI 看到的是同一个答案；
+/// provider 若不同意，用自己的声明覆盖（[`VdfsNode::search`]）。
+const LIST_SEARCH_MIN_ITEMS: usize = 8;
+
 async fn list(
     root: &DynVdfsProvider,
     vctx: &VdfsContext,
@@ -353,7 +364,7 @@ async fn list_at(
     fill_paths(&addr, &mut items);
 
     // 目录自身节点：provider 未实现 stat 时按目录形态兜底
-    let node = match root.dispatch(&vctx, &addr, VdfsRequest::Stat).await {
+    let mut node = match root.dispatch(&vctx, &addr, VdfsRequest::Stat).await {
         Ok(resp) => match resp.into_stat() {
             Some(mut n) => {
                 if n.title.is_empty() {
@@ -368,6 +379,13 @@ async fn list_at(
         },
         Err(_) => dir_self(&addr),
     };
+
+    // 检索入口：**服务端统一回答**（使用方只看这一位，不各自设阈值）。
+    //
+    // 只有三行，但它解决的问题是「每个使用方自己判『够不够多』」——那条判断
+    // 天然会分叉（网页端用 20 条、桌面端用 5 条、CLI 干脆不做），而这里的
+    // 判据是全局一份。provider 若有更强的依据，用自己的声明覆盖（`Some`）。
+    node.search = Some(node.search.unwrap_or(items.len() >= LIST_SEARCH_MIN_ITEMS));
 
     Ok(PluginPayload::new(&VdfsListResponse {
         path: addr,

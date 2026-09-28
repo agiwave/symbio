@@ -36,7 +36,12 @@ export const DETAIL_PICK_FILE = 'file'
 export const DETAIL_PICKS = [DETAIL_PICK_DIRECTORY, DETAIL_PICK_FILE] as const
 export type DetailPick = (typeof DETAIL_PICKS)[number]
 
-/** 条件谓词（徽标/动作显隐、字段条件显隐 visible_when）。`all` 存在时为 AND 组合 */
+/* * 条件谓词（徽标/动作显隐、字段条件显隐 visible_when）。`all` 存在时为 AND 组合。
+ *
+ * `equals` / `not_equals` / `truthy` 三位的**缺席即无该约束**；`null` 与缺席同义
+ * （求值见 `evalDetailCondition`——线上可能出现 `null`，把它当约束会让整条条件
+ * 恒假，界面于是静默少一个动作）。
+ */
 export interface DetailCondition {
   /**
    * 求值键：表单字段名，或特殊键 is_existing / is_default / cap.<name>。
@@ -48,7 +53,8 @@ export interface DetailCondition {
   key?: string
   equals?: unknown
   not_equals?: unknown
-  truthy?: boolean
+  /** 允许 `null`：线上可能把「无该约束」发成 `null`，两者同义（见 `evalDetailCondition`） */
+  truthy?: boolean | null
   all?: DetailCondition[]
 }
 
@@ -224,6 +230,19 @@ export function looseDetailEqual(a: unknown, b: unknown): boolean {
  * 缺省 `true` 是**为 `when` / `visible_when` 的「缺省即显示」服务**的——
  * 因此判「禁用」时不可写成 `!evalDetailCondition(...)`：那会把「无条件」与
  * 「条件成立」两种相反情形都解释成不禁用（见 `DetailForm` 的 `fieldDisabled`）。
+ *
+ * ## 缺席的约束位：`null` 与「键不在」同义
+ *
+ * 三个约束位（`equals` / `not_equals` / `truthy`）在**定义里**是可缺席的，判据
+ * 因此是「有没有这条约束」。而它们是经过 JSON 到达的：生产者（后端
+ * `DetailCondition`）若不声明跳过空值，缺席就会写成 `null`，于是它变成一条
+ * **恒假**的约束——`Boolean(v) !== null` 恒真。结果是动作/字段**静默**消失，
+ * 没有任何报错。
+ *
+ * 生产侧已修（`detail.rs` 的缺席不序列化 + 同文件守卫测试）；消费侧在这里
+ * **同样**不把 `null` 当约束：契约说「可选」就该按「可选」读，而不是要求每个
+ * 生产者都记得一件事——这是一次真回归（会话详情「进入下一级」整条不见）换来的
+ * 判据，`vdfs-form.spec.ts` 有对应用例。
  */
 export function evalDetailCondition(
   c: DetailCondition | null | undefined,
@@ -234,9 +253,10 @@ export function evalDetailCondition(
   // 叶子条件：`key` 缺席（后端缺省空串）⇒ 取不到任何值，比较器按常规语义判（
   // 缺省 `true` 是刻意的——见上文「缺省即显示」的说明）。
   const v = valueOf(c.key ?? '')
-  if (c.equals !== undefined && !looseDetailEqual(v, c.equals)) return false
-  if (c.not_equals !== undefined && looseDetailEqual(v, c.not_equals)) return false
-  if (c.truthy !== undefined && Boolean(v) !== c.truthy) return false
+  // `!= null` 同时覆盖 `undefined` 与 `null`（`false` / `0` / `''` 是合法取值，照样参与比较）
+  if (c.equals != null && !looseDetailEqual(v, c.equals)) return false
+  if (c.not_equals != null && looseDetailEqual(v, c.not_equals)) return false
+  if (c.truthy != null && Boolean(v) !== c.truthy) return false
   return true
 }
 

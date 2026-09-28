@@ -193,6 +193,32 @@ pub struct VdfsNode {
     /// 因此接入方可以自由定义（JSON Schema、宿主自有表单定义……皆可）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema: Option<Value>,
+    /// 本目录清单的**检索入口声明**（使用方是否给出筛选框）。
+    ///
+    /// 三级取值，语义各不相同：
+    ///
+    /// - `None`（缺省）：**不表态**。列表分发按条目数决定（
+    ///   `plugins/vdfs/host.rs::VDFS_LIST_SEARCH_MIN_ITEMS`）——「几条东西的目录
+    ///   不需要搜索框」这件事由服务端统一判，使用方不各自设阈值；
+    /// - `Some(true)`：provider 明确要求启用（它比机制更懂这份清单：条目可能很少
+    ///   但每个名字都很长 / 挨得很近）；
+    /// - `Some(false)`：provider 明确要求不启用（如目录内容由固定几类构成，
+    ///   检索没有意义）。
+    ///
+    /// ## 为什么是「声明」而不是「能力位」
+    ///
+    /// 它不是访问位：检索是**呈现层**的选择（在前端已加载的那一页里做投影），
+    /// 与 [`VdfsAccess`] 的 `r` / `w` / `l` / `t`（访问层能不能做某件事）不同一层。
+    /// 也不等同于 `vdfs/search`（那是**访问层**的全库检索）。
+    ///
+    /// ## 为什么在**节点**上而不在列表响应上
+    ///
+    /// 列表响应里的目录节点本来就是「你此刻看到的这个目录视图」的自述
+    /// （分发层同一处把 `title` / `ext` 补齐），使用方已经在读它的
+    /// [`new_type`](Self::new_type)——多一个字段就是多一行判据，不必再多一份
+    /// 「响应级配置」让消费端另外记一个引用。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<bool>,
     /// 本目录可接受的**新建元素类型**（「新建」入口的唯一依据）。
     ///
     /// `None`（缺省）= 不可新建；`Some` → 使用方显示添加入口。
@@ -237,6 +263,7 @@ impl Default for VdfsNode {
             binary: false,
             hidden: false,
             schema: None,
+            search: None,
             new_type: None,
             attributes: serde_json::Map::new(),
         }
@@ -283,6 +310,12 @@ impl VdfsNode {
     /// 装箱在**这里**完成，调用方不必知道字段是 `Box`（理由见字段文档）。
     pub fn with_new_type(mut self, new_type: Option<VdfsNewType>) -> Self {
         self.new_type = new_type.map(Box::new);
+        self
+    }
+
+    /// 声明本目录清单的**检索入口**（`None` = 不表态，由机制按条目数判）
+    pub fn with_search(mut self, search: Option<bool>) -> Self {
+        self.search = search;
         self
     }
 

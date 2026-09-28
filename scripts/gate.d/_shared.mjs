@@ -218,7 +218,18 @@ export const BASELINE = {
   //      新增两条：压缩节点 `meta` 的结构化交代（`compression_stats`）——字段齐全时
   //      五项都要在，且**成功才有「压缩后水位」**（失败 / 未触发时编一个 0，界面会
   //      显示成「水位已降到 0」）。
-  rustTests: 965,
+  // 969：2026-09-28（同日第三笔）：+4（965 → **969**）。压缩摘要的**增量改道**与其
+  //      约束位序列化——四条各钉一处：
+  //        +2 `plugins/session/context/pipeline.test.rs`：`gate_passes_only_pure_delta_frames`
+  //           / `gate_keeps_delta_only_and_strips_meta`——白名单只放行纯增量帧
+  //           （Turn 骨架与带状态帧一律吞），改道后落点即压缩节点。
+  //        +1 `symbio_core/exec/tests.rs`：`sink_filtered_rewrites_and_drops_per_frame`
+  //           ——`ExecEventSink::Filtered` 吞掉的帧不进写入点、不记进度；放行的按
+  //           **改写后**的帧进（进度只计放行帧）。
+  //        +1 `symbio_core/schemas/detail.test.rs`：`absent_constraints_do_not_serialize_as_null`
+  //           ——三个约束位缺席时不写 `null`（写成 `null` ⇒ 整条恒假、界面静默
+  //           少一个动作，T13 清单节「进入下一级」曾整条消失）。
+  rustTests: 969,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *
@@ -462,8 +473,22 @@ export const BASELINE = {
   //         发送键 / 停止键同一个语义点 + 运行中回车不提交（真装 `ChatComposer`）。
   //      ②里两条做了反证：去掉 `facets.compacted` 的判定 ⇒ 记忆节点变回用户气泡；
   //      把回车改回「运行中也提交」⇒ 对应用例变红。
+  // 53 文件 / 828（2026-09-28 同日第三笔，**VDFS 检索入口 + 约束位 null 同义**）：
+  //      `vitestFiles` 不变、`vitestTests` 820 → **828**，**净 +8**。四组：
+  //      ① `useVdfs.spec` **+3**：`search` 三级语义——声明 true 才启用、未表态 /
+  //         false 一律不启用；true 时筛选是**纯投影**（只筛已加载条目）；入口从
+  //         启用变为不启用时清掉筛选词（否则列表被一个看不见的词过滤）。
+  //      ② `VdfsWorkbench.spec` **净 +2**（2 条按新判据改写 + 2 条新增）：筛选框
+  //         由**服务端声明**显隐——声明才出现；未表态 ⇒ 不给（没有声明的功能不
+  //         自己长出来）；有内容但服务端明确 false ⇒ 仍不给（不是「有东西就可筛」）；
+  //         空目录但声明 true ⇒ 框仍在（前端不二次裁决条目数）。2 条改写把旧判据
+  //         「有没有内容」整条替换成「服务端怎么说」。
+  //      ③ `vdfs-form.spec` **+2**：`DetailCondition` 缺席约束位写成 `null` 与缺席
+  //         同义；`false` / `0` / 空串是**合法取值**，不得被当成缺席。
+  //      ④ `VdfsDetailActions.spec` **+1**：定义里 `when` 为 `null` 占位时动作照常
+  //         出现（线上形状回归）。
   vitestFiles: 53,
-  vitestTests: 820,
+  vitestTests: 828,
 }
 
 export const VITEST_TIMEOUT_MS = 180_000

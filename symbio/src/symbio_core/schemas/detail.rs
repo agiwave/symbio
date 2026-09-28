@@ -44,13 +44,30 @@ use serde::{Deserialize, Serialize};
 ///
 /// 因此「缺省」一律按**成立**处理（渲染器侧对空条件求值为 `true`）；只有
 /// `disabled_when` 需要渲染器额外判空——否则「无条件」会被解释成「禁用」。
+/// ## 缺席的约束位**不得序列化成 `null`**
+///
+/// 三个约束位（`equals` / `not_equals` / `truthy`）在线上是**可缺席**的：
+/// 渲染器按「键在不在」判断「有没有这条约束」（`!== undefined`）。若缺席被写成
+/// `null`，它就成了一条**永远不成立**的约束 ——
+///
+/// - 只有 `truthy` 的条件：`Boolean(v) !== null` 恒真 ⇒ 整条恒假；
+/// - 只有 `equals` 的条件：`equals: null` 先判不成立 ⇒ 整条恒假。
+///
+/// 两种形态都**静默**：动作不出现、字段永不显隐、`disabled_when` 永不生效，
+/// 没有任何报错，只有「按钮莫名不见了」。这不是假设——会话详情的「进入下一级」
+/// 曾因此整条消失（`when = is_existing`，附带 `truthy: null`），agent 草稿的
+/// 「导入整包」同样永不出现。守卫见本文件的
+/// `absent_constraints_do_not_serialize_as_null`。
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default)]
 pub struct DetailCondition {
     /// 求值键：表单字段名，或特殊键 `is_existing` / `is_default` / `cap.<name>`
     pub key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub equals: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub not_equals: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub truthy: Option<bool>,
     /// AND 组合（嵌套条件全真才真）
     #[serde(skip_serializing_if = "Vec::is_empty")]

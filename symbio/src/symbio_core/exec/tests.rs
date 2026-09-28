@@ -62,6 +62,41 @@ async fn sink_direct_forwards_and_null_drops() {
     assert_eq!(ops.lock().unwrap().len(), 1, "Null 出口不得写出任何东西");
 }
 
+/// Filtered 出口：白名单吞掉的帧不进写入点、不记进度；放行的帧按**改写后**
+/// 的形状进写入点。上下文压缩靠它同时做到「骨架静默」与「增量流式」。
+#[tokio::test]
+async fn sink_filtered_rewrites_and_drops_per_frame() {
+    let ops = Arc::new(std::sync::Mutex::new(Vec::new()));
+    // 白名单：只放行落向 "keep" 的纯增量帧，落点改写为 "node"
+    let allow: Arc<dyn Fn(&mut ChatMessage) -> bool + Send + Sync> =
+        Arc::new(|f: &mut ChatMessage| {
+            if f.id == "keep" && f.delta.is_some() && f.status.is_none() {
+                f.id = "node".into();
+                return true;
+            }
+            false
+        });
+    let sink = ExecEventSink::filtered(allow, Arc::new(RecordingWriter { ops: ops.clone() }));
+    let progress = sink.progress();
+
+    sink.emit(delta("keep", "a")).await; // 放行（改写落点）
+    sink.emit(delta("drop", "b")).await; // 吞
+    let mut mixed = delta("keep", "c");
+    mixed.status =
+        Some(crate::symbio_core::schemas::session::chat_message::MessageStatus::Completed);
+    sink.emit(mixed).await; // 带状态 ⇒ 吞
+
+    let got = ops.lock().unwrap();
+    assert_eq!(got.len(), 1, "只有白名单放行的帧才能进写入点");
+    assert_eq!(got[0].id, "node", "放行的是改写后的帧");
+    assert_eq!(got[0].delta.as_deref(), Some("a"));
+    assert_eq!(
+        progress.emitted(),
+        1,
+        "进度只计放行的帧（吞掉＝什么都没发生）"
+    );
+}
+
 /// abort 之后 is_aborted 为真、cancelled 立即返回（无轮询延迟）。
 #[tokio::test]
 async fn abort_signal_abort_is_immediate() {

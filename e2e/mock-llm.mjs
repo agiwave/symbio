@@ -18,14 +18,32 @@
 //!     { "id": "tool-call",  "toolCalls": [{ "id": "call_1", "name": "vdfs_read", "arguments": {"path": "/a"} }],
 //!                           "content": "工具调用完成。" },
 //!     { "id": "sse-flood",  "chunks": ["分", "片", "输", "出"], "chunkDelayMs": 15 },
-//!     { "id": "http-500",   "status": 500, "error": "mock 注入的服务端错误" }
+//!     { "id": "http-500",   "status": 500, "error": "mock 注入的服务端错误" },
+//!     { "id": "flaky",      "match": "Distill", "failTimes": 2, "content": "第 3 个逻辑请求起正常" }
 //!   ],
 //!   "fallback": { "id": "default", "content": "（默认回复）" }
 //! }
 //! ```
 //! 匹配规则：按数组顺序，`match` 是对**最后一条 user 消息**的子串匹配；
 //! 不带 `match` 的场景可设 `once: true`（只用一次，适合「第 N 轮调工具」的编排）。
+//! `failTimes: N`：前 N 次**逻辑请求**返回 `errorStatus`（默认 500）错误，之后同场景正常应答。
 //! 无匹配时走 `fallback`；都没有则回复固定占位文本。
+//!
+//! ## 「逻辑请求」= 一个请求体，不是一次 HTTP 命中
+//!
+//! 客户端对 5xx 会退避重发（`model/http.rs::execute_post_with_abort` 的
+//! `MAX_RETRIES`），重发**复用同一份序列化字节**——于是同一次摘要请求会命中 mock
+//! 5 次。按 HTTP 命中计数的话，「前 3 次压缩失败」会在第 1 次压缩里就烧光名额
+//! （第 4 次重发拿到成功响应），熔断、重试这些**按逻辑请求计数**的契约全部对不上。
+//!
+//! 因此 `failTimes` 按**请求体指纹**计数：首次见到的请求体消耗一个名额并定下
+//! 结论，同一请求体的重放**沿用该结论**（仍失败 ⇒ 继续 500，直到客户端重试耗尽
+//! 拿到 `Err`）。这与「服务端这一段时间对这类请求就是坏的」直觉一致，也让用例
+//! 不必知道 `MAX_RETRIES` 是几。
+//!
+//! 注入的错误附带 `retry-after: 0`（服务端明示可立即重试），否则用例要空等整段
+//! 指数退避（3 次逻辑失败 ≈ 22s）。要验退避节奏就用静态 `status`，或显式给
+//! `retryAfterSec`。
 
 import http from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -47,6 +65,15 @@ if (SCENARIOS_PATH) {
 }
 const requests = []; // 每次调用的完整请求体 + 时间戳
 const onceUsed = new Set();
+// `failTimes` 的名额按**逻辑请求**消耗：键 = 场景 id + 请求体指纹，值 = 该请求
+// 定下的结论（fail / ok）。同一请求体的退避重放沿用首次结论（见文件头说明）。
+const failOutcome = new Map();
+const failLogicalHits = new Map(); // 场景 id → 已消耗的逻辑名额
+
+/** 逻辑请求指纹：场景 id + 请求体（重发复用同一份字节 ⇒ 指纹相同）。 */
+function requestFingerprint(scenarioId, body) {
+  return `${scenarioId}\n${JSON.stringify(body)}`;
+}
 
 function loadScenarios() {
   return plan.scenarios ?? [];
@@ -73,6 +100,38 @@ function pickScenario(body) {
     return { scenario: s, userText };
   }
   return { scenario: plan.fallback ?? { id: 'default', content: '（mock 默认回复）' }, userText };
+}
+
+// ---------- 故障注入：逻辑请求的判定与响应头 ----------
+
+/**
+ * `failTimes` 的判定：名额按**逻辑请求**（场景 id + 请求体指纹）消耗，同一请求体的
+ * 退避重放沿用首次结论。客户端对 5xx 会拿同一份序列化字节重发（见文件头「逻辑请求」），
+ * 一次逻辑失败因此命中 1 + MAX_RETRIES 次，按 HTTP 命中计数会把名额烧光。
+ *
+ * @returns {{ hit: number, fail: boolean }} `hit` = 该请求是本场景的第几个逻辑请求
+ */
+function failVerdict(scenario, body) {
+  const fp = requestFingerprint(scenario.id, body);
+  const seen = failOutcome.get(fp);
+  if (seen) return seen;
+  const hit = (failLogicalHits.get(scenario.id) ?? 0) + 1;
+  failLogicalHits.set(scenario.id, hit);
+  const verdict = { hit, fail: hit <= scenario.failTimes };
+  failOutcome.set(fp, verdict);
+  return verdict;
+}
+
+/**
+ * 注入错误的响应头。`failTimes` 路径默认 `retry-after: 0`：服务端明示可立即重试，
+ * 用例因此不必空等客户端的指数退避（3 次逻辑失败约为 22s）；要验退避节奏就用静态
+ * `status`，或显式给 `retryAfterSec`。
+ */
+function errorHeaders(scenario) {
+  const headers = { 'content-type': 'application/json' };
+  const retryAfter = scenario.retryAfterSec ?? (scenario.failTimes > 0 ? 0 : null);
+  if (retryAfter != null) headers['retry-after'] = String(retryAfter);
+  return headers;
 }
 
 // ---------- OpenAI 线格式 ----------
@@ -132,6 +191,8 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === '/_reset') {
     requests.length = 0;
     onceUsed.clear();
+    failOutcome.clear();
+    failLogicalHits.clear();
     res.writeHead(200, noKeepAlive);
     return res.end(JSON.stringify({ ok: true }));
   }
@@ -143,8 +204,13 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname.endsWith('/chat/completions')) {
-    let body = '';
-    for await (const part of req) body += part;
+    // 请求体必须**先攒 Buffer 再整体解码**（`body += part` 是逐块解码：一个 3 字节
+    // 中文字符被 socket 分块切在中间时，两半各解出一个 U+FFFD —— 同一份字节的重发
+    // 会因分块边界不同而解出**差 1 个字符**的请求体 ⇒ 指纹分裂 ⇒ failTimes 名额与
+    // 逻辑请求数被虚增，e2e 按「逻辑请求」计数的用例随之偶发飘红）。
+    const parts = [];
+    for await (const part of req) parts.push(part);
+    const body = Buffer.concat(parts).toString('utf8');
     let parsed = {};
     try { parsed = JSON.parse(body); } catch { /* 容错：空体 */ }
     requests.push({ at: Date.now(), path: url.pathname, body: parsed, contentType: req.headers['content-type'] ?? null });
@@ -153,10 +219,28 @@ const server = http.createServer(async (req, res) => {
     const model = parsed.model ?? 'mock-model';
     const requestId = `chatcmpl-${Date.now().toString(16)}-${requests.length}`;
 
-    // 故障注入：非 2xx
+    // 故障注入：非 2xx（静态）
     if (scenario.status && scenario.status >= 400) {
-      res.writeHead(scenario.status, { 'content-type': 'application/json' });
+      res.writeHead(scenario.status, errorHeaders(scenario));
       return res.end(JSON.stringify({ error: { message: scenario.error ?? 'mock 注入的错误', type: 'mock_error' } }));
+    }
+
+    // 故障注入：前 `failTimes` 次**逻辑请求**失败，之后同场景正常应答——
+    // 支撑「连续失败 → 熗断 → 重试成功」这类**按时间变化**的编排（静态 status 做不到）。
+    // 名额按请求体指纹消耗、同一请求体的重放沿用首次结论：见文件头「逻辑请求」。
+    if (scenario.failTimes > 0) {
+      const verdict = failVerdict(scenario, parsed);
+      if (verdict.fail) {
+        res.writeHead(scenario.errorStatus ?? 500, errorHeaders(scenario));
+        return res.end(
+          JSON.stringify({
+            error: {
+              message: scenario.error ?? `mock 第 ${verdict.hit} 个逻辑请求注入的错误`,
+              type: 'mock_error',
+            },
+          }),
+        );
+      }
     }
 
     const events = [...buildEvents(scenario, model, requestId)];

@@ -60,10 +60,12 @@
     </template>
 
     <template #list>
-      <!-- 筛选框：只在**当前目录有内容**时出现。
-           空目录给一个搜索框是噪音——没有东西可筛，它只会让用户以为"可以搜库"。
-           筛选是纯客户端投影（见 useVdfs 的说明），不发请求、不动分页游标。 -->
-      <div v-if="items.length > 0" class="vdfs-filter">
+      <!-- 筛选框：**服务端声明**了才出现（`cwdNode.search`）——与「新建」看
+           `new_type` 同一条通道，本控件不自判「条目够不够多」。
+           目录条目少（服务端认定不值得检索）、或空目录时都不给：一个筛不出东西的
+           搜索框只会让用户以为"可以搜库"。
+           筛选本身是纯客户端投影（见 useVdfs 的说明），不发请求、不动分页游标。 -->
+      <div v-if="searchable" class="vdfs-filter">
         <input
           v-model="filter"
           class="vdfs-filter-input"
@@ -234,6 +236,7 @@ const {
   title,
   items,
   filteredItems,
+  searchable,
   filter,
   activeFilter,
   filterEmpty,

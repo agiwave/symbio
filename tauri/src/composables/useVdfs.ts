@@ -336,8 +336,29 @@ export function useVdfs(opts: UseVdfsOptions) {
   // 「只筛已加载的那些」（未加载的更早页里可能有命中）——这一点必须对用户
   // 说出来，否则「搜不到」会被读成「不存在」。故 `filterTruncated` 单独暴露。
 
+  /**
+   * 检索入口是否可用 —— **服务端声明**（`cwdNode.search`，与「新建」看
+   * `new_type` 同一条通道）。
+   *
+   * 为什么不在这里判「条目够不够多」：那是一条**阈值**，各前端各判一份必然分叉
+   * （网页 20 条、桌面 5 条、CLI 干脆不做），而用户看到的应该是同一个答案。
+   * 后端在**列表分发**里统一回答（`plugins/vdfs/host.rs::LIST_SEARCH_MIN_ITEMS`），
+   * provider 也可以按自己的资源特征覆盖（`VdfsNode::search`）——前端只读结果。
+   *
+   * 未声明（`undefined`，如 `stat` 上的节点）一律按**不启用**处理：没有声明的
+   * 功能不自己长出来。
+   */
+  const searchable = computed(() => cwdNode.value?.search === true)
+
   /** 筛选词（大小写不敏感的**子串**匹配：中文没有词边界，分词反而搜不到） */
   const filter = ref('')
+
+  // 入口消失（换到条目很少的目录 / 服务端收起它）时，筛选词必须一并清掉：
+  // 否则列表仍在被一个**看不见的词**过滤——用户既看不到自己筛了什么，也找不到
+  // 清除入口，看到的只是「条目莫名少了一半」。
+  watch(searchable, (on) => {
+    if (!on) filter.value = ''
+  })
 
   /** 归一化筛选词（去首尾空白；空 = 不过滤） */
   const activeFilter = computed(() => filter.value.trim().toLowerCase())
@@ -943,7 +964,8 @@ export function useVdfs(opts: UseVdfsOptions) {
     loadMore,
     reload,
     select,
-    // 列表筛选（纯投影，不与分页冲突）
+    // 列表筛选（纯投影，不与分页冲突；入口可见性由服务端声明）
+    searchable,
     filter,
     activeFilter,
     filteredItems,

@@ -143,6 +143,55 @@ fn nested_form_field_validates_against_sub_definition() {
     );
 }
 
+/// 缺席的约束位**不得**序列化成 `null`（线上的「缺席」= 键不在）。
+///
+/// 这是「条件静默失效」的唯一根因面：渲染器按「键在不在」判约束，`null` 会被
+/// 当成一条约束,并且因 `Boolean(v) !== null` 恒真而**恒假**——动作不出现、字段
+/// 永不显隐、`disabled_when` 永不生效，全程无报错。单侧条件（只有 `equals` 或只有
+/// `truthy`）已实测踩过：会话详情的「进入下一级」(T13 的清单节点) 整条消失。
+#[test]
+fn absent_constraints_do_not_serialize_as_null() {
+    // 只带 equals
+    let only_equals = DetailCondition {
+        key: "is_existing".into(),
+        equals: Some(json!(true)),
+        ..Default::default()
+    };
+    let v = serde_json::to_value(&only_equals).unwrap();
+    assert_eq!(v, json!({ "key": "is_existing", "equals": true }), "{v}");
+
+    // 只带 truthy
+    let only_truthy = DetailCondition {
+        key: "message_count".into(),
+        truthy: Some(true),
+        ..Default::default()
+    };
+    let v = serde_json::to_value(&only_truthy).unwrap();
+    assert_eq!(v, json!({ "key": "message_count", "truthy": true }), "{v}");
+
+    // 组合条件不带任何叶子约束位（`all` 之外的字段一律不出现）
+    let combo = DetailCondition {
+        all: vec![only_truthy],
+        ..Default::default()
+    };
+    let v = serde_json::to_value(&combo).unwrap();
+    assert!(
+        v.get("equals").is_none() && v.get("not_equals").is_none() && v.get("truthy").is_none(),
+        "组合条件不得带叶子约束位: {v}"
+    );
+
+    // 线上形状可原样读回（`null` 会被当成约束，故也必须能不带这些键反序列化）
+    let back: DetailCondition = serde_json::from_value(json!({"key": "a", "equals": 1})).unwrap();
+    assert_eq!(
+        back,
+        DetailCondition {
+            key: "a".into(),
+            equals: Some(json!(1)),
+            ..Default::default()
+        }
+    );
+}
+
 /// `disabled_when` 成立**不**豁免校验：字段仍然在提交值里（只是用户改不动），
 /// 与 `visible_when` 不成立的「没显示就不该拦提交」是两回事。
 #[test]

@@ -217,6 +217,8 @@ async fn compress_snapshot_inner(
     keep_messages: Vec<ChatMessage>,
     extra_hints: Option<&str>,
     log_tag: &str,
+    // 与包装层 begin/finish 同一个 id：摘要增量因此落到**同一个**节点上
+    node_id: &str,
 ) -> Result<Option<usize>, CompressionFailure> {
     // 保存原始历史：压缩失败时回滚，绝不能让压缩请求残留在上下文里。
     let original_messages = context.messages.clone();
@@ -293,6 +295,9 @@ async fn compress_snapshot_inner(
         &context.messages,
         &root_id,
         abort,
+        // 摘要增量实时落到压缩节点上（节点 id 与 begin/finish 同源，见包装层）
+        orchestrator.compression.as_deref(),
+        node_id,
     )
     .await
     {
@@ -342,12 +347,16 @@ async fn compress_snapshot_inner(
             ..Default::default()
         };
         context.messages.push(retry_msg);
+        // 纠正重试沿用**同一个压缩节点**：两段摘要增量先后追加到同一节点正文上，
+        // 与「这是一次压缩、重试是它的一部分」的观感一致。
         let retry = send_compression_request(
             orchestrator,
             &compression_prompt,
             &context.messages,
             &llm_short_id(),
             abort,
+            orchestrator.compression.as_deref(),
+            node_id,
         )
         .await;
         if let Ok(s) = retry {
@@ -551,6 +560,7 @@ async fn compress_with_snapshot_core(
         keep_messages,
         extra_hints,
         log_tag,
+        &node_id,
     )
     .await;
     if let Some(e) = &orchestrator.compression {
@@ -828,22 +838,37 @@ async fn send_compression_request(
     messages: &[ChatMessage],
     root_id: &str,
     abort: &ExecAbortSignal,
+    // 压缩节点的发射器与节点 id：有发射器时，摘要正文的逐帧增量会**改道**到这个
+    // 节点上实时可见（[`compression_delta_gate`]）；`None` = 无前端场景，全帧静默。
+    emitter: Option<&super::super::chat_loop::CompressionEmitter>,
+    node_id: &str,
 ) -> Result<ChatMessage, PluginError> {
     // 压缩是**内部 LLM 请求**，不是对话轮次：其流式事件（Turn 起始 / 思考 / 正文 delta）
-    // 绝不能进入对话流——否则前端会多出一个永远停在"正在思考…"的空 Turn（压缩请求
-    // 从不 finalize，快照也只落库不广播），且随每次自动压缩/主动压缩逐个累积。
-    // 长会话才会触发压缩，因此该泄漏只在长任务后复现，极易误判为渲染层问题。
+    // 绝不能以**自有身份**进入对话流——否则前端会多出一个永远停在"正在思考…"的
+    // 空 Turn（压缩请求从不 finalize，快照也只落库不广播），且随每次自动压缩/主动
+    // 压缩逐个累积。长会话才会触发压缩，因此该泄漏只在长任务后复现，极易误判为
+    // 渲染层问题。
+    //
+    // 但「静默」不等于「用户全程面对一句占位文案」：长上下文的摘要请求可能耗时
+    // 数分钟，用户看到的应当是摘要**正在长出来**——增量落在**压缩节点**上（它
+    // 由 [`CompressionEmitter::begin`] 先行占位，不依赖压缩请求的任何帧）。
     //
     // 收口前这里靠**通道隔离的不对称设计**实现：tx 换成哑 sender + drain task
     // （出帧静默），rx 临时与主通道对调（入帧收真实 Abort）——因为当时「出口」
     // 只能是通道，「静默」只能靠换掉通道的一半来伪造。
     //
-    // 现在静默是**出口的一种取值**（[`ExecEventSink::silent`]），而中止走**共享的
-    // [`ExecAbortSignal`]**——压缩请求与对话轮次拿到的是同一个信号，用户停止时立即
-    // 感知，不需要「把 rx 临时移交主通道」这种所有权交换。整个 hack（含两个
-    // `mem::replace` 与一个 drain task）因此消失，且「压缩绝不产生可见事件」
-    // 从运行期约定变成类型上的选择。
-    let sink = ExecEventSink::silent();
+    // 现在这个窗口是**出口的一种取值**：有发射器时走[`ExecEventSink::filtered`]
+    // （白名单把摘要文本帧改道到压缩节点，Turn 骨架帧照旧吞掉，见
+    // [`compression_delta_gate`]），无发射器时退回 [`ExecEventSink::silent`]。
+    // 中止则始终走**共享的 [`ExecAbortSignal`]**——压缩请求与对话轮次拿到的是同一
+    // 个信号，用户停止时立即感知，不需要「把 rx 临时移交主通道」这种所有权交换。
+    let sink = match emitter {
+        Some(em) => {
+            let writer = em.transcript_writer();
+            ExecEventSink::filtered(std::sync::Arc::new(compression_delta_gate(node_id)), writer)
+        }
+        None => ExecEventSink::silent(),
+    };
 
     // 压缩请求窗口日志：此窗口内出帧静默、消费循环收不到任何流式帧，
     // 若无日志，长压缩请求表现为"整段时间无任何输出"（用户视角的卡死）。
@@ -887,12 +912,59 @@ async fn send_compression_request(
     result
 }
 
-/// 压缩摘要的实际 LLM 调用：出口静默，中止走共享信号。
+/// 摘要请求出口的**白名单**：把摘要正文的逐帧增量改道到压缩节点，其余帧吞掉。
+///
+/// ## 为什么是一道逐帧白名单，而不是「换一个出口」
+///
+/// 模型插件的流循环（`plugins/model/stream.rs`）发出的帧有三类：
+///
+/// 1. **Turn 组合节点骨架**（`msg_type = Turn`，`id = 请求 root_id`）——压缩请求
+///    的 root 是一次性 id，这条帧若进转写，前端会多出一个**永远停在流式的空
+///    Turn 骨架**（压缩不走 Turn 定稿路径），这是静默最初的动机，必须继续吞掉；
+/// 2. **摘要正文子节点**（model 流循环自选 id 的 `Streaming` 正文）——它才是
+///    摘要内容：首帧是「全量快照」（id + content + Streaming），后续是**纯窄
+///    增量**（id + delta）。首帧被吞（它携带节点身份与全量正文），增量改写为
+///    「压缩节点上的纯窄增量」放行；
+/// 3. **推理增量**——同属摘要内容（reasoning-only 回退时 `effective_text` 取的
+///    就是它），与正文增量同待遇。已知局限：工具参数增量与正文增量**帧形相同**
+///    （`{id, delta}`），无法按形状区分；压缩请求本就不带工具清单（`tools: []`），
+///    规约的模型不会产生工具调用，即使异常模型产生了，也只是把参数碎片追加到
+///    预览正文后面——不落库（`finish` 用完整正文整条替换），无破坏性。
+///
+/// 于是判据落在**帧形状**上而不是节点 id 上：纯窄增量（`delta` 有、`content`
+/// 与 `status` 皆无）⇒ 改写落点放行；其余（身份 / 全量 / 状态帧）⇒ 吞。帧面
+/// 语义全在字段上（见 `transcript.rs` 的帧表），白名单因此可以**就地改写**而
+/// 不需要新帧型。压缩节点本体由 [`CompressionEmitter::begin`] 先行占位，前端
+/// 转写由此在占位正文后面逐帧长出摘要；`finish` 再用**完整消息帧**替换正文定稿
+/// （正文从未经 delta 完整上线过——尾部不可能被 delta 续写，`finish` 的帧形
+/// 无需变更）。
+///
+/// 返回 `false` = 吞掉（与静默出口完全同义）；`true` = 按（可能已改写的）帧放行。
+fn compression_delta_gate(
+    node_id: &str,
+) -> impl Fn(&mut ChatMessage) -> bool + Send + Sync + 'static {
+    let node_id = node_id.to_string();
+    move |frame: &mut ChatMessage| {
+        // 纯窄增量 ⇒ 摘要内容在增长：落点改到压缩节点（占位正文之后尾追加）。
+        // 增量/全量语义互斥：改写后只留 `delta`，剥掉可能存在的 `meta`，
+        // 防止上游帧形状演化时静默破坏转写不变量。
+        if frame.delta.is_some() && frame.content.is_none() && frame.status.is_none() {
+            frame.id = node_id.clone();
+            frame.meta = None;
+            return true;
+        }
+        // 其余（Turn 骨架 / 节点身份帧 / 全量快照 / 状态迁移）一律吞掉：
+        // 压缩请求不得在流上产生任何可见节点。
+        false
+    }
+}
+
+/// 压缩摘要的实际 LLM 调用：出口由调用方给定（静默或过滤桥），中止走共享信号。
 ///
 /// 注意：这里**绝不发射 Turn 帧**（不发 emit_streaming_start）。压缩是内部请求、
 /// 不是对话轮次——若误走真实出口会在前端留下永远"正在思考…"的空 Turn 骨架
-/// （每轮压缩尝试累积一个）。出口由调用方给定为 [`ExecEventSink::silent`]，
-/// 使"内部请求泄漏可见事件"这一类问题在结构上不可能发生。
+/// （每轮压缩尝试累积一个）。出口取值见 [`send_compression_request`]：无前端
+/// 场景静默，有前端场景走过滤桥（摘要增量改道到压缩节点，骨架帧仍被吞）。
 async fn run_compression_llm(
     orchestrator: &ChatOrchestrator,
     system_prompt: &str,

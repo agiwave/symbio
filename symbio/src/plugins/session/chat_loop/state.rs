@@ -368,6 +368,22 @@ impl CompressionEmitter {
             .await;
     }
 
+    /// 压缩请求的**增量改道落点**：返回直连本会话转写唯一写入点的 writer（仅由
+    /// `context::pipeline` 的过滤桥消费——摘要帧经白名单改写后从这里进转写）。
+    ///
+    /// ## 为什么复用转写而不是另开一条通道
+    ///
+    /// 增量落点是「在途图 + 位置号 + 发布」三件事的合成：另开通道等于把这套收敛
+    /// 逻辑再实现一遍，且必然漂移。压缩期本转写的唯一常规写入者（消费循环）正等
+    /// 着压缩完成，不存在写竞争——这与 `begin` / `finish` 经同一入口写是同一个理由。
+    pub(crate) fn transcript_writer(
+        &self,
+    ) -> std::sync::Arc<dyn crate::symbio_core::ExecTranscriptWriter> {
+        std::sync::Arc::new(TranscriptWriterBridge {
+            transcript: self.state.transcript.clone(),
+        })
+    }
+
     /// 落库回包用的**发布通道**（[`PublishTarget::Transcript`]：按会话 id 现场解析转写）。
     ///
     /// 「落库 → 逐条下发权威副本」整段动作在 `plugin::append_and_publish`（§3.4 的
@@ -385,6 +401,21 @@ impl CompressionEmitter {
             plugin: &self.plugin,
             session_id,
         }
+    }
+}
+
+/// [`CompressionEmitter::transcript_writer`] 的落点：一个只做「锁转写 → apply」
+/// 的最小 writer（合成 [`crate::symbio_core::ExecTranscriptWriter`] 的桥，与
+/// `orchestrator::sink::TranscriptSink` 平行——后者多了会话级告警分派，压缩增量
+/// 用不上）。
+struct TranscriptWriterBridge {
+    transcript: std::sync::Arc<tokio::sync::Mutex<super::super::transcript::Transcript>>,
+}
+
+#[async_trait::async_trait]
+impl crate::symbio_core::ExecTranscriptWriter for TranscriptWriterBridge {
+    async fn apply(&self, message: ChatMessage) {
+        self.transcript.lock().await.apply(message);
     }
 }
 

@@ -58,6 +58,13 @@ export const LINE_BUDGET_BASELINES = {
   // 前后水位 / 丢了几条）与它的口径说明——注释占一半，那几条口径（内容水位不含
   // 请求级开销、`after_tokens` 只在成功时写入）是防止下一个人"顺手补齐"的关键；
   // `chat_loop/state.rs` 新增 `merge_meta`（字段补丁不覆盖已有键）。
+  // 2026-09-28（同日第三笔）：+103 行（16910 → **17013**）。压缩摘要的**增量改道**：
+  // `context/pipeline.rs` 的 `send_compression_request` 由「出口恒静默」改为
+  // 「有发射器 ⇒ `ExecEventSink::filtered` 白名单改道到压缩节点，无发射器 ⇒ 静默」
+  // （含 `compression_delta_gate` 的逐帧白名单与它的口径说明），`chat_loop/state.rs`
+  // 新增 `CompressionEmitter::transcript_writer` 与 `TranscriptWriterBridge`
+  // （只做「锁转写 → apply」的最小 writer）。骨架帧照静、摘要增量照流——注释占
+  // 增量的过半，说明的是「为什么不能逐窗口二选一」。
   // 2026-09-27：智能体详情重设计（方案 A，后端驱动）——`agent/host/vdfs.rs` 的
   // `agent_dir_info` 由「能力拼成一个字符串」改为**结构化下发**（`capabilities`
   // 计数对象 + `capability_kinds` 清单 + `capability_count`），新增
@@ -75,15 +82,26 @@ export const LINE_BUDGET_BASELINES = {
   "symbio/src/plugins/mcp": { maxLines: 2897, exts: [".rs"] },
   "symbio/src/plugins/model": { maxLines: 6212, exts: [".rs"] },
   "symbio/src/plugins/plugin_manager": { maxLines: 666, exts: [".rs"] },
-  "symbio/src/plugins/session": { maxLines: 16910, exts: [".rs"] },
+  "symbio/src/plugins/session": { maxLines: 17013, exts: [".rs"] },
   "symbio/src/plugins/skill": { maxLines: 1470, exts: [".rs"] },
   "symbio/src/plugins/telegram": { maxLines: 887, exts: [".rs"] },
-  "symbio/src/plugins/vdfs": { maxLines: 3012, exts: [".rs"] },
+  // 2026-09-28：+18 行（3012 → **3030**）。列表**检索入口**的服务端回答：
+  // `host.rs` 新增 `LIST_SEARCH_MIN_ITEMS`（阀值统一住服务端，各前端不各判一份）
+  // 与 `list_at` 里给目录节点补 `search` 的三行。
+  "symbio/src/plugins/vdfs": { maxLines: 3030, exts: [".rs"] },
   "symbio/src/plugins/web": { maxLines: 1028, exts: [".rs"] },
   "symbio/src/plugins/work": { maxLines: 627, exts: [".rs"] },
 
   // ── 内核与驱动层（symbio/src/*） ──
-  "symbio/src/symbio_core": { maxLines: 8143, exts: [".rs"] },
+  // 2026-09-28：+89 行（8143 → **8232**）。三件事：
+  // ① `exec/mod.rs` 新增 [`ExecEventSink::Filtered`] 出口（白名单可改写 / 可吞帧的
+  //    过滤桥，压缩摘要增量改道的类型基础）与 `filtered()` 构造器；
+  // ② `schemas/detail.rs` 的 `DetailCondition` 三个约束位改 `skip_serializing_if`，
+  //    并写明「缺席不得序列化成 `null`」的理由（缺席 `null` ⇒ 整条恒假、界面静默
+  //    少一个动作——一次真回归换来判据）；
+  // ③ `vdfs/node.rs` 的 `VdfsNode::search` 声明位（三级语义 + 为什么在节点上而
+  //    不在列表响应上）。
+  "symbio/src/symbio_core": { maxLines: 8232, exts: [".rs"] },
   "symbio/src/providers": { maxLines: 2732, exts: [".rs"] },
 
   // ── 宿主与工具层 ──
@@ -155,7 +173,15 @@ export const LINE_BUDGET_BASELINES = {
   //      `components/message/CompressionNode.vue`（按字段渲染事实行）、
   //      `components/chat/ChatInputArea.vue`（发送键 / 停止键收敛为一个语义）。
   //      测试代码不计入本口径。
-  "tauri/src": { maxLines: 22150, exts: [".ts", ".vue"] },
+  // 2026-09-28（同日第六笔）：+54 行（22150 → **22204**）。**检索入口的使用方接线**
+  //      与约束位的消费侧口径：`schemas/vdfs.ts` 的 `search?: boolean` 声明 +
+  //      `composables/useVdfs.ts` 的 `searchable` computed 与入口收起时清筛选词的
+  //      watch、`schemas/vdfs-form.ts` 的 `evalDetailCondition` 把 `null` 与缺席
+  //      同义（`!= null` 判据）+ `DetailCondition` 三个约束位的类型放宽、
+  //      `VdfsWorkbench.vue` 的筛选框按服务端声明显隐。注释占大半：阀值不得由各
+  //      前端自判、`null` 不得当约束——都是「不写就会被下一轮优化掉」的判据。
+  //      测试代码不计入本口径。
+  "tauri/src": { maxLines: 22204, exts: [".ts", ".vue"] },
 };
 
 export function runAudit({ root = repoRoot, baselines = LINE_BUDGET_BASELINES, strict = STRICT } = {}) {
