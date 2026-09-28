@@ -496,3 +496,104 @@ describe('MessageNode：节点头键盘可达性', () => {
     expect(w.find('.node-body').exists()).toBe(before)
   })
 })
+
+/**
+ * 压缩后的**历史记忆**（`meta.compacted`）。
+ *
+ * 回归动机：它是 `role = user` 的消息（后端为让对话以 user 开头），曾按「角色优先」
+ * 渲染成右对齐的用户气泡、头像是「你」——一段系统写的记忆被读成用户自己的话。
+ * 这里钉住四个可见后果：标题 / 对齐 / 默认收起 / 不给悬停操作。
+ */
+describe('MessageNode：压缩后的历史记忆（不是「你说的那句话」）', () => {
+  const memory = (extra: Partial<ChatMessage> = {}) =>
+    msg({
+      id: 'mem1',
+      role: 'user',
+      status: 'completed',
+      content: '[CONTEXT SNAPSHOT — 压缩的历史记忆，基于它继续任务]\n要点一\n要点二',
+      meta: { compacted: true, post_tokens: 9000, transcript_path: '/store/s1/transcripts/a.json' },
+      ...extra,
+    })
+
+  it('标题自述「历史记忆」，且不是用户消息的右对齐形态', () => {
+    const w = mountNode(memory())
+    expect(w.find('.node-title').text()).toBe('历史记忆')
+    expect(w.find('.msg').classes()).not.toContain('user')
+  })
+
+  it('默认收起（摘要很长，不得盖过对话本体）', () => {
+    const w = mountNode(memory())
+    expect(w.find('.node-head').attributes('aria-expanded')).toBe('false')
+    expect(w.find('.memory-body').exists()).toBe(false)
+  })
+
+  it('展开后：记忆原文原样可读 + 事实行（水位 / 已转存）', async () => {
+    const w = mountNode(memory())
+    await w.find('.node-head').trigger('click')
+
+    // 原文原样：内部标记也不剥掉——这一页的意义是「可审计」
+    expect(w.find('.memory-text').text()).toContain('CONTEXT SNAPSHOT')
+    const facts = w.find('.memory-facts').text()
+    expect(facts).toContain('压缩后水位 9k')
+    expect(facts).toContain('完整历史已转存')
+  })
+
+  it('不给悬停操作（系统记忆的编辑 / 删除不走悬停）', () => {
+    const w = mountNode(memory({ parent_id: undefined }))
+    expect(w.findAll('.node-act')).toHaveLength(0)
+  })
+
+  it('旧会话（无这些字段）⇒ 事实行不出现，不编数字', () => {
+    const w = mountNode(memory({ meta: { compacted: true } }))
+    expect(w.find('.memory-facts').exists()).toBe(false)
+  })
+})
+
+/**
+ * 压缩节点的**结构化交代**：正文只说得了一条「N → M 条」，而「离上限还有多少」
+ * 「这次是谁触发的」是字段（后端随 `meta` 下发）。缺字段就退回只有正文的旧观感。
+ */
+describe('MessageNode：压缩节点的事实行', () => {
+  const compressed = (meta: Record<string, unknown> | undefined) =>
+    msg({
+      id: 'cp1',
+      type: 'compression',
+      status: 'completed',
+      content: '已压缩上下文（12 → 3 条）',
+      ...(meta ? { meta } : {}),
+    })
+
+  it('字段齐全 ⇒ 水位 / 上限 / 触发来源 / 丢了几条', () => {
+    const w = mountNode(
+      compressed({
+        compact_trigger: 'threshold',
+        context_limit: 200000,
+        before_tokens: 150000,
+        after_tokens: 30000,
+        dropped: 9,
+      }),
+    )
+    const facts = w.find('.compress-facts').text()
+    expect(facts).toContain('压缩后水位 30k')
+    expect(facts).toContain('上限 200k')
+    expect(facts).toContain('自动整理')
+    expect(facts).toContain('压掉 9 条')
+    // 正文没被改写：事实行是补充，不是替换
+    expect(w.find('.compress-note').text()).toContain('12 → 3 条')
+  })
+
+  it('未触发 / 失败（无 after_tokens）⇒ 报当前水位，不报「压缩后」', () => {
+    const w = mountNode(
+      compressed({ compact_trigger: 'retry', context_limit: 200000, before_tokens: 150000 }),
+    )
+    const facts = w.find('.compress-facts').text()
+    expect(facts).toContain('当前水位 150k')
+    expect(facts).not.toContain('压缩后水位')
+    expect(facts).toContain('手动重试')
+  })
+
+  it('旧后端（无字段）⇒ 不出事实行', () => {
+    const w = mountNode(compressed(undefined))
+    expect(w.find('.compress-facts').exists()).toBe(false)
+  })
+})

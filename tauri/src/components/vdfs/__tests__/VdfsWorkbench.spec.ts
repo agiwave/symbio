@@ -479,3 +479,36 @@ describe('VdfsWorkbench 列表为空时收起中栏（喂给容器的三个事�
     expect(w.find('.workbench-list').exists()).toBe(false)
   })
 })
+
+/**
+ * 空态即引导：可新建的空目录必须给一个**可执行**的出口。
+ *
+ * 中栏会有可见空态的主要场合是「刚把最后一项删掉 / 清空了选中」——此时自动草稿
+ * 已经开过一次（`autoDraftDone`），不会再开，用户看到的就只有那句「此目录为空」。
+ * 从前它只提示「点击右上角「新建」添加」，等于把用户推去找一个图标。
+ *
+ * ⚠️ 文案里的类型名必须来自**类型自述的 `title`**（后端下发），不是前端按类型
+ * 分支写死的字面量——后者会让「新增一类资源前端零开发」在这条路径上失效。
+ */
+describe('VdfsWorkbench 空态即引导', () => {
+  it('★ 可新建的空目录 ⇒ 给「新建第一个 ⟨类型标题⟩」按钮，点它就开草稿', async () => {
+    installStub({ newType: { ext: 'session', title: '会话' }, selected: null, items: [] })
+    const w = bench()
+
+    const cta = w.find('.empty-action.primary')
+    expect(cta.exists(), '空目录不能只给说明、不给出口').toBe(true)
+    expect(cta.text(), '类型名取自类型自述（后端下发）').toBe('新建第一个会话')
+
+    const before = hoisted.fns.startNew.mock.calls.length
+    await cta.trigger('click')
+    expect(hoisted.fns.startNew.mock.calls.length).toBe(before + 1)
+  })
+
+  it('不可新建的空目录 ⇒ 只说「该目录由系统管理」，不给按钮（不给假的出口）', () => {
+    installStub({ newType: null, selected: null, items: [], cwdNode: null })
+    const w = bench()
+
+    expect(w.find('.empty-action.primary').exists()).toBe(false)
+    expect(w.text()).toContain('该目录由系统管理')
+  })
+})

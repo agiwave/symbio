@@ -94,6 +94,7 @@ pub(crate) async fn auto_compress_process(
         // 自动路径无用户保留提示（hints 只在主动路径有来源）
         None,
         "auto",
+        if force { "retry" } else { "threshold" },
     )
     .await;
     match post_tokens {
@@ -474,6 +475,40 @@ async fn emit_transcript_rewrite(
         .await;
 }
 
+/// 压缩节点的**结构化交代** —— 「这次压缩从哪里来、水位到哪去」的数字，
+/// 随节点 `meta` 下发，由前端按字段渲染（缺字段就退回正文那一行）。
+///
+/// ## 口径（改之前先读）
+///
+/// - `before_tokens` / `after_tokens` 是**内容水位**：与快照 `meta.post_tokens` 同源
+///   （包含历史与保留区内容，**不含**请求级固定开销）。与 `context_limit` 相除得到的
+///   比例因此是一个**下限**——真实占用还要加上 system prompt 与工具定义。宁可少报
+///   也不要多报：报多了会让用户以为"已经快满了"而做无谓的手动压缩。
+/// - `after_tokens` 只在**成功**时写入。失败 / 未触发的路径没有可信的"压缩后水位"，
+///   编一个 0 会在界面上显示成"水位已降到 0"——那是最坏的一种谎报。
+///
+/// 纯函数：可直接断言，不需要跑一整条压缩流水线。
+fn compression_stats(
+    trigger: &str,
+    context_limit: usize,
+    before_tokens: usize,
+    after_tokens: Option<usize>,
+    dropped: usize,
+) -> serde_json::Value {
+    let mut stats = serde_json::json!({
+        "compact_trigger": trigger,
+        "context_limit": context_limit,
+        "before_tokens": before_tokens,
+    });
+    if let Some(after) = after_tokens {
+        stats["after_tokens"] = serde_json::json!(after);
+    }
+    if dropped > 0 {
+        stats["dropped"] = serde_json::json!(dropped);
+    }
+    stats
+}
+
 /// 压缩内核的**包装层**：只负责「正在压缩」这个会话阶段的置位与清位。
 ///
 /// ## 为什么清位必须收在这一层
@@ -494,10 +529,16 @@ async fn compress_with_snapshot_core(
     keep_messages: Vec<ChatMessage>,
     extra_hints: Option<&str>,
     log_tag: &str,
+    // 触发来源（**面向用户的原因词**，进节点 `meta.compact_trigger`）：
+    // `threshold`（越线自动）/ `tool`（模型主动调 `context_compact`）/ `retry`（用户重试）。
+    // 与 `log_tag`（日志标签）分开：前者是线上契约的一部分，改它会改变前端呈现。
+    trigger: &'static str,
 ) -> Result<Option<usize>, CompressionFailure> {
     // 压缩节点的 id 在**包装层**生成：这里才有发射器，而内层只管压缩逻辑。
     let node_id = llm_short_id();
     let before = context.messages.len();
+    // 内容水位（不含请求级开销，口径见 `compression_stats`）——在上下文被改写**之前**读
+    let before_tokens = super::estimate_context_tokens(&context.messages, 0);
     if let Some(e) = &orchestrator.compression {
         e.begin(&node_id).await;
     }
@@ -530,7 +571,19 @@ async fn compress_with_snapshot_core(
             ),
             Err(f) => (MessageStatus::Failed, f.message(), Some(f.kind())),
         };
-        let node = e.finish(&node_id, status, &text, kind).await;
+        // 成功才带「压缩后水位」；`dropped` = 这次被压掉的条数（前后条数之差）：
+        // 用户关心的"我的历史少了多少"是一个数字，不该让他自己做减法。
+        let stats = compression_stats(
+            trigger,
+            orchestrator.context_limit as usize,
+            before_tokens,
+            match &result {
+                Ok(Some(post)) => Some(*post),
+                _ => None,
+            },
+            before.saturating_sub(after),
+        );
+        let node = e.finish(&node_id, status, &text, kind, Some(stats)).await;
         // 落库 + 落库回包：压缩是会话里真实发生的一步，应当留下记录。否则用户刷新后
         // 只看到"历史突然变短了"，却没有任何东西说明发生过什么。回包那一步换入
         // `finish` 帧还缺的存储权威号（§3.4）；失败只记日志——前端已收到终态。
@@ -602,6 +655,7 @@ pub(crate) async fn run_context_compact(
         keep_messages,
         hints,
         "manual",
+        "tool",
     )
     .await;
 
@@ -699,12 +753,22 @@ pub(crate) async fn retry_compaction(
             if let Some(em) = &orchestrator.compression {
                 let node_id = llm_short_id();
                 em.begin(&node_id).await;
+                // 仍然带上触发来源与当前水位：「未触发」也是用户点出来的结果，
+                // 一行「无需压缩」之外应当能看出"现在离上限还有多远"。
+                let stats = compression_stats(
+                    "retry",
+                    orchestrator.context_limit as usize,
+                    super::estimate_context_tokens(&context.messages, 0),
+                    None,
+                    0,
+                );
                 let node = em
                     .finish(
                         &node_id,
                         MessageStatus::Completed,
                         "未触发压缩（当前历史无需压缩）",
                         None,
+                        Some(stats),
                     )
                     .await;
                 let sid = context.session.session_id();

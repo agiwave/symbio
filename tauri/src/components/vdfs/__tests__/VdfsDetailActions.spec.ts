@@ -97,8 +97,31 @@ describe('VdfsSessionDetail 动作装配', () => {
   /** Session 的子图很重（聊天工作区）：用桩只保留 props 通道 */
   const SessionStub = {
     name: 'Session',
-    props: ['node', 'actions', 'mechanismActions', 'mechanismBusy', 'saving'],
+    props: ['node', 'actions', 'actionDisabled', 'mechanismActions', 'mechanismBusy', 'saving'],
     template: '<div class="session-stub" />',
+  }
+
+  /**
+   * 会话节点**自带 `schema`**：动作由后端随定义声明
+   * （`plugins/session/options::session_detail_actions`）。形状照抄后端——
+   * 含 `when = is_existing`，草稿靠它被滤掉。
+   */
+  const SESSION_DEFINITION = {
+    binding: 'option',
+    sections: [],
+    actions: [
+      {
+        id: 'open-container',
+        label: '进入下一级',
+        style: 'primary',
+        payload: { kind: 'session' },
+        when: { key: 'is_existing', equals: true },
+      },
+    ],
+  }
+
+  function sessionNode(partial: Partial<VdfsItem> = {}): VdfsItem {
+    return node({ kind: 'session', ext: 'session', schema: SESSION_DEFINITION, ...partial })
   }
 
   function mountSession(target: VdfsItem, mechanism: DetailAction[] = MECHANISM) {
@@ -108,20 +131,25 @@ describe('VdfsSessionDetail 动作装配', () => {
     })
   }
 
-  it('自有动作只有「进入下一级」；草稿（新建态）没有内部可进入，故不给', () => {
-    const w = mountSession(node({ kind: 'session', ext: 'session' }))
+  it('自有动作**来自节点定义**（前端不硬编码）；草稿按 when 判据被滤掉', () => {
+    const w = mountSession(sessionNode())
     const actions = w.findComponent(SessionStub).props('actions') as DetailAction[]
     expect(actions.map((a) => a.id)).toEqual(['open-container'])
     expect(actions[0].label).toBe('进入下一级')
     expect(actions[0].payload).toEqual({ kind: 'session' })
 
-    // 草稿没有地址 ⇒ 没有「同名目录」可进入
-    const draft = mountSession(node({ path: '', name: '', kind: 'session', ext: 'session' }))
+    // 草稿没有地址 ⇒ `mechanismDetailValueOf` 给出 is_existing=false ⇒ 定义里的动作不出现
+    const draft = mountSession(sessionNode({ path: '', name: '' }))
     expect(draft.findComponent(SessionStub).props('actions')).toEqual([])
   })
 
-  it('机制动作与忙态原样下传给 Session（渲染器不自算、不改写）', () => {
+  it('节点没有定义时不凭空造动作（渲染器不认识任何具体动作名）', () => {
     const w = mountSession(node({ kind: 'session', ext: 'session' }))
+    expect(w.findComponent(SessionStub).props('actions')).toEqual([])
+  })
+
+  it('机制动作与忙态原样下传给 Session（渲染器不自算、不改写）', () => {
+    const w = mountSession(sessionNode())
     const s = w.findComponent(SessionStub)
     expect(s.props('mechanismActions')).toEqual(MECHANISM)
     expect(s.props('mechanismBusy')).toBe('delete')

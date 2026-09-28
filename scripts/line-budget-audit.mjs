@@ -50,6 +50,14 @@ export const LINE_BUDGET_BASELINES = {
   // 该文件净 -4 行：16815（未改）→ 16811（改后））。
   // 2026-09-27：`clear_messages` 整体下线（与「删除会话」功能重叠），session 基线
   // 收紧 16811 → 16790（净 -21）。
+  // 2026-09-28：+30 行（16790 → **16820**）。会话详情页的「进入下一级」改为由后端
+  // 声明（`plugins/session/options/mod.rs::session_detail_actions`，与会话选项同一份
+  // `schema`），行数全在那一处函数与它的说明里。
+  // 2026-09-28（同日第二笔）：+90 行（16820 → **16910**）。压缩节点的**结构化交代**：
+  // `context/pipeline.rs` 新增纯函数 `compression_stats`（触发来源 / 上限 /
+  // 前后水位 / 丢了几条）与它的口径说明——注释占一半，那几条口径（内容水位不含
+  // 请求级开销、`after_tokens` 只在成功时写入）是防止下一个人"顺手补齐"的关键；
+  // `chat_loop/state.rs` 新增 `merge_meta`（字段补丁不覆盖已有键）。
   // 2026-09-27：智能体详情重设计（方案 A，后端驱动）——`agent/host/vdfs.rs` 的
   // `agent_dir_info` 由「能力拼成一个字符串」改为**结构化下发**（`capabilities`
   // 计数对象 + `capability_kinds` 清单 + `capability_count`），新增
@@ -67,7 +75,7 @@ export const LINE_BUDGET_BASELINES = {
   "symbio/src/plugins/mcp": { maxLines: 2897, exts: [".rs"] },
   "symbio/src/plugins/model": { maxLines: 6212, exts: [".rs"] },
   "symbio/src/plugins/plugin_manager": { maxLines: 666, exts: [".rs"] },
-  "symbio/src/plugins/session": { maxLines: 16790, exts: [".rs"] },
+  "symbio/src/plugins/session": { maxLines: 16910, exts: [".rs"] },
   "symbio/src/plugins/skill": { maxLines: 1470, exts: [".rs"] },
   "symbio/src/plugins/telegram": { maxLines: 887, exts: [".rs"] },
   "symbio/src/plugins/vdfs": { maxLines: 3012, exts: [".rs"] },
@@ -130,7 +138,24 @@ export const LINE_BUDGET_BASELINES = {
   //         回来，且有更早分页时判不了，那正是旧选中项能一直挂着的漏洞）。
   //      ② `useVdfs.ts` 的换目录清理 watch（+21）。
   //      ③ 控件侧自动开草稿的监听源由 `cwd` 改为 `cwdNode`（+3 注释）。
-  "tauri/src": { maxLines: 21137, exts: [".ts", ".vue"] },
+  // 2026-09-28（同日第四笔）：+730 行（21137 → **21867**）。前端 UI/UX 第三批
+  //      「抵达与导航」，主体是两个新生产文件：首启引导（`components/common/Onboarding.vue`
+  //      + `stores/onboarding.ts`）与会话级 UI 状态（`stores/sessionUiState.ts`）；
+  //      其余是既有件的机制扩展（`composables/useVdfs.ts` 的挂载层左栏、
+  //      `components/vdfs/VdfsWorkbench.vue` 的空态即引导、
+  //      `components/vdfs/VdfsSessionDetail.vue` 改为只做动作投影、
+  //      `schemas/vdfs-form.ts` 的 `projectDetailActions`）。
+  //      测试代码不计入本口径。
+  // 2026-09-28（同日第五笔）：+283 行（21867 → **22150**）。会话流与上下文压缩的
+  //      可见性。主体是新渲染器 `components/message/MemoryNode.vue`（压缩后的历史
+  //      记忆，此前被当成用户消息渲染成气泡）；其余是既有件的机制扩展：
+  //      `registry/messageTypes.ts`（`facets.compacted` + 两个 meta 读取口 +
+  //      触发来源词表 + token 展示写法）、`registry/messageRenderers.ts`（登记
+  //      `memory`）、`components/message/NodeShell.vue`（系统记忆不给悬停操作）、
+  //      `components/message/CompressionNode.vue`（按字段渲染事实行）、
+  //      `components/chat/ChatInputArea.vue`（发送键 / 停止键收敛为一个语义）。
+  //      测试代码不计入本口径。
+  "tauri/src": { maxLines: 22150, exts: [".ts", ".vue"] },
 };
 
 export function runAudit({ root = repoRoot, baselines = LINE_BUDGET_BASELINES, strict = STRICT } = {}) {

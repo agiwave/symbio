@@ -237,6 +237,7 @@ import {
   detailPresetOf,
   detailPresetPatch,
   evalDetailCondition,
+  projectDetailActions,
   DETAIL_PICK_DIRECTORY,
   type DetailPick,
 } from '@/schemas/vdfs-form'
@@ -537,8 +538,9 @@ const visibleBadges = computed<DetailBadge[]>(() =>
   (props.definition.badges ?? []).filter((b) => evalCond(b.when))
 )
 
+// 唯一实现来自 `schemas/vdfs-form`（自定义渲染器用同一个函数、换一份作用域）
 const visibleActions = computed<DetailAction[]>(() =>
-  (props.definition.actions ?? []).filter((a) => evalCond(a.when))
+  projectDetailActions(props.definition.actions, valueOf).actions
 )
 
 /**

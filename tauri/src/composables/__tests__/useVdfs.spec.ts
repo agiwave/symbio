@@ -706,3 +706,131 @@ describe('useVdfs 左栏导航图标（回归：挂载点 kind 恒为 dir，必�
     wrapper.unmount()
   })
 })
+
+/**
+ * 挂载层左栏（回归：冷启动落在 `<根>/session` 之后，左栏不得是空的）
+ *
+ * ## 坏掉的是什么
+ *
+ * 冷启动落点是**会话目录** `<根>/session`（见 `router/coldStart.spec.ts`）。而会话
+ * 是**叶子**节点（`VdfsNode::file(..., READ_WRITE)`，没有 `l` 位，`isVdfsDir` 为假），
+ * 于是「左栏 = 绑定地址的子目录」直译出来的结果是**空**的：用户打开应用看不到任何
+ * 类别（模型 / 技能 / MCP…），也没有入口去别处——只能靠左上角那个语义含糊的「返回」。
+ *
+ * ## 修法
+ *
+ * 挂载层（`<根>` 的**直接子节点**）的左栏回到**类别清单**（根的子目录，当前挂载
+ * 高亮），点一下 = 换类别页。判据纯从地址结构导出，前端不持有任何类别清单。
+ *
+ * ⚠️ 下面第二条钉住「判据不得波及资源根」：根页仍然是「左栏 = 六个挂载点、点一下
+ * 就地切换当前目录」（不产生新页面）——两种形态只差「这一栏的东西住在谁的下面」。
+ */
+describe('useVdfs 挂载层左栏（类别清单）', () => {
+  const ROOT = '@vfs'
+  const SESSION = `${ROOT}/session`
+  const INNER = `${SESSION}/s1`
+
+  /** 形状照抄后端 `VdfsNode::dir(...)`：`kind` 恒为 `dir`，身份只有 name / title */
+  function mountPoint(name: string, title: string): VdfsNode {
+    return { path: `${ROOT}/${name}`, name, title, kind: 'dir', status: '', access: 'l' }
+  }
+
+  /** 会话节点形状照抄后端 `session_node`：叶子（`rw`，没有 `l`） */
+  function sessionNode(id: string, title: string): VdfsNode {
+    return {
+      path: `${SESSION}/${id}`,
+      name: id,
+      title,
+      kind: 'session',
+      status: 'active',
+      access: 'rw',
+      ext: 'session',
+    }
+  }
+
+  /** 按目录分发响应（同一个 mock 服务左栏与中栏两次列目录） */
+  function routes() {
+    mocks.listVdfs.mockImplementation(async (_reason: string, dir: string) => {
+      if (dir === ROOT) {
+        return {
+          path: ROOT,
+          node: { path: ROOT, name: '', title: '系统', kind: 'dir', status: '', access: 'l' },
+          items: [mountPoint('session', '会话'), mountPoint('model', '模型')],
+        }
+      }
+      if (dir === SESSION) {
+        return {
+          path: SESSION,
+          node: {
+            path: SESSION,
+            name: 'session',
+            title: '会话',
+            kind: 'dir',
+            status: '',
+            access: 'l',
+            new_type: { ext: 'session', title: '会话' },
+          },
+          items: [sessionNode('s1', '第一段对话')],
+        }
+      }
+      // 会话内部（挂载之下）：仍按「左栏 = 该地址的子目录」走
+      return {
+        path: dir,
+        node: { path: dir, name: 's1', title: '第一段对话', kind: 'dir', status: '', access: 'lt' },
+        items: [
+          {
+            path: `${INNER}/message`,
+            name: 'message',
+            title: '转写',
+            kind: 'messages',
+            status: '',
+            access: 'l',
+          },
+        ],
+      }
+    })
+  }
+
+  it('挂载层：左栏 = 类别清单（根的子目录），当前挂载高亮；中栏仍是该挂载的内容', async () => {
+    routes()
+    const { api, wrapper } = mountHost(SESSION)
+    await settle()
+
+    expect(api.atMountLevel.value, '`<根>` 的直接子节点 = 挂载层').toBe(true)
+    expect(
+      api.navItems.value.map((it) => it.key),
+      '左栏必须是类别清单（空左栏 = 用户无处可去）',
+    ).toEqual(['session', 'model'])
+    expect(
+      api.navItems.value.find((it) => it.key === 'session')?.active,
+      '当前挂载必须高亮',
+    ).toBe(true)
+
+    // 中栏 = 该挂载自身的内容（会话列表），不是根的内容
+    expect(api.cwd.value).toBe(SESSION)
+    expect(api.items.value.map((it) => it.name)).toEqual(['s1'])
+    wrapper.unmount()
+  })
+
+  it('资源根不受波及：仍是「左栏 = 六个挂载点 + 就地切换当前目录」', async () => {
+    routes()
+    const { api, wrapper } = mountHost(ROOT)
+    await settle()
+
+    expect(api.atMountLevel.value, '根不是挂载层（它是类别层本身）').toBe(false)
+    // 根页缺省选中第一个子目录（后端 order 决定），中栏即该类别的内容
+    expect(api.selectedName.value).toBe('session')
+    expect(api.cwd.value).toBe(SESSION)
+    wrapper.unmount()
+  })
+
+  it('挂载之下（深入一层）⇒ 判据失效，左栏回到该地址的子目录', async () => {
+    routes()
+    const { api, wrapper } = mountHost(INNER)
+    await settle()
+
+    expect(api.atMountLevel.value, '两级之下不是挂载层').toBe(false)
+    expect(api.navItems.value.map((it) => it.key)).toEqual(['message'])
+    wrapper.unmount()
+  })
+})

@@ -150,3 +150,53 @@ describe('ChatComposer：暴露面（父级只认一个 ref）', () => {
     w.unmount()
   })
 })
+
+/**
+ * 发送键 / 停止键 —— **一个控件只能有一种语义**。
+ *
+ * 回归动机：呈现曾按「输入框里有没有字」分叉——运行中且有字时显示纸飞机与提示
+ * 「发送新消息」，而实际动作是**中止当前轮**（父级在运行中只认中止，不排队）。
+ * 用户以为在排队，实际把正在跑的一轮杀掉了。现在三者（图标 / 提示语 / 可点性）
+ * 统一由 `isLoading` 决定，回车在运行中不再提交（回车是发送手势，不该用来中止）。
+ */
+describe('ChatComposer：发送键 / 停止键同一个语义点', () => {
+  const sendBtn = (w: ReturnType<typeof mount>) => w.find('.send-btn')
+
+  it('空闲 ⇒ 发送（有内容才可点）', async () => {
+    const w = mount(ChatComposer, { props: { modelValue: 'hello' } })
+    expect(sendBtn(w).attributes('title')).toBe('发送')
+    expect(sendBtn(w).classes()).not.toContain('stop-btn')
+
+    await sendBtn(w).trigger('click')
+    expect(w.emitted('submit')).toHaveLength(1)
+  })
+
+  it('空闲且无内容 ⇒ 禁用', () => {
+    const w = mount(ChatComposer)
+    expect(sendBtn(w).attributes('disabled')).toBeDefined()
+  })
+
+  it('运行中 ⇒ 停止；输入框里有字也仍然是停止', () => {
+    const w = mount(ChatComposer, { props: { isLoading: true, modelValue: '下一句' } })
+    expect(sendBtn(w).attributes('title')).toBe('停止')
+    expect(sendBtn(w).classes()).toContain('stop-btn')
+  })
+
+  it('运行中点它 ⇒ 提交（父级把它翻成中止）', async () => {
+    const w = mount(ChatComposer, { props: { isLoading: true } })
+    await sendBtn(w).trigger('click')
+    expect(w.emitted('submit')).toHaveLength(1)
+  })
+
+  it('运行中回车**不**提交（否则写下一句时会顺手中止正在跑的一轮）', async () => {
+    const w = mount(ChatComposer, { props: { isLoading: true, modelValue: '下一句' } })
+    await w.find('textarea').trigger('keydown', { key: 'Enter' })
+    expect(w.emitted('submit')).toBeUndefined()
+  })
+
+  it('空闲回车 ⇒ 提交（既有手势不变）', async () => {
+    const w = mount(ChatComposer, { props: { modelValue: 'hello' } })
+    await w.find('textarea').trigger('keydown', { key: 'Enter' })
+    expect(w.emitted('submit')).toHaveLength(1)
+  })
+})

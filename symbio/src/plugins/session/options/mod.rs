@@ -76,6 +76,11 @@ impl SessionPlugin {
     /// [`VdfsNode::schema`](crate::symbio_core::VdfsNode::schema)，
     /// 新建草稿挂 `VdfsNewType::schema`。
     ///
+    /// 本定义同时承载会话详情页**头部动作区**的动作（`actions`）——会话的详情是
+    /// 注册 editor（聊天工作区），但「有哪些动作」仍属 provider 的自述：它与 agent /
+    /// model / mcp 走同一条通道（后端声明、前端只渲染），而不是由前端硬编码一条
+    /// 类型专属动作。选项栏（紧凑渲染形态）只读 `sections`，忽略 `actions`。
+    ///
     /// ## 为什么不需要请求上下文
     ///
     /// 定义只声明「有哪些字段与候选」，值与「是哪个会话」都不在这里
@@ -103,9 +108,34 @@ impl SessionPlugin {
                 collapsed: false,
                 fields: visitor.list_option_fields().await,
             }],
+            actions: session_detail_actions(),
             ..Default::default()
         }
     }
+}
+
+/// 会话详情页的动作区声明（与 agent / model / mcp 的 `detail_definition` 同一职责）。
+///
+/// 只有一条：**进入下一级**（`open-container`）——会话的内部结构（转写 / 收件箱 /
+/// 子会话 / 工作目录树）在 VDFS 上是「会话同名目录」，由页面层 `browseInto(节点路径)`
+/// 进入。它是**纯导航**、与访问位无关，位置由前端机制固定在动作区最右端
+/// （`mergeDetailActions`）。
+///
+/// `when = is_existing`：草稿（新建态）没有同名目录可进入，故不出现。这条判据与
+/// agent 的「导入整包」（`is_existing == false`）用的是同一个机制键，前端只有一份求值实现。
+fn session_detail_actions() -> Vec<DetailAction> {
+    vec![DetailAction {
+        id: "open-container".to_string(),
+        label: "进入下一级".to_string(),
+        style: "primary".to_string(),
+        payload: Some(json!({ "kind": crate::symbio_core::PLUGIN_ID_SESSION })),
+        when: Some(DetailCondition {
+            key: "is_existing".to_string(),
+            equals: Some(json!(true)),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }]
 }
 
 // ==================== 选项收集器已迁出 ====================

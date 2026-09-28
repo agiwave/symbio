@@ -12,6 +12,10 @@
         <a href="#" class="link-btn">文档</a>
         <a href="#" class="link-btn">GitHub</a>
         <a href="#" class="link-btn">反馈</a>
+        <!-- 引导的重开入口：它只弹一次（且只在尚未配好时），但随时可以回来看 -->
+        <button class="link-btn" type="button" @click="onboarding.openManually()">
+          查看首次引导
+        </button>
       </div>
     </div>
   </SettingsFormShell>
@@ -20,7 +24,10 @@
 <script setup lang="ts">
 import SettingsFormShell from './SettingsFormShell.vue'
 import logoUrl from '../../assets/logo.svg'
+import { useOnboardingStore } from '@/stores/onboarding'
 import type { VdfsRendererProps } from '@/components/vdfs/rendererContract'
+
+const onboarding = useOnboardingStore()
 
 // 声明渲染器统一契约的**全量** props：页面恒传 node / data / testing /
 // mechanism-actions…，声明了才不会被透传到根 DOM（不需要 inheritAttrs 兜底）。
@@ -65,6 +72,9 @@ defineProps<VdfsRendererProps>()
   color: var(--text-primary);
   text-decoration: none;
   transition: background var(--motion-fast) var(--motion-ease);
+  /* 同一排里既有 <a> 也有 <button>：字体与光标必须对齐，否则按钮显得是外来物 */
+  font: inherit;
+  cursor: pointer;
 }
 .link-btn:hover {
   background: var(--surface-hover);

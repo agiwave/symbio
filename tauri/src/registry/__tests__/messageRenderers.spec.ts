@@ -29,6 +29,7 @@ const ALL_RENDERERS: MessageRenderer[] = [
   'tool_call',
   'user_prompt',
   'compression',
+  'memory',
   'fallback',
 ]
 

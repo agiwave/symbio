@@ -9,7 +9,8 @@ tauri/
 ├── src/              # Vue3 应用（视图、组件、store、API 层）
 ├── src-tauri/        # Tauri 宿主（Rust）：仅 3 个 command
 └── docs/             # 前端文档
-    └── FRONTEND.md   # 前端架构与机制
+    ├── FRONTEND.md     # 前端架构与机制（代码结构、与后端通信）
+    └── INTERACTION.md  # 交互语义（用户看到什么、动作产生什么反馈）
 ```
 
 ## Tauri 宿主命令（src-tauri）
@@ -25,4 +26,5 @@ tauri/
 ## 文档
 
 - 前端架构与机制：`docs/FRONTEND.md`
+- 交互语义（屏幕 / 动作 / 状态 / 流式时间轴）：`docs/INTERACTION.md`
 - 后端总览：`../README.md`、`../docs/SYSTEM_MAP.md`

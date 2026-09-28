@@ -99,11 +99,27 @@ export function resetVdfsSessionScheme(): void {
  * @throws 根清单里没有声明「可新建 `ext = session`」的子节点时抛错
  *   （那是会话 provider 没注册，属实打实的配置问题）。
  */
+/**
+ * 在根清单里按「可新建类型的**呈现扩展名**」认出挂载目录；认不出返回 `null`。
+ *
+ * 这是「某个类别挂在哪」的**唯一实现**：`ensureSessionMountDir` 与需要别的类别的
+ * 消费方（如首启引导里「配一个模型」）都走它——免得各自列一次根目录、各自写一遍
+ * `fullAddr`，那两处一旦漂移，认出来的地址形状就会不一致（`fullAddr` 的注释记着
+ * 一次「读出 `<根>/<根>/session` 直接 404」的真实事故）。
+ *
+ * `ext` 取的是节点自述里的 `new_type.ext`（与 `PLUGIN_ID_*` 同族的契约词），
+ * 不是目录名——目录名可改，认出来的是**类型**。
+ */
+export async function findMountDirByNewTypeExt(ext: string): Promise<string | null> {
+  const resp = await listVdfs(READBACK_REASON.BOOTSTRAP)
+  const hit = (resp.items ?? []).find((n) => n.new_type?.ext === ext)
+  return hit ? fullAddr(vdfsRoot(), hit) : null
+}
+
 export async function ensureSessionMountDir(): Promise<string> {
   if (cachedMountDir) return cachedMountDir
-  const resp = await listVdfs(READBACK_REASON.BOOTSTRAP)
-  const hit = (resp.items ?? []).find((n) => n.new_type?.ext === VDFS_EXT_SESSION)
-  if (!hit) {
+  const dir = await findMountDirByNewTypeExt(VDFS_EXT_SESSION)
+  if (!dir) {
     // 注意：`listVdfs` 失败时是**吞掉异常返回空列表**的，所以这里可能是「真没有
     // 挂载点」，也可能是「列目录失败了」。两种都说出来——只报前一种会让人去查
     // 后端注册，而真正的故障在网络 / IPC。
@@ -112,7 +128,7 @@ export async function ensureSessionMountDir(): Promise<string> {
         `（根清单为空或列目录失败——后者会被 listVdfs 吞成空列表，见 services/vdfs.ts）`,
     )
   }
-  cachedMountDir = fullAddr(vdfsRoot(), hit)
+  cachedMountDir = dir
   logger.info(MODULE_TAG, 'mount resolved', cachedMountDir)
   return cachedMountDir
 }

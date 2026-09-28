@@ -240,6 +240,45 @@ export function evalDetailCondition(
   return true
 }
 
+/**
+ * 机制条件作用域：**只有** `is_existing` 一个键。
+ *
+ * 详情定义的动作可用 `when` 区分「已落盘 / 草稿」（agent 的「导入整包」、会话的
+ * 「进入下一级」用的都是它）。纵向表单（`DetailForm`）的求值作用域是**字段模型**
+ * （外加 `is_default` / `cap.*`）；而自定义渲染器（如会话聊天工作区）手上没有字段
+ * 模型，只有节点——两者的公共部分就是这一个键，故单独给出，避免各自拼一份。
+ */
+export function mechanismDetailValueOf(isExisting: boolean): (key: string) => unknown {
+  return (key) => (key === 'is_existing' ? isExisting : undefined)
+}
+
+/**
+ * 详情定义动作的**投影**：可见性（`when` 不成立即不渲染；缺省 = 显示）与禁用
+ * （`disabled_when` 成立才禁用；缺省 = 不禁用）。
+ *
+ * 这是「哪些动作该出现、哪个不能点」的**唯一实现**：`DetailForm`（字段模型作用域）
+ * 与自定义渲染器（机制键作用域）都调它，差别只在传入的 `valueOf`。规则写两份
+ * 必然漂移，而漂移的表现是「同一个动作在两种详情里一个显示一个不显示」——不报错，
+ * 只不一致。
+ *
+ * `disabled` 与 `actions` **等长且按索引对齐**（`VdfsActions` 的入参形状）。
+ * 判空是必须的：`evalDetailCondition` 对空条件返回 `true`（那是为「缺省即显示」
+ * 服务的），直接取反会把「无条件」解释成「禁用」。
+ */
+export function projectDetailActions(
+  actions: DetailAction[] | null | undefined,
+  valueOf: (key: string) => unknown,
+): { actions: DetailAction[]; disabled: boolean[] } {
+  const visible: DetailAction[] = []
+  const disabled: boolean[] = []
+  for (const a of actions ?? []) {
+    if (!evalDetailCondition(a.when, valueOf)) continue
+    visible.push(a)
+    disabled.push(a.disabled_when ? evalDetailCondition(a.disabled_when, valueOf) : false)
+  }
+  return { actions: visible, disabled }
+}
+
 // ==================== 紧凑渲染形态（选项栏）的取值规则 ====================
 //
 // `DetailDefinition` 有两种渲染形态：纵向表单（`DetailForm`）与紧凑选项栏

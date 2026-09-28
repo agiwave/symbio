@@ -30,7 +30,13 @@
     @edit="emit('edit', $event)"
   >
     <MessageErrorBox v-if="failed" :text="text" retryable @retry="emit('retry', node.id)" />
-    <div v-else class="compress-note">{{ text }}</div>
+    <template v-else>
+      <div class="compress-note">{{ text }}</div>
+      <!-- 事实行：正文只说得了一条「N → M 条」，而「我离上限还剩多少」「这次是谁
+           触发的」都是**字段**（后端随 `meta` 下发，见 registry/messageTypes
+           的 `messageCompactionStats`）。缺字段时本行不出现，旧后端照常工作。 -->
+      <p v-if="facts.length" class="compress-facts">{{ facts.join(' · ') }}</p>
+    </template>
   </NodeShell>
 </template>
 
@@ -38,7 +44,13 @@
 import { computed } from 'vue'
 import type { ChatMessage } from '@/schemas/chat_message'
 import { useMessageContent } from '@/composables/useMessageContent'
-import { canRetryCompaction, type MessageFacets } from '@/registry/messageTypes'
+import {
+  canRetryCompaction,
+  compactionTriggerLabel,
+  formatTokens,
+  messageCompactionStats,
+  type MessageFacets,
+} from '@/registry/messageTypes'
 import NodeShell from './NodeShell.vue'
 import MessageErrorBox from './MessageErrorBox.vue'
 
@@ -61,6 +73,27 @@ const { text } = useMessageContent(
 
 /** 失败判定与「能否重试」都来自注册表——本组件不解释 `status` 取值 */
 const failed = computed(() => canRetryCompaction(props.facets))
+
+/**
+ * 事实行（按字段拼，缺字段就少一项）。
+ *
+ * 水位用「压缩后」优先：压缩成功时用户关心的是**现在**还剩多少；
+ * 失败 / 未触发时没有「压缩后」那个数，退而报当前水位——两者都不存在就不显示。
+ */
+const facts = computed<string[]>(() => {
+  const s = messageCompactionStats(props.node)
+  const parts: string[] = []
+  const water = s.afterTokens ?? s.beforeTokens
+  if (water != null) {
+    parts.push(
+      `${s.afterTokens != null ? '压缩后水位' : '当前水位'} ${formatTokens(water)}`,
+    )
+  }
+  if (s.limit != null) parts.push(`上限 ${formatTokens(s.limit)}`)
+  if (s.trigger) parts.push(compactionTriggerLabel(s.trigger))
+  if (s.dropped != null) parts.push(`压掉 ${s.dropped} 条`)
+  return parts
+})
 </script>
 
 <style scoped>
@@ -71,5 +104,12 @@ const failed = computed(() => canRetryCompaction(props.facets))
   padding: 0.2rem 0 0.1rem;
   font-size: 0.82rem;
   opacity: 0.75;
+}
+
+/* 事实行：比正文更弱一档（它是解释，不是结论）。 */
+.compress-facts {
+  margin: 0 0 0.1rem;
+  font-size: 0.74rem;
+  color: var(--text-muted);
 }
 </style>

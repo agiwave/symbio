@@ -41,6 +41,11 @@ import {
   MESSAGE_STATUS_LABELS,
   MESSAGE_TYPE_LABELS,
   agentNameOf,
+  compactionTriggerLabel,
+  formatTokens,
+  messageCompactionStats,
+  messageIsCompacted,
+  messageMemoryStats,
   canRetryCompaction,
   canRetryTool,
   canSupplyToolArgs,
@@ -78,6 +83,7 @@ function facets(partial: Partial<MessageFacets> = {}): MessageFacets {
     toolResult: false,
     hasWaitingChild: false,
     recoverable: false,
+    compacted: false,
     responseText: false,
     ...partial,
   }
@@ -641,5 +647,119 @@ describe('messageRendererKey：渲染形态分派', () => {
     expect(messageIcon(f)).toBe('👤')
     expect(messageTitle(f, '助手')).toBe('你')
     expect(messageRendererKey(f)).toBe('turn')
+  })
+})
+
+/**
+ * 压缩后的**历史记忆**（`meta.compacted`）。
+ *
+ * 它是一条 `role = user` 的消息——后端为了让对话以 user 开头而这么写。因此这段的
+ * 每一条断言防的都是同一件事：**它不许被当成用户说的话**（右对齐气泡、「你」、
+ * 悬停可编辑/删除）。判据是后端打的 `meta.compacted`，不是正文长什么样。
+ */
+describe('压缩后的历史记忆：不是「你说的那句话」', () => {
+  /** 后端那条记忆节点的形状：role=user、正文以内部标记开头、带 meta 标记 */
+  const memory = {
+    id: 'm1',
+    role: CHAT_ROLE_USER,
+    type: MESSAGE_TYPE_TEXT,
+    status: MESSAGE_STATUS_COMPLETED,
+    content: '[CONTEXT SNAPSHOT — 压缩的历史记忆]\n…',
+    meta: { compacted: true, post_tokens: 9000, transcript_path: '/s/t/a.json' },
+  } as const
+
+  it('facets 认后端标记（判定只有一处：`messageIsCompacted`）', () => {
+    expect(facetsOf(memory).compacted).toBe(true)
+    expect(messageIsCompacted(memory)).toBe(true)
+    // 缺失 / 非 true 一律不算（不能靠正文猜）
+    expect(messageIsCompacted({ meta: {} })).toBe(false)
+    expect(messageIsCompacted({})).toBe(false)
+  })
+
+  it('渲染器优先于角色判定 → `memory`，而不是用户气泡 `text`', () => {
+    expect(messageRendererKey(facetsOf(memory))).toBe('memory')
+  })
+
+  it('图标与标题自述「历史记忆」，不叫「你」', () => {
+    const f = facetsOf(memory)
+    expect(messageIcon(f)).toBe('🧠')
+    expect(messageTitle(f, '助手')).toBe('历史记忆')
+  })
+
+  it('默认收起（长摘要不得盖过对话本体）——连「user 一律展开」也要让它', () => {
+    expect(messageDefaultOpen(facetsOf(memory))).toBe(false)
+  })
+
+  it('不是运行中动作、不挂「回复中…」小字（它是终态产物）', () => {
+    const f = facetsOf(memory)
+    expect(messageIsRunningAction(f)).toBe(false)
+    expect(messageShowsLiveBadge(f)).toBe(false)
+  })
+})
+
+/**
+ * 压缩相关 `meta` 字段的读取口（组件不许直读——`mechanism-audit` 判定依据）。
+ *
+ * 两个节点形状不同，因此有两个读取函数：压缩**动作**节点（`before/after_tokens`…）
+ * 与压缩**产物**节点（`post_tokens` / `transcript_path`）。
+ */
+describe('压缩字段读取：缺字段就是 undefined，绝不编数字', () => {
+  it('压缩动作节点：字段齐全时全部读出', () => {
+    const s = messageCompactionStats({
+      meta: {
+        compact_trigger: 'threshold',
+        context_limit: 200000,
+        before_tokens: 150000,
+        after_tokens: 30000,
+        dropped: 9,
+      },
+    })
+    expect(s).toEqual({
+      trigger: 'threshold',
+      limit: 200000,
+      beforeTokens: 150000,
+      afterTokens: 30000,
+      dropped: 9,
+    })
+  })
+
+  it('压缩未成功 ⇒ 没有 after_tokens（显示层据此不报「水位已降到 0」）', () => {
+    const s = messageCompactionStats({ meta: { before_tokens: 150000 } })
+    expect(s.afterTokens).toBeUndefined()
+    expect(s.dropped).toBeUndefined()
+    expect(s.beforeTokens).toBe(150000)
+  })
+
+  it('脏值（字符串 / NaN / 空串原因）不当数字用', () => {
+    const s = messageCompactionStats({
+      meta: { before_tokens: '150000', after_tokens: Number.NaN, compact_trigger: '' },
+    })
+    expect(s.beforeTokens).toBeUndefined()
+    expect(s.afterTokens).toBeUndefined()
+    expect(s.trigger).toBeUndefined()
+  })
+
+  it('记忆节点：水位与「是否已转存」', () => {
+    expect(
+      messageMemoryStats({ meta: { post_tokens: 9000, transcript_path: '/a/b.json' } }),
+    ).toEqual({ postTokens: 9000, archived: true })
+    expect(messageMemoryStats({ meta: {} })).toEqual({
+      postTokens: undefined,
+      archived: false,
+    })
+  })
+
+  it('触发来源有面向用户的词；没登记过的取值原样显示', () => {
+    expect(compactionTriggerLabel('threshold')).toBe('自动整理')
+    expect(compactionTriggerLabel('tool')).toBe('模型主动')
+    expect(compactionTriggerLabel('retry')).toBe('手动重试')
+    expect(compactionTriggerLabel('brand_new')).toBe('brand_new')
+  })
+
+  it('token 展示写法：千位以上收成 k（仅展示用，判定一律用原始数字）', () => {
+    expect(formatTokens(950)).toBe('950')
+    expect(formatTokens(9000)).toBe('9k')
+    expect(formatTokens(44500)).toBe('44.5k')
+    expect(formatTokens(200000)).toBe('200k')
   })
 })

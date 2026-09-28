@@ -57,6 +57,10 @@ const hoisted = vi.hoisted(() => ({
 
 vi.mock('@/services/vdfsScheme', () => ({
   ensureSessionMountDir: hoisted.ensureSessionMountDir,
+  // 路由图里挂着 MainLayout → 首启引导（`stores/onboarding`），它按「类别挂在哪」
+  // 判定就绪状态。本用例不触达那条路径，但替身仍是**同一个模块的完整面**——
+  // 缺一个导出会让任何一次未来的调用在测试里炸成 `No export is defined`。
+  findMountDirByNewTypeExt: vi.fn(async () => null),
 }))
 vi.mock('@/utils/logger', () => ({
   logger: { info: hoisted.loggerInfo, warn: vi.fn(), error: vi.fn() },

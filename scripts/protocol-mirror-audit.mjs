@@ -173,6 +173,11 @@ const ALIASES = [
     rust: { file: 'symbio/src/plugins/session/plugin/words.rs', name: 'EXT_MESSAGE' },
     what: '单条对话消息的呈现扩展名',
   },
+  {
+    ts: 'VDFS_EXT_MODEL',
+    rust: { file: 'symbio/src/symbio_core/plugin/ids.rs', name: 'PLUGIN_ID_MODEL' },
+    what: '「模型」类别的挂载点自述（首启引导据此认出「模型配在哪」）',
+  },
 ]
 
 /**

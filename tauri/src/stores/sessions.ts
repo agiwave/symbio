@@ -70,6 +70,7 @@ import {
   type VdfsNode,
 } from '@/schemas/vdfs'
 import { setLastWorkdir, getLastWorkdir } from '@/services/plugin'
+import { useSessionUiStateStore } from './sessionUiState'
 import { publishVdfsChangedLocal } from '@/services/eventBus'
 import { ensureSessionMountDir, ensureSessionScheme } from '@/services/vdfsScheme'
 import { playCompletionChime } from '@/services/completionChime'
@@ -951,6 +952,10 @@ export const useSessionsStore = defineStore('sessions', () => {
     delete titles.value[id]
     // 清理 in-memory 状态
     dropSessionState(id)
+    // 会话级**纯 UI 状态**（输入草稿 / 滚动位置）随会话一起丢弃：
+    // 放在此处而不是 deleteSession 里，因为这里是「本地移除」的唯一实现——
+    // 删除命令与后端 deleted 事件两条路径都经过它。
+    useSessionUiStateStore().forget(id)
     const snext = { ...sessionSeq.value }
     delete snext[id]
     sessionSeq.value = snext

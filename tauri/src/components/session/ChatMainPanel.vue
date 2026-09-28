@@ -96,8 +96,10 @@ import { useGenerationGuard } from '@/composables/useGenerationGuard'
 import { mergeDetailActions, type DetailAction } from '@/schemas/vdfs'
 
 const props = defineProps<{
-  /** 会话自有动作（如「进入下一级」），由 Session ← VdfsSessionDetail 声明 */
+  /** 会话自有动作（如「进入下一级」），由 Session ← VdfsSessionDetail 从节点定义投影 */
   actions?: DetailAction[]
+  /** 与 `actions` 等长且按索引对齐的禁用标记（定义 `disabled_when` 的投影结果） */
+  actionDisabled?: boolean[]
   /** 机制动作注入（页面单一定义点计算：删除等），与自身按钮并排渲染 */
   mechanismActions?: DetailAction[]
   /** 正在执行的机制动作 id（驱动其进行中文案） */
@@ -109,13 +111,13 @@ const emit = defineEmits<{
   (e: 'action', action: DetailAction): void
 }>()
 
-/** 动作区 = 自有 + 机制（去重合并与忙态对齐由机制唯一实现） */
+/** 动作区 = 自有 + 机制（去重合并、位置与忙态/禁用对齐由机制唯一实现） */
 const merged = computed(() =>
   mergeDetailActions(
     props.actions ?? [],
     props.mechanismActions ?? [],
     [],
-    [],
+    props.actionDisabled ?? [],
     props.mechanismBusy ?? null
   )
 )

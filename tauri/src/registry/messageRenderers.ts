@@ -23,6 +23,7 @@ import TextNode from '@/components/message/TextNode.vue'
 import ToolCallNode from '@/components/message/ToolCallNode.vue'
 import UserPromptNode from '@/components/message/UserPromptNode.vue'
 import CompressionNode from '@/components/message/CompressionNode.vue'
+import MemoryNode from '@/components/message/MemoryNode.vue'
 import { registerMessageRenderer } from './messageTypes'
 
 // 机制级呈现形态（与场景无关）
@@ -31,5 +32,7 @@ registerMessageRenderer('text', markRaw(TextNode))
 registerMessageRenderer('tool_call', markRaw(ToolCallNode))
 registerMessageRenderer('user_prompt', markRaw(UserPromptNode))
 registerMessageRenderer('compression', markRaw(CompressionNode))
+// 压缩后的历史记忆（`meta.compacted`）：系统产出的记忆，不是用户说的话
+registerMessageRenderer('memory', markRaw(MemoryNode))
 // 未登记类型的兜底：仍把内容当正文显示（会话流永不空白）
 registerMessageRenderer('fallback', markRaw(TextNode))

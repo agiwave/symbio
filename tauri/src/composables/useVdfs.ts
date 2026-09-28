@@ -10,7 +10,10 @@
  * 宿主给一个**数据地址**（`addr`，如 `<根>` 或 `<根>/session/<id>`），本层
  * 完成全部数据装配，**不感知浏览器路由**——数据地址与浏览器地址是两个概念：
  *
- * - **左栏导航** = `addr` 的内容（其子目录清单，后端 order 排列）；
+ * - **左栏导航** = `addr` 的内容（其子目录清单，后端 order 排列）。
+ *   **挂载层例外**：`addr` 是 `<根>` 的直接子节点时（冷启动落点 `<根>/session`
+ *   就是这种），左栏回到根的子目录（= 类别清单，当前挂载高亮），点一下换类别页
+ *   —— 会话是叶子节点、没有子目录，照直译的话会话页左栏会是空的（见 `atMountLevel`）；
  * - **当前目录**（`cwd`）= 选中的左栏子目录（缺省第一个）；`addr` 无子目录时
  *   落在 `addr` 自身。中栏列表 = `cwd` 内容，点文件选中、点目录钻入
  *   （钻入由控件 emit `open`，宿主决定呈现方式，通常是 push 新地址页）；
@@ -62,6 +65,7 @@ import {
   isVdfsUnder,
   parseVdfsValidation,
   vdfsAccessOf,
+  vdfsBase,
   vdfsJoin,
   vdfsParent,
   type DetailAction,
@@ -71,6 +75,7 @@ import {
   type VdfsNewType,
   type VdfsNode,
 } from '@/schemas/vdfs'
+import { vdfsRoot } from '@/schemas/vdfsRoot'
 import {
   isTextualRenderer,
   rendererReadsNodeText,
@@ -104,8 +109,35 @@ export function useVdfs(opts: UseVdfsOptions) {
   const { showToast } = useToast()
   const addr = opts.addr
 
-  // ==================== 左栏导航（绑定地址的子目录清单） ====================
-  /** `addr` 的内容（其子目录 = 左栏导航项）；条目 = 地址 + 节点（`VdfsItem`） */
+  // ==================== 左栏导航 ====================
+  /**
+   * 绑定地址是不是**挂载层**：`<根>` 的直接子节点（`session` / `model` / …）。
+   *
+   * 挂载层是**类别层**：`<根>/session` 的内容是「一个个会话」，它自己的子目录
+   * 并不是用户想看的第二级导航（会话是叶子，没有子目录）。若照「左栏 = 绑定地址
+   * 的子目录」直译，会话页的左栏就是**空的**——冷启动恰好落在这里，用户于是看不到
+   * 任何类别，也无处可去（只能靠左上角那个语义含糊的返回键回资源根）。
+   *
+   * 因此挂载层的左栏回到**类别清单**（根的子目录，当前挂载高亮），点一下 = 换到
+   * 那个类别的地址页（由宿主 push，见 `VdfsWorkbench` 的 `onRailSelect`）。
+   * 判据纯从地址结构导出（`<根>` 的直接子节点），不需要任何类型名或后端新字段。
+   */
+  const atMountLevel = computed(() => {
+    const root = vdfsRoot()
+    const a = addr.value
+    return a !== root && vdfsParent(a) === root
+  })
+
+  /** 挂载层里当前挂载的段名（高亮用；非挂载层为空串） */
+  const mountKey = computed(() => (atMountLevel.value ? vdfsBase(addr.value) : ''))
+
+  /**
+   * 左栏的**数据源地址**：一般为绑定地址；挂载层例外，读根（类别清单）。
+   * 两处（拉取与实时收敛）共用它，免得各写一条相同的三元式。
+   */
+  const navDir = computed(() => (atMountLevel.value ? vdfsRoot() : addr.value))
+
+  /** `navDir` 的内容（其子目录 = 左栏导航项）；条目 = 地址 + 节点（`VdfsItem`） */
   const navDirs = ref<VdfsItem[]>([])
 
   /** 选中的左栏子目录名；null = `addr` 无子目录（中栏显示 `addr` 自身内容） */
@@ -124,17 +156,20 @@ export function useVdfs(opts: UseVdfsOptions) {
    * 按 kind 优先会让六个挂载点整排退成同一张默认图——完整记录见
    * `docs/design/frontend-ui-ux-plan.md` §9。护栏见本文件同目录的 spec。
    */
-  const navItems = computed<WorkbenchRailItem[]>(() =>
-    navDirs.value
+  const navItems = computed<WorkbenchRailItem[]>(() => {
+    // 挂载层的高亮是**当前挂载**（地址导出的身份），不是 selectedName——
+    // 那里 selectedName 恒为 null（当前目录就是绑定地址自身）。
+    const activeName = atMountLevel.value ? mountKey.value : selectedName.value
+    return navDirs.value
       .filter(isVdfsDir)
       .map((n) => ({
         key: n.name,
         label: n.title || n.name,
         icon: iconForNode(n) ?? null,
         description: n.description,
-        active: n.name === selectedName.value,
+        active: n.name === activeName,
       }))
-  )
+  })
 
   /** 页标题 = 当前目录节点的标题（列表加载后即为当前目录的自述） */
   const title = computed(() => cwdNode.value?.title || cwdNode.value?.name || '资源')
@@ -225,8 +260,11 @@ export function useVdfs(opts: UseVdfsOptions) {
    * 选中变化时内部已就地刷新当前目录（返回值告知调用方免重复刷）。
    */
   async function refreshNav(): Promise<boolean> {
-    const resp = await listVdfs(READBACK_REASON.VDFS_BROWSER, addr.value)
+    const resp = await listVdfs(READBACK_REASON.VDFS_BROWSER, navDir.value)
     navDirs.value = resp.items
+    // 挂载层：左栏是类别清单，点击 = 换类别页（宿主 push），当前目录恒为绑定地址
+    // 本身，因此没有「选中的子目录」可落位。
+    if (atMountLevel.value) return false
     const names = resp.items.filter(isVdfsDir).map((n) => n.name)
     const want = selectedMemo.get(addr.value)
     const next = want && names.includes(want) ? want : (names[0] ?? null)
@@ -247,8 +285,14 @@ export function useVdfs(opts: UseVdfsOptions) {
     await refresh()
   }
 
-  /** 点左栏某项 = 就地切换当前目录（不产生新页面） */
+  /**
+   * 点左栏某项 = 就地切换当前目录（不产生新页面）。
+   *
+   * **挂载层不适用**：那里的左栏项是类别（兄弟挂载），点一下是换一个地址页，
+   * 由宿主 `VdfsWorkbench` 播成 `open` 事件（本层不认识浏览器路由）。
+   */
   async function selectDir(name: string) {
+    if (atMountLevel.value) return
     if (name === selectedName.value) return
     const n = navDirs.value.find((x) => x.name === name && isVdfsDir(x))
     if (!n) return
@@ -347,7 +391,6 @@ export function useVdfs(opts: UseVdfsOptions) {
   const nodeText = ref('')
   /** form 渲染器的数据（`vdfs/read` 文本按 JSON 解析） */
   const formData = ref<Record<string, unknown> | null>(null)
-  const nodeBinary = ref(false)
   const loadingDetail = ref(false)
 
   const saving = ref(false)
@@ -435,7 +478,6 @@ export function useVdfs(opts: UseVdfsOptions) {
     selectedNode.value = null
     nodeText.value = ''
     formData.value = null
-    nodeBinary.value = false
     detailError.value = ''
     fieldErrors.value = []
   }
@@ -453,7 +495,6 @@ export function useVdfs(opts: UseVdfsOptions) {
     if (!sameNode) {
       nodeText.value = ''
       formData.value = null
-      nodeBinary.value = false
     }
     detailError.value = ''
     fieldErrors.value = []
@@ -480,7 +521,6 @@ export function useVdfs(opts: UseVdfsOptions) {
         detailError.value = '读取失败'
         return
       }
-      nodeBinary.value = Boolean(content.binary)
       const text = content.text ?? ''
       if (r === 'form') {
         try {
@@ -843,8 +883,8 @@ export function useVdfs(opts: UseVdfsOptions) {
     // ③ 其余变更（资源信号 / 只有状态的消息帧）：只有真的影响本目录的条目集合
     //    才重拉。
     if (affects(cwd.value, change.path)) scheduleRefresh()
-    // 绑定地址一层（左栏子目录增删）→ 导航跟着变
-    if (change.path === addr.value || vdfsParent(change.path) === addr.value) {
+    // 左栏数据源那一层（子目录增删）→ 导航跟着变
+    if (change.path === navDir.value || vdfsParent(change.path) === navDir.value) {
       void refreshNav()
     }
   }
@@ -888,6 +928,8 @@ export function useVdfs(opts: UseVdfsOptions) {
     navItems,
     selectDir,
     selectedName,
+    /** 绑定地址是否处于**挂载层**（类别层）：宿主据此决定左栏点击 = 就地切换还是换地址页 */
+    atMountLevel,
     // 目录
     cwd,
     title,
@@ -913,7 +955,6 @@ export function useVdfs(opts: UseVdfsOptions) {
     renderer,
     nodeText,
     formData,
-    nodeBinary,
     loadingDetail,
     saving,
     actionBusy,

@@ -19,7 +19,7 @@
     </BaseModal>
 
     <!-- 消息历史区域 -->
-    <div class="chat-messages" ref="messagesRef" @scroll="handleScroll">
+    <div class="chat-messages" ref="messagesRef" @scroll="onScroll">
       <div v-if="messageTree.length === 0" class="empty-chat">
         <p>开始与 AI 助手对话</p>
         <p class="empty-hint">输入消息后按 Enter 发送，Shift+Enter 换行</p>
@@ -91,6 +91,7 @@ import type { ImageAttachment } from '@/types'
 import type { DetailDefinition } from '@/schemas/vdfs'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
+import { useSessionUiStateStore } from '@/stores/sessionUiState'
 import { needsTypingRow } from '@/stores/sessionLive'
 import { CHAT_ROLE_USER } from '@/schemas/chat_message'
 // 消息级判定与业务规则全部来自 registry（本组件不解释消息词表，也不读后端 meta 字段）
@@ -131,13 +132,37 @@ const messagesRef = ref<HTMLElement | null>(null)
 const composerRef = ref<{
   resetHeight: () => void
 } | null>(null)
-const inputText = ref('')
+
+// 会话级纯 UI 状态（按 sessionId 记忆）：本面板是按地址**重挂载**的
+// （`ChatMainPanel` 的 `:key`），切走再切回时组件是全新的——草稿与滚动位置
+// 因此不能存在组件里，否则「切一下再回来，刚才写的东西没了」。
+const uiState = useSessionUiStateStore()
+
+/** 输入框初值 = 上次离开时这一会话留下的草稿（无记录 = 空串） */
+const inputText = ref(uiState.draftOf(props.sessionId))
+
+// 草稿随输入实时落进按会话的状态（空串 = 清除）。
+// 不在这里做防抖：键盘输入本来就该即时生效，而写入是一次浅对象替换。
+watch(inputText, (text) => uiState.setDraft(props.sessionId, text))
 const attachedImages = ref<ImageAttachment[]>([])
 // 编辑单条消息的浮层状态
 const editing = ref<{ id: string; content: string; isJson: boolean } | null>(null)
 
 // --- Composables ---
 const { scrollToBottom, smartScroll, handleScroll } = useChatScroll(messagesRef)
+
+/**
+ * 滚动事件：先按 `useChatScroll` 的规则重算「是否贴底」，再把位置记进
+ * **按会话**的 UI 状态（切回时还原）。
+ *
+ * 两个职责合成一个 handler，是因为 DOM 上只能挂一个 `@scroll`；拆成两个监听
+ * 只会让「哪次滚动被记下」变得不确定。
+ */
+function onScroll() {
+  handleScroll()
+  const top = messagesRef.value?.scrollTop
+  if (typeof top === 'number') uiState.setScrollTop(props.sessionId, top)
+}
 
 const chat = useChatConnection({
   sessionId: props.sessionId,
@@ -251,7 +276,19 @@ const optionScope = computed<Record<string, unknown>>(() => ({
 
   // --- 方法 ---
 onMounted(() => {
-  nextTick(() => scrollToBottom())
+  // 还原上次的阅读位置：有记录就回到那里（并重算「是否贴底」——否则下一次
+  // 流式追加会把它拽回底部），无记录才贴底。
+  const savedTop = uiState.scrollTopOf(props.sessionId)
+  nextTick(() => {
+    if (savedTop == null) {
+      scrollToBottom()
+      return
+    }
+    const el = messagesRef.value
+    if (!el) return
+    el.scrollTop = savedTop
+    handleScroll()
+  })
 
   // 懒创建闭环：新建会话流程中排队的首条消息（文本 + 可选图片附件；
   // 用户在"新建详情"输入、创建完成后经机制选中切到本会话），挂载即注入并发送。

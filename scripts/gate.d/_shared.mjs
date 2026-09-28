@@ -214,7 +214,11 @@ export const BASELINE = {
   //      同批 +2（959 → **961**）：`plugins/session/compression.test.rs`（37 → 39）——
   //        压缩快照模板新增 `<next_step>` 节与 `Decision:` 前缀约定（含渲染映射回归），
   //        与本次下沉无关，一并实测入基线。
-  rustTests: 961,
+  // 2026-09-28（同日第二笔）：+4（961 → **965**）。`plugins/session/context/pipeline.test.rs`
+  //      新增两条：压缩节点 `meta` 的结构化交代（`compression_stats`）——字段齐全时
+  //      五项都要在，且**成功才有「压缩后水位」**（失败 / 未触发时编一个 0，界面会
+  //      显示成「水位已降到 0」）。
+  rustTests: 965,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *
@@ -447,8 +451,19 @@ export const BASELINE = {
   //         且 `hasMore` 为真时根本判不了 ⇒ 旧选中项一直挂着。改按**归属**
   //         （`schemas/vdfs.ts::isVdfsUnder`，+4 条；`useVdfs.spec` +2 条）。
   //      两组都做了反证（改回旧写法 ⇒ 各自的 ★ 用例变红）。
-  vitestFiles: 50,
-  vitestTests: 768,
+  // 2026-09-28（同日两笔一并计入）：50 文件 / 768 用例 → **53 / 820**（+3 文件 / +52 用例）。
+  //      ① 前端 UI/UX 第三批「抵达与导航」：新增三个 spec（引导 store / 引导组件 /
+  //         会话级 UI 状态），并在 `useVdfs.spec`、`VdfsWorkbench.spec`、
+  //         `VdfsDetailActions.spec`、`coldStart.spec` 内补用例（挂载层左栏、空态即引导、
+  //         动作投影）。
+  //      ② 「会话流与压缩可见性」：+26，四组——压缩后的历史记忆不再是用户气泡
+  //         （facets / 渲染器 / 图标标题 / 默认收起 / 不挂运行中信号）、压缩字段读取口
+  //         与「缺字段不编数字」、记忆节点与压缩节点事实行（真装 `MessageNode`）、
+  //         发送键 / 停止键同一个语义点 + 运行中回车不提交（真装 `ChatComposer`）。
+  //      ②里两条做了反证：去掉 `facets.compacted` 的判定 ⇒ 记忆节点变回用户气泡；
+  //      把回车改回「运行中也提交」⇒ 对应用例变红。
+  vitestFiles: 53,
+  vitestTests: 820,
 }
 
 export const VITEST_TIMEOUT_MS = 180_000

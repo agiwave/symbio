@@ -313,12 +313,18 @@ impl CompressionEmitter {
     /// 并发布**——终态必须到达，否则那个 `Streaming` 节点会永远留在前端转圈。
     ///
     /// `failure_kind`：失败原因码（写进 `meta.failure_kind`）。
+    ///
+    /// `stats`：这次压缩的**结构化交代**（来源 / 前后水位 / 上限 / 丢了几条）。
+    /// 正文只说得了一条「N → M 条」，而用户真正想知道的是「我离上限还有多远、
+    /// 这次是谁触发的」——那些都是字段，不是文案，因此随 `meta` 下发由前端渲染。
+    /// 缺字段时前端退回正文那一行，旧前端（不认识这些字段）也不受影响。
     pub async fn finish(
         &self,
         node_id: &str,
         status: MessageStatus,
         text: &str,
         failure_kind: Option<&str>,
+        stats: Option<serde_json::Value>,
     ) -> ChatMessage {
         let node = {
             let mut tr = self.state.transcript.lock().await;
@@ -331,9 +337,10 @@ impl CompressionEmitter {
             node.status = Some(status.clone());
             node.content = Some(MessageContent::Text(text.to_string()));
             if let Some(kind) = failure_kind {
-                let mut meta = node.meta.take().unwrap_or_else(|| serde_json::json!({}));
-                meta["failure_kind"] = serde_json::json!(kind);
-                node.meta = Some(meta);
+                merge_meta(&mut node, serde_json::json!({ "failure_kind": kind }));
+            }
+            if let Some(stats) = stats {
+                merge_meta(&mut node, stats);
             }
             // 发布终态 + 落库回执：权威副本即将由调用方落库，
             // 在途副本必须作废（否则同一条消息以「存储 + 在途」两种形态参与叠加）。
@@ -379,6 +386,25 @@ impl CompressionEmitter {
             session_id,
         }
     }
+}
+
+/// 把一个字段补丁（对象）**合并**进节点 `meta`，不覆盖已有键——
+/// `failure_kind` 与统计字段因此可以各写各的，谁都不会把对方抹掉。
+fn merge_meta(node: &mut ChatMessage, patch: serde_json::Value) {
+    let serde_json::Value::Object(patch) = patch else {
+        return;
+    };
+    let mut meta = node
+        .meta
+        .take()
+        .filter(|m| m.is_object())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if let Some(obj) = meta.as_object_mut() {
+        for (k, v) in patch {
+            obj.insert(k, v);
+        }
+    }
+    node.meta = Some(meta);
 }
 
 pub struct ChatOrchestrator {

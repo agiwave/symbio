@@ -57,7 +57,9 @@
       <span class="node-actions" @click.stop>
         <button v-if="isUser" class="node-act" title="编辑" :aria-label="'编辑'" @click.stop="emit('edit', node.id)">✎</button>
         <button v-if="canRetry" class="node-act" title="重试此工具" :aria-label="'重试此工具'" @click.stop="emit('retry', node.id)">↻</button>
-        <button v-if="!node.parent_id" class="node-act" title="删除" :aria-label="'删除'" @click.stop="emit('delete', node.id)">🗑</button>
+        <!-- 压缩记忆不给删除：它是系统写下的记忆，删掉它等于让会话失去唯一的历史依托，
+             而这个动作不该藏在悬停里（它与「删掉一条对话」不是一回事）。 -->
+        <button v-if="!node.parent_id && !facets.compacted" class="node-act" title="删除" :aria-label="'删除'" @click.stop="emit('delete', node.id)">🗑</button>
       </span>
     </div>
 
@@ -103,7 +105,12 @@ const emit = defineEmits<{
   edit: [messageId: string]
 }>()
 
-const isUser = computed(() => props.facets.role === CHAT_ROLE_USER)
+// 压缩后的历史记忆虽是 `user` 角色（后端为了让对话以 user 开头），但它是**系统产出的
+// 记忆**：不能按用户消息对待——右对齐的气泡、头像「你」、悬停可编辑/删除都会把
+// 「系统替你说了一句话」坐实。这里排掉它，`memory` 渲染器只是同一份判定的消费方。
+const isUser = computed(
+  () => props.facets.role === CHAT_ROLE_USER && !props.facets.compacted,
+)
 /** 分形层级：仅 depth ≥ 2 施加缩进 + 左侧引导竖线（depth=1 与主回合左缘齐平） */
 const nested = computed(() => (props.depth ?? 0) > 1)
 const typeClass = computed(() => `type-${props.facets.type}`)

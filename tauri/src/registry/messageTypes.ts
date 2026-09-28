@@ -115,6 +115,14 @@ export interface MessageFacets {
   recoverable: boolean
   /** 后端标记的失败类别（`meta.failure_kind`，如 `error`） */
   failureKind?: string
+  /**
+   * **压缩后的历史记忆**（`meta.compacted`）。
+   *
+   * 后端把它写成一条 `role = user` 的消息（多数 provider 要求对话以 user 开头），
+   * 但它是系统产出的记忆，不是用户说的话：不认这个标记，它就会渲染成一个
+   * 右对齐的用户气泡，正文是 `[CONTEXT SNAPSHOT …]` 这类内部标记。
+   */
+  compacted: boolean
   /** Turn 的**直接正文子节点**：内联直排，不重复渲染折叠头部 */
   responseText: boolean
 }
@@ -153,6 +161,7 @@ export function facetsOf(node: ChatMessage, parentType?: string): MessageFacets 
     ),
     recoverable: messageIsRecoverable(node),
     failureKind: messageFailureKind(node),
+    compacted: messageIsCompacted(node),
     // Turn 的直接正文子节点：内联直排（无折叠头部）。仅限 text——思考必须保留单行行头，
     // 否则流式思考会以裸 Markdown 块呈现，破坏「思考中…」动效与折叠交互。
     responseText: parentType === MESSAGE_TYPE_TURN && type === MESSAGE_TYPE_TEXT,
@@ -172,6 +181,100 @@ export function facetsOf(node: ChatMessage, parentType?: string): MessageFacets 
 /** 合成「请求」子节点标记（渲染期提升，不落存储） */
 export function messageIsToolRequest(node: Pick<ChatMessage, 'meta'>): boolean {
   return Boolean((node.meta as Record<string, unknown> | undefined)?.__toolRequest)
+}
+
+/** 压缩后的历史记忆（后端标记 `meta.compacted`） */
+export function messageIsCompacted(node: Pick<ChatMessage, 'meta'>): boolean {
+  return (node.meta as Record<string, unknown> | undefined)?.compacted === true
+}
+
+/**
+ * 一次压缩的**结构化交代**（压缩节点 `meta`；缺字段一律 `undefined`）。
+ *
+ * 前端按字段渲染、**缺字段退回正文那一行**：这样同一份前端既能显示旧后端
+ * （没有这些字段）的节点，也能在字段到位后自动多出「水位 / 来源 / 丢了几条」。
+ *
+ * 口径（与后端 `context/pipeline.rs::compression_stats` 一致）：
+ * `beforeTokens` / `afterTokens` 是**内容水位**，不含请求级固定开销——
+ * 与 `contextLimit` 相除得到的比例是一个**下限**。
+ */
+export interface MessageCompactionStats {
+  /** 触发来源：`threshold`（越线自动）/ `tool`（模型主动）/ `retry`（用户重试） */
+  trigger?: string
+  /** 生效的上下文上限（token） */
+  limit?: number
+  /** 压缩前内容水位（token） */
+  beforeTokens?: number
+  /** 压缩后内容水位（token）——只在压缩成功时存在 */
+  afterTokens?: number
+  /** 这次被压掉的条数 */
+  dropped?: number
+}
+
+/** 一次性读出压缩节点的统计字段（读取后端 `meta` 字段名的**唯一处**） */
+export function messageCompactionStats(
+  node: Pick<ChatMessage, 'meta'>,
+): MessageCompactionStats {
+  const meta = (node.meta ?? {}) as Record<string, unknown>
+  const num = (k: string): number | undefined => {
+    const v = meta[k]
+    return typeof v === 'number' && Number.isFinite(v) ? v : undefined
+  }
+  const trigger = meta.compact_trigger
+  return {
+    trigger: typeof trigger === 'string' && trigger ? trigger : undefined,
+    limit: num('context_limit'),
+    beforeTokens: num('before_tokens'),
+    afterTokens: num('after_tokens'),
+    dropped: num('dropped'),
+  }
+}
+
+/**
+ * 压缩后那条**历史记忆**自述的事实（缺字段一律 `undefined`）。
+ *
+ * 与 [`messageCompactionStats`] 分开：那是「压缩这一动作」的节点，这是「压缩的产物」
+ * （记忆本身）的节点，后端给的字段名不同（`post_tokens` / `transcript_path`）。
+ * 两者都不在组件里直读 `meta`——字段名只在本模块出现。
+ */
+export interface MessageMemoryStats {
+  /** 压缩后的内容水位（token） */
+  postTokens?: number
+  /** 压缩前的完整历史是否已转存（转存路径存在即为真） */
+  archived: boolean
+}
+
+export function messageMemoryStats(node: Pick<ChatMessage, 'meta'>): MessageMemoryStats {
+  const meta = (node.meta ?? {}) as Record<string, unknown>
+  const post = meta.post_tokens
+  const path = meta.transcript_path
+  return {
+    postTokens: typeof post === 'number' && Number.isFinite(post) ? post : undefined,
+    archived: typeof path === 'string' && path.length > 0,
+  }
+}
+
+/** 触发来源 → 面向用户的词（新取值原样显示，便于发现协议新增） */
+export const COMPACTION_TRIGGER_LABELS: Record<string, string> = {
+  threshold: '自动整理',
+  tool: '模型主动',
+  retry: '手动重试',
+}
+
+export function compactionTriggerLabel(trigger: string): string {
+  return COMPACTION_TRIGGER_LABELS[trigger] ?? trigger
+}
+
+/**
+ * token 数的紧凑写法（`128000` → `128k`、`950` → `950`）。
+ *
+ * 只用于**展示**：阈值比较与迟滞判断始终用后端给的原始数字，前端不拿这个值
+ * 做任何判定（四舍五入过的数不能参与计算）。
+ */
+export function formatTokens(n: number): string {
+  if (n < 1000) return String(n)
+  const k = n / 1000
+  return `${k >= 100 ? Math.round(k) : Math.round(k * 10) / 10}k`
 }
 
 /** 系统心跳任务自动发送的消息（后端 `trigger_heartbeat` 打标） */
@@ -597,7 +700,8 @@ const TYPE_PRESENTATION: Record<ChatMessageType, TypePresentation> = {
     icon: '🗜',
     title: '上下文压缩',
     renderer: 'compression',
-    // 压缩节点同样默认折叠，标签是唯一信号
+    // 默认**展开**：正文只有一行系统说明，展开也不与对话正文争视觉重量；
+    // 折叠态下的唯一信号是状态标签（`statusTag`，见下方）。
     runningAction: true,
     ownRunningSignal: true,
     statusTag: (f) => {
@@ -642,6 +746,7 @@ function facetValue<T>(v: Facet<T>, f: MessageFacets, agentName = ''): T {
  * 请求 / 返回只出现在 `type = text` 上（`facetsOf` 保证），故在查表前判定。
  */
 export function messageIcon(f: MessageFacets): string {
+  if (f.compacted) return '🧠'
   if (f.role === CHAT_ROLE_USER) return '👤'
   if (f.toolRequest) return '📤'
   if (f.toolResult) return '↩'
@@ -655,6 +760,7 @@ export function messageIcon(f: MessageFacets): string {
  * 优先级与 `messageIcon` 同源（用户 > 请求 > 返回 > 类型表）。
  */
 export function messageTitle(f: MessageFacets, agentName: string): string {
+  if (f.compacted) return '历史记忆'
   if (f.role === CHAT_ROLE_USER) return '你'
   if (f.toolRequest) return '请求'
   if (f.toolResult) return '响应'
@@ -780,6 +886,10 @@ export function messagePreviewFollowsLiveEdge(f: MessageFacets): boolean {
  * 用户手动点击后以 `userToggled` 为准（该状态在组件里，不在本函数）。
  */
 export function messageDefaultOpen(f: MessageFacets): boolean {
+  // 压缩记忆：默认**收起**。它是可以很长的一段摘要，展开会盖过对话本体；
+  // 折叠态的标题（「历史记忆」）已经把它交待清楚了。这条必须排在角色规则之前
+  // ——它的 `role` 是 user（见 `MessageFacets.compacted`）。
+  if (f.compacted) return false
   if (isWaitingStatus(f.status)) return true
   if (f.role === CHAT_ROLE_USER) return true
   return presentationOf(f.type).defaultOpen(f)
@@ -843,6 +953,7 @@ export function nextOpenOf(
  * - `tool_call`    工具调用三段式卡片（请求 / 过程 / 结果）
  * - `user_prompt`  待用户响应（提问 / 工具确认）
  * - `compression`  上下文压缩（系统动作，非对话内容）
+ * - `memory`       压缩后的**历史记忆**（系统产出的记忆，不是用户说的话）
  * - `fallback`     未登记类型的只读兜底（会话流永不空白）
  */
 export type MessageRenderer =
@@ -851,6 +962,7 @@ export type MessageRenderer =
   | 'tool_call'
   | 'user_prompt'
   | 'compression'
+  | 'memory'
   | 'fallback'
 
 /**
@@ -858,15 +970,18 @@ export type MessageRenderer =
  *
  * 判定顺序有语义，与改造前的模板 `v-if` 链逐条对齐：
  * 1. `turn` 最先——任何 Turn 都走分组形态（用户消息若是 Turn 亦如此）；
- * 2. 角色优先于类型——用户消息一律走气泡（`text`），即便它的 `type` 是别的；
- * 3. 其余按类型分派（`TYPE_PRESENTATION.renderer`）；
- * 4. 未登记取值 → `fallback`（新类型上线时旧前端仍能显示内容）。
+ * 2. **压缩记忆先于角色**——它是 `role = user` 的系统记忆，走路 `memory` 形态
+ *    （正是这一步阻止它渲染成「你说的那句话」）；
+ * 3. 角色优先于类型——用户消息一律走气泡（`text`），即便它的 `type` 是别的；
+ * 4. 其余按类型分派（`TYPE_PRESENTATION.renderer`）；
+ * 5. 未登记取值 → `fallback`（新类型上线时旧前端仍能显示内容）。
  *
- * 第 1 条**必须先于**第 2 条，因此 `turn` 在这里显式判一次，不能只靠类型表——
+ * 第 1 条**必须先于**第 3 条，因此 `turn` 在这里显式判一次，不能只靠类型表——
  * 图标 / 标题那边的顺序恰好相反（角色优先），两处顺序不同是既有行为。
  */
 export function messageRendererKey(f: MessageFacets): MessageRenderer {
   if (f.type === MESSAGE_TYPE_TURN) return 'turn'
+  if (f.compacted) return 'memory'
   if (f.role === CHAT_ROLE_USER) return 'text'
   return presentationOf(f.type).renderer
 }

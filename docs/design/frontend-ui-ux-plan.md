@@ -47,7 +47,9 @@
 | 测试 | vitest + happy-dom，19 个 spec；**前端无 e2e** | `tauri/src/**/__tests__` |
 
 **已建成但前端未消费的后端能力**（高性价比，优先接）：`vdfs/search`、消息 `parent_id`
-分支树、`context_compact` 上下文压缩、`<根>/session/<id>/workdir` 会话工作区。
+分支树、`<根>/session/<id>/workdir` 会话工作区。上下文压缩**已接线**（`tauri/src/components/message/CompressionNode.vue`）；
+未消费的是压缩节点与压缩后快照随节点下发的 `meta`——缺口清单与改进方向见
+`tauri/docs/INTERACTION.md` 附录（不在此复述）。
 
 ---
 
@@ -308,3 +310,33 @@ P1-3 长会话渲染、P1-4 多开、P2-1 上下文水位、P2-3 授权分级、
 **这条与 §8 判据 3 是同一件事的两半**：判据 3 说的是「项级优先」，本节说的是
 「优先顺序要在**同一个地方**实现一次」。
 
+---
+
+## 10. 已落地（2026-09-28，第三批：抵达与导航）
+
+| 内容 | 实现落点 |
+|---|---|
+| 会话「进入下一级」不再由前端硬编码——与 agent / model / mcp 同一条通道（后端声明、前端只渲染） | 后端 `symbio/src/plugins/session/options/mod.rs`（`session_detail_actions`，挂在会话 `schema.actions` 上）；前端只做投影 `schemas/vdfs-form.ts` + `components/vdfs/VdfsSessionDetail.vue` |
+| 挂载层（`<根>` 的直接子节点）的左栏回到**类别清单**——冷启动落点 `/vdfs/session` 的左栏不再为空 | `composables/useVdfs.ts`（`atMountLevel`）+ `components/vdfs/VdfsWorkbench.vue`（`onRailSelect`） |
+| 首启引导：三步（系统目录 → 配模型 → 发第一条消息），可跳过、可从「关于」重开；**只在尚未配好模型时自动弹** | `stores/onboarding.ts` + `components/common/Onboarding.vue` + `MainLayout.vue` + `components/settings/About.vue` |
+| 空态即引导：「新建第一个 ⟨类型标题⟩」按钮（标题来自类型自述，新增资源零改动） | `components/vdfs/VdfsWorkbench.vue` 的 `empty` 插槽 |
+| 会话级 UI 状态保持：输入草稿与滚动位置按会话记忆（切走再切回不丢） | `stores/sessionUiState.ts` + `components/ModelChatPanel.vue` |
+
+**本批确立的判据**：
+
+1. **「某个类型的特有动作」属于后端**。会话详情是注册 editor（聊天工作区），但
+   「有哪些动作」不是呈现细节——它与 agent / model / mcp 一样由 provider 声明
+   （`DetailDefinition.actions`），前端只按机制键（`is_existing`）投影。前端硬编码
+   一条类型动作，等于把「这个类型能做什么」拆成两处，且新增动作必须改前端。
+   判据（`when` / `disabled_when`）的求值也只有一处实现（`projectDetailActions`），
+   `DetailForm` 与自定义渲染器共用它、只换作用域。
+2. **「这一步做完了没」由数据判据给，不由流程状态给**。引导的三步各自读后端事实
+   （有没有模型 / 认不认得出会话挂载点），因此已配好的用户不会被一张「请去配置」
+   的空话卡片拦在门口；而「读到第几步」这种流程状态根本不落地。
+3. **跨「按地址重挂载」保留的状态放 store，且只放纯 UI 状态**。会话面板是按
+   `activeAddr` 重挂载的（`:key` 策略），组件内状态必然随重挂载蒸发；`sessionUiState`
+   按会话 id 存草稿与滚动位置。它**不缓存消息**（消息的权威来源仍只有 VDFS 变更
+   一条通道），也不记**附件**（object URL 的所有权契约要求 revoke 只发生在一处）。
+4. **导航判据从地址结构导出，不从类型名导出**。「哪一级是类别层」= 根的直接子节点，
+   这条规则不需要任何类别清单，也不需要后端新字段；而「会话页左栏为空」这个故障
+   正是把「左栏 = 绑定地址的子目录」直译的后果——会话是叶子，没有子目录。

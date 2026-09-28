@@ -81,3 +81,33 @@ fn failure_displays_as_message() {
     // `Display` 即 `message()`：日志里 `auto_compress_process failed: {e}` 能拿到原因
     assert_eq!(format!("{f}"), f.message());
 }
+
+// ==================== 压缩节点的结构化交代（`meta`） ====================
+//
+// 动机：用户最先想知道的两件事——「我离上限还有多远」与「这次是谁触发的」——
+// 都不是正文那句话能说清楚的（正文只说条数）。它们是**字段**，由前端按字段渲染，
+// 因此字段名与「缺字段意味着什么」必须在这里钉住。
+
+#[test]
+fn stats_carry_trigger_both_waters_and_limit() {
+    let s = compression_stats("threshold", 200_000, 150_000, Some(30_000), 9);
+    assert_eq!(s["compact_trigger"], serde_json::json!("threshold"));
+    assert_eq!(s["context_limit"], serde_json::json!(200_000));
+    assert_eq!(s["before_tokens"], serde_json::json!(150_000));
+    assert_eq!(s["after_tokens"], serde_json::json!(30_000));
+    assert_eq!(s["dropped"], serde_json::json!(9));
+}
+
+/// 「压缩后水位」只在成功路径存在。
+///
+/// 失败 / 未触发时编一个 `0` 会在界面上显示成「水位已降到 0」——比不显示更坏：
+/// 那会让用户以为上下文已经空了，而实际上历史一条都没动。
+#[test]
+fn stats_omit_after_tokens_when_there_is_no_such_number() {
+    let s = compression_stats("retry", 200_000, 150_000, None, 0);
+    assert!(s.get("after_tokens").is_none(), "{s}");
+    assert!(s.get("dropped").is_none(), "{s}");
+    // 但触发来源与当前水位照样有：用户在失败 / 未触发时更需要这两个数字
+    assert_eq!(s["compact_trigger"], serde_json::json!("retry"));
+    assert_eq!(s["before_tokens"], serde_json::json!(150_000));
+}

@@ -1,6 +1,8 @@
 # 前端架构
 
-> 前端 UI/UX 需求与设计方案详见 `docs/design/frontend-ui-ux-plan.md`（根 docs/）。本文只写前端代码结构与机制。
+> 前端 UI/UX 需求与设计方案详见 `docs/design/frontend-ui-ux-plan.md`（根 docs/）。
+> 用户视角的交互语义（屏幕、动作、反馈、流式时间轴）见 `tauri/docs/INTERACTION.md`。
+> 本文只写前端代码结构与机制。
 
 ## 技术栈
 

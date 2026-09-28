@@ -37,14 +37,20 @@
         @paste="handlePaste"
         rows="1"
       ></textarea>
+      <!-- 发送键 / 停止键：**同一个控件、同一个语义点**。
+           运行中它就是停止，无论输入框里有没有字——呈现（图标 / 提示语 /
+           可点性）全部由 `isLoading` 一处决定。输入文本参与呈现会让三者不一致：
+           图标与提示语说「发送新消息」（用户以为在排队），而动作是把正在跑的一轮
+           中止（见 `ModelChatPanel.handleSendOrAbort`）。 -->
       <button
         class="send-btn"
-        :class="{ 'stop-btn': isLoading && !modelValue.trim() }"
+        :class="{ 'stop-btn': isLoading }"
         @click="$emit('submit')"
         :disabled="!isLoading && !modelValue.trim() && attachedImages.length === 0"
-        :title="isLoading ? (modelValue.trim() ? '发送新消息' : '停止') : '发送'"
+        :title="isLoading ? '停止' : '发送'"
+        :aria-label="isLoading ? '停止' : '发送'"
       >
-        <svg v-if="!isLoading || modelValue.trim()" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg v-if="!isLoading" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="22" y1="2" x2="11" y2="13"></line>
           <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
         </svg>
@@ -87,7 +93,13 @@ function resetHeight() {
 defineExpose({ resetHeight, textarea: textareaRef })
 
 // 键盘事件
+//
+// 运行中 Enter **不提交**：它会把正在跑的一轮中止（父级的 `handleSendOrAbort`
+// 在运行中只认中止），而「回车」是用户用来发送的键——用一个发送手势去中止一次
+// 正在进行的生成，是这里最容易发生的误操作。中止有它自己的入口（那个红色方块
+// 按钮）。因此运行中回车就是换行，用户可以先把下一句写下来。
 function handleKeydown(e: KeyboardEvent) {
+  if (props.isLoading) return
   if (!e.shiftKey) {
     e.preventDefault()
     emit('submit')

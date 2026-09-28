@@ -25,7 +25,7 @@
     :has-draft="isDraftSelected"
     :can-create="canCreate"
     :loading="loading"
-    @rail-select="selectDir"
+    @rail-select="onRailSelect"
   >
     <template #rail-header><slot name="rail-header" /></template>
     <template #rail-footer><slot name="rail-footer" /></template>
@@ -129,9 +129,21 @@
         <p v-if="filterTruncated" class="hint">还有更早的条目未加载，可能在其中</p>
         <button class="empty-action" type="button" @click="filter = ''">清除筛选</button>
       </template>
+      <!-- 空态即引导：目录自己声明了可新建的类型（`new_type`）时，直接给一个
+           **可执行**的入口，而不是让用户去找右上角那个图标（「没内容时该做什么」
+           正是最需要一眼看出的时刻）。文案里的类型名来自**类型自己的 title**
+           （后端下发），因此新增一类资源这里零改动——不存在任何类型清单。 -->
       <template v-else>
         <p>{{ selectedName ? '此目录为空' : '暂无子目录' }}</p>
-        <p v-if="canCreate" class="hint">点击右上角「新建」添加</p>
+        <button
+          v-if="canCreate"
+          class="empty-action primary"
+          type="button"
+          :disabled="loading || saving"
+          @click="startNew()"
+        >
+          新建第一个{{ creatableType?.title ?? '条目' }}
+        </button>
         <p v-else class="hint">该目录由系统管理</p>
       </template>
     </template>
@@ -200,6 +212,7 @@ import {
   vdfsJoin,
   type VdfsItem,
 } from '@/schemas/vdfs'
+import { vdfsRoot } from '@/schemas/vdfsRoot'
 import { useSessionsStore } from '@/stores/sessions'
 
 const props = defineProps<{
@@ -232,6 +245,7 @@ const {
   refresh,
   loadMore,
   select,
+  atMountLevel,
   selectedNode,
   selectedId,
   renderer,
@@ -315,6 +329,23 @@ watch(
 )
 
 // ==================== 钻入（emit，宿主决定呈现） ====================
+
+/**
+ * 点左栏某项。
+ *
+ * 两种形态，由**地址结构**决定（`useVdfs.atMountLevel`，前端不持有类别清单）：
+ *
+ * - **挂载层**（绑定地址是 `<根>` 的直接子节点，如 `<根>/session`）：左栏是
+ *   **类别清单**（当前挂载高亮）——点一下 = 换到那个类别的地址页；
+ * - 其余：左栏是绑定地址的子目录——点一下就地切换当前目录，不产生新页面。
+ *
+ * 差别只在「这一栏的东西住在谁的下面」：换类别必须换地址（类别不是当前目录的
+ * 子目录，没有可重置的选中态），而子目录切换是同一个地址内的浏览。
+ */
+function onRailSelect(key: string) {
+  if (atMountLevel.value) return void emit('open', vdfsJoin(vdfsRoot(), key))
+  return void selectDir(key)
+}
 
 /**
  * 点中栏列表项：文件 → 选中（右栏详情）；目录 → 钻入其数据地址
@@ -510,7 +541,8 @@ async function onCreated(id: string) {
   color: var(--text-primary);
 }
 
-/* 空态里的「清除筛选」是恢复路径：不能只有一个说明而没有出口 */
+/* 空态里的动作：恢复路径（清除筛选）与引导入口（新建）共用一个原子。
+   不能只有一个说明而没有出口。 */
 .empty-action {
   margin-top: 0.5rem;
   padding: 0.3rem 0.85rem;
@@ -521,9 +553,26 @@ async function onCreated(id: string) {
   font-size: 0.78rem;
   cursor: pointer;
 }
-.empty-action:hover {
+.empty-action:hover:not(:disabled) {
   background: var(--surface-hover);
   color: var(--text-primary);
+}
+
+/* 主操作（新建第一个 X）：与本栏右上角那个「新建」同色，
+   两处说的是同一件事，不应有两种视觉层级 */
+.empty-action.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+.empty-action.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--text-on-accent);
+}
+.empty-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ============== 列表 ============== */

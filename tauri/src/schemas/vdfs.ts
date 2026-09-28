@@ -121,6 +121,15 @@ export function isFailedStatus(status?: string | null): boolean {
 /** 约定呈现扩展名（宿主可自行扩展） */
 export const VDFS_EXT_FORM = 'form'
 export const VDFS_EXT_SESSION = 'session'
+/**
+ * 「模型」类别的挂载点自述（`new_type.ext`）。
+ *
+ * 前端**不持有类别清单**——左栏、列表、详情由后端下发，这里多一个常量只因为
+ * 首启引导需要知道「模型配在哪」才能把用户送过去（与会话那个的用途同族：
+ * 认出某个类别的挂载目录，见 `services/vdfsScheme.findMountDirByNewTypeExt`）。
+ * 它是**契约词**（后端 `PLUGIN_ID_MODEL`），不是某条路由的字面量。
+ */
+export const VDFS_EXT_MODEL = 'model'
 /** 单条对话消息（**列表项**：正文在内容里，结构在 `attributes` 里） */
 export const VDFS_EXT_MESSAGE = 'message'
 export const VDFS_EXT_TEXT = 'text'

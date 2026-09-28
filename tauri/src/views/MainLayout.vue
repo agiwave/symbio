@@ -15,6 +15,9 @@
     <RouterView />
     <!-- 全局浮动消息浮层 -->
     <Toast />
+    <!-- 首启引导（全 App 仅渲染一次；可见性由自己的 store 决定，
+         且只在「该做的事还没做」时自动弹——见 stores/onboarding） -->
+    <Onboarding />
   </div>
 </template>
 
@@ -27,8 +30,10 @@ import { setChimeSettingsSource } from '@/services/completionChime'
 import { getWorkspacePath } from '@/services/home'
 import { useSessionsStore } from '@/stores/sessions'
 import { useSoundSettingsStore } from '@/stores/soundSettings'
+import { useOnboardingStore } from '@/stores/onboarding'
 import { logger } from '@/utils/logger'
 import Toast from '@/components/common/Toast.vue'
+import Onboarding from '@/components/common/Onboarding.vue'
 
 const sessions = useSessionsStore()
 
@@ -102,6 +107,10 @@ onMounted(async () => {
     logger.warn('MainLayout', '恢复全局工作区失败:', err)
   }
   void sessions.refreshList()
+
+  // 首启引导：**只在「该做的事还没做」时自动弹**（判据见 stores/onboarding），
+  // 不阻塞任何启动流程——它只是浮层，数据侧照旧自己拉。
+  void useOnboardingStore().maybeOpen()
 })
 </script>
 

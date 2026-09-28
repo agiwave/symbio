@@ -29,6 +29,8 @@
 export const READBACK_REASON = {
   /** 引导：解析根锚点 / 会话挂载点 / 转写段。应用启动期一次性，之后走缓存 */
   BOOTSTRAP: 'bootstrap',
+  /** **首启引导的就绪判定**：列根 / 某个类别目录，判断「这一步做完了没」（可重复） */
+  GUIDE: 'guide',
   /** 实时面**缺基线**：状态帧到达，本端没有该节点（首帧丢失或订阅晚于节点出现） */
   MISSING_BASELINE: 'missing-baseline',
   /** 实时面**身份未知**：窄增量帧到达，本端没有该节点（只有 delta，没有身份） */

@@ -31,6 +31,7 @@
     <ChatMainPanel
       class="col-chat"
       :actions="actions"
+      :action-disabled="actionDisabled"
       :mechanism-actions="mechanismActions"
       :mechanism-busy="mechanismBusy"
       @action="onAction"
@@ -70,8 +71,10 @@ import ChatComposer from '@/components/chat/ChatComposer.vue'
 const props = defineProps<{
   /** 会话条目（`<根>/session/<id>`）；无地址 = 新建草稿态 */
   node: VdfsItem | null
-  /** 会话自有动作（进入下一级；由 VdfsSessionDetail 声明） */
+  /** 会话自有动作（由 VdfsSessionDetail 从节点定义投影而来，本组件不解释） */
   actions?: DetailAction[]
+  /** 与 `actions` 等长且按索引对齐的禁用标记（`disabled_when` 的投影结果） */
+  actionDisabled?: boolean[]
   /** 机制动作注入（页面单一定义点计算：删除等） */
   mechanismActions?: DetailAction[]
   /** 正在执行的机制动作 id（驱动其进行中文案） */
