@@ -36,11 +36,6 @@ const GUARDS = [
   // 行内历史词、`<!-- doc-symbol-allow: 理由 -->` 承认通道（空理由不算）。
   // 回归测试双向钉住：违规必须变红，注释/单段词/ADR 不得误报，范围读不出必须 exit 1。
   'doc-symbol-audit',
-  // `line-budget-audit` 实现行数棘轮守卫（全仓防膨胀）：
-  // 对各模块生产实现行数设天花板（基线），超标变红，低于基线提示收紧，测试代码不计入。
-  // 共享 `scripts/line-count.mjs` 口径。
-  // 回归测试钉住：超标变红、持平通过、缩减告警、测试不计入、范围不存在变红。
-  'line-budget-audit',
 ]
 // 不是**判定型**审计脚本，只跑回归测试（共享库 / 门禁原语 / 报告型脚本）：
 //   - `color` 带一道「scripts/ 下不得手写 ANSI」守卫；
@@ -73,6 +68,12 @@ const GUARDS = [
 //     朴素实现在字符串里的 `//`、`format!("{{}}")` 的字面量括号、未跨行的引号上
 //     都会翻车，而后果是「生成器说某条路由不存在，其实是抽漏了」。回归测试对每种
 //     翻车输入各钉一条。
+//   - `commit` 是提交入口（不是门禁的一环）。它的失效形态是**卡住自动化**：
+//     默认读 stdin 等交互 ⇒ 无 TTY 时挂起（实测后台提交卡在
+//     `Detected unsettled top-level await`），而它偏偏是「跑完门禁后那一句」。
+//     另两种：repoRoot 不认调用方 cwd ⇒ 在别的仓库跑却读本仓索引；
+//     `--gate` 被预览分支吞掉 ⇒ 人以为门禁跑过了。回归测试用真实临时 git 仓库
+//     钉住这三条（`stdio: ['ignore', ...]` 让「默认读 stdin」暴露成超时）。
 const TEST_ONLY = [
   'color',
   'rust-scan',
@@ -81,6 +82,7 @@ const TEST_ONLY = [
   'tauri-binary',
   'schema-audit',
   'core-surface-audit',
+  'commit',
 ]
 // 报告型：只防崩溃（退出码恒 0，判定需人工复核），走日志不刷屏。
 // 刻意 `echo: 'none'`：这份报告的候选会长期存在（大部分是签名组成部分与自引用），

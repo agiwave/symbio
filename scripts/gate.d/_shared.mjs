@@ -542,7 +542,7 @@ export function cargoTestRatchet(ctx, { label, cwd, args, baseline, baselineName
       const r = await ctx.run({ label, cmd: 'cargo', args, cwd })
       if (!r.ok) {
         const note = r.timedOut ? '超时终止' : `exit=${r.code}${r.signal ? `, ${r.signal}` : ''}`
-        return { ok: false, note }
+        return { ok: false, note, logFile: r.logFile }
       }
       if (ctx.ci) {
         // CI 跑全量（含集成测试）：每个测试目标各打一行 ⇒ 求和；数字仅作信息展示
@@ -553,7 +553,11 @@ export function cargoTestRatchet(ctx, { label, cwd, args, baseline, baselineName
       const passed = grabInt(r.output, /test result: ok\. (\d+) passed/)
       if (passed === null) return { ok: true, note: '未能解析通过数' }
       if (passed < baseline) {
-        return { ok: false, note: `通过数 ${passed} < 基线 ${baseline}（有测试被删或失败）` }
+        return {
+          ok: false,
+          note: `通过数 ${passed} < 基线 ${baseline}（有测试被删或失败）`,
+          logFile: r.logFile,
+        }
       }
       if (passed > baseline) {
         console.log(

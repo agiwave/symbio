@@ -82,6 +82,13 @@ function run(o) {
     let output = ''
     let timedOut = false
 
+    // **流式落盘**：边跑边写，进程被 kill / 超时 / Ctrl+C 时该任务的日志也已完整。
+    // 早先只在 close 时一次性写，于是「跑挂了」恰恰等于「没有日志」——最需要它的
+    // 那一刻它不存在（只能重跑一遍）。
+    const logFile = path.join(logDir, `${slug(label)}.log`)
+    fs.mkdirSync(logDir, { recursive: true })
+    const sink = fs.createWriteStream(logFile, { flags: 'w' })
+
     const child = spawn(cmd, args, { cwd, shell: false, env: { ...process.env, ...env } })
     let timer = null
     if (timeoutMs > 0) {
@@ -94,6 +101,7 @@ function run(o) {
     const consume = (chunk) => {
       const text = chunk.toString()
       output += text
+      sink.write(text)
       if (echo !== 'none') {
         for (const raw of text.split('\n')) {
           const line = raw.replace(/\r/g, '').trimEnd()
@@ -103,6 +111,7 @@ function run(o) {
         }
       }
     }
+
     child.stdout?.on('data', consume)
     child.stderr?.on('data', consume)
 
@@ -110,19 +119,19 @@ function run(o) {
       if (timer) clearTimeout(timer)
       console.log(red('启动失败'))
       console.log(red(`      ${err.message}`))
-      resolve({ ok: false, code: null, signal: null, output: output + err.message, timedOut })
+      sink.end(err.message)
+      resolve({ ok: false, code: null, signal: null, output: output + err.message, timedOut, logFile })
     })
 
     child.on('close', (code, signal) => {
       if (timer) clearTimeout(timer)
       const ok = code === 0 && signal === null && !timedOut
       const ms = Date.now() - started
-      fs.mkdirSync(logDir, { recursive: true })
-      fs.writeFileSync(path.join(logDir, `${slug(label)}.log`), output, 'utf8')
+      sink.end()
       if (timedOut) console.log(yellow(`超时（已 kill，${fmtDuration(ms)}）`))
       else if (ok) console.log(green(`ok (${fmtDuration(ms)})`))
       else console.log(red(`失败 (exit=${code}${signal ? `, ${signal}` : ''}, ${fmtDuration(ms)})`))
-      resolve({ ok, code, signal, output, timedOut })
+      resolve({ ok, code, signal, output, timedOut, logFile })
     })
   })
 }
@@ -134,9 +143,12 @@ const ctx = {
   ci: CI,
   profile,
   run,
+  /** 手写日志（自定义任务自己产出的文本）。返回落盘路径，便于结果里带回去。 */
   log(name, text) {
     fs.mkdirSync(logDir, { recursive: true })
-    fs.writeFileSync(path.join(logDir, `${slug(name)}.log`), text, 'utf8')
+    const file = path.join(logDir, `${slug(name)}.log`)
+    fs.writeFileSync(file, text, 'utf8')
+    return file
   },
 }
 
@@ -150,13 +162,16 @@ for (const f of fs.readdirSync(gateDir).filter((f) => f.endsWith('.mjs') && !f.s
 const enabled = (id) => (only ? only.includes(id) : true) && !skip.includes(id)
 
 const results = []
-const record = (stage, label, pass, note) => results.push({ stage, label, pass, note })
+// 每条结果都记下自己的日志文件（可能为 null：跳过项没跑命令），失败汇总据此
+// 直接列出**这一项的文件名**——早先只给目录，68 个文件里要自己猜是哪个。
+const record = (stage, label, pass, note, logFile = null) =>
+  results.push({ stage, label, pass, note, logFile })
 
 function normalize(outcome) {
   if (outcome === 'skipped') return { pass: 'skipped', note: '' }
   if (outcome == null || outcome === true) return { pass: true, note: '' }
   if (typeof outcome === 'boolean') return { pass: outcome, note: '' }
-  return { pass: outcome.ok !== false, note: outcome.note ?? '' }
+  return { pass: outcome.ok !== false, note: outcome.note ?? '', logFile: outcome.logFile ?? null }
 }
 
 async function executeTask(stageId, t) {
@@ -171,11 +186,12 @@ async function executeTask(stageId, t) {
       t.label,
       r.ok,
       r.timedOut ? '超时终止' : r.ok ? '' : `exit=${r.code}${r.signal ? `, ${r.signal}` : ''}`,
+      r.logFile,
     )
     return
   }
   const outcome = normalize(await t.run(ctx))
-  record(stageId, t.label, outcome.pass, outcome.note)
+  record(stageId, t.label, outcome.pass, outcome.note, outcome.logFile ?? null)
 }
 
 function stageHeader(index, title) {
@@ -206,7 +222,8 @@ console.log(
   ),
 )
 console.log(dim(`  阶段：${stages.filter((s) => enabled(s.id)).map((s) => s.id).join(' → ')}`))
-console.log(dim(`  完整日志：${path.relative(repoRoot, logDir) || '.'}/`))
+const relLog = (path.relative(repoRoot, logDir) || '.').replace(/\\/g, '/')
+console.log(dim(`  完整日志：${relLog}/（每次运行都写；失败项下方会直接列出文件名）`))
 
 for (const [i, s] of stages.entries()) {
   if (!enabled(s.id)) continue
@@ -214,22 +231,77 @@ for (const [i, s] of stages.entries()) {
   for (const t of materialize(s)) await executeTask(s.id, t)
 }
 
-const failed = results.filter((r) => r.pass === false)
-const skipped = results.filter((r) => r.pass === 'skipped')
-console.log()
-console.log(bold('══ 汇总 ══'))
-for (const r of results) {
-  const mark = r.pass === true ? green('✓') : r.pass === 'skipped' ? yellow('⊘') : red('✗')
-  console.log(`  ${mark} ${r.label}${r.note ? yellow(` — ${r.note}`) : ''}`)
-}
-console.log()
-console.log(
-  `  通过 ${results.length - failed.length - skipped.length} / ${results.length}${skipped.length ? `（另有 ${skipped.length} 项未判定）` : ''}`,
-)
+/** 汇总并给退出码。**中断时也走这里**（见下方 SIGINT/SIGTERM）——已跑完的结果、
+ *  各自日志文件、失败归属都不该因为按了一次 Ctrl+C 就丢掉。 */
+function report(interrupted = false) {
+  const failed = results.filter((r) => r.pass === false)
+  const skipped = results.filter((r) => r.pass === 'skipped')
+  const passed = results.length - failed.length - skipped.length
 
-if (failed.length > 0) {
-  console.log(red(`  失败 ${failed.length} 项，逐项日志见 ${path.relative(repoRoot, logDir) || '.'}/`))
-  process.exit(1)
+  // 运行清单落盘：终端的滚动缓冲会丢，文件不会。**中断路径也写**——正是那条
+  // 路径最可能只剩这一个物证。逐项带日志文件名，供事后核对。
+  try {
+    const lines = [
+      `# 门禁运行清单${interrupted ? '（中断，未跑完）' : ''}`,
+      `时间：${new Date().toISOString()}`,
+      `结论：通过 ${passed} / ${results.length}${skipped.length ? `（另有 ${skipped.length} 项未判定）` : ''}`,
+      '',
+      ...results.map((r) => {
+        const mark = r.pass === true ? '✓' : r.pass === 'skipped' ? '⊘' : '✗'
+        const list = Array.isArray(r.logFile) ? r.logFile : r.logFile ? [r.logFile] : []
+        const logs = list.map((f) => path.relative(repoRoot, f).replace(/\\/g, '/')).join(', ')
+        return `${mark} [${r.stage}] ${r.label}${r.note ? ` — ${r.note}` : ''}${logs ? `\n    日志：${logs}` : ''}`
+      }),
+      '',
+    ]
+    fs.writeFileSync(path.join(logDir, '_summary.md'), lines.join('\n'), 'utf8')
+  } catch {
+    /* 清单只是副产品：写不进去也不该改变门禁结论 */
+  }
+
+  console.log()
+  console.log(bold('══ 汇总 ══'))
+  for (const r of results) {
+    const mark = r.pass === true ? green('✓') : r.pass === 'skipped' ? yellow('⊘') : red('✗')
+    console.log(`  ${mark} ${r.label}${r.note ? yellow(` — ${r.note}`) : ''}`)
+  }
+  console.log()
+  console.log(
+    `  通过 ${passed} / ${results.length}${skipped.length ? `（另有 ${skipped.length} 项未判定）` : ''}${interrupted ? '（中断，未跑完）' : ''}`,
+  )
+
+  // 失败逐项直接给**文件**（早先只给目录，68 个日志里得自己猜）；聚合任务可以
+  // 一次带回多个子日志（数组），没跑上命令的项（自己的断言失败、非子进程）如实说明。
+  for (const r of failed) {
+    const list = Array.isArray(r.logFile) ? r.logFile : r.logFile ? [r.logFile] : []
+    if (list.length === 0) {
+      console.log(red(`  · ${r.label} → （无子进程日志，见上方输出）`))
+      continue
+    }
+    for (const f of list) {
+      console.log(red(`  · ${r.label} → ${path.relative(repoRoot, f).replace(/\\/g, '/')}`))
+    }
+  }
+
+  console.log(dim(`  本次运行日志目录：${path.relative(repoRoot, logDir).replace(/\\/g, '/') || '.'}/`))
+  if (interrupted) {
+    console.log(yellow('  已中断——以上为已跑完部分；本次运行日志已落盘，无需重跑即可查看。'))
+    process.exit(130)
+  }
+  if (failed.length > 0) {
+    console.log(red(`  失败 ${failed.length} 项。`))
+    process.exit(1)
+  }
+  console.log(green('  全部通过'))
+  process.exit(0)
 }
-console.log(green('  全部通过'))
-process.exit(0)
+
+// 中断兜底：Ctrl+C / 被 kill 时把已有结果与日志归属打出来，别让人重跑一遍才看得到。
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => {
+    console.log(yellow(`\n  收到 ${sig}，收尾中…`))
+    report(true)
+  })
+}
+
+report()

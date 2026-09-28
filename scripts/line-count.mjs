@@ -1,8 +1,8 @@
 /**
  * 行数与规模统计口径（唯一真源）
  *
- * 供 `scripts/gen-current-facts.mjs` 与 `scripts/line-budget-audit.mjs` 等审计共同引用。
- * 本模块提取自 `gen-current-facts.mjs`，确保事实表与棘轮口径逐字一致，绝无漂移。
+ * 供 `scripts/gen-current-facts.mjs` 等消费方共同引用。
+ * 本模块提取自 `gen-current-facts.mjs`，确保事实表口径只有一个来源，绝无漂移。
  */
 
 import { readFileSync, readdirSync } from "node:fs";

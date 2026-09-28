@@ -64,7 +64,7 @@ export default {
               : coverageRed
                 ? '覆盖率低于阈值（见 tauri/vitest.config.ts 的 coverage.thresholds）'
                 : `exit=${r.code}, signal=${r.signal}`
-            return { ok: false, note }
+            return { ok: false, note, logFile: r.logFile }
           }
 
           const files = grabInt(r.output, /Test Files\s+(\d+) passed/)
@@ -110,7 +110,7 @@ export default {
             console.log('      ↳ 构建失败：本地复现用 `npm run build`（在 tauri/ 下）')
             maybeSandboxDeleteHint(r.output)
             if (blockedBySandboxDelete(r.output)) return 'skipped'
-            return { ok: false, note: `exit=${r.code}` }
+            return { ok: false, note: `exit=${r.code}`, logFile: r.logFile }
           }
           return { ok: true }
         },

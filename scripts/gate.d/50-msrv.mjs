@@ -63,7 +63,7 @@ export default {
           })
           if (!r.ok) {
             console.log(red(`      ↳ ${name} 在 ${msrv} 上编译失败 ⇒ rust-version 声明与实际不符`))
-            return { ok: false, note: `exit=${r.code}` }
+            return { ok: false, note: `exit=${r.code}`, logFile: r.logFile }
           }
           return { ok: true }
         },

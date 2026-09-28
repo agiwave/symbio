@@ -53,6 +53,7 @@ export default {
         if (cases.length === 0) return { ok: false, note: '未发现任何用例（e2e/cases/）' }
         let pass = 0
         const failures = []
+        const failedLogs = []
         for (const c of cases) {
           const r = await ctx.run({
             label: `e2e: ${c.name}`,
@@ -68,6 +69,7 @@ export default {
             console.log(`      ✓ ${c.name}`)
           } else {
             failures.push(c.name)
+            if (r.logFile) failedLogs.push(r.logFile)
             console.log(`      ✗ ${c.name}（详见日志）`)
             if (ctx.ci !== true) console.log(dim(r.output.split('\n').slice(-6).join('\n      ')))
           }
@@ -77,7 +79,8 @@ export default {
             ? `${pass}/${cases.length} 通过`
             : `通过 ${pass}/${cases.length}，失败: ${failures.join('、')}`
         console.log(`      ${failures.length === 0 ? '' : yellow('')}${note}`)
-        return { ok: failures.length === 0, note }
+        // 聚合任务有多个子日志：失败时把每一项的文件名都带回去（汇总逐个列出）。
+        return { ok: failures.length === 0, note, logFile: failures.length === 0 ? null : failedLogs }
       },
     })
     return tasks
