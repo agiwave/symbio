@@ -110,9 +110,17 @@ const ROOT_FILES = ['README.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md']
 
 /**
  * 整体豁免的目录（相对 repoRoot，以 `/` 结尾）。
- * docs/archive/ = 历史归档，其链接指向的是**当时**的兄弟文档，改写等于篡改历史。
+ *
+ * - `docs/archive/` = 历史归档，其链接指向的是**当时**的兄弟文档，改写等于篡改历史。
+ * - `docs/plan/` = **前瞻计划**（未落地的设计方案 / 演进路线）。它引用的文档
+ *   **可以尚不存在**——那正是"计划"的一部分（"这一件将在 X 落地，见 …"）。
+ *   对它判失效链接，等于要求**还没做的工作先有文档**，与文档职责边界
+ *   （`docs/README.md`：现行文档只描述当前行为）自相矛盾。同一理由已用于
+ *   `doc-symbol-audit`（见其 `EXCLUDE_DIRS` 的"前瞻计划"注）。
+ *
+ *   这条豁免**不放松活文档**：`docs/plan/` 之外的一切仍是逐条判定、失效即失败。
  */
-const EXEMPT_DIRS = ['docs/archive/']
+const EXEMPT_DIRS = ['docs/archive/', 'docs/plan/']
 
 /** 递归时跳过的目录名（构建产物 / 依赖 / 版本库） */
 const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'dist', 'build', '.venv'])

@@ -153,6 +153,9 @@ fn dir_info_lists_unknown_categories_verbatim() {
     let store = AgentDirStore::new(tmp.path());
     let info = agent_dir_info(&record, &store);
 
-    assert_eq!(info["capability_kinds"], serde_json::json!(["custom_widget"]));
+    assert_eq!(
+        info["capability_kinds"],
+        serde_json::json!(["custom_widget"])
+    );
     assert_eq!(info["capabilities"]["custom_widget"], serde_json::json!(1));
 }

@@ -49,11 +49,7 @@ async fn list_route_returns_registered_names() {
     let v = data_of(resp);
     let arr = v.as_array().expect("list 返回应为数组");
     let names: Vec<&str> = arr.iter().filter_map(|x| x.as_str()).collect();
-    for expect in [
-        "session.snapshot",
-        "session.display",
-        "session.checkpoint",
-    ] {
+    for expect in ["session.snapshot", "session.display", "session.checkpoint"] {
         assert!(names.contains(&expect), "应含已登记投影 {expect}");
     }
 }
@@ -88,7 +84,10 @@ async fn run_unknown_projection_is_not_found() {
     let p = Arc::new(plugin());
     let body = json!({ "name": "__nope__" });
     let r = p.route(ctx("run", Some(body))).await;
-    assert!(matches!(r, Err(crate::symbio_core::PluginError::NotFound(_))));
+    assert!(matches!(
+        r,
+        Err(crate::symbio_core::PluginError::NotFound(_))
+    ));
 }
 
 /// `run` 无载荷 ⇒ 不报错，按空事实跑出确定结果（最小调用可用）。
@@ -119,7 +118,12 @@ async fn run_is_deterministic() {
         ],
         "at_ms": 5
     });
-    let a = data_of(p.clone().route(ctx("run", Some(body.clone()))).await.unwrap());
+    let a = data_of(
+        p.clone()
+            .route(ctx("run", Some(body.clone())))
+            .await
+            .unwrap(),
+    );
     let b = data_of(p.clone().route(ctx("run", Some(body))).await.unwrap());
     assert_eq!(a, b, "同一载荷双跑必须逐字节相同");
 }
@@ -129,7 +133,10 @@ async fn run_is_deterministic() {
 async fn unknown_route_is_not_found() {
     let p = Arc::new(plugin());
     let r = p.route(ctx("bogus", None)).await;
-    assert!(matches!(r, Err(crate::symbio_core::PluginError::NotFound(_))));
+    assert!(matches!(
+        r,
+        Err(crate::symbio_core::PluginError::NotFound(_))
+    ));
 }
 
 /// **平凡值（J2）**：`enabled = false` ⇒ 两条路由都不可达，但**投影机制不受影响**

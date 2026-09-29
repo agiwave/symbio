@@ -170,11 +170,7 @@ fn agent_dir_info(r: &AgentDirRecord, store: &AgentDirStore) -> serde_json::Valu
 ///
 /// 取不到子目录时给 `null` 而不是 `0`——「数不了」与「这一类是空的」是两件事，
 /// 后者不应该出现在一个能力类别上（空的类别本就不该在列表里）。
-fn capability_counts(
-    agent_id: &str,
-    store: &AgentDirStore,
-    kinds: &[String],
-) -> serde_json::Value {
+fn capability_counts(agent_id: &str, store: &AgentDirStore, kinds: &[String]) -> serde_json::Value {
     let mut map = serde_json::Map::new();
     for kind in kinds {
         let n = store

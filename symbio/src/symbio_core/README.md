@@ -84,7 +84,7 @@
    协议 schema 的词汇表就是它的命名空间，收敛成平铺反而丢失 `session::chat_message`
    这类语义。其余深路径（`symbio_core::plugin::dir::` 之类）视为不规范，应改为根平铺。
 
-### 域前缀对照表（全 16 域 —— 新增符号照此取名）
+### 域前缀对照表（全 17 域 —— 新增符号照此取名）
 
 这张表是第 2 条的**唯一执行口径**：拿不准新符号叫什么，先在这里查它的域。
 「—」= 该域没有这一类符号（不是「不用前缀」）。**一个前缀只属于一个域。**
@@ -106,6 +106,7 @@
 | `llm` | 子命名空间 `Model*` · `Turn*` | — | `llm_` | 对应 `model_provider.rs` / `turn.rs` |
 | `logger` | — | `LOG_`（登记缩写） | `logger_` | 常量用登记缩写，函数用全名——两者不混 |
 | `plugin` | `Plugin` | `PLUGIN_`；子命名空间 `ROUTE_*` · `TRAVERSE_*` | `plugin_` | `PLUGIN_` 下细分：`PLUGIN_ID_*`（工厂 id）· `PLUGIN_KEY_*`（清单键）· `PLUGIN_FILE` · `PLUGIN_PAYLOAD_KEY` |
+| `actor` | `Actor*` | 无（`name` 是**字段**不是常量） | `actor_` | 主体规格：`ActorSpec`（唯一入口 `new` / `builtin`）· `ActorPattern` · `ActorScope` · `ActorSource`（登记方 trait）· `ActorError`；查询面 `actor_list` / `actor_get` / `actor_register` / `actor_clear`（测试专用）。**表为空 ⇒ 内置默认**，见 §2 |
 | `projection` | `Projection` · `View` | — | `projection_` | 受约束的纯投影：`Projection`（唯一入口 `new`）· `View`（平凡值可区分）· `ProjectionInput` · `ProjectionFn`（擦除签名）· `ProjectionError`；查询面 `projection_list` / `projection_run` / `projection_has`。**只登记不搬迁**，见 §2 |
 | `schemas` | 协议词 | 协议词 | 协议词 | 命名空间就是协议本身，见 §3 |
 | `text` | — | — | `text_` | 只有两个纯函数 |
@@ -143,6 +144,7 @@
 | `llm` | 模型服务的唯一契约面（协议无关、插件无关）——只留**多消费方**共用的符号（唯一例外 `llm_message_frame` 见 ADR-038） | `ModelProvider` · `ModelFinishReason` · `ModelUsage` · `TurnOutput`（`tool_calls` 是**结果形态**，只装结果不装过程；累积过程住 `plugins/model/tool_accumulator.rs`，三个读方法 `is_reasoning_only` / `effective_text` / `into_messages` 住 `plugins/session/message_build.rs`）· `TurnToolCallInfo` · 帧 `llm_emit_message` / `llm_message_frame` / `llm_removed_frame` · id 原语 `llm_short_id` | `model_provider` · `turn` |
 | `logger` | 结构化日志与级别闸门 | 日志宏 · `LOG_LEVEL_*`（`MIN_LEVEL` 是**私有**静态量，不是公开面） | — |
 | `plugin` | 插件核心契约：trait、信封、错误、目录、身份与地址 | `Plugin` · `PluginMeta` · `PluginInvokeRequest` / `PluginInvokeResponse` · `PluginError` / `PluginErrorCode` · `PluginChannel` / `PluginFrame` / `PluginPayload` / `PLUGIN_PAYLOAD_KEY` · `PluginDir` / `PluginConfigFile` / `PluginEntry` · `PLUGIN_ID_*`（工厂 id）· `PLUGIN_KEY_*` / `PLUGIN_FILE`（清单）· `ROUTE_*`（路由地址）· `TRAVERSE_AVAILABLE_*`（遍历端点） | `dir` · `error` · `ids` · `route` · `transport` · `traverse` |
+| `actor` | 主体规格：执行者"以什么身份、按什么模式、在什么预算与范围内"运行。把 `chat_loop` 里**已经隐含**的那个 Actor 命名出来，并允许登记更多（表住 core、行住插件）。**表为空 ⇒ 内置默认行（即现行行为）**，故是扩展点而非运行时必需品 | `ActorSpec`（唯一入口 `new` / `builtin`；`resolve` 以真实 `principal` 覆盖占位符）· `ActorPattern` · `ActorScope` · `ActorSource`（登记方 trait；`layer` 由装配方赋予 = 断言 A5）· `ActorError` · `actor_list` / `actor_get` / `actor_register` | `registry` · `spec` |
 | `projection` | 受约束的**纯投影**：把事实序列折成一个视图。**只登记不搬迁**——投影仍住各自插件，登记进进程级表；新增必须经 `Projection::new`（签名即纯净性约束：拿不到 `&Store` / `&mut` / 时钟 / 主体），既有裸函数不被强制 | `Projection`（唯一入口 `new`）· `View`（`trivial` 平凡值可区分）· `ProjectionInput` · `ProjectionFn`（擦除签名）· `ProjectionError` · `ProjectionSubmit` · `projection_list` / `projection_run` / `projection_has` | `registry` · `view` |
 | `schemas` | 跨端协议 schema（前端逐字段镜像） | `ChatMessage` · `HookEvent` · `SuccessResponse` · 详情表 schema | `common` · `detail` · `hook` · `session` |
 | `text` | 字符串安全截断（避免按字节切多字节字符 panic） | `text_truncate_bytes` · `text_floor_char_boundary` | — |

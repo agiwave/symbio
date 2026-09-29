@@ -27,6 +27,7 @@
 //!   编排层的引用为 0，靠评审把持）。若将来建守卫，必须是**全仓规则**
 //!   （所有插件同一判据），不为单个插件立脚本。
 
+mod actor;
 mod agent;
 mod composite;
 mod event_bus;

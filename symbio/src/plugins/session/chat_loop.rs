@@ -51,6 +51,7 @@ pub(crate) use super::context::{auto_compress_process, run_context_compact};
 
 use super::chat_session::{PersistentChatSession, SESSION_HANDLE};
 use super::model_chat;
+use crate::plugin_debug;
 use crate::plugin_error;
 use crate::plugin_info;
 use crate::plugin_warn;
@@ -87,6 +88,30 @@ pub async fn run_chat_loop(
     // `unwrap_or(false)` / `unwrap_or(15)` 三份影子默认值，与配置默认值恰好相等纯属
     // 巧合，改配置会静默失效。
     let turn_req = TurnRequest::new(&req);
+
+    // ── 本轮的 Actor 行（B3 装配化）────────────────────────────────────────
+    //
+    // 把"这一轮是谁在跑、按什么预算、在哪一层"显式化为一行 `ActorSpec`。
+    // 两处取值与原实现**逐字节相同**：
+    // - `budget_ms`：`0` ⇒ 现行"无墙钟上限"，`TurnRequest` 的 `max_tool_rounds`
+    //   语义原样交给 `gate_turn`（本行不参与该判定，只是把语义命名出来）；
+    // - `scope`：由 `ctx[AGENT_ID]` 判定，与 `entry.rs` 的 agent 边界同判据。
+    //
+    // 登记（幂等）+ 解析失败一律不阻断：表为空时回落到内置默认行（取值相同），
+    // 因此**移除全部登记行后系统退化为现行形态**（J2）。
+    let actor = {
+        let sid = ctx.get(crate::symbio_core::SESSION_ID).unwrap_or_default();
+        super::actors::register_reasoner(&*ctx, &sid);
+        super::actors::resolve_reasoner(&*ctx, &sid)
+    };
+    plugin_debug!(
+        "session",
+        "[Session] Actor 行：{}（pattern={:?}, budget_ms={}, scope={}）",
+        actor.name,
+        actor.pattern,
+        actor.budget_ms,
+        actor.scope.wire()
+    );
 
     plugin_info!(
         "session",

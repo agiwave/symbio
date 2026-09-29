@@ -24,7 +24,7 @@
 
 use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::{
-    projection_list, plugin_dir_from_ctx, projection_run, Fact, Plugin, PluginConfigFile,
+    plugin_dir_from_ctx, projection_list, projection_run, Fact, Plugin, PluginConfigFile,
     PluginDir, PluginError, PluginInvokeRequest, PluginInvokeResponse, PluginMeta, PluginPayload,
     ProjectionInput, PLUGIN_ID_PROJECTION,
 };
@@ -172,11 +172,7 @@ impl Plugin for ProjectionPlugin {
     }
 }
 
-crate::submit_object_creator!(
-    PLUGIN_ID_PROJECTION,
-    ProjectionPlugin::build,
-    dyn Plugin
-);
+crate::submit_object_creator!(PLUGIN_ID_PROJECTION, ProjectionPlugin::build, dyn Plugin);
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]

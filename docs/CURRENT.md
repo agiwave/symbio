@@ -13,6 +13,7 @@
 
 | 插件目录 | 注册名 | VDFS 挂载点 | 自有路由（静态可提取） | 实现的核心 trait | 配置文件 | 模块 README |
 |---|---|---|---|---|---|---|
+| `actor` | `actor` | — | `actor/list` | `Plugin` | ✓ | ✓ |
 | `agent` | `agent` | <根>/agent · （运行期动态） | （动态）已无自有路由（一律 `NotFound` 并指引到 `<根>/agent`） | `Capability` · `Plugin` · `VdfsProvider` | ✓ | ✓ |
 | `composite` | `composite` | — | （动态）容器：按配置挂载的子插件名分发，运行期动态 | `Plugin` · `VdfsProvider` | — | ✓ |
 | `event_bus` | `event_bus` | — | `event_bus/ping` · `event_bus/subscribe` | `Plugin` | — | ✓ |
@@ -104,7 +105,7 @@
 
 | 范围 | 实现 | 测试 |
 |---|---|---|
-| `symbio/src` | 231 文件 / 57585 行 | 134 文件 / 25822 行 |
+| `symbio/src` | 237 文件 / 58424 行 | 138 文件 / 26349 行 |
 | `cli/src` | 4 文件 / 1573 行 | 1 文件 / 80 行 |
 | `tauri/src-tauri/src` | 3 文件 / 449 行 | 0 文件 / 0 行 |
 | `tauri/src` | 96 文件 / 21137 行 | 50 文件 / 11448 行 |
@@ -118,4 +119,4 @@
 
 ---
 
-> 生成时间：2026-09-29 19:18:33 UTC · 源：`git rev-parse HEAD` = `unknown`
+> 生成时间：2026-09-29 20:34:55 UTC · 源：`git rev-parse HEAD` = `unknown`

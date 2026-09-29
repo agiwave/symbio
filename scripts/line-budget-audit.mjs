@@ -72,7 +72,11 @@ export const LINE_BUDGET_BASELINES = {
   // `find_compress_split_point` 的**薄适配器** + 登记点；既有函数本体零改动，
   // `find_compress_split_point` 由 `fn` 提为 `pub(crate)` 供投影直调）。
   // 基线 16790 → 16993（+203）。测试另计（`projections.test.rs`）。
-  "symbio/src/plugins/session": { maxLines: 16993, exts: [".rs"] },
+  // 2026-09-29（B3）：v2 桥接「Actor 行」落地——`session` 增 `actors.rs`
+  // （把现行 `chat_loop` 隐含的那个 Actor **显式声明为一行** `session.reasoner`
+  //  + 层判定 + 运行期以真实会话 id 解析；`chat_loop.rs` 入口取该行，取值与原实现
+  //  逐字节相同）。基线 16993 → 17144（+151）。测试另计（`actors.test.rs`）。
+  "symbio/src/plugins/session": { maxLines: 17144, exts: [".rs"] },
   "symbio/src/plugins/skill": { maxLines: 1470, exts: [".rs"] },
   "symbio/src/plugins/telegram": { maxLines: 887, exts: [".rs"] },
   "symbio/src/plugins/vdfs": { maxLines: 3012, exts: [".rs"] },
@@ -91,7 +95,13 @@ export const LINE_BUDGET_BASELINES = {
   // `projection_run` / `projection_has` + `submit_projection!` 宏；`view.rs`：
   // `View` 平凡值可区分；`ProjectionError`。实现 ~347 行，测试另计）。
   // 基线 8610 → 8959（+349）。
-  "symbio/src/symbio_core": { maxLines: 8959, exts: [".rs"] },
+  // 2026-09-29（B3）：v2 桥接「Actor 行」落地——新增 `actor` 域
+  // （`spec.rs`：`ActorSpec` 四字段 + `ActorPattern` / `ActorScope`；
+  //  `registry.rs`：进程级登记表 + `ActorSource` 登记方 trait（`layer` 由装配方赋予
+  //  ⇒ 越层登记不进去，断言 A5）+ `actor_register` / `actor_get` / `actor_list` /
+  //  `actor_clear`。实现 ~360 行，测试另计）。**表为空 ⇒ 内置默认行**（现行行为），
+  // 故本域是扩展点而非运行时必需品。基线 8959 → 9409（+450）。
+  "symbio/src/symbio_core": { maxLines: 9409, exts: [".rs"] },
   "symbio/src/providers": { maxLines: 2732, exts: [".rs"] },
 
   // ── 宿主与工具层 ──

@@ -52,12 +52,15 @@ fn message_of(f: &Fact) -> Option<ChatMessage> {
         "System" => Some(MessageRole::System),
         _ => None,
     };
-    let msg_type = p.get("type").and_then(|v| v.as_str()).and_then(|t| match t {
-        "Text" => Some(MessageType::Text),
-        "ToolCall" => Some(MessageType::ToolCall),
-        "Reasoning" => Some(MessageType::Reasoning),
-        _ => None,
-    });
+    let msg_type = p
+        .get("type")
+        .and_then(|v| v.as_str())
+        .and_then(|t| match t {
+            "Text" => Some(MessageType::Text),
+            "ToolCall" => Some(MessageType::ToolCall),
+            "Reasoning" => Some(MessageType::Reasoning),
+            _ => None,
+        });
     Some(ChatMessage {
         id: p
             .get("message_id")

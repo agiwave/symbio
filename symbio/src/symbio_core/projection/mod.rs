@@ -36,7 +36,7 @@ mod registry;
 mod view;
 
 pub use registry::{
-    projection_list, projection_has, projection_run, Projection, ProjectionError, ProjectionFn,
+    projection_has, projection_list, projection_run, Projection, ProjectionError, ProjectionFn,
     ProjectionInput, ProjectionSubmit,
 };
 pub use view::View;

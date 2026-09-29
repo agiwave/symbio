@@ -1,5 +1,6 @@
 //! 核心模块
 
+mod actor;
 mod assembly;
 mod capability;
 mod clock;
@@ -73,9 +74,22 @@ pub use fact::{Fact, FactError, FactKind, FactPrincipal, FactSource, FACT_NONE_S
 // 既有裸函数不被强制。契约住 core，实现住各自插件——消费方按名字取用，不必认识产生方。
 // 注意：submit_projection! 宏已通过 #[macro_export] 导出到 crate 根目录
 pub use projection::{
-    projection_list, projection_has, projection_run, Projection, ProjectionError, ProjectionFn,
+    projection_has, projection_list, projection_run, Projection, ProjectionError, ProjectionFn,
     ProjectionInput, ProjectionSubmit, View,
 };
+
+// ==================== 主体规格 ====================
+// 执行者"以什么身份、按什么模式、在什么预算与范围内"运行——把 `chat_loop` 里
+// 已经隐含的那个 Actor 命名出来，并允许登记更多。表住 core、行住插件；
+// 表为空 ⇒ 内置默认行（现行行为），故本域是**扩展点**而非运行时必需品。
+pub use actor::{
+    actor_clear, actor_get, actor_list, actor_register, ActorError, ActorPattern, ActorScope,
+    ActorSource, ActorSpec, ActorSpecSubmit,
+};
+// 测试专用：Actor 表的全局串行闸 + 清表（见 `actor::actor_test_guard` 的说明）。
+// 表是进程级的而测试并行，不互斥就会随机串味。
+#[cfg(test)]
+pub(crate) use actor::actor_test_guard;
 
 // ==================== 插件契约 ====================
 pub use capability::{

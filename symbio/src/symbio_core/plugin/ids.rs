@@ -68,6 +68,8 @@ pub const PLUGIN_ID_EVENT_BUS: &str = "event_bus";
 pub const PLUGIN_ID_FACT_LOG: &str = "fact_log";
 /// Projection 插件工厂（可选的投影内省口：列出 / 运行已登记的纯投影）
 pub const PLUGIN_ID_PROJECTION: &str = "projection";
+/// Actor 插件工厂（可选的执行者登记与内省口：登记判定者行 / 列出全部 Actor 行）
+pub const PLUGIN_ID_ACTOR: &str = "actor";
 
 // 注：`SYSTEM_LEVEL_PROVIDERS`（「系统级插件不参与容器扫描」）不在这里——它只被
 // `plugins/composite` 一个模块消费，按 ADR-023 的依赖方判据已下沉到该模块。

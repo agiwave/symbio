@@ -141,7 +141,12 @@ where
 static TABLE: OnceLock<Vec<&'static str>> = OnceLock::new();
 
 fn names() -> &'static Vec<&'static str> {
-    TABLE.get_or_init(|| inventory::iter::<ProjectionSubmit>.into_iter().map(|s| s.name).collect())
+    TABLE.get_or_init(|| {
+        inventory::iter::<ProjectionSubmit>
+            .into_iter()
+            .map(|s| s.name)
+            .collect()
+    })
 }
 
 /// 列出全部已登记的投影名（顺序不保证，调用方需稳定顺序时自行排序）。
@@ -227,4 +232,3 @@ macro_rules! submit_projection {
         }
     };
 }
-
