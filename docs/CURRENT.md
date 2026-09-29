@@ -24,10 +24,12 @@
 | `memory` | `memory` | <根>/memory | — | `Plugin` · `VdfsProvider` | ✓ | ✓ |
 | `model` | `model` | <根>/model | （动态）已无自有路由（`execute_turn` 由 session 直连调用） | `ModelProvider` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `plugin_manager` | `plugin_manager` | <根>/plugin_manager | — | `Plugin` · `VdfsProvider` | — | ✓ |
+| `reply` | `reply` | — | `reply/compose` | `Plugin` | — | ✓ |
 | `session` | `session` | <根>/session | `session/chat/abort` · `session/chat/send` | `Capability` · `Plugin` | ✓ | ✓ |
 | `setting` | `setting` | <根>/setting | — | `Plugin` | ✓ | ✓ |
 | `skill` | `skill` | <根>/skill | `skill/execute` | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `telegram` | `telegram` | <根>/telegram | `telegram/get_updates` · `telegram/send` · `telegram/set_chat_id` · `telegram/start_listener` · `telegram/status` · `telegram/stop_listener` | `Plugin` | ✓ | ✓ |
+| `triage` | `triage` | — | `triage/decide` | `Plugin` | — | ✓ |
 | `vdfs` | `vdfs` | — | （动态）`vdfs/<操作>`——按 `VDFS_OPS` 校验后分发（见 §3.2，13 个操作） | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `web` | `web` | <根>/web | — | `Capability` · `Plugin` | ✓ | ✓ |
 
@@ -103,7 +105,7 @@
 
 | 范围 | 实现 | 测试 |
 |---|---|---|
-| `symbio/src` | 221 文件 / 56677 行 | 129 文件 / 25586 行 |
+| `symbio/src` | 226 文件 / 56981 行 | 131 文件 / 25773 行 |
 | `cli/src` | 4 文件 / 1573 行 | 1 文件 / 80 行 |
 | `tauri/src-tauri/src` | 3 文件 / 449 行 | 0 文件 / 0 行 |
 | `tauri/src` | 100 文件 / 22211 行 | 53 文件 / 12422 行 |
@@ -117,4 +119,4 @@
 
 ---
 
-> 生成时间：2026-09-29 14:09:10 UTC · 源：`git rev-parse HEAD` = `a044327`
+> 生成时间：2026-09-29 14:50:12 UTC · 源：`git rev-parse HEAD` = `8abef14`

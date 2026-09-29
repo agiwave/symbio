@@ -240,7 +240,12 @@ export const BASELINE = {
   //           / 不改写用户原文 / 缺 content 当空串 / 非文本片段走 `Parts` 无损 / 全文本仍为文本）；
   //           `transcript/inbox.test.rs` 新增 5 例（抽干**整队** / 上界截断且余者留队 /
   //           平凡值退化为一条 / 取走的每条都在**自己的地址**上发 `bare` 变更 / 上界 0 夹到 1）。
-  rustTests: 989,
+  // 2026-09-29：989 → **1000**（+11）。对话面插件拆分 S1（骨架 + 契约）：新增
+  //           `plugins/triage`（6 例：平凡判决恒 Escalate / `Verdict` 带判别键的枚举形态 /
+  //           缺载荷报错 / 未知子命令 NotFound / traverse 不贡献工具 / meta 首参 == 目录名）
+  //           与 `plugins/reply`（5 例：三个判决变体都走同一条平凡路径 / 缺载荷报错 /
+  //           未知子命令 NotFound / traverse 不贡献工具 / meta 首参 == 目录名）。
+  rustTests: 1000,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *
