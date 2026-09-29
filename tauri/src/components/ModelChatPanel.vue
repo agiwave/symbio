@@ -18,45 +18,75 @@
       </template>
     </BaseModal>
 
-    <!-- 消息历史区域 -->
-    <div class="chat-messages" ref="messagesRef" @scroll="onScroll">
-      <div v-if="messageTree.length === 0" class="empty-chat">
-        <p>开始与 AI 助手对话</p>
-        <p class="empty-hint">输入消息后按 Enter 发送，Shift+Enter 换行</p>
-      </div>
+    <!-- 消息区：单列（分栏关闭）或「对话 / 工作」两列（分栏开启）。
+         两列是**同一批节点**的两种读法，不是两份数据：左边按**对话线**投影
+         （用户消息 + 助手说过的话），右边是它的补集（工具 / 推理 / 轮次过程）。
+         分栏关闭时逐字退回单列——那是这个开关的平凡值。 -->
+    <div class="chat-body" :class="{ 'is-split': split }">
+      <section class="chat-column">
+        <div v-if="split" class="column-head">对话</div>
+        <div class="column-body" ref="messagesRef" @scroll="onScroll">
+          <div v-if="primaryNodes.length === 0" class="empty-chat">
+            <p>开始与 AI 助手对话</p>
+            <p class="empty-hint">输入消息后按 Enter 发送，Shift+Enter 换行</p>
+          </div>
 
-      <MessageNode
-        v-for="node in messageTree"
-        :key="node.id"
-        :node="node"
-        :depth="0"
-        @retry="handleRetry"
-        @delete="handleDelete"
-        @edit="handleEdit"
-      />
+          <MessageNode
+            v-for="node in primaryNodes"
+            :key="node.id"
+            :node="node"
+            :depth="0"
+            @retry="handleRetry"
+            @delete="handleDelete"
+            @edit="handleEdit"
+          />
 
-      <!-- 等待提示的**第二个来源**：会话在跑，而流里没有任何在途节点。
-           常规情形下 Turn 节点已到，骨架由 TurnGroupNode 挂在 Turn 组里；
-           这条只在「Turn 节点的变更还没到 / 丢了一次」时兜底——否则用户点完
-           发送会看到「什么都没发生」。两者互斥，不会同时出现两条。 -->
-      <TurnPending v-if="showTyping" />
+          <!-- 等待提示的**第二个来源**：会话在跑，而流里没有任何在途节点。
+               常规情形下 Turn 节点已到，骨架由 TurnGroupNode 挂在 Turn 组里；
+               这条只在「Turn 节点的变更还没到 / 丢了一次」时兜底——否则用户点完
+               发送会看到「什么都没发生」。两者互斥，不会同时出现两条。 -->
+          <TurnPending v-if="showTyping" />
 
-      <!-- 会话级错误条（兜底：无 Failed Turn 节点、但会话整体因错误中止时展示；
-           有 Failed Turn 时错误由根级 Turn 节点承载，不在此重复显示）。
+          <!-- 会话级错误条（兜底：无 Failed Turn 节点、但会话整体因错误中止时展示；
+               有 Failed Turn 时错误由根级 Turn 节点承载，不在此重复显示）。
 
-           位置在**流内末尾**而不是页面顶部：错误是这一轮的结果，它属于会话流的
-           时间轴——挂在流的尾部，用户的视线本来就在那里，重试按钮也就在手边。
-           顶部横幅会把一次“这轮没跑完”的景象抬成“页面级故障”，与刚刚过去的
-           对话脱节（看门狗定稿的失败也走流内，两者观感因此一致）。 -->
-      <MessageErrorBox
-        v-if="sessionError"
-        :text="sessionError"
-        retryable
-        dismissible
-        variant="turn"
-        @retry="handleSessionRetry"
-        @dismiss="sessionsStore.setSessionError(props.sessionId, null)"
-      />
+               位置在**流内末尾**而不是页面顶部：错误是这一轮的结果，它属于会话流的
+               时间轴——挂在流的尾部，用户的视线本来就在那里，重试按钮也就在手边。
+               顶部横幅会把一次“这轮没跑完”的景象抬成“页面级故障”，与刚刚过去的
+               对话脱节（看门狗定稿的失败也走流内，两者观感因此一致）。 -->
+          <MessageErrorBox
+            v-if="sessionError"
+            :text="sessionError"
+            retryable
+            dismissible
+            variant="turn"
+            @retry="handleSessionRetry"
+            @dismiss="sessionsStore.setSessionError(props.sessionId, null)"
+          />
+        </div>
+      </section>
+
+      <!-- 工作列（只在分栏开启时存在）：这一轮**干了什么**——工具调用、思考、
+           轮次过程。它不承载状态提示与错误条（那些留在用户正在读的对话列），
+           因此没有第二条「什么都没发生」的信号来源。 -->
+      <section v-if="split" class="chat-column">
+        <div class="column-head">工作</div>
+        <div class="column-body" ref="workRef" @scroll="onScrollWork">
+          <div v-if="workRoots.length === 0" class="empty-chat">
+            <p class="empty-hint">还没有工具调用或推理过程</p>
+          </div>
+
+          <MessageNode
+            v-for="node in workRoots"
+            :key="node.id"
+            :node="node"
+            :depth="0"
+            @retry="handleRetry"
+            @delete="handleDelete"
+            @edit="handleEdit"
+          />
+        </div>
+      </section>
     </div>
 
     <!-- 输入控制区域：输入框 + 选项行由 ChatComposer 唯一装配（不再在此各拼一半） -->
@@ -92,6 +122,7 @@ import type { DetailDefinition } from '@/schemas/vdfs'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
 import { useSessionUiStateStore } from '@/stores/sessionUiState'
+import { useAppearanceStore } from '@/stores/appearance'
 import { needsTypingRow } from '@/stores/sessionLive'
 import { CHAT_ROLE_USER } from '@/schemas/chat_message'
 // 消息级判定与业务规则全部来自 registry（本组件不解释消息词表，也不读后端 meta 字段）
@@ -152,6 +183,15 @@ const editing = ref<{ id: string; content: string; isJson: boolean } | null>(nul
 const { scrollToBottom, smartScroll, handleScroll } = useChatScroll(messagesRef)
 
 /**
+ * 工作列的滚动（与对话列同一套机制，只是另一个容器）。
+ *
+ * 分栏关闭时 `workRef` 恒为 `null`（元素不在），`useChatScroll` 的每个入口都自带
+ * 空值守卫，因此这里不需要分支——**不为"开关关着"写一条代码路径**。
+ */
+const workRef = ref<HTMLElement | null>(null)
+const { smartScroll: smartScrollWork, handleScroll: handleScrollWork } = useChatScroll(workRef)
+
+/**
  * 滚动事件：先按 `useChatScroll` 的规则重算「是否贴底」，再把位置记进
  * **按会话**的 UI 状态（切回时还原）。
  *
@@ -162,6 +202,11 @@ function onScroll() {
   handleScroll()
   const top = messagesRef.value?.scrollTop
   if (typeof top === 'number') uiState.setScrollTop(props.sessionId, top)
+}
+
+/** 工作列的滚动：只重算「是否贴底」（阅读位置不跨会话记忆，它是过程视图） */
+function onScrollWork() {
+  handleScrollWork()
 }
 
 const chat = useChatConnection({
@@ -183,6 +228,26 @@ provide(RESUME_KEY, (payload: ResumePayload) => {
 
 const { isLoading } = chat
 const messageTree = chat.messageTree
+
+/**
+ * 分栏开关（外观设置，出厂 `true`）。**平凡值 = `false`** ⇒ 单列，与分栏之前逐字一致。
+ */
+const appearance = useAppearanceStore()
+const split = computed(() => appearance.dialogPanelSplit)
+
+/**
+ * 主列（左）的数据源。
+ *
+ * 分栏开启时是**对话线**（`useChatConnection.conversationNodes`，判据的唯一 owner
+ * 在 `schemas/conversation_line`）；关闭时是**整棵树**——这正是"平凡值下行为与改造前
+ * 逐字一致"的落点：同一条 `MessageNode` 渲染路径、同一批节点，只是不做投影。
+ */
+const primaryNodes = computed<ChatMessage[]>(() =>
+  split.value ? chat.conversationNodes.value : messageTree.value,
+)
+
+/** 工作列（右）的数据源：根级里不属于对话线的那些（工具 / 推理 / 轮次过程） */
+const workRoots = chat.workRoots
 
 // 全局 store 引用：错误状态兜底 / 消息计数
 const sessionsStore = useSessionsStore()
@@ -440,6 +505,8 @@ watch(
     scrollRaf = requestAnimationFrame(() => {
       scrollRaf = null
       smartScroll()
+      // 工作列同帧处理：它是另一个容器、另一份「是否贴底」，共用这一帧的开销。
+      smartScrollWork()
     })
   }
 )
@@ -462,7 +529,41 @@ watch(sessionError, (now) => {
   background: var(--color-chat-bg);
 }
 
-.chat-messages {
+/* 消息区：单列时就是一个滚动容器；分栏时是「对话 / 工作」两个滚动容器并排。
+   两列是**同一批节点**的两种读法，因此间距、缩进、卡片内边距这套纵向节奏
+   在列容器上定义一次，两个面板共用（下游 MessageNode 经 CSS 继承复用）。 */
+.chat-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.chat-column {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 两列之间一条分隔线：它是"两个视角"的唯一视觉线索，不用留白表达
+   （留白会被读成"这里少了一块"）。 */
+.chat-body.is-split .chat-column + .chat-column {
+  border-left: 1px solid var(--border-default);
+}
+
+/* 列头（只在分栏时出现）：说的是这一列**回答什么问题**，不是装饰。 */
+.column-head {
+  flex-shrink: 0;
+  padding: 0.3rem 1rem;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.column-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;

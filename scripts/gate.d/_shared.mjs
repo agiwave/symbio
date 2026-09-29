@@ -282,7 +282,20 @@ export const BASELINE = {
   //           另有 1 例改名：`report_has_no_template_yet` → `report_has_no_template_row`）。
   //           `plugins/reply/plugin.test` 10 → **11**（+1 净增：`Report` 的填表产线零 LLM
   //           往返 + 恒有话说，替换掉 S3 的 `report_yields_no_dialog_text_yet`）。
-  rustTests: 1078,
+  // 1079（S5，2026-09-29）：**对话线分界改判据**——`1078 → 1079`，**+1**。
+  //      改动本身很小，但它是 S5 的地基：`conversation_view` 原先按「根级」切，
+  //      把**助手正文**（`Turn` 的子 `Text`，用户真正读到的那段回答）挡在对话线外
+  //      ⇒ 插件看不到自己上一轮答过什么，前端「对话」面板也看不到回答本身。
+  //      判据改为**只看角色与类型、不看 `parent_id`**（位置不参与分界）。
+  //      `conversation_view.test` 8 → **9**：新增
+  //      `turn_child_answer_text_is_on_the_conversation_line`（正面边界，与
+  //      `tool_and_turn_and_reasoning_are_excluded` 的逐类排除一正一反）；
+  //      另有 2 例按新规则改写（`projection_keeps_only_the_conversation_line` 期望
+  //      由 `["u1","f1"]` 变 `["u1","t1","f1"]`、`limit_keeps_the_tail` 的 `all.len()` 3）。
+  //      `chat_loop/compose.test` 12 不变：`dialog_node_lands_on_the_conversation_line`
+  //      改名并加 `parent_id.is_none()` 字面断言、`a_turn_child_text_is_not_...`
+  //      反转为 `..._is_...`，**净增 0**（改的是判据不是数量）。
+  rustTests: 1079,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *
@@ -540,8 +553,30 @@ export const BASELINE = {
   //         同义；`false` / `0` / 空串是**合法取值**，不得被当成缺席。
   //      ④ `VdfsDetailActions.spec` **+1**：定义里 `when` 为 `null` 占位时动作照常
   //         出现（线上形状回归）。
-  vitestFiles: 53,
-  vitestTests: 828,
+  // 54 文件 / 847（S5，2026-09-29，**对话面分栏**）：`vitestFiles` 53 → **54**、
+  //      `vitestTests` 828 → **847**，**+1 文件 / +19 用例**。两组：
+  //      ① 新增 `schemas/__tests__/conversation_line.spec.ts` **+15**：
+  //         `conversation_line.ts` 是 Rust `conversation_view.rs` 的**镜像**，而
+  //         `protocol-mirror-audit` 只守常量 / 枚举 / 字段名，**不守谓词** ⇒ 两侧各写
+  //         一份穷举测试是这份镜像唯一的防线。15 条分三组：
+  //         - `isConversationNode` **5**：两条判据（user/assistant 文本）判真、
+  //           `type` 缺省视为文本（后端流式帧可能不带）、`role` 缺省不算（Rust 侧
+  //           `None` 落空）、五类非文本节点判假、`role=tool|system` 即便类型是文本也判假；
+  //         - `conversationNodesOf` **6**：投影保序扁平、**`turn` 子正文在对话线上**
+  //           （`parent_id` 不参与判定）、工具结果正文一个字节都不泄漏、空输入 / 纯工作
+  //           转写 ⇒ 空投影、产出是新数组不改入参；
+  //         - `workRootsOf` **4**：根级补集、**它不是树遍历器**（入参给什么就过滤什么，
+  //           防"顺手改成递归"而让工作面板丢掉 `turn` 里的工具调用）、与对话线互为补集
+  //           （同一份根级上二者并集 = 全量）、空输入。
+  //         与 Rust 侧逐条对应关系写在 spec 文件头的表里——改规则必须同时改两处。
+  //      ② `stores/__tests__/appearance.spec.ts` 4 → **8**（**+4**，新增一组
+  //         「会话分栏」）：`dialogPanelSplit` 是**唯一不影响根节点**的外观项（由
+  //         `ModelChatPanel` 直接读），`apply()` 里漏写它 / `watch` 里漏监听它 /
+  //         恢复时漏读它，原来那 4 条一条都不会红。4 条：出厂 `true` 且入持久化、
+  //         平凡值 `false` 能存下来（关掉分栏可回退）、新实例恢复已保存的 `false`
+  //         （否则重启就失效）、旧数据缺键 ⇒ 落出厂值 `true`（不因缺字段退化成单列）。
+  vitestFiles: 54,
+  vitestTests: 847,
 }
 
 export const VITEST_TIMEOUT_MS = 180_000

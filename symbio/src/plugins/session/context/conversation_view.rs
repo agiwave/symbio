@@ -1,3 +1,4 @@
+// Corresponding Frontend: tauri/src/schemas/conversation_line.ts
 //! 对话线投影 —— 从**一份存储**里切出「用户与助手说过的话」。
 //!
 //! ## 一条存储，两条线，一个分界
@@ -15,14 +16,29 @@
 //!
 //! ## 判据只有两条
 //!
-//! 1. `role = user`（根级）；
-//! 2. `role = assistant` 且是**文本节点**（`msg_type` 缺省或 `Text`），且**根级**
-//!    （`parent_id` 为空）。
+//! 1. `role = user` 且是**文本节点**；
+//! 2. `role = assistant` 且是**文本节点**（`msg_type` 缺省或 `Text`）。
 //!
-//! 第 2 条的「根级」是必须的：`Turn` 的子 `Text` 节点是**回复正文**，它属于工作线
-//! 的一轮；而根级的 assistant 文本节点才是「助手单独说的一句话」（首响 / 汇报）。
-//! 两者在节点树上长得一样，靠 `parent_id` 区分——这也正是「对话线不是节点类型，
-//! 是位置」的由来。
+//! 「是文本节点」挡掉 `ToolCall` / `Reasoning` / `Turn` / `Compression` /
+//! `UserPrompt` 五类；「角色」挡掉 `role = tool`（工具结果——可能含几万 token 的
+//! 源码或命令输出）与 `role = system`（注入的框架文本）。这正是 C-D4 的两条边界。
+//!
+//! ## 助手说的话有两种位置，**都算对话线**
+//!
+//! 根级的 assistant 文本是「单独说的一句话」（首响 / 汇报）；`Turn` 的**子**
+//! `Text` 节点是**回复正文**——用户真正读到的那段回答。两者都是"助手说过的话"。
+//!
+//! 判据因此**不看 `parent_id`**。曾经按"根级"切（只收根级 assistant 文本），
+//! 理由是"子 Text 属于工作线的一轮"。那是把**过程**与**说过的话**混成了一个判据，
+//! 两处代价都是真的：
+//!
+//! - **插件失明**：`triage` / `reply` 的上下文里没有助手上一轮的回答。用户追问
+//!   「那 LICENSE 呢？」时，判决只看得到用户问了什么、看不到自己答过什么——
+//!   而"能不能直接答"恰恰取决于"已经答过什么"；`reply` 的措辞也会因此重复或断裂。
+//! - **界面错位**：前端「对话」面板按同一条规则过滤时，用户会看到自己说的话
+//!   与一句开场白，却**看不到回答本身**（回答在 `Turn` 组里）——那就不成其为对话。
+//!
+//! 工作线的边界因此是**排除法**（凡不在对话线上的节点），不是"位置法"。
 //!
 //! ## 它**不**看 `meta.exclude_from_context`
 //!
@@ -74,17 +90,16 @@ pub fn conversation_view(messages: &[ChatMessage], limit: usize) -> Vec<ChatMess
 }
 
 /// 一条节点是否属于对话线（判据见模块文档，只有两条）。
+///
+/// **位置（`parent_id`）不参与判定**：`Turn` 的子 `Text` 是回复正文，它和根级的
+/// 首响一样是"助手说过的话"。
 fn is_conversation_node(m: &ChatMessage) -> bool {
     let is_text = matches!(m.msg_type, None | Some(MessageType::Text));
-    if !is_text {
-        return false;
-    }
-    match m.role {
-        Some(MessageRole::User) => true,
-        Some(MessageRole::Assistant) => m.parent_id.is_none(),
-        // `tool` / `system` 都不是"说过的话"：前者是工具的产物，后者是注入的框架文本
-        _ => false,
-    }
+    is_text
+        && matches!(
+            m.role,
+            Some(MessageRole::User) | Some(MessageRole::Assistant)
+        )
 }
 
 #[cfg(test)]

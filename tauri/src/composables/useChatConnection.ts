@@ -2,6 +2,7 @@ import { shallowRef, computed, type ComputedRef, type InjectionKey } from 'vue'
 import { runVdfsAction, writeVdfs } from '@/services/vdfs'
 import { ensureSessionScheme } from '@/services/vdfsScheme'
 import { messageTextOf, type ChatMessage, type ResumeAction } from '@/schemas/chat_message'
+import { conversationNodesOf, workRootsOf } from '@/schemas/conversation_line'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
 import { isBlankContentNode, isInProgressMessage } from '@/stores/sessionTranscript'
@@ -74,6 +75,11 @@ export interface UseChatConnectionReturn {
   isWaitingApproval: ComputedRef<boolean>
   isConnected: ComputedRef<boolean>
   messageTree: ComputedRef<ChatMessage[]>
+  /** 对话面板的数据源：对话线（用户与助手说的话），扁平、按时间序。
+   *  判据与后端 `conversation_view` 同源，镜像在 `schemas/conversation_line.ts`。 */
+  conversationNodes: ComputedRef<ChatMessage[]>
+  /** 工作面板的数据源：根级里不属于对话线的那些（推理 / 工具 / 容器）。 */
+  workRoots: ComputedRef<ChatMessage[]>
   /** 发送一条消息。会话参数（智能体 / 模型 / 模式 / 风险等级）由后端按
    *  `session.metadata` 解析——选择动作统一经会话选项栏落库，故此处不透传。
    *
@@ -261,13 +267,16 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     return node
   }
 
-  const messageTree = computed<ChatMessage[]>(() => {
+  /**
+   * 可见节点（扁平、按存储序）—— **两个面板共同的输入**。
+   *
+   * 抽成独立 computed 而不是留在 `messageTree` 里，是因为「哪些节点可见」必须只有
+   * 一个答案：本地删除、空壳叶子两处过滤若各写一份，两个面板迟早会出现
+   * 「这一条左边有、右边没有」的错位——而那种错位没有任何错误信号。
+   */
+  const visibleMessages = computed<ChatMessage[]>(() => {
     const sessionId = options.sessionId
     if (!sessionId) return []
-    if (nodeCacheSession !== sessionId) {
-      nodeCacheSession = sessionId
-      nodeCache.clear()
-    }
     const all = store.getSessionMessages(sessionId)
     const removed = getRemovedSet()
     const filtered = all.filter(m => !removed.has(m.id))
@@ -291,7 +300,17 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     const isEmptyLeaf = (msg: ChatMessage) =>
       !parentsWithChildren.has(msg.id) && isBlankContentNode(msg)
 
-    const visible = filtered.filter(m => !isEmptyLeaf(m))
+    return filtered.filter(m => !isEmptyLeaf(m))
+  })
+
+  const messageTree = computed<ChatMessage[]>(() => {
+    const sessionId = options.sessionId
+    if (!sessionId) return []
+    if (nodeCacheSession !== sessionId) {
+      nodeCacheSession = sessionId
+      nodeCache.clear()
+    }
+    const visible = visibleMessages.value
 
     const childrenMap: Record<string, ChatMessage[]> = {}
     visible.forEach(msg => {
@@ -349,6 +368,27 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     }
     return rootMessages.map((msg) => buildNode(msg))
   })
+
+  /**
+   * **对话线**（扁平、按存储序）—— 「对话」面板的数据源。
+   *
+   * 判据不在这里：它只有一个 owner（`schemas/conversation_line`，Rust
+   * `conversation_view.rs` 的镜像）。这里只做排序——**对话面板要的是"按时间读下来的
+   * 一段对话"**，而存储序不一定等于时间序（实时增量按到达顺序合并）。
+   */
+  const conversationNodes = computed<ChatMessage[]>(() =>
+    conversationNodesOf(visibleMessages.value)
+      .slice()
+      .sort((a, b) => (a.seq ?? a.timestamp ?? 0) - (b.seq ?? b.timestamp ?? 0)),
+  )
+
+  /**
+   * **工作面板的根节点** —— 根级里不属于对话线的那些（`turn` 容器 / 压缩 / 待响应）。
+   *
+   * 直接过滤 `messageTree` 的根：子节点一个都不动（`turn` 组内保留完整的推理 / 工具 /
+   * 正文，理由见 `workRootsOf`）。
+   */
+  const workRoots = computed<ChatMessage[]>(() => workRootsOf(messageTree.value))
 
   // 从 store 派生 isLoading / isWaitingApproval
   const isLoading = computed(() => {
@@ -575,6 +615,10 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     isWaitingApproval,
     isConnected: computed(() => true), // 始终视为已连接（状态由全局消费端收敛）
     messageTree,
+    /** 对话面板的数据源（对话线，扁平） */
+    conversationNodes,
+    /** 工作面板的数据源（根级里不属于对话线的那些） */
+    workRoots,
     send,
     abort,
     removeMessage,

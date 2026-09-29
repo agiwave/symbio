@@ -45,6 +45,27 @@
 
     <div class="setting-item">
       <div class="setting-info">
+        <label>会话分栏</label>
+        <p class="setting-desc">
+          开启后会话工作区分成两列：左侧「对话」只显示用户消息与助手说过的话，右侧「工作」显示工具调用、思考与轮次过程。关闭则与从前一样，全部节点在一列里按时间排列。
+        </p>
+      </div>
+      <div class="segmented">
+        <button
+          v-for="(opt, i) in splitOptions"
+          :key="i"
+          type="button"
+          class="seg-btn"
+          :class="{ active: appearance.dialogPanelSplit === opt.value }"
+          @click="appearance.dialogPanelSplit = opt.value"
+        >
+          {{ opt.label }}
+        </button>
+      </div>
+    </div>
+
+    <div class="setting-item">
+      <div class="setting-info">
         <label>会话结束提示音</label>
         <p class="setting-desc">任何会话结束（完成 / 中止 / 失败）时播放提示音，不同结束类型音色不同</p>
       </div>
@@ -165,6 +186,12 @@ function preview(kind: 'completed' | 'aborted' | 'failed') {
 const soundToggleOptions: Array<{ value: boolean; label: string }> = [
   { value: true, label: '开启' },
   { value: false, label: '关闭' },
+]
+
+/** 会话分栏的两个取值（与 `soundToggleOptions` 同形，但文案说的是"列"） */
+const splitOptions: Array<{ value: boolean; label: string }> = [
+  { value: true, label: '两列' },
+  { value: false, label: '单列' },
 ]
 
 const themeOptions: Array<{ value: ThemeMode; label: string }> = [

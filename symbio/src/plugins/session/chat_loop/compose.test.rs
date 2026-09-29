@@ -49,13 +49,22 @@ fn dialog_node_is_a_completed_assistant_text_node() {
 
 /// **落点判据**：根级（`parent_id = None`）——与用户消息互为兄弟。
 ///
-/// 这条断言刻意不写"`parent_id` 是 `None`"，而是**用投影函数反过来验证**：
-/// 「落点正确」的定义就是「对话线认它」。写成字面量断言的话，哪天投影规则改了，
-/// 这里仍然绿——而实际效果（前端「对话」面板看不看得见）已经坏了。
+/// 两个断言各钉一件事，缺一不可：
+///
+/// - **根级**：位置**不再是**对话线的判据（判据只有角色与类型，见
+///   `conversation_view` 的模块文档），因此"落在根级"必须在这里字面钉住。
+///   挂到 Turn 之下，首响就变成"工作的一轮"，前端「对话」面板看到的不再是一个
+///   独立的节点。
+/// - **对话线认它**：它是一句 assistant 文本，必须被投影收进去——否则下一轮
+///   `reply` 不知道上一轮说过什么（措辞会重复或断裂），前端「对话」面板也看不到它。
 #[test]
-fn dialog_node_lands_on_the_conversation_line() {
+fn dialog_node_lands_at_the_root_and_on_the_conversation_line() {
     let node = dialog_node("好，我来处理。", "needs_work", true);
 
+    assert!(
+        node.parent_id.is_none(),
+        "对话面节点必须落在根级——它是一句独立的话，不是某一轮工作的一部分"
+    );
     let line = conversation_view(std::slice::from_ref(&node), 0);
     assert_eq!(
         line.len(),
@@ -66,12 +75,13 @@ fn dialog_node_lands_on_the_conversation_line() {
     assert_eq!(line[0].id, node.id);
 }
 
-/// 挂在 Turn 之下的节点**不是**对话线的一部分——反向钉住上一条。
+/// 助手正文（`Turn` 的子 `Text`）**在**对话线上——判据不看位置。
 ///
-/// 没有这条，`dialog_node_lands_on_the_conversation_line` 可能因为"投影根本不过滤"
-/// 而通过。两个断言合起来才说明「根级」这个选择是**有判别力的**。
+/// 与上一条合起来说明「根级」是**语义选择**（首响是一句独立的话），而不是
+/// "投影只认这个形状"。曾经按"根级"切，代价是插件看不到助手上一轮的回答、
+/// 前端「对话」面板看不到回答本身（回答在 Turn 组里）。
 #[test]
-fn a_turn_child_text_is_not_on_the_conversation_line() {
+fn a_turn_child_text_is_on_the_conversation_line() {
     let child = ChatMessage {
         parent_id: Some("turn-1".to_string()),
         role: Some(MessageRole::Assistant),
@@ -80,10 +90,13 @@ fn a_turn_child_text_is_not_on_the_conversation_line() {
         ..Default::default()
     };
 
-    assert!(
-        conversation_view(std::slice::from_ref(&child), 0).is_empty(),
-        "Turn 的子文本节点是回复正文，属工作线——它不该出现在对话线投影里"
+    let line = conversation_view(std::slice::from_ref(&child), 0);
+    assert_eq!(
+        line.len(),
+        1,
+        "Turn 的子文本节点是回复正文——它就是用户读到的那段回答，必须在对话线上"
     );
+    assert_eq!(line[0].id, child.id);
 }
 
 /// `Answered` 的答话：`surface = "reply"`，且**不设** `exclude_from_context`。

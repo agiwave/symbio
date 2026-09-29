@@ -1,10 +1,12 @@
 /**
  * 外观设置 Store
  *
- * 统一管理主题（浅色 / 深色 / 跟随系统）与字体大小（小 / 中 / 大）。
+ * 统一管理主题（浅色 / 深色 / 跟随系统）、字体大小（小 / 中 / 大）与
+ * 会话工作区的面板分栏（对话 / 工作两列）。
  *
  * - 持久化：写入 localStorage（`symbio.appearance`），应用重启后自动恢复。
- * - 即时生效：修改 theme / fontSize 后立即应用到 `<html>` 根节点。
+ * - 即时生效：修改 theme / fontSize 后立即应用到 `<html>` 根节点；
+ *   `dialogPanelSplit` 由消费方（`ModelChatPanel`）直接读，无需应用到根节点。
  * - 跟随系统：theme 为 `auto` 时，监听系统深色模式变化并实时切换。
  *
  * 应用方式说明：
@@ -33,6 +35,8 @@ const FONT_SCALE_MAP: Record<FontSize, number> = {
 interface PersistedAppearance {
   theme?: ThemeMode
   fontSize?: FontSize
+  /** 会话工作区分栏：`true` = 对话 / 工作两列，`false` = 单列（今天的行为） */
+  dialogPanelSplit?: boolean
 }
 
 function loadPersisted(): PersistedAppearance {
@@ -48,6 +52,14 @@ export const useAppearanceStore = defineStore('appearance', () => {
   const saved = loadPersisted()
   const theme = ref<ThemeMode>(saved.theme ?? 'light')
   const fontSize = ref<FontSize>(saved.fontSize ?? 'medium')
+  /**
+   * 会话工作区分栏（出厂 `true`）。
+   *
+   * **平凡值是 `false`**：关掉它退化成"一列显示全部节点"——正是引入分栏之前的行为，
+   * 也是它唯一的回退开关（`ModelChatPanel` 单列分支）。它没有两段式：打开它不会
+   * 让任何东西消失（两列合起来与单列显示的是同一批节点），只是换了读法。
+   */
+  const dialogPanelSplit = ref<boolean>(saved.dialogPanelSplit ?? true)
 
   const darkMedia = window.matchMedia('(prefers-color-scheme: dark)')
 
@@ -61,7 +73,11 @@ export const useAppearanceStore = defineStore('appearance', () => {
     document.documentElement.style.setProperty('--font-scale', String(FONT_SCALE_MAP[fontSize.value]))
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ theme: theme.value, fontSize: fontSize.value })
+      JSON.stringify({
+        theme: theme.value,
+        fontSize: fontSize.value,
+        dialogPanelSplit: dialogPanelSplit.value,
+      })
     )
   }
 
@@ -70,8 +86,8 @@ export const useAppearanceStore = defineStore('appearance', () => {
     if (theme.value === 'auto') apply()
   })
 
-  // 主题 / 字体改变 → 即时应用并持久化
-  watch([theme, fontSize], () => apply())
+  // 主题 / 字体 / 分栏改变 → 即时应用并持久化
+  watch([theme, fontSize, dialogPanelSplit], () => apply())
 
-  return { theme, fontSize, apply }
+  return { theme, fontSize, dialogPanelSplit, apply }
 })

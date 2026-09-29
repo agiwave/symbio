@@ -6,6 +6,11 @@
 //! 不是"少了一条消息"，而是**工具结果被当成对话喂给判决 / 措辞插件**——那可能含
 //! 几万 token 的源码或命令输出，既贵（每判一次都付）又错（模型会把工具输出读成
 //! "用户说的话"）。因此本文件的核心是**逐类排除**，而不是"能取到用户消息"。
+//!
+//! 另一头同样要钉：**助手正文（`Turn` 的子 `Text`）必须**在对话线上。判据曾经按
+//! "根级"切，把回复正文挡在外面——那样插件看不到自己上一轮答过什么，前端「对话」
+//! 面板也看不到回答本身（见 `conversation_view.rs` 模块文档）。两条边界一正一反，
+//! 缺任一条都会让分界悄悄偏向一侧。
 
 use super::*;
 use crate::symbio_core::schemas::session::chat_message::{MessageContent, MessageStatus};
@@ -91,14 +96,38 @@ fn transcript() -> Vec<ChatMessage> {
     ]
 }
 
-/// C-D4 正面判据：投影里**只有**用户消息与根级 assistant 文本
+/// C-D4 正面判据：投影里**只有**用户消息与 assistant 文本
+///
+/// 顺序即存储顺序：`u1`（用户）→ `t1`（Turn 子正文，助手真正答的那段）→ `f1`（根级首响）。
 #[test]
 fn projection_keeps_only_the_conversation_line() {
     let ids: Vec<String> = conversation_view(&transcript(), 0)
         .iter()
         .map(|m| m.id.clone())
         .collect();
-    assert_eq!(ids, vec!["u1", "f1"]);
+    assert_eq!(ids, vec!["u1", "t1", "f1"]);
+}
+
+/// 助手正文（`Turn` 的子 `Text`）**在**对话线上——`parent_id` 不参与判定。
+///
+/// 这条与下面的逐类排除是一对边界：排除工具 / 推理，但不排除"助手说过的话"。
+/// 丢掉它的后果见 `conversation_view.rs` 模块文档（插件失明 + 界面错位）。
+#[test]
+fn turn_child_answer_text_is_on_the_conversation_line() {
+    let view = conversation_view(&transcript(), 0);
+    let answer = view
+        .iter()
+        .find(|m| m.id == "t1")
+        .expect("回复正文应在对话线上");
+    assert_eq!(
+        answer.parent_id.as_deref(),
+        Some("turn1"),
+        "它确实是 Turn 的子节点——位置不参与判定"
+    );
+    assert_eq!(
+        answer.content.as_ref().map(|c| c.to_text()).unwrap(),
+        "文件已读完"
+    );
 }
 
 /// C-D4 的逐类排除：三类节点一个都不能漏进来
@@ -139,7 +168,7 @@ fn tool_result_payload_never_leaks_into_the_projection() {
 #[test]
 fn limit_keeps_the_tail() {
     let all = conversation_view(&transcript(), 0);
-    assert_eq!(all.len(), 2);
+    assert_eq!(all.len(), 3);
     let one = conversation_view(&transcript(), 1);
     assert_eq!(one.len(), 1);
     assert_eq!(one[0].id, "f1", "窗口必须保留最新的那条");
