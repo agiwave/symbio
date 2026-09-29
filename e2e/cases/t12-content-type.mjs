@@ -8,6 +8,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
+  DIALOG_FACE_OFF,
   cleanupHomedir,
   runCli,
   assert,
@@ -21,7 +22,11 @@ export default defineCase('T12 LLM POST 必须带 Content-Type: application/json
   const llm = await new MockLlm([
     { id: 'echo', match: '你好', chunks: ['你好', '，', 'mock'], chunkDelayMs: 5 },
   ]).start();
-  const hd = makeHomedir({ providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }] });
+  // 本用例的主题与对话面正交 ⇒ 把两个开关钉死（理由见 `DIALOG_FACE_OFF`）。
+  const hd = makeHomedir({
+    providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
+    pluginConfigs: { session: { ...DIALOG_FACE_OFF } },
+  });
   try {
     const r = runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '你好', provider: PROVIDER_ID, session: 'e2e-t12' });
     assertEq(r.code, 0, `CLI 退出码（stderr: ${r.stderr.slice(0, 400)}）`);

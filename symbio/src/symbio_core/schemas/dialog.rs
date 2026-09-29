@@ -31,6 +31,12 @@
 //! 猜形状。它各自在需要的那一刻加进来（新增字段是 `L-schema` 级变化，生产者与
 //! 消费者同仓，编译期就会拦住漏改）。
 //!
+//! ### 为什么 `ComposeRequest` 不带字数上限
+//!
+//! 答话的「短」由**提示词**约束，不由硬截断——截断会把句子切一半，比长一句更糟。
+//! 而 `session` 并没有比 `reply` 更好的字数知识：它唯一能给的那个数只能是从别处
+//! 抄来的常量。一个没有生产者的字段就是预留，不因为它是 `Option` 就例外。
+//!
 //! ## 新增字段为什么**不带** `deny_unknown_fields` 且带 `#[serde(default)]`
 //!
 //! 本模块的请求还有**第二个调用方**：网关把外部客户端的 `path` 原样转发给容器
@@ -95,6 +101,13 @@ pub struct ComposeRequest {
     pub session_id: String,
     /// 上游判决结果 —— 措辞**执行**判决，不重新判决
     pub verdict: Verdict,
-    /// 字数上限；`None` = 不限制
-    pub max_chars: Option<usize>,
+    /// **对话线**投影（与 [`DecideRequest::context`] 同一份规则、同一个函数）。
+    ///
+    /// ## 为什么措辞需要它
+    ///
+    /// `Answered { reason: "from_context" }` 的含义是「答案已在对话里」——那段文本
+    /// 只能从对话线**组织**出来，模板给不了。其余理由码走模板，用不到这个字段，
+    /// 但字段不按分支可选：让 `reply` 的入参形状随判决变，等于把编排细节泄进契约。
+    #[serde(default)]
+    pub context: Vec<ChatMessage>,
 }

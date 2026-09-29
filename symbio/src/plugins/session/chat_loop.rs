@@ -8,7 +8,8 @@
 //! loop
 //!   步骤1 加载上下文
 //!   步骤2 gate_turn            ← 启动条件 + 退出条件（唯一判定点）
-//!   步骤2b decide_turn         ← 轮首判决（唯一判决点；Escalate 之外即收尾）
+//!   步骤2b decide_turn         ← 轮首判决（唯一判决点）
+//!   步骤2c apply_verdict       ← 判决的执行点：措辞 + 落点（`Answered` 在此收尾）
 //!   步骤3 prepare_turn_inputs  ← 提示词 + 工具 + 压缩 + 请求视图（唯一收集点）
 //!   步骤4 execute_turn         ← LLM 调用
 //!   步骤5 settle_reasoning     ← 推理产物并入上下文（定稿内容子节点）
@@ -21,6 +22,7 @@
 //! 子模块分工：
 //! - [`state`]    会话上下文 / 请求快照 / 单轮状态 / 闸门结果 / 退出原因 / 编排器
 //! - [`decide`]   轮首判决：经容器 `route` 调 `triage/decide`，把判决回读成枚举
+//! - [`compose`]  判决的执行点：经容器 `route` 调 `reply/compose`，把措辞写进转写
 //! - [`inputs`]   收口 ②③：提示词与工具的唯一收集点、压缩的唯一响应点
 //! - [`turn`]     单轮收尾：推理并入 → 工具分发 → 落库 → 流向
 //! - [`io`]       副作用出口：落库 / 广播 / 流式占位 / 开会话 / 生命周期钩子
@@ -33,6 +35,7 @@
 //! - 具体协议实现层决定如何使用这些历史（有状态协议可能只使用部分或不使用）
 //! - 请求中只包含当前要发送的单条消息（single_message）
 
+mod compose;
 mod decide;
 mod inputs;
 mod io;
@@ -43,6 +46,7 @@ mod turn;
 pub use self::state::{ChatOrchestrator, CompressionEmitter, StopSignal, SupplementDrain};
 
 // 模块内共享面：子模块经 `use super::*;` 取用，测试亦同（`gate_tests` 等）。
+pub(crate) use self::compose::apply_verdict;
 pub(crate) use self::decide::decide_turn;
 pub(crate) use self::inputs::prepare_turn_inputs;
 pub(crate) use self::io::{
@@ -59,7 +63,6 @@ use crate::plugin_error;
 use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::schemas::{
-    dialog::Verdict,
     session::chat_message::{ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType},
     HookEvent,
 };
@@ -242,28 +245,47 @@ pub async fn run_chat_loop(
         // - `first_utterance.is_some()`：`resume` / 无发言轮次不进判决（取值点的
         //   说明见前步骤 ③）。
         //
-        // ## `Answered` 为什么直接收尾
+        // ## 判决与执行分成两步（`decide` → `compose`）
         //
-        // 判决说「不用干活」时**进工具循环是错的**：那会先付一次 LLM 往返、
-        // 再让模型在"没有工具"的语境里重新决定一次要不要动手。收尾把决定权交回
-        // 编排层——这正是 `Verdict` 是枚举而不是文本的理由。
+        // 步骤 2b 只拿**枚举**（`triage` 不说人话），步骤 2c 才把枚举翻成文本
+        // （`reply` 不做判决）。分开的理由见 `schemas/dialog.rs` 的模块文档：
+        // 编排层要能**执行**判决，而措辞只被展示——把两者揉进一次调用，等于让
+        // "这轮走哪条路"取决于一段文本长什么样。
         //
-        // 本批（S2）收尾即结束本轮：面向用户的那句话由 `reply` 负责（S3），
-        // 本批它还是平凡实现（空串），因此这一轮**没有对话面文本**。
+        // ## `Answered` 什么时候收尾
+        //
+        // 只有 `apply_verdict` 返回 `true` 才收尾——即"判决说能直接答，**且**答话
+        // 真的写出来了"。措辞拿不到时（未挂载 `reply` / `reply_enabled = false`）
+        // 它返回 `false`，本轮**照旧进工具循环**：沉默是最坏的失败形态（用户什么
+        // 都收不到，且没有任何错误信号），降级进工具循环则退化成"引入判决之前的
+        // 行为"——慢一点，但有答案。判据与兜底方向见 `chat_loop/compose.rs`。
+        //
+        // `Escalate` / `Report` 恒不收尾：前者本来就要干活（首响只是开场白），
+        // 后者的措辞要从运行现状组织，那个快照到 S4 才有生产者。
+        //
         // 卸载 `triage`（或 `triage_enabled = false`）时这段整体不发生，
         // 行为与引入判决之前逐字一致。
         if turn.tool_rounds == 0 && orchestrator.triage_enabled {
             if let Some(utterance) = first_utterance.as_deref() {
-                // 一次匹配同时表达两件事：**没有判决**（插件缺席 / 判不出来）与
-                // **判为 `Escalate`** 都落进 `else`——两者都照旧进工具循环。
-                if let Some(Verdict::Answered { reason }) =
-                    decide_turn(orchestrator, &ctx, &context, utterance)
-                        .await
-                        .as_ref()
-                {
-                    plugin_info!("session", "[Triage] 本轮不进工具循环（reason={}）", reason);
-                    return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Completed)
+                // 先落成变量再进 `if let`：`decide_turn` 借的是 `&context`，而
+                // `apply_verdict` 要 `&mut context`——把两次借用放进同一个表达式
+                // 会让不可变借用活到整个 `if let` 体（Rust 2021 的临时值规则）。
+                let verdict = decide_turn(orchestrator, &ctx, &context, utterance).await;
+                if let Some(verdict) = verdict {
+                    if apply_verdict(orchestrator, &ctx, &mut context, verdict.clone()).await {
+                        plugin_info!(
+                            "session",
+                            "[Triage] 本轮不进工具循环（verdict={verdict:?}）"
+                        );
+                        return finish_turn(
+                            orchestrator,
+                            &context,
+                            &sink,
+                            &turn,
+                            TurnExit::Completed,
+                        )
                         .await;
+                    }
                 }
             }
         }

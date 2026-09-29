@@ -29,7 +29,7 @@ mod window;
 
 // 门面 = 域内唯一对外出口：调用方（`chat_loop` / `resume`）只经 `context::X` 取用，
 // 不感知域内文件划分；域内子模块则经 `use super::*` 取用门面（含下面的 re-export）。
-pub use self::conversation_view::conversation_view;
+pub use self::conversation_view::{conversation_view, CONVERSATION_VIEW_LIMIT};
 pub(crate) use self::pipeline::{auto_compress_process, retry_compaction, run_context_compact};
 pub use self::prompt::{
     build_compression_request, compression_prompt_fingerprint, context_compact_tool_meta,

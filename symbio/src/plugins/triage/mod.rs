@@ -19,5 +19,12 @@
 mod classify;
 mod config;
 mod plugin;
-mod reasons;
+/// **唯一**对仓内可见的域内模块，理由只有一条：`reply` 要拿它比对措辞表的抄本
+/// （`reply/templates.test.rs` 的抄本一致性用例）。
+///
+/// 它**不放宽插件隔离**：生产代码里跨插件 `use crate::plugins::<兄弟>` 仍被
+/// `plugin-entry-audit` 的 E-009 拦着，本条只让**测试**能比对词表。词表是跨插件的
+/// 线上词汇表，而它的两份抄本一旦漂移，表现是"用户收到一句通用话"——没有错误信号。
+/// 那正是必须外置成断言的那类失效。
+pub(crate) mod reasons;
 mod rules;

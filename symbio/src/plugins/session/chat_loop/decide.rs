@@ -32,18 +32,8 @@ use crate::symbio_core::{
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PATH, ROUTE_TRIAGE_DECIDE, SESSION_ID,
 };
 
-use super::super::context::conversation_view;
+use super::super::context::{conversation_view, CONVERSATION_VIEW_LIMIT};
 use super::state::{ChatOrchestrator, SessionContext};
-
-/// 对话线投影的窗口（条数）。
-///
-/// 判决要的是**最近的对话**，不是全量历史：分类请求每次都要付这份上下文，
-/// 窗口放大直接放大每轮开销。12 条 ≈ 6 轮来回，足够判「用户在问刚才说过的事」。
-///
-/// 它是**常量而不是配置项**：没有一条平凡值能把它关掉（关掉它 = 没有上下文 =
-/// 功能缺失），因此它不符合「每个配置项都必须有平凡值」的准入（J2）——
-/// 一个无法被关掉的旋钮不是参数，是装饰。
-const CONVERSATION_VIEW_LIMIT: usize = 12;
 
 /// 轮首判决。
 ///

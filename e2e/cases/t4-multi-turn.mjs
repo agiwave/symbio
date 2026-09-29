@@ -3,6 +3,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
+  DIALOG_FACE_OFF,
   cleanupHomedir,
   runCli,
   readMessagesJson,
@@ -20,7 +21,11 @@ export default defineCase('T4 多轮会话：第二轮请求携带第一轮历�
     { id: 'r1', match: '第一轮', content: '第一轮回复' },
     { id: 'r2', match: '第二轮', content: '第二轮回复' },
   ]).start();
-  const hd = makeHomedir({ providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }] });
+  // 本用例的主题与对话面正交 ⇒ 把两个开关钉死（理由见 `DIALOG_FACE_OFF`）。
+  const hd = makeHomedir({
+    providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
+    pluginConfigs: { session: { ...DIALOG_FACE_OFF } },
+  });
   try {
     // REPL 管道模式：两行输入 = 两轮对话
     const r = runCli({

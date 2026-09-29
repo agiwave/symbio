@@ -121,6 +121,36 @@ export class MockLlm {
 }
 
 // ---------- 临时 homedir 夹具 ----------
+
+/**
+ * 「对话面整体关闭」的 session 配置片段。
+ *
+ * ## 为什么需要它
+ *
+ * 对话面（`triage` 判决 + `reply` 措辞）**出厂默认开启**——这是产品行为：问候 / 致谢
+ * 这类输入不该付任何 LLM 往返，而"这一轮该不该干活"也不该由 worker 每轮自己猜。
+ * 但它会改变**每一轮**的请求数（多一次静默分类）与落库节点（多一条根级对话面文本）。
+ *
+ * 因此主题**不是**对话面的用例必须把它钉死：那些用例验的是流式 / 压缩 / MCP / 装配 /
+ * 补充整合等**正交**机制，它们的断言多按"精确请求数"与"精确节点形态"写。不钉的话，
+ * 一次对话面调优就会让一批无关用例变红——而那种红没有任何诊断价值。
+ *
+ * ## 为什么两个键都要给
+ *
+ * `triage_enabled = false` 已足够（没有判决就不会调 `reply`）。第二个键是**冗余但有意**：
+ * 它让"本用例与对话面无关"这句话在夹具里自明，且日后若出现第二个判决生产者
+ * （S4 的汇报走的是同一个 `triage` 路由，所以目前不会），本片段不需要重审。
+ *
+ * ## 对话面自己的用例怎么写
+ *
+ * `t21-triage` / `t22-reply` **显式**写出两个键的取值（含 `true`）——它们验的正是
+ * 这个功能，不能依赖默认值（默认值翻转不该悄悄改变它们验的是什么）。
+ */
+export const DIALOG_FACE_OFF = Object.freeze({
+  triage_enabled: false,
+  reply_enabled: false,
+});
+
 export function makeHomedir({ providers, mcpServers, sessionConfig, pluginConfigs } = {}) {
   const homedir = mkdtempSync(join(tmpdir(), 'symbio-e2e-home-'));
   const workdir = join(homedir, 'work');

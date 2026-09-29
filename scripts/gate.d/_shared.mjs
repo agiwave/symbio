@@ -256,7 +256,20 @@ export const BASELINE = {
   //           `model/message_builder` 14 → **16**（+2：`meta.exclude_from_context` 剔除，
   //           **C-D3**）。`session/config` 4 → **6**（+2：`triage_enabled` 出厂默认 `false`、
   //           缺键落默认）。
-  rustTests: 1034,
+  // 2026-09-29：1034 → **1062**（+28）。对话面插件拆分 S3（措辞：模板 + 答话生成）。
+  //           `plugins/reply` 5 → **22**（+17）：`templates.test` 8 例（抄本一致性逐字比对
+  //           `triage::reasons` / 每个模板码都有行 / `from_context` **不得**有行 / 表无空行
+  //           无重复 / 两变体各查各的 / **兜底随变体而不同** / `Report` 无模板 / 空输入是
+  //           正常行）、`compose.test` 5 例（投影原样转发 / 空正文剔除 / `non_empty` /
+  //           无模型服务 ⇒ None / 无用户发言 ⇒ None）、`plugin.test` 4 → 10（模板理由码
+  //           零 LLM 往返 / `Answered` 恒有话说 / 未知码按变体兜底 / `Report` ⇒ 空串）。
+  //           `session/chat_loop/compose.test` **10** 例（落点与两个标记：根级 / 被
+  //           `conversation_view` 认下 / Turn 子文本**不**算对话线 / `Answered` 不设
+  //           `exclude_from_context` / `Escalate` 设 / 两标记相互独立 / 理由码原样透传 /
+  //           正文原样 / `surface` 字面量是跨端契约 / id 唯一）。
+  //           `session/config` 6 → **7**（+1 净增：两个开关出厂默认翻 `true` + 相互独立，
+  //           替换掉 S2 的 `triage_is_off_by_default`）。
+  rustTests: 1062,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

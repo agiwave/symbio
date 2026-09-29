@@ -239,6 +239,9 @@ impl SessionPlugin {
         // 交给编排器：配置在一次请求生命周期内不变，判决只需要一个布尔
         // （见 `ChatOrchestrator::triage_enabled` 的说明）。锁不跨 await——先取值再放锁。
         let triage_enabled = self.config.read().await.triage_enabled;
+        // 对话面措辞的开关（`SessionConfig::reply_enabled`），同一条取值纪律。
+        // 两级开关相互独立：判决决定"要不要干活"，措辞决定"说什么"。
+        let reply_enabled = self.config.read().await.reply_enabled;
 
         // 结构体字面量而不是 `new()`：字段全是 `pub`、构造点唯一，而字面量把"谁是谁"
         // 写在字段名上（八参的位置参数要靠数数），且字段增删由编译器在这里报错。
@@ -251,6 +254,7 @@ impl SessionPlugin {
             compression: phase,
             supplements: drain,
             triage_enabled,
+            reply_enabled,
             // 会话目录 = **本插件自己的目录**（装配期由父插件经 `PLUGIN_DIR` 告知），
             // 不是任何全局系统根——子智能体下它指向子树，这正是作用域正确性的来源。
             session_dir: self.config_file.dir().clone(),

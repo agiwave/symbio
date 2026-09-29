@@ -51,6 +51,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
+  DIALOG_FACE_OFF,
   cleanupHomedir,
   startLongLivedCli,
   subscribeSessionRealtime,
@@ -110,7 +111,8 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
       { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 12000 }) },
     ],
     pluginConfigs: {
-      session: { auto_compress: true, context_messages: 0 },
+      // 本用例的主题是压缩，与对话面正交 ⇒ 把两个开关钉死（理由见 `DIALOG_FACE_OFF`）。
+      session: { auto_compress: true, context_messages: 0, ...DIALOG_FACE_OFF },
       gateway: {
         inbound_enabled: true,
         inbound_protocol: 'http',

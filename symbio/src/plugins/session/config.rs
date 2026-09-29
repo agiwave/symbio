@@ -146,14 +146,15 @@ pub struct SessionConfig {
     ///   `Escalate` ⇒ 照旧进工具循环；
     /// - `false`：**不调用**，全部输入直接进工具循环——与未挂载 `triage` 时逐字一致。
     ///
-    /// ## 出厂默认为什么是 `false`（而"完整值"是 `true`）
+    /// ## 出厂默认为什么是 `true`
     ///
-    /// **默认值必须是"用户可见层面完整"的行为**。判决本身只输出枚举，面向用户的
-    /// 那句话归 `reply`（S3）；在 `reply` 还是平凡实现（恒空串）之前打开本开关，
-    /// 「你好」会变成**沉默**——那不是"少说一句"，那是回归。
+    /// 判决本身只输出枚举，面向用户的那句话归 `reply`；在 `reply` 还是平凡实现
+    /// （恒空串）时打开本开关，「你好」会变成**沉默**——那不是"少说一句"，那是回归。
+    /// S2 因此只交付机制、默认关闭，并在字段文档里写下「`reply` 落地的那一批把默认
+    /// 翻成 `true`」。S3 就是那一批：`reply` 的两条产线（模板 / 生成）都已落地，
+    /// 判决为 `Answered` 时**必然有话说**（最差也是变体兜底），沉默的前提不复存在。
     ///
-    /// 因此本批（S2）交付机制、默认关闭；`reply` 落地的那一批（S3）把默认翻成
-    /// `true`。这与「一批一件事、每批行为可独立回退」是同一条纪律：
+    /// 这与「一批一件事、每批行为可独立回退」是同一条纪律：
     /// **让功能生效的那一批，负责它带来的全部影响**。
     ///
     /// ## 为什么它在 session 的配置面，而「用不用规则表」不在
@@ -163,6 +164,28 @@ pub struct SessionConfig {
     /// 把后者也塞进这里，等于让调用方为一段它看不见的策略维护一个开关。
     #[serde(default = "default_triage_enabled")]
     pub triage_enabled: bool,
+    /// 对话面措辞总开关（**J2 平凡值：`false`**）。
+    ///
+    /// ## 它控制什么
+    ///
+    /// 判决为 `Answered` / `Escalate` 时是否经容器 `route` 请 `reply` 说一句话：
+    /// - `true`：说。`Answered` 的答话进请求包（它就是这一轮的答复）；
+    ///   `Escalate` 的首响**不进**请求包（界面开场白，见 `chat_loop/compose.rs`）；
+    /// - `false`：**不调用**。`Answered` 于是拿不到措辞 ⇒ **降级进工具循环**
+    ///   （不沉默）；`Escalate` 没有首响。与未挂载 `reply` 时逐字一致。
+    ///
+    /// ## 为什么出厂默认就是 `true`
+    ///
+    /// 与 `triage_enabled` 相反：本开关**不需要**等谁落地。关掉它不会让任何东西
+    /// 变沉默——`Answered` 的降级方向是"照旧进工具循环"，那是引入判决之前的行为，
+    /// 完整可用。因此打开它是纯粹的增强，没有"先交机制再生效"的两段式需要。
+    ///
+    /// ## 为什么它在 session 的配置面
+    ///
+    /// 与 `triage_enabled` 同一条：问的是「**调用方**要不要请措辞」。措辞内部
+    /// 用模板还是用模型、用哪个提示词，都是 `reply` 自己的策略，归它自己的配置面。
+    #[serde(default = "default_reply_enabled")]
+    pub reply_enabled: bool,
 }
 
 pub fn default_max_messages() -> usize {
@@ -211,9 +234,13 @@ pub fn default_supplements_max_per_drain() -> usize {
     20
 }
 pub fn default_triage_enabled() -> bool {
-    // 出厂关闭：判决只输出枚举，面向用户的那句话归 `reply`（见字段文档）。
-    // `reply` 落地的那一批把这里翻成 `true`——本开关是那一批唯一的"生效"动作。
-    false
+    // S3 生效：`reply` 的两条产线已落地，`Answered` 必然有话说（最差是变体兜底），
+    // 沉默的前提不复存在。S2 的"先交机制、默认关闭"到此结束——见字段文档。
+    true
+}
+pub fn default_reply_enabled() -> bool {
+    // 关掉它不会让任何东西变沉默（`Answered` 降级进工具循环），因此无需两段式。
+    true
 }
 
 impl SessionConfig {
@@ -256,6 +283,7 @@ impl Default for SessionConfig {
             supplements_enabled: default_supplements_enabled(),
             supplements_max_per_drain: default_supplements_max_per_drain(),
             triage_enabled: default_triage_enabled(),
+            reply_enabled: default_reply_enabled(),
         }
     }
 }

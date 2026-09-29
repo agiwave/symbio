@@ -9,7 +9,7 @@ import './_selfrun.mjs';
 // | 线 | 输入 | 判决 | 会话行为 |
 // |---|---|---|---|
 // | A 规则短路 | 「谢谢」 | `Answered{thanks}` | **零** LLM 请求，不进工具循环 |
-// | B 快速档 | 「我们刚才聊了什么」 | `Answered{from_context}` | 有分类请求；**无**工具节点 |
+// | B 快速档 | 「我们刚才聊了什么」 | `Answered{clarify}` | 有分类请求；**无**工具节点 |
 // | C 需要干活 | 「读一下 README」 | `Escalate{needs_work}` | 有工具节点（工具真跑） |
 // | D 开关平凡值 | 「谢谢」+ `triage_enabled=false` | 不判决 | 与今天逐字一致（有 LLM 请求） |
 // | E 卸载平凡值 | 「谢谢」+ 不挂载 `triage` | 不判决 | 与今天逐字一致（有 LLM 请求） |
@@ -87,8 +87,13 @@ export default defineCase(
     // 因此区分两者的唯一手段是顺序 + `once`：分类请求先发生，用它消耗掉
     // `once` 的那一条；工具循环的请求于是落到下一条匹配上。
     const llm = await new MockLlm([
-      // 分类请求（B 线）：模糊问题 ⇒ 判「能凭上下文直接答」
-      { id: 'cls-direct', match: '我们刚才聊了什么', content: 'direct' },
+      // 分类请求（B 线）：模糊问题 ⇒ 判「能直接答」。
+      //
+      // mock 返回哪个词是**任意**的（判决由词决定，不由提示词的措辞决定）。这里刻意
+      // 选 `clarify` 而不是 `direct`：两者都落 `Answered`，但 `direct`（`from_context`）
+      // 会多走一条**生成**产线（`reply` 再发一次静默 LLM 请求）——那是 T22 的主题，
+      // 本用例只钉 `triage` 的判决与编排后果，不该顺带把生成产线拖进来。
+      { id: 'cls-answer', match: '我们刚才聊了什么', content: 'clarify', once: true },
       // 分类请求（C 线，once）⇒ 判「要干活」
       { id: 'cls-work', match: '读一下 README', content: 'work', once: true },
       // 工具循环（C 线）：读文件
@@ -109,8 +114,9 @@ export default defineCase(
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
         gateway: gatewayConfig(GATEWAY_PORT),
-        // 判决**出厂默认关闭**（见 `SessionConfig::triage_enabled` 的文档）：
-        // 本用例把它显式打开，才有 A / B / C 三条线。
+        // 两个开关的出厂默认都已是 `true`（S3 起，见 `SessionConfig` 的字段文档）。
+        // 这里仍**显式**写出，是让本用例的前提自证——不依赖任何默认值，翻转默认值
+        // 不会悄悄改变本用例验的是什么。
         session: { triage_enabled: true },
       },
     });
@@ -200,12 +206,26 @@ export default defineCase(
       );
 
       // 分类请求是**内部请求**：它必须静默（不产生任何可见节点）。
-      // 反过来说，B 线落库的节点里除了那条 user 消息什么都不该有。
+      //
+      // 断言的形式随 S3 变了：S2 时 `reply` 还是平凡实现（恒空串），B 线因此**一条
+      // 助手节点都没有**；S3 起 `reply` 会为 `Answered` 写一句答话，于是"零助手节点"
+      // 不再成立。仍成立的是它**真正要拦的东西**：分类请求自己不得泄漏成可见节点。
+      //
+      // 判据取"恰一条助手节点，且它是根级的对话面节点"：泄漏的形态是 Turn 骨架
+      // （已由上面那条断言拦住）或 Turn 的子文本节点，两者都不是根级、也都不带
+      // `meta.surface = "reply"`。
+      const assistants = clsMsgs.filter((m) => m.role === 'assistant');
       assertEq(
-        clsMsgs.filter((m) => m.role === 'assistant').length,
-        0,
-        '分类请求不得留下任何助手侧节点（它是静默的内部请求）',
+        assistants.length,
+        1,
+        `B 线只该有 reply 写的那一条答话（实得 ${assistants.length} 条助手节点）`,
       );
+      assert(
+        assistants[0].parent_id == null,
+        '答话必须挂在根级（对话线），不是某个 Turn 的子节点',
+      );
+      assertEq(assistants[0].meta?.surface, 'reply', '答话必须带对话面标记（谁产出的）');
+      assertEq(assistants[0].meta?.reason, 'clarify', '答话必须带上游判决的理由码（原样透传）');
 
       // ── C 需要干活：「读一下 README」⇒ Escalate ⇒ 工具真的跑 ──
       base = await reqCount();
@@ -245,7 +265,7 @@ export default defineCase(
       //    这个布尔在**启动时**读进 `SessionConfig`，运行期改它不生效；因此本线
       //    另起 homedir + 进程（只换会话 id 是没用的）。
       //    另注：本线写的是**显式** `false` 而不是靠缺省——缺省那条路由
-      //    `session/config.test.rs` 的 `triage_is_off_by_default` 单测钉住，
+      //    `session/config.test.rs` 的 `triage_and_reply_are_on_by_default` 单测钉住，
       //    这里验的是"这个开关本身有效"。
       const offPort = nextPort();
       const hdOff = makeHomedir({

@@ -3,6 +3,7 @@ import './_selfrun.mjs';
 import {
   MockLlm,
   makeHomedir,
+  DIALOG_FACE_OFF,
   cleanupHomedir,
   runCli,
   readSessionJson,
@@ -20,7 +21,11 @@ export default defineCase('T1 文本流式：SSE 分片输出 + 转写落盘', a
   const llm = await new MockLlm([
     { id: 'echo', match: '你好', chunks: ['你好', '，', 'mock', '世', '界'], chunkDelayMs: 10 },
   ]).start();
-  const hd = makeHomedir({ providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }] });
+  // 本用例的主题与对话面正交 ⇒ 把两个开关钉死（理由见 `DIALOG_FACE_OFF`）。
+  const hd = makeHomedir({
+    providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
+    pluginConfigs: { session: { ...DIALOG_FACE_OFF } },
+  });
   try {
     const r = runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '你好', provider: PROVIDER_ID, session: 'e2e-t1' });
     assertEq(r.code, 0, `CLI 退出码（stderr: ${r.stderr.slice(0, 400)}）`);

@@ -82,8 +82,18 @@ export default defineCase(
 
       // ④ 停用：装配位写盘后，该插件**不再被构造** ⇒ 它提供的工具从清单里消失。
       //    工具名不硬编码（各 OS 的 shell 工具名不同），按「首轮有、次轮没有」的差集判。
+      //
+      //    取的是**带工具的那一次请求**，不是 `requests[0]`：对话面出厂开启，而它的
+      //    判决请求（`triage/decide`）是**无工具**的内部请求——它排在 worker 之前。
+      //    本用例的主题是装配（不能预置 `session/PLUGIN.yml` 去关掉对话面，那会破坏
+      //    「插件树全部由这次运行装配出来」的前提），因此按"有没有 tools"挑。
+      const workerTools = (reqs) =>
+        (reqs.find((r) => (r.body.tools ?? []).length > 0)?.body.tools ?? []).map(
+          (t) => t.function?.name,
+        );
+
       const reqs1 = await llm.requests();
-      const tools1 = (reqs1[0].body.tools ?? []).map((t) => t.function?.name);
+      const tools1 = workerTools(reqs1);
       assert(tools1.includes('vdfs_write'), `首轮 tools 应含 vdfs_write（实际: ${tools1.join(',')}）`);
 
       const ymlPath = join(hd.homedir, 'local', 'PLUGIN.yml');
@@ -101,7 +111,7 @@ export default defineCase(
       assert(existsSync(join(hd.homedir, 'local')), '停用不删目录（那是卸载的语义）');
 
       const reqs2 = await llm.requests();
-      const tools2 = (reqs2[0].body.tools ?? []).map((t) => t.function?.name);
+      const tools2 = workerTools(reqs2);
       const gone = tools1.filter((t) => !tools2.includes(t));
       assert(
         gone.length > 0,

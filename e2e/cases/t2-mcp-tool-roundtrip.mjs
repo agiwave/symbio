@@ -6,6 +6,7 @@ import {
   E2E_ROOT,
   MockLlm,
   makeHomedir,
+  DIALOG_FACE_OFF,
   addMcpServer,
   cleanupHomedir,
   runCli,
@@ -28,7 +29,11 @@ export default defineCase('T2 工具回路（MCP stdio）：tool_calls → 执�
     },
     { id: 'after-echo', afterTool: true, content: '工具调用完成，回显成功。' },
   ]).start();
-  const hd = makeHomedir({ providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }] });
+  // 本用例的主题与对话面正交 ⇒ 把两个开关钉死（理由见 `DIALOG_FACE_OFF`）。
+  const hd = makeHomedir({
+    providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
+    pluginConfigs: { session: { ...DIALOG_FACE_OFF } },
+  });
   addMcpServer(hd, 'mockserv', {
     type: 'stdio',
     command: process.execPath,

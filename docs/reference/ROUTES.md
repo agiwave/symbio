@@ -158,7 +158,14 @@
 | `reply/compose` | 按上游判决组织一段面向用户的文本 | `String` |
 
 > 调用方只有 `session`。本插件**不写转写**：文本由 `session` 落库，转写只有一个写入者。
-> 不挂载本插件 ⇒ 没有对话面产出的文本，而 worker 正文照旧（卸载平凡值）。
+> 契约 `ComposeRequest` 见 [`symbio_core::schemas::dialog`](../../symbio/src/symbio_core/schemas/dialog.rs)。
+> 出参**空串 = 没有对话面文本**（平凡值），调用方据此不写节点。
+>
+> 不挂载本插件 ⇒ 路由 `NotFound` ⇒ `session` 按「缺插件」处理：`Answered` 拿不到措辞时
+> **降级进工具循环**（不沉默），`Escalate` 没有首响（卸载平凡值）。
+> 两条产线（模板 0 次 LLM / `from_context` 生成 1 次静默 LLM）见
+> [reply 插件的 README](../../symbio/src/plugins/reply/README.md)。
+> 调用方开关 `SessionConfig::reply_enabled`（`<session 目录>/PLUGIN.yml`）。
 
 ---
 

@@ -153,3 +153,16 @@ pub const ROUTE_HOOK_FIRE: &str = "hook/fire";
 /// 那时加它就是一个零消费方的预留常量。S2 落下第一个调用方的同一批里，
 /// 它才被登记进来。
 pub const ROUTE_TRIAGE_DECIDE: &str = "triage/decide";
+
+// ============ Reply 插件 ============
+/// reply/compose — 按上游判决产出一段**面向用户**的文本
+///
+/// 唯一调用方：`session` 的 `chat_loop/compose.rs`（判决的执行点）。入参是
+/// [`crate::symbio_core::schemas::dialog::ComposeRequest`]，出参是 `String`——
+/// **措辞只被展示，不被执行**，因此它不需要是枚举（判决才需要，见 `dialog` 的模块文档）。
+///
+/// ## 为什么直到 S3 才加这个常量
+///
+/// 与 [`ROUTE_TRIAGE_DECIDE`] 同一条理由：S1 / S2 时 `session` 还没有措辞调用点，
+/// 加了就是零消费方的预留常量。S3 落下调用方的同一批里它才被登记进来。
+pub const ROUTE_REPLY_COMPOSE: &str = "reply/compose";
