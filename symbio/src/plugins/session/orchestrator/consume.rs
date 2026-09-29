@@ -235,17 +235,26 @@ impl SessionPlugin {
         let abort = ExecAbortSignal::new();
         let mut abort_guard = AbortGuard::register(state.clone(), abort.clone()).await;
 
-        let orchestrator = Arc::new(super::super::chat_loop::ChatOrchestrator::new(
+        // 轮首判决的开关（`SessionConfig::triage_enabled`）。取**值快照**而不是把插件
+        // 交给编排器：配置在一次请求生命周期内不变，判决只需要一个布尔
+        // （见 `ChatOrchestrator::triage_enabled` 的说明）。锁不跨 await——先取值再放锁。
+        let triage_enabled = self.config.read().await.triage_enabled;
+
+        // 结构体字面量而不是 `new()`：字段全是 `pub`、构造点唯一，而字面量把"谁是谁"
+        // 写在字段名上（八参的位置参数要靠数数），且字段增删由编译器在这里报错。
+        // 理由见 `ChatOrchestrator` 的"为什么没有 `new()`"。
+        let orchestrator = Arc::new(super::super::chat_loop::ChatOrchestrator {
             provider,
-            Some(parent),
+            parent: Some(parent),
             context_limit,
-            stop.clone(),
-            phase,
-            drain,
+            stop: stop.clone(),
+            compression: phase,
+            supplements: drain,
+            triage_enabled,
             // 会话目录 = **本插件自己的目录**（装配期由父插件经 `PLUGIN_DIR` 告知），
             // 不是任何全局系统根——子智能体下它指向子树，这正是作用域正确性的来源。
-            self.config_file.dir().clone(),
-        ));
+            session_dir: self.config_file.dir().clone(),
+        });
 
         let ctx_clone = chat_ctx.fork();
         let task_orchestrator = orchestrator.clone();

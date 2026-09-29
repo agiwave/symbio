@@ -17,9 +17,18 @@ import './_selfrun.mjs';
 // | 线 | 验什么 |
 // |---|---|
 // | A 装配 | 空 homedir 下两个插件的目录 / `plugin_provider` / 出厂身份被补出来（同 T17 形态） |
-// | B 路由 | 经 gateway HTTP 边界可达两条路由；契约往返正确（恒 `Escalate` / 恒空串）；未知子命令 NotFound |
+// | B 路由 | 经 gateway HTTP 边界可达两条路由；契约往返正确（规则命中 / 兜底判决 / 未知子命令 NotFound） |
 // | C 零足迹 | 跑一轮真实工具回路：工具真落盘，且转写里**没有任何**对话面标记 |
 // | D 卸载 | 停用两个插件 ⇒ 路由消失（`NotFound`），而工具回路照旧跑通 |
+//
+// ## S2 之后本用例为什么仍然成立
+//
+// S2 让 `triage/decide` 真的开始判决（规则表 + 一次静默分类请求），因此 B 线断言
+// 从"S1 的平凡实现"改成了"两条不需要模型就能验证的判决路径"（网关这条 ctx 里
+// 没有能力访问器，快速档必然判不出来——这恰好让断言是确定性的）。
+// C 线的"零对话面节点"在 S2 **仍然**成立：判决不写转写（面向用户的文本归 `reply`，
+// 它是 S3 的事），这条判据因此顺带钉住了"判决插件不写转写"。
+// 判决对会话行为的完整覆盖见 `t21-triage.mjs`。
 //
 // ## 为什么经 gateway 而不是 CLI 命令
 //
@@ -156,18 +165,31 @@ export default defineCase(
       }
 
       // ── B 路由：经 gateway 的真实边界可达，契约往返正确 ──
+      //
+      // 断言刻意选**不需要模型**的两条路（网关这条 ctx 里没有能力访问器，
+      // 因此快速档必然判不出来）：
+      //   ① 规则命中 ⇒ 判决出来了 —— 连模型都没有，说明这条路上根本没碰模型；
+      //   ② 规则未命中 ⇒ 兜底 `Escalate` —— 失败方向是"照旧进工具循环"，
+      //      绝不是 `Answered`（那会让用户看到沉默）。
       const decided = await cli.invoke('triage/decide', { session_id: SID, utterance: '你好' });
       assertEq(
         decided.status,
         200,
         `triage/decide 应可达（${JSON.stringify(decided.body)?.slice(0, 300)}）`,
       );
-      assertEq(decided.body?.data?.verdict, 'escalate', 'S1 的平凡判决恒 Escalate');
-      assertEq(decided.body?.data?.reason, 'unwired', '平凡实现的理由码');
+      assertEq(decided.body?.data?.verdict, 'answered', '规则命中 ⇒ Answered');
+      assertEq(decided.body?.data?.reason, 'greeting', '问候的理由码');
+
+      const undecided = await cli.invoke('triage/decide', {
+        session_id: SID,
+        utterance: '我们刚才聊了什么',
+      });
+      assertEq(undecided.body?.data?.verdict, 'escalate', '判不出来 ⇒ 兜底 Escalate');
+      assertEq(undecided.body?.data?.reason, 'unclassified', '兜底理由码');
 
       const composed = await cli.invoke('reply/compose', {
         session_id: SID,
-        verdict: { verdict: 'escalate', reason: 'unwired' },
+        verdict: { verdict: 'escalate', reason: 'unclassified' },
         max_chars: null,
       });
       assertEq(
@@ -175,13 +197,16 @@ export default defineCase(
         200,
         `reply/compose 应可达（${JSON.stringify(composed.body)?.slice(0, 300)}）`,
       );
-      assertEq(composed.body?.data, '', 'S1 的平凡措辞恒空串');
+      assertEq(composed.body?.data, '', 'reply 本批（S2）仍是平凡实现（恒空串）');
 
       // 路由是**静态分派**：未知子命令必须响亮失败，而不是"什么都接"
       const bogus = await cli.invoke('triage/bogus', {});
       assert(bogus.status >= 400, `triage/bogus 应失败（实得 ${bogus.status}）`);
 
       // ── C 零足迹：一轮真实工具回路 + 转写里没有任何对话面标记 ──
+      //    本批（S2）的判决会真的发生（一次静默分类请求），但它**不写任何节点**：
+      //    面向用户的文本归 `reply`（S3），本批它还是平凡实现。因此"零对话面节点"
+      //    这条判据在 S2 仍然成立，且它恰好钉住了"判决不该自己写转写"。
       const msgs = await runTurn(cli, SID, '帮我写文件');
       assertTranscriptInvariants(msgs, 'T20');
       const tc = msgs.find((m) => m.type === 'tool_call');
@@ -191,12 +216,11 @@ export default defineCase(
         readFileSync(join(hd.workdir, 'notes.md'), 'utf8').includes('# T20'),
         '工具应真实落盘（插件装配没有改变工具链）',
       );
-      // 两个插件都**不写转写**：S1 的判据就是"一条对话面节点都没有"
       const surfaced = msgs.filter((m) => m.meta && 'surface' in m.meta);
       assertEq(
         surfaced.length,
         0,
-        `S1 不得产出任何对话面节点（实得 ${surfaced.length} 条：${JSON.stringify(surfaced.map((m) => m.meta)).slice(0, 300)}）`,
+        `本批不得产出任何对话面节点（实得 ${surfaced.length} 条：${JSON.stringify(surfaced.map((m) => m.meta)).slice(0, 300)}）`,
       );
 
       // ── D 卸载平凡值：停用 ⇒ 路由消失，而系统**照旧正确运行** ──

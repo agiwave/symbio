@@ -479,6 +479,13 @@ fn merge_meta(node: &mut ChatMessage, patch: serde_json::Value) {
     node.meta = Some(meta);
 }
 
+/// ## 为什么没有 `new()`
+///
+/// 字段全是 `pub`，构造点是**唯一**的（`orchestrator/consume.rs`）。此前有一个
+/// 八参的 `new()`——那是八个**位置参数**，读调用点要靠数数才知道谁是谁，而且
+/// 每加一个字段就要再挤一个（`clippy::too_many_arguments` 在第八个就报错）。
+/// 结构体字面量把"谁是谁"写在字段名上，**字段增删由编译器在唯一构造点报错**，
+/// 比位置参数强。这里不再补 `new()`。
 pub struct ChatOrchestrator {
     /// 唯一生效的模型服务（model 插件按上下文解析后经 CAPABILITY_VISITOR 注册；
     /// core 纯 trait 的 trait object——session 对协议实现零依赖）
@@ -501,6 +508,21 @@ pub struct ChatOrchestrator {
     /// `None` = 调用方没有提供（单测 / 无会话状态场景）：轮边界不抽干，
     /// 行为与改造前一致。可选而非必填的理由与 `compression` 相同。
     pub supplements: Option<Arc<SupplementDrain>>,
+    /// 轮首判决的**请求级开关快照**（`SessionConfig::triage_enabled`）。
+    ///
+    /// ## 为什么是一个值而不是一个持有者
+    ///
+    /// `compression` / `supplements` 必须持有插件，因为它们要读会话状态与配置的
+    /// **当前值**（压缩水位、队列深度）；判决只需要一个布尔：配置在一次请求的生命
+    /// 周期内不变，因此在这里取一次快照就够——多持一个 `Arc<SessionPlugin>` 只会
+    /// 多一条可以绕过配置面的路径。
+    ///
+    /// ## 它关掉的是什么
+    ///
+    /// `false` ⇒ 本循环**不调用** `triage/decide`，全部输入直接进工具循环——
+    /// 与未挂载该插件时的行为一致（两条路径都退化成"今天的行为"，但验证的
+    /// 是两件不同的事：这里是"分支写对了"，卸载是"插件边界真的存在"）。
+    pub triage_enabled: bool,
     /// **本插件自己的目录**（装配期由父插件经 `PLUGIN_DIR` 告知）。
     ///
     /// 会话存储 / 转写存档 / 工具结果存档都在这个目录下——它是「本实例的作用域」，
@@ -510,26 +532,6 @@ pub struct ChatOrchestrator {
 }
 
 impl ChatOrchestrator {
-    pub fn new(
-        provider: Arc<dyn ModelProvider>,
-        parent: Option<Arc<dyn Plugin>>,
-        context_limit: u32,
-        stop: Arc<StopSignal>,
-        compression: Option<Arc<CompressionEmitter>>,
-        supplements: Option<Arc<SupplementDrain>>,
-        session_dir: crate::symbio_core::PluginDir,
-    ) -> Self {
-        Self {
-            provider,
-            parent,
-            context_limit,
-            stop,
-            compression,
-            supplements,
-            session_dir,
-        }
-    }
-
     pub async fn finalize_assistant_turn(
         &self,
         root_id: &str,

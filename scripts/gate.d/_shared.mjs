@@ -245,7 +245,18 @@ export const BASELINE = {
   //           缺载荷报错 / 未知子命令 NotFound / traverse 不贡献工具 / meta 首参 == 目录名）
   //           与 `plugins/reply`（5 例：三个判决变体都走同一条平凡路径 / 缺载荷报错 /
   //           未知子命令 NotFound / traverse 不贡献工具 / meta 首参 == 目录名）。
-  rustTests: 1000,
+  // 2026-09-29：1000 → **1034**（+34）。对话面插件拆分 S2（判决：规则短路 + 快速档）。
+  //           `plugins/triage` 6 → **29**（+23）：`rules.test` 7 例（含**反例**——"你好，
+  //           帮我读一下 README" 不得命中问候，误判会静默吞掉真实请求）、`classify.test` 9 例
+  //           （四选一映射 / 仅 work 升级 / 噪声容忍 / 不可解析 ⇒ None / 空节点剔除）、
+  //           `config.test` 3 例、`plugin.test` 4 → 10（**全部不依赖模型**：规则命中与
+  //           无能力访问器时的升级方向，即"零 LLM 往返"的等价证明）。
+  //           `session/context/conversation_view.test` **7** 例（对话线投影：只留
+  //           `role=user` 与根级文本 assistant；工具结果 / Turn / reasoning 一律不进）。
+  //           `model/message_builder` 14 → **16**（+2：`meta.exclude_from_context` 剔除，
+  //           **C-D3**）。`session/config` 4 → **6**（+2：`triage_enabled` 出厂默认 `false`、
+  //           缺键落默认）。
+  rustTests: 1034,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

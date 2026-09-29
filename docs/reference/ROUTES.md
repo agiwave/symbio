@@ -144,6 +144,8 @@
 > 调用方只有 `session`（编排层）：它投影事实、发起调用，并按判决**执行**对应路径。
 > 契约 `DecideRequest` / `Verdict` 见 [`symbio_core::schemas::dialog`](../../symbio/src/symbio_core/schemas/dialog.rs)。
 > 不挂载本插件 ⇒ 路由 `NotFound` ⇒ 全部输入直接进工具循环（卸载平凡值）。
+> 两条产线（规则短路 0 次 LLM / 快速档 1 次静默 LLM）见
+> [triage 插件的 README](../../symbio/src/plugins/triage/README.md)。
 
 ---
 

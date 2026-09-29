@@ -8,18 +8,20 @@
 //! |---|---|
 //! | 本文件 | 触发与度量：阈值 / 切分点 / token 估算 / 收益护栏（「何时压、从哪切」） |
 //! | [`view`]     | 请求视图层：淡化 / 骨架化 / 水位提醒（`build_request_view` 唯一入口） |
+//! | [`conversation_view`] | 对话线投影：user 消息 + 根级 assistant 文本节点（对话面唯一分界） |
 //! | [`prompt`]   | 压缩提示词、`<state_snapshot>` 快照协议、`context_compact` 工具元 |
 //! | [`window`]   | 分层滑窗骨架化（纯函数，无副作用） |
 //! | [`pipeline`] | 压缩执行流水线：被动 L2 与主动 `context_compact` 共用的唯一内核 |
 //!
-//! 分层：门面与 `view` / `prompt` 是**纯策略**（无 I/O），`pipeline` 是**执行**
-//! （LLM 请求 / 落库 / 广播），是本域唯一的副作用出口。
+//! 分层：门面与 `view` / `conversation_view` / `prompt` 是**纯策略**（无 I/O），
+//! `pipeline` 是**执行**（LLM 请求 / 落库 / 广播），是本域唯一的副作用出口。
 
 use std::sync::Arc;
 
 use crate::symbio_core::schemas::session::chat_message::{ChatMessage, MessageRole, MessageType};
 use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt};
 
+mod conversation_view;
 mod pipeline;
 mod prompt;
 mod view;
@@ -27,6 +29,7 @@ mod window;
 
 // 门面 = 域内唯一对外出口：调用方（`chat_loop` / `resume`）只经 `context::X` 取用，
 // 不感知域内文件划分；域内子模块则经 `use super::*` 取用门面（含下面的 re-export）。
+pub use self::conversation_view::conversation_view;
 pub(crate) use self::pipeline::{auto_compress_process, retry_compaction, run_context_compact};
 pub use self::prompt::{
     build_compression_request, compression_prompt_fingerprint, context_compact_tool_meta,

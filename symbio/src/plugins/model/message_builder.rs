@@ -22,6 +22,33 @@ use super::types::*;
 /// （Anthropic 协议本就不回传历史思考——缺官方签名，此裁剪对它无副作用）。
 const RETAINED_RECENT_REASONING: usize = 2;
 
+/// 请求包**剔除标记**的键名（`meta.exclude_from_context = true`）。
+///
+/// ## 为什么是一个 `meta` 键而不是一个 `MessageType` 取值
+///
+/// 「这条节点算不算对话内容」不是**节点类型**的属性，是**消费场景**的属性：
+/// 同一条首响节点，对话面板要显示它（用户真的看到过），模型请求包必须剔除它
+/// （否则连续两条 `assistant`）。把它做成 `MessageType` 取值，等于把"某个消费
+/// 场景的判断"固化进 schema——下一个场景（审计导出 / 检索索引）还要再加一个类型。
+///
+/// `meta` 是自由 JSON 且已有先例（`meta.kind = "context_nudge"`），加一个键是
+/// **数据变化**，不是 schema 变化。
+///
+/// ## 与对话线投影的分工（看着矛盾，其实各管一条线）
+///
+/// 本标记管**工作线**（发给模型的包）；`session/context/conversation_view.rs`
+/// 管**对话线**（判决 / 措辞 / 对话面板），它**不看**这个键。详见那个文件的模块文档。
+pub const META_EXCLUDE_FROM_CONTEXT: &str = "exclude_from_context";
+
+/// 该节点是否被标记为「不进请求包」
+fn excluded_from_context(m: &ChatMessage) -> bool {
+    m.meta
+        .as_ref()
+        .and_then(|meta| meta.get(META_EXCLUDE_FROM_CONTEXT))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
 /// 将存储的细粒度 ChatMessage 树扁平化，转换为 API 所需的 NativeMessage 列表。
 ///
 /// 分型树结构（请求/响应由 MessageRole 区分，组合节点可选）：
@@ -144,6 +171,21 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
         }
         if !is_root(m) {
             continue; // 非根节点会在其父节点处理时被合并
+        }
+        // ── 「不进请求包」的节点在此剔除（C-D3）────────────────────────────
+        //
+        // 对话面节点（首响 / 进度汇报）是**给用户看的一句话**，不是工作线的一环：
+        //
+        // 1. 它会以根级 `role = assistant` 的身份插在用户消息与 Turn 之间，
+        //    于是同一轮出现**连续两条 `assistant`**——部分协议直接 400；
+        // 2. 就算协议容忍，它也会把"界面上的话"当成"模型说过的话"再喂回去，
+        //    同一份信息在两条线上各留一份，越滚越偏。
+        //
+        // 与 `Some(MessageType::Compression) => {}` 是同一条处置（压缩节点也不是
+        // 对话内容），区别只是判据来自 `meta` 而不是节点类型——**`meta` 是自由
+        // JSON，所以加这一条不需要动 `MessageType` 枚举**（数据变化，不是 schema 变化）。
+        if excluded_from_context(m) {
+            continue;
         }
 
         match m.msg_type {

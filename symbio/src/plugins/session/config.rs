@@ -137,6 +137,32 @@ pub struct SessionConfig {
     /// 打爆。上界是**护栏**，不是策略：它只决定"这一批最多几条"，不决定合并与否。
     #[serde(default = "default_supplements_max_per_drain")]
     pub supplements_max_per_drain: usize,
+    /// 轮首判决总开关（**J2 平凡值：`false`**）。
+    ///
+    /// ## 它控制什么
+    ///
+    /// 每一轮开始时是否经容器 `route` 请 `triage` 判一次「直接回答还是派活」：
+    /// - `true`：判一次。`Answered` ⇒ 本轮不进工具循环（收尾）；
+    ///   `Escalate` ⇒ 照旧进工具循环；
+    /// - `false`：**不调用**，全部输入直接进工具循环——与未挂载 `triage` 时逐字一致。
+    ///
+    /// ## 出厂默认为什么是 `false`（而"完整值"是 `true`）
+    ///
+    /// **默认值必须是"用户可见层面完整"的行为**。判决本身只输出枚举，面向用户的
+    /// 那句话归 `reply`（S3）；在 `reply` 还是平凡实现（恒空串）之前打开本开关，
+    /// 「你好」会变成**沉默**——那不是"少说一句"，那是回归。
+    ///
+    /// 因此本批（S2）交付机制、默认关闭；`reply` 落地的那一批（S3）把默认翻成
+    /// `true`。这与「一批一件事、每批行为可独立回退」是同一条纪律：
+    /// **让功能生效的那一批，负责它带来的全部影响**。
+    ///
+    /// ## 为什么它在 session 的配置面，而「用不用规则表」不在
+    ///
+    /// 本开关问的是「**调用方**要不要请判决」，是调用方的事；而「判决内部用不用规则表」
+    /// 是插件自己的策略，归 `triage` 自己的 `PLUGIN.yml`（`TriageConfig::rule_shortcut`）。
+    /// 把后者也塞进这里，等于让调用方为一段它看不见的策略维护一个开关。
+    #[serde(default = "default_triage_enabled")]
+    pub triage_enabled: bool,
 }
 
 pub fn default_max_messages() -> usize {
@@ -184,6 +210,11 @@ pub fn default_supplements_enabled() -> bool {
 pub fn default_supplements_max_per_drain() -> usize {
     20
 }
+pub fn default_triage_enabled() -> bool {
+    // 出厂关闭：判决只输出枚举，面向用户的那句话归 `reply`（见字段文档）。
+    // `reply` 落地的那一批把这里翻成 `true`——本开关是那一批唯一的"生效"动作。
+    false
+}
 
 impl SessionConfig {
     /// 下发给 `model_chat::Request::max_tool_rounds` 的值（契约翻译点）。
@@ -224,6 +255,7 @@ impl Default for SessionConfig {
             memory_inject_max_bytes: default_memory_inject_max_bytes(),
             supplements_enabled: default_supplements_enabled(),
             supplements_max_per_drain: default_supplements_max_per_drain(),
+            triage_enabled: default_triage_enabled(),
         }
     }
 }

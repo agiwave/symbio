@@ -139,3 +139,17 @@ pub const ROUTE_EVENT_BUS_SUBSCRIBE: &str = "event_bus/subscribe";
 /// （仅 agent_run 能力内部调用）」，而**没有任何代码那样调用**——这正是本模块
 /// 存在的理由（防止路径漂移）被反过来利用的样子。本模块只收有真实调用方的路径。
 pub const ROUTE_HOOK_FIRE: &str = "hook/fire";
+
+// ============ Triage 插件 ============
+/// triage/decide — 判决这一轮该直接回答、还是派给工具循环
+///
+/// 唯一调用方：`session` 的 `chat_loop/decide.rs`（轮首判决）。返回
+/// [`crate::symbio_core::schemas::dialog::Verdict`]——一个**闭集枚举**，不是文本。
+///
+/// ## 为什么直到 S2 才加这个常量
+///
+/// S1 只建了两个插件的骨架，`session` 侧**还没有调用点**。本模块的规则是
+/// 「不为『将来可能用到』的路由预置常量」（见上文 `AGENT_CHAT` 的教训）——
+/// 那时加它就是一个零消费方的预留常量。S2 落下第一个调用方的同一批里，
+/// 它才被登记进来。
+pub const ROUTE_TRIAGE_DECIDE: &str = "triage/decide";

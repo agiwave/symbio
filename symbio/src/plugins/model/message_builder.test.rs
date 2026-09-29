@@ -696,3 +696,73 @@ fn compression_nodes_are_excluded_from_request_view() {
     assert_eq!(natives.len(), 1, "压缩节点必须被剔除出请求包");
     assert_eq!(natives[0].role, MessageRole::User);
 }
+
+/// **C-D3**：带 `meta.exclude_from_context` 的节点不进请求包。
+///
+/// 这是**唯一**一条能挡住"界面文本污染模型上下文"的约束，而且它违反时
+/// **不会产生任何错误信号**（C-D3 属于 J3 那一类）——因此必须在这里被钉住。
+///
+/// 场景取自真实形态：判决说「要干活」时，`session` 会先落一条面向用户的首响
+/// （「好的，我去看看」）再进工具循环。那条首响是**根级 `role = assistant`**，
+/// 若不剔除，同一轮的请求包会变成 `user → assistant(首响) → assistant(tool_calls)`——
+/// 连续两条 `assistant`，部分协议直接 400。
+#[test]
+fn nodes_marked_exclude_from_context_are_dropped() {
+    let msgs = vec![
+        ChatMessage {
+            id: "u1".into(),
+            role: Some(MessageRole::User),
+            msg_type: Some(MessageType::Text),
+            content: Some(MessageContent::Text("读一下 README".into())),
+            ..Default::default()
+        },
+        ChatMessage {
+            id: "f1".into(),
+            role: Some(MessageRole::Assistant),
+            msg_type: Some(MessageType::Text),
+            content: Some(MessageContent::Text("好的，我去看看。".into())),
+            status: Some(MessageStatus::Completed),
+            meta: Some(serde_json::json!({ "surface": "reply", "exclude_from_context": true })),
+            ..Default::default()
+        },
+    ];
+    let natives = flatten_chat_messages(&msgs);
+    assert_eq!(natives.len(), 1, "标记节点必须被剔除出请求包");
+    assert_eq!(natives[0].role, MessageRole::User);
+}
+
+/// 标记的**取值**是判据，不是"有没有 `meta`"：
+/// 同一条节点去掉标记后必须照常进包（否则就是把"有没有 meta"当成了判据，
+/// 而工具结果节点本来就带 `meta.success`——那会把工具结果全丢掉）。
+#[test]
+fn unmarked_meta_nodes_still_enter_the_request_view() {
+    let msgs = vec![
+        ChatMessage {
+            id: "u1".into(),
+            role: Some(MessageRole::User),
+            msg_type: Some(MessageType::Text),
+            content: Some(MessageContent::Text("读一下 README".into())),
+            ..Default::default()
+        },
+        ChatMessage {
+            id: "f1".into(),
+            role: Some(MessageRole::Assistant),
+            msg_type: Some(MessageType::Text),
+            content: Some(MessageContent::Text("好的，我去看看。".into())),
+            status: Some(MessageStatus::Completed),
+            meta: Some(serde_json::json!({ "surface": "reply" })),
+            ..Default::default()
+        },
+        ChatMessage {
+            id: "f2".into(),
+            role: Some(MessageRole::Assistant),
+            msg_type: Some(MessageType::Text),
+            content: Some(MessageContent::Text("显式 false 也不剔除".into())),
+            status: Some(MessageStatus::Completed),
+            meta: Some(serde_json::json!({ "exclude_from_context": false })),
+            ..Default::default()
+        },
+    ];
+    let natives = flatten_chat_messages(&msgs);
+    assert_eq!(natives.len(), 3, "只有显式 true 才剔除");
+}

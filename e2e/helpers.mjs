@@ -263,8 +263,14 @@ export function startLongLivedCli({ homedir, workdir, session = 'e2e-live', mode
     send(message) {
       child.stdin.write(`${message}\n`);
     },
-    /** 等网关入站服务就绪（真实边界探活：GET /api/v1/health） */
-    async waitGatewayReady(timeoutMs = 20_000) {
+    /**
+     * 等网关入站服务就绪（真实边界探活：GET /api/v1/health）
+     *
+     * `label` 只在失败信息里出现。用例里有多个进程时它是**必需**的：没有它，
+     * "网关未就绪"无法区分是哪一个进程——而两个进程失败的原因完全不同
+     * （首个进程失败 = 装配坏了；后续进程失败 = 端口被占）。
+     */
+    async waitGatewayReady(timeoutMs = 20_000, label = `:${gatewayPort}`) {
       try {
         await waitFor(
           async () => {
@@ -275,7 +281,7 @@ export function startLongLivedCli({ homedir, workdir, session = 'e2e-live', mode
               return false;
             }
           },
-          { what: 'gateway /api/v1/health', timeoutMs },
+          { what: `gateway /api/v1/health（${label}）`, timeoutMs },
         );
       } catch (e) {
         // 超时必带诊断：网关绑定失败/插件装配失败的线索都在 stderr

@@ -54,3 +54,19 @@ fn missing_memory_keys_fall_back_to_defaults() {
         SessionConfig::default().memory_inject_max_bytes
     );
 }
+
+/// 出厂**关闭**判决：`Answered` 在措辞侧落地之前打开它，会把「你好」变成沉默——
+/// 那不是"少说一句"，那是回归。本断言把这条出厂决定钉住（翻转它的人必须同时
+/// 让措辞侧就位）。
+#[test]
+fn triage_is_off_by_default() {
+    assert!(!SessionConfig::default().triage_enabled);
+    assert!(!default_triage_enabled());
+}
+
+/// 存量 `PLUGIN.yml` 没有这个键时按缺省补齐（`#[serde(default)]` 的意义）
+#[test]
+fn missing_triage_key_falls_back_to_default() {
+    let c: SessionConfig = serde_json::from_str(r#"{"max_messages": 42}"#).unwrap();
+    assert_eq!(c.triage_enabled, SessionConfig::default().triage_enabled);
+}
