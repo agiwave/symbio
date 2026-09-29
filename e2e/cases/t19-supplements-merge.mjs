@@ -194,9 +194,14 @@ export default defineCase(
         what: 'A 线合并后的用户消息落库',
         timeoutMs: 30_000,
       });
-      // 再多等一拍，确认**没有**第三条冒出来（合并若失效，第三条会紧跟着出现）
-      await waitFor(() => (readMessagesJson(hd.homedir, sidA) ?? []).length >= 4, {
-        what: 'A 线两轮各自的助手正文落库',
+      // 等合并后的那一轮**真的跑完**——判据必须是**请求数**，不能是节点总数。
+      //
+      // 一轮在 `messages.json` 里是 **3 个节点**（user + turn 容器 + 正文子节点，
+      // 对话面关掉时没有根级首响），所以 `length >= 4` 会在"第二轮刚起头、请求还没
+      // 发出"时成立；紧接着数请求就会读到 `baseA + 1`。**等一个确定的量，别等节点数**：
+      // 请求在到达 mock 时即记录，`reqCount` 是这里唯一"收尾即成立"的判据。
+      await waitFor(async () => (await reqCount()) >= baseA + 2, {
+        what: 'A 线合并后的第 2 次 LLM 请求',
         timeoutMs: 30_000,
       });
 
@@ -304,10 +309,11 @@ export default defineCase(
         what: 'C 线三条补充各自成轮',
         timeoutMs: 40_000,
       });
-      // 用户消息**先落库**、该轮的 LLM 请求**后记录**——只等消息数就数请求，会在
-      // 最后一轮还在飞的时候读到"少一次"。等三轮各自打完（每轮 1 用户 + 1 助手）。
-      await waitFor(() => (readMessagesJson(hdOff.homedir, sidC) ?? []).length >= 6, {
-        what: 'C 线三轮各自的助手正文落库',
+      // 等三轮**各自打完**：判据同样是**请求数**，不是节点总数。
+      // 一轮 = 3 个节点（见 A 线同一处注释），`length >= 6` 在"第二轮收尾、第三轮刚
+      // 起头"时就成立——那一刻第三轮的请求还没发出，数请求会读到 `baseC + 2`。
+      await waitFor(async () => (await reqCount()) >= baseC + 3, {
+        what: 'C 线第三次 LLM 请求',
         timeoutMs: 40_000,
       });
 

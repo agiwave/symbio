@@ -294,7 +294,16 @@ export function startLongLivedCli({ homedir, workdir, session = 'e2e-live', mode
       child.stdin.write(`${message}\n`);
     },
     /**
-     * 等网关入站服务就绪（真实边界探活：GET /api/v1/health）
+     * 等网关入站服务就绪。
+     *
+     * 判据是**两条**，缺一条都不算就绪：
+     * 1. `GET /api/v1/health` 通（网关进程在监听）；
+     * 2. `vdfs/root` 能取到根地址（**插件树能回答 VDFS 路由**）。
+     *
+     * 第 2 条是必须的：用例的就绪后第一个动作几乎都是取根地址，而"进程在监听"与
+     * "树能路由"之间有一段窗口——曾出现 `health` 通过、紧接着 `vdfs/root` 无返回的
+     * 偶发（`t15`，392ms 即失败）。就绪判据必须抬到用例真正需要的那**一个能力**上，
+     * 否则窗口只是被搬到下一行。真要坏了，这里仍会超时并带上 stderr。
      *
      * `label` 只在失败信息里出现。用例里有多个进程时它是**必需**的：没有它，
      * "网关未就绪"无法区分是哪一个进程——而两个进程失败的原因完全不同
@@ -306,12 +315,18 @@ export function startLongLivedCli({ homedir, workdir, session = 'e2e-live', mode
           async () => {
             try {
               const r = await fetch(`http://127.0.0.1:${gatewayPort}/api/v1/health`);
-              return r.ok;
+              if (!r.ok) return false;
+            } catch {
+              return false;
+            }
+            try {
+              const inv = await api.invoke('vdfs/root', {});
+              return inv.status === 200 && typeof inv.body?.data?.path === 'string' && inv.body.data.path.length > 0;
             } catch {
               return false;
             }
           },
-          { what: `gateway /api/v1/health（${label}）`, timeoutMs },
+          { what: `gateway /api/v1/health + vdfs/root（${label}）`, timeoutMs },
         );
       } catch (e) {
         // 超时必带诊断：网关绑定失败/插件装配失败的线索都在 stderr
