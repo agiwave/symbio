@@ -10,6 +10,7 @@
 //!   步骤2 gate_turn            ← 启动条件 + 退出条件（唯一判定点）
 //!   步骤2b decide_turn         ← 轮首判决（唯一判决点）
 //!   步骤2c apply_verdict       ← 判决的执行点：措辞 + 落点（`Answered` 在此收尾）
+//!   步骤2d report_if_due       ← 轮边界汇报判定（触发权在编排层，措辞权在 reply）
 //!   步骤3 prepare_turn_inputs  ← 提示词 + 工具 + 压缩 + 请求视图（唯一收集点）
 //!   步骤4 execute_turn         ← LLM 调用
 //!   步骤5 settle_reasoning     ← 推理产物并入上下文（定稿内容子节点）
@@ -23,6 +24,7 @@
 //! - [`state`]    会话上下文 / 请求快照 / 单轮状态 / 闸门结果 / 退出原因 / 编排器
 //! - [`decide`]   轮首判决：经容器 `route` 调 `triage/decide`，把判决回读成枚举
 //! - [`compose`]  判决的执行点：经容器 `route` 调 `reply/compose`，把措辞写进转写
+//! - [`progress`] 中途汇报：轮边界的「该不该说一句」判定（触发权归编排层，措辞权归 `reply`）
 //! - [`inputs`]   收口 ②③：提示词与工具的唯一收集点、压缩的唯一响应点
 //! - [`turn`]     单轮收尾：推理并入 → 工具分发 → 落库 → 流向
 //! - [`io`]       副作用出口：落库 / 广播 / 流式占位 / 开会话 / 生命周期钩子
@@ -39,20 +41,25 @@ mod compose;
 mod decide;
 mod inputs;
 mod io;
+mod progress;
 mod state;
 mod turn;
 
 // 跨模块契约：`orchestrator.rs` / `resume.rs` 经 `chat_loop::X` 引用。
+// `ProgressPolicy` 的构造点在 `orchestrator/consume.rs`（那里拿着插件与配置），
+// 消费方是本模块——它因此也是契约，不是内部实现细节。
+pub use self::progress::ProgressPolicy;
 pub use self::state::{ChatOrchestrator, CompressionEmitter, StopSignal, SupplementDrain};
 
 // 模块内共享面：子模块经 `use super::*;` 取用，测试亦同（`gate_tests` 等）。
-pub(crate) use self::compose::apply_verdict;
+pub(crate) use self::compose::{apply_verdict, VerdictEffect};
 pub(crate) use self::decide::decide_turn;
 pub(crate) use self::inputs::prepare_turn_inputs;
 pub(crate) use self::io::{
     emit_streaming_start, finalize_turn_root, fire_stop_hook, fire_user_prompt_submit_hook,
     open_chat_session, persist_messages,
 };
+pub(crate) use self::progress::report_if_due;
 pub(crate) use self::state::{Gate, SessionContext, TurnExit, TurnRequest, TurnResult, TurnState};
 pub(crate) use self::turn::{close_turn, settle_reasoning};
 pub(crate) use super::context::{auto_compress_process, run_context_compact};
@@ -63,11 +70,14 @@ use crate::plugin_error;
 use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::schemas::{
+    dialog::RunSnapshot,
     session::chat_message::{ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType},
     HookEvent,
 };
 use crate::symbio_core::ModelFinishReason;
-use crate::symbio_core::{llm_emit_message, llm_short_id, TurnOutput, TurnToolCallInfo};
+use crate::symbio_core::{
+    clock_now_ms, llm_emit_message, llm_short_id, TurnOutput, TurnToolCallInfo,
+};
 use crate::symbio_core::{
     CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, ModelProvider, ModelUsage, Plugin,
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
@@ -108,6 +118,10 @@ pub async fn run_chat_loop(
     // ── 前步骤 ③：轮次状态 + 上下文容器 ───────────────────────────────────
     let mut turn = TurnState {
         abort: abort.clone(),
+        // 静默时钟的起点 = 本请求开始。用户刚说完话，"距上次有人说话"从此刻起算；
+        // 此后的更新点只有两处（助手写下对话面文本 / 轮边界折进用户补充），
+        // 都在本循环内，见 `progress.rs` 的模块文档。
+        last_user_facing_at: clock_now_ms(),
         ..Default::default()
     };
     let mut single_message = req.single_message.take();
@@ -261,7 +275,7 @@ pub async fn run_chat_loop(
         // 行为"——慢一点，但有答案。判据与兜底方向见 `chat_loop/compose.rs`。
         //
         // `Escalate` / `Report` 恒不收尾：前者本来就要干活（首响只是开场白），
-        // 后者的措辞要从运行现状组织，那个快照到 S4 才有生产者。
+        // 后者只是"中途说一句"（它的触发点在步骤 2d，不在轮首）。
         //
         // 卸载 `triage`（或 `triage_enabled = false`）时这段整体不发生，
         // 行为与引入判决之前逐字一致。
@@ -272,7 +286,23 @@ pub async fn run_chat_loop(
                 // 会让不可变借用活到整个 `if let` 体（Rust 2021 的临时值规则）。
                 let verdict = decide_turn(orchestrator, &ctx, &context, utterance).await;
                 if let Some(verdict) = verdict {
-                    if apply_verdict(orchestrator, &ctx, &mut context, verdict.clone()).await {
+                    // 轮首判决不带运行现状：`Answered` / `Escalate` 说的是"这一轮怎么办"，
+                    // 而 `RunSnapshot` 说的是"干到哪一步"——只有 `Report` 读它，
+                    // 而 `Report` 不在轮首产生（见步骤 2d）。
+                    let effect = apply_verdict(
+                        orchestrator,
+                        &ctx,
+                        &mut context,
+                        verdict.clone(),
+                        &RunSnapshot::default(),
+                    )
+                    .await;
+                    // 说了一句话（首响 / 答话）⇒ 静默时钟归零。不收尾的 `Escalate`
+                    // 也要归零：用户刚看到"好，我来处理"，此刻不该再报进度。
+                    if effect != VerdictEffect::Silent {
+                        turn.last_user_facing_at = clock_now_ms();
+                    }
+                    if effect == VerdictEffect::Finish {
                         plugin_info!(
                             "session",
                             "[Triage] 本轮不进工具循环（verdict={verdict:?}）"
@@ -332,6 +362,10 @@ pub async fn run_chat_loop(
                         turn.tool_rounds
                     );
                     context.messages.push(merged);
+                    // 用户刚说了一句话 ⇒ 静默时钟归零（"对话线上有动静了"）。
+                    // 用户补充的消息**是**面向用户的话语，把它排除在"动静"之外，
+                    // 会让助手在用户刚补充完之后抢着报一句进度。
+                    turn.last_user_facing_at = clock_now_ms();
                     // 刻意**不**推进 `turn.last_saved`：`persist_messages` 落
                     // `context.messages[last_saved..]`，锚点不动 ⇒ 这条合并消息由
                     // 下一次落库（`close_turn` 或 `finish_turn`）自然带上。
@@ -339,6 +373,28 @@ pub async fn run_chat_loop(
                 }
             }
         }
+
+        // ── 步骤 2d：轮边界汇报判定（唯一判定点）────────────────────────────
+        //
+        // 「干到一半也要能说一句话」。判定与执行都在 `progress.rs`，这里只是调用点。
+        //
+        // ## 为什么在抽干**之后**
+        //
+        // 抽干会把用户刚补充的那句话折进上下文，并（见上）把静默时钟归零。顺序
+        // 反了就会出现"用户刚说完话，助手抢着报了一句进度"——判定用的正是那个时钟。
+        //
+        // ## 为什么在 `prepare_turn_inputs` 之前
+        //
+        // 汇报节点带 `exclude_from_context`（它是给用户看的，不是模型的对话内容），
+        // 因此不影响请求包的内容；但它必须在本轮落库锚点之下就位，才能被下一次
+        // 落库带上。放在这里与抽干点同一条纪律：**append 之后不动 `last_saved`**。
+        //
+        // ## 为什么判定失败什么都不做
+        //
+        // 拿不到措辞（未挂载 `reply` / 措辞为空）时**不消耗配额**，下一个轮边界再试
+        // ——与 `Answered` 的降级同一条方向：降级而不失效。卸载 `reply`（或
+        // `progress_enabled = false`）时这里恒不产出，行为与引入汇报之前逐字一致。
+        report_if_due(orchestrator, &ctx, &mut context, &mut turn).await;
 
         // 轮次起点。历史上这一行带 `tools={}` 一栏，但实参恒为字面量 `0`——此处
         // 尚未决定本轮用哪些工具，输出「tools=0」会被读成「没有工具」，属误导，

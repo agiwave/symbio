@@ -4,7 +4,9 @@
 //!
 //! 「首响 / 答话 / 汇报」——**只输出文本，不做判决**。它执行上游判决
 //! （`schemas::dialog::Verdict`）：`Answered` 说一句答话、`Escalate` 说一句首响、
-//! `Report` 说一句进度。判决归 [`crate::plugins::triage`]。
+//! `Report` 说一句进度。判决的产出方见该枚举的变体表（`Answered` / `Escalate` 归
+//! [`crate::plugins::triage`]，`Report` 由 `session` 自己判出）——本插件两种都执行，
+//! 不区分来源。
 //!
 //! ## 为什么是一个独立插件（而不是 session 里的一个函数）
 //!
@@ -18,22 +20,24 @@
 //!
 //! 「无工具」是**结构保证**：本插件不注册任何 `Capability`（同 `triage`）。
 //!
-//! ## 两条产线（本批 S3 落位）
+//! ## 三条产线
 //!
 //! | 判决 | 产线 | 代价 |
 //! |---|---|---|
 //! | `Answered { reason: from_context }` | **生成**（[`compose`]） | 1 次**静默** LLM 往返 |
 //! | 其余 `Answered` / `Escalate` | **模板**（[`templates`]） | 0 次 LLM 往返 |
-//! | `Report` | 本批**没有**产线 | — |
+//! | `Report` | **填表**（[`templates::progress_text`]） | 0 次 LLM 往返（事实随 `RunSnapshot` 带来） |
 //!
 //! 分派顺序是「先生成、生成不了落模板」：`from_context` 在模板表里**没有行**
 //! （有一条用例钉着，见 `templates.test.rs`），因此生成失败时它落到**变体兜底**，
 //! 而不是落到某句与问题无关的模板。
 //!
-//! ## 出参是 `String`，空串 = 没有对话面文本
+//! ## 出参是 `String`，**空串 = 没有对话面文本**（契约上的平凡值）
 //!
-//! 空串是**平凡值**（S1 的平凡实现就是"恒空串"）：调用方（`session`）据此**不写节点**。
-//! 本批只有 `Report` 会走到它——`Answered` 与 `Escalate` 恒有文本（模板兜底非空）。
+//! 三条产线各自都有兜底 ⇒ 本实现**恒有文本**。空串因此不是本插件的产出形态，
+//! 而是契约留给**其它产出方**的形态（网关把外部客户端的 `path` 原样转发给容器，
+//! `reply/compose` 可能由仓外程序调用）：调用方（`session`）见到空串即**不写节点**，
+//! 与"没有这个插件"走同一条降级路径。
 //!
 //! ## 本插件**不写转写**
 //!
@@ -49,7 +53,7 @@ use std::sync::Arc;
 
 use super::compose::generate;
 use super::reasons::REASON_FROM_CONTEXT;
-use super::templates::template_for;
+use super::templates::{progress_text, template_for};
 
 /// Reply 插件（无状态、无副作用、不持有任何地址）
 pub struct ReplyPlugin;
@@ -67,25 +71,28 @@ impl ReplyPlugin {
     pub fn metadata() -> PluginMeta {
         PluginMeta::new(PLUGIN_ID_REPLY, "对话措辞")
             .with_description("首响 / 答话 / 汇报的措辞；只输出文本，不做判决")
-            .with_version("0.2.0")
+            .with_version("0.3.0")
     }
 
-    /// 两条产线的分派：**先生成，生成不了落模板**。
+    /// 三条产线的分派：**填表**（`Report`）/ **先生成、生成不了落模板**（其余）。
     ///
-    /// 返回 `None` = 没有对话面文本（只有 `Report` 会到这里）。
-    async fn compose(
-        &self,
-        ctx: &Arc<dyn PluginInvokeRequest>,
-        req: &ComposeRequest,
-    ) -> Option<String> {
+    /// 恒有返回：三条产线各自都有兜底（见模块文档）。
+    async fn compose(&self, ctx: &Arc<dyn PluginInvokeRequest>, req: &ComposeRequest) -> String {
+        // `Report` 走**填表**产线：事实在 `snapshot` 里，措辞是固定的。它与下面的
+        // 模板表并列而不混入表——表里每一行都是"与上下文无关的固定措辞"，
+        // 而汇报的正文随现状变（见 `templates::progress_text`）。
+        if matches!(req.verdict, Verdict::Report) {
+            return progress_text(&req.snapshot);
+        }
         if requires_generation(&req.verdict) {
             if let Some(text) = generate(ctx, req).await {
-                return Some(text);
+                return text;
             }
-            // 生成失败**不返回 `None`**：继续往下走模板产线。`from_context` 在模板表里
+            // 生成失败**不返回空串**：继续往下走模板产线。`from_context` 在模板表里
             // 没有行 ⇒ 落到变体兜底（"好的。"）——一句通用话，但**不是空白**。
         }
-        template_for(&req.verdict)
+        // `template_for` 只对 `Report` 返回 `None`，而它在上面已经分派走了。
+        template_for(&req.verdict).unwrap_or_default()
     }
 }
 
@@ -118,7 +125,7 @@ impl Plugin for ReplyPlugin {
             "compose" => {
                 // 请求必须能解析：契约的形状由这一行保证，而不是由注释保证。
                 let req: ComposeRequest = ctx.payload()?;
-                let text = self.compose(&ctx, &req).await.unwrap_or_default();
+                let text = self.compose(&ctx, &req).await;
                 Ok(PluginPayload::new(&text))
             }
             _ => Err(PluginError::NotFound(format!("[reply] 未知子命令: {path}"))),

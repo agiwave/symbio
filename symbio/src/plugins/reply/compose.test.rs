@@ -26,6 +26,7 @@ fn request(context: Vec<ChatMessage>) -> ComposeRequest {
             reason: "from_context".to_string(),
         },
         context,
+        snapshot: crate::symbio_core::schemas::dialog::RunSnapshot::default(),
     }
 }
 

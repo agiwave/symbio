@@ -1,11 +1,12 @@
-//! `session/config.rs` 的单元测试 —— 记忆两道闸门 + 两个能力开关的取值与下界。
+//! `session/config.rs` 的单元测试 —— 记忆两道闸门 + 三个能力开关的取值与下界。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //!
 //! 缺省值 / 向后兼容 / 「面板默认值与 serde 同源」的不变式由 `plugin.test.rs`
 //! 的 `config_definition_defaults_come_from_session_config` 锁定，这里**刻意不重复**。
 //! 本文件只回答「取值与出厂决定」这一件事——「出厂决定」指那些一旦翻转就会改变
-//! 用户可见行为的默认值（`triage_enabled` / `reply_enabled`），它们必须被断言钉住。
+//! 用户可见行为的默认值（`triage_enabled` / `reply_enabled` / `progress_enabled`），
+//! 它们必须被断言钉住。
 
 use super::*;
 
@@ -98,4 +99,50 @@ fn triage_and_reply_switches_are_independent() {
         ..SessionConfig::default()
     };
     assert!(!only_reply.triage_enabled && only_reply.reply_enabled);
+}
+
+/// 出厂**打开**中途汇报，且三个上界都不是"关掉它"的取值。
+///
+/// 断言三个上界一起，是因为单看总开关不够：`progress_enabled = true` 配上
+/// `progress_max_per_turn = 0`（或 `progress_min_rounds` 大得离谱）同样一次都不汇报
+/// ——那样"默认开启"就成了一句空话。三个数各自要有意义：
+/// 间隔足够长（不打扰短任务）、最少轮次 > 0（第一轮不算进展）、每轮配额 > 0。
+#[test]
+fn progress_reporting_is_on_by_default_with_meaningful_bounds() {
+    let c = SessionConfig::default();
+    assert!(c.progress_enabled);
+    assert!(default_progress_enabled());
+    assert!(
+        c.progress_interval_ms >= 10_000,
+        "间隔太短会让长任务反复刷屏（实得 {}）",
+        c.progress_interval_ms
+    );
+    assert!(c.progress_min_rounds >= 1, "至少要走过一轮才有进展可言");
+    assert!(c.progress_max_per_turn >= 1, "配额为 0 等于关掉了这个特性");
+}
+
+/// 存量 `PLUGIN.yml` 没有这四个键时按缺省补齐（`#[serde(default)]` 的意义）
+#[test]
+fn missing_progress_keys_fall_back_to_defaults() {
+    let c: SessionConfig = serde_json::from_str(r#"{"max_messages": 42}"#).unwrap();
+    let d = SessionConfig::default();
+    assert_eq!(c.progress_enabled, d.progress_enabled);
+    assert_eq!(c.progress_interval_ms, d.progress_interval_ms);
+    assert_eq!(c.progress_min_rounds, d.progress_min_rounds);
+    assert_eq!(c.progress_max_per_turn, d.progress_max_per_turn);
+}
+
+/// 汇报开关与判决 / 措辞**相互独立**：关掉汇报不影响另外两个，反之亦然。
+///
+/// 与上面那条同一条理由——它们回答三个不同的问题（要不要判 / 说什么 / 要不要
+/// 中途打断）。合并成一个开关会让"只想要其中两个"变成不可能。
+#[test]
+fn the_progress_switch_is_independent_of_the_other_two() {
+    let c = SessionConfig {
+        triage_enabled: true,
+        reply_enabled: true,
+        progress_enabled: false,
+        ..SessionConfig::default()
+    };
+    assert!(c.triage_enabled && c.reply_enabled && !c.progress_enabled);
 }

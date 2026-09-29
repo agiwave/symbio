@@ -8,6 +8,7 @@
 //! 只在 `chat_loop` 及其子模块内可见。
 
 use super::super::plugin::PublishTarget;
+use super::progress::ProgressPolicy;
 use super::*;
 
 /// MODEL 会话上下文
@@ -93,6 +94,21 @@ pub(crate) struct TurnState {
     /// 级别 2（异步工具调用）：`settle_turn` 把每个工具 spawn 出去并登记 id，
     /// 完成回调逐个移除；全部移除后唤醒主循环——**不完整不唤醒**。
     pub(crate) in_flight_tools: HashSet<String>,
+    /// **对话线上最近一次动静**的时刻（毫秒）——中途汇报的静默时钟起点。
+    ///
+    /// 两个来源都算一次"动静"：用户发言（轮首输入 / 轮边界折进的补充）与助手写下
+    /// 一句面向用户的话（首响 / 答话 / 上一次汇报）。汇报判定的全部内容是
+    /// "距上次动静够久了吗"（见 `progress.rs`）。
+    ///
+    /// 它是**请求作用域**的量而不是会话级的：`run_chat_loop` 构造 [`TurnState`] 时
+    /// 取一次当前时刻，此后每次说话更新——判定点与更新点都在同一个任务里，
+    /// 不需要跨任务共享，也就不会有"两个写入者各写一半"的形态。
+    pub(crate) last_user_facing_at: i64,
+    /// 本轮已汇报次数（中途汇报的配额，见 `progress.rs`）。
+    ///
+    /// 它随请求复位（`TurnState` 即请求作用域）：`progress_max_per_turn` 说的是
+    /// "这一轮最多打断几次"，跨轮累加会让第二次请求一开始就没有配额。
+    pub(crate) progress_reports: u32,
 }
 
 /// 主循环的唯一退出原因。
@@ -545,6 +561,15 @@ pub struct ChatOrchestrator {
     /// 就没有 `Answered`，措辞只剩 `Escalate` 首响——本批 `Escalate` 由 `triage`
     /// 产出，故该组合退化为"不生效"，但**结构上合法**，不是需要拦的错误）。
     pub reply_enabled: bool,
+    /// 中途汇报的策略快照（`SessionConfig` 的四个旋钮，见 [`ProgressPolicy`]）。
+    ///
+    /// 与 `triage_enabled` / `reply_enabled` 同形（取**值快照**），但这里是一个结构体
+    /// 而不是四个平铺字段：它们是**同一个判定**的四个参数（见
+    /// [`ProgressPolicy::due`]），拆成四个字段会让"谁和谁是一组"只能靠命名猜。
+    ///
+    /// 四个参数各自能取到的值见 `SessionConfig`；构造点唯一
+    /// （`orchestrator/consume.rs`）。
+    pub progress: ProgressPolicy,
     /// **本插件自己的目录**（装配期由父插件经 `PLUGIN_DIR` 告知）。
     ///
     /// 会话存储 / 转写存档 / 工具结果存档都在这个目录下——它是「本实例的作用域」，

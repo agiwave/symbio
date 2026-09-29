@@ -15,6 +15,10 @@
 //! 这两件事错了都没有错误信号：节点照样落库、照样上线，只是前端「对话」面板
 //! 看不到它，或者模型收到连续两条 `assistant`（部分协议直接 400）。因此它们
 //! 必须被断言钉住。
+//!
+//! 三种产物（`Answered` 答话 / `Escalate` 首响 / `Report` 汇报）各有一条形状用例：
+//! 它们的 `surface` 相同、`exclude_from_context` 相反、理由码不同——分开验才说明
+//! 两个标记没有被合并成一个。
 
 use super::*;
 
@@ -173,6 +177,50 @@ fn text_is_written_verbatim() {
 #[test]
 fn surface_literal_is_the_wire_contract() {
     assert_eq!(SURFACE_REPLY, "reply");
+}
+
+/// `Report` 的汇报：与首响同一形状（根级 + 剔除），理由码是 `progress`。
+///
+/// 三条各自独立的理由：**根级**（对话线才认它——否则前端「对话」面板看不到，
+/// 而"中途汇报"的全部意义就是在对话里说一句）；**剔除**（进度是给用户看的，
+/// 不是模型的对话内容——它紧跟在模型自己的工具轮之后，进包会白白占用上下文）；
+/// **理由码**（前端据此与首响区分渲染）。
+///
+/// 它验的是"给定这三个参数，节点长对了"；调用点是否**真的**传了这三个参数由 e2e
+/// （`t23-progress-report.mjs`）在真实边界上验——两者缺一，另一条都可能因为走错
+/// 路径而恰好通过。
+#[test]
+fn report_node_is_excluded_and_on_the_conversation_line() {
+    let node = dialog_node(
+        "已经完成 3 轮工具调用，用时约 2 分钟，还在继续。",
+        REASON_PROGRESS,
+        true,
+    );
+
+    assert_eq!(meta_key(&node, "surface"), Some(serde_json::json!("reply")));
+    assert_eq!(
+        meta_key(&node, "reason"),
+        Some(serde_json::json!("progress"))
+    );
+    assert_eq!(
+        meta_key(&node, "exclude_from_context"),
+        Some(serde_json::json!(true)),
+        "汇报是给用户看的界面文本，必须被请求视图剔除"
+    );
+    assert!(node.parent_id.is_none(), "汇报挂在根级（对话线）");
+    assert_eq!(
+        conversation_view(std::slice::from_ref(&node), 0).len(),
+        1,
+        "汇报必须被对话线投影认出来——否则它落在工作面板里，用户看不到"
+    );
+}
+
+/// `Report` 的理由码是**跨端契约**（前端按它区分"这是汇报不是首响"）。
+///
+/// 与 `surface` 同一条：改名不会报错，只会让前端静默失配。
+#[test]
+fn progress_reason_literal_is_the_wire_contract() {
+    assert_eq!(REASON_PROGRESS, "progress");
 }
 
 /// 每次调用给出**新 id**：同一轮里 `Answered` 的答话与 `Escalate` 的首响若撞 id，

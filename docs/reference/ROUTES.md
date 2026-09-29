@@ -158,14 +158,19 @@
 | `reply/compose` | 按上游判决组织一段面向用户的文本 | `String` |
 
 > 调用方只有 `session`。本插件**不写转写**：文本由 `session` 落库，转写只有一个写入者。
-> 契约 `ComposeRequest` 见 [`symbio_core::schemas::dialog`](../../symbio/src/symbio_core/schemas/dialog.rs)。
+> 契约 `ComposeRequest` 见 [`symbio_core::schemas::dialog`](../../symbio/src/symbio_core/schemas/dialog.rs)；
+> 其中 `snapshot`（`RunSnapshot`）是 `session` 投影的运行现状，**只有 `Report` 读它**。
 > 出参**空串 = 没有对话面文本**（平凡值），调用方据此不写节点。
 >
 > 不挂载本插件 ⇒ 路由 `NotFound` ⇒ `session` 按「缺插件」处理：`Answered` 拿不到措辞时
-> **降级进工具循环**（不沉默），`Escalate` 没有首响（卸载平凡值）。
-> 两条产线（模板 0 次 LLM / `from_context` 生成 1 次静默 LLM）见
+> **降级进工具循环**（不沉默），`Escalate` 没有首响，`Report` 只是"这次没说"且不消耗
+> 汇报配额（卸载平凡值）。
+> 三条产线（模板 0 次 LLM / `from_context` 生成 1 次静默 LLM / `Report` 填表 0 次 LLM）见
 > [reply 插件的 README](../../symbio/src/plugins/reply/README.md)。
-> 调用方开关 `SessionConfig::reply_enabled`（`<session 目录>/PLUGIN.yml`）。
+> 调用方开关 `SessionConfig::reply_enabled`（`<session 目录>/PLUGIN.yml`）；
+> `Report` 的**触发**另归 `SessionConfig::progress_enabled` 等四个旋钮（见
+> [`chat_loop/progress.rs`](../../symbio/src/plugins/session/chat_loop/progress.rs)）——
+> 措辞与触发是两件事，各有各的开关。
 
 ---
 

@@ -14,13 +14,14 @@
 //! | `clarify` / `refuse` | 模板 | 同上：这两句话的**内容**是固定的，模型只会把它写长 |
 //! | `from_context` | **生成** | 「答案在对话里」——那段文本只能从对话线组织出来，模板给不了 |
 //! | `needs_work` / `unclassified`（`Escalate`） | 模板 | 首响必须**立刻**出现（不等任何东西），模板是唯一能做到的形态 |
+//! | `Report` | 模板（[`progress_text`]） | 事实已在 [`RunSnapshot`] 里，缺的只是把它说成人话——生成只会多一次**加在用户等待期间**的往返 |
 //!
 //! ## 兜底：未知码走通用模板
 //!
 //! 见 [`super::reasons`] 的说明——生产方加了码而这里忘了配措辞时，用户收到一句
 //! 通用话而不是空白。**降级而不失效**。
 
-use crate::symbio_core::schemas::dialog::Verdict;
+use crate::symbio_core::schemas::dialog::{RunSnapshot, Verdict};
 
 use super::reasons::{
     REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE,
@@ -54,9 +55,9 @@ pub(super) const FALLBACK_ESCALATE: &str = "好，我来处理。";
 
 /// 按判决取模板文本。
 ///
-/// 返回 `None` 只有一种情况：[`Verdict::Report`]——它的措辞要从**运行现状**里组织
-/// （在跑什么、跑了多久、完成了什么），而那个快照到 S4 才有生产者。本批**不编**
-/// 一句话：编出来的那句必然与界面上的真实进展不符，比不说更糟。
+/// 返回 `None` 只有一种情况：[`Verdict::Report`]——它的正文随**运行现状**变，因此
+/// 不在下面这张表里，而由 [`progress_text`] 填出来。表里的每一行都是"与上下文无关
+/// 的固定措辞"，两者不是同一种数据。
 pub(crate) fn template_for(verdict: &Verdict) -> Option<String> {
     let (reason, fallback) = match verdict {
         Verdict::Answered { reason } => (reason.as_str(), FALLBACK_ANSWERED),
@@ -64,6 +65,52 @@ pub(crate) fn template_for(verdict: &Verdict) -> Option<String> {
         Verdict::Report => return None,
     };
     Some(lookup(reason).unwrap_or(fallback).to_string())
+}
+
+/// `Report` 的措辞：把**运行现状**说成一句人话（**零 LLM 往返**）。
+///
+/// ## 为什么是填表而不是生成
+///
+/// 这句话的内容全部来自 [`RunSnapshot`] 的两个事实（跑了几轮、静默多久），措辞是
+/// 固定的。让模型来写只会多出两样东西：一次**加在用户等待期间**的往返（汇报的全部
+/// 意义是减少等待，不是延长它），以及"把 3 轮说成 4 轮"这种无从校验的漂移。
+/// **事实已经在这里了，缺的只是把它说成人话。**
+///
+/// ## 为什么不说一句"我还在处理"
+///
+/// 那句信息量为零的话，用户从界面上的运行态就能看出来。本插件要说的是**"到哪一步了"**
+/// ——那正是界面给不出的东西：工具节点讲的是"在跑什么"，而"一共走完了几轮、你等了
+/// 多久"只有编排层知道。
+///
+/// ## 为什么有两句
+///
+/// `tool_rounds = 0` 在编排层不可达（汇报判定要求至少走完一轮，见 `session` 的
+/// `chat_loop/progress.rs`），但本契约还有**第二个调用方**：网关把外部客户端的
+/// `path` 原样转发给容器，`reply/compose` 可能被仓外程序直接调用。那句话在这里
+/// 必须说得通，而不是渲染出"已完成 0 轮工具调用"。
+pub(super) fn progress_text(snapshot: &RunSnapshot) -> String {
+    let quiet = humanize_ms(snapshot.quiet_ms);
+    if snapshot.tool_rounds == 0 {
+        return format!("还在处理，已经 {quiet} 了，稍等一下。");
+    }
+    format!(
+        "已经完成 {} 轮工具调用，用时约 {quiet}，还在继续。",
+        snapshot.tool_rounds
+    )
+}
+
+/// 毫秒 → 一句人话（秒 / 分钟两档）。
+///
+/// 只分两档、不写「1 小时 3 分 12 秒」：汇报要说的是"还在动、走到哪了"，精度在这里
+/// 没有价值，位数越多越像机器自说自话。负数（时钟回拨）按 0 处理，并抬到 1 秒
+/// ——"用时约 0 秒"读起来像故障。
+fn humanize_ms(ms: i64) -> String {
+    let secs = (ms.max(0) / 1_000).max(1);
+    if secs < 60 {
+        format!("{secs} 秒")
+    } else {
+        format!("{} 分钟", secs / 60)
+    }
 }
 
 /// 查表（纯函数，无兜底——兜底由调用方给，因为兜底**随变体而不同**）。

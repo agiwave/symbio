@@ -102,11 +102,54 @@ fn the_fallback_depends_on_the_variant() {
     assert_ne!(answered, escalate, "两个变体的兜底不能是同一句");
 }
 
-/// `Report` 没有模板：它的措辞要从运行现状组织，而那个快照到 S4 才有生产者。
-/// 本批**不编**一句话——编出来的必然与界面上的真实进展不符。
+/// `Report` **不在**模板表里：它的正文随运行现状变，由 [`progress_text`] 填出来。
+///
+/// 表里每一行都是"与上下文无关的固定措辞"，两者不是同一种数据——把它塞进表里，
+/// 就得让 `template_for` 去读 `RunSnapshot`，于是"查表"和"填表"混成一个函数。
 #[test]
-fn report_has_no_template_yet() {
+fn report_has_no_template_row() {
     assert_eq!(template_for(&Verdict::Report), None);
+}
+
+/// 汇报把**运行现状说进句子**：轮次与静默时长都出现，且是给人读的量级。
+#[test]
+fn progress_text_states_the_snapshot() {
+    let text = progress_text(&RunSnapshot {
+        tool_rounds: 3,
+        quiet_ms: 125_000,
+    });
+
+    assert!(text.contains('3'), "应说出已完成轮次，实得：{text}");
+    assert!(
+        text.contains("2 分钟"),
+        "125s 应读成「2 分钟」而不是「125 秒」，实得：{text}"
+    );
+}
+
+/// `tool_rounds = 0` 时**不说"已完成 0 轮"**。
+///
+/// 编排层不可达（汇报判定要求至少走完一轮），但契约的第二个调用方是网关——
+/// 那句话在这里必须说得通，否则外部调用方会拿到一句自相矛盾的汇报。
+#[test]
+fn progress_text_handles_a_zero_round_snapshot() {
+    let text = progress_text(&RunSnapshot {
+        tool_rounds: 0,
+        quiet_ms: 5_000,
+    });
+
+    assert!(!text.contains('0'), "不该说「已完成 0 轮」，实得：{text}");
+    assert!(text.contains("5 秒"), "静默时长仍要说出来，实得：{text}");
+}
+
+/// 时长分档的边界：不足一分钟说秒，到一分钟改说分钟；负数与 0 抬到 1 秒
+/// （"用时约 0 秒"读起来像故障）。
+#[test]
+fn humanize_ms_switches_scale_at_one_minute() {
+    assert_eq!(humanize_ms(-1), "1 秒");
+    assert_eq!(humanize_ms(0), "1 秒");
+    assert_eq!(humanize_ms(59_999), "59 秒");
+    assert_eq!(humanize_ms(60_000), "1 分钟");
+    assert_eq!(humanize_ms(3_600_000), "60 分钟");
 }
 
 /// 空输入不是"没模板"，而是一条**正常**的模板行：它是规则表判出来的

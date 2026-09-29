@@ -10,7 +10,7 @@
 //! 生成路径本身由 e2e `t22-reply.mjs` 在真实边界上验（mock LLM）。
 
 use super::*;
-use crate::symbio_core::schemas::dialog::Verdict;
+use crate::symbio_core::schemas::dialog::{RunSnapshot, Verdict};
 use crate::symbio_core::PluginSimpleRequest;
 
 use super::super::reasons::{
@@ -34,17 +34,32 @@ fn request(verdict: Verdict) -> ComposeRequest {
         session_id: "s1".to_string(),
         verdict,
         context: Vec::new(),
+        snapshot: RunSnapshot::default(),
+    }
+}
+
+/// 带运行现状的 `Report` 请求（`snapshot` 是汇报唯一读的字段）。
+fn report(snapshot: RunSnapshot) -> ComposeRequest {
+    ComposeRequest {
+        session_id: "s1".to_string(),
+        verdict: Verdict::Report,
+        context: Vec::new(),
+        snapshot,
     }
 }
 
 /// 走一次路由，取出参文本
-async fn compose(verdict: Verdict) -> String {
+async fn compose_with(req: ComposeRequest) -> String {
     let p = Arc::new(ReplyPlugin)
-        .route(ctx("compose", Some(request(verdict))))
+        .route(ctx("compose", Some(req)))
         .await
         .unwrap_or_else(|e| panic!("compose 必须成功：{e}"));
-    let text: String = serde_json::from_value(data_of(p)).expect("出参是 String");
-    text
+    serde_json::from_value(data_of(p)).expect("出参是 String")
+}
+
+/// 走一次路由（只给判决，运行现状取平凡值）
+async fn compose(verdict: Verdict) -> String {
+    compose_with(request(verdict)).await
 }
 
 fn data_of(p: PluginPayload) -> serde_json::Value {
@@ -123,13 +138,50 @@ async fn unknown_reason_falls_back_by_variant() {
     assert_eq!(compose(escalate("未来才有的码")).await, FALLBACK_ESCALATE);
 }
 
-/// `Report` 本批**没有产线** ⇒ 空串（= 没有对话面文本，平凡值）。
+/// `Report` 的产线是**填表**：零 LLM 往返（本上下文没有模型服务，它照样拿到文本）。
 ///
-/// 它的措辞要从**运行现状**组织（在跑什么、跑了多久），而那个快照到 S4 才有生产者。
-/// 本批**不编**一句话：编出来的那句必然与界面上的真实进展不符，比不说更糟。
+/// 这是"汇报不花一次往返"的等价证明——若它走生成，这里拿到的会是兜底而非那句
+/// 带数字的话。汇报的全部意义是**减少**用户等待，而一次加在等待期间的往返
+/// 会把这件事反过来做。
 #[tokio::test]
-async fn report_yields_no_dialog_text_yet() {
-    assert_eq!(compose(Verdict::Report).await, "");
+async fn report_is_filled_from_the_snapshot_without_any_model_service() {
+    let text = compose_with(report(RunSnapshot {
+        tool_rounds: 3,
+        quiet_ms: 125_000,
+    }))
+    .await;
+
+    assert!(
+        text.contains('3') && text.contains("2 分钟"),
+        "汇报必须把运行现状（轮次 / 静默时长）说进句子里，实得：{text}"
+    );
+}
+
+/// `Report` 恒有话说——包括运行现状是平凡值的情形。
+///
+/// 与 `answered_never_yields_empty_text` 同一条性质：空串会让这一轮**彻底沉默**，
+/// 而沉默是这里最坏的失败形态。`tool_rounds = 0` 在编排层不可达（汇报判定要求至少
+/// 走完一轮），但契约的第二个调用方是**网关**（外部客户端可直接调 `reply/compose`），
+/// 那句话在这里必须说得通，而不是渲染出"已完成 0 轮工具调用"。
+#[tokio::test]
+async fn report_never_yields_empty_text() {
+    for snapshot in [
+        RunSnapshot::default(),
+        RunSnapshot {
+            tool_rounds: 1,
+            quiet_ms: 0,
+        },
+        RunSnapshot {
+            tool_rounds: 0,
+            quiet_ms: -1,
+        },
+    ] {
+        let text = compose_with(report(snapshot.clone())).await;
+        assert!(
+            !text.trim().is_empty(),
+            "`Report` 必须有话可说（snapshot={snapshot:?}）"
+        );
+    }
 }
 
 /// 契约缺载荷必须报错，而不是静默给一个空串——

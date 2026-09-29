@@ -186,6 +186,51 @@ pub struct SessionConfig {
     /// 用模板还是用模型、用哪个提示词，都是 `reply` 自己的策略，归它自己的配置面。
     #[serde(default = "default_reply_enabled")]
     pub reply_enabled: bool,
+    /// 中途汇报总开关（**J2 平凡值：`false`**）。
+    ///
+    /// ## 它控制什么
+    ///
+    /// 长任务进行中，助手是否在**轮边界**主动说一句进度（`Verdict::Report` ⇒
+    /// `reply` 从运行现状组织一句话 ⇒ 一条根级对话面节点）。判定与执行见
+    /// `chat_loop/progress.rs`。
+    ///
+    /// - `true`：静默超过 [`Self::progress_interval_ms`]、且已跑够
+    ///   [`Self::progress_min_rounds`] 轮时，汇报一次（每轮至多
+    ///   [`Self::progress_max_per_turn`] 次）；
+    /// - `false`：**不判定**，一次都不汇报——与引入汇报之前逐字一致。
+    ///
+    /// ## 为什么出厂默认为 `true`
+    ///
+    /// 它是**用户可见层面**的一部分（与 `triage_enabled` / `reply_enabled` 同一条
+    /// 判据）：一个跑了几分钟的任务，界面上什么都不说，用户无法区分"在干活"与
+    /// "卡死了"。而它的代价被三个上界钉住（间隔 / 最少轮次 / 每轮次数），
+    /// 不会变成噪声源。
+    ///
+    /// ## 为什么它在 session 的配置面
+    ///
+    /// 「什么时候该打断用户」是**编排**的判断（它要读会话状态：静默时长、轮次、
+    /// 已汇报次数），不是措辞插件的策略——`reply` 只负责把给它的现状说成人话。
+    #[serde(default = "default_progress_enabled")]
+    pub progress_enabled: bool,
+    /// 汇报的**静默阈值**（毫秒）：距对话线上最近一次动静（用户发言 / 助手说话）
+    /// 超过它，才认为"用户等太久了，该说一句"。
+    ///
+    /// 它同时是措辞里那句"已经 N 分钟了"的来源——**同一个数**，不另算一份。
+    #[serde(default = "default_progress_interval_ms")]
+    pub progress_interval_ms: u64,
+    /// 汇报的**最少轮次**：已完成的工具轮次达到它才有"进展"可报。
+    ///
+    /// 第一轮就跑完的任务不该被打断——那时用户刚说完话，一句"我已经跑了一轮"
+    /// 是噪声。
+    #[serde(default = "default_progress_min_rounds")]
+    pub progress_min_rounds: usize,
+    /// **每轮**汇报次数上限（护栏）：`0` ⇒ 一次都不汇报（与 `progress_enabled`
+    /// 同效，但语义不同——前者是"这个特性关掉"，后者是"上界为零"）。
+    ///
+    /// 上界的理由与 `supplements_max_per_drain` 同一条：判定是"该不该说"，
+    /// 上界是"最多说几次"。没有它，一个长时间运行的任务会按间隔反复刷屏。
+    #[serde(default = "default_progress_max_per_turn")]
+    pub progress_max_per_turn: u32,
 }
 
 pub fn default_max_messages() -> usize {
@@ -242,6 +287,22 @@ pub fn default_reply_enabled() -> bool {
     // 关掉它不会让任何东西变沉默（`Answered` 降级进工具循环），因此无需两段式。
     true
 }
+pub fn default_progress_enabled() -> bool {
+    // 用户可见层面的一部分：一个跑了几分钟的任务不该在界面上什么都不说。
+    true
+}
+pub fn default_progress_interval_ms() -> u64 {
+    // 60s：短于它的任务本来就快，用户不需要被打断；长于它的才值得说一句。
+    60_000
+}
+pub fn default_progress_min_rounds() -> usize {
+    // 2 轮：一轮就完事的任务，"进展"还谈不上。
+    2
+}
+pub fn default_progress_max_per_turn() -> u32 {
+    // 5 次：一个 10 分钟的任务最多被打断 5 次，间隔已由 `progress_interval_ms` 保证。
+    5
+}
 
 impl SessionConfig {
     /// 下发给 `model_chat::Request::max_tool_rounds` 的值（契约翻译点）。
@@ -284,6 +345,10 @@ impl Default for SessionConfig {
             supplements_max_per_drain: default_supplements_max_per_drain(),
             triage_enabled: default_triage_enabled(),
             reply_enabled: default_reply_enabled(),
+            progress_enabled: default_progress_enabled(),
+            progress_interval_ms: default_progress_interval_ms(),
+            progress_min_rounds: default_progress_min_rounds(),
+            progress_max_per_turn: default_progress_max_per_turn(),
         }
     }
 }

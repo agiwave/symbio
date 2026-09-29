@@ -20,9 +20,10 @@
 //! |---|---|---|
 //! | `Answered` 的答话 | `"reply"` | **不设** —— 它就是这一轮的答复，是对话内容 |
 //! | `Escalate` 的首响 | `"reply"` | `true` —— 界面开场白，不是模型的对话内容 |
+//! | `Report` 的汇报 | `"reply"` | `true` —— 进度是给用户看的，不是模型的对话内容 |
 //!
-//! 首响必须剔除，硬理由有两条：① 它是**面向用户**的界面文本，不是"模型的对话历史"；
-//! ② 它紧跟用户消息，若进请求包，线上会出现连续两条 `assistant`
+//! 首响与汇报必须剔除，硬理由有两条：① 它们是**面向用户**的界面文本，不是"模型的
+//! 对话历史"；② 首响紧跟用户消息，若进请求包，线上会出现连续两条 `assistant`
 //! （Anthropic 一类协议要求交替，会直接 400）。剔除点在 model 插件
 //! （`message_builder` 的 `flatten_chat_messages`），与 `compression` 节点同层处置。
 //!
@@ -37,10 +38,18 @@
 //! 而进工具循环退化成"引入判决之前的行为"——慢一点，但有答案。
 //!
 //! `Escalate` 拿不到首响则只是"少一句开场白"，本轮照旧干活——**不降级**（本来就要干活）。
+//! `Report` 拿不到措辞则只是"这次没说"，且**不消耗汇报配额**（见 `progress.rs`）——
+//! 下一次轮边界会再试一次。
+//!
+//! ## 返回值：**说没说**与**收不收尾**是两个问题
+//!
+//! [`VerdictEffect`] 把它们分开编码，而不是一个 `bool`。两个 `bool` 会多出一个
+//! 不可达组合（"收尾了但没说话"不存在），而一个 `bool` 根本答不了"说没说"——
+//! 那正是中途汇报要读的量（说了一句才消耗配额）。
 
 use std::sync::Arc;
 
-use crate::symbio_core::schemas::dialog::{ComposeRequest, Verdict};
+use crate::symbio_core::schemas::dialog::{ComposeRequest, RunSnapshot, Verdict};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
@@ -58,10 +67,20 @@ use super::state::{ChatOrchestrator, SessionContext};
 /// （`exclude_from_context`）是两件事。
 const SURFACE_REPLY: &str = "reply";
 
+/// 汇报节点的理由码（`meta.reason`）。
+///
+/// ## 为什么它由 `session` 拥有，而不是 `reply` 的抄本
+///
+/// `reply/reasons.rs` 与 `triage/reasons.rs` 是同一份词汇表的**两份抄本**，因为
+/// 生产方与消费方分处两个插件、不能共享常量。而汇报的理由码是**本侧自己产的**：
+/// 判决 `Report` 由 `session` 判出（见 `schemas/dialog.rs` 的变体表），措辞只是执行它
+/// ——`reply` 按判决分派，不看这个码。因此它没有"第二份抄本"可漂移，就地定义。
+const REASON_PROGRESS: &str = "progress";
+
 /// 判决的**执行点**：措辞 + 落点。
 ///
-/// 返回 `true` = 本轮**到此收尾**（判决说能直接答，且答话已经写好）。
-/// 返回 `false` = 照旧进工具循环（`Escalate` / `Report` / 拿不到措辞的降级）。
+/// `snapshot` 是**运行现状**（只有 `Report` 读它，见 [`RunSnapshot`]）。轮首的两个变体
+/// 不看运行现状——它们说的是"这一轮怎么办"，而现状说的是"干到哪一步了"。
 ///
 /// 收尾动作由调用方做（`finish_turn` 是主循环的唯一收尾点）——本函数只负责
 /// "说什么"与"写下来"，不负责"怎么结束"。
@@ -70,38 +89,68 @@ pub(crate) async fn apply_verdict(
     ctx: &Arc<dyn PluginInvokeRequest>,
     context: &mut SessionContext,
     verdict: Verdict,
-) -> bool {
+    snapshot: &RunSnapshot,
+) -> VerdictEffect {
     // 调用方关掉了措辞（或压根没挂 `reply`）⇒ 与"未挂载 reply"逐字一致：
-    // `Answered` 降级进工具循环，`Escalate` 没有首响。两条都在下面自然成立。
+    // `Answered` 降级进工具循环，`Escalate` 没有首响，`Report` 什么都没说。
+    // 三条都在下面自然成立。
     if !orchestrator.reply_enabled {
         crate::plugin_debug!("session", "[Reply] 措辞未启用，本轮不产出对话面文本");
-        return false;
+        return VerdictEffect::Silent;
     }
 
     match &verdict {
         Verdict::Answered { reason } => {
-            let Some(text) = compose_text(orchestrator, ctx, context, &verdict).await else {
+            let Some(text) = compose_text(orchestrator, ctx, context, &verdict, snapshot).await
+            else {
                 // 判决说能直接答，但没人能说话 ⇒ **降级进工具循环**（不沉默）。
                 crate::plugin_warn!(
                     "session",
                     "[Reply] 判决为 Answered（reason={reason}）但取不到措辞，本轮降级进工具循环"
                 );
-                return false;
+                return VerdictEffect::Silent;
             };
             context.messages.push(dialog_node(&text, reason, false));
-            true
+            VerdictEffect::Finish
         }
         Verdict::Escalate { reason } => {
             // 首响：拿不到就只是少一句开场白，本轮照旧干活。
-            if let Some(text) = compose_text(orchestrator, ctx, context, &verdict).await {
-                context.messages.push(dialog_node(&text, reason, true));
+            match compose_text(orchestrator, ctx, context, &verdict, snapshot).await {
+                Some(text) => {
+                    context.messages.push(dialog_node(&text, reason, true));
+                    VerdictEffect::Spoke
+                }
+                None => VerdictEffect::Silent,
             }
-            false
         }
-        // `Report` 的措辞要从运行现状里组织，而那个快照到 S4 才有生产者。
-        // 本批不产出文本——见 `reply/templates.rs` 的同一条说明。
-        Verdict::Report => false,
+        // 汇报：措辞从**运行现状**组织（`reply` 的模板产线，零 LLM 往返）。
+        // 拿不到就不说——本轮照旧干活，且不消耗配额（调用方按 [`VerdictEffect`] 判）。
+        Verdict::Report => {
+            match compose_text(orchestrator, ctx, context, &verdict, snapshot).await {
+                Some(text) => {
+                    context
+                        .messages
+                        .push(dialog_node(&text, REASON_PROGRESS, true));
+                    VerdictEffect::Spoke
+                }
+                None => VerdictEffect::Silent,
+            }
+        }
     }
+}
+
+/// [`apply_verdict`] 的产物：**说没说**一句话，以及**要不要收尾**。
+///
+/// 合成一个枚举而不是两个 `bool`：`Finish` 必然包含"说了话"（收尾的前提就是答话
+/// 已写下），两个 `bool` 会多出一个不可达组合。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VerdictEffect {
+    /// `Answered` 且答话已写下：本轮**到此收尾**（调用方据此 `finish_turn`）。
+    Finish,
+    /// 说了一句话，本轮继续（`Escalate` 首响 / `Report` 汇报）。
+    Spoke,
+    /// 一句话都没说，本轮继续（措辞未启用 / 取不到措辞 / 措辞为空）。
+    Silent,
 }
 
 /// 调 `reply/compose` 拿一段文本。
@@ -114,6 +163,7 @@ async fn compose_text(
     ctx: &Arc<dyn PluginInvokeRequest>,
     context: &SessionContext,
     verdict: &Verdict,
+    snapshot: &RunSnapshot,
 ) -> Option<String> {
     let parent = orchestrator.parent.as_ref()?;
     let session_id = ctx.get(SESSION_ID).unwrap_or_default();
@@ -128,6 +178,7 @@ async fn compose_text(
         session_id,
         verdict: verdict.clone(),
         context: conversation,
+        snapshot: snapshot.clone(),
     })
     .ok()?;
 

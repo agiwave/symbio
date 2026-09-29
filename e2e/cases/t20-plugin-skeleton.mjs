@@ -23,6 +23,12 @@ import './_selfrun.mjs';
 // | C 会话内边界 | 跑一轮真实工具回路：工具真落盘，且对话面节点**只由 `reply` 产出、只挂根级** |
 // | D 卸载 | 停用两个插件 ⇒ 路由消失（`NotFound`），而工具回路照旧跑通 |
 //
+// ## C 线为什么钉住 `progress_enabled = false`
+//
+// 它验的是**边界**（谁产出 / 挂在哪），而中途汇报会往同一轮里再加一条对话面节点
+// （`reason = progress`）。汇报自己见 `t23`；本线把开关关掉，让"恰有一条对话面节点"
+// 这个断言不依赖"本用例跑得比 `progress_interval_ms` 快"这种隐式前提。
+//
 // ## B 线为什么只断言"不需要模型"的路径
 //
 // 网关这条 ctx 里**没有能力访问器**（`CAPABILITY_VISITOR` 是装配期由容器挂上的），
@@ -31,7 +37,7 @@ import './_selfrun.mjs';
 // - `triage/decide`：规则命中 ⇒ 判决出来了（连模型都没有 ⇒ 这条路上没碰模型）；
 //   规则未命中 ⇒ 兜底 `Escalate`（失败方向是"照旧进工具循环"，绝不是 `Answered`）；
 // - `reply/compose`：模板产线照常出文本；**生成产线取不到模型 ⇒ 落变体兜底**；
-//   `Report` 本批无产线 ⇒ 空串（平凡值）。
+//   `Report` 走**填表**产线（事实随 `snapshot` 带来）⇒ 同样零往返、同样拿得到完整句子。
 //
 // ## 为什么经 gateway 而不是 CLI 命令
 //
@@ -113,7 +119,11 @@ export default defineCase(
     const GATEWAY_PORT = nextPort();
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
-      pluginConfigs: { gateway: gatewayConfig(GATEWAY_PORT) },
+      pluginConfigs: {
+        gateway: gatewayConfig(GATEWAY_PORT),
+        // 判决与措辞用出厂默认（本线验的正是它们），汇报关掉（理由见文件头）。
+        session: { progress_enabled: false },
+      },
     });
 
     /** 起一个长驻 CLI 并等网关就绪（本用例反复用两次：初始 / 停用后） */
@@ -198,8 +208,10 @@ export default defineCase(
       assertEq(undecided.body?.data?.reason, 'unclassified', '兜底理由码');
 
       /** 调一次 `reply/compose` 并取出文本（载荷形状见 `schemas::dialog::ComposeRequest`） */
-      const compose = async (verdict, context = []) => {
-        const r = await cli.invoke('reply/compose', { session_id: SID, verdict, context });
+      const compose = async (verdict, context = [], snapshot = null) => {
+        const payload = { session_id: SID, verdict, context };
+        if (snapshot) payload.snapshot = snapshot;
+        const r = await cli.invoke('reply/compose', payload);
         assertEq(
           r.status,
           200,
@@ -221,12 +233,13 @@ export default defineCase(
         FALLBACK_ANSWERED,
         '生成不了时应落 Answered 的变体兜底（绝不能是空白）',
       );
-      // ③ `Report` 本批没有产线 ⇒ 空串。空串是**平凡值**（"没有对话面文本"），
-      //    调用方据此不写节点——它必须与"生成失败"区分开：后者有兜底，前者没有。
+      // ③ `Report` 的产线是**填表**：事实随 `snapshot` 带来、措辞固定 ⇒ 零 LLM 往返，
+      //    因此网关这条**没有模型服务**的 ctx 照样拿得到完整句子。**逐字**比对轮次与
+      //    时长——"非空即可"在"返回一句与现状无关的通用话"的实现下也会通过。
       assertEq(
-        await compose({ verdict: 'report' }),
-        '',
-        'Report 本批无产线 ⇒ 空串（平凡值：没有对话面文本）',
+        await compose({ verdict: 'report' }, [], { tool_rounds: 3, quiet_ms: 125_000 }),
+        '已经完成 3 轮工具调用，用时约 2 分钟，还在继续。',
+        'Report 的措辞由运行现状填出（零 LLM 往返）',
       );
 
       // 路由是**静态分派**：未知子命令必须响亮失败，而不是"什么都接"

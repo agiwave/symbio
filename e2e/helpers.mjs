@@ -135,20 +135,24 @@ export class MockLlm {
  * 补充整合等**正交**机制，它们的断言多按"精确请求数"与"精确节点形态"写。不钉的话，
  * 一次对话面调优就会让一批无关用例变红——而那种红没有任何诊断价值。
  *
- * ## 为什么两个键都要给
+ * ## 为什么三个键都要给
  *
- * `triage_enabled = false` 已足够（没有判决就不会调 `reply`）。第二个键是**冗余但有意**：
- * 它让"本用例与对话面无关"这句话在夹具里自明，且日后若出现第二个判决生产者
- * （S4 的汇报走的是同一个 `triage` 路由，所以目前不会），本片段不需要重审。
+ * `reply_enabled = false` 已经足够：没有措辞就产不出任何对话面文本——判决判出来的
+ * 两个变体与中途汇报都要经它。另外两个键是**冗余但有意**：它们让"本用例与对话面
+ * 无关"这句话在夹具里**自明**，而不是依赖"当前恰好是谁在把门"。判决那一侧
+ * （`triage_enabled`）与汇报那一侧（`progress_enabled`）各自也是一道闸，其中任一道
+ * 被绕过、被重排，或阈值默认值被调小，本片段都不必重审。
  *
  * ## 对话面自己的用例怎么写
  *
- * `t21-triage` / `t22-reply` **显式**写出两个键的取值（含 `true`）——它们验的正是
- * 这个功能，不能依赖默认值（默认值翻转不该悄悄改变它们验的是什么）。
+ * `t21-triage` / `t22-reply` / `t23-progress-report` **显式**写出各自相关键的取值
+ * （含 `true`）——它们验的正是这个功能，不能依赖默认值（默认值翻转不该悄悄改变
+ * 它们验的是什么）。
  */
 export const DIALOG_FACE_OFF = Object.freeze({
   triage_enabled: false,
   reply_enabled: false,
+  progress_enabled: false,
 });
 
 export function makeHomedir({ providers, mcpServers, sessionConfig, pluginConfigs } = {}) {

@@ -242,6 +242,20 @@ impl SessionPlugin {
         // 对话面措辞的开关（`SessionConfig::reply_enabled`），同一条取值纪律。
         // 两级开关相互独立：判决决定"要不要干活"，措辞决定"说什么"。
         let reply_enabled = self.config.read().await.reply_enabled;
+        // 中途汇报的策略（`SessionConfig` 的四个旋钮），同一条取值纪律：一次锁、
+        // 一次映射。四个数合成一个结构体，因为它们是**同一个判定**的四个参数
+        // （见 `ProgressPolicy::due`）——平铺成四个字段会让"谁和谁是一组"只能靠命名猜。
+        let progress = {
+            let cfg = self.config.read().await;
+            super::super::chat_loop::ProgressPolicy {
+                enabled: cfg.progress_enabled,
+                // `u64` → `i64`：策略与时钟（`clock_now_ms`）比大小，同类型比较
+                // 不必每次转换。取值是毫秒级时长，远在 `i64` 范围内。
+                interval_ms: cfg.progress_interval_ms as i64,
+                min_rounds: cfg.progress_min_rounds,
+                max_per_turn: cfg.progress_max_per_turn,
+            }
+        };
 
         // 结构体字面量而不是 `new()`：字段全是 `pub`、构造点唯一，而字面量把"谁是谁"
         // 写在字段名上（八参的位置参数要靠数数），且字段增删由编译器在这里报错。
@@ -255,6 +269,7 @@ impl SessionPlugin {
             supplements: drain,
             triage_enabled,
             reply_enabled,
+            progress,
             // 会话目录 = **本插件自己的目录**（装配期由父插件经 `PLUGIN_DIR` 告知），
             // 不是任何全局系统根——子智能体下它指向子树，这正是作用域正确性的来源。
             session_dir: self.config_file.dir().clone(),

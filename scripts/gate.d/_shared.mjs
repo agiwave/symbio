@@ -269,7 +269,20 @@ export const BASELINE = {
   //           正文原样 / `surface` 字面量是跨端契约 / id 唯一）。
   //           `session/config` 6 → **7**（+1 净增：两个开关出厂默认翻 `true` + 相互独立，
   //           替换掉 S2 的 `triage_is_off_by_default`）。
-  rustTests: 1062,
+  // 2026-09-29：1062 → **1078**（+16）。对话面插件拆分 S4（中途汇报：轮边界判定 + `reply` 填表）。
+  //           `session/chat_loop/progress.test` **7** 例（`ProgressPolicy::due` 的逐条件钉法：
+  //           四条件全满足 / 关掉总开关 / 差 1ms 不报 / 轮次不够 / 配额用完 / 配额为 0 /
+  //           负静默时长不报——只验"全满足时汇报"在"恒返回 true"的实现下也通过）。
+  //           `session/chat_loop/compose.test` 10 → **12**（+2：`Report` 节点被对话线认下且带
+  //           剔除标记 / `reason = "progress"` 字面量是跨端契约）。
+  //           `session/config` 7 → **10**（+3：汇报出厂默认开启且三个上界都有意义 /
+  //           缺键落默认 / 汇报开关与另两个独立）。
+  //           `plugins/reply/templates.test` 8 → **11**（+3：`progress_text` 把现状说进
+  //           句子 / `tool_rounds=0` 不说"已完成 0 轮" / `humanize_ms` 的分档与边界；
+  //           另有 1 例改名：`report_has_no_template_yet` → `report_has_no_template_row`）。
+  //           `plugins/reply/plugin.test` 10 → **11**（+1 净增：`Report` 的填表产线零 LLM
+  //           往返 + 恒有话说，替换掉 S3 的 `report_yields_no_dialog_text_yet`）。
+  rustTests: 1078,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *
