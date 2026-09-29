@@ -7,6 +7,7 @@ mod creator;
 mod embedding;
 pub mod event_bus;
 pub mod exec;
+mod fact;
 mod keys;
 pub mod llm;
 mod logger;
@@ -60,6 +61,11 @@ pub use event_bus::{
 
 // ==================== 服务抽象 ====================
 pub use embedding::{EmbeddingError, EmbeddingService, EMBEDDING_LOCAL, EMBEDDING_NOOP};
+
+// ==================== 事实信封 ====================
+// 全系统可观测事实的统一**只读**公共面：信封 / 网格 / 派生源 trait。
+// 「写入仍走各自原有路径」——本域不提供任何写入口（见 `fact` 模块文档）。
+pub use fact::{Fact, FactError, FactKind, FactPrincipal, FactSource, FACT_NONE_SEQ};
 
 // ==================== 插件契约 ====================
 pub use capability::{

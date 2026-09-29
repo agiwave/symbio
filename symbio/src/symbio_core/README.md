@@ -84,7 +84,7 @@
    协议 schema 的词汇表就是它的命名空间，收敛成平铺反而丢失 `session::chat_message`
    这类语义。其余深路径（`symbio_core::plugin::dir::` 之类）视为不规范，应改为根平铺。
 
-### 域前缀对照表（全 14 域 —— 新增符号照此取名）
+### 域前缀对照表（全 15 域 —— 新增符号照此取名）
 
 这张表是第 2 条的**唯一执行口径**：拿不准新符号叫什么，先在这里查它的域。
 「—」= 该域没有这一类符号（不是「不用前缀」）。**一个前缀只属于一个域。**
@@ -99,6 +99,7 @@
 | `clock` | — | — | `clock_` | 只有一个函数 |
 | `creator` | — | — | `creator_` | 通用对象创建注册表：按 id 装配**任意**类型对象，见 §2 |
 | `embedding` | `Embedding` | `EMBEDDING_` | — | 服务 id 在 `embedding/ids.rs` |
+| `fact` | `Fact` | `FACT_` | — | 统一事实信封：`Fact` · `FactKind` · `FactPrincipal` · `FactSource`（trait）· `FACT_NONE_SEQ`。「事实」概念跨域共享，故住 core |
 | `event_bus` | `EventBus` | `EVENT_BUS_` | `event_bus_` | |
 | `exec` | `Exec` | — | — | 本域无常量 |
 | `keys` | `…Key`（**后缀**） | **裸名**（实例） | — | 只有键：类型带 `Key` 后缀、实例裸名。**本域不收字符串常量** |
@@ -136,6 +137,7 @@
 | `embedding` | 嵌入服务的**抽象**（实现在 `src/providers/embedding`） | `EmbeddingService` · `EmbeddingError` · `EMBEDDING_LOCAL` / `EMBEDDING_NOOP` | `ids` |
 | `event_bus` | 跨插件全局发布设施门面 + 频道词表 | `EventBus` · `EventBusSubscribeRequest` · `EVENT_BUS_KIND_SYSTEM` · `EVENT_BUS_KIND_VDFS` · `EVENT_BUS_RESYNC_MARKER_TYPE` | — |
 | `exec` | 执行期原语：事件出口（出）与中止信号（入） | `ExecEventSink` · `ExecAbortSignal` · `ExecEnv` · `ExecTranscriptWriter` | — |
+| `fact` | 统一事实信封：把各域（三套方言）的可观测事实归一到**一个只读形状**，供跨域消费（检索 / 巩固 / 审计）。是**派生视图**，不做存储 | `Fact` · `FactKind` · `FactPrincipal` · `FactError` · `FactSource`（派生契约）· `FACT_NONE_SEQ` | `kind` · `envelope` |
 | `keys` | **类型安全上下文键**（只有键：trait + 类型 + 实例） | `SymbioKey` 及其实例（`PATH` · `WORKDIR` · `ID` · `NAME` · `PLUGIN_DIR` · `CAPABILITY_VISITOR` · `CAPABILITY_ERRORS` …） | — |
 | `llm` | 模型服务的唯一契约面（协议无关、插件无关）——只留**多消费方**共用的符号（唯一例外 `llm_message_frame` 见 ADR-038） | `ModelProvider` · `ModelFinishReason` · `ModelUsage` · `TurnOutput`（`tool_calls` 是**结果形态**，只装结果不装过程；累积过程住 `plugins/model/tool_accumulator.rs`，三个读方法 `is_reasoning_only` / `effective_text` / `into_messages` 住 `plugins/session/message_build.rs`）· `TurnToolCallInfo` · 帧 `llm_emit_message` / `llm_message_frame` / `llm_removed_frame` · id 原语 `llm_short_id` | `model_provider` · `turn` |
 | `logger` | 结构化日志与级别闸门 | 日志宏 · `LOG_LEVEL_*`（`MIN_LEVEL` 是**私有**静态量，不是公开面） | — |

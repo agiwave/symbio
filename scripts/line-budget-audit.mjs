@@ -75,7 +75,12 @@ export const LINE_BUDGET_BASELINES = {
   "symbio/src/plugins/work": { maxLines: 627, exts: [".rs"] },
 
   // ── 内核与驱动层（symbio/src/*） ──
-  "symbio/src/symbio_core": { maxLines: 8143, exts: [".rs"] },
+  // 2026-09-29：v2 桥接 B1「事实信封」落地——新增 `fact` 域（`FactKind` 七实体×动词
+  // 枚举 + `Fact` 只读信封 + `FactPrincipal` + `FactSource` 异步源 trait + `FactError`，
+  // 实现 ~413 行，测试另计），`CapabilityVisitor` 增 3 个事实源登记方法
+  // （`register_fact_source` / `list_fact_sources` / `get_fact_source`）。
+  // 基线 8143 → 8610（+467）。该域为 v2 投影表的前置只读视图，不触碰既有存储层。
+  "symbio/src/symbio_core": { maxLines: 8610, exts: [".rs"] },
   "symbio/src/providers": { maxLines: 2732, exts: [".rs"] },
 
   // ── 宿主与工具层 ──

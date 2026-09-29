@@ -352,6 +352,52 @@ pub trait CapabilityVisitor: Send + Sync + 'static {
     async fn get_vdfs_root(&self) -> Option<Arc<dyn crate::symbio_core::VdfsProvider>> {
         None
     }
+
+    // ==================== 事实源（唯一可观测事实的登记面） ====================
+
+    /// 登记一个事实源（**多槽**，按 `name` 去重；重复登记后者覆盖）。
+    ///
+    /// ## 定位：新能力与既有域之间的**唯一解耦点**
+    ///
+    /// 「谁产生了哪些事实」是一个跨域的公共知识。若让消费方（检索者 / 巩固者 /
+    /// 审计者）直接去找产生方，就产生了**插件间依赖**——本仓明令禁止
+    /// （见 `plugins/mod.rs` 的插件独立原则）。本通道把这条依赖**挪到 core**：
+    ///
+    /// ```text
+    /// 传统形态（禁止）                        本方案
+    ///   检索者 ──import── session               检索者 ──┐
+    ///   审计者 ──import── vdfs                 审计者 ──┼── FactSource（core）── 各域
+    ///   巩固者 ──import── memory               巩固者 ──┘
+    /// ```
+    ///
+    /// 与工具 / 模型服务 / VDFS provider **共用同一次 `traverse` 广播**：产生方在自己的
+    /// `TRAVERSE_AVAILABLE_TOOLS` 分支里顺带登记事实源，不新增任何收集通道。
+    ///
+    /// ## 平凡值（J2）
+    ///
+    /// **不登记 = 不贡献事实**。消费方取不到时按"无事实"处理，系统照常运行。
+    /// 这是"可选能力"的字面实现。
+    ///
+    /// 默认 no-op —— 不产生事实的实现方无需关心。
+    async fn register_fact_source(
+        &self,
+        _name: &str,
+        _source: Arc<dyn crate::symbio_core::FactSource>,
+    ) {
+    }
+
+    /// 列出已登记的事实源：`(名字, 实现)`，按登记顺序稳定排序。
+    async fn list_fact_sources(&self) -> Vec<(String, Arc<dyn crate::symbio_core::FactSource>)> {
+        Vec::new()
+    }
+
+    /// 按名字查询事实源（`None` = 该域未接入事实日志，不是错误）。
+    async fn get_fact_source(
+        &self,
+        _name: &str,
+    ) -> Option<Arc<dyn crate::symbio_core::FactSource>> {
+        None
+    }
 }
 
 #[cfg(test)]

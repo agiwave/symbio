@@ -30,6 +30,7 @@
 mod agent;
 mod composite;
 mod event_bus;
+mod fact_log;
 mod gateway;
 mod home;
 mod hook;

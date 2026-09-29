@@ -64,6 +64,8 @@ pub const PLUGIN_ID_HOOK: &str = "hook";
 pub const PLUGIN_ID_VDFS: &str = "vdfs";
 /// Event Bus 插件工厂（统一事件总线）
 pub const PLUGIN_ID_EVENT_BUS: &str = "event_bus";
+/// Fact Log 插件工厂（可选的事实日志：把各域的可观测事实聚合为只读序列）
+pub const PLUGIN_ID_FACT_LOG: &str = "fact_log";
 
 // 注：`SYSTEM_LEVEL_PROVIDERS`（「系统级插件不参与容器扫描」）不在这里——它只被
 // `plugins/composite` 一个模块消费，按 ADR-023 的依赖方判据已下沉到该模块。

@@ -72,6 +72,9 @@ async function main() {
         encoding: 'utf8',
         timeout: 180_000,
         maxBuffer: 16 * 1024 * 1024,
+        // stdin 显式 'ignore'：本机 `spawnSync` 建 stdin 管道会 EBUSY（详见
+        // e2e/helpers.mjs::runCli 的同款注释）。用例子进程不读 stdin。
+        stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env, E2E_CASE_SELF: '1' },
       },
     );

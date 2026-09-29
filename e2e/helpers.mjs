@@ -7,7 +7,7 @@
 // - 每个用例独立的临时 homedir + 独立 mock 实例，互不串扰。
 
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync, rmSync, openSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -213,14 +213,36 @@ export function runCli({ homedir, workdir, message, provider = null, session = n
   if (session) argv.push('--session', session);
   if (stdinText != null) argv.push('--repl'); // stdin 喂多轮时强制 REPL
 
+  // stdio 显式声明，**stdin 绝不用 `'pipe'`**——这是本机环境的硬约束，不是风格偏好。
+  //
+  // Node 的 `spawnSync` 在本仓 CI/开发机上给子进程建 stdin 管道会以 `EBUSY` 失败
+  // （`spawnSync <任何 exe> EBUSY`，连 `cmd /c echo` 都一样）。实测：`stdio[0]` 取
+  // `'ignore'` / `'inherit'` / 文件 fd 都成功，取 `'pipe'`（含默认 + `input: ''`）
+  // 必失败。表现极具误导性——`code = -1` + 空 stdout/stderr，看起来像「CLI 崩了」。
+  //
+  // 因此：不需要喂输入 → `'ignore'`；需要喂输入 → 写临时文件、用 fd 当 stdin
+  // （fd 语义与管道相同：子进程照常读到内容并等到 EOF）。两者都不经过管道。
   const t0 = Date.now();
-  const r = spawnSync(exe, argv.slice(1), {
-    encoding: 'utf8',
-    timeout: timeoutMs,
-    input: stdinText ?? '',
-    maxBuffer: 64 * 1024 * 1024,
-    env: { ...process.env, E2E_STDIO: '1', ...env },
-  });
+  let tmpStdin = null;
+  let inFd = null;
+  if (stdinText != null) {
+    tmpStdin = join(mkdtempSync(join(tmpdir(), 'symbio-e2e-stdin-')), 'in.txt');
+    writeFileSync(tmpStdin, stdinText);
+    inFd = openSync(tmpStdin, 'r');
+  }
+  let r;
+  try {
+    r = spawnSync(exe, argv.slice(1), {
+      encoding: 'utf8',
+      timeout: timeoutMs,
+      stdio: [inFd ?? 'ignore', 'pipe', 'pipe'],
+      maxBuffer: 64 * 1024 * 1024,
+      env: { ...process.env, E2E_STDIO: '1', ...env },
+    });
+  } finally {
+    if (inFd != null) closeSync(inFd);
+    if (tmpStdin != null) rmSync(dirname(tmpStdin), { recursive: true, force: true });
+  }
   return {
     code: r.status ?? -1,
     stdout: r.stdout ?? '',
@@ -263,7 +285,20 @@ export function startLongLivedCli({ homedir, workdir, session = 'e2e-live', mode
     send(message) {
       child.stdin.write(`${message}\n`);
     },
-    /** 等网关入站服务就绪（真实边界探活：GET /api/v1/health） */
+    /**
+     * 等网关入站服务**可路由**就绪。
+     *
+     * 两步，缺一不可：
+     * 1. `GET /api/v1/health` ⇒ `{"ok":true}`：**存活**探针，只说明监听套接字已就绪。
+     *    它是硬编码回包（`gateway/server.rs`），**不反映插件树是否装配完**。
+     * 2. `POST /api/v1/invoke` 打一条真实路由 `vdfs/root` 直到 200：**就绪**探针。
+     *
+     * 为什么第 2 步是必须的：网关开始监听与容器 `mount_all` 完成之间存在**竞态窗口**
+     * （实测复现：health 已 OK，随后 `vdfs/root` 偶发 `Composite: 路径 'vdfs/root' 无法
+     * 识别或子插件未挂载`）。只探 health 时，用例会以「插件没挂载」的假象失败——
+     * 排查方向被引到插件装配，而真因只是**探活探早了**。轮询一条必经 `vdfs` 的
+     * 真实路径，等于「网关+插件树都稳定可服务」的判据。
+     */
     async waitGatewayReady(timeoutMs = 20_000) {
       try {
         await waitFor(
@@ -276,6 +311,22 @@ export function startLongLivedCli({ homedir, workdir, session = 'e2e-live', mode
             }
           },
           { what: 'gateway /api/v1/health', timeoutMs },
+        );
+        // 就绪探针：插件树尚未装配完时，这条会 400；装配完才 200。
+        await waitFor(
+          async () => {
+            try {
+              const r = await fetch(`http://127.0.0.1:${gatewayPort}/api/v1/invoke`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ metadata: { path: 'vdfs/root' }, payload: {} }),
+              });
+              return r.status === 200;
+            } catch {
+              return false;
+            }
+          },
+          { what: 'gateway 插件树可路由（vdfs/root 200）', timeoutMs },
         );
       } catch (e) {
         // 超时必带诊断：网关绑定失败/插件装配失败的线索都在 stderr

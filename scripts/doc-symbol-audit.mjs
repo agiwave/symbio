@@ -19,9 +19,10 @@
  *     模块内 use），逐一解析必然误报；
  *   - 整词集合而非子串：`register_option` 不会误匹配 `register_option_field`。
  *
- * 豁免（都对应「文档说的是历史」）：
- *   1. `docs/DECISIONS.md` 与 `docs/archive/` 整体排除——ADR / 归档是历史
- *      快照，当时的符号指认不随代码改名回改（回改反而篡改历史）；
+ * 豁免（都对应「文档说的不是当前实现」）：
+ *   1. `docs/DECISIONS.md`（历史快照）、`docs/archive/`（归档）、`docs/plan/`（前瞻计划）
+ *      整体排除——ADR / 归档 / 计划里的符号指认本就不对应「现在存在的代码」：
+ *      归档说的是过去、计划说的是将来，按现状回改反而篡改原意；
  *   2. 行内含历史词（已删除 / 已退役 / 已废弃 / deprecated / 取代）⇒ 跳过，
  *      如迁移表里「已删除」的行；
  *   3. 承认通道：行内 `<!-- doc-symbol-allow: <理由> -->`，**理由不可为空**
@@ -56,6 +57,8 @@ const RS_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src']
 const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'tmp', '.workbuddy-ai'])
 /** 整文件排除（历史快照，指认不随代码改名回改） */
 const EXCLUDE_MD = new Set(['docs/DECISIONS.md'])
+/** 整目录排除（非「现行实现」的文档：历史快照与前瞻计划，指认不随代码改名回改） */
+const EXCLUDE_DIRS = new Set(['docs/archive', 'docs/plan'])
 /** 行内历史词：这行说的是过去，符号现在不存在是正常的 */
 const HISTORY_RE = /已删除|已退役|已废弃|deprecated|取代/
 /** 承认通道，理由非空才生效 */
@@ -74,7 +77,7 @@ function collectMd (dir, prefix = '') {
     const rel = prefix ? `${prefix}/${ent.name}` : ent.name
     if (ent.isDirectory()) {
       if (SKIP_DIRS.has(ent.name)) continue
-      if (rel === 'docs/archive') continue
+      if (EXCLUDE_DIRS.has(rel)) continue
       out.push(...collectMd(join(dir, ent.name), rel))
     } else if (ent.name.endsWith('.md') && !EXCLUDE_MD.has(rel)) {
       out.push(rel)
