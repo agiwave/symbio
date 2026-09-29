@@ -47,6 +47,7 @@ D-006 是 D-001 的盲区补丁：D-001 只认 Markdown 链接语法（方括号
 | 为什么这样设计（含被否决的方案与理由） | [DECISIONS.md](./DECISIONS.md) | 其它文档只引用 ADR 编号 |
 | 模块内部机制 | 该模块 `README.md` | 系统级文档不复述 |
 | 模块深度设计与不变量 | 该模块 `docs/` | — |
+| **目标架构（v2）与迁移计划** | [plan/README.md](./plan/README.md) | 其余文档只引用，不复述取舍 |
 | 变更历史（改了什么、何时改的） | `git log` | **现行文档不写变更史**（见下） |
 | 一次性评审 / 迁移记录 / 体检报告 | `docs/archive/` | 活文档不保留过程日志 |
 
@@ -78,6 +79,7 @@ D-006 是 D-001 的盲区补丁：D-001 只认 Markdown 链接语法（方括号
 | 开发新插件 | [PLUGIN_DEVELOPMENT.md](./guides/PLUGIN_DEVELOPMENT.md) |
 | 排查问题 | [TROUBLESHOOTING.md](./guides/TROUBLESHOOTING.md) |
 | 了解设计决策 | [DECISIONS.md](./DECISIONS.md) |
+| 了解**目标架构（v2）**与分步迁移计划 | [plan/README.md](./plan/README.md)（**先读其 §0.1：v2 是本仓的目标架构**） |
 | 查「某条约定写在哪」 | `node scripts/doc-find.mjs <词>`（全仓 md + Rust 文档注释检索） |
 | 看某个插件/前端的职责与机制 | 各模块 `README.md`（见下方模块文档地图） |
 
@@ -92,6 +94,7 @@ D-006 是 D-001 的盲区补丁：D-001 只认 Markdown 链接语法（方括号
 | `docs/reference/` | 路由 / 错误码 / 配置的权威参考页 |
 | `docs/guides/` | 上手 / 插件开发 / 排障 |
 | `docs/design/` | 跨层设计规范（VDFS、agent 目录、HTTP 传输…）；**只放规范** |
+| `docs/plan/` | **目标架构（v2）+ 迁移计划**：核心架构 / 能力坐标系 / 演进验证 / 工程落地 / 模块架构，附 `roadmap/`（13 阶能力扩充）与 `verify/`（可编译运行的验证程序）；**读之前先看 [plan/README.md §0.1](./plan/README.md)** |
 | `docs/archive/` | 历史归档：已废止的旧机制 / 旧规范、一次性评审与体检、已落地的实施方案与迁移；**变更历史以 `git log` 为准，本仓库不维护 CHANGELOG** |
 | 模块目录 | `symbio/src/plugins/<plugin>/README.md`（+ 可选 `docs/`）、`tauri/`、`cli/`——就近放置，受同一「过程文档必须归档」约束 |
 
