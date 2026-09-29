@@ -90,7 +90,11 @@ pub fn snapshot_slot_seq(compressed: &[ChatMessage], keep: &[ChatMessage]) -> Op
 ///    30% 保留语义，且会把进行中的 tool_calls 压成孤儿（结果子节点失去父节点）。
 /// 2. 尾部若存在未配对的 ToolCall（结果子节点尚未落库，典型于 continuation 场景），
 ///    任何切分都可能拆散配对，返回 0 放弃本轮压缩。
-fn find_compress_split_point(messages: &[ChatMessage], fraction: f64) -> usize {
+///
+/// `pub(crate)`：投影登记表（`session::projections`）需要一个**只读**的切分点
+/// 观测口——它直接调本函数，而不是把规则抄一遍（同一规则只有一个实现，
+/// 见 `symbio_core/README.md` §4）。
+pub(crate) fn find_compress_split_point(messages: &[ChatMessage], fraction: f64) -> usize {
     if fraction <= 0.0 || fraction >= 1.0 || messages.is_empty() {
         return 0;
     }

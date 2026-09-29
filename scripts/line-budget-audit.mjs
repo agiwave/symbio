@@ -67,7 +67,12 @@ export const LINE_BUDGET_BASELINES = {
   "symbio/src/plugins/mcp": { maxLines: 2897, exts: [".rs"] },
   "symbio/src/plugins/model": { maxLines: 6212, exts: [".rs"] },
   "symbio/src/plugins/plugin_manager": { maxLines: 666, exts: [".rs"] },
-  "symbio/src/plugins/session": { maxLines: 16790, exts: [".rs"] },
+  // 2026-09-29（B2）：v2 桥接「投影表」落地——`session` 增 `projections.rs`
+  // （三个既有纯函数 `sliding_window` / `fade_aged_content_nodes` /
+  // `find_compress_split_point` 的**薄适配器** + 登记点；既有函数本体零改动，
+  // `find_compress_split_point` 由 `fn` 提为 `pub(crate)` 供投影直调）。
+  // 基线 16790 → 16993（+203）。测试另计（`projections.test.rs`）。
+  "symbio/src/plugins/session": { maxLines: 16993, exts: [".rs"] },
   "symbio/src/plugins/skill": { maxLines: 1470, exts: [".rs"] },
   "symbio/src/plugins/telegram": { maxLines: 887, exts: [".rs"] },
   "symbio/src/plugins/vdfs": { maxLines: 3012, exts: [".rs"] },
@@ -80,7 +85,13 @@ export const LINE_BUDGET_BASELINES = {
   // 实现 ~413 行，测试另计），`CapabilityVisitor` 增 3 个事实源登记方法
   // （`register_fact_source` / `list_fact_sources` / `get_fact_source`）。
   // 基线 8143 → 8610（+467）。该域为 v2 投影表的前置只读视图，不触碰既有存储层。
-  "symbio/src/symbio_core": { maxLines: 8610, exts: [".rs"] },
+  // 2026-09-29（B2）：v2 桥接「投影表」落地——新增 `projection` 域
+  // （`registry.rs`：`Projection` 私有构造 + `ProjectionInput` + 类型擦除
+  // `ProjectionFn` / `ProjectionSubmit` + `inventory` 登记表 + `projection_list` /
+  // `projection_run` / `projection_has` + `submit_projection!` 宏；`view.rs`：
+  // `View` 平凡值可区分；`ProjectionError`。实现 ~347 行，测试另计）。
+  // 基线 8610 → 8959（+349）。
+  "symbio/src/symbio_core": { maxLines: 8959, exts: [".rs"] },
   "symbio/src/providers": { maxLines: 2732, exts: [".rs"] },
 
   // ── 宿主与工具层 ──

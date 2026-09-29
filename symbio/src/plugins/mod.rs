@@ -38,6 +38,7 @@ mod local;
 mod mcp;
 mod model;
 mod plugin_manager;
+mod projection;
 mod session;
 mod skill;
 mod telegram;

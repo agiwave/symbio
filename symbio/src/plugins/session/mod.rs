@@ -14,6 +14,7 @@ mod model_chat;
 mod options;
 mod orchestrator;
 pub(crate) mod paths;
+mod projections;
 mod resume;
 mod tokenizer;
 mod transcript;

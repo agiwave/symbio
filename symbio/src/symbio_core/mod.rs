@@ -12,6 +12,7 @@ mod keys;
 pub mod llm;
 mod logger;
 mod plugin;
+mod projection;
 pub mod schemas;
 mod text;
 pub mod vdfs;
@@ -66,6 +67,15 @@ pub use embedding::{EmbeddingError, EmbeddingService, EMBEDDING_LOCAL, EMBEDDING
 // 全系统可观测事实的统一**只读**公共面：信封 / 网格 / 派生源 trait。
 // 「写入仍走各自原有路径」——本域不提供任何写入口（见 `fact` 模块文档）。
 pub use fact::{Fact, FactError, FactKind, FactPrincipal, FactSource, FACT_NONE_SEQ};
+
+// ==================== 投影契约 ====================
+// 受约束的**纯投影**：只登记、不搬迁；新增必须经 `Projection::new`（签名即纯净性约束），
+// 既有裸函数不被强制。契约住 core，实现住各自插件——消费方按名字取用，不必认识产生方。
+// 注意：submit_projection! 宏已通过 #[macro_export] 导出到 crate 根目录
+pub use projection::{
+    projection_list, projection_has, projection_run, Projection, ProjectionError, ProjectionFn,
+    ProjectionInput, ProjectionSubmit, View,
+};
 
 // ==================== 插件契约 ====================
 pub use capability::{
