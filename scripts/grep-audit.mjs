@@ -16,6 +16,8 @@
  *   - S-008:        VdfsNode.status 用裸字面量赋值（词表只有 `VDFS_STATUS_*`）
  *   - S-009:        事件总线 kind 用裸字面量（词表只有 `KIND_*`）
  *   - S-010:        vdfs 挂载根名字面量不得出现在 vdfs 插件之外（仓级）
+ *   - S-011:        补充抽干点必须夹在 `gate_turn` 与 `prepare_turn_inputs` 之间
+ *                   （`session/chat_loop.rs`；位置错了不会有任何测试变红）
  *
  * 用法：
  *   node scripts/grep-audit.mjs            # 审计 symbio/src/plugins（全部插件）
@@ -405,6 +407,91 @@ for (const file of s010Files) {
   })
 }
 if (s010 === 0) ok('S-010 通过：根名字面量只在 vdfs 插件内')
+console.log()
+
+// ── S-011: 补充抽干点必须夹在 `gate_turn` 与 `prepare_turn_inputs` 之间 ──
+//
+// `chat_loop.rs` 里读 `orchestrator.supplements` 的那一段（补充整合的轮边界抽干点）
+// **前移或后移都不会有任何测试变红**：
+//   · 前移到 `gate_turn` **之前** ⇒ 闸门 `Exit` / `WaitForTools` 时队列已被消费却
+//     没人用它——用户那句补充进了转写，但模型从没见过它，静默消失；
+//   · 后移到 `prepare_turn_inputs` **之后** ⇒ 合并消息不在本轮请求里，白折一轮；
+//   · 移进工具批次中间（`assistant(tool_calls)` 与 `tool` 结果之间）⇒ 部分协议直接
+//     400——这是三种里**唯一会响**的那种。
+// 正是 J3 的形态：**违反时不产生错误信号的约束，必须外置为断言**。
+// 文档侧的定义见 `docs/plan/09-对话面插件拆分实施方案.md` §5 S0 的 C-D2b。
+//
+// 判据（只认 `plugins/session/chat_loop.rs` 一个文件，且**只认代码行**）：
+//   line(`gate_turn(` 调用) < line(`orchestrator.supplements`) < line(`prepare_turn_inputs(` 调用)
+// 三个锚点**任一找不到即 ERROR**：找不到不等于"无需检查"——那说明抽干点被删了
+// （那就该连本规则与文档一起改）或被改名了（那本规则必须同步）。**让守卫悄悄退化成
+// 空转，比没有守卫更糟**（它会以绿灯的形式提供虚假保证）。
+// 这也是为什么"锚点缺失"**不接受豁免**：豁免的前提是"我看过并确认没问题"，
+// 而锚点缺失时根本无从判断。
+//
+// 豁免：`// grep-audit-allow S-011: 理由`（写在抽干行上，理由不可为空）——
+// 只在"位置确实不对但已确认可接受"时用。
+console.log('--- S-011: 补充抽干点位置检查 ---')
+
+const S011_GATE_RE = /gate_turn\s*\(/
+/** `fn gate_turn(...)` 是**定义**，不是调用点，必须排除 */
+const S011_GATE_DEF_RE = /\bfn\s+gate_turn\s*\(/
+const S011_DRAIN_RE = /orchestrator\.supplements\b/
+const S011_PREP_RE = /prepare_turn_inputs\s*\(/
+const WAIVER_S011_RE = /\/\/\s*grep-audit-allow S-011:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
+
+const s011Entry = [...linesOf.entries()].find(([f]) =>
+  f.split(path.sep).join('/').endsWith('plugins/session/chat_loop.rs'),
+)
+
+if (!s011Entry) {
+  ok('S-011 跳过：scope 内没有 plugins/session/chat_loop.rs')
+} else {
+  const [s011File, s011Lines] = s011Entry
+  // 只认代码行：本文件恰好有一大段解释"为什么放在这里"的注释，注释里提到
+  // `gate_turn` 不等于调用它。**注释掉抽干调用**会被判成"锚点缺失"（响亮），
+  // 这正是想要的——注释掉一个守卫点，不该得到绿灯。
+  const firstLine = (re, exclude) => {
+    for (let i = 0; i < s011Lines.length; i++) {
+      const l = s011Lines[i]
+      if (l.trimStart().startsWith('//')) continue
+      if (!re.test(l)) continue
+      if (exclude && exclude.test(l)) continue
+      return i + 1
+    }
+    return null
+  }
+
+  const gateAt = firstLine(S011_GATE_RE, S011_GATE_DEF_RE)
+  const drainAt = firstLine(S011_DRAIN_RE)
+  const prepAt = firstLine(S011_PREP_RE)
+  const rel = disp(s011File)
+
+  const missing = []
+  if (gateAt == null) missing.push('`gate_turn` 调用')
+  if (drainAt == null) missing.push('`orchestrator.supplements` 抽干点')
+  if (prepAt == null) missing.push('`prepare_turn_inputs` 调用')
+
+  if (missing.length > 0) {
+    err(
+      `${rel}  S-011 锚点缺失：${missing.join(' / ')}——抽干点被删除或改名了？` +
+        `守卫不得悄悄退化成空转：同步更新本规则与 docs/plan/09 §5 S0 的 C-D2b`,
+    )
+  } else if (!(gateAt < drainAt && drainAt < prepAt)) {
+    if (WAIVER_S011_RE.test(s011Lines[drainAt - 1])) {
+      ok('S-011 通过（逐行豁免：位置已确认可接受）')
+    } else {
+      err(
+        `${rel}  S-011 抽干点位置错（gate_turn@${gateAt} → supplements@${drainAt} → ` +
+          `prepare_turn_inputs@${prepAt}）：必须在 gate_turn **之后**（否则闸门 Exit / ` +
+          `WaitForTools 时队列被消费却没人用，补充被静默吞掉）、prepare_turn_inputs ` +
+          `**之前**（否则合并消息进不了本轮请求）`,
+      )
+    }
+  } else {
+    ok(`S-011 通过：抽干点夹在 gate_turn(${gateAt}) 与 prepare_turn_inputs(${prepAt}) 之间`)
+  }
+}
 console.log()
 
 // ── 汇总 ───────────────────────────────────────────────────────────────

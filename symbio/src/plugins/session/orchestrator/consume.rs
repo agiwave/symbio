@@ -216,6 +216,12 @@ impl SessionPlugin {
             super::super::chat_loop::CompressionEmitter::new(self.clone(), state.clone()),
         ));
 
+        // 轮边界补充整合的落点：抽干队列要读 `active_mgr` 与 `config`，两者都在插件上
+        // ——与 `phase` 同形注入，不新增第二种手法（见 `SupplementDrain` 的文档）。
+        let drain = Some(std::sync::Arc::new(
+            super::super::chat_loop::SupplementDrain::new(self.clone(), state.clone()),
+        ));
+
         // ── 本 Turn 的两个执行期原语 ────────────────────────────────────────
         //
         // 出口：进程内直连转写唯一写入点。执行期的每一次节点变更直接落进
@@ -235,6 +241,7 @@ impl SessionPlugin {
             context_limit,
             stop.clone(),
             phase,
+            drain,
             // 会话目录 = **本插件自己的目录**（装配期由父插件经 `PLUGIN_DIR` 告知），
             // 不是任何全局系统根——子智能体下它指向子树，这正是作用域正确性的来源。
             self.config_file.dir().clone(),

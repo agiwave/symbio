@@ -35,8 +35,9 @@
 //! 装配顺序（脆弱且不可测）。实例级消费者在构造点起，**早于任何写入**，与谁写、
 //! 什么时候写无关。
 
-use super::super::active::InboxItem;
+use super::super::active::{ActiveSessionState, InboxItem};
 use super::super::plugin::{inbox_item_node, inbox_item_path, SessionPlugin};
+use super::supplements;
 use crate::symbio_core::schemas::{session::chat_message as cm, session::session_chat};
 use crate::symbio_core::{
     vdfs, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, SESSION_ID, WORKDIR,
@@ -189,10 +190,23 @@ impl SessionPlugin {
         false
     }
 
-    /// 扫一遍所有会话，为**空闲**且队列非空的会话各取出一条开跑。
+    /// 扫一遍所有会话，为**空闲**且队列非空的会话各抽一批开跑。
     ///
     /// 返回"这一趟是否启动了至少一轮"——调用方据此决定是立刻再扫（可能还有别的
     /// 会话排着）还是转入等待。
+    ///
+    /// ## 抽干整队，而不是取一条（补充整合）
+    ///
+    /// 一次抽干**整队**（至多 `supplements_max_per_drain` 条）并合并成**一条**
+    /// 用户消息（见 [`supplements`]）。于是"用户连发三条"不再各占一轮，而是作为
+    /// **同一轮**的一条输入被整体处理。
+    ///
+    /// 只抽一条（今天的行为）会让 n 条补充吃掉 n 份存储裁剪预算——裁剪按
+    /// `role = User` 的消息数算分水岭（`chat_session/write.rs::prune_historical_tool_calls`），
+    /// 用户多说的两句话会让历史悄悄少两轮。
+    ///
+    /// `supplements_enabled = false`（平凡值）或 `max_per_drain = 1` 时退化为
+    /// "取一条"，与今天逐字一致。
     pub(crate) async fn drain_inbox_once(self: Arc<Self>) -> bool {
         let sessions = self.active_mgr.sessions.read().await;
         let states: Vec<_> = sessions.values().cloned().collect();
@@ -206,37 +220,70 @@ impl SessionPlugin {
             }
             // 出队。写完即释放锁——`start_turn` 还会去写同一把锁。
             //
-            // **出队要发一条变更**：条目已经不在队列里了，而不通知就等于告诉订阅方
+            // **出队要逐条发变更**：条目已经不在队列里了，而不通知就等于告诉订阅方
             // 「它还在」。变更是**无载荷**的（`bare`）——删掉的节点本就没有视图可带，
             // 消费方按「载荷缺失 + 回读 NotFound」收敛（ADR-025 的删除表达）。
             // 与 `cancel_inbox_item` 同一手法：两种「没了」对订阅方是同一件事。
-            let item = {
-                let mut inner = state.inner.write().await;
-                inner.inbox.pop_front()
-            };
-            let Some(item) = item else { continue };
-            self.change_subs
-                .notify(&vdfs::VdfsChange::bare(inbox_item_path(
-                    &state.session_id,
-                    &item.id,
-                )));
+            let batch = self.take_inbox_batch(&state).await;
+            if batch.is_empty() {
+                continue;
+            }
 
-            match self.clone().run_inbox_turn(&state.session_id, &item).await {
+            match self.clone().run_inbox_turn(&state.session_id, &batch).await {
                 Ok(()) => started = true,
                 Err(e) => {
                     crate::plugin_error!(
                         "session",
                         "收件箱条目 {} 未能启动（会话 {}）：{}",
-                        item.id,
+                        batch[0].id,
                         state.session_id,
                         e
                     );
-                    // 启动失败 = 这一条没被消费。放回队首，等下一趟（用户也可删它）
-                    state.inner.write().await.inbox.push_front(item);
+                    // 启动失败 = 这一批没被消费。**按原顺序整体放回队首**：
+                    // 倒序 push_front 才是原顺序——顺序是这个队列唯一的不变量
+                    // （FIFO，ADR-026），放错就再也对不回来。
+                    let mut inner = state.inner.write().await;
+                    for item in batch.into_iter().rev() {
+                        inner.inbox.push_front(item);
+                    }
                 }
             }
         }
         started
+    }
+
+    /// 取走该会话队首的一批条目（至多 `supplements_max_per_drain` 条），并逐条发删除变更。
+    ///
+    /// 抽干与变更通知必须成对：分开写就会出现"抽了没通知"（前端以为条目还在）
+    /// 或"通知了没抽"（条目凭空消失）两种静默不一致。
+    ///
+    /// `pub(crate)`：轮边界抽干（[`super::super::chat_loop::SupplementDrain`]）经它取批，
+    /// 再交给 [`super::supplements::merge_supplements`] 合并。两个抽干点共用同一个取批
+    /// 实现——各写一遍必然在"上界取谁""变更发几次"上漂移。
+    pub(crate) async fn take_inbox_batch(&self, state: &Arc<ActiveSessionState>) -> Vec<InboxItem> {
+        let limit = {
+            let cfg = self.config.read().await;
+            if cfg.supplements_enabled {
+                cfg.supplements_max_per_drain.max(1)
+            } else {
+                1
+            }
+        };
+
+        let batch: Vec<InboxItem> = {
+            let mut inner = state.inner.write().await;
+            let n = inner.inbox.len().min(limit);
+            inner.inbox.drain(..n).collect()
+        };
+
+        for item in &batch {
+            self.change_subs
+                .notify(&vdfs::VdfsChange::bare(inbox_item_path(
+                    &state.session_id,
+                    &item.id,
+                )));
+        }
+        batch
     }
 
     /// 用收件箱条目驱动一轮（消费者调用；单测也直接调它以绕开后台任务）。
@@ -244,21 +291,30 @@ impl SessionPlugin {
     /// 上下文**自己造**：只带目标会话 id 与工作目录。发起者的请求上下文刻意不沿用
     /// ——它的 `SESSION_ID` 头是发起者自己的会话（跨空间写入时二者不同），沿用会
     /// 把消息投错会话（见 [`InboxItem`] 的说明）。
+    ///
+    /// 入参是一**批**条目（`drain_inbox_once` 抽干所得）：合并成一条用户消息后开跑。
+    /// 批内条目的 `params` / `workdir` **一律忽略**，只贡献正文——本轮参数取自
+    /// 批内第一条（它是这一轮的开端，见 [`supplements::merge_supplements`]）。
     pub(crate) async fn run_inbox_turn(
         self: Arc<Self>,
         session_id: &str,
-        item: &InboxItem,
+        batch: &[InboxItem],
     ) -> Result<(), PluginError> {
+        let Some(merged) = supplements::merge_supplements(batch) else {
+            return Ok(());
+        };
+        let first = &batch[0];
+
         let ctx: Arc<dyn PluginInvokeRequest> =
             Arc::new(crate::symbio_core::PluginSimpleRequest::new(None, None));
         ctx.set(SESSION_ID, session_id.to_string());
-        if let Some(w) = &item.workdir {
+        if let Some(w) = &first.workdir {
             ctx.set(WORKDIR, w.clone());
         }
         let req = session_chat::Request {
             session_id: Some(session_id.to_string()),
-            message: Some(item.message.clone()),
-            ..item.params.clone()
+            message: Some(merged),
+            ..first.params.clone()
         };
         ctx.set_payload(req)?;
         // 直呼**执行**而非入口：入口会把 message 再次入队（无限循环）

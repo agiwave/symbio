@@ -233,7 +233,14 @@ export const BASELINE = {
   //           重写/新增 4 件测试（plugin 9 例 / vdfs 11 例 / workspace 8 例 / config 4 例），
   //           work 的旧测试随目录删除（净变化 +7）；agent 侧穿越用例改指工作区腿、
   //           config.test 补 `workspace_enabled` 字段。
-  rustTests: 976,
+  // 2026-09-29：976 → **989**（+13）。补充整合（G-A）：用户在会话运行中连发的多条消息
+  //           抽干后合并成**一条**用户消息（不再"一条消息 = 一轮"）。
+  //           `transcript/supplements.test.rs` 新增 8 例（`merge_supplements` 的纯函数形状：
+  //           空批次 / **n=1 原样返回且一个字段都不多** / 按入队序空行拼接 / 三个 meta 标记
+  //           / 不改写用户原文 / 缺 content 当空串 / 非文本片段走 `Parts` 无损 / 全文本仍为文本）；
+  //           `transcript/inbox.test.rs` 新增 5 例（抽干**整队** / 上界截断且余者留队 /
+  //           平凡值退化为一条 / 取走的每条都在**自己的地址**上发 `bare` 变更 / 上界 0 夹到 1）。
+  rustTests: 989,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

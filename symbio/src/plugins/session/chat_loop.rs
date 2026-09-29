@@ -37,7 +37,7 @@ mod state;
 mod turn;
 
 // 跨模块契约：`orchestrator.rs` / `resume.rs` 经 `chat_loop::X` 引用。
-pub use self::state::{ChatOrchestrator, CompressionEmitter, StopSignal};
+pub use self::state::{ChatOrchestrator, CompressionEmitter, StopSignal, SupplementDrain};
 
 // 模块内共享面：子模块经 `use super::*;` 取用，测试亦同（`gate_tests` 等）。
 pub(crate) use self::inputs::prepare_turn_inputs;
@@ -199,6 +199,56 @@ pub async fn run_chat_loop(
             }
             Gate::Exit(exit) => {
                 return finish_turn(orchestrator, &context, &sink, &turn, exit).await
+            }
+        }
+
+        // ── 轮边界补充整合（唯一抽干点②）───────────────────────────────────
+        //
+        // 用户在本轮运行中继续补充时，队列里积着若干条。这里把它们**整体**抽干、
+        // 合并成**一条**用户消息折进本轮上下文——于是"边处理边综合"成立，而不是
+        // 每条补充各占一轮（那正是改造前"一条一条处理"的形态）。
+        //
+        // ## 为什么必须在 `gate_turn` **之后**
+        //
+        // 闸门可能 `Exit`（软上限 / 中止）或 `WaitForTools`。若在它之前抽干，一旦
+        // 闸门退出，队列已被消费却没人用它——还得补一套"放回队首"的补偿逻辑。
+        // 放在 `Proceed` 之后，**只有确定要发请求才抽**。
+        //
+        // ## 为什么结构上不会插进工具批次中间
+        //
+        // `gate_turn` 只在 `turn.in_flight_tools` 为空时放行，而级别 1（同步工具执行）
+        // 下 `close_turn` 里的 `process_tool_calls_async` 是串行阻塞的——回到循环顶部时
+        // 本批结果**必然已齐**。因此本抽干点不可能落在 `assistant(tool_calls)` 与其
+        // `tool` 结果之间（那会让 OpenAI / Anthropic 直接 400）。
+        //
+        // ## 为什么只在非轮首、且只对有历史的轮次
+        //
+        // - `tool_rounds > 0`：轮首的输入在**进入循环之前**就定了（空闲路径由
+        //   `drain_inbox_once` 抽干；`chat/send` 路径由入口落库 + `single_message`）。
+        //   轮首再抽一次是多余的，且会与下面 `single_message` 的去重逻辑纠缠。
+        // - `load_history`：心跳等无上下文场景从**空**上下文开始，把用户补充折进
+        //   一个没有历史的轮次会让模型凭空收到一句话，语义不对——那些轮次留给
+        //   下一次正常输入去消费。
+        if turn.tool_rounds > 0 && turn_req.load_history {
+            if let Some(drain) = orchestrator.supplements.as_ref() {
+                if let Some(merged) = drain.drain().await {
+                    plugin_info!(
+                        "session",
+                        "[Turn] 轮边界折进 {} 条补充（第 {} 轮）",
+                        merged
+                            .meta
+                            .as_ref()
+                            .and_then(|m| m.get("supplement_count"))
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(1),
+                        turn.tool_rounds
+                    );
+                    context.messages.push(merged);
+                    // 刻意**不**推进 `turn.last_saved`：`persist_messages` 落
+                    // `context.messages[last_saved..]`，锚点不动 ⇒ 这条合并消息由
+                    // 下一次落库（`close_turn` 或 `finish_turn`）自然带上。
+                    // 手动推进反而会在"落库前退出"的路径上把它丢掉。
+                }
             }
         }
 

@@ -117,6 +117,26 @@ pub struct SessionConfig {
     /// 地址 `vdfs_read` 读取。两者取值不同才有意义。
     #[serde(default = "default_memory_inject_max_bytes")]
     pub memory_inject_max_bytes: usize,
+    /// 补充整合总开关（J2 平凡值：`false` ⇒ 完全退回"一条消息 = 一轮"）。
+    ///
+    /// ## 它控制什么
+    ///
+    /// 用户在会话运行中连续发多条消息时，把队列里的条目**抽干并合并成一条**
+    /// 用户消息，作为**同一轮**的输入折进当前工作，而不是一条消息占一轮。
+    ///
+    /// 两个抽干点（见 `transcript/inbox.rs::drain_inbox_once` 与
+    /// `chat_loop.rs` 的轮边界）都受本开关管辖——关掉它，两个点一起失效。
+    #[serde(default = "default_supplements_enabled")]
+    pub supplements_enabled: bool,
+    /// 单次抽干的条目数上限；超出者**留队**，等下一个抽干点再抽。
+    ///
+    /// ## 为什么必须有上界
+    ///
+    /// 合并是"把 n 条拼成一条"。没有上界时，一次刷屏（或上游批量写入）会把
+    /// 任意多条消息拼成一条巨型用户消息——那不是"整体处理"，那是把上下文一次
+    /// 打爆。上界是**护栏**，不是策略：它只决定"这一批最多几条"，不决定合并与否。
+    #[serde(default = "default_supplements_max_per_drain")]
+    pub supplements_max_per_drain: usize,
 }
 
 pub fn default_max_messages() -> usize {
@@ -158,6 +178,12 @@ pub fn default_memory_max_bytes() -> usize {
 pub fn default_memory_inject_max_bytes() -> usize {
     4 * 1024
 }
+pub fn default_supplements_enabled() -> bool {
+    true
+}
+pub fn default_supplements_max_per_drain() -> usize {
+    20
+}
 
 impl SessionConfig {
     /// 下发给 `model_chat::Request::max_tool_rounds` 的值（契约翻译点）。
@@ -196,6 +222,8 @@ impl Default for SessionConfig {
             prune_tool_history: default_prune_tool_history(),
             memory_max_bytes: default_memory_max_bytes(),
             memory_inject_max_bytes: default_memory_inject_max_bytes(),
+            supplements_enabled: default_supplements_enabled(),
+            supplements_max_per_drain: default_supplements_max_per_drain(),
         }
     }
 }

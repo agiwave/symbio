@@ -50,6 +50,8 @@ use std::time::{Duration, Instant};
 
 mod frames;
 mod inbox;
+/// 补充整合：n 条收件箱条目 → 一条用户消息（纯函数，见模块文档）。
+pub(crate) mod supplements;
 
 // 帧构造 / 日志合并 / 合帧窗口（纯机械；状态机仍在根）
 mod deliver;

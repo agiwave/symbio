@@ -404,6 +404,47 @@ impl CompressionEmitter {
     }
 }
 
+/// 补充整合在**轮边界**的落点：抽干整队并合并成一条用户消息。
+///
+/// ## 为什么需要它（与 [`CompressionEmitter`] 同一个理由）
+///
+/// `run_chat_loop` 是自由函数，拿不到插件实例；而"抽干"要读两样都在插件上的东西：
+/// `active_mgr`（会话队列）与 `config`（`supplements_enabled` / `supplements_max_per_drain`）。
+/// 所以由调用方（`orchestrator::consume`）在构造 `ChatOrchestrator` 时把这个持有者
+/// 一并交进来——与 `compression` 字段同形，不新增第二种注入手法。
+///
+/// ## 它只做一件事
+///
+/// 取批（[`SessionPlugin::take_inbox_batch`]）+ 合并（`merge_supplements`），
+/// **不写任何地址、不落库**：合并消息由主循环推进 `context.messages`，
+/// 落库仍走既有的锚点增量路径（见 `run_chat_loop` 的轮边界抽干点）。
+pub struct SupplementDrain {
+    plugin: Arc<crate::plugins::session::plugin::SessionPlugin>,
+    pub(crate) state: Arc<crate::plugins::session::active::ActiveSessionState>,
+}
+
+impl SupplementDrain {
+    pub fn new(
+        plugin: Arc<crate::plugins::session::plugin::SessionPlugin>,
+        state: Arc<crate::plugins::session::active::ActiveSessionState>,
+    ) -> Self {
+        Self { plugin, state }
+    }
+
+    /// 抽干该会话队首的一批补充并合并成**一条**用户消息。
+    ///
+    /// 返回 `None` = 队列为空（或合并结果为空批次）——调用方据此**什么都不做**，
+    /// 不推进 `last_saved`、不落库。
+    ///
+    /// 开关与上界的判定在 [`SessionPlugin::take_inbox_batch`] 内（那里是唯一真源）：
+    /// `supplements_enabled = false` 时它退化为"取一条"，与本函数的合并叠加后
+    /// 恰好等于"一条消息 = 一轮"的今天行为。
+    pub async fn drain(&self) -> Option<ChatMessage> {
+        let batch = self.plugin.take_inbox_batch(&self.state).await;
+        crate::plugins::session::transcript::supplements::merge_supplements(&batch)
+    }
+}
+
 /// [`CompressionEmitter::transcript_writer`] 的落点：一个只做「锁转写 → apply」
 /// 的最小 writer（合成 [`crate::symbio_core::ExecTranscriptWriter`] 的桥，与
 /// `orchestrator::sink::TranscriptSink` 平行——后者多了会话级告警分派，压缩增量
@@ -455,6 +496,11 @@ pub struct ChatOrchestrator {
     /// 之所以是可选而非必填：`run_chat_loop` 的其它调用场景（单测）根本没有
     /// 会话状态与前端订阅者，让它们为「一个提示」去构造插件实例是本末倒置。
     pub compression: Option<Arc<CompressionEmitter>>,
+    /// **轮边界补充整合**的落点（把运行中到达的补充抽干、合并成一条用户消息）。
+    ///
+    /// `None` = 调用方没有提供（单测 / 无会话状态场景）：轮边界不抽干，
+    /// 行为与改造前一致。可选而非必填的理由与 `compression` 相同。
+    pub supplements: Option<Arc<SupplementDrain>>,
     /// **本插件自己的目录**（装配期由父插件经 `PLUGIN_DIR` 告知）。
     ///
     /// 会话存储 / 转写存档 / 工具结果存档都在这个目录下——它是「本实例的作用域」，
@@ -470,6 +516,7 @@ impl ChatOrchestrator {
         context_limit: u32,
         stop: Arc<StopSignal>,
         compression: Option<Arc<CompressionEmitter>>,
+        supplements: Option<Arc<SupplementDrain>>,
         session_dir: crate::symbio_core::PluginDir,
     ) -> Self {
         Self {
@@ -478,6 +525,7 @@ impl ChatOrchestrator {
             context_limit,
             stop,
             compression,
+            supplements,
             session_dir,
         }
     }

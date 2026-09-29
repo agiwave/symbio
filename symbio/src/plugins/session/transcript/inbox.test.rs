@@ -179,3 +179,140 @@ async fn enqueue_carries_request_params_and_workdir() {
     assert_eq!(ctx.get(SESSION_ID).as_deref(), Some("s1"));
     assert!(ctx.get(WORKDIR).is_none());
 }
+
+// ────────────── 补充整合：抽干整队（G-A）──────────────
+//
+// 抽干与合并的**规则**在单测里钉（本段 + `supplements.test.rs`）；
+// 「合并后的那条真的进了下一轮 LLM 请求」由 e2e 钉
+// （`e2e/cases/t19-supplements-merge.mjs`）——那要读回请求体才看得见。
+
+/// 建一个带自定义配置的插件（抽干上界 / 总开关都在配置里）。
+fn plugin_with(config: SessionConfig) -> Arc<SessionPlugin> {
+    Arc::new(SessionPlugin::new(
+        None,
+        config,
+        crate::plugins::session::test_dir(),
+    ))
+}
+
+/// 入队 n 条（id 依次 i1..in），返回 id 列表。
+async fn enqueue_n(p: &Arc<SessionPlugin>, n: usize) -> Vec<String> {
+    let mut ids = Vec::new();
+    for k in 1..=n {
+        let id = format!("i{k}");
+        p.enqueue_inbox(
+            "s1",
+            Some(id.clone()),
+            user_message(&format!("第 {k} 条")),
+            session_chat::Request::default(),
+            None,
+        )
+        .await;
+        ids.push(id);
+    }
+    ids
+}
+
+/// 抽干取的是**整队**（不是一条），且按 FIFO 顺序。
+#[tokio::test]
+async fn drain_takes_the_whole_queue_in_one_batch() {
+    let p = plugin();
+    let ids = enqueue_n(&p, 3).await;
+    let state = p.active_mgr.get_or_create("s1").await;
+
+    let batch = p.take_inbox_batch(&state).await;
+    let taken: Vec<String> = batch.iter().map(|i| i.id.clone()).collect();
+
+    assert_eq!(taken, ids, "一趟取走整队，且保持入队顺序");
+    assert!(
+        p.inbox_items("s1").await.is_empty(),
+        "整队已被取走，队列应为空"
+    );
+}
+
+/// 上界：超过 `supplements_max_per_drain` 的部分**留队**，等下一个抽干点。
+#[tokio::test]
+async fn drain_is_bounded_by_max_per_drain() {
+    let p = plugin_with(SessionConfig {
+        supplements_max_per_drain: 2,
+        ..SessionConfig::default()
+    });
+    enqueue_n(&p, 3).await;
+    let state = p.active_mgr.get_or_create("s1").await;
+
+    let batch = p.take_inbox_batch(&state).await;
+    assert_eq!(batch.len(), 2, "一趟至多取上界条");
+    assert_eq!(
+        p.inbox_items("s1").await.len(),
+        1,
+        "超出的那条留队，等下一个抽干点"
+    );
+}
+
+/// **平凡值**：`supplements_enabled = false` ⇒ 一趟只取一条（今天的行为）。
+#[tokio::test]
+async fn disabled_supplements_take_one_item_per_pass() {
+    let p = plugin_with(SessionConfig {
+        supplements_enabled: false,
+        ..SessionConfig::default()
+    });
+    enqueue_n(&p, 3).await;
+    let state = p.active_mgr.get_or_create("s1").await;
+
+    let batch = p.take_inbox_batch(&state).await;
+    assert_eq!(batch.len(), 1, "关掉开关后一趟一条，与今天一致");
+    assert_eq!(p.inbox_items("s1").await.len(), 2, "其余留队");
+}
+
+/// 订阅**本插件实例**的变更流，收集被通知的地址。
+///
+/// 抽成函数有两个理由，都不是为了好看：
+/// - 与 `plugin/vdfs_provider.test.rs::watch_changes` 同形——同一份手法只留一处定义；
+/// - 订阅表是本插件实例的（`SessionPlugin::change_subs`），不是进程级全局总线，
+///   因此并行用例互不干扰，也不必按 `session_id` 过滤。
+fn watch_inbox_paths(p: &SessionPlugin) -> Arc<std::sync::Mutex<Vec<String>>> {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = seen.clone();
+    p.change_subs.watch(
+        "",
+        Arc::new(move |c: crate::symbio_core::VdfsChange| sink.lock().unwrap().push(c.path)),
+    );
+    seen
+}
+
+/// 抽干与删除变更**成对**：每取走一条都要在**它自己的地址**上通知一次。
+///
+/// 分开写就会出现两种静默不一致：抽了没通知（前端以为条目还在）、
+/// 通知了没抽（条目凭空消失）。
+#[tokio::test]
+async fn drain_notifies_every_taken_item_at_its_own_address() {
+    let p = plugin();
+    let ids = enqueue_n(&p, 3).await;
+    let seen = watch_inbox_paths(&p);
+
+    let state = p.active_mgr.get_or_create("s1").await;
+    let batch = p.take_inbox_batch(&state).await;
+    assert_eq!(batch.len(), 3);
+
+    let paths = seen.lock().unwrap().clone();
+    for id in &ids {
+        assert!(
+            paths.iter().any(|p| p.ends_with(&format!("inbox/{id}"))),
+            "条目 {id} 被取走时必须通知它自己的地址，实得 {paths:?}"
+        );
+    }
+}
+
+/// 上界配成 0 时下界兜到 1：不能"一趟取零条"把队列永久卡死。
+#[tokio::test]
+async fn zero_bound_is_clamped_to_one() {
+    let p = plugin_with(SessionConfig {
+        supplements_max_per_drain: 0,
+        ..SessionConfig::default()
+    });
+    enqueue_n(&p, 2).await;
+    let state = p.active_mgr.get_or_create("s1").await;
+
+    let batch = p.take_inbox_batch(&state).await;
+    assert_eq!(batch.len(), 1, "上界 0 会让队列永不消费，必须兜到 1");
+}
