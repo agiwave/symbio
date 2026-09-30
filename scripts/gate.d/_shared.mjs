@@ -343,7 +343,13 @@ export const BASELINE = {
   //      ⑤ LlmAdapter 端口的真实实现（包 ModelProvider，S2 预留接线点兑现）：
   //      真实 TCP/HTTP/SSE 全链路彩排（Reasoner 持令牌 → execute_turn → final 落
   //      事件 → 不变量绿）+ 空流按失败（I3）+ 不可达端点映射。
-  rustTests: 1184,
+  // 1185（SLO 校准，2026-09-30）：**埋点 + 首测**——`1184 → 1185`，**+1**。
+  //      埋点：LlmAdapter::generate_timed（trait 默认，adapter 边界实测）+
+  //      Reasoner::reply_timed；final 事件带实测 cost_ms → cost_ledger 累计 →
+  //      熔断判据闭环（G3 输入接实测）。校准：真实 HTTP/SSE 12 轮实测系统
+  //      自身开销 P50=1ms / max=3ms（G2 首测，四层预算初值保留为正式值），
+  //      守卫 reflex_tier_system_overhead_is_measured_and_bounded 钉住两档下界。
+  rustTests: 1185,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

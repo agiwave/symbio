@@ -172,6 +172,19 @@ impl Reasoner {
         tok: &FullModel,
         events: &[Event],
     ) -> Result<String, AdapterError> {
+        Ok(self.reply_timed(llm, tok, events).await?.0)
+    }
+
+    /// 埋点版 reply（SLO 校准，[plan/04 §1](../../../../docs/plan/04-工程落地.md)）：
+    /// 除文本外返回 adapter 边界实测耗时（毫秒）。调用方把它写到 final 事件的
+    /// `cost_ms`——成本台账与熔断判据（② CircuitBreaker）从此读**实测值**
+    /// 而不是声明值（G3：成本模型有了实测数字）。
+    pub async fn reply_timed(
+        &self,
+        llm: &dyn LlmAdapter,
+        tok: &FullModel,
+        events: &[Event],
+    ) -> Result<(String, u64), AdapterError> {
         let prompt = events
             .iter()
             .rev()
@@ -184,7 +197,7 @@ impl Reasoner {
                     .to_string()
             })
             .unwrap_or_default();
-        llm.generate(tok, &prompt).await
+        llm.generate_timed(tok, &prompt).await
     }
 }
 

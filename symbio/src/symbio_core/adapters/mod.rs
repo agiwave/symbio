@@ -141,6 +141,21 @@ pub trait LlmAdapter: Send + Sync {
     fn model_id(&self) -> &str;
     /// 生成。`tok` 是闸门：没有 `FullModel` 就调不到这里。
     async fn generate(&self, tok: &FullModel, prompt: &str) -> Result<String, AdapterError>;
+
+    /// 埋点版生成（SLO 校准，[plan/04 §1](../../../../docs/plan/04-工程落地.md)）：
+    /// 除文本外返回 **adapter 边界实测耗时**（毫秒）。默认实现包一层
+    /// `Instant`——桩与真实适配器零改动共享；调用方把它写到 final 事件的
+    /// `cost_ms`，成本台账（③ cost_ledger）与熔断判据从此有了真实来源
+    /// （G3：参数有了实测数字）。
+    async fn generate_timed(
+        &self,
+        tok: &FullModel,
+        prompt: &str,
+    ) -> Result<(String, u64), AdapterError> {
+        let start = std::time::Instant::now();
+        let out = self.generate(tok, prompt).await?;
+        Ok((out, start.elapsed().as_millis() as u64))
+    }
 }
 
 /// 零 LLM 桩——S2 彩排与测试用。可注入**确定性失败**，用于演练兜底路径。
