@@ -1,7 +1,7 @@
 //! v2 事实桥验收——转写的事件格必须与 core 侧事实源**同构**：不变量全绿、
 //! 溯源（N5）、轮次编号（N3）靠构造成立，重开恢复（N2）不因桥而破。
 
-use super::{first_user_utterance, last_assistant_text, record_to_wal, V2Closure};
+use super::{first_user_utterance, last_assistant_text, record, record_to_wal, V2Closure};
 use crate::symbio_core::schemas::session::chat_message as cm;
 use crate::symbio_core::{
     check_all, Entity, EventEnvelope as _, EventWalStore, Seq, Store, EVENT_ASSISTANT_FINAL,
@@ -218,4 +218,65 @@ fn empty_messages_yield_no_utterance() {
     let msgs: Vec<cm::ChatMessage> = vec![];
     assert!(first_user_utterance(&msgs).is_none());
     assert!(last_assistant_text(&msgs).is_none());
+}
+
+/// 总开关：`off` 档不转写——不建 WAL、网格零增长（用户关的是数据源，不是对话）；
+/// `bridge` 档照常落格。锁与目录都从真会话走（`record` 的唯一判据是 `v2_mode`）。
+#[tokio::test]
+async fn v2_mode_off_disables_recording() {
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let store = Arc::new(super::super::store::SessionStore::new(
+        tmp.path().to_path_buf(),
+    ));
+    let session_id = "s-switch".to_string();
+    // 每个用到的会话 id 都要先落盘种子（session_dir 只认已存在的会话目录）。
+    for id in [&session_id, "s-off", "s-on"] {
+        store
+            .save_session(&super::super::types::Session::new(id))
+            .await
+            .expect("种子会话落盘");
+    }
+
+    // off 档：record 后不建 WAL。
+    let cfg = super::super::config::SessionConfig {
+        v2_mode: super::super::config::V2Mode::Off,
+        ..Default::default()
+    };
+    let off_session = super::super::chat_session::PersistentChatSession::new(
+        "s-off".to_string(),
+        Arc::new(RwLock::new(cfg)),
+        store.clone(),
+    );
+    record(
+        &off_session,
+        "u-1",
+        "问",
+        V2Closure::Final {
+            text: "答".into(),
+            cost_ms: 1,
+        },
+    );
+    let dir = off_session.session_dir().expect("持久会话有目录");
+    assert!(!dir.join("v2-events.wal").exists(), "off 档不得写 WAL");
+
+    // bridge 档（出厂默认）：照常落格。
+    let on_session = super::super::chat_session::PersistentChatSession::new(
+        "s-on".to_string(),
+        Arc::new(RwLock::new(super::super::config::SessionConfig::default())),
+        store,
+    );
+    record(
+        &on_session,
+        "u-1",
+        "问",
+        V2Closure::Final {
+            text: "答".into(),
+            cost_ms: 1,
+        },
+    );
+    let dir = on_session.session_dir().expect("持久会话有目录");
+    assert!(dir.join("v2-events.wal").exists(), "bridge 档必须写 WAL");
 }

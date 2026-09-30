@@ -75,7 +75,7 @@ work:
 | 插件 | 配置地址 | 主要键 |
 |---|---|---|
 | `home` | `<根>/PLUGIN.yml` | `work.workdir` / `work.recent_workspaces` |
-| `session` | `<根>/session/PLUGIN.yml` | `max_messages` / `auto_compress` / `context_messages` / `max_tool_rounds` / `tool_context_window` / `fade_activate_rounds` / `fade_keep_recent_turns` / `compress_line_threshold` / `compress_keep_recent` / `enable_compact_tool` / `prune_tool_history` / `memory_max_bytes` / `memory_inject_max_bytes` / `classify_enabled` / `compose_enabled` / `progress_enabled` / `supplements_enabled` / `supplements_max_per_drain`（字段全表见 `session/config.rs::SessionConfig`；会话存储**无选型项**——已收为单一具体类型，见 ADR-011） |
+| `session` | `<根>/session/PLUGIN.yml` | `max_messages` / `auto_compress` / `context_messages` / `max_tool_rounds` / `tool_context_window` / `fade_activate_rounds` / `fade_keep_recent_turns` / `compress_line_threshold` / `compress_keep_recent` / `enable_compact_tool` / `prune_tool_history` / `memory_max_bytes` / `memory_inject_max_bytes` / `classify_enabled` / `compose_enabled` / `progress_enabled` / `supplements_enabled` / `supplements_max_per_drain` / `v2_mode`（字段全表见 `session/config.rs::SessionConfig`；会话存储**无选型项**——已收为单一具体类型，见 ADR-011） |
 | `memory` | `<根>/memory/PLUGIN.yml` | `workspace_enabled` / `workspace_max_bytes` / `workspace_inject_max_bytes`（工作区作用域）+ `memory_max_bytes` / `memory_inject_max_bytes`（智能体作用域）；字段全表见 `memory/config.rs::MemoryConfig` |
 | `setting` | `<根>/setting/PLUGIN.yml` | `display_name` / `description` / `reply_language` / `verbosity`（字段全表见 `setting/config.rs::SettingConfig`） |
 | `web` | `<根>/web/PLUGIN.yml` | `web_enabled` / `web_timeout` / `tavily_api_key` / `serper_api_key` |

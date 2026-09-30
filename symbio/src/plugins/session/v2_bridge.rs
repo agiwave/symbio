@@ -15,7 +15,9 @@
 //! - 重试（resume 重跑同一用户消息）在 v2 网格里是**新的轮次**（attempt
 //!   递增）——失败与成功都是真实发生的收束，各自成格，N3 仍由构造成立；
 //! - 中止（Aborted）不转写：轮未收束，网格少一格是诚实的缺口，不是假象；
-//! - 临时会话（不落盘）不转写：事实源本就不持久，转写无从安放。
+//! - 临时会话（不落盘）不转写：事实源本就不持久，转写无从安放；
+//! - 总开关：`SessionConfig::v2_mode`（`off` / `bridge`，默认 `bridge`）——
+//!   `off` 档不转写（用户关的是数据源，不是对话；v1 行为照旧）。
 
 use std::path::PathBuf;
 
@@ -45,6 +47,12 @@ pub(crate) fn record(
     user_text: &str,
     closure: V2Closure,
 ) {
+    // 总开关（`v2_mode`，ADR-045 过渡期的切换档位）：只有 `bridge` 档转写——
+    // `off` 档网格零增长（用户关的是数据源，不是对话）。检查在取目录之前：
+    // 关掉时连 WAL 的打开开销都不该有。
+    if !matches!(session.v2_mode(), super::config::V2Mode::Bridge) {
+        return;
+    }
     let Some(dir) = session.session_dir() else {
         return; // 临时会话：事实源不持久，转写无从安放（见模块文档口径）
     };

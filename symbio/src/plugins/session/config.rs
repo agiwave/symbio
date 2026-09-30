@@ -22,6 +22,29 @@
 
 use serde::{Deserialize, Serialize};
 
+/// v2 会话链路的切换档位（[ADR-045](../../../../docs/decisions/core.md) 过渡期的总开关）。
+///
+/// 迁移是**分档推进**的，每一档都可独立回退（退回上一档即回到既有行为）：
+///
+/// - `off`：纯 v1——轮次收束**不转写**事实，v2 事件网格零增长；
+/// - `bridge`（默认）：v1 运行 + v2 事实累积——每轮收束把事实转写进
+///   `<会话目录>/v2-events.wal`（v1 行为零变化，纯增量记录）；
+/// - `full`：整体切换——会话链路走 v2 引擎（**尚未落地**；落地时在本枚举上
+///   增档即可，存量配置无需迁移）。
+///
+/// 默认 `bridge` 的理由：转写是纯增量记录、失败只警告不冒泡（桥的故障拖不垮
+/// 对话），关掉它只会让 P99 / 兜底率失去数据源——默认应当是「有数据、可关闭」，
+/// 而不是「没数据、可打开」。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum V2Mode {
+    /// 纯 v1：不转写事实。
+    Off,
+    /// v1 运行 + v2 事实累积（每轮收束转写，见 `v2_bridge`）。
+    #[default]
+    Bridge,
+}
+
 /// 会话配置 —— 本插件的旋钮（字段真源）。
 ///
 /// ## 存储目录
@@ -231,6 +254,13 @@ pub struct SessionConfig {
     /// 上界是"最多说几次"。没有它，一个长时间运行的任务会按间隔反复刷屏。
     #[serde(default = "default_progress_max_per_turn")]
     pub progress_max_per_turn: u32,
+    /// v2 会话链路的切换档位（`off` / `bridge`；默认 `bridge`，见 [`V2Mode`]）。
+    ///
+    /// 管辖范围：v2 事实桥的转写（`v2_bridge`——轮次收束写 `v2-events.wal`）。
+    /// 未来整体切换（chat_loop 走 v2 引擎）落地时在同一枚举上增 `full` 档，
+    /// 由同一个开关统一管辖——「切到 v2 的哪一步」是一个问题，不该拆成多个旋钮。
+    #[serde(default)]
+    pub v2_mode: V2Mode,
 }
 
 pub fn default_max_messages() -> usize {
@@ -349,6 +379,7 @@ impl Default for SessionConfig {
             progress_interval_ms: default_progress_interval_ms(),
             progress_min_rounds: default_progress_min_rounds(),
             progress_max_per_turn: default_progress_max_per_turn(),
+            v2_mode: V2Mode::default(),
         }
     }
 }

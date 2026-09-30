@@ -131,6 +131,11 @@ impl PersistentChatSession {
             .unwrap_or_default()
     }
 
+    /// 当前 v2 切换档位（`v2_bridge` 转写与否的唯一判据；锁被占时回落默认档）。
+    pub(crate) fn v2_mode(&self) -> super::config::V2Mode {
+        self.cfg_or_default().v2_mode
+    }
+
     async fn load_session(&self) -> Result<super::types::Session, PluginError> {
         self.store.load_session(&self.session_id).await
     }

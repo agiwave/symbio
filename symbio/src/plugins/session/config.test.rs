@@ -146,3 +146,21 @@ fn the_progress_switch_is_independent_of_the_other_two() {
     };
     assert!(c.classify_enabled && c.compose_enabled && !c.progress_enabled);
 }
+
+/// v2 切换档位：出厂即 `bridge`（有数据、可关闭——见 `V2Mode` 文档的理由）；
+/// serde 用小写词，`off` 可显式配置回去。
+#[test]
+fn v2_mode_defaults_to_bridge_and_roundtrips() {
+    let c = SessionConfig::default();
+    assert_eq!(
+        c.v2_mode,
+        V2Mode::Bridge,
+        "出厂档位 = bridge（转写开、可关）"
+    );
+    assert_eq!(serde_json::to_string(&c.v2_mode).unwrap(), "\"bridge\"");
+    let off: SessionConfig = serde_json::from_str(r#"{"v2_mode":"off"}"#).unwrap();
+    assert_eq!(off.v2_mode, V2Mode::Off);
+    // 空配置（存量 PLUGIN.yml 不写这个键）= 出厂档位。
+    let from_empty: SessionConfig = serde_json::from_str("{}").unwrap();
+    assert_eq!(from_empty.v2_mode, V2Mode::Bridge);
+}
