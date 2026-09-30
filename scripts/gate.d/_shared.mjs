@@ -363,7 +363,12 @@ export const BASELINE = {
   //      fallback→assistant+why——模型知道自己说过兜底话术）；
   //      Reasoner::reply_timed 的 prompt 改从转写出（多轮带历史，
   //      单轮裸文本等价）——历史来自同一事实源，不另存副本（ADR-044 同族）。
-  rustTests: 1193,
+  // 1198（v2 事实桥，2026-09-30）：**session 插件接线**——`1193 → 1198`，**+5**。
+  //      v2_bridge：chat_loop 收束点（finish_turn）把每轮事实（用户发言/助手
+  //      答复/实测耗时）转写进 per-session 的 v2 WAL——v1 行为零变化，纯增量
+  //      记录；P99/兜底率从此有生产数据源。Aborted/ResumeDone 不转写（诚实
+  //      缺口）；桥故障只 plugin_warn 不冒泡（不得拖垮 v1 对话）。
+  rustTests: 1198,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

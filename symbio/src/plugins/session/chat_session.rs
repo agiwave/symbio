@@ -139,6 +139,11 @@ impl PersistentChatSession {
         self.store.save_session(session).await
     }
 
+    /// 会话目录（v2 事实桥的 WAL 安放处）；临时会话 ⇒ `None`。
+    pub(crate) fn session_dir(&self) -> Option<std::path::PathBuf> {
+        self.store.session_dir(&self.session_id)
+    }
+
     pub(crate) fn session_id(&self) -> &str {
         &self.session_id
     }

@@ -1,0 +1,153 @@
+//! v2 事实桥——把 v1 会话轮次**转写**进事件网格（ADR-044：实测与判据同源）。
+//!
+//! 定位：chat_loop 切到 v2 链路之前的过渡件。v1 管线行为**零变化**，只是在
+//! 每轮收束时把「用户发言 / 助手答复 / 实测耗时」转写为 v2 事件，落进
+//! per-session 的持久事实源（`<会话目录>/v2-events.wal`）——P99 / 兜底率
+//! 等口径从此有真实流量可扫。
+//!
+//! 为什么这不是「旁路遥测」：ADR-044 反对的是**不进事件网格的计数器**；
+//! 本桥是把 v1 流量的既有事实**转写为网格事件**（同一事实落入事实源），
+//! 与 v1 侧的对话存储是两份持久化、一份语义。
+//!
+//! 口径：
+//! - 档位恒 `deep`——v1 chat_loop 的每一轮都装配完整模型 + 工具；
+//! - `turn` 号 = WAL 内既有 user.message 计数（0 起）；
+//! - 重试（resume 重跑同一用户消息）在 v2 网格里是**新的轮次**（attempt
+//!   递增）——失败与成功都是真实发生的收束，各自成格，N3 仍由构造成立；
+//! - 中止（Aborted）不转写：轮未收束，网格少一格是诚实的缺口，不是假象；
+//! - 临时会话（不落盘）不转写：事实源本就不持久，转写无从安放。
+
+use std::path::PathBuf;
+
+use crate::symbio_core::{
+    Entity, Event, EventWalStore, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK,
+    EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+};
+
+use super::chat_session::PersistentChatSession;
+use crate::symbio_core::schemas::session::chat_message as cm;
+
+/// 一轮的收束形态（转写的第二只脚；第一只脚是用户发言）。
+pub(crate) enum V2Closure {
+    /// 模型作答完成。
+    Final { text: String, cost_ms: u64 },
+    /// 兜底（I3：失败也是一句话——`why` 是用户实际看到的东西）。
+    Fallback { why: String, cost_ms: u64 },
+}
+
+/// 把一轮事实转写进该会话的 v2 WAL。
+///
+/// 所有失败都只记日志不冒泡：桥的故障不得拖垮 v1 对话——但**必须被看见**
+/// （plugin_warn），不允许静默吞。
+pub(crate) fn record(
+    session: &PersistentChatSession,
+    user_id: &str,
+    user_text: &str,
+    closure: V2Closure,
+) {
+    let Some(dir) = session.session_dir() else {
+        return; // 临时会话：事实源不持久，转写无从安放（见模块文档口径）
+    };
+    let result = record_to_wal(dir.join("v2-events.wal"), user_id, user_text, closure);
+    if let Err(why) = result {
+        crate::plugin_warn!(
+            "session",
+            "[v2-bridge] 转写失败（{}）：{}",
+            dir.display(),
+            why
+        );
+    }
+}
+
+fn record_to_wal(
+    wal: PathBuf,
+    user_id: &str,
+    user_text: &str,
+    closure: V2Closure,
+) -> Result<(), String> {
+    let store = EventWalStore::open(&wal).map_err(|e| format!("打开 WAL 失败：{e}"))?;
+    let snapshot = store.range(Seq::new(0));
+
+    // turn 号 = 既有 user.message 计数；attempt = 同一 v1 用户消息的转写次数
+    //（重试各成一格，失败与成功都是真实发生的收束）。
+    let mut turn = 0u64;
+    let mut attempt = 0u64;
+    for e in &snapshot {
+        if e.kind == EVENT_USER_MESSAGE && e.entity == Entity::Turn {
+            turn += 1;
+            if e.payload.get("turn_ref").and_then(|v| v.as_str()) == Some(user_id) {
+                attempt += 1;
+            }
+        }
+    }
+
+    let user = Event::pending(
+        format!("v2u-{user_id}-a{attempt}"),
+        EVENT_USER_MESSAGE,
+        Entity::Turn,
+        Verb::Opened,
+        turn,
+        "user",
+    )
+    .with_payload(serde_json::json!({ "text": user_text, "tier": "deep", "turn_ref": user_id }));
+    let user_seq = store
+        .append(user)
+        .map(|s| s.value())
+        .map_err(|e| format!("用户消息入格失败：{e:?}"))?;
+
+    let (id, kind, payload, cost_ms) = match closure {
+        V2Closure::Final { text, cost_ms } => (
+            format!("v2f-{user_id}-a{attempt}"),
+            EVENT_ASSISTANT_FINAL,
+            serde_json::json!({ "text": text, "model": "v1-chat_loop" }),
+            cost_ms,
+        ),
+        V2Closure::Fallback { why, cost_ms } => (
+            format!("v2fb-{user_id}-a{attempt}"),
+            EVENT_ASSISTANT_FALLBACK,
+            serde_json::json!({ "why": why }),
+            cost_ms,
+        ),
+    };
+    store
+        .append(
+            Event::pending(id, kind, Entity::Turn, Verb::Closed, turn, "agent:main")
+                .with_produced_by(user_seq)
+                .with_cost_ms(cost_ms)
+                .with_payload(payload),
+        )
+        .map_err(|e| format!("收束事件入格失败：{e:?}"))?;
+    Ok(())
+}
+
+/// 本轮用户发言（消息 id + 文本）：本轮**第一条**用户 Text 节点。
+pub(crate) fn first_user_utterance(messages: &[cm::ChatMessage]) -> Option<(String, String)> {
+    messages
+        .iter()
+        .find(|m| {
+            m.role == Some(cm::MessageRole::User)
+                && m.msg_type == Some(cm::MessageType::Text)
+                && m.status == Some(cm::MessageStatus::Completed)
+        })
+        .and_then(|m| {
+            let text = m.content.as_ref()?.to_text();
+            Some((m.id.clone(), text))
+        })
+}
+
+/// 本轮助手答复文本：**最后一条**已完成的助手 Text 节点。
+pub(crate) fn last_assistant_text(messages: &[cm::ChatMessage]) -> Option<String> {
+    messages
+        .iter()
+        .rev()
+        .find(|m| {
+            m.role == Some(cm::MessageRole::Assistant)
+                && m.msg_type == Some(cm::MessageType::Text)
+                && m.status == Some(cm::MessageStatus::Completed)
+        })
+        .and_then(|m| m.content.as_ref().map(|c| c.to_text()))
+}
+
+#[cfg(test)]
+#[path = "v2_bridge.test.rs"]
+mod tests;

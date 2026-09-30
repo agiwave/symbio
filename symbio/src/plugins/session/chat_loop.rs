@@ -63,6 +63,7 @@ pub(crate) use self::progress::report_if_due;
 pub(crate) use self::state::{Gate, SessionContext, TurnExit, TurnRequest, TurnResult, TurnState};
 pub(crate) use self::turn::{close_turn, settle_reasoning};
 pub(crate) use super::context::{auto_compress_process, run_context_compact};
+use super::v2_bridge::V2Closure;
 
 use super::chat_session::{PersistentChatSession, SESSION_HANDLE};
 use super::model_chat;
@@ -439,6 +440,9 @@ pub async fn run_chat_loop(
         // ── 步骤 4：LLM 调用（唯一发起处）────────────────────────────────────
         // 执行期环境一次给全：出口（可见流）+ 中止（本轮信号）。
         let env = ExecEnv::new(sink.clone(), turn.abort.clone());
+        // v2 事实桥的实测口径（ADR-044）：模型耗时在唯一发起处累计（含工具轮
+        // 的多次请求），随轮次收束写进事件网格的 cost_ms。
+        let v2_started = std::time::Instant::now();
         let result = orchestrator
             .provider
             .execute_turn(
@@ -449,6 +453,7 @@ pub async fn run_chat_loop(
                 &env,
             )
             .await;
+        turn.model_elapsed_ms += v2_started.elapsed().as_millis() as u64;
 
         let out = match result {
             Err(PluginError::RetryWithoutContextId) => {
@@ -617,6 +622,45 @@ async fn finish_turn(
 
     // 增量落库（锚点已对齐时为空切片，天然 no-op）。
     persist_messages(context, turn.last_saved, sink).await;
+
+    // ── v2 事实桥：本轮事实转写进事件网格（ADR-044；v1 行为不变，纯增量记录）──
+    // Aborted（用户主动收束）/ ResumeDone（无增量）不转写——网格少一格是
+    // 诚实的缺口，不是假象。转写失败只记日志：桥的故障不得拖垮 v1 对话。
+    match &exit {
+        TurnExit::Completed | TurnExit::MaxToolRounds { .. } => {
+            if let Some((user_id, user_text)) =
+                super::v2_bridge::first_user_utterance(&context.messages)
+            {
+                let closure = match super::v2_bridge::last_assistant_text(&context.messages) {
+                    Some(text) => V2Closure::Final {
+                        text,
+                        cost_ms: turn.model_elapsed_ms,
+                    },
+                    None => V2Closure::Fallback {
+                        why: "轮次收束但无助手文本".into(),
+                        cost_ms: turn.model_elapsed_ms,
+                    },
+                };
+                super::v2_bridge::record(&context.session, &user_id, &user_text, closure);
+            }
+        }
+        TurnExit::Failed(e) => {
+            if let Some((user_id, user_text)) =
+                super::v2_bridge::first_user_utterance(&context.messages)
+            {
+                super::v2_bridge::record(
+                    &context.session,
+                    &user_id,
+                    &user_text,
+                    V2Closure::Fallback {
+                        why: e.to_string(),
+                        cost_ms: turn.model_elapsed_ms,
+                    },
+                );
+            }
+        }
+        _ => {}
+    }
 
     // Stop 钩子（幂等）：resume 出口发生在主循环之前，此时尚无消息列表
     // （收口前该分支即传空切片），其余出口一律携带当前消息列表。
