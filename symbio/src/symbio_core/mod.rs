@@ -8,8 +8,9 @@ mod clock;
 mod creator;
 mod embedding;
 mod event;
-pub mod event_bus;
+mod event_bus;
 pub mod exec;
+pub mod governance;
 mod invariants;
 mod keys;
 pub mod llm;
@@ -47,6 +48,12 @@ pub use adapters::{
     AdapterError, CanClassify, CanGenerate, ClassifyOnly, FullModel, LatencyTier, LlmAdapter,
     RuleOnly, StubLlmAdapter, TokenIssuer,
 };
+
+// ==================== 权限与可见性（v2 阶段 S3，⑥ governance） ====================
+// 读写成对、fail-closed（plan/01 §7）。注意：governance::Capability（权限能力，
+// 7 个封顶）与 capability::Capability（LLM 工具描述符）是两个概念，
+// 刻意**不进根平铺**——以路径限定消歧，见 governance/mod.rs 的同名辨析。
+pub use governance::{PairingViolation, PermissionMatrix, PrincipalPolicy, VisScope};
 
 // ==================== LLM 契约 ====================
 // 模型接入（`model_provider`）与单轮产物 / 帧原语（`turn`）。

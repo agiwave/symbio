@@ -104,6 +104,7 @@
 | `event` | `Event` / `EventEnvelope`；契约词 `Seq` · `Entity` · `Verb` · `Timestamp` | `EVENT_` | — | 契约词来自 [plan/01 §2](../../../docs/plan/01-核心架构.md) 的冻结契约文本，名字先于模块存在（判据同 `schemas`：改名 = 代码与契约漂移）。见 [ADR-043](../../../docs/DECISIONS.md)。常量 = 事件**名字表**（名字是数据，单点定义） |
 | `event_bus` | `EventBus` | `EVENT_BUS_` | `event_bus_` | |
 | `exec` | `Exec` | — | — | 本域无常量 |
+| `governance` | 契约词 `PermissionMatrix` · `PrincipalPolicy` · `PairingViolation` · `VisScope`；**Capability（7 个封顶）刻意不进根平铺** | — | — | [plan/01 §7](../../../docs/plan/01-核心架构.md) 的冻结契约名。governance 的 Capability（权限矩阵的键）与 `capability` 域的 `Capability`（LLM 工具描述符）是**两个概念**、计划文本同名——以路径限定消歧：两个 Capability 同时出现在调用点正是命名纪律要阻止的错位，故本域不把它登记为前缀 |
 | `invariants` | `Violation` | — | **裸名**（不变量名） | 函数名即不变量的可执行名（N1/N3/N5 的 C1/C2/C3 形态），谓词名比域名更有信息量——判据同 `schemas`：名字先于模块存在 |
 | `keys` | `…Key`（**后缀**） | **裸名**（实例） | — | 只有键：类型带 `Key` 后缀、实例裸名。**本域不收字符串常量** |
 | `llm` | 子命名空间 `Model*` · `Turn*` | — | `llm_` | 对应 `model_provider.rs` / `turn.rs` |
@@ -145,6 +146,7 @@
 | `embedding` | 嵌入服务的**抽象**（实现在 `src/providers/embedding`） | `EmbeddingService` · `EmbeddingError` · `EMBEDDING_LOCAL` / `EMBEDDING_NOOP` | `ids` |
 | `event` | v2 事件契约的**中性共享类型层**（④ store 与 ③ projection 都只 import 本域，见 [ADR-043](../../../docs/DECISIONS.md)） | `Seq`（私有构造：只有 `Store` 能分配）· `Event`（信封：幂等键 / 网格坐标 / 溯源 / 记账）· `EventEnvelope` · 语法网格闭集 `Entity`(10) × `Verb`(5)（F5） | — |
 | `event_bus` | 跨插件全局发布设施门面 + 频道词表 | `EventBus` · `EventBusSubscribeRequest` · `EVENT_BUS_KIND_SYSTEM` · `EVENT_BUS_KIND_VDFS` · `EVENT_BUS_RESYNC_MARKER_TYPE` | — |
+| `governance` | v2 ⑥ 权限与可见性（第零天，[plan/01 §7](../../../docs/plan/01-核心架构.md)）：授权**读写成对**（构造即拒绝单侧策略）、查询 fail-closed；`thread_private` 缺省（C10 越界读取 0） | `PermissionMatrix`（`grants_of` / `can_write` 写侧 · `sees_of` / `can_see` 读侧）· `PrincipalPolicy` · `Capability`（7 个封顶，**路径限定** `governance::Capability`，不进根平铺）· `VisScope` · `PairingViolation` | — |
 | `exec` | 执行期原语：事件出口（出）与中止信号（入） | `ExecEventSink` · `ExecAbortSignal` · `ExecEnv` · `ExecTranscriptWriter` | — |
 | `invariants` | v2 三条可执行不变量（N1 单调 / N3 每 turn 一条 final / N5 断言必带溯源）；每条检查都有反向用例 | `seq_monotonic` · `final_unique_per_turn` · `produced_by_coverage` · `check_all` · `Violation` | — |
 | `keys` | **类型安全上下文键**（只有键：trait + 类型 + 实例） | `SymbioKey` 及其实例（`PATH` · `WORKDIR` · `ID` · `NAME` · `PLUGIN_DIR` · `CAPABILITY_VISITOR` · `CAPABILITY_ERRORS` …） | — |
