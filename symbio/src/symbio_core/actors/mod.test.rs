@@ -2115,4 +2115,75 @@ mod turn_runner_tests {
         assert_eq!(view.value.entries[1].role, "assistant");
         assert_eq!(view.value.entries[1].text, "上游 402");
     }
+
+    /// 收集口：按序记增量（流式验收用）。
+    struct CollectingDeltas(std::sync::Mutex<Vec<String>>);
+
+    impl crate::symbio_core::adapters::DeltaSink for CollectingDeltas {
+        fn on_delta(&self, text: &str) {
+            self.0.lock().unwrap().push(text.to_string());
+        }
+    }
+
+    /// 流式运行：分片按序进 sink；落格语义与 run() 同一条路径（final 照常、
+    /// 不变量照绿）；无分片的桩走默认降级（一次性全文一帧）。
+    #[tokio::test]
+    async fn streaming_run_forwards_deltas_and_writes_final() {
+        use crate::symbio_core::adapters::DeltaSink;
+        use std::sync::{Arc, Mutex};
+
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = StubLlmAdapter::succeed_streaming("stub-model", &["你", "好", "！"]);
+        let got = Arc::new(CollectingDeltas(Mutex::new(Vec::new())));
+
+        let out = TurnRunner
+            .run_streaming(
+                &store,
+                &llm,
+                &tok,
+                0,
+                "问",
+                LatencyTier::Deep,
+                got.clone() as Arc<dyn DeltaSink>,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            *got.0.lock().unwrap(),
+            vec!["你", "好", "！"],
+            "分片按序送达"
+        );
+        assert_eq!(out.text, "你好！", "全文 = 分片拼接");
+        assert!(!out.fell_back);
+        let snapshot = store.range(Seq::new(0));
+        assert!(
+            check_all(&snapshot).is_empty(),
+            "{:?}",
+            check_all(&snapshot)
+        );
+        let view = transcript().apply(&snapshot, i64::MAX, Budget::generous());
+        assert_eq!(view.value.entries[1].text, "你好！", "final 落的是全文");
+
+        // 默认降级：无分片桩经 run_streaming = 一帧全文（诚实降级，不是静默）。
+        let store2 = EventStore::new();
+        let llm2 = StubLlmAdapter::succeed("stub-model");
+        let got2 = Arc::new(CollectingDeltas(Mutex::new(Vec::new())));
+        TurnRunner
+            .run_streaming(
+                &store2,
+                &llm2,
+                &tok,
+                0,
+                "问",
+                LatencyTier::Deep,
+                got2.clone() as Arc<dyn DeltaSink>,
+            )
+            .await
+            .unwrap();
+        let frames = got2.0.lock().unwrap();
+        assert_eq!(frames.len(), 1, "非流式适配器 = 一帧全文");
+        assert!(frames[0].contains("问"));
+    }
 }

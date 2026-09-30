@@ -68,8 +68,8 @@ pub use event::{
 // ==================== 适配器（v2 阶段 S2，⑤ adapters） ====================
 // 时延闸门 = 本包的依赖注入策略（plan/05 §3.3）：令牌按档位签发，反射档拿不到模型句柄。
 pub use adapters::{
-    AdapterError, CanClassify, CanGenerate, ClassifyOnly, FullModel, LatencyTier, LlmAdapter,
-    RuleOnly, StubLlmAdapter, TokenIssuer,
+    AdapterError, CanClassify, CanGenerate, ClassifyOnly, DeltaSink, FullModel, LatencyTier,
+    LlmAdapter, RuleOnly, SilentDeltas, StubLlmAdapter, TokenIssuer,
 };
 
 // ==================== 权限与可见性（v2 阶段 S3，⑥ governance） ====================

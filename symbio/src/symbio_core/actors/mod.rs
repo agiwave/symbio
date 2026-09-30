@@ -189,13 +189,31 @@ impl Reasoner {
         tok: &FullModel,
         events: &[Event],
     ) -> Result<(String, u64), AdapterError> {
+        self.reply_streaming(
+            llm,
+            tok,
+            events,
+            std::sync::Arc::new(crate::symbio_core::SilentDeltas),
+        )
+        .await
+    }
+
+    /// 流式版：生成增量逐片经 `sink` 送出（v2 执行路径的 UI 帧源）；
+    /// 返回值与 [`Self::reply_timed`] 同形——流式只是帧的形态，收束语义不变。
+    pub async fn reply_streaming(
+        &self,
+        llm: &dyn LlmAdapter,
+        tok: &FullModel,
+        events: &[Event],
+        sink: std::sync::Arc<dyn crate::symbio_core::adapters::DeltaSink>,
+    ) -> Result<(String, u64), AdapterError> {
         // prompt 从**转写投影**出（多轮带历史，单轮裸文本与旧形态等价）——
         // 历史来自同一份事实源，不另存副本（ADR-044 同族纪律）。
         let prompt = crate::symbio_core::transcript()
             .apply(events, i64::MAX, crate::symbio_core::Budget::generous())
             .value
             .to_prompt();
-        llm.generate_timed(tok, &prompt).await
+        llm.generate_streaming(tok, &prompt, sink).await
     }
 }
 
@@ -743,6 +761,36 @@ impl TurnRunner {
     where
         S: Store<Event = Event>,
     {
+        self.run_streaming(
+            store,
+            llm,
+            tok,
+            turn,
+            text,
+            tier,
+            std::sync::Arc::new(crate::symbio_core::SilentDeltas),
+        )
+        .await
+    }
+
+    /// 流式版：生成增量逐片经 `sink` 送出（v2 执行路径的 UI 帧源）；
+    /// 落格语义与 [`Self::run`] 完全同一条路径。
+    // 参数面每项职责不同（事实源 / 适配器 / 闸门 / 轮次 / 发言 / 档位 / 流式口），
+    // 硬捆成 struct 只是把参数换个地方放——与 local 插件执行器同一豁免理由。
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_streaming<S>(
+        &self,
+        store: &S,
+        llm: &dyn LlmAdapter,
+        tok: &FullModel,
+        turn: u64,
+        text: &str,
+        tier: LatencyTier,
+        sink: std::sync::Arc<dyn crate::symbio_core::adapters::DeltaSink>,
+    ) -> Result<TurnOutcome, crate::symbio_core::store::AppendError>
+    where
+        S: Store<Event = Event>,
+    {
         // 1. 用户消息入格（turn × opened），档位随载荷入账。
         let user_seq = store
             .append(
@@ -761,7 +809,7 @@ impl TurnRunner {
 
         // 2. 生成（实测耗时在 adapter 边界取得；失败路径的耗时从调用起点算）。
         let started = std::time::Instant::now();
-        match Reasoner.reply_timed(llm, tok, &snapshot).await {
+        match Reasoner.reply_streaming(llm, tok, &snapshot, sink).await {
             Ok((reply, cost_ms)) => {
                 // 3a. final 落格：溯源指向本轮用户消息（N5），实测成本随事件入账。
                 store.append(

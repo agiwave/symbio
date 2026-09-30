@@ -109,6 +109,49 @@ fn mock_provider(port: u16) -> Arc<BoundProvider> {
     Arc::new(BoundProvider::new(cfg, Arc::new(OpenaiChatProtocol)))
 }
 
+/// 流式帧桥：SSE 正文增量逐片经 `DeltaSink` 送达；快照 + 窄帧拼起来与
+/// 聚合全文一致；generate()（委托静默口）与流式路径同源（同一执行路径）。
+#[tokio::test]
+async fn provider_adapter_streams_text_deltas_through_bridge() {
+    use crate::symbio_core::adapters::DeltaSink;
+    use std::sync::Mutex;
+
+    struct Collecting(Mutex<Vec<String>>);
+    impl DeltaSink for Collecting {
+        fn on_delta(&self, text: &str) {
+            self.0.lock().unwrap().push(text.to_string());
+        }
+    }
+
+    let (port, _captured) = spawn_mock(SSE_OK);
+    let adapter = ProviderLlmAdapter::new(mock_provider(port));
+    let tok = TokenIssuer::issue_deep();
+
+    let got = Arc::new(Collecting(Mutex::new(Vec::new())));
+    let (text, cost_ms) = adapter
+        .generate_streaming(
+            &tok,
+            "写一句关于秋天的诗",
+            got.clone() as Arc<dyn DeltaSink>,
+        )
+        .await
+        .expect("真实传输层必答");
+
+    let frames = got.0.lock().unwrap();
+    assert_eq!(
+        frames.concat(),
+        text,
+        "增量拼接 = 聚合全文（桥不丢帧、不重复）"
+    );
+    assert!(
+        frames.iter().any(|f| f.contains("秋天")),
+        "首片快照帧的全文要过桥：{frames:?}"
+    );
+    assert!(cost_ms > 0, "实测耗时必须为正（真实网络往返）");
+    // 注：mock 每实例只收一次连接，「generate() 与流式同源」由实现保证
+    // （generate = 流式路径 + SilentDeltas，见 provider_adapter.rs）。
+}
+
 /// 全链路：事件网格 → Reasoner（持令牌）→ **真实 HTTP/SSE** → final 落事件
 /// → 不变量全绿 → mock 收到的请求体里确实带着我们的 prompt。
 #[tokio::test]
@@ -309,16 +352,26 @@ async fn real_provider_full_calibration() {
     let store = crate::symbio_core::EventWalStore::open(&wal).expect("open wal");
     let tok = TokenIssuer::issue_deep();
 
+    // 流式计数口：真实 SSE 逐片过桥的证明（帧数 > 轮数 = 流式成立）。
+    struct Counting(std::sync::Mutex<u64>);
+    impl crate::symbio_core::adapters::DeltaSink for Counting {
+        fn on_delta(&self, _: &str) {
+            *self.0.lock().unwrap() += 1;
+        }
+    }
+    let delta_frames = Arc::new(Counting(std::sync::Mutex::new(0)));
+
     let mut samples: Vec<u64> = Vec::new();
     for i in 0..rounds {
         let out = crate::symbio_core::TurnRunner
-            .run(
+            .run_streaming(
                 &store,
                 &adapter,
                 &tok,
                 i as u64,
                 "用一句话说明什么是事件溯源。",
                 LatencyTier::Deep,
+                delta_frames.clone() as Arc<dyn crate::symbio_core::adapters::DeltaSink>,
             )
             .await
             .unwrap_or_else(|e| panic!("第 {i} 轮落格失败：{e:?}"));
@@ -367,9 +420,13 @@ async fn real_provider_full_calibration() {
     let p95 = samples[samples.len() * 95 / 100];
     let max = samples[samples.len() - 1];
     let total: u64 = samples.iter().sum();
-    println!("═══ 真实端点完整校准（{rounds} 轮，{model}，WalStore 持久）═══");
+    println!("═══ 真实端点完整校准（{rounds} 轮，{model}，WalStore 持久，流式）═══");
     println!("样本：{samples:?}");
     println!("P50 = {p50}ms · P95 = {p95}ms · max = {max}ms · 总耗 = {total}ms");
     println!("（系统自身开销基线：P50 = 1ms / max = 3ms，见 docs/plan/slo-calibration.md）");
+    println!(
+        "流式帧：{} 片（> {rounds} = SSE 逐片过桥成立）",
+        delta_frames.0.lock().unwrap()
+    );
     std::fs::remove_dir_all(&dir).ok();
 }

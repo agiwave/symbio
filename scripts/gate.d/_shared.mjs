@@ -377,7 +377,13 @@ export const BASELINE = {
   //      ADR-045 过渡期的迁移总开关：off（纯 v1）/ bridge（默认，v1 运行
   //      + 事实累积）；full 档待 v2 引擎切换落地时在同一枚举增设——
   //      「切到 v2 的哪一步」一个问题一个旋钮，不拆多个开关。
-  rustTests: 1203,
+  // 1205（流式生成，2026-09-30）——`1203 → 1205`，**+2**。
+  //      `full` 档的硬缺口补上：LlmAdapter::generate_streaming（默认 =
+  //      一次性全文的诚实降级）+ DeltaSink/SilentDeltas；Reasoner/TurnRunner
+  //      收成单路径（run = run_streaming + SilentDeltas）；ProviderLlmAdapter
+  //      帧桥（快照记账 + 窄帧转发，reasoning/工具增量不进 v2 文本面）——
+  //      SSE mock 验收增量拼接 = 聚合全文。流式只是帧的形态，收束语义不变。
+  rustTests: 1205,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

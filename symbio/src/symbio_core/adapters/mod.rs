@@ -160,6 +160,23 @@ impl std::fmt::Display for AdapterError {
     }
 }
 
+/// 流式增量接收口（[`LlmAdapter::generate_streaming`] 的回调面）。
+///
+/// `Send + Sync + 'static`——适配器在自己的执行任务上逐片回调，回调体可能
+/// 跨线程投递（如 [`crate::symbio_core::exec::ExecEventSink`] 的桥接实现）。
+pub trait DeltaSink: Send + Sync + 'static {
+    /// 正文增量（按序追加；适配器保证语义为「追加到正文尾部」）。
+    fn on_delta(&self, text: &str);
+}
+
+/// 静默接收口：[`crate::symbio_core::TurnRunner::run`]（非流式形态）的委托目标——同一条执行路径，
+/// 不为「不要流式」造第二条。
+pub struct SilentDeltas;
+
+impl DeltaSink for SilentDeltas {
+    fn on_delta(&self, _text: &str) {}
+}
+
 /// LLM 端口（⑤ 的抽象面）。**generate 只接受 `FullModel`**——反射/快速档
 /// 在类型上拿不到生成能力。
 ///
@@ -186,6 +203,23 @@ pub trait LlmAdapter: Send + Sync {
         let out = self.generate(tok, prompt).await?;
         Ok((out, start.elapsed().as_millis() as u64))
     }
+
+    /// 流式生成（v2 执行路径的 UI 帧源）：正文逐片经 `sink.on_delta` 送出，
+    /// 返回值与 [`Self::generate_timed`] 同形（全文 + 实测耗时——收束语义
+    /// 与流式与否无关，final 事件照常落格）。
+    ///
+    /// 默认实现 = **一次性发全文**：非流式适配器的诚实降级——调用方收到的
+    /// 帧少，但顺序、收束、记账全部不变。真实适配器（SSE）覆写本方法逐片回调。
+    async fn generate_streaming(
+        &self,
+        tok: &FullModel,
+        prompt: &str,
+        sink: std::sync::Arc<dyn DeltaSink>,
+    ) -> Result<(String, u64), AdapterError> {
+        let out = self.generate_timed(tok, prompt).await?;
+        sink.on_delta(&out.0);
+        Ok(out)
+    }
 }
 
 /// 零 LLM 桩——S2 彩排与测试用。可注入**确定性失败**，用于演练兜底路径。
@@ -197,6 +231,8 @@ pub struct StubLlmAdapter {
     fail_with: Option<&'static str>,
     /// 注入的延迟毫秒（演练 cost_ms 埋点；测试配合 `tokio::time` 使用）。
     delay_ms: u64,
+    /// 非空 ⇒ 逐片生成（演练流式回调；全文 = 各片拼接，与单发等价）。
+    chunks: Option<Vec<String>>,
 }
 
 impl StubLlmAdapter {
@@ -205,6 +241,17 @@ impl StubLlmAdapter {
             model,
             fail_with: None,
             delay_ms: 0,
+            chunks: None,
+        }
+    }
+
+    /// 逐片生成的桩：演练流式回调（`generate_streaming` 覆写逐片送出）。
+    pub fn succeed_streaming(model: &'static str, chunks: &[&str]) -> Self {
+        StubLlmAdapter {
+            model,
+            fail_with: None,
+            delay_ms: 0,
+            chunks: Some(chunks.iter().map(|c| c.to_string()).collect()),
         }
     }
 
@@ -214,6 +261,7 @@ impl StubLlmAdapter {
             model: "stub",
             fail_with: Some(message),
             delay_ms: 0,
+            chunks: None,
         }
     }
 
@@ -223,6 +271,7 @@ impl StubLlmAdapter {
             model,
             fail_with: None,
             delay_ms,
+            chunks: None,
         }
     }
 }
@@ -239,8 +288,49 @@ impl LlmAdapter for StubLlmAdapter {
         }
         match self.fail_with {
             Some(msg) => Err(AdapterError::GenerationFailed(msg.to_string())),
-            None => Ok(format!("[{}] {}", self.model, prompt)),
+            None => match &self.chunks {
+                // 分片桩：全文 = 各片拼接（与单发等价——流式只是帧的形态）。
+                Some(chunks) => Ok(chunks.concat()),
+                None => Ok(format!("[{}] {}", self.model, prompt)),
+            },
         }
+    }
+
+    async fn generate_streaming(
+        &self,
+        tok: &FullModel,
+        prompt: &str,
+        sink: std::sync::Arc<dyn DeltaSink>,
+    ) -> Result<(String, u64), AdapterError> {
+        let Some(chunks) = &self.chunks else {
+            // 无分片配置 ⇒ 走默认降级（一次性全文）。
+            return LlmAdapter::generate_streaming(&DelegateGen(self), tok, prompt, sink).await;
+        };
+        if self.delay_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(self.delay_ms)).await;
+        }
+        if let Some(msg) = self.fail_with {
+            return Err(AdapterError::GenerationFailed(msg.to_string()));
+        }
+        for c in chunks {
+            sink.on_delta(c);
+        }
+        let full = chunks.concat();
+        Ok((full, 0))
+    }
+}
+
+/// 委托包装：让无分片的桩走进 trait 的**默认**实现（Rust 裸调用默认方法
+/// 需要 `Self` 类型，包装避免把默认体复制一份）。
+struct DelegateGen<'a>(&'a StubLlmAdapter);
+
+#[async_trait]
+impl LlmAdapter for DelegateGen<'_> {
+    fn model_id(&self) -> &str {
+        self.0.model_id()
+    }
+    async fn generate(&self, tok: &FullModel, prompt: &str) -> Result<String, AdapterError> {
+        self.0.generate(tok, prompt).await
     }
 }
 

@@ -13,14 +13,47 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::symbio_core::adapters::{AdapterError, FullModel, LlmAdapter};
+use crate::symbio_core::adapters::{AdapterError, DeltaSink, FullModel, LlmAdapter, SilentDeltas};
 use crate::symbio_core::schemas::session::chat_message::{
-    ChatMessage, MessageContent, MessageRole,
+    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
 use crate::symbio_core::ExecAbortSignal;
 use crate::symbio_core::ExecEnv;
 use crate::symbio_core::ExecEventSink;
-use crate::symbio_core::{llm_short_id, ModelProvider};
+use crate::symbio_core::{llm_short_id, ExecTranscriptWriter, ModelProvider};
+
+/// 流式帧桥：把 `execute_turn` 的转写帧**择要**转成正文增量——
+/// - 快照帧（`msg_type = Text × status = Streaming`）：登记节点 id，全文转发；
+/// - 窄帧（`delta`）：只有**已登记的正文节点**才转发（reasoning / 工具增量
+///   不进 v2 文本面——v2 的推理帧桥接是独立的一步，不在这里顺手做）。
+///
+/// 为什么不直接转发所有 delta：model 插件的窄帧只带 `id + delta`，不带
+/// `msg_type`——不记账就分不清正文增量与推理增量。收束帧不经此桥：终态由
+/// 消费方负责（model 插件只发 Streaming 快照与窄帧，见 `state.rs` 的收口）。
+struct DeltaBridge {
+    sink: Arc<dyn DeltaSink>,
+    text_nodes: std::sync::Mutex<std::collections::HashSet<String>>,
+}
+
+#[async_trait]
+impl ExecTranscriptWriter for DeltaBridge {
+    async fn apply(&self, m: ChatMessage) {
+        if let Some(d) = &m.delta {
+            if !d.is_empty() && self.text_nodes.lock().unwrap().contains(&m.id) {
+                self.sink.on_delta(d);
+            }
+            return;
+        }
+        if m.msg_type == Some(MessageType::Text) && m.status == Some(MessageStatus::Streaming) {
+            if let Some(MessageContent::Text(t)) = &m.content {
+                if !t.is_empty() {
+                    self.text_nodes.lock().unwrap().insert(m.id.clone());
+                    self.sink.on_delta(t);
+                }
+            }
+        }
+    }
+}
 
 /// ⑤ 端口的真实实现：把 `ModelProvider::execute_turn`（五态机 + SSE 解析）
 /// 折进 `LlmAdapter::generate`（prompt 入、文本出）的最小适配。
@@ -42,17 +75,38 @@ impl LlmAdapter for ProviderLlmAdapter {
         self.provider.provider_id()
     }
 
-    /// 单轮生成。`_tok` 是闸门证据：能拿到本方法的调用方必然已持 `FullModel`
-    /// （闸门在 [`crate::symbio_core::Reasoner::reply`] 的签名上，适配器不重复查）。
-    async fn generate(&self, _tok: &FullModel, prompt: &str) -> Result<String, AdapterError> {
+    /// 单轮生成（委托流式路径 + 静默接收口——**同一条执行路径**，不为
+    /// 「不要流式」造第二条）。
+    async fn generate(&self, tok: &FullModel, prompt: &str) -> Result<String, AdapterError> {
+        let (text, _) = self
+            .generate_streaming(tok, prompt, Arc::new(SilentDeltas))
+            .await?;
+        Ok(text)
+    }
+
+    /// 流式生成：经帧桥把 SSE 增量逐片转给 `sink`；返回值 = 全文 + 实测耗时
+    ///（收束语义与流式与否无关）。
+    async fn generate_streaming(
+        &self,
+        _tok: &FullModel,
+        prompt: &str,
+        sink: Arc<dyn DeltaSink>,
+    ) -> Result<(String, u64), AdapterError> {
+        let started = std::time::Instant::now();
         let message = ChatMessage {
             id: llm_short_id(),
             role: Some(MessageRole::User),
             content: Some(MessageContent::Text(prompt.to_string())),
             ..Default::default()
         };
-        // 内部请求：出口静默、中止信号独立（同 classify 直呼路径的形态）。
-        let env = ExecEnv::new(ExecEventSink::silent(), ExecAbortSignal::new());
+        // 流式出口：转写帧经桥转成正文增量（桥不落盘——帧面只进回调）。
+        let env = ExecEnv::new(
+            ExecEventSink::direct(Arc::new(DeltaBridge {
+                sink,
+                text_nodes: Default::default(),
+            })),
+            ExecAbortSignal::new(),
+        );
         let output = self
             .provider
             .execute_turn(
@@ -71,7 +125,7 @@ impl LlmAdapter for ProviderLlmAdapter {
                 "model returned empty text".into(),
             ));
         }
-        Ok(output.text)
+        Ok((output.text, started.elapsed().as_millis() as u64))
     }
 }
 
