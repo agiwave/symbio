@@ -55,6 +55,7 @@ pub mod fallback;
 pub mod readyset;
 pub mod recall;
 pub mod reputation;
+pub mod transcript;
 pub mod turnstate;
 
 #[cfg(test)]

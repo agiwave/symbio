@@ -358,7 +358,12 @@ export const BASELINE = {
   //      I3 失败也落事件。真锅：WalStore 落盘行 seq 全 null（assign_seq 在序列化
   //      之后）——重开恢复丢序，N2 静默破裂；修复 = 赋 seq 先于序列化，
   //      重开 check_all 绿（此前 S4 测试没走到这条所以没炸）。
-  rustTests: 1191,
+  // 1193（转写投影，2026-09-30）：**多轮对话的历史侧**——，**+2**。
+  //      ③ transcript 投影（user.message→user 行 / final→assistant 行 /
+  //      fallback→assistant+why——模型知道自己说过兜底话术）；
+  //      Reasoner::reply_timed 的 prompt 改从转写出（多轮带历史，
+  //      单轮裸文本等价）——历史来自同一事实源，不另存副本（ADR-044 同族）。
+  rustTests: 1193,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

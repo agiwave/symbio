@@ -189,18 +189,12 @@ impl Reasoner {
         tok: &FullModel,
         events: &[Event],
     ) -> Result<(String, u64), AdapterError> {
-        let prompt = events
-            .iter()
-            .rev()
-            .find(|e| e.kind == crate::symbio_core::event::EVENT_USER_MESSAGE)
-            .map(|e| {
-                e.payload
-                    .get("text")
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("")
-                    .to_string()
-            })
-            .unwrap_or_default();
+        // prompt 从**转写投影**出（多轮带历史，单轮裸文本与旧形态等价）——
+        // 历史来自同一份事实源，不另存副本（ADR-044 同族纪律）。
+        let prompt = crate::symbio_core::transcript()
+            .apply(events, i64::MAX, crate::symbio_core::Budget::generous())
+            .value
+            .to_prompt();
         llm.generate_timed(tok, &prompt).await
     }
 }

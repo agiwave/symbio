@@ -1869,7 +1869,8 @@ mod turn_runner_tests {
     use crate::symbio_core::adapters::{LatencyTier, StubLlmAdapter, TokenIssuer};
     use crate::symbio_core::store::Store;
     use crate::symbio_core::{
-        check_all, cost_ledger, fallback_rate, Budget, Event, Seq, TurnRunner, WalStore,
+        check_all, cost_ledger, fallback_rate, transcript, Budget, Event, EventStore, Seq,
+        TurnRunner, WalStore,
     };
 
     /// 成功轮：final 落格、溯源指向本轮用户消息、实测 cost_ms > 0、
@@ -2025,5 +2026,93 @@ mod turn_runner_tests {
             err,
             Err(crate::symbio_core::store::AppendError::Duplicate)
         ));
+    }
+
+    /// 多轮对话带历史：③ transcript 投影读同一事实源，第二轮 prompt 含第一轮；
+    /// 单轮 prompt 保持裸文本（与无历史形态等价）。
+    #[tokio::test]
+    async fn multi_turn_transcript_carries_history_from_fact_source() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = StubLlmAdapter::succeed("stub-model");
+
+        // 第一轮：单轮 prompt = 裸文本。
+        let r1 = TurnRunner
+            .run(&store, &llm, &tok, 0, "第一轮问题", LatencyTier::Deep)
+            .await
+            .unwrap();
+        assert!(r1.text.contains("第一轮问题"));
+        assert!(
+            !r1.text.contains("<对话历史>"),
+            "单轮不得引入历史标记：{}",
+            r1.text
+        );
+
+        // 第二轮：prompt 带历史——模型看得见自己上一轮的答复。
+        let r2 = TurnRunner
+            .run(&store, &llm, &tok, 1, "第二轮问题", LatencyTier::Deep)
+            .await
+            .unwrap();
+        assert!(
+            r2.text.contains("<对话历史>"),
+            "多轮必须带历史：{}",
+            r2.text
+        );
+        assert!(r2.text.contains("用户: 第一轮问题"), "历史里有上一轮提问");
+        assert!(r2.text.contains("助手: "), "历史里有上一轮答复");
+        assert!(r2.text.contains("第二轮问题"), "当前消息在历史之外");
+
+        // 投影联动与 N1。
+        let snapshot = store.range(Seq::new(0));
+        assert!(
+            check_all(&snapshot).is_empty(),
+            "{:?}",
+            check_all(&snapshot)
+        );
+        let view = transcript().apply(&snapshot, i64::MAX, Budget::generous());
+        assert_eq!(view.value.entries.len(), 4, "两轮 × (问+答)");
+        assert_eq!(view.value.entries[0].role, "user");
+        assert_eq!(view.value.entries[1].role, "assistant");
+        let again = transcript().apply(&snapshot, i64::MAX, Budget::generous());
+        assert_eq!(view.value, again.value);
+    }
+
+    /// fallback 行进转写（assistant / why）——兜底话术是用户实际看到的回复。
+    #[test]
+    fn transcript_includes_fallback_as_assistant_line() {
+        use crate::symbio_core::{Entity, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_USER_MESSAGE};
+        let store = EventStore::new();
+        store
+            .append(
+                Event::pending(
+                    "u-0",
+                    EVENT_USER_MESSAGE,
+                    Entity::Turn,
+                    Verb::Opened,
+                    0,
+                    "user",
+                )
+                .with_payload(serde_json::json!({ "text": "问", "tier": "deep" })),
+            )
+            .unwrap();
+        store
+            .append(
+                Event::pending(
+                    "fb-0",
+                    EVENT_ASSISTANT_FALLBACK,
+                    Entity::Turn,
+                    Verb::Closed,
+                    0,
+                    "agent:main",
+                )
+                .with_produced_by(0)
+                .with_payload(serde_json::json!({ "why": "上游 402" })),
+            )
+            .unwrap();
+        let snapshot = store.range(Seq::new(0));
+        let view = transcript().apply(&snapshot, i64::MAX, Budget::generous());
+        assert_eq!(view.value.entries.len(), 2);
+        assert_eq!(view.value.entries[1].role, "assistant");
+        assert_eq!(view.value.entries[1].text, "上游 402");
     }
 }
