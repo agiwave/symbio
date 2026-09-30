@@ -260,3 +260,113 @@ async fn reflex_tier_system_overhead_is_measured_and_bounded() {
         "系统自身开销 max = {max}ms 超快速档预算——传输/解析/网格有回归"
     );
 }
+
+/// 真实端点彩排（**opt-in**，默认 `#[ignore]`——CI 无凭据不跑）：
+/// 完整校准 = 系统开销 + **模型延迟**。给一个真实 OpenAI 兼容端点即可手测：
+///
+/// ```text
+/// SYMBIO_REHEARSE_API_BASE=https://...  \
+/// SYMBIO_REHEARSE_API_KEY=sk-...        \
+/// SYMBIO_REHEARSE_MODEL=...             \
+/// cargo test -p symbio --lib provider_adapter -- --ignored --nocapture
+/// ```
+///
+/// 链路与 CI 侧校准（[`reflex_tier_system_overhead_is_measured_and_bounded`]）
+/// 完全同形，只把 mock 换成真实端点——产出可抄进
+/// `docs/plan/slo-calibration.md` 的报告行。守卫：每轮落在**深度档**
+/// （60s）内——真实模型延迟的主导项必须被四层预算接住；不变量全绿。
+#[tokio::test]
+#[ignore = "需要真实端点凭据：SYMBIO_REHEARSE_API_BASE / _API_KEY / _MODEL"]
+async fn real_provider_full_calibration() {
+    let api_base = std::env::var("SYMBIO_REHEARSE_API_BASE").expect("缺 SYMBIO_REHEARSE_API_BASE");
+    let api_key = std::env::var("SYMBIO_REHEARSE_API_KEY").expect("缺 SYMBIO_REHEARSE_API_KEY");
+    let model = std::env::var("SYMBIO_REHEARSE_MODEL").unwrap_or_else(|_| "gpt-4o-mini".into());
+    let rounds: usize = std::env::var("SYMBIO_REHEARSE_ROUNDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(12);
+
+    let cfg: ModelProviderConfig = serde_json::from_value(json!({
+        "id": "rehearse-real",
+        "provider": "openai",
+        "api_base": api_base,
+        "api_key": api_key,
+        "model": model,
+        "rate_limit_ms": 0
+    }))
+    .expect("配置合法");
+    let adapter = ProviderLlmAdapter::new(Arc::new(BoundProvider::new(
+        cfg,
+        Arc::new(OpenaiChatProtocol),
+    )));
+
+    let tok = TokenIssuer::issue_deep();
+    let store = EventStore::new();
+
+    let mut samples: Vec<u64> = Vec::new();
+    for i in 0..rounds {
+        // 每轮独立成 turn（N3 发言唯一性：每 turn ≤ 1 条 final——turn 号随轮次走）。
+        store
+            .append(
+                Event::pending(
+                    format!("u-{i}"),
+                    EVENT_USER_MESSAGE,
+                    Entity::Turn,
+                    Verb::Opened,
+                    i as u64,
+                    "user",
+                )
+                .with_payload(json!({ "text": "用一句话说明什么是事件溯源。" })),
+            )
+            .unwrap();
+        let user_seq = store.head().value();
+        let snapshot = store.range(Seq::new(0));
+        let (reply, cost_ms) = Reasoner
+            .reply_timed(&adapter, &tok, &snapshot)
+            .await
+            .unwrap_or_else(|e| panic!("第 {i} 轮真实调用失败：{e:?}"));
+        assert!(!reply.trim().is_empty(), "第 {i} 轮空回复");
+        assert!(cost_ms <= 60_000, "第 {i} 轮 {cost_ms}ms 超深度档预算");
+        store
+            .append(
+                Event::pending(
+                    format!("f-{i}"),
+                    EVENT_ASSISTANT_FINAL,
+                    Entity::Turn,
+                    Verb::Closed,
+                    i as u64,
+                    "agent:main",
+                )
+                .with_produced_by(user_seq)
+                .with_cost_ms(cost_ms)
+                .with_payload(json!({ "text": reply, "model": adapter.model_id() })),
+            )
+            .unwrap();
+        samples.push(cost_ms);
+        println!("[{i:>2}/{rounds}] {cost_ms:>6}ms  {reply}");
+        // 轮内即时校验：N3 / 溯源等不变量每轮都不破（别攒到最后一起炸）。
+        let snapshot = store.range(Seq::new(0));
+        assert!(
+            check_all(&snapshot).is_empty(),
+            "第 {i} 轮不变量失守：{:?}",
+            check_all(&snapshot)
+        );
+    }
+
+    let snapshot = store.range(Seq::new(0));
+    assert!(
+        check_all(&snapshot).is_empty(),
+        "{:?}",
+        check_all(&snapshot)
+    );
+
+    samples.sort_unstable();
+    let p50 = samples[samples.len() / 2];
+    let p95 = samples[samples.len() * 95 / 100];
+    let max = samples[samples.len() - 1];
+    let total: u64 = samples.iter().sum();
+    println!("═══ 真实端点完整校准（{rounds} 轮，{model}）═══");
+    println!("样本：{samples:?}");
+    println!("P50 = {p50}ms · P95 = {p95}ms · max = {max}ms · 总耗 = {total}ms");
+    println!("（系统自身开销基线：P50 = 1ms / max = 3ms，见 docs/plan/slo-calibration.md）");
+}
