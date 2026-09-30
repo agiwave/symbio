@@ -1,9 +1,9 @@
 //! 中途汇报 —— 「干到一半也要能说一句话」的**触发点**与**判定**。
 //!
-//! ## 两件事分开：触发权归编排层，措辞权归 `reply`
+//! ## 两件事分开：触发权归编排层，措辞权归 `compose`
 //!
-//! 本文件只回答「**该不该**在现在说一句」，一个字都不写；说什么由 `reply` 从
-//! [`RunSnapshot`] 组织（见 `reply/templates.rs` 的 `progress_text`），落点由
+//! 本文件只回答「**该不该**在现在说一句」，一个字都不写；说什么由 `compose` 从
+//! [`RunSnapshot`] 组织（见 `compose/templates.rs` 的 `progress_text`），落点由
 //! `chat_loop/compose.rs` 执行。合成一处就会出现"该说话时没人说话"——判定方
 //! 不知道有什么可说，措辞方不知道什么时候该说。
 //!
@@ -45,7 +45,7 @@ use super::{apply_verdict, VerdictEffect};
 /// 中途汇报的策略快照（`SessionConfig` 的四个旋钮）。
 ///
 /// 构造点唯一：`orchestrator/consume.rs`——那里拿着插件、能读配置，与
-/// `ChatOrchestrator::triage_enabled` / `reply_enabled` 是同一条取值纪律
+/// `ChatOrchestrator::classify_enabled` / `compose_enabled` 是同一条取值纪律
 /// （取**值快照**，不把插件交给主循环）。
 pub struct ProgressPolicy {
     /// 总开关（`SessionConfig::progress_enabled`）
@@ -124,7 +124,7 @@ pub(crate) async fn report_if_due(
             );
             true
         }
-        // 拿不到措辞（未挂载 `reply` / 措辞为空）⇒ 没汇报，也就**不消耗配额**：
+        // 拿不到措辞（未挂载 `compose` / 措辞为空）⇒ 没汇报，也就**不消耗配额**：
         // 下一个轮边界还会再试一次。方向与 `Answered` 的降级一致——**降级而不失效**。
         _ => {
             crate::plugin_debug!(

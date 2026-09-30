@@ -84,7 +84,7 @@ export default defineCase(
       //    工具名不硬编码（各 OS 的 shell 工具名不同），按「首轮有、次轮没有」的差集判。
       //
       //    取的是**带工具的那一次请求**，不是 `requests[0]`：对话面出厂开启，而它的
-      //    判决请求（`triage/decide`）是**无工具**的内部请求——它排在 worker 之前。
+      //    判决请求（`classify/decide`）是**无工具**的内部请求——它排在 worker 之前。
       //    本用例的主题是装配（不能预置 `session/PLUGIN.yml` 去关掉对话面，那会破坏
       //    「插件树全部由这次运行装配出来」的前提），因此按"有没有 tools"挑。
       const workerTools = (reqs) =>

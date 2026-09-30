@@ -1,20 +1,20 @@
-//! 轮首判决的调用点 —— `session` ⇄ `triage` 的那条边。
+//! 轮首判决的调用点 —— `session` ⇄ `classify` 的那条边。
 //!
 //! ## 它做三件事
 //!
 //! 1. 把**对话线**投影出来（[`conversation_view`]）——插件不读存储，读的是投影；
-//! 2. 经容器 `route` 调 `triage/decide`（`ctx.fork()` + `PATH` 常量 + 契约载荷）；
+//! 2. 经容器 `route` 调 `classify/decide`（`ctx.fork()` + `PATH` 常量 + 契约载荷）；
 //! 3. 把判决回读成 [`Verdict`]（**枚举**，不是文本——编排层要能执行它）。
 //!
 //! ## 为什么经容器 `route` 而不是直连插件实例
 //!
-//! 直连要求 session 按值持有 `triage`，那会绕过地址分发（`plugin-entry-audit` 的
+//! 直连要求 session 按值持有 `classify`，那会绕过地址分发（`plugin-entry-audit` 的
 //! E-007 正是拦这个），并在插件重建后钉住旧实例。`parent` 已经是容器句柄
 //! （[`ChatOrchestrator::parent`]），本方案不需要新增任何持有关系。
 //!
 //! ## 「没有这个插件」是一个**正常状态**，不是错误
 //!
-//! `triage` 的卸载语义就是「全部输入直接进工具循环」（= 引入它之前的行为）。
+//! `classify` 的卸载语义就是「全部输入直接进工具循环」（= 引入它之前的行为）。
 //! 因此这里对路由失败的处理是**返回 `None` 并放行**，而不是报错：
 //!
 //! - `NotFound`（未挂载 / 已停用）：**静默**——这是预期的装配形态，
@@ -29,7 +29,8 @@ use std::sync::Arc;
 use crate::symbio_core::schemas::dialog::{DecideRequest, Verdict};
 use crate::symbio_core::schemas::session::chat_message::ChatMessage;
 use crate::symbio_core::{
-    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PATH, ROUTE_TRIAGE_DECIDE, SESSION_ID,
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PATH, ROUTE_CLASSIFY_DECIDE,
+    SESSION_ID,
 };
 
 use super::super::context::{conversation_view, CONVERSATION_VIEW_LIMIT};
@@ -37,7 +38,7 @@ use super::state::{ChatOrchestrator, SessionContext};
 
 /// 轮首判决。
 ///
-/// 返回 `None` = **没有判决**（没挂载 `triage` / 路由失败 / 响应不是合法契约）——
+/// 返回 `None` = **没有判决**（没挂载 `classify` / 路由失败 / 响应不是合法契约）——
 /// 调用方按「引入本插件之前的行为」继续，即全部输入进工具循环。
 pub(crate) async fn decide_turn(
     orchestrator: &ChatOrchestrator,
@@ -52,7 +53,7 @@ pub(crate) async fn decide_turn(
         conversation_view(&context.messages, CONVERSATION_VIEW_LIMIT);
 
     let req = ctx.fork();
-    req.set(PATH, ROUTE_TRIAGE_DECIDE.to_string());
+    req.set(PATH, ROUTE_CLASSIFY_DECIDE.to_string());
     req.set(SESSION_ID, session_id.clone());
     req.set_payload(DecideRequest {
         session_id,
@@ -67,18 +68,21 @@ pub(crate) async fn decide_turn(
             Err(e) => {
                 crate::plugin_warn!(
                     "session",
-                    "[Triage] 判决载荷不是合法契约，按「无判决」处理：{e}"
+                    "[Classify] 判决载荷不是合法契约，按「无判决」处理：{e}"
                 );
                 None
             }
         },
         Err(PluginError::NotFound(_)) => {
             // 未挂载 / 已停用：这正是「卸载平凡值」的形态，不是故障。
-            crate::plugin_debug!("session", "[Triage] 未挂载判决插件，本轮直接进工具循环");
+            crate::plugin_debug!("session", "[Classify] 未挂载判决插件，本轮直接进工具循环");
             None
         }
         Err(e) => {
-            crate::plugin_warn!("session", "[Triage] 判决调用失败，本轮直接进工具循环：{e}");
+            crate::plugin_warn!(
+                "session",
+                "[Classify] 判决调用失败，本轮直接进工具循环：{e}"
+            );
             None
         }
     }

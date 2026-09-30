@@ -3,7 +3,7 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// S2 让 `triage` 真的开始判决，并把 `session` 接上它。判决是**枚举**，编排层据此
+// S2 让 `classify` 真的开始判决，并把 `session` 接上它。判决是**枚举**，编排层据此
 // **执行**——因此本用例验的不是"插件返回了什么"，而是**会话行为随判决改变**：
 //
 // | 线 | 输入 | 判决 | 会话行为 |
@@ -11,16 +11,16 @@ import './_selfrun.mjs';
 // | A 规则短路 | 「谢谢」 | `Answered{thanks}` | **零** LLM 请求，不进工具循环 |
 // | B 快速档 | 「我们刚才聊了什么」 | `Answered{clarify}` | 有分类请求；**无**工具节点 |
 // | C 需要干活 | 「读一下 README」 | `Escalate{needs_work}` | 有工具节点（工具真跑） |
-// | D 开关平凡值 | 「谢谢」+ `triage_enabled=false` | 不判决 | 与今天逐字一致（有 LLM 请求） |
-// | E 卸载平凡值 | 「谢谢」+ 不挂载 `triage` | 不判决 | 与今天逐字一致（有 LLM 请求） |
+// | D 开关平凡值 | 「谢谢」+ `classify_enabled=false` | 不判决 | 与今天逐字一致（有 LLM 请求） |
+// | E 卸载平凡值 | 「谢谢」+ 不挂载 `classify` | 不判决 | 与今天逐字一致（有 LLM 请求） |
 //
 // ## 为什么断言落在"请求数"与"节点"上，而不是"判决值"
 //
-// 判决值是**中间产物**：`triage` 的返回只在进程内活一次，落库的是它的**后果**。
+// 判决值是**中间产物**：`classify` 的返回只在进程内活一次，落库的是它的**后果**。
 // 拿判决值当断言，等于测一个用户看不到也存不下来的东西；而"零 LLM 请求"
 // 与"没有工具节点"是同一件事的**可观测形式**——它们才是判据。
 // 判决值本身（规则表命中什么、四选一怎么映射）由单测穷举，见
-// `symbio/src/plugins/triage/rules.test.rs` 与 `classify.test.rs`。
+// `symbio/src/plugins/classify/rules.test.rs` 与 `classify.test.rs`。
 //
 // ## 为什么每一条线都要"先取请求基线"
 //
@@ -29,19 +29,19 @@ import './_selfrun.mjs';
 //
 // ## 为什么平凡值线要另起 homedir 与进程
 //
-// 两个开关都在**启动时**读进内存（`triage_enabled` 进 `SessionConfig`、停用进装配期），
+// 两个开关都在**启动时**读进内存（`classify_enabled` 进 `SessionConfig`、停用进装配期），
 // 运行期改配置不会生效。因此 D / E 两条平凡值线只能另起进程——它们验的正是
 // "这条路径在关掉之后与今天逐字一致"。
 //
 // 端口来自 homedir 里的插件配置，而**同一个 homedir 的端口是固定的**：复用 `hd` 的
 // 进程就得复用它的端口，而那个端口刚被 kill 掉，可能还在 TIME_WAIT 里。E 线因此
 // 不复用 `hd`，而是另起一个 homedir 并把停用位**预置**进 manifest
-// （`ensure_manifest` 不覆盖已存在的文件 ⇒ 第一次装配就不构造 `triage`）。
+// （`ensure_manifest` 不覆盖已存在的文件 ⇒ 第一次装配就不构造 `classify`）。
 //
 // 三组 homedir / 端口分配：
 //   A·B·C 共享第一个 homedir 与端口（同进程，只换会话 id）
-//   D 另起 homedir + 端口（要 `triage_enabled=false`）
-//   E 另起 homedir + 端口（要它"从一开始就没有 triage"）
+//   D 另起 homedir + 端口（要 `classify_enabled=false`）
+//   E 另起 homedir + 端口（要它"从一开始就没有 classify"）
 import {
   MockLlm,
   makeHomedir,
@@ -91,8 +91,8 @@ export default defineCase(
       //
       // mock 返回哪个词是**任意**的（判决由词决定，不由提示词的措辞决定）。这里刻意
       // 选 `clarify` 而不是 `direct`：两者都落 `Answered`，但 `direct`（`from_context`）
-      // 会多走一条**生成**产线（`reply` 再发一次静默 LLM 请求）——那是 T22 的主题，
-      // 本用例只钉 `triage` 的判决与编排后果，不该顺带把生成产线拖进来。
+      // 会多走一条**生成**产线（`compose` 再发一次静默 LLM 请求）——那是 T22 的主题，
+      // 本用例只钉 `classify` 的判决与编排后果，不该顺带把生成产线拖进来。
       { id: 'cls-answer', match: '我们刚才聊了什么', content: 'clarify', once: true },
       // 分类请求（C 线，once）⇒ 判「要干活」
       { id: 'cls-work', match: '读一下 README', content: 'work', once: true },
@@ -117,7 +117,7 @@ export default defineCase(
         // 两个开关的出厂默认都已是 `true`（S3 起，见 `SessionConfig` 的字段文档）。
         // 这里仍**显式**写出，是让本用例的前提自证——不依赖任何默认值，翻转默认值
         // 不会悄悄改变本用例验的是什么。
-        session: { triage_enabled: true },
+        session: { classify_enabled: true },
       },
     });
 
@@ -207,8 +207,8 @@ export default defineCase(
 
       // 分类请求是**内部请求**：它必须静默（不产生任何可见节点）。
       //
-      // 断言的形式随 S3 变了：S2 时 `reply` 还是平凡实现（恒空串），B 线因此**一条
-      // 助手节点都没有**；S3 起 `reply` 会为 `Answered` 写一句答话，于是"零助手节点"
+      // 断言的形式随 S3 变了：S2 时 `compose` 还是平凡实现（恒空串），B 线因此**一条
+      // 助手节点都没有**；S3 起 `compose` 会为 `Answered` 写一句答话，于是"零助手节点"
       // 不再成立。仍成立的是它**真正要拦的东西**：分类请求自己不得泄漏成可见节点。
       //
       // 判据取"恰一条助手节点，且它是根级的对话面节点"：泄漏的形态是 Turn 骨架
@@ -218,13 +218,13 @@ export default defineCase(
       assertEq(
         assistants.length,
         1,
-        `B 线只该有 reply 写的那一条答话（实得 ${assistants.length} 条助手节点）`,
+        `B 线只该有 compose 写的那一条答话（实得 ${assistants.length} 条助手节点）`,
       );
       assert(
         assistants[0].parent_id == null,
         '答话必须挂在根级（对话线），不是某个 Turn 的子节点',
       );
-      assertEq(assistants[0].meta?.surface, 'reply', '答话必须带对话面标记（谁产出的）');
+      assertEq(assistants[0].meta?.surface, 'reply', '答话必须带对话面标记（surface 是数据概念）');
       assertEq(assistants[0].meta?.reason, 'clarify', '答话必须带上游判决的理由码（原样透传）');
 
       // ── C 需要干活：「读一下 README」⇒ Escalate ⇒ 工具真的跑 ──
@@ -261,18 +261,18 @@ export default defineCase(
         `C 线的 Turn 数应等于工具循环请求数（共 ${cReqs} 次请求，含 1 次静默分类）`,
       );
 
-      // ── D 开关平凡值：`triage_enabled = false` ⇒ 行为与今天逐字一致 ──
+      // ── D 开关平凡值：`classify_enabled = false` ⇒ 行为与今天逐字一致 ──
       //    这个布尔在**启动时**读进 `SessionConfig`，运行期改它不生效；因此本线
       //    另起 homedir + 进程（只换会话 id 是没用的）。
       //    另注：本线写的是**显式** `false` 而不是靠缺省——缺省那条路由
-      //    `session/config.test.rs` 的 `triage_and_reply_are_on_by_default` 单测钉住，
+      //    `session/config.test.rs` 的 `classify_and_compose_are_on_by_default` 单测钉住，
       //    这里验的是"这个开关本身有效"。
       const offPort = nextPort();
       const hdOff = makeHomedir({
         providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
         pluginConfigs: {
           gateway: gatewayConfig(offPort),
-          session: { triage_enabled: false },
+          session: { classify_enabled: false },
         },
       });
       const cliOff = startLongLivedCli({
@@ -303,7 +303,7 @@ export default defineCase(
         cleanupHomedir(hdOff);
       }
 
-      // ── E 卸载平凡值：不挂载 `triage` ⇒ 行为与今天逐字一致 ──
+      // ── E 卸载平凡值：不挂载 `classify` ⇒ 行为与今天逐字一致 ──
       //    「没有这个插件也能正确运行」的可执行形式不是配置开关，而是**装配期**的
       //    不挂载：停用即"根本不构造"，路由随之 `NotFound`，`session` 按"缺插件"放行。
       //
@@ -316,10 +316,10 @@ export default defineCase(
         providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
         pluginConfigs: {
           gateway: gatewayConfig(unmountedPort),
-          // 与 A/B/C 线**同一个完整值**：差别只有"挂不挂 triage"这一项，
+          // 与 A/B/C 线**同一个完整值**：差别只有"挂不挂 classify"这一项，
           // 否则验的就不是"卸载"而是"两个变量一起变"。
-          session: { triage_enabled: true },
-          triage: { plugin_enabled: false },
+          session: { classify_enabled: true },
+          classify: { plugin_enabled: false },
         },
       });
       const cli2 = startLongLivedCli({
@@ -329,11 +329,11 @@ export default defineCase(
         provider: PROVIDER_ID,
         gatewayPort: unmountedPort,
       });
-      await cli2.waitGatewayReady(20_000, 'E 线进程（triage 未挂载）');
+      await cli2.waitGatewayReady(20_000, 'E 线进程（classify 未挂载）');
       try {
         // 停用后路由必须消失（卸载的判据是"路由 NotFound"，不是"读了 enabled 字段"）
-        const gone = await cli2.invoke('triage/decide', { session_id: SIDS.unmounted, utterance: '你好' });
-        assert(gone.status >= 400, `停用后 triage/decide 应不可达（实得 ${gone.status}）`);
+        const gone = await cli2.invoke('classify/decide', { session_id: SIDS.unmounted, utterance: '你好' });
+        assert(gone.status >= 400, `停用后 classify/decide 应不可达（实得 ${gone.status}）`);
 
         const unmBase = await reqCount();
         const root = (await cli2.invoke('vdfs/root', {})).body?.data?.path;

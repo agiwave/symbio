@@ -3,7 +3,7 @@
 //! ## 为什么模板是"数据"而不是"机制"
 //!
 //! 表就是一张 `&[(&str, &str)]`，查表是一个 `iter().find()`。新增一类措辞 = 加一行，
-//! 不动任何类型、不动 `symbio_core`（J1）。这与 [`super::super::triage`] 的规则表
+//! 不动任何类型、不动 `symbio_core`（J1）。这与 [`super::super::classify`] 的规则表
 //! 是同一个形状：**能用数据表达的，就不要写成分支**。
 //!
 //! ## 哪些理由码走模板、哪个走生成
@@ -86,7 +86,7 @@ pub(crate) fn template_for(verdict: &Verdict) -> Option<String> {
 ///
 /// `tool_rounds = 0` 在编排层不可达（汇报判定要求至少走完一轮，见 `session` 的
 /// `chat_loop/progress.rs`），但本契约还有**第二个调用方**：网关把外部客户端的
-/// `path` 原样转发给容器，`reply/compose` 可能被仓外程序直接调用。那句话在这里
+/// `path` 原样转发给容器，`compose/compose` 可能被仓外程序直接调用。那句话在这里
 /// 必须说得通，而不是渲染出"已完成 0 轮工具调用"。
 pub(super) fn progress_text(snapshot: &RunSnapshot) -> String {
     let quiet = humanize_ms(snapshot.quiet_ms);

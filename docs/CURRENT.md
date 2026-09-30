@@ -14,6 +14,8 @@
 | 插件目录 | 注册名 | VDFS 挂载点 | 自有路由（静态可提取） | 实现的核心 trait | 配置文件 | 模块 README |
 |---|---|---|---|---|---|---|
 | `agent` | `agent` | <根>/agent · （运行期动态） | （动态）已无自有路由（一律 `NotFound` 并指引到 `<根>/agent`） | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
+| `classify` | `classify` | — | `classify/decide` | `Plugin` | ✓ | ✓ |
+| `compose` | `compose` | — | `compose/wording` | `Plugin` | ✓ | ✓ |
 | `composite` | `composite` | — | （动态）容器：按配置挂载的子插件名分发，运行期动态 | `Plugin` · `VdfsProvider` | — | ✓ |
 | `event_bus` | `event_bus` | — | `event_bus/ping` · `event_bus/subscribe` | `Plugin` | — | ✓ |
 | `gateway` | `gateway` | <根>/gateway | `gateway/status` | `Plugin` | ✓ | ✓ |
@@ -24,12 +26,10 @@
 | `memory` | `memory` | <根>/memory | — | `Plugin` · `VdfsProvider` | ✓ | ✓ |
 | `model` | `model` | <根>/model | （动态）已无自有路由（`execute_turn` 由 session 直连调用） | `ModelProvider` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `plugin_manager` | `plugin_manager` | <根>/plugin_manager | — | `Plugin` · `VdfsProvider` | — | ✓ |
-| `reply` | `reply` | — | `reply/compose` | `Plugin` | ✓ | ✓ |
 | `session` | `session` | <根>/session | `session/chat/abort` · `session/chat/send` | `Capability` · `Plugin` | ✓ | ✓ |
 | `setting` | `setting` | <根>/setting | — | `Plugin` | ✓ | ✓ |
 | `skill` | `skill` | <根>/skill | `skill/execute` | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `telegram` | `telegram` | <根>/telegram | `telegram/get_updates` · `telegram/send` · `telegram/set_chat_id` · `telegram/start_listener` · `telegram/status` · `telegram/stop_listener` | `Plugin` | ✓ | ✓ |
-| `triage` | `triage` | — | `triage/decide` | `Plugin` | ✓ | ✓ |
 | `vdfs` | `vdfs` | — | （动态）`vdfs/<操作>`——按 `VDFS_OPS` 校验后分发（见 §3.2，13 个操作） | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `web` | `web` | <根>/web | — | `Capability` · `Plugin` | ✓ | ✓ |
 
@@ -105,7 +105,7 @@
 
 | 范围 | 实现 | 测试 |
 |---|---|---|
-| `symbio/src` | 238 文件 / 59357 行 | 140 文件 / 27494 行 |
+| `symbio/src` | 238 文件 / 59370 行 | 140 文件 / 27495 行 |
 | `cli/src` | 4 文件 / 1573 行 | 1 文件 / 80 行 |
 | `tauri/src-tauri/src` | 3 文件 / 449 行 | 0 文件 / 0 行 |
 | `tauri/src` | 101 文件 / 22484 行 | 54 文件 / 12649 行 |
@@ -119,4 +119,4 @@
 
 ---
 
-> 生成时间：2026-09-30 00:39:33 UTC · 源：`git rev-parse HEAD` = `59eea0c`
+> 生成时间：2026-09-30 02:22:34 UTC · 源：`git rev-parse HEAD` = `cd2c4b1`

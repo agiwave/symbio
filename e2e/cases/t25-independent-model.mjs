@@ -9,17 +9,17 @@ import './_selfrun.mjs';
 //
 // | 线 | 配置 | 期望 |
 // |---|---|---|
-// | A 各自独立 | `triage.model=triage-prov`、`reply.model=reply-prov`、会话选 `session-prov` | 分类请求带 `cheap-classifier`、答话生成带 `good-writer`、worker 请求带 `session-model` |
-// | A 提示词 | `triage.system_prompt=<本用例那段>` | 两次分类请求的 system 段**逐字等于**它 |
+// | A 各自独立 | `classify.model=classify-prov`、`compose.model=compose-prov`、会话选 `session-prov` | 分类请求带 `cheap-classifier`、答话生成带 `good-writer`、worker 请求带 `session-model` |
+// | A 提示词 | `classify.system_prompt=<本用例那段>` | 两次分类请求的 system 段**逐字等于**它 |
 // | B 平凡值 | 两个插件的 `PLUGIN.yml` 里**不写**这两个键 | 全部请求带 `session-model`；system 段里**没有**本用例那段 |
-// | C 写错 id | `triage.model=nope-not-exist` | 全部请求带 `session-model`，**而判决照常发生**（用户仍拿到答话） |
+// | C 写错 id | `classify.model=nope-not-exist` | 全部请求带 `session-model`，**而判决照常发生**（用户仍拿到答话） |
 //
 // ## 为什么温度也在断言里
 //
 // 「独立温度」没有、也不该有独立的配置字段——温度是 **provider 条目自己的参数**
 // （`<根>/model/<id>/provider.json`），换一个条目就是换温度。三个条目给三个不同的
-// 温度值，于是"换条目"这件事在请求体里是可观测的：`triage-prov` 是 0.0、
-// `reply-prov` 是 0.7、`session-prov` 是 0.1。若哪天有人真给插件加了个 temperature
+// 温度值，于是"换条目"这件事在请求体里是可观测的：`classify-prov` 是 0.0、
+// `compose-prov` 是 0.7、`session-prov` 是 0.1。若哪天有人真给插件加了个 temperature
 // 字段，这三条会红——那时该先回答"为什么同一个 provider 要被两处改温度"。
 //
 // ## 为什么 B 与 C 都要另起 homedir 与进程
@@ -52,11 +52,11 @@ import {
 /** 三个 provider 条目：**只有 `model` 与 `temperature` 不同**，都指向同一个 mock */
 const PROVIDERS = {
   session: { id: 'session-prov', model: 'session-model', temperature: 0.1 },
-  triage: { id: 'triage-prov', model: 'cheap-classifier', temperature: 0.0 },
-  reply: { id: 'reply-prov', model: 'good-writer', temperature: 0.7 },
+  classify: { id: 'classify-prov', model: 'cheap-classifier', temperature: 0.0 },
+  compose: { id: 'compose-prov', model: 'good-writer', temperature: 0.7 },
 };
 
-/** 本用例给 `triage` 写的那段提示词（**逐字**比对，证明覆盖真的生效） */
+/** 本用例给 `classify` 写的那段提示词（**逐字**比对，证明覆盖真的生效） */
 const TRIAGE_PROMPT = '只输出一个词：direct / clarify / refuse / work。';
 
 /** 会话 id：一条线一个，断言互不污染 */
@@ -84,7 +84,7 @@ function gatewayConfig(port) {
 
 /** 会话配置：判决与措辞都开，汇报**显式关掉**——本用例数请求，不该被汇报调优影响 */
 function sessionConfig() {
-  return { triage_enabled: true, reply_enabled: true, progress_enabled: false };
+  return { classify_enabled: true, compose_enabled: true, progress_enabled: false };
 }
 
 /** 一个请求的 system 段（`execute_turn` 的第一条消息；缺席给空串） */
@@ -132,15 +132,15 @@ export default defineCase(
     }));
 
     /** 起一条线：自己的 homedir / 端口 / 两个插件的配置 */
-    const startLine = async (sid, triageCfg, replyCfg, label) => {
+    const startLine = async (sid, classifyCfg, composeCfg, label) => {
       const port = nextPort();
       const hd = makeHomedir({
         providers,
         pluginConfigs: {
           gateway: gatewayConfig(port),
           session: sessionConfig(),
-          ...(triageCfg ? { triage: triageCfg } : {}),
-          ...(replyCfg ? { reply: replyCfg } : {}),
+          ...(classifyCfg ? { classify: classifyCfg } : {}),
+          ...(composeCfg ? { compose: composeCfg } : {}),
         },
       });
       const cli = startLongLivedCli({
@@ -191,11 +191,11 @@ export default defineCase(
 
     const lines = [];
     try {
-      // ── A 各自独立：分类用 `triage-prov`、答话用 `reply-prov`、worker 用会话选定的 ──
+      // ── A 各自独立：分类用 `classify-prov`、答话用 `compose-prov`、worker 用会话选定的 ──
       const a = await startLine(
         SIDS.independent,
-        { model: PROVIDERS.triage.id, system_prompt: TRIAGE_PROMPT },
-        { model: PROVIDERS.reply.id },
+        { model: PROVIDERS.classify.id, system_prompt: TRIAGE_PROMPT },
+        { model: PROVIDERS.compose.id },
         'A 线进程（两个插件各配一个模型）',
       );
       lines.push(a);
@@ -219,23 +219,23 @@ export default defineCase(
 
       assertEq(
         classified[0].body.model,
-        PROVIDERS.triage.model,
-        '分类请求必须用 `triage` 自己配的模型（便宜快的那个）',
+        PROVIDERS.classify.model,
+        '分类请求必须用 `classify` 自己配的模型（便宜快的那个）',
       );
       assertEq(
         classified[0].body.temperature,
-        PROVIDERS.triage.temperature,
-        '温度随 provider 条目走（triage-prov 是 0.0）',
+        PROVIDERS.classify.temperature,
+        '温度随 provider 条目走（classify-prov 是 0.0）',
       );
       assertEq(
         generated[0].body.model,
-        PROVIDERS.reply.model,
-        '答话必须用 `reply` 自己配的模型（措辞更好的那个）',
+        PROVIDERS.compose.model,
+        '答话必须用 `compose` 自己配的模型（措辞更好的那个）',
       );
       assertEq(
         generated[0].body.temperature,
-        PROVIDERS.reply.temperature,
-        '温度随 provider 条目走（reply-prov 是 0.7）',
+        PROVIDERS.compose.temperature,
+        '温度随 provider 条目走（compose-prov 是 0.7）',
       );
 
       // 第二句：`Escalate` ⇒ 首响走模板（零往返）⇒ 工具循环的请求仍归会话
@@ -257,10 +257,10 @@ export default defineCase(
         );
         assertEq(r.body.temperature, PROVIDERS.session.temperature, '温度随条目走（session-prov 是 0.1）');
       }
-      // 第二句的分类请求同样用 triage 的模型（换一句话不改变"谁用哪个模型"）
+      // 第二句的分类请求同样用 classify 的模型（换一句话不改变"谁用哪个模型"）
       const cls2 = reqs.filter((r) => sysOf(r) === TRIAGE_PROMPT);
       assertEq(cls2.length, 1, '第二句也应恰有一次分类请求');
-      assertEq(cls2[0].body.model, PROVIDERS.triage.model, '第二句的分类仍用 triage 的模型');
+      assertEq(cls2[0].body.model, PROVIDERS.classify.model, '第二句的分类仍用 classify 的模型');
 
       const aMsgs = readMessagesJson(a.hd.homedir, SIDS.independent);
       assertTranscriptInvariants(aMsgs, 'T25-A');
@@ -299,7 +299,7 @@ export default defineCase(
         SIDS.typo,
         { model: 'nope-not-exist' },
         null,
-        'C 线进程（triage 的 model 写错了）',
+        'C 线进程（classify 的 model 写错了）',
       );
       lines.push(c);
 

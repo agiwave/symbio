@@ -28,6 +28,8 @@
 //!   （所有插件同一判据），不为单个插件立脚本。
 
 mod agent;
+mod classify;
+mod compose;
 mod composite;
 mod event_bus;
 mod gateway;
@@ -38,11 +40,9 @@ mod mcp;
 mod memory;
 mod model;
 mod plugin_manager;
-mod reply;
 mod session;
 mod setting;
 mod skill;
 mod telegram;
-mod triage;
 mod vdfs;
 mod web;

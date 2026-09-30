@@ -103,8 +103,8 @@ function gatewayConfig(port) {
 
 /** 汇报要真的发生：判决关掉（本用例不验判决），措辞与汇报打开、阈值配到恒成立 */
 const SESSION = {
-  triage_enabled: false,
-  reply_enabled: true,
+  classify_enabled: false,
+  compose_enabled: true,
   progress_enabled: true,
   progress_interval_ms: 0,
   progress_min_rounds: 1,

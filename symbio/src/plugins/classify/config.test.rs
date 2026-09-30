@@ -1,4 +1,4 @@
-//! `triage/config.rs` 的单元测试 —— 平凡值与存量配置的兼容。
+//! `classify/config.rs` 的单元测试 —— 平凡值与存量配置的兼容。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 
@@ -7,9 +7,9 @@ use super::*;
 /// 缺省即出厂行为：规则短路**开**
 #[test]
 fn rule_shortcut_defaults_to_on() {
-    assert!(TriageConfig::default().rule_shortcut);
+    assert!(ClassifyConfig::default().rule_shortcut);
     assert_eq!(
-        TriageConfig::default().rule_shortcut,
+        ClassifyConfig::default().rule_shortcut,
         default_rule_shortcut()
     );
 }
@@ -17,7 +17,7 @@ fn rule_shortcut_defaults_to_on() {
 /// 存量 `PLUGIN.yml`（装配期刚补出身份键、还没有本插件业务键）必须能读成缺省
 #[test]
 fn missing_business_keys_fall_back_to_defaults() {
-    let c: TriageConfig = serde_json::from_str("{}").unwrap();
+    let c: ClassifyConfig = serde_json::from_str("{}").unwrap();
     assert_eq!(c.rule_shortcut, default_rule_shortcut());
     assert!(c.model_id().is_none(), "缺省模型 ⇒ 用会话选定值");
     assert!(c.prompt_override().is_none(), "缺省提示词 ⇒ 用内置那份");
@@ -26,14 +26,14 @@ fn missing_business_keys_fall_back_to_defaults() {
 /// 平凡值可达：`rule_shortcut: false` 是一条能被写进配置的取值
 #[test]
 fn plain_value_is_reachable_from_config() {
-    let c: TriageConfig = serde_json::from_str(r#"{"rule_shortcut": false}"#).unwrap();
+    let c: ClassifyConfig = serde_json::from_str(r#"{"rule_shortcut": false}"#).unwrap();
     assert!(!c.rule_shortcut);
 }
 
 /// 「独立模型」与「提示词覆盖」都能从配置里写进来（S6 的两条产线）
 #[test]
 fn model_and_prompt_come_from_config() {
-    let c: TriageConfig =
+    let c: ClassifyConfig =
         serde_json::from_str(r#"{"model": "cheap-classifier", "system_prompt": "只输出一个词。"}"#)
             .unwrap();
     assert_eq!(c.model_id(), Some("cheap-classifier"));
@@ -48,7 +48,8 @@ fn model_and_prompt_come_from_config() {
 /// 一切正常。两种写法必须在**同一处**归一。
 #[test]
 fn blank_strings_are_same_as_absent() {
-    let c: TriageConfig = serde_json::from_str(r#"{"model": "  ", "system_prompt": ""}"#).unwrap();
+    let c: ClassifyConfig =
+        serde_json::from_str(r#"{"model": "  ", "system_prompt": ""}"#).unwrap();
     assert!(c.model_id().is_none());
     assert!(c.prompt_override().is_none());
 }

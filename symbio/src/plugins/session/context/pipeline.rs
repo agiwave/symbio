@@ -339,8 +339,8 @@ async fn compress_snapshot_inner(
             role: Some(MessageRole::User),
             msg_type: Some(MessageType::Text),
             content: Some(MessageContent::Text(
-                "Your previous reply did not contain a valid <state_snapshot> XML block. \
-                 Reply again with ONLY the <state_snapshot> block, following the requested structure."
+                "Your previous compose did not contain a valid <state_snapshot> XML block. \
+                 Compose again with ONLY the <state_snapshot> block, following the requested structure."
                     .to_string(),
             )),
             status: Some(MessageStatus::Completed),

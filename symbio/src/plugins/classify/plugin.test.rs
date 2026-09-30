@@ -1,4 +1,4 @@
-//! `symbio/src/plugins/triage/plugin.rs` 的单元测试 —— 拆自源码末尾的测试模块。
+//! `symbio/src/plugins/classify/plugin.rs` 的单元测试 —— 拆自源码末尾的测试模块。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //!
@@ -11,7 +11,7 @@
 //!    判决照样出来了，说明这条路上根本没碰模型）；
 //! 2. 规则未命中时，兜底方向是 `Escalate`（= 今天的行为），**绝不是 `Answered`**。
 //!
-//! 走真实模型的路径（快速档分类请求）由 e2e 覆盖，见 `e2e/cases/t21-triage.mjs`。
+//! 走真实模型的路径（快速档分类请求）由 e2e 覆盖，见 `e2e/cases/t21-classify.mjs`。
 
 use super::super::reasons::{REASON_ACK, REASON_EMPTY, REASON_GREETING, REASON_THANKS};
 use super::*;
@@ -21,10 +21,10 @@ use crate::symbio_core::PluginSimpleRequest;
 ///
 /// 目录只用于**声明配置文档**（`traverse` 那条通道），本文件的用例不读文件系统，
 /// 故给一个临时目录即可——真读盘的那条路径由 `config.rs` 的单测与 e2e 覆盖。
-fn plugin(config: TriageConfig) -> Arc<TriagePlugin> {
-    Arc::new(TriagePlugin::new(
+fn plugin(config: ClassifyConfig) -> Arc<ClassifyPlugin> {
+    Arc::new(ClassifyPlugin::new(
         config,
-        PluginDir::at(std::env::temp_dir(), PLUGIN_ID_TRIAGE),
+        PluginDir::at(std::env::temp_dir(), PLUGIN_ID_CLASSIFY),
     ))
 }
 
@@ -57,7 +57,7 @@ fn data_of(p: PluginPayload) -> serde_json::Value {
 }
 
 /// 判一次并回读契约类型
-async fn decide(plugin: Arc<TriagePlugin>, utterance: Option<&str>) -> Verdict {
+async fn decide(plugin: Arc<ClassifyPlugin>, utterance: Option<&str>) -> Verdict {
     let p = plugin
         .route(ctx("decide", Some(request(utterance))))
         .await
@@ -84,7 +84,7 @@ fn escalated(reason: &str) -> Verdict {
 /// `Answered`。
 #[tokio::test]
 async fn rule_hits_without_any_model_service() {
-    let plugin = plugin(TriageConfig::default());
+    let plugin = plugin(ClassifyConfig::default());
     for (utterance, reason) in [
         ("你好", REASON_GREETING),
         ("谢谢", REASON_THANKS),
@@ -104,7 +104,7 @@ async fn rule_hits_without_any_model_service() {
 /// 这条是失败方向的守卫：`Answered` 会让「判不出来」表现成**用户什么都收不到**。
 #[tokio::test]
 async fn rule_miss_without_model_service_escalates() {
-    let plugin = plugin(TriageConfig::default());
+    let plugin = plugin(ClassifyConfig::default());
     assert_eq!(
         decide(plugin, Some("我们刚才聊了什么")).await,
         escalated(REASON_UNCLASSIFIED)
@@ -114,7 +114,7 @@ async fn rule_miss_without_model_service_escalates() {
 /// 没有用户发言（后台触发的判定）：无事可判 ⇒ 同一条兜底方向
 #[tokio::test]
 async fn absent_utterance_escalates() {
-    let plugin = plugin(TriageConfig::default());
+    let plugin = plugin(ClassifyConfig::default());
     assert_eq!(decide(plugin, None).await, escalated(REASON_UNCLASSIFIED));
 }
 
@@ -125,10 +125,10 @@ async fn absent_utterance_escalates() {
 /// 与开关打开时的 `Answered{greeting}` 形成对照。
 #[tokio::test]
 async fn rule_shortcut_off_disables_the_table() {
-    let on = plugin(TriageConfig::default());
+    let on = plugin(ClassifyConfig::default());
     assert_eq!(decide(on, Some("你好")).await, answered(REASON_GREETING));
 
-    let off = plugin(TriageConfig {
+    let off = plugin(ClassifyConfig {
         rule_shortcut: false,
         ..Default::default()
     });
@@ -159,7 +159,7 @@ async fn verdict_serializes_as_tagged_enum() {
 /// 静默默认会让「忘了传请求」表现成「判决说不用干活」。
 #[tokio::test]
 async fn decide_without_payload_fails() {
-    let r = plugin(TriageConfig::default())
+    let r = plugin(ClassifyConfig::default())
         .route(ctx("decide", None))
         .await;
     assert!(r.is_err(), "缺载荷应报错，实得 {:?}", r.is_ok());
@@ -172,7 +172,7 @@ async fn legacy_payload_without_new_fields_still_parses() {
     req.set(PATH, "decide".to_string());
     req.set_payload(serde_json::json!({ "session_id": "s1", "utterance": "你好" }))
         .expect("载荷写入必须成功");
-    let p = plugin(TriageConfig::default())
+    let p = plugin(ClassifyConfig::default())
         .route(Arc::new(req))
         .await
         .expect("decide 必须成功");
@@ -182,7 +182,7 @@ async fn legacy_payload_without_new_fields_still_parses() {
 
 #[tokio::test]
 async fn unknown_subcommand_is_not_found() {
-    let r = plugin(TriageConfig::default())
+    let r = plugin(ClassifyConfig::default())
         .route(ctx("bogus", None))
         .await;
     assert!(matches!(r, Err(PluginError::NotFound(_))));
@@ -191,7 +191,7 @@ async fn unknown_subcommand_is_not_found() {
 /// 本插件不注册 `Capability` —— 它在工具集里**结构上不可能**出现
 #[tokio::test]
 async fn traverse_contributes_no_tools() {
-    let p = plugin(TriageConfig::default())
+    let p = plugin(ClassifyConfig::default())
         .traverse(String::new(), ctx("", None))
         .await
         .expect("traverse 必须成功");
@@ -199,9 +199,9 @@ async fn traverse_contributes_no_tools() {
 }
 
 /// 但它**声明了自己的配置文档**（另一条通道）：设置页据此列出并指路
-/// `<根>/triage/PLUGIN.yml`——「可 A/B」要能操作，靠的就是这一条。
+/// `<根>/classify/PLUGIN.yml`——「可 A/B」要能操作，靠的就是这一条。
 ///
-/// 条目名用**目录名**（列表内唯一），地址必须显式带着 `triage/PLUGIN.yml`
+/// 条目名用**目录名**（列表内唯一），地址必须显式带着 `classify/PLUGIN.yml`
 /// （它跨挂载点、推不出来，见 `capability_entry_of` 的说明）。
 #[tokio::test]
 async fn traverse_announces_its_own_config() {
@@ -214,15 +214,15 @@ async fn traverse_announces_its_own_config() {
     req.set(CONFIGURABLE_VISITOR, visitor.clone());
     let req: Arc<dyn PluginInvokeRequest> = Arc::new(req);
 
-    plugin(TriageConfig::default())
+    plugin(ClassifyConfig::default())
         .traverse(String::new(), req)
         .await
         .expect("traverse 必须成功");
 
     let items = visitor.list_configurables().await;
     assert_eq!(items.len(), 1, "应恰好声明一条配置文档");
-    assert_eq!(items[0].node.name, PLUGIN_ID_TRIAGE);
-    assert_eq!(items[0].path, "triage/PLUGIN.yml");
+    assert_eq!(items[0].node.name, PLUGIN_ID_CLASSIFY);
+    assert_eq!(items[0].path, "classify/PLUGIN.yml");
     // 表单定义随声明一起交出去（设置页不另查一份）
     let keys: Vec<&str> = items[0]
         .node
@@ -244,6 +244,6 @@ async fn traverse_announces_its_own_config() {
 /// E-001 的自证：`PluginMeta` 首参必须等于插件目录名（容器按目录名分发）
 #[test]
 fn meta_id_matches_plugin_dir() {
-    assert_eq!(TriagePlugin::metadata().id, PLUGIN_ID_TRIAGE);
-    assert_eq!(PLUGIN_ID_TRIAGE, "triage");
+    assert_eq!(ClassifyPlugin::metadata().id, PLUGIN_ID_CLASSIFY);
+    assert_eq!(PLUGIN_ID_CLASSIFY, "classify");
 }

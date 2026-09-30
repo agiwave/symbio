@@ -1,4 +1,4 @@
-//! Reply 插件模块（对话面：措辞）
+//! Compose 插件模块（对话面：措辞）
 //!
 //! 本模块是**私有**的：插件之间互不可见（见 [`crate::plugins`] 的架构原则），
 //! 跨插件调用一律经容器 `route` + `symbio_core::schemas::dialog` 的共享契约。
@@ -18,8 +18,8 @@
 //! （它们是两条并列的产线，分派在 `plugin`）；`config` 不认识它们中的任何一个
 //! （它只管"用户填了什么"，不解释这些值怎么用）。
 
-mod compose;
 mod config;
 mod plugin;
 mod reasons;
 mod templates;
+mod wording;

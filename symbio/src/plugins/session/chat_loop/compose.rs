@@ -1,11 +1,11 @@
-//! 对话面措辞的调用点 + **落点** —— `session` ⇄ `reply` 的那条边。
+//! 对话面措辞的调用点 + **落点** —— `session` ⇄ `compose` 的那条边。
 //!
 //! ## 它做三件事
 //!
 //! 1. 把**对话线**投影出来（与 `decide.rs` 同一个函数、同一个窗口）；
-//! 2. 经容器 `route` 调 `reply/compose`（`ctx.fork()` + `PATH` 常量 + 契约载荷）；
+//! 2. 经容器 `route` 调 `compose/compose`（`ctx.fork()` + `PATH` 常量 + 契约载荷）；
 //! 3. 把返回的文本**写进转写**——唯一写入者仍是 `session`（ADR-020）。
-//!    `reply` 只返回一个 `String`，一个节点都不写。
+//!    `compose` 只返回一个 `String`，一个节点都不写。
 //!
 //! ## 落点：**根级**，不是某个 Turn 之下
 //!
@@ -40,8 +40,8 @@
 //!
 //! ## 措辞拿不到时**降级进工具循环**，不沉默
 //!
-//! `Answered` 而措辞为空（未挂载 `reply` / `reply_enabled = false` / 连兜底模板都取不到）
-//! ⇒ 本轮**照旧进工具循环**。理由与 `triage` 分类失败的兜底方向是同一条：
+//! `Answered` 而措辞为空（未挂载 `compose` / `compose_enabled = false` / 连兜底模板都取不到）
+//! ⇒ 本轮**照旧进工具循环**。理由与 `classify` 分类失败的兜底方向是同一条：
 //! **沉默是这里最坏的失败形态**（用户什么都收不到，且没有任何错误信号），
 //! 而进工具循环退化成"引入判决之前的行为"——慢一点，但有答案。
 //!
@@ -63,7 +63,7 @@ use crate::symbio_core::schemas::session::chat_message::{
 };
 use crate::symbio_core::{
     clock_now_ms, llm_short_id, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PATH,
-    ROUTE_REPLY_COMPOSE, SESSION_ID,
+    ROUTE_COMPOSE_WORDING, SESSION_ID,
 };
 
 use super::super::context::{conversation_view, CONVERSATION_VIEW_LIMIT};
@@ -77,12 +77,12 @@ const SURFACE_REPLY: &str = "reply";
 
 /// 汇报节点的理由码（`meta.reason`）。
 ///
-/// ## 为什么它由 `session` 拥有，而不是 `reply` 的抄本
+/// ## 为什么它由 `session` 拥有，而不是 `compose` 的抄本
 ///
-/// `reply/reasons.rs` 与 `triage/reasons.rs` 是同一份词汇表的**两份抄本**，因为
+/// `compose/reasons.rs` 与 `classify/reasons.rs` 是同一份词汇表的**两份抄本**，因为
 /// 生产方与消费方分处两个插件、不能共享常量。而汇报的理由码是**本侧自己产的**：
 /// 判决 `Report` 由 `session` 判出（见 `schemas/dialog.rs` 的变体表），措辞只是执行它
-/// ——`reply` 按判决分派，不看这个码。因此它没有"第二份抄本"可漂移，就地定义。
+/// ——`compose` 按判决分派，不看这个码。因此它没有"第二份抄本"可漂移，就地定义。
 const REASON_PROGRESS: &str = "progress";
 
 /// 判决的**执行点**：措辞 + 落点。
@@ -99,11 +99,11 @@ pub(crate) async fn apply_verdict(
     verdict: Verdict,
     snapshot: &RunSnapshot,
 ) -> VerdictEffect {
-    // 调用方关掉了措辞（或压根没挂 `reply`）⇒ 与"未挂载 reply"逐字一致：
+    // 调用方关掉了措辞（或压根没挂 `compose`）⇒ 与"未挂载 compose"逐字一致：
     // `Answered` 降级进工具循环，`Escalate` 没有首响，`Report` 什么都没说。
     // 三条都在下面自然成立。
-    if !orchestrator.reply_enabled {
-        crate::plugin_debug!("session", "[Reply] 措辞未启用，本轮不产出对话面文本");
+    if !orchestrator.compose_enabled {
+        crate::plugin_debug!("session", "[Compose] 措辞未启用，本轮不产出对话面文本");
         return VerdictEffect::Silent;
     }
 
@@ -114,7 +114,7 @@ pub(crate) async fn apply_verdict(
                 // 判决说能直接答，但没人能说话 ⇒ **降级进工具循环**（不沉默）。
                 crate::plugin_warn!(
                     "session",
-                    "[Reply] 判决为 Answered（reason={reason}）但取不到措辞，本轮降级进工具循环"
+                    "[Compose] 判决为 Answered（reason={reason}）但取不到措辞，本轮降级进工具循环"
                 );
                 return VerdictEffect::Silent;
             };
@@ -131,7 +131,7 @@ pub(crate) async fn apply_verdict(
                 None => VerdictEffect::Silent,
             }
         }
-        // 汇报：措辞从**运行现状**组织（`reply` 的模板产线，零 LLM 往返）。
+        // 汇报：措辞从**运行现状**组织（`compose` 的模板产线，零 LLM 往返）。
         // 拿不到就不说——本轮照旧干活，且不消耗配额（调用方按 [`VerdictEffect`] 判）。
         Verdict::Report => {
             match compose_text(orchestrator, ctx, context, &verdict, snapshot).await {
@@ -161,9 +161,9 @@ pub(crate) enum VerdictEffect {
     Silent,
 }
 
-/// 调 `reply/compose` 拿一段文本。
+/// 调 `compose/compose` 拿一段文本。
 ///
-/// 返回 `None` = 没有措辞可用（未挂载 `reply` / 路由失败 / 出参为空）。
+/// 返回 `None` = 没有措辞可用（未挂载 `compose` / 路由失败 / 出参为空）。
 /// 与 `decide.rs` 同一条处置原则：**「没有这个插件」是一个正常状态**，
 /// `NotFound` 静默放行，其它错误告警但**仍然放行**——措辞是增强，不是正确性的前提。
 async fn compose_text(
@@ -180,7 +180,7 @@ async fn compose_text(
         conversation_view(&context.messages, CONVERSATION_VIEW_LIMIT);
 
     let req = ctx.fork();
-    req.set(PATH, ROUTE_REPLY_COMPOSE.to_string());
+    req.set(PATH, ROUTE_COMPOSE_WORDING.to_string());
     req.set(SESSION_ID, session_id.clone());
     req.set_payload(ComposeRequest {
         session_id,
@@ -198,18 +198,21 @@ async fn compose_text(
             Err(e) => {
                 crate::plugin_warn!(
                     "session",
-                    "[Reply] 措辞载荷不是合法契约，按「无措辞」处理：{e}"
+                    "[Compose] 措辞载荷不是合法契约，按「无措辞」处理：{e}"
                 );
                 None
             }
         },
         Err(PluginError::NotFound(_)) => {
             // 未挂载 / 已停用：这正是「卸载平凡值」的形态，不是故障。
-            crate::plugin_debug!("session", "[Reply] 未挂载措辞插件，本轮不产出对话面文本");
+            crate::plugin_debug!("session", "[Compose] 未挂载措辞插件，本轮不产出对话面文本");
             None
         }
         Err(e) => {
-            crate::plugin_warn!("session", "[Reply] 措辞调用失败，本轮不产出对话面文本：{e}");
+            crate::plugin_warn!(
+                "session",
+                "[Compose] 措辞调用失败，本轮不产出对话面文本：{e}"
+            );
             None
         }
     }

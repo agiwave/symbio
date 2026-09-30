@@ -140,8 +140,8 @@ pub const ROUTE_EVENT_BUS_SUBSCRIBE: &str = "event_bus/subscribe";
 /// 存在的理由（防止路径漂移）被反过来利用的样子。本模块只收有真实调用方的路径。
 pub const ROUTE_HOOK_FIRE: &str = "hook/fire";
 
-// ============ Triage 插件 ============
-/// triage/decide — 判决这一轮该直接回答、还是派给工具循环
+// ============ Classify 插件 ============
+/// classify/decide — 判决这一轮该直接回答、还是派给工具循环
 ///
 /// 唯一调用方：`session` 的 `chat_loop/decide.rs`（轮首判决）。返回
 /// [`crate::symbio_core::schemas::dialog::Verdict`]——一个**闭集枚举**，不是文本。
@@ -152,10 +152,10 @@ pub const ROUTE_HOOK_FIRE: &str = "hook/fire";
 /// 「不为『将来可能用到』的路由预置常量」（见上文 `AGENT_CHAT` 的教训）——
 /// 那时加它就是一个零消费方的预留常量。S2 落下第一个调用方的同一批里，
 /// 它才被登记进来。
-pub const ROUTE_TRIAGE_DECIDE: &str = "triage/decide";
+pub const ROUTE_CLASSIFY_DECIDE: &str = "classify/decide";
 
-// ============ Reply 插件 ============
-/// reply/compose — 按上游判决产出一段**面向用户**的文本
+// ============ Compose 插件 ============
+/// compose/wording — 按上游判决产出一段**面向用户**的文本
 ///
 /// 唯一调用方：`session` 的 `chat_loop/compose.rs`（判决的执行点）。入参是
 /// [`crate::symbio_core::schemas::dialog::ComposeRequest`]，出参是 `String`——
@@ -163,6 +163,6 @@ pub const ROUTE_TRIAGE_DECIDE: &str = "triage/decide";
 ///
 /// ## 为什么直到 S3 才加这个常量
 ///
-/// 与 [`ROUTE_TRIAGE_DECIDE`] 同一条理由：S1 / S2 时 `session` 还没有措辞调用点，
+/// 与 [`ROUTE_CLASSIFY_DECIDE`] 同一条理由：S1 / S2 时 `session` 还没有措辞调用点，
 /// 加了就是零消费方的预留常量。S3 落下调用方的同一批里它才被登记进来。
-pub const ROUTE_REPLY_COMPOSE: &str = "reply/compose";
+pub const ROUTE_COMPOSE_WORDING: &str = "compose/wording";

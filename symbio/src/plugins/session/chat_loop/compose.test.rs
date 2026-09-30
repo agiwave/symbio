@@ -5,7 +5,7 @@
 //! ## 为什么只测 `dialog_node`
 //!
 //! `apply_verdict` / `compose_text` 都要 `Arc<dyn PluginInvokeRequest>` 与容器路由，
-//! 属 e2e 的射程（`e2e/cases/t22-reply.mjs`）——单测在这里重复一遍只会得到一份
+//! 属 e2e 的射程（`e2e/cases/t22-compose.mjs`）——单测在这里重复一遍只会得到一份
 //! 会漂移的假副本。而 `dialog_node` 是**纯函数**，它承载本文件里唯一"错了不会报错、
 //! 只表现为界面不对"的决定：
 //!
@@ -56,7 +56,7 @@ fn dialog_node_is_a_completed_assistant_text_node() {
 ///   挂到 Turn 之下，首响就变成"工作的一轮"，前端「对话」面板看到的不再是一个
 ///   独立的节点。
 /// - **对话线认它**：它是一句 assistant 文本，必须被投影收进去——否则下一轮
-///   `reply` 不知道上一轮说过什么（措辞会重复或断裂），前端「对话」面板也看不到它。
+///   `compose` 不知道上一轮说过什么（措辞会重复或断裂），前端「对话」面板也看不到它。
 #[test]
 fn dialog_node_lands_at_the_root_and_on_the_conversation_line() {
     let node = dialog_node("好，我来处理。", "needs_work", true);
@@ -70,7 +70,7 @@ fn dialog_node_lands_at_the_root_and_on_the_conversation_line() {
         line.len(),
         1,
         "对话面节点必须被 conversation_view 认出来——否则前端「对话」面板看不到它，\
-         且下一轮 reply 不知道上一轮说过什么（措辞会重复或断裂）"
+         且下一轮 compose 不知道上一轮说过什么（措辞会重复或断裂）"
     );
     assert_eq!(line[0].id, node.id);
 }
@@ -99,7 +99,7 @@ fn a_turn_child_text_is_on_the_conversation_line() {
     assert_eq!(line[0].id, child.id);
 }
 
-/// `Answered` 的答话：`surface = "reply"`，且**不设** `exclude_from_context`。
+/// `Answered` 的答话：`surface = "compose"`，且**不设** `exclude_from_context`。
 ///
 /// "不设"而不是"设成 `false`"：缺席是**缺省即进请求包**，而 `false` 是一个显式
 /// 取值。两者在今天等价，但前者让"这个键只有一种含义"成立——见下一条断言。
@@ -154,7 +154,7 @@ fn the_two_markers_are_independent() {
 
 /// 理由码**原样**带上，不做映射、不校验取值。
 ///
-/// 它是**数据**（J1）：新增一类理由只加一行码表，两侧不共享常量（`reply` 侧持有
+/// 它是**数据**（J1）：新增一类理由只加一行码表，两侧不共享常量（`compose` 侧持有
 /// 抄本，未知码走通用模板）。本函数若在这里做白名单，等于把"可扩展"变成"改 core"。
 #[test]
 fn reason_code_is_carried_verbatim() {
@@ -170,7 +170,7 @@ fn reason_code_is_carried_verbatim() {
 
 /// 正文**原样**写入：不 trim、不加前后缀。
 ///
-/// 措辞的加工在 `reply` 侧（提示词约束 + 模板），这里若再加工一次，就会出现
+/// 措辞的加工在 `compose` 侧（提示词约束 + 模板），这里若再加工一次，就会出现
 /// "两处都在管正文长什么样"——而它们会各演化一次。本函数的职责只有"落点 + 标记"。
 #[test]
 fn text_is_written_verbatim() {

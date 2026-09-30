@@ -1,9 +1,9 @@
-//! `triage/classify.rs` 的单元测试 —— 解析器的**全部行为**。
+//! `classify/classify.rs` 的单元测试 —— 解析器的**全部行为**。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //!
 //! `classify()` 本身要一个真实的 `ModelProvider`（属于 e2e 的范畴，见
-//! `e2e/cases/t21-triage.mjs`）；本文件钉住它**不依赖模型**的那一半——
+//! `e2e/cases/t21-classify.mjs`）；本文件钉住它**不依赖模型**的那一半——
 //! 「模型说了什么」到「判决是什么」的映射，以及「说不清时返回什么」。
 
 use super::*;

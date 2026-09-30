@@ -3,7 +3,7 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// S4 让助手在**轮边界**主动说一句进度（`Verdict::Report` ⇒ `reply` 从运行现状
+// S4 让助手在**轮边界**主动说一句进度（`Verdict::Report` ⇒ `compose` 从运行现状
 // 组织一句话 ⇒ 一条根级对话面节点）。本用例验的不是"某句文案长什么样"，而是
 // **转写里多出了什么、多付了什么代价**：
 //
@@ -19,7 +19,7 @@ import './_selfrun.mjs';
 // 就是"汇报没花任何往返"：一次 3 轮工具的任务本来发 3 次请求，若汇报去问模型，
 // 就会变成 5 次。若哪天有人给汇报加一次"润色"，A 线会红——这正是它存在的意义。
 //
-// ## 为什么判决关掉（`triage_enabled=false`）
+// ## 为什么判决关掉（`classify_enabled=false`）
 //
 // 本用例的主题是**汇报**，不是判决（判决见 `t21`）。关掉判决有两个好处：
 // ① 请求数只剩工具回路那几次，A 线的"零额外往返"才有判别力；② 顺带证明汇报
@@ -35,7 +35,7 @@ import './_selfrun.mjs';
 // ## 为什么阈值配成 0 / 1
 //
 // `progress_interval_ms = 0` 让"静默时长"这一条恒成立——本用例要验的是**触发点与
-// 配额**，不是时长分档（那是 `reply/templates.test.rs` 的单测射程）。`min_rounds = 1`
+// 配额**，不是时长分档（那是 `compose/templates.test.rs` 的单测射程）。`min_rounds = 1`
 // 同理：让第一个轮边界就有资格汇报，于是"边界数 = 汇报数"这条关系可以直接数出来。
 import {
   MockLlm,
@@ -107,8 +107,8 @@ function gatewayConfig(port) {
 /** 长任务那一轮的 session 配置：判决关掉、措辞与汇报打开，阈值配到恒成立 */
 function longTaskSession(overrides) {
   return {
-    triage_enabled: false,
-    reply_enabled: true,
+    classify_enabled: false,
+    compose_enabled: true,
     progress_enabled: true,
     // 0 / 1：让"静默时长"与"最少轮次"两条恒成立，本用例只数**边界**。
     progress_interval_ms: 0,

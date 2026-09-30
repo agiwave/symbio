@@ -1,9 +1,9 @@
-# Reply 插件（对话面：措辞）
+# Compose 插件（对话面：措辞）
 
 「首响 / 答话 / 汇报」的措辞——**只输出文本，不做判决**。
 
 判决的产出方见 `schemas::dialog::Verdict` 的变体表：`Answered` / `Escalate` 归
-[`../triage/README.md`](../triage/README.md)，`Report` 由 `session` 自己判出。
+[`../classify/README.md`](../classify/README.md)，`Report` 由 `session` 自己判出。
 本插件**不知道任何一个产出方存在**：它执行上游给出的判决结果，而两条调用边都从
 `session` 出发 —— 插件之间没有边。
 
@@ -12,8 +12,8 @@
 
 ## 路由
 
-清单见 [`docs/reference/ROUTES.md`](../../../../docs/reference/ROUTES.md) §Reply 插件（**权威**）：
-`reply/compose`。
+清单见 [`docs/reference/ROUTES.md`](../../../../docs/reference/ROUTES.md) §Compose 插件（**权威**）：
+`compose/compose`。
 
 ## 契约
 
@@ -21,7 +21,7 @@
 [`symbio_core::schemas::dialog`](../../symbio_core/schemas/dialog.rs) ——
 契约跨插件（`session` 生产，本插件消费），故落在 core（ADR-023）。
 
-出参是文本而非枚举，与 `triage` 正好相反：**判决是给编排层执行的，措辞是给人看的。**
+出参是文本而非枚举，与 `classify` 正好相反：**判决是给编排层执行的，措辞是给人看的。**
 措辞只被展示，因此不需要结构化。
 
 **空串 = 没有对话面文本**（平凡值）：调用方（`session`）据此**不写节点**。
@@ -29,7 +29,7 @@
 （网关把外部客户端的 `path` 原样转发给容器，本路由可能被仓外程序直接调用）。
 
 `ComposeRequest.context` 是 `session` 投影好的**对话线**（`conversation_view`）——
-本插件不读存储，读的是投影。它与 `triage` 拿到的是**同一份规则、同一个函数**投影出来的
+本插件不读存储，读的是投影。它与 `classify` 拿到的是**同一份规则、同一个函数**投影出来的
 同一条线，否则会出现「界面看得到、插件看不到」的错位。
 
 ## 措辞怎么做的：三条产线
@@ -42,12 +42,12 @@ compose(verdict)
 ```
 
 只有**生成**那条会碰模型，用的模型由本插件的 `model` 决定（缺席则用会话选定值）——
-它与 `triage` 的分类模型**各选各的**：本插件可以用措辞更好的那一个，见配置节。
+它与 `classify` 的分类模型**各选各的**：本插件可以用措辞更好的那一个，见配置节。
 
 | 产线 | 文件 | 判据 |
 |---|---|---|
 | 模板表 | [`templates.rs`](templates.rs) | `greeting` / `thanks` / `ack` / `empty` / `clarify` / `refuse` / `needs_work` / `unclassified` —— 这些句子的**内容**是固定的，模型只会把它们写长 |
-| 生成 | [`compose.rs`](compose.rs) | 只有 `from_context`（「答案已在对话里」）——那段文本只能从对话线**组织**出来，模板给不了 |
+| 生成 | [`wording.rs`](wording.rs) | 只有 `from_context`（「答案已在对话里」）——那段文本只能从对话线**组织**出来，模板给不了 |
 | 填表 | [`templates.rs`](templates.rs) 的 `progress_text` | 只有 `Report` —— 事实（跑了几轮 / 静默多久）已在 `ComposeRequest.snapshot` 里，缺的只是把它说成人话 |
 
 **为什么汇报是"填表"而不是"生成"**：它的正文全部来自 `RunSnapshot` 的两个事实，
@@ -66,9 +66,9 @@ compose(verdict)
 的兜底是「好，我来处理。」（本轮**会**干活）。用同一句会让用户以为要干活而本轮已经收尾。
 
 **理由码不共享常量**：本插件持有词表**抄本**（[`reasons.rs`](reasons.rs)），与
-`triage` 各持一份。共享常量会把「加一行数据」升级成「改 core」；代价是两侧可能漂移，
+`classify` 各持一份。共享常量会把「加一行数据」升级成「改 core」；代价是两侧可能漂移，
 兜底是未知码走通用模板——**降级而不失效**。抄本一致性由 `templates.test.rs` 的一条
-用例逐字比对守着（那也正是 `triage::reasons` 对仓内可见的唯一理由）。
+用例逐字比对守着（那也正是 `classify::reasons` 对仓内可见的唯一理由）。
 
 ## 配置（本插件自己的 `PLUGIN.yml`）
 
@@ -131,6 +131,6 @@ owner）。取不到（写错 / 该条目已禁用）⇒ **落回会话选定值
 
 ## 关联
 
-- 判决：`../triage/README.md`
+- 判决：`../classify/README.md`
 - 切分依据（为什么是两个插件）：`docs/plan/09-对话面插件拆分实施方案.md`
 - 地址规则：`docs/design/plugin-route-address.md`

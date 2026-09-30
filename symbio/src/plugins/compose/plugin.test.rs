@@ -1,4 +1,4 @@
-//! `symbio/src/plugins/reply/plugin.rs` 的单元测试 —— 拆自源码末尾的测试模块。
+//! `symbio/src/plugins/compose/plugin.rs` 的单元测试 —— 拆自源码末尾的测试模块。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //!
@@ -7,7 +7,7 @@
 //! 测试上下文里**没有** `CAPABILITY_VISITOR`（它由 `session` 经容器广播挂上）。
 //! 这恰好让"模板产线零 LLM 往返"成为可执行的判据：模板路径**根本不碰**模型服务，
 //! 因此在这里能拿到正确文本；而生成路径取不到模型服务 ⇒ 走兜底。
-//! 生成路径本身由 e2e `t22-reply.mjs` 在真实边界上验（mock LLM）。
+//! 生成路径本身由 e2e `t22-compose.mjs` 在真实边界上验（mock LLM）。
 
 use super::*;
 use crate::symbio_core::schemas::dialog::{RunSnapshot, Verdict};
@@ -23,10 +23,10 @@ use super::super::templates::{FALLBACK_ANSWERED, FALLBACK_ESCALATE};
 ///
 /// 目录只用于**声明配置文档**（`traverse` 那条通道），本文件的用例不读文件系统，
 /// 故给一个临时目录即可——真读盘的那条路径由 `config.rs` 的单测与 e2e 覆盖。
-fn plugin(config: ReplyConfig) -> Arc<ReplyPlugin> {
-    Arc::new(ReplyPlugin::new(
+fn plugin(config: ComposeConfig) -> Arc<ComposePlugin> {
+    Arc::new(ComposePlugin::new(
         config,
-        PluginDir::at(std::env::temp_dir(), PLUGIN_ID_REPLY),
+        PluginDir::at(std::env::temp_dir(), PLUGIN_ID_COMPOSE),
     ))
 }
 
@@ -61,8 +61,8 @@ fn report(snapshot: RunSnapshot) -> ComposeRequest {
 
 /// 走一次路由，取出参文本
 async fn compose_with(req: ComposeRequest) -> String {
-    let p = plugin(ReplyConfig::default())
-        .route(ctx("compose", Some(req)))
+    let p = plugin(ComposeConfig::default())
+        .route(ctx("wording", Some(req)))
         .await
         .unwrap_or_else(|e| panic!("compose 必须成功：{e}"));
     serde_json::from_value(data_of(p)).expect("出参是 String")
@@ -172,7 +172,7 @@ async fn report_is_filled_from_the_snapshot_without_any_model_service() {
 ///
 /// 与 `answered_never_yields_empty_text` 同一条性质：空串会让这一轮**彻底沉默**，
 /// 而沉默是这里最坏的失败形态。`tool_rounds = 0` 在编排层不可达（汇报判定要求至少
-/// 走完一轮），但契约的第二个调用方是**网关**（外部客户端可直接调 `reply/compose`），
+/// 走完一轮），但契约的第二个调用方是**网关**（外部客户端可直接调 `compose/compose`），
 /// 那句话在这里必须说得通，而不是渲染出"已完成 0 轮工具调用"。
 #[tokio::test]
 async fn report_never_yields_empty_text() {
@@ -199,15 +199,15 @@ async fn report_never_yields_empty_text() {
 /// 静默默认会让「忘了传请求」表现成「措辞说没什么好说的」。
 #[tokio::test]
 async fn compose_without_payload_fails() {
-    let r = plugin(ReplyConfig::default())
-        .route(ctx("compose", None))
+    let r = plugin(ComposeConfig::default())
+        .route(ctx("wording", None))
         .await;
     assert!(r.is_err(), "缺载荷应报错，实得 {:?}", r.is_ok());
 }
 
 #[tokio::test]
 async fn unknown_subcommand_is_not_found() {
-    let r = plugin(ReplyConfig::default())
+    let r = plugin(ComposeConfig::default())
         .route(ctx("bogus", None))
         .await;
     assert!(matches!(r, Err(PluginError::NotFound(_))));
@@ -216,7 +216,7 @@ async fn unknown_subcommand_is_not_found() {
 /// 本插件不注册 `Capability` —— 它在工具集里**结构上不可能**出现
 #[tokio::test]
 async fn traverse_contributes_no_tools() {
-    let p = plugin(ReplyConfig::default())
+    let p = plugin(ComposeConfig::default())
         .traverse(String::new(), ctx("", None))
         .await
         .expect("traverse 必须成功");
@@ -224,7 +224,7 @@ async fn traverse_contributes_no_tools() {
 }
 
 /// 但它**声明了自己的配置文档**（另一条通道）：设置页据此列出并指路
-/// `<根>/reply/PLUGIN.yml`——「可 A/B」要能操作，靠的就是这一条。
+/// `<根>/compose/PLUGIN.yml`——「可 A/B」要能操作，靠的就是这一条。
 #[tokio::test]
 async fn traverse_announces_its_own_config() {
     use crate::providers::DefaultConfigurableVisitor;
@@ -236,20 +236,20 @@ async fn traverse_announces_its_own_config() {
     req.set(CONFIGURABLE_VISITOR, visitor.clone());
     let req: Arc<dyn PluginInvokeRequest> = Arc::new(req);
 
-    plugin(ReplyConfig::default())
+    plugin(ComposeConfig::default())
         .traverse(String::new(), req)
         .await
         .expect("traverse 必须成功");
 
     let items = visitor.list_configurables().await;
     assert_eq!(items.len(), 1, "应恰好声明一条配置文档");
-    assert_eq!(items[0].node.name, PLUGIN_ID_REPLY);
-    assert_eq!(items[0].path, "reply/PLUGIN.yml");
+    assert_eq!(items[0].node.name, PLUGIN_ID_COMPOSE);
+    assert_eq!(items[0].path, "compose/PLUGIN.yml");
 }
 
 /// E-001 的自证：`PluginMeta` 首参必须等于插件目录名（容器按目录名分发）
 #[test]
 fn meta_id_matches_plugin_dir() {
-    assert_eq!(ReplyPlugin::metadata().id, PLUGIN_ID_REPLY);
-    assert_eq!(PLUGIN_ID_REPLY, "reply");
+    assert_eq!(ComposePlugin::metadata().id, PLUGIN_ID_COMPOSE);
+    assert_eq!(PLUGIN_ID_COMPOSE, "compose");
 }

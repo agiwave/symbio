@@ -1,4 +1,4 @@
-//! Triage 插件模块（对话面：判决）
+//! Classify 插件模块（对话面：判决）
 //!
 //! 本模块是**私有**的：插件之间互不可见（见 [`crate::plugins`] 的架构原则），
 //! 跨插件调用一律经容器 `route` + `symbio_core::schemas::dialog` 的共享契约。
@@ -16,11 +16,11 @@
 //! 四条内部依赖是单向的：`plugin` → `rules` / `classify` → `reasons`。
 //! 反过来没有边——`reasons` 不认识任何人，`rules` 与 `classify` 互不认识。
 
-mod classify;
 mod config;
+mod decide;
 mod plugin;
-/// **唯一**对仓内可见的域内模块，理由只有一条：`reply` 要拿它比对措辞表的抄本
-/// （`reply/templates.test.rs` 的抄本一致性用例）。
+/// **唯一**对仓内可见的域内模块，理由只有一条：`compose` 要拿它比对措辞表的抄本
+/// （`compose/templates.test.rs` 的抄本一致性用例）。
 ///
 /// 它**不放宽插件隔离**：生产代码里跨插件 `use crate::plugins::<兄弟>` 仍被
 /// `plugin-entry-audit` 的 E-009 拦着，本条只让**测试**能比对词表。词表是跨插件的

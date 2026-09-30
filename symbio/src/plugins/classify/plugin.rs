@@ -1,4 +1,4 @@
-//! Triage 插件 —— 对话面的**判决**能力
+//! Classify 插件 —— 对话面的**判决**能力
 //!
 //! ## 它是什么
 //!
@@ -28,12 +28,12 @@
 //!   └─ 判不出来（无模型服务 / 响应不可解析）→ Escalate{unclassified}（= 今天的行为）
 //! ```
 //!
-//! 规则表由本插件自己的配置开关（`TriageConfig::rule_shortcut`）管辖——它是本插件的
+//! 规则表由本插件自己的配置开关（`ClassifyConfig::rule_shortcut`）管辖——它是本插件的
 //! 内部策略，不该出现在调用方的配置面里（见 `config.rs` 的模块文档）。
 //!
 //! ## 它不做什么
 //!
-//! - **不产出面向用户的文本**：措辞归 `reply`；
+//! - **不产出面向用户的文本**：措辞归 `compose`；
 //! - **不写转写**：转写只有 `session` 一个写入者（ADR-020）；
 //! - **不注册工具**：见上「结构保证」；
 //! - **不持有会话状态**：入参带 `session_id` 与对话线投影，它每次现算。
@@ -45,16 +45,16 @@ use crate::symbio_core::schemas::dialog::{DecideRequest, Verdict};
 use crate::symbio_core::{
     plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH,
-    PLUGIN_ID_TRIAGE,
+    PLUGIN_ID_CLASSIFY,
 };
 use async_trait::async_trait;
 
-use super::classify::classify;
-use super::config::TriageConfig;
+use super::config::ClassifyConfig;
+use super::decide::decide;
 use super::reasons::REASON_UNCLASSIFIED;
 use super::rules::classify_by_rule;
 
-/// Triage 插件（无状态、无副作用、不持有任何地址）
+/// Classify 插件（无状态、无副作用、不持有任何地址）
 ///
 /// 唯一持有的东西是自己的配置（`<本插件目录>/PLUGIN.yml`）——装配期读一次，
 /// 与 `session` / `skill` 同款（插件从**自己的目录**里读自己的配置）。
@@ -62,13 +62,13 @@ use super::rules::classify_by_rule;
 /// 同时持有那份配置的**文档**（[`PluginConfigFile`]）：设置页要能改它，
 /// 「可 A/B」才不是一句空话——提示词的措辞直接决定四选一的准确率，调它不该
 /// 需要改代码重编译。
-pub struct TriagePlugin {
-    config: TriageConfig,
+pub struct ClassifyPlugin {
+    config: ClassifyConfig,
     config_file: PluginConfigFile,
 }
 
-impl TriagePlugin {
-    pub fn new(config: TriageConfig, dir: PluginDir) -> Self {
+impl ClassifyPlugin {
+    pub fn new(config: ClassifyConfig, dir: PluginDir) -> Self {
         Self {
             config,
             config_file: PluginConfigFile::new(dir, "意图判决设置", config_definition()),
@@ -80,20 +80,20 @@ impl TriagePlugin {
     /// 自己的目录由容器经 `PLUGIN_DIR` 告知；配置就存在那里的 `PLUGIN.yml`
     /// （`#[serde(default)]` ⇒ 装配期刚补出身份键、还没有业务键的存量文件也能读）。
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
-        let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_TRIAGE);
-        let config: TriageConfig = match dir.load::<TriageConfig>() {
+        let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_CLASSIFY);
+        let config: ClassifyConfig = match dir.load::<ClassifyConfig>() {
             Ok(Some(c)) => c,
-            Ok(None) => TriageConfig::default(),
+            Ok(None) => ClassifyConfig::default(),
             Err(e) => {
-                crate::plugin_warn!("triage", "读取自身配置失败，改用默认值：{e}");
-                TriageConfig::default()
+                crate::plugin_warn!("classify", "读取自身配置失败，改用默认值：{e}");
+                ClassifyConfig::default()
             }
         };
-        Arc::new(TriagePlugin::new(config, dir)) as Arc<dyn Plugin>
+        Arc::new(ClassifyPlugin::new(config, dir)) as Arc<dyn Plugin>
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new(PLUGIN_ID_TRIAGE, "意图判决")
+        PluginMeta::new(PLUGIN_ID_CLASSIFY, "意图判决")
             .with_description(
                 "判决这一轮该直接回答还是派给工具循环；只输出枚举，不产出面向用户的文本",
             )
@@ -114,8 +114,8 @@ impl TriagePlugin {
         if self.config.rule_shortcut {
             if let Some(reason) = classify_by_rule(utterance) {
                 crate::plugin_info!(
-                    "triage",
-                    "[Triage] 规则短路命中（session={}, reason={}）",
+                    "classify",
+                    "[Classify] 规则短路命中（session={}, reason={}）",
                     req.session_id,
                     reason
                 );
@@ -125,7 +125,7 @@ impl TriagePlugin {
             }
         }
 
-        match classify(ctx, utterance, &req.context, &self.config).await {
+        match decide(ctx, utterance, &req.context, &self.config).await {
             Some(verdict) => verdict,
             None => escalate_unclassified(),
         }
@@ -140,7 +140,7 @@ fn escalate_unclassified() -> Verdict {
 }
 
 #[async_trait]
-impl Plugin for TriagePlugin {
+impl Plugin for ClassifyPlugin {
     fn meta(&self) -> PluginMeta {
         Self::metadata()
     }
@@ -159,7 +159,7 @@ impl Plugin for TriagePlugin {
                 Ok(PluginPayload::new(&self.decide(&ctx, &req).await))
             }
             _ => Err(PluginError::NotFound(format!(
-                "[triage] 未知子命令: {path}"
+                "[classify] 未知子命令: {path}"
             ))),
         }
     }
@@ -173,7 +173,7 @@ impl Plugin for TriagePlugin {
     /// 一个也没注册。
     ///
     /// 它参与的是**另一条通道**（`ConfigurableVisitor`）：声明「本插件有一份配置
-    /// 文档」，设置页据此列出并指路 `<根>/triage/PLUGIN.yml`。缺了它插件照常工作，
+    /// 文档」，设置页据此列出并指路 `<根>/classify/PLUGIN.yml`。缺了它插件照常工作，
     /// 只是那份配置在界面上改不到。
     async fn traverse(
         self: Arc<Self>,
@@ -185,20 +185,20 @@ impl Plugin for TriagePlugin {
     }
 }
 
-crate::submit_object_creator!(PLUGIN_ID_TRIAGE, TriagePlugin::build, dyn Plugin);
+crate::submit_object_creator!(PLUGIN_ID_CLASSIFY, ClassifyPlugin::build, dyn Plugin);
 
-// ==================== 配置文档（`<根>/triage/PLUGIN.yml`） ====================
+// ==================== 配置文档（`<根>/classify/PLUGIN.yml`） ====================
 
 /// 判决配置的定义 —— **定义由配置的拥有者产出**（与 `session` 同一条纪律）。
 ///
-/// 默认值一律从 [`TriageConfig::default()`] 读出，不写第二份字面量：schema 与 serde
+/// 默认值一律从 [`ClassifyConfig::default()`] 读出，不写第二份字面量：schema 与 serde
 /// 各写一份默认值，就会出现"面板显示的值与实际行为不符"的漂移（`session` 那边为此
 /// 吃过一次 `max_tool_rounds` 的亏，见其 `config_definition` 的说明）。
 ///
 /// 两个可空字段没有"默认值"可写——它们的缺省就是**留空**，故给 `placeholder` 说明
 /// 留空意味着什么，而不是编一个看起来像默认值的字面量。
 fn config_definition() -> DetailDefinition {
-    let d = TriageConfig::default();
+    let d = ClassifyConfig::default();
     DetailDefinition::form(
         "意图判决设置",
         vec![

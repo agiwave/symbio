@@ -5,13 +5,13 @@ use super::*;
 // （那正是下面 `from_context_has_no_template_row` 要钉的事）。
 use super::super::reasons::REASON_FROM_CONTEXT;
 
-/// **抄本一致性**：本插件的词表与 `triage` 的逐字一致。
+/// **抄本一致性**：本插件的词表与 `classify` 的逐字一致。
 ///
 /// 这是"两份抄本"这件事的判据。漂移的表现是**用户收到一句通用兜底话**——功能还在，
 /// 但没有任何错误信号，属于必须外置成断言的那类失效。
 #[test]
-fn the_vocabulary_matches_triage() {
-    use crate::plugins::triage::reasons as t;
+fn the_vocabulary_matches_classify() {
+    use crate::plugins::classify::reasons as t;
 
     assert_eq!(REASON_GREETING, t::REASON_GREETING);
     assert_eq!(REASON_THANKS, t::REASON_THANKS);
@@ -28,7 +28,7 @@ fn the_vocabulary_matches_triage() {
 /// （降级而不失效，但那是兜底，不是正常路径）。
 #[test]
 fn every_template_bound_reason_has_a_row() {
-    use crate::plugins::triage::reasons as t;
+    use crate::plugins::classify::reasons as t;
 
     for code in [
         t::REASON_GREETING,
@@ -48,7 +48,7 @@ fn every_template_bound_reason_has_a_row() {
 /// ⇒ 表里那一行永远读不到。留着它比没有更糟——读表的人会以为它生效。
 #[test]
 fn from_context_has_no_template_row() {
-    use crate::plugins::triage::reasons as t;
+    use crate::plugins::classify::reasons as t;
 
     assert!(
         lookup(t::REASON_FROM_CONTEXT).is_none(),

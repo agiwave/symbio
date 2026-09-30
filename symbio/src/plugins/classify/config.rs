@@ -1,4 +1,4 @@
-//! Triage 插件自己的配置（`<本插件目录>/PLUGIN.yml`）。
+//! Classify 插件自己的配置（`<本插件目录>/PLUGIN.yml`）。
 //!
 //! ## 为什么配置归本插件，而不是 `session` 的配置面
 //!
@@ -10,7 +10,7 @@
 //! **「独立开关 / 独立模型」的落地形态是「插件目录 = 配置目录（各自 `PLUGIN.yml`）」**。
 //! 本文件是这句话的第一个实例。
 //!
-//! `session` 侧只留一个开关：`triage_enabled`（要不要请判决）——那才是调用方的事。
+//! `session` 侧只留一个开关：`classify_enabled`（要不要请判决）——那才是调用方的事。
 //!
 //! ## 三个键各自的平凡值
 //!
@@ -24,9 +24,9 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Triage 配置 —— 本插件的旋钮（字段真源）
+/// Classify 配置 —— 本插件的旋钮（字段真源）
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TriageConfig {
+pub struct ClassifyConfig {
     /// 规则短路开关（**J2 平凡值：`false`**）。
     ///
     /// - `true`（默认）：问候 / 致谢 / 确认 / 空输入由规则表直接判决，
@@ -66,7 +66,7 @@ pub fn default_rule_shortcut() -> bool {
     true
 }
 
-impl Default for TriageConfig {
+impl Default for ClassifyConfig {
     fn default() -> Self {
         Self {
             rule_shortcut: default_rule_shortcut(),
@@ -76,7 +76,7 @@ impl Default for TriageConfig {
     }
 }
 
-impl TriageConfig {
+impl ClassifyConfig {
     /// 生效的模型 id。**空串与缺席同义**——设置页把输入框清空得到的是 `""`，
     /// 不是"删掉这个键"；把它当成一个 id 去查，只会查不到。
     pub fn model_id(&self) -> Option<&str> {

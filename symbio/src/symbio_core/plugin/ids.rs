@@ -52,10 +52,10 @@ pub const PLUGIN_ID_MANAGER: &str = "plugin_manager";
 pub const PLUGIN_ID_GATEWAY: &str = "gateway";
 /// Session 插件工厂
 pub const PLUGIN_ID_SESSION: &str = "session";
-/// Triage 插件工厂（对话面：判决这一轮该直接答、还是派给工具循环）
-pub const PLUGIN_ID_TRIAGE: &str = "triage";
-/// Reply 插件工厂（对话面：措辞——首响 / 答话 / 汇报）
-pub const PLUGIN_ID_REPLY: &str = "reply";
+/// Classify 插件工厂（对话面：判决这一轮该直接答、还是派给工具循环）
+pub const PLUGIN_ID_CLASSIFY: &str = "classify";
+/// Compose 插件工厂（对话面：措辞——首响 / 答话 / 汇报）
+pub const PLUGIN_ID_COMPOSE: &str = "compose";
 /// MCP 插件工厂
 pub const PLUGIN_ID_MCP: &str = "mcp";
 /// Local 插件工厂

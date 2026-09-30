@@ -3,14 +3,14 @@
 //! ## 为什么这一条必须生成而不是查模板
 //!
 //! `from_context` 的含义是「答案已经在对话里了」（用户问的是"我们刚才聊了什么"
-//! 这类问题）。那段文本只能从对话线**组织**出来——模板给不了。这与 `triage` 的
+//! 这类问题）。那段文本只能从对话线**组织**出来——模板给不了。这与 `classify` 的
 //! 快速档判出 `from_context` 是同一条事实的两端：判决说"能答"，措辞就得真的答。
 //!
 //! ## 为什么出口是 `silent()`
 //!
-//! 与 `triage` 的分类请求同一条理由：这是**内部请求**，它的流式帧绝不能以自有身份
+//! 与 `classify` 的分类请求同一条理由：这是**内部请求**，它的流式帧绝不能以自有身份
 //! 进入对话流（否则每答一次就在前端留下一个空 Turn 骨架）。可见的那句话由 `session`
-//! 用生成结果**单独写一个节点**——`reply` 自己一个节点都不写（唯一写入者不变，ADR-020）。
+//! 用生成结果**单独写一个节点**——`compose` 自己一个节点都不写（唯一写入者不变，ADR-020）。
 //!
 //! ## 为什么系统提示词要拼上注册段
 //!
@@ -26,7 +26,7 @@
 
 use std::sync::Arc;
 
-use super::config::ReplyConfig;
+use super::config::ComposeConfig;
 use crate::symbio_core::schemas::dialog::ComposeRequest;
 use crate::symbio_core::schemas::session::chat_message::{ChatMessage, MessageRole};
 use crate::symbio_core::{
@@ -35,7 +35,7 @@ use crate::symbio_core::{
 };
 
 /// 生成请求的**指令段**（拼在注册的系统提示词之后；可被
-/// `ReplyConfig::instruction` 覆盖）。
+/// `ComposeConfig::instruction` 覆盖）。
 ///
 /// 三条约束各自对应一种已知的坏输出：① 不复述问题（模型很爱把问题抄一遍再答）；
 /// ② 不编（"我们刚才聊了什么"最容易诱发幻觉）；③ 不用工具（本插件没有工具，
@@ -61,13 +61,13 @@ pub(crate) const INSTRUCTION: &str = "\
 pub(crate) async fn generate(
     ctx: &Arc<dyn PluginInvokeRequest>,
     req: &ComposeRequest,
-    config: &ReplyConfig,
+    config: &ComposeConfig,
 ) -> Option<String> {
     // 先做**不花任何代价**的判据，再去找模型服务：没有"要回答的那句话"时，
     // 生成只会得到一句凭空的话——那时连能力访问器都不必碰。
     let messages = build_messages(&req.context);
     if !messages.iter().any(|m| m.role == Some(MessageRole::User)) {
-        crate::plugin_debug!("reply", "[Reply] 对话线里没有用户发言，生成路径跳过");
+        crate::plugin_debug!("compose", "[Compose] 对话线里没有用户发言，生成路径跳过");
         return None;
     }
 
@@ -81,8 +81,8 @@ pub(crate) async fn generate(
     // 选了哪个模型记一笔：配置的 id 写错时**没有错误信号**（行为是"用会话的模型"，
     // 一切照常），这行日志是唯一的线索。
     crate::plugin_debug!(
-        "reply",
-        "[Reply] 答话使用模型 '{}'（配置 model={:?}）",
+        "compose",
+        "[Compose] 答话使用模型 '{}'（配置 model={:?}）",
         provider.provider_id(),
         config.model_id()
     );
@@ -101,7 +101,7 @@ pub(crate) async fn generate(
         Err(e) => {
             // 生成失败**不是**本轮的失败：调用方退回模板，用户照旧收到一句答话。
             // 因此 warn 而不 error——把它报成错误会让一次限流看起来像会话故障。
-            crate::plugin_warn!("reply", "[Reply] 答话生成失败，退回模板：{e}");
+            crate::plugin_warn!("compose", "[Compose] 答话生成失败，退回模板：{e}");
             None
         }
     }
@@ -114,7 +114,10 @@ pub(crate) async fn generate(
 ///
 /// 可覆盖的只有**指令段**：注册段不属于本插件（它由 `setting` / `session` /
 /// `memory` 各自注册），在这里也拿不到"改它"的资格。
-async fn build_system_prompt(visitor: &Arc<dyn CapabilityVisitor>, config: &ReplyConfig) -> String {
+async fn build_system_prompt(
+    visitor: &Arc<dyn CapabilityVisitor>,
+    config: &ComposeConfig,
+) -> String {
     let mut parts: Vec<String> = visitor
         .list_system_prompts()
         .await
@@ -161,5 +164,5 @@ fn text_of(m: &ChatMessage) -> String {
 }
 
 #[cfg(test)]
-#[path = "compose.test.rs"]
+#[path = "wording.test.rs"]
 mod tests;

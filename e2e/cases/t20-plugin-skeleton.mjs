@@ -20,7 +20,7 @@ import './_selfrun.mjs';
 // |---|---|
 // | A 装配 | 空 homedir 下两个插件的目录 / `plugin_provider` / 出厂身份被补出来（同 T17 形态） |
 // | B 路由 | 经 gateway HTTP 边界可达两条路由；契约往返正确（规则命中 / 兜底判决 / 三条措辞产线 / 未知子命令 NotFound） |
-// | C 会话内边界 | 跑一轮真实工具回路：工具真落盘，且对话面节点**只由 `reply` 产出、只挂根级** |
+// | C 会话内边界 | 跑一轮真实工具回路：工具真落盘，且对话面节点**只由 `compose` 产出、只挂根级** |
 // | D 卸载 | 停用两个插件 ⇒ 路由消失（`NotFound`），而工具回路照旧跑通 |
 //
 // ## C 线为什么钉住 `progress_enabled = false`
@@ -34,9 +34,9 @@ import './_selfrun.mjs';
 // 网关这条 ctx 里**没有能力访问器**（`CAPABILITY_VISITOR` 是装配期由容器挂上的），
 // 因此任何要调模型的产线在这里都取不到模型服务。这不是缺陷，恰好让断言**确定**：
 //
-// - `triage/decide`：规则命中 ⇒ 判决出来了（连模型都没有 ⇒ 这条路上没碰模型）；
+// - `classify/decide`：规则命中 ⇒ 判决出来了（连模型都没有 ⇒ 这条路上没碰模型）；
 //   规则未命中 ⇒ 兜底 `Escalate`（失败方向是"照旧进工具循环"，绝不是 `Answered`）；
-// - `reply/compose`：模板产线照常出文本；**生成产线取不到模型 ⇒ 落变体兜底**；
+// - `compose/wording`：模板产线照常出文本；**生成产线取不到模型 ⇒ 落变体兜底**；
 //   `Report` 走**填表**产线（事实随 `snapshot` 带来）⇒ 同样零往返、同样拿得到完整句子。
 //
 // ## 为什么经 gateway 而不是 CLI 命令
@@ -75,11 +75,11 @@ const SID_OFF = 'e2e-t20-off';
 
 /** 本批（S1）两个插件的出厂身份（`PluginMeta::new` 的第二参 → 投影成 `plugin_title`） */
 const PLUGINS = [
-  { name: 'triage', title: '意图判决' },
-  { name: 'reply', title: '对话措辞' },
+  { name: 'classify', title: '意图判决' },
+  { name: 'compose', title: '对话措辞' },
 ];
 
-/** 模板产线的两句期望文本（与 `reply/templates.rs` 的对应行一致，逐字比对） */
+/** 模板产线的两句期望文本（与 `compose/templates.rs` 的对应行一致，逐字比对） */
 const TEMPLATE_UNCLASSIFIED = '我先看一下。';
 /** `from_context` 在模板表里**没有行** ⇒ 生成不了时落的是**变体兜底**（`FALLBACK_ANSWERED`） */
 const FALLBACK_ANSWERED = '好的。';
@@ -191,31 +191,31 @@ export default defineCase(
       //      绝不是 `Answered`（那会让用户看到沉默）；
       //   ③ 措辞三条产线：模板照常 / 生成取不到模型 ⇒ **变体兜底**（不是空白）/
       //      `Report` 无产线 ⇒ 空串（平凡值）。
-      const decided = await cli.invoke('triage/decide', { session_id: SID, utterance: '你好' });
+      const decided = await cli.invoke('classify/decide', { session_id: SID, utterance: '你好' });
       assertEq(
         decided.status,
         200,
-        `triage/decide 应可达（${JSON.stringify(decided.body)?.slice(0, 300)}）`,
+        `classify/decide 应可达（${JSON.stringify(decided.body)?.slice(0, 300)}）`,
       );
       assertEq(decided.body?.data?.verdict, 'answered', '规则命中 ⇒ Answered');
       assertEq(decided.body?.data?.reason, 'greeting', '问候的理由码');
 
-      const undecided = await cli.invoke('triage/decide', {
+      const undecided = await cli.invoke('classify/decide', {
         session_id: SID,
         utterance: '我们刚才聊了什么',
       });
       assertEq(undecided.body?.data?.verdict, 'escalate', '判不出来 ⇒ 兜底 Escalate');
       assertEq(undecided.body?.data?.reason, 'unclassified', '兜底理由码');
 
-      /** 调一次 `reply/compose` 并取出文本（载荷形状见 `schemas::dialog::ComposeRequest`） */
+      /** 调一次 `compose/wording` 并取出文本（载荷形状见 `schemas::dialog::ComposeRequest`） */
       const compose = async (verdict, context = [], snapshot = null) => {
         const payload = { session_id: SID, verdict, context };
         if (snapshot) payload.snapshot = snapshot;
-        const r = await cli.invoke('reply/compose', payload);
+        const r = await cli.invoke('compose/wording', payload);
         assertEq(
           r.status,
           200,
-          `reply/compose 应可达（${JSON.stringify(r.body)?.slice(0, 300)}）`,
+          `compose/wording 应可达（${JSON.stringify(r.body)?.slice(0, 300)}）`,
         );
         return r.body?.data;
       };
@@ -243,13 +243,13 @@ export default defineCase(
       );
 
       // 路由是**静态分派**：未知子命令必须响亮失败，而不是"什么都接"
-      const bogus = await cli.invoke('triage/bogus', {});
-      assert(bogus.status >= 400, `triage/bogus 应失败（实得 ${bogus.status}）`);
+      const bogus = await cli.invoke('classify/bogus', {});
+      assert(bogus.status >= 400, `classify/bogus 应失败（实得 ${bogus.status}）`);
 
-      // ── C 会话内边界：一轮真实工具回路 + 对话面节点只由 `reply` 产出、只挂根级 ──
+      // ── C 会话内边界：一轮真实工具回路 + 对话面节点只由 `compose` 产出、只挂根级 ──
       //    本线验的是**边界**，不是行为（行为见 `t21` / `t22`）。三条判据：
       //    ① 工具链照旧（插件装配没有改变工具链）；
-      //    ② 对话面文本由 `reply` 产出 —— 它带 `meta.surface`，且 `reason` 来自判决；
+      //    ② 对话面文本由 `compose` 产出 —— 它带 `meta.surface`，且 `reason` 来自判决；
       //    ③ 它挂在**根级**（对话线与用户消息互为兄弟），不是某个 Turn 的子节点。
       //
       //    本线的输入被 mock 判成 `unclassified`（mock 对这一句返回的是工具调用、
@@ -265,7 +265,7 @@ export default defineCase(
       );
       const surfaced = msgs.filter((m) => m.meta && 'surface' in m.meta);
       assertEq(surfaced.length, 1, `本轮应恰有一条对话面节点（实得 ${surfaced.length} 条）`);
-      assertEq(surfaced[0].meta.surface, 'reply', '对话面节点由 reply 产出（谁产出的）');
+      assertEq(surfaced[0].meta.surface, 'reply', '对话面节点带对话面标记（surface 是数据概念，与产出插件无关）');
       assertEq(surfaced[0].meta.reason, 'unclassified', '理由码来自上游判决（原样透传）');
       assertEq(surfaced[0].role, 'assistant', '对话面节点是助手说的话');
       assert(
@@ -290,7 +290,7 @@ export default defineCase(
       await llm.reset();
 
       cli = await startCli();
-      for (const path of ['triage/decide', 'reply/compose']) {
+      for (const path of ['classify/decide', 'compose/wording']) {
         const r = await cli.invoke(path, { session_id: SID_OFF });
         assert(
           r.status >= 400,

@@ -1,9 +1,9 @@
-//! `symbio/src/plugins/reply/compose.rs` 的单元测试 —— 拆自源码末尾的测试模块。
+//! `symbio/src/plugins/compose/compose.rs` 的单元测试 —— 拆自源码末尾的测试模块。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //!
 //! 这里只测**不需要模型**的部分（纯函数 + 「没有模型服务」这条失败方向）：
-//! 生成路径本身由 e2e `t22-reply.mjs` 在真实边界上验（mock LLM）。
+//! 生成路径本身由 e2e `t22-compose.mjs` 在真实边界上验（mock LLM）。
 
 use super::*;
 use crate::symbio_core::schemas::session::chat_message::{
@@ -87,7 +87,7 @@ async fn generation_without_a_model_service_returns_none() {
     let out = generate(
         &ctx,
         &request(vec![node(MessageRole::User, "我们刚才聊了什么")]),
-        &ReplyConfig::default(),
+        &ComposeConfig::default(),
     )
     .await;
     assert!(out.is_none(), "没有模型服务时应返回 None");
@@ -102,10 +102,10 @@ async fn generation_without_a_user_turn_returns_none() {
         Arc::new(crate::symbio_core::PluginSimpleRequest::new(None, None));
 
     let only_assistant = vec![node(MessageRole::Assistant, "我先说一句")];
-    let out = generate(&ctx, &request(only_assistant), &ReplyConfig::default()).await;
+    let out = generate(&ctx, &request(only_assistant), &ComposeConfig::default()).await;
     assert!(out.is_none(), "没有用户发言时不该生成");
 
     let empty: Vec<ChatMessage> = Vec::new();
-    let out = generate(&ctx, &request(empty), &ReplyConfig::default()).await;
+    let out = generate(&ctx, &request(empty), &ComposeConfig::default()).await;
     assert!(out.is_none(), "空对话线时不该生成");
 }

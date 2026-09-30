@@ -1,9 +1,9 @@
-//! 对话面契约 —— `session` ⇄ `triage` / `reply` 之间唯一的类型面
+//! 对话面契约 —— `session` ⇄ `classify` / `compose` 之间唯一的类型面
 //!
 //! ## 为什么在 core
 //!
-//! 契约的生产方是 `session`（它投影事实、发起调用），消费方是 `triage`（判决）与
-//! `reply`（措辞）**两个**插件。依赖方 ≥ 2 且分处不同插件 ⇒ 满足 `ADR-023` 的
+//! 契约的生产方是 `session`（它投影事实、发起调用），消费方是 `classify`（判决）与
+//! `compose`（措辞）**两个**插件。依赖方 ≥ 2 且分处不同插件 ⇒ 满足 `ADR-023` 的
 //! core 准入判据：插件之间不得互相 import（`plugin-entry-audit` 的 E-009 在守），
 //! 共享类型只能落在 core。
 //!
@@ -41,13 +41,13 @@
 //! ### 为什么 `ComposeRequest` 不带字数上限
 //!
 //! 答话的「短」由**提示词**约束，不由硬截断——截断会把句子切一半，比长一句更糟。
-//! 而 `session` 并没有比 `reply` 更好的字数知识：它唯一能给的那个数只能是从别处
+//! 而 `session` 并没有比 `compose` 更好的字数知识：它唯一能给的那个数只能是从别处
 //! 抄来的常量。一个没有生产者的字段就是预留，不因为它是 `Option` 就例外。
 //!
 //! ## 新增字段为什么**不带** `deny_unknown_fields` 且带 `#[serde(default)]`
 //!
 //! 本模块的请求还有**第二个调用方**：网关把外部客户端的 `path` 原样转发给容器
-//! （`gateway/server.rs`），因此 `triage/decide` 也可能由仓外程序直接调用。
+//! （`gateway/server.rs`），因此 `classify/decide` 也可能由仓外程序直接调用。
 //! 缺省值让「老调用方不传新字段」与「新调用方不传可选字段」都成立——
 //! 契约扩展不产生破坏性变更。
 
@@ -55,7 +55,7 @@ use serde::{Deserialize, Serialize};
 
 use super::session::chat_message::ChatMessage;
 
-/// `triage` 的入参：这一轮发生了什么
+/// `classify` 的入参：这一轮发生了什么
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecideRequest {
     /// 会话 id（插件据此取自己的上下文；两个插件都不持有会话状态）
@@ -67,7 +67,7 @@ pub struct DecideRequest {
     ///
     /// ## 为什么是投影而不是会话 id 自取
     ///
-    /// 转写只有一个写入者（ADR-020），读侧同理只有一个**投影**入口：`triage`
+    /// 转写只有一个写入者（ADR-020），读侧同理只有一个**投影**入口：`classify`
     /// 不读存储、不认节点树，它拿到的是「用户与助手说过的话」这一条线——
     /// 判「已知事实能否直答」只需要这条线。
     ///
@@ -89,11 +89,11 @@ pub struct DecideRequest {
 ///
 /// | 变体 | 产出方 | 为什么是它 |
 /// |---|---|---|
-/// | `Answered` / `Escalate` | `triage` | 判「用户这句话要不要派活」需要**语义**判断，而 `triage` 是那个能力 |
-/// | `Report` | `session` | 「该不该汇报」是**会话状态**上的判定（静默多久、跑了几轮、说过几次），`triage` 手里没有这些量；把它交给 `triage` 等于让它对一个已经定好的结论盖章 |
+/// | `Answered` / `Escalate` | `classify` | 判「用户这句话要不要派活」需要**语义**判断，而 `classify` 是那个能力 |
+/// | `Report` | `session` | 「该不该汇报」是**会话状态**上的判定（静默多久、跑了几轮、说过几次），`classify` 手里没有这些量；把它交给 `classify` 等于让它对一个已经定好的结论盖章 |
 ///
 /// 因此本枚举是**编排层的执行面**，不是某个插件的私有出参：`session` 既能执行
-/// 别人判出来的结果，也能自己判出 `Report`。两者对 `reply` 是同一种输入。
+/// 别人判出来的结果，也能自己判出 `Report`。两者对 `compose` 是同一种输入。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "verdict", rename_all = "snake_case")]
 pub enum Verdict {
@@ -107,7 +107,7 @@ pub enum Verdict {
         /// 理由码（数据，见模块文档）
         reason: String,
     },
-    /// 该汇报了：措辞由 `reply` 从**运行现状**（[`RunSnapshot`]）组织
+    /// 该汇报了：措辞由 `compose` 从**运行现状**（[`RunSnapshot`]）组织
     Report,
 }
 
@@ -125,7 +125,7 @@ pub struct RunSnapshot {
     pub quiet_ms: i64,
 }
 
-/// `reply` 的入参
+/// `compose` 的入参
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposeRequest {
     /// 会话 id
@@ -138,14 +138,14 @@ pub struct ComposeRequest {
     ///
     /// `Answered { reason: "from_context" }` 的含义是「答案已在对话里」——那段文本
     /// 只能从对话线**组织**出来，模板给不了。其余理由码走模板，用不到这个字段，
-    /// 但字段不按分支可选：让 `reply` 的入参形状随判决变，等于把编排细节泄进契约。
+    /// 但字段不按分支可选：让 `compose` 的入参形状随判决变，等于把编排细节泄进契约。
     #[serde(default)]
     pub context: Vec<ChatMessage>,
     /// **运行现状**（[`RunSnapshot`]）。`Report` 的措辞据此组织。
     ///
     /// 与 `context` 同一条纪律：字段不按分支可选。`Answered` / `Escalate` 用不到它
     /// （它们说的是"这一轮"的事，而现状说的是"干到哪一步"），但让入参形状随判决变
-    /// 就会让 `reply` 的分派从"看判决"退化成"看字段在不在"。
+    /// 就会让 `compose` 的分派从"看判决"退化成"看字段在不在"。
     #[serde(default)]
     pub snapshot: RunSnapshot,
 }

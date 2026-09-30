@@ -141,17 +141,17 @@ pub struct SessionConfig {
     ///
     /// ## 它控制什么
     ///
-    /// 每一轮开始时是否经容器 `route` 请 `triage` 判一次「直接回答还是派活」：
+    /// 每一轮开始时是否经容器 `route` 请 `classify` 判一次「直接回答还是派活」：
     /// - `true`：判一次。`Answered` ⇒ 本轮不进工具循环（收尾）；
     ///   `Escalate` ⇒ 照旧进工具循环；
-    /// - `false`：**不调用**，全部输入直接进工具循环——与未挂载 `triage` 时逐字一致。
+    /// - `false`：**不调用**，全部输入直接进工具循环——与未挂载 `classify` 时逐字一致。
     ///
     /// ## 出厂默认为什么是 `true`
     ///
-    /// 判决本身只输出枚举，面向用户的那句话归 `reply`；在 `reply` 还是平凡实现
+    /// 判决本身只输出枚举，面向用户的那句话归 `compose`；在 `compose` 还是平凡实现
     /// （恒空串）时打开本开关，「你好」会变成**沉默**——那不是"少说一句"，那是回归。
-    /// S2 因此只交付机制、默认关闭，并在字段文档里写下「`reply` 落地的那一批把默认
-    /// 翻成 `true`」。S3 就是那一批：`reply` 的两条产线（模板 / 生成）都已落地，
+    /// S2 因此只交付机制、默认关闭，并在字段文档里写下「`compose` 落地的那一批把默认
+    /// 翻成 `true`」。S3 就是那一批：`compose` 的两条产线（模板 / 生成）都已落地，
     /// 判决为 `Answered` 时**必然有话说**（最差也是变体兜底），沉默的前提不复存在。
     ///
     /// 这与「一批一件事、每批行为可独立回退」是同一条纪律：
@@ -160,38 +160,38 @@ pub struct SessionConfig {
     /// ## 为什么它在 session 的配置面，而「用不用规则表」不在
     ///
     /// 本开关问的是「**调用方**要不要请判决」，是调用方的事；而「判决内部用不用规则表」
-    /// 是插件自己的策略，归 `triage` 自己的 `PLUGIN.yml`（`TriageConfig::rule_shortcut`）。
+    /// 是插件自己的策略，归 `classify` 自己的 `PLUGIN.yml`（`ClassifyConfig::rule_shortcut`）。
     /// 把后者也塞进这里，等于让调用方为一段它看不见的策略维护一个开关。
-    #[serde(default = "default_triage_enabled")]
-    pub triage_enabled: bool,
+    #[serde(default = "default_classify_enabled")]
+    pub classify_enabled: bool,
     /// 对话面措辞总开关（**J2 平凡值：`false`**）。
     ///
     /// ## 它控制什么
     ///
-    /// 判决为 `Answered` / `Escalate` 时是否经容器 `route` 请 `reply` 说一句话：
+    /// 判决为 `Answered` / `Escalate` 时是否经容器 `route` 请 `compose` 说一句话：
     /// - `true`：说。`Answered` 的答话进请求包（它就是这一轮的答复）；
     ///   `Escalate` 的首响**不进**请求包（界面开场白，见 `chat_loop/compose.rs`）；
     /// - `false`：**不调用**。`Answered` 于是拿不到措辞 ⇒ **降级进工具循环**
-    ///   （不沉默）；`Escalate` 没有首响。与未挂载 `reply` 时逐字一致。
+    ///   （不沉默）；`Escalate` 没有首响。与未挂载 `compose` 时逐字一致。
     ///
     /// ## 为什么出厂默认就是 `true`
     ///
-    /// 与 `triage_enabled` 相反：本开关**不需要**等谁落地。关掉它不会让任何东西
+    /// 与 `classify_enabled` 相反：本开关**不需要**等谁落地。关掉它不会让任何东西
     /// 变沉默——`Answered` 的降级方向是"照旧进工具循环"，那是引入判决之前的行为，
     /// 完整可用。因此打开它是纯粹的增强，没有"先交机制再生效"的两段式需要。
     ///
     /// ## 为什么它在 session 的配置面
     ///
-    /// 与 `triage_enabled` 同一条：问的是「**调用方**要不要请措辞」。措辞内部
-    /// 用模板还是用模型、用哪个提示词，都是 `reply` 自己的策略，归它自己的配置面。
-    #[serde(default = "default_reply_enabled")]
-    pub reply_enabled: bool,
+    /// 与 `classify_enabled` 同一条：问的是「**调用方**要不要请措辞」。措辞内部
+    /// 用模板还是用模型、用哪个提示词，都是 `compose` 自己的策略，归它自己的配置面。
+    #[serde(default = "default_compose_enabled")]
+    pub compose_enabled: bool,
     /// 中途汇报总开关（**J2 平凡值：`false`**）。
     ///
     /// ## 它控制什么
     ///
     /// 长任务进行中，助手是否在**轮边界**主动说一句进度（`Verdict::Report` ⇒
-    /// `reply` 从运行现状组织一句话 ⇒ 一条根级对话面节点）。判定与执行见
+    /// `compose` 从运行现状组织一句话 ⇒ 一条根级对话面节点）。判定与执行见
     /// `chat_loop/progress.rs`。
     ///
     /// - `true`：静默超过 [`Self::progress_interval_ms`]、且已跑够
@@ -201,7 +201,7 @@ pub struct SessionConfig {
     ///
     /// ## 为什么出厂默认为 `true`
     ///
-    /// 它是**用户可见层面**的一部分（与 `triage_enabled` / `reply_enabled` 同一条
+    /// 它是**用户可见层面**的一部分（与 `classify_enabled` / `compose_enabled` 同一条
     /// 判据）：一个跑了几分钟的任务，界面上什么都不说，用户无法区分"在干活"与
     /// "卡死了"。而它的代价被三个上界钉住（间隔 / 最少轮次 / 每轮次数），
     /// 不会变成噪声源。
@@ -209,7 +209,7 @@ pub struct SessionConfig {
     /// ## 为什么它在 session 的配置面
     ///
     /// 「什么时候该打断用户」是**编排**的判断（它要读会话状态：静默时长、轮次、
-    /// 已汇报次数），不是措辞插件的策略——`reply` 只负责把给它的现状说成人话。
+    /// 已汇报次数），不是措辞插件的策略——`compose` 只负责把给它的现状说成人话。
     #[serde(default = "default_progress_enabled")]
     pub progress_enabled: bool,
     /// 汇报的**静默阈值**（毫秒）：距对话线上最近一次动静（用户发言 / 助手说话）
@@ -278,12 +278,12 @@ pub fn default_supplements_enabled() -> bool {
 pub fn default_supplements_max_per_drain() -> usize {
     20
 }
-pub fn default_triage_enabled() -> bool {
-    // S3 生效：`reply` 的两条产线已落地，`Answered` 必然有话说（最差是变体兜底），
+pub fn default_classify_enabled() -> bool {
+    // S3 生效：`compose` 的两条产线已落地，`Answered` 必然有话说（最差是变体兜底），
     // 沉默的前提不复存在。S2 的"先交机制、默认关闭"到此结束——见字段文档。
     true
 }
-pub fn default_reply_enabled() -> bool {
+pub fn default_compose_enabled() -> bool {
     // 关掉它不会让任何东西变沉默（`Answered` 降级进工具循环），因此无需两段式。
     true
 }
@@ -343,8 +343,8 @@ impl Default for SessionConfig {
             memory_inject_max_bytes: default_memory_inject_max_bytes(),
             supplements_enabled: default_supplements_enabled(),
             supplements_max_per_drain: default_supplements_max_per_drain(),
-            triage_enabled: default_triage_enabled(),
-            reply_enabled: default_reply_enabled(),
+            classify_enabled: default_classify_enabled(),
+            compose_enabled: default_compose_enabled(),
             progress_enabled: default_progress_enabled(),
             progress_interval_ms: default_progress_interval_ms(),
             progress_min_rounds: default_progress_min_rounds(),

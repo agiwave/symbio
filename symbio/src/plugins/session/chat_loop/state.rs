@@ -524,7 +524,7 @@ pub struct ChatOrchestrator {
     /// `None` = 调用方没有提供（单测 / 无会话状态场景）：轮边界不抽干，
     /// 行为与改造前一致。可选而非必填的理由与 `compression` 相同。
     pub supplements: Option<Arc<SupplementDrain>>,
-    /// 轮首判决的**请求级开关快照**（`SessionConfig::triage_enabled`）。
+    /// 轮首判决的**请求级开关快照**（`SessionConfig::classify_enabled`）。
     ///
     /// ## 为什么是一个值而不是一个持有者
     ///
@@ -535,35 +535,35 @@ pub struct ChatOrchestrator {
     ///
     /// ## 它关掉的是什么
     ///
-    /// `false` ⇒ 本循环**不调用** `triage/decide`，全部输入直接进工具循环——
+    /// `false` ⇒ 本循环**不调用** `classify/decide`，全部输入直接进工具循环——
     /// 与未挂载该插件时的行为一致（两条路径都退化成"今天的行为"，但验证的
     /// 是两件不同的事：这里是"分支写对了"，卸载是"插件边界真的存在"）。
-    pub triage_enabled: bool,
-    /// 对话面措辞的**请求级开关快照**（`SessionConfig::reply_enabled`）。
+    pub classify_enabled: bool,
+    /// 对话面措辞的**请求级开关快照**（`SessionConfig::compose_enabled`）。
     ///
     /// ## 为什么也是一个值
     ///
-    /// 与 [`ChatOrchestrator::triage_enabled`] 同一条理由：配置在一次请求生命周期内
+    /// 与 [`ChatOrchestrator::classify_enabled`] 同一条理由：配置在一次请求生命周期内
     /// 不变，措辞只需要一个布尔。持有 `Arc<SessionPlugin>` 会多一条绕过配置面的路径，
     /// 而这里没有任何"当前值"要读。
     ///
     /// ## 它关掉的是什么
     ///
-    /// `false` ⇒ 本循环**不调用** `reply/compose`：`Answered` 拿不到措辞，
-    /// 于是**降级进工具循环**（不沉默），`Escalate` 没有首响。与未挂载 `reply`
+    /// `false` ⇒ 本循环**不调用** `compose/compose`：`Answered` 拿不到措辞，
+    /// 于是**降级进工具循环**（不沉默），`Escalate` 没有首响。与未挂载 `compose`
     /// 时的行为一致——两条路径都退化成"没有对话面文本"，但验证的是两件不同的事
     /// （这里是"分支写对了"，卸载是"插件边界真的存在"）。
     ///
-    /// ## 它与 `triage_enabled` 是**两级独立的开关**
+    /// ## 它与 `classify_enabled` 是**两级独立的开关**
     ///
     /// 判决决定"要不要干活"，措辞决定"说什么"。四个组合都成立且都有意义：
     /// 只判决不措辞（判决决定派活与否，话由工具循环说）、只措辞不判决（没有判决
-    /// 就没有 `Answered`，措辞只剩 `Escalate` 首响——本批 `Escalate` 由 `triage`
+    /// 就没有 `Answered`，措辞只剩 `Escalate` 首响——本批 `Escalate` 由 `classify`
     /// 产出，故该组合退化为"不生效"，但**结构上合法**，不是需要拦的错误）。
-    pub reply_enabled: bool,
+    pub compose_enabled: bool,
     /// 中途汇报的策略快照（`SessionConfig` 的四个旋钮，见 [`ProgressPolicy`]）。
     ///
-    /// 与 `triage_enabled` / `reply_enabled` 同形（取**值快照**），但这里是一个结构体
+    /// 与 `classify_enabled` / `compose_enabled` 同形（取**值快照**），但这里是一个结构体
     /// 而不是四个平铺字段：它们是**同一个判定**的四个参数（见
     /// [`ProgressPolicy::due`]），拆成四个字段会让"谁和谁是一组"只能靠命名猜。
     ///

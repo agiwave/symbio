@@ -3,7 +3,7 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// S3 让 `reply` 真的开始说话，并把 `session` 接上它。判决是**枚举**（S2 已落位），
+// S3 让 `compose` 真的开始说话，并把 `session` 接上它。判决是**枚举**（S2 已落位），
 // 措辞是**文本**——本用例验的不是"插件返回了什么字符串"，而是**会话转写里多出了
 // 什么、请求包里少了什么**：
 //
@@ -12,8 +12,8 @@ import './_selfrun.mjs';
 // | A 模板路径 | 「谢谢」 | `Answered{thanks}` | 模板 | **零** LLM 请求；一条根级 `surface=reply` 节点 |
 // | B 生成路径 | 「我们刚才聊了什么」 | `Answered{from_context}` | 生成 | 分类 1 次 + 生成 1 次静默请求；答话**进**后续请求包 |
 // | B 首响剔除 | 再接「读一下 README」 | `Escalate{needs_work}` | 模板 | 首响节点**不进**请求包（同一批 worker 请求里查无此句） |
-// | C 卸载平凡值 | 「谢谢」+ 不挂载 `reply` | `Answered{thanks}` | 无 | **降级进工具循环**；转写里没有对话面文本 |
-// | D 开关平凡值 | 「谢谢」+ `reply_enabled=false` | `Answered{thanks}` | 无 | 同上（验的是"分支写对了"，C 验的是"插件边界真的存在"） |
+// | C 卸载平凡值 | 「谢谢」+ 不挂载 `compose` | `Answered{thanks}` | 无 | **降级进工具循环**；转写里没有对话面文本 |
+// | D 开关平凡值 | 「谢谢」+ `compose_enabled=false` | `Answered{thanks}` | 无 | 同上（验的是"分支写对了"，C 验的是"插件边界真的存在"） |
 //
 // ## 为什么 A 线必须是**零** LLM 请求
 //
@@ -33,19 +33,19 @@ import './_selfrun.mjs';
 //
 // ## 为什么平凡值线要另起 homedir 与进程
 //
-// `reply_enabled` 与停用位都在**装配期**定型（前者读进 `SessionConfig` 快照、
+// `compose_enabled` 与停用位都在**装配期**定型（前者读进 `SessionConfig` 快照、
 // 后者决定挂不挂），运行期改配置不会生效。因此 C / D 只能另起进程——它们验的
 // 正是"这条路径在关掉之后与今天逐字一致"。
 //
 // 端口来自 homedir 里的插件配置，而**同一个 homedir 的端口是固定的**：复用 `hd` 的
 // 进程就得复用它的端口，而那个端口刚被 kill 掉，可能还在 TIME_WAIT 里。C 线因此
 // 另起 homedir 并把停用位**预置**进 manifest（`ensure_manifest` 不覆盖已存在的
-// 文件 ⇒ 第一次装配就不构造 `reply`）。
+// 文件 ⇒ 第一次装配就不构造 `compose`）。
 //
 // 三组 homedir / 端口分配：
 //   A·B 共享第一个 homedir 与端口（同进程，只换会话 id）
-//   C 另起 homedir + 端口（要它"从一开始就没有 reply"）
-//   D 另起 homedir + 端口（要 `reply_enabled=false`）
+//   C 另起 homedir + 端口（要它"从一开始就没有 compose"）
+//   D 另起 homedir + 端口（要 `compose_enabled=false`）
 import {
   MockLlm,
   makeHomedir,
@@ -70,11 +70,11 @@ const SIDS = {
   off: 'e2e-t22-off',
 };
 
-/** A 线期望的模板文本（与 `reply/templates.rs` 的 `REASON_THANKS` 行一致） */
+/** A 线期望的模板文本（与 `compose/templates.rs` 的 `REASON_THANKS` 行一致） */
 const TEMPLATE_THANKS = '不客气。';
 /** B 线期望的生成文本（由本用例的 mock 场景给出，逐字比对以证明它真的进了请求包） */
 const ANSWER_FROM_CONTEXT = '我们刚才在聊 README 的事。';
-/** B 线第二条消息的 `Escalate` 首响（与 `reply/templates.rs` 的 `REASON_NEEDS_WORK` 行一致） */
+/** B 线第二条消息的 `Escalate` 首响（与 `compose/templates.rs` 的 `REASON_NEEDS_WORK` 行一致） */
 const OPENING_NEEDS_WORK = '好，我来处理。';
 
 function gatewayConfig(port) {
@@ -111,7 +111,7 @@ export default defineCase(
     const llm = await new MockLlm([
       // 分类请求（B 线第 1 步）⇒ 判「能凭上下文直接答」⇒ 走生成产线
       { id: 'cls-direct', match: '我们刚才聊了什么', content: 'direct', once: true },
-      // **生成**请求（B 线第 1 步）：`reply` 的措辞产线，同一句话、同一份对话线
+      // **生成**请求（B 线第 1 步）：`compose` 的措辞产线，同一句话、同一份对话线
       { id: 'gen-answer', match: '我们刚才聊了什么', content: ANSWER_FROM_CONTEXT },
       // 分类请求（B 线第 2 步，once）⇒ 判「要干活」⇒ 走模板产线（首响）
       { id: 'cls-work', match: '读一下 README', content: 'work', once: true },
@@ -133,7 +133,7 @@ export default defineCase(
         gateway: gatewayConfig(GATEWAY_PORT),
         // 两个开关出厂默认都已是 `true`（S3 起）。这里仍**显式**写出，是让本用例的
         // 前提自证——不依赖默认值，翻转默认值不会悄悄改变本用例验的是什么。
-        session: { triage_enabled: true, reply_enabled: true },
+        session: { classify_enabled: true, compose_enabled: true },
       },
     });
 
@@ -276,7 +276,7 @@ export default defineCase(
         'Escalate 的首响必须带剔除标记（界面开场白 ≠ 模型的对话内容）',
       );
 
-      // ── C 卸载平凡值：不挂载 `reply` ⇒ 判决说能直接答却没人能说话 ⇒ 降级进工具循环 ──
+      // ── C 卸载平凡值：不挂载 `compose` ⇒ 判决说能直接答却没人能说话 ⇒ 降级进工具循环 ──
       //    「没有这个插件也能正确运行」的可执行形式不是配置开关，而是**装配期**的
       //    不挂载：停用即"根本不构造"，路由随之 `NotFound`，`session` 按"缺插件"降级。
       //
@@ -289,10 +289,10 @@ export default defineCase(
         providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
         pluginConfigs: {
           gateway: gatewayConfig(unmountedPort),
-          // 与 A/B 线**同一个完整值**：差别只有"挂不挂 reply"这一项，
+          // 与 A/B 线**同一个完整值**：差别只有"挂不挂 compose"这一项，
           // 否则验的就不是"卸载"而是"两个变量一起变"。
-          session: { triage_enabled: true, reply_enabled: true },
-          reply: { plugin_enabled: false },
+          session: { classify_enabled: true, compose_enabled: true },
+          compose: { plugin_enabled: false },
         },
       });
       const cli2 = startLongLivedCli({
@@ -302,15 +302,15 @@ export default defineCase(
         provider: PROVIDER_ID,
         gatewayPort: unmountedPort,
       });
-      await cli2.waitGatewayReady(20_000, 'C 线进程（reply 未挂载）');
+      await cli2.waitGatewayReady(20_000, 'C 线进程（compose 未挂载）');
       try {
         // 停用后路由必须消失（卸载的判据是"路由 NotFound"，不是"读了 enabled 字段"）
-        const gone = await cli2.invoke('reply/compose', {
+        const gone = await cli2.invoke('compose/compose', {
           session_id: SIDS.unmounted,
           verdict: { verdict: 'answered', reason: 'thanks' },
           context: [],
         });
-        assert(gone.status >= 400, `停用后 reply/compose 应不可达（实得 ${gone.status}）`);
+        assert(gone.status >= 400, `停用后 compose/compose 应不可达（实得 ${gone.status}）`);
 
         const unmBase = await reqCount();
         await send(cli2, SIDS.unmounted, '谢谢', hdUn.workdir);
@@ -327,14 +327,14 @@ export default defineCase(
         assertTranscriptInvariants(unmMsgs, 'T22-C');
         assert(
           !unmMsgs.some((m) => m.meta?.surface === 'reply'),
-          'C 线不该有任何对话面文本（没有 reply 插件，没人能说话）',
+          'C 线不该有任何对话面文本（没有 compose 插件，没人能说话）',
         );
       } finally {
         cli2.stop();
         cleanupHomedir(hdUn);
       }
 
-      // ── D 开关平凡值：`reply_enabled = false` ⇒ 与 C 线同形（降级进工具循环）──
+      // ── D 开关平凡值：`compose_enabled = false` ⇒ 与 C 线同形（降级进工具循环）──
       //    C 与 D 断言相同、验证的却是两件不同的事：C 验"插件边界真的存在"（装配期
       //    不挂载），D 验"这个分支写对了"（插件挂着但调用方关掉了它）。缺任何一条，
       //    另一条都可能因为走错路径而**恰好**通过。
@@ -343,7 +343,7 @@ export default defineCase(
         providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
         pluginConfigs: {
           gateway: gatewayConfig(offPort),
-          session: { triage_enabled: true, reply_enabled: false },
+          session: { classify_enabled: true, compose_enabled: false },
         },
       });
       const cli3 = startLongLivedCli({
@@ -353,7 +353,7 @@ export default defineCase(
         provider: PROVIDER_ID,
         gatewayPort: offPort,
       });
-      await cli3.waitGatewayReady(20_000, 'D 线进程（reply_enabled=false）');
+      await cli3.waitGatewayReady(20_000, 'D 线进程（compose_enabled=false）');
       try {
         const offBase = await reqCount();
         await send(cli3, SIDS.off, '谢谢', hdOff.workdir);

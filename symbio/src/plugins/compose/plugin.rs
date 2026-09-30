@@ -1,11 +1,11 @@
-//! Reply 插件 —— 对话面的**措辞**能力
+//! Compose 插件 —— 对话面的**措辞**能力
 //!
 //! ## 它是什么
 //!
 //! 「首响 / 答话 / 汇报」——**只输出文本，不做判决**。它执行上游判决
 //! （`schemas::dialog::Verdict`）：`Answered` 说一句答话、`Escalate` 说一句首响、
 //! `Report` 说一句进度。判决的产出方见该枚举的变体表（`Answered` / `Escalate` 归
-//! [`crate::plugins::triage`]，`Report` 由 `session` 自己判出）——本插件两种都执行，
+//! [`crate::plugins::classify`]，`Report` 由 `session` 自己判出）——本插件两种都执行，
 //! 不区分来源。
 //!
 //! ## 为什么是一个独立插件（而不是 session 里的一个函数）
@@ -15,10 +15,10 @@
 //! 1. **一个能力一个插件**：插件名 = 能力名（措辞）；
 //! 2. **可卸载**：没有它，系统**完整运行**——没有对话面产出的文本，而 worker 的正文
 //!    照旧（= 卸载前的行为），走的是装配期（不挂载 ⇒ 路由 `NotFound`）；
-//! 3. **零相关**：不 import、不持有任何兄弟插件——**包括 `triage`**。两者都由 `session`
+//! 3. **零相关**：不 import、不持有任何兄弟插件——**包括 `classify`**。两者都由 `session`
 //!    在 `ctx` 里喂输入，两条边都从 session 出发，插件之间没有边。
 //!
-//! 「无工具」是**结构保证**：本插件不注册任何 `Capability`（同 `triage`）。
+//! 「无工具」是**结构保证**：本插件不注册任何 `Capability`（同 `classify`）。
 //!
 //! ## 三条产线
 //!
@@ -36,7 +36,7 @@
 //!
 //! 三条产线各自都有兜底 ⇒ 本实现**恒有文本**。空串因此不是本插件的产出形态，
 //! 而是契约留给**其它产出方**的形态（网关把外部客户端的 `path` 原样转发给容器，
-//! `reply/compose` 可能由仓外程序调用）：调用方（`session`）见到空串即**不写节点**，
+//! `compose/compose` 可能由仓外程序调用）：调用方（`session`）见到空串即**不写节点**，
 //! 与"没有这个插件"走同一条降级路径。
 //!
 //! ## 本插件**不写转写**
@@ -47,45 +47,46 @@ use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::schemas::dialog::{ComposeRequest, Verdict};
 use crate::symbio_core::{
     plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH, PLUGIN_ID_REPLY,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH,
+    PLUGIN_ID_COMPOSE,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use super::compose::generate;
-use super::config::ReplyConfig;
+use super::config::ComposeConfig;
 use super::reasons::REASON_FROM_CONTEXT;
 use super::templates::{progress_text, template_for};
+use super::wording::generate;
 
-/// Reply 插件（无状态、无副作用、不持有任何地址）
+/// Compose 插件（无状态、无副作用、不持有任何地址）
 ///
 /// 持有自己的配置（`<本插件目录>/PLUGIN.yml`）：**用哪个模型**、**指令段怎么写**
 /// ——两件真的有分歧的事（见 `config.rs` 的模块文档）。它不持有会话状态，也不持有
 /// 任何兄弟插件。
-pub struct ReplyPlugin {
-    config: ReplyConfig,
+pub struct ComposePlugin {
+    config: ComposeConfig,
     config_file: PluginConfigFile,
 }
 
-impl ReplyPlugin {
+impl ComposePlugin {
     /// 工厂方法（满足 `submit_object_creator!` 协议）
     ///
     /// **不读"要不要用本插件"**：那归调用方（`SessionConfig::reply_enabled`）。
     /// 这里读的是本插件**自己**的两件事：模型与指令段。
     pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
-        let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_REPLY);
-        let config: ReplyConfig = match dir.load::<ReplyConfig>() {
+        let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_COMPOSE);
+        let config: ComposeConfig = match dir.load::<ComposeConfig>() {
             Ok(Some(c)) => c,
-            Ok(None) => ReplyConfig::default(),
+            Ok(None) => ComposeConfig::default(),
             Err(e) => {
-                crate::plugin_warn!("reply", "读取自身配置失败，改用默认值：{e}");
-                ReplyConfig::default()
+                crate::plugin_warn!("compose", "读取自身配置失败，改用默认值：{e}");
+                ComposeConfig::default()
             }
         };
-        Arc::new(ReplyPlugin::new(config, dir)) as Arc<dyn Plugin>
+        Arc::new(ComposePlugin::new(config, dir)) as Arc<dyn Plugin>
     }
 
-    pub fn new(config: ReplyConfig, dir: PluginDir) -> Self {
+    pub fn new(config: ComposeConfig, dir: PluginDir) -> Self {
         Self {
             config,
             config_file: PluginConfigFile::new(dir, "对话措辞设置", config_definition()),
@@ -93,7 +94,7 @@ impl ReplyPlugin {
     }
 
     pub fn metadata() -> PluginMeta {
-        PluginMeta::new(PLUGIN_ID_REPLY, "对话措辞")
+        PluginMeta::new(PLUGIN_ID_COMPOSE, "对话措辞")
             .with_description("首响 / 答话 / 汇报的措辞；只输出文本，不做判决")
             .with_version("0.4.0")
     }
@@ -133,7 +134,7 @@ fn requires_generation(verdict: &Verdict) -> bool {
 }
 
 #[async_trait]
-impl Plugin for ReplyPlugin {
+impl Plugin for ComposePlugin {
     fn meta(&self) -> PluginMeta {
         Self::metadata()
     }
@@ -146,13 +147,15 @@ impl Plugin for ReplyPlugin {
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         match path {
-            "compose" => {
+            "wording" => {
                 // 请求必须能解析：契约的形状由这一行保证，而不是由注释保证。
                 let req: ComposeRequest = ctx.payload()?;
                 let text = self.compose(&ctx, &req).await;
                 Ok(PluginPayload::new(&text))
             }
-            _ => Err(PluginError::NotFound(format!("[reply] 未知子命令: {path}"))),
+            _ => Err(PluginError::NotFound(format!(
+                "[compose] 未知子命令: {path}"
+            ))),
         }
     }
 
@@ -160,7 +163,7 @@ impl Plugin for ReplyPlugin {
     /// （它无状态、不持有地址，因此不实现 `VdfsProvider`）。
     ///
     /// 它参与的是**另一条通道**（`ConfigurableVisitor`）：声明「本插件有一份配置
-    /// 文档」，设置页据此列出并指路 `<根>/reply/PLUGIN.yml`——「可 A/B」要能操作，
+    /// 文档」，设置页据此列出并指路 `<根>/compose/PLUGIN.yml`——「可 A/B」要能操作，
     /// 靠的就是这一条。
     async fn traverse(
         self: Arc<Self>,
@@ -172,11 +175,11 @@ impl Plugin for ReplyPlugin {
     }
 }
 
-crate::submit_object_creator!(PLUGIN_ID_REPLY, ReplyPlugin::build, dyn Plugin);
+crate::submit_object_creator!(PLUGIN_ID_COMPOSE, ComposePlugin::build, dyn Plugin);
 
-// ==================== 配置文档（`<根>/reply/PLUGIN.yml`） ====================
+// ==================== 配置文档（`<根>/compose/PLUGIN.yml`） ====================
 
-/// 措辞配置的定义 —— **定义由配置的拥有者产出**（与 `triage` / `session` 同一条纪律）。
+/// 措辞配置的定义 —— **定义由配置的拥有者产出**（与 `classify` / `session` 同一条纪律）。
 ///
 /// 两个可空字段没有"默认值"可写——它们的缺省就是**留空**，故给 `placeholder` 说明
 /// 留空意味着什么，而不是编一个看起来像默认值的字面量。

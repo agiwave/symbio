@@ -10,7 +10,7 @@
 //!   步骤2 gate_turn            ← 启动条件 + 退出条件（唯一判定点）
 //!   步骤2b decide_turn         ← 轮首判决（唯一判决点）
 //!   步骤2c apply_verdict       ← 判决的执行点：措辞 + 落点（`Answered` 在此收尾）
-//!   步骤2d report_if_due       ← 轮边界汇报判定（触发权在编排层，措辞权在 reply）
+//!   步骤2d report_if_due       ← 轮边界汇报判定（触发权在编排层，措辞权在 compose）
 //!   步骤3 prepare_turn_inputs  ← 提示词 + 工具 + 压缩 + 请求视图（唯一收集点）
 //!   步骤4 execute_turn         ← LLM 调用
 //!   步骤5 settle_reasoning     ← 推理产物并入上下文（定稿内容子节点）
@@ -22,9 +22,9 @@
 //!
 //! 子模块分工：
 //! - [`state`]    会话上下文 / 请求快照 / 单轮状态 / 闸门结果 / 退出原因 / 编排器
-//! - [`decide`]   轮首判决：经容器 `route` 调 `triage/decide`，把判决回读成枚举
-//! - [`compose`]  判决的执行点：经容器 `route` 调 `reply/compose`，把措辞写进转写
-//! - [`progress`] 中途汇报：轮边界的「该不该说一句」判定（触发权归编排层，措辞权归 `reply`）
+//! - [`decide`]   轮首判决：经容器 `route` 调 `classify/decide`，把判决回读成枚举
+//! - [`compose`]  判决的执行点：经容器 `route` 调 `compose/compose`，把措辞写进转写
+//! - [`progress`] 中途汇报：轮边界的「该不该说一句」判定（触发权归编排层，措辞权归 `compose`）
 //! - [`inputs`]   收口 ②③：提示词与工具的唯一收集点、压缩的唯一响应点
 //! - [`turn`]     单轮收尾：推理并入 → 工具分发 → 落库 → 流向
 //! - [`io`]       副作用出口：落库 / 广播 / 流式占位 / 开会话 / 生命周期钩子
@@ -243,7 +243,7 @@ pub async fn run_chat_loop(
         //
         // ## 它判什么
         //
-        // 「这一轮该直接回答、还是派给工具循环」。`triage` 只输出**枚举**
+        // 「这一轮该直接回答、还是派给工具循环」。`classify` 只输出**枚举**
         // （`Verdict`），本循环负责**执行**它——判决与措辞分开，执行权归编排层。
         //
         // ## 为什么在 `gate_turn` 之后
@@ -261,15 +261,15 @@ pub async fn run_chat_loop(
         //
         // ## 判决与执行分成两步（`decide` → `compose`）
         //
-        // 步骤 2b 只拿**枚举**（`triage` 不说人话），步骤 2c 才把枚举翻成文本
-        // （`reply` 不做判决）。分开的理由见 `schemas/dialog.rs` 的模块文档：
+        // 步骤 2b 只拿**枚举**（`classify` 不说人话），步骤 2c 才把枚举翻成文本
+        // （`compose` 不做判决）。分开的理由见 `schemas/dialog.rs` 的模块文档：
         // 编排层要能**执行**判决，而措辞只被展示——把两者揉进一次调用，等于让
         // "这轮走哪条路"取决于一段文本长什么样。
         //
         // ## `Answered` 什么时候收尾
         //
         // 只有 `apply_verdict` 返回 `true` 才收尾——即"判决说能直接答，**且**答话
-        // 真的写出来了"。措辞拿不到时（未挂载 `reply` / `reply_enabled = false`）
+        // 真的写出来了"。措辞拿不到时（未挂载 `compose` / `compose_enabled = false`）
         // 它返回 `false`，本轮**照旧进工具循环**：沉默是最坏的失败形态（用户什么
         // 都收不到，且没有任何错误信号），降级进工具循环则退化成"引入判决之前的
         // 行为"——慢一点，但有答案。判据与兜底方向见 `chat_loop/compose.rs`。
@@ -277,9 +277,9 @@ pub async fn run_chat_loop(
         // `Escalate` / `Report` 恒不收尾：前者本来就要干活（首响只是开场白），
         // 后者只是"中途说一句"（它的触发点在步骤 2d，不在轮首）。
         //
-        // 卸载 `triage`（或 `triage_enabled = false`）时这段整体不发生，
+        // 卸载 `classify`（或 `classify_enabled = false`）时这段整体不发生，
         // 行为与引入判决之前逐字一致。
-        if turn.tool_rounds == 0 && orchestrator.triage_enabled {
+        if turn.tool_rounds == 0 && orchestrator.classify_enabled {
             if let Some(utterance) = first_utterance.as_deref() {
                 // 先落成变量再进 `if let`：`decide_turn` 借的是 `&context`，而
                 // `apply_verdict` 要 `&mut context`——把两次借用放进同一个表达式
@@ -305,7 +305,7 @@ pub async fn run_chat_loop(
                     if effect == VerdictEffect::Finish {
                         plugin_info!(
                             "session",
-                            "[Triage] 本轮不进工具循环（verdict={verdict:?}）"
+                            "[Classify] 本轮不进工具循环（verdict={verdict:?}）"
                         );
                         return finish_turn(
                             orchestrator,
@@ -391,8 +391,8 @@ pub async fn run_chat_loop(
         //
         // ## 为什么判定失败什么都不做
         //
-        // 拿不到措辞（未挂载 `reply` / 措辞为空）时**不消耗配额**，下一个轮边界再试
-        // ——与 `Answered` 的降级同一条方向：降级而不失效。卸载 `reply`（或
+        // 拿不到措辞（未挂载 `compose` / 措辞为空）时**不消耗配额**，下一个轮边界再试
+        // ——与 `Answered` 的降级同一条方向：降级而不失效。卸载 `compose`（或
         // `progress_enabled = false`）时这里恒不产出，行为与引入汇报之前逐字一致。
         report_if_due(orchestrator, &ctx, &mut context, &mut turn).await;
 

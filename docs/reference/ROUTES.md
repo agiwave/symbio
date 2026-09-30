@@ -133,29 +133,29 @@
 
 ---
 
-## Triage 插件（对话面：判决）
+## Classify 插件（对话面：判决）
 
 「这一轮该直接回答、还是派给工具循环」——只输出**枚举**，不产出面向用户的文本。
 
 | 路径 | 用途 | 返回类型 |
 |------|------|----------|
-| `triage/decide` | 判决一轮的走向（能直接答 / 需干活 / 该汇报） | `Verdict` |
+| `classify/decide` | 判决一轮的走向（能直接答 / 需干活 / 该汇报） | `Verdict` |
 
 > 调用方只有 `session`（编排层）：它投影事实、发起调用，并按判决**执行**对应路径。
 > 契约 `DecideRequest` / `Verdict` 见 [`symbio_core::schemas::dialog`](../../symbio/src/symbio_core/schemas/dialog.rs)。
 > 不挂载本插件 ⇒ 路由 `NotFound` ⇒ 全部输入直接进工具循环（卸载平凡值）。
 > 两条产线（规则短路 0 次 LLM / 快速档 1 次静默 LLM）见
-> [triage 插件的 README](../../symbio/src/plugins/triage/README.md)。
+> [classify 插件的 README](../../symbio/src/plugins/classify/README.md)。
 
 ---
 
-## Reply 插件（对话面：措辞）
+## Compose 插件（对话面：措辞）
 
 「首响 / 答话 / 汇报」的措辞——只输出**文本**，不做判决。
 
 | 路径 | 用途 | 返回类型 |
 |------|------|----------|
-| `reply/compose` | 按上游判决组织一段面向用户的文本 | `String` |
+| `compose/wording` | 按上游判决组织一段面向用户的文本 | `String` |
 
 > 调用方只有 `session`。本插件**不写转写**：文本由 `session` 落库，转写只有一个写入者。
 > 契约 `ComposeRequest` 见 [`symbio_core::schemas::dialog`](../../symbio/src/symbio_core/schemas/dialog.rs)；
@@ -166,8 +166,8 @@
 > **降级进工具循环**（不沉默），`Escalate` 没有首响，`Report` 只是"这次没说"且不消耗
 > 汇报配额（卸载平凡值）。
 > 三条产线（模板 0 次 LLM / `from_context` 生成 1 次静默 LLM / `Report` 填表 0 次 LLM）见
-> [reply 插件的 README](../../symbio/src/plugins/reply/README.md)。
-> 调用方开关 `SessionConfig::reply_enabled`（`<session 目录>/PLUGIN.yml`）；
+> [compose 插件的 README](../../symbio/src/plugins/compose/README.md)。
+> 调用方开关 `SessionConfig::compose_enabled`（`<session 目录>/PLUGIN.yml`）；
 > `Report` 的**触发**另归 `SessionConfig::progress_enabled` 等四个旋钮（见
 > [`chat_loop/progress.rs`](../../symbio/src/plugins/session/chat_loop/progress.rs)）——
 > 措辞与触发是两件事，各有各的开关。

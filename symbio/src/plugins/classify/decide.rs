@@ -33,10 +33,10 @@ use crate::symbio_core::{
     PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_VISITOR,
 };
 
-use super::config::TriageConfig;
+use super::config::ClassifyConfig;
 use super::reasons::{REASON_CLARIFY, REASON_FROM_CONTEXT, REASON_NEEDS_WORK, REASON_REFUSE};
 
-/// 分类器的系统提示词（**内置那份**，可被 `TriageConfig::system_prompt` 覆盖）。
+/// 分类器的系统提示词（**内置那份**，可被 `ClassifyConfig::system_prompt` 覆盖）。
 ///
 /// 它必须**只输出一个词**——本模块的解析（[`parse_verdict`]）建立在这一点上。
 /// 让模型输出 JSON 或一句话再解析，等于把「这轮走哪条路」变成一次不可靠的字符串
@@ -115,11 +115,11 @@ fn normalize_word(raw: &str) -> String {
 ///
 /// 返回 `None` = 判不出来（没有可用的模型服务 / 请求失败 / 响应不可解析）——
 /// 调用方据此落 `Escalate`（见模块文档的失败方向说明）。
-pub(crate) async fn classify(
+pub(crate) async fn decide(
     ctx: &Arc<dyn PluginInvokeRequest>,
     utterance: &str,
     context: &[ChatMessage],
-    config: &TriageConfig,
+    config: &ClassifyConfig,
 ) -> Option<Verdict> {
     // 模型服务从**调用方带来的能力访问器**里取。优先本插件配置的那个 provider id
     // （model 插件在 traverse 广播里把**全部已启用**的 provider 一并交来），
@@ -131,8 +131,8 @@ pub(crate) async fn classify(
     // 选了哪个模型记一笔：配置的 id 写错时**没有错误信号**（行为是"用会话的模型"，
     // 一切照常），这行日志是唯一的线索。
     crate::plugin_debug!(
-        "triage",
-        "[Triage] 分类使用模型 '{}'（配置 model={:?}）",
+        "classify",
+        "[Classify] 分类使用模型 '{}'（配置 model={:?}）",
         provider.provider_id(),
         config.model_id()
     );
@@ -153,8 +153,8 @@ pub(crate) async fn classify(
             // 分类失败**不是**本轮的失败：它只让判决退回 `Escalate`（= 今天的行为）。
             // 因此这里 warn 而不 error——把它报成错误会让一次限流看起来像会话故障。
             crate::plugin_warn!(
-                "triage",
-                "[Triage] 快速档分类请求失败，按 Escalate 处理：{e}"
+                "classify",
+                "[Classify] 快速档分类请求失败，按 Escalate 处理：{e}"
             );
             None
         }
@@ -198,5 +198,5 @@ fn text_of(m: &ChatMessage) -> String {
 }
 
 #[cfg(test)]
-#[path = "classify.test.rs"]
+#[path = "decide.test.rs"]
 mod tests;

@@ -1,20 +1,20 @@
-# Triage 插件（对话面：判决）
+# Classify 插件（对话面：判决）
 
 「这一轮该直接回答、还是派给工具循环」——**只输出枚举，不产出面向用户的文本**。
 
-措辞归 [`../reply/README.md`](../reply/README.md)。判决与措辞分开的理由不是「拆得越细越好」，
+措辞归 [`../compose/README.md`](../compose/README.md)。判决与措辞分开的理由不是「拆得越细越好」，
 而是编排层要能**执行**判决（收尾 / 进工具循环 / 只说一句）——执行一段自由文本只能靠字符串匹配。
 
 ## 路由
 
-清单见 [`docs/reference/ROUTES.md`](../../../../docs/reference/ROUTES.md) §Triage 插件（**权威**）：
-`triage/decide`。
+清单见 [`docs/reference/ROUTES.md`](../../../../docs/reference/ROUTES.md) §Classify 插件（**权威**）：
+`classify/decide`。
 
 ## 契约
 
 入参 `DecideRequest`、出参 `Verdict`，都在
 [`symbio_core::schemas::dialog`](../../symbio_core/schemas/dialog.rs) ——
-契约跨插件（`session` 生产，本插件与 `reply` 消费），故落在 core（ADR-023）。
+契约跨插件（`session` 生产，本插件与 `compose` 消费），故落在 core（ADR-023）。
 
 `Verdict` 是**闭集枚举**（`Answered` / `Escalate` / `Report`），不是自由文本；
 其中的 `reason` 是**理由码**（数据），新增一类理由只加一行码表，不动 core。
@@ -36,7 +36,7 @@ decide(utterance)
 | 产线 | 文件 | 判据 |
 |---|---|---|
 | 反射档规则表 | [`rules.rs`](rules.rs) | **归一化后逐字全等**——包含匹配会把「你好，帮我读一下 README」判成问候，从而**静默吞掉真实请求** |
-| 快速档分类 | [`classify.rs`](classify.rs) | 四选一（`direct` / `clarify` / `refuse` / `work`），出口 `ExecEventSink::silent()` |
+| 快速档分类 | [`decide.rs`](decide.rs) | 四选一（`direct` / `clarify` / `refuse` / `work`），出口 `ExecEventSink::silent()` |
 
 **顺序是判据的一部分**：先规则、后分类。反过来，规则短路省下的那次往返会被分类请求吃掉。
 
@@ -52,7 +52,7 @@ decide(utterance)
 | `system_prompt` | 缺席 | **缺席** | 用内置 `SYSTEM_PROMPT` |
 
 配置归本插件而不是 `session`：它们是**本插件的内部策略**，调用方不该知道判决内部有没有规则表、
-用的是哪个模型（`session` 侧只留「要不要请判决」的 `triage_enabled`）。
+用的是哪个模型（`session` 侧只留「要不要请判决」的 `classify_enabled`）。
 
 **`model` 填的是 provider 条目的 id**（`<根>/model/<id>/`），不是模型名——**温度是条目的参数**
 （`provider.json`），所以换一个条目就是换温度；本插件**不需要也不该**再加一个 `temperature` 键
@@ -76,6 +76,6 @@ decide(utterance)
 
 ## 关联
 
-- 措辞：`../reply/README.md`
+- 措辞：`../compose/README.md`
 - 切分依据（为什么是两个插件）：`docs/plan/09-对话面插件拆分实施方案.md`
 - 地址规则：`docs/design/plugin-route-address.md`

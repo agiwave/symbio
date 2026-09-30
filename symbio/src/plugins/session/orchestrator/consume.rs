@@ -235,13 +235,13 @@ impl SessionPlugin {
         let abort = ExecAbortSignal::new();
         let mut abort_guard = AbortGuard::register(state.clone(), abort.clone()).await;
 
-        // 轮首判决的开关（`SessionConfig::triage_enabled`）。取**值快照**而不是把插件
+        // 轮首判决的开关（`SessionConfig::classify_enabled`）。取**值快照**而不是把插件
         // 交给编排器：配置在一次请求生命周期内不变，判决只需要一个布尔
-        // （见 `ChatOrchestrator::triage_enabled` 的说明）。锁不跨 await——先取值再放锁。
-        let triage_enabled = self.config.read().await.triage_enabled;
-        // 对话面措辞的开关（`SessionConfig::reply_enabled`），同一条取值纪律。
+        // （见 `ChatOrchestrator::classify_enabled` 的说明）。锁不跨 await——先取值再放锁。
+        let classify_enabled = self.config.read().await.classify_enabled;
+        // 对话面措辞的开关（`SessionConfig::compose_enabled`），同一条取值纪律。
         // 两级开关相互独立：判决决定"要不要干活"，措辞决定"说什么"。
-        let reply_enabled = self.config.read().await.reply_enabled;
+        let compose_enabled = self.config.read().await.compose_enabled;
         // 中途汇报的策略（`SessionConfig` 的四个旋钮），同一条取值纪律：一次锁、
         // 一次映射。四个数合成一个结构体，因为它们是**同一个判定**的四个参数
         // （见 `ProgressPolicy::due`）——平铺成四个字段会让"谁和谁是一组"只能靠命名猜。
@@ -267,8 +267,8 @@ impl SessionPlugin {
             stop: stop.clone(),
             compression: phase,
             supplements: drain,
-            triage_enabled,
-            reply_enabled,
+            classify_enabled,
+            compose_enabled,
             progress,
             // 会话目录 = **本插件自己的目录**（装配期由父插件经 `PLUGIN_DIR` 告知），
             // 不是任何全局系统根——子智能体下它指向子树，这正是作用域正确性的来源。

@@ -1,4 +1,4 @@
-//! Reply 插件自己的配置（`<本插件目录>/PLUGIN.yml`）。
+//! Compose 插件自己的配置（`<本插件目录>/PLUGIN.yml`）。
 //!
 //! ## 为什么本插件现在有配置了（S3 时没有）
 //!
@@ -11,7 +11,7 @@
 //! - **指令段怎么写**：它直接决定答话像不像"这个助手本人"，而调它不该需要改代码
 //!   重编译。
 //!
-//! 「要不要用 `reply`」仍然**不在这里**——那归调用方（`SessionConfig::reply_enabled`）。
+//! 「要不要用 `compose`」仍然**不在这里**——那归调用方（`SessionConfig::reply_enabled`）。
 //! 判据见 `docs/plan/06-会话响应性落地.md` §4.2：插件目录 = 配置目录，各管各的旋钮。
 //!
 //! ## 两个键各自的平凡值
@@ -23,9 +23,9 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Reply 配置 —— 本插件的旋钮（字段真源）
+/// Compose 配置 —— 本插件的旋钮（字段真源）
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ReplyConfig {
+pub struct ComposeConfig {
     /// 措辞用的 **provider id**（`<根>/model/<id>`）。
     ///
     /// 缺席 / 空串 ⇒ 用会话选定的那一个（平凡值）。配置的 id 取不到时同样落回它
@@ -45,7 +45,7 @@ pub struct ReplyConfig {
     pub instruction: Option<String>,
 }
 
-impl ReplyConfig {
+impl ComposeConfig {
     /// 生效的模型 id。**空串与缺席同义**——设置页把输入框清空得到的是 `""`，
     /// 不是"删掉这个键"。
     pub fn model_id(&self) -> Option<&str> {
