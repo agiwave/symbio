@@ -83,7 +83,7 @@
 消息是 `<根>/session/<id>/message` 目录里的**文件**，流式输出 = 该文件内容的
 **增长**（`updated` + `delta`）；会话运行态是会话节点 `<根>/session/<id>` 的
 `status`（`updated`，无 `delta` ⇒ 回读）。判据与推导见
-[ADR-025](../DECISIONS.md#adr-025-顺序是节点属性delta-是updated的传输形态)
+[ADR-025](../decisions/session.md#adr-025-顺序是节点属性delta-是updated的传输形态)
 与 `symbio/src/plugins/session/docs/node-state-streaming.md`。
 
 ---

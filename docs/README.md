@@ -44,7 +44,7 @@ D-006 是 D-001 的盲区补丁：D-001 只认 Markdown 链接语法（方括号
 | 协议线上形状（帧 / 载荷 / 通道 / 线格式） | [architecture/PROTOCOLS.md](./architecture/PROTOCOLS.md) | — |
 | 系统拓扑（谁挂在谁下面） | [SYSTEM_MAP.md](./SYSTEM_MAP.md) | 其它图只画自己那一层 |
 | 排障链路（一次请求经过哪些代码） | [architecture/DATA_FLOW.md](./architecture/DATA_FLOW.md) | — |
-| 为什么这样设计（含被否决的方案与理由） | [DECISIONS.md](./DECISIONS.md) | 其它文档只引用 ADR 编号 |
+| 为什么这样设计（含被否决的方案与理由） | [DECISIONS.md](./DECISIONS.md)（**索引**）+ `decisions/*.md`（**分域正文**） | 其它文档只引用 ADR 编号 |
 | 模块内部机制 | 该模块 `README.md` | 系统级文档不复述 |
 | 模块深度设计与不变量 | 该模块 `docs/` | — |
 | **目标架构（v2）与迁移计划** | [plan/README.md](./plan/README.md) | 其余文档只引用，不复述取舍 |
@@ -78,7 +78,7 @@ D-006 是 D-001 的盲区补丁：D-001 只认 Markdown 链接语法（方括号
 | 快速上手 | [QUICK_START.md](./guides/QUICK_START.md) |
 | 开发新插件 | [PLUGIN_DEVELOPMENT.md](./guides/PLUGIN_DEVELOPMENT.md) |
 | 排查问题 | [TROUBLESHOOTING.md](./guides/TROUBLESHOOTING.md) |
-| 了解设计决策 | [DECISIONS.md](./DECISIONS.md) |
+| 了解设计决策 | [DECISIONS.md](./DECISIONS.md)（索引；正文按域在 `decisions/`） |
 | 了解**目标架构（v2）**与分步迁移计划 | [plan/README.md](./plan/README.md)（**先读其 §0.1：v2 是本仓的目标架构**） |
 | 查「某条约定写在哪」 | `node scripts/doc-find.mjs <词>`（全仓 md + Rust 文档注释检索） |
 | 看某个插件/前端的职责与机制 | 各模块 `README.md`（见下方模块文档地图） |
@@ -90,6 +90,7 @@ D-006 是 D-001 的盲区补丁：D-001 只认 Markdown 链接语法（方括号
 | 位置 | 放什么 |
 |------|--------|
 | `docs/`（本目录） | 系统级跨模块文档；`CURRENT.md` 自动生成、勿手改 |
+| `docs/decisions/` | **ADR 正文分册**（按域拆）——索引与域分配规则在 [DECISIONS.md](./DECISIONS.md) |
 | `docs/architecture/` | 架构总览 / 协议形状 / 排障链路 |
 | `docs/reference/` | 路由 / 错误码 / 配置的权威参考页 |
 | `docs/guides/` | 上手 / 插件开发 / 排障 |

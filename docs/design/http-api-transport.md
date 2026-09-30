@@ -176,7 +176,7 @@ WS /api/v1/ws?token=<token>
 > ① 早期版本让第三方订阅 `kind = "vdfs"` 看流式（消息与运行态都寄生在资源变更频道上）；
 > ② 2026-09-21 起改走 `session/stream` 转写流，本节随之改写为「另开一条连接订阅
 > `session/stream`」；
-> ③ 2026-09-23（[ADR-025](../DECISIONS.md#adr-025-顺序是节点属性delta-是updated的传输形态)）
+> ③ 2026-09-23（[ADR-025](../decisions/session.md#adr-025-顺序是节点属性delta-是updated的传输形态)）
 > 判定 ② 的两条理由**把「数据的属性」当成了「传输的属性」**——顺序是**节点属性**
 > （`ChatMessage.seq`），「追加」不是新取值而是 `updated` 上的 `delta` 字段——实时面
 > **迁回** `vdfs/watch`，本节再次改写。② 那一版（「订阅 `session/stream`」）已随

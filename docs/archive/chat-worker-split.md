@@ -1,13 +1,20 @@
 <!-- doc-link-allow D-006: 本文是实施前设计，正文引用的 `plugins/chat/*`、`schemas/chat/*` 等路径尚未创建；路径以「拟新增」标注 -->
 # 会话响应性改造：编排（worker）× 对话面（chat）
 
-> **文档类型：设计** ｜ **状态：提案（未落地）**
+> **【归档说明】** 本文档是**对话面拆分的实施前设计稿（过程产物）**。它描述的形状是
+> `chat` 插件 + `chat/reply` 子模块，该形状**从未实现**——方案经
+> [plan/06–09](../plan/README.md) 收敛为 `triage`（判决）× `reply`（措辞）两个能力插件，
+> **已全部落地**（批次 S0–S6，见 [09 §5](../plan/09-对话面插件拆分实施方案.md)）。
+> 已于 2026-09-29 移入 `docs/archive/`；其中的 ADR 草案已迁为
+> [ADR-041](../decisions/session.md#adr-041-会话的响应性由编排层调度--无副作用对话服务承担)
+> 与 [ADR-042](../decisions/core.md#adr-042-跨插件调用一律经容器-route--路径常量不持有对方类型)。
+> 目标架构与迁移计划见 [plan/README.md](../plan/README.md)，「现在是什么」见
+> [CURRENT.md](../CURRENT.md)。本文不再更新。
 >
 > 前置阅读：[session/docs/core-loop.md](../../symbio/src/plugins/session/docs/core-loop.md)（主循环）、
 > [session/docs/node-state-streaming.md](../../symbio/src/plugins/session/docs/node-state-streaming.md)（实时面）、
 > [session/transcript/inbox.rs](../../symbio/src/plugins/session/transcript/inbox.rs)（输入入口）、
 > [model/message_builder.rs](../../symbio/src/plugins/model/message_builder.rs)（请求视图投影）。
-> 「现在是什么」以 [CURRENT.md](../CURRENT.md) 为准；新增决策在 §12 以 ADR 草案给出。
 
 ---
 
@@ -485,7 +492,7 @@ let out: ReplyOutcome = parent.clone().route(c).await?.payload()?;   // parent =
 ```
 
 调用方**不 `use` 被调方任何符号**：session 只写路径常量，chat 只实现 `Plugin`、
-不知道谁在调它。`agent_run` 调 `session/chat/send` 已经是这个形态——本方案把它写成明文规则（§12 ADR-042）。
+不知道谁在调它。`agent_run` 调 `session/chat/send` 已经是这个形态——本方案把它写成明文规则（[ADR-042](../decisions/core.md#adr-042-跨插件调用一律经容器-route--路径常量不持有对方类型)）。
 
 ### 7.3 chat 怎么拿到 `ModelProvider` 与记忆
 
@@ -622,48 +629,3 @@ P1 与 P2 是**必须做对**的两批（对应目标 1 与目标 2）；P3 是*
 | 把 `chat` 暴露成 LLM 工具 | 模型本来就会产出面向用户的正文且那条路是流式的，做成工具等于同一件事两条路 |
 | 把 `session` 改名 `worker` | 插件名 = 地址（挂载点 / 路由前缀 / 配置目录）；且 `worker` 已被 composite 容器占用。角色名写进 `PLUGIN.yml` 的 `plugin_title` |
 | 让 chat 决定"要不要干活" | 它无工具、无执行上下文；决策权归有工具、有历史的编排层 |
-
----
-
-## 13. 拟新增 ADR（草案）
-
-> 落地时迁入 [DECISIONS.md](../DECISIONS.md)，本节随之删除。
-
-### ADR-041：会话的响应性由编排层调度 + 无副作用对话服务承担
-
-**决策**：
-1. 新增 `chat` 插件，**无工具、无副作用、无状态**：`chat/reply` 输入
-   「用户输入 + 已投影上下文 + 运行现状快照 + intent」，输出 `Answered` / `Escalate` / `Report`。
-2. `session` 保留唯一编排者与唯一转写写入者；它在三个调用点（轮首 triage / 轮边界 triage /
-   进度 tick）调 chat，并写回返回文本。
-3. **收件箱是输入缓冲**：抽干整队、合并成一条用户消息、在轮边界折进当前轮。
-4. **异常一律 `Escalate`**（fail-safe 方向是多干一次活）。
-5. **会话只有一份存储、两条线**：对话线（用户 ↔ 助手）与工作线（worker ↔ 任务）是同一份
-   存储的两个**读法**，各有自己的窗口；不新增存储，也不为 chat 另建上下文收集通道——
-   "我知道什么"走 `register_system_prompt`（与 worker 同一通道），
-   "现在在发生什么 / 我们聊过什么"由 session 在调用那一刻投影进 `ctx`。
-6. **分界规则是单点纯函数**（`conversation_view`）：三处共用（chat 上下文 / 前端对话面板 /
-   工作线请求视图）；chat 的请求视图里**不得出现** `tool_call` / `role = tool` / Turn / 推理节点，
-   由投影保证而非提示词保证。
-7. **两条线在呈现上严格分开**：工具 / 推理节点不进对话面板。今天把工具卡片插进对话列表
-   是既有混乱的来源，本次一并改。
-
-**理由**：三条目标（直接回答 / 补充整体整合 / 中途汇报）都指向"何时说人话"没有被显式调度，
-而不是缺少决策者；把 chat 设计成无副作用服务，则只需**一条单向边**，
-写入者、`seq` 分配、终态收敛的单点保证全部不动。
-两条线若各存一份，**一条助手消息会被劈成两半**（正文进对话流、工具调用进工作流），
-请求视图必须再拼回一条——混乱没有消失，只是从呈现层搬到数据层，并新增 join 的正确性负担。
-
-**后果与不变量**：见 §8.1 十五条。关闭 chat 后行为与改造前逐字一致。
-
-### ADR-042：跨插件调用一律经容器 `route` + 路径常量，不持有对方类型
-
-**决策**：插件 A 调用插件 B 的唯一合法形态是 `parent.route(ctx.set(PATH, ROUTE_X))`
-（`parent` 是容器弱引用）。调用方**不得** `use` 被调方的任何符号；
-`ctx` 里的载荷类型必须住在 `symbio_core`。
-
-**理由**：`agent_run` → `session/chat/send` 已经是这个形态，但它是惯例而非规则。
-本方案新增一条边，若不把规则写下来，下一次就会有人直接持有 `Arc<ChatPlugin>`。
-
-**后果**：跨插件载荷类型自动获得 core 准入资格（依赖方 ≥ 2）；
-`route` 常量进 `symbio_core::plugin::route`，由既有审计核对常量名 ↔ 值。

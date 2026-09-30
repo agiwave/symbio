@@ -11,7 +11,7 @@
 - 代码规模、Tauri 命令面、CLI 选项与命令 → §5
 
 改完代码重跑生成脚本（CI 用 `--check` 防漂移）。「为什么这样设计」看
-`docs/DECISIONS.md`，不要塞进 CURRENT.md。
+`docs/DECISIONS.md`（索引）+ `docs/decisions/*.md`（正文分册），不要塞进 CURRENT.md。
 
 ## 目标架构（v2）：是目标，不是"别人的设计"
 
@@ -32,7 +32,8 @@
 [`docs/README.md`](docs/README.md#文档职责边界一个事实只有一个-owner)）：
 
 - 结构事实 → `CURRENT.md`（自动生成，不手改）
-- 「为什么这样设计」→ `DECISIONS.md`（只增 ADR，不在别处复述）
+- 「为什么这样设计」→ `DECISIONS.md`（**索引**）+ `decisions/*.md`（**按域分的正文分册**，
+  域分配规则见其 §0.1）；新增一条 ADR 只动它自己那一册 + 索引一行，不在别处复述
 - 路由 / 错误码 / 配置 → 各自的 `ROUTES.md` / `ERROR_CODES.md` / `CONFIGURATION.md`
 - 模块机制 → 该模块 `README.md`
 - **现行文档不写变更史**（「曾经…已改为…」）——那是 `git log` 与 ADR 的事
