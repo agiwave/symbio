@@ -96,7 +96,7 @@
 |---|---|---|---|---|
 | `assembly` | — | `ASSEMBLY_` | — | 本域只有两个常量 |
 | `adapters` | 契约词 `LatencyTier` · `RuleOnly` · `ClassifyOnly` · `FullModel` · `CanClassify` · `CanGenerate` · `TokenIssuer` · `LlmAdapter` · `AdapterError` · `StubLlmAdapter` | — | — | 全部是 [plan/05 §3.3](../../../docs/plan/05-模块架构.md) 注入策略与 [plan/01 §10](../../../docs/plan/01-核心架构.md) 四层时延表的冻结契约名（出处 [`verify/latency_gate.rs`](../../../docs/plan/verify/latency_gate.rs)），名字先于模块存在——判据同 `schemas` |
-| `actors` | `Actor*`（`ActorSpec`）；契约词 `Pattern` · `Scope` · `Decider`（含 `DeciderMiss`）· `Reasoner` · `RecallTranslator` · `CommitmentKeeper` | — | — | [plan/01 §4](../../../docs/plan/01-核心架构.md) 的冻结契约名（名字先于模块存在，判据同 `schemas`）；`Decider` 是 [plan/05 §4](../../../docs/plan/05-模块架构.md) S8 反射档判定者，S1 先以规则应答形态落地 |
+| `actors` | `Actor*`（`ActorSpec`）；契约词 `Pattern` · `Scope` · `Decider`（含 `DeciderMiss`）· `Reasoner` · `RecallTranslator` · `CommitmentKeeper` · `PreemptionDecider`（含 `Preemption`）· `CircuitBreaker`（含 `GateDecision`） | — | — | [plan/01 §4](../../../docs/plan/01-核心架构.md) 的冻结契约名（名字先于模块存在，判据同 `schemas`）；`Decider` 是 [plan/05 §4](../../../docs/plan/05-模块架构.md) S8 反射档判定者，S1 先以规则应答形态落地 |
 | `capability` | `Capability`；子命名空间 `Configurable*` · `Option*` · `Tool*` | — | `capability_` | 无常量；三个子命名空间各有对应文件 |
 | `clock` | — | — | `clock_` | 只有一个函数 |
 | `creator` | — | — | `creator_` | 通用对象创建注册表：按 id 装配**任意**类型对象，见 §2 |
@@ -110,7 +110,7 @@
 | `llm` | 子命名空间 `Model*` · `Turn*` | — | `llm_` | 对应 `model_provider.rs` / `turn.rs` |
 | `logger` | — | `LOG_`（登记缩写） | `logger_` | 常量用登记缩写，函数用全名——两者不混 |
 | `plugin` | `Plugin` | `PLUGIN_`；子命名空间 `ROUTE_*` · `TRAVERSE_*` | `plugin_` | `PLUGIN_` 下细分：`PLUGIN_ID_*`（工厂 id）· `PLUGIN_KEY_*`（清单键）· `PLUGIN_FILE` · `PLUGIN_PAYLOAD_KEY` |
-| `projection` | `Projection`；契约词 `TurnState` · `CheckpointState` · `ConsolidateParams` · `Rejection` · `Reputation*`（`ReputationEntry` / `ReputationView`）· `Ready*`（`ReadySetView` / `ReadyTask`） | — | `consolidate_` · `reputation` · `plain_score` · `readyset` | 纯函数视图（F2）：形参只有 `&[Event]` / `Timestamp` / `Budget`，返回 `View` 而非 `Result`。`TurnState` 是 [plan/01 §8](../../../docs/plan/01-核心架构.md) `projection = turnstate` 的产出视图名。见 [ADR-043](../../../docs/DECISIONS.md) |
+| `projection` | `Projection`；契约词 `TurnState` · `CheckpointState` · `ConsolidateParams` · `Rejection` · `Reputation*`（`ReputationEntry` / `ReputationView`）· `Ready*`（`ReadySetView` / `ReadyTask`）· `Cost*`（`CostLedgerView` / `CostEntry`） | — | `consolidate_` · `reputation` · `plain_score` · `readyset` · `cost_` | 纯函数视图（F2）：形参只有 `&[Event]` / `Timestamp` / `Budget`，返回 `View` 而非 `Result`。`TurnState` 是 [plan/01 §8](../../../docs/plan/01-核心架构.md) `projection = turnstate` 的产出视图名。见 [ADR-043](../../../docs/DECISIONS.md) |
 | `schemas` | 协议词 | 协议词 | 协议词 | 命名空间就是协议本身，见 §3 |
 | `store` | `Store` / `MemoryStore` / `EventStore` / `WalStore` / `EventWalStore`；契约词 `AppendError` | — | — | `Store` trait 冻结（F1）：append / range / head，无 update/delete；`EventStore` 是装 `Event` 信封的便捷别名；`AppendError` 是 [plan/01 §2](../../../docs/plan/01-核心架构.md) 冻结签名的一部分 |
 | `text` | — | — | `text_` | 只有两个纯函数 |

@@ -326,7 +326,14 @@ export const BASELINE = {
   //      ③ readyset 投影（纯函数就绪集，N1 双跑一致）；C14 acyclic_deps（Kahn +
   //      悬空）；C15 SelfVerifier 构造期拒绝；rework_bounded（终止性前提 2）。
   //      S03 §6 验收 1–4 全落地。
-  rustTests: 1166,
+  // 1175（S8，2026-09-30）：**时延与插话**——`1166 → 1175`，**+9**。
+  //      事件格子 control.opened（打断与熔断共用一格，载荷 reason 区分）；
+  //      ② PreemptionDecider（80ms 反射档：Proceed/Suspend/Queue + 超时默认继续）
+  //      + CircuitBreaker（Refuse 零事件 / Break 必须落事件 / Allow）；
+  //      ③ readyset 补挂起排除（held 不进就绪集——二次调度 0）与 cost_ledger
+  //      投影（熔断判据来源，N1 双跑一致）；governance 高风险组合
+  //      （ProduceArtifact+AssertVerification）构造期拒绝。S07/S09 §6 验收落地。
+  rustTests: 1175,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

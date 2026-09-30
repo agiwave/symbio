@@ -146,7 +146,10 @@ for (const f of backendFiles) {
 
   // 1) use 语句（含花括号组展开）
   if (!isSchemasMod) {
-    const useRe = /(?:pub\s+)?use\s+([^;]+);/g;
+    // `\b` 是必须的（2026-09-30 实测事故）：没有词边界时，`GateDecision::Refuse => {`
+    // 里 "Refuse" 的 "use" 子串会被误当成 use 语句，花括号展开（expandUse）在
+    // match 块上无限递归直接栈爆。use 关键字前面必然是行首 / 空白（= 词边界）。
+    const useRe = /\b(?:pub\s+)?use\s+([^;]+);/g;
     let um;
     while ((um = useRe.exec(src))) {
       for (const full of expandUse(um[1])) {

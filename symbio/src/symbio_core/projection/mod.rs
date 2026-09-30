@@ -49,6 +49,7 @@ impl<V: 'static> Projection<V> {
 
 pub mod checkpoint;
 pub mod consolidate;
+pub mod cost;
 pub mod readyset;
 pub mod recall;
 pub mod reputation;

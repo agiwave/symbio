@@ -1155,3 +1155,310 @@ fn n_step_chain_terminates_within_rework_bound() {
         check_all(&snapshot)
     );
 }
+
+// ── S8 彩排（[plan/04 §3](../../../../docs/plan/04-工程落地.md) 第 19–20 步）：时延与插话 ──
+//
+// 19 抢占判定者（80ms 反射档）+ 挂起/恢复（出口判据「二次调度 0」，roadmap/S07）；
+// 20 熔断（外部执行闸门，出口判据「熔断后仍执行 0」，roadmap/S09）。
+
+use crate::symbio_core::event::EVENT_CONTROL_OPENED;
+use crate::symbio_core::projection::cost::cost_ledger;
+
+/// 造一个在跑任务（供插话/熔断场景使用）。
+fn running_task(store: &EventStore, id: &str) {
+    open_task(store, id, &[], "agent:main");
+}
+
+/// S07 §6 验收 1：注入打断事件 → 80ms 内必须产出处置（Suspend ⇒ task.controlled 落库）。
+#[test]
+fn interruption_within_reflex_budget_produces_control_event() {
+    let store = EventStore::new();
+    running_task(&store, "t1");
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    let d = PreemptionDecider.decide(&snapshot, 10, 80);
+    match d {
+        Preemption::Suspend { task_id, as_of_seq } => {
+            assert_eq!(task_id, "t1");
+            // 挂起就是一条事件 + 一条控制事实（判定者只产控制事件，不发言）。
+            store
+                .append(PreemptionDecider.held_event(&task_id, as_of_seq))
+                .unwrap();
+            store
+                .append(PreemptionDecider.control_event("interrupt-suspend", as_of_seq))
+                .unwrap();
+            let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+            assert!(
+                snapshot.iter().any(|e| e.kind == EVENT_CONTROL_OPENED),
+                "80ms 内必须有 task.controlled"
+            );
+            assert!(
+                check_all(&snapshot).is_empty(),
+                "{:?}",
+                check_all(&snapshot)
+            );
+        }
+        other => panic!("预算内应实质判定，得到 {other:?}"),
+    }
+}
+
+/// S07 §6 验收 4（反向）：同一场景，预算放宽 → 判定结果必须改变（预算参数在生效）。
+#[test]
+fn widening_budget_changes_preemption_outcome() {
+    let store = EventStore::new();
+    running_task(&store, "t1");
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    // 判定耗时 100ms：反射档（80ms）超时 → 默认继续（不挂起）。
+    assert_eq!(
+        PreemptionDecider.decide(&snapshot, 100, 80),
+        Preemption::TimeoutDefaultContinue
+    );
+    // 同样的耗时，预算放宽到 60000 → 实质判定成立（挂起）。
+    assert_eq!(
+        PreemptionDecider.decide(&snapshot, 100, 60_000),
+        Preemption::Suspend {
+            task_id: "t1".into(),
+            as_of_seq: 0
+        }
+    );
+}
+
+/// 04 §2.3 边界：final 已发出后到达插话 → 不抢占，排队（已发出的发言不可撤回）。
+#[test]
+fn interruption_after_final_is_queued_not_preempted() {
+    let store = EventStore::new();
+    running_task(&store, "t1");
+    store
+        .append(
+            Event::pending(
+                "f0",
+                EVENT_ASSISTANT_FINAL,
+                Entity::Turn,
+                Verb::Closed,
+                0,
+                "agent:main",
+            )
+            .with_produced_by(0),
+        )
+        .unwrap();
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    assert_eq!(
+        PreemptionDecider.decide(&snapshot, 10, 80),
+        Preemption::Queue
+    );
+}
+
+/// S07 §6 验收 2 + 3：挂起期间任务不在 readyset（二次调度 0）；以挂起锚 as-of 重放
+/// 与挂起前一致（恢复零状态迁移）；恢复事件让任务重新就绪。
+#[test]
+fn suspended_task_leaves_readyset_and_restores() {
+    let store = EventStore::new();
+    running_task(&store, "t1");
+    let before = readyset().apply(
+        &store.range(crate::symbio_core::event::Seq::new(0)),
+        9_999,
+        Budget::generous(),
+    );
+    assert_eq!(before.value.ready.len(), 1);
+
+    // 挂起（锚 T = 挂起前 head；held 事件 ts 在未来——as-of 语义下可被锚排除）。
+    let t = store.head().value();
+    store
+        .append(PreemptionDecider.held_event("t1", t).with_ts(5_000))
+        .unwrap();
+    let events = store.range(crate::symbio_core::event::Seq::new(0));
+    let suspended = readyset().apply(&events, 9_999, Budget::generous());
+    assert!(
+        suspended.value.ready.is_empty(),
+        "挂起期间不得二次调度（S07 §6 验收 2）"
+    );
+
+    // 验收 3：以挂起锚（as-of 排除 held 事件）重放 → 与挂起前一致。
+    // 恢复零状态迁移——投影是纯函数，给同一个 T 就得到同一个视图（04 §2.2）。
+    let at_t = readyset().apply(&events, 1_000, Budget::generous());
+    assert_eq!(at_t.value, before.value, "as-of=T 重放与挂起前一致");
+
+    // 恢复：一条 progressed 事件 → 重新就绪（零状态迁移代码）。
+    store
+        .append(
+            Event::pending(
+                "resume-t1",
+                EVENT_TASK_PROGRESS,
+                Entity::Task,
+                Verb::Progressed,
+                0,
+                "agent:main",
+            )
+            .with_payload(serde_json::json!({ "task_id": "t1" })),
+        )
+        .unwrap();
+    let restored = readyset().apply(
+        &store.range(crate::symbio_core::event::Seq::new(0)),
+        9_999,
+        Budget::generous(),
+    );
+    assert_eq!(restored.value.ready.len(), 1, "恢复后重新进入 readyset");
+    assert_eq!(restored.value, before.value, "恢复后视图与挂起前一致");
+}
+
+/// S07 §5：抢占判定者只持 JudgeIntent——无 reply.* 写权（判定者不得直接发言）。
+#[test]
+fn preemption_decider_cannot_speak() {
+    let matrix = PermissionMatrix::new(vec![PrincipalPolicy::paired(
+        "agent:reflex",
+        vec![Capability::JudgeIntent],
+        VisScope::ThreadPrivate,
+    )])
+    .expect("判定者策略合法");
+    assert!(matrix.can_write("agent:reflex", Capability::JudgeIntent));
+    assert!(
+        !matrix.can_write("agent:reflex", Capability::ReplyFirst),
+        "无首响写权"
+    );
+    assert!(
+        !matrix.can_write("agent:reflex", Capability::ReplyAppend),
+        "无追加写权"
+    );
+}
+
+/// S09 §6 验收 1：未持外部执行能力的主体 → 拒绝且**不产生事件**。
+#[test]
+fn unauthorized_external_write_is_refused_without_event() {
+    let matrix = PermissionMatrix::new(vec![PrincipalPolicy::paired(
+        "agent:talker",
+        vec![Capability::ReplyAppend],
+        VisScope::ThreadPrivate,
+    )])
+    .unwrap();
+    let gate = CircuitBreaker;
+    let authorized = matrix.can_write("agent:talker", Capability::ProduceArtifact);
+    let store = EventStore::new();
+    let head_before = store.head().value();
+    match gate.gate(authorized, 0, 500, 1_000, 10) {
+        GateDecision::Refuse => {
+            assert_eq!(
+                store.head().value(),
+                head_before,
+                "拒绝且零事件（不进 Log）"
+            );
+        }
+        other => panic!("未授权必须 Refuse，得到 {other:?}"),
+    }
+}
+
+/// S09 §6 验收 2 + 4：预算耗尽 → 必须产出熔断事件（不静默）；预算放宽 → 判定改变。
+#[test]
+fn budget_exhaustion_breaks_the_circuit() {
+    let matrix = PermissionMatrix::new(vec![PrincipalPolicy::paired(
+        "agent:doer",
+        vec![Capability::ProduceArtifact],
+        VisScope::ThreadPrivate,
+    )])
+    .unwrap();
+    let authorized = matrix.can_write("agent:doer", Capability::ProduceArtifact);
+    let gate = CircuitBreaker;
+    // 已耗 900 / 预算 1000，申请 500 ⇒ 超支 → 熔断（必须写事件）。
+    let d = gate.gate(authorized, 900, 500, 1_000, 10);
+    assert_eq!(
+        d,
+        GateDecision::Break {
+            reason: "budget-exhausted"
+        }
+    );
+    let store = EventStore::new();
+    store
+        .append(gate.break_event("budget-exhausted", 0))
+        .unwrap();
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    assert!(
+        snapshot.iter().any(|e| e.kind == EVENT_CONTROL_OPENED),
+        "熔断不允许静默继续"
+    );
+    // 验收 4（反向）：预算放宽到 10_000 → 同样的申请放行。
+    assert_eq!(
+        gate.gate(authorized, 900, 500, 10_000, 10),
+        GateDecision::Allow
+    );
+    // 闸门自身超时（>80ms 反射档）→ 也是熔断（有事件的超时，不是静默失效）。
+    assert_eq!(
+        gate.gate(authorized, 0, 500, 10_000, 200),
+        GateDecision::Break {
+            reason: "gate-timeout"
+        }
+    );
+}
+
+/// S09 §6 验收 3：grants 表高风险组合（外部执行 + 自验）→ 构造期拒绝。
+#[test]
+fn high_risk_grant_combo_is_rejected() {
+    let risky = PermissionMatrix::new(vec![PrincipalPolicy::paired(
+        "agent:risky",
+        vec![Capability::ProduceArtifact, Capability::AssertVerification],
+        VisScope::ThreadPrivate,
+    )]);
+    assert!(matches!(
+        risky,
+        Err(crate::symbio_core::governance::PairingViolation::SelfVerifier { .. })
+    ));
+}
+
+/// ③ 成本台账：按主体累计 cost_ms；双跑一致（N1）；as-of 同口径。
+#[test]
+fn cost_ledger_accumulates_per_principal() {
+    let store = EventStore::new();
+    store
+        .append(
+            Event::pending(
+                "e0",
+                EVENT_TASK_PROGRESS,
+                Entity::Task,
+                Verb::Progressed,
+                0,
+                "agent:a",
+            )
+            .with_cost_ms(300)
+            .with_payload(serde_json::json!({ "task_id": "t0" })),
+        )
+        .unwrap();
+    store
+        .append(
+            Event::pending(
+                "e1",
+                EVENT_TASK_PROGRESS,
+                Entity::Task,
+                Verb::Progressed,
+                0,
+                "agent:a",
+            )
+            .with_cost_ms(200)
+            .with_payload(serde_json::json!({ "task_id": "t0" })),
+        )
+        .unwrap();
+    store
+        .append(
+            Event::pending(
+                "e2",
+                EVENT_TASK_PROGRESS,
+                Entity::Task,
+                Verb::Progressed,
+                0,
+                "agent:b",
+            )
+            .with_cost_ms(50)
+            .with_payload(serde_json::json!({ "task_id": "t1" })),
+        )
+        .unwrap();
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    let ledger = cost_ledger().apply(&snapshot, 9_999, Budget::generous());
+    assert_eq!(ledger.value.of("agent:a").spent_ms, 500);
+    assert_eq!(ledger.value.of("agent:a").entries, 2);
+    assert_eq!(ledger.value.total_ms, 550);
+    // N1 双跑一致。
+    assert_eq!(
+        ledger.value,
+        cost_ledger()
+            .apply(&snapshot, 9_999, Budget::generous())
+            .value
+    );
+    // 未记账主体零账。
+    assert_eq!(ledger.value.of("agent:ghost"), Default::default());
+}

@@ -94,13 +94,27 @@ pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
 pub const EVENT_TASK_OPENED: &str = "task.opened";
 /// 推进：执行中的普通事实。落在 `task × progressed`。
 pub const EVENT_TASK_PROGRESS: &str = "task.progress";
-/// 暂挂（如等外部资源）。落在 `task × held`。
+/// 暂挂（插话抢占 / 等外部资源；[roadmap/S07](../../../../docs/plan/roadmap/S07-插话与实时打断.md)
+/// 里这一格的事件名叫 `task.blocked`，本仓库以 `task.held` 单点定义）。
+/// 落在 `task × held`。
 pub const EVENT_TASK_HELD: &str = "task.held";
 /// 终态：验证通过（验收通过才终态）。落在 `task × asserted`。
 pub const EVENT_TASK_ASSERTED: &str = "task.asserted";
 /// 返工：判定不合格 ⇒ **新增一条事件**（重开一个返工节点），不是回滚。
 /// 落在 `task × asserted`（返工本身是一次质量判定的事实）。
 pub const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
+
+// ── 控制格子（S8 第 19–20 步，[roadmap/S07 §3](../../../../docs/plan/roadmap/S07-插话与实时打断.md)、
+//    [roadmap/S09 §3](../../../../docs/plan/roadmap/S09-外部执行与熔断.md)）────
+//
+// 打断信号与熔断**共用一格**：`control/opened`（kinds 都是 `task.controlled`，
+// 以载荷 `reason` 区分）——插话的"停/继续/改道"与外部的"熔断"是同一类事实：
+// 一个更快的判定者决定了对在跑事务的处置。不加新机制，只加一格。
+
+/// 控制判定产出（打断处置 / 熔断）。载荷 `{ task_id?, reason, ... }`。
+/// 落在 `control × opened`。**抢占判定者只持 JudgeIntent**——无 `reply.*` 写权，
+/// 判定者不得直接发言（S07 §5）。
+pub const EVENT_CONTROL_OPENED: &str = "task.controlled";
 
 /// 事件实体 —— 语法网格的**行**，闭集（F5，10 个）。
 ///

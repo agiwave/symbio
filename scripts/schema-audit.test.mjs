@@ -80,3 +80,25 @@ test('真的只有一个消费方时，仍如实报为下放候选', () => {
   // 下放候选段印的是 `schemas/hook`（`display(top)`），不是裸 `hook`
   assert.match(out, /--- 下放候选[^\n]*\n\s*schemas\/hook\b/, out)
 })
+
+test('match 臂里的 "Refuse => {" 不被误当成 use 语句（2026-09-30 实测事故）', () => {
+  // 无词边界的 `use\s+` 正则会把 "Refuse" 的 "use" 子串当成 use 关键字，
+  // expandUse 在 match 块的花括号上无限递归直接栈爆（RangeError: Invalid string
+  // length）——修复后该输入必须正常跑完且 exit 0（报告型恒 0）。
+  const out = audit({
+    'symbio/src/symbio_core/schemas/mod.rs': SCHEMAS_MOD,
+    'symbio/src/symbio_core/schemas/hook.rs': HOOK_SCHEMA,
+    'symbio/src/plugins/gate/actor.rs': [
+      'pub fn f(d: u8) -> u8 {',
+      '  match d {',
+      '    GateDecision::Refuse => {',
+      '      assert_eq!(d, 0, "拒绝且零事件");',
+      '    }',
+      '    _ => {}',
+      '  }',
+      '  d',
+      '}',
+    ].join('\n'),
+  })
+  assert.doesNotMatch(out, /RangeError|Invalid string length/)
+})

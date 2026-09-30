@@ -29,7 +29,7 @@ pub struct TurnState {
 impl TurnState {
     /// 收束是否合法：恰好一条收束事件（final 或 fallback，二选一）。
     ///
-    /// 这是 [`crate::symbio_core::invariants`] N3 的投影侧孪生——一个给 CI 报警，
+    /// 这是 invariants 域 N3 检查的投影侧孪生——一个给 CI 报警，
     /// 一个给运行时判断「能不能把答复递给用户」。
     pub fn settled(&self) -> bool {
         self.final_text.is_some() ^ self.fallback_text.is_some()

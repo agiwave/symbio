@@ -11,7 +11,9 @@
 //! - 并发抢占与租约（`held` 格的占用判定）是 S04 的增量，本投影先按
 //!   「终态 + 依赖闭合」取集——容量参数由调用方的调度器决定。
 
-use super::super::event::{Entity, Event, EVENT_TASK_ASSERTED, EVENT_TASK_OPENED};
+use super::super::event::{
+    Entity, Event, EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
+};
 use super::super::view::{Budget, View};
 use super::Projection;
 
@@ -40,12 +42,15 @@ pub struct ReadySetView {
 /// - 终态 = `task.asserted`（验收通过才终态——返工节点重开后不算旧任务复活）；
 /// - `ts > now` 的事件不参与（与其余投影同口径）；
 /// - 环与悬空依赖不在这里判——那是 C14（[`crate::symbio_core::invariants::acyclic_deps`]）
-///   的职责；本投影在有环时诚实返回「依赖未闭合」的空子集（跑不完 ≠ 假装能跑）。
+///   的职责；本投影在有环时诚实返回「依赖未闭合」的空子集（跑不完 ≠ 假装能跑）；
+/// - **挂起排除**（S07 §5 强制点）：`task.held` 的任务不进就绪集——被挂起的任务
+///   被二次调度可能重复执行；恢复（同任务的 `task.progress`）自动解除挂起。
 pub fn readyset() -> Projection<ReadySetView> {
     Projection::new(|events: &[Event], now, _budget: Budget| {
         // task_id → (opened 事件 seq, depends_on)
         let mut tasks: BTreeMap<&str, (u64, Vec<String>)> = BTreeMap::new();
         let mut terminal: BTreeMap<&str, ()> = BTreeMap::new();
+        let mut held: BTreeMap<&str, ()> = BTreeMap::new();
         let mut scanned = 0u64;
         for e in events {
             if e.ts > now || e.entity != Entity::Task {
@@ -73,6 +78,16 @@ pub fn readyset() -> Projection<ReadySetView> {
                 EVENT_TASK_ASSERTED => {
                     scanned += 1;
                     terminal.insert(id, ());
+                    held.remove(id);
+                }
+                EVENT_TASK_HELD => {
+                    // 挂起：S07 §5 的强制点——挂起期间不得被二次调度。
+                    scanned += 1;
+                    held.insert(id, ());
+                }
+                EVENT_TASK_PROGRESS => {
+                    // 恢复：挂起是一条事件，恢复也是——progressed 自动解除挂起。
+                    held.remove(id);
                 }
                 _ => {}
             }
@@ -80,7 +95,9 @@ pub fn readyset() -> Projection<ReadySetView> {
         let ready = tasks
             .iter()
             .filter(|(id, (_, ds))| {
-                !terminal.contains_key(*id) && ds.iter().all(|d| terminal.contains_key(d.as_str()))
+                !terminal.contains_key(*id)
+                    && !held.contains_key(*id)
+                    && ds.iter().all(|d| terminal.contains_key(d.as_str()))
             })
             .map(|(id, (seq, ds))| ReadyTask {
                 task_id: (*id).to_string(),

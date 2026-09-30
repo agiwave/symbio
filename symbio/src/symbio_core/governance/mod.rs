@@ -134,10 +134,15 @@ impl PermissionMatrix {
                     principal: p.principal.clone(),
                 });
             }
-            // C15（不自验）：DefineWork + AssertVerification 不得同持。
-            let defines = p.grants.contains(&Capability::DefineWork);
+            // C15（不自验）：DefineWork + AssertVerification 不得同持（S7 第 17 步）；
+            // 高风险组合（S9，[roadmap/S09 §5](../../../../docs/plan/roadmap/S09-外部执行与熔断.md)
+            // 验收 3）：外部执行（ProduceArtifact）+ AssertVerification 同样不得同持——
+            // 给自己的外部动作盖章 = 质量闸门等于没有。
             let verifies = p.grants.contains(&Capability::AssertVerification);
-            if defines && verifies {
+            let self_verifies = verifies
+                && (p.grants.contains(&Capability::DefineWork)
+                    || p.grants.contains(&Capability::ProduceArtifact));
+            if self_verifies {
                 return Err(PairingViolation::SelfVerifier {
                     principal: p.principal.clone(),
                 });
