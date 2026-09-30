@@ -83,7 +83,11 @@ export const LINE_BUDGET_BASELINES = {
   // 本体零改动。基线 17144 → 17236（+92）。测试另计（`projections.test.rs`）。
   // 2026-09-30：`memory.recall` 投影落地后经 `cargo fmt` 收窄 3 行（无代码删除，
   // 纯格式回折）。棘轮只进不退 ⇒ 按审计提示收紧。基线 17236 → 17233（-3）。
-  "symbio/src/plugins/session": { maxLines: 17233, exts: [".rs"] },
+  // 2026-09-30：修复 `memory.recall` 多会话窗口缺陷——窗口从全局一条改为按
+  // principal 分组（各主体取自己尾部 8 轮用户事实；检索者合并全部会话时，
+  // 旧全局窗口只罩住位次最大的会话，跨会话召回名存实亡）。新增 `windows`
+  // 输出数组与兼容标量折叠；多会话单测 + e2e T22 另计。基线 17233 → 17263（+30）。
+  "symbio/src/plugins/session": { maxLines: 17263, exts: [".rs"] },
   "symbio/src/plugins/skill": { maxLines: 1470, exts: [".rs"] },
   "symbio/src/plugins/telegram": { maxLines: 887, exts: [".rs"] },
   "symbio/src/plugins/vdfs": { maxLines: 3012, exts: [".rs"] },

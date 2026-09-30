@@ -208,6 +208,15 @@ fn session_checkpoint(input: &ProjectionInput<'_>) -> View<serde_json::Value> {
 /// 更关键的是：本投影是**被登记**的，不是被调用的；检索者按名字 `memory.recall`
 /// 取用，**不必认识 session**（B2 的核心收益）。物理位置与调用关系解耦。
 ///
+/// ## 多会话窗口：按主体（principal）分组，而非全局一条
+///
+/// 检索者喂给本投影的事实是**全部会话合并**的（seq 高位按会话字典序编码，
+/// 见 retrieval 插件）。若全局取"尾部 8 轮用户事实"，窗口只会罩住字典序
+/// 最大那个会话的近期轮次——其余会话的全部事实落窗，"跨会话记住"名存实亡。
+/// 因此窗口**按主体各算各的**：每个主体从自己的用户事实序列里取尾部 N 轮起点；
+/// 没有用户事实的主体取哨兵 [`FACT_NONE_SEQ`]（= 无下界，其事实全部入选），
+/// 与旧全局语义在单会话下逐分支等价。
+///
 /// ## 平凡值（J2）
 ///
 /// **未登记 = 未接入**。检索者取不到 `memory.recall` 时按"只看当前窗口"处理，
@@ -225,27 +234,44 @@ fn memory_recall(input: &ProjectionInput<'_>) -> View<serde_json::Value> {
         .filter(|f| f.kind.entity() == "memory")
         .collect();
 
-    // ② 当前窗口：沿用 `session.snapshot` 的窗口语义（最近 N 轮）。
-    //    "窗口"是**跨事实类型**的通用折叠：按 seq 序取尾部 N 轮的用户事实起点。
-    let user_seqs: Vec<u64> = input
-        .facts
-        .iter()
-        .filter(|f| f.kind == crate::symbio_core::FactKind::TurnUserMessage)
-        .map(|f| f.seq)
-        .collect();
-    let window_from = if user_seqs.len() > WINDOW_TURNS {
-        user_seqs[user_seqs.len() - WINDOW_TURNS]
-    } else {
-        crate::symbio_core::FACT_NONE_SEQ
-    };
+    // ② 各主体的窗口：先给**每个出现过的主体**开一行，再把用户事实的 seq
+    //    归组投进去（BTreeMap 迭代按 principal 字典序 ⇒ 输出确定，A4）。
+    let mut user_seqs: std::collections::BTreeMap<&str, Vec<u64>> =
+        std::collections::BTreeMap::new();
+    for f in input.facts.iter() {
+        let group = user_seqs.entry(f.principal.as_str()).or_default();
+        if f.kind == crate::symbio_core::FactKind::TurnUserMessage {
+            group.push(f.seq);
+        }
+    }
+    // 每主体的窗口下界：尾部 N 轮用户事实的起点；无用户事实 ⇒ 哨兵（无下界）。
+    let mut thresholds: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
+    for (principal, seqs) in &user_seqs {
+        let from = if seqs.len() > WINDOW_TURNS {
+            seqs[seqs.len() - WINDOW_TURNS]
+        } else {
+            crate::symbio_core::FACT_NONE_SEQ
+        };
+        thresholds.insert(*principal, from);
+    }
+    // 兼容标量：各主体窗口的最小值（单会话下与旧全局值逐分支相同）。
+    // 多会话下它只是"最松的下界"，权威数据是下面的 `windows` 数组。
+    let window_from = thresholds
+        .values()
+        .copied()
+        .min()
+        .unwrap_or(crate::symbio_core::FACT_NONE_SEQ);
 
-    // ③ 候选 = 记忆类事实 ∪ 窗口内事实（去重靠 seq 唯一）。
+    // ③ 候选 = 记忆类事实 ∪ 各主体**自己的窗口**内事实（去重靠 seq 唯一）。
     let mut candidates: Vec<(&Fact, &'static str)> = Vec::new();
     for f in &memory_facts {
         candidates.push((f, "memory"));
     }
-    for f in input.facts.iter().filter(|f| f.seq >= window_from) {
-        if f.kind.entity() != "memory" {
+    for f in input.facts.iter().filter(|f| f.kind.entity() != "memory") {
+        let Some(from) = thresholds.get(f.principal.as_str()) else {
+            continue; // 主体不在事实集 ⇒ 无窗口（防御性；理论上不可达）
+        };
+        if f.seq >= *from {
             candidates.push((f, "window"));
         }
     }
@@ -262,6 +288,10 @@ fn memory_recall(input: &ProjectionInput<'_>) -> View<serde_json::Value> {
     let value = json!({
         "window_turns": WINDOW_TURNS,
         "window_from_seq": window_from,
+        "windows": thresholds
+            .iter()
+            .map(|(p, from)| json!({ "principal": p, "window_from_seq": from }))
+            .collect::<Vec<_>>(),
         "total": input.facts.len(),
         "candidates": ids.len(),
         "candidate_seqs": ids,

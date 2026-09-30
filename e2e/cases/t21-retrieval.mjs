@@ -132,7 +132,6 @@ export default defineCase(
         assert(Array.isArray(facts), `facts 应是数组（实得 ${typeof facts}）`);
         assert(facts.length >= 4, `真实会话 + 记忆应派生出事实（实得 ${facts.length}）`);
         const kinds = new Set(facts.map((f) => f.kind));
-        console.log('DEBUG facts=', JSON.stringify(facts).slice(0, 1500));
         // 词形 = v2 网格的 `<实体>.<动词>`（`FactKind::wire()`），序列化同源——不是 snake_case
         assert(kinds.has('turn.user_message'), `应含用户消息事实（实得 ${[...kinds].join(',')}）`);
         assert(

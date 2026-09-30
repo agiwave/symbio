@@ -6,6 +6,11 @@ use crate::symbio_core::{
 
 /// 造一条"消息类"事实：payload 形状与 `fact_log` 派生的一致。
 fn msg_fact(seq: u64, id: &str, role: &str, ty: Option<&str>) -> Fact {
+    msg_fact_as("s1", seq, id, role, ty)
+}
+
+/// 同上，但指定 principal（多会话用例需要）。
+fn msg_fact_as(principal: &str, seq: u64, id: &str, role: &str, ty: Option<&str>) -> Fact {
     Fact {
         seq,
         kind: if role == "User" {
@@ -13,7 +18,7 @@ fn msg_fact(seq: u64, id: &str, role: &str, ty: Option<&str>) -> Fact {
         } else {
             FactKind::TurnAssistantFinal
         },
-        principal: FactPrincipal::new("s1"),
+        principal: FactPrincipal::new(principal),
         caused_by: None,
         at_ms: seq as i64 * 10,
         payload: serde_json::json!({
@@ -150,10 +155,15 @@ fn none_seq_sentinel_is_not_a_message() {
 
 /// 造一条记忆类事实（`memory.*` 格子，payload 不必是消息形状）。
 fn memory_fact(seq: u64, kind: FactKind) -> Fact {
+    memory_fact_as("s1", seq, kind)
+}
+
+/// 同上，但指定 principal。
+fn memory_fact_as(principal: &str, seq: u64, kind: FactKind) -> Fact {
     Fact {
         seq,
         kind,
-        principal: FactPrincipal::new("s1"),
+        principal: FactPrincipal::new(principal),
         caused_by: None,
         at_ms: seq as i64 * 10,
         payload: serde_json::json!({ "note": "encoded" }),
@@ -220,4 +230,114 @@ fn recall_window_keeps_last_turns() {
     assert_eq!(v.value["window_from_seq"], 5);
     // 窗口内 = 8 轮 × 2 条 = 16；无 memory 事实 ⇒ 候选恰为这些
     assert_eq!(v.value["candidates"], 16);
+    // 单会话：windows 数组恰一行，且与兼容标量一致
+    let windows = v.value["windows"].as_array().unwrap();
+    assert_eq!(windows.len(), 1);
+    assert_eq!(windows[0]["principal"], "s1");
+    assert_eq!(windows[0]["window_from_seq"], 5);
+}
+
+// ==================== 多会话窗口（跨会话召回的核心语义）====================
+
+/// 造 10 轮 user/assistant 事实，seq 从 `base` 起（模拟 retrieval 的会话高位编码）。
+fn ten_turns(principal: &str, base: u64) -> Vec<Fact> {
+    let mut facts = Vec::new();
+    for i in 0..10u64 {
+        facts.push(msg_fact_as(
+            principal,
+            base + i * 2 + 1,
+            &format!("{principal}-u{i}"),
+            "User",
+            Some("Text"),
+        ));
+        facts.push(msg_fact_as(
+            principal,
+            base + i * 2 + 2,
+            &format!("{principal}-a{i}"),
+            "Assistant",
+            Some("Text"),
+        ));
+    }
+    facts
+}
+
+/// **跨会话窗口**：两个会话各有 10 轮，合并后每个主体的窗口必须各算各的。
+///
+/// 旧实现全局取尾部 8 轮 ⇒ 窗口只罩住 seq 更大的会话（字典序靠后者），
+/// 另一会话的全部事实落窗。本用例在旧实现下必失败（锁住修复）。
+#[test]
+fn recall_windows_are_per_principal() {
+    const B2: u64 = 1 << 40;
+    let mut facts = ten_turns("s1", 0); // seq 1..=20
+    facts.extend(ten_turns("s2", B2)); // seq 2^40+1 ..= 2^40+20
+    facts.push(memory_fact_as("s1", 21, FactKind::MemoryEncoded));
+    let input = ProjectionInput::new(&facts, 0);
+    let v = projection_run("memory.recall", &input).unwrap();
+    assert!(!v.trivial);
+
+    // windows：两行，按 principal 字典序，各行下界 = 自己的第 3 轮用户事实
+    let windows = v.value["windows"].as_array().unwrap();
+    assert_eq!(windows.len(), 2);
+    assert_eq!(windows[0]["principal"], "s1");
+    assert_eq!(windows[0]["window_from_seq"], 5);
+    assert_eq!(windows[1]["principal"], "s2");
+    assert_eq!(windows[1]["window_from_seq"], B2 + 5);
+
+    // 兼容标量 = 各主体下界的最小值
+    assert_eq!(v.value["window_from_seq"], 5);
+
+    // 两个会话的窗口内事实都在候选里（跨会话召回成立）
+    let seqs: Vec<u64> = v.value["candidate_seqs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|x| x.as_u64())
+        .collect();
+    assert!(seqs.contains(&5), "s1 的窗口起点必须在候选中");
+    assert!(seqs.contains(&(B2 + 5)), "s2 的窗口起点必须在候选中");
+    // 各自窗口外的前两轮不在候选中
+    assert!(!seqs.contains(&1), "s1 窗口外的事实不应在候选中");
+    assert!(!seqs.contains(&(B2 + 1)), "s2 窗口外的事实不应在候选中");
+    // 记忆事实永远在候选中
+    assert!(seqs.contains(&21));
+
+    // **A4**：多会话输入下双跑逐字节一致
+    let b = projection_run("memory.recall", &input).unwrap();
+    assert_eq!(
+        serde_json::to_string(&v).unwrap(),
+        serde_json::to_string(&b).unwrap(),
+        "多会话下双跑必须逐字节相同"
+    );
+}
+
+/// 没有用户事实的主体取哨兵下界（`FACT_NONE_SEQ` = 0）⇒ 其事实全部入选。
+///
+/// 与旧全局语义同形：单会话无用户轮时窗口为"无下界"。
+#[test]
+fn recall_principal_without_user_turns_is_fully_in_window() {
+    let facts = vec![
+        Fact {
+            seq: 1,
+            kind: FactKind::SystemHealth,
+            principal: FactPrincipal::new("sys"),
+            caused_by: None,
+            at_ms: 0,
+            payload: serde_json::json!({}),
+        },
+        memory_fact_as("sys", 2, FactKind::MemoryEncoded),
+    ];
+    let input = ProjectionInput::new(&facts, 0);
+    let v = projection_run("memory.recall", &input).unwrap();
+    let windows = v.value["windows"].as_array().unwrap();
+    assert_eq!(windows.len(), 1);
+    assert_eq!(windows[0]["principal"], "sys");
+    assert_eq!(windows[0]["window_from_seq"], FACT_NONE_SEQ);
+    // 非记忆事实 seq=1 >= 0 ⇒ 入选
+    let seqs: Vec<u64> = v.value["candidate_seqs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|x| x.as_u64())
+        .collect();
+    assert!(seqs.contains(&1));
 }
