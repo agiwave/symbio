@@ -136,7 +136,8 @@ impl std::error::Error for FactError {}
 /// 实现方分布在**不同插件**（会话事实由 `session` 派生、资源事实由 `vdfs` 派生），
 /// 而消费方（检索者、巩固者等新能力）需要**按统一形状**取用。
 /// 插件之间不可相互引用，因此这条契约只能住在 core——这与
-/// [`crate::vdfs::VdfsProvider`]、[`crate::capability::Capability`] 同型。
+/// [`VdfsProvider`](crate::symbio_core::vdfs::VdfsProvider)、
+/// [`Capability`](crate::symbio_core::capability::Capability) 同型。
 ///
 /// ## 平凡值（J2）
 ///

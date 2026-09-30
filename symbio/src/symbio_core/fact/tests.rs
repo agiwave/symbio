@@ -31,6 +31,38 @@ fn wire_is_unique() {
     }
 }
 
+/// **线上词形只有一个来源**：序列化输出必须**逐字等于** `wire()`。
+///
+/// 这条存在的原因是它曾经**不成立**：`FactKind` 一度 `derive` + `snake_case`，
+/// 于是线上载荷是 `memory_encoded`，而 `wire()` 是 `memory.encoded`——同一事实
+/// 两种写法。单测两侧都用 `wire()` 比较，因此**测不出来**；只有跨进程的真实
+/// 载荷（e2e）才暴露。故在此钉死：序列化 = `wire()`，反序列化 = 按 `wire()` 反查。
+#[test]
+fn serde_uses_wire_verbatim() {
+    for k in FactKind::ALL {
+        // 序列化后的 JSON 字符串字面量 = wire 词形本身（含点号）
+        let json = serde_json::to_string(k).expect("序列化应成功");
+        assert_eq!(
+            json,
+            format!("\"{}\"", k.wire()),
+            "序列化必须与 wire() 逐字一致"
+        );
+        // 往返：按 wire 反查回同一个取值
+        let back: FactKind = serde_json::from_str(&json).expect("反序列化应成功");
+        assert_eq!(&back, k, "往返应回到同一取值");
+    }
+}
+
+/// 反序列化**不静默兜底**：认不出的词形必须报错，不能变成看似正常的错值。
+#[test]
+fn unknown_wire_is_rejected() {
+    // snake_case 那套旧词形现在必须**认不出**（否则就是双词形复燃）
+    let err = serde_json::from_str::<FactKind>(r#""memory_encoded""#);
+    assert!(err.is_err(), "旧 snake_case 词形不应被接受");
+    let err2 = serde_json::from_str::<FactKind>(r#""nope.nope""#);
+    assert!(err2.is_err(), "未知词形应报错");
+}
+
 /// 溯源方向：指向更早的 seq 合法，指向自身 / 更晚不合法。
 #[test]
 fn provenance_direction() {

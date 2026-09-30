@@ -40,6 +40,7 @@ mod mcp;
 mod model;
 mod plugin_manager;
 mod projection;
+mod retrieval;
 mod session;
 mod skill;
 mod telegram;

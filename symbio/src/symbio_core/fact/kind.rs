@@ -29,14 +29,24 @@
 //! 待其能力（评审 / 断点 / 控制）真正落地时**追加枚举取值**——这仍属"加格子"，
 //! 不改机制。**不要为尚未存在的能力预先占位**：空枚举值会让人以为系统已经支持它。
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// 事实类型 —— 全系统可观测事实的**穷举**目录。
 ///
 /// 每个取值形如 `<实体>.<动词>`，与 v2 的事件网格一一对应。
 /// [`FactKind::ALL`] 是可被断言 A1 核对的全集（机制表的那一行）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+///
+/// ## 线上词形只有一个来源：[`wire`](Self::wire)
+///
+/// `Serialize` / `Deserialize` **手写并委托 `wire()`**（不是 `derive` +
+/// `rename_all`）。理由：derive 的 `snake_case` 会产出 `memory_encoded`，
+/// 而 `wire()` 产出 `memory.encoded`——**同一事实两种线上写法**。消费方按
+/// v2 网格词表匹配就会落空，而这类错位只在**跨进程真实载荷**里才暴露
+/// （单测两侧都用 `wire()`，看不出来；e2e T21 第一次跑就撞上了）。
+///
+/// 于是 `wire()` 是本类型的**唯一真相源**：序列化写它、反序列化查它、
+/// [`entity`](Self::entity) 劈它。加新取值只需改 `wire()` 一处。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FactKind {
     // ---- turn（轮次：对话基线）----
     /// 用户消息成为事实（对应 `open`）
@@ -186,6 +196,30 @@ impl FactKind {
                 | FactKind::CommitmentAsserted
                 | FactKind::ConationGated
         )
+    }
+}
+
+// ==================== 序列化：委托 `wire()` ====================
+
+impl Serialize for FactKind {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.wire())
+    }
+}
+
+impl<'de> Deserialize<'de> for FactKind {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let raw = <String as Deserialize>::deserialize(d)?;
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|k| k.wire() == raw)
+            // 未知词形**不静默兜底**：事实类型是可枚举的封闭集合，
+            // 认不出的词要么是写错、要么是版本错位，两种都该当场报错，
+            // 而不是变成一个"看起来正常"的错值继续往下流。
+            .ok_or_else(|| {
+                serde::de::Error::unknown_variant(&raw, &["<见 FactKind::wire() 的词表>"])
+            })
     }
 }
 

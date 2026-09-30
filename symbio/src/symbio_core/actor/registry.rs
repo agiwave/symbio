@@ -180,7 +180,7 @@ mod tests;
 /// 经 trait 登记时，`layer` 由**装配方在构造登记者时给定**，登记者改不了——
 /// 于是"我是哪一层"不是自我声明，而是被赋予的事实。
 ///
-/// 与 [`FactSource`](crate::FactSource) 同款：plugin 实现 trait，core 通过 trait
+/// 与 [`FactSource`](crate::symbio_core::FactSource) 同款：plugin 实现 trait，core 通过 trait
 /// 对象收口，双方不必互相认识。
 pub trait ActorSource: Send + Sync {
     /// 本登记方所在层。

@@ -57,7 +57,8 @@ export const LINE_BUDGET_BASELINES = {
   // 并按新字段重写；`vdfs.test.rs` 加夹具与 3 条用例。基线 3667 → 3736（+69）。
   // 前端零改动：`DetailForm.staticDisplay` 本就支持数组与对象（数组 `join('、')`、
   // 对象逐项 `k v`），故结构化值直接可渲染。
-  "symbio/src/plugins/agent": { maxLines: 3736, exts: [".rs"] },
+  // 2026-09-30：`cargo fmt` 后收窄 4 行（无代码删除，纯格式回折），按审计提示收紧。
+  "symbio/src/plugins/agent": { maxLines: 3732, exts: [".rs"] },
   "symbio/src/plugins/composite": { maxLines: 1330, exts: [".rs"] },
   "symbio/src/plugins/event_bus": { maxLines: 164, exts: [".rs"] },
   "symbio/src/plugins/gateway": { maxLines: 1190, exts: [".rs"] },
@@ -76,7 +77,13 @@ export const LINE_BUDGET_BASELINES = {
   // （把现行 `chat_loop` 隐含的那个 Actor **显式声明为一行** `session.reasoner`
   //  + 层判定 + 运行期以真实会话 id 解析；`chat_loop.rs` 入口取该行，取值与原实现
   //  逐字节相同）。基线 16993 → 17144（+151）。测试另计（`actors.test.rs`）。
-  "symbio/src/plugins/session": { maxLines: 17144, exts: [".rs"] },
+  // 2026-09-29（B4）：v2 桥接「注册检索者（S06）」落地——`session` 增
+  // `projections.rs` 的第四个投影 `memory.recall`（从事实里挑出 `memory.*` 格子
+  // 与当前窗口，折成"可召回集合"；平凡值 = 无记忆事实时只看窗口）。既有三个投影
+  // 本体零改动。基线 17144 → 17236（+92）。测试另计（`projections.test.rs`）。
+  // 2026-09-30：`memory.recall` 投影落地后经 `cargo fmt` 收窄 3 行（无代码删除，
+  // 纯格式回折）。棘轮只进不退 ⇒ 按审计提示收紧。基线 17236 → 17233（-3）。
+  "symbio/src/plugins/session": { maxLines: 17233, exts: [".rs"] },
   "symbio/src/plugins/skill": { maxLines: 1470, exts: [".rs"] },
   "symbio/src/plugins/telegram": { maxLines: 887, exts: [".rs"] },
   "symbio/src/plugins/vdfs": { maxLines: 3012, exts: [".rs"] },
@@ -101,7 +108,20 @@ export const LINE_BUDGET_BASELINES = {
   //  ⇒ 越层登记不进去，断言 A5）+ `actor_register` / `actor_get` / `actor_list` /
   //  `actor_clear`。实现 ~360 行，测试另计）。**表为空 ⇒ 内置默认行**（现行行为），
   // 故本域是扩展点而非运行时必需品。基线 8959 → 9409（+450）。
-  "symbio/src/symbio_core": { maxLines: 9409, exts: [".rs"] },
+  // 2026-09-29（B4）：
+  //  ① 新增可选插件工厂 id 常量 `PLUGIN_ID_RETRIEVAL`（`ids.rs` 一行 +
+  //     `plugin/mod.rs` 重导出一行）。检索者插件本体住 `plugins/retrieval`，不进 core。
+  //  ② **`FactKind` 的序列化收敛为单一词形**（`kind.rs`）：原本 `derive` +
+  //     `snake_case` 产出 `memory_encoded`，而 `wire()` 产出 `memory.encoded`
+  //     ——同一事实两种线上写法，单测测不出（两侧都用 `wire()` 比较），
+  //     由 e2e 跨进程真实载荷抓出。改为手写 `Serialize`/`Deserialize`
+  //     委托 `wire()`（+ 反序列化在 `ALL` 内反查，认不出即报错不兜底），
+  //     并在 `tests.rs` 加两条钉死该契约。实现 +34 行，测试另计。
+  //  ③ 修 4 处 intra-doc 断链（`cargo doc -D rustdoc::broken_intra_doc_links` 拦下，
+  //     属 B1/B3 遗留）：`crate::Fact` 一类链接漏了 `symbio_core::` 段，另有两处
+  //     指向不存在的方法 / 常量。注释改写 +4 行。
+  // 基线 9409 → 9449（+2 +34 +4）。
+  "symbio/src/symbio_core": { maxLines: 9449, exts: [".rs"] },
   "symbio/src/providers": { maxLines: 2732, exts: [".rs"] },
 
   // ── 宿主与工具层 ──

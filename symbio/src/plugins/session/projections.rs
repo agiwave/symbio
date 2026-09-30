@@ -190,11 +190,100 @@ fn session_checkpoint(input: &ProjectionInput<'_>) -> View<serde_json::Value> {
     }))
 }
 
+// ==================== 投影 4：记忆召回（B4 / S06）====================
+
+/// `memory.recall` —— S06 检索者消费的**召回投影**（v2 桥接 B4）。
+///
+/// ## 它做什么
+///
+/// 从事实序列里挑出**记忆类事实**（`memory.*` 格子）与**当前窗口**内的轮次事实，
+/// 折叠成一个"可召回集合"的结构视图：有哪些候选、分别属于哪个 `memory.*` 动词、
+/// 时间戳区间如何。它**不返回正文**（事实是索引不是副本），只返回候选的 id 与
+/// 分档——与既有三个会话投影同款：输出必须可序列化、可双跑比对。
+///
+/// ## 为什么它住在 session 而非新插件
+///
+/// 投影的**输入只有事实**（[`ProjectionInput`]），因此放置位置只取决于
+/// "谁顺手"——而事实的 actor 是会话，会话事实的派生约定也住在会话链路。
+/// 更关键的是：本投影是**被登记**的，不是被调用的；检索者按名字 `memory.recall`
+/// 取用，**不必认识 session**（B2 的核心收益）。物理位置与调用关系解耦。
+///
+/// ## 平凡值（J2）
+///
+/// **未登记 = 未接入**。检索者取不到 `memory.recall` 时按"只看当前窗口"处理，
+/// 即退化成 S01 的失忆助手。本投影**总是登记**（session 是必需插件），
+/// 但它的**输入**（`memory.*` 事实）是否出现，取决于事实源——若无人产生记忆事实，
+/// 它自然只折出窗口部分，`trivial` 标记为真。这与 S06 §4 的平凡值表一致。
+fn memory_recall(input: &ProjectionInput<'_>) -> View<serde_json::Value> {
+    const WINDOW_TURNS: usize = 8;
+
+    // ① 记忆类事实：B1 的 `memory.*` 四格。断言 A1 的落点——这里**只枚举**已预留的
+    //    取值，不引入新类型；格子没点亮时这一段自然为空。
+    let memory_facts: Vec<&Fact> = input
+        .facts
+        .iter()
+        .filter(|f| f.kind.entity() == "memory")
+        .collect();
+
+    // ② 当前窗口：沿用 `session.snapshot` 的窗口语义（最近 N 轮）。
+    //    "窗口"是**跨事实类型**的通用折叠：按 seq 序取尾部 N 轮的用户事实起点。
+    let user_seqs: Vec<u64> = input
+        .facts
+        .iter()
+        .filter(|f| f.kind == crate::symbio_core::FactKind::TurnUserMessage)
+        .map(|f| f.seq)
+        .collect();
+    let window_from = if user_seqs.len() > WINDOW_TURNS {
+        user_seqs[user_seqs.len() - WINDOW_TURNS]
+    } else {
+        crate::symbio_core::FACT_NONE_SEQ
+    };
+
+    // ③ 候选 = 记忆类事实 ∪ 窗口内事实（去重靠 seq 唯一）。
+    let mut candidates: Vec<(&Fact, &'static str)> = Vec::new();
+    for f in &memory_facts {
+        candidates.push((f, "memory"));
+    }
+    for f in input.facts.iter().filter(|f| f.seq >= window_from) {
+        if f.kind.entity() != "memory" {
+            candidates.push((f, "window"));
+        }
+    }
+    // 确定性：按 seq 升序（同 seq 按 kind wire 序），与事实序列本身的序一致。
+    candidates.sort_by(|a, b| (a.0.seq, a.0.kind.wire()).cmp(&(b.0.seq, b.0.kind.wire())));
+
+    let ids: Vec<u64> = candidates.iter().map(|(f, _)| f.seq).collect();
+    let verbs: Vec<&'static str> = memory_facts.iter().map(|f| f.kind.wire()).collect();
+    let at_range = (
+        candidates.first().map(|(f, _)| f.at_ms).unwrap_or(0),
+        candidates.last().map(|(f, _)| f.at_ms).unwrap_or(0),
+    );
+
+    let value = json!({
+        "window_turns": WINDOW_TURNS,
+        "window_from_seq": window_from,
+        "total": input.facts.len(),
+        "candidates": ids.len(),
+        "candidate_seqs": ids,
+        "memory_verbs": verbs,
+        "at_range": { "first": at_range.0, "last": at_range.1 },
+    });
+
+    // 平凡值：没有任何记忆类事实 ⇒ 检索退化为"只看当前窗口"，
+    // 调用方据 `trivial` 判断"这次召回没有长期记忆成分"。
+    if memory_facts.is_empty() {
+        View::trivial(value)
+    } else {
+        View::new(value)
+    }
+}
+
 // ==================== 登记 ====================
 
 crate::submit_projection!("session.snapshot", session_snapshot);
 crate::submit_projection!("session.display", session_display);
 crate::submit_projection!("session.checkpoint", session_checkpoint);
+crate::submit_projection!("memory.recall", memory_recall);
 
 #[cfg(test)]
 #[path = "projections.test.rs"]

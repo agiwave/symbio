@@ -21,9 +21,13 @@ import './_selfrun.mjs';
 // ## 溯源（I2）在真实数据上的形态
 //
 // 一轮对话的落盘是 `user → assistant`（可能还有 `tool_call → tool`）。派生规则：
-// - 用户消息 → `turn_user_message`（无前驱）；
-// - 助手消息 → `turn_assistant_final` / `_fallback`，**溯源到同一会话最近的用户消息**；
-// - 工具调用 / 结果 → `artifact_added`，溯源到最近的助手消息。
+// - 用户消息 → `turn.user_message`（无前驱）；
+// - 助手消息 → `turn.assistant_final` / `.assistant_fallback`，
+//   **溯源到同一会话最近的用户消息**；
+// - 工具调用 / 结果 → `artifact.added`，溯源到最近的助手消息。
+//
+// 词形一律是 v2 网格的 `<实体>.<动词>`（`FactKind::wire()` 既是比较用的方法，
+// 也是序列化的输出）——**不是** snake_case。
 //
 // 因此本用例断言：**助手事实的 `caused_by` 恒指向某条更早的用户事实**——
 // 这就是 I2「无溯源不声明」在真实链路上的第一次成立。
@@ -144,21 +148,28 @@ export default defineCase(
 
       // ④ 溯源（I2）：助手事实的 `caused_by` 指向某条更早的用户事实
       const bySeq = new Map(facts1.map((f) => [f.seq, f]));
+      // `kind` 的线上词形 = v2 网格的 `<实体>.<动词>`（`FactKind::wire()`），
+      // 序列化与 `wire()` 同源——**不是** snake_case。见 `fact/kind.rs` 的说明。
       const assistantFacts = facts1.filter(
-        (f) => f.kind === 'turn_assistant_final' || f.kind === 'turn_assistant_fallback',
+        (f) => f.kind === 'turn.assistant_final' || f.kind === 'turn.assistant_fallback',
       );
       assert(assistantFacts.length > 0, '一轮对话应至少产出一条助手事实');
       for (const a of assistantFacts) {
         assert(a.caused_by != null, `助手事实必须带溯源（seq=${a.seq}）`);
         const src = bySeq.get(a.caused_by);
         assert(src, `溯源应指向本序列内的事实（seq=${a.caused_by}）`);
-        assertEq(src.kind, 'turn_user_message', `助手事实应溯源到用户消息（实得 ${src.kind}）`);
+        assertEq(src.kind, 'turn.user_message', `助手事实应溯源到用户消息（实得 ${src.kind}）`);
         assert(a.caused_by < a.seq, '溯源必须指向更早的 seq（派生图无环）');
       }
 
       // 事实类型：真实一轮含用户消息（+工具节点），至少覆盖用户与助手两类
       const kinds = new Set(facts1.map((f) => f.kind));
-      assert(kinds.has('turn_user_message'), `应含用户消息事实（实得: ${[...kinds].join(',')}）`);
+      assert(kinds.has('turn.user_message'), `应含用户消息事实（实得: ${[...kinds].join(',')}）`);
+      // 反证词形唯一：载荷里不应出现 snake_case 那套写法
+      assert(
+        ![...kinds].some((k) => k.includes('_') && !k.includes('.')),
+        `kind 不应出现 snake_case 词形（实得: ${[...kinds].join(',')}）`,
+      );
 
       // ⑤ 确定性（A4）：同一份磁盘连调两次，两串事实**逐字节相同**
       const facts2 = dataOf(await cli.invoke('fact_log/list', {}), 'fact_log/list(第二次)');

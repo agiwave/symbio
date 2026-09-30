@@ -49,11 +49,14 @@ impl ActorPattern {
 
 /// Actor 的**作用域** —— 它属于哪一层装配。
 ///
-/// 与 [`ASSEMBLY_SUB_AGENT_PLUGINS`](crate::ASSEMBLY_SUB_AGENT_PLUGINS) 的分形层级
-/// 同构：root 会话是 [`Root`](Self::Root)，子智能体树是 [`SubAgent`](Self::SubAgent)。
+/// 与 [`ASSEMBLY_SUB_AGENT_PLUGINS`](crate::symbio_core::assembly::ASSEMBLY_SUB_AGENT_PLUGINS)
+/// 的分形层级同构：root 会话是 [`Root`](Self::Root)，子智能体树是
+/// [`SubAgent`](Self::SubAgent)。
 ///
 /// 这是新断言 **A5** 的落点：登记行声明的 `scope` 必须与登记者所在装配层一致——
-/// 越层的行**登记不进去**（见 [`ActorSource::register`](super::ActorSource::register)）。
+/// 越层的行**登记不进去**（登记入口是
+/// [`ActorSource::register_all`](crate::symbio_core::ActorSource::register_all)，
+/// 层由 [`layer`](crate::symbio_core::ActorSource::layer) 给出）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "agent_id")]
 pub enum ActorScope {
@@ -83,7 +86,7 @@ impl ActorScope {
 
 /// 一行主体规格 —— **执行一个 Actor 需要的全部参数**。
 ///
-/// 字段 `pub`：它是**只读描述**（同 [`Fact`](crate::Fact) 的处理），构造经
+/// 字段 `pub`：它是**只读描述**（同 [`Fact`](crate::symbio_core::Fact) 的处理），构造经
 /// [`ActorSpec::new`]。没有 setter——"改一行 Actor" = 重新登记一行，不是就地改。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActorSpec {

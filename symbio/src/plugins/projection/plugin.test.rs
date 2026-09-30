@@ -58,10 +58,11 @@ async fn list_route_returns_registered_names() {
 #[tokio::test]
 async fn run_route_executes_projection() {
     let p = Arc::new(plugin());
+    // `kind` 用 v2 网格词形（`FactKind::wire()`，`序列化同源`）——不是 snake_case。
     let body = json!({
         "name": "session.snapshot",
         "facts": [
-            {"seq":1,"kind":"turn_user_message","principal":"s1",
+            {"seq":1,"kind":"turn.user_message","principal":"s1",
              "caused_by":null,"at_ms":10,
              "payload":{"message_id":"u1","role":"User","type":"Text","timestamp":10}}
         ],
@@ -108,12 +109,13 @@ async fn run_without_payload_is_empty_not_error() {
 #[tokio::test]
 async fn run_is_deterministic() {
     let p = Arc::new(plugin());
+    // 同上：`kind` 一律用 `wire()` 词形（`<实体>.<动词>`）
     let body = json!({
         "name": "session.checkpoint",
         "facts": [
-            {"seq":1,"kind":"turn_user_message","principal":"s1","caused_by":null,
+            {"seq":1,"kind":"turn.user_message","principal":"s1","caused_by":null,
              "at_ms":1,"payload":{"message_id":"u1","role":"User","type":"Text"}},
-            {"seq":2,"kind":"turn_assistant_final","principal":"s1","caused_by":1,
+            {"seq":2,"kind":"turn.assistant_final","principal":"s1","caused_by":1,
              "at_ms":2,"payload":{"message_id":"a1","role":"Assistant","type":"Text"}}
         ],
         "at_ms": 5

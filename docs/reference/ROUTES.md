@@ -331,6 +331,34 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 ---
 
+## v2 桥接插件（**全部可选**）
+
+下面四个插件是 v2 桥接（[`docs/plan/06-落地桥接方案.md`](../plan/06-落地桥接方案.md)）的
+产物，共同点是**都不在 `ASSEMBLY_SUB_AGENT_PLUGINS` 里** ⇒ 真可选：目录删掉或
+`plugin_enabled: false`，其余机制**零影响**（会话照常、路由其它条目照常）。
+
+它们各自**恰好一条**内省路由（与"一个插件一件事"同款），且**互不 import**——
+跨插件协作只经 `symbio_core` 的登记表（事实源 / 投影表 / Actor 表），不靠彼此。
+
+| 插件 | 路径 | 用途 | 步骤 |
+|------|------|------|------|
+| `fact_log` | `fact_log/list` | 列出从磁盘派生的只读事实（`turn.*` / `artifact.*`） | B1 |
+| `projection` | `projection/list` | 列出已登记投影名 | B2 |
+| `projection` | `projection/run` | 跑一次命名投影（纯函数，输入只有事实） | B2 |
+| `actor` | `actor/list` | 列出全部 Actor 行（主体规格） | B3 |
+| `retrieval` | `retrieval/list` | 派生可召回事实 → 跑 `memory.recall` → 回 `{facts, recall, degraded, actor}` | B4 |
+
+> `retrieval/list` 的 `degraded: true` 表示「`memory.recall` 投影未登记」——
+> 那是**平凡值**（能力未接入）而不是错误：检索退化为只看当前窗口，
+> 与未装 `session` 之外的任何东西时行为一致。停用 `retrieval` 则整条路由
+> **不可达**（`NotFound`），两态可区分。
+
+> **`session` 侧的投影不在此表**：`session.snapshot` / `session.display` /
+> `session.checkpoint` / `memory.recall` 是**登记进投影表**的名字，不是路由；
+> 取用经 `projection/run`（按名寻址），或由 `retrieval` 这类消费者自行调用。
+
+---
+
 ## 退役路由索引
 
 **只登记「路径 → 现在去哪」，不写过程叙述**（决策与理由见 [DECISIONS.md](../DECISIONS.md)、
