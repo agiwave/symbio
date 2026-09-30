@@ -52,7 +52,7 @@ pub use actors::{
     ActorSpec, ApprovedIntent, AutonomousInitiator, CircuitBreaker, CommitmentKeeper,
     ConationCandidate, ConationPolicy, Decider, DeciderMiss, GateDecision, GateWarrant,
     IntentDecision, IntentGate, Pattern, Preemption, PreemptionDecider, Reasoner, RecallTranslator,
-    Scope, SkillCompiler, SkillRoute, SkillRouter,
+    Scope, SkillCompiler, SkillRoute, SkillRouter, TurnOutcome, TurnRunner,
 };
 // 事件名字表（名字是数据，单点定义）。
 pub use event::{

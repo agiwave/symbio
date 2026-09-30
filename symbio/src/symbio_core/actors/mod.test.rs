@@ -1862,3 +1862,168 @@ fn latency_tier_name_round_trip() {
     assert_eq!(LatencyTier::from_name("gpu"), None);
     assert_eq!(LatencyTier::from_name(""), None);
 }
+
+// ── v2 会话运行时：TurnRunner 验收（不变量靠构造成立 + WAL 持久 + 兜底联动）──
+
+mod turn_runner_tests {
+    use crate::symbio_core::adapters::{LatencyTier, StubLlmAdapter, TokenIssuer};
+    use crate::symbio_core::store::Store;
+    use crate::symbio_core::{
+        check_all, cost_ledger, fallback_rate, Budget, Event, Seq, TurnRunner, WalStore,
+    };
+
+    /// 成功轮：final 落格、溯源指向本轮用户消息、实测 cost_ms > 0、
+    /// 不变量绿、收束投影 settled；成本台账与兜底率同账（ADR-044）。
+    #[tokio::test]
+    async fn turn_runner_happy_path_lands_final_with_measured_cost() {
+        let store = crate::symbio_core::EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = StubLlmAdapter::succeed("stub-model");
+
+        let out = TurnRunner
+            .run(&store, &llm, &tok, 0, "你好", LatencyTier::Deep)
+            .await
+            .expect("桩必答");
+        assert_eq!(out.turn, 0);
+        assert!(!out.fell_back);
+        assert!(out.text.contains("你好"), "桩回显 prompt：{}", out.text);
+        // 桩零延迟 ⇒ cost_ms 可为 0（诚实值）；真实链路的正数断言在真实端点彩排里。
+
+        let snapshot = store.range(Seq::new(0));
+        assert!(
+            check_all(&snapshot).is_empty(),
+            "{:?}",
+            check_all(&snapshot)
+        );
+
+        // 成本台账：实测值入账（agent:main 一笔）。
+        let ledger = cost_ledger().apply(&snapshot, i64::MAX, Budget::generous());
+        assert_eq!(ledger.value.of("agent:main").spent_ms, out.cost_ms);
+
+        // 兜底率：deep 档 1 turn，0 兜底。
+        let fr = fallback_rate().apply(&snapshot, i64::MAX, Budget::generous());
+        let deep = fr.value.of("deep");
+        assert_eq!((deep.turns, deep.fallbacks), (1, 0));
+        assert_eq!(deep.rate(), 0.0);
+
+        // turnstate：收束且 final 可见。
+        let view = crate::symbio_core::turnstate().apply(&snapshot, 0, Budget::generous());
+        assert!(view.value.settled() && view.value.final_text.is_some());
+    }
+
+    /// 失败轮（I3）：兜底事件落格（`turn × closed` + `why`），`fell_back = true`，
+    /// 不变量照常绿——「失败也是一句话」，不是静默。
+    #[tokio::test]
+    async fn turn_runner_failure_lands_fallback_not_silence() {
+        let store = crate::symbio_core::EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = StubLlmAdapter::always_fail("模型挂了");
+
+        let out = TurnRunner
+            .run(&store, &llm, &tok, 0, "你好", LatencyTier::Deep)
+            .await
+            .expect("兜底路径仍返回 Ok（轮次本身收束了）");
+        assert!(out.fell_back, "失败轮必须走兜底");
+        assert!(
+            out.text.contains("模型挂了"),
+            "兜底话术 = 失败原因：{}",
+            out.text
+        );
+
+        let snapshot = store.range(Seq::new(0));
+        assert!(
+            check_all(&snapshot).is_empty(),
+            "{:?}",
+            check_all(&snapshot)
+        );
+
+        // 兜底率：deep 档 1 turn 1 兜底 = 100%（被看见，不是被藏）。
+        let fr = fallback_rate().apply(&snapshot, i64::MAX, Budget::generous());
+        let deep = fr.value.of("deep");
+        assert_eq!((deep.turns, deep.fallbacks), (1, 1));
+        assert_eq!(deep.rate(), 1.0);
+    }
+
+    /// WAL 持久：多轮写入 → 重开 → 逐字节一致（N2 家族：恢复 = 重放，
+    /// 投影不需要状态迁移）；turn 号跨重启由调用方续排（N3 仍成立）。
+    #[tokio::test]
+    async fn turn_runner_over_wal_survives_reopen() {
+        let dir = std::env::temp_dir().join(format!("symbio-turn-runner-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("临时目录");
+        let wal = dir.join("session.wal");
+
+        let tok = TokenIssuer::issue_deep();
+        let llm = StubLlmAdapter::succeed("stub-model");
+        {
+            let store = WalStore::<Event>::open(&wal).expect("open");
+            for turn in 0..3u64 {
+                TurnRunner
+                    .run(&store, &llm, &tok, turn, "问", LatencyTier::Deep)
+                    .await
+                    .expect("桩必答");
+            }
+        } // drop ⇒ 文件在盘上
+
+        let reopened = WalStore::<Event>::open(&wal).expect("reopen");
+        assert_eq!(reopened.head().value(), 6, "3 轮 × 2 事件");
+
+        // 恢复后直接续排（turn 号接续）——N3 由 turn 号单调保证。
+        let out = TurnRunner
+            .run(&reopened, &llm, &tok, 3, "再问", LatencyTier::Deep)
+            .await
+            .expect("桩必答");
+        assert_eq!(out.turn, 3);
+
+        let snapshot = reopened.range(Seq::new(0));
+        assert!(
+            check_all(&snapshot).is_empty(),
+            "{:?}",
+            check_all(&snapshot)
+        );
+        assert_eq!(snapshot.len(), 8);
+
+        // 与一遍直写（不经过重启）的台账逐字节一致（N1/N2 家族）。
+        let fresh = crate::symbio_core::EventStore::new();
+        for turn in 0..4u64 {
+            TurnRunner
+                .run(
+                    &fresh,
+                    &llm,
+                    &tok,
+                    turn,
+                    if turn == 3 { "再问" } else { "问" },
+                    LatencyTier::Deep,
+                )
+                .await
+                .unwrap();
+        }
+        let a = cost_ledger().apply(&snapshot, i64::MAX, Budget::generous());
+        let b = cost_ledger().apply(&fresh.range(Seq::new(0)), i64::MAX, Budget::generous());
+        assert_eq!(a.value.total_ms, b.value.total_ms, "恢复后的台账与直写一致");
+        assert_eq!(a.value.by_principal, b.value.by_principal);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 多轮 turn 号单调：N3（每 turn ≤ 1 条 final）由构造成立——
+    /// 同一 turn 号重复使用被幂等键挡住（事件 id 撞车 ⇒ Duplicate）。
+    #[tokio::test]
+    async fn turn_runner_reused_turn_number_is_rejected() {
+        let store = crate::symbio_core::EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = StubLlmAdapter::succeed("stub-model");
+
+        TurnRunner
+            .run(&store, &llm, &tok, 0, "第一轮", LatencyTier::Deep)
+            .await
+            .unwrap();
+        let err = TurnRunner
+            .run(&store, &llm, &tok, 0, "重复 turn 号", LatencyTier::Deep)
+            .await;
+        assert!(err.is_err(), "事件 id 撞车必须被 Store 幂等键拒绝");
+        assert!(matches!(
+            err,
+            Err(crate::symbio_core::store::AppendError::Duplicate)
+        ));
+    }
+}

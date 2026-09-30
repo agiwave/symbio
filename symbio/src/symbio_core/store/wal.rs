@@ -105,6 +105,12 @@ where
         // 先落盘、再提交内存：盘上是唯一权威（崩溃 ⇒ 已落的还在，没落的不算）。
         // 写盘失败 = 不可继续的存储层灾难，直接 panic（不吞错）——静默返回会让
         // 调用方误以为事件已提交，比崩溃更糟的静默失效。
+        //
+        // seq 必须在序列化**之前**赋上（2026-09-30 实测事故）：否则盘上每行
+        // `seq: null`，重开恢复的事件全部丢序——readyset 排序退化为 u64::MAX、
+        // seq_monotonic 从 0 重新计数，N2（重放一致性）静默破裂。
+        let seq = Seq::new(inner.head);
+        event.assign_seq(seq);
         let line = serde_json::to_vec(&event).expect("事件序列化失败（serde 不可能败于自有类型）");
         let mut file = std::fs::OpenOptions::new()
             .create(true)
@@ -116,8 +122,6 @@ where
             .and_then(|_| file.flush())
             .and_then(|_| file.sync_data())
             .expect("WAL 写入失败（存储层灾难，不可静默）");
-        let seq = Seq::new(inner.head);
-        event.assign_seq(seq);
         inner.ids.insert(event.event_id().to_string());
         inner.events.push(event);
         inner.head += 1;

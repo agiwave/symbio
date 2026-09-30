@@ -19,10 +19,10 @@ use super::ProviderLlmAdapter;
 use crate::plugins::model::bound_provider::BoundProvider;
 use crate::plugins::model::model_providers::ModelProviderConfig;
 use crate::plugins::model::protocols::openai_chat::OpenaiChatProtocol;
-use crate::symbio_core::adapters::{LlmAdapter as _, TokenIssuer};
+use crate::symbio_core::adapters::{LatencyTier, LlmAdapter as _, TokenIssuer};
 use crate::symbio_core::{
-    check_all, cost_ledger, turnstate, Budget, Entity, Event, EventStore, Reasoner, Seq, Store,
-    Verb, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+    check_all, cost_ledger, fallback_rate, turnstate, Budget, Entity, Event, EventStore, Reasoner,
+    Seq, Store, Verb, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 
 /// 一次性 OpenAI-SSE mock：收一个请求、回一段流、把收到的原始请求存档。
@@ -300,50 +300,37 @@ async fn real_provider_full_calibration() {
         Arc::new(OpenaiChatProtocol),
     )));
 
+    // 完整 v2 运行器彩排：事实落 **WalStore**（持久事实源），TurnRunner 负责
+    // 用户消息入格 / final-fallback 收束 / 实测成本入账（chat_loop 切换的
+    // 预演——未来会话链路直接复用 TurnRunner）。
+    let dir = std::env::temp_dir().join(format!("symbio-rehearse-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("临时目录");
+    let wal = dir.join("rehearse.wal");
+    let store = crate::symbio_core::EventWalStore::open(&wal).expect("open wal");
     let tok = TokenIssuer::issue_deep();
-    let store = EventStore::new();
 
     let mut samples: Vec<u64> = Vec::new();
     for i in 0..rounds {
-        // 每轮独立成 turn（N3 发言唯一性：每 turn ≤ 1 条 final——turn 号随轮次走）。
-        store
-            .append(
-                Event::pending(
-                    format!("u-{i}"),
-                    EVENT_USER_MESSAGE,
-                    Entity::Turn,
-                    Verb::Opened,
-                    i as u64,
-                    "user",
-                )
-                .with_payload(json!({ "text": "用一句话说明什么是事件溯源。" })),
+        let out = crate::symbio_core::TurnRunner
+            .run(
+                &store,
+                &adapter,
+                &tok,
+                i as u64,
+                "用一句话说明什么是事件溯源。",
+                LatencyTier::Deep,
             )
-            .unwrap();
-        let user_seq = store.head().value();
-        let snapshot = store.range(Seq::new(0));
-        let (reply, cost_ms) = Reasoner
-            .reply_timed(&adapter, &tok, &snapshot)
             .await
-            .unwrap_or_else(|e| panic!("第 {i} 轮真实调用失败：{e:?}"));
-        assert!(!reply.trim().is_empty(), "第 {i} 轮空回复");
-        assert!(cost_ms <= 60_000, "第 {i} 轮 {cost_ms}ms 超深度档预算");
-        store
-            .append(
-                Event::pending(
-                    format!("f-{i}"),
-                    EVENT_ASSISTANT_FINAL,
-                    Entity::Turn,
-                    Verb::Closed,
-                    i as u64,
-                    "agent:main",
-                )
-                .with_produced_by(user_seq)
-                .with_cost_ms(cost_ms)
-                .with_payload(json!({ "text": reply, "model": adapter.model_id() })),
-            )
-            .unwrap();
-        samples.push(cost_ms);
-        println!("[{i:>2}/{rounds}] {cost_ms:>6}ms  {reply}");
+            .unwrap_or_else(|e| panic!("第 {i} 轮落格失败：{e:?}"));
+        assert!(!out.fell_back, "第 {i} 轮走了兜底：{}", out.text);
+        assert!(!out.text.trim().is_empty(), "第 {i} 轮空回复");
+        assert!(
+            out.cost_ms <= 60_000,
+            "第 {i} 轮 {}ms 超深度档预算",
+            out.cost_ms
+        );
+        samples.push(out.cost_ms);
+        println!("[{i:>2}/{rounds}] {:>6}ms  {}", out.cost_ms, out.text);
         // 轮内即时校验：N3 / 溯源等不变量每轮都不破（别攒到最后一起炸）。
         let snapshot = store.range(Seq::new(0));
         assert!(
@@ -360,13 +347,29 @@ async fn real_provider_full_calibration() {
         check_all(&snapshot)
     );
 
+    // 成本台账 + 兜底率：实测报告的另外两列（ADR-044 同一事实源）。
+    let ledger = cost_ledger().apply(&snapshot, i64::MAX, Budget::generous());
+    println!(
+        "成本台账：agent:main {}ms（{} 笔）",
+        ledger.value.of("agent:main").spent_ms,
+        ledger.value.of("agent:main").entries
+    );
+    let fr = fallback_rate().apply(&snapshot, i64::MAX, Budget::generous());
+    let deep = fr.value.of("deep");
+    assert_eq!(
+        (deep.turns, deep.fallbacks),
+        (rounds as u64, 0),
+        "全成功轮的兜底率必须为 0"
+    );
+
     samples.sort_unstable();
     let p50 = samples[samples.len() / 2];
     let p95 = samples[samples.len() * 95 / 100];
     let max = samples[samples.len() - 1];
     let total: u64 = samples.iter().sum();
-    println!("═══ 真实端点完整校准（{rounds} 轮，{model}）═══");
+    println!("═══ 真实端点完整校准（{rounds} 轮，{model}，WalStore 持久）═══");
     println!("样本：{samples:?}");
     println!("P50 = {p50}ms · P95 = {p95}ms · max = {max}ms · 总耗 = {total}ms");
     println!("（系统自身开销基线：P50 = 1ms / max = 3ms，见 docs/plan/slo-calibration.md）");
+    std::fs::remove_dir_all(&dir).ok();
 }

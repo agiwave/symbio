@@ -152,6 +152,14 @@ pub enum AdapterError {
     GenerationFailed(String),
 }
 
+impl std::fmt::Display for AdapterError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AdapterError::GenerationFailed(why) => write!(f, "生成失败：{why}"),
+        }
+    }
+}
+
 /// LLM 端口（⑤ 的抽象面）。**generate 只接受 `FullModel`**——反射/快速档
 /// 在类型上拿不到生成能力。
 ///

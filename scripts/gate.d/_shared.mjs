@@ -352,7 +352,13 @@ export const BASELINE = {
   // 1187（兜底率统计，2026-09-30）：**SLO §1.2 兜底率列的口径落地**——`1185 → 1187`，**+2**。
   //      ③ fallback_rate 投影（按档统计兜底率；turn 档位 = 用户消息载荷 tier，
   //      缺失进 unspecified 桶可观测）+ LatencyTier::name/from_name 往返。
-  rustTests: 1187,
+  // 1191（turn 运行器 + WAL seq 修复，2026-09-30）：**chat_loop 切换的第一块**——`1187 → 1191`，**+4**。
+  //      ② TurnRunner（actors 域）：单轮 = 用户消息入格（tier 随载荷）→ Reasoner
+  //      生成（实测耗时）→ final/fallback 落格——N3/N5/实测成本靠构造成立；
+  //      I3 失败也落事件。真锅：WalStore 落盘行 seq 全 null（assign_seq 在序列化
+  //      之后）——重开恢复丢序，N2 静默破裂；修复 = 赋 seq 先于序列化，
+  //      重开 check_all 绿（此前 S4 测试没走到这条所以没炸）。
+  rustTests: 1191,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

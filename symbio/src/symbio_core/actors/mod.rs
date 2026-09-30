@@ -26,8 +26,12 @@
 //! - `Decider`：[plan/05 §4](../../../../docs/plan/05-模块架构.md) S8 的反射档判定者，
 //!   S1 先以规则应答形态落地。
 
-use crate::symbio_core::adapters::{AdapterError, FullModel, LlmAdapter};
-use crate::symbio_core::event::Event;
+use crate::symbio_core::adapters::{AdapterError, FullModel, LatencyTier, LlmAdapter};
+use crate::symbio_core::event::{
+    Entity, Event, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+};
+use crate::symbio_core::store::Store;
+use crate::symbio_core::Seq;
 
 /// 主体模式（[plan/01 §4](../../../../docs/plan/01-核心架构.md)：机制，**3 个封顶**）。
 ///
@@ -700,6 +704,117 @@ impl SkillRouter {
         } else {
             SkillRoute::ReasonerFallback {
                 budget_ms: crate::symbio_core::adapters::LatencyTier::Fast.budget_ms(),
+            }
+        }
+    }
+}
+
+// ── v2 会话运行时：turn 运行器（chat_loop 切换的第一块可复用件）────────
+//
+// 职责把 [plan/04 §2](../../../../docs/plan/04-工程落地.md) 的单轮流程落成
+// 一个函数调用：用户消息入格 → [`Reasoner`] 生成（实测耗时）→ final / fallback
+// 落格（I3：失败也必须有输出）。不变量靠构造成立：每轮独立 turn 号（N3）、
+// final 溯源指向本轮用户消息（N5）、实测 cost_ms 随事件入账（ADR-044）。
+// 未来 chat_loop 切到 v2 链路时复用本运行器；当前由真实端点校准彩排使用。
+
+/// 一轮的结果：`fell_back = false` ⇒ 模型作答；`true` ⇒ 兜底（`text` 即
+/// 失败原因，可观测——I3 的「到点必答」落在这里）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnOutcome {
+    pub turn: u64,
+    pub text: String,
+    pub cost_ms: u64,
+    pub fell_back: bool,
+}
+
+/// turn 运行器：持令牌的调用方对每个会话轮调用一次。
+pub struct TurnRunner;
+
+impl TurnRunner {
+    /// 跑一轮：用户消息（声明档位）→ 生成 → 收束事件落格。
+    ///
+    /// `turn` 是本轮的 turn 号（调用方保证单调递增——它就是 N3 的轮次锚）；
+    /// `tier` 是**本轮装配进哪一档**的调度决定，随用户消息入格（ADR-044：
+    /// 档位是数据）。令牌 `tok` 是闸门：只有持 `FullModel` 的调用方进得来
+    /// （反射/快速档在类型上就到不了这里）。
+    pub async fn run<S>(
+        &self,
+        store: &S,
+        llm: &dyn LlmAdapter,
+        tok: &FullModel,
+        turn: u64,
+        text: &str,
+        tier: LatencyTier,
+    ) -> Result<TurnOutcome, crate::symbio_core::store::AppendError>
+    where
+        S: Store<Event = Event>,
+    {
+        // 1. 用户消息入格（turn × opened），档位随载荷入账。
+        let user_seq = store
+            .append(
+                Event::pending(
+                    format!("u-{turn}"),
+                    EVENT_USER_MESSAGE,
+                    Entity::Turn,
+                    Verb::Opened,
+                    turn,
+                    "user",
+                )
+                .with_payload(serde_json::json!({ "text": text, "tier": tier.name() })),
+            )
+            .map(|seq| seq.value())?;
+        let snapshot = store.range(Seq::new(0));
+
+        // 2. 生成（实测耗时在 adapter 边界取得；失败路径的耗时从调用起点算）。
+        let started = std::time::Instant::now();
+        match Reasoner.reply_timed(llm, tok, &snapshot).await {
+            Ok((reply, cost_ms)) => {
+                // 3a. final 落格：溯源指向本轮用户消息（N5），实测成本随事件入账。
+                store.append(
+                    Event::pending(
+                        format!("f-{turn}"),
+                        EVENT_ASSISTANT_FINAL,
+                        Entity::Turn,
+                        Verb::Closed,
+                        turn,
+                        "agent:main",
+                    )
+                    .with_produced_by(user_seq)
+                    .with_cost_ms(cost_ms)
+                    .with_payload(serde_json::json!({
+                        "text": reply,
+                        "model": llm.model_id(),
+                    })),
+                )?;
+                Ok(TurnOutcome {
+                    turn,
+                    text: reply,
+                    cost_ms,
+                    fell_back: false,
+                })
+            }
+            Err(e) => {
+                // 3b. 兜底落格（I3：到点必答——失败也是一句话，不是静默）。
+                let cost_ms = started.elapsed().as_millis() as u64;
+                store.append(
+                    Event::pending(
+                        format!("fb-{turn}"),
+                        EVENT_ASSISTANT_FALLBACK,
+                        Entity::Turn,
+                        Verb::Closed,
+                        turn,
+                        "agent:main",
+                    )
+                    .with_produced_by(user_seq)
+                    .with_cost_ms(cost_ms)
+                    .with_payload(serde_json::json!({ "why": e.to_string() })),
+                )?;
+                Ok(TurnOutcome {
+                    turn,
+                    text: e.to_string(),
+                    cost_ms,
+                    fell_back: true,
+                })
             }
         }
     }
