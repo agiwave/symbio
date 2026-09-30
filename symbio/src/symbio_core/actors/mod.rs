@@ -188,6 +188,44 @@ impl Reasoner {
     }
 }
 
+/// 检索 Translator（`pattern = Translator` 的 S5 形态，[plan/01 §9.2](../../../../docs/plan/01-核心架构.md)）。
+///
+/// **Translator 不创造信息**：召回内容原样来自 `RecallView`（③ 的投影产出），
+/// 本体的职责只是把「读视图」落成「一条事实」——`memory.recalled` 事件
+/// （`memory × asserted` 格子，带溯源指向触发它的事件）。检索是
+/// 「读视图 → 产出事实」，这正是 Actor 定义对 Translator 的要求。
+pub struct RecallTranslator;
+
+impl RecallTranslator {
+    /// 把召回结果固化为一条 `memory.recalled` 事件。
+    ///
+    /// `trigger_seq`：触发本次检索的事件 seq（溯源锚——I2：断言类必带溯源）。
+    pub fn recalled_event(
+        &self,
+        view: &crate::symbio_core::view::RecallView,
+        trigger_seq: u64,
+    ) -> Event {
+        let top = view
+            .entries
+            .first()
+            .map(|e| e.content.as_str())
+            .unwrap_or("");
+        Event::pending(
+            format!("recalled-{trigger_seq}"),
+            crate::symbio_core::event::EVENT_MEMORY_RECALLED,
+            crate::symbio_core::event::Entity::Memory,
+            crate::symbio_core::event::Verb::Asserted,
+            0,
+            "agent:main",
+        )
+        .with_produced_by(trigger_seq)
+        .with_payload(serde_json::json!({
+            "found": view.entries.len(),
+            "top": top,
+        }))
+    }
+}
+
 #[cfg(test)]
 #[path = "mod.test.rs"]
 mod tests;

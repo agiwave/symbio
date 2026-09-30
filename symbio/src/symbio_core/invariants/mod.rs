@@ -93,11 +93,12 @@ pub fn final_unique_per_turn(events: &[Event]) -> Vec<Violation> {
 
 /// C3 / N5（I2）：**声明类**事件必须带溯源。
 ///
-/// 「声明」= 宣称某件事为真或已发生，两类（[plan/03 §2 I2](../../../../docs/plan/03-演进与验证.md)）：
+/// 「声明」= 宣称某件事为真或已发生，三类（[plan/03 §2 I2](../../../../docs/plan/03-演进与验证.md)）：
 /// - **断言类**（`verb == Asserted`）：`task.verified` / `artifact.added` / `classify.verdict`…
 /// - **收束类**（`turn × closed` 的 `chat.assistant.final` / `chat.assistant.fallback`）：
-///   宣称"已经答复"（[roadmap/S01 §5](../../../../docs/plan/roadmap/S01-最小闭环.md)：
-///   回复必须有 `produced_by`——否则用户收到了话，却查不到它是怎么来的）。
+///   宣称"已经答复"（[roadmap/S01 §5](../../../../docs/plan/roadmap/S01-最小闭环.md)）；
+/// - **记忆类**（`entity == memory`，S5）：宣称"学到了什么"（[roadmap/S06](../../../../docs/plan/roadmap/S06-长期记忆与语义检索.md)
+///   步骤 11 出口判据：溯源覆盖 100%——无溯源的记忆无法审计，也无法在遗忘时被追溯）。
 ///
 /// 没有溯源的声明**无法审计也无法撤销**——静默失效的温床（J3）。
 pub fn produced_by_coverage(events: &[Event]) -> Vec<Violation> {
@@ -105,22 +106,23 @@ pub fn produced_by_coverage(events: &[Event]) -> Vec<Violation> {
         .iter()
         .filter(|e| needs_provenance(e) && e.produced_by.is_none())
         .map(|e| {
-            Violation::at(
-                e,
-                if e.verb == Verb::Asserted {
-                    "断言类事件必须带 produced_by（I2 无溯源不声明）"
-                } else {
-                    "收束类事件（答复）必须带 produced_by（I2：用户收到的话必须可追溯）"
-                },
-            )
+            let why = if e.verb == Verb::Asserted {
+                "断言类事件必须带 produced_by（I2 无溯源不声明）"
+            } else if e.entity == Entity::Memory {
+                "记忆事件必须带 produced_by（I2：溯源覆盖 100%）"
+            } else {
+                "收束类事件（答复）必须带 produced_by（I2：用户收到的话必须可追溯）"
+            };
+            Violation::at(e, why)
         })
         .collect()
 }
 
 /// I2 的覆盖判据（参照 [`docs/plan/verify/invariants.rs`](../../../../docs/plan/verify/invariants.rs)
-/// 的 `needs_provenance`，S1 扩展收束类）。
+/// 的 `needs_provenance`；S1 扩展收束类，S5 扩展记忆类）。
 fn needs_provenance(e: &Event) -> bool {
     e.verb == Verb::Asserted
+        || e.entity == Entity::Memory
         || (e.entity == Entity::Turn
             && e.verb == Verb::Closed
             && matches!(

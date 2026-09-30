@@ -55,6 +55,19 @@ pub const EVENT_ASSISTANT_FALLBACK: &str = "chat.assistant.fallback";
 /// 载荷携带可序列化的 checkpoint 状态。落在 `thread × progressed`。
 pub const EVENT_THREAD_CHECKPOINT: &str = "thread.checkpoint";
 
+// ── 记忆格子（S5，[roadmap/S06 §3](../../../../docs/plan/roadmap/S06-长期记忆与语义检索.md)）────
+
+/// 编码：学到的语义内容 + embedding（`payload: { content, tag, vec }`）。
+/// 落在 `memory × opened`。**记忆必带溯源**（I2 扩展：溯源覆盖 100%）。
+pub const EVENT_MEMORY_ENCODED: &str = "memory.encoded";
+/// 巩固：压缩 + 反事实（不是逐帧回放）。落在 `memory × progressed`。
+pub const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";
+/// 遗忘：**不是物理删除**——Log 永不删，只是投影不再包含（可撤销、可审计）。
+/// 落在 `memory × closed`。
+pub const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
+/// 召回：检索 Translator 的产出（读视图 → 产出事实）。落在 `memory × asserted`。
+pub const EVENT_MEMORY_RECALLED: &str = "memory.recalled";
+
 /// 事件实体 —— 语法网格的**行**，闭集（F5，10 个）。
 ///
 /// 新增实体是 L-schema 变化（[plan/03 §2](../../../../docs/plan/03-演进与验证.md)）：

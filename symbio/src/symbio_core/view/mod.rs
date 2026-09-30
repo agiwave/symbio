@@ -8,6 +8,7 @@
 //! **F2** 的后半句：投影返回 `View` 而**不是** `Result`——「可降级」是类型义务
 //! 而不是约定：超预算的投影返回 `degraded: true`，对话永不因状态爆炸而中断。
 
+use serde::{Deserialize, Serialize};
 /// 投影预算（I3 记账口径）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Budget {
@@ -54,5 +55,40 @@ impl<V> View<V> {
             degraded: true,
             used,
         }
+    }
+}
+
+// ── 召回视图（S5，[plan/01 §9](../../../../docs/plan/01-核心架构.md)）────────────────
+//
+// 住 view 域的理由（[plan/05 §3.1](../../../../docs/plan/05-模块架构.md)）：③ 的投影
+// 产出它、② 的检索 Translator 消费它——跨包共享的**视图类型**必须住中性层，
+// 谁也不持有谁的句柄。
+
+use crate::symbio_core::event::Timestamp;
+
+/// 一条被召回的记忆。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecallEntry {
+    /// 来源事件（`memory.encoded`）的 seq——溯源到事实。
+    pub seq: u64,
+    /// 编码时间（Unix 毫秒）。
+    pub ts: Timestamp,
+    /// 内容（编码时的正文）。
+    pub content: String,
+    /// 认知内容标签（七类，[plan/01 §9.1](../../../../docs/plan/01-核心架构.md)；
+    /// 「记忆类型」不是枚举，是过滤参数——加第六类只加参数）。
+    pub tag: String,
+}
+
+/// 召回视图：as-of 可见、未被遗忘、按新近度排序的记忆条目。
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct RecallView {
+    pub entries: Vec<RecallEntry>,
+}
+
+impl RecallView {
+    /// 是否包含某内容（跨主体隔离断言 C13 的观测面）。
+    pub fn contains_content(&self, content: &str) -> bool {
+        self.entries.iter().any(|e| e.content == content)
     }
 }

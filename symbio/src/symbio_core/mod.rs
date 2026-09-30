@@ -32,18 +32,23 @@ pub use invariants::{
     unresolved_turns, Violation,
 };
 pub use projection::checkpoint::{checkpoint, CheckpointState};
+pub use projection::consolidate::{accept as consolidate_accept, ConsolidateParams, Rejection};
+pub use projection::recall::recall;
 pub use projection::turnstate::{turnstate, TurnState};
 pub use projection::Projection;
 pub use store::wal::{EventWalStore, WalStore};
 pub use store::{AppendError, EventStore, MemoryStore, Store};
 pub use view::{Budget, View};
+pub use view::{RecallEntry, RecallView};
 
 // ==================== 主体（v2 阶段 S1，② actors） ====================
 // 只收类型化输入、只产事件（plan/05 §3.1 ② 行）；S1 落 Decider 平凡值，S2 加 Reasoner。
-pub use actors::{ActorSpec, Decider, DeciderMiss, Pattern, Reasoner, Scope};
+pub use actors::{ActorSpec, Decider, DeciderMiss, Pattern, Reasoner, RecallTranslator, Scope};
 // 事件名字表（名字是数据，单点定义）。
 pub use event::{
-    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_THREAD_CHECKPOINT, EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CONSOLIDATED,
+    EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED, EVENT_THREAD_CHECKPOINT,
+    EVENT_USER_MESSAGE,
 };
 
 // ==================== 适配器（v2 阶段 S2，⑤ adapters） ====================
