@@ -104,6 +104,10 @@ pub enum PairingViolation {
     WriteOnly { principal: String },
     /// 只有读侧（无 grants）——拒绝。
     ReadOnly { principal: String },
+    /// 同一主体同时持有 `DefineWork` 与 `AssertVerification`（C15：不自验）——拒绝。
+    /// 验证者 ≠ 产出者不是纪律是构造期约束：双持的主体给自己的产物盖章，
+    /// 质量闸门等于没有（S7 第 17 步，[roadmap/S03 §5](../../../../docs/plan/roadmap/S03-多步任务与返工.md)）。
+    SelfVerifier { principal: String },
 }
 
 /// 授权矩阵（S3 第 7 步产物）。
@@ -127,6 +131,14 @@ impl PermissionMatrix {
             }
             if p.vis_scope.is_none() {
                 return Err(PairingViolation::WriteOnly {
+                    principal: p.principal.clone(),
+                });
+            }
+            // C15（不自验）：DefineWork + AssertVerification 不得同持。
+            let defines = p.grants.contains(&Capability::DefineWork);
+            let verifies = p.grants.contains(&Capability::AssertVerification);
+            if defines && verifies {
+                return Err(PairingViolation::SelfVerifier {
                     principal: p.principal.clone(),
                 });
             }

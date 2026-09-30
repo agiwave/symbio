@@ -84,6 +84,24 @@ pub const EVENT_COMMITMENT_BROKEN: &str = "commitment.broken";
 /// 落在 `commitment × asserted`。
 pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
 
+// ── 任务格子（S7 第 16–18 步，[roadmap/S03 §3](../../../../docs/plan/roadmap/S03-多步任务与返工.md)）──
+//
+// 任务图（DAG）= 事件的 `depends_on` 载荷字段——**数据，不是机制**；
+// 返工 = 新增一条事件（`task.rework_created`），不是修改历史（append-only
+// 已经提供了撤销语义）。落在 `task × opened / progressed / held / asserted`。
+
+/// 开任务：载荷 `{ task_id, depends_on, goal }`。落在 `task × opened`。
+pub const EVENT_TASK_OPENED: &str = "task.opened";
+/// 推进：执行中的普通事实。落在 `task × progressed`。
+pub const EVENT_TASK_PROGRESS: &str = "task.progress";
+/// 暂挂（如等外部资源）。落在 `task × held`。
+pub const EVENT_TASK_HELD: &str = "task.held";
+/// 终态：验证通过（验收通过才终态）。落在 `task × asserted`。
+pub const EVENT_TASK_ASSERTED: &str = "task.asserted";
+/// 返工：判定不合格 ⇒ **新增一条事件**（重开一个返工节点），不是回滚。
+/// 落在 `task × asserted`（返工本身是一次质量判定的事实）。
+pub const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
+
 /// 事件实体 —— 语法网格的**行**，闭集（F5，10 个）。
 ///
 /// 新增实体是 L-schema 变化（[plan/03 §2](../../../../docs/plan/03-演进与验证.md)）：

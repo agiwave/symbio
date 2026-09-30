@@ -195,6 +195,115 @@ pub fn budget_exceeded(events: &[Event], budget_ms: u64) -> Vec<Violation> {
         .collect()
 }
 
+/// C14（终止性前提 3）：任务依赖图**无环且无悬空依赖**（Kahn 拓扑排序）。
+///
+/// 有环的依赖图违反时**没有任何信号**——可能只是永远跑不完（[roadmap/S03 §5](../../../../docs/plan/roadmap/S03-多步任务与返工.md)），
+/// 所以必须是 CI 断言。任务图从 `task.opened` 事件的载荷提取：
+/// `{ task_id, depends_on }`——**图是数据，不是机制**。
+/// 悬空依赖（依赖不存在的任务）同样判违规。反向用例见测试区（验收 1 / 4）。
+pub fn acyclic_deps(events: &[Event]) -> Vec<Violation> {
+    use std::collections::{BTreeMap, BTreeSet};
+    let mut deps: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    let mut opened_at: BTreeMap<&str, &Event> = BTreeMap::new();
+    for e in events {
+        if e.entity != Entity::Task || e.verb != Verb::Opened {
+            continue;
+        }
+        let Some(id) = e.payload.get("task_id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let ds: BTreeSet<&str> = e
+            .payload
+            .get("depends_on")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+            .unwrap_or_default();
+        opened_at.insert(id, e);
+        deps.insert(id, ds);
+    }
+    let ids: BTreeSet<&str> = deps.keys().copied().collect();
+    let mut bad = Vec::new();
+    // 悬空依赖：依赖不存在的任务。
+    for (id, ds) in &deps {
+        for d in ds {
+            if !ids.contains(d) {
+                if let Some(e) = opened_at.get(id) {
+                    bad.push(Violation::at(
+                        e,
+                        format!("任务 {id} 悬空依赖 {d}（依赖不存在）"),
+                    ));
+                }
+            }
+        }
+    }
+    // Kahn：能剥完 = 无环；剥不完 = 剩下的都在环上。
+    let mut indeg: BTreeMap<&str, usize> = deps
+        .iter()
+        .map(|(k, v)| (*k, v.iter().filter(|d| ids.contains(**d)).count()))
+        .collect();
+    let mut ready: Vec<&str> = indeg
+        .iter()
+        .filter(|(_, v)| **v == 0)
+        .map(|(k, _)| *k)
+        .collect();
+    let mut done = 0usize;
+    while let Some(id) = ready.pop() {
+        done += 1;
+        for (t, ds) in &deps {
+            if ds.contains(&id) {
+                let e = indeg.get_mut(t).expect("图节点必在");
+                *e -= 1;
+                if *e == 0 {
+                    ready.push(t);
+                }
+            }
+        }
+    }
+    if done < deps.len() {
+        for (id, deg) in &indeg {
+            if *deg > 0 {
+                if let Some(e) = opened_at.get(id) {
+                    bad.push(Violation::at(
+                        e,
+                        format!("任务 {id} 处在依赖环上（C14：依赖图必须无环）"),
+                    ));
+                }
+            }
+        }
+    }
+    bad
+}
+
+/// 终止性前提 2：每个任务的**返工次数有硬上界**。
+///
+/// 返工 = `task.rework_created` 事件（新增一条事实，不是修改历史）；同一被返工
+/// 节点的返工轮数超过 `max_rework` ⇒ 违规——无上界的返工可能永不终止
+/// （[docs/plan/verify/termination.rs](../../../../docs/plan/verify/termination.rs) 前提 2）。
+pub fn rework_bounded(events: &[Event], max_rework: u32) -> Vec<Violation> {
+    use std::collections::BTreeMap;
+    let mut counts: BTreeMap<String, u32> = BTreeMap::new();
+    let mut bad = Vec::new();
+    for e in events {
+        if e.entity != Entity::Task
+            || e.kind != crate::symbio_core::event::EVENT_TASK_REWORK_CREATED
+        {
+            continue;
+        }
+        let Some(replaces) = e.payload.get("replaces").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let c = counts.entry(replaces.to_string()).or_insert(0);
+        *c += 1;
+        if *c > max_rework {
+            bad.push(Violation::at(
+                e,
+                format!("任务 {replaces} 返工第 {c} 轮，超过上界 {max_rework}（终止性前提 2）"),
+            ));
+        }
+    }
+    bad
+}
+
 #[cfg(test)]
 #[path = "mod.test.rs"]
 mod tests;

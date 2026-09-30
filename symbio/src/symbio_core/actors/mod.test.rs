@@ -861,3 +861,297 @@ fn reputation_double_run_is_identical_and_as_of_safe() {
         .value;
     assert_eq!(now.of("agent:b").score, 0, "违约计入后声誉下降");
 }
+
+// ── S7 彩排（[plan/04 §3](../../../../docs/plan/04-工程落地.md) 第 16–18 步）：任务树与返工 ──
+//
+// 16 DAG 调度 + readyset（C14 无环）；17 独立验证者（C15 不自验，构造期拒绝）；
+// 18 返工闭环（rework_created，返工次数有界 = 终止性前提 2）。
+
+use crate::symbio_core::event::{
+    EVENT_TASK_ASSERTED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
+};
+use crate::symbio_core::invariants::{acyclic_deps, rework_bounded};
+use crate::symbio_core::projection::readyset::readyset;
+
+/// 开一个任务（载荷 `{ task_id, depends_on, goal }`）。
+fn open_task(store: &EventStore, id: &str, depends_on: &[&str], actor: &str) {
+    store
+        .append(
+            Event::pending(
+                format!("o-{id}"),
+                EVENT_TASK_OPENED,
+                Entity::Task,
+                Verb::Opened,
+                0,
+                actor,
+            )
+            .with_payload(
+                serde_json::json!({ "task_id": id, "depends_on": depends_on, "goal": "goal" }),
+            ),
+        )
+        .expect("开任务必入库");
+}
+
+/// 终态：任务验证通过。
+fn assert_task(store: &EventStore, id: &str, actor: &str) {
+    store
+        .append(
+            Event::pending(
+                format!("done-{id}"),
+                EVENT_TASK_ASSERTED,
+                Entity::Task,
+                Verb::Asserted,
+                0,
+                actor,
+            )
+            .with_produced_by(0)
+            .with_payload(serde_json::json!({ "task_id": id })),
+        )
+        .expect("终态必入库");
+}
+
+/// S03 §6 验收 1：构造含环依赖图（a→b→c→a）→ 无环检测必须报错。
+#[test]
+fn cyclic_dependency_graph_is_rejected() {
+    let store = EventStore::new();
+    open_task(&store, "a", &["c"], "agent:main");
+    open_task(&store, "b", &["a"], "agent:main");
+    open_task(&store, "c", &["b"], "agent:main");
+    let bad = acyclic_deps(&store.range(crate::symbio_core::event::Seq::new(0)));
+    assert_eq!(bad.len(), 3, "环上三个节点都要被点名：{bad:?}");
+    assert!(bad[0].why.contains("依赖环"), "{}", bad[0].why);
+}
+
+/// S03 §6 验收 4（反向）：把环去掉一个依赖 → 断言 1 必须通过（检测在算，不是常量 false）。
+#[test]
+fn breaking_one_edge_makes_graph_pass() {
+    let store = EventStore::new();
+    // 同一张图，只去掉 c→b 这条边。
+    open_task(&store, "a", &["c"], "agent:main");
+    open_task(&store, "b", &["a"], "agent:main");
+    open_task(&store, "c", &[], "agent:main");
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    assert!(
+        acyclic_deps(&snapshot).is_empty(),
+        "去边后必须过：{:?}",
+        acyclic_deps(&snapshot)
+    );
+}
+
+/// 悬空依赖：依赖不存在的任务 ⇒ 违规（termination.rs 前提 3 的另一半）。
+#[test]
+fn dangling_dependency_is_rejected() {
+    let store = EventStore::new();
+    open_task(&store, "a", &["ghost"], "agent:main");
+    let bad = acyclic_deps(&store.range(crate::symbio_core::event::Seq::new(0)));
+    assert_eq!(bad.len(), 1, "{bad:?}");
+    assert!(bad[0].why.contains("悬空"), "{}", bad[0].why);
+}
+
+/// S03 §6 验收 2（C15）：同一主体同时持 define.work 与 assert.verification → 拒绝。
+#[test]
+fn self_verifier_is_rejected_at_construction() {
+    let both = PermissionMatrix::new(vec![PrincipalPolicy::paired(
+        "agent:greedy",
+        vec![Capability::DefineWork, Capability::AssertVerification],
+        VisScope::ThreadPrivate,
+    )]);
+    assert!(
+        matches!(
+            &both,
+            Err(crate::symbio_core::governance::PairingViolation::SelfVerifier { .. })
+        ),
+        "双持必须被构造期拒绝：{both:?}"
+    );
+    // 反向：拆成两个主体 → 通过（验证者 ≠ 产出者）。
+    let split = PermissionMatrix::new(vec![
+        PrincipalPolicy::paired(
+            "agent:planner",
+            vec![Capability::DefineWork],
+            VisScope::ThreadPrivate,
+        ),
+        PrincipalPolicy::paired(
+            "agent:verifier",
+            vec![Capability::AssertVerification],
+            VisScope::ThreadPrivate,
+        ),
+    ]);
+    assert!(split.is_ok(), "分工后必须通过：{split:?}");
+}
+
+/// 第 16 步：readyset 就绪集 = 非终态 ∧ 依赖闭合；双跑一致（N1）。
+#[test]
+fn readyset_contains_only_dependency_closed_tasks() {
+    let store = EventStore::new();
+    open_task(&store, "a", &[], "agent:main");
+    open_task(&store, "b", &["a"], "agent:main");
+    open_task(&store, "c", &["b"], "agent:main");
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+
+    let rs = readyset().apply(&snapshot, 9_999, Budget::generous());
+    assert_eq!(rs.value.ready.len(), 1, "只有 a 就绪：{:?}", rs.value.ready);
+    assert_eq!(rs.value.ready[0].task_id, "a");
+
+    // a 终态 → 就绪集挪到 b；链式推进，调度器零内部状态。
+    assert_task(&store, "a", "agent:verifier");
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    let rs = readyset().apply(&snapshot, 9_999, Budget::generous());
+    assert_eq!(
+        rs.value
+            .ready
+            .iter()
+            .map(|t| t.task_id.as_str())
+            .collect::<Vec<_>>(),
+        ["b"]
+    );
+
+    // N1：双跑逐字节一致。
+    let again = readyset().apply(&snapshot, 9_999, Budget::generous());
+    assert_eq!(rs.value, again.value);
+}
+
+/// 第 18 步：返工闭环——验证判不合格 ⇒ 新增返工节点（不是回滚）⇒ 旧节点不再就绪。
+#[test]
+fn rework_creates_new_node_instead_of_rollback() {
+    let store = EventStore::new();
+    open_task(&store, "a", &[], "agent:planner");
+    open_task(&store, "b", &["a"], "agent:planner");
+    // 验证者判 a 不合格 → 返工（新增一条事件，append-only）。
+    store
+        .append(
+            Event::pending(
+                "rw-a1",
+                EVENT_TASK_REWORK_CREATED,
+                Entity::Task,
+                Verb::Asserted,
+                0,
+                "agent:verifier",
+            )
+            .with_produced_by(0)
+            .with_payload(serde_json::json!({ "task_id": "a-r1", "replaces": "a", "round": 1 })),
+        )
+        .unwrap();
+    open_task(&store, "a-r1", &[], "agent:planner");
+
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    let rs = readyset().apply(&snapshot, 9_999, Budget::generous()).value;
+    let ids: Vec<_> = rs.ready.iter().map(|t| t.task_id.as_str()).collect();
+    assert!(ids.contains(&"a-r1"), "返工节点就绪：{ids:?}");
+    assert!(
+        ids.contains(&"a"),
+        "旧节点仍未终态（Log 永不改——被取代靠新节点表达）"
+    );
+
+    // 返工节点过验 → b 的依赖由终态的 a-r1 之外仍卡住（a 未终态）→ b 不就绪。
+    assert_task(&store, "a-r1", "agent:verifier");
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    let rs = readyset().apply(&snapshot, 9_999, Budget::generous()).value;
+    let ids: Vec<_> = rs.ready.iter().map(|t| t.task_id.as_str()).collect();
+    assert!(
+        !ids.contains(&"b"),
+        "b 依赖 a（不是 a-r1），依旧不就绪：{ids:?}"
+    );
+
+    // 终止性：返工 1 轮在上界内；第 3 轮超上界（max=2）→ 被看见。
+    store
+        .append(
+            Event::pending(
+                "rw-a2",
+                EVENT_TASK_REWORK_CREATED,
+                Entity::Task,
+                Verb::Asserted,
+                0,
+                "agent:verifier",
+            )
+            .with_produced_by(0)
+            .with_payload(serde_json::json!({ "task_id": "a-r2", "replaces": "a", "round": 2 })),
+        )
+        .unwrap();
+    store
+        .append(
+            Event::pending(
+                "rw-a3",
+                EVENT_TASK_REWORK_CREATED,
+                Entity::Task,
+                Verb::Asserted,
+                0,
+                "agent:verifier",
+            )
+            .with_produced_by(0)
+            .with_payload(serde_json::json!({ "task_id": "a-r3", "replaces": "a", "round": 3 })),
+        )
+        .unwrap();
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    assert!(
+        rework_bounded(&snapshot, 3).is_empty(),
+        "3 轮对上界 3 恰好合规"
+    );
+    let bad = rework_bounded(&snapshot, 2);
+    assert_eq!(bad.len(), 1, "上界 2 时第 3 轮违规：{bad:?}");
+    assert!(bad[0].why.contains("超过上界"), "{}", bad[0].why);
+    let bad = rework_bounded(&snapshot, 1);
+    assert_eq!(bad.len(), 2, "上界 1 时第 2、3 轮都违规：{bad:?}");
+}
+
+/// S03 §6 验收 3：注入 N 步任务链 → 在 rework 上界内终止（全链跑完、检查全绿）。
+#[test]
+fn n_step_chain_terminates_within_rework_bound() {
+    let store = EventStore::new();
+    let n = 5;
+    // 链：t0 → t1 → … → t4；每个任务至多返工 1 轮。
+    for i in 0..n {
+        let deps: Vec<String> = if i == 0 {
+            vec![]
+        } else {
+            vec![format!("t{}", i - 1)]
+        };
+        open_task(
+            &store,
+            &format!("t{i}"),
+            &deps.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+            "agent:planner",
+        );
+    }
+    // 全链推进：一次就绪一个，终态后下一个就绪（终止性前提 1/3 由 store 与 C14 保证）。
+    for i in 0..n {
+        let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+        let rs = readyset().apply(&snapshot, 9_999, Budget::generous()).value;
+        assert_eq!(
+            rs.ready.len(),
+            1,
+            "链式调度任意时刻恰一个就绪：{:?}",
+            rs.ready
+        );
+        assert_eq!(rs.ready[0].task_id, format!("t{i}"));
+        store
+            .append(
+                Event::pending(
+                    format!("p-{i}"),
+                    EVENT_TASK_PROGRESS,
+                    Entity::Task,
+                    Verb::Progressed,
+                    0,
+                    "agent:main",
+                )
+                .with_payload(serde_json::json!({ "task_id": format!("t{i}") })),
+            )
+            .unwrap();
+        assert_task(&store, &format!("t{i}"), "agent:verifier");
+    }
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    assert!(
+        readyset()
+            .apply(&snapshot, 9_999, Budget::generous())
+            .value
+            .ready
+            .is_empty(),
+        "全链终态"
+    );
+    assert!(acyclic_deps(&snapshot).is_empty());
+    assert!(rework_bounded(&snapshot, 1).is_empty());
+    assert!(
+        check_all(&snapshot).is_empty(),
+        "{:?}",
+        check_all(&snapshot)
+    );
+}

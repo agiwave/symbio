@@ -314,7 +314,19 @@ export const BASELINE = {
   //      默认全 `None`；`plugins/reply/plugin.test` 11 → **12**（+1：traverse 声明配置，
   //      字段键顺序 `["model","instruction"]`）。**只覆盖指令段**：注册段（`build_system_prompt`
   //      里排在前面那段）永远在，否则 `instruction` 认空串时答话会失去全部约束且日志正常。
-  rustTests: 1089,
+  // 1166（S5–S7，2026-09-30）：**core 事件网格三阶落地**——`1089 → 1166`，**+77**。
+  //      S5 记忆：事件格子 memory.encoded/consolidated/forgotten/recalled；
+  //      ③ recall 投影（as-of / 排除式遗忘 / 预算降级 / thread_private 跨主体隔离）
+  //      + consolidate 接受边界（保真度下界 N8）；② RecallTranslator。S06 §6 四条
+  //      验收 + 溯源覆盖 + 全链路绿。
+  //      S6 多主体：事件格子 commitment.opened/released/broken/asserted；
+  //      ③ reputation 投影（as-of 与 recall 同口径、打分是参数）；② CommitmentKeeper。
+  //      S08 §6 验收 1/3/4 落地（成对拒绝在 S3 区）。
+  //      S7 任务树：事件格子 task.opened/progress/held/asserted/rework_created；
+  //      ③ readyset 投影（纯函数就绪集，N1 双跑一致）；C14 acyclic_deps（Kahn +
+  //      悬空）；C15 SelfVerifier 构造期拒绝；rework_bounded（终止性前提 2）。
+  //      S03 §6 验收 1–4 全落地。
+  rustTests: 1166,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *
