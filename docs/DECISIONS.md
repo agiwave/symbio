@@ -55,6 +55,7 @@
 | [040](./decisions/agent.md#adr-040-work-并入-memory记忆的两个作用域同属一个所有者) | `work` 并入 `memory`：记忆的两个作用域同属一个所有者 | 现行 |
 | [041](./decisions/session.md#adr-041-会话的响应性由编排层调度--无副作用对话服务承担) | 会话的响应性由编排层调度 + 无副作用对话服务承担 | 现行 |
 | [042](./decisions/core.md#adr-042-跨插件调用一律经容器-route--路径常量不持有对方类型) | 跨插件调用一律经容器 `route` + 路径常量 | 现行 |
+| [043](./decisions/core.md#adr-043-v2-事件地基落地契约居中于中性层store--projection-按冻结形状进-symbio_core) | v2 事件地基：契约居中，`store` / `projection` 按冻结形状进 core | 现行 |
 
 ---
 

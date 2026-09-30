@@ -5,15 +5,31 @@ mod capability;
 mod clock;
 mod creator;
 mod embedding;
+mod event;
 pub mod event_bus;
 pub mod exec;
+mod invariants;
 mod keys;
 pub mod llm;
 mod logger;
 mod plugin;
+mod projection;
 pub mod schemas;
+mod store;
 mod text;
 pub mod vdfs;
+mod view;
+
+// ==================== 事件溯源契约（v2 阶段 S0） ====================
+// 共享类型层（`event` / `view`）与两个机制（`store` ④ / `projection` ③）。
+// 模块依赖纪律见 [plan/05 §3.1]：彼此只准依赖类型定义，不持有对方句柄。
+pub use event::{Entity, Event, EventEnvelope, Seq, Timestamp, Verb};
+pub use invariants::{
+    check_all, final_unique_per_turn, produced_by_coverage, seq_monotonic, Violation,
+};
+pub use projection::Projection;
+pub use store::{AppendError, EventStore, MemoryStore, Store};
+pub use view::{Budget, View};
 
 // ==================== LLM 契约 ====================
 // 模型接入（`model_provider`）与单轮产物 / 帧原语（`turn`）。

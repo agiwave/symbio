@@ -371,3 +371,26 @@
 
 **后果**：跨插件载荷类型自动获得 core 准入资格（依赖方 ≥ 2）；
 `route` 常量进 `symbio_core::plugin::route`，由既有审计核对常量名 ↔ 值。
+
+## ADR-043: v2 事件地基落地——契约居中于中性层，`store` / `projection` 按冻结形状进 `symbio_core`
+
+**决策**：`symbio_core` 新增五个模块：`event`（事件契约：`Seq` / `Entity` × `Verb` 闭集 /
+信封）/ `view`（`View` + `Budget`）/ `store`（`Store` trait + `MemoryStore`，F1）/
+`projection`（`Projection<V>`，F2）/ `invariants`（N1 / N3 / N5 可执行断言）。
+事件与视图类型住**中性层**（`event` / `view`），`store` 与 `projection` 只 import 它们，
+彼此零依赖——这是 [plan/05 §3.1](../../docs/plan/05-模块架构.md)「六包互不依赖」的构造侧。
+
+**理由**：纯净性与 append-only 不靠约定靠编译器：`Seq` 私有构造（伪造序号编译不过）、
+`Projection::new` 泛型约束（句柄进不来，J3）、`Store` trait 无 update / delete（接口上
+不存在 = 违规不可能）。契约先于实现冻结（F1 / F2），S4 的 `wal` 实现、S1 起的各投影
+都从这里长出，接口零改动。
+
+**被否决的方案**：事件名用自由字符串（网格之外的事件无法拒绝，J3 失守）——改为枚举
+闭集 + `kind` 字符串作数据；投影返回 `Result`（错误路径会把「预算不够」升级成「对话中断」，
+与 I3 相悖）——改为 `View { degraded }` 类型义务；把事件类型放进 `store` 模块（③ 与 ④
+互不依赖的规则会破）——拆中性层。
+
+**后果与不变量**：`EventEnvelope: Clone + Send + Sync`（事件是纯数据，快照跨线程）；
+`invariants` 的每条检查必须带反向用例（证明它红得起来也静得下去）；形状对应关系由
+[`docs/plan/verify/`](../../docs/plan/verify/) 的可执行夹具钉住，改冻结形状 = 架构变更
+（[plan/03 §1](../../docs/plan/03-演进与验证.md)）。
