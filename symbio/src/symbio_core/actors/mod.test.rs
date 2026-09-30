@@ -696,3 +696,168 @@ fn recall_translator_produces_provenanced_event_and_invariants_stay_green() {
         .unwrap();
     assert_eq!(recalled.payload["found"], 1);
 }
+
+// ── S6 彩排（[plan/04 §3](../../../../docs/plan/04-工程落地.md) 第 14–15 步）：多主体与对等承诺 ──
+//
+// 第 14 步：principal 隔离（下方验收 1/4）+ 无直连静态扫描（scripts/no-direct-call-audit.mjs，
+// 出口判据「直连调用 0」；成对性拒绝 = S08 §6 验收 3，已在 governance 测试区覆盖）。
+// 第 15 步：commitment 立约 + 声誉投影（出口判据「声誉双跑一致」）。
+
+use crate::symbio_core::governance::{Capability, PermissionMatrix, PrincipalPolicy, VisScope};
+use crate::symbio_core::projection::reputation::reputation;
+
+/// S08 §6 验收 1 + 4：thread_private 互不可见；内容可见域放宽成 public 后，
+/// 同一主体、同一份事件切片立刻可见——证明「可见域是参数在生效」，不是投影写死。
+#[test]
+fn principals_are_isolated_until_scope_widened() {
+    let store = EventStore::new();
+    store
+        .append(Event::pending(
+            "a0",
+            "task.progress",
+            Entity::Task,
+            Verb::Progressed,
+            0,
+            "agent:a",
+        ))
+        .unwrap();
+    store
+        .append(Event::pending(
+            "b0",
+            "task.progress",
+            Entity::Task,
+            Verb::Progressed,
+            0,
+            "agent:b",
+        ))
+        .unwrap();
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    let matrix = PermissionMatrix::new(vec![
+        PrincipalPolicy::paired(
+            "agent:a",
+            vec![Capability::ProduceArtifact],
+            VisScope::ThreadPrivate,
+        ),
+        PrincipalPolicy::paired(
+            "agent:b",
+            vec![Capability::ProduceArtifact],
+            VisScope::ThreadPrivate,
+        ),
+    ])
+    .expect("成对策略必过");
+
+    // 验收 1：thread_private 下 A 只看见自己写的事件。
+    let seen_by_a: Vec<_> = snapshot
+        .iter()
+        .filter(|e| matrix.can_see("agent:a", &e.actor, VisScope::ThreadPrivate))
+        .collect();
+    assert_eq!(
+        seen_by_a.len(),
+        1,
+        "thread_private：A 只见自己（S08 §6 验收 1）"
+    );
+    assert_eq!(seen_by_a[0].actor, "agent:a");
+
+    // 验收 4（反向）：内容可见域放宽为 public ⇒ 同一 viewer、同一切片全可见。
+    let seen_by_a_wide: Vec<_> = snapshot
+        .iter()
+        .filter(|e| matrix.can_see("agent:a", &e.actor, VisScope::Public))
+        .collect();
+    assert_eq!(
+        seen_by_a_wide.len(),
+        2,
+        "public ⇒ 隔离消失：断言 1 的实现若在 public 下仍红，说明可见域没在生效"
+    );
+}
+
+/// 第 15 步：立约 → 守约 / 违约 → 声誉投影。违约可观测（broken 必带 why），
+/// 声誉记在承诺方（from）头上。
+#[test]
+fn commitment_lifecycle_feeds_reputation() {
+    let keeper = CommitmentKeeper;
+    let store = EventStore::new();
+    // B 立约两条：一条守约、一条违约；A 立约一条守约。
+    store
+        .append(keeper.offer("k1", "agent:b", "agent:a", "整理周报", 0))
+        .unwrap();
+    store.append(keeper.release("k1", "agent:b", 0)).unwrap();
+    store
+        .append(keeper.offer("k2", "agent:b", "agent:a", "压测报告", 0))
+        .unwrap();
+    store
+        .append(keeper.breach("k2", "agent:b", "上游数据没到", 0))
+        .unwrap();
+    // 对等宣告：违约状态告知协作方（普通事件，不是新通道）。
+    store
+        .append(keeper.declare("k2", "agent:b", "违约已告知 agent:a", 0))
+        .unwrap();
+    store
+        .append(keeper.offer("k3", "agent:a", "agent:b", "评审", 0))
+        .unwrap();
+    store.append(keeper.release("k3", "agent:a", 0)).unwrap();
+
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    let view = reputation()
+        .apply(&snapshot, 9_999, Budget::generous())
+        .value;
+    let b = view.of("agent:b");
+    assert_eq!((b.offered, b.kept, b.broken), (2, 1, 1));
+    assert_eq!(b.score, 0, "平凡打分：守约 − 违约");
+    assert_eq!(view.of("agent:a").score, 1);
+    // 未立约的主体：空条目，不是错误。
+    assert_eq!(view.of("agent:ghost").offered, 0);
+
+    // 全链路不变量仍绿（承诺也是普通事件，永远逃不出审计）。
+    assert!(
+        check_all(&snapshot).is_empty(),
+        "{:?}",
+        check_all(&snapshot)
+    );
+}
+
+/// 出口判据「声誉双跑一致」（N1 在声誉面上的形状）：同一份切片双跑逐字节相同；
+/// as-of 锚前的违约不影响当时已算出的声誉。
+#[test]
+fn reputation_double_run_is_identical_and_as_of_safe() {
+    let keeper = CommitmentKeeper;
+    let store = EventStore::new();
+    store
+        .append(keeper.offer("k1", "agent:b", "agent:a", "整理周报", 0))
+        .unwrap();
+    store
+        .append(keeper.release("k1", "agent:b", 0).with_ts(1_000))
+        .unwrap();
+    let before = {
+        let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+        reputation()
+            .apply(&snapshot, 2_000, Budget::generous())
+            .value
+    };
+    assert_eq!(before.of("agent:b").score, 1);
+
+    // 后台追加违约（ts 在 as-of 之后）。
+    store
+        .append(
+            keeper
+                .offer("k2", "agent:b", "agent:a", "压测报告", 0)
+                .with_ts(5_000),
+        )
+        .unwrap();
+    store
+        .append(
+            keeper
+                .breach("k2", "agent:b", "上游数据没到", 0)
+                .with_ts(6_000),
+        )
+        .unwrap();
+
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    let after_as_of = reputation()
+        .apply(&snapshot, 2_000, Budget::generous())
+        .value;
+    assert_eq!(before, after_as_of, "as-of=T 的声誉不受其后追加污染");
+    let now = reputation()
+        .apply(&snapshot, 9_999, Budget::generous())
+        .value;
+    assert_eq!(now.of("agent:b").score, 0, "违约计入后声誉下降");
+}

@@ -34,6 +34,7 @@ pub use invariants::{
 pub use projection::checkpoint::{checkpoint, CheckpointState};
 pub use projection::consolidate::{accept as consolidate_accept, ConsolidateParams, Rejection};
 pub use projection::recall::recall;
+pub use projection::reputation::{plain_score, reputation, ReputationEntry, ReputationView};
 pub use projection::turnstate::{turnstate, TurnState};
 pub use projection::Projection;
 pub use store::wal::{EventWalStore, WalStore};
@@ -43,7 +44,9 @@ pub use view::{RecallEntry, RecallView};
 
 // ==================== 主体（v2 阶段 S1，② actors） ====================
 // 只收类型化输入、只产事件（plan/05 §3.1 ② 行）；S1 落 Decider 平凡值，S2 加 Reasoner。
-pub use actors::{ActorSpec, Decider, DeciderMiss, Pattern, Reasoner, RecallTranslator, Scope};
+pub use actors::{
+    ActorSpec, CommitmentKeeper, Decider, DeciderMiss, Pattern, Reasoner, RecallTranslator, Scope,
+};
 // 事件名字表（名字是数据，单点定义）。
 pub use event::{
     EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CONSOLIDATED,

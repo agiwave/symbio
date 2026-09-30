@@ -50,6 +50,7 @@ impl<V: 'static> Projection<V> {
 pub mod checkpoint;
 pub mod consolidate;
 pub mod recall;
+pub mod reputation;
 pub mod turnstate;
 
 #[cfg(test)]

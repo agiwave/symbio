@@ -68,6 +68,22 @@ pub const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
 /// 召回：检索 Translator 的产出（读视图 → 产出事实）。落在 `memory × asserted`。
 pub const EVENT_MEMORY_RECALLED: &str = "memory.recalled";
 
+// ── 承诺格子（S6 第 15 步，[roadmap/S08 §3](../../../../docs/plan/roadmap/S08-多主体与对等承诺.md)）──
+//
+// 立约 = `commitment` 实体的一格事件（**加格子，不加机制**——对等协作是图，
+// 子智能体递归的树表达不了，才需要这组格子）。声誉是它的投影（`projection = reputation`）。
+
+/// 立约：`from` 向 `to` 承诺交付什么（载荷 `{ id, from, to, promise }`）。
+/// 落在 `commitment × opened`。
+pub const EVENT_COMMITMENT_OFFERED: &str = "commitment.opened";
+/// 守约收束：承诺按约履行。落在 `commitment × closed`。
+pub const EVENT_COMMITMENT_RELEASED: &str = "commitment.released";
+/// 违约收束：承诺未履行（载荷带 `why`——违约必须可观测）。落在 `commitment × closed`。
+pub const EVENT_COMMITMENT_BROKEN: &str = "commitment.broken";
+/// 对等声明：把承诺状态对等宣告给协作方（不是新通道，是普通事件）。
+/// 落在 `commitment × asserted`。
+pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
+
 /// 事件实体 —— 语法网格的**行**，闭集（F5，10 个）。
 ///
 /// 新增实体是 L-schema 变化（[plan/03 §2](../../../../docs/plan/03-演进与验证.md)）：

@@ -226,6 +226,74 @@ impl RecallTranslator {
     }
 }
 
+/// 承诺登记者（S6 第 15 步，[roadmap/S08 §3](../../../../docs/plan/roadmap/S08-多主体与对等承诺.md)）。
+///
+/// 立约 = `commitment` 实体的一格事件；本体的职责只是把「谁向谁承诺了什么 /
+/// 是否履行」落成**普通事件**（经 Store，无直连——I1 的直接推论）。
+/// 违约不是异常通道：`broken` 与 `released` 是同一格（`commitment × closed`）
+/// 的两个名字，违约必须带 `why`（可观测，S08 §5）。
+pub struct CommitmentKeeper;
+
+impl CommitmentKeeper {
+    /// 立约：`from` 向 `to` 承诺 `promise`。`source_seq` 是触发本次立约的事件
+    /// （溯源锚；无触发场景传 0 并由调用方保证可解释）。
+    pub fn offer(&self, id: &str, from: &str, to: &str, promise: &str, source_seq: u64) -> Event {
+        Event::pending(
+            format!("c-offer-{id}"),
+            crate::symbio_core::event::EVENT_COMMITMENT_OFFERED,
+            crate::symbio_core::event::Entity::Commitment,
+            crate::symbio_core::event::Verb::Opened,
+            0,
+            from,
+        )
+        .with_produced_by(source_seq)
+        .with_payload(serde_json::json!({ "id": id, "from": from, "to": to, "promise": promise }))
+    }
+
+    /// 守约收束。
+    pub fn release(&self, id: &str, from: &str, source_seq: u64) -> Event {
+        Event::pending(
+            format!("c-close-{id}"),
+            crate::symbio_core::event::EVENT_COMMITMENT_RELEASED,
+            crate::symbio_core::event::Entity::Commitment,
+            crate::symbio_core::event::Verb::Closed,
+            0,
+            from,
+        )
+        .with_produced_by(source_seq)
+        .with_payload(serde_json::json!({ "id": id }))
+    }
+
+    /// 违约收束（**必须带 why**——违约可被观测是 T5 的全部前提）。
+    pub fn breach(&self, id: &str, from: &str, why: &str, source_seq: u64) -> Event {
+        Event::pending(
+            format!("c-close-{id}"),
+            crate::symbio_core::event::EVENT_COMMITMENT_BROKEN,
+            crate::symbio_core::event::Entity::Commitment,
+            crate::symbio_core::event::Verb::Closed,
+            0,
+            from,
+        )
+        .with_produced_by(source_seq)
+        .with_payload(serde_json::json!({ "id": id, "why": why }))
+    }
+
+    /// 对等宣告：把承诺状态告知协作方（`commitment.asserted`，
+    /// `commitment × asserted` 格——声明仍是一条普通事件，带溯源）。
+    pub fn declare(&self, id: &str, from: &str, statement: &str, source_seq: u64) -> Event {
+        Event::pending(
+            format!("c-assert-{id}"),
+            crate::symbio_core::event::EVENT_COMMITMENT_ASSERTED,
+            crate::symbio_core::event::Entity::Commitment,
+            crate::symbio_core::event::Verb::Asserted,
+            0,
+            from,
+        )
+        .with_produced_by(source_seq)
+        .with_payload(serde_json::json!({ "id": id, "from": from, "statement": statement }))
+    }
+}
+
 #[cfg(test)]
 #[path = "mod.test.rs"]
 mod tests;
