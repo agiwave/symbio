@@ -1,21 +1,24 @@
-//! 三条不变量的可执行检查（v2 F4，[plan/01 §5](../../../../docs/plan/01-核心架构.md)、[plan/04 §4](../../../../docs/plan/04-工程落地.md)）。
+//! 可执行不变量检查（v2 F4，[plan/01 §5](../../../../docs/plan/01-核心架构.md)、[plan/04 §4](../../../../docs/plan/04-工程落地.md)）。
 //!
 //! ## 形态：纯函数，不是 trait
 //!
 //! 每条检查 = 「事件切片 ⇒ 违规清单」。输入是数据，输出是数据——它可以被
 //! 单测双跑、可以挂 CI、可以离线跑在导出的事件序列上，而不需要任何运行时。
 //!
-//! ## S0 覆盖的三条 CI 断言（[plan/04 §3](../../../../docs/plan/04-工程落地.md) 步骤 2 的出口判据）
+//! ## 覆盖的 CI 断言（S0 步骤 2 出口判据 + S1 步骤 4 故障注入，[roadmap/S01 §5](../../../../docs/plan/roadmap/S01-最小闭环.md)）
 //!
 //! | 断言 | 不变量 | 检查 | 函数 |
 //! |---|---|---|---|
 //! | C1 | I1 单通道 | `seq` 严格单调、无跳号 | [`seq_monotonic`] |
 //! | C2 / N3 | I1 单通道 | 每 `turn` 至多 1 条 final | [`final_unique_per_turn`] |
-//! | C3 / N5 | I2 无溯源不声明 | 断言类事件 `produced_by` 非空 | [`produced_by_coverage`] |
+//! | C3 / N5 | I2 无溯源不声明 | 断言类 + 收束类事件 `produced_by` 非空 | [`produced_by_coverage`] |
+//! | C4 | I3 到点必答 | 开过的 turn 必须收束（final 或 fallback） | [`unresolved_turns`] |
+//! | C5 | I3 到点必答 | 事件 `cost_ms` 不得超主体预算 | [`budget_exceeded`] |
 //!
 //! ## 判定纪律
 //!
 //! 每条检查配**反向用例**：喂入违规序列，违规必须被看见；看不见 = 检查是摆设。
+//! 故障注入用例集（S1 步骤 4）在 `mod.test.rs` 的 fault 区统一收纳。
 
 use super::event::{Entity, Event, Verb};
 
@@ -133,6 +136,61 @@ pub fn check_all(events: &[Event]) -> Vec<Violation> {
     all.extend(final_unique_per_turn(events));
     all.extend(produced_by_coverage(events));
     all
+}
+
+/// C4（I3 到点必答）：开过的 turn 必须收束。
+///
+/// 「收到」与「发出」是一对端点（[roadmap/S01 §1](../../../../docs/plan/roadmap/S01-最小闭环.md)）：
+/// 有 `user.message`（`turn × opened`）却始终等不到 `chat.assistant.final` /
+/// `chat.assistant.fallback`（`turn × closed`），就是**对话静默中断**——超时后
+/// 什么都没发生，没有任何错误信号的那类失效。兜底必须产生事件（I3）。
+pub fn unresolved_turns(events: &[Event]) -> Vec<Violation> {
+    let mut bad = Vec::new();
+    let mut opened: Vec<(u64, &str)> = Vec::new();
+    for e in events {
+        if e.entity == Entity::Turn && e.verb == Verb::Opened && e.kind == "user.message" {
+            opened.push((e.turn, e.event_id.as_str()));
+        }
+        if e.entity == Entity::Turn
+            && e.verb == Verb::Closed
+            && matches!(
+                e.kind.as_str(),
+                crate::symbio_core::event::EVENT_ASSISTANT_FINAL
+                    | crate::symbio_core::event::EVENT_ASSISTANT_FALLBACK
+            )
+        {
+            opened.retain(|(turn, _)| *turn != e.turn);
+        }
+    }
+    for (turn, first_id) in opened {
+        bad.push(Violation::at(
+            events.last().expect("opened 非空 ⇒ 事件序列非空"),
+            format!(
+                "turn {turn}（自 {first_id} 开启）始终未收束——无 final 也无 fallback，对话静默中断（I3 到点必答）"
+            ),
+        ));
+    }
+    bad
+}
+
+/// C5（I3 到点必答）：事件的 `cost_ms` 不得超过主体预算。
+///
+/// 超预算本身**允许发生**（S4 的兜底链路负责降级），但它必须被**看见**：
+/// `budget_ms` 是 I3 的记账口径，超了却没人知道 = 声明式预算（S1 之前的形态）。
+pub fn budget_exceeded(events: &[Event], budget_ms: u64) -> Vec<Violation> {
+    events
+        .iter()
+        .filter(|e| e.cost_ms > budget_ms)
+        .map(|e| {
+            Violation::at(
+                e,
+                format!(
+                    "cost_ms {} 超出主体预算 {budget_ms}（I3 到点必答）",
+                    e.cost_ms
+                ),
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]

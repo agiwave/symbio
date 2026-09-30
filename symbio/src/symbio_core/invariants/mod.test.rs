@@ -187,3 +187,103 @@ fn check_all_on_clean_sequence_is_empty() {
     ]);
     assert!(check_all(&events).is_empty(), "合规序列三查全绿");
 }
+
+// ── 故障注入用例集（S1 步骤 4：超时 / 乱序 / 重复 final / 无溯源，4 类违规全被捕获）────
+//
+// [plan/04 §3](../../../../docs/plan/04-工程落地.md) 第 4 步的产物：每类故障注入
+// 事件序列，断言**对应的检查必须红**。反向用例（合规序列不报警）在上方各检查区。
+
+#[test]
+fn fault_timeout_turn_never_settles_is_caught() {
+    // 超时 = 生成失败且什么都没写——turn 开了却没有 final/fallback。
+    let events = stored(vec![pending(
+        "u0",
+        "user.message",
+        Entity::Turn,
+        Verb::Opened,
+        0,
+    )]);
+    let bad = unresolved_turns(&events);
+    assert_eq!(bad.len(), 1, "静默中断必须被看见（I3：兜底必须产生事件）");
+    assert!(bad[0].why.contains("未收束"), "{}", bad[0].why);
+}
+
+#[test]
+fn fault_timeout_avoided_by_fallback_event() {
+    // 反向：超时后**写了** fallback → turn 收束，检查放行（兜底是普通事件）。
+    let events = stored(vec![
+        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
+        pending(
+            "fb0",
+            "chat.assistant.fallback",
+            Entity::Turn,
+            Verb::Closed,
+            0,
+        ),
+    ]);
+    assert!(unresolved_turns(&events).is_empty());
+}
+
+#[test]
+fn fault_out_of_order_seq_regression_is_caught() {
+    // 乱序 = seq 回退（3 之后又来 1）——绕过唯一写入口的典型痕迹。
+    let mut e3 = pending("e3", "task.progress", Entity::Task, Verb::Progressed, 0);
+    e3 = Event {
+        seq: Some(crate::symbio_core::event::Seq::new(3)),
+        ..e3
+    };
+    let mut e1 = pending("e1", "task.progress", Entity::Task, Verb::Progressed, 1);
+    e1 = Event {
+        seq: Some(crate::symbio_core::event::Seq::new(1)),
+        ..e1
+    };
+    let bad = seq_monotonic(&[e3, e1]);
+    // 两条都被看见：seq 3 处应为 0（开头顶格），seq 1 处应为 4（回退）。
+    assert_eq!(bad.len(), 2, "乱序注入的两处异常都必须被看见：{:?}", bad);
+    assert_eq!(bad[1].event_id, "e1");
+}
+
+#[test]
+fn fault_double_final_is_caught_by_check_all() {
+    // 重复 final 经 check_all 合跑也必须红（CI 形态下无漏网）。
+    let events = stored(vec![
+        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
+        pending("f0", "chat.assistant.final", Entity::Turn, Verb::Closed, 0),
+        pending("f1", "chat.assistant.final", Entity::Turn, Verb::Closed, 0),
+    ]);
+    let violations = check_all(&events);
+    assert!(
+        violations.iter().any(|v| v.why.contains("final")),
+        "{:?}",
+        violations
+    );
+}
+
+#[test]
+fn fault_missing_provenance_is_caught_by_check_all() {
+    // 无溯源的断言经 check_all 合跑也必须红。
+    let bare = Event {
+        produced_by: None,
+        ..pending("v0", "classify.verdict", Entity::Verdict, Verb::Asserted, 0)
+    };
+    let events = stored(vec![bare]);
+    assert!(
+        check_all(&events).iter().any(|v| v.why.contains("溯源")),
+        "{:?}",
+        check_all(&events)
+    );
+}
+
+#[test]
+fn fault_budget_exceeded_is_caught() {
+    // I3 记账：单事件耗时超主体预算必须被看见（超预算允许发生，但不容隐身）。
+    let events =
+        vec![pending("s0", "task.progress", Entity::Task, Verb::Progressed, 0).with_cost_ms(2_000)];
+    let bad = budget_exceeded(&events, 1_500);
+    assert_eq!(bad.len(), 1, "超预算必须被看见");
+    assert!(bad[0].why.contains("2"), "{}", bad[0].why);
+    // 反向：预算内不报警。
+    let ok =
+        vec![pending("s1", "task.progress", Entity::Task, Verb::Progressed, 0).with_cost_ms(1_499)];
+    assert!(budget_exceeded(&ok, 1_500).is_empty());
+}

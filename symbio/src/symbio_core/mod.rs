@@ -26,7 +26,8 @@ mod view;
 // 模块依赖纪律见 [plan/05 §3.1]：彼此只准依赖类型定义，不持有对方句柄。
 pub use event::{Entity, Event, EventEnvelope, Seq, Timestamp, Verb};
 pub use invariants::{
-    check_all, final_unique_per_turn, produced_by_coverage, seq_monotonic, Violation,
+    budget_exceeded, check_all, final_unique_per_turn, produced_by_coverage, seq_monotonic,
+    unresolved_turns, Violation,
 };
 pub use projection::turnstate::{turnstate, TurnState};
 pub use projection::Projection;
