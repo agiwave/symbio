@@ -24,11 +24,15 @@ use crate::symbio_core::CapabilityMeta;
 use std::collections::BTreeMap;
 
 /// 段落标题（注入进提示词时的开头；空目录时整段不出现）
+// dead-code-allow R-001: 消费方是 R1-b 的主会话提示词注入点，本期只有单测调用
+#[allow(dead_code)]
 pub const DIGEST_TITLE: &str = "【可用能力】";
 
 /// 折叠：`{"分类": [名字…]}` → 标题 + 逐行目录。
 ///
 /// 返回空串表示"没有可注入的内容"（调用方不要拼空段落）。
+// dead-code-allow R-001: 消费方是 R1-b 的主会话提示词注入点（`prepare_turn_inputs`），本期只有单测调用
+#[allow(dead_code)]
 pub fn digest(caps: &[CapabilityMeta], max: usize) -> String {
     if caps.is_empty() || max == 0 {
         return String::new();
@@ -43,7 +47,7 @@ pub fn digest(caps: &[CapabilityMeta], max: usize) -> String {
         }
         let mut group = c
             .category
-            .map(|k| category_wire(k))
+            .map(category_wire)
             .unwrap_or_else(|| "other".to_string());
         if group.is_empty() {
             group = "other".to_string();
@@ -88,6 +92,8 @@ pub fn digest(caps: &[CapabilityMeta], max: usize) -> String {
 ///
 /// 取**序列化结果**而不是自己写一张映射表：枚举加变体时这里零改动，
 /// 也不会出现"目录里的分类名与线路上的不一样"这种第二份真相。
+// dead-code-allow R-001: 随 digest 一起只有 R1-b 消费（reachability 仍判它死）
+#[allow(dead_code)]
 fn category_wire(k: crate::symbio_core::CapabilityCategory) -> String {
     serde_json::to_value(k)
         .ok()

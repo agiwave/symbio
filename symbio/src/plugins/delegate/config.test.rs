@@ -31,7 +31,9 @@ fn force_prefix_is_optional_but_keeps_its_word_boundary() {
 /// 上限下界 1：配成 0 会让目录恒空，而下界保证"看得见至少一项"。
 #[test]
 fn digest_max_has_floor_of_one() {
-    let mut c = DelegateConfig::default();
-    c.digest_max = 0;
+    let c = DelegateConfig {
+        digest_max: 0,
+        ..Default::default()
+    };
     assert_eq!(c.effective_digest_max(), 1);
 }

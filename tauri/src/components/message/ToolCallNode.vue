@@ -42,10 +42,37 @@
         />
       </div>
 
-      <!-- 过程：子会话实时流（有些工具有，有些没有） -->
+      <!--
+        过程：worker 的全量转播（`docs/plan/06` §10.2）。
+
+        R1-a 起**默认收成一行状态**（状态 / 轮次 / 最新一步），展开才看全量过程。
+        为什么默认收起：主会话与 worker 是**两份历史**，主窗口塞满 worker 的多轮
+        工具轨迹会把结论淹没（且这些帧本就不该进主窗口的阅读重心）。
+        **过程不丢**——展开即在，worker 会话自己的历史也还在（VDFS 子会话段）。
+        状态行不是第二份状态：它每次渲染都由 `workerProgressOf` 从父调用状态 +
+        过程段现算，字段名与后端 `delegate/progress` 投影逐字同名。
+      -->
       <div v-if="processTurns.length" class="tool-section">
-        <div class="ts-label">过程</div>
+        <button
+          class="worker-status"
+          :class="{ open: showProcess }"
+          :aria-expanded="showProcess"
+          @click="showProcess = !showProcess"
+        >
+          <span class="ws-state" :class="`ws-${workerProgress.state}`">
+            {{ WORKER_STATE_LABELS[workerProgress.state] }}
+          </span>
+          <span v-if="workerProgress.rounds" class="ws-rounds">
+            {{ workerProgress.rounds }} 轮
+          </span>
+          <span v-if="workerProgress.lastStep" class="ws-step">
+            {{ workerProgress.lastStep }}
+          </span>
+          <span class="ws-toggle">{{ showProcess ? '收起过程' : '查看过程' }}</span>
+        </button>
+        <div v-if="showProcess" class="ts-label">过程</div>
         <MessageChildren
+          v-if="showProcess"
           :nodes="processTurns"
           :depth="depth ?? 0"
           parent-type="tool_call"
@@ -121,6 +148,8 @@ import {
   isFailedStatus,
   messageParentSessionId,
   missingResultNoteOf,
+  workerProgressOf,
+  WORKER_STATE_LABELS,
   type MessageFacets,
 } from '@/registry/messageTypes'
 import NodeShell from './NodeShell.vue'
@@ -201,6 +230,28 @@ const missingResultNote = computed<string | null>(() =>
   resultChildren.value.length ? null : missingResultNoteOf(props.node),
 )
 
+/**
+ * 后台任务状态行（R1-a）：由**已在手的数据**现算，不另存一份状态。
+ *
+ * 父调用自身在途 ⇒ worker 还在跑；过程段里有在途节点 ⇒ 同样在跑（父调用已收到
+ * 部分结果但子会话没结束）。判定在 `workerProgressOf`（registry），组件只画。
+ */
+const workerProgress = computed(() =>
+  workerProgressOf(props.facets.status, processTurns.value),
+)
+
+/**
+ * 过程段默认**收起**（R1-a）：主窗口只留一行状态，展开才看全量过程。
+ *
+ * **恒定收起，不跟着运行态自动展开**——「主窗口被 worker 的过程占满」正是本条
+ * 要消掉的症状；运行中就自动展开，等于把这个症状留在原地。状态行承担"在跑、
+ * 第几步"，要看过程多点一次。
+ *
+ * 收起与否**不落库**：纯渲染期状态，刷新后按同一判据重算（幂等），也不会让
+ * "这一条历史会话"在换设备后长得不一样。
+ */
+const showProcess = ref(false)
+
 // ── 补充参数表单 ───────────────────────────────────────────
 const showSupplyForm = ref(false)
 const supplyArgsText = ref('')
@@ -255,6 +306,55 @@ function submitSupply() {
 }
 .mr-text {
   word-break: break-word;
+}
+
+/* ── 后台任务状态行（R1-a）──
+   一行放得下：状态 · 轮次 · 最新一步 · 展开开关。主窗口默认只见这一行，
+   过程整体收进 `v-if` 里。宽度用 flex + 溢出省略，工具名再长也不换行撑高。 */
+.worker-status {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.2rem 0.35rem;
+  background: none;
+  border: 0;
+  border-radius: 0.3rem;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  text-align: left;
+  cursor: pointer;
+}
+.worker-status:hover {
+  background: var(--color-chip-tool-bg);
+}
+/* 状态词：运行中点亮，收敛后退回中性——一眼可辨"这活干完了没有"。 */
+.ws-state {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+/* 用工具 chip 的前景色而不是写死色值：两套主题都已有该令牌，色值只有一处真源。 */
+.ws-running {
+  color: var(--color-chip-tool-fg);
+}
+.ws-idle {
+  color: var(--text-muted);
+}
+.ws-rounds {
+  flex-shrink: 0;
+}
+.ws-step {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ws-toggle {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--text-muted);
+  opacity: 0.75;
 }
 
 /* ── 工具失败补充参数 UI ── */

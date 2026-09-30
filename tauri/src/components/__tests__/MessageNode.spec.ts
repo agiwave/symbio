@@ -227,13 +227,71 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
     )
     // 三段式在折叠体里：先展开（收起态不渲染，DOM 里没有）
     await w.find('.node-head').trigger('click')
-    // 请求/结果不设外层标签（内层节点头部「请求/响应」已承载语义），仅「过程」保留
+
+    // R1-a：worker 过程**默认收起**，主窗口只留一行状态。
+    // 请求/结果不设外层标签（内层节点头部「请求/响应」已承载语义），
+    // 「过程」标签与过程正文都在展开态里——所以收起时一个 .ts-label 都没有。
+    expect(w.findAll('.ts-label')).toHaveLength(0)
+    // 判据是「过程本体没渲染」而不是「正文一个字都不出现」：最新一步恰恰**要**显示
+    // 在状态行上（那就是状态行的第三段），所以按节点判、不按全文判。
+    expect(w.findAll('.turn-group')).toHaveLength(0)
+    const status = w.find('.worker-status')
+    expect(status.exists()).toBe(true)
+    expect(status.text()).toContain('已收敛') // 父调用与过程都已完成
+    expect(status.text()).toContain('1 轮')
+    expect(status.text()).toContain('子流正文') // 最新一步 = 过程末条正文
+    expect(status.attributes('aria-expanded')).toBe('false')
+
+    // 展开后恢复原三段式：仅「过程」有外层标签
+    await status.trigger('click')
     const labels = w.findAll('.ts-label').map((l) => l.text())
     expect(labels).toEqual(['过程'])
     // 子会话 Turn 与主会话 Turn 同一响应分组形态（分形复用）：
     // 无折叠头部，其子节点（思考/正文）以缩进节点直排呈现
     expect(w.text()).toContain('子流正文')
     expect(w.findAll('.turn-group').length).toBe(1)
+
+    // 再点收起：状态行还在，过程本体整体消失（不靠"渲染后再隐藏"糊弄）
+    await w.find('.worker-status').trigger('click')
+    expect(w.findAll('.ts-label')).toHaveLength(0)
+    expect(w.findAll('.turn-group')).toHaveLength(0)
+    expect(w.find('.worker-status').exists()).toBe(true)
+  })
+
+  it('状态行在 worker 还在跑时点亮「进行中」，父调用终态但过程仍在途也算跑', async () => {
+    const mk = (status: string) =>
+      msg({
+        id: 'tc-r',
+        type: 'tool_call',
+        status: status as never,
+        name: 'agent',
+        content: '{}',
+        children: [
+          msg({
+            id: 'sub-r',
+            type: 'turn',
+            role: 'tool',
+            status: 'streaming',
+            name: 'sub-agent',
+            parent_id: 'tc-r',
+            children: [
+              msg({ id: 'st-r', type: 'tool_call', status: 'completed', name: 'read', content: '{}', parent_id: 'sub-r' }),
+            ],
+          }),
+        ],
+      })
+
+    // 父调用在途 ⇒ 进行中
+    const running = mountNode(mk('streaming'))
+    await running.find('.node-head').trigger('click')
+    expect(running.find('.worker-status').text()).toContain('进行中')
+    // 最新一步是工具名（动作优先于正文）
+    expect(running.find('.worker-status').text()).toContain('read')
+
+    // 父调用已收敛、过程仍有 streaming 节点 ⇒ 仍算在跑
+    const inflight = mountNode(mk('completed'))
+    await inflight.find('.node-head').trigger('click')
+    expect(inflight.find('.worker-status').text()).toContain('进行中')
   })
 
   it('无子会话的工具：「过程」段整段隐藏（仅 请求 + 结果）', async () => {

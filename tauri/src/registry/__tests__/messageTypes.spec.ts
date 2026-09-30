@@ -34,9 +34,12 @@ import {
   CHAT_ROLE_TOOL,
   CHAT_ROLE_USER,
   isUnsettledMessageStatus,
+  type ChatMessage,
+  type MessageStatus,
 } from '@/schemas/chat_message'
 import {
   DEEP_COLLAPSE_LEVEL,
+  MESSAGE_PREVIEW_MAX,
   MESSAGE_ROLE_LABELS,
   MESSAGE_STATUS_LABELS,
   MESSAGE_TYPE_LABELS,
@@ -64,7 +67,10 @@ import {
   messageTitle,
   messageTypeLabel,
   nextOpenOf,
+  oneLinePreview,
   type MessageFacets,
+  workerProgressOf,
+  WORKER_STATE_LABELS,
 } from '../messageTypes'
 
 /** 构造 facets：只写关心的字段，其余取「普通助手正文」缺省 */
@@ -641,5 +647,121 @@ describe('messageRendererKey：渲染形态分派', () => {
     expect(messageIcon(f)).toBe('👤')
     expect(messageTitle(f, '助手')).toBe('你')
     expect(messageRendererKey(f)).toBe('turn')
+  })
+})
+
+/**
+ * R1-a：后台任务状态行 —— 由**已在手的转写**现算，不另存一份状态。
+ *
+ * 这组断言盯的是**推导契约**（组件只是画它）：字段名与后端 `delegate/progress`
+ * 的投影逐字同名，所以两处一旦漂移，用户看到的状态就会与主会话注入给模型的
+ * 快照自相矛盾（模型说"已收敛"、界面说"进行中"）。
+ */
+describe('workerProgressOf：worker 状态快照', () => {
+  /** 过程段里的一个子会话 Turn（转播桥锚定到父 ToolCall 之下的那种节点） */
+  const turn = (id: string, children: ChatMessage[] = []): ChatMessage => ({
+    id,
+    type: MESSAGE_TYPE_TURN,
+    role: CHAT_ROLE_TOOL,
+    status: MESSAGE_STATUS_COMPLETED,
+    name: 'sub-agent',
+    children,
+  })
+  // `status` 必须**显式标注**为 `MessageStatus`：字面量常量当默认值时 TS 会把形参
+  // 收窄成那一个字面量类型，于是传别的状态就报错——夹具不该被推断策略绑住。
+  const text = (id: string, content: string, status: MessageStatus = MESSAGE_STATUS_COMPLETED): ChatMessage => ({
+    id,
+    type: MESSAGE_TYPE_TEXT,
+    role: CHAT_ROLE_ASSISTANT,
+    status,
+    content,
+  })
+  const toolCall = (id: string, name: string, status: MessageStatus = MESSAGE_STATUS_COMPLETED): ChatMessage => ({
+    id,
+    type: MESSAGE_TYPE_TOOL_CALL,
+    status,
+    name,
+    content: '{}',
+  })
+
+  it('轮次 = 过程段的 Turn 条数（一个 Turn = worker 的一来一回）', () => {
+    const p = workerProgressOf(MESSAGE_STATUS_COMPLETED, [turn('t1'), turn('t2')])
+    expect(p.rounds).toBe(2)
+    expect(p.state).toBe('idle')
+  })
+
+  it('父调用在途 ⇒ 进行中（父工具没结束，worker 就还在跑）', () => {
+    expect(workerProgressOf(MESSAGE_STATUS_STREAMING, [turn('t1')]).state).toBe('running')
+  })
+
+  it('父调用已终态、过程里仍有在途节点 ⇒ 仍算在跑', () => {
+    // 这一态很常见：父工具先拿到部分结果，子会话还在跑——只看父状态会漏报收敛。
+    const p = workerProgressOf(MESSAGE_STATUS_COMPLETED, [
+      turn('t1', [text('x1', '查一下', MESSAGE_STATUS_STREAMING)]),
+    ])
+    expect(p.state).toBe('running')
+  })
+
+  it('最新一步 = 最后一条有内容的节点；工具名优先于正文', () => {
+    const p = workerProgressOf(MESSAGE_STATUS_COMPLETED, [
+      turn('t1', [text('x1', '先看看'), toolCall('tc1', 'read')]),
+    ])
+    expect(p.lastStep).toBe('read')
+  })
+
+  it('无内容节点（空占位）不产出步骤——状态行宁可少说也不编', () => {
+    const p = workerProgressOf(MESSAGE_STATUS_COMPLETED, [
+      turn('t1', [text('empty', ''), text('x1', '开始查')]),
+    ])
+    expect(p.lastStep).toBe('开始查')
+  })
+
+  it('多行正文压成一行（状态行是单行槽位，不能被正文撑成三行）', () => {
+    const p = workerProgressOf(MESSAGE_STATUS_COMPLETED, [
+      turn('t1', [text('x1', '第一行\n第二行\t第三行')]),
+    ])
+    expect(p.lastStep).toBe('第一行 第二行 第三行')
+  })
+
+  it('过程段为空 ⇒ 零轮、无步骤、无运行态（组件据此不画状态行）', () => {
+    const p = workerProgressOf(MESSAGE_STATUS_STREAMING, [])
+    expect(p).toEqual({ rounds: 0, state: 'running', lastStep: '' })
+  })
+
+  it('两个状态都有面向用户的词（不把 idle / running 摆给用户）', () => {
+    expect(WORKER_STATE_LABELS.running).toBeTruthy()
+    expect(WORKER_STATE_LABELS.idle).toBeTruthy()
+  })
+})
+
+describe('oneLinePreview：唯一的「一行」实现', () => {
+  it('折叠连续空白并去首尾', () => {
+    expect(oneLinePreview('  a \n\n b\t c ', false)).toBe('a b c')
+  })
+
+  it('未超限原样返回（不凭空加省略号）', () => {
+    expect(oneLinePreview('短句', false)).toBe('短句')
+  })
+
+  // 长度从常量派生而非写死：写死 50 时上限一旦调大（80），这两条会**静默地**
+  // 测成"不超限原样返回"——断言照样绿，却再没测过省略号落在哪一端。
+  const over = (n: number) => 'x'.repeat(MESSAGE_PREVIEW_MAX + n)
+
+  it('liveEdge 取末端：省略号落在被截掉的**开头**', () => {
+    const out = oneLinePreview(`${over(10)}尾`, true)
+    expect(out.startsWith('…')).toBe(true)
+    expect(out.endsWith('尾')).toBe(true)
+    expect(out.length).toBe(MESSAGE_PREVIEW_MAX + 1)
+  })
+
+  it('摘要取开头：省略号落在被截掉的**结尾**', () => {
+    const out = oneLinePreview(`头${over(10)}`, false)
+    expect(out.startsWith('头')).toBe(true)
+    expect(out.endsWith('…')).toBe(true)
+    expect(out.length).toBe(MESSAGE_PREVIEW_MAX + 1)
+  })
+
+  it('空串是平凡值（不返回 "…"）', () => {
+    expect(oneLinePreview('   ', false)).toBe('')
   })
 })

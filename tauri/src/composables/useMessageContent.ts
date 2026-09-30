@@ -22,9 +22,9 @@ import {
 } from '@/schemas/chat_message'
 import {
   MESSAGE_FAILURE_NOTE,
-  MESSAGE_PREVIEW_MAX,
   isFailedStatus,
   messagePreviewFollowsLiveEdge,
+  oneLinePreview,
   type MessageFacets,
 } from '@/registry/messageTypes'
 
@@ -146,7 +146,9 @@ export interface MessageSummaryPreview {
  *
  * 取**哪一端**由 `liveEdge` 决定（判据见 `registry::messagePreviewFollowsLiveEdge`）：
  * 流式中取末端（这一行是走马灯，最新的内容才是用户要看的），定稿后取开头（摘要）。
- * 截断时省略号落在**被截掉的那一端**，不伪装成"内容从这里开始/到这里结束"。
+ * 截断时省略号落在**被截掉的那一端**，不伪装成"内容从这里开始/到这里结束"——
+ * 这两件事（折叠空白 + 按端截断）由 `registry::oneLinePreview` 独家实现，
+ * 与 R1-a 的后台任务状态行共用，故本函数只管**取哪段内容**。
  */
 export function messageSummaryPreviewOf(
   node: ChatMessage,
@@ -162,15 +164,7 @@ export function messageSummaryPreviewOf(
   } else {
     source = messageTextOf(node.content)
   }
-  const raw = source.replace(/\s+/g, ' ').trim()
-  if (!raw) return { text: '', liveEdge }
-  if (raw.length <= MESSAGE_PREVIEW_MAX) return { text: raw, liveEdge }
-  return {
-    text: liveEdge
-      ? '…' + raw.slice(-MESSAGE_PREVIEW_MAX)
-      : raw.slice(0, MESSAGE_PREVIEW_MAX) + '…',
-    liveEdge,
-  }
+  return { text: oneLinePreview(source, liveEdge), liveEdge }
 }
 
 /** 组合式封装：跟随节点与 facets 变化的呈现结果 */

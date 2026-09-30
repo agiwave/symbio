@@ -214,7 +214,20 @@ export const BASELINE = {
   //      同批 +2（959 → **961**）：`plugins/session/compression.test.rs`（37 → 39）——
   //        压缩快照模板新增 `<next_step>` 节与 `Decision:` 前缀约定（含渲染映射回归），
   //        与本次下沉无关，一并实测入基线。
-  rustTests: 961,
+  // 1105：v2 桥接 B1–B4 + B5 + R1-a0（2026-09-30）——961 → 1105，**+144**。
+  //      ⚠️ 这 +144 里**只有最后一项来自本轮 R1-a0 之前的三批**；本轮 R1-a（前端收敛）
+  //      **Rust 侧零新增用例**（1105 在 R1-a 改动前后实测同为 1105，用 `git stash`
+  //      对照过），所以 R1-a 不进这条注记。逐插件实测（`#[test]`/`#[tokio::test]` 计数）：
+  //        +18 `plugins/fact_log`（B1）　+7 `plugins/projection`（B2）
+  //        +10 `plugins/actor`（B3）　　  +23 `plugins/retrieval`（B4，含 `tool.rs`）
+  //        +11 `plugins/session/projections.test.rs`（`memory.recall` 投影）
+  //        +33 `plugins/delegate`（R1-a0）
+  //        合计 +102；余下 ~42 是 B1–B4 期间既有文件里新增的用例
+  //        （`session` / `symbio_core` 侧），按文件核对而非估算。
+  //      **为什么拖到这一批才改**：这 +144 分属四个已合并批次，每批都只在自己那格
+  //      注记里加了东西，**没人回头核总数**——门禁的 `⚠ 通过数 > 基线` 是**警告不是失败**，
+  //      于是它连续四批红着没人管。教训：`只增不减` 的棘轮若只警告不拦，语义等于没有。
+  rustTests: 1105,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

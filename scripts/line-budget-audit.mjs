@@ -191,7 +191,17 @@ export const LINE_BUDGET_BASELINES = {
   //         回来，且有更早分页时判不了，那正是旧选中项能一直挂着的漏洞）。
   //      ② `useVdfs.ts` 的换目录清理 watch（+21）。
   //      ③ 控件侧自动开草稿的监听源由 `cwd` 改为 `cwdNode`（+3 注释）。
-  "tauri/src": { maxLines: 21137, exts: [".ts", ".vue"] },
+  // 2026-09-30：R1-a 主会话快照化，21137 → 21329（+192）。**后端零改动**，全部在前端：
+  //      ① `registry/messageTypes.ts` 的 `workerProgressOf` / `WORKER_STATE_LABELS` /
+  //         `oneLinePreview`（实现 +57，注释占大半：判据、字段名与后端投影逐字同名的
+  //         理由、以及"真源只能在 registry"（composable 依赖 registry，反向即成环））；
+  //      ② `ToolCallNode.vue` 过程段默认收起成一行状态（模板 +18 / 样式 +47，注释
+  //         写明"恒定收起、不跟运行态自动展开"——自动展开等于把症状留在原地）；
+  //      ③ `useMessageContent.ts` 改为委托 `oneLinePreview`（−4，消掉第二份"一行"实现）。
+  //      ④ 再 +7：spec 夹具的 `status` 形参显式标注 `MessageStatus`——字面量常量当默认值
+  //         时 TS 把形参收窄成那一个字面量，vue-tsc 直接报 TS2322（门禁抓到的真错）。
+  // 2026-09-30：21329 → 21336（+7）。基线 21329 的构成见上。
+  "tauri/src": { maxLines: 21336, exts: [".ts", ".vue"] },
 };
 
 export function runAudit({ root = repoRoot, baselines = LINE_BUDGET_BASELINES, strict = STRICT } = {}) {

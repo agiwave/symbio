@@ -21,8 +21,10 @@ fn test_dir(root: &Path) -> PluginDir {
 }
 
 fn plugin(root: &Path, enabled: bool) -> Arc<DelegatePlugin> {
-    let mut cfg = DelegateConfig::default();
-    cfg.enabled = enabled;
+    let cfg = DelegateConfig {
+        enabled,
+        ..Default::default()
+    };
     Arc::new(DelegatePlugin::new(test_dir(root), cfg))
 }
 

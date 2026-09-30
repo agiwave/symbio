@@ -62,6 +62,12 @@ impl Decision {
         }
     }
 
+    /// 判定的**谓词形态**：`true` = 该开 worker。
+    ///
+    /// 不是 `dispatch` 的别名——注入点问的是"该不该开 worker"（`bool`），
+    /// 而序列化出口要的是 `dispatch` 的线格式词。R1-b 的注入点按谓词分支。
+    // dead-code-allow R-001: 消费方是 R1-b 的主会话注入点（问"该不该开 worker"），本期只有单测调用
+    #[allow(dead_code)]
     pub fn should_delegate(&self) -> bool {
         self.dispatch == Dispatch::Work
     }

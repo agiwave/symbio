@@ -234,7 +234,8 @@ fn legacy_inline_messages_layout_is_readable() {
             ]
         })
         .to_string(),
-    );
+    )
+    .unwrap();
     let states = scan(&root);
     assert_eq!(states.len(), 1, "老布局的 worker 不该被静默丢弃");
     assert_eq!(states[0].rounds, 1);

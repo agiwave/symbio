@@ -48,6 +48,8 @@ import {
   type ChatRole,
   type MessageStatus,
   type ResumeAction,
+  isInflightMessageStatus,
+  messageTextOf,
 } from '@/schemas/chat_message'
 import type { MessagePrompt, MessagePromptKind } from '@/schemas/message_prompt'
 
@@ -404,6 +406,109 @@ export function isFailedStatus(status?: MessageStatus | null): boolean {
 /** 是否用户主动终止 */
 export function isAbortedStatus(status?: MessageStatus | null): boolean {
   return status === MESSAGE_STATUS_ABORTED
+}
+
+// ==================== 后台任务状态快照 ====================
+//
+// 主会话的目标形态是**不持有工具**：重活都在 worker 会话里做，主窗口只看得到
+// 一行状态（`docs/plan/06` §10.2 R1-a）。这行状态是**投影**，不是第二份状态——
+// 它每次渲染都从已在手的数据（父 ToolCall 的状态 + 过程段的节点）现算。
+//
+// 字段名与后端 `delegate/progress` 的投影**逐字同名**（`state` / `rounds` /
+// `last_step`）。这样 R1-c 把数据源换成那份投影时，换的是「快照从哪来」，
+// 不是「快照长什么样」——组件与这套判据都不必动。
+
+/** 后台任务状态快照（R1-a 的呈现契约） */
+export interface WorkerProgress {
+  /**
+   * worker 跑了几轮（转播桥里每个子会话 Turn 节点 = worker 的一个来回）
+   *
+   * 与后端 `delegate/progress` 的 `rounds`（用户消息条数）**语义对齐而非同源**：
+   * 两者数的是不同布局里的同一样东西——一个 worker 回合恰好产出一个用户消息
+   * 与一个 Turn 节点，故数值相同；R1-c 换成那份投影时不必改这个字段的含义。
+   */
+  rounds: number
+  /** `running` = 还没收敛（父调用在途，或过程里仍有在途节点） */
+  state: 'running' | 'idle'
+  /** 最新一步：工具名优先，其次正文摘要；没有可说的步骤时为空串 */
+  lastStep: string
+}
+
+/** 状态词 → 面向用户的说法（与 `delegate/progress` 的状态取值同源） */
+export const WORKER_STATE_LABELS: Record<WorkerProgress['state'], string> = {
+  running: '进行中',
+  idle: '已收敛',
+}
+
+/**
+ * 从「父 ToolCall + 过程段节点」推出后台任务状态快照。
+ *
+ * ## 为什么在这层算，而不是让后端推一条状态消息
+ *
+ * 过程段本来就完整落在父会话转写里（转播桥把 worker 的每一帧锚定到父 ToolCall
+ * 之下），前端手里已经有全部事实——再让后端额外发一条状态消息，就是**第二份
+ * 状态**，两者一旦不一致（漏一帧 / 顺序错位）用户看到的就是自相矛盾的进度。
+ *
+ * @param toolStatus   父 ToolCall 自身状态（它没结束 ⇒ worker 还在跑）
+ * @param processTurns 过程段节点（子会话 Turn 列表，顺序即显示顺序）
+ */
+export function workerProgressOf(
+  toolStatus: MessageStatus | undefined,
+  processTurns: readonly ChatMessage[],
+): WorkerProgress {
+  const steps: string[] = []
+  let inflight = false
+  const walk = (nodes: readonly ChatMessage[]) => {
+    for (const n of nodes) {
+      if (isInflightMessageStatus(n.status)) inflight = true
+      const step = stepOf(n)
+      if (step) steps.push(step)
+      if (n.children?.length) walk(n.children)
+    }
+  }
+  walk(processTurns)
+  return {
+    rounds: processTurns.length,
+    state: isInflightMessageStatus(toolStatus) || inflight ? 'running' : 'idle',
+    lastStep: steps.length ? steps[steps.length - 1] : '',
+  }
+}
+
+/**
+ * 单个节点的「这一步在做什么」：工具名优先，其次正文摘要。
+ *
+ * 工具名优先于正文，因为**动作**才是进度（"正在读文档"不如"read"可核对）；
+ * 空节点（还什么都没写下来的占位）不产出步骤——状态行宁可少说也不编。
+ *
+ * 正文取 `liveEdge`（**末端**）：状态行是"此刻在做什么"，末句才是当前动作
+ * （"好的我来查一下…"是意图，"…答案是 42"才是结果）。折叠空白走共用函数，
+ * 否则 worker 的一条多行回复会把状态行撑成三行。
+ */
+function stepOf(node: ChatMessage): string {
+  if (node.type === MESSAGE_TYPE_TOOL_CALL && node.name) return node.name
+  return oneLinePreview(messageTextOf(node.content), true)
+}
+
+/**
+ * 文本压成**一行**预览：折叠连续空白 → 超限截断，省略号落在被截掉的那一端。
+ *
+ * ## 唯一的「一行」实现（为什么提到 registry 而不是就地写）
+ *
+ * 「一行放得下」这条要求有两处消费：折叠态单行摘要（`useMessageContent`
+ * 的 `messageSummaryPreviewOf`）与 R1-a 的后台任务状态行（`workerProgressOf`）。
+ * 两处各写一份，后果不是"重复劳动"而是**状态行会把多行正文原样铺开**——
+ * 而 `useMessageContent` 是 composable、**依赖** registry，反向 import 即成环，
+ * 所以真源只能在 registry 这一层。
+ *
+ * @param liveEdge 取末端（走马灯 / 最新）还是开头（摘要）。判据见
+ *                 [`messagePreviewFollowsLiveEdge`](消息预览是否跟随流式末端)。
+ */
+export function oneLinePreview(text: string, liveEdge: boolean): string {
+  const raw = text.replace(/\s+/g, ' ').trim()
+  if (!raw || raw.length <= MESSAGE_PREVIEW_MAX) return raw
+  return liveEdge
+    ? '…' + raw.slice(-MESSAGE_PREVIEW_MAX)
+    : raw.slice(0, MESSAGE_PREVIEW_MAX) + '…'
 }
 
 // ==================== 文案表（角色 / 类型 / 状态 → 面向用户的词） ====================
