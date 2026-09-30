@@ -2,7 +2,7 @@
 /**
  * doc-link-audit — 文档相对链接审计
  *
- * 用途：**活跃文档体检**——五条机械可判定的规矩，每条都对应一类「没人看着就必然腐烂」的文档病：
+ * 用途：**活跃文档体检**——六条机械可判定的规矩，每条都对应一类「没人看着就必然腐烂」的文档病：
  *
  *   D-001 站内相对链接：文档移动 / 归档（`git mv`）最容易留下静默坏链——阅读时才发现，
  *     而它本可以在提交前被机械地查出来。
@@ -10,6 +10,7 @@
  *   D-003 行数预算：活跃文档 **不得超过 `MAX_DOC_LINES`**。
  *   D-004 变更史不得混入活跃文档正文：历史归 `git log` 与 `archive/`。
  *   D-006 反引号里的文件路径：正文用 `` `path/to/x.md` `` 指路时，目标必须存在。
+ *   D-007 站内锚点：链接的 `#fragment` 必须等于目标文件某个标题的 slug（含纯锚点 `#x`）。
  *
  * D-006 存在的理由（它是 D-001 的**盲区补丁**）：D-001 只认 Markdown 链接语法
  *   `[文字](目标)`，而本仓正文里指路**更常**写成行内反引号（"详见 `docs/design/vdfs.md`"）。
@@ -72,7 +73,7 @@
  *   node scripts/doc-link-audit.mjs --root=<dir> # 换仓库根（回归测试用）
  *
  * 退出码：
- *   0 = 五条规矩全过
+ *   0 = 六条规矩全过
  *   1 = 有命中（**默认即失败**，不需要 `--strict`
  *       ——2026-09-20 前失效链接只在 `--strict` 下失败，而门禁从不带该参数 ⇒ 从未真的红过）
  *
@@ -329,8 +330,79 @@ const isExternal = (t) =>
   t.startsWith('#') ||
   /^[a-z][a-z0-9+.-]*:/i.test(t) // http: https: mailto: file:
 
+// ==================== D-007：站内锚点必须指向存在的标题 ====================
+/**
+ * 为什么需要它：D-001 在判定前 `raw.split('#')[0]` 把 fragment **整段丢掉**——于是
+ * 「文件在、锚点指向的标题不在」这类失效**全仓无人守**。它与 D-006 是同一类**盲区补丁**
+ * （D-006 的判词同样适用于此：**守卫报 0 不等于没有坏链，只等于它看不见**）：本次把
+ * `DECISIONS.md` 拆成索引 + 5 册时新增了 90 余条跨册锚点，锚点面一下子翻了数倍，
+ * 而没有任何东西会红。
+ *
+ * 判据：站内链接（含纯锚点 `#x`）的 fragment 必须等于**目标文件某个标题的 GitHub slug**。
+ *   标题 → slug：小写 → 去掉非（字母 / 数字 / 空白 / `-` / `_`）→ 每个空白转一个 `-`。
+ *   于是 `**` 加粗、反引号、`——`、`（出）`、`+` 一律被丢弃，所以
+ *   ``## ADR-020: 执行期与传输层**分离**——`EventSink`（出）+ `AbortSignal`（入）…``
+ *   的 slug 里 `eventsink出` 是**连着的**（`+ ` 那个空格才产生连字符）。
+ *   这条算法在真实数据上校准过：全仓 90 余条 ADR 索引锚点与 4 处外部 ADR 锚点逐字通过。
+ *
+ * 不判定（各自有更合适的归属，报了只是噪音）：
+ *   · 非 `.md` 目标（`x.rs#L10`、`x.html#id`）——行号 / DOM id 不是标题 slug；
+ *   · 目标文件不存在——D-001 已经报了；
+ *   · `docs/archive/` 下的**源文件**——同 D-001 / D-002 的整体豁免（归档是历史快照）。
+ *
+ * 重复标题：GitHub 给第 2、3 个同名标题追加 `-1` / `-2`，故接受 `slug` 与 `slug-N`（N < 出现次数）。
+ */
+/** 标题 → GitHub 锚点 slug（保留字母/数字/空白/`-`/`_`，其余丢弃，空白逐个转 `-`） */
+function ghSlug(heading) {
+  return heading
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+    .replace(/\s/g, '-')
+}
+
+/** 取一篇 md 的全部 ATX 标题（跳过 ``` 围栏内的内容，避免把代码注释里的 `#` 当标题） */
+function mdHeadings(text) {
+  const out = []
+  let fence = null
+  for (const line of text.split('\n')) {
+    const f = line.match(/^\s*(```+|~~~+)/)
+    if (f) {
+      if (fence === null) fence = f[1][0]
+      else if (f[1][0] === fence) fence = null
+      continue
+    }
+    if (fence !== null) continue
+    const h = line.match(/^#{1,6}\s+(.+?)\s*#*\s*$/)
+    if (h) out.push(h[1])
+  }
+  return out
+}
+
+/** 文件路径 → 可用锚点集合（含重复标题的 `-N` 变体）；读盘结果缓存 */
+const slugCache = new Map()
+function slugSet(absPath) {
+  if (slugCache.has(absPath)) return slugCache.get(absPath)
+  const set = new Set()
+  try {
+    const counts = new Map()
+    for (const h of mdHeadings(fs.readFileSync(absPath, 'utf8'))) {
+      const base = ghSlug(h)
+      const n = counts.get(base) ?? 0
+      counts.set(base, n + 1)
+      set.add(n === 0 ? base : `${base}-${n}`)
+    }
+  } catch {
+    /* 读不出 ⇒ 交给 D-001 报「文件不存在」 */
+  }
+  slugCache.set(absPath, set)
+  return set
+}
+
 const bad = []
+const badAnchors = []
 let total = 0
+let anchorsChecked = 0
 let skippedFiles = 0
 
 const walk = (dir) => {
@@ -344,6 +416,20 @@ const walk = (dir) => {
   }
 }
 
+/** D-007 单条锚点判定：fragment 必须是目标文件某标题的 slug */
+function checkAnchor(fromRel, absFile, rawFrag, toLabel) {
+  if (!rawFrag) return
+  let frag = rawFrag
+  try {
+    frag = decodeURIComponent(rawFrag)
+  } catch {
+    /* 非法转义 ⇒ 按原样比，让判定去报它 */
+  }
+  anchorsChecked += 1
+  if (slugSet(absFile).has(frag.toLowerCase())) return
+  badAnchors.push({ from: fromRel, to: toLabel, frag: rawFrag })
+}
+
 function check(file) {
   const rel = path.relative(repoRoot, file).split(path.sep).join('/')
   if (EXEMPT_DIRS.some((d) => rel.startsWith(d))) {
@@ -353,13 +439,24 @@ function check(file) {
   const text = fs.readFileSync(file, 'utf8')
   for (const m of text.matchAll(LINK)) {
     const raw = m[1].trim()
+    if (raw.startsWith('#')) {
+      // 纯锚点：查本文件的标题（这类链接 D-001 完全看不见）
+      checkAnchor(rel, file, raw.slice(1), rel)
+      continue
+    }
     if (isExternal(raw)) continue
-    const target = raw.split('#')[0].trim() // 去锚点
+    const hash = raw.indexOf('#')
+    const target = (hash >= 0 ? raw.slice(0, hash) : raw).trim()
     if (isExternal(target) || target === '') continue
     total += 1
     const resolved = path.resolve(path.dirname(file), target)
     if (!fs.existsSync(resolved)) {
-      bad.push({ from: path.relative(repoRoot, file), to: target })
+      bad.push({ from: rel, to: target }) // D-001 报它；锚点不再重复报
+      continue
+    }
+    // 只判 .md 目标：`x.rs#L10` / `x.html#id` 的 fragment 不是标题 slug
+    if (hash >= 0 && target.endsWith('.md')) {
+      checkAnchor(rel, resolved, raw.slice(hash + 1), target)
     }
   }
 }
@@ -485,12 +582,25 @@ if (backtickBad.length > 0) {
   console.log('        改为完整路径，或头部写 `<!-- doc-link-allow D-006: 理由 -->`（理由不可为空）。')
 }
 
+// ---- D-007：站内锚点 ----
+console.log(`D-007 站内锚点：判定 ${anchorsChecked} 条，失效 ${badAnchors.length} 条`)
+for (const { from, to, frag } of badAnchors) {
+  console.log(`  ✗ ${from}  ->  ${to}#${frag}  目标文件里没有这个标题`)
+}
+if (badAnchors.length > 0) {
+  console.log('\n提示：D-001 判定前会把 `#…` 丢掉，所以「文件在、标题不在」一直是盲区。')
+  console.log('      多为文档拆篇 / 改标题后未更新入链。标题 → 锚点的算法：小写 → 去掉非')
+  console.log('      （字母 / 数字 / 空白 / `-` / `_`）→ 每个空白转一个 `-`（加粗、反引号、')
+  console.log('      `——`、`（出）` 之类都被丢掉）。本条**不给豁免**：标题存在与否是精确判定。')
+}
+
 process.exit(
   bad.length > 0 ||
     misplaced.length > 0 ||
     oversized.length > 0 ||
     historical.length > 0 ||
-    backtickBad.length > 0
+    backtickBad.length > 0 ||
+    badAnchors.length > 0
     ? 1
     : 0
 )

@@ -69,12 +69,16 @@ test('有效链接 → 通过', () => {
   assert.equal(r.status, 0)
 })
 
-test('外链 / 纯锚点 / 空目标一律跳过（不是失效链接）', () => {
+test('外链 / 空目标一律跳过（不是失效链接）；纯锚点归 D-007 判标题存在性', () => {
   const r = audit({
     'docs/a.md':
-      '[外链](https://example.com/x)\n[锚点](#section)\n[邮件](mailto:a@b.c)\n[空]()\n',
+      '# section\n\n[外链](https://example.com/x)\n[锚点](#section)\n[邮件](mailto:a@b.c)\n[空]()\n',
   })
-  assert.equal(r.status, 0)
+  assert.equal(r.status, 0, r.stdout)
+  // 外链 / 邮件 / 空目标在计数**之前**就跳过 ⇒ 不进 D-001 的「相对链接」数；
+  // 纯锚点没有文件目标，也不进该数，但 D-007 会查它的标题
+  assert.match(r.stdout, /扫描相对链接 0 条/)
+  assert.match(r.stdout, /D-007 站内锚点：判定 1 条，失效 0 条/)
 })
 
 test('docs/archive/ 整体豁免 → 其中的失效链接不判（改写归档等于篡改历史）', () => {
@@ -284,6 +288,105 @@ test('D-006：豁免理由为空 → 仍失败（同 D-002 / D-004 的口径）'
 
 test('D-006：docs/archive/ 整体豁免（归档记录当时形态，改写等于篡改历史）', () => {
   assert.equal(audit({ 'docs/archive/old.md': '# 旧\n\n见 `docs/gone.md`。\n' }).status, 0)
+})
+
+// ── D-007：站内锚点 ─────────────────────────────────────────────────────
+test('D-007：跨册锚点指向不存在的标题 → 失败（D-001 会剥掉 # 后段，看不见这类）', () => {
+  const r = audit({
+    'docs/decisions/core.md': '# 平台基座\n\n## ADR-001: 分形插件架构\n',
+    'docs/README.md': '[001](./decisions/core.md#adr-999-不存在的那条)\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-007/)
+  assert.match(r.stdout, /adr-999-不存在的那条/)
+})
+
+test('D-007：锚点指向真实标题 → 通过', () => {
+  const r = audit({
+    'docs/decisions/core.md': '# 平台基座\n\n## ADR-001: 分形插件架构\n',
+    'docs/README.md': '[001](./decisions/core.md#adr-001-分形插件架构)\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+  assert.match(r.stdout, /D-007 站内锚点：判定 1 条，失效 0 条/)
+})
+
+test('D-007：slug 算法钉住真实形状——加粗 / 反引号 / 全角括号 / —— / + 全被丢，空格逐个转 -', () => {
+  // 标题取自 `docs/decisions/core.md` ADR-020 的真实形状：`EventSink`（出）后**无空格**，
+  // 而 `+ ` 那个空格才产生连字符 ⇒ `eventsink出-abortsignal入`。
+  const heading =
+    '## ADR-020: 执行期与传输层**分离**——`EventSink`（出）+ `AbortSignal`（入）取代 `PluginChannel` 的双职责'
+  const r = audit({
+    'docs/decisions/core.md': `# 平台基座\n\n${heading}\n`,
+    'docs/README.md':
+      '[020](./decisions/core.md#adr-020-执行期与传输层分离eventsink出-abortsignal入取代-pluginchannel-的双职责)\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-007：` 是 ` 两侧的空格各产生一个连字符（漏了就红——这正是真仓库 3 处失效的形态）', () => {
+  // 标题取自 ADR-025：`顺序是**节点属性**；`delta` 是 `updated` 的**传输形态**`
+  const heading = '## ADR-025: 顺序是**节点属性**；`delta` 是 `updated` 的**传输形态**'
+  const r = audit({
+    'docs/decisions/session.md': `# 会话与执行\n\n${heading}\n`,
+    'docs/good.md': '[025-good](./decisions/session.md#adr-025-顺序是节点属性delta-是-updated-的传输形态)\n',
+    'docs/README.md': '[025-bad](./decisions/session.md#adr-025-顺序是节点属性delta-是updated的传输形态)\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /README\.md.*#adr-025-顺序是节点属性delta-是updated的传输形态/s)
+  assert.doesNotMatch(r.stdout, /good\.md/)
+})
+
+test('D-007：纯锚点 `#x` 查本文件的标题（这类链接 D-001 与 D-006 都看不见）', () => {
+  const bad = audit({
+    'docs/README.md': '[§0.1](#02-不存在的小节)\n\n## 01. 存在的小节\n',
+  })
+  assert.equal(bad.status, 1, bad.stdout)
+  assert.match(bad.stdout, /#02-不存在的小节/)
+
+  const good = audit({
+    'docs/README.md': '[§0.1](#01-存在的小节)\n\n## 01. 存在的小节\n',
+  })
+  assert.equal(good.status, 0, good.stdout)
+})
+
+test('D-007：重复标题接受 GitHub 的 `-1` 后缀变体（但不超过重复数）', () => {
+  const r = audit({
+    'docs/a.md': [
+      '[第一条](#x-标题)',
+      '[第二条](#x-标题-1)',
+      '[第三条](#x-标题-2)',
+      '',
+      '## X: 标题',
+      '## X: 标题',
+    ].join('\n'),
+  })
+  // 2 个同名标题 ⇒ 合法后缀只到 `-1`；`-2` 失败，前两条不算失效
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /#x-标题-2/)
+  assert.doesNotMatch(r.stdout, /#x-标题-1 /)
+})
+
+test('D-007：非 .md 目标的 fragment 不判（`x.rs#L10` 的 L10 不是标题 slug）', () => {
+  const r = audit({
+    'symbio/src/lib.rs': 'pub const X: u8 = 1;\n',
+    'docs/README.md': '[源码](../symbio/src/lib.rs#L1)\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-007：目标文件不存在时只报 D-001，锚点不重复报', () => {
+  const r = audit({ 'docs/README.md': '[去这儿](./nope.md#section)\n' })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /nope\.md/)
+  assert.match(r.stdout, /D-007 站内锚点：判定 0 条，失效 0 条/)
+})
+
+test('D-007：docs/archive/ 作为**源文件**整体豁免；作为**目标**仍受查', () => {
+  const r = audit({
+    'docs/archive/old.md': '[坏锚](#不存在)\n\n## 真标题\n', // 源文件被豁免
+    'docs/README.md': '[归档](./archive/old.md#真标题)\n', // 目标受查
+  })
+  assert.equal(r.status, 0, r.stdout)
 })
 
 // ── 空树 ────────────────────────────────────────────────────────────────
