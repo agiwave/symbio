@@ -54,6 +54,7 @@
 | 请求构造 | `message_build.rs` | 发给 LLM 的请求消息数组与工具结果节点构造，及挂在用户消息 `prompt` 上的时间上下文 |
 | 会话恢复 | `resume.rs` | 会话恢复与历史重写 |
 | 运行态 | `active.rs` | 进程内运行态注册表：待消费请求、请求 id、中止信号、变更订阅 |
+| v2 事实桥 | `v2_bridge.rs` | `finish_turn` 收束点把每轮事实（用户发言 / 助手答复 / 实测耗时）转写进 per-session 的 v2 WAL——v1 行为零变化，纯增量记录（[ADR-045](../../../../../docs/decisions/core.md)） |
 
 ### 1.3 支撑单件（一文件一职责）
 

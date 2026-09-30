@@ -57,6 +57,7 @@
 | [042](./decisions/core.md#adr-042-跨插件调用一律经容器-route--路径常量不持有对方类型) | 跨插件调用一律经容器 `route` + 路径常量 | 现行 |
 | [043](./decisions/core.md#adr-043-v2-事件地基落地契约居中于中性层store--projection-按冻结形状进-symbio_core) | v2 事件地基：契约居中，`store` / `projection` 按冻结形状进 core | 现行 |
 | [044](./decisions/core.md#adr-044-实测与判据同源成本时延与兜底率是事件网格的一等数据不用旁路遥测) | 实测与判据同源：成本/时延/兜底率是事件网格一等数据 | 现行 |
+| [045](./decisions/core.md#adr-045-v2-事实桥生产流量经转写进事实源不等整体切换) | v2 事实桥：生产流量经转写进事实源，不等整体切换 | 现行 |
 
 ---
 
