@@ -368,7 +368,12 @@ export const BASELINE = {
   //      答复/实测耗时）转写进 per-session 的 v2 WAL——v1 行为零变化，纯增量
   //      记录；P99/兜底率从此有生产数据源。Aborted/ResumeDone 不转写（诚实
   //      缺口）；桥故障只 plugin_warn 不冒泡（不得拖垮 v1 对话）。
-  rustTests: 1198,
+  // 1201（slo_report 投影 + 阶段三扫描口，2026-09-30）——`1198 → 1201`，**+3**。
+  //      时延列的正式口径：final 实测 cost_ms 按 turn 归档（declared_tier
+  //      单源共享，兜底轮不混样本）；slo_scan_wal_roots（opt-in）walk 会话
+  //      存储根的 v2-events.wal，跨会话合并 P50/P95/P99 + 兜底率——
+  //      v2 事实桥写、扫描口读，三列同源闭环（ADR-044/045）。
+  rustTests: 1201,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

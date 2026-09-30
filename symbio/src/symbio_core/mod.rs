@@ -39,6 +39,7 @@ pub use projection::fallback::{fallback_rate, FallbackRateView, TierStats};
 pub use projection::readyset::{readyset, ReadySetView, ReadyTask};
 pub use projection::recall::recall;
 pub use projection::reputation::{plain_score, reputation, ReputationEntry, ReputationView};
+pub use projection::slo::{slo_report, SloLatencyView, TierLatency};
 pub use projection::transcript::{transcript, TranscriptEntry, TranscriptView};
 pub use projection::turnstate::{turnstate, TurnState};
 pub use projection::Projection;

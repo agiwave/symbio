@@ -58,6 +58,28 @@ impl FallbackRateView {
     }
 }
 
+/// 本轮声明的档位：找 `turn` 号在本事件**之前**开启的那条 `user.message`，
+/// 读载荷 `tier`；缺失/未知 ⇒ `unspecified` 桶（可观测，不静默归类）。
+///
+/// 兜底率与时延报告（[`super::slo`]）共用的**唯一判据**——档位归属只在这
+/// 一处定义，两列统计不各自为政。
+pub(super) fn declared_tier(events: &[Event], turn: u64, before_seq: Option<u64>) -> String {
+    events
+        .iter()
+        .rev()
+        .find(|u| {
+            u.entity == Entity::Turn
+                && u.verb == Verb::Opened
+                && u.turn == turn
+                && u.kind == EVENT_USER_MESSAGE
+                && u.seq.map(|s| s.value()) < before_seq
+        })
+        .and_then(|u| u.payload.get("tier").and_then(|v| v.as_str()))
+        .and_then(crate::symbio_core::adapters::LatencyTier::from_name)
+        .map(|t| t.name().to_string())
+        .unwrap_or_else(|| "unspecified".to_string())
+}
+
 /// `fallback_rate` 投影：从事件切片统计各档位的兜底率。
 pub fn fallback_rate() -> Projection<FallbackRateView> {
     Projection::new(|events: &[Event], now, _budget: Budget| {
@@ -94,20 +116,7 @@ pub fn fallback_rate() -> Projection<FallbackRateView> {
                         continue;
                     }
                     // 兜底落在哪档 = 本轮用户消息声明的档位（turn 号即归属）。
-                    let tier = events
-                        .iter()
-                        .rev()
-                        .find(|u| {
-                            u.entity == Entity::Turn
-                                && u.verb == Verb::Opened
-                                && u.turn == e.turn
-                                && u.kind == EVENT_USER_MESSAGE
-                                && u.seq.map(|s| s.value()) < e.seq.map(|s| s.value())
-                        })
-                        .and_then(|u| u.payload.get("tier").and_then(|v| v.as_str()))
-                        .and_then(crate::symbio_core::adapters::LatencyTier::from_name)
-                        .map(|t| t.name().to_string())
-                        .unwrap_or_else(|| "unspecified".to_string());
+                    let tier = declared_tier(events, e.turn, e.seq.map(|s| s.value()));
                     let st = by_tier.entry(tier.clone()).or_insert_with(|| TierStats {
                         tier,
                         turns: 0,
