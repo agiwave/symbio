@@ -331,11 +331,14 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 ---
 
-## v2 桥接插件（**全部可选**）
+## v2 桥接插件（**系统默认装配 · 可停用**）
 
 下面四个插件是 v2 桥接（[`docs/plan/06-落地桥接方案.md`](../plan/06-落地桥接方案.md)）的
-产物，共同点是**都不在 `ASSEMBLY_SUB_AGENT_PLUGINS` 里** ⇒ 真可选：目录删掉或
-`plugin_enabled: false`，其余机制**零影响**（会话照常、路由其它条目照常）。
+产物。**都不在 `ASSEMBLY_SUB_AGENT_PLUGINS` 里**（子 Agent 子树不挂）；自 B5 起列入
+**系统树**默认清单（`home::SYSTEM_EXTRA_PLUGINS` → `REQUIRED_PLUGINS`）——目录与
+manifest 由装配方补出，能力**默认到达用户**。停用（`plugin_enabled: false`）后对应路由 /
+工具消失，其余机制**零影响**（会话照常、路由其它条目照常）；必需插件的目录即使被删除
+也会被重新补出，**停用才是对外的开关**。
 
 它们各自**恰好一条**内省路由（与"一个插件一件事"同款），且**互不 import**——
 跨插件协作只经 `symbio_core` 的登记表（事实源 / 投影表 / Actor 表），不靠彼此。
@@ -347,6 +350,10 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 | `projection` | `projection/run` | 跑一次命名投影（纯函数，输入只有事实） | B2 |
 | `actor` | `actor/list` | 列出全部 Actor 行（主体规格） | B3 |
 | `retrieval` | `retrieval/list` | 派生可召回事实 → 跑 `memory.recall` → 回 `{facts, recall, degraded, actor}` | B4 |
+
+> **B5 起 `retrieval` 另注册一个 LLM 工具 `memory_recall`**：它经
+> `traverse(TRAVERSE_AVAILABLE_TOOLS)` 进模型工具清单，**不是路由**（工具清单的权威
+> 见 [CURRENT.md](../CURRENT.md) §2）；停用 `retrieval` 后它同样从清单消失。
 
 > `retrieval/list` 的 `degraded: true` 表示「`memory.recall` 投影未登记」——
 > 那是**平凡值**（能力未接入）而不是错误：检索退化为只看当前窗口，

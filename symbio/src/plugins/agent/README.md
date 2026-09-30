@@ -28,7 +28,8 @@
 ### 子 Agent 的默认插件清单
 
 子树挂**与父 Agent 同构的默认插件集**（见 `symbio_core::ASSEMBLY_SUB_AGENT_PLUGINS`）——与系统侧
-是**同一份清单**：`home` 的 `SYSTEM_PLUGINS` 直接取这个常量，**不是第二份手抄**。清单内容不在此
+的清单**主体**是同一份：`home` 的 `SYSTEM_PLUGINS` 直接取这个常量，**不是第二份手抄**；系统侧
+另加四行 v2 桥接插件（`home::SYSTEM_EXTRA_PLUGINS`，子树不挂）。清单内容不在此
 复述（复述即重复，改一次要动两处），要看得去常量定义或 `docs/CURRENT.md` §1。`vdfs` 会随子树
 构造出实例，但其注册经 `SubAgentVisitor` 丢弃（VDFS 根单槽归根）。
 

@@ -1,6 +1,7 @@
 # retrieval 插件
 
-**可选的检索者（S06）**：登记一行检索 Actor，并提供一条只读召回路由（跑 `memory.recall` 投影）。
+**可选的检索者（S06）**：登记一行检索 Actor，提供一条只读召回路由（跑 `memory.recall` 投影），
+以及 **`memory_recall` LLM 工具**（B5 消费口——模型在聊天里真的能召回）。
 
 ## 它解决什么
 
@@ -14,13 +15,16 @@ S06「长期记忆与语义检索」要的能力是**跨会话记住东西并能
 
 **四个"否"就是 B4 想验证的**：它若成立，`docs/plan/06-落地桥接方案.md` §5 的"需要改的既有代码 = 0"就不是口号。
 
-## 路由
+## 路由与工具
 
-| 路径 | 用途 |
-|---|---|
-| `retrieval/list` | 派生事实 → 跑 `memory.recall` → 回 `{ facts, recall, degraded, actor }` |
+| 出口 | 用途 | 形态 |
+|---|---|---|
+| `retrieval/list` | 派生事实 → 跑 `memory.recall` → 回 `{ facts, recall, degraded, actor }` | **只读内省路由**，不是工具 |
+| `memory_recall` | 跨会话列出 `MEMORY.md` 钉住的行（`query` 过滤 / `limit` 截断），回 `{ entries, returned, matched, limit, trivial, degraded }` | **LLM 工具**（B5），经 `traverse(TRAVERSE_AVAILABLE_TOOLS)` 注册 |
 
-> **只读内省口**，**不是** LLM 工具，不进 `available_tools`。
+> 工具分级：`memory_recall` 属**单发、毫秒级、只读**的轻查询，允许留在主会话；
+> 多轮 / 写盘 / 重度思考一律进 worker 会话（`docs/plan/06` §10.3）。
+> `enabled=false` ⇒ `traverse` 不注册、路由不可达（三处一致，J2）。
 
 `degraded: true` 表示 `memory.recall` 投影**未登记**（能力未接入）——不是错误。
 
@@ -58,11 +62,13 @@ S06「长期记忆与语义检索」要的能力是**跨会话记住东西并能
 | 文件 | 职责 |
 |---|---|
 | [`derive`](derive.rs) | 从磁盘派生事实（含 `memory.*` 格子）的**纯函数** |
-| [`plugin`](plugin.rs) | 插件本体（`Plugin` 实现 + 检索行登记 + `list` 路由） |
+| [`plugin`](plugin.rs) | 插件本体（`Plugin` 实现 + 检索行登记 + `list` 路由 + `traverse` 注册） |
+| [`tool`](tool.rs) | `memory_recall` 工具（LLM 消费口，只读轻查询） |
 
 ## 关联
 
 - 事实信封：[`symbio_core/fact`](../../symbio_core/fact/mod.rs)
 - 投影域：[`symbio_core/projection`](../../symbio_core/projection/mod.rs)
 - 投影登记（`memory.recall`）：[`symbio/src/plugins/session/projections.rs`](../session/projections.rs)
-- 端到端回归：[`e2e/cases/t21-retrieval.mjs`](../../../../e2e/cases/t21-retrieval.mjs)
+- 端到端回归：[`e2e/cases/t21-retrieval.mjs`](../../../../e2e/cases/t21-retrieval.mjs)（诊断链路）、
+  [`e2e/cases/t23-memory-recall-tool.mjs`](../../../../e2e/cases/t23-memory-recall-tool.mjs)（消费口 B5）

@@ -33,7 +33,7 @@ use crate::symbio_core::{
     actor_list, plugin_dir_from_ctx, projection_has, projection_run, ActorPattern, ActorScope,
     ActorSource, ActorSpec, Fact, Plugin, PluginConfigFile, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
-    ProjectionInput, PLUGIN_ID_RETRIEVAL,
+    ProjectionInput, CAPABILITY_VISITOR, PLUGIN_ID_RETRIEVAL, TRAVERSE_AVAILABLE_TOOLS,
 };
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -53,7 +53,7 @@ const RETRIEVAL_BUDGET_MS: u64 = 500;
 const PLUGIN_ID_SESSION_DIR: &str = "session";
 
 /// 本插件消费的投影名 —— B2 的登记表按名寻址，本插件**不认识**产生它的插件。
-const PROJECTION_RECALL: &str = "memory.recall";
+pub(super) const PROJECTION_RECALL: &str = "memory.recall";
 
 /// 本插件自身配置 —— 只有一个开关（与 `fact_log` / `projection` / `actor` 同形）。
 #[derive(Debug, Clone, Deserialize)]
@@ -165,9 +165,14 @@ impl RetrievalPlugin {
             .with_hidden(true)
     }
 
+    /// 会话根目录（公开布局：`<root>/session`）—— 派生与召回共用同一取法。
+    pub(super) fn session_root(&self) -> PathBuf {
+        self.root.join(PLUGIN_ID_SESSION_DIR)
+    }
+
     /// 从磁盘派生全部可召回事实（含 `memory.*` 格子）。
-    fn derive_all(&self) -> Vec<Fact> {
-        let session_root = self.root.join(PLUGIN_ID_SESSION_DIR);
+    pub(super) fn derive_all(&self) -> Vec<Fact> {
+        let session_root = self.session_root();
         let mut ids = session_ids(&session_root);
         ids.sort();
 
@@ -263,14 +268,26 @@ impl Plugin for RetrievalPlugin {
         }
     }
 
-    /// 本插件**没有能力面**：它是纯只读召回口，不贡献工具 / 选项。
+    /// 能力广播：把 `memory_recall` 工具注册进 LLM 工具清单（B5 消费口），
+    /// 并声明「本插件有一份配置文档」（设置页据此列出并指路）。
     ///
-    /// 仍需实现（`Plugin` trait 要求）：声明有配置文档，于是设置页能列出它。
+    /// - **仅 `TRAVERSE_AVAILABLE_TOOLS` 分支注册**：选项收集（`…_OPTIONS`）
+    ///   不该拿到工具——与 `web` 插件的守卫同款；
+    /// - **`enabled=false` 不注册**（J2）：模型的工具清单里直接没有它，
+    ///   与「行不登记、路由不可达」三处一致；此时只剩配置声明。
     async fn traverse(
         self: Arc<Self>,
         _path: String,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
+        let sub_path = ctx.get(crate::symbio_core::PATH).unwrap_or_default();
+        if sub_path == TRAVERSE_AVAILABLE_TOOLS && self.config.enabled {
+            if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
+                visitor
+                    .register(Arc::new(super::tool::MemoryRecallTool::new(self.clone())))
+                    .await;
+            }
+        }
         crate::symbio_core::capability_announce_configurable(&ctx, &self.config_file).await;
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }

@@ -35,10 +35,13 @@
 /// 子 Agent 是一棵 composite 插件树（与系统 Agent 同构，agent-directory-spec §1.1），
 /// 构造时经 ctx 键 [`crate::symbio_core::REQUIRED_PLUGINS`] 告知容器「必须挂哪些插件」。
 ///
-/// ## 与系统树清单的关系：**当前逐项相同**
+/// ## 与系统树清单的关系：**主体相同，系统侧另有四行**
 ///
-/// 系统树那份（`plugins/home` 的 `SYSTEM_PLUGINS`）现在直接别名到本常量，
-/// 因此不存在需要手工同步的第二份字面量。差异**不在清单里**，而在收集期的**作用域**：
+/// 系统树那份（`plugins/home` 的 `SYSTEM_PLUGINS`）直接别名到本常量，另加系统侧
+/// 独有的 `home::SYSTEM_EXTRA_PLUGINS`（v2 桥接四插件，子树不挂）。因此不存在需要
+/// 手工同步的第二份 14 行字面量。（那是插件层的私有模块，**不能**写成 intra-doc
+/// 链接——`cargo doc -D rustdoc::broken_intra_doc_links` 会当场报断链。）
+/// 差异**不在清单主体里**，而在收集期的**作用域**：
 ///
 /// - `vdfs`（VDFS 根）是**单槽**注册，归系统 Agent 独占。子树**会构造**自己的
 ///   `vdfs` 实例（故本清单在列），但它的**注册**经

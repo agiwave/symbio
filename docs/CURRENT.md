@@ -26,7 +26,7 @@
 | `model` | `model` | <根>/model | （动态）已无自有路由（`execute_turn` 由 session 直连调用） | `ModelProvider` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `plugin_manager` | `plugin_manager` | <根>/plugin_manager | — | `Plugin` · `VdfsProvider` | — | ✓ |
 | `projection` | `projection` | — | `projection/list` · `projection/run` | `Plugin` | ✓ | ✓ |
-| `retrieval` | `retrieval` | — | `retrieval/list` | `Plugin` | ✓ | ✓ |
+| `retrieval` | `retrieval` | — | `retrieval/list` | `Capability` · `Plugin` | ✓ | ✓ |
 | `session` | `session` | <根>/session | `session/chat/abort` · `session/chat/send` | `Capability` · `Plugin` | ✓ | ✓ |
 | `skill` | `skill` | <根>/skill | `skill/execute` | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `telegram` | `telegram` | <根>/telegram | `telegram/get_updates` · `telegram/send` · `telegram/set_chat_id` · `telegram/start_listener` · `telegram/status` · `telegram/stop_listener` | `Plugin` | ✓ | ✓ |
@@ -61,6 +61,7 @@
 | `codebase_search` | `local` | 语义代码搜索 |
 | `content_search` | `local` | 正则内容搜索（ripgrep 库） |
 | `todo_write` | `local` | 任务清单（`LastOnly` 保留策略） |
+| `memory_recall` | `retrieval` |  |
 | `context_compact` | `session` | 主动压缩上下文（开关打开时才暴露给模型） |
 | `heartbeat` | `session` | 会话心跳配置 |
 | `read_skill` | `skill` | 读取技能定义 |
@@ -106,7 +107,7 @@
 
 | 范围 | 实现 | 测试 |
 |---|---|---|
-| `symbio/src` | 240 文件 / 59165 行 | 140 文件 / 27012 行 |
+| `symbio/src` | 247 文件 / 60209 行 | 145 文件 / 27755 行 |
 | `cli/src` | 4 文件 / 1573 行 | 1 文件 / 80 行 |
 | `tauri/src-tauri/src` | 3 文件 / 449 行 | 0 文件 / 0 行 |
 | `tauri/src` | 96 文件 / 21137 行 | 50 文件 / 11448 行 |
@@ -120,4 +121,4 @@
 
 ---
 
-> 生成时间：2026-09-30 03:00:42 UTC · 源：`git rev-parse HEAD` = `unknown`
+> 生成时间：2026-09-30 05:22:41 UTC · 源：`git rev-parse HEAD` = `a532e74`

@@ -14,13 +14,32 @@ export async function runRegisteredCase() {
   try {
     await fn();
     console.log(`  ✓ ${name} (${Date.now() - t0}ms)`);
+    await settleBeforeExit();
     process.exit(0);
   } catch (e) {
     console.error(`  ✗ ${name} (${Date.now() - t0}ms)`);
     console.error(`      ${String(e.message ?? e)}`);
     if (process.env.E2E_DEBUG) console.error(e.stack);
+    await settleBeforeExit();
     process.exit(1);
   }
+}
+
+/**
+ * 退出前的事件循环收尾窗口（Windows 专属噪声的兜底）。
+ *
+ * 症状：用例断言**全部通过**（`✓` 已打印），退出码却是 1，stderr 只有一行
+ * `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c`。
+ * 成因：用例末尾刚杀掉 mock / 长驻 CLI 子进程，或刚完成若干 `fetch`，
+ * 这些句柄仍在异步关闭中；此刻 `process.exit()` 会在 libuv 里撞断言。
+ *
+ * 为什么放在这里：**本文件是用例进程唯一的退出点**——放一处即覆盖全部用例，
+ * 不必每个 `finally` 各写一遍。用固定一拍的代价换掉"红的其实是退出噪声"，
+ * 同 `mock-llm.mjs`「connection: close 避开 libuv 退出断言」的同类处理。
+ * 250ms 为实测校准值（200ms 已足够，留一档余量）。
+ */
+function settleBeforeExit() {
+  return new Promise((r) => setTimeout(r, 250));
 }
 
 if (process.env.E2E_CASE_SELF === '1') {

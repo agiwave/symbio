@@ -229,3 +229,133 @@ fn list_sees_other_plugins_rows() {
     assert!(names.contains(&"session.reasoner".to_string()));
     assert!(names.contains(&ACTOR_NAME_SESSION_RETRIEVAL.to_string()));
 }
+
+// ==================== B5：memory_recall 消费口 ====================
+
+use super::super::tool::MemoryRecallTool;
+use crate::providers::DefaultToolVisitor;
+use crate::symbio_core::{CapabilityVisitor, CAPABILITY_VISITOR, TRAVERSE_AVAILABLE_TOOLS};
+
+/// 能力广播：启用时 `traverse` 把 `memory_recall` 注册进收集器（LLM 可见）。
+#[test]
+fn traverse_registers_memory_recall_when_enabled() {
+    let _g = setup();
+    let root = temp_root();
+    write_session(&root, "s1", &messages_json(), Some("记住这一行\n"));
+    let p = plugin(&root, true);
+    let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
+    let req = PluginSimpleRequest::new(None, None);
+    req.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
+    req.set(CAPABILITY_VISITOR, visitor.clone());
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(req);
+    run(async move { p.clone().traverse(String::new(), ctx).await.unwrap() });
+
+    let metas = run(async { visitor.list_capability().await });
+    let meta = metas
+        .iter()
+        .find(|m| m.name == "memory_recall")
+        .unwrap_or_else(|| panic!("工具清单应含 memory_recall（实得 {:?}）", metas));
+    // 面向模型的契约：参数 schema 必须在场
+    assert!(
+        meta.input_schema.get("properties").is_some(),
+        "input_schema 应声明 properties"
+    );
+}
+
+/// J2：停用 ⇒ `traverse` 不注册（模型工具清单里直接没有它），且不报错。
+#[test]
+fn traverse_disabled_registers_no_memory_recall() {
+    let _g = setup();
+    let root = temp_root();
+    let p = plugin(&root, false);
+    let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
+    let req = PluginSimpleRequest::new(None, None);
+    req.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
+    req.set(CAPABILITY_VISITOR, visitor.clone());
+    let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(req);
+    run(async move { p.clone().traverse(String::new(), ctx).await.unwrap() });
+
+    let metas = run(async { visitor.list_capability().await });
+    assert!(
+        !metas.iter().any(|m| m.name == "memory_recall"),
+        "停用后不应注册 memory_recall"
+    );
+}
+
+/// 召回核心：跨会话内容 + 会话字典序（确定性 A4）+ 两态判据。
+#[test]
+fn recall_returns_cross_session_lines_in_order() {
+    let _g = setup();
+    let root = temp_root();
+    write_session(&root, "s2", &messages_json(), Some("另一条记忆\n"));
+    write_session(
+        &root,
+        "s1",
+        &messages_json(),
+        Some("口令：紫金十三钗\n第二行\n"),
+    );
+    let tool = MemoryRecallTool::new(plugin(&root, true));
+
+    let v = tool.recall(None, 20);
+    assert_eq!(v["degraded"], false, "投影已登记 ⇒ 不降级");
+    assert_eq!(v["trivial"], false, "有记忆事实 ⇒ 非平凡");
+    let entries = v["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 3, "两会话合计三行");
+    // 会话 id 字典序：s1 在前，行序稳定
+    assert_eq!(entries[0]["session"], "s1");
+    assert_eq!(entries[0]["text"], "口令：紫金十三钗");
+    assert_eq!(entries[0]["line"], 0);
+    assert_eq!(entries[1]["line"], 1);
+    assert_eq!(entries[2]["session"], "s2");
+    assert_eq!(v["matched"], 3);
+    assert_eq!(v["returned"], 3);
+
+    // A4：同一份磁盘双跑逐字节一致
+    let v2 = tool.recall(None, 20);
+    assert_eq!(
+        serde_json::to_string(&v).unwrap(),
+        serde_json::to_string(&v2).unwrap(),
+        "同一份磁盘两次召回必须逐字节相同"
+    );
+}
+
+/// 关键词过滤（不区分大小写）+ limit 截断（returned ⊆ matched）。
+#[test]
+fn recall_filters_by_query_and_clamps_limit() {
+    let _g = setup();
+    let root = temp_root();
+    write_session(
+        &root,
+        "s1",
+        &messages_json(),
+        Some("Deploy pipeline is fast\n部署口诀\n"),
+    );
+    let tool = MemoryRecallTool::new(plugin(&root, true));
+
+    let hit = tool.recall(Some("deploy"), 20);
+    assert_eq!(hit["matched"], 1, "子串过滤应命中一行");
+    assert_eq!(hit["returned"], 1);
+
+    let hit_upper = tool.recall(Some("DEPLOY"), 20);
+    assert_eq!(hit_upper["matched"], 1, "过滤不区分大小写");
+
+    let capped = tool.recall(None, 1);
+    assert_eq!(capped["matched"], 2, "matched 是过滤后的总数");
+    assert_eq!(capped["returned"], 1, "returned 被 limit 截断");
+    assert_eq!(capped["limit"], 1);
+}
+
+/// 全盘无记忆 ⇒ `trivial=true`、entries 空、**不报错**（J2 平凡值）。
+#[test]
+fn recall_without_any_memory_is_trivial_and_empty() {
+    let _g = setup();
+    let root = temp_root();
+    write_session(&root, "s1", &messages_json(), None);
+    let tool = MemoryRecallTool::new(plugin(&root, true));
+
+    let v = tool.recall(None, 20);
+    assert_eq!(v["trivial"], true, "无记忆事实 ⇒ 平凡值");
+    assert_eq!(v["degraded"], false, "投影在，只是折出平凡值——不是降级");
+    assert_eq!(v["matched"], 0);
+    assert!(v["entries"].as_array().unwrap().is_empty());
+}

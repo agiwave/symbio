@@ -20,8 +20,10 @@ import './_selfrun.mjs';
 // | 失败时带 `failure_kind` | 可诊断（S20.6） |
 // | 重写后逐条 `removed` + 快照帧（`meta.compacted`） | 前端历史能被就地收敛，不必猜 |
 //
-// 触发参数沿用 T8（实测校准）：`max_context_tokens=12000` + 每轮超大回复，
-// 第 3 轮起水位越过 70% 阈值。
+// 触发参数沿用 T8（实测校准）：`max_context_tokens=13000` + 每轮超大回复，
+// 水位越过 70% 阈值（2026-09-30 随 B5 从 12000 重校准：第 21 个工具
+// `memory_recall` 的 schema 使 overhead +~0.3k，原上限下「压缩请求自身
+// 不超限」预检不再通过——详见 t8-compression.mjs 头部的校准记录）。
 import {
   MockLlm,
   makeHomedir,
@@ -68,7 +70,7 @@ export default defineCase('T11 压缩节点协议：compression 节点的开始/
   const GATEWAY_PORT = nextPort();
   const hd = makeHomedir({
     providers: [
-      { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 12000 }) },
+      { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 13000 }) },
     ],
     pluginConfigs: {
       session: { auto_compress: true, context_messages: 0 },

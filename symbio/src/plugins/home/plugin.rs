@@ -36,15 +36,35 @@ use tokio::sync::RwLock;
 
 /// 系统必备插件：**home 的策略**，随构造交给容器。
 ///
-/// 系统（根）Agent 挂载的插件清单。**当前与子 Agent 子树逐项相同**，故直接取
-/// `symbio_core` 的 [`ASSEMBLY_SUB_AGENT_PLUGINS`](crate::symbio_core::ASSEMBLY_SUB_AGENT_PLUGINS)
-/// ——这里**不是**第二份手抄的字面量。父子因此「结构一致、能力对齐」；二者的差异在
-/// **收集期作用域**（`vdfs` 单槽归根、`model` 单槽按收集方）而非清单内容——详见
-/// `ASSEMBLY_SUB_AGENT_PLUGINS` 的文档。
+/// 系统（根）Agent 挂载的插件清单**主体**取自 `symbio_core` 的
+/// [`ASSEMBLY_SUB_AGENT_PLUGINS`](crate::symbio_core::ASSEMBLY_SUB_AGENT_PLUGINS)
+/// ——这里**不是**第二份手抄的字面量；父子在**这 14 行上**「结构一致、能力对齐」。
 ///
-/// 若将来两侧确需分叉，**在这里加只属于系统侧的字面量并写清理由**——不要恢复
-/// 「两张各写一遍、靠人同步」的形态（两份各自演化的清单会静默漂移，且没有测试会变红）。
+/// 系统侧另有只属于本侧的四行（v2 桥接插件），见下方 [`SYSTEM_EXTRA_PLUGINS`]——
+/// 真实清单 = 两者并集，消费点在构造 `REQUIRED_PLUGINS` 处的 `chain`。
+/// 二者的差异在**收集期作用域**（`vdfs` 单槽归根、`model` 单槽按收集方）与
+/// 这四行系统侧附加，详见两个常量各自的文档。
 pub const SYSTEM_PLUGINS: &[&str] = crate::symbio_core::ASSEMBLY_SUB_AGENT_PLUGINS;
+
+/// 系统侧**额外**插件 —— 只挂系统树，不进子 Agent 子树（v2 桥接四插件）。
+///
+/// ## 为什么要在系统侧分叉出这四行
+///
+/// 分叉判据正是上面 [`SYSTEM_PLUGINS`] 注释预留的那句「若将来两侧确需分叉，
+/// 在这里加只属于系统侧的字面量并写清理由」：
+///
+/// 1. **能力要到达用户**：这四件（事实派生 / 投影内省 / Actor 表 / 跨会话召回）
+///    此前**只在 e2e 里被显式建目录才挂载**——新装环境连插件目录都没有，
+///    能力永远走不到用户面前（`docs/plan/06` §6.3 BR2「登记了但没被用」的
+///    装配侧形态）。进 `REQUIRED_PLUGINS` ⇒ 容器补目录、装配、默认挂载。
+/// 2. **子树不需要**：子 Agent 会话短命、无跨会话记忆可召回，挂上只是四行空转；
+///    缺席时系统照常（J2 平凡值，`docs/plan/06` §9.4）。
+/// 3. **仍然可停用**：进必需清单只决定「目录与 manifest 由装配方补出来」，
+///    `plugin_enabled: false` 照样停用 ⇒ 路由 / 工具消失、其余零影响。
+///
+/// 与 `ASSEMBLY_SUB_AGENT_PLUGINS` 的关系：**子集 + 这四行**，不复写那 14 行
+/// （复写即重复，必然漂移）；消费点在下方构造处的 `chain`。
+pub const SYSTEM_EXTRA_PLUGINS: &[&str] = &["fact_log", "projection", "actor", "retrieval"];
 
 /// Home 自己的插件目录 = **系统根** `<homedir>`
 ///
@@ -335,7 +355,11 @@ impl HomePlugin {
         );
         sub_context.set(
             REQUIRED_PLUGINS,
-            SYSTEM_PLUGINS.iter().map(|s| (*s).to_string()).collect(),
+            SYSTEM_PLUGINS
+                .iter()
+                .chain(SYSTEM_EXTRA_PLUGINS)
+                .map(|s| (*s).to_string())
+                .collect::<Vec<String>>(),
         );
 
         let worker_plugin: Arc<dyn Plugin> =

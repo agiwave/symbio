@@ -6,7 +6,9 @@
 //!    （`{ pattern: translator, budget_ms: 500, scope: root }`）。这是 B4 的**第一个
 //!    真消费者**：B3 的 `decider` 只是"能登记"的演示（它不读事实、不产出事实），
 //!    检索者不同——它读 `Fact`、跑投影，把 B1 / B2 / B3 三者串成一条链；
-//! 2. 提供 `retrieval/list` 路由：**跑一次 `memory.recall` 投影**，返回召回候选。
+//! 2. 提供 `retrieval/list` 路由：**跑一次 `memory.recall` 投影**，返回召回候选；
+//! 3. 提供 **`memory_recall` LLM 工具**（B5 消费口）：模型在聊天里按需召回
+//!    跨会话钉住的记忆（`MEMORY.md`）——B1–B4 由此第一次**到达用户**。
 //!
 //! ## 它与前三个可选插件（`fact_log` / `projection` / `actor`）的差别
 //!
@@ -38,7 +40,9 @@
 //! ## 文件
 //!
 //! - [`derive`]：从磁盘派生事实（含 `memory.*` 格子）的**纯函数**——本插件的全部机制
-//! - [`plugin`]：插件本体（`Plugin` 实现 + 检索行登记 + `list` 路由）
+//! - [`plugin`]：插件本体（`Plugin` 实现 + 检索行登记 + `list` 路由 + `traverse` 注册）
+//! - [`tool`]：`memory_recall` 工具（LLM 消费口，只读轻查询）
 
 mod derive;
 mod plugin;
+mod tool;

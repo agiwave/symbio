@@ -9,6 +9,12 @@ import './_selfrun.mjs';
 // - 每轮回复 ≈ 9.6k 字符 ≈ 9.6k tokens（CJK ≈ 1 token/字）；
 // - 12000 上限：70% = 8400，第 3 轮开始时水位 ≈ 19k 稳过线，且压缩请求
 //   （历史 ≈ 7.4k + overhead ≈ 4.5k < 12000）能通过「摘要请求自身不超限」预检。
+//
+// **2026-09-30 重校准（B5）**：工具清单增至 21 个（`memory_recall` 进入
+// `available_tools`），overhead +~0.3k ⇒ 压缩请求 ≈ 7.4k + 4.8k = 12.2k > 12000
+// ——预检不再通过、压缩被**正确地**跳过（预检语义见 node-state-streaming §23：
+// 只跳过注定失败的请求）。上限 12000 → 13000（70% = 9100，水位照常越线；
+// 预检余量 ≈ 0.8k）。**再加工具时按同一口径复核这三个数。**
 // 钉的不变量：
 // - 压缩 LLM 调用真实发生（mock 收到压缩请求）；
 // - 快照消息落库：meta.compacted=true、protocol_version=v2、user 角色、
@@ -56,7 +62,7 @@ export default defineCase('T8 上下文压缩：水位触发自动压缩，快�
   ]).start();
   const hd = makeHomedir({
     providers: [
-      { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 12000 }) },
+      { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 13000 }) },
     ],
     // context_messages: 0 = 上下文窗口不按轮次截断（压缩判定的原料是完整历史）
     pluginConfigs: { session: { auto_compress: true, context_messages: 0 } },

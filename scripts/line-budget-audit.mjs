@@ -62,7 +62,10 @@ export const LINE_BUDGET_BASELINES = {
   "symbio/src/plugins/composite": { maxLines: 1330, exts: [".rs"] },
   "symbio/src/plugins/event_bus": { maxLines: 164, exts: [".rs"] },
   "symbio/src/plugins/gateway": { maxLines: 1190, exts: [".rs"] },
-  "symbio/src/plugins/home": { maxLines: 928, exts: [".rs"] },
+  // 2026-09-30：B5 消费接入——`home` 新增 `SYSTEM_EXTRA_PLUGINS`（v2 桥接四插件的
+  // 系统侧装配清单 + 分叉理由注释），`REQUIRED_PLUGINS` 构造处改为与之 `chain`。
+  // 基线 928 → 952（+24）。
+  "symbio/src/plugins/home": { maxLines: 952, exts: [".rs"] },
   "symbio/src/plugins/hook": { maxLines: 467, exts: [".rs"] },
   "symbio/src/plugins/local": { maxLines: 3460, exts: [".rs"] },
   "symbio/src/plugins/mcp": { maxLines: 2897, exts: [".rs"] },
@@ -125,7 +128,9 @@ export const LINE_BUDGET_BASELINES = {
   //     属 B1/B3 遗留）：`crate::Fact` 一类链接漏了 `symbio_core::` 段，另有两处
   //     指向不存在的方法 / 常量。注释改写 +4 行。
   // 基线 9409 → 9449（+2 +34 +4）。
-  "symbio/src/symbio_core": { maxLines: 9449, exts: [".rs"] },
+  // 2026-09-30：B5——`assembly/mod.rs` 的「与系统树清单的关系」由「逐项相同」改为
+  // 「主体相同、系统侧另有四行」（指认 `home::SYSTEM_EXTRA_PLUGINS`）。基线 9449 → 9451（+2）。
+  "symbio/src/symbio_core": { maxLines: 9451, exts: [".rs"] },
   "symbio/src/providers": { maxLines: 2732, exts: [".rs"] },
 
   // ── 宿主与工具层 ──

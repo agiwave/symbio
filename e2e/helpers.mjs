@@ -152,24 +152,36 @@ export function makeHomedir({ providers, mcpServers, sessionConfig, pluginConfig
   return { homedir, workdir };
 }
 
-/** 简单 YAML 序列化：只支持扁平键值 / 嵌套对象两层 / 布尔数字字符串。 */
+/**
+ * 简单 YAML 序列化：支持扁平键值 / 嵌套对象 / **数组（块序列）**。
+ *
+ * 数组是块序列（`k:\n  - v`）而不是行内 `[a, b]`：后端用 `serde_yaml_ng` 解析，
+ * 两种都吃；块序列对**含逗号或空格的词**更稳（"帮我 重构"不会被行内语法切成两项），
+ * 而这类词恰好是关键词类配置的值。
+ */
 function yamlStringify(obj, indent = 0) {
   const pad = '  '.repeat(indent);
   return (
     Object.entries(obj)
       .map(([k, v]) => {
         if (v == null) return `${pad}${k}: null`;
-        if (typeof v === 'object' && !Array.isArray(v)) {
+        if (Array.isArray(v)) {
+          if (v.length === 0) return `${pad}${k}: []`;
+          return `${pad}${k}:\n${v.map((x) => `${pad}  - ${yamlScalar(x)}`).join('\n')}`;
+        }
+        if (typeof v === 'object') {
           return `${pad}${k}:\n${yamlStringify(v, indent + 1)}`;
         }
-        if (typeof v === 'string') {
-          // 含特殊字符的字符串加引号，避免 YAML 语法歧义
-          return /^[A-Za-z0-9_.:/-]+$/.test(v) ? `${pad}${k}: ${v}` : `${pad}${k}: "${v.replace(/"/g, '\\"')}"`;
-        }
-        return `${pad}${k}: ${v}`;
+        return `${pad}${k}: ${yamlScalar(v)}`;
       })
       .join('\n') + '\n'
   );
+}
+
+/** 标量序列化：含特殊字符的字符串加引号，避免 YAML 语法歧义。 */
+function yamlScalar(v) {
+  if (typeof v !== 'string') return String(v);
+  return /^[A-Za-z0-9_.:/-]+$/.test(v) ? v : `"${v.replace(/"/g, '\\"')}"`;
 }
 
 /** 在已建好的 homedir 上追加一个 MCP server 条目（供引用 homedir 路径的 args 用）。 */
