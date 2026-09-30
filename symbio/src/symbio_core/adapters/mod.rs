@@ -47,6 +47,28 @@ impl LatencyTier {
         }
     }
 
+    /// 档位名（入事件的 `tier` 字段——兜底率按层统计的口径锚）。
+    pub fn name(self) -> &'static str {
+        match self {
+            LatencyTier::Reflex => "reflex",
+            LatencyTier::Fast => "fast",
+            LatencyTier::Deep => "deep",
+            LatencyTier::Autonomic => "autonomic",
+        }
+    }
+
+    /// 从事件载荷的 `tier` 字符串还原档位（未知/缺失 ⇒ `None`——**不静默归类**，
+    /// 投影侧把 None 计入可观测的 `unspecified` 桶）。
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "reflex" => Some(LatencyTier::Reflex),
+            "fast" => Some(LatencyTier::Fast),
+            "deep" => Some(LatencyTier::Deep),
+            "autonomic" => Some(LatencyTier::Autonomic),
+            _ => None,
+        }
+    }
+
     /// 该档位是否允许**触碰模型**。
     pub fn may_call_model(self) -> bool {
         matches!(

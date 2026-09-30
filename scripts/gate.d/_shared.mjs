@@ -349,7 +349,10 @@ export const BASELINE = {
   //      熔断判据闭环（G3 输入接实测）。校准：真实 HTTP/SSE 12 轮实测系统
   //      自身开销 P50=1ms / max=3ms（G2 首测，四层预算初值保留为正式值），
   //      守卫 reflex_tier_system_overhead_is_measured_and_bounded 钉住两档下界。
-  rustTests: 1185,
+  // 1187（兜底率统计，2026-09-30）：**SLO §1.2 兜底率列的口径落地**——`1185 → 1187`，**+2**。
+  //      ③ fallback_rate 投影（按档统计兜底率；turn 档位 = 用户消息载荷 tier，
+  //      缺失进 unspecified 桶可观测）+ LatencyTier::name/from_name 往返。
+  rustTests: 1187,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

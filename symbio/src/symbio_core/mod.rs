@@ -35,6 +35,7 @@ pub use projection::calibration::{calibration, CalibrationView, SkillStats};
 pub use projection::checkpoint::{checkpoint, CheckpointState};
 pub use projection::consolidate::{accept as consolidate_accept, ConsolidateParams, Rejection};
 pub use projection::cost::{cost_ledger, CostEntry, CostLedgerView};
+pub use projection::fallback::{fallback_rate, FallbackRateView, TierStats};
 pub use projection::readyset::{readyset, ReadySetView, ReadyTask};
 pub use projection::recall::recall;
 pub use projection::reputation::{plain_score, reputation, ReputationEntry, ReputationView};

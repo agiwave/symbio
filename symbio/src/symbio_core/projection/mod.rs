@@ -51,6 +51,7 @@ pub mod calibration;
 pub mod checkpoint;
 pub mod consolidate;
 pub mod cost;
+pub mod fallback;
 pub mod readyset;
 pub mod recall;
 pub mod reputation;
