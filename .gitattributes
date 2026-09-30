@@ -7,3 +7,21 @@
 # 导致同一份代码在 Windows（autocrlf 开）与 CI（Linux）上结论不一致。
 # 此处显式锁定 `.rs` 的检出与入库行尾，避免再次漂移。
 *.rs text eol=lf
+
+# 2026-09-30：把同一约定扩展到其余文本类型。起因是一次真实事故：`.md` 未经
+# `.gitattributes` 声明，在 `core.autocrlf=true` 的 Windows 上以 CRLF **入库**，
+# 一次只改 65 行的文档提交在 diff 里显示成 1265 行整文件重写——diff 因此不可
+# 审阅（本仓 BR3 明确把"diff 不可审阅"列为风险）。
+#
+# 为什么必须显式写而不是靠 autocrlf：autocrlf 只保证**检出**方向（LF → 工作树
+# CRLF），**入库**方向的归一化依赖 git 对"该文件是文本"的判定，一旦某条路径
+# （编辑器直写、`git add` 与提交的时序、工具链自己的写入）绕过它，blob 里就是
+# CRLF，而 diff 不会提示原因——只能靠人肉发现整文件重写。
+#
+# 下面四类在仓库里**全部已是 LF**，因此本条不产生任何一次性重排（blob 不变），
+# 只是把既有事实写成机制。`eol=lf` 同时规定工作树用 LF：与 rustfmt 的要求一致。
+*.md text eol=lf
+*.mjs text eol=lf
+*.ts text eol=lf
+*.vue text eol=lf
+
