@@ -47,6 +47,7 @@ impl<V: 'static> Projection<V> {
     }
 }
 
+pub mod calibration;
 pub mod checkpoint;
 pub mod consolidate;
 pub mod cost;

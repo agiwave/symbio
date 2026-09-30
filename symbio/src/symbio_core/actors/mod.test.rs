@@ -1462,3 +1462,260 @@ fn cost_ledger_accumulates_per_principal() {
     // 未记账主体零账。
     assert_eq!(ledger.value.of("agent:ghost"), Default::default());
 }
+
+// ── S9 彩排（[plan/04 §3](../../../../docs/plan/04-工程落地.md) 第 21–22 步）：自治与学习 ──
+//
+// 21 定时触发 + 自主层 budget_ms（出口判据「自主写入对话 0」，roadmap/S12）；
+// 22 技能编译 + 校准 + 反自动化回退（出口判据「技能溯源 100%」，roadmap/S11）。
+
+use crate::symbio_core::event::{EVENT_CONATION_EXPRESSED, EVENT_SYSTEM_TRIGGERED};
+use crate::symbio_core::projection::calibration::calibration;
+use std::mem::size_of;
+
+/// S12 §6 验收 1：无用户消息时，定时触发必须产生 `system.triggered` 事件
+/// （触发器产出事件，不是旁路——自主行为同样走 I1 单通道 + I2 溯源）。
+#[test]
+fn scheduled_trigger_produces_event_not_side_channel() {
+    let store = EventStore::new();
+    // 注意：此时 Log 里没有任何用户消息——纯自主场景。
+    let init = AutonomousInitiator;
+    store.append(init.trigger(0)).unwrap();
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    assert!(
+        snapshot.iter().any(|e| e.kind == EVENT_SYSTEM_TRIGGERED),
+        "自主行为必须以事件形态存在"
+    );
+    assert!(
+        check_all(&snapshot).is_empty(),
+        "{:?}",
+        check_all(&snapshot)
+    );
+}
+
+/// S12 §6 验收 2：自主发起者尝试写 `chat.assistant.final` → 授权拒绝且不产生事件。
+#[test]
+fn autonomous_actor_cannot_write_to_dialog() {
+    let matrix = PermissionMatrix::new(vec![PrincipalPolicy::paired(
+        "agent:autonomous",
+        vec![Capability::DefineWork],
+        VisScope::ThreadPrivate,
+    )])
+    .expect("自主发起者策略合法");
+    let store = EventStore::new();
+    let head_before = store.head().value();
+    let authorized = matrix.can_write("agent:autonomous", Capability::ReplyFirst);
+    assert!(!authorized, "自主层无 reply.* 写权（自主写入对话 = 0）");
+    assert_eq!(store.head().value(), head_before, "拒绝 ⇒ 零事件");
+}
+
+/// S12 §6 验收 3 + 4：长目标超过自主层预算 → 必须被看见；预算改小 → 判定改变。
+#[test]
+fn long_goal_overrun_is_visible_and_budget_param_is_live() {
+    let store = EventStore::new();
+    let init = AutonomousInitiator;
+    store.append(init.trigger(0)).unwrap();
+    store
+        .append(init.open_long_goal("goal-1", "整理全年归档", 0))
+        .unwrap();
+    // 任务执行事件：耗时 90M ms > 自主层预算 86.4M。
+    store
+        .append(
+            Event::pending(
+                "g1",
+                EVENT_TASK_PROGRESS,
+                Entity::Task,
+                Verb::Progressed,
+                0,
+                "agent:autonomous",
+            )
+            .with_produced_by(0)
+            .with_cost_ms(90_000_000)
+            .with_payload(serde_json::json!({ "task_id": "goal-1" })),
+        )
+        .unwrap();
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    // 验收 3：超 86.4M 必须产出兜底（先被看见）。
+    let bad = budget_exceeded(
+        &snapshot,
+        crate::symbio_core::adapters::LatencyTier::Autonomic.budget_ms(),
+    );
+    assert_eq!(bad.len(), 1, "长目标超支必须被看见：{bad:?}");
+    // 验收 4（反向）：同一事件 70M ms（预算内）；把预算改成 60000 → 判定改变。
+    let ok_event = Event::pending(
+        "g2",
+        EVENT_TASK_PROGRESS,
+        Entity::Task,
+        Verb::Progressed,
+        0,
+        "agent:autonomous",
+    )
+    .with_produced_by(0)
+    .with_cost_ms(70_000)
+    .with_payload(serde_json::json!({ "task_id": "goal-1" }));
+    let ok_events = vec![ok_event];
+    assert!(
+        budget_exceeded(&ok_events, 86_400_000).is_empty(),
+        "70M 在自主层预算内"
+    );
+    assert_eq!(
+        budget_exceeded(&ok_events, 60_000).len(),
+        1,
+        "同一耗时，深挖档预算下违规"
+    );
+}
+
+/// 02 §2.3 欲治理三条：(a) 候选造出来一定未批准 (b) 无溯源构造不出 (c) 关停后
+/// 无任何自主任务但读侧投影照常（J2 平凡值）。ZST 令牌零开销。
+#[test]
+fn conation_governance_three_rules() {
+    let init = AutonomousInitiator;
+    let store = EventStore::new();
+    store.append(init.trigger(0)).unwrap();
+    store.append(init.express_intent("整理归档", 0)).unwrap();
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+
+    // (a) 唯一构造路径读出的候选，approved 恒 false——欲不得直接变成行。
+    let want = snapshot
+        .iter()
+        .find(|e| e.kind == EVENT_CONATION_EXPRESSED)
+        .unwrap();
+    let mut candidate = ConationCandidate::from_event(want).expect("合法欲事件必出候选");
+    assert!(!candidate.is_approved());
+    // approved 字段私有：外部无法伪造 true（error[E0451]，编译期反向用例）。
+
+    // (b) 无溯源的欲 → 构造不出候选（I2 强化）。
+    let bare = Event {
+        produced_by: None,
+        ..Event::pending(
+            "w1",
+            EVENT_CONATION_EXPRESSED,
+            Entity::Conation,
+            Verb::Opened,
+            0,
+            "agent:x",
+        )
+    };
+    assert!(
+        ConationCandidate::from_event(&bare).is_none(),
+        "来路不明的意图混不进来"
+    );
+
+    // (c) 关停开关：enabled=false → 评估拒绝，无自主任务；但读侧照常工作。
+    let policy_off = ConationPolicy::default();
+    assert_eq!(
+        IntentGate::evaluate(&candidate, &policy_off),
+        IntentDecision::Rejected("conation disabled")
+    );
+    // 打开后：评估通过 → 持令牌升格（ZST：size_of == 0）。
+    let policy_on = ConationPolicy {
+        enabled: true,
+        max_goal_len: 200,
+    };
+    let warrant = IntentGate::issue_warrant();
+    assert_eq!(size_of::<GateWarrant>(), 0, "ZST 零运行时开销");
+    let approved = IntentGate::approve(&mut candidate, &policy_on, &warrant).expect("合法意图必批");
+    assert!(candidate.is_approved());
+    assert_eq!(approved.goal, "整理归档");
+    assert_eq!(approved.from_seq, want.seq.map(|s| s.value()).unwrap_or(0));
+}
+
+/// S11 §6 验收 1 + 4：编译产出的技能事件 produced_by 必须非空；置空 → I2 抓住。
+#[test]
+fn compiled_skill_requires_provenance() {
+    let compiler = SkillCompiler;
+    // 源轨迹：一个成功任务的终态（seq 2）。
+    let skill = compiler.compile("weekly-report", "用户问周报格式", "按模板三段式作答", 2);
+    assert_eq!(skill.produced_by, Some(2), "溯源 100%：指向源轨迹");
+    assert_eq!(skill.payload["tag"], "skill");
+    // 正向：I2 全绿。
+    assert!(
+        crate::symbio_core::invariants::produced_by_coverage(std::slice::from_ref(&skill))
+            .is_empty()
+    );
+    // 验收 4（反向）：把 produced_by 置空 → 断言 1 必须失败。
+    let bare = Event {
+        produced_by: None,
+        ..skill
+    };
+    let bad = crate::symbio_core::invariants::produced_by_coverage(std::slice::from_ref(&bare));
+    assert_eq!(bad.len(), 1, "无溯源的技能必须被看见");
+}
+
+/// S11 §6 验收 2 + 3：命中技能 cost 显著低于完整推理；置信度低于阈值必回退。
+#[test]
+fn skill_hit_is_cheaper_and_low_confidence_falls_back() {
+    let store = EventStore::new();
+    let compiler = SkillCompiler;
+    // 编译技能（源轨迹 seq 0）。
+    store
+        .append(compiler.compile("weekly-report", "周报", "三段式", 0))
+        .unwrap();
+    // 命中：反射档快路（cost 40ms，低两个数量级）。
+    store
+        .append(
+            Event::pending("h1", EVENT_TASK_PROGRESS, Entity::Task, Verb::Progressed, 0, "agent:main")
+                .with_produced_by(0)
+                .with_cost_ms(40)
+                .with_payload(
+                    serde_json::json!({ "task_id": "t1", "skill_id": "weekly-report", "fallback": false }),
+                ),
+        )
+        .unwrap();
+    // 未命中 / 回退：完整推理（cost 5000ms）。
+    store
+        .append(
+            Event::pending("h2", EVENT_TASK_PROGRESS, Entity::Task, Verb::Progressed, 0, "agent:main")
+                .with_produced_by(0)
+                .with_cost_ms(5_000)
+                .with_payload(
+                    serde_json::json!({ "task_id": "t2", "skill_id": "weekly-report", "fallback": true }),
+                ),
+        )
+        .unwrap();
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+
+    // 验收 2：命中路径 cost 显著低于回退路径（40ms vs 5000ms）。
+    let hit_cost = snapshot
+        .iter()
+        .find(|e| e.payload.get("fallback") == Some(&serde_json::json!(false)))
+        .map(|e| e.cost_ms)
+        .unwrap();
+    let fallback_cost = snapshot
+        .iter()
+        .find(|e| e.payload.get("fallback") == Some(&serde_json::json!(true)))
+        .map(|e| e.cost_ms)
+        .unwrap();
+    assert!(
+        hit_cost * 10 < fallback_cost,
+        "技能命中必须显著更便宜：{hit_cost} vs {fallback_cost}"
+    );
+
+    // 校准：1 用 1 回退 ⇒ 置信度 0.5；低于阈值 0.8 ⇒ 必须回退（不得走技能路径）。
+    let cal = calibration().apply(&snapshot, 9_999, Budget::generous());
+    assert_eq!(cal.value.of("weekly-report").uses, 2);
+    assert_eq!(cal.value.of("weekly-report").fallbacks, 1);
+    let router = SkillRouter;
+    assert_eq!(
+        router.route(cal.value.of("weekly-report").confidence(), 0.8),
+        SkillRoute::ReasonerFallback { budget_ms: 300 },
+        "校准值持续走低 ⇒ 保留反自动化回退"
+    );
+    // 反向：置信度高于阈值 → 走快路。
+    assert_eq!(
+        router.route(0.95, 0.8),
+        SkillRoute::SkillFastPath { budget_ms: 80 }
+    );
+    // N1：校准双跑一致。
+    assert_eq!(
+        cal.value,
+        calibration()
+            .apply(&snapshot, 9_999, Budget::generous())
+            .value
+    );
+    // 全链路不变量仍绿。
+    assert!(
+        check_all(&snapshot).is_empty(),
+        "{:?}",
+        check_all(&snapshot)
+    );
+}

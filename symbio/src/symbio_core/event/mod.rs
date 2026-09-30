@@ -116,6 +116,22 @@ pub const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
 /// 判定者不得直接发言（S07 §5）。
 pub const EVENT_CONTROL_OPENED: &str = "task.controlled";
 
+// ── 系统与「欲」格子（S9 第 21 步，[roadmap/S12 §3](../../../../docs/plan/roadmap/S12-自主层与长期目标.md)）──
+//
+// 自主层**不是新架构层**：定时触发 = 触发器产出事件（不是旁路）；长目标 = 一条
+// `task.opened`，`budget_ms = 86400000`（四层时延的第四个取值，同一参数）；
+// 「欲」= `event.entity = conation` 的新取值（02 §2.3 的 E1）。
+
+/// 定时触发：没有用户消息时的自主行为起点。落在 `system × opened`。
+/// **触发器产出事件，不是旁路**——自主行为同样走 I1 单通道、I2 带溯源。
+pub const EVENT_SYSTEM_TRIGGERED: &str = "system.triggered";
+/// 健康自检。落在 `system × progressed`。
+pub const EVENT_SYSTEM_HEALTH: &str = "system.health";
+/// 「欲」的表达：一条意图出现（E1：欲是数据，走 I1 单通道、I2 带溯源——
+/// 无 `produced_by` 的欲事件**构造不出**候选意图，见 ② IntentGate）。
+/// 落在 `conation × opened`。
+pub const EVENT_CONATION_EXPRESSED: &str = "conation.expressed";
+
 /// 事件实体 —— 语法网格的**行**，闭集（F5，10 个）。
 ///
 /// 新增实体是 L-schema 变化（[plan/03 §2](../../../../docs/plan/03-演进与验证.md)）：

@@ -31,6 +31,7 @@ pub use invariants::{
     acyclic_deps, budget_exceeded, check_all, final_unique_per_turn, produced_by_coverage,
     rework_bounded, seq_monotonic, unresolved_turns, Violation,
 };
+pub use projection::calibration::{calibration, CalibrationView, SkillStats};
 pub use projection::checkpoint::{checkpoint, CheckpointState};
 pub use projection::consolidate::{accept as consolidate_accept, ConsolidateParams, Rejection};
 pub use projection::cost::{cost_ledger, CostEntry, CostLedgerView};
@@ -47,15 +48,18 @@ pub use view::{RecallEntry, RecallView};
 // ==================== 主体（v2 阶段 S1，② actors） ====================
 // 只收类型化输入、只产事件（plan/05 §3.1 ② 行）；S1 落 Decider 平凡值，S2 加 Reasoner。
 pub use actors::{
-    ActorSpec, CircuitBreaker, CommitmentKeeper, Decider, DeciderMiss, GateDecision, Pattern,
-    Preemption, PreemptionDecider, Reasoner, RecallTranslator, Scope,
+    ActorSpec, ApprovedIntent, AutonomousInitiator, CircuitBreaker, CommitmentKeeper,
+    ConationCandidate, ConationPolicy, Decider, DeciderMiss, GateDecision, GateWarrant,
+    IntentDecision, IntentGate, Pattern, Preemption, PreemptionDecider, Reasoner, RecallTranslator,
+    Scope, SkillCompiler, SkillRoute, SkillRouter,
 };
 // 事件名字表（名字是数据，单点定义）。
 pub use event::{
-    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_CONTROL_OPENED,
-    EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
-    EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS,
-    EVENT_TASK_REWORK_CREATED, EVENT_THREAD_CHECKPOINT, EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_CONATION_EXPRESSED,
+    EVENT_CONTROL_OPENED, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,
+    EVENT_MEMORY_RECALLED, EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED, EVENT_TASK_ASSERTED,
+    EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
+    EVENT_THREAD_CHECKPOINT, EVENT_USER_MESSAGE,
 };
 
 // ==================== 适配器（v2 阶段 S2，⑤ adapters） ====================

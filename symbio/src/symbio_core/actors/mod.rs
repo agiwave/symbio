@@ -463,6 +463,235 @@ impl CircuitBreaker {
     }
 }
 
+/// 自主发起者（S9 第 21 步，[roadmap/S12](../../../../docs/plan/roadmap/S12-自主层与长期目标.md)）。
+///
+/// `pattern = decider`、`capabilities = [DefineWork]`、`budget_ms = 86400000`——
+/// 自主层不是新架构层，只是四层时延的第四个取值。**不可写 `chat.assistant.*`**
+/// （自主行为不得冒充用户对话；由 grants 保证，见测试）。
+pub struct AutonomousInitiator;
+
+impl AutonomousInitiator {
+    /// 定时触发：**触发器产出事件，不是旁路**——自主行为同样走 I1 单通道。
+    pub fn trigger(&self, source_seq: u64) -> Event {
+        Event::pending(
+            format!("sys-{source_seq}"),
+            crate::symbio_core::event::EVENT_SYSTEM_TRIGGERED,
+            crate::symbio_core::event::Entity::System,
+            crate::symbio_core::event::Verb::Opened,
+            0,
+            "agent:autonomous",
+        )
+        .with_produced_by(source_seq)
+        .with_payload(serde_json::json!({ "kind": "scheduled" }))
+    }
+
+    /// 表达一条「欲」（E1：欲是数据，必带溯源——否则过不了 IntentGate）。
+    pub fn express_intent(&self, goal: &str, source_seq: u64) -> Event {
+        Event::pending(
+            format!("want-{source_seq}"),
+            crate::symbio_core::event::EVENT_CONATION_EXPRESSED,
+            crate::symbio_core::event::Entity::Conation,
+            crate::symbio_core::event::Verb::Opened,
+            0,
+            "agent:autonomous",
+        )
+        .with_produced_by(source_seq)
+        .with_payload(serde_json::json!({ "goal": goal }))
+    }
+
+    /// 把闸门批准的意图落成长目标任务（自主层 `budget_ms` 的完整取值）。
+    pub fn open_long_goal(&self, task_id: &str, goal: &str, source_seq: u64) -> Event {
+        Event::pending(
+            format!("o-{task_id}"),
+            crate::symbio_core::event::EVENT_TASK_OPENED,
+            crate::symbio_core::event::Entity::Task,
+            crate::symbio_core::event::Verb::Opened,
+            0,
+            "agent:autonomous",
+        )
+        .with_produced_by(source_seq)
+        .with_payload(serde_json::json!({
+            "task_id": task_id,
+            "depends_on": [],
+            "goal": goal,
+            "budget_ms": crate::symbio_core::adapters::LatencyTier::Autonomic.budget_ms(),
+        }))
+    }
+}
+
+/// 「欲」的治理策略（E3：平凡值 `enabled = false`——关掉后系统退化为纯响应式
+/// 且仍完整运行；两层开关独立，这是生产环境最需要的开关）。
+#[derive(Debug, Clone)]
+pub struct ConationPolicy {
+    /// 是否允许「欲」升格为任务。
+    pub enabled: bool,
+    /// 目标长度上界（过宽的目标 = 不可评估的意图，拒绝）。
+    pub max_goal_len: usize,
+}
+
+impl Default for ConationPolicy {
+    fn default() -> Self {
+        ConationPolicy {
+            enabled: false,
+            max_goal_len: 200,
+        }
+    }
+}
+
+/// 候选意图：从 `conation.expressed` 事件**唯一**构造路径读出，
+/// 造出来一定**未被批准**——「欲」不得直接变成「行」（E2）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConationCandidate {
+    /// 源事件 seq（溯源锚）。
+    pub seq: u64,
+    pub goal: String,
+    /// 私有：只有闸门能把它置真。
+    approved: bool,
+}
+
+impl ConationCandidate {
+    /// 唯一构造路径：从欲事件读出候选。**无溯源的欲构造不出候选**（I2 强化）。
+    pub fn from_event(e: &Event) -> Option<Self> {
+        if e.kind != crate::symbio_core::event::EVENT_CONATION_EXPRESSED {
+            return None;
+        }
+        // 来路不明的意图混不进来（I2 强化：无溯源即 None）。
+        e.produced_by?;
+        let goal = e
+            .payload
+            .get("goal")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        Some(ConationCandidate {
+            seq: e.seq.map(|s| s.value()).unwrap_or(u64::MAX),
+            goal,
+            approved: false,
+        })
+    }
+
+    pub fn is_approved(&self) -> bool {
+        self.approved
+    }
+}
+
+/// 闸门能力令牌（ZST，私有构造 → 不可伪造；02 §2.3 E2 的可编译强制：
+/// 不持令牌则 `approve` 调用**编译失败**，`size_of == 0` 零运行时开销）。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GateWarrant {
+    _private: (),
+}
+
+/// 闸门评估结论。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IntentDecision {
+    Approved,
+    Rejected(&'static str),
+}
+
+/// 经闸门批准后的可执行任务（只有这一条路能造出来）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovedIntent {
+    pub from_seq: u64,
+    pub goal: String,
+}
+
+/// 意图闸门：**「欲」与「行」之间唯一的一道门**（02 §2.3 E2）。
+pub struct IntentGate;
+
+impl IntentGate {
+    /// 评估：关停开关优先；目标过宽拒绝。真实系统里这里接价值偏好 / 预算 / 授权。
+    pub fn evaluate(candidate: &ConationCandidate, policy: &ConationPolicy) -> IntentDecision {
+        if !policy.enabled {
+            return IntentDecision::Rejected("conation disabled");
+        }
+        if candidate.goal.len() > policy.max_goal_len {
+            return IntentDecision::Rejected("goal too broad");
+        }
+        IntentDecision::Approved
+    }
+
+    /// 升格：**唯一**能把 [`ConationCandidate`] 变成 [`ApprovedIntent`] 的函数。
+    /// 要求 (a) 评估通过 (b) 持 [`GateWarrant`]（不持令牌 = 编译失败）。
+    pub fn approve(
+        candidate: &mut ConationCandidate,
+        policy: &ConationPolicy,
+        _warrant: &GateWarrant,
+    ) -> Result<ApprovedIntent, &'static str> {
+        match Self::evaluate(candidate, policy) {
+            IntentDecision::Approved => {
+                candidate.approved = true;
+                Ok(ApprovedIntent {
+                    from_seq: candidate.seq,
+                    goal: candidate.goal.clone(),
+                })
+            }
+            IntentDecision::Rejected(r) => Err(r),
+        }
+    }
+
+    /// 发牌入口——**故意做成唯一一道**：真要多一道门，就得再写一个发牌函数，
+    /// 而那个函数是可见的、可审计的（不是靠约定）。
+    pub fn issue_warrant() -> GateWarrant {
+        GateWarrant { _private: () }
+    }
+}
+
+/// 技能编译者（S9 第 22 步，[roadmap/S11](../../../../docs/plan/roadmap/S11-技能编译与自我改进.md)）。
+///
+/// 编译 = 把成功执行轨迹固化为一条 `memory.encoded{tag:"skill"}` 事件——
+/// **技能是事实，不是特殊类型**。编译产出的技能事件**必带溯源**
+/// （`produced_by` 指向源轨迹；I2 断言，技能溯源 100%）。
+pub struct SkillCompiler;
+
+impl SkillCompiler {
+    /// 编译一条技能。`source_seq`：源轨迹（成功任务的终态事件）seq。
+    pub fn compile(&self, skill_id: &str, trigger: &str, response: &str, source_seq: u64) -> Event {
+        Event::pending(
+            format!("skill-{skill_id}-{source_seq}"),
+            crate::symbio_core::event::EVENT_MEMORY_ENCODED,
+            crate::symbio_core::event::Entity::Memory,
+            crate::symbio_core::event::Verb::Opened,
+            0,
+            "agent:main",
+        )
+        .with_produced_by(source_seq) // 溯源 100%：指向源轨迹
+        .with_payload(serde_json::json!({
+            "content": response,
+            "tag": "skill",
+            "skill_id": skill_id,
+            "trigger": trigger,
+        }))
+    }
+}
+
+/// 路由结论：命中技能走快路（`budget_ms = 80`），否则**必须回退**完整推理
+/// （反自动化回退，Beilock & Carr 2001——全自动化在压力下以异常方式失效）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SkillRoute {
+    /// 技能命中：反射档快路。
+    SkillFastPath { budget_ms: u64 },
+    /// 回退完整推理：快速档。
+    ReasonerFallback { budget_ms: u64 },
+}
+
+/// 技能路由者：按校准置信度决定走技能还是回退（校准值低于阈值 ⇒ 不得走技能路径）。
+pub struct SkillRouter;
+
+impl SkillRouter {
+    pub fn route(&self, confidence: f64, threshold: f64) -> SkillRoute {
+        if confidence >= threshold {
+            SkillRoute::SkillFastPath {
+                budget_ms: crate::symbio_core::adapters::LatencyTier::Reflex.budget_ms(),
+            }
+        } else {
+            SkillRoute::ReasonerFallback {
+                budget_ms: crate::symbio_core::adapters::LatencyTier::Fast.budget_ms(),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "mod.test.rs"]
 mod tests;

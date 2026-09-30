@@ -333,7 +333,13 @@ export const BASELINE = {
   //      ③ readyset 补挂起排除（held 不进就绪集——二次调度 0）与 cost_ledger
   //      投影（熔断判据来源，N1 双跑一致）；governance 高风险组合
   //      （ProduceArtifact+AssertVerification）构造期拒绝。S07/S09 §6 验收落地。
-  rustTests: 1175,
+  // 1181（S9，2026-09-30）：**自治与学习（22 步收官）**——`1175 → 1181`，**+6**。
+  //      事件格子 system.triggered / system.health / conation.expressed；
+  //      ② AutonomousInitiator（自主层 = budget_ms 第四取值 86.4M，非新架构层）+
+  //      IntentGate（欲→行的 ZST 闸门：CandidateIntent / GateWarrant / 关停开关）+
+  //      SkillCompiler（技能=memory.encoded{tag:skill}，溯源 100%）+ SkillRouter
+  //      （反自动化回退）；③ calibration 投影。S12/S11 §6 验收逐条落地。
+  rustTests: 1181,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *
