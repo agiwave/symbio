@@ -244,3 +244,146 @@ fn decider_miss_reports_the_utterance() {
         "Miss 携带输入摘要（可观测，入兜底载荷）"
     );
 }
+
+// ── S2 彩排（[plan/04 §3](../../../../docs/plan/04-工程落地.md) 第 5–6 步）：真实执行形状 ──
+//
+// 步骤 5：接入真实模型（pattern = reasoner）→ 真实对话 → N1/N3/N5 仍全绿；
+// 步骤 6：兜底埋点 + 四层 budget_ms 就位 → 时延埋点可测。
+// 这里用 ⑤ adapters 的确定性桩（StubLlmAdapter）代替真实模型——闭环形状与
+// 真实接线完全一致，只换适配器。
+
+use crate::symbio_core::adapters::{LatencyTier, StubLlmAdapter, TokenIssuer};
+use crate::symbio_core::invariants::{budget_exceeded, unresolved_turns};
+use std::time::Instant;
+
+/// 一轮**真实执行形状**的对话：Decider 换成 Reasoner + 适配器，带 cost_ms 埋点。
+///
+/// 返回 (store, 收束事件 id)；失败路径产出 fallback（I3 到点必答）。
+async fn rehearse_reasoner_turn(
+    utterance: &str,
+    llm: &dyn crate::symbio_core::adapters::LlmAdapter,
+) -> (EventStore, Result<String, String>) {
+    let tok = TokenIssuer::issue_deep();
+    let store = EventStore::new();
+    let seq = store
+        .append(
+            Event::pending(
+                "u0",
+                EVENT_USER_MESSAGE,
+                Entity::Turn,
+                Verb::Opened,
+                0,
+                "user",
+            )
+            .with_payload(serde_json::json!({ "text": utterance })),
+        )
+        .expect("用户消息必入库");
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    let started = Instant::now();
+    let outcome = Reasoner.reply(llm, &tok, &snapshot).await;
+    let cost_ms = started.elapsed().as_millis() as u64;
+    match outcome {
+        Ok(reply) => {
+            store
+                .append(
+                    Event::pending(
+                        "f0",
+                        EVENT_ASSISTANT_FINAL,
+                        Entity::Turn,
+                        Verb::Closed,
+                        0,
+                        "agent:main",
+                    )
+                    .with_produced_by(seq.value())
+                    .with_cost_ms(cost_ms)
+                    .with_payload(serde_json::json!({ "text": reply, "model": llm.model_id() })),
+                )
+                .expect("final 必入库");
+            (store, Ok(reply))
+        }
+        Err(e) => {
+            store
+                .append(
+                    Event::pending("fb0", EVENT_ASSISTANT_FALLBACK, Entity::Turn, Verb::Closed, 0, "agent:main")
+                        .with_produced_by(seq.value())
+                        .with_cost_ms(cost_ms)
+                        .with_payload(serde_json::json!({ "text": "抱歉，我暂时答不上来。", "error": format!("{e:?}") })),
+                )
+                .expect("fallback 必入库");
+            (store, Err(format!("{e:?}")))
+        }
+    }
+}
+
+/// 验收（步骤 5）：接入「真实模型」→ 真实对话 → N1/N3/N5 仍全绿。
+#[tokio::test]
+async fn reasoner_turn_keeps_all_invariants_green() {
+    let llm = StubLlmAdapter::succeed("stub-model");
+    let (store, outcome) = rehearse_reasoner_turn("写一首关于秋天的诗", &llm).await;
+    let reply = outcome.expect("成功桩必答");
+    assert!(reply.contains("stub-model"));
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    assert!(
+        check_all(&snapshot).is_empty(),
+        "{:?}",
+        check_all(&snapshot)
+    );
+    assert!(unresolved_turns(&snapshot).is_empty());
+    // turnstate 投影照常工作（N1：双跑一致）。
+    let p = turnstate();
+    let v1 = p.apply(&snapshot, 0, Budget::generous());
+    let v2 = p.apply(&snapshot, 0, Budget::generous());
+    assert_eq!(v1, v2);
+    assert!(v1.value.settled() && v1.value.final_text.is_some());
+}
+
+/// 验收（步骤 6 上半）：生成失败 → 兜底埋点（cost_ms / produced_by / error 载荷）。
+#[tokio::test]
+async fn reasoner_failure_produces_fallback_with_telemetry() {
+    let llm = StubLlmAdapter::always_fail("模型不可用");
+    let (store, outcome) = rehearse_reasoner_turn("任何话", &llm).await;
+    assert!(outcome.is_err());
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    let fb = snapshot
+        .iter()
+        .find(|e| e.kind == EVENT_ASSISTANT_FALLBACK)
+        .expect("兜底必在");
+    assert!(fb.produced_by.is_some(), "兜底可被 I2 审计");
+    let payload: serde_json::Value = fb.payload.clone();
+    assert!(
+        payload.get("error").is_some(),
+        "失败原因入载荷（可观测）：{payload}"
+    );
+    assert!(
+        check_all(&snapshot).is_empty(),
+        "{:?}",
+        check_all(&snapshot)
+    );
+    assert!(
+        unresolved_turns(&snapshot).is_empty(),
+        "写了 fallback ⇒ turn 已收束"
+    );
+}
+
+/// 验收（步骤 6 下半）：四层 budget_ms 就位——同一时延在不同档位下结论不同。
+#[tokio::test]
+async fn four_tier_budgets_are_measurable() {
+    // 注入 120ms 时延：反射档（80ms）超预算，深度档（60s）预算内。
+    let llm = StubLlmAdapter::with_delay("stub-model", 120);
+    let (store, _) = rehearse_reasoner_turn("你好", &llm).await;
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    let cost_ms = snapshot.iter().find(|e| e.cost_ms > 0).map(|e| e.cost_ms);
+    assert!(cost_ms.is_some(), "cost_ms 埋点必非零（兜底埋点就位）");
+    let cost = cost_ms.unwrap();
+    assert!(
+        !budget_exceeded(&snapshot, LatencyTier::Reflex.budget_ms()).is_empty(),
+        "反射档 {}/80ms 必须被看见超预算",
+        cost
+    );
+    assert!(
+        budget_exceeded(&snapshot, LatencyTier::Deep.budget_ms()).is_empty(),
+        "同一时延在深度档预算内"
+    );
+    // 反向锚：预算表口径（01 §10）在 adapters 域的单测里逐值钉死。
+    assert_eq!(LatencyTier::Reflex.budget_ms(), 80);
+}

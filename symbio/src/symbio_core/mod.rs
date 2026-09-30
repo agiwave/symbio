@@ -1,6 +1,7 @@
 //! 核心模块
 
 pub mod actors;
+pub mod adapters;
 mod assembly;
 mod capability;
 mod clock;
@@ -35,10 +36,17 @@ pub use store::{AppendError, EventStore, MemoryStore, Store};
 pub use view::{Budget, View};
 
 // ==================== 主体（v2 阶段 S1，② actors） ====================
-// 只收类型化输入、只产事件（plan/05 §3.1 ② 行）；S1 只落 Decider 平凡值。
-pub use actors::{ActorSpec, Decider, DeciderMiss, Pattern, Scope};
+// 只收类型化输入、只产事件（plan/05 §3.1 ② 行）；S1 落 Decider 平凡值，S2 加 Reasoner。
+pub use actors::{ActorSpec, Decider, DeciderMiss, Pattern, Reasoner, Scope};
 // 事件名字表（名字是数据，单点定义）。
 pub use event::{EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
+
+// ==================== 适配器（v2 阶段 S2，⑤ adapters） ====================
+// 时延闸门 = 本包的依赖注入策略（plan/05 §3.3）：令牌按档位签发，反射档拿不到模型句柄。
+pub use adapters::{
+    AdapterError, CanClassify, CanGenerate, ClassifyOnly, FullModel, LatencyTier, LlmAdapter,
+    RuleOnly, StubLlmAdapter, TokenIssuer,
+};
 
 // ==================== LLM 契约 ====================
 // 模型接入（`model_provider`）与单轮产物 / 帧原语（`turn`）。

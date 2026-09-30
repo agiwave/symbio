@@ -26,6 +26,9 @@
 //! - `Decider`：[plan/05 §4](../../../../docs/plan/05-模块架构.md) S8 的反射档判定者，
 //!   S1 先以规则应答形态落地。
 
+use crate::symbio_core::adapters::{AdapterError, FullModel, LlmAdapter};
+use crate::symbio_core::event::Event;
+
 /// 主体模式（[plan/01 §4](../../../../docs/plan/01-核心架构.md)：机制，**3 个封顶**）。
 ///
 /// 模式选择的判据是函数不是清单：可写成确定性规则 → [`Pattern::Decider`]；
@@ -144,6 +147,44 @@ impl Decider {
             }
         }
         Err(DeciderMiss { utterance })
+    }
+}
+
+/// 生成档主体（`pattern = Reasoner` 的 S2 形态，[plan/01 §4](../../../../docs/plan/01-核心架构.md)）。
+///
+/// ## 闸门在签名上
+///
+/// [`Reasoner::reply`] 要求 `&FullModel` 令牌——**反射 / 快速档拿不到这个令牌**，
+/// 所以「反射层调模型」不是被检测到，而是**编译不过**（J3，[plan/01 §10](../../../../docs/plan/01-核心架构.md)
+/// 第 4 条语义）。令牌由 ⑤ `adapters` 的 [`crate::symbio_core::adapters::TokenIssuer`]
+/// 按档位签发，装配时注入；`Reasoner` 自身不持有任何适配器句柄。
+pub struct Reasoner;
+
+impl Reasoner {
+    /// 生成答复：从事件切片取最后一条用户消息作输入，经端口生成。
+    ///
+    /// 失败形态是 [`AdapterError`](crate::symbio_core::adapters::AdapterError)
+    /// （不是 [`DeciderMiss`]）——**调用方必须产出 `chat.assistant.fallback` 事件**
+    /// （I3 到点必答：禁止静默超时，[plan/01 §10](../../../../docs/plan/01-核心架构.md) 第 2 条）。
+    pub async fn reply(
+        &self,
+        llm: &dyn LlmAdapter,
+        tok: &FullModel,
+        events: &[Event],
+    ) -> Result<String, AdapterError> {
+        let prompt = events
+            .iter()
+            .rev()
+            .find(|e| e.kind == crate::symbio_core::event::EVENT_USER_MESSAGE)
+            .map(|e| {
+                e.payload
+                    .get("text")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .unwrap_or_default();
+        llm.generate(tok, &prompt).await
     }
 }
 
