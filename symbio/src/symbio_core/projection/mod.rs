@@ -47,6 +47,7 @@ impl<V: 'static> Projection<V> {
     }
 }
 
+pub mod checkpoint;
 pub mod turnstate;
 
 #[cfg(test)]

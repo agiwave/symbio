@@ -51,6 +51,9 @@ pub const EVENT_USER_MESSAGE: &str = "user.message";
 pub const EVENT_ASSISTANT_FINAL: &str = "chat.assistant.final";
 /// 兜底话术——**普通事件，不是特殊通道**（生成失败也要有输出）。落在 `turn × closed`。
 pub const EVENT_ASSISTANT_FALLBACK: &str = "chat.assistant.fallback";
+/// 断点（S4：`store = wal` 的伴随事件，[roadmap/S05 §3](../../../../docs/plan/roadmap/S05-长会话与断点恢复.md)）。
+/// 载荷携带可序列化的 checkpoint 状态。落在 `thread × progressed`。
+pub const EVENT_THREAD_CHECKPOINT: &str = "thread.checkpoint";
 
 /// 事件实体 —— 语法网格的**行**，闭集（F5，10 个）。
 ///

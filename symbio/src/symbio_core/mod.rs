@@ -31,8 +31,10 @@ pub use invariants::{
     budget_exceeded, check_all, final_unique_per_turn, produced_by_coverage, seq_monotonic,
     unresolved_turns, Violation,
 };
+pub use projection::checkpoint::{checkpoint, CheckpointState};
 pub use projection::turnstate::{turnstate, TurnState};
 pub use projection::Projection;
+pub use store::wal::{EventWalStore, WalStore};
 pub use store::{AppendError, EventStore, MemoryStore, Store};
 pub use view::{Budget, View};
 
@@ -40,7 +42,9 @@ pub use view::{Budget, View};
 // 只收类型化输入、只产事件（plan/05 §3.1 ② 行）；S1 落 Decider 平凡值，S2 加 Reasoner。
 pub use actors::{ActorSpec, Decider, DeciderMiss, Pattern, Reasoner, Scope};
 // 事件名字表（名字是数据，单点定义）。
-pub use event::{EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
+pub use event::{
+    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_THREAD_CHECKPOINT, EVENT_USER_MESSAGE,
+};
 
 // ==================== 适配器（v2 阶段 S2，⑤ adapters） ====================
 // 时延闸门 = 本包的依赖注入策略（plan/05 §3.3）：令牌按档位签发，反射档拿不到模型句柄。

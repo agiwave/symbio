@@ -122,6 +122,8 @@ impl<E: EventEnvelope> Store for MemoryStore<E> {
 /// 便捷别名：装 [`crate::symbio_core::event::Event`] 信封的事实源。
 pub type EventStore = MemoryStore<Event>;
 
+pub mod wal;
+
 #[cfg(test)]
 #[path = "mod.test.rs"]
 mod tests;
