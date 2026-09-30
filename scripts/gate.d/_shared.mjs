@@ -339,7 +339,11 @@ export const BASELINE = {
   //      IntentGate（欲→行的 ZST 闸门：CandidateIntent / GateWarrant / 关停开关）+
   //      SkillCompiler（技能=memory.encoded{tag:skill}，溯源 100%）+ SkillRouter
   //      （反自动化回退）；③ calibration 投影。S12/S11 §6 验收逐条落地。
-  rustTests: 1181,
+  // 1184（真实模型接线，2026-09-30）：**ProviderLlmAdapter 全链路**——`1181 → 1184`，**+3**。
+  //      ⑤ LlmAdapter 端口的真实实现（包 ModelProvider，S2 预留接线点兑现）：
+  //      真实 TCP/HTTP/SSE 全链路彩排（Reasoner 持令牌 → execute_turn → final 落
+  //      事件 → 不变量绿）+ 空流按失败（I3）+ 不可达端点映射。
+  rustTests: 1184,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

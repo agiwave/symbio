@@ -21,7 +21,7 @@
 mod anthropic_messages;
 mod context_probe;
 mod gemini_api;
-mod openai_chat;
+pub(crate) mod openai_chat;
 mod openai_responses;
 mod partial_json;
 mod sse;
