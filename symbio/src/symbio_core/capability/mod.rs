@@ -246,20 +246,75 @@ pub trait CapabilityVisitor: Send + Sync + 'static {
 
     async fn has_capability(&self, name: &str) -> bool;
 
-    /// 注册模型服务（AI 对话能力）
+    /// 注册模型服务：**当次生效者** + 本次可见的**全部已启用者**。
     ///
-    /// 语义：model 插件在 traverse 中按上下文（用户选中的
-    /// 模型 id > 默认 provider > 首个启用）解析出**唯一生效**的
-    /// `Arc<dyn ModelProvider>`（配置 + 协议钩子的绑定实现）并注册于此；
-    /// 重复注册时后者覆盖（单槽）。会话发起时经同一次
+    /// 语义：model 插件在 traverse 中按上下文（用户选中的模型 id > 默认 provider >
+    /// 首个启用）解析出**唯一生效**的 `active_id`，并把**全部已启用**的 provider
+    /// （配置 + 协议钩子的绑定实现）作为 `available` 一并交来。会话发起时经同一次
     /// `traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播，与工具、系统提示词一并收集。
-    async fn register_model_provider(&self, provider: Arc<dyn ModelProvider>);
+    ///
+    /// - `active_id`：会话引擎用的那个（[`Self::get_model_provider`] 读它）；
+    /// - `available`：按 `provider_id()` 索引的目录，[`Self::get_model_provider_by_id`]
+    ///   读它——**插件**用它选自己的模型（判决用便宜快的、措辞用更好的），
+    ///   会话引擎不看这个目录。
+    ///
+    /// ## 为什么合成一次注册（而不是"注册生效者" + "注册目录"两个方法）
+    ///
+    /// 两者必须一致——**生效者必然是目录里的一员**。拆成两次注册就允许了
+    /// 「生效者不在目录里」这个非法状态，而它没有错误信号：只表现为插件拿到了一个
+    /// 谁也查不到的实例。合成一次，非法状态在签名上就不存在。
+    ///
+    /// ## 为什么 `active_id` 是 `Option<&str>`
+    ///
+    /// 「一个可用的都没有」是**一等输入**，不是特例：此时 `available` 为空、
+    /// `active_id` 为 `None`，[`Self::get_model_provider`] 返回 `None`，调用方各走
+    /// 自己的降级路径（会话报"未找到可用的 Model Provider"、两个插件退回模板）。
+    ///
+    /// `active_id` 在 `available` 里查不到（该 provider 的协议工厂不可用）同样落
+    /// `None`——**不**替调用方挑一个别的：静默换模型比没有模型更难查。
+    async fn register_model_providers(
+        &self,
+        active_id: Option<&str>,
+        available: Vec<Arc<dyn ModelProvider>>,
+    );
 
     /// 取当前生效的模型服务（trait object；协议适配细节内化于实现体）
     ///
     /// 会话引擎凭此实例即可直接发起 `execute_turn`（参数自含，无需回查
     /// model 插件内部注册表，也无需感知任何协议抽象）。
     async fn get_model_provider(&self) -> Option<Arc<dyn ModelProvider>>;
+
+    /// 按 `provider_id` 取模型服务（与"当次生效者"无关）。
+    ///
+    /// **给插件选自己的模型用**：插件在自己的配置里声明一个 provider id，取到就用它、
+    /// 取不到就落回 [`Self::get_model_provider`]（降级而不失效——一个写错的 id 不该让
+    /// 判决或措辞整条产线消失）。会话引擎不用本方法：它要的是用户选定的那一个。
+    ///
+    /// 只认**已启用**的 provider（未启用的不在目录里，查不到），与 `resolve` 的
+    /// 「未找到就降级到 default」不同——这里是**严格查找**：插件问的是"有没有这一个"，
+    /// 替它挑一个别的就等于悄悄换了它的模型。
+    async fn get_model_provider_by_id(&self, provider_id: &str) -> Option<Arc<dyn ModelProvider>>;
+
+    /// 取一个模型服务：优先 `preferred`（**插件自己配的**那个），取不到落回当次生效者。
+    ///
+    /// 这是「插件选自己的模型」的默认形态。给出默认实现是为了让**降级方向只有一处
+    /// 定义**——判决与措辞各写一遍，就会有一天两处不一致。
+    ///
+    /// **降级而不失效**：一个写错的 provider id 不该让整条产线消失。判决退回
+    /// `Escalate`、措辞退回模板虽然都"还能工作"，但那是功能没了——比"用会话的模型"
+    /// 糟得多。代价是一个 typo 不会有错误信号，故调用方应把选中了哪个模型记进日志。
+    async fn resolve_model_provider(
+        &self,
+        preferred: Option<&str>,
+    ) -> Option<Arc<dyn ModelProvider>> {
+        match preferred {
+            Some(id) => match self.get_model_provider_by_id(id).await {
+                Some(p) => Some(p),
+                None => self.get_model_provider().await,
+            },
+            None => self.get_model_provider().await,
+        }
+    }
 
     /// 注册系统提示词（按名称保序；同名覆盖）。
     ///

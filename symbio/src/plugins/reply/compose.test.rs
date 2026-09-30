@@ -87,6 +87,7 @@ async fn generation_without_a_model_service_returns_none() {
     let out = generate(
         &ctx,
         &request(vec![node(MessageRole::User, "我们刚才聊了什么")]),
+        &ReplyConfig::default(),
     )
     .await;
     assert!(out.is_none(), "没有模型服务时应返回 None");
@@ -101,10 +102,10 @@ async fn generation_without_a_user_turn_returns_none() {
         Arc::new(crate::symbio_core::PluginSimpleRequest::new(None, None));
 
     let only_assistant = vec![node(MessageRole::Assistant, "我先说一句")];
-    let out = generate(&ctx, &request(only_assistant)).await;
+    let out = generate(&ctx, &request(only_assistant), &ReplyConfig::default()).await;
     assert!(out.is_none(), "没有用户发言时不该生成");
 
     let empty: Vec<ChatMessage> = Vec::new();
-    let out = generate(&ctx, &request(empty)).await;
+    let out = generate(&ctx, &request(empty), &ReplyConfig::default()).await;
     assert!(out.is_none(), "空对话线时不该生成");
 }

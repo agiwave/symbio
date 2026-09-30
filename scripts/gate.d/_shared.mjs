@@ -295,7 +295,26 @@ export const BASELINE = {
   //      `chat_loop/compose.test` 12 不变：`dialog_node_lands_on_the_conversation_line`
   //      改名并加 `parent_id.is_none()` 字面断言、`a_turn_child_text_is_not_...`
   //      反转为 `..._is_...`，**净增 0**（改的是判据不是数量）。
-  rustTests: 1079,
+  // 1089（S6，2026-09-29）：**模型槽单槽 → 生效者 + 目录**——`1079 → 1089`，**+10**。
+  //      原以为 S6「架构改动：无」，核对后发现 `CapabilityVisitor` 的模型槽是**单槽**
+  //      （`provider: Arc<RwLock<Option<...>>>`，重复注册即覆盖），插件只能拿到会话选定的
+  //      那一个 ⇒「各插件独立模型」在代码里不成立。改法：`register_model_providers(active_id,
+  //      available)` 一次注册合成（**拆两次注册**会允许"生效者不在目录里"这个没有错误信号的
+  //      非法状态）；`get_model_provider_by_id` 严格查找；`resolve_model_provider(preferred)`
+  //      带默认实现 ⇒ 降级方向只有一处定义。温度**不新增字段**（它本就是 provider 条目
+  //      `<根>/model/<id>/provider.json` 的参数，换条目就是换温度）。
+  //      `providers/collectors/tool_visitor.test` 3 → **6**：目录按 id 严格查 /
+  //      生效者不在目录里 ⇒ None（不是"降级到别的"）/ 空注册 ⇒ None / 重复注册替换目录。
+  //      `plugins/triage/config.test` 3 → **5**（+2：`model` 与 `system_prompt` 从配置来 /
+  //      空串与缺席同义——设置页清空输入框得到的是 `""`，不当成"配了个空提示词"）。
+  //      `plugins/triage/plugin.test` 8 → **9**（+1：traverse 声明自己的配置，
+  //      条目名 = 目录名、`path == "triage/PLUGIN.yml"`、字段键顺序
+  //      `["rule_shortcut","model","system_prompt"]`）。
+  //      `plugins/reply/config.test`（**新**）**3** 例：两个键从配置来 / 空串与缺席同义 /
+  //      默认全 `None`；`plugins/reply/plugin.test` 11 → **12**（+1：traverse 声明配置，
+  //      字段键顺序 `["model","instruction"]`）。**只覆盖指令段**：注册段（`build_system_prompt`
+  //      里排在前面那段）永远在，否则 `instruction` 认空串时答话会失去全部约束且日志正常。
+  rustTests: 1089,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

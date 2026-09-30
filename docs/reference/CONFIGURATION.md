@@ -75,7 +75,7 @@ work:
 | 插件 | 配置地址 | 主要键 |
 |---|---|---|
 | `home` | `<根>/PLUGIN.yml` | `work.workdir` / `work.recent_workspaces` |
-| `session` | `<根>/session/PLUGIN.yml` | `max_messages` / `auto_compress` / `context_messages` / `max_tool_rounds` / `tool_context_window` / `fade_activate_rounds` / `fade_keep_recent_turns` / `compress_line_threshold` / `compress_keep_recent` / `enable_compact_tool` / `prune_tool_history` / `memory_max_bytes` / `memory_inject_max_bytes`（字段全表见 `session/config.rs::SessionConfig`；会话存储**无选型项**——已收为单一具体类型，见 ADR-011） |
+| `session` | `<根>/session/PLUGIN.yml` | `max_messages` / `auto_compress` / `context_messages` / `max_tool_rounds` / `tool_context_window` / `fade_activate_rounds` / `fade_keep_recent_turns` / `compress_line_threshold` / `compress_keep_recent` / `enable_compact_tool` / `prune_tool_history` / `memory_max_bytes` / `memory_inject_max_bytes` / `triage_enabled` / `reply_enabled` / `progress_enabled` / `supplements_enabled` / `supplements_max_per_drain`（字段全表见 `session/config.rs::SessionConfig`；会话存储**无选型项**——已收为单一具体类型，见 ADR-011） |
 | `memory` | `<根>/memory/PLUGIN.yml` | `workspace_enabled` / `workspace_max_bytes` / `workspace_inject_max_bytes`（工作区作用域）+ `memory_max_bytes` / `memory_inject_max_bytes`（智能体作用域）；字段全表见 `memory/config.rs::MemoryConfig` |
 | `setting` | `<根>/setting/PLUGIN.yml` | `display_name` / `description` / `reply_language` / `verbosity`（字段全表见 `setting/config.rs::SettingConfig`） |
 | `web` | `<根>/web/PLUGIN.yml` | `web_enabled` / `web_timeout` / `tavily_api_key` / `serper_api_key` |
@@ -84,6 +84,13 @@ work:
 | `telegram` | `<根>/telegram/PLUGIN.yml` | 见下 |
 | `model` | `<根>/model/PLUGIN.yml` | `default_provider_id`（只有跨条目状态；每个 Provider 的明细是资源，见下） |
 | `mcp` | 无配置文档 | 配置就是它的资源树（`<根>/mcp/<id>`） |
+| `triage` | `<根>/triage/PLUGIN.yml` | `rule_shortcut` / `model` / `system_prompt`（字段全表见 `triage/config.rs::TriageConfig`） |
+| `reply` | `<根>/reply/PLUGIN.yml` | `model` / `instruction`（字段全表见 `reply/config.rs::ReplyConfig`） |
+
+> **对话面两个插件的 `model` 填的是 provider 条目的 id**（`<根>/model/<id>/`），不是模型名——
+> **温度是条目的参数**（`provider.json`），因此它们各自不需要 `temperature` 键：换条目就是换温度。
+> 键缺席（或为空串）⇒ 落回**会话选定的**模型；填了一个取不到的 id 同样落回会话选定值
+> （**降级而不失效**，但 typo 无错误信号，只有 `plugin_debug!` 留痕）。
 
 ### Model 插件
 

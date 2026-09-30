@@ -772,44 +772,65 @@ impl Plugin for ModelPlugin {
                 .get(crate::symbio_core::PROVIDER_ID)
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty());
-            match providers.resolve(requested.as_deref()).cloned() {
-                Some(p) => {
-                    let protocol_id = resolve_protocol_id(&p.api_protocol);
-                    match creator_create_object::<dyn super::protocols::ModelProtocol>(
-                        protocol_id,
-                        ctx.clone(),
-                    ) {
-                        Some(protocol) => {
-                            // 人格在**注册期**就已选定（上面 `providers.resolve` 按
-                            // `PROVIDER_ID` 解析出唯一生效 provider），因此这里只注册
-                            // 一个条目。历史上曾同时注册 `provider_id` 与 `"default"`
-                            // 两个键——值完全相同，而消费侧早已不再按 key 挑选，
-                            // 属于纯粹冗余（见 `CapabilityVisitor::register_system_prompt`）。
-                            let system_prompt = p.system_prompt.clone();
-                            let provider = Arc::new(BoundProvider::new(p, protocol));
-                            tool_visitor.register_model_provider(provider).await;
-                            if let Some(sp) = &system_prompt {
-                                tool_visitor
-                                    .register_system_prompt(PLUGIN_ID_MODEL, sp.clone())
-                                    .await;
-                            }
-                        }
-                        None => {
-                            // 协议工厂不可用：软故障（不进致命错误桶），消费侧报"未找到可用的 Model Provider"
-                            plugin_warn!(
-                                "model",
-                                "traverse: provider '{}' 协议工厂不可用（protocol_id={protocol_id}），跳过注册",
-                                p.id
-                            );
-                        }
+            let active = providers.resolve(requested.as_deref()).cloned();
+
+            // 目录 = **全部已启用**的 provider（按 id 索引）。插件用它选自己的模型
+            // （判决用便宜快的分类模型、措辞用更好的），会话引擎不看它。
+            //
+            // 协议钩子的构造要用 `ctx`（协议工厂按 `ctx` 装配），因此这一步只能在这里
+            // 做——插件拿不到 model 插件的内部注册表，也不该拿到（E-007 / E-009）。
+            //
+            // 单个 provider 的协议工厂不可用 ⇒ 它**不在目录里**，而不是让整次注册失败：
+            // 一个配坏的条目不该把其余可用的模型一起带走。
+            let mut available: Vec<Arc<dyn crate::symbio_core::ModelProvider>> = Vec::new();
+            let mut active_in_catalog = false;
+            for p in providers.providers.values().filter(|p| p.enabled) {
+                let protocol_id = resolve_protocol_id(&p.api_protocol);
+                match creator_create_object::<dyn super::protocols::ModelProtocol>(
+                    protocol_id,
+                    ctx.clone(),
+                ) {
+                    Some(protocol) => {
+                        active_in_catalog |= active.as_ref().is_some_and(|a| a.id == p.id);
+                        available.push(Arc::new(BoundProvider::new(p.clone(), protocol)));
+                    }
+                    None => {
+                        // 软故障（不进致命错误桶），消费侧报"未找到可用的 Model Provider"
+                        plugin_warn!(
+                            "model",
+                            "traverse: provider '{}' 协议工厂不可用（protocol_id={protocol_id}），不进目录",
+                            p.id
+                        );
                     }
                 }
-                None => {
-                    plugin_warn!(
-                        "model",
-                        "traverse: 无可用 Model Provider（requested={requested:?}），跳过注册"
-                    );
-                }
+            }
+
+            let active_id = active.as_ref().map(|p| p.id.clone());
+            if active_id.is_some() && !active_in_catalog {
+                // 生效者配坏了：**不**替会话挑一个别的（静默换模型比没有模型更难查）
+                plugin_warn!(
+                    "model",
+                    "traverse: 生效 provider 未进目录，会话将报「未找到可用的 Model Provider」"
+                );
+            }
+            if available.is_empty() {
+                plugin_warn!(
+                    "model",
+                    "traverse: 无可用 Model Provider（requested={requested:?}），跳过注册"
+                );
+            }
+            tool_visitor
+                .register_model_providers(active_id.as_deref(), available)
+                .await;
+
+            // 人格在**注册期**就已选定（上面按 `PROVIDER_ID` 解析出生效 provider），
+            // 因此这里只注册一个条目。历史上曾同时注册 `provider_id` 与 `"default"`
+            // 两个键——值完全相同，而消费侧早已不再按 key 挑选，属于纯粹冗余
+            // （见 `CapabilityVisitor::register_system_prompt`）。
+            if let Some(sp) = active.as_ref().and_then(|p| p.system_prompt.as_ref()) {
+                tool_visitor
+                    .register_system_prompt(PLUGIN_ID_MODEL, sp.clone())
+                    .await;
             }
         }
 

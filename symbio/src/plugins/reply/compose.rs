@@ -26,6 +26,7 @@
 
 use std::sync::Arc;
 
+use super::config::ReplyConfig;
 use crate::symbio_core::schemas::dialog::ComposeRequest;
 use crate::symbio_core::schemas::session::chat_message::{ChatMessage, MessageRole};
 use crate::symbio_core::{
@@ -33,12 +34,16 @@ use crate::symbio_core::{
     PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_VISITOR,
 };
 
-/// 生成请求的**指令段**（拼在注册的系统提示词之后）。
+/// 生成请求的**指令段**（拼在注册的系统提示词之后；可被
+/// `ReplyConfig::instruction` 覆盖）。
 ///
 /// 三条约束各自对应一种已知的坏输出：① 不复述问题（模型很爱把问题抄一遍再答）；
 /// ② 不编（"我们刚才聊了什么"最容易诱发幻觉）；③ 不用工具（本插件没有工具，
 /// 说"我去查一下"就是撒谎）。
-const INSTRUCTION: &str = "\
+///
+/// 它是 `pub(crate)` 而不是私有：配置的文档与测试要能引用"出厂那段长什么样"，
+/// 而不必再抄一遍字面量。
+pub(crate) const INSTRUCTION: &str = "\
 你是这个助手本人，正在和用户对话。用一两句话回答用户最后那句话。
 
 只依据下面这段对话里**已经发生过的事**回答；不要调用任何工具，不要编造没发生过的事。
@@ -47,11 +52,16 @@ const INSTRUCTION: &str = "\
 
 /// 生成一段答话。
 ///
+/// 模型与指令段都来自**本插件自己的配置**（`config.rs`）：配置了 `model` 就用它
+/// （答话是用户逐字读的那段文本，值得用比判决更好的模型），取不到落回会话选定的那个；
+/// 配置了 `instruction` 就覆盖内置那段。
+///
 /// 返回 `None` = 生成不了（没有可用的模型服务 / 请求失败 / 空文本 / 对话线里没有
 /// 用户发言）——调用方据此**退回模板**。
 pub(crate) async fn generate(
     ctx: &Arc<dyn PluginInvokeRequest>,
     req: &ComposeRequest,
+    config: &ReplyConfig,
 ) -> Option<String> {
     // 先做**不花任何代价**的判据，再去找模型服务：没有"要回答的那句话"时，
     // 生成只会得到一句凭空的话——那时连能力访问器都不必碰。
@@ -61,12 +71,23 @@ pub(crate) async fn generate(
         return None;
     }
 
-    // 模型服务从**调用方带来的能力访问器**里取（model 插件在 traverse 广播中注册的
-    // 唯一生效实例）。取不到 ⇒ 生成不了，调用方退回模板。
+    // 模型服务从**调用方带来的能力访问器**里取。优先本插件配置的那个 provider id
+    // （model 插件在 traverse 广播里把**全部已启用**的 provider 一并交来），
+    // 取不到就落回当次生效的那个——降级而不失效。
     let visitor: Arc<dyn CapabilityVisitor> = ctx.get(CAPABILITY_VISITOR)?;
-    let provider: Arc<dyn ModelProvider> = visitor.get_model_provider().await?;
+    let provider: Arc<dyn ModelProvider> =
+        visitor.resolve_model_provider(config.model_id()).await?;
 
-    let system_prompt = build_system_prompt(&visitor).await;
+    // 选了哪个模型记一笔：配置的 id 写错时**没有错误信号**（行为是"用会话的模型"，
+    // 一切照常），这行日志是唯一的线索。
+    crate::plugin_debug!(
+        "reply",
+        "[Reply] 答话使用模型 '{}'（配置 model={:?}）",
+        provider.provider_id(),
+        config.model_id()
+    );
+
+    let system_prompt = build_system_prompt(&visitor, config).await;
     // 出口 = 静默（内部请求）；中止 = 调用方若给了就跟着走，没给就是一个永不中止的
     // 独立信号（`route()` 直呼没有编排层，也就没有中止来源——见 `ExecAbortSignal::of`）。
     let env = ExecEnv::new(ExecEventSink::silent(), ExecAbortSignal::of(&**ctx));
@@ -90,7 +111,10 @@ pub(crate) async fn generate(
 ///
 /// 顺序不是随意的：注册段是"我是谁 / 我知道什么"（人格与记忆），指令段是"这一句
 /// 该怎么写"。把指令放在后面，它才压得住长人格段里的措辞习惯。
-async fn build_system_prompt(visitor: &Arc<dyn CapabilityVisitor>) -> String {
+///
+/// 可覆盖的只有**指令段**：注册段不属于本插件（它由 `setting` / `session` /
+/// `memory` 各自注册），在这里也拿不到"改它"的资格。
+async fn build_system_prompt(visitor: &Arc<dyn CapabilityVisitor>, config: &ReplyConfig) -> String {
     let mut parts: Vec<String> = visitor
         .list_system_prompts()
         .await
@@ -98,7 +122,12 @@ async fn build_system_prompt(visitor: &Arc<dyn CapabilityVisitor>) -> String {
         .map(|(_, prompt)| prompt)
         .filter(|p| !p.trim().is_empty())
         .collect();
-    parts.push(INSTRUCTION.to_string());
+    parts.push(
+        config
+            .instruction_override()
+            .unwrap_or(INSTRUCTION)
+            .to_string(),
+    );
     parts.join("\n\n")
 }
 

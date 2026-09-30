@@ -33,14 +33,18 @@ use crate::symbio_core::{
     PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_VISITOR,
 };
 
+use super::config::TriageConfig;
 use super::reasons::{REASON_CLARIFY, REASON_FROM_CONTEXT, REASON_NEEDS_WORK, REASON_REFUSE};
 
-/// 分类器的系统提示词。
+/// 分类器的系统提示词（**内置那份**，可被 `TriageConfig::system_prompt` 覆盖）。
 ///
 /// 它必须**只输出一个词**——本模块的解析（[`parse_verdict`]）建立在这一点上。
 /// 让模型输出 JSON 或一句话再解析，等于把「这轮走哪条路」变成一次不可靠的字符串
 /// 匹配（`schemas::dialog` 的模块文档写了同一条理由）。
-const SYSTEM_PROMPT: &str = "\
+///
+/// 它是 `pub(crate)` 而不是私有：配置的文档与测试要能引用"出厂那份长什么样"，
+/// 而不必再抄一遍字面量。
+pub(crate) const SYSTEM_PROMPT: &str = "\
 你是一个意图分流器。读用户最后这一句话，判断这一轮该怎么处理，只输出一个词：
 
 direct  —— 用户在问已有对话里能回答的事实（或纯粹在寒暄确认），不需要动任何工具
@@ -105,18 +109,35 @@ fn normalize_word(raw: &str) -> String {
 /// `context` 是**对话线**投影（`session` 经 `context::conversation_view` 投影后带来），
 /// 最后一条即本轮用户发言。它为空（仓外调用方直呼本路由）时退回「只用这句话」。
 ///
+/// 模型与提示词都来自**本插件自己的配置**（`config.rs`）：配置了 `model` 就用它
+/// （判决是一次四选一分类，最便宜最快的模型就够），取不到落回会话选定的那个；
+/// 配置了 `system_prompt` 就覆盖内置那份。
+///
 /// 返回 `None` = 判不出来（没有可用的模型服务 / 请求失败 / 响应不可解析）——
 /// 调用方据此落 `Escalate`（见模块文档的失败方向说明）。
 pub(crate) async fn classify(
     ctx: &Arc<dyn PluginInvokeRequest>,
     utterance: &str,
     context: &[ChatMessage],
+    config: &TriageConfig,
 ) -> Option<Verdict> {
-    // 模型服务从**调用方带来的能力访问器**里取（model 插件在 traverse 广播中注册的
-    // 唯一生效实例）。取不到 ⇒ 判不出来，调用方落 `Escalate`。
+    // 模型服务从**调用方带来的能力访问器**里取。优先本插件配置的那个 provider id
+    // （model 插件在 traverse 广播里把**全部已启用**的 provider 一并交来），
+    // 取不到就落回当次生效的那个——降级而不失效。
     let visitor: Arc<dyn CapabilityVisitor> = ctx.get(CAPABILITY_VISITOR)?;
-    let provider: Arc<dyn ModelProvider> = visitor.get_model_provider().await?;
+    let provider: Arc<dyn ModelProvider> =
+        visitor.resolve_model_provider(config.model_id()).await?;
 
+    // 选了哪个模型记一笔：配置的 id 写错时**没有错误信号**（行为是"用会话的模型"，
+    // 一切照常），这行日志是唯一的线索。
+    crate::plugin_debug!(
+        "triage",
+        "[Triage] 分类使用模型 '{}'（配置 model={:?}）",
+        provider.provider_id(),
+        config.model_id()
+    );
+
+    let system_prompt = config.prompt_override().unwrap_or(SYSTEM_PROMPT);
     let messages = build_messages(utterance, context);
     // 出口 = 静默（内部请求）；中止 = 调用方若给了就跟着走，没给就是一个永不中止的
     // 独立信号（`route()` 直呼没有编排层，也就没有中止来源——见 `ExecAbortSignal::of`）。
@@ -124,7 +145,7 @@ pub(crate) async fn classify(
     let root_id = llm_short_id();
 
     match provider
-        .execute_turn(SYSTEM_PROMPT, &messages, &[], &root_id, &env)
+        .execute_turn(system_prompt, &messages, &[], &root_id, &env)
         .await
     {
         Ok(out) => parse_verdict(&out.text),

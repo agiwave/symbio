@@ -43,35 +43,59 @@
 //!
 //! 文本由 `session` 落库，转写只有一个写入者（ADR-020）。本插件只返回字符串。
 
+use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::schemas::dialog::{ComposeRequest, Verdict};
 use crate::symbio_core::{
-    Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
-    PluginMeta, PluginPayload, PATH, PLUGIN_ID_REPLY,
+    plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH, PLUGIN_ID_REPLY,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
 
 use super::compose::generate;
+use super::config::ReplyConfig;
 use super::reasons::REASON_FROM_CONTEXT;
 use super::templates::{progress_text, template_for};
 
 /// Reply 插件（无状态、无副作用、不持有任何地址）
-pub struct ReplyPlugin;
+///
+/// 持有自己的配置（`<本插件目录>/PLUGIN.yml`）：**用哪个模型**、**指令段怎么写**
+/// ——两件真的有分歧的事（见 `config.rs` 的模块文档）。它不持有会话状态，也不持有
+/// 任何兄弟插件。
+pub struct ReplyPlugin {
+    config: ReplyConfig,
+    config_file: PluginConfigFile,
+}
 
 impl ReplyPlugin {
     /// 工厂方法（满足 `submit_object_creator!` 协议）
     ///
-    /// **不读配置**：本插件没有自己的配置面。要不要用它归调用方
-    /// （`SessionConfig::reply_enabled`），"要不要先用模板挡一层"这种内部策略
-    /// 本插件也没有（措辞没有比"能生成就生成"更值得开关的分支）。
-    pub fn build(_ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
-        Arc::new(ReplyPlugin) as Arc<dyn Plugin>
+    /// **不读"要不要用本插件"**：那归调用方（`SessionConfig::reply_enabled`）。
+    /// 这里读的是本插件**自己**的两件事：模型与指令段。
+    pub fn build(ctx: Arc<dyn PluginInvokeRequest>) -> Arc<dyn Plugin> {
+        let dir = plugin_dir_from_ctx(&*ctx, PLUGIN_ID_REPLY);
+        let config: ReplyConfig = match dir.load::<ReplyConfig>() {
+            Ok(Some(c)) => c,
+            Ok(None) => ReplyConfig::default(),
+            Err(e) => {
+                crate::plugin_warn!("reply", "读取自身配置失败，改用默认值：{e}");
+                ReplyConfig::default()
+            }
+        };
+        Arc::new(ReplyPlugin::new(config, dir)) as Arc<dyn Plugin>
+    }
+
+    pub fn new(config: ReplyConfig, dir: PluginDir) -> Self {
+        Self {
+            config,
+            config_file: PluginConfigFile::new(dir, "对话措辞设置", config_definition()),
+        }
     }
 
     pub fn metadata() -> PluginMeta {
         PluginMeta::new(PLUGIN_ID_REPLY, "对话措辞")
             .with_description("首响 / 答话 / 汇报的措辞；只输出文本，不做判决")
-            .with_version("0.3.0")
+            .with_version("0.4.0")
     }
 
     /// 三条产线的分派：**填表**（`Report`）/ **先生成、生成不了落模板**（其余）。
@@ -85,7 +109,7 @@ impl ReplyPlugin {
             return progress_text(&req.snapshot);
         }
         if requires_generation(&req.verdict) {
-            if let Some(text) = generate(ctx, req).await {
+            if let Some(text) = generate(ctx, req, &self.config).await {
                 return text;
             }
             // 生成失败**不返回空串**：继续往下走模板产线。`from_context` 在模板表里
@@ -132,18 +156,61 @@ impl Plugin for ReplyPlugin {
         }
     }
 
-    /// 不参与任何收集：本插件不注册 `Capability`，也没有挂载视图
+    /// 不参与**能力**收集：本插件不注册 `Capability`，也没有挂载视图
     /// （它无状态、不持有地址，因此不实现 `VdfsProvider`）。
+    ///
+    /// 它参与的是**另一条通道**（`ConfigurableVisitor`）：声明「本插件有一份配置
+    /// 文档」，设置页据此列出并指路 `<根>/reply/PLUGIN.yml`——「可 A/B」要能操作，
+    /// 靠的就是这一条。
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        _ctx: Arc<dyn PluginInvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
+        crate::symbio_core::capability_announce_configurable(&ctx, &self.config_file).await;
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }
 
 crate::submit_object_creator!(PLUGIN_ID_REPLY, ReplyPlugin::build, dyn Plugin);
+
+// ==================== 配置文档（`<根>/reply/PLUGIN.yml`） ====================
+
+/// 措辞配置的定义 —— **定义由配置的拥有者产出**（与 `triage` / `session` 同一条纪律）。
+///
+/// 两个可空字段没有"默认值"可写——它们的缺省就是**留空**，故给 `placeholder` 说明
+/// 留空意味着什么，而不是编一个看起来像默认值的字面量。
+fn config_definition() -> DetailDefinition {
+    DetailDefinition::form(
+        "对话措辞设置",
+        vec![
+            DetailField {
+                placeholder: Some("留空 = 用会话选定的模型".into()),
+                ..DetailField::text(
+                    "model",
+                    "措辞模型",
+                    "本插件自己的 provider id（`<根>/model/<id>`）。答话是用户逐字读的\
+                     那段文本，值得用比判决更好的模型；温度不必在这里写——它是 provider\
+                     条目自己的参数，换一个条目就是换温度",
+                )
+            },
+            DetailField {
+                rows: Some(6),
+                full_width: true,
+                placeholder: Some("留空 = 用内置的指令段".into()),
+                ..DetailField {
+                    widget: "textarea".to_string(),
+                    ..DetailField::text(
+                        "instruction",
+                        "生成指令段",
+                        "覆盖内置的生成指令段（拼在人格与记忆之后）。只覆盖指令段，\
+                         不覆盖人格与记忆——同一个人在两处口吻不同，比一句措辞不理想糟得多",
+                    )
+                }
+            },
+        ],
+    )
+}
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]

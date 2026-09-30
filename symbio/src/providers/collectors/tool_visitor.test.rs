@@ -56,28 +56,88 @@ fn provider(id: &str) -> Arc<dyn ModelProvider> {
 }
 
 #[tokio::test]
-async fn provider_slot_set_get_and_missing() {
+async fn model_slot_set_get_and_missing() {
     let mgr = DefaultToolVisitor::new();
-    // 未注册 → None
+    // 未注册 → 生效者与目录都是空
     assert!(mgr.get_model_provider().await.is_none());
+    assert!(mgr.get_model_provider_by_id("p1").await.is_none());
 
     // 注册后可取回，身份字段一致
-    mgr.register_model_provider(provider("p1")).await;
+    mgr.register_model_providers(Some("p1"), vec![provider("p1")])
+        .await;
     let got = mgr.get_model_provider().await;
     let got = got.expect("注册后应可取回");
     assert_eq!(got.provider_id(), "p1");
 }
 
+/// **空集是一等输入**：一个可用的都没有时，两个取值口都给 `None`（不 panic、不补占位）
 #[tokio::test]
-async fn provider_overwrite_replaces_single_slot() {
+async fn empty_registration_yields_no_provider() {
     let mgr = DefaultToolVisitor::new();
-    mgr.register_model_provider(provider("p1")).await;
-    mgr.register_model_provider(provider("p2")).await;
+    mgr.register_model_providers(None, vec![]).await;
+    assert!(mgr.get_model_provider().await.is_none());
+    assert!(mgr.get_model_provider_by_id("p1").await.is_none());
+}
 
-    // 单槽覆盖：后注册者生效
-    let got = mgr.get_model_provider().await;
-    let got = got.expect("覆盖注册后仍应可取回");
-    assert_eq!(got.provider_id(), "p2");
+/// 生效者**从目录里取**：`active_id` 在目录里查不到 ⇒ `None`，**不**替调用方挑一个别的
+///
+/// 静默换模型比没有模型更难查——会话会用另一个模型跑完一整轮，而配置里那个坏条目
+/// 永远不会被注意到。
+#[tokio::test]
+async fn active_id_absent_from_catalog_yields_none() {
+    let mgr = DefaultToolVisitor::new();
+    mgr.register_model_providers(Some("missing"), vec![provider("p1")])
+        .await;
+    assert!(mgr.get_model_provider().await.is_none());
+    // 目录本身照常可用（一个配坏的条目不该把其余可用的模型一起带走）
+    assert_eq!(
+        mgr.get_model_provider_by_id("p1")
+            .await
+            .unwrap()
+            .provider_id(),
+        "p1"
+    );
+}
+
+/// 目录按 `provider_id` 索引，且是**严格查找**：不在目录里就是 `None`，
+/// 不降级到生效者（插件问的是"有没有这一个"）
+#[tokio::test]
+async fn catalog_lookup_is_by_id_and_strict() {
+    let mgr = DefaultToolVisitor::new();
+    mgr.register_model_providers(Some("p1"), vec![provider("p1"), provider("p2")])
+        .await;
+
+    assert_eq!(
+        mgr.get_model_provider_by_id("p2")
+            .await
+            .unwrap()
+            .provider_id(),
+        "p2"
+    );
+    assert!(mgr.get_model_provider_by_id("nope").await.is_none());
+    // 生效者仍是 p1（目录不影响它）
+    assert_eq!(mgr.get_model_provider().await.unwrap().provider_id(), "p1");
+}
+
+/// 重新注册**整体替换**目录（不是累积）：provider 被停用 / 删除后，
+/// 旧实例不该留在目录里被插件取到
+#[tokio::test]
+async fn reregistration_replaces_the_catalog() {
+    let mgr = DefaultToolVisitor::new();
+    mgr.register_model_providers(Some("p1"), vec![provider("p1"), provider("p2")])
+        .await;
+    mgr.register_model_providers(Some("p2"), vec![provider("p2")])
+        .await;
+
+    assert!(mgr.get_model_provider_by_id("p1").await.is_none());
+    assert_eq!(
+        mgr.get_model_provider_by_id("p2")
+            .await
+            .unwrap()
+            .provider_id(),
+        "p2"
+    );
+    assert_eq!(mgr.get_model_provider().await.unwrap().provider_id(), "p2");
 }
 
 /// 同名覆盖只改内容、**不改槽位**（顺序 = 首次注册顺序）

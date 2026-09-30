@@ -40,10 +40,12 @@
 
 use std::sync::Arc;
 
+use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::schemas::dialog::{DecideRequest, Verdict};
 use crate::symbio_core::{
-    plugin_dir_from_ctx, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, PATH, PLUGIN_ID_TRIAGE,
+    plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH,
+    PLUGIN_ID_TRIAGE,
 };
 use async_trait::async_trait;
 
@@ -56,13 +58,21 @@ use super::rules::classify_by_rule;
 ///
 /// 唯一持有的东西是自己的配置（`<本插件目录>/PLUGIN.yml`）——装配期读一次，
 /// 与 `session` / `skill` 同款（插件从**自己的目录**里读自己的配置）。
+///
+/// 同时持有那份配置的**文档**（[`PluginConfigFile`]）：设置页要能改它，
+/// 「可 A/B」才不是一句空话——提示词的措辞直接决定四选一的准确率，调它不该
+/// 需要改代码重编译。
 pub struct TriagePlugin {
     config: TriageConfig,
+    config_file: PluginConfigFile,
 }
 
 impl TriagePlugin {
-    pub fn new(config: TriageConfig) -> Self {
-        Self { config }
+    pub fn new(config: TriageConfig, dir: PluginDir) -> Self {
+        Self {
+            config,
+            config_file: PluginConfigFile::new(dir, "意图判决设置", config_definition()),
+        }
     }
 
     /// 静态工厂：从 `PluginInvokeRequest` 构造 Plugin 实例
@@ -79,7 +89,7 @@ impl TriagePlugin {
                 TriageConfig::default()
             }
         };
-        Arc::new(TriagePlugin::new(config)) as Arc<dyn Plugin>
+        Arc::new(TriagePlugin::new(config, dir)) as Arc<dyn Plugin>
     }
 
     pub fn metadata() -> PluginMeta {
@@ -87,7 +97,7 @@ impl TriagePlugin {
             .with_description(
                 "判决这一轮该直接回答还是派给工具循环；只输出枚举，不产出面向用户的文本",
             )
-            .with_version("0.2.0")
+            .with_version("0.3.0")
     }
 
     /// 判决（本插件能力的全部）。
@@ -115,7 +125,7 @@ impl TriagePlugin {
             }
         }
 
-        match classify(ctx, utterance, &req.context).await {
+        match classify(ctx, utterance, &req.context, &self.config).await {
             Some(verdict) => verdict,
             None => escalate_unclassified(),
         }
@@ -154,23 +164,79 @@ impl Plugin for TriagePlugin {
         }
     }
 
-    /// 不参与任何收集：本插件不注册 `Capability`，也没有挂载视图
+    /// 不参与**能力**收集：本插件不注册 `Capability`，也没有挂载视图
     /// （它无状态、不持有地址，因此不实现 `VdfsProvider`）。
     ///
     /// ⚠️ 「不注册 `Capability`」与「不调用模型」是**两件事**：本插件确实会发起一次
     /// 静默的模型请求（快速档分类），但那次请求不向模型暴露任何工具，本插件也从不
     /// 出现在模型的工具清单里——工具集来自 `CapabilityVisitor::register`，而这里
     /// 一个也没注册。
+    ///
+    /// 它参与的是**另一条通道**（`ConfigurableVisitor`）：声明「本插件有一份配置
+    /// 文档」，设置页据此列出并指路 `<根>/triage/PLUGIN.yml`。缺了它插件照常工作，
+    /// 只是那份配置在界面上改不到。
     async fn traverse(
         self: Arc<Self>,
         _path: String,
-        _ctx: Arc<dyn PluginInvokeRequest>,
+        ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
+        crate::symbio_core::capability_announce_configurable(&ctx, &self.config_file).await;
         Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
     }
 }
 
 crate::submit_object_creator!(PLUGIN_ID_TRIAGE, TriagePlugin::build, dyn Plugin);
+
+// ==================== 配置文档（`<根>/triage/PLUGIN.yml`） ====================
+
+/// 判决配置的定义 —— **定义由配置的拥有者产出**（与 `session` 同一条纪律）。
+///
+/// 默认值一律从 [`TriageConfig::default()`] 读出，不写第二份字面量：schema 与 serde
+/// 各写一份默认值，就会出现"面板显示的值与实际行为不符"的漂移（`session` 那边为此
+/// 吃过一次 `max_tool_rounds` 的亏，见其 `config_definition` 的说明）。
+///
+/// 两个可空字段没有"默认值"可写——它们的缺省就是**留空**，故给 `placeholder` 说明
+/// 留空意味着什么，而不是编一个看起来像默认值的字面量。
+fn config_definition() -> DetailDefinition {
+    let d = TriageConfig::default();
+    DetailDefinition::form(
+        "意图判决设置",
+        vec![
+            DetailField::toggle(
+                "rule_shortcut",
+                "规则短路",
+                "问候 / 致谢 / 确认 / 空输入由规则表直接判决，省掉一次分类请求；\
+                 关闭后全部落快速档（慢但正确）",
+                d.rule_shortcut,
+            ),
+            DetailField {
+                placeholder: Some("留空 = 用会话选定的模型".into()),
+                ..DetailField::text(
+                    "model",
+                    "判决模型",
+                    "本插件自己的 provider id（`<根>/model/<id>`）。判决是一次四选一分类，\
+                     用最便宜最快的模型即可；温度不必在这里写——它是 provider 条目自己的\
+                     参数，换一个条目就是换温度",
+                )
+            },
+            DetailField {
+                rows: Some(6),
+                full_width: true,
+                placeholder: Some("留空 = 用内置的分类提示词".into()),
+                ..DetailField {
+                    widget: "textarea".to_string(),
+                    ..DetailField::text(
+                        "system_prompt",
+                        "分类提示词",
+                        "覆盖内置的分类提示词。必须只让模型输出一个词\
+                         （direct / clarify / refuse / work）——词表本身在代码里，\
+                         改提示词不会改行为映射",
+                    )
+                }
+            },
+        ],
+    )
+}
 
 #[cfg(test)]
 #[path = "plugin.test.rs"]

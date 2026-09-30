@@ -17,6 +17,17 @@ use super::super::reasons::{REASON_ACK, REASON_EMPTY, REASON_GREETING, REASON_TH
 use super::*;
 use crate::symbio_core::PluginSimpleRequest;
 
+/// 造一个插件实例。
+///
+/// 目录只用于**声明配置文档**（`traverse` 那条通道），本文件的用例不读文件系统，
+/// 故给一个临时目录即可——真读盘的那条路径由 `config.rs` 的单测与 e2e 覆盖。
+fn plugin(config: TriageConfig) -> Arc<TriagePlugin> {
+    Arc::new(TriagePlugin::new(
+        config,
+        PluginDir::at(std::env::temp_dir(), PLUGIN_ID_TRIAGE),
+    ))
+}
+
 /// 带路由路径 + 契约载荷的请求上下文（与容器转发的形状一致；**不带**能力访问器）
 fn ctx(path: &str, payload: Option<DecideRequest>) -> Arc<dyn PluginInvokeRequest> {
     let req = PluginSimpleRequest::new(None, None);
@@ -73,7 +84,7 @@ fn escalated(reason: &str) -> Verdict {
 /// `Answered`。
 #[tokio::test]
 async fn rule_hits_without_any_model_service() {
-    let plugin = Arc::new(TriagePlugin::new(TriageConfig::default()));
+    let plugin = plugin(TriageConfig::default());
     for (utterance, reason) in [
         ("你好", REASON_GREETING),
         ("谢谢", REASON_THANKS),
@@ -93,7 +104,7 @@ async fn rule_hits_without_any_model_service() {
 /// 这条是失败方向的守卫：`Answered` 会让「判不出来」表现成**用户什么都收不到**。
 #[tokio::test]
 async fn rule_miss_without_model_service_escalates() {
-    let plugin = Arc::new(TriagePlugin::new(TriageConfig::default()));
+    let plugin = plugin(TriageConfig::default());
     assert_eq!(
         decide(plugin, Some("我们刚才聊了什么")).await,
         escalated(REASON_UNCLASSIFIED)
@@ -103,7 +114,7 @@ async fn rule_miss_without_model_service_escalates() {
 /// 没有用户发言（后台触发的判定）：无事可判 ⇒ 同一条兜底方向
 #[tokio::test]
 async fn absent_utterance_escalates() {
-    let plugin = Arc::new(TriagePlugin::new(TriageConfig::default()));
+    let plugin = plugin(TriageConfig::default());
     assert_eq!(decide(plugin, None).await, escalated(REASON_UNCLASSIFIED));
 }
 
@@ -114,12 +125,13 @@ async fn absent_utterance_escalates() {
 /// 与开关打开时的 `Answered{greeting}` 形成对照。
 #[tokio::test]
 async fn rule_shortcut_off_disables_the_table() {
-    let on = Arc::new(TriagePlugin::new(TriageConfig::default()));
+    let on = plugin(TriageConfig::default());
     assert_eq!(decide(on, Some("你好")).await, answered(REASON_GREETING));
 
-    let off = Arc::new(TriagePlugin::new(TriageConfig {
+    let off = plugin(TriageConfig {
         rule_shortcut: false,
-    }));
+        ..Default::default()
+    });
     assert_eq!(
         decide(off, Some("你好")).await,
         escalated(REASON_UNCLASSIFIED),
@@ -147,7 +159,7 @@ async fn verdict_serializes_as_tagged_enum() {
 /// 静默默认会让「忘了传请求」表现成「判决说不用干活」。
 #[tokio::test]
 async fn decide_without_payload_fails() {
-    let r = Arc::new(TriagePlugin::new(TriageConfig::default()))
+    let r = plugin(TriageConfig::default())
         .route(ctx("decide", None))
         .await;
     assert!(r.is_err(), "缺载荷应报错，实得 {:?}", r.is_ok());
@@ -160,7 +172,7 @@ async fn legacy_payload_without_new_fields_still_parses() {
     req.set(PATH, "decide".to_string());
     req.set_payload(serde_json::json!({ "session_id": "s1", "utterance": "你好" }))
         .expect("载荷写入必须成功");
-    let p = Arc::new(TriagePlugin::new(TriageConfig::default()))
+    let p = plugin(TriageConfig::default())
         .route(Arc::new(req))
         .await
         .expect("decide 必须成功");
@@ -170,7 +182,7 @@ async fn legacy_payload_without_new_fields_still_parses() {
 
 #[tokio::test]
 async fn unknown_subcommand_is_not_found() {
-    let r = Arc::new(TriagePlugin::new(TriageConfig::default()))
+    let r = plugin(TriageConfig::default())
         .route(ctx("bogus", None))
         .await;
     assert!(matches!(r, Err(PluginError::NotFound(_))));
@@ -179,11 +191,54 @@ async fn unknown_subcommand_is_not_found() {
 /// 本插件不注册 `Capability` —— 它在工具集里**结构上不可能**出现
 #[tokio::test]
 async fn traverse_contributes_no_tools() {
-    let p = Arc::new(TriagePlugin::new(TriageConfig::default()))
+    let p = plugin(TriageConfig::default())
         .traverse(String::new(), ctx("", None))
         .await
         .expect("traverse 必须成功");
     assert_eq!(data_of(p), serde_json::json!([]));
+}
+
+/// 但它**声明了自己的配置文档**（另一条通道）：设置页据此列出并指路
+/// `<根>/triage/PLUGIN.yml`——「可 A/B」要能操作，靠的就是这一条。
+///
+/// 条目名用**目录名**（列表内唯一），地址必须显式带着 `triage/PLUGIN.yml`
+/// （它跨挂载点、推不出来，见 `capability_entry_of` 的说明）。
+#[tokio::test]
+async fn traverse_announces_its_own_config() {
+    use crate::providers::DefaultConfigurableVisitor;
+    use crate::symbio_core::{ConfigurableVisitor, CONFIGURABLE_VISITOR};
+
+    let visitor: Arc<dyn ConfigurableVisitor> = Arc::new(DefaultConfigurableVisitor::new());
+    let req = PluginSimpleRequest::new(None, None);
+    req.set(PATH, String::new());
+    req.set(CONFIGURABLE_VISITOR, visitor.clone());
+    let req: Arc<dyn PluginInvokeRequest> = Arc::new(req);
+
+    plugin(TriageConfig::default())
+        .traverse(String::new(), req)
+        .await
+        .expect("traverse 必须成功");
+
+    let items = visitor.list_configurables().await;
+    assert_eq!(items.len(), 1, "应恰好声明一条配置文档");
+    assert_eq!(items[0].node.name, PLUGIN_ID_TRIAGE);
+    assert_eq!(items[0].path, "triage/PLUGIN.yml");
+    // 表单定义随声明一起交出去（设置页不另查一份）
+    let keys: Vec<&str> = items[0]
+        .node
+        .schema
+        .as_ref()
+        .and_then(|s| s.get("sections"))
+        .and_then(|s| s.get(0))
+        .and_then(|s| s.get("fields"))
+        .and_then(|f| f.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|f| f.get("key").and_then(|k| k.as_str()))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(keys, vec!["rule_shortcut", "model", "system_prompt"]);
 }
 
 /// E-001 的自证：`PluginMeta` 首参必须等于插件目录名（容器按目录名分发）

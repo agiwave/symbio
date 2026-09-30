@@ -19,6 +19,17 @@ use super::super::reasons::{
 };
 use super::super::templates::{FALLBACK_ANSWERED, FALLBACK_ESCALATE};
 
+/// 造一个插件实例。
+///
+/// 目录只用于**声明配置文档**（`traverse` 那条通道），本文件的用例不读文件系统，
+/// 故给一个临时目录即可——真读盘的那条路径由 `config.rs` 的单测与 e2e 覆盖。
+fn plugin(config: ReplyConfig) -> Arc<ReplyPlugin> {
+    Arc::new(ReplyPlugin::new(
+        config,
+        PluginDir::at(std::env::temp_dir(), PLUGIN_ID_REPLY),
+    ))
+}
+
 /// 带路由路径 + 契约载荷的请求上下文（与容器转发的形状一致）
 fn ctx(path: &str, payload: Option<ComposeRequest>) -> Arc<dyn PluginInvokeRequest> {
     let req = PluginSimpleRequest::new(None, None);
@@ -50,7 +61,7 @@ fn report(snapshot: RunSnapshot) -> ComposeRequest {
 
 /// 走一次路由，取出参文本
 async fn compose_with(req: ComposeRequest) -> String {
-    let p = Arc::new(ReplyPlugin)
+    let p = plugin(ReplyConfig::default())
         .route(ctx("compose", Some(req)))
         .await
         .unwrap_or_else(|e| panic!("compose 必须成功：{e}"));
@@ -188,24 +199,52 @@ async fn report_never_yields_empty_text() {
 /// 静默默认会让「忘了传请求」表现成「措辞说没什么好说的」。
 #[tokio::test]
 async fn compose_without_payload_fails() {
-    let r = Arc::new(ReplyPlugin).route(ctx("compose", None)).await;
+    let r = plugin(ReplyConfig::default())
+        .route(ctx("compose", None))
+        .await;
     assert!(r.is_err(), "缺载荷应报错，实得 {:?}", r.is_ok());
 }
 
 #[tokio::test]
 async fn unknown_subcommand_is_not_found() {
-    let r = Arc::new(ReplyPlugin).route(ctx("bogus", None)).await;
+    let r = plugin(ReplyConfig::default())
+        .route(ctx("bogus", None))
+        .await;
     assert!(matches!(r, Err(PluginError::NotFound(_))));
 }
 
 /// 本插件不注册 `Capability` —— 它在工具集里**结构上不可能**出现
 #[tokio::test]
 async fn traverse_contributes_no_tools() {
-    let p = Arc::new(ReplyPlugin)
+    let p = plugin(ReplyConfig::default())
         .traverse(String::new(), ctx("", None))
         .await
         .expect("traverse 必须成功");
     assert_eq!(data_of(p), serde_json::json!([]));
+}
+
+/// 但它**声明了自己的配置文档**（另一条通道）：设置页据此列出并指路
+/// `<根>/reply/PLUGIN.yml`——「可 A/B」要能操作，靠的就是这一条。
+#[tokio::test]
+async fn traverse_announces_its_own_config() {
+    use crate::providers::DefaultConfigurableVisitor;
+    use crate::symbio_core::{ConfigurableVisitor, CONFIGURABLE_VISITOR};
+
+    let visitor: Arc<dyn ConfigurableVisitor> = Arc::new(DefaultConfigurableVisitor::new());
+    let req = PluginSimpleRequest::new(None, None);
+    req.set(PATH, String::new());
+    req.set(CONFIGURABLE_VISITOR, visitor.clone());
+    let req: Arc<dyn PluginInvokeRequest> = Arc::new(req);
+
+    plugin(ReplyConfig::default())
+        .traverse(String::new(), req)
+        .await
+        .expect("traverse 必须成功");
+
+    let items = visitor.list_configurables().await;
+    assert_eq!(items.len(), 1, "应恰好声明一条配置文档");
+    assert_eq!(items[0].node.name, PLUGIN_ID_REPLY);
+    assert_eq!(items[0].path, "reply/PLUGIN.yml");
 }
 
 /// E-001 的自证：`PluginMeta` 首参必须等于插件目录名（容器按目录名分发）

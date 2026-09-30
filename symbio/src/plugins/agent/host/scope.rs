@@ -127,17 +127,30 @@ impl CapabilityVisitor for SubAgentVisitor {
         self.inner.has_capability(name).await
     }
 
-    /// 子 Agent **不得**决定用哪个模型服务（单槽，被劫持等于整个会话换模型）
-    async fn register_model_provider(&self, _provider: Arc<dyn ModelProvider>) {
+    /// 子 Agent **不得**决定用哪个模型服务（生效者是单槽，被劫持等于整个会话换模型）
+    ///
+    /// 目录也一并丢弃：它同样归系统 Agent——子 Agent 若能往目录里塞 provider，
+    /// 插件就会按 id 取到子 Agent 塞进来的那一个。
+    async fn register_model_providers(
+        &self,
+        _active_id: Option<&str>,
+        _available: Vec<Arc<dyn ModelProvider>>,
+    ) {
         crate::plugin_debug!(
             "agent",
-            "丢弃子 Agent `{}` 的模型服务注册（单槽，归系统 Agent）",
+            "丢弃子 Agent `{}` 的模型服务注册（生效者与目录都归系统 Agent）",
             self.agent_id
         );
     }
 
     async fn get_model_provider(&self) -> Option<Arc<dyn ModelProvider>> {
         self.inner.get_model_provider().await
+    }
+
+    /// 按 id 查询**转发**给内层：目录是只读的（写侧已被上面挡住），
+    /// 子 Agent 作用域内的插件照常按 id 取自己的模型。
+    async fn get_model_provider_by_id(&self, provider_id: &str) -> Option<Arc<dyn ModelProvider>> {
+        self.inner.get_model_provider_by_id(provider_id).await
     }
 
     async fn register_system_prompt(&self, name: &str, prompt: String) {

@@ -20,8 +20,12 @@ use tokio::sync::RwLock;
 /// 默认能力管理器：内存 HashMap 实现，一次会话请求一个实例
 ///
 /// 除工具外，同时承载四组注册（与工具同一 traverse 收集机制）：
-/// - `provider`：当前生效的模型服务（单槽；model 插件按上下文解析出
-///   唯一生效 Provider 后注册，重复注册覆盖）
+/// - `provider` / `model_catalog`：模型服务的**生效者**（单槽）与**已启用目录**
+///   （按 `provider_id` 索引）。生效者归会话引擎，目录归**插件**——插件在自己的
+///   配置里声明一个 provider id 就能选自己的模型（判决用便宜快的、措辞用更好的）。
+///   两者由 model 插件在**同一次** `register_model_providers` 里交来：生效者必然
+///   是目录里的一员，拆成两次注册就会允许"生效者不在目录里"这个没有错误信号的
+///   非法状态（见 `CapabilityVisitor::register_model_providers`）。
 /// - `system_prompts`：系统提示词（按名称保序；**全部**送达模型，不做竞争）
 /// - `vdfs_providers`：VDFS 挂载点（按挂载名去重，`order` 升序对外）。
 ///   这是 **LLM 可控挂载机制**的清单（子智能体经 `SubAgentVisitor` 在此加
@@ -32,6 +36,7 @@ use tokio::sync::RwLock;
 pub struct DefaultToolVisitor {
     tools: Arc<RwLock<HashMap<String, Arc<dyn Capability>>>>,
     provider: Arc<RwLock<Option<Arc<dyn ModelProvider>>>>,
+    model_catalog: Arc<RwLock<IndexMap<String, Arc<dyn ModelProvider>>>>,
     system_prompts: Arc<RwLock<IndexMap<String, String>>>,
     vdfs_providers: Arc<RwLock<IndexMap<String, Arc<dyn VdfsProvider>>>>,
     vdfs_root: Arc<RwLock<Option<Arc<dyn VdfsProvider>>>>,
@@ -42,6 +47,7 @@ impl DefaultToolVisitor {
         Self {
             tools: Arc::new(RwLock::new(HashMap::new())),
             provider: Arc::new(RwLock::new(None)),
+            model_catalog: Arc::new(RwLock::new(IndexMap::new())),
             system_prompts: Arc::new(RwLock::new(IndexMap::new())),
             vdfs_providers: Arc::new(RwLock::new(IndexMap::new())),
             vdfs_root: Arc::new(RwLock::new(None)),
@@ -89,14 +95,33 @@ impl CapabilityVisitor for DefaultToolVisitor {
         tools.contains_key(name)
     }
 
-    async fn register_model_provider(&self, provider: Arc<dyn ModelProvider>) {
+    async fn register_model_providers(
+        &self,
+        active_id: Option<&str>,
+        available: Vec<Arc<dyn ModelProvider>>,
+    ) {
+        let mut catalog: IndexMap<String, Arc<dyn ModelProvider>> = IndexMap::new();
+        for p in available {
+            catalog.insert(p.provider_id().to_string(), p);
+        }
+        // 生效者从目录里取——**不在目录里就是没有**（协议工厂不可用的那种），
+        // 不替调用方挑一个别的：静默换模型比没有模型更难查。
+        let active = active_id.and_then(|id| catalog.get(id).cloned());
+
         let mut slot = self.provider.write().await;
-        *slot = Some(provider);
+        *slot = active;
+        let mut cat = self.model_catalog.write().await;
+        *cat = catalog;
     }
 
     async fn get_model_provider(&self) -> Option<Arc<dyn ModelProvider>> {
         let slot = self.provider.read().await;
         slot.clone()
+    }
+
+    async fn get_model_provider_by_id(&self, provider_id: &str) -> Option<Arc<dyn ModelProvider>> {
+        let cat = self.model_catalog.read().await;
+        cat.get(provider_id).cloned()
     }
 
     async fn register_system_prompt(&self, name: &str, prompt: String) {
