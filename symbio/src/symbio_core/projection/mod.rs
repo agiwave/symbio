@@ -47,6 +47,8 @@ impl<V: 'static> Projection<V> {
     }
 }
 
+pub mod turnstate;
+
 #[cfg(test)]
 #[path = "mod.test.rs"]
 mod tests;

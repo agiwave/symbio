@@ -1,5 +1,6 @@
 //! 核心模块
 
+pub mod actors;
 mod assembly;
 mod capability;
 mod clock;
@@ -27,9 +28,16 @@ pub use event::{Entity, Event, EventEnvelope, Seq, Timestamp, Verb};
 pub use invariants::{
     check_all, final_unique_per_turn, produced_by_coverage, seq_monotonic, Violation,
 };
+pub use projection::turnstate::{turnstate, TurnState};
 pub use projection::Projection;
 pub use store::{AppendError, EventStore, MemoryStore, Store};
 pub use view::{Budget, View};
+
+// ==================== 主体（v2 阶段 S1，② actors） ====================
+// 只收类型化输入、只产事件（plan/05 §3.1 ② 行）；S1 只落 Decider 平凡值。
+pub use actors::{ActorSpec, Decider, DeciderMiss, Pattern, Scope};
+// 事件名字表（名字是数据，单点定义）。
+pub use event::{EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
 
 // ==================== LLM 契约 ====================
 // 模型接入（`model_provider`）与单轮产物 / 帧原语（`turn`）。

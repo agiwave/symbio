@@ -39,6 +39,19 @@ impl Seq {
 /// 事件时间戳：Unix 毫秒（UTC），口径同 [`crate::symbio_core::clock_now_ms`]。
 pub type Timestamp = i64;
 
+// ── 事件名字表（S01：turn/* 全部，[roadmap/S01 §3](../../../../docs/plan/roadmap/S01-最小闭环.md)）────
+//
+// 名字是**数据**（加名字不加枚举，01 §6）；但名字必须**单点定义**——散在调用点的
+// 字符串字面量必然漂移（同 merge_supplements 的单点判据）。常量只钉名字，
+// 网格坐标（落在哪个 entity × verb 格子）由构造方用枚举保证。
+
+/// 用户发言。落在 `turn × opened`。
+pub const EVENT_USER_MESSAGE: &str = "user.message";
+/// 助手最终答复（每 turn 至多 1 条——N3）。落在 `turn × closed`。
+pub const EVENT_ASSISTANT_FINAL: &str = "chat.assistant.final";
+/// 兜底话术——**普通事件，不是特殊通道**（生成失败也要有输出）。落在 `turn × closed`。
+pub const EVENT_ASSISTANT_FALLBACK: &str = "chat.assistant.fallback";
+
 /// 事件实体 —— 语法网格的**行**，闭集（F5，10 个）。
 ///
 /// 新增实体是 L-schema 变化（[plan/03 §2](../../../../docs/plan/03-演进与验证.md)）：

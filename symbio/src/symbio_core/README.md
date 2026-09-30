@@ -95,11 +95,12 @@
 | 域 | 类型 / trait | 常量 / 静态量 | 函数 / 自由函数 | 备注 |
 |---|---|---|---|---|
 | `assembly` | — | `ASSEMBLY_` | — | 本域只有两个常量 |
+| `actors` | `Actor*`（`ActorSpec`）；契约词 `Pattern` · `Scope` · `Decider`（含 `DeciderMiss`） | — | — | [plan/01 §4](../../../docs/plan/01-核心架构.md) 的冻结契约名（名字先于模块存在，判据同 `schemas`）；`Decider` 是 [plan/05 §4](../../../docs/plan/05-模块架构.md) S8 反射档判定者，S1 先以规则应答形态落地 |
 | `capability` | `Capability`；子命名空间 `Configurable*` · `Option*` · `Tool*` | — | `capability_` | 无常量；三个子命名空间各有对应文件 |
 | `clock` | — | — | `clock_` | 只有一个函数 |
 | `creator` | — | — | `creator_` | 通用对象创建注册表：按 id 装配**任意**类型对象，见 §2 |
 | `embedding` | `Embedding` | `EMBEDDING_` | — | 服务 id 在 `embedding/ids.rs` |
-| `event` | `Event` / `EventEnvelope`；契约词 `Seq` · `Entity` · `Verb` · `Timestamp` | — | — | 契约词来自 [plan/01 §2](../../../docs/plan/01-核心架构.md) 的冻结契约文本，名字先于模块存在（判据同 `schemas`：改名 = 代码与契约漂移）。见 [ADR-043](../../../docs/DECISIONS.md) |
+| `event` | `Event` / `EventEnvelope`；契约词 `Seq` · `Entity` · `Verb` · `Timestamp` | `EVENT_` | — | 契约词来自 [plan/01 §2](../../../docs/plan/01-核心架构.md) 的冻结契约文本，名字先于模块存在（判据同 `schemas`：改名 = 代码与契约漂移）。见 [ADR-043](../../../docs/DECISIONS.md)。常量 = 事件**名字表**（名字是数据，单点定义） |
 | `event_bus` | `EventBus` | `EVENT_BUS_` | `event_bus_` | |
 | `exec` | `Exec` | — | — | 本域无常量 |
 | `invariants` | `Violation` | — | **裸名**（不变量名） | 函数名即不变量的可执行名（N1/N3/N5 的 C1/C2/C3 形态），谓词名比域名更有信息量——判据同 `schemas`：名字先于模块存在 |
@@ -107,7 +108,7 @@
 | `llm` | 子命名空间 `Model*` · `Turn*` | — | `llm_` | 对应 `model_provider.rs` / `turn.rs` |
 | `logger` | — | `LOG_`（登记缩写） | `logger_` | 常量用登记缩写，函数用全名——两者不混 |
 | `plugin` | `Plugin` | `PLUGIN_`；子命名空间 `ROUTE_*` · `TRAVERSE_*` | `plugin_` | `PLUGIN_` 下细分：`PLUGIN_ID_*`（工厂 id）· `PLUGIN_KEY_*`（清单键）· `PLUGIN_FILE` · `PLUGIN_PAYLOAD_KEY` |
-| `projection` | `Projection` | — | — | 纯函数视图（F2）：形参只有 `&[Event]` / `Timestamp` / `Budget`，返回 `View` 而非 `Result`。见 [ADR-043](../../../docs/DECISIONS.md) |
+| `projection` | `Projection`；契约词 `TurnState` | — | — | 纯函数视图（F2）：形参只有 `&[Event]` / `Timestamp` / `Budget`，返回 `View` 而非 `Result`。`TurnState` 是 [plan/01 §8](../../../docs/plan/01-核心架构.md) `projection = turnstate` 的产出视图名。见 [ADR-043](../../../docs/DECISIONS.md) |
 | `schemas` | 协议词 | 协议词 | 协议词 | 命名空间就是协议本身，见 §3 |
 | `store` | `Store` / `MemoryStore` / `EventStore`；契约词 `AppendError` | — | — | `Store` trait 冻结（F1）：append / range / head，无 update/delete；`EventStore` 是装 `Event` 信封的便捷别名；`AppendError` 是 [plan/01 §2](../../../docs/plan/01-核心架构.md) 冻结签名的一部分 |
 | `text` | — | — | `text_` | 只有两个纯函数 |
@@ -135,6 +136,7 @@
 | 域 | 职责 | 关键符号 | 子路径 |
 |---|---|---|---|
 | `assembly` | 装配策略：一棵标准插件树挂哪些插件、哪些插件不许被停用 | `ASSEMBLY_SUB_AGENT_PLUGINS` · `ASSEMBLY_UNDISABLABLE_PLUGINS` | — |
+| `actors` | v2 ② 主体：只收类型化输入（事件切片 / `View`）、只产事件（[plan/05 §3.1](../../../docs/plan/05-模块架构.md) ② 行）；S1 只落 `Decider` 规则应答（零 LLM 平凡值），`Reasoner` / `Translator` 归 S2 / S5 | `ActorSpec` · `Pattern`（三模式闭集）· `Scope`（root / child）· `Decider` · `Miss`（规则未命中 = 兜底触发条件，不是错误） | — |
 | `capability` | 能力系统：LLM 可见工具与插件遍历面 | `Capability` · `CapabilityMeta` · `CapabilityCategory` · `CapabilityToolContextRetention` · `capability_invoke` · 收集**三**表契约（`CapabilityVisitor` / `OptionVisitor` / `ConfigurableVisitor`；三者的**默认实现**住 `providers/collectors`）· `capability_resolve` / `capability_to_wire` · `failure_kind` · 错误桶读写（`CapabilityError` / `capability_report_error` / `capability_take_errors`；**桶的键** `CAPABILITY_ERRORS` 住在 `keys`） | `configurable` · `error` · `option` · `tool_name` |
 | `clock` | 全项目「当前时间（Unix 毫秒）」唯一实现 | `clock_now_ms` | — |
 | `creator` | 通用对象创建注册表：按 id 装配**任意**类型对象（见 [ADR-036](../../../docs/DECISIONS.md)） | `creator_create_object` · `creator_has` · `creator_ids` | — |

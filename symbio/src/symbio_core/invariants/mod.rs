@@ -88,16 +88,43 @@ pub fn final_unique_per_turn(events: &[Event]) -> Vec<Violation> {
     bad
 }
 
-/// C3 / N5（I2）：断言类事件（`verb == Asserted`）必须带溯源。
+/// C3 / N5（I2）：**声明类**事件必须带溯源。
 ///
-/// 断言 = 「宣称某事实为真」（`task.verified` / `artifact.added` / `classify.verdict`…）。
-/// 没有溯源的断言**无法审计也无法撤销**——静默失效的温床（J3）。
+/// 「声明」= 宣称某件事为真或已发生，两类（[plan/03 §2 I2](../../../../docs/plan/03-演进与验证.md)）：
+/// - **断言类**（`verb == Asserted`）：`task.verified` / `artifact.added` / `classify.verdict`…
+/// - **收束类**（`turn × closed` 的 `chat.assistant.final` / `chat.assistant.fallback`）：
+///   宣称"已经答复"（[roadmap/S01 §5](../../../../docs/plan/roadmap/S01-最小闭环.md)：
+///   回复必须有 `produced_by`——否则用户收到了话，却查不到它是怎么来的）。
+///
+/// 没有溯源的声明**无法审计也无法撤销**——静默失效的温床（J3）。
 pub fn produced_by_coverage(events: &[Event]) -> Vec<Violation> {
     events
         .iter()
-        .filter(|e| e.verb == Verb::Asserted && e.produced_by.is_none())
-        .map(|e| Violation::at(e, "断言类事件必须带 produced_by（I2 无溯源不声明）"))
+        .filter(|e| needs_provenance(e) && e.produced_by.is_none())
+        .map(|e| {
+            Violation::at(
+                e,
+                if e.verb == Verb::Asserted {
+                    "断言类事件必须带 produced_by（I2 无溯源不声明）"
+                } else {
+                    "收束类事件（答复）必须带 produced_by（I2：用户收到的话必须可追溯）"
+                },
+            )
+        })
         .collect()
+}
+
+/// I2 的覆盖判据（参照 [`docs/plan/verify/invariants.rs`](../../../../docs/plan/verify/invariants.rs)
+/// 的 `needs_provenance`，S1 扩展收束类）。
+fn needs_provenance(e: &Event) -> bool {
+    e.verb == Verb::Asserted
+        || (e.entity == Entity::Turn
+            && e.verb == Verb::Closed
+            && matches!(
+                e.kind.as_str(),
+                crate::symbio_core::event::EVENT_ASSISTANT_FINAL
+                    | crate::symbio_core::event::EVENT_ASSISTANT_FALLBACK
+            ))
 }
 
 /// 三条一起跑（S0 的 CI 形态：任一违规 ⇒ 清单非空）。

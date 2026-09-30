@@ -104,7 +104,6 @@ fn closed_tasks_do_not_count_as_final() {
 }
 
 // ── C3 / N5：断言类事件必须带溯源 ──────────────────────────────────────
-
 #[test]
 fn asserted_with_provenance_passes() {
     let events = stored(vec![pending(
@@ -134,8 +133,46 @@ fn asserted_without_provenance_is_detected() {
 
 #[test]
 fn non_asserted_events_need_no_provenance() {
-    // 普通发言（opened / closed）不是断言，不要求 produced_by。
+    // 普通过程事件（opened 等）不是声明，不要求 produced_by——
+    // S1 起收束类（chat.assistant.final/fallback）例外，见下。
     let events = vec![pending("u0", "user.message", Entity::Turn, Verb::Opened, 0)];
+    assert!(produced_by_coverage(&events).is_empty());
+}
+
+#[test]
+fn reply_without_provenance_is_detected() {
+    // S01 §5：回复必须有 produced_by——用户收到的话必须可追溯。
+    let bare = Event {
+        produced_by: None,
+        ..pending("f0", "chat.assistant.final", Entity::Turn, Verb::Closed, 0)
+    };
+    let bad = produced_by_coverage(std::slice::from_ref(&bare));
+    assert_eq!(bad.len(), 1, "无溯源的答复必须被看见（I2）");
+    assert!(bad[0].why.contains("收束"), "{}", bad[0].why);
+}
+
+#[test]
+fn fallback_without_provenance_is_detected() {
+    // 兜底也是一条普通事件——同样逃不出 I2（roadmap/S01 §2 的关键设计）。
+    let bare = Event {
+        produced_by: None,
+        ..pending(
+            "fb0",
+            "chat.assistant.fallback",
+            Entity::Turn,
+            Verb::Closed,
+            0,
+        )
+    };
+    assert_eq!(produced_by_coverage(std::slice::from_ref(&bare)).len(), 1);
+}
+
+#[test]
+fn reply_with_provenance_passes() {
+    let events = stored(vec![
+        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
+        pending("f0", "chat.assistant.final", Entity::Turn, Verb::Closed, 0).with_produced_by(0),
+    ]);
     assert!(produced_by_coverage(&events).is_empty());
 }
 
