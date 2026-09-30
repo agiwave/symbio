@@ -30,6 +30,7 @@
 mod actor;
 mod agent;
 mod composite;
+mod delegate;
 mod event_bus;
 mod fact_log;
 mod gateway;

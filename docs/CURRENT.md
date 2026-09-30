@@ -16,6 +16,7 @@
 | `actor` | `actor` | — | `actor/list` | `Plugin` | ✓ | ✓ |
 | `agent` | `agent` | <根>/agent · （运行期动态） | （动态）已无自有路由（一律 `NotFound` 并指引到 `<根>/agent`） | `Capability` · `Plugin` · `VdfsProvider` | ✓ | ✓ |
 | `composite` | `composite` | — | （动态）容器：按配置挂载的子插件名分发，运行期动态 | `Plugin` · `VdfsProvider` | — | ✓ |
+| `delegate` | `delegate` | — | `delegate/decide` · `delegate/progress` | `Plugin` | ✓ | ✓ |
 | `event_bus` | `event_bus` | — | `event_bus/ping` · `event_bus/subscribe` | `Plugin` | — | ✓ |
 | `fact_log` | `fact_log` | — | `fact_log/list` | `Plugin` | ✓ | ✓ |
 | `gateway` | `gateway` | <根>/gateway | `gateway/status` | `Plugin` | ✓ | ✓ |
@@ -121,4 +122,4 @@
 
 ---
 
-> 生成时间：2026-09-30 05:22:41 UTC · 源：`git rev-parse HEAD` = `a532e74`
+> 生成时间：2026-09-30 05:24:26 UTC · 源：`git rev-parse HEAD` = `58213d4`

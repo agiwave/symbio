@@ -366,6 +366,29 @@ manifest 由装配方补出，能力**默认到达用户**。停用（`plugin_en
 
 ---
 
+## 委派者插件（**可选 · 需显式装配**）
+
+`delegate` 给主会话（目标形态下**不持有工具**）提供三项只读事实——判定该不该开后台
+worker、能力目录折叠、worker 进展快照。与上面四个不同：它**不在系统默认装配清单**
+（`home::SYSTEM_EXTRA_PLUGINS`）里，需在 `<homedir>/delegate/PLUGIN.yml` 建目录才装上；
+停用（`plugin_enabled: false`）或 `enabled: false` 后两条路由都 `NotFound`，
+**会话与其余路由零影响**。判据与阈值由该 `PLUGIN.yml` 给出（可全关，出厂默认只认
+显式前缀 `/work `）。
+
+| 路径 | payload | 用途 |
+|------|------|------|
+| `delegate/decide` | `{ "text": "用户消息" }` | 判定这轮该不该开 worker，回 `{ dispatch: "chat" \| "work", reason }` |
+| `delegate/progress` | `{ "parent": "主会话 id" }`（可选） | 扫 worker 会话目录推出状态快照，回 `{ parent, count, workers, rendered }` |
+
+> `reason` 是**必填**的：它是"为什么这轮没动手"的唯一出口，也是漏判可申诉的依据。
+> `rendered` 为**空串**表示没有 worker（调用方据此不注入空标题，不是错误）。
+> 给 `parent` 就只报该主会话名下的 worker（注入自用），不给 = 全局（诊断面用）。
+>
+> 判定与快照的**纯函数**在插件内（`decide` / `digest` / `progress`），未接入会话
+> 提示词——注入点与时序见 [`docs/plan/06`](../plan/06-落地桥接方案.md) §10。
+
+---
+
 ## 退役路由索引
 
 **只登记「路径 → 现在去哪」，不写过程叙述**（决策与理由见 [DECISIONS.md](../DECISIONS.md)、

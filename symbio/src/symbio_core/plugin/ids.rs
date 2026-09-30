@@ -72,6 +72,8 @@ pub const PLUGIN_ID_PROJECTION: &str = "projection";
 pub const PLUGIN_ID_ACTOR: &str = "actor";
 /// Retrieval 插件工厂（可选的检索者：登记检索 Actor 行 + 一条只读召回路由 / S06）
 pub const PLUGIN_ID_RETRIEVAL: &str = "retrieval";
+/// Delegate 插件工厂（可选的委派者：判定是否开后台 worker 会话 + worker 进展快照 / R1）
+pub const PLUGIN_ID_DELEGATE: &str = "delegate";
 
 // 注：`SYSTEM_LEVEL_PROVIDERS`（「系统级插件不参与容器扫描」）不在这里——它只被
 // `plugins/composite` 一个模块消费，按 ADR-023 的依赖方判据已下沉到该模块。

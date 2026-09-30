@@ -130,7 +130,10 @@ export const LINE_BUDGET_BASELINES = {
   // 基线 9409 → 9449（+2 +34 +4）。
   // 2026-09-30：B5——`assembly/mod.rs` 的「与系统树清单的关系」由「逐项相同」改为
   // 「主体相同、系统侧另有四行」（指认 `home::SYSTEM_EXTRA_PLUGINS`）。基线 9449 → 9451（+2）。
-  "symbio/src/symbio_core": { maxLines: 9451, exts: [".rs"] },
+  // 2026-09-30：R1-a0 委派者——core 侧只多了 `PLUGIN_ID_DELEGATE` 常量与它在
+  // `plugin/mod.rs` 的重导出（**纯数据，无逻辑**：插件 id 登记本来就在 core，插件本体
+  // 一行都不在 core）。基线 9451 → 9454（+3）。
+  "symbio/src/symbio_core": { maxLines: 9454, exts: [".rs"] },
   "symbio/src/providers": { maxLines: 2732, exts: [".rs"] },
 
   // ── 宿主与工具层 ──
