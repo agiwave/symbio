@@ -21,6 +21,8 @@
 
 use async_trait::async_trait;
 
+use crate::symbio_core::{CapabilityMeta, TurnToolCallInfo};
+
 // ── 四层时延（[plan/01 §10](../../../../docs/plan/01-核心架构.md)，一等契约） ──
 
 /// 时延档位。**判据是时延，不是形式**——约束的是 `budget_ms`，不是"工具"这个名词。
@@ -169,6 +171,24 @@ impl std::fmt::Display for AdapterError {
     }
 }
 
+/// 一轮生成的**完整**产物（[`LlmAdapter::generate_turn`] 的返回类型）。
+///
+/// ## 为什么不是 `(String, u64)` 再加一条旁路
+///
+/// 工具调用与正文是**同一次响应**的两面（模型要么答话、要么要工具），分两处返回
+/// 必然要回答"哪个是权威"——而答案是两个都不是：**一次响应 = 一个产物**。
+/// `tool_calls` 复用 core 既有的 [`TurnToolCallInfo`]：那是 provider 边界上已在用的
+/// 类型，另立一个必然要写映射，两处形状必然漂移。
+#[derive(Debug, Clone, Default)]
+pub struct LlmTurn {
+    /// 本轮正文。纯工具调用轮为空——「没说话」与「没答」是两件事（后者是失败）。
+    pub text: String,
+    /// 模型**请求**的工具调用（尚未执行）；空 = 本轮收束（落 final）。
+    pub tool_calls: Vec<TurnToolCallInfo>,
+    /// adapter 边界实测耗时（毫秒）——与 [`LlmAdapter::generate_timed`] 同一口径。
+    pub cost_ms: u64,
+}
+
 /// 流式增量接收口（[`LlmAdapter::generate_streaming`] 的回调面）。
 ///
 /// `Send + Sync + 'static`——适配器在自己的执行任务上逐片回调，回调体可能
@@ -229,6 +249,73 @@ pub trait LlmAdapter: Send + Sync {
         sink.on_delta(&out.0);
         Ok(out)
     }
+
+    /// **工具通道**：工具清单下行、工具调用上行（v2 运行器做工具轮的前提）。
+    ///
+    /// 默认实现 = **忽略工具清单、`tool_calls` 恒空**——这是**诚实降级**而非失败：
+    /// 不支持工具的适配器照常答文本。没有这条通道，运行器在**类型上**就拿不到模型
+    /// 请求的工具调用（见 `docs/plan/10-工具轮v2化实施方案.md` §1）。
+    ///
+    /// 与 [`Self::generate_streaming`] 的关系：无工具时两者等价（默认实现即经它委托）
+    /// ——「有工具」与「无工具」不是两条执行路径，是同一条的两种入参。
+    async fn generate_turn(
+        &self,
+        tok: &FullModel,
+        prompt: &str,
+        _tools: &[CapabilityMeta],
+        sink: std::sync::Arc<dyn DeltaSink>,
+    ) -> Result<LlmTurn, AdapterError> {
+        let (text, cost_ms) = self.generate_streaming(tok, prompt, sink).await?;
+        Ok(LlmTurn {
+            text,
+            tool_calls: Vec::new(),
+            cost_ms,
+        })
+    }
+}
+
+/// 一次工具调用的**事实形状**（[`DispatchPort::dispatch`] 的元素类型）。
+///
+/// 刻意只装**结果**：调用方（运行器）要的是「拿什么回填给模型」与「要不要停」，
+/// 不是插件侧的节点形状。节点怎么建、往哪发，是分发方自己的事——core 不认识
+/// `ChatMessage` 的图语义（那在 `plugins/session`），只认识这段文本。
+#[derive(Debug, Clone, Default)]
+pub struct DispatchOutcome {
+    /// 对应的工具调用 id（回填给模型时锚定 ToolCall；取 `TurnToolCallInfo::id`）。
+    pub call_id: String,
+    /// 工具名（LLM 可见名）。
+    pub name: String,
+    /// 结果正文。**失败也是正文**——工具失败是信息性的，模型据此改道，不中断会话。
+    pub text: String,
+    /// 成功与否。仅供可观测/展示；**不改变**本轮终态（同 v1 的信息性策略）。
+    pub ok: bool,
+    /// 本次调用**收束于等待用户动作**（confirm / ask_user ⇒ 本轮停下等用户）。
+    /// 运行器据此**停止工具循环**（批 2 的恢复前提）。
+    pub needs_user_action: bool,
+}
+
+/// 工具分发端口（⑤ 的抽象面，与 [`LlmAdapter`] 并列的第二只端口）。
+///
+/// ## 为什么是 trait 而不是把分发搬进 core
+///
+/// 分发的**全部输入**都在插件侧：插件宿主（路由工具能力）、调用上下文（会话 id /
+/// 工作区 / 能力注册表）、转写（结果节点写进对话图）、会话目录（超长结果存档）。
+/// core 认识插件即违 E-009，而依赖方向由编译器保证——同 [`crate::symbio_core::ProviderLlmAdapter`]
+/// 留在 core 的那条理由（它只依赖 core 契约）。
+///
+/// ## 为什么实现方持有中止信号
+///
+/// 与 [`LlmAdapter`] 同形：中止是**调用的语境**，由构造方注入实现体，不由每轮传参。
+/// 分发方在批内逐工具检查 `abort.is_aborted()` 并提前收口（未执行的批尾必须定格，
+/// 否则前端留下永远转动的「运行中」）。
+#[async_trait]
+pub trait DispatchPort: Send + Sync {
+    /// 分发一轮的工具调用，返回每个调用的结果事实。
+    ///
+    /// `turn` 是本轮生成的完整产物——分发方需要它的 `text` 与 `tool_calls` 一起，
+    /// 才能把这一轮**落成一条完整的助手消息**（正文 + 工具调用节点），而不是只落
+    /// 工具结果（那样下一轮请求里模型看不到自己请求过什么）。
+    async fn dispatch(&self, turn: &LlmTurn) -> Vec<DispatchOutcome>;
 }
 
 /// 零 LLM 桩——S2 彩排与测试用。可注入**确定性失败**，用于演练兜底路径。

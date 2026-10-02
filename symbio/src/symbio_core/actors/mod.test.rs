@@ -2228,3 +2228,270 @@ mod turn_runner_tests {
         );
     }
 }
+
+// ── 工具轮（`run_with_tools`）：产物落格 + 结果回灌 + 等待用户停下 ──────────
+
+mod tool_round_tests {
+    use std::sync::{Arc, Mutex};
+
+    use crate::symbio_core::adapters::{
+        AdapterError, DeltaSink, FullModel, LatencyTier, LlmAdapter, LlmTurn, SilentDeltas,
+        TokenIssuer,
+    };
+    use crate::symbio_core::invariants::unresolved_turns;
+    use crate::symbio_core::store::Store;
+    use crate::symbio_core::{
+        check_all, CapabilityMeta, DispatchOutcome, DispatchPort, Entity, EventStore, Seq,
+        TurnInput, TurnRunner, TurnToolCallInfo, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL,
+        EVENT_USER_MESSAGE,
+    };
+
+    /// 假适配器：首次请求回一个工具调用，之后回正文；记录每次收到的 prompt。
+    struct ToolCallingLlm {
+        prompts: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl ToolCallingLlm {
+        fn new() -> Self {
+            Self {
+                prompts: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LlmAdapter for ToolCallingLlm {
+        fn model_id(&self) -> &str {
+            "tool-mock"
+        }
+        async fn generate(&self, _tok: &FullModel, _prompt: &str) -> Result<String, AdapterError> {
+            // 本用例只走工具通道（`generate_turn`）——留一个诚实的不支持。
+            Err(AdapterError::GenerationFailed("unused".into()))
+        }
+        async fn generate_turn(
+            &self,
+            _tok: &FullModel,
+            prompt: &str,
+            _tools: &[CapabilityMeta],
+            _sink: Arc<dyn DeltaSink>,
+        ) -> Result<LlmTurn, AdapterError> {
+            let round = {
+                let mut p = self.prompts.lock().unwrap();
+                p.push(prompt.to_string());
+                p.len()
+            };
+            if round == 1 {
+                Ok(LlmTurn {
+                    text: "我先查一下。".into(),
+                    tool_calls: vec![TurnToolCallInfo {
+                        id: Some("tc-1".into()),
+                        wire_id: Some("w-1".into()),
+                        name: Some("vdfs_read".into()),
+                        arguments: serde_json::json!({ "path": "a.md" }),
+                        parse_error: None,
+                    }],
+                    cost_ms: 3,
+                })
+            } else {
+                Ok(LlmTurn {
+                    text: "读到了。".into(),
+                    tool_calls: Vec::new(),
+                    cost_ms: 4,
+                })
+            }
+        }
+    }
+
+    /// 假分发方：把工具调用映射成一条结果事实；`pending` 决定是否收束于等用户。
+    struct FakeDispatch {
+        pending: bool,
+        rounds: Arc<Mutex<usize>>,
+    }
+
+    #[async_trait::async_trait]
+    impl DispatchPort for FakeDispatch {
+        async fn dispatch(&self, turn: &LlmTurn) -> Vec<DispatchOutcome> {
+            *self.rounds.lock().unwrap() += 1;
+            turn.tool_calls
+                .iter()
+                .map(|tc| DispatchOutcome {
+                    call_id: tc.id.clone().unwrap_or_default(),
+                    name: tc.name.clone().unwrap_or_default(),
+                    text: "文件内容：hello".into(),
+                    ok: true,
+                    needs_user_action: self.pending,
+                })
+                .collect()
+        }
+    }
+
+    fn tools() -> Vec<CapabilityMeta> {
+        vec![CapabilityMeta {
+            name: "vdfs_read".into(),
+            ..Default::default()
+        }]
+    }
+
+    fn input() -> TurnInput {
+        TurnInput {
+            turn: 0,
+            text: "读 a.md".into(),
+            tier: LatencyTier::Deep,
+            window_turns: None,
+        }
+    }
+
+    /// 工具轮：产物落 `artifact × asserted` 且溯源指向本轮用户格；final 只落一次；
+    /// **工具结果进了下一次请求**（回读 prompt——不变量与网格都证明不了这条）。
+    #[tokio::test]
+    async fn tool_round_lands_artifact_and_feeds_next_prompt() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = ToolCallingLlm::new();
+        let prompts = llm.prompts.clone();
+        let dispatch = FakeDispatch {
+            pending: false,
+            rounds: Arc::new(Mutex::new(0)),
+        };
+
+        let out = TurnRunner
+            .run_with_tools(
+                &store,
+                &llm,
+                &tok,
+                input(),
+                Arc::new(SilentDeltas),
+                &tools(),
+                Some(&dispatch),
+            )
+            .await
+            .expect("工具轮必答");
+
+        assert_eq!(out.text, "读到了。");
+        assert!(!out.fell_back && !out.aborted && !out.awaits_user);
+        assert_eq!(out.cost_ms, 7, "跨轮累加实测耗时（3 + 4）");
+        assert_eq!(*dispatch.rounds.lock().unwrap(), 1, "分发恰好一次");
+
+        // 两次请求；第二次带上了模型请求过的工具与它的结果。
+        let seen = prompts.lock().unwrap().clone();
+        assert_eq!(seen.len(), 2, "工具轮 + 收尾轮：{seen:?}");
+        assert!(
+            !seen[0].contains("文件内容"),
+            "第一次请求还没有结果：{}",
+            seen[0]
+        );
+        assert!(
+            seen[1].contains("vdfs_read") && seen[1].contains("文件内容：hello"),
+            "第二次请求要带上工具调用与结果：{}",
+            seen[1]
+        );
+
+        // 网格：用户格 + 产物格 + final 格（final 只一条——N3）。
+        let snapshot = store.range(Seq::new(0));
+        assert_eq!(snapshot.len(), 3, "{snapshot:?}");
+        assert!(
+            check_all(&snapshot).is_empty(),
+            "{:?}",
+            check_all(&snapshot)
+        );
+        assert_eq!(snapshot[0].kind, EVENT_USER_MESSAGE);
+        assert_eq!(snapshot[1].kind, EVENT_ARTIFACT_ADDED);
+        assert_eq!(snapshot[1].entity, Entity::Artifact);
+        assert_eq!(snapshot[1].verb, Verb::Asserted);
+        assert_eq!(snapshot[1].payload["tool"], "vdfs_read");
+        assert_eq!(snapshot[1].payload["text"], "文件内容：hello");
+        assert_eq!(
+            snapshot[1].produced_by,
+            Some(0),
+            "产物格溯源指向本轮用户格（S02 §3 的 caused_by 断言）"
+        );
+        assert_eq!(snapshot[2].kind, EVENT_ASSISTANT_FINAL);
+        assert_eq!(snapshot[2].payload["text"], "读到了。");
+    }
+
+    /// 收束于等待用户：运行器**停下且不落收束格**——本轮还没了结（网格少一格是
+    /// 诚实缺口，与中止同纪律），且这个缺口必须**可被判出**（C4 看得见它）。
+    #[tokio::test]
+    async fn pending_tool_stops_loop_without_closing_cell() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = ToolCallingLlm::new();
+        let dispatch = FakeDispatch {
+            pending: true,
+            rounds: Arc::new(Mutex::new(0)),
+        };
+
+        let out = TurnRunner
+            .run_with_tools(
+                &store,
+                &llm,
+                &tok,
+                input(),
+                Arc::new(SilentDeltas),
+                &tools(),
+                Some(&dispatch),
+            )
+            .await
+            .expect("等待用户不是失败");
+
+        assert!(out.awaits_user, "等待用户必须在结果里可见");
+        assert!(
+            !out.fell_back && !out.aborted,
+            "等待用户既不是失败也不是中止"
+        );
+        assert_eq!(*dispatch.rounds.lock().unwrap(), 1, "停下：不再发起第二轮");
+
+        let snapshot = store.range(Seq::new(0));
+        assert_eq!(
+            snapshot.len(),
+            2,
+            "用户格 + 产物格，**没有**收束格：{snapshot:?}"
+        );
+        assert_eq!(snapshot[1].kind, EVENT_ARTIFACT_ADDED);
+        assert!(
+            check_all(&snapshot).is_empty(),
+            "{:?}",
+            check_all(&snapshot)
+        );
+        assert_eq!(
+            unresolved_turns(&snapshot).len(),
+            1,
+            "缺口要可被判出（不是假装收束）"
+        );
+    }
+
+    /// 无分发方却收到工具调用 = 配置缺口：按失败诚实回报（兜底格），
+    /// 不假装成功、也不静默丢工具调用。
+    #[tokio::test]
+    async fn tool_call_without_dispatch_falls_back() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = ToolCallingLlm::new();
+
+        let out = TurnRunner
+            .run_with_tools(
+                &store,
+                &llm,
+                &tok,
+                input(),
+                Arc::new(SilentDeltas),
+                &tools(),
+                None,
+            )
+            .await
+            .expect("失败轮仍返回 Ok（轮次收束了）");
+
+        assert!(out.fell_back, "没有分发通道 ⇒ 兜底");
+        assert!(
+            out.text.contains("工具分发通道"),
+            "兜底话术说明原因：{}",
+            out.text
+        );
+        let snapshot = store.range(Seq::new(0));
+        assert_eq!(snapshot.len(), 2, "用户格 + 兜底格：{snapshot:?}");
+        assert_eq!(
+            snapshot[1].kind,
+            crate::symbio_core::EVENT_ASSISTANT_FALLBACK
+        );
+    }
+}

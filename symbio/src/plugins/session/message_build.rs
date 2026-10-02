@@ -133,45 +133,81 @@ pub fn llm_build_assistant_messages(
         } else {
             child_ids.text.clone()
         };
-        msgs.push(ChatMessage {
-            id: text_child_id.unwrap_or_else(llm_short_id),
-            parent_id: Some(id.to_string()),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Text),
-            content: Some(MessageContent::Text(content.into())),
-            status: Some(MessageStatus::Completed),
-            timestamp: Some(timestamp),
-            response_id: rid,
-            ..Default::default()
-        });
+        msgs.push(llm_build_text_node(
+            id,
+            content,
+            rid,
+            text_child_id.unwrap_or_else(llm_short_id),
+        ));
     }
 
     // ── ToolCall 消息（parent_id=turn_id，组合节点）──────────────────────
-    // ToolCall 组合节点自身携带请求参数（content = JSON 文本），不设独立的请求子节点。
-    // `id` 是节点 id（与流式帧一致），provider 的 wire id 存 `tool_call_id`。
-    for tc in tool_calls {
-        let tc_id = tc.id.clone().unwrap_or_else(llm_short_id);
-        // 解析失败时落库**残破原文**而非占位 `{}`：存储层保真，事后能看出模型
-        // 究竟发了什么（截断在哪一字符），而不是留下一个看似合法的假空参数。
-        let args_text = match &tc.parse_error {
-            Some(raw) => raw.clone(),
-            None => tc.arguments.to_string(),
-        };
-        msgs.push(ChatMessage {
-            id: tc_id.clone(),
-            parent_id: Some(id.to_string()),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::ToolCall),
-            name: tc.name.clone(),
-            content: Some(MessageContent::Text(args_text)),
-            status: Some(MessageStatus::Completed),
-            timestamp: Some(timestamp),
-            tool_call_id: tc.wire_id.clone(),
-            ..Default::default()
-        });
-    }
+    msgs.extend(llm_build_tool_call_nodes(id, tool_calls));
 
     msgs
+}
+
+/// 助手**正文**子节点（`msg_type = Text`，`parent_id = Turn 根`）。
+///
+/// `id` 由调用方给定：流式期已广播的节点 id **必须复用**（见 [`TurnStreamChildIds`]），
+/// 否则同一段正文在存储层与流式层是两个身份。工具轮的中途正文也走本函数——分发方
+/// 拿流式节点的 id 把这一轮**定格**成一条完整消息（见 `plugins/session/v2_tools.rs`）。
+pub fn llm_build_text_node(
+    parent_id: &str,
+    content: &str,
+    rid: Option<String>,
+    id: String,
+) -> ChatMessage {
+    ChatMessage {
+        id,
+        parent_id: Some(parent_id.to_string()),
+        role: Some(MessageRole::Assistant),
+        msg_type: Some(MessageType::Text),
+        content: Some(MessageContent::Text(content.into())),
+        status: Some(MessageStatus::Completed),
+        timestamp: Some(crate::symbio_core::clock_now_ms()),
+        response_id: rid,
+        ..Default::default()
+    }
+}
+
+/// 助手**工具调用**子节点组（`msg_type = ToolCall`，`parent_id = Turn 根`）。
+///
+/// ToolCall 组合节点自身携带请求参数（`content` = JSON 文本），不设独立的请求子节点。
+/// `id` 是节点 id（与流式帧一致），provider 的 wire id 存 `tool_call_id`。
+///
+/// 单点定义：v1 的落库视图（[`llm_build_assistant_messages`]）与 v2 的分发方
+/// （`plugins/session/v2_tools.rs`）都经此构造——两处各写一份，工具卡片的形状
+/// 迟早会分叉（前端读的是同一套字段）。
+pub fn llm_build_tool_call_nodes(
+    parent_id: &str,
+    tool_calls: &[TurnToolCallInfo],
+) -> Vec<ChatMessage> {
+    let timestamp = crate::symbio_core::clock_now_ms();
+    tool_calls
+        .iter()
+        .map(|tc| {
+            let tc_id = tc.id.clone().unwrap_or_else(llm_short_id);
+            // 解析失败时落库**残破原文**而非占位 `{}`：存储层保真，事后能看出模型
+            // 究竟发了什么（截断在哪一字符），而不是留下一个看似合法的假空参数。
+            let args_text = match &tc.parse_error {
+                Some(raw) => raw.clone(),
+                None => tc.arguments.to_string(),
+            };
+            ChatMessage {
+                id: tc_id,
+                parent_id: Some(parent_id.to_string()),
+                role: Some(MessageRole::Assistant),
+                msg_type: Some(MessageType::ToolCall),
+                name: tc.name.clone(),
+                content: Some(MessageContent::Text(args_text)),
+                status: Some(MessageStatus::Completed),
+                timestamp: Some(timestamp),
+                tool_call_id: tc.wire_id.clone(),
+                ..Default::default()
+            }
+        })
+        .collect()
 }
 
 /// 构造工具执行结果消息（role: Tool，msg_type: Text，parent_id 指向 tool_call）。

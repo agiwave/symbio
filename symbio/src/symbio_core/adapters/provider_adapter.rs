@@ -17,10 +17,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use super::{AdapterError, DeltaSink, FullModel, LlmAdapter, SilentDeltas};
+use super::{AdapterError, DeltaSink, FullModel, LlmAdapter, LlmTurn, SilentDeltas};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
+use crate::symbio_core::CapabilityMeta;
 use crate::symbio_core::ExecAbortSignal;
 use crate::symbio_core::ExecEnv;
 use crate::symbio_core::ExecEventSink;
@@ -124,12 +125,39 @@ impl LlmAdapter for ProviderLlmAdapter {
 
     /// 流式生成：经帧桥把 SSE 增量逐片转给 `sink`；返回值 = 全文 + 实测耗时
     ///（收束语义与流式与否无关）。
+    ///
+    /// **无工具 = [`Self::generate_turn`] 的入参为空的同一路径**（`&[]`）：不另写
+    /// 一条请求构造。「空文本」在这里是**失败**（调用方拿到 Ok(空串) 会把「模型没答」
+    /// 当「答了空话」落成 final）——判定归这里，因为无工具轮没有别的产出可指望。
     async fn generate_streaming(
         &self,
-        _tok: &FullModel,
+        tok: &FullModel,
         prompt: &str,
         sink: Arc<dyn DeltaSink>,
     ) -> Result<(String, u64), AdapterError> {
+        let turn = self.generate_turn(tok, prompt, &[], sink).await?;
+        if turn.text.trim().is_empty() {
+            // 空文本不是成功：调用方拿到 Ok(空串) 会把「模型没答」当「答了空话」
+            // 落成 final——必须走兜底路径（I3），所以这里按失败返回。
+            return Err(AdapterError::GenerationFailed(
+                "model returned empty text".into(),
+            ));
+        }
+        Ok((turn.text, turn.cost_ms))
+    }
+
+    /// 工具通道：工具清单下行 + 工具调用上行。
+    ///
+    /// **空文本在工具轮上是合法的**（纯工具调用轮不说话）——所以这里不做空文本
+    /// 判定，判定归「本轮收束」的那一侧（`TurnRunner::run_with_tools`）：只有
+    /// 「无工具调用 + 空文本」才是失败。
+    async fn generate_turn(
+        &self,
+        _tok: &FullModel,
+        prompt: &str,
+        tools: &[CapabilityMeta],
+        sink: Arc<dyn DeltaSink>,
+    ) -> Result<LlmTurn, AdapterError> {
         let started = std::time::Instant::now();
         let message = ChatMessage {
             id: llm_short_id(),
@@ -139,6 +167,8 @@ impl LlmAdapter for ProviderLlmAdapter {
         };
         // 流式出口：转写帧经桥转成正文增量（桥不落盘——帧面只进回调）；
         // 中止信号直通调用方（会话轮的中止语义不因换执行路径而丢）。
+        // 工具调用帧不进 v2 文本面：工具节点的构造权在分发方（`DispatchPort` 实现），
+        // 由它按**同一份** `tool_calls` 建节点——两处各建一份必然出现重复卡片。
         let env = ExecEnv::new(
             ExecEventSink::direct(Arc::new(DeltaBridge {
                 sink,
@@ -148,20 +178,23 @@ impl LlmAdapter for ProviderLlmAdapter {
         );
         let output = self
             .provider
-            .execute_turn(self.system_prompt(), &[message], &[], &llm_short_id(), &env)
+            .execute_turn(
+                self.system_prompt(),
+                &[message],
+                tools,
+                &llm_short_id(),
+                &env,
+            )
             .await
             .map_err(|e| match e {
                 // 中止不压成失败：调用方据此**不落兜底格**（ADR-045 同源纪律）。
                 PluginError::Aborted => AdapterError::Aborted,
                 other => AdapterError::GenerationFailed(format!("{other}")),
             })?;
-        if output.text.trim().is_empty() {
-            // 空文本不是成功：调用方拿到 Ok(空串) 会把「模型没答」当「答了空话」
-            // 落成 final——必须走兜底路径（I3），所以这里按失败返回。
-            return Err(AdapterError::GenerationFailed(
-                "model returned empty text".into(),
-            ));
-        }
-        Ok((output.text, started.elapsed().as_millis() as u64))
+        Ok(LlmTurn {
+            text: output.text,
+            tool_calls: output.tool_calls,
+            cost_ms: started.elapsed().as_millis() as u64,
+        })
     }
 }

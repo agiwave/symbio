@@ -128,7 +128,17 @@ pub(crate) async fn prepare_turn_inputs(
 
     // 主动压缩工具：仅当工具压缩启用时暴露给模型（独立于自动压缩开关）。
     // 执行不走 CapabilityVisitor 分发，由 `close_turn` 拦截处理（需要编排器内部链路）。
-    if req.enable_compact_tool {
+    //
+    // **full 档不注入**：拦截点在 `close_turn` 的工具分发分支，而 full 档的轮次由
+    // v2 运行器执行、工具经 `DispatchPort` 分发——那条路没有压缩链路，模型真调了
+    // 只会得到一个「未知工具」。与其把一个必然失败的工具摆给模型，不如不摆
+    // （v2 侧的压缩链路是独立一批，见 `docs/plan/10-工具轮v2化实施方案.md` §5）。
+    if req.enable_compact_tool
+        && !matches!(
+            context.session.v2_mode(),
+            crate::plugins::session::config::V2Mode::Full
+        )
+    {
         tools.push(context::context_compact_tool_meta());
     }
 

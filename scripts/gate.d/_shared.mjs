@@ -397,7 +397,18 @@ export const BASELINE = {
   //      → `AdapterError::Aborted`，v2_exec 上抛 `PluginError::Aborted`，
   //      chat_loop 走独立 Aborted 出口。验收 = core 中止轮（只剩用户格 +
   //      C4 判得出缺口）/ session 中止轮（Aborted 上抛 + 网格一格）。
-  rustTests: 1209,
+  // 1213（工具轮 v2 化，2026-10-02）——`1209 → 1213`，**+4**。
+  //      工具通道 / 分发通道 / `artifact.added` 格子三处契约补齐，v2 运行器
+  //      在类型上做得了工具轮：core 新增 LlmTurn + DispatchPort/DispatchOutcome +
+  //      EVENT_ARTIFACT_ADDED；`run_with_tools` 工具循环（产物落格带溯源 /
+  //      中途正文定格切节点 / 等待用户不落收束格）；session 侧
+  //      `SessionDispatchPort` 复用 `process_tool_calls_async`（工具节点与结果
+  //      仍写进同一份对话图），full 档放开 `tools.is_empty()`。
+  //      （端口名不带 `Tool` 前缀：`Tool*` 是 `capability` 域的子命名空间，
+  //      两只端口与 `LlmAdapter` 同域 —— core-naming-audit N-003 的判据。）
+  //      验收 = core 工具轮 3 例（产物格 + 溯源 / 等待用户不落格 / 无分发方兜底）
+  //      + e2e t26（MCP echo → `/_requests` 回读结果进下一次请求 + WAL 溯源）。
+  rustTests: 1213,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

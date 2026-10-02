@@ -49,9 +49,8 @@ pub(crate) fn record(
 ) {
     // 总开关（`v2_mode`，ADR-045 过渡期的切换档位）：`off` 档网格零增长
     // （用户关的是数据源，不是对话）。`bridge` 档：v1 轮次全部经此转写；
-    // `full` 档：**原生轮**不经此（调用侧以 `TurnState::v2_executed` 拦下
-    // ——原生路径自记账），**回退轮**（有工具挂载）照常转写。检查在取
-    // 目录之前：关掉时连 WAL 的打开开销都不该有。
+    // `full` 档：轮次由 v2 运行器原生记账，调用侧以 `TurnState::v2_executed`
+    // 拦下，不经此转写。检查在取目录之前：关掉时连 WAL 的打开开销都不该有。
     if matches!(session.v2_mode(), super::config::V2Mode::Off) {
         return;
     }

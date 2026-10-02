@@ -55,6 +55,17 @@ pub const EVENT_ASSISTANT_FALLBACK: &str = "chat.assistant.fallback";
 /// 载荷携带可序列化的 checkpoint 状态。落在 `thread × progressed`。
 pub const EVENT_THREAD_CHECKPOINT: &str = "thread.checkpoint";
 
+// ── 产物格子（S02 §3，[roadmap/S02-工具调用与产物.md](../../../../docs/plan/roadmap/S02-工具调用与产物.md)）──
+//
+// 工具**结果**是产物事实：模型请求了工具、工具产出了这段东西。工具调用**本身**
+// 不单独占格（同一件事两格必然漂移）；`produced_by` 指向**本轮用户格**，即
+// 「这个产物是本轮用户请求的后果」——S02 §3 的验收断言正是 `caused_by` 指向发起
+// 它的 `task/turn`。
+
+/// 产物产出：一次工具调用的**结果**（载荷 `{ tool, text }`）。
+/// 落在 `artifact × asserted`（网格坐标见 [plan/01 §6](../../../../docs/plan/01-核心架构.md)）。
+pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
+
 // ── 记忆格子（S5，[roadmap/S06 §3](../../../../docs/plan/roadmap/S06-长期记忆与语义检索.md)）────
 
 /// 编码：学到的语义内容 + embedding（`payload: { content, tag, vec }`）。

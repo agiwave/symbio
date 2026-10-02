@@ -207,13 +207,21 @@ impl Reasoner {
         events: &[Event],
         sink: std::sync::Arc<dyn crate::symbio_core::adapters::DeltaSink>,
     ) -> Result<(String, u64), AdapterError> {
-        // prompt 从**转写投影**出（多轮带历史，单轮裸文本与旧形态等价）——
-        // 历史来自同一份事实源，不另存副本（ADR-044 同族纪律）。
-        let prompt = crate::symbio_core::transcript()
+        let prompt = Self::render_prompt(events);
+        llm.generate_streaming(tok, &prompt, sink).await
+    }
+
+    /// prompt 的**唯一渲染点**：事件切片 → 转写投影 → 单条 prompt。
+    ///
+    /// prompt 从**转写投影**出（多轮带历史，单轮裸文本与旧形态等价）——历史来自
+    /// 同一份事实源，不另存副本（ADR-044 同族纪律）。工具轮需要在本轮内**追加**
+    /// 工具交换（网格里还没有那部分历史），因此渲染被单独提出来供运行器复用：
+    /// 一条基线 + 就地累积的交换，而不是两条渲染路径。
+    pub fn render_prompt(events: &[Event]) -> String {
+        crate::symbio_core::transcript()
             .apply(events, i64::MAX, crate::symbio_core::Budget::generous())
             .value
-            .to_prompt();
-        llm.generate_streaming(tok, &prompt, sink).await
+            .to_prompt()
     }
 }
 
@@ -758,6 +766,11 @@ pub struct TurnOutcome {
     /// `text` 为空。与 `fell_back` 互斥（失败要落兜底格，中止不落），因此
     /// **绝不进兜底分子**（兜底率是失败的指标）。
     pub aborted: bool,
+    /// 本轮**收束于等待用户动作**（工具报了 `failure_kind = pending`，如 confirm /
+    /// ask_user）：运行器停止工具循环并**不落收束格**——本轮尚未了结，等用户答完
+    /// 才续（恢复是批 2 的能力）。与 `aborted` 同样是「网格少一格的诚实缺口」，
+    /// 但原因不同：一个是被放弃，一个是还没完。
+    pub awaits_user: bool,
 }
 
 /// 对话窗口：保留 turn 号落在「当前轮往前数 `keep` 个」之内的事件
@@ -813,6 +826,9 @@ impl TurnRunner {
 
     /// 流式版：生成增量逐片经 `sink` 送出（v2 执行路径的 UI 帧源）；
     /// 落格语义与 [`Self::run`] 完全同一条路径。
+    ///
+    /// 无工具轮 = [`Self::run_with_tools`] 的**入参为空的同一路径**（工具清单空、
+    /// 无分发方）——「有工具」与「无工具」不是两条执行路径。
     pub async fn run_streaming<S>(
         &self,
         store: &S,
@@ -820,6 +836,53 @@ impl TurnRunner {
         tok: &FullModel,
         input: TurnInput,
         sink: std::sync::Arc<dyn crate::symbio_core::adapters::DeltaSink>,
+    ) -> Result<TurnOutcome, crate::symbio_core::store::AppendError>
+    where
+        S: Store<Event = Event>,
+    {
+        self.run_with_tools(store, llm, tok, input, sink, &[], None)
+            .await
+    }
+
+    /// 带工具的流式轮：**工具清单下行、工具调用上行、分发、产物落格**，直到模型
+    /// 不再请求工具为止。
+    ///
+    /// ## 网格记账
+    ///
+    /// - 用户消息：`turn × opened`（`user.message`），一次；
+    /// - 每轮工具调用：**不单独占格**——工具结果才是产物事实，落
+    ///   `artifact × asserted`（`artifact.added`，载荷 `{ tool, text }`），
+    ///   `produced_by` 指向**本轮用户格**（S02 §3 的 `caused_by` 断言）；
+    /// - 收束：`chat.assistant.final`（或失败的兜底格）——**只落一次**。
+    ///
+    /// ## prompt 的两段
+    ///
+    /// 基线由 [`Reasoner::render_prompt`] 从转写投影出（历史来自事实源）；本轮内
+    /// 已发生的工具交换由本函数**就地累积**追加——那部分历史此刻还读不回来
+    /// （`transcript` 投影消费 `artifact.added` 是批 3），而模型必须看到自己请求过
+    /// 什么、拿到了什么，否则第二轮会重复调用同一个工具。
+    ///
+    /// ## 中止 / 等待用户
+    ///
+    /// 两者都**不落收束格**（网格少一格是诚实缺口，ADR-045 同源），差别在原因：
+    /// 中止是被放弃（`aborted`），等待用户是还没完（`awaits_user`，批 2 续跑）。
+    ///
+    /// ## 为什么参数多到要 `allow`
+    ///
+    /// 七个参数**各自是一个不同的端口**（事实源 / 生成 / 令牌 / 输入 / 流式出口 /
+    /// 工具清单 / 分发通道），没有两个属于同一概念——打包成一个结构体只是把
+    /// 「七个端口」改名叫「一个结构体 + 七个字段」，调用方仍要逐个填，
+    /// 却多出一层只为过 lint 而生的壳。
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_with_tools<S>(
+        &self,
+        store: &S,
+        llm: &dyn LlmAdapter,
+        tok: &FullModel,
+        input: TurnInput,
+        sink: std::sync::Arc<dyn crate::symbio_core::adapters::DeltaSink>,
+        tools: &[crate::symbio_core::CapabilityMeta],
+        dispatch: Option<&dyn crate::symbio_core::DispatchPort>,
     ) -> Result<TurnOutcome, crate::symbio_core::store::AppendError>
     where
         S: Store<Event = Event>,
@@ -851,76 +914,214 @@ impl TurnRunner {
             None => &full_snapshot,
             Some(keep) => window_by_turn(&full_snapshot, turn, keep),
         };
+        // prompt 基线：转写投影渲染一次（本轮内不变——本轮的新事实还没进投影）。
+        let base_prompt = Reasoner::render_prompt(snapshot);
 
-        // 2. 生成（实测耗时在 adapter 边界取得；失败路径的耗时从调用起点算）。
         let started = std::time::Instant::now();
-        match Reasoner.reply_streaming(llm, tok, snapshot, sink).await {
-            Ok((reply, cost_ms)) => {
-                // 3a. final 落格：溯源指向本轮用户消息（N5），实测成本随事件入账。
-                store.append(
-                    Event::pending(
-                        format!("f-{turn}"),
-                        EVENT_ASSISTANT_FINAL,
-                        Entity::Turn,
-                        Verb::Closed,
+        // 本轮内已发生的工具交换（调用 + 结果），供下一轮 prompt 追加。
+        let mut exchange = String::new();
+        // 实测耗时：跨轮累加（一次用户轮可能有多次 LLM 请求，ADR-044 的实测口径）。
+        let mut cost_ms = 0u64;
+        // 产物格的事件 id 需要在本轮内唯一（同一工具可被调用多次）。
+        let mut artifact_no = 0u64;
+
+        loop {
+            let prompt = if exchange.is_empty() {
+                base_prompt.clone()
+            } else {
+                format!("{base_prompt}\n{exchange}")
+            };
+
+            // 2. 生成（实测耗时在 adapter 边界取得；失败路径的耗时从调用起点算）。
+            match llm.generate_turn(tok, &prompt, tools, sink.clone()).await {
+                Ok(rt) => {
+                    cost_ms += rt.cost_ms;
+
+                    // 2a. 本轮不再请求工具 ⇒ 收束（落 final）。
+                    if rt.tool_calls.is_empty() {
+                        if rt.text.trim().is_empty() {
+                            // 空文本 + 无工具调用 = 模型什么也没答。这是**失败**：
+                            // 落成 final 会把「没答」记成「答了空话」（I3 的到点必答
+                            // 要求有一句话，兜底话术承担它）。
+                            let cost = started.elapsed().as_millis() as u64;
+                            return self
+                                .append_fallback(
+                                    store,
+                                    turn,
+                                    user_seq,
+                                    "model returned empty text",
+                                    cost,
+                                )
+                                .await;
+                        }
+                        store.append(
+                            Event::pending(
+                                format!("f-{turn}"),
+                                EVENT_ASSISTANT_FINAL,
+                                Entity::Turn,
+                                Verb::Closed,
+                                turn,
+                                "agent:main",
+                            )
+                            .with_produced_by(user_seq)
+                            .with_cost_ms(cost_ms)
+                            .with_payload(serde_json::json!({
+                                "text": rt.text,
+                                "model": llm.model_id(),
+                            })),
+                        )?;
+                        return Ok(TurnOutcome {
+                            turn,
+                            text: rt.text,
+                            cost_ms,
+                            fell_back: false,
+                            aborted: false,
+                            awaits_user: false,
+                        });
+                    }
+
+                    // 2b. 模型请求了工具 ⇒ 分发。没有分发方却收到工具调用是**配置
+                    //     缺口**（无工具轮不该出现工具调用），按失败诚实回报。
+                    let Some(dispatch) = dispatch else {
+                        let cost = started.elapsed().as_millis() as u64;
+                        return self
+                            .append_fallback(
+                                store,
+                                turn,
+                                user_seq,
+                                "模型请求了工具，但本轮没有工具分发通道",
+                                cost,
+                            )
+                            .await;
+                    };
+                    let outcomes = dispatch.dispatch(&rt).await;
+
+                    // 2c. 产物落格：每条工具结果一格，溯源指向本轮用户格。
+                    for outcome in &outcomes {
+                        store.append(
+                            Event::pending(
+                                format!("a-{turn}-{artifact_no}"),
+                                crate::symbio_core::EVENT_ARTIFACT_ADDED,
+                                Entity::Artifact,
+                                Verb::Asserted,
+                                turn,
+                                "agent:main",
+                            )
+                            .with_produced_by(user_seq)
+                            .with_payload(serde_json::json!({
+                                "tool": outcome.name,
+                                "text": outcome.text,
+                            })),
+                        )?;
+                        artifact_no += 1;
+                    }
+
+                    // 2d. 收束于等待用户 ⇒ 停止循环且**不落收束格**（见函数文档）。
+                    if outcomes.iter().any(|o| o.needs_user_action) {
+                        return Ok(TurnOutcome {
+                            turn,
+                            text: rt.text,
+                            cost_ms,
+                            fell_back: false,
+                            aborted: false,
+                            awaits_user: true,
+                        });
+                    }
+
+                    // 2e. 把这一轮交换追加进 prompt，继续下一轮。
+                    exchange.push_str(&render_tool_exchange(&rt, &outcomes));
+                }
+                Err(AdapterError::Aborted) => {
+                    // 3a. 中止：**不落任何收束格**——用户消息已入格，少一格是诚实
+                    // 的缺口（ADR-045 同一纪律）。兜底格是**失败**的形状（`fell_back`
+                    // 专有），中止落了它就等于把「用户按了停止」记成「模型答不出」，
+                    // 还会抬高兜底率——那是假象。
+                    let cost = started.elapsed().as_millis() as u64;
+                    return Ok(TurnOutcome {
                         turn,
-                        "agent:main",
-                    )
-                    .with_produced_by(user_seq)
-                    .with_cost_ms(cost_ms)
-                    .with_payload(serde_json::json!({
-                        "text": reply,
-                        "model": llm.model_id(),
-                    })),
-                )?;
-                Ok(TurnOutcome {
-                    turn,
-                    text: reply,
-                    cost_ms,
-                    fell_back: false,
-                    aborted: false,
-                })
-            }
-            Err(AdapterError::Aborted) => {
-                // 3a'. 中止：**不落任何收束格**——用户消息已入格，少一格是诚实
-                // 的缺口（ADR-045 同一纪律）。兜底格是**失败**的形状（`fell_back`
-                // 专有），中止落了它就等于把「用户按了停止」记成「模型答不出」，
-                // 还会抬高兜底率——那是假象。
-                let cost_ms = started.elapsed().as_millis() as u64;
-                Ok(TurnOutcome {
-                    turn,
-                    text: String::new(),
-                    cost_ms,
-                    fell_back: false,
-                    aborted: true,
-                })
-            }
-            Err(e) => {
-                // 3b. 兜底落格（I3：到点必答——失败也是一句话，不是静默）。
-                let cost_ms = started.elapsed().as_millis() as u64;
-                store.append(
-                    Event::pending(
-                        format!("fb-{turn}"),
-                        EVENT_ASSISTANT_FALLBACK,
-                        Entity::Turn,
-                        Verb::Closed,
-                        turn,
-                        "agent:main",
-                    )
-                    .with_produced_by(user_seq)
-                    .with_cost_ms(cost_ms)
-                    .with_payload(serde_json::json!({ "why": e.to_string() })),
-                )?;
-                Ok(TurnOutcome {
-                    turn,
-                    text: e.to_string(),
-                    cost_ms,
-                    fell_back: true,
-                    aborted: false,
-                })
+                        text: String::new(),
+                        cost_ms: cost,
+                        fell_back: false,
+                        aborted: true,
+                        awaits_user: false,
+                    });
+                }
+                Err(e) => {
+                    // 3b. 兜底落格（I3：到点必答——失败也是一句话，不是静默）。
+                    let cost = started.elapsed().as_millis() as u64;
+                    return self
+                        .append_fallback(store, turn, user_seq, &e.to_string(), cost)
+                        .await;
+                }
             }
         }
     }
+
+    /// 兜底落格（I3）的唯一构造点：失败也是一句话。
+    async fn append_fallback<S>(
+        &self,
+        store: &S,
+        turn: u64,
+        user_seq: u64,
+        why: &str,
+        cost_ms: u64,
+    ) -> Result<TurnOutcome, crate::symbio_core::store::AppendError>
+    where
+        S: Store<Event = Event>,
+    {
+        store.append(
+            Event::pending(
+                format!("fb-{turn}"),
+                EVENT_ASSISTANT_FALLBACK,
+                Entity::Turn,
+                Verb::Closed,
+                turn,
+                "agent:main",
+            )
+            .with_produced_by(user_seq)
+            .with_cost_ms(cost_ms)
+            .with_payload(serde_json::json!({ "why": why })),
+        )?;
+        Ok(TurnOutcome {
+            turn,
+            text: why.to_string(),
+            cost_ms,
+            fell_back: true,
+            aborted: false,
+            awaits_user: false,
+        })
+    }
+}
+
+/// 把一轮工具交换渲染成 prompt 片段（调用 + 结果），供下一轮追加。
+///
+/// 形状与 `transcript` 投影的平铺口径同族（`用户:` / `助手:` 前缀），使模型看到
+/// 的是一段连贯的对话流，而不是另一种协议。
+fn render_tool_exchange(
+    turn: &crate::symbio_core::adapters::LlmTurn,
+    outcomes: &[crate::symbio_core::DispatchOutcome],
+) -> String {
+    let mut out = String::new();
+    if !turn.text.trim().is_empty() {
+        out.push_str("助手: ");
+        out.push_str(turn.text.trim());
+        out.push('\n');
+    }
+    for call in &turn.tool_calls {
+        out.push_str("助手请求工具: ");
+        out.push_str(call.name.as_deref().unwrap_or("<unnamed>"));
+        out.push(' ');
+        out.push_str(&call.arguments.to_string());
+        out.push('\n');
+    }
+    for outcome in outcomes {
+        out.push_str("工具结果(");
+        out.push_str(&outcome.name);
+        out.push_str("): ");
+        out.push_str(&outcome.text);
+        out.push('\n');
+    }
+    out
 }
 
 #[cfg(test)]

@@ -439,20 +439,18 @@ pub async fn run_chat_loop(
         }
 
         // ── 步骤 4：LLM 调用（唯一发起处）────────────────────────────────────
-        // **full 档分流**（切换日本体）：v2_mode = Full 且本轮无工具挂载 ⇒ v2
-        // 运行器执行——事实原生入格、prompt 从转写出、流式经 UiBridge 回同一
-        // 出口；收口（步骤 5-7）两条路共享。本轮一旦进入 v2 分支，网格记账归
-        // v2 路径所有（`v2_executed` = true）：成功原生入格，失败也已尽力入格
-        // （I3 兜底格 + Failed 出口），收束不再经桥补记——同一轮两份记账是
-        // 假象，不是冗余；重试即新一轮（N3 靠构造成立）。有工具挂载的轮次
-        // 回退 v1 并照常转写（工具轮 v2 化是独立一批）。
-        let v2_takeover = matches!(context.session.v2_mode(), super::config::V2Mode::Full)
-            && inputs.tools.is_empty();
+        // **full 档分流**（切换日本体）：v2_mode = Full ⇒ v2 运行器执行——事实原生
+        // 入格、prompt 从转写出、流式经 UiBridge 回同一出口、工具轮经 `DispatchPort`
+        // 契约分发（工具节点与结果仍写进同一份对话图）；收口（步骤 5-7）两条路共享。
+        // 本轮一旦进入 v2 分支，网格记账归 v2 路径所有（`v2_executed` = true）：
+        // 成功原生入格，失败也已尽力入格（I3 兜底格 + Failed 出口），收束不再经桥
+        // 补记——同一轮两份记账是假象，不是冗余；重试即新一轮（N3 靠构造成立）。
+        let v2_takeover = matches!(context.session.v2_mode(), super::config::V2Mode::Full);
         if v2_takeover {
             turn.v2_executed = true;
         }
         let out = if v2_takeover {
-            // 本轮用户文本：轮首已入列的最后一条用户消息（无工具 ⇒ 必有）。
+            // 本轮用户文本：轮首已入列的最后一条用户消息。
             let user_text = context
                 .messages
                 .iter()
@@ -464,21 +462,29 @@ pub async fn run_chat_loop(
                 })
                 .unwrap_or_default();
             let v2_started = std::time::Instant::now();
-            match super::v2_exec::execute_tool_free_turn(super::v2_exec::ToolFreeTurn {
+            match super::v2_exec::execute_turn(super::v2_exec::V2Turn {
                 session: &context.session,
                 provider: orchestrator.provider.clone(),
+                parent: orchestrator.parent.clone(),
+                session_dir: orchestrator.session_dir.clone(),
+                ctx: ctx.clone(),
                 system_prompt: &inputs.system_prompt,
                 abort: turn.abort.clone(),
                 root_id: &inputs.root_id,
                 sink: &sink,
                 user_text: &user_text,
                 window_turns: context.session.context_window(),
+                tools: &inputs.tools,
             })
             .await
             {
-                Ok(out) => {
+                Ok(res) => {
                     turn.model_elapsed_ms += v2_started.elapsed().as_millis() as u64;
-                    out
+                    // v2 原生产生的消息（工具轮：助手中途正文 + ToolCall + 工具结果）
+                    // 并入落库权威镜像——`persist_messages` 只写这份的尾部增量，
+                    // 不并入就只看得见、不落库（重启即丢）。
+                    context.messages.extend(res.messages);
+                    res.output
                 }
                 Err(PluginError::Aborted) => {
                     // 与 v1 的中止出口同形：在途 Turn 交消费循环落库为

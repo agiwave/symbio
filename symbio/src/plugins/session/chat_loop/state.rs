@@ -113,7 +113,7 @@ pub(crate) struct TurnState {
     /// 实测与判据同源）。在「LLM 调用唯一发起处」用 `Instant` 累计——含工具轮
     /// 的多次请求；随轮次收束经 v2 事实桥写进事件网格的 `cost_ms`。
     pub(crate) model_elapsed_ms: u64,
-    /// 本轮是否已由 v2 路径**原生**入格（full 档无工具轮）。
+    /// 本轮是否已由 v2 路径**原生**入格（full 档）。
     ///
     /// `true` ⇒ 收束时**跳过** v2 桥转写——原生路径已把 user/final/fallback
     /// 全部记账，同一轮再转写一份就是重复格（v1 行为不变：bridge/off 档恒

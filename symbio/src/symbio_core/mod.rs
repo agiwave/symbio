@@ -58,18 +58,21 @@ pub use actors::{
 };
 // 事件名字表（名字是数据，单点定义）。
 pub use event::{
-    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_CONATION_EXPRESSED,
-    EVENT_CONTROL_OPENED, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,
-    EVENT_MEMORY_RECALLED, EVENT_SYSTEM_HEALTH, EVENT_SYSTEM_TRIGGERED, EVENT_TASK_ASSERTED,
-    EVENT_TASK_HELD, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
-    EVENT_THREAD_CHECKPOINT, EVENT_USER_MESSAGE,
+    EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
+    EVENT_CONATION_EXPRESSED, EVENT_CONTROL_OPENED, EVENT_MEMORY_CONSOLIDATED,
+    EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED, EVENT_SYSTEM_HEALTH,
+    EVENT_SYSTEM_TRIGGERED, EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
+    EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED, EVENT_THREAD_CHECKPOINT, EVENT_USER_MESSAGE,
 };
 
 // ==================== 适配器（v2 阶段 S2，⑤ adapters） ====================
 // 时延闸门 = 本包的依赖注入策略（plan/05 §3.3）：令牌按档位签发，反射档拿不到模型句柄。
+// 两只端口并列：`LlmAdapter`（生成）与 `DispatchPort`（工具分发）——运行器只认这两只，
+// 不认任何具体实现（插件宿主/转写都在实现侧）。
 pub use adapters::{
-    AdapterError, CanClassify, CanGenerate, ClassifyOnly, DeltaSink, FullModel, LatencyTier,
-    LlmAdapter, ProviderLlmAdapter, RuleOnly, SilentDeltas, StubLlmAdapter, TokenIssuer,
+    AdapterError, CanClassify, CanGenerate, ClassifyOnly, DeltaSink, DispatchOutcome, DispatchPort,
+    FullModel, LatencyTier, LlmAdapter, LlmTurn, ProviderLlmAdapter, RuleOnly, SilentDeltas,
+    StubLlmAdapter, TokenIssuer,
 };
 
 // ==================== 权限与可见性（v2 阶段 S3，⑥ governance） ====================
