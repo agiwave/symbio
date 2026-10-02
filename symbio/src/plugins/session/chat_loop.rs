@@ -438,67 +438,117 @@ pub async fn run_chat_loop(
         }
 
         // ── 步骤 4：LLM 调用（唯一发起处）────────────────────────────────────
-        // 执行期环境一次给全：出口（可见流）+ 中止（本轮信号）。
-        let env = ExecEnv::new(sink.clone(), turn.abort.clone());
-        // v2 事实桥的实测口径（ADR-044）：模型耗时在唯一发起处累计（含工具轮
-        // 的多次请求），随轮次收束写进事件网格的 cost_ms。
-        let v2_started = std::time::Instant::now();
-        let result = orchestrator
-            .provider
-            .execute_turn(
-                &inputs.system_prompt,
-                &inputs.request_view,
-                &inputs.tools,
-                &inputs.root_id,
-                &env,
-            )
-            .await;
-        turn.model_elapsed_ms += v2_started.elapsed().as_millis() as u64;
+        // **full 档分流**（切换日本体）：v2_mode = Full 且本轮无工具挂载 ⇒ v2
+        // 运行器执行——事实原生入格、prompt 从转写出、流式经 UiBridge 回同一
+        // 出口；收口（步骤 5-7）两条路共享。本轮一旦进入 v2 分支，网格记账归
+        // v2 路径所有（`v2_executed` = true）：成功原生入格，失败也已尽力入格
+        // （I3 兜底格 + Failed 出口），收束不再经桥补记——同一轮两份记账是
+        // 假象，不是冗余；重试即新一轮（N3 靠构造成立）。有工具挂载的轮次
+        // 回退 v1 并照常转写（工具轮 v2 化是独立一批）。
+        let v2_takeover = matches!(context.session.v2_mode(), super::config::V2Mode::Full)
+            && inputs.tools.is_empty();
+        if v2_takeover {
+            turn.v2_executed = true;
+        }
+        let out = if v2_takeover {
+            // 本轮用户文本：轮首已入列的最后一条用户消息（无工具 ⇒ 必有）。
+            let user_text = context
+                .messages
+                .iter()
+                .rev()
+                .find(|m| m.role == Some(MessageRole::User))
+                .map(|m| match &m.content {
+                    Some(MessageContent::Text(t)) => t.clone(),
+                    _ => String::new(),
+                })
+                .unwrap_or_default();
+            let v2_started = std::time::Instant::now();
+            match super::v2_exec::execute_tool_free_turn(super::v2_exec::ToolFreeTurn {
+                session: &context.session,
+                provider: orchestrator.provider.clone(),
+                system_prompt: &inputs.system_prompt,
+                abort: turn.abort.clone(),
+                root_id: &inputs.root_id,
+                sink: &sink,
+                user_text: &user_text,
+                window_turns: context.session.context_window(),
+            })
+            .await
+            {
+                Ok(out) => {
+                    turn.model_elapsed_ms += v2_started.elapsed().as_millis() as u64;
+                    out
+                }
+                Err(e) => {
+                    plugin_warn!("session", "[Session] v2 执行失败，走 Failed 出口: {e}");
+                    return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Failed(e))
+                        .await;
+                }
+            }
+        } else {
+            // 执行期环境一次给全：出口（可见流）+ 中止（本轮信号）。
+            let env = ExecEnv::new(sink.clone(), turn.abort.clone());
+            // v2 事实桥的实测口径（ADR-044）：模型耗时在唯一发起处累计（含工具轮
+            // 的多次请求），随轮次收束写进事件网格的 cost_ms。
+            let v2_started = std::time::Instant::now();
+            let result = orchestrator
+                .provider
+                .execute_turn(
+                    &inputs.system_prompt,
+                    &inputs.request_view,
+                    &inputs.tools,
+                    &inputs.root_id,
+                    &env,
+                )
+                .await;
+            turn.model_elapsed_ms += v2_started.elapsed().as_millis() as u64;
 
-        let out = match result {
-            Err(PluginError::RetryWithoutContextId) => {
-                for m in &mut context.messages {
-                    m.response_id = None;
+            match result {
+                Err(PluginError::RetryWithoutContextId) => {
+                    for m in &mut context.messages {
+                        m.response_id = None;
+                    }
+                    // 清除本轮未完成的 Streaming 半截内容（来自上一轮被中断的 LLM 流），
+                    // 避免下轮 get_context_messages 加载到半截消息污染 LLM 上下文。
+                    // RetryWithoutContextId 表示 LLM 提供商返回的 context_id 无效（会话不存在），
+                    // 本轮流式产出的 Streaming 节点都是无效半截响应，应直接删除而非保留为 Failed 终态。
+                    //
+                    // 删除是**状态迁移**（`removed`）：对每个被废弃的节点发一条删除帧，
+                    // 接收端据此就地移除视图——取代原先被消费循环静默丢弃的
+                    // `StreamEvent::Abort` 事件帧（那正是"Reason 块不结束 /
+                    // 半截节点永远挂着流式动画"的根因）。
+                    for m in context
+                        .messages
+                        .iter()
+                        .filter(|m| m.status == Some(MessageStatus::Streaming))
+                    {
+                        llm_emit_removed(&sink, &m.id).await;
+                    }
+                    context
+                        .messages
+                        .retain(|m| m.status != Some(MessageStatus::Streaming));
+                    // 持久化清除后的 response_id 与 Streaming 删除结果，确保下轮加载到干净版本
+                    let _ = context
+                        .session
+                        .replace_messages(context.messages.clone())
+                        .await;
+                    continue;
                 }
-                // 清除本轮未完成的 Streaming 半截内容（来自上一轮被中断的 LLM 流），
-                // 避免下轮 get_context_messages 加载到半截消息污染 LLM 上下文。
-                // RetryWithoutContextId 表示 LLM 提供商返回的 context_id 无效（会话不存在），
-                // 本轮流式产出的 Streaming 节点都是无效半截响应，应直接删除而非保留为 Failed 终态。
-                //
-                // 删除是**状态迁移**（`removed`）：对每个被废弃的节点发一条删除帧，
-                // 接收端据此就地移除视图——取代原先被消费循环静默丢弃的
-                // `StreamEvent::Abort` 事件帧（那正是"Reason 块不结束 /
-                // 半截节点永远挂着流式动画"的根因）。
-                for m in context
-                    .messages
-                    .iter()
-                    .filter(|m| m.status == Some(MessageStatus::Streaming))
-                {
-                    llm_emit_removed(&sink, &m.id).await;
+                Err(PluginError::Aborted) => {
+                    // 用户手动中止：向上冒泡 Err(Aborted)，由消费循环识别 code=ABORTED
+                    // 后走 persist_failure —— 在途 Turn 持久化为 Failed + error，前端
+                    // 可渲染错误条与重试入口；若在此直接返回 Ok，在途 Turn 不落库，
+                    // 刷新即消失且无重试入口。
+                    return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Aborted)
+                        .await;
                 }
-                context
-                    .messages
-                    .retain(|m| m.status != Some(MessageStatus::Streaming));
-                // 持久化清除后的 response_id 与 Streaming 删除结果，确保下轮加载到干净版本
-                let _ = context
-                    .session
-                    .replace_messages(context.messages.clone())
-                    .await;
-                continue;
+                Err(e) => {
+                    plugin_warn!("session", "[Session] 发送请求失败: {e}");
+                    return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Failed(e))
+                        .await;
+                }
+                Ok(out) => out,
             }
-            Err(PluginError::Aborted) => {
-                // 用户手动中止：向上冒泡 Err(Aborted)，由消费循环识别 code=ABORTED
-                // 后走 persist_failure —— 在途 Turn 持久化为 Failed + error，前端
-                // 可渲染错误条与重试入口；若在此直接返回 Ok，在途 Turn 不落库，
-                // 刷新即消失且无重试入口。
-                return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Aborted).await;
-            }
-            Err(e) => {
-                plugin_warn!("session", "[Session] 发送请求失败: {e}");
-                return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Failed(e))
-                    .await;
-            }
-            Ok(out) => out,
         };
 
         if turn.abort.is_aborted() {
@@ -626,40 +676,44 @@ async fn finish_turn(
     // ── v2 事实桥：本轮事实转写进事件网格（ADR-044；v1 行为不变，纯增量记录）──
     // Aborted（用户主动收束）/ ResumeDone（无增量）不转写——网格少一格是
     // 诚实的缺口，不是假象。转写失败只记日志：桥的故障不得拖垮 v1 对话。
-    match &exit {
-        TurnExit::Completed | TurnExit::MaxToolRounds { .. } => {
-            if let Some((user_id, user_text)) =
-                super::v2_bridge::first_user_utterance(&context.messages)
-            {
-                let closure = match super::v2_bridge::last_assistant_text(&context.messages) {
-                    Some(text) => V2Closure::Final {
-                        text,
-                        cost_ms: turn.model_elapsed_ms,
-                    },
-                    None => V2Closure::Fallback {
-                        why: "轮次收束但无助手文本".into(),
-                        cost_ms: turn.model_elapsed_ms,
-                    },
-                };
-                super::v2_bridge::record(&context.session, &user_id, &user_text, closure);
+    // full 档经 v2 原生入格的轮次（`v2_executed`）不转写——同一轮两份记账
+    // 是假象，不是冗余。
+    if !turn.v2_executed {
+        match &exit {
+            TurnExit::Completed | TurnExit::MaxToolRounds { .. } => {
+                if let Some((user_id, user_text)) =
+                    super::v2_bridge::first_user_utterance(&context.messages)
+                {
+                    let closure = match super::v2_bridge::last_assistant_text(&context.messages) {
+                        Some(text) => V2Closure::Final {
+                            text,
+                            cost_ms: turn.model_elapsed_ms,
+                        },
+                        None => V2Closure::Fallback {
+                            why: "轮次收束但无助手文本".into(),
+                            cost_ms: turn.model_elapsed_ms,
+                        },
+                    };
+                    super::v2_bridge::record(&context.session, &user_id, &user_text, closure);
+                }
             }
-        }
-        TurnExit::Failed(e) => {
-            if let Some((user_id, user_text)) =
-                super::v2_bridge::first_user_utterance(&context.messages)
-            {
-                super::v2_bridge::record(
-                    &context.session,
-                    &user_id,
-                    &user_text,
-                    V2Closure::Fallback {
-                        why: e.to_string(),
-                        cost_ms: turn.model_elapsed_ms,
-                    },
-                );
+            TurnExit::Failed(e) => {
+                if let Some((user_id, user_text)) =
+                    super::v2_bridge::first_user_utterance(&context.messages)
+                {
+                    super::v2_bridge::record(
+                        &context.session,
+                        &user_id,
+                        &user_text,
+                        V2Closure::Fallback {
+                            why: e.to_string(),
+                            cost_ms: turn.model_elapsed_ms,
+                        },
+                    );
+                }
             }
+            _ => {}
         }
-        _ => {}
     }
 
     // Stop 钩子（幂等）：resume 出口发生在主循环之前，此时尚无消息列表

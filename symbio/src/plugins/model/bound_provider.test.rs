@@ -1,8 +1,9 @@
-//! ProviderLlmAdapter 全链路彩排 —— **真实传输层**（真实 TCP + HTTP + SSE 解析）。
+//! `BoundProvider` 全链路彩排 —— **真实传输层**（真实 TCP + HTTP + SSE 解析）。
 //!
 //! 与 e2e 的 mock-llm 同形态（OpenAI Chat SSE 方言），但在 Rust 集成测试里
 //! 闭环：本地 TcpListener 一次性 mock → `BoundProvider`（真实 `execute_turn`
-//! 五态机 + `openai_chat` 流解析）→ ⑤ `ProviderLlmAdapter` → core `Reasoner`
+//! 五态机 + `openai_chat` 流解析）→ ⑤ `ProviderLlmAdapter`（core 侧适配器，
+//! 生产代码不认识插件，故彩排挂在本文件的宿主上）→ core `Reasoner`
 //! （持 `FullModel` 令牌）→ 事件网格落 final → 不变量全绿。
 //!
 //! 闸门的编译期反向用例（无法在运行期测试，注释为证）：
@@ -15,11 +16,11 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::json;
 
-use super::ProviderLlmAdapter;
 use crate::plugins::model::bound_provider::BoundProvider;
 use crate::plugins::model::model_providers::ModelProviderConfig;
 use crate::plugins::model::protocols::openai_chat::OpenaiChatProtocol;
 use crate::symbio_core::adapters::{LatencyTier, LlmAdapter as _, TokenIssuer};
+use crate::symbio_core::ProviderLlmAdapter;
 use crate::symbio_core::{
     check_all, cost_ledger, fallback_rate, turnstate, Budget, Entity, Event, EventStore, Reasoner,
     Seq, Store, Verb, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
@@ -368,9 +369,12 @@ async fn real_provider_full_calibration() {
                 &store,
                 &adapter,
                 &tok,
-                i as u64,
-                "用一句话说明什么是事件溯源。",
-                LatencyTier::Deep,
+                crate::symbio_core::TurnInput {
+                    turn: i as u64,
+                    text: "用一句话说明什么是事件溯源。".into(),
+                    tier: LatencyTier::Deep,
+                    window_turns: None,
+                },
                 delta_frames.clone() as Arc<dyn crate::symbio_core::adapters::DeltaSink>,
             )
             .await

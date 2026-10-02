@@ -201,3 +201,7 @@ impl ModelProvider for BoundProvider {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "bound_provider.test.rs"]
+mod tests;

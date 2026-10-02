@@ -1870,7 +1870,7 @@ mod turn_runner_tests {
     use crate::symbio_core::store::Store;
     use crate::symbio_core::{
         check_all, cost_ledger, fallback_rate, transcript, Budget, Event, EventStore, Seq,
-        TurnRunner, WalStore,
+        TurnInput, TurnRunner, WalStore,
     };
 
     /// 成功轮：final 落格、溯源指向本轮用户消息、实测 cost_ms > 0、
@@ -2142,9 +2142,12 @@ mod turn_runner_tests {
                 &store,
                 &llm,
                 &tok,
-                0,
-                "问",
-                LatencyTier::Deep,
+                TurnInput {
+                    turn: 0,
+                    text: "问".into(),
+                    tier: LatencyTier::Deep,
+                    window_turns: None,
+                },
                 got.clone() as Arc<dyn DeltaSink>,
             )
             .await
@@ -2175,9 +2178,12 @@ mod turn_runner_tests {
                 &store2,
                 &llm2,
                 &tok,
-                0,
-                "问",
-                LatencyTier::Deep,
+                TurnInput {
+                    turn: 0,
+                    text: "问".into(),
+                    tier: LatencyTier::Deep,
+                    window_turns: None,
+                },
                 got2.clone() as Arc<dyn DeltaSink>,
             )
             .await

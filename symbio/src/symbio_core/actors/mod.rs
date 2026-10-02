@@ -729,6 +729,22 @@ impl SkillRouter {
 // final 溯源指向本轮用户消息（N5）、实测 cost_ms 随事件入账（ADR-044）。
 // 未来 chat_loop 切到 v2 链路时复用本运行器；当前由真实端点校准彩排使用。
 
+/// 一轮的**调度输入**（full 档会话轮与彩排共用的入参包）。
+#[derive(Debug, Clone)]
+pub struct TurnInput {
+    /// 本轮 turn 号（调用方保证单调递增——N3 的轮次锚）。
+    pub turn: u64,
+    /// 用户发言。
+    pub text: String,
+    /// 本轮装配进哪一时延档（调度决定是数据，ADR-044）。
+    pub tier: LatencyTier,
+    /// 对话窗口（最近的 turn 数，**含当前轮**）；`None` = 全量。
+    ///
+    /// 会话轮必填——WAL 里的事实只增不减，不带窗口的 prompt 会随会话
+    /// 无界增长；窗口值由调用方的窗口配置给出（如 `context_messages`）。
+    pub window_turns: Option<u64>,
+}
+
 /// 一轮的结果：`fell_back = false` ⇒ 模型作答；`true` ⇒ 兜底（`text` 即
 /// 失败原因，可观测——I3 的「到点必答」落在这里）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -737,6 +753,20 @@ pub struct TurnOutcome {
     pub text: String,
     pub cost_ms: u64,
     pub fell_back: bool,
+}
+
+/// 对话窗口：保留 turn 号落在「当前轮往前数 `keep` 个」之内的事件
+/// （含当前轮）。事实是全量的，**视图**才是窗口——纯切片，不改数据。
+fn window_by_turn(events: &[Event], current_turn: u64, keep: u64) -> &[Event] {
+    if keep == 0 {
+        return &events[events.len()..];
+    }
+    let oldest = current_turn.saturating_sub(keep - 1);
+    let cut = events
+        .iter()
+        .position(|e| e.entity == Entity::Turn && e.turn >= oldest)
+        .unwrap_or(events.len());
+    &events[cut..]
 }
 
 /// turn 运行器：持令牌的调用方对每个会话轮调用一次。
@@ -765,9 +795,12 @@ impl TurnRunner {
             store,
             llm,
             tok,
-            turn,
-            text,
-            tier,
+            TurnInput {
+                turn,
+                text: text.to_string(),
+                tier,
+                window_turns: None,
+            },
             std::sync::Arc::new(crate::symbio_core::SilentDeltas),
         )
         .await
@@ -775,22 +808,23 @@ impl TurnRunner {
 
     /// 流式版：生成增量逐片经 `sink` 送出（v2 执行路径的 UI 帧源）；
     /// 落格语义与 [`Self::run`] 完全同一条路径。
-    // 参数面每项职责不同（事实源 / 适配器 / 闸门 / 轮次 / 发言 / 档位 / 流式口），
-    // 硬捆成 struct 只是把参数换个地方放——与 local 插件执行器同一豁免理由。
-    #[allow(clippy::too_many_arguments)]
     pub async fn run_streaming<S>(
         &self,
         store: &S,
         llm: &dyn LlmAdapter,
         tok: &FullModel,
-        turn: u64,
-        text: &str,
-        tier: LatencyTier,
+        input: TurnInput,
         sink: std::sync::Arc<dyn crate::symbio_core::adapters::DeltaSink>,
     ) -> Result<TurnOutcome, crate::symbio_core::store::AppendError>
     where
         S: Store<Event = Event>,
     {
+        let TurnInput {
+            turn,
+            text,
+            tier,
+            window_turns,
+        } = input;
         // 1. 用户消息入格（turn × opened），档位随载荷入账。
         let user_seq = store
             .append(
@@ -805,11 +839,17 @@ impl TurnRunner {
                 .with_payload(serde_json::json!({ "text": text, "tier": tier.name() })),
             )
             .map(|seq| seq.value())?;
-        let snapshot = store.range(Seq::new(0));
+        let full_snapshot = store.range(Seq::new(0));
+        // 对话窗口：只把最近 N 个 turn 的事件交给 prompt（含当前轮）——
+        // 窗口是**视图**问题，事实照常全量入格（append-only 不受影响）。
+        let snapshot: &[Event] = match window_turns {
+            None => &full_snapshot,
+            Some(keep) => window_by_turn(&full_snapshot, turn, keep),
+        };
 
         // 2. 生成（实测耗时在 adapter 边界取得；失败路径的耗时从调用起点算）。
         let started = std::time::Instant::now();
-        match Reasoner.reply_streaming(llm, tok, &snapshot, sink).await {
+        match Reasoner.reply_streaming(llm, tok, snapshot, sink).await {
             Ok((reply, cost_ms)) => {
                 // 3a. final 落格：溯源指向本轮用户消息（N5），实测成本随事件入账。
                 store.append(

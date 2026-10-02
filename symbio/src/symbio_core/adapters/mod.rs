@@ -334,6 +334,10 @@ impl LlmAdapter for DelegateGen<'_> {
     }
 }
 
+mod provider_adapter;
+
+pub use provider_adapter::ProviderLlmAdapter;
+
 #[cfg(test)]
 #[path = "mod.test.rs"]
 mod tests;

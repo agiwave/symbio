@@ -29,7 +29,7 @@ pub mod message_builder;
 mod model_providers;
 mod plugin;
 mod protocols;
-mod provider_adapter;
 mod stream;
 mod tool_accumulator;
+
 mod types;

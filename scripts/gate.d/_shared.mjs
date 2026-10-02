@@ -383,7 +383,13 @@ export const BASELINE = {
   //      收成单路径（run = run_streaming + SilentDeltas）；ProviderLlmAdapter
   //      帧桥（快照记账 + 窄帧转发，reasoning/工具增量不进 v2 文本面）——
   //      SSE mock 验收增量拼接 = 聚合全文。流式只是帧的形态，收束语义不变。
-  rustTests: 1205,
+  // 1207（v2 执行器，2026-09-30）——`1205 → 1207`，**+2**。
+  //      切换日本体：`v2_mode = full` 且无工具挂载的轮次经 v2 运行器执行
+  //      （事实原生入格 + prompt 从转写出 + 流式经 UiBridge 回同一出口）；
+  //      验收 = v2_exec.test 成功轮（网格两格 + UI 帧同构）/ 失败轮（I3 兜底格）。
+  //      适配器搬家：ProviderLlmAdapter → symbio_core/adapters（session 直引
+  //      兄弟插件违反 E-009）；全链路测试留在 plugins/model。
+  rustTests: 1207,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

@@ -136,6 +136,12 @@ impl PersistentChatSession {
         self.cfg_or_default().v2_mode
     }
 
+    /// 对话窗口（最近轮数，**含当前轮**）——v2 执行器的 prompt 窗口
+    /// （锁被占回落默认；与 [`Self::v2_mode`] 同一读取纪律）。
+    pub(crate) fn context_window(&self) -> u64 {
+        self.cfg_or_default().context_messages as u64
+    }
+
     async fn load_session(&self) -> Result<super::types::Session, PluginError> {
         self.store.load_session(&self.session_id).await
     }

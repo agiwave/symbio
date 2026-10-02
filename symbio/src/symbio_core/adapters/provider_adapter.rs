@@ -6,14 +6,18 @@
 //! 会话链路（chat_loop / classify / compose）与 core 彩排链路（`Reasoner`）
 //! 从此共享同一个真实模型入口——**换适配器不换链路**。
 //!
-//! 依赖方向：plugins → core（本文件在 plugins/model，依赖方向合法；
-//! core 的 ⑤ 不认识任何插件类型）。
+//! 依赖方向：本文件只依赖 core 契约（`ModelProvider` / `LlmAdapter` /
+//! `ExecEventSink` 均在 core）——纯胶水就该住在契约旁边。真实传输层的全链路
+//! 彩排（真实 TCP + HTTP + SSE）挂在 **`plugins/model/bound_provider.test.rs`**：
+//! 那份测试要装配 `BoundProvider` / `openai_chat` 等插件内部件，而
+//! `plugins::model` 是私有模块（core 侧**在可见性上**就到不了它）——
+//! 依赖方向由编译器保证，不靠约定。
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::symbio_core::adapters::{AdapterError, DeltaSink, FullModel, LlmAdapter, SilentDeltas};
+use super::{AdapterError, DeltaSink, FullModel, LlmAdapter, SilentDeltas};
 use crate::symbio_core::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
@@ -60,12 +64,46 @@ impl ExecTranscriptWriter for DeltaBridge {
 #[allow(dead_code)] // dead-code-allow R-001: 会话链路切到彩排生成器+本适配器时的接线点；真实 HTTP/SSE 全链路已在 provider_adapter.test 验证
 pub struct ProviderLlmAdapter {
     provider: Arc<dyn ModelProvider>,
+    /// 会话级系统提示词（full 档经 `for_turn` 注入；缺省 = 彩排用的通用提示）。
+    system: Option<String>,
+    /// 本轮的中止信号（full 档经 `for_turn` 注入；缺省自建——彩排无需中止）。
+    abort: Option<ExecAbortSignal>,
 }
 
 impl ProviderLlmAdapter {
     #[allow(dead_code)] // dead-code-allow R-001: 同上——全链路彩排的构造入口
     pub fn new(provider: Arc<dyn ModelProvider>) -> Self {
-        ProviderLlmAdapter { provider }
+        ProviderLlmAdapter {
+            provider,
+            system: None,
+            abort: None,
+        }
+    }
+
+    /// 会话轮构造：系统提示词 + 本轮中止信号直通——中止与提示词是**调用方的
+    /// 语境**，适配器不再自作主张（此前硬编码通用提示 + 自建中止信号，
+    /// full 档接管会话轮后两者都必须由 chat_loop 传入）。
+    #[allow(dead_code)] // dead-code-allow R-001: v2_exec（full 档）的构造入口
+    pub fn for_turn(
+        provider: Arc<dyn ModelProvider>,
+        system: &str,
+        abort: ExecAbortSignal,
+    ) -> Self {
+        ProviderLlmAdapter {
+            provider,
+            system: Some(system.to_string()),
+            abort: Some(abort),
+        }
+    }
+
+    fn system_prompt(&self) -> &str {
+        self.system
+            .as_deref()
+            .unwrap_or("You are a helpful assistant.")
+    }
+
+    fn abort_signal(&self) -> ExecAbortSignal {
+        self.abort.clone().unwrap_or_default()
     }
 }
 
@@ -99,23 +137,18 @@ impl LlmAdapter for ProviderLlmAdapter {
             content: Some(MessageContent::Text(prompt.to_string())),
             ..Default::default()
         };
-        // 流式出口：转写帧经桥转成正文增量（桥不落盘——帧面只进回调）。
+        // 流式出口：转写帧经桥转成正文增量（桥不落盘——帧面只进回调）；
+        // 中止信号直通调用方（会话轮的中止语义不因换执行路径而丢）。
         let env = ExecEnv::new(
             ExecEventSink::direct(Arc::new(DeltaBridge {
                 sink,
                 text_nodes: Default::default(),
             })),
-            ExecAbortSignal::new(),
+            self.abort_signal(),
         );
         let output = self
             .provider
-            .execute_turn(
-                "You are a helpful assistant.",
-                &[message],
-                &[],
-                &llm_short_id(),
-                &env,
-            )
+            .execute_turn(self.system_prompt(), &[message], &[], &llm_short_id(), &env)
             .await
             .map_err(|e| AdapterError::GenerationFailed(format!("{e}")))?;
         if output.text.trim().is_empty() {
@@ -128,7 +161,3 @@ impl LlmAdapter for ProviderLlmAdapter {
         Ok((output.text, started.elapsed().as_millis() as u64))
     }
 }
-
-#[cfg(test)]
-#[path = "provider_adapter.test.rs"]
-mod tests;
