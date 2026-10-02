@@ -1870,7 +1870,7 @@ mod turn_runner_tests {
     use crate::symbio_core::store::Store;
     use crate::symbio_core::{
         check_all, cost_ledger, fallback_rate, transcript, Budget, Event, EventStore, Seq,
-        TurnInput, TurnRunner, WalStore,
+        TurnInput, TurnRunner, WalStore, EVENT_USER_MESSAGE,
     };
 
     /// 成功轮：final 落格、溯源指向本轮用户消息、实测 cost_ms > 0、
@@ -2191,5 +2191,40 @@ mod turn_runner_tests {
         let frames = got2.0.lock().unwrap();
         assert_eq!(frames.len(), 1, "非流式适配器 = 一帧全文");
         assert!(frames[0].contains("问"));
+    }
+
+    /// 中止（AdapterError::Aborted）：**不落收束格**——网格只剩已入格的用户
+    /// 消息（少一格是诚实的缺口，ADR-045 同源），`aborted` 为真且 `text` 为空；
+    /// 不变量照绿（C4 会看见这个缺口，那是设计而非缺陷：中止不是静默中断）。
+    #[tokio::test]
+    async fn aborted_run_leaves_only_user_event() {
+        use crate::symbio_core::invariants::unresolved_turns;
+
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = StubLlmAdapter::aborting("stub-model");
+
+        let out = TurnRunner
+            .run(&store, &llm, &tok, 0, "问", LatencyTier::Deep)
+            .await
+            .unwrap();
+
+        assert!(out.aborted, "中止必须在结果里可见");
+        assert!(!out.fell_back, "中止不是兜底（两者互斥）");
+        assert!(out.text.is_empty(), "中止没有答复文本");
+
+        let snapshot = store.range(Seq::new(0));
+        assert_eq!(snapshot.len(), 1, "只剩用户格：{snapshot:?}");
+        assert_eq!(snapshot[0].kind, EVENT_USER_MESSAGE);
+        assert!(
+            check_all(&snapshot).is_empty(),
+            "{:?}",
+            check_all(&snapshot)
+        );
+        assert_eq!(
+            unresolved_turns(&snapshot).len(),
+            1,
+            "缺口要**可被判出**（不是假装收束）——C4 看得见它"
+        );
     }
 }

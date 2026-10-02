@@ -130,12 +130,13 @@ pub(crate) enum TurnExit {
     /// 正常收尾：无工具调用 / 工具待用户输入。
     Completed,
     /// 循环顶部的中止检查点：上一轮 Turn 已定稿落库，**不冒泡** `Err(Aborted)`
-    /// （否则消费循环的 `persist_failure` 会把成功的 Turn 误回滚为 Failed）。
+    /// （否则消费循环的 `persist_failure` 会把已成功的 Turn 误标为 `Aborted`）。
     AbortedAtBoundary,
     /// 显式软上限：先广播明确提示再退出，绝不静默。
     MaxToolRounds { max: usize },
-    /// 用户中止且**在途 Turn 尚未定稿**：冒泡 `Err(Aborted)`，由消费循环收尾为
-    /// Failed + 错误条 + 重试入口。
+    /// 用户中止且**在途 Turn 尚未定稿**：冒泡 `Err(Aborted)`，由消费循环落库为
+    /// `MessageStatus::Aborted` + 会话结局 `aborted`（**不是** `failed`），
+    /// 前端渲染错误条与重试入口。
     Aborted,
     /// LLM / 编排失败：冒泡原始错误。
     Failed(PluginError),

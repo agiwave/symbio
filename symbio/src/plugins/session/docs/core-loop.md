@@ -138,8 +138,8 @@ fn gate_turn(req: &TurnRequest, turn: &TurnState) -> Gate
 - **显式软上限**（`req.max_tool_rounds`，`None` = 不限制）→ `TurnExit::MaxToolRounds`，
   先广播明确提示再退出，绝不静默；
 - **循环顶部的中止检查点** → `TurnExit::AbortedAtBoundary`（**不冒泡** `Err(Aborted)`：
-  上一轮 Turn 已定稿落库，冒泡会让消费循环的 `persist_failure` 把成功的 Turn
-  误回滚为 Failed）。推理前后（在途 Turn 尚未定稿）的中止才走 `TurnExit::Aborted`。
+  上一轮 Turn 已定稿落库，冒泡会让消费循环的 `persist_failure` 把已成功的 Turn
+  误标为 `Aborted`）。推理前后（在途 Turn 尚未定稿）的中止才走 `TurnExit::Aborted`。
 
 ### 2.2 收口 ②：提示词 / 工具 / 请求视图 → `prepare_turn_inputs`
 

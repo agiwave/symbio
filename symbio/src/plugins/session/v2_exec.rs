@@ -16,6 +16,17 @@
 //! 兜底语义：生成失败时运行器落 fallback 事件（I3）后，本函数把失败
 //! **上抛**给 chat_loop（`Failed` 出口）——用户侧的失败呈现（错误状态 +
 //! 重试）与 v1 保持一致；网格里已有兜底格，重试即新一轮（N3 靠构造成立）。
+//!
+//! 中止语义：生成被中止时运行器**不落收束格**（网格少一格是诚实缺口，
+//! ADR-045 同源），本函数上抛 `Aborted`——chat_loop 走独立出口，会话结局
+//! `aborted`（**不是** `failed`）。中止与失败在**类型上**分开（`AdapterError`
+//! / `TurnOutcome.aborted`），不靠错误文本猜；两者出口因此可各自演化。
+//!
+//! 与 bridge 档的**已知差异**（中止轮）：bridge 档在收束时原子转写，中止即
+//! 整轮不转写（网格零增长）；full 档必须先落用户格——prompt 从网格出，用户
+//! 发言不入格就会从下一轮的 prompt 里消失。同一「诚实缺口」原则的两种落地，
+//! 差别源于 prompt 来源（v1 读转写 / v2 读网格）。影响面：中止轮在 full 档
+//! 计入兜底率的**分母**（用户格在网格里），bridge 档不计——分子两档都不计。
 
 use std::sync::{Arc, Mutex};
 
@@ -187,6 +198,12 @@ pub(crate) async fn execute_tool_free_turn(
         .await
         .map_err(|e| PluginError::InternalError(format!("流式发射任务失败：{e}")))?;
 
+    // 中止：运行器**未落收束格**（网格少一格是诚实缺口，ADR-045 同源），
+    // 出口走 Aborted——由 chat_loop/消费循环落库为 `MessageStatus::Aborted`
+    // + 会话结局 `aborted`（**不是** `failed`），与 v1 的中止出口同形。
+    if outcome.aborted {
+        return Err(PluginError::Aborted);
+    }
     // 兜底已入格（I3），失败呈现交回 v1 语义（Failed 出口 + 重试）。
     if outcome.fell_back {
         return Err(PluginError::InternalError(outcome.text));

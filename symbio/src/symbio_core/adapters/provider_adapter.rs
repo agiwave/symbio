@@ -24,7 +24,7 @@ use crate::symbio_core::schemas::session::chat_message::{
 use crate::symbio_core::ExecAbortSignal;
 use crate::symbio_core::ExecEnv;
 use crate::symbio_core::ExecEventSink;
-use crate::symbio_core::{llm_short_id, ExecTranscriptWriter, ModelProvider};
+use crate::symbio_core::{llm_short_id, ExecTranscriptWriter, ModelProvider, PluginError};
 
 /// 流式帧桥：把 `execute_turn` 的转写帧**择要**转成正文增量——
 /// - 快照帧（`msg_type = Text × status = Streaming`）：登记节点 id，全文转发；
@@ -150,7 +150,11 @@ impl LlmAdapter for ProviderLlmAdapter {
             .provider
             .execute_turn(self.system_prompt(), &[message], &[], &llm_short_id(), &env)
             .await
-            .map_err(|e| AdapterError::GenerationFailed(format!("{e}")))?;
+            .map_err(|e| match e {
+                // 中止不压成失败：调用方据此**不落兜底格**（ADR-045 同源纪律）。
+                PluginError::Aborted => AdapterError::Aborted,
+                other => AdapterError::GenerationFailed(format!("{other}")),
+            })?;
         if output.text.trim().is_empty() {
             // 空文本不是成功：调用方拿到 Ok(空串) 会把「模型没答」当「答了空话」
             // 落成 final——必须走兜底路径（I3），所以这里按失败返回。

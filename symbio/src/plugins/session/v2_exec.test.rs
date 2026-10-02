@@ -5,7 +5,10 @@
 //! 2. **流式回同一出口**：生成增量经 UiBridge 变成 v1 的 UI 帧（首片快照
 //!    建节点 + 后续窄帧），帧语义与 model 插件直发同构；
 //! 3. **兜底也是一句话**（I3）：生成失败落 fallback 格后上抛——用户侧
-//!    失败呈现走 v1 的 Failed 出口，网格里不缺格。
+//!    失败呈现走 v1 的 Failed 出口，网格里不缺格；
+//! 4. **中止不是失败**：生成被中止时**不落收束格**（网格少一格是诚实缺口，
+//!    ADR-045 同源），上抛 `Aborted` 走独立出口——不呈现「失败」也不进兜底率
+//!    分母。中止与失败的差别在**类型上**可见，不靠错误文本猜。
 
 use std::sync::{Arc, Mutex};
 
@@ -30,10 +33,20 @@ impl ExecTranscriptWriter for CollectingFrames {
     }
 }
 
-/// 忠实假 provider：像真实 SSE 一样经 `env` 发「快照 + 窄帧」，返回聚合全文。
-/// `fail` 为真时按生成失败返回（演练 I3 兜底格）。
+/// 假 provider 的行为档：忠实流式 / 生成失败 / 中止。
+#[derive(Clone, Copy)]
+enum Behavior {
+    /// 像真实 SSE 一样经 `env` 发「快照 + 窄帧」，返回聚合全文。
+    Faithful,
+    /// 按生成失败返回（演练 I3 兜底格）。
+    Fail,
+    /// 按中止返回（演练「中止不落收束格」）。
+    Abort,
+}
+
+/// 忠实假 provider：行为由 [`Behavior`] 选定（同一传输形状，只换结局）。
 struct FaithfulProvider {
-    fail: bool,
+    behavior: Behavior,
 }
 
 #[async_trait::async_trait]
@@ -61,8 +74,10 @@ impl ModelProvider for FaithfulProvider {
         _root_id: &str,
         env: &crate::symbio_core::ExecEnv,
     ) -> Result<TurnOutput, PluginError> {
-        if self.fail {
-            return Err(PluginError::InternalError("模型断了".into()));
+        match self.behavior {
+            Behavior::Fail => return Err(PluginError::InternalError("模型断了".into())),
+            Behavior::Abort => return Err(PluginError::Aborted),
+            Behavior::Faithful => {}
         }
         // 真实链路的帧形态：正文快照（Text × Streaming）先行，窄帧随后。
         env.sink()
@@ -123,7 +138,9 @@ async fn tool_free_turn_writes_grid_and_streams_ui() {
 
     let out = execute_tool_free_turn(ToolFreeTurn {
         session: &session,
-        provider: Arc::new(FaithfulProvider { fail: false }),
+        provider: Arc::new(FaithfulProvider {
+            behavior: Behavior::Faithful,
+        }),
         system_prompt: "system",
         abort: crate::symbio_core::ExecAbortSignal::new(),
         root_id: "r-1",
@@ -182,7 +199,9 @@ async fn tool_free_turn_failure_leaves_fallback_event_and_bubbles() {
 
     let err = execute_tool_free_turn(ToolFreeTurn {
         session: &session,
-        provider: Arc::new(FaithfulProvider { fail: true }),
+        provider: Arc::new(FaithfulProvider {
+            behavior: Behavior::Fail,
+        }),
         system_prompt: "system",
         abort: crate::symbio_core::ExecAbortSignal::new(),
         root_id: "r-1",
@@ -207,4 +226,41 @@ async fn tool_free_turn_failure_leaves_fallback_event_and_bubbles() {
     assert_eq!(snap[1].kind, EVENT_ASSISTANT_FALLBACK);
     let why = snap[1].payload["why"].as_str().unwrap_or_default();
     assert!(why.contains("模型断了"), "兜底格要记失败原因：{why}");
+}
+
+/// 中止轮：**不落收束格**（网格只剩用户格），上抛 `Aborted` 走独立出口——
+/// 用户自己按的停止不该有错误条与重试入口，也不该进兜底率分母。
+#[tokio::test]
+async fn tool_free_turn_abort_leaves_only_user_event_and_bubbles_aborted() {
+    let (session, dir, _tmp) = setup_full().await;
+    let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
+    let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
+
+    let err = execute_tool_free_turn(ToolFreeTurn {
+        session: &session,
+        provider: Arc::new(FaithfulProvider {
+            behavior: Behavior::Abort,
+        }),
+        system_prompt: "system",
+        abort: crate::symbio_core::ExecAbortSignal::new(),
+        root_id: "r-1",
+        sink: &sink,
+        user_text: "你好",
+        window_turns: 6,
+    })
+    .await
+    .err()
+    .expect("中止必须上抛（Aborted 出口，不是 Failed）");
+
+    assert!(
+        matches!(err, PluginError::Aborted),
+        "上抛的是中止本体，不被压成失败：{err:?}"
+    );
+
+    // 网格里**只有用户格**——中止不是失败，不落兜底格；少一格是诚实缺口。
+    let store = EventWalStore::open(dir.join("v2-events.wal")).expect("open wal");
+    let snap = store.range(Seq::new(0));
+    assert_eq!(snap.len(), 1, "只剩用户格（中止不落收束格）：{snap:?}");
+    assert_eq!(snap[0].kind, EVENT_USER_MESSAGE);
+    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
 }

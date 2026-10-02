@@ -431,7 +431,8 @@ pub async fn run_chat_loop(
         // true 且 abort 帧已被压缩请求消费——若不在此拦截，execute_turn 会
         // 发起一次多余的 LLM 请求。此处 Turn 已创建（上方 emit_streaming_start），
         // 冒泡 Err(Aborted) → 消费循环 ABORTED 分支 → persist_failure 把本轮
-        // Turn 收尾为 Failed + "用户手动中止了本次回复"（错误条 + 重试入口），
+        // Turn 收尾为 `MessageStatus::Aborted` + "用户手动中止了本次回复"
+        // （错误条 + 重试入口），会话结局 `aborted`（**不是** `failed`）；
         // 不会波及上一轮已成功的 Turn（persist_failure 按 failing_turn 子树收窄）。
         if turn.abort.is_aborted() {
             return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Aborted).await;
@@ -478,6 +479,13 @@ pub async fn run_chat_loop(
                 Ok(out) => {
                     turn.model_elapsed_ms += v2_started.elapsed().as_millis() as u64;
                     out
+                }
+                Err(PluginError::Aborted) => {
+                    // 与 v1 的中止出口同形：在途 Turn 交消费循环落库为
+                    // `MessageStatus::Aborted` + 会话结局 `aborted`（**不是**
+                    // `failed`——中止不是错误），与 v1 分支逐字同路。
+                    return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Aborted)
+                        .await;
                 }
                 Err(e) => {
                     plugin_warn!("session", "[Session] v2 执行失败，走 Failed 出口: {e}");
@@ -535,10 +543,11 @@ pub async fn run_chat_loop(
                     continue;
                 }
                 Err(PluginError::Aborted) => {
-                    // 用户手动中止：向上冒泡 Err(Aborted)，由消费循环识别 code=ABORTED
-                    // 后走 persist_failure —— 在途 Turn 持久化为 Failed + error，前端
-                    // 可渲染错误条与重试入口；若在此直接返回 Ok，在途 Turn 不落库，
-                    // 刷新即消失且无重试入口。
+                    // 用户手动中止：向上冒泡 Err(Aborted)，由消费循环识别
+                    // `PluginErrorCode::Aborted` 后走 persist_failure —— 在途 Turn
+                    // 落库为 `MessageStatus::Aborted` + error，会话结局 `aborted`
+                    // （**不是** `failed`），前端可渲染错误条与重试入口；若在此直接
+                    // 返回 Ok，在途 Turn 不落库，刷新即消失且无重试入口。
                     return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Aborted)
                         .await;
                 }
@@ -553,9 +562,10 @@ pub async fn run_chat_loop(
 
         if turn.abort.is_aborted() {
             // 与 Err(PluginError::Aborted) 分支同理：请求结束后才置位的 abort 标志
-            // 同样向上冒泡，由消费循环统一收尾（在途 Turn → Failed + error + 可重试）。
-            // 仅 send_request 之后的 abort 冒泡；turn 循环顶部的边界检查点不冒泡——
-            // 上一轮已定稿落库，冒泡会把成功的 Turn 误回滚为 Failed。
+            // 同样向上冒泡，由消费循环统一收尾（在途 Turn → `Aborted` + error +
+            // 可重试，会话结局 `aborted`）。仅 send_request 之后的 abort 冒泡；
+            // turn 循环顶部的边界检查点不冒泡——上一轮已定稿落库，冒泡会把成功的
+            // Turn 误回滚为失败。
             return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Aborted).await;
         }
 
@@ -724,7 +734,8 @@ async fn finish_turn(
     };
     fire_stop_hook(orchestrator, messages).await;
 
-    // 返回语义：中止与失败向上冒泡，由消费循环统一收尾（在途 Turn → Failed + 可重试）。
+    // 返回语义：中止与失败向上冒泡，由消费循环统一收尾（在途 Turn 落 `Aborted`
+    // 或 `Failed`，各自结局分明 + 可重试）。
     match exit {
         TurnExit::Aborted => Err(PluginError::Aborted),
         TurnExit::Failed(e) => Err(e),

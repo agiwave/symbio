@@ -106,7 +106,7 @@ fn max_tool_rounds_zero_is_unbounded_not_instant_break() {
 fn abort_at_loop_boundary_exits_without_bubbling() {
     // 边界检查点用 `AbortedAtBoundary`（收尾为 Ok），不是 `Aborted`（收尾为
     // `Err(Aborted)`）：上一轮 Turn 已定稿落库，冒泡 Err 会让消费循环的
-    // `persist_failure` 把成功的 Turn 误回滚为 Failed。
+    // `persist_failure` 把已成功的 Turn 误标为 `Aborted`。
     assert!(matches!(
         gate_turn(&req(None), &state(1, &[], true)),
         Gate::Exit(TurnExit::AbortedAtBoundary)

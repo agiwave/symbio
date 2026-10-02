@@ -389,7 +389,15 @@ export const BASELINE = {
   //      验收 = v2_exec.test 成功轮（网格两格 + UI 帧同构）/ 失败轮（I3 兜底格）。
   //      适配器搬家：ProviderLlmAdapter → symbio_core/adapters（session 直引
   //      兄弟插件违反 E-009）；全链路测试留在 plugins/model。
-  rustTests: 1207,
+  // 1209（中止语义，2026-10-02）——`1207 → 1209`，**+2**。
+  //      v2 路径的中止不再是「失败」：`AdapterError::Aborted` 与
+  //      `GenerationFailed` 在类型上分开（压成一个变体，消费方只能靠错误
+  //      文本猜）；`TurnOutcome.aborted` 让运行器**不落收束格**（网格少一格
+  //      是诚实缺口，ADR-045 同源），适配器保真映射 `PluginError::Aborted`
+  //      → `AdapterError::Aborted`，v2_exec 上抛 `PluginError::Aborted`，
+  //      chat_loop 走独立 Aborted 出口。验收 = core 中止轮（只剩用户格 +
+  //      C4 判得出缺口）/ session 中止轮（Aborted 上抛 + 网格一格）。
+  rustTests: 1209,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

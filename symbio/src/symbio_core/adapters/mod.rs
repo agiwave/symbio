@@ -150,12 +150,21 @@ impl TokenIssuer {
 pub enum AdapterError {
     /// 生成失败（模型返回错误 / 结果不可用）。**调用方必须产出兜底事件**（I3）。
     GenerationFailed(String),
+    /// 生成被中止（用户主动停止 / 会话销毁）。
+    ///
+    /// **调用方不得产出兜底事件**——中止不是失败：轮未收束，网格少一格是
+    /// 诚实的缺口（ADR-045 的转写纪律同源），也绝不能被计入兜底（兜底率是
+    /// 失败的指标：用户按的停止不是「模型答不出」）。中止与失败的差别必须
+    /// **在类型上**可见：压成一个变体，消费方就只能靠错误文本猜（会话结局
+    /// `aborted` 与 `failed` 的分派即由此定）。
+    Aborted,
 }
 
 impl std::fmt::Display for AdapterError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AdapterError::GenerationFailed(why) => write!(f, "生成失败：{why}"),
+            AdapterError::Aborted => write!(f, "已中止"),
         }
     }
 }
@@ -233,6 +242,8 @@ pub struct StubLlmAdapter {
     delay_ms: u64,
     /// 非空 ⇒ 逐片生成（演练流式回调；全文 = 各片拼接，与单发等价）。
     chunks: Option<Vec<String>>,
+    /// 真 ⇒ 一律以 [`AdapterError::Aborted`] 返回（演练中止路径：不落兜底格）。
+    abort: bool,
 }
 
 impl StubLlmAdapter {
@@ -242,6 +253,18 @@ impl StubLlmAdapter {
             fail_with: None,
             delay_ms: 0,
             chunks: None,
+            abort: false,
+        }
+    }
+
+    /// 中止桩：生成一律返回 [`AdapterError::Aborted`]（演练「中止不落兜底格」）。
+    pub fn aborting(model: &'static str) -> Self {
+        StubLlmAdapter {
+            model,
+            fail_with: None,
+            delay_ms: 0,
+            chunks: None,
+            abort: true,
         }
     }
 
@@ -252,6 +275,7 @@ impl StubLlmAdapter {
             fail_with: None,
             delay_ms: 0,
             chunks: Some(chunks.iter().map(|c| c.to_string()).collect()),
+            abort: false,
         }
     }
 
@@ -262,6 +286,7 @@ impl StubLlmAdapter {
             fail_with: Some(message),
             delay_ms: 0,
             chunks: None,
+            abort: false,
         }
     }
 
@@ -272,6 +297,7 @@ impl StubLlmAdapter {
             fail_with: None,
             delay_ms,
             chunks: None,
+            abort: false,
         }
     }
 }
@@ -283,6 +309,9 @@ impl LlmAdapter for StubLlmAdapter {
     }
 
     async fn generate(&self, _tok: &FullModel, prompt: &str) -> Result<String, AdapterError> {
+        if self.abort {
+            return Err(AdapterError::Aborted);
+        }
         if self.delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(self.delay_ms)).await;
         }
@@ -302,6 +331,9 @@ impl LlmAdapter for StubLlmAdapter {
         prompt: &str,
         sink: std::sync::Arc<dyn DeltaSink>,
     ) -> Result<(String, u64), AdapterError> {
+        if self.abort {
+            return Err(AdapterError::Aborted);
+        }
         let Some(chunks) = &self.chunks else {
             // 无分片配置 ⇒ 走默认降级（一次性全文）。
             return LlmAdapter::generate_streaming(&DelegateGen(self), tok, prompt, sink).await;

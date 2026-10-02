@@ -753,6 +753,11 @@ pub struct TurnOutcome {
     pub text: String,
     pub cost_ms: u64,
     pub fell_back: bool,
+    /// 中止（用户主动停止 / 会话销毁）：**既无 final 也无兜底格**——网格只留
+    /// 已入格的用户消息，少一格是诚实的缺口（ADR-045 的转写纪律同源）；
+    /// `text` 为空。与 `fell_back` 互斥（失败要落兜底格，中止不落），因此
+    /// **绝不进兜底分子**（兜底率是失败的指标）。
+    pub aborted: bool,
 }
 
 /// 对话窗口：保留 turn 号落在「当前轮往前数 `keep` 个」之内的事件
@@ -873,6 +878,21 @@ impl TurnRunner {
                     text: reply,
                     cost_ms,
                     fell_back: false,
+                    aborted: false,
+                })
+            }
+            Err(AdapterError::Aborted) => {
+                // 3a'. 中止：**不落任何收束格**——用户消息已入格，少一格是诚实
+                // 的缺口（ADR-045 同一纪律）。兜底格是**失败**的形状（`fell_back`
+                // 专有），中止落了它就等于把「用户按了停止」记成「模型答不出」，
+                // 还会抬高兜底率——那是假象。
+                let cost_ms = started.elapsed().as_millis() as u64;
+                Ok(TurnOutcome {
+                    turn,
+                    text: String::new(),
+                    cost_ms,
+                    fell_back: false,
+                    aborted: true,
                 })
             }
             Err(e) => {
@@ -896,6 +916,7 @@ impl TurnRunner {
                     text: e.to_string(),
                     cost_ms,
                     fell_back: true,
+                    aborted: false,
                 })
             }
         }
