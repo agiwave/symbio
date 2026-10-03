@@ -23,7 +23,6 @@ use std::collections::BTreeMap;
 
 /// 一个档位的时延样本（升序；`percentile` 的前提）。
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[allow(dead_code)] // dead-code-allow R-002: 读数口未落地（零生产调用点）；04 §3.1 批③ 接线后摘除
 pub struct TierLatency {
     /// 档位名（四层之一，或 `unspecified`）。
     pub tier: String,
@@ -36,7 +35,6 @@ impl TierLatency {
     ///
     /// 最近邻取法（`ceil(p/100 × n) - 1`）：P50 = 中位、P100 = max，
     /// 与校准彩排同一取法。
-    #[allow(dead_code)] // dead-code-allow R-002: 读数口未落地（零生产调用点）；04 §3.1 批③ 接线后摘除
     pub fn percentile(&self, p: u64) -> u64 {
         if self.samples.is_empty() || p == 0 {
             return 0;
@@ -47,25 +45,21 @@ impl TierLatency {
     }
 
     /// P50。
-    #[allow(dead_code)] // dead-code-allow R-002: 读数口未落地（零生产调用点）；04 §3.1 批③ 接线后摘除
     pub fn p50(&self) -> u64 {
         self.percentile(50)
     }
 
     /// P95。
-    #[allow(dead_code)] // dead-code-allow R-002: 读数口未落地（零生产调用点）；04 §3.1 批③ 接线后摘除
     pub fn p95(&self) -> u64 {
         self.percentile(95)
     }
 
     /// P99。
-    #[allow(dead_code)] // dead-code-allow R-002: 读数口未落地（零生产调用点）；04 §3.1 批③ 接线后摘除
     pub fn p99(&self) -> u64 {
         self.percentile(99)
     }
 
     /// 样本数。
-    #[allow(dead_code)] // dead-code-allow R-002: 读数口未落地（零生产调用点）；04 §3.1 批③ 接线后摘除
     pub fn count(&self) -> usize {
         self.samples.len()
     }
@@ -73,14 +67,12 @@ impl TierLatency {
 
 /// 时延视图：按档位名字典序（BTreeMap ⇒ 逐字节确定，N1）。
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[allow(dead_code)] // dead-code-allow R-002: 读数口未落地（零生产调用点）；04 §3.1 批③ 接线后摘除
 pub struct SloLatencyView {
     pub by_tier: BTreeMap<String, TierLatency>,
 }
 
 impl SloLatencyView {
     /// 某档位的样本（无数据 ⇒ 空账，不是错误）。
-    #[allow(dead_code)] // dead-code-allow R-002: 读数口未落地（零生产调用点）；04 §3.1 批③ 接线后摘除
     pub fn of(&self, tier: &str) -> TierLatency {
         self.by_tier.get(tier).cloned().unwrap_or(TierLatency {
             tier: tier.to_string(),
@@ -90,7 +82,6 @@ impl SloLatencyView {
 }
 
 /// `slo_report` 投影：从事件切片统计各档位的实测时延样本（final 的 cost_ms）。
-#[allow(dead_code)] // dead-code-allow R-002: 读数口未落地（零生产调用点）；04 §3.1 批③ 接线后摘除
 pub fn slo_report() -> Projection<SloLatencyView> {
     Projection::new(|events: &[Event], now, _budget: Budget| {
         let mut by_tier: BTreeMap<String, Vec<u64>> = BTreeMap::new();

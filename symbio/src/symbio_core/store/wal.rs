@@ -45,40 +45,71 @@ where
     /// 重放所有完整行；撕裂的尾行被丢弃并截断（提交边界，S05 §6.1）。
     pub fn open(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let path = path.as_ref().to_path_buf();
+        let (events, good_len) = Self::replay(&path)?;
+        if path.exists() && good_len < path.metadata()?.len() {
+            // 截断撕裂部分——恢复语义的一部分。
+            let f = std::fs::OpenOptions::new().write(true).open(&path)?;
+            f.set_len(good_len)?;
+            f.sync_all()?;
+        }
+        Ok(Self::build(path, events))
+    }
+
+    /// **只读**打开：只解析，不动文件。
+    ///
+    /// 与 [`open`](Self::open) 的差别只在「谁有资格写」：恢复（截断撕裂尾行）
+    /// 是**写方**的语义，读方不能顺手做——读数口在会话进行中随时可能被调用，
+    /// 而 [`Store::append`] 用的是 append 模式（写点恒在当前 EOF）：读方若在
+    /// 写方落一行的中途截断了它，剩下的字节会接在被截掉的位置之后 ⇒ 那一行
+    /// 静默损坏。解析器仍是同一个（[`replay`](Self::replay)），撕裂尾行同样
+    /// 丢弃，只是**不改文件**。
+    ///
+    /// 文件不存在 ⇒ 空仓（「还没有事实源」是常态，读方不该为了读而创建文件）。
+    pub fn open_readonly(path: impl AsRef<Path>) -> std::io::Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        let (events, _) = Self::replay(&path)?;
+        Ok(Self::build(path, events))
+    }
+
+    /// 重放到最后一行完整记录（撕裂尾行丢弃——**提交边界**，S05 §6.1）。
+    ///
+    /// 返回 `(事件, 最后一条完整记录的结束偏移)`；文件不存在 ⇒ 空。
+    /// 不写文件：写不写由调用方决定（[`open`](Self::open) 截断 /
+    /// [`open_readonly`](Self::open_readonly) 不动）。
+    fn replay(path: &Path) -> std::io::Result<(Vec<E>, u64)> {
         let mut events = Vec::new();
-        let mut ids = HashSet::new();
+        if !path.exists() {
+            return Ok((events, 0));
+        }
+        let file = std::fs::File::open(path)?;
+        let mut offset = 0u64;
         let mut good_len = 0u64;
-        if path.exists() {
-            let file = std::fs::File::open(&path)?;
-            let mut offset = 0u64;
-            for line in BufReader::new(file).split(b'\n') {
-                let bytes = line?;
-                let total = bytes.len() as u64 + 1; // 含换行（末行可能无）
-                match serde_json::from_slice::<E>(&bytes) {
-                    Ok(event) => {
-                        ids.insert(event.event_id().to_string());
-                        events.push(event);
-                        offset += total;
-                        good_len = offset;
-                    }
-                    Err(_) => {
-                        // 撕裂尾行：停止重放（后面的内容一律不可信）。
-                        break;
-                    }
+        for line in BufReader::new(file).split(b'\n') {
+            let bytes = line?;
+            let total = bytes.len() as u64 + 1; // 含换行（末行可能无）
+            match serde_json::from_slice::<E>(&bytes) {
+                Ok(event) => {
+                    events.push(event);
+                    offset += total;
+                    good_len = offset;
+                }
+                Err(_) => {
+                    // 撕裂尾行：停止重放（后面的内容一律不可信）。
+                    break;
                 }
             }
-            if good_len < path.metadata()?.len() {
-                // 截断撕裂部分——恢复语义的一部分。
-                let f = std::fs::OpenOptions::new().write(true).open(&path)?;
-                f.set_len(good_len)?;
-                f.sync_all()?;
-            }
         }
+        Ok((events, good_len))
+    }
+
+    /// 由已重放的事件构造内存形态（`ids` / `head` 都是它的派生量）。
+    fn build(path: PathBuf, events: Vec<E>) -> Self {
+        let ids = events.iter().map(|e| e.event_id().to_string()).collect();
         let head = events.len() as u64;
-        Ok(WalStore {
+        WalStore {
             path,
             inner: RwLock::new(WalInner { events, ids, head }),
-        })
+        }
     }
 
     /// 已入库事件数（== `head().value()`；测试与断言用）。

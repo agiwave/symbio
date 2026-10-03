@@ -349,7 +349,7 @@ if (rustWaived.length) {
 //      基线每次随该表的批次下调，不随本文件的意志上调。
 const R002_BASELINE = process.env.DEAD_CODE_R002_BASELINE
   ? Number(process.env.DEAD_CODE_R002_BASELINE)
-  : 128
+  : 117
 
 /**
  * R-002 的承认理由：复用 R-001 的回看（同行 + 上 3 行、理由非空）。

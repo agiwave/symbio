@@ -92,10 +92,14 @@
 |------|------|----------|
 | `session/chat/send` | 发起 AI 对话（流式；实际入口） | `Session` |
 | `session/chat/abort` | 中止进行中的对话 | `Empty` |
+| `session/stats` | 读本会话 v2 事实源的四列读数（时延分位 / 兜底率 / 成本台账 / 断点）——纯读，零副作用 | `SessionStats` |
 
-> 会话与消息的增删改查**全部**经 VDFS 地址完成；`chat/send` 与 `chat/abort` 是编排 / 控制，
-> 不是数据操作。两者的**实时面**都走 `event_bus` 的 `vdfs` 频道（见
-> [PROTOCOLS.md](../architecture/PROTOCOLS.md) §事件总线频道）。
+> 会话与消息的增删改查**全部**经 VDFS 地址完成；`chat/send`、`chat/abort` 是编排 / 控制，
+> `stats` 是读数——三者都不是数据操作。前两者的**实时面**都走 `event_bus` 的 `vdfs` 频道
+> （见 [PROTOCOLS.md](../architecture/PROTOCOLS.md) §事件总线频道）。
+>
+> `stats` 的读数只能调已有的投影、不得另写一份统计口径（[plan/12 §4](../plan/12-价值验收与基线埋点.md)
+> 的复算判据）；实现见 [`symbio/src/plugins/session/stats.rs`](../../symbio/src/plugins/session/stats.rs)。
 
 ### 会话级操作已并入 VDFS（专用路由不再存在）
 

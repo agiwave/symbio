@@ -26,7 +26,7 @@
 | `memory` | `memory` | <根>/memory | — | `Plugin` · `VdfsProvider` | ✓ | ✓ |
 | `model` | `model` | <根>/model | （动态）已无自有路由（`execute_turn` 由 session 直连调用） | `ModelProvider` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `plugin_manager` | `plugin_manager` | <根>/plugin_manager | — | `Plugin` · `VdfsProvider` | — | ✓ |
-| `session` | `session` | <根>/session | `session/chat/abort` · `session/chat/send` | `Capability` · `Plugin` · `VdfsProvider` | ✓ | ✓ |
+| `session` | `session` | <根>/session | `session/chat/abort` · `session/chat/send` · `session/stats` | `Capability` · `Plugin` · `VdfsProvider` | ✓ | ✓ |
 | `setting` | `setting` | <根>/setting | — | `Plugin` | ✓ | ✓ |
 | `skill` | `skill` | <根>/skill | `skill/execute` | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `telegram` | `telegram` | <根>/telegram | `telegram/get_updates` · `telegram/send` · `telegram/set_chat_id` · `telegram/start_listener` · `telegram/status` · `telegram/stop_listener` | `Plugin` | ✓ | ✓ |
@@ -105,7 +105,7 @@
 
 | 范围 | 实现 | 测试 |
 |---|---|---|
-| `symbio/src` | 262 文件 / 64742 行 | 152 文件 / 32722 行 |
+| `symbio/src` | 263 文件 / 64965 行 | 153 文件 / 32998 行 |
 | `cli/src` | 4 文件 / 1571 行 | 1 文件 / 80 行 |
 | `tauri/src-tauri/src` | 3 文件 / 449 行 | 0 文件 / 0 行 |
 | `tauri/src` | 101 文件 / 22484 行 | 54 文件 / 12649 行 |
@@ -119,4 +119,4 @@
 
 ---
 
-> 生成时间：2026-10-03 04:05:52 UTC · 源：`git rev-parse HEAD` = `c6b60fa`
+> 生成时间：2026-10-03 07:30:10 UTC · 源：`git rev-parse HEAD` = `6b251f3`

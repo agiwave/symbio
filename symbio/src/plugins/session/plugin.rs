@@ -498,13 +498,16 @@ impl Plugin for SessionPlugin {
         match path {
             "chat/send" => return self.handle_chat_send_oneoff(ctx).await,
             "chat/abort" => return self.handle_chat_abort_oneoff(ctx).await,
+            // 读数：本会话 v2 事实源的四列（时延 / 兜底 / 成本 / 断点）。
+            // 纯计算、零副作用——既不落盘也不碰消息。
+            "stats" => return self.handle_stats(ctx).await,
             // 本表只留「不是数据 CRUD」的路由：会话与消息的增删改查**全部**经 VDFS
             // 地址完成（`vdfs/list|read|write|action|delete`）。在路由上再开一条数据面
             // 入口 = 同一能力的第二份实现，两条实现会各自漂移——判据与逐条退役记录见
             // `docs/archive/legacy-route-migration.md`（`stream` 见
             // `docs/archive/session-realtime-vdfs-watch.md`；选项三条见
             // `docs/archive/session-options-unification.md`）。
-            // 剩下的都不是 CRUD：前两条是**编排 / 控制**。
+            // 剩下的都不是 CRUD：前三条是**编排 / 控制 / 读数**。
             _ => return Err(PluginError::NotFound(format!("未知路径: {path}"))),
         }
     }

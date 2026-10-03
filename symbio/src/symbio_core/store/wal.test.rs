@@ -313,3 +313,64 @@ fn checkpoint_state_round_trips_through_event_payload() {
     .unwrap();
     assert_eq!(round, cp, "断点状态经事件载荷往返必须无损");
 }
+
+/// 只读打开：撕裂尾行同样不算已提交，但**不改文件**——截断是写方的恢复语义。
+///
+/// 为什么必须分开：[`Store::append`] 用 append 模式（写点恒在当前 EOF），
+/// 读方若在写方落一行的中途把它截掉，剩下的字节会接在新的 EOF 上 ⇒ 那一行
+/// 静默损坏。读数口（`session/stats`）会在会话进行中随时打开同一个 WAL。
+#[test]
+fn open_readonly_drops_a_torn_tail_without_truncating_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("events.jsonl");
+    {
+        let store = EventWalStore::open(&path).unwrap();
+        for i in 0..2 {
+            store
+                .append(ev(
+                    &format!("e{i}"),
+                    "user.message",
+                    Entity::Turn,
+                    Verb::Opened,
+                    i as u64,
+                    "hi",
+                ))
+                .unwrap();
+        }
+    }
+    // 追加半行：模拟进程死在写到一半。
+    let mut raw = std::fs::read_to_string(&path).unwrap();
+    raw.push_str("{\"event_id\":\"e2\",\"ki");
+    std::fs::write(&path, &raw).unwrap();
+    let torn_len = std::fs::metadata(&path).unwrap().len();
+
+    let ro = EventWalStore::open_readonly(&path).unwrap();
+    assert_eq!(ro.len(), 2, "撕裂尾行不算已提交（同一提交边界）");
+    assert_eq!(ro.head().value(), 2);
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().len(),
+        torn_len,
+        "只读打开不许截断文件"
+    );
+
+    // 对照：写方打开才执行恢复截断——恢复语义归写方，读方只解析。
+    let _rw = EventWalStore::open(&path).unwrap();
+    assert!(
+        std::fs::metadata(&path).unwrap().len() < torn_len,
+        "写方打开照旧截断到最后一行完整记录"
+    );
+}
+
+/// 只读打开遇上「还没有事实源」= 空仓，且**不创建文件**。
+#[test]
+fn open_readonly_on_a_missing_file_creates_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("events.jsonl");
+    let ro = EventWalStore::open_readonly(&path).unwrap();
+    assert_eq!(ro.len(), 0);
+    assert_eq!(ro.head().value(), 0);
+    assert!(
+        !path.exists(),
+        "读方不该为了读而写下东西——那会把「从没跑过」变成「跑过一轮空的」"
+    );
+}

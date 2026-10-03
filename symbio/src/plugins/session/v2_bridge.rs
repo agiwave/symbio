@@ -57,7 +57,12 @@ pub(crate) fn record(
     let Some(dir) = session.session_dir() else {
         return; // 临时会话：事实源不持久，转写无从安放（见模块文档口径）
     };
-    let result = record_to_wal(dir.join("v2-events.wal"), user_id, user_text, closure);
+    let result = record_to_wal(
+        dir.join(super::paths::V2_WAL_FILE),
+        user_id,
+        user_text,
+        closure,
+    );
     if let Err(why) = result {
         crate::plugin_warn!(
             "session",
@@ -129,14 +134,28 @@ fn record_to_wal(
     Ok(())
 }
 
-/// 本轮用户发言（消息 id + 文本）：本轮**第一条**用户 Text 节点。
+/// 本轮用户发言（消息 id + 文本）：本轮**第一条已提交**的用户 Text 节点。
+///
+/// 判别式 = `role` + `msg_type` 两条**构造即成立**的字段，再加 `status` 只用来
+/// 排除**显式在途**：`None` 与 `Completed` 都算已提交，`Streaming` / `Pending` /
+/// `WaitingUserAction` 不算。
+///
+/// 为什么 `None` 算数：用户消息不是流式产物，而它的写入方有好几个——`chat/send`
+/// 的调用方（CLI / 前端）、收件箱入口（`plugin/nodes.rs::parse_inbox_message`）、
+/// 心跳——各写各的形状，`chat/send` 那一支就**不填** `status`
+/// （`ChatMessage::default()` → `None`）。把「填了且 = `Completed`」当判据，
+/// 转写就在不填的那一支上**静默不发生**：不报错、连 `plugin_warn!` 都没有，
+/// 事实源默默少一格，P99 与兜底率默默缺一轮——比转写失败更难发现。
+///
+/// [`last_assistant_text`] 要求 `status == Completed`：助手消息**是**流式的，
+/// 未收束的那条不该被当成终稿。两条判据因此不对称，这不是笔误。
 pub(crate) fn first_user_utterance(messages: &[cm::ChatMessage]) -> Option<(String, String)> {
     messages
         .iter()
         .find(|m| {
             m.role == Some(cm::MessageRole::User)
                 && m.msg_type == Some(cm::MessageType::Text)
-                && m.status == Some(cm::MessageStatus::Completed)
+                && matches!(m.status, None | Some(cm::MessageStatus::Completed))
         })
         .and_then(|m| {
             let text = m.content.as_ref()?.to_text();

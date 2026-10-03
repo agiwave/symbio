@@ -19,6 +19,12 @@
 //!   原先住在 `plugin/nodes.rs` 的路径模型里（见该模块头），归位理由是
 //!   消费方在**领域层**（会话的写语义要按地址定 id），而领域层不引用汇编层。
 
+/// v2 事实源文件名（per-session 的事件 WAL）。
+///
+/// **写方（`v2_bridge` / `v2_exec`）与读方（`stats` 读数口）共用这一个拼法**——
+/// 文件名是事实源的身份，两处各写一份字面量就等于两份事实源。
+pub(crate) const V2_WAL_FILE: &str = "v2-events.wal";
+
 /// 会话内固定子目录名：L0 工具结果全文存档。
 pub const TOOL_ARCHIVES_SUBDIR: &str = "tool_archives";
 

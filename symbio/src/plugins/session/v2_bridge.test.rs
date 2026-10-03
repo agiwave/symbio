@@ -212,6 +212,28 @@ fn utterance_helpers_pick_completed_text_nodes_only() {
     );
 }
 
+/// 真实形状回归：`chat/send` 送进来的用户消息**不填 `status`**（CLI / 前端都是
+/// `..Default::default()`），它照样是本轮发言，必须被认出来。
+///
+/// 这条锁的故障形态很具体：判据一旦只认 `status == Completed`，转写就在真实流量
+/// 上**整片消失**——没有报错、没有 `plugin_warn!`，事实源只是从来不存在，于是
+/// 读数口四列全零，而全零看起来完全正常。单测里那些手造消息都带 `status`
+/// （夹具替真实数据把话说满了），只有这条能替 CLI 那一支作证。
+#[test]
+fn user_message_without_status_is_still_this_rounds_utterance() {
+    let sent = cm::ChatMessage {
+        id: "u1".into(),
+        role: Some(cm::MessageRole::User),
+        msg_type: Some(cm::MessageType::Text),
+        content: Some(cm::MessageContent::Text("普通提问".into())),
+        ..Default::default()
+    };
+    let msgs = vec![sent, assistant_text("a1", "答")];
+
+    let (id, text) = first_user_utterance(&msgs).expect("不填 status 的用户消息必须被认出");
+    assert_eq!((id.as_str(), text.as_str()), ("u1", "普通提问"));
+}
+
 /// 无发言 / 无答复的空轮形态：None → Fallback（诚实缺口）。
 #[test]
 fn empty_messages_yield_no_utterance() {

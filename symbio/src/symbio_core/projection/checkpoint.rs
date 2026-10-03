@@ -18,7 +18,6 @@ use super::Projection;
 /// `BTreeMap` 保证序列化顺序确定（同一事件序列 ⇒ 逐字节相同的断点，N1 不因
 /// 断点本身被破坏）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[allow(dead_code)] // dead-code-allow R-002: 接线未落地；04 §3.1 批③ 接线后摘除
 pub struct CheckpointState {
     /// 断点覆盖到的最后一条事件 seq。
     pub last_seq: Option<u64>,
@@ -48,7 +47,6 @@ impl CheckpointState {
 /// `checkpoint` 投影：按入参顺序扫描事件，产出截至最后一条事件的可序列化状态。
 ///
 /// 确定性（N1）：同一事件序列 ⇒ 逐字节相同的 [`CheckpointState`]。
-#[allow(dead_code)] // dead-code-allow R-002: 接线未落地；04 §3.1 批③ 接线后摘除
 pub fn checkpoint() -> Projection<CheckpointState> {
     Projection::new(|events: &[Event], _now, _b: Budget| {
         let mut last_seq = None;

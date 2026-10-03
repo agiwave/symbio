@@ -86,14 +86,14 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
  *
  * `0` 是规则 2 首批整改的结果：140 个「名字没跨出 core」的符号已从根出口收窄
  * （定义留在原域 `pub`，core 内走域内路径），只被测试/无人使用的存量另由
- * `dead-code-audit` R-002 逐项承认。`64` 是宏展开消费计入口径后的单消费方存量。
+ * `dead-code-audit` R-002 逐项承认。`63` 是宏展开消费计入口径后的单消费方存量。
  */
 const BASELINE = process.env.CORE_EXPORT_BASELINE
   ? (() => {
       const [zero, one] = process.env.CORE_EXPORT_BASELINE.split(':').map((n) => Number(n))
       return { zero, one }
     })()
-  : { zero: 0, one: 64 }
+  : { zero: 0, one: 63 }
 
 const errors = []
 const report = (rule, msg, loc = '') => errors.push({ rule, msg, loc })

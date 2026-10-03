@@ -419,7 +419,16 @@ export const BASELINE = {
   //      （缺口被填 + 用户格只一格 + 恢复交换进 prompt）。
   //      注：e2e `t27` 待 CLI 恢复入口（`cli/src/client.rs` 现写死 `resume: None`），
   //      属批 2b，不在本次基线内。
-  rustTests: 1214,
+  // 1220（读数口 `session/stats`，2026-10-03）——`1214 → 1220`，**+6**。
+  //      读侧出口接进生产路由：core 根导出 `slo_report` / `checkpoint` +
+  //      `WalStore::open_readonly`（只读开档：不创建、不截断撕裂尾行），
+  //      `plugins/session/stats.rs` 一次给四列（时延/兜底/成本/断点）。
+  //      写侧判据同步订正：`v2_bridge::first_user_utterance` 此前只认
+  //      `status = Completed`，而 `chat/send` 的用户消息不填该字段 ⇒ 转写恒
+  //      不发生且**无告警**，事实源根本不曾存在（详见 04 §3.1 S2 行）。
+  //      验收 = stats 3 例（复算 / 反向手术 / 缺源不创建）+ wal 只读 2 例
+  //      + `first_user_utterance` 真实形状 1 例 + e2e t28（四列对账 + 两刀反向）。
+  rustTests: 1220,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

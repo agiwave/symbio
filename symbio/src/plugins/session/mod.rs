@@ -15,6 +15,7 @@ mod options;
 mod orchestrator;
 pub(crate) mod paths;
 mod resume;
+mod stats;
 mod tokenizer;
 mod transcript;
 pub(crate) mod v2_bridge;

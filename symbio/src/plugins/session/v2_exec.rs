@@ -243,7 +243,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     let dir = session.session_dir().ok_or_else(|| {
         PluginError::InternalError("full 档需要持久会话（临时会话无事实源）".into())
     })?;
-    let store = EventWalStore::open(dir.join("v2-events.wal"))
+    let store = EventWalStore::open(dir.join(super::paths::V2_WAL_FILE))
         .map_err(|e| PluginError::InternalError(format!("v2 WAL 打开失败：{e}")))?;
     let snapshot = store.range(Seq::new(0));
 
