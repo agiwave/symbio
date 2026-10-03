@@ -349,7 +349,8 @@ if (rustWaived.length) {
 //      基线每次随该表的批次下调，不随本文件的意志上调。
 const R002_BASELINE = process.env.DEAD_CODE_R002_BASELINE
   ? Number(process.env.DEAD_CODE_R002_BASELINE)
-  : 99 // 04 §3.1 批⑤ 摘 16（115 → 99）：Decider 族 5 + S4 断点锚 2 + 测试面转 #[cfg(test)] 9（其中 3 处本属批⑫，随桩迁入 ⇒ 批⑫ 8 → 5）
+  : 88 // 04 §3.1 批⑥ 摘 11（99 → 88）：governance/mod.rs 标记**全摘**——矩阵生产构造住 crate::authz（from_names 按能力名闭集校验），写侧 can_reply 进 v2_bridge 收束闸、读侧 can_see 进 session/stats 读闸
+  // 04 §3.1 批⑤ 摘 16（115 → 99）：Decider 族 5 + S4 断点锚 2 + 测试面转 #[cfg(test)] 9（其中 3 处本属批⑫，随桩迁入 ⇒ 批⑫ 8 → 5）
 
 /**
  * R-002 的承认理由：复用 R-001 的回看（同行 + 上 3 行、理由非空）。

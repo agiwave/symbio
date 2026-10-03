@@ -1,11 +1,13 @@
 //! v2 事实桥验收——转写的事件格必须与 core 侧事实源**同构**：不变量全绿、
 //! 溯源（N5）、轮次编号（N3）靠构造成立，重开恢复（N2）不因桥而破。
 
-use super::{first_user_utterance, last_assistant_text, record, record_to_wal, V2Closure};
+use super::{
+    authorize_close, first_user_utterance, last_assistant_text, record, record_to_wal, V2Closure,
+};
 use crate::symbio_core::chat_message as cm;
 use crate::symbio_core::{
-    check_all, Entity, EventEnvelope as _, EventWalStore, Seq, Store, EVENT_ASSISTANT_FINAL,
-    EVENT_USER_MESSAGE,
+    check_all, Entity, EventEnvelope as _, EventWalStore, PermissionMatrix, Seq, Store, VisScope,
+    EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 use std::path::PathBuf;
 
@@ -301,4 +303,35 @@ async fn v2_mode_off_disables_recording() {
     );
     let dir = on_session.session_dir().expect("持久会话有目录");
     assert!(dir.join("v2-events.wal").exists(), "bridge 档必须写 WAL");
+}
+
+/// 写侧闸（[04 §3.1 批⑥](../../../../docs/plan/04-工程落地.md)）：收束入格前判
+/// **能力**——首条 / 追加各判各的，未持有 ⇒ 拒绝入格（不是记一笔照写）。
+#[test]
+fn a_closure_without_the_grant_is_refused() {
+    // 本机授权表：主智能体两种位置都放行（否则生产对话第一步就断）。
+    let live = crate::authz::production_matrix();
+    authorize_close(live, crate::authz::PRINCIPAL_MAIN, true).expect("首响放行");
+    authorize_close(live, crate::authz::PRINCIPAL_MAIN, false).expect("追加放行");
+    assert!(
+        authorize_close(live, "agent:ghost", true).is_err(),
+        "矩阵外主体 fail-closed"
+    );
+
+    // 只配追加能力的表 ⇒ 首条被拒、追加放行：判的是能力，不是恒真。
+    let append_only = PermissionMatrix::from_names(&[(
+        crate::authz::PRINCIPAL_MAIN,
+        &["reply.append"],
+        VisScope::ThreadPrivate,
+    )])
+    .expect("表合法");
+    let why = authorize_close(&append_only, crate::authz::PRINCIPAL_MAIN, true)
+        .expect_err("缺 reply.first ⇒ 不入格");
+    assert!(why.contains("reply.first"), "{why}");
+    authorize_close(&append_only, crate::authz::PRINCIPAL_MAIN, false)
+        .expect("持有 reply.append ⇒ 放行");
+
+    // 构造失败时的 fail-closed 兜底（空表）：谁都不许。
+    let deny_all = PermissionMatrix::from_names(&[]).expect("空表合法");
+    assert!(authorize_close(&deny_all, crate::authz::PRINCIPAL_MAIN, true).is_err());
 }

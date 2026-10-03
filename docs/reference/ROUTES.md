@@ -92,7 +92,7 @@
 |------|------|----------|
 | `session/chat/send` | 发起 AI 对话（流式；实际入口） | `Session` |
 | `session/chat/abort` | 中止进行中的对话 | `Empty` |
-| `session/stats` | 读本会话 v2 事实源的四列读数（时延分位 / 兜底率 / 成本台账 / 断点）+ 不变量清单 `invariants`（`check_all` 五条，空 = 全绿）——纯读，零副作用 | `SessionStats` |
+| `session/stats` | 读本会话 v2 事实源的四列读数（时延分位 / 兜底率 / 成本台账 / 断点）+ 不变量清单 `invariants`（`check_all` 五条，空 = 全绿）——纯读，零副作用。载荷 `{ principal?: string }` 可声明**读方身份** | `SessionStats` |
 
 > 会话与消息的增删改查**全部**经 VDFS 地址完成；`chat/send`、`chat/abort` 是编排 / 控制，
 > `stats` 是读数——三者都不是数据操作。前两者的**实时面**都走 `event_bus` 的 `vdfs` 频道
@@ -100,6 +100,11 @@
 >
 > `stats` 的读数只能调已有的投影、不得另写一份统计口径（[plan/12 §4](../plan/12-价值验收与基线埋点.md)
 > 的复算判据）；实现见 [`symbio/src/plugins/session/stats.rs`](../../symbio/src/plugins/session/stats.rs)。
+>
+> 读侧闸（[plan/01 §7](../plan/01-核心架构.md)）：**不声明 `principal` = 本机默认读数**；
+> 声明了才按 `can_see` 判可见域（`thread_private` 缺省，C10）——属主全量、**非属主读数为空**
+> （含矩阵内主体；`has_wal` 仍为真，于是「有源但不给你看」与「没有源」可分辨）。
+> 载荷只回答「我是谁」，不接受声明「能看到什么」——那等于给自己授权。
 
 ### 会话级操作已并入 VDFS（专用路由不再存在）
 

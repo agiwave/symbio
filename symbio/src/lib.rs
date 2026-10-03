@@ -8,6 +8,8 @@
 //!
 //! ## 模块分层
 //!
+//! - `authz`：本机部署的**授权策略表**（谁持有什么能力 + 可见域）——跨插件的
+//!   部署事实，故不能住任何插件（E-009），也不住 core（core 只有机制，没有「谁」）
 //! - `plugins/`：业务插件（私有，插件之间不直接相互引用）
 //! - `symbio_core/`：核心抽象（Plugin trait、PluginInvokeRequest、schemas、**服务 trait**）
 //! - `providers/`：通用服务基础设施（私有，**不**对外暴露）
@@ -17,6 +19,7 @@
 //!   - 业务模块通过 `creator_create_object::<dyn XXXService>(...)` 获取实例
 //!   - **不**通过 `pub use` 暴露给 crate 外部
 
+mod authz;
 pub mod init;
 mod plugins;
 mod providers;

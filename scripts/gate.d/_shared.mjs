@@ -447,7 +447,19 @@ export const BASELINE = {
   //      承接**（`reasoner_reply_reads_the_user_message_from_events`，+1）：
   //      净降 1 不是「删测试放行」，而是删掉的两条只测已删除的类型。
   //      `rehearse_turn` 的规则表换成彩排内定值，链路形状断言一条不少。
-  rustTests: 1222,
+  // 1232（授权矩阵接线，2026-10-03）——`1222 → 1232`，**+10**。
+  //      读写两道闸进生产（04 §3.1 批⑥）：矩阵**生产构造**住宿主表
+  //      `symbio/src/authz.rs`（能力名字符串 ⇒ `PermissionMatrix::from_names`
+  //      按 7 项闭集校验、失败降级空矩阵；`PRINCIPAL_MAIN` / `PRINCIPAL_USER`
+  //      与事件 actor 同源，判的对象 = 写的对象）；写侧
+  //      `v2_bridge::authorize_close`（收束入格前 `can_reply`，轮次→能力映射
+  //      只在 core）；读侧 `session/stats` 载荷声明 `principal` 才 `can_see`
+  //      （属主全量、矩阵外读数为空，不声明 = 今天行为逐字不变）。
+  //      验收 = governance 3 例（`from_names` 成功 / 认不出的能力名**拒绝整体**
+  //      构造 / `can_reply` 映射）+ authz 4 例（表形状 / 写读两侧 / 降级空矩阵）
+  //      + stats 2 例（属主全量 / 非属主全零）+ v2_bridge 写闸 1 例 + e2e t28
+  //      读方三态（`principal` = user / agent:main / 未知 ⇒ 4 格 / 0 格 / 0 格）。
+  rustTests: 1232,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

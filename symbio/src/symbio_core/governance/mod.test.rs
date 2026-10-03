@@ -2,6 +2,10 @@
 //!
 //! 第 7 步：`grants_of` / `sees_of` 成对，只有写侧 → 拒绝；
 //! 第 8 步：`vis_scope` 默认 `thread_private` → 越界读取 0。
+//!
+//! [04 §3.1 批⑥](../../../../docs/plan/04-工程落地.md) 的接线面（判定在 core、
+//! 构造与调用在 core 外，故各钉一半）：`from_names` 认不出的能力名**拒绝整体构造**、
+//! `can_reply` 的「轮次位置 → 能力」映射（调用点不复述）。
 
 use super::*;
 use crate::symbio_core::event::Entity;
@@ -105,6 +109,74 @@ fn thread_private_yields_zero_out_of_bounds_reads() {
     assert!(matrix.can_see("agent:main", "agent:main", VisScope::ThreadPrivate));
     // 提权必须显式：shared 对矩阵内主体开放。
     assert!(matrix.can_see("agent:worker", "agent:main", VisScope::Shared));
+}
+
+/// `from_names`（授权表构造面）：能力**名** → 枚举的闭集翻译，成功时照样过成对性。
+///
+/// 授权表住在宿主（`crate::authz`），core 只提供这张翻译——所以本测钉的是 core 的
+/// 那半边：名字认得出 ⇒ grants 与可见域都落位（`paired` 仍被调用，成对性不绕过）。
+#[test]
+fn from_names_translates_a_name_table_into_a_paired_matrix() {
+    let matrix = PermissionMatrix::from_names(&[(
+        "agent:main",
+        &["reply.first", "reply.append"],
+        VisScope::ThreadPrivate,
+    )])
+    .expect("认得出的能力名必过");
+    assert_eq!(
+        matrix.grants_of("agent:main"),
+        [Capability::ReplyFirst, Capability::ReplyAppend]
+    );
+    assert_eq!(matrix.sees_of("agent:main"), Some(VisScope::ThreadPrivate));
+    // 闭集之外的行不复存在 ⇒ 未知主体照旧 fail-closed。
+    assert!(!matrix.can_write("agent:ghost", Capability::ReplyFirst));
+}
+
+/// `from_names` 的反向：**认不出的能力名拒绝整体构造**，且错误指名道姓。
+///
+/// 不能「跳过那一行 / 当作没这个能力」——那会把授权表里的笔误变成一条**悄悄生效的
+/// 拒绝**（生产上线后才发现某项能力从未生效），与 fail-closed 是两回事：这里拒绝的是
+/// 「表本身不合法」，于是宿主降级空矩阵 + 告警（`crate::authz::production_matrix`）。
+#[test]
+fn a_name_outside_the_closed_set_refuses_construction() {
+    let err =
+        PermissionMatrix::from_names(&[("agent:main", &["reply.fisrt"], VisScope::ThreadPrivate)])
+            .expect_err("拼写错误必须拒绝整体构造");
+    let text = err.to_string();
+    assert!(text.contains("reply.fisrt"), "错误要点名那个能力：{text}");
+    assert!(text.contains("agent:main"), "错误要点名那一行：{text}");
+}
+
+/// `can_reply`：**轮次位置 → 能力**的映射口径只在这一处（调用点不复述）。
+#[test]
+fn can_reply_maps_turn_position_to_one_capability() {
+    // 只有追加能力 ⇒ 首条被拒、追加放行（证明判的是能力，不是恒真）。
+    let append_only =
+        PermissionMatrix::from_names(&[("agent:worker", &["reply.append"], VisScope::default())])
+            .expect("成对策略必过");
+    assert!(
+        !append_only.can_reply("agent:worker", true),
+        "缺 reply.first"
+    );
+    assert!(
+        append_only.can_reply("agent:worker", false),
+        "有 reply.append"
+    );
+
+    // 只有首响能力 ⇒ 反过来。
+    let first_only =
+        PermissionMatrix::from_names(&[("agent:main", &["reply.first"], VisScope::default())])
+            .expect("成对策略必过");
+    assert!(first_only.can_reply("agent:main", true));
+    assert!(
+        !first_only.can_reply("agent:main", false),
+        "缺 reply.append"
+    );
+
+    // 空矩阵（表构造失败时的降级兜底）⇒ 一概拒绝；未知主体 ⇒ fail-closed。
+    let deny_all = PermissionMatrix::from_names(&[]).expect("空表无主体可校验");
+    assert!(!deny_all.can_reply("agent:main", true));
+    assert!(!first_only.can_reply("agent:ghost", true));
 }
 
 /// 与 S1/S2 彩排链路对接的形状预演：主体对**事件切片**的可见子集为空 ⇒ 越界读取 0。

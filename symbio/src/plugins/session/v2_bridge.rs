@@ -22,7 +22,7 @@
 use std::path::PathBuf;
 
 use crate::symbio_core::{
-    Entity, Event, EventWalStore, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK,
+    Entity, Event, EventWalStore, PermissionMatrix, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK,
     EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 
@@ -101,7 +101,7 @@ fn record_to_wal(
         Entity::Turn,
         Verb::Opened,
         turn,
-        "user",
+        crate::authz::PRINCIPAL_USER,
     )
     .with_payload(serde_json::json!({ "text": user_text, "tier": "deep", "turn_ref": user_id }));
     let user_seq = store
@@ -123,15 +123,54 @@ fn record_to_wal(
             cost_ms,
         ),
     };
+
+    // 01 §7 写侧闸（[04 §3.1 批⑥](../../../docs/plan/04-工程落地.md)）：收束格是
+    // 主智能体的**权威发言**，入格前判它是否持有对应能力——该轮首条 →
+    // `reply.first`，后续（同轮追加 / 重试）→ `reply.append`。映射口径在 core 的
+    // `can_reply`，此处不复述；表由 `crate::authz` 提供，全机只有那一张。
+    // 拒绝 = **不入格**：用户发言已入格、本轮留在未收束态，`check_all` 会把它
+    // 报进第五列（不变量）——拒绝可被看见，且 v1 对话行为不变（由 `record` 吞下）。
+    let prior_closures = snapshot
+        .iter()
+        .filter(|e| e.entity == Entity::Turn && e.verb == Verb::Closed && e.turn == turn)
+        .count() as u64;
+    authorize_close(
+        crate::authz::production_matrix(),
+        crate::authz::PRINCIPAL_MAIN,
+        prior_closures == 0,
+    )?;
+
     store
         .append(
-            Event::pending(id, kind, Entity::Turn, Verb::Closed, turn, "agent:main")
-                .with_produced_by(user_seq)
-                .with_cost_ms(cost_ms)
-                .with_payload(payload),
+            Event::pending(
+                id,
+                kind,
+                Entity::Turn,
+                Verb::Closed,
+                turn,
+                crate::authz::PRINCIPAL_MAIN,
+            )
+            .with_produced_by(user_seq)
+            .with_cost_ms(cost_ms)
+            .with_payload(payload),
         )
         .map_err(|e| format!("收束事件入格失败：{e:?}"))?;
     Ok(())
+}
+
+/// 收束入格前的写侧授权闸（[plan/01 §7](../../../docs/plan/01-核心架构.md) 写侧）。
+///
+/// `first` = 该轮尚无收束格。拒绝的语义是**不入格**，不是「照写但记一笔」——
+/// 记一笔会把授权判定降级成一个可以忽略的日志项。
+fn authorize_close(matrix: &PermissionMatrix, principal: &str, first: bool) -> Result<(), String> {
+    if matrix.can_reply(principal, first) {
+        return Ok(());
+    }
+    Err(format!(
+        "收束被授权拒绝（{} 缺 {}）",
+        principal,
+        if first { "reply.first" } else { "reply.append" }
+    ))
 }
 
 /// 本轮用户发言（消息 id + 文本）：本轮**第一条已提交**的用户 Text 节点。

@@ -33,8 +33,8 @@ use serde::Serialize;
 
 use crate::symbio_core::{
     check_all, checkpoint, cost_ledger, fallback_rate, slo_report, Budget, EventWalStore,
-    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
-    Seq, Store, SESSION_ID,
+    PermissionMatrix, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginInvokeResponse, PluginPayload, Seq, Store, VisScope, SESSION_ID,
 };
 
 use super::plugin::SessionPlugin;
@@ -84,14 +84,56 @@ pub(crate) struct SessionStats {
     pub invariants: serde_json::Value,
 }
 
+/// `session/stats` 的请求体：**全部可选**——不传 = 本机默认（今天的行为）。
+///
+/// `principal` 是读方身份（[plan/01 §7](../../../docs/plan/01-核心架构.md) 读侧）：
+/// 声明了才判可见域，没声明就不判定。**这里的选择权只在读方，可见域与属主
+/// 不在载荷里**——请求方自己声明「我能看到什么」等于给自己授权（governance 模块
+/// 文档点名的那条捷径），本字段只回答「我是谁」。
+#[derive(Debug, Default, Clone, serde::Deserialize)]
+pub(crate) struct StatsRequest {
+    /// 读方身份；缺席 / `null` ⇒ 不判定。
+    #[serde(default)]
+    pub principal: Option<String>,
+}
+
 /// 读一个会话的事实源，出四列读数 + 不变量清单。
 ///
 /// 纯读：不写文件、不改网格、不碰会话存储（消息 / 转写）。
-pub(crate) fn read(session_id: &str, wal: &Path) -> Result<SessionStats, PluginError> {
+///
+/// `viewer = Some(身份)` 时先按可见域取**可读切片**再出四列（**读什么由能看什么
+/// 决定**，不是先算完再裁结果）；`None` = 本机默认，与判定引入之前逐字一致。
+pub(crate) fn read(
+    session_id: &str,
+    wal: &Path,
+    viewer: Option<&str>,
+) -> Result<SessionStats, PluginError> {
     let has_wal = wal.exists();
     let store = EventWalStore::open_readonly(wal)
         .map_err(|e| PluginError::InternalError(format!("v2 WAL 读取失败：{e}")))?;
     let snapshot = store.range(Seq::new(0));
+
+    // 读侧闸（[04 §3.1 批⑥](../../../docs/plan/04-工程落地.md)）：**读什么由能看
+    // 什么决定**——四列与不变量列都只从「你看得见的事实」算，不先算完再裁结果。
+    //
+    // 属主 = 本机会话的属主（`SESSION_OWNER`，部署事实；`[会话] ≈ [线程]`，S4 的
+    // thread 实体落地前用会话属主），可见域取 C10 缺省 `thread_private`。于是：
+    // 属主本人 = 全量读数（与不声明时逐字一致）；非属主 / 矩阵外主体 = **空切片**
+    // ⇒ 四列全零、不变量清单为空，与 `has_wal: true` 并排即可分辨「有源但不给你
+    // 看」，而不是被读成「这里没有数」。
+    let snapshot = match viewer {
+        None => snapshot,
+        Some(principal) => {
+            let matrix: &PermissionMatrix = crate::authz::production_matrix();
+            let may_read =
+                matrix.can_see(principal, crate::authz::SESSION_OWNER, VisScope::default());
+            if may_read {
+                snapshot
+            } else {
+                Vec::new()
+            }
+        }
+    };
 
     // 四列全部来自同一份事件切片（ADR-044：实测与判据同源）。
     let latency = slo_report()
@@ -172,7 +214,20 @@ impl SessionPlugin {
         }
         let wal =
             super::paths::session_dir(&self.storage_dir(), &sid).join(super::paths::V2_WAL_FILE);
-        let stats = read(&sid, &wal)?;
+        // 载荷 = **读方身份声明**（可选）：不带 `principal` = 本机默认，与读侧闸
+        // 引入之前逐字一致；带了却读不出身份（类型不对）⇒ 声明了却判不了 ⇒ 拒绝
+        // 读数，不悄悄降级成「未声明」（fail-closed）。载荷整体缺席同理拒绝。
+        let viewer: Option<String> = match ctx.payload::<serde_json::Value>()? {
+            serde_json::Value::Null => None,
+            v => {
+                serde_json::from_value::<StatsRequest>(v)
+                    .map_err(|e| {
+                        PluginError::ValidationError(format!("session/stats 载荷不合法：{e}"))
+                    })?
+                    .principal
+            }
+        };
+        let stats = read(&sid, &wal, viewer.as_deref())?;
         Ok(PluginPayload::new(&stats))
     }
 }

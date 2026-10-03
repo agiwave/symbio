@@ -22,6 +22,7 @@ import './_selfrun.mjs';
 // | 出口真的挂上了生产路由 | gateway `POST /api/v1/invoke` → 容器 → `session/stats` |
 // | 读的是**这一轮真实写下**的事实 | 磁盘上的 `v2-events.wal`（由真实 LLM 流量产生） |
 // | 读方真的每次重读文件 | 对文件动手术后**再调一次**，读数跟着变 |
+// | `payload.principal` 真的进了读侧判定 | 线路层（`PluginMessageWire`）→ `ctx.payload` → 可见域闸 |
 //
 // ## 对账口径
 //
@@ -185,6 +186,51 @@ export default defineCase(
         assertEq(row.fallbacks, 1, '恰好一轮兜底');
         assertEq(row.samples, 1, '恰好一轮成功');
         assertEq(row.rate, 0.5, '兜底率 1/2');
+
+        // ── 证据 ②′：读侧可见域（[04 §3.1 批⑥](../../docs/plan/04-工程落地.md)）──
+        // 载荷声明**读方身份**才判可见域（`thread_private` 缺省，C10）；不声明 =
+        // 本机默认，与上面 ①/② 的读数逐字相同。三条并排要证的是**同一条事实源、
+        // 三种读法**——差异只来自闸，不来自文件（下面 ③ 才动文件）。
+        const asOwner = (
+          await api.invoke('session/stats', { principal: 'user' }, { session_id: SID })
+        ).body.data;
+        assertEq(
+          asOwner.checkpoint.event_count,
+          stats.checkpoint.event_count,
+          '读方 = 属主 ⇒ 与本机默认读到同样多的事实',
+        );
+        assertEq(
+          asOwner.cost.total_ms,
+          stats.cost.total_ms,
+          '读方 = 属主 ⇒ 成本列逐字相同（闸不是为了把属主挡在外面）',
+        );
+        assertEq(
+          asOwner.tiers,
+          stats.tiers,
+          '读方 = 属主 ⇒ 档位行逐字相同',
+        );
+
+        // 矩阵内但**不是属主**的主体、以及矩阵外的未知主体 ⇒ 读数全空（fail-closed）。
+        // `has_wal` 仍为真，于是「有源但不给你看」与「没有源」可分辨——不是被读成
+        // 「这一格没有数」。
+        for (const outsider of ['agent:main', 'agent:ghost']) {
+          const denied = (
+            await api.invoke('session/stats', { principal: outsider }, { session_id: SID })
+          ).body.data;
+          assertEq(denied.has_wal, true, `${outsider}: 事实源存在，只是不给你看`);
+          assertEq(
+            denied.checkpoint.event_count,
+            0,
+            `${outsider}: 断点列为空（越界读取 0）`,
+          );
+          assertEq(denied.cost.total_ms, 0, `${outsider}: 成本列为 0`);
+          assertEq(denied.tiers.length, 0, `${outsider}: 四列为空 ⇒ 无档位行`);
+          assertEq(
+            denied.invariants.length,
+            0,
+            `${outsider}: 没有可见事实 ⇒ 无可报的违规`,
+          );
+        }
 
         // ── 证据 ③：对事实源动手术 ⇒ 出口读数必须跟着变（不是常数）──────────
         // 每次手术都重读文件（出口也是每次重读），删掉命中的行。

@@ -60,9 +60,14 @@ pub use adapters::{
 };
 
 // ==================== 权限与可见性（v2 阶段 S3，⑥ governance） ====================
-// 读写成对、fail-closed（plan/01 §7）。注意：governance::Capability（权限能力，
-// 7 个封顶）与 capability::Capability（LLM 工具描述符）是两个概念，
-// 刻意**不进根平铺**——以路径限定消歧，见 governance/mod.rs 的同名辨析。
+// 读写成对、fail-closed（plan/01 §7）。根出口只出**矩阵与可见域**两个类型：
+// 构造面（`crate::authz` 的主体清单）与判定面（`plugins/session` 两道闸）都要指称
+// 它们，C-003 要求 ≥2 个模块级消费方——两个正好各 2 个。
+// governance::Capability（权限能力，7 个封顶）与 capability::Capability（LLM 工具
+// 描述符）是两个概念，**刻意不进根平铺**：授权表走能力名字符串（由
+// `PermissionMatrix::from_names` 按闭集校验），轮次→能力的映射收在 `can_reply` 里，
+// core 外的调用点既不深引也不与 `Capability` 撞名，见 governance/mod.rs 同名辨析。
+pub use governance::{PermissionMatrix, VisScope};
 
 // ==================== LLM 契约 ====================
 // 模型接入（`model_provider`）与单轮产物 / 帧原语（`turn`）。
