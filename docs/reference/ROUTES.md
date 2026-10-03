@@ -92,7 +92,7 @@
 |------|------|----------|
 | `session/chat/send` | 发起 AI 对话（流式；实际入口） | `Session` |
 | `session/chat/abort` | 中止进行中的对话 | `Empty` |
-| `session/stats` | 读本会话 v2 事实源的四列读数（时延分位 / 兜底率 / 成本台账 / 断点）——纯读，零副作用 | `SessionStats` |
+| `session/stats` | 读本会话 v2 事实源的四列读数（时延分位 / 兜底率 / 成本台账 / 断点）+ 不变量清单 `invariants`（`check_all` 五条，空 = 全绿）——纯读，零副作用 | `SessionStats` |
 
 > 会话与消息的增删改查**全部**经 VDFS 地址完成；`chat/send`、`chat/abort` 是编排 / 控制，
 > `stats` 是读数——三者都不是数据操作。前两者的**实时面**都走 `event_bus` 的 `vdfs` 频道

@@ -19,11 +19,27 @@
 //!
 //! 每条检查配**反向用例**：喂入违规序列，违规必须被看见；看不见 = 检查是摆设。
 //! 故障注入用例集（S1 步骤 4）在 `mod.test.rs` 的 fault 区统一收纳。
+//!
+//! ## 宽限（C4 / C5 的读侧形参）
+//!
+//! 直接调 C4 / C5 得自己决定「多旧才算违规、拿什么预算比」——这两个决定在
+//! **故障注入**（宁严）与**读侧**（首日假红就没人再看那份清单）里相反。于是
+//! 判据不写死在函数里，而是形参：[`unresolved_turns`] 的尾轮放行、
+//! [`budget_exceeded`] 的「没预算不判」。[`check_all`] 是读侧 / CI 的入口，
+//! 它替读侧选宽限；要严判就绕过它直接调那两条。
+//!
+//! 出口是 [`crate::symbio_core::check_all`]（根导出，消费方在 core 之外）——
+//! 这两条检查因此**不必**再进根出口：`core-export-audit` C-003 要求根导出的
+//! 符号至少有两个 core 外的消费方，而它们只服务读出口一个模块，单模块消费的
+//! 符号该下沉、不该占着架构出口。
 
 use super::event::{Entity, Event, Verb};
 
 /// 一处违规：事件（按 seq 定位）+ 人话。
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Serialize` 是**读出口**要的：`session/stats` 在出口边界一次性序列化
+/// （与 `cost_ledger` / `checkpoint` 视图同一形态），类型不进任何插件的 `use`。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Violation {
     /// 违规事件的 `event_id`（seq 尚未分配的pending 事件用它定位）。
     pub event_id: String,
@@ -132,12 +148,48 @@ fn needs_provenance(e: &Event) -> bool {
             ))
 }
 
-/// 三条一起跑（S0 的 CI 形态：任一违规 ⇒ 清单非空）。
+/// 五条一起跑（S0/S1 的 CI 形态：任一违规 ⇒ 清单非空）。
+///
+/// 前三条是结构判定（C1 `seq` 单调 / C2 每轮一条 final / C3 断言带溯源）；
+/// 后两条（C4 未收束 / C5 超预算）按**读侧口径**带宽限——本函数是
+/// `session/stats` 读出口与 e2e 的入口，首日就跑真实流量，假红一次
+/// 那份清单就再没人看：
+///
+/// - C4 放行**切片末尾**仍在途的一轮：读取瞬间它可能正在生成，而切片没有
+///   wall-clock（`Event::pending` 的 `ts` 恒 0，写方从不填），「在途」与「卡死」
+///   在纯函数里无从分辨。被**后续轮越过**的未收束轮照样报——那才确凿：
+///   会话已经往前走了，旧轮却没收束。
+/// - C5 只在切片**声明过档位**时判，预算取声明档位里**最宽**的一档（判定方向
+///   宁可漏报、不可假红：拿最严档比，会把别的档位的正常流量整片报成违规）。
+///
+/// 要严判就绕过本函数直接调 [`unresolved_turns`]（`false`）/ [`budget_exceeded`]。
 pub fn check_all(events: &[Event]) -> Vec<Violation> {
     let mut all = seq_monotonic(events);
     all.extend(final_unique_per_turn(events));
     all.extend(produced_by_coverage(events));
+    all.extend(unresolved_turns(events, true));
+    all.extend(budget_exceeded(events, declared_budget_ms(events)));
     all
+}
+
+/// 本切片**声明过**的档位里最宽的一档预算；一档都没声明 ⇒ `None`（C5 跳过）。
+///
+/// 档位只从开轮事件（`user.message`）的载荷读——与 `projection::fallback` 的
+/// `declared_tier` 同一个字段、同一个 `LatencyTier::from_name`，只是问的问题
+/// 不同：那边是「这一轮归哪一档」（按轮归位），这边是「这份切片最宽的预算
+/// 是多少」（一个全局上界，因此不会误伤任何一档）。
+fn declared_budget_ms(events: &[Event]) -> Option<u64> {
+    events
+        .iter()
+        .filter(|e| {
+            e.entity == Entity::Turn
+                && e.verb == Verb::Opened
+                && e.kind == crate::symbio_core::event::EVENT_USER_MESSAGE
+        })
+        .filter_map(|e| e.payload.get("tier").and_then(|v| v.as_str()))
+        .filter_map(crate::symbio_core::adapters::LatencyTier::from_name)
+        .map(|t| t.budget_ms())
+        .max()
 }
 
 /// C4（I3 到点必答）：开过的 turn 必须收束。
@@ -146,13 +198,24 @@ pub fn check_all(events: &[Event]) -> Vec<Violation> {
 /// 有 `user.message`（`turn × opened`）却始终等不到 `chat.assistant.final` /
 /// `chat.assistant.fallback`（`turn × closed`），就是**对话静默中断**——超时后
 /// 什么都没发生，没有任何错误信号的那类失效。兜底必须产生事件（I3）。
-#[allow(dead_code)] // dead-code-allow R-002: 不变量可执行名（README §1.2 invariants 行）；04 §3.1 批④ 接线后摘除
-pub fn unresolved_turns(events: &[Event]) -> Vec<Violation> {
-    let mut bad = Vec::new();
-    let mut opened: Vec<(u64, &str)> = Vec::new();
-    for e in events {
+///
+/// # 宽限形参 `allow_trailing_open`
+///
+/// `false` = 严格：任何未收束的轮都算违规（故障注入用这一档，见
+/// `fault_timeout_turn_never_settles_is_caught`）。
+/// `true` = 放行**切片末尾**那一轮（[`check_all`] 的读侧口径）：它可能正在
+/// 生成，切片又没有时间可比。放行的判据是「它就是最后开的那一轮」——
+/// 一旦后面又开了新轮，旧轮的未收束就是确凿的静默中断，照报。
+///
+/// 违规锚在**开轮那条事件**上（`event_id` 指向缺口本身，不是切片末尾某条无关事件）。
+pub fn unresolved_turns(events: &[Event], allow_trailing_open: bool) -> Vec<Violation> {
+    // (开轮事件在切片中的位置, turn 号, 开轮事件)——位置用于判「尾轮」。
+    let mut opened: Vec<(usize, u64, &Event)> = Vec::new();
+    let mut last_open_pos: Option<usize> = None;
+    for (i, e) in events.iter().enumerate() {
         if e.entity == Entity::Turn && e.verb == Verb::Opened && e.kind == "user.message" {
-            opened.push((e.turn, e.event_id.as_str()));
+            opened.push((i, e.turn, e));
+            last_open_pos = Some(i);
         }
         if e.entity == Entity::Turn
             && e.verb == Verb::Closed
@@ -162,14 +225,19 @@ pub fn unresolved_turns(events: &[Event]) -> Vec<Violation> {
                     | crate::symbio_core::event::EVENT_ASSISTANT_FALLBACK
             )
         {
-            opened.retain(|(turn, _)| *turn != e.turn);
+            opened.retain(|(_, turn, _)| *turn != e.turn);
         }
     }
-    for (turn, first_id) in opened {
+    let mut bad = Vec::new();
+    for (pos, turn, open_event) in opened {
+        if allow_trailing_open && Some(pos) == last_open_pos {
+            continue; // 宽限：尾轮在途（或崩溃残轮），切片内没有更晚的开轮可证它卡死
+        }
         bad.push(Violation::at(
-            events.last().expect("opened 非空 ⇒ 事件序列非空"),
+            open_event,
             format!(
-                "turn {turn}（自 {first_id} 开启）始终未收束——无 final 也无 fallback，对话静默中断（I3 到点必答）"
+                "turn {turn}（自 {} 开启）始终未收束——无 final 也无 fallback，对话静默中断（I3 到点必答）",
+                open_event.event_id
             ),
         ));
     }
@@ -180,8 +248,16 @@ pub fn unresolved_turns(events: &[Event]) -> Vec<Violation> {
 ///
 /// 超预算本身**允许发生**（S4 的兜底链路负责降级），但它必须被**看见**：
 /// `budget_ms` 是 I3 的记账口径，超了却没人知道 = 声明式预算（S1 之前的形态）。
-#[allow(dead_code)] // dead-code-allow R-002: 不变量可执行名（README §1.2 invariants 行）；04 §3.1 批④ 接线后摘除
-pub fn budget_exceeded(events: &[Event], budget_ms: u64) -> Vec<Violation> {
+///
+/// # 宽限形参 `budget_ms: Option<u64>`
+///
+/// `None` = **本次判定没有预算** ⇒ 不判（返回空）。没有预算就没有「超」——
+/// 硬塞一个默认数会把正常流量整片报成违规，那才是首日假红。读侧由
+/// [`declared_budget_ms`] 供数：切片声明过档位才 `Some`。
+pub fn budget_exceeded(events: &[Event], budget_ms: Option<u64>) -> Vec<Violation> {
+    let Some(budget_ms) = budget_ms else {
+        return Vec::new();
+    };
     events
         .iter()
         .filter(|e| e.cost_ms > budget_ms)

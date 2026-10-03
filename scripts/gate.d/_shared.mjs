@@ -428,7 +428,18 @@ export const BASELINE = {
   //      不发生且**无告警**，事实源根本不曾存在（详见 04 §3.1 S2 行）。
   //      验收 = stats 3 例（复算 / 反向手术 / 缺源不创建）+ wal 只读 2 例
   //      + `first_user_utterance` 真实形状 1 例 + e2e t28（四列对账 + 两刀反向）。
-  rustTests: 1220,
+  // 1223（不变量进读出口，2026-10-03）——`1220 → 1223`，**+3**。
+  //      `check_all` 从「只被测试调」变成**读出口的第五列**（`session/stats`
+  //      的 `invariants`，空 = 五条全绿）：C4 未收束 / C5 超预算并进
+  //      `check_all`，两条 `dead-code-allow` 摘除（04 §3.1 批④）。判据为
+  //      **读侧口径**的宽限——首日不假红：C4 放行切片尾轮在途（切片无
+  //      wall-clock，「在途」与「卡死」无从分辨；被后续轮越过的照样报），
+  //      C5 只在声明过档位时判、取最宽一档预算。严判档走形参
+  //      （`unresolved_turns(_, false)` / `budget_exceeded(_, Some(n))`）。
+  //      验收 = `read_side_graces_the_trailing_open_turn_but_flags_the_overtaken_one`
+  //      + `read_side_budget_follows_declared_tiers_and_skips_when_none_declared`
+  //      + stats `invariants_move_when_the_wal_changes`（两刀后清单跟着红/回落）。
+  rustTests: 1223,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

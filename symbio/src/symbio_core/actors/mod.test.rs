@@ -328,7 +328,7 @@ async fn reasoner_turn_keeps_all_invariants_green() {
         "{:?}",
         check_all(&snapshot)
     );
-    assert!(unresolved_turns(&snapshot).is_empty());
+    assert!(unresolved_turns(&snapshot, false).is_empty());
     // turnstate 投影照常工作（N1：双跑一致）。
     let p = turnstate();
     let v1 = p.apply(&snapshot, 0, Budget::generous());
@@ -360,7 +360,7 @@ async fn reasoner_failure_produces_fallback_with_telemetry() {
         check_all(&snapshot)
     );
     assert!(
-        unresolved_turns(&snapshot).is_empty(),
+        unresolved_turns(&snapshot, false).is_empty(),
         "写了 fallback ⇒ turn 已收束"
     );
 }
@@ -376,12 +376,12 @@ async fn four_tier_budgets_are_measurable() {
     assert!(cost_ms.is_some(), "cost_ms 埋点必非零（兜底埋点就位）");
     let cost = cost_ms.unwrap();
     assert!(
-        !budget_exceeded(&snapshot, LatencyTier::Reflex.budget_ms()).is_empty(),
+        !budget_exceeded(&snapshot, Some(LatencyTier::Reflex.budget_ms())).is_empty(),
         "反射档 {}/80ms 必须被看见超预算",
         cost
     );
     assert!(
-        budget_exceeded(&snapshot, LatencyTier::Deep.budget_ms()).is_empty(),
+        budget_exceeded(&snapshot, Some(LatencyTier::Deep.budget_ms())).is_empty(),
         "同一时延在深度档预算内"
     );
     // 反向锚：预算表口径（01 §10）在 adapters 域的单测里逐值钉死。
@@ -1537,7 +1537,7 @@ fn long_goal_overrun_is_visible_and_budget_param_is_live() {
     // 验收 3：超 86.4M 必须产出兜底（先被看见）。
     let bad = budget_exceeded(
         &snapshot,
-        crate::symbio_core::adapters::LatencyTier::Autonomic.budget_ms(),
+        Some(crate::symbio_core::adapters::LatencyTier::Autonomic.budget_ms()),
     );
     assert_eq!(bad.len(), 1, "长目标超支必须被看见：{bad:?}");
     // 验收 4（反向）：同一事件 70M ms（预算内）；把预算改成 60000 → 判定改变。
@@ -1554,11 +1554,11 @@ fn long_goal_overrun_is_visible_and_budget_param_is_live() {
     .with_payload(serde_json::json!({ "task_id": "goal-1" }));
     let ok_events = vec![ok_event];
     assert!(
-        budget_exceeded(&ok_events, 86_400_000).is_empty(),
+        budget_exceeded(&ok_events, Some(86_400_000)).is_empty(),
         "70M 在自主层预算内"
     );
     assert_eq!(
-        budget_exceeded(&ok_events, 60_000).len(),
+        budget_exceeded(&ok_events, Some(60_000)).len(),
         1,
         "同一耗时，深挖档预算下违规"
     );
@@ -2224,7 +2224,7 @@ mod turn_runner_tests {
             check_all(&snapshot)
         );
         assert_eq!(
-            unresolved_turns(&snapshot).len(),
+            unresolved_turns(&snapshot, false).len(),
             1,
             "缺口要**可被判出**（不是假装收束）——C4 看得见它"
         );
@@ -2494,7 +2494,7 @@ mod tool_round_tests {
             check_all(&snapshot)
         );
         assert_eq!(
-            unresolved_turns(&snapshot).len(),
+            unresolved_turns(&snapshot, false).len(),
             1,
             "缺口要可被判出（不是假装收束）"
         );
@@ -2565,7 +2565,7 @@ mod tool_round_tests {
             .expect("等待用户不是失败");
         assert!(first.awaits_user, "等待轮必须在结果里可见");
         assert_eq!(
-            unresolved_turns(&store.range(Seq::new(0))).len(),
+            unresolved_turns(&store.range(Seq::new(0)), false).len(),
             1,
             "等待轮留一个可判出的缺口"
         );
@@ -2648,7 +2648,7 @@ mod tool_round_tests {
             check_all(&snapshot)
         );
         assert!(
-            unresolved_turns(&snapshot).is_empty(),
+            unresolved_turns(&snapshot, false).is_empty(),
             "续写填上了原轮的缺口（否则 C4 会把它当永久假缺口）"
         );
 

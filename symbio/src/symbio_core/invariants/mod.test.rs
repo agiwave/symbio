@@ -203,9 +203,17 @@ fn fault_timeout_turn_never_settles_is_caught() {
         Verb::Opened,
         0,
     )]);
-    let bad = unresolved_turns(&events);
+    // 严判档（`false`）：故障注入要的是"开了没关就是红"。
+    let bad = unresolved_turns(&events, false);
     assert_eq!(bad.len(), 1, "静默中断必须被看见（I3：兜底必须产生事件）");
     assert!(bad[0].why.contains("未收束"), "{}", bad[0].why);
+    // 宽限档（`true`）：切片尾部这一轮可能只是**还在生成**——纯函数无从分辨，
+    // 放行（读侧口径，见 `check_all`）。两条判据并存，不是谁覆盖谁。
+    assert!(
+        check_all(&events).is_empty(),
+        "读侧不该把在途尾轮报成静默中断：{:?}",
+        check_all(&events)
+    );
 }
 
 #[test]
@@ -221,7 +229,7 @@ fn fault_timeout_avoided_by_fallback_event() {
             0,
         ),
     ]);
-    assert!(unresolved_turns(&events).is_empty());
+    assert!(unresolved_turns(&events, false).is_empty());
 }
 
 #[test]
@@ -279,11 +287,81 @@ fn fault_budget_exceeded_is_caught() {
     // I3 记账：单事件耗时超主体预算必须被看见（超预算允许发生，但不容隐身）。
     let events =
         vec![pending("s0", "task.progress", Entity::Task, Verb::Progressed, 0).with_cost_ms(2_000)];
-    let bad = budget_exceeded(&events, 1_500);
+    let bad = budget_exceeded(&events, Some(1_500));
     assert_eq!(bad.len(), 1, "超预算必须被看见");
     assert!(bad[0].why.contains("2"), "{}", bad[0].why);
     // 反向：预算内不报警。
     let ok =
         vec![pending("s1", "task.progress", Entity::Task, Verb::Progressed, 0).with_cost_ms(1_499)];
-    assert!(budget_exceeded(&ok, 1_500).is_empty());
+    assert!(budget_exceeded(&ok, Some(1_500)).is_empty());
+    // 宽限档：没给预算就无从判"超"——返回空，不是拿默认数硬比。
+    assert!(budget_exceeded(&events, None).is_empty(), "无预算 ⇒ 不判");
+}
+
+// ── 读侧宽限（04 §3.1 批④：两条 I3 检查接进读出口前先立的口径）────────────
+
+#[test]
+fn read_side_graces_the_trailing_open_turn_but_flags_the_overtaken_one() {
+    // 轮 0 开了没收束，轮 1 随后开轮并正常收束——会话已经往前走，轮 0 是确凿的
+    // 静默中断（不是"还在生成"），读侧必须报。
+    let overtaken = stored(vec![
+        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
+        pending("u1", "user.message", Entity::Turn, Verb::Opened, 1),
+        pending("f1", "chat.assistant.final", Entity::Turn, Verb::Closed, 1),
+    ]);
+    let bad = unresolved_turns(&overtaken, true);
+    assert_eq!(bad.len(), 1, "被后续轮越过的未收束轮必须报");
+    assert_eq!(bad[0].event_id, "u0", "违规锚在缺口本身（开轮那条）");
+    assert!(
+        check_all(&overtaken)
+            .iter()
+            .any(|v| v.why.contains("未收束")),
+        "经 check_all 也要红：{:?}",
+        check_all(&overtaken)
+    );
+}
+
+#[test]
+fn read_side_budget_follows_declared_tiers_and_skips_when_none_declared() {
+    // 声明了 reflex 档（80ms）⇒ 预算有值，2000ms 的事件必须被看见。
+    let declared = stored(vec![
+        Event::pending("u0", "user.message", Entity::Turn, Verb::Opened, 0, "user")
+            .with_payload(serde_json::json!({ "text": "问", "tier": "reflex" })),
+        Event::pending(
+            "s0",
+            "task.progress",
+            Entity::Task,
+            Verb::Progressed,
+            0,
+            "agent:autonomous",
+        )
+        .with_produced_by(0)
+        .with_cost_ms(2_000),
+    ]);
+    assert_eq!(
+        declared_budget_ms(&declared),
+        Some(80),
+        "声明档位 ⇒ 预算 = 该档四层预算表"
+    );
+    assert!(
+        check_all(&declared).iter().any(|v| v.why.contains("超")),
+        "读侧必须看见超预算：{:?}",
+        check_all(&declared)
+    );
+
+    // 一档都没声明 ⇒ `None` ⇒ 不判（没有预算就没有"超"）。
+    let undeclared = stored(vec![pending(
+        "s1",
+        "task.progress",
+        Entity::Task,
+        Verb::Progressed,
+        0,
+    )
+    .with_cost_ms(9_999_999)]);
+    assert_eq!(declared_budget_ms(&undeclared), None);
+    assert!(
+        check_all(&undeclared).is_empty(),
+        "未声明档位的切片首日不该红：{:?}",
+        check_all(&undeclared)
+    );
 }

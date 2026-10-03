@@ -1,6 +1,7 @@
 import './_selfrun.mjs';
-// T28 读数口 `session/stats`：跑一轮成功 + 一轮兜底，从**生产出口**读四列，
-// 与同一份 `v2-events.wal` 逐列对账；再对事实源做手术，验证列真的会动。
+// T28 读数口 `session/stats`：跑一轮成功 + 一轮兜底，从**生产出口**读四列
+// 与一份不变量清单，与同一份 `v2-events.wal` 逐列对账；再对事实源做手术，
+// 验证列和清单真的会动。
 //
 // ## 编号为什么是 28
 //
@@ -136,12 +137,24 @@ export default defineCase(
         assertEq(stats.session_id, SID, '出口应回带会话 id');
         assert(stats.has_wal, '跑过两轮 ⇒ 事实源应在');
 
+        // ── 证据 ①′：不变量列在**真实生产流量**下必须全绿（04 §3.1 批④）────
+        // 这条断言同时钉两件事：wiring 真的接上了（不是恒空的摆设——下一刀会
+        // 把它变红），以及首日不假红（在途轮 / 档位预算的宽限口径生效）。
+        assertEq(
+          stats.invariants.length,
+          0,
+          `两轮都收束、档位已声明且预算内 ⇒ 五条全绿（实际: ${JSON.stringify(stats.invariants)}）`,
+        );
+
         // ── 证据 ②：逐列与**同一时刻的文件**对账（JS 只计数，不复刻统计口径）──
         const events = readEvents(walPath);
         const finals = events.filter((e) => e.kind === 'chat.assistant.final');
         const fallbacks = events.filter((e) => e.kind === 'chat.assistant.fallback');
         const opens = events.filter((e) => e.kind === 'user.message');
         const totalCost = events.reduce((n, e) => n + (e.cost_ms ?? 0), 0);
+        // 手术靶子（轮 0 的开轮事件）的 event_id——稍后验不变量**锚在这条上**。
+        const turn0OpenId = opens.find((e) => e.turn === 0)?.event_id;
+        assert(turn0OpenId, `事实源里应有轮 0 的开轮事件（实际: ${JSON.stringify(opens)}）`);
 
         assertEq(
           stats.checkpoint.event_count,
@@ -201,6 +214,21 @@ export default defineCase(
         assertEq(afterDropFinal.tiers[0].p95, 0, '无样本 ⇒ 分位数 0');
         assertEq(afterDropFinal.tiers[0].turns, 2, '开轮格未动 ⇒ 分母不变');
         assertEq(afterDropFinal.checkpoint.event_count, 3, '断点是事实计数');
+        // 同一刀必须也砍在不变量列上：轮 0 被轮 1 越过 ⇒ C4 报「未收束」，
+        // 中间那行没了 ⇒ C1 报 seq 跳号。两刀一清单，证明这一列不是常数。
+        assertEq(
+          afterDropFinal.invariants.length,
+          2,
+          `手术后不变量必须红（实际: ${JSON.stringify(afterDropFinal.invariants)}）`,
+        );
+        assert(
+          afterDropFinal.invariants.some((v) => v.why.includes('未收束')),
+          `C4：删掉收束格 ⇒ 该轮被判未收束（实际: ${JSON.stringify(afterDropFinal.invariants)}）`,
+        );
+        assert(
+          afterDropFinal.invariants.some((v) => v.event_id === turn0OpenId),
+          `违规锚在开轮那条（缺口本身，id=${turn0OpenId}）（实际: ${JSON.stringify(afterDropFinal.invariants)}）`,
+        );
 
         // 3b. 再删掉**第一轮**的开轮格 ⇒ 兜底率的**分母**必须变（2 → 1）
         dropMatching((e) => e.kind === 'user.message' && e.turn === 0);
@@ -209,6 +237,11 @@ export default defineCase(
         assertEq(afterDropOpen.tiers[0].fallbacks, 1, '兜底格未动 ⇒ 分子不变');
         assertEq(afterDropOpen.tiers[0].rate, 1, '分母变了 ⇒ 比率必须跟着变（1/1）');
         assertEq(afterDropOpen.checkpoint.event_count, 2);
+        // 开轮格也没了 ⇒ 没有可判的缺口：C4 必须跟着回落（否则它锚的是别的东西）。
+        assert(
+          !afterDropOpen.invariants.some((v) => v.why.includes('未收束')),
+          `开轮格被删 ⇒ C4 无从判定（实际: ${JSON.stringify(afterDropOpen.invariants)}）`,
+        );
       } finally {
         api.stop();
       }

@@ -8,8 +8,9 @@
 
 use super::read;
 use crate::symbio_core::{
-    checkpoint, cost_ledger, fallback_rate, slo_report, Budget, Entity, Event, EventWalStore, Seq,
-    Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+    check_all, checkpoint, cost_ledger, fallback_rate, slo_report, Budget, Entity, Event,
+    EventWalStore, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
+    EVENT_USER_MESSAGE,
 };
 use std::path::{Path, PathBuf};
 
@@ -173,6 +174,47 @@ fn reverse_case_each_column_moves_when_the_wal_changes() {
     assert_eq!(after.checkpoint["event_count"], 2);
 }
 
+/// 不变量列随事实源反向变化（[04 §3.1 批④](../../../../docs/plan/04-工程落地.md)）：
+/// 真实形状的两轮全绿 ⇒ 空；删掉收束格 ⇒ C4 必须报出那个缺口。
+#[test]
+fn invariants_move_when_the_wal_changes() {
+    let wal = seed("invariants");
+    let clean = read("s1", &wal).unwrap();
+
+    // 复算：出口的清单与直接 `check_all` 逐字相等（口径只活在 core，出口不复判）。
+    let store = EventWalStore::open_readonly(&wal).unwrap();
+    let snap = store.range(Seq::new(0));
+    assert_eq!(
+        clean.invariants,
+        serde_json::to_value(check_all(&snap)).unwrap()
+    );
+    assert_eq!(
+        clean.invariants,
+        serde_json::json!([]),
+        "两轮都收束、档位已声明且预算内 ⇒ 五条全绿（首日不假红）"
+    );
+
+    // 删轮 0 的收束格 ⇒ 轮 0 被轮 1 越过 ⇒ C4 报未收束；行删了 ⇒ C1 报 seq 跳号。
+    drop_line(&wal, "f0");
+    let list = read("s1", &wal).unwrap().invariants;
+    let list = list.as_array().expect("清单是数组");
+    assert_eq!(list.len(), 2, "{list:?}");
+    assert!(
+        list.iter()
+            .any(|v| v["why"].as_str().unwrap_or_default().contains("未收束")),
+        "C4：删掉收束格 ⇒ 该轮被判未收束：{list:?}"
+    );
+    assert!(
+        list.iter().any(|v| v["event_id"] == "u0"),
+        "违规锚在开轮那条（缺口本身，不是切片末尾某条无关事件）：{list:?}"
+    );
+    assert!(
+        list.iter()
+            .any(|v| v["why"].as_str().unwrap_or_default().contains("seq")),
+        "C1：删掉中间一行 ⇒ 后续 seq 跳号：{list:?}"
+    );
+}
+
 /// 没有事实源 = 有据的零，且读方不许创建文件（真·只读）。
 #[test]
 fn missing_wal_is_an_honest_zero_and_creates_nothing() {
@@ -186,6 +228,7 @@ fn missing_wal_is_an_honest_zero_and_creates_nothing() {
     assert!(got.tiers.is_empty());
     assert_eq!(got.checkpoint["event_count"], 0);
     assert_eq!(got.cost["total_ms"], 0);
+    assert_eq!(got.invariants, serde_json::json!([]), "空事实源 ⇒ 五条全绿");
     assert!(
         !wal.exists(),
         "读方不得为了读而创建事实源文件——那会把「没跑过一轮」变成「跑过一轮空的」"

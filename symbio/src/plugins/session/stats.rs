@@ -11,7 +11,8 @@
 //! - **只调已有投影，不另写一份统计**（[plan/12 §4](../../../docs/plan/12-价值验收与基线埋点.md)）：
 //!   本文件里没有分位数 / 占比 / 累计的算式——口径只活在 core 的投影里，出口
 //!   只做「取数 + 排版」。否则同一份事实会长出两套口径，读数与投影静默漂移，
-//!   而两边都自称是 SLO。
+//!   而两边都自称是 SLO。**不变量同理**：清单只调 `check_all`，宽限与预算判据
+//!   由 core 定（[04 §3.1 批④](../../../docs/plan/04-工程落地.md)——本处不复判）。
 //! - **真·只读**：WAL 经 [`EventWalStore::open_readonly`] 打开——不创建文件、
 //!   不截断撕裂尾行。截断是**写方**的恢复语义，读方顺手做会与正在落行的写方
 //!   撞车（append 模式下截断后剩下的字节接在新 EOF ⇒ 那一行静默损坏）。
@@ -31,9 +32,9 @@ use std::sync::Arc;
 use serde::Serialize;
 
 use crate::symbio_core::{
-    checkpoint, cost_ledger, fallback_rate, slo_report, Budget, EventWalStore, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload, Seq, Store,
-    SESSION_ID,
+    check_all, checkpoint, cost_ledger, fallback_rate, slo_report, Budget, EventWalStore,
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
+    Seq, Store, SESSION_ID,
 };
 
 use super::plugin::SessionPlugin;
@@ -75,9 +76,15 @@ pub(crate) struct SessionStats {
     /// 断点（`checkpoint` 视图原样序列化：`last_seq` / `event_count` /
     /// `kind_counts`——末两项就是「这一格里到底有多少事实」）。
     pub checkpoint: serde_json::Value,
+    /// 不变量违规清单（`check_all` 五条：C1 `seq` 单调 / C2 每轮一条 final /
+    /// C3 断言带溯源 / C4 未收束 / C5 超预算）。**空 = 五条全绿**；每条带
+    /// `event_id` 与人话。宽限口径（尾轮在途放行、按声明档位取预算）在 core 的
+    /// `check_all`，本处只取数——[04 §3.1 批④](../../../docs/plan/04-工程落地.md)
+    /// 的「不变量进 CI/读侧」：e2e 断言的就是这一列。
+    pub invariants: serde_json::Value,
 }
 
-/// 读一个会话的事实源，出四列读数。
+/// 读一个会话的事实源，出四列读数 + 不变量清单。
 ///
 /// 纯读：不写文件、不改网格、不碰会话存储（消息 / 转写）。
 pub(crate) fn read(session_id: &str, wal: &Path) -> Result<SessionStats, PluginError> {
@@ -133,6 +140,8 @@ pub(crate) fn read(session_id: &str, wal: &Path) -> Result<SessionStats, PluginE
         .map_err(|e| PluginError::InternalError(format!("成本台账序列化失败：{e}")))?;
     let checkpoint = serde_json::to_value(&ck)
         .map_err(|e| PluginError::InternalError(format!("断点序列化失败：{e}")))?;
+    let invariants = serde_json::to_value(check_all(&snapshot))
+        .map_err(|e| PluginError::InternalError(format!("不变量清单序列化失败：{e}")))?;
 
     Ok(SessionStats {
         session_id: session_id.to_string(),
@@ -141,6 +150,7 @@ pub(crate) fn read(session_id: &str, wal: &Path) -> Result<SessionStats, PluginE
         tiers,
         cost,
         checkpoint,
+        invariants,
     })
 }
 

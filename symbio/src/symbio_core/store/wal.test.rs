@@ -168,7 +168,7 @@ fn recovery_projection_is_byte_identical_to_pre_crash() {
         "{:?}",
         check_all(&snapshot)
     );
-    assert!(unresolved_turns(&snapshot).is_empty());
+    assert!(unresolved_turns(&snapshot, false).is_empty());
     // 断点事件本身也在账上（thread.checkpoint 落 thread × progressed）。
     assert_eq!(after_cp.kind_counts.get("thread.checkpoint"), Some(&1));
 }
