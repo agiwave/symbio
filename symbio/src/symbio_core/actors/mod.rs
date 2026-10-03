@@ -61,11 +61,11 @@ pub enum Scope {
 
 /// 主体规格（[plan/01 §4](../../../../docs/plan/01-核心架构.md) 的 `ActorSpec`，五字段）。
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑧ 接线后摘除
 pub struct ActorSpec {
     /// 身份（数据，无限增长——如 `"agent:main"`）。
     #[allow(dead_code)]
-    // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑧ 接线后摘除
     pub principal: String,
     /// 三种模式之一（机制，封顶）。
     pub pattern: Pattern,
@@ -80,7 +80,7 @@ pub struct ActorSpec {
 impl ActorSpec {
     /// S01 的平凡值主体（[roadmap/S01 §4](../../../../docs/plan/roadmap/S01-最小闭环.md)）：
     /// 全规则驱动、预算放宽、单主体——平凡值下系统完整运行。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑧ 接线后摘除
     pub fn trivial(principal: impl Into<String>) -> Self {
         ActorSpec {
             principal: principal.into(),
@@ -99,7 +99,7 @@ impl ActorSpec {
 /// 因此「Decider 答不出」在类型上就是 `Err(DeciderMiss)`，调用方据此产兜底事件——
 /// 它永远逃不出审计（I2）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑤ 接线后摘除
 pub struct DeciderMiss {
     /// 未命中的输入摘要（入兜底事件的载荷，可观测）。
     pub utterance: String,
@@ -111,21 +111,21 @@ pub struct DeciderMiss {
 /// 确定性：同一事件序列 ⇒ 同一应答（N1 在整条链路上成立的前提）。
 ///
 /// 规则表是**数据**：加规则不加分支（同事件网格的"加名字不加枚举"）。
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑤ 接线后摘除
 pub struct Decider {
     rules: Vec<(&'static str, &'static str)>,
 }
 
 impl Decider {
     /// 规则表驱动构造：`(子串匹配, 应答)` 逐条尝试，**首条命中即返回**。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑤ 接线后摘除
     pub fn new(rules: Vec<(&'static str, &'static str)>) -> Self {
         Decider { rules }
     }
 
     /// S01 彩排用的最小规则表（内容来自
     /// [`docs/plan/verify/latency_gate.rs`](../../../../docs/plan/verify/latency_gate.rs) 的 `RuleEngine`）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑤ 接线后摘除
     pub fn rehearsal() -> Self {
         Decider::new(vec![
             ("你好", "你好，我能做什么？"),
@@ -138,7 +138,7 @@ impl Decider {
     /// 输入是事件切片而非裸文本：Decider 自己从事件里找 `user.message`——
     /// 「收到」这个端点（[roadmap/S01 §1](../../../../docs/plan/roadmap/S01-最小闭环.md)）
     /// 由此成为它的输入契约，而不是调用方的口头约定。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑤ 接线后摘除
     pub fn respond(
         &self,
         events: &[crate::symbio_core::event::Event],
@@ -241,14 +241,14 @@ impl Reasoner {
 /// 本体的职责只是把「读视图」落成「一条事实」——`memory.recalled` 事件
 /// （`memory × asserted` 格子，带溯源指向触发它的事件）。检索是
 /// 「读视图 → 产出事实」，这正是 Actor 定义对 Translator 的要求。
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑦ 接线后摘除
 pub struct RecallTranslator;
 
 impl RecallTranslator {
     /// 把召回结果固化为一条 `memory.recalled` 事件。
     ///
     /// `trigger_seq`：触发本次检索的事件 seq（溯源锚——I2：断言类必带溯源）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑦ 接线后摘除
     pub fn recalled_event(
         &self,
         view: &crate::symbio_core::view::RecallView,
@@ -281,13 +281,13 @@ impl RecallTranslator {
 /// 是否履行」落成**普通事件**（经 Store，无直连——I1 的直接推论）。
 /// 违约不是异常通道：`broken` 与 `released` 是同一格（`commitment × closed`）
 /// 的两个名字，违约必须带 `why`（可观测，S08 §5）。
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑧ 接线后摘除
 pub struct CommitmentKeeper;
 
 impl CommitmentKeeper {
     /// 立约：`from` 向 `to` 承诺 `promise`。`source_seq` 是触发本次立约的事件
     /// （溯源锚；无触发场景传 0 并由调用方保证可解释）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑧ 接线后摘除
     pub fn offer(&self, id: &str, from: &str, to: &str, promise: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("c-offer-{id}"),
@@ -302,7 +302,7 @@ impl CommitmentKeeper {
     }
 
     /// 守约收束。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑧ 接线后摘除
     pub fn release(&self, id: &str, from: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("c-close-{id}"),
@@ -317,7 +317,7 @@ impl CommitmentKeeper {
     }
 
     /// 违约收束（**必须带 why**——违约可被观测是 T5 的全部前提）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑧ 接线后摘除
     pub fn breach(&self, id: &str, from: &str, why: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("c-close-{id}"),
@@ -333,7 +333,7 @@ impl CommitmentKeeper {
 
     /// 对等宣告：把承诺状态告知协作方（`commitment.asserted`，
     /// `commitment × asserted` 格——声明仍是一条普通事件，带溯源）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑧ 接线后摘除
     pub fn declare(&self, id: &str, from: &str, statement: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("c-assert-{id}"),
@@ -350,7 +350,7 @@ impl CommitmentKeeper {
 
 /// 抢占判定结论（反射档三选一 + 超时默认，[plan/04 §2.1](../../../../docs/plan/04-工程落地.md)）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑩ 接线后摘除
 pub enum Preemption {
     /// 当前无在跑任务——插话放行，直接开始新 turn。
     Proceed,
@@ -369,7 +369,7 @@ pub enum Preemption {
 /// 系统第一次需要在几十毫秒内对外部信号做决策。**判定者只产控制事件**
 /// （`task.controlled`），无 `reply.*` 写权——它不得直接发言（S07 §5，由
 /// grants 表保证，见 governance 测试）。
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑩ 接线后摘除
 pub struct PreemptionDecider;
 
 impl PreemptionDecider {
@@ -378,7 +378,7 @@ impl PreemptionDecider {
     /// `elapsed_ms`：判定者自身耗时（调用方 `Instant` 计时后传入——判定是纯函数，
     /// 计时留在边界上）。预算内（≤ `budget_ms`）才做实质判定，超时走默认分支。
     /// 判定顺序（04 §2.1）：无在跑任务 → 放行；final 已发出 → 排队；否则 → 挂起。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑩ 接线后摘除
     pub fn decide(&self, events: &[Event], elapsed_ms: u64, budget_ms: u64) -> Preemption {
         if elapsed_ms > budget_ms {
             return Preemption::TimeoutDefaultContinue;
@@ -428,7 +428,7 @@ impl PreemptionDecider {
     }
 
     /// 挂起事件（`task × held`）——挂起就是一条事件，不需要新状态机。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑩ 接线后摘除
     pub fn held_event(&self, task_id: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("held-{task_id}-{source_seq}"),
@@ -443,7 +443,7 @@ impl PreemptionDecider {
     }
 
     /// 控制事件（`control × opened`）——打断处置的产出事实。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑩ 接线后摘除
     pub fn control_event(&self, reason: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("ctrl-{source_seq}"),
@@ -460,7 +460,7 @@ impl PreemptionDecider {
 
 /// 闸门结论（S8 第 20 步，[roadmap/S09 §6](../../../../docs/plan/roadmap/S09-外部执行与熔断.md)）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑩ 接线后摘除
 pub enum GateDecision {
     /// 未授权——调用方**不得产生任何事件**（验收 1：拒绝且无事件）。
     Refuse,
@@ -475,7 +475,7 @@ pub enum GateDecision {
 ///
 /// `budget_ms = 80` 的反射档判定：超预算 / 超时**熔断**而不是"先做了再说"。
 /// 授权判定留在调用方（读路径持矩阵）——本体的输入是判据数据，不是 ⑥ 的句柄。
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑩ 接线后摘除
 pub struct CircuitBreaker;
 
 impl CircuitBreaker {
@@ -485,7 +485,7 @@ impl CircuitBreaker {
     /// - `spent_ms` / `requested_ms` / `budget_ms`：已耗 / 本次申请 / 总预算；
     /// - `elapsed_ms`：闸门自身耗时——超反射档预算也熔断（**有事件**的超时，
     ///   不是静默失效；I3）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑩ 接线后摘除
     pub fn gate(
         &self,
         authorized: bool,
@@ -511,7 +511,7 @@ impl CircuitBreaker {
     }
 
     /// 熔断事件（复用 `control/opened` 格，载荷 `reason` 区分打断与熔断）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑩ 接线后摘除
     pub fn break_event(&self, reason: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("cb-{source_seq}"),
@@ -531,12 +531,12 @@ impl CircuitBreaker {
 /// `pattern = decider`、`capabilities = [DefineWork]`、`budget_ms = 86400000`——
 /// 自主层不是新架构层，只是四层时延的第四个取值。**不可写 `chat.assistant.*`**
 /// （自主行为不得冒充用户对话；由 grants 保证，见测试）。
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
 pub struct AutonomousInitiator;
 
 impl AutonomousInitiator {
     /// 定时触发：**触发器产出事件，不是旁路**——自主行为同样走 I1 单通道。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
     pub fn trigger(&self, source_seq: u64) -> Event {
         Event::pending(
             format!("sys-{source_seq}"),
@@ -551,7 +551,7 @@ impl AutonomousInitiator {
     }
 
     /// 表达一条「欲」（E1：欲是数据，必带溯源——否则过不了 IntentGate）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
     pub fn express_intent(&self, goal: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("want-{source_seq}"),
@@ -566,7 +566,7 @@ impl AutonomousInitiator {
     }
 
     /// 把闸门批准的意图落成长目标任务（自主层 `budget_ms` 的完整取值）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
     pub fn open_long_goal(&self, task_id: &str, goal: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("o-{task_id}"),
@@ -589,7 +589,7 @@ impl AutonomousInitiator {
 /// 「欲」的治理策略（E3：平凡值 `enabled = false`——关掉后系统退化为纯响应式
 /// 且仍完整运行；两层开关独立，这是生产环境最需要的开关）。
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
 pub struct ConationPolicy {
     /// 是否允许「欲」升格为任务。
     pub enabled: bool,
@@ -609,7 +609,7 @@ impl Default for ConationPolicy {
 /// 候选意图：从 `conation.expressed` 事件**唯一**构造路径读出，
 /// 造出来一定**未被批准**——「欲」不得直接变成「行」（E2）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
 pub struct ConationCandidate {
     /// 源事件 seq（溯源锚）。
     pub seq: u64,
@@ -620,7 +620,7 @@ pub struct ConationCandidate {
 
 impl ConationCandidate {
     /// 唯一构造路径：从欲事件读出候选。**无溯源的欲构造不出候选**（I2 强化）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
     pub fn from_event(e: &Event) -> Option<Self> {
         if e.kind != crate::symbio_core::event::EVENT_CONATION_EXPRESSED {
             return None;
@@ -640,7 +640,7 @@ impl ConationCandidate {
         })
     }
 
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
     pub fn is_approved(&self) -> bool {
         self.approved
     }
@@ -649,14 +649,14 @@ impl ConationCandidate {
 /// 闸门能力令牌（ZST，私有构造 → 不可伪造；02 §2.3 E2 的可编译强制：
 /// 不持令牌则 `approve` 调用**编译失败**，`size_of == 0` 零运行时开销）。
 #[derive(Debug, Clone, Copy, Default)]
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
 pub struct GateWarrant {
     _private: (),
 }
 
 /// 闸门评估结论。
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
 pub enum IntentDecision {
     Approved,
     Rejected(&'static str),
@@ -664,19 +664,19 @@ pub enum IntentDecision {
 
 /// 经闸门批准后的可执行任务（只有这一条路能造出来）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
 pub struct ApprovedIntent {
     pub from_seq: u64,
     pub goal: String,
 }
 
 /// 意图闸门：**「欲」与「行」之间唯一的一道门**（02 §2.3 E2）。
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
 pub struct IntentGate;
 
 impl IntentGate {
     /// 评估：关停开关优先；目标过宽拒绝。真实系统里这里接价值偏好 / 预算 / 授权。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
     pub fn evaluate(candidate: &ConationCandidate, policy: &ConationPolicy) -> IntentDecision {
         if !policy.enabled {
             return IntentDecision::Rejected("conation disabled");
@@ -689,7 +689,7 @@ impl IntentGate {
 
     /// 升格：**唯一**能把 [`ConationCandidate`] 变成 [`ApprovedIntent`] 的函数。
     /// 要求 (a) 评估通过 (b) 持 [`GateWarrant`]（不持令牌 = 编译失败）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
     pub fn approve(
         candidate: &mut ConationCandidate,
         policy: &ConationPolicy,
@@ -709,7 +709,7 @@ impl IntentGate {
 
     /// 发牌入口——**故意做成唯一一道**：真要多一道门，就得再写一个发牌函数，
     /// 而那个函数是可见的、可审计的（不是靠约定）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
     pub fn issue_warrant() -> GateWarrant {
         GateWarrant { _private: () }
     }
@@ -720,12 +720,12 @@ impl IntentGate {
 /// 编译 = 把成功执行轨迹固化为一条 `memory.encoded{tag:"skill"}` 事件——
 /// **技能是事实，不是特殊类型**。编译产出的技能事件**必带溯源**
 /// （`produced_by` 指向源轨迹；I2 断言，技能溯源 100%）。
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
 pub struct SkillCompiler;
 
 impl SkillCompiler {
     /// 编译一条技能。`source_seq`：源轨迹（成功任务的终态事件）seq。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
     pub fn compile(&self, skill_id: &str, trigger: &str, response: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("skill-{skill_id}-{source_seq}"),
@@ -748,7 +748,7 @@ impl SkillCompiler {
 /// 路由结论：命中技能走快路（`budget_ms = 80`），否则**必须回退**完整推理
 /// （反自动化回退，Beilock & Carr 2001——全自动化在压力下以异常方式失效）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
 pub enum SkillRoute {
     /// 技能命中：反射档快路。
     SkillFastPath { budget_ms: u64 },
@@ -757,11 +757,11 @@ pub enum SkillRoute {
 }
 
 /// 技能路由者：按校准置信度决定走技能还是回退（校准值低于阈值 ⇒ 不得走技能路径）。
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
 pub struct SkillRouter;
 
 impl SkillRouter {
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行），plan/11 批0 接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
     pub fn route(&self, confidence: f64, threshold: f64) -> SkillRoute {
         if confidence >= threshold {
             SkillRoute::SkillFastPath {

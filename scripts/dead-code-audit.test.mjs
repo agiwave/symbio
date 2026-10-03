@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url'
 //   <root>/symbio/src/*.rs                    （Rust 侧被检对象）
 const script = fileURLToPath(new URL('./dead-code-audit.mjs', import.meta.url))
 
-function audit(rustFiles, { waiver = null, env: extraEnv = {} } = {}) {
+function audit(rustFiles, { waiver = null, env: extraEnv = {}, plan = null } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dead-code-audit-'))
   try {
     fs.mkdirSync(path.join(root, 'tauri/src'), { recursive: true })
@@ -28,6 +28,11 @@ function audit(rustFiles, { waiver = null, env: extraEnv = {} } = {}) {
     for (const [name, src] of Object.entries(rustFiles)) {
       const text = waiver === null ? src : src.replace('WAIVER', waiver)
       fs.writeFileSync(path.join(root, 'symbio/src', name), text)
+    }
+    // 带台账的 fixture：R-002 ③「承认必须挂到计划步」只在台账存在时判
+    if (plan) {
+      fs.mkdirSync(path.join(root, 'docs/plan'), { recursive: true })
+      fs.writeFileSync(path.join(root, 'docs/plan/04-工程落地.md'), plan)
     }
     const env = { ...process.env, NO_COLOR: '1', ...extraEnv }
     const result = spawnSync(process.execPath, [script, `--root=${root}`], {
@@ -146,4 +151,62 @@ test('R-002 counts the module-level marker too', () => {
   const r = audit({ 'a.rs': '#![allow(dead_code)]\nfn anything() {}\n' })
   assert.equal(r.status, 1, '模块级 `#![allow(dead_code)]` 同样要带理由')
   assert.match(r.stdout, /a\.rs:1/)
+})
+
+// R-002 ③：**承认 ↔ 计划步**。死码清偿的账在 `docs/plan/04-工程落地.md §3.1`，
+// 每处 `allow` 的理由必须指向该表里的一个真实批次——否则「计划完成」只是一句
+// 自述，门禁查不出「步已标完成、标记还挂着」这种漂移。
+const PLAN_FIXTURE = [
+  '## 3. 阶段排期（22 步）',
+  '',
+  '### 3.1 实施状态与死码清偿登记（22 步状态的唯一 owner）',
+  '',
+  '**C. 结构性承认（8 处，不进清偿批次）**',
+  '',
+  '| 批 | 内容 | 摘标记 | 状态 |',
+  '|---|---|:-:|:-:|',
+  '| ① | 过期标记清理 | -9 | ✅ |',
+  '| ③ | 读侧出口 | -11 | 待做 |',
+].join('\n')
+
+test('R-002 ③ 承认理由必须挂到 04 §3.1 的清偿批', () => {
+  const noRef = audit(
+    { 'a.rs': '#[allow(dead_code)] // dead-code-allow R-002: 契约名先于接线\nfn c() {}\n' },
+    { plan: PLAN_FIXTURE },
+  )
+  assert.equal(noRef.status, 1, '理由没有计划步引用 = 没挂到台账，判红')
+  assert.match(noRef.stdout, /04 §3\.1/)
+
+  const unknown = audit(
+    { 'a.rs': '#[allow(dead_code)] // dead-code-allow R-002: 契约名先于接线；04 §3.1 批⑨ 接线后摘除\nfn c() {}\n' },
+    { plan: PLAN_FIXTURE },
+  )
+  assert.equal(unknown.status, 1, '批号不在批次表里 = 指向不存在的步，判红')
+  assert.match(unknown.stdout, /批⑨/)
+
+  const ok = audit(
+    { 'a.rs': '#[allow(dead_code)] // dead-code-allow R-002: 契约名先于接线；04 §3.1 批③ 接线后摘除\nfn c() {}\n' },
+    { plan: PLAN_FIXTURE },
+  )
+  assert.equal(ok.status, 0, '批号在批次表里则放行')
+  assert.match(ok.stdout, /批③ 1/)
+})
+
+test('R-002 ③ C 类（结构性承认）要求台账里有那一节', () => {
+  const withC = audit(
+    { 'a.rs': '#[allow(dead_code)] // dead-code-allow R-002: 前端镜像词；04 §3.1 C 类：消费方=schemas/vdfs.ts\nfn c() {}\n' },
+    { plan: PLAN_FIXTURE },
+  )
+  assert.equal(withC.status, 0, 'C 类在台账里有登记则放行')
+  const withoutC = audit(
+    { 'a.rs': '#[allow(dead_code)] // dead-code-allow R-002: 前端镜像词；04 §3.1 C 类：消费方=schemas/vdfs.ts\nfn c() {}\n' },
+    { plan: PLAN_FIXTURE.replace('**C. 结构性承认（8 处，不进清偿批次）**', '**C 段已删**') },
+  )
+  assert.equal(withoutC.status, 1, '台账里没有 C 类登记 ⇒ 这条承认无处挂，判红')
+})
+
+test('R-002 ③ 没有台账的仓库不判这一条（fixture 不误伤）', () => {
+  const r = audit({ 'a.rs': '#[allow(dead_code)] // dead-code-allow R-002: 契约名先于接线\nfn c() {}\n' })
+  assert.equal(r.status, 0, '无 04 文档 ⇒ 退回只判理由与棘轮')
+  assert.doesNotMatch(r.stdout, /各清偿批待摘/)
 })

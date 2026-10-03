@@ -62,7 +62,6 @@ impl ExecTranscriptWriter for DeltaBridge {
 
 /// ⑤ 端口的真实实现：把 `ModelProvider::execute_turn`（五态机 + SSE 解析）
 /// 折进 `LlmAdapter::generate`（prompt 入、文本出）的最小适配。
-#[allow(dead_code)] // dead-code-allow R-001: 会话链路切到彩排生成器+本适配器时的接线点；真实 HTTP/SSE 全链路已在 provider_adapter.test 验证
 pub struct ProviderLlmAdapter {
     provider: Arc<dyn ModelProvider>,
     /// 会话级系统提示词（full 档经 `for_turn` 注入；缺省 = 彩排用的通用提示）。
@@ -72,7 +71,6 @@ pub struct ProviderLlmAdapter {
 }
 
 impl ProviderLlmAdapter {
-    #[allow(dead_code)] // dead-code-allow R-001: 同上——全链路彩排的构造入口
     pub fn new(provider: Arc<dyn ModelProvider>) -> Self {
         ProviderLlmAdapter {
             provider,
@@ -84,7 +82,6 @@ impl ProviderLlmAdapter {
     /// 会话轮构造：系统提示词 + 本轮中止信号直通——中止与提示词是**调用方的
     /// 语境**，适配器不再自作主张（此前硬编码通用提示 + 自建中止信号，
     /// full 档接管会话轮后两者都必须由 chat_loop 传入）。
-    #[allow(dead_code)] // dead-code-allow R-001: v2_exec（full 档）的构造入口
     pub fn for_turn(
         provider: Arc<dyn ModelProvider>,
         system: &str,

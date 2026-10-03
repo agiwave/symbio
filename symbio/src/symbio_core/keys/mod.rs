@@ -110,7 +110,7 @@ define_string_key!(PathKey, PATH, "path");
 define_string_key!(WorkdirKey, WORKDIR, "workdir");
 define_string_key!(AgentIdKey, AGENT_ID, "agent_id");
 define_string_key!(SessionIdKey, SESSION_ID, "session_id");
-// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（PROTOCOLS.md 字段表），消费方接线后摘除
+// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（PROTOCOLS.md 字段表）；04 §3.1 批⑫ 接线后摘除
 define_string_key!(
     #[allow(dead_code)]
     TraceIdKey,
@@ -136,14 +136,14 @@ define_string_key!(RiskLevelKey, RISK_LEVEL, "risk_level");
 // 常用业务属性 Key
 define_string_key!(IdKey, ID, "id");
 define_string_key!(NameKey, NAME, "name");
-// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（PROTOCOLS.md 字段表），消费方接线后摘除
+// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（PROTOCOLS.md 字段表）（04 §3.1 C 类：消费方=PROTOCOLS.md 字段表 + 三方规范键清单）
 define_string_key!(
     #[allow(dead_code)]
     KindKey,
     KIND,
     "kind"
 );
-// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（PROTOCOLS.md 字段表），消费方接线后摘除
+// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（PROTOCOLS.md 字段表）（04 §3.1 C 类：消费方=PROTOCOLS.md 字段表 + 三方规范键清单）
 define_string_key!(
     #[allow(dead_code)]
     ScopeKey,
@@ -151,7 +151,7 @@ define_string_key!(
     "scope"
 );
 define_string_key!(ContentKey, CONTENT, "content");
-// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（PROTOCOLS.md 字段表），消费方接线后摘除
+// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（PROTOCOLS.md 字段表）（04 §3.1 C 类：消费方=PROTOCOLS.md 字段表 + 三方规范键清单）
 define_string_key!(
     #[allow(dead_code)]
     DescriptionKey,

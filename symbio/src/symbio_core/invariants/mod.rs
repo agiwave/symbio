@@ -146,7 +146,7 @@ pub fn check_all(events: &[Event]) -> Vec<Violation> {
 /// 有 `user.message`（`turn × opened`）却始终等不到 `chat.assistant.final` /
 /// `chat.assistant.fallback`（`turn × closed`），就是**对话静默中断**——超时后
 /// 什么都没发生，没有任何错误信号的那类失效。兜底必须产生事件（I3）。
-#[allow(dead_code)] // dead-code-allow R-002: 不变量可执行名（README §1.2 invariants 行），运行时接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 不变量可执行名（README §1.2 invariants 行）；04 §3.1 批④ 接线后摘除
 pub fn unresolved_turns(events: &[Event]) -> Vec<Violation> {
     let mut bad = Vec::new();
     let mut opened: Vec<(u64, &str)> = Vec::new();
@@ -180,7 +180,7 @@ pub fn unresolved_turns(events: &[Event]) -> Vec<Violation> {
 ///
 /// 超预算本身**允许发生**（S4 的兜底链路负责降级），但它必须被**看见**：
 /// `budget_ms` 是 I3 的记账口径，超了却没人知道 = 声明式预算（S1 之前的形态）。
-#[allow(dead_code)] // dead-code-allow R-002: 不变量可执行名（README §1.2 invariants 行），运行时接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 不变量可执行名（README §1.2 invariants 行）；04 §3.1 批④ 接线后摘除
 pub fn budget_exceeded(events: &[Event], budget_ms: u64) -> Vec<Violation> {
     events
         .iter()
@@ -203,7 +203,7 @@ pub fn budget_exceeded(events: &[Event], budget_ms: u64) -> Vec<Violation> {
 /// 所以必须是 CI 断言。任务图从 `task.opened` 事件的载荷提取：
 /// `{ task_id, depends_on }`——**图是数据，不是机制**。
 /// 悬空依赖（依赖不存在的任务）同样判违规。反向用例见测试区（验收 1 / 4）。
-#[allow(dead_code)] // dead-code-allow R-002: 不变量可执行名（README §1.2 invariants 行），运行时接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 不变量可执行名（README §1.2 invariants 行）；04 §3.1 批⑨ 接线后摘除
 pub fn acyclic_deps(events: &[Event]) -> Vec<Violation> {
     use std::collections::{BTreeMap, BTreeSet};
     let mut deps: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
@@ -282,7 +282,7 @@ pub fn acyclic_deps(events: &[Event]) -> Vec<Violation> {
 /// 返工 = `task.rework_created` 事件（新增一条事实，不是修改历史）；同一被返工
 /// 节点的返工轮数超过 `max_rework` ⇒ 违规——无上界的返工可能永不终止
 /// （[docs/plan/verify/termination.rs](../../../../docs/plan/verify/termination.rs) 前提 2）。
-#[allow(dead_code)] // dead-code-allow R-002: 不变量可执行名（README §1.2 invariants 行），运行时接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 不变量可执行名（README §1.2 invariants 行）；04 §3.1 批⑨ 接线后摘除
 pub fn rework_bounded(events: &[Event], max_rework: u32) -> Vec<Violation> {
     use std::collections::BTreeMap;
     let mut counts: BTreeMap<String, u32> = BTreeMap::new();

@@ -338,15 +338,18 @@ if (rustWaived.length) {
 //
 // 起因：`core-export-audit` C-003 把「名字没跨出 core」的符号从根出口收窄之后，
 // `dead_code` lint 会把**只被测试引用的冻结契约名**逐个点名——那正是规则 2 的应有
-// 之义（无消费者的东西不该占着根出口），但这些契约名按 plan/11、plan/12 要留到接线
-// 那天。于是就地承认。承认若既无理由又无数量约束，半年后就是 138 个没人说得清的
-// `allow`，死码审计等于自废。故：
+// 之义（无消费者的东西不该占着根出口），但这些契约名要留到接线那天。于是就地承认。
+// 承认若既无理由又无数量约束，半年后就是 138 个没人说得清的 `allow`，死码审计等于
+// 自废。故：
 //   ① 每个 `#[allow(dead_code)]`（含模块级 `#![allow(dead_code)]`）必须在**同一行**
 //      或其上 3 行内写 `// dead-code-allow R-002: <非空理由>`——与 R-001 同一判空；
 //   ② 数量走棘轮：只许降（接线一批、摘一批），`grep -c` 即可复核，不靠自觉。
+//   ③ 理由必须指到**清偿步**（`04 §3.1 批N` 或其 A/B 表行）：接入 + 摘标记 + 步状态
+//      改"完成"三者同批发生，账在 `docs/plan/04-工程落地.md §3.1`，本文件只判数量。
+//      基线每次随该表的批次下调，不随本文件的意志上调。
 const R002_BASELINE = process.env.DEAD_CODE_R002_BASELINE
   ? Number(process.env.DEAD_CODE_R002_BASELINE)
-  : 137
+  : 128
 
 /**
  * R-002 的承认理由：复用 R-001 的回看（同行 + 上 3 行、理由非空）。
@@ -357,7 +360,23 @@ function r002Reason(lines, i) {
   return waiverReason(lines, i)
 }
 
+// ③ **承认必须挂到计划步**：理由里给出 `04 §3.1 批N`（或 `04 §3.1 C 类`），
+//    且批号必须真实存在于 `docs/plan/04-工程落地.md §3.1` 的清偿批次表。
+//    于是「一处死码 ↔ 一个计划步」双向可查：`grep "04 §3.1 批⑥"` = 该批待摘清单，
+//    表里的 `-N` = 该批完成判据；批次号以表为唯一来源，写不存在的批号等于没挂。
+const PLAN_04_PATH = join(REPO, 'docs', 'plan', '04-工程落地.md')
+// 回归测试用 `--root=` 注入最小仓库，那里没有计划文档——**没有台账就不判这一条**
+// （否则 fixture 全红，守卫的测试自己成了噪音）；真仓里文档在，规则才生效。
+const PLAN_04 = existsSync(PLAN_04_PATH) ? readFileSync(PLAN_04_PATH, 'utf8') : null
+const planStart = PLAN_04 ? PLAN_04.indexOf('### 3.1') : -1
+const PLAN_04_SECTION = planStart >= 0 ? PLAN_04.slice(planStart) : PLAN_04
+const validBatches = PLAN_04_SECTION ? new Set([...PLAN_04_SECTION.matchAll(/\|\s*([①-⑳])\s*\|/g)].map((m) => `批${m[1]}`)) : new Set()
+const hasCClass = PLAN_04_SECTION ? /C\. 结构性承认/.test(PLAN_04_SECTION) : false
+const REF_RE = /04 §3\.1 (批[①-⑳]|C 类)/
+
 const r002NoReason = []
+const r002BadPlan = []
+const r002ByBatch = new Map()
 let r002Marks = 0
 for (const [file, code] of rustCorpus) {
   const lines = code.split(/\r?\n/)
@@ -368,7 +387,24 @@ for (const [file, code] of rustCorpus) {
     if (lines[i].trimStart().startsWith('//')) continue
     if (!/#!?\[allow\(dead_code\)\]/.test(lines[i].split('//')[0])) continue
     r002Marks++
-    if (!r002Reason(lines, i)) r002NoReason.push(`${repoRel(file)}:${i + 1}`)
+    const reason = r002Reason(lines, i)
+    if (!reason) {
+      r002NoReason.push(`${repoRel(file)}:${i + 1}`)
+      continue
+    }
+    if (!PLAN_04) continue // 无台账（fixture 仓库）⇒ 本条不判
+    const ref = reason.match(REF_RE)
+    if (!ref) {
+      r002BadPlan.push(`${repoRel(file)}:${i + 1}  理由未指向 04 §3.1：${reason.slice(0, 60)}`)
+      continue
+    }
+    const key = ref[1]
+    const known = key === 'C 类' ? hasCClass : validBatches.has(key)
+    if (!known) {
+      r002BadPlan.push(`${repoRel(file)}:${i + 1}  ${key} 不在 04 §3.1 的清偿登记里`)
+      continue
+    }
+    r002ByBatch.set(key, (r002ByBatch.get(key) ?? 0) + 1)
   }
 }
 
@@ -380,12 +416,23 @@ if (r002NoReason.length) {
   for (const loc of r002NoReason) console.log(`    ${loc}`)
   console.log('    ↳ 标记同行或其上 3 行内写 `// dead-code-allow R-002: 理由`（R-001 的理由同样认，理由必填）')
 }
+if (r002BadPlan.length) {
+  console.log(`  ✗ ${r002BadPlan.length} 处承认没挂到计划步（04 §3.1）：`)
+  for (const loc of r002BadPlan) console.log(`    ${loc}`)
+  console.log('    ↳ 理由尾缀写 `；04 §3.1 批N 接线后摘除`——批号取自 04 §3.1 清偿批次表')
+}
 if (r002OverRatchet) {
   console.log(`  ✗ 承认标记 ${r002Marks} > 基线 ${R002_BASELINE} —— 只许降：`)
   console.log('    ↳ 接线一批就摘一批；新出现的死码要么删掉、要么接上，不许再加 allow')
 }
-if (!r002NoReason.length && !r002OverRatchet) console.log('  ✓ 标记均带理由，数量未超基线')
+if (!r002NoReason.length && !r002BadPlan.length && !r002OverRatchet) {
+  console.log('  ✓ 标记均带理由并挂到计划步，数量未超基线')
+  if (PLAN_04) {
+    const tally = [...r002ByBatch].sort((a, b) => a[0].localeCompare(b[0], 'zh'))
+    console.log(`  · 各清偿批待摘：${tally.map(([k, n]) => `${k} ${n}`).join(' · ')}`)
+  }
+}
 
 const lines = dead.reduce((n, f) => n + lineCount(f), 0)
 console.log(`\n合计可移除：${dead.length} 文件 / ${lines} 行`)
-process.exit(dead.length || rustUnused.length || r002NoReason.length || r002OverRatchet ? 1 : 0)
+process.exit(dead.length || rustUnused.length || r002NoReason.length || r002BadPlan.length || r002OverRatchet ? 1 : 0)

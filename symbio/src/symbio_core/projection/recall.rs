@@ -28,7 +28,7 @@ use super::Projection;
 /// - `tag`：内容标签过滤（`None` = 全部；「记忆类型」是过滤参数，01 §9.1）；
 /// - 排序：新近度优先（`ts` 降序，确定性——不打浮点分）；
 /// - 预算：`budget.ms` 为扫描配额（1 事件 = 1ms），超配额 ⇒ 降级 + 部分结果。
-#[allow(dead_code)] // dead-code-allow R-002: plan/12 批1/批2 读数口未落地（plan/12 §3），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 接线未落地；04 §3.1 批⑦ 接线后摘除
 pub fn recall(viewer: impl Into<String>, tag: Option<String>) -> Projection<RecallView> {
     let viewer = viewer.into();
     Projection::new(move |events: &[Event], now, budget: Budget| {

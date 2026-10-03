@@ -18,7 +18,7 @@ use super::Projection;
 /// `BTreeMap` 保证序列化顺序确定（同一事件序列 ⇒ 逐字节相同的断点，N1 不因
 /// 断点本身被破坏）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[allow(dead_code)] // dead-code-allow R-002: plan/12 批1/批2 读数口未落地（plan/12 §3），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 接线未落地；04 §3.1 批③ 接线后摘除
 pub struct CheckpointState {
     /// 断点覆盖到的最后一条事件 seq。
     pub last_seq: Option<u64>,
@@ -31,7 +31,7 @@ pub struct CheckpointState {
 impl CheckpointState {
     /// 把断点状态打包成 `thread.checkpoint` 事件（**断点也是一条普通事件**，
     /// 落 `thread × progressed` 格子——它自己同样受 I2/I3 约束）。
-    #[allow(dead_code)] // dead-code-allow R-002: plan/12 批1/批2 读数口未落地（plan/12 §3），接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 接线未落地；04 §3.1 批⑤ 接线后摘除
     pub fn to_event(&self, event_id: impl Into<String>, actor: impl Into<String>) -> Event {
         Event::pending(
             event_id,
@@ -48,7 +48,7 @@ impl CheckpointState {
 /// `checkpoint` 投影：按入参顺序扫描事件，产出截至最后一条事件的可序列化状态。
 ///
 /// 确定性（N1）：同一事件序列 ⇒ 逐字节相同的 [`CheckpointState`]。
-#[allow(dead_code)] // dead-code-allow R-002: plan/12 批1/批2 读数口未落地（plan/12 §3），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 接线未落地；04 §3.1 批③ 接线后摘除
 pub fn checkpoint() -> Projection<CheckpointState> {
     Projection::new(|events: &[Event], _now, _b: Budget| {
         let mut last_seq = None;

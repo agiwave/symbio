@@ -82,7 +82,7 @@ pub const ROUTE_SESSION_CHAT_SEND: &str = "session/chat/send";
 /// 保留的代价为零（一个 `&'static str`），收益是「前端认识的后端路由」在后端也有
 /// 一条可检索的登记。这条理由由 `#[allow(dead_code)]` 同行注明，供
 /// `scripts/dead-code-audit.mjs` 识别为**刻意保留**而非漏删。
-#[allow(dead_code)] // dead-code-allow R-001: 唯一调用方在前端 pluginPaths.ts::CHAT_ABORT，路由真实存在
+#[allow(dead_code)] // dead-code-allow R-002: ADR-031 未完成项：chat/abort 去留未定（保留则根导出 + 换 cli 字面量，退役则连 ROUTES.md 一并删）；04 §3.1 批⑫ 接线后摘除
 pub const ROUTE_SESSION_CHAT_ABORT: &str = "session/chat/abort";
 
 // ============ VDFS 插件 ============
@@ -94,7 +94,6 @@ pub const ROUTE_SESSION_CHAT_ABORT: &str = "session/chat/abort";
 /// [`ROUTE_SESSION_CHAT_ABORT`] 相同——「前端认识的后端路由」在后端也应有一条可检索的
 /// 常量；且**根名只归 vdfs 插件**（`plugins/vdfs/fs.rs::VDFS_ADDR_ROOT`，仓级守卫
 /// S-010 禁止它在别处出现），故消费方一律取运行期值、不写字面量。
-#[allow(dead_code)] // dead-code-allow R-001: 调用方在前端 schemas/vdfs.ts + services/vdfsScheme.ts，路由真实存在
 pub const ROUTE_VDFS_ROOT: &str = "vdfs/root";
 
 /// vdfs/watch — 订阅一棵地址子树的变更。
@@ -104,14 +103,12 @@ pub const ROUTE_VDFS_ROOT: &str = "vdfs/root";
 /// 后端只向**登记过路径**的订阅者投递变更（`core/vdfs/host::VdfsChangeSubscriptions`），
 /// 因此这是「能收到 VDFS 变更」的前置条件：只订阅全局总线而不登记 watch，
 /// 等于在一条没人开闸的频道上等事件（一条也收不到）。
-#[allow(dead_code)] // dead-code-allow R-001: 调用方在前端 schemas/vdfs.ts + services/vdfs.ts，路由真实存在
 pub const ROUTE_VDFS_WATCH: &str = "vdfs/watch";
 
 /// vdfs/unwatch — 取消订阅（与 [`ROUTE_VDFS_WATCH`] 严格配对）。
 ///
 /// 引用计数归零才真正摘除，多余一次 `unwatch` 是安全的空操作；
 /// 但**漏掉**它会留下幽灵订阅（后端持续投递、消费者早已不在）。
-#[allow(dead_code)] // dead-code-allow R-001: 调用方在前端 schemas/vdfs.ts + services/vdfs.ts，路由真实存在
 pub const ROUTE_VDFS_UNWATCH: &str = "vdfs/unwatch";
 
 // ============ Event Bus 插件 ============

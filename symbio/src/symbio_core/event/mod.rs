@@ -53,7 +53,7 @@ pub const EVENT_ASSISTANT_FINAL: &str = "chat.assistant.final";
 pub const EVENT_ASSISTANT_FALLBACK: &str = "chat.assistant.fallback";
 /// 断点（S4：`store = wal` 的伴随事件，[roadmap/S05 §3](../../../../docs/plan/roadmap/S05-长会话与断点恢复.md)）。
 /// 载荷携带可序列化的 checkpoint 状态。落在 `thread × progressed`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑤ 接线后摘除
 pub const EVENT_THREAD_CHECKPOINT: &str = "thread.checkpoint";
 
 // ── 产物格子（S02 §3，[roadmap/S02-工具调用与产物.md](../../../../docs/plan/roadmap/S02-工具调用与产物.md)）──
@@ -71,17 +71,17 @@ pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
 
 /// 编码：学到的语义内容 + embedding（`payload: { content, tag, vec }`）。
 /// 落在 `memory × opened`。**记忆必带溯源**（I2 扩展：溯源覆盖 100%）。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑦ 接线后摘除
 pub const EVENT_MEMORY_ENCODED: &str = "memory.encoded";
 /// 巩固：压缩 + 反事实（不是逐帧回放）。落在 `memory × progressed`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑦ 接线后摘除
 pub const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";
 /// 遗忘：**不是物理删除**——Log 永不删，只是投影不再包含（可撤销、可审计）。
 /// 落在 `memory × closed`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑦ 接线后摘除
 pub const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
 /// 召回：检索 Translator 的产出（读视图 → 产出事实）。落在 `memory × asserted`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑦ 接线后摘除
 pub const EVENT_MEMORY_RECALLED: &str = "memory.recalled";
 
 // ── 承诺格子（S6 第 15 步，[roadmap/S08 §3](../../../../docs/plan/roadmap/S08-多主体与对等承诺.md)）──
@@ -91,17 +91,17 @@ pub const EVENT_MEMORY_RECALLED: &str = "memory.recalled";
 
 /// 立约：`from` 向 `to` 承诺交付什么（载荷 `{ id, from, to, promise }`）。
 /// 落在 `commitment × opened`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑧ 接线后摘除
 pub const EVENT_COMMITMENT_OFFERED: &str = "commitment.opened";
 /// 守约收束：承诺按约履行。落在 `commitment × closed`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑧ 接线后摘除
 pub const EVENT_COMMITMENT_RELEASED: &str = "commitment.released";
 /// 违约收束：承诺未履行（载荷带 `why`——违约必须可观测）。落在 `commitment × closed`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑧ 接线后摘除
 pub const EVENT_COMMITMENT_BROKEN: &str = "commitment.broken";
 /// 对等声明：把承诺状态对等宣告给协作方（不是新通道，是普通事件）。
 /// 落在 `commitment × asserted`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑧ 接线后摘除
 pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
 
 // ── 任务格子（S7 第 16–18 步，[roadmap/S03 §3](../../../../docs/plan/roadmap/S03-多步任务与返工.md)）──
@@ -111,22 +111,22 @@ pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
 // 已经提供了撤销语义）。落在 `task × opened / progressed / held / asserted`。
 
 /// 开任务：载荷 `{ task_id, depends_on, goal }`。落在 `task × opened`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑨ 接线后摘除
 pub const EVENT_TASK_OPENED: &str = "task.opened";
 /// 推进：执行中的普通事实。落在 `task × progressed`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑨ 接线后摘除
 pub const EVENT_TASK_PROGRESS: &str = "task.progress";
 /// 暂挂（插话抢占 / 等外部资源；[roadmap/S07](../../../../docs/plan/roadmap/S07-插话与实时打断.md)
 /// 里这一格的事件名叫 `task.blocked`，本仓库以 `task.held` 单点定义）。
 /// 落在 `task × held`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑨ 接线后摘除
 pub const EVENT_TASK_HELD: &str = "task.held";
 /// 终态：验证通过（验收通过才终态）。落在 `task × asserted`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑨ 接线后摘除
 pub const EVENT_TASK_ASSERTED: &str = "task.asserted";
 /// 返工：判定不合格 ⇒ **新增一条事件**（重开一个返工节点），不是回滚。
 /// 落在 `task × asserted`（返工本身是一次质量判定的事实）。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑨ 接线后摘除
 pub const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
 
 // ── 控制格子（S8 第 19–20 步，[roadmap/S07 §3](../../../../docs/plan/roadmap/S07-插话与实时打断.md)、
@@ -139,7 +139,7 @@ pub const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
 /// 控制判定产出（打断处置 / 熔断）。载荷 `{ task_id?, reason, ... }`。
 /// 落在 `control × opened`。**抢占判定者只持 JudgeIntent**——无 `reply.*` 写权，
 /// 判定者不得直接发言（S07 §5）。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑩ 接线后摘除
 pub const EVENT_CONTROL_OPENED: &str = "task.controlled";
 
 // ── 系统与「欲」格子（S9 第 21 步，[roadmap/S12 §3](../../../../docs/plan/roadmap/S12-自主层与长期目标.md)）──
@@ -150,15 +150,15 @@ pub const EVENT_CONTROL_OPENED: &str = "task.controlled";
 
 /// 定时触发：没有用户消息时的自主行为起点。落在 `system × opened`。
 /// **触发器产出事件，不是旁路**——自主行为同样走 I1 单通道、I2 带溯源。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑪ 接线后摘除
 pub const EVENT_SYSTEM_TRIGGERED: &str = "system.triggered";
 /// 健康自检。落在 `system × progressed`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑪ 接线后摘除
 pub const EVENT_SYSTEM_HEALTH: &str = "system.health";
 /// 「欲」的表达：一条意图出现（E1：欲是数据，走 I1 单通道、I2 带溯源——
 /// 无 `produced_by` 的欲事件**构造不出**候选意图，见 ② IntentGate）。
 /// 落在 `conation × opened`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑪ 接线后摘除
 pub const EVENT_CONATION_EXPRESSED: &str = "conation.expressed";
 
 /// 事件实体 —— 语法网格的**行**，闭集（F5，10 个）。

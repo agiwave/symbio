@@ -202,7 +202,7 @@ fn cache() -> &'static tokio::sync::Mutex<HashMap<String, Arc<CodeIndex>>> {
 /// 诊断/检索工具：语义代码检索
 #[derive(Clone)]
 pub struct CodebaseSearchTool {
-    // dead-code-allow R-002: 字段由构造签名注入、本工具不读（策略统一由 SecureToolWrapper 执行），接线或改签名后摘除
+    // dead-code-allow R-002: 字段由构造签名注入、本工具不读（策略统一由 SecureToolWrapper 执行）；04 §3.1 批⑫ 接线后摘除
     #[allow(dead_code)]
     security: Arc<SecurityPolicy>,
 }

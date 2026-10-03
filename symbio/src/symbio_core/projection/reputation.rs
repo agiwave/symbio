@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 
 /// 一个主体的声誉条目。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[allow(dead_code)] // dead-code-allow R-002: plan/12 批1/批2 读数口未落地（plan/12 §3），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 接线未落地；04 §3.1 批⑧ 接线后摘除
 pub struct ReputationEntry {
     /// 主体（`commitment.opened` 的 `from`——**声誉记在承诺方头上**）。
     pub principal: String,
@@ -37,7 +37,7 @@ pub struct ReputationEntry {
 
 /// 声誉视图：按主体排序（`BTreeMap` ⇒ 逐字节确定，N1 双跑一致的前提）。
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[allow(dead_code)] // dead-code-allow R-002: plan/12 批1/批2 读数口未落地（plan/12 §3），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 接线未落地；04 §3.1 批⑧ 接线后摘除
 pub struct ReputationView {
     /// principal → 条目。
     pub by_principal: BTreeMap<String, ReputationEntry>,
@@ -45,7 +45,7 @@ pub struct ReputationView {
 
 impl ReputationView {
     /// 某主体的声誉（未立约的主体 ⇒ 空条目，**不是错误**）。
-    #[allow(dead_code)] // dead-code-allow R-002: plan/12 批1/批2 读数口未落地（plan/12 §3），接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 接线未落地；04 §3.1 批⑧ 接线后摘除
     pub fn of(&self, principal: &str) -> ReputationEntry {
         self.by_principal
             .get(principal)
@@ -61,11 +61,11 @@ impl ReputationView {
 }
 
 /// 打分函数（平凡值：守约 − 违约；换算法 = 换这个闭包，不加机制）。
-#[allow(dead_code)] // dead-code-allow R-002: plan/12 批1/批2 读数口未落地（plan/12 §3），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 接线未落地；04 §3.1 批⑧ 接线后摘除
 pub type ReputationScore = fn(offered: u64, kept: u64, broken: u64) -> i64;
 
 /// 平凡打分：守约 − 违约。
-#[allow(dead_code)] // dead-code-allow R-002: plan/12 批1/批2 读数口未落地（plan/12 §3），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 接线未落地；04 §3.1 批⑧ 接线后摘除
 pub fn plain_score(_offered: u64, kept: u64, broken: u64) -> i64 {
     kept as i64 - broken as i64
 }
@@ -75,13 +75,13 @@ pub fn plain_score(_offered: u64, kept: u64, broken: u64) -> i64 {
 /// - as-of：`ts > now` 的立约 / 收束不参与（与 `recall` 同口径）；
 /// - 配对：收束事件经载荷 `id` 找回立约方（`from` 是立约时的事实，收束时不重抄）；
 /// - 排序：`BTreeMap` 按主体字典序——同一份事件切片永远产出同一张表（N1）。
-#[allow(dead_code)] // dead-code-allow R-002: plan/12 批1/批2 读数口未落地（plan/12 §3），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 接线未落地；04 §3.1 批⑧ 接线后摘除
 pub fn reputation() -> Projection<ReputationView> {
     reputation_with(plain_score)
 }
 
 /// 带自定义打分函数的声誉投影（算法是参数，架构只提供位置）。
-#[allow(dead_code)] // dead-code-allow R-002: plan/12 批1/批2 读数口未落地（plan/12 §3），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 接线未落地；04 §3.1 批⑧ 接线后摘除
 pub fn reputation_with(score: ReputationScore) -> Projection<ReputationView> {
     Projection::new(move |events: &[Event], now, _budget: Budget| {
         let mut offered_of: BTreeMap<String, u64> = BTreeMap::new();

@@ -95,7 +95,7 @@ pub struct DetailOption {
 /// 闭集的**唯一定义处**是前端 `schemas/vdfs-form.ts::DETAIL_PICKS`，由
 /// `protocol-mirror-audit` 的 C 组按 `DETAIL_PICK_` 前缀提取本组取值逐词比对。
 pub const DETAIL_PICK_DIRECTORY: &str = "directory";
-#[allow(dead_code)] // dead-code-allow R-002: schema 细节选项契约，消费方接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: schema 细节选项契约（04 §3.1 C 类：消费方=protocol-mirror C 组集合比对（唯一定义处在前端 vdfs-form.ts））
 pub const DETAIL_PICK_FILE: &str = "file";
 
 /// 表单字段定义。`widget` ∈ text | password | number | select | textarea |

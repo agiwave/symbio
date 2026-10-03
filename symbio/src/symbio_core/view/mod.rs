@@ -68,7 +68,7 @@ use crate::symbio_core::event::Timestamp;
 
 /// 一条被召回的记忆。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[allow(dead_code)] // dead-code-allow R-002: 视图类型随投影接线（plan/12 批2），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 视图类型随投影接线（）；04 §3.1 批⑦ 接线后摘除
 pub struct RecallEntry {
     /// 来源事件（`memory.encoded`）的 seq——溯源到事实。
     pub seq: u64,
@@ -83,14 +83,14 @@ pub struct RecallEntry {
 
 /// 召回视图：as-of 可见、未被遗忘、按新近度排序的记忆条目。
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[allow(dead_code)] // dead-code-allow R-002: 视图类型随投影接线（plan/12 批2），接线后摘除
+#[allow(dead_code)] // dead-code-allow R-002: 视图类型随投影接线（）；04 §3.1 批⑦ 接线后摘除
 pub struct RecallView {
     pub entries: Vec<RecallEntry>,
 }
 
 impl RecallView {
     /// 是否包含某内容（跨主体隔离断言 C13 的观测面）。
-    #[allow(dead_code)] // dead-code-allow R-002: 视图类型随投影接线（plan/12 批2），接线后摘除
+    #[allow(dead_code)] // dead-code-allow R-002: 视图类型随投影接线（）；04 §3.1 批⑦ 接线后摘除
     pub fn contains_content(&self, content: &str) -> bool {
         self.entries.iter().any(|e| e.content == content)
     }

@@ -40,7 +40,7 @@ use super::types::McpTool;
 /// 包含 tool count + 协议版本 + server 元信息（来自 initialize 响应）。
 /// 用于在 UI 展示"连接成功（来自 xxx v1.2.3，10 个工具）"等丰富提示。
 #[derive(Debug, Clone)]
-// dead-code-allow R-002: cap.test_connection 的前端流程未接线（理由见上方文档），接线后摘除
+// dead-code-allow R-002: 富提示字段（server 版本 / instructions / 耗时）尚未拼进返回 message；04 §3.1 批⑫ 接线后摘除
 #[allow(dead_code)]
 pub struct TestConnectionResult {
     /// 发现的工具数量
@@ -295,9 +295,7 @@ impl McpManager {
     /// - `Ok(result)` 包含 tool count、协议版本、server 名称/版本、instructions
     /// - `Err(e)` 表示失败
     ///
-    /// 连接测试能力：供详情表单的 `test` 动作（`vdfs/action`）复用（尚未接入，故带 dead_code 放行）
-    // dead-code-allow R-002: cap.test_connection 的前端流程未接线（理由见上方文档），接线后摘除
-    #[allow(dead_code)]
+    /// 连接测试能力：供详情表单的 `test` 动作（`vdfs/action`）复用
     pub async fn test_connection(
         &self,
         name: &str,
