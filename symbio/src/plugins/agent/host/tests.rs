@@ -12,7 +12,7 @@
 use super::plugin::AgentPlugin;
 use super::store::AgentDirStore;
 use crate::providers::DefaultToolVisitor;
-use crate::symbio_core::{vdfs, VdfsProvider};
+use crate::symbio_core::{vdfs_context, VdfsProvider};
 use crate::symbio_core::{
     CapabilityVisitor, Plugin, PluginDir, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginSimpleRequest, AGENT_ID, CAPABILITY_VISITOR, PATH, PLUGIN_ID_AGENT,
@@ -358,7 +358,7 @@ async fn sub_agent_root_crosses_mount_and_hides_root_hidden() {
     // 持有的目录决定，不由请求方喂。请求方塞一个进来，测的就不是生产形状了。
     ctx.set(AGENT_ID, "reviewer".to_string());
     ctx.set(WORKDIR, tmp.path().to_string_lossy().to_string());
-    let vctx = vdfs::vdfs_context(&ctx);
+    let vctx = vdfs_context(&ctx);
 
     // 钻进子智能体根：列 `agent/reviewer` 的「下一层」
     let items = plugin
@@ -413,7 +413,7 @@ async fn mount_root_lists_only_installed_agents() {
     // 作用域来自插件自持的目录，不是请求方喂的）
     let host: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     host.set(WORKDIR, workdir);
-    let ctx = vdfs::vdfs_context(&host);
+    let ctx = vdfs_context(&host);
 
     let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_ID_AGENT));
     let items = plugin
@@ -480,7 +480,7 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     // 持有的目录决定，不由请求方喂。请求方塞一个进来，测的就不是生产形状了。
     ctx.set(AGENT_ID, "reviewer".to_string());
     ctx.set(WORKDIR, tmp.path().to_string_lossy().to_string());
-    let vctx = vdfs::vdfs_context(&ctx);
+    let vctx = vdfs_context(&ctx);
 
     // 物理陷阱（= 绕过挂载点时会写进去的那个路径）：子树里**不存在** `memory/`
     // 子目录——工作区记忆的真实落点在工作区根，两者分离才有判别力
@@ -539,7 +539,7 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
         .dispatch(
             &vctx,
             "reviewer/memory/WORKSPACE.md",
-            vdfs::VdfsRequest::Write {
+            VdfsRequest::Write {
                 content: crate::symbio_core::VdfsContent::text("改过的记忆"),
             },
         )
@@ -571,7 +571,7 @@ async fn sub_agent_mount_crossing_is_uniform_across_operations() {
     // 自己根下造目录（`NotImplemented`），因此这里**不断言成败**——只钉住外部可观测的
     // 一点：它不得绕过挂载点、把目录造进裸 agent 目录。
     let mkdir_on_mount = plugin
-        .dispatch(&vctx, "reviewer/skill/new-dir", vdfs::VdfsRequest::Mkdir)
+        .dispatch(&vctx, "reviewer/skill/new-dir", VdfsRequest::Mkdir)
         .await;
     assert!(
         !agent_root
@@ -634,7 +634,7 @@ async fn sub_agent_agent_list_is_scoped_to_its_own_space() {
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
     ctx.set(WORKDIR, tmp.path().to_string_lossy().to_string());
-    let vctx = vdfs::vdfs_context(&ctx);
+    let vctx = vdfs_context(&ctx);
 
     // 钻进子智能体，看它自己的「智能体」挂载点
     let nested = plugin
@@ -718,7 +718,7 @@ async fn non_mountable_agent_dir_is_not_browsable_at_all() {
     let plugin = AgentPlugin::new_with_dir(PluginDir::at(&agent_root, PLUGIN_ID_AGENT));
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     ctx.set(VDFS_PARENT_ADDR, "@vfs/agent".to_string());
-    let vctx = vdfs::vdfs_context(&ctx);
+    let vctx = vdfs_context(&ctx);
 
     // 列不出来：挂载根清单里没有它
     let listed = plugin

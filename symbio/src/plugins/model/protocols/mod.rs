@@ -30,7 +30,7 @@ pub(crate) use sse::utf8_chunk;
 pub use sse::{SseLineParser, SsePartialLineExtractor};
 
 use crate::plugin_warn;
-use crate::symbio_core::schemas::session::chat_message::ChatMessage;
+use crate::symbio_core::chat_message::ChatMessage;
 use crate::symbio_core::{CapabilityMeta, ModelFinishReason, ModelUsage, PluginError};
 use async_trait::async_trait;
 use reqwest::header::HeaderMap;

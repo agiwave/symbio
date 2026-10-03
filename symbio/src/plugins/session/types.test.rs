@@ -7,7 +7,7 @@ use super::*;
 use serde_json::json;
 
 fn user_msg(text: &str) -> ChatMessage {
-    use crate::symbio_core::schemas::session::chat_message as cm;
+    use crate::symbio_core::chat_message as cm;
     ChatMessage {
         id: "m1".into(),
         role: Some(cm::MessageRole::User),
@@ -36,7 +36,7 @@ fn derive_title_truncates_long_text() {
 
 #[test]
 fn derive_title_skips_empty_and_non_user() {
-    use crate::symbio_core::schemas::session::chat_message as cm;
+    use crate::symbio_core::chat_message as cm;
     let empty = ChatMessage {
         id: "m0".into(),
         role: Some(cm::MessageRole::User),
@@ -57,7 +57,7 @@ fn display_title_prefers_metadata_then_content_then_default() {
 }
 
 fn assistant_msg(text: &str) -> ChatMessage {
-    use crate::symbio_core::schemas::session::chat_message as cm;
+    use crate::symbio_core::chat_message as cm;
     ChatMessage {
         id: "a1".into(),
         role: Some(cm::MessageRole::Assistant),
@@ -85,7 +85,7 @@ fn summary_ignores_user_messages() {
 
 #[test]
 fn summary_skips_textless_assistant_messages() {
-    use crate::symbio_core::schemas::session::chat_message as cm;
+    use crate::symbio_core::chat_message as cm;
     // 纯工具调用 / 推理消息没有正文：继续往前找最近一条**有文本**的回复
     let tool_only = ChatMessage {
         id: "t1".into(),

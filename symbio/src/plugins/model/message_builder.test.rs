@@ -16,7 +16,7 @@
 
 use super::*;
 
-use crate::symbio_core::schemas::session::chat_message::MessageStatus;
+use crate::symbio_core::chat_message::MessageStatus;
 
 const TURN_ID: &str = "turn-0001";
 

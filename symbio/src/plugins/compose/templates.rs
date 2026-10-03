@@ -21,7 +21,7 @@
 //! 见 [`super::reasons`] 的说明——生产方加了码而这里忘了配措辞时，用户收到一句
 //! 通用话而不是空白。**降级而不失效**。
 
-use crate::symbio_core::schemas::dialog::{RunSnapshot, Verdict};
+use crate::symbio_core::{RunSnapshot, Verdict};
 
 use super::reasons::{
     REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE,

@@ -33,13 +33,13 @@ use super::config::MemoryConfig;
 use super::memory::{self, PLUGIN_TITLE, SEGMENT_NAME};
 use super::workspace;
 use crate::providers::MemoryFile;
-use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
 use crate::symbio_core::VdfsAccess;
 use crate::symbio_core::{
     capability_announce_configurable, plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir,
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
     PluginPayload, CAPABILITY_VISITOR, PATH, PLUGIN_ID_MEMORY, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
 };
+use crate::symbio_core::{DetailDefinition, DetailField};
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::Arc;

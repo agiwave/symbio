@@ -1,7 +1,7 @@
 //! `impl VdfsProvider for SessionPlugin` 及其**私有辅助**。
 //!
 //! 职责：
-//! - [`vdfs::VdfsProvider::dispatch`] 是唯一入口：**先按 `path` 定位资源域，再按
+//! - [`crate::symbio_core::VdfsProvider::dispatch`] 是唯一入口：**先按 `path` 定位资源域，再按
 //!   `req` 执行操作**——`parse_session_path` 的每个域各有一个 `*_at` 私有方法，
 //!   dispatch 只做路由，域内怎么读写是各方法自己的事；
 //! - 读侧：域方法**转发既有会话能力**（SessionStore + 会话 metadata 合并），不新造协议
@@ -11,36 +11,42 @@
 //!   删除），再把变更投进订阅表。「谁能改会话」的答案在 `commands` 一处。
 
 use super::*;
+use crate::symbio_core::{
+    vdfs_from_plugin_error, vdfs_host_ctx, VdfsAccess, VdfsActionResult, VdfsChange,
+    VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode, VdfsProvider,
+    VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_ABORT, VDFS_ACTION_CLEAR,
+    VDFS_ACTION_TRUNCATE,
+};
 
 #[async_trait]
-impl vdfs::VdfsProvider for SessionPlugin {
+impl VdfsProvider for SessionPlugin {
     /// 唯一入口：**先按 `path` 定位资源域，再按 `req` 执行操作**。
     ///
     /// 配置文件（`PLUGIN.yml`）是文档不是会话——先判路径再分流操作；其余全部经
     /// [`parse_session_path`] 定域，各域逻辑收敛在下方 `*_at` 方法里。
     async fn dispatch(
         &self,
-        ctx: &vdfs::VdfsContext,
+        ctx: &VdfsContext,
         path: &str,
-        req: vdfs::VdfsRequest,
-    ) -> vdfs::VdfsResult<vdfs::VdfsResponse> {
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
         // 配置文件优先：`PLUGIN.yml` 是文档，不是会话
         if path == PLUGIN_FILE {
             return match req {
-                vdfs::VdfsRequest::Stat => Ok(vdfs::VdfsResponse::Stat(self.config_file.node())),
-                vdfs::VdfsRequest::Read => Ok(vdfs::VdfsResponse::Read(
+                VdfsRequest::Stat => Ok(VdfsResponse::Stat(self.config_file.node())),
+                VdfsRequest::Read => Ok(VdfsResponse::Read(
                     self.config_file.read(&self.config).await?,
                 )),
-                vdfs::VdfsRequest::Write { content } => Ok(vdfs::VdfsResponse::Write(
+                VdfsRequest::Write { content } => Ok(VdfsResponse::Write(
                     self.config_file.apply(&self.config, &content).await?,
                 )),
-                vdfs::VdfsRequest::List { .. } => Err(vdfs::VdfsError::not_found(format!(
+                VdfsRequest::List { .. } => Err(VdfsError::not_found(format!(
                     "配置文件是文档，没有子项：{path}"
                 ))),
-                vdfs::VdfsRequest::Delete { .. } => {
-                    Err(vdfs::VdfsError::Forbidden("配置文件不可删除".to_string()))
+                VdfsRequest::Delete { .. } => {
+                    Err(VdfsError::Forbidden("配置文件不可删除".to_string()))
                 }
-                _ => Err(vdfs::VdfsError::invalid(format!("该路径不可操作：{path}"))),
+                _ => Err(VdfsError::invalid(format!("该路径不可操作：{path}"))),
             };
         }
         match parse_session_path(path)? {
@@ -66,12 +72,12 @@ impl SessionPlugin {
     /// 挂载根：会话清单 / 根节点 / 新建（名字由 provider 生成）。
     async fn root_at(
         &self,
-        ctx: &vdfs::VdfsContext,
+        ctx: &VdfsContext,
         path: &str,
-        req: vdfs::VdfsRequest,
-    ) -> vdfs::VdfsResult<vdfs::VdfsResponse> {
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
         match req {
-            vdfs::VdfsRequest::List { .. } => {
+            VdfsRequest::List { .. } => {
                 let (limit, before) = window_params(ctx);
                 // 清单里**只有会话**——配置文件是文档，它进设置菜单走的是
                 // ConfigurableVisitor 那条通道，不该在会话清单里再出现一次
@@ -79,14 +85,14 @@ impl SessionPlugin {
                 let sessions = self
                     .list_sessions_window(limit, before)
                     .await
-                    .map_err(vdfs::vdfs_from_plugin_error)?;
+                    .map_err(vdfs_from_plugin_error)?;
                 // 选项定义与「是哪个会话」无关 ⇒ 一次算好，清单里逐项复用
                 let schema = self.session_schema().await;
-                Ok(vdfs::VdfsResponse::list(
+                Ok(VdfsResponse::list(
                     self.nodes_of_sessions(&sessions, &schema).await,
                 ))
             }
-            vdfs::VdfsRequest::Stat => {
+            VdfsRequest::Stat => {
                 // 自身根：**名字留空**——provider 不知道自己的挂载名，由使用方回填。
                 //
                 // 根的自述里带着「可新建类型」：根下可新建「会话」，类型定义带**选项
@@ -98,62 +104,55 @@ impl SessionPlugin {
                 // ⚠️ 代价要认：`session_schema()` 会做一次全项目广播（options 收集，
                 // 含 agent 目录扫描），因此**列 / stat 会话挂载根**比 stat 某个会话贵。
                 // 这与从前相同（容器合成根节点时就要取这份自述），只是取法统一了。
-                Ok(vdfs::VdfsResponse::Stat(
-                    vdfs::VdfsNode::dir("", "会话", vdfs::VdfsAccess::LIST).with_new_type(Some(
-                        vdfs::VdfsNewType::new(EXT_SESSION, "会话")
+                Ok(VdfsResponse::Stat(
+                    VdfsNode::dir("", "会话", VdfsAccess::LIST).with_new_type(Some(
+                        VdfsNewType::new(EXT_SESSION, "会话")
                             .with_description("新建会话")
                             .with_schema_opt(self.session_schema().await),
                     )),
                 ))
             }
-            vdfs::VdfsRequest::Read => Err(vdfs::VdfsError::invalid(format!(
-                "该路径不可读取内容：{path}"
-            ))),
-            vdfs::VdfsRequest::Write { content } => {
+            VdfsRequest::Read => Err(VdfsError::invalid(format!("该路径不可读取内容：{path}"))),
+            VdfsRequest::Write { content } => {
                 // 挂载根 = 「新建一个会话，名字由 provider 生成」。
                 //
                 // 写目录自身没有可覆盖的目标，因此 `create` 是唯一合法意图
                 // （见 `VdfsRequest::Write` 的两种目标形态）；缺它即报错，
                 // 不静默落成「一次无意义的写」。
                 if !content.create {
-                    return Err(vdfs::VdfsError::invalid(
+                    return Err(VdfsError::invalid(
                         "写会话挂载根需要 create 意图：目录自身没有可覆盖的目标",
                     ));
                 }
                 self.session_upsert(path, &content).await
             }
-            vdfs::VdfsRequest::Delete { .. } => {
-                Err(vdfs::VdfsError::Forbidden("会话挂载根不可删除".to_string()))
+            VdfsRequest::Delete { .. } => {
+                Err(VdfsError::Forbidden("会话挂载根不可删除".to_string()))
             }
-            vdfs::VdfsRequest::Watch { sink } => {
+            VdfsRequest::Watch { sink } => {
                 self.watch_at_path(path, sink).await?;
-                Ok(vdfs::VdfsResponse::Unit)
+                Ok(VdfsResponse::Unit)
             }
-            vdfs::VdfsRequest::Unwatch => {
+            VdfsRequest::Unwatch => {
                 self.unwatch_at_path(path).await?;
-                Ok(vdfs::VdfsResponse::Unit)
+                Ok(VdfsResponse::Unit)
             }
-            _ => Err(vdfs::VdfsError::NotImplemented),
+            _ => Err(VdfsError::NotImplemented),
         }
     }
 
     /// 会话本体（`<id>`）：清单里是**叶子**，被当目录访问时是**会话内部**视图。
-    async fn session_at(
-        &self,
-        path: &str,
-        id: &str,
-        req: vdfs::VdfsRequest,
-    ) -> vdfs::VdfsResult<vdfs::VdfsResponse> {
+    async fn session_at(&self, path: &str, id: &str, req: VdfsRequest) -> VdfsResult<VdfsResponse> {
         match req {
-            vdfs::VdfsRequest::List { .. } => {
+            VdfsRequest::List { .. } => {
                 // 会话内部：三个虚拟子目录 + 记忆文件（会话存在性校验由 `session_of` 承担）
                 let session = self.session_of(id).await?;
-                Ok(vdfs::VdfsResponse::list(internal_dirs(
+                Ok(VdfsResponse::list(internal_dirs(
                     super::super::workdir::workdir_of(&session).is_some(),
                     self.memory_node_of(id).await,
                 )))
             }
-            vdfs::VdfsRequest::Stat => {
+            VdfsRequest::Stat => {
                 let session = self.session_of(id).await?;
                 // 呈现与清单**同源**（`session_node`）：status / ext / 更新时间 /
                 // 摘要都随节点给出。缺了 `status`，运行态在这条链路上永远读不到
@@ -167,36 +166,36 @@ impl SessionPlugin {
                     &SessionSummary::of(&session),
                     &self.session_runtime(id).await,
                 );
-                n.access = vdfs::VdfsAccess::LIST;
-                Ok(vdfs::VdfsResponse::Stat(n))
+                n.access = VdfsAccess::LIST;
+                Ok(VdfsResponse::Stat(n))
             }
-            vdfs::VdfsRequest::Read => {
+            VdfsRequest::Read => {
                 let session = self.session_of(id).await?;
                 // 含在途：叶子与转写列表必须是同一份消息集合，否则前端
                 // `loadMessages`（读叶子）会在流式期间看不到正在跑的那一轮。
                 // 详见 `session_content` 的文档。
                 let live = self.live_messages_of(id).await;
-                Ok(vdfs::VdfsResponse::Read(session_content(&session, live)?))
+                Ok(VdfsResponse::Read(session_content(&session, live)?))
             }
             // 会话本身（`path` 即会话 id —— 具名新建时它就是**身份**，见
             // `session_upsert` 的 `create` 分支；`id` 由地址末段给出，不再由
             // provider 另生成一个）
-            vdfs::VdfsRequest::Write { content } => self.session_upsert(path, &content).await,
-            vdfs::VdfsRequest::Delete { .. } => {
+            VdfsRequest::Write { content } => self.session_upsert(path, &content).await,
+            VdfsRequest::Delete { .. } => {
                 // 存在性校验：删除不存在的会话应报 NotFound 而非静默成功
                 self.session_of(id).await?;
                 self.delete_session_internal(id)
                     .await
-                    .map_err(vdfs::vdfs_from_plugin_error)?;
-                Ok(vdfs::VdfsResponse::Unit)
+                    .map_err(vdfs_from_plugin_error)?;
+                Ok(VdfsResponse::Unit)
             }
-            vdfs::VdfsRequest::Watch { sink } => {
+            VdfsRequest::Watch { sink } => {
                 self.watch_at_path(path, sink).await?;
-                Ok(vdfs::VdfsResponse::Unit)
+                Ok(VdfsResponse::Unit)
             }
-            vdfs::VdfsRequest::Unwatch => {
+            VdfsRequest::Unwatch => {
                 self.unwatch_at_path(path).await?;
-                Ok(vdfs::VdfsResponse::Unit)
+                Ok(VdfsResponse::Unit)
             }
             // 节点动作：**中止**正在跑的那一轮。
             //
@@ -204,12 +203,12 @@ impl SessionPlugin {
             // 早已出队，它现在是转写里的消息；队列上的动作只该管「还没被消费的」
             // （取消 = 删条目，清空 = `clear`）。两个动词作用在**两个不同的对象**上
             // ，因此是两个地址——与 ADR-026 已确立的分界同一条。
-            vdfs::VdfsRequest::Action { action, .. } => match action.as_str() {
-                vdfs::VDFS_ACTION_ABORT => {
+            VdfsRequest::Action { action, .. } => match action.as_str() {
+                VDFS_ACTION_ABORT => {
                     // 存在性校验：会话不在就没有「它的一轮」可谈
                     self.session_of(id).await?;
                     let stopped = self.abort_turn(id).await;
-                    Ok(vdfs::VdfsResponse::Action(vdfs::VdfsActionResult {
+                    Ok(VdfsResponse::Action(VdfsActionResult {
                         action: action.clone(),
                         ok: stopped,
                         // 「没在跑」不是错误，但也不报成功——报成功会让调用方以为
@@ -222,30 +221,25 @@ impl SessionPlugin {
                         data: Some(json!({ "session_id": id })),
                     }))
                 }
-                _ => Err(vdfs::VdfsError::NotImplemented),
+                _ => Err(VdfsError::NotImplemented),
             },
-            _ => Err(vdfs::VdfsError::NotImplemented),
+            _ => Err(VdfsError::NotImplemented),
         }
     }
 
     /// 会话记忆（`<id>/MEMORY.md`）：单个文件，形状由共享实现产出。
-    async fn memory_at(
-        &self,
-        path: &str,
-        id: &str,
-        req: vdfs::VdfsRequest,
-    ) -> vdfs::VdfsResult<vdfs::VdfsResponse> {
+    async fn memory_at(&self, path: &str, id: &str, req: VdfsRequest) -> VdfsResult<VdfsResponse> {
         match req {
             // 记忆是**单个文件**：没有子项
-            vdfs::VdfsRequest::List { .. } => Err(vdfs::VdfsError::not_found(format!(
+            VdfsRequest::List { .. } => Err(VdfsError::not_found(format!(
                 "记忆是文件，没有子项：{path}"
             ))),
-            vdfs::VdfsRequest::Stat => {
+            VdfsRequest::Stat => {
                 // 存在性校验：会话不在，就没有「它的记忆」可谈
                 self.session_of(id).await?;
-                Ok(vdfs::VdfsResponse::Stat(self.memory_node_of(id).await))
+                Ok(VdfsResponse::Stat(self.memory_node_of(id).await))
             }
-            vdfs::VdfsRequest::Read => {
+            VdfsRequest::Read => {
                 // 会话记忆（`<根>/session/<id>/MEMORY.md`）：正文即文件全文。
                 // 文件不存在 → 空串（不是错误）——「还没写过」是记忆的正常状态。
                 self.session_of(id).await?;
@@ -253,66 +247,63 @@ impl SessionPlugin {
                     .memory_store(id)
                     .await
                     .read()
-                    .map_err(vdfs::VdfsError::internal)?;
-                Ok(vdfs::VdfsResponse::Read(vdfs::VdfsContent::text(text)))
+                    .map_err(VdfsError::internal)?;
+                Ok(VdfsResponse::Read(VdfsContent::text(text)))
             }
-            vdfs::VdfsRequest::Write { content } => {
+            VdfsRequest::Write { content } => {
                 // 会话记忆：**纯文本**写入（容量闸门在共享实现 `MemoryFile::write`，本插件不重复实现）
                 if content.binary {
-                    return Err(vdfs::VdfsError::invalid(
-                        "会话记忆是文本文件，不接受二进制内容",
-                    ));
+                    return Err(VdfsError::invalid("会话记忆是文本文件，不接受二进制内容"));
                 }
                 // 存在性校验：会话不在，就没有「它的记忆」可写
                 self.session_of(id).await?;
                 let store = self.memory_store(id).await;
                 let existed = store.exists();
                 let text = content.text.as_deref().unwrap_or_default();
-                store.write(text).map_err(vdfs::VdfsError::invalid)?;
+                store.write(text).map_err(VdfsError::invalid)?;
                 // 变更路径与 `list` 返回的节点地址同源（provider 子树口径，
                 // 挂载名由容器的 watch 包装补上——见 `watch_at_path` 的说明）
-                self.change_subs.notify(&vdfs::VdfsChange::bare(
-                    super::super::memory::memory_rel_path(id),
-                ));
-                Ok(vdfs::VdfsResponse::Write(vdfs::VdfsWriteResponse {
+                self.change_subs
+                    .notify(&VdfsChange::bare(super::super::memory::memory_rel_path(id)));
+                Ok(VdfsResponse::Write(VdfsWriteResponse {
                     name: None,
                     created: !existed,
                     etag: None,
                 }))
             }
-            vdfs::VdfsRequest::Delete { .. } => {
+            VdfsRequest::Delete { .. } => {
                 // 记忆**不可删除**（与 work / agent 的记忆层同一共享实现约定）：
                 // 删除即丢失本会话的长期约定，且没有东西能把它找回来。要清空就写入空内容
                 // ——那是一次可读、可审、可撤销的显式动作。
-                Err(vdfs::VdfsError::Forbidden(format!(
+                Err(VdfsError::Forbidden(format!(
                     "会话记忆不可删除（删除即丢失本会话的长期约定）。\
                      如需清空，请向 `{}` 写入空内容。",
                     crate::plugins::session::memory::SESSION_MEMORY_FILE
                 )))
             }
-            vdfs::VdfsRequest::Watch { sink } => {
+            VdfsRequest::Watch { sink } => {
                 self.watch_at_path(path, sink).await?;
-                Ok(vdfs::VdfsResponse::Unit)
+                Ok(VdfsResponse::Unit)
             }
-            vdfs::VdfsRequest::Unwatch => {
+            VdfsRequest::Unwatch => {
                 self.unwatch_at_path(path).await?;
-                Ok(vdfs::VdfsResponse::Unit)
+                Ok(VdfsResponse::Unit)
             }
-            _ => Err(vdfs::VdfsError::NotImplemented),
+            _ => Err(VdfsError::NotImplemented),
         }
     }
 
     /// 转写区段（`<id>/message[/mid]`）：列表与单条消息。
     async fn messages_at(
         &self,
-        ctx: &vdfs::VdfsContext,
+        ctx: &VdfsContext,
         path: &str,
         id: &str,
         mid: Option<&str>,
-        req: vdfs::VdfsRequest,
-    ) -> vdfs::VdfsResult<vdfs::VdfsResponse> {
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
         match req {
-            vdfs::VdfsRequest::List { .. } => match mid {
+            VdfsRequest::List { .. } => match mid {
                 // 转写列表：每一条消息是一个列表项，顺序由 `seq` 决定。
                 // 含**在途**消息——流式期间列表就是活的，不必等落库。
                 None => {
@@ -320,52 +311,50 @@ impl SessionPlugin {
                     let (limit, before) = window_params(ctx);
                     // 有界窗口：**只在调用方显式给参数时**生效。不给参数 = 全量，
                     // 与从前逐字节一致（流式期间前端要的是完整列表）。
-                    Ok(vdfs::VdfsResponse::list(
+                    Ok(VdfsResponse::list(
                         transcript_window(&msgs, limit, before)
                             .iter()
                             .map(message_node)
-                            .collect::<Vec<vdfs::VdfsNode>>(),
+                            .collect::<Vec<VdfsNode>>(),
                     ))
                 }
-                Some(_) => Err(vdfs::VdfsError::not_found(format!(
+                Some(_) => Err(VdfsError::not_found(format!(
                     "消息是列表项，没有子项：{path}"
                 ))),
             },
-            vdfs::VdfsRequest::Stat => match mid {
+            VdfsRequest::Stat => match mid {
                 // 列表本身是个目录（`l` 位：可列，不参与树遍历——会话整体是叶子）。
                 // 只需存在性校验，不必取全量转写。
                 None => {
                     self.session_of(id).await?;
-                    Ok(vdfs::VdfsResponse::Stat(messages_dir_node()))
+                    Ok(VdfsResponse::Stat(messages_dir_node()))
                 }
-                Some(mid) => Ok(vdfs::VdfsResponse::Stat(message_node(message_of(
+                Some(mid) => Ok(VdfsResponse::Stat(message_node(message_of(
                     &self.transcript_of(id).await?,
                     mid,
                 )?))),
             },
-            vdfs::VdfsRequest::Read => match mid {
+            VdfsRequest::Read => match mid {
                 // 单条消息的正文（列表项内容）——流式追加的正是它。
                 // 同样取含在途的转写：追加型变更的消费者读到的必须是**已含该增量**的正文。
                 Some(mid) => {
                     let msgs = self.transcript_of(id).await?;
-                    Ok(vdfs::VdfsResponse::Read(vdfs::VdfsContent::text(
-                        message_text(message_of(&msgs, mid)?),
-                    )))
+                    Ok(VdfsResponse::Read(VdfsContent::text(message_text(
+                        message_of(&msgs, mid)?,
+                    ))))
                 }
-                None => Err(vdfs::VdfsError::invalid(format!(
-                    "该路径不可读取内容：{path}"
-                ))),
+                None => Err(VdfsError::invalid(format!("该路径不可读取内容：{path}"))),
             },
-            vdfs::VdfsRequest::Write { content } => match mid {
+            VdfsRequest::Write { content } => match mid {
                 Some(mid) => {
                     if content.create {
-                        return Err(vdfs::VdfsError::invalid(
+                        return Err(VdfsError::invalid(
                             "消息不支持 create 意图：新增消息即发言，请走聊天协议\
                              （一次发言触发一整轮编排）",
                         ));
                     }
                     if content.binary {
-                        return Err(vdfs::VdfsError::invalid(
+                        return Err(VdfsError::invalid(
                             "消息是文本（JSON 字段补丁），不接受二进制内容",
                         ));
                     }
@@ -380,59 +369,58 @@ impl SessionPlugin {
                     // 再抄一遍。
                     let raw = content.text.as_deref().unwrap_or("").trim();
                     let mut value: Value = serde_json::from_str(raw).map_err(|e| {
-                        vdfs::VdfsError::invalid(format!(
+                        VdfsError::invalid(format!(
                             "消息补丁需要合法 JSON（ChatMessage 字段子集）：{e}"
                         ))
                     })?;
                     let obj = value.as_object_mut().ok_or_else(|| {
-                        vdfs::VdfsError::invalid("消息补丁需要 JSON 对象（ChatMessage 字段子集）")
+                        VdfsError::invalid("消息补丁需要 JSON 对象（ChatMessage 字段子集）")
                     })?;
                     if !obj.contains_key("id") {
                         obj.insert("id".to_string(), Value::String(mid.to_string()));
                     }
                     let patch: cm::ChatMessage = serde_json::from_value(value).map_err(|e| {
-                        vdfs::VdfsError::invalid(format!(
+                        VdfsError::invalid(format!(
                             "消息补丁需要合法 JSON（ChatMessage 字段子集）：{e}"
                         ))
                     })?;
                     self.patch_message(id, mid, &patch)
                         .await
-                        .map_err(vdfs::vdfs_from_plugin_error)?;
-                    Ok(vdfs::VdfsResponse::Write(vdfs::VdfsWriteResponse {
+                        .map_err(vdfs_from_plugin_error)?;
+                    Ok(VdfsResponse::Write(VdfsWriteResponse {
                         name: None,
                         created: false,
                         etag: None,
                     }))
                 }
                 // 转写列表本身：**仍只读**。往里放一条 = 发言 = 动作，不是写入。
-                None => Err(vdfs::VdfsError::Forbidden(
+                None => Err(VdfsError::Forbidden(
                     "转写列表只读：发言请走聊天协议（一次发言触发一整轮编排）".to_string(),
                 )),
             },
-            vdfs::VdfsRequest::Delete { .. } => {
+            VdfsRequest::Delete { .. } => {
                 // 转写区段（列表与单条）**不可 delete**：`delete` 的全局语义是
                 // 「**这一个**节点没了」，而「从这条删到末尾」是一种**区间**语义，
-                // 有它自己的动作——[`vdfs::VDFS_ACTION_TRUNCATE`]（落在起始消息上）。
+                // 有它自己的动作——[`crate::symbio_core::VDFS_ACTION_TRUNCATE`]（落在起始消息上）。
                 // 动作承载这类集合操作——理由见 `VDFS_ACTION_TRUNCATE` 的文档。
-                Err(vdfs::VdfsError::Forbidden(format!(
+                Err(VdfsError::Forbidden(format!(
                     "转写区段不可 delete：删除某条及其之后请用 action(\"{truncate}\")：{path}",
-                    truncate = vdfs::VDFS_ACTION_TRUNCATE,
+                    truncate = VDFS_ACTION_TRUNCATE,
                 )))
             }
             // 节点动作：转写区段上只有两类动词——**区间删除**
             // （`truncate`，落在单条消息上）与**恢复**（见下）。
-            vdfs::VdfsRequest::Action { action, payload } => {
+            VdfsRequest::Action { action, payload } => {
                 match (mid, action.as_str(), payload.as_ref()) {
-                    (Some(mid), vdfs::VDFS_ACTION_TRUNCATE, _) => {
+                    (Some(mid), VDFS_ACTION_TRUNCATE, _) => {
                         let deleted_ids = self
                             .truncate_messages(id, mid)
                             .await
-                            .map_err(vdfs::vdfs_from_plugin_error)?;
+                            .map_err(vdfs_from_plugin_error)?;
                         // 回执带**权威**的被删 id 列表：消费方本地若因锚点缺失而删窄了，
                         // 据它补齐（`vdfs/delete` 只回 `{path}`，带不回这个）。
-                        let data = serde_json::to_value(&deleted_ids).map_err(|e| {
-                            vdfs::VdfsError::internal(format!("截断回执序列化失败：{e}"))
-                        })?;
+                        let data = serde_json::to_value(&deleted_ids)
+                            .map_err(|e| VdfsError::internal(format!("截断回执序列化失败：{e}")))?;
                         let message = if deleted_ids.is_empty() {
                             // 目标不存在 ⇒ 什么都没删。这是**结果**不是错误，但也不发变更
                             // ——「什么都没删」不该留下痕迹：发一条「从 <mid> 起截断」的
@@ -441,7 +429,7 @@ impl SessionPlugin {
                         } else {
                             format!("已从 {mid} 起截断 {} 条消息", deleted_ids.len())
                         };
-                        Ok(vdfs::VdfsResponse::Action(vdfs::VdfsActionResult {
+                        Ok(VdfsResponse::Action(VdfsActionResult {
                             action: action.clone(),
                             ok: true,
                             message,
@@ -464,7 +452,7 @@ impl SessionPlugin {
                         let Ok(resume_action) = serde_json::from_value::<cm::ResumeAction>(
                             Value::String(word.to_string()),
                         ) else {
-                            return Err(vdfs::VdfsError::NotImplemented);
+                            return Err(VdfsError::NotImplemented);
                         };
                         self.session_of(id).await?;
                         let p = payload.cloned().unwrap_or(Value::Null);
@@ -478,7 +466,7 @@ impl SessionPlugin {
                         // 上下文**自己造**（与收件箱消费者的 `run_inbox_turn` 同款）：
                         // 只带目标会话 id 与恢复请求。发起者的请求上下文刻意不沿用——
                         // 它的 `SESSION_ID` 是发起者自己的会话（跨空间时二者不同）。
-                        let host = vdfs::vdfs_host_ctx(ctx)?;
+                        let host = vdfs_host_ctx(ctx)?;
                         let req_ctx = host.fork();
                         req_ctx.set(SESSION_ID, id.to_string());
                         let _ = req_ctx.set_payload(session_chat::Request {
@@ -496,16 +484,16 @@ impl SessionPlugin {
                         });
                         let resp = self
                             .me()
-                            .map_err(vdfs::vdfs_from_plugin_error)?
+                            .map_err(vdfs_from_plugin_error)?
                             .start_turn(req_ctx)
                             .await
-                            .map_err(vdfs::vdfs_from_plugin_error)?;
+                            .map_err(vdfs_from_plugin_error)?;
                         let status = resp
                             .get::<Value>()
                             .ok()
                             .and_then(|v| v.get("status").and_then(Value::as_str).map(String::from))
                             .unwrap_or_default();
-                        Ok(vdfs::VdfsResponse::Action(vdfs::VdfsActionResult {
+                        Ok(VdfsResponse::Action(VdfsActionResult {
                             action: action.clone(),
                             // 忙碌时**明确回绝**：http 层是 200，只有 `ok` 能把这个
                             // 事实带给调用方（前端据此把乐观置的 working 复位）。
@@ -518,52 +506,52 @@ impl SessionPlugin {
                             data: Some(json!({ "session_id": id, "status": status })),
                         }))
                     }
-                    _ => Err(vdfs::VdfsError::NotImplemented),
+                    _ => Err(VdfsError::NotImplemented),
                 }
             }
-            vdfs::VdfsRequest::Watch { sink } => {
+            VdfsRequest::Watch { sink } => {
                 self.watch_at_path(path, sink).await?;
-                Ok(vdfs::VdfsResponse::Unit)
+                Ok(VdfsResponse::Unit)
             }
-            vdfs::VdfsRequest::Unwatch => {
+            VdfsRequest::Unwatch => {
                 self.unwatch_at_path(path).await?;
-                Ok(vdfs::VdfsResponse::Unit)
+                Ok(VdfsResponse::Unit)
             }
-            _ => Err(vdfs::VdfsError::NotImplemented),
+            _ => Err(VdfsError::NotImplemented),
         }
     }
 
     /// 收件箱（`<id>/inbox[/iid]`）：**待消费**的用户消息。
     async fn inbox_at(
         &self,
-        ctx: &vdfs::VdfsContext,
+        ctx: &VdfsContext,
         path: &str,
         id: &str,
         iid: Option<&str>,
-        req: vdfs::VdfsRequest,
-    ) -> vdfs::VdfsResult<vdfs::VdfsResponse> {
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
         match req {
-            vdfs::VdfsRequest::List { .. } => match iid {
+            VdfsRequest::List { .. } => match iid {
                 // 收件箱：**待消费**的用户消息（已消费的那些在转写里，不在这）
                 None => {
                     self.session_of(id).await?;
-                    Ok(vdfs::VdfsResponse::list(
+                    Ok(VdfsResponse::list(
                         self.inbox_items(id)
                             .await
                             .iter()
                             .map(inbox_item_node)
-                            .collect::<Vec<vdfs::VdfsNode>>(),
+                            .collect::<Vec<VdfsNode>>(),
                     ))
                 }
-                Some(_) => Err(vdfs::VdfsError::not_found(format!(
+                Some(_) => Err(VdfsError::not_found(format!(
                     "收件箱条目是列表项，没有子项：{path}"
                 ))),
             },
-            vdfs::VdfsRequest::Stat => match iid {
+            VdfsRequest::Stat => match iid {
                 // 收件箱目录：形状与 `list` 同源；条目：队列里那一条（出队即消失）
                 None => {
                     self.session_of(id).await?;
-                    Ok(vdfs::VdfsResponse::Stat(inbox_dir_node()))
+                    Ok(VdfsResponse::Stat(inbox_dir_node()))
                 }
                 Some(iid) => {
                     self.session_of(id).await?;
@@ -572,15 +560,15 @@ impl SessionPlugin {
                         .iter()
                         .find(|i| i.id == iid)
                         .map(inbox_item_node)
-                        .map(vdfs::VdfsResponse::Stat)
+                        .map(VdfsResponse::Stat)
                         .ok_or_else(|| {
-                            vdfs::VdfsError::not_found(format!(
+                            VdfsError::not_found(format!(
                                 "收件箱里没有待消费条目：{iid}（已出队的那条在转写里）"
                             ))
                         })
                 }
             },
-            vdfs::VdfsRequest::Read => match iid {
+            VdfsRequest::Read => match iid {
                 // 收件箱条目：正文就是那条待发消息（与消息节点同一投影口径，
                 // 它就是一条消息——差的只是"还没被消费"）
                 Some(iid) => {
@@ -592,17 +580,15 @@ impl SessionPlugin {
                         .find(|i| i.id == iid)
                         .map(|i| i.message.clone())
                         .ok_or_else(|| {
-                            vdfs::VdfsError::not_found(format!("收件箱里没有待消费条目：{iid}"))
+                            VdfsError::not_found(format!("收件箱里没有待消费条目：{iid}"))
                         })?;
-                    Ok(vdfs::VdfsResponse::Read(vdfs::VdfsContent::text(
-                        message_text(&message),
-                    )))
+                    Ok(VdfsResponse::Read(VdfsContent::text(message_text(
+                        &message,
+                    ))))
                 }
-                None => Err(vdfs::VdfsError::invalid(format!(
-                    "该路径不可读取内容：{path}"
-                ))),
+                None => Err(VdfsError::invalid(format!("该路径不可读取内容：{path}"))),
             },
-            vdfs::VdfsRequest::Write { content } => {
+            VdfsRequest::Write { content } => {
                 // 收件箱：**写即入队**（`<id>/inbox` 与 `<id>/inbox/<iid>` 同义）。
                 //
                 // ## 为什么这里不存在"发言不是一次写入"那个叉
@@ -616,7 +602,7 @@ impl SessionPlugin {
                 // `create` 在这里**没有区分度**：两种形态都是新建一条队列项，因此既不
                 // 要求也不拒绝——回执统一 `created: true`（它确实是一条新条目）。
                 if content.binary {
-                    return Err(vdfs::VdfsError::invalid(
+                    return Err(VdfsError::invalid(
                         "收件箱条目是文本（ChatMessage 字段子集或纯文本），不接受二进制内容",
                     ));
                 }
@@ -628,7 +614,7 @@ impl SessionPlugin {
                 // 它是 `start_turn` 回退链的**第一档**（ctx > 会话 metadata > 报错），
                 // 丢了它就只能靠会话 metadata——而「会话还没绑过 workdir」正是新建
                 // 会话那一刻的常态。
-                let workdir = vdfs::vdfs_host_ctx(ctx)
+                let workdir = vdfs_host_ctx(ctx)
                     .ok()
                     .and_then(|h| h.get(crate::symbio_core::WORKDIR));
                 let item = self
@@ -645,13 +631,13 @@ impl SessionPlugin {
                 // （与新建会话回执返回生成的 id 同一手法）；写具名条目
                 // （`<inbox>/<iid>`）时那个名字本来就是调用方给的，回传没有信息量。
                 let anonymous = iid.is_none();
-                Ok(vdfs::VdfsResponse::Write(vdfs::VdfsWriteResponse {
+                Ok(VdfsResponse::Write(VdfsWriteResponse {
                     name: anonymous.then(|| item.id.clone()),
                     created: true,
                     etag: None,
                 }))
             }
-            vdfs::VdfsRequest::Delete { .. } => match iid {
+            VdfsRequest::Delete { .. } => match iid {
                 // 收件箱条目：**取消排队**（尚未被消费的那条）。
                 //
                 // 找不到就是"已出队"（它已经变成一条真消息了）或本来就没有——两种
@@ -659,44 +645,42 @@ impl SessionPlugin {
                 Some(iid) => {
                     self.session_of(id).await?;
                     if self.cancel_inbox_item(id, iid).await {
-                        Ok(vdfs::VdfsResponse::Unit)
+                        Ok(VdfsResponse::Unit)
                     } else {
-                        Err(vdfs::VdfsError::not_found(format!(
+                        Err(VdfsError::not_found(format!(
                             "收件箱里没有待消费条目 {iid}\
                              （已出队的那条已是会话里的消息，中止请走 \
                              action(会话地址, \"{abort}\")）：{path}",
-                            abort = vdfs::VDFS_ACTION_ABORT
+                            abort = VDFS_ACTION_ABORT
                         )))
                     }
                 }
-                None => Err(vdfs::VdfsError::Forbidden(format!(
+                None => Err(VdfsError::Forbidden(format!(
                     "收件箱不可整体删除：清空待消费队列请用 action(\"{clear}\")：{path}",
-                    clear = vdfs::VDFS_ACTION_CLEAR,
+                    clear = VDFS_ACTION_CLEAR,
                 ))),
             },
             // 收件箱的 `clear`：**只取消还没被消费的**。已出队的那条已经是会话里的
             // 消息，中止它走 `action(<会话地址>, "abort")`（与删除条目同款分界）。
-            vdfs::VdfsRequest::Action { action, .. }
-                if iid.is_none() && action == vdfs::VDFS_ACTION_CLEAR =>
-            {
+            VdfsRequest::Action { action, .. } if iid.is_none() && action == VDFS_ACTION_CLEAR => {
                 self.session_of(id).await?;
                 let ids = self.clear_inbox(id).await;
-                Ok(vdfs::VdfsResponse::Action(vdfs::VdfsActionResult {
+                Ok(VdfsResponse::Action(VdfsActionResult {
                     action: action.clone(),
                     ok: true,
                     message: format!("已取消 {} 条待消费消息", ids.len()),
                     data: Some(json!(ids)),
                 }))
             }
-            vdfs::VdfsRequest::Watch { sink } => {
+            VdfsRequest::Watch { sink } => {
                 self.watch_at_path(path, sink).await?;
-                Ok(vdfs::VdfsResponse::Unit)
+                Ok(VdfsResponse::Unit)
             }
-            vdfs::VdfsRequest::Unwatch => {
+            VdfsRequest::Unwatch => {
                 self.unwatch_at_path(path).await?;
-                Ok(vdfs::VdfsResponse::Unit)
+                Ok(VdfsResponse::Unit)
             }
-            _ => Err(vdfs::VdfsError::NotImplemented),
+            _ => Err(VdfsError::NotImplemented),
         }
     }
 
@@ -705,49 +689,42 @@ impl SessionPlugin {
         &self,
         path: &str,
         id: &str,
-        req: vdfs::VdfsRequest,
-    ) -> vdfs::VdfsResult<vdfs::VdfsResponse> {
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
         match req {
-            vdfs::VdfsRequest::List { .. } => {
+            VdfsRequest::List { .. } => {
                 self.session_of(id).await?;
-                let store = self
-                    .get_store()
-                    .await
-                    .map_err(vdfs::vdfs_from_plugin_error)?;
+                let store = self.get_store().await.map_err(vdfs_from_plugin_error)?;
                 let subs = store
                     .list_sub_sessions(id)
                     .await
-                    .map_err(vdfs::vdfs_from_plugin_error)?;
+                    .map_err(vdfs_from_plugin_error)?;
                 // 子会话也是会话：同一份选项定义
                 let schema = self.session_schema().await;
-                Ok(vdfs::VdfsResponse::list(
+                Ok(VdfsResponse::list(
                     self.nodes_of_sessions(&subs, &schema).await,
                 ))
             }
-            vdfs::VdfsRequest::Stat => {
+            VdfsRequest::Stat => {
                 self.session_of(id).await?;
-                Ok(vdfs::VdfsResponse::Stat(
+                Ok(VdfsResponse::Stat(
                     super::super::workdir::sub_sessions_dir_node(),
                 ))
             }
-            vdfs::VdfsRequest::Read => Err(vdfs::VdfsError::invalid(format!(
-                "该路径不可读取内容：{path}"
-            ))),
-            vdfs::VdfsRequest::Write { .. } => {
-                Err(vdfs::VdfsError::invalid(format!("该路径不可写入：{path}")))
+            VdfsRequest::Read => Err(VdfsError::invalid(format!("该路径不可读取内容：{path}"))),
+            VdfsRequest::Write { .. } => Err(VdfsError::invalid(format!("该路径不可写入：{path}"))),
+            VdfsRequest::Delete { .. } => {
+                Err(VdfsError::Forbidden(format!("该路径不可删除：{path}")))
             }
-            vdfs::VdfsRequest::Delete { .. } => Err(vdfs::VdfsError::Forbidden(format!(
-                "该路径不可删除：{path}"
-            ))),
-            vdfs::VdfsRequest::Watch { sink } => {
+            VdfsRequest::Watch { sink } => {
                 self.watch_at_path(path, sink).await?;
-                Ok(vdfs::VdfsResponse::Unit)
+                Ok(VdfsResponse::Unit)
             }
-            vdfs::VdfsRequest::Unwatch => {
+            VdfsRequest::Unwatch => {
                 self.unwatch_at_path(path).await?;
-                Ok(vdfs::VdfsResponse::Unit)
+                Ok(VdfsResponse::Unit)
             }
-            _ => Err(vdfs::VdfsError::NotImplemented),
+            _ => Err(VdfsError::NotImplemented),
         }
     }
 
@@ -757,46 +734,44 @@ impl SessionPlugin {
         path: &str,
         id: &str,
         sub: &str,
-        req: vdfs::VdfsRequest,
-    ) -> vdfs::VdfsResult<vdfs::VdfsResponse> {
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
         match req {
-            vdfs::VdfsRequest::List { .. } => Err(vdfs::VdfsError::not_found(format!(
+            VdfsRequest::List { .. } => Err(VdfsError::not_found(format!(
                 "子会话是叶子节点，没有子项：{path}"
             ))),
-            vdfs::VdfsRequest::Stat => {
+            VdfsRequest::Stat => {
                 let session = self.sub_session_of(id, sub).await?;
-                Ok(vdfs::VdfsResponse::Stat(session_node(
+                Ok(VdfsResponse::Stat(session_node(
                     &SessionSummary::of(&session),
                     &self.session_runtime(sub).await,
                 )))
             }
-            vdfs::VdfsRequest::Read => {
+            VdfsRequest::Read => {
                 let session = self.sub_session_of(id, sub).await?;
                 // 子会话是**独立会话**（有自己的 id 与活跃状态），因此叠加的是它
                 // 自己的在途缓冲，而不是父会话的——父会话的在途消息不属于它。
                 let live = self.live_messages_of(&session.id).await;
-                Ok(vdfs::VdfsResponse::Read(session_content(&session, live)?))
+                Ok(VdfsResponse::Read(session_content(&session, live)?))
             }
-            vdfs::VdfsRequest::Write { .. } => {
-                Err(vdfs::VdfsError::invalid(format!("该路径不可写入：{path}")))
-            }
-            vdfs::VdfsRequest::Delete { .. } => {
+            VdfsRequest::Write { .. } => Err(VdfsError::invalid(format!("该路径不可写入：{path}"))),
+            VdfsRequest::Delete { .. } => {
                 // 子会话：先 abort 活跃任务再删（`delete_session_internal` 同语义）
                 self.sub_session_of(id, sub).await?;
                 self.delete_session_internal(sub)
                     .await
-                    .map_err(vdfs::vdfs_from_plugin_error)?;
-                Ok(vdfs::VdfsResponse::Unit)
+                    .map_err(vdfs_from_plugin_error)?;
+                Ok(VdfsResponse::Unit)
             }
-            vdfs::VdfsRequest::Watch { sink } => {
+            VdfsRequest::Watch { sink } => {
                 self.watch_at_path(path, sink).await?;
-                Ok(vdfs::VdfsResponse::Unit)
+                Ok(VdfsResponse::Unit)
             }
-            vdfs::VdfsRequest::Unwatch => {
+            VdfsRequest::Unwatch => {
                 self.unwatch_at_path(path).await?;
-                Ok(vdfs::VdfsResponse::Unit)
+                Ok(VdfsResponse::Unit)
             }
-            _ => Err(vdfs::VdfsError::NotImplemented),
+            _ => Err(VdfsError::NotImplemented),
         }
     }
 
@@ -806,89 +781,83 @@ impl SessionPlugin {
         path: &str,
         id: &str,
         rel: &str,
-        req: vdfs::VdfsRequest,
-    ) -> vdfs::VdfsResult<vdfs::VdfsResponse> {
+        req: VdfsRequest,
+    ) -> VdfsResult<VdfsResponse> {
         match req {
-            vdfs::VdfsRequest::List { .. } => {
+            VdfsRequest::List { .. } => {
                 let workdir = self.workdir_of(id).await?;
                 // 目录树场景的实时监听（按会话 id 引用计数）
                 self.workdir_watches.ensure_watch(&workdir, id);
                 super::super::workdir::list_children(&workdir, Some(rel))
                     .await
-                    .map_err(vdfs::vdfs_from_plugin_error)
-                    .map(vdfs::VdfsResponse::list)
+                    .map_err(vdfs_from_plugin_error)
+                    .map(VdfsResponse::list)
             }
-            vdfs::VdfsRequest::Stat => {
+            VdfsRequest::Stat => {
                 let workdir = self.workdir_of(id).await?;
                 if rel.is_empty() {
-                    return Ok(vdfs::VdfsResponse::Stat(
-                        super::super::workdir::workdir_dir_node(),
-                    ));
+                    return Ok(VdfsResponse::Stat(super::super::workdir::workdir_dir_node()));
                 }
                 super::super::workdir::read_node(&workdir, rel)
                     .await
-                    .map_err(vdfs::vdfs_from_plugin_error)
-                    .map(vdfs::VdfsResponse::Stat)
+                    .map_err(vdfs_from_plugin_error)
+                    .map(VdfsResponse::Stat)
             }
-            vdfs::VdfsRequest::Read => {
+            VdfsRequest::Read => {
                 if rel.is_empty() {
-                    return Err(vdfs::VdfsError::invalid(format!(
-                        "该路径不可读取内容：{path}"
-                    )));
+                    return Err(VdfsError::invalid(format!("该路径不可读取内容：{path}")));
                 }
                 let workdir = self.workdir_of(id).await?;
                 let text = super::super::workdir::read_content(&workdir, rel)
                     .await
-                    .map_err(vdfs::vdfs_from_plugin_error)?;
-                Ok(vdfs::VdfsResponse::Read(vdfs::VdfsContent::text(text)))
+                    .map_err(vdfs_from_plugin_error)?;
+                Ok(VdfsResponse::Read(VdfsContent::text(text)))
             }
-            vdfs::VdfsRequest::Write { content } => {
+            VdfsRequest::Write { content } => {
                 if rel.is_empty() {
-                    return Err(vdfs::VdfsError::invalid(format!("该路径不可写入：{path}")));
+                    return Err(VdfsError::invalid(format!("该路径不可写入：{path}")));
                 }
                 // 工作目录分支：文件写回（与列读同一份实现——路径越界校验 + 落盘）
                 let workdir = self.workdir_of(id).await?;
                 let text = content.text.as_deref().unwrap_or("");
                 super::super::workdir::write_node(&workdir, rel, text)
                     .await
-                    .map_err(vdfs::vdfs_from_plugin_error)?;
+                    .map_err(vdfs_from_plugin_error)?;
                 self.workdir_watches.ensure_watch(&workdir, id);
-                Ok(vdfs::VdfsResponse::Write(vdfs::VdfsWriteResponse {
+                Ok(VdfsResponse::Write(VdfsWriteResponse {
                     name: None,
                     created: false,
                     etag: None,
                 }))
             }
-            vdfs::VdfsRequest::Delete { .. } => {
+            VdfsRequest::Delete { .. } => {
                 if rel.is_empty() {
-                    return Err(vdfs::VdfsError::Forbidden(format!(
-                        "该路径不可删除：{path}"
-                    )));
+                    return Err(VdfsError::Forbidden(format!("该路径不可删除：{path}")));
                 }
                 let workdir = self.workdir_of(id).await?;
                 super::super::workdir::delete_node(&workdir, rel)
                     .await
-                    .map_err(vdfs::vdfs_from_plugin_error)?;
-                Ok(vdfs::VdfsResponse::Unit)
+                    .map_err(vdfs_from_plugin_error)?;
+                Ok(VdfsResponse::Unit)
             }
-            vdfs::VdfsRequest::Watch { sink } => {
+            VdfsRequest::Watch { sink } => {
                 // 工作目录子树：接入文件系统监听（文件变化经**同一张订阅表**到达本
                 // sink，见 `SessionPlugin::new` 注入的 `set_vdfs_subs`）
                 if let Ok(workdir) = self.workdir_of(id).await {
                     self.workdir_watches.ensure_watch(&workdir, id);
                 }
                 self.change_subs.watch(path, sink);
-                Ok(vdfs::VdfsResponse::Unit)
+                Ok(VdfsResponse::Unit)
             }
-            vdfs::VdfsRequest::Unwatch => {
+            VdfsRequest::Unwatch => {
                 // 与 `watch` 严格配对：引用计数归零才真正摘掉
                 if let Ok(workdir) = self.workdir_of(id).await {
                     self.workdir_watches.release_watch(&workdir, id);
                 }
                 self.change_subs.unwatch(path);
-                Ok(vdfs::VdfsResponse::Unit)
+                Ok(VdfsResponse::Unit)
             }
-            _ => Err(vdfs::VdfsError::NotImplemented),
+            _ => Err(VdfsError::NotImplemented),
         }
     }
 
@@ -918,13 +887,13 @@ impl SessionPlugin {
     ///
     /// 代价是订阅者会收到兄弟子树的变更（订阅一个会话会看到别的会话的事件）；
     /// 消费者按路径前缀自行过滤即可，正确性不受影响。
-    async fn watch_at_path(&self, path: &str, sink: vdfs::VdfsChangeSink) -> vdfs::VdfsResult<()> {
+    async fn watch_at_path(&self, path: &str, sink: VdfsChangeSink) -> VdfsResult<()> {
         self.change_subs.watch(path, sink);
         Ok(())
     }
 
     /// 取消订阅：与 [`Self::watch_at_path`] 严格配对——引用计数归零才真正摘掉。
-    async fn unwatch_at_path(&self, path: &str) -> vdfs::VdfsResult<()> {
+    async fn unwatch_at_path(&self, path: &str) -> VdfsResult<()> {
         self.change_subs.unwatch(path);
         Ok(())
     }
@@ -939,7 +908,7 @@ impl SessionPlugin {
     /// 「转写即列表」当场失效。
     ///
     /// 存在性校验在此一并完成（`session_of`），因此调用方不必再查一次。
-    async fn transcript_of(&self, id: &str) -> vdfs::VdfsResult<Vec<cm::ChatMessage>> {
+    async fn transcript_of(&self, id: &str) -> VdfsResult<Vec<cm::ChatMessage>> {
         let session = self.session_of(id).await?;
         let live = self.live_messages_of(id).await;
         Ok(ordered(overlay_live(session.messages, live)))
@@ -956,14 +925,14 @@ impl SessionPlugin {
 
     /// 按 id 取会话（**存在性校验**：`load_session` 对未命中会返回空会话，
     /// 因此这里走带存在性判据的 `load_session_checked`）
-    pub(crate) async fn session_of(&self, id: &str) -> vdfs::VdfsResult<Session> {
+    pub(crate) async fn session_of(&self, id: &str) -> VdfsResult<Session> {
         self.get_store()
             .await
-            .map_err(vdfs::vdfs_from_plugin_error)?
+            .map_err(vdfs_from_plugin_error)?
             .load_session_checked(id)
             .await
-            .map_err(vdfs::vdfs_from_plugin_error)?
-            .ok_or_else(|| vdfs::VdfsError::not_found(format!("会话不存在：{id}")))
+            .map_err(vdfs_from_plugin_error)?
+            .ok_or_else(|| VdfsError::not_found(format!("会话不存在：{id}")))
     }
 
     /// 单个会话的**运行态**（节点状态的唯一来源，见 [`SessionRuntime`]）。
@@ -996,7 +965,7 @@ impl SessionPlugin {
         &self,
         sessions: &[SessionSummary],
         schema: &Option<Value>,
-    ) -> Vec<vdfs::VdfsNode> {
+    ) -> Vec<VdfsNode> {
         let active = self.active_mgr.sessions.read().await;
         sessions
             .iter()
@@ -1039,10 +1008,10 @@ impl SessionPlugin {
     }
 
     /// 会话的工作目录（未声明 workdir ⇒ 该会话无目录树能力）
-    async fn workdir_of(&self, id: &str) -> vdfs::VdfsResult<String> {
+    async fn workdir_of(&self, id: &str) -> VdfsResult<String> {
         let session = self.session_of(id).await?;
         super::super::workdir::workdir_of(&session)
-            .ok_or_else(|| vdfs::VdfsError::not_found(format!("会话 {id} 没有工作目录")))
+            .ok_or_else(|| VdfsError::not_found(format!("会话 {id} 没有工作目录")))
     }
 
     /// 会话记忆 → VDFS 节点。
@@ -1050,7 +1019,7 @@ impl SessionPlugin {
     /// 形状由共享实现 [`MemoryFile::node`](crate::providers::MemoryFile::node) 产出，
     /// `list`（经 `internal_dirs`）与 `stat`
     /// **共用同一份**——「列表里的和点开的不是同一个东西」这类 bug 因此写不出来。
-    async fn memory_node_of(&self, id: &str) -> vdfs::VdfsNode {
+    async fn memory_node_of(&self, id: &str) -> VdfsNode {
         self.memory_store(id)
             .await
             .node(&crate::providers::MemoryNodeSpec {
@@ -1066,19 +1035,16 @@ impl SessionPlugin {
         &self,
         id: &str,
         sub: &str,
-    ) -> vdfs::VdfsResult<super::super::types::Session> {
-        let store = self
-            .get_store()
-            .await
-            .map_err(vdfs::vdfs_from_plugin_error)?;
+    ) -> VdfsResult<super::super::types::Session> {
+        let store = self.get_store().await.map_err(vdfs_from_plugin_error)?;
         let session = store
             .load_session(sub)
             .await
-            .map_err(vdfs::vdfs_from_plugin_error)?;
+            .map_err(vdfs_from_plugin_error)?;
         if session.id == sub && session.parent_session_id() == Some(id) {
             Ok(session)
         } else {
-            Err(vdfs::VdfsError::not_found(format!(
+            Err(VdfsError::not_found(format!(
                 "会话 {id} 下不存在子会话 {sub}"
             )))
         }

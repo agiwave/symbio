@@ -1,4 +1,4 @@
-use crate::symbio_core::schemas::session::chat_message::{ChatMessage, ResumeRequest};
+use crate::symbio_core::chat_message::{ChatMessage, ResumeRequest};
 use serde::{Deserialize, Serialize};
 
 /// Model 推理请求 (由 Session 插件或 Agent 发起)

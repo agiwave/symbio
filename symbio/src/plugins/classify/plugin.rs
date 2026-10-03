@@ -40,13 +40,13 @@
 
 use std::sync::Arc;
 
-use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
-use crate::symbio_core::schemas::dialog::{DecideRequest, Verdict};
 use crate::symbio_core::{
     plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH,
     PLUGIN_ID_CLASSIFY,
 };
+use crate::symbio_core::{DecideRequest, Verdict};
+use crate::symbio_core::{DetailDefinition, DetailField};
 use async_trait::async_trait;
 
 use super::config::ClassifyConfig;

@@ -18,7 +18,7 @@
 use crate::plugin_error;
 use crate::plugin_info;
 use crate::plugin_warn;
-use crate::symbio_core::schemas::session::chat_message::ChatMessage;
+use crate::symbio_core::chat_message::ChatMessage;
 use crate::symbio_core::TurnOutput;
 use crate::symbio_core::{CapabilityMeta, ExecEnv, ModelProvider, PluginError};
 use async_trait::async_trait;

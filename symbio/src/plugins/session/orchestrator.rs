@@ -26,12 +26,12 @@ use super::model_chat;
 // / 本文件都要用），因此在这里导入一次，而不是各子模块各导一遍。
 use super::plugin::{SessionPlugin, OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED};
 use crate::plugin_debug;
-use crate::symbio_core::schemas::{session::chat_message as cm, session::session_chat};
 use crate::symbio_core::{
     capability_take_errors, ExecAbortSignal, ExecEventSink, Plugin, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload, MODE,
     PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
 };
+use crate::symbio_core::{chat_message as cm, session_chat};
 use broadcast::SessionStateChange;
 use serde_json::json;
 use std::sync::atomic::Ordering;

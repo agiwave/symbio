@@ -52,7 +52,7 @@
 //! 把两者混成一个开关，会让「用户看得到但模型看不到」与「模型看得到但用户看不到」
 //! 这两种**都错**的状态变成同一件事。
 
-use crate::symbio_core::schemas::session::chat_message::{ChatMessage, MessageRole, MessageType};
+use crate::symbio_core::chat_message::{ChatMessage, MessageRole, MessageType};
 
 /// 投影窗口（条数）——**默认值**，两个调用方（`classify` / `compose`）共用。
 ///

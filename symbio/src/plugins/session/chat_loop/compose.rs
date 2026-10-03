@@ -57,14 +57,14 @@
 
 use std::sync::Arc;
 
-use crate::symbio_core::schemas::dialog::{ComposeRequest, RunSnapshot, Verdict};
-use crate::symbio_core::schemas::session::chat_message::{
+use crate::symbio_core::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
 use crate::symbio_core::{
     clock_now_ms, llm_short_id, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PATH,
     ROUTE_COMPOSE_WORDING, SESSION_ID,
 };
+use crate::symbio_core::{ComposeRequest, RunSnapshot, Verdict};
 
 use super::super::context::{conversation_view, CONVERSATION_VIEW_LIMIT};
 use super::state::{ChatOrchestrator, SessionContext};

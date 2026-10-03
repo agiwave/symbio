@@ -40,7 +40,7 @@
 //! 非文本片段（如图片），就按顺序把所有片段拼成 `Parts`，不把图片丢掉。
 
 use super::super::active::InboxItem;
-use crate::symbio_core::schemas::session::chat_message as cm;
+use crate::symbio_core::chat_message as cm;
 
 /// 合并标记的三个键名（唯一真源：写入方与消费方都从这里取）。
 ///

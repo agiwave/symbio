@@ -25,7 +25,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 
-use symbio::symbio_core::schemas::session::chat_message::{
+use symbio::symbio_core::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
 use symbio::symbio_core::VDFS_STATUS_WORKING;

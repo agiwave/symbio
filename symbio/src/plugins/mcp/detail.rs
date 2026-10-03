@@ -12,7 +12,7 @@
 //! 新建态派生目录 id，`validate_manifest` 时丢弃），校验与规范化在
 //! `validate_manifest`（plugin.rs）完成。
 
-use crate::symbio_core::schemas::detail::{
+use crate::symbio_core::{
     DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,
     DetailSection,
 };

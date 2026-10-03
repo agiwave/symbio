@@ -46,7 +46,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
         &self,
         cfg: &ModelProviderConfig,
         system: &str,
-        messages: &[crate::symbio_core::schemas::session::chat_message::ChatMessage],
+        messages: &[crate::symbio_core::chat_message::ChatMessage],
         tools: &[CapabilityMeta],
     ) -> Value {
         let mut input_items = Vec::new();

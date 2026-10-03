@@ -42,11 +42,10 @@
  *   node scripts/core-surface-audit.mjs --root=<dir>   # 指向别处的仓库（测试用）
  */
 
-import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, yellow, green, dim } from './color.mjs'
-import { walk, stripComments, collectCoreSurface } from './core-surface.mjs'
+import { collectCoreSurface, collectConsumers, isSelfReference } from './core-surface.mjs'
 
 const argv = process.argv.slice(2)
 const VERBOSE = argv.includes('--verbose')
@@ -56,12 +55,6 @@ const ROOT = rootArg
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 const CORE_REL = 'symbio/src/symbio_core'
-
-/** 跨 crate 消费方：整个 crate 算一个单位（它们是独立 crate，与插件模块不可比） */
-const CROSS_CRATE = [
-  { rel: 'cli/src', label: 'cli' },
-  { rel: 'tauri/src-tauri/src', label: 'tauri-shell' },
-]
 
 let surface
 try {
@@ -73,64 +66,20 @@ try {
 const symbols = surface.symbols
 
 // ==================== 数消费方 ====================
-
-/**
- * 文件 → 消费方单位。**永远返回一个单位，绝不返回 null**（口径 3）。
- *
- * 返回 `null` 会让调用方 `continue` 跳过该文件，于是定义在那里的符号被算成
- * 「0 个消费方」——`PluginErrorCode` / `PluginIdentity` 一族就这样被假报过。
- */
-function unitOf(rel) {
-  const norm = rel.split(path.sep).join('/')
-  const m = norm.match(/^symbio\/src\/plugins\/([^/]+)\//)
-  if (m) return `plugins/${m[1]}`
-  const m2 = norm.match(/^symbio\/src\/providers\/([^/]+)\//)
-  if (m2) return `providers/${m2[1]}`
-  if (/^symbio\/src\/plugins\/[^/]+$/.test(norm)) return 'plugins/(registry)'
-  if (norm.startsWith('symbio/src/')) return 'symbio/(crate root)'
-  for (const c of CROSS_CRATE) {
-    if (norm.startsWith(c.rel)) return c.label
-  }
-  return null
-}
-
-const allNames = [...symbols.keys()]
-const consumers = new Map()
-for (const scanRoot of ['symbio/src', 'cli/src', 'tauri/src-tauri/src'].map((r) => path.join(ROOT, r))) {
-  for (const file of walk(scanRoot)) {
-    if (!file.endsWith('.rs')) continue
-    const rel = path.relative(ROOT, file)
-    if (rel.split(path.sep).join('/').startsWith(CORE_REL + '/')) continue // core 自身不算消费方
-    const unit = unitOf(rel)
-    if (!unit) continue
-    const src = stripComments(fs.readFileSync(file, 'utf8'))
-    for (const name of allNames) {
-      if (!new RegExp(`\\b${name}\\b`).test(src)) continue
-      if (!consumers.has(name)) consumers.set(name, new Set())
-      consumers.get(name).add(unit)
-    }
-  }
-}
+//
+// 计数口径（`unitOf` 的单位划分、自引用不算下放候选、一个文件都不能跳过）收在
+// [`core-surface.mjs`](./core-surface.mjs)——判定型的 `core-export-audit.mjs` 判
+// 「≥2 个模块消费」走的是**同一份**计数，避免「报告说 A、判定说 B」。
+const consumers = collectConsumers(ROOT, symbols, CORE_REL)
 
 // ==================== 报告 ====================
 
+const allNames = [...symbols.keys()]
 const rows = allNames.map((name) => ({
   name,
   domain: symbols.get(name),
   units: [...(consumers.get(name) ?? [])].sort(),
 }))
-
-/**
- * 自引用：插件 id 常量（`PLUGIN_ID_<X>`）与嵌入服务 id（`EMBEDDING_<X>`）被
- * **同名插件 / provider** 使用。这是**正常**的——常量就是它自己的名字，不该算
- * 「下放候选」。
- */
-function isSelfReference(r) {
-  const m = r.name.match(/^(?:PLUGIN_ID|EMBEDDING)_([A-Z]+)$/)
-  if (!m || r.units.length !== 1) return false
-  const slug = m[1].toLowerCase()
-  return r.units[0] === `plugins/${slug}` || r.units[0] === `providers/${slug}`
-}
 
 const zero = rows.filter((r) => r.units.length === 0)
 const one = rows.filter((r) => r.units.length === 1 && !isSelfReference(r))

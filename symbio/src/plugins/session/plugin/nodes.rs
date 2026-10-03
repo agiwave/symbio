@@ -17,6 +17,10 @@
 //! `pub(crate)`，由 `plugin.rs` 统一重导出；只在本文件内部使用的保持私有。
 
 use super::*;
+use crate::symbio_core::{
+    VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsResult, VDFS_STATUS_ACTIVE,
+    VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,
+};
 
 /// 会话的**运行态**——非持久化，随进程与当前请求变化。
 ///
@@ -108,12 +112,12 @@ impl SessionRuntime {
     /// 显示"处理中"与"错误"。
     fn status(&self) -> &'static str {
         if self.working {
-            return vdfs::VDFS_STATUS_WORKING;
+            return VDFS_STATUS_WORKING;
         }
         if self.outcome.as_deref() == Some(OUTCOME_FAILED) {
-            return vdfs::VDFS_STATUS_FAILED;
+            return VDFS_STATUS_FAILED;
         }
-        vdfs::VDFS_STATUS_ACTIVE
+        VDFS_STATUS_ACTIVE
     }
 }
 
@@ -129,8 +133,8 @@ impl SessionRuntime {
 ///
 /// 运行态由 [`SessionRuntime`] 投影：`status` 是运行态本身，`outcome` / `error`
 /// 是它的两个场景属性（消费者据此选提示音音色、渲染会话级错误条）。
-pub(crate) fn session_node(s: &SessionSummary, rt: &SessionRuntime) -> vdfs::VdfsNode {
-    let mut n = vdfs::VdfsNode::file(&s.id, s.title.clone(), vdfs::VdfsAccess::READ_WRITE);
+pub(crate) fn session_node(s: &SessionSummary, rt: &SessionRuntime) -> VdfsNode {
+    let mut n = VdfsNode::file(&s.id, s.title.clone(), VdfsAccess::READ_WRITE);
     n.kind = PLUGIN_ID_SESSION.to_string();
     n.ext = Some(EXT_SESSION.to_string());
     n.status = rt.status().to_string();
@@ -167,7 +171,7 @@ pub(crate) fn session_node(s: &SessionSummary, rt: &SessionRuntime) -> vdfs::Vdf
 
 /// 从调用级参数袋里取窗口：`limit`（条数，名义值）与 `before`（游标 = 上一页
 /// 最后一个条目的地址）。
-pub(crate) fn window_params(ctx: &vdfs::VdfsContext) -> (Option<u32>, Option<&str>) {
+pub(crate) fn window_params(ctx: &VdfsContext) -> (Option<u32>, Option<&str>) {
     (
         ctx.param_as::<u32>(VDFS_PARAM_LIMIT),
         ctx.param_str(VDFS_PARAM_BEFORE),
@@ -287,9 +291,9 @@ fn cursor_id(before: &str) -> Option<&str> {
 // 并行的「容器页」路由。
 
 // 转写路径段 [`SEG_MESSAGES`] 与节点逆投影 [`message_of_node`] 已上移到
-// `symbio_core::schemas::session::chat_message`——它们描述的是**跨插件契约**
+// `symbio_core::chat_message`——它们描述的是**跨插件契约**
 // （agent 的子会话转播桥也要用），不是本插件的私事。本模块继续按原名使用。
-use crate::symbio_core::schemas::session::chat_message::SEG_MESSAGES;
+use crate::symbio_core::chat_message::SEG_MESSAGES;
 
 /// 转写列表的**展示名**（`title`）。**只影响 UI**，不参与寻址。
 pub(crate) const TITLE_MESSAGES: &str = "消息";
@@ -299,8 +303,8 @@ pub(crate) const TITLE_MESSAGES: &str = "消息";
 /// `name` = 路径段（[`SEG_MESSAGES`]，ASCII）、`title` = 展示名（[`TITLE_MESSAGES`]）。
 /// `kind` 承担对外标识：消费者按它发现这一段，不必把段名写进自己的地址模板
 /// （见 `tauri/src/services/vdfsScheme.ts::resolveMessagesSeg`）。
-pub(crate) fn messages_dir_node() -> vdfs::VdfsNode {
-    let mut node = vdfs::VdfsNode::dir(SEG_MESSAGES, TITLE_MESSAGES, vdfs::VdfsAccess::LIST);
+pub(crate) fn messages_dir_node() -> VdfsNode {
+    let mut node = VdfsNode::dir(SEG_MESSAGES, TITLE_MESSAGES, VdfsAccess::LIST);
     node.kind = KIND_MESSAGES.to_string();
     node
 }
@@ -329,8 +333,8 @@ pub(crate) const SEG_INBOX: &str = "inbox";
 pub(crate) const TITLE_INBOX: &str = "收件箱";
 
 /// 收件箱目录节点（`list` 与 `stat` 共用同一份形状）
-pub(crate) fn inbox_dir_node() -> vdfs::VdfsNode {
-    let mut node = vdfs::VdfsNode::dir(SEG_INBOX, TITLE_INBOX, vdfs::VdfsAccess::LIST);
+pub(crate) fn inbox_dir_node() -> VdfsNode {
+    let mut node = VdfsNode::dir(SEG_INBOX, TITLE_INBOX, VdfsAccess::LIST);
     node.kind = KIND_INBOX.to_string();
     node
 }
@@ -355,7 +359,7 @@ pub(crate) fn inbox_item_path(session_id: &str, iid: &str) -> String {
 /// `completed`（它是一条**待发**消息，不是流式中的消息）。`id` 缺失时补**空串
 /// 占位**，由 [`SessionPlugin::enqueue_inbox`] 落到真正的条目 id 上——身份有三个
 /// 来源（地址末段 > 写体里的 `id` > provider 生成），判别收在一处，不在这里各判一次。
-pub(crate) fn parse_inbox_message(raw: &str) -> vdfs::VdfsResult<cm::ChatMessage> {
+pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatMessage> {
     let body = raw.trim();
     if !body.starts_with('{') {
         return Ok(cm::ChatMessage {
@@ -368,12 +372,12 @@ pub(crate) fn parse_inbox_message(raw: &str) -> vdfs::VdfsResult<cm::ChatMessage
         });
     }
     let mut value: Value = serde_json::from_str(body).map_err(|e| {
-        vdfs::VdfsError::invalid(format!(
+        VdfsError::invalid(format!(
             "收件箱条目需要合法 JSON（ChatMessage 字段子集）：{e}"
         ))
     })?;
     let Some(obj) = value.as_object_mut() else {
-        return Err(vdfs::VdfsError::invalid(
+        return Err(VdfsError::invalid(
             "收件箱条目需要 JSON 对象（ChatMessage 字段子集）",
         ));
     };
@@ -384,7 +388,7 @@ pub(crate) fn parse_inbox_message(raw: &str) -> vdfs::VdfsResult<cm::ChatMessage
     obj.entry("id".to_string())
         .or_insert_with(|| Value::String(String::new()));
     let mut message: cm::ChatMessage = serde_json::from_value(value).map_err(|e| {
-        vdfs::VdfsError::invalid(format!(
+        VdfsError::invalid(format!(
             "收件箱条目需要合法 JSON（ChatMessage 字段子集）：{e}"
         ))
     })?;
@@ -401,7 +405,7 @@ pub(crate) fn parse_inbox_message(raw: &str) -> vdfs::VdfsResult<cm::ChatMessage
 /// 再造一套"待发消息"的字段只会让同一件事有两种读法。差别只有两处，且都在
 /// `kind` / 说明上——`kind = inbox` 让消费者分清"待发"与"已发生"，摘要前缀
 /// 让列表里一眼看出这条还没被消费。
-pub(crate) fn inbox_item_node(item: &InboxItem) -> vdfs::VdfsNode {
+pub(crate) fn inbox_item_node(item: &InboxItem) -> VdfsNode {
     let mut n = message_node(&item.message);
     n.kind = KIND_INBOX.to_string();
     n.description = Some(match n.description {
@@ -450,7 +454,7 @@ pub(crate) enum VdfsSessionPath<'a> {
 }
 
 /// 解析会话挂载点内的相对路径（首段 = 会话 id，次段 = 内部区段）。
-pub(crate) fn parse_session_path(path: &str) -> vdfs::VdfsResult<VdfsSessionPath<'_>> {
+pub(crate) fn parse_session_path(path: &str) -> VdfsResult<VdfsSessionPath<'_>> {
     let p = path.trim_matches('/');
     if p.is_empty() {
         return Ok(VdfsSessionPath::Root);
@@ -463,12 +467,12 @@ pub(crate) fn parse_session_path(path: &str) -> vdfs::VdfsResult<VdfsSessionPath
         Some((seg, sub)) => (seg, Some(sub)),
         None => (rest, None),
     };
-    let not_found = || vdfs::VdfsError::not_found(format!("会话内部不存在该路径：{path}"));
+    let not_found = || VdfsError::not_found(format!("会话内部不存在该路径：{path}"));
     match seg {
         // 记忆是**单个文件**：地址用真实文件名（`MEMORY.md`），没有更深层级
         crate::plugins::session::memory::SESSION_MEMORY_FILE => match sub {
             None => Ok(VdfsSessionPath::Memory(id)),
-            Some(_) => Err(vdfs::VdfsError::not_found(format!(
+            Some(_) => Err(VdfsError::not_found(format!(
                 "记忆是文件，没有更深层级：{path}"
             ))),
         },
@@ -477,7 +481,7 @@ pub(crate) fn parse_session_path(path: &str) -> vdfs::VdfsResult<VdfsSessionPath
             Some(mid) if !mid.is_empty() && !mid.contains('/') => {
                 Ok(VdfsSessionPath::Messages { id, mid: Some(mid) })
             }
-            Some(_) => Err(vdfs::VdfsError::not_found(format!(
+            Some(_) => Err(VdfsError::not_found(format!(
                 "消息是列表项，没有更深层级：{path}"
             ))),
         },
@@ -486,7 +490,7 @@ pub(crate) fn parse_session_path(path: &str) -> vdfs::VdfsResult<VdfsSessionPath
             Some(iid) if !iid.is_empty() && !iid.contains('/') => {
                 Ok(VdfsSessionPath::Inbox { id, iid: Some(iid) })
             }
-            Some(_) => Err(vdfs::VdfsError::not_found(format!(
+            Some(_) => Err(VdfsError::not_found(format!(
                 "收件箱条目是列表项，没有更深层级：{path}"
             ))),
         },
@@ -495,7 +499,7 @@ pub(crate) fn parse_session_path(path: &str) -> vdfs::VdfsResult<VdfsSessionPath
             Some(sub) if !sub.is_empty() && !sub.contains('/') => {
                 Ok(VdfsSessionPath::SubSession { id, sub })
             }
-            Some(_) => Err(vdfs::VdfsError::not_found(format!(
+            Some(_) => Err(VdfsError::not_found(format!(
                 "子会话是叶子节点，没有更深层级：{path}"
             ))),
         },
@@ -518,7 +522,7 @@ pub(crate) fn parse_session_path(path: &str) -> vdfs::VdfsResult<VdfsSessionPath
 /// [`inbox_dir_node`] / `workdir::sub_sessions_dir_node` / `workdir::workdir_dir_node`）：
 /// 段名（ASCII，进地址）与展示名（中文，只进 UI）的配对因此与段本身同处，
 /// 新增一类集合只需在这里多一项，不必在两处同步改字符串。
-pub(crate) fn internal_dirs(has_workdir: bool, memory: vdfs::VdfsNode) -> Vec<vdfs::VdfsNode> {
+pub(crate) fn internal_dirs(has_workdir: bool, memory: VdfsNode) -> Vec<VdfsNode> {
     let mut out = vec![
         messages_dir_node(),
         inbox_dir_node(),
@@ -592,8 +596,8 @@ fn message_preview(m: &cm::ChatMessage) -> Option<String> {
 }
 
 /// 单条消息 → VDFS 节点（**列表项**）
-pub(crate) fn message_node(m: &cm::ChatMessage) -> vdfs::VdfsNode {
-    let mut n = vdfs::VdfsNode::file(&m.id, message_label(m), vdfs::VdfsAccess::READ);
+pub(crate) fn message_node(m: &cm::ChatMessage) -> VdfsNode {
+    let mut n = VdfsNode::file(&m.id, message_label(m), VdfsAccess::READ);
     n.ext = Some(EXT_MESSAGE.to_string());
     n.status = message_status(m).to_string();
     n.updated_at = m.timestamp;
@@ -681,10 +685,10 @@ pub(crate) fn overlay_live(
 pub(crate) fn message_of<'a>(
     msgs: &'a [cm::ChatMessage],
     mid: &str,
-) -> vdfs::VdfsResult<&'a cm::ChatMessage> {
+) -> VdfsResult<&'a cm::ChatMessage> {
     msgs.iter()
         .find(|m| m.id == mid)
-        .ok_or_else(|| vdfs::VdfsError::not_found(format!("消息不存在：{mid}")))
+        .ok_or_else(|| VdfsError::not_found(format!("消息不存在：{mid}")))
 }
 
 /// 会话内容（转写全文 + 元数据）→ VDFS 文本内容。
@@ -702,7 +706,7 @@ pub(crate) fn message_of<'a>(
 pub(crate) fn session_content(
     session: &super::super::types::Session,
     live: Vec<cm::ChatMessage>,
-) -> vdfs::VdfsResult<vdfs::VdfsContent> {
+) -> VdfsResult<VdfsContent> {
     // 与 `transcript_of` 同一组合（`ordered(overlay_live(..))`），不另立口径：
     // 同 id 在途版本胜出（它更新），顺序锚点仍由存储分配的 `seq` 决定。
     let messages = ordered(overlay_live(session.messages.clone(), live));
@@ -714,8 +718,8 @@ pub(crate) fn session_content(
         "updated_at": session.updated_at,
     });
     let text = serde_json::to_string_pretty(&payload)
-        .map_err(|e| vdfs::VdfsError::internal(format!("会话序列化失败：{e}")))?;
-    Ok(vdfs::VdfsContent::text(text).with_mime("application/json"))
+        .map_err(|e| VdfsError::internal(format!("会话序列化失败：{e}")))?;
+    Ok(VdfsContent::text(text).with_mime("application/json"))
 }
 
 #[cfg(test)]

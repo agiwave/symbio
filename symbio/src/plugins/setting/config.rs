@@ -17,9 +17,7 @@
 //! 四个字段的缺省值都是「未设置」（空串），因此**刚装配完什么都不会注入**。
 //! 这不是偷懒：本插件描述的是「这个智能体是谁」，宿主不该替用户编一个名字。
 
-use crate::symbio_core::schemas::detail::{
-    DetailDefinition, DetailField, DetailOption, DetailSection,
-};
+use crate::symbio_core::{DetailDefinition, DetailField, DetailOption, DetailSection};
 
 /// setting 插件配置 —— 本智能体自身的**档案**与**回答偏好**
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]

@@ -469,7 +469,7 @@ async fn delete(
     )
     .await?;
     Ok(PluginPayload::new(
-        &crate::symbio_core::schemas::common::SuccessResponse::default(),
+        &crate::symbio_core::SuccessResponse::default(),
     ))
 }
 
@@ -758,7 +758,7 @@ async fn watch(
         root.dispatch(vctx, &addr, VdfsRequest::Unwatch).await?;
     }
     Ok(PluginPayload::new(
-        &crate::symbio_core::schemas::common::SuccessResponse::default(),
+        &crate::symbio_core::SuccessResponse::default(),
     ))
 }
 

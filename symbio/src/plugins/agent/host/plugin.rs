@@ -46,7 +46,6 @@
 
 use crate::plugins::agent::host::manifest;
 use crate::plugins::agent::host::store::AgentDirStore;
-use crate::symbio_core::schemas::detail::{DetailField, DetailOption};
 use crate::symbio_core::{
     capability_report_error, creator_create_object, descend_addr, plugin_dir_from_ctx, Capability,
     CapabilityVisitor, Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
@@ -55,6 +54,7 @@ use crate::symbio_core::{
     PLUGIN_ID_COMPOSITE, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
     VDFS_PARENT_ADDR, WORKDIR,
 };
+use crate::symbio_core::{DetailField, DetailOption};
 use crate::symbio_core::{VdfsAccess, VdfsProvider};
 use async_trait::async_trait;
 use std::sync::Arc;

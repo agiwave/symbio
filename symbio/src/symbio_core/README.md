@@ -79,10 +79,20 @@
    （如 `llm` 只留契约，HTTP 重试与 SSE 流循环留在 `plugins/model/`）。**宿主接缝的统一
    形态是「纯接口 + 一个桥文件」**：接口与域类型宿主无关，只有 `host.rs` 知道本宿主的
    信封类型（`vdfs/host.rs` 是范本），换宿主只重写那一个文件。
-4. **一个出口（根平铺重导出）**：域 `mod.rs` 的公开面被根 [`mod.rs`](./mod.rs) 平铺重导出，
-   消费方一律写 `symbio_core::<符号>`。**唯一允许的深引是 `schemas::` 子树**——
-   协议 schema 的词汇表就是它的命名空间，收敛成平铺反而丢失 `session::chat_message`
-   这类语义。其余深路径（`symbio_core::plugin::dir::` 之类）视为不规范，应改为根平铺。
+4. **一个出口（根平铺重导出，且只导"跨出 core 的"）**：**core 外**的消费方一律写
+   `symbio_core::<符号>`——域 `mod.rs` 的公开面由根 [`mod.rs`](./mod.rs) 逐条平铺重导出。
+   **只在 core 内部用的符号不出根**：根 `pub use` 里没有它，core 内自己走域内路径
+   `symbio_core::<域>::<符号>`（否则「没人用的东西占着公共面」会一直长）；只被测试或
+   无人使用的存量，按 [`dead-code-audit`](../../../scripts/dead-code-audit.mjs) R-002
+   **逐项承认**（`// dead-code-allow R-002: <理由>`，理由必填、数量棘轮只许降）。
+   **根 `mod.rs` 里域目录一律 `mod <域>;`（私有）**——
+   子目录不开模块门，谁出现在公共面上由根 `pub use` 逐条声明；`schemas/` 同样如此：
+   契约按符号（`Verdict` / `ChatMessage`…）与两个叶子模块（`chat_message` / `session_chat`）
+   在根导出，不再有 `symbio_core::schemas::…` 的深引豁免。任何深路径
+   （`symbio_core::plugin::dir::` 之类）视为不规范，应改为根平铺。
+   **可执行判据**：[`core-export-audit.mjs`](../../../scripts/core-export-audit.mjs)——
+   C-001（根出口唯一）/ C-002（无深引）/ C-003（根输出的符号必须被 ≥2 个模块消费，
+   0 消费方基线已归零、单消费方存量走棘轮，豁免写 §4 四问的理由）。
 
 ### 域前缀对照表（全 14 域 —— 新增符号照此取名）
 
@@ -96,7 +106,7 @@
 |---|---|---|---|---|
 | `assembly` | — | `ASSEMBLY_` | — | 本域只有两个常量 |
 | `adapters` | 契约词 `LatencyTier` · `RuleOnly` · `ClassifyOnly` · `FullModel` · `CanClassify` · `CanGenerate` · `TokenIssuer` · `LlmAdapter` · `LlmTurn` · `AdapterError` · `StubLlmAdapter` · `ProviderLlmAdapter` · `DeltaSink` · `SilentDeltas` · `DispatchPort` · `DispatchOutcome` | — | — | 全部是 [plan/05 §3.3](../../../docs/plan/05-模块架构.md) 注入策略与 [plan/01 §10](../../../docs/plan/01-核心架构.md) 四层时延表的冻结契约名（出处 [`verify/latency_gate.rs`](../../../docs/plan/verify/latency_gate.rs)），名字先于模块存在——判据同 `schemas`。`LlmTurn` / `DispatchPort` / `DispatchOutcome` 是 [plan/10 §2](../../../docs/plan/10-工具轮v2化实施方案.md) 的两只端口（生成 / 工具分发），与前缀同域：**不能叫 `Tool*`**——那是 `capability` 域的子命名空间 |
-| `actors` | `Actor*`（`ActorSpec`）；契约词 `Pattern` · `Scope` · `Decider`（含 `DeciderMiss`）· `Reasoner` · `RecallTranslator` · `CommitmentKeeper` · `PreemptionDecider`（含 `Preemption`）· `CircuitBreaker`（含 `GateDecision`）· `AutonomousInitiator` · `IntentGate`（含 `ConationPolicy` / `ConationCandidate` / `GateWarrant` / `IntentDecision` / `ApprovedIntent`）· `SkillCompiler` · `SkillRouter`（含 `SkillRoute`）· `TurnRunner`（含 `TurnOutcome` / `TurnInput`） | — | — | [plan/01 §4](../../../docs/plan/01-核心架构.md) 的冻结契约名（名字先于模块存在，判据同 `schemas`）；`Decider` 是 [plan/05 §4](../../../docs/plan/05-模块架构.md) S8 反射档判定者，S1 先以规则应答形态落地 |
+| `actors` | `Actor*`（`ActorSpec`）；契约词 `Pattern` · `Scope` · `Decider`（含 `DeciderMiss`）· `Reasoner` · `RecallTranslator` · `CommitmentKeeper` · `PreemptionDecider`（含 `Preemption`）· `CircuitBreaker`（含 `GateDecision`）· `AutonomousInitiator` · `IntentGate`（含 `ConationPolicy` / `ConationCandidate` / `GateWarrant` / `IntentDecision` / `ApprovedIntent`）· `SkillCompiler` · `SkillRouter`（含 `SkillRoute`）· `TurnRunner`（含 `TurnOutcome` / `TurnInput` / `TurnResume`） | — | — | [plan/01 §4](../../../docs/plan/01-核心架构.md) 的冻结契约名（名字先于模块存在，判据同 `schemas`）；`Decider` 是 [plan/05 §4](../../../docs/plan/05-模块架构.md) S8 反射档判定者，S1 先以规则应答形态落地 |
 | `capability` | `Capability`；子命名空间 `Configurable*` · `Option*` · `Tool*` | — | `capability_` | 无常量；三个子命名空间各有对应文件 |
 | `clock` | — | — | `clock_` | 只有一个函数 |
 | `creator` | — | — | `creator_` | 通用对象创建注册表：按 id 装配**任意**类型对象，见 §2 |

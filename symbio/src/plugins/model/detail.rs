@@ -9,7 +9,7 @@
 //!   保存 / 设为默认 / 删除）
 //! - id·name 派生回落链（前端 slug 去重，后端 `validate_manifest` 兜底）
 
-use crate::symbio_core::schemas::detail::{
+use crate::symbio_core::{
     DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,
     DetailPreset, DetailPresetSpec, DetailSection,
 };

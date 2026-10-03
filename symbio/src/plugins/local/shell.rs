@@ -34,9 +34,7 @@
 use super::policy::{RiskLevel, SecurityPolicy};
 use super::system::{decode_output, validate_params};
 use crate::symbio_core::{
-    schemas::session::chat_message::{
-        ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
-    },
+    chat_message::{ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType},
     Capability, CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt,
 };

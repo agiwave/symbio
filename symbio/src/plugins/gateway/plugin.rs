@@ -4,13 +4,12 @@
 //! worker，调用 `parent.route(ctx)` 等价于既有的 `root.route`：能转发前端会发起的全部路径
 //!（`session/*`、`model/*`、`vdfs/*` …）。因此本插件**无需任何新全局注册表**。
 
-use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField, DetailOption};
-use crate::symbio_core::vdfs;
 use crate::symbio_core::{
     plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH,
     PLUGIN_ID_GATEWAY,
 };
+use crate::symbio_core::{DetailDefinition, DetailField, DetailOption, DynVdfsProvider};
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
@@ -227,7 +226,7 @@ impl Plugin for GatewayPlugin {
     ) -> PluginInvokeResponse<PluginPayload> {
         if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
             // 本插件在 VDFS 上的全部内容 = 一个配置文档
-            let me: vdfs::DynVdfsProvider = self.clone();
+            let me: DynVdfsProvider = self.clone();
             visitor.register_vdfs_provider(PLUGIN_ID_GATEWAY, me).await;
         }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）

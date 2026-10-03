@@ -42,7 +42,7 @@ impl ModelProtocol for OpenaiChatProtocol {
         &self,
         cfg: &ModelProviderConfig,
         system: &str,
-        messages: &[crate::symbio_core::schemas::session::chat_message::ChatMessage],
+        messages: &[crate::symbio_core::chat_message::ChatMessage],
         tools: &[CapabilityMeta],
     ) -> Value {
         let flattened_messages =

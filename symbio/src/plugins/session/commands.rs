@@ -32,12 +32,14 @@
 use super::paths::session_id_from_new_path;
 use super::plugin::SessionPlugin;
 use super::types::Session;
+use crate::symbio_core::chat_message as cm;
 use crate::symbio_core::clock_now_ms;
-use crate::symbio_core::schemas::session::chat_message as cm;
-use crate::symbio_core::vdfs;
 use crate::symbio_core::PluginError;
 use serde_json::{json, Value};
 
+use crate::symbio_core::{
+    vdfs_from_plugin_error, VdfsContent, VdfsError, VdfsResponse, VdfsResult, VdfsWriteResponse,
+};
 impl SessionPlugin {
     // ==================== 会话本体：新建 / 覆盖 ====================
 
@@ -49,18 +51,18 @@ impl SessionPlugin {
     pub(crate) async fn session_upsert(
         &self,
         path: &str,
-        content: &vdfs::VdfsContent,
-    ) -> vdfs::VdfsResult<vdfs::VdfsResponse> {
+        content: &VdfsContent,
+    ) -> VdfsResult<VdfsResponse> {
         let text = content.text.as_deref().unwrap_or("");
         let value: Value = if text.trim().is_empty() {
             json!({})
         } else {
             serde_json::from_str(text)
-                .map_err(|e| vdfs::VdfsError::invalid(format!("会话写入需要合法 JSON：{e}")))?
+                .map_err(|e| VdfsError::invalid(format!("会话写入需要合法 JSON：{e}")))?
         };
         let obj = value
             .as_object()
-            .ok_or_else(|| vdfs::VdfsError::invalid("会话写入需要 JSON 对象"))?;
+            .ok_or_else(|| VdfsError::invalid("会话写入需要 JSON 对象"))?;
 
         // 寻址：**具名目标的地址末段就是会话 id**；写挂载根（无名目标）没有 id。
         // 会话 id 从来就是路径末段原样，这里只是把「怎么从地址得到 id」收成一处
@@ -72,7 +74,7 @@ impl SessionPlugin {
         let existing = match named.as_deref() {
             Some(id) => match self.session_of(id).await {
                 Ok(session) => Some(session),
-                Err(vdfs::VdfsError::NotFound(_)) => None,
+                Err(VdfsError::NotFound(_)) => None,
                 Err(e) => return Err(e),
             },
             None => None,
@@ -95,7 +97,7 @@ impl SessionPlugin {
         //   「新建会话」——它只说建在哪个目录，不说叫什么。
         if existing.is_none() && content.create {
             // 名字是不是**本插件生成的**——决定回执里要不要交回它
-            // （见 [`vdfs::VdfsWriteResponse::name`]）。
+            // （见 [`crate::symbio_core::VdfsWriteResponse::name`]）。
             let anonymous = named.is_none();
             let id = match named {
                 Some(id) => id,
@@ -129,9 +131,9 @@ impl SessionPlugin {
             session.updated_at = clock_now_ms();
             self.save_session(&session)
                 .await
-                .map_err(vdfs::vdfs_from_plugin_error)?;
+                .map_err(vdfs_from_plugin_error)?;
             self.notify_change(&id);
-            return Ok(vdfs::VdfsResponse::Write(vdfs::VdfsWriteResponse {
+            return Ok(VdfsResponse::Write(VdfsWriteResponse {
                 name: anonymous.then_some(id),
                 created: true,
                 etag: None,
@@ -143,12 +145,12 @@ impl SessionPlugin {
         let has_title = obj.contains_key("title");
         let has_meta = obj.contains_key("metadata");
         if !has_title && !has_meta {
-            return Err(vdfs::VdfsError::invalid(
+            return Err(VdfsError::invalid(
                 "会话写入支持 metadata / title 字段；消息请走聊天协议",
             ));
         }
         let id = named.ok_or_else(|| {
-            vdfs::VdfsError::invalid("写会话挂载根需要 create 意图：目录自身没有可覆盖的目标")
+            VdfsError::invalid("写会话挂载根需要 create 意图：目录自身没有可覆盖的目标")
         })?;
         // 前面已经取过一次（存在性判据），这里复用同一份，不重复读盘
         let mut session = match existing {
@@ -160,11 +162,11 @@ impl SessionPlugin {
         session.updated_at = clock_now_ms();
         self.save_session(&session)
             .await
-            .map_err(vdfs::vdfs_from_plugin_error)?;
+            .map_err(vdfs_from_plugin_error)?;
         // 资源变更（标题 / metadata）走粗粒度信号：消费方重拉清单收敛。
         // 不带节点视图，见 `symbio_core::vdfs_notify_change`。
         self.notify_change(&id);
-        Ok(vdfs::VdfsResponse::Write(vdfs::VdfsWriteResponse {
+        Ok(VdfsResponse::Write(VdfsWriteResponse {
             name: None,
             created: false,
             etag: None,
@@ -369,7 +371,7 @@ impl SessionPlugin {
 
     /// 删除会话的统一内部实现（abort 活跃任务 → 清活跃条目 → 存储删除）。
     ///
-    /// 唯一入口是 [`vdfs::VdfsProvider::dispatch`] 的两条 `Delete` 分支（会话本体
+    /// 唯一入口是 [`crate::symbio_core::VdfsProvider::dispatch`] 的两条 `Delete` 分支（会话本体
     /// 与 `sub_session_at` 的子会话），两者语义相同，共用这一份实现。
     ///
     /// ## 为什么没有第二条删除路径

@@ -15,8 +15,8 @@ use super::super::plugin::append_and_publish;
 use super::super::tools::fire_hook;
 use super::super::transcript::llm_emit_removed;
 use crate::plugin_warn;
-use crate::symbio_core::schemas::session::chat_message::{MessageContent, MessageStatus};
-use crate::symbio_core::schemas::HookEvent;
+use crate::symbio_core::chat_message::{MessageContent, MessageStatus};
+use crate::symbio_core::HookEvent;
 use crate::symbio_core::{llm_short_id, ExecAbortSignal, ExecEnv, ExecEventSink, PluginError};
 
 /// 被动自动压缩（L1）：阈值判定 → 切分 → 收益护栏 → 交执行内核。
@@ -997,7 +997,7 @@ async fn run_compression_llm(
 
     Ok(ChatMessage {
         id: root_id.to_string(),
-        role: Some(crate::symbio_core::schemas::session::chat_message::MessageRole::Assistant),
+        role: Some(crate::symbio_core::chat_message::MessageRole::Assistant),
         msg_type: Some(MessageType::Text),
         content: Some(MessageContent::Text(effective)),
         status: Some(MessageStatus::Completed),

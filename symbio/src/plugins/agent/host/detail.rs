@@ -19,7 +19,7 @@
 //! `disabled_when` 表达——草稿上只有「导入整包」可用（它正是新建智能体的
 //! 唯一入口），其余动作要么隐藏（`open-container`）要么禁用（导出 / 删除）。
 
-use crate::symbio_core::schemas::detail::{
+use crate::symbio_core::{
     DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
 };
 

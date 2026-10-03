@@ -9,7 +9,7 @@
 
 use super::*;
 use crate::plugins::session::plugin::SessionConfig;
-use crate::symbio_core::schemas::session::session_chat;
+use crate::symbio_core::session_chat;
 use crate::symbio_core::PluginSimpleRequest;
 
 fn plugin() -> Arc<SessionPlugin> {

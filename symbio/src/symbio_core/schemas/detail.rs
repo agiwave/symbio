@@ -20,7 +20,8 @@
 //! [`VDFS_ACTION_IMPORT`]: crate::symbio_core::vdfs::VDFS_ACTION_IMPORT
 //! [`VDFS_ACTION_EXPORT`]: crate::symbio_core::vdfs::VDFS_ACTION_EXPORT
 
-use crate::symbio_core::{VdfsFieldError, VdfsValidationError};
+use crate::symbio_core::vdfs::VdfsFieldError;
+use crate::symbio_core::VdfsValidationError;
 use serde::{Deserialize, Serialize};
 
 // ==================== 详情页定义（definition-driven detail） ====================
@@ -94,6 +95,7 @@ pub struct DetailOption {
 /// 闭集的**唯一定义处**是前端 `schemas/vdfs-form.ts::DETAIL_PICKS`，由
 /// `protocol-mirror-audit` 的 C 组按 `DETAIL_PICK_` 前缀提取本组取值逐词比对。
 pub const DETAIL_PICK_DIRECTORY: &str = "directory";
+#[allow(dead_code)] // dead-code-allow R-002: schema 细节选项契约，消费方接线后摘除
 pub const DETAIL_PICK_FILE: &str = "file";
 
 /// 表单字段定义。`widget` ∈ text | password | number | select | textarea |

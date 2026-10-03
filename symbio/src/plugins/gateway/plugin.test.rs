@@ -6,7 +6,7 @@ use super::*;
 
 use crate::symbio_core::{
     Plugin, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload, PluginSimpleRequest,
-    PLUGIN_FILE,
+    VdfsContent, VdfsRequest, PLUGIN_FILE, VDFS_EXT_FORM,
 };
 use crate::symbio_core::{VdfsContext, VdfsError, VdfsProvider};
 
@@ -43,7 +43,7 @@ async fn config_document_is_the_only_child_of_the_root() {
         .dispatch(
             &vctx(),
             "",
-            vdfs::VdfsRequest::List {
+            VdfsRequest::List {
                 limit: None,
                 before: None,
             },
@@ -58,7 +58,7 @@ async fn config_document_is_the_only_child_of_the_root() {
         "条目名就是插件目录里的真实文件名"
     );
     assert_eq!(items[0].node.title, "开放接口");
-    assert_eq!(items[0].node.ext.as_deref(), Some(vdfs::VDFS_EXT_FORM));
+    assert_eq!(items[0].node.ext.as_deref(), Some(VDFS_EXT_FORM));
     assert_eq!(items[0].node.access.flags(), "rw");
     assert!(items[0].node.schema.is_some(), "定义随节点下发");
 }
@@ -74,7 +74,7 @@ async fn config_document_reads_current_config() {
     };
     let plugin = Arc::new(GatewayPlugin::new(None, cfg, tdir()));
     let content = plugin
-        .dispatch(&vctx(), PLUGIN_FILE, vdfs::VdfsRequest::Read)
+        .dispatch(&vctx(), PLUGIN_FILE, VdfsRequest::Read)
         .await
         .unwrap()
         .into_read()
@@ -89,13 +89,9 @@ async fn config_document_reads_current_config() {
 #[tokio::test]
 async fn config_document_write_validates_before_applying() {
     let plugin = Arc::new(GatewayPlugin::new(None, GatewayConfig::default(), tdir()));
-    let bad = vdfs::VdfsContent::text(r#"{"inbound_port": 70000}"#);
+    let bad = VdfsContent::text(r#"{"inbound_port": 70000}"#);
     match plugin
-        .dispatch(
-            &vctx(),
-            PLUGIN_FILE,
-            vdfs::VdfsRequest::Write { content: bad },
-        )
+        .dispatch(&vctx(), PLUGIN_FILE, VdfsRequest::Write { content: bad })
         .await
     {
         Err(VdfsError::Invalid(v)) => assert_eq!(v.fields[0].field, "inbound_port"),
@@ -120,7 +116,7 @@ async fn unknown_path_is_not_found() {
     assert!(call(plugin.clone(), "bogus", None).await.is_err());
     // 配置文档之外无其它节点
     assert!(plugin
-        .dispatch(&vctx(), "bogus", vdfs::VdfsRequest::Stat)
+        .dispatch(&vctx(), "bogus", VdfsRequest::Stat)
         .await
         .is_err());
 }

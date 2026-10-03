@@ -2,7 +2,7 @@
 //! 溯源（N5）、轮次编号（N3）靠构造成立，重开恢复（N2）不因桥而破。
 
 use super::{first_user_utterance, last_assistant_text, record, record_to_wal, V2Closure};
-use crate::symbio_core::schemas::session::chat_message as cm;
+use crate::symbio_core::chat_message as cm;
 use crate::symbio_core::{
     check_all, Entity, EventEnvelope as _, EventWalStore, Seq, Store, EVENT_ASSISTANT_FINAL,
     EVENT_USER_MESSAGE,

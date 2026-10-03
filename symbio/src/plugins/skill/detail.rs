@@ -10,7 +10,7 @@
 //! 保存时映射为行业键 `allowedTools`/`disable-model-invocation`）。
 //! BUG-SR6 硬约束（目录名 == frontmatter name）由 `manifest_to_skill_md` 强制。
 
-use crate::symbio_core::schemas::detail::{
+use crate::symbio_core::{
     DetailAction, DetailCondition, DetailDefinition, DetailField, DetailSection,
 };
 

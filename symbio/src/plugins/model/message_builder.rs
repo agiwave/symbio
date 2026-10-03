@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::symbio_core::schemas::session::chat_message::{
+use crate::symbio_core::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
 

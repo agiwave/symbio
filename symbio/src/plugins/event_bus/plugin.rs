@@ -26,7 +26,7 @@
 //! 灌入的事件帧，而 VDFS 变更的发布方传 `session_id = None`（身份在地址里），缓冲永远
 //! 为空——路由成了恒返回空数组的空壳。
 
-use crate::symbio_core::schemas::common::SimpleResponse;
+use crate::symbio_core::SimpleResponse;
 use crate::symbio_core::{
     event_bus_build_envelope, event_bus_register_subscriber, event_bus_unregister_subscriber,
     EventBus, EventBusSubscribeRequest, EVENT_BUS_KIND_SYSTEM,

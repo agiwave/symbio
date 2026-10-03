@@ -67,6 +67,27 @@ pub trait SymbioKey {
 }
 
 macro_rules! define_string_key {
+    // 带承认标记的形态（`dead-code-audit` R-002）：lint 属性**由宏转发**到生成的结构体与
+    // 常量上——调用点的属性进不到 `macro_rules!` 的生成项（rustc 报 `unused attribute`，
+    // 且死码照旧）。理由仍写在调用点同行，扫描器只认源码里的字面属性行。
+    (#[$attr:meta] $struct_name:ident, $const_name:ident, $key_name:expr) => {
+        #[$attr]
+        pub struct $struct_name;
+        impl SymbioKey for $struct_name {
+            type Value = String;
+            fn name(&self) -> &'static str {
+                $key_name
+            }
+            fn parse(&self, s: &str) -> Option<Self::Value> {
+                Some(s.to_string())
+            }
+            fn format(&self, v: &Self::Value) -> String {
+                v.clone()
+            }
+        }
+        #[$attr]
+        pub const $const_name: $struct_name = $struct_name;
+    };
     ($struct_name:ident, $const_name:ident, $key_name:expr) => {
         pub struct $struct_name;
         impl SymbioKey for $struct_name {
@@ -89,7 +110,13 @@ define_string_key!(PathKey, PATH, "path");
 define_string_key!(WorkdirKey, WORKDIR, "workdir");
 define_string_key!(AgentIdKey, AGENT_ID, "agent_id");
 define_string_key!(SessionIdKey, SESSION_ID, "session_id");
-define_string_key!(TraceIdKey, TRACE_ID, "trace_id");
+// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（PROTOCOLS.md 字段表），消费方接线后摘除
+define_string_key!(
+    #[allow(dead_code)]
+    TraceIdKey,
+    TRACE_ID,
+    "trace_id"
+);
 // 当前父地址：本插件在地址空间中挂载点的绝对地址。与 `WORKDIR` / `SESSION_ID`
 // 同类的**上下文数据**：父插件把请求转发给子插件时（route / traverse）改写它，
 // 子插件在少数需要协议级绝对地址的场合读它拼接（见 `symbio_core::vdfs::address`）。
@@ -109,10 +136,28 @@ define_string_key!(RiskLevelKey, RISK_LEVEL, "risk_level");
 // 常用业务属性 Key
 define_string_key!(IdKey, ID, "id");
 define_string_key!(NameKey, NAME, "name");
-define_string_key!(KindKey, KIND, "kind");
-define_string_key!(ScopeKey, SCOPE, "scope");
+// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（PROTOCOLS.md 字段表），消费方接线后摘除
+define_string_key!(
+    #[allow(dead_code)]
+    KindKey,
+    KIND,
+    "kind"
+);
+// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（PROTOCOLS.md 字段表），消费方接线后摘除
+define_string_key!(
+    #[allow(dead_code)]
+    ScopeKey,
+    SCOPE,
+    "scope"
+);
 define_string_key!(ContentKey, CONTENT, "content");
-define_string_key!(DescriptionKey, DESCRIPTION, "description");
+// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（PROTOCOLS.md 字段表），消费方接线后摘除
+define_string_key!(
+    #[allow(dead_code)]
+    DescriptionKey,
+    DESCRIPTION,
+    "description"
+);
 
 // 父插件弱引用 Key (Option<Weak<dyn Plugin>>)
 pub struct ParentKey;
@@ -325,7 +370,7 @@ pub const ABORT_SIGNAL: ExecAbortSignalKey = ExecAbortSignalKey;
 /// 只是不做「从字符串恢复」这件事——`WIRE` 与 `parse` 是**声明与结果**，不是同一条。）
 pub struct CapabilityErrorsKey;
 impl SymbioKey for CapabilityErrorsKey {
-    type Value = Arc<Mutex<Vec<crate::symbio_core::CapabilityError>>>;
+    type Value = Arc<Mutex<Vec<crate::symbio_core::capability::CapabilityError>>>;
     /// 进程内专用：`Arc<Mutex<..>>` 无字符串 / JSON 形态
     const WIRE: bool = false;
     fn name(&self) -> &'static str {

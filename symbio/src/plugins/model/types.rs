@@ -3,9 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::symbio_core::capability_to_wire;
-pub use crate::symbio_core::schemas::session::chat_message::{
-    ChatMessage, ContentPart, MessageContent, MessageRole,
-};
+pub use crate::symbio_core::chat_message::{ChatMessage, ContentPart, MessageContent, MessageRole};
 pub use crate::symbio_core::CapabilityMeta;
 
 /// 工具调用定义
@@ -68,9 +66,7 @@ impl From<NativeMessage> for ChatMessage {
             content: msg.content,
             // 增量是帧的形态（只在出方向的转写帧上），不是消息的形态。
             delta: None,
-            status: Some(
-                crate::symbio_core::schemas::session::chat_message::MessageStatus::Completed,
-            ),
+            status: Some(crate::symbio_core::chat_message::MessageStatus::Completed),
             meta: None,
             timestamp: Some(msg.timestamp),
             seq: msg.seq,

@@ -13,7 +13,7 @@
 //! 缺任一条都会让分界悄悄偏向一侧。
 
 use super::*;
-use crate::symbio_core::schemas::session::chat_message::{MessageContent, MessageStatus};
+use crate::symbio_core::chat_message::{MessageContent, MessageStatus};
 
 fn msg(
     id: &str,

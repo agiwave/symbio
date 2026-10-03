@@ -38,9 +38,9 @@
 use super::super::active::{ActiveSessionState, InboxItem};
 use super::super::plugin::{inbox_item_node, inbox_item_path, SessionPlugin};
 use super::supplements;
-use crate::symbio_core::schemas::{session::chat_message as cm, session::session_chat};
+use crate::symbio_core::{chat_message as cm, session_chat, VdfsChange};
 use crate::symbio_core::{
-    vdfs, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, SESSION_ID, WORKDIR,
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, SESSION_ID, WORKDIR,
 };
 use std::sync::Arc;
 
@@ -99,7 +99,7 @@ impl SessionPlugin {
 
         let state = self.active_mgr.get_or_create(session_id).await;
         state.inner.write().await.inbox.push_back(item.clone());
-        self.change_subs.notify(&vdfs::VdfsChange::with_data(
+        self.change_subs.notify(&VdfsChange::with_data(
             inbox_item_path(session_id, &id),
             inbox_item_node(&item),
         ));
@@ -124,7 +124,7 @@ impl SessionPlugin {
         };
         if removed {
             self.change_subs
-                .notify(&vdfs::VdfsChange::bare(inbox_item_path(session_id, iid)));
+                .notify(&VdfsChange::bare(inbox_item_path(session_id, iid)));
         }
         removed
     }
@@ -141,7 +141,7 @@ impl SessionPlugin {
         };
         for id in &ids {
             self.change_subs
-                .notify(&vdfs::VdfsChange::bare(inbox_item_path(session_id, id)));
+                .notify(&VdfsChange::bare(inbox_item_path(session_id, id)));
         }
         ids
     }
@@ -277,11 +277,10 @@ impl SessionPlugin {
         };
 
         for item in &batch {
-            self.change_subs
-                .notify(&vdfs::VdfsChange::bare(inbox_item_path(
-                    &state.session_id,
-                    &item.id,
-                )));
+            self.change_subs.notify(&VdfsChange::bare(inbox_item_path(
+                &state.session_id,
+                &item.id,
+            )));
         }
         batch
     }

@@ -2,13 +2,12 @@
 
 pub use super::web_config::WebConfig;
 use super::{http_request::HttpRequestTool, web_fetch::WebFetchTool, web_search::WebSearchTool};
-use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
-use crate::symbio_core::vdfs;
 use crate::symbio_core::{
     plugin_dir_from_ctx, Capability, Plugin, PluginConfigFile, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
     PLUGIN_ID_WEB,
 };
+use crate::symbio_core::{DetailDefinition, DetailField, DynVdfsProvider};
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
@@ -158,7 +157,7 @@ impl Plugin for WebPlugin {
                 visitor.register(tool.clone()).await;
             }
             // 与工具共用同一次能力广播：本插件在 VDFS 上的全部内容 = 一个配置文档
-            let me: vdfs::DynVdfsProvider = self.clone();
+            let me: DynVdfsProvider = self.clone();
             visitor.register_vdfs_provider(PLUGIN_ID_WEB, me).await;
         }
         // 顺带声明「本插件有一份配置文档」：设置页据此列出本项并指路到

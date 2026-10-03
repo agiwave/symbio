@@ -27,7 +27,7 @@ pub(super) fn max_seq(messages: &[ChatMessage]) -> i64 {
 
 /// 按切片顺序为消息补发 `seq`（**只补缺号**），返回分配后的新水位。
 ///
-/// 自 `symbio_core::schemas::session::chat_message` 迁入。`seq` **字段**是跨栈 schema
+/// 自 `symbio_core::chat_message` 迁入。`seq` **字段**是跨栈 schema
 /// （前端逐字段镜像，必须留 core，见该字段文档）；而「怎么补号」是会话存储的实现策略
 /// ——调用点只有本文件的 `replace_messages` 一处，故与它的兄弟 `append_messages`
 /// （另一条分配路径）同处一文件，两条路径可以直接对照着读。

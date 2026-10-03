@@ -29,11 +29,9 @@
 use super::config::{default_context_messages, SessionConfig};
 use super::store::SessionStore;
 use crate::plugin_info;
+use crate::symbio_core::chat_message as cm;
+use crate::symbio_core::chat_message::{ChatMessage, MessageContent, MessageRole, MessageType};
 use crate::symbio_core::clock_now_ms;
-use crate::symbio_core::schemas::session::chat_message as cm;
-use crate::symbio_core::schemas::session::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageType,
-};
 use crate::symbio_core::{PluginError, SymbioKey};
 use std::collections::HashSet;
 use std::sync::Arc;

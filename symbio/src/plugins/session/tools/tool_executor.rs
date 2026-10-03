@@ -15,13 +15,8 @@ use super::super::transcript::llm_emit_state;
 use crate::symbio_core::{llm_emit_message, llm_short_id, TurnToolCallInfo};
 
 use crate::symbio_core::{
-    schemas::{
-        hook::{HookEvent, HookOutput},
-        session::chat_message::{
-            ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
-        },
-    },
-    PluginInvokeRequestExt,
+    chat_message::{ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType},
+    HookEvent, HookOutput, PluginInvokeRequestExt,
 };
 use crate::symbio_core::{
     ExecAbortSignal, ExecEventSink, Plugin, PluginError, PluginInvokeRequest, PluginPayload,

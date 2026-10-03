@@ -27,7 +27,7 @@ use crate::symbio_core::{
 };
 
 use super::chat_session::PersistentChatSession;
-use crate::symbio_core::schemas::session::chat_message as cm;
+use crate::symbio_core::chat_message as cm;
 
 /// 一轮的收束形态（转写的第二只脚；第一只脚是用户发言）。
 pub(crate) enum V2Closure {

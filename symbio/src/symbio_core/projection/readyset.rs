@@ -22,6 +22,7 @@ use std::collections::BTreeMap;
 
 /// 一条就绪任务。
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[allow(dead_code)] // dead-code-allow R-002: plan/12 批1/批2 读数口未落地（plan/12 §3），接线后摘除
 pub struct ReadyTask {
     /// 任务 id（`task.opened` 载荷的 `task_id`）。
     pub task_id: String,
@@ -33,6 +34,7 @@ pub struct ReadyTask {
 
 /// 就绪集视图：按 `task_id` 字典序（BTreeMap ⇒ 逐字节确定）。
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[allow(dead_code)] // dead-code-allow R-002: plan/12 批1/批2 读数口未落地（plan/12 §3），接线后摘除
 pub struct ReadySetView {
     pub ready: Vec<ReadyTask>,
 }
@@ -45,6 +47,7 @@ pub struct ReadySetView {
 ///   的职责；本投影在有环时诚实返回「依赖未闭合」的空子集（跑不完 ≠ 假装能跑）；
 /// - **挂起排除**（S07 §5 强制点）：`task.held` 的任务不进就绪集——被挂起的任务
 ///   被二次调度可能重复执行；恢复（同任务的 `task.progress`）自动解除挂起。
+#[allow(dead_code)] // dead-code-allow R-002: plan/12 批1/批2 读数口未落地（plan/12 §3），接线后摘除
 pub fn readyset() -> Projection<ReadySetView> {
     Projection::new(|events: &[Event], now, _budget: Budget| {
         // task_id → (opened 事件 seq, depends_on)

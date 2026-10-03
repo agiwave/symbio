@@ -36,7 +36,8 @@ use super::chat_loop::ChatOrchestrator;
 use super::chat_session::PersistentChatSession;
 use super::tools::{apply_not_executed, execute_tool_async};
 use super::transcript::{llm_emit_removed, llm_emit_state};
-use crate::symbio_core::schemas::session::chat_message::{
+use super::v2_exec::ResumedTool;
+use crate::symbio_core::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType, ResumeAction,
     ResumeRequest,
 };
@@ -50,7 +51,11 @@ use std::sync::Arc;
 /// resume 执行结果：继续 turn 循环 或 退出等下次 resume。
 pub enum ResumeOutcome {
     /// 恢复成功，turn 循环应继续（历史已含新工具结果，或 Failed Turn 已删除）。
-    Continue,
+    ///
+    /// `resumed` 是本次恢复**实际产生的工具交换**（`Some` = 真的重跑/生成了结果）。
+    /// v2 原生路径（`v2_mode = full`）据此**续写同一轮**——把这段交换落格并拼进
+    /// 下一轮 prompt；v1 路径不需要它（它从转写读，见 `v2_bridge`）。
+    Continue { resumed: Option<ResumedTool> },
     /// 恢复失败或 reject/answer 已终态，turn 循环应退出（留 Failed 等下次 resume）。
     Done,
 }
@@ -162,7 +167,7 @@ async fn process_retry_turn(
     );
 
     // 7. Continue：chat_loop 从 session 重新加载消息（已删除 Failed Turn），重新走 LLM 请求
-    Ok(ResumeOutcome::Continue)
+    Ok(ResumeOutcome::Continue { resumed: None })
 }
 
 /// 处理工具调用恢复（Retry/Approve/Reject/Supply/Answer）。
@@ -402,14 +407,21 @@ async fn process_tool_resume_action(
     llm_emit_message(sink, new_child).await;
     llm_emit_message(sink, updated_parent).await;
 
-    // 11. 成功 → Continue；失败 → Done
+    // 11. 成功 → Continue（交回本次恢复产生的工具交换，供 v2 原生路径续写同一轮）；
+    //     失败 → Done
     if final_success {
         plugin_info!(
             "session",
             "[Resume] tool {} resumed successfully, continuing chat_loop",
             tool_name
         );
-        Ok(ResumeOutcome::Continue)
+        Ok(ResumeOutcome::Continue {
+            resumed: Some(ResumedTool {
+                name: tool_name,
+                args: base_args,
+                text: final_result_text,
+            }),
+        })
     } else {
         plugin_info!(
             "session",

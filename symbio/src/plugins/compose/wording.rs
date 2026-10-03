@@ -27,8 +27,8 @@
 use std::sync::Arc;
 
 use super::config::ComposeConfig;
-use crate::symbio_core::schemas::dialog::ComposeRequest;
-use crate::symbio_core::schemas::session::chat_message::{ChatMessage, MessageRole};
+use crate::symbio_core::chat_message::{ChatMessage, MessageRole};
+use crate::symbio_core::ComposeRequest;
 use crate::symbio_core::{
     llm_short_id, CapabilityVisitor, ExecAbortSignal, ExecEnv, ExecEventSink, ModelProvider,
     PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_VISITOR,

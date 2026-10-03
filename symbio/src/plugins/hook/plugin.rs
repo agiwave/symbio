@@ -8,8 +8,8 @@
 
 use super::executor::HookExecutor;
 use super::registry::{HookRegistration, HookRegistry};
-use crate::symbio_core::schemas::common::SimpleResponse;
-use crate::symbio_core::schemas::{HookEvent, HookOutput};
+use crate::symbio_core::SimpleResponse;
+use crate::symbio_core::{HookEvent, HookOutput};
 use crate::symbio_core::{
     Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
     PluginMeta, PluginPayload, PLUGIN_ID_HOOK,

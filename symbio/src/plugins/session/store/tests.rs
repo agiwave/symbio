@@ -271,7 +271,7 @@ async fn save_leaves_no_temp_file_behind() {
 
 /// 造一条用户文本消息（标题 / 摘要推导的输入）
 fn text_msg(role_is_user: bool, text: &str) -> ChatMessage {
-    use crate::symbio_core::schemas::session::chat_message::{MessageContent, MessageRole};
+    use crate::symbio_core::chat_message::{MessageContent, MessageRole};
     ChatMessage {
         id: format!("m{}", text.len()),
         role: Some(if role_is_user {
@@ -509,7 +509,7 @@ fn atomic_tmp_paths_are_unique_per_call() {
 /// 同一会话的并发保存不得互相覆盖（「整份 load → 改 → 整份重写」的丢更新）
 #[tokio::test]
 async fn concurrent_saves_of_one_session_serialize_via_lock() {
-    use crate::symbio_core::schemas::session::chat_message::ChatMessage;
+    use crate::symbio_core::chat_message::ChatMessage;
 
     let tmp = TempDir::new().unwrap();
     let store = std::sync::Arc::new(SessionStore::new(tmp.path().to_path_buf()));

@@ -10,8 +10,8 @@
 //! 生成路径本身由 e2e `t22-compose.mjs` 在真实边界上验（mock LLM）。
 
 use super::*;
-use crate::symbio_core::schemas::dialog::{RunSnapshot, Verdict};
 use crate::symbio_core::PluginSimpleRequest;
+use crate::symbio_core::{RunSnapshot, Verdict};
 
 use super::super::reasons::{
     REASON_ACK, REASON_EMPTY, REASON_GREETING, REASON_NEEDS_WORK, REASON_THANKS,

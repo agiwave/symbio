@@ -44,10 +44,8 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use symbio::init::create_root_plugin;
-use symbio::symbio_core::schemas::session::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageType,
-};
-use symbio::symbio_core::schemas::session::session_chat;
+use symbio::symbio_core::chat_message::{ChatMessage, MessageContent, MessageRole, MessageType};
+use symbio::symbio_core::session_chat;
 use symbio::symbio_core::{
     vdfs_change_of, VdfsChange, VdfsNode, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,
 };

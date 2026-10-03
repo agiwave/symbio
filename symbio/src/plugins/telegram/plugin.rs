@@ -1,15 +1,13 @@
 use super::schemas::{telegram_send, telegram_status};
 use super::types::{TelegramConfig, TelegramMessage};
 use super::typing::TypingGuard;
-use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
-use crate::symbio_core::vdfs;
 use crate::symbio_core::PluginInvokeRequestExt;
 use crate::symbio_core::{
-    plugin_dir_from_ctx,
-    schemas::{common, session::session_chat},
-    CapabilityMeta, Plugin, PluginConfigFile, PluginDir, PluginError, PluginInvokeRequest,
-    PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_ID_TELEGRAM, ROUTE_SESSION_CHAT_SEND,
+    plugin_dir_from_ctx, session_chat, CapabilityMeta, Plugin, PluginConfigFile, PluginDir,
+    PluginError, PluginInvokeRequest, PluginInvokeResponse, PluginMeta, PluginPayload,
+    PLUGIN_ID_TELEGRAM, ROUTE_SESSION_CHAT_SEND,
 };
+use crate::symbio_core::{DetailDefinition, DetailField, DynVdfsProvider, SuccessResponse};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -479,13 +477,11 @@ impl TelegramPlugin {
                 let chat_input = serde_json::to_value(session_chat::Request {
                     session_id: Some(chat_id.clone()),
                     agent_id: None,
-                    message: Some(crate::symbio_core::schemas::session::chat_message::ChatMessage {
-                        role: Some(crate::symbio_core::schemas::session::chat_message::MessageRole::User),
-                        content: Some(
-                            crate::symbio_core::schemas::session::chat_message::MessageContent::Text(
-                                text.to_string(),
-                            ),
-                        ),
+                    message: Some(crate::symbio_core::chat_message::ChatMessage {
+                        role: Some(crate::symbio_core::chat_message::MessageRole::User),
+                        content: Some(crate::symbio_core::chat_message::MessageContent::Text(
+                            text.to_string(),
+                        )),
                         ..Default::default()
                     }),
                     provider_id: None,
@@ -624,7 +620,7 @@ impl Plugin for TelegramPlugin {
 
         // 与工具共用同一次能力广播：本插件在 VDFS 上的全部内容 = 一个配置文档
         if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
-            let me: vdfs::DynVdfsProvider = self.clone();
+            let me: DynVdfsProvider = self.clone();
             visitor.register_vdfs_provider(PLUGIN_ID_TELEGRAM, me).await;
         }
         // 顺带声明「本插件有一份配置文档」（设置页据此列出并指路）
@@ -674,7 +670,7 @@ impl TelegramPlugin {
                 config.chat_id = Some(id);
             }
         }
-        Ok(serde_json::to_value(common::SuccessResponse::default())?)
+        Ok(serde_json::to_value(SuccessResponse::default())?)
     }
 
     async fn invoke_start_listener(

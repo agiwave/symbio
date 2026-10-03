@@ -35,6 +35,7 @@
 /// 按「权威动作的种类」划分，不按「有多少个智能体」划分——新主体不新增能力，
 /// 新动作种类才走 ADR（03 §3）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)] // dead-code-allow R-002: 治理契约（plan/01 §7），plan/11 批1 身份/可见域接线后摘除
 pub enum Capability {
     /// 判决意图（快速档分类）。
     JudgeIntent,
@@ -57,6 +58,7 @@ pub enum Capability {
 /// **C10**（[plan/04 §4](../../../../docs/plan/04-工程落地.md)）：默认
 /// `thread_private`——默认隔离是**缺省值**，不是需要每个主体记得配置的东西。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[allow(dead_code)] // dead-code-allow R-002: 治理契约（plan/01 §7），plan/11 批1 身份/可见域接线后摘除
 pub enum VisScope {
     /// 仅本线程可见（默认）。
     #[default]
@@ -73,6 +75,7 @@ pub enum VisScope {
 /// （成对性），不会被静默当作某个默认值——「没说允许」必须显式说，默认值
 /// （C10 `thread_private`）只作用于**内容**的缺省可见域，不替主体补授权。
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)] // dead-code-allow R-002: 治理契约（plan/01 §7），plan/11 批1 身份/可见域接线后摘除
 pub struct PrincipalPolicy {
     /// 身份（数据，任意字符串）。
     pub principal: String,
@@ -84,6 +87,7 @@ pub struct PrincipalPolicy {
 
 impl PrincipalPolicy {
     /// 读写成对的便捷构造。
+    #[allow(dead_code)] // dead-code-allow R-002: 治理契约（plan/01 §7），plan/11 批1 身份/可见域接线后摘除
     pub fn paired(
         principal: impl Into<String>,
         grants: Vec<Capability>,
@@ -99,6 +103,7 @@ impl PrincipalPolicy {
 
 /// 成对性违规：策略只有一侧。
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)] // dead-code-allow R-002: 治理契约（plan/01 §7），plan/11 批1 身份/可见域接线后摘除
 pub enum PairingViolation {
     /// 只有写侧（有 grants，读侧未配置）——拒绝。
     WriteOnly { principal: String },
@@ -115,6 +120,7 @@ pub enum PairingViolation {
 /// 构造即校验成对性；查询 **fail-closed**：未知主体、未持有的能力、越界的
 /// 可见域，一律拒绝。
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)] // dead-code-allow R-002: 治理契约（plan/01 §7），plan/11 批1 身份/可见域接线后摘除
 pub struct PermissionMatrix {
     policies: Vec<PrincipalPolicy>,
 }
@@ -122,6 +128,7 @@ pub struct PermissionMatrix {
 impl PermissionMatrix {
     /// 由主体策略集构造。**任何一侧缺失即整体拒绝**（出口判据「只有写侧 → 拒绝」，
     /// [plan/04 §3](../../../../docs/plan/04-工程落地.md) 第 7 步）。
+    #[allow(dead_code)] // dead-code-allow R-002: 治理契约（plan/01 §7），plan/11 批1 身份/可见域接线后摘除
     pub fn new(policies: Vec<PrincipalPolicy>) -> Result<Self, PairingViolation> {
         for p in &policies {
             if p.grants.is_empty() {
@@ -152,6 +159,7 @@ impl PermissionMatrix {
     }
 
     /// 写侧：主体持有的全部能力（空切片 = 未知主体 / 只读被拒后不存在）。
+    #[allow(dead_code)] // dead-code-allow R-002: 治理契约（plan/01 §7），plan/11 批1 身份/可见域接线后摘除
     pub fn grants_of(&self, principal: &str) -> &[Capability] {
         self.policies
             .iter()
@@ -161,11 +169,13 @@ impl PermissionMatrix {
     }
 
     /// 写侧判定：主体是否可以权威地做 `cap`。**fail-closed**。
+    #[allow(dead_code)] // dead-code-allow R-002: 治理契约（plan/01 §7），plan/11 批1 身份/可见域接线后摘除
     pub fn can_write(&self, principal: &str, cap: Capability) -> bool {
         self.grants_of(principal).contains(&cap)
     }
 
     /// 读侧：主体的可见域（未知主体 ⇒ `None` ⇒ [`Self::can_see`] 必拒）。
+    #[allow(dead_code)] // dead-code-allow R-002: 治理契约（plan/01 §7），plan/11 批1 身份/可见域接线后摘除
     pub fn sees_of(&self, principal: &str) -> Option<VisScope> {
         self.policies
             .iter()
@@ -178,6 +188,7 @@ impl PermissionMatrix {
     /// - `thread_private`：仅 owner 本人（**默认隔离**，C10——越界读取 0 的构造侧）；
     /// - `shared`：矩阵内任何主体；
     /// - `public`：任何人。
+    #[allow(dead_code)] // dead-code-allow R-002: 治理契约（plan/01 §7），plan/11 批1 身份/可见域接线后摘除
     pub fn can_see(&self, viewer: &str, owner: &str, scope: VisScope) -> bool {
         match scope {
             VisScope::ThreadPrivate => viewer == owner,

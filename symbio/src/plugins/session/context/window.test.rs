@@ -4,7 +4,7 @@
 //! `context/window.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
-use crate::symbio_core::schemas::session::chat_message::MessageStatus;
+use crate::symbio_core::chat_message::MessageStatus;
 
 fn tc_msg(id: &str, name: &str, args: &str) -> ChatMessage {
     ChatMessage {

@@ -10,10 +10,8 @@ mod traverse;
 // 域内子模块私有，公开面在此显式重导出
 pub use dir::{
     plugin_dir_from_ctx, plugin_expand_tilde_path, PluginConfigFile, PluginConfigMount, PluginDir,
-    PluginEntry, PluginIdentity, PLUGIN_FILE, PLUGIN_KEY_API, PLUGIN_KEY_AUTHOR,
-    PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_DESCRIPTION, PLUGIN_KEY_ENABLED, PLUGIN_KEY_GRANTS,
-    PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED, PLUGIN_KEY_TITLE,
-    PLUGIN_KEY_VERSION, PLUGIN_RESERVED_KEYS,
+    PluginEntry, PLUGIN_FILE, PLUGIN_KEY_CAN_DISABLE, PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME,
+    PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED, PLUGIN_KEY_VERSION,
 };
 pub use error::{PluginError, PluginErrorCode, PluginInvokeResponse};
 // 锁辅助函数刻意 `pub(crate)`（见 `error.rs::lock_read` 的说明），不进对外 API
@@ -26,8 +24,7 @@ pub use ids::{
 };
 pub use route::{
     ROUTE_CLASSIFY_DECIDE, ROUTE_COMPOSE_WORDING, ROUTE_EVENT_BUS_SUBSCRIBE, ROUTE_HOOK_FIRE,
-    ROUTE_SESSION_CHAT_ABORT, ROUTE_SESSION_CHAT_SEND, ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH,
-    ROUTE_VDFS_WATCH,
+    ROUTE_SESSION_CHAT_SEND, ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH,
 };
 pub use transport::{
     PluginChannel, PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire,
@@ -213,7 +210,7 @@ pub trait PluginInvokeRequestExt: PluginInvokeRequest {
 
     /// 获取配置信息 (Value)
     fn config(&self) -> Option<serde_json::Value> {
-        self.get(crate::symbio_core::CONFIG)
+        self.get(crate::symbio_core::keys::CONFIG)
     }
 
     /// 直接将上下文中的载荷解析为指定的强类型 T（进程内零拷贝）
@@ -287,7 +284,7 @@ impl PluginSimpleRequest {
         }
         if let Some(c) = config {
             extensions.insert(
-                crate::symbio_core::CONFIG.name().to_string(),
+                crate::symbio_core::keys::CONFIG.name().to_string(),
                 Arc::new(c) as Arc<dyn Any + Send + Sync>,
             );
         }

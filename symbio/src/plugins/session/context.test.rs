@@ -5,7 +5,7 @@
 //! 请求视图层与提示词/快照协议的测试分别在 `view.test.rs` / `prompt.test.rs`。
 
 use super::*;
-use crate::symbio_core::schemas::session::chat_message::MessageContent;
+use crate::symbio_core::chat_message::MessageContent;
 
 fn user_msg(text: &str) -> ChatMessage {
     ChatMessage {

@@ -408,7 +408,18 @@ export const BASELINE = {
   //      两只端口与 `LlmAdapter` 同域 —— core-naming-audit N-003 的判据。）
   //      验收 = core 工具轮 3 例（产物格 + 溯源 / 等待用户不落格 / 无分发方兜底）
   //      + e2e t26（MCP echo → `/_requests` 回读结果进下一次请求 + WAL 溯源）。
-  rustTests: 1213,
+  // 1214（审批与恢复·机制，2026-10-02）——`1213 → 1214`，**+1**。
+  //      等待轮的恢复**续写同一轮**（不新开用户格、收束仍记在原 turn 上）：
+  //      core 新增 `TurnResume` + `TurnInput.resume`（`run_with_tools` 续写分支：
+  //      复用既有用户格 seq / 续编号产物格 / 种子交换段）；插件侧
+  //      `ResumeOutcome::Continue{resumed}` 把恢复产生的工具交换交回 chat_loop，
+  //      `v2_exec` 定位已开未收束轮次并落 `artifact.added`。判据是 C4
+  //      （`unresolved_turns` 按 turn 号配对）：另开新轮会把原轮变成永久假缺口。
+  //      验收 = core `resume_continues_same_turn_without_reopening_user_cell`
+  //      （缺口被填 + 用户格只一格 + 恢复交换进 prompt）。
+  //      注：e2e `t27` 待 CLI 恢复入口（`cli/src/client.rs` 现写死 `resume: None`），
+  //      属批 2b，不在本次基线内。
+  rustTests: 1214,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

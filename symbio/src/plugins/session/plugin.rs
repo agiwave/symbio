@@ -23,13 +23,14 @@ use super::chat_session::PersistentChatSession;
 pub use super::config::SessionConfig;
 use super::types::{Session, SessionSummary};
 use crate::providers::MemoryFile;
-use crate::symbio_core::schemas::detail::{DetailDefinition, DetailField};
-use crate::symbio_core::schemas::session::{chat_message as cm, session_chat};
-use crate::symbio_core::vdfs;
+use crate::symbio_core::{chat_message as cm, session_chat};
 use crate::symbio_core::{
     plugin_dir_from_ctx, ExecEventSink, Plugin, PluginConfigFile, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
     PLUGIN_FILE, PLUGIN_ID_SESSION, SESSION_ID,
+};
+use crate::symbio_core::{
+    DetailDefinition, DetailField, DynVdfsProvider, VdfsAccess, VdfsChange, VdfsChangeSubscriptions,
 };
 use crate::symbio_core::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
 use async_trait::async_trait;
@@ -58,12 +59,12 @@ pub struct SessionPlugin {
     /// VDFS 实时：变更订阅表（引用计数 + 恰好一次投递）。
     ///
     /// provider 是**变更源的持有者**：会话的任何写入 / 删除都经这张表同步投给
-    /// 当前订阅者，[`vdfs::VdfsRequest::Watch`] 只往表里登记——变更因此无需
+    /// 当前订阅者，[`crate::symbio_core::VdfsRequest::Watch`] 只往表里登记——变更因此无需
     /// 轮询即可到达 VDFS 事件总线，且**重叠订阅不会重复投递**（见该类型的文档）。
     ///
     /// 用 `Arc` 而非内联值：工作目录监听器（后台任务）也要投递进同一批订阅者，
     /// 需要共享所有权。
-    pub(crate) change_subs: Arc<vdfs::VdfsChangeSubscriptions>,
+    pub(crate) change_subs: Arc<VdfsChangeSubscriptions>,
     /// 收件箱唤醒：入队时置位，常驻消费者据此醒来取件（见 `inbox` 模块）。
     /// 它是**唤醒**不是队列——队列本身在 `ActiveSessionStateInner::inbox`。
     pub(crate) inbox_wake: tokio::sync::Notify,
@@ -153,7 +154,7 @@ impl SessionPlugin {
     /// 主构造函数（Factory 机制使用）
     pub fn new(parent: Option<Weak<dyn Plugin>>, config: SessionConfig, dir: PluginDir) -> Self {
         // 变更订阅表：provider 自持一份，工作目录监听器共享同一份（见下方注入）
-        let change_subs = Arc::new(vdfs::VdfsChangeSubscriptions::default());
+        let change_subs = Arc::new(VdfsChangeSubscriptions::default());
         // 目录树场景同时服务 VDFS：文件变化经**同一张订阅表**转发给 `<根>`
         // 订阅方，VDFS 侧不必另开一套监听（实时链路在机制层合流）。
         let workdir_watches = super::workdir::WorkdirWatchManager::default();
@@ -217,7 +218,7 @@ impl SessionPlugin {
     /// 「无载荷」本身（CLI 侧原有一段"无载荷就回读 `stat` 分辨"的代码，实测
     /// 那笔请求永远改变不了结论，已删——见 `cli/src/client.rs` 的说明）。
     pub(crate) fn notify_change(&self, id: &str) {
-        self.change_subs.notify(&vdfs::VdfsChange::bare(id));
+        self.change_subs.notify(&VdfsChange::bare(id));
     }
 
     // ==================== 转写发布（消息变更的唯一出口）====================
@@ -286,7 +287,7 @@ impl SessionPlugin {
             .with_order(1)
             .with_icon("session")
             // 会话是叶子文档：可列，不参与树遍历（会话内部的子结构另有容器语义）
-            .with_root_access(vdfs::VdfsAccess::LIST)
+            .with_root_access(VdfsAccess::LIST)
     }
 
     /// 静态工厂：从 PluginInvokeRequest 构造 Plugin 实例
@@ -543,7 +544,7 @@ impl Plugin for SessionPlugin {
         // 挂载名由使用方（此处即本插件）选定——约定用插件名（`PLUGIN_ID_SESSION`），
         // 插件名在宿主内唯一，天然就是合格的挂载名；provider 自身不含此概念。
         if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
-            let me: vdfs::DynVdfsProvider = self.clone();
+            let me: DynVdfsProvider = self.clone();
             visitor.register_vdfs_provider(PLUGIN_ID_SESSION, me).await;
 
             // 智能体自身的 `AGENTS.md`（`{homedir}` / `<agentdir>`）**不再在此注入**：

@@ -1,6 +1,6 @@
-use crate::symbio_core::schemas::{session::chat_message as cm, session::session_chat};
 use crate::symbio_core::ExecAbortSignal;
 use crate::symbio_core::VdfsChangeSubscriptions;
+use crate::symbio_core::{chat_message as cm, session_chat};
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{atomic::AtomicU64, atomic::Ordering, Arc};

@@ -1,7 +1,10 @@
 //! 核心模块
 
-pub mod actors;
-pub mod adapters;
+// Rule-1（架构出口唯一）：core 的代码一律住子目录，但子目录**不对外开模块门**——根一律
+// `mod <域>;` 私有，谁出现在公共面上由下方 `pub use` 逐条显式声明（`scripts/core-export-audit.mjs`
+// C-001 校验，编译器兜底）。外部只写 `symbio_core::<符号>`，不得写 `symbio_core::<域>::…`。
+mod actors;
+mod adapters;
 mod assembly;
 mod capability;
 mod clock;
@@ -9,60 +12,40 @@ mod creator;
 mod embedding;
 mod event;
 mod event_bus;
-pub mod exec;
-pub mod governance;
+mod exec;
+mod governance;
 mod invariants;
 mod keys;
-pub mod llm;
+mod llm;
 mod logger;
 mod plugin;
 mod projection;
-pub mod schemas;
+mod schemas;
 mod store;
 mod text;
-pub mod vdfs;
+mod vdfs;
 mod view;
 
 // ==================== 事件溯源契约（v2 阶段 S0） ====================
 // 共享类型层（`event` / `view`）与两个机制（`store` ④ / `projection` ③）。
 // 模块依赖纪律见 [plan/05 §3.1]：彼此只准依赖类型定义，不持有对方句柄。
-pub use event::{Entity, Event, EventEnvelope, Seq, Timestamp, Verb};
-pub use invariants::{
-    acyclic_deps, budget_exceeded, check_all, final_unique_per_turn, produced_by_coverage,
-    rework_bounded, seq_monotonic, unresolved_turns, Violation,
-};
-pub use projection::calibration::{calibration, CalibrationView, SkillStats};
-pub use projection::checkpoint::{checkpoint, CheckpointState};
-pub use projection::consolidate::{accept as consolidate_accept, ConsolidateParams, Rejection};
-pub use projection::cost::{cost_ledger, CostEntry, CostLedgerView};
-pub use projection::fallback::{fallback_rate, FallbackRateView, TierStats};
-pub use projection::readyset::{readyset, ReadySetView, ReadyTask};
-pub use projection::recall::recall;
-pub use projection::reputation::{plain_score, reputation, ReputationEntry, ReputationView};
-pub use projection::slo::{slo_report, SloLatencyView, TierLatency};
-pub use projection::transcript::{transcript, TranscriptEntry, TranscriptView};
+pub use event::{Entity, Event, EventEnvelope, Seq, Verb};
+pub use invariants::check_all;
+pub use projection::calibration::calibration;
+pub use projection::cost::cost_ledger;
+pub use projection::fallback::fallback_rate;
+pub use projection::transcript::transcript;
 pub use projection::turnstate::{turnstate, TurnState};
-pub use projection::Projection;
 pub use store::wal::{EventWalStore, WalStore};
-pub use store::{AppendError, EventStore, MemoryStore, Store};
-pub use view::{Budget, View};
-pub use view::{RecallEntry, RecallView};
+pub use store::{EventStore, Store};
+pub use view::Budget;
 
 // ==================== 主体（v2 阶段 S1，② actors） ====================
 // 只收类型化输入、只产事件（plan/05 §3.1 ② 行）；S1 落 Decider 平凡值，S2 加 Reasoner。
-pub use actors::{
-    ActorSpec, ApprovedIntent, AutonomousInitiator, CircuitBreaker, CommitmentKeeper,
-    ConationCandidate, ConationPolicy, Decider, DeciderMiss, GateDecision, GateWarrant,
-    IntentDecision, IntentGate, Pattern, Preemption, PreemptionDecider, Reasoner, RecallTranslator,
-    Scope, SkillCompiler, SkillRoute, SkillRouter, TurnInput, TurnOutcome, TurnRunner,
-};
+pub use actors::{Pattern, Reasoner, TurnInput, TurnOutcome, TurnResume, TurnRunner};
 // 事件名字表（名字是数据，单点定义）。
 pub use event::{
-    EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_CONATION_EXPRESSED, EVENT_CONTROL_OPENED, EVENT_MEMORY_CONSOLIDATED,
-    EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED, EVENT_SYSTEM_HEALTH,
-    EVENT_SYSTEM_TRIGGERED, EVENT_TASK_ASSERTED, EVENT_TASK_HELD, EVENT_TASK_OPENED,
-    EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED, EVENT_THREAD_CHECKPOINT, EVENT_USER_MESSAGE,
+    EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 
 // ==================== 适配器（v2 阶段 S2，⑤ adapters） ====================
@@ -70,16 +53,14 @@ pub use event::{
 // 两只端口并列：`LlmAdapter`（生成）与 `DispatchPort`（工具分发）——运行器只认这两只，
 // 不认任何具体实现（插件宿主/转写都在实现侧）。
 pub use adapters::{
-    AdapterError, CanClassify, CanGenerate, ClassifyOnly, DeltaSink, DispatchOutcome, DispatchPort,
-    FullModel, LatencyTier, LlmAdapter, LlmTurn, ProviderLlmAdapter, RuleOnly, SilentDeltas,
-    StubLlmAdapter, TokenIssuer,
+    DeltaSink, DispatchOutcome, DispatchPort, LatencyTier, LlmAdapter, LlmTurn, ProviderLlmAdapter,
+    TokenIssuer,
 };
 
 // ==================== 权限与可见性（v2 阶段 S3，⑥ governance） ====================
 // 读写成对、fail-closed（plan/01 §7）。注意：governance::Capability（权限能力，
 // 7 个封顶）与 capability::Capability（LLM 工具描述符）是两个概念，
 // 刻意**不进根平铺**——以路径限定消歧，见 governance/mod.rs 的同名辨析。
-pub use governance::{PairingViolation, PermissionMatrix, PrincipalPolicy, VisScope};
 
 // ==================== LLM 契约 ====================
 // 模型接入（`model_provider`）与单轮产物 / 帧原语（`turn`）。
@@ -96,8 +77,7 @@ pub use llm::turn::{
 pub use vdfs::{
     VDFS_ACTION_ABORT, VDFS_ACTION_CLEAR, VDFS_ACTION_DISABLE, VDFS_ACTION_ENABLE,
     VDFS_ACTION_EXPORT, VDFS_ACTION_IMPORT, VDFS_ACTION_PLUGINS, VDFS_ACTION_TEST,
-    VDFS_ACTION_TRUNCATE, VDFS_EXT_DIR, VDFS_EXT_FORM, VDFS_EXT_JSON, VDFS_EXT_MARKDOWN,
-    VDFS_EXT_TEXT, VDFS_EXT_ZIP, VDFS_KIND_DIR, VDFS_KIND_FILE, VDFS_PARAM_BEFORE,
+    VDFS_ACTION_TRUNCATE, VDFS_EXT_FORM, VDFS_EXT_ZIP, VDFS_KIND_DIR, VDFS_PARAM_BEFORE,
     VDFS_PARAM_LIMIT, VDFS_PARAM_WORKDIR, VDFS_PLUGINS_FIELD, VDFS_PLUGIN_NAME_FIELD,
     VDFS_PLUGIN_PROVIDER_FIELD, VDFS_STATUS_ACTIVE, VDFS_STATUS_DISABLED, VDFS_STATUS_FAILED,
     VDFS_STATUS_NONE, VDFS_STATUS_UNKNOWN, VDFS_STATUS_WORKING,
@@ -105,8 +85,8 @@ pub use vdfs::{
 // 域类型：节点 / 内容 / 请求响应 / 错误 / 变更
 pub use vdfs::{
     DynVdfsProvider, VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent,
-    VdfsContext, VdfsError, VdfsFieldError, VdfsItem, VdfsNewType, VdfsNode, VdfsParams,
-    VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsValidationError, VdfsWriteResponse,
+    VdfsContext, VdfsError, VdfsItem, VdfsNewType, VdfsNode, VdfsParams, VdfsProvider, VdfsRequest,
+    VdfsResponse, VdfsResult, VdfsValidationError, VdfsWriteResponse,
 };
 // 契约函数与宿主桥
 pub use vdfs::{
@@ -116,6 +96,18 @@ pub use vdfs::{
 };
 // 地址机制（crate 内部装配用，不是公开契约）
 pub(crate) use vdfs::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
+
+// ==================== 跨插件契约（schemas，ADR-023） ====================
+// `schemas/` 目录同样不开模块门：schema 契约在根显式再导出——`chat_message` /
+// `session_chat` 保**叶子模块**形态（`as cm` 别名依赖它），其余按符号扁平导出。
+// 外部一律 `symbio_core::ChatMessage` / `symbio_core::chat_message::…`。
+pub use schemas::common::{SimpleResponse, SuccessResponse};
+pub use schemas::detail::{
+    DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,
+    DetailPreset, DetailPresetSpec, DetailSection, DETAIL_PICK_DIRECTORY,
+};
+pub use schemas::session::{chat_message, session_chat};
+pub use schemas::{ComposeRequest, DecideRequest, HookEvent, HookOutput, RunSnapshot, Verdict};
 
 // ==================== 事件总线 ====================
 pub use event_bus::{
@@ -136,7 +128,20 @@ pub use capability::{
 // 工具结果 `failure_kind` 闭集：生产方（`local`）与消费方（`session`）分属不同插件，
 // 互相不可见，只能经这里共享。单独一行——它是模块而非类型。
 pub use capability::failure_kind;
-pub use plugin::*;
+pub use plugin::{
+    plugin_dir_from_ctx, plugin_expand_tilde_path, Plugin, PluginChannel, PluginConfigFile,
+    PluginConfigMount, PluginDir, PluginEntry, PluginError, PluginFrame, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginMessageWire, PluginMeta, PluginPayload,
+    PluginPayloadWire, PluginSimpleRequest, PluginStopReason, PLUGIN_FILE, PLUGIN_ID_AGENT,
+    PLUGIN_ID_CLASSIFY, PLUGIN_ID_COMPOSE, PLUGIN_ID_COMPOSITE, PLUGIN_ID_EVENT_BUS,
+    PLUGIN_ID_GATEWAY, PLUGIN_ID_HOME, PLUGIN_ID_HOOK, PLUGIN_ID_LOCAL, PLUGIN_ID_MANAGER,
+    PLUGIN_ID_MCP, PLUGIN_ID_MEMORY, PLUGIN_ID_MODEL, PLUGIN_ID_SESSION, PLUGIN_ID_SETTING,
+    PLUGIN_ID_SKILL, PLUGIN_ID_TELEGRAM, PLUGIN_ID_VDFS, PLUGIN_ID_WEB, PLUGIN_KEY_CAN_DISABLE,
+    PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED,
+    PLUGIN_KEY_VERSION, PLUGIN_PAYLOAD_KEY, ROUTE_CLASSIFY_DECIDE, ROUTE_COMPOSE_WORDING,
+    ROUTE_EVENT_BUS_SUBSCRIBE, ROUTE_HOOK_FIRE, ROUTE_SESSION_CHAT_SEND, ROUTE_VDFS_ROOT,
+    ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
+};
 // 注意：submit_object_creator! 宏已通过 #[macro_export] 导出到 crate 根目录
 
 // ==================== 通用对象创建注册表 ====================
@@ -148,7 +153,12 @@ pub use creator::{creator_create_object, creator_has, creator_ids};
 pub(crate) use creator::{ObjectConstructor, Submit};
 
 // ==================== 键面 ====================
-pub use keys::*;
+pub use keys::{
+    SymbioKey, ABORT_SIGNAL, AGENT_ID, CAPABILITY_ERRORS, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR,
+    CONTENT, EVENT_SINK, ID, MODE, NAME, OPTION_VISITOR, PARENT, PATH, PLUGIN_DIR, PROVIDER_ID,
+    REQUIRED_PLUGINS, RESULT_MSG_ID, RISK_LEVEL, SESSION_ID, TOOL_CALL_ID, VDFS_PARENT_ADDR,
+    WORKDIR,
+};
 
 // ==================== 装配策略 ====================
 // 「一棵标准插件树挂哪些插件」「哪些插件不许被停用」——不是键、不是 id，见 assembly 模块文档。
@@ -158,17 +168,22 @@ pub use assembly::{ASSEMBLY_SUB_AGENT_PLUGINS, ASSEMBLY_UNDISABLABLE_PLUGINS};
 // 注：`CAPABILITY_ERRORS`（错误桶键）不在这里——它是 `SymbioKey` 实例，
 // 随 `pub use keys::*` 一并平铺（键面只有一个定义处，见 `keys/mod.rs`）。
 pub use capability::{
-    capability_init_error_bucket, capability_report_error, capability_take_errors, CapabilityError,
+    capability_init_error_bucket, capability_report_error, capability_take_errors,
 };
 pub use clock::clock_now_ms;
 // 锁辅助函数**刻意不进 `pub use plugin::*`**（见 `plugin/error.rs::lock_read` 的说明）：
 // 显式 `pub(crate)` 导入，既让全 crate 可用，又保留 `dead_code` 的可见性。
-pub use exec::{
-    ExecAbortSignal, ExecEnv, ExecEventSink, ExecEventSinkProgress, ExecTranscriptWriter,
-};
+pub use exec::{ExecAbortSignal, ExecEnv, ExecEventSink, ExecTranscriptWriter};
 // 注：homedir（系统根注册表）**不在 core**——它归 `home` 插件独有。core 只提供
 // 纯路径工具 `plugin_expand_tilde_path`（经 `plugin::dir` 重导出，不读任何全局系统根）。
-pub use logger::*;
+// 日志门面：`logger_is_initialized` / `logger_level_enabled` / `LOG_LEVEL_{WARN,ERROR}` 只被
+// logger 的 `plugin_*!` 宏体引用——但宏在**插件**调用点展开，根路径必须可达（`core-export-audit`
+// 的消费方计数认这层，见 `core-surface.mjs` 的 `collectMacroBodies`）。
+// `logger_min_level` 只在 core 内用，故不进根。
+pub use logger::{
+    logger_init, logger_is_initialized, logger_level_enabled, logger_parse_level,
+    logger_set_min_level, LOG_LEVEL_DEBUG, LOG_LEVEL_ERROR, LOG_LEVEL_INFO, LOG_LEVEL_WARN,
+};
 // 注：记忆（`MemoryFile` / 两道闸门 / 片段渲染 / 节点形状）**整块不在 core**——
 // 实现不隶属任何单个插件（memory / session 各用一个或多个作用域），故归
 // `providers/memory`（方式 B，不套 `dyn`）。**连文件名也不在 core**：各作用域

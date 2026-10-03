@@ -30,7 +30,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
-use crate::symbio_core::schemas::session::chat_message::{ChatMessage, MessageStatus, MessageType};
+use crate::symbio_core::chat_message::{ChatMessage, MessageStatus, MessageType};
 use crate::symbio_core::{
     llm_emit_message, DispatchOutcome, DispatchPort, ExecAbortSignal, ExecEventSink, LlmTurn,
     Plugin, PluginInvokeRequest,

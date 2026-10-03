@@ -6,9 +6,7 @@
 //! 生成路径本身由 e2e `t22-compose.mjs` 在真实边界上验（mock LLM）。
 
 use super::*;
-use crate::symbio_core::schemas::session::chat_message::{
-    ChatMessage, MessageContent, MessageRole,
-};
+use crate::symbio_core::chat_message::{ChatMessage, MessageContent, MessageRole};
 
 fn node(role: MessageRole, text: &str) -> ChatMessage {
     ChatMessage {
@@ -22,11 +20,11 @@ fn node(role: MessageRole, text: &str) -> ChatMessage {
 fn request(context: Vec<ChatMessage>) -> ComposeRequest {
     ComposeRequest {
         session_id: "s1".to_string(),
-        verdict: crate::symbio_core::schemas::dialog::Verdict::Answered {
+        verdict: crate::symbio_core::Verdict::Answered {
             reason: "from_context".to_string(),
         },
         context,
-        snapshot: crate::symbio_core::schemas::dialog::RunSnapshot::default(),
+        snapshot: crate::symbio_core::RunSnapshot::default(),
     }
 }
 

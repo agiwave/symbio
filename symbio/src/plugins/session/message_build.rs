@@ -29,7 +29,7 @@
 //! 互引被 `plugin-entry-audit` E-009 禁止，故那侧改为本地构造 fixture，形状契约
 //! 由本文件的测试锁定（见 `message_build.test.rs` 里的用例 A / A2 / B / C / D）。
 
-use crate::symbio_core::schemas::session::chat_message::{
+use crate::symbio_core::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
 use crate::symbio_core::{llm_short_id, TurnOutput, TurnToolCallInfo};

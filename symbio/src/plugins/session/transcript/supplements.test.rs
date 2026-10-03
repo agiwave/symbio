@@ -6,8 +6,8 @@
 //! `inbox.test.rs` 与 e2e（`e2e/cases/t19-supplements-merge.mjs`）负责。
 
 use super::*;
-use crate::symbio_core::schemas::session::chat_message as cm;
-use crate::symbio_core::schemas::session::session_chat;
+use crate::symbio_core::chat_message as cm;
+use crate::symbio_core::session_chat;
 
 /// 造一条收件箱条目（params 与本模块无关，取默认）。
 fn item(id: &str, text: &str) -> InboxItem {

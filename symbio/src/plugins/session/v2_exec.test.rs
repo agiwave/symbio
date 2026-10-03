@@ -13,7 +13,7 @@
 use std::sync::{Arc, Mutex};
 
 use super::*;
-use crate::symbio_core::schemas::session::chat_message as cm;
+use crate::symbio_core::chat_message as cm;
 use crate::symbio_core::{
     check_all, CapabilityMeta, ExecTranscriptWriter, PluginSimpleRequest, EVENT_ASSISTANT_FALLBACK,
     EVENT_ASSISTANT_FINAL,
@@ -48,6 +48,7 @@ fn tool_free_req<'a>(
         user_text: "你好",
         window_turns: 6,
         tools: &[],
+        resume: None,
     }
 }
 
@@ -378,6 +379,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
             examples: None,
             context_retention: None,
         }],
+        resume: None,
     })
     .await
     .expect("工具轮执行成功");

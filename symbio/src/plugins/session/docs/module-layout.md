@@ -69,9 +69,12 @@
 
 > 依赖方向是**规范不是机制**——本仓没有判定它的审计，由评审把持：编排层可以
 > 引用领域层，领域层不得反向引用编排层（`plugin.rs` / `orchestrator/` /
-> `chat_loop/` 即编排层）。跨插件引用规则（E-009 / E-010）的编号定义在
+> `chat_loop/` 即编排层）。跨插件引用规则（E-009；内核深引是
+> `core-export-audit` 的 **C-002**——原 E-010 已迁走，避免两个脚本各判一遍）定义在
 > [`scripts/plugin-entry-audit.mjs`](../../../../../scripts/plugin-entry-audit.mjs)
-> 的规则表（那是唯一定义处；[`plugin-route-address.md`](../../../../../docs/design/plugin-route-address.md)
+> 与 [`scripts/core-export-audit.mjs`](../../../../../scripts/core-export-audit.mjs)
+> 的规则表（各是自己那批规则的唯一定义处；
+> [`plugin-route-address.md`](../../../../../docs/design/plugin-route-address.md)
 > 只收地址类规则 E-001 ~ E-007）。
 
 **存量豁免（登记于此，只减不增）**——领域层当前仍引用的编排层符号及归位方向。

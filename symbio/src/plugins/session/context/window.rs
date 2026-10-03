@@ -5,9 +5,7 @@
 //! "跨插件共享"的前提（model 构建 request view）已随 Phase E-② 循环族下沉消失，
 //! 属单一模块私有设施，不再置于 core 共享层。
 
-use crate::symbio_core::schemas::session::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageType,
-};
+use crate::symbio_core::chat_message::{ChatMessage, MessageContent, MessageRole, MessageType};
 use crate::symbio_core::CapabilityToolContextRetention;
 use std::collections::{HashMap, HashSet};
 

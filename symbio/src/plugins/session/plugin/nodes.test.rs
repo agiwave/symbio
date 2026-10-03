@@ -3,6 +3,7 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）：测试跟着被测试的实现走。
 
 use super::*;
+use crate::symbio_core::{VDFS_STATUS_ACTIVE, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING};
 // 目录树场景模块的区段常量（`SEG_SUB_SESSIONS` / `SEG_WORKDIR`）
 use crate::plugins::session::workdir;
 
@@ -62,13 +63,13 @@ fn session_node_carries_renderer_ext_and_presentation() {
     assert_eq!(idle.name, "abc");
     assert_eq!(idle.effective_ext().as_deref(), Some("session"));
     assert_eq!(idle.kind, PLUGIN_ID_SESSION);
-    assert_eq!(idle.status, vdfs::VDFS_STATUS_ACTIVE);
+    assert_eq!(idle.status, VDFS_STATUS_ACTIVE);
     assert_eq!(idle.updated_at, Some(1_700_000_000_000));
     assert_eq!(idle.access.flags(), "rw", "会话可读可写");
     assert!(!idle.is_dir(), "会话是文档而非目录");
 
     let busy = session_node(&SessionSummary::of(&s), &SessionRuntime::working());
-    assert_eq!(busy.status, vdfs::VDFS_STATUS_WORKING);
+    assert_eq!(busy.status, VDFS_STATUS_WORKING);
 }
 
 /// 会话运行态投影：**三个状态**（运行中 / 空闲 / 失败），不是「状态 + `last_failed` 布尔」。
@@ -86,7 +87,7 @@ fn session_node_projects_runtime_state() {
         &SessionSummary::of(&s),
         &SessionRuntime::finished(OUTCOME_FAILED, Some("上游 502".to_string()), None),
     );
-    assert_eq!(failed.status, vdfs::VDFS_STATUS_FAILED);
+    assert_eq!(failed.status, VDFS_STATUS_FAILED);
     assert_eq!(failed.attributes.get("outcome"), Some(&json!("failed")));
     assert_eq!(failed.attributes.get("error"), Some(&json!("上游 502")));
 
@@ -94,12 +95,12 @@ fn session_node_projects_runtime_state() {
         &SessionSummary::of(&s),
         &SessionRuntime::finished(OUTCOME_ABORTED, None, None),
     );
-    assert_eq!(aborted.status, vdfs::VDFS_STATUS_ACTIVE, "中止不是失败");
+    assert_eq!(aborted.status, VDFS_STATUS_ACTIVE, "中止不是失败");
     assert_eq!(aborted.attributes.get("outcome"), Some(&json!("aborted")));
     assert_eq!(aborted.attributes.get("error"), None, "中止不带错误文案");
 
     let idle = session_node(&SessionSummary::of(&s), &SessionRuntime::idle(None));
-    assert_eq!(idle.status, vdfs::VDFS_STATUS_ACTIVE);
+    assert_eq!(idle.status, VDFS_STATUS_ACTIVE);
     assert_eq!(
         idle.attributes.get("outcome"),
         None,
@@ -555,10 +556,10 @@ fn vdfs_session_node_carries_list_fields() {
 
     // 运行态由 status 承载（机制口径，不另设 is_working 字段）：
     // 空闲 / 运行中 / 上次失败是三个**并列的状态值**，不是布尔 + 标志位
-    assert_eq!(n.status, vdfs::VDFS_STATUS_ACTIVE);
+    assert_eq!(n.status, VDFS_STATUS_ACTIVE);
     assert_eq!(
         session_node(&SessionSummary::of(&s), &SessionRuntime::working()).status,
-        vdfs::VDFS_STATUS_WORKING
+        VDFS_STATUS_WORKING
     );
     assert_eq!(
         session_node(
@@ -566,7 +567,7 @@ fn vdfs_session_node_carries_list_fields() {
             &SessionRuntime::finished(OUTCOME_FAILED, Some("boom".into()), None)
         )
         .status,
-        vdfs::VDFS_STATUS_FAILED,
+        VDFS_STATUS_FAILED,
         "以错误结束是一个独立状态：空闲但上次失败"
     );
     // 正常收尾 → 回到空闲（不是第三个「已完成」态：会话是长驻容器，不是一次性任务）
@@ -576,7 +577,7 @@ fn vdfs_session_node_carries_list_fields() {
             &SessionRuntime::finished(OUTCOME_COMPLETED, None, None)
         )
         .status,
-        vdfs::VDFS_STATUS_ACTIVE
+        VDFS_STATUS_ACTIVE
     );
 }
 

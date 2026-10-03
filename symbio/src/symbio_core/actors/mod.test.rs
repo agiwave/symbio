@@ -2147,6 +2147,7 @@ mod turn_runner_tests {
                     text: "问".into(),
                     tier: LatencyTier::Deep,
                     window_turns: None,
+                    resume: None,
                 },
                 got.clone() as Arc<dyn DeltaSink>,
             )
@@ -2183,6 +2184,7 @@ mod turn_runner_tests {
                     text: "问".into(),
                     tier: LatencyTier::Deep,
                     window_turns: None,
+                    resume: None,
                 },
                 got2.clone() as Arc<dyn DeltaSink>,
             )
@@ -2242,9 +2244,46 @@ mod tool_round_tests {
     use crate::symbio_core::store::Store;
     use crate::symbio_core::{
         check_all, CapabilityMeta, DispatchOutcome, DispatchPort, Entity, EventStore, Seq,
-        TurnInput, TurnRunner, TurnToolCallInfo, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL,
-        EVENT_USER_MESSAGE,
+        TurnInput, TurnResume, TurnRunner, TurnToolCallInfo, Verb, EVENT_ARTIFACT_ADDED,
+        EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
     };
+
+    /// 假适配器：**直接作答**（无工具调用）——续写轮的收尾轮；记录收到的 prompt。
+    struct AnsweringLlm {
+        prompts: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl AnsweringLlm {
+        fn new() -> Self {
+            Self {
+                prompts: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LlmAdapter for AnsweringLlm {
+        fn model_id(&self) -> &str {
+            "answer-mock"
+        }
+        async fn generate(&self, _tok: &FullModel, _prompt: &str) -> Result<String, AdapterError> {
+            Err(AdapterError::GenerationFailed("unused".into()))
+        }
+        async fn generate_turn(
+            &self,
+            _tok: &FullModel,
+            prompt: &str,
+            _tools: &[CapabilityMeta],
+            _sink: Arc<dyn DeltaSink>,
+        ) -> Result<LlmTurn, AdapterError> {
+            self.prompts.lock().unwrap().push(prompt.to_string());
+            Ok(LlmTurn {
+                text: "批准后已完成。".into(),
+                tool_calls: Vec::new(),
+                cost_ms: 5,
+            })
+        }
+    }
 
     /// 假适配器：首次请求回一个工具调用，之后回正文；记录每次收到的 prompt。
     struct ToolCallingLlm {
@@ -2338,6 +2377,7 @@ mod tool_round_tests {
             text: "读 a.md".into(),
             tier: LatencyTier::Deep,
             window_turns: None,
+            resume: None,
         }
     }
 
@@ -2492,6 +2532,138 @@ mod tool_round_tests {
         assert_eq!(
             snapshot[1].kind,
             crate::symbio_core::EVENT_ASSISTANT_FALLBACK
+        );
+    }
+
+    /// 续写同一轮（审批 / 问答恢复）：**不重开用户格**、收束记在**原轮**上。
+    ///
+    /// 这是批 2 的核心判据，也是 C4 的**反向用例**：等待轮留一个缺口（`unresolved_turns`
+    /// 看得见），续写把它**真正填上**。若续写另开新轮（`u-1` + `f-1`），原轮永远等不到
+    /// 收束事件，C4 会把它当**永久假缺口**——不变量随即失去判据价值。
+    #[tokio::test]
+    async fn resume_continues_same_turn_without_reopening_user_cell() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+
+        // ① 等待轮：工具报 pending ⇒ 停下、不落收束格（网格留 1 个可判出的缺口）。
+        let pending_llm = ToolCallingLlm::new();
+        let pending_dispatch = FakeDispatch {
+            pending: true,
+            rounds: Arc::new(Mutex::new(0)),
+        };
+        let first = TurnRunner
+            .run_with_tools(
+                &store,
+                &pending_llm,
+                &tok,
+                input(),
+                Arc::new(SilentDeltas),
+                &tools(),
+                Some(&pending_dispatch),
+            )
+            .await
+            .expect("等待用户不是失败");
+        assert!(first.awaits_user, "等待轮必须在结果里可见");
+        assert_eq!(
+            unresolved_turns(&store.range(Seq::new(0))).len(),
+            1,
+            "等待轮留一个可判出的缺口"
+        );
+
+        // ② 恢复：续写**同一轮**（turn 0），用户格 seq = 0（网格第一格）。
+        let answer_llm = AnsweringLlm::new();
+        let prompts = answer_llm.prompts.clone();
+        let out = TurnRunner
+            .run_with_tools(
+                &store,
+                &answer_llm,
+                &tok,
+                TurnInput {
+                    turn: 0,
+                    text: String::new(), // 续写不新开用户格，此字段不参与入格
+                    tier: LatencyTier::Deep,
+                    window_turns: None,
+                    resume: Some(TurnResume {
+                        user_seq: 0,
+                        call: TurnToolCallInfo {
+                            id: Some("tc-1".into()),
+                            wire_id: Some("w-1".into()),
+                            name: Some("vdfs_read".into()),
+                            arguments: serde_json::json!({ "path": "a.md", "approved": true }),
+                            parse_error: None,
+                        },
+                        text: "文件内容：hello（已批准）".into(),
+                    }),
+                },
+                Arc::new(SilentDeltas),
+                &tools(),
+                // 续写轮若真的再请求工具才有分发可言；本用例的收尾轮不请求工具。
+                Some(&FakeDispatch {
+                    pending: false,
+                    rounds: Arc::new(Mutex::new(0)),
+                }),
+            )
+            .await
+            .expect("续写轮必答");
+
+        assert_eq!(out.turn, 0, "续写记在原轮上");
+        assert_eq!(out.text, "批准后已完成。");
+        assert!(!out.fell_back && !out.aborted && !out.awaits_user);
+
+        let snapshot = store.range(Seq::new(0));
+        let kinds: Vec<&str> = snapshot.iter().map(|e| e.kind.as_str()).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                EVENT_USER_MESSAGE,
+                EVENT_ARTIFACT_ADDED,
+                EVENT_ARTIFACT_ADDED,
+                EVENT_ASSISTANT_FINAL
+            ],
+            "续写**不重开用户格**（否则 5 格），只补产物格与收束格：{snapshot:?}"
+        );
+        assert_eq!(
+            snapshot
+                .iter()
+                .filter(|e| e.kind == EVENT_USER_MESSAGE)
+                .count(),
+            1,
+            "同一句话在网格里只能出现一次"
+        );
+        assert_eq!(
+            snapshot[2].payload["tool"], "vdfs_read",
+            "恢复的产物格记被恢复的工具"
+        );
+        assert_eq!(snapshot[2].payload["text"], "文件内容：hello（已批准）");
+        assert_eq!(
+            snapshot[2].produced_by,
+            Some(0),
+            "溯源仍指向**原轮**用户格（I2）"
+        );
+        assert_eq!(snapshot[3].turn, 0, "收束格记在原轮号上");
+        assert_eq!(snapshot[3].payload["text"], "批准后已完成。");
+        assert!(
+            check_all(&snapshot).is_empty(),
+            "{:?}",
+            check_all(&snapshot)
+        );
+        assert!(
+            unresolved_turns(&snapshot).is_empty(),
+            "续写填上了原轮的缺口（否则 C4 会把它当永久假缺口）"
+        );
+
+        // prompt：恢复的交换进了模型看得见的地方（形状与在途工具轮同一套前缀）。
+        let seen = prompts.lock().unwrap().clone();
+        assert_eq!(seen.len(), 1, "收尾轮一次请求：{seen:?}");
+        assert!(
+            seen[0].contains("助手请求工具: vdfs_read"),
+            "恢复的工具调用要进 prompt：{}",
+            seen[0]
+        );
+        assert!(
+            seen[0].contains("工具结果(vdfs_read): 文件内容：hello（已批准）"),
+            "恢复的结果要进 prompt：{}",
+            seen[0]
         );
     }
 }

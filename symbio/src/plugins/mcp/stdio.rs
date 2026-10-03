@@ -98,6 +98,7 @@ impl McpManager {
     /// 不修改任何缓存或配置。仅用于"用户点击测试连接"时的可用性验证。
     ///
     /// 连接测试能力：供详情表单的 `test` 动作（`vdfs/action`）复用
+    // dead-code-allow R-002: cap.test_connection 的前端流程未接线（理由见上方文档），接线后摘除
     #[allow(dead_code)]
     pub async fn test_connection_stdio(
         &self,

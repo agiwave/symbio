@@ -12,7 +12,7 @@ use crate::plugin_error;
 use crate::plugin_info;
 use crate::plugin_warn;
 use crate::plugins::model::http::STREAM_IDLE_TIMEOUT;
-use crate::symbio_core::schemas::session::chat_message::{
+use crate::symbio_core::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
 use crate::symbio_core::ModelUsage;

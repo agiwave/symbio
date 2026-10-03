@@ -1,8 +1,8 @@
 //! 会话插件的配置（`<本插件目录>/PLUGIN.yml`）。
 //!
-//! ## 为什么在插件里，而不是 `symbio_core::schemas`
+//! ## 为什么在插件里，而不是 `symbio_core/schemas`
 //!
-//! 它曾经住在 `symbio_core::schemas::session::session_config`，与同目录的
+//! 它曾经住在 `symbio_core/schemas::session::session_config`，与同目录的
 //! `session_chat` / `chat_message` 并列。但两者性质不同：
 //!
 //! - **协议 schema**（那两个）是**跨插件契约**——agent / local / model 都按同一份

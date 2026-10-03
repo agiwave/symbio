@@ -4,7 +4,7 @@
 //! `context_compact` 工具元也在本模块——它只是给模型看的入口说明。
 
 use super::*;
-use crate::symbio_core::schemas::session::chat_message::{MessageContent, MessageStatus};
+use crate::symbio_core::chat_message::{MessageContent, MessageStatus};
 
 /// 压缩协议版本（P2-3）：快照 meta 记录此版本，用于从产物侧验证协议演进是否生效。
 /// 语义：v2 = L0 会话目录存档 + 三层统一取回协议 + JSON 语义摘要 + 快照指纹。

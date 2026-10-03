@@ -8,7 +8,7 @@
 
 use super::*;
 
-use crate::symbio_core::schemas::detail::DetailDefinition;
+use crate::symbio_core::DetailDefinition;
 use crate::symbio_core::{VdfsActionResult, VdfsNewType, VdfsWriteResponse, VDFS_STATUS_NONE};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -607,7 +607,7 @@ async fn missing_container_view_reports_internal_but_sections_still_work() {
 async fn ctx_with_configs() -> VdfsContext {
     use crate::providers::DefaultConfigurableVisitor;
     use crate::symbio_core::{
-        capability_entry_of, vdfs::vdfs_context, ConfigurableVisitor, PluginConfigFile, PluginDir,
+        capability_entry_of, vdfs_context, ConfigurableVisitor, PluginConfigFile, PluginDir,
         PluginSimpleRequest, CONFIGURABLE_VISITOR,
     };
 

@@ -19,12 +19,12 @@ use serde_json::json;
 use crate::plugins::model::bound_provider::BoundProvider;
 use crate::plugins::model::model_providers::ModelProviderConfig;
 use crate::plugins::model::protocols::openai_chat::OpenaiChatProtocol;
-use crate::symbio_core::adapters::{LatencyTier, LlmAdapter as _, TokenIssuer};
 use crate::symbio_core::ProviderLlmAdapter;
 use crate::symbio_core::{
     check_all, cost_ledger, fallback_rate, turnstate, Budget, Entity, Event, EventStore, Reasoner,
     Seq, Store, Verb, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
+use crate::symbio_core::{LatencyTier, LlmAdapter as _, TokenIssuer};
 
 /// 一次性 OpenAI-SSE mock：收一个请求、回一段流、把收到的原始请求存档。
 fn spawn_mock(response: &'static str) -> (u16, Arc<Mutex<String>>) {
@@ -114,7 +114,7 @@ fn mock_provider(port: u16) -> Arc<BoundProvider> {
 /// 聚合全文一致；generate()（委托静默口）与流式路径同源（同一执行路径）。
 #[tokio::test]
 async fn provider_adapter_streams_text_deltas_through_bridge() {
-    use crate::symbio_core::adapters::DeltaSink;
+    use crate::symbio_core::DeltaSink;
     use std::sync::Mutex;
 
     struct Collecting(Mutex<Vec<String>>);
@@ -355,7 +355,7 @@ async fn real_provider_full_calibration() {
 
     // 流式计数口：真实 SSE 逐片过桥的证明（帧数 > 轮数 = 流式成立）。
     struct Counting(std::sync::Mutex<u64>);
-    impl crate::symbio_core::adapters::DeltaSink for Counting {
+    impl crate::symbio_core::DeltaSink for Counting {
         fn on_delta(&self, _: &str) {
             *self.0.lock().unwrap() += 1;
         }
@@ -374,8 +374,9 @@ async fn real_provider_full_calibration() {
                     text: "用一句话说明什么是事件溯源。".into(),
                     tier: LatencyTier::Deep,
                     window_turns: None,
+                    resume: None,
                 },
-                delta_frames.clone() as Arc<dyn crate::symbio_core::adapters::DeltaSink>,
+                delta_frames.clone() as Arc<dyn crate::symbio_core::DeltaSink>,
             )
             .await
             .unwrap_or_else(|e| panic!("第 {i} 轮落格失败：{e:?}"));

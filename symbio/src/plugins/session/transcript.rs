@@ -41,7 +41,7 @@
 //! 不需要在信封上加概念。
 
 use super::plugin::message_path;
-use crate::symbio_core::schemas::session::chat_message as cm;
+use crate::symbio_core::chat_message as cm;
 use crate::symbio_core::{VdfsChange, VdfsChangeSubscriptions};
 use crate::{plugin_debug, plugin_error, plugin_info};
 use indexmap::IndexMap;

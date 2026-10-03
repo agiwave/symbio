@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 死代码审计（前端 TS/Vue 判定 + Rust 声明级判定 R-001）
+ * 死代码审计（前端 TS/Vue 判定 + Rust 声明级判定 R-001 / 承认标记判定 R-002）
  *
  * 四层判定，尽量零误报：
  *  L1 import 依赖图：从入口（index.html→main.ts、测试、.d.ts、构建配置）可达性。
@@ -10,18 +10,25 @@
  *     一次都没被提及。判据是「这个名字在整仓只出现一次（就是声明那行）」——
  *     `dead_code` lint 对 `pub` 项结构性失明（`symbio_core/mod.rs` 一句
  *     `pub use plugin::*` 就能让整批函数被当成对外 API），故需要这条补网。
+ *  L5 Rust 侧 **R-002（判定型）**：`#[allow(dead_code)]` 承认标记必须带
+ *     `// dead-code-allow R-002: <非空理由>`，且数量走棘轮只许降——
+ *     收窄根导出（`core-export-audit` C-003）之后，只被测试引用的冻结契约名
+ *     会被 `dead_code` 逐个点名，留下的每一条都必须有「为什么留 / 什么时候摘」。
  *
  * 承认通道：确需保留但无 Rust 消费方的（消费方在前端 / 闭集成员），在声明行或
  * 紧邻其上一行写 `// dead-code-allow R-001: <理由>`；**理由不可为空**（空理由
  * 视为未承认，与 `grep-audit` / `plugin-entry-audit` 的豁免同一约定）。
+ * R-002 的承认写在 `#[allow(dead_code)]` 同行或其上 3 行，同一句话、同一个判空。
  *
  * 用法： node scripts/dead-code-audit.mjs             # 死代码清单（明细只印死代码）
  *        node scripts/dead-code-audit.mjs --verbose   # 附带「未被引用的导出」明细
- * 退出码：1 = 有「确认死代码」（前端文件级）或「未承认的 R-001」；
- *         0 = 通过。两者都在 gate.mjs 的 docs 阶段（判定型）。
+ * 退出码：1 = 有「确认死代码」（前端文件级）、「未承认的 R-001」或「R-002 违规」；
+ *         0 = 通过。三者都在 gate.mjs 的 docs 阶段（判定型）。
  *
  * 已知边界：R-001 只抓「整仓一次都没被提过」这一最低风险形态。`pub` 项被**弱引用**
  * （只在文档 / 注释里被提到，或在运行期被拼名字调用）一律视为存活——宁可漏报。
+ * R-002 同理只认**字面属性**：`cfg_attr` 里拼出来的 `allow`、宏内部生成的属性
+ * （`define_string_key!` 靠调用点透传臂转发）都按调用点那行算。
  */
 import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs'
 import { join, dirname, resolve, relative, extname, basename } from 'node:path'
@@ -327,6 +334,58 @@ if (rustWaived.length) {
   for (const line of rustWaived) console.log(`    ${line}`)
 }
 
+// ── R-002：`dead_code` 承认标记必须带理由，且数量只许降（判定型）──
+//
+// 起因：`core-export-audit` C-003 把「名字没跨出 core」的符号从根出口收窄之后，
+// `dead_code` lint 会把**只被测试引用的冻结契约名**逐个点名——那正是规则 2 的应有
+// 之义（无消费者的东西不该占着根出口），但这些契约名按 plan/11、plan/12 要留到接线
+// 那天。于是就地承认。承认若既无理由又无数量约束，半年后就是 138 个没人说得清的
+// `allow`，死码审计等于自废。故：
+//   ① 每个 `#[allow(dead_code)]`（含模块级 `#![allow(dead_code)]`）必须在**同一行**
+//      或其上 3 行内写 `// dead-code-allow R-002: <非空理由>`——与 R-001 同一判空；
+//   ② 数量走棘轮：只许降（接线一批、摘一批），`grep -c` 即可复核，不靠自觉。
+const R002_BASELINE = process.env.DEAD_CODE_R002_BASELINE
+  ? Number(process.env.DEAD_CODE_R002_BASELINE)
+  : 137
+
+/**
+ * R-002 的承认理由：复用 R-001 的回看（同行 + 上 3 行、理由非空）。
+ * 不校验规则号——`#[allow(dead_code)]` 与它所压制的那条 `pub` 声明常是同一件事
+ * （`route.rs` 的路由常量同时挂 R-001 与 R-002），两个通道必须说同一句话。
+ */
+function r002Reason(lines, i) {
+  return waiverReason(lines, i)
+}
+
+const r002NoReason = []
+let r002Marks = 0
+for (const [file, code] of rustCorpus) {
+  const lines = code.split(/\r?\n/)
+  for (let i = 0; i < lines.length; i++) {
+    // 只认**代码位置**的属性：以 `//` 开头的行是文档/注释里举例的写法
+    // （`plugin/route.rs` 的文档段就提了一句 `#[allow(dead_code)]`），
+    // 照单全收会凭空多出一条「没有理由的标记」。
+    if (lines[i].trimStart().startsWith('//')) continue
+    if (!/#!?\[allow\(dead_code\)\]/.test(lines[i].split('//')[0])) continue
+    r002Marks++
+    if (!r002Reason(lines, i)) r002NoReason.push(`${repoRel(file)}:${i + 1}`)
+  }
+}
+
+const r002OverRatchet = r002Marks > R002_BASELINE
+console.log(`\n【R-002】死码承认标记检查（判定型）`)
+console.log(`  ${r002Marks} 处 \`[allow(dead_code)]\` · 棘轮 ${r002Marks}/${R002_BASELINE}`)
+if (r002NoReason.length) {
+  console.log(`  ✗ ${r002NoReason.length} 处承认标记没有理由：`)
+  for (const loc of r002NoReason) console.log(`    ${loc}`)
+  console.log('    ↳ 标记同行或其上 3 行内写 `// dead-code-allow R-002: 理由`（R-001 的理由同样认，理由必填）')
+}
+if (r002OverRatchet) {
+  console.log(`  ✗ 承认标记 ${r002Marks} > 基线 ${R002_BASELINE} —— 只许降：`)
+  console.log('    ↳ 接线一批就摘一批；新出现的死码要么删掉、要么接上，不许再加 allow')
+}
+if (!r002NoReason.length && !r002OverRatchet) console.log('  ✓ 标记均带理由，数量未超基线')
+
 const lines = dead.reduce((n, f) => n + lineCount(f), 0)
 console.log(`\n合计可移除：${dead.length} 文件 / ${lines} 行`)
-process.exit(dead.length || rustUnused.length ? 1 : 0)
+process.exit(dead.length || rustUnused.length || r002NoReason.length || r002OverRatchet ? 1 : 0)

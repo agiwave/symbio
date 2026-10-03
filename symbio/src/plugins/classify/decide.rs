@@ -24,10 +24,8 @@
 
 use std::sync::Arc;
 
-use crate::symbio_core::schemas::dialog::Verdict;
-use crate::symbio_core::schemas::session::chat_message::{
-    ChatMessage, MessageContent, MessageRole,
-};
+use crate::symbio_core::chat_message::{ChatMessage, MessageContent, MessageRole};
+use crate::symbio_core::Verdict;
 use crate::symbio_core::{
     llm_short_id, CapabilityVisitor, ExecAbortSignal, ExecEnv, ExecEventSink, ModelProvider,
     PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_VISITOR,

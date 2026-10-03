@@ -39,12 +39,16 @@ pub const VDFS_KIND_FILE: &str = "file";
 /// 定义驱动表单（呈现描述放 `node.schema`）
 pub const VDFS_EXT_FORM: &str = "form";
 /// 纯文本编辑器
+#[allow(dead_code)] // dead-code-allow R-002: vdfs 词表常量，消费方接线后摘除
 pub const VDFS_EXT_TEXT: &str = "text";
 /// JSON 编辑器
+#[allow(dead_code)] // dead-code-allow R-002: vdfs 词表常量，消费方接线后摘除
 pub const VDFS_EXT_JSON: &str = "json";
 /// Markdown 编辑器
+#[allow(dead_code)] // dead-code-allow R-002: vdfs 词表常量，消费方接线后摘除
 pub const VDFS_EXT_MARKDOWN: &str = "md";
 /// 文件树（目录节点的默认呈现）
+#[allow(dead_code)] // dead-code-allow R-002: vdfs 词表常量，消费方接线后摘除
 pub const VDFS_EXT_DIR: &str = "dir";
 /// 整包（zip）——**导入**用扩展名：内容是一整个资源目录的压缩包
 pub const VDFS_EXT_ZIP: &str = "zip";

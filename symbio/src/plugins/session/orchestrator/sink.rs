@@ -26,7 +26,7 @@
 //!    消费循环因此可以退化为纯生命周期管理（见 [`super::consume`]）。
 
 use super::*;
-use crate::symbio_core::schemas::session::chat_message::ChatMessage;
+use crate::symbio_core::chat_message::ChatMessage;
 use crate::symbio_core::ExecTranscriptWriter;
 use async_trait::async_trait;
 

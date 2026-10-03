@@ -6,9 +6,9 @@
 //! 心跳任务配置存储于 `Session.metadata.heartbeat`，由前端"会话设置"写入。
 
 use super::plugin::SessionPlugin;
+use crate::symbio_core::chat_message as cm;
 use crate::symbio_core::clock_now_ms;
-use crate::symbio_core::schemas::session::chat_message as cm;
-use crate::symbio_core::schemas::session::session_chat;
+use crate::symbio_core::session_chat;
 use crate::symbio_core::{PluginInvokeRequestExt, PluginSimpleRequest, SESSION_ID};
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;

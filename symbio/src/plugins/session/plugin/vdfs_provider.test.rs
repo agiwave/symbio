@@ -3,6 +3,10 @@
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）：测试跟着被测试的实现走。
 
 use super::*;
+use crate::symbio_core::{
+    VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsRequest, VDFS_ACTION_TRUNCATE,
+    VDFS_EXT_FORM, VDFS_STATUS_ACTIVE,
+};
 // dispatch 是 VdfsProvider 的唯一入口（测试经文件尾的 LIST/STAT/… 请求常量调用）
 use crate::symbio_core::VdfsProvider;
 // 地址构造辅助：只被本测试用，故不经 `plugin.rs` 的共享面转出（那里会让
@@ -22,8 +26,8 @@ fn fixture() -> (tempfile::TempDir, SessionPlugin) {
 
 // ==================== VDFS provider ====================
 
-fn vctx() -> vdfs::VdfsContext {
-    vdfs::VdfsContext::empty()
+fn vctx() -> VdfsContext {
+    VdfsContext::empty()
 }
 
 /// provider 自描述：**不含挂载名**——挂载名由使用方在注册时选定
@@ -107,11 +111,7 @@ async fn vdfs_stat_session_is_dir_view_with_list_shape() {
     assert_eq!(n.status, listed.status);
     assert_eq!(n.ext, listed.ext);
     assert_eq!(n.updated_at, listed.updated_at);
-    assert_eq!(
-        n.status,
-        vdfs::VDFS_STATUS_ACTIVE,
-        "空闲是显式状态值，不是空串"
-    );
+    assert_eq!(n.status, VDFS_STATUS_ACTIVE, "空闲是显式状态值，不是空串");
 }
 
 /// 实时：`watch` 登记的 sink 在 `vdfs_notify_change` 时**同步**收到变更；
@@ -119,15 +119,15 @@ async fn vdfs_stat_session_is_dir_view_with_list_shape() {
 #[tokio::test]
 async fn vdfs_watch_forwards_session_changes() {
     let (_dir, p) = fixture();
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<vdfs::VdfsChange>();
-    let sink: vdfs::VdfsChangeSink = Arc::new(move |c| {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<VdfsChange>();
+    let sink: VdfsChangeSink = Arc::new(move |c| {
         let _ = tx.send(c);
     });
 
-    p.dispatch(&vctx(), "", vdfs::VdfsRequest::Watch { sink: sink.clone() })
+    p.dispatch(&vctx(), "", VdfsRequest::Watch { sink: sink.clone() })
         .await
         .unwrap();
-    p.dispatch(&vctx(), "", vdfs::VdfsRequest::Watch { sink })
+    p.dispatch(&vctx(), "", VdfsRequest::Watch { sink })
         .await
         .unwrap();
     assert_eq!(p.change_subs.subscriber_count(), 2);
@@ -178,7 +178,7 @@ async fn config_document_is_reachable_but_not_a_session_list_item() {
         .into_stat()
         .unwrap();
     assert_eq!(node.name, PLUGIN_FILE, "地址就是插件目录里的真实文件名");
-    assert_eq!(node.ext.as_deref(), Some(vdfs::VDFS_EXT_FORM));
+    assert_eq!(node.ext.as_deref(), Some(VDFS_EXT_FORM));
     assert_eq!(node.access.flags(), "rw");
     assert!(node.schema.is_some(), "定义随节点下发");
 
@@ -231,8 +231,8 @@ async fn session_list_carries_the_option_definition() {
         .dispatch(
             &vctx(),
             "",
-            vdfs::VdfsRequest::Write {
-                content: vdfs::VdfsContent::text("").with_create(),
+            VdfsRequest::Write {
+                content: VdfsContent::text("").with_create(),
             },
         )
         .await
@@ -271,8 +271,8 @@ async fn session_list_carries_the_option_definition() {
     p.dispatch(
         &vctx(),
         &id,
-        vdfs::VdfsRequest::Write {
-            content: vdfs::VdfsContent::text(r#"{"metadata":{"risk_level":"high"}}"#),
+        VdfsRequest::Write {
+            content: VdfsContent::text(r#"{"metadata":{"risk_level":"high"}}"#),
         },
     )
     .await
@@ -314,8 +314,8 @@ async fn named_create_uses_the_address_as_the_session_id() {
         .dispatch(
             &vctx(),
             "cli-abc",
-            vdfs::VdfsRequest::Write {
-                content: vdfs::VdfsContent::text(r#"{"metadata":{"workdir":"/w"}}"#).with_create(),
+            VdfsRequest::Write {
+                content: VdfsContent::text(r#"{"metadata":{"workdir":"/w"}}"#).with_create(),
             },
         )
         .await
@@ -349,11 +349,9 @@ async fn named_create_on_an_existing_session_merges_instead_of_duplicating() {
         .dispatch(
             &vctx(),
             "keep",
-            vdfs::VdfsRequest::Write {
-                content: vdfs::VdfsContent::text(
-                    r#"{"metadata":{"workdir":"/old","agent_id":"a"}}"#,
-                )
-                .with_create(),
+            VdfsRequest::Write {
+                content: VdfsContent::text(r#"{"metadata":{"workdir":"/old","agent_id":"a"}}"#)
+                    .with_create(),
             },
         )
         .await
@@ -366,9 +364,8 @@ async fn named_create_on_an_existing_session_merges_instead_of_duplicating() {
         .dispatch(
             &vctx(),
             "keep",
-            vdfs::VdfsRequest::Write {
-                content: vdfs::VdfsContent::text(r#"{"metadata":{"workdir":"/new"}}"#)
-                    .with_create(),
+            VdfsRequest::Write {
+                content: VdfsContent::text(r#"{"metadata":{"workdir":"/new"}}"#).with_create(),
             },
         )
         .await
@@ -411,11 +408,9 @@ async fn write_merges_metadata_shallowly() {
     p.dispatch(
         &vctx(),
         "s1",
-        vdfs::VdfsRequest::Write {
-            content: vdfs::VdfsContent::text(
-                r#"{"metadata":{"workdir":"/old","agent_id":"keep-me"}}"#,
-            )
-            .with_create(),
+        VdfsRequest::Write {
+            content: VdfsContent::text(r#"{"metadata":{"workdir":"/old","agent_id":"keep-me"}}"#)
+                .with_create(),
         },
     )
     .await
@@ -425,8 +420,8 @@ async fn write_merges_metadata_shallowly() {
     p.dispatch(
         &vctx(),
         "s1",
-        vdfs::VdfsRequest::Write {
-            content: vdfs::VdfsContent::text(r#"{"metadata":{"workdir":"/new"},"title":"改名"}"#),
+        VdfsRequest::Write {
+            content: VdfsContent::text(r#"{"metadata":{"workdir":"/new"},"title":"改名"}"#),
         },
     )
     .await
@@ -450,16 +445,12 @@ async fn write_merges_metadata_shallowly() {
 async fn config_write_validates_before_applying() {
     let (_dir, p) = fixture();
     let before = p.config.read().await.max_messages;
-    let bad = vdfs::VdfsContent::text(r#"{"max_messages": 1}"#);
+    let bad = VdfsContent::text(r#"{"max_messages": 1}"#);
     match p
-        .dispatch(
-            &vctx(),
-            PLUGIN_FILE,
-            vdfs::VdfsRequest::Write { content: bad },
-        )
+        .dispatch(&vctx(), PLUGIN_FILE, VdfsRequest::Write { content: bad })
         .await
     {
-        Err(vdfs::VdfsError::Invalid(v)) => assert_eq!(v.fields[0].field, "max_messages"),
+        Err(VdfsError::Invalid(v)) => assert_eq!(v.fields[0].field, "max_messages"),
         other => panic!("应为字段级校验错误，实得 {other:?}"),
     }
     assert_eq!(p.config.read().await.max_messages, before);
@@ -528,8 +519,8 @@ async fn memory_is_a_read_write_file_inside_the_session() {
         .dispatch(
             &vctx(),
             &path,
-            vdfs::VdfsRequest::Write {
-                content: vdfs::VdfsContent::text("本会话约定：所有时间用 UTC。"),
+            VdfsRequest::Write {
+                content: VdfsContent::text("本会话约定：所有时间用 UTC。"),
             },
         )
         .await
@@ -551,8 +542,8 @@ async fn memory_is_a_read_write_file_inside_the_session() {
         .dispatch(
             &vctx(),
             &path,
-            vdfs::VdfsRequest::Write {
-                content: vdfs::VdfsContent::text("改主意了"),
+            VdfsRequest::Write {
+                content: VdfsContent::text("改主意了"),
             },
         )
         .await
@@ -565,7 +556,7 @@ async fn memory_is_a_read_write_file_inside_the_session() {
     assert!(
         matches!(
             p.dispatch(&vctx(), &path, DEL).await,
-            Err(vdfs::VdfsError::Forbidden(_))
+            Err(VdfsError::Forbidden(_))
         ),
         "删除即丢失本会话的长期约定，必须明确拒绝"
     );
@@ -598,8 +589,8 @@ async fn memory_write_respects_the_configured_gate() {
         p.dispatch(
             &vctx(),
             &path,
-            vdfs::VdfsRequest::Write {
-                content: vdfs::VdfsContent::text("12345")
+            VdfsRequest::Write {
+                content: VdfsContent::text("12345")
             }
         )
         .await
@@ -635,8 +626,8 @@ async fn memory_of_unknown_session_is_not_found() {
         .dispatch(
             &vctx(),
             &path,
-            vdfs::VdfsRequest::Write {
-                content: vdfs::VdfsContent::text("x")
+            VdfsRequest::Write {
+                content: VdfsContent::text("x")
             }
         )
         .await
@@ -654,19 +645,19 @@ async fn memory_write_notifies_subscribers() {
         crate::plugins::session::memory::SESSION_MEMORY_FILE
     );
 
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<vdfs::VdfsChange>();
-    let sink: vdfs::VdfsChangeSink = Arc::new(move |c| {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<VdfsChange>();
+    let sink: VdfsChangeSink = Arc::new(move |c| {
         let _ = tx.send(c);
     });
-    p.dispatch(&vctx(), &id, vdfs::VdfsRequest::Watch { sink })
+    p.dispatch(&vctx(), &id, VdfsRequest::Watch { sink })
         .await
         .unwrap();
 
     p.dispatch(
         &vctx(),
         &path,
-        vdfs::VdfsRequest::Write {
-            content: vdfs::VdfsContent::text("记一笔"),
+        VdfsRequest::Write {
+            content: VdfsContent::text("记一笔"),
         },
     )
     .await
@@ -698,12 +689,12 @@ async fn memory_write_notifies_subscribers() {
 #[tokio::test]
 async fn new_session_id_is_a_short_guid() {
     let (_dir, p) = fixture();
-    let content = vdfs::VdfsContent {
+    let content = VdfsContent {
         create: true,
-        ..vdfs::VdfsContent::text("{}")
+        ..VdfsContent::text("{}")
     };
     let r = p
-        .dispatch(&vctx(), "", vdfs::VdfsRequest::Write { content })
+        .dispatch(&vctx(), "", VdfsRequest::Write { content })
         .await
         .unwrap()
         .into_write()
@@ -735,10 +726,10 @@ async fn new_session_ids_are_distinct() {
             .dispatch(
                 &vctx(),
                 "",
-                vdfs::VdfsRequest::Write {
-                    content: vdfs::VdfsContent {
+                VdfsRequest::Write {
+                    content: VdfsContent {
                         create: true,
-                        ..vdfs::VdfsContent::text("{}")
+                        ..VdfsContent::text("{}")
                     },
                 },
             )
@@ -836,8 +827,8 @@ async fn truncate_removes_the_target_and_everything_after() {
         .dispatch(
             &vctx(),
             &message_path(&id, "m1"),
-            vdfs::VdfsRequest::Action {
-                action: vdfs::VDFS_ACTION_TRUNCATE.to_string(),
+            VdfsRequest::Action {
+                action: VDFS_ACTION_TRUNCATE.to_string(),
                 payload: None,
             },
         )
@@ -888,8 +879,8 @@ async fn truncate_of_missing_target_changes_nothing() {
         .dispatch(
             &vctx(),
             &message_path(&id, "nope"),
-            vdfs::VdfsRequest::Action {
-                action: vdfs::VDFS_ACTION_TRUNCATE.to_string(),
+            VdfsRequest::Action {
+                action: VDFS_ACTION_TRUNCATE.to_string(),
                 payload: None,
             },
         )
@@ -918,20 +909,20 @@ async fn unknown_or_misplaced_action_is_not_implemented() {
         // 动作标识不认识
         (message_path(&id, "m0"), "explode"),
         // 动作对、地址不对：`truncate` 落在列表目录上
-        (message_dir_path(&id), vdfs::VDFS_ACTION_TRUNCATE),
+        (message_dir_path(&id), VDFS_ACTION_TRUNCATE),
     ] {
         assert!(
             matches!(
                 p.dispatch(
                     &vctx(),
                     &path,
-                    vdfs::VdfsRequest::Action {
+                    VdfsRequest::Action {
                         action: action.to_string(),
                         payload: None
                     }
                 )
                 .await,
-                Err(vdfs::VdfsError::NotImplemented)
+                Err(VdfsError::NotImplemented)
             ),
             "{path} + {action} 应报 NotImplemented"
         );
@@ -945,11 +936,11 @@ async fn unknown_or_misplaced_action_is_not_implemented() {
 
 // ==================== dispatch 请求形态（测试辅助） ====================
 
-const LIST: vdfs::VdfsRequest = vdfs::VdfsRequest::List {
+const LIST: VdfsRequest = VdfsRequest::List {
     limit: None,
     before: None,
 };
-const STAT: vdfs::VdfsRequest = vdfs::VdfsRequest::Stat;
-const READ: vdfs::VdfsRequest = vdfs::VdfsRequest::Read;
-const DEL: vdfs::VdfsRequest = vdfs::VdfsRequest::Delete { recursive: false };
-const UNWATCH: vdfs::VdfsRequest = vdfs::VdfsRequest::Unwatch;
+const STAT: VdfsRequest = VdfsRequest::Stat;
+const READ: VdfsRequest = VdfsRequest::Read;
+const DEL: VdfsRequest = VdfsRequest::Delete { recursive: false };
+const UNWATCH: VdfsRequest = VdfsRequest::Unwatch;

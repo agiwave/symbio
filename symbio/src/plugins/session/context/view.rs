@@ -4,7 +4,7 @@
 //! 水位提醒，按固定顺序执行。视图每轮从存储重建，四步天然幂等。
 
 use super::*;
-use crate::symbio_core::schemas::session::chat_message::{MessageContent, MessageStatus};
+use crate::symbio_core::chat_message::{MessageContent, MessageStatus};
 
 /// 轮次淡化（请求视图级）：当对话轮次过多时，把较早的工具结果（`role=Tool`、`msg_type=Text`）
 /// 做 head/tail 摘要，保留最近 `keep_recent_turns` 个 user turn 起的原文，以及**全部**

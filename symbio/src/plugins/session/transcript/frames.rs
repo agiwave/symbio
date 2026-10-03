@@ -19,7 +19,7 @@
 //! [`llm_emit_removed`] 就是这样调 [`llm_removed_frame`] 的）。
 //! 插件之间同样禁止互引（`plugin-entry-audit` E-009）——本插件之外没人能引用本文件。
 
-use crate::symbio_core::schemas::session::chat_message::{ChatMessage, MessageStatus};
+use crate::symbio_core::chat_message::{ChatMessage, MessageStatus};
 use crate::symbio_core::{llm_removed_frame, ExecEventSink};
 
 /// 发送一帧**状态**：身份 + 状态 + 元数据 + 错误，**不带正文**。

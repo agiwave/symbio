@@ -3,9 +3,10 @@
 
 use super::super::fallback::fallback_rate;
 use super::slo_report;
+use crate::symbio_core::projection::slo::TierLatency;
 use crate::symbio_core::{
-    cost_ledger, Budget, Entity, Event, EventStore, Seq, Store, TierLatency, Verb,
-    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+    cost_ledger, Budget, Entity, Event, EventStore, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK,
+    EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 
 fn user_msg(id: &str, turn: u64, tier: &str) -> Event {

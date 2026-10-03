@@ -39,12 +39,12 @@
 //! 工具），随后同 4-5。父子关系始终由子会话存储元数据承载，无进程内状态。
 
 use super::store::AgentDirStore;
-use crate::symbio_core::schemas::session::chat_message::{message_of_node, SEG_MESSAGES};
-use crate::symbio_core::schemas::session::chat_message::{
+use crate::symbio_core::chat_message::{message_of_node, SEG_MESSAGES};
+use crate::symbio_core::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType, ResumeAction,
     ResumeRequest,
 };
-use crate::symbio_core::schemas::session::session_chat;
+use crate::symbio_core::session_chat;
 use crate::symbio_core::{event_bus_register_subscriber, event_bus_unregister_subscriber};
 use crate::symbio_core::{
     vdfs_change_of, VdfsContent, VdfsNode, VdfsProvider, VdfsRequest, VDFS_STATUS_WORKING,

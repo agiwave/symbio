@@ -11,7 +11,7 @@
 //! 注册时带的 `order` 号用于**收集层**排序（`order` 相同者保持注册顺序），
 //! 不出现在产物里——`list_option_fields` 只回字段本身。
 
-use crate::symbio_core::schemas::detail::DetailField;
+use crate::symbio_core::DetailField;
 use crate::symbio_core::OptionVisitor;
 use async_trait::async_trait;
 use indexmap::IndexMap;

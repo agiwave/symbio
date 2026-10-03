@@ -12,12 +12,12 @@ use super::bound_provider::BoundProvider;
 use super::model_providers::{ModelProviderConfig, ModelProvidersConfig};
 use super::protocols::resolve_protocol_id;
 use crate::providers::{MemoryVdfs, SingleFileVdfs};
-use crate::symbio_core::schemas::detail::{DetailField, DetailOption};
 use crate::symbio_core::{
     creator_create_object, plugin_dir_from_ctx, Plugin, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
     PluginSimpleRequest, PLUGIN_ID_MODEL,
 };
+use crate::symbio_core::{DetailField, DetailOption};
 use crate::{plugin_error, plugin_info, plugin_warn};
 use async_trait::async_trait;
 use serde_json::{json, Value};

@@ -18,7 +18,7 @@
 
 use std::sync::Arc;
 
-use crate::symbio_core::schemas::session::chat_message::{ChatMessage, MessageRole, MessageType};
+use crate::symbio_core::chat_message::{ChatMessage, MessageRole, MessageType};
 use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt};
 
 mod conversation_view;

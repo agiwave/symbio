@@ -599,87 +599,12 @@ test('E-009 豁免理由为空视为未豁免', () => {
   assert.match(r.stdout, E009_HIT)
 })
 
-// ── E-010：消费方不得深引 `symbio_core::<域>::` ─────────────────────────
+// ── E-010（已迁出）─────────────────────────────────────────────────────
 //
-// 真实形态：`symbio_core/README.md` §1.4 规定「根平铺导出是唯一出口」，但这条规则
-// 此前**没有任何守卫**，于是烂到 14 处。深引的代价不是「不好看」——根导出是唯一的
-// 公开面，符号从根移除后深引点照样编译通过，公开面于是变成两套。
-const E010_HIT = /\[ERROR\]\s+E-010\s+\S+:\d/
-
-test('E-010 命中：插件里 `crate::symbio_core::<域>::…`', () => {
-  const r = audit({
-    ...CLEAN,
-    'symbio/src/plugins/mcp/caller.rs': 'use crate::symbio_core::vdfs::VdfsProvider;\n',
-  })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, E010_HIT)
-})
-
-test('E-010 命中：跨 crate 的 `symbio::symbio_core::<域>::…`（cli）', () => {
-  const r = audit({
-    ...CLEAN,
-    'cli/src/client.rs': 'use symbio::symbio_core::event_bus::EventBus;\n',
-  })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, E010_HIT)
-})
-
-test('E-010 命中：壳侧 `tauri/src-tauri` 也管（整棵插件树编译进壳）', () => {
-  const r = audit({
-    ...CLEAN,
-    'tauri/src-tauri/src/commands.rs': 'use symbio::symbio_core::plugin::Plugin;\n',
-  })
-  assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, E010_HIT)
-})
-
-test('E-010 不误报：`schemas::` 是 §1.4 明文允许的唯一深引', () => {
-  const r = audit({
-    ...CLEAN,
-    'symbio/src/plugins/mcp/caller.rs':
-      'use crate::symbio_core::schemas::session::chat_message::ChatMessage;\n',
-  })
-  assert.equal(r.status, 0, r.stdout)
-  assert.doesNotMatch(r.stdout, E010_HIT)
-})
-
-test('E-010 不误报：文档链接（注释里的深引路径）', () => {
-  const r = audit({
-    ...CLEAN,
-    'symbio/src/plugins/mcp/caller.rs':
-      '//! 见 [`VdfsProvider`](crate::symbio_core::vdfs::VdfsProvider)。\npub fn f() {}\n',
-  })
-  assert.equal(r.status, 0, r.stdout)
-  assert.doesNotMatch(r.stdout, E010_HIT)
-})
-
-test('E-010 不误报：根平铺写法（`symbio_core::<符号>`）', () => {
-  const r = audit({
-    ...CLEAN,
-    'symbio/src/plugins/mcp/caller.rs':
-      'use crate::symbio_core::{VdfsProvider, VdfsNode};\n',
-  })
-  assert.equal(r.status, 0, r.stdout)
-  assert.doesNotMatch(r.stdout, E010_HIT)
-})
-
-test('E-010 豁免：带理由的 plugin-entry-allow 不再报；空理由仍报', () => {
-  const withReason = audit({
-    ...CLEAN,
-    'symbio/src/plugins/mcp/caller.rs':
-      '// plugin-entry-allow E-010: 本文件要按子模块路径重导出\nuse crate::symbio_core::vdfs::VdfsProvider;\n',
-  })
-  assert.equal(withReason.status, 0, withReason.stdout)
-  assert.doesNotMatch(withReason.stdout, E010_HIT)
-
-  const emptyReason = audit({
-    ...CLEAN,
-    'symbio/src/plugins/mcp/caller.rs':
-      '// plugin-entry-allow E-010:\nuse crate::symbio_core::vdfs::VdfsProvider;\n',
-  })
-  assert.equal(emptyReason.status, 1, emptyReason.stdout)
-  assert.match(emptyReason.stdout, E010_HIT)
-})
+// 原「消费方不得深引 `symbio_core::<域>::`」连同它在这里的 7 条用例一起迁到了
+// `core-export-audit.test.mjs`（C-002）：深引是**内核出口**的事，判定方只留一个，
+// 覆盖面反而更全——C-002 还拦裸 `use …::symbio_core::<域>;`（本脚本的正则要求尾
+// `::`，漏了这种形态），且 `schemas::` 不再有豁免（根 `mod schemas;` 已私有化）。
 
 // ── E-011：纯配置挂载点插件不得手写 `impl VdfsProvider` ──────────────────
 //

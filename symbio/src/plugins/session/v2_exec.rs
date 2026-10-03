@@ -38,16 +38,32 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
 
-use crate::symbio_core::schemas::session::chat_message::{
+use crate::symbio_core::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
 use crate::symbio_core::{
-    llm_short_id, CapabilityMeta, DeltaSink, DispatchPort, Entity, EventWalStore, ExecAbortSignal,
-    ExecEventSink, LatencyTier, ModelProvider, Plugin, PluginError, ProviderLlmAdapter, Seq, Store,
-    TokenIssuer, TurnInput, TurnOutput, TurnRunner, Verb, EVENT_USER_MESSAGE,
+    llm_short_id, CapabilityMeta, DeltaSink, DispatchPort, Entity, Event, EventWalStore,
+    ExecAbortSignal, ExecEventSink, LatencyTier, ModelProvider, Plugin, PluginError,
+    ProviderLlmAdapter, Seq, Store, TokenIssuer, TurnInput, TurnOutput, TurnResume, TurnRunner,
+    TurnToolCallInfo, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 
 use super::chat_session::PersistentChatSession;
+
+/// 恢复产生的工具交换（审批 / 问答恢复后，由 v1 恢复路径交回）。
+///
+/// **为什么由恢复路径交回而不是 v2 自己从会话读**：恢复方（`resume.rs`）是唯一
+/// 知道「刚重跑了哪个工具、拿到什么」的地方；让 v2 去会话存储里猜「哪条是刚恢复的
+/// 结果」是启发式，恢复方直给是事实。
+#[derive(Debug, Clone)]
+pub(crate) struct ResumedTool {
+    /// 被恢复的工具名。
+    pub name: String,
+    /// 恢复时实际使用的参数（`approve` / `supply` 可能改写）。
+    pub args: serde_json::Value,
+    /// 恢复产生的结果正文。
+    pub text: String,
+}
 
 /// UI 桥的帧：首片建节点（快照），后续窄追加，收束定格。语义与 model 插件的流式帧同构。
 enum UiFrame {
@@ -191,6 +207,9 @@ pub(crate) struct V2Turn<'a> {
     pub window_turns: u64,
     /// 本轮装配进模型的工具清单（空 = 无工具轮）。
     pub tools: &'a [CapabilityMeta],
+    /// 续写锚点：`Some` ⇒ 本轮续写**已开未收束**的轮次（审批 / 问答恢复），
+    /// `None` ⇒ 新开一轮。见 [`ResumedTool`] 与 core 的 `TurnResume`。
+    pub resume: Option<ResumedTool>,
 }
 
 /// 一轮 v2 原生产物的**全部出口**。
@@ -218,6 +237,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         user_text,
         window_turns,
         tools,
+        resume,
     } = req;
     // 事实源：per-session v2 WAL（与桥同一个文件——两档共用一份网格）。
     let dir = session.session_dir().ok_or_else(|| {
@@ -225,15 +245,37 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     })?;
     let store = EventWalStore::open(dir.join("v2-events.wal"))
         .map_err(|e| PluginError::InternalError(format!("v2 WAL 打开失败：{e}")))?;
+    let snapshot = store.range(Seq::new(0));
 
-    // turn 号 = WAL 内既有 user.message 计数（与桥同一口径）。
-    let turn_no = store
-        .range(Seq::new(0))
-        .iter()
-        .filter(|e| {
-            e.entity == Entity::Turn && e.verb == Verb::Opened && e.kind == EVENT_USER_MESSAGE
-        })
-        .count() as u64;
+    // turn 号与续写锚点：
+    // - 新开轮：号 = WAL 内既有 `user.message` 计数（与桥同一口径）；
+    // - 续写轮：号 = **已开未收束**的那一轮（审批 / 问答恢复），并取它的用户格 seq
+    //   作溯源锚点——续写**不新开用户格**，收束仍记在该轮上（C4 按 turn 配对，
+    //   另开新轮会把原轮变成永久假缺口，见 core `TurnResume`）。
+    let (turn_no, resume_anchor) = match &resume {
+        None => (count_user_messages(&snapshot), None),
+        Some(r) => {
+            let (turn, user_seq) = last_open_turn(&snapshot).ok_or_else(|| {
+                PluginError::InternalError(
+                    "续写轮找不到未收束的轮次（事实源与恢复路径不一致）".into(),
+                )
+            })?;
+            (
+                turn,
+                Some(TurnResume {
+                    user_seq,
+                    call: TurnToolCallInfo {
+                        id: None,
+                        wire_id: None,
+                        name: Some(r.name.clone()),
+                        arguments: r.args.clone(),
+                        parse_error: None,
+                    },
+                    text: r.text.clone(),
+                }),
+            )
+        }
+    };
 
     // 流式桥：分帧侧（同步回调）与发射侧（异步任务）经 unbounded 通道解耦。
     // 通道在桥 drop（生成结束）后关闭，接收端自然退出。
@@ -286,6 +328,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         text: user_text.to_string(),
         tier: LatencyTier::Deep,
         window_turns: Some(window_turns),
+        resume: resume_anchor,
     };
     // 工具分发：core 只认契约（`DispatchPort`），实现是插件侧——它持插件宿主、
     // 请求上下文、转写出口与会话目录（core 认识这些即违 E-009）。
@@ -348,6 +391,42 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         },
         messages: produced,
     })
+}
+
+/// WAL 内 `user.message` 计数（新开轮的 turn 号；与桥同一口径）。
+fn count_user_messages(events: &[Event]) -> u64 {
+    events
+        .iter()
+        .filter(|e| {
+            e.entity == Entity::Turn && e.verb == Verb::Opened && e.kind == EVENT_USER_MESSAGE
+        })
+        .count() as u64
+}
+
+/// **已开未收束**的轮次（`turn × opened` 无同号收束）：返回 `(turn, 用户格 seq)`。
+///
+/// 与 core 的 `invariants::unresolved_turns`（C4）同一口径——等待用户动作的那一轮
+/// 就是它（运行器有意不落收束格，那是「还没完」的诚实缺口）。取**最后**一个：
+/// 恢复请求总是续写最近一次停顿。
+fn last_open_turn(events: &[Event]) -> Option<(u64, u64)> {
+    let mut open: Vec<(u64, u64)> = Vec::new();
+    for e in events {
+        if e.entity == Entity::Turn && e.verb == Verb::Opened && e.kind == EVENT_USER_MESSAGE {
+            if let Some(seq) = e.seq {
+                open.push((e.turn, seq.value()));
+            }
+        }
+        if e.entity == Entity::Turn
+            && e.verb == Verb::Closed
+            && matches!(
+                e.kind.as_str(),
+                EVENT_ASSISTANT_FINAL | EVENT_ASSISTANT_FALLBACK
+            )
+        {
+            open.retain(|(turn, _)| *turn != e.turn);
+        }
+    }
+    open.last().copied()
 }
 
 #[cfg(test)]

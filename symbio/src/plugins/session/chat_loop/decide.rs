@@ -26,8 +26,8 @@
 
 use std::sync::Arc;
 
-use crate::symbio_core::schemas::dialog::{DecideRequest, Verdict};
-use crate::symbio_core::schemas::session::chat_message::ChatMessage;
+use crate::symbio_core::chat_message::ChatMessage;
+use crate::symbio_core::{DecideRequest, Verdict};
 use crate::symbio_core::{
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PATH, ROUTE_CLASSIFY_DECIDE,
     SESSION_ID,

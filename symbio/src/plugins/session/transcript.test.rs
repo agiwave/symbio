@@ -11,9 +11,7 @@
 //! 把窗口顶出去；断言「正文」的用例则与窗口无关（合帧逐字等价）。
 
 use super::*;
-use crate::symbio_core::schemas::session::chat_message::{
-    MessageContent, MessageRole, MessageStatus, MessageType,
-};
+use crate::symbio_core::chat_message::{MessageContent, MessageRole, MessageStatus, MessageType};
 use std::sync::Mutex;
 
 /// 一条带正文的完整消息（`content` = 整条替换）。

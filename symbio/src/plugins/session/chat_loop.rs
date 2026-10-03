@@ -70,14 +70,11 @@ use super::model_chat;
 use crate::plugin_error;
 use crate::plugin_info;
 use crate::plugin_warn;
-use crate::symbio_core::schemas::{
-    dialog::RunSnapshot,
-    session::chat_message::{ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType},
-    HookEvent,
-};
 use crate::symbio_core::ModelFinishReason;
 use crate::symbio_core::{
-    clock_now_ms, llm_emit_message, llm_short_id, TurnOutput, TurnToolCallInfo,
+    chat_message::{ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType},
+    clock_now_ms, llm_emit_message, llm_short_id, HookEvent, RunSnapshot, TurnOutput,
+    TurnToolCallInfo,
 };
 use crate::symbio_core::{
     CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, ModelProvider, ModelUsage, Plugin,
@@ -157,6 +154,9 @@ pub async fn run_chat_loop(
     // 成功 → `Continue`：turn 循环从 session 加载含新工具结果的历史，续写 LLM
     //   （RetryTurn 也走此路径，但因为是删除整个 Failed Turn 后重新请求，等价于普通 send）。
     // 失败/reject/answer → `Done`：退出循环，留 Failed/Completed 等下次 resume。
+    // 恢复产生的工具交换（v2 原生路径续写同一轮用；v1 路径不读它）。只作用于
+    // 恢复后的**第一轮**——`take()` 一次即空，后续工具轮照常走 `DispatchPort`。
+    let mut pending_resume: Option<super::v2_exec::ResumedTool> = None;
     if let Some(tr) = req.resume.take() {
         match crate::plugins::session::resume::process_resume(
             orchestrator,
@@ -168,8 +168,9 @@ pub async fn run_chat_loop(
         )
         .await
         {
-            Ok(crate::plugins::session::resume::ResumeOutcome::Continue) => {
+            Ok(crate::plugins::session::resume::ResumeOutcome::Continue { resumed }) => {
                 // 成功：turn 循环会从 session 加载含新工具结果的历史
+                pending_resume = resumed;
             }
             Ok(crate::plugins::session::resume::ResumeOutcome::Done) => {
                 return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::ResumeDone)
@@ -475,6 +476,7 @@ pub async fn run_chat_loop(
                 user_text: &user_text,
                 window_turns: context.session.context_window(),
                 tools: &inputs.tools,
+                resume: pending_resume.take(),
             })
             .await
             {

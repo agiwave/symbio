@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub use crate::symbio_core::schemas::session::chat_message::ChatMessage;
+pub use crate::symbio_core::chat_message::ChatMessage;
 
 /// 会话列表一行摘要：**最新一条助手回复**的首行（压缩空白、限长 60 字符）。
 ///
@@ -25,7 +25,7 @@ pub fn derive_session_summary(messages: &[ChatMessage]) -> Option<String> {
         .filter(|m| {
             matches!(
                 m.role,
-                Some(crate::symbio_core::schemas::session::chat_message::MessageRole::Assistant)
+                Some(crate::symbio_core::chat_message::MessageRole::Assistant)
             )
         })
         .filter_map(|m| m.content.as_ref().map(|c| c.to_text()))
@@ -217,22 +217,18 @@ pub(crate) fn derive_session_title(messages: &[ChatMessage]) -> Option<String> {
     for m in messages.iter().rev() {
         if !matches!(
             m.role,
-            Some(crate::symbio_core::schemas::session::chat_message::MessageRole::User)
+            Some(crate::symbio_core::chat_message::MessageRole::User)
         ) {
             continue;
         }
         let text = match &m.content {
-            Some(crate::symbio_core::schemas::session::chat_message::MessageContent::Text(s)) => {
-                s.clone()
-            }
-            Some(crate::symbio_core::schemas::session::chat_message::MessageContent::Parts(
-                parts,
-            )) => parts
+            Some(crate::symbio_core::chat_message::MessageContent::Text(s)) => s.clone(),
+            Some(crate::symbio_core::chat_message::MessageContent::Parts(parts)) => parts
                 .iter()
                 .filter_map(|p| match p {
-                    crate::symbio_core::schemas::session::chat_message::ContentPart::Text {
-                        text,
-                    } => Some(text.clone()),
+                    crate::symbio_core::chat_message::ContentPart::Text { text } => {
+                        Some(text.clone())
+                    }
                     _ => None,
                 })
                 .collect::<Vec<_>>()

@@ -1,9 +1,10 @@
 /**
  * core-surface — `symbio_core` **公开面**的枚举（共享模块，不直接执行）
  *
- * 被两个审计脚本使用：
+ * 被三个审计脚本使用：
  *   - `core-surface-audit.mjs`（**报告型**）：数每个符号的消费方数量（ADR-023 判据）
  *   - `core-naming-audit.mjs`（**判定型**）：检查每个符号的前缀是否落在所属域登记的前缀里
+ *   - `core-export-audit.mjs`（**判定型**）：判「根显式出口」与「≥2 个模块消费」
  *
  * 两者必须对「公开面是什么」给出**同一份**答案。各写一份解析必然各自演化，最后变成
  * 两套口径——这与本项目 `schema-audit` 曾出现的「报告型与判定型判据不一致」是同一类
@@ -195,4 +196,119 @@ export function collectCoreSurface(root) {
   }
 
   return { coreRel, coreDir, domains, symbols, modules }
+}
+
+// ==================== 消费方计数（报告型与判定型共用） ====================
+//
+// 从 `core-surface-audit.mjs` 提上来：`core-export-audit.mjs`（判定型）要判
+// 「≥2 个模块消费」，判据必须与报告型**同一份**，否则又是「报告说 A、判定说 B」。
+// 口径全文见文件头，此处照搬原实现，不动语义。
+
+/** 跨 crate 消费方：整个 crate 算一个单位（它们是独立 crate，与插件模块不可比） */
+export const CROSS_CRATE = [
+  { rel: 'cli/src', label: 'cli' },
+  { rel: 'tauri/src-tauri/src', label: 'tauri-shell' },
+]
+
+/**
+ * 文件 → 消费方单位。**永远返回一个单位，绝不返回 null**（口径 4）。
+ *
+ * 返回 `null` 会让调用方 `continue` 跳过该文件，于是定义在那里的符号被算成
+ * 「0 个消费方」——`PluginErrorCode` / `PluginIdentity` 一族就这样被假报过。
+ */
+export function unitOf(rel) {
+  const norm = rel.split(path.sep).join('/')
+  const m = norm.match(/^symbio\/src\/plugins\/([^/]+)\//)
+  if (m) return `plugins/${m[1]}`
+  const m2 = norm.match(/^symbio\/src\/providers\/([^/]+)\//)
+  if (m2) return `providers/${m2[1]}`
+  if (/^symbio\/src\/plugins\/[^/]+$/.test(norm)) return 'plugins/(registry)'
+  if (norm.startsWith('symbio/src/')) return 'symbio/(crate root)'
+  for (const c of CROSS_CRATE) {
+    if (norm.startsWith(c.rel)) return c.label
+  }
+  return null
+}
+
+/**
+ * 自引用：插件 id 常量（`PLUGIN_ID_<X>`）与嵌入服务 id（`EMBEDDING_<X>`）被
+ * **同名插件 / provider** 使用。这是**正常**的——常量就是它自己的名字，不该算
+ * 「下放候选」。
+ */
+export function isSelfReference({ name, units }) {
+  const m = name.match(/^(?:PLUGIN_ID|EMBEDDING)_([A-Z]+)$/)
+  if (!m || units.length !== 1) return false
+  const slug = m[1].toLowerCase()
+  return units[0] === `plugins/${slug}` || units[0] === `providers/${slug}`
+}
+
+/**
+ * core 内 `macro_rules!` 宏体引用到的公开符号（`宏名 → Set<符号>`）。
+ *
+ * **为什么必须认这层**：宏体在 core 内书写，却在 core **外**的调用点展开——
+ * `plugin_error!` 之类的名字只落在 core 的宏定义文件里，按文本找消费方永远是 0。
+ * 不认这层，这些符号会被判成「0 消费方 → 收窄根导出」，然后宏体的根路径
+ * `$crate::symbio_core::<符号>` 在插件调用点当场 E0603（`mod` 是私有的）。
+ * 判定型审计与报告型**共用本口径**，见文件头。
+ */
+export function collectMacroBodies(root, coreRel, symbols) {
+  const names = [...symbols.keys()]
+  const macros = new Map()
+  for (const file of walk(path.join(root, coreRel))) {
+    if (!file.endsWith('.rs')) continue
+    const src = stripComments(fs.readFileSync(file, 'utf8'))
+    for (const m of src.matchAll(/macro_rules!\s*([A-Za-z_]\w*)\s*\{/g)) {
+      let depth = 1
+      let j = m.index + m[0].length
+      for (; j < src.length && depth > 0; j++) {
+        if (src[j] === '{') depth++
+        else if (src[j] === '}') depth--
+      }
+      const body = src.slice(m.index + m[0].length, j - 1)
+      const hit = names.filter((n) => new RegExp(`\\b${n}\\b`).test(body))
+      if (!hit.length) continue
+      if (!macros.has(m[1])) macros.set(m[1], new Set())
+      for (const n of hit) macros.get(m[1]).add(n)
+    }
+  }
+  return macros
+}
+
+/**
+ * 数每个公开符号的消费方单位（`Map<符号, Set<单位>>`）。
+ *
+ * - core 自身不算消费方（口径：公开面是给 core **外**用的）；
+ * - 一个文件都不能跳过（口径 4）：`symbio/src/` 直属文件也算；
+ * - 宏调用点算消费方（见 `collectMacroBodies`）。
+ */
+export function collectConsumers(root, symbols, coreRel = 'symbio/src/symbio_core') {
+  const allNames = [...symbols.keys()]
+  const macros = collectMacroBodies(root, coreRel, symbols)
+  const consumers = new Map()
+  const scanRoots = ['symbio/src', 'cli/src', 'tauri/src-tauri/src'].map((r) => path.join(root, r))
+  for (const scanRoot of scanRoots) {
+    for (const file of walk(scanRoot)) {
+      if (!file.endsWith('.rs')) continue
+      const rel = path.relative(root, file)
+      if (rel.split(path.sep).join('/').startsWith(coreRel + '/')) continue // core 自身不算消费方
+      const unit = unitOf(rel)
+      if (!unit) continue
+      const src = stripComments(fs.readFileSync(file, 'utf8'))
+      const add = (name) => {
+        if (!consumers.has(name)) consumers.set(name, new Set())
+        consumers.get(name).add(unit)
+      }
+      for (const name of allNames) {
+        if (!new RegExp(`\\b${name}\\b`).test(src)) continue
+        add(name)
+      }
+      // 宏调用点：`plugin_error!(…)` 在这里展开 ⇒ 这里是真消费方（名字不落地）
+      for (const m of src.matchAll(/\b([A-Za-z_]\w*)\s*!/g)) {
+        const hit = macros.get(m[1])
+        if (!hit) continue
+        for (const name of hit) add(name)
+      }
+    }
+  }
+  return consumers
 }

@@ -35,11 +35,11 @@
 
 use super::capabilities::collect_options;
 use super::plugin::SessionPlugin;
-use crate::symbio_core::schemas::detail::{
+use crate::symbio_core::PluginInvokeRequest;
+use crate::symbio_core::{
     DetailAction, DetailCondition, DetailDefinition, DetailField, DetailOption, DetailSection,
     DETAIL_PICK_DIRECTORY,
 };
-use crate::symbio_core::PluginInvokeRequest;
 use serde_json::{json, Value};
 use std::sync::Arc;
 

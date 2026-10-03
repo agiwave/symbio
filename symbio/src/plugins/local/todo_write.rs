@@ -26,6 +26,7 @@ async fn todo_store() -> &'static RwLock<HashMap<String, Vec<Value>>> {
 /// 任务清单工具
 #[derive(Clone)]
 pub struct TodoWriteTool {
+    // dead-code-allow R-002: 字段由构造签名注入、本工具不读（策略统一由 SecureToolWrapper 执行），接线或改签名后摘除
     #[allow(dead_code)]
     security: Arc<SecurityPolicy>,
 }
