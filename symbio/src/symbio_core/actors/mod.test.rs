@@ -1,5 +1,5 @@
 //! `actors` 单测 —— 含 **S01 闭环彩排**（[plan/04 §3](../../../../docs/plan/04-工程落地.md)
-//! 第 3 步：用 `Decider` 跑通完整闭环，零 LLM）。
+//! 第 3 步：零 LLM 跑通完整闭环——应答由彩排内的定值给出，链路一条不少）。
 //!
 //! 彩排把 S0 的地基（store / projection / invariants）与 S1 的 ② `actors`
 //! 拧成一条完整链路，验收断言逐条对应
@@ -34,10 +34,12 @@ fn trivial_spec_is_the_s01_baseline() {
 
 // ── S01 闭环彩排 ────────────────────────────────────────────────────────
 
-/// 一轮完整对话：用户消息入库 → Decider 应答 → final/fallback 入库 → 三查。
+/// 一轮完整对话：用户消息入库 → 应答 → final/fallback 入库 → 三查。
 ///
-/// 返回 (store, 收束事件 seq)；`miss` 模拟生成失败（Decider 查空规则表）。
-fn rehearse_turn(utterance: &str, decider: &Decider) -> (EventStore, Result<u64, u64>) {
+/// 返回 (store, 收束事件 seq)；`reply = None` 模拟**无应答**（走兜底那一支）。
+/// 应答是彩排内的定值——彩排验的是**链路形状**（收到 → 发出 → 收束 → 三查），
+/// 规则语义本身归 [`classify`](../../../../docs/plan/06-会话响应性落地.md) 的规则表。
+fn rehearse_turn(utterance: &str, reply: Option<&str>) -> (EventStore, Result<u64, u64>) {
     let store = EventStore::new();
     // 「收到」：用户消息成为一条事件（turn × opened）。
     let seq = store
@@ -53,10 +55,9 @@ fn rehearse_turn(utterance: &str, decider: &Decider) -> (EventStore, Result<u64,
             .with_payload(serde_json::json!({ "text": utterance })),
         )
         .expect("用户消息必入库");
-    // 「思考 + 发出」：actor 只看事件切片（View 的原始形态）。
-    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
-    let outcome = match decider.respond(&snapshot) {
-        Ok(reply) => {
+    // 「思考 + 发出」：应答与兜底落**同一个** turn × closed 格子（收束语义不变）。
+    let outcome = match reply {
+        Some(reply) => {
             let s = store
                 .append(
                     Event::pending(
@@ -73,7 +74,7 @@ fn rehearse_turn(utterance: &str, decider: &Decider) -> (EventStore, Result<u64,
                 .expect("final 必入库");
             Ok(s.value())
         }
-        Err(_) => {
+        None => {
             // 「兜底」：也是一条普通事件，落同一个 turn × closed 格子，同样带溯源。
             let s = store
                 .append(
@@ -98,7 +99,7 @@ fn rehearse_turn(utterance: &str, decider: &Decider) -> (EventStore, Result<u64,
 /// 验收 1：一条 `user.message` → 恰好一条 `turn/closed`。
 #[test]
 fn one_user_message_yields_exactly_one_final() {
-    let (store, _) = rehearse_turn("你好，帮我看看", &Decider::rehearsal());
+    let (store, _) = rehearse_turn("你好，帮我看看", Some("你好，我能做什么？"));
     let finals: Vec<_> = store
         .range(crate::symbio_core::event::Seq::new(0))
         .into_iter()
@@ -114,13 +115,13 @@ fn one_user_message_yields_exactly_one_final() {
     );
 }
 
-/// 验收 2：强制生成失败 → 必须存在 fallback，且它的 `produced_by` 非空。
+/// 验收 2：强制无应答 → 必须存在 fallback，且它的 `produced_by` 非空。
 #[test]
 fn forced_failure_produces_fallback_with_provenance() {
-    let (store, outcome) = rehearse_turn("这是规则表外的一句话", &Decider::new(vec![]));
+    let (store, outcome) = rehearse_turn("这是规则表外的一句话", None);
     assert!(
         outcome.is_err(),
-        "规则未命中 ⇒ 走兜底（Miss 不是错误，是触发条件）"
+        "无应答 ⇒ 走兜底（兜底是触发条件，不是错误）"
     );
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     let fallbacks: Vec<_> = snapshot
@@ -139,7 +140,7 @@ fn forced_failure_produces_fallback_with_provenance() {
 /// 验收 3：投影两次运行结果逐字节相同。
 #[test]
 fn turnstate_projection_is_deterministic() {
-    let (store, _) = rehearse_turn("你好", &Decider::rehearsal());
+    let (store, _) = rehearse_turn("你好", Some("你好，我能做什么？"));
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     let p = turnstate();
     let v1 = p.apply(&snapshot, 1_000, Budget::generous());
@@ -149,7 +150,7 @@ fn turnstate_projection_is_deterministic() {
         v1.value.opened && v1.value.settled(),
         "当前 turn 已开且已收束"
     );
-    assert!(v1.value.final_text.is_some(), "规则命中 ⇒ final 态");
+    assert!(v1.value.final_text.is_some(), "有应答 ⇒ final 态");
 }
 
 /// 验收 4（反向）：注入两条 final → N3 必须报警。
@@ -204,44 +205,6 @@ fn two_finals_are_caught_by_n3() {
     assert!(
         !v.value.settled(),
         "settled 的 xor 语义：两条 final ≠ 合法收束"
-    );
-}
-
-// ── Decider 的输入契约 ─────────────────────────────────────────────────
-
-#[test]
-fn decider_reads_the_last_user_message_from_events() {
-    // Decider 自己从事件切片里找 user.message——「收到」是它的输入契约。
-    let events = vec![Event::pending(
-        "u0",
-        EVENT_USER_MESSAGE,
-        Entity::Turn,
-        Verb::Opened,
-        0,
-        "user",
-    )
-    .with_payload(serde_json::json!({ "text": "你好" }))];
-    assert_eq!(
-        Decider::rehearsal().respond(&events).unwrap(),
-        "你好，我能做什么？"
-    );
-}
-
-#[test]
-fn decider_miss_reports_the_utterance() {
-    let events = vec![Event::pending(
-        "u0",
-        EVENT_USER_MESSAGE,
-        Entity::Turn,
-        Verb::Opened,
-        0,
-        "user",
-    )
-    .with_payload(serde_json::json!({ "text": "规则表外" }))];
-    let miss = Decider::rehearsal().respond(&events).unwrap_err();
-    assert_eq!(
-        miss.utterance, "规则表外",
-        "Miss 携带输入摘要（可观测，入兜底载荷）"
     );
 }
 
@@ -335,6 +298,40 @@ async fn reasoner_turn_keeps_all_invariants_green() {
     let v2 = p.apply(&snapshot, 0, Budget::generous());
     assert_eq!(v1, v2);
     assert!(v1.value.settled() && v1.value.final_text.is_some());
+}
+
+/// 输入契约：`Reasoner` **只看事件切片**——prompt 由事件渲染，
+/// 桩回显 prompt ⇒ 回显里能看到事件里的那条用户消息（零 LLM 侧的同一契约见
+/// `rehearse_turn`：应答是彩排内定值，形状一条不少）。
+#[tokio::test]
+async fn reasoner_reply_reads_the_user_message_from_events() {
+    use crate::symbio_core::adapters::{StubLlmAdapter, TokenIssuer};
+
+    let store = EventStore::new();
+    store
+        .append(
+            Event::pending(
+                "u0",
+                EVENT_USER_MESSAGE,
+                Entity::Turn,
+                Verb::Opened,
+                0,
+                "user",
+            )
+            .with_payload(serde_json::json!({ "text": "帮我看看这份计划" })),
+        )
+        .expect("用户消息必入库");
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    let llm = StubLlmAdapter::succeed("stub-model");
+    let reply = Reasoner
+        .reply(&llm, &TokenIssuer::issue_deep(), &snapshot)
+        .await
+        .expect("成功桩必答");
+    assert!(
+        reply.contains("帮我看看这份计划"),
+        "prompt 必须来自事件切片：{}",
+        reply
+    );
 }
 
 /// 验收（步骤 6 上半）：生成失败 → 兜底埋点（cost_ms / produced_by / error 载荷）。

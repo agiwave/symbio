@@ -51,10 +51,6 @@ pub const EVENT_USER_MESSAGE: &str = "user.message";
 pub const EVENT_ASSISTANT_FINAL: &str = "chat.assistant.final";
 /// 兜底话术——**普通事件，不是特殊通道**（生成失败也要有输出）。落在 `turn × closed`。
 pub const EVENT_ASSISTANT_FALLBACK: &str = "chat.assistant.fallback";
-/// 断点（S4：`store = wal` 的伴随事件，[roadmap/S05 §3](../../../../docs/plan/roadmap/S05-长会话与断点恢复.md)）。
-/// 载荷携带可序列化的 checkpoint 状态。落在 `thread × progressed`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑤ 接线后摘除
-pub const EVENT_THREAD_CHECKPOINT: &str = "thread.checkpoint";
 
 // ── 产物格子（S02 §3，[roadmap/S02-工具调用与产物.md](../../../../docs/plan/roadmap/S02-工具调用与产物.md)）──
 //

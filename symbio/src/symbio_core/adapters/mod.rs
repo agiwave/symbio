@@ -119,16 +119,24 @@ impl FullModel {
 }
 
 // ── 令牌层级：trait 表达「高档能做低档的事」 ────────────────────────────
+//
+// 这两只 trait 与下面三条 impl 只服务**编译期正/负例**（`adapters/mod.test.rs`：
+// `FullModel` 满足 `CanClassify`、`RuleOnly` 不满足）——生产侧的同一道闸门
+// 由签名本身表达（`LlmAdapter::generate` 只收 `FullModel`），不需要运行时问它。
+// 故整组留在 `#[cfg(test)]`：进测试构建，不占生产面。
 
 /// 能做分类（快速档 / 深度档 / 自主档都满足）。
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（README §1.2 adapters 行）；04 §3.1 批⑤ 接线后摘除
+#[cfg(test)]
 pub trait CanClassify {}
 /// 能完整生成（仅深度档 / 自主档）。
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（README §1.2 adapters 行）；04 §3.1 批⑤ 接线后摘除
+#[cfg(test)]
 pub trait CanGenerate: CanClassify {}
 
+#[cfg(test)]
 impl CanClassify for ClassifyOnly {}
+#[cfg(test)]
 impl CanClassify for FullModel {}
+#[cfg(test)]
 impl CanGenerate for FullModel {}
 // 注意：`RuleOnly` **不**实现 `CanClassify`——这就是闸门在类型层的全部表达。
 
@@ -211,8 +219,8 @@ impl DeltaSink for SilentDeltas {
 /// LLM 端口（⑤ 的抽象面）。**generate 只接受 `FullModel`**——反射/快速档
 /// 在类型上拿不到生成能力。
 ///
-/// 真实接线（`ModelProvider` 适配器）在 S2 e2e 落地；本端口当前由
-/// [`StubLlmAdapter`]（零 LLM 桩）与后续的真实适配器实现。
+/// 实现方两个：生产是 `ProviderLlmAdapter`（包 `ModelProvider`，见同目录
+/// `provider_adapter`），测试是 `#[cfg(test)]` 的零 LLM 桩 `StubLlmAdapter`。
 #[async_trait]
 pub trait LlmAdapter: Send + Sync {
     /// 模型标识（入 final 事件的载荷，可观测）。
@@ -320,10 +328,12 @@ pub trait DispatchPort: Send + Sync {
     async fn dispatch(&self, turn: &LlmTurn) -> Vec<DispatchOutcome>;
 }
 
-/// 零 LLM 桩——S2 彩排与测试用。可注入**确定性失败**，用于演练兜底路径。
+/// 零 LLM 桩——彩排与测试用。可注入**确定性失败**，用于演练兜底路径。
 ///
 /// 真实适配器（包 `ModelProvider`）由 e2e 的 MockLlm / 真实 provider 接线承接。
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（README §1.2 adapters 行）；04 §3.1 批⑤ 接线后摘除
+/// 桩只有测试这一个消费面，故整组（结构 + 构造 + 实现 + 分片委托）进
+/// `#[cfg(test)]`——不占生产面，也就没有「接入生产」这一步可走。
+#[cfg(test)]
 pub struct StubLlmAdapter {
     model: &'static str,
     /// 非空 ⇒ generate 一律返回该错误（演练兜底）。
@@ -336,8 +346,8 @@ pub struct StubLlmAdapter {
     abort: bool,
 }
 
+#[cfg(test)]
 impl StubLlmAdapter {
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（README §1.2 adapters 行）；04 §3.1 批⑤ 接线后摘除
     pub fn succeed(model: &'static str) -> Self {
         StubLlmAdapter {
             model,
@@ -349,7 +359,6 @@ impl StubLlmAdapter {
     }
 
     /// 中止桩：生成一律返回 [`AdapterError::Aborted`]（演练「中止不落兜底格」）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（README §1.2 adapters 行）；04 §3.1 批⑫ 接线后摘除
     pub fn aborting(model: &'static str) -> Self {
         StubLlmAdapter {
             model,
@@ -361,7 +370,6 @@ impl StubLlmAdapter {
     }
 
     /// 逐片生成的桩：演练流式回调（`generate_streaming` 覆写逐片送出）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（README §1.2 adapters 行）；04 §3.1 批⑫ 接线后摘除
     pub fn succeed_streaming(model: &'static str, chunks: &[&str]) -> Self {
         StubLlmAdapter {
             model,
@@ -373,7 +381,6 @@ impl StubLlmAdapter {
     }
 
     /// 一律失败的桩：演练「生成失败 → 兜底必须产生事件」。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（README §1.2 adapters 行）；04 §3.1 批⑤ 接线后摘除
     pub fn always_fail(message: &'static str) -> Self {
         StubLlmAdapter {
             model: "stub",
@@ -385,7 +392,6 @@ impl StubLlmAdapter {
     }
 
     /// 带注入延迟的桩（演练时延埋点）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（README §1.2 adapters 行）；04 §3.1 批⑤ 接线后摘除
     pub fn with_delay(model: &'static str, delay_ms: u64) -> Self {
         StubLlmAdapter {
             model,
@@ -397,6 +403,7 @@ impl StubLlmAdapter {
     }
 }
 
+#[cfg(test)]
 #[async_trait]
 impl LlmAdapter for StubLlmAdapter {
     fn model_id(&self) -> &str {
@@ -449,9 +456,10 @@ impl LlmAdapter for StubLlmAdapter {
 
 /// 委托包装：让无分片的桩走进 trait 的**默认**实现（Rust 裸调用默认方法
 /// 需要 `Self` 类型，包装避免把默认体复制一份）。
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（README §1.2 adapters 行）；04 §3.1 批⑫ 接线后摘除
+#[cfg(test)]
 struct DelegateGen<'a>(&'a StubLlmAdapter);
 
+#[cfg(test)]
 #[async_trait]
 impl LlmAdapter for DelegateGen<'_> {
     fn model_id(&self) -> &str {

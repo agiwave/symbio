@@ -93,7 +93,7 @@ fn torn_tail_line_is_not_committed() {
 fn recovery_projection_is_byte_identical_to_pre_crash() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("events.jsonl");
-    // 崩溃前的完整对话（S01 闭环形状）+ 断点事件。
+    // 崩溃前的完整对话（S01 闭环形状）。
     {
         let store = EventWalStore::open(&path).unwrap();
         store
@@ -136,11 +136,6 @@ fn recovery_projection_is_byte_identical_to_pre_crash() {
                 "今天晴，25 度。",
             ))
             .unwrap();
-        let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
-        let cp = checkpoint().apply(&snapshot, 0, Budget::generous()).value;
-        store
-            .append(cp.to_event("cp0", "agent:main").with_produced_by(3))
-            .unwrap();
     }
     // 崩溃前的投影。
     let before_store = EventWalStore::open(&path).unwrap();
@@ -169,14 +164,14 @@ fn recovery_projection_is_byte_identical_to_pre_crash() {
         check_all(&snapshot)
     );
     assert!(unresolved_turns(&snapshot, false).is_empty());
-    // 断点事件本身也在账上（thread.checkpoint 落 thread × progressed）。
-    assert_eq!(after_cp.kind_counts.get("thread.checkpoint"), Some(&1));
+    // 断点状态本身也在账上（4 条事实 ⇒ event_count = 4）。
+    assert_eq!(after_cp.event_count, 4, "断点按事实条数计");
 }
 
 /// 验收 3：`store = memory` 平凡值——重启即丢，但系统仍能完成 S01 闭环。
 #[test]
 fn memory_store_trivial_value_still_completes_the_loop() {
-    use crate::symbio_core::actors::{Decider, Pattern};
+    use crate::symbio_core::actors::{ActorSpec, Pattern};
     use crate::symbio_core::store::{EventStore, Store as _};
 
     // 「重启」= 新进程 = 全新 MemoryStore（事件为空）。
@@ -193,8 +188,6 @@ fn memory_store_trivial_value_still_completes_the_loop() {
             "你好，帮我看看",
         ))
         .unwrap();
-    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
-    let reply = Decider::rehearsal().respond(&snapshot).expect("规则命中");
     store
         .append(ev(
             "f0",
@@ -202,15 +195,15 @@ fn memory_store_trivial_value_still_completes_the_loop() {
             Entity::Turn,
             Verb::Closed,
             0,
-            &reply,
+            "我可以帮你查资料、跑任务、写东西。",
         ))
         .unwrap();
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     assert!(check_all(&snapshot).is_empty());
     let v = turnstate().apply(&snapshot, 0, Budget::generous());
     assert!(v.value.settled() && v.value.final_text.is_some());
-    // Decider 模式仍是平凡值锚。
-    assert_eq!(Pattern::Decider, Pattern::Decider);
+    // 平凡值锚仍是规则模式（零 LLM 也能跑完整闭环）。
+    assert_eq!(ActorSpec::trivial("agent:main").pattern, Pattern::Decider);
 }
 
 /// 验收 4（反向）：故意丢掉最后一条已提交事件 → `head()` 必须不同
@@ -285,9 +278,12 @@ fn duplicate_is_rejected_after_recovery() {
     );
 }
 
-/// 断点事件的载荷可序列化且可回读（S05 §5：checkpoint 可序列化）。
+/// 断点状态可序列化且可回读（S05 §5：checkpoint 可序列化——序列化失败有信号）。
+///
+/// 往返直接走 JSON：断点是**派生视图**（恢复 = 重放 + 投影），没有「写回事件」
+/// 这一步，所以序列化的对象就是状态本身。
 #[test]
-fn checkpoint_state_round_trips_through_event_payload() {
+fn checkpoint_state_round_trips_through_json() {
     let dir = tempfile::tempdir().unwrap();
     let store = EventWalStore::open(dir.path().join("events.jsonl")).unwrap();
     store
@@ -302,16 +298,10 @@ fn checkpoint_state_round_trips_through_event_payload() {
         .unwrap();
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     let cp: CheckpointState = checkpoint().apply(&snapshot, 0, Budget::generous()).value;
-    let event = cp.to_event("cp0", "agent:main").with_produced_by(0);
-    store.append(event).unwrap();
-
-    let round: CheckpointState = serde_json::from_value(
-        store.range(crate::symbio_core::event::Seq::new(1))[0]
-            .payload
-            .clone(),
-    )
-    .unwrap();
-    assert_eq!(round, cp, "断点状态经事件载荷往返必须无损");
+    let value = serde_json::to_value(&cp).expect("CheckpointState 必可序列化");
+    assert_eq!(value["event_count"], 1, "断点状态按事实计数");
+    let round: CheckpointState = serde_json::from_value(value).unwrap();
+    assert_eq!(round, cp, "断点状态 JSON 往返必须无损");
 }
 
 /// 只读打开：撕裂尾行同样不算已提交，但**不改文件**——截断是写方的恢复语义。

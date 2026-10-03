@@ -439,7 +439,15 @@ export const BASELINE = {
   //      验收 = `read_side_graces_the_trailing_open_turn_but_flags_the_overtaken_one`
   //      + `read_side_budget_follows_declared_tiers_and_skips_when_none_declared`
   //      + stats `invariants_move_when_the_wal_changes`（两刀后清单跟着红/回落）。
-  rustTests: 1223,
+  // 1222（Decider 族退役，2026-10-03）——`1223 → 1222`，**−1**。
+  //      规则应答器（`Decider` / `DeciderMiss` / `new` / `rehearsal` /
+  //      `respond`）生产零调用 ⇒ 整族删除（04 §3.1 批⑤）。专属用例
+  //      `decider_reads_the_last_user_message_from_events` /
+  //      `decider_miss_reports_the_utterance` 随之退役，**输入契约改由生产形态
+  //      承接**（`reasoner_reply_reads_the_user_message_from_events`，+1）：
+  //      净降 1 不是「删测试放行」，而是删掉的两条只测已删除的类型。
+  //      `rehearse_turn` 的规则表换成彩排内定值，链路形状断言一条不少。
+  rustTests: 1222,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

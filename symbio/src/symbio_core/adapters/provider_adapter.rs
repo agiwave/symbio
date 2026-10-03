@@ -1,6 +1,6 @@
-//! ProviderLlmAdapter —— ⑤ `LlmAdapter` 端口的**真实实现**（S2 预留的接线点）。
+//! ProviderLlmAdapter —— ⑤ `LlmAdapter` 端口的**真实实现**（生产接线点）。
 //!
-//! S2 彩排用 [`StubLlmAdapter`]（确定性桩）走通闭环形状；本适配器把端口接到
+//! S2 彩排用的确定性桩 `StubLlmAdapter`（`#[cfg(test)]`）走通闭环形状；本适配器把端口接到
 //! **真实传输层**：持 `Arc<dyn ModelProvider>`（core 契约），`generate` 经
 //! `execute_turn` 走「请求体构造 → 真实 HTTP POST → SSE 流解析 → 文本聚合」。
 //! 会话链路（chat_loop / classify / compose）与 core 彩排链路（`Reasoner`）

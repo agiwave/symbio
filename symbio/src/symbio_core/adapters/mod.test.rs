@@ -43,12 +43,17 @@ fn tier_capabilities_match_the_budget_table() {
     assert!(LatencyTier::Autonomic.may_generate());
 }
 
-/// 高档能做低档的事（trait 层级）：`FullModel` 满足 `CanClassify`。
+/// 高档能做低档的事（trait 层级）：`FullModel` 同时满足 `CanClassify` 与
+/// `CanGenerate`，`ClassifyOnly` 只满足 `CanClassify`（负例由签名承载，见文件头）。
 #[test]
-fn full_model_token_satisfies_classify() {
+fn full_model_token_satisfies_classify_and_generate() {
     fn assert_can_classify<T: CanClassify>(_: &T) {}
-    let tok = TokenIssuer::issue_deep();
-    assert_can_classify(&tok);
+    fn assert_can_generate<T: CanGenerate>(_: &T) {}
+    let deep = TokenIssuer::issue_deep();
+    assert_can_classify(&deep);
+    assert_can_generate(&deep);
+    let fast = TokenIssuer::issue_fast();
+    assert_can_classify(&fast);
 }
 
 /// 桩的两种演练形态：确定性成功 / 确定性失败。

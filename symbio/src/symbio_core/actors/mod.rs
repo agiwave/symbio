@@ -11,11 +11,12 @@
 //! 只接收**类型化输入**（事件切片 / `View`），**产出事件**——不持有任何其他模块的
 //! 句柄。「想调用也拿不到对方的句柄」是构造保证，不是约定。
 //!
-//! ## S1 范围（[plan/04 §3](../../../../docs/plan/04-工程落地.md) 第 3 步：零 LLM 彩排）
+//! ## S1 彩排（[plan/04 §3](../../../../docs/plan/04-工程落地.md) 第 3 步：零 LLM 彩排）
 //!
-//! 只落 `Decider`（规则应答，`pattern` 的**平凡值**）——零 LLM 也能跑通完整闭环
-//! （[roadmap/S01 §4](../../../../docs/plan/roadmap/S01-最小闭环.md)：平凡值下系统
-//! 必须完整运行）。`Reasoner` / `Translator` 的**产出路径**在 S2 / S5 接入；
+//! 闭环彩排跑在 ⑤ `adapters` 的确定性桩上（零 LLM、毫秒级），链路一条不少：
+//! 用户消息入库 → 应答 → final/fallback 入库 → 三查。规则应答的语义由
+//! [`classify`(../../../../docs/plan/06-会话响应性落地.md)] 的规则表以更严纪律承接，
+//! 本域只留**模式名**；`Reasoner` / `Translator` 的**产出路径**在 S2 / S5 接入；
 //! `capabilities` 暂为字符串数据（能力名），枚举闭集与 grants 校验归 S3 ⑥
 //! `governance`——本域不抢。
 //!
@@ -23,8 +24,8 @@
 //!
 //! - `ActorSpec` / `Pattern` / `Scope`：[plan/01 §4](../../../../docs/plan/01-核心架构.md)
 //!   的冻结契约名（名字先于模块存在，判据同 `schemas`）；
-//! - `Decider`：[plan/05 §4](../../../../docs/plan/05-模块架构.md) S8 的反射档判定者，
-//!   S1 先以规则应答形态落地。
+//! - [`Pattern::Decider`]：[plan/05 §4](../../../../docs/plan/05-模块架构.md) S8 的
+//!   反射档判定者——模式名在此，规则应答不在（见上）。
 
 use crate::symbio_core::adapters::{AdapterError, FullModel, LatencyTier, LlmAdapter};
 use crate::symbio_core::event::{
@@ -92,78 +93,6 @@ impl ActorSpec {
     }
 }
 
-/// 规则未命中——**不是错误，是兜底的触发条件**。
-///
-/// [roadmap/S01 §2](../../../../docs/plan/roadmap/S01-最小闭环.md)：兜底话术也是一条
-/// 普通事件（`chat.assistant.fallback`，网格里已有的一格，**不是特殊通道**）。
-/// 因此「Decider 答不出」在类型上就是 `Err(DeciderMiss)`，调用方据此产兜底事件——
-/// 它永远逃不出审计（I2）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑤ 接线后摘除
-pub struct DeciderMiss {
-    /// 未命中的输入摘要（入兜底事件的载荷，可观测）。
-    pub utterance: String,
-}
-
-/// 反射档规则应答器（`pattern = Decider` 的 S1 形态）。
-///
-/// **只接收事件切片**（View 的原始形态），产出应答文本——无任何模块句柄。
-/// 确定性：同一事件序列 ⇒ 同一应答（N1 在整条链路上成立的前提）。
-///
-/// 规则表是**数据**：加规则不加分支（同事件网格的"加名字不加枚举"）。
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑤ 接线后摘除
-pub struct Decider {
-    rules: Vec<(&'static str, &'static str)>,
-}
-
-impl Decider {
-    /// 规则表驱动构造：`(子串匹配, 应答)` 逐条尝试，**首条命中即返回**。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑤ 接线后摘除
-    pub fn new(rules: Vec<(&'static str, &'static str)>) -> Self {
-        Decider { rules }
-    }
-
-    /// S01 彩排用的最小规则表（内容来自
-    /// [`docs/plan/verify/latency_gate.rs`](../../../../docs/plan/verify/latency_gate.rs) 的 `RuleEngine`）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑤ 接线后摘除
-    pub fn rehearsal() -> Self {
-        Decider::new(vec![
-            ("你好", "你好，我能做什么？"),
-            ("帮我", "我可以帮你查资料、跑任务、写东西。"),
-        ])
-    }
-
-    /// 对**最后一条用户消息**应答。规则未命中 ⇒ [`DeciderMiss`]（调用方产兜底事件）。
-    ///
-    /// 输入是事件切片而非裸文本：Decider 自己从事件里找 `user.message`——
-    /// 「收到」这个端点（[roadmap/S01 §1](../../../../docs/plan/roadmap/S01-最小闭环.md)）
-    /// 由此成为它的输入契约，而不是调用方的口头约定。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑤ 接线后摘除
-    pub fn respond(
-        &self,
-        events: &[crate::symbio_core::event::Event],
-    ) -> Result<String, DeciderMiss> {
-        let utterance = events
-            .iter()
-            .rev()
-            .find(|e| e.kind == crate::symbio_core::event::EVENT_USER_MESSAGE)
-            .map(|e| {
-                e.payload
-                    .get("text")
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("")
-                    .to_string()
-            })
-            .unwrap_or_default();
-        for (needle, reply) in &self.rules {
-            if utterance.contains(needle) {
-                return Ok((*reply).to_string());
-            }
-        }
-        Err(DeciderMiss { utterance })
-    }
-}
-
 /// 生成档主体（`pattern = Reasoner` 的 S2 形态，[plan/01 §4](../../../../docs/plan/01-核心架构.md)）。
 ///
 /// ## 闸门在签名上
@@ -177,8 +106,7 @@ pub struct Reasoner;
 impl Reasoner {
     /// 生成答复：从事件切片取最后一条用户消息作输入，经端口生成。
     ///
-    /// 失败形态是 [`AdapterError`]
-    /// （不是 [`DeciderMiss`]）——**调用方必须产出 `chat.assistant.fallback` 事件**
+    /// 失败形态是 [`AdapterError`]——**调用方必须产出 `chat.assistant.fallback` 事件**
     /// （I3 到点必答：禁止静默超时，[plan/01 §10](../../../../docs/plan/01-核心架构.md) 第 2 条）。
     pub async fn reply(
         &self,

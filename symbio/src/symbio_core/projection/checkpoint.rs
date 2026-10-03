@@ -9,11 +9,15 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::super::event::{Event, EVENT_THREAD_CHECKPOINT};
+use super::super::event::Event;
 use super::super::view::{Budget, View};
 use super::Projection;
 
 /// 可序列化的断点状态（`projection = checkpoint` 的产出）。
+///
+/// **断点是派生视图，不是落盘的锚**：恢复 = 重放 WAL + 投影纯函数（见模块头），
+/// 所以没有「把状态再写回事件」的写方——[04 §3.1](../../../../docs/plan/04-工程落地.md)
+/// 批⑤ 的判定即以此为准（要落锚，属 S4 第 10 步，不是本投影的事）。
 ///
 /// `BTreeMap` 保证序列化顺序确定（同一事件序列 ⇒ 逐字节相同的断点，N1 不因
 /// 断点本身被破坏）。
@@ -25,23 +29,6 @@ pub struct CheckpointState {
     pub event_count: usize,
     /// 按事件名字的计数（内容摘要，可扩展；有序 ⇒ 序列化确定）。
     pub kind_counts: BTreeMap<String, usize>,
-}
-
-impl CheckpointState {
-    /// 把断点状态打包成 `thread.checkpoint` 事件（**断点也是一条普通事件**，
-    /// 落 `thread × progressed` 格子——它自己同样受 I2/I3 约束）。
-    #[allow(dead_code)] // dead-code-allow R-002: 接线未落地；04 §3.1 批⑤ 接线后摘除
-    pub fn to_event(&self, event_id: impl Into<String>, actor: impl Into<String>) -> Event {
-        Event::pending(
-            event_id,
-            EVENT_THREAD_CHECKPOINT,
-            crate::symbio_core::event::Entity::Thread,
-            crate::symbio_core::event::Verb::Progressed,
-            0,
-            actor,
-        )
-        .with_payload(serde_json::to_value(self).expect("CheckpointState 必可序列化"))
-    }
 }
 
 /// `checkpoint` 投影：按入参顺序扫描事件，产出截至最后一条事件的可序列化状态。
