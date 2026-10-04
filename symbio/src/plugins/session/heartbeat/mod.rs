@@ -5,11 +5,15 @@
 //!
 //! 心跳任务配置存储于 `Session.metadata.heartbeat`，由前端"会话设置"写入。
 
+use super::active::PreemptPending;
 use super::plugin::SessionPlugin;
 use crate::symbio_core::chat_message as cm;
 use crate::symbio_core::clock_now_ms;
 use crate::symbio_core::session_chat;
-use crate::symbio_core::{PluginInvokeRequestExt, PluginSimpleRequest, SESSION_ID};
+use crate::symbio_core::{
+    AutonomousInitiator, ConationCandidate, ConationPolicy, EventWalStore, IntentGate,
+    PluginInvokeRequestExt, PluginSimpleRequest, Seq, Store, EVENT_TASK_OPENED, SESSION_ID,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -202,15 +206,24 @@ impl SessionPlugin {
                 let interval_ms = (hb.interval_seconds as i64) * 1_000 + heartbeat_phase_ms(&s.id);
 
                 if now - last_activity >= interval_ms {
-                    self.clone().trigger_heartbeat(&s.id, &hb).await;
-                    // 写入内存锚点作为防热循环下限：心跳回合内的消息落盘会把
-                    // updated_at 推进到回合结束，下一次触发自然在「回合结束后
-                    // 再空闲 interval」时到来；仅当回合零写盘退出时由此锚点兜底。
-                    {
-                        let mut map = self.heartbeat_state.write().await;
-                        map.insert(s.id.clone(), now);
+                    // 只有**触发事实落了格**才写内存锚点：这一趟没触发（无事实源 /
+                    // 有写方在写 / 开档失败）时留着原锚点，下个 tick 重试——那几种
+                    // 都是暂时的，按整段 `interval_seconds` 推迟等于把一次本可成功的
+                    // 触发白白睡掉。
+                    let fired_now = self
+                        .clone()
+                        .trigger_heartbeat(&s.id, &hb, now - last_activity)
+                        .await;
+                    if fired_now {
+                        // 写入内存锚点作为防热循环下限：心跳回合内的消息落盘会把
+                        // updated_at 推进到回合结束，下一次触发自然在「回合结束后
+                        // 再空闲 interval」时到来；仅当回合零写盘退出时由此锚点兜底。
+                        {
+                            let mut map = self.heartbeat_state.write().await;
+                            map.insert(s.id.clone(), now);
+                        }
+                        fired += 1;
                     }
-                    fired += 1;
                 }
             }
         }
@@ -220,7 +233,28 @@ impl SessionPlugin {
     ///
     /// 构造一条用户消息（心跳提示词）并复用统一入口 [`SessionPlugin::handle_chat_send_oneoff`]
     /// 的发送链路。`include_history=false` 时本次发送不加载历史会话信息。
-    pub(crate) async fn trigger_heartbeat(self: Arc<Self>, session_id: &str, hb: &HeartbeatConfig) {
+    ///
+    /// 返回 `true` = 这次触发的**事实已落格**（调用方据此推进空闲锚点）；
+    /// `false` = 这一趟没触发、一格也没写（原因在 [`Self::record_autonomous_trigger`]）。
+    ///
+    /// ## 先落事实，再开轮
+    ///
+    /// 第一步是把这次触发写成事实（[`Self::record_autonomous_trigger`]）：**事实没落成
+    /// 就不发这一轮**。「触发器产出事件，不是旁路」（[roadmap/S12 §2](../../../../../docs/plan/roadmap/S12-自主层与长期目标.md)）
+    /// 的可执行形式就是这句——否则自主行为从头到尾只有那条伪装成用户消息的提示词，
+    /// 在事实源里连"系统自己发起过"都查不到。
+    pub(crate) async fn trigger_heartbeat(
+        self: Arc<Self>,
+        session_id: &str,
+        hb: &HeartbeatConfig,
+        idle_ms: i64,
+    ) -> bool {
+        if !self
+            .record_autonomous_trigger(session_id, idle_ms, &hb.prompt)
+            .await
+        {
+            return false;
+        }
         let now = clock_now_ms();
         let user_msg = cm::ChatMessage {
             id: format!("hb_{}_{}", session_id, now),
@@ -258,7 +292,9 @@ impl SessionPlugin {
         ctx.set(SESSION_ID, session_id.to_string());
         if let Err(e) = ctx.set_payload(req) {
             crate::plugin_error!("session", "[Heartbeat] 触发失败：无法设置 payload: {}", e);
-            return;
+            // 触发事实已经落格了：这一趟按"触发过"算（`true`），否则下个 tick 会
+            // 再写一遍——而 `system.triggered` 是**事实**，重复记一次就是两次触发。
+            return true;
         }
 
         crate::plugin_info!(
@@ -277,7 +313,187 @@ impl SessionPlugin {
                 e
             );
         }
+        true
     }
+
+    /// 把一次定时触发落成事实（S9 第 21 步，[roadmap/S12](../../../../../docs/plan/roadmap/S12-自主层与长期目标.md)）。
+    ///
+    /// 返回 `true` = 触发事实已入格；`false` = 这一趟不触发（原因已记日志）。
+    ///
+    /// ## 三种不触发，各说各的
+    ///
+    /// 1. **有写方在写**——事实源是同一会话的唯一写入口（`WalStore::open` 各自
+    ///    replay，两个写方并存会重复 `head` ⇒ 盘上出现重复 seq、`seq_monotonic`
+    ///    直接变红）。见下「谁有资格写」；
+    /// 2. **没有事实源 / 事实源为空**——溯源锚是"上一格的 seq"，一格都没有就无处
+    ///    可指。I2 要求触发事件带 `produced_by`（S12 §5 第 3 行：自主发起的工作
+    ///    必须可追溯），**宁可不触发也不写一条来路不明的触发**；新会话收到第一条
+    ///    消息后事实源自然就有了，下一趟就成；
+    /// 3. **开档失败**——存储层问题，记错误。
+    ///
+    /// ## 谁有资格写
+    ///
+    /// 会话事实源只有两个写窗口，本函数把两条互斥条件都检查掉：
+    ///
+    /// - 收束期写方 `record_to_wal` 跑在 `is_working` 复位**之前** ⇒ 要求
+    ///   `is_working == false`；
+    /// - 收件箱的空闲写方（挂起落格 / 恢复落格）**只在 `preempt != None` 时**才
+    ///   落格 ⇒ 要求 `preempt == PreemptPending::None`。
+    ///
+    /// 两条同时成立时没有第二个写方能开档。残余窗口是"检查之后一毫秒内跑完一整轮
+    /// 插话"——那是既有设计已接受的一类风险（同款说明见
+    /// `transcript/inbox.rs::append_preemption`），本函数不放大它：检查紧跟开档、
+    /// 格子逐条落、失败逐条记日志。
+    async fn record_autonomous_trigger(&self, session_id: &str, idle_ms: i64, goal: &str) -> bool {
+        {
+            let sessions = self.active_mgr.sessions.read().await;
+            if let Some(state) = sessions.get(session_id) {
+                let inner = state.inner.read().await;
+                if inner.is_working || inner.preempt != PreemptPending::None {
+                    crate::plugin_info!(
+                        "session",
+                        "[Heartbeat] 会话 {} 有写方在写，本次触发不落格（下个 tick 重试）",
+                        session_id
+                    );
+                    return false;
+                }
+            }
+        }
+
+        // 溯源锚 = 上一格的 seq：触发是"从当时的状态出发"的，指过去的事件而不是
+        // 指自己。`head == 0` 既包含"事实源不存在"也包含"空文件"——两种都没有上一格。
+        // 顺带挡掉目录不存在的情形：再往下就会 `append`（写方入口对缺父目录是 panic）。
+        let path = super::paths::session_dir(&self.storage_dir(), session_id)
+            .join(super::paths::V2_WAL_FILE);
+        let store = match EventWalStore::open(&path) {
+            Ok(store) => store,
+            Err(e) => {
+                crate::plugin_error!(
+                    "session",
+                    "[Heartbeat] 会话 {} 事实源开档失败：{}",
+                    session_id,
+                    e
+                );
+                return false;
+            }
+        };
+        let head = store.head().value();
+        if head == 0 {
+            crate::plugin_info!(
+                "session",
+                "[Heartbeat] 会话 {} 还没有事实源，本次不触发（无可指的溯源锚）",
+                session_id
+            );
+            return false;
+        }
+        let anchor = head - 1;
+
+        let initiator = AutonomousInitiator;
+        let triggered_seq = match store.append(initiator.trigger(anchor)) {
+            Ok(seq) => seq.value(),
+            Err(e) => {
+                crate::plugin_error!(
+                    "session",
+                    "[Heartbeat] 触发事实未入格（会话 {}）：{:?}",
+                    session_id,
+                    e
+                );
+                return false;
+            }
+        };
+        // 自检紧跟触发：触发是主事实，自检是这次触发的观测附录（`system × progressed`）。
+        if let Err(e) = store.append(initiator.health_event(triggered_seq, idle_ms)) {
+            crate::plugin_warn!(
+                "session",
+                "[Heartbeat] 健康自检未入格（会话 {}）：{:?}",
+                session_id,
+                e
+            );
+        }
+
+        // 「欲」先入格（E1：欲是数据），闸门再决定它要不要升格成任务。
+        let conation_seq = match store.append(initiator.express_intent(goal, triggered_seq)) {
+            Ok(seq) => seq.value(),
+            Err(e) => {
+                crate::plugin_warn!(
+                    "session",
+                    "[Heartbeat] 意图未入格（会话 {}）：{:?}",
+                    session_id,
+                    e
+                );
+                // 触发已经落格 ⇒ 这一轮照常开跑（意图没写成不该连累触发）。
+                return true;
+            }
+        };
+        // 回读刚落格的那一条：候选的唯一构造路径要读 `seq`，而本地副本还是 pending。
+        let source = store.range(Seq::new(conation_seq)).into_iter().next();
+        let Some(source) = source else {
+            crate::plugin_warn!(
+                "session",
+                "[Heartbeat] 意图回读不到（会话 {}，seq {}）",
+                session_id,
+                conation_seq
+            );
+            return true;
+        };
+        let Some(mut candidate) = ConationCandidate::from_event(&source) else {
+            crate::plugin_warn!(
+                "session",
+                "[Heartbeat] 意图构造不出候选（会话 {}）",
+                session_id
+            );
+            return true;
+        };
+
+        let policy = {
+            let cfg = self.config.read().await;
+            ConationPolicy {
+                enabled: cfg.conation_enabled,
+                ..ConationPolicy::default()
+            }
+        };
+        match IntentGate::approve(&mut candidate, &policy, &IntentGate::issue_warrant()) {
+            Ok(approved) => {
+                // E2 的**动作点**：`task.opened` 只从盖过章的候选长出来。闸门是发牌口
+                //（`issue_warrant` 是唯一一道），这一行验的是牌本身——少了它，「闸门与
+                // 自主层同批成对」就退化成一句约定。
+                if candidate.is_approved() && !long_goal_declared(&store, &approved.goal) {
+                    let task_id = format!("hb-{triggered_seq}");
+                    let opened =
+                        initiator.open_long_goal(&task_id, &approved.goal, approved.from_seq);
+                    if let Err(e) = store.append(opened) {
+                        crate::plugin_error!(
+                            "session",
+                            "[Heartbeat] 长目标未入格（会话 {}）：{:?}",
+                            session_id,
+                            e
+                        );
+                    }
+                }
+            }
+            Err(reason) => {
+                crate::plugin_info!(
+                    "session",
+                    "[Heartbeat] 意图闸门拒绝（会话 {}）：{}",
+                    session_id,
+                    reason
+                );
+            }
+        }
+        true
+    }
+}
+
+/// 事实源里有没有**已经声明过的**同一个长目标。
+///
+/// 长目标只声明一次：心跳按 `interval_seconds` 周期性表达同一条「欲」，每次都开格
+/// 会让就绪集无界增长——而 `readyset` 是模型唯一的调度候选来源，那就等于用自己
+/// 刷爆自己的提示词。重新发起是 S03 返工机制（`{id}-r{n}`）的事，不由心跳每 tick
+/// 重开；「欲」本身照样每 tick 入格（它是流，不是状态）。
+fn long_goal_declared(store: &EventWalStore, goal: &str) -> bool {
+    store.range(Seq::new(0)).iter().any(|e| {
+        e.kind == EVENT_TASK_OPENED && e.payload.get("goal").and_then(|v| v.as_str()) == Some(goal)
+    })
 }
 
 #[cfg(test)]

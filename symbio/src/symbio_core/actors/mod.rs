@@ -517,12 +517,10 @@ impl CircuitBreaker {
 /// `pattern = decider`、`capabilities = [DefineWork]`、`budget_ms = 86400000`——
 /// 自主层不是新架构层，只是四层时延的第四个取值。**不可写 `chat.assistant.*`**
 /// （自主行为不得冒充用户对话；由 grants 保证，见测试）。
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
 pub struct AutonomousInitiator;
 
 impl AutonomousInitiator {
     /// 定时触发：**触发器产出事件，不是旁路**——自主行为同样走 I1 单通道。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
     pub fn trigger(&self, source_seq: u64) -> Event {
         Event::pending(
             format!("sys-{source_seq}"),
@@ -537,7 +535,6 @@ impl AutonomousInitiator {
     }
 
     /// 表达一条「欲」（E1：欲是数据，必带溯源——否则过不了 IntentGate）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
     pub fn express_intent(&self, goal: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("want-{source_seq}"),
@@ -552,7 +549,6 @@ impl AutonomousInitiator {
     }
 
     /// 把闸门批准的意图落成长目标任务（自主层 `budget_ms` 的完整取值）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
     pub fn open_long_goal(&self, task_id: &str, goal: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("o-{task_id}"),
@@ -570,12 +566,32 @@ impl AutonomousInitiator {
             "budget_ms": crate::symbio_core::adapters::LatencyTier::Autonomic.budget_ms(),
         }))
     }
+
+    /// 健康自检：触发时刻测得的状态入格（`system × progressed`）。
+    ///
+    /// [`Self::trigger`] 说"触发了"，本条说"触发时测得什么"——`system` 实体的两个
+    /// 格子一个开一个进（S12 §2 / [plan/01 §6](../../../../docs/plan/01-核心架构.md)
+    /// 的 `system` 行）。缺了它，健康自检永远没有事实，而"名字是数据、单点定义"
+    /// （ADR-043）又不允许插件自己拼 `"system.health"` 字面量——写入口只能在这里。
+    ///
+    /// `source_seq` 取触发事实的 seq：自检是**这一次触发**的观测附录，不是独立事件。
+    pub fn health_event(&self, source_seq: u64, idle_ms: i64) -> Event {
+        Event::pending(
+            format!("health-{source_seq}"),
+            crate::symbio_core::event::EVENT_SYSTEM_HEALTH,
+            crate::symbio_core::event::Entity::System,
+            crate::symbio_core::event::Verb::Progressed,
+            0,
+            "agent:autonomous",
+        )
+        .with_produced_by(source_seq)
+        .with_payload(serde_json::json!({ "idle_ms": idle_ms }))
+    }
 }
 
 /// 「欲」的治理策略（E3：平凡值 `enabled = false`——关掉后系统退化为纯响应式
 /// 且仍完整运行；两层开关独立，这是生产环境最需要的开关）。
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
 pub struct ConationPolicy {
     /// 是否允许「欲」升格为任务。
     pub enabled: bool,
@@ -595,7 +611,6 @@ impl Default for ConationPolicy {
 /// 候选意图：从 `conation.expressed` 事件**唯一**构造路径读出，
 /// 造出来一定**未被批准**——「欲」不得直接变成「行」（E2）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
 pub struct ConationCandidate {
     /// 源事件 seq（溯源锚）。
     pub seq: u64,
@@ -606,7 +621,6 @@ pub struct ConationCandidate {
 
 impl ConationCandidate {
     /// 唯一构造路径：从欲事件读出候选。**无溯源的欲构造不出候选**（I2 强化）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
     pub fn from_event(e: &Event) -> Option<Self> {
         if e.kind != crate::symbio_core::event::EVENT_CONATION_EXPRESSED {
             return None;
@@ -626,7 +640,6 @@ impl ConationCandidate {
         })
     }
 
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
     pub fn is_approved(&self) -> bool {
         self.approved
     }
@@ -635,14 +648,12 @@ impl ConationCandidate {
 /// 闸门能力令牌（ZST，私有构造 → 不可伪造；02 §2.3 E2 的可编译强制：
 /// 不持令牌则 `approve` 调用**编译失败**，`size_of == 0` 零运行时开销）。
 #[derive(Debug, Clone, Copy, Default)]
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
 pub struct GateWarrant {
     _private: (),
 }
 
 /// 闸门评估结论。
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
 pub enum IntentDecision {
     Approved,
     Rejected(&'static str),
@@ -650,19 +661,16 @@ pub enum IntentDecision {
 
 /// 经闸门批准后的可执行任务（只有这一条路能造出来）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
 pub struct ApprovedIntent {
     pub from_seq: u64,
     pub goal: String,
 }
 
 /// 意图闸门：**「欲」与「行」之间唯一的一道门**（02 §2.3 E2）。
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
 pub struct IntentGate;
 
 impl IntentGate {
     /// 评估：关停开关优先；目标过宽拒绝。真实系统里这里接价值偏好 / 预算 / 授权。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
     pub fn evaluate(candidate: &ConationCandidate, policy: &ConationPolicy) -> IntentDecision {
         if !policy.enabled {
             return IntentDecision::Rejected("conation disabled");
@@ -675,7 +683,6 @@ impl IntentGate {
 
     /// 升格：**唯一**能把 [`ConationCandidate`] 变成 [`ApprovedIntent`] 的函数。
     /// 要求 (a) 评估通过 (b) 持 [`GateWarrant`]（不持令牌 = 编译失败）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
     pub fn approve(
         candidate: &mut ConationCandidate,
         policy: &ConationPolicy,
@@ -695,7 +702,6 @@ impl IntentGate {
 
     /// 发牌入口——**故意做成唯一一道**：真要多一道门，就得再写一个发牌函数，
     /// 而那个函数是可见的、可审计的（不是靠约定）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
     pub fn issue_warrant() -> GateWarrant {
         GateWarrant { _private: () }
     }

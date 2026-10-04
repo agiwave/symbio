@@ -258,6 +258,35 @@ pub struct SessionConfig {
     /// 上界是"最多说几次"。没有它，一个长时间运行的任务会按间隔反复刷屏。
     #[serde(default = "default_progress_max_per_turn")]
     pub progress_max_per_turn: u32,
+    /// 「欲」升格为任务的总开关（**E3 平凡值：`false`**，[02 §2.3](../../../../docs/plan/02-能力坐标系.md)）。
+    ///
+    /// ## 它控制什么
+    ///
+    /// 心跳 tick 表达出来的意图（`conation.expressed`）要不要经 `IntentGate` 升格成
+    /// 长目标任务（`task.opened`，`budget_ms = 86400000`）：
+    /// - `true`：闸门按 `ConationPolicy` 评估（目标过宽仍拒），通过即开格；
+    /// - `false`：`IntentGate::approve` 恒 `Err("conation disabled")` ⇒ **一条自主
+    ///   任务都不产生**，而「欲」照样入格、照样可被读——退化为纯响应式且完整运行。
+    ///
+    /// ## 与心跳开关是**两层**，不合并
+    ///
+    /// 触发（`HeartbeatConfig::enabled`，按会话、藏在 `Session.metadata`）问的是
+    /// 「系统要不要定时做事」；本开关（按插件、藏在 `PLUGIN.yml`）问的是「做出来的事
+    /// 要不要升格为长期任务」。两者的平凡值都关，但关掉的是**不同的东西**——合成一个
+    /// 就没法只关其中一层（S12 §4「两层开关独立」）。
+    ///
+    /// 为什么放 session 的配置面：它是**治理策略**（授权 / 预算 / 审计的入口），
+    /// 不是某个插件的内部参数，归编排侧的旋钮面（与 `classify_enabled` 同一条）。
+    ///
+    /// ## 开着之后还有一道长度闸
+    ///
+    /// 闸门按 `ConationPolicy::default().max_goal_len`（**200 字节**）再判一次
+    /// 「目标过宽 ⇒ 拒」。心跳拿 `HeartbeatConfig::prompt` 本身当目标，中文提示词
+    /// 3 字节一个字 ⇒ 约 66 字之后就会每趟被 `goal too broad` 拒掉（拒绝会记日志、
+    /// `conation.expressed` 照样入格，但永远开不出长任务）。要开长目标，提示词就得
+    /// 短于这个上界。
+    #[serde(default = "default_conation_enabled")]
+    pub conation_enabled: bool,
     /// v2 会话链路的切换档位（`off` / `bridge`；默认 `bridge`，见 [`V2Mode`]）。
     ///
     /// 管辖范围：v2 事实桥的转写（`v2_bridge`——轮次收束写 `v2-events.wal`）。
@@ -338,6 +367,12 @@ pub fn default_progress_max_per_turn() -> u32 {
     5
 }
 
+pub fn default_conation_enabled() -> bool {
+    // E3 平凡值（02 §2.3）：关掉后「欲」照样入格、照样可读，只是不升格为任务——
+    // 系统退化为纯响应式且**仍完整运行**。开不开它是价值判断，不是架构选择。
+    false
+}
+
 impl SessionConfig {
     /// 下发给 `model_chat::Request::max_tool_rounds` 的值（契约翻译点）。
     ///
@@ -383,6 +418,7 @@ impl Default for SessionConfig {
             progress_interval_ms: default_progress_interval_ms(),
             progress_min_rounds: default_progress_min_rounds(),
             progress_max_per_turn: default_progress_max_per_turn(),
+            conation_enabled: default_conation_enabled(),
             v2_mode: V2Mode::default(),
         }
     }

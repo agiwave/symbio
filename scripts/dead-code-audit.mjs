@@ -349,7 +349,8 @@ if (rustWaived.length) {
 //      基线每次随该表的批次下调，不随本文件的意志上调。
 const R002_BASELINE = process.env.DEAD_CODE_R002_BASELINE
   ? Number(process.env.DEAD_CODE_R002_BASELINE)
-  : 36 // 04 §3.1 批⑩ 子批 B 摘 5（41 → 36）：插话抢占接线——actors/mod.rs 5（Preemption / PreemptionDecider / decide / held_event / control_event，消费方 plugins/session/transcript/inbox.rs 忙窗判定 + 空闲落格 + 插话轮后写恢复；同域新增 resume_event 无标记）
+  : 18 // 04 §3.1 批⑪ 子批 A 摘 18（36 → 18）：自主与意图闸门接线——actors/mod.rs 15（AutonomousInitiator / trigger / express_intent / open_long_goal / health_event、ConationPolicy、ConationCandidate 2、GateWarrant、IntentDecision、ApprovedIntent、IntentGate 3，消费方 plugins/session/heartbeat/mod.rs::record_autonomous_trigger 落格 → 闸门 → 动作点验牌）+ event/mod.rs 3（system.triggered / system.health / conation.expressed 名字表）
+  // 04 §3.1 批⑩ 子批 B 摘 5（41 → 36）：插话抢占接线——actors/mod.rs 5（Preemption / PreemptionDecider / decide / held_event / control_event，消费方 plugins/session/transcript/inbox.rs 忙窗判定 + 空闲落格 + 插话轮后写恢复；同域新增 resume_event 无标记）
   // 04 §3.1 批⑩ 子批 A 摘 5（46 → 41）：外部执行闸门接线——actors/mod.rs 4（GateDecision / CircuitBreaker / gate / break_event，消费方 plugins/session/tools/tool_executor.rs 判定 + v2_bridge.rs::record_to_wal 落格）+ event/mod.rs 1（EVENT_CONTROL_OPENED = task.controlled，写方同上按名写格）
   // 04 §3.1 批⑨ 摘 10（56 → 46）：任务表接线——projection/readyset.rs 3（ReadyTask / ReadySetView / readyset，读出口 stats 列 + 调度段两处消费）+ event/mod.rs 5（task.* 名字表，写方 plugins/session/v2_tasks.rs 按名写格）+ invariants/mod.rs 2（acyclic_deps / rework_bounded 进 check_all 七条）
   // 04 §3.1 批⑧ 摘 19（75 → 56）：身份 / 承诺 / 声誉全接线——actors/mod.rs 8（ActorSpec 3 起于 TurnInput.actor 入参 + run/run_streaming 平凡值、CommitmentKeeper 5 经 core 域内入口 commitment_events 落四格）+ projection/reputation.rs 7（stats.rs::read 新列 reputation，own/by_principal 全有全无）+ event/mod.rs 4（commitment.* 名字表，写方 v2_bridge::record_to_wal 按名写格）

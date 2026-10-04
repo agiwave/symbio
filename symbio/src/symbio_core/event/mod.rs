@@ -137,15 +137,12 @@ pub const EVENT_CONTROL_OPENED: &str = "task.controlled";
 
 /// 定时触发：没有用户消息时的自主行为起点。落在 `system × opened`。
 /// **触发器产出事件，不是旁路**——自主行为同样走 I1 单通道、I2 带溯源。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑪ 接线后摘除
 pub const EVENT_SYSTEM_TRIGGERED: &str = "system.triggered";
 /// 健康自检。落在 `system × progressed`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑪ 接线后摘除
 pub const EVENT_SYSTEM_HEALTH: &str = "system.health";
 /// 「欲」的表达：一条意图出现（E1：欲是数据，走 I1 单通道、I2 带溯源——
 /// 无 `produced_by` 的欲事件**构造不出**候选意图，见 ② IntentGate）。
 /// 落在 `conation × opened`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑪ 接线后摘除
 pub const EVENT_CONATION_EXPRESSED: &str = "conation.expressed";
 
 /// 事件实体 —— 语法网格的**行**，闭集（F5，10 个）。

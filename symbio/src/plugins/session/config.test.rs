@@ -164,3 +164,17 @@ fn v2_mode_defaults_to_bridge_and_roundtrips() {
     let from_empty: SessionConfig = serde_json::from_str("{}").unwrap();
     assert_eq!(from_empty.v2_mode, V2Mode::Bridge);
 }
+
+/// 「欲」升格开关出厂关着（E3 平凡值，02 §2.3）：关掉后心跳照常触发、「欲」照常
+/// 入格，只是**一条自主任务都不产生**——退化为纯响应式且仍完整运行。
+///
+/// 这条默认值一旦翻转，每个开了心跳的会话都会凭空多出 `budget_ms = 86400000` 的
+/// 长目标进就绪集（模型唯一的调度候选来源），属于必须钉住的出厂决定。
+#[test]
+fn conation_is_off_by_default_and_falls_back_when_the_key_is_missing() {
+    let d = SessionConfig::default();
+    assert!(!d.conation_enabled);
+    assert!(!default_conation_enabled());
+    let from_empty: SessionConfig = serde_json::from_str("{}").unwrap();
+    assert!(!from_empty.conation_enabled);
+}
