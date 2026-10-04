@@ -45,14 +45,17 @@ pub use view::Budget;
 // ==================== 主体（v2 阶段 S1，② actors） ====================
 // 只收类型化输入、只产事件（plan/05 §3.1 ② 行）；S1 落 Decider 平凡值，S2 加 Reasoner。
 pub use actors::{Pattern, Reasoner, TurnInput, TurnOutcome, TurnResume, TurnRunner};
-// 外部执行闸门（S8 第 20 步）、插话抢占判定（S8 第 19 步）与自主发起 + 意图闸门
-// （S9 第 21 步）：判定在 core、接线在 `plugins/session`（闸门进工具执行闸，判定者
-// 进收件箱忙窗，自主侧进心跳 tick）。
+// 外部执行闸门（S8 第 20 步）、插话抢占判定（S8 第 19 步）、自主发起 + 意图闸门
+// （S9 第 21 步）与技能编译 + 路由（S9 第 22 步）：判定在 core、接线在
+// `plugins/session`（闸门进工具执行闸，判定者进收件箱忙窗，自主侧进心跳 tick，
+// 技能进 `v2_skills`）。**必须整对**：闸门与自主层同批成对（否则"自主写入对话"，
+// 04 §3.1），编译与路由同批成对（否则回退永远不会发生——编译不入格就没有
+// `skill_id`、路由不落观测就没有 `fallback`，置信度恒 1.0，S11 §5 静默失效）。
 // `pub(crate) use` 而非 `pub use`：消费方全在本 crate 内，进根公开面只会给
 // C-003（根导出须 ≥2 个消费方）凭空添待办——C-003 只数 `pub use`。
 pub(crate) use actors::{
     AutonomousInitiator, CircuitBreaker, ConationCandidate, ConationPolicy, GateDecision,
-    IntentGate, Preemption, PreemptionDecider,
+    IntentGate, Preemption, PreemptionDecider, SkillCompiler, SkillRoute, SkillRouter,
 };
 // 事件名字表（名字是数据，单点定义）。
 pub use event::{

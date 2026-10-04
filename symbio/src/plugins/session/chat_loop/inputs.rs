@@ -182,6 +182,25 @@ pub(crate) async fn prepare_turn_inputs(
             }
             _ => None,
         };
+        // 技能路由（S9 步 22，[04 §3.1 批⑪](../../../../docs/plan/04-工程落地.md)）：
+        // 置信度闸判 + 把低置信的技能**摘出本轮召回视图**（反自动化回退，S11 §5）。
+        // 与召回 / 调度段同一条 `tool_rounds == 0` 口径（同一轮内判定不漂移），也同
+        // 「`off` 档与临时会话不读不写」——没有事实源就没有技能，无从判。
+        // 判决存进 `TurnState::skill_route`，轮末收束才入格（溯源锚那时才在事实源里）。
+        turn.skill_route = match context.session.session_dir() {
+            Some(dir)
+                if !matches!(
+                    context.session.v2_mode(),
+                    crate::plugins::session::config::V2Mode::Off
+                ) =>
+            {
+                turn.recall_view
+                    .as_mut()
+                    .map(|view| crate::plugins::session::v2_skills::route(&dir, view))
+                    .unwrap_or_default()
+            }
+            _ => Vec::new(),
+        };
     }
     let recall_section = turn
         .recall_view

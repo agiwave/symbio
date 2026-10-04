@@ -739,6 +739,7 @@ async fn finish_turn(
                         &turn.delegations,
                         &turn.task_decls,
                         &turn.gate_breaks,
+                        &turn.skill_route,
                     );
                 }
             }
@@ -757,6 +758,7 @@ async fn finish_turn(
                         &turn.delegations,
                         &turn.task_decls,
                         &turn.gate_breaks,
+                        &turn.skill_route,
                     );
                 }
             }

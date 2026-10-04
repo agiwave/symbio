@@ -23,7 +23,7 @@ use std::path::PathBuf;
 
 use crate::symbio_core::{
     Entity, Event, EventWalStore, PermissionMatrix, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK,
-    EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_FINAL, EVENT_MEMORY_RECALLED, EVENT_USER_MESSAGE,
 };
 
 use super::chat_session::PersistentChatSession;
@@ -48,8 +48,14 @@ pub(crate) enum V2Closure {
 ///
 /// `delegations` / `tasks` 同一形态：工具执行层的出参（批⑧ 的承诺 / 批⑨ 的任务表），
 /// 一路带到这里入格——工具执行层没有事实源，谁负责入格谁负责开这扇门。
-// 9 个参数：收束转写的全部输入各自独立（轮次上下文 / 档位 / 记忆 / 承诺 / 任务表 /
-// 熔断各一条出路），打包成 struct 只多一层间接；单一调用点（chat_loop）传入，
+///
+/// `skill_obs` 同一形态：读侧的出参（`v2_skills::route` 在 `prepare_turn_inputs` 里
+/// 拿置信度闸判的逐条 `(skill_id, fallback)`），轮末落一条 `memory.recalled` 载荷——
+/// `calibration` 投影只认带这两个字段的事件，**不落它，回退一次都不会发生**
+/// （S11 §5 静默失效第 2 行）。技能编译不额外传参：开关在 `session` 上，本函数
+/// 已经拿着它。
+// 10 个参数：收束转写的全部输入各自独立（轮次上下文 / 档位 / 记忆 / 承诺 / 任务表 /
+// 熔断 / 技能判定各一条出路），打包成 struct 只多一层间接；单一调用点（chat_loop）传入，
 // 显式豁免参数数上限。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn record(
@@ -62,6 +68,7 @@ pub(crate) fn record(
     delegations: &[super::tools::Delegation],
     tasks: &[super::tools::TaskDeclaration],
     breaks: &[&'static str],
+    skill_obs: &[(String, bool)],
 ) {
     // 总开关（`v2_mode`，ADR-045 过渡期的切换档位）：`off` 档网格零增长
     // （用户关的是数据源，不是对话）。`bridge` 档：v1 轮次全部经此转写；
@@ -84,6 +91,8 @@ pub(crate) fn record(
         delegations,
         tasks,
         breaks,
+        skill_obs,
+        session.skill_compile_enabled(),
     );
     if let Err(why) = result {
         crate::plugin_warn!(
@@ -95,7 +104,7 @@ pub(crate) fn record(
     }
 }
 
-// 10 个参数：见 `record` 的同类豁免（本函数是它的落格体，形状随行）。
+// 12 个参数：见 `record` 的同类豁免（本函数是它的落格体，形状随行）。
 #[allow(clippy::too_many_arguments)]
 fn record_to_wal(
     wal: PathBuf,
@@ -107,6 +116,8 @@ fn record_to_wal(
     delegations: &[super::tools::Delegation],
     tasks: &[super::tools::TaskDeclaration],
     breaks: &[&'static str],
+    skill_obs: &[(String, bool)],
+    skill_compile: bool,
 ) -> Result<(), String> {
     let store = EventWalStore::open(&wal).map_err(|e| format!("打开 WAL 失败：{e}"))?;
     let snapshot = store.range(Seq::new(0));
@@ -138,18 +149,22 @@ fn record_to_wal(
         .map(|s| s.value())
         .map_err(|e| format!("用户消息入格失败：{e:?}"))?;
 
-    let (id, kind, payload, cost_ms) = match closure {
+    // 第 5 个返回值是**成功收束的正文**（技能编译的输入）：`text` 在 json! 里被
+    // 消费，兜底收束没有可固化的回答 ⇒ `None`（只编译走得通的路，S11 §2）。
+    let (id, kind, payload, cost_ms, success_text) = match closure {
         V2Closure::Final { text, cost_ms } => (
             format!("v2f-{user_id}-a{attempt}"),
             EVENT_ASSISTANT_FINAL,
-            serde_json::json!({ "text": text, "model": "v1-chat_loop" }),
+            serde_json::json!({ "text": text.clone(), "model": "v1-chat_loop" }),
             cost_ms,
+            Some(text),
         ),
         V2Closure::Fallback { why, cost_ms } => (
             format!("v2fb-{user_id}-a{attempt}"),
             EVENT_ASSISTANT_FALLBACK,
             serde_json::json!({ "why": why }),
             cost_ms,
+            None,
         ),
     };
 
@@ -284,6 +299,46 @@ fn record_to_wal(
     }
     if let Err(why) = super::v2_memory::consolidate(&store, &store.range(Seq::new(0)), turn, now) {
         remember("步 13 巩固", why);
+    }
+
+    // ── 步 22 · 技能路由观测 + 技能编译（S11，04 §3.1 批⑪ 子批 B）────────────
+    //
+    // 观测在前：它记的是**本轮判没判、判成什么**，编译产出的是**下一轮才可能被
+    // 用的技能**。两者溯源锚都是 `user_seq`（I2），彼此顺序不影响任何不变量。
+    //
+    // 观测只带数据 `{ skill_id, fallback }`——`calibration` 投影的契约就是这两个
+    // 字段（S11 §3「不加新格子」：复用 `memory.recalled`，它的 `payload` 由写方
+    // 决定）。**没有这一步，回退永远不会发生**：零使用时置信度按 1.0 算，技能
+    // 再错也一直被用，S11 §5 的「一直用错技能而自己不知道」当场应验。
+    for (n, (skill_id, fallback)) in skill_obs.iter().enumerate() {
+        let ev = Event::pending(
+            format!("v2s-{user_id}-a{attempt}-{n}"),
+            EVENT_MEMORY_RECALLED,
+            Entity::Memory,
+            Verb::Asserted,
+            turn,
+            principal,
+        )
+        .with_produced_by(user_seq)
+        .with_ts(now)
+        .with_payload(serde_json::json!({ "skill_id": skill_id, "fallback": fallback }));
+        if let Err(e) = store.append(ev) {
+            remember("步 22 路由观测", format!("{e:?}"));
+        }
+    }
+
+    // 技能编译：只编译**成功**收束（`success_text` = `V2Closure::Final` 的正文）——
+    // 兜底说明这条路自己没走通，固化它等于把失败写成套路。开关 `skill_compile_enabled`
+    // 默认 off（S11 §4 平凡值「不编译，只检索」）：关着时读侧逐条跳过，整条
+    // 编译 → 校准 → 回退链路原地待命、不产生任何事实。
+    if skill_compile {
+        if let Some(response) = success_text.as_deref() {
+            if let Err(why) = super::v2_skills::compile(
+                &store, &snapshot, turn, user_seq, user_text, response, now,
+            ) {
+                remember("步 22 技能编译", why);
+            }
+        }
     }
     Ok(())
 }

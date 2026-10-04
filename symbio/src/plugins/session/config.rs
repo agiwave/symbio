@@ -287,6 +287,26 @@ pub struct SessionConfig {
     /// 短于这个上界。
     #[serde(default = "default_conation_enabled")]
     pub conation_enabled: bool,
+    /// 技能编译的总开关（**S11 §4 平凡值：`false`**，[roadmap/S11 §4](../../../../docs/plan/roadmap/S11-技能编译与自我改进.md)）。
+    ///
+    /// ## 它控制什么
+    ///
+    /// 轮末收束时，本轮的**成功轨迹**（`V2Closure::Final`）要不要被固化成一条
+    /// `memory.encoded{tag:"skill"}`——S11 §4 的平凡值 `projection = recall` 说的
+    /// 正是「不编译，只检索」：
+    /// - `true`：`v2_skills::compile` 在收束时写技能事件（同文去重，同一句 trigger
+    ///   至多编译一次），本轮的用户发言与助手回答一起被固化下来；
+    /// - `false`：**零技能事件** ⇒ 读侧 `v2_skills::route` 逐条跳过，置信度闸与
+    ///   反自动化回退整条链路原地待命、不产生任何事实——与 [`conation_enabled`]
+    ///   同一条「关掉后系统退化为纯响应式且仍完整运行」。
+    ///
+    /// ## 它**不**等于"开了就更快"
+    ///
+    /// 快路（`SkillRoute::SkillFastPath`）今天只作用在**提示词**上：低置信的技能
+    /// 会被摘出本轮召回视图（回退）。「真正跳过模型、跑出 S11 §6.2 的命中 P99 比
+    /// 未命中快 ≥ 3×」是执行档位与埋点那半边的事，不在本开关的管辖内。
+    #[serde(default = "default_skill_compile_enabled")]
+    pub skill_compile_enabled: bool,
     /// v2 会话链路的切换档位（`off` / `bridge`；默认 `bridge`，见 [`V2Mode`]）。
     ///
     /// 管辖范围：v2 事实桥的转写（`v2_bridge`——轮次收束写 `v2-events.wal`）。
@@ -373,6 +393,13 @@ pub fn default_conation_enabled() -> bool {
     false
 }
 
+pub fn default_skill_compile_enabled() -> bool {
+    // S11 §4 平凡值：`projection = recall`（不编译，只检索）。关掉后技能链路
+    // （编译 → 校准 → 回退）整条退到「没有技能」的形态，而召回 / 巩固照常跑；
+    // 技能从经验里学来，不是系统的前提。
+    false
+}
+
 impl SessionConfig {
     /// 下发给 `model_chat::Request::max_tool_rounds` 的值（契约翻译点）。
     ///
@@ -419,6 +446,7 @@ impl Default for SessionConfig {
             progress_min_rounds: default_progress_min_rounds(),
             progress_max_per_turn: default_progress_max_per_turn(),
             conation_enabled: default_conation_enabled(),
+            skill_compile_enabled: default_skill_compile_enabled(),
             v2_mode: V2Mode::default(),
         }
     }

@@ -57,6 +57,8 @@ fn final_closure_writes_user_and_final_with_cost() {
         &[],
         &[],
         &[],
+        &[],
+        false,
     )
     .expect("转写成功");
 
@@ -135,6 +137,8 @@ fn retry_of_same_message_increments_attempt_and_new_message_increments_turn() {
         &[],
         &[],
         &[],
+        &[],
+        false,
     )
     .unwrap();
     record_to_wal(
@@ -150,6 +154,8 @@ fn retry_of_same_message_increments_attempt_and_new_message_increments_turn() {
         &[],
         &[],
         &[],
+        &[],
+        false,
     )
     .expect("重试转写成功（id 不撞 = 幂等键不冲突）");
     record_to_wal(
@@ -165,6 +171,8 @@ fn retry_of_same_message_increments_attempt_and_new_message_increments_turn() {
         &[],
         &[],
         &[],
+        &[],
+        false,
     )
     .unwrap();
 
@@ -216,6 +224,8 @@ fn reopen_recovers_events_with_seq() {
         &[],
         &[],
         &[],
+        &[],
+        false,
     )
     .unwrap();
     let count_before = EventWalStore::open(&wal).unwrap().range(Seq::new(0)).len();
@@ -341,6 +351,7 @@ async fn v2_mode_off_disables_recording() {
         &[],
         &[],
         &[],
+        &[],
     );
     let dir = off_session.session_dir().expect("持久会话有目录");
     assert!(!dir.join("v2-events.wal").exists(), "off 档不得写 WAL");
@@ -361,6 +372,7 @@ async fn v2_mode_off_disables_recording() {
             cost_ms: 1,
         },
         None,
+        &[],
         &[],
         &[],
         &[],
@@ -422,6 +434,8 @@ fn record_to_wal_wires_all_three_memory_steps() {
             &[],
             &[],
             &[],
+            &[],
+            false,
         )
         .expect("转写成功");
     }
@@ -471,6 +485,8 @@ fn record_to_wal_wires_all_three_memory_steps() {
         &[],
         &[],
         &[],
+        &[],
+        false,
     )
     .expect("转写成功");
 
@@ -520,6 +536,8 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
         &delegations,
         &[],
         &[],
+        &[],
+        false,
     )
     .expect("转写成功");
 
@@ -610,6 +628,8 @@ fn breached_delegation_is_declared_to_the_counterparty() {
         &delegations,
         &[],
         &[],
+        &[],
+        false,
     )
     .expect("转写成功");
 
@@ -679,6 +699,8 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
         &[],
         &[],
         &["budget-exhausted"],
+        &[],
+        false,
     )
     .expect("转写成功");
 
@@ -721,6 +743,8 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
         &[],
         &[],
         &[],
+        &[],
+        false,
     )
     .expect("转写成功");
     let snap = EventWalStore::open(&quiet)

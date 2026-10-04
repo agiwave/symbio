@@ -179,6 +179,20 @@ pub(crate) struct TurnState {
     /// 落 `memory.recalled` 的时机在**轮末收束**（`v2_bridge::record`）而不是取视图
     /// 那一刻：溯源锚是本轮 `user.message` 格，那时它才在事实源里。
     pub(crate) recall_view: Option<crate::symbio_core::RecallView>,
+    /// 本轮**技能路由**的判定（S9 步 22，[04 §3.1 批⑪](../../../../docs/plan/04-工程落地.md)）：
+    /// 每条 `(skill_id, fallback)`，即 `v2_skills::route` 对召回视图里一条技能的判决。
+    ///
+    /// 形态与 [`TurnState::gate_breaks`] / [`TurnState::task_decls`] 完全对称：
+    /// **读侧填**（`prepare_turn_inputs` 拿置信度闸判），**轮末收束入格**
+    /// （`v2_bridge::record` → 一条 `memory.recalled` 载荷 `{skill_id, fallback}`），
+    /// 中间隔着同一段本轮收尾，所以要有个请求作用域的量存它。
+    ///
+    /// 为什么不能在收束那一刻现算：回退的判决同时**改写了 `recall_view`
+    ///**（低置信的技能被摘出本轮视图），事后重算看到的是已经被改过的视图，
+    /// 判决与它作用的对象对不上；而且溯源锚要等到 `user.message` 落盘才存在。
+    /// 空表 = 本轮没召回技能 / 没判（与 `None` 的「取都没取」不同，但收束侧
+    /// 一视同仁）。
+    pub(crate) skill_route: Vec<(String, bool)>,
     /// 本轮的**调度段**（S7 步 16–17，[04 §3.1 批⑨](../../../../docs/plan/04-工程落地.md)）：
     /// 就绪任务集渲染成的一段提示，交给**本轮的执行者**（模型）。
     ///

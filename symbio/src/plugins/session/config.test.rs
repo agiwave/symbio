@@ -178,3 +178,20 @@ fn conation_is_off_by_default_and_falls_back_when_the_key_is_missing() {
     let from_empty: SessionConfig = serde_json::from_str("{}").unwrap();
     assert!(!from_empty.conation_enabled);
 }
+
+/// 技能编译开关出厂关着（S11 §4 平凡值 `projection = recall`：不编译，只检索）。
+///
+/// 这条默认值一旦翻转，每个会话都会在收束时凭空多出一条 `memory.encoded`——
+/// 技能集随对话长度增长，而它的回退机制还没被用户认可过。关掉时整条
+/// 编译 → 校准 → 回退链路**原地待命且不产生任何事实**，系统退化为纯检索。
+#[test]
+fn skill_compile_is_off_by_default_and_falls_back_when_the_key_is_missing() {
+    let d = SessionConfig::default();
+    assert!(!d.skill_compile_enabled);
+    assert!(!default_skill_compile_enabled());
+    let from_empty: SessionConfig = serde_json::from_str("{}").unwrap();
+    assert!(!from_empty.skill_compile_enabled);
+    // 键是**可配**的（默认值不是不可覆盖的常量）。
+    let on: SessionConfig = serde_json::from_str(r#"{"skill_compile_enabled":true}"#).unwrap();
+    assert!(on.skill_compile_enabled);
+}

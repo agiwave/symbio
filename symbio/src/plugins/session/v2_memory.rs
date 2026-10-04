@@ -377,10 +377,13 @@ pub(crate) fn consolidate(
     Ok(Some(consolidated_seq.value()))
 }
 
-// ==================== 私有小工具 ====================
+// ==================== 小工具 ====================
 
 /// 按**字符**截断（不切 UTF-8 字节）。
-fn truncate_chars(text: &str, max_chars: usize) -> String {
+///
+/// `pub(crate)` 只为共享给 [`super::v2_skills`]：技能的 trigger / response 走同一个
+/// 上限（技能内容同样要进提示词，两处各写一份上限迟早分叉）。
+pub(crate) fn truncate_chars(text: &str, max_chars: usize) -> String {
     if text.chars().count() <= max_chars {
         return text.to_string();
     }

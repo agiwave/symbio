@@ -712,12 +712,10 @@ impl IntentGate {
 /// 编译 = 把成功执行轨迹固化为一条 `memory.encoded{tag:"skill"}` 事件——
 /// **技能是事实，不是特殊类型**。编译产出的技能事件**必带溯源**
 /// （`produced_by` 指向源轨迹；I2 断言，技能溯源 100%）。
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
 pub struct SkillCompiler;
 
 impl SkillCompiler {
     /// 编译一条技能。`source_seq`：源轨迹（成功任务的终态事件）seq。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
     pub fn compile(&self, skill_id: &str, trigger: &str, response: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("skill-{skill_id}-{source_seq}"),
@@ -740,7 +738,6 @@ impl SkillCompiler {
 /// 路由结论：命中技能走快路（`budget_ms = 80`），否则**必须回退**完整推理
 /// （反自动化回退，Beilock & Carr 2001——全自动化在压力下以异常方式失效）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
 pub enum SkillRoute {
     /// 技能命中：反射档快路。
     SkillFastPath { budget_ms: u64 },
@@ -749,11 +746,9 @@ pub enum SkillRoute {
 }
 
 /// 技能路由者：按校准置信度决定走技能还是回退（校准值低于阈值 ⇒ 不得走技能路径）。
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
 pub struct SkillRouter;
 
 impl SkillRouter {
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑪ 接线后摘除
     pub fn route(&self, confidence: f64, threshold: f64) -> SkillRoute {
         if confidence >= threshold {
             SkillRoute::SkillFastPath {
