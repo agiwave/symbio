@@ -45,10 +45,11 @@ pub use view::Budget;
 // ==================== 主体（v2 阶段 S1，② actors） ====================
 // 只收类型化输入、只产事件（plan/05 §3.1 ② 行）；S1 落 Decider 平凡值，S2 加 Reasoner。
 pub use actors::{Pattern, Reasoner, TurnInput, TurnOutcome, TurnResume, TurnRunner};
-// 外部执行闸门（S8 第 20 步）：判定在 core、接线在 `plugins/session`。
+// 外部执行闸门（S8 第 20 步）与插话抢占判定（S8 第 19 步）：判定在 core、接线在
+// `plugins/session`（闸门进工具执行闸，判定者进收件箱忙窗）。
 // `pub(crate) use` 而非 `pub use`：消费方全在本 crate 内，进根公开面只会给
-// C-003（根导出须 ≥2 个消费方）凭空添两条待办——C-003 只数 `pub use`。
-pub(crate) use actors::{CircuitBreaker, GateDecision};
+// C-003（根导出须 ≥2 个消费方）凭空添待办——C-003 只数 `pub use`。
+pub(crate) use actors::{CircuitBreaker, GateDecision, Preemption, PreemptionDecider};
 // 事件名字表（名字是数据，单点定义）。
 pub use event::{
     EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,

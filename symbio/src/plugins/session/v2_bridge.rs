@@ -169,6 +169,22 @@ fn record_to_wal(
         prior_closures == 0,
     )?;
 
+    // ── 收束发言先落，派生事实随后 ─────────────────────────────────────────
+    // 顺序是判据，不是排版：`PreemptionDecider::decide` 的「final 已发出 → 排队」
+    // 边界（04 §2.3 步 1）比的是**任务开格之后**有没有收束发言。若 final 落在
+    // `task.opened` 之后，那么宣告这个任务的那条发言自己就满足了该条件——抢占
+    // 在生产里一次都不会发生（只有 fallback 收束例外），判定被接入却永远走不到
+    // `Suspend`，正是 S07 §5 要防的静默失效。改为先落这一轮说了什么、再落它派生
+    // 出的承诺 / 任务 / 熔断：三者溯源锚都是 `user_seq`，彼此顺序不影响任何不变量。
+    store
+        .append(
+            Event::pending(id, kind, Entity::Turn, Verb::Closed, turn, principal)
+                .with_produced_by(user_seq)
+                .with_cost_ms(cost_ms)
+                .with_payload(payload),
+        )
+        .map_err(|e| format!("收束事件入格失败：{e:?}"))?;
+
     // ── 承诺（04 §3.1 批⑧，S08 §3「加格子，不加机制」）──────────────────
     // 本轮代际立约随收束入格：溯源锚是刚落的 `user.message`（`user_seq`）——
     // 承诺是「这轮我答应了什么」，锚必须落在这一轮的开口上，否则立约会漂在
@@ -232,15 +248,6 @@ fn record_to_wal(
             );
         }
     }
-
-    store
-        .append(
-            Event::pending(id, kind, Entity::Turn, Verb::Closed, turn, principal)
-                .with_produced_by(user_seq)
-                .with_cost_ms(cost_ms)
-                .with_payload(payload),
-        )
-        .map_err(|e| format!("收束事件入格失败：{e:?}"))?;
 
     // ── 记忆三段（S5 步 11–13，04 §3.1 批⑦）：本轮收束时写记忆 ────────────
     // 顺序有讲究：

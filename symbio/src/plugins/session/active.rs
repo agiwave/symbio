@@ -47,6 +47,35 @@ pub struct InboxItem {
     pub workdir: Option<String>,
 }
 
+/// 抢占判定的**待结算项**（S8 第 19 步，[plan/04 §2.2](../../../docs/plan/04-工程落地.md)）。
+///
+/// 判定与落格必须分开，因为两者要的时刻不同：
+/// - **判定**只能在忙窗（`is_working == true` 且有插话排着）做——那时事实源里只有
+///   上一轮的收束转写，而写方（`record_to_wal`）还在等这一轮收尾，并发 append 会
+///   重复 `head`（同会话不许两个写方并存）；
+/// - **落格**只能在空闲分支做——`task.held` 要在插话轮**开跑之前**就位，
+///   `task.progress`（恢复）要等插话轮**结束之后**再写。
+///
+/// 中间这段时间由本项背着跨过去，所以它住在会话状态里而不是栈上。
+///
+/// 三态而非两态：`Hold` 是"判出来了但还没落格"，`Resume` 是"落了格等收"。
+/// 少一态就会把"待收"和"未判"混为一谈——那会让挂起在插话轮结束后永久留存，
+/// 任务从此不进 `readyset`，且没有任何一条消息说得出为什么（S07 §5 的静默失效）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PreemptPending {
+    /// 无事待办（未判过，或已结清）。
+    None,
+    /// 判出挂起，尚未写入事实源。
+    Hold {
+        /// 被挂起的存活任务节点。
+        task_id: String,
+        /// 挂起锚（任务开格 seq，随事实一起落盘，见 `held_event`）。
+        as_of_seq: u64,
+    },
+    /// 挂起已落格，等插话轮结束写恢复事件。
+    Resume { task_id: String },
+}
+
 /// 会话内部状态 (封装为单个锁定对象以保证原子性)
 pub struct ActiveSessionStateInner {
     pub is_working: bool,
@@ -104,6 +133,13 @@ pub struct ActiveSessionStateInner {
     /// 落库并出现在转写里，队列里因此只留"还没轮到"的那些——
     /// 「正在处理的那条」在转写里，不在队列里（取消它走中止，不走删条目）。
     pub inbox: VecDeque<InboxItem>,
+    /// **一忙窗一判**的标记（见 [`PreemptPending`]）：`task.*` 与
+    /// `chat.assistant.final` 都只在收束转写时入格，
+    /// 忙窗内事实源不会长出新的判据，所以判过一次就够了——留个标记免得每 50ms
+    /// 重放一遍整条 WAL。空闲分支复位它，下一轮忙窗重新判。
+    pub preempt_judged: bool,
+    /// 抢占判定的待结算项（见 [`PreemptPending`]）。
+    pub preempt: PreemptPending,
 }
 
 /// 会话状态锚点
@@ -160,6 +196,8 @@ impl ActiveSessionState {
                 auto_compress_circuit_opened_at: None,
                 auto_compress_over_limit: false,
                 inbox: VecDeque::new(),
+                preempt_judged: false,
+                preempt: PreemptPending::None,
             }),
             transcript: Arc::new(Mutex::new(super::transcript::Transcript::new(
                 session_id,

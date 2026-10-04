@@ -498,7 +498,19 @@ export const BASELINE = {
   //      验收 = 判据读矩阵 1 例（非 agent 主体 fail-closed）+ 台账吃满即拒且走出参
   //      1 例 + 放宽预算翻面 1 例（S09 §6.4 反向：预算在生效而非常量）+
   //      桥入格与空出参静默 1 例（S09 §6 验收 1 与 2 两条相反判据）。
-  rustTests: 1270,
+  // 1274（插话抢占，2026-10-04）——`1270 → 1274`，**+4**。
+  //      04 §3.1 批⑩ 子批 B（S8 步 19）接线：`transcript/inbox.rs` 忙窗**只判不落**
+  //      （队列非空 + 一忙窗一判，`Instant` 计时读只读事实源 →
+  //      `PreemptionDecider::decide(.., LatencyTier::Reflex.budget_ms())`），空闲分支
+  //      **先取批、有插话才落格**（`held_event` + `control_event`，锚 = 落格前
+  //      `head`），插话轮结束后落 `resume_event`；状态跨忙窗住在
+  //      `ActiveSessionStateInner::preempt`，唤醒条件扩成 `has_pending_work`。
+  //      判据输入由 `record_to_wal` 保证：收束发言先于承诺 / 任务入格。
+  //      验收 = 忙判 → 空闲落格 → 插话轮 → 收恢复全程 1 例（就绪集出 / 回 +
+  //      `check_all` 恒空）+ 反向 1 例（收束发言在任务之后 ⇒ 判为排队、零事实，
+  //      证明挂起是判出来的）+ 未结清判定不能睡过去 1 例 + 没有事实源时结清走通
+  //      1 例（`Ok(None)` 清状态、`Err` 留着重试，两者分界错一边就是 J3 或空转）。
+  rustTests: 1274,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

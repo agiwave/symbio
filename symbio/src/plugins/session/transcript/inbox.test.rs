@@ -1,11 +1,12 @@
-//! `transcript/inbox.rs` 的单元测试（入队 / 取消 / 清空 / 忙则排队）。
+//! `transcript/inbox.rs` 的单元测试（入队 / 取消 / 清空 / 忙则排队 / 抢占落格）。
 //!
 //! ## 这里**不**测"跑一轮"
 //!
 //! 真跑一轮要整棵树（能力收集 + 模型 provider），那是 e2e 的活（`e2e/cases/t15-*.mjs`）。
-//! 本文件锁的是队列本身的规则：顺序、身份、两种取消的分界、**忙则排队**。
-//! 后者是 ADR-026 的核心承诺之一，而它恰好**能**在单测里钉死——因为它判的是
-//! "这一趟要不要动队列"，与跑得成跑不成无关。
+//! 本文件锁的是队列本身的规则：顺序、身份、两种取消的分界、**忙则排队**，以及
+//! 忙窗里那条**只判不落、空闲才落格**的抢占链。前几者是 ADR-026 的核心承诺，
+//! 后者是 S8 第 19 步的落格时序——它们恰好**能**在单测里钉死，因为判的都是
+//! "这一趟要不要动队列 / 动事实源"，与跑得成跑不成无关。
 
 use super::*;
 use crate::plugins::session::plugin::SessionConfig;
@@ -315,4 +316,280 @@ async fn zero_bound_is_clamped_to_one() {
 
     let batch = p.take_inbox_batch(&state).await;
     assert_eq!(batch.len(), 1, "上界 0 会让队列永不消费，必须兜到 1");
+}
+
+// ────────────── 插话抢占：忙窗判、空闲落、收在插话轮之后（S8 第 19 步）───────
+//
+// 上面几例钉的是**队列**规则（忙则排队，ADR-026）；这一段钉的是跨过忙窗的那条
+// 链子。断言一律看**就绪集**：`readyset` 是模型唯一的调度候选来源，挂起没落格、
+// 恢复没落格对用户都是「任务凭空消失 / 永不复活」，而两者都**不报错**——
+// 正是 04 §2.2 步 6 要防的静默失效。
+
+/// 每例独占存储根：抢占要往事实源写格，共用 `test_dir()` 会跨用例串味。
+fn preempt_plugin() -> (tempfile::TempDir, Arc<SessionPlugin>) {
+    let dir = tempfile::tempdir().expect("临时目录创建失败");
+    let plugin = Arc::new(SessionPlugin::new(
+        None,
+        SessionConfig::default(),
+        crate::symbio_core::PluginDir::at(dir.path(), "session"),
+    ));
+    (dir, plugin)
+}
+
+fn wal_path(p: &SessionPlugin, sid: &str) -> std::path::PathBuf {
+    crate::plugins::session::paths::session_dir(&p.storage_dir(), sid)
+        .join(crate::plugins::session::paths::V2_WAL_FILE)
+}
+
+/// 往该会话的事实源写一批事实（模拟上一轮的收束转写）。
+///
+/// 目录要自己建：`WalStore::open` 是「写方已经就位」的入口，盘上没这层目录属
+/// 存储层灾难、直接 panic（生产里由统一发送链路先落会话目录）。
+fn seed_wal(p: &SessionPlugin, sid: &str, facts: Vec<crate::symbio_core::Event>) {
+    let path = wal_path(p, sid);
+    std::fs::create_dir_all(path.parent().expect("WAL 路径必有父目录")).expect("会话目录创建失败");
+    let store = EventWalStore::open(&path).expect("打开 WAL");
+    for fact in facts {
+        store.append(fact).expect("事实入格");
+    }
+}
+
+fn read_wal(p: &SessionPlugin, sid: &str) -> Vec<crate::symbio_core::Event> {
+    EventWalStore::open_readonly(wal_path(p, sid))
+        .expect("只读打开 WAL")
+        .range(Seq::new(0))
+}
+
+/// 一轮的事实。`final_first` = 收束发言在 `task.opened` **之前**——这正是
+/// `record_to_wal` 的落笔顺序（04 §2.1 的判据输入，见那里的「顺序是判据」注记）。
+fn turn_facts(final_first: bool) -> Vec<crate::symbio_core::Event> {
+    use crate::symbio_core::{Entity, Event, Verb, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
+
+    let user = Event::pending(
+        "u1",
+        EVENT_USER_MESSAGE,
+        Entity::Turn,
+        Verb::Opened,
+        0,
+        "user:t",
+    );
+    let final_msg = Event::pending(
+        "f1",
+        EVENT_ASSISTANT_FINAL,
+        Entity::Turn,
+        Verb::Closed,
+        0,
+        "agent:t",
+    )
+    .with_produced_by(0);
+    let task = Event::pending(
+        "t1",
+        crate::symbio_core::EVENT_TASK_OPENED,
+        Entity::Task,
+        Verb::Opened,
+        0,
+        "user:t",
+    )
+    .with_produced_by(0)
+    .with_payload(serde_json::json!({ "task_id": "x1", "goal": "把事办了" }));
+
+    if final_first {
+        vec![user, final_msg, task]
+    } else {
+        vec![user, task, final_msg]
+    }
+}
+
+/// 当前就绪的任务 id（`readyset` = 模型唯一的调度候选来源）。
+fn ready_ids(p: &SessionPlugin, sid: &str) -> Vec<String> {
+    let snapshot = read_wal(p, sid);
+    crate::symbio_core::readyset()
+        .apply(&snapshot, i64::MAX, crate::symbio_core::Budget::generous())
+        .value
+        .ready
+        .iter()
+        .map(|t| t.task_id.clone())
+        .collect()
+}
+
+/// 事实源里有没有那一格：按 **`entity × verb`** 认（名字表在 core 里，不复述字面量）。
+fn has_fact(
+    p: &SessionPlugin,
+    sid: &str,
+    entity: crate::symbio_core::Entity,
+    verb: crate::symbio_core::Verb,
+) -> bool {
+    read_wal(p, sid)
+        .iter()
+        .any(|e| e.entity == entity && e.verb == verb)
+}
+
+/// 插话走完「忙窗判定 → 空闲落格 → 插话轮 → 收恢复」全程。
+#[tokio::test]
+async fn interjection_holds_the_running_task_and_releases_it_when_idle() {
+    use crate::symbio_core::{Entity, Verb};
+    let (_dir, p) = preempt_plugin();
+    let sid = "s-preempt";
+    seed_wal(&p, sid, turn_facts(true));
+    p.enqueue_inbox(
+        sid,
+        Some("i1".to_string()),
+        user_message("插一句"),
+        session_chat::Request::default(),
+        None,
+    )
+    .await;
+    let state = p.active_mgr.get_or_create(sid).await;
+
+    // ① 忙窗：**只判不落格**。此刻收束期写方随时可能落笔，两个写方并存会各自
+    //    replay 出重复的 `head`（同会话不许两个写方并存）。
+    state.inner.write().await.is_working = true;
+    assert!(!p.clone().drain_inbox_once().await, "忙则一趟不启动");
+    assert_eq!(p.inbox_items(sid).await.len(), 1, "忙则排队（ADR-026）不变");
+    assert_eq!(
+        ready_ids(&p, sid),
+        vec!["x1".to_string()],
+        "忙窗不动事实：就绪集不变，挂起还没落格"
+    );
+
+    // ② 空闲：**先落挂起，再开轮**——顺序反了就是「插话轮开跑时任务还在就绪集里」。
+    //    本用例无父插件 ⇒ 轮启动失败并放回队首（既有的「失败不丢条目」承诺），
+    //    恰好让「落格先于开轮」这一步能被单独观察到。
+    state.inner.write().await.is_working = false;
+    assert!(!p.clone().drain_inbox_once().await);
+    assert_eq!(p.inbox_items(sid).await.len(), 1, "启动失败 ⇒ 放回队首");
+    assert!(
+        has_fact(&p, sid, Entity::Task, Verb::Held),
+        "挂起必须落成 `task × held` 事实（04 §2.2 步 1–2）"
+    );
+    assert!(
+        has_fact(&p, sid, Entity::Control, Verb::Opened),
+        "打断处置必须留一条 `control × opened`（S07 §6.1 验收 1）"
+    );
+    assert!(
+        ready_ids(&p, sid).is_empty(),
+        "挂起的任务退出就绪集——插话轮因此看不见在跑的任务（S07 §5）"
+    );
+    assert!(
+        crate::symbio_core::check_all(&read_wal(&p, sid)).is_empty(),
+        "{:?}",
+        crate::symbio_core::check_all(&read_wal(&p, sid))
+    );
+
+    // ③ 插话轮收尾：**批空 ⇒ 收**。挂起不收就是永久挂起——任务从此再也不进
+    //    就绪集，且没有一条消息说得出为什么（S07 §5 的静默失效）。
+    p.clear_inbox(sid).await;
+    assert!(!p.clone().drain_inbox_once().await);
+    assert!(
+        has_fact(&p, sid, Entity::Task, Verb::Progressed),
+        "恢复必须落成 `task × progressed` 事实（04 §2.2 步 6）"
+    );
+    assert_eq!(
+        ready_ids(&p, sid),
+        vec!["x1".to_string()],
+        "恢复之后任务回到就绪集——挂起是临时的"
+    );
+    assert!(
+        crate::symbio_core::check_all(&read_wal(&p, sid)).is_empty(),
+        "{:?}",
+        crate::symbio_core::check_all(&read_wal(&p, sid))
+    );
+    assert_eq!(
+        state.inner.read().await.preempt,
+        PreemptPending::None,
+        "结清后不留尾巴：留在 `Resume` 会让消费者一直空转"
+    );
+}
+
+/// 反向：同样一组事实，只把收束发言挪到 `task.opened` **之后** ⇒ 结论翻面。
+///
+/// 判据是「任务开格之后有没有收束发言」（04 §2.1）：有 ⇒ 排队不挂起（已发出的
+/// 发言不可撤回）。所以挂起是**判出来的**，不是无条件写的一格——收束在任务之后的
+/// 老布局会话走的就是这一支。
+#[tokio::test]
+async fn final_after_the_task_queues_instead_of_holding() {
+    use crate::symbio_core::{Entity, Verb};
+    let (_dir, p) = preempt_plugin();
+    let sid = "s-queue";
+    seed_wal(&p, sid, turn_facts(false));
+    p.enqueue_inbox(
+        sid,
+        Some("i1".to_string()),
+        user_message("插一句"),
+        session_chat::Request::default(),
+        None,
+    )
+    .await;
+    let state = p.active_mgr.get_or_create(sid).await;
+
+    state.inner.write().await.is_working = true;
+    assert!(!p.clone().drain_inbox_once().await);
+    state.inner.write().await.is_working = false;
+    assert!(!p.clone().drain_inbox_once().await);
+
+    assert!(
+        !has_fact(&p, sid, Entity::Task, Verb::Held),
+        "结论是排队 ⇒ 一条挂起事实都不许有（写得出来就说明判定没生效）"
+    );
+    assert!(
+        !has_fact(&p, sid, Entity::Control, Verb::Opened),
+        "排队不产生打断处置"
+    );
+    assert_eq!(
+        ready_ids(&p, sid),
+        vec!["x1".to_string()],
+        "没挂起 ⇒ 就绪集原样"
+    );
+    assert_eq!(
+        state.inner.read().await.preempt,
+        PreemptPending::None,
+        "没判出挂起就没有待结算项"
+    );
+}
+
+/// 唤醒条件含「抢占待结算」：队列空了也不许睡过去。
+///
+/// 挂起在插话轮**之前**落格，恢复必须在它**之后**——中间隔着插话轮，而那段时间
+/// 队列恰好是空的（消息已出队）。只看队列就会在消费者身上睡死，恢复事件永不落格。
+#[tokio::test]
+async fn unresolved_preemption_keeps_the_consumer_awake() {
+    let (_dir, p) = preempt_plugin();
+    let sid = "s-awake";
+    let state = p.active_mgr.get_or_create(sid).await;
+
+    assert!(
+        !p.has_pending_work().await,
+        "没活就是没活：照常挂在入队唤醒上"
+    );
+    state.inner.write().await.preempt = PreemptPending::Resume {
+        task_id: "x1".to_string(),
+    };
+    assert!(
+        p.has_pending_work().await,
+        "挂起未结清 ⇒ 必须继续轮询，直到恢复落格"
+    );
+}
+
+/// 上一例的反面：**没有事实源**时结清必须走通，否则唤醒条件会把消费者钉死。
+///
+/// `Ok(None)` 与 `Err` 同样「没写进去」，结局却相反——前者是「没有挂起可收」
+/// （清状态），后者是「暂时开不了档」（留着重试）。分不开就会二选一错：要么
+/// 挂起被永久钉死（J3），要么消费者为一个没人认领的 `Resume` 空转到天荒地老。
+#[tokio::test]
+async fn settled_without_a_fact_source_clears_the_stash() {
+    let (_dir, p) = preempt_plugin();
+    let sid = "s-gone";
+    let state = p.active_mgr.get_or_create(sid).await;
+    state.inner.write().await.preempt = PreemptPending::Resume {
+        task_id: "x1".to_string(),
+    };
+
+    // 事实源从未落盘（会话目录里没有 WAL）⇒ `Ok(None)` ⇒ 结清。
+    assert!(!p.clone().drain_inbox_once().await);
+    assert_eq!(
+        state.inner.read().await.preempt,
+        PreemptPending::None,
+        "没人认领的 `Resume` 必须清掉，否则消费者一直轮询"
+    );
+    assert!(!p.has_pending_work().await, "结清后才睡得着");
 }

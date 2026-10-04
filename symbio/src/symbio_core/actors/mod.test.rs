@@ -1178,7 +1178,7 @@ fn interruption_within_reflex_budget_produces_control_event() {
             assert_eq!(task_id, "t1");
             // 挂起就是一条事件 + 一条控制事实（判定者只产控制事件，不发言）。
             store
-                .append(PreemptionDecider.held_event(&task_id, as_of_seq))
+                .append(PreemptionDecider.held_event(&task_id, as_of_seq, as_of_seq))
                 .unwrap();
             store
                 .append(PreemptionDecider.control_event("interrupt-suspend", as_of_seq))
@@ -1260,7 +1260,7 @@ fn suspended_task_leaves_readyset_and_restores() {
     // 挂起（锚 T = 挂起前 head；held 事件 ts 在未来——as-of 语义下可被锚排除）。
     let t = store.head().value();
     store
-        .append(PreemptionDecider.held_event("t1", t).with_ts(5_000))
+        .append(PreemptionDecider.held_event("t1", t, 0).with_ts(5_000))
         .unwrap();
     let events = store.range(crate::symbio_core::event::Seq::new(0));
     let suspended = readyset().apply(&events, 9_999, Budget::generous());
