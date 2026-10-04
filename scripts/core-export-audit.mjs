@@ -93,7 +93,7 @@ const BASELINE = process.env.CORE_EXPORT_BASELINE
       const [zero, one] = process.env.CORE_EXPORT_BASELINE.split(':').map((n) => Number(n))
       return { zero, one }
     })()
-  : { zero: 0, one: 63 }
+  : { zero: 0, one: 62 }
 
 const errors = []
 const report = (rule, msg, loc = '') => errors.push({ rule, msg, loc })
