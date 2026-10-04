@@ -60,6 +60,9 @@ impl From<NativeMessage> for ChatMessage {
             },
             parent_id: None,
             role: Some(msg.role),
+            // 谁说的不由模型侧决定（它只回正文与角色）：`None` = 未标身份，
+            // 落库时由 `persist_messages` 按角色补齐（会话主体 / 人）。
+            principal: None,
             msg_type: None,
 
             name: None,

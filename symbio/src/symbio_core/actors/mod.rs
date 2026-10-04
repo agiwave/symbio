@@ -32,7 +32,9 @@ use crate::symbio_core::event::{
     Entity, Event, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 use crate::symbio_core::store::Store;
+use crate::symbio_core::view::visible_to;
 use crate::symbio_core::Seq;
+use std::borrow::Cow;
 
 /// 主体模式（[plan/01 §4](../../../../docs/plan/01-核心架构.md)：机制，**3 个封顶**）。
 ///
@@ -53,7 +55,6 @@ pub enum Pattern {
 /// `root` 是**一等输入**，不是"没有子智能体"的特例（03 §2 推论：
 /// 不出现 `if (children.is_empty())` 分支）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[expect(dead_code)] // DRYRUN
 pub enum Scope {
     Root,
     /// 子智能体：挂在其父主体的作用域下。
@@ -62,11 +63,8 @@ pub enum Scope {
 
 /// 主体规格（[plan/01 §4](../../../../docs/plan/01-核心架构.md) 的 `ActorSpec`，五字段）。
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑧ 接线后摘除
 pub struct ActorSpec {
     /// 身份（数据，无限增长——如 `"agent:main"`）。
-    #[allow(dead_code)]
-    // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑧ 接线后摘除
     pub principal: String,
     /// 三种模式之一（机制，封顶）。
     pub pattern: Pattern,
@@ -81,7 +79,6 @@ pub struct ActorSpec {
 impl ActorSpec {
     /// S01 的平凡值主体（[roadmap/S01 §4](../../../../docs/plan/roadmap/S01-最小闭环.md)）：
     /// 全规则驱动、预算放宽、单主体——平凡值下系统完整运行。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑧ 接线后摘除
     pub fn trivial(principal: impl Into<String>) -> Self {
         ActorSpec {
             principal: principal.into(),
@@ -179,6 +176,8 @@ impl RecallTranslator {
         &self,
         view: &crate::symbio_core::view::RecallView,
         trigger_seq: u64,
+        // 谁在断言「我召回了这些」——会话主体（`memory.recalled` 的 `actor`）。
+        actor: &str,
     ) -> Event {
         let top = view
             .entries
@@ -191,7 +190,7 @@ impl RecallTranslator {
             crate::symbio_core::event::Entity::Memory,
             crate::symbio_core::event::Verb::Asserted,
             0,
-            "agent:main",
+            actor,
         )
         .with_produced_by(trigger_seq)
         .with_payload(serde_json::json!({
@@ -208,8 +207,12 @@ impl RecallTranslator {
 /// 直连（协作只走事件是 I1 的直接推论）。分工因此清楚：「什么时候把检索事实落格」
 /// 是写方（`plugins/session` 收束时）的决定，「怎么把视图变成一格事实」是本域的
 /// 决定，两者的缝就是本函数——与生产侧驱动 [`TurnRunner`] 而不逐个持有主体同一形态。
-pub fn recalled_event(view: &crate::symbio_core::view::RecallView, trigger_seq: u64) -> Event {
-    RecallTranslator.recalled_event(view, trigger_seq)
+pub fn recalled_event(
+    view: &crate::symbio_core::view::RecallView,
+    trigger_seq: u64,
+    actor: &str,
+) -> Event {
+    RecallTranslator.recalled_event(view, trigger_seq, actor)
 }
 
 /// 承诺登记者（S6 第 15 步，[roadmap/S08 §3](../../../../docs/plan/roadmap/S08-多主体与对等承诺.md)）。
@@ -218,13 +221,11 @@ pub fn recalled_event(view: &crate::symbio_core::view::RecallView, trigger_seq: 
 /// 是否履行」落成**普通事件**（经 Store，无直连——I1 的直接推论）。
 /// 违约不是异常通道：`broken` 与 `released` 是同一格（`commitment × closed`）
 /// 的两个名字，违约必须带 `why`（可观测，S08 §5）。
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑧ 接线后摘除
 pub struct CommitmentKeeper;
 
 impl CommitmentKeeper {
     /// 立约：`from` 向 `to` 承诺 `promise`。`source_seq` 是触发本次立约的事件
     /// （溯源锚；无触发场景传 0 并由调用方保证可解释）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑧ 接线后摘除
     pub fn offer(&self, id: &str, from: &str, to: &str, promise: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("c-offer-{id}"),
@@ -239,7 +240,6 @@ impl CommitmentKeeper {
     }
 
     /// 守约收束。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑧ 接线后摘除
     pub fn release(&self, id: &str, from: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("c-close-{id}"),
@@ -254,7 +254,6 @@ impl CommitmentKeeper {
     }
 
     /// 违约收束（**必须带 why**——违约可被观测是 T5 的全部前提）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑧ 接线后摘除
     pub fn breach(&self, id: &str, from: &str, why: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("c-close-{id}"),
@@ -270,7 +269,6 @@ impl CommitmentKeeper {
 
     /// 对等宣告：把承诺状态告知协作方（`commitment.asserted`，
     /// `commitment × asserted` 格——声明仍是一条普通事件，带溯源）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑧ 接线后摘除
     pub fn declare(&self, id: &str, from: &str, statement: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("c-assert-{id}"),
@@ -283,6 +281,39 @@ impl CommitmentKeeper {
         .with_produced_by(source_seq)
         .with_payload(serde_json::json!({ "id": id, "from": from, "statement": statement }))
     }
+}
+
+/// `commitment.*` 一族的**运行时入口**（[plan/04 §3.1 批⑧](../../../../docs/plan/04-工程落地.md)，
+/// NDC-001：定义域外不得提及主体类型名——提及即可持有，持有即可绕过事实源直连）。
+///
+/// 返回**待入格的事件序列**：立约（`opened`）→ 了结（`released` / `broken`）→
+/// 必要时宣告（`asserted`）。写方（`plugins/session` 的收束转写）只管按序 append，
+/// 「什么时候落格」是它的决定，「怎么把一次立约变成格子」是本域的决定——与
+/// [`recalled_event`] 同一形态。
+///
+/// 违约才宣告：守约无需告知（履行的东西就摆在那里），违约却必须让承诺对象知道
+/// （S08 §5：违约可被观测是 T5 的全部前提）。宣告仍是同一份事实源里的**一格**，
+/// 不是新通道（S08 §2「通信 = 没有直连」）。
+///
+/// 生产侧只准调本函数。
+pub fn commitment_events(
+    id: &str,
+    from: &str,
+    to: &str,
+    promise: &str,
+    ok: bool,
+    why: &str,
+    source_seq: u64,
+) -> Vec<Event> {
+    let keeper = CommitmentKeeper;
+    let mut out = vec![keeper.offer(id, from, to, promise, source_seq)];
+    if ok {
+        out.push(keeper.release(id, from, source_seq));
+    } else {
+        out.push(keeper.breach(id, from, why, source_seq));
+        out.push(keeper.declare(id, from, &format!("已告知 {to}：违约——{why}"), source_seq));
+    }
+    out
 }
 
 /// 抢占判定结论（反射档三选一 + 超时默认，[plan/04 §2.1](../../../../docs/plan/04-工程落地.md)）。
@@ -740,6 +771,14 @@ pub struct TurnInput {
     /// 续写锚点：`Some` ⇒ 本轮**续写**一个已开未收束的轮次（审批 / 问答恢复），
     /// `None` ⇒ 新开一轮。见 [`TurnResume`]。
     pub resume: Option<TurnResume>,
+    /// **本轮以哪个主体的身份记账**——收束 / 产物事件的 `actor`、窗口可见域的
+    /// `viewer` 都取它（[plan/11 批 1](../../../../docs/plan/11-多执行器与多主体加固实施方案.md)
+    /// ①：`"agent:main"` 从字面量变成**入参**，`ActorSpec` 首次在生产构造）。
+    ///
+    /// 身份是数据不是常量：同一个会话引擎跑在哪个 agent 上，由**调用方**说了算
+    /// （`plugins/session/v2_exec` 从会话元数据派生）。S08 §4 的平凡值是
+    /// `agent:main`——所有主体同一身份时退化成单主体，与接线前逐字一致。
+    pub actor: ActorSpec,
 }
 
 /// 续写锚点（审批 / 问答恢复）：本轮**续写**一个已开未收束的轮次，而不是新开。
@@ -789,18 +828,50 @@ pub struct TurnOutcome {
     pub awaits_user: bool,
 }
 
+/// 按主体过滤一批事件（**可见域入口**，[plan/11 批 1](../../../../docs/plan/11-多执行器与多主体加固实施方案.md)
+/// ③）：`None` = 不过滤（与接线前逐字一致），`Some(v)` = 只交 `visible_to` 通过的事件。
+///
+/// 全部可见时**不复制**（借用原切片）——平凡值下（单主体会话）这条路径与
+/// 接线前逐字一致，零拷贝。
+fn filter_visible<'a>(events: &'a [Event], viewer: Option<&str>) -> Cow<'a, [Event]> {
+    let Some(viewer) = viewer else {
+        return Cow::Borrowed(events);
+    };
+    if events.iter().all(|e| visible_to(&e.actor, viewer)) {
+        Cow::Borrowed(events)
+    } else {
+        Cow::Owned(
+            events
+                .iter()
+                .filter(|e| visible_to(&e.actor, viewer))
+                .cloned()
+                .collect(),
+        )
+    }
+}
+
 /// 对话窗口：保留 turn 号落在「当前轮往前数 `keep` 个」之内的事件
 /// （含当前轮）。事实是全量的，**视图**才是窗口——纯切片，不改数据。
-fn window_by_turn(events: &[Event], current_turn: u64, keep: u64) -> &[Event] {
-    if keep == 0 {
-        return &events[events.len()..];
-    }
-    let oldest = current_turn.saturating_sub(keep - 1);
-    let cut = events
-        .iter()
-        .position(|e| e.entity == Entity::Turn && e.turn >= oldest)
-        .unwrap_or(events.len());
-    &events[cut..]
+///
+/// 第二层是**可见域**（`viewer`，见 [`filter_visible`]）：窗口先按轮切，
+/// 再按主体滤——两层都只改视图，不改数据。
+fn window_by_turn<'a>(
+    events: &'a [Event],
+    current_turn: u64,
+    keep: u64,
+    viewer: Option<&str>,
+) -> Cow<'a, [Event]> {
+    let windowed = if keep == 0 {
+        &events[events.len()..]
+    } else {
+        let oldest = current_turn.saturating_sub(keep - 1);
+        let cut = events
+            .iter()
+            .position(|e| e.entity == Entity::Turn && e.turn >= oldest)
+            .unwrap_or(events.len());
+        &events[cut..]
+    };
+    filter_visible(windowed, viewer)
 }
 
 /// turn 运行器：持令牌的调用方对每个会话轮调用一次。
@@ -835,6 +906,9 @@ impl TurnRunner {
                 tier,
                 window_turns: None,
                 resume: None,
+                // 便捷入口跑在平凡值身份上（S08 §4：单主体 = 今天的状态）。
+                // 生产不走这里——`v2_exec` 自己构造 `ActorSpec` 再调 [`Self::run_with_tools`]。
+                actor: ActorSpec::trivial("agent:main"),
             },
             std::sync::Arc::new(crate::symbio_core::adapters::SilentDeltas),
         )
@@ -910,7 +984,12 @@ impl TurnRunner {
             tier,
             window_turns,
             resume,
+            actor,
         } = input;
+        // 本轮的 viewer：历史窗口只交**本主体看得见**的事件（plan/11 批1 ③）。
+        // 身份是入参不是字面量——`actor.principal` 由调用方（生产：会话属于哪个
+        // agent）给出；S08 §4 平凡值 `agent:main` 下没有任何事件被滤掉。
+        let viewer = Some(actor.principal.as_str());
         // 1. 用户消息入格（turn × opened），档位随载荷入账。
         //
         // 续写轮（`resume`）**不新开用户格**：用户没再说话，重开会让同一句话在网格里
@@ -935,12 +1014,12 @@ impl TurnRunner {
         let full_snapshot = store.range(Seq::new(0));
         // 对话窗口：只把最近 N 个 turn 的事件交给 prompt（含当前轮）——
         // 窗口是**视图**问题，事实照常全量入格（append-only 不受影响）。
-        let snapshot: &[Event] = match window_turns {
-            None => &full_snapshot,
-            Some(keep) => window_by_turn(&full_snapshot, turn, keep),
+        let snapshot: Cow<'_, [Event]> = match window_turns {
+            None => filter_visible(&full_snapshot, viewer),
+            Some(keep) => window_by_turn(&full_snapshot, turn, keep, viewer),
         };
         // prompt 基线：转写投影渲染一次（本轮内不变——本轮的新事实还没进投影）。
-        let base_prompt = Reasoner::render_prompt(snapshot);
+        let base_prompt = Reasoner::render_prompt(&snapshot);
 
         let started = std::time::Instant::now();
         // 本轮内已发生的工具交换（调用 + 结果），供下一轮 prompt 追加。
@@ -965,7 +1044,7 @@ impl TurnRunner {
                     Entity::Artifact,
                     Verb::Asserted,
                     turn,
-                    "agent:main",
+                    &actor.principal,
                 )
                 .with_produced_by(user_seq)
                 .with_payload(serde_json::json!({
@@ -999,6 +1078,7 @@ impl TurnRunner {
                             return self
                                 .append_fallback(
                                     store,
+                                    &actor,
                                     turn,
                                     user_seq,
                                     "model returned empty text",
@@ -1013,7 +1093,7 @@ impl TurnRunner {
                                 Entity::Turn,
                                 Verb::Closed,
                                 turn,
-                                "agent:main",
+                                &actor.principal,
                             )
                             .with_produced_by(user_seq)
                             .with_cost_ms(cost_ms)
@@ -1039,6 +1119,7 @@ impl TurnRunner {
                         return self
                             .append_fallback(
                                 store,
+                                &actor,
                                 turn,
                                 user_seq,
                                 "模型请求了工具，但本轮没有工具分发通道",
@@ -1057,7 +1138,7 @@ impl TurnRunner {
                                 Entity::Artifact,
                                 Verb::Asserted,
                                 turn,
-                                "agent:main",
+                                &actor.principal,
                             )
                             .with_produced_by(user_seq)
                             .with_payload(serde_json::json!({
@@ -1102,7 +1183,7 @@ impl TurnRunner {
                     // 3b. 兜底落格（I3：到点必答——失败也是一句话，不是静默）。
                     let cost = started.elapsed().as_millis() as u64;
                     return self
-                        .append_fallback(store, turn, user_seq, &e.to_string(), cost)
+                        .append_fallback(store, &actor, turn, user_seq, &e.to_string(), cost)
                         .await;
                 }
             }
@@ -1113,6 +1194,7 @@ impl TurnRunner {
     async fn append_fallback<S>(
         &self,
         store: &S,
+        actor: &ActorSpec,
         turn: u64,
         user_seq: u64,
         why: &str,
@@ -1128,7 +1210,7 @@ impl TurnRunner {
                 Entity::Turn,
                 Verb::Closed,
                 turn,
-                "agent:main",
+                &actor.principal,
             )
             .with_produced_by(user_seq)
             .with_cost_ms(cost_ms)

@@ -732,6 +732,63 @@ pub(super) fn not_executed_result(tool_call_id: &str, reason: &str) -> ChatMessa
     msg
 }
 
+/// 本轮的**代际立约记录**（[04 §3.1 批⑧](../../../../docs/plan/04-工程落地.md)，S08 §3）：
+/// 工具执行层把「我向上游承诺了什么、履行了没有」交出来，由收束转写落成
+/// `commitment.*` 格。
+///
+/// 只认 `agent_run`——它是**跨主体**的那一次调用：本会话向上游承诺「会有另一个
+/// 智能体接手这件事」。别的工具是本会话自办，办没办成是执行结果，不是承诺。
+///
+/// 工具执行层**没有事实源**（它只写节点、不碰 WAL），所以这里是纯出参：
+/// 谁负责把承诺入格，谁负责开那扇门（收束转写 `v2_bridge::record_to_wal`）。
+#[derive(Debug, Clone)]
+pub struct Delegation {
+    /// 承诺号 = 本次调用在**转写里的 ToolCall 节点 id**（`c-offer-<id>` 由此成格）：
+    /// 节点 id 由转写生成、跨轮不撞——模型给的 `tool_call` 编号只在一次响应内唯一，
+    /// 直接拿来当事件号会在下一轮撞幂等键（`v2_bridge` 还会再加 `{user_id}-a{attempt}`
+    /// 前缀，两层各自挡一种撞法）。
+    pub id: String,
+    /// 承诺内容 = 委托出去的那句话（`agent_run` 的 `prompt` 参数）。
+    pub promise: String,
+    /// 是否履行（`true` ⇒ `commitment.released`，`false` ⇒ `.broken` + `why`）。
+    pub ok: bool,
+    /// 违约原因（`ok = true` 时为空——违约必须带 why，守约不必）。
+    pub why: String,
+}
+
+/// 承诺出参的**唯一写入点**（见 [`Delegation`]）：只有 `agent_run` 会被记账，
+/// 且在每个终态分支各记一次——没跑到的（协议错 / 被拦 / 批次跳过）同样是**没履约**，
+/// 记成违约比"查无此约"诚实（S08 §5：违约可被观测是 T5 的全部前提）。
+pub fn note_delegation(
+    out: &mut Vec<Delegation>,
+    id: &str,
+    name: &str,
+    args: &serde_json::Value,
+    ok: bool,
+    why: &str,
+) {
+    if name.trim() != "agent_run" {
+        return;
+    }
+    let record = Delegation {
+        id: id.to_string(),
+        promise: args
+            .get("prompt")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        ok,
+        why: if ok { String::new() } else { why.to_string() },
+    };
+    // **先到先得**：同一次调用可能在两个分支各记一笔（终态广播找不到节点 ⇒
+    // `parent_updates` 里没有它 ⇒ 末尾收口会再记一次「未执行」）。先记下的那次
+    // 是**更接近事实**的判决（它就发生在该分支里），后来的收口只该覆盖「一次都
+    // 没跑到」的调用，不能把跑成功的改写成没跑。
+    if !out.iter().any(|d| d.id == record.id) {
+        out.push(record);
+    }
+}
+
 /// 顺序处理一批工具调用，向 channel 广播每个工具的结果，
 /// 并返回 `(tool_messages, parent_updates)`：
 /// - `tool_messages`：工具结果子节点（用于追加到对话历史）
@@ -764,6 +821,10 @@ pub async fn process_tool_calls_async(
     // `session_dir` = **本插件自己的目录**（来自 orchestrator）：工具结果存档落在这里。
     // 不从请求上下文反推——请求上下文不带 `PLUGIN_DIR`，子智能体下会指到父作用域。
     session_dir: &std::path::Path,
+    // 代际立约出参（批⑧）：`agent_run` 的承诺记录，交回调用方随收束入格。
+    // out-param 而不是返回值：本函数的返回值是节点对（消费方三处都在用），
+    // 再加一个只会逼着每个调用方都写 `let _ = `。
+    delegations: &mut Vec<Delegation>,
 ) -> (Vec<ChatMessage>, Vec<ChatMessage>) {
     let mut tool_messages = Vec::new();
     // 父 ToolCall 终态——**完整消息**（发射端从权威转写取副本应用终态）。
@@ -782,13 +843,20 @@ pub async fn process_tool_calls_async(
         mode
     );
 
-    // 本批全部工具调用 id。循环按值消费 `tool_calls`，而"哪些没被执行"要在循环
-    // **之后**才知道（break 出口），故先留一份 id 清单供末尾收口。
-    let batch_ids: Vec<String> = tool_calls
+    // 本批留底 `(id, name, args)`：循环按值消费 `tool_calls`，而「哪些没被执行」
+    // 要在循环**之后**才知道（break 出口）——末尾收口既要补节点，也要把
+    // **没跑到的 `agent_run`** 记成没履约的承诺（见 [`note_delegation`]）。
+    // id 或 name 缺失的不进表：它们走协议失败分支，父节点已入 `parent_updates`。
+    let batch_meta: Vec<(String, String, serde_json::Value)> = tool_calls
         .iter()
-        .filter_map(|tc| tc.id.as_ref())
-        .filter(|id| !id.trim().is_empty())
-        .cloned()
+        .filter_map(|tc| {
+            let id = tc.id.as_deref()?;
+            let name = tc.name.as_deref()?;
+            if id.trim().is_empty() || name.trim().is_empty() {
+                return None;
+            }
+            Some((id.to_string(), name.to_string(), tc.arguments.clone()))
+        })
         .collect();
 
     for tc in tool_calls {
@@ -893,6 +961,15 @@ pub async fn process_tool_calls_async(
                 context_messages,
             )
             .await;
+            // 约还没落地就执行不了 = 没履约（`agent_run` 记账见 `note_delegation`）。
+            note_delegation(
+                delegations,
+                &id,
+                &name,
+                &tc.arguments,
+                false,
+                "参数 JSON 解析失败，未执行",
+            );
             continue;
         }
 
@@ -937,6 +1014,14 @@ pub async fn process_tool_calls_async(
             {
                 parent_updates.push(parent_update);
             }
+            note_delegation(
+                delegations,
+                &id,
+                &name,
+                &tc.arguments,
+                false,
+                &format!("被 PreToolUse 钩子拦下：{block_msg}"),
+            );
             continue;
         }
 
@@ -958,6 +1043,13 @@ pub async fn process_tool_calls_async(
         .await;
 
         let final_res = res;
+
+        // 代际立约的了结（批⑧）：跑完即知履约与否。**待用户审批的不记**——
+        // 承诺还没到可判时刻，抢跑记成履约或违约都是假事实（审批结束后随
+        // resume 那一轮再记）。
+        if pending_user_prompt.is_none() {
+            note_delegation(delegations, &id, &name, &tc.arguments, success, &final_res);
+        }
 
         let tool_output = if success {
             serde_json::json!({ "content": final_res.clone() })
@@ -1082,7 +1174,7 @@ pub async fn process_tool_calls_async(
     // 两条路径会走到这里：① 用户中止；② 交互模式下前一个工具待用户恢复，
     // 本批剩余被 break 掉。它们从未经过 `emit_tool_running`，但参数流式阶段
     // 已经把它们广播成 `Streaming`——不定格就是前端一个永远转下去的「运行中」。
-    for id in &batch_ids {
+    for (id, name, args) in &batch_meta {
         if parent_updates.iter().any(|p| p.id == *id) {
             continue;
         }
@@ -1104,6 +1196,15 @@ pub async fn process_tool_calls_async(
             parent_updates.push(parent_update);
         }
         tool_messages.push(result_msg);
+        // 没跑到同样是没履约（`agent_run` 的约不能因为"没执行"就查无此约）。
+        note_delegation(
+            delegations,
+            id,
+            name,
+            args,
+            false,
+            "未执行（中止或同批前序未结束）",
+        );
     }
 
     (tool_messages, parent_updates)

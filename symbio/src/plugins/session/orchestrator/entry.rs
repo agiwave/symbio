@@ -411,6 +411,10 @@ impl SessionPlugin {
                                 plugin: &this_spawn,
                                 session_id: &sid_spawn,
                             },
+                            // 用户发言的 `principal` 是 `user`（不看会话主体），
+                            // 但同一次落库里没有别的消息；主体仍按**这条会话解析出的**
+                            // `agent_id` 给（编排里那次解析的同一份结果）。
+                            &crate::authz::principal_of(agent_id_spawn.as_deref()),
                         )
                         .await
                     }

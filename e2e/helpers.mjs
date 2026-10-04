@@ -229,7 +229,7 @@ export function cleanupHomedir(hd) {
  * `env` 是**追加**给 CLI 的环境变量（如 `SYMBIO_ROUTE_LOG=1` 打开路由留痕），
  * 不是替换——被测系统仍然继承本进程环境。
  */
-export function runCli({ homedir, workdir, message, provider = null, session = null, mode = 'auto', timeoutMs = 120_000, stdinText = null, env = null }) {
+export function runCli({ homedir, workdir, message, provider = null, session = null, agent = null, mode = 'auto', timeoutMs = 120_000, stdinText = null, env = null }) {
   // `cliExe()` 会保证拿到的是「对应当前源码」的那一份（指纹不符则先重建）。
   // 二进制仍然缺失要**当场说清楚**：否则表现为 `code = -1` + 空 stderr，
   // 与"CLI 崩了"无法区分，得翻源码才知道是路径写错了。
@@ -245,6 +245,9 @@ export function runCli({ homedir, workdir, message, provider = null, session = n
   if (message != null) argv.push('-m', message);
   if (provider) argv.push('--provider', provider);
   if (session) argv.push('--session', session);
+  // `--agent <ID>`：绑定智能体 ⇒ 会话 `metadata.agent_id` 落这个值 ⇒
+  // `ctx[AGENT_ID]` ⇒ 主体名 `agent:<ID>`（`chat_loop::request_principal` 的取值链）。
+  if (agent) argv.push('--agent', agent);
   if (stdinText != null) argv.push('--repl'); // stdin 喂多轮时强制 REPL
 
   const t0 = Date.now();

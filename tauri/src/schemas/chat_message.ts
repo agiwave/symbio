@@ -250,6 +250,18 @@ export interface ChatMessage {
   /** 树形展开：前端按 `parent_id` 组装的父引用（后端只给扁平列表） */
   parent?: ChatMessage;
   role?: ChatRole;
+  /**
+   * **这条发言是谁说的**（跨栈身份字段，后端 `ChatMessage.principal` 的镜像）。
+   *
+   * 主体名（`user` / `agent:main` / `agent:<id>`），写方只在落库那一刻补
+   * （后端 `append_and_publish::attributed`：人的话是 `user`，其余是本会话主体，
+   * 已带身份的一律不覆盖——覆盖就是串主体）。`undefined` = 尚未标身份（历史消息、
+   * 未接入的写方），可见域判据把它当**可见**：缺身份是「还没接线」，不是「不让人看」。
+   *
+   * 前端目前**不消费**该字段：按主体分组 / 过滤的 UI 还没有消费者，进 schema 是为了让
+   * 协议两侧同形（`scripts/protocol-mirror-audit.mjs` D 组守这一条）。
+   */
+  principal?: string;
   type?: ChatMessageType;
   name?: string;
   /**

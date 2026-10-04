@@ -116,8 +116,17 @@ async fn missing_tool_call_id_is_recorded_as_failure() {
         parse_error: None,
     }];
 
-    let (msgs, updates) =
-        process_tool_calls_async(tcs, &None, &sink, &abort, test_ctx(), &[], &test_dir()).await;
+    let (msgs, updates) = process_tool_calls_async(
+        tcs,
+        &None,
+        &sink,
+        &abort,
+        test_ctx(),
+        &[],
+        &test_dir(),
+        &mut Vec::new(),
+    )
+    .await;
 
     assert_eq!(msgs.len(), 1, "必须生成失败结果子节点（而非跳过）");
     assert_eq!(msgs[0].role, Some(MessageRole::Tool));
@@ -157,8 +166,17 @@ async fn empty_tool_call_id_is_recorded_as_failure() {
         parse_error: None,
     }];
 
-    let (msgs, updates) =
-        process_tool_calls_async(tcs, &None, &sink, &abort, test_ctx(), &[], &test_dir()).await;
+    let (msgs, updates) = process_tool_calls_async(
+        tcs,
+        &None,
+        &sink,
+        &abort,
+        test_ctx(),
+        &[],
+        &test_dir(),
+        &mut Vec::new(),
+    )
+    .await;
 
     assert_eq!(msgs.len(), 1);
     assert_eq!(updates.len(), 1);
@@ -177,8 +195,17 @@ async fn missing_tool_name_is_recorded_as_failure() {
         parse_error: None,
     }];
 
-    let (msgs, updates) =
-        process_tool_calls_async(tcs, &None, &sink, &abort, test_ctx(), &[], &test_dir()).await;
+    let (msgs, updates) = process_tool_calls_async(
+        tcs,
+        &None,
+        &sink,
+        &abort,
+        test_ctx(),
+        &[],
+        &test_dir(),
+        &mut Vec::new(),
+    )
+    .await;
 
     assert_eq!(msgs.len(), 1);
     assert_eq!(msgs[0].parent_id.as_deref(), Some("tc-known"));
@@ -201,8 +228,17 @@ async fn unparseable_arguments_are_refused_not_executed() {
         parse_error: Some(r#"{"command": "cargo test"#.into()),
     }];
 
-    let (msgs, updates) =
-        process_tool_calls_async(tcs, &None, &sink, &abort, test_ctx(), &[], &test_dir()).await;
+    let (msgs, updates) = process_tool_calls_async(
+        tcs,
+        &None,
+        &sink,
+        &abort,
+        test_ctx(),
+        &[],
+        &test_dir(),
+        &mut Vec::new(),
+    )
+    .await;
 
     assert_eq!(msgs.len(), 1, "必须生成失败结果子节点（而非跳过）");
     assert_eq!(msgs[0].role, Some(MessageRole::Tool));
@@ -310,6 +346,7 @@ async fn aborted_batch_terminates_every_tool_call() {
         test_ctx(),
         &tc_context(&["tc1", "tc2"]),
         &test_dir(),
+        &mut Vec::new(),
     )
     .await;
 
@@ -388,6 +425,7 @@ async fn interactive_break_leaves_result_for_skipped_calls() {
         ctx,
         &tc_context(&["tc1", "tc2"]),
         &test_dir(),
+        &mut Vec::new(),
     )
     .await;
 
@@ -598,4 +636,74 @@ fn subagent_pending_payload_is_recognized_as_pending_intent() {
         crate::symbio_core::failure_kind::NEEDS_APPROVAL
     );
     // 载荷里没有身份字段 ⇒ [`PendingPrompt`] 无法承载悬空引用（类型层面成立）
+}
+
+// ==================== note_delegation：代际立约的唯一观察点 ====================
+
+/// 只有 `agent_run` 立约——别的工具是本会话自办，办没办成是执行结果不是承诺。
+#[test]
+fn note_delegation_ignores_non_delegating_tools() {
+    let mut out = Vec::new();
+    let args = json!({ "prompt": "让 reviewer 复查这段", "agent_id": "reviewer" });
+
+    note_delegation(&mut out, "c1", "vdfs_read", &args, true, "");
+    note_delegation(&mut out, "c2", "read", &args, true, "");
+    assert!(out.is_empty(), "非 `agent_run` 不产生承诺记录：{out:?}");
+
+    note_delegation(&mut out, "c3", "agent_run", &args, true, "");
+    assert_eq!(out.len(), 1);
+    assert_eq!(
+        out[0].id, "c3",
+        "承诺号 = 转写里的 ToolCall 节点 id（`c-offer-<id>` 由此成格）"
+    );
+    assert_eq!(
+        out[0].promise, "让 reviewer 复查这段",
+        "承诺内容取 `prompt` 参数"
+    );
+    assert!(out[0].ok);
+    assert!(out[0].why.is_empty(), "守约不必带 why，违约必须带");
+}
+
+/// **先到先得**：同一次调用可能在两个分支各记一笔（终态广播找不到节点 ⇒ 末尾
+/// 收口会再记一次「未执行」），后到的收口不许把跑成功的改写成没跑。
+#[test]
+fn note_delegation_never_overwrites_an_earlier_judgement() {
+    let mut out = Vec::new();
+    let args = json!({ "prompt": "交给子智能体" });
+
+    note_delegation(&mut out, "c1", "agent_run", &args, true, "");
+    note_delegation(
+        &mut out,
+        "c1",
+        "agent_run",
+        &args,
+        false,
+        "未执行（中止或同批前序未结束）",
+    );
+    assert_eq!(out.len(), 1, "同一承诺只入格一次");
+    assert!(out[0].ok, "先记下的那次更接近事实，收口分支不得覆盖");
+
+    note_delegation(
+        &mut out,
+        "c1",
+        "agent_run",
+        &args,
+        false,
+        "被 PreToolUse 钩子拦下",
+    );
+    assert_eq!(out.len(), 1);
+    assert!(out[0].ok);
+
+    // 没跑到的那一次（一次都没记过）照常入账，且带得出违约原因。
+    note_delegation(
+        &mut out,
+        "c2",
+        "agent_run",
+        &args,
+        false,
+        "被 PreToolUse 钩子拦下",
+    );
+    assert_eq!(out.len(), 2);
+    assert!(!out[1].ok);
+    assert_eq!(out[1].why, "被 PreToolUse 钩子拦下");
 }

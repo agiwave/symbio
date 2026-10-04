@@ -601,6 +601,7 @@ async fn compress_with_snapshot_core(
             &context.session,
             vec![node],
             e.target(context.session.session_id()),
+            &context.principal,
         )
         .await
         {
@@ -734,6 +735,7 @@ pub(crate) async fn retry_compaction(
     let mut context = SessionContext {
         messages: session.get_context_messages(None).await.unwrap_or_default(),
         session: session.clone(),
+        principal: super::super::chat_loop::request_principal(ctx.as_ref()),
     };
     // 请求级固定开销与自动路径同源（压缩提示词 + 工具定义）：口径不一致会让
     // "是否超限"的预判比自动路径乐观，重试的结论就与首次失败对不上。
@@ -783,8 +785,13 @@ pub(crate) async fn retry_compaction(
                     .await;
                 let sid = context.session.session_id();
                 // 落库 + 回包：同上，换回存储分配的权威 `seq`（§3.4）。
-                if let Err(err) =
-                    append_and_publish(&context.session, vec![node], em.target(sid)).await
+                if let Err(err) = append_and_publish(
+                    &context.session,
+                    vec![node],
+                    em.target(sid),
+                    &context.principal,
+                )
+                .await
                 {
                     plugin_warn!("session", "[Compress] 重试节点落库失败: {err}");
                 }

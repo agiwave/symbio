@@ -132,6 +132,11 @@ impl DispatchPort for SessionDispatchPort {
             self.ctx.clone(),
             &call_nodes,
             &self.session_dir,
+            // 代际立约出参：full 档**本批不落格**（承诺的写方随收束转写走，而 full
+            // 档不经 `v2_bridge::record`；记忆三段同此档位口径——full 随 full 启用）。
+            // 传临时量而不是漏参，是为了让"这里没有消费方"成为一行**看得见的注记**，
+            // 而不是一个静默的 `&mut Vec::new()` 淹没在参数表里。
+            &mut Vec::new(),
         )
         .await;
 

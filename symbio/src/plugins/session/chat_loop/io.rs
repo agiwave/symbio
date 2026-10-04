@@ -32,6 +32,10 @@ pub(crate) async fn finalize_turn_root(
 
 /// 增量落库 + **落库回包**（把存储分配的权威 `seq` 交回实时面）。
 ///
+/// 落库补身份（`principal`）不在这里——那是 [`append_and_publish`] 的活：
+/// 它是唯一的消息追加写点，补在那一处 = 每条持久化消息都带身份；在这里补一层、
+/// 别处再补一层就等于两个判定方。
+///
 /// ## 回包这一步不能省
 ///
 /// `seq` 只在存储写入时分配；助手侧节点的号是转写建节点时发的**在途号**
@@ -59,6 +63,7 @@ pub(crate) async fn persist_messages(
         &context.session,
         new_messages.to_vec(),
         PublishTarget::Sink(sink),
+        &context.principal,
     )
     .await
     {

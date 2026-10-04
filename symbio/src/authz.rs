@@ -36,9 +36,10 @@
 //! 04 §3.1 批⑧）落地时，子智能体各成一行——行的形状不变，仍是
 //! `(主体, 能力名, 可见域)`。
 
+use std::borrow::Cow;
 use std::sync::OnceLock;
 
-use crate::symbio_core::{PermissionMatrix, VisScope};
+use crate::symbio_core::{PermissionMatrix, VisScope, AGENT_PREFIX};
 
 /// 本机主智能体的身份——**表里那一行的名字**与 `v2_bridge` 收束事件的 `actor`
 /// 是同一个常量：授权判定的对象若与实际写入的主体各写一份字符串，两边迟早漂移
@@ -76,6 +77,53 @@ const ROWS: &[(&str, &[&str], VisScope)] = &[(
 )];
 
 static MATRIX: OnceLock<PermissionMatrix> = OnceLock::new();
+
+/// 本机会话的**主体派生**（部署事实 → [`PRINCIPAL_MAIN`] 同族的取值点）：
+/// 会话选定了哪个 agent，这轮所有断言就是哪个主体；未选 ⇒ 主智能体。
+///
+/// 前缀取自 core 的可见域约定 [`AGENT_PREFIX`](crate::symbio_core::view::AGENT_PREFIX)
+/// ——「什么形状算智能体身份」只定义一次，可见域判据与身份派生共用它，
+/// 两处各写一个字面量迟早漂移成「判的是 A、写的是 B」。
+///
+/// 平凡值（S08 §4）：今天所有会话未选智能体 ⇒ 恒为 `agent:main`，与接线前
+/// `v2_bridge` 里那个写死的常量**逐字一致**。
+pub(crate) fn principal_of(agent_id: Option<&str>) -> String {
+    match agent_id.map(str::trim).filter(|s| !s.is_empty()) {
+        None => PRINCIPAL_MAIN.to_string(),
+        //调用方给的已是主体名（`agent:<id>`）就原样认下——派生点不二次加前缀。
+        Some(id) if id.starts_with(AGENT_PREFIX) => id.to_string(),
+        Some(id) => format!("{AGENT_PREFIX}{id}"),
+    }
+}
+
+/// **该主体当次判定**用的矩阵（行的形状不变：`(主体, 能力名, 可见域)`，
+/// 见本模块文档「本表会怎么长」）。
+///
+/// 本机今天只有一张静态表，但**判定的对象是实际写入的那个主体**：主智能体之外
+/// 的 `agent:<id>`（子智能体 / 对等体）要能写自己的收束格，就必须有自己那一行。
+/// 行的**内容** = 主智能体那一行的能力集——**身份分层 ≠ 权限分层**，本机所有
+/// 智能体同角色（S08 §4 平凡值）；按主体展开 grants 做能力分级是 S13 的工序。
+///
+/// 非 `agent:*` 的主体（`user` 及一切未登记名）走静态表：表里没有它 ⇒
+/// `can_reply` 为假 ⇒ fail-closed。少一行是一条**拒绝**，不是一条漏判。
+pub(crate) fn matrix_for(principal: &str) -> Cow<'static, PermissionMatrix> {
+    if principal == PRINCIPAL_MAIN || !principal.starts_with(AGENT_PREFIX) {
+        return Cow::Borrowed(production_matrix());
+    }
+    let (main_caps, main_scope) = ROWS
+        .first()
+        .map(|(_, caps, scope)| (*caps, *scope))
+        .unwrap_or((&[], VisScope::ThreadPrivate));
+    Cow::Owned(
+        PermissionMatrix::from_names(&[(principal, main_caps, main_scope)]).unwrap_or_else(|why| {
+            crate::plugin_warn!(
+                "authz",
+                "[governance] 主体 `{principal}` 的行构造失败，按 fail-closed 降级为空矩阵：{why}"
+            );
+            PermissionMatrix::from_names(&[]).expect("空授权表无主体可校验，不可能违反成对性")
+        }),
+    )
+}
 
 /// 本机授权矩阵（懒构造一次；构造失败 ⇒ 空矩阵 = 谁都不许，并告警）。
 ///

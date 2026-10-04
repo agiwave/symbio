@@ -66,6 +66,27 @@ impl<V> View<V> {
 
 use crate::symbio_core::event::Timestamp;
 
+/// 本机智能体身份前缀（`agent:<id>`）——身份是**数据**，可无限增长；
+/// 前缀是判定用的形状，不是主体清单（清单住 [`crate::authz`]）。
+pub const AGENT_PREFIX: &str = "agent:";
+
+/// **可见域的平凡判据**（[plan/11 批 1](../../../../docs/plan/11-多执行器与多主体加固实施方案.md) ③，
+/// S08 §4 的 `vis_scope` 平凡值）：`actor` 这条事实在 `viewer` 的视图里可见吗？
+///
+/// 三条规则，一条判定方：
+///
+/// 1. 自己的发言可见（`actor == viewer`）；
+/// 2. 会话内的另一方（人）与**未标身份**的事件可见——会话是一条双向线程，
+///    线程里的话彼此都看得见；
+/// 3. **别的智能体**的发言不可见——第三方私有，不进本主体的 prompt。
+///
+/// 平凡值保证：今天的会话是单主体的（所有主体同一身份 `agent:main`）⇒ 这条
+/// 判定对每一条事件都返回 `true`，视图与接线前**逐字一致**。多主体一出现
+/// （子智能体、对等体），第 3 条才开始挡东西——那正是它存在的理由。
+pub fn visible_to(actor: &str, viewer: &str) -> bool {
+    actor == viewer || !actor.starts_with(AGENT_PREFIX)
+}
+
 /// 一条被召回的记忆。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecallEntry {
@@ -92,3 +113,7 @@ impl RecallView {
         self.entries.iter().any(|e| e.content == content)
     }
 }
+
+#[cfg(test)]
+#[path = "mod.test.rs"]
+mod tests;

@@ -153,6 +153,21 @@ fn line_head_tail(text: &str, line_threshold: usize) -> String {
     out
 }
 
+/// 请求视图的**可见域判定**（`viewer = None` ⇒ 恒真，与接线前逐字一致）。
+///
+/// 一条规则一个判定方：这里的 `Some` 分支走 core 的 [`visible_to`]，不再自带
+/// 第二条规则。`principal = None` 单独判为可见——存量消息没有标身份，把它判成
+/// 不可见等于让历史整段从 prompt 里消失，那是拿接线覆盖旧行为。
+pub fn visible_for(m: &ChatMessage, viewer: Option<&str>) -> bool {
+    let Some(viewer) = viewer else {
+        return true;
+    };
+    match m.principal.as_deref() {
+        None => true,
+        Some(p) => crate::symbio_core::visible_to(p, viewer),
+    }
+}
+
 /// 水位提醒文案（请求级注入，不落库）。模型不应直接回应此提示。
 const CONTEXT_NUDGE_TEXT: &str =
     "[system note] Context usage is approaching the limit. If you are \
@@ -181,9 +196,15 @@ const CONTEXT_NUDGE_TEXT: &str =
 ///    轮次窗口都会读错；也不进系统提示词——那里有「唯一真源 = 注册段」的纪律
 ///    （`plugins/session/README.md`）。
 ///
-/// 视图每轮从存储重建，五个步骤天然幂等，不存在重复存档 / 重复注入问题。
+/// 以及第 0 步（在一切裁剪之前）：**可见域**（`viewer`，[plan/11 批 1](../../../docs/plan/11-多执行器与多主体加固实施方案.md)
+/// ③ 的请求侧入口）。`None` = 不过滤，与接线前逐字一致；`Some(会话主体)` = 别的
+/// 智能体的发言不进本主体的 prompt。**未标身份的消息照旧可见**（`principal = None`
+/// 是「还没接线」，不是「不让人看」——见 [`ChatMessage::principal`]）。两条链各滤一次：
+/// 请求侧滤消息、运行器侧（`window_by_turn`）滤事件，判据同一条（`visible_to`）。
+///
+/// 视图每轮从存储重建，六个步骤天然幂等，不存在重复存档 / 重复注入问题。
 /// 全部压缩由此统一收敛于"发给大模型之前"（写入时压缩已废除，落库恒为原文）。
-// 9 个参数均为单一调用点（chat_loop）传入的独立语义旋钮，强行打包成
+// 10 个参数均为单一调用点（chat_loop）传入的独立语义旋钮，强行打包成
 // config struct 只会多一层间接而无行为收益，故显式豁免 clippy 参数数上限。
 #[allow(clippy::too_many_arguments)]
 pub fn build_request_view(
@@ -199,8 +220,13 @@ pub fn build_request_view(
     line_threshold: usize,
     inject_nudge: bool,
     recall_section: Option<&str>,
+    viewer: Option<&str>,
 ) -> Vec<ChatMessage> {
-    let mut view = messages.to_vec();
+    let mut view: Vec<ChatMessage> = messages
+        .iter()
+        .filter(|m| visible_for(m, viewer))
+        .cloned()
+        .collect();
     fade_aged_content_nodes(&mut view, content_keep_recent, line_threshold);
     if fade_active {
         fade_aged_tool_results(&mut view, fade_keep_turns);

@@ -391,3 +391,52 @@ async fn migrated_session_routes_stay_retired() {
         }
     }
 }
+
+// ==================== attributed：落库补身份的唯一执行点 ====================
+
+/// [plan/11 批 1](../../../../docs/plan/11-多执行器与多主体加固实施方案.md) ②：
+/// 人的话是 `user`（不随会话变），其余是**本会话主体**；**已带主体的一律不覆盖**——
+/// 覆盖转播进来的别的会话 / 子智能体的消息就是串主体。
+///
+/// 为什么断言在 `attributed` 而不是「落库后的文件」：这条规则的判定点只有一个
+/// （`append_and_publish` 里那次映射），文件断言是它的效果、还得搭一整条链路；
+/// 判定点钉死之后，效果由 T30（e2e）在真实落盘上验。
+#[test]
+fn attributed_fills_by_role_and_never_overwrites() {
+    let base = |role| cm::ChatMessage {
+        id: uuid::Uuid::new_v4().to_string(),
+        role,
+        ..Default::default()
+    };
+    let main = crate::authz::PRINCIPAL_MAIN;
+    let of = |m: cm::ChatMessage| attributed(m, main).principal;
+
+    // 人说的话不随会话变。
+    assert_eq!(
+        of(base(Some(cm::MessageRole::User))).as_deref(),
+        Some(crate::authz::PRINCIPAL_USER)
+    );
+    // 助手正文、工具结果、压缩记录、系统说明都是本会话主体说的。
+    assert_eq!(
+        of(base(Some(cm::MessageRole::Assistant))).as_deref(),
+        Some(main)
+    );
+    assert_eq!(of(base(None)).as_deref(), Some(main));
+
+    // 已带主体 ⇒ 原样交还（转播的身份优先，这是「不串主体」的写侧那一半）。
+    let mut relayed = base(Some(cm::MessageRole::Assistant));
+    relayed.principal = Some("agent:reviewer".to_string());
+    assert_eq!(
+        of(relayed).as_deref(),
+        Some("agent:reviewer"),
+        "不得把子智能体的发言改成本会话主体"
+    );
+
+    // 换个会话主体，人的话仍是 `user`——它是会话外的那一方。
+    let mut user = base(Some(cm::MessageRole::User));
+    user.principal = None;
+    assert_eq!(
+        attributed(user, "agent:reviewer").principal.as_deref(),
+        Some(crate::authz::PRINCIPAL_USER)
+    );
+}

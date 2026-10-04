@@ -375,6 +375,7 @@ async fn real_provider_full_calibration() {
                     tier: LatencyTier::Deep,
                     window_turns: None,
                     resume: None,
+                    actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
                 },
                 delta_frames.clone() as Arc<dyn crate::symbio_core::DeltaSink>,
             )

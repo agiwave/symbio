@@ -201,6 +201,15 @@ pub struct ChatMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<MessageRole>,
 
+    /// **这条发言是谁说的**（[plan/11 批 1](../../../../docs/plan/11-多执行器与多主体加固实施方案.md)
+    /// ② 的跨栈身份字段）：主体名，取值点只有 `chat_loop::request_principal`。
+    ///
+    /// `None` = 尚未标身份（历史消息、未接入的写方）——可见域判据把它当**可见**：
+    /// 缺身份是「还没接线」，不是「不让人看」。反过来把 `None` 判成不可见会让
+    /// 所有存量消息从视图里消失，那是拿接线覆盖旧行为（S08 §4 平凡值要求逐字一致）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub principal: Option<String>,
+
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub msg_type: Option<MessageType>,
 
@@ -411,6 +420,7 @@ pub fn message_of_node(node: &crate::symbio_core::VdfsNode, text: String) -> Opt
         tool_call_id: attr(&node.attributes, "tool_call_id"),
         seq: attr(&node.attributes, "seq"),
         error: attr(&node.attributes, "error"),
+        principal: attr(&node.attributes, "principal"),
         // `message_node` 把「没有 meta」写成 `null`；这里还原成"没有"
         meta: node
             .attributes

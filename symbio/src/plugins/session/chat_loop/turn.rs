@@ -276,6 +276,8 @@ pub(crate) async fn close_turn(
         ctx.clone(),
         &context.messages,
         orchestrator.session_dir.dir(),
+        // 代际立约出参：`agent_run` 的承诺随本轮收束入格（见 `TurnState::delegations`）。
+        &mut turn.delegations,
     )
     .await;
     turn.in_flight_tools.clear();

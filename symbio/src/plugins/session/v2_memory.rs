@@ -249,6 +249,7 @@ pub(crate) fn record_recalled(
     store: &EventWalStore,
     view: &RecallView,
     trigger_seq: u64,
+    actor: &str,
     now: i64,
 ) -> Result<(), String> {
     let already = store
@@ -259,7 +260,7 @@ pub(crate) fn record_recalled(
         return Ok(());
     }
     store
-        .append(recalled_event(view, trigger_seq).with_ts(now))
+        .append(recalled_event(view, trigger_seq, actor).with_ts(now))
         .map_err(|e| format!("memory.recalled 入格失败：{e:?}"))?;
     Ok(())
 }

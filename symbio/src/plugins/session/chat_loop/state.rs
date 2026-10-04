@@ -11,6 +11,16 @@ use super::super::plugin::PublishTarget;
 use super::progress::ProgressPolicy;
 use super::*;
 
+/// 本请求所属会话的主体身份——**唯一**读 `ctx[AGENT_ID]` 并派生主体名的取值点。
+///
+/// 派生本身住 [`crate::authz::principal_of`]（部署事实的唯一 owner）；这里只负责
+/// 「从请求上下文取那个 id」。写事件的 `actor`、写消息的 `principal`、写侧闸判的
+/// 对象三者都走它——三处各推一次迟早漂移成「判的是 A、写的是 B」。
+pub(crate) fn request_principal(ctx: &dyn crate::symbio_core::PluginInvokeRequest) -> String {
+    use crate::symbio_core::PluginInvokeRequestExt;
+    crate::authz::principal_of(ctx.get(crate::symbio_core::AGENT_ID).as_deref())
+}
+
 /// MODEL 会话上下文
 ///
 /// 设计说明：
@@ -20,6 +30,14 @@ use super::*;
 pub(crate) struct SessionContext {
     pub messages: Vec<ChatMessage>,
     pub session: Arc<PersistentChatSession>,
+    /// **本会话的主体身份**（[plan/11 批 1](../../../../docs/plan/11-多执行器与多主体加固实施方案.md)
+    /// ② 的取值点）：会话选定的 agent ⇒ 主体名，未选 ⇒ `agent:main`。
+    ///
+    /// 派生只有一处（[`crate::authz::principal_of`]），转写事件的 `actor`、消息的
+    /// `principal`、写侧闸判的对象三者共用它——三处各写一份字符串迟早漂移成
+    /// 「判的是 A、写的是 B」。放在上下文里而不是每个阶段各推一次：一个事实一个
+    /// 取值点，且它随会话走、不随阶段变。
+    pub principal: String,
 }
 
 /// 请求级不可变配置（`model_chat::Request` 的取值快照，全程只读）。
@@ -94,6 +112,13 @@ pub(crate) struct TurnState {
     /// 级别 2（异步工具调用）：`settle_turn` 把每个工具 spawn 出去并登记 id，
     /// 完成回调逐个移除；全部移除后唤醒主循环——**不完整不唤醒**。
     pub(crate) in_flight_tools: HashSet<String>,
+    /// 本轮的**代际立约记录**（[04 §3.1 批⑧](../../../../docs/plan/04-工程落地.md)，S08 §3）。
+    ///
+    /// 由工具执行层填（`process_tool_calls_async` 的出参），随收束转写入格
+    /// （`v2_bridge::record`）——两者之间必须有个**请求作用域**的地方存它：执行在
+    /// `close_turn`、入格在 `finish_turn`，中间隔着一整段本轮收尾。与 `TurnState`
+    /// 的其它字段一样随请求复位，所以不会把上一轮的承诺带到这一轮。
+    pub(crate) delegations: Vec<crate::plugins::session::tools::Delegation>,
     /// **对话线上最近一次动静**的时刻（毫秒）——中途汇报的静默时钟起点。
     ///
     /// 两个来源都算一次"动静"：用户发言（轮首输入 / 轮边界折进的补充）与助手写下

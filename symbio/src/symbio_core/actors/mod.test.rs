@@ -679,7 +679,7 @@ fn recall_translator_produces_provenanced_event_and_invariants_stay_green() {
     let view = recall("agent:main", None)
         .apply(&snapshot, 2_000, Budget::generous())
         .value;
-    let event = RecallTranslator.recalled_event(&view, 0);
+    let event = RecallTranslator.recalled_event(&view, 0, "agent:main");
     store.append(event).unwrap();
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     assert!(
@@ -2145,6 +2145,7 @@ mod turn_runner_tests {
                     tier: LatencyTier::Deep,
                     window_turns: None,
                     resume: None,
+                    actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
                 },
                 got.clone() as Arc<dyn DeltaSink>,
             )
@@ -2182,6 +2183,7 @@ mod turn_runner_tests {
                     tier: LatencyTier::Deep,
                     window_turns: None,
                     resume: None,
+                    actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
                 },
                 got2.clone() as Arc<dyn DeltaSink>,
             )
@@ -2375,6 +2377,7 @@ mod tool_round_tests {
             tier: LatencyTier::Deep,
             window_turns: None,
             resume: None,
+            actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
         }
     }
 
@@ -2580,6 +2583,7 @@ mod tool_round_tests {
                     text: String::new(), // 续写不新开用户格，此字段不参与入格
                     tier: LatencyTier::Deep,
                     window_turns: None,
+                    actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
                     resume: Some(TurnResume {
                         user_seq: 0,
                         call: TurnToolCallInfo {

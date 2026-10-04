@@ -46,6 +46,7 @@ fn final_closure_writes_user_and_final_with_cost() {
     let wal = tmp_wal("final");
     record_to_wal(
         wal.clone(),
+        crate::authz::PRINCIPAL_MAIN,
         "u-1",
         "你好",
         V2Closure::Final {
@@ -53,6 +54,7 @@ fn final_closure_writes_user_and_final_with_cost() {
             cost_ms: 4321,
         },
         None,
+        &[],
     )
     .expect("转写成功");
 
@@ -120,6 +122,7 @@ fn retry_of_same_message_increments_attempt_and_new_message_increments_turn() {
     let wal = tmp_wal("retry");
     record_to_wal(
         wal.clone(),
+        crate::authz::PRINCIPAL_MAIN,
         "u-1",
         "问",
         V2Closure::Fallback {
@@ -127,10 +130,12 @@ fn retry_of_same_message_increments_attempt_and_new_message_increments_turn() {
             cost_ms: 100,
         },
         None,
+        &[],
     )
     .unwrap();
     record_to_wal(
         wal.clone(),
+        crate::authz::PRINCIPAL_MAIN,
         "u-1",
         "问",
         V2Closure::Final {
@@ -138,10 +143,12 @@ fn retry_of_same_message_increments_attempt_and_new_message_increments_turn() {
             cost_ms: 200,
         },
         None,
+        &[],
     )
     .expect("重试转写成功（id 不撞 = 幂等键不冲突）");
     record_to_wal(
         wal.clone(),
+        crate::authz::PRINCIPAL_MAIN,
         "u-2",
         "问2",
         V2Closure::Final {
@@ -149,6 +156,7 @@ fn retry_of_same_message_increments_attempt_and_new_message_increments_turn() {
             cost_ms: 300,
         },
         None,
+        &[],
     )
     .unwrap();
 
@@ -189,6 +197,7 @@ fn reopen_recovers_events_with_seq() {
     let wal = tmp_wal("reopen");
     record_to_wal(
         wal.clone(),
+        crate::authz::PRINCIPAL_MAIN,
         "u-1",
         "问",
         V2Closure::Final {
@@ -196,6 +205,7 @@ fn reopen_recovers_events_with_seq() {
             cost_ms: 5,
         },
         None,
+        &[],
     )
     .unwrap();
     let count_before = EventWalStore::open(&wal).unwrap().range(Seq::new(0)).len();
@@ -310,6 +320,7 @@ async fn v2_mode_off_disables_recording() {
     );
     record(
         &off_session,
+        crate::authz::PRINCIPAL_MAIN,
         "u-1",
         "问",
         V2Closure::Final {
@@ -317,6 +328,7 @@ async fn v2_mode_off_disables_recording() {
             cost_ms: 1,
         },
         None,
+        &[],
     );
     let dir = off_session.session_dir().expect("持久会话有目录");
     assert!(!dir.join("v2-events.wal").exists(), "off 档不得写 WAL");
@@ -329,6 +341,7 @@ async fn v2_mode_off_disables_recording() {
     );
     record(
         &on_session,
+        crate::authz::PRINCIPAL_MAIN,
         "u-1",
         "问",
         V2Closure::Final {
@@ -336,6 +349,7 @@ async fn v2_mode_off_disables_recording() {
             cost_ms: 1,
         },
         None,
+        &[],
     );
     let dir = on_session.session_dir().expect("持久会话有目录");
     assert!(dir.join("v2-events.wal").exists(), "bridge 档必须写 WAL");
@@ -383,6 +397,7 @@ fn record_to_wal_wires_all_three_memory_steps() {
     for i in 0..4u64 {
         record_to_wal(
             wal.clone(),
+            crate::authz::PRINCIPAL_MAIN,
             &format!("u-{i}"),
             &format!("第 {i} 条约定"),
             V2Closure::Final {
@@ -390,6 +405,7 @@ fn record_to_wal_wires_all_three_memory_steps() {
                 cost_ms: i,
             },
             None,
+            &[],
         )
         .expect("转写成功");
     }
@@ -428,6 +444,7 @@ fn record_to_wal_wires_all_three_memory_steps() {
 
     record_to_wal(
         wal.clone(),
+        crate::authz::PRINCIPAL_MAIN,
         "u-4",
         "第五句",
         V2Closure::Final {
@@ -435,6 +452,7 @@ fn record_to_wal_wires_all_three_memory_steps() {
             cost_ms: 44,
         },
         Some(&view),
+        &[],
     )
     .expect("转写成功");
 
@@ -453,6 +471,162 @@ fn record_to_wal_wires_all_three_memory_steps() {
         "溯源锚 = 触发检索的那格用户发言"
     );
     assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+
+    std::fs::remove_dir_all(wal.parent().unwrap()).ok();
+}
+
+/// 代际立约（[04 §3.1 批⑧](../../../../docs/plan/04-工程落地.md)，S08 §3「加格子，不加机制」）：
+/// 本轮的 `agent_run` 委托随收束落成 `commitment.opened` → `released`，
+/// **同锚在本轮 `user.message`**——承诺是「这轮我答应了什么」，锚漂到别处就查不到了。
+#[test]
+fn settled_delegation_becomes_commitment_opened_then_released() {
+    use super::super::tools::Delegation;
+
+    let wal = tmp_wal("commit-ok");
+    let delegations = [Delegation {
+        id: "call-1".to_string(),
+        promise: "让 reviewer 复查这段".to_string(),
+        ok: true,
+        why: String::new(),
+    }];
+    record_to_wal(
+        wal.clone(),
+        crate::authz::PRINCIPAL_MAIN,
+        "u-9",
+        "交给子智能体",
+        V2Closure::Final {
+            text: "已交给子智能体".into(),
+            cost_ms: 50,
+        },
+        None,
+        &delegations,
+    )
+    .expect("转写成功");
+
+    let store = EventWalStore::open(&wal).unwrap();
+    let snap = store.range(Seq::new(0));
+    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+
+    let user = snap
+        .iter()
+        .find(|e| e.kind == EVENT_USER_MESSAGE)
+        .expect("用户格");
+    let user_seq = user.seq().map(|s| s.value()).expect("已入格");
+    let opened = snap
+        .iter()
+        .find(|e| e.kind == crate::symbio_core::EVENT_COMMITMENT_OFFERED)
+        .expect("立约格");
+    let released = snap
+        .iter()
+        .find(|e| e.kind == crate::symbio_core::EVENT_COMMITMENT_RELEASED)
+        .expect("守约格");
+
+    assert_eq!(opened.entity, Entity::Commitment);
+    assert_eq!(
+        opened.produced_by,
+        Some(user_seq),
+        "立约锚在本轮开口上（溯源可查）"
+    );
+    assert_eq!(
+        released.produced_by,
+        Some(user_seq),
+        "立约与了结同锚成对——`check_all` 才看得见它们是一对"
+    );
+    assert_eq!(
+        released.payload.get("id"),
+        opened.payload.get("id"),
+        "了结按载荷 id 找回立约方（收束时不重抄 `from`）"
+    );
+    assert_eq!(
+        opened.payload.get("from").and_then(|v| v.as_str()),
+        Some(crate::authz::PRINCIPAL_MAIN),
+        "承诺方 = 会话主体（声誉记在承诺方头上）"
+    );
+    assert_eq!(
+        opened.payload.get("to").and_then(|v| v.as_str()),
+        Some(crate::authz::PRINCIPAL_USER),
+        "承诺对象 = 会话外的另一方"
+    );
+    assert_eq!(
+        opened.payload.get("promise").and_then(|v| v.as_str()),
+        Some("让 reviewer 复查这段"),
+        "承诺内容 = 委托出去的那句话"
+    );
+    // 承诺号带 `{user_id}-a{attempt}` 前缀：调用编号只在**一次模型响应内**唯一，
+    // 而 WAL 的幂等键是事件 id——不加前缀，跨轮复用同一编号会让第二次立约撞
+    // `Duplicate`、把整轮转写拖失败。
+    assert!(
+        opened.event_id.starts_with("c-offer-v2c-u-9-a0-"),
+        "承诺号须带轮次前缀：{}",
+        opened.event_id
+    );
+
+    std::fs::remove_dir_all(wal.parent().unwrap()).ok();
+}
+
+/// 违约必须可观测（S08 §5）：`broken` 带 `why`，并**宣告**给承诺对象——
+/// 宣告仍是同一份事实源里的一格，不是新通道（S08 §2「通信 = 没有直连」）。
+#[test]
+fn breached_delegation_is_declared_to_the_counterparty() {
+    use super::super::tools::Delegation;
+
+    let wal = tmp_wal("commit-breach");
+    let delegations = [Delegation {
+        id: "call-2".to_string(),
+        promise: "让 reviewer 复查这段".to_string(),
+        ok: false,
+        why: "子会话中途失败".to_string(),
+    }];
+    record_to_wal(
+        wal.clone(),
+        crate::authz::PRINCIPAL_MAIN,
+        "u-10",
+        "交给子智能体",
+        V2Closure::Final {
+            text: "没交出去".into(),
+            cost_ms: 50,
+        },
+        None,
+        &delegations,
+    )
+    .expect("转写成功");
+
+    let snap = EventWalStore::open(&wal).expect("重开").range(Seq::new(0));
+    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+
+    let broken = snap
+        .iter()
+        .find(|e| e.kind == crate::symbio_core::EVENT_COMMITMENT_BROKEN)
+        .expect("违约收束必须成格");
+    assert_eq!(
+        broken.payload.get("why").and_then(|v| v.as_str()),
+        Some("子会话中途失败"),
+        "违约必须带 why（可观测，S08 §5）"
+    );
+
+    let asserted = snap
+        .iter()
+        .find(|e| e.kind == crate::symbio_core::EVENT_COMMITMENT_ASSERTED)
+        .expect("违约宣告必须成格");
+    assert_eq!(asserted.entity, Entity::Commitment);
+    let statement = asserted
+        .payload
+        .get("statement")
+        .and_then(|v| v.as_str())
+        .expect("宣告载荷带原话");
+    assert!(
+        statement.contains(crate::authz::PRINCIPAL_USER) && statement.contains("子会话中途失败"),
+        "宣告 = 把这次违约告知承诺对象：{statement}"
+    );
+    let user = snap
+        .iter()
+        .find(|e| e.kind == EVENT_USER_MESSAGE)
+        .expect("用户格");
+    assert_eq!(
+        asserted.produced_by,
+        user.seq().map(|s| s.value()),
+        "宣告同样锚在本轮开口上"
+    );
 
     std::fs::remove_dir_all(wal.parent().unwrap()).ok();
 }

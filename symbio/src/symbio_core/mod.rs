@@ -60,13 +60,27 @@ pub use event::{
 // 名字是数据，core 内与插件内各写一份字面量就等于两套事件名。
 // `recalled_event` 出根而不是主体类型本身：NDC-001（无直连）禁止定义域之外**提及
 // 主体名**——提及即可持有、持有即可绕过事实源。主体仍在 `actors` 内被本函数驱动。
-pub(crate) use actors::recalled_event;
+pub(crate) use actors::{commitment_events, recalled_event, ActorSpec};
+// 承诺事件名字表：core 内的消费方（`commitment_events` 的 `CommitmentKeeper`、
+// `projection::reputation`）走**模块内**路径引用，插件侧只有**测试**要按名字断言
+// （`v2_bridge.test.rs`）——而 C-002 禁止 core 外深引、非测试构建里这四个名字又
+// 没有消费者。故只在 `cfg(test)` 出根：出根是给测试用的，不出根不是把它们藏着。
+#[cfg(test)]
+pub(crate) use event::{
+    EVENT_COMMITMENT_ASSERTED, EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OFFERED,
+    EVENT_COMMITMENT_RELEASED,
+};
 pub(crate) use event::{
     EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
 };
 pub(crate) use projection::consolidate::{accept, ConsolidateParams, Rejection};
 pub(crate) use projection::recall::recall;
+pub(crate) use projection::reputation::reputation;
 pub(crate) use view::RecallView;
+// 可见域判据与智能体身份前缀：三处共用**同一条**判定——写视图的 `window_by_turn`
+// （core）、写消息过滤的 `context/view`（插件）、做主体派生的 `crate::authz`。
+// 两个判定方 = 两套可见域与两种身份形状，迟早漂移成「判的是 A、写的是 B」。
+pub(crate) use view::{visible_to, AGENT_PREFIX};
 
 // ==================== 适配器（v2 阶段 S2，⑤ adapters） ====================
 // 时延闸门 = 本包的依赖注入策略（plan/05 §3.3）：令牌按档位签发，反射档拿不到模型句柄。

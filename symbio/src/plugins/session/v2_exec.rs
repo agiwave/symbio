@@ -42,7 +42,7 @@ use crate::symbio_core::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
 use crate::symbio_core::{
-    llm_short_id, CapabilityMeta, DeltaSink, DispatchPort, Entity, Event, EventWalStore,
+    llm_short_id, ActorSpec, CapabilityMeta, DeltaSink, DispatchPort, Entity, Event, EventWalStore,
     ExecAbortSignal, ExecEventSink, LatencyTier, ModelProvider, Plugin, PluginError,
     ProviderLlmAdapter, Seq, Store, TokenIssuer, TurnInput, TurnOutput, TurnResume, TurnRunner,
     TurnToolCallInfo, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
@@ -323,12 +323,19 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
 
     let llm = ProviderLlmAdapter::for_turn(provider, system_prompt, abort.clone());
     let tok = TokenIssuer::issue_deep();
+    // 身份进事件（[plan/11 批 1](../../../docs/plan/11-多执行器与多主体加固实施方案.md) ①）：
+    // 本轮以**会话选定的那个 agent** 为主体——`ActorSpec` 首次在生产构造，
+    // `agent:main` 从字面量变成数据。取值点与转写侧同一个（`request_principal`），
+    // 写侧闸判的正是它 ⇒ 判的对象 = 写的对象。未选智能体 ⇒ `agent:main`
+    // （S08 §4 平凡值，与接线前逐字一致）。
+    let actor = ActorSpec::trivial(super::chat_loop::request_principal(ctx.as_ref()));
     let input = TurnInput {
         turn: turn_no,
         text: user_text.to_string(),
         tier: LatencyTier::Deep,
         window_turns: Some(window_turns),
         resume: resume_anchor,
+        actor,
     };
     // 工具分发：core 只认契约（`DispatchPort`），实现是插件侧——它持插件宿主、
     // 请求上下文、转写出口与会话目录（core 认识这些即违 E-009）。

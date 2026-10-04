@@ -130,6 +130,16 @@ impl PublishTarget<'_> {
 /// `content` 两个字段必须分开的原因——同一个消费端既可能需要追加（流式），也可能
 /// 需要替换（权威副本对齐），而帧必须自证是哪一种。
 ///
+/// ## 落库补身份在这里，不在别处（[plan/11 批 1](../../../docs/plan/11-多执行器与多主体加固实施方案.md) ②）
+///
+/// 本函数是**唯一的**消息追加写点（生产代码里 `append_messages` 只有这一处调用），
+/// 所以 [`attributed`] 补在这里就等于「每条持久化消息都带身份」——补在各处建消息
+/// 的地方则必然漏：建消息的写点有七八处（用户发言 / 助手正文 / 工具结果 / 压缩
+/// 记录 / 系统说明），漏一处就造出「有身份、没有身份」两种同义消息。
+///
+/// `session_principal` 是**本会话主体**，谁说话按 role 分：人（`user`）不随会话变，
+/// 其余都是本会话主体说的。
+///
 /// ## 用户发言那条为什么也在这个出口里
 ///
 /// 它由 `orchestrator/entry.rs` 直连存储追加——前端手里只有自己的**乐观副本**，
@@ -142,12 +152,38 @@ pub(crate) async fn append_and_publish(
     session: &PersistentChatSession,
     messages: Vec<cm::ChatMessage>,
     to: PublishTarget<'_>,
+    session_principal: &str,
 ) -> Result<(), PluginError> {
-    let persisted = session.append_messages(messages).await?;
+    let persisted = session
+        .append_messages(
+            messages
+                .into_iter()
+                .map(|m| attributed(m, session_principal))
+                .collect(),
+        )
+        .await?;
     for message in persisted {
         to.publish(message).await;
     }
     Ok(())
+}
+
+/// 落库前补身份的**唯一执行点**：写方知道这一轮是谁在说话，只补**没标过**的——
+/// 转播进来的别的会话 / 子智能体消息带着自己的主体，不得被本会话覆盖（那是串主体）。
+///
+/// 人说的话是 `user`（会话外的一方，不随会话变），其余（助手正文、工具结果、
+/// 压缩记录、系统说明）都是本会话主体说的。见 [`append_and_publish`]：为什么补
+/// 在落库这一个点上、而不是各处建消息时。
+fn attributed(m: cm::ChatMessage, session_principal: &str) -> cm::ChatMessage {
+    if m.principal.is_some() {
+        return m;
+    }
+    let mut out = m;
+    out.principal = Some(match out.role {
+        Some(cm::MessageRole::User) => crate::authz::PRINCIPAL_USER.to_string(),
+        _ => session_principal.to_string(),
+    });
+    out
 }
 
 impl SessionPlugin {

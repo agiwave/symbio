@@ -496,7 +496,7 @@ fn record_recalled_anchors_the_retrieval_and_is_idempotent() {
         .value;
     assert_eq!(view.entries.len(), 1);
 
-    record_recalled(&store, &view, trigger, 9000).expect("入格");
+    record_recalled(&store, &view, trigger, crate::authz::PRINCIPAL_MAIN, 9000).expect("入格");
     let snap = store.range(Seq::new(0));
     let ev = snap
         .iter()
@@ -516,7 +516,8 @@ fn record_recalled_anchors_the_retrieval_and_is_idempotent() {
     assert!(payload_str(ev, "top").is_some_and(|s| s.contains("记住这条")));
 
     // 幂等：同一锚再落一次仍是 1 条。
-    record_recalled(&store, &view, trigger, 9001).expect("重复调用不失败");
+    record_recalled(&store, &view, trigger, crate::authz::PRINCIPAL_MAIN, 9001)
+        .expect("重复调用不失败");
     assert_eq!(
         store
             .range(Seq::new(0))

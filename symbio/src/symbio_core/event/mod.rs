@@ -85,17 +85,13 @@ pub const EVENT_MEMORY_RECALLED: &str = "memory.recalled";
 
 /// 立约：`from` 向 `to` 承诺交付什么（载荷 `{ id, from, to, promise }`）。
 /// 落在 `commitment × opened`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑧ 接线后摘除
 pub const EVENT_COMMITMENT_OFFERED: &str = "commitment.opened";
 /// 守约收束：承诺按约履行。落在 `commitment × closed`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑧ 接线后摘除
 pub const EVENT_COMMITMENT_RELEASED: &str = "commitment.released";
 /// 违约收束：承诺未履行（载荷带 `why`——违约必须可观测）。落在 `commitment × closed`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑧ 接线后摘除
 pub const EVENT_COMMITMENT_BROKEN: &str = "commitment.broken";
 /// 对等声明：把承诺状态对等宣告给协作方（不是新通道，是普通事件）。
 /// 落在 `commitment × asserted`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑧ 接线后摘除
 pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
 
 // ── 任务格子（S7 第 16–18 步，[roadmap/S03 §3](../../../../docs/plan/roadmap/S03-多步任务与返工.md)）──

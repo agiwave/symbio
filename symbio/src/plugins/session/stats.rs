@@ -82,6 +82,15 @@ pub(crate) struct SessionStats {
     /// `check_all`，本处只取数——[04 §3.1 批④](../../../docs/plan/04-工程落地.md)
     /// 的「不变量进 CI/读侧」：e2e 断言的就是这一列。
     pub invariants: serde_json::Value,
+    /// 声誉（S6 第 15 步的**读侧**，[04 §3.1 批⑧](../../../docs/plan/04-工程落地.md) +
+    /// [plan/12 批 2](../../../docs/plan/12-价值验收与基线埋点.md)）：`own` = 本会话
+    /// 主体自己的条目，`by_principal` = 这份事实源里每个主体的条目（`own` 在其中，
+    /// 原样摊开、不另造口径）。
+    ///
+    /// 无读权限 ⇒ **整列为空对象**，不是零值条目：t28 的三态（没源 / 有源不给 / 有数）
+    /// 靠它分辨「这里没有数」与「不给你看」——与四列用「空切片 ⇒ 全零」是同一条判定，
+    /// 换个列名不换判据。
+    pub reputation: serde_json::Value,
 }
 
 /// `session/stats` 的请求体：**全部可选**——不传 = 本机默认（今天的行为）。
@@ -103,10 +112,15 @@ pub(crate) struct StatsRequest {
 ///
 /// `viewer = Some(身份)` 时先按可见域取**可读切片**再出四列（**读什么由能看什么
 /// 决定**，不是先算完再裁结果）；`None` = 本机默认，与判定引入之前逐字一致。
+///
+/// `session_principal` 是**本会话主体**（声誉列的 `own` 取谁），与读方身份是两回事：
+/// 读方是「谁在看」，会话主体是「这份承诺是谁立的」——把两者合成一个参数会让
+/// 「别人看我的声誉」退化成「别人的声誉」。
 pub(crate) fn read(
     session_id: &str,
     wal: &Path,
     viewer: Option<&str>,
+    session_principal: &str,
 ) -> Result<SessionStats, PluginError> {
     let has_wal = wal.exists();
     let store = EventWalStore::open_readonly(wal)
@@ -121,19 +135,16 @@ pub(crate) fn read(
     // 属主本人 = 全量读数（与不声明时逐字一致）；非属主 / 矩阵外主体 = **空切片**
     // ⇒ 四列全零、不变量清单为空，与 `has_wal: true` 并排即可分辨「有源但不给你
     // 看」，而不是被读成「这里没有数」。
-    let snapshot = match viewer {
-        None => snapshot,
+    // 可见域只判**一次**：四列与声誉列共用同一个答案——两个判定点 = 两套判据，
+    // 必然漂移成「四列能看、声誉不能看」这种没有理由的半开半掩。
+    let may_read = match viewer {
+        None => true,
         Some(principal) => {
             let matrix: &PermissionMatrix = crate::authz::production_matrix();
-            let may_read =
-                matrix.can_see(principal, crate::authz::SESSION_OWNER, VisScope::default());
-            if may_read {
-                snapshot
-            } else {
-                Vec::new()
-            }
+            matrix.can_see(principal, crate::authz::SESSION_OWNER, VisScope::default())
         }
     };
+    let snapshot = if may_read { snapshot } else { Vec::new() };
 
     // 四列全部来自同一份事件切片（ADR-044：实测与判据同源）。
     let latency = slo_report()
@@ -185,6 +196,18 @@ pub(crate) fn read(
     let invariants = serde_json::to_value(check_all(&snapshot))
         .map_err(|e| PluginError::InternalError(format!("不变量清单序列化失败：{e}")))?;
 
+    // 声誉列：与四列同一份切片、同一个 as-of（`i64::MAX` = 落盘即已发生）。
+    // 没有权限时不给零值条目——给零值等于替一个你本来看不到的主体报数。
+    let rep = crate::symbio_core::reputation()
+        .apply(&snapshot, i64::MAX, Budget::generous())
+        .value;
+    let reputation = if may_read {
+        let own = rep.of(session_principal);
+        serde_json::json!({ "own": own, "by_principal": rep.by_principal })
+    } else {
+        serde_json::json!({})
+    };
+
     Ok(SessionStats {
         session_id: session_id.to_string(),
         wal: wal.display().to_string(),
@@ -193,6 +216,7 @@ pub(crate) fn read(
         cost,
         checkpoint,
         invariants,
+        reputation,
     })
 }
 
@@ -227,7 +251,14 @@ impl SessionPlugin {
                     .principal
             }
         };
-        let stats = read(&sid, &wal, viewer.as_deref())?;
+        let stats = read(
+            &sid,
+            &wal,
+            viewer.as_deref(),
+            // 本会话主体与转写侧同一个取值点（`request_principal`）：会话主体错一点，
+            // `own` 就会把别人的承诺记到这个会话头上。
+            &super::chat_loop::request_principal(ctx.as_ref()),
+        )?;
         Ok(PluginPayload::new(&stats))
     }
 }

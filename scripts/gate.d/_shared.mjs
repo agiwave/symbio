@@ -467,7 +467,17 @@ export const BASELINE = {
   //      验收 = v2_memory 8 例（编码溯源/去重/截断、巩固三态、跨会话召回与排版、
   //      检索事实幂等与 actor 对齐、合并算法两条边界）+ 桥三段接线 1 例 +
   //      请求视图置顶注入 1 例 + e2e `t29`（记忆进 prompt、跨会话召回、巩固可见）。
-  rustTests: 1243,
+  // 1252（身份 / 承诺 / 声誉，2026-10-04）——`1243 → 1252`，**+9**。
+  //      04 §3.1 批⑧ 全量接线：身份（`TurnInput.actor` 入参、`authz::principal_of` /
+  //      `matrix_for`、`view::visible_to`、`build_request_view(viewer)`、
+  //      `ChatMessage.principal` 落库单点 `append_and_publish::attributed`）、
+  //      承诺写方（`note_delegation` 四个终态分支 → `TurnState.delegations` →
+  //      `v2_bridge::record_to_wal` 逐条入格）、声誉读列（`stats::read` 会话主体
+  //      第 4 参 + `reputation` 列全有全无）。
+  //      验收 = core 可见域 2 例 + 视图按主体过滤 1 例 + `note_delegation` 2 例 +
+  //      桥承诺入格 2 例 + 声誉列 1 例 + `attributed` 身份补齐 1 例 + e2e `t30`
+  //      （父/子两会话请求包不串主体、代际立约入格、出口读声誉）。
+  rustTests: 1252,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

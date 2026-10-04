@@ -47,10 +47,12 @@ pub(crate) enum V2Closure {
 /// 溯源锚是本轮 `user.message` 格，只有轮末它才在事实源里。
 pub(crate) fn record(
     session: &PersistentChatSession,
+    principal: &str,
     user_id: &str,
     user_text: &str,
     closure: V2Closure,
     recalled: Option<&crate::symbio_core::RecallView>,
+    delegations: &[super::tools::Delegation],
 ) {
     // 总开关（`v2_mode`，ADR-045 过渡期的切换档位）：`off` 档网格零增长
     // （用户关的是数据源，不是对话）。`bridge` 档：v1 轮次全部经此转写；
@@ -65,10 +67,12 @@ pub(crate) fn record(
     };
     let result = record_to_wal(
         dir.join(super::paths::V2_WAL_FILE),
+        principal,
         user_id,
         user_text,
         closure,
         recalled,
+        delegations,
     );
     if let Err(why) = result {
         crate::plugin_warn!(
@@ -82,10 +86,12 @@ pub(crate) fn record(
 
 fn record_to_wal(
     wal: PathBuf,
+    principal: &str,
     user_id: &str,
     user_text: &str,
     closure: V2Closure,
     recalled: Option<&crate::symbio_core::RecallView>,
+    delegations: &[super::tools::Delegation],
 ) -> Result<(), String> {
     let store = EventWalStore::open(&wal).map_err(|e| format!("打开 WAL 失败：{e}"))?;
     let snapshot = store.range(Seq::new(0));
@@ -143,24 +149,41 @@ fn record_to_wal(
         .filter(|e| e.entity == Entity::Turn && e.verb == Verb::Closed && e.turn == turn)
         .count() as u64;
     authorize_close(
-        crate::authz::production_matrix(),
-        crate::authz::PRINCIPAL_MAIN,
+        &crate::authz::matrix_for(principal),
+        principal,
         prior_closures == 0,
     )?;
 
+    // ── 承诺（04 §3.1 批⑧，S08 §3「加格子，不加机制」）──────────────────
+    // 本轮代际立约随收束入格：溯源锚是刚落的 `user.message`（`user_seq`）——
+    // 承诺是「这轮我答应了什么」，锚必须落在这一轮的开口上，否则立约会漂在
+    // 没有出处的 turn 0。立约与了结**同锚成对**，`check_all` 才看得见它们。
+    // 承诺号带 `{user_id}-a{attempt}` 前缀：tool_call id 只在一次模型响应内唯一，
+    // 而 WAL 的幂等键是事件 id——跨轮复用同一个 id 会让第二次立约撞 `Duplicate`、
+    // 把整轮转写拖失败。
+    for d in delegations {
+        let cid = format!("v2c-{user_id}-a{attempt}-{}", d.id);
+        for e in crate::symbio_core::commitment_events(
+            &cid,
+            principal,
+            crate::authz::PRINCIPAL_USER,
+            &d.promise,
+            d.ok,
+            &d.why,
+            user_seq,
+        ) {
+            store
+                .append(e)
+                .map_err(|e| format!("承诺事件入格失败：{e:?}"))?;
+        }
+    }
+
     store
         .append(
-            Event::pending(
-                id,
-                kind,
-                Entity::Turn,
-                Verb::Closed,
-                turn,
-                crate::authz::PRINCIPAL_MAIN,
-            )
-            .with_produced_by(user_seq)
-            .with_cost_ms(cost_ms)
-            .with_payload(payload),
+            Event::pending(id, kind, Entity::Turn, Verb::Closed, turn, principal)
+                .with_produced_by(user_seq)
+                .with_cost_ms(cost_ms)
+                .with_payload(payload),
         )
         .map_err(|e| format!("收束事件入格失败：{e:?}"))?;
 
@@ -192,7 +215,8 @@ fn record_to_wal(
         remember("步 11 编码", why);
     }
     if let Some(view) = recalled {
-        if let Err(why) = super::v2_memory::record_recalled(&store, view, user_seq, now) {
+        if let Err(why) = super::v2_memory::record_recalled(&store, view, user_seq, principal, now)
+        {
             remember("步 12 检索入格", why);
         }
     }

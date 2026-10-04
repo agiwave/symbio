@@ -60,7 +60,9 @@ pub(crate) use self::io::{
     open_chat_session, persist_messages,
 };
 pub(crate) use self::progress::report_if_due;
-pub(crate) use self::state::{Gate, SessionContext, TurnExit, TurnRequest, TurnResult, TurnState};
+pub(crate) use self::state::{
+    request_principal, Gate, SessionContext, TurnExit, TurnRequest, TurnResult, TurnState,
+};
 pub(crate) use self::turn::{close_turn, settle_reasoning};
 pub(crate) use super::context::{auto_compress_process, run_context_compact};
 use super::v2_bridge::V2Closure;
@@ -126,6 +128,7 @@ pub async fn run_chat_loop(
     let mut context = SessionContext {
         messages: Vec::new(),
         session,
+        principal: request_principal(ctx.as_ref()),
     };
 
     // 本轮输入（消息 id + 正文）：锚定在 `single_message` 被消费**之前**。
@@ -728,10 +731,12 @@ async fn finish_turn(
                     };
                     super::v2_bridge::record(
                         &context.session,
+                        &context.principal,
                         &user_id,
                         &user_text,
                         closure,
                         turn.recall_view.as_ref(),
+                        &turn.delegations,
                     );
                 }
             }
@@ -739,6 +744,7 @@ async fn finish_turn(
                 if let Some((user_id, user_text)) = utterance {
                     super::v2_bridge::record(
                         &context.session,
+                        &context.principal,
                         &user_id,
                         &user_text,
                         V2Closure::Fallback {
@@ -746,6 +752,7 @@ async fn finish_turn(
                             cost_ms: turn.model_elapsed_ms,
                         },
                         turn.recall_view.as_ref(),
+                        &turn.delegations,
                     );
                 }
             }

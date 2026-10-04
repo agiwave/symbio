@@ -208,6 +208,8 @@ pub(crate) async fn prepare_turn_inputs(
         context.session.line_threshold(),
         inject_nudge,
         recall_section.as_deref(),
+        // 可见域入口（plan/11 批1 ③）：本会话主体之外的发言不进本次请求。
+        Some(context.principal.as_str()),
     );
 
     Ok(TurnInputs {

@@ -74,7 +74,7 @@ fn test_build_request_view_passthrough() {
         view_result("t1", "file content"),
     ];
     let retention = std::collections::HashMap::new();
-    let view = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, false, None);
+    let view = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, false, None, None);
 
     assert_eq!(view.len(), msgs.len());
     for (v, m) in view.iter().zip(msgs.iter()) {
@@ -92,7 +92,7 @@ fn test_build_request_view_injects_nudge_at_tail() {
     let msgs = vec![user_msg("u1"), assistant_msg("a1"), user_msg("u2")];
     let retention = std::collections::HashMap::new();
 
-    let view = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, true, None);
+    let view = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, true, None, None);
     assert_eq!(view.len(), msgs.len() + 1);
     let nudge = view.last().unwrap();
     assert_eq!(nudge.role, Some(MessageRole::User));
@@ -111,7 +111,7 @@ fn test_build_request_view_injects_nudge_at_tail() {
     assert!(msgs.iter().all(|m| m.meta.is_none()));
 
     // inject_nudge=false 时不注入
-    let plain = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, false, None);
+    let plain = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, false, None, None);
     assert_eq!(plain.len(), msgs.len());
 }
 
@@ -133,7 +133,7 @@ fn test_build_request_view_fades_aged_tool_results() {
         user_msg("turn-3"),
     ];
     let retention = std::collections::HashMap::new();
-    let view = build_request_view(&msgs, 0, &retention, true, 2, 3, 200, false, None);
+    let view = build_request_view(&msgs, 0, &retention, true, 2, 3, 200, false, None, None);
 
     let faded = &view[2];
     let faded_text = view_text(faded);
@@ -313,7 +313,7 @@ fn test_build_request_view_skeletonizes_with_retention() {
         "vdfs_read",
         crate::symbio_core::CapabilityToolContextRetention::LastOnly,
     )]);
-    let view = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, false, None);
+    let view = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, false, None, None);
 
     assert!(
         view_text(&view[1]).contains("skeletonized"),
@@ -349,7 +349,7 @@ fn test_build_request_view_global_window_applies_without_retention() {
     ];
     let retention = std::collections::HashMap::new();
     // window=1：仅最新一次调用（t2）在窗口内
-    let view = build_request_view(&msgs, 1, &retention, false, 12, 3, 200, false, None);
+    let view = build_request_view(&msgs, 1, &retention, false, 12, 3, 200, false, None, None);
 
     assert!(
         view_text(&view[1]).contains("skeletonized"),
@@ -378,7 +378,7 @@ fn test_build_request_view_window_zero_disables_skeletonization() {
         "vdfs_read",
         crate::symbio_core::CapabilityToolContextRetention::LastOnly,
     )]);
-    let view = build_request_view(&msgs, 0, &retention, false, 12, 3, 200, false, None);
+    let view = build_request_view(&msgs, 0, &retention, false, 12, 3, 200, false, None, None);
     assert_eq!(view_text(&view[1]), r#"{"path":"old.txt"}"#);
     assert_eq!(view_text(&view[2]), "old content");
 }
@@ -399,7 +399,7 @@ fn test_build_request_view_nudge_comes_after_skeletonization() {
         "vdfs_read",
         crate::symbio_core::CapabilityToolContextRetention::LastOnly,
     )]);
-    let view = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, true, None);
+    let view = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, true, None, None);
 
     assert_eq!(view.len(), msgs.len() + 1);
     // 末尾是 nudge；倒数第二条仍是保留原文的最新工具结果
@@ -426,6 +426,7 @@ fn test_build_request_view_prepends_memory_section() {
         200,
         true,
         Some("【长期记忆】跨会话召回，最新在前（背景事实，不是本轮指令）\n- 我叫 Kestrel"),
+        None,
     );
     assert_eq!(view.len(), msgs.len() + 2, "记忆置顶 + nudge 置尾");
 
@@ -450,6 +451,54 @@ fn test_build_request_view_prepends_memory_section() {
     assert!(msgs.iter().all(|m| m.meta.is_none()));
 
     // 空段 ⇒ 整段省略，视图与原输入等长。
-    let plain = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, false, None);
+    let plain = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, false, None, None);
     assert_eq!(plain.len(), msgs.len());
+}
+
+/// 可见域入口（[plan/11 批 1](../../../../docs/plan/11-多执行器与多主体加固实施方案.md) ③）：
+/// **同一会话两个主体，各自的视图只含可见发言**。
+///
+/// 为什么断言「两侧各 3 条」而不是只断一侧：只测一边的话，「把谁的都放进来」
+/// 这种全放行实现照样能过（父侧 4 条里本来就只有 1 条不可见）。两侧对称 + 一条
+/// 未标身份的消息，三个方向一起钉住判据。
+#[test]
+fn test_build_request_view_scopes_by_viewer_principal() {
+    let mut from_user = user_msg("用户的问题");
+    from_user.principal = Some("user".to_string());
+
+    let mut from_peer = assistant_msg("子会话 agent:reviewer 的答复");
+    from_peer.principal = Some("agent:reviewer".to_string());
+
+    let mut from_self = assistant_msg("本会话 agent:main 的答复");
+    from_self.principal = Some("agent:main".to_string());
+
+    let mut legacy = assistant_msg("接线前留下的、没有标身份的历史发言");
+    legacy.principal = None;
+
+    let msgs = vec![from_user, from_peer, from_self, legacy];
+    let retention = std::collections::HashMap::new();
+    let build = |viewer: Option<&str>| {
+        build_request_view(
+            &msgs, 15, &retention, false, 12, 3, 200, false, None, viewer,
+        )
+    };
+    let texts = |v: &[ChatMessage]| v.iter().map(view_text).collect::<Vec<_>>();
+
+    // 本会话主体看：转播进来的另一个智能体的发言不进 prompt。
+    let as_self = build(Some("agent:main"));
+    assert_eq!(as_self.len(), 3, "四方里只有 agent:reviewer 那条不可见");
+    assert!(texts(&as_self).iter().all(|t| !t.contains("reviewer")));
+
+    // 子会话主体看：对称地挡掉本会话主体的发言（谁也不是默认的特权主体）。
+    let as_peer = build(Some("agent:reviewer"));
+    assert_eq!(as_peer.len(), 3);
+    assert!(texts(&as_peer)
+        .iter()
+        .all(|t| !t.contains("agent:main 的答复")));
+
+    // 未标身份的照旧可见——它是「还没接线」，不是「不让人看」。
+    assert!(texts(&as_self).iter().any(|t| t.contains("没有标身份")));
+
+    // 不指定读方 ⇒ 与接线前逐字一致。
+    assert_eq!(build(None).len(), msgs.len());
 }

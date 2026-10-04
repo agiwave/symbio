@@ -349,7 +349,8 @@ if (rustWaived.length) {
 //      基线每次随该表的批次下调，不随本文件的意志上调。
 const R002_BASELINE = process.env.DEAD_CODE_R002_BASELINE
   ? Number(process.env.DEAD_CODE_R002_BASELINE)
-  : 75 // 04 §3.1 批⑦ 摘 13（88 → 75）：记忆三段接线全摘——event/mod.rs 记忆事件名字表 4（写方 plugins/session/v2_memory.rs 按名写格）+ view/mod.rs 视图类型 3（RecallEntry/RecallView/contains_content 生产读视图与去重）+ projection/recall.rs 1（召回进 prepare_turn_inputs）+ projection/consolidate.rs 3（巩固写方过 accept）+ actors/mod.rs 2（RecallTranslator 落 memory.recalled）
+  : 56 // 04 §3.1 批⑧ 摘 19（75 → 56）：身份 / 承诺 / 声誉全接线——actors/mod.rs 8（ActorSpec 3 起于 TurnInput.actor 入参 + run/run_streaming 平凡值、CommitmentKeeper 5 经 core 域内入口 commitment_events 落四格）+ projection/reputation.rs 7（stats.rs::read 新列 reputation，own/by_principal 全有全无）+ event/mod.rs 4（commitment.* 名字表，写方 v2_bridge::record_to_wal 按名写格）
+  // 04 §3.1 批⑦ 摘 13（88 → 75）：记忆三段接线全摘——event/mod.rs 记忆事件名字表 4（写方 plugins/session/v2_memory.rs 按名写格）+ view/mod.rs 视图类型 3（RecallEntry/RecallView/contains_content 生产读视图与去重）+ projection/recall.rs 1（召回进 prepare_turn_inputs）+ projection/consolidate.rs 3（巩固写方过 accept）+ actors/mod.rs 2（RecallTranslator 落 memory.recalled）
   // 04 §3.1 批⑥ 摘 11（99 → 88）：governance/mod.rs 标记**全摘**——矩阵生产构造住 crate::authz（from_names 按能力名闭集校验），写侧 can_reply 进 v2_bridge 收束闸、读侧 can_see 进 session/stats 读闸
   // 04 §3.1 批⑤ 摘 16（115 → 99）：Decider 族 5 + S4 断点锚 2 + 测试面转 #[cfg(test)] 9（其中 3 处本属批⑫，随桩迁入 ⇒ 批⑫ 8 → 5）
 
