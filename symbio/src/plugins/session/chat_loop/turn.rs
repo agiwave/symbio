@@ -278,6 +278,8 @@ pub(crate) async fn close_turn(
         orchestrator.session_dir.dir(),
         // 代际立约出参：`agent_run` 的承诺随本轮收束入格（见 `TurnState::delegations`）。
         &mut turn.delegations,
+        // 任务表出参：`todo_write` 的清单声明随本轮收束入格（见 `TurnState::task_decls`）。
+        &mut turn.task_decls,
     )
     .await;
     turn.in_flight_tools.clear();

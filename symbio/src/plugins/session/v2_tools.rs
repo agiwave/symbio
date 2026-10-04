@@ -137,6 +137,9 @@ impl DispatchPort for SessionDispatchPort {
             // 传临时量而不是漏参，是为了让"这里没有消费方"成为一行**看得见的注记**，
             // 而不是一个静默的 `&mut Vec::new()` 淹没在参数表里。
             &mut Vec::new(),
+            // 任务表出参（批⑨）：同上——任务格的写方 `v2_tasks` 挂在收束转写上，
+            // full 档不经 `v2_bridge::record`，故本批不入格（full 随 full 启用）。
+            &mut Vec::new(),
         )
         .await;
 

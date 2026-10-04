@@ -144,7 +144,7 @@ export default defineCase(
         assertEq(
           stats.invariants.length,
           0,
-          `两轮都收束、档位已声明且预算内 ⇒ 五条全绿（实际: ${JSON.stringify(stats.invariants)}）`,
+          `两轮都收束、档位已声明且预算内 ⇒ 不变量清单为空（实际: ${JSON.stringify(stats.invariants)}）`,
         );
 
         // ── 证据 ②：逐列与**同一时刻的文件**对账（JS 只计数，不复刻统计口径）──

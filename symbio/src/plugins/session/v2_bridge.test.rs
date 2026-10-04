@@ -55,6 +55,7 @@ fn final_closure_writes_user_and_final_with_cost() {
         },
         None,
         &[],
+        &[],
     )
     .expect("转写成功");
 
@@ -131,6 +132,7 @@ fn retry_of_same_message_increments_attempt_and_new_message_increments_turn() {
         },
         None,
         &[],
+        &[],
     )
     .unwrap();
     record_to_wal(
@@ -144,6 +146,7 @@ fn retry_of_same_message_increments_attempt_and_new_message_increments_turn() {
         },
         None,
         &[],
+        &[],
     )
     .expect("重试转写成功（id 不撞 = 幂等键不冲突）");
     record_to_wal(
@@ -156,6 +159,7 @@ fn retry_of_same_message_increments_attempt_and_new_message_increments_turn() {
             cost_ms: 300,
         },
         None,
+        &[],
         &[],
     )
     .unwrap();
@@ -205,6 +209,7 @@ fn reopen_recovers_events_with_seq() {
             cost_ms: 5,
         },
         None,
+        &[],
         &[],
     )
     .unwrap();
@@ -329,6 +334,7 @@ async fn v2_mode_off_disables_recording() {
         },
         None,
         &[],
+        &[],
     );
     let dir = off_session.session_dir().expect("持久会话有目录");
     assert!(!dir.join("v2-events.wal").exists(), "off 档不得写 WAL");
@@ -349,6 +355,7 @@ async fn v2_mode_off_disables_recording() {
             cost_ms: 1,
         },
         None,
+        &[],
         &[],
     );
     let dir = on_session.session_dir().expect("持久会话有目录");
@@ -406,6 +413,7 @@ fn record_to_wal_wires_all_three_memory_steps() {
             },
             None,
             &[],
+            &[],
         )
         .expect("转写成功");
     }
@@ -452,6 +460,7 @@ fn record_to_wal_wires_all_three_memory_steps() {
             cost_ms: 44,
         },
         Some(&view),
+        &[],
         &[],
     )
     .expect("转写成功");
@@ -500,6 +509,7 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
         },
         None,
         &delegations,
+        &[],
     )
     .expect("转写成功");
 
@@ -588,6 +598,7 @@ fn breached_delegation_is_declared_to_the_counterparty() {
         },
         None,
         &delegations,
+        &[],
     )
     .expect("转写成功");
 

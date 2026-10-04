@@ -430,7 +430,7 @@ export const BASELINE = {
   //      + `first_user_utterance` 真实形状 1 例 + e2e t28（四列对账 + 两刀反向）。
   // 1223（不变量进读出口，2026-10-03）——`1220 → 1223`，**+3**。
   //      `check_all` 从「只被测试调」变成**读出口的第五列**（`session/stats`
-  //      的 `invariants`，空 = 五条全绿）：C4 未收束 / C5 超预算并进
+  //      的 `invariants`，空 = 全部断言通过）：C4 未收束 / C5 超预算并进
   //      `check_all`，两条 `dead-code-allow` 摘除（04 §3.1 批④）。判据为
   //      **读侧口径**的宽限——首日不假红：C4 放行切片尾轮在途（切片无
   //      wall-clock，「在途」与「卡死」无从分辨；被后续轮越过的照样报），
@@ -467,6 +467,15 @@ export const BASELINE = {
   //      验收 = v2_memory 8 例（编码溯源/去重/截断、巩固三态、跨会话召回与排版、
   //      检索事实幂等与 actor 对齐、合并算法两条边界）+ 桥三段接线 1 例 +
   //      请求视图置顶注入 1 例 + e2e `t29`（记忆进 prompt、跨会话召回、巩固可见）。
+  // 1266（任务表，2026-10-04）——`1252 → 1266`，**+14**。
+  //      04 §3.1 批⑨ 全量接线：`local/todo_write` 输入 schema 增 `depends_on`（任务图
+  //      是数据）、`note_tasks` 任务表出参 → `TurnState.task_decls` → `v2_bridge::record`
+  //      → `v2_tasks::write` 逐批入格（opened / progress / asserted / 返工）、
+  //      `readyset` 投影进 `stats` 读列、调度段 `prompt_section` → `build_request_view`
+  //      置顶注入、`acyclic_deps` / `rework_bounded` 进 `check_all`（五条 → 七条）。
+  //      验收 = `v2_tasks` 9 例（就绪判定 / 成环与悬空反向 / 降级不产事实 / 返工轮与
+  //      上界反向 / 调度段门控）+ `note_tasks` 3 例（短名判据、只认成功、id 兜底）+
+  //      声誉式复算与读侧闸的 `readyset` 列 1 例 + 调度段注入位置 1 例 + e2e `t31`。
   // 1252（身份 / 承诺 / 声誉，2026-10-04）——`1243 → 1252`，**+9**。
   //      04 §3.1 批⑧ 全量接线：身份（`TurnInput.actor` 入参、`authz::principal_of` /
   //      `matrix_for`、`view::visible_to`、`build_request_view(viewer)`、
@@ -477,7 +486,7 @@ export const BASELINE = {
   //      验收 = core 可见域 2 例 + 视图按主体过滤 1 例 + `note_delegation` 2 例 +
   //      桥承诺入格 2 例 + 声誉列 1 例 + `attributed` 身份补齐 1 例 + e2e `t30`
   //      （父/子两会话请求包不串主体、代际立约入格、出口读声誉）。
-  rustTests: 1252,
+  rustTests: 1266,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

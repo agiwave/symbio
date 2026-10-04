@@ -169,6 +169,19 @@ pub(crate) async fn prepare_turn_inputs(
             }
             _ => None,
         };
+        // 调度段（S7 步 16–17，批⑨）：就绪任务集只读一次、本轮各工具轮复用——与
+        // 召回同一条口径（同一轮内集合不漂移）。`off` 档与临时会话同召回的口径。
+        turn.ready_section = match context.session.session_dir() {
+            Some(dir)
+                if !matches!(
+                    context.session.v2_mode(),
+                    crate::plugins::session::config::V2Mode::Off
+                ) =>
+            {
+                crate::plugins::session::v2_tasks::prompt_section(&dir)
+            }
+            _ => None,
+        };
     }
     let recall_section = turn
         .recall_view
@@ -176,7 +189,7 @@ pub(crate) async fn prepare_turn_inputs(
         .and_then(crate::plugins::session::v2_memory::prompt_section);
 
     // ── ⑥ 请求视图（唯一入口 build_request_view）──────────────────────────
-    // 在存储视图之上叠加五项**不落库**的裁剪，全部只作用于本次 execute_turn 的
+    // 在存储视图之上叠加六项**不落库**的裁剪，全部只作用于本次 execute_turn 的
     // 请求包，不回写 context.messages——存储保持完整历史，last_saved 锚点与
     // persist_messages 切片不会错位。
     // 1) 内容节点淡化：B1 保护窗口（末条 + 最近 N 个内容节点）外的超大正文/思考
@@ -186,7 +199,8 @@ pub(crate) async fn prepare_turn_inputs(
     //    保留策略，LastOnly/LastN → 更早调用的参数与结果替换为占位文案
     //    （ToolCall↔Tool 配对完整保留，不会造成大模型逻辑断联）；
     // 4) nudge：水位提醒请求级注入（不落库、不占轮次窗口的 User 计数）；
-    // 5) 长期记忆：置顶注入（不落库；位置与理由见 build_request_view 文档第 5 条）。
+    // 5) 长期记忆：置顶注入（不落库；位置与理由见 build_request_view 文档第 5 条）；
+    // 6) 任务调度段：就绪任务集置顶注入（不落库；见 build_request_view 文档第 6 条）。
     let retention: HashMap<String, crate::symbio_core::CapabilityToolContextRetention> = tools
         .iter()
         .filter_map(|t| {
@@ -208,6 +222,8 @@ pub(crate) async fn prepare_turn_inputs(
         context.session.line_threshold(),
         inject_nudge,
         recall_section.as_deref(),
+        // 调度段（S7 步 16–17，批⑨）：就绪任务集，非空时置顶一条 `meta.kind = readyset`。
+        turn.ready_section.as_deref(),
         // 可见域入口（plan/11 批1 ③）：本会话主体之外的发言不进本次请求。
         Some(context.principal.as_str()),
     );

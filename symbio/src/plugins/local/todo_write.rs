@@ -67,6 +67,20 @@ impl TodoWriteTool {
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| format!("task_{}", i + 1));
+            // 依赖：任务图是**数据不是机制**（`docs/plan/roadmap/S03` §2），所以它必须
+            // 由调用方声明在清单里，而不是由框架推断。省略 ⇒ `[]`（默认无依赖，日常
+            // 调用不受影响；成环由 `acyclic_deps` 在读侧报，不在这里拦——拦下它就变成
+            // 了框架替模型决定任务图）。
+            let depends_on = t
+                .get("depends_on")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str())
+                        .map(String::from)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             if content.is_empty() {
                 return Err(PluginError::ValidationError(format!(
                     "第 {} 项任务缺少 content",
@@ -78,6 +92,7 @@ impl TodoWriteTool {
                 "content": content,
                 "status": status,
                 "priority": priority,
+                "depends_on": depends_on,
             }));
         }
 
@@ -141,7 +156,8 @@ impl Capability for TodoWriteTool {
                                 "id": { "type": "string", "description": "任务唯一标识（省略则自动生成 task_N）" },
                                 "content": { "type": "string", "description": "任务描述" },
                                 "status": { "type": "string", "enum": ["pending", "in_progress", "completed"], "description": "状态" },
-                                "priority": { "type": "string", "enum": ["high", "medium", "low"], "description": "优先级" }
+                                "priority": { "type": "string", "enum": ["high", "medium", "low"], "description": "优先级" },
+                                "depends_on": { "type": "array", "items": { "type": "string" }, "description": "依赖的任务 id（默认 []）；全部依赖到达 completed 后本任务才可推进" }
                             },
                             "required": ["content"]
                         }

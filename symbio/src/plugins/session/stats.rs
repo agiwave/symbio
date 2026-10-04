@@ -76,11 +76,12 @@ pub(crate) struct SessionStats {
     /// 断点（`checkpoint` 视图原样序列化：`last_seq` / `event_count` /
     /// `kind_counts`——末两项就是「这一格里到底有多少事实」）。
     pub checkpoint: serde_json::Value,
-    /// 不变量违规清单（`check_all` 五条：C1 `seq` 单调 / C2 每轮一条 final /
-    /// C3 断言带溯源 / C4 未收束 / C5 超预算）。**空 = 五条全绿**；每条带
-    /// `event_id` 与人话。宽限口径（尾轮在途放行、按声明档位取预算）在 core 的
-    /// `check_all`，本处只取数——[04 §3.1 批④](../../../docs/plan/04-工程落地.md)
-    /// 的「不变量进 CI/读侧」：e2e 断言的就是这一列。
+    /// 不变量违规清单（`check_all` 七条：C1 `seq` 单调 / C2 每轮一条 final /
+    /// C3 断言带溯源 / C4 未收束 / C5 超预算 / `acyclic_deps` 依赖成环或悬空 /
+    /// `rework_bounded` 返工超上界）。**空 = 七条全绿**；每条带 `event_id` 与人话。宽限口径（尾轮在途放行、按声明
+    /// 档位取预算）在 core 的 `check_all`，任务表两条**无宽限**（环与超界不是时序
+    /// 假象），本处只取数——[04 §3.1 批④](../../../docs/plan/04-工程落地.md) 的
+    /// 「不变量进 CI/读侧」：e2e 断言的就是这一列。
     pub invariants: serde_json::Value,
     /// 声誉（S6 第 15 步的**读侧**，[04 §3.1 批⑧](../../../docs/plan/04-工程落地.md) +
     /// [plan/12 批 2](../../../docs/plan/12-价值验收与基线埋点.md)）：`own` = 本会话
@@ -91,6 +92,15 @@ pub(crate) struct SessionStats {
     /// 靠它分辨「这里没有数」与「不给你看」——与四列用「空切片 ⇒ 全零」是同一条判定，
     /// 换个列名不换判据。
     pub reputation: serde_json::Value,
+    /// 就绪任务集（S7 步 16 的**读侧**，[04 §3.1 批⑨](../../../docs/plan/04-工程落地.md)）：
+    /// `readyset` 投影原样序列化（`{ ready: [ { task_id, seq, depends_on } ] }`），
+    /// 按 `task_id` 字典序——同一份事实源永远读出同一个集合。
+    ///
+    /// 归**四列**那一族（同切片、同 as-of、`may_read = false ⇒ 空切片` ⇒ `{ready: []}`），
+    /// 不归声誉那一族（那列不给的是「有数但不给你看」的空对象）：就绪集为空在语义上
+    /// 与「没有任务 / 依赖未闭合」本来就同值，两种「空」由 `has_wal` 与本列的
+    /// 上下游（清单在不在）分辨，不靠列的形状。
+    pub readyset: serde_json::Value,
 }
 
 /// `session/stats` 的请求体：**全部可选**——不传 = 本机默认（今天的行为）。
@@ -106,11 +116,11 @@ pub(crate) struct StatsRequest {
     pub principal: Option<String>,
 }
 
-/// 读一个会话的事实源，出四列读数 + 不变量清单。
+/// 读一个会话的事实源，出四列读数 + 声誉 / 就绪集两列 + 不变量清单。
 ///
 /// 纯读：不写文件、不改网格、不碰会话存储（消息 / 转写）。
 ///
-/// `viewer = Some(身份)` 时先按可见域取**可读切片**再出四列（**读什么由能看什么
+/// `viewer = Some(身份)` 时先按可见域取**可读切片**再出各列（**读什么由能看什么
 /// 决定**，不是先算完再裁结果）；`None` = 本机默认，与判定引入之前逐字一致。
 ///
 /// `session_principal` 是**本会话主体**（声誉列的 `own` 取谁），与读方身份是两回事：
@@ -128,14 +138,14 @@ pub(crate) fn read(
     let snapshot = store.range(Seq::new(0));
 
     // 读侧闸（[04 §3.1 批⑥](../../../docs/plan/04-工程落地.md)）：**读什么由能看
-    // 什么决定**——四列与不变量列都只从「你看得见的事实」算，不先算完再裁结果。
+    // 什么决定**——各列与不变量列都只从「你看得见的事实」算，不先算完再裁结果。
     //
     // 属主 = 本机会话的属主（`SESSION_OWNER`，部署事实；`[会话] ≈ [线程]`，S4 的
     // thread 实体落地前用会话属主），可见域取 C10 缺省 `thread_private`。于是：
     // 属主本人 = 全量读数（与不声明时逐字一致）；非属主 / 矩阵外主体 = **空切片**
-    // ⇒ 四列全零、不变量清单为空，与 `has_wal: true` 并排即可分辨「有源但不给你
+    // ⇒ 四列全零、就绪集为空、不变量清单为空，与 `has_wal: true` 并排即可分辨「有源但不给你
     // 看」，而不是被读成「这里没有数」。
-    // 可见域只判**一次**：四列与声誉列共用同一个答案——两个判定点 = 两套判据，
+    // 可见域只判**一次**：四列、声誉列与就绪集列共用同一个答案——两个判定点 = 两套判据，
     // 必然漂移成「四列能看、声誉不能看」这种没有理由的半开半掩。
     let may_read = match viewer {
         None => true,
@@ -208,6 +218,15 @@ pub(crate) fn read(
         serde_json::json!({})
     };
 
+    // 就绪集列（批⑨）：与四列同一份切片、同一个 as-of。`may_read = false` 时切片
+    // 已被换成空的 ⇒ 本列是 `{ready: []}`（四列的形态），不是声誉那列的空对象。
+    let readyset = serde_json::to_value(
+        crate::symbio_core::readyset()
+            .apply(&snapshot, i64::MAX, Budget::generous())
+            .value,
+    )
+    .map_err(|e| PluginError::InternalError(format!("就绪集序列化失败：{e}")))?;
+
     Ok(SessionStats {
         session_id: session_id.to_string(),
         wal: wal.display().to_string(),
@@ -217,6 +236,7 @@ pub(crate) fn read(
         checkpoint,
         invariants,
         reputation,
+        readyset,
     })
 }
 

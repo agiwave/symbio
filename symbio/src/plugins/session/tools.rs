@@ -28,5 +28,6 @@ mod tool_result_guard;
 pub use self::heartbeat_tool::HeartbeatTool;
 pub use self::tool_executor::{
     apply_not_executed, execute_tool_async, fire_hook, process_tool_calls_async, Delegation,
+    TaskDeclaration, TaskItem, TaskStatus,
 };
 pub use self::tool_result_guard::{summarize_head_tail, summarize_tool_result};

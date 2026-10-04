@@ -119,6 +119,12 @@ pub(crate) struct TurnState {
     /// `close_turn`、入格在 `finish_turn`，中间隔着一整段本轮收尾。与 `TurnState`
     /// 的其它字段一样随请求复位，所以不会把上一轮的承诺带到这一轮。
     pub(crate) delegations: Vec<crate::plugins::session::tools::Delegation>,
+    /// 本轮的**任务表声明**（[04 §3.1 批⑨](../../../../docs/plan/04-工程落地.md)，S7 步 16）。
+    ///
+    /// 形态与 [`TurnState::delegations`] 完全对称：工具执行层填
+    /// （`process_tool_calls_async` 的出参），轮末收束转写入格（`v2_bridge::record`
+    /// → `v2_tasks::write`），中间隔着同一段本轮收尾，所以要有个请求作用域的量存它。
+    pub(crate) task_decls: Vec<crate::plugins::session::tools::TaskDeclaration>,
     /// **对话线上最近一次动静**的时刻（毫秒）——中途汇报的静默时钟起点。
     ///
     /// 两个来源都算一次"动静"：用户发言（轮首输入 / 轮边界折进的补充）与助手写下
@@ -164,6 +170,14 @@ pub(crate) struct TurnState {
     /// 落 `memory.recalled` 的时机在**轮末收束**（`v2_bridge::record`）而不是取视图
     /// 那一刻：溯源锚是本轮 `user.message` 格，那时它才在事实源里。
     pub(crate) recall_view: Option<crate::symbio_core::RecallView>,
+    /// 本轮的**调度段**（S7 步 16–17，[04 §3.1 批⑨](../../../../docs/plan/04-工程落地.md)）：
+    /// 就绪任务集渲染成的一段提示，交给**本轮的执行者**（模型）。
+    ///
+    /// 与 [`TurnState::recall_view`] 同一条取用口径（`tool_rounds == 0` 取一次、
+    /// 本轮各工具轮复用）：同一轮内任务集不该漂移，也省得每个工具轮都重开一次
+    /// 事实源。它**只读不写**——算不出来（没开过任务 / 就绪集空 / `off` 档）就是
+    /// `None`，请求视图里就少一段，不存在"空占位"。
+    pub(crate) ready_section: Option<String>,
 }
 
 /// 主循环的唯一退出原因。

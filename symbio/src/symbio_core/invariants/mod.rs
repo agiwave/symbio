@@ -148,10 +148,19 @@ fn needs_provenance(e: &Event) -> bool {
             ))
 }
 
-/// 五条一起跑（S0/S1 的 CI 形态：任一违规 ⇒ 清单非空）。
+/// 一条任务**最多返工几轮**：超过即违规（进 `check_all` 的清单，读出口与 e2e 共用）。
+///
+/// 政策常量（不是配置）——[`rework_bounded`] 的上界从这里取，`check_all` 与
+/// 读出口 `session/stats` 因此共享同一条口径，e2e 不必自己挑一个数字。
+/// 取 3：返工两轮还在返，说明当初的任务拆得或验收得有问题，该被看见而不是被
+/// 默许（[roadmap/S03 §5](../../../../docs/plan/roadmap/S03-多步任务与返工.md)
+/// 的「返工次数有界」）。
+const MAX_REWORK_ROUNDS: u32 = 3;
+
+/// 七条一起跑（S0/S1 的 CI 形态：任一违规 ⇒ 清单非空）。
 ///
 /// 前三条是结构判定（C1 `seq` 单调 / C2 每轮一条 final / C3 断言带溯源）；
-/// 后两条（C4 未收束 / C5 超预算）按**读侧口径**带宽限——本函数是
+/// 中两条（C4 未收束 / C5 超预算）按**读侧口径**带宽限——本函数是
 /// `session/stats` 读出口与 e2e 的入口，首日就跑真实流量，假红一次
 /// 那份清单就再没人看：
 ///
@@ -164,6 +173,12 @@ fn needs_provenance(e: &Event) -> bool {
 /// - C5 只在切片**声明过档位**时判，预算取声明档位里**最宽**的一档（判定方向
 ///   宁可漏报、不可假红：拿最严档比，会把别的档位的正常流量整片报成违规）。
 ///
+/// 末两条是任务表的判定（[`acyclic_deps`]：依赖成环 / 悬空，即
+/// [04 §4 断言清单](../../../../docs/plan/04-工程落地.md) 的 C14；
+/// [`rework_bounded`]：同一任务的返工轮数不超过 [`MAX_REWORK_ROUNDS`]）——
+/// 都是**结构判定、无宽限**：环与超界不是「读取瞬间的时序假象」，不会假红
+/// （04 §3.1 批⑨ 的「断言进 CI」）。
+///
 /// 要严判就绕过本函数直接调 [`unresolved_turns`]（`false`）/ [`budget_exceeded`]。
 pub fn check_all(events: &[Event]) -> Vec<Violation> {
     let mut all = seq_monotonic(events);
@@ -171,6 +186,8 @@ pub fn check_all(events: &[Event]) -> Vec<Violation> {
     all.extend(produced_by_coverage(events));
     all.extend(unresolved_turns(events, true));
     all.extend(budget_exceeded(events, declared_budget_ms(events)));
+    all.extend(acyclic_deps(events));
+    all.extend(rework_bounded(events, MAX_REWORK_ROUNDS));
     all
 }
 
@@ -281,7 +298,9 @@ pub fn budget_exceeded(events: &[Event], budget_ms: Option<u64>) -> Vec<Violatio
 /// 所以必须是 CI 断言。任务图从 `task.opened` 事件的载荷提取：
 /// `{ task_id, depends_on }`——**图是数据，不是机制**。
 /// 悬空依赖（依赖不存在的任务）同样判违规。反向用例见测试区（验收 1 / 4）。
-#[allow(dead_code)] // dead-code-allow R-002: 不变量可执行名（README §1.2 invariants 行）；04 §3.1 批⑨ 接线后摘除
+///
+/// 接进 [`check_all`]（[04 §3.1 批⑨](../../../../docs/plan/04-工程落地.md) 的
+/// 「断言进 CI」）：读出口 `session/stats` 的 `invariants` 列与 e2e 都跑它。
 pub fn acyclic_deps(events: &[Event]) -> Vec<Violation> {
     use std::collections::{BTreeMap, BTreeSet};
     let mut deps: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
@@ -360,7 +379,7 @@ pub fn acyclic_deps(events: &[Event]) -> Vec<Violation> {
 /// 返工 = `task.rework_created` 事件（新增一条事实，不是修改历史）；同一被返工
 /// 节点的返工轮数超过 `max_rework` ⇒ 违规——无上界的返工可能永不终止
 /// （[docs/plan/verify/termination.rs](../../../../docs/plan/verify/termination.rs) 前提 2）。
-#[allow(dead_code)] // dead-code-allow R-002: 不变量可执行名（README §1.2 invariants 行）；04 §3.1 批⑨ 接线后摘除
+/// 接进 [`check_all`]（[04 §3.1 批⑨](../../../../docs/plan/04-工程落地.md)）。
 pub fn rework_bounded(events: &[Event], max_rework: u32) -> Vec<Violation> {
     use std::collections::BTreeMap;
     let mut counts: BTreeMap<String, u32> = BTreeMap::new();

@@ -99,24 +99,22 @@ pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
 // 任务图（DAG）= 事件的 `depends_on` 载荷字段——**数据，不是机制**；
 // 返工 = 新增一条事件（`task.rework_created`），不是修改历史（append-only
 // 已经提供了撤销语义）。落在 `task × opened / progressed / held / asserted`。
+//
+// 写方 = `plugins/session/v2_tasks`（会话任务清单 `todo_write` 的转写，
+// 04 §3.1 批⑨）；`task.held` 的写方是插话抢占（批⑩）。
 
 /// 开任务：载荷 `{ task_id, depends_on, goal }`。落在 `task × opened`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑨ 接线后摘除
 pub const EVENT_TASK_OPENED: &str = "task.opened";
 /// 推进：执行中的普通事实。落在 `task × progressed`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑨ 接线后摘除
 pub const EVENT_TASK_PROGRESS: &str = "task.progress";
 /// 暂挂（插话抢占 / 等外部资源；[roadmap/S07](../../../../docs/plan/roadmap/S07-插话与实时打断.md)
 /// 里这一格的事件名叫 `task.blocked`，本仓库以 `task.held` 单点定义）。
 /// 落在 `task × held`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑨ 接线后摘除
 pub const EVENT_TASK_HELD: &str = "task.held";
 /// 终态：验证通过（验收通过才终态）。落在 `task × asserted`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑨ 接线后摘除
 pub const EVENT_TASK_ASSERTED: &str = "task.asserted";
 /// 返工：判定不合格 ⇒ **新增一条事件**（重开一个返工节点），不是回滚。
 /// 落在 `task × asserted`（返工本身是一次质量判定的事实）。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑨ 接线后摘除
 pub const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
 
 // ── 控制格子（S8 第 19–20 步，[roadmap/S07 §3](../../../../docs/plan/roadmap/S07-插话与实时打断.md)、

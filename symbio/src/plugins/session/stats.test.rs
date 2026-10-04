@@ -11,7 +11,7 @@ use super::read;
 use crate::symbio_core::{
     check_all, checkpoint, cost_ledger, fallback_rate, slo_report, Budget, Entity, Event,
     EventEnvelope as _, EventWalStore, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK,
-    EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_FINAL, EVENT_TASK_OPENED, EVENT_USER_MESSAGE,
 };
 use std::path::{Path, PathBuf};
 
@@ -127,6 +127,13 @@ fn stats_recompute_equals_direct_apply() {
     let ck = checkpoint()
         .apply(&snap, i64::MAX, Budget::generous())
         .value;
+    let rs = serde_json::to_value(
+        crate::symbio_core::readyset()
+            .apply(&snap, i64::MAX, Budget::generous())
+            .value,
+    )
+    .expect("就绪集序列化");
+    assert_eq!(got.readyset, rs, "就绪集列同样复算（同切片、同 as-of）");
 
     assert_eq!(got.tiers.len(), 1, "种子数据只有一档");
     let row = &got.tiers[0];
@@ -198,7 +205,7 @@ fn invariants_move_when_the_wal_changes() {
     assert_eq!(
         clean.invariants,
         serde_json::json!([]),
-        "两轮都收束、档位已声明且预算内 ⇒ 五条全绿（首日不假红）"
+        "两轮都收束、档位已声明且预算内 ⇒ 不变量清单为空（首日不假红）"
     );
 
     // 删轮 0 的收束格 ⇒ 轮 0 被轮 1 越过 ⇒ C4 报未收束；行删了 ⇒ C1 报 seq 跳号。
@@ -237,7 +244,7 @@ fn missing_wal_is_an_honest_zero_and_creates_nothing() {
     assert!(got.tiers.is_empty());
     assert_eq!(got.checkpoint["event_count"], 0);
     assert_eq!(got.cost["total_ms"], 0);
-    assert_eq!(got.invariants, serde_json::json!([]), "空事实源 ⇒ 五条全绿");
+    assert_eq!(got.invariants, serde_json::json!([]), "空事实源 ⇒ 断言全绿");
     assert!(
         !wal.exists(),
         "读方不得为了读而创建事实源文件——那会把「没跑过一轮」变成「跑过一轮空的」"
@@ -353,4 +360,69 @@ fn reputation_column_reports_own_and_by_principal() {
     )
     .expect("读数");
     assert_eq!(denied.reputation, serde_json::json!({}));
+}
+
+/// 就绪集列（S7 步 16，[04 §3.1 批⑨]）：候选集入列 + **复算同源** + 读侧闸（反向）。
+///
+/// `may_read = false ⇒ {ready: []}` 与四列同款（空切片 = 有源但不给你看），
+/// 不是声誉那列的空对象——「没有任务」与「不给你看」由 `has_wal` 与列的上下游分辨。
+#[test]
+fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
+    let dir = std::env::temp_dir().join(format!("symbio-stats-rs-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("临时目录");
+    let wal = dir.join(super::super::paths::V2_WAL_FILE);
+    let store = EventWalStore::open(&wal).expect("WAL");
+    for (id, deps) in [("t1", vec![]), ("t2", vec!["t1"])] {
+        store
+            .append(
+                Event::pending(
+                    id.to_string(),
+                    EVENT_TASK_OPENED,
+                    Entity::Task,
+                    Verb::Opened,
+                    0,
+                    crate::authz::PRINCIPAL_MAIN,
+                )
+                .with_produced_by(0)
+                .with_payload(serde_json::json!({
+                    "task_id": id,
+                    "depends_on": deps,
+                    "goal": id,
+                })),
+            )
+            .expect("任务开格");
+    }
+
+    let got = read("s-rs", &wal, None, crate::authz::PRINCIPAL_MAIN).expect("读数");
+    assert_eq!(
+        got.readyset["ready"].as_array().map(|a| a.len()),
+        Some(1),
+        "t1 无依赖（就绪）、t2 等 t1（未终态）：{}",
+        got.readyset
+    );
+    assert_eq!(got.readyset["ready"][0]["task_id"], "t1");
+
+    // 复算：同切片、同一个 as-of——出口只能调投影，不许另写一份统计。
+    let ro = EventWalStore::open_readonly(&wal).expect("WAL 只读");
+    let snap = ro.range(Seq::new(0));
+    let direct = serde_json::to_value(
+        crate::symbio_core::readyset()
+            .apply(&snap, i64::MAX, Budget::generous())
+            .value,
+    )
+    .expect("序列化");
+    assert_eq!(got.readyset, direct, "就绪集列必须复算相等");
+
+    // 反向：读侧闸关 ⇒ 空切片 ⇒ 连不变量列也空（有源但不给你看）。
+    let denied = read(
+        "s-rs",
+        &wal,
+        Some(crate::authz::PRINCIPAL_MAIN),
+        crate::authz::PRINCIPAL_MAIN,
+    )
+    .expect("读数");
+    assert_eq!(denied.readyset, serde_json::json!({ "ready": [] }));
+    assert_eq!(denied.invariants, serde_json::json!([]));
+    assert!(denied.has_wal, "has_wal 独立于可见域：文件在，只是不给你看");
 }

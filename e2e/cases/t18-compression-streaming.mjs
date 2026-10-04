@@ -24,13 +24,25 @@ import './_selfrun.mjs';
 //    超限预判 ⇒ 窗口必须多留 2 轮余量，否则重试会变成 `input_over_limit`
 //    （永久失败位，熔断从此不再半开），契约 F「重试恢复」无从谈起。
 //
-// 实测取 `max_context_tokens=12000` + `FILL.repeat(240)`：原始正文每轮涨约
+// 实测取 `max_context_tokens=12400` + `FILL.repeat(240)`：原始正文每轮涨约
 // 3.9k 字符，但**水位按校准后的估算值推进**——mock 固定回报 usage
 // （`prompt_tokens: 64`，见 `mock-llm.mjs`）⇒ `CalibratedTokenizer` 的比值压在
-// 下限 0.2 ⇒ 估算每轮只涨约 0.5k tokens（实测 before_tokens 7346 → 7808 →
-// 8323）。于是 0.3L ≈ 3.6k tokens 的窗口容得下 3 次失败 + 观察轮 + 重试：
-// 失败落在第 8/9/10 轮，重试仍在线内。T8/T11 的 600 倍填充把增速放大 2.4 倍，
-// 实测一次 llm_error 后紧接 input_over_limit，契约 F 无从谈起。
+// 下限 0.2 ⇒ 估算每轮只涨约 0.5k tokens。于是 0.3L ≈ 3.7k tokens 的窗口容得下
+// 3 次失败 + 观察轮 + 重试：失败落在第 9/10/11 轮，重试仍在线内。T8/T11 的 600
+// 倍填充把增速放大 2.4 倍，实测一次 llm_error 后紧接 input_over_limit，契约 F
+// 无从谈起。
+//
+// ## 触发线两侧必须留余量，不是「卡着线走」
+//
+// 触发轮 = 第一个让「历史估算 + 请求级开销」越过 `0.7 × L` 的轮次，而估算里的
+// 请求级开销 = system prompt + **全部工具定义**（`estimate_overhead_with_tools`）
+// ——工具定义长一截，触发就整体前移一轮；system prompt 带时间戳，其 token 数每
+// 秒还会抖 1–2。**卡在线上**的后果不是「偶尔早一轮」这么轻：压缩请求按 User
+// 边界切分（`find_compress_split_point` 只在 User 处落刀），触发前移会换一组切分
+// 相位，头两次压缩可能命中同一个边界 ⇒ 两个请求体**字节相同** ⇒ 两个 500 同时
+// 烧掉 `failTimes` 的一个名额与熔断的一个额度，于是熔断开闸时只观测到 2 个不同
+// 请求体（「3 次失败」那步断言拿不到），第 4 次重试也因名额没烧够而拿到 500。
+// 上限取 12400，就是把触发轮两侧的间距从「几十」拉到「两百以上」。
 //
 // **这份参数与 mock 的 usage 口径绑定**：若 mock 改成回报真实 usage，估算会贴回
 // 原始字符数，触发轮与窗口一起前移，本用例需重新标定（轮次推进本身自适应，
@@ -73,8 +85,8 @@ const TERMINAL = new Set(['completed', 'failed', 'aborted', 'waiting_user_action
 const CIRCUIT_LIMIT = 3; // 镜像 active.rs::COMPRESS_CIRCUIT_LIMIT
 
 const FILL = '上下文填充内容用于推高历史水位。';
-// 每轮约 3.9k 字符原文，校准后水位约 +0.5k tokens/轮：与 12000 的上限配套
-// （0.3L 窗口 ≈ 7 轮，见文件头的实测标定）
+// 每轮约 3.9k 字符原文，校准后水位约 +0.5k tokens/轮：与 12400 的上限配套
+// （0.3L 窗口 ≈ 8 轮，见文件头的实测标定与「触发线两侧必须留余量」）
 const REPLY = '填充：' + FILL.repeat(240);
 // 摘要正文分片：首个分片会成为「全量首帧」被吞，其余逐帧以 delta 改道到压缩节点
 const SNAPSHOT_XML = [
@@ -108,7 +120,7 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
   const GATEWAY_PORT = nextPort();
   const hd = makeHomedir({
     providers: [
-      { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 12000 }) },
+      { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 12400 }) },
     ],
     pluginConfigs: {
       // 本用例的主题是压缩，与对话面正交 ⇒ 把两个开关钉死（理由见 `DIALOG_FACE_OFF`）。
@@ -206,7 +218,7 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
       assert(String(final.content ?? '').includes('已保留完整历史'), `失败说明应明示历史未丢（实际：${final.content}）`);
       assertEq(final.meta?.failure_kind, 'llm_error', 'HTTP 500 的失败码必须是 llm_error（机读）');
       assertEq(final.meta?.compact_trigger, 'threshold', '自动路径的触发来源必须是 threshold');
-      assertEq(final.meta?.context_limit, 12000, 'meta.context_limit 应为配置的上限');
+      assertEq(final.meta?.context_limit, 12400, 'meta.context_limit 应为配置的上限');
       assert(
         Number(final.meta?.before_tokens) > 0,
         `失败时也应有压缩前水位（实际 ${JSON.stringify(final.meta)}）`,
@@ -302,7 +314,7 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
 
     // B：成功节点的结构化 meta
     assertEq(final.meta?.compact_trigger, 'retry', '重试路径的触发来源必须是 retry');
-    assertEq(final.meta?.context_limit, 12000, 'meta.context_limit');
+    assertEq(final.meta?.context_limit, 12400, 'meta.context_limit');
     assert(Number(final.meta?.before_tokens) > 0, 'meta.before_tokens');
     assert(
       Number(final.meta?.after_tokens) > 0 && Number(final.meta?.after_tokens) < Number(final.meta?.before_tokens),

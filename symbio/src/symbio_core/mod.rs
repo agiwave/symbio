@@ -49,6 +49,15 @@ pub use actors::{Pattern, Reasoner, TurnInput, TurnOutcome, TurnResume, TurnRunn
 pub use event::{
     EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
+// 任务格名字表（S7 步 16–18，批⑨）：core 内的读方（`projection::readyset`、
+// `invariants` 的 `acyclic_deps` / `rework_bounded`）走域内路径，core 外的写方只有
+// `plugins/session/v2_tasks` 按名字落格——**单消费方**，故与记忆事件名字表（下）、
+// `readyset` 出根（同批）同一形态：`pub(crate)` 出根（C-003 数 `pub use`），只在本
+// crate 内可见、不进对外公开面。收窄成「下沉到 `plugins/session`」会让写方复述字面量、
+// 制造第二处真相，违反 ADR-043「名字是数据、单点定义」——可下沉的只有消费方，字典不行。
+pub(crate) use event::{
+    EVENT_TASK_ASSERTED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
+};
 
 // ==================== 记忆三段（v2 阶段 S5 步 11–13） ====================
 // 写方 / 召回注入 / 巩固的消费方只有 `plugins/session` 的记忆链路**一个**。C-003 的
@@ -74,6 +83,10 @@ pub(crate) use event::{
     EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
 };
 pub(crate) use projection::consolidate::{accept, ConsolidateParams, Rejection};
+// 就绪集出根：生产消费方是 `plugins/session` 的**两处**——读出口 `session/stats`
+// 的 `readyset` 列与请求装配的调度段（04 §3.1 批⑨）。与 `reputation` 同一形态：
+// `pub(crate)` 出根，只在本 crate 内可见、不进对外公开面（C-003 数 `pub use`）。
+pub(crate) use projection::readyset::readyset;
 pub(crate) use projection::recall::recall;
 pub(crate) use projection::reputation::reputation;
 pub(crate) use view::RecallView;

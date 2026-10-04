@@ -385,7 +385,7 @@ export default defineCase(
         assertEq(
           stats.invariants.length,
           0,
-          `三轮都收束 ⇒ 五条全绿（实际: ${JSON.stringify(stats.invariants)}）`,
+          `三轮都收束 ⇒ 不变量清单为空（实际: ${JSON.stringify(stats.invariants)}）`,
         );
         // 逐字段比（不比 JSON 串）：`serde_json` 的对象键序是 BTreeMap 的字典序，
         // 拿它当判据等于把「库的内部实现」写进用例。

@@ -194,7 +194,15 @@ const CONTEXT_NUDGE_TEXT: &str =
 ///    （`meta.kind = recall_context`，同样不落库）。**置顶**而不是置尾：记忆是背景
 ///    事实，置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与
 ///    轮次窗口都会读错；也不进系统提示词——那里有「唯一真源 = 注册段」的纪律
-///    （`plugins/session/README.md`）。
+///    （`plugins/session/README.md`）；
+/// 6. 任务调度段（S7 步 16–17，[04 §3.1 批⑨](../../../docs/plan/04-工程落地.md)）：
+///    `ready_section` 非空时在视图**开头**插一条就绪任务消息
+///    （`meta.kind = readyset`，同样不落库）。同样不置尾、不进系统提示词，理由同上。
+///    **不与记忆段争 index 0**：记忆段的「置顶」是批⑦ 已定的决定——本段先插，
+///    记忆段随后再插一次 0 把它挤到 `index 1`（两段并存时记忆 0 / 就绪 1；
+///    单独存在时各自在 0）。
+///    它给的是 `readyset` 投影的**候选集**，不是替模型决定做哪件事——选哪一个是
+///    执行者的选择（`projection::readyset` 模块头的边界）。
 ///
 /// 以及第 0 步（在一切裁剪之前）：**可见域**（`viewer`，[plan/11 批 1](../../../docs/plan/11-多执行器与多主体加固实施方案.md)
 /// ③ 的请求侧入口）。`None` = 不过滤，与接线前逐字一致；`Some(会话主体)` = 别的
@@ -202,9 +210,9 @@ const CONTEXT_NUDGE_TEXT: &str =
 /// 是「还没接线」，不是「不让人看」——见 [`ChatMessage::principal`]）。两条链各滤一次：
 /// 请求侧滤消息、运行器侧（`window_by_turn`）滤事件，判据同一条（`visible_to`）。
 ///
-/// 视图每轮从存储重建，六个步骤天然幂等，不存在重复存档 / 重复注入问题。
+/// 视图每轮从存储重建，七个步骤天然幂等，不存在重复存档 / 重复注入问题。
 /// 全部压缩由此统一收敛于"发给大模型之前"（写入时压缩已废除，落库恒为原文）。
-// 10 个参数均为单一调用点（chat_loop）传入的独立语义旋钮，强行打包成
+// 11 个参数均为单一调用点（chat_loop）传入的独立语义旋钮，强行打包成
 // config struct 只会多一层间接而无行为收益，故显式豁免 clippy 参数数上限。
 #[allow(clippy::too_many_arguments)]
 pub fn build_request_view(
@@ -220,6 +228,7 @@ pub fn build_request_view(
     line_threshold: usize,
     inject_nudge: bool,
     recall_section: Option<&str>,
+    ready_section: Option<&str>,
     viewer: Option<&str>,
 ) -> Vec<ChatMessage> {
     let mut view: Vec<ChatMessage> = messages
@@ -244,6 +253,23 @@ pub fn build_request_view(
             meta: Some(serde_json::json!({ "kind": "context_nudge" })),
             ..Default::default()
         });
+    }
+    // 6) 任务调度段置顶（S7 步 16–17，批⑨）——先插本段，第 5 条的记忆段随后再插
+    //    一次 0 把它挤到 index 1（见本函数文档第 6 条：记忆段的置顶不被本段改掉）。
+    //    与 nudge / recall 同一套形状：请求级、`meta.kind` 可观测、不落库。
+    if let Some(section) = ready_section {
+        view.insert(
+            0,
+            ChatMessage {
+                id: uuid::Uuid::new_v4().to_string(),
+                role: Some(MessageRole::User),
+                msg_type: Some(MessageType::Text),
+                content: Some(MessageContent::Text(section.to_string())),
+                status: Some(MessageStatus::Completed),
+                meta: Some(serde_json::json!({ "kind": "readyset" })),
+                ..Default::default()
+            },
+        );
     }
     // 5) 长期记忆置顶（S5 步 12）——见本函数文档的第 5 条：位置与理由都在那里，
     //    这里只落机制（与 nudge 同一套形状：请求级、`meta.kind` 可观测、不落库）。

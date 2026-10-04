@@ -22,7 +22,6 @@ use std::collections::BTreeMap;
 
 /// 一条就绪任务。
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[allow(dead_code)] // dead-code-allow R-002: 接线未落地；04 §3.1 批⑨ 接线后摘除
 pub struct ReadyTask {
     /// 任务 id（`task.opened` 载荷的 `task_id`）。
     pub task_id: String,
@@ -34,7 +33,6 @@ pub struct ReadyTask {
 
 /// 就绪集视图：按 `task_id` 字典序（BTreeMap ⇒ 逐字节确定）。
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[allow(dead_code)] // dead-code-allow R-002: 接线未落地；04 §3.1 批⑨ 接线后摘除
 pub struct ReadySetView {
     pub ready: Vec<ReadyTask>,
 }
@@ -47,7 +45,11 @@ pub struct ReadySetView {
 ///   的职责；本投影在有环时诚实返回「依赖未闭合」的空子集（跑不完 ≠ 假装能跑）；
 /// - **挂起排除**（S07 §5 强制点）：`task.held` 的任务不进就绪集——被挂起的任务
 ///   被二次调度可能重复执行；恢复（同任务的 `task.progress`）自动解除挂起。
-#[allow(dead_code)] // dead-code-allow R-002: 接线未落地；04 §3.1 批⑨ 接线后摘除
+///
+/// 生产消费方两处（[04 §3.1 批⑨](../../../../docs/plan/04-工程落地.md)）：读出口
+/// `session/stats` 的 `readyset` 列，与请求装配时交给执行者的**调度段**
+/// （`plugins/session/v2_tasks::prompt_section`）——本投影给候选集，选哪个是调用方的
+/// 策略（见模块头的边界）。
 pub fn readyset() -> Projection<ReadySetView> {
     Projection::new(|events: &[Event], now, _budget: Budget| {
         // task_id → (opened 事件 seq, depends_on)

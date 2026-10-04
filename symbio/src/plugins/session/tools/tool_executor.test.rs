@@ -125,6 +125,7 @@ async fn missing_tool_call_id_is_recorded_as_failure() {
         &[],
         &test_dir(),
         &mut Vec::new(),
+        &mut Vec::new(),
     )
     .await;
 
@@ -175,6 +176,7 @@ async fn empty_tool_call_id_is_recorded_as_failure() {
         &[],
         &test_dir(),
         &mut Vec::new(),
+        &mut Vec::new(),
     )
     .await;
 
@@ -203,6 +205,7 @@ async fn missing_tool_name_is_recorded_as_failure() {
         test_ctx(),
         &[],
         &test_dir(),
+        &mut Vec::new(),
         &mut Vec::new(),
     )
     .await;
@@ -236,6 +239,7 @@ async fn unparseable_arguments_are_refused_not_executed() {
         test_ctx(),
         &[],
         &test_dir(),
+        &mut Vec::new(),
         &mut Vec::new(),
     )
     .await;
@@ -347,6 +351,7 @@ async fn aborted_batch_terminates_every_tool_call() {
         &tc_context(&["tc1", "tc2"]),
         &test_dir(),
         &mut Vec::new(),
+        &mut Vec::new(),
     )
     .await;
 
@@ -425,6 +430,7 @@ async fn interactive_break_leaves_result_for_skipped_calls() {
         ctx,
         &tc_context(&["tc1", "tc2"]),
         &test_dir(),
+        &mut Vec::new(),
         &mut Vec::new(),
     )
     .await;
@@ -706,4 +712,65 @@ fn note_delegation_never_overwrites_an_earlier_judgement() {
     assert_eq!(out.len(), 2);
     assert!(!out[1].ok);
     assert_eq!(out[1].why, "被 PreToolUse 钩子拦下");
+}
+
+// ==================== note_tasks：任务表出参的唯一写入点（批⑨） ====================
+//
+// 判据三条，各钉一条反向：**短名**匹配（不反演全名、不误吃 MCP 工具）、**只认成功**
+// （失败的调用没改清单）、**id 缺席按位次兜底**（与 local/todo_write 同一条格式——
+// 两处各写一次是跨插件契约，改名必须一起改）。
+
+#[test]
+fn note_tasks_records_a_successful_todo_write() {
+    let mut out = Vec::new();
+    let args = json!({
+        "todos": [
+            { "content": "分析架构", "status": "in_progress" },
+            { "id": "t2", "content": "写实现", "status": "completed", "depends_on": ["task_1"] },
+            { "id": "t3", "content": "写文档", "status": "pending" }
+        ],
+        "merge": false
+    });
+    note_tasks(&mut out, "local/todo_write", &args, true);
+
+    assert_eq!(out.len(), 1, "一次成功调用 = 一条声明");
+    let items = &out[0].items;
+    assert_eq!(items.len(), 3);
+    assert_eq!(items[0].id, "task_1", "id 缺席按位次兜底（与工具同格式）");
+    assert_eq!(items[0].status, TaskStatus::InProgress);
+    assert!(items[0].depends_on.is_empty(), "省略 depends_on ⇒ []");
+    assert_eq!(items[1].status, TaskStatus::Completed);
+    assert_eq!(items[1].depends_on, vec!["task_1".to_string()]);
+    assert_eq!(items[2].status, TaskStatus::Pending);
+    assert_eq!(out[0].items[0].goal, "分析架构");
+}
+
+#[test]
+fn note_tasks_ignores_failures_and_other_tools() {
+    let mut out = Vec::new();
+    let args = json!({ "todos": [{ "content": "甲" }] });
+
+    // 失败的调用没改清单 ⇒ 不记（记它等于替工具编一条事实）。
+    note_tasks(&mut out, "local/todo_write", &args, false);
+    // 别的工具：短名判据只认 todo_write。
+    note_tasks(&mut out, "local/shell", &args, true);
+    // MCP 的同名工具走 `mcp__srv__todo_write` 线上名，短名判据**不反演** ⇒ 不误吃。
+    note_tasks(&mut out, "mcp__srv__todo_write", &args, true);
+    // 裸 `todo_write`（无挂载点前缀）同样要认。
+    note_tasks(&mut out, "todo_write", &args, true);
+
+    assert_eq!(out.len(), 1, "只有成功的 todo_write 被记账");
+}
+
+#[test]
+fn note_tasks_skips_payloads_that_cannot_be_a_task_list() {
+    let mut out = Vec::new();
+    note_tasks(&mut out, "local/todo_write", &json!({}), true);
+    note_tasks(
+        &mut out,
+        "local/todo_write",
+        &json!({ "todos": [{ "content": "" }] }),
+        true,
+    );
+    assert!(out.is_empty(), "缺 todos / 空 content ⇒ 不是一份清单");
 }
