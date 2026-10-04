@@ -105,7 +105,9 @@ pub(crate) struct TurnInputs {
 ///    `context_compact`，与历史一致 → 压缩阈值 / 水位提醒的判定行为不变）
 /// 3. 压缩（收口 ③：[`apply_compaction`]，自动语义压缩 + 水位提醒的唯一响应点）
 /// 4. Turn 根节点流式占位（**必须在压缩之后**：压缩失败时不留半截 Turn 节点）
-/// 5. 请求视图重建（`build_request_view` 唯一入口）
+/// 5. 长期记忆召回（S5 步 12：跨会话读视图 → 置顶注入请求视图；只在本轮**第一个**
+///    工具轮取一次，后续工具轮复用同一份视图）
+/// 6. 请求视图重建（`build_request_view` 唯一入口）
 pub(crate) async fn prepare_turn_inputs(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn PluginInvokeRequest>,
@@ -150,8 +152,31 @@ pub(crate) async fn prepare_turn_inputs(
     let root_id: String = llm_short_id();
     emit_streaming_start(sink, &root_id, Some(turn.tool_rounds)).await;
 
-    // ── ⑤ 请求视图（唯一入口 build_request_view）──────────────────────────
-    // 在存储视图之上叠加四项**不落库**的裁剪，全部只作用于本次 execute_turn 的
+    // ── ⑤ 长期记忆召回（S5 步 12）：跨会话读视图，本轮内只取一次 ─────────────
+    // `tool_rounds == 0` 是「每轮一次」的既有判据（classify / history 同款）：
+    // 同一轮内记忆不漂移，事实源也只扫一遍，后续工具轮复用同一份视图。
+    // `off` 档不读（用户关的是数据源，与转写同一条开关）；临时会话没有落盘目录，
+    // 与「不转写」同一条口径——不读不写。
+    if turn.tool_rounds == 0 {
+        turn.recall_view = match context.session.session_dir() {
+            Some(dir)
+                if !matches!(
+                    context.session.v2_mode(),
+                    crate::plugins::session::config::V2Mode::Off
+                ) =>
+            {
+                crate::plugins::session::v2_memory::recall_view(&dir)
+            }
+            _ => None,
+        };
+    }
+    let recall_section = turn
+        .recall_view
+        .as_ref()
+        .and_then(crate::plugins::session::v2_memory::prompt_section);
+
+    // ── ⑥ 请求视图（唯一入口 build_request_view）──────────────────────────
+    // 在存储视图之上叠加五项**不落库**的裁剪，全部只作用于本次 execute_turn 的
     // 请求包，不回写 context.messages——存储保持完整历史，last_saved 锚点与
     // persist_messages 切片不会错位。
     // 1) 内容节点淡化：B1 保护窗口（末条 + 最近 N 个内容节点）外的超大正文/思考
@@ -160,7 +185,8 @@ pub(crate) async fn prepare_turn_inputs(
     // 3) 工具级骨架化：从 CapabilityVisitor 的能力声明（context_retention）动态解析
     //    保留策略，LastOnly/LastN → 更早调用的参数与结果替换为占位文案
     //    （ToolCall↔Tool 配对完整保留，不会造成大模型逻辑断联）；
-    // 4) nudge：水位提醒请求级注入（不落库、不占轮次窗口的 User 计数）。
+    // 4) nudge：水位提醒请求级注入（不落库、不占轮次窗口的 User 计数）；
+    // 5) 长期记忆：置顶注入（不落库；位置与理由见 build_request_view 文档第 5 条）。
     let retention: HashMap<String, crate::symbio_core::CapabilityToolContextRetention> = tools
         .iter()
         .filter_map(|t| {
@@ -181,6 +207,7 @@ pub(crate) async fn prepare_turn_inputs(
         context.session.compress_keep_recent(),
         context.session.line_threshold(),
         inject_nudge,
+        recall_section.as_deref(),
     );
 
     Ok(TurnInputs {

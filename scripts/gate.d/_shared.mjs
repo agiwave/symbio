@@ -459,7 +459,15 @@ export const BASELINE = {
   //      构造 / `can_reply` 映射）+ authz 4 例（表形状 / 写读两侧 / 降级空矩阵）
   //      + stats 2 例（属主全量 / 非属主全零）+ v2_bridge 写闸 1 例 + e2e t28
   //      读方三态（`principal` = user / agent:main / 未知 ⇒ 4 格 / 0 格 / 0 格）。
-  rustTests: 1232,
+  // 1243（记忆三段接线，2026-10-04）——`1232 → 1243`，**+11**。
+  //      步 11–13 全部接入（04 §3.1 批⑦）：写方 `v2_bridge::record_to_wal` 收束时
+  //      编码本轮用户发言（同文去重判定方 = core 的 `contains_content`）、把本轮
+  //      检索落成 `memory.recalled`、再过 `consolidate::accept` 才巩固；读方
+  //      `prepare_turn_inputs` 首轮扫跨会话事实源、`build_request_view` 置顶注入。
+  //      验收 = v2_memory 8 例（编码溯源/去重/截断、巩固三态、跨会话召回与排版、
+  //      检索事实幂等与 actor 对齐、合并算法两条边界）+ 桥三段接线 1 例 +
+  //      请求视图置顶注入 1 例 + e2e `t29`（记忆进 prompt、跨会话召回、巩固可见）。
+  rustTests: 1243,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

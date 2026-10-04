@@ -119,6 +119,26 @@ pub(crate) struct TurnState {
     /// 全部记账，同一轮再转写一份就是重复格（v1 行为不变：bridge/off 档恒
     /// `false`，本字段不影响它们）。
     pub(crate) v2_executed: bool,
+    /// 本轮**输入**（消息 id + 正文），在 `single_message` 被消费之前锚定。
+    ///
+    /// 锚定而不现取，是因为 `context.messages` 装着**整段历史**（`load_history = true`
+    /// 时每轮都重新加载）：从里面找「本轮用户发言」找到的永远是首轮那句——转写
+    /// （`v2_bridge::record` 的 `user.message` 文本与 `attempt` 判据）和记忆编码
+    /// （`v2_memory::encode`）会**一起**逐轮记错同一条事实。两处消费同一份锚，
+    /// 判决（`first_utterance`）与转写才不会各读各的。
+    ///
+    /// `None` = 本请求没有用户新发言（`resume` 重跑等）——那时调用方回落到
+    /// `v2_bridge::first_user_utterance` 的兜底口径（历史首条）。
+    pub(crate) input_utterance: Option<(String, String)>,
+    /// 本轮的**长期记忆召回视图**（S5 步 12，`v2_memory::recall_view`）。
+    ///
+    /// 只在本轮**第一个工具轮**取一次（与 classify / history 同一条 `tool_rounds == 0`
+    /// 口径）：同一轮内记忆不该漂移，事实源也只扫一遍；后续工具轮复用同一份视图，
+    /// 渲染 [`chat_loop::inputs`] 每次调用现算（纯内存，零 I/O）。
+    ///
+    /// 落 `memory.recalled` 的时机在**轮末收束**（`v2_bridge::record`）而不是取视图
+    /// 那一刻：溯源锚是本轮 `user.message` 格，那时它才在事实源里。
+    pub(crate) recall_view: Option<crate::symbio_core::RecallView>,
 }
 
 /// 主循环的唯一退出原因。

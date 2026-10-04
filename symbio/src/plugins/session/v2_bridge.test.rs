@@ -6,8 +6,9 @@ use super::{
 };
 use crate::symbio_core::chat_message as cm;
 use crate::symbio_core::{
-    check_all, Entity, EventEnvelope as _, EventWalStore, PermissionMatrix, Seq, Store, VisScope,
-    EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+    check_all, recall, Budget, Entity, EventEnvelope as _, EventWalStore, PermissionMatrix, Seq,
+    Store, VisScope, EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED,
+    EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED, EVENT_USER_MESSAGE,
 };
 use std::path::PathBuf;
 
@@ -39,7 +40,7 @@ fn assistant_text(id: &str, text: &str) -> cm::ChatMessage {
     }
 }
 
-/// 成功轮：两格（用户开 + final 收），溯源指向本轮用户格，实测耗时入账。
+/// 成功轮：两格（用户开 + final 收）+ 一条记忆（步 11 写方），溯源各自到位。
 #[test]
 fn final_closure_writes_user_and_final_with_cost() {
     let wal = tmp_wal("final");
@@ -51,12 +52,13 @@ fn final_closure_writes_user_and_final_with_cost() {
             text: "答".into(),
             cost_ms: 4321,
         },
+        None,
     )
     .expect("转写成功");
 
     let store = EventWalStore::open(&wal).unwrap();
     let snap = store.range(Seq::new(0));
-    assert_eq!(snap.len(), 2, "用户格 + final 格");
+    assert_eq!(snap.len(), 3, "用户格 + final 格 + 记忆格");
     assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
 
     let user = &snap[0];
@@ -90,6 +92,25 @@ fn final_closure_writes_user_and_final_with_cost() {
         Some("v1-chat_loop")
     );
 
+    // 记忆格（S5 步 11）：溯源指向**本轮用户格**，`ts` 是编码时刻，`vec` 恒空。
+    let mem = &snap[2];
+    assert_eq!(mem.kind, EVENT_MEMORY_ENCODED);
+    assert_eq!(mem.entity, Entity::Memory);
+    assert_eq!(
+        mem.produced_by,
+        user.seq().map(|s| s.value()),
+        "记忆必带溯源（I2：覆盖 100%）"
+    );
+    assert!(mem.ts > 0, "记忆事件填真实编码时刻（RecallEntry::ts 契约）");
+    assert_eq!(
+        mem.payload.get("content").and_then(|v| v.as_str()),
+        Some("你好")
+    );
+    assert!(mem
+        .payload
+        .get("vec")
+        .is_some_and(|v| v.as_array().is_some_and(|a| a.is_empty())));
+
     std::fs::remove_dir_all(wal.parent().unwrap()).ok();
 }
 
@@ -105,6 +126,7 @@ fn retry_of_same_message_increments_attempt_and_new_message_increments_turn() {
             why: "上游 500".into(),
             cost_ms: 100,
         },
+        None,
     )
     .unwrap();
     record_to_wal(
@@ -115,6 +137,7 @@ fn retry_of_same_message_increments_attempt_and_new_message_increments_turn() {
             text: "答".into(),
             cost_ms: 200,
         },
+        None,
     )
     .expect("重试转写成功（id 不撞 = 幂等键不冲突）");
     record_to_wal(
@@ -125,12 +148,22 @@ fn retry_of_same_message_increments_attempt_and_new_message_increments_turn() {
             text: "答2".into(),
             cost_ms: 300,
         },
+        None,
     )
     .unwrap();
 
     let store = EventWalStore::open(&wal).unwrap();
     let snap = store.range(Seq::new(0));
-    assert_eq!(snap.len(), 6, "三轮 × 两格");
+    // 三轮 × 两格 = 6，再加 2 条记忆：u-1 说了两遍「问」（第二次**同文去重**不记），
+    // u-2 的「问2」另记一条。
+    assert_eq!(snap.len(), 8, "三轮 × 两格 + 两条不重复的记忆");
+    assert_eq!(
+        snap.iter()
+            .filter(|e| e.kind == EVENT_MEMORY_ENCODED)
+            .count(),
+        2,
+        "同文去重：重试轮不重复编码"
+    );
     assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
 
     // turn 编号：0 / 1 / 2（每个 user.message 都是新轮次）。
@@ -162,6 +195,7 @@ fn reopen_recovers_events_with_seq() {
             text: "答".into(),
             cost_ms: 5,
         },
+        None,
     )
     .unwrap();
     let count_before = EventWalStore::open(&wal).unwrap().range(Seq::new(0)).len();
@@ -282,6 +316,7 @@ async fn v2_mode_off_disables_recording() {
             text: "答".into(),
             cost_ms: 1,
         },
+        None,
     );
     let dir = off_session.session_dir().expect("持久会话有目录");
     assert!(!dir.join("v2-events.wal").exists(), "off 档不得写 WAL");
@@ -300,6 +335,7 @@ async fn v2_mode_off_disables_recording() {
             text: "答".into(),
             cost_ms: 1,
         },
+        None,
     );
     let dir = on_session.session_dir().expect("持久会话有目录");
     assert!(dir.join("v2-events.wal").exists(), "bridge 档必须写 WAL");
@@ -334,4 +370,89 @@ fn a_closure_without_the_grant_is_refused() {
     // 构造失败时的 fail-closed 兜底（空表）：谁都不许。
     let deny_all = PermissionMatrix::from_names(&[]).expect("空表合法");
     assert!(authorize_close(&deny_all, crate::authz::PRINCIPAL_MAIN, true).is_err());
+}
+
+/// 三段在桥里真的接上了（[04 §3.1 批⑦](../../../../docs/plan/04-工程落地.md) 的接入
+/// 判据）：每轮编码一条（步 11）、第 4 条到齐自动巩固（步 13）、收束时把本轮检索
+/// 落成事实（步 12）——全部在同一份 WAL 里可读，且 `check_all` 全绿（溯源 100%）。
+#[test]
+fn record_to_wal_wires_all_three_memory_steps() {
+    let wal = tmp_wal("memory-wiring");
+
+    // 轮 0–3：每轮说一句、四句互不相同 ⇒ 第 4 轮收束时活记忆到 4 条 ⇒ 巩固触发。
+    for i in 0..4u64 {
+        record_to_wal(
+            wal.clone(),
+            &format!("u-{i}"),
+            &format!("第 {i} 条约定"),
+            V2Closure::Final {
+                text: "答".into(),
+                cost_ms: i,
+            },
+            None,
+        )
+        .expect("转写成功");
+    }
+
+    let store = EventWalStore::open(&wal).expect("打开 WAL");
+    let snap = store.range(Seq::new(0));
+    assert_eq!(
+        snap.iter()
+            .filter(|e| e.kind == EVENT_MEMORY_ENCODED)
+            .count(),
+        4,
+        "步 11：每轮各编码一条"
+    );
+    snap.iter()
+        .find(|e| e.kind == EVENT_MEMORY_CONSOLIDATED)
+        .expect("步 13：第 4 条到齐即触发巩固")
+        .payload
+        .get("generation")
+        .and_then(|v| v.as_u64())
+        .filter(|g| *g == 1)
+        .expect("首次合并代数 = 1");
+    assert_eq!(
+        snap.iter()
+            .filter(|e| e.kind == EVENT_MEMORY_FORGOTTEN)
+            .count(),
+        2,
+        "最旧的两条源记忆被排除式遗忘（Log 不删，只是投影不再包含）"
+    );
+
+    // 步 12：视图在收束前读出，收束时才落成事实（溯源锚那时才存在）。
+    let view = recall(crate::authz::PRINCIPAL_USER, None)
+        .apply(&snap, i64::MAX, Budget::generous())
+        .value;
+    assert!(!view.entries.is_empty(), "还有活记忆可召回");
+    drop(store);
+
+    record_to_wal(
+        wal.clone(),
+        "u-4",
+        "第五句",
+        V2Closure::Final {
+            text: "答".into(),
+            cost_ms: 44,
+        },
+        Some(&view),
+    )
+    .expect("转写成功");
+
+    let snap = EventWalStore::open(&wal).expect("重开").range(Seq::new(0));
+    let recalled = snap
+        .iter()
+        .find(|e| e.kind == EVENT_MEMORY_RECALLED)
+        .expect("步 12：检索事实入格");
+    let fifth_user = snap
+        .iter()
+        .rfind(|e| e.kind == EVENT_USER_MESSAGE)
+        .expect("本轮用户格");
+    assert_eq!(
+        recalled.produced_by,
+        fifth_user.seq().map(|s| s.value()),
+        "溯源锚 = 触发检索的那格用户发言"
+    );
+    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+
+    std::fs::remove_dir_all(wal.parent().unwrap()).ok();
 }

@@ -41,16 +41,22 @@ pub(crate) enum V2Closure {
 ///
 /// 所有失败都只记日志不冒泡：桥的故障不得拖垮 v1 对话——但**必须被看见**
 /// （plugin_warn），不允许静默吞。
+///
+/// `recalled` = 本轮开头召回的长期记忆视图（S5 步 12），非空且有条目时收束入格一条
+/// `memory.recalled`。它从 [`super::chat_loop::state::TurnState`] 一路带到这里才落笔：
+/// 溯源锚是本轮 `user.message` 格，只有轮末它才在事实源里。
 pub(crate) fn record(
     session: &PersistentChatSession,
     user_id: &str,
     user_text: &str,
     closure: V2Closure,
+    recalled: Option<&crate::symbio_core::RecallView>,
 ) {
     // 总开关（`v2_mode`，ADR-045 过渡期的切换档位）：`off` 档网格零增长
     // （用户关的是数据源，不是对话）。`bridge` 档：v1 轮次全部经此转写；
     // `full` 档：轮次由 v2 运行器原生记账，调用侧以 `TurnState::v2_executed`
-    // 拦下，不经此转写。检查在取目录之前：关掉时连 WAL 的打开开销都不该有。
+    // 拦下，不经此转写——**记忆写方同此档位**（full 档的记忆写随 full 档启用，
+    // 见 `v2_exec` 侧的同批注记）。检查在取目录之前：关掉时连 WAL 的打开开销都不该有。
     if matches!(session.v2_mode(), super::config::V2Mode::Off) {
         return;
     }
@@ -62,6 +68,7 @@ pub(crate) fn record(
         user_id,
         user_text,
         closure,
+        recalled,
     );
     if let Err(why) = result {
         crate::plugin_warn!(
@@ -78,6 +85,7 @@ fn record_to_wal(
     user_id: &str,
     user_text: &str,
     closure: V2Closure,
+    recalled: Option<&crate::symbio_core::RecallView>,
 ) -> Result<(), String> {
     let store = EventWalStore::open(&wal).map_err(|e| format!("打开 WAL 失败：{e}"))?;
     let snapshot = store.range(Seq::new(0));
@@ -155,6 +163,42 @@ fn record_to_wal(
             .with_payload(payload),
         )
         .map_err(|e| format!("收束事件入格失败：{e:?}"))?;
+
+    // ── 记忆三段（S5 步 11–13，04 §3.1 批⑦）：本轮收束时写记忆 ────────────
+    // 顺序有讲究：
+    //  1. 编码（步 11）先写——本轮新记忆要能进本轮的巩固；
+    //  2. 检索事实（步 12）与它平级：溯源锚是刚入格的 `user.message`（`user_seq`）；
+    //  3. 巩固（步 13）最后，且用**刷新后的**快照——它要看得见 1 刚写下的那条。
+    // 三条都**只记日志不冒泡**：记忆是本轮的附加事实，它失败不该被说成「转写失败」
+    // （那会把桥的健康度算错）。`now` 是统一的墙钟时刻——记忆类事件的 `ts` 是
+    // `RecallEntry::ts` 契约里的「编码时刻」，跨会话新近度排序全靠它。
+    let now = crate::symbio_core::clock_now_ms();
+    let remember = |step: &str, why: String| {
+        crate::plugin_warn!(
+            "session",
+            "[memory] {step} 失败（{}）：{why}",
+            wal.display()
+        );
+    };
+    if let Err(why) = super::v2_memory::encode(
+        &store,
+        &snapshot,
+        turn,
+        user_seq,
+        user_text,
+        &format!("v2m-{user_id}-a{attempt}"),
+        now,
+    ) {
+        remember("步 11 编码", why);
+    }
+    if let Some(view) = recalled {
+        if let Err(why) = super::v2_memory::record_recalled(&store, view, user_seq, now) {
+            remember("步 12 检索入格", why);
+        }
+    }
+    if let Err(why) = super::v2_memory::consolidate(&store, &store.range(Seq::new(0)), turn, now) {
+        remember("步 13 巩固", why);
+    }
     Ok(())
 }
 
@@ -173,7 +217,13 @@ fn authorize_close(matrix: &PermissionMatrix, principal: &str, first: bool) -> R
     ))
 }
 
-/// 本轮用户发言（消息 id + 文本）：本轮**第一条已提交**的用户 Text 节点。
+/// 本轮用户发言的**兜底取法**（消息 id + 文本）：历史里**第一条已提交**的用户 Text 节点。
+///
+/// 正路是 `chat_loop::state::TurnState::input_utterance`——循环前在 `single_message`
+/// 上锚定的那一份（判决与转写共用同一份锚）。本函数只服务**没有锚**的请求
+/// （`resume` 重跑等，那时「本轮」无从界定），退而取历史首条。**有锚时不得用它**：
+/// `context.messages` 在 `load_history = true` 下装着整段历史，取「第一条」会逐轮
+/// 指回首轮那句——转写的 `user.message` 文本 / `attempt` 判据与记忆编码会一起记错。
 ///
 /// 判别式 = `role` + `msg_type` 两条**构造即成立**的字段，再加 `status` 只用来
 /// 排除**显式在途**：`None` 与 `Completed` 都算已提交，`Streaming` / `Pending` /

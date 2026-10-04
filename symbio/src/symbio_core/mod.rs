@@ -50,6 +50,24 @@ pub use event::{
     EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 
+// ==================== 记忆三段（v2 阶段 S5 步 11–13） ====================
+// 写方 / 召回注入 / 巩固的消费方只有 `plugins/session` 的记忆链路**一个**。C-003 的
+// 口径是「单消费方不算架构元素，该下沉」——可下沉的只有消费方，算法不行：
+// `recall` 是 ③ 的投影、`consolidate` 是 01 §9.3 的接受边界、事件名字表是 ADR-043
+// 的单点定义，都必须留在 core。故按 `symbio_core/README.md §4 四问` 留 core，以
+// **`pub(crate)`** 出根：只在本 crate 内可见、不进对外公开面（C-003 数 `pub use`），
+// 与 `lock_read` / `ObjectConstructor` 同一形态。记忆事件名字表同样只对写方可见——
+// 名字是数据，core 内与插件内各写一份字面量就等于两套事件名。
+// `recalled_event` 出根而不是主体类型本身：NDC-001（无直连）禁止定义域之外**提及
+// 主体名**——提及即可持有、持有即可绕过事实源。主体仍在 `actors` 内被本函数驱动。
+pub(crate) use actors::recalled_event;
+pub(crate) use event::{
+    EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
+};
+pub(crate) use projection::consolidate::{accept, ConsolidateParams, Rejection};
+pub(crate) use projection::recall::recall;
+pub(crate) use view::RecallView;
+
 // ==================== 适配器（v2 阶段 S2，⑤ adapters） ====================
 // 时延闸门 = 本包的依赖注入策略（plan/05 §3.3）：令牌按档位签发，反射档拿不到模型句柄。
 // 两只端口并列：`LlmAdapter`（生成）与 `DispatchPort`（工具分发）——运行器只认这两只，

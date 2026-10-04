@@ -128,6 +128,18 @@ pub async fn run_chat_loop(
         session,
     };
 
+    // 本轮输入（消息 id + 正文）：锚定在 `single_message` 被消费**之前**。
+    //
+    // 这是「本请求带了什么输入」这一事实，而不是「第几轮」的函数；两处消费它——
+    // 下面判决的 `first_utterance`，以及收束转写 `v2_bridge::record`（经
+    // `TurnState::input_utterance` 传到 `finish_turn`）。转写那一处不能改从
+    // `context.messages` 现取：`load_history = true` 时那份列表装着整段历史，
+    // 「第一条用户发言」逐轮都指回首轮那句（e2e t29 钉住这条）。
+    turn.input_utterance = single_message.as_ref().and_then(|m| {
+        let text = m.content.as_ref()?.to_text();
+        Some((m.id.clone(), text))
+    });
+
     // 本轮用户发言（**判决的输入**）。
     //
     // 取值点在循环**之前**、`single_message` 被消费之前，因为它是「本请求带了什么
@@ -138,10 +150,7 @@ pub async fn run_chat_loop(
     // - 心跳等无上下文轮次同理（它们由 `single_message` 携带触发文案，见 `heartbeat`）；
     // - `None` 与 `Some("")` 是两件事：前者「没有发言」，后者「发言是空的」——
     //   后者由规则表判成 `Answered{empty}`，前者根本不进判决。
-    let first_utterance: Option<String> = single_message
-        .as_ref()
-        .and_then(|m| m.content.as_ref())
-        .map(|c| c.to_text());
+    let first_utterance: Option<String> = turn.input_utterance.as_ref().map(|(_, t)| t.clone());
 
     // ── 会话恢复（resume）：在 turn 循环前处理 ──────────────────────────────
     //
@@ -697,11 +706,16 @@ async fn finish_turn(
     // full 档经 v2 原生入格的轮次（`v2_executed`）不转写——同一轮两份记账
     // 是假象，不是冗余。
     if !turn.v2_executed {
+        // 本轮发言优先用**循环前锚定**的那一份（`TurnState::input_utterance`）；
+        // 没有锚的请求（`resume` 重跑）才回落到历史首条——`context.messages` 装着
+        // 整段历史，现取「第一条」会逐轮指回首轮那句（见 `first_user_utterance`）。
+        let utterance = turn
+            .input_utterance
+            .clone()
+            .or_else(|| super::v2_bridge::first_user_utterance(&context.messages));
         match &exit {
             TurnExit::Completed | TurnExit::MaxToolRounds { .. } => {
-                if let Some((user_id, user_text)) =
-                    super::v2_bridge::first_user_utterance(&context.messages)
-                {
+                if let Some((user_id, user_text)) = utterance {
                     let closure = match super::v2_bridge::last_assistant_text(&context.messages) {
                         Some(text) => V2Closure::Final {
                             text,
@@ -712,13 +726,17 @@ async fn finish_turn(
                             cost_ms: turn.model_elapsed_ms,
                         },
                     };
-                    super::v2_bridge::record(&context.session, &user_id, &user_text, closure);
+                    super::v2_bridge::record(
+                        &context.session,
+                        &user_id,
+                        &user_text,
+                        closure,
+                        turn.recall_view.as_ref(),
+                    );
                 }
             }
             TurnExit::Failed(e) => {
-                if let Some((user_id, user_text)) =
-                    super::v2_bridge::first_user_utterance(&context.messages)
-                {
+                if let Some((user_id, user_text)) = utterance {
                     super::v2_bridge::record(
                         &context.session,
                         &user_id,
@@ -727,6 +745,7 @@ async fn finish_turn(
                             why: e.to_string(),
                             cost_ms: turn.model_elapsed_ms,
                         },
+                        turn.recall_view.as_ref(),
                     );
                 }
             }

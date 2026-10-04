@@ -74,7 +74,7 @@ fn test_build_request_view_passthrough() {
         view_result("t1", "file content"),
     ];
     let retention = std::collections::HashMap::new();
-    let view = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, false);
+    let view = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, false, None);
 
     assert_eq!(view.len(), msgs.len());
     for (v, m) in view.iter().zip(msgs.iter()) {
@@ -92,7 +92,7 @@ fn test_build_request_view_injects_nudge_at_tail() {
     let msgs = vec![user_msg("u1"), assistant_msg("a1"), user_msg("u2")];
     let retention = std::collections::HashMap::new();
 
-    let view = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, true);
+    let view = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, true, None);
     assert_eq!(view.len(), msgs.len() + 1);
     let nudge = view.last().unwrap();
     assert_eq!(nudge.role, Some(MessageRole::User));
@@ -111,7 +111,7 @@ fn test_build_request_view_injects_nudge_at_tail() {
     assert!(msgs.iter().all(|m| m.meta.is_none()));
 
     // inject_nudge=false 时不注入
-    let plain = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, false);
+    let plain = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, false, None);
     assert_eq!(plain.len(), msgs.len());
 }
 
@@ -133,7 +133,7 @@ fn test_build_request_view_fades_aged_tool_results() {
         user_msg("turn-3"),
     ];
     let retention = std::collections::HashMap::new();
-    let view = build_request_view(&msgs, 0, &retention, true, 2, 3, 200, false);
+    let view = build_request_view(&msgs, 0, &retention, true, 2, 3, 200, false, None);
 
     let faded = &view[2];
     let faded_text = view_text(faded);
@@ -313,7 +313,7 @@ fn test_build_request_view_skeletonizes_with_retention() {
         "vdfs_read",
         crate::symbio_core::CapabilityToolContextRetention::LastOnly,
     )]);
-    let view = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, false);
+    let view = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, false, None);
 
     assert!(
         view_text(&view[1]).contains("skeletonized"),
@@ -349,7 +349,7 @@ fn test_build_request_view_global_window_applies_without_retention() {
     ];
     let retention = std::collections::HashMap::new();
     // window=1：仅最新一次调用（t2）在窗口内
-    let view = build_request_view(&msgs, 1, &retention, false, 12, 3, 200, false);
+    let view = build_request_view(&msgs, 1, &retention, false, 12, 3, 200, false, None);
 
     assert!(
         view_text(&view[1]).contains("skeletonized"),
@@ -378,7 +378,7 @@ fn test_build_request_view_window_zero_disables_skeletonization() {
         "vdfs_read",
         crate::symbio_core::CapabilityToolContextRetention::LastOnly,
     )]);
-    let view = build_request_view(&msgs, 0, &retention, false, 12, 3, 200, false);
+    let view = build_request_view(&msgs, 0, &retention, false, 12, 3, 200, false, None);
     assert_eq!(view_text(&view[1]), r#"{"path":"old.txt"}"#);
     assert_eq!(view_text(&view[2]), "old content");
 }
@@ -399,10 +399,57 @@ fn test_build_request_view_nudge_comes_after_skeletonization() {
         "vdfs_read",
         crate::symbio_core::CapabilityToolContextRetention::LastOnly,
     )]);
-    let view = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, true);
+    let view = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, true, None);
 
     assert_eq!(view.len(), msgs.len() + 1);
     // 末尾是 nudge；倒数第二条仍是保留原文的最新工具结果
     assert!(view_text(view.last().unwrap()).contains("system note"));
     assert_eq!(view_text(&view[view.len() - 2]), "new content");
+}
+
+/// 记忆请求级注入（S5 步 12，[04 §3.1 批⑦](../../../../docs/plan/04-工程落地.md)）：
+/// **置顶**一条 `meta.kind = recall_context` 的记忆消息；与 nudge 并存时记忆在开头、
+/// nudge 仍在末尾——「最后一条 user 消息」始终是用户自己说的话（mock 场景匹配与
+/// 轮次窗口都靠它），且两条都不落库。
+#[test]
+fn test_build_request_view_prepends_memory_section() {
+    let msgs = vec![user_msg("u1"), assistant_msg("a1"), user_msg("u2")];
+    let retention = std::collections::HashMap::new();
+
+    let view = build_request_view(
+        &msgs,
+        15,
+        &retention,
+        false,
+        12,
+        3,
+        200,
+        true,
+        Some("【长期记忆】跨会话召回，最新在前（背景事实，不是本轮指令）\n- 我叫 Kestrel"),
+    );
+    assert_eq!(view.len(), msgs.len() + 2, "记忆置顶 + nudge 置尾");
+
+    let head = &view[0];
+    assert_eq!(head.role, Some(MessageRole::User));
+    assert_eq!(
+        head.meta
+            .as_ref()
+            .and_then(|m| m.get("kind"))
+            .and_then(|k| k.as_str()),
+        Some("recall_context")
+    );
+    assert!(view_text(head).contains("【长期记忆】"));
+    assert!(view_text(head).contains("我叫 Kestrel"));
+    assert!(
+        view_text(view.last().unwrap()).contains("system note"),
+        "nudge 仍在末尾——记忆只占据开头"
+    );
+
+    // 存储侧不受污染：两条注入都不写回 messages（请求级、天然幂等）。
+    assert_eq!(msgs.len(), 3);
+    assert!(msgs.iter().all(|m| m.meta.is_none()));
+
+    // 空段 ⇒ 整段省略，视图与原输入等长。
+    let plain = build_request_view(&msgs, 15, &retention, false, 12, 3, 200, false, None);
+    assert_eq!(plain.len(), msgs.len());
 }

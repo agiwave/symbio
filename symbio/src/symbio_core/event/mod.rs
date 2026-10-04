@@ -65,19 +65,17 @@ pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
 
 // ── 记忆格子（S5，[roadmap/S06 §3](../../../../docs/plan/roadmap/S06-长期记忆与语义检索.md)）────
 
-/// 编码：学到的语义内容 + embedding（`payload: { content, tag, vec }`）。
+/// 编码：学到的语义内容 + embedding（`payload: { content, tag, generation, vec }`）。
 /// 落在 `memory × opened`。**记忆必带溯源**（I2 扩展：溯源覆盖 100%）。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑦ 接线后摘除
+/// `vec` 是向量索引的载荷位：**索引未建时写 `[]`**——内容恒在 `content` 里，
+/// 索引落成时按 `content` 回填即可（写方 `plugins/session/v2_memory.rs`）。
 pub const EVENT_MEMORY_ENCODED: &str = "memory.encoded";
 /// 巩固：压缩 + 反事实（不是逐帧回放）。落在 `memory × progressed`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑦ 接线后摘除
 pub const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";
 /// 遗忘：**不是物理删除**——Log 永不删，只是投影不再包含（可撤销、可审计）。
 /// 落在 `memory × closed`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑦ 接线后摘除
 pub const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
 /// 召回：检索 Translator 的产出（读视图 → 产出事实）。落在 `memory × asserted`。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑦ 接线后摘除
 pub const EVENT_MEMORY_RECALLED: &str = "memory.recalled";
 
 // ── 承诺格子（S6 第 15 步，[roadmap/S08 §3](../../../../docs/plan/roadmap/S08-多主体与对等承诺.md)）──

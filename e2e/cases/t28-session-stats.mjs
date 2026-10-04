@@ -259,7 +259,13 @@ export default defineCase(
         );
         assertEq(afterDropFinal.tiers[0].p95, 0, '无样本 ⇒ 分位数 0');
         assertEq(afterDropFinal.tiers[0].turns, 2, '开轮格未动 ⇒ 分母不变');
-        assertEq(afterDropFinal.checkpoint.event_count, 3, '断点是事实计数');
+        // 断点列按**事实条数**计——绝对数会随记忆三段（[04 §3.1 批⑦](../../docs/plan/04-工程落地.md)
+        // 往同一份事实源追加 `memory.*`）一起涨，故按「删几条少几条」判，不钉死数字。
+        assertEq(
+          afterDropFinal.checkpoint.event_count,
+          events.length - 1,
+          `删 1 条 ⇒ 断点 1（出口 ${afterDropFinal.checkpoint.event_count} vs 事实 ${events.length}）`,
+        );
         // 同一刀必须也砍在不变量列上：轮 0 被轮 1 越过 ⇒ C4 报「未收束」，
         // 中间那行没了 ⇒ C1 报 seq 跳号。两刀一清单，证明这一列不是常数。
         assertEq(
@@ -282,7 +288,11 @@ export default defineCase(
         assertEq(afterDropOpen.tiers[0].turns, 1, '删掉一个开轮格 ⇒ 分母 2 → 1');
         assertEq(afterDropOpen.tiers[0].fallbacks, 1, '兜底格未动 ⇒ 分子不变');
         assertEq(afterDropOpen.tiers[0].rate, 1, '分母变了 ⇒ 比率必须跟着变（1/1）');
-        assertEq(afterDropOpen.checkpoint.event_count, 2);
+        assertEq(
+          afterDropOpen.checkpoint.event_count,
+          events.length - 2,
+          '两刀之后 = 事实数 − 2（断点列真的是计数）',
+        );
         // 开轮格也没了 ⇒ 没有可判的缺口：C4 必须跟着回落（否则它锚的是别的东西）。
         assert(
           !afterDropOpen.invariants.some((v) => v.why.includes('未收束')),

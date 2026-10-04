@@ -174,11 +174,16 @@ const CONTEXT_NUDGE_TEXT: &str =
 ///    ToolCall↔Tool 配对与 parent_id 传播完整保留，不会造成大模型逻辑断联）；
 /// 4. 水位提醒（nudge）：`inject_nudge` 时在视图末尾追加一条一次性系统提示——
 ///    请求级注入、不写会话存储，因此不占用轮次窗口的 User 计数，也不会在前端
-///    以用户消息的形式出现。
+///    以用户消息的形式出现；
+/// 5. 长期记忆（S5 步 12）：`recall_section` 非空时在视图**开头**插一条记忆消息
+///    （`meta.kind = recall_context`，同样不落库）。**置顶**而不是置尾：记忆是背景
+///    事实，置尾会把「最后一条 user 消息」从用户的问题换成记忆——mock 场景匹配与
+///    轮次窗口都会读错；也不进系统提示词——那里有「唯一真源 = 注册段」的纪律
+///    （`plugins/session/README.md`）。
 ///
-/// 视图每轮从存储重建，四个步骤天然幂等，不存在重复存档 / 重复注入问题。
+/// 视图每轮从存储重建，五个步骤天然幂等，不存在重复存档 / 重复注入问题。
 /// 全部压缩由此统一收敛于"发给大模型之前"（写入时压缩已废除，落库恒为原文）。
-// 8 个参数均为单一调用点（chat_loop）传入的独立语义旋钮，强行打包成
+// 9 个参数均为单一调用点（chat_loop）传入的独立语义旋钮，强行打包成
 // config struct 只会多一层间接而无行为收益，故显式豁免 clippy 参数数上限。
 #[allow(clippy::too_many_arguments)]
 pub fn build_request_view(
@@ -193,6 +198,7 @@ pub fn build_request_view(
     content_keep_recent: usize,
     line_threshold: usize,
     inject_nudge: bool,
+    recall_section: Option<&str>,
 ) -> Vec<ChatMessage> {
     let mut view = messages.to_vec();
     fade_aged_content_nodes(&mut view, content_keep_recent, line_threshold);
@@ -212,6 +218,22 @@ pub fn build_request_view(
             meta: Some(serde_json::json!({ "kind": "context_nudge" })),
             ..Default::default()
         });
+    }
+    // 5) 长期记忆置顶（S5 步 12）——见本函数文档的第 5 条：位置与理由都在那里，
+    //    这里只落机制（与 nudge 同一套形状：请求级、`meta.kind` 可观测、不落库）。
+    if let Some(section) = recall_section {
+        view.insert(
+            0,
+            ChatMessage {
+                id: uuid::Uuid::new_v4().to_string(),
+                role: Some(MessageRole::User),
+                msg_type: Some(MessageType::Text),
+                content: Some(MessageContent::Text(section.to_string())),
+                status: Some(MessageStatus::Completed),
+                meta: Some(serde_json::json!({ "kind": "recall_context" })),
+                ..Default::default()
+            },
+        );
     }
     view
 }

@@ -16,7 +16,6 @@
 
 /// 巩固参数（[plan/01 §8](../../../../docs/plan/01-核心架构.md) `projection.param` 的两个取值）。
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[allow(dead_code)] // dead-code-allow R-002: 接线未落地；04 §3.1 批⑦ 接线后摘除
 pub struct ConsolidateParams {
     /// 巩固代数上界（派生代数 ≤ max_gen，防代数发散）。
     pub max_gen: u32,
@@ -36,7 +35,6 @@ impl Default for ConsolidateParams {
 
 /// 拒收形态（01 §9.3 表的两臂）。
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)] // dead-code-allow R-002: 接线未落地；04 §3.1 批⑦ 接线后摘除
 pub enum Rejection {
     /// 代数超界：派生代数超过 `max_gen`。
     RejectedMaxGen { generation: u32, max: u32 },
@@ -47,7 +45,9 @@ pub enum Rejection {
 /// 巩固接受判定：通过 ⇒ 该 `memory.consolidated` 事件可入库（带 generation /
 /// fidelity 载荷）；否则拒收。**拒收不是错误**——巩固者换策略重试或放弃，
 /// 但失真记忆永远进不了 Log。
-#[allow(dead_code)] // dead-code-allow R-002: 接线未落地；04 §3.1 批⑦ 接线后摘除
+///
+/// 写方（`plugins/session/v2_memory.rs::consolidate`）**必须**过这道门再入格：
+/// 拒收 = 源记忆原样保留（不是降标入库，也不是写日志了事）。
 pub fn accept(params: &ConsolidateParams, generation: u32, fidelity: f64) -> Result<(), Rejection> {
     if generation > params.max_gen {
         return Err(Rejection::RejectedMaxGen {
