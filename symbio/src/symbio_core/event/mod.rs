@@ -127,7 +127,6 @@ pub const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
 /// 控制判定产出（打断处置 / 熔断）。载荷 `{ task_id?, reason, ... }`。
 /// 落在 `control × opened`。**抢占判定者只持 JudgeIntent**——无 `reply.*` 写权，
 /// 判定者不得直接发言（S07 §5）。
-#[allow(dead_code)] // dead-code-allow R-002: 事件名字表：名字是数据、单点定义（README §1.2 event 行 / ADR-043）；04 §3.1 批⑩ 接线后摘除
 pub const EVENT_CONTROL_OPENED: &str = "task.controlled";
 
 // ── 系统与「欲」格子（S9 第 21 步，[roadmap/S12 §3](../../../../docs/plan/roadmap/S12-自主层与长期目标.md)）──

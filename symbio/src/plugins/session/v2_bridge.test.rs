@@ -56,6 +56,7 @@ fn final_closure_writes_user_and_final_with_cost() {
         None,
         &[],
         &[],
+        &[],
     )
     .expect("转写成功");
 
@@ -133,6 +134,7 @@ fn retry_of_same_message_increments_attempt_and_new_message_increments_turn() {
         None,
         &[],
         &[],
+        &[],
     )
     .unwrap();
     record_to_wal(
@@ -147,6 +149,7 @@ fn retry_of_same_message_increments_attempt_and_new_message_increments_turn() {
         None,
         &[],
         &[],
+        &[],
     )
     .expect("重试转写成功（id 不撞 = 幂等键不冲突）");
     record_to_wal(
@@ -159,6 +162,7 @@ fn retry_of_same_message_increments_attempt_and_new_message_increments_turn() {
             cost_ms: 300,
         },
         None,
+        &[],
         &[],
         &[],
     )
@@ -209,6 +213,7 @@ fn reopen_recovers_events_with_seq() {
             cost_ms: 5,
         },
         None,
+        &[],
         &[],
         &[],
     )
@@ -335,6 +340,7 @@ async fn v2_mode_off_disables_recording() {
         None,
         &[],
         &[],
+        &[],
     );
     let dir = off_session.session_dir().expect("持久会话有目录");
     assert!(!dir.join("v2-events.wal").exists(), "off 档不得写 WAL");
@@ -355,6 +361,7 @@ async fn v2_mode_off_disables_recording() {
             cost_ms: 1,
         },
         None,
+        &[],
         &[],
         &[],
     );
@@ -414,6 +421,7 @@ fn record_to_wal_wires_all_three_memory_steps() {
             None,
             &[],
             &[],
+            &[],
         )
         .expect("转写成功");
     }
@@ -460,6 +468,7 @@ fn record_to_wal_wires_all_three_memory_steps() {
             cost_ms: 44,
         },
         Some(&view),
+        &[],
         &[],
         &[],
     )
@@ -509,6 +518,7 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
         },
         None,
         &delegations,
+        &[],
         &[],
     )
     .expect("转写成功");
@@ -599,6 +609,7 @@ fn breached_delegation_is_declared_to_the_counterparty() {
         None,
         &delegations,
         &[],
+        &[],
     )
     .expect("转写成功");
 
@@ -640,4 +651,85 @@ fn breached_delegation_is_declared_to_the_counterparty() {
     );
 
     std::fs::remove_dir_all(wal.parent().unwrap()).ok();
+}
+
+// ==================== 熔断入格（S8 第 20 步，04 §3.1 批⑩） ====================
+
+/// `Break` 的理由随收束落成 `control × opened`，溯源锚是本轮开口；
+/// `breaks` 为空 ⇒ 一格都不落。
+///
+/// 这是 [roadmap/S09 §6](../../../../docs/plan/roadmap/S09-外部执行与熔断.md) 的两条
+/// **相反**验收：验收 1（未授权 ⇒ 拒绝且不产生事件）与验收 2（预算耗尽 ⇒ 必须产出
+/// 熔断事件）。两条必须由**同一个出参**分别触发——有理由就落、没理由就不落；
+/// 「反正都落一条」违反 1，「反正都不落」违反 2。
+#[test]
+fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
+    // ── 有理由：落格 ────────────────────────────────────────────────────
+    let wal = tmp_wal("break");
+    record_to_wal(
+        wal.clone(),
+        crate::authz::PRINCIPAL_MAIN,
+        "u-break",
+        "让它跑一遍",
+        V2Closure::Final {
+            text: "答".into(),
+            cost_ms: 7,
+        },
+        None,
+        &[],
+        &[],
+        &["budget-exhausted"],
+    )
+    .expect("转写成功");
+
+    let snap = EventWalStore::open(&wal).expect("重开").range(Seq::new(0));
+    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+
+    let user = snap
+        .iter()
+        .find(|e| e.kind == EVENT_USER_MESSAGE)
+        .expect("用户格");
+    let user_seq = user.seq().map(|s| s.value()).expect("已入格");
+    let brk = snap
+        .iter()
+        .find(|e| e.entity == Entity::Control && e.verb == crate::symbio_core::Verb::Opened)
+        .expect("熔断必须成格（S09 §6 验收 2：不允许静默继续）");
+    assert_eq!(
+        brk.payload.get("reason").and_then(|v| v.as_str()),
+        Some("budget-exhausted"),
+        "载荷的 reason 区分打断与熔断"
+    );
+    assert_eq!(
+        brk.produced_by,
+        Some(user_seq),
+        "溯源锚 = 本轮开口（与承诺 / 任务同锚）"
+    );
+    std::fs::remove_dir_all(wal.parent().unwrap()).ok();
+
+    // ── 没理由（`Refuse` 或未触发）：一格都不落 ────────────────────────
+    let quiet = tmp_wal("break-none");
+    record_to_wal(
+        quiet.clone(),
+        crate::authz::PRINCIPAL_MAIN,
+        "u-quiet",
+        "问",
+        V2Closure::Final {
+            text: "答".into(),
+            cost_ms: 1,
+        },
+        None,
+        &[],
+        &[],
+        &[],
+    )
+    .expect("转写成功");
+    let snap = EventWalStore::open(&quiet)
+        .expect("重开")
+        .range(Seq::new(0));
+    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+    assert!(
+        !snap.iter().any(|e| e.entity == Entity::Control),
+        "没有熔断理由 ⇒ 不产生任何事件（S09 §6 验收 1）"
+    );
+    std::fs::remove_dir_all(quiet.parent().unwrap()).ok();
 }

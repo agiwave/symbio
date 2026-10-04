@@ -125,6 +125,15 @@ pub(crate) struct TurnState {
     /// （`process_tool_calls_async` 的出参），轮末收束转写入格（`v2_bridge::record`
     /// → `v2_tasks::write`），中间隔着同一段本轮收尾，所以要有个请求作用域的量存它。
     pub(crate) task_decls: Vec<crate::plugins::session::tools::TaskDeclaration>,
+    /// 本轮**外部执行闸门判熔断**的理由（[04 §3.1 批⑩](../../../../docs/plan/04-工程落地.md)，
+    /// S8 步 20，[roadmap/S09 §6](../../../../docs/plan/roadmap/S09-外部执行与熔断.md) 验收 2）。
+    ///
+    /// 形态与 [`TurnState::task_decls`] 对称：工具执行层填（`process_tool_calls_async`
+    /// 的出参），轮末收束转写入格（`v2_bridge::record` → `CircuitBreaker::break_event`）。
+    /// 只有 `Break` 进这张表——`Refuse`（未授权）按验收 1 **不得产生事件**，
+    /// 两种拒绝在事件面上必须分得开；这也是为什么它不复用 `delegations` 或
+    /// `task_decls` 的出参：那是「做了什么」，这是「**不允许做**什么」。
+    pub(crate) gate_breaks: Vec<&'static str>,
     /// **对话线上最近一次动静**的时刻（毫秒）——中途汇报的静默时钟起点。
     ///
     /// 两个来源都算一次"动静"：用户发言（轮首输入 / 轮边界折进的补充）与助手写下

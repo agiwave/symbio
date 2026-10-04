@@ -57,6 +57,13 @@ pub(crate) const PRINCIPAL_USER: &str = "user";
 /// 已是上限，再声明「内容归谁」等于给自己授权。
 pub(crate) const SESSION_OWNER: &str = PRINCIPAL_USER;
 
+/// **外部执行**能力名（`ProduceArtifact` 的书写形态）——熔断闸门的授权判据
+/// （[roadmap/S09 §6](../../docs/plan/roadmap/S09-外部执行与熔断.md) 验收 1）。
+///
+/// 提成常量而不是在闸门那里再写一遍字面量：能力名只有一个拼法，写两处迟早漂移成
+/// 「表授予 A、闸门判 B」，而这种错位**没有任何东西会变红**（两边都是合法能力名）。
+pub(crate) const CAP_EXTERNAL_EXECUTION: &str = "produce.artifact";
+
 /// 本机主体清单：`(主体, 能力名, 可见域)`。能力名的闭集与拼写由
 /// [`PermissionMatrix::from_names`] 校验（认不出即拒绝构造）。
 ///
@@ -70,7 +77,7 @@ const ROWS: &[(&str, &[&str], VisScope)] = &[(
         "reply.first",
         "reply.append",
         "define.work",
-        "produce.artifact",
+        CAP_EXTERNAL_EXECUTION,
         "assign.work",
     ],
     VisScope::ThreadPrivate,
@@ -127,7 +134,8 @@ pub(crate) fn matrix_for(principal: &str) -> Cow<'static, PermissionMatrix> {
 
 /// 本机授权矩阵（懒构造一次；构造失败 ⇒ 空矩阵 = 谁都不许，并告警）。
 ///
-/// 两道闸（写侧收束、读侧可见域）都取这一份，保证「表只有一张」。
+/// 写侧收束、读侧可见域与外部执行闸门的授权判据都取这一份，保证「表只有一张」——
+/// 各判各的就会漂移成「闸放行、表说没有」。
 pub(crate) fn production_matrix() -> &'static PermissionMatrix {
     MATRIX.get_or_init(|| {
         PermissionMatrix::from_names(ROWS).unwrap_or_else(|why| {

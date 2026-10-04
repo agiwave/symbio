@@ -280,6 +280,8 @@ pub(crate) async fn close_turn(
         &mut turn.delegations,
         // 任务表出参：`todo_write` 的清单声明随本轮收束入格（见 `TurnState::task_decls`）。
         &mut turn.task_decls,
+        // 熔断出参：闸门判 `Break` 的理由随本轮收束入格（见 `TurnState::gate_breaks`）。
+        &mut turn.gate_breaks,
     )
     .await;
     turn.in_flight_tools.clear();

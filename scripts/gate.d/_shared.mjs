@@ -486,7 +486,19 @@ export const BASELINE = {
   //      验收 = core 可见域 2 例 + 视图按主体过滤 1 例 + `note_delegation` 2 例 +
   //      桥承诺入格 2 例 + 声誉列 1 例 + `attributed` 身份补齐 1 例 + e2e `t30`
   //      （父/子两会话请求包不串主体、代际立约入格、出口读声誉）。
-  rustTests: 1266,
+  // 1270（外部执行闸门，2026-10-04）——`1266 → 1270`，**+4**。
+  //      04 §3.1 批⑩ 子批 A（S8 步 20）接线：`process_tool_calls_async` 批首读一次
+  //      判据（`BreakerInputs`：授权走 `PermissionMatrix::can_write_name` 按能力名
+  //      判 `produce.artifact`、已耗走 `cost_ledger` 台账〔ADR-044〕、本次申请 =
+  //      深度档预算、总预算 = 自主层预算），随后**每个调用点各判一次**
+  //      `CircuitBreaker::gate`；`Refuse` 零事件、`Break` 经 `TurnState.gate_breaks`
+  //      出参交 `v2_bridge::record` 落 `control × opened`（与承诺 / 任务同锚
+  //      `user_seq`）、`Allow` 照旧开窗。判据在批首读而非逐点重放：一次工具批几十
+  //      个调用点 × 全量 WAL 重放会让闸门自己变成时延源。
+  //      验收 = 判据读矩阵 1 例（非 agent 主体 fail-closed）+ 台账吃满即拒且走出参
+  //      1 例 + 放宽预算翻面 1 例（S09 §6.4 反向：预算在生效而非常量）+
+  //      桥入格与空出参静默 1 例（S09 §6 验收 1 与 2 两条相反判据）。
+  rustTests: 1270,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

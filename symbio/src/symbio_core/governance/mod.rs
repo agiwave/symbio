@@ -262,6 +262,18 @@ impl PermissionMatrix {
         self.grants_of(principal).contains(&cap)
     }
 
+    /// 写侧判定（**按能力名**）：`name` 是授权表的书写形态（[`Self::from_names`] 按
+    /// 7 项闭集校验），与构造面同一套字符串。
+    ///
+    /// 为什么查询侧也要一个按名入口：[`Capability`] 刻意不进根平铺（见模块头
+    /// 「同名辨析」），core 的模块门也不对外开 ⇒ **core 外拿不到那个枚举**，
+    /// 只能写名字。名字的对错由构造期兜住，查询侧照单全收于是不会变成
+    /// 「拼写错误被读成拒绝」的第二处判定——`from_name` 认不出即 `None`
+    /// ⇒ `false`，fail-closed 的方向与 [`Self::can_write`] 完全一致。
+    pub fn can_write_name(&self, principal: &str, name: &str) -> bool {
+        Capability::from_name(name).is_some_and(|cap| self.can_write(principal, cap))
+    }
+
     /// 写侧判定（收束闸）：主体能否**收束一轮发言**——`v2_bridge` 入格前的判据。
     ///
     /// `first` = 该轮尚无收束格：首条 → [`Capability::ReplyFirst`]，后续（重试 /

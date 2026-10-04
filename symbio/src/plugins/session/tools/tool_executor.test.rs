@@ -126,6 +126,7 @@ async fn missing_tool_call_id_is_recorded_as_failure() {
         &test_dir(),
         &mut Vec::new(),
         &mut Vec::new(),
+        &mut Vec::new(),
     )
     .await;
 
@@ -177,6 +178,7 @@ async fn empty_tool_call_id_is_recorded_as_failure() {
         &test_dir(),
         &mut Vec::new(),
         &mut Vec::new(),
+        &mut Vec::new(),
     )
     .await;
 
@@ -205,6 +207,7 @@ async fn missing_tool_name_is_recorded_as_failure() {
         test_ctx(),
         &[],
         &test_dir(),
+        &mut Vec::new(),
         &mut Vec::new(),
         &mut Vec::new(),
     )
@@ -239,6 +242,7 @@ async fn unparseable_arguments_are_refused_not_executed() {
         test_ctx(),
         &[],
         &test_dir(),
+        &mut Vec::new(),
         &mut Vec::new(),
         &mut Vec::new(),
     )
@@ -352,6 +356,7 @@ async fn aborted_batch_terminates_every_tool_call() {
         &test_dir(),
         &mut Vec::new(),
         &mut Vec::new(),
+        &mut Vec::new(),
     )
     .await;
 
@@ -430,6 +435,7 @@ async fn interactive_break_leaves_result_for_skipped_calls() {
         ctx,
         &tc_context(&["tc1", "tc2"]),
         &test_dir(),
+        &mut Vec::new(),
         &mut Vec::new(),
         &mut Vec::new(),
     )
@@ -773,4 +779,162 @@ fn note_tasks_skips_payloads_that_cannot_be_a_task_list() {
         true,
     );
     assert!(out.is_empty(), "缺 todos / 空 content ⇒ 不是一份清单");
+}
+
+// ==================== 外部执行闸门（S8 第 20 步，04 §3.1 批⑩） ====================
+
+/// 判据那一半：授权是**读矩阵**得来的（fail-closed），不是默认放行。
+///
+/// 本机部署里 `agent:*` 一律继承 `agent:main` 的 grants（含 `produce.artifact`），
+/// 所以 `Refuse` 只可能来自**不属于这一族**的主体——判据为 false 就是 false，
+/// 没有任何「认不出 ⇒ 放行」的旁路。另一侧的判据（预算）见下方端到端用例。
+#[test]
+fn external_execution_capability_is_read_from_the_matrix() {
+    assert!(
+        crate::authz::matrix_for(crate::authz::PRINCIPAL_MAIN).can_write_name(
+            crate::authz::PRINCIPAL_MAIN,
+            crate::authz::CAP_EXTERNAL_EXECUTION
+        ),
+        "agent:main 持外部执行能力（本机部署事实）"
+    );
+    assert!(
+        !crate::authz::matrix_for(crate::authz::PRINCIPAL_USER).can_write_name(
+            crate::authz::PRINCIPAL_USER,
+            crate::authz::CAP_EXTERNAL_EXECUTION
+        ),
+        "非 agent 主体不持外部执行能力 ⇒ 判据 false ⇒ Refuse（fail-closed）"
+    );
+}
+
+/// 事实源那一半：台账累计把预算吃满 ⇒ 工具**不执行**，且 `Break` 走出参。
+///
+/// 这条用例钉的是 [roadmap/S09 §6](../../../../docs/plan/roadmap/S09-外部执行与熔断.md)
+/// 验收 2 的前半句（预算耗尽必须判得出来，不允许静默继续）；后半句——
+/// 理由真的落成一条 `control × opened` 事件——在 `v2_bridge` 的用例里，
+/// 因为工具执行层没有事实源，入格要到收束那一步才发生。
+#[tokio::test]
+async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
+    let dir = std::env::temp_dir().join("symbio-test/session-tool-executor-gate");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("建会话目录");
+
+    // 台账：一条已耗超过会话累计上限的收束事件（`cost_ledger` 按 actor 归账，
+    // ADR-044：闸门读台账，不读运行时计数器）。
+    let store = EventWalStore::open(dir.join(crate::plugins::session::paths::V2_WAL_FILE))
+        .expect("打开 WAL");
+    store
+        .append(
+            crate::symbio_core::Event::pending(
+                "v2f-gate",
+                crate::symbio_core::EVENT_ASSISTANT_FINAL,
+                crate::symbio_core::Entity::Turn,
+                crate::symbio_core::Verb::Closed,
+                0,
+                crate::authz::PRINCIPAL_MAIN,
+            )
+            .with_cost_ms(LatencyTier::Autonomic.budget_ms() + 1),
+        )
+        .expect("入格");
+    drop(store);
+
+    let sink = ExecEventSink::silent();
+    let abort = ExecAbortSignal::new();
+    // 父 ToolCall 节点：参数流式阶段已广播过（生产里它就在 `context.messages`），
+    // 终态定稿要从这份权威转写取副本——不给它，`emit_parent_finalized` 会判协议违例。
+    let parent = ChatMessage {
+        id: "tc-gate".into(),
+        role: Some(MessageRole::Assistant),
+        msg_type: Some(MessageType::ToolCall),
+        status: Some(MessageStatus::Streaming),
+        name: Some("vdfs_list".into()),
+        ..Default::default()
+    };
+    let tcs = vec![TurnToolCallInfo {
+        id: Some("tc-gate".into()),
+        wire_id: None,
+        name: Some("vdfs_list".into()),
+        arguments: json!({ "path": "." }),
+        parse_error: None,
+    }];
+    let mut breaks: Vec<&'static str> = Vec::new();
+    let (msgs, updates) = process_tool_calls_async(
+        tcs,
+        &None,
+        &sink,
+        &abort,
+        test_ctx(),
+        std::slice::from_ref(&parent),
+        &dir,
+        &mut Vec::new(),
+        &mut Vec::new(),
+        &mut breaks,
+    )
+    .await;
+
+    assert_eq!(msgs.len(), 1, "被闸门拦下的调用也必须有结果子节点");
+    assert!(
+        msgs[0]
+            .content
+            .as_ref()
+            .map(|c| c.to_text().contains("Refused:"))
+            .unwrap_or(false),
+        "结果要写明是被拒的，不是照常执行后的输出"
+    );
+    assert_eq!(updates.len(), 1, "父节点必须收到终态（否则永远转下去）");
+    assert_eq!(
+        updates[0]
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("failure_kind"))
+            .and_then(|v| v.as_str()),
+        Some(failure_kind::TOOL_UNAVAILABLE),
+        "熔断不是「等待用户」，是让模型改走别的路"
+    );
+    assert_eq!(
+        breaks,
+        vec!["budget-exhausted"],
+        "Break 必须经出参交回调用方——它没有这一格就是静默继续（S09 §6 验收 2）"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// 预算在生效而非常量（S09 §6.4 的反向用例在生产判据上的形状）：
+/// 同一份事实源，预算放得比已耗宽 ⇒ 同一次判定翻成放行、出参为空。
+#[tokio::test]
+async fn relaxing_the_budget_turns_the_same_facts_into_a_pass() {
+    let dir = std::env::temp_dir().join("symbio-test/session-tool-executor-gate-open");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("建会话目录");
+
+    let inputs = BreakerInputs::of(&dir, &test_ctx());
+    assert_eq!(inputs.spent_ms, 0, "没有事实源 ⇒ 零账，不是故障");
+    assert!(inputs.authorized, "agent:main 持外部执行能力");
+
+    // 预算收紧到「已耗 + 申请」之下 ⇒ 熔断；放宽到之上 ⇒ 放行。
+    assert_eq!(
+        crate::symbio_core::CircuitBreaker.gate(
+            inputs.authorized,
+            inputs.spent_ms,
+            inputs.requested_ms,
+            inputs.spent_ms + inputs.requested_ms - 1,
+            0
+        ),
+        crate::symbio_core::GateDecision::Break {
+            reason: "budget-exhausted"
+        },
+        "预算真的在参与判定（常量判定拿不出这一对相反的结论）"
+    );
+    assert_eq!(
+        crate::symbio_core::CircuitBreaker.gate(
+            inputs.authorized,
+            inputs.spent_ms,
+            inputs.requested_ms,
+            inputs.spent_ms + inputs.requested_ms + 1,
+            0
+        ),
+        crate::symbio_core::GateDecision::Allow
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
 }

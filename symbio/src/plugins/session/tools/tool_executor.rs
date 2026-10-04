@@ -16,7 +16,8 @@ use crate::symbio_core::{llm_emit_message, llm_short_id, TurnToolCallInfo};
 
 use crate::symbio_core::{
     chat_message::{ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType},
-    HookEvent, HookOutput, PluginInvokeRequestExt,
+    failure_kind, Budget, EventWalStore, HookEvent, HookOutput, LatencyTier,
+    PluginInvokeRequestExt, Seq, Store,
 };
 use crate::symbio_core::{
     ExecAbortSignal, ExecEventSink, Plugin, PluginError, PluginInvokeRequest, PluginPayload,
@@ -895,6 +896,73 @@ pub fn note_tasks(out: &mut Vec<TaskDeclaration>, name: &str, args: &Value, succ
     out.push(TaskDeclaration { items });
 }
 
+/// 熔断闸门的**判据**（S8 第 20 步，[roadmap/S09 §6](../../../../docs/plan/roadmap/S09-外部执行与熔断.md)）。
+///
+/// 判据在**批首**读一次，随后每个调用点只做一次纯判定：授权表与成本台账都是
+/// 只读的，闸门不该为了拿到自己的判据就把整个事实源重放进工具循环
+/// （一次工具批里几十个调用点 × 全量 WAL 重放 = 闸门自己变成时延源）。
+///
+/// 三个毫秒数的口径（ADR-044：实测与判据同源，**读台账不读运行时计数器**）：
+///
+/// | 形参 | 取值 | 为什么是它 |
+/// |---|---|---|
+/// | `authorized` | 授权矩阵按能力名判 `produce.artifact` | 未持外部执行能力 ⇒ `Refuse`（**零事件**，验收 1） |
+/// | `spent_ms` | `cost_ledger` 按主体累计 | 「已耗多少」的唯一真源，与 `session/stats` 的成本列同一份切片 |
+/// | `requested_ms` | 深度档预算 | 工具循环所在档，本轮**申请**这么多 |
+/// | `budget_ms` | 自主层预算 | 会话累计成本**总预算**——四层时延的第四个取值复用为天花板 |
+///
+/// `budget_ms` 是**初值**不是定值：[04 §1](../../../../docs/plan/04-工程落地.md)
+/// 写明「所有百分比与毫秒数是初值，必须在阶段一埋点后校准」。它长什么样由
+/// 判据表回答，不由调用点回答——所以三个数都收在本结构里，测试可以**只换预算**
+/// 就看见判定翻面（S09 §6.4 反向用例：预算在生效而非常量）。
+struct BreakerInputs {
+    /// 主体是否持外部执行能力（读路径判定）。
+    authorized: bool,
+    /// 已耗（会话累计，`cost_ledger` 台账）。
+    spent_ms: u64,
+    /// 本次申请（工具循环所在档的额度）。
+    requested_ms: u64,
+    /// 总预算（会话累计成本天花板）。
+    budget_ms: u64,
+}
+
+impl BreakerInputs {
+    /// 批首读一次判据：授权走矩阵（fail-closed），已耗走台账（ADR-044）。
+    ///
+    /// 台账读不到 / 还没有事实源 ⇒ **零账**，不是故障——「还没记过账」不等于
+    /// 「不许执行」，闸门因为没有账就把工具全拦下才是静默失效。
+    fn of(session_dir: &std::path::Path, ctx: &Arc<dyn PluginInvokeRequest>) -> Self {
+        let principal =
+            crate::authz::principal_of(ctx.get(crate::symbio_core::AGENT_ID).as_deref());
+        let authorized = crate::authz::matrix_for(&principal)
+            .can_write_name(&principal, crate::authz::CAP_EXTERNAL_EXECUTION);
+        Self {
+            authorized,
+            spent_ms: session_cost_ms(session_dir, &principal),
+            requested_ms: LatencyTier::Deep.budget_ms(),
+            budget_ms: LatencyTier::Autonomic.budget_ms(),
+        }
+    }
+}
+
+/// 会话累计已耗（毫秒）：`cost_ledger` 台账按主体取数。
+///
+/// 与 `session/stats` 的成本列**同一切片同一投影**——两处各算一遍必然漂移成
+/// 「闸门说还有余量、出口说已耗尽」，而错的若是台账，熔断就形同虚设（ADR-044）。
+fn session_cost_ms(session_dir: &std::path::Path, principal: &str) -> u64 {
+    let path = session_dir.join(super::super::paths::V2_WAL_FILE);
+    // 只读打开：读方不创建文件、不截尾（`wal.rs::open_readonly`）。
+    let Ok(store) = EventWalStore::open_readonly(&path) else {
+        return 0;
+    };
+    let snapshot = store.range(Seq::new(0));
+    crate::symbio_core::cost_ledger()
+        .apply(&snapshot, i64::MAX, Budget::generous())
+        .value
+        .of(principal)
+        .spent_ms
+}
+
 /// 顺序处理一批工具调用，向 channel 广播每个工具的结果，
 /// 并返回 `(tool_messages, parent_updates)`：
 /// - `tool_messages`：工具结果子节点（用于追加到对话历史）
@@ -913,9 +981,13 @@ pub fn note_tasks(out: &mut Vec<TaskDeclaration>, name: &str, args: &Value, succ
 ///    漏掉任何一条，前端就会有一个永远转下去的「运行中」。
 /// 2. **每一个工具调用都必须有结果子节点**（`tool_messages` 里一条 role=Tool）——
 ///    「结果」在树里是子节点，前端按它渲染响应段。任何一条 return 分支
-///    （参数解析失败 / 未执行 / 中止 / 被钩子拦下）都必须在给出父节点终态的同时
-///    给出结果：只有父状态没有结果，用户看到的就是「调用凭空消失、会话照旧往下走」。
-///    见 [`not_executed_result`]。
+///    （参数解析失败 / 未执行 / 中止 / 被钩子拦下 / 闸门拒绝）都必须在给出父节点
+///    终态的同时给出结果：只有父状态没有结果，用户看到的就是「调用凭空消失、
+///    会话照旧往下走」。见 [`not_executed_result`]。
+///
+/// 3. **外部执行闸门在每个调用点各判一次**（S8 第 20 步）：判据批首读一次
+///    （[`BreakerInputs`]），结论按调用点出——`Refuse` 零事件、`Break` 走出参
+///    随收束入格、`Allow` 照旧开窗。
 #[allow(clippy::too_many_arguments)]
 pub async fn process_tool_calls_async(
     tool_calls: Vec<TurnToolCallInfo>,
@@ -934,6 +1006,10 @@ pub async fn process_tool_calls_async(
     // 任务表出参（批⑨）：本次成功的 `todo_write` 声明的清单状态，同一条口径
     // 交回调用方随收束入格。理由同上——不进返回值。
     tasks: &mut Vec<TaskDeclaration>,
+    // 熔断出参（批⑩ 步 20）：外部执行闸门判 `Break` 的**理由**，同一条口径交回
+    // 调用方随收束入格。**只记 `Break`**——`Refuse`（未授权）按 S09 §6 验收 1
+    // 不得产生任何事件，两种拒绝在事件面上必须分得开。
+    breaks: &mut Vec<&'static str>,
 ) -> (Vec<ChatMessage>, Vec<ChatMessage>) {
     let mut tool_messages = Vec::new();
     // 父 ToolCall 终态——**完整消息**（发射端从权威转写取副本应用终态）。
@@ -951,6 +1027,10 @@ pub async fn process_tool_calls_async(
         tool_calls.len(),
         mode
     );
+
+    // 熔断闸门的判据批首读一次（见 `BreakerInputs`）：授权表与成本台账都是只读的，
+    // 读一次给整批复用——每个调用点各重放一次事实源，闸门自己就变成时延源了。
+    let breaker = BreakerInputs::of(session_dir, &ctx);
 
     // 本批留底 `(id, name, args)`：循环按值消费 `tool_calls`，而「哪些没被执行」
     // 要在循环**之后**才知道（break 出口）——末尾收口既要补节点，也要把
@@ -1083,6 +1163,77 @@ pub async fn process_tool_calls_async(
         }
 
         let result_msg_id = uuid::Uuid::new_v4().to_string();
+
+        // ── 外部执行闸门（S8 第 20 步，[roadmap/S09 §6](../../../../docs/plan/roadmap/S09-外部执行与熔断.md)）──
+        //
+        // 判定紧贴执行窗口之前、**先于 PreToolUse 钩子**：钩子是给「要执行的调用」
+        // 准备的用户策略，对一通马上要被拒的调用先跑一遍钩子，等于让拒绝白白付一次
+        // 钩子往返（还可能触发钩子自己的副作用）。
+        //
+        // 三种结论的出口判据**不对称**，这是 S09 §6 的核心：
+        // - `Refuse`（未授权）→ 拒绝且**不产生任何事件**（验收 1）；
+        // - `Break`（预算耗尽 / 判定超时）→ 必须落一格 `task.controlled`（验收 2：
+        //   不允许静默继续）。本层写不了事实源——锚是本轮 `user.message`，它要到
+        //   收束才落格 ⇒ 经出参交回调用方随收束入格（与承诺 / 任务表同一条口径）；
+        // - `Allow` → 照旧开窗执行。
+        let gate_started = std::time::Instant::now();
+        let decision = crate::symbio_core::CircuitBreaker.gate(
+            breaker.authorized,
+            breaker.spent_ms,
+            breaker.requested_ms,
+            breaker.budget_ms,
+            gate_started.elapsed().as_millis() as u64,
+        );
+        // `(标签, 拒绝理由, failure_kind, 是否熔断)`；`None` = 放行。
+        let gate_refusal: Option<(&'static str, String, &'static str, bool)> = match decision {
+            crate::symbio_core::GateDecision::Break { reason } => {
+                // 按理由去重：事件号是 `cb-{溯源锚}`，同一轮熔断两次会拿到同一个号，
+                // 第二条撞幂等键被丢——那条静默失效正是验收 2 要禁的。
+                if !breaks.contains(&reason) {
+                    breaks.push(reason);
+                }
+                Some((
+                    "熔断",
+                    format!("外部执行闸门熔断（{reason}），本轮工具调用未执行"),
+                    failure_kind::TOOL_UNAVAILABLE,
+                    true,
+                ))
+            }
+            crate::symbio_core::GateDecision::Refuse => Some((
+                "未授权",
+                "未持外部执行能力（produce.artifact），本次调用未执行".to_string(),
+                failure_kind::PERMISSION_DENIED,
+                false,
+            )),
+            crate::symbio_core::GateDecision::Allow => None,
+        };
+        if let Some((label, reason, kind, _is_break)) = gate_refusal {
+            plugin_warn!("session", "[Tool] {label}：{id} / {name}——{reason}");
+            let tool_msg = llm_build_tool_message(
+                &id,
+                &format!("Refused: {reason}"),
+                Some(false),
+                Some(result_msg_id.clone()),
+            );
+            tool_messages.push(tool_msg);
+            // 拒掉的调用同样必须收敛父节点：只推结果子节点，父节点就永远停在
+            // 「运行中」（那条兜底 `finalize_assistant_turn` 已移除）。
+            if let Some(parent_update) = emit_parent_finalized(
+                sink,
+                context_messages,
+                &id,
+                MessageStatus::Completed,
+                json!({ "success": false, "failure_kind": kind }),
+                None,
+            )
+            .await
+            {
+                parent_updates.push(parent_update);
+            }
+            // 没跑 = 没履约（`agent_run` 的承诺记账见 `note_delegation`）。
+            note_delegation(delegations, &id, &name, &tc.arguments, false, &reason);
+            continue;
+        }
 
         let pre_output = fire_hook(
             parent,

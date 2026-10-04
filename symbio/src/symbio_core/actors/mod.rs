@@ -428,7 +428,6 @@ impl PreemptionDecider {
 
 /// 闸门结论（S8 第 20 步，[roadmap/S09 §6](../../../../docs/plan/roadmap/S09-外部执行与熔断.md)）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑩ 接线后摘除
 pub enum GateDecision {
     /// 未授权——调用方**不得产生任何事件**（验收 1：拒绝且无事件）。
     Refuse,
@@ -443,7 +442,6 @@ pub enum GateDecision {
 ///
 /// `budget_ms = 80` 的反射档判定：超预算 / 超时**熔断**而不是"先做了再说"。
 /// 授权判定留在调用方（读路径持矩阵）——本体的输入是判据数据，不是 ⑥ 的句柄。
-#[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑩ 接线后摘除
 pub struct CircuitBreaker;
 
 impl CircuitBreaker {
@@ -453,7 +451,6 @@ impl CircuitBreaker {
     /// - `spent_ms` / `requested_ms` / `budget_ms`：已耗 / 本次申请 / 总预算；
     /// - `elapsed_ms`：闸门自身耗时——超反射档预算也熔断（**有事件**的超时，
     ///   不是静默失效；I3）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑩ 接线后摘除
     pub fn gate(
         &self,
         authorized: bool,
@@ -479,7 +476,6 @@ impl CircuitBreaker {
     }
 
     /// 熔断事件（复用 `control/opened` 格，载荷 `reason` 区分打断与熔断）。
-    #[allow(dead_code)] // dead-code-allow R-002: 冻结契约名先于接线（plan/01 §4 / README §1.2 actors 行）；04 §3.1 批⑩ 接线后摘除
     pub fn break_event(&self, reason: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("cb-{source_seq}"),

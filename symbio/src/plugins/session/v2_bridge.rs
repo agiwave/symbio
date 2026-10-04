@@ -48,8 +48,9 @@ pub(crate) enum V2Closure {
 ///
 /// `delegations` / `tasks` 同一形态：工具执行层的出参（批⑧ 的承诺 / 批⑨ 的任务表），
 /// 一路带到这里入格——工具执行层没有事实源，谁负责入格谁负责开这扇门。
-// 8 个参数：收束转写的全部输入各自独立（轮次上下文 / 档位 / 记忆 / 承诺 / 任务表各一条
-// 出路），打包成 struct 只多一层间接；单一调用点（chat_loop）传入，显式豁免参数数上限。
+// 9 个参数：收束转写的全部输入各自独立（轮次上下文 / 档位 / 记忆 / 承诺 / 任务表 /
+// 熔断各一条出路），打包成 struct 只多一层间接；单一调用点（chat_loop）传入，
+// 显式豁免参数数上限。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn record(
     session: &PersistentChatSession,
@@ -60,6 +61,7 @@ pub(crate) fn record(
     recalled: Option<&crate::symbio_core::RecallView>,
     delegations: &[super::tools::Delegation],
     tasks: &[super::tools::TaskDeclaration],
+    breaks: &[&'static str],
 ) {
     // 总开关（`v2_mode`，ADR-045 过渡期的切换档位）：`off` 档网格零增长
     // （用户关的是数据源，不是对话）。`bridge` 档：v1 轮次全部经此转写；
@@ -81,6 +83,7 @@ pub(crate) fn record(
         recalled,
         delegations,
         tasks,
+        breaks,
     );
     if let Err(why) = result {
         crate::plugin_warn!(
@@ -92,7 +95,7 @@ pub(crate) fn record(
     }
 }
 
-// 9 个参数：见 `record` 的同类豁免（本函数是它的落格体，形状随行）。
+// 10 个参数：见 `record` 的同类豁免（本函数是它的落格体，形状随行）。
 #[allow(clippy::too_many_arguments)]
 fn record_to_wal(
     wal: PathBuf,
@@ -103,6 +106,7 @@ fn record_to_wal(
     recalled: Option<&crate::symbio_core::RecallView>,
     delegations: &[super::tools::Delegation],
     tasks: &[super::tools::TaskDeclaration],
+    breaks: &[&'static str],
 ) -> Result<(), String> {
     let store = EventWalStore::open(&wal).map_err(|e| format!("打开 WAL 失败：{e}"))?;
     let snapshot = store.range(Seq::new(0));
@@ -204,6 +208,29 @@ fn record_to_wal(
         &format!("v2t-{user_id}-a{attempt}"),
     ) {
         crate::plugin_warn!("session", "[task] 清单入格失败（{}）：{why}", wal.display());
+    }
+
+    // ── 熔断（S8 第 20 步，04 §3.1 批⑩）────────────────────────────────────
+    // 本轮被外部执行闸门拦下的事实随收束入格，与承诺 / 任务**同锚**（`user_seq`）：
+    // 熔断说的是「这一轮不允许做」，出处同样是这一轮的开口。写方住 core 的
+    // `CircuitBreaker`，此处只负责把门推开——失败**只记日志不冒泡**（熔断格是
+    // 本轮的附加事实，与任务格 / 记忆三段同一条口径）。
+    //
+    // 一轮只落**一格**：事件号按溯源锚定（`cb-{user_seq}`），两条就是同一个幂等键，
+    // 第二条会被存储丢掉——那正是验收 2 要禁的「静默继续」，所以宁可在写**之前**
+    // 就只取第一条，而不是靠撞键兜底。逐工具的拒绝理由不在这里：它们已经在每条
+    // 工具结果节点上（`Refused: …`），模型与用户都看得见；这里记的是**本轮被
+    // 闸门拦过**这件事本身。
+    if let Some(&reason) = breaks.first() {
+        if let Err(e) =
+            store.append(crate::symbio_core::CircuitBreaker.break_event(reason, user_seq))
+        {
+            crate::plugin_warn!(
+                "session",
+                "[v2-bridge] 熔断事件入格失败（{}）：{e:?}",
+                wal.display()
+            );
+        }
     }
 
     store

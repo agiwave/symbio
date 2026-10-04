@@ -140,6 +140,10 @@ impl DispatchPort for SessionDispatchPort {
             // 任务表出参（批⑨）：同上——任务格的写方 `v2_tasks` 挂在收束转写上，
             // full 档不经 `v2_bridge::record`，故本批不入格（full 随 full 启用）。
             &mut Vec::new(),
+            // 熔断出参（批⑩ 步 20）：同上——熔断格 `task.controlled` 的写方挂在
+            // `v2_bridge::record` 上，full 档不经收束转写 ⇒ 本批不入格。**闸门本身
+            // 照判**（判据批首读、每个调用点各出结论）：拒的是执行，不是事件。
+            &mut Vec::new(),
         )
         .await;
 

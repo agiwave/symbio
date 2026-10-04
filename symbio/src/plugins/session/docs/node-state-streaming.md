@@ -374,6 +374,7 @@ ToolCall 标 `Completed`**，前端在执行窗口内就没有任何「运行中
 | 正常分发 | `tool_executor::process_tool_calls_async` |
 | 恢复执行（approve / retry / supply） | `resume::process_tool_resume_action` |
 | 被 PreToolUse 拦下 / 用户中止 / 交互中断 | `process_tool_calls_async` 末尾统一收口：父节点 `Completed` + `meta.failure_kind = "not_executed"`，并由 `not_executed_result` 补一条结果子节点（**成对**，缺一就是「有请求无响应」） |
+| 外部执行闸门拒绝（[plan/04](../../../../../docs/plan/04-工程落地.md) S8 步 20） | `process_tool_calls_async` 内**就地收场**：父节点 `Completed`，`meta.failure_kind = "permission_denied"`（`Refuse`，未授权）或 `"tool_unavailable"`（`Break`，熔断），结果子节点文本 `Refused: …`。判据在钩子**之前**读、结论在钩子**之前**出——被拒的调用不跑 `PreToolUse`，`Refuse` 连一条事件都不产生（[roadmap/S09 §6](../../../../../docs/plan/roadmap/S09-外部执行与熔断.md)） |
 
 **"本批每一个 ToolCall 都必须以终态收场"** 由 `process_tool_calls_async` 负责保证：
 调用前广播 `Streaming`，调用后广播终态，未执行的批尾在函数末尾一次性收口。

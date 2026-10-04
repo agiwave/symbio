@@ -738,6 +738,7 @@ async fn finish_turn(
                         turn.recall_view.as_ref(),
                         &turn.delegations,
                         &turn.task_decls,
+                        &turn.gate_breaks,
                     );
                 }
             }
@@ -755,6 +756,7 @@ async fn finish_turn(
                         turn.recall_view.as_ref(),
                         &turn.delegations,
                         &turn.task_decls,
+                        &turn.gate_breaks,
                     );
                 }
             }
