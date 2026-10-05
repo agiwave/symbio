@@ -78,7 +78,17 @@ const CODE_ROOTS = ['symbio/src', 'cli/src', 'tauri/src', 'tauri/src-tauri/src']
  */
 const WAIVERS = process.env.CORE_EXPORT_WAIVERS
   ? JSON.parse(process.env.CORE_EXPORT_WAIVERS)
-  : {}
+  : {
+      // 治理矩阵与可见域参数（04 §3.1 批⑥ 接线）。core 外唯一消费方是 `plugins/session`
+      // 的两道闸，但它们**不能**下沉：core 内 `authz` / `governance` 自己也在用（core 不
+      // 依赖插件），而插件又够不着 `governance` 域目录的深引（C-002）⇒ 必须留根出口。
+      // 属 README §4 四问的「接缝」而非「单消费方该下沉」的情形（`authz` 迁入 core 后
+      // 它们掉了原本由 `crate::authz` 充当的第 2 个消费方，见 `symbio_core/mod.rs` 注）。
+      PermissionMatrix:
+        '插件-facing 治理契约类型：E-009/C-002 禁止插件深引 core 域目录，必须留根出口；core 内 authz 与 governance 亦用，无法下沉到唯一消费方',
+      VisScope:
+        '同上：读侧可见域参数类型，插件经 session/stats 读闸传入，core 内 authz 亦用，无法下沉',
+    }
 
 /**
  * 棘轮基线：0 消费方 / 单消费方的存量上限（自引用不计）。
@@ -86,14 +96,16 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
  *
  * `0` 是规则 2 首批整改的结果：140 个「名字没跨出 core」的符号已从根出口收窄
  * （定义留在原域 `pub`，core 内走域内路径），只被测试/无人使用的存量另由
- * `dead-code-audit` R-002 逐项承认。`63` 是宏展开消费计入口径后的单消费方存量。
+ * `dead-code-audit` R-002 逐项承认。`61` 是宏展开消费计入口径后的单消费方存量——
+ * 授权表迁入 core（`authz` 不再充当第 2 个消费方）后从 62 降为 61，掉出的
+ * `PermissionMatrix` / `VisScope` 两个走 `WAIVERS`（见上）。
  */
 const BASELINE = process.env.CORE_EXPORT_BASELINE
   ? (() => {
       const [zero, one] = process.env.CORE_EXPORT_BASELINE.split(':').map((n) => Number(n))
       return { zero, one }
     })()
-  : { zero: 0, one: 62 }
+  : { zero: 0, one: 61 }
 
 const errors = []
 const report = (rule, msg, loc = '') => errors.push({ rule, msg, loc })

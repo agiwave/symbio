@@ -113,8 +113,9 @@ fn thread_private_yields_zero_out_of_bounds_reads() {
 
 /// `from_names`（授权表构造面）：能力**名** → 枚举的闭集翻译，成功时照样过成对性。
 ///
-/// 授权表住在宿主（`crate::authz`），core 只提供这张翻译——所以本测钉的是 core 的
-/// 那半边：名字认得出 ⇒ grants 与可见域都落位（`paired` 仍被调用，成对性不绕过）。
+/// 授权表（`crate::symbio_core::authz`）与本域同住一棵模块树，但**表与翻译仍是两半**
+/// ——所以本测钉的是翻译那半边：名字认得出 ⇒ grants 与可见域都落位（`paired` 仍被
+/// 调用，成对性不绕过）。
 #[test]
 fn from_names_translates_a_name_table_into_a_paired_matrix() {
     let matrix = PermissionMatrix::from_names(&[(
@@ -136,7 +137,7 @@ fn from_names_translates_a_name_table_into_a_paired_matrix() {
 ///
 /// 不能「跳过那一行 / 当作没这个能力」——那会把授权表里的笔误变成一条**悄悄生效的
 /// 拒绝**（生产上线后才发现某项能力从未生效），与 fail-closed 是两回事：这里拒绝的是
-/// 「表本身不合法」，于是宿主降级空矩阵 + 告警（`crate::authz::production_matrix`）。
+/// 「表本身不合法」，于是宿主降级空矩阵 + 告警（`crate::symbio_core::authz::production_matrix`）。
 #[test]
 fn a_name_outside_the_closed_set_refuses_construction() {
     let err =

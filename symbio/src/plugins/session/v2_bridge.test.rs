@@ -46,7 +46,7 @@ fn final_closure_writes_user_and_final_with_cost() {
     let wal = tmp_wal("final");
     record_to_wal(
         wal.clone(),
-        crate::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
         "u-1",
         "你好",
         V2Closure::Final {
@@ -126,7 +126,7 @@ fn retry_of_same_message_increments_attempt_and_new_message_increments_turn() {
     let wal = tmp_wal("retry");
     record_to_wal(
         wal.clone(),
-        crate::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
         "u-1",
         "问",
         V2Closure::Fallback {
@@ -143,7 +143,7 @@ fn retry_of_same_message_increments_attempt_and_new_message_increments_turn() {
     .unwrap();
     record_to_wal(
         wal.clone(),
-        crate::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
         "u-1",
         "问",
         V2Closure::Final {
@@ -160,7 +160,7 @@ fn retry_of_same_message_increments_attempt_and_new_message_increments_turn() {
     .expect("重试转写成功（id 不撞 = 幂等键不冲突）");
     record_to_wal(
         wal.clone(),
-        crate::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
         "u-2",
         "问2",
         V2Closure::Final {
@@ -213,7 +213,7 @@ fn reopen_recovers_events_with_seq() {
     let wal = tmp_wal("reopen");
     record_to_wal(
         wal.clone(),
-        crate::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
         "u-1",
         "问",
         V2Closure::Final {
@@ -340,7 +340,7 @@ async fn v2_mode_off_disables_recording() {
     );
     record(
         &off_session,
-        crate::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
         "u-1",
         "问",
         V2Closure::Final {
@@ -364,7 +364,7 @@ async fn v2_mode_off_disables_recording() {
     );
     record(
         &on_session,
-        crate::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
         "u-1",
         "问",
         V2Closure::Final {
@@ -386,9 +386,9 @@ async fn v2_mode_off_disables_recording() {
 #[test]
 fn a_closure_without_the_grant_is_refused() {
     // 本机授权表：主智能体两种位置都放行（否则生产对话第一步就断）。
-    let live = crate::authz::production_matrix();
-    authorize_close(live, crate::authz::PRINCIPAL_MAIN, true).expect("首响放行");
-    authorize_close(live, crate::authz::PRINCIPAL_MAIN, false).expect("追加放行");
+    let live = crate::symbio_core::authz::production_matrix();
+    authorize_close(live, crate::symbio_core::authz::PRINCIPAL_MAIN, true).expect("首响放行");
+    authorize_close(live, crate::symbio_core::authz::PRINCIPAL_MAIN, false).expect("追加放行");
     assert!(
         authorize_close(live, "agent:ghost", true).is_err(),
         "矩阵外主体 fail-closed"
@@ -396,20 +396,28 @@ fn a_closure_without_the_grant_is_refused() {
 
     // 只配追加能力的表 ⇒ 首条被拒、追加放行：判的是能力，不是恒真。
     let append_only = PermissionMatrix::from_names(&[(
-        crate::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
         &["reply.append"],
         VisScope::ThreadPrivate,
     )])
     .expect("表合法");
-    let why = authorize_close(&append_only, crate::authz::PRINCIPAL_MAIN, true)
-        .expect_err("缺 reply.first ⇒ 不入格");
+    let why = authorize_close(
+        &append_only,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        true,
+    )
+    .expect_err("缺 reply.first ⇒ 不入格");
     assert!(why.contains("reply.first"), "{why}");
-    authorize_close(&append_only, crate::authz::PRINCIPAL_MAIN, false)
-        .expect("持有 reply.append ⇒ 放行");
+    authorize_close(
+        &append_only,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        false,
+    )
+    .expect("持有 reply.append ⇒ 放行");
 
     // 构造失败时的 fail-closed 兜底（空表）：谁都不许。
     let deny_all = PermissionMatrix::from_names(&[]).expect("空表合法");
-    assert!(authorize_close(&deny_all, crate::authz::PRINCIPAL_MAIN, true).is_err());
+    assert!(authorize_close(&deny_all, crate::symbio_core::authz::PRINCIPAL_MAIN, true).is_err());
 }
 
 /// 三段在桥里真的接上了（[04 §3.1 批⑦](../../../../docs/plan/04-工程落地.md) 的接入
@@ -423,7 +431,7 @@ fn record_to_wal_wires_all_three_memory_steps() {
     for i in 0..4u64 {
         record_to_wal(
             wal.clone(),
-            crate::authz::PRINCIPAL_MAIN,
+            crate::symbio_core::authz::PRINCIPAL_MAIN,
             &format!("u-{i}"),
             &format!("第 {i} 条约定"),
             V2Closure::Final {
@@ -466,7 +474,7 @@ fn record_to_wal_wires_all_three_memory_steps() {
     );
 
     // 步 12：视图在收束前读出，收束时才落成事实（溯源锚那时才存在）。
-    let view = recall(crate::authz::PRINCIPAL_USER, None)
+    let view = recall(crate::symbio_core::authz::PRINCIPAL_USER, None)
         .apply(&snap, i64::MAX, Budget::generous())
         .value;
     assert!(!view.entries.is_empty(), "还有活记忆可召回");
@@ -474,7 +482,7 @@ fn record_to_wal_wires_all_three_memory_steps() {
 
     record_to_wal(
         wal.clone(),
-        crate::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
         "u-4",
         "第五句",
         V2Closure::Final {
@@ -525,7 +533,7 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
     }];
     record_to_wal(
         wal.clone(),
-        crate::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
         "u-9",
         "交给子智能体",
         V2Closure::Final {
@@ -577,12 +585,12 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
     );
     assert_eq!(
         opened.payload.get("from").and_then(|v| v.as_str()),
-        Some(crate::authz::PRINCIPAL_MAIN),
+        Some(crate::symbio_core::authz::PRINCIPAL_MAIN),
         "承诺方 = 会话主体（声誉记在承诺方头上）"
     );
     assert_eq!(
         opened.payload.get("to").and_then(|v| v.as_str()),
-        Some(crate::authz::PRINCIPAL_USER),
+        Some(crate::symbio_core::authz::PRINCIPAL_USER),
         "承诺对象 = 会话外的另一方"
     );
     assert_eq!(
@@ -617,7 +625,7 @@ fn breached_delegation_is_declared_to_the_counterparty() {
     }];
     record_to_wal(
         wal.clone(),
-        crate::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
         "u-10",
         "交给子智能体",
         V2Closure::Final {
@@ -657,7 +665,8 @@ fn breached_delegation_is_declared_to_the_counterparty() {
         .and_then(|v| v.as_str())
         .expect("宣告载荷带原话");
     assert!(
-        statement.contains(crate::authz::PRINCIPAL_USER) && statement.contains("子会话中途失败"),
+        statement.contains(crate::symbio_core::authz::PRINCIPAL_USER)
+            && statement.contains("子会话中途失败"),
         "宣告 = 把这次违约告知承诺对象：{statement}"
     );
     let user = snap
@@ -688,7 +697,7 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
     let wal = tmp_wal("break");
     record_to_wal(
         wal.clone(),
-        crate::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
         "u-break",
         "让它跑一遍",
         V2Closure::Final {
@@ -732,7 +741,7 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
     let quiet = tmp_wal("break-none");
     record_to_wal(
         quiet.clone(),
-        crate::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
         "u-quiet",
         "问",
         V2Closure::Final {

@@ -791,17 +791,19 @@ fn note_tasks_skips_payloads_that_cannot_be_a_task_list() {
 #[test]
 fn external_execution_capability_is_read_from_the_matrix() {
     assert!(
-        crate::authz::matrix_for(crate::authz::PRINCIPAL_MAIN).can_write_name(
-            crate::authz::PRINCIPAL_MAIN,
-            crate::authz::CAP_EXTERNAL_EXECUTION
-        ),
+        crate::symbio_core::authz::matrix_for(crate::symbio_core::authz::PRINCIPAL_MAIN)
+            .can_write_name(
+                crate::symbio_core::authz::PRINCIPAL_MAIN,
+                crate::symbio_core::authz::CAP_EXTERNAL_EXECUTION
+            ),
         "agent:main 持外部执行能力（本机部署事实）"
     );
     assert!(
-        !crate::authz::matrix_for(crate::authz::PRINCIPAL_USER).can_write_name(
-            crate::authz::PRINCIPAL_USER,
-            crate::authz::CAP_EXTERNAL_EXECUTION
-        ),
+        !crate::symbio_core::authz::matrix_for(crate::symbio_core::authz::PRINCIPAL_USER)
+            .can_write_name(
+                crate::symbio_core::authz::PRINCIPAL_USER,
+                crate::symbio_core::authz::CAP_EXTERNAL_EXECUTION
+            ),
         "非 agent 主体不持外部执行能力 ⇒ 判据 false ⇒ Refuse（fail-closed）"
     );
 }
@@ -830,7 +832,7 @@ async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
                 crate::symbio_core::Entity::Turn,
                 crate::symbio_core::Verb::Closed,
                 0,
-                crate::authz::PRINCIPAL_MAIN,
+                crate::symbio_core::authz::PRINCIPAL_MAIN,
             )
             .with_cost_ms(LatencyTier::Autonomic.budget_ms() + 1),
         )

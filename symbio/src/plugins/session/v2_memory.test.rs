@@ -13,7 +13,7 @@ use super::{
     split_sentences, CONSOLIDATE_MIN_ENTRIES, ENCODE_MAX_CHARS, MEMORY_TAG, MERGE_MAX_CHARS,
     RECALL_SECTION_HEAD,
 };
-use crate::authz::PRINCIPAL_USER;
+use crate::symbio_core::authz::PRINCIPAL_USER;
 use crate::symbio_core::{
     check_all, recall, Budget, Entity, Event, EventEnvelope as _, EventWalStore, Seq, Store, Verb,
     EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
@@ -496,7 +496,14 @@ fn record_recalled_anchors_the_retrieval_and_is_idempotent() {
         .value;
     assert_eq!(view.entries.len(), 1);
 
-    record_recalled(&store, &view, trigger, crate::authz::PRINCIPAL_MAIN, 9000).expect("入格");
+    record_recalled(
+        &store,
+        &view,
+        trigger,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        9000,
+    )
+    .expect("入格");
     let snap = store.range(Seq::new(0));
     let ev = snap
         .iter()
@@ -508,7 +515,7 @@ fn record_recalled_anchors_the_retrieval_and_is_idempotent() {
     assert_eq!(ev.actor, "agent:main");
     assert_eq!(
         ev.actor,
-        crate::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
         "Translator 写死的 actor 必须与本机主智能体常量同值（对齐测试）"
     );
     assert_eq!(ev.ts, 9000, "检索事实也填时刻");
@@ -516,8 +523,14 @@ fn record_recalled_anchors_the_retrieval_and_is_idempotent() {
     assert!(payload_str(ev, "top").is_some_and(|s| s.contains("记住这条")));
 
     // 幂等：同一锚再落一次仍是 1 条。
-    record_recalled(&store, &view, trigger, crate::authz::PRINCIPAL_MAIN, 9001)
-        .expect("重复调用不失败");
+    record_recalled(
+        &store,
+        &view,
+        trigger,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        9001,
+    )
+    .expect("重复调用不失败");
     assert_eq!(
         store
             .range(Seq::new(0))

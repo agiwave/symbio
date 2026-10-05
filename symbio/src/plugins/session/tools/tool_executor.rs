@@ -932,10 +932,13 @@ impl BreakerInputs {
     /// 台账读不到 / 还没有事实源 ⇒ **零账**，不是故障——「还没记过账」不等于
     /// 「不许执行」，闸门因为没有账就把工具全拦下才是静默失效。
     fn of(session_dir: &std::path::Path, ctx: &Arc<dyn PluginInvokeRequest>) -> Self {
-        let principal =
-            crate::authz::principal_of(ctx.get(crate::symbio_core::AGENT_ID).as_deref());
-        let authorized = crate::authz::matrix_for(&principal)
-            .can_write_name(&principal, crate::authz::CAP_EXTERNAL_EXECUTION);
+        let principal = crate::symbio_core::authz::principal_of(
+            ctx.get(crate::symbio_core::AGENT_ID).as_deref(),
+        );
+        let authorized = crate::symbio_core::authz::matrix_for(&principal).can_write_name(
+            &principal,
+            crate::symbio_core::authz::CAP_EXTERNAL_EXECUTION,
+        );
         Self {
             authorized,
             spent_ms: session_cost_ms(session_dir, &principal),

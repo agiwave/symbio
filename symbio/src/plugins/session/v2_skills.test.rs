@@ -3,7 +3,7 @@
 //! （同 trigger 不重编译；零使用不判死、一次回退即摘；本轮没技能 ⇒ 一行 I/O 都不走）。
 
 use super::{compile, route, SKILL_TAG};
-use crate::authz::PRINCIPAL_MAIN;
+use crate::symbio_core::authz::PRINCIPAL_MAIN;
 use crate::symbio_core::{
     check_all, recall, Budget, Entity, Event, EventWalStore, Seq, Store, Verb,
     EVENT_ASSISTANT_FINAL, EVENT_MEMORY_ENCODED, EVENT_MEMORY_RECALLED, EVENT_USER_MESSAGE,
@@ -31,7 +31,7 @@ fn seed_turn(store: &EventWalStore) -> u64 {
                 Entity::Turn,
                 Verb::Opened,
                 0,
-                crate::authz::PRINCIPAL_USER,
+                crate::symbio_core::authz::PRINCIPAL_USER,
             )
             .with_payload(serde_json::json!({
                 "text": "帮我写测试",

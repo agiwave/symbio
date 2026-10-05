@@ -44,7 +44,7 @@ fn write_all(dir: &Path, turn: u64, decls: &[TaskDeclaration]) {
         decls,
         turn,
         0,
-        crate::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
         &format!("v2t-test-a{turn}"),
     )
     .expect("任务事件入格");

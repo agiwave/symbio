@@ -67,7 +67,7 @@ impl<V> View<V> {
 use crate::symbio_core::event::Timestamp;
 
 /// 本机智能体身份前缀（`agent:<id>`）——身份是**数据**，可无限增长；
-/// 前缀是判定用的形状，不是主体清单（清单住 [`crate::authz`]）。
+/// 前缀是判定用的形状，不是主体清单（清单住 [`crate::symbio_core::authz`]）。
 pub const AGENT_PREFIX: &str = "agent:";
 
 /// **可见域的平凡判据**（[plan/11 批 1](../../../../docs/plan/11-多执行器与多主体加固实施方案.md) ③，

@@ -150,8 +150,12 @@ pub(crate) fn read(
     let may_read = match viewer {
         None => true,
         Some(principal) => {
-            let matrix: &PermissionMatrix = crate::authz::production_matrix();
-            matrix.can_see(principal, crate::authz::SESSION_OWNER, VisScope::default())
+            let matrix: &PermissionMatrix = crate::symbio_core::authz::production_matrix();
+            matrix.can_see(
+                principal,
+                crate::symbio_core::authz::SESSION_OWNER,
+                VisScope::default(),
+            )
         }
     };
     let snapshot = if may_read { snapshot } else { Vec::new() };

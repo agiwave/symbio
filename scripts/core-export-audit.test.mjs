@@ -40,6 +40,7 @@ function rmTree(dir) {
  *
  * 默认把棘轮压到 `0:0`（`CORE_EXPORT_BASELINE`）——夹具只有几个符号，
  * 不压基线就测不到 C-003。要测「基线放行」的用例显式传 `baseline: '10:10'`。
+ * 豁免账本同理默认注入**空**对象；要测账本行为显式传 `waivers`。
  */
 function audit(files, { baseline = '0:0', waivers } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'core-export-'))
@@ -50,8 +51,9 @@ function audit(files, { baseline = '0:0', waivers } = {}) {
       fs.writeFileSync(abs, content)
     }
     const env = { ...process.env, NO_COLOR: '1', CORE_EXPORT_BASELINE: baseline }
-    if (waivers !== undefined) env.CORE_EXPORT_WAIVERS = waivers
-    else delete env.CORE_EXPORT_WAIVERS
+    // 夹具与真仓的**豁免账本**解耦（与 BASELINE 同理：账本是仓库数据，不是守卫逻辑）。
+    // 不隔离的话，真仓每登记一条豁免，就会让每个「没有那个符号」的夹具误报「已不在公开面」。
+    env.CORE_EXPORT_WAIVERS = waivers ?? '{}'
     const result = spawnSync(process.execPath, [script, `--root=${root}`], {
       cwd: root,
       env,

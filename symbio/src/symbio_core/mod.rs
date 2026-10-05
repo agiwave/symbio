@@ -6,6 +6,11 @@
 mod actors;
 mod adapters;
 mod assembly;
+// **本机授权表**（谁持有什么能力 + 可见域）——与下面 `governance` 的机制同住一棵模块树：
+// 表与判定分家的唯一坏处是「表授予 A、闸门判 B」这种错位**没有任何东西会变红**。
+// 表整块是架构元素，故保留 `authz` 命名空间、`pub(crate)` 开给全 crate（不进对外公开面，
+// 故 C-003 不数它）：表里写的是部署事实，不是契约。
+pub(crate) mod authz;
 mod capability;
 mod clock;
 mod creator;
@@ -103,7 +108,7 @@ pub(crate) use projection::recall::recall;
 pub(crate) use projection::reputation::reputation;
 pub(crate) use view::RecallView;
 // 可见域判据与智能体身份前缀：三处共用**同一条**判定——写视图的 `window_by_turn`
-// （core）、写消息过滤的 `context/view`（插件）、做主体派生的 `crate::authz`。
+// （core）、写消息过滤的 `context/view`（插件）、做主体派生的授权表（`authz`，本根开给全 crate）。
 // 两个判定方 = 两套可见域与两种身份形状，迟早漂移成「判的是 A、写的是 B」。
 pub(crate) use view::{visible_to, AGENT_PREFIX};
 
@@ -118,8 +123,10 @@ pub use adapters::{
 
 // ==================== 权限与可见性（v2 阶段 S3，⑥ governance） ====================
 // 读写成对、fail-closed（plan/01 §7）。根出口只出**矩阵与可见域**两个类型：
-// 构造面（`crate::authz` 的主体清单）与判定面（`plugins/session` 两道闸）都要指称
-// 它们，C-003 要求 ≥2 个模块级消费方——两个正好各 2 个。
+// 构造面（本根 `authz` 的主体清单）与判定面（`plugins/session` 两道闸）都要指称它们。
+// core 外消费方只有 `plugins/session` 一个，但它们**不能**下沉——core 内 `authz` /
+// `governance` 自己也在用（core 不依赖插件），插件又够不着 `governance` 域目录的深引
+// （C-002）⇒ 必须留根出口。故按 C-003 的接缝口径登记进 `core-export-audit` 的 WAIVERS。
 // governance::Capability（权限能力，7 个封顶）与 capability::Capability（LLM 工具
 // 描述符）是两个概念，**刻意不进根平铺**：授权表走能力名字符串（由
 // `PermissionMatrix::from_names` 按闭集校验），轮次→能力的映射收在 `can_reply` 里，

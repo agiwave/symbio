@@ -408,13 +408,13 @@ fn attributed_fills_by_role_and_never_overwrites() {
         role,
         ..Default::default()
     };
-    let main = crate::authz::PRINCIPAL_MAIN;
+    let main = crate::symbio_core::authz::PRINCIPAL_MAIN;
     let of = |m: cm::ChatMessage| attributed(m, main).principal;
 
     // 人说的话不随会话变。
     assert_eq!(
         of(base(Some(cm::MessageRole::User))).as_deref(),
-        Some(crate::authz::PRINCIPAL_USER)
+        Some(crate::symbio_core::authz::PRINCIPAL_USER)
     );
     // 助手正文、工具结果、压缩记录、系统说明都是本会话主体说的。
     assert_eq!(
@@ -437,6 +437,6 @@ fn attributed_fills_by_role_and_never_overwrites() {
     user.principal = None;
     assert_eq!(
         attributed(user, "agent:reviewer").principal.as_deref(),
-        Some(crate::authz::PRINCIPAL_USER)
+        Some(crate::symbio_core::authz::PRINCIPAL_USER)
     );
 }

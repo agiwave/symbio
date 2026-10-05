@@ -102,7 +102,7 @@ fn drop_line(wal: &Path, event_id: &str) {
 #[test]
 fn stats_recompute_equals_direct_apply() {
     let wal = seed("recompute");
-    let got = read("s1", &wal, None, crate::authz::PRINCIPAL_MAIN).expect("读数");
+    let got = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).expect("读数");
 
     assert!(got.has_wal);
     assert_eq!(got.session_id, "s1");
@@ -161,7 +161,7 @@ fn stats_recompute_equals_direct_apply() {
 fn reverse_case_each_column_moves_when_the_wal_changes() {
     let wal = seed("reverse");
     assert_eq!(
-        read("s1", &wal, None, crate::authz::PRINCIPAL_MAIN)
+        read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN)
             .unwrap()
             .tiers[0]
             .samples,
@@ -170,7 +170,7 @@ fn reverse_case_each_column_moves_when_the_wal_changes() {
 
     // 删收束格 ⇒ 时延样本列归零、P95 归零
     drop_line(&wal, "f0");
-    let after = read("s1", &wal, None, crate::authz::PRINCIPAL_MAIN).unwrap();
+    let after = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).unwrap();
     assert_eq!(after.tiers[0].samples, 0, "删掉唯一的 final ⇒ 样本 1 → 0");
     assert_eq!(after.tiers[0].p95, 0, "无样本 ⇒ 分位数为 0（空档位不报警）");
     assert_eq!(after.tiers[0].turns, 2, "开轮格还在 ⇒ 分母不受收束格影响");
@@ -178,7 +178,7 @@ fn reverse_case_each_column_moves_when_the_wal_changes() {
 
     // 删开轮格 ⇒ 兜底率的**分母**必须变（2 → 1），比率随之变成 1.0
     drop_line(&wal, "u0");
-    let after = read("s1", &wal, None, crate::authz::PRINCIPAL_MAIN).unwrap();
+    let after = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).unwrap();
     assert_eq!(
         after.tiers[0].turns, 1,
         "删掉一个 user.message ⇒ 分母 2 → 1"
@@ -193,7 +193,7 @@ fn reverse_case_each_column_moves_when_the_wal_changes() {
 #[test]
 fn invariants_move_when_the_wal_changes() {
     let wal = seed("invariants");
-    let clean = read("s1", &wal, None, crate::authz::PRINCIPAL_MAIN).unwrap();
+    let clean = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).unwrap();
 
     // 复算：出口的清单与直接 `check_all` 逐字相等（口径只活在 core，出口不复判）。
     let store = EventWalStore::open_readonly(&wal).unwrap();
@@ -210,7 +210,7 @@ fn invariants_move_when_the_wal_changes() {
 
     // 删轮 0 的收束格 ⇒ 轮 0 被轮 1 越过 ⇒ C4 报未收束；行删了 ⇒ C1 报 seq 跳号。
     drop_line(&wal, "f0");
-    let list = read("s1", &wal, None, crate::authz::PRINCIPAL_MAIN)
+    let list = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN)
         .unwrap()
         .invariants;
     let list = list.as_array().expect("清单是数组");
@@ -239,7 +239,8 @@ fn missing_wal_is_an_honest_zero_and_creates_nothing() {
     std::fs::create_dir_all(&dir).expect("临时目录");
     let wal = dir.join(super::super::paths::V2_WAL_FILE);
 
-    let got = read("s1", &wal, None, crate::authz::PRINCIPAL_MAIN).expect("没有事实源不是错误");
+    let got = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN)
+        .expect("没有事实源不是错误");
     assert!(!got.has_wal);
     assert!(got.tiers.is_empty());
     assert_eq!(got.checkpoint["event_count"], 0);
@@ -256,8 +257,15 @@ fn missing_wal_is_an_honest_zero_and_creates_nothing() {
 #[test]
 fn declaring_the_owner_reads_everything() {
     let wal = seed("gate-owner");
-    let plain = read("s1", &wal, None, crate::authz::PRINCIPAL_MAIN).expect("本机默认读数");
-    let as_owner = read("s1", &wal, Some("user"), crate::authz::PRINCIPAL_MAIN).expect("属主读数");
+    let plain =
+        read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).expect("本机默认读数");
+    let as_owner = read(
+        "s1",
+        &wal,
+        Some("user"),
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+    )
+    .expect("属主读数");
     assert_eq!(
         as_owner, plain,
         "属主本人的读数与本机默认逐字一致（声明不改变她能看什么）"
@@ -273,7 +281,13 @@ fn declaring_the_owner_reads_everything() {
 fn a_non_owner_reads_nothing_at_all() {
     let wal = seed("gate-nonowner");
     for viewer in ["agent:main", "agent:ghost"] {
-        let got = read("s1", &wal, Some(viewer), crate::authz::PRINCIPAL_MAIN).expect("读数");
+        let got = read(
+            "s1",
+            &wal,
+            Some(viewer),
+            crate::symbio_core::authz::PRINCIPAL_MAIN,
+        )
+        .expect("读数");
         assert!(got.has_wal, "{viewer}: 事实源存在，只是不给你看");
         assert!(
             got.tiers.is_empty(),
@@ -318,8 +332,8 @@ fn reputation_column_reports_own_and_by_principal() {
     // 一次守约的代际立约（写方 `v2_bridge::record_to_wal` 落的就是这三格）。
     for e in crate::symbio_core::commitment_events(
         "c-rep",
-        crate::authz::PRINCIPAL_MAIN,
-        crate::authz::PRINCIPAL_USER,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_USER,
         "把这段复查看完",
         true,
         "",
@@ -328,11 +342,11 @@ fn reputation_column_reports_own_and_by_principal() {
         store.append(e).expect("承诺入格");
     }
 
-    let got = read("s1", &wal, None, crate::authz::PRINCIPAL_MAIN).expect("读数");
+    let got = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).expect("读数");
     assert_eq!(
         got.reputation["own"],
         serde_json::json!({
-            "principal": crate::authz::PRINCIPAL_MAIN,
+            "principal": crate::symbio_core::authz::PRINCIPAL_MAIN,
             "offered": 1,
             "kept": 1,
             "broken": 0,
@@ -341,7 +355,7 @@ fn reputation_column_reports_own_and_by_principal() {
         "own = 本会话主体的条目；score = 平凡打分（守约 − 违约）"
     );
     assert_eq!(
-        got.reputation["by_principal"][crate::authz::PRINCIPAL_MAIN],
+        got.reputation["by_principal"][crate::symbio_core::authz::PRINCIPAL_MAIN],
         got.reputation["own"],
         "own 就在 by_principal 里——同一张表的两个视角，不是两套数"
     );
@@ -355,8 +369,8 @@ fn reputation_column_reports_own_and_by_principal() {
     let denied = read(
         "s1",
         &wal,
-        Some(crate::authz::PRINCIPAL_MAIN),
-        crate::authz::PRINCIPAL_MAIN,
+        Some(crate::symbio_core::authz::PRINCIPAL_MAIN),
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
     )
     .expect("读数");
     assert_eq!(denied.reputation, serde_json::json!({}));
@@ -382,7 +396,7 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
                     Entity::Task,
                     Verb::Opened,
                     0,
-                    crate::authz::PRINCIPAL_MAIN,
+                    crate::symbio_core::authz::PRINCIPAL_MAIN,
                 )
                 .with_produced_by(0)
                 .with_payload(serde_json::json!({
@@ -394,7 +408,13 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
             .expect("任务开格");
     }
 
-    let got = read("s-rs", &wal, None, crate::authz::PRINCIPAL_MAIN).expect("读数");
+    let got = read(
+        "s-rs",
+        &wal,
+        None,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+    )
+    .expect("读数");
     assert_eq!(
         got.readyset["ready"].as_array().map(|a| a.len()),
         Some(1),
@@ -418,8 +438,8 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
     let denied = read(
         "s-rs",
         &wal,
-        Some(crate::authz::PRINCIPAL_MAIN),
-        crate::authz::PRINCIPAL_MAIN,
+        Some(crate::symbio_core::authz::PRINCIPAL_MAIN),
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
     )
     .expect("读数");
     assert_eq!(denied.readyset, serde_json::json!({ "ready": [] }));

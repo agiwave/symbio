@@ -180,7 +180,7 @@ fn attributed(m: cm::ChatMessage, session_principal: &str) -> cm::ChatMessage {
     }
     let mut out = m;
     out.principal = Some(match out.role {
-        Some(cm::MessageRole::User) => crate::authz::PRINCIPAL_USER.to_string(),
+        Some(cm::MessageRole::User) => crate::symbio_core::authz::PRINCIPAL_USER.to_string(),
         _ => session_principal.to_string(),
     });
     out

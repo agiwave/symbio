@@ -41,7 +41,7 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::authz::PRINCIPAL_USER;
+use crate::symbio_core::authz::PRINCIPAL_USER;
 use crate::symbio_core::{
     accept, recall, recalled_event, Budget, ConsolidateParams, Entity, Event, EventWalStore,
     RecallView, Rejection, Seq, Store, Verb, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED,

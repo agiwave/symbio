@@ -13,12 +13,12 @@ use super::*;
 
 /// 本请求所属会话的主体身份——**唯一**读 `ctx[AGENT_ID]` 并派生主体名的取值点。
 ///
-/// 派生本身住 [`crate::authz::principal_of`]（部署事实的唯一 owner）；这里只负责
+/// 派生本身住 [`crate::symbio_core::authz::principal_of`]（部署事实的唯一 owner）；这里只负责
 /// 「从请求上下文取那个 id」。写事件的 `actor`、写消息的 `principal`、写侧闸判的
 /// 对象三者都走它——三处各推一次迟早漂移成「判的是 A、写的是 B」。
 pub(crate) fn request_principal(ctx: &dyn crate::symbio_core::PluginInvokeRequest) -> String {
     use crate::symbio_core::PluginInvokeRequestExt;
-    crate::authz::principal_of(ctx.get(crate::symbio_core::AGENT_ID).as_deref())
+    crate::symbio_core::authz::principal_of(ctx.get(crate::symbio_core::AGENT_ID).as_deref())
 }
 
 /// MODEL 会话上下文
@@ -33,7 +33,7 @@ pub(crate) struct SessionContext {
     /// **本会话的主体身份**（[plan/11 批 1](../../../../docs/plan/11-多执行器与多主体加固实施方案.md)
     /// ② 的取值点）：会话选定的 agent ⇒ 主体名，未选 ⇒ `agent:main`。
     ///
-    /// 派生只有一处（[`crate::authz::principal_of`]），转写事件的 `actor`、消息的
+    /// 派生只有一处（[`crate::symbio_core::authz::principal_of`]），转写事件的 `actor`、消息的
     /// `principal`、写侧闸判的对象三者共用它——三处各写一份字符串迟早漂移成
     /// 「判的是 A、写的是 B」。放在上下文里而不是每个阶段各推一次：一个事实一个
     /// 取值点，且它随会话走、不随阶段变。

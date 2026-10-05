@@ -141,7 +141,7 @@ fn record_to_wal(
         Entity::Turn,
         Verb::Opened,
         turn,
-        crate::authz::PRINCIPAL_USER,
+        crate::symbio_core::authz::PRINCIPAL_USER,
     )
     .with_payload(serde_json::json!({ "text": user_text, "tier": "deep", "turn_ref": user_id }));
     let user_seq = store
@@ -171,7 +171,7 @@ fn record_to_wal(
     // 01 §7 写侧闸（[04 §3.1 批⑥](../../../docs/plan/04-工程落地.md)）：收束格是
     // 主智能体的**权威发言**，入格前判它是否持有对应能力——该轮首条 →
     // `reply.first`，后续（同轮追加 / 重试）→ `reply.append`。映射口径在 core 的
-    // `can_reply`，此处不复述；表由 `crate::authz` 提供，全机只有那一张。
+    // `can_reply`，此处不复述；表由 `crate::symbio_core::authz` 提供，全机只有那一张。
     // 拒绝 = **不入格**：用户发言已入格、本轮留在未收束态，`check_all` 会把它
     // 报进第五列（不变量）——拒绝可被看见，且 v1 对话行为不变（由 `record` 吞下）。
     let prior_closures = snapshot
@@ -179,7 +179,7 @@ fn record_to_wal(
         .filter(|e| e.entity == Entity::Turn && e.verb == Verb::Closed && e.turn == turn)
         .count() as u64;
     authorize_close(
-        &crate::authz::matrix_for(principal),
+        &crate::symbio_core::authz::matrix_for(principal),
         principal,
         prior_closures == 0,
     )?;
@@ -212,7 +212,7 @@ fn record_to_wal(
         for e in crate::symbio_core::commitment_events(
             &cid,
             principal,
-            crate::authz::PRINCIPAL_USER,
+            crate::symbio_core::authz::PRINCIPAL_USER,
             &d.promise,
             d.ok,
             &d.why,
