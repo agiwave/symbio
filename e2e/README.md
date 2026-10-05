@@ -101,6 +101,40 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
 - 每个 `tool_call` 必有 `role=tool` 结果子节点（「有请求必有响应」）；
 - 失败路径不得留非终态节点（无「永远运行中」）。
 
+> 上表**停在 T18**（用例已到 T36，中间的行没有补）——它是一份人工索引，不是清单；
+> 权威清单 = `ls e2e/cases/`（runner 与门控都按目录发现式加载，新增文件即生效）。
+
+## 常见夹具陷阱（跨用例，踩过的）
+
+写新用例时先过一遍这几条——它们的共同形状是**「用例看起来对、其实测的是别的东西」**：
+
+1. **`gateway` 配置是 homedir 级的**。在 `pluginConfigs.gateway` 里开 `inbound_enabled`，
+   同 homedir 下**每一个** CLI 进程（含一次性 `runCli`）都会去绑同一个 `inbound_port`：
+   长驻进程没抢到端口时，「网关就绪」（`waitGatewayReady` 轮询的是那个端口）就时对时错。
+   **不需要网关的用例就别配它**；需要时避免让多个进程同时活着（参考 `t28`：先用 `runCli`
+   跑轮次，再起一个长驻 CLI 只用于读出口）。
+2. **`startLongLivedCli({ session: X })` 会在启动时把 X 的 `session.json` 落一次盘**
+   （`updated_at = now`）。所以：拿**被测会话**当 REPL 会话，会把你手工构造的会话状态
+   （如回拨的 `updated_at`）抹掉。心跳/调度类用例要用**中立会话 id**。
+3. **后台调度器有 tick，别用墙上时钟空等**。心跳调度器 15s 一 tick（
+   `heartbeat/mod.rs::HEARTBEAT_TICK_SECS`），且首次 tick 被跳过；触发还要等空闲满
+   `interval_seconds + 抖动(0–30s)`。两招压时间：把 `updated_at` **回拨**（把「已空闲很久」
+   这个前置条件直接摆好）＋ 让 `interval_seconds > 一个 tick`（保证观测窗内**恰好一次**
+   触发，否则判据会随 tick 数漂移）。参考 `t36`。
+4. **「事实先落」≠「那一轮跑完」**。若被测机制是「先落事实、再开轮」（心跳就是），
+   等到事实出现只证明「要跑」，不证明「跑完了」——断言轮次之前要**再等**收束转写落格。
+   参考 `t36` 的证据③。
+5. **`serde_json::Value` 的键序是字典序**（底层 `BTreeMap`）。服务端回来的对象**不能**
+   拿手写对象字面量直接 `JSON.stringify` 比对（字面量是书写序）——逐字段比。参考 `t28`。
+6. **收尾等子进程退干净**。Windows 上带着活子进程 `process.exit()` 会撞 libuv 断言，
+   表现是「断言全过、退出码 `0xC0000409`」。`finally` 里要
+   `await waitFor(() => !process.getActiveResourcesInfo().includes('ProcessWrap'))`。
+
+**新增「接线判据」用例时另加一条纪律**：机制已经接进生产、只是缺判据时，用例必须证
+**「接线前后行为可见地不同」**——把开关翻掉（如 `skill_compile_enabled` /
+`conation_enabled`）跑一遍，确认用例**真的会红**。只跑一次绿，证明不了它测的是接线。
+参考 `t35` / `t36`（各验过一次负向）。
+
 ## 门控接入
 
 e2e 是 `scripts/gate.mjs` 的一个阶段（`scripts/gate.d/40-e2e.mjs`）：
