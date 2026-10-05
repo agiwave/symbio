@@ -31,7 +31,6 @@
 //! `WalkBuilder` 的 `standard_filters` 会跳过它，`.bin` 也不在 `SOURCE_EXTS` 里，
 //! 因此**索引不会把自己索引进去**（两重保险）。
 
-use super::policy::SecurityPolicy;
 use crate::symbio_core::EmbeddingService;
 use crate::symbio_core::{
     creator_create_object, Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest,
@@ -200,18 +199,17 @@ fn cache() -> &'static tokio::sync::Mutex<HashMap<String, Arc<CodeIndex>>> {
 }
 
 /// 诊断/检索工具：语义代码检索
+///
+/// **不持策略**：检索根恒为 `workspace_dir`（索引建在它里面、`keyword_search`
+/// 也从它出发），入参 `path` 只是对**已经落在工作区内的结果**做子串过滤
+/// （见 `execute_inner` 尾部的 `retain`），不参与任何一次读 ⇒ 不存在可校验的
+/// 越界读。按 `content_search` 那样补一次 `is_path_allowed_for_read` 会得到一段
+/// **永不触发**的死校验（结果集里根本没有工作区外的路径），比不写更坏：它会让
+/// 下一个读代码的人以为这里有路径边界。审批闸门照旧在 `SecureToolWrapper`。
 #[derive(Clone)]
-pub struct CodebaseSearchTool {
-    // dead-code-allow R-002: 字段由构造签名注入、本工具不读（策略统一由 SecureToolWrapper 执行）；04 §3.1 批⑫ 接线后摘除
-    #[allow(dead_code)]
-    security: Arc<SecurityPolicy>,
-}
+pub struct CodebaseSearchTool;
 
 impl CodebaseSearchTool {
-    pub fn new(security: Arc<SecurityPolicy>) -> Self {
-        Self { security }
-    }
-
     async fn execute_inner(&self, args: &Value, workdir: &str) -> PluginInvokeResponse<Value> {
         let query = args
             .get("query")

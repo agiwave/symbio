@@ -308,8 +308,10 @@ impl LocalPlugin {
 
         let shell = Arc::new(ShellTool::new(Arc::clone(&security)));
         let content_search = Arc::new(ContentSearchTool::new(Arc::clone(&security)));
-        let todo_write = Arc::new(TodoWriteTool::new(Arc::clone(&security)));
-        let codebase_search = Arc::new(CodebaseSearchTool::new(Arc::clone(&security)));
+        // 下面两个**不持策略**（与 `ask_user` 同类的「没有可判的路径」）：策略统一由
+        // `SecureToolWrapper::execute` 的审批闸门执行，理由见各自结构体文档。
+        let todo_write = Arc::new(TodoWriteTool);
+        let codebase_search = Arc::new(CodebaseSearchTool);
         // 询问用户：不接触文件系统，故不持 SecurityPolicy；产出 user_prompt 节点
         // 等用户回答（与下面的 confirm 审批共用同一套节点 / 回填机制）。
         let ask_user = Arc::new(AskUserTool);

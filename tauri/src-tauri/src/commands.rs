@@ -4,7 +4,8 @@ use crate::AppState;
 use serde_json::Value;
 use std::sync::Arc;
 use symbio::symbio_core::{
-    PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire, PLUGIN_PAYLOAD_KEY,
+    PluginFrame, PluginMessageWire, PluginPayload, PluginPayloadWire, SymbioKey,
+    PLUGIN_PAYLOAD_KEY, TRACE_ID,
 };
 use tauri::Emitter;
 use tracing::{debug, error, info, warn};
@@ -28,10 +29,11 @@ pub async fn route_v2(
         .unwrap_or("")
         .to_string();
 
-    // 提取并记录 trace_id (如果存在)
+    // 提取并记录 trace_id (如果存在)。键名来自键面（`TRACE_ID.name()`）而不是再写
+    // 一遍字面量：协议 `metadata` 的键与上下文键是**同一张表**，两处各写一遍必然漂移。
     let trace_id = request
         .metadata
-        .get("trace_id")
+        .get(TRACE_ID.name())
         .and_then(|v| v.as_str())
         .unwrap_or("unknown")
         .to_string();

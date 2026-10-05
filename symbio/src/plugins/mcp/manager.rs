@@ -40,8 +40,6 @@ use super::types::McpTool;
 /// 包含 tool count + 协议版本 + server 元信息（来自 initialize 响应）。
 /// 用于在 UI 展示"连接成功（来自 xxx v1.2.3，10 个工具）"等丰富提示。
 #[derive(Debug, Clone)]
-// dead-code-allow R-002: 富提示字段（server 版本 / instructions / 耗时）尚未拼进返回 message；04 §3.1 批⑫ 接线后摘除
-#[allow(dead_code)]
 pub struct TestConnectionResult {
     /// 发现的工具数量
     pub tool_count: usize,
@@ -55,6 +53,26 @@ pub struct TestConnectionResult {
     pub instructions: Option<String>,
     /// 测试耗时（毫秒）
     pub elapsed_ms: u64,
+}
+
+impl TestConnectionResult {
+    /// 连接成功的那句提示——结构体文档承诺的「来自 xxx v1.2.3，10 个工具」。
+    ///
+    /// **版本与耗时一并带上**：这两样只有握手那一刻拿得到，测试连接是它们唯一的出口，
+    /// 打进日志等于没人看。`instructions` 是一整段 server 说明，塞进一行提示会把版本 /
+    /// 工具数挤掉——它走 `data`（见 `plugin.rs` 的 `VDFS_ACTION_TEST` 臂）。
+    pub fn success_message(&self) -> String {
+        let who = match (&self.server_name, &self.server_version) {
+            (Some(n), Some(v)) => format!("{n} {v}"),
+            (Some(n), None) => n.clone(),
+            (None, Some(v)) => format!("unknown {v}"),
+            (None, None) => "unknown".to_string(),
+        };
+        format!(
+            "连接成功（来自 {who}，{} 个工具 · protocol {} · {} ms）",
+            self.tool_count, self.protocol_version, self.elapsed_ms
+        )
+    }
 }
 
 /// discover 缓存有效期（5 分钟）

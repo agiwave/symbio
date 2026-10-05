@@ -71,29 +71,14 @@
 /// [`ROUTE_HOOK_FIRE`] 同类的记录。
 pub const ROUTE_SESSION_CHAT_SEND: &str = "session/chat/send";
 
-/// session/chat/abort — 中止进行中的一轮
-///
-/// **唯一调用方不在 Rust 侧**：前端 `tauri/src/constants/pluginPaths.ts::CHAT_ABORT`
-/// （由 `${SESSION_PATH}/chat/abort` 拼出，前缀收敛为 `worker/`；`worker` 可省略，
-/// 故与本常量是同一路由的两种合法写法）。Rust 侧因此没有任何代码引用它，但路径
-/// **真实存在**（session 的 `route` 认 `chat/abort` 臂）——与 `AGENT_CHAT` 那类
-/// 「描述了一条不存在的路由」的幽灵常量不同，故保留。
-///
-/// 保留的代价为零（一个 `&'static str`），收益是「前端认识的后端路由」在后端也有
-/// 一条可检索的登记。这条理由由 `#[allow(dead_code)]` 同行注明，供
-/// `scripts/dead-code-audit.mjs` 识别为**刻意保留**而非漏删。
-#[allow(dead_code)] // dead-code-allow R-002: ADR-031 未完成项：chat/abort 去留未定（保留则根导出 + 换 cli 字面量，退役则连 ROUTES.md 一并删）；04 §3.1 批⑫ 接线后摘除
-pub const ROUTE_SESSION_CHAT_ABORT: &str = "session/chat/abort";
-
 // ============ VDFS 插件 ============
 /// vdfs/root — **进入地址空间**：取根地址，调用方不给地址。
 ///
 /// 调用方：Rust 侧 `agent/host/subagent.rs`（拼 Run 的 VDFS 根地址）、前端
 /// `tauri/src/schemas/vdfs.ts::VDFS_ROOT`（启动期取根当运行期数据，
-/// `services/vdfsScheme.ts` 据此拼会话地址）。保留登记的理由与
-/// [`ROUTE_SESSION_CHAT_ABORT`] 相同——「前端认识的后端路由」在后端也应有一条可检索的
-/// 常量；且**根名只归 vdfs 插件**（`plugins/vdfs/fs.rs::VDFS_ADDR_ROOT`，仓级守卫
-/// S-010 禁止它在别处出现），故消费方一律取运行期值、不写字面量。
+/// `services/vdfsScheme.ts` 据此拼会话地址）。**两端都会拼这条路径**，后端因此留一条
+/// 可检索的常量登记；且**根名只归 vdfs 插件**（`plugins/vdfs/fs.rs::VDFS_ADDR_ROOT`，
+/// 仓级守卫 S-010 禁止它在别处出现），故消费方一律取运行期值、不写字面量。
 pub const ROUTE_VDFS_ROOT: &str = "vdfs/root";
 
 /// vdfs/watch — 订阅一棵地址子树的变更。

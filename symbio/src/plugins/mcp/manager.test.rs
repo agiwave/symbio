@@ -350,3 +350,46 @@ fn test_connection_result_default_construction() {
     assert_eq!(r.instructions, None);
     assert_eq!(r.elapsed_ms, 0);
 }
+
+/// TEST-MR30.3：富提示按结构体文档承诺的形状（名字 / 版本 / 工具数 / 协议 / 耗时）
+///
+/// 这一行是 `TestConnectionResult` 摘 `#[allow(dead_code)]` 的接线判据：字段从
+/// 「取回来了没人看」变成**用户看得见的那一句**，形状由本测钉住。
+#[test]
+fn test_connection_result_success_message_is_rich() {
+    use super::TestConnectionResult;
+    let r = TestConnectionResult {
+        tool_count: 10,
+        protocol_version: "2025-06-18".to_string(),
+        server_name: Some("github".to_string()),
+        server_version: Some("v1.2.3".to_string()),
+        instructions: Some("Use carefully".to_string()),
+        elapsed_ms: 42,
+    };
+    let msg = r.success_message();
+    for want in ["github", "v1.2.3", "10", "2025-06-18", "42"] {
+        assert!(msg.contains(want), "提示里缺 `{want}`：{msg}");
+    }
+    // 整段说明**不进**一行提示：它会把上面几样挤掉，且折行后没人读得完。
+    assert!(
+        !msg.contains("Use carefully"),
+        "说明文本不该挤进提示：{msg}"
+    );
+}
+
+/// TEST-MR30.4：server 没报名字 / 版本时不留空洞（不出现「来自  ，」）
+#[test]
+fn test_connection_result_success_message_without_identity() {
+    use super::TestConnectionResult;
+    let r = TestConnectionResult {
+        tool_count: 0,
+        protocol_version: "2024-11-05".to_string(),
+        server_name: None,
+        server_version: None,
+        instructions: None,
+        elapsed_ms: 0,
+    };
+    let msg = r.success_message();
+    assert!(msg.contains("unknown"), "缺身份时该有占位：{msg}");
+    assert!(!msg.contains("  "), "不该出现连续空格：{msg}");
+}

@@ -24,7 +24,7 @@
 use super::config::{is_readonly_allowed, GatewayConfig};
 use crate::symbio_core::{
     Plugin, PluginChannel, PluginFrame, PluginInvokeRequest, PluginMessageWire, PluginPayload,
-    PluginPayloadWire, PluginSimpleRequest, PLUGIN_PAYLOAD_KEY,
+    PluginPayloadWire, PluginSimpleRequest, SymbioKey, PLUGIN_PAYLOAD_KEY, TRACE_ID,
 };
 use base64::Engine;
 use serde_json::Value;
@@ -35,7 +35,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::{debug, error, info, warn};
 
 /// HTTP 请求头上限（64 KiB）——头是逐字节读的，不设上限时一个只发头不发全的
 /// 连接就能长期占住内存与任务。
@@ -464,12 +464,31 @@ async fn dispatch_once(
         .get("path")
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    // `trace_id`：ERROR_CODES.md 约定「每个请求的 metadata 应包含 trace_id，后端会记录在
+    // 日志中」。壳层 `route_v2` 一直记着，网关这侧（CLI / e2e / 第三方客户端的唯一入口）
+    // 此前连读都不读——**链路恰好断在它身上**。缺席统一写 `-`：字段恒在，日志行的形状才
+    // 稳定（与壳层 `origin` 的缺省同一取向）；键名取自键面（`TRACE_ID.name()`），
+    // 协议 `metadata` 与上下文键是同一张表，两边各写一遍字面量就是两份真相。
+    let trace_id = msg
+        .metadata
+        .get(TRACE_ID.name())
+        .and_then(|v| v.as_str())
+        .unwrap_or("-");
+
     if readonly && !is_readonly_allowed(path, &msg.payload) {
+        warn!(trace_id = %trace_id, path = %path, "只读模式下拒绝调用");
         return Err(format!("只读模式下禁止调用: {path}"));
     }
 
     let ctx = build_ctx(msg);
-    let payload = router.clone().route(ctx).await.map_err(|e| e.to_string())?;
+    // 逐请求一行走 `debug`：这是一条**访问日志**，默认过滤级别（`symbio=debug`）下照记，
+    // 但把控制台留给 `info` 级的事件。失败必须升到 `error`——那才是需要顺着 trace_id
+    // 回查的那一刻。
+    debug!(trace_id = %trace_id, path = %path, "网关路由");
+    let payload = router.clone().route(ctx).await.map_err(|e| {
+        error!(trace_id = %trace_id, path = %path, error = %e, "网关路由失败");
+        e.to_string()
+    })?;
 
     match classify_payload(payload)? {
         PayloadDelivery::Empty => Ok(PluginPayloadWire::Data(Value::Null)),

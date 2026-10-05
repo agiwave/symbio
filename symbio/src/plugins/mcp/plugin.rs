@@ -444,22 +444,31 @@ impl VdfsProvider for McpPlugin {
                     // **结果**，不是协议错误）
                     VDFS_ACTION_TEST => {
                         let server = self.server_config(&id).await?;
-                        let (ok, message) = match self.manager.test_connection(&id, &server).await {
-                            Ok(r) => (
-                                true,
-                                format!(
-                                    "{tools} tools · protocol {protocol}",
-                                    tools = r.tool_count,
-                                    protocol = r.protocol_version
-                                ),
-                            ),
-                            Err(e) => (false, e),
-                        };
+                        let (ok, message, data) =
+                            match self.manager.test_connection(&id, &server).await {
+                                // 一行提示给能读完的（名字 / 版本 / 工具数 / 协议 / 耗时）；
+                                // 整段 `instructions` 走 `data`——它是 server 自带的说明文本，
+                                // 折行塞进提示会把上面几样挤掉，而它正是 `initialize` 费劲
+                                // 握手取回来的东西（BUG-MR32），取回来就得有去处。
+                                Ok(r) => {
+                                    let message = r.success_message();
+                                    let data = serde_json::json!({
+                                        "tool_count": r.tool_count,
+                                        "protocol_version": r.protocol_version,
+                                        "server_name": r.server_name,
+                                        "server_version": r.server_version,
+                                        "instructions": r.instructions,
+                                        "elapsed_ms": r.elapsed_ms,
+                                    });
+                                    (true, message, Some(data))
+                                }
+                                Err(e) => (false, e, None),
+                            };
                         Ok(VdfsResponse::Action(VdfsActionResult {
                             action: action.clone(),
                             ok,
                             message,
-                            data: None,
+                            data,
                         }))
                     }
                     // 导出：整包打包下载（与「导入整包」互为逆向）

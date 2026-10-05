@@ -3,7 +3,6 @@
 //! 以会话（session_id）为作用域维护一份结构化任务清单，
 //! 帮助 Agent 跟踪复杂多步任务的进度。纯内存状态，不落盘。
 
-use super::policy::SecurityPolicy;
 use crate::symbio_core::{
     Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, AGENT_ID, SESSION_ID, WORKDIR,
@@ -24,20 +23,15 @@ async fn todo_store() -> &'static RwLock<HashMap<String, Vec<Value>>> {
 }
 
 /// 任务清单工具
+///
+/// **不持策略**：本工具只吃 `todos` / `merge` 两个参数、不碰任何路径，策略这一层
+/// 由 `SecureToolWrapper::execute` 的 `approval_gate` 统一执行（见 [`local::plugin`]
+/// 的分支注释）。构造签名里挂一个不读的 `SecurityPolicy` 只是把「谁执行审批」
+/// 这件事在两个地方各说一遍，而两处必然漂移。
 #[derive(Clone)]
-pub struct TodoWriteTool {
-    // dead-code-allow R-002: 字段由构造签名注入、本工具不读（策略统一由 SecureToolWrapper 执行）；04 §3.1 批⑫ 接线后摘除
-    #[allow(dead_code)]
-    security: Arc<SecurityPolicy>,
-}
+pub struct TodoWriteTool;
 
 impl TodoWriteTool {
-    pub fn new(_security: Arc<SecurityPolicy>) -> Self {
-        Self {
-            security: _security,
-        }
-    }
-
     async fn execute_inner(&self, args: &Value, key: &str) -> PluginInvokeResponse<Value> {
         let todos = args
             .get("todos")

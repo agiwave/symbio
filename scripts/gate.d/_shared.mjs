@@ -510,7 +510,14 @@ export const BASELINE = {
   //      `check_all` 恒空）+ 反向 1 例（收束发言在任务之后 ⇒ 判为排队、零事实，
   //      证明挂起是判出来的）+ 未结清判定不能睡过去 1 例 + 没有事实源时结清走通
   //      1 例（`Ok(None)` 清状态、`Err` 留着重试，两者分界错一边就是 J3 或空转）。
-  rustTests: 1284,
+  // 1286（批⑫ B 类零散契约，2026-10-05）——`1284 → 1286`，**+2**。
+  //      `TestConnectionResult` 富提示接线（04 §3.1 批⑫）：`success_message()` 把
+  //      名字 / 版本 / 工具数 / 协议 / 耗时拼进 `VDFS_ACTION_TEST` 的 `message`，
+  //      整段 `instructions` 走同一结果的 `data`（BUG-MR32 取回了就得有去处）。
+  //      验收 = 形状 1 例（五样都在、说明文本不挤进来）+ 缺身份不留空洞 1 例。
+  //      同批另三处不产用例——接入面分别是**两处日志**（`TRACE_ID`）、**删除**
+  //      （`ROUTE_SESSION_CHAT_ABORT`）与**构造签名**（local 两处 `security` 字段）。
+  rustTests: 1286,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

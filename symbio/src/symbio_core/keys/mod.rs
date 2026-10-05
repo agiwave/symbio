@@ -110,13 +110,10 @@ define_string_key!(PathKey, PATH, "path");
 define_string_key!(WorkdirKey, WORKDIR, "workdir");
 define_string_key!(AgentIdKey, AGENT_ID, "agent_id");
 define_string_key!(SessionIdKey, SESSION_ID, "session_id");
-// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（PROTOCOLS.md 字段表）；04 §3.1 批⑫ 接线后摘除
-define_string_key!(
-    #[allow(dead_code)]
-    TraceIdKey,
-    TRACE_ID,
-    "trace_id"
-);
+// 请求链路 id：同一条链上的多次请求共用它，把跨插件的日志串回一条线。
+// 线上形态 = 请求 `metadata.trace_id`，因此读它的地方就是读 metadata 的地方
+// （壳层 `route_v2`、网关 `dispatch_once`）。
+define_string_key!(TraceIdKey, TRACE_ID, "trace_id");
 // 当前父地址：本插件在地址空间中挂载点的绝对地址。与 `WORKDIR` / `SESSION_ID`
 // 同类的**上下文数据**：父插件把请求转发给子插件时（route / traverse）改写它，
 // 子插件在少数需要协议级绝对地址的场合读它拼接（见 `symbio_core::vdfs::address`）。
