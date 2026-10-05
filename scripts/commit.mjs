@@ -15,8 +15,11 @@
  *   node scripts/commit.mjs --gate                  # 提交前**显式**跑门禁（把关场景）
  *   node scripts/commit.mjs --interactive           # 逐项询问（想手写正文时）
  *   node scripts/commit.mjs --dry-run               # 只生成消息文件与暂存清单，不提交
+ *   node scripts/commit.mjs --help                  # 打印用法并退出（**不提交**）
  *
  * （`--no-gate` / `--yes` 保留为 no-op：历史调用不受影响。）
+ * ⚠️ 查用法一律用 `--help`：本脚本**只认已识别的开关**，把 `--help` 当未知参数会让它
+ * 照常走完并**真的提交一次**（2026-10-05 实测踩过）。
  *
  * 分节来源优先级：`--section=`（可多次）> 交互逐条输入 > **自动从暂存 diff 归纳**。
  * 自动归纳只给「改了什么」的事实清单（文件 + 增删行数），不下判断、不编理由——
@@ -65,6 +68,30 @@ const hasFlag = (n) => argv.includes(n)
 const valOf = (p) => {
   const a = argv.find((x) => x.startsWith(p))
   return a ? a.slice(p.length).trim() : null
+}
+
+// `--help` / `-h`：**在任何副作用之前**退出。
+//
+// 补它的理由：脚本原先不认 `--help`，于是 `node scripts/commit.mjs --help` 会**真的
+// 提交一次**（把暂存区里的东西提上去）——想查用法，代价是一次误提交（只能
+// `git reset --soft HEAD~1` 回退）。与 `gate.mjs` 的 `--help` 同类陷阱（那里是白跑
+// 十分钟门禁 + 覆盖 `.workbuddy-ai/gate-logs/*.log`，最需要日志的那一刻它没了）。
+// 判据 = `commit.test.mjs` 的 `--help` 用例：退出 0、打印用法、**不产生提交**。
+if (hasFlag('--help') || hasFlag('-h')) {
+  console.log(`用法：node scripts/commit.mjs [选项]
+
+  （无参数）          非交互：type / scope / 标题从暂存内容推断，分节从 diff 归纳
+  --type=<t>          显式 type（覆盖推断）
+  --scope=<s>         显式 scope（覆盖推断）
+  --title="…"         显式标题（覆盖推断）
+  --section="…"       正文分节，可多次；**不要**自带编号（脚本会补编号）
+  --gate              提交前显式跑门禁（**默认不跑**：提交要秒级）
+  --interactive       逐项询问（想手写正文时；默认非交互、不读 stdin）
+  --dry-run           只生成消息文件与暂存清单，不提交
+  --help, -h          打印本用法并退出（不提交任何东西）
+
+  注意：本脚本**只提交已暂存的文件**（先 git add；未暂存的不进本次提交）。`)
+  process.exit(0)
 }
 
 const DRY_RUN = hasFlag('--dry-run')

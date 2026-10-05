@@ -240,3 +240,29 @@ test('索引为空时明确报错（而不是跑完门禁再被 git 拒掉）', 
   // 报错走 stderr（die 用 console.error）——两路合起来查。
   assert.match(r.stdout + r.stderr, /没有可提交的改动|索引为空/)
 })
+
+// ================= 4. --help 不产生副作用 =================
+
+test('★ `--help` 只打印用法并退出 0，绝不提交（否则查用法 = 一次误提交）', () => {
+  const { root, git } = repo()
+  fs.writeFileSync(path.join(root, 'h.md'), 'x\n')
+  git(['add', 'h.md'])
+  const before = git(['rev-parse', 'HEAD']).stdout.trim()
+
+  const r = runCommit(root, ['--help'])
+  assert.equal(r.status, 0, `--help 应退出 0：${r.stdout}\n${r.stderr}`)
+  assert.match(r.stdout, /用法：node scripts\/commit\.mjs/, '应打印用法')
+  assert.match(r.stdout, /--section=/, '用法应列出主要开关')
+
+  // 这两条才是补 `--help` 的**理由**：原先它会照常走完并真的提交一次。
+  assert.equal(
+    git(['rev-parse', 'HEAD']).stdout.trim(),
+    before,
+    '`--help` 不得产生提交（查用法不该付一次误提交的代价）',
+  )
+  assert.match(
+    git(['diff', '--cached', '--name-only']).stdout,
+    /h\.md/,
+    '`--help` 不消费暂存区（索引应原样保留）',
+  )
+})

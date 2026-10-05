@@ -23,6 +23,7 @@
  *   node scripts/gate.mjs --ci                  CI 对齐模式（语义由任务模块自行解释）
  *   node scripts/gate.mjs --profile=<p>         附加构建档位（语义由任务模块自行解释）
  *   node scripts/gate.mjs --list                只列出阶段与任务，不执行
+ *   node scripts/gate.mjs --help                打印用法并退出（**不跑任何阶段**）
  *
  * ## 判定 vs 执行：门禁会**做掉**确定性的机械工作
  *
@@ -62,6 +63,28 @@ const profile = valOf('--profile=')
 const only = valOf('--only=') ? valOf('--only=').split(',').map((s) => s.trim()).filter(Boolean) : null
 const skip = valOf('--skip=') ? valOf('--skip=').split(',').map((s) => s.trim()).filter(Boolean) : []
 const listOnly = hasFlag('--list')
+
+// `--help` / `-h`：**在任何副作用之前**退出。
+//
+// 补它的理由：脚本原先不认 `--help`，于是 `node scripts/gate.mjs --help` 会**真的跑一遍
+// 全量门禁**（10+ 分钟）并把 `.workbuddy-ai/gate-logs/*.log` 覆盖掉——想查用法，代价是
+// 丢掉上一次的失败日志（最需要它的那一刻它没了，只能重跑）。与 `commit.mjs` 的 `--help`
+// 同类陷阱（那里更贵：会真的提交一次）。判据 = `gate.test.mjs`：退出 0、打印用法、**不跑任何阶段**。
+if (hasFlag('--help') || hasFlag('-h')) {
+  console.log(`用法：node scripts/gate.mjs [选项]
+
+  （无参数）            跑全部阶段
+  --only=id1,id2        只跑指定阶段（id 见 --list）
+  --skip=id1,id2        跳过指定阶段
+  --ci                  CI 对齐模式（语义由各任务模块自行解释）
+  --profile=<p>         附加构建档位（语义由各任务模块自行解释）
+  --list                只列出阶段与任务，不执行
+  --help, -h            打印本用法并退出（**不跑任何阶段**）
+
+  查用法一律用 --help：本脚本只认已识别的开关，未知参数不会报错——--help 被当未知
+  参数时会照常跑完全量门禁并覆盖日志。`)
+  process.exit(0)
+}
 
 const NOISE =
   /^(?:\s*$|.*\r$|\s*(Compiling|Checking|Downloading|Downloaded|Updating|Locking|Adding|Removing|Finished|Blocking|Waiting|Fresh|Documenting|Building)\b)/
