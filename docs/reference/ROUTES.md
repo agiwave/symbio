@@ -92,7 +92,7 @@
 |------|------|----------|
 | `session/chat/send` | 发起 AI 对话（流式；实际入口） | `Session` |
 | `session/chat/abort` | 中止进行中的对话 | `Empty` |
-| `session/stats` | 读本会话 v2 事实源的**七列**读数（时延分位 / 兜底率 / 成本台账 / 校准 `calibration` = `{by_skill: {<skill_id>: {skill_id, uses, fallbacks}}}`：技能的使用与回退计数（`confidence = 1 − 回退率` 由投影算） / 断点 / 声誉 `reputation` = `{own, by_principal}`：按主体分组的立约-守约-违约与打分 / 就绪任务集 `readyset` = `{ready: [{task_id, seq, depends_on}]}` 按 `task_id` 字典序的调度候选集）+ 不变量清单 `invariants`（`check_all` 八条，空 = 全绿）——纯读，零副作用。载荷 `{ principal?: string }` 可声明**读方身份** | `SessionStats` |
+| `session/stats` | 读本会话 v2 事实源的**八列**读数（时延分位 / 兜底率 / 成本台账 / 校准 `calibration` = `{by_skill: {<skill_id>: {skill_id, uses, fallbacks}}}`：技能的使用与回退计数（`confidence = 1 − 回退率` 由投影算） / 断点 / 声誉 `reputation` = `{own, by_principal}`：按主体分组的立约-守约-违约与打分 / 就绪任务集 `readyset` = `{ready: [{task_id, seq, depends_on}]}` 按 `task_id` 字典序的调度候选集 / 转写 `transcript` = `{entries: [{role, text}]}`：按事件顺序的对话（`user.message` / `chat.assistant.final` / `chat.assistant.fallback` 三格））+ 不变量清单 `invariants`（`check_all` 八条，空 = 全绿）——纯读，零副作用。载荷 `{ principal?: string }` 可声明**读方身份** | `SessionStats` |
 
 > 会话与消息的增删改查**全部**经 VDFS 地址完成；`chat/send`、`chat/abort` 是编排 / 控制，
 > `stats` 是读数——三者都不是数据操作。前两者的**实时面**都走 `event_bus` 的 `vdfs` 频道
@@ -105,10 +105,10 @@
 > 声明了才按 `can_see` 判可见域（`thread_private` 缺省，C10）——属主全量、**非属主读数为空**
 > （含矩阵内主体；`has_wal` 仍为真，于是「有源但不给你看」与「没有源」可分辨）。
 > 载荷只回答「我是谁」，不接受声明「能看到什么」——那等于给自己授权。
-> 可见域**只判一次**：四列、不变量、声誉与就绪集列共用同一个答案，读不出时声誉是**整列**
+> 可见域**只判一次**：四列、不变量、声誉、就绪集与转写列共用同一个答案，读不出时声誉是**整列**
 > `{}`（不是零值条目）——全有全无，免得「没人立过约」与「不给你看」同形；
-> 就绪集与四列同形（空切片 ⇒ `{ready: []}`）——「没有就绪任务」与「不给你看」由
-> `has_wal` 与列的上下游分辨。
+> 就绪集与转写列跟四列同形（空切片 ⇒ `{ready: []}` / `{entries: []}`）——「没有就绪任务 /
+> 没有对话」与「不给你看」由 `has_wal` 与列的上下游分辨。
 
 ### 会话级操作已并入 VDFS（专用路由不再存在）
 

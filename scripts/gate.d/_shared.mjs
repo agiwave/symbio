@@ -560,7 +560,17 @@ export const BASELINE = {
   //      `ctx[SESSION_ID]`）。验收 = 台账从**会话目录**读而非插件目录 1 例
   //      （三侧断言：插件目录同名文件不得被读走 / 会话目录读得出账 / 无会话 id ⇒ 零账），
   //      同文件另两条既有用例改夹具（`test_ctx` → `gate_ctx`）不增计数。端到端见 e2e `t33`。
-  rustTests: 1296,
+  // 1297（plan/12 批 2 转写读列，2026-10-05）——`1296 → 1297`，**+1**。
+  //      [plan/12 §批 2](../../docs/plan/12-价值验收与基线埋点.md)：把 `transcript`
+  //      投影接进 `plugins/session/stats.rs` 的 `SessionStats` 成最后一列（七个投影
+  //      里最后一个接上生产读出口的），与四列同一份切片、同一个 as-of，
+  //      `may_read = false` 时同样走空切片（`{ entries: [] }`，四列形态）。判据 =
+  //      `transcript_column_reads_the_conversation_back_from_the_wal` 1 例（复算相等 +
+  //      期望值钉死 + 删一格 final ⇒ 那一句从转写里消失 + 非属主 ⇒ 空表）。端到端
+  //      见 e2e `t37`（两轮真实对话 ⇒ 出口转写与 WAL 的三格逐条对账，按目录发现式
+  //      加载，不进本格计数）。**纯读**：`transcript` 投影早已被 `actors::Reasoner`
+  //      消费，无 `#[allow(dead_code)]` 可摘，故不进 04 §3.1 的清偿批次表。
+  rustTests: 1297,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

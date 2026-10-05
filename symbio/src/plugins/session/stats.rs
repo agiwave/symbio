@@ -32,7 +32,7 @@ use std::sync::Arc;
 use serde::Serialize;
 
 use crate::symbio_core::{
-    calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, Budget,
+    calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Budget,
     EventWalStore, PermissionMatrix, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginPayload, Seq, Store, VisScope, SESSION_ID,
 };
@@ -112,6 +112,22 @@ pub(crate) struct SessionStats {
     /// 与「没有任务 / 依赖未闭合」本来就同值，两种「空」由 `has_wal` 与本列的
     /// 上下游（清单在不在）分辨，不靠列的形状。
     pub readyset: serde_json::Value,
+    /// 转写（**对话面读侧**，[plan/12 批 2](../../../docs/plan/12-价值验收与基线埋点.md)）：
+    /// `transcript` 投影原样序列化（`{ entries: [ { role, text } ] }`，按事件顺序 =
+    /// append-only 的时间序；`role` 是 `"user"` / `"assistant"`）。
+    ///
+    /// 读的是**事实源本身**（`user.message` / `chat.assistant.final` /
+    /// `chat.assistant.fallback` 三格），不是会话存储里的消息副本——同一份事实既喂
+    /// 模型（`Reasoner` 组 prompt 的输入）又能从这里读回，ADR-044 的「实测与判据同源」。
+    ///
+    /// 归**四列**那一族（同切片、同 as-of、`may_read = false ⇒ 空切片` ⇒
+    /// `{ entries: [] }`），不取声誉列的空对象形态：对话为空与「不给你看」由 `has_wal`
+    /// 分辨——同一份判定，换个列名不换判据。
+    ///
+    /// 逐条可见域（「这条是谁说的」）属 [11 §2-E](./11-多执行器与多主体加固实施方案.md)
+    /// 的呈现面过滤（S08 的 `vis_scope`），落地前本列只有**整列**闸——与其余各列同款，
+    /// 不在这里先造一个半开的判据。
+    pub transcript: serde_json::Value,
 }
 
 /// `session/stats` 的请求体：**全部可选**——不传 = 本机默认（今天的行为）。
@@ -127,9 +143,11 @@ pub(crate) struct StatsRequest {
     pub principal: Option<String>,
 }
 
-/// 读一个会话的事实源，出四列读数 + 校准 / 声誉 / 就绪集三列 + 不变量清单。
+/// 读一个会话的事实源，出四列读数 + 校准 / 声誉 / 就绪集 / 转写四列 + 不变量清单。
 ///
-/// 纯读：不写文件、不改网格、不碰会话存储（消息 / 转写）。
+/// 纯读：不写文件、不改网格、不碰会话存储（消息 / 转写）。转写列读的是**事实源**
+/// （WAL）里的三格，不是会话存储那份消息副本——本函数只经 `open_readonly` 打开
+/// 一个文件，别的盘面一概不碰。
 ///
 /// `viewer = Some(身份)` 时先按可见域取**可读切片**再出各列（**读什么由能看什么
 /// 决定**，不是先算完再裁结果）；`None` = 本机默认，与判定引入之前逐字一致。
@@ -156,7 +174,7 @@ pub(crate) fn read(
     // 属主本人 = 全量读数（与不声明时逐字一致）；非属主 / 矩阵外主体 = **空切片**
     // ⇒ 四列全零、就绪集为空、不变量清单为空，与 `has_wal: true` 并排即可分辨「有源但不给你
     // 看」，而不是被读成「这里没有数」。
-    // 可见域只判**一次**：四列、声誉列与就绪集列共用同一个答案——两个判定点 = 两套判据，
+    // 可见域只判**一次**：四列、声誉列、就绪集列与转写列共用同一个答案——两个判定点 = 两套判据，
     // 必然漂移成「四列能看、声誉不能看」这种没有理由的半开半掩。
     let may_read = match viewer {
         None => true,
@@ -249,6 +267,17 @@ pub(crate) fn read(
     )
     .map_err(|e| PluginError::InternalError(format!("就绪集序列化失败：{e}")))?;
 
+    // 转写列（对话面读侧，[plan/12 批 2](../../../docs/plan/12-价值验收与基线埋点.md)）：
+    // 与四列同一份切片、同一个 as-of。口径（三格 → 两条角色）只活在 core 的 `transcript`
+    // 投影里，本处只取数 + 排版；`may_read = false` 时切片已空 ⇒ `{ entries: [] }`
+    // （四列形态，与就绪集 / 校准同族）。
+    let transcript = serde_json::to_value(
+        transcript()
+            .apply(&snapshot, i64::MAX, Budget::generous())
+            .value,
+    )
+    .map_err(|e| PluginError::InternalError(format!("转写序列化失败：{e}")))?;
+
     Ok(SessionStats {
         session_id: session_id.to_string(),
         wal: wal.display().to_string(),
@@ -260,6 +289,7 @@ pub(crate) fn read(
         invariants,
         reputation,
         readyset,
+        transcript,
     })
 }
 

@@ -9,8 +9,8 @@
 
 use super::read;
 use crate::symbio_core::{
-    calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, Budget, Entity,
-    Event, EventEnvelope as _, EventWalStore, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK,
+    calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Budget,
+    Entity, Event, EventEnvelope as _, EventWalStore, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK,
     EVENT_ASSISTANT_FINAL, EVENT_MEMORY_RECALLED, EVENT_TASK_OPENED, EVENT_USER_MESSAGE,
 };
 use std::path::{Path, PathBuf};
@@ -246,6 +246,11 @@ fn missing_wal_is_an_honest_zero_and_creates_nothing() {
     assert_eq!(got.checkpoint["event_count"], 0);
     assert_eq!(got.cost["total_ms"], 0);
     assert_eq!(got.invariants, serde_json::json!([]), "空事实源 ⇒ 断言全绿");
+    assert_eq!(
+        got.transcript,
+        serde_json::json!({ "entries": [] }),
+        "没有事实源 ⇒ 转写为空表（有据的空，不是缺列）"
+    );
     assert!(
         !wal.exists(),
         "读方不得为了读而创建事实源文件——那会把「没跑过一轮」变成「跑过一轮空的」"
@@ -310,6 +315,12 @@ fn a_non_owner_reads_nothing_at_all() {
             got.reputation,
             serde_json::json!({}),
             "{viewer}: 没有可见事实 ⇒ 不替你看不见的主体报数"
+        );
+        // 转写列同四列一起没（空切片 ⇒ `{entries: []}`）：别人的对话不该从你的读数里漏出去。
+        assert_eq!(
+            got.transcript,
+            serde_json::json!({ "entries": [] }),
+            "{viewer}: 没有可见事实 ⇒ 转写为空表"
         );
     }
 }
@@ -512,4 +523,61 @@ fn calibration_column_recomputes_and_moves_with_the_wal() {
     .expect("读数");
     assert_eq!(denied.calibration, serde_json::json!({ "by_skill": {} }));
     assert!(denied.has_wal, "has_wal 独立于可见域");
+}
+
+/// 转写列（**对话面读侧**，[plan/12 批 2](../../../../docs/plan/12-价值验收与基线埋点.md)）：
+/// 读的是**事实源的三格**（`user.message` / `chat.assistant.final` /
+/// `chat.assistant.fallback`）而不是会话存储里的消息副本。
+///
+/// 判据 = 复算同源（口径只活在 core 的 `transcript` 投影）+ 期望值钉死 + 反向
+/// （删一格 ⇒ 那一句从转写里消失）+ 读侧闸（非属主 ⇒ `{entries: []}`，四列形态）。
+#[test]
+fn transcript_column_reads_the_conversation_back_from_the_wal() {
+    let wal = seed("transcript");
+    let got = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).expect("读数");
+
+    // 复算：出口的转写列与直接 `apply` 逐字相等（口径只活在 core 的投影，出口不复判）。
+    let ro = EventWalStore::open_readonly(&wal).expect("WAL 只读");
+    let snap = ro.range(Seq::new(0));
+    let direct = serde_json::to_value(
+        transcript()
+            .apply(&snap, i64::MAX, Budget::generous())
+            .value,
+    )
+    .expect("序列化");
+    assert_eq!(got.transcript, direct, "转写列必须复算相等");
+
+    // 期望值直接写在这里（不从出口自己身上取）：种子的四格 → user/assistant 交替两条。
+    // 兜底话术（`chat.assistant.fallback` 的 `why`）是用户**实际看到**的回复，也算 assistant 行。
+    assert_eq!(
+        got.transcript["entries"],
+        serde_json::json!([
+            { "role": "user", "text": "你好" },
+            { "role": "assistant", "text": "答" },
+            { "role": "user", "text": "再问" },
+            { "role": "assistant", "text": "模型超时" },
+        ]),
+        "转写按事件顺序读出两条问答"
+    );
+
+    // 反向：删掉成功轮的收束格 ⇒ 对应那一句必须从转写里消失（证明它真的在读文件，不是常数）。
+    drop_line(&wal, "f0");
+    let after = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).expect("读数");
+    let entries = after.transcript["entries"].as_array().expect("条目数组");
+    assert_eq!(entries.len(), 3, "删一条 final ⇒ 转写 4 → 3：{entries:?}");
+    assert!(
+        !entries.iter().any(|e| e["text"] == "答"),
+        "被删的那句不得再出现在转写里：{entries:?}"
+    );
+
+    // 读侧闸：非属主 ⇒ 空切片 ⇒ `{ entries: [] }`（与就绪集 / 校准同族，不是声誉的空对象）。
+    let denied = read(
+        "s1",
+        &wal,
+        Some(crate::symbio_core::authz::PRINCIPAL_MAIN),
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+    )
+    .expect("读数");
+    assert_eq!(denied.transcript, serde_json::json!({ "entries": [] }));
+    assert!(denied.has_wal, "has_wal 独立于可见域：文件在，只是不给你看");
 }
