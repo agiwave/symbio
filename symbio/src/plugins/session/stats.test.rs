@@ -9,9 +9,9 @@
 
 use super::read;
 use crate::symbio_core::{
-    check_all, checkpoint, cost_ledger, fallback_rate, slo_report, Budget, Entity, Event,
-    EventEnvelope as _, EventWalStore, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK,
-    EVENT_ASSISTANT_FINAL, EVENT_TASK_OPENED, EVENT_USER_MESSAGE,
+    calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, Budget, Entity,
+    Event, EventEnvelope as _, EventWalStore, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK,
+    EVENT_ASSISTANT_FINAL, EVENT_MEMORY_RECALLED, EVENT_TASK_OPENED, EVENT_USER_MESSAGE,
 };
 use std::path::{Path, PathBuf};
 
@@ -445,4 +445,71 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
     assert_eq!(denied.readyset, serde_json::json!({ "ready": [] }));
     assert_eq!(denied.invariants, serde_json::json!([]));
     assert!(denied.has_wal, "has_wal 独立于可见域：文件在，只是不给你看");
+}
+
+/// 校准列（S9 步 22 的读侧，[plan/12 批 1](../../../../docs/plan/12-价值验收与基线埋点.md)）：
+/// 读数 == 直接 `apply`（复算）+ 随事实源**反向**变化（证明它在算，不是常数）。
+///
+/// 观测面 = 路由收束时落的 `memory.recalled{skill_id, fallback}`（`v2_skills::route`
+/// 的产物）——本处按**写方落下的真实形状**造（`Memory × Asserted`、`turn = 0`、
+/// `produced_by` 指向本轮用户格），只把载荷换成校准认的那两把钥匙。
+#[test]
+fn calibration_column_recomputes_and_moves_with_the_wal() {
+    let wal = seed("calibration");
+    {
+        let store = EventWalStore::open(&wal).expect("WAL");
+        for (id, fallback) in [("recalled-1", false), ("recalled-2", true)] {
+            store
+                .append(
+                    Event::pending(
+                        id,
+                        EVENT_MEMORY_RECALLED,
+                        Entity::Memory,
+                        Verb::Asserted,
+                        0,
+                        "agent:main",
+                    )
+                    .with_produced_by(0)
+                    .with_payload(serde_json::json!({
+                        "found": 1,
+                        "skill_id": "sk-a",
+                        "fallback": fallback,
+                    })),
+                )
+                .expect("路由观测入格");
+        }
+    }
+
+    let got = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).expect("读数");
+
+    // 复算：出口的校准列与直接 `apply` 逐字相等（口径只活在 core，出口不复判）。
+    let ro = EventWalStore::open_readonly(&wal).expect("WAL 只读");
+    let snap = ro.range(Seq::new(0));
+    let direct = serde_json::to_value(
+        calibration()
+            .apply(&snap, i64::MAX, Budget::generous())
+            .value,
+    )
+    .expect("序列化");
+    assert_eq!(got.calibration, direct, "校准列必须复算相等");
+    // 口径：sk-a 用了 2 次、其中回退 1 次（`confidence = 1 − 回退率` 由 core 算）。
+    assert_eq!(got.calibration["by_skill"]["sk-a"]["uses"], 2);
+    assert_eq!(got.calibration["by_skill"]["sk-a"]["fallbacks"], 1);
+
+    // 反向：删掉回退那条 ⇒ 回退数 1 → 0（读数跟着事实源动）。
+    drop_line(&wal, "recalled-2");
+    let after = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).expect("读数");
+    assert_eq!(after.calibration["by_skill"]["sk-a"]["uses"], 1);
+    assert_eq!(after.calibration["by_skill"]["sk-a"]["fallbacks"], 0);
+
+    // 读侧闸：非属主 ⇒ 空切片 ⇒ `{ by_skill: {} }`（与就绪集列同族，不是声誉的空对象）。
+    let denied = read(
+        "s1",
+        &wal,
+        Some(crate::symbio_core::authz::PRINCIPAL_MAIN),
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+    )
+    .expect("读数");
+    assert_eq!(denied.calibration, serde_json::json!({ "by_skill": {} }));
+    assert!(denied.has_wal, "has_wal 独立于可见域");
 }

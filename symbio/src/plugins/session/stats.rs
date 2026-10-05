@@ -32,8 +32,8 @@ use std::sync::Arc;
 use serde::Serialize;
 
 use crate::symbio_core::{
-    check_all, checkpoint, cost_ledger, fallback_rate, slo_report, Budget, EventWalStore,
-    PermissionMatrix, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, Budget,
+    EventWalStore, PermissionMatrix, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginPayload, Seq, Store, VisScope, SESSION_ID,
 };
 
@@ -73,6 +73,16 @@ pub(crate) struct SessionStats {
     pub tiers: Vec<TierRow>,
     /// 成本台账（`cost_ledger` 视图原样序列化）。
     pub cost: serde_json::Value,
+    /// 校准（S9 步 22 的**读侧**，[plan/12 批 1](../../../docs/plan/12-价值验收与基线埋点.md)）：
+    /// `calibration` 投影原样序列化（`{ by_skill: { <skill_id>: { skill_id, uses,
+    /// fallbacks } } }`，按 `skill_id` 字典序）——`confidence = 1 − 回退率` 的口径活在
+    /// core 的投影里，本处不重算。
+    ///
+    /// 观测面是路由落下的 `memory.recalled{skill_id, fallback}`（数据，不加新格子），
+    /// 所以「本会话没编过技能」与「编了但一次没判过」都读成 `{ by_skill: {} }`——
+    /// **有据的空**，不是缺列。与四列同一份切片、同一个 as-of，`may_read = false`
+    /// 时同样走空切片（与就绪集列同族，不取声誉列的空对象形态）。
+    pub calibration: serde_json::Value,
     /// 断点（`checkpoint` 视图原样序列化：`last_seq` / `event_count` /
     /// `kind_counts`——末两项就是「这一格里到底有多少事实」）。
     pub checkpoint: serde_json::Value,
@@ -117,7 +127,7 @@ pub(crate) struct StatsRequest {
     pub principal: Option<String>,
 }
 
-/// 读一个会话的事实源，出四列读数 + 声誉 / 就绪集两列 + 不变量清单。
+/// 读一个会话的事实源，出四列读数 + 校准 / 声誉 / 就绪集三列 + 不变量清单。
 ///
 /// 纯读：不写文件、不改网格、不碰会话存储（消息 / 转写）。
 ///
@@ -171,6 +181,11 @@ pub(crate) fn read(
     let cost = cost_ledger()
         .apply(&snapshot, i64::MAX, Budget::generous())
         .value;
+    // 校准列（[plan/12 批 1](../../../docs/plan/12-价值验收与基线埋点.md)）：与四列同一份
+    // 切片、同一个 as-of。观测面 = 路由收束时落的 `memory.recalled{skill_id, fallback}`。
+    let cal = calibration()
+        .apply(&snapshot, i64::MAX, Budget::generous())
+        .value;
     let ck = checkpoint()
         .apply(&snapshot, i64::MAX, Budget::generous())
         .value;
@@ -206,6 +221,8 @@ pub(crate) fn read(
 
     let cost = serde_json::to_value(&cost)
         .map_err(|e| PluginError::InternalError(format!("成本台账序列化失败：{e}")))?;
+    let calibration = serde_json::to_value(&cal)
+        .map_err(|e| PluginError::InternalError(format!("校准序列化失败：{e}")))?;
     let checkpoint = serde_json::to_value(&ck)
         .map_err(|e| PluginError::InternalError(format!("断点序列化失败：{e}")))?;
     let invariants = serde_json::to_value(check_all(&snapshot))
@@ -238,6 +255,7 @@ pub(crate) fn read(
         has_wal,
         tiers,
         cost,
+        calibration,
         checkpoint,
         invariants,
         reputation,

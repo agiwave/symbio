@@ -716,6 +716,11 @@ pub struct SkillCompiler;
 
 impl SkillCompiler {
     /// 编译一条技能。`source_seq`：源轨迹（成功任务的终态事件）seq。
+    ///
+    /// 信封里的 `actor` / `turn` 是**占位**（本机主智能体 / `0`）：核心契约只管
+    /// 「这条事件说什么」，记在谁头上、发生在哪一轮由部署的写方落格前归位
+    /// （`plugins/session/v2_skills.rs::compile`——`memory × *` 的 actor 是属主，
+    /// 召回投影按它过滤，占位不归位技能就进不了召回视图）。
     pub fn compile(&self, skill_id: &str, trigger: &str, response: &str, source_seq: u64) -> Event {
         Event::pending(
             format!("skill-{skill_id}-{source_seq}"),

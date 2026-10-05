@@ -540,7 +540,18 @@ export const BASELINE = {
   //      指出先落那条）+ 同坐标别的 kind 不算用户开轮 1 例 + 经 `check_all` 合跑只红
   //      这一条 1 例。端到端另在 e2e `t28` 加第三刀（复制一格开轮事件 ⇒ `invariants`
   //      列报「每 turn 至多 1 条开轮」），按目录发现式加载，不进本格计数。
-  rustTests: 1293,
+  // 1295（plan/12 批 1 校准读列 + 并入的 actor 归位，2026-10-05）——`1293 → 1295`，**+2**。
+  //      [plan/12 §批 1](../../docs/plan/12-价值验收与基线埋点.md)：把 `calibration`
+  //      投影接进 `plugins/session/stats.rs` 的 `SessionStats` 成第五列（四列 + 校准 /
+  //      声誉 / 就绪集），与四列同一份切片、同一个 as-of，`may_read = false` 时同样走空
+  //      切片（`{ by_skill: {} }`）。判据 = `calibration_column_recomputes_and_moves_
+  //      with_the_wal` 1 例（追加两条 `memory.recalled` ⇒ 复算相等 + `uses` / `fallbacks`
+  //      随切片动；非属主 ⇒ 空视图）。端到端另在 e2e `t28` 加第四注（照抄真实行形状注入
+  //      `memory.recalled` ⇒ 逐字段断言 `uses` / `fallbacks`），不进本格计数。
+  //      同批并入**另一处会话**的 SkillCompiler `actor` 归位修复（写侧前提：技能落格前
+  //      归位成属主，否则生产召回视图看不见技能 ⇒ 校准列永远空），其用例
+  //      `the_production_recall_view_sees_the_compiled_skill` 1 例计入本格。
+  rustTests: 1295,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

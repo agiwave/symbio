@@ -3,7 +3,7 @@
 //! （同 trigger 不重编译；零使用不判死、一次回退即摘；本轮没技能 ⇒ 一行 I/O 都不走）。
 
 use super::{compile, route, SKILL_TAG};
-use crate::symbio_core::authz::PRINCIPAL_MAIN;
+use crate::symbio_core::authz::{PRINCIPAL_MAIN, PRINCIPAL_USER};
 use crate::symbio_core::{
     check_all, recall, Budget, Entity, Event, EventWalStore, Seq, Store, Verb,
     EVENT_ASSISTANT_FINAL, EVENT_MEMORY_ENCODED, EVENT_MEMORY_RECALLED, EVENT_USER_MESSAGE,
@@ -80,8 +80,12 @@ fn observe(store: &EventWalStore, n: usize, skill_id: &str, fallback: bool, anch
 }
 
 /// 本会话当前的召回视图（技能就在里面——`tag` 由投影从载荷带出来）。
+///
+/// viewer 取**属主**（与生产读方 `v2_memory::recall_view` 同一个 viewer）：
+/// `memory × *` 的 actor 是属主、投影按 `actor == viewer` 过滤，两个 viewer
+/// 不一致时单测看得到的东西生产看不到（断链就是这么溜进来的）。
 fn view_of(store: &EventWalStore) -> crate::symbio_core::RecallView {
-    recall(PRINCIPAL_MAIN, None)
+    recall(PRINCIPAL_USER, None)
         .apply(&store.range(Seq::new(0)), i64::MAX, Budget::generous())
         .value
 }
@@ -157,6 +161,11 @@ fn compile_writes_a_sourced_skill_exactly_once_per_trigger() {
     );
     assert_eq!(skill.turn, 0, "轮号是写方口径，不认 core 造信封时的占位");
     assert_eq!(skill.ts, 1_700_000_000_000, "ts 是编译时刻（写方给）");
+    assert_eq!(
+        skill.actor, PRINCIPAL_USER,
+        "actor 归位属主——`memory × *` 的 actor 是属主不是作者，占位（agent:main）\
+         会让召回投影按 `actor == viewer` 把技能挡在视图外（断链即红）"
+    );
     let skill_id = skill
         .payload
         .get("skill_id")
@@ -251,4 +260,55 @@ fn without_any_skill_the_reader_touches_nothing() {
     // 目录里根本没有 WAL 的情形同样不炸（读方不创建文件）。
     let missing = tmp_dir("missing-wal");
     assert!(route(&missing, &mut view).is_empty());
+}
+
+/// 链路前提（[plan/12 批 1](../../../../docs/plan/12-价值验收与基线埋点.md) 的「写侧
+/// 前提」+ [plan/11 批 2 ③](../../../../docs/plan/11-多执行器与多主体加固实施方案.md)
+/// 的接线判据）：技能入格后，**生产读方** `v2_memory::recall_view` 必须把它召回，
+/// 随后 `route` 必须真的判出观测。
+///
+/// 反向即断链：`memory × *` 的 actor 是属主（`PRINCIPAL_USER`），写方归位前是 core
+/// 的占位 `"agent:main"`，召回投影按 `actor == viewer`（viewer = 属主）过滤 ⇒ 技能被
+/// 挡在视图外 ⇒ `route` 恒快判返回、观测永不落格、校准账零使用——单测用错了 viewer
+/// （`agent:main`）时这条链**看起来**是通的，只有走生产读方才看得见。
+#[test]
+fn the_production_recall_view_sees_the_compiled_skill() {
+    // `recall_view` 扫 `<根>/*​/v2-events.wal`：根自己造，不借全局临时目录
+    //（否则会扫进并行跑的其它用例的会话）。
+    let root = tempfile::tempdir().expect("临时根");
+    let session = root.path().join("s-1");
+    std::fs::create_dir_all(&session).expect("会话目录");
+    {
+        let store = EventWalStore::open(wal_of(&session)).expect("WAL");
+        let anchor = seed_turn(&store);
+        let snap = store.range(Seq::new(0));
+        compile(
+            &store,
+            &snap,
+            0,
+            anchor,
+            "帮我写测试",
+            "好的，先写正向用例。",
+            1_700_000_000_000,
+        )
+        .expect("编译入格")
+        .expect("首次必须产出技能");
+    }
+
+    let mut view =
+        super::super::v2_memory::recall_view(&session).expect("技能是一条记忆 ⇒ 视图非空");
+    assert!(
+        view.entries.iter().any(|e| e.tag == SKILL_TAG),
+        "生产读方必须召回技能：{:?}",
+        view.entries
+    );
+
+    // 路由半边真的判得动：生产视图 → 观测（零使用 ⇒ 快路、不摘条目）。
+    let obs = route(&session, &mut view);
+    assert_eq!(
+        obs.len(),
+        1,
+        "生产视图 → 路由必须产出一条观测（断链时这里是 0）：{obs:?}"
+    );
+    assert!(!obs[0].1, "零使用的新技能不判死 ⇒ 快路 fallback = false");
 }

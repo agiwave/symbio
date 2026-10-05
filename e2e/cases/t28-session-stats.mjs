@@ -10,10 +10,11 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// [12 批 0](../../docs/plan/12-价值验收与基线埋点.md) 的出口判据（原文见该处）：
-// 从出口读到的 P95 / 兜底率必须与**读方复算**逐字相等；**反向用例三刀**——
-// 删收束格 / 删开轮格 / **复制**开轮格 ⇒ 对应的列与不变量清单必须跟着变
-// （证明它真的在算，不是常数）。
+// [12 批 0 / 批 1](../../docs/plan/12-价值验收与基线埋点.md) 的出口判据（原文见该处）：
+// 从出口读到的每一列必须与**读方复算**逐字相等；**反向用例三刀**——
+// 删收束格 / 删开轮格 / **复制**开轮格 ⇒ 对应的列与不变量清单必须跟着变；
+// 校准列另加**一注**（注入一条路由观测 ⇒ 该列认它）。三刀一注合起来证明
+// 这些列真的在算，不是常数。
 //
 // 为什么必须端到端：复算的逐字相等在 Rust 单测里已钉（`stats.test.rs`），
 // 但它证不了三件**只有这条链路能看见**的事：
@@ -181,6 +182,14 @@ export default defineCase(
           'P95 必须等于文件里成功轮 cost_ms 的最近邻取法值',
         );
         assertEq(stats.cost.total_ms, totalCost, '成本台账 = 文件里 cost_ms 之和');
+        // 校准列（[12 批 1](../../docs/plan/12-价值验收与基线埋点.md)）：本会话没编过技能
+        // （`skill_compile_enabled` 默认 off）⇒ **有据的空**，不是缺列。下一刀注入一条
+        // 观测把它变非空——两刀合起来证明这一列真的在读文件，不是恒空也不是恒有。
+        assertEq(
+          stats.calibration.by_skill,
+          {},
+          `没编过技能 ⇒ 校准列为空（实际: ${JSON.stringify(stats.calibration)}）`,
+        );
 
         // 一轮成功 + 一轮失败 ⇒ 期望值本身也钉死（防止两边一起算错）。
         assertEq(row.turns, 2, '两轮各开一格');
@@ -331,6 +340,65 @@ export default defineCase(
           afterDupOpen.invariants.some((v) => v.why.includes('开轮')),
           `复制开轮格 ⇒「每 turn 至多 1 条开轮」必须红（实际: ${JSON.stringify(afterDupOpen.invariants)}）`,
         );
+
+        // 3d. 往事实源**注入**一条路由观测（`memory.recalled{skill_id, fallback}`）⇒
+        //     校准列必须认它。本会话跑不出真观测（技能编译默认关），所以用**构造**的
+        //     那一条证「这一列真的在读文件」——读数与读方复算逐字相等（[12 批 1]）。
+        const injectObservation = (skillId, fallback) => {
+          const lines = readFileSyncSafe(walPath).split('\n').filter(Boolean);
+          const parsed = lines.map((l) => JSON.parse(l));
+          // 行形状**照抄一条真实事件**，只换定位与载荷：信封的 `entity` / `verb` 等
+          // 枚举拼写不许手写——写错一个字母，`replay` 会把整行当撕裂尾行截断，
+          // 测出来的是解析器不是校准。校准只读载荷的两把钥匙，别的一律不动。
+          const ev = {
+            ...parsed[0],
+            event_id: `obs-${skillId}`,
+            kind: 'memory.recalled',
+            seq: Math.max(...parsed.map((e) => e.seq ?? -1)) + 1,
+            payload: { skill_id: skillId, fallback },
+          };
+          writeFileSync(walPath, `${lines.join('\n')}\n${JSON.stringify(ev)}\n`, 'utf8');
+        };
+
+        injectObservation('sk-e2e', true);
+        const afterObs = (await api.invoke('session/stats', {}, { session_id: SID })).body.data;
+        // ⚠ 不要拿**手写对象字面量**直接比服务端对象：`serde_json::Value` 底层是
+        // BTreeMap ⇒ 服务端 JSON 的键序是**字典序**，字面量的键序是书写序，
+        // `JSON.stringify` 一比就假红。逐字段比（下面的复算同款）。
+        const one = afterObs.calibration.by_skill['sk-e2e'];
+        assert(one, `校准列应认下注入的路由观测（实际: ${JSON.stringify(afterObs.calibration)}）`);
+        assertEq(one.uses, 1, '注入的那条算一次使用');
+        assertEq(one.fallbacks, 1, '带 fallback 标记 ⇒ 回退一次');
+        assertEq(one.skill_id, 'sk-e2e', '条目自带 skill_id（投影的口径，不是用例补的）');
+
+        // 复算：列 == 读方按**同一把钥匙**归并事实源的结果（用例只计数、不复刻统计
+        // 口径——口径属于 `calibration` 投影，出口与用例都只准调它）。
+        const recomputed = new Map();
+        for (const e of readEvents(walPath)) {
+          const skillId = e.payload?.skill_id;
+          if (!skillId || typeof e.payload.fallback !== 'boolean') continue;
+          const s = recomputed.get(skillId) ?? { uses: 0, fallbacks: 0 };
+          s.uses += 1;
+          if (e.payload.fallback) s.fallbacks += 1;
+          recomputed.set(skillId, s);
+        }
+        assertEq(
+          Object.keys(afterObs.calibration.by_skill).sort(),
+          [...recomputed.keys()].sort(),
+          '校准列的技能集 == 读方复算（同一把钥匙）',
+        );
+        for (const [skillId, s] of recomputed) {
+          assertEq(
+            afterObs.calibration.by_skill[skillId].uses,
+            s.uses,
+            `${skillId}: uses == 复算`,
+          );
+          assertEq(
+            afterObs.calibration.by_skill[skillId].fallbacks,
+            s.fallbacks,
+            `${skillId}: fallbacks == 复算`,
+          );
+        }
       } finally {
         api.stop();
       }

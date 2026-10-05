@@ -25,6 +25,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use crate::symbio_core::authz::PRINCIPAL_USER;
 use crate::symbio_core::{
     calibration, Budget, Event, EventWalStore, RecallView, Seq, SkillCompiler, SkillRoute,
     SkillRouter, Store, EVENT_MEMORY_ENCODED,
@@ -97,9 +98,16 @@ pub(crate) fn compile(
 
     let skill_id = skill_id_of(&trigger);
     let mut ev = SkillCompiler.compile(&skill_id, &trigger, &content, user_seq);
-    // 信封里的 `turn` 由 core 造的是占位 0；轮号是**写方的口径**（与
-    // `v2_memory::encode` 同一条），落格前归位。`ts` 同理——核心契约只管
-    // 「这条事件说什么」，什么时候发生由写方给（`recalled_event` 同款 `.with_ts`）。
+    // 信封里的 `actor` / `turn` 由 core 造的是占位（`"agent:main"` / `0`）；**`memory × *`
+    // 格子的 actor 是属主、不是作者**——同域三条写方（`v2_memory::encode` /
+    // `consolidated` / `forgotten`）全落 `PRINCIPAL_USER`（巩固与遗忘更不是"用户做的"），
+    // 属主 = `SESSION_OWNER`。而召回投影按 `actor == viewer` 过滤、生产读方
+    // （`v2_memory::recall_view`）的 viewer 就是属主：占位不归位 ⇒ 技能被挡在召回
+    // 视图外 ⇒ `route` 恒快判返回、观测永不落格、校准账零使用——S9 步 22 的生产
+    // 链路正断在这里（[plan/11 批 2 ③] 的 e2e 判据钉的就是这条）。
+    // 轮号 / 时刻同理落格前归位：核心契约只管「这条事件说什么」，
+    // 何时发生、记在谁头上由写方给（`recalled_event` 同款 `.with_ts`）。
+    ev.actor = PRINCIPAL_USER.to_string();
     ev.turn = turn;
     ev.ts = now;
     let seq = store
