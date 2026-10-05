@@ -103,6 +103,51 @@ fn closed_tasks_do_not_count_as_final() {
     assert!(final_unique_per_turn(&events).is_empty());
 }
 
+// ── C2 对偶：每 turn 至多 1 条开轮（`u-{turn}`）────────────────────────
+
+#[test]
+fn one_open_per_turn_passes() {
+    let events = stored(vec![
+        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
+        pending("f0", "chat.assistant.final", Entity::Turn, Verb::Closed, 0),
+        pending("u1", "user.message", Entity::Turn, Verb::Opened, 1),
+        pending("f1", "chat.assistant.final", Entity::Turn, Verb::Closed, 1),
+    ]);
+    assert!(
+        open_unique_per_turn(&events).is_empty(),
+        "每轮只开一次 ⇒ 不报警：{:?}",
+        open_unique_per_turn(&events)
+    );
+}
+
+#[test]
+fn two_opens_in_one_turn_is_detected() {
+    // 同一个 `u-{turn}` 落两回——单写者被绕过的痕迹（plan/11 批 0）。
+    let events = stored(vec![
+        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
+        pending("u0-again", "user.message", Entity::Turn, Verb::Opened, 0),
+    ]);
+    let bad = open_unique_per_turn(&events);
+    assert_eq!(bad.len(), 1, "一轮两条开轮必须被看见");
+    assert_eq!(bad[0].event_id, "u0-again", "违规锚在**后落**的那条上");
+    assert!(
+        bad[0].why.contains("u0"),
+        "违规要指出已存在的那条：{}",
+        bad[0].why
+    );
+}
+
+#[test]
+fn other_kinds_on_the_opened_coordinate_are_not_user_opens() {
+    // 开轮 = `turn × opened` 的 `user.message`；同一坐标上的别的 kind 不是「用户开轮」
+    // （判据与 `unresolved_turns` / `declared_budget_ms` 是同一条：格子 + 名字）。
+    let events = stored(vec![
+        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
+        pending("x0", "turn.reopened", Entity::Turn, Verb::Opened, 0),
+    ]);
+    assert!(open_unique_per_turn(&events).is_empty());
+}
+
 // ── C3 / N5：断言类事件必须带溯源 ──────────────────────────────────────
 #[test]
 fn asserted_with_provenance_passes() {
@@ -176,7 +221,7 @@ fn reply_with_provenance_passes() {
     assert!(produced_by_coverage(&events).is_empty());
 }
 
-// ── check_all：三条合跑 ────────────────────────────────────────────────
+// ── check_all：八条合跑 ────────────────────────────────────────────────
 
 #[test]
 fn check_all_on_clean_sequence_is_empty() {
@@ -265,6 +310,19 @@ fn fault_double_final_is_caught_by_check_all() {
         "{:?}",
         violations
     );
+}
+
+#[test]
+fn fault_double_open_is_caught_by_check_all() {
+    // 重复开轮经 check_all 合跑也必须红，且是**唯一**那条（该轮正常收束 ⇒ 不牵连 C4）。
+    let events = stored(vec![
+        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
+        pending("u0-again", "user.message", Entity::Turn, Verb::Opened, 0),
+        pending("f0", "chat.assistant.final", Entity::Turn, Verb::Closed, 0).with_produced_by(0),
+    ]);
+    let violations = check_all(&events);
+    assert_eq!(violations.len(), 1, "只有开轮这一条红：{violations:?}");
+    assert!(violations[0].why.contains("开轮"), "{violations:?}");
 }
 
 #[test]

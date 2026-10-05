@@ -5,12 +5,14 @@
 //! 每条检查 = 「事件切片 ⇒ 违规清单」。输入是数据，输出是数据——它可以被
 //! 单测双跑、可以挂 CI、可以离线跑在导出的事件序列上，而不需要任何运行时。
 //!
-//! ## 覆盖的 CI 断言（S0 步骤 2 出口判据 + S1 步骤 4 故障注入，[roadmap/S01 §5](../../../../docs/plan/roadmap/S01-最小闭环.md)）
+//! ## 覆盖的 CI 断言（S0 步骤 2 出口判据 + S1 步骤 4 故障注入，[roadmap/S01 §5](../../../../docs/plan/roadmap/S01-最小闭环.md)；
+//! [`open_unique_per_turn`] 随 [plan/11 批 0](../../../../docs/plan/11-多执行器与多主体加固实施方案.md) 补入）
 //!
 //! | 断言 | 不变量 | 检查 | 函数 |
 //! |---|---|---|---|
 //! | C1 | I1 单通道 | `seq` 严格单调、无跳号 | [`seq_monotonic`] |
 //! | C2 / N3 | I1 单通道 | 每 `turn` 至多 1 条 final | [`final_unique_per_turn`] |
+//! | C2 对偶 | I1 单通道 | 每 `turn` 至多 1 条开轮（`u-{turn}`） | [`open_unique_per_turn`] |
 //! | C3 / N5 | I2 无溯源不声明 | 断言类 + 收束类事件 `produced_by` 非空 | [`produced_by_coverage`] |
 //! | C4 | I3 到点必答 | 开过的 turn 必须收束（final 或 fallback） | [`unresolved_turns`] |
 //! | C5 | I3 到点必答 | 事件 `cost_ms` 不得超主体预算 | [`budget_exceeded`] |
@@ -107,6 +109,39 @@ pub fn final_unique_per_turn(events: &[Event]) -> Vec<Violation> {
     bad
 }
 
+/// I1 单通道（C2 的对偶）：每 `turn` 至多 1 条**开轮**事件（`u-{turn}`）。
+///
+/// 开轮 = `turn × opened` 格子上的 `user.message`（[plan/01 §6](../../../../docs/plan/01-核心架构.md)），
+/// 与 [`final_unique_per_turn`] 是同一枚硬币的两面——一轮只能**开**一次、只能**收**一次。
+/// 开两次 = 同一个 `u-{turn}` 事件号落进网格两回：那一轮的输入成了两条、`turn` 计数
+/// 跟着虚增（兜底率的分母就在这条上），而**没有任何下游会察觉**——单写者被绕过的
+/// 典型痕迹。[plan/11 批 0](../../../../docs/plan/11-多执行器与多主体加固实施方案.md)
+/// 的 0-A 在**写入侧**用写者令牌堵住并发写，本检查是它在**事实源上**的观测面：
+/// 令牌漏了、或有人绕过唯一写入口直接落盘，这里就红。
+pub fn open_unique_per_turn(events: &[Event]) -> Vec<Violation> {
+    let mut seen: Vec<(u64, &str)> = Vec::new();
+    let mut bad = Vec::new();
+    for e in events {
+        let is_open =
+            e.entity == Entity::Turn && e.verb == Verb::Opened && e.kind == "user.message";
+        if !is_open {
+            continue;
+        }
+        if let Some((_, first_id)) = seen.iter().find(|(turn, _)| *turn == e.turn) {
+            bad.push(Violation::at(
+                e,
+                format!(
+                    "turn {} 已有开轮事件（{}），又出现一条——每 turn 至多 1 条 user.message",
+                    e.turn, first_id
+                ),
+            ));
+        } else {
+            seen.push((e.turn, e.event_id.as_str()));
+        }
+    }
+    bad
+}
+
 /// C3 / N5（I2）：**声明类**事件必须带溯源。
 ///
 /// 「声明」= 宣称某件事为真或已发生，三类（[plan/03 §2 I2](../../../../docs/plan/03-演进与验证.md)）：
@@ -183,6 +218,7 @@ const MAX_REWORK_ROUNDS: u32 = 3;
 pub fn check_all(events: &[Event]) -> Vec<Violation> {
     let mut all = seq_monotonic(events);
     all.extend(final_unique_per_turn(events));
+    all.extend(open_unique_per_turn(events));
     all.extend(produced_by_coverage(events));
     all.extend(unresolved_turns(events, true));
     all.extend(budget_exceeded(events, declared_budget_ms(events)));

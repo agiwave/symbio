@@ -76,12 +76,13 @@ pub(crate) struct SessionStats {
     /// 断点（`checkpoint` 视图原样序列化：`last_seq` / `event_count` /
     /// `kind_counts`——末两项就是「这一格里到底有多少事实」）。
     pub checkpoint: serde_json::Value,
-    /// 不变量违规清单（`check_all` 七条：C1 `seq` 单调 / C2 每轮一条 final /
-    /// C3 断言带溯源 / C4 未收束 / C5 超预算 / `acyclic_deps` 依赖成环或悬空 /
-    /// `rework_bounded` 返工超上界）。**空 = 七条全绿**；每条带 `event_id` 与人话。宽限口径（尾轮在途放行、按声明
-    /// 档位取预算）在 core 的 `check_all`，任务表两条**无宽限**（环与超界不是时序
-    /// 假象），本处只取数——[04 §3.1 批④](../../../docs/plan/04-工程落地.md) 的
-    /// 「不变量进 CI/读侧」：e2e 断言的就是这一列。
+    /// 不变量违规清单（`check_all` 八条：C1 `seq` 单调 / C2 每轮一条 final /
+    /// 每轮一条开轮（C2 对偶）/ C3 断言带溯源 / C4 未收束 / C5 超预算 /
+    /// `acyclic_deps` 依赖成环或悬空 / `rework_bounded` 返工超上界）。
+    /// **空 = 八条全绿**；每条带 `event_id` 与人话。宽限口径（尾轮在途放行、
+    /// 按声明档位取预算）在 core 的 `check_all`，任务表两条**无宽限**（环与超界
+    /// 不是时序假象），本处只取数——[04 §3.1 批④](../../../docs/plan/04-工程落地.md)
+    /// 的「不变量进 CI/读侧」：e2e 断言的就是这一列。
     pub invariants: serde_json::Value,
     /// 声誉（S6 第 15 步的**读侧**，[04 §3.1 批⑧](../../../docs/plan/04-工程落地.md) +
     /// [plan/12 批 2](../../../docs/plan/12-价值验收与基线埋点.md)）：`own` = 本会话

@@ -10,9 +10,10 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// [12 批 0](../../docs/plan/12-价值验收与基线埋点.md) 的出口判据原文：
-// 「跑一轮（含一次兜底）后，从出口读到的 P95 / 兜底率与**读方复算**逐字相等。
-// **反向用例**：删掉一次收束事件 ⇒ 对应那一列必须变化（证明它真的在算，不是常数）」。
+// [12 批 0](../../docs/plan/12-价值验收与基线埋点.md) 的出口判据（原文见该处）：
+// 从出口读到的 P95 / 兜底率必须与**读方复算**逐字相等；**反向用例三刀**——
+// 删收束格 / 删开轮格 / **复制**开轮格 ⇒ 对应的列与不变量清单必须跟着变
+// （证明它真的在算，不是常数）。
 //
 // 为什么必须端到端：复算的逐字相等在 Rust 单测里已钉（`stats.test.rs`），
 // 但它证不了三件**只有这条链路能看见**的事：
@@ -249,6 +250,22 @@ export default defineCase(
           writeFileSync(walPath, `${kept.join('\n')}\n`, 'utf8');
         };
 
+        // 复制刀：把命中的行**再写一遍**——注入「同一个 `u-{turn}` 落两回」。
+        const duplicateMatching = (pred) => {
+          const lines = readFileSyncSafe(walPath).split('\n').filter(Boolean);
+          const out = [];
+          let dup = 0;
+          for (const line of lines) {
+            out.push(line);
+            if (pred(JSON.parse(line))) {
+              out.push(line);
+              dup += 1;
+            }
+          }
+          assert(dup > 0, '复制刀必须真的复制到行，否则测不出变化');
+          writeFileSync(walPath, `${out.join('\n')}\n`, 'utf8');
+        };
+
         // 3a. 删掉唯一的收束格 ⇒ 时延样本列归零
         dropMatching((e) => e.kind === 'chat.assistant.final');
         const afterDropFinal = (await api.invoke('session/stats', {}, { session_id: SID })).body.data;
@@ -297,6 +314,22 @@ export default defineCase(
         assert(
           !afterDropOpen.invariants.some((v) => v.why.includes('未收束')),
           `开轮格被删 ⇒ C4 无从判定（实际: ${JSON.stringify(afterDropOpen.invariants)}）`,
+        );
+
+        // 3c. 把**剩下那一格开轮事件复制成两条** ⇒ 同一个 `u-{turn}` 落两回。
+        //     这一刀钉的是 [11 批 0-B](../../docs/plan/11-多执行器与多主体加固实施方案.md)
+        //     的单写者观测面：写者令牌（0-A）在写入侧堵并发，本不变量在**事实源上**
+        //     把「绕过唯一写入口」的痕迹报出来——令牌漏了，这一条必须红。
+        duplicateMatching((e) => e.kind === 'user.message');
+        const afterDupOpen = (await api.invoke('session/stats', {}, { session_id: SID })).body.data;
+        assertEq(
+          afterDupOpen.tiers[0].turns,
+          2,
+          '重复开轮 ⇒ 同一 turn 被数成两轮（兜底率分母虚增，这正是它的危害）',
+        );
+        assert(
+          afterDupOpen.invariants.some((v) => v.why.includes('开轮')),
+          `复制开轮格 ⇒「每 turn 至多 1 条开轮」必须红（实际: ${JSON.stringify(afterDupOpen.invariants)}）`,
         );
       } finally {
         api.stop();
