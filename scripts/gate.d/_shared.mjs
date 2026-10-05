@@ -551,7 +551,16 @@ export const BASELINE = {
   //      同批并入**另一处会话**的 SkillCompiler `actor` 归位修复（写侧前提：技能落格前
   //      归位成属主，否则生产召回视图看不见技能 ⇒ 校准列永远空），其用例
   //      `the_production_recall_view_sees_the_compiled_skill` 1 例计入本格。
-  rustTests: 1295,
+  // 1296（plan/11 批 2 ③ 熔断台账读列修路径，2026-10-05）——`1295 → 1296`，**+1**。
+  //      补 e2e `t33`（熔断接线）时抓到的**生产 bug**：`BreakerInputs::of` 把
+  //      `session_dir` 当会话目录用，而它实际是**插件目录**（`<homedir>/session`）⇒
+  //      `session_dir.join("v2-events.wal")` 读的是插件根下不存在的文件 ⇒ `spent_ms`
+  //      恒 0 ⇒ 熔断的 `budget-exhausted` 分支永远走不到，且无任何告警（静默失效）。
+  //      修法 = 走 `paths::session_dir(session_dir, session_id)`（session_id 取自
+  //      `ctx[SESSION_ID]`）。验收 = 台账从**会话目录**读而非插件目录 1 例
+  //      （三侧断言：插件目录同名文件不得被读走 / 会话目录读得出账 / 无会话 id ⇒ 零账），
+  //      同文件另两条既有用例改夹具（`test_ctx` → `gate_ctx`）不增计数。端到端见 e2e `t33`。
+  rustTests: 1296,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

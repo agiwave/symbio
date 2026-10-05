@@ -783,6 +783,16 @@ fn note_tasks_skips_payloads_that_cannot_be_a_task_list() {
 
 // ==================== 外部执行闸门（S8 第 20 步，04 §3.1 批⑩） ====================
 
+/// 带 `SESSION_ID` 的请求上下文：闸门的成本台账按「**插件目录** + 会话 id」定位
+/// 事实源（`paths::session_dir`）。夹具必须带上会话 id——少了它闸门退回
+/// 「读插件目录下的 `v2-events.wal`」，而那正是被测的那条错路径
+/// （见 `ledger_is_read_from_the_session_wal_not_the_plugin_dir`）。
+fn gate_ctx(session_id: &str) -> Arc<dyn PluginInvokeRequest> {
+    let req = PluginSimpleRequest::new(None, None);
+    req.set(crate::symbio_core::SESSION_ID, session_id.to_string());
+    Arc::new(req)
+}
+
 /// 判据那一半：授权是**读矩阵**得来的（fail-closed），不是默认放行。
 ///
 /// 本机部署里 `agent:*` 一律继承 `agent:main` 的 grants（含 `produce.artifact`），
@@ -818,11 +828,17 @@ fn external_execution_capability_is_read_from_the_matrix() {
 async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
     let dir = std::env::temp_dir().join("symbio-test/session-tool-executor-gate");
     let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("建会话目录");
+    std::fs::create_dir_all(&dir).expect("建插件目录");
+
+    // 生产布局：事实源在 `<插件目录>/<会话 id>/v2-events.wal`——闸门按会话 id
+    // 定位（`paths::session_dir`）。夹具照生产摆，否则测的是另一条路径。
+    let sid = "gate-sess";
+    let session_dir = crate::plugins::session::paths::session_dir(&dir, sid);
+    std::fs::create_dir_all(&session_dir).expect("建会话目录");
 
     // 台账：一条已耗超过会话累计上限的收束事件（`cost_ledger` 按 actor 归账，
     // ADR-044：闸门读台账，不读运行时计数器）。
-    let store = EventWalStore::open(dir.join(crate::plugins::session::paths::V2_WAL_FILE))
+    let store = EventWalStore::open(session_dir.join(crate::plugins::session::paths::V2_WAL_FILE))
         .expect("打开 WAL");
     store
         .append(
@@ -864,7 +880,7 @@ async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
         &None,
         &sink,
         &abort,
-        test_ctx(),
+        gate_ctx(sid),
         std::slice::from_ref(&parent),
         &dir,
         &mut Vec::new(),
@@ -907,9 +923,9 @@ async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
 async fn relaxing_the_budget_turns_the_same_facts_into_a_pass() {
     let dir = std::env::temp_dir().join("symbio-test/session-tool-executor-gate-open");
     let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("建会话目录");
+    std::fs::create_dir_all(&dir).expect("建插件目录");
 
-    let inputs = BreakerInputs::of(&dir, &test_ctx());
+    let inputs = BreakerInputs::of(&dir, &gate_ctx("gate-open"));
     assert_eq!(inputs.spent_ms, 0, "没有事实源 ⇒ 零账，不是故障");
     assert!(inputs.authorized, "agent:main 持外部执行能力");
 
@@ -936,6 +952,64 @@ async fn relaxing_the_budget_turns_the_same_facts_into_a_pass() {
             0
         ),
         crate::symbio_core::GateDecision::Allow
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// 台账读的是**会话目录**的 WAL，不是插件目录下的同名文件。
+///
+/// 这条钉的是一次真实事故：`session_cost_ms` 曾经只 `session_dir.join(V2_WAL_FILE)`，
+/// 而形参 `session_dir` 是**插件目录**——于是读的是 `<插件目录>/v2-events.wal`
+/// （不存在）⇒ `spent_ms` 恒 0 ⇒ 闸门的预算分支永远走不到，且**没有任何东西会变红**
+/// （熔断格只在判 `Break` 时才落）。判据因此**两侧都钉**：错的路径读不出账，
+/// 对的路径读得出账。
+#[tokio::test]
+async fn ledger_is_read_from_the_session_wal_not_the_plugin_dir() {
+    let dir = std::env::temp_dir().join("symbio-test/session-tool-executor-ledger-path");
+    let _ = std::fs::remove_dir_all(&dir);
+    let sid = "ledger-sess";
+    let session_dir = crate::plugins::session::paths::session_dir(&dir, sid);
+    std::fs::create_dir_all(&session_dir).expect("建会话目录");
+
+    let seed = |path: &std::path::Path| {
+        let store = EventWalStore::open(path).expect("打开 WAL");
+        store
+            .append(
+                crate::symbio_core::Event::pending(
+                    "v2f-ledger",
+                    crate::symbio_core::EVENT_ASSISTANT_FINAL,
+                    crate::symbio_core::Entity::Turn,
+                    crate::symbio_core::Verb::Closed,
+                    0,
+                    crate::symbio_core::authz::PRINCIPAL_MAIN,
+                )
+                .with_cost_ms(LatencyTier::Autonomic.budget_ms() + 1),
+            )
+            .expect("入格");
+    };
+
+    // ① 错的路径（插件目录下的同名文件）：**不得**被读走。
+    seed(&dir.join(crate::plugins::session::paths::V2_WAL_FILE));
+    assert_eq!(
+        BreakerInputs::of(&dir, &gate_ctx(sid)).spent_ms,
+        0,
+        "插件目录下的 v2-events.wal 不是会话事实源（会话在它的子目录里）"
+    );
+
+    // ② 对的路径（插件目录 / 会话 id）：读得出账。
+    seed(&session_dir.join(crate::plugins::session::paths::V2_WAL_FILE));
+    assert_eq!(
+        BreakerInputs::of(&dir, &gate_ctx(sid)).spent_ms,
+        LatencyTier::Autonomic.budget_ms() + 1,
+        "会话事实源里的账必须被读出来（否则预算分支永远走不到）"
+    );
+
+    // ③ 没有会话 id ⇒ 零账（没有会话就没有账，不是"读插件目录的账"）。
+    assert_eq!(
+        BreakerInputs::of(&dir, &test_ctx()).spent_ms,
+        0,
+        "无会话上下文 ⇒ 零账"
     );
 
     std::fs::remove_dir_all(&dir).ok();

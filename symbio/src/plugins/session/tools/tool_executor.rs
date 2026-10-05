@@ -907,7 +907,7 @@ pub fn note_tasks(out: &mut Vec<TaskDeclaration>, name: &str, args: &Value, succ
 /// | 形参 | 取值 | 为什么是它 |
 /// |---|---|---|
 /// | `authorized` | 授权矩阵按能力名判 `produce.artifact` | 未持外部执行能力 ⇒ `Refuse`（**零事件**，验收 1） |
-/// | `spent_ms` | `cost_ledger` 按主体累计 | 「已耗多少」的唯一真源，与 `session/stats` 的成本列同一份切片 |
+/// | `spent_ms` | `cost_ledger` 按主体累计（读**会话目录**的 WAL） | 「已耗多少」的唯一真源，与 `session/stats` 的成本列同一份切片 |
 /// | `requested_ms` | 深度档预算 | 工具循环所在档，本轮**申请**这么多 |
 /// | `budget_ms` | 自主层预算 | 会话累计成本**总预算**——四层时延的第四个取值复用为天花板 |
 ///
@@ -941,7 +941,11 @@ impl BreakerInputs {
         );
         Self {
             authorized,
-            spent_ms: session_cost_ms(session_dir, &principal),
+            spent_ms: session_cost_ms(
+                session_dir,
+                ctx.get(crate::symbio_core::SESSION_ID).as_deref(),
+                &principal,
+            ),
             requested_ms: LatencyTier::Deep.budget_ms(),
             budget_ms: LatencyTier::Autonomic.budget_ms(),
         }
@@ -952,8 +956,26 @@ impl BreakerInputs {
 ///
 /// 与 `session/stats` 的成本列**同一切片同一投影**——两处各算一遍必然漂移成
 /// 「闸门说还有余量、出口说已耗尽」，而错的若是台账，熔断就形同虚设（ADR-044）。
-fn session_cost_ms(session_dir: &std::path::Path, principal: &str) -> u64 {
-    let path = session_dir.join(super::super::paths::V2_WAL_FILE);
+///
+/// ## 路径必须走 `paths::session_dir`，不能只 join 文件名
+///
+/// `session_dir` 形参是**本插件自己的目录**（见 [`process_tool_calls_async`] 的形参
+/// 文档），而事实源在它下面的 `<safe_id(session_id)>/v2-events.wal`。曾经这里直接
+/// `session_dir.join(V2_WAL_FILE)` ⇒ 读的是 `<插件目录>/v2-events.wal`——那个文件
+/// **不存在**，`open_readonly` 失败即返回 0 ⇒ `spent_ms` 恒 0 ⇒ 闸门的预算分支
+/// 永远走不到，而**没有任何东西会变红**（熔断格只在判 `Break` 时才落，判不出来就
+/// 一条都没有）。接线了却永不生效，正是 [11 批 2 ③] 的 e2e 判据要拦的那类静默失效。
+/// 会话 id 缺失（无会话上下文）⇒ 零账：没有会话就没有账，不是"读不到插件目录的账"。
+fn session_cost_ms(
+    session_dir: &std::path::Path,
+    session_id: Option<&str>,
+    principal: &str,
+) -> u64 {
+    let Some(session_id) = session_id.filter(|s| !s.trim().is_empty()) else {
+        return 0;
+    };
+    let path = super::super::paths::session_dir(session_dir, session_id)
+        .join(super::super::paths::V2_WAL_FILE);
     // 只读打开：读方不创建文件、不截尾（`wal.rs::open_readonly`）。
     let Ok(store) = EventWalStore::open_readonly(&path) else {
         return 0;
@@ -999,8 +1021,11 @@ pub async fn process_tool_calls_async(
     abort: &ExecAbortSignal,
     ctx: Arc<dyn PluginInvokeRequest>,
     context_messages: &[ChatMessage],
-    // `session_dir` = **本插件自己的目录**（来自 orchestrator）：工具结果存档落在这里。
-    // 不从请求上下文反推——请求上下文不带 `PLUGIN_DIR`，子智能体下会指到父作用域。
+    // `session_dir` = **本插件自己的目录**（来自 orchestrator）：工具结果存档落在
+    // 它下面的 `<会话 id>/tool_archives`，闸门的成本台账读它下面的
+    // `<会话 id>/v2-events.wal`（会话 id 取自请求上下文，派生统一走
+    // `paths::session_dir`）。不从请求上下文反推插件目录——请求上下文不带
+    // `PLUGIN_DIR`，子智能体下会指到父作用域。
     session_dir: &std::path::Path,
     // 代际立约出参（批⑧）：`agent_run` 的承诺记录，交回调用方随收束入格。
     // out-param 而不是返回值：本函数的返回值是节点对（消费方三处都在用），
