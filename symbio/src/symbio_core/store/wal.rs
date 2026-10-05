@@ -11,13 +11,55 @@
 //! JSONL append-only 文件：每次 append = 一行 JSON + flush。恢复 = 重放文件；
 //! **投影是纯函数，恢复只需要重放，不需要状态迁移**（S05 §2 的关键回报）。
 //!
+//! ## 单写者：跨进程写者令牌
+//!
+//! 「每 thread 一个 FIFO，串行」（[`Store`](super::Store) 五条语义之首）在
+//! S4 之前只由**进程内** `RwLock` 保证：两个进程各持一份 `WalStore`，各自
+//! `head` 从文件重放算出，`append` 只 append 不校验 ⇒ seq 重号 / 事件交错，
+//! 且**没有任何错误信号**（[plan/11 §2-B](../../../../docs/plan/11-多执行器与多主体加固实施方案.md)）。
+//!
+//! 本实现把它升级为**跨进程**的写者令牌：`open` 对一个**旁挂锁文件**
+//! （`<wal>.lock`）取一次非阻塞独占锁（[`File::try_lock`](std::fs::File::try_lock)：
+//! Unix `flock` / Windows `LockFileEx`，随句柄关闭自动释放）。
+//!
+//! | 入口 | 令牌 | `append` |
+//! |---|---|---|
+//! | [`open`](Self::open) 拿到锁 | 持 | 正常落盘 |
+//! | [`open`](Self::open) 拿不到锁 | 不持 | [`AppendError::NotTheWriter`](super::AppendError::NotTheWriter) |
+//! | [`open_readonly`](Self::open_readonly) | 从不取锁 | 同上（读方在类型上就不该写） |
+//!
+//! 拿不到令牌**不报错、降级成「非写者」**：读照常（`range` / `head` 不看令牌），
+//! 只有写被拒。这样「第二个写者」拿到的是一个可判别的信号，而不是一个静默的
+//! 重复 seq——[plan/11 §4](../../../../docs/plan/11-多执行器与多主体加固实施方案.md)
+//! 要的正是这个反向用例。
+//!
+//! ### 锁为什么落在旁挂文件、而不是 WAL 文件自身
+//!
+//! 这是 Windows 逼出来的（实测，非偏好）：`LockFileEx` 是**强制锁**——它不只拦
+//! 别的写者，也拦**别的句柄的读**。把锁打在 WAL 上，会话进行中的读数口
+//! （[`session/stats`](../../plugins/session/stats.rs) 会在任意时刻 `open_readonly`
+//! 同一文件）会直接 `ERROR_LOCK_VIOLATION`。Unix 的 `flock` 是劝告锁、没有这个
+//! 问题，但两平台必须同一套语义，所以锁打在一个**只有写者会碰**的旁挂文件上：
+//! WAL 自身永不被锁，读方照旧自由读。
+//!
+//! 同一实测还给出第二条约束：`.append(true)` 打开的句柄在 Windows 上**没有**
+//! `GENERIC_WRITE`，`set_len` 会 `PermissionDenied`。所以截断（恢复语义）用
+//! 独立的写句柄做，锁句柄只负责"我是写者"这一个事实。
+//!
+//! **重放必须在持锁之后做**：先重放再取锁的话，「重放 → 取锁」之间别的写者落一条，
+//! `head` 就落后一格 ⇒ seq 重号。取锁成功者才重放，`head` 才是权威的。
+//!
 //! ## 提交边界与撕裂行
 //!
 //! 「已提交」= 完整落在盘上的最后一行。进程写到一半被杀 ⇒ 最后一行是撕裂的
 //! （不完整 JSON）⇒ 恢复时丢弃并截断到最后一行完整记录——这是**恢复语义的
 //! 一部分**，不是错误。反向用例（S05 §6.4）证明该边界真实存在。
+//!
+//! 截断是**写方**的语义，因此只有持令牌者才做（[`open_readonly`](Self::open_readonly)
+//! 从不截断，拿不到令牌的降级写者也不截断）。
 
 use std::collections::HashSet;
+use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
@@ -28,6 +70,11 @@ use crate::symbio_core::event::EventEnvelope;
 /// 持久化 Store（`store = wal`，[plan/01 §8](../../../../docs/plan/01-核心架构.md) 参数表取值）。
 pub struct WalStore<E: EventEnvelope> {
     path: PathBuf,
+    /// 写者令牌：`Some` = 本实例持有该事实源的跨进程独占锁，`None` = 非写者。
+    ///
+    /// 句柄指向**旁挂锁文件**（见模块头），不是 WAL 本身——WAL 永不被锁，
+    /// 读方才能随时进。锁随句柄关闭自动释放，故不需要显式解锁。
+    writer: Option<File>,
     inner: RwLock<WalInner<E>>,
 }
 
@@ -37,38 +84,74 @@ struct WalInner<E: EventEnvelope> {
     head: u64,
 }
 
+/// 旁挂锁文件的路径：`<wal>.lock`（同目录、同名 + `.lock`）。
+///
+/// 用 `with_file_name` 追加后缀而不是 `with_extension`：后者会把 `v2-events.wal`
+/// 变成 `v2-events.lock`——丢掉 `.wal` 这一段，两个不同的事实源可能撞到同一个锁文件。
+fn lock_path(wal: &Path) -> PathBuf {
+    let mut name = wal.file_name().unwrap_or_default().to_os_string();
+    name.push(".lock");
+    wal.with_file_name(name)
+}
+
 impl<E> WalStore<E>
 where
     E: EventEnvelope + serde::Serialize + serde::de::DeserializeOwned,
 {
-    /// 打开（或创建）一个 WAL 文件。**恢复在这里发生**：
-    /// 重放所有完整行；撕裂的尾行被丢弃并截断（提交边界，S05 §6.1）。
+    /// 打开（或创建）一个 WAL 文件，并**尝试取得写者令牌**。
+    ///
+    /// 拿不到令牌（另一个写者持有）⇒ 返回一个可读、但 `append` 恒
+    /// [`NotTheWriter`](super::AppendError::NotTheWriter) 的实例——降级不是失败，
+    /// 是「这次你不是写者」这个事实本身。
+    ///
+    /// **恢复在这里发生**：持令牌者重放所有完整行，撕裂的尾行被丢弃并截断
+    /// （提交边界，S05 §6.1）；非写者只重放，不动文件。
     pub fn open(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let path = path.as_ref().to_path_buf();
+        // 先取令牌、再重放（见模块头「重放必须在持锁之后做」）。锁文件用 `create`
+        // 是必需的：还不存在的事实源也要能被锁定，否则两个进程会同时认为
+        // 「文件还没有 ⇒ 我是第一个写者」。
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(lock_path(&path))?;
+        let writer = match lock.try_lock() {
+            Ok(()) => Some(lock),
+            Err(_) => None,
+        };
+
         let (events, good_len) = Self::replay(&path)?;
-        if path.exists() && good_len < path.metadata()?.len() {
-            // 截断撕裂部分——恢复语义的一部分。
-            let f = std::fs::OpenOptions::new().write(true).open(&path)?;
-            f.set_len(good_len)?;
-            f.sync_all()?;
+        // 只有持令牌的写者才恢复；且 WAL 可能还不存在（锁文件已建、事实源未建是常态）。
+        if writer.is_some() && path.exists() {
+            let len = std::fs::metadata(&path)?.len();
+            if good_len < len {
+                // 截断撕裂部分——恢复语义的一部分，只有持令牌的写者有资格做。
+                // 用独立的写句柄：锁句柄是为「我是写者」而开的，不兼职改文件
+                // （且 `.append(true)` 的句柄在 Windows 上没有 `GENERIC_WRITE`，
+                // `set_len` 会 `PermissionDenied`——实测）。
+                let f = std::fs::OpenOptions::new().write(true).open(&path)?;
+                f.set_len(good_len)?;
+                f.sync_all()?;
+            }
         }
-        Ok(Self::build(path, events))
+        Ok(Self::build(path, events, writer))
     }
 
-    /// **只读**打开：只解析，不动文件。
+    /// **只读**打开：只解析，不动文件、不取令牌。
     ///
     /// 与 [`open`](Self::open) 的差别只在「谁有资格写」：恢复（截断撕裂尾行）
     /// 是**写方**的语义，读方不能顺手做——读数口在会话进行中随时可能被调用，
-    /// 而 [`Store::append`] 用的是 append 模式（写点恒在当前 EOF）：读方若在
-    /// 写方落一行的中途截断了它，剩下的字节会接在被截掉的位置之后 ⇒ 那一行
-    /// 静默损坏。解析器仍是同一个（[`replay`](Self::replay)），撕裂尾行同样
-    /// 丢弃，只是**不改文件**。
+    /// 而写点恒在当前 EOF：读方若在写方落一行的中途截断了它，剩下的字节会接在
+    /// 被截掉的位置之后 ⇒ 那一行静默损坏。解析器仍是同一个（[`replay`](Self::replay)），
+    /// 撕裂尾行同样丢弃，只是**不改文件**。
     ///
     /// 文件不存在 ⇒ 空仓（「还没有事实源」是常态，读方不该为了读而创建文件）。
     pub fn open_readonly(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let path = path.as_ref().to_path_buf();
         let (events, _) = Self::replay(&path)?;
-        Ok(Self::build(path, events))
+        Ok(Self::build(path, events, None))
     }
 
     /// 重放到最后一行完整记录（撕裂尾行丢弃——**提交边界**，S05 §6.1）。
@@ -103,11 +186,12 @@ where
     }
 
     /// 由已重放的事件构造内存形态（`ids` / `head` 都是它的派生量）。
-    fn build(path: PathBuf, events: Vec<E>) -> Self {
+    fn build(path: PathBuf, events: Vec<E>, writer: Option<File>) -> Self {
         let ids = events.iter().map(|e| e.event_id().to_string()).collect();
         let head = events.len() as u64;
         WalStore {
             path,
+            writer,
             inner: RwLock::new(WalInner { events, ids, head }),
         }
     }
@@ -130,6 +214,11 @@ where
 
     fn append(&self, mut event: Self::Event) -> Result<Seq, AppendError> {
         let mut inner = self.inner.write().expect("WalStore 锁中毒");
+        // 单写者闸门（跨进程）：非写者一律拒写。这是 I1 在并发下的硬边界——
+        // 在此之前这里只有进程内 RwLock，第二个进程会静默地写出重复 seq。
+        if self.writer.is_none() {
+            return Err(AppendError::NotTheWriter);
+        }
         if inner.ids.contains(event.event_id()) {
             return Err(AppendError::Duplicate);
         }

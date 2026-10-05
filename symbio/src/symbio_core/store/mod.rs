@@ -9,7 +9,7 @@
 //!
 //! | 语义 | 保证 | 强制方式 |
 //! |---|---|---|
-//! | 单写者 | 每 thread 一个 FIFO，串行 | 运行时（本实现内部锁串行化）+ CI |
+//! | 单写者 | 每 thread 一个 FIFO，串行 | 运行时（`MemoryStore` 进程内锁；[`wal::WalStore`] **跨进程写者令牌**）+ CI |
 //! | 单调 seq | thread 内严格递增、**无跳号** | [`crate::symbio_core::event::Seq`] 私有构造 + 本实现 |
 //! | append-only | 接口上**无** `update` / `delete` | 编译期（trait 就没有这些方法） |
 //! | 幂等 | `event_id` 重复 ⇒ `Duplicate` | 运行时 |
@@ -30,7 +30,12 @@ pub enum AppendError {
     Duplicate,
     /// 并发写冲突（期望的 head 与实际不符——并发 / WAL 实现用）。
     Conflict { expected: Seq, actual: Seq },
-    /// 违反单写者约束。
+    /// 违反单写者约束：本实例**不持**该事实源的写者令牌。
+    ///
+    /// 谁发这个令牌是各实现的事（[`wal::WalStore`] 用文件锁，**跨进程**）；trait 只
+    /// 承诺「拿不到令牌的写入口会**返回**它，而不是静默写坏网格」。在
+    /// [plan/11 批 0](../../../../docs/plan/11-多执行器与多主体加固实施方案.md) 之前，
+    /// 这个形态全仓零构造——错误定义在那儿，却永远不可达。
     NotTheWriter,
 }
 

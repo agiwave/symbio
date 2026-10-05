@@ -364,3 +364,155 @@ fn open_readonly_on_a_missing_file_creates_nothing() {
         "读方不该为了读而写下东西——那会把「从没跑过」变成「跑过一轮空的」"
     );
 }
+
+/// 批 0 反向用例（[plan/11 §3 批 0](../../../../docs/plan/11-多执行器与多主体加固实施方案.md) 判据）：
+/// 两个写者交错 ⇒ 第二个拿不到写者令牌、`append` 返回 `NotTheWriter`，且**盘上零丢失**。
+///
+/// 这是本批的核心：在此之前「单写者」只由进程内 `RwLock` 保证，第二个写者会静默地
+/// 写出重复 seq——错误形态（`NotTheWriter`）早已定义，却**从不可达**。
+#[test]
+fn second_writer_gets_not_the_writer_and_nothing_is_lost() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("events.jsonl");
+
+    let writer = EventWalStore::open(&path).unwrap();
+    writer
+        .append(ev(
+            "u0",
+            EVENT_USER_MESSAGE,
+            Entity::Turn,
+            Verb::Opened,
+            0,
+            "hi",
+        ))
+        .unwrap();
+
+    // 第二个写者：同一进程、同一文件。令牌已被占用 ⇒ 降级为非写者。
+    let intruder = EventWalStore::open(&path).unwrap();
+    assert_eq!(
+        intruder.append(ev(
+            "u1",
+            EVENT_USER_MESSAGE,
+            Entity::Turn,
+            Verb::Opened,
+            1,
+            "hi"
+        )),
+        Err(AppendError::NotTheWriter),
+        "第二个写者必须拿到 NotTheWriter，而不是静默写出重复 seq"
+    );
+    // 降级不是失败：读面照常。
+    assert_eq!(intruder.head().value(), 1, "非写者仍可读（降级 ≠ 报错）");
+
+    // 持令牌者继续写，不受干扰。
+    writer
+        .append(ev(
+            "f0",
+            EVENT_ASSISTANT_FINAL,
+            Entity::Turn,
+            Verb::Closed,
+            0,
+            "yo",
+        ))
+        .unwrap();
+    assert_eq!(writer.head().value(), 2);
+    drop(intruder);
+    drop(writer);
+
+    // 盘上零丢失、无重号。
+    let reopened = EventWalStore::open(&path).unwrap();
+    let ids: Vec<String> = reopened
+        .range(Seq::new(0))
+        .iter()
+        .map(|e| e.event_id().to_string())
+        .collect();
+    assert_eq!(ids, vec!["u0".to_string(), "f0".to_string()], "盘上零丢失");
+    assert_eq!(reopened.head().value(), 2, "seq 无跳号、无重号");
+}
+
+/// 读方在类型上就不该写：[`EventWalStore::open_readonly`] 从不取令牌 ⇒ 写入口恒关闭。
+#[test]
+fn readonly_store_refuses_to_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("events.jsonl");
+    {
+        let store = EventWalStore::open(&path).unwrap();
+        store
+            .append(ev(
+                "u0",
+                EVENT_USER_MESSAGE,
+                Entity::Turn,
+                Verb::Opened,
+                0,
+                "hi",
+            ))
+            .unwrap();
+    }
+    let ro = EventWalStore::open_readonly(&path).unwrap();
+    assert_eq!(ro.head().value(), 1, "读方看得见已提交的事实");
+    assert_eq!(
+        ro.append(ev(
+            "u1",
+            EVENT_USER_MESSAGE,
+            Entity::Turn,
+            Verb::Opened,
+            1,
+            "hi"
+        )),
+        Err(AppendError::NotTheWriter),
+        "只读档的写入口必须关闭"
+    );
+}
+
+/// 令牌随句柄关闭自动释放（不是粘死的）：前一个写者 drop 之后，新的 `open` 成为写者，
+/// 且它的 `head` 来自**重放**而不是从 0 重新计数——否则接手者会重号。
+#[test]
+fn writer_token_is_released_when_the_store_drops() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("events.jsonl");
+
+    let first = EventWalStore::open(&path).unwrap();
+    first
+        .append(ev(
+            "u0",
+            EVENT_USER_MESSAGE,
+            Entity::Turn,
+            Verb::Opened,
+            0,
+            "hi",
+        ))
+        .unwrap();
+    // 令牌在手上时，第二个写者进不来。
+    assert_eq!(
+        EventWalStore::open(&path).unwrap().append(ev(
+            "u1",
+            EVENT_USER_MESSAGE,
+            Entity::Turn,
+            Verb::Opened,
+            1,
+            "hi"
+        )),
+        Err(AppendError::NotTheWriter),
+        "令牌未释放前，第二个写者仍被拒"
+    );
+    drop(first);
+
+    // 令牌释放 ⇒ 下一个写者接手。
+    let second = EventWalStore::open(&path).unwrap();
+    assert_eq!(
+        second.head().value(),
+        1,
+        "接手者的 head 来自重放，不是从 0 起"
+    );
+    second
+        .append(ev(
+            "u1",
+            EVENT_USER_MESSAGE,
+            Entity::Turn,
+            Verb::Opened,
+            1,
+            "hi",
+        ))
+        .unwrap();
+    assert_eq!(second.head().value(), 2, "接手后继续单调递增");
+}

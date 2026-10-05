@@ -517,7 +517,18 @@ export const BASELINE = {
   //      验收 = 形状 1 例（五样都在、说明文本不挤进来）+ 缺身份不留空洞 1 例。
   //      同批另三处不产用例——接入面分别是**两处日志**（`TRACE_ID`）、**删除**
   //      （`ROUTE_SESSION_CHAT_ABORT`）与**构造签名**（local 两处 `security` 字段）。
-  rustTests: 1286,
+  // 1289（批 0-A 跨进程写者令牌，2026-10-05）——`1286 → 1289`，**+3**。
+  //      [plan/11 §3 批 0](../../docs/plan/11-多执行器与多主体加固实施方案.md) 的 ①③
+  //      合并子批：`store = wal` 的单写者从**进程内** `RwLock` 升级为**跨进程**写者
+  //      令牌。`WalStore::open` 对旁挂锁文件（`<wal>.lock`）取一次非阻塞独占锁
+  //      （std `File::try_lock`，Unix `flock` / Windows `LockFileEx`），拿不到即降级成
+  //      「非写者」——读照常，`append` 恒返回 `AppendError::NotTheWriter`；截断（撕裂
+  //      尾行恢复）也只在持令牌时发生。trait 一行未改（F1 冻结锚点）。
+  //      验收 = 两写者交错 1 例（第二个拿 `NotTheWriter` 且盘上零丢失、无重号）+
+  //      只读档写入口关闭 1 例 + 令牌随 drop 释放 1 例（接手者的 `head` 来自重放，
+  //      不是从 0 重新计数——否则接手即重号）。端到端另在 e2e `t32`（两个真进程写
+  //      同一会话），按目录发现式加载，不进本格计数。
+  rustTests: 1289,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *
