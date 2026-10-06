@@ -400,6 +400,11 @@ pub trait CapabilityVisitor: Send + Sync + 'static {
     /// 与工具 / 模型服务 / 系统提示词**共用同一次 `traverse` 广播**：容器在自己的
     /// `traverse` 分支里注册根，会话链路与前端链路因此拿到同一个根。
     ///
+    /// **单槽归系统 Agent**：子智能体子树里也有容器（它会把自己登记成根），
+    /// 其注册经 `plugins/agent/host/scope.rs::SubAgentVisitor` **丢弃**——否则子树
+    /// 会劫持整个 `<根>`，系统侧全部挂载点瞬间消失。判据 = 该文件的单测 +
+    /// e2e `t39`（细节归 `scope.rs` 的模块文档，此处只指路）。
+    ///
     /// 默认 no-op —— 不是容器的实现方无需关心。
     async fn register_vdfs_root(&self, _provider: Arc<dyn crate::symbio_core::VdfsProvider>) {}
 

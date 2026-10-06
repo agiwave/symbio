@@ -581,7 +581,20 @@ export const BASELINE = {
   //      交换同形 + 线格式：非工具行仍是 `{role, text}`）；② `transcript_column_surfaces_tool_rows`
   //      （补一格工具产物 ⇒ `session/stats` 的转写列浮出工具行）。端到端见 e2e `t38`
   //      （两轮真实工具轮 ⇒ 第三处请求带第一轮的工具结果，按目录发现式加载，不进本格计数）。
-  rustTests: 1299,
+  // 1303（plan/11 批 2 ②「子 Agent 注册不覆盖父」判据化，2026-10-06）——`1299 → 1303`，**+4**。
+  //      [plan/11 §3 批 2 ②](../../docs/plan/11-多执行器与多主体加固实施方案.md)：该批原写
+  //      「`register_*` 单槽改多槽」，核实后**前提不成立**（每次 `collect_capabilities`
+  //      各建一个 `DefaultToolVisitor` ⇒ 槽位按收集隔离；同一次收集里子树这两项被
+  //      `SubAgentVisitor` 丢弃）⇒ 改为**判据化**：把「子 Agent 不得劫持父会话的根与模型」
+  //      从"只有模块文档在说"变成用例钉住。判据 4 例（`plugins/agent/host/scope.test.rs`）：
+  //      ① `sub_agent_root_registration_is_discarded`（内层根不变）；②
+  //      `sub_agent_model_registration_is_discarded`（内层生效者与**目录**都不变）；
+  //      ③ `sub_agent_multi_slot_registrations_join_parent_with_prefix`（工具 / 提示词段 /
+  //      挂载点**确实**带前缀并集——挡住「代理什么都不转发」那种假绿）；④
+  //      `read_side_forwards_to_inner_unchanged`（读侧透传，防劫持改从读侧发生）。
+  //      端到端见 e2e `t39`（钉**根**那一半：`vdfs_read <根>/memory/AGENTS.md` 读到的必须是
+  //      `{homedir}/AGENTS.md`；模型那一半端到端钉不住——注册序来自 `HashMap`，见 11 §3）。
+  rustTests: 1303,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *
