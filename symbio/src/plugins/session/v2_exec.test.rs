@@ -92,6 +92,9 @@ enum Behavior {
     Abort,
     /// 首次请求回一个工具调用（附中途正文），第二次回正文——演练工具轮。
     ToolThenAnswer,
+    /// 首次请求回一个 `agent_run` 工具调用，第二次回正文——演练 full 档**代际立约**
+    /// 的入格通道（承诺出参经 `SessionDispatchPort::take_derived` 回到运行器）。
+    ToolThenAgentRun,
 }
 
 /// 忠实假 provider：行为由 [`Behavior`] 选定（同一传输形状，只换结局）。
@@ -180,6 +183,36 @@ impl ModelProvider for FaithfulProvider {
                             parse_error: None,
                         }],
                         response_text_child_id: "n-tool".into(),
+                        ..Default::default()
+                    });
+                }
+            }
+            Behavior::ToolThenAgentRun => {
+                if round == 1 {
+                    env.sink()
+                        .emit(cm::ChatMessage {
+                            id: "n-agent".into(),
+                            parent_id: Some("r-1".into()),
+                            role: Some(cm::MessageRole::Assistant),
+                            msg_type: Some(cm::MessageType::Text),
+                            content: Some(cm::MessageContent::Text("我来委托。".into())),
+                            status: Some(cm::MessageStatus::Streaming),
+                            ..Default::default()
+                        })
+                        .await;
+                    return Ok(TurnOutput {
+                        text: "我来委托。".into(),
+                        tool_calls: vec![crate::symbio_core::TurnToolCallInfo {
+                            id: Some("tc-agent".into()),
+                            wire_id: Some("call_agent".into()),
+                            name: Some("agent_run".into()),
+                            arguments: serde_json::json!({
+                                "agent_id": "reviewer",
+                                "prompt": "让 reviewer 复查这段",
+                            }),
+                            parse_error: None,
+                        }],
+                        response_text_child_id: "n-agent".into(),
                         ..Default::default()
                     });
                 }
@@ -595,6 +628,94 @@ async fn full_turn_lands_memory_and_learning_facts() {
         Some(user_seq),
         "观测的溯源锚同为本轮开口"
     );
+}
+
+// ==================== 收束派生事实：承诺 / 任务表 / 熔断 ====================
+
+/// `full` 档的**收束派生事实**：承诺（`agent_run` 的代际立约）必须入格。
+///
+/// ## 这个用例挡的是什么
+///
+/// 承诺的数据来源在工具执行层（`Delegation`，`process_tool_calls_async` 的出参），
+/// 写方在收束处（`v2_bridge::record_derived`）。`full` 档不经 `v2_bridge::record`，
+/// 若分发方不把出参交回（`SessionDispatchPort` 的三个出参曾是 `&mut Vec::new()`），
+/// 承诺就**静默全丢**——代际立约在 full 档整体失效，而档位名还自称「整体切换」。
+///
+/// 本用例走的是**真实通道**：假 provider 回一个 `agent_run` 工具调用 ⇒
+/// `SessionDispatchPort::dispatch` 收集出参 ⇒ `execute_turn` 轮末调 `record_derived`
+/// 落格。它同时钉住两件事——出参通道（`take_derived`）与写方（`record_derived`）——
+/// 以及锚点：立约溯源必须是本轮开口（I2）。
+///
+/// **反向自检**：把 `v2_tools` 里三份出参改回 `&mut Vec::new()`，本用例必须红。
+#[tokio::test]
+async fn full_turn_lands_derived_commitment_facts() {
+    use crate::symbio_core::{EVENT_COMMITMENT_BROKEN, EVENT_COMMITMENT_OFFERED};
+
+    let (session, dir, _tmp) = setup_full().await;
+    let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
+    let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
+    let (provider, _prompts) = FaithfulProvider::new(Behavior::ToolThenAgentRun);
+
+    let res = execute_turn(V2Turn {
+        session: &session,
+        provider: Arc::new(provider),
+        // 无插件宿主 ⇒ `agent_run` 诚实失败（"No parent plugin"）。失败同样是
+        // **没履约**——立约与违约都要入格（S08 §5：违约可被观测是 T5 的前提）。
+        parent: None,
+        session_dir: super::super::test_dir(),
+        ctx: test_ctx(),
+        system_prompt: "system",
+        abort: crate::symbio_core::ExecAbortSignal::new(),
+        root_id: "r-1",
+        sink: &sink,
+        user_text: "请委托评审",
+        window_turns: 6,
+        tools: &[CapabilityMeta {
+            name: "agent_run".into(),
+            description: "派生一个子智能体".into(),
+            input_schema: serde_json::json!({ "type": "object" }),
+            keywords: vec![],
+            category: None,
+            examples: None,
+            context_retention: None,
+        }],
+        resume: None,
+        recalled: None,
+        skill_obs: &[],
+        skill_hits: &[],
+    })
+    .await
+    .expect("工具轮执行成功");
+    assert_eq!(res.output.text, "秋天好", "收尾轮的正文");
+
+    let store = EventWalStore::open(dir.join("v2-events.wal")).expect("open wal");
+    let events = store.range(Seq::new(0));
+    let kinds: Vec<&str> = events.iter().map(|e| e.kind.as_str()).collect();
+
+    let user_seq = events
+        .iter()
+        .find(|e| e.kind == EVENT_USER_MESSAGE)
+        .and_then(|e| e.seq.map(|s| s.value()))
+        .expect("本轮用户格必须入格");
+
+    let offered = events
+        .iter()
+        .find(|e| e.kind == EVENT_COMMITMENT_OFFERED)
+        .unwrap_or_else(|| panic!("代际立约必须入格（full 档出参通道）：{kinds:?}"));
+    assert_eq!(
+        offered.payload["promise"], "让 reviewer 复查这段",
+        "承诺内容 = 委托出去的那句话（`agent_run` 的 prompt）"
+    );
+    assert_eq!(
+        offered.produced_by,
+        Some(user_seq),
+        "立约锚必须在本轮开口（I2：承诺溯源 100%）"
+    );
+    assert!(
+        events.iter().any(|e| e.kind == EVENT_COMMITMENT_BROKEN),
+        "无宿主 ⇒ 委托失败 ⇒ 违约必须可观测（S08 §5）：{kinds:?}"
+    );
+    assert!(check_all(&events).is_empty(), "{:?}", check_all(&events));
 }
 
 // ==================== 反射档（S11 快路的执行半边）====================

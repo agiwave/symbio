@@ -40,12 +40,13 @@
 //!   说该做什么」，出处是这一轮的开口；`task.asserted` 是断言类事件，无溯源即违规
 //!   （I2）。事件号 `{id_prefix}-{n}` 带 `{user_id}-a{attempt}` 前缀 + 本次序号，
 //!   跨轮不撞幂等键。
-//! - **档位**：**只挂收束转写 `v2_bridge::record`**，因此 **bridge 档生效、full
-//!   档尚未接**（full 档不经收束转写，其写方要等 v2 运行器原生记任务格时才接）。
-//!   别按「与记忆同档位」推断——记忆与学习已由
-//!   [`super::v2_bridge::record_learning`] 补上 full 档，本模块**不在其中**；
-//!   与任务表同样只走桥档的还有承诺 / 熔断 / 写侧授权闸（见 `v2_exec` 模块文档的
-//!   诚实缺口一节）。
+//! - **档位**：写方住收束处，两档共用同一份——`bridge` 档由
+//!   [`super::v2_bridge::record_to_wal`] 调本模块，`full` 档由 `v2_exec` 轮末调
+//!   [`super::v2_bridge::record_derived`]（同一个调用点形状、同一锚 `user_seq`）。
+//!   别按「与记忆同档位」推断——记忆与学习住
+//!   [`super::v2_bridge::record_learning`]，承诺 / 任务表 / 熔断住
+//!   [`super::v2_bridge::record_derived`]，两档都在其中；只有**写侧授权闸**仍只挂
+//!   桥档（见 `v2_exec` 模块文档的诚实缺口一节）。
 //!
 //! ## 诚实划界
 //!

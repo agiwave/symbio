@@ -41,9 +41,10 @@ import './_selfrun.mjs';
 //
 // ## 为什么是 `bridge` 档
 //
-// `task.controlled` 的写方挂在 `v2_bridge::record` 上；`full` 档不经收束转写
-// （`v2_tools.rs` 那三个出参传的是临时量），闸门**照判但不入格**。要看见那一格，
-// 必须走 `bridge` 档——这也是 T28 读数口用的同一档位。
+// 本用例钉的是 `bridge` 档的熔断入格（`task.controlled` 的写方挂在 `v2_bridge::record`
+// 上）；`full` 档的那一份由 `v2_exec` 轮末经 `SessionDispatchPort::take_derived`
+// 交回的出参落格——两档同一个写方（`v2_bridge::record_derived`），`full` 档那一侧
+// 另有 `t42` 覆盖。故本用例与 T28 读数口一样走 `bridge` 档。
 import { join } from 'node:path';
 import { writeFileSync } from 'node:fs';
 import {

@@ -201,69 +201,23 @@ fn record_to_wal(
         )
         .map_err(|e| format!("收束事件入格失败：{e:?}"))?;
 
-    // ── 承诺（04 §3.1 批⑧，S08 §3「加格子，不加机制」）──────────────────
-    // 本轮代际立约随收束入格：溯源锚是刚落的 `user.message`（`user_seq`）——
-    // 承诺是「这轮我答应了什么」，锚必须落在这一轮的开口上，否则立约会漂在
-    // 没有出处的 turn 0。立约与了结**同锚成对**，`check_all` 才看得见它们。
-    // 承诺号带 `{user_id}-a{attempt}` 前缀：tool_call id 只在一次模型响应内唯一，
-    // 而 WAL 的幂等键是事件 id——跨轮复用同一个 id 会让第二次立约撞 `Duplicate`、
-    // 把整轮转写拖失败。
-    for d in delegations {
-        let cid = format!("v2c-{user_id}-a{attempt}-{}", d.id);
-        for e in crate::symbio_core::commitment_events(
-            &cid,
-            principal,
-            crate::symbio_core::authz::PRINCIPAL_USER,
-            &d.promise,
-            d.ok,
-            &d.why,
-            user_seq,
-        ) {
-            store
-                .append(e)
-                .map_err(|e| format!("承诺事件入格失败：{e:?}"))?;
-        }
-    }
-
-    // ── 任务表（S7 步 16–18，04 §3.1 批⑨）────────────────────────────────
-    // 本轮 `todo_write` 声明的清单状态随收束入格，与承诺**同锚**（`user_seq`）：
-    // 任务是「这轮模型说该做什么」，出处是这一轮的开口。写方住 `v2_tasks`，
-    // 此处只负责把门推开——失败**只记日志不冒泡**（任务格是本轮的附加事实，
-    // 它失败不该被说成「转写失败」，与记忆三段同一条口径）。
-    if let Err(why) = super::v2_tasks::write(
+    // ── 收束派生事实：承诺 / 任务表 / 熔断（S08 §3 / S7 步 16–18 / S8 第 20 步）──
+    // 三者的数据来源都在工具执行层（`Delegation` / `TaskDeclaration` / 熔断理由），
+    // 写方与锚点口径收在 [`record_derived`] 里——`full` 档同样要写这三样（那里不经
+    // 本函数，但调的是**同一个** `record_derived`，见 `v2_exec`）。锚是刚落的
+    // `user.message`（`user_seq`）。
+    record_derived(
+        &wal,
         &store,
         &snapshot,
-        tasks,
         turn,
         user_seq,
         principal,
-        &format!("v2t-{user_id}-a{attempt}"),
-    ) {
-        crate::plugin_warn!("session", "[task] 清单入格失败（{}）：{why}", wal.display());
-    }
-
-    // ── 熔断（S8 第 20 步，04 §3.1 批⑩）────────────────────────────────────
-    // 本轮被外部执行闸门拦下的事实随收束入格，与承诺 / 任务**同锚**（`user_seq`）：
-    // 熔断说的是「这一轮不允许做」，出处同样是这一轮的开口。写方住 core 的
-    // `CircuitBreaker`，此处只负责把门推开——失败**只记日志不冒泡**（熔断格是
-    // 本轮的附加事实，与任务格 / 记忆三段同一条口径）。
-    //
-    // 一轮只落**一格**：事件号按溯源锚定（`cb-{user_seq}`），两条就是同一个幂等键，
-    // 第二条会被存储丢掉——那正是验收 2 要禁的「静默继续」，所以宁可在写**之前**
-    // 就只取第一条，而不是靠撞键兜底。逐工具的拒绝理由不在这里：它们已经在每条
-    // 工具结果节点上（`Refused: …`），模型与用户都看得见；这里记的是**本轮被
-    // 闸门拦过**这件事本身。
-    if let Some(&reason) = breaks.first() {
-        if let Err(e) =
-            store.append(crate::symbio_core::CircuitBreaker.break_event(reason, user_seq))
-        {
-            crate::plugin_warn!(
-                "session",
-                "[v2-bridge] 熔断事件入格失败（{}）：{e:?}",
-                wal.display()
-            );
-        }
-    }
+        &format!("{user_id}-a{attempt}"),
+        delegations,
+        tasks,
+        breaks,
+    )?;
 
     // ── 收束派生事实：记忆与学习（步 11–13 + 步 22）────────────────────────
     // 抽成独立函数是因为**它不是轮次事实**：`full` 档由 v2 运行器原生记账、
@@ -283,6 +237,107 @@ fn record_to_wal(
         skill_compile,
         crate::symbio_core::clock_now_ms(),
     );
+    Ok(())
+}
+
+/// 收束派生事实中的**承诺 / 任务表 / 熔断**半边（S08 §3 / S7 步 16–18 / S8 第 20 步）。
+///
+/// ## 为什么它与「轮次事实」分开成函数
+///
+/// 轮次事实（`v2u-*` 用户格 / `v2f-*` 收束格）记的是「这一轮说了什么」——`full` 档
+/// 由 v2 运行器原生记账，`chat_loop` 以 `TurnState::v2_executed` 把整段 `record` 拦下。
+/// 但承诺 / 任务表 / 熔断是**本轮的派生事实**：数据来源都在工具执行层
+/// （`Delegation` / `TaskDeclaration` / 熔断理由），运行器一处都不写。拦下轮次事实时
+/// 若把它们一起拦掉，`full` 档的代际立约（S08）、任务表（S7）、熔断（S9 §6 验收 2）
+/// 就**静默全丢**——与记忆/学习同一个坑（见 [`record_learning`]）。
+///
+/// 两档调的是**同一个**本函数，差别只在锚点（见下）——不是两份实现。
+///
+/// ## 锚点由调用方给，锚的**含义**不由调用方定
+///
+/// `user_seq` = 本轮 `user.message` 格的 seq。两档的锚点是**不同的事件**
+/// （bridge = 转写写的 `v2u-*` 格；full = v2 原生写的 `u-{turn}` 格），但
+/// 「溯源锚必须是本轮的开口」这条不变（I2：承诺 / 任务 / 熔断溯源 100%）。
+/// 同理 `anchor_id` 是事件号的**词干**：bridge 用 `{v1 消息 id}-a{attempt}`
+/// （同一句 v1 消息重试各成一格），full 用 `t{turn}`（v2 侧一轮一个号）。
+///
+/// ## 失败口径（承袭原实现，两种）
+///
+/// - **承诺**：入格失败 ⇒ **上抛**（`Err`）。bridge 档由 `record_to_wal` 的 `?`
+///   接住（顶层 `record` 只记日志），full 档由调用方**只记日志不冒泡**——轮次已
+///   收束，派生事实失败不该把成功的一轮说成失败；
+/// - **任务表 / 熔断**：失败只记日志不冒泡（与记忆三段同一条口径：附加事实）。
+///
+/// 熔断一轮只落**一格**：事件号按溯源锚定（`cb-{user_seq}`），两条就是同一个
+/// 幂等键、第二条会被存储丢掉——那正是验收 2 要禁的「静默继续」，所以宁可在写
+/// **之前**就只取第一条，而不是靠撞键兜底。逐工具的拒绝理由不在这里：它们已经在
+/// 每条工具结果节点上（`Refused: …`），模型与用户都看得见；这里记的是**本轮被
+/// 闸门拦过**这件事本身。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn record_derived(
+    wal: &std::path::Path,
+    store: &EventWalStore,
+    snapshot: &[Event],
+    turn: u64,
+    user_seq: u64,
+    principal: &str,
+    anchor_id: &str,
+    delegations: &[super::tools::Delegation],
+    tasks: &[super::tools::TaskDeclaration],
+    breaks: &[&'static str],
+) -> Result<(), String> {
+    // ── 承诺（04 §3.1 批⑧，S08 §3「加格子，不加机制」）──────────────────
+    // 本轮代际立约随收束入格：立约与了结**同锚成对**，`check_all` 才看得见它们。
+    // 承诺号带 `{anchor_id}` 前缀：tool_call id 只在一次模型响应内唯一，而 WAL 的
+    // 幂等键是事件 id——跨轮复用同一个 id 会让第二次立约撞 `Duplicate`、把整轮
+    // 转写拖失败。
+    for d in delegations {
+        let cid = format!("v2c-{anchor_id}-{}", d.id);
+        for e in crate::symbio_core::commitment_events(
+            &cid,
+            principal,
+            crate::symbio_core::authz::PRINCIPAL_USER,
+            &d.promise,
+            d.ok,
+            &d.why,
+            user_seq,
+        ) {
+            store
+                .append(e)
+                .map_err(|e| format!("承诺事件入格失败：{e:?}"))?;
+        }
+    }
+
+    // ── 任务表（S7 步 16–18，04 §3.1 批⑨）────────────────────────────────
+    // 与承诺**同锚**（`user_seq`）：任务是「这轮模型说该做什么」，出处是这一轮的
+    // 开口。写方住 `v2_tasks`，此处只负责把门推开——失败只记日志不冒泡。
+    if let Err(why) = super::v2_tasks::write(
+        store,
+        snapshot,
+        tasks,
+        turn,
+        user_seq,
+        principal,
+        &format!("v2t-{anchor_id}"),
+    ) {
+        crate::plugin_warn!("session", "[task] 清单入格失败（{}）：{why}", wal.display());
+    }
+
+    // ── 熔断（S8 第 20 步，04 §3.1 批⑩）────────────────────────────────────
+    // 与承诺 / 任务**同锚**（`user_seq`）：熔断说的是「这一轮不允许做」，出处同样
+    // 是这一轮的开口。写方住 core 的 `CircuitBreaker`，此处只负责把门推开。
+    if let Some(&reason) = breaks.first() {
+        if let Err(e) =
+            store.append(crate::symbio_core::CircuitBreaker.break_event(reason, user_seq))
+        {
+            crate::plugin_warn!(
+                "session",
+                "[v2-bridge] 熔断事件入格失败（{}）：{e:?}",
+                wal.display()
+            );
+        }
+    }
+
     Ok(())
 }
 

@@ -41,6 +41,26 @@ use super::tools::process_tool_calls_async;
 use super::transcript::llm_emit_state;
 use super::v2_exec::UiBridge;
 
+/// 工具执行层交回的**收束派生事实**（承诺 / 任务表 / 熔断）。
+///
+/// 三者的数据来源都在工具执行层（`Delegation` / `TaskDeclaration` / 熔断理由），
+/// 而写方（落格）在收束处——`bridge` 档由 `v2_bridge::record` 写，`full` 档由
+/// `v2_exec::execute_turn` 轮末写（同一个 `v2_bridge::record_derived`）。本结构是
+/// 那份出参从分发点回到运行器的**唯一通道**：不收集它，`full` 档这三样就静默全丢
+/// （与记忆/学习同一个坑——它们在 `full` 档整体失效，而档位名还自称「整体切换」）。
+///
+/// 形态仿 [`SessionDispatchPort::produced`]：`dispatch` 在 `&self` 上跑，出参却要
+/// 跨 await 累积，故用 `Mutex` 收，调用方在桥释放前 `take_derived` 取走。
+#[derive(Default)]
+pub(crate) struct DerivedFacts {
+    /// 代际立约出参（批⑧）：`agent_run` 的承诺记录。
+    pub(crate) delegations: Vec<super::tools::Delegation>,
+    /// 任务表出参（批⑨）：本次成功的 `todo_write` 声明的清单状态。
+    pub(crate) tasks: Vec<super::tools::TaskDeclaration>,
+    /// 熔断出参（批⑩ 步 20）：外部执行闸门判 `Break` 的理由。
+    pub(crate) breaks: Vec<&'static str>,
+}
+
 /// v2 的工具分发方：一轮工具调用的执行 + 落节点 + 结果映射。
 pub(crate) struct SessionDispatchPort {
     /// 插件宿主（工具能力经它路由）。
@@ -59,6 +79,8 @@ pub(crate) struct SessionDispatchPort {
     bridge: Arc<UiBridge>,
     /// 本轮产生的全部消息（供 chat_loop 并入落库权威镜像）。
     produced: Mutex<Vec<ChatMessage>>,
+    /// 本轮工具执行层交回的收束派生事实（承诺 / 任务表 / 熔断）。
+    derived: Mutex<DerivedFacts>,
 }
 
 impl SessionDispatchPort {
@@ -81,12 +103,18 @@ impl SessionDispatchPort {
             root_id,
             bridge,
             produced: Mutex::new(Vec::new()),
+            derived: Mutex::new(DerivedFacts::default()),
         }
     }
 
     /// 取走本轮产生的消息（调用方在桥释放前取）。
     pub(crate) fn take_produced(&self) -> Vec<ChatMessage> {
         std::mem::take(&mut self.produced.lock().unwrap())
+    }
+
+    /// 取走本轮工具执行层交回的收束派生事实（调用方在桥释放前取）。
+    pub(crate) fn take_derived(&self) -> DerivedFacts {
+        std::mem::take(&mut self.derived.lock().unwrap())
     }
 }
 
@@ -124,6 +152,14 @@ impl DispatchPort for SessionDispatchPort {
 
         // ③ 分发（v1 的执行器：存档 / 钩子 / 审批 / 批尾收口全在里面）。
         //    父节点查询用刚广播的这批节点——它们与执行器要求的形状同源。
+        //
+        // 三份收束派生事实出参（承诺 / 任务表 / 熔断）：数据来源在工具执行层，
+        // 写方在收束处——`full` 档由本分发方收下、`v2_exec` 轮末调
+        // `v2_bridge::record_derived` 落格（与 bridge 档**同一写方**）。不收这三份，
+        // `full` 档的代际立约 / 任务表 / 熔断就静默全丢（见 [`DerivedFacts`]）。
+        let mut delegations: Vec<super::tools::Delegation> = Vec::new();
+        let mut tasks: Vec<super::tools::TaskDeclaration> = Vec::new();
+        let mut breaks: Vec<&'static str> = Vec::new();
         let (tool_msgs, parent_updates) = process_tool_calls_async(
             turn.tool_calls.clone(),
             &self.parent,
@@ -132,20 +168,12 @@ impl DispatchPort for SessionDispatchPort {
             self.ctx.clone(),
             &call_nodes,
             &self.session_dir,
-            // 代际立约出参：full 档**不落格**（承诺的写方随收束转写走，而 full
-            // 档不经 `v2_bridge::record`）。已覆盖 full 档的收束派生事实只有记忆与
-            // 学习（见 `v2_bridge::record_learning`），承诺不在其中。
-            // 传临时量而不是漏参，是为了让"这里没有消费方"成为一行**看得见的注记**，
-            // 而不是一个静默的 `&mut Vec::new()` 淹没在参数表里。
-            &mut Vec::new(),
-            // 任务表出参（批⑨）：同上——任务格的写方 `v2_tasks` 挂在收束转写上，
-            // full 档不经 `v2_bridge::record`，故本批不入格（full 档的写方待 v2
-            // 运行器原生记任务格时接）。
-            &mut Vec::new(),
-            // 熔断出参（批⑩ 步 20）：同上——熔断格 `task.controlled` 的写方挂在
-            // `v2_bridge::record` 上，full 档不经收束转写 ⇒ 本批不入格。**闸门本身
-            // 照判**（判据批首读、每个调用点各出结论）：拒的是执行，不是事件。
-            &mut Vec::new(),
+            // 代际立约出参（批⑧）：`agent_run` 的承诺记录。
+            &mut delegations,
+            // 任务表出参（批⑨）：本次成功的 `todo_write` 声明的清单状态。
+            &mut tasks,
+            // 熔断出参（批⑩ 步 20）：外部执行闸门判 `Break` 的理由。
+            &mut breaks,
         )
         .await;
 
@@ -160,6 +188,13 @@ impl DispatchPort for SessionDispatchPort {
         }
         produced.extend(tool_msgs.iter().cloned());
         self.produced.lock().unwrap().extend(produced);
+        // 三份收束派生事实出参收进取件面（`take_derived`）——调用方在桥释放前取走。
+        {
+            let mut d = self.derived.lock().unwrap();
+            d.delegations.extend(delegations);
+            d.tasks.extend(tasks);
+            d.breaks.extend(breaks);
+        }
 
         // ④ 映射为 core 的事实形状（运行器据此落 `artifact.added` 并拼下一轮 prompt）。
         tool_msgs

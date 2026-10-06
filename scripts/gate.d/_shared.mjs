@@ -675,7 +675,24 @@ export const BASELINE = {
   //      `+7` = `projection/conation.test.rs` 五条（升格靠溯源 / as-of / 无溯源可读不升格 /
   //      按目标不误伤 / 升格前后两态）+ `authz.test.rs::{the_autonomous_row_is_narrower_than_main,
   //      matrix_for_prefers_the_registered_row_over_derivation}`。
-  rustTests: 1320,
+  // 1321（full 档补上承诺 / 任务表 / 熔断三份收束派生事实，2026-10-06）——`1320 → 1321`，**+1**。
+  //      `full` 档的轮次事实由 v2 运行器原生记账，`chat_loop` 以 `v2_executed` 拦下整段
+  //      `v2_bridge::record`——但承诺 / 任务表 / 熔断**不是轮次事实**（数据来源在工具执行层），
+  //      那一侧原先既不收集出参也不落格（`v2_tools` 三处 `&mut Vec::new()` 的「看得见的注记」），
+  //      ⇒ `full` 档这三样**静默全丢**（与 t40 修的记忆/学习同一个坑）。本批：
+  //      ① 把 `record_to_wal` 里三段落格抽成 `v2_bridge::record_derived`（两档共用同一份
+  //         实现、同一锚 `user_seq`，差别只在 `anchor_id` 词干：桥档 `{user_id}-a{attempt}`、
+  //         full 档 `t{turn}`）——抽取保持行为逐字不变（既有 bridge 用例全绿）；
+  //      ② `SessionDispatchPort` 新增 `DerivedFacts` + `take_derived` 取件面，`dispatch` 收下
+  //         三份出参（原先是临时量）；
+  //      ③ `v2_exec::execute_turn` 轮末调 `record_derived` 落格（承诺失败只记日志不冒泡——
+  //         轮次已收束，派生事实失败不该把成功的一轮说成失败）。
+  //      负向自检数清变红数：把三份出参改回 `&mut Vec::new()` ⇒ **单元 1 条红**
+  //      （`v2_exec::full_turn_lands_derived_commitment_facts`，网格里无 `commitment.*`）+
+  //      **e2e 1 条红**（`t42`，网格里 `task.opened` 0 格、`commitment.*` / `task.controlled` 全无）。
+  //      `+1` = `v2_exec.test.rs::full_turn_lands_derived_commitment_facts`（出参通道 + 写方 +
+  //      锚点一次钉死；e2e `t42` 另覆盖真工具成功 / 台账手术两条单测够不到的路径）。
+  rustTests: 1321,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

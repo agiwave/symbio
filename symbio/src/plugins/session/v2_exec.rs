@@ -31,29 +31,26 @@
 //! 今天是"算了却看不见"——读方接进来属 `invariants` 那一侧的独立一批，
 //! 见 `execute_turn` 里派生点旁的注记。
 //!
-//! ## 收束派生事实：记忆与学习（本档已覆盖）
+//! ## 收束派生事实（本档已覆盖）
 //!
 //! 轮次事实由运行器原生入格，`chat_loop` 因此以 `TurnState::v2_executed` 拦下整段
-//! `v2_bridge::record`。但**记忆与学习不是轮次事实**，而是本轮的派生副作用——运行器
-//! 一处都不写。本档因此在轮末直接调 [`super::v2_bridge::record_learning`]（与 bridge 档
-//! **同一个函数**，差别只在溯源锚：这里是原生写的 `u-{turn}` 格）：步 11 编码 /
-//! 步 12 检索锚 / 步 13 巩固 / 步 22 技能观测与编译。
+//! `v2_bridge::record`。但**派生事实不是轮次事实**，而是本轮的派生副作用——运行器
+//! 一处都不写。本档因此在轮末直接调 bridge 档的两个写方（**同一份函数**，差别只在
+//! 溯源锚：这里是原生写的 `u-{turn}` 格）：
+//!
+//! - [`super::v2_bridge::record_learning`]：步 11 编码 / 步 12 检索锚 / 步 13 巩固 /
+//!   步 22 技能观测与编译；
+//! - [`super::v2_bridge::record_derived`]：承诺（`commitment_events`，S08 §3）/
+//!   任务表（`v2_tasks::write`，S7 步 16–18）/ 熔断（`CircuitBreaker::break_event`，
+//!   S8 步 20）——三者的数据来源都在工具执行层（`Delegation` / `TaskDeclaration` /
+//!   熔断理由），由 [`super::v2_tools::SessionDispatchPort`] 经 `take_derived` 交回。
 //!
 //! ## 本档**尚未**覆盖的收束派生事实（诚实缺口）
 //!
-//! 同一段 `record_to_wal` 里还有四类派生事实，目前仍只走 bridge 档——`full` 档下
-//! 它们**不入格**：
-//!
-//! - **承诺**（`commitment_events`，S08 §3）与**任务表**（`v2_tasks::write`，S7 步 16–18）
-//!   与**熔断**（`CircuitBreaker::break_event`，S8 步 20）：三者的数据来源都在工具执行层
-//!   （`Delegation` / `TaskDeclaration` / 熔断理由），而 `full` 档的工具经 `DispatchPort`
-//!   分发——那三份出参目前没有回到 `v2_exec` 的通道；
-//! - **写侧授权闸**（`authorize_close`，[plan/01 §7](../../../docs/plan/01-核心架构.md)）：
-//!   bridge 档在落收束格**之前**判 `reply.first` / `reply.append`，运行器不判。
-//!
-//! 这两组的补法与记忆/学习同形（把出参带进来 + 复用同一个写方），但**数据来源不同**：
-//! 前者要先让分发方把三份出参交回（`DispatchPort` 的取件面），后者要先决定运行器
-//! 的落格路径怎么接闸——各自是独立一批，不混进本档的收束收尾。
+//! 只剩一类：**写侧授权闸**（`authorize_close`，
+//! [plan/01 §7](../../../docs/plan/01-核心架构.md)）——bridge 档在落收束格**之前**判
+//! `reply.first` / `reply.append`，运行器不判。补它要先决定运行器的落格路径怎么接闸，
+//! 是独立一批（要动 core 运行器的落格路径），不混进本档的收束收尾。
 //!
 //! 窗口：prompt 只带最近 `context_messages` 轮（含当前轮）——事实全量
 //! 入格（append-only），**视图**才是窗口。
@@ -434,6 +431,9 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     };
 
     let mut produced = Vec::new();
+    // 工具执行层交回的收束派生事实（承诺 / 任务表 / 熔断）——只有工具轮（深度档）才有，
+    // 反射档与无工具轮保持默认空值。轮末随收束落格（与 bridge 档同一写方，见下方）。
+    let mut derived = super::v2_tools::DerivedFacts::default();
     let outcome = match &hit {
         // ── 反射档（S11 §2）：**没有 `llm` 形参**的那条路 ────────────────────
         // "反射档调模型"在类型上写不出来（`run_reflex` 只收 `RuleOnly`）——
@@ -495,6 +495,8 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
                 .await;
             // 分发方产生的消息（工具轮）——先取走再释放，避免它随分发方一起消失。
             produced = dispatcher.take_produced();
+            // 收束派生事实出参同样先取走（承诺 / 任务表 / 熔断）——轮末随收束落格。
+            derived = dispatcher.take_derived();
             drop(dispatcher);
             r
         }
@@ -519,14 +521,15 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         return Err(PluginError::Aborted);
     }
 
-    // ── 收束派生事实：记忆与学习（步 11–13 + 步 22）────────────────────────
+    // ── 收束派生事实（两半）：承诺 / 任务表 / 熔断 + 记忆与学习 ────────────────
     //
     // **本步的存在理由**：`full` 档的轮次事实由运行器原生入格，chat_loop 因此以
-    // `v2_executed` 拦下整段 `v2_bridge::record`。但「记忆三段 + 技能观测与编译」
-    // 不是轮次事实，而是本轮的**派生副作用**——运行器一处都不写。不在这里补，
-    // full 档的长期记忆（S06）与技能自我改进（S11）就整体失效，而档位名还自称
-    // 「整体切换」。写方与 bridge 档**同一个函数**（`record_learning`），
-    // 差别只在锚点：这里是 v2 原生写的 `u-{turn}` 格，那里是转写的 `v2u-*` 格。
+    // `v2_executed` 拦下整段 `v2_bridge::record`。但这两半都**不是轮次事实**，而是
+    // 本轮的**派生副作用**——运行器一处都不写。不在这里补，full 档的代际立约（S08）/
+    // 任务表（S7）/ 熔断（S9 §6 验收 2）/ 长期记忆（S06）/ 技能自我改进（S11）就整体
+    // 失效，而档位名还自称「整体切换」。写方与 bridge 档**同一份函数**
+    // （`record_derived` / `record_learning`），差别只在锚点：这里是 v2 原生写的
+    // `u-{turn}` 格，那里是转写的 `v2u-*` 格。
     //
     // 兜底收束的 `response` 为 `None`：兜底说明这条路没走通，固化它等于把失败写成
     // 套路（与 bridge 档 `V2Closure::Fallback` → `success_text = None` 同一条口径）。
@@ -537,21 +540,41 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         .find(|e| e.kind == EVENT_USER_MESSAGE && e.turn == turn_no)
         .and_then(|e| e.seq.map(|s| s.value()))
     {
-        Some(user_seq) => super::v2_bridge::record_learning(
-            &wal,
-            &store,
-            &store.range(Seq::new(0)),
-            turn_no,
-            user_seq,
-            user_text,
-            &principal,
-            &format!("t{turn_no}"),
-            response,
-            recalled,
-            skill_obs,
-            session.skill_compile_enabled(),
-            crate::symbio_core::clock_now_ms(),
-        ),
+        Some(user_seq) => {
+            // 承诺 / 任务表 / 熔断：与 bridge 档**同一写方**（`record_derived`）。
+            // 承诺失败只记日志不冒泡——轮次已收束，派生事实失败不该把成功的一轮说成
+            // 失败（与记忆三段同一条口径）。
+            if let Err(why) = super::v2_bridge::record_derived(
+                &wal,
+                &store,
+                &store.range(Seq::new(0)),
+                turn_no,
+                user_seq,
+                &principal,
+                &format!("t{turn_no}"),
+                &derived.delegations,
+                &derived.tasks,
+                &derived.breaks,
+            ) {
+                crate::plugin_warn!("session", "[v2-exec] 承诺入格失败（turn={turn_no}）：{why}");
+            }
+            // 记忆与学习：同一函数（`record_learning`）。
+            super::v2_bridge::record_learning(
+                &wal,
+                &store,
+                &store.range(Seq::new(0)),
+                turn_no,
+                user_seq,
+                user_text,
+                &principal,
+                &format!("t{turn_no}"),
+                response,
+                recalled,
+                skill_obs,
+                session.skill_compile_enabled(),
+                crate::symbio_core::clock_now_ms(),
+            );
+        }
         // 锚缺失即**不写**并出声：静默锚在 0 上会把记忆挂到不存在的轮次，
         // 那比不写更坏（`produced_by` 是 I2 的判据）。
         None => crate::plugin_warn!(
