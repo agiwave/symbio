@@ -533,6 +533,29 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     //
     // 兜底收束的 `response` 为 `None`：兜底说明这条路没走通，固化它等于把失败写成
     // 套路（与 bridge 档 `V2Closure::Fallback` → `success_text = None` 同一条口径）。
+    // 写侧闸拒（`closure_denied`，见 core 的 `closure_granted`）：收束格**未入格**
+    // ⇒ 本轮的派生事实**也不写**——与 bridge 档 `authorize_close` 拒绝时同形（那一档的
+    // `record_to_wal` 在闸处提前返回，承诺 / 任务 / 熔断 / 记忆全不写）。用户的答案
+    // 照旧经 `produced` 回给调用方——收束格是**记录**，不是呈现。
+    if outcome.closure_denied {
+        crate::plugin_warn!(
+            "session",
+            "[v2-exec] 收束被授权拒绝，本轮派生事实不入格（turn={turn_no}）"
+        );
+        // 被拒的兜底仍是**失败**（I3）：呈现走 v1 的 Failed 出口，与未拒时同形。
+        if outcome.fell_back {
+            return Err(PluginError::InternalError(outcome.text));
+        }
+        return Ok(V2TurnResult {
+            output: TurnOutput {
+                text: outcome.text,
+                response_text_child_id: child_id,
+                ..Default::default()
+            },
+            messages: produced,
+        });
+    }
+
     let response = (!outcome.fell_back).then_some(outcome.text.as_str());
     match store
         .range(Seq::new(0))

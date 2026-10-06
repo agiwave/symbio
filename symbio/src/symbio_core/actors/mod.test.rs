@@ -2346,6 +2346,98 @@ mod turn_runner_tests {
             "缺口要**可被判出**（不是假装收束）——C4 看得见它"
         );
     }
+
+    /// 写侧闸（[04 §3.1 批⑥](../../../../docs/plan/04-工程落地.md) 的 **full 档半边**）：
+    /// 主体不持 `reply.first` ⇒ 收束格**不落**——该轮留在未收束态（C4 报得出），
+    /// 但用户的答案仍回给调用方。
+    ///
+    /// ## 这个用例挡的是什么
+    ///
+    /// 收束格的写方**跟着执行路径走**：`bridge` 档由 `v2_bridge::record_to_wal` 落格
+    /// （那里有 `authorize_close`），`full` 档由**运行器**原生落格。闸原先只在桥档，
+    /// 运行器这一侧整条漏判——而**没有任何东西会变红**（两条路径各写各的收束格，
+    /// 谁也不看谁）。与 S12 那批查出的「文档断言了、生产数据里却相反」是同一类缺口。
+    ///
+    /// 判据分两半，各自钉一件事：
+    /// - **拒绝**：`PRINCIPAL_AUTONOMOUS`（表里只持 `define.work`）驱动一轮 ⇒ 网格里
+    ///   **没有** `chat.assistant.final`，`unresolved_turns` 看得见这一格缺口；
+    /// - **放行对照**：`agent:main` 驱动同样一轮 ⇒ final 照落（否则「拒绝」可能只是
+    ///   「闸把所有人都拒了」的平凡真）。
+    #[tokio::test]
+    async fn closure_is_withheld_when_the_principal_lacks_the_grant() {
+        use crate::symbio_core::adapters::SilentDeltas;
+        use crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS;
+        use crate::symbio_core::invariants::unresolved_turns;
+        use crate::symbio_core::ActorSpec;
+
+        // ── 拒绝：自主发起者不持 `reply.first` ⇒ 收束格不落 ────────────────
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = StubLlmAdapter::succeed("stub-model");
+        let out = TurnRunner
+            .run_with_tools(
+                &store,
+                &llm,
+                &tok,
+                TurnInput {
+                    turn: 0,
+                    text: "问".into(),
+                    tier: LatencyTier::Deep,
+                    window_turns: None,
+                    resume: None,
+                    actor: ActorSpec::trivial(PRINCIPAL_AUTONOMOUS),
+                },
+                std::sync::Arc::new(SilentDeltas),
+                &[],
+                None,
+            )
+            .await
+            .expect("落格不报错——拒绝的语义是**不入格**，不是失败");
+        assert!(!out.fell_back, "拒绝不是兜底");
+
+        let snapshot = store.range(Seq::new(0));
+        assert!(
+            !snapshot
+                .iter()
+                .any(|e| e.kind == crate::symbio_core::EVENT_ASSISTANT_FINAL),
+            "缺 reply.first ⇒ 收束格不得入格：{:?}",
+            snapshot.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            unresolved_turns(&snapshot, false).len(),
+            1,
+            "拒绝要**可被判出**（留在未收束态）——C4 看得见它"
+        );
+
+        // ── 放行对照：`agent:main` 持 `reply.first` ⇒ final 照落 ───────────
+        let store2 = EventStore::new();
+        TurnRunner
+            .run_with_tools(
+                &store2,
+                &llm,
+                &tok,
+                TurnInput {
+                    turn: 0,
+                    text: "问".into(),
+                    tier: LatencyTier::Deep,
+                    window_turns: None,
+                    resume: None,
+                    actor: ActorSpec::trivial("agent:main"),
+                },
+                std::sync::Arc::new(SilentDeltas),
+                &[],
+                None,
+            )
+            .await
+            .expect("桩必答");
+        let snapshot2 = store2.range(Seq::new(0));
+        assert!(
+            snapshot2
+                .iter()
+                .any(|e| e.kind == crate::symbio_core::EVENT_ASSISTANT_FINAL),
+            "持有 reply.first ⇒ final 照落（否则拒绝可能只是「闸全拒」的平凡真）"
+        );
+    }
 }
 
 // ── 工具轮（`run_with_tools`）：产物落格 + 结果回灌 + 等待用户停下 ──────────

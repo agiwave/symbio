@@ -867,6 +867,15 @@ pub struct TurnOutcome {
     /// 才续（恢复是批 2 的能力）。与 `aborted` 同样是「网格少一格的诚实缺口」，
     /// 但原因不同：一个是被放弃，一个是还没完。
     pub awaits_user: bool,
+    /// 本轮收束**被写侧闸拒绝**（主体不持 `reply.first`，见 [`closure_granted`]）：
+    /// 收束格未入格，该轮留在未收束态（`check_all` 的 C4 报得出）。与 `aborted` /
+    /// `awaits_user` 同属「网格少一格」，但**原因在授权**，不是放弃也不是等待——
+    /// 调用方据此**跳过本轮的派生事实**（与桥档 `authorize_close` 拒绝时同形：
+    /// 那一档的 `record_to_wal` 在闸处提前返回，承诺 / 任务 / 熔断 / 记忆全不写）。
+    ///
+    /// 平凡值 `false`：生产里主体恒为 `agent:main` 或经 `matrix_for` 派生的
+    /// `agent:<id>`，都持 `reply.*` ⇒ 闸是 fail-closed 的**结构**，不是会翻面的开关。
+    pub closure_denied: bool,
 }
 
 /// 按主体过滤一批事件（**可见域入口**，[plan/11 批 1](../../../../docs/plan/11-多执行器与多主体加固实施方案.md)
@@ -1129,6 +1138,25 @@ impl TurnRunner {
                                 )
                                 .await;
                         }
+                        if !closure_granted(&actor.principal) {
+                            // 写侧闸拒：**不落收束格**——该轮留在未收束态，`check_all`
+                            // 会把它报出来（C4），与桥档 `authorize_close` 同一条纪律、
+                            // 同一个谓词。用户的答案照旧可见（`text` 仍回给调用方）。
+                            crate::plugin_warn!(
+                                "actors",
+                                "[v2] 收束被授权拒绝（{} 缺 reply.first），本轮不入格（turn={turn}）",
+                                actor.principal
+                            );
+                            return Ok(TurnOutcome {
+                                turn,
+                                text: rt.text,
+                                cost_ms,
+                                fell_back: false,
+                                aborted: false,
+                                awaits_user: false,
+                                closure_denied: true,
+                            });
+                        }
                         store.append(
                             Event::pending(
                                 format!("f-{turn}"),
@@ -1152,6 +1180,7 @@ impl TurnRunner {
                             fell_back: false,
                             aborted: false,
                             awaits_user: false,
+                            closure_denied: false,
                         });
                     }
 
@@ -1201,6 +1230,7 @@ impl TurnRunner {
                             fell_back: false,
                             aborted: false,
                             awaits_user: true,
+                            closure_denied: false,
                         });
                     }
 
@@ -1220,6 +1250,7 @@ impl TurnRunner {
                         fell_back: false,
                         aborted: true,
                         awaits_user: false,
+                        closure_denied: false,
                     });
                 }
                 Err(e) => {
@@ -1303,6 +1334,23 @@ impl TurnRunner {
             .map(|seq| seq.value())?;
         sink.on_delta(text);
         let cost_ms = started.elapsed().as_millis() as u64;
+        if !closure_granted(&actor.principal) {
+            // 与深度档同一条写侧闸（见 [`closure_granted`]）：拒绝 ⇒ 不落收束格。
+            crate::plugin_warn!(
+                "actors",
+                "[v2] 反射档收束被授权拒绝（{} 缺 reply.first），本轮不入格（turn={turn}）",
+                actor.principal
+            );
+            return Ok(TurnOutcome {
+                turn,
+                text: text.to_string(),
+                cost_ms,
+                fell_back: false,
+                aborted: false,
+                awaits_user: false,
+                closure_denied: true,
+            });
+        }
         store.append(
             Event::pending(
                 format!("f-{turn}"),
@@ -1326,6 +1374,7 @@ impl TurnRunner {
             fell_back: false,
             aborted: false,
             awaits_user: false,
+            closure_denied: false,
         })
     }
 
@@ -1342,6 +1391,24 @@ impl TurnRunner {
     where
         S: Store<Event = Event>,
     {
+        if !closure_granted(&actor.principal) {
+            // 兜底格也是**收束格**，同过写侧闸（见 [`closure_granted`]）：拒绝 ⇒ 不落格。
+            // `fell_back` 仍为真——模型确实失败了（I3 的「到点必答」由调用方按失败呈现）。
+            crate::plugin_warn!(
+                "actors",
+                "[v2] 兜底收束被授权拒绝（{} 缺 reply.first），本轮不入格（turn={turn}）",
+                actor.principal
+            );
+            return Ok(TurnOutcome {
+                turn,
+                text: why.to_string(),
+                cost_ms,
+                fell_back: true,
+                aborted: false,
+                awaits_user: false,
+                closure_denied: true,
+            });
+        }
         store.append(
             Event::pending(
                 format!("fb-{turn}"),
@@ -1362,8 +1429,37 @@ impl TurnRunner {
             fell_back: true,
             aborted: false,
             awaits_user: false,
+            closure_denied: false,
         })
     }
+}
+
+/// 写侧授权闸（[plan/01 §7](../../../../docs/plan/01-核心架构.md) 写侧，
+/// [04 §3.1 批⑥](../../../../docs/plan/04-工程落地.md)）：该主体此刻能否写本轮的
+/// **收束格**。
+///
+/// ## 为什么运行器也要判（它原先只在桥档判）
+///
+/// 收束格的写方**跟着执行路径走**：`bridge` 档由 `v2_bridge::record_to_wal` 落格
+/// （那里有 `authorize_close`），`full` 档由**本运行器**原生落格。闸只挂在其中一条
+/// 路径上，另一条就整条漏判——而**没有任何东西会变红**（两条路径各写各的收束格，
+/// 谁也不看谁）。这与 S12 那批查出的「文档断言了、生产数据里却相反」是同一类缺口。
+///
+/// 三条落格路径（深度档 final / 反射档 final / 兜底格）都过这里——收束格是**同一个
+/// 事实**，不论它由哪条路径、哪种收束形态写出。
+///
+/// ## 谓词与判据
+///
+/// 谓词是 `PermissionMatrix::can_reply`（桥档 `authorize_close` 用的也是它——写侧闸
+/// 判什么**只定义一次**）。`first` 恒为 `true`：运行器一轮只落一格收束
+/// （`final_unique_per_turn` 是不变量），不存在「同轮追加」那一态——那是 v1 重试的
+/// 形状，只有桥档才有。
+///
+/// 拒绝 ⇒ **不落格**：该轮留在未收束态，`check_all` 会把它报出来（C4），与桥档同一
+/// 条纪律。平凡值下（`agent:main`，以及任何经 `matrix_for` 派生的 `agent:<id>`）恒
+/// 放行——闸是 fail-closed 的**结构**，不是生产里会翻面的开关。
+fn closure_granted(principal: &str) -> bool {
+    crate::symbio_core::authz::matrix_for(principal).can_reply(principal, true)
 }
 
 /// 把一轮工具交换渲染成 prompt 片段（调用 + 结果），供下一轮追加。
