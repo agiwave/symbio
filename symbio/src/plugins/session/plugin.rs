@@ -812,6 +812,13 @@ fn config_definition() -> DetailDefinition {
                         "成功收束的轨迹固化成一条技能事实（同一句触发至多一条）；关闭后不编译、只检索",
                         d.skill_compile_enabled,
                     ),
+                    DetailField::toggle(
+                        "skill_fast_path",
+                        "技能快路（命中时跳过模型）",
+                        "本轮发言逐字命中某条已编译技能时，直接以技能正文收束、不调模型。\
+                         命中判据取恒等（更宽的「同类」判定是算法问题）；只在 full 档生效",
+                        d.skill_fast_path,
+                    ),
                     DetailField::select(
                         "v2_mode",
                         "事实链路档位",

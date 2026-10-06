@@ -307,6 +307,41 @@ pub struct SessionConfig {
     /// 未命中快 ≥ 3×」是执行档位与埋点那半边的事，不在本开关的管辖内。
     #[serde(default = "default_skill_compile_enabled")]
     pub skill_compile_enabled: bool,
+    /// 技能快路的**执行半边**（[roadmap/S11 §4](../../../../docs/plan/roadmap/S11-技能编译与自我改进.md)
+    /// 的 `actor.pattern`：完整值 `decider`、**平凡值 `reasoner`**，默认 `false`）。
+    ///
+    /// ## 它控制什么
+    ///
+    /// [`skill_compile_enabled`] 让技能**存在**、`v2_skills::route` 让低置信技能**不进
+    /// 提示词**；本开关决定命中时**要不要跳过模型**：
+    /// - `true`：本轮发言**逐字命中**某条已编译技能（且该技能过置信度闸）⇒ 本轮以
+    ///   **技能正文**收束，**一次模型调用都不发生**（S11 §2「命中技能后走 `budget_ms`
+    ///   更小的 ActorSpec」、§6.2「命中后 `cost_ms` 显著低于未命中路径」）；
+    /// - `false`：**永远走完整推理**——退化成 S03（S11 §4 平凡值）。
+    ///
+    /// ## 与 [`skill_compile_enabled`] 为什么是两个开关
+    ///
+    /// S11 §4 的两行参数是独立的：`projection = skill_compile`（编不编）与
+    /// `actor.pattern`（命中后走不走快路）。合成一个会让「只编译、不加速」无法表达
+    /// ——而那正是**观察编译质量**时最需要的形态（编译是数据，加速是行为）。
+    ///
+    /// ## 命中判据取**恒等**，不是"同类"
+    ///
+    /// 命中 = 本轮发言与技能的 `trigger` **逐字相同**（归一化 = `trim` + 与写方
+    /// **同一个**截断上限）。更宽的"同类"判定是算法问题（S11 §7：架构只提供
+    /// `skill_compile` 这个位置），本开关不假装它已解决——因此命中率取决于
+    /// **重复发言**，不取决于语义相似。这是诚实划界，不是缺陷：后续接入匹配算法时，
+    /// 改的是**数据**（`v2_skills::take_match` 一处），不是结构。
+    ///
+    /// ## 只在 `full` 档生效
+    ///
+    /// 快路要"跳过模型"，而模型调用发生在 v2 运行器（`v2_exec`）里；`bridge` 档的轮次
+    /// 由 v1 执行，没有可跳过的那一次调用。故本开关在 `bridge` / `off` 档**不产生任何
+    /// 后果**——但两档的"不算"不是一回事：`bridge` 档判定照常发生（观测照常落格，与
+    /// 关着时同形），只是没人拿它去装配；`off` 档连判定都不算（没有事实源，无从判）。
+    /// 见 `chat_loop/inputs.rs` 的 `fast_armed` 与 `routing` 两处条件。
+    #[serde(default = "default_skill_fast_path")]
+    pub skill_fast_path: bool,
     /// v2 会话链路的切换档位（`off` / `bridge` / `full`；默认 `bridge`，见 [`V2Mode`]）。
     ///
     /// 管辖范围：从「只转写事实」到「整体切换引擎」的**同一根旋钮**——
@@ -400,6 +435,13 @@ pub fn default_skill_compile_enabled() -> bool {
     false
 }
 
+pub fn default_skill_fast_path() -> bool {
+    // S11 §4 平凡值：`actor.pattern = reasoner`（永远走完整推理，退化成 S03）。
+    // 开它是**行为改变**（命中时以技能正文收束、不调模型），因此默认关：
+    // 「不加速」是安全退路口，而"只编译不加速"本身是有意义的观察形态。
+    false
+}
+
 impl SessionConfig {
     /// 下发给 `model_chat::Request::max_tool_rounds` 的值（契约翻译点）。
     ///
@@ -447,6 +489,7 @@ impl Default for SessionConfig {
             progress_max_per_turn: default_progress_max_per_turn(),
             conation_enabled: default_conation_enabled(),
             skill_compile_enabled: default_skill_compile_enabled(),
+            skill_fast_path: default_skill_fast_path(),
             v2_mode: V2Mode::default(),
         }
     }

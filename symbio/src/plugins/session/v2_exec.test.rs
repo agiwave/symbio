@@ -66,6 +66,8 @@ fn tool_free_req<'a>(
         resume: None,
         recalled: None,
         skill_obs: &[],
+        // 快路候选集默认空 ⇒ 与接线前逐字同路（`run_with_tools`）。
+        skill_hits: &[],
     }
 }
 
@@ -410,6 +412,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         resume: None,
         recalled: None,
         skill_obs: &[],
+        skill_hits: &[],
     })
     .await
     .expect("工具轮执行成功");
@@ -591,5 +594,149 @@ async fn full_turn_lands_memory_and_learning_facts() {
         obs_events[0].produced_by,
         Some(user_seq),
         "观测的溯源锚同为本轮开口"
+    );
+}
+
+// ==================== 反射档（S11 快路的执行半边）====================
+
+/// 命中一条已编译技能 ⇒ 本轮**一次模型都不调**，以技能正文收束；开轮格声明
+/// `reflex`，收束格 `cost_ms` 在反射档预算内。
+///
+/// ## 判据只有一个，就是"没调模型"
+///
+/// `prompts` 为空是本用例最硬的一条。技能命中若只是"把技能正文当提示词喂给模型"，
+/// 请求数照样是 1——那样"跳过模型"就是一句空话，S11 §6.2 的加速根本不存在。
+/// 其余三条（`tier = reflex` / `model = reflex` / `cost_ms` 在预算内）钉的是**埋点**：
+/// 没有它们，"跳过"发生了却无从观测。
+///
+/// ## 为什么"只对新开轮"这条边界要在这里立
+///
+/// 续写轮的 `user_text` 仍是原轮那句发言（用户没再说话）——若不禁，同一句话命中技能
+/// 时反射档会去新开一个 `u-{turn}` 格，而该轮的用户格**已经在网格里**（等待轮落的）
+/// ⇒ 撞幂等键（`AppendError::Duplicate` → Failed 出口），本轮既完不成收束、又变成一次
+/// 报错。语义上同样说不通：续写要跑的是刚被批准的那次工具，不是拿技能顶掉它。
+/// 该边界由 `v2_exec` 的 `resume_anchor.is_none()` 判定，故此处钉住：`resume` 为
+/// `Some` 时即便命中集非空，也照走完整推理（模型被调用）。
+#[tokio::test]
+async fn skill_hit_takes_the_reflex_tier_without_any_model_call() {
+    let (session, dir, _tmp) = setup_full().await;
+    let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
+    let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
+    let (provider, prompts) = FaithfulProvider::new(Behavior::Faithful);
+
+    // `trigger` 与 `tool_free_req` 的 `user_text`（"你好"）逐字相同 ⇒ 命中。
+    let hits = [super::super::v2_skills::SkillLlmHit {
+        skill_id: "sk-1".into(),
+        trigger: "你好".into(),
+        content: "先列要点；再合并同类项。".into(),
+    }];
+    let mut req = tool_free_req(
+        &session,
+        Arc::new(provider),
+        &sink,
+        crate::symbio_core::ExecAbortSignal::new(),
+    );
+    req.skill_hits = &hits;
+    let res = execute_turn(req).await.expect("反射档执行成功");
+
+    assert_eq!(
+        res.output.text, "先列要点；再合并同类项。",
+        "命中即以技能正文收束（不是让模型照着技能重说一遍）"
+    );
+    assert!(
+        prompts.lock().unwrap().is_empty(),
+        "命中技能 ⇒ 一次模型调用都不发生：{:?}",
+        prompts.lock().unwrap()
+    );
+    assert!(
+        !res.output.response_text_child_id.is_empty(),
+        "产物必须经桥上线（否则收束节点在前端建不起来）"
+    );
+    assert!(
+        res.messages.is_empty(),
+        "反射档不跑工具 ⇒ 没有额外消息：{:?}",
+        res.messages
+    );
+
+    let store = EventWalStore::open(dir.join("v2-events.wal")).expect("open wal");
+    let all = store.range(Seq::new(0));
+    let snap: Vec<&Event> = all.iter().filter(|e| turn_facts(e)).collect();
+    assert_eq!(snap.len(), 2, "开轮格 + 收束格（没有产物格）：{snap:?}");
+    assert_eq!(snap[0].kind, EVENT_USER_MESSAGE);
+    assert_eq!(
+        snap[0].payload["tier"], "reflex",
+        "开轮格声明反射档（S11 §3 的档位观测；兜底率按层统计靠它）"
+    );
+    assert_eq!(snap[1].kind, EVENT_ASSISTANT_FINAL);
+    assert_eq!(snap[1].payload["text"], "先列要点；再合并同类项。");
+    assert_eq!(
+        snap[1].payload["model"], "reflex",
+        "载荷的 `model` 记产者——空着会让命中轮与普通轮在事件面上无从区分"
+    );
+    assert!(
+        snap[1].cost_ms <= LatencyTier::Reflex.budget_ms(),
+        "命中后耗时必须在反射档预算内（S11 §6.2：命中显著低于未命中）：{}",
+        snap[1].cost_ms
+    );
+    assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
+}
+
+/// 反向（边界）：命中集非空但本轮是**续写轮** ⇒ 一律走完整推理，技能不得顶掉
+/// 刚被批准的那次工具。
+#[tokio::test]
+async fn a_skill_hit_never_takes_over_a_resumed_turn() {
+    let (session, dir, _tmp) = setup_full().await;
+    let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
+    let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
+    let (provider, prompts) = FaithfulProvider::new(Behavior::Faithful);
+
+    // 续写轮的前提是「本轮已开未收束」（`last_open_turn` 要能找到它）——先手工开一轮。
+    // 句柄必须**在 `execute_turn` 之前释放**：写者令牌是独占的（`wal.rs`），
+    // 本测试握着它，`execute_turn` 里那次 `open` 就只能拿到只读降级、落格全失败。
+    {
+        let store = EventWalStore::open(dir.join("v2-events.wal")).expect("open wal");
+        store
+            .append(
+                Event::pending(
+                    "u-0",
+                    EVENT_USER_MESSAGE,
+                    Entity::Turn,
+                    Verb::Opened,
+                    0,
+                    "user",
+                )
+                .with_payload(serde_json::json!({ "text": "你好", "tier": "deep" })),
+            )
+            .expect("开轮格");
+    }
+
+    let hits = [super::super::v2_skills::SkillLlmHit {
+        skill_id: "sk-1".into(),
+        trigger: "你好".into(),
+        content: "先列要点；再合并同类项。".into(),
+    }];
+    let mut req = tool_free_req(
+        &session,
+        Arc::new(provider),
+        &sink,
+        crate::symbio_core::ExecAbortSignal::new(),
+    );
+    req.skill_hits = &hits;
+    req.resume = Some(ResumedTool {
+        name: "vdfs_read".into(),
+        args: serde_json::json!({ "path": "a.md" }),
+        text: "文件内容：hello".into(),
+    });
+
+    let res = execute_turn(req).await.expect("续写轮执行成功");
+    assert_eq!(
+        res.output.text, "秋天好",
+        "续写轮走完整推理（模型作答），技能正文不得顶替它"
+    );
+    assert_eq!(
+        prompts.lock().unwrap().len(),
+        1,
+        "续写轮照常请求模型：{:?}",
+        prompts.lock().unwrap()
     );
 }

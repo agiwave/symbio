@@ -180,6 +180,12 @@ impl PersistentChatSession {
         self.cfg_or_default().skill_compile_enabled
     }
 
+    /// 技能快路开关（步 22 的**执行半边**，S11 §4 的 `actor.pattern`；
+    /// 锁被占回落默认 off——与 [`Self::v2_mode`] 同一读取纪律）。
+    pub(crate) fn skill_fast_path(&self) -> bool {
+        self.cfg_or_default().skill_fast_path
+    }
+
     /// fade 的保留窗口：最近 N 个 user turn 的工具结果保持原文，更早的才淡化。
     pub(crate) fn fade_keep_recent_turns(&self) -> usize {
         self.cfg_or_default().fade_keep_recent_turns

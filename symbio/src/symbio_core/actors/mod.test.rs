@@ -2766,3 +2766,115 @@ mod tool_round_tests {
         );
     }
 }
+
+// ── 反射档（`run_reflex`，S11 快路的执行半边）────────────────────────────────
+//
+// 判据分列（一个规则一个判定方）：
+// - **落格**：`u-{turn}` / `f-{turn}` 与 [`TurnRunner::run_with_tools`] 同一份纪律
+//   （收束溯源指向开轮格、`cost_ms` 随事件入账）——本模块只读事实源；
+// - **档位**：开轮格载荷的 `tier` 由**令牌类型**给出（`RuleOnly` ⇒ `reflex`），
+//   不是调用方填的字符串；
+// - **产物上线**：正文经 `sink` 到出口（不上线，收束节点在前端建不起来）。
+
+mod reflex_turn_tests {
+    use std::sync::{Arc, Mutex};
+
+    use crate::symbio_core::adapters::{DeltaSink, LatencyTier, TokenIssuer};
+    use crate::symbio_core::invariants::unresolved_turns;
+    use crate::symbio_core::store::Store;
+    use crate::symbio_core::{
+        check_all, ActorSpec, Entity, EventStore, Seq, TurnRunner, Verb, EVENT_ASSISTANT_FINAL,
+        EVENT_USER_MESSAGE,
+    };
+
+    /// 收集口：按序记增量（反射产物上线的判据）。
+    struct CollectingDeltas(Mutex<Vec<String>>);
+
+    impl DeltaSink for CollectingDeltas {
+        fn on_delta(&self, text: &str) {
+            self.0.lock().unwrap().push(text.to_string());
+        }
+    }
+
+    /// 正向：反射档一轮**只落两格**（开轮 + 收束），收束溯源指向开轮格、
+    /// `cost_ms` 在反射档预算内、开轮格声明 `reflex`、产物经 `sink` 上线。
+    #[tokio::test]
+    async fn reflex_turn_lands_open_and_close_with_reflex_tier() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_reflex();
+        let actor = ActorSpec::trivial("agent:main");
+        let got = Arc::new(CollectingDeltas(Mutex::new(Vec::new())));
+
+        let out = TurnRunner
+            .run_reflex(
+                &store,
+                &tok,
+                0,
+                &actor,
+                "把周报整理成摘要",
+                "先列要点；再合并同类项。",
+                got.clone() as Arc<dyn DeltaSink>,
+            )
+            .await
+            .expect("反射档必答（不生成也要有产物）");
+
+        assert_eq!(out.text, "先列要点；再合并同类项。");
+        assert!(!out.fell_back && !out.aborted && !out.awaits_user);
+        assert!(
+            out.cost_ms <= LatencyTier::Reflex.budget_ms(),
+            "命中后耗时必须在反射档预算内（S11 §6.2：命中显著低于未命中）：{}",
+            out.cost_ms
+        );
+
+        let snapshot = store.range(Seq::new(0));
+        assert_eq!(
+            snapshot.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(),
+            vec![EVENT_USER_MESSAGE, EVENT_ASSISTANT_FINAL],
+            "反射档只落开轮与收束两格（没有产物格——它没跑工具）：{snapshot:?}"
+        );
+        let open = &snapshot[0];
+        assert_eq!(open.entity, Entity::Turn);
+        assert_eq!(open.verb, Verb::Opened);
+        assert_eq!(
+            open.payload["text"], "把周报整理成摘要",
+            "开轮格记的是**用户说的**，不是反射产物"
+        );
+        assert_eq!(
+            open.payload["tier"], "reflex",
+            "档位由令牌类型给出（RuleOnly ⇒ reflex），不是调用方填的字符串"
+        );
+        let close = &snapshot[1];
+        assert_eq!(close.verb, Verb::Closed);
+        assert_eq!(close.turn, 0);
+        assert_eq!(close.payload["text"], "先列要点；再合并同类项。");
+        assert_eq!(
+            close.payload["model"], "reflex",
+            "反射档没有模型：载荷的 `model` 记产者，空着会让命中轮与普通轮无从区分"
+        );
+        assert_eq!(close.cost_ms, out.cost_ms, "实测耗时随事件入账");
+        assert_eq!(
+            close.produced_by,
+            Some(0),
+            "收束溯源指向开轮格（I2；开轮格是网格第一格，seq = 0）"
+        );
+        assert_eq!(
+            close.actor, "agent:main",
+            "收束格的 actor 取本轮主体（与 run_with_tools 同一处取值）"
+        );
+
+        assert_eq!(
+            *got.0.lock().unwrap(),
+            vec!["先列要点；再合并同类项。".to_string()],
+            "产物必须经 sink 上线——不上线，收束节点在前端建不起来"
+        );
+        assert!(
+            check_all(&snapshot).is_empty(),
+            "{:?}",
+            check_all(&snapshot)
+        );
+        assert!(
+            unresolved_turns(&snapshot, false).is_empty(),
+            "开过的轮必须收束（I3 到点必答）"
+        );
+    }
+}

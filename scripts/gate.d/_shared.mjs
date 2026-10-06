@@ -618,7 +618,22 @@ export const BASELINE = {
   //      的（承诺 / 任务表 / 熔断 / 写侧授权闸）已在 `v2_exec` 模块文档**诚实划界**。
   //      +1 = `v2_exec.test.rs::full_turn_lands_memory_and_learning_facts`；端到端判据 =
   //      e2e `t40`（两轮不同发言 ⇒ 逐轮编码 + 逐轮编译 + 第 2 轮判第 1 轮编的技能）。
-  rustTests: 1305,
+  // 1309（S11 快路的**执行半边**，2026-10-06）——`1305 → 1309`，**+4**。
+  //      在此之前 `SkillRoute::SkillFastPath` 只作用在**提示词**上：判定被算出来
+  //      （`route` 逐条推观测），却**从不产生后果**——没有消费方，`issue_reflex()` 在
+  //      生产里零消费者。本批把这条判定接出第二个后果：命中一条已编译技能 ⇒ 本轮以
+  //      技能正文收束、**一次模型调用都不发生**。执行侧是 core 的
+  //      `TurnRunner::run_reflex`：**没有 `llm` 形参**、只收 `RuleOnly` 令牌 —— 于是
+  //      「反射档调模型」不是被检测到，而是**写不出来**（`verify/latency_gate.rs` 的
+  //      `assemble(Reflex)` 落地形态：反射档结构上装不进 LLM 字段）。开关
+  //      `SessionConfig::skill_fast_path` 默认 off；三条边界 = 只对新开轮 / 只在 full 档 /
+  //      关着时候选集恒空。`+4` = 核心 `reflex_turn_tests::reflex_turn_lands_open_and_close_with_reflex_tier`、
+  //      `v2_skills.test.rs::the_hit_judgement_is_literal_after_the_writers_normalisation`、
+  //      `v2_exec.test.rs::{skill_hit_takes_the_reflex_tier_without_any_model_call,
+  //      a_skill_hit_never_takes_over_a_resumed_turn}`；端到端判据 = e2e `t41`
+  //      （同一句话第二遍 ⇒ mock-llm 请求数不增、`tier = reflex`、以技能正文收束；
+  //      第三轮换一句话 ⇒ 请求数照增，把"命中才跳过"与"整档不调模型"分开）。
+  rustTests: 1309,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

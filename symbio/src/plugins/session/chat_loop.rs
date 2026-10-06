@@ -493,6 +493,9 @@ pub async fn run_chat_loop(
                 // ——full 档的记忆写与 bridge 档共用 `record_learning`（见其文档）。
                 recalled: turn.recall_view.as_ref(),
                 skill_obs: &turn.skill_route,
+                // 快路候选集（S11 执行半边）：命中一条 ⇒ 本轮走反射档、不调模型。
+                // 空表（默认）⇒ 与接线前逐字同路（`run_with_tools`）。
+                skill_hits: &turn.skill_hits,
             })
             .await
             {

@@ -101,7 +101,7 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
 - 每个 `tool_call` 必有 `role=tool` 结果子节点（「有请求必有响应」）；
 - 失败路径不得留非终态节点（无「永远运行中」）。
 
-> 上表**停在 T18**（用例已到 T40，中间的行没有补）——它是一份人工索引，不是清单；
+> 上表**停在 T18**（用例已到 T41，中间的行没有补）——它是一份人工索引，不是清单；
 > 权威清单 = `ls e2e/cases/`（runner 与门控都按目录发现式加载，新增文件即生效）。
 
 ## 常见夹具陷阱（跨用例，踩过的）
@@ -129,6 +129,16 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
 6. **收尾等子进程退干净**。Windows 上带着活子进程 `process.exit()` 会撞 libuv 断言，
    表现是「断言全过、退出码 `0xC0000409`」。`finally` 里要
    `await waitFor(() => !process.getActiveResourcesInfo().includes('ProcessWrap'))`。
+7. **mock-llm 的 `match` 是对「最后一条 user 消息」的子串匹配，而 `full` 档的 prompt
+   是整段转写**（含长期记忆的注入段）。于是**第 2 轮起的 prompt 里会出现第 1 轮的用户
+   发言**（它作为一条记忆被召回注入），早先写的 `match: <第 1 轮那句话>` 场景会把后面
+   每一轮都吃掉——表现为「换了句话问，答的还是上一轮的模板」。**数组顺序即优先级**：
+   把更具体的 `match` 排在前面，或改用 `once: true`。参考 `t41`。
+8. **同一个 WAL 的写者令牌是独占的**（`wal.rs` 的 `<wal>.lock`，非阻塞 `try_lock`）。
+   在测试里先 `EventWalStore::open(...)` 播种、再调被测函数（它自己也会 `open`），
+   第二个句柄只能拿到**只读降级**（`append` 恒 `NotTheWriter`）——被测函数的落格会
+   全线失败。播种要在**独立的块里做完并 drop**（参考 `v2_exec.test.rs` 的
+   `a_skill_hit_never_takes_over_a_resumed_turn`）。
 
 **新增「接线判据」用例时另加一条纪律**：机制已经接进生产、只是缺判据时，用例必须证
 **「接线前后行为可见地不同」**——把开关翻掉（如 `skill_compile_enabled` /

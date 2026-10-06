@@ -11,6 +11,26 @@
 //! 由 [`super::v2_tools::SessionDispatchPort`] 经 core 的 [`crate::symbio_core::DispatchPort`]
 //! 契约接入——**分发在 v2 是插件侧的实现细节，不是第二条执行链**。
 //!
+//! ## 反射档（S11 快路）：本档的第三条路，也是唯一不调模型的一条
+//!
+//! 开 `skill_fast_path` 且本轮发言**逐字命中**一条已编译技能时，本轮改走
+//! [`TurnRunner::run_reflex`]——以技能正文收束，**一次模型调用都不发生**。
+//! 它不是"又一条执行链"：产物落的是**同一对格子**（`u-{turn}` / `f-{turn}`），
+//! 收束后仍走同一段 `record_learning`，收口（步骤 5–7）也完全共享；变的只是
+//! **生成那一格**由谁产出（反射档没有 `llm` 形参 ⇒ "反射档调模型"写不出来）。
+//!
+//! 三条边界，缺一条都会静默走错：
+//! - **只对新开轮**：续写轮不新开用户格（复用 `resume.user_seq`），而反射档的落格形状
+//!   就是新开一轮 ⇒ 走它会撞幂等键（`Duplicate`），既完不成收束也把本轮变成错误；
+//! - **只在 `full` 档**：跳过的是本档里的那一次模型调用，`bridge` / `off` 档没有可跳过的；
+//! - **开关默认关**：关着时候选集恒空，本档与接线前逐字同路。
+//!
+//! 一处**诚实缺口**：反射档把 `actor.budget_ms` 按档位派生
+//! （`LatencyTier::Reflex.budget_ms()`），但该字段在生产里仍**没有读方**
+//! （`invariants::declared_budget_ms` 读的是开轮载荷的 `tier` 字符串）。派生出的值
+//! 今天是"算了却看不见"——读方接进来属 `invariants` 那一侧的独立一批，
+//! 见 `execute_turn` 里派生点旁的注记。
+//!
 //! ## 收束派生事实：记忆与学习（本档已覆盖）
 //!
 //! 轮次事实由运行器原生入格，`chat_loop` 因此以 `TurnState::v2_executed` 拦下整段
@@ -248,6 +268,13 @@ pub(crate) struct V2Turn<'a> {
     /// 本轮技能路由判定（S11 步 22）：`(skill_id, fallback)` 逐条——轮末落
     /// `memory.recalled` 供 `calibration` 归并，是「回退会发生」的唯一数据源。
     pub skill_obs: &'a [(String, bool)],
+    /// 本轮**可用**的技能集（S11 快路的候选）：本轮发言逐字命中其中一条 ⇒ 本轮
+    /// 走**反射档**（[`TurnRunner::run_reflex`]），一次模型调用都不发生。
+    ///
+    /// 空表是**常态**（没开 `skill_fast_path` / 没编过技能 / 档位不是 `full`）——
+    /// 那时本轮与接线前逐字同路（`run_with_tools`）。填充点唯一：
+    /// `chat_loop/inputs.rs` 的 `fast_armed` 分支（与观测同一次 `route`）。
+    pub skill_hits: &'a [super::v2_skills::SkillLlmHit],
 }
 
 /// 一轮 v2 原生产物的**全部出口**。
@@ -278,6 +305,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         resume,
         recalled,
         skill_obs,
+        skill_hits,
     } = req;
     // 事实源：per-session v2 WAL（与桥同一个文件——两档共用一份网格）。
     let dir = session.session_dir().ok_or_else(|| {
@@ -362,8 +390,35 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         }
     });
 
-    let llm = ProviderLlmAdapter::for_turn(provider, system_prompt, abort.clone());
-    let tok = TokenIssuer::issue_deep();
+    // 本轮是否走**反射档**（S11 快路）：命中一条已编译技能 ⇒ 以技能正文收束、
+    // 一次模型调用都不发生。两关缺一不可：
+    //
+    // - **逐字命中**（`take_match`：判据是数据，更宽的匹配接进来时改的是它）；
+    // - **只对新开轮**：续写轮**不新开用户格**（运行器复用 `resume.user_seq`），而
+    //   反射档的落格形状就是新开一轮（`u-{turn}`）⇒ 续写轮走它会撞幂等键
+    //   （`AppendError::Duplicate` → Failed 出口），既完不成收束、也把本轮变成错误。
+    //   语义上同样说不通：续写要跑的是**刚被用户批准的那次工具**，不是拿技能顶掉它。
+    //   故 `resume_anchor` 非空时一律不走快路（判定根本不算，不是算了再丢）。
+    let hit = resume_anchor
+        .is_none()
+        .then(|| super::v2_skills::take_match(skill_hits, user_text))
+        .flatten();
+
+    // 档位：命中 ⇒ 反射（`budget_ms = 80`、开轮格的 `tier = reflex`），未命中 ⇒ 深度。
+    // `tier` 与 `actor.budget_ms` 是**同一个事实**（一个入格、一个随主体走），
+    // 故由前者派生后者——两处各写一遍迟早对不上（S11 §3 的 ActorSpec 行）。
+    //
+    // **诚实缺口**：`ActorSpec.budget_ms` 在生产里**还没有读方**——`invariants` 的
+    // `declared_budget_ms` 读的是开轮载荷里的 `tier` **字符串**（再映射回同一个数）。
+    // 于是这里派生出的数是"算了却看不见"：不派生也不改变今天的行为（`trivial()` 的
+    // `60_000` 同样无人读）。仍然派生的理由 = 它是 I3 预算的**正确值**，读方接进来时
+    // 不必回头改这里；而读方该读 `tier` 还是该读这个字段（= 改事件载荷形状），
+    // 属 `invariants` 那一侧的独立一批，不混进本批。
+    let tier = if hit.is_some() {
+        LatencyTier::Reflex
+    } else {
+        LatencyTier::Deep
+    };
     // 身份进事件（[plan/11 批 1](../../../docs/plan/11-多执行器与多主体加固实施方案.md) ①）：
     // 本轮以**会话选定的那个 agent** 为主体——`ActorSpec` 首次在生产构造，
     // `agent:main` 从字面量变成数据。取值点与转写侧同一个（`request_principal`），
@@ -373,48 +428,83 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     // 另存一份 `principal`：`actor` 随 `input` 被移动进运行器，轮末的记忆与学习
     // 写方（`record_learning`）仍要以它为主体——先取字符串，不依赖 `actor` 的存活。
     let principal = super::chat_loop::request_principal(ctx.as_ref());
-    let actor = ActorSpec::trivial(principal.clone());
-    let input = TurnInput {
-        turn: turn_no,
-        text: user_text.to_string(),
-        tier: LatencyTier::Deep,
-        window_turns: Some(window_turns),
-        resume: resume_anchor,
-        actor,
+    let actor = ActorSpec {
+        budget_ms: tier.budget_ms(),
+        ..ActorSpec::trivial(principal.clone())
     };
-    // 工具分发：core 只认契约（`DispatchPort`），实现是插件侧——它持插件宿主、
-    // 请求上下文、转写出口与会话目录（core 认识这些即违 E-009）。
-    let dispatcher = super::v2_tools::SessionDispatchPort::new(
-        parent,
-        ctx,
-        sink.clone(),
-        session_dir.dir().to_path_buf(),
-        abort.clone(),
-        root_id.to_string(),
-        bridge.clone(),
-    );
-    let dispatch_ref: &dyn DispatchPort = &dispatcher;
 
-    let outcome = TurnRunner
-        .run_with_tools(
-            &store,
-            &llm,
-            &tok,
-            input,
-            bridge.clone(),
-            tools,
-            Some(dispatch_ref),
-        )
-        .await
-        .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?;
+    let mut produced = Vec::new();
+    let outcome = match &hit {
+        // ── 反射档（S11 §2）：**没有 `llm` 形参**的那条路 ────────────────────
+        // "反射档调模型"在类型上写不出来（`run_reflex` 只收 `RuleOnly`）——
+        // 这正是 `docs/plan/verify/latency_gate.rs::assemble(Reflex)` 的落地形态
+        // （反射档装不进 LLM 字段），而不是"装配了模型但约定不调它"。
+        Some(h) => {
+            crate::plugin_info!(
+                "session",
+                "[v2-exec] 技能快路命中（skill_id={}），本轮不调模型",
+                h.skill_id
+            );
+            let tok = TokenIssuer::issue_reflex();
+            TurnRunner
+                .run_reflex(
+                    &store,
+                    &tok,
+                    turn_no,
+                    &actor,
+                    user_text,
+                    &h.content,
+                    bridge.clone(),
+                )
+                .await
+        }
+        // ── 深度档：完整推理（与接线前逐字同路）─────────────────────────────
+        None => {
+            let llm = ProviderLlmAdapter::for_turn(provider, system_prompt, abort.clone());
+            let tok = TokenIssuer::issue_deep();
+            let input = TurnInput {
+                turn: turn_no,
+                text: user_text.to_string(),
+                tier,
+                window_turns: Some(window_turns),
+                resume: resume_anchor,
+                actor,
+            };
+            // 工具分发：core 只认契约（`DispatchPort`），实现是插件侧——它持插件宿主、
+            // 请求上下文、转写出口与会话目录（core 认识这些即违 E-009）。
+            let dispatcher = super::v2_tools::SessionDispatchPort::new(
+                parent,
+                ctx,
+                sink.clone(),
+                session_dir.dir().to_path_buf(),
+                abort.clone(),
+                root_id.to_string(),
+                bridge.clone(),
+            );
+            let dispatch_ref: &dyn DispatchPort = &dispatcher;
+            let r = TurnRunner
+                .run_with_tools(
+                    &store,
+                    &llm,
+                    &tok,
+                    input,
+                    bridge.clone(),
+                    tools,
+                    Some(dispatch_ref),
+                )
+                .await;
+            // 分发方产生的消息（工具轮）——先取走再释放，避免它随分发方一起消失。
+            produced = dispatcher.take_produced();
+            drop(dispatcher);
+            r
+        }
+    }
+    .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?;
 
     // 本轮的正文节点 id 必须在桥 drop 之前取走（收束帧由 chat_loop 的
     // `finalize_assistant_turn` 发出，用的就是它）。
     let child_id = bridge.current_node().unwrap_or_default();
-    // 分发方产生的消息（工具轮）——先取走再释放桥，避免它随桥一起消失。
-    let produced = dispatcher.take_produced();
-    // 桥与分发方都归零 ⇒ 通道关闭 ⇒ 发射端排空后退出。
-    drop(dispatcher);
+    // 桥归零 ⇒ 通道关闭 ⇒ 发射端排空后退出。
     drop(bridge);
     emitter
         .await

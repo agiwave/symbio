@@ -186,8 +186,12 @@ pub(crate) async fn prepare_turn_inputs(
         // 置信度闸判 + 把低置信的技能**摘出本轮召回视图**（反自动化回退，S11 §5）。
         // 与召回 / 调度段同一条 `tool_rounds == 0` 口径（同一轮内判定不漂移），也同
         // 「`off` 档与临时会话不读不写」——没有事实源就没有技能，无从判。
-        // 判决存进 `TurnState::skill_route`，轮末收束才入格（溯源锚那时才在事实源里）。
-        turn.skill_route = match context.session.session_dir() {
+        //
+        // **一次判定、两个出口**：观测存进 `TurnState::skill_route`（轮末收束才入格，
+        // 溯源锚那时才在事实源里），可用集存进 `TurnState::skill_hits`（供 `v2_exec`
+        // 装配反射档，S11 §2「命中技能后走 `budget_ms` 更小的 ActorSpec」）。
+        // 分两处各判一遍必然漂移成「摘出视图的那条」与「拿去执行的那条」不是同一条。
+        let routing = match context.session.session_dir() {
             Some(dir)
                 if !matches!(
                     context.session.v2_mode(),
@@ -199,8 +203,20 @@ pub(crate) async fn prepare_turn_inputs(
                     .map(|view| crate::plugins::session::v2_skills::route(&dir, view))
                     .unwrap_or_default()
             }
-            _ => Vec::new(),
+            _ => Default::default(),
         };
+        // 快路开关（S11 §4 的 `actor.pattern`）：**只对 `full` 档**有意义——跳过的是
+        // v2 运行器里那一次模型调用，`bridge` / `off` 档的轮次由 v1 执行，没有可跳过
+        // 的东西（本开关在那些档位**不产生任何后果**，见 `SessionConfig` 字段文档）。
+        // 关着时可用集恒空：判定照常发生、观测照常落格（"只编译不加速"的观察形态），
+        // 只是没人拿它去装配——这就是它作为一个独立开关的全部含义。
+        let fast_armed = context.session.skill_fast_path()
+            && matches!(
+                context.session.v2_mode(),
+                crate::plugins::session::config::V2Mode::Full
+            );
+        turn.skill_route = routing.obs;
+        turn.skill_hits = if fast_armed { routing.hits } else { Vec::new() };
     }
     let recall_section = turn
         .recall_view
