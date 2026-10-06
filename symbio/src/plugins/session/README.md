@@ -48,7 +48,11 @@ flowchart TD
 
 字段真源是本插件的 `config.rs::SessionConfig`（**定义由配置的拥有者产出**：设置页的表单定义从 `SessionConfig::default()` 读出，不写第二份字面量，避免「面板显示值与实际行为漂移」）。
 
-以下是完整配置示例：
+以下是**与本节机制直接相关的键**的示例（不是全表）：全字段真源见
+`config.rs::SessionConfig`，配置面总表见 [`docs/reference/CONFIGURATION.md`](../../../../docs/reference/CONFIGURATION.md)。
+（`classify_enabled` / `compose_enabled` / `progress_*` / `supplements_*` /
+`conation_enabled` / `skill_compile_enabled` / `v2_mode` 等键不在下方示例中，
+它们归「对话面机制」与「自主与学习」两节。）
 
 ```yaml
 session:

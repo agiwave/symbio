@@ -594,7 +594,20 @@ export const BASELINE = {
   //      `read_side_forwards_to_inner_unchanged`（读侧透传，防劫持改从读侧发生）。
   //      端到端见 e2e `t39`（钉**根**那一半：`vdfs_read <根>/memory/AGENTS.md` 读到的必须是
   //      `{homedir}/AGENTS.md`；模型那一半端到端钉不住——注册序来自 `HashMap`，见 11 §3）。
-  rustTests: 1303,
+  // 1304（会话配置面补齐 6/24 → 24/24，2026-10-06）——`1303 → 1304`，**+1**。
+  //      `session/plugin.rs::config_definition()` 此前只登记 6 个字段，而 `SessionConfig`
+  //      有 24 个 ⇒ `skill_compile_enabled`（S11 技能编译）/ `conation_enabled`（S12 自主层）
+  //      / `v2_mode` 的 `full` 档这些**高阶能力开关在产品里根本开不了**（后端存在、
+  //      设置页无控件 = 导航层不可达的虚假实现）。本批把 24 个字段全量登记（5 分区：
+  //      基础 / 上下文与工具 / 记忆 / 对话面机制 / 自主与学习），并新增覆盖判据
+  //      `config_definition_covers_every_session_config_field`：schema 字段键集合（跨**全部**
+  //      sections）必须与 `SessionConfig` 序列化键集合**完全相等**（少 = 开不了，多 = 保存必失败，
+  //      重复 = 两控件互相覆盖）。既有 `config_definition_defaults_come_from_session_config`
+  //      同步改为跨分区遍历（原只看 `sections[0]`，分区化后后四区无人看守）。
+  //      连带：数值字段刻意**不声明** `min`/`max`（边界是策略不是事实，`DetailField::check`
+  //      会据此拒收 ⇒ 编边界即造假约束），故 `vdfs_provider.test.rs::config_write_validates_before_applying`
+  //      的坏值从「`max_messages: 1`（靠旧 min 边界）」改成「`max_messages: "不是数字"`（形状错误）」。
+  rustTests: 1304,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

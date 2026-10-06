@@ -307,11 +307,11 @@ pub struct SessionConfig {
     /// 未命中快 ≥ 3×」是执行档位与埋点那半边的事，不在本开关的管辖内。
     #[serde(default = "default_skill_compile_enabled")]
     pub skill_compile_enabled: bool,
-    /// v2 会话链路的切换档位（`off` / `bridge`；默认 `bridge`，见 [`V2Mode`]）。
+    /// v2 会话链路的切换档位（`off` / `bridge` / `full`；默认 `bridge`，见 [`V2Mode`]）。
     ///
-    /// 管辖范围：v2 事实桥的转写（`v2_bridge`——轮次收束写 `v2-events.wal`）。
-    /// 未来整体切换（chat_loop 走 v2 引擎）落地时在同一枚举上增 `full` 档，
-    /// 由同一个开关统一管辖——「切到 v2 的哪一步」是一个问题，不该拆成多个旋钮。
+    /// 管辖范围：从「只转写事实」到「整体切换引擎」的**同一根旋钮**——
+    /// `off` 不转写、`bridge` 转写、`full` 走 v2 引擎（`v2_exec`）。
+    /// 「切到 v2 的哪一步」是一个问题，因此不拆成多个开关。
     #[serde(default)]
     pub v2_mode: V2Mode,
 }

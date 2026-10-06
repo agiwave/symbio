@@ -21,6 +21,7 @@
 
 use super::chat_session::PersistentChatSession;
 pub use super::config::SessionConfig;
+use super::config::V2Mode;
 use super::types::{Session, SessionSummary};
 use crate::providers::MemoryFile;
 use crate::symbio_core::{chat_message as cm, session_chat};
@@ -30,7 +31,8 @@ use crate::symbio_core::{
     PLUGIN_FILE, PLUGIN_ID_SESSION, SESSION_ID,
 };
 use crate::symbio_core::{
-    DetailDefinition, DetailField, DynVdfsProvider, VdfsAccess, VdfsChange, VdfsChangeSubscriptions,
+    DetailDefinition, DetailField, DetailOption, DetailSection, DynVdfsProvider, VdfsAccess,
+    VdfsChange, VdfsChangeSubscriptions,
 };
 use crate::symbio_core::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
 use async_trait::async_trait;
@@ -608,62 +610,260 @@ crate::submit_object_creator!(PLUGIN_ID_SESSION, SessionPlugin::build, dyn Plugi
 
 /// 会话配置的定义 —— **定义由配置的拥有者产出**。
 ///
+/// ## 覆盖判据：本定义与 [`SessionConfig`] 必须**逐字段对齐**
+///
+/// 字段键集合与 `SessionConfig` 序列化后的键集合**完全相等**，由单测
+/// `config_definition_covers_every_session_config_field` 守着。少一个字段就是
+/// 「开关存在、产品里开不了」——`skill_compile_enabled`（S11 技能编译）与
+/// `conation_enabled`（S12 自主层）这两个**高阶能力**的开关曾长期只躺在配置文件里，
+/// 前端设置页根本没有它们的控件，正是这条判据要防的形态。
+///
+/// ## 默认值单一真源
+///
 /// 字段默认值一律从 [`SessionConfig::default()`] 读出，不写第二份字面量：
 /// 历史上定义寄居在 plugin_manager 插件里，schema 与 serde 各写一份默认值，出现过
 /// `max_tool_rounds` schema=15 而 serde=65535 的漂移（面板显示的默认值与
 /// 实际行为不符）。不变式由 `config_definition_defaults_come_from_session_config`
 /// 锁定。
+///
+/// ## 数值字段刻意不声明 `min` / `max`
+///
+/// 边界是**策略不是事实**：[`DetailField::check`] 会在保存时按 `min` / `max` 拒收，
+/// 而 `SessionConfig` 里这些字段的真约束只有「非负」（都是无符号整数）。编一套宽窄
+/// 无从论证的边界就是造一套假约束（`session-complexity-audit` 已记过这条教训），
+/// 还会拒掉用户手工写进配置文件里的合法值。前端因此拿到 `null`，输入框不加
+/// `min` / `max` 属性。
+///
+/// ## 分区
+///
+/// 多分区走 `DetailDefinition` 的**直接构造**（与 `agent/host` / `mcp` / `model`
+/// 同一条形状），骨架（`binding = option` + 「保存配置」动作）用 `..form(...)` 复用，
+/// 不另抄一份动作字面量。
 fn config_definition() -> DetailDefinition {
     let d = SessionConfig::default();
-    DetailDefinition::form(
-        "会话设置",
-        vec![
-            DetailField::number(
-                "max_messages",
-                "最大消息数",
-                "每个会话保存的最大消息数量",
-                10.0,
-                1000.0,
-                json!(d.max_messages),
-            ),
-            DetailField::toggle(
-                "auto_compress",
-                "自动压缩",
-                "上下文 Token 用量达到有效上限 70% 时自动压缩历史（LLM 语义快照）",
-                d.auto_compress,
-            ),
-            DetailField::toggle(
-                "enable_compact_tool",
-                "工具压缩",
-                "向模型提供主动压缩工具（context_compact）与 55% 水位提醒；关闭后仅保留自动压缩兜底",
-                d.enable_compact_tool,
-            ),
-            DetailField::number(
-                "context_messages",
-                "上下文消息数量",
-                "Model 对话时包含的上下文消息数量（0 表示不限制，6 表示 3 轮对话）",
-                0.0,
-                200.0,
-                json!(d.context_messages),
-            ),
-            DetailField::number(
-                "memory_max_bytes",
-                "记忆写入上限（字节）",
-                "会话记忆文件（每个会话自己的 `MEMORY.md`）单次写入的字节上限，超出会被拒绝",
-                1.0,
-                1_048_576.0,
-                json!(d.memory_max_bytes),
-            ),
-            DetailField::number(
-                "memory_inject_max_bytes",
-                "记忆注入上限（字节）",
-                "每轮注入系统提示词的会话记忆正文字节上限，超出部分截断",
-                1.0,
-                1_048_576.0,
-                json!(d.memory_inject_max_bytes),
-            ),
+    DetailDefinition {
+        sections: vec![
+            // 「基础」不折叠：进这一页的人多半只想改消息数与上下文轮数。
+            DetailSection {
+                title: Some("基础".into()),
+                collapsed: false,
+                fields: vec![
+                    unbounded_number(
+                        "max_messages",
+                        "最大消息数",
+                        "每个会话保存的最大消息数量（超出后按轮 FIFO 淘汰）",
+                        json!(d.max_messages),
+                    ),
+                    unbounded_number(
+                        "context_messages",
+                        "上下文消息数量",
+                        "Model 对话时包含的上下文消息数量（0 表示不限制，6 表示 3 轮对话）",
+                        json!(d.context_messages),
+                    ),
+                    unbounded_number(
+                        "max_tool_rounds",
+                        "工具轮次上限",
+                        "单轮最多工具迭代次数（0 = 不限制）。达到上限会先给出明确提示再正常退出，不是静默熔断",
+                        json!(d.max_tool_rounds),
+                    ),
+                ],
+            },
+            DetailSection {
+                title: Some("上下文与工具".into()),
+                collapsed: true,
+                fields: vec![
+                    DetailField::toggle(
+                        "auto_compress",
+                        "自动压缩",
+                        "上下文 Token 用量达到有效上限 70% 时自动压缩历史（LLM 语义快照）",
+                        d.auto_compress,
+                    ),
+                    DetailField::toggle(
+                        "enable_compact_tool",
+                        "工具压缩",
+                        "向模型提供主动压缩工具（context_compact）与 55% 水位提醒；关闭后仅保留自动压缩兜底",
+                        d.enable_compact_tool,
+                    ),
+                    unbounded_number(
+                        "compress_line_threshold",
+                        "淡化行数阈值",
+                        "请求视图中超过此行数的内容节点做头尾淡化（存储恒为完整原文）",
+                        json!(d.compress_line_threshold),
+                    ),
+                    unbounded_number(
+                        "compress_keep_recent",
+                        "淡化保护窗口",
+                        "请求视图中最近的 N 条内容节点豁免淡化（0 表示不保护）",
+                        json!(d.compress_keep_recent),
+                    ),
+                    unbounded_number(
+                        "tool_context_window",
+                        "工具结果保留窗口",
+                        "保留完整结果的最近工具调用数量，更早的按骨架化策略替换为占位文案",
+                        json!(d.tool_context_window),
+                    ),
+                    unbounded_number(
+                        "fade_activate_rounds",
+                        "工具结果淡化阈值",
+                        "单轮工具迭代轮数超过此值后，较早轮次的工具结果在请求视图中压成头尾摘要",
+                        json!(d.fade_activate_rounds),
+                    ),
+                    unbounded_number(
+                        "fade_keep_recent_turns",
+                        "淡化保留轮数",
+                        "最近 N 个用户轮次的工具结果保持原文，更早的才淡化",
+                        json!(d.fade_keep_recent_turns),
+                    ),
+                    DetailField::toggle(
+                        "prune_tool_history",
+                        "落库期工具链裁剪",
+                        "开启时在落库阶段物理删除上下文窗口之外的 Tool / ToolCall / Reasoning 节点\
+                         （存储不再保留完整原文）；关闭后存储严格保留全文，裁剪只发生在请求视图",
+                        d.prune_tool_history,
+                    ),
+                ],
+            },
+            DetailSection {
+                title: Some("记忆".into()),
+                collapsed: true,
+                fields: vec![
+                    unbounded_number(
+                        "memory_max_bytes",
+                        "记忆写入上限（字节）",
+                        "会话记忆文件（每个会话自己的 `MEMORY.md`）单次写入的字节上限，超出会被拒绝",
+                        json!(d.memory_max_bytes),
+                    ),
+                    unbounded_number(
+                        "memory_inject_max_bytes",
+                        "记忆注入上限（字节）",
+                        "每轮注入系统提示词的会话记忆正文字节上限，超出部分截断并告知地址",
+                        json!(d.memory_inject_max_bytes),
+                    ),
+                ],
+            },
+            DetailSection {
+                title: Some("对话面机制".into()),
+                collapsed: true,
+                fields: vec![
+                    DetailField::toggle(
+                        "classify_enabled",
+                        "轮首判决",
+                        "每轮开始时请 `classify` 判一次「直接回答还是派活」；关闭后全部输入直接进工具循环",
+                        d.classify_enabled,
+                    ),
+                    DetailField::toggle(
+                        "compose_enabled",
+                        "对话面措辞",
+                        "判决结果由 `compose` 组织成一句话；关闭后「直接回答」降级进工具循环（不沉默）",
+                        d.compose_enabled,
+                    ),
+                    DetailField::toggle(
+                        "progress_enabled",
+                        "中途汇报",
+                        "长任务在轮边界主动说一句进度；关闭后一次都不判定、不汇报",
+                        d.progress_enabled,
+                    ),
+                    unbounded_number(
+                        "progress_interval_ms",
+                        "汇报静默阈值（毫秒）",
+                        "距最近一次对话动静超过它才汇报；同时是措辞里「已经 N 分钟了」的来源",
+                        json!(d.progress_interval_ms),
+                    ),
+                    unbounded_number(
+                        "progress_min_rounds",
+                        "汇报最少轮次",
+                        "已完成的工具轮次达到它才有「进展」可报（第一轮就跑完的任务不该被打断）",
+                        json!(d.progress_min_rounds),
+                    ),
+                    unbounded_number(
+                        "progress_max_per_turn",
+                        "每轮汇报上限",
+                        "每轮最多汇报几次（0 = 一次都不汇报；与「关掉汇报」同效但语义不同）",
+                        json!(d.progress_max_per_turn),
+                    ),
+                    DetailField::toggle(
+                        "supplements_enabled",
+                        "补充整合",
+                        "运行中连续发来的多条消息抽干合并成**同一条**用户消息，而不是一条消息占一轮",
+                        d.supplements_enabled,
+                    ),
+                    unbounded_number(
+                        "supplements_max_per_drain",
+                        "单次抽干上限",
+                        "一次最多合并几条消息，超出者留队等下一个抽干点",
+                        json!(d.supplements_max_per_drain),
+                    ),
+                ],
+            },
+            DetailSection {
+                title: Some("自主与学习".into()),
+                collapsed: true,
+                fields: vec![
+                    DetailField::toggle(
+                        "conation_enabled",
+                        "「欲」升格为任务",
+                        "心跳表达出的意图是否经闸门升格成长目标任务。关闭后意图照样入格、照样可读，\
+                         但一条自主任务都不产生（退化为纯响应式，完整运行）",
+                        d.conation_enabled,
+                    ),
+                    DetailField::toggle(
+                        "skill_compile_enabled",
+                        "技能编译",
+                        "成功收束的轨迹固化成一条技能事实（同一句触发至多一条）；关闭后不编译、只检索",
+                        d.skill_compile_enabled,
+                    ),
+                    DetailField::select(
+                        "v2_mode",
+                        "事实链路档位",
+                        vec![
+                            DetailOption {
+                                value: "off".into(),
+                                label: "off（纯 v1：不转写事实）".into(),
+                                description: None,
+                            },
+                            DetailOption {
+                                value: "bridge".into(),
+                                label: "bridge（v1 运行 + v2 事实累积，默认）".into(),
+                                description: None,
+                            },
+                            DetailOption {
+                                value: "full".into(),
+                                label: "full（整体切换：轮次走 v2 引擎）".into(),
+                                description: None,
+                            },
+                        ],
+                        v2_mode_name(d.v2_mode),
+                    )
+                    .with_description(
+                        "管辖范围 = v2 事实链路的切换档位。`full` 的覆盖面是**非交互轮次**\
+                         （有工具 / 无工具都走 v2）；交互轮（审批 / 问答等待）的恢复仍是独立一批",
+                    ),
+                ],
+            },
         ],
-    )
+        ..DetailDefinition::form("会话设置", vec![])
+    }
+}
+
+/// 无边界数字字段：先取 [`DetailField::number`] 的骨架（`widget` / `step` / 说明 /
+/// 默认值的处理全部复用），再把 `min` / `max` 清空——理由见 [`config_definition`]。
+fn unbounded_number(key: &str, label: &str, description: &str, default: Value) -> DetailField {
+    DetailField {
+        min: None,
+        max: None,
+        ..DetailField::number(key, label, description, 0.0, 0.0, default)
+    }
+}
+
+/// 档位名（[`V2Mode`] 的 serde 表示）——面板的候选值与默认值共用它，不在 schema 侧
+/// 另写一份档位字面量。漂移由 `config_definition_defaults_come_from_session_config`
+/// 兜底（它比的就是这里的默认值与 `SessionConfig::default()` 的序列化结果）。
+fn v2_mode_name(mode: V2Mode) -> &'static str {
+    match mode {
+        V2Mode::Off => "off",
+        V2Mode::Bridge => "bridge",
+        V2Mode::Full => "full",
+    }
 }
 
 // ==================== VDFS 挂载点（/session） ====================

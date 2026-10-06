@@ -440,12 +440,16 @@ async fn write_merges_metadata_shallowly() {
     assert_eq!(s.display_title(), "改名");
 }
 
-/// 配置写入：校验先于一切（字段级错误），坏值不会改动内存
+/// 配置写入：校验先于一切（字段级错误），坏值不会改动内存。
+///
+/// 坏值取**形状**错误（数字字段收到字符串），不取**范围**错误：数值字段刻意不声明
+/// `min` / `max`（边界是策略不是事实，编边界就是造假约束——见
+/// `plugin.rs::config_definition`）。形状错误才是定义恒能判定的那类非法值。
 #[tokio::test]
 async fn config_write_validates_before_applying() {
     let (_dir, p) = fixture();
     let before = p.config.read().await.max_messages;
-    let bad = VdfsContent::text(r#"{"max_messages": 1}"#);
+    let bad = VdfsContent::text(r#"{"max_messages": "不是数字"}"#);
     match p
         .dispatch(&vctx(), PLUGIN_FILE, VdfsRequest::Write { content: bad })
         .await

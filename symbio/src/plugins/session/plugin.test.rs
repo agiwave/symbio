@@ -109,13 +109,16 @@ fn default_max_tool_rounds_is_effectively_unlimited() {
 
 /// **定义与配置同源**：面板字段的默认值一律来自 `SessionConfig::default()`，
 /// 且 serde 默认值函数与 `Default` impl 不漂移（两处各自书写必然漂移）。
+///
+/// 遍历**全部**分区——定义是多分区的（基础 / 上下文与工具 / 记忆 / 对话面机制 /
+/// 自主与学习），只看 `sections[0]` 会让后面四个分区的默认值无人看守。
 #[test]
 fn config_definition_defaults_come_from_session_config() {
     let defaults = serde_json::to_value(SessionConfig::default()).unwrap();
     let def = config_definition();
-    let fields = &def.sections[0].fields;
-    assert!(!fields.is_empty(), "会话配置必须有字段");
-    for f in fields {
+    let mut checked = 0usize;
+    for f in def.sections.iter().flat_map(|s| &s.fields) {
+        checked += 1;
         let declared = f
             .default
             .clone()
@@ -129,6 +132,7 @@ fn config_definition_defaults_come_from_session_config() {
             f.key, f.key
         );
     }
+    assert!(checked > 0, "会话配置必须有字段");
 
     let from_empty: SessionConfig =
         serde_json::from_str("{}").expect("空对象应能反序列化出默认配置");
@@ -136,6 +140,55 @@ fn config_definition_defaults_come_from_session_config() {
         serde_json::to_value(&from_empty).unwrap(),
         defaults,
         "SessionConfig 的 serde 默认值与 Default impl 漂移了（两处各自书写）"
+    );
+}
+
+/// **覆盖判据**：面板定义必须登记 `SessionConfig` 的**每一个**字段——键集合
+/// **完全相等**，无豁免。
+///
+/// ## 为什么「少一个字段」是要害，不是样式问题
+///
+/// 少登记的字段就是「能力在后端存在、产品里既设不了也看不见」：`skill_compile_enabled`
+/// （S11 技能编译）与 `conation_enabled`（S12 自主层）这两个**高阶能力的开关**曾长期
+/// 只躺在 `session/PLUGIN.yml` 里，前端设置页没有任何控件——用户根本开不了它们，
+/// 于是那些能力的「存在」在导航层不可达，等于虚假实现。
+///
+/// 判据与 [`config_definition_defaults_come_from_session_config`] 分工：那条查
+/// 「同名字段的默认值一致」，本条查「字段一个不少、也不多、不重复」。两条都过，
+/// 才成立「定义 = 配置的完整镜像」。
+///
+/// 反向也查：声明了 `SessionConfig` 不存在的字段 ⇒ 保存时该字段必然失败（后端
+/// 反序列化会丢弃未知键），是另一种形态的假开关。
+#[test]
+fn config_definition_covers_every_session_config_field() {
+    use std::collections::BTreeSet;
+
+    let def = config_definition();
+    let mut declared: BTreeSet<String> = BTreeSet::new();
+    for f in def.sections.iter().flat_map(|s| &s.fields) {
+        assert!(
+            declared.insert(f.key.clone()),
+            "字段 {} 在多处重复声明（同一键两个控件会互相覆盖）",
+            f.key
+        );
+    }
+    let actual: BTreeSet<String> = serde_json::to_value(SessionConfig::default())
+        .unwrap()
+        .as_object()
+        .expect("SessionConfig 序列化必须是 JSON 对象")
+        .keys()
+        .cloned()
+        .collect();
+
+    let missing: Vec<&String> = actual.difference(&declared).collect();
+    assert!(
+        missing.is_empty(),
+        "以下 SessionConfig 字段没有面板控件（后端存在、产品里开不了）: {missing:?}"
+    );
+    let extra: Vec<&String> = declared.difference(&actual).collect();
+    assert!(
+        extra.is_empty(),
+        "面板声明了 SessionConfig 不存在的字段（保存必被丢弃）: {extra:?}"
     );
 }
 
