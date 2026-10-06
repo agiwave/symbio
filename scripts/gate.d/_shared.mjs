@@ -570,7 +570,18 @@ export const BASELINE = {
   //      见 e2e `t37`（两轮真实对话 ⇒ 出口转写与 WAL 的三格逐条对账，按目录发现式
   //      加载，不进本格计数）。**纯读**：`transcript` 投影早已被 `actors::Reasoner`
   //      消费，无 `#[allow(dead_code)]` 可摘，故不进 04 §3.1 的清偿批次表。
-  rustTests: 1297,
+  // 1299（plan/10 批 3 工具事实进转写投影，2026-10-06）——`1297 → 1299`，**+2**。
+  //      [plan/10 §3 批 3](../../docs/plan/10-工具轮v2化实施方案.md)：`artifact.added`
+  //      （`artifact × asserted`）进 `transcript` 投影，成 `role = "tool"` 行
+  //      （另带 `tool` = 工具名；非工具行 `skip_serializing_if` 保持 `{role, text}` 旧形状）。
+  //      口径从「三格 → 两角色」变成「四格 → 三角色」——跨轮的 prompt 因此能重建
+  //      **含工具**的对话（此前只有轮内交换 `render_tool_exchange`，跨轮就丢了工具结果
+  //      ⇒ 模型会重复调用同一个工具）。判据 2 例：① `transcript_includes_artifact_as_tool_line`
+  //      （四格 → 四行 + 工具名/正文 + prompt 里渲染成 `工具结果(<tool>): <text>`，与轮内
+  //      交换同形 + 线格式：非工具行仍是 `{role, text}`）；② `transcript_column_surfaces_tool_rows`
+  //      （补一格工具产物 ⇒ `session/stats` 的转写列浮出工具行）。端到端见 e2e `t38`
+  //      （两轮真实工具轮 ⇒ 第三处请求带第一轮的工具结果，按目录发现式加载，不进本格计数）。
+  rustTests: 1299,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

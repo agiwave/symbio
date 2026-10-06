@@ -10,8 +10,9 @@
 use super::read;
 use crate::symbio_core::{
     calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Budget,
-    Entity, Event, EventEnvelope as _, EventWalStore, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK,
-    EVENT_ASSISTANT_FINAL, EVENT_MEMORY_RECALLED, EVENT_TASK_OPENED, EVENT_USER_MESSAGE,
+    Entity, Event, EventEnvelope as _, EventWalStore, Seq, Store, Verb, EVENT_ARTIFACT_ADDED,
+    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_MEMORY_RECALLED, EVENT_TASK_OPENED,
+    EVENT_USER_MESSAGE,
 };
 use std::path::{Path, PathBuf};
 
@@ -526,8 +527,8 @@ fn calibration_column_recomputes_and_moves_with_the_wal() {
 }
 
 /// 转写列（**对话面读侧**，[plan/12 批 2](../../../../docs/plan/12-价值验收与基线埋点.md)）：
-/// 读的是**事实源的三格**（`user.message` / `chat.assistant.final` /
-/// `chat.assistant.fallback`）而不是会话存储里的消息副本。
+/// 读的是**事实源**（`user.message` / `chat.assistant.final` / `chat.assistant.fallback` /
+/// `artifact.added` 四格）而不是会话存储里的消息副本。
 ///
 /// 判据 = 复算同源（口径只活在 core 的 `transcript` 投影）+ 期望值钉死 + 反向
 /// （删一格 ⇒ 那一句从转写里消失）+ 读侧闸（非属主 ⇒ `{entries: []}`，四列形态）。
@@ -580,4 +581,48 @@ fn transcript_column_reads_the_conversation_back_from_the_wal() {
     .expect("读数");
     assert_eq!(denied.transcript, serde_json::json!({ "entries": [] }));
     assert!(denied.has_wal, "has_wal 独立于可见域：文件在，只是不给你看");
+}
+
+/// 转写列把**工具结果**也读出来（[plan/10 批 3](../../../../docs/plan/10-工具轮v2化实施方案.md)）：
+/// `artifact.added` 进投影 ⇒ 列里多一条 `role = "tool"`（带 `tool` = 工具名）。
+///
+/// 这是「口径只活在 core 投影」的直接后果——出口不加任何判断，投影多一格，列就多一行。
+/// 判据独立于上一条（上一条的种子不含工具轮）：这条**补一格工具产物**再看列，因此它
+/// 证的是「列真的会浮出工具行」，不是「列恒等于种子那四行」。
+#[test]
+fn transcript_column_surfaces_tool_rows() {
+    let wal = seed("transcript-tool");
+    // 往事实源补一格工具产物（种子本身不含工具轮）。`produced_by` 指向轮 0 用户格（seq 0）。
+    let store = EventWalStore::open(&wal).expect("WAL");
+    store
+        .append(
+            Event::pending(
+                "a0",
+                EVENT_ARTIFACT_ADDED,
+                Entity::Artifact,
+                Verb::Asserted,
+                0,
+                "agent:main",
+            )
+            .with_produced_by(0)
+            .with_payload(serde_json::json!({ "tool": "vdfs_read", "text": "文件内容" })),
+        )
+        .expect("追加工具格");
+
+    let got = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).expect("读数");
+    let entries = got.transcript["entries"].as_array().expect("条目数组");
+    let tool_row = entries
+        .iter()
+        .find(|e| e["role"] == "tool")
+        .unwrap_or_else(|| panic!("转写列应含工具行：{entries:?}"));
+    assert_eq!(tool_row["tool"], "vdfs_read", "工具行带工具名");
+    assert_eq!(tool_row["text"], "文件内容", "工具行带结果正文");
+    // 非工具行**不带** `tool`（`skip_serializing_if`：新增角色不改旧角色的线格式）。
+    assert!(
+        entries
+            .iter()
+            .filter(|e| e["role"] != "tool")
+            .all(|e| e.get("tool").is_none()),
+        "非工具行不该带 tool：{entries:?}"
+    );
 }

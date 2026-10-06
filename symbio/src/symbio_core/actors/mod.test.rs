@@ -2113,6 +2113,104 @@ mod turn_runner_tests {
         assert_eq!(view.value.entries[1].text, "上游 402");
     }
 
+    /// 工具结果进转写（`tool` / 工具名 + text）——跨轮 prompt 因此能重建**含工具**的
+    /// 对话（[plan/10 批 3](../../../../docs/plan/10-工具轮v2化实施方案.md)）；且工具行在
+    /// prompt 里渲染成 `工具结果(<tool>): <text>`，与轮内交换（`render_tool_exchange`）同形。
+    #[test]
+    fn transcript_includes_artifact_as_tool_line() {
+        use crate::symbio_core::{
+            Entity, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+        };
+        let store = EventStore::new();
+        // 轮 0：用户 → 工具结果 → 收束
+        store
+            .append(
+                Event::pending(
+                    "u-0",
+                    EVENT_USER_MESSAGE,
+                    Entity::Turn,
+                    Verb::Opened,
+                    0,
+                    "user",
+                )
+                .with_payload(serde_json::json!({ "text": "帮我回显", "tier": "deep" })),
+            )
+            .unwrap();
+        store
+            .append(
+                Event::pending(
+                    "a-0-0",
+                    EVENT_ARTIFACT_ADDED,
+                    Entity::Artifact,
+                    Verb::Asserted,
+                    0,
+                    "agent:main",
+                )
+                .with_produced_by(0)
+                .with_payload(
+                    serde_json::json!({ "tool": "mcp__mockserv__echo", "text": "回显内容" }),
+                ),
+            )
+            .unwrap();
+        store
+            .append(
+                Event::pending(
+                    "f-0",
+                    EVENT_ASSISTANT_FINAL,
+                    Entity::Turn,
+                    Verb::Closed,
+                    0,
+                    "agent:main",
+                )
+                .with_produced_by(0)
+                .with_payload(serde_json::json!({ "text": "回显完成" })),
+            )
+            .unwrap();
+        // 轮 1：用户（本轮）——历史里应看得见轮 0 的工具结果。
+        store
+            .append(
+                Event::pending(
+                    "u-1",
+                    EVENT_USER_MESSAGE,
+                    Entity::Turn,
+                    Verb::Opened,
+                    1,
+                    "user",
+                )
+                .with_payload(serde_json::json!({ "text": "再问一句", "tier": "deep" })),
+            )
+            .unwrap();
+
+        let snapshot = store.range(Seq::new(0));
+        let view = transcript().apply(&snapshot, i64::MAX, Budget::generous());
+        let entries = &view.value.entries;
+        assert_eq!(entries.len(), 4, "四格 → 四行：{entries:?}");
+        assert_eq!(entries[0].role, "user");
+        assert_eq!(entries[1].role, "tool");
+        assert_eq!(entries[1].tool.as_deref(), Some("mcp__mockserv__echo"));
+        assert_eq!(entries[1].text, "回显内容");
+        assert_eq!(entries[0].tool, None, "非工具行不带 tool");
+        assert_eq!(entries[2].role, "assistant");
+
+        // prompt：轮 1 的历史里含工具结果行，形态与轮内交换逐字同形。
+        let prompt = view.value.to_prompt();
+        assert!(
+            prompt.contains("工具结果(mcp__mockserv__echo): 回显内容"),
+            "工具行进 prompt：{prompt}"
+        );
+        assert!(prompt.contains("用户: 帮我回显"), "{prompt}");
+        assert!(prompt.contains("助手: 回显完成"), "{prompt}");
+        assert!(prompt.ends_with("用户: 再问一句"), "{prompt}");
+
+        // 线格式：非工具行保持 `{role, text}`（新增角色不改旧角色的形状）；工具行多一个 `tool`。
+        let wire = serde_json::to_value(&view.value).unwrap();
+        assert_eq!(
+            wire["entries"][0],
+            serde_json::json!({ "role": "user", "text": "帮我回显" })
+        );
+        assert_eq!(wire["entries"][1]["tool"], "mcp__mockserv__echo");
+    }
+
     /// 收集口：按序记增量（流式验收用）。
     struct CollectingDeltas(std::sync::Mutex<Vec<String>>);
 

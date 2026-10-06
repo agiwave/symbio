@@ -114,11 +114,14 @@ pub(crate) struct SessionStats {
     pub readyset: serde_json::Value,
     /// 转写（**对话面读侧**，[plan/12 批 2](../../../docs/plan/12-价值验收与基线埋点.md)）：
     /// `transcript` 投影原样序列化（`{ entries: [ { role, text } ] }`，按事件顺序 =
-    /// append-only 的时间序；`role` 是 `"user"` / `"assistant"`）。
+    /// append-only 的时间序；`role` 是 `"user"` / `"assistant"` / `"tool"`，
+    /// 工具行另带 `tool` = 工具名）。
     ///
     /// 读的是**事实源本身**（`user.message` / `chat.assistant.final` /
-    /// `chat.assistant.fallback` 三格），不是会话存储里的消息副本——同一份事实既喂
-    /// 模型（`Reasoner` 组 prompt 的输入）又能从这里读回，ADR-044 的「实测与判据同源」。
+    /// `chat.assistant.fallback` / `artifact.added` 四格——最后一格是
+    /// [plan/10 批 3](../../../docs/plan/10-工具轮v2化实施方案.md) 纳入的工具结果），
+    /// 不是会话存储里的消息副本——同一份事实既喂模型（`Reasoner` 组 prompt 的输入）
+    /// 又能从这里读回，ADR-044 的「实测与判据同源」。
     ///
     /// 归**四列**那一族（同切片、同 as-of、`may_read = false ⇒ 空切片` ⇒
     /// `{ entries: [] }`），不取声誉列的空对象形态：对话为空与「不给你看」由 `has_wal`
@@ -146,7 +149,7 @@ pub(crate) struct StatsRequest {
 /// 读一个会话的事实源，出四列读数 + 校准 / 声誉 / 就绪集 / 转写四列 + 不变量清单。
 ///
 /// 纯读：不写文件、不改网格、不碰会话存储（消息 / 转写）。转写列读的是**事实源**
-/// （WAL）里的三格，不是会话存储那份消息副本——本函数只经 `open_readonly` 打开
+/// （WAL）里的格，不是会话存储那份消息副本——本函数只经 `open_readonly` 打开
 /// 一个文件，别的盘面一概不碰。
 ///
 /// `viewer = Some(身份)` 时先按可见域取**可读切片**再出各列（**读什么由能看什么
@@ -268,9 +271,10 @@ pub(crate) fn read(
     .map_err(|e| PluginError::InternalError(format!("就绪集序列化失败：{e}")))?;
 
     // 转写列（对话面读侧，[plan/12 批 2](../../../docs/plan/12-价值验收与基线埋点.md)）：
-    // 与四列同一份切片、同一个 as-of。口径（三格 → 两条角色）只活在 core 的 `transcript`
-    // 投影里，本处只取数 + 排版；`may_read = false` 时切片已空 ⇒ `{ entries: [] }`
-    // （四列形态，与就绪集 / 校准同族）。
+    // 与四列同一份切片、同一个 as-of。口径（四格 → 三角色，含
+    // [plan/10 批 3](../../../docs/plan/10-工具轮v2化实施方案.md) 的工具结果）只活在 core
+    // 的 `transcript` 投影里，本处只取数 + 排版；`may_read = false` 时切片已空 ⇒
+    // `{ entries: [] }`（四列形态，与就绪集 / 校准同族）。
     let transcript = serde_json::to_value(
         transcript()
             .apply(&snapshot, i64::MAX, Budget::generous())

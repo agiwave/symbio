@@ -92,7 +92,7 @@
 |------|------|----------|
 | `session/chat/send` | 发起 AI 对话（流式；实际入口） | `Session` |
 | `session/chat/abort` | 中止进行中的对话 | `Empty` |
-| `session/stats` | 读本会话 v2 事实源的**八列**读数（时延分位 / 兜底率 / 成本台账 / 校准 `calibration` = `{by_skill: {<skill_id>: {skill_id, uses, fallbacks}}}`：技能的使用与回退计数（`confidence = 1 − 回退率` 由投影算） / 断点 / 声誉 `reputation` = `{own, by_principal}`：按主体分组的立约-守约-违约与打分 / 就绪任务集 `readyset` = `{ready: [{task_id, seq, depends_on}]}` 按 `task_id` 字典序的调度候选集 / 转写 `transcript` = `{entries: [{role, text}]}`：按事件顺序的对话（`user.message` / `chat.assistant.final` / `chat.assistant.fallback` 三格））+ 不变量清单 `invariants`（`check_all` 八条，空 = 全绿）——纯读，零副作用。载荷 `{ principal?: string }` 可声明**读方身份** | `SessionStats` |
+| `session/stats` | 读本会话 v2 事实源的**八列**读数（时延分位 / 兜底率 / 成本台账 / 校准 `calibration` = `{by_skill: {<skill_id>: {skill_id, uses, fallbacks}}}`：技能的使用与回退计数（`confidence = 1 − 回退率` 由投影算） / 断点 / 声誉 `reputation` = `{own, by_principal}`：按主体分组的立约-守约-违约与打分 / 就绪任务集 `readyset` = `{ready: [{task_id, seq, depends_on}]}` 按 `task_id` 字典序的调度候选集 / 转写 `transcript` = `{entries: [{role, text, tool?}]}`：按事件顺序的对话（`user.message` / `chat.assistant.final` / `chat.assistant.fallback` / `artifact.added` 四格；`role` ∈ `user` / `assistant` / `tool`，工具行另带 `tool` = 工具名））+ 不变量清单 `invariants`（`check_all` 八条，空 = 全绿）——纯读，零副作用。载荷 `{ principal?: string }` 可声明**读方身份** | `SessionStats` |
 
 > 会话与消息的增删改查**全部**经 VDFS 地址完成；`chat/send`、`chat/abort` 是编排 / 控制，
 > `stats` 是读数——三者都不是数据操作。前两者的**实时面**都走 `event_bus` 的 `vdfs` 频道
