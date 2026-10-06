@@ -25,7 +25,11 @@ use super::Projection;
 
 /// `recall` 投影：召回 `viewer` 自己的、as-of 可见、未被遗忘的记忆。
 ///
-/// - `tag`：内容标签过滤（`None` = 全部；「记忆类型」是过滤参数，01 §9.1）；
+/// - `tag`：内容标签过滤（`None` = 全部；「记忆类型」是过滤参数，01 §9.1）。这是
+///   「**读侧过滤**」这条设计的唯一已落地实例（通用性过滤 / 分层过滤与它同构，见
+///   [roadmap/S10 §5](../../../../docs/plan/roadmap/S10-个人认知体系注入.md)）：过滤只改视图、
+///   事实永不删 ⇒ **放宽即召回**（可逆）。它是**承重**的——`v2_memory::consolidate`
+///   靠它只合并同标签的记忆。三条性质（排除 / 可逆 / 活参数）由 `recall.test.rs` 钉住。
 /// - 排序：新近度优先（`ts` 降序，确定性——不打浮点分）；
 /// - 预算：`budget.ms` 为扫描配额（1 事件 = 1ms），超配额 ⇒ 降级 + 部分结果。
 pub fn recall(viewer: impl Into<String>, tag: Option<String>) -> Projection<RecallView> {
@@ -98,3 +102,7 @@ pub fn recall(viewer: impl Into<String>, tag: Option<String>) -> Projection<Reca
         }
     })
 }
+
+#[cfg(test)]
+#[path = "recall.test.rs"]
+mod tests;

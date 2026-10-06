@@ -633,7 +633,20 @@ export const BASELINE = {
   //      a_skill_hit_never_takes_over_a_resumed_turn}`；端到端判据 = e2e `t41`
   //      （同一句话第二遍 ⇒ mock-llm 请求数不增、`tier = reflex`、以技能正文收束；
   //      第三轮换一句话 ⇒ 请求数照增，把"命中才跳过"与"整档不调模型"分开）。
-  rustTests: 1309,
+  // 1313（S10 核实：读侧过滤的**判据化**，2026-10-06）——`1309 → 1313`，**+4**。
+  //      核实结论是「**部分成立**」：S10 §5 的架构结论（通用性过滤必须是读侧投影参数、
+  //      与 `memory.forgotten` 同构）成立，机制也在生产里；但 §3 那一族 `recall:<键>=<值>`
+  //      今天只有 `tag` 有形参，`min_generality` / `density` 连**值的写方**都没有
+  //      （分级器是算法问题）⇒ 照抄落地会得到一个**恒真**的假过滤，故不实现，改为判据化。
+  //      真实缺口：`tag` 这个**唯一已落地**的实例在生产里零判据——既有用例一律传正好
+  //      匹配的标签，过滤从未排除过任何东西。负向自检（把过滤改成恒真）实测：**只有本批
+  //      新增的 4 条变红，其余 1309 条全绿** ⇒ 缺口属实。而它是**承重**的：`consolidate`
+  //      靠它只合并同标签的记忆，失效时技能会被当经验合并并排除式遗忘（**无任何报错**）。
+  //      `+4` = `projection/recall.test.rs::{a_tag_filter_keeps_only_its_own_tag,
+  //      widening_the_filter_recalls_what_it_excluded_without_touching_the_log,
+  //      changing_the_tag_changes_the_view}`（纯函数三性质：排除 / 可逆 / 活参数）+
+  //      `v2_memory.test.rs::consolidation_never_merges_across_tags`（生产后果）。
+  rustTests: 1313,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

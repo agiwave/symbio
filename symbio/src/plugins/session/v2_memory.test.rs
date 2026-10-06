@@ -13,6 +13,7 @@ use super::{
     split_sentences, CONSOLIDATE_MIN_ENTRIES, ENCODE_MAX_CHARS, MEMORY_TAG, MERGE_MAX_CHARS,
     RECALL_SECTION_HEAD,
 };
+use crate::plugins::session::v2_skills::SKILL_TAG;
 use crate::symbio_core::authz::PRINCIPAL_USER;
 use crate::symbio_core::{
     check_all, recall, Budget, Entity, Event, EventEnvelope as _, EventWalStore, Seq, Store, Verb,
@@ -30,8 +31,9 @@ fn tmp_wal(tag: &str) -> PathBuf {
     dir.join(V2_WAL_FILE)
 }
 
-/// 种入一条 `memory.encoded`（**种子不是被测对象**：形态按写方的载荷来）。
-fn seed_encoded(store: &EventWalStore, id: &str, content: &str, ts: i64) -> u64 {
+/// 种入一条 `memory.encoded`，**标签由调用方给**——巩固只合并同标签的记忆，
+/// 要证「技能不参与经验的巩固」就得能种出别的标签。
+fn seed_encoded_as(store: &EventWalStore, id: &str, content: &str, tag: &str, ts: i64) -> u64 {
     store
         .append(
             Event::pending(
@@ -46,13 +48,18 @@ fn seed_encoded(store: &EventWalStore, id: &str, content: &str, ts: i64) -> u64 
             .with_ts(ts)
             .with_payload(serde_json::json!({
                 "content": content,
-                "tag": MEMORY_TAG,
+                "tag": tag,
                 "generation": 0u32,
                 "vec": [],
             })),
         )
         .expect("种子入格")
         .value()
+}
+
+/// 种入一条**经验**记忆（多数用例的默认标签，形态与写方 `encode` 一致）。
+fn seed_encoded(store: &EventWalStore, id: &str, content: &str, ts: i64) -> u64 {
+    seed_encoded_as(store, id, content, MEMORY_TAG, ts)
 }
 
 /// 种入一条 `memory.consolidated`——代数由形参给，代数上界的拒收分支非它不可达。
@@ -296,6 +303,76 @@ fn consolidate_merges_the_two_oldest_and_forgets_the_sources() {
     assert!(!view.contains_content("周三不排会"), "源记忆被遗忘");
     assert!(view.contains_content("喝水要喝温的"));
     assert!(view.contains_content("周四发周报"));
+    assert!(check_all(&snap2).is_empty(), "{:?}", check_all(&snap2));
+
+    std::fs::remove_dir_all(wal.parent().unwrap()).ok();
+}
+
+/// **巩固只合并同标签的记忆**——`recall(.., Some(MEMORY_TAG))` 的标签过滤是**承重**的。
+///
+/// 技能（`tag = "skill"`）与经验同住一张网格（S11 §2「技能是事实，不是特殊类型」），
+/// 若这个过滤退化成恒真，`consolidate` 眼里的「最旧两条」会变成**技能**：合并产物成了
+/// 技能正文、两条技能被排除式遗忘——**技能静默消失，没有任何报错**。
+///
+/// 两条技能刻意比四条经验**更旧**：这样"选错了"必然可见（选对时它们根本不在候选里）。
+/// 这也是「读侧过滤」这条设计（[roadmap/S10 §5](../../../../docs/plan/roadmap/S10-个人认知体系注入.md)）
+/// 在生产链上唯一可观察的后果——过滤本身的纯函数性质在 core 的 `recall.test.rs` 钉。
+#[test]
+fn consolidation_never_merges_across_tags() {
+    let wal = tmp_wal("consolidate-tags");
+    let store = EventWalStore::open(&wal).expect("打开 WAL");
+    seed_encoded_as(&store, "s0", "先写正向用例", SKILL_TAG, 1000);
+    seed_encoded_as(&store, "s1", "先跑一遍再改", SKILL_TAG, 1100);
+    for (i, text) in ["起床先喝水", "周三不排会", "喝水要喝温的", "周四发周报"]
+        .iter()
+        .enumerate()
+    {
+        seed_encoded(&store, &format!("e{i}"), text, 1200 + i as i64);
+    }
+    let snap = store.range(Seq::new(0));
+    assert_eq!(snap.len(), 6, "2 条技能 + 4 条经验");
+
+    let merged_seq = consolidate(&store, &snap, 7, 5000)
+        .expect("巩固不失败")
+        .expect("同标签活记忆 4 条 ⇒ 触发");
+    let snap2 = store.range(Seq::new(0));
+
+    let c = snap2
+        .iter()
+        .find(|e| e.kind == EVENT_MEMORY_CONSOLIDATED)
+        .expect("写了一条合并产物");
+    assert_eq!(c.seq().map(|s| s.value()), Some(merged_seq));
+    assert_eq!(
+        c.payload
+            .get("sources")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default(),
+        vec![serde_json::json!(2), serde_json::json!(3)],
+        "合并的是最旧的**两条经验**（技能 seq 0 / 1 更旧，但标签不同 ⇒ 不在候选里）"
+    );
+    let merged = payload_str(c, "content").unwrap_or("");
+    assert!(
+        !merged.contains("先写正向用例") && !merged.contains("先跑一遍再改"),
+        "技能正文不得被并进经验（过滤失效时这里会红）：{merged}"
+    );
+
+    let targets: Vec<u64> = snap2
+        .iter()
+        .filter(|e| e.kind == EVENT_MEMORY_FORGOTTEN)
+        .map(|e| e.produced_by.expect("遗忘格带溯源"))
+        .collect();
+    assert_eq!(targets, vec![2, 3], "被排除式遗忘的只有那两条经验");
+
+    // 技能原样留在事实源与视图里（`recall_view` 不按标签过滤 ⇒ 它们照常可召回，
+    // 只是不参与**经验**的巩固）。
+    let view = recall(PRINCIPAL_USER, None)
+        .apply(&snap2, i64::MAX, Budget::generous())
+        .value;
+    assert!(
+        view.contains_content("先写正向用例") && view.contains_content("先跑一遍再改"),
+        "技能必须还在（被遗忘 = 技能静默消失）"
+    );
     assert!(check_all(&snap2).is_empty(), "{:?}", check_all(&snap2));
 
     std::fs::remove_dir_all(wal.parent().unwrap()).ok();
