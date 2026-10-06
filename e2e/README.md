@@ -140,6 +140,20 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
 参考 `t37`（转写读列）。注意别让临时改动**遮蔽同名函数**（局部 `let transcript`
 会盖住 `transcript()`，那是编译错、不是判据红——改完记得 `grep` 一遍临时标记）。
 
+**恢复（resume）的驱动入口**：CLI 把 `resume: None` 写死（`cli/src/client.rs`），
+`runCli` / `startLongLivedCli.send` 都**不带** resume。要在 e2e 里驱动恢复（审批 / 回填答案），
+走 **gateway HTTP 边界直发** `session/chat/send` 带 `resume` 字段：
+
+```js
+await api.invoke('session/chat/send',
+  { session_id: SID, resume: { target_id: tcId, action: 'answer', answer: {...} } },
+  { session_id: SID });
+```
+
+`message` 与 `resume` 互斥（入口显式校验）；`target_id` = 提问 / 审批所在的 **ToolCall 节点 id**
+（从 `messages.json` 取）；恢复分支是 `start_turn` **spawn** 执行（立即返回 `accepted`）⇒
+要轮询 WAL / 存储等收束。参考 `t27`。
+
 ## 门控接入
 
 e2e 是 `scripts/gate.mjs` 的一个阶段（`scripts/gate.d/40-e2e.mjs`）：
