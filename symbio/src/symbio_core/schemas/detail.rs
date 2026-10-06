@@ -116,6 +116,15 @@ pub const DETAIL_PICK_FILE: &str = "file";
 /// `disabled_when` / `icon` 曾只在 [`DetailAction`] 上有，字段只能表达「显 / 隐」。
 /// 但「可见但不可改」（锁定字段、只读派生字段）是普遍需求，把它表达成「隐藏」
 /// 是错的——用户会以为这一项不存在。故与动作对齐补上。
+///
+/// ## `min` / `max` 是**策略**，不是事实——别为了「看起来严谨」编一套
+///
+/// [`DetailField::check`] 会按 `min` / `max` 在**保存时拒收**越界值。多数配置字段
+/// 的真约束只有「非负」（无符号整数），编一套宽窄无从论证的边界等于**造假约束**：
+/// 既拦不住任何真错误，又会拒掉用户手工写进配置文件里的合法值（且拒收发生在保存
+/// 路径，表现为「改不动」而非报错）。需要无边界数字字段时，取
+/// [`DetailField::number`] 的骨架后把两者清空（前端 `:min="null"` 即不加属性），
+/// 不要在构造器上另开一个「无边界」变体——那会让两处骨架各自漂移。
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default)]
 pub struct DetailField {
