@@ -593,6 +593,29 @@ export function textOf(m) {
 }
 
 /**
+ * v2 事实网格里的**轮次事实**种类——「这一轮说了什么 / 跑出了什么」。
+ *
+ * 网格里同时住着两类事件：**轮次事实**（用户格 / 收束格 / 兜底格 / 产物格）与
+ * **派生副作用**（`memory.encoded` / `memory.recalled`，S5 步 11–13 与 S11 步 22）。
+ * 断言轮次事实时先按本表筛一遍：用「总数等于几」去断言会把两类混在一起——
+ * 派生素化多写一条就假红、少写一条又假绿（t26 / t27 各踩过一次）。
+ *
+ * 与 `symbio/src/plugins/session/v2_exec.test.rs::turn_facts` 同一口径；两边分开
+ * 是因为 e2e 跑在**独立进程**里，够不着 Rust 测试的语料。
+ */
+export const TURN_FACT_KINDS = new Set([
+  'user.message',
+  'chat.assistant.final',
+  'chat.assistant.fallback',
+  'artifact.added',
+]);
+
+/** 从事实网格里筛出**轮次事实**（按 `TURN_FACT_KINDS`）——见该常量的文档。 */
+export function turnFacts(events) {
+  return events.filter((e) => TURN_FACT_KINDS.has(e.kind));
+}
+
+/**
  * 转写不变量（所有用例共享的落盘断言）：
  * - `seq` 严格递增、消息 id 唯一；
  * - 每个 tool_call 必有 role=tool 的结果子节点（「有请求必有响应」）。

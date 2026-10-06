@@ -68,6 +68,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  turnFacts,
 } from '../helpers.mjs';
 
 /** 本用例的会话 id */
@@ -258,7 +259,28 @@ export default defineCase(
         );
 
         // 期望值本身也钉死（防止两边一起算错）：原轮缺口被真正填上。
-        assertEq(after.length, 4, `恢复后应恰好 4 格（u + a(pending) + a(resume) + f）`);
+        // 只数**轮次事实**——派生副作用（记忆与学习，S5 步 11–13 / S11 步 22）不在其中
+        // （见 `helpers.mjs::turnFacts`）。
+        assertEq(
+          turnFacts(after).length,
+          4,
+          `恢复后应恰好 4 格轮次事实（u + a(pending) + a(resume) + f），实得: ${afterKinds}`,
+        );
+
+        // ── 派生副作用：恢复路径同样派生记忆（本批新增 ⇒ 判据化）──────────────
+        // 两幕都走 `v2_exec::execute_turn` ⇒ 两幕都在轮末调 `record_learning`。
+        // ① 编码**恰好一条**：恢复幕的发言与首幕同文，步 11 按内容去重
+        //    （`RecallView::contains_content`）⇒ 同一轮不会编出第二条。
+        // ② 检索锚一条：恢复幕的召回视图非空（首幕刚编的那条）⇒ 落 `memory.recalled`。
+        // 两条的溯源锚都指**原轮**用户格（I2）——恢复不新开用户格。
+        const encoded = after.filter(
+          (e) => e.kind === 'memory.encoded' && e.payload?.tag === '经验',
+        );
+        assertEq(encoded.length, 1, `本轮只编一条记忆（恢复幕按内容去重）：${afterKinds}`);
+        assertEq(encoded[0].produced_by, user.seq, '编码的溯源锚 = 原轮用户格（I2）');
+        const recalledEvents = after.filter((e) => e.kind === 'memory.recalled');
+        assert(recalledEvents.length >= 1, `恢复幕应落检索锚：${afterKinds}`);
+        assertEq(recalledEvents[0].produced_by, user.seq, '检索锚的溯源指向原轮用户格（I2）');
 
         // ── 证据 ③：答案回了模型（只能靠回读请求体证明）─────────────────────────
         //

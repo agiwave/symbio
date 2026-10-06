@@ -11,6 +11,30 @@
 //! 由 [`super::v2_tools::SessionDispatchPort`] 经 core 的 [`crate::symbio_core::DispatchPort`]
 //! 契约接入——**分发在 v2 是插件侧的实现细节，不是第二条执行链**。
 //!
+//! ## 收束派生事实：记忆与学习（本档已覆盖）
+//!
+//! 轮次事实由运行器原生入格，`chat_loop` 因此以 `TurnState::v2_executed` 拦下整段
+//! `v2_bridge::record`。但**记忆与学习不是轮次事实**，而是本轮的派生副作用——运行器
+//! 一处都不写。本档因此在轮末直接调 [`super::v2_bridge::record_learning`]（与 bridge 档
+//! **同一个函数**，差别只在溯源锚：这里是原生写的 `u-{turn}` 格）：步 11 编码 /
+//! 步 12 检索锚 / 步 13 巩固 / 步 22 技能观测与编译。
+//!
+//! ## 本档**尚未**覆盖的收束派生事实（诚实缺口）
+//!
+//! 同一段 `record_to_wal` 里还有四类派生事实，目前仍只走 bridge 档——`full` 档下
+//! 它们**不入格**：
+//!
+//! - **承诺**（`commitment_events`，S08 §3）与**任务表**（`v2_tasks::write`，S7 步 16–18）
+//!   与**熔断**（`CircuitBreaker::break_event`，S8 步 20）：三者的数据来源都在工具执行层
+//!   （`Delegation` / `TaskDeclaration` / 熔断理由），而 `full` 档的工具经 `DispatchPort`
+//!   分发——那三份出参目前没有回到 `v2_exec` 的通道；
+//! - **写侧授权闸**（`authorize_close`，[plan/01 §7](../../../docs/plan/01-核心架构.md)）：
+//!   bridge 档在落收束格**之前**判 `reply.first` / `reply.append`，运行器不判。
+//!
+//! 这两组的补法与记忆/学习同形（把出参带进来 + 复用同一个写方），但**数据来源不同**：
+//! 前者要先让分发方把三份出参交回（`DispatchPort` 的取件面），后者要先决定运行器
+//! 的落格路径怎么接闸——各自是独立一批，不混进本档的收束收尾。
+//!
 //! 窗口：prompt 只带最近 `context_messages` 轮（含当前轮）——事实全量
 //! 入格（append-only），**视图**才是窗口。
 //!
@@ -27,6 +51,11 @@
 //! 停止工具循环且**不落收束格**（本轮还没了结），本函数按正常收束返回——
 //! 待用户动作由分发方广播的 `user_prompt` 节点承载（`WaitingUserAction`），
 //! 与 v1 的呈现一致。恢复（用户答完续跑同一轮）是独立一批。
+//!
+//! 但**派生事实两幕都写**（等待幕与恢复幕都走到本函数轮末）：步 11 编码按**内容**
+//! 去重（`RecallView::contains_content`）⇒ 同一轮不会编出第二条；恢复幕的召回视图
+//! 非空（首幕刚编的那条）⇒ 会落一条 `memory.recalled`。两条的溯源锚都指原轮用户格
+//! （I2：恢复不新开用户格）。判据 = e2e `t27`（`turnFacts` 数轮次事实、派生事实另数）。
 //!
 //! 与 bridge 档的**已知差异**（中止轮 / 等待轮）：bridge 档在收束时原子转写，
 //! 中止即整轮不转写（网格零增长）；full 档必须先落用户格——prompt 从网格出，
@@ -210,6 +239,15 @@ pub(crate) struct V2Turn<'a> {
     /// 续写锚点：`Some` ⇒ 本轮续写**已开未收束**的轮次（审批 / 问答恢复），
     /// `None` ⇒ 新开一轮。见 [`ResumedTool`] 与 core 的 `TurnResume`。
     pub resume: Option<ResumedTool>,
+    /// 本轮开头召回的长期记忆视图（S5 步 12）——轮末由
+    /// [`super::v2_bridge::record_learning`] 落一条 `memory.recalled`。
+    ///
+    /// 它**不是**轮次事实，因此不随 `v2_executed` 的拦截一起消失：v2 原生记账
+    /// 只覆盖轮次事实，记忆与学习的写方两档共用同一个函数（见该函数文档）。
+    pub recalled: Option<&'a crate::symbio_core::RecallView>,
+    /// 本轮技能路由判定（S11 步 22）：`(skill_id, fallback)` 逐条——轮末落
+    /// `memory.recalled` 供 `calibration` 归并，是「回退会发生」的唯一数据源。
+    pub skill_obs: &'a [(String, bool)],
 }
 
 /// 一轮 v2 原生产物的**全部出口**。
@@ -238,12 +276,15 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         window_turns,
         tools,
         resume,
+        recalled,
+        skill_obs,
     } = req;
     // 事实源：per-session v2 WAL（与桥同一个文件——两档共用一份网格）。
     let dir = session.session_dir().ok_or_else(|| {
         PluginError::InternalError("full 档需要持久会话（临时会话无事实源）".into())
     })?;
-    let store = EventWalStore::open(dir.join(super::paths::V2_WAL_FILE))
+    let wal = dir.join(super::paths::V2_WAL_FILE);
+    let store = EventWalStore::open(&wal)
         .map_err(|e| PluginError::InternalError(format!("v2 WAL 打开失败：{e}")))?;
     let snapshot = store.range(Seq::new(0));
 
@@ -328,7 +369,11 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     // `agent:main` 从字面量变成数据。取值点与转写侧同一个（`request_principal`），
     // 写侧闸判的正是它 ⇒ 判的对象 = 写的对象。未选智能体 ⇒ `agent:main`
     // （S08 §4 平凡值，与接线前逐字一致）。
-    let actor = ActorSpec::trivial(super::chat_loop::request_principal(ctx.as_ref()));
+    //
+    // 另存一份 `principal`：`actor` 随 `input` 被移动进运行器，轮末的记忆与学习
+    // 写方（`record_learning`）仍要以它为主体——先取字符串，不依赖 `actor` 的存活。
+    let principal = super::chat_loop::request_principal(ctx.as_ref());
+    let actor = ActorSpec::trivial(principal.clone());
     let input = TurnInput {
         turn: turn_no,
         text: user_text.to_string(),
@@ -378,9 +423,53 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     // 中止：运行器**未落收束格**（网格少一格是诚实缺口，ADR-045 同源），
     // 出口走 Aborted——由 chat_loop/消费循环落库为 `MessageStatus::Aborted`
     // + 会话结局 `aborted`（**不是** `failed`），与 v1 的中止出口同形。
+    // 记忆与学习也**不写**：与 bridge 档的中止出口同形（那一档的 `TurnExit::Aborted`
+    // 同样不转写）——中止的轮次没有收束，没有可固化的东西。
     if outcome.aborted {
         return Err(PluginError::Aborted);
     }
+
+    // ── 收束派生事实：记忆与学习（步 11–13 + 步 22）────────────────────────
+    //
+    // **本步的存在理由**：`full` 档的轮次事实由运行器原生入格，chat_loop 因此以
+    // `v2_executed` 拦下整段 `v2_bridge::record`。但「记忆三段 + 技能观测与编译」
+    // 不是轮次事实，而是本轮的**派生副作用**——运行器一处都不写。不在这里补，
+    // full 档的长期记忆（S06）与技能自我改进（S11）就整体失效，而档位名还自称
+    // 「整体切换」。写方与 bridge 档**同一个函数**（`record_learning`），
+    // 差别只在锚点：这里是 v2 原生写的 `u-{turn}` 格，那里是转写的 `v2u-*` 格。
+    //
+    // 兜底收束的 `response` 为 `None`：兜底说明这条路没走通，固化它等于把失败写成
+    // 套路（与 bridge 档 `V2Closure::Fallback` → `success_text = None` 同一条口径）。
+    let response = (!outcome.fell_back).then_some(outcome.text.as_str());
+    match store
+        .range(Seq::new(0))
+        .iter()
+        .find(|e| e.kind == EVENT_USER_MESSAGE && e.turn == turn_no)
+        .and_then(|e| e.seq.map(|s| s.value()))
+    {
+        Some(user_seq) => super::v2_bridge::record_learning(
+            &wal,
+            &store,
+            &store.range(Seq::new(0)),
+            turn_no,
+            user_seq,
+            user_text,
+            &principal,
+            &format!("t{turn_no}"),
+            response,
+            recalled,
+            skill_obs,
+            session.skill_compile_enabled(),
+            crate::symbio_core::clock_now_ms(),
+        ),
+        // 锚缺失即**不写**并出声：静默锚在 0 上会把记忆挂到不存在的轮次，
+        // 那比不写更坏（`produced_by` 是 I2 的判据）。
+        None => crate::plugin_warn!(
+            "session",
+            "[v2-exec] 本轮用户格缺失，记忆与学习不入格（turn={turn_no}）"
+        ),
+    }
+
     // 兜底已入格（I3），失败呈现交回 v1 语义（Failed 出口 + 重试）。
     if outcome.fell_back {
         return Err(PluginError::InternalError(outcome.text));

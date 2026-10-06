@@ -28,6 +28,21 @@ fn test_ctx() -> Arc<dyn crate::symbio_core::PluginInvokeRequest> {
     Arc::new(PluginSimpleRequest::new(None, None))
 }
 
+/// **轮次事实**（这一轮说了什么 / 跑出了什么）——记忆与学习是**派生副作用**，
+/// 不在其中（见 `full_turn_lands_memory_and_learning_facts`）。
+///
+/// 断言轮次事实时先按它筛一遍：网格里同时住着两类事件，用「总数等于几」去断言
+/// 会把两类混在一起——派生素化多写一条就假红，少写一条又假绿。
+fn turn_facts(e: &Event) -> bool {
+    matches!(
+        e.kind.as_str(),
+        EVENT_USER_MESSAGE
+            | EVENT_ASSISTANT_FINAL
+            | EVENT_ASSISTANT_FALLBACK
+            | crate::symbio_core::EVENT_ARTIFACT_ADDED
+    )
+}
+
 /// 无工具轮的入参包（本文件的三个用例都是这一形态）。
 fn tool_free_req<'a>(
     session: &'a PersistentChatSession,
@@ -49,6 +64,8 @@ fn tool_free_req<'a>(
         window_turns: 6,
         tools: &[],
         resume: None,
+        recalled: None,
+        skill_obs: &[],
     }
 }
 
@@ -195,6 +212,14 @@ impl ModelProvider for FaithfulProvider {
 
 /// 持久会话 + Full 档装配；返回 (会话, 会话目录, 清理句柄)。
 async fn setup_full() -> (PersistentChatSession, std::path::PathBuf, tempfile::TempDir) {
+    setup_full_with(false).await
+}
+
+/// 同 [`setup_full`]，另可开技能编译——步 22 的**编译**半边要它才动
+/// （观测半边不需要，`memory.recalled` 与开关无关）。
+async fn setup_full_with(
+    skill_compile: bool,
+) -> (PersistentChatSession, std::path::PathBuf, tempfile::TempDir) {
     let tmp = tempfile::tempdir().expect("临时目录创建失败");
     let store = Arc::new(SessionStore::new(tmp.path().to_path_buf()));
     let session_id = "v2_exec_test".to_string();
@@ -204,6 +229,7 @@ async fn setup_full() -> (PersistentChatSession, std::path::PathBuf, tempfile::T
     let dir = store.session_dir(&session_id).expect("应返回会话目录");
     let config = SessionConfig {
         v2_mode: V2Mode::Full,
+        skill_compile_enabled: skill_compile,
         ..Default::default()
     };
     let session = PersistentChatSession::new(
@@ -266,9 +292,10 @@ async fn tool_free_turn_writes_grid_and_streams_ui() {
 
     // 事实网格：user 格 + final 格，不变量全绿，final 溯源指向本轮用户格。
     let store = EventWalStore::open(dir.join("v2-events.wal")).expect("open wal");
-    let snap = store.range(Seq::new(0));
+    let all = store.range(Seq::new(0));
+    let snap: Vec<&Event> = all.iter().filter(|e| turn_facts(e)).collect();
     assert_eq!(snap.len(), 2, "用户格 + final 格：{snap:?}");
-    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+    assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
     assert_eq!(snap[0].kind, EVENT_USER_MESSAGE);
     assert_eq!(snap[0].turn, 0, "turn 号 = WAL 内 user.message 计数");
     assert_eq!(snap[1].kind, EVENT_ASSISTANT_FINAL);
@@ -301,9 +328,10 @@ async fn tool_free_turn_failure_leaves_fallback_event_and_bubbles() {
 
     // 网格里用户格 + fallback 格都在——失败也是一句话，不是静默。
     let store = EventWalStore::open(dir.join("v2-events.wal")).expect("open wal");
-    let snap = store.range(Seq::new(0));
+    let all = store.range(Seq::new(0));
+    let snap: Vec<&Event> = all.iter().filter(|e| turn_facts(e)).collect();
     assert_eq!(snap.len(), 2, "用户格 + fallback 格：{snap:?}");
-    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+    assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
     assert_eq!(snap[1].kind, EVENT_ASSISTANT_FALLBACK);
     let why = snap[1].payload["why"].as_str().unwrap_or_default();
     assert!(why.contains("模型断了"), "兜底格要记失败原因：{why}");
@@ -380,6 +408,8 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
             context_retention: None,
         }],
         resume: None,
+        recalled: None,
+        skill_obs: &[],
     })
     .await
     .expect("工具轮执行成功");
@@ -460,9 +490,10 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
 
     // ── 网格：用户格 + 产物格 + final 格，产物格溯源指向本轮用户格 ────────
     let store = EventWalStore::open(dir.join("v2-events.wal")).expect("open wal");
-    let snap = store.range(Seq::new(0));
+    let all = store.range(Seq::new(0));
+    let snap: Vec<&Event> = all.iter().filter(|e| turn_facts(e)).collect();
     assert_eq!(snap.len(), 3, "用户格 + 产物格 + final 格：{snap:?}");
-    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+    assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
     assert_eq!(snap[0].kind, EVENT_USER_MESSAGE);
     assert_eq!(snap[1].kind, crate::symbio_core::EVENT_ARTIFACT_ADDED);
     assert_eq!(snap[1].entity, Entity::Artifact);
@@ -482,4 +513,83 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         "产物格溯源指向本轮用户格（S02 §3 的 caused_by 断言）"
     );
     assert_eq!(snap[2].kind, EVENT_ASSISTANT_FINAL);
+}
+
+// ==================== 收束派生事实：记忆与学习（步 11–13 + 步 22）====================
+
+/// `full` 档的**收束派生事实**：记忆三段（步 11–13）与技能观测 / 编译（步 22）必须入格。
+///
+/// ## 这个用例挡的是什么
+///
+/// 轮次事实（用户格 / final 格 / 产物格）由 v2 运行器原生记账，`chat_loop` 因此以
+/// `TurnState::v2_executed` 拦下整段 `v2_bridge::record`。但记忆与学习**不是轮次事实**
+/// ——运行器一处都不写。拦下时若把它们一起拦掉，`full` 档的长期记忆（S06）与技能
+/// 自我改进（S11）就**静默全丢**，而档位名还自称「整体切换」。
+///
+/// 三条断言各自钉一段：
+/// ① 步 11 编码（`memory.encoded{tag:"经验"}`，锚 = 本轮用户格）；
+/// ② 步 22 观测（`memory.recalled{skill_id, fallback}`，锚同）——缺它 `calibration`
+///    永远读到「零使用」，置信度恒 1.0，回退一次都不会发生（S11 §5 静默失效第 2 行）；
+/// ③ 步 22 编译（`memory.encoded{tag:"skill"}`）——缺它下一轮无技能可用。
+///
+/// **反向自检**：注掉 `v2_exec` 里的 `record_learning` 调用，本用例必须红。
+#[tokio::test]
+async fn full_turn_lands_memory_and_learning_facts() {
+    use crate::symbio_core::{EVENT_MEMORY_ENCODED, EVENT_MEMORY_RECALLED};
+
+    let (session, dir, _tmp) = setup_full_with(true).await;
+    let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
+    let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
+    let (provider, _prompts) = FaithfulProvider::new(Behavior::Faithful);
+
+    // 技能路由判定由读侧给出（生产里是 `prepare_turn_inputs` 调 `v2_skills::route`）。
+    let obs = [("sk-1".to_string(), false)];
+    let mut req = tool_free_req(
+        &session,
+        Arc::new(provider),
+        &sink,
+        crate::symbio_core::ExecAbortSignal::new(),
+    );
+    req.skill_obs = &obs;
+    execute_turn(req).await.expect("full 轮执行成功");
+
+    let store = EventWalStore::open(dir.join("v2-events.wal")).expect("open wal");
+    let events = store.range(Seq::new(0));
+    let kinds: Vec<&str> = events.iter().map(|e| e.kind.as_str()).collect();
+
+    let user_seq = events
+        .iter()
+        .find(|e| e.kind == EVENT_USER_MESSAGE)
+        .and_then(|e| e.seq.map(|s| s.value()))
+        .expect("本轮用户格必须入格");
+
+    let encoded: Vec<&Event> = events
+        .iter()
+        .filter(|e| e.kind == EVENT_MEMORY_ENCODED)
+        .collect();
+    assert!(
+        encoded.iter().any(|e| e.payload["tag"] == "经验"),
+        "步 11 编码必须入格：{kinds:?}"
+    );
+    assert!(
+        encoded.iter().any(|e| e.payload["tag"] == "skill"),
+        "步 22 技能编译必须入格：{kinds:?}"
+    );
+    assert!(
+        !encoded.is_empty() && encoded.iter().all(|e| e.produced_by == Some(user_seq)),
+        "记忆的溯源锚必须是本轮开口（I2）：{encoded:?}"
+    );
+
+    let obs_events: Vec<&Event> = events
+        .iter()
+        .filter(|e| e.kind == EVENT_MEMORY_RECALLED && e.payload.get("skill_id").is_some())
+        .collect();
+    assert_eq!(obs_events.len(), 1, "步 22 观测必须逐条入格：{kinds:?}");
+    assert_eq!(obs_events[0].payload["skill_id"], "sk-1");
+    assert_eq!(obs_events[0].payload["fallback"], false);
+    assert_eq!(
+        obs_events[0].produced_by,
+        Some(user_seq),
+        "观测的溯源锚同为本轮开口"
+    );
 }

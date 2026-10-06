@@ -132,13 +132,15 @@ impl DispatchPort for SessionDispatchPort {
             self.ctx.clone(),
             &call_nodes,
             &self.session_dir,
-            // 代际立约出参：full 档**本批不落格**（承诺的写方随收束转写走，而 full
-            // 档不经 `v2_bridge::record`；记忆三段同此档位口径——full 随 full 启用）。
+            // 代际立约出参：full 档**不落格**（承诺的写方随收束转写走，而 full
+            // 档不经 `v2_bridge::record`）。已覆盖 full 档的收束派生事实只有记忆与
+            // 学习（见 `v2_bridge::record_learning`），承诺不在其中。
             // 传临时量而不是漏参，是为了让"这里没有消费方"成为一行**看得见的注记**，
             // 而不是一个静默的 `&mut Vec::new()` 淹没在参数表里。
             &mut Vec::new(),
             // 任务表出参（批⑨）：同上——任务格的写方 `v2_tasks` 挂在收束转写上，
-            // full 档不经 `v2_bridge::record`，故本批不入格（full 随 full 启用）。
+            // full 档不经 `v2_bridge::record`，故本批不入格（full 档的写方待 v2
+            // 运行器原生记任务格时接）。
             &mut Vec::new(),
             // 熔断出参（批⑩ 步 20）：同上——熔断格 `task.controlled` 的写方挂在
             // `v2_bridge::record` 上，full 档不经收束转写 ⇒ 本批不入格。**闸门本身

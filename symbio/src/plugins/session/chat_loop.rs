@@ -489,6 +489,10 @@ pub async fn run_chat_loop(
                 window_turns: context.session.context_window(),
                 tools: &inputs.tools,
                 resume: pending_resume.take(),
+                // 记忆与学习的入参：轮次事实由 v2 原生记账，这两项**不在其中**
+                // ——full 档的记忆写与 bridge 档共用 `record_learning`（见其文档）。
+                recalled: turn.recall_view.as_ref(),
+                skill_obs: &turn.skill_route,
             })
             .await
             {

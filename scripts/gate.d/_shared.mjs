@@ -607,7 +607,18 @@ export const BASELINE = {
   //      连带：数值字段刻意**不声明** `min`/`max`（边界是策略不是事实，`DetailField::check`
   //      会据此拒收 ⇒ 编边界即造假约束），故 `vdfs_provider.test.rs::config_write_validates_before_applying`
   //      的坏值从「`max_messages: 1`（靠旧 min 边界）」改成「`max_messages: "不是数字"`（形状错误）」。
-  rustTests: 1304,
+  // 1305（full 档补上收束派生事实里的记忆与学习，2026-10-06）——`1304 → 1305`，**+1**。
+  //      `v2_mode = full` 档下 `chat_loop` 以 `TurnState::v2_executed` 拦下整段
+  //      `v2_bridge::record`（「同一轮两份记账是假象」），但记忆三段（S5 步 11–13）与
+  //      技能观测 / 编译（S11 步 22）**不是轮次事实**、而是派生副作用——`v2_exec` 一处
+  //      都不写 ⇒ 这个档位的长期记忆与自我改进**静默全丢**，而档位名还自称「整体切换」。
+  //      本批把「记忆 + 学习」从 `record_to_wal` 抽成 `v2_bridge::record_learning`
+  //      （同一函数、两个调用点：bridge 档经 `record_to_wal`，full 档在 `v2_exec` 轮末
+  //      直接调，锚点分别是转写的 `v2u-*` 格与原生写的 `u-{turn}` 格）。仍只走 bridge 档
+  //      的（承诺 / 任务表 / 熔断 / 写侧授权闸）已在 `v2_exec` 模块文档**诚实划界**。
+  //      +1 = `v2_exec.test.rs::full_turn_lands_memory_and_learning_facts`；端到端判据 =
+  //      e2e `t40`（两轮不同发言 ⇒ 逐轮编码 + 逐轮编译 + 第 2 轮判第 1 轮编的技能）。
+  rustTests: 1305,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

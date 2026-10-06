@@ -73,8 +73,9 @@ pub(crate) fn record(
     // 总开关（`v2_mode`，ADR-045 过渡期的切换档位）：`off` 档网格零增长
     // （用户关的是数据源，不是对话）。`bridge` 档：v1 轮次全部经此转写；
     // `full` 档：轮次由 v2 运行器原生记账，调用侧以 `TurnState::v2_executed`
-    // 拦下，不经此转写——**记忆写方同此档位**（full 档的记忆写随 full 档启用，
-    // 见 `v2_exec` 侧的同批注记）。检查在取目录之前：关掉时连 WAL 的打开开销都不该有。
+    // 拦下，不经此转写——**但拦下的只是「轮次事实」**：记忆与学习是派生副作用，
+    // 由 [`record_learning`] 承担、`v2_exec` 在轮末直接调用（同一函数、两个调用点，
+    // 不是两份实现）。检查在取目录之前：关掉时连 WAL 的打开开销都不该有。
     if matches!(session.v2_mode(), super::config::V2Mode::Off) {
         return;
     }
@@ -264,15 +265,77 @@ fn record_to_wal(
         }
     }
 
-    // ── 记忆三段（S5 步 11–13，04 §3.1 批⑦）：本轮收束时写记忆 ────────────
-    // 顺序有讲究：
-    //  1. 编码（步 11）先写——本轮新记忆要能进本轮的巩固；
-    //  2. 检索事实（步 12）与它平级：溯源锚是刚入格的 `user.message`（`user_seq`）；
-    //  3. 巩固（步 13）最后，且用**刷新后的**快照——它要看得见 1 刚写下的那条。
-    // 三条都**只记日志不冒泡**：记忆是本轮的附加事实，它失败不该被说成「转写失败」
-    // （那会把桥的健康度算错）。`now` 是统一的墙钟时刻——记忆类事件的 `ts` 是
-    // `RecallEntry::ts` 契约里的「编码时刻」，跨会话新近度排序全靠它。
-    let now = crate::symbio_core::clock_now_ms();
+    // ── 收束派生事实：记忆与学习（步 11–13 + 步 22）────────────────────────
+    // 抽成独立函数是因为**它不是轮次事实**：`full` 档由 v2 运行器原生记账、
+    // 轮次事实不经本函数，但记忆与学习两档都要写（见 [`record_learning`] 的文档）。
+    record_learning(
+        &wal,
+        &store,
+        &snapshot,
+        turn,
+        user_seq,
+        user_text,
+        principal,
+        &format!("{user_id}-a{attempt}"),
+        success_text.as_deref(),
+        recalled,
+        skill_obs,
+        skill_compile,
+        crate::symbio_core::clock_now_ms(),
+    );
+    Ok(())
+}
+
+/// 收束派生事实中的**记忆与学习**半边（步 11–13 + 步 22）。
+///
+/// ## 为什么它与「轮次事实转写」是两件事
+///
+/// 轮次事实（`v2u-*` 用户格 / `v2f-*` 收束格 / 承诺 / 任务表 / 熔断）记的是
+/// **这一轮说了什么、答应了什么**。`v2_mode = full` 档由 v2 运行器原生记账，
+/// 调用侧以 `TurnState::v2_executed` 把整段 `record` 拦下——同一轮两份记账是假象。
+///
+/// 但记忆与学习**不是轮次事实**，而是本轮的**派生副作用**：`v2_exec` 一处都不写
+/// （它只写轮次事实）。若这一半也随轮次事实一起被拦下，`full` 档下
+/// 「编码 / 检索锚 / 巩固 / 技能观测 / 技能编译」会**静默全丢**——S06 的长期记忆与
+/// S11 的自我改进在这个档位整体失效，而档位名还自称「整体切换」。
+/// （本文件曾写「记忆写方同此档位……见 `v2_exec` 侧的同批注记」，而那一侧既无注记
+/// 也无实现——`full` 档的写侧因此空了一整块。）
+///
+/// ## 锚点由调用方给，锚的**含义**不由调用方定
+///
+/// `user_seq` = 本轮 `user.message` 格的 seq。两档的锚点是**不同的事件**
+/// （bridge = 转写写的 `v2u-*` 格；full = v2 原生写的 `u-{turn}` 格），但
+/// 「溯源锚必须是本轮的开口」这条不变（I2：记忆溯源覆盖 100%）。
+/// 同理 `anchor_id` 是幂等键的**词干**：bridge 用 `{v1 消息 id}-a{attempt}`
+/// （同一句 v1 消息重试各成一格），full 用 `t{turn}`（v2 侧一轮一个号）。
+///
+/// ## 失败只记日志不冒泡
+///
+/// 记忆是本轮的附加事实，它失败不该被说成「转写失败」（那会把桥的健康度算错）。
+///
+/// ## 顺序是判据
+///
+/// 1. 编码（步 11）先写——本轮新记忆要能进本轮的巩固；
+/// 2. 检索事实（步 12）与它平级：溯源锚同为本轮开口；
+/// 3. 巩固（步 13）最后，且用**刷新后的**快照——它要看得见 1 刚写下的那条；
+/// 4. 技能观测在前、编译在后：观测记的是**本轮判没判、判成什么**，编译产出的是
+///    **下一轮才可能被用的技能**。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn record_learning(
+    wal: &std::path::Path,
+    store: &EventWalStore,
+    snapshot: &[Event],
+    turn: u64,
+    user_seq: u64,
+    user_text: &str,
+    principal: &str,
+    anchor_id: &str,
+    response: Option<&str>,
+    recalled: Option<&crate::symbio_core::RecallView>,
+    skill_obs: &[(String, bool)],
+    skill_compile: bool,
+    now: i64,
+) {
     let remember = |step: &str, why: String| {
         crate::plugin_warn!(
             "session",
@@ -280,31 +343,31 @@ fn record_to_wal(
             wal.display()
         );
     };
+
+    // ── 步 11 编码（S5，04 §3.1 批⑦）────────────────────────────────────
     if let Err(why) = super::v2_memory::encode(
-        &store,
-        &snapshot,
+        store,
+        snapshot,
         turn,
         user_seq,
         user_text,
-        &format!("v2m-{user_id}-a{attempt}"),
+        &format!("v2m-{anchor_id}"),
         now,
     ) {
         remember("步 11 编码", why);
     }
+    // ── 步 12 检索入格：本轮召回视图 → 一条 `memory.recalled` ─────────────
     if let Some(view) = recalled {
-        if let Err(why) = super::v2_memory::record_recalled(&store, view, user_seq, principal, now)
-        {
+        if let Err(why) = super::v2_memory::record_recalled(store, view, user_seq, principal, now) {
             remember("步 12 检索入格", why);
         }
     }
-    if let Err(why) = super::v2_memory::consolidate(&store, &store.range(Seq::new(0)), turn, now) {
+    // ── 步 13 巩固（用**刷新后**的快照）──────────────────────────────────
+    if let Err(why) = super::v2_memory::consolidate(store, &store.range(Seq::new(0)), turn, now) {
         remember("步 13 巩固", why);
     }
 
-    // ── 步 22 · 技能路由观测 + 技能编译（S11，04 §3.1 批⑪ 子批 B）────────────
-    //
-    // 观测在前：它记的是**本轮判没判、判成什么**，编译产出的是**下一轮才可能被
-    // 用的技能**。两者溯源锚都是 `user_seq`（I2），彼此顺序不影响任何不变量。
+    // ── 步 22 · 技能路由观测（S11，04 §3.1 批⑪ 子批 B）───────────────────
     //
     // 观测只带数据 `{ skill_id, fallback }`——`calibration` 投影的契约就是这两个
     // 字段（S11 §3「不加新格子」：复用 `memory.recalled`，它的 `payload` 由写方
@@ -312,7 +375,7 @@ fn record_to_wal(
     // 再错也一直被用，S11 §5 的「一直用错技能而自己不知道」当场应验。
     for (n, (skill_id, fallback)) in skill_obs.iter().enumerate() {
         let ev = Event::pending(
-            format!("v2s-{user_id}-a{attempt}-{n}"),
+            format!("v2s-{anchor_id}-{n}"),
             EVENT_MEMORY_RECALLED,
             Entity::Memory,
             Verb::Asserted,
@@ -327,20 +390,20 @@ fn record_to_wal(
         }
     }
 
-    // 技能编译：只编译**成功**收束（`success_text` = `V2Closure::Final` 的正文）——
-    // 兜底说明这条路自己没走通，固化它等于把失败写成套路。开关 `skill_compile_enabled`
-    // 默认 off（S11 §4 平凡值「不编译，只检索」）：关着时读侧逐条跳过，整条
+    // ── 步 22 · 技能编译 ────────────────────────────────────────────────
+    // 只编译**成功**收束（`response` = `V2Closure::Final` 的正文）——兜底说明这条路
+    // 自己没走通，固化它等于把失败写成套路。开关 `skill_compile_enabled` 默认 off
+    // （S11 §4 平凡值「不编译，只检索」）：关着时读侧逐条跳过，整条
     // 编译 → 校准 → 回退链路原地待命、不产生任何事实。
     if skill_compile {
-        if let Some(response) = success_text.as_deref() {
-            if let Err(why) = super::v2_skills::compile(
-                &store, &snapshot, turn, user_seq, user_text, response, now,
-            ) {
+        if let Some(response) = response {
+            if let Err(why) =
+                super::v2_skills::compile(store, snapshot, turn, user_seq, user_text, response, now)
+            {
                 remember("步 22 技能编译", why);
             }
         }
     }
-    Ok(())
 }
 
 /// 收束入格前的写侧授权闸（[plan/01 §7](../../../docs/plan/01-核心架构.md) 写侧）。

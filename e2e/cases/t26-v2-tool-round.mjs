@@ -57,6 +57,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  turnFacts,
 } from '../helpers.mjs';
 
 /** 本用例的会话 id */
@@ -167,10 +168,13 @@ export default defineCase(
       assert(walRaw.length > 0, `v2 事实源应存在且非空：${join(hd.homedir, 'session', SID, V2_WAL)}`);
       const events = walRaw.split('\n').filter(Boolean).map((l) => JSON.parse(l));
       const kinds = events.map((e) => e.kind).join(', ');
+      // 只数**轮次事实**：网格里同时住着派生副作用（`memory.encoded`，S5 步 11），
+      // 按总数断言会把两类混在一起（见 `helpers.mjs::turnFacts`）。
+      const facts = turnFacts(events);
       assertEq(
-        events.length,
+        facts.length,
         3,
-        `full 档一轮应恰好 3 格（用户 + 产物 + final），实得 ${events.length}: ${kinds}`,
+        `full 档一轮应恰好 3 格轮次事实（用户 + 产物 + final），实得 ${facts.length}: ${kinds}`,
       );
 
       const user = events.find((e) => e.kind === 'user.message');
