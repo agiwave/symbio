@@ -28,6 +28,7 @@
 //!   反射档判定者——模式名在此，规则应答不在（见上）。
 
 use crate::symbio_core::adapters::{AdapterError, FullModel, LatencyTier, LlmAdapter};
+use crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS;
 use crate::symbio_core::event::{
     Entity, Event, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
@@ -520,9 +521,19 @@ impl CircuitBreaker {
 
 /// 自主发起者（S9 第 21 步，[roadmap/S12](../../../../docs/plan/roadmap/S12-自主层与长期目标.md)）。
 ///
-/// `pattern = decider`、`capabilities = [DefineWork]`、`budget_ms = 86400000`——
-/// 自主层不是新架构层，只是四层时延的第四个取值。**不可写 `chat.assistant.*`**
-/// （自主行为不得冒充用户对话；由 grants 保证，见测试）。
+/// 形状 = `pattern: decider`（规则驱动，零 LLM）、能力只 `define.work`、
+/// `budget_ms` = 自主档 [`LatencyTier::Autonomic`]（四层时延的第四个取值——自主层不是
+/// 新架构层，只是同一个参数的第四个取值）。
+///
+/// ## 两处「单点定义」，本类型各引用一次
+///
+/// - **主体名**：[`PRINCIPAL_AUTONOMOUS`]——表里那一行与这里四个事件的 `actor` 是同一个
+///   常量。名字分两处写，授权表那行就成了一条谁也管不到的死记录（见该常量的文档）。
+/// - **预算**：[`LatencyTier::Autonomic`]——`86400000` 不在本文件出现第二次。
+///
+/// 能力那一半**不在这里**：`capabilities = [define.work]` 的权威是授权表
+/// （`authz::ROWS` 里 [`PRINCIPAL_AUTONOMOUS`] 那一行），本类型只负责按那个主体名写事件。
+/// 两处各写一份能力清单必然漂移成「表授予 A、闸门判 B」——两边都是合法能力名。
 pub struct AutonomousInitiator;
 
 impl AutonomousInitiator {
@@ -534,7 +545,7 @@ impl AutonomousInitiator {
             crate::symbio_core::event::Entity::System,
             crate::symbio_core::event::Verb::Opened,
             0,
-            "agent:autonomous",
+            PRINCIPAL_AUTONOMOUS,
         )
         .with_produced_by(source_seq)
         .with_payload(serde_json::json!({ "kind": "scheduled" }))
@@ -548,7 +559,7 @@ impl AutonomousInitiator {
             crate::symbio_core::event::Entity::Conation,
             crate::symbio_core::event::Verb::Opened,
             0,
-            "agent:autonomous",
+            PRINCIPAL_AUTONOMOUS,
         )
         .with_produced_by(source_seq)
         .with_payload(serde_json::json!({ "goal": goal }))
@@ -562,7 +573,7 @@ impl AutonomousInitiator {
             crate::symbio_core::event::Entity::Task,
             crate::symbio_core::event::Verb::Opened,
             0,
-            "agent:autonomous",
+            PRINCIPAL_AUTONOMOUS,
         )
         .with_produced_by(source_seq)
         .with_payload(serde_json::json!({
@@ -588,7 +599,7 @@ impl AutonomousInitiator {
             crate::symbio_core::event::Entity::System,
             crate::symbio_core::event::Verb::Progressed,
             0,
-            "agent:autonomous",
+            PRINCIPAL_AUTONOMOUS,
         )
         .with_produced_by(source_seq)
         .with_payload(serde_json::json!({ "idle_ms": idle_ms }))

@@ -646,7 +646,36 @@ export const BASELINE = {
   //      widening_the_filter_recalls_what_it_excluded_without_touching_the_log,
   //      changing_the_tag_changes_the_view}`（纯函数三性质：排除 / 可逆 / 活参数）+
   //      `v2_memory.test.rs::consolidation_never_merges_across_tags`（生产后果）。
-  rustTests: 1313,
+  // 1320（S12 核实：一处**假成立** + 一处**装饰判据**，2026-10-06）——`1313 → 1320`，**+7**。
+  //      核实 S12 §3 的四行增量，结论：事件格子 / 投影参数 / grants 行**三行成立**，
+  //      ActorSpec 行只是目标。但「成立」里有两条是**假**的，本批修掉：
+  //      ① **grants 行在生产里被静默推翻**——`authz::ROWS` 根本没有 `agent:autonomous`
+  //         那一行，而 `matrix_for` 对一切 `agent:*` 都派生主智能体的整套能力集（**含
+  //         `reply.*`**）⇒「自主行为不得冒充用户对话」在生产数据里**不成立**，文档与验收
+  //         断言却都写着它成立。修法：加 `PRINCIPAL_AUTONOMOUS` 那一行（只持 `define.work`），
+  //         并把 `matrix_for` 改成「**表里登记过的主体走表**（表是权威，派生不覆盖它），
+  //         未登记的 `agent:<id>` 才派生」；主体名收成常量（表里那一行与
+  //         `AutonomousInitiator` 四个事件的 `actor` 是同一个常量——名字分两处写，
+  //         那行就成了一条谁也管不到的死记录）。
+  //      ② **验收 2 的判据是装饰**——原用例自造 `PrincipalPolicy::paired("agent:autonomous", …)`
+  //         矩阵，再断言「拒绝 ⇒ `store.head()` 不变」：自造矩阵只证明「一个我自己写的策略
+  //         拒绝了我自己」，而空 store 上「拒绝 ⇒ 零事件」是**同义反复**。改为查
+  //         `authz::matrix_for`（生产表）+ 两条对照（持 `define.work`、主智能体持 `reply.first`）。
+  //      ③ **`projection = conation` 不存在**（文档断言了没实现的行为）——判定「这条长目标
+  //         声明过没有」原先写在消费方里直接 `range(0).any(…)` 全表扫。新增
+  //         `symbio_core::projection::conation`（`ConationView` / `ConationIntent`），升格靠
+  //         **溯源**认（`task.opened` 的 `produced_by` 指回欲 seq，不是 goal 字符串相等），
+  //         消费方 = `heartbeat::long_goal_declared` 的 `is_declared(goal)`（判定住 core、插件只消费）。
+  //      负向自检两条，各数清变红数：把 `matrix_for` 的分支改成恒假 ⇒ **3 条红**
+  //      （`autonomous_actor_cannot_write_to_dialog` / `matrix_for_prefers_the_registered_row_over_derivation`
+  //      / 既有 `tool_executor::external_execution_capability_is_read_from_the_matrix`）；
+  //      把 `is_declared` 的 `task_id.is_some()` 去掉 ⇒ **5 条红**（4 条投影判据 + 集成判据
+  //      `heartbeat::gate_opens_the_long_goal_exactly_once_per_goal`——首 tick 就会被误判成
+  //      「已声明」而一格都不开，证明消费方真的接上了）。
+  //      `+7` = `projection/conation.test.rs` 五条（升格靠溯源 / as-of / 无溯源可读不升格 /
+  //      按目标不误伤 / 升格前后两态）+ `authz.test.rs::{the_autonomous_row_is_narrower_than_main,
+  //      matrix_for_prefers_the_registered_row_over_derivation}`。
+  rustTests: 1320,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

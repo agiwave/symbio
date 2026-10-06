@@ -103,6 +103,7 @@ pub(crate) use projection::consolidate::{accept, ConsolidateParams, Rejection};
 // 就绪集出根：生产消费方是 `plugins/session` 的**两处**——读出口 `session/stats`
 // 的 `readyset` 列与请求装配的调度段（04 §3.1 批⑨）。与 `reputation` 同一形态：
 // `pub(crate)` 出根，只在本 crate 内可见、不进对外公开面（C-003 数 `pub use`）。
+pub(crate) use projection::conation::conation;
 pub(crate) use projection::readyset::readyset;
 pub(crate) use projection::recall::recall;
 pub(crate) use projection::reputation::reputation;

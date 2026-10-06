@@ -38,6 +38,11 @@
 //! 多主体加固（[plan/11 批 2](../../../docs/plan/11-多执行器与多主体加固实施方案.md) /
 //! 04 §3.1 批⑧）落地时，子智能体各成一行——行的形状不变，仍是
 //! `(主体, 能力名, 可见域)`。
+//!
+//! 自主发起者那一行已按 [S12 §3](../../../docs/plan/roadmap/S12-自主层与长期目标.md)
+//! 先落地：它是本表里**第一行「比主智能体窄」**的记录（只持 `define.work`）。这行同时
+//! 说明一件事——**「同角色」是平凡值而不是规则**：派生只服务**未登记**的主体，
+//! 一旦某个主体被显式登记，那一行就是它的权威能力集。
 
 use std::borrow::Cow;
 use std::sync::OnceLock;
@@ -51,6 +56,15 @@ pub(crate) const PRINCIPAL_MAIN: &str = "agent:main";
 
 /// 本机用户的身份——`v2_bridge` 用户发言事件的 `actor`。
 pub(crate) const PRINCIPAL_USER: &str = "user";
+
+/// 自主发起者的身份（[roadmap/S12 §3](../../../docs/plan/roadmap/S12-自主层与长期目标.md)）
+/// ——表里那一行的名字与 `AutonomousInitiator` 四个事件的 `actor` 是同一个常量。
+///
+/// 与 [`PRINCIPAL_MAIN`] 同理：判定用的主体名与实际写入的主体名各写一份字符串，两边
+/// 迟早漂移到「判的是 A、写的是 B」而没有任何东西会变红——**这里尤其致命**，因为这一行
+/// 存在的全部理由就是**少给**（它不持 `reply.*`）；名字对不上，那行就成了一条谁也管不到的
+/// 死记录，而自主行为照旧能冒充用户对话。
+pub(crate) const PRINCIPAL_AUTONOMOUS: &str = "agent:autonomous";
 
 /// 本机会话**内容的属主**：`thread_private`（C10 缺省）下「谁能读到」等同于
 /// 「是不是属主」，所以属主取值就是读侧闸的答案。
@@ -70,21 +84,37 @@ pub(crate) const CAP_EXTERNAL_EXECUTION: &str = "produce.artifact";
 /// 本机主体清单：`(主体, 能力名, 可见域)`。能力名的闭集与拼写由
 /// [`PermissionMatrix::from_names`] 校验（认不出即拒绝构造）。
 ///
-/// `agent:main`（主智能体）持 6 项，**刻意不持 `assert.verification`**：C15 不自验
-/// ——验证者 ≠ 产出者是构造期约束（`PermissionMatrix::new` 会拒绝双持），本机目前
-/// 没有独立验证者行，验证能力因此无人持有。
-const ROWS: &[(&str, &[&str], VisScope)] = &[(
-    PRINCIPAL_MAIN,
-    &[
-        "judge.intent",
-        "reply.first",
-        "reply.append",
-        "define.work",
-        CAP_EXTERNAL_EXECUTION,
-        "assign.work",
-    ],
-    VisScope::ThreadPrivate,
-)];
+/// 两行，各自存在的理由不同：
+///
+/// - `agent:main`（主智能体）持 6 项，**刻意不持 `assert.verification`**：C15 不自验
+///   ——验证者 ≠ 产出者是构造期约束（`PermissionMatrix::new` 会拒绝双持），本机目前
+///   没有独立验证者行，验证能力因此无人持有；
+/// - [`PRINCIPAL_AUTONOMOUS`]（自主发起者）**只持 `define.work`**——自主行为不得冒充
+///   用户对话（S12 §3 grants 行 / §5）。它是本表里**唯一**一行「比主智能体少」的，
+///   因为它的危险面与其他智能体相反：子智能体怕的是**写不了**，它怕的是**写得太多**。
+///
+/// 少了这一行会怎样（本批修掉的正是这个）：未登记的 `agent:<id>` 走
+/// [`matrix_for`] 的派生分支，拿到主智能体的**整套**能力集（含 `reply.*`）——于是
+/// 「自主行为不得冒充用户对话」在生产里被静默推翻，而文档与验收断言都还写着它成立。
+const ROWS: &[(&str, &[&str], VisScope)] = &[
+    (
+        PRINCIPAL_MAIN,
+        &[
+            "judge.intent",
+            "reply.first",
+            "reply.append",
+            "define.work",
+            CAP_EXTERNAL_EXECUTION,
+            "assign.work",
+        ],
+        VisScope::ThreadPrivate,
+    ),
+    (
+        PRINCIPAL_AUTONOMOUS,
+        &["define.work"],
+        VisScope::ThreadPrivate,
+    ),
+];
 
 static MATRIX: OnceLock<PermissionMatrix> = OnceLock::new();
 
@@ -109,19 +139,27 @@ pub(crate) fn principal_of(agent_id: Option<&str>) -> String {
 /// **该主体当次判定**用的矩阵（行的形状不变：`(主体, 能力名, 可见域)`，
 /// 见本模块文档「本表会怎么长」）。
 ///
-/// 本机今天只有一张静态表，但**判定的对象是实际写入的那个主体**：主智能体之外
-/// 的 `agent:<id>`（子智能体 / 对等体）要能写自己的收束格，就必须有自己那一行。
-/// 行的**内容** = 主智能体那一行的能力集——**身份分层 ≠ 权限分层**，本机所有
-/// 智能体同角色（S08 §4 平凡值）；按主体展开 grants 做能力分级是 S13 的工序。
+/// 两条分支，先表后派生：
 ///
-/// 非 `agent:*` 的主体（`user` 及一切未登记名）走静态表：表里没有它 ⇒
-/// `can_reply` 为假 ⇒ fail-closed。少一行是一条**拒绝**，不是一条漏判。
+/// 1. **表里登记过的主体**（主智能体、自主发起者）与非 `agent:*` 的主体（`user` 及
+///    一切未登记名）都直接用[生产表](Self::production_matrix)：登记过的拿自己那一行
+///    ——**表是权威，派生不得覆盖它**（覆盖就成「表授予 A、闸门判 B」）；未登记的
+///    `user` 在表里没有行 ⇒ `can_reply` 为假 ⇒ fail-closed。少一行是一条**拒绝**，
+///    不是一条漏判。
+/// 2. **未登记的 `agent:<id>`**（子智能体 / 对等体）派生：要能写自己的收束格，就必须
+///    有自己那一行。行的**内容** = **主智能体**那一行的能力集——**身份分层 ≠ 权限分层**，
+///    本机所有智能体同角色（S08 §4 平凡值）；按主体展开 grants 做能力分级是 S13 的工序。
+///
+/// 取的是主智能体那一行、**不是「第一行」**：表加了一行就把派生口径换掉，等于给行序
+/// 赋予了语义，而没有任何东西会为此变红。
 pub(crate) fn matrix_for(principal: &str) -> Cow<'static, PermissionMatrix> {
-    if principal == PRINCIPAL_MAIN || !principal.starts_with(AGENT_PREFIX) {
-        return Cow::Borrowed(production_matrix());
+    let live = production_matrix();
+    if live.sees_of(principal).is_some() || !principal.starts_with(AGENT_PREFIX) {
+        return Cow::Borrowed(live);
     }
     let (main_caps, main_scope) = ROWS
-        .first()
+        .iter()
+        .find(|(p, _, _)| *p == PRINCIPAL_MAIN)
         .map(|(_, caps, scope)| (*caps, *scope))
         .unwrap_or((&[], VisScope::ThreadPrivate));
     Cow::Owned(

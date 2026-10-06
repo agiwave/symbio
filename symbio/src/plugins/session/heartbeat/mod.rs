@@ -11,8 +11,8 @@ use crate::symbio_core::chat_message as cm;
 use crate::symbio_core::clock_now_ms;
 use crate::symbio_core::session_chat;
 use crate::symbio_core::{
-    AutonomousInitiator, ConationCandidate, ConationPolicy, EventWalStore, IntentGate,
-    PluginInvokeRequestExt, PluginSimpleRequest, Seq, Store, EVENT_TASK_OPENED, SESSION_ID,
+    conation, AutonomousInitiator, Budget, ConationCandidate, ConationPolicy, EventWalStore,
+    IntentGate, PluginInvokeRequestExt, PluginSimpleRequest, Seq, Store, SESSION_ID,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
@@ -490,10 +490,16 @@ impl SessionPlugin {
 /// 会让就绪集无界增长——而 `readyset` 是模型唯一的调度候选来源，那就等于用自己
 /// 刷爆自己的提示词。重新发起是 S03 返工机制（`{id}-r{n}`）的事，不由心跳每 tick
 /// 重开；「欲」本身照样每 tick 入格（它是流，不是状态）。
+///
+/// 判定住 ③ [`conation`]（core），这里只**消费**——插件不再自己扫事实源拼一个布尔。
+/// as-of 取上界 `i64::MAX`：问的是「这条目标**曾经**声明过吗」，与 `session/stats`
+/// 的复算同口径。升格靠**溯源**认（`task.opened` 的 `produced_by` 指回欲 seq），
+/// 不靠 goal 字符串相等，见 `conation` 模块头的边界一节。
 fn long_goal_declared(store: &EventWalStore, goal: &str) -> bool {
-    store.range(Seq::new(0)).iter().any(|e| {
-        e.kind == EVENT_TASK_OPENED && e.payload.get("goal").and_then(|v| v.as_str()) == Some(goal)
-    })
+    conation()
+        .apply(&store.range(Seq::new(0)), i64::MAX, Budget::generous())
+        .value
+        .is_declared(goal)
 }
 
 #[cfg(test)]

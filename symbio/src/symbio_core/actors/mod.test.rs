@@ -1490,19 +1490,39 @@ fn scheduled_trigger_produces_event_not_side_channel() {
 }
 
 /// S12 §6 验收 2：自主发起者尝试写 `chat.assistant.final` → 授权拒绝且不产生事件。
+///
+/// 判据查的是**生产授权表**（[`authz::matrix_for`](crate::symbio_core::authz::matrix_for)），
+/// 不是自造矩阵——自造矩阵只证明「一个我自己写的策略拒绝了我自己」，生产表改了它照样绿。
+/// 三条断言缺一不可：
+/// ① 自主发起者**不持** `reply.*`（验收 2 的结论）；
+/// ② 它**持** `define.work`（否则 ① 可能只是「矩阵整个是空的」的平凡真）；
+/// ③ 主智能体**持** `reply.first`（对照：拒绝是**针对这个主体**的，不是一律拒绝）。
+///
+/// 「拒绝 ⇒ 不产生事件」的**执行**在写侧闸（`plugins/session/v2_bridge::authorize_close`
+/// 的 `can_reply`，其判据用例见 `v2_bridge.test.rs::a_closure_without_the_grant_is_refused`）
+/// ——core 这边只钉**表里的结论**，不假装自己跑过那条闸。
 #[test]
 fn autonomous_actor_cannot_write_to_dialog() {
-    let matrix = PermissionMatrix::new(vec![PrincipalPolicy::paired(
-        "agent:autonomous",
-        vec![Capability::DefineWork],
-        VisScope::ThreadPrivate,
-    )])
-    .expect("自主发起者策略合法");
-    let store = EventStore::new();
-    let head_before = store.head().value();
-    let authorized = matrix.can_write("agent:autonomous", Capability::ReplyFirst);
-    assert!(!authorized, "自主层无 reply.* 写权（自主写入对话 = 0）");
-    assert_eq!(store.head().value(), head_before, "拒绝 ⇒ 零事件");
+    use crate::symbio_core::authz::{matrix_for, PRINCIPAL_AUTONOMOUS, PRINCIPAL_MAIN};
+
+    let initiator = matrix_for(PRINCIPAL_AUTONOMOUS);
+    assert!(
+        !initiator.can_write(PRINCIPAL_AUTONOMOUS, Capability::ReplyFirst),
+        "自主层无 reply.first 写权（自主写入对话 = 0）"
+    );
+    assert!(
+        !initiator.can_write(PRINCIPAL_AUTONOMOUS, Capability::ReplyAppend),
+        "续写同样不持——自主行为不得冒充用户对话"
+    );
+    assert!(
+        initiator.can_write(PRINCIPAL_AUTONOMOUS, Capability::DefineWork),
+        "自主层必须能定义工作（否则上一条只是『空矩阵』的平凡真）"
+    );
+    let main = matrix_for(PRINCIPAL_MAIN);
+    assert!(
+        main.can_write(PRINCIPAL_MAIN, Capability::ReplyFirst),
+        "对照：主智能体持 reply.first——拒绝是针对主体的，不是矩阵一律拒绝"
+    );
 }
 
 /// S12 §6 验收 3 + 4：长目标超过自主层预算 → 必须被看见；预算改小 → 判定改变。
@@ -1523,7 +1543,7 @@ fn long_goal_overrun_is_visible_and_budget_param_is_live() {
                 Entity::Task,
                 Verb::Progressed,
                 0,
-                "agent:autonomous",
+                crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS,
             )
             .with_produced_by(0)
             .with_cost_ms(90_000_000)
@@ -1544,7 +1564,7 @@ fn long_goal_overrun_is_visible_and_budget_param_is_live() {
         Entity::Task,
         Verb::Progressed,
         0,
-        "agent:autonomous",
+        crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS,
     )
     .with_produced_by(0)
     .with_cost_ms(70_000)
