@@ -132,6 +132,27 @@ jobs:
           libwebkit2gtk-4.1-dev libgtk-3-dev
           libayatana-appindicator3-dev librsvg2-dev libxdo-dev
 
+      - name: Build frontend assets (tauri::generate_context! 要求 tauri/dist)
+        # `tauri/src-tauri/src/main.rs:110` 的 `tauri::generate_context!()` 是**编译期**
+        # 宏：它读 `tauri.conf.json` 的 `"frontendDist": "../dist"` 并要求该路径存在，
+        # 不存在就直接 `error: proc macro panicked`。于是 `--workspace` 的四步
+        # （check / test / clippy / doc）**全红**，而报错指向的是一段完全正常的 Rust
+        # 代码 —— 2026-10-07 首次在 v2-plan 上跑 CI 实测：
+        #   = help: message: The `frontendDist` configuration is set to `"../dist"`
+        #           but this path doesn't exist
+        #
+        # `tauri/dist` 被 `tauri/.gitignore` 忽略（`dist/`），**只在开发者本机存在**。
+        # 与「分支没接 CI」「本机不编 GTK」「cargo-audit 被项目 pin 拖住」同族：
+        # 前置只存在于开发者的机器上，于是这条路径在本机天天绿、在 CI 一次没跑过。
+        #
+        # 这里真的跑一次 `vite build` 而不是 `mkdir dist` 占位：占位能让 cargo check
+        # 过，但那等于把「前端产物与 tauri.conf.json 是否搭得上」从 Rust 构建里抹掉，
+        # 而 `generate_context!` 恰恰就是在编译期做这层校验的——占位会让它去校验一个
+        # 我们刚编出来的空壳。
+        # （前端自身的类型 / 单测 / lint 归 `frontend-checks`；这里只要它的产物。）
+        working-directory: tauri
+        run: npm ci && npm run build
+
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
@@ -354,6 +375,13 @@ jobs:
         run: cargo +stable install cargo-audit
       
       - name: Run security audit
-        working-directory: symbio
+        # ⚠️ **必须在仓库根跑**：本仓是单 workspace，`Cargo.lock` 只有根目录那一份
+        # （`symbio/Cargo.lock` / `cli/Cargo.lock` 都不存在）。原先这里写着
+        # `working-directory: symbio`，而 cargo-audit 只在 cwd 找 `Cargo.lock`、**不向
+        # 上找 workspace 根**，于是它必然失败：
+        #   error: not found: Couldn't load Cargo.lock
+        # 这是**既有配置错误**——此前从未暴露，因为 cargo-audit 自己就装不上
+        # （见上一步：工具被 rust-toolchain.toml 的 pin 拖住）。两层壳剥掉一层，
+        # 才露出里面这层。
         run: cargo audit --ignore RUSTSEC-2020-0058 --ignore RUSTSEC-2021-0099
         # 忽略一些已知的误报或低严重性问题

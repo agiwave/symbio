@@ -330,6 +330,46 @@ test('ci.yml：cargo-audit 不能用项目 pin 的工具链编（会红在装工
   )
 })
 
+// 第二轮 CI（2026-10-07，run 37635738557）暴露的两处：同样是「前置只存在于开发者的
+// 机器上」，且同样是剥掉上一层壳之后才露出来的。
+test('ci.yml：rust-checks 必须自己产出 tauri/dist，否则 generate_context! 编译期炸', () => {
+  const block = jobBlock(ciYml(), 'rust-checks', 'msrv-check')
+  assert.match(
+    block,
+    /working-directory:\s*tauri\s*\n\s*run:\s*npm ci && npm run build/,
+    // `tauri::generate_context!()` 是编译期宏，读 `frontendDist: "../dist"` 且要求该
+    // 路径存在；`tauri/dist` 被 tauri/.gitignore 忽略、**只在开发者本机存在**。
+    // 缺了它：`error: proc macro panicked` ⇒ `--workspace` 的 check/test/clippy/doc
+    // 四步**全红**，而报错指向的是一段完全正常的 Rust 代码。
+    'rust-checks 没有构建前端产物 ⇒ symbio-tauri 编译期 panic，四步全红且报错指向正常代码',
+  )
+})
+
+test('ci.yml：cargo audit 必须在仓库根跑（symbio/ 下没有 Cargo.lock）', () => {
+  const block = jobBlock(ciYml(), 'security-check', null)
+  // 本仓是单 workspace：`Cargo.lock` 只有根目录那一份，`symbio/Cargo.lock` 不存在。
+  // cargo-audit 只在 cwd 找 Cargo.lock、不向上找 workspace 根 ⇒ `working-directory:
+  // symbio` 必然失败（`Couldn't load Cargo.lock`）。此前从未暴露是因为它连装都装不上。
+  assert.doesNotMatch(
+    block,
+    /^\s*working-directory:\s*symbio\s*$/m,
+    'cargo audit 的工作目录被指到 symbio/ ⇒ 那里没有 Cargo.lock，审计必然失败',
+  )
+  assert.match(
+    block,
+    /run:\s*cargo audit\b/,
+    '没有 cargo audit 调用——守卫失效了',
+  )
+  assert.ok(
+    fs.existsSync(path.join(repoRoot, 'Cargo.lock')),
+    '仓库根没有 Cargo.lock —— 上面这条断言的前提变了，跟着改',
+  )
+  assert.ok(
+    !fs.existsSync(path.join(repoRoot, 'symbio', 'Cargo.lock')),
+    'symbio/Cargo.lock 现在存在了 ⇒ 工作目录断言的前提变了，跟着改',
+  )
+})
+
 test('gate：e2e 失败详情不能按 ci 模式关掉（CI 上日志文件看不到）', () => {
   const src = fs.readFileSync(path.join(repoRoot, 'scripts/gate.d', '40-e2e.mjs'), 'utf8')
   // 判据是**语句**不是字样：注释里可以（应当）记着这行代码曾经长什么样，
