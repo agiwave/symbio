@@ -698,18 +698,26 @@ export const BASELINE = {
   //      只打黄字（`⚠ 通过数 1339 > 基线 1321：请更新 BASELINE.rustTests`）——那条黄字
   //      自 2026-10-06 起**每天都在打、每天都没人回填**，门禁照旧全绿。后果不是难看，
   //      是**棘轮被削掉了 18 格**：删掉 18 个测试，1339−18 = 1321 = 基线，仍然绿。
-  //      溯源（`git diff 22360cb..HEAD --unified=0`）：+13 可定位到 `plugins/hook/
-  //      executor.test.rs` 首次接线（`#[path = "executor.test.rs"]` 与 `#[cfg(test)]`
-  //      同批出现）；**余下 5 条从 diff 定位不到来源**，如实记为未解释残差——可能是
-  //      基线设定当日即低于实际，不猜。下次触碰此格应查明并删掉这句。
-  rustTests: 1339,
+  //      溯源（2026-10-08 补齐，方法 = `git diff --name-only 22360cb..0d5e449 -- symbio/src`
+  //      **逐文件数测试属性**，而不是只数新增 `fn` 行）：+18 **全部归因，无残差**——
+  //      `plugins/hook/executor.test.rs` 整文件首次接线 **+13**（`#[path = "executor.test.rs"]`
+  //      与 `#[cfg(test)]` 同批出现）、`symbio_core/capability/tests.rs` **+4**、
+  //      `symbio_core/actors/mod.test.rs` **+1**。后者之所以曾被记成「未解释残差」，
+  //      是因为它在**已有 fn** 上补了 `#[test]`：`git diff -U0 | grep '+fn'` 那种数法
+  //      结构上就看不见它——**溯源方法有盲区，不等于来源不存在**，本条即该教训的存证。
+  //
+  // 2026-10-08 **回填 `1339 → 1341`（+2）**，仍是欠账清偿、不是新账：+2 全部来自
+  //      `0b806c0` 给 `v2_exec.test.rs` 补的两条 `flush_returns_*` 判据，而
+  //      `git diff fe612a2..22ed05a -- '*.rs'` 在该区间**零**新增测试 fn ⇒ 归因无残差。
+  //      之所以又欠了一次，是同一个结构：**黄字不判红**，只要没人回填，棘轮就持续被削格。
+  rustTests: 1341,
   /**
    * CI 口径的 Rust 通过数（**只增不减**）——与上面三个分包基线**是不同口径，不能互替**。
    *
    * 为什么要单独一格：本地与 CI 跑的不是同一条命令。本地按 crate 分包
    * `cargo test -p <pkg>`，每个包**各取首个** `test result: ok. N passed`（lib 目标，
    * `ignored` 不计）；CI 跑一次 `cargo test --workspace`，输出是**所有测试目标各行求和**
-   * （含 cli / tauri / doctest 那几行）。所以 1347 = 1339 + 8 + 0 + 0，**不等于**三个
+   * （含 cli / tauri / doctest 那几行）。所以 1349 = 1341 + 8 + 0 + 0，**不等于**三个
    * 分包基线之和的口径语义（那里是「首个 result 行」，这里是「全部 ok 行求和」）。
    *
    * ⚠️ **这个格子是补上来的，不是一直有的**：`cargoTestRatchet` 的 CI 分支原先
@@ -718,10 +726,15 @@ export const BASELINE = {
    * 照样绿。这与 ci.yml 漏掉 `v2-plan` 是同一课的第三次：**只信退出码**能抓住
    * 「测试失败」，抓不住「测试消失」——后者不留任何痕迹。
    *
-   * 1347 = 2026-10-07 实测 `cargo test --workspace` 的 4 行之和
-   * （1339 + 8 + 0 + 0，其中第 4 行是 doctest `0 passed; 7 ignored`）。
+   * 1349 = 2026-10-08 实测 `cargo test --workspace` 的 4 行之和
+   * （1341 + 8 + 0 + 0，其中第 4 行是 doctest `0 passed; 7 ignored`）。
+   * 出处：CI run 37647725557 的 `rust-checks (dev)`，四行依次
+   * `1341 / 8 / 0 / 0 passed`，并打黄字 `⚠ CI 全量 1349 > 基线 1347：
+   * 请更新 BASELINE.ciRustTestsTotal`。上一版 1347 = 1339 + 8 + 0 + 0，
+   * 两次 +2 **同源**（`0b806c0` 给 `v2_exec.test.rs` 补的两条 flush 判据）——
+   * 本地与 CI 是两条独立的格子，欠账会各欠一次，回填时必须两边一起看。
    */
-  ciRustTestsTotal: 1347,
+  ciRustTestsTotal: 1349,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *
