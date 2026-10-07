@@ -124,10 +124,24 @@ export default {
       }
     }
     for (const name of GUARDS) {
+      // ⚠️ `--strict` **不是可选的**：这 12 个守卫里，凡是带 WARNING 级判定的
+      // （`grep-audit` 的「疑似吞错需人工 review」、`plugin-entry-audit` /
+      // `mechanism-audit` / `test-layout-audit` / `style-audit` 的 WARNING），
+      // 不传它就**永远只打印、永不红**——只剩 ERROR 会拦，而 WARNING 恰恰是
+      // 「需要人看一眼」的那一类，于是它天天被打印、天天没人看。
+      //
+      // 这不是假设：`doc-link-audit` 为同一个原因改过一次，它的文件头至今写着
+      // 「2026-09-20 前失效链接只在 `--strict` 下失败，而门禁从不带该参数 ⇒ **从未
+      // 真的红过**」。同一个坑不踩第二次。
+      //
+      // 2026-10-07 实测 12 个守卫逐个跑 `--strict` 全部 exit 0（当前零 WARNING），
+      // 故本条是**接线**而非清账；此后出现 WARNING 就必须**修掉或写下豁免理由**
+      // （`grep-audit` 有 `grep-audit-allow S-xxx: 理由` 这类留痕口）——强制那次
+      // 人工 review 真的发生，而不是靠打印一行指望有人注意到。
       yield {
         label: `scripts/${name}.mjs`,
         cmd: process.execPath,
-        args: [path.join(scriptDir, '..', `${name}.mjs`)],
+        args: [path.join(scriptDir, '..', `${name}.mjs`), '--strict'],
         cwd: repoRoot,
         echo: 'all',
       }

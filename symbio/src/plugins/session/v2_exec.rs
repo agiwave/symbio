@@ -188,7 +188,21 @@ impl UiBridge {
         if self.tx.send(UiFrame::Barrier(done)).is_err() {
             return; // 接收端已退出（生成结束）：没有待落帧可言。
         }
-        let _ = wait.await;
+        // 屏障没走完 = **同步点失效**，不是「无所谓的失败」：定格帧还压在队列里，
+        // 而调用方（`v2_tools::dispatch` 的 ①）紧接着就把工具节点**直接**写出口——
+        // 那正是本函数存在的理由（见那里的注释：工具卡片会跑到正文之前）。
+        //
+        // 接收端只在两种情况下丢掉 `done`：emitter 任务被 abort，或它 panic；两者都
+        // 意味着本轮 UI 已经没了，没有可重试的对象。所以只记一笔、不冒泡——但**不许
+        // 静默**：静默的失效与「没有这个同步点」在日志里长得一模一样，下次有人把它
+        // 一起删掉也不会有人察觉。`grep-audit` 的 S-002-bonus 因此判它是业务路径吞错。
+        if let Err(e) = wait.await {
+            crate::plugin_warn!(
+                "session",
+                "[v2] UI 桥屏障未完成（emitter 已退出：{}）⇒ 定格帧可能未落出口，时序无法保证",
+                e
+            );
+        }
     }
 }
 

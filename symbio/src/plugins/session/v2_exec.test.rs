@@ -863,3 +863,50 @@ async fn a_skill_hit_never_takes_over_a_resumed_turn() {
         prompts.lock().unwrap()
     );
 }
+
+// ── `UiBridge::flush` 的同步点 ────────────────────────────────────────────
+//
+// `flush` 是 `v2_tools::dispatch` 里**定格正文**与**工具节点**之间的同步点：定格帧
+// 在桥的通道里排队，而工具节点直接写出口，不排空队列就倒序（工具卡片先于正文）。
+//
+// 第一条钉的是最容易被静默的那条出口——接收端**活着**但把屏障丢掉（emitter 被
+// abort 或 panic）。原实现是 `let _ = wait.await`，吞掉的恰好是「同步点失效」这件事
+// 本身：此后删掉屏障与屏障失效在日志里长得一模一样。判据取「**必须返回、不得挂死**」
+// ——挂死意味着整轮停在正文定格处，比倒序更糟，也更难发现。
+#[tokio::test]
+async fn flush_returns_when_the_emitter_drops_the_barrier() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<UiFrame>();
+    // 接收端存活，收到屏障却直接丢弃（模拟 emitter 中途退出）
+    let _emitter = tokio::spawn(async move {
+        while let Some(frame) = rx.recv().await {
+            if let UiFrame::Barrier(done) = frame {
+                drop(done);
+                break;
+            }
+        }
+    });
+    let bridge = UiBridge {
+        tx,
+        root_id: "root".to_string(),
+        node: Arc::new(Mutex::new(None)),
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(2), bridge.flush())
+        .await
+        .expect("屏障被丢弃时 flush 必须返回，不得挂死");
+}
+
+// 第二条：接收端**已经没了**（连 send 都失败）。这条走的是早退分支，与上一条不是
+// 同一条路径——收下它是因为 `flush` 被调用时生成往往已收尾，早退不能变成等待。
+#[tokio::test]
+async fn flush_returns_immediately_when_the_channel_is_already_closed() {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<UiFrame>();
+    drop(rx);
+    let bridge = UiBridge {
+        tx,
+        root_id: "root".to_string(),
+        node: Arc::new(Mutex::new(None)),
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(2), bridge.flush())
+        .await
+        .expect("通道已关闭时 flush 必须立即返回");
+}
