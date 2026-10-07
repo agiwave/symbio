@@ -295,11 +295,9 @@ async fn blocking_hook_stops_the_chain() {
     } else {
         format!("cat '{}' ; :", deny_file.display())
     });
-    let after = cmd_hook(if cfg!(target_os = "windows") {
-        "echo should-not-appear > ran.txt".to_string()
-    } else {
-        "echo should-not-appear > ran.txt".to_string()
-    });
+    // 后续钩子：真被执行就会在 workdir 留下 ran.txt。
+    // `echo ... > 文件` 两家 shell 语法相同，故不需要分平台。
+    let after = cmd_hook("echo should-not-appear > ran.txt");
 
     let out = HookExecutor::new()
         .execute(
