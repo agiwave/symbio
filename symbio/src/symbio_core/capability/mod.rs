@@ -116,6 +116,13 @@ pub struct CapabilityMeta {
     /// 不感知任何具体工具名。
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub context_retention: Option<CapabilityToolContextRetention>,
+    /// 工具风险等级（`None` = 默认 `Medium`，由 [`effective_risk`](Self::effective_risk) 兜底）
+    ///
+    /// 机制说明：工具在 `CapabilityMeta` 中**自声明**风险等级，审批闸门
+    /// （`local::policy`）读这个字段判定，**不硬编码工具名**——工具增删不改闸门。
+    /// 取值只能是枚举变体（不接受字符串字面量），编译器强制这一点。
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub risk: Option<CapabilityRiskLevel>,
 }
 
 impl CapabilityMeta {
@@ -131,10 +138,43 @@ impl CapabilityMeta {
         self
     }
 
+    /// 构造带风险等级的元数据
+    pub fn with_risk(mut self, risk: CapabilityRiskLevel) -> Self {
+        self.risk = Some(risk);
+        self
+    }
+
     /// 读取生效的上下文保留策略（未声明视为 `All`）
     pub fn effective_context_retention(&self) -> CapabilityToolContextRetention {
         self.context_retention.unwrap_or_default()
     }
+
+    /// 读取生效的风险等级（未声明视为 `Medium`）
+    pub fn effective_risk(&self) -> CapabilityRiskLevel {
+        self.risk.unwrap_or_default()
+    }
+}
+
+/// 工具风险等级（`CapabilityMeta.risk` 的唯一取值）
+///
+/// **默认档是 `Medium`，不是 `Low`**：未声明风险的工具走 [`Default`]，而
+/// [`CapabilityMeta::effective_risk`] 用它兜底。判据方向是「宁可多问一次」——
+/// 未声明即视为可能改状态（Medium），阈值调到 low 的会话仍会为它要一次审批；
+/// 若默认 Low，同一个未声明的工具在任何阈值下都免审批，声明就失去了约束力。
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityRiskLevel {
+    /// 低风险：只读、不触碰资源（如问答、搜索、读取）
+    Low,
+    /// 中风险：写入、修改、有副作用但可回滚
+    ///
+    /// **未声明风险的工具按此档兜底**（见类型文档）。
+    #[default]
+    Medium,
+    /// 高风险：破坏性、不可逆、系统级操作
+    High,
 }
 
 #[async_trait]
@@ -143,6 +183,23 @@ pub trait Capability: Send + Sync + 'static {
 
     fn name(&self) -> String {
         self.meta().name
+    }
+
+    /// 本次调用的**生效风险等级**（审批闸门读它）。
+    ///
+    /// 默认实现 = [`CapabilityMeta::effective_risk`]，即「工具自声明的静态档」。
+    /// 绝大多数工具到此为止；**风险随参数变化**的工具覆写它——shell 是唯一
+    /// 已知的例子：`rm -rf ./build` 与 `git status` 同属一个工具，风险却差两档。
+    ///
+    /// ## 为什么不写成「闸门按工具名特判」
+    ///
+    /// 闸门里出现 `if name == "cmd"` 这类判定，等于把「有哪些工具」这份清单
+    /// 复制到审批层：工具改名/新增/改名都要回来改闸门，而漏改的表现是**静默放行**
+    /// （新工具落到默认档，免审批）。让工具自己回答「我这次有多危险」，闸门只负责
+    /// 拿这个数去比阈值——判定与清单就都留在工具这一侧了。
+    fn risk_for(&self, args: &Value) -> CapabilityRiskLevel {
+        let _ = args;
+        self.meta().effective_risk()
     }
 
     /// 执行能力调用。

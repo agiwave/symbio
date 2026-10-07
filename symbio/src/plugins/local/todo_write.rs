@@ -4,8 +4,8 @@
 //! 帮助 Agent 跟踪复杂多步任务的进度。纯内存状态，不落盘。
 
 use crate::symbio_core::{
-    Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, AGENT_ID, SESSION_ID, WORKDIR,
+    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, AGENT_ID, SESSION_ID, WORKDIR,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -162,6 +162,7 @@ impl Capability for TodoWriteTool {
                 "required": ["todos"]
             }),
             category: Some(crate::symbio_core::CapabilityCategory::SystemOperation),
+            risk: Some(CapabilityRiskLevel::Medium),
             examples: Some(vec![
                 "todos=[{content:'分析架构',status:'in_progress',priority:'high'}]".to_string(),
             ]),

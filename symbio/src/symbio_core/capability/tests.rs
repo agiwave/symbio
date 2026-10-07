@@ -40,3 +40,57 @@ fn keep_count_semantics() {
     assert_eq!(CapabilityToolContextRetention::LastN(3).keep_count(), 3);
     assert_eq!(CapabilityToolContextRetention::LastOnly.keep_count(), 1);
 }
+
+/// 未声明风险 ⇒ 生效档是 `Medium`（不是 `Low`）
+///
+/// 这条是**审批闸门的安全前提**：默认档决定了那些没写 `risk` 的工具（第三方
+/// 插件、MCP 工具、新加的工具）在阈值比较里落在哪一档。曾一度把 `#[default]`
+/// 标在 `Low` 上，于是未声明 = 免审批 —— 比显式声明 Low 还要宽，
+/// 「声明」这个动作因此失去约束力。
+#[test]
+fn undeclared_risk_falls_back_to_medium() {
+    let meta = CapabilityMeta {
+        name: "third_party_tool".into(),
+        description: "d".into(),
+        input_schema: serde_json::json!({ "type": "object" }),
+        ..Default::default()
+    };
+    assert_eq!(meta.risk, None, "本例的前提是「未声明」");
+    assert_eq!(meta.effective_risk(), CapabilityRiskLevel::Medium);
+}
+
+/// 声明了就按声明的档，且 `with_risk` 是构造入口
+#[test]
+fn declared_risk_wins_over_the_default() {
+    for level in [
+        CapabilityRiskLevel::Low,
+        CapabilityRiskLevel::Medium,
+        CapabilityRiskLevel::High,
+    ] {
+        let meta = CapabilityMeta::default().with_risk(level);
+        assert_eq!(meta.effective_risk(), level);
+    }
+}
+
+/// 排序即档位序（Low < Medium < High）——闸门靠 `tool_risk > threshold` 判审批
+#[test]
+fn risk_levels_are_ordered_low_to_high() {
+    assert!(CapabilityRiskLevel::Low < CapabilityRiskLevel::Medium);
+    assert!(CapabilityRiskLevel::Medium < CapabilityRiskLevel::High);
+}
+
+/// serde 形状：snake_case；未声明的 `risk` 不出现在 JSON 里（旧 JSON 仍可解析）
+#[test]
+fn risk_serde_shape() {
+    let meta = CapabilityMeta::default().with_risk(CapabilityRiskLevel::High);
+    assert_eq!(
+        serde_json::to_value(&meta).unwrap()["risk"],
+        serde_json::json!("high")
+    );
+
+    let undeclared = CapabilityMeta::default();
+    assert!(serde_json::to_value(&undeclared)
+        .unwrap()
+        .get("risk")
+        .is_none());
+}

@@ -31,8 +31,9 @@
 //!
 //! 出口缺席（`route()` 直连调用，如 MCP 网关）⇒ `ExecEventSink::of` 给 `Null`：
 //! 同一份代码照跑，只是不发增量。
-use super::policy::{RiskLevel, SecurityPolicy};
+use super::policy::SecurityPolicy;
 use super::system::{decode_output, validate_params};
+use crate::symbio_core::CapabilityRiskLevel;
 use crate::symbio_core::{
     chat_message::{ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType},
     Capability, CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, PluginError,
@@ -45,7 +46,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 
-const SHELL_TIMEOUT_SECS: u64 = 3600;
 const MAX_OUTPUT_BYTES: usize = 1_048_576;
 /// 流式快照帧的节流间隔：避免高频输出（如 ping/大文件 cat）打爆通道与前端
 const STREAM_EMIT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(120);
@@ -136,11 +136,15 @@ fn get_os_info() -> (&'static str, &'static str, &'static str, &'static str) {
 #[derive(Clone)]
 pub struct ShellTool {
     security: Arc<SecurityPolicy>,
+    timeout_secs: u64,
 }
 
 impl ShellTool {
-    pub fn new(security: Arc<SecurityPolicy>) -> Self {
-        Self { security }
+    pub fn new(security: Arc<SecurityPolicy>, timeout_secs: u64) -> Self {
+        Self {
+            security,
+            timeout_secs,
+        }
     }
 
     /// 公共前置：参数校验 + 速率限制 + 风险等级判定 + 动作记录。
@@ -148,8 +152,8 @@ impl ShellTool {
     fn prepare(
         &self,
         args: &Value,
-        threshold: RiskLevel,
-    ) -> Result<(String, RiskLevel), PluginError> {
+        threshold: CapabilityRiskLevel,
+    ) -> Result<(String, CapabilityRiskLevel), PluginError> {
         validate_params(args, &["command"]).map_err(PluginError::ValidationError)?;
 
         let command = match args.get("command").and_then(|v| v.as_str()) {
@@ -216,7 +220,7 @@ impl ShellTool {
         &self,
         args: &Value,
         workdir: &str,
-        threshold: RiskLevel,
+        threshold: CapabilityRiskLevel,
         sink: &ExecEventSink,
         abort: &ExecAbortSignal,
         target: Option<&SnapshotTarget>,
@@ -287,7 +291,7 @@ impl ShellTool {
                     reap_pump(h).await;
                 }
             } => {}
-            _ = tokio::time::sleep(Duration::from_secs(SHELL_TIMEOUT_SECS)) => {
+            _ = tokio::time::sleep(Duration::from_secs(self.timeout_secs)) => {
                 // kill 失败最常见的原因是**子进程已经自己退出了**（正常路径）；
                 // 真出问题也有随后的 `child.wait()` 兜底，故此处不必留痕。
                 let _ = child.kill().await; // grep-audit-allow S-002-bonus: 子进程常已自行退出，且 child.wait() 兜底
@@ -473,11 +477,11 @@ fn compose_output(stdout: &str, stderr: &str) -> String {
     }
 }
 
-fn risk_level_str(risk: &RiskLevel) -> String {
+fn risk_level_str(risk: &CapabilityRiskLevel) -> String {
     match risk {
-        RiskLevel::Low => "low".to_string(),
-        RiskLevel::Medium => "medium".to_string(),
-        RiskLevel::High => "high".to_string(),
+        CapabilityRiskLevel::Low => "low".to_string(),
+        CapabilityRiskLevel::Medium => "medium".to_string(),
+        CapabilityRiskLevel::High => "high".to_string(),
     }
 }
 
@@ -500,6 +504,9 @@ impl Capability for ShellTool {
                 "required": ["command"]
             }),
             category: Some(crate::symbio_core::CapabilityCategory::SystemOperation),
+            // 静态档取**最高可能**：shell 的实际风险随命令而变（见 `risk_for`），
+            // 这里的声明只兜住「有人只看 meta 不看参数」的那些读者。
+            risk: Some(CapabilityRiskLevel::High),
             examples: Some(vec![
                 format!(
                     "command='{}'",
@@ -509,6 +516,17 @@ impl Capability for ShellTool {
             ]),
             ..Default::default()
         }
+    }
+
+    /// 风险随命令而变：`git status` 是 Low，`rm -rf ./` 是 High。判定复用执行期
+    /// 同一份 [`SecurityPolicy::command_risk_level`]，所以**审批卡上写的档与真正
+    /// 执行时判的档必然一致**——闸门自己算一遍的话，两处规则会各自漂移。
+    fn risk_for(&self, args: &Value) -> CapabilityRiskLevel {
+        args.get("command")
+            .and_then(|v| v.as_str())
+            .map(|cmd| self.security.command_risk_level(cmd))
+            // 参数缺失/非字符串：`execute` 会以 ValidationError 拒掉，这里按最高档算
+            .unwrap_or(CapabilityRiskLevel::High)
     }
 
     async fn execute(
@@ -529,11 +547,11 @@ impl Capability for ShellTool {
         let threshold = ctx
             .get(crate::symbio_core::RISK_LEVEL)
             .map(|s| match s.as_str() {
-                "low" => RiskLevel::Low,
-                "high" => RiskLevel::High,
-                _ => RiskLevel::Medium,
+                "low" => CapabilityRiskLevel::Low,
+                "high" => CapabilityRiskLevel::High,
+                _ => CapabilityRiskLevel::Medium,
             })
-            .unwrap_or(RiskLevel::Medium);
+            .unwrap_or(CapabilityRiskLevel::Medium);
 
         // 执行期双原语 + 快照身份，全部由编排层经 ctx 注入；**缺席即降级**：
         // `ExecEventSink::Null`（不发增量）、永不中止的信号、`None` 快照身份。

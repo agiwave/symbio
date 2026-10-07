@@ -86,8 +86,12 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
       // 它们掉了原本由 `crate::authz` 充当的第 2 个消费方，见 `symbio_core/mod.rs` 注）。
       PermissionMatrix:
         '插件-facing 治理契约类型：E-009/C-002 禁止插件深引 core 域目录，必须留根出口；core 内 authz 与 governance 亦用，无法下沉到唯一消费方',
-      VisScope:
+VisScope:
         '同上：读侧可见域参数类型，插件经 session/stats 读闸传入，core 内 authz 亦用，无法下沉',
+      // 注：`CapabilityRiskLevel` 曾挂在这张豁免表上（「静态扫描只数到首个 use 点」）。
+      // 门禁已判定该豁免失效并要求删除——工具侧真的开始读它之后，多消费方是可证的，
+      // 不再依赖豁免。风险等级改为由各工具在 `CapabilityMeta` 里自声明，
+      // 消费方（local 审批闸门 / 各插件 meta）都是具名的。
     }
 
 /**

@@ -331,6 +331,8 @@ impl Capability for WebSearchTool {
                 "required": ["query"]
             }),
             category: Some(crate::symbio_core::CapabilityCategory::Network),
+            // 只读检索 ⇒ 低风险（同 web_fetch）。依赖默认档会让它在 low 阈值下多要审批。
+            risk: Some(crate::symbio_core::CapabilityRiskLevel::Low),
             examples: Some(vec![
                 "query='rust tutorial'".to_string(),
                 "query='MODEL news', max_results=10".to_string(),

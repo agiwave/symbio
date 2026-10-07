@@ -4,7 +4,9 @@ mod policy_tracker;
 mod policy_types;
 
 pub use policy_tracker::ActionTracker;
-pub use policy_types::*;
+pub use policy_types::AutonomyLevel;
+// CapabilityRiskLevel 来自 core capability 域（统一风险定义，避免跨插件硬编码）
+pub use crate::symbio_core::CapabilityRiskLevel;
 
 /// 规范化路径用于比较
 pub fn normalize_path_for_comparison(path: &Path) -> PathBuf {
@@ -128,7 +130,7 @@ fn normalize_base_command(base_cmd: &str) -> &str {
 /// 命令包装器：真实命令藏在**参数里的脚本**中，白名单看不见内层。
 ///
 /// 它们**保留在白名单**（Windows 下模型确实要靠它跑命令，砍掉能力是过度反应），
-/// 但风险固定为 [`RiskLevel::High`]——默认 Medium 阈值下必须用户审批，
+/// 但风险固定为 [`CapabilityRiskLevel::High`]——默认 Medium 阈值下必须用户审批，
 /// 用户显式开到 High 阈值即代表自担风险。
 const SHELL_WRAPPERS: [&str; 3] = ["powershell", "pwsh", "cmd"];
 
@@ -240,7 +242,7 @@ impl SecurityPolicy {
     /// `_threshold` 刻意不参与判定——白名单管「能跑什么」，风险阈值管「跑之前
     /// 要不要审批」，两者正交。早先这里有 `threshold == High ⇒ 放行一切` 的
     /// 旁路，它让白名单在高危模式下**整体失效**（连命令替换都被放过）。
-    pub fn is_command_allowed(&self, command: &str, _threshold: RiskLevel) -> bool {
+    pub fn is_command_allowed(&self, command: &str, _threshold: CapabilityRiskLevel) -> bool {
         if self.rules().autonomy == AutonomyLevel::ReadOnly {
             return false;
         }
@@ -277,72 +279,72 @@ impl SecurityPolicy {
     ///
     /// 只看首词会让 `git status; rm -rf D:\` 判成 Low（首词是 git），
     /// 尾随的破坏性命令因此绕开审批门槛。
-    pub fn command_risk_level(&self, command: &str) -> RiskLevel {
+    pub fn command_risk_level(&self, command: &str) -> CapabilityRiskLevel {
         match split_subcommands(command) {
             Ok(segments) => segments
                 .iter()
                 .map(|s| self.segment_risk_level(s))
                 .max()
-                .unwrap_or(RiskLevel::High),
+                .unwrap_or(CapabilityRiskLevel::High),
             // 结构非法：fail-closed，按最高风险处理，交给白名单 / 审批拦
-            Err(_) => RiskLevel::High,
+            Err(_) => CapabilityRiskLevel::High,
         }
     }
 
     /// 单个子命令的风险等级（比首词 + 危险模式扫描）
-    fn segment_risk_level(&self, segment: &str) -> RiskLevel {
+    fn segment_risk_level(&self, segment: &str) -> CapabilityRiskLevel {
         let command_lower = segment.to_lowercase();
         let base_cmd = command_lower.split_whitespace().next().unwrap_or("");
         let base_cmd = normalize_base_command(base_cmd);
         // 命令包装器：内层脚本对白名单不可见 ⇒ 一律高风险（默认阈值下需审批）
         if SHELL_WRAPPERS.contains(&base_cmd) {
-            return RiskLevel::High;
+            return CapabilityRiskLevel::High;
         }
         let high_risk = [
             "rm", "sudo", "su", "chmod", "chown", "shutdown", "reboot", "mkfs", "dd", "mount",
             "umount", "curl", "wget",
         ];
         if high_risk.contains(&base_cmd) {
-            return RiskLevel::High;
+            return CapabilityRiskLevel::High;
         }
         let high_risk_patterns = ["rm -rf /", "rm -fr /", "mkfs", "dd if=", "sudo"];
         for pattern in &high_risk_patterns {
             if command_lower.contains(pattern) {
-                return RiskLevel::High;
+                return CapabilityRiskLevel::High;
             }
         }
         let medium_risk = ["touch", "mkdir", "mv", "cp", "ln"];
         if medium_risk.contains(&base_cmd) {
-            return RiskLevel::Medium;
+            return CapabilityRiskLevel::Medium;
         }
         if base_cmd == "git" {
             let git_ops = ["commit", "push", "reset", "clean", "rebase", "merge"];
             let second = command_lower.split_whitespace().nth(1).unwrap_or("");
             if git_ops.contains(&second) {
-                return RiskLevel::Medium;
+                return CapabilityRiskLevel::Medium;
             }
         }
-        RiskLevel::Low
+        CapabilityRiskLevel::Low
     }
 
     pub fn validate_command_execution(
         &self,
         command: &str,
         approved: bool,
-        threshold: RiskLevel,
-    ) -> Result<RiskLevel, String> {
+        threshold: CapabilityRiskLevel,
+    ) -> Result<CapabilityRiskLevel, String> {
         if !self.is_command_allowed(command, threshold) {
             return Err(format!("命令不在允许列表中: {command}"));
         }
         let risk = self.command_risk_level(command);
         // 阈值 High = 用户已确认承担高风险 ⇒ 自动批准，不再逐级要审批。
         // 注意：白名单与结构检查在上面已经执行过，**不因此旁路**。
-        if threshold == RiskLevel::High {
+        if threshold == CapabilityRiskLevel::High {
             return Ok(risk);
         }
         let r = self.rules();
         match risk {
-            RiskLevel::High => {
+            CapabilityRiskLevel::High => {
                 if r.block_high_risk_commands {
                     return Err("高风险命令被策略阻止".into());
                 }
@@ -350,7 +352,7 @@ impl SecurityPolicy {
                     return Err("高风险命令需要显式批准".into());
                 }
             }
-            RiskLevel::Medium => {
+            CapabilityRiskLevel::Medium => {
                 if r.autonomy == AutonomyLevel::Supervised
                     && r.require_approval_for_medium_risk
                     && !approved
@@ -358,7 +360,7 @@ impl SecurityPolicy {
                     return Err("中等风险命令需要批准".into());
                 }
             }
-            RiskLevel::Low => {}
+            CapabilityRiskLevel::Low => {}
         }
         Ok(risk)
     }
@@ -376,35 +378,11 @@ impl SecurityPolicy {
     pub fn check_tool_approval_needed(
         &self,
         _tool_name: &str,
-        tool_risk_level: RiskLevel,
-        threshold: RiskLevel,
-    ) -> (bool, RiskLevel) {
+        tool_risk_level: CapabilityRiskLevel,
+        threshold: CapabilityRiskLevel,
+    ) -> (bool, CapabilityRiskLevel) {
         let needs_approval = tool_risk_level > threshold;
         (needs_approval, tool_risk_level)
-    }
-
-    pub fn get_tool_risk_level(
-        &self,
-        tool_name: &str,
-        args: Option<&serde_json::Value>,
-    ) -> RiskLevel {
-        match tool_name {
-            // `ask_user` 只是向用户提问，不触碰任何资源；若不显式归为 Low，
-            // 它会落到默认 Medium —— 当会话把执行风险阈值设为 low 时，
-            // 提问本身反而要先过一次审批，属荒谬路径。
-            "read_file" | "web_fetch" | "web_search" | "glob_search" | "content_search"
-            | "vdfs_read" | "vdfs_search" | "ask_user" => RiskLevel::Low,
-            "shell" => {
-                if let Some(cmd) = args.and_then(|a| a.get("command")).and_then(|c| c.as_str()) {
-                    self.command_risk_level(cmd)
-                } else {
-                    RiskLevel::High
-                }
-            }
-            "http_request" => RiskLevel::High,
-            "write_file" | "file_edit" | "vdfs_write" | "vdfs_edit" => RiskLevel::Medium,
-            _ => RiskLevel::Medium,
-        }
     }
 }
 

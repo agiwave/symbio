@@ -6,15 +6,17 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 const MAX_RESPONSE_SIZE: usize = 1_048_576; // 1MB
-const REQUEST_TIMEOUT_SECS: u64 = 30;
 
 /// Web 获取工具
 #[derive(Clone)]
-pub struct WebFetchTool;
+pub struct WebFetchTool {
+    /// 单次请求超时（秒）——来自 `WebConfig.web_timeout`，**不另写一份字面量**。
+    timeout_secs: u64,
+}
 
 impl WebFetchTool {
-    pub fn new() -> Self {
-        Self
+    pub fn new(timeout_secs: u64) -> Self {
+        Self { timeout_secs }
     }
 
     async fn execute_inner(&self, args: Value) -> Result<Value, PluginError> {
@@ -36,7 +38,7 @@ impl WebFetchTool {
 
         // 创建客户端
         let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
+            .timeout(std::time::Duration::from_secs(self.timeout_secs))
             .user_agent("Symbio/0.1.0")
             .build()
             .map_err(|e| PluginError::InternalError(format!("创建 HTTP 客户端失败: {e}")))?;
@@ -100,6 +102,9 @@ impl Capability for WebFetchTool {
                 "required": ["url"]
             }),
             category: Some(crate::symbio_core::CapabilityCategory::Network),
+            // 只读抓取，不改本地状态⇒ 低风险（与旧风险表一致）。显式声明而非依赖默认档：
+            // 默认档是 Medium，那会让「读个网页」在 low 阈值会话里多要一次审批。
+            risk: Some(crate::symbio_core::CapabilityRiskLevel::Low),
             examples: Some(vec!["url='https://example.com'".to_string()]),
             ..Default::default()
         }

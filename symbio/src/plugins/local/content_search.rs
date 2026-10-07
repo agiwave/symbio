@@ -6,8 +6,8 @@
 use super::policy::SecurityPolicy;
 use super::system::validate_params;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse,
+    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse,
 };
 use async_trait::async_trait;
 use bstr::ByteSlice;
@@ -452,6 +452,7 @@ impl Capability for ContentSearchTool {
                 "required": ["pattern"]
             }),
             category: Some(crate::symbio_core::CapabilityCategory::FileOperation),
+            risk: Some(CapabilityRiskLevel::Low),
             examples: Some(vec![
                 "pattern='fn main'".to_string(),
                 "pattern='TODO', include='*.rs'".to_string(),

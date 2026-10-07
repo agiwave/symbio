@@ -15,7 +15,8 @@
 //! 返回 `tool_unavailable` 让 LLM 自行继续，避免无人值守时阻塞。
 
 use crate::symbio_core::{
-    Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -204,6 +205,7 @@ impl Capability for AskUserTool {
                 "required": []
             }),
             category: Some(crate::symbio_core::CapabilityCategory::SystemOperation),
+            risk: Some(CapabilityRiskLevel::Low),
             ..Default::default()
         }
     }

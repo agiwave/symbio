@@ -10,8 +10,6 @@ use super::policy::{AutonomyLevel, PolicyRules};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LocalConfig {
-    pub shell_enabled: bool,
-    pub file_enabled: bool,
     pub shell_timeout: u64,
     pub autonomy: AutonomyLevel,
     pub workspace_only: bool,
@@ -31,8 +29,6 @@ pub struct LocalConfig {
 impl Default for LocalConfig {
     fn default() -> Self {
         Self {
-            shell_enabled: true,
-            file_enabled: true,
             shell_timeout: 60,
             autonomy: AutonomyLevel::Full,
             workspace_only: false,

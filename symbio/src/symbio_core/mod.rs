@@ -194,7 +194,7 @@ pub use embedding::{EmbeddingError, EmbeddingService, EMBEDDING_LOCAL, EMBEDDING
 // ==================== 插件契约 ====================
 pub use capability::{
     capability_announce_configurable, capability_entry_of, capability_invoke, capability_resolve,
-    capability_to_wire, Capability, CapabilityCategory, CapabilityMeta,
+    capability_to_wire, Capability, CapabilityCategory, CapabilityMeta, CapabilityRiskLevel,
     CapabilityToolContextRetention, CapabilityVisitor, ConfigurableVisitor, OptionVisitor,
 };
 // 工具结果 `failure_kind` 闭集：生产方（`local`）与消费方（`session`）分属不同插件，

@@ -8,7 +8,7 @@ fn tool_with_domains(domains: &[&str]) -> HttpRequestTool {
     HttpRequestTool {
         allowed_domains: domains.iter().map(|s| s.to_string()).collect(),
         max_response_size: DEFAULT_MAX_RESPONSE_SIZE,
-        timeout_secs: DEFAULT_TIMEOUT_SECS,
+        timeout_secs: crate::plugins::web::web_config::WebConfig::default().web_timeout,
     }
 }
 
@@ -99,7 +99,7 @@ fn validate_url_enforces_allowlist() {
 
 #[test]
 fn validate_method_accepts_known_and_rejects_unknown() {
-    let t = HttpRequestTool::new();
+    let t = HttpRequestTool::default();
     for m in ["GET", "post", "Put", "delete", "patch", "head", "options"] {
         assert!(t.validate_method(m).is_ok(), "{m}");
     }

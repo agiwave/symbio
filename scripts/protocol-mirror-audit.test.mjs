@@ -37,7 +37,7 @@ const CHAT_RS = 'symbio/src/symbio_core/schemas/session/chat_message.rs'
 const CHAT_TS = 'tauri/src/schemas/chat_message.ts'
 const DETAIL_RS = 'symbio/src/symbio_core/schemas/detail.rs'
 const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
-const RISK_LEVEL_RS = 'symbio/src/plugins/local/policy/policy_types.rs'
+const RISK_LEVEL_RS = 'symbio/src/symbio_core/capability/mod.rs'
 const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
 
 /** 后端结构体（最小形态）：`pub struct X { pub a: String, }` */
@@ -310,9 +310,9 @@ const FORM_TS_SRC = [
   tsArray('DETAIL_PICKS', 'DETAIL_PICK_DIRECTORY', 'DETAIL_PICK_FILE'),
 ].join('\n')
 
-/** 后端 policy_types.rs：C 组的 `lowercase` 闭集（`RiskLevel`） */
+/** 后端 capability/mod.rs：C 组的 `lowercase` 闭集（`CapabilityRiskLevel`） */
 const RISK_LEVEL_RS_SRC = [
-  rsEnum('RiskLevel', ['Low', 'Medium', 'High'], 'lowercase'),
+  rsEnum('CapabilityRiskLevel', ['Low', 'Medium', 'High'], 'lowercase'),
   '',
   // 同文件另一个 `lowercase` 枚举：前端**没有**镜像它，故不登记（登记了才会红）
   rsEnum('AutonomyLevel', ['ReadOnly', 'Supervised', 'Full'], 'lowercase'),

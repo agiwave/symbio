@@ -223,6 +223,7 @@ pub fn context_compact_tool_meta() -> crate::symbio_core::CapabilityMeta {
         ],
         category: Some(crate::symbio_core::CapabilityCategory::Core),
         examples: None,
+        ..Default::default()
     }
 }
 

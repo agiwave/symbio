@@ -8,7 +8,6 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
 
-const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const DEFAULT_MAX_RESPONSE_SIZE: usize = 1_048_576; // 1 MB
 
 /// HTTP 请求工具
@@ -20,11 +19,13 @@ pub struct HttpRequestTool {
 }
 
 impl HttpRequestTool {
-    pub fn new() -> Self {
+    /// 超时来自 `WebConfig.web_timeout`——与 `web_fetch` 同一真源，
+    /// 不在这里另留一份默认值（那正是「面板能改、代码不读」的来源）。
+    pub fn new(timeout_secs: u64) -> Self {
         Self {
             allowed_domains: vec!["*".to_string()],
             max_response_size: DEFAULT_MAX_RESPONSE_SIZE,
-            timeout_secs: DEFAULT_TIMEOUT_SECS,
+            timeout_secs,
         }
     }
 
@@ -208,6 +209,10 @@ impl Capability for HttpRequestTool {
                 "required": ["url"]
             }),
             category: Some(crate::symbio_core::CapabilityCategory::SystemOperation),
+            // 任意方法 + 任意 body + 任意目标主机 ⇒ 高风险。旧的风险表把`http_request`
+            // 单独列为 High；改由工具自声明后，若不写这一行就会落到默认 Medium，
+            // 等于悄悄放宽了审批——故显式声明。
+            risk: Some(crate::symbio_core::CapabilityRiskLevel::High),
             examples: Some(vec![
                 "url='https://api.example.com/data'".to_string(),
                 "url='https://api.example.com/users', method='POST', body={'name':'test'}"
@@ -229,8 +234,10 @@ impl Capability for HttpRequestTool {
 }
 
 impl Default for HttpRequestTool {
+    /// 默认档取 [`WebConfig`](super::WebConfig) 的默认超时——**唯一真源**，
+    /// 不在此处另写一个字面量30（那正是「配置不生效」的成因）。
     fn default() -> Self {
-        Self::new()
+        Self::new(crate::plugins::web::web_config::WebConfig::default().web_timeout)
     }
 }
 

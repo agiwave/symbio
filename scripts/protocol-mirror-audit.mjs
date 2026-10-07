@@ -106,7 +106,7 @@ const CHAT_MESSAGE_RS = 'symbio/src/symbio_core/schemas/session/chat_message.rs'
 const CHAT_MESSAGE_TS = 'tauri/src/schemas/chat_message.ts'
 const DETAIL_RS = 'symbio/src/symbio_core/schemas/detail.rs'
 const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
-const RISK_LEVEL_RS = 'symbio/src/plugins/local/policy/policy_types.rs'
+const RISK_LEVEL_RS = 'symbio/src/symbio_core/capability/mod.rs'
 const SESSION_META_TS = 'tauri/src/schemas/session_meta.ts'
 
 /** 后端常量源：自动发现其中 `VDFS_*` 前缀的 `&str` 常量 */
@@ -262,7 +262,7 @@ const ENUM_SETS = [
     // 声明的取值并选用对应的转换规则，故两者都能守。此前只认 `snake_case`，
     // 于是它在前端 `schemas/session_meta.ts` 的镜像（`SESSION_RISK_LEVELS`）
     // 长期无人看守——「枚举类型对了但属性取值没覆盖到」是守卫自己的漏。
-    rust: { file: RISK_LEVEL_RS, enum: 'RiskLevel' },
+    rust: { file: RISK_LEVEL_RS, enum: 'CapabilityRiskLevel' },
     ts: { file: SESSION_META_TS, array: 'SESSION_RISK_LEVELS' },
   },
   {

@@ -1,11 +1,12 @@
 //! Local Tools 插件实现
 
 pub use super::local_config::LocalConfig;
-use super::policy::{AutonomyLevel, RiskLevel, SecurityPolicy};
+use super::policy::{AutonomyLevel, SecurityPolicy};
 use super::{
     ask_user::AskUserTool, codebase_search::CodebaseSearchTool, content_search::ContentSearchTool,
     shell::ShellTool, todo_write::TodoWriteTool,
 };
+use crate::symbio_core::CapabilityRiskLevel;
 use crate::symbio_core::{
     plugin_dir_from_ctx, Capability, CapabilityMeta, ExecEnv, Plugin, PluginConfigFile, PluginDir,
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
@@ -29,18 +30,6 @@ fn config_definition() -> DetailDefinition {
     DetailDefinition::form(
         "本地工具设置",
         vec![
-            DetailField::toggle(
-                "shell_enabled",
-                "启用 Shell 工具",
-                "允许执行 Shell 命令",
-                d.shell_enabled,
-            ),
-            DetailField::toggle(
-                "file_enabled",
-                "启用文件工具",
-                "允许文件读写操作",
-                d.file_enabled,
-            ),
             DetailField::number(
                 "shell_timeout",
                 "Shell 超时（秒）",
@@ -124,14 +113,14 @@ fn config_definition() -> DetailDefinition {
 ///
 /// 与 agent_id/provider_id/mode 同级别：随 chat_send 传输，由 orchestrator 写入 ctx。
 /// ctx 无值时默认 `Medium`（新会话尚未设置时的安全默认值）。
-fn risk_level_from_ctx(ctx: &Arc<dyn PluginInvokeRequest>) -> RiskLevel {
+fn risk_level_from_ctx(ctx: &Arc<dyn PluginInvokeRequest>) -> CapabilityRiskLevel {
     ctx.get(crate::symbio_core::RISK_LEVEL)
         .map(|s| match s.as_str() {
-            "low" => RiskLevel::Low,
-            "high" => RiskLevel::High,
-            _ => RiskLevel::Medium,
+            "low" => CapabilityRiskLevel::Low,
+            "high" => CapabilityRiskLevel::High,
+            _ => CapabilityRiskLevel::Medium,
         })
-        .unwrap_or(RiskLevel::Medium)
+        .unwrap_or(CapabilityRiskLevel::Medium)
 }
 
 /// 构造 confirm 类型 prompt 的**返回值**（不构造节点、不发事件）。
@@ -202,11 +191,13 @@ pub struct SecureToolWrapper {
 fn approval_gate(
     security: &SecurityPolicy,
     ctx: &Arc<dyn PluginInvokeRequest>,
-    tool_name: &str,
-    tool_description: &str,
+    tool: &dyn Capability,
     args: &Value,
 ) -> Result<Option<Value>, PluginError> {
-    let tool_risk_level = security.get_tool_risk_level(tool_name, Some(args));
+    // 风险由**工具自己**回答（`Capability::risk_for`）：静态档来自 `CapabilityMeta.risk`，
+    // 随参数变化档（shell）的工具覆写它。闸门不认工具名——新增/改名工具不必回来改这里。
+    let meta = tool.meta();
+    let tool_risk_level = tool.risk_for(args);
 
     // 用户已在审批卡上批准 → 参数里带 `approved: true`，本轮直接放行。
     let is_approved = args
@@ -218,7 +209,7 @@ fn approval_gate(
     let threshold = risk_level_from_ctx(ctx);
 
     let (suggested_approval, final_risk_level) =
-        security.check_tool_approval_needed(tool_name, tool_risk_level, threshold);
+        security.check_tool_approval_needed(&meta.name, tool_risk_level, threshold);
 
     // 放行条件：策略没建议审批，或本次调用已带过批准
     if !suggested_approval || is_approved {
@@ -228,8 +219,8 @@ fn approval_gate(
     // 产出 confirm 类型 user_prompt 节点（交互模式），或自动模式返回友好错误
     let mode = ctx.get(crate::symbio_core::MODE).unwrap_or_default();
     confirm_prompt_payload(
-        tool_name,
-        tool_description,
+        &meta.name,
+        &meta.description,
         args,
         &format!("{final_risk_level:?}").to_lowercase(),
         &mode,
@@ -253,16 +244,19 @@ impl Capability for SecureToolWrapper {
         self.inner.name()
     }
 
+    /// 透传给被包装的工具：装饰器不重判风险，否则「谁的风险」就成了包装层的事——
+    /// 闸门拿到的是 wrapper 的默认档，真实档（shell 的按命令分级）就丢了。
+    fn risk_for(&self, args: &Value) -> CapabilityRiskLevel {
+        self.inner.risk_for(args)
+    }
+
     async fn execute(
         &self,
         args: Value,
         env: &ExecEnv,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> Result<Value, PluginError> {
-        let meta = self.inner.meta();
-        if let Some(payload) =
-            approval_gate(&self.security, &ctx, &meta.name, &meta.description, &args)?
-        {
+        if let Some(payload) = approval_gate(&self.security, &ctx, &*self.inner, &args)? {
             return Ok(payload);
         }
 
@@ -304,9 +298,10 @@ impl LocalPlugin {
     pub fn new(parent: Option<Weak<dyn Plugin>>, config: LocalConfig, dir: PluginDir) -> Self {
         // 策略来自配置文档（默认全放开，见 PolicyRules::default 的说明）
         let security = Arc::new(SecurityPolicy::new(config.policy_rules()));
+        // 读取 shell_timeout 配置（默认 60s，见 LocalConfig::default）
+        let shell_timeout = config.shell_timeout;
         let config_lock = Arc::new(RwLock::new(config));
-
-        let shell = Arc::new(ShellTool::new(Arc::clone(&security)));
+        let shell = Arc::new(ShellTool::new(Arc::clone(&security), shell_timeout));
         let content_search = Arc::new(ContentSearchTool::new(Arc::clone(&security)));
         // 下面两个**不持策略**（与 `ask_user` 同类的「没有可判的路径」）：策略统一由
         // `SecureToolWrapper::execute` 的审批闸门执行，理由见各自结构体文档。
@@ -372,12 +367,7 @@ impl Plugin for LocalPlugin {
         if let Some(tool) = self.tool_impls.iter().find(|t| t.name() == path) {
             // 审批闸门与 `SecureToolWrapper::execute` 共用同一份判定
             // （见 [`approval_gate`]）——两条入口都真实存在，但判定只写一次。
-            // 描述取**工具真实描述**，与 wrapper 路径一致：此前这里传字面量
-            // `"工具执行"`，同一个工具走不同入口会得到不同的审批卡文案。
-            let meta = tool.meta();
-            if let Some(payload) =
-                approval_gate(&self.security, &ctx, &path, &meta.description, &payload)?
-            {
+            if let Some(payload) = approval_gate(&self.security, &ctx, tool.as_ref(), &payload)? {
                 return Ok(PluginPayload::new(&payload));
             }
 

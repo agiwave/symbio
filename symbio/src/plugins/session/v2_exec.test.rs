@@ -441,6 +441,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
             category: None,
             examples: None,
             context_retention: None,
+            ..Default::default()
         }],
         resume: None,
         recalled: None,
@@ -678,6 +679,7 @@ async fn full_turn_lands_derived_commitment_facts() {
             category: None,
             examples: None,
             context_retention: None,
+            ..Default::default()
         }],
         resume: None,
         recalled: None,

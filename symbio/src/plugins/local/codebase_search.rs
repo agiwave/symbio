@@ -33,8 +33,9 @@
 
 use crate::symbio_core::EmbeddingService;
 use crate::symbio_core::{
-    creator_create_object, Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse, PluginSimpleRequest, EMBEDDING_LOCAL,
+    creator_create_object, Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginSimpleRequest,
+    EMBEDDING_LOCAL,
 };
 use async_trait::async_trait;
 use grep::regex::RegexMatcherBuilder;
@@ -837,6 +838,7 @@ impl Capability for CodebaseSearchTool {
                 "required": ["query"]
             }),
             category: Some(crate::symbio_core::CapabilityCategory::FileOperation),
+            risk: Some(CapabilityRiskLevel::Low),
             examples: Some(vec![
                 "query='数据库连接池初始化'".to_string(),
                 "query='处理 HTTP 401 的逻辑', limit=5".to_string(),

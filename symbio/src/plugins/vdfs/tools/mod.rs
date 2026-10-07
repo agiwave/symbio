@@ -44,7 +44,8 @@ pub mod read;
 pub mod spec;
 
 use crate::symbio_core::{
-    Capability, CapabilityCategory, CapabilityMeta, CapabilityToolContextRetention, PluginError,
+    Capability, CapabilityCategory, CapabilityMeta, CapabilityRiskLevel,
+    CapabilityToolContextRetention, PluginError,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -89,12 +90,17 @@ pub const PATH_DESC: &str =
     "路径（统一文件系统）。磁盘文件：相对路径从工作目录开始，如 'README.md'、'src/main.rs'；'/' 表示工作目录根；绝对路径直用，如 'D:/tmp/a.txt'。系统资源：以 '.vdfsv2' 打头，列 '.vdfsv2' 可枚举全部资源类别，'.vdfsv2/<类别>/...' 深入对应资源（如 '.vdfsv2/plugin_manager/appearance'）。";
 
 /// 构造工具元数据骨架；子模块在自身 `meta()` 里直接调用，避免重复样板。
+///
+/// `risk` 由调用方**显式**给出而非走默认档：这几个工具同属一个插件、schema 形状
+/// 几乎一样，但风险并不相同（`vdfs_read` 只读、`vdfs_write` 改状态）。让默认值
+/// 隐式决定，等于把「哪些工具能改状态」这件事藏进了一个看不见的兜底里。
 pub fn tool(
     name: &str,
     description: &str,
     parameters: serde_json::Value,
     examples: Vec<&str>,
     retention: Option<CapabilityToolContextRetention>,
+    risk: CapabilityRiskLevel,
 ) -> CapabilityMeta {
     CapabilityMeta {
         name: name.to_string(),
@@ -103,6 +109,7 @@ pub fn tool(
         category: Some(CapabilityCategory::Resource),
         examples: Some(examples.into_iter().map(str::to_string).collect()),
         context_retention: retention,
+        risk: Some(risk),
         keywords: vec![
             "资源".to_string(),
             "文件".to_string(),

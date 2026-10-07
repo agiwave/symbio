@@ -13,7 +13,9 @@
 //! 即返回当前可访问的全部类别，无需独立工具。
 
 use super::{tool, ToolVdfs};
-use crate::symbio_core::{Capability, CapabilityMeta, ExecEnv, PluginError, PluginInvokeRequest};
+use crate::symbio_core::{
+    Capability, CapabilityMeta, CapabilityRiskLevel, ExecEnv, PluginError, PluginInvokeRequest,
+};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -51,6 +53,7 @@ impl Capability for ListTool {
             }),
             vec!["{\"path\":\"/\"}", "{\"path\":\".vdfsv2\"}", "{\"path\":\".\",\"ignore\":[\"target\",\"node_modules\"]}"],
             None,
+        CapabilityRiskLevel::Low,
         )
     }
 

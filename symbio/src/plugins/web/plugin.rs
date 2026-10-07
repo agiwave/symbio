@@ -22,16 +22,10 @@ fn config_definition() -> DetailDefinition {
     DetailDefinition::form(
         "网络工具设置",
         vec![
-            DetailField::toggle(
-                "web_enabled",
-                "启用 Web 工具",
-                "允许网络请求",
-                d.web_enabled,
-            ),
             DetailField::number(
                 "web_timeout",
                 "Web 超时（秒）",
-                "Web 请求超时时间",
+                "单次网络请求超时（web_fetch 与 http_request 共用）",
                 1.0,
                 300.0,
                 serde_json::json!(d.web_timeout),
@@ -80,11 +74,12 @@ impl WebPlugin {
     }
 
     pub fn new(parent: Option<Weak<dyn Plugin>>, config: WebConfig, dir: PluginDir) -> Self {
+        let web_timeout = config.web_timeout;
         let config_lock = Arc::new(RwLock::new(config));
 
-        let web_fetch = Arc::new(WebFetchTool::new());
+        let web_fetch = Arc::new(WebFetchTool::new(web_timeout));
         let web_search = Arc::new(WebSearchTool::new(Arc::clone(&config_lock)));
-        let http_request = Arc::new(HttpRequestTool::new());
+        let http_request = Arc::new(HttpRequestTool::new(web_timeout));
 
         let tool_impls: Vec<Arc<dyn Capability>> = vec![web_fetch, web_search, http_request];
 

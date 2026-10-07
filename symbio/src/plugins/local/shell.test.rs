@@ -157,7 +157,7 @@ async fn pump_with_silent_sink_emits_nothing() {
 /// 会话内执行：返回工具结果本身（不再是 `Session` 通道），完整输出在 `output` 字段里。
 #[tokio::test]
 async fn execute_returns_data_payload_with_full_output() {
-    let tool = ShellTool::new(Arc::new(SecurityPolicy::default()));
+    let tool = ShellTool::new(Arc::new(SecurityPolicy::default()), 60);
     let (sink, ops) = recording_sink();
     let ctx = make_ctx("echo hello_stream", sink, Some(("res-1", "tc-1")));
 
@@ -175,7 +175,7 @@ async fn execute_returns_data_payload_with_full_output() {
 /// 直连调用（无快照身份）：同一份代码照跑，静默返回。
 #[tokio::test]
 async fn execute_without_target_returns_output_silently() {
-    let tool = ShellTool::new(Arc::new(SecurityPolicy::default()));
+    let tool = ShellTool::new(Arc::new(SecurityPolicy::default()), 60);
     let (sink, ops) = recording_sink();
     let ctx = make_ctx("echo hello_direct", sink, None);
 
@@ -188,7 +188,7 @@ async fn execute_without_target_returns_output_silently() {
 /// 大量输出不再有「通道容量」这一类阻塞源（旧回归：>64 帧时死锁）。
 #[tokio::test]
 async fn execute_many_lines_completes_without_backpressure() {
-    let tool = ShellTool::new(Arc::new(SecurityPolicy::default()));
+    let tool = ShellTool::new(Arc::new(SecurityPolicy::default()), 60);
     let (sink, ops) = recording_sink();
     let ctx = make_ctx(
         "echo line1 & echo line2 & echo line3 & echo line4",
@@ -207,7 +207,7 @@ async fn execute_many_lines_completes_without_backpressure() {
 /// 参数非法 ⇒ `Err`（不再是「错误哨兵帧」）：错误由 `tool_executor` 统一收敛。
 #[tokio::test]
 async fn execute_rejects_empty_command() {
-    let tool = ShellTool::new(Arc::new(SecurityPolicy::default()));
+    let tool = ShellTool::new(Arc::new(SecurityPolicy::default()), 60);
     let (sink, ops) = recording_sink();
     let ctx = make_ctx("", sink, Some(("res-1", "tc-1")));
 
