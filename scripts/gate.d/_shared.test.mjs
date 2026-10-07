@@ -370,6 +370,27 @@ test('ci.yml：cargo audit 必须在仓库根跑（symbio/ 下没有 Cargo.lock�
   )
 })
 
+// 本地偶发红（2026-10-07，gate-full-4）：`cargo test -p symbio` 偶发 6 例 `Duplicate`、
+// 单跑全绿。根因是临时目录按 **pid** 命名却**从不清理**——Windows 复用 pid 时旧
+// `v2-events.wal` 还在，而事件 id 是写死的，首个 append 就撞 Duplicate。
+test('v2 测试的临时目录必须用前先删（pid 复用会把残留 WAL 撞成 Duplicate）', () => {
+  for (const n of ['v2_bridge', 'v2_memory', 'v2_skills', 'v2_tasks']) {
+    const p = `symbio/src/plugins/session/${n}.test.rs`
+    const src = fs.readFileSync(path.join(repoRoot, p), 'utf8')
+    const fn = src.match(/^fn tmp_\w+\([\s\S]*?^\}/m)
+    assert.ok(fn, `${p}：找不到 tmp_* 助手 —— 结构变了，跟着改这条钉`)
+    const body = fn[0]
+    assert.match(body, /std::process::id\(\)/, `${p}：目录名不再带 pid ⇒ 这条钉的前提变了`)
+    const wipe = body.indexOf('remove_dir_all')
+    const create = body.indexOf('create_dir_all')
+    assert.ok(wipe !== -1, `${p}：tmp 助手没有 remove_dir_all ⇒ 残留 WAL 会撞 Duplicate`)
+    assert.ok(
+      wipe < create,
+      `${p}：remove_dir_all 不在 create_dir_all 之前 ⇒ 先建后删等于没删`,
+    )
+  }
+})
+
 test('gate：e2e 失败详情不能按 ci 模式关掉（CI 上日志文件看不到）', () => {
   const src = fs.readFileSync(path.join(repoRoot, 'scripts/gate.d', '40-e2e.mjs'), 'utf8')
   // 判据是**语句**不是字样：注释里可以（应当）记着这行代码曾经长什么样，

@@ -10,8 +10,14 @@ use crate::symbio_core::{
 };
 use std::path::{Path, PathBuf};
 
+/// 一个测试的临时目录：**用前先删**，上次残留不污染本次（Windows 会复用 pid）。
+///
+/// 目录名是 `pid + tag`，而 `seed_turn` 往里写的是**固定事件 id**（`v2u-test-a0` …）：
+/// 旧运行的 `v2-events.wal` 一旦留到 pid 被复用的这次，首个 append 就撞 `Duplicate`，
+/// 表现为「门禁偶发红、单跑全绿」。删掉重建才谈得上从空开始。
 fn tmp_dir(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("symbio-v2skills-{}-{tag}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("临时目录");
     dir
 }

@@ -12,8 +12,13 @@ use crate::symbio_core::{
 };
 use std::path::PathBuf;
 
+/// 一个测试的临时目录：**用前先删**，上次残留不污染本次（Windows 会复用 pid）。
+///
+/// 收尾的 `remove_dir_all` 只在**用例跑通**时执行；用例一旦 panic，残留的
+/// `v2-events.wal` 就会跟着下次 pid 复用回来，把确定事件 id 撞成 `Duplicate`。
 fn tmp_wal(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("symbio-v2bridge-{}-{tag}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("临时目录");
     dir.join("v2-events.wal")
 }
