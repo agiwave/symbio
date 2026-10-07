@@ -370,6 +370,32 @@ test('ci.yml：cargo audit 必须在仓库根跑（symbio/ 下没有 Cargo.lock�
   )
 })
 
+// 第三轮 CI（2026-10-07，run 37642902455）暴露：`cargo test --workspace` **第一次**
+// 真正跑到，三个「断言 stdout 内容」的 hook 用例立刻在 Linux 上全红，`left: ""`。
+// 本机没有 sh，POSIX 侧只能结构钉（行为由 CI 在 Linux 上钉，WSL sh 已实测两边字节数）。
+test('hook 测试：POSIX 分支必须引用 $1，否则裸 cat 去读被置空的 stdin', () => {
+  const src = fs.readFileSync(
+    path.join(repoRoot, 'symbio/src/plugins/hook/executor.test.rs'),
+    'utf8',
+  )
+  const fn = src.match(/^fn cat_last_arg_command[\s\S]*?^\}/m)
+  assert.ok(fn, '找不到 cat_last_arg_command —— 契约换了地方，跟着改这条钉')
+  const posix = fn[0].match(/else\s*\{\s*("(?:[^"\\]|\\.)*")\s*\}/)
+  assert.ok(posix, '找不到 POSIX 分支 —— 结构变了，跟着改这条钉')
+  const cmd = JSON.parse(posix[1])
+  assert.match(
+    cmd,
+    /\$1/,
+    // `executor.rs` 在 POSIX 走 `sh -c <command> <name> <path>`：路径落在 `$1`，
+    // **命令串不引用它就看不见**——裸 `cat` 没有操作数，去读 `Stdio::null()` 的
+    // stdin ⇒ 恒输出空。实测（WSL sh）：`sh -c cat n p` = 0 字节，
+    // `sh -c 'cat "$1"' n p` = 23 字节。Windows 侧 `cmd /C <cmd> <path>` 会把路径
+    // 并进命令行，`type` 因此不必引用——**这个平台差异正是它只在 Linux 红的原因**，
+    // 也是本地门禁永远抓不到它的原因。
+    `POSIX 分支是 ${cmd}，没引用 $1 ⇒ Linux 上钩子读到空 stdin，断言 stdout 的用例必红`,
+  )
+})
+
 // 本地偶发红（2026-10-07，gate-full-4）：`cargo test -p symbio` 偶发 6 例 `Duplicate`、
 // 单跑全绿。根因是临时目录按 **pid** 命名却**从不清理**——Windows 复用 pid 时旧
 // `v2-events.wal` 还在，而事件 id 是写死的，首个 append 就撞 Duplicate。
