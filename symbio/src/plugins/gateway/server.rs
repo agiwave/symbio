@@ -88,12 +88,7 @@ pub async fn start(
     if !cfg.inbound_enabled || cfg.inbound_protocol != "http" {
         return Ok(None);
     }
-    let is_loopback = cfg.inbound_bind == "127.0.0.1"
-        || cfg.inbound_bind == "localhost"
-        || cfg.inbound_bind == "::1";
-    if !is_loopback && cfg.inbound_token.is_empty() {
-        return Err("绑定非回环地址时必须设置访问令牌".to_string());
-    }
+    require_token_for_non_loopback(&cfg.inbound_bind, &cfg.inbound_token)?;
 
     let addr = format!("{}:{}", cfg.inbound_bind, cfg.inbound_port);
     let listener = TcpListener::bind(&addr)
@@ -167,6 +162,25 @@ fn http_response(
     let mut out = head.into_bytes();
     out.extend_from_slice(body);
     out
+}
+
+/// **安全护栏**：绑定非回环地址时必须设置访问令牌。
+///
+/// 它与 [`check_auth`] 是同一枚硬币的两面——[`check_auth`] 在令牌为空时**直接放行**
+/// （那是回环本机开发的有意形态），所以「谁能连进来」只能由本函数在**启动时**把住：
+/// 令牌为空 ⇒ 只允许绑在回环上。少了这道判断，把网关绑到 `0.0.0.0` 且忘记设令牌，
+/// 就是把整个事实源对网络上任意主机敞开，而请求侧不会拦下任何一条。
+///
+/// 提成函数不是为了复用（它只有一个调用点），是为了**可判据**：内联在 [`start`] 里时
+/// 它没有测试，等于一道写了文档、随时可能被无声删掉的安全闸。判据见 `server.test.rs`：
+/// 谓词四象限各一条（不占端口），外加一条走 [`start`] 的接线断言——谓词写得再对，
+/// `start` 不调它也等于没有。
+fn require_token_for_non_loopback(bind: &str, token: &str) -> Result<(), String> {
+    let is_loopback = bind == "127.0.0.1" || bind == "localhost" || bind == "::1";
+    if !is_loopback && token.is_empty() {
+        return Err("绑定非回环地址时必须设置访问令牌".to_string());
+    }
+    Ok(())
 }
 
 fn check_auth(token: &str, req: &HttpRequest) -> bool {

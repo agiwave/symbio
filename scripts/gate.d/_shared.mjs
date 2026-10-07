@@ -710,14 +710,18 @@ export const BASELINE = {
   //      `0b806c0` 给 `v2_exec.test.rs` 补的两条 `flush_returns_*` 判据，而
   //      `git diff fe612a2..22ed05a -- '*.rs'` 在该区间**零**新增测试 fn ⇒ 归因无残差。
   //      之所以又欠了一次，是同一个结构：**黄字不判红**，只要没人回填，棘轮就持续被削格。
-  rustTests: 1341,
+  //
+  // 2026-10-08 **回填 `1341 → 1343`（+2）**：+2 = `gateway::server` 非回环安全护栏的
+  //      两条判据（谓词四象限 + `start()` 接线断言）。**加了测试就跟着回填**——结构同上，
+  //      不再重复解释。
+  rustTests: 1343,
   /**
    * CI 口径的 Rust 通过数（**只增不减**）——与上面三个分包基线**是不同口径，不能互替**。
    *
    * 为什么要单独一格：本地与 CI 跑的不是同一条命令。本地按 crate 分包
    * `cargo test -p <pkg>`，每个包**各取首个** `test result: ok. N passed`（lib 目标，
    * `ignored` 不计）；CI 跑一次 `cargo test --workspace`，输出是**所有测试目标各行求和**
-   * （含 cli / tauri / doctest 那几行）。所以 1349 = 1341 + 8 + 0 + 0，**不等于**三个
+   * （含 cli / tauri / doctest 那几行）。所以 1351 = 1343 + 8 + 0 + 0，**不等于**三个
    * 分包基线之和的口径语义（那里是「首个 result 行」，这里是「全部 ok 行求和」）。
    *
    * ⚠️ **这个格子是补上来的，不是一直有的**：`cargoTestRatchet` 的 CI 分支原先
@@ -726,15 +730,14 @@ export const BASELINE = {
    * 照样绿。这与 ci.yml 漏掉 `v2-plan` 是同一课的第三次：**只信退出码**能抓住
    * 「测试失败」，抓不住「测试消失」——后者不留任何痕迹。
    *
-   * 1349 = 2026-10-08 实测 `cargo test --workspace` 的 4 行之和
-   * （1341 + 8 + 0 + 0，其中第 4 行是 doctest `0 passed; 7 ignored`）。
-   * 出处：CI run 37647725557 的 `rust-checks (dev)`，四行依次
+   * 1351 = 1343 + 8 + 0 + 0（**推算**：+2 与 `rustTests` 同源，即 gateway 非回环护栏
+   * 的两条判据；下一次 CI 以实测复核）。第 4 行是 doctest `0 passed; 7 ignored`。
+   * 口径的出处是 CI run 37647725557：`rust-checks (dev)` 四行依次
    * `1341 / 8 / 0 / 0 passed`，并打黄字 `⚠ CI 全量 1349 > 基线 1347：
-   * 请更新 BASELINE.ciRustTestsTotal`。上一版 1347 = 1339 + 8 + 0 + 0，
-   * 两次 +2 **同源**（`0b806c0` 给 `v2_exec.test.rs` 补的两条 flush 判据）——
-   * 本地与 CI 是两条独立的格子，欠账会各欠一次，回填时必须两边一起看。
+   * 请更新 BASELINE.ciRustTestsTotal`。**本地与 CI 是两条独立的格子**，同一个增量
+   * 会各欠一次，回填时必须两边一起看。
    */
-  ciRustTestsTotal: 1349,
+  ciRustTestsTotal: 1351,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

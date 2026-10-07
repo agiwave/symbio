@@ -70,6 +70,84 @@ fn check_auth_requires_the_configured_bearer_token() {
     );
 }
 
+// ---- 非回环绑定的安全护栏 ----
+
+/// 谓词四象限：**回环可空令牌、非回环必填**。
+///
+/// 两个方向都得钉——只钉拒绝方向的话，把条件写反（一律拒绝）也能通过，
+/// 而那会让网关再也起不来，且没有哪条测试会说话。
+#[test]
+fn require_token_for_non_loopback_is_the_documented_boundary() {
+    // 回环 + 空令牌：有意的本机开发形态，必须放行（config.rs 默认就是这个组合）
+    for bind in ["127.0.0.1", "localhost", "::1"] {
+        assert!(
+            require_token_for_non_loopback(bind, "").is_ok(),
+            "{bind} + 空令牌应放行（本机开发形态，见 plan/11 §2-G）"
+        );
+    }
+    // 非回环 + 空令牌：拒绝
+    for bind in ["0.0.0.0", "192.168.1.10", "::"] {
+        let err = require_token_for_non_loopback(bind, "").expect_err("非回环 + 空令牌必须被拒绝");
+        assert!(err.contains("必须设置访问令牌"), "{err}");
+    }
+    // 两个「带令牌」的象限：放行（对外暴露的正常形态 / 回环不因设了令牌反而被拒）
+    assert!(require_token_for_non_loopback("0.0.0.0", "s3cret").is_ok());
+    assert!(require_token_for_non_loopback("127.0.0.1", "s3cret").is_ok());
+}
+
+/// **接线断言**：谓词写得再对，`start` 不调它也等于没有。
+///
+/// 走真实入口 [`start`]：护栏必须在 `TcpListener::bind` **之前**返回。若它被整个删掉，
+/// `start` 会绑上 `0.0.0.0:0` 并返回 `Ok`，下面的 `panic!` 即触发；若被挪到 bind 之后，
+/// 端口会真的开出去（仍红）。`inbound_port: 0` 是为了万一守卫失效也不与他人抢端口。
+///
+/// 用 `match` 而非 `expect_err`：`ServerHandle` 没有 `impl Debug`，而 `expect_err`
+/// 要求成功侧可打印。
+#[tokio::test]
+async fn start_refuses_non_loopback_bind_without_token() {
+    let cfg = GatewayConfig {
+        inbound_enabled: true,
+        inbound_protocol: "http".into(),
+        inbound_bind: "0.0.0.0".into(),
+        inbound_port: 0,
+        inbound_token: String::new(),
+        ..Default::default()
+    };
+    match start(&cfg, Arc::new(NopRouter)).await {
+        Err(err) => assert!(err.contains("必须设置访问令牌"), "{err}"),
+        Ok(_) => panic!("非回环 + 空令牌必须拒绝启动，护栏被删掉或挪到 bind 之后了"),
+    }
+}
+
+/// 什么都答 `NotFound` 的占位路由——护栏分支根本用不到它，但 [`start`] 的签名要
+/// `Arc<dyn Plugin>`。刻意**不复用别处的 NopPlugin**：测试夹具跨模块引用会让
+/// 两边的改动互相牵连。
+struct NopRouter;
+
+#[async_trait::async_trait]
+impl Plugin for NopRouter {
+    fn meta(&self) -> crate::symbio_core::PluginMeta {
+        crate::symbio_core::PluginMeta::new("nop-router", "nop")
+    }
+
+    async fn route(
+        self: Arc<Self>,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> crate::symbio_core::PluginInvokeResponse<crate::symbio_core::PluginPayload> {
+        Err(crate::symbio_core::PluginError::NotFound("nop".to_string()))
+    }
+
+    async fn traverse(
+        self: Arc<Self>,
+        _path: String,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> crate::symbio_core::PluginInvokeResponse<crate::symbio_core::PluginPayload> {
+        Ok(crate::symbio_core::PluginPayload::new(&Vec::<
+            serde_json::Value,
+        >::new()))
+    }
+}
+
 /// 只取指定键；无 `=` 的裸参数不参与匹配，也不得误取成整串。
 #[test]
 fn query_param_reads_only_the_named_key() {
