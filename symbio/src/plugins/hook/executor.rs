@@ -74,8 +74,6 @@ impl HookExecutor {
         timeout_ms: u64,
     ) -> HookExecutionResult {
         let command = match &config.command {
-            // SYS-003: 避免将 `Some(workdir)` 模式绑定名设置为 `workdir`，
-            // 防止遮蔽外层同名参数导致后续 `workdir` 不再指向原参数。
             Some(cmd) => cmd,
             None => {
                 return HookExecutionResult {
@@ -86,11 +84,33 @@ impl HookExecutor {
             }
         };
 
-        let event_json = serde_json::to_string(event).unwrap_or_default();
-        let event_file = format!("{}/.hook_event_{}.json", workdir, std::process::id());
+        let event_json = match serde_json::to_string(event) {
+            Ok(s) => s,
+            Err(e) => {
+                return HookExecutionResult {
+                    success: false,
+                    output: HookOutput::default(),
+                    error: Some(format!("Failed to serialize event: {e}")),
+                };
+            }
+        };
 
-        let write_result = tokio::fs::write(&event_file, &event_json).await;
-        if let Err(e) = write_result {
+        // 载荷落**独立临时目录**（不是 workdir——那是用户的项目目录，钩子跑一次
+        // 就在里面留一个文件），文件名由 tempfile 唯一生成：早先的
+        // `.hook_event_<pid>.json` 只带进程号，同进程内并发钩子 / 残留文件会撞名，
+        // 撞名就是「A 钩子读到 B 钩子的事件」。
+        let tmp_dir = match tempfile::Builder::new().prefix("symbio-hook-").tempdir() {
+            Ok(d) => d,
+            Err(e) => {
+                return HookExecutionResult {
+                    success: false,
+                    output: HookOutput::default(),
+                    error: Some(format!("Failed to create temp dir: {e}")),
+                };
+            }
+        };
+        let event_file = tmp_dir.path().join("event.json");
+        if let Err(e) = tokio::fs::write(&event_file, &event_json).await {
             return HookExecutionResult {
                 success: false,
                 output: HookOutput::default(),
@@ -98,36 +118,49 @@ impl HookExecutor {
             };
         }
 
-        let shell = if cfg!(target_os = "windows") {
-            ("cmd", "/C")
+        // 事件文件路径作为**独立参数**追加（`cmd <path>` / `sh -c 'cmd' <path>`），
+        // 而不是拼进命令串。两条理由都是实测出来的：
+        // - **Windows**：命令串里内嵌 `"` 会被 Rust 的 MSVC 参数转义写成 `\"`，
+        //   而 `cmd.exe` 不认反斜杠转义——路径于是变成 `C:\Temp\...\"`，直接报
+        //   「文件名、目录名或卷标语法不正确」。走独立参数则由 Rust 负责转义，
+        //   两边都不必手工加引号。
+        // - **POSIX**：`sh -c <string> <name> <arg…>` 里第一个是 `$0`、第二个才是
+        //   `$1`。故补一个占位 `$0`，事件路径才落在 `$1`——与钩子作者「读 `$1`」
+        //   的直觉一致（漏掉占位，路径会占掉 `$0`，`$1` 为空）。
+        //
+        // 载荷 JSON **自始至终不进命令行**，故命令串里没有可被 shell 解释的内容。
+        // tempfile 生成的名字不含空格 / 引号，两种平台都不会因空格而拆参。
+        let event_path = event_file.to_string_lossy().into_owned();
+
+        let output = if cfg!(target_os = "windows") {
+            Command::new("cmd")
+                .arg("/C")
+                .arg(command)
+                .arg(&event_path)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .current_dir(workdir)
+                .output()
         } else {
-            ("sh", "-c")
+            Command::new("sh")
+                .arg("-c")
+                .arg(command)
+                .arg("symbio-hook") // 占位 `$0`
+                .arg(&event_path) // `$1`
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .current_dir(workdir)
+                .output()
         };
-
-        let full_command = format!(
-            "{} {} && rm -f {}",
-            command,
-            event_file
-                .replace("/", std::path::MAIN_SEPARATOR.to_string().as_str())
-                .replace("\\", "\\\\"),
-            event_file
-                .replace("/", std::path::MAIN_SEPARATOR.to_string().as_str())
-                .replace("\\", "\\\\")
-        );
-
-        let output = Command::new(shell.0)
-            .arg(shell.1)
-            .arg(&full_command)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .current_dir(workdir)
-            .output();
 
         let result = timeout(Duration::from_millis(timeout_ms), output).await;
 
-        // 清理临时事件文件。文件可能本就不存在（命令提前失败），且这里也已经是
-        // 收尾位置——清理不掉没有后续动作可做，故刻意忽略。
-        let _ = tokio::fs::remove_file(&event_file).await; // grep-audit-allow S-002-bonus: 收尾清理，文件可能本就不存在
+        // 清理交给 `tmp_dir` 的 Drop（RAII）：早先把 `&& rm -f <file>` 拼进命令串，
+        // 于是「清理」变成了命令的一部分——命令失败就不清理，Windows 上更是
+        // 根本没有 `rm`。命令跑完（成败皆然）目录随 drop 消失。
+        drop(tmp_dir);
 
         match result {
             Ok(Ok(output)) => {
@@ -241,3 +274,7 @@ impl Default for HookExecutor {
         Self::new()
     }
 }
+
+#[cfg(test)]
+#[path = "executor.test.rs"]
+mod tests;

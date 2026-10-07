@@ -105,6 +105,7 @@ moka = { version = "0.12.16", features = ["future"] }
 zip = { version = "2.4.1", default-features = false, features = ["deflate"] }
 # base64 编码：zip 字节经 JSON payload 传输（agent 插件）
 base64 = "0.22.1"
+tempfile = "3.27.0"
 
 [dev-dependencies]
 tempfile = "3.27.0"
