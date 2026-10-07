@@ -389,6 +389,36 @@ test('D-007：docs/archive/ 作为**源文件**整体豁免；作为**目标**�
   assert.equal(r.status, 0, r.stdout)
 })
 
+// ── D-008：裸风险编号 ───────────────────────────────────────────────────
+test('D-008：正文裸 R<数字> → 失败（撞号唯一的机械信号）', () => {
+  const r = audit({ 'docs/a.md': '按 R1 的目标形态走。\n' })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-008 裸风险编号/)
+})
+
+test('D-008：定义行**首列**的 Rn → 通过（编号只能从这里产生）', () => {
+  const r = audit({ 'docs/a.md': '| R1 | 某风险条目 | 高 |\n| R2 | 另一条风险 | 中 |\n' })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-008：同一行里首列**之外**的裸编号仍判（首列区间之外不算定义）', () => {
+  const r = audit({ 'docs/a.md': '| R1 | 本行另提到 R2 | 高 |\n' })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /R2/)
+})
+
+test('D-008：紧邻「风险」的限定引用 → 通过', () => {
+  const r = audit({ 'docs/a.md': '参见风险 R3 的缓释措施。\n' })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-008：不给豁免——头部 `doc-link-allow` 注释也照样判', () => {
+  const r = audit({
+    'docs/a.md': '<!-- doc-link-allow D-008: 这条不接受豁免 -->\n\n按 R1 走。\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+})
+
 // ── 空树 ────────────────────────────────────────────────────────────────
 test('空树通过（守卫不是空转即红）', () => {
   assert.equal(audit({}).status, 0)

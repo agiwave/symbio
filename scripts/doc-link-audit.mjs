@@ -2,7 +2,7 @@
 /**
  * doc-link-audit — 文档相对链接审计
  *
- * 用途：**活跃文档体检**——六条机械可判定的规矩，每条都对应一类「没人看着就必然腐烂」的文档病：
+ * 用途：**活跃文档体检**——七条机械可判定的规矩，每条都对应一类「没人看着就必然腐烂」的文档病：
  *
  *   D-001 站内相对链接：文档移动 / 归档（`git mv`）最容易留下静默坏链——阅读时才发现，
  *     而它本可以在提交前被机械地查出来。
@@ -11,6 +11,8 @@
  *   D-004 变更史不得混入活跃文档正文：历史归 `git log` 与 `archive/`。
  *   D-006 反引号里的文件路径：正文用 `` `path/to/x.md` `` 指路时，目标必须存在。
  *   D-007 站内锚点：链接的 `#fragment` 必须等于目标文件某个标题的 slug（含纯锚点 `#x`）。
+ *   D-008 裸风险编号：正文里的 `R\d+` 必须是**定义**（`| Rn |` 表行的首列）或
+ *     **限定引用**（编号紧邻「风险」二字），其余一律报红。
  *
  * D-006 存在的理由（它是 D-001 的**盲区补丁**）：D-001 只认 Markdown 链接语法
  *   `[文字](目标)`，而本仓正文里指路**更常**写成行内反引号（"详见 `docs/design/vdfs.md`"）。
@@ -41,6 +43,20 @@
  *   · **全文**：写在头部（前 `DOCTYPE_HEAD_LINES` 行）的豁免注释，豁免**整篇**。
  *     实测全文豁免会被滥用（一篇讲文档规矩的文章给整篇挂豁免，等于规则对它失效），
  *     故只在确需时用；行内豁免覆盖绝大多数真实场景。
+ *
+ * D-008 存在的理由（**编号引用**这一类的首条规则）：2026-10-08 复核时发现
+ *   `docs/plan/04` §3.2 与 `docs/decisions/session.md` 的 ADR-047 都写着「R1」，
+ *   而本仓的 `R1` 有**两个**含义——`04` 风险登记表的 R1（从未写过可运行系统代码）
+ *   与从 `feat` 分支并入的 `docs/plan/06` §10.2 的 R1（「主会话不持有工具」的架构定案）。
+ *   后者那篇文档**不在本仓**：引用悬空，却撞进了前者的编号空间。
+ *
+ *   关键在于**解析型规则抓不到它**——`R1` 能解析到风险表那一条，只是解析到了**错误的
+ *   含义**。这正是本文件反复写下的判词：**守卫报 0 不等于没有坏链，只等于它看不见。**
+ *   机械可判的只有**形态**：这个编号是定义、是限定引用、还是裸的。撞号是裸编号的产物，
+ *   故本条判形态、不判解析。
+ *
+ *   **不给豁免**：`R\d+` 在本仓只表示风险编号，处置只有两种且都不需要解释——
+ *   要么它是 `| Rn |` 表行的首列（定义），要么紧邻「风险」二字（限定引用）。
  *
  * D-003 存在的理由（为什么是「行数」这个粗指标）：文档臃肿不是美学问题，而是**职责失守的
  *   可观测代理**。实测 `docs/design/vdfs.md` 涨到 1045 行时，超出的部分是 §13「范例」——
@@ -303,6 +319,37 @@ function backtickHits(file, text, limit = 8) {
 }
 
 /** 递归 docs/ 下的 .md（目录不存在 ⇒ 空数组） */
+// ==================== D-008：裸风险编号必须是定义或限定引用 ====================
+
+/**
+ * D-008 单篇判定：返回**裸** `R\d+` 的命中行。
+ *
+ * 三种形态，只有第三种是缺陷：
+ *  · **定义** —— `| Rn | ...` 表行的**首列**（编号落在首列区间内）。编号只能从这里产生；
+ *  · **限定引用** —— 编号紧邻「风险」二字（其间只允许空白），如「参见风险 R3」；
+ *  · **裸** —— 两者皆非。撞号唯一的机械信号。
+ *
+ * 为什么判形态而不判解析：撞号的两个 `R1` **都能解析**（`04` 风险表里就有一条 R1），
+ * 解析会把「错误的含义」判成通过——**守卫报 0 不等于没有坏链，只等于它看不见**。
+ */
+function riskIdHits(text) {
+  const hits = []
+  const lines = text.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const def = line.match(/^\s*\|\s*R\d+\s*\|/) // 定义行的首列区间
+    const re = /\bR\d+\b/g
+    let m
+    while ((m = re.exec(line))) {
+      if (def && m.index < def[0].length) continue // 首列 = 定义
+      if (/风险\s*$/.test(line.slice(0, m.index))) continue // 紧邻「风险」= 限定引用
+      hits.push({ line: i + 1, text: line.trim() })
+      break // 一行报一次：判定与处置都按行
+    }
+  }
+  return hits
+}
+
 function walkDocs(dir, out = []) {
   let entries
   try {
@@ -483,6 +530,7 @@ const misplaced = []
 const oversized = []
 const historical = []
 const backtickBad = []
+const bareRisk = []
 let docsScanned = 0
 let backtickChecked = 0
 
@@ -507,6 +555,9 @@ function scanBody(file) {
     const dead = backtickHits(file, text)
     if (dead.length > 0) backtickBad.push({ rel, dead })
   }
+
+  const bare = riskIdHits(text)
+  if (bare.length > 0) bareRisk.push({ rel, hits: bare })
 }
 
 for (const root of BODY_ROOTS) {
@@ -594,13 +645,29 @@ if (badAnchors.length > 0) {
   console.log('      `——`、`（出）` 之类都被丢掉）。本条**不给豁免**：标题存在与否是精确判定。')
 }
 
+// ---- D-008：裸风险编号 ----
+console.log(`D-008 裸风险编号：扫描 ${docsScanned} 篇，命中 ${bareRisk.length} 篇`)
+for (const { rel, hits } of bareRisk) {
+  for (const h of hits) console.log(`  ✗ ${rel}:${h.line}  ${h.text}`)
+}
+if (bareRisk.length > 0) {
+  console.log('\n提示：`R<n>` 在本仓只表示风险编号，而裸编号会撞进别人的编号空间——实测')
+  console.log('      `04` 风险表的 R1 与并入文档的 R1 各指一事，且**都能被解析到**，所以')
+  console.log('      解析型守卫看不见它（**守卫报 0 不等于没有坏链，只等于它看不见**）。')
+  console.log('      两种处置都不需要解释：')
+  console.log('      · 定义 → 写成 `| Rn | ...` 表行的首列；')
+  console.log('      · 引用 → 紧邻「风险」二字（如「参见风险 R3」）。')
+  console.log('      本条**不给豁免**：判定的是编号的形态，不是语义。')
+}
+
 process.exit(
   bad.length > 0 ||
     misplaced.length > 0 ||
     oversized.length > 0 ||
     historical.length > 0 ||
     backtickBad.length > 0 ||
-    badAnchors.length > 0
+    badAnchors.length > 0 ||
+    bareRisk.length > 0
     ? 1
     : 0
 )
