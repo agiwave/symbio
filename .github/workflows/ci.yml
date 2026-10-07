@@ -112,6 +112,26 @@ jobs:
         # ② 镜像变更时以「openssl-sys 找不到库」之外的方式暴露出来。
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
 
+      - name: Install Linux system libs (GTK/WebKit)
+        # workspace 的 members 含 `tauri/src-tauri`，而 Tauri v2 在 Linux 上走
+        # GTK/WebKit ⇒ `glib-sys` / `gobject-sys` / `gtk-sys` / `webkit2gtk-sys` /
+        # `libappindicator` 的 build script 逐个跑 pkg-config。
+        #
+        # 2026-10-07 首次在 `v2-plan` 上跑 CI 时实测：`cargo check --tests --workspace`
+        # 在第一个 sys crate 就红——
+        #   `Package gobject-2.0 was not found in the pkg-config search path.`
+        # 在此之前这条路径**从未被执行过**：本地是 Windows，Tauri 走 WebView2，
+        # 根本不编 GTK ⇒ 与「分支没接 CI」同族，是**没有信号的漏跑**的第三次。
+        #
+        # 只装 openssl 是不够的：openssl 那步当时是绿的，红的是它后面的 GTK 链。
+        # 清单取 Tauri 官方 Linux 前置（webkit2gtk 4.1 对应 Ubuntu 24.04）。
+        # ⚠️ `msrv-check` / `e2e-check` 只编 `symbio` + `cli`、不碰 tauri，故不装这组。
+        run: >
+          sudo apt-get update && sudo apt-get install -y
+          libssl-dev pkg-config
+          libwebkit2gtk-4.1-dev libgtk-3-dev
+          libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
@@ -242,6 +262,19 @@ jobs:
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
+      - name: Install frontend deps (e2e 要用的 WS 客户端)
+        # ⚠️ 这一步不能省，且**缺了不报"缺依赖"、报的是"42/42 全部用例失败"**：
+        # `e2e/helpers.mjs` 第 16 行 `import WebSocket from
+        # '../tauri/node_modules/ws/index.js'`——**不为测试再引一份**（该文件头注明说）。
+        # 而每个 `e2e/cases/t*.mjs` 都 import helpers ⇒ `tauri/node_modules` 不存在时，
+        # 42 个用例**每一个**都在 import 期抛模块解析错误、立即 exit=1，
+        # 表现为「42/42 全红、每例 0s」，与"用例本身坏了"完全同形。
+        # 2026-10-07 首次在 v2-plan 上跑 CI 时实测：CLI 二进制重建成功（ok 2m2s），
+        # 随后 42 例在 0.4 秒内全灭。
+        # `frontend-checks` 有 `npm ci`、这个 job 没有——依赖存在与否是**按 job**的。
+        working-directory: tauri
+        run: npm ci
+
       - name: Install Linux system libs (OpenSSL)
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
 
@@ -307,7 +340,18 @@ jobs:
       - uses: actions/checkout@v5
       
       - name: Install cargo-audit
-        run: cargo install cargo-audit
+        # ⚠️ 必须显式 `+stable`：仓库根的 `rust-toolchain.toml` 钉 **1.93.1**，
+        # 不带工具链前缀时 `cargo install` 会**拿本项目的 pin 去编 cargo-audit 自己的
+        # 依赖**，而它的依赖已经跑到需要更新的编译器 —— 2026-10-07 实测：
+        #   error: failed to compile `cargo-audit v0.22.2`
+        #   rustc 1.93.1 is not supported by the following package:
+        #     kstring@2.0.5 requires rustc 1.96.0
+        # 于是这个 job 红在**安装工具**那一步，一条漏洞都没扫到。
+        #
+        # cargo-audit 是**开发工具**、不是本项目的产物：它的 MSRV 与本仓库的
+        # `rust-version`（1.91）无关，也不该被 pin 拖住。pin 保住的是「编出来的东西
+        # 与本地一致」，而这里编的是工具本身。
+        run: cargo +stable install cargo-audit
       
       - name: Run security audit
         working-directory: symbio

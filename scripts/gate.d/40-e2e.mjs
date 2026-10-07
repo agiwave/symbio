@@ -71,7 +71,13 @@ export default {
             failures.push(c.name)
             if (r.logFile) failedLogs.push(r.logFile)
             console.log(`      ✗ ${c.name}（详见日志）`)
-            if (ctx.ci !== true) console.log(dim(r.output.split('\n').slice(-6).join('\n      ')))
+            // ⚠️ 这行**原先带 `if (ctx.ci !== true)`**：本地打印、CI 不打印。
+            // 方向恰好反了——本地有 `.workbuddy-ai/gate-logs/` 可以打开，CI 上那个
+            // 目录在 runner 里、没人上传，于是「（详见日志）+ 一条本机路径」就是一条
+            // **零信息的红**。2026-10-07 首次在 v2-plan 上跑 CI 正是如此：42/42 全红，
+            // 日志里只有 42 个文件名，真正的原因（缺 `tauri/node_modules`）一行没露。
+            // 失败项才打印、只取末 6 行，撑不爆 CI 日志。
+            console.log(dim(r.output.split('\n').slice(-6).join('\n      ')))
           }
         }
         const note =

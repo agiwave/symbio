@@ -240,6 +240,115 @@ test('ci.yml：verify 阶段必须上 CI', () => {
   )
 })
 
+// ⚠️ 与上两条同族（**参数漏写 ⇒ 守卫静默降级**），只是换了个地方：
+// `30-docs.mjs` 调那 12 个守卫时若不传 `--strict`，它们的 **WARNING 级判定永远不红**
+// ——只剩 ERROR 会拦，而 WARNING 恰恰是「需要人看一眼」的那一类。于是它天天被打印、
+// 天天没人看，门禁却一路绿。
+//
+// 这不是假设：`doc-link-audit` 的文件头至今写着「2026-09-20 前失效链接只在 `--strict`
+// 下失败，而门禁从不带该参数 ⇒ **从未真的红过**」——同一个坑已经踩过一次。而参数漏写
+// 同样不报错、不变慢、本地复现不出来，只能靠断言钉住。
+test('gate：调 12 个守卫必须传 --strict，否则 WARNING 级判定永不红', () => {
+  const src = fs.readFileSync(path.join(repoRoot, 'scripts/gate.d', '30-docs.mjs'), 'utf8')
+  const m = src.match(/for \(const name of GUARDS\) \{[\s\S]*?args:\s*\[([^\]]*)\]/)
+  assert.ok(m, '没找到 GUARDS 的调用处——接线变了，这条断言要跟着改')
+  assert.match(
+    m[1],
+    /--strict/,
+    `GUARDS 调用没带 --strict ⇒ WARNING 只打印不判红（已踩过一次的坑）：args: [${m[1].trim()}]`,
+  )
+})
+
+// ── 首次真实 CI（2026-10-07，run 37629977724）暴露的四个配置缺口 ──────────────
+//
+// 这四条的共同点是：**缺口只在 CI 环境里存在，本机永远复现不出来**——本地 Windows
+// 不编 GTK、本地 `tauri/node_modules` 一直在、本地 1.93.1 编 cargo-audit 时依赖还没
+// 跑到需要 1.96、本地日志文件直接能打开。所以它们不会以"跑得慢"或"报错"的形式被人
+// 发现，只会以**红了但没人看得懂**或**绿了但根本没跑**的形式存在。四个都是实测，
+// 不是推演；断言钉住的是「改回去也照样红」。
+//
+// 取 job 块的方式：按两个 job 标记之间切片——ci.yml 的 job 键是两空格缩进，
+// 块内所有行都更深，因此 `^  <name>:` 是可靠的切点。
+// ⚠️ 必须**逐行**匹配而不是拼 `'\n  ' + name + ':\n'`：工作区是 CRLF
+// （`.gitattributes` 只钉了 `*.md/*.mjs/*.ts/*.vue`，`*.yml` 走 core.autocrlf），
+// 拼出来的模式在 `\r\n` 上**一个都匹配不到**，断言会以「找不到 job」的形式假红。
+function jobBlock(yml, fromJob, toJob) {
+  const idx = (name, from) => {
+    const m = yml.slice(from).match(new RegExp(`^ {2}${name}:\\s*$`, 'm'))
+    return m ? from + m.index : -1
+  }
+  const a = idx(fromJob, 0)
+  assert.ok(a >= 0, `ci.yml 里没有 job \`${fromJob}\`——守卫失效了`)
+  if (toJob == null) return yml.slice(a) // 末位 job（如 security-check）之后没有切点
+  const b = idx(toJob, a + 1)
+  assert.ok(b > a, `找不到 \`${fromJob}\` 之后的 job \`${toJob}\`——守卫失效了`)
+  return yml.slice(a, b)
+}
+function ciYml() {
+  return fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
+}
+
+test('ci.yml：e2e job 必须装 tauri 的 node 依赖，否则 42 例在 import 期全灭', () => {
+  const block = jobBlock(ciYml(), 'e2e-check', 'docs-validation')
+  assert.match(
+    block,
+    /working-directory:\s*tauri\s*\n\s*run:\s*npm ci\s*$/m,
+    // 缺了它：`e2e/helpers.mjs` 第 16 行 `import '../tauri/node_modules/ws/index.js'`
+    // 解析失败 ⇒ 每个用例 import 期 exit=1 ⇒ 实测「42/42 全红、每例 0s」，
+    // 与"用例本身坏了"同形。`frontend-checks` 有 `npm ci` 不代表这个 job 有。
+    'e2e job 没有在 tauri/ 跑 npm ci ⇒ 42 个用例全部在 import 期失败（与用例坏了同形）',
+  )
+})
+
+test('ci.yml：rust-checks 必须装 GTK 系统库，否则 workspace 编不过', () => {
+  const block = jobBlock(ciYml(), 'rust-checks', 'msrv-check')
+  assert.match(
+    block,
+    /libwebkit2gtk|libgtk-3-dev/,
+    // workspace 的 members 含 `tauri/src-tauri` ⇒ Linux 上 `gobject-sys` / `gtk-sys` /
+    // `webkit2gtk-sys` 都要跑 pkg-config。实测首红是
+    // 「Package gobject-2.0 was not found in the pkg-config search path」。
+    // 只装 openssl 是不够的：openssl 那步当时是绿的，红的是它后面的 GTK 链。
+    'rust-checks 没装 GTK/WebKit 开发库 ⇒ `cargo check --tests --workspace` 在第一个 sys crate 就红',
+  )
+})
+
+test('ci.yml：cargo-audit 不能用项目 pin 的工具链编（会红在装工具那一步）', () => {
+  const block = jobBlock(ciYml(), 'security-check', null)
+  assert.match(
+    block,
+    /cargo \+stable install cargo-audit/,
+    // `rust-toolchain.toml` 钉 1.93.1，裸 `cargo install` 会拿它去编 cargo-audit 的
+    // 依赖。实测：`kstring@2.0.5 requires rustc 1.96.0` ⇒ 安装 101 退出，
+    // 这个 job 红在**装工具**，一条漏洞都没扫到。
+    'cargo-audit 安装没显式指定项目之外的工具链 ⇒ 被 rust-toolchain.toml 的 pin 拖住，job 红在装工具',
+  )
+  assert.doesNotMatch(
+    block,
+    /^\s*run:\s*cargo install cargo-audit\s*$/m,
+    '裸 `cargo install cargo-audit` 会被仓库根的 rust-toolchain.toml 拿去编，实测失败',
+  )
+})
+
+test('gate：e2e 失败详情不能按 ci 模式关掉（CI 上日志文件看不到）', () => {
+  const src = fs.readFileSync(path.join(repoRoot, 'scripts/gate.d', '40-e2e.mjs'), 'utf8')
+  // 判据是**语句**不是字样：注释里可以（应当）记着这行代码曾经长什么样，
+  // 所以按 `ctx.ci !== true` 这种裸字样去 doesNotMatch 会被自己的注释打中。
+  assert.doesNotMatch(
+    src,
+    /^\s*if\s*\(\s*ctx\.ci/m,
+    // 本地有 `.workbuddy-ai/gate-logs/`，CI 上那个目录在 runner 里、没人上传 ⇒
+    // 「（详见日志）+ 一条本机路径」是一条零信息的红。方向恰好反了。
+    '40-e2e.mjs 又用 ctx.ci 做条件 ⇒ CI 红了但零信息',
+  )
+  // 关掉条件后打印语句必须还在，否则「整个删掉」也能让上一条通过。
+  assert.match(
+    src,
+    /console\.log\(dim\(r\.output\.split/,
+    '失败时没有把末 6 行打出来——断言要跟着改',
+  )
+})
+
 // ── cargoTestRatchet：两个独立 workspace 共用的「跑测试 + 通过数棘轮」 ──────
 //
 // 抽成共享函数就是为了让 `symbio` 与 `cli` 是**同一套判据**，所以这里钉的是
