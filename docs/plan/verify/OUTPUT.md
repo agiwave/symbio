@@ -1,8 +1,10 @@
 # 验证程序实测输出
 
-> 环境：rustc 1.98.1 (48a229cea 2026-09-01)
-> 命令：`rustc --edition 2021 <file>.rs -o <out> && ./<out>`
-> 全部 exit 0，零 error 零 warning。
+> 环境：最初实测于 rustc 1.98.1 (48a229cea 2026-09-01)；当前判据环境为 `rust-toolchain.toml` 的 1.93.1——
+> 由 `scripts/gate.d/55-verify.mjs`（CI job `verify-evidence`）每次 push 重新编译运行这 14 个程序、断言退出码，
+> 并以 `--cfg feature="should_not_compile"` 断言那 3 个反例**必须**编译不过。
+> **判据在那个阶段里，不在本文件**：本文只是某次实测的留存，陈旧不会让门禁变绿或变红——「快照不是事实来源」。
+> 命令：`rustc --edition 2021 <file>.rs -o <out> && ./<out>` → 全部 exit 0，零 error 零 warning。
 >
 > **共 14 个程序。** 其中 3 个（`projection_purity` / `latency_gate` / `conation_minimal`）
 > 额外带**编译期反向用例**：用
