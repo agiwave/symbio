@@ -195,6 +195,51 @@ test('ci.yml 里包含 facts 阶段的 gate 调用必须传 --ci', () => {
   }
 })
 
+// ⚠️ 下面两条钉的是**同一种失效模式：没有信号的漏跑**——漏跑时门禁与日志都一片绿，
+// 事后只能靠人记住「今天本该跑的没跑」。
+//
+// 2026-10-07 实测：触发分支只有 `[ main, master ]`，而 `v2-plan` 领先 `main` 80 个
+// 提交，`gh run list --branch v2-plan` **一条 run 都没有、也没有 PR**——1339 个 Rust
+// 单测、42 个 e2e、14 个守卫的绿灯**只存在于开发者本机**。这与 ci.yml 文件头记的
+// 「白名单漏掉 `*.css` ⇒ 四个 job 都不跑」是同一课的第二次：第一次漏的是文件类型，
+// 这次漏的是分支。
+//
+// 为什么只能靠断言：分支名单写错不报错、不变慢、本地复现不出来（本地跑 gate 与
+// CI 触发毫无关系）。且 `--ci` 只认这个命令行开关、**不读 `process.env.CI`**
+// （gate.mjs `const CI = hasFlag('--ci')`），所以连「CI 环境里会自动生效」的想当然
+// 都不成立。
+test('ci.yml：v2-plan 必须在 push 与 pull_request 的触发分支里，且保留手动触发', () => {
+  const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
+  const branchLines = yml.split('\n').filter((l) => /^\s*branches:\s*\[/.test(l))
+  assert.equal(
+    branchLines.length,
+    2,
+    `期望 push / pull_request 各一个 branches 行，实得 ${branchLines.length}——守卫失效了`,
+  )
+  for (const l of branchLines) {
+    assert.match(
+      l,
+      /v2-plan/,
+      `触发分支里没有 v2-plan ⇒ 该分支的 push 永远不触发 CI，且**没有任何提示**：${l.trim()}`,
+    )
+  }
+  // 手动触发是第三条路：分支不在名单里时，连补跑都做不到。
+  assert.match(yml, /^ {2}workflow_dispatch:/m, '没有 workflow_dispatch ⇒ 分支名写错时连手动补跑都不可能')
+})
+
+// verify 阶段是 `docs/plan/verify/` 那 14 个「架构证据」的自动化 runner（C29 兑现）。
+// 在此之前它们只能手敲 rustc 跑、结果抄进 OUTPUT.md 提交——**快照不是守卫**。
+// 少了这个 job，证据是否仍然成立取决于有没有人记得去手跑一遍。
+test('ci.yml：verify 阶段必须上 CI', () => {
+  const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
+  const calls = yml.split('\n').filter((l) => l.includes('gate.mjs') && !l.trim().startsWith('#'))
+  const verifyCalls = calls.filter((l) => /only=[^\s]*verify/.test(l))
+  assert.ok(
+    verifyCalls.length > 0,
+    '没有含 verify 阶段的 gate 调用 ⇒ 14 个验证程序退回「人手跑过一次」的状态',
+  )
+})
+
 // ── cargoTestRatchet：两个独立 workspace 共用的「跑测试 + 通过数棘轮」 ──────
 //
 // 抽成共享函数就是为了让 `symbio` 与 `cli` 是**同一套判据**，所以这里钉的是
@@ -205,13 +250,16 @@ const fakeCtx = (output, { ci = false, ok = true } = {}) => ({
   ci,
   run: async () => ({ ok, output, code: ok ? 0 : 1, timedOut: false }),
 })
-const ratchet = (output, opts, baseline = 10) =>
+const ratchet = (output, opts, { baseline = 10, ciBaseline } = {}) =>
   cargoTestRatchet(fakeCtx(output, opts), {
     label: 'cargo test',
     cwd: '.',
     args: ['test'],
     baseline,
     baselineName: 'rustTests',
+    // 关键：**不传就把这个键整个省掉**（而不是传 undefined 占位）——被测函数判的是
+    // `ciBaseline === undefined`，两种「没给」必须走同一条路径。
+    ...(ciBaseline === undefined ? {} : { ciBaseline, ciBaselineName: 'ciRustTestsTotal' }),
   })
 
 test('cargoTestRatchet：通过数等于基线 ⇒ 通过且无 note', async () => {
@@ -239,8 +287,49 @@ test('cargoTestRatchet：命令失败 ⇒ 判红并带退出码', async () => {
   assert.equal(r.ok, false)
   assert.match(r.note, /exit=1/)
 })
-test('cargoTestRatchet：CI 下只信退出码，不比对基线（1 个通过也过）', async () => {
-  const r = await ratchet('test result: ok. 1 passed; 0 failed', { ci: true }).run()
+// ── CI 分支：2026-10-07 从「只信退出码」改为与 `ciBaseline` 比对 ────────────
+//
+// 原实现是 `if (ctx.ci) return { ok: true }`（注释还写着「数字仅作信息展示」）——
+// **CI 这一侧从来没有棘轮**。本地删掉测试会被分包基线拦下，推上去 CI 却只信退出码，
+// 照样绿。这正是「测试失败」与「测试消失」的分界：后者**不留任何痕迹**，退出码恒为 0。
+// 而两条分支判据必须一致（抽成共享函数就是为了这个），否则本地与 CI 各自演化成两条规范。
+test('cargoTestRatchet：CI 全量等于基线 ⇒ 通过且无 note', async () => {
+  const r = await ratchet('test result: ok. 10 passed; 0 failed', { ci: true }, { ciBaseline: 10 }).run()
   assert.equal(r.ok, true)
   assert.equal(r.note, undefined)
+})
+test('cargoTestRatchet：CI 全量低于基线 ⇒ 判红（测试消失在 CI 也拦得住）', async () => {
+  const r = await ratchet('test result: ok. 10 passed; 0 failed', { ci: true }, { ciBaseline: 12 }).run()
+  assert.equal(r.ok, false)
+  assert.match(r.note, /10 < 基线 12/)
+})
+test('cargoTestRatchet：CI 全量高于基线 ⇒ 通过但提示同步基线', async () => {
+  const r = await ratchet('test result: ok. 11 passed; 0 failed', { ci: true }, { ciBaseline: 10 }).run()
+  assert.equal(r.ok, true)
+  assert.match(r.note, /基线待更新/)
+})
+// ⚠️ 这一条是本组的重点：**少写一个参数不该让守卫消失**。
+// 「退回只信退出码」是这条守卫唯一会**静默**失效的方式——调用方漏写 `ciBaseline`，
+// 不报错、不变慢、日志里只少一行字，CI 就此变回抓不住「测试消失」的状态。
+test('cargoTestRatchet：CI 模式缺 ciBaseline ⇒ 判红（省略参数不让棘轮消失）', async () => {
+  const r = await ratchet('test result: ok. 10 passed; 0 failed', { ci: true }).run()
+  assert.equal(r.ok, false)
+  assert.match(r.note, /缺 ciBaseline/)
+})
+// 解析不到 ⇒ 仍不判红，与本地同一口径（宁可漏报，也不因**解析**失败变红）。
+test('cargoTestRatchet：CI 解析不到通过数 ⇒ 通过并标注', async () => {
+  const r = await ratchet('no summary here', { ci: true }, { ciBaseline: 10 }).run()
+  assert.equal(r.ok, true)
+  assert.match(r.note, /未能解析/)
+})
+// CI 的实际输出形状是**多个测试目标各一行**，判据按求和而非首行——口径不同于本地
+// 分包（那条取首个 result 行）。求和算错会让 1347 这类基线判在错误的数上。
+test('cargoTestRatchet：CI 全量按各行求和（不是首行）', async () => {
+  const out = 'test result: ok. 7 passed; 0 failed\ntest result: ok. 3 passed; 0 failed'
+  const sum = await ratchet(out, { ci: true }, { ciBaseline: 10 }).run()
+  assert.equal(sum.ok, true)
+  assert.equal(sum.note, undefined)
+  const low = await ratchet(out, { ci: true }, { ciBaseline: 11 }).run()
+  assert.equal(low.ok, false)
+  assert.match(low.note, /10 < 基线 11/)
 })

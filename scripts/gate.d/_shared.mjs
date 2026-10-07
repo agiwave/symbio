@@ -692,7 +692,36 @@ export const BASELINE = {
   //      **e2e 1 条红**（`t42`，网格里 `task.opened` 0 格、`commitment.*` / `task.controlled` 全无）。
   //      `+1` = `v2_exec.test.rs::full_turn_lands_derived_commitment_facts`（出参通道 + 写方 +
   //      锚点一次钉死；e2e `t42` 另覆盖真工具成功 / 台账手术两条单测够不到的路径）。
-  rustTests: 1321,
+  //
+  // 2026-10-07 **回填 `1321 → 1339`（+18）**。这不是「又加了 18 个测试」的登记，而是
+  //      **基线欠账的清偿**：实测 `cargo test -p symbio` 首行 1339，而棘轮对「高于基线」
+  //      只打黄字（`⚠ 通过数 1339 > 基线 1321：请更新 BASELINE.rustTests`）——那条黄字
+  //      自 2026-10-06 起**每天都在打、每天都没人回填**，门禁照旧全绿。后果不是难看，
+  //      是**棘轮被削掉了 18 格**：删掉 18 个测试，1339−18 = 1321 = 基线，仍然绿。
+  //      溯源（`git diff 22360cb..HEAD --unified=0`）：+13 可定位到 `plugins/hook/
+  //      executor.test.rs` 首次接线（`#[path = "executor.test.rs"]` 与 `#[cfg(test)]`
+  //      同批出现）；**余下 5 条从 diff 定位不到来源**，如实记为未解释残差——可能是
+  //      基线设定当日即低于实际，不猜。下次触碰此格应查明并删掉这句。
+  rustTests: 1339,
+  /**
+   * CI 口径的 Rust 通过数（**只增不减**）——与上面三个分包基线**是不同口径，不能互替**。
+   *
+   * 为什么要单独一格：本地与 CI 跑的不是同一条命令。本地按 crate 分包
+   * `cargo test -p <pkg>`，每个包**各取首个** `test result: ok. N passed`（lib 目标，
+   * `ignored` 不计）；CI 跑一次 `cargo test --workspace`，输出是**所有测试目标各行求和**
+   * （含 cli / tauri / doctest 那几行）。所以 1347 = 1339 + 8 + 0 + 0，**不等于**三个
+   * 分包基线之和的口径语义（那里是「首个 result 行」，这里是「全部 ok 行求和」）。
+   *
+   * ⚠️ **这个格子是补上来的，不是一直有的**：`cargoTestRatchet` 的 CI 分支原先
+   * `return { ok: true }` ——「CI 跑全量……数字仅作信息展示」。于是 CI 这一侧
+   * **根本没有棘轮**：本地删测试会被 1321 这个数拦下，推上去 CI 却只信退出码，
+   * 照样绿。这与 ci.yml 漏掉 `v2-plan` 是同一课的第三次：**只信退出码**能抓住
+   * 「测试失败」，抓不住「测试消失」——后者不留任何痕迹。
+   *
+   * 1347 = 2026-10-07 实测 `cargo test --workspace` 的 4 行之和
+   * （1339 + 8 + 0 + 0，其中第 4 行是 doctest `0 passed; 7 ignored`）。
+   */
+  ciRustTestsTotal: 1347,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *
@@ -974,6 +1003,28 @@ export const BASELINE = {
   //         （否则重启就失效）、旧数据缺键 ⇒ 落出厂值 `true`（不因缺字段退化成单列）。
   vitestFiles: 54,
   vitestTests: 847,
+  /**
+   * `docs/plan/verify/` 的**验证程序数**（棘轮，只许涨）——见 `gate.d/55-verify.mjs`。
+   *
+   * 为什么这个数也要棘轮：这些程序是 v2 方案的"硬证据"（`docs/plan/README.md §4`），
+   * 而**少跑一跑在日志里与"全绿"长得一模一样**。程序被删掉时没有编译错误、没有
+   * 测试失败、没有任何红灯——证据凭空消失而门禁照旧 51/51。数量是唯一能看见它的信号。
+   *
+   * 14 = `docs/plan/README.md §4` 的表（逐个核对过文件名），2026-10-07 实测 14/14 通过。
+   */
+  verifyPrograms: 14,
+  /**
+   * 带 `should_not_compile` 的**反例程序数**（棘轮，只许涨）——同上。
+   *
+   * 比 `verifyPrograms` 更要紧的一条：反例能力写在**源码里**（`55-verify.mjs` 读
+   * `hasNegative` 自行发现，不维护名单）。把某个文件里的 `should_not_compile` 摘走，
+   * 对应的 C29 那一跑就**凭空消失**，日志变短、其余全绿——这正是 C29 存在的理由
+   * 所要防的那件事（`04 §4`：无法区分"真的强制"与"恰好没写错"）。
+   *
+   * 3 = `projection_purity` / `latency_gate` / `conation_minimal`（`README §4` 与
+   * `03 §5.1` 同口径），2026-10-07 实测三个反例档均以 `error[E…]` 非 0 退出。
+   */
+  verifyNegatives: 3,
 }
 
 export const VITEST_TIMEOUT_MS = 180_000
@@ -1013,6 +1064,10 @@ export function sumInt(output, re) {
  * - 高于基线 ⇒ 通过，但打印提示要求同步基线（那是刻意要人看一眼的地方）；
  * - 解析不到通过数 ⇒ 通过但标注 —— 宁可漏报，也不因为**解析**失败把门禁变红。
  *
+ * **CI 分支同样有棘轮**（2026-10-07 补上，此前是 `return { ok: true }`）：靠 `ciBaseline`
+ * 这一格，口径是 `--workspace` **各行求和**，与下面的本地口径不同。调用方在 CI 模式
+ * **必须**传它——不传不降级、直接判红，理由见函数体内注释：省略参数不该让守卫消失。
+ *
  * **口径（本地分包时）**：取输出里**第一个** `test result: ok. N passed`——那是 lib
  * 目标的**通过数**（`cargo test -p <pkg>` 先跑 lib，再跑集成测试 / doctest）。所以基线
  * 是「通过数」**不是「用例总数」**：`ignored` 的不计入（实测 `symbio` lib 总 1299、
@@ -1021,7 +1076,7 @@ export function sumInt(output, re) {
  * 自定义任务而非声明式命令：同一次运行既判退出码又解析通过数，
  * 避免为了拿输出再跑一遍测试。
  */
-export function cargoTestRatchet(ctx, { label, cwd, args, baseline, baselineName }) {
+export function cargoTestRatchet(ctx, { label, cwd, args, baseline, baselineName, ciBaseline, ciBaselineName }) {
   return {
     label,
     run: async () => {
@@ -1031,9 +1086,40 @@ export function cargoTestRatchet(ctx, { label, cwd, args, baseline, baselineName
         return { ok: false, note, logFile: r.logFile }
       }
       if (ctx.ci) {
-        // CI 跑全量（含集成测试）：每个测试目标各打一行 ⇒ 求和；数字仅作信息展示
+        // ⚠️ **没给 `ciBaseline` ⇒ 判红**，而不是退回「只信退出码」。
+        //
+        // 退回是这条守卫唯一会**静默**失效的方式：调用方少写一个参数，CI 就变回
+        // 只抓「测试失败」、抓不住「测试消失」——后者不留任何痕迹（本地 1339 与基线
+        // 比，CI 却只是求和打印一行数字）。宁可让漏写的人当场看见红，也不要一个
+        // 只亮绿灯的检查项。真要「这个 crate 在 CI 没有可比基线」，显式传 `ciBaseline: 0`，
+        // 那是**声明**，不是省略。
+        if (ciBaseline === undefined) {
+          return {
+            ok: false,
+            note: 'CI 模式缺 ciBaseline ⇒ 本轮次没有棘轮（调用方少写了一个参数）',
+            logFile: r.logFile,
+          }
+        }
+        // CI 跑一次 `--workspace`：输出是**所有测试目标各行求和**，与本地分包「各取
+        // 首个 result 行」不是同一个口径（见 `BASELINE.ciRustTestsTotal`）。
         const total = sumInt(r.output, /test result: ok\. (\d+) passed/)
-        if (total !== null) console.log(`      ${total} passed（--workspace 全量；只信退出码）`)
+        if (total === null) return { ok: true, note: '未能解析通过数（--workspace 全量；只信退出码）' }
+        if (total < ciBaseline) {
+          return {
+            ok: false,
+            note: `CI 全量 ${total} < 基线 ${ciBaseline}（有测试被删或失败）`,
+            logFile: r.logFile,
+          }
+        }
+        if (total > ciBaseline) {
+          console.log(
+            yellow(
+              `      ⚠ CI 全量 ${total} > 基线 ${ciBaseline}：请更新 scripts/gate.d/_shared.mjs 的 BASELINE.${ciBaselineName ?? baselineName}`,
+            ),
+          )
+          return { ok: true, note: `CI 全量 ${total}（基线待更新）` }
+        }
+        console.log(`      ${total} passed（CI 全量，基线 ${ciBaseline}）`)
         return { ok: true }
       }
       const passed = grabInt(r.output, /test result: ok\. (\d+) passed/)

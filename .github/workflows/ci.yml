@@ -15,8 +15,17 @@ name: CI
 # 若 CI 时长成为问题，正确做法是**拆出独立的 docs 工作流**（按 `docs/**` 触发），
 # 而**不是**退回白名单——那只会把漏跑的风险再请回来。
 on:
+  # 2026-10-07：`v2-plan` 加入触发分支。
+  #
+  # 起因是一次**没有信号的漏跑**：在此之前这里只有 `[ main, master ]`，而
+  # `v2-plan` 领先 `main` 80 个提交、却连**一次 workflow run 都没有**
+  # （`gh run list --branch v2-plan` 为空、无 PR）——1339 个 Rust 单测、42 个 e2e、
+  # 14 个守卫的绿灯**只存在于开发者本机**。这与本文件头部「漏跑的代价远大于多跑」
+  # 是同一条教训的第二次出现：第一次漏的是文件类型，这次漏的是分支。
+  #
+  # `workflow_dispatch` 是第三条路（当前没有）：分支不在名单里时，连手动补跑都做不到。
   push:
-    branches: [ main, master ]
+    branches: [ main, master, v2-plan ]
     paths-ignore:
       # 构建 / 依赖 / 日志等产出目录。它们目前都未被 git 跟踪（见 .gitignore），
       # 列出是防御性的：一旦将来被误纳入版本控制，也不会白白触发全量 CI。
@@ -27,7 +36,9 @@ on:
       - 'tauri/.vbuild*/**'
       - '.workbuddy-ai/**'
   pull_request:
-    branches: [ main, master ]
+    # 这里是**目标**分支：`v2-plan → main` 的 PR 命中 `main`，早已会跑；
+    # 列上 `v2-plan` 是为了反向的 `feat/… → v2-plan` 这类评审也照样被验证。
+    branches: [ main, master, v2-plan ]
     paths-ignore:
       - '**/node_modules/**'
       - '**/target/**'
@@ -35,6 +46,7 @@ on:
       - '**/coverage/**'
       - 'tauri/.vbuild*/**'
       - '.workbuddy-ai/**'
+  workflow_dispatch:
 
 jobs:
   # 提交信息规范：与本机 `git config core.hooksPath scripts/git-hooks` 同一套判据
@@ -152,6 +164,30 @@ jobs:
 
       - name: MSRV gate
         run: node scripts/gate.mjs --only=msrv
+
+  # 架构证据验证：`docs/plan/verify/` 的 14 个程序**自己证明自己**。
+  #
+  # 这批程序是 v2 方案对外声称的"硬证据"（`docs/plan/README.md §4`），此前只能
+  # 手敲 rustc 跑一遍、结果抄进 `OUTPUT.md` 提交——**快照不是守卫**，没有任何东西
+  # 保证它明天还绿。更关键的是 C29：3 个程序带 `should_not_compile`，声称"投影纯度 /
+  # 时延闸门 / 欲的最小形态是编译期强制"。**强制本身必须有反向用例**（验证纪律第 4 条），
+  # 否则无法区分"真的强制"与"恰好没写错"。检查逻辑在 gate.mjs 的 verify 阶段，
+  # 此处不重抄。
+  #
+  # 不装额外工具链：`rust-toolchain.toml` 钉了 1.93.1，rustup 在仓库内任何子目录
+  # 调 `rustc` 都会自动解析并取用它——在此硬编码版本号会造出第二个真相源。
+  verify-evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Verify gate（14 个验证程序 + 3 个编译期反例）
+        run: node scripts/gate.mjs --only=verify --ci
 
   # 前端代码质量检查 (如果存在前端构建工具)
   frontend-checks:

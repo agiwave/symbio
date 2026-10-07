@@ -46,13 +46,18 @@ export default {
     })
     tasks.push({ label: 'cargo check --tests --workspace', cmd: 'cargo', args: ['check', '--tests', '--workspace'], cwd: backendDir })
 
-    // 测试：CI 跑一次 `--workspace` 全量（只信退出码、求和打印）；本地按 crate 分包比对基线。
+    // 测试：CI 跑一次 `--workspace` 全量（求和**并比对 CI 口径基线**）；本地按 crate 分包比对基线。
     if (ctx.ci) {
       tasks.push(
         cargoTestRatchet(ctx, {
           label: 'cargo test --workspace（全量）',
           cwd: backendDir,
           args: ['test', '--workspace'],
+          // 与下面分包的 `baseline` **不是同一个口径**：`--workspace` 是所有测试目标
+          // 各行求和，分包是各取首个 result 行。不给 `ciBaseline` 会直接判红（见
+          // `cargoTestRatchet`）——那不是麻烦，是让「CI 没有棘轮」这件事不可能再静默发生。
+          ciBaseline: BASELINE.ciRustTestsTotal,
+          ciBaselineName: 'ciRustTestsTotal',
           baseline: BASELINE.rustTests,
           baselineName: 'rustTests',
         }),
