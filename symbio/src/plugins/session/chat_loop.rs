@@ -39,6 +39,7 @@
 
 mod compose;
 mod decide;
+mod delegate;
 mod inputs;
 mod io;
 mod progress;

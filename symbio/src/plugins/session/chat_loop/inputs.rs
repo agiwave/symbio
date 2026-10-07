@@ -98,7 +98,7 @@ pub(crate) struct TurnInputs {
 /// 使查询成为可观开销，或需要"一次请求内人格与工具集冻结"），**必须两者一起提升**，
 /// 不允许只提升其一。
 ///
-/// ## 本步内的顺序（与收口前逐条对齐，语义不变）
+/// ## 本步内的顺序（1–5 与收口前逐条对齐，语义不变；6 为 [ADR-047](../../../../../docs/decisions/session.md) 新增）
 ///
 /// 1. 系统提示词 + 工具（同函数、同一时刻）
 /// 2. 派生请求级开销 `overhead_tokens`（口径：**不含**下面条件注入的
@@ -107,7 +107,9 @@ pub(crate) struct TurnInputs {
 /// 4. Turn 根节点流式占位（**必须在压缩之后**：压缩失败时不留半截 Turn 节点）
 /// 5. 长期记忆召回（S5 步 12：跨会话读视图 → 置顶注入请求视图；只在本轮**第一个**
 ///    工具轮取一次，后续工具轮复用同一份视图）
-/// 6. 请求视图重建（`build_request_view` 唯一入口）
+/// 6. 委派者真源段（Q1 判定 + Q2 能力目录）：**在①②把 `tools` 收集成形之后**才动笔
+///    ——这是 ADR-047 的注入点约束本身，见 [`delegate`] 模块头
+/// 7. 请求视图重建（`build_request_view` 唯一入口）
 pub(crate) async fn prepare_turn_inputs(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn PluginInvokeRequest>,
@@ -236,6 +238,22 @@ pub(crate) async fn prepare_turn_inputs(
     // 4) nudge：水位提醒请求级注入（不落库、不占轮次窗口的 User 计数）；
     // 5) 长期记忆：置顶注入（不落库；位置与理由见 build_request_view 文档第 5 条）；
     // 6) 任务调度段：就绪任务集置顶注入（不落库；见 build_request_view 文档第 6 条）。
+    // 7) 委派者真源段：Q1 判定 + Q2 能力目录（不落库；见 build_request_view 文档第 7 条）。
+
+    // ── ⑥′ 委派者真源段（ADR-047）：Q1 判定 + Q2 能力目录 ─────────────────────
+    //
+    // **位置即约束**：能力目录必须在 ①② 把 `tools` 收集成形**之后**才动笔——收集是
+    // 广播，遍历期取集合必然漏掉还没被访问到的兄弟插件（静默、且漏哪几项次次不同）。
+    // 这里取的是本轮**最终**发给模型的同一份 `tools`（含 ② 里 push 的压缩工具）
+    // ⇒ 同源，不构成第二份真相。
+    //
+    // Q1 的输入取 `turn.input_utterance`（循环**前**锚定的 `(消息 id, 正文)`）⇒
+    // 同一请求内不随工具轮变化，判定不漂移；`None` = resume / 心跳这类没有用户新
+    // 发言的请求，判决无从谈起（与判决侧「None 根本不进判决」同一条口径）。
+    let delegate_section = delegate::delegate_section(
+        turn.input_utterance.as_ref().map(|(_, text)| text.as_str()),
+        &tools,
+    );
     let retention: HashMap<String, crate::symbio_core::CapabilityToolContextRetention> = tools
         .iter()
         .filter_map(|t| {
@@ -259,6 +277,8 @@ pub(crate) async fn prepare_turn_inputs(
         recall_section.as_deref(),
         // 调度段（S7 步 16–17，批⑨）：就绪任务集，非空时置顶一条 `meta.kind = readyset`。
         turn.ready_section.as_deref(),
+        // 委派者真源段（ADR-047）：Q1 判定 + Q2 能力目录，落 index 2。
+        delegate_section.as_deref(),
         // 可见域入口（plan/11 批1 ③）：本会话主体之外的发言不进本次请求。
         Some(context.principal.as_str()),
     );

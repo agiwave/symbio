@@ -203,6 +203,12 @@ const CONTEXT_NUDGE_TEXT: &str =
 ///    单独存在时各自在 0）。
 ///    它给的是 `readyset` 投影的**候选集**，不是替模型决定做哪件事——选哪一个是
 ///    执行者的选择（`projection::readyset` 模块头的边界）。
+/// 7. 委派者真源段（[ADR-047](../../../docs/decisions/session.md)）：
+///    `delegate_section` 非空时插一条 `meta.kind = delegate_context`，落 **index 2**。
+///    插入次序是判据的一部分：本段在 `ready_section` **之前**插，于是记忆 0 /
+///    就绪 1 / 委派 2（记忆段最后插的那个 0 会把两者依次下推）；顺序反了会把
+///    三段的位置全部改掉，而段位置是模型读到的上下文次序的一部分——
+///    换一段就换一次上下文次序，同一会话的两次请求不再可比。
 ///
 /// 以及第 0 步（在一切裁剪之前）：**可见域**（`viewer`，[plan/11 批 1](../../../docs/plan/11-多执行器与多主体加固实施方案.md)
 /// ③ 的请求侧入口）。`None` = 不过滤，与接线前逐字一致；`Some(会话主体)` = 别的
@@ -210,9 +216,9 @@ const CONTEXT_NUDGE_TEXT: &str =
 /// 是「还没接线」，不是「不让人看」——见 [`ChatMessage::principal`]）。两条链各滤一次：
 /// 请求侧滤消息、运行器侧（`window_by_turn`）滤事件，判据同一条（`visible_to`）。
 ///
-/// 视图每轮从存储重建，七个步骤天然幂等，不存在重复存档 / 重复注入问题。
+/// 视图每轮从存储重建，八个步骤天然幂等，不存在重复存档 / 重复注入问题。
 /// 全部压缩由此统一收敛于"发给大模型之前"（写入时压缩已废除，落库恒为原文）。
-// 11 个参数均为单一调用点（chat_loop）传入的独立语义旋钮，强行打包成
+// 12 个参数均为单一调用点（chat_loop）传入的独立语义旋钮，强行打包成
 // config struct 只会多一层间接而无行为收益，故显式豁免 clippy 参数数上限。
 #[allow(clippy::too_many_arguments)]
 pub fn build_request_view(
@@ -229,6 +235,7 @@ pub fn build_request_view(
     inject_nudge: bool,
     recall_section: Option<&str>,
     ready_section: Option<&str>,
+    delegate_section: Option<&str>,
     viewer: Option<&str>,
 ) -> Vec<ChatMessage> {
     let mut view: Vec<ChatMessage> = messages
@@ -253,6 +260,23 @@ pub fn build_request_view(
             meta: Some(serde_json::json!({ "kind": "context_nudge" })),
             ..Default::default()
         });
+    }
+    // 7) 委派者真源段落 index 2（ADR-047）——**必须在第 6 条之前**插：本段先插 0，
+    //    ready 段再插 0 把本段挤到 1，最后记忆段插 0 把两者依次推到 1 / 2。
+    //    三段共用同一套形状（请求级、`meta.kind` 可观测、不落库），只差 kind 与位置。
+    if let Some(section) = delegate_section {
+        view.insert(
+            0,
+            ChatMessage {
+                id: uuid::Uuid::new_v4().to_string(),
+                role: Some(MessageRole::User),
+                msg_type: Some(MessageType::Text),
+                content: Some(MessageContent::Text(section.to_string())),
+                status: Some(MessageStatus::Completed),
+                meta: Some(serde_json::json!({ "kind": "delegate_context" })),
+                ..Default::default()
+            },
+        );
     }
     // 6) 任务调度段置顶（S7 步 16–17，批⑨）——先插本段，第 5 条的记忆段随后再插
     //    一次 0 把它挤到 index 1（见本函数文档第 6 条：记忆段的置顶不被本段改掉）。
