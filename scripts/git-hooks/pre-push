@@ -1,0 +1,26 @@
+#!/bin/sh
+#
+# pre-push — 推送前挡住 `docs/CURRENT.md` 漂移（事实文件必须与代码同批再生成）
+#
+# 启用（一次性，本机生效）：
+#   git config core.hooksPath scripts/git-hooks
+#
+# 为什么需要它：`CURRENT.md` 由 `scripts/gen-current-facts.mjs` 从代码提取，改了插件 /
+# 挂载点 / 路由 / 配置 / 测试数就必须重新生成。**漏了不会有任何报错**——表照常渲染，
+# 只是内容是旧的，而这份文件自称「每次重生成，不会漂移」，于是它漂移得最理直气壮。
+#
+# 2026-10-07 复查到的实际形态：`CURRENT.md` 连续 3 个提交没跟上代码，而两层守卫当时
+# **都断着**——本机 `core.hooksPath` 又被清空（2026-09 才装上过，见
+# `docs/archive/guard-and-adr-health-check-2026-09.md`），CI 又只认 `main`/`master`。
+# 这条钩子是第二层；第一层是 CI 的 `--only=docs,facts --ci`（那一层不依赖任何人记得装）。
+#
+# 为什么带 `--ci`：CI 模式下 facts 阶段**不自动修复、有差异即报红**；本地模式它会
+# 自动改写并暂存——在推送点替人暂存 = 替人决定哪些改动进本次提交（改动可能还没被审过）。
+# 所以这里只报红，修复交给人：`node scripts/gate.mjs --only=facts`（会生成并暂存）。
+#
+# 耗时实测 0.3s（只重生成 + 比对，不编译、不跑测试）。
+# 想跳过某一次：git push --no-verify
+#
+# ⚠️ 本文件需在 git 里有执行位：git update-index --chmod=+x scripts/git-hooks/pre-push
+
+node scripts/gate.mjs --only=facts --ci

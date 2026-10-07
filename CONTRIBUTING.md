@@ -132,6 +132,13 @@ CI（[.github/workflows/ci.yml](./.github/workflows/ci.yml)）跑的是**同一�
 git config core.hooksPath scripts/git-hooks   # 本机：写提交时即时拦
 ```
 
+钩子目录里有两个，**判据各不相同**：
+
+| 钩子 | 拦什么 | 为什么是它 |
+|---|---|---|
+| `commit-msg` | 提交信息格式 | 规范判据在 `scripts/check-commit-msg.mjs`，钩子只是入口 |
+| `pre-push` | `docs/CURRENT.md` 漂移 | 事实表由代码提取，漏了重新生成**不报错、只变旧**；它带 `--ci` ⇒ 只判红不代改（不在推送点替人暂存）。实测 0.3s |
+
 CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐个判一遍
 （判据只有脚本里那一处，两边不重抄）。
 
