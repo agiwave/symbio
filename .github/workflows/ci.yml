@@ -318,6 +318,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # baseline 阶段读的是**上一版** `BASELINE`（`git show <ref>:…`）；默认浅克隆只有
+          # 一个提交 ⇒ 它在这里恒走「诚实跳过」，日志一片绿而守卫等于没跑。
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -335,7 +339,7 @@ jobs:
         # 的确定性机械工作，本地跑会「自动修复 + 暂存」，而 CI 无法提交、只能判红。
         # 少了 `--ci`，这一步就退化成「修复完静默放过漂移」——一个只亮绿灯的检查项。
         # 回归测试 scripts/gate.d/_shared.test.mjs 断言了这一行必须带 `--ci`。
-        run: node scripts/gate.mjs --only=docs,facts --ci
+        run: node scripts/gate.mjs --only=docs,facts,baseline --ci
         continue-on-error: false
 
       - name: Check for obvious documentation issues

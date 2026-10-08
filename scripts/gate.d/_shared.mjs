@@ -2,8 +2,9 @@
 //
 // ## 基线只增不减
 //
-// 通过数低于基线即失败；高于基线时提示更新本表 —— 那是刻意要人看一眼的地方。
-// 每次上调都要在这里留一句「为什么」。
+// 三态判定只有**一处**定义（`ratchetVerdict`）：低于基线红、高出但在 `BASELINE_GRACE`
+// 内黄字提示、超出容差红；`BASELINE` 本身被下调由 `gate.d/35-baseline.mjs` 判红。
+// 每次动基线都要在这里留一句「为什么」。
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -1051,6 +1052,187 @@ export const BASELINE = {
   verifyNegatives: 3,
 }
 
+/**
+ * 棘轮的**回填容差**：实测高出基线、差值在此格数以内只提示，超出即判红。
+ *
+ * 为什么要有上限：「高于基线」不是无害的——基线不跟着涨，删掉同样多的测试仍然全绿，
+ * 棘轮就被削掉了同样的格数。而提示是可以被无限忽略的（日志天天有、门禁天天绿），
+ * 所以容差的作用是给「正常的一次提交里先加测试再回填」留出余量，**红才是回填的判据**。
+ */
+export const BASELINE_GRACE = 5
+
+/**
+ * 棘轮三态判定的**唯一定义**——所有棘轮（本地 / CI / verify）共用一条判据，
+ * 各自决定红不红必然演化成两套口径。
+ *
+ * | 实测 vs 基线 | 结论 |
+ * |---|---|
+ * | 低于 | 红：有测试或证据被移除（棘轮存在的唯一理由） |
+ * | 高出但在 `BASELINE_GRACE` 内 | 绿 + `warn`：提示回填 |
+ * | 高出且超出容差 | 红：没回填的基线等于没有棘轮 |
+ * | 等于 | 绿，无 note |
+ *
+ * `kind` / `unit` 只影响措辞，不影响判定。
+ */
+export function ratchetVerdict({ actual, baseline, name, kind = '通过数', unit = '测试' }) {
+  if (actual < baseline) {
+    return { ok: false, note: `${kind} ${actual} < 基线 ${baseline}（有${unit}被删或失败）` }
+  }
+  if (actual > baseline + BASELINE_GRACE) {
+    return {
+      ok: false,
+      note: `${kind} ${actual} > 基线 ${baseline}：超出回填容差 ${BASELINE_GRACE} ⇒ 更新 BASELINE.${name}`,
+    }
+  }
+  if (actual > baseline) return { ok: true, warn: true, note: `${kind} ${actual}（基线待更新）` }
+  return { ok: true }
+}
+
+/**
+ * BASELINE 的**只增**判据：当前值只要低于任一基准版本里的值，就是削判据。
+ *
+ * `BASELINE` 是源码常量，而它是「有测试被删就红」这条判据本身——把它改小不需要动
+ * 任何测试、任何守卫代码，门禁照样全绿，且**不留痕迹**（与「测试消失」同形）。
+ *
+ * **基准是「触碰过该文件的最近两个版本」，不是分支根**：远历史里基线本来就低，拿它比
+ * 会让每一跑都红，于是豁免被喂到失效；只比最近一版又漏掉「已经提交的那次下调」。
+ * 两版足够让**下调发生的当次**变红，无论它还在工作区还是已进 HEAD。
+ */
+export function baselineErosion(currentText, baseTexts) {
+  const current = parseBaselineCells(currentText)
+  const waived = new Set(baselineWaivers(currentText).keys())
+  const worst = new Map()
+  for (const { ref, text } of baseTexts) {
+    for (const [key, from] of parseBaselineCells(text)) {
+      const to = current.get(key)
+      if (to !== undefined && to >= from) continue
+      const hit = worst.get(key)
+      if (hit && hit.from >= from) continue
+      worst.set(key, { key, from, to: to ?? null, waived: waived.has(key), source: ref })
+    }
+  }
+  return [...worst.values()]
+}
+
+/**
+ * 已登记的基线豁免（键 → 理由）。豁免形态与 `dead-code-allow R-002: 理由` 同一条
+ * 约定：**理由非空**，否则不算豁免——空理由的豁免等于没有判据。
+ */
+export function baselineWaivers(text) {
+  const out = new Map()
+  for (const m of text.matchAll(/^ {0,2}\/\/ baseline-allow ([A-Za-z][A-Za-z0-9_]*): (\S[^\n]*)$/gm)) {
+    out.set(m[1], m[2].trim())
+  }
+  return out
+}
+
+/**
+ * 从 `_shared.mjs` 源码文本里取出 BASELINE 的数值格。
+ *
+ * 只认对象体内的 `  键: 数字,` 一种形状，且**只扫对象体**——不然注释里那句
+ * 「回填 `1339 → 1341`」这类文本会被当成一格，而它描述的恰恰是历史值。
+ */
+export function parseBaselineCells(text) {
+  const norm = text.replace(/\r\n/g, '\n')
+  const start = norm.indexOf('export const BASELINE = {')
+  const cells = new Map()
+  if (start < 0) return cells
+  const body = norm.slice(start)
+  const end = body.indexOf('\n}')
+  const lines = (end < 0 ? body : body.slice(0, end)).split('\n')
+  for (const line of lines) {
+    const m = /^ {2}([A-Za-z][A-Za-z0-9_]*): (-?\d+),$/.exec(line)
+    if (m) cells.set(m[1], Number(m[2]))
+  }
+  return cells
+}
+
+/**
+ * 解析脚本里的判据码声明（`@ns` 命名空间 / `@codes` 本脚本判的号）。
+ *
+ * 声明**只认行注释形态**，写在文件头之后——登记表的唯一真源是这些行，
+ * `docs/reference/GATE_CODES.md` 由它们生成（`gen-gate-codes.mjs`）。
+ */
+export function parseGateCodeDecls(text) {
+  const ns = new Map()
+  const codes = new Map()
+  for (const m of text.matchAll(/^ *\/\/ @ns ([A-Z]{1,4}) (\S[^\n]*)$/gm)) {
+    ns.set(m[1], m[2].trim())
+  }
+  for (const m of text.matchAll(/^ *\/\/ @codes ((?:[A-Z]{1,4}-\d{3}\s*)+)$/gm)) {
+    for (const code of m[1].trim().split(/\s+/)) codes.set(code, code.slice(0, code.indexOf('-')))
+  }
+  return { ns, codes }
+}
+
+/** 正则字面量可以出现在这些字符之后（其余情况下 `/` 是除号，不是正则的开头） */
+const REGEX_PRECEDERS = new Set([
+  '', '(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*', '%', '~', '^', '<', '>',
+])
+
+/**
+ * 取一段 JS 源码里所有**字符串字面量的内容**，注释一律排除。
+ *
+ * 为什么只要字符串：判据码被「用到」的唯一硬形态是它出现在输出语句里；注释里的
+ * 「原 E-010 已退役」讲的是历史，要求它进登记表就把叙述当成了事实——而这类叙述
+ * 在头注释里成段存在，误报会直接把守卫喂成豁免。
+ */
+export function stringLiteralsOf(src) {
+  const out = []
+  let i = 0
+  let last = ''
+  while (i < src.length) {
+    const c = src[i]
+    const d = src[i + 1]
+    if (c === '/' && d === '/') {
+      const nl = src.indexOf('\n', i)
+      i = nl < 0 ? src.length : nl + 1
+      continue
+    }
+    if (c === '/' && d === '*') {
+      const end = src.indexOf('*/', i + 2)
+      i = end < 0 ? src.length : end + 2
+      continue
+    }
+    if (c === '/' && REGEX_PRECEDERS.has(last)) {
+      i++
+      let inClass = false
+      while (i < src.length && src[i] !== '\n') {
+        if (src[i] === '\\') {
+          i += 2
+          continue
+        }
+        if (src[i] === '[') inClass = true
+        else if (src[i] === ']') inClass = false
+        else if (src[i] === '/' && !inClass) break
+        i++
+      }
+      last = '/'
+      i++
+      continue
+    }
+    if (c === '"' || c === "'" || c === '`') {
+      let j = i + 1
+      while (j < src.length) {
+        if (src[j] === '\\') {
+          j += 2
+          continue
+        }
+        if (src[j] === c) break
+        if (c !== '`' && src[j] === '\n') break
+        j++
+      }
+      out.push(src.slice(i + 1, j))
+      last = c
+      i = j + 1
+      continue
+    }
+    if (!/\s/.test(c)) last = c
+    i++
+  }
+  return out
+}
+
 export const VITEST_TIMEOUT_MS = 180_000
 
 /** cargo 的进度噪音（刷屏且无信息量） */
@@ -1128,43 +1310,32 @@ export function cargoTestRatchet(ctx, { label, cwd, args, baseline, baselineName
         // 首个 result 行」不是同一个口径（见 `BASELINE.ciRustTestsTotal`）。
         const total = sumInt(r.output, /test result: ok\. (\d+) passed/)
         if (total === null) return { ok: true, note: '未能解析通过数（--workspace 全量；只信退出码）' }
-        if (total < ciBaseline) {
-          return {
-            ok: false,
-            note: `CI 全量 ${total} < 基线 ${ciBaseline}（有测试被删或失败）`,
-            logFile: r.logFile,
-          }
-        }
-        if (total > ciBaseline) {
+        const v = ratchetVerdict({
+          actual: total,
+          baseline: ciBaseline,
+          name: ciBaselineName ?? baselineName,
+          kind: 'CI 全量',
+        })
+        if (v.warn) {
           console.log(
             yellow(
-              `      ⚠ CI 全量 ${total} > 基线 ${ciBaseline}：请更新 scripts/gate.d/_shared.mjs 的 BASELINE.${ciBaselineName ?? baselineName}`,
+              `      ⚠ ${v.note}：见 scripts/gate.d/_shared.mjs 的 BASELINE.${ciBaselineName ?? baselineName}`,
             ),
           )
-          return { ok: true, note: `CI 全量 ${total}（基线待更新）` }
+        } else if (v.ok) {
+          console.log(`      ${total} passed（CI 全量，基线 ${ciBaseline}）`)
         }
-        console.log(`      ${total} passed（CI 全量，基线 ${ciBaseline}）`)
-        return { ok: true }
+        return { ...v, logFile: r.logFile }
       }
       const passed = grabInt(r.output, /test result: ok\. (\d+) passed/)
       if (passed === null) return { ok: true, note: '未能解析通过数' }
-      if (passed < baseline) {
-        return {
-          ok: false,
-          note: `通过数 ${passed} < 基线 ${baseline}（有测试被删或失败）`,
-          logFile: r.logFile,
-        }
+      const v = ratchetVerdict({ actual: passed, baseline, name: baselineName })
+      if (v.warn) {
+        console.log(yellow(`      ⚠ ${v.note}：见 scripts/gate.d/_shared.mjs 的 BASELINE.${baselineName}`))
+      } else if (v.ok) {
+        console.log(`      ${passed} passed（基线 ${baseline}）`)
       }
-      if (passed > baseline) {
-        console.log(
-          yellow(
-            `      ⚠ 通过数 ${passed} > 基线 ${baseline}：请更新 scripts/gate.d/_shared.mjs 的 BASELINE.${baselineName}`,
-          ),
-        )
-        return { ok: true, note: `通过数 ${passed}（基线待更新）` }
-      }
-      console.log(`      ${passed} passed（基线 ${baseline}）`)
-      return { ok: true }
+      return { ...v, logFile: r.logFile }
     },
   }
 }

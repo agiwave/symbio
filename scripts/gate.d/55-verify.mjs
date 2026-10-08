@@ -26,7 +26,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow } from '../color.mjs'
-import { BASELINE } from './_shared.mjs'
+import { BASELINE, ratchetVerdict } from './_shared.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -76,25 +76,35 @@ export default {
 
     // 棘轮（只许涨）：**数量本身也是判据**。程序被人删掉、或某个文件里的
     // `should_not_compile` 被摘走时，"少跑一跑"在日志里与"全绿"长得一模一样——
-    // C29 存在的理由正是不接受这种静默。跑高了只提示同步基线（与
-    // `cargoTestRatchet` 同口径），跑低了才判红。
+    // C29 存在的理由正是不接受这种静默。三态判定走 `ratchetVerdict`（与测试数
+    // 棘轮同一条判据，不在这里再决定一次红不红）。
     const negatives = entries.filter((e) => e.hasNegative).length
     yield {
       label: 'verify: 程序数与反例数棘轮',
       run: async () => {
-        const short = []
-        if (entries.length < BASELINE.verifyPrograms) short.push(`程序 ${entries.length} < ${BASELINE.verifyPrograms}`)
-        if (negatives < BASELINE.verifyNegatives) short.push(`反例 ${negatives} < ${BASELINE.verifyNegatives}`)
+        const verdicts = [
+          ratchetVerdict({
+            actual: entries.length,
+            baseline: BASELINE.verifyPrograms,
+            name: 'verifyPrograms',
+            kind: '程序',
+            unit: '验证程序',
+          }),
+          ratchetVerdict({
+            actual: negatives,
+            baseline: BASELINE.verifyNegatives,
+            name: 'verifyNegatives',
+            kind: '反例',
+            unit: '反例档',
+          }),
+        ]
+        const short = verdicts.filter((v) => !v.ok)
         if (short.length) {
-          console.log(red(`      ↳ ${short.join('；')} ⇒ 有证据被移除`))
-          return { ok: false, note: short.join('；') }
+          for (const v of short) console.log(red(`      ↳ ${v.note}`))
+          return { ok: false, note: short.map((v) => v.note).join('；') }
         }
-        if (entries.length > BASELINE.verifyPrograms || negatives > BASELINE.verifyNegatives) {
-          console.log(
-            yellow(
-              `      ↳ 程序 ${entries.length}（基线 ${BASELINE.verifyPrograms}）· 反例 ${negatives}（基线 ${BASELINE.verifyNegatives}）：请上调 scripts/gate.d/_shared.mjs 的 BASELINE`,
-            ),
-          )
+        for (const v of verdicts) {
+          if (v.warn) console.log(yellow(`      ↳ ${v.note}：请上调 scripts/gate.d/_shared.mjs 的 BASELINE`))
         }
         console.log(green(`      ↳ 程序 ${entries.length}/${BASELINE.verifyPrograms} · 反例 ${negatives}/${BASELINE.verifyNegatives}`))
         return { ok: true }

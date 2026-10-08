@@ -1,6 +1,7 @@
 // `gate.d/_shared.mjs` 的回归测试。
 //
-// 这里只覆盖 `autoWork`——门禁的「自动执行的工作」原语。它值得有回归测试的理由，
+// 这里覆盖 `autoWork`（门禁的「自动执行的工作」原语）与**棘轮判据一族**
+// （`ratchetVerdict` / `cargoTestRatchet` / `BASELINE` 只增）。前者值得有回归测试的理由，
 // 与 `30-docs.mjs` 开头那句是同一个：**一个只会亮绿灯的机制等于没有机制**。
 // `autoWork` 的失效方式恰恰是「看起来在修、其实没把修复带进提交」，而这一点
 // 在正常流程里看不出来（本地跑门禁 → 文件确实被格式化了 → 一切正常），
@@ -14,7 +15,16 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { autoWork, cargoTestRatchet } from './_shared.mjs'
+import {
+  autoWork,
+  cargoTestRatchet,
+  BASELINE,
+  BASELINE_GRACE,
+  baselineErosion,
+  baselineWaivers,
+  parseBaselineCells,
+  ratchetVerdict,
+} from './_shared.mjs'
 
 const repoRoot = path.resolve(import.meta.dirname, '../..')
 
@@ -528,4 +538,133 @@ test('cargoTestRatchet：CI 全量按各行求和（不是首行）', async () =
   const low = await ratchet(out, { ci: true }, { ciBaseline: 11 }).run()
   assert.equal(low.ok, false)
   assert.match(low.note, /10 < 基线 11/)
+})
+test('cargoTestRatchet：高出基线但**超出回填容差** ⇒ 判红（不回填就没有棘轮）', async () => {
+  const r = await ratchet(`test result: ok. ${10 + BASELINE_GRACE + 1} passed; 0 failed`).run()
+  assert.equal(r.ok, false)
+  assert.match(r.note, /超出回填容差/)
+})
+
+// ================= 棘轮三态判定的唯一定义：`ratchetVerdict` =================
+//
+// 本地分包、CI 全量、verify 的程序数与反例档**必须同一条判据**——各自写一遍
+// 「低于基线怎么办」必然演化成两套口径。四态各钉一条，外加容差边界：
+// 差一格就从黄变红，边界不钉住则容差会在无人察觉时被改动。
+
+const v = (actual, baseline) => ratchetVerdict({ actual, baseline, name: 'rustTests' })
+
+test('ratchetVerdict：低于 ⇒ 红', () => {
+  assert.equal(v(9, 10).ok, false)
+})
+test('ratchetVerdict：等于 ⇒ 绿且无 note', () => {
+  const r = v(10, 10)
+  assert.equal(r.ok, true)
+  assert.equal(r.note, undefined)
+  assert.equal(r.warn, undefined)
+})
+test('ratchetVerdict：高出但在容差内 ⇒ 绿 + warn（给「先加测试再回填」留余量）', () => {
+  const r = v(10 + BASELINE_GRACE, 10)
+  assert.equal(r.ok, true)
+  assert.equal(r.warn, true)
+  assert.match(r.note, /基线待更新/)
+})
+test('ratchetVerdict：高出且越过容差 ⇒ 红，且点名要改哪一格', () => {
+  const r = v(10 + BASELINE_GRACE + 1, 10)
+  assert.equal(r.ok, false)
+  assert.match(r.note, /BASELINE\.rustTests/)
+})
+
+// ================= BASELINE 只增：`parseBaselineCells` / `baselineErosion` =================
+//
+// 守的是**判据自己**。这一族的失效形态是「解析不到 ⇒ 恒绿」，不是「解析错了 ⇒ 变红」，
+// 所以第一条用**运行时导出的常量**做对照：解析口径一旦与 `BASELINE` 的形状脱钩就立刻红。
+
+const sharedSrc = fs.readFileSync(path.join(repoRoot, 'scripts/gate.d', '_shared.mjs'), 'utf8')
+/** 最小 BASELINE 文本（只认 `  键: 数字,` 一种形状） */
+const baselineText = (pairs, extra = '') =>
+  `export const BASELINE = {\n${extra}${pairs.map(([k, n]) => `  ${k}: ${n},`).join('\n')}\n}\n`
+
+test('parseBaselineCells：真实源码每格都取到，且与导出的 BASELINE 逐格相等', () => {
+  const cells = parseBaselineCells(sharedSrc)
+  assert.ok(cells.size > 0, '真实文件里一格都没取到 ⇒ 解析口径已与 BASELINE 的形状一起失效')
+  for (const [key, value] of Object.entries(BASELINE)) {
+    assert.equal(cells.get(key), value, `${key} 的解析值与运行时常量不一致`)
+  }
+})
+
+test('parseBaselineCells：只认对象体内的格——注释里的历史数字不是基线', () => {
+  const text = baselineText(
+    [['rustTests', 5]],
+    '  // 回填 `1339 → 1341`（2026-10-06 实测）\n  // verifyPrograms: 14,\n',
+  )
+  const cells = parseBaselineCells(text)
+  assert.equal(cells.size, 1, '把注释里的数字当一格 ⇒ 历史值冒充基线')
+  assert.equal(cells.get('rustTests'), 5)
+})
+
+test('parseBaselineCells：对象体在 `\\n}` 处结束，体外不扫', () => {
+  const cells = parseBaselineCells(`${baselineText([['a', 1]])}\nfunction f() {\n  b: 2,\n}`)
+  assert.deepEqual([...cells.keys()], ['a'])
+})
+
+test('parseBaselineCells：CRLF 工作区与 LF 取到同一份（`git show` 给的是 LF）', () => {
+  assert.deepEqual([...parseBaselineCells(baselineText([['a', 1]]).replace(/\n/g, '\r\n'))], [['a', 1]])
+})
+
+test('parseBaselineCells：没有 BASELINE 对象 ⇒ 空集，不抛', () => {
+  assert.equal(parseBaselineCells('// 这个文件里没有基线').size, 0)
+})
+
+test('baselineErosion：下调 ⇒ 报出该格；持平或上调 ⇒ 空', () => {
+  const base = [{ ref: 'b', text: baselineText([['a', 10], ['c', 4]]) }]
+  assert.deepEqual(baselineErosion(baselineText([['a', 9], ['c', 4]]), base), [
+    { key: 'a', from: 10, to: 9, waived: false, source: 'b' },
+  ])
+  assert.equal(baselineErosion(baselineText([['a', 10], ['c', 5]]), base).length, 0)
+})
+
+test('baselineErosion：整格被删也是削判据（`to` 为 null，不是漏掉）', () => {
+  const [hit] = baselineErosion(baselineText([['a', 10]]), [
+    { ref: 'b', text: baselineText([['a', 10], ['verifyNegatives', 3]]) },
+  ])
+  assert.equal(hit.key, 'verifyNegatives')
+  assert.equal(hit.to, null)
+})
+
+test('baselineErosion：基准取**并集里的最高值**——只比最近一版会放过「已提交的那次下调」', () => {
+  const [hit] = baselineErosion(baselineText([['a', 11]]), [
+    { ref: 'new', text: baselineText([['a', 10]]) },
+    { ref: 'old', text: baselineText([['a', 12]]) },
+  ])
+  assert.equal(hit.from, 12)
+  assert.equal(hit.source, 'old')
+})
+
+test('baselineWaivers：理由非空才算豁免，且按格生效', () => {
+  const text = baselineText([['a', 1]]) + '// baseline-allow a: 压测豁免通道\n// baseline-allow b:\n'
+  assert.deepEqual([...baselineWaivers(text)], [['a', '压测豁免通道']])
+  assert.equal(baselineWaivers(text).has('b'), false, '空理由的豁免等于没有判据')
+})
+
+test('baselineErosion：已登记的豁免仍报出该格，只标 waived（黄字还是红由阶段决定）', () => {
+  const current = baselineText([['a', 9]]) + '// baseline-allow a: 一次性压测\n'
+  assert.equal(baselineErosion(current, [{ ref: 'b', text: baselineText([['a', 10]]) }])[0].waived, true)
+})
+
+// ⚠️ 与 `verify 阶段必须上 CI` 同族：**守卫写在仓库里 ≠ 守卫在 CI 上跑**。
+// `35-baseline.mjs` 靠 `git show` 读基准版本，而 `actions/checkout` 默认浅克隆只有一个
+// 提交 ⇒ 它在 CI 上走「诚实跳过」。跳过不报错、不变慢、日志一片绿，所以这里同时钉两件事：
+// 阶段进了 `--only`，且所在 job 拉了历史。
+test('ci.yml：baseline 阶段必须上 CI，且所在 job 要拉全历史', () => {
+  const block = jobBlock(ciYml(), 'docs-validation', 'security-check')
+  const calls = block.split('\n').filter((l) => l.includes('gate.mjs') && !l.trim().startsWith('#'))
+  assert.ok(
+    calls.some((l) => /only=[^\s]*baseline/.test(l)),
+    `baseline 不在 docs-validation 的 --only 里 ⇒「基线只增」只存在于开发者本机：${calls.join(' | ').trim()}`,
+  )
+  assert.match(
+    block,
+    /actions\/checkout@v5[\s\S]{0,200}?fetch-depth:\s*0/,
+    '没拉 git 历史 ⇒ baseline 阶段在 CI 上恒为「诚实跳过」，日志里看不出来',
+  )
 })
