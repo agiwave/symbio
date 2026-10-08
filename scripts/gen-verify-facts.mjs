@@ -15,6 +15,10 @@
  * | 生成物 | 真源 |
  * |---|---|
  * | `MECHANISMS` | [01 §8 权威参数表](../docs/plan/01-核心架构.md) 的「参数键」列 |
+ * | `DIMENSIONS` / `AXES` / `TIER_MAX` | [02 §2 / §3 / §3.1](../docs/plan/02-能力坐标系.md) 的三张坐标系定义表 |
+ * | `CAPABILITIES` | 02 §6.1 能力名册（全仓唯一一份 54 行名册） |
+ * | `DECLARED_*` | 02 §2「条数」列、§6.2 生长位表、§7 社交能力表——**是被验的声明** |
+ * | `PSEUDO` | 02 §5 伪高阶表的「说法」列 |
  * | `STAGE_CLAIMS` | [路线图总览 §1 阶梯总表](../docs/plan/roadmap/00-路线图总览.md) |
  * | `STAGE_DOCS` | 每阶 `S0N-*.md` §3 的 ```capability-assign``` 块 + §4 的加粗平凡值行 |
  *
@@ -49,6 +53,7 @@ const repoRoot = path.resolve(scriptDir, '..')
 const OUT_REL = path.join('docs', 'plan', 'verify', 'facts', 'mod.rs')
 
 const ARCH_REL = path.join('docs', 'plan', '01-核心架构.md')
+const FRAME_REL = path.join('docs', 'plan', '02-能力坐标系.md')
 const LADDER_REL = path.join('docs', 'plan', 'roadmap', '00-路线图总览.md')
 const STAGE_DIR_REL = path.join('docs', 'plan', 'roadmap')
 
@@ -74,6 +79,85 @@ export function mechanismsOf(archMd) {
   const known = new Set(all)
   const top = all.filter((k) => !(k.includes('.') && known.has(k.split('.')[0])))
   return { all, top }
+}
+
+/**
+ * 02 能力坐标系 → 坐标系定义 + 名册 + 文档自己的**声明**。
+ *
+ * 失效形态与阶梯同族：名册（§6.1）是输入，「条数 / 生长位 / 社交能力的轴」是三处**结论**，
+ * 此前它们抄在程序里、名册也抄在程序里，文档与程序各有一份手抄本。现在程序算，声明吃文档。
+ * 每张表按**所在小节**定位（`## 2.` / `### 6.1` / `## 7.`）：02 里同名表头不止一张，
+ * 按出现顺序猜会把 §3.1 的天梯表读成 §3 的五轴表。
+ */
+export function frameOf(frameMd) {
+  // 按**小节**切范围，而不是按出现顺序找：02 里「能力」开头的表不止一张（§6.1 名册、
+  // §7 社会性），全局扫会把名册读成 §7 的两列表——读歪了还一路绿灯，是最坏的一种。
+  const lines = frameMd.split(/\r?\n/)
+  const section = (re, label) => {
+    const i = lines.findIndex((l) => re.test(l))
+    if (i < 0) throw new Error(`${FRAME_REL}：找不到 ${label}——小节标题被改写了？`)
+    const level = (lines[i].match(/^#+/) || ['#'])[0].length
+    let j = i + 1
+    const stop = new RegExp(`^#{1,${level}}\\s`)
+    while (j < lines.length && !stop.test(lines[j])) j++
+    return lines.slice(i, j).join('\n')
+  }
+  const table = (first, re, label) => {
+    const sec = section(re, label)
+    const t = tableWithHeader(sec, first)
+    if (!t) throw new Error(`${FRAME_REL}：${label}里找不到表头首列为「${first}」的表`)
+    return t
+  }
+  const int = (s, where) => {
+    const n = Number(s)
+    if (!Number.isInteger(n)) throw new Error(`${FRAME_REL}：${where} 读不出整数：\`${s}\``)
+    return n
+  }
+
+  const dims = table('维度', /^## 2\./, '§2 五维表')
+  if (dims.header.length < 4) {
+    throw new Error(`${FRAME_REL} §2：五维表不足四列（维度 / 回答 / 内涵 / 条数），实际 ${dims.header.length} 列`)
+  }
+  const dimensions = dims.rows.map((r) => plain(r[0]).split(/\s+/)[0])
+  const dimCounts = dims.rows.map((r, i) => [dimensions[i], int(plain(r[3]), `§2「${dimensions[i]}」的条数`)])
+
+  const axes = table('轴', /^## 3\./, '§3 五轴表').rows.map((r) => plain(r[0]))
+  const tiers = table('级', /^### 3\.1/, '§3.1 天梯表')
+    .rows.map((r) => int(plain(r[0]).replace(/^T/i, ''), '§3.1 的天梯级'))
+  if (!tiers.length) throw new Error(`${FRAME_REL} §3.1：天梯表没有行`)
+
+  const roster = table('能力', /^### 6\.1/, '§6.1 名册')
+  if (roster.header.length !== 4) {
+    throw new Error(`${FRAME_REL} §6.1：名册必须是「能力 / 维 / 轴 / 天梯」四列，实际 ${roster.header.join(' | ')}`)
+  }
+  const names = roster.rows.map((r) => plain(r[0]))
+  const dup = names.filter((n, i) => names.indexOf(n) !== i)
+  if (dup.length) throw new Error(`${FRAME_REL} §6.1：名册有重名行 ${dup.join(', ')}——重名会让计数静默翻倍`)
+  const caps = roster.rows.map((r) => ({
+    name: plain(r[0]),
+    dim: plain(r[1]),
+    axis: plain(r[2]),
+    tier: int(plain(r[3]).replace(/^T/i, ''), `§6.1「${plain(r[0])}」的天梯`),
+  }))
+
+  const pseudo = table('说法', /^## 5\./, '§5 伪高阶表').rows.map((r) => plain(r[0]))
+  const growth = table('空格', /^### 6\.2/, '§6.2 生长位表').rows.map((r) => {
+    const parts = plain(r[0]).split('×').map((x) => x.trim())
+    if (parts.length !== 2) throw new Error(`${FRAME_REL} §6.2：空格必须写成「维 × 轴」，实际 \`${r[0]}\``)
+    return parts
+  })
+  const social = table('能力', /^## 7\./, '§7 社会性表').rows.map((r) => [plain(r[0]), plain(r[1])])
+
+  return {
+    dimensions,
+    axes,
+    tierMax: Math.max(...tiers),
+    caps,
+    dimCounts,
+    pseudo,
+    growth,
+    social,
+  }
 }
 
 /**
@@ -151,8 +235,9 @@ export function stageFilesOf(dirEntries) {
 }
 
 /** 汇总成一份 facts 文本（导出给测试用：同一份代码，测试喂假文档） */
-export function buildFacts({ archMd, ladderMd, stageMds, dirEntries }) {
+export function buildFacts({ archMd, frameMd, ladderMd, stageMds, dirEntries }) {
   const { all, top } = mechanismsOf(archMd)
+  const frame = frameOf(frameMd)
   const claims = claimsOf(ladderMd)
   const files = stageFilesOf(dirEntries)
 
@@ -189,7 +274,7 @@ export function buildFacts({ archMd, ladderMd, stageMds, dirEntries }) {
   const rs = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
   const out = []
   out.push('// 生成物：由 `scripts/gen-verify-facts.mjs` 从 docs/plan 抽取，**不要手改**。')
-  out.push('// 要改这些数据就改文档（01 §8 / 路线图总表 / 各阶 §3·§4），然后重跑生成脚本。')
+  out.push('// 要改这些数据就改文档（01 §8 / 02 坐标系 / 路线图总表 / 各阶 §3·§4），再重跑生成脚本。')
   out.push('//')
   out.push('// 每个 verify 程序都是一个**独立的 crate**，各自只 `use` 下面的一部分；')
   out.push('// 没被某个程序读到的那些不是死码，是另一个程序在读。这里判死码只会制造噪音，')
@@ -201,6 +286,49 @@ export function buildFacts({ archMd, ladderMd, stageMds, dirEntries }) {
   out.push('')
   out.push('/// 01 §8 参数表里登记的全部键（含子键）——赋值块的合法词表')
   out.push(`pub const PARAM_KEYS: &[&str] = &[${all.map((k) => `\n    ${rs(k)},`).join('')}\n];`)
+  out.push('')
+  out.push('/// 02 §2 的五维（名册「维」列的合法取值）')
+  out.push(`pub const DIMENSIONS: &[&str] = &[${frame.dimensions.map((k) => `\n    ${rs(k)},`).join('')}\n];`)
+  out.push('')
+  out.push('/// 02 §3 的五轴（名册「轴」列的合法取值）')
+  out.push(`pub const AXES: &[&str] = &[${frame.axes.map((k) => `\n    ${rs(k)},`).join('')}\n];`)
+  out.push('')
+  out.push('/// 02 §3.1 天梯的最高级——名册「天梯」列的取值上界')
+  out.push(`pub const TIER_MAX: usize = ${frame.tierMax};`)
+  out.push('')
+  out.push('/// 02 §6.1 名册的一行——坐标系审计的**输入**（全仓唯一一份能力名册就在文档里）')
+  out.push(`pub struct Capability {
+    pub name: &'static str,
+    pub dim: &'static str,
+    pub axis: &'static str,
+    pub tier: usize,
+}`)
+  out.push('')
+  out.push(`pub const CAPABILITIES: &[Capability] = &[${frame.caps
+    .map(
+      (c) =>
+        `\n    Capability {\n        name: ${rs(c.name)},\n        dim: ${rs(c.dim)},\n` +
+        `        axis: ${rs(c.axis)},\n        tier: ${c.tier},\n    },`,
+    )
+    .join('')}\n];`)
+  out.push('')
+  out.push('/// 02 §2「条数」列的**声明**——由名册算出后被验的结论，不是输入')
+  out.push(`pub const DECLARED_DIM_COUNTS: &[(&str, usize)] = &[${frame.dimCounts
+    .map(([d, n]) => `\n    (${rs(d)}, ${n}),`)
+    .join('')}\n];`)
+  out.push('')
+  out.push('/// 02 §5 表里的伪高阶说法——词表本体在文档，程序不再抄第二份')
+  out.push(`pub const PSEUDO: &[&str] = &[${frame.pseudo.map((k) => `\n    ${rs(k)},`).join('')}\n];`)
+  out.push('')
+  out.push('/// 02 §6.2 声明的空格子（生长位）——必须与名册算出的空格子**同集合**')
+  out.push(`pub const DECLARED_GROWTH: &[(&str, &str)] = &[${frame.growth
+    .map(([d, a]) => `\n    (${rs(d)}, ${rs(a)}),`)
+    .join('')}\n];`)
+  out.push('')
+  out.push('/// 02 §7 声明的社会性能力（名 → 提升的轴）——名册里那些行的声明')
+  out.push(`pub const DECLARED_SOCIAL: &[(&str, &str)] = &[${frame.social
+    .map(([n, a]) => `\n    (${rs(n)}, ${rs(a)}),`)
+    .join('')}\n];`)
   out.push('')
   out.push('/// 路线图总表 §1 对某一阶的**声明**——是被验的结论，不是输入')
   out.push(`pub struct StageClaim {
@@ -256,6 +384,7 @@ export function generate(root = repoRoot) {
   }
   return buildFacts({
     archMd: fs.readFileSync(path.join(root, ARCH_REL), 'utf8'),
+    frameMd: fs.readFileSync(path.join(root, FRAME_REL), 'utf8'),
     ladderMd: fs.readFileSync(path.join(root, LADDER_REL), 'utf8'),
     stageMds,
     dirEntries,
@@ -282,7 +411,7 @@ if (MAIN) {
     } else {
       console.error(
         `gen-verify-facts --check: ${OUT_REL} 已与文档不一致。\n` +
-          '  改了 01 §8 / 阶梯总表 / 各阶 §3·§4 就要重跑 `node scripts/gen-verify-facts.mjs`——\n' +
+          '  改了 01 §8 / 02 坐标系 / 阶梯总表 / 各阶 §3·§4 就要重跑 `node scripts/gen-verify-facts.mjs`——\n' +
           '  让 verify 程序继续吃旧数据，它验的就还是旧计划（绿灯是假的）。',
       )
       process.exit(1)

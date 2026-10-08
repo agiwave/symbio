@@ -6,6 +6,7 @@ import path from 'node:path'
 
 import {
   mechanismsOf,
+  frameOf,
   assignsOf,
   fallbackOf,
   claimsOf,
@@ -15,10 +16,10 @@ import {
 
 const REPO = path.resolve(import.meta.dirname, '..')
 
-// ── 最小可用夹具：一张 §8 参数表 + 一张阶梯总表 + 两阶文档 ──────────────────
+// ── 最小可用夹具：01 §8 参数表 + 02 坐标系七张表 + 阶梯总表 + 两阶文档 ──────
 //
-// 夹具刻意只给两阶：反向用例注入的是**形状**（少一行 / 多一个加粗 / 未知键），
-// 与阶数无关；两阶足以暴露「名册配对」「累计点亮全表」这些判据的两端。
+// 夹具刻意只给两阶、两维：反向用例注入的是**形状**（少一行 / 多一个加粗 / 未知键 /
+// 表头改名），与阶数、维数无关；两阶足以暴露「名册配对」「累计点亮全表」的两端。
 
 const ARCH = `
 ## 8. 权威参数表（唯一一份）
@@ -30,6 +31,65 @@ const ARCH = `
 | \`projection.param\` | \`recall:tag\` … | — | 投影的取值 |
 | \`event.entity\` | \`turn\` / \`task\` | — | 事件目录 |
 | \`scope\` | \`root\` / \`child:<id>\` | \`root\` | 递归 |
+`
+
+// 02 的七张表：三张定义（§2 维度 / §3 轴 / §3.1 天梯）+ 一张名册（§6.1）
+// + 三张声明（§2 条数列、§5 说法、§6.2 空格、§7 社交）。声明与名册在这里刻意自洽——
+// 自洽与否由 verify 程序判，生成器只管读得出读不出。
+const FRAME = `
+## 2. 横向：五维
+
+| 维度 | 回答 | 内涵 | 条数 |
+|---|---|---|:-:|
+| **知** Episteme | 我知道什么 | 记忆、因果 | 2 |
+| **行** Action | 我能做什么 | 工具、承诺 | 2 |
+
+## 3. 纵向：五轴
+
+| 轴 | 低阶 | 高阶 |
+|---|---|---|
+| **主动性** | 只在被要求时行动 | 自己发起 |
+| **时域跨度** | 单轮、当下 | 跨会话 |
+| **抽象层级** | 具体指令 | 归纳规则 |
+
+### 3.1 天梯 T1–T3 = 五轴的递进
+
+| 级 | 名称 | 提升的轴 |
+|---|---|---|
+| T1 | 能对话 | 抽象层级 |
+| T2 | 能干活 | 主动性 |
+| T3 | 能记住 | 时域跨度 |
+
+## 5. 伪高阶识别
+
+| 说法 | 为什么是伪高阶 |
+|---|---|
+| 工具数量多 | 是「行」的宽度 |
+| 会写代码 | 是技能 |
+
+## 6. 覆盖矩阵（实测）
+
+### 6.1 能力名册
+
+| 能力 | 维 | 轴 | 天梯 |
+|---|---|---|:-:|
+| 多轮对话 | 知 | 抽象层级 | T1 |
+| 情景记忆 | 知 | 时域跨度 | T3 |
+| 工具接入 | 行 | 主动性 | T2 |
+| 对等协商 | 行 | 抽象层级 | T2 |
+
+### 6.2 覆盖矩阵与生长位
+
+| 空格 | 可能的生长方向 |
+|---|---|
+| 知 × 主动性 | 自主决定记什么 |
+| 行 × 时域跨度 | 长时任务 |
+
+## 7. 社会性
+
+| 能力 | 提升的轴 |
+|---|---|
+| 对等协商 | 抽象层级 |
 `
 
 const LADDER = `
@@ -82,6 +142,7 @@ scope = child:<id>
 
 const fixture = (over = {}) => ({
   archMd: ARCH,
+  frameMd: FRAME,
   ladderMd: LADDER,
   stageMds: { S01, S02 },
   dirEntries: ['00-路线图总览.md', 'S01-a.md', 'S02-b.md'],
@@ -111,6 +172,28 @@ test('新增一个真正的顶层键，MECHANISMS 才会变长——「10 还是
     '| `scope` | `root` / `child:<id>` | `root` | 递归 |\n| `vis_scope` | `shared` | `root` | 可见域 |',
   )
   assert.equal(mechanismsOf(withNew).top.length, 5)
+})
+
+test('02 的七张表各归各位：定义、名册、三处声明都按所在小节读，不吃错表', () => {
+  const f = frameOf(FRAME)
+  assert.deepEqual(f.dimensions, ['知', '行'])
+  assert.deepEqual(f.axes, ['主动性', '时域跨度', '抽象层级'])
+  assert.equal(f.tierMax, 3)
+  assert.deepEqual(f.dimCounts, [['知', 2], ['行', 2]])
+  assert.deepEqual(f.caps[3], { name: '对等协商', dim: '行', axis: '抽象层级', tier: 2 })
+  assert.deepEqual(f.pseudo, ['工具数量多', '会写代码'])
+  assert.deepEqual(f.growth, [['知', '主动性'], ['行', '时域跨度']])
+  assert.deepEqual(f.social, [['对等协商', '抽象层级']])
+})
+
+test('名册与三处声明一起进生成物——program 侧不再有一份 54 行抄本', () => {
+  const text = buildFacts(fixture())
+  assert.match(text, /pub const DIMENSIONS: &\[&str\] = &\[\n {4}"知",/)
+  assert.match(text, /pub const CAPABILITIES: &\[Capability\] = &\[\n {4}Capability \{/)
+  assert.match(text, /pub const DECLARED_DIM_COUNTS: &\[\(&str, usize\)\] = &\[\n {4}\("知", 2\),/)
+  assert.match(text, /pub const PSEUDO: &\[&str\] = &\[\n {4}"工具数量多",/)
+  assert.match(text, /pub const DECLARED_GROWTH: &\[\(&str, &str\)\] = &\[\n {4}\("知", "主动性"\),/)
+  assert.match(text, /pub const DECLARED_SOCIAL: &\[\(&str, &str\)\] = &\[\n {4}\("对等协商", "抽象层级"\),/)
 })
 
 // ── 反向用例：读不出来 / 两处各说各话，都必须抛，不得静默产出残缺 facts ────
@@ -186,6 +269,47 @@ test('反向：总表缺「新增机制键」那一列 ⇒ 声明读不出来，
   )
 })
 
+test('反向：§6.1 名册少一列 ⇒ 四列的形状不成立，抛错', () => {
+  const three = FRAME.replace('| 能力 | 维 | 轴 | 天梯 |\n|---|---|---|:-:|', '| 能力 | 维 | 轴 |\n|---|---|---|')
+  assert.throws(() => frameOf(three), /名册必须是「能力 \/ 维 \/ 轴 \/ 天梯」四列/)
+})
+
+test('反向：名册里有重名行 ⇒ 计数会静默翻倍，抛错', () => {
+  const dup = FRAME.replace('| 对等协商 | 行 | 抽象层级 | T2 |', '| 情景记忆 | 行 | 抽象层级 | T2 |')
+  assert.throws(() => frameOf(dup), /名册有重名行/)
+})
+
+test('反向：名册的天梯列写成汉字 ⇒ 读不出整数，抛错（不当成 T0）', () => {
+  const odd = FRAME.replace('| 多轮对话 | 知 | 抽象层级 | T1 |', '| 多轮对话 | 知 | 抽象层级 | 第一级 |')
+  assert.throws(() => frameOf(odd), /§6\.1「多轮对话」的天梯 读不出整数/)
+})
+
+test('反向：§2 的条数列写成文字 ⇒ 声明读不出来，抛错', () => {
+  const odd = FRAME.replace('| **知** Episteme | 我知道什么 | 记忆、因果 | 2 |', '| **知** Episteme | 我知道什么 | 记忆、因果 | 十余条 |')
+  assert.throws(() => frameOf(odd), /§2「知」的条数 读不出整数/)
+})
+
+test('反向：§6.2 的空格不写「维 × 轴」⇒ 生长位读不出归属，抛错', () => {
+  const odd = FRAME.replace('| 知 × 主动性 | 自主决定记什么 |', '| 自我模型精度 | 自主决定记什么 |')
+  assert.throws(() => frameOf(odd), /空格必须写成「维 × 轴」/)
+})
+
+test('反向：§3.1 的小节标题改名 ⇒ 天梯表按节定位失败，抛错而不是读成 §3 的五轴表', () => {
+  const renamed = FRAME.replace('### 3.1 天梯 T1–T3 = 五轴的递进', '### 3.1 天梯与递进')
+    .replace(/^### 3\.1/m, '### 3-1')
+  assert.throws(() => frameOf(renamed), /找不到 §3\.1 天梯表/)
+})
+
+test('反向：§5 的表不见而小节还在 ⇒ 抛错，绝不在程序里退回一份词表', () => {
+  const gone = FRAME.replace('| 说法 | 为什么是伪高阶 |\n|---|---|\n| 工具数量多 | 是「行」的宽度 |\n| 会写代码 | 是技能 |\n\n', '')
+  assert.throws(() => frameOf(gone), /§5 伪高阶表里找不到表头首列为「说法」/)
+})
+
+test('反向：§6.1 名册整张不见 ⇒ 抛错，绝不返回空名册（空名册会让所有维都变空）', () => {
+  const gone = FRAME.replace(/\| 能力 \| 维 \| 轴 \| 天梯 \|\n(\|[^\n]*\n)+\n/, '')
+  assert.throws(() => frameOf(gone), /§6\.1 名册里找不到表头首列为「能力」的表/)
+})
+
 // ── dogfood：真实仓库的文档必须能被同一份代码读出来，且生成物未漂移 ────────
 
 test('真实 docs/plan 读得出 10 个顶层键与 13 阶名册', () => {
@@ -195,6 +319,23 @@ test('真实 docs/plan 读得出 10 个顶层键与 13 阶名册', () => {
   assert.equal([...text.matchAll(/^ {4}StageClaim \{$/gm)].length, 13)
   assert.equal([...text.matchAll(/^ {4}StageDoc \{$/gm)].length, 13)
   assert.match(text, /"projection\.param"/, '§8 的子键必须出现在 PARAM_KEYS 里')
+})
+
+test('真实 02 读得出坐标系：名册、定义表与三处声明吃的是同一个集合', () => {
+  const f = frameOf(fs.readFileSync(path.join(REPO, 'docs', 'plan', '02-能力坐标系.md'), 'utf8'))
+  assert.equal(f.dimensions.length, f.dimCounts.length)
+  assert.equal(
+    f.dimCounts.reduce((s, [, n]) => s + n, 0),
+    f.caps.length,
+    '§2 的条数声明加起来必须等于名册行数——名册少一行这里就对不上',
+  )
+  assert.ok(f.caps.every((c) => c.tier >= 1 && c.tier <= f.tierMax), '名册的天梯都落在 §3.1 定义的级数内')
+  assert.equal(
+    f.growth.length,
+    f.dimensions.length * f.axes.length - new Set(f.caps.map((c) => `${c.dim}×${c.axis}`)).size,
+    '生长位数 = 总格数 − 名册已占的格数',
+  )
+  assert.ok(f.pseudo.length > 0 && f.social.length > 0, '词表与社交声明都读得出内容（空表说明读歪了）')
 })
 
 test('生成物与 docs/plan/verify/facts/mod.rs 逐字一致（漂移由门禁自动修复，单测钉住判据）', () => {

@@ -1,5 +1,5 @@
 // 生成物：由 `scripts/gen-verify-facts.mjs` 从 docs/plan 抽取，**不要手改**。
-// 要改这些数据就改文档（01 §8 / 路线图总表 / 各阶 §3·§4），然后重跑生成脚本。
+// 要改这些数据就改文档（01 §8 / 02 坐标系 / 路线图总表 / 各阶 §3·§4），再重跑生成脚本。
 //
 // 每个 verify 程序都是一个**独立的 crate**，各自只 `use` 下面的一部分；
 // 没被某个程序读到的那些不是死码，是另一个程序在读。这里判死码只会制造噪音，
@@ -33,6 +33,403 @@ pub const PARAM_KEYS: &[&str] = &[
     "scope",
     "vis_scope",
     "principal",
+];
+
+/// 02 §2 的五维（名册「维」列的合法取值）
+pub const DIMENSIONS: &[&str] = &[
+    "知",
+    "行",
+    "言",
+    "省",
+    "欲",
+];
+
+/// 02 §3 的五轴（名册「轴」列的合法取值）
+pub const AXES: &[&str] = &[
+    "主动性",
+    "时域跨度",
+    "抽象层级",
+    "自我模型精度",
+    "自主程度",
+];
+
+/// 02 §3.1 天梯的最高级——名册「天梯」列的取值上界
+pub const TIER_MAX: usize = 8;
+
+/// 02 §6.1 名册的一行——坐标系审计的**输入**（全仓唯一一份能力名册就在文档里）
+pub struct Capability {
+    pub name: &'static str,
+    pub dim: &'static str,
+    pub axis: &'static str,
+    pub tier: usize,
+}
+
+pub const CAPABILITIES: &[Capability] = &[
+    Capability {
+        name: "工作记忆（≈4 槽）",
+        dim: "知",
+        axis: "抽象层级",
+        tier: 1,
+    },
+    Capability {
+        name: "情景记忆",
+        dim: "知",
+        axis: "时域跨度",
+        tier: 3,
+    },
+    Capability {
+        name: "语义记忆",
+        dim: "知",
+        axis: "时域跨度",
+        tier: 3,
+    },
+    Capability {
+        name: "程序记忆（技能）",
+        dim: "知",
+        axis: "时域跨度",
+        tier: 3,
+    },
+    Capability {
+        name: "时序历史",
+        dim: "知",
+        axis: "时域跨度",
+        tier: 3,
+    },
+    Capability {
+        name: "因果结构",
+        dim: "知",
+        axis: "抽象层级",
+        tier: 4,
+    },
+    Capability {
+        name: "未来预测",
+        dim: "知",
+        axis: "抽象层级",
+        tier: 6,
+    },
+    Capability {
+        name: "世界模型",
+        dim: "知",
+        axis: "抽象层级",
+        tier: 6,
+    },
+    Capability {
+        name: "长期记忆检索",
+        dim: "知",
+        axis: "时域跨度",
+        tier: 3,
+    },
+    Capability {
+        name: "主动求知",
+        dim: "知",
+        axis: "主动性",
+        tier: 8,
+    },
+    Capability {
+        name: "工具接入（L1）",
+        dim: "行",
+        axis: "抽象层级",
+        tier: 2,
+    },
+    Capability {
+        name: "副作用分级",
+        dim: "行",
+        axis: "自我模型精度",
+        tier: 2,
+    },
+    Capability {
+        name: "权限与配额",
+        dim: "行",
+        axis: "自主程度",
+        tier: 4,
+    },
+    Capability {
+        name: "幂等与重试",
+        dim: "行",
+        axis: "自主程度",
+        tier: 2,
+    },
+    Capability {
+        name: "执行隔离",
+        dim: "行",
+        axis: "自主程度",
+        tier: 2,
+    },
+    Capability {
+        name: "因果表征工具",
+        dim: "行",
+        axis: "抽象层级",
+        tier: 3,
+    },
+    Capability {
+        name: "可逆性设计",
+        dim: "行",
+        axis: "自我模型精度",
+        tier: 3,
+    },
+    Capability {
+        name: "制造工具（L2）",
+        dim: "行",
+        axis: "抽象层级",
+        tier: 5,
+    },
+    Capability {
+        name: "造工具的工具（L3）",
+        dim: "行",
+        axis: "抽象层级",
+        tier: 5,
+    },
+    Capability {
+        name: "抽象协议设计（L4）",
+        dim: "行",
+        axis: "抽象层级",
+        tier: 5,
+    },
+    Capability {
+        name: "具身实时闭环",
+        dim: "行",
+        axis: "主动性",
+        tier: 7,
+    },
+    Capability {
+        name: "多轮对话",
+        dim: "言",
+        axis: "抽象层级",
+        tier: 1,
+    },
+    Capability {
+        name: "流式输出",
+        dim: "言",
+        axis: "时域跨度",
+        tier: 1,
+    },
+    Capability {
+        name: "时延分层（反射→自主）",
+        dim: "言",
+        axis: "时域跨度",
+        tier: 2,
+    },
+    Capability {
+        name: "打断与插话",
+        dim: "言",
+        axis: "时域跨度",
+        tier: 2,
+    },
+    Capability {
+        name: "多模态",
+        dim: "言",
+        axis: "抽象层级",
+        tier: 4,
+    },
+    Capability {
+        name: "人格语气一致",
+        dim: "言",
+        axis: "抽象层级",
+        tier: 2,
+    },
+    Capability {
+        name: "主动开口",
+        dim: "言",
+        axis: "主动性",
+        tier: 6,
+    },
+    Capability {
+        name: "节奏与时机",
+        dim: "言",
+        axis: "主动性",
+        tier: 6,
+    },
+    Capability {
+        name: "规划与重规划",
+        dim: "省",
+        axis: "抽象层级",
+        tier: 2,
+    },
+    Capability {
+        name: "自我校验",
+        dim: "省",
+        axis: "自我模型精度",
+        tier: 4,
+    },
+    Capability {
+        name: "成本控制",
+        dim: "省",
+        axis: "自主程度",
+        tier: 4,
+    },
+    Capability {
+        name: "自我模型",
+        dim: "省",
+        axis: "自我模型精度",
+        tier: 4,
+    },
+    Capability {
+        name: "校准（说到做到率）",
+        dim: "省",
+        axis: "自我模型精度",
+        tier: 4,
+    },
+    Capability {
+        name: "承诺追踪",
+        dim: "省",
+        axis: "时域跨度",
+        tier: 4,
+    },
+    Capability {
+        name: "信任账本",
+        dim: "省",
+        axis: "时域跨度",
+        tier: 5,
+    },
+    Capability {
+        name: "凸显仲裁",
+        dim: "省",
+        axis: "自主程度",
+        tier: 2,
+    },
+    Capability {
+        name: "可解释",
+        dim: "省",
+        axis: "自我模型精度",
+        tier: 4,
+    },
+    Capability {
+        name: "技能编译",
+        dim: "省",
+        axis: "抽象层级",
+        tier: 8,
+    },
+    Capability {
+        name: "反自动化回退",
+        dim: "省",
+        axis: "自我模型精度",
+        tier: 8,
+    },
+    Capability {
+        name: "独立验证与返工",
+        dim: "省",
+        axis: "自主程度",
+        tier: 6,
+    },
+    Capability {
+        name: "目标自生成",
+        dim: "欲",
+        axis: "主动性",
+        tier: 8,
+    },
+    Capability {
+        name: "内在动机",
+        dim: "欲",
+        axis: "主动性",
+        tier: 8,
+    },
+    Capability {
+        name: "好奇与探索",
+        dim: "欲",
+        axis: "主动性",
+        tier: 8,
+    },
+    Capability {
+        name: "回避倾向",
+        dim: "欲",
+        axis: "自我模型精度",
+        tier: 5,
+    },
+    Capability {
+        name: "完成度追求",
+        dim: "欲",
+        axis: "自主程度",
+        tier: 5,
+    },
+    Capability {
+        name: "价值偏好",
+        dim: "欲",
+        axis: "自主程度",
+        tier: 6,
+    },
+    Capability {
+        name: "对等协商",
+        dim: "行",
+        axis: "抽象层级",
+        tier: 5,
+    },
+    Capability {
+        name: "跨体承诺",
+        dim: "省",
+        axis: "时域跨度",
+        tier: 5,
+    },
+    Capability {
+        name: "声誉与互信",
+        dim: "省",
+        axis: "时域跨度",
+        tier: 5,
+    },
+    Capability {
+        name: "传递性信任",
+        dim: "省",
+        axis: "抽象层级",
+        tier: 5,
+    },
+    Capability {
+        name: "共同目标与分工",
+        dim: "欲",
+        axis: "自主程度",
+        tier: 5,
+    },
+    Capability {
+        name: "冲突与仲裁",
+        dim: "省",
+        axis: "自主程度",
+        tier: 5,
+    },
+    Capability {
+        name: "可撤销的承诺",
+        dim: "行",
+        axis: "时域跨度",
+        tier: 5,
+    },
+];
+
+/// 02 §2「条数」列的**声明**——由名册算出后被验的结论，不是输入
+pub const DECLARED_DIM_COUNTS: &[(&str, usize)] = &[
+    ("知", 10),
+    ("行", 13),
+    ("言", 8),
+    ("省", 16),
+    ("欲", 7),
+];
+
+/// 02 §5 表里的伪高阶说法——词表本体在文档，程序不再抄第二份
+pub const PSEUDO: &[&str] = &[
+    "工具数量多",
+    "上下文更长",
+    "反应更快",
+    "支持更多模型",
+    "能跑很久",
+    "会写代码",
+];
+
+/// 02 §6.2 声明的空格子（生长位）——必须与名册算出的空格子**同集合**
+pub const DECLARED_GROWTH: &[(&str, &str)] = &[
+    ("知", "自我模型精度"),
+    ("知", "自主程度"),
+    ("言", "自我模型精度"),
+    ("言", "自主程度"),
+    ("欲", "时域跨度"),
+    ("欲", "抽象层级"),
+    ("省", "主动性"),
+];
+
+/// 02 §7 声明的社会性能力（名 → 提升的轴）——名册里那些行的声明
+pub const DECLARED_SOCIAL: &[(&str, &str)] = &[
+    ("对等协商", "抽象层级"),
+    ("跨体承诺", "时域跨度"),
+    ("声誉与互信", "时域跨度"),
+    ("传递性信任", "抽象层级"),
+    ("共同目标与分工", "自主程度"),
+    ("冲突与仲裁", "自主程度"),
+    ("可撤销的承诺", "时域跨度"),
 ];
 
 /// 路线图总表 §1 对某一阶的**声明**——是被验的结论，不是输入
