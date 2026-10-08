@@ -230,10 +230,138 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
     // 请求/结果不设外层标签（内层节点头部「请求/响应」已承载语义），仅「过程」保留
     const labels = w.findAll('.ts-label').map((l) => l.text())
     expect(labels).toEqual(['过程'])
+    // B2：过程段**默认收起成一行状态**——全文不进 DOM（`子流正文` 仍会出现在
+    // `steps=[...]` 那是步骤预览，本就该有），结构信号是 TurnGroup 尚未渲染
+    expect(w.find('.process-status').exists()).toBe(true)
+    expect(w.findAll('.turn-group').length).toBe(0)
+    await w.find('.process-status').trigger('click')
     // 子会话 Turn 与主会话 Turn 同一响应分组形态（分形复用）：
     // 无折叠头部，其子节点（思考/正文）以缩进节点直排呈现
     expect(w.text()).toContain('子流正文')
     expect(w.findAll('.turn-group').length).toBe(1)
+  })
+
+  // ── B2：状态行三字段（与后端 `WorkerProgress` 逐字同名） ──────────────
+
+  it('判据1：在途 = 父工具没结束，或过程段里仍有在途节点（两半都要）', async () => {
+    // ① 父已 completed，但子会话流仍在 streaming ——**只看父状态会漏报**的那一种
+    const partial = mountNode(
+      msg({
+        id: 'tcA',
+        type: 'tool_call',
+        status: 'completed',
+        content: '{}',
+        children: [
+          msg({
+            id: 'subA',
+            type: 'turn',
+            role: 'tool',
+            status: 'streaming',
+            parent_id: 'tcA',
+            children: [msg({ id: 'stA', type: 'text', status: 'streaming', content: '正在写', parent_id: 'subA' })],
+          }),
+        ],
+      }),
+    )
+    await partial.find('.node-head').trigger('click')
+    expect(partial.find('.process-status').text()).toContain('in_flight=true（在途）')
+
+    // ② 父还在跑、过程段已全部终态 —— OR 的另一半
+    const running = mountNode(
+      msg({
+        id: 'tcB',
+        type: 'tool_call',
+        status: 'streaming',
+        content: '{}',
+        children: [
+          msg({
+            id: 'subB',
+            type: 'turn',
+            role: 'tool',
+            status: 'completed',
+            parent_id: 'tcB',
+            children: [msg({ id: 'stB', type: 'text', status: 'completed', content: '做完了', parent_id: 'subB' })],
+          }),
+        ],
+      }),
+    )
+    await running.find('.node-head').trigger('click')
+    expect(running.find('.process-status').text()).toContain('in_flight=true（在途）')
+  })
+
+  it('判据1反例：父与过程段都到终态 ⇒ in_flight=false（不谎报在途）', async () => {
+    const done = mountNode(
+      msg({
+        id: 'tcC',
+        type: 'tool_call',
+        status: 'completed',
+        content: '{}',
+        children: [
+          msg({
+            id: 'subC',
+            type: 'turn',
+            role: 'tool',
+            status: 'completed',
+            parent_id: 'tcC',
+            children: [msg({ id: 'stC', type: 'text', status: 'completed', content: '全部完成', parent_id: 'subC' })],
+          }),
+        ],
+      }),
+    )
+    await done.find('.node-head').trigger('click')
+    expect(done.find('.process-status').text()).toContain('in_flight=false（已结束）')
+  })
+
+  it('判据2：rounds = 过程段的 Turn 条数（结果段不计入，与后端数值同源）', async () => {
+    const w = mountNode(
+      msg({
+        id: 'tcD',
+        type: 'tool_call',
+        status: 'completed',
+        content: '{}',
+        children: [
+          msg({ id: 't1', type: 'turn', role: 'tool', status: 'completed', parent_id: 'tcD' }),
+          msg({ id: 't2', type: 'turn', role: 'tool', status: 'completed', parent_id: 'tcD' }),
+          msg({ id: 'res', type: 'text', role: 'tool', status: 'completed', content: '"ok"', parent_id: 'tcD' }),
+        ],
+      }),
+    )
+    await w.find('.node-head').trigger('click')
+    expect(w.find('.process-status').text()).toContain('rounds=2')
+    expect(w.find('.process-status').text()).not.toContain('rounds=3')
+  })
+
+  it('判据3：无内容节点不产出步骤（状态行宁可少说也不编）', async () => {
+    const w = mountNode(
+      msg({
+        id: 'tcE',
+        type: 'tool_call',
+        status: 'completed',
+        content: '{}',
+        children: [
+          msg({
+            id: 'subE',
+            type: 'turn',
+            role: 'tool',
+            status: 'completed',
+            parent_id: 'tcE',
+            children: [
+              // 空内容排在前面：一旦它被算进步骤，join 会留下前导分隔符，下一条断言立刻红
+              msg({ id: 'empty', type: 'text', status: 'completed', content: '', parent_id: 'subE' }),
+              msg({ id: 'has', type: 'text', status: 'completed', content: '有内容', parent_id: 'subE' }),
+            ],
+          }),
+        ],
+      }),
+    )
+    await w.find('.node-head').trigger('click')
+    const status = w.find('.process-status').text()
+    expect(status).toContain('steps=[有内容]')
+    expect(status).not.toContain('steps=[；')
+    // 字段名逐字可见 —— 与后端投影同名，改一个字这里就红
+    expect(status).toContain('in_flight=')
+    expect(status).toContain('rounds=')
+    expect(status).toContain('steps=')
   })
 
   it('无子会话的工具：「过程」段整段隐藏（仅 请求 + 结果）', async () => {

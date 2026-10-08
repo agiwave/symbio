@@ -42,10 +42,20 @@
         />
       </div>
 
-      <!-- 过程：子会话实时流（有些工具有，有些没有） -->
+      <!-- 过程：子会话实时流（有些工具有，有些没有）。
+           B2：**默认收起成一行状态**——全文展开才渲染，主窗口回到「问答 + 状态行」。 -->
       <div v-if="processTurns.length" class="tool-section">
         <div class="ts-label">过程</div>
+        <button
+          type="button"
+          class="process-status"
+          :aria-expanded="processOpen"
+          @click="processOpen = !processOpen"
+        >
+          {{ processStatusText }}
+        </button>
         <MessageChildren
+          v-if="processOpen"
           :nodes="processTurns"
           :depth="depth ?? 0"
           parent-type="tool_call"
@@ -106,11 +116,14 @@
 import { computed, inject, ref } from 'vue'
 import {
   CHAT_ROLE_ASSISTANT,
+  CHAT_ROLE_USER,
   MESSAGE_STATUS_COMPLETED,
   MESSAGE_STATUS_STREAMING,
   MESSAGE_TYPE_TEXT,
   MESSAGE_TYPE_TURN,
   RESUME_ACTION_SUPPLY,
+  isInflightMessageStatus,
+  messageTextOf,
   type ChatMessage,
 } from '@/schemas/chat_message'
 import { RESUME_KEY } from '@/composables/useChatConnection'
@@ -190,6 +203,69 @@ const resultChildren = computed<ChatMessage[]>(() =>
   children.value.filter((c) => c.type !== MESSAGE_TYPE_TURN),
 )
 
+// ── B2：过程段收起成一行状态（三字段与后端 `WorkerProgress` 逐字同名） ──
+//
+// **后端零改动**：状态全部由**已在手的转写**现算——不另存状态、不发请求。
+// 字段名一旦与后端投影漂移，界面与注入给模型的快照会自相矛盾；故三处逐字同名，
+// 并把字段名写进状态行文本，测试据此断言（改一个字就红）。
+
+/** 步骤条数上限（取最近的）——与后端 `STEPS_MAX` 同值同向。 */
+const STEPS_MAX = 8
+/** 单步字符上限——与后端 `STEP_MAX_CHARS` 同值。 */
+const STEP_MAX_CHARS = 60
+
+/** 判据 1 第二半：过程段子树里是否仍有在途节点（递归，Turn 自身也算）。 */
+function subtreeInFlight(nodes: ChatMessage[]): boolean {
+  return nodes.some(
+    (n) => isInflightMessageStatus(n.status) || subtreeInFlight(n.children ?? []),
+  )
+}
+
+/** 判据 3：非空内容才产出步骤；取最近 `STEPS_MAX` 条、单步截 `STEP_MAX_CHARS`。 */
+function collectSteps(turns: ChatMessage[]): string[] {
+  const out: string[] = []
+  const walk = (nodes: ChatMessage[]) => {
+    for (const n of nodes) {
+      // user 是输入不是进展（与后端投影同一口径）
+      if (n.role !== CHAT_ROLE_USER) {
+        const text = messageTextOf(n.content).trim()
+        // 「无内容节点不产出步骤」：组合节点（turn / tool_call）没有 content ⇒ 空串跳过
+        if (text) {
+          out.push(text.length > STEP_MAX_CHARS ? `${text.slice(0, STEP_MAX_CHARS)}…` : text)
+        }
+      }
+      walk(n.children ?? [])
+    }
+  }
+  walk(turns)
+  return out.slice(-STEPS_MAX)
+}
+
+/** 过程段状态（B2 三字段），由已在手的转写现算。 */
+const workerStatus = computed(() => {
+  const turns = processTurns.value
+  return {
+    // 判据 1：父工具没结束，**或**过程段里仍有在途节点——只看父状态会漏报
+    // （父工具常先拿到部分结果）。
+    in_flight: isInflightMessageStatus(props.node.status) || subtreeInFlight(turns),
+    // 判据 2：过程段的 Turn 条数 = 后端按 user 消息计数，语义一致、数值同源。
+    rounds: turns.length,
+    // 判据 3：无内容节点不产出步骤——状态行宁可少说也不编。
+    steps: collectSteps(turns),
+  }
+})
+
+/** 过程段默认收起（B2 的目标形态：主窗口回到「问答 + 状态行」）。 */
+const processOpen = ref(false)
+
+/** 状态行文本——字段名逐字可见，测试据此断言三处同名。 */
+const processStatusText = computed(() => {
+  const s = workerStatus.value
+  const steps = s.steps.length ? `、steps=[${s.steps.join('；')}]` : ''
+  const state = s.in_flight ? '在途' : '已结束'
+  return `in_flight=${s.in_flight}（${state}）、rounds=${s.rounds}${steps}`
+})
+
 /**
  * 「有请求、无响应」的兜底文案（`registry` 里的判定，本组件只负责画）。
  *
@@ -236,6 +312,19 @@ function submitSupply() {
   flex-direction: column;
   gap: 0.3rem;
 }
+/* 过程段状态行（B2）：默认收起的一行——字段名逐字可见，点击展开全文 */
+.process-status {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
 .ts-label {
   font-size: 0.68rem;
   font-weight: 600;
