@@ -22,15 +22,18 @@
  * | `PSEUDO` | 02 §5 伪高阶表的「说法」列 |
  * | `STAGE_CLAIMS` | [路线图总览 §1 阶梯总表](../docs/plan/roadmap/00-路线图总览.md) |
  * | `STAGE_DOCS` | 每阶 `S0N-*.md` §3 的 ```capability-assign``` 块 + §4 的加粗平凡值行 |
+ * | `COGNITIVE_DEMANDS` | [S10 §2 需求映射表](../docs/plan/roadmap/S10-个人认知体系注入.md)——全仓唯一一份认知体系需求清单 |
  *
  * **顶层键 vs 子键**：`projection.param` 在 §8 里与顶层键同列一张表，但 01 §8 自己写明
  * 「它不是第 11 个机制键，是 `projection` 的子键」。判据因此是形状而非名单：
  * 键名带 `.` 且首段本身也是一个登记的键 ⇒ 子键。这条规则同时终结了「机制键 10 还是 11」
  * 的口径分歧（plan/13 批 D3 数到的那处），因为它把答案交给了表本身。
  *
- * **取值域**：§8 的「取值域」列是**形态列表**，生成器据此核对每阶 §3 赋值与 §4 退路口
- * 的**取值**——越界即抛。「0 值域扩展」由此是个算出来的结论，而不是一个恒为假的标志位。
- * 表里写 `*` 的键（`principal` = 身份是数据）是**开放值域**：不判取值，且程序把这件事报出来。
+ * **取值域**：§8 的「取值域」列是**形态列表**，生成器据此核对每阶 §3 赋值、§4 退路口
+ * 与认知需求落点的**取值**——越界即抛。「0 值域扩展」由此是个算出来的结论，而不是一个恒为假的标志位。
+ * 表里写 `*` 的键（`principal` = 身份是数据、`actor.budget_ms` = 数值参数）是**开放值域**：
+ * 不判取值，且程序把这件事报出来。同一条判据在生成物里有一份 Rust 镜像（`facts` 的
+ * `in_domain`），verify 程序 `use` 它而不是各抄一份——判据只有一份，同一个输入才翻得动两处。
  *
  * **加粗的平凡值行**：§4 每阶列 2–3 行参数，其中**恰好一行**的平凡值加粗——那是本阶的
  * 退路口（S01 退回 `decider`、S03 退回 `scope=root`）。加粗是文档里已有的记号，
@@ -223,7 +226,7 @@ function assertValue(domains, key, value, where) {
   const d = domains.get(key)
   throw new Error(
     `${where}：\`${key} = ${value}\` 越出 01 §8 声明的取值域（${d.forms.join(' / ')}）——` +
-      '这就是**值域扩展**：要么这一行漏登记了它，要么本阶真的需要扩值域，后者走 03 §3 的 ADR',
+      '这就是**值域扩展**：要么这一行漏登记了它，要么这一处真的需要扩值域，后者走 03 §3 的 ADR',
   )
 }
 
@@ -345,6 +348,48 @@ export function fallbackOf(stageMd, mechanisms, where) {
   return [bolded[0].key, plain(bolded[0].trivial)]
 }
 
+/**
+ * S10 §2 的需求映射表 → 认知体系的 16 条需求（`(键, 取值)` 向量 + 归属阶段）。
+ *
+ * 这张表**是全仓唯一一份**这份清单的地方：此前它抄在 `cognitive_fit.rs` 里，程序拿着
+ * 手填的 `extends_domain` 标志宣布「无需扩值域」，而没有任何东西把它的取值与 §8 对过。
+ * 落点格只认两种写法——逐项 `` `键 = 取值` ``，或以 `—` 开头说明这条需求**不占参数面**。
+ * 第三种写法（漏了反引号、把赋值写成散文）一律抛错：静默少验一条需求，比不验更坏。
+ */
+export function demandsOf(s10Md, where) {
+  const sec = sectionOf(s10Md, /^## 2\./, '§2 需求映射表（认知体系需求的 owner）', where)
+  const table = tableWithHeader(sec, '需求')
+  if (!table) throw new Error(`${where}：§2 找不到表头首列为「需求」的映射表——表头被改写了？`)
+  if (table.header.length !== 4) {
+    throw new Error(
+      `${where} §2：映射表必须是「需求 / 认知体系要什么 / 落在 v2 的哪 / 归属阶段」四列，` +
+        `实际 ${table.header.length} 列：${table.header.join(' | ')}`,
+    )
+  }
+  const demands = table.rows.map((r) => {
+    const id = plain(r[0])
+    if (!/^C\d+$/.test(id)) throw new Error(`${where} §2：需求号 \`${id}\` 不是 \`C<数字>\``)
+    const cell = r[2] || ''
+    const assignments = [...cell.matchAll(/`([a-z][a-z0-9_.]*) = ([^`]+)`/g)].map((m) => [m[1], m[2].trim()])
+    const stage = plain(r[3])
+    if (!assignments.length && !plain(cell).startsWith('—')) {
+      throw new Error(
+        `${where} §2 \`${id}\`：落点格既没有一项 \`键 = 取值\`，也没以 \`—\` 开头写明它不占参数面——` +
+          '读不出赋值的需求会被静默跳过',
+      )
+    }
+    if (!assignments.length && !plain(cell).includes('不占参数')) {
+      throw new Error(`${where} §2 \`${id}\`：写了 \`—\` 但没说明它落在哪——「不占参数面」要给出理由，否则它是漏验的遮羞布`)
+    }
+    if (!/^S\d\d$/.test(stage)) throw new Error(`${where} §2 \`${id}\`：归属阶段 \`${stage}\` 不是一个 \`SNN\` 阶号`)
+    return { id, name: plain(r[1]), assignments, stage }
+  })
+  if (!demands.length) throw new Error(`${where} §2：映射表一行也没读出来`)
+  const dup = demands.map((d) => d.id).filter((x, i) => demands.findIndex((y) => y.id === x) !== i)
+  if (dup.length) throw new Error(`${where} §2：需求号重复 ${dup.join(', ')}——重号会让条数静默翻倍`)
+  return demands
+}
+
 /** 路线图总览 §1 → 13 阶的**声明**（新增机制键数 / 参数变化数都来自这里，是被验的结论） */
 export function claimsOf(ladderMd) {
   const table = tableWithHeader(ladderMd, '阶')
@@ -412,14 +457,32 @@ export function buildFacts({ archMd, frameMd, ladderMd, stageMds, dirEntries }) 
     return { id, file, assigns, fallback }
   })
 
+  // 认知体系的需求清单：同一套判据（键 ∈ §8、取值 ∈ §8 的值域）套到**外部体系**提出的
+  // 需求上。M8 立这条判据时就是在这里撞出标注与 §8 不符的（13 §1 M9）。
+  const s10 = files.find((f) => f.id === 'S10')
+  if (!s10) throw new Error(`${STAGE_DIR_REL}：没有 S10 阶文档——认知体系需求映射表的 owner 不见了`)
+  const s10Md = stageMds.S10
+  if (s10Md === undefined) throw new Error(`${STAGE_DIR_REL}/${s10.file}：读不到正文`)
+  const s10Where = `${STAGE_DIR_REL}/${s10.file}`
+  const demands = demandsOf(s10Md, s10Where)
+  for (const d of demands) {
+    for (const [k, v] of d.assignments) {
+      if (!all.includes(k)) {
+        throw new Error(`${s10Where} §2 ${d.id}：落点用了不在 01 §8 参数表里的键 \`${k}\`——新增机制键要走 ADR，不是走文档笔误`)
+      }
+      assertValue(domains, k, v, `${s10Where} §2 ${d.id}`)
+    }
+  }
+
   const rs = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
   const out = []
   out.push('// 生成物：由 `scripts/gen-verify-facts.mjs` 从 docs/plan 抽取，**不要手改**。')
-  out.push('// 要改这些数据就改文档（01 §8 / 02 坐标系 / 路线图总表 / 各阶 §3·§4），再重跑生成脚本。')
+  out.push('// 要改这些数据就改文档（01 §8 / 02 坐标系 / 路线图总表 / 各阶 §3·§4 / S10 §2），再重跑生成脚本。')
   out.push('//')
   out.push('// 每个 verify 程序都是一个**独立的 crate**，各自只 `use` 下面的一部分；')
   out.push('// 没被某个程序读到的那些不是死码，是另一个程序在读。这里判死码只会制造噪音，')
-  out.push('// 所以整模块关掉这条 lint——纯数据模块没有逻辑，关掉不掩盖任何真实缺陷。')
+  out.push('// 所以整模块关掉这条 lint。模块里唯一的逻辑是 §8 取值域语法的 Rust 镜像（`in_domain`）——')
+  out.push('// 它必须只有一份：判据抄进第二个程序，同一个输入就可能只翻红一处。')
   out.push('#![allow(dead_code)]')
   out.push('')
   out.push('/// 01 §8 的顶层机制键（`projection.param` 这类子键不计，判据见生成器注释）')
@@ -446,6 +509,45 @@ export function buildFacts({ archMd, frameMd, ladderMd, stageMds, dirEntries }) 
     )
     .join('')
   out.push(`pub const DOMAINS: &[Domain] = &[${domainLiterals}\n];`)
+  out.push('')
+  out.push(`/// 01 §8 取值域语法的 Rust 镜像（本生成物里唯一的逻辑，供各 verify 程序共用——
+/// 判据抄两份，同一个输入就可能只翻红一处）。三条放行路径：
+/// ① 键是**开放值域**（§8 那格写 \`*\`，如 \`principal\` = 身份是数据）；
+/// ② 值匹配该键的某个形态（\`<…>\` 是通配段：\`child:<id>\` 匹配任何 \`child:x\`）；
+/// ③ **带子键参数的取值**——\`projection = recall:tag=judgment\` 合法的条件是「\`recall\`
+///    是 \`projection\` 的取值」**且**「整串是 \`projection.*\` 某个子键的取值」。
+/// ③ 的判据是「§8 里登记了 \`key.*\` 这一行」，不是「这一格恰好叫 projection」。
+pub fn form_matches(form: &str, v: &str) -> bool {
+    match (form.find('<'), form.find('>')) {
+        (Some(i), Some(j)) if j > i => {
+            let (head, tail) = (&form[..i], &form[j + 1..]);
+            v.starts_with(head) && v.ends_with(tail) && v.len() >= head.len() + tail.len()
+        }
+        (Some(_), _) => panic!("取值域形态 {form} 的通配段没有闭合"),
+        _ => form == v,
+    }
+}
+
+/// §8 里这个键的值域行。键没登记时返回 \`None\`——那不是越界**取值**，是越界**键**，
+/// 由调用方按自己问的那个问题分辨（同一处红不该有两种说法）。
+pub fn domain_of(key: &str) -> Option<&'static Domain> {
+    DOMAINS.iter().find(|d| d.key == key)
+}
+
+/// 赋值 \`key = value\` 是否落在 01 §8 声明的值域内；键没登记 ⇒ 判不了 ⇒ false。
+pub fn in_domain(key: &str, value: &str) -> bool {
+    let Some(d) = domain_of(key) else { return false };
+    if d.open || d.forms.iter().any(|f| form_matches(f, value)) {
+        return true;
+    }
+    let base = value.split(':').next().unwrap_or(value);
+    d.forms.iter().any(|f| form_matches(f, base))
+        && DOMAINS.iter().any(|sub| {
+            sub.key.starts_with(&format!("{key}."))
+                && !sub.open
+                && sub.forms.iter().any(|f| form_matches(f, value))
+        })
+}`)
   out.push('')
   out.push('/// 02 §2 的五维（名册「维」列的合法取值）')
   out.push(`pub const DIMENSIONS: &[&str] = &[${frame.dimensions.map((k) => `\n    ${rs(k)},`).join('')}\n];`)
@@ -528,6 +630,27 @@ export function buildFacts({ archMd, frameMd, ladderMd, stageMds, dirEntries }) 
     )
     .join('')
   out.push(`pub const STAGE_DOCS: &[StageDoc] = &[${docLiterals}\n];`)
+  out.push('')
+  out.push('/// 认知体系的一条需求（S10 §2 的映射表，roadmap/S10-个人认知体系注入.md）')
+  out.push(`#[derive(Clone, Copy)]
+pub struct CognitiveDemand {
+    pub id: &'static str,
+    pub name: &'static str,
+    /// 落在 01 §8 的哪些\`(键, 取值)\`上；**空 = 这条需求不占参数面**（文档里以 \`—\` 写明）
+    pub assignments: &'static [(&'static str, &'static str)],
+    /// 这条需求的落点在哪一阶——认知体系横跨多阶，不是单独一阶
+    pub stage: &'static str,
+}`)
+  out.push('')
+  const demandLiterals = demands
+    .map(
+      (d) =>
+        `\n    CognitiveDemand {\n        id: ${rs(d.id)},\n        name: ${rs(d.name)},\n` +
+        `        assignments: &[${d.assignments.map(([k, v]) => `(${rs(k)}, ${rs(v)})`).join(', ')}],\n` +
+        `        stage: ${rs(d.stage)},\n    },`,
+    )
+    .join('')
+  out.push(`pub const COGNITIVE_DEMANDS: &[CognitiveDemand] = &[${demandLiterals}\n];`)
   out.push('')
   return out.join('\n')
 }

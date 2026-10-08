@@ -24,7 +24,7 @@
 
 mod facts;
 
-use facts::{Domain, DOMAINS, MECHANISMS, STAGE_CLAIMS, STAGE_DOCS};
+use facts::{DOMAINS, MECHANISMS, STAGE_CLAIMS, STAGE_DOCS, domain_of, in_domain};
 
 #[derive(Clone)]
 struct Stage {
@@ -114,48 +114,15 @@ fn j2_violations(roster: &[Stage]) -> Vec<&'static str> {
         .collect()
 }
 
-/// 值域形态匹配：`<…>` 是通配段，`child:<id>` 匹配任何 `child:x`。
-/// 与生成器 `formMatches` 同一条规则——判据写在两侧不是重复：生成器红在文档被改坏的
-/// 那一刻，这里红在**结论**不成立的那一刻，而只有这里的判据能被反向用例证明它不是永真。
-fn form_matches(form: &str, v: &str) -> bool {
-    match (form.find('<'), form.find('>')) {
-        (Some(i), Some(j)) if j > i => {
-            let (head, tail) = (&form[..i], &form[j + 1..]);
-            v.starts_with(head) && v.ends_with(tail) && v.len() >= head.len() + tail.len()
-        }
-        (Some(_), _) => panic!("取值域形态 `{form}` 的通配段没有闭合"),
-        _ => form == v,
-    }
-}
-
-/// 一个取值是否落在 [01 §8](../01-核心架构.md) 声明的该键值域内。三条放行路径：
-/// ① 键是开放值域（表里写 `*`，如 `principal` = 身份是数据）；② 值匹配该键的某个形态；
-/// ③ **带子键参数的取值**——`projection = recall:tag=judgment` 合法的条件是「`recall`
-///    是 `projection` 的取值」**且**「整串是 `projection.*` 某个子键的取值」。
-/// ③ 的判据是「§8 里登记了 `key.*` 这一行」，不是「这一格恰好叫 projection」。
-fn in_domain(d: &Domain, key: &str, v: &str) -> bool {
-    if d.open || d.forms.iter().any(|f| form_matches(f, v)) {
-        return true;
-    }
-    let base = v.split(':').next().unwrap_or(v);
-    d.forms.iter().any(|f| form_matches(f, base))
-        && DOMAINS.iter().any(|sub| {
-            sub.key.starts_with(&format!("{key}."))
-                && !sub.open
-                && sub.forms.iter().any(|f| form_matches(f, v))
-        })
-}
-
-/// Q5：越界取值 = 需要一次值域扩展。没有值域行的键不在这里报——那正是 Q1 的越界键，
-/// 同一处红不该有两种说法。
+/// Q5：越界取值 = 需要一次值域扩展。值域与匹配规则都在 `facts`（[01 §8](../01-核心架构.md)
+/// 那张表的生成物，判据见 `facts::in_domain`）。没有值域行的键不在这里报——那正是 Q1 的
+/// 越界键，同一处红不该有两种说法。
 fn out_of_domain(roster: &[Stage]) -> Vec<(String, String)> {
     let mut bad = Vec::new();
     for s in roster {
         for &(k, v) in s.assigns.iter().chain(std::iter::once(&s.fallback)) {
-            if let Some(d) = DOMAINS.iter().find(|d| d.key == k) {
-                if !in_domain(d, k, v) {
-                    bad.push((s.id.to_string(), format!("{} = {}", k, v)));
-                }
+            if domain_of(k).is_some() && !in_domain(k, v) {
+                bad.push((s.id.to_string(), format!("{} = {}", k, v)));
             }
         }
     }

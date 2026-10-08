@@ -1,9 +1,10 @@
 // 生成物：由 `scripts/gen-verify-facts.mjs` 从 docs/plan 抽取，**不要手改**。
-// 要改这些数据就改文档（01 §8 / 02 坐标系 / 路线图总表 / 各阶 §3·§4），再重跑生成脚本。
+// 要改这些数据就改文档（01 §8 / 02 坐标系 / 路线图总表 / 各阶 §3·§4 / S10 §2），再重跑生成脚本。
 //
 // 每个 verify 程序都是一个**独立的 crate**，各自只 `use` 下面的一部分；
 // 没被某个程序读到的那些不是死码，是另一个程序在读。这里判死码只会制造噪音，
-// 所以整模块关掉这条 lint——纯数据模块没有逻辑，关掉不掩盖任何真实缺陷。
+// 所以整模块关掉这条 lint。模块里唯一的逻辑是 §8 取值域语法的 Rust 镜像（`in_domain`）——
+// 它必须只有一份：判据抄进第二个程序，同一个输入就可能只翻红一处。
 #![allow(dead_code)]
 
 /// 01 §8 的顶层机制键（`projection.param` 这类子键不计，判据见生成器注释）
@@ -72,8 +73,8 @@ pub const DOMAINS: &[Domain] = &[
     },
     Domain {
         key: "actor.budget_ms",
-        forms: &["80", "300", "60000", "86400000"],
-        open: false,
+        forms: &[],
+        open: true,
     },
     Domain {
         key: "event.entity",
@@ -101,6 +102,45 @@ pub const DOMAINS: &[Domain] = &[
         open: true,
     },
 ];
+
+/// 01 §8 取值域语法的 Rust 镜像（本生成物里唯一的逻辑，供各 verify 程序共用——
+/// 判据抄两份，同一个输入就可能只翻红一处）。三条放行路径：
+/// ① 键是**开放值域**（§8 那格写 `*`，如 `principal` = 身份是数据）；
+/// ② 值匹配该键的某个形态（`<…>` 是通配段：`child:<id>` 匹配任何 `child:x`）；
+/// ③ **带子键参数的取值**——`projection = recall:tag=judgment` 合法的条件是「`recall`
+///    是 `projection` 的取值」**且**「整串是 `projection.*` 某个子键的取值」。
+/// ③ 的判据是「§8 里登记了 `key.*` 这一行」，不是「这一格恰好叫 projection」。
+pub fn form_matches(form: &str, v: &str) -> bool {
+    match (form.find('<'), form.find('>')) {
+        (Some(i), Some(j)) if j > i => {
+            let (head, tail) = (&form[..i], &form[j + 1..]);
+            v.starts_with(head) && v.ends_with(tail) && v.len() >= head.len() + tail.len()
+        }
+        (Some(_), _) => panic!("取值域形态 {form} 的通配段没有闭合"),
+        _ => form == v,
+    }
+}
+
+/// §8 里这个键的值域行。键没登记时返回 `None`——那不是越界**取值**，是越界**键**，
+/// 由调用方按自己问的那个问题分辨（同一处红不该有两种说法）。
+pub fn domain_of(key: &str) -> Option<&'static Domain> {
+    DOMAINS.iter().find(|d| d.key == key)
+}
+
+/// 赋值 `key = value` 是否落在 01 §8 声明的值域内；键没登记 ⇒ 判不了 ⇒ false。
+pub fn in_domain(key: &str, value: &str) -> bool {
+    let Some(d) = domain_of(key) else { return false };
+    if d.open || d.forms.iter().any(|f| form_matches(f, value)) {
+        return true;
+    }
+    let base = value.split(':').next().unwrap_or(value);
+    d.forms.iter().any(|f| form_matches(f, base))
+        && DOMAINS.iter().any(|sub| {
+            sub.key.starts_with(&format!("{key}."))
+                && !sub.open
+                && sub.forms.iter().any(|f| form_matches(f, value))
+        })
+}
 
 /// 02 §2 的五维（名册「维」列的合法取值）
 pub const DIMENSIONS: &[&str] = &[
@@ -762,5 +802,115 @@ pub const STAGE_DOCS: &[StageDoc] = &[
             ("projection", "reputation"),
         ],
         fallback: ("vis_scope", "thread_private"),
+    },
+];
+
+/// 认知体系的一条需求（S10 §2 的映射表，roadmap/S10-个人认知体系注入.md）
+#[derive(Clone, Copy)]
+pub struct CognitiveDemand {
+    pub id: &'static str,
+    pub name: &'static str,
+    /// 落在 01 §8 的哪些`(键, 取值)`上；**空 = 这条需求不占参数面**（文档里以 `—` 写明）
+    pub assignments: &'static [(&'static str, &'static str)],
+    /// 这条需求的落点在哪一阶——认知体系横跨多阶，不是单独一阶
+    pub stage: &'static str,
+}
+
+pub const COGNITIVE_DEMANDS: &[CognitiveDemand] = &[
+    CognitiveDemand {
+        id: "C01",
+        name: "七类认知内容入库（知识/经验/技能/判断/策略/直觉/情绪）",
+        assignments: &[("event.entity", "memory"), ("event.verb", "asserted"), ("projection", "recall:tag=judgment")],
+        stage: "S06",
+    },
+    CognitiveDemand {
+        id: "C02",
+        name: "内容密度金字塔（原文/要点/摘要/模式）",
+        assignments: &[("projection", "recall:density=summary")],
+        stage: "S10",
+    },
+    CognitiveDemand {
+        id: "C03",
+        name: "Level 0-4 通用性分级与过滤（读侧，与遗忘同构）",
+        assignments: &[("projection", "recall:min_generality=2")],
+        stage: "S10",
+    },
+    CognitiveDemand {
+        id: "C04",
+        name: "五层存储（原始/情景/语义/技能/元）",
+        assignments: &[("event.entity", "memory"), ("projection", "recall:layer=semantic")],
+        stage: "S06",
+    },
+    CognitiveDemand {
+        id: "C05",
+        name: "激活扩散检索（关系网络多跳）",
+        assignments: &[("projection", "recall:spread=on"), ("actor.pattern", "translator"), ("actor.budget_ms", "500")],
+        stage: "S06",
+    },
+    CognitiveDemand {
+        id: "C06",
+        name: "向量索引 + 关系索引 + 时间分区",
+        assignments: &[],
+        stage: "S06",
+    },
+    CognitiveDemand {
+        id: "C07",
+        name: "时间衰减 + 使用反馈调权",
+        assignments: &[("projection", "recall:decay=exp"), ("event.entity", "memory"), ("event.verb", "asserted")],
+        stage: "S06",
+    },
+    CognitiveDemand {
+        id: "C08",
+        name: "内外双轨动作空间（Internal / External）",
+        assignments: &[("actor.capability", "produce.artifact"), ("actor.pattern", "decider")],
+        stage: "S09",
+    },
+    CognitiveDemand {
+        id: "C09",
+        name: "系统 2 → 系统 1 技能编译",
+        assignments: &[("projection", "skill_compile"), ("actor.pattern", "decider")],
+        stage: "S11",
+    },
+    CognitiveDemand {
+        id: "C10",
+        name: "个人认知归属与隔离",
+        assignments: &[("principal", "person:zhangsan"), ("vis_scope", "thread_private")],
+        stage: "S08",
+    },
+    CognitiveDemand {
+        id: "C11",
+        name: "跨主体借用他人认知（人 → 智能体）",
+        assignments: &[("principal", "agent:helper"), ("vis_scope", "shared")],
+        stage: "S08",
+    },
+    CognitiveDemand {
+        id: "C12",
+        name: "动态学习：巩固（压缩 + 反事实）",
+        assignments: &[("projection", "consolidate"), ("event.entity", "memory"), ("event.verb", "progressed"), ("actor.pattern", "reasoner")],
+        stage: "S06",
+    },
+    CognitiveDemand {
+        id: "C13",
+        name: "动态学习：遗忘（投影排除，非物理删除）",
+        assignments: &[("projection", "recall"), ("event.entity", "memory"), ("event.verb", "closed")],
+        stage: "S06",
+    },
+    CognitiveDemand {
+        id: "C14",
+        name: "认知注入上下文（检索结果进提示词）",
+        assignments: &[("actor.pattern", "translator"), ("projection", "recall"), ("event.entity", "memory"), ("event.verb", "asserted")],
+        stage: "S06",
+    },
+    CognitiveDemand {
+        id: "C15",
+        name: "认知置信度校准（元认知）",
+        assignments: &[("projection", "calibration"), ("event.entity", "verdict"), ("event.verb", "asserted")],
+        stage: "S11",
+    },
+    CognitiveDemand {
+        id: "C16",
+        name: "L1-L5 能力演进（自主层 + 子作用域）",
+        assignments: &[("scope", "child:long-goal"), ("actor.budget_ms", "86400000")],
+        stage: "S12",
     },
 ];

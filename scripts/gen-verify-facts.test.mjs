@@ -11,6 +11,7 @@ import {
   assignsOf,
   fallbackOf,
   claimsOf,
+  demandsOf,
   buildFacts,
   generate,
 } from './gen-verify-facts.mjs'
@@ -110,6 +111,7 @@ const LADDER = `
 |---|---|:-:|---|:-:|:-:|---|
 | S01 | 最小闭环 | T1 | 能对话 | **2** | 2 | [→](./S01-a.md) |
 | S02 | 工具与产物 | T2 | 能动手 | **2** | 2 | [→](./S02-b.md) |
+| S10 | 认知注入 | T4 | 像谁那样想 | **0** | 2 | [→](./S10-c.md) |
 
 **机制键累计**：2 → 4
 `
@@ -151,12 +153,38 @@ scope = child:<id>
 | \`store\` | \`wal\` | **\`memory\`** | 仍完整运行 |
 `
 
+// S10 是认知体系需求映射表的 owner：它的 §2 那张表喂 `COGNITIVE_DEMANDS`，
+// §3 / §4 仍按阶梯的形状喂 `STAGE_DOCS`——两张表读自同一篇，验的是两件事。
+const S10 = `
+## 2. 为什么它能落在 v2 上（J1）
+
+| 需求 | 认知体系要什么 | 落在 v2 的哪（逐条对 01 §8 的取值域） | 归属阶段 |
+|---|---|---|---|
+| \`C01\` | 七类认知内容入库 | \`event.entity = turn\`、\`projection = recall:tag=judgment\` | S06 |
+| \`C06\` | 向量索引 + 关系索引 | — **不占参数键**：索引是 \`Store\` 的实现细节 | S06 |
+| \`C10\` | 个人认知归属 | \`principal = person:zhangsan\` | S08 |
+
+## 3. 增量清单（只加数据）
+
+\`\`\`capability-assign
+scope = child:<id>
+principal = person:me
+\`\`\`
+
+## 4. 平凡值与回退（J2）
+
+| 参数 | 完整值 | **平凡值** | 平凡值下 |
+|---|---|---|---|
+| \`scope\` | \`child:<id>\` | **\`root\`** | 仍完整运行 |
+| \`principal\` | \`person:me\` | \`person:me\` | 不适用 |
+`
+
 const fixture = (over = {}) => ({
   archMd: ARCH,
   frameMd: FRAME,
   ladderMd: LADDER,
-  stageMds: { S01, S02 },
-  dirEntries: ['00-路线图总览.md', 'S01-a.md', 'S02-b.md'],
+  stageMds: { S01, S02, S10 },
+  dirEntries: ['00-路线图总览.md', 'S01-a.md', 'S02-b.md', 'S10-c.md'],
   ...over,
 })
 
@@ -239,7 +267,7 @@ test('反向：删掉一篇阶文档而总表还声明着它 ⇒ 同一条不配
 test('反向：§3 赋值块少一行 ⇒ 与总表声明的「参数变化」数不符', () => {
   const short = S02.replace('store = wal\n', '')
   assert.throws(
-    () => buildFacts(fixture({ stageMds: { S01, S02: short } })),
+    () => buildFacts(fixture({ stageMds: { S01, S02: short, S10 } })),
     /§3 赋值块有 1 项，总表声明 S02 的参数变化是 2 项/,
   )
 })
@@ -247,7 +275,7 @@ test('反向：§3 赋值块少一行 ⇒ 与总表声明的「参数变化」�
 test('反向：赋值块用了一个不在 §8 表里的键 ⇒ 指认它是要走 ADR 的新机制', () => {
   const bad = S02.replace('scope = child:<id>', 'wizard.mode = on')
   assert.throws(
-    () => buildFacts(fixture({ stageMds: { S01, S02: bad } })),
+    () => buildFacts(fixture({ stageMds: { S01, S02: bad, S10 } })),
     /不在 01 §8 参数表里的键 `wizard.mode`/,
   )
 })
@@ -294,13 +322,13 @@ test('取值域读得出来：`↳ §6` 的集合由那张网格自己拥有，`
 test('通配段与子键参数都放行：`child:<id>`、`recall:tag=judgment` 不是越界', () => {
   // 反向用例只证「抓得住」是不够的——判据若「逢取值即判越界」也能拿到那条红。
   const ok = S02.replace('scope = child:<id>', 'projection = recall:tag=judgment')
-  assert.doesNotThrow(() => buildFacts(fixture({ stageMds: { S01, S02: ok } })))
+  assert.doesNotThrow(() => buildFacts(fixture({ stageMds: { S01, S02: ok, S10 } })))
 })
 
 test('反向：§3 赋一个值域之外的取值 ⇒ 抛错（「0 值域扩展」由此是算出来的）', () => {
   const bad = S02.replace('store = wal', 'store = sqlite')
   assert.throws(
-    () => buildFacts(fixture({ stageMds: { S01, S02: bad } })),
+    () => buildFacts(fixture({ stageMds: { S01, S02: bad, S10 } })),
     /`store = sqlite` 越出 01 §8 声明的取值域/,
   )
 })
@@ -308,7 +336,7 @@ test('反向：§3 赋一个值域之外的取值 ⇒ 抛错（「0 值域扩展
 test('反向：§4 退路口的平凡值越界 ⇒ 同样抛（退路口也是这一行上的一个取值）', () => {
   const bad = S02.replace('**`memory`**', '**`sqlite`**')
   assert.throws(
-    () => buildFacts(fixture({ stageMds: { S01, S02: bad } })),
+    () => buildFacts(fixture({ stageMds: { S01, S02: bad, S10 } })),
     /§4 退路口.*越出 01 §8/,
   )
 })
@@ -399,6 +427,72 @@ test('反向：§6.1 名册整张不见 ⇒ 抛错，绝不返回空名册（空
   assert.throws(() => frameOf(gone), /§6\.1 名册里找不到表头首列为「能力」的表/)
 })
 
+// ── 认知需求清单（S10 §2 是唯一 owner）：读得出，越界就红 ─────────────────
+
+test('需求清单进生成物：落点逐项吃 §8，`—` 那行读成空赋值', () => {
+  const ds = demandsOf(S10, 'S10')
+  assert.deepEqual(ds.map((d) => d.id), ['C01', 'C06', 'C10'])
+  assert.deepEqual(ds[0].assignments, [
+    ['event.entity', 'turn'],
+    ['projection', 'recall:tag=judgment'],
+  ])
+  assert.deepEqual(ds[1].assignments, [], 'C06 不占参数面 ⇒ 空赋值，而不是读出一行假的')
+  const text = buildFacts(fixture())
+  assert.match(text, /pub const COGNITIVE_DEMANDS: &\[CognitiveDemand\] = &\[\n {4}CognitiveDemand \{/)
+  assert.match(text, /assignments: &\[\],/)
+  // 判据在 Rust 侧只有一份：生成物带出 §8 语法的镜像，两个程序共用
+  assert.match(text, /pub fn in_domain\(key: &str, value: &str\) -> bool \{/)
+})
+
+test('反向：落点格既没写 `键 = 取值` 也没以 `—` 开头 ⇒ 抛错，不静默少验一条需求', () => {
+  const prose = S10.replace('— **不占参数键**：索引是 `Store` 的实现细节', '索引是 Store 的实现细节')
+  assert.throws(() => demandsOf(prose, 'S10'), /既没有一项 .键 = 取值.，也没以 .—. 开头/)
+})
+
+test('反向：`—` 之后不说明落在哪 ⇒ 抛错（"不占参数面"不能当漏验的遮羞布）', () => {
+  assert.throws(() => demandsOf(S10.replace('— **不占参数键**：索引是 `Store` 的实现细节', '—'), 'S10'), /没说明它落在哪/)
+})
+
+test('反向：需求的取值越出 §8 ⇒ 同一条判据，照样抛', () => {
+  const bad = S10.replace('`event.entity = turn`', '`event.entity = memory`')
+  assert.throws(
+    () => buildFacts(fixture({ stageMds: { S01, S02, S10: bad } })),
+    /§2 C01：`event\.entity = memory` 越出 01 §8 声明的取值域/,
+  )
+})
+
+test('反向：需求用了一个不在 §8 的键 ⇒ 指认它是要走 ADR 的新机制', () => {
+  const bad = S10.replace('`principal = person:zhangsan`', '`cognition.layer = 5`')
+  assert.throws(
+    () => buildFacts(fixture({ stageMds: { S01, S02, S10: bad } })),
+    /不在 01 §8 参数表里的键 `cognition\.layer`/,
+  )
+})
+
+test('反向：归属阶段写「本阶」⇒ 读不出阶号，抛错（跨阶覆盖由这一列算）', () => {
+  const odd = S10.replace('| S06 |\n| `C10`', '| 本阶 |\n| `C10`')
+  assert.throws(() => demandsOf(odd, 'S10'), /归属阶段 .本阶. 不是一个 .SNN/)
+})
+
+test('反向：需求号重复 ⇒ 条数会静默翻倍，抛错', () => {
+  const dup = S10.replace('| `C10` |', '| `C01` |')
+  assert.throws(() => demandsOf(dup, 'S10'), /需求号重复/)
+})
+
+test('反向：S10 那篇读不到 ⇒ 抛错，而不是产出一份没有需求清单的 facts', () => {
+  assert.throws(
+    () =>
+      buildFacts(
+        fixture({
+          ladderMd: LADDER.replace(/^.*S10.*$/m, ''),
+          stageMds: { S01, S02 },
+          dirEntries: ['00-路线图总览.md', 'S01-a.md', 'S02-b.md'],
+        }),
+      ),
+    /没有 S10 阶文档/,
+  )
+})
+
 // ── dogfood：真实仓库的文档必须能被同一份代码读出来，且生成物未漂移 ────────
 
 test('真实 docs/plan 读得出 10 个顶层键与 13 阶名册', () => {
@@ -425,6 +519,14 @@ test('真实 02 读得出坐标系：名册、定义表与三处声明吃的是�
     '生长位数 = 总格数 − 名册已占的格数',
   )
   assert.ok(f.pseudo.length > 0 && f.social.length > 0, '词表与社交声明都读得出内容（空表说明读歪了）')
+})
+
+test('真实 S10 读得出 16 条认知需求，其中恰有一条不占参数面', () => {
+  const s10 = fs.readFileSync(path.join(REPO, 'docs', 'plan', 'roadmap', 'S10-个人认知体系注入.md'), 'utf8')
+  const ds = demandsOf(s10, 'S10')
+  assert.equal(ds.length, 16, 'S10 §2 与 03 §7.1 都说 16 条——数一下，别信')
+  assert.equal(ds.filter((d) => !d.assignments.length).length, 1, '只有 C06（索引）不占参数面')
+  assert.equal(new Set(ds.map((d) => d.stage)).size >= 5, true, '落点跨阶：认知体系不是单独一阶')
 })
 
 test('生成物与 docs/plan/verify/facts/mod.rs 逐字一致（漂移由门禁自动修复，单测钉住判据）', () => {
