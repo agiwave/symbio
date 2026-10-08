@@ -19,7 +19,7 @@
 | **N** | core 命名 | `scripts/core-naming-audit.mjs` | N-001–005 | `N-006` |
 | **NDC** | 主体直连 | `scripts/no-direct-call-audit.mjs` | NDC-001–002 | `NDC-003` |
 | **R** | 死代码 | `scripts/dead-code-audit.mjs` | R-001–002 | `R-003` |
-| **S** | 源码 grep 形态 | `scripts/grep-audit.mjs` | S-001–003、S-006–011 | `S-012` |
+| **S** | 源码 grep 形态 | `scripts/grep-audit.mjs` | S-001–003、S-006–012 | `S-013` |
 
 ## 2. 逐码归属
 
@@ -78,3 +78,4 @@
 | **S-009** | `scripts/grep-audit.mjs` |
 | **S-010** | `scripts/grep-audit.mjs` |
 | **S-011** | `scripts/grep-audit.mjs` |
+| **S-012** | `scripts/grep-audit.mjs` |

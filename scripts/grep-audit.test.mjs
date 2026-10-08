@@ -407,3 +407,71 @@ test('S-011 is skipped (not failed) when chat_loop.rs is outside the scope', () 
   assert.equal(r.status, 0)
   assert.match(r.stdout, /S-011 跳过/)
 })
+
+// ── S-012: 代码注释里的实施排期指认 ────────────────────────────────────
+// 这批注释没有 owner：「本批未修」的下一批修了，句子就指着已不存在的时间点；
+// 单独的「批 2」在批次重排后无人能解。判据只取两种无歧义形态（待办标记 / 无出处批次号）。
+const S012_FILE = 'symbio/src/symbio_core/actors/mod.rs'
+
+test('S-012 fires on a batch number with no plan anchor', () => {
+  const r = s010Audit({ [S012_FILE]: '/// 运行器据此停止工具循环（批 2 的恢复前提）。\n' })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /S-012/)
+  assert.match(r.stdout, /批次号没有出处/)
+})
+
+test('S-012 accepts the same batch number with its plan anchor', () => {
+  const src =
+    '/// 恢复前提见 [plan/11 批 2](../../../../docs/plan/11-多执行器与多主体加固实施方案.md)。\n'
+  assert.equal(s010Audit({ [S012_FILE]: src }).status, 0)
+})
+
+test('S-012 fires on a TODO / FIXME marker left in a comment', () => {
+  for (const marker of ['TODO', 'FIXME', 'XXX', 'HACK']) {
+    const r = s010Audit({ [S012_FILE]: `// ${marker}: 补上回退分支\n` })
+    assert.equal(r.status, 1, `${marker} ⇒ ${r.stdout}`)
+    assert.match(r.stdout, /待办登记进计划文档/)
+  }
+})
+
+test('S-012 judges only comment lines (a string holding "// TODO" is code)', () => {
+  assert.equal(s010Audit({ [S012_FILE]: 'fn f() { let s = "// TODO 用户写的待办"; }\n' }).status, 0)
+})
+
+test('S-012 does not touch runtime prose about a batch of tool calls', () => {
+  // 「本批」在这里是**运行期事实**（这一批工具调用），不是排期——误报的代价是守卫被喂死。
+  const src = '/// 本批未执行的工具调用不得停在 `Streaming`。\n// 诚实缺口：网格少一格。\n'
+  assert.equal(s010Audit({ [S012_FILE]: src }).status, 0)
+})
+
+test('S-012 covers cli and the verify programs, not just symbio', () => {
+  for (const file of ['cli/src/client.rs', 'docs/plan/verify/scenario_ladder.rs']) {
+    const r = s010Audit({ [file]: '/// 这一格随批 3 补。\n' })
+    assert.equal(r.status, 1, `${file} ⇒ ${r.stdout}`)
+  }
+})
+
+test('S-012 waiver requires a reason (same line or the line above)', () => {
+  const hit = '/// 运行器据此停止工具循环（批 2 的恢复前提）。\n'
+  for (const waived of [
+    hit.replace('\n', '  // grep-audit-allow S-012: 同段首行已给 plan/11 出处\n'),
+    `// grep-audit-allow S-012: 同段首行已给 plan/11 出处\n${hit}`,
+  ]) {
+    const r = s010Audit({ [S012_FILE]: waived })
+    assert.equal(r.status, 0, r.stdout)
+  }
+  for (const empty of [hit.replace('\n', '  // grep-audit-allow S-012:   \n'), `// grep-audit-allow S-012:  \n${hit}`]) {
+    const r = s010Audit({ [S012_FILE]: empty })
+    assert.equal(r.status, 1, r.stdout)
+  }
+})
+
+test('S-012 finds no batch-relative narration in this repository', () => {
+  const r = spawnSync(process.execPath, [script], {
+    cwd: path.resolve(path.dirname(script), '..'),
+    env: { ...process.env, NO_COLOR: '1' },
+    encoding: 'utf8',
+    timeout: 30000,
+  })
+  assert.match(r.stdout, /S-012 通过/)
+})

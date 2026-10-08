@@ -18,6 +18,7 @@
  *   - S-010:        vdfs 挂载根名字面量不得出现在 vdfs 插件之外（仓级）
  *   - S-011:        补充抽干点必须夹在 `gate_turn` 与 `prepare_turn_inputs` 之间
  *                   （`session/chat_loop.rs`；位置错了不会有任何测试变红）
+ *   - S-012:        代码注释不得写只有实施排期含义的话（待办标记 / 无出处的批次号）
  *
  * 用法：
  *   node scripts/grep-audit.mjs            # 审计 symbio/src/plugins（全部插件）
@@ -35,7 +36,7 @@
 
 // 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns S 源码 grep 形态
-// @codes S-001 S-002 S-003 S-006 S-007 S-008 S-009 S-010 S-011
+// @codes S-001 S-002 S-003 S-006 S-007 S-008 S-009 S-010 S-011 S-012
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -495,6 +496,66 @@ if (!s011Entry) {
   } else {
     ok(`S-011 通过：抽干点夹在 gate_turn(${gateAt}) 与 prepare_turn_inputs(${prepAt}) 之间`)
   }
+}
+console.log()
+
+// ── S-012: 代码注释不得写只有实施排期含义的话 ──────────────────────────
+//
+// 注释的边界（`CONTRIBUTING.md` §4）：写「读这个文件需要知道的不变量 / 陷阱 / 为什么」，
+// **不写过程**。过程叙述的危害不是啰嗦，而是**它会变成假的**：「本批未修」的下一批
+// 修了，那句注释就躺在代码里指着一个已不存在的时间点；「批 2 的能力」在批次重排后
+// 无人能解。这类句子没有 owner，也就没人回头改它——而读者只能选择信或不信。
+//
+// 判据只取**两种无歧义形态**（同 D-004「只收结构标记」的取舍）：
+//   ① 待办标记：注释行以 `TODO` / `FIXME` / `XXX` / `HACK` 起头——待办有自己的
+//      登记处（`docs/plan/13-质量改进总纲.md` §3：引入新待办就登记进计划文档，
+//      **不是代码注释**），写在注释里就等于「谁也不会再看见」的那一类；
+//   ② 无出处的批次号：`批 N` / `批次 N` 且**同一行没有 `plan/NN`**。批次号属实施
+//      计划，单独一个数字不知道是哪份计划的哪一批；带出处就是合法指认
+//      （仓内既有的 `[plan/11 批 2 ③](…)` 那种写法全部通过）。
+//
+// **已知边界（刻意不判）**：`本批` / `诚实缺口` / `曾经` 在注释里都可能是**运行期语义**
+// 或**陷阱说明**——「本批未执行的工具调用」说的是这一批工具调用（`tool_executor` 的
+// 收口不变量），as-of 投影里「这条目标曾经声明过吗」是查询语义。实测把它们列进词表：
+// `本批|待接|尚未接` 在 `symbio/src` 命中 50 处、绝大多数是运行期 prose，`曾经` 命中
+// 59 处含真误报——**一条天天误报的守卫最后只会被人用豁免喂死**（本文件反复写的那条）。
+// 范围：`.rs` 的注释行（`symbio/src`、`cli/src`、`tauri/src-tauri/src`、`docs/plan/verify`），
+// 测试文件同样参与检查（与 S-002 一致）。
+// 豁免：`// grep-audit-allow S-012: 理由`（写在命中行或其紧邻上一行，理由不可为空，同 S-010）。
+console.log('--- S-012: 代码注释里的实施排期指认 ---')
+
+const S012_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/plan/verify']
+/** 与 resolveScope 同策略：cwd 是仓库树就用 cwd（回归测试注入临时树），否则退回仓库根 */
+const S012_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
+const S012_TODO_RE = /^\s*(?:\/\/[/!]*)\s*(?:TODO|FIXME|XXX|HACK)\b/
+const S012_BATCH_RE = /批(?:次)?\s*\d/
+const S012_ANCHOR_RE = /plan\/\d+/
+const WAIVER_S012_RE = /\/\/\s*grep-audit-allow S-012:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
+
+{
+  const s012Files = S012_ROOTS.flatMap((r) => walk(path.join(S012_BASE, r)))
+  let s012 = 0
+  for (const file of s012Files) {
+    let lines
+    try {
+      lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
+    } catch {
+      continue
+    }
+    lines.forEach((l, i) => {
+      if (!/^\s*\/\//.test(l)) return
+      if (WAIVER_S012_RE.test(l) || (i > 0 && WAIVER_S012_RE.test(lines[i - 1]))) return
+      const why = S012_TODO_RE.test(l)
+        ? '注释以 TODO / FIXME 起头 ⇒ 待办登记进计划文档，不写进代码注释'
+        : S012_BATCH_RE.test(l) && !S012_ANCHOR_RE.test(l)
+          ? '批次号没有出处 ⇒ 写成 `plan/NN 批 M`（单独的「批 N」指不出是哪份计划的第几批）'
+          : null
+      if (!why) return
+      err(`${disp(file)}:${i + 1}  ${why}`)
+      s012++
+    })
+  }
+  if (s012 === 0) ok('S-012 通过：注释里没有待办标记与无出处的批次号')
 }
 console.log()
 

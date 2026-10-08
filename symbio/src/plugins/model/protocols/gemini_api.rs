@@ -123,11 +123,11 @@ impl ModelProtocol for GeminiProtocol {
                     Some(MessageContent::Text(ref t)) => t.clone(),
                     _ => "{}".into(),
                 };
-                // ⚠ 已知缺陷（本批未修）：`functionResponse.name` 按 Gemini 规范应当
+                // ⚠ 已知缺陷：`functionResponse.name` 按 Gemini 规范应当
                 // 是**函数名**，这里填的是 `tool_call_id`。两者不等，严格实现会报错。
                 // 修它需要把工具名带到 role=Tool 的消息上（`ChatMessage.name` 目前
-                // 由 `llm_build_tool_message` 留空），是一次独立的协议改动，故不夹带在
-                // 名字编解码这一批里。此处的 `replace` 也不再保留——工具调用 id 不是
+                // 由 `llm_build_tool_message` 留空），是一次独立的协议改动。
+                // 此处的 `replace` 也不再保留——工具调用 id 不是
                 // 能力名，对它做线上形态换算没有意义。
                 parts.push(json!({
                     "functionResponse": {

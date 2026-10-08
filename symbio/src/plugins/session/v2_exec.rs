@@ -28,8 +28,8 @@
 //! 一处**诚实缺口**：反射档把 `actor.budget_ms` 按档位派生
 //! （`LatencyTier::Reflex.budget_ms()`），但该字段在生产里仍**没有读方**
 //! （`invariants::declared_budget_ms` 读的是开轮载荷的 `tier` 字符串）。派生出的值
-//! 今天是"算了却看不见"——读方接进来属 `invariants` 那一侧的独立一批，
-//! 见 `execute_turn` 里派生点旁的注记。
+//! 今天是"算了却看不见"——读方归 `invariants` 那一侧（它读 `tier` 还是读这个字段，
+//! 是那边的决定），见 `execute_turn` 里派生点旁的注记。
 //!
 //! ## 收束派生事实（本档已覆盖）
 //!
@@ -45,12 +45,12 @@
 //!   S8 步 20）——三者的数据来源都在工具执行层（`Delegation` / `TaskDeclaration` /
 //!   熔断理由），由 [`super::v2_tools::SessionDispatchPort`] 经 `take_derived` 交回。
 //!
-//! ## 本档**尚未**覆盖的收束派生事实（诚实缺口）
+//! ## 本档不覆盖：写侧授权闸
 //!
 //! 只剩一类：**写侧授权闸**（`authorize_close`，
 //! [plan/01 §7](../../../docs/plan/01-核心架构.md)）——bridge 档在落收束格**之前**判
 //! `reply.first` / `reply.append`，运行器不判。补它要先决定运行器的落格路径怎么接闸，
-//! 是独立一批（要动 core 运行器的落格路径），不混进本档的收束收尾。
+//! 那是 core 侧的一处独立改动，不在本档的收束收尾里。
 //!
 //! 窗口：prompt 只带最近 `context_messages` 轮（含当前轮）——事实全量
 //! 入格（append-only），**视图**才是窗口。
@@ -67,7 +67,7 @@
 //! 等待用户语义：工具报 `failure_kind = pending`（confirm / ask_user）时运行器
 //! 停止工具循环且**不落收束格**（本轮还没了结），本函数按正常收束返回——
 //! 待用户动作由分发方广播的 `user_prompt` 节点承载（`WaitingUserAction`），
-//! 与 v1 的呈现一致。恢复（用户答完续跑同一轮）是独立一批。
+//! 与 v1 的呈现一致。恢复（用户答完续跑同一轮）走 [`TurnResume`]，**不重开用户格**。
 //!
 //! 但**派生事实两幕都写**（等待幕与恢复幕都走到本函数轮末）：步 11 编码按**内容**
 //! 去重（`RecallView::contains_content`）⇒ 同一轮不会编出第二条；恢复幕的召回视图
@@ -424,7 +424,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     // 于是这里派生出的数是"算了却看不见"：不派生也不改变今天的行为（`trivial()` 的
     // `60_000` 同样无人读）。仍然派生的理由 = 它是 I3 预算的**正确值**，读方接进来时
     // 不必回头改这里；而读方该读 `tier` 还是该读这个字段（= 改事件载荷形状），
-    // 属 `invariants` 那一侧的独立一批，不混进本批。
+    // 是 `invariants` 那一侧的取舍，本模块两个都不替它定。
     let tier = if hit.is_some() {
         LatencyTier::Reflex
     } else {
@@ -626,8 +626,8 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     }
     // 等待用户（`outcome.awaits_user`）：本轮尚未了结（运行器未落收束格），但
     // **按正常收束返回**——待用户动作由分发方广播的 `user_prompt` 节点承载
-    // （`WaitingUserAction`），v1 的呈现（卡片 + 恢复入口）不变；恢复（用户答完
-    // 续跑同一轮）是独立一批。此处的 `text` 只是模型在工具轮说过的话，不是终答。
+    // （`WaitingUserAction`），v1 的呈现（卡片 + 恢复入口）不变；恢复时经
+    // [`TurnResume`] 续写同一轮（不重开用户格）。此处的 `text` 只是模型在工具轮说过的话，不是终答。
 
     Ok(V2TurnResult {
         output: TurnOutput {

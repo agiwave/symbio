@@ -27,7 +27,7 @@
 //! 本模块**不持第二份字面量**，出厂参数由判定侧的测试显式 import 同一批常量。
 //! 字段表同步 [CONFIGURATION](../../../../../docs/reference/CONFIGURATION.md)。
 //!
-//! ## 一件刻意未做的事
+//! ## Q3 现读磁盘，不记进程内账
 //!
 //! - **Q3（worker 进展）也在本模块**，且**同样不记进程内账**——每次现读磁盘，
 //!   重启后与磁盘天然对得上。读侧走 [`PersistentChatSession::list_sub_sessions`]

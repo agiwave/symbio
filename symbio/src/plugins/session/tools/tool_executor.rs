@@ -964,7 +964,7 @@ impl BreakerInputs {
 /// `session_dir.join(V2_WAL_FILE)` ⇒ 读的是 `<插件目录>/v2-events.wal`——那个文件
 /// **不存在**，`open_readonly` 失败即返回 0 ⇒ `spent_ms` 恒 0 ⇒ 闸门的预算分支
 /// 永远走不到，而**没有任何东西会变红**（熔断格只在判 `Break` 时才落，判不出来就
-/// 一条都没有）。接线了却永不生效，正是 [11 批 2 ③] 的 e2e 判据要拦的那类静默失效。
+/// 一条都没有）。接线了却永不生效，正是 [plan/11 批 2 ③] 的 e2e 判据要拦的那类静默失效。
 /// 会话 id 缺失（无会话上下文）⇒ 零账：没有会话就没有账，不是"读不到插件目录的账"。
 fn session_cost_ms(
     session_dir: &std::path::Path,
