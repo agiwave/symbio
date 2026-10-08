@@ -82,8 +82,6 @@
 
 use std::sync::{Arc, Mutex};
 
-use tokio::sync::mpsc;
-
 use crate::symbio_core::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
@@ -136,6 +134,176 @@ enum UiFrame {
     Barrier(tokio::sync::oneshot::Sender<()>),
 }
 
+/// UI 帧队列的**容量上限**。
+///
+/// 取值不是性能参数而是**内存上界**：`on_delta` 是同步回调（不能 await），所以生产者
+/// 不能被背压——慢消费者下唯一能让内存有界的办法是**给队列设界**，并在满了的时候
+/// **合并增量**而不是丢帧（丢增量 = 丢正文，界面会少一截）。
+const UI_FRAME_CAPACITY: usize = 64;
+
+/// 有界 UI 帧队列：容量上限 + 增量合并。
+///
+/// ## 为什么不是 `mpsc` 加界就完事
+///
+/// 加了界必然要处理「满了怎么办」，而这里的答案是**不能丢**：
+/// `Finalize` 丢一次，正文节点永远转在「流式中」；`Snapshot` 丢一次，那轮正文
+/// 整段消失。所以本队列的策略是
+///
+/// - **增量（`Delta`）满了就合并**：并进队列里**同节点的最后一条增量**的正文。
+///   这是**无损**的——增量本来就是追加，合并等价于「一批到达」；
+/// - **结构帧（`Snapshot` / `Finalize` / `Barrier`）永不被丢**：满时先腾掉一条
+///   增量；一条增量都腾不掉（队列里全是结构帧）才允许软超容，而结构帧每轮 O(1) 条，
+///   在 64 的容量下不可能发生。
+///
+/// ## 为什么合并要「并进同节点的那一条」而不是「并进队尾」
+///
+/// 一轮的帧序是 `Snapshot → Delta* → Finalize`，而 `Finalize` 之后不会再有同节点的
+/// 增量（节点已定格）。所以队列里同节点的增量必然**位于 Snapshot 与 Finalize 之间**，
+/// 把新增量并进它既不丢文本也不打乱它与 Finalize 的相对次序。跨节点合并则会——
+/// 那正是本实现要避免的。
+///
+/// ## 关闭语义
+///
+/// `UiBridge` drop 时关闭队列，接收端 `pop` 返回 `None` 自然退出——与原先
+/// `UnboundedSender` drop 后 `recv` 返回 `None` 同形。
+struct FrameQueue {
+    inner: std::sync::Mutex<FrameQueueInner>,
+    cap: usize,
+    notify: tokio::sync::Notify,
+}
+
+#[derive(Default)]
+struct FrameQueueInner {
+    q: std::collections::VecDeque<UiFrame>,
+    closed: bool,
+    /// 因「队列里没有可腾的增量」而软超容的次数——恒应为 0，非零即说明容量取值有问题。
+    soft_overflow: usize,
+}
+
+impl FrameQueue {
+    fn new(cap: usize) -> Self {
+        Self {
+            inner: std::sync::Mutex::new(FrameQueueInner::default()),
+            cap,
+            notify: tokio::sync::Notify::new(),
+        }
+    }
+
+    /// 入队一帧。返回 `false` 表示队列已关闭（接收端退出）——与 `UnboundedSender::send`
+    /// 的 `SendError` 同形，调用方原有那几处 `let _ =` / `is_err()` 语义不变。
+    fn send(&self, frame: UiFrame) -> bool {
+        let mut g = self.inner.lock().unwrap();
+        if g.closed {
+            return false;
+        }
+        if g.q.len() < self.cap {
+            g.q.push_back(frame);
+        } else {
+            match frame {
+                UiFrame::Delta { id, text } => {
+                    // 先找同节点的最后一条增量：找到就并进去（无损、保序）。
+                    let merged =
+                        g.q.iter_mut()
+                            .rev()
+                            .find_map(|f| match f {
+                                UiFrame::Delta {
+                                    id: fid,
+                                    text: ftext,
+                                } if *fid == id => {
+                                    ftext.push_str(&text);
+                                    Some(())
+                                }
+                                _ => None,
+                            })
+                            .is_some();
+                    if !merged {
+                        // 同节点一条都没有 ⇒ 这是该节点的首帧（队列里连它的
+                        // Snapshot 都还没进），腾一条增量给它让位。
+                        if let Some(pos) =
+                            g.q.iter().position(|f| matches!(f, UiFrame::Delta { .. }))
+                        {
+                            g.q.remove(pos);
+                        } else {
+                            g.soft_overflow += 1;
+                        }
+                        g.q.push_back(UiFrame::Delta { id, text });
+                    }
+                }
+                structural => {
+                    // 结构帧不可丢：腾掉**最旧的一条增量**（不是队尾——队尾那条
+                    // 可能正是定格前最后一段正文）。
+                    if let Some(pos) = g.q.iter().position(|f| matches!(f, UiFrame::Delta { .. })) {
+                        g.q.remove(pos);
+                    } else {
+                        g.soft_overflow += 1;
+                    }
+                    g.q.push_back(structural);
+                }
+            }
+        }
+        drop(g);
+        self.notify.notify_one();
+        true
+    }
+
+    /// 关闭队列并唤醒等待者（`UiBridge` drop 时调用）。
+    fn close(&self) {
+        let mut g = self.inner.lock().unwrap();
+        g.closed = true;
+        drop(g);
+        self.notify.notify_waiters();
+    }
+
+    async fn pop(&self) -> Option<UiFrame> {
+        loop {
+            // ⚠️ **必须先注册兴趣，再检查条件**——否则丢唤醒。
+            //
+            // 朴素写法（先查队列/closed、解锁、再 `notified().await`）在 `close()`
+            // 恰好落在「解锁」与「await」之间时会**永远等下去**：那一刻还没有人在
+            // 等待，`notify_waiters()` 唤不醒任何东西，而 `pop` 随后就注册上并
+            // 睡下去，再没有第二次通知。
+            //
+            // 这个失效形态是**静默**的：不 panic、不超时、不占 CPU，只是永远不返回。
+            // 它在本函数上真实发生过一次（见 `v2_exec.test.rs` 里 `drained` 的注释）。
+            // `tokio::sync::Notify` 的规范解法就是这个顺序：先拿到 future、`enable()`
+            // 登记兴趣，然后才去检查条件。
+            let notified = self.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            {
+                let mut g = self.inner.lock().unwrap();
+                if let Some(f) = g.q.pop_front() {
+                    return Some(f);
+                }
+                if g.closed {
+                    return None;
+                }
+            }
+            notified.await;
+        }
+    }
+
+    /// 当前排队帧数（判据与测试用）。
+    /// ⚠️ `#[cfg(test)]`：这两个是**判据用的观察口**，只有
+    /// `v2_exec.test.rs` 调它们。生产构建里它们无人调用 ⇒ `clippy -D warnings`
+    /// 判死代码。标 cfg(test) 而不是加 `dead-code-allow` 豁免——豁免是给「生产里
+    /// 确实需要、只是暂时没人调」的东西用的，而这里的需求本来就不在生产侧。
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.inner.lock().unwrap().q.len()
+    }
+
+    /// 软超容累计（恒应为 0）。
+    /// ⚠️ `#[cfg(test)]`：这两个是**判据用的观察口**，只有
+    /// `v2_exec.test.rs` 调它们。生产构建里它们无人调用 ⇒ `clippy -D warnings`
+    /// 判死代码。标 cfg(test) 而不是加 `dead-code-allow` 豁免——豁免是给「生产里
+    /// 确实需要、只是暂时没人调」的东西用的，而这里的需求本来就不在生产侧。
+    #[cfg(test)]
+    pub(crate) fn soft_overflow(&self) -> usize {
+        self.inner.lock().unwrap().soft_overflow
+    }
+}
+
 /// 流式 UI 桥（DeltaSink 侧）：同步回调里只做「分帧 + 投递」——真正的
 /// `emit`（异步）由执行任务里的接收端驱动（见模块文档）。
 ///
@@ -143,10 +311,23 @@ enum UiFrame {
 /// [`UiBridge::finalize_node`] 定格本轮正文——它必须与增量帧走**同一条通道**，
 /// 否则定格帧会越过队列里未消化的增量先到，正文被追加到已定格的副本之后。
 pub(crate) struct UiBridge {
-    tx: mpsc::UnboundedSender<UiFrame>,
+    tx: Arc<FrameQueue>,
     root_id: String,
     /// 正文节点 id：首片分配、此后稳定；`finalize_node` 交还并置空（下一轮另开）。
     node: Arc<Mutex<Option<String>>>,
+}
+
+/// `UiBridge` drop 时**关闭队列**：接收端的 `pop` 因此返回 `None` 而退出。
+///
+/// 这条语义原先由 `UnboundedSender` 的 drop 免费提供——改成 `Arc<FrameQueue>` 后
+/// 队列与桥同生共死，而**发射任务自己也持有一份 Arc**（`execute_turn` 里
+/// `tx.pop()`），所以「桥没了通道就关了」不再自动成立。不显式关的话，发射任务
+/// 会在每一轮结束后**永久挂起**：不 panic、不超时、不占 CPU，只是永不退出，
+/// 而轮次照常增长——那种泄漏在日志里一个字都看不见。
+impl Drop for UiBridge {
+    fn drop(&mut self) {
+        self.tx.close();
+    }
 }
 
 impl UiBridge {
@@ -185,7 +366,7 @@ impl UiBridge {
     /// 正文后到，前端按到达顺序排出来的时间线是错的。
     pub(crate) async fn flush(&self) {
         let (done, wait) = tokio::sync::oneshot::channel();
-        if self.tx.send(UiFrame::Barrier(done)).is_err() {
+        if !self.tx.send(UiFrame::Barrier(done)) {
             return; // 接收端已退出（生成结束）：没有待落帧可言。
         }
         // 屏障没走完 = **同步点失效**，不是「无所谓的失败」：定格帧还压在队列里，
@@ -230,7 +411,8 @@ impl DeltaSink for UiBridge {
                 }
             }
         };
-        // unbounded 通道：发送不阻塞、不失败（接收端与生成同生命周期）。
+        // 有界队列：入队不阻塞（`on_delta` 是同步回调，不能 await），满了合并
+        // 增量而不是丢——丢增量等于丢正文。见 `FrameQueue`。
         let _ = self.tx.send(frame);
     }
 }
@@ -359,15 +541,15 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
 
     // 流式桥：分帧侧（同步回调）与发射侧（异步任务）经 unbounded 通道解耦。
     // 通道在桥 drop（生成结束）后关闭，接收端自然退出。
-    let (tx, mut rx) = mpsc::unbounded_channel::<UiFrame>();
+    let tx = Arc::new(FrameQueue::new(UI_FRAME_CAPACITY));
     let bridge = Arc::new(UiBridge {
-        tx,
+        tx: tx.clone(),
         root_id: root_id.to_string(),
         node: Arc::new(Mutex::new(None)),
     });
     let emit_sink = sink.clone();
     let emitter = tokio::spawn(async move {
-        while let Some(frame) = rx.recv().await {
+        while let Some(frame) = tx.pop().await {
             let message = match frame {
                 UiFrame::Snapshot { id, parent, text } => ChatMessage {
                     id,
@@ -686,3 +868,6 @@ mod tests;
 // panic-allow symbio/src/plugins/session/v2_exec.rs::current_node: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow symbio/src/plugins/session/v2_exec.rs::finalize_node: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow symbio/src/plugins/session/v2_exec.rs::on_delta: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/v2_exec.rs::send: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/v2_exec.rs::close: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/v2_exec.rs::pop: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。

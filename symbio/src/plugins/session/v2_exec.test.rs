@@ -875,10 +875,11 @@ async fn a_skill_hit_never_takes_over_a_resumed_turn() {
 // ——挂死意味着整轮停在正文定格处，比倒序更糟，也更难发现。
 #[tokio::test]
 async fn flush_returns_when_the_emitter_drops_the_barrier() {
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<UiFrame>();
+    let q = Arc::new(FrameQueue::new(UI_FRAME_CAPACITY));
     // 接收端存活，收到屏障却直接丢弃（模拟 emitter 中途退出）
+    let rx = q.clone();
     let _emitter = tokio::spawn(async move {
-        while let Some(frame) = rx.recv().await {
+        while let Some(frame) = rx.pop().await {
             if let UiFrame::Barrier(done) = frame {
                 drop(done);
                 break;
@@ -886,7 +887,7 @@ async fn flush_returns_when_the_emitter_drops_the_barrier() {
         }
     });
     let bridge = UiBridge {
-        tx,
+        tx: q,
         root_id: "root".to_string(),
         node: Arc::new(Mutex::new(None)),
     };
@@ -899,8 +900,8 @@ async fn flush_returns_when_the_emitter_drops_the_barrier() {
 // 同一条路径——收下它是因为 `flush` 被调用时生成往往已收尾，早退不能变成等待。
 #[tokio::test]
 async fn flush_returns_immediately_when_the_channel_is_already_closed() {
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<UiFrame>();
-    drop(rx);
+    let tx = Arc::new(FrameQueue::new(UI_FRAME_CAPACITY));
+    tx.close();
     let bridge = UiBridge {
         tx,
         root_id: "root".to_string(),
@@ -909,4 +910,237 @@ async fn flush_returns_immediately_when_the_channel_is_already_closed() {
     tokio::time::timeout(std::time::Duration::from_secs(2), bridge.flush())
         .await
         .expect("通道已关闭时 flush 必须立即返回");
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// FrameQueue 的有界 + 增量合并（批 C4 的判据）
+//
+// 这组用例只测 `FrameQueue` 本身，不经 `UiBridge`——`on_delta` 要先有一个节点，
+// 而「合并是否无损、是否保序」是队列的性质，与谁在生产它无关。
+//
+// **慢消费者**是关键输入：`on_delta` 是同步回调（不能 await），所以慢消费者永远
+// 无法把背压传回生产者——生产者唯一能做的就是**有界**。因此判据不是「会不会阻塞」，
+// 而是「队列满时发生什么」：
+//
+//  1. 队列长度**不超过**容量（内存有上界）；
+//  2. 正文**零丢失**（增量合并而非丢帧）——丢一帧就是界面少一截；
+//  3. **终态帧必达**——`Finalize` 永不被丢，丢了正文节点会永远转在「流式中」；
+//  4. **保序**——`Finalize` 必须排在它自己那条增量**之后**；
+//  5. **屏障帧必达且必回执**——`flush` 的同步点不能被有界化吃掉；
+//  6. **关闭语义**——bridge drop 后接收端靠 `pop` 返回 `None` 退出。
+//
+// ⚠️ 函数名只用 ASCII 标识符：中文全角括号与冒号不是合法的 Rust 标识符字符
+// （第一版写成 `fn 慢消费者：…（…）()` 直接编译不过，记在这里免得再犯）。
+// ─────────────────────────────────────────────────────────────────────────
+
+fn q() -> FrameQueue {
+    FrameQueue::new(UI_FRAME_CAPACITY)
+}
+
+/// 排干队列，返回（拼接后的增量正文 / 帧序里节点的次序，`Finalize` 记作 `<finalize>`）
+/// ⚠️ **必须先 `close()`**：`pop` 只在队列关闭时返回 `None`，不关的话这里会永远
+/// 等下去——而且是**静默**地等（不 panic、不超时、不占 CPU）。第一版就踩了：
+/// 整条 `cargo test` 挂住 13 分钟，最后是靠「测试进程 CPU 恒为 0」这件事发现的，
+/// 而不是靠任何报错。所以两件事一起做：先关（给循环一个终点），再套 `timeout`
+/// （万一将来回归成挂死，几秒内报出来，而不是把门禁拖到超时）。
+fn drained(q: FrameQueue) -> (String, Vec<String>) {
+    let mut text = String::new();
+    let mut order = Vec::new();
+    q.close();
+    // `enable_time()` 不能省：`tokio::time::timeout` 需要一个**启了 timer 的**
+    // runtime，而 `new_current_thread()` 默认不启——不显式开就 panic 在
+    // `timeout(...)` 那一行，报错是「no timer running」，与「队列排不干」毫无关系，
+    // 极易误诊成队列的 bug（第一版就踩了：4 条测试瞬间红、0.03s，跟超时无关）。
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while let Some(f) = q.pop().await {
+                match f {
+                    UiFrame::Delta { id, text: t } => {
+                        text.push_str(&t);
+                        order.push(id);
+                    }
+                    UiFrame::Finalize { .. } => order.push(String::from("<finalize>")),
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("排干超时 ⇒ pop 在队列关闭后仍不返回 None（队列的退出语义坏了）")
+    });
+    (text, order)
+}
+
+/// 灌 500 条增量把队列灌满（容量 64 ⇒ 一定是满的）
+fn flood(q: &FrameQueue, n: usize) {
+    for i in 0..n {
+        q.send(UiFrame::Delta {
+            id: "n1".into(),
+            text: format!("x{i}"),
+        });
+    }
+}
+
+#[test]
+fn queue_passes_frames_through_in_order_when_not_full() {
+    let q = q();
+    assert!(q.send(UiFrame::Snapshot {
+        id: "n1".into(),
+        parent: "root".into(),
+        text: "a".into()
+    }));
+    assert!(q.send(UiFrame::Delta {
+        id: "n1".into(),
+        text: "b".into()
+    }));
+    assert!(q.send(UiFrame::Finalize {
+        id: "n1".into(),
+        parent: "root".into(),
+        text: "ab".into()
+    }));
+    assert_eq!(q.len(), 3);
+    let (_text, order) = drained(q);
+    assert_eq!(order, vec!["n1", "<finalize>"], "未满时必须原序透传");
+}
+
+#[test]
+fn slow_consumer_never_exceeds_the_capacity() {
+    let q = q();
+    flood(&q, 500);
+    assert!(
+        q.len() <= UI_FRAME_CAPACITY,
+        "队列涨到 {} 条，超过容量 {} ⇒ 内存无上界",
+        q.len(),
+        UI_FRAME_CAPACITY
+    );
+    assert_eq!(
+        q.soft_overflow(),
+        0,
+        "不该有软超容（队列里全是可合并的增量）"
+    );
+}
+
+#[test]
+fn slow_consumer_loses_no_text() {
+    let q = q();
+    // ⚠️ 期望值**逐条拼出来**再逐字节比，不要写成 `500 * 4` 这类算术：
+    // `x0`..`x9` 是 2 字节、`x10`..`x99` 是 3 字节、`x100`..`x499` 才是 4 字节，
+    // 总长 1890 而非 2000。第一版写成 `500 * 4`，差出来的 110 字节被误读成
+    // 「丢了正文」，白查一轮——**测试自己的期望值算错，报错信息就会指向错误的方向**。
+    let mut expected = String::new();
+    for i in 0..500 {
+        expected.push_str(&format!("x{i}"));
+    }
+    q.send(UiFrame::Delta {
+        id: "n1".into(),
+        text: String::new(),
+    });
+    for i in 0..500 {
+        let piece = format!("x{i}");
+        q.send(UiFrame::Delta {
+            id: "n1".into(),
+            text: piece,
+        });
+    }
+    let (text, _order) = drained(q);
+    assert_eq!(
+        text.len(),
+        expected.len(),
+        "正文少了 {} 字节 ⇒ 有增量被丢掉而不是被合并",
+        expected.len() as isize - text.len() as isize
+    );
+    assert_eq!(text, expected, "正文内容与逐条入队的完全一致");
+    assert!(text.contains("x499"), "最后一条增量不见了");
+    assert!(text.contains("x0"), "第一条增量不见了");
+}
+
+#[test]
+fn slow_consumer_still_delivers_the_finalize_frame() {
+    let q = q();
+    flood(&q, 500);
+    q.send(UiFrame::Finalize {
+        id: "n1".into(),
+        parent: "root".into(),
+        text: "done".into(),
+    });
+    let (_text, order) = drained(q);
+    assert!(
+        order.contains(&String::from("<finalize>")),
+        "队列满时 `Finalize` 被丢了 ⇒ 节点永远定格不了"
+    );
+}
+
+#[test]
+fn finalize_stays_after_its_own_deltas_when_the_queue_is_full() {
+    let q = q();
+    flood(&q, 500);
+    q.send(UiFrame::Finalize {
+        id: "n1".into(),
+        parent: "root".into(),
+        text: "done".into(),
+    });
+    let (_text, order) = drained(q);
+    let last_delta = order.iter().rposition(|x| x == "n1");
+    let finalize_at = order.iter().position(|x| x == "<finalize>");
+    assert!(last_delta.is_some() && finalize_at.is_some());
+    assert!(
+        last_delta.unwrap() < finalize_at.unwrap(),
+        "定格帧跑到了增量前面 ⇒ 顺序错乱：{:?}",
+        order
+    );
+}
+
+#[test]
+fn barrier_survives_a_full_queue_and_is_acknowledged() {
+    let q = Arc::new(q());
+    flood(&q, 500);
+    let (done, wait) = tokio::sync::oneshot::channel();
+    assert!(q.send(UiFrame::Barrier(done)), "屏障帧入队失败");
+    let q2 = q.clone();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    rt.block_on(async move {
+        let t = tokio::spawn(async move {
+            while let Some(f) = q2.pop().await {
+                if let UiFrame::Barrier(d) = f {
+                    let _ = d.send(());
+                    break;
+                }
+            }
+        });
+        wait.await.expect("屏障未回执 ⇒ flush 的同步点失效");
+        t.await.unwrap();
+    });
+}
+
+#[test]
+fn closed_queue_rejects_sends_and_drains_to_none() {
+    let q = q();
+    q.send(UiFrame::Delta {
+        id: "n1".into(),
+        text: "a".into(),
+    });
+    q.close();
+    assert!(
+        !q.send(UiFrame::Delta {
+            id: "n1".into(),
+            text: "b".into()
+        }),
+        "关闭后 send 应失败"
+    );
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        // 已排队的那条要先吐出来，之后才是 None
+        assert!(matches!(q.pop().await, Some(UiFrame::Delta { .. })));
+        assert!(
+            q.pop().await.is_none(),
+            "关闭后 pop 应返回 None（接收端靠这个退出）"
+        );
+    });
 }

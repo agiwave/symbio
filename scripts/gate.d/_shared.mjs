@@ -730,7 +730,10 @@ export const BASELINE = {
   //      （`reason` 会原样写进转写节点 `meta.reason`，改值 = 老对话读不回当时的理由，
   //      与 `progress_reason_literal_is_the_wire_contract` 同一条判据）、`Verdict` 的
   //      serde 形状收下**词表之外**的码（未知码是可达输入，不是事故）。
-  rustTests: 1376,
+  // 1383（2026-10-08，批 C4）：1376 → 1383，**+7** = `FrameQueue` 的 7 条判据
+  //   （未满原序透传 / 慢消费者不超容量 / 正文零丢失 / 定格帧必达 / 定格排在自己增量之后 /
+  //   屏障满载仍回执 / 关闭后退出）。其中 6 条是这一批新写的慢消费者判据。
+  rustTests: 1383,
   /**
    * CI 口径的 Rust 通过数（**只增不减**）——与上面三个分包基线**是不同口径，不能互替**。
    *
@@ -1101,7 +1104,13 @@ export const BASELINE = {
    * 排除 `*.test.rs` / `tests.rs` / 内联 `#[cfg(test)] mod` / **单独带 `#[cfg(test)]`
    * 的项**，排除注释里的形态，按**出现次数**计（同一行两处算两处）。
    */
-  panicSites: 64,
+  // 64 → 67（2026-10-08，批 C4）：**+3** = `FrameQueue` 自身的 `Mutex::lock().unwrap()`
+  //   （`send` / `close` / `pop`）。`len` / `soft_overflow` 是判据用的观察口，标了
+  //   `#[cfg(test)]` ⇒ 生产构建里不存在，clippy 也不判死代码。
+  //   这不是新增的债面而是**新增的守卫**：
+  //   C7 上线当天就把这 5 处抓了出来（未登记 ⇒ PN-001 红），登记后才放行——
+  //   同一批里 `Drop for UiBridge` 补上了「桥 drop 必须关队列」，否则发射任务每轮永久挂起。
+  panicSites: 67,
 }
 
 /**
