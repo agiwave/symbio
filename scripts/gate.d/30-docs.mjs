@@ -8,8 +8,11 @@ import { fileURLToPath } from 'node:url'
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
 
-// 带回归测试的判定型守卫（两份清单保持同序同集）
-const GUARDS = [
+// 带回归测试的判定型守卫。
+// ⚠️ 这两份名单**手写**是刻意的（每条都带着「为什么值得跑」的说明），但手写就有漏登：
+// `gate-wiring-audit`（GW-001…003）拿 `scripts/**/*.test.mjs` 的目录事实与它们对账，
+// 所以下面两处 `export` 不是给人读的出口，是给那条守卫读的输入。
+export const GUARDS = [
   'grep-audit',
   'mechanism-audit',
   'plugin-entry-audit',
@@ -52,13 +55,18 @@ const GUARDS = [
   // `Box<dyn P>` / `&dyn P`——协作只走事件）。主体名单是**显式清单**（加主体
   // 登记一行），不存在注释豁免通道。回归测试双向钉住：运行时引用 / 互持句柄
   // 必须变红，定义域 / 重导出 / 测试驱动 / 注释提及不得误报。
-  'no-direct-call-audit',
-  // `gate-codes-audit` 判**判据码本身**：撞号（两个脚本声明同一码）、未登记前缀、
+  'no-direct-call-audit',  // `gate-codes-audit` 判**判据码本身**：撞号（两个脚本声明同一码）、未登记前缀、
   // 输出里出现没登记的码、空命名空间、同一前缀两种说法。它守的是判据的**地址**——
   // 豁免注释、门禁日志、文档指认都按码定位，码一旦撞车，「已豁免」会在两个脚本里
   // 同时命中而人只看见其中一个。失效形态与 `35-baseline` 同族：判据被削不需要动
   // 任何测试，且不留痕迹，所以判据必须是**独立一跑**而不靠人记得住号段。
   'gate-codes-audit',
+  // `gate-wiring-audit` 判**门禁自己有没有在跑这些测试**：名单是手写的，而「加了一份
+  // 测试但没接线」这件事没有任何地方会报——实测 `windows-restart` 两份测试躺在仓里
+  // 从没被跑过，其中一份早就红了（`prepare` 用 realpath 建 stage，测试拿未归一化的
+  // 临时目录名比前缀，盘符大小写不同必然假红）。它反向也判：名单指名的文件不存在 ⇒
+  // 那一步跑的是空气。判据是「名单 vs 目录事实」两个方向的差集，不是词表。
+  'gate-wiring-audit',
 ]
 // 不是**判定型**审计脚本，只跑回归测试（共享库 / 门禁原语 / 报告型脚本）：
 //   - `color` 带一道「scripts/ 下不得手写 ANSI」守卫；
@@ -97,7 +105,10 @@ const GUARDS = [
 //     另两种：repoRoot 不认调用方 cwd ⇒ 在别的仓库跑却读本仓索引；
 //     `--gate` 被预览分支吞掉 ⇒ 人以为门禁跑过了。回归测试用真实临时 git 仓库
 //     钉住这三条（`stdio: ['ignore', ...]` 让「默认读 stdin」暴露成超时）。
-const TEST_ONLY = [
+//   - `windows-restart` / `windows-restart-prepare` 是「换壳重启」监督器的真实进程测试
+//     （只在 win32 跑）：它们此前**从没被门禁跑过**，其中 prepare 一份早已红了
+//     ——正是 `gate-wiring-audit` 存在的理由。
+export const TEST_ONLY = [
   'color',
   'rust-scan',
   'gate.d/_shared',
@@ -119,6 +130,10 @@ const TEST_ONLY = [
   // 14 条是反向用例（文档与声明各说各话必须抛）——不跑它，「外置」就只是把
   // 手填数据从程序里搬进脚本，绿灯照样可能是假的。
   'gen-verify-facts',
+  // 两份 Windows 换壳重启监督器的真实进程测试（`skip` 在非 win32）。它们一直没接线，
+  // 于是 prepare 那份红了很久没人知道——接线由 GW-001 保证不会再丢。
+  'windows-restart',
+  'windows-restart-prepare',
 ]
 // 报告型：只防崩溃（退出码恒 0，判定需人工复核），走日志不刷屏。
 // 刻意 `echo: 'none'`：这份报告的候选会长期存在（大部分是签名组成部分与自引用），
@@ -138,7 +153,7 @@ export default {
       }
     }
     for (const name of GUARDS) {
-      // ⚠️ `--strict` **不是可选的**：这 12 个守卫里，凡是带 WARNING 级判定的
+      // ⚠️ `--strict` **不是可选的**：`GUARDS` 里凡是带 WARNING 级判定的
       // （`grep-audit` 的「疑似吞错需人工 review」、`plugin-entry-audit` /
       // `mechanism-audit` / `test-layout-audit` / `style-audit` 的 WARNING），
       // 不传它就**永远只打印、永不红**——只剩 ERROR 会拦，而 WARNING 恰恰是
@@ -148,9 +163,9 @@ export default {
       // 「2026-09-20 前失效链接只在 `--strict` 下失败，而门禁从不带该参数 ⇒ **从未
       // 真的红过**」。同一个坑不踩第二次。
       //
-      // 2026-10-07 实测 12 个守卫逐个跑 `--strict` 全部 exit 0（当前零 WARNING），
-      // 故本条是**接线**而非清账；此后出现 WARNING 就必须**修掉或写下豁免理由**
-      // （`grep-audit` 有 `grep-audit-allow S-xxx: 理由` 这类留痕口）——强制那次
+      // 实测当前每个守卫在 `--strict` 下都是 exit 0，故本条是**接线**而非清账；此后
+      // 出现 WARNING 就必须**修掉或写下豁免理由**（`grep-audit` 有
+      // `grep-audit-allow S-xxx: 理由` 这类留痕口）——强制那次
       // 人工 review 真的发生，而不是靠打印一行指望有人注意到。
       yield {
         label: `scripts/${name}.mjs`,

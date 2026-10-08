@@ -79,7 +79,12 @@ test('Windows prepare-only: real Cargo fixture and safety boundaries', { skip: p
     }
     const name = stageNames().find(n => !before.has(n));
     const record = JSON.parse(fs.readFileSync(path.join(stages, name, 'ready.json'), 'utf8'));
-    assert.ok(record.candidate.startsWith(path.join(stages, name, 'target')));
+    // 两侧同取 realpath：prepare 用 `fs.realpathSync.native(stageRoot)` 建 stage 目录，
+    // 而 `os.tmpdir()` 的盘符大小写与真实路径不同（`c:\Temp` vs `C:\Temp`），
+    // 不归一化就会让「候选落在隔离 target 里」这条判据假红。
+    const stageTarget = path.join(fs.realpathSync.native(path.join(stages, name)), 'target');
+    assert.ok(record.candidate.startsWith(stageTarget),
+      `candidate ${record.candidate} 应在隔离 target ${stageTarget} 下`);
     assert.equal(record.validation.sha256, inspectPE(record.candidate, config.triple).sha256);
     assert.equal(fs.existsSync(path.join(project, 'target')), false);
     assert.match(record.limitation, /Not a readiness test/);

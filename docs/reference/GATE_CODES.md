@@ -15,6 +15,7 @@
 | **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–009 | `D-010` |
 | **E** | 插件入口与门面 | `scripts/plugin-entry-audit.mjs` | E-001–009、E-011 | `E-012` |
 | **GC** | 判据码命名空间本身 | `scripts/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
+| **GW** | 门禁接线（测试文件与门禁名单的对账） | `scripts/gate-wiring-audit.mjs` | GW-001–003 | `GW-004` |
 | **M** | 机制表 | `scripts/mechanism-audit.mjs` | M-001–007 | `M-008` |
 | **N** | core 命名 | `scripts/core-naming-audit.mjs` | N-001–005 | `N-006` |
 | **NDC** | 主体直连 | `scripts/no-direct-call-audit.mjs` | NDC-001–002 | `NDC-003` |
@@ -53,6 +54,9 @@
 | **GC-004** | `scripts/gate-codes-audit.mjs` |
 | **GC-005** | `scripts/gate-codes-audit.mjs` |
 | **GC-006** | `scripts/gate-codes-audit.mjs` |
+| **GW-001** | `scripts/gate-wiring-audit.mjs` |
+| **GW-002** | `scripts/gate-wiring-audit.mjs` |
+| **GW-003** | `scripts/gate-wiring-audit.mjs` |
 | **M-001** | `scripts/mechanism-audit.mjs` |
 | **M-002** | `scripts/mechanism-audit.mjs` |
 | **M-003** | `scripts/mechanism-audit.mjs` |
