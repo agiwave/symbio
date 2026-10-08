@@ -15,8 +15,8 @@
  * 2. **数据地址 → 浏览器地址**：根 → `/vdfs`；根之下 → `/vdfs/<rel>`。
  *    ⚠️ 非虚拟地址（不在根之下）**一律兜底 `/vdfs`**，绝不把外来地址
  *    拼进 URL——拼错的地址会静默打开一个空页面。
- * 3. **深页面判定**：`/vdfs/<something>` 才是 push 出来的地址页（首页显示 logo，
- *    深页面在左上角显示返回键）。`/vdfs` 本身不是。
+ * 3. **深页面判定**：`/vdfs/<something>` 才是 push 出来的地址页（深页面在左上角
+ *    显示返回键）。`/vdfs` 本身不是。
  *
  * 根叫什么不归本文件：一律读 [`vdfsRoot`]（启动期经 `vdfs/root` 引导）。
  *
@@ -60,7 +60,7 @@ export function vdfsBrowserPathOf(addr: string): string {
 /**
  * 是否**深地址页**（push 出来的页面，而非首页）。
  *
- * 首页（`/vdfs`）显示主 logo，深页面在左上角显示返回键——两者互斥，
+ * 首页（`/vdfs`）左上角是空位，深页面在左上角显示返回键——两者互斥，
  * 判据只有这一处。
  */
 export function isVdfsDeepPage(path: string): boolean {

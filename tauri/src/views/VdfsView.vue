@@ -34,8 +34,10 @@
   <VdfsWorkbench :key="reloadKey" :addr="addr" @open="onOpen">
     <template #rail-header>
       <!--
-        页面**最左上角**这一格只有一个主人：首页是主 logo（品牌位），
-        push 出来的地址页是返回键。两者互斥、等高，push 前后该格不跳位。
+        页面**最左上角**这一格只在深页面有主人：返回键；首页**整个空出来**——
+        首页不放品牌 logo（主窗口菜单栏已有一枚，侧栏再来一枚是同屏重复），
+        占位也一并省掉，空间归还给类别列表。`.side-nav` 头部没有包裹容器，
+        插槽为空即自然塌陷，不留残高。
 
         返回键做成**整行的导航件**（占满侧栏宽 + 下方一条分隔线），而不是挤在
         56px 里的描边小胶囊——后者既塞不下「返回」二字，又和一排 40px 图标
@@ -46,9 +48,6 @@
           <polyline points="15 18 9 12 15 6" />
         </svg>
       </button>
-      <div v-else class="logo-area">
-        <img :src="logoUrl" alt="Symbio" class="app-logo" />
-      </div>
     </template>
 
     <!-- 左下角：系统目录切换（首页与地址页通用入口） -->
@@ -65,8 +64,6 @@ import VdfsWorkbench from '@/components/vdfs/VdfsWorkbench.vue'
 import HomedirEntry from '@/components/common/HomedirEntry.vue'
 import { useSessionsStore } from '@/stores/sessions'
 import { vdfsAddrOf, vdfsBrowserPathOf, isVdfsDeepPage } from '@/schemas/vdfsAddress'
-// 正式品牌资源（与「关于」页同源；此前主窗口用的是一个占位字母块）
-import logoUrl from '../assets/logo.svg'
 
 const route = useRoute()
 const router = useRouter()
@@ -117,28 +114,13 @@ async function onHomedirReloaded() {
 </script>
 
 <style scoped>
-/* 首页品牌位：正式 logo 资源（assets/logo.svg，512×512 带圆角底板） */
-.logo-area {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.75rem 0;
-  border-bottom: 1px solid var(--border-default);
-}
-
-.app-logo {
-  width: 2rem;
-  height: 2rem;
-  display: block;
-  flex-shrink: 0;
-  border-radius: var(--radius-md);
-}
-
 /*
- * 返回按钮：侧栏顶部**整行**的导航件（页面最左上角）。
+ * 返回按钮：侧栏顶部**整行**的导航件（页面最左上角，仅深页面存在）。
  *
- * 与 .logo-area 等高（内容盒 3.5rem + 底部 1px 分隔线），因此首页与 push 页
- * 切换时左上角这一格不发生位移。
+ * 首页这一格**整个空出来**——品牌 logo 连同占位一并移除（主窗口菜单栏已有
+ * 一枚，侧栏再来一枚是同屏重复），空间归还给类别列表。`.side-nav` 头部没有
+ * 包裹容器，插槽为空即自然塌陷；返回键出现时列表整体让位是预期的，故这里
+ * 不再有「两态等高」那条配对约束。
  *
  * 三条刻意的取舍：
  * - **不加边框**：右侧那排图标按钮都是无边框的，单独描边会显得是外来物；
