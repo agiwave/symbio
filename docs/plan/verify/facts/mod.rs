@@ -35,6 +35,73 @@ pub const PARAM_KEYS: &[&str] = &[
     "principal",
 ];
 
+/// 01 §8 一行的**取值域**。`open` = 表里写成 `*` 的开放值域（数据，不判取值）；
+/// `forms` 里的 `<…>` 是通配段（`child:<id>` 匹配任何 `child:x`），标了 `↳ §N` 的
+/// 集合已由生成器从那张表读成逐项形态。
+pub struct Domain {
+    pub key: &'static str,
+    pub forms: &'static [&'static str],
+    pub open: bool,
+}
+
+pub const DOMAINS: &[Domain] = &[
+    Domain {
+        key: "store",
+        forms: &["memory", "wal", "sharded", "distributed"],
+        open: false,
+    },
+    Domain {
+        key: "projection",
+        forms: &["snapshot", "display", "readyset", "turnstate", "checkpoint", "eval", "recall", "consolidate", "reputation", "calibration", "budget", "replay", "skill_compile", "conation"],
+        open: false,
+    },
+    Domain {
+        key: "projection.param",
+        forms: &["consolidate:max_gen=<n>", "consolidate:min_fidelity=<f>", "recall:tag=<label>", "recall:density=<n>", "recall:layer=<n>", "recall:spread=on", "recall:decay=<fn>", "recall:min_generality=<0–4>", "readyset:cap=<n>", "conation:pref=<p>"],
+        open: false,
+    },
+    Domain {
+        key: "actor.pattern",
+        forms: &["decider", "reasoner", "translator"],
+        open: false,
+    },
+    Domain {
+        key: "actor.capability",
+        forms: &["judge.intent", "reply.first", "reply.append", "define.work", "produce.artifact", "assert.verification", "assign.work"],
+        open: false,
+    },
+    Domain {
+        key: "actor.budget_ms",
+        forms: &["80", "300", "60000", "86400000"],
+        open: false,
+    },
+    Domain {
+        key: "event.entity",
+        forms: &["turn", "task", "artifact", "verdict", "memory", "commitment", "conation", "thread", "control", "system"],
+        open: false,
+    },
+    Domain {
+        key: "event.verb",
+        forms: &["opened", "progressed", "held", "closed", "asserted"],
+        open: false,
+    },
+    Domain {
+        key: "scope",
+        forms: &["root", "child:<id>"],
+        open: false,
+    },
+    Domain {
+        key: "vis_scope",
+        forms: &["thread_private", "shared", "public"],
+        open: false,
+    },
+    Domain {
+        key: "principal",
+        forms: &[],
+        open: true,
+    },
+];
+
 /// 02 §2 的五维（名册「维」列的合法取值）
 pub const DIMENSIONS: &[&str] = &[
     "知",

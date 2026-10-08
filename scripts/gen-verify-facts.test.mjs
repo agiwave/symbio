@@ -6,6 +6,7 @@ import path from 'node:path'
 
 import {
   mechanismsOf,
+  domainsOf,
   frameOf,
   assignsOf,
   fallbackOf,
@@ -19,18 +20,28 @@ const REPO = path.resolve(import.meta.dirname, '..')
 // ── 最小可用夹具：01 §8 参数表 + 02 坐标系七张表 + 阶梯总表 + 两阶文档 ──────
 //
 // 夹具刻意只给两阶、两维：反向用例注入的是**形状**（少一行 / 多一个加粗 / 未知键 /
-// 表头改名），与阶数、维数无关；两阶足以暴露「名册配对」「累计点亮全表」的两端。
+// 表头改名 / 越界取值），与阶数、维数无关；两阶足以暴露「名册配对」「累计点亮全表」的两端。
+// ARCH 带一节 §6 网格：`↳ §6` 这类出处写法要有真表才测得出「集合由那张表拥有」。
 
 const ARCH = `
+## 6. 事件语法网格（实体 × 动词）
+
+| 实体 \\ 动词 | \`opened\` | \`progressed\` |
+|---|---|---|
+| \`turn\` | \`user.message\` | — |
+| **\`task\`** | \`task.created\` | \`task.progress\` |
+
 ## 8. 权威参数表（唯一一份）
 
 | 参数键 | 取值域 | **平凡值** | 用于 |
 |---|---|---|---|
-| \`store\` | \`memory\` / \`wal\` | \`memory\` | 部署 |
-| \`projection\` | \`snapshot\` / \`recall\` | 仅 \`eval\` | 视图定义 |
-| \`projection.param\` | \`recall:tag\` … | — | 投影的取值 |
-| \`event.entity\` | \`turn\` / \`task\` | — | 事件目录 |
+| \`store\` | \`memory\`（回放模式 \`L0\`、\`L1\` 与之正交） / \`wal\` | \`memory\` | 部署 |
+| \`projection\` | \`snapshot\` / \`recall\` / \`eval\` | 仅 \`eval\` | 视图定义 |
+| \`projection.param\` | \`recall:tag=<label>\` / \`readyset:cap=<n>\` | — | 投影的取值 |
+| \`event.entity\` | \`↳ §6 实体\` | — | 事件目录 |
+| \`event.verb\` | \`↳ §6 动词\` | — | 事件目录 |
 | \`scope\` | \`root\` / \`child:<id>\` | \`root\` | 递归 |
+| \`principal\` | \`*\`（身份是数据，不判取值） | — | 身份 |
 `
 
 // 02 的七张表：三张定义（§2 维度 / §3 轴 / §3.1 天梯）+ 一张名册（§6.1）
@@ -153,8 +164,16 @@ const fixture = (over = {}) => ({
 
 test('§8 的顶层键判据是形状：projection.param 是子键，不另计一个机制', () => {
   const { all, top } = mechanismsOf(ARCH)
-  assert.deepEqual(all, ['store', 'projection', 'projection.param', 'event.entity', 'scope'])
-  assert.deepEqual(top, ['store', 'projection', 'event.entity', 'scope'])
+  assert.deepEqual(all, [
+    'store',
+    'projection',
+    'projection.param',
+    'event.entity',
+    'event.verb',
+    'scope',
+    'principal',
+  ])
+  assert.deepEqual(top, ['store', 'projection', 'event.entity', 'event.verb', 'scope', 'principal'])
 })
 
 test('生成物带出机制表、名册与每阶赋值——程序侧不需要任何手填计划数字', () => {
@@ -166,12 +185,19 @@ test('生成物带出机制表、名册与每阶赋值——程序侧不需要�
   assert.ok(!text.includes('projection.param"\n];'), '子键不得混进 MECHANISMS 那一段')
 })
 
+test('取值域进生成物：`↳ §6` 已被解析成逐项形态，`*` 记成开放值域', () => {
+  const text = buildFacts(fixture())
+  assert.match(text, /pub const DOMAINS: &\[Domain\] = &\[\n {4}Domain \{/)
+  assert.match(text, /key: "event\.entity",\n {8}forms: &\["turn", "task"\],/)
+  assert.match(text, /key: "principal",\n {8}forms: &\[\],\n {8}open: true,/)
+})
+
 test('新增一个真正的顶层键，MECHANISMS 才会变长——「10 还是 11」由表本身回答', () => {
   const withNew = ARCH.replace(
     '| `scope` | `root` / `child:<id>` | `root` | 递归 |',
     '| `scope` | `root` / `child:<id>` | `root` | 递归 |\n| `vis_scope` | `shared` | `root` | 可见域 |',
   )
-  assert.equal(mechanismsOf(withNew).top.length, 5)
+  assert.equal(mechanismsOf(withNew).top.length, mechanismsOf(ARCH).top.length + 1)
 })
 
 test('02 的七张表各归各位：定义、名册、三处声明都按所在小节读，不吃错表', () => {
@@ -252,6 +278,69 @@ test('反向：§4 一行加粗都没有 ⇒ 退路口读不出来，抛错', ()
 test('反向：§4 只在本文那一节里找表（S02 前面另有一张「参数」表时不误吃）', () => {
   const withEarlier = '## 3.\n\n| 参数 | 今天 |\n|---|---|\n| `projection` | `x` |\n\n' + S02.replace('## 3. 增量清单（只加数据）\n', '')
   assert.deepEqual(fallbackOf(withEarlier, ['store'], 'S02'), ['store', 'memory'])
+})
+
+// ── 取值域（01 §8 的「取值域」列）：读得出形态，越界就红 ─────────────────
+
+test('取值域读得出来：`↳ §6` 的集合由那张网格自己拥有，`*` 是开放值域', () => {
+  const d = domainsOf(ARCH)
+  assert.deepEqual(d.get('event.entity').forms, ['turn', 'task'])
+  assert.deepEqual(d.get('event.verb').forms, ['opened', 'progressed'])
+  assert.deepEqual(d.get('store').forms, ['memory', 'wal'])
+  assert.equal(d.get('principal').open, true)
+  assert.equal(d.get('store').open, false)
+})
+
+test('通配段与子键参数都放行：`child:<id>`、`recall:tag=judgment` 不是越界', () => {
+  // 反向用例只证「抓得住」是不够的——判据若「逢取值即判越界」也能拿到那条红。
+  const ok = S02.replace('scope = child:<id>', 'projection = recall:tag=judgment')
+  assert.doesNotThrow(() => buildFacts(fixture({ stageMds: { S01, S02: ok } })))
+})
+
+test('反向：§3 赋一个值域之外的取值 ⇒ 抛错（「0 值域扩展」由此是算出来的）', () => {
+  const bad = S02.replace('store = wal', 'store = sqlite')
+  assert.throws(
+    () => buildFacts(fixture({ stageMds: { S01, S02: bad } })),
+    /`store = sqlite` 越出 01 §8 声明的取值域/,
+  )
+})
+
+test('反向：§4 退路口的平凡值越界 ⇒ 同样抛（退路口也是这一行上的一个取值）', () => {
+  const bad = S02.replace('**`memory`**', '**`sqlite`**')
+  assert.throws(
+    () => buildFacts(fixture({ stageMds: { S01, S02: bad } })),
+    /§4 退路口.*越出 01 §8/,
+  )
+})
+
+test('反向：取值域写回散文 ⇒ 读不出形态，抛错（绝不退回一份手填集合）', () => {
+  assert.throws(
+    () => domainsOf(ARCH.replace('`memory`（回放模式 `L0`、`L1` 与之正交） / `wal`', '若干种后端')),
+    /不是反引号形态/,
+  )
+})
+
+test('反向：值域里留省略号 ⇒ 集合不完备时「0 值域扩展」无从判起，抛错', () => {
+  assert.throws(
+    () => domainsOf(ARCH.replace('`snapshot` / `recall` / `eval`', '`snapshot` / `recall` …')),
+    /`recall` 后面跟着读不懂的东西/,
+  )
+})
+
+test('反向：`*` 与枚举混在同一格 ⇒ 开放就整个开放，抛错', () => {
+  assert.throws(() => domainsOf(ARCH.replace('`root` / `child:<id>`', '`root` / `*`')), /既写了 `\*`/)
+})
+
+test('反向：`↳` 指向的那一节没有网格表 ⇒ 抛错，不静默产出一个空值域', () => {
+  assert.throws(
+    () => domainsOf(ARCH.replace(/^\| 实体 .*\|$/m, '（这里本来是一张网格表）')),
+    /找不到「实体 × 动词」的网格表/,
+  )
+  assert.throws(() => domainsOf(ARCH.replace(/^## 6\./m, '## 9.')), /找不到 §6/)
+})
+
+test('反向：`↳` 的角色写错 ⇒ 出处读不出，抛错（不当成一个合法形态收下）', () => {
+  assert.throws(() => domainsOf(ARCH.replace('`↳ §6 实体`', '`↳ §6 名词`')), /出处写法读不出来/)
 })
 
 test('反向：§8 表头第三列不叫「平凡值」⇒ 判定列位读歪，抛错', () => {

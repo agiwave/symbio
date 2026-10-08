@@ -10,11 +10,12 @@
  * 而「改了文档要有人记得同步改程序」恰恰是这类体系里最先断的那环（`_shared.mjs` 的
  * 基线漏改在同一天发生了两次，就是这个机制缺失的直接后果）。
  *
- * ## 数据的 owner（生成器只搬运，不判断）
+ * ## 数据的 owner（生成器搬运，并按表核对）
  *
  * | 生成物 | 真源 |
  * |---|---|
  * | `MECHANISMS` | [01 §8 权威参数表](../docs/plan/01-核心架构.md) 的「参数键」列 |
+ * | `DOMAINS` | 01 §8 的「取值域」列——读法写在那张表下面，`↳ §N` 的集合去那一节读 |
  * | `DIMENSIONS` / `AXES` / `TIER_MAX` | [02 §2 / §3 / §3.1](../docs/plan/02-能力坐标系.md) 的三张坐标系定义表 |
  * | `CAPABILITIES` | 02 §6.1 能力名册（全仓唯一一份 54 行名册） |
  * | `DECLARED_*` | 02 §2「条数」列、§6.2 生长位表、§7 社交能力表——**是被验的声明** |
@@ -26,6 +27,10 @@
  * 「它不是第 11 个机制键，是 `projection` 的子键」。判据因此是形状而非名单：
  * 键名带 `.` 且首段本身也是一个登记的键 ⇒ 子键。这条规则同时终结了「机制键 10 还是 11」
  * 的口径分歧（plan/13 批 D3 数到的那处），因为它把答案交给了表本身。
+ *
+ * **取值域**：§8 的「取值域」列是**形态列表**，生成器据此核对每阶 §3 赋值与 §4 退路口
+ * 的**取值**——越界即抛。「0 值域扩展」由此是个算出来的结论，而不是一个恒为假的标志位。
+ * 表里写 `*` 的键（`principal` = 身份是数据）是**开放值域**：不判取值，且程序把这件事报出来。
  *
  * **加粗的平凡值行**：§4 每阶列 2–3 行参数，其中**恰好一行**的平凡值加粗——那是本阶的
  * 退路口（S01 退回 `decider`、S03 退回 `scope=root`）。加粗是文档里已有的记号，
@@ -46,7 +51,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { tableWithHeader, plain, fencedBlock } from './md-table.mjs'
+import { tableWithHeader, plain, fencedBlock, cellsOf, isSeparator } from './md-table.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..')
@@ -82,6 +87,147 @@ export function mechanismsOf(archMd) {
 }
 
 /**
+ * 一个键的取值域：**形态匹配**，`<…>` 是通配段（`child:<id>` 匹配任何 `child:x`）。
+ * 只支持「通配段在末尾」与「通配段被字面量夹住」两种形状——§8 用不到更多，
+ * 出现第三种就让它匹配失败（红），而不是静默按字面比。
+ */
+export function formMatches(form, value) {
+  const open = form.indexOf('<')
+  if (open < 0) return form === value
+  const close = form.indexOf('>', open)
+  if (close < 0) throw new Error(`取值域形态 \`${form}\` 的通配段没有闭合`)
+  const head = form.slice(0, open)
+  const tail = form.slice(close + 1)
+  return value.startsWith(head) && value.endsWith(tail) && value.length >= head.length + tail.length
+}
+
+/** `md` 里 `## N.` 那一小节的原文（到下一个同级或更高级标题为止）——按节定位，不按出现顺序猜表 */
+function sectionOf(md, headingRe, label, where) {
+  const lines = md.split(/\r?\n/)
+  const i = lines.findIndex((l) => headingRe.test(l))
+  if (i < 0) throw new Error(`${where}：找不到 ${label}——小节标题被改写了？`)
+  const level = (lines[i].match(/^#+/) || ['#'])[0].length
+  let j = i + 1
+  const stop = new RegExp(`^#{1,${level}}\\s`)
+  while (j < lines.length && !stop.test(lines[j])) j++
+  return lines.slice(i, j).join('\n')
+}
+
+/**
+ * `↳ §N` 指向的那张网格表：表头是「实体 × 动词」，实体在首列、动词在首行。
+ * 值域由网格自己拥有——加一格事件不必动 §8，这正是 [01 §6] 说的「维护一张有限网格，
+ * 不维护会膨胀的名字列表」。
+ */
+function gridOf(archMd, secNo, role) {
+  const where = `${ARCH_REL} §${secNo}`
+  const sec = sectionOf(archMd, new RegExp(`^## ${secNo}\\.`), `§${secNo}（\`↳ §${secNo}\` 的出处）`, ARCH_REL)
+  const lines = sec.split(/\r?\n/)
+  for (let i = 0; i < lines.length; i++) {
+    const head = cellsOf(lines[i])
+    if (!head || !head[0].includes('实体') || !head[0].includes('动词')) continue
+    const sep = cellsOf(lines[i + 1] || '')
+    if (!sep || !isSeparator(sep)) continue
+    const rows = []
+    for (let j = i + 2; j < lines.length; j++) {
+      const c = cellsOf(lines[j])
+      if (!c) break
+      rows.push(c)
+    }
+    const out = role === '实体' ? rows.map((r) => plain(r[0])) : head.slice(1).map((h) => plain(h))
+    if (!out.length) throw new Error(`${where}：网格表里读不出${role}——表还在但${role}那一侧空了`)
+    return out
+  }
+  throw new Error(`${where}：找不到「实体 × 动词」的网格表——\`↳ §${secNo}\` 的出处得是一张二维网格`)
+}
+
+/**
+ * 01 §8 的「取值域」列 → 每个键的值域。读法（`/` 分隔的形态 · `<…>` 通配段 · `*` 开放值域 ·
+ * `↳ §N 角色` 去另一张表读）权威说明在 01 §8 表下那条注里，这里是它的实现。
+ *
+ * 读不懂一律抛错。「`…`」（省略号）这种过去的写法**故意不再合法**：它等于宣布
+ * 「这一格的集合不完备」，而值域不完备时「0 值域扩展」就无从判起。
+ */
+export function domainsOf(archMd) {
+  const table = tableWithHeader(archMd, '参数键')
+  if (!table) throw new Error(`${ARCH_REL} §8：找不到参数表`)
+  const domains = new Map()
+  for (const row of table.rows) {
+    const key = plain(row[0])
+    if (!KEY_RE.test(key)) continue
+    const cell = (row[1] || '').trim()
+    const src = plain(cell).match(/^↳ §(\d+) (实体|动词)$/)
+    if (src) {
+      domains.set(key, { key, forms: gridOf(archMd, src[1], src[2]), open: false })
+      continue
+    }
+    const forms = []
+    let open = false
+    for (const raw of cell.split('/')) {
+      const s = raw.trim().replace(/^\*\*(.+)\*\*$/, '$1')
+      const m = s.match(/^`([^`]+)`(.*)$/)
+      if (!m) {
+        throw new Error(
+          `${ARCH_REL} §8：\`${key}\` 的取值域有一节不是反引号形态：\`${s}\`` +
+            '（形态之间用 `/` 分隔；开放值域写成 `` `*` ``；`（…）` 注解里不能出现 `/`，那是分隔符）',
+        )
+      }
+      const note = m[2].trim()
+      if (note && !/^（[^）]*）$/.test(note)) {
+        throw new Error(`${ARCH_REL} §8：\`${key}\` 的形态 \`${m[1]}\` 后面跟着读不懂的东西：${note}`)
+      }
+      if (m[1].startsWith('↳')) {
+        throw new Error(
+          `${ARCH_REL} §8：\`${key}\` 的出处写法读不出来：\`${m[1]}\`——只能是 \`↳ §N 实体\` 或 \`↳ §N 动词\``,
+        )
+      }
+      if (m[1] === '*') {
+        open = true
+        continue
+      }
+      forms.push(m[1])
+    }
+    if (open && forms.length) {
+      throw new Error(`${ARCH_REL} §8：\`${key}\` 的取值域既写了 \`*\`（开放）又列了形态——开放就整个开放`)
+    }
+    if (!open && !forms.length) {
+      throw new Error(`${ARCH_REL} §8：\`${key}\` 的取值域读不出任何形态：\`${cell}\``)
+    }
+    domains.set(key, { key, forms, open })
+  }
+  return domains
+}
+
+/**
+ * 赋值 `key = value` 是否落在 §8 声明的值域内。三条放行路径：
+ * ① 该键是开放值域；② 值匹配该键的某个形态；③ **带子键参数的取值**——
+ * `projection = recall:tag=judgment` 合法的条件是「`recall` 是 `projection` 的取值」
+ * **且**「`recall:tag=judgment` 是 `projection.param` 的取值」。
+ * ③ 不是给投影开的特例：判据是「§8 里登记了 `key.*` 这一行」，谁有子键谁可用。
+ */
+export function inDomain(domains, key, value) {
+  const d = domains.get(key)
+  if (!d) throw new Error(`§8 里没有 \`${key}\` 这一行——无法判它的取值`)
+  if (d.open) return true
+  if (d.forms.some((f) => formMatches(f, value))) return true
+  for (const [sub, sd] of domains) {
+    if (!sub.startsWith(`${key}.`) || sd.open) continue
+    const base = value.split(':')[0]
+    if (d.forms.some((f) => formMatches(f, base)) && sd.forms.some((f) => formMatches(f, value))) return true
+  }
+  return false
+}
+
+/** 越界取值的报错：把「怎么办」写进红灯，而不是让人去猜这条判据出自哪张表 */
+function assertValue(domains, key, value, where) {
+  if (inDomain(domains, key, value)) return
+  const d = domains.get(key)
+  throw new Error(
+    `${where}：\`${key} = ${value}\` 越出 01 §8 声明的取值域（${d.forms.join(' / ')}）——` +
+      '这就是**值域扩展**：要么这一行漏登记了它，要么本阶真的需要扩值域，后者走 03 §3 的 ADR',
+  )
+}
+
+/**
  * 02 能力坐标系 → 坐标系定义 + 名册 + 文档自己的**声明**。
  *
  * 失效形态与阶梯同族：名册（§6.1）是输入，「条数 / 生长位 / 社交能力的轴」是三处**结论**，
@@ -92,16 +238,7 @@ export function mechanismsOf(archMd) {
 export function frameOf(frameMd) {
   // 按**小节**切范围，而不是按出现顺序找：02 里「能力」开头的表不止一张（§6.1 名册、
   // §7 社会性），全局扫会把名册读成 §7 的两列表——读歪了还一路绿灯，是最坏的一种。
-  const lines = frameMd.split(/\r?\n/)
-  const section = (re, label) => {
-    const i = lines.findIndex((l) => re.test(l))
-    if (i < 0) throw new Error(`${FRAME_REL}：找不到 ${label}——小节标题被改写了？`)
-    const level = (lines[i].match(/^#+/) || ['#'])[0].length
-    let j = i + 1
-    const stop = new RegExp(`^#{1,${level}}\\s`)
-    while (j < lines.length && !stop.test(lines[j])) j++
-    return lines.slice(i, j).join('\n')
-  }
+  const section = (re, label) => sectionOf(frameMd, re, label, FRAME_REL)
   const table = (first, re, label) => {
     const sec = section(re, label)
     const t = tableWithHeader(sec, first)
@@ -237,6 +374,7 @@ export function stageFilesOf(dirEntries) {
 /** 汇总成一份 facts 文本（导出给测试用：同一份代码，测试喂假文档） */
 export function buildFacts({ archMd, frameMd, ladderMd, stageMds, dirEntries }) {
   const { all, top } = mechanismsOf(archMd)
+  const domains = domainsOf(archMd)
   const frame = frameOf(frameMd)
   const claims = claimsOf(ladderMd)
   const files = stageFilesOf(dirEntries)
@@ -263,12 +401,15 @@ export function buildFacts({ archMd, frameMd, ladderMd, stageMds, dirEntries }) 
           `——两处必须同改，否则总表那一列在说假话`,
       )
     }
-    for (const [k] of assigns) {
+    for (const [k, v] of assigns) {
       if (!all.includes(k)) {
         throw new Error(`${where}：赋值块用了不在 01 §8 参数表里的键 \`${k}\`——新增机制键要走 ADR，不是走文档笔误`)
       }
+      assertValue(domains, k, v, where)
     }
-    return { id, file, assigns, fallback: fallbackOf(md, top, where) }
+    const fallback = fallbackOf(md, top, where)
+    assertValue(domains, fallback[0], fallback[1], `${where} §4 退路口`)
+    return { id, file, assigns, fallback }
   })
 
   const rs = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
@@ -286,6 +427,25 @@ export function buildFacts({ archMd, frameMd, ladderMd, stageMds, dirEntries }) 
   out.push('')
   out.push('/// 01 §8 参数表里登记的全部键（含子键）——赋值块的合法词表')
   out.push(`pub const PARAM_KEYS: &[&str] = &[${all.map((k) => `\n    ${rs(k)},`).join('')}\n];`)
+  out.push('')
+  out.push('/// 01 §8 一行的**取值域**。`open` = 表里写成 `*` 的开放值域（数据，不判取值）；')
+  out.push('/// `forms` 里的 `<…>` 是通配段（`child:<id>` 匹配任何 `child:x`），标了 `↳ §N` 的')
+  out.push('/// 集合已由生成器从那张表读成逐项形态。')
+  out.push(`pub struct Domain {
+    pub key: &'static str,
+    pub forms: &'static [&'static str],
+    pub open: bool,
+}`)
+  out.push('')
+  const domainLiterals = [...domains.values()]
+    .map(
+      (d) =>
+        `\n    Domain {\n        key: ${rs(d.key)},\n        forms: &[${d.forms
+          .map((f) => rs(f))
+          .join(', ')}],\n        open: ${d.open},\n    },`,
+    )
+    .join('')
+  out.push(`pub const DOMAINS: &[Domain] = &[${domainLiterals}\n];`)
   out.push('')
   out.push('/// 02 §2 的五维（名册「维」列的合法取值）')
   out.push(`pub const DIMENSIONS: &[&str] = &[${frame.dimensions.map((k) => `\n    ${rs(k)},`).join('')}\n];`)
