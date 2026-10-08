@@ -118,24 +118,18 @@ try {
 
 ---
 
-## 错误码扩展
+## 错误码是闭集
 
-插件可以定义自己的错误码，但必须：
+码只有 [`PluginErrorCode`](../../symbio/src/symbio_core/plugin/error.rs) 的 13 个变体这一份真源：
+生产侧 `PluginError::code` 给出枚举、传输侧 `to_frame` 写 `as_str()`、消费侧
+`PluginFrame::error_code` 解析回枚举后按值分派。
 
-1. **前缀命名**：`{PLUGIN}_{ERROR}` (如 `MODEL_RATE_LIMIT`)
-2. **文档登记**：在此文档添加条目
-3. **向后兼容**：已发布的错误码不可删除或改义
+**插件不自造码。** 帧里出现认不出的码，消费侧一律降级为 `PluginErrorCode::Unknown`——它不参与
+等值分派，所以「`MODEL_` 前缀 + 自造后缀」这类约定**写不出一个读得到的错误码**。域内具体故障
+（Key 含非法字符、上游限流、目录校验失败……）走 `message` / `details` 与日志。
 
-### 已知扩展错误码
-
-| 错误码 | 来源插件 | 含义 |
-|--------|----------|------|
-| `MODEL_AUTH_ERROR` | model | API Key 无效或过期 |
-| `MODEL_RATE_LIMIT` | model | 请求频率超限 |
-| `BUNDLE_VALIDATION` | agent | agent 目录 manifest 校验失败 |
-| `BUNDLE_NOT_FOUND` | agent | agent 目录实例不存在 |
-| `MCP_CONNECTION` | mcp | MCP Server 连接失败 |
-| `TELEGRAM_AUTH` | telegram | Bot Token 无效 |
+要新增一类**可分派**的故障就动那个枚举：变体、`as_str()`、`from_code()` 三处一起改，回来补
+上面那张表，并按[错误码约定](#错误码约定)走 ADR——它是 ABI。
 
 ---
 

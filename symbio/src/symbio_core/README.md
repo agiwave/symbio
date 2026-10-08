@@ -57,11 +57,10 @@
 
    - `ChangeSubscriptions` 住在 `vdfs` 却既不姓 `Vdfs` 也不属于任何已登记主题 ⇒
      改名 `VdfsChangeSubscriptions`；
-   - `KEY_PROVIDER` 住在 `plugin` 却用着 `keys` 域的前缀 ⇒ 改名 `PLUGIN_KEY_PROVIDER`；
+   - `KEY_PROVIDER` 住在 `plugin` 却用着 `keys` 域的前缀 ⇒ 改名 `PLUGIN_KEY_PROVIDER`；<!-- doc-symbol-allow: 历史：改名前的旧名，实名见下一行的 PLUGIN_KEY_PROVIDER -->
    - 插件工厂 id 描述的是「哪个插件」而非「哪个键」⇒ 从 `keys` 搬到 `plugin::ids`，
      并改名 `PLUGIN_ID_*`；
-   - 反例：`LOG_LEVEL_INFO` **不**需要改成 `LOGGER_LOG_LEVEL_INFO`——多出来的四个
-     字母不增加任何信息。
+   - 反例：`LOG_LEVEL_INFO` **不**需要冠上 `LOGGER_` 前缀——多出来的那点长度不增加任何信息。
 
    **一域一前缀，且前缀不跨域复用。** 两个域共用同一个前缀就是「一个前缀两种东西」——
    同一个 `PLUGIN_` 既指插件工厂 id 又指清单键，读的人得先分辨是哪一个。故 `PLUGIN_`

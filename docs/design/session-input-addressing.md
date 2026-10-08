@@ -159,8 +159,8 @@ action(<A>/message/<mid>, <ResumeAction>)   payload: {args?, reason?, answer?, m
 | `agent/host/subagent.rs:338` | `parent.route(SESSION_CHAT_SEND)` | `parent.get_vfs_provider()` 写 `session/<sid>/inbox`（与它自己的 `register_subsession` 同款） |
 | e2e t7 / t9 / t10 / t11 / t14 | 走路由 | 走地址（t15 已是范本） |
 
-迁移期两条路并存（路由 = 薄别名），全部迁完删路由 + `SESSION_CHAT_SEND` /
-`SESSION_CHAT_ABORT` 常量 + `CURRENT.md` §1 里 session 的自有路由行（重跑生成脚本）。
+迁移期两条路并存（路由 = 薄别名），全部迁完删 `session/chat/send` / `session/chat/abort`
+两条路由 + 对应常量 + `CURRENT.md` §1 里 session 的自有路由行（重跑生成脚本）。
 
 ### 5.6 ⚠️ 退役的**前置条件**：写入面还表达不了「本次运行的选项」
 
@@ -242,7 +242,7 @@ abort()     → runVdfsAction(<A>, 'abort')  +  runVdfsAction(<A>/inbox, 'clear'
 resume(p)   → runVdfsAction(<A>/message/<p.targetId>, p.action, {args, reason, answer, mode, risk_level})
 ```
 
-- 删除 `CHAT_SEND` / `CHAT_ABORT` 常量。
+- 删除 `CHAT_SEND` / `CHAT_ABORT` 常量。<!-- doc-symbol-allow: 历史：本节已实施，这两个前端常量已删 -->
 - **继续不做乐观回显**（现有约定，注释已写明理由）：写 inbox ≠ 已落库。
 - `working` 乐观置位保留（等待期的可视反馈）。
 

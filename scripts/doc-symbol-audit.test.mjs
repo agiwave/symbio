@@ -42,12 +42,19 @@ function audit (files) {
   }
 }
 
-/** 最小 Rust 语料：两个真实符号（一个带前缀、一个仅字段名） */
+/** 最小 Rust 语料：两个真实符号（一个带前缀、一个仅字段名）+ 一个常量族 + 一个只在引号里的外部约定名 */
 const RS = {
   'symbio/src/lib.rs': [
     'pub const PLUGIN_PAYLOAD_KEY: &str = "payload";',
+    'pub const ROUTE_SESSION_CHAT_SEND: &str = "session/chat/send";',
     'fn register_option_field(order: i32) {}',
+    'fn build() { let v = env!("CARGO_PKG_VERSION"); }',
   ].join('\n'),
+}
+
+/** 最小前端语料：只有跨栈常量名，后端 .rs 里没有 */
+const TS = {
+  'tauri/src/constants/pages.ts': 'export const VDFS_PAGE_SIZE = 50\n',
 }
 
 test('失效指认变红：文档指认源码里不存在的符号（exit 1）', () => {
@@ -69,7 +76,7 @@ test('有效指认通过（exit 0）', () => {
   assert.match(r.stdout, /doc-symbol-audit 通过/)
 })
 
-test('单段反引号词不是符号指认（exit 0）', () => {
+test('单段反引号词：代码里没有同族时不是符号指认（exit 0）', () => {
   const r = audit({ ...RS, 'README.md': '旧名 `GONE_WORD` 已不再使用。\n' })
   assert.equal(r.status, 0, r.stdout)
 })
@@ -79,10 +86,83 @@ test('非标识符形态（泛型 / 路径带参数）不查（exit 0）', () =>
   assert.equal(r.status, 0, r.stdout)
 })
 
+// ── D-009：裸常量名（同族闸把环境变量、CI 密钥挡在外面）──────────────────
+
+test('D-009 改名漂移变红：同族有成员、这个名查无（exit 1）', () => {
+  const r = audit({ ...RS, 'README.md': '分流由路由常量 `ROUTE_TRIAGE_DECIDE` 决定。\n' })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-009 README\.md:1/)
+  assert.match(r.stdout, /ROUTE_TRIAGE_DECIDE/)
+})
+
+test('D-009 逐字存在即通过（exit 0）', () => {
+  const r = audit({ ...RS, 'README.md': '分流由路由常量 `ROUTE_SESSION_CHAT_SEND` 决定。\n' })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-009 同族闸：本仓没有这一族 ⇒ 是环境变量 / CI 密钥，不判（exit 0）', () => {
+  const r = audit({ ...RS, 'README.md': '签名要在 CI 里配 `APPLE_CERTIFICATE_PASSWORD`。\n' })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-009 族名不被引号污染：`env!("CARGO_PKG_VERSION")` 开不出 CARGO_ 一族（exit 0）', () => {
+  const r = audit({ ...RS, 'README.md': '构建前先设 `CARGO_TARGET_DIR` 指定产物目录。\n' })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-009 族名不由注释开出：注释提过 CHAT_FLOW_* 而代码没有 ⇒ 文档的 CHAT_SEND 不判（exit 0）', () => {
+  const r = audit({
+    ...RS,
+    'tauri/src/stores/sessions.ts': '// CHAT_FLOW_ANALYSIS 早就不在了\nexport const unrelated = 1\n',
+    'README.md': '发送开关叫 `CHAT_SEND`。\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-009 认前端语料：只有 ts 里声明的常量名，文档指认它合法（exit 0）', () => {
+  const r = audit({ ...RS, ...TS, 'README.md': '分页大小取 `VDFS_PAGE_SIZE`。\n' })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-009 前端族同样开闸：VDFS_ 有成员而这个名字查无 ⇒ 红（exit 1）', () => {
+  const r = audit({ ...RS, ...TS, 'README.md': '分页大小取 `VDFS_PAGE_SZIE`。\n' })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-009 .*VDFS_PAGE_SZIE/)
+})
+
+test('D-009 单段全大写但没有下划线 ⇒ 与普通词无法区分，不查（exit 0）', () => {
+  const r = audit({ ...RS, 'README.md': '配置键 `PAYLOAD` 与开关 `VERBOSE`。\n' })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-009 承认通道：目标态指认写明落在哪一批即放行（exit 0）', () => {
+  const r = audit({
+    ...RS,
+    'docs/plan/09.md': '新增 `ROUTE_TRIAGE_DECIDE`<!-- doc-symbol-allow: 目标态，09 的 S2 才落这个常量 -->\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-009 承认通道：空理由视为未承认（exit 1）', () => {
+  const r = audit({
+    ...RS,
+    'README.md': '新增 `ROUTE_TRIAGE_DECIDE`<!-- doc-symbol-allow: -->\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+})
+
 test('历史行豁免：行内含「已删除」（exit 0）', () => {
   const r = audit({
     ...RS,
     'README.md': '| `OptionVisitor::GONE_METHOD` | **已删除** |\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('历史行豁免：台账的「判为删除」说的就是这名字不在了（exit 0）', () => {
+  const r = audit({
+    ...RS,
+    'docs/plan/04.md': '| ⑫ | `ROUTE_GONE_ARM` 判为删除（只删 Rust 常量，路由保留） |\n',
   })
   assert.equal(r.status, 0, r.stdout)
 })

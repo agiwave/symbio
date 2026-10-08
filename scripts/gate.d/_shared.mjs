@@ -1171,14 +1171,20 @@ const REGEX_PRECEDERS = new Set([
 ])
 
 /**
- * 取一段 JS 源码里所有**字符串字面量的内容**，注释一律排除。
+ * 扫一段源码，分出两类区间：
+ * - `literals`：字符串字面量的**内容**区间（不含引号）；
+ * - `blanks`：应当从「代码标识符」里剔除的区间——字符串内容 **与注释**。
  *
  * 为什么只要字符串：判据码被「用到」的唯一硬形态是它出现在输出语句里；注释里的
  * 「原 E-010 已退役」讲的是历史，要求它进登记表就把叙述当成了事实——而这类叙述
  * 在头注释里成段存在，误报会直接把守卫喂成豁免。
+ *
+ * 为什么注释要一起剔：注释是**文档的另一处**，它跟着代码一起腐烂。按标识符统计时
+ * 留下注释，等于让一个早已删除的常量继续替它那一族「作证」，把合法的改名判成假红。
  */
-export function stringLiteralsOf(src) {
-  const out = []
+export function codeSpansOf(src) {
+  const literals = []
+  const blanks = []
   let i = 0
   let last = ''
   while (i < src.length) {
@@ -1186,11 +1192,14 @@ export function stringLiteralsOf(src) {
     const d = src[i + 1]
     if (c === '/' && d === '/') {
       const nl = src.indexOf('\n', i)
-      i = nl < 0 ? src.length : nl + 1
+      const stop = nl < 0 ? src.length : nl
+      blanks.push({ start: i + 2, end: stop })
+      i = stop < src.length ? stop + 1 : src.length
       continue
     }
     if (c === '/' && d === '*') {
       const end = src.indexOf('*/', i + 2)
+      blanks.push({ start: i + 2, end: end < 0 ? src.length : end })
       i = end < 0 ? src.length : end + 2
       continue
     }
@@ -1222,7 +1231,8 @@ export function stringLiteralsOf(src) {
         if (c !== '`' && src[j] === '\n') break
         j++
       }
-      out.push(src.slice(i + 1, j))
+      literals.push({ start: i + 1, end: j })
+      blanks.push({ start: i + 1, end: j })
       last = c
       i = j + 1
       continue
@@ -1230,7 +1240,29 @@ export function stringLiteralsOf(src) {
     if (!/\s/.test(c)) last = c
     i++
   }
-  return out
+  return { literals, blanks }
+}
+
+export function stringLiteralsOf(src) {
+  return codeSpansOf(src).literals.map(({ start, end }) => src.slice(start, end))
+}
+
+/**
+ * 取「代码自己写下的标识符」那一份文本：字符串内容与注释整段抹成空格。
+ *
+ * 为什么需要：`env!("CARGO_PKG_VERSION")` 里的 `CARGO_PKG_VERSION` 是**外部约定**的
+ * 名字，不是本仓声明的常量；一条讲历史改名注释里的 `ROUTE_OLD` 也只是叙述。按标识符
+ * 统计时留下它们，文档里合法的 `CARGO_TARGET_DIR` 就成了假红，而早已删除的常量还能
+ * 替自己那一族「作证」。判据的「这一族存在」只能由代码本体回答。
+ */
+export function codeTextOf(src) {
+  let out = ''
+  let at = 0
+  for (const { start, end } of codeSpansOf(src).blanks) {
+    out += src.slice(at, start) + ' '
+    at = end
+  }
+  return out + src.slice(at)
 }
 
 export const VITEST_TIMEOUT_MS = 180_000

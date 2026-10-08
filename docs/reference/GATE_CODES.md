@@ -12,7 +12,7 @@
 | 前缀 | 归属 | 声明脚本 | 已用号段 | 下一个可用号 |
 |---|---|---|---|---|
 | **C** | core 出口 | `scripts/core-export-audit.mjs` | C-001–003 | `C-004` |
-| **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–008 | `D-009` |
+| **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–009 | `D-010` |
 | **E** | 插件入口与门面 | `scripts/plugin-entry-audit.mjs` | E-001–009、E-011 | `E-012` |
 | **GC** | 判据码命名空间本身 | `scripts/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
 | **M** | 机制表 | `scripts/mechanism-audit.mjs` | M-001–007 | `M-008` |
@@ -36,6 +36,7 @@
 | **D-006** | `scripts/doc-link-audit.mjs` |
 | **D-007** | `scripts/doc-link-audit.mjs` |
 | **D-008** | `scripts/doc-link-audit.mjs` |
+| **D-009** | `scripts/doc-symbol-audit.mjs` |
 | **E-001** | `scripts/plugin-entry-audit.mjs` |
 | **E-002** | `scripts/plugin-entry-audit.mjs` |
 | **E-003** | `scripts/plugin-entry-audit.mjs` |

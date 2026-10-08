@@ -183,7 +183,8 @@ curl -X POST ... -d '{"path": "_root"}'
 
 ### 问题：API Key 无效
 
-**症状**：`MODEL_AUTH_ERROR`
+**症状**：鉴权失败。Key 含非法字符（非 ASCII / 控制字符）时 `Authorization` 头**不会发出**，
+协议适配层只记一条 `plugin_warn!("model", "Invalid characters in … API key")`——日志里搜这句
 
 **排查步骤**：
 1. 确认 API Key 未过期

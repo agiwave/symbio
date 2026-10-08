@@ -1,8 +1,9 @@
 // `gate.d/_shared.mjs` 的回归测试。
 //
-// 这里覆盖 `autoWork`（门禁的「自动执行的工作」原语）与**棘轮判据一族**
-// （`ratchetVerdict` / `cargoTestRatchet` / `BASELINE` 只增）。前者值得有回归测试的理由，
-// 与 `30-docs.mjs` 开头那句是同一个：**一个只会亮绿灯的机制等于没有机制**。
+// 这里覆盖 `autoWork`（门禁的「自动执行的工作」原语）、**棘轮判据一族**
+// （`ratchetVerdict` / `cargoTestRatchet` / `BASELINE` 只增）与**源码区间扫描**
+// （`codeSpansOf` / `stringLiteralsOf` / `codeTextOf`）。前两者值得有回归
+// 测试的理由，与 `30-docs.mjs` 开头那句是同一个：**一个只会亮绿灯的机制等于没有机制**。
 // `autoWork` 的失效方式恰恰是「看起来在修、其实没把修复带进提交」，而这一点
 // 在正常流程里看不出来（本地跑门禁 → 文件确实被格式化了 → 一切正常），
 // 只在「修复前就已脏/已暂存」时暴露。这个设计第一版就写反了方向，见下。
@@ -17,6 +18,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import {
   autoWork,
+  codeTextOf,
   cargoTestRatchet,
   BASELINE,
   BASELINE_GRACE,
@@ -24,6 +26,7 @@ import {
   baselineWaivers,
   parseBaselineCells,
   ratchetVerdict,
+  stringLiteralsOf,
 } from './_shared.mjs'
 
 const repoRoot = path.resolve(import.meta.dirname, '../..')
@@ -667,4 +670,26 @@ test('ci.yml：baseline 阶段必须上 CI，且所在 job 要拉全历史', () 
     /actions\/checkout@v5[\s\S]{0,200}?fetch-depth:\s*0/,
     '没拉 git 历史 ⇒ baseline 阶段在 CI 上恒为「诚实跳过」，日志里看不出来',
   )
+})
+
+// 字符串字面量与注释的区间扫描是两件判据的地基：`gate-codes-audit` 的「码出现在输出
+// 里」只看字符串，`doc-symbol-audit` 的「这一族存在」只看代码本体。抹错了范围（把代码
+// 一起抹掉，或让注释继续替已删除的常量作证）不会报错，只会让判据静默改口径。
+test('codeTextOf：字符串内容与注释抹空，代码标识符留着', () => {
+  const src = [
+    '// 注释里的 ROUTE_IN_COMMENT 只是叙述',
+    'const NAME: &str = "CARGO_PKG_VERSION";',
+    'let joined = A + "mid" + B;',
+    'const tpl = `line1',
+    'LINE_IN_TEMPLATE',
+    'line3`;',
+    '/* 块注释里的 PLUGIN_OLD_NAME */',
+  ].join('\n')
+  const out = codeTextOf(src)
+  assert.ok(!out.includes('ROUTE_IN_COMMENT'), '注释要抹——它是文档的另一处')
+  assert.ok(!out.includes('PLUGIN_OLD_NAME'))
+  assert.ok(!out.includes('CARGO_PKG_VERSION'))
+  assert.ok(!out.includes('LINE_IN_TEMPLATE'), '模板串整段算字面量内容')
+  assert.match(out, /A \+ " " \+ B/, '多个区间各自抹空，代码标识符留下')
+  assert.equal(stringLiteralsOf(src).join('|'), 'CARGO_PKG_VERSION|mid|line1\nLINE_IN_TEMPLATE\nline3')
 })
