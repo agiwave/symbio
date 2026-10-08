@@ -265,3 +265,12 @@ pub type EventWalStore = WalStore<crate::symbio_core::event::Event>;
 #[cfg(test)]
 #[path = "wal.test.rs"]
 mod tests;
+
+// ── panic 面登记（PN-001…003）─────────────────────────────────────────
+// 本文件每一处 `unwrap` / `expect` / `panic!` / `unreachable!` 的理由。登记放在
+// 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
+// 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
+// panic-allow symbio/src/symbio_core/store/wal.rs::len: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/symbio_core/store/wal.rs::range: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/symbio_core/store/wal.rs::head: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/symbio_core/store/wal.rs::append: 存储层灾难不可静默：WAL 打不开 / 写不进时继续跑等于事实源与读侧悄悄分叉。序列化自有类型失败同理。

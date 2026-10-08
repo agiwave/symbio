@@ -20,6 +20,7 @@
 | **M** | 机制表 | `scripts/mechanism-audit.mjs` | M-001–008 | `M-009` |
 | **N** | core 命名 | `scripts/core-naming-audit.mjs` | N-001–005 | `N-006` |
 | **NDC** | 主体直连 | `scripts/no-direct-call-audit.mjs` | NDC-001–002 | `NDC-003` |
+| **PN** | 健壮性登记（每一处 panic 都是显式事实） | `scripts/panic-audit.mjs` | PN-001–003 | `PN-004` |
 | **R** | 死代码 | `scripts/dead-code-audit.mjs` | R-001–002 | `R-003` |
 | **S** | 源码 grep 形态 | `scripts/grep-audit.mjs` | S-001–003、S-006–012 | `S-013` |
 
@@ -79,6 +80,9 @@
 | **N-005** | `scripts/core-naming-audit.mjs` |
 | **NDC-001** | `scripts/no-direct-call-audit.mjs` |
 | **NDC-002** | `scripts/no-direct-call-audit.mjs` |
+| **PN-001** | `scripts/panic-audit.mjs` |
+| **PN-002** | `scripts/panic-audit.mjs` |
+| **PN-003** | `scripts/panic-audit.mjs` |
 | **R-001** | `scripts/dead-code-audit.mjs` |
 | **R-002** | `scripts/dead-code-audit.mjs` |
 | **S-001** | `scripts/grep-audit.mjs` |

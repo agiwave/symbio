@@ -621,3 +621,11 @@ impl Clone for HomePlugin {
 #[cfg(test)]
 #[path = "plugin.test.rs"]
 mod tests;
+
+// ── panic 面登记（PN-001…003）─────────────────────────────────────────
+// 本文件每一处 `unwrap` / `expect` / `panic!` / `unreachable!` 的理由。登记放在
+// 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
+// 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
+// panic-allow symbio/src/plugins/home/plugin.rs::set_self_sync: 装配期：拿不到就是启动失败。带着半套插件继续跑，比崩掉更难诊断。
+// panic-allow symbio/src/plugins/home/plugin.rs::add_instance_sync: 装配期：拿不到就是启动失败。带着半套插件继续跑，比崩掉更难诊断。
+// panic-allow symbio/src/plugins/home/plugin.rs::rebuild_worker_sync: 装配期：拿不到就是启动失败。带着半套插件继续跑，比崩掉更难诊断。

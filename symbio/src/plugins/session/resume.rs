@@ -568,3 +568,10 @@ fn extract_tool_context(
 #[cfg(test)]
 #[path = "resume.test.rs"]
 mod tests;
+
+// ── panic 面登记（PN-001…003）─────────────────────────────────────────
+// 本文件每一处 `unwrap` / `expect` / `panic!` / `unreachable!` 的理由。登记放在
+// 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
+// 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
+// panic-allow symbio/src/plugins/session/resume.rs::process_tool_resume_action: 穷尽性不变量：上游已穷举 / 已校验，走到 else 说明本文件的判据漏了一个分支，属代码缺陷。
+// panic-allow symbio/src/plugins/session/resume.rs::finalize_aborted_parent: 前序步骤已记下该值，取不到说明本函数的前置条件被破坏，属代码缺陷。
