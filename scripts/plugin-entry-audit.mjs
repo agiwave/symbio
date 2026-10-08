@@ -33,13 +33,14 @@
  * | E-008 | 文档里标了 `<!-- vocab:PREFIX_ -->` 的**词表行**必须与代码常量逐字一致 | 闭集的第二份真相常驻文档：`vdfs.md` 的 status 行曾一直写 `error`，而代码早已改名为 `failed`——漂移会从文档**流回**代码 |
  * | E-009 | 插件不得直接 `use crate::plugins::<兄弟插件>`，**测试代码同样判**  | 「插件之间互不可见」**不是**编译器保证的：`plugins` 是共同父模块，而 Rust 的私有可见性包含"定义模块的后代" ⇒ `plugins::mcp` 能路径到私有的 `plugins::web`。当前代码恰好为 0，但没有守卫，一次顺手 import 就能破坏它且不留红（`plugins/mod.rs` 的架构原则只是约定）。测试也在范围内：一条要跨插件比对数据的测试，本身就要求先把一个模块的隔离拆掉——那是这条规则要拦的形态，不是它的例外 |
  * | E-011 | 纯配置挂载点插件不得手写 `impl VdfsProvider`                    | 「挂载根 = 一份配置文档」的插件（`CONFIG_MOUNT_PLUGINS`）四臂 dispatch 骨架逐字相同，机制侧已提供唯一实现（`symbio_core::PluginConfigMount` 的泛型 blanket impl）。手写一份 = 把同一段语义复制出去：四份副本改一条错误文案要改四处，新增插件「记得抄对每条分支」是纯人肉负担。本条与行数棘轮互补——棘轮在**事后**度量规模，本条在**事前**禁止把已收口的语义再摊开 |
+ * | E-012 | `ROUTE_*` 常量：**名**去掉前缀后逐字等于**值**的大写，且**值**必须是真实分发目标 | 名字与值分叉 ⇒ 照名字拼出的地址不存在；值不在 `route()` 的臂也不在 `VDFS_OPS` ⇒ 登记的是一条没人能到达的地址（`AGENT_CHAT` 就是这个形态）。E-005 判「引用」不判「定义」，这两条此前无守卫，而 `route.rs` 的文档还声称有 |
  *
  * （原 E-010「消费方不得深引 `symbio_core::<域>::`」已迁至
  * [`core-export-audit.mjs`](./core-export-audit.mjs) 的 **C-002** 并退役：深引是
  * **内核出口**的事，不是插件门面的事；两处各判一遍就是两个 owner，域清单与豁免通道
  * 必然分叉。C-002 是它的全量版——域目录动态取自 core、额外拦裸 `use …::core::<域>;`。）
  *
- * E-001 ~ E-004、E-007 ~ E-009、E-011 是 **ERROR**（判据 airtight，可进 `--strict` 门禁）；
+ * E-001 ~ E-004、E-007 ~ E-009、E-011、E-012 是 **ERROR**（判据 airtight，可进 `--strict` 门禁）；
  * E-005 / E-006 是 **WARNING**（需要「动态命名空间」白名单配合，宁可先报给人看）。
  *
  * 报告段另给一张表：**每条路由 → 消费方计数**。`refs=0` 的行是「定义了但没人用」
@@ -79,13 +80,23 @@
 
 // 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns E 插件入口与门面
-// @codes E-001 E-002 E-003 E-004 E-005 E-006 E-007 E-008 E-009 E-011
+// @codes E-001 E-002 E-003 E-004 E-005 E-006 E-007 E-008 E-009 E-011 E-012
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, yellow, green, dim } from './color.mjs'
-import { blankComments, matchBrace, blankTestModules } from './rust-scan.mjs'
+import { blankComments, blankTestModules } from './rust-scan.mjs'
+// 「什么算一条路由臂」「哪些地址能被分发」由 route-facts 单一持有：本脚本与
+// `gen-current-facts` / `gen-routes-ts` 读的是同一份实现（两份判据各写一遍正则，
+// 就会有一份开始漏掉复合臂而另一份不报）。
+import {
+  dispatchableRoutes,
+  fnBody,
+  relativeRouteArms,
+  routeConstDecls,
+  routeConstName,
+} from './route-facts.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const defaultRoot = path.resolve(scriptDir, '..')
@@ -276,39 +287,6 @@ const CONFIG_MOUNT_PLUGINS = new Set(['gateway', 'local', 'telegram', 'web'])
 /** 该绝对路径是否落在 `plugins/` 之下（E-007 的适用范围） */
 const isInPluginsDir = (abs) => abs.startsWith(PLUGINS_DIR + path.sep)
 
-/**
- * 提取 `async fn <name>(…)` 的函数体。
- *
- * 只认**第一个** `async fn <name>(`（生产实现总在测试替身之前，且测试模块已被
- * `stripTestModules` 剥掉）。
- */
-function fnBody(txt, name) {
-  const i = txt.indexOf(`async fn ${name}(`)
-  if (i < 0) return null
-  const open = txt.indexOf('{', i)
-  if (open < 0) return null
-  return txt.slice(open, matchBrace(txt, open) + 1)
-}
-
-/**
- * 从 `route` 体里提取**相对臂**：`match` 臂左侧的字符串字面量。
- *
- * 只认带 `=>` 的行——不整段抓字符串，否则会把 `get("approved")` 这类参数名当成路由
- * （`gen-current-facts.mjs` 实测踩过同一个坑）。
- */
-function routeArms(body) {
-  const out = new Set()
-  for (const line of body.split('\n')) {
-    const eq = line.indexOf('=>')
-    if (eq < 0) continue
-    for (const m of line.slice(0, eq).matchAll(/"([a-z][a-z0-9_/-]*)"/g)) {
-      if (m[1] === '_') continue
-      out.add(m[1])
-    }
-  }
-  return [...out].sort()
-}
-
 /** 从 `traverse` 体里提取**协议端点**（只可能有两个合法值） */
 function traverseEndpoints(body) {
   const out = new Set()
@@ -347,7 +325,7 @@ function discoverPlugins() {
 
     const routeBody = fnBody(all, 'route')
     const travBody = fnBody(all, 'traverse')
-    const arms = routeBody ? routeArms(routeBody) : []
+    const arms = routeBody ? relativeRouteArms(routeBody) : []
 
     out.push({
       dirName,
@@ -862,6 +840,50 @@ for (const abs of VOCAB_MD_FILES) {
   }
 }
 
+// ── E-012：`ROUTE_*` 常量的**名↔值**逐字同构，且值必须是真实分发目标 ──────
+//
+// 契约的另一半。`plugin/route.rs` 的模块文档长期**声称**这两条由 `core-naming-audit.mjs`
+// 检查，而那个脚本只有 N-001…N-005 的前缀归属规则——声称有守卫的文档比没有守卫更糟。
+//
+// ① 名 ↔ 值：`ROUTE_SESSION_CHAT_SEND` 的值必须是 `"session/chat/send"`。名字是调用方
+//    唯一读得见的线索：名字说 A、值说 B 时，读代码的人会照着名字拼出一条不存在的地址，
+//    而编译与测试都不会响。
+// ② 值真实存在：值必须落在 `dispatchableRoutes`（`route()` 的静态臂 ∪ `VDFS_OPS`）。
+//    `AGENT_CHAT`（幽灵常量）与 `"session/chat"`（少一截的真实路由）都以「登记了一条
+//    没人能到达的地址」的形态存在过。E-005 明确**跳过常量定义行**——定义行就是那条地址
+//    的真相源，拿自己判自己必然假阳性——所以值的真实性此前无人看。
+//
+// 动态命名空间（`local/<工具名>`、容器挂载名）静态提不出臂：那样的值必须**逐行豁免并
+// 写明运行期来源**，而不是给脚本加一张白名单表——表会让 `local/serch` 这种拼错的工具名
+// 一路静默放行，而拼错工具名恰是这类地址最容易犯的错。
+const ROUTE_MODULE = path.join(repoRoot, 'symbio', 'src', 'symbio_core', 'plugin', 'route.rs')
+{
+  const dispatchable = dispatchableRoutes(repoRoot)
+  const raw = fs.existsSync(ROUTE_MODULE) ? readLines(ROUTE_MODULE).raw : []
+  for (const decl of routeConstDecls(repoRoot)) {
+    const expected = routeConstName(decl.value)
+    if (decl.name !== expected) {
+      report(
+        'E-012',
+        'error',
+        rel(ROUTE_MODULE),
+        decl.line,
+        `${decl.name} = "${decl.value}" 名与值不同构，按命名规则应叫 \`${expected}\``,
+      )
+    }
+    if (!dispatchable.has(decl.value) && !exempted(raw, decl.line - 1, 'E-012')) {
+      report(
+        'E-012',
+        'error',
+        rel(ROUTE_MODULE),
+        decl.line,
+        `"${decl.value}" 不是任何插件的分发目标：既不是 \`route()\` 的臂，也不在 \`VDFS_OPS\` 里` +
+          `（动态分发的地址请写 \`plugin-entry-allow E-012: <运行期来源>\`）`,
+      )
+    }
+  }
+}
+
 // ── 报告：路由表 + 消费方 ───────────────────────────────────────────────
 console.log('')
 console.log(dim('── 路由表（绝对地址 → 消费方）─────────────────────────────────'))
@@ -905,6 +927,7 @@ const ruleNames = {
   'E-008': '文档词表 == 代码词表',
   'E-009': '不直接引用兄弟插件模块',
   'E-011': '配置挂载点不手写 dispatch',
+  'E-012': '路由常量名↔值同构且值可分发',
 }
 for (const [rule, name] of Object.entries(ruleNames)) {
   const n = hitsByRule.get(rule) ?? 0

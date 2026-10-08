@@ -61,8 +61,9 @@
 //! # 命名：`ROUTE_<插件目录名>_<操作>`
 //!
 //! 标识符去掉 `ROUTE_` 前缀后，必须**逐字等于值的大写形式**（`/` → `_`）：
-//! `ROUTE_SESSION_CHAT_SEND` ↔ `"session/chat/send"`。于是「常量名 ↔ 值」可机械核对，
-//! 由 `scripts/core-naming-audit.mjs` 检查——这条规则同时也是本模块存在的理由
+//! `ROUTE_SESSION_CHAT_SEND` ↔ `"session/chat/send"`。这条与「值必须是真实分发目标」
+//! 一起由 `scripts/plugin-entry-audit.mjs` 的 **E-012** 检查（后者抓的是登记了一条没人
+//! 能到达的地址——`AGENT_CHAT` 正是这个形态）。命名规则同时也是本模块存在的理由
 //! （防止路径漂移）的守卫。
 
 // ============ Session 插件 ============

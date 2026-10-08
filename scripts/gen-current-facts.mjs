@@ -32,7 +32,7 @@ import { scopeRow as sharedScopeRow } from "./line-count.mjs";
 import { stripComments } from "./rust-scan.mjs";
 // 路由提取只有一份实现（`route-facts.mjs`），与前端常量生成器共用——
 // 「什么算一条路由」这条判据若有两遍，它们会在没人注意时分叉。
-import { pluginSources, extractRouteArms } from "./route-facts.mjs";
+import { pluginSources, extractRouteArms, vdfsOps } from "./route-facts.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -41,10 +41,6 @@ const PLUGINS_DIR = path.join(ROOT, "symbio", "src", "plugins");
 // 「哪个插件」，不是「哪个键」，故不随 `keys` 域走（见 `symbio_core/README.md` §1.2
 // 的「放置也是同一条规则的一部分」）。
 const IDS_FILE = path.join(ROOT, "symbio", "src", "symbio_core", "plugin", "ids.rs");
-// 跨插件可见的路由地址（`vdfs/root` / `vdfs/watch` / `vdfs/unwatch`）归 core 的
-// `plugin/route.rs`——它们不是 vdfs 插件私有，见 `plugins/vdfs/protocol.rs` 模块文档。
-const ROUTE_FILE = path.join(ROOT, "symbio", "src", "symbio_core", "plugin", "route.rs");
-const VDFS_PROTOCOL_FILE = path.join(PLUGINS_DIR, "vdfs", "protocol.rs");
 const OUT = path.join(ROOT, "docs", "CURRENT.md");
 
 const VDFS_FS_FILE = path.join(PLUGINS_DIR, "vdfs", "fs.rs");
@@ -76,34 +72,6 @@ function parseIds(txt) {
     m.set(mm[1], mm[2]);
   }
   return m;
-}
-
-/** `symbio_core/plugin/route.rs`：跨插件可见的路由地址常量（`ROUTE_*`） */
-function parseRouteConsts() {
-  const m = new Map();
-  const txt = readFileSync(ROUTE_FILE, "utf8");
-  for (const mm of txt.matchAll(/pub const (ROUTE_[A-Z_]+)\s*:\s*&str\s*=\s*"([^"]+)"/g)) {
-    m.set(mm[1], mm[2]);
-  }
-  return m;
-}
-
-/** vdfs/protocol.rs：协议操作常量 + `VDFS_OPS` 清单（按声明顺序） */
-function parseVdfsOps(txt) {
-  // 名字有两种来源：`VDFS_*` 在本文件定义，`ROUTE_VDFS_*` 跨插件可见、归 core
-  // （见 `plugins/vdfs/protocol.rs` 模块文档的「三个例外」）。
-  const consts = new Map(parseRouteConsts());
-  for (const mm of txt.matchAll(/pub const (VDFS_[A-Z_]+)\s*:\s*&str\s*=\s*"([^"]+)"/g)) {
-    consts.set(mm[1], mm[2]);
-  }
-  const block = txt.match(/pub const VDFS_OPS\s*:\s*&\[&str\]\s*=\s*&\[([\s\S]*?)\];/);
-  if (!block) return [];
-  // 必须同时认 `ROUTE_VDFS_*`：只写 `\bVDFS_` 时，`ROUTE_VDFS_ROOT` 里的 `VDFS`
-  // 前面是 `_`（词字符），**没有词边界** ⇒ 匹配不上 ⇒ 三个路由从事实表里静默消失
-  // （操作计数还跟着变少，看起来像「操作被删了」，而不是「抽取漏了」）。
-  return [...block[1].matchAll(/\b((?:ROUTE_)?VDFS_[A-Z_]+)\b/g)]
-    .map((m) => consts.get(m[1]))
-    .filter(Boolean);
 }
 
 /** 解析 `PluginMeta::new(X` / `register_vdfs_provider(X` 的第一个实参 */
@@ -329,7 +297,7 @@ const DYNAMIC_ROUTES = {
   local: "`local/<工具短名>`——按已注册工具名分发（与 §2 的工具清单同一份集合）",
   // 操作数从协议源码动态推导（VDFS_OPS 增删时不再漂移）
   vdfs: `\`vdfs/<操作>\`——按 \`VDFS_OPS\` 校验后分发（见 §3.2，${
-    parseVdfsOps(readFileSync(VDFS_PROTOCOL_FILE, "utf8")).length
+    vdfsOps(ROOT).length
   } 个操作）`,
   composite: "容器：按配置挂载的子插件名分发，运行期动态",
   agent: "已无自有路由（一律 `NotFound` 并指引到 `<根>/agent`）",
@@ -352,7 +320,7 @@ function headSha() {
 
 function render() {
   const ids = parseIds(readFileSync(IDS_FILE, "utf8"));
-  const vdfsOps = parseVdfsOps(readFileSync(VDFS_PROTOCOL_FILE, "utf8"));
+  const vdfsOpList = vdfsOps(ROOT);
   const pluginDirs = readdirSync(PLUGINS_DIR, { withFileTypes: true })
     .filter((e) => e.isDirectory())
     .map((e) => e.name)
@@ -449,7 +417,7 @@ function render() {
   L.push("");
   L.push("### 3.2 VDFS 操作（`plugins/vdfs/protocol.rs::VDFS_OPS`）");
   L.push("");
-  L.push(`- **前端链路**（${vdfsOps.length} 个，计数有测试锁死）：${fmtList(vdfsOps)}`);
+  L.push(`- **前端链路**（${vdfsOpList.length} 个，计数有测试锁死）：${fmtList(vdfsOpList)}`);
   const vdfsPlugin = plugins.find((p) => p.dirName === "vdfs");
   const llmTools = vdfsPlugin ? vdfsPlugin.tools.filter((t) => t.startsWith("vdfs_")) : [];
   L.push(`- **LLM 工具链路**（${llmTools.length} 个）：${fmtList(llmTools)}`);

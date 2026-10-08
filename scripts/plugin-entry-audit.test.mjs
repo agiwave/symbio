@@ -705,3 +705,77 @@ test('E-011 豁免：带理由的 plugin-entry-allow 不再报；空理由仍报
   assert.equal(emptyReason.status, 1, emptyReason.stdout)
   assert.match(emptyReason.stdout, E011_HIT)
 })
+
+// ── E-012：`ROUTE_*` 的名↔值逐字同构，且值必须是真实分发目标 ──────────────
+//
+// 只断言 E-012 命中与否、不断言整体退出码：这些 fixture 里只有一两个插件目录，
+// 别的规则（E-002 的首段白名单）会对着同一段文本各判各的，那与本条无关。
+const ROUTE_FILE = 'symbio/src/symbio_core/plugin/route.rs'
+const E012_HIT = /E-012 .*plugin\/route\.rs:\d/
+
+/** 干净 fixture 里 `session` 有 `chat/send` / `update` 两条臂 ⇒ 这两个值是分发目标 */
+test('E-012 不误报：名与值同构、且值就是插件的臂', () => {
+  assert.doesNotMatch(audit(CLEAN).stdout, E012_HIT)
+})
+
+test('E-012 命中：名字与值不同构（值本身是真实路由）', () => {
+  const r = audit({
+    ...CLEAN,
+    [ROUTE_FILE]: `pub const ROUTE_SESSION_SEND: &str = "session/chat/send";\n`,
+  })
+  assert.match(r.stdout, E012_HIT)
+  assert.match(r.stdout, /按命名规则应叫 `ROUTE_SESSION_CHAT_SEND`/)
+})
+
+test('E-012 命中：名字与值同构，但这条地址没人能到达（幽灵常量）', () => {
+  const r = audit({
+    ...CLEAN,
+    [ROUTE_FILE]: `pub const ROUTE_SESSION_CHAT_ABSENT: &str = "session/chat/absent";\n`,
+  })
+  assert.match(r.stdout, E012_HIT)
+  assert.match(r.stdout, /不是任何插件的分发目标/)
+})
+
+test('E-012 命中：`ROUTE_HOOK_FIRE = "hooks/fire"`（M4 之前的真实形态，两条一起红）', () => {
+  const r = audit({
+    ...CLEAN,
+    [ROUTE_FILE]: `pub const ROUTE_HOOK_FIRE: &str = "hooks/fire";\n`,
+  })
+  // 前缀写错一次 ⇒ 名字说的是 `hook/fire`、值指的是 `hooks/fire`，两处各判各的都命中
+  assert.match(r.stdout, /E-012 .*不同构/)
+  assert.match(r.stdout, /E-012 .*分发目标/)
+})
+
+test('E-012 放行：值在 `VDFS_OPS` 里（含跨文件引用 core 的 `ROUTE_VDFS_*`）', () => {
+  const r = audit({
+    ...CLEAN,
+    [ROUTE_FILE]: `pub const ROUTE_VDFS_WATCH: &str = "vdfs/watch";\n`,
+    'symbio/src/plugins/vdfs/protocol.rs':
+      `pub const VDFS_PING: &str = "vdfs/ping";\n` +
+      `pub const VDFS_OPS: &[&str] = &[VDFS_PING, ROUTE_VDFS_WATCH];\n`,
+  })
+  assert.doesNotMatch(r.stdout, E012_HIT)
+})
+
+test('E-012 豁免：动态分发的地址带理由放行；空理由仍报', () => {
+  const ghost = `pub const ROUTE_LOCAL_SEARCH: &str = "local/search";\n`
+  const withReason = audit({
+    ...CLEAN,
+    [ROUTE_FILE]: `// plugin-entry-allow E-012: 按运行期已注册的工具名分发\n${ghost}`,
+  })
+  assert.doesNotMatch(withReason.stdout, E012_HIT)
+
+  const emptyReason = audit({
+    ...CLEAN,
+    [ROUTE_FILE]: `// plugin-entry-allow E-012:\n${ghost}`,
+  })
+  assert.match(emptyReason.stdout, E012_HIT)
+})
+
+test('E-012 不误报：注释里的示例声明（文档写了一条不存在的地址）', () => {
+  const r = audit({
+    ...CLEAN,
+    [ROUTE_FILE]: `/// 形如 `+"`pub const ROUTE_FOO_BAR: &str = \"foo/bar\";`"+ ` 的声明\n`,
+  })
+  assert.doesNotMatch(r.stdout, E012_HIT)
+})

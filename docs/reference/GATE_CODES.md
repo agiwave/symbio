@@ -13,7 +13,7 @@
 |---|---|---|---|---|
 | **C** | core 出口 | `scripts/core-export-audit.mjs` | C-001–003 | `C-004` |
 | **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–009 | `D-010` |
-| **E** | 插件入口与门面 | `scripts/plugin-entry-audit.mjs` | E-001–009、E-011 | `E-012` |
+| **E** | 插件入口与门面 | `scripts/plugin-entry-audit.mjs` | E-001–009、E-011–012 | `E-013` |
 | **GC** | 判据码命名空间本身 | `scripts/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
 | **GW** | 门禁接线（测试文件与门禁名单的对账） | `scripts/gate-wiring-audit.mjs` | GW-001–003 | `GW-004` |
 | **M** | 机制表 | `scripts/mechanism-audit.mjs` | M-001–008 | `M-009` |
@@ -48,6 +48,7 @@
 | **E-008** | `scripts/plugin-entry-audit.mjs` |
 | **E-009** | `scripts/plugin-entry-audit.mjs` |
 | **E-011** | `scripts/plugin-entry-audit.mjs` |
+| **E-012** | `scripts/plugin-entry-audit.mjs` |
 | **GC-001** | `scripts/gate-codes-audit.mjs` |
 | **GC-002** | `scripts/gate-codes-audit.mjs` |
 | **GC-003** | `scripts/gate-codes-audit.mjs` |
