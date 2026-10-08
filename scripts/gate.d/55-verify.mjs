@@ -26,12 +26,13 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow } from '../color.mjs'
-import { BASELINE, ratchetVerdict } from './_shared.mjs'
+import { BASELINE, ratchetVerdict, autoWork } from './_shared.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
 const verifyDir = path.join(repoRoot, 'docs', 'plan', 'verify')
 const outDir = path.join(repoRoot, '.workbuddy-ai', 'verify-target')
+const genFacts = path.join(repoRoot, 'scripts', 'gen-verify-facts.mjs')
 
 const exeSuffix = process.platform === 'win32' ? '.exe' : ''
 
@@ -112,6 +113,20 @@ export default {
     }
 
     fs.mkdirSync(outDir, { recursive: true })
+
+    // **先**把期望数据从文档抽出来，再跑程序：verify 吃的必须是当前计划。
+    // 顺序反了就会「文档改了、程序还在验旧的那份」——那正是本批要消灭的形态
+    // （plan/13 批 M1）。生成失败（表读不出来、名册与阶文件不配对）直接红。
+    yield {
+      label: 'verify: facts 生成（docs/plan → verify/facts/mod.rs）',
+      run: (c) =>
+        autoWork(c, {
+          label: 'gen-verify-facts',
+          cmd: process.execPath,
+          args: [genFacts],
+          cwd: repoRoot,
+        }),
+    }
 
     for (const { file, name, hasNegative } of entries) {
       yield {

@@ -84,6 +84,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, green, dim } from './color.mjs'
+import { cellsOf, isSeparator } from './md-table.mjs'
 import { collectCoreSurface, kindOf } from './core-surface.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
@@ -157,12 +158,12 @@ function readRules() {
   let inTable = false
   let headerChecked = false
   for (let i = head; i < lines.length; i++) {
-    const line = lines[i]
-    if (!line.trim().startsWith('|')) {
+    const parsed = cellsOf(lines[i])
+    if (parsed === null) {
       if (inTable) break
       continue
     }
-    const cells = line.split('|').slice(1, -1).map((x) => x.trim())
+    const cells = parsed
     if (cells[0] === '域') {
       // 表头必须**恰好**是五列，且第四列是「函数 / 自由函数」。
       // 少一列时 `cells[3]` 会落到「备注」上 ⇒ 每个函数都被判成「该域没有这一类符号」，
@@ -176,7 +177,7 @@ function readRules() {
       headerChecked = true
       continue
     }
-    if (/^[-: ]+$/.test(cells[0])) continue
+    if (isSeparator(cells)) continue
     const domain = cells[0].replace(/`/g, '').trim()
     if (!domain) continue
     inTable = true

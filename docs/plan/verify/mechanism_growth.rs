@@ -1,28 +1,29 @@
 //! 元素数守恒律：机制数不随场景数增长
 //!
-//! 这是"扩充不会重构"唯一可自动审计的形式：
+//! 这是「扩充不会重构」唯一可自动审计的形式：
 //!   · 场景 = 一组（机制键, 取值）赋值向量
 //!   · 合法性 = 场景用到的键 ⊆ 机制表
 //!   · 守恒 = 机制表长度不随场景数变化
 //!
-//! 关键：这里**遍历场景计算键集合**，不是把“是否会增长”预先硬编码成 false 再断言 false。
+//! 机制表**不在本程序里**：它由 `scripts/gen-verify-facts.mjs` 从
+//! [01 §8 权威参数表](../01-核心架构.md) 生成进 `facts`（顶层键判据见该脚本注释——
+//! `projection.param` 是 `projection` 的子键，不是第 11 个机制）。
+//! 于是这里审的是「计划文档里登记的键 ⊆ 权威参数表」，而不是「程序抄的那一份自洽」。
+//!
+//! 两类场景，来源不同、判据相同：
+//!   · `facts::STAGE_DOCS` —— 路线图 13 阶**真实声明**的赋值向量（各阶 §3 的
+//!     `capability-assign` 块），这是计划本体；
+//!   · `scenarios()` 的 20 个 —— 本程序**自造**的压力样本（不属于任何文档），
+//!     它们问的是另一个问题：往「已有场景」这个方向再加到 20 种能力，会不会长出
+//!     第 11 个键。数据是输入，结论仍由遍历算出。
+//!
 //! 反向用例：加入一个需要新机制的场景，审计必须失败。
 //!
 //! 编译运行：rustc --edition 2021 mechanism_growth.rs -o mg && ./mg
 
-/// 机制表：**这是唯一的机制清单**。新增能力只允许在已有键上取新值。
-const MECHANISMS: &[&str] = &[
-    "store",           // 事实源（唯一原语）
-    "projection",      // 纯函数派生的视图名与参数
-    "actor.pattern",   // 三种模式：decider / reasoner / translator
-    "actor.capability",// 能力（7 个封顶）
-    "actor.budget_ms", // I3 时延预算
-    "event.entity",    // 事件语法网格：实体
-    "event.verb",      // 事件语法网格：动词
-    "scope",           // 递归：子作用域
-    "vis_scope",       // 可见域
-    "principal",       // 身份（数据，可无限增长）
-];
+mod facts;
+
+use facts::{MECHANISMS, PARAM_KEYS, STAGE_DOCS};
 
 struct Scenario {
     name: &'static str,
@@ -109,6 +110,21 @@ fn audit(scs: &[Scenario]) -> Vec<(String, String)> {
     bad
 }
 
+/// 同一判据用在计划本体上：路线图各阶 §3 声明的赋值。
+///
+/// 越界即「这一阶要长出新机制」——那是重构，不是排期，必须先过 ADR 前置闸门。
+fn audit_stage_docs() -> Vec<(String, String)> {
+    let mut bad = Vec::new();
+    for doc in STAGE_DOCS {
+        for (k, v) in doc.assigns {
+            if !MECHANISMS.contains(k) {
+                bad.push((doc.id.to_string(), format!("{} = {}", k, v)));
+            }
+        }
+    }
+    bad
+}
+
 /// 场景覆盖到的机制种类数（只统计被用到的键）
 fn mechanisms_used(scs: &[Scenario]) -> usize {
     let mut used: Vec<&str> = Vec::new();
@@ -125,8 +141,14 @@ fn mechanisms_used(scs: &[Scenario]) -> usize {
 fn main() {
     println!("═══ 元素数守恒审计 ═══");
     let scs = scenarios();
-    println!("机制表（恒定）：{} 项", MECHANISMS.len());
-    println!("场景数：{}", scs.len());
+    let stage_bad = audit_stage_docs();
+    println!(
+        "机制表（01 §8 生成，顶层键）：{} 项；§8 登记的键（含子键）：{} 项",
+        MECHANISMS.len(),
+        PARAM_KEYS.len()
+    );
+    println!("路线图各阶 §3 的赋值越界键：{} 个", stage_bad.len());
+    println!("自造场景数：{}", scs.len());
 
     let bad = audit(&scs);
     println!("越界键（需要新机制的）：{} 个", bad.len());
@@ -142,21 +164,45 @@ fn main() {
         println!("  场景 {} 个 → 用到机制 {} 种", n, used);
         prev = used;
     }
-    println!("  全量场景 → 用到机制 {} 种（机制表 {} 项，未用 {} 项为延迟启用）",
-        prev, MECHANISMS.len(), MECHANISMS.len() - prev);
+    println!(
+        "  全量场景 → 用到机制 {} 种（机制表 {} 项，未用 {} 项为延迟启用）",
+        prev,
+        MECHANISMS.len(),
+        MECHANISMS.len() - prev
+    );
 
     // ── 反向用例：加入一个需要新机制的场景，审计必须失败 ──
     let mut with_new = scenarios();
-    with_new.push(Scenario { name: "S21 需要新机制的场景", assignments: vec![
-        ("event.entity", "turn"), ("wizard.mode", "on")] });
+    with_new.push(Scenario {
+        name: "S21 需要新机制的场景",
+        assignments: vec![("event.entity", "turn"), ("wizard.mode", "on")],
+    });
     let bad_new = audit(&with_new);
     println!("\n反向用例：加入含 'wizard.mode' 的场景 → 越界键 {} 个", bad_new.len());
 
     // ── 断言 ──
-    assert!(bad.is_empty(), "20 个场景不应需要任何新机制");
+    assert!(bad.is_empty(), "自造场景不应需要任何新机制");
     assert_eq!(bad_new.len(), 1, "反向用例：含未知键的场景必须被审计抓到");
-    assert!(bad_new[0].1.contains("wizard.mode"), "反向用例：抓到的必须是那个未知键");
+    assert!(
+        bad_new[0].1.contains("wizard.mode"),
+        "反向用例：抓到的必须是那个未知键"
+    );
+    assert!(
+        stage_bad.is_empty(),
+        "路线图某一阶 §3 声明的键不在机制表里——那一阶要长出新机制，先走 ADR"
+    );
     assert!(prev <= MECHANISMS.len(), "用到的机制数不得超过机制表长度");
+    // 「机制键是 10 个还是 11 个」的口径分歧在此一次清偿：判据不是名单，是形状。
+    assert!(
+        PARAM_KEYS
+            .iter()
+            .all(|k| MECHANISMS.contains(k) || (k.contains('.') && MECHANISMS.contains(&k.split('.').next().unwrap()))),
+        "§8 里的键要么是顶层机制键，要么首段是——否则它就是被漏掉的第 11 个机制"
+    );
+    assert!(
+        PARAM_KEYS.len() > MECHANISMS.len(),
+        "§8 登记了子键，全键数应严格大于顶层键数（相等说明表读歪了）"
+    );
 
     println!("\n✅ 全部断言通过（含 1 条反向用例）：机制数不随场景数增长。");
 }
