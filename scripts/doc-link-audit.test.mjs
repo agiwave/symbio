@@ -199,6 +199,35 @@ test('D-004：「不再 / 以前」这类现行语义常用词不误报', () => 
   assert.equal(r.status, 0, r.stdout)
 })
 
+// 批 D0：D-004 扩到**计数的箭头形态**与「初版」这类时序回指。
+// 此前 D-004 只认三个词，于是「五条 → 七条」这个形状完全漏掉——而它与「曾经」是
+// 同一件事：数「从几个变成几个」，而变更历史归 `git log`。
+test('D-004：计数箭头（五条 → 七条）判红', () => {
+  const r = audit({ 'docs/a.md': '# A\n\n`check_all` 五条 → 七条（并入两条新断言）。\n' })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-004/)
+})
+
+test('D-004：四格三角色式的箭头同样判红（带量词才算数）', () => {
+  const r = audit({ 'docs/a.md': '# A\n\n该列的口径扩成四格 → 三角色。\n' })
+  assert.equal(r.status, 1, r.stdout)
+})
+
+test('D-004：「初版五条」这类时序回指判红', () => {
+  const r = audit({ 'docs/a.md': '# A\n\n全部不变量（初版五条，后并入两条）。\n' })
+  assert.equal(r.status, 1, r.stdout)
+})
+
+test('D-004：裸数字箭头不误报（04 §3.1 状态表合法记着测试数增减 56 → 46）', () => {
+  const r = audit({ 'docs/a.md': '# A\n\n| 批 | 判定 | 用例 |\n|---|---|---|\n| ⑨ | ✅ | 56 → 46 |\n' })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-004：流转箭头不误报（turn → opened 这类图示是现行语义）', () => {
+  const r = audit({ 'docs/a.md': '# A\n\n一格 `turn → opened`、一格 `final_unique → closed`。\n' })
+  assert.equal(r.status, 0, r.stdout)
+})
+
 test('D-004：头部豁免带理由 → 通过（定义该规矩的文档要能引用反例措辞）', () => {
   const allowed =
     '<!-- doc-link-allow D-004: 本文定义该规矩，需引用反例措辞 -->\n# A\n\n不写「曾经是什么」。\n'
