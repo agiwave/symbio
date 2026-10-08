@@ -141,6 +141,56 @@ export const TEST_ONLY = [
   'windows-restart',
   'windows-restart-prepare',
 ]
+/**
+ * 被 `import` 或被 `spawn` 调用、但**没有自己的门禁步骤**的 `.mjs`。
+ *
+ * 这张名单与上面两张合起来把 `scripts/` 的**命名空间闭合**：每一个非测试 `.mjs`
+ * 必须落在三张名单之一（`gate-wiring-audit` 的 GW-004 判）。此前没有这张，
+ * 于是「既没有回归测试、又不在任何名单里」的 `.mjs` 是完全隐形的——写一份
+ * `foo-audit.mjs` 忘了登记，它就静默地不存在。实测的现成例子是 `route-facts.mjs`：
+ * 它被 M10 立为「什么算一条路由臂」的唯一语法实现、被三个判定共读，却既没有同名
+ * `.test.mjs`，也不在任何名单上（只被 `gen-routes-ts.test.mjs` 与
+ * `plugin-entry-audit.test.mjs` 的夹具**间接**碰到）。
+ *
+ * ⚠️ 它与前两张的区别是**它自己不会被当成一道门禁步骤跑**：前两张每一条都跑
+ * 回归测试（或守卫本体），这一张只被引用。所以放进来的门槛是「它必须真的被谁
+ * 引用」——一份没人 import 也没人 spawn 的 `.mjs` 放进来就是自我豁免，
+ * `gate-wiring-audit` 因此同时判「名单里的名字磁盘上必须存在」（GW-002 扩面）。
+ *
+ * 逐条理由：
+ *  - `color`：ANSI 输出的唯一实现（`scripts/` 下不得手写转义序列）；
+ *  - `rust-scan`：Rust 文本扫描库，被 `core-export-audit` / `gen-current-facts` /
+ *    `plugin-entry-audit` / `route-facts` 共读；**写错不报错、只静默漏报**，
+ *    后果是「生成器说某条路由不存在，其实是抽漏了」；
+ *  - `md-table`：全仓唯一的 Markdown 管道表解析库（`core-naming-audit` 与
+ *    `gen-verify-facts` 都吃它），判据是「读不出来必须返回 null」；
+ *  - `gate.d/_shared`：门禁原语（`BASELINE` / `ratchetVerdict` / `autoWork` / `color`）；
+ *  - `core-surface`：`core-surface-audit` 的公开面统计库（它只被那一个审计引用）；
+ *  - `route-facts`：`docs/CURRENT.md` §1 路由列、`routes.gen.ts`、`plugin-entry-audit`
+ *    三份判定的共读提取实现（M4/M10 立）；
+ *  - `gen-current-facts`：`docs/CURRENT.md` 与本批 D0 计数守卫的共读生成器，
+ *    由 `60-facts` 阶段 spawn；
+ *  - `gen-gate-codes`：`reference/GATE_CODES.md` 的生成器，由本阶段 spawn；
+ *  - `line-count`：门禁报告里的行数统计；
+ *  - `doc-find`：「某条约定写在哪」的检索入口（`docs/README.md` 导航里对用户承诺的命令）。
+ *
+ * 刻意**不在**这里：`check-commit-msg` 与 `cargo-offline-refresh` 由 git hook /
+ * 人工触发，不是门禁的一环；`gate.mjs` 自己即门禁入口。
+ */
+export const LIBS = [
+  'color',
+  'rust-scan',
+  'md-table',
+  'gate.d/_shared',
+  'core-surface',
+  'route-facts',
+  'gen-current-facts',
+  'gen-gate-codes',
+  'line-count',
+  'doc-find',
+]
+/** 不进门禁的辅助脚本：登记它们是为了让 GW-004 的「谁引用它」这条判据有落点。 */
+export const OUT_OF_GATE = ['check-commit-msg', 'cargo-offline-refresh', 'gate']
 // 报告型：只防崩溃（退出码恒 0，判定需人工复核），走日志不刷屏。
 // 刻意 `echo: 'none'`：这份报告的候选会长期存在（大部分是签名组成部分与自引用），
 // 每次门禁都刷一遍只会训练人忽略它。要看结论就单独跑一次脚本。
