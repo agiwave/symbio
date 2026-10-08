@@ -40,6 +40,10 @@
  * 会被误报（当前全仓数据 0 条）——真出现时把文档改成本仓可见的完整指认，
  * 或用承认通道。
  */
+// 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// @ns D 文档正文与链接
+// @codes D-005
+
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join, dirname, resolve, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'

@@ -30,6 +30,10 @@
  * R-002 同理只认**字面属性**：`cfg_attr` 里拼出来的 `allow`、宏内部生成的属性
  * （`define_string_key!` 靠调用点透传臂转发）都按调用点那行算。
  */
+// 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// @ns R 死代码
+// @codes R-001 R-002
+
 import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs'
 import { join, dirname, resolve, relative, extname, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'

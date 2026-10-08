@@ -33,6 +33,10 @@
  * Windows / macOS / Linux 通用（仓库约定：脚本一律平台无关）。
  */
 
+// 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// @ns S 源码 grep 形态
+// @codes S-001 S-002 S-003 S-006 S-007 S-008 S-009 S-010 S-011
+
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'

@@ -77,6 +77,10 @@
  * 平台无关（Windows / macOS / Linux 通用）：纯 Node，不依赖 bash / ripgrep。
  */
 
+// 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// @ns E 插件入口与门面
+// @codes E-001 E-002 E-003 E-004 E-005 E-006 E-007 E-008 E-009 E-011
+
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'

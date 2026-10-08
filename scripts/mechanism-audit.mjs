@@ -45,6 +45,10 @@
  * 平台无关（Windows / macOS / Linux 通用）：纯 Node，不依赖 bash / ripgrep。
  */
 
+// 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// @ns M 机制表
+// @codes M-001 M-002 M-003 M-004 M-005 M-006 M-007
+
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'

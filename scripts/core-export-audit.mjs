@@ -51,6 +51,10 @@
  * 退出码：0 = 通过，1 = 违规（源头可改）。
  */
 
+// 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// @ns C core 出口
+// @codes C-001 C-002 C-003
+
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'

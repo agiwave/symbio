@@ -9,6 +9,7 @@ import { autoWork } from './_shared.mjs'
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
 const gen = path.join(scriptDir, '..', 'gen-current-facts.mjs')
+const genCodes = path.join(scriptDir, '..', 'gen-gate-codes.mjs')
 
 export default {
   id: 'facts',
@@ -22,6 +23,16 @@ export default {
             label: 'gen-current-facts',
             cmd: process.execPath,
             args: [gen],
+            cwd: repoRoot,
+          }),
+      },
+      {
+        label: 'gen-gate-codes（自动重新生成）',
+        run: (c) =>
+          autoWork(c, {
+            label: 'gen-gate-codes',
+            cmd: process.execPath,
+            args: [genCodes],
             cwd: repoRoot,
           }),
       },
