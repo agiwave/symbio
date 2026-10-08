@@ -122,7 +122,7 @@ impl PersistentChatSession {
     ///
     /// 不再手写魔数兜底（历史上是 `unwrap_or(200)` / `unwrap_or(3)`，与默认值三源）：
     /// 默认值只存在于 `SessionConfig` 一处。
-    fn cfg_or_default(&self) -> SessionConfig {
+    pub(crate) fn cfg_or_default(&self) -> SessionConfig {
         self.config
             .try_read()
             .map(|c| c.clone())

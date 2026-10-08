@@ -349,6 +349,47 @@ pub struct SessionConfig {
     /// 「切到 v2 的哪一步」是一个问题，因此不拆成多个开关。
     #[serde(default)]
     pub v2_mode: V2Mode,
+    // ── Q1：worker 启动判据的三条旋钮（ADR-047 批 B 的「独立一批」）────────
+    //
+    // 出厂值即判据原样，两个平凡值都是**这一层关闭**，不是「永远命中」：
+    // 阈值 0 若也判长度，任何非空消息都命中 ⇒ 每条寒暄都开一个后台会话，
+    // 那正是 ADR-047 被否决方案的第一条。
+    /// 显式前缀（**带尾空格**：`/work 干活` 命中，`/worker 是什么` 不命中）。
+    /// 空串 = 本层关闭（`starts_with("")` 恒真，故显式跳过）。
+    #[serde(default = "default_worker_force_prefix")]
+    pub worker_force_prefix: String,
+    /// 关键词（子串、忽略大小写），**逗号分隔**；空串 = 空集 = 本层关闭。
+    ///
+    /// 刻意用逗号串而非数组：面板控件只有 `toggle / text / number / select`，
+    /// 声明一个没有对应控件的数组键，就是「后端存在、产品里开不了」——
+    /// `config_definition_covers_every_session_config_field` 正是防这个形态。
+    #[serde(default = "default_worker_keywords")]
+    pub worker_keywords: String,
+    /// 主题长度阈值（字符数）。**0 = 本层关闭**。
+    #[serde(default = "default_worker_min_chars")]
+    pub worker_min_chars: usize,
+}
+
+// ── Q1 判据的出厂值：单一真源 ─────────────────────────────────────────
+//
+// 出厂值落在**配置面**而非判定模块——两者都是私有模块，判定侧能 import
+// 配置面、配置面反过来够不着判定侧；写成两处字面量就是必然漂移的第二份。
+
+/// 出厂值：显式前缀，**带尾空格**——`/work 干活` 命中，`/worker 是什么` 不命中。
+pub(crate) const FORCE_PREFIX: &str = "/work ";
+/// 出厂值：关键词（子串、忽略大小写）。**空集 = 本层关闭**。
+pub(crate) const KEYWORDS: &[&str] = &[];
+/// 出厂值：主题长度阈值（字符数）。**0 = 本层关闭**。
+pub(crate) const MIN_CHARS: usize = 0;
+
+pub fn default_worker_force_prefix() -> String {
+    FORCE_PREFIX.to_string()
+}
+pub fn default_worker_keywords() -> String {
+    KEYWORDS.join(",")
+}
+pub fn default_worker_min_chars() -> usize {
+    MIN_CHARS
 }
 
 pub fn default_max_messages() -> usize {
@@ -491,6 +532,9 @@ impl Default for SessionConfig {
             skill_compile_enabled: default_skill_compile_enabled(),
             skill_fast_path: default_skill_fast_path(),
             v2_mode: V2Mode::default(),
+            worker_force_prefix: default_worker_force_prefix(),
+            worker_keywords: default_worker_keywords(),
+            worker_min_chars: default_worker_min_chars(),
         }
     }
 }

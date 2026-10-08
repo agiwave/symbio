@@ -666,6 +666,29 @@ fn config_definition() -> DetailDefinition {
                         "单轮最多工具迭代次数（0 = 不限制）。达到上限会先给出明确提示再正常退出，不是静默熔断",
                         json!(d.max_tool_rounds),
                     ),
+                    // ── Q1：worker 启动判据（三层按序短路，空值 / 0 = 该层关闭）───
+                    DetailField {
+                        default: Some(json!(d.worker_force_prefix)),
+                        ..DetailField::text(
+                            "worker_force_prefix",
+                            "委派前缀",
+                            "发言以此前缀开头即启动 worker（带尾空格，如 `/work `）；留空 = 关闭这一层",
+                        )
+                    },
+                    DetailField {
+                        default: Some(json!(d.worker_keywords)),
+                        ..DetailField::text(
+                            "worker_keywords",
+                            "委派关键词",
+                            "逗号分隔、忽略大小写，命中即启动 worker；留空 = 关闭这一层",
+                        )
+                    },
+                    unbounded_number(
+                        "worker_min_chars",
+                        "委派长度阈值",
+                        "发言字符数达到此值即启动 worker（0 = 关闭这一层）",
+                        json!(d.worker_min_chars),
+                    ),
                 ],
             },
             DetailSection {

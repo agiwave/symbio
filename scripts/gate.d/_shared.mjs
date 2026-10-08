@@ -722,14 +722,14 @@ export const BASELINE = {
   //      落地，`delegate.test.rs` 新增 7 条——`rounds` 数 user 消息不拿 `message_count`
   //      顶、`steps` 无内容节点不产出、`in_flight` 只认见过的终态、步骤截断与上限、
   //      段落字段逐字可见、次序在判定/目录之后、空段一个字节不占。**加了测试就跟着回填**。
-  rustTests: 1373,
+  rustTests: 1375,
   /**
    * CI 口径的 Rust 通过数（**只增不减**）——与上面三个分包基线**是不同口径，不能互替**。
    *
    * 为什么要单独一格：本地与 CI 跑的不是同一条命令。本地按 crate 分包
    * `cargo test -p <pkg>`，每个包**各取首个** `test result: ok. N passed`（lib 目标，
    * `ignored` 不计）；CI 跑一次 `cargo test --workspace`，输出是**所有测试目标各行求和**
-   * （含 cli / tauri / doctest 那几行）。所以 1381 = 1373 + 8 + 0 + 0，**不等于**三个
+   * （含 cli / tauri / doctest 那几行）。所以 1383 = 1375 + 8 + 0 + 0，**不等于**三个
    * 分包基线之和的口径语义（那里是「首个 result 行」，这里是「全部 ok 行求和」）。
    *
    * ⚠️ **这个格子是补上来的，不是一直有的**：`cargoTestRatchet` 的 CI 分支原先
@@ -738,14 +738,14 @@ export const BASELINE = {
    * 照样绿。这与 ci.yml 漏掉 `v2-plan` 是同一课的第三次：**只信退出码**能抓住
    * 「测试失败」，抓不住「测试消失」——后者不留任何痕迹。
    *
-   * 1381 = 1373 + 8 + 0 + 0（**推算**：+7 与 `rustTests` 同源，即批 B step 2 的 Q3
-   * 七条判据；下一次 CI 以实测复核）。第 4 行是 doctest `0 passed; 7 ignored`。
+   * 1383 = 1375 + 8 + 0 + 0（**推算**：+2 与 `rustTests` 同源，即批 B 三条判据改可配
+   * 的两条旋钮用例；下一次 CI 以实测复核）。第 4 行是 doctest `0 passed; 7 ignored`。
    * 口径的出处是 CI run 37647725557：`rust-checks (dev)` 四行依次
    * `1341 / 8 / 0 / 0 passed`，并打黄字 `⚠ CI 全量 1349 > 基线 1347：
    * 请更新 BASELINE.ciRustTestsTotal`。**本地与 CI 是两条独立的格子**，同一个增量
    * 会各欠一次，回填时必须两边一起看。
    */
-  ciRustTestsTotal: 1381,
+  ciRustTestsTotal: 1383,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

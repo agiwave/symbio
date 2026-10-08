@@ -255,10 +255,13 @@ pub(crate) async fn prepare_turn_inputs(
     let workers = delegate::worker_progress(context.session.as_ref())
         .await
         .map_err(TurnExit::Failed)?;
-    let delegate_section = delegate::delegate_section(
+    // Q1 的三条判据按**本会话当前配置**取（`worker_*` 三字段），不再读判定模块的
+    // 常量——常量只是出厂值的单一真源，运行时值属于配置面。
+    let delegate_section = delegate::delegate_section_with(
         turn.input_utterance.as_ref().map(|(_, text)| text.as_str()),
         &tools,
         &workers,
+        &context.session.cfg_or_default(),
     );
     let retention: HashMap<String, crate::symbio_core::CapabilityToolContextRetention> = tools
         .iter()

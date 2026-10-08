@@ -7,11 +7,66 @@
 //!   消息都命中，判定权等于没有。
 
 use super::*;
+// 出厂值的真源在配置面（`delegate.rs` 不持第二份字面量）——判定侧测试显式 import。
+use crate::plugins::session::config::{FORCE_PREFIX, KEYWORDS, MIN_CHARS};
 use crate::symbio_core::CapabilityCategory;
 
 /// 出厂参数：前缀 `/work `、关键词空集、阈值 0。
 fn factory(text: &str) -> Option<&'static str> {
     worker_start_reason(text, FORCE_PREFIX, KEYWORDS, MIN_CHARS)
+}
+
+/// 出厂**配置**下的委派段：与生产同一个 `delegate_section_with`，只把默认配置递进去
+/// （判定侧不持第二份默认，故「出厂值」与「测试所测」同路）。
+fn factory_section(
+    utterance: Option<&str>,
+    tools: &[CapabilityMeta],
+    workers: &[WorkerProgress],
+) -> Option<String> {
+    delegate_section_with(utterance, tools, workers, &SessionConfig::default())
+}
+
+// ── Q1 · 三条旋钮（判据可配：值取自配置面，出厂值只是默认）────────────────
+mod knobs {
+    use super::*;
+    use crate::plugins::session::config::SessionConfig;
+
+    /// 改前缀 ⇒ 判定跟着改，且**出厂前缀此时不再命中**（配置是替换，不是叠加）。
+    #[test]
+    fn prefix_is_configurable_and_replaces_the_default() {
+        let cfg = SessionConfig {
+            worker_force_prefix: "#run ".to_string(),
+            ..SessionConfig::default()
+        };
+        let hit = delegate_section_with(Some("#run 重构"), &[], &[], &cfg).unwrap();
+        assert!(hit.contains("reason=explicit_prefix"), "{hit}");
+
+        let replaced = delegate_section_with(Some("/work 重构"), &[], &[], &cfg).unwrap();
+        assert!(replaced.contains("未命中任何委派判据"), "{replaced}");
+    }
+
+    /// 关键词与长度阈值同理：出厂是「空集 / 0」两层关闭，配了才开。
+    #[test]
+    fn keywords_and_min_chars_are_configurable() {
+        let kw = SessionConfig {
+            worker_keywords: "重构".to_string(),
+            ..SessionConfig::default()
+        };
+        let hit = delegate_section_with(Some("帮我把这个重构掉"), &[], &[], &kw).unwrap();
+        assert!(hit.contains("reason=keyword_hit"), "{hit}");
+
+        let len = SessionConfig {
+            worker_min_chars: 4,
+            ..SessionConfig::default()
+        };
+        let long = delegate_section_with(Some("这句话足够长了吧"), &[], &[], &len).unwrap();
+        assert!(long.contains("reason=topic_length"), "{long}");
+
+        // 出厂值这两层是**关闭**的：同一条消息在默认配置下不命中（否则每条寒暄
+        // 都开一个后台会话，ADR-047 被否决方案第一条）。
+        let off = factory_section(Some("帮我把这个重构掉"), &[], &[]).unwrap();
+        assert!(off.contains("未命中任何委派判据"), "{off}");
+    }
 }
 
 // ── Q1 · 三层判据 ──────────────────────────────────────────────────────
@@ -213,12 +268,12 @@ fn digest_is_order_independent() {
 #[test]
 fn section_is_none_when_there_is_nothing_to_say() {
     // 无发言（resume / 心跳）且无能力 ⇒ 一个字节都不多。
-    assert_eq!(delegate_section(None, &[], &[]), None);
+    assert_eq!(factory_section(None, &[], &[]), None);
 }
 
 #[test]
 fn section_carries_the_hit_reason_verbatim() {
-    let section = delegate_section(Some("/work 帮我重构"), &[], &[]).unwrap();
+    let section = factory_section(Some("/work 帮我重构"), &[], &[]).unwrap();
     assert!(
         section.starts_with("- 委派判定：本轮应启动 worker（reason=explicit_prefix）"),
         "实际：{section}"
@@ -231,7 +286,7 @@ fn section_carries_the_hit_reason_verbatim() {
 fn section_records_a_miss_too() {
     // 「为什么这轮没动手」是 Q1 存在的理由——未命中也要落事实，否则分不清
     // 「判了不动」与「压根没判」。
-    let section = delegate_section(Some("今天天气不错"), &[], &[]).unwrap();
+    let section = factory_section(Some("今天天气不错"), &[], &[]).unwrap();
     assert!(
         section.contains("- 委派判定：未启动 worker（未命中任何委派判据）"),
         "实际：{section}"
@@ -245,7 +300,7 @@ fn section_records_a_miss_too() {
 #[test]
 fn section_without_utterance_omits_the_verdict_line() {
     // resume / 心跳：没有用户新发言，判决无从谈起 ⇒ 只剩能力目录。
-    let section = delegate_section(
+    let section = factory_section(
         None,
         &[meta("file_read", Some(CapabilityCategory::FileOperation))],
         &[],
@@ -258,7 +313,7 @@ fn section_without_utterance_omits_the_verdict_line() {
 #[test]
 fn section_puts_verdict_before_digest() {
     // 判定在前、目录在后：模型先看到「本轮动不动手」，再看到「我有哪些能力」。
-    let section = delegate_section(
+    let section = factory_section(
         Some("/work 重构"),
         &[meta("file_read", Some(CapabilityCategory::FileOperation))],
         &[],
@@ -272,7 +327,7 @@ fn section_puts_verdict_before_digest() {
 #[test]
 fn section_survives_empty_capability_list_when_verdict_exists() {
     // 能力空 ⇒ 目录不出现，但判定仍在（两条真源各自独立决定自己在不在）。
-    let section = delegate_section(Some("/work 重构"), &[], &[]).unwrap();
+    let section = factory_section(Some("/work 重构"), &[], &[]).unwrap();
     assert!(section.contains("reason=explicit_prefix"));
     assert!(!section.contains("【能力目录】"), "实际：{section}");
 }
@@ -466,7 +521,7 @@ fn section_carries_worker_fields_verbatim() {
         rounds: 3,
         steps: vec!["读代码".to_string()],
     };
-    let section = delegate_section(Some("/work 继续"), &[], &[p]).unwrap();
+    let section = factory_section(Some("/work 继续"), &[], &[p]).unwrap();
     // 三个字段名逐字可见：与 B2 状态行同名，两处漂移时一眼对得出来。
     assert!(section.contains("rounds=3"), "{section}");
     assert!(section.contains("in_flight=true"), "{section}");
@@ -482,7 +537,7 @@ fn section_puts_workers_after_verdict_and_digest() {
         title: "t".to_string(),
         ..Default::default()
     };
-    let section = delegate_section(
+    let section = factory_section(
         Some("/work 重构"),
         &[meta("file_read", Some(CapabilityCategory::FileOperation))],
         &[p],
@@ -497,6 +552,6 @@ fn section_puts_workers_after_verdict_and_digest() {
 #[test]
 fn section_omits_workers_when_there_are_none() {
     // 没开 worker ⇒ Q3 一个字节都不占（与 Q2 空目录同一条纪律）。
-    let section = delegate_section(Some("/work 继续"), &[], &[]).unwrap();
+    let section = factory_section(Some("/work 继续"), &[], &[]).unwrap();
     assert!(!section.contains("worker `"), "{section}");
 }

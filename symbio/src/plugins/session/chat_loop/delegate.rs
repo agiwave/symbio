@@ -19,11 +19,16 @@
 //! 一个是「怎么调」的契约。索引复制的是**名字**，而名字的真源是
 //! `CapabilityVisitor::list_capability()`（同一轮同一次收集）⇒ 同源，不构成第二份。
 //!
-//! ## 本批刻意未做的两件事
+//! ## 三条判据可配：读 `SessionConfig`，出厂值真源在配置面
 //!
-//! - **不往 `SessionConfig` 加旋钮**：ADR-047 要的是「答案是数据」，出厂值
-//!   （前缀 `/work `、关键词空集、阈值 0）由本模块的常量给出。旋钮会连带改配置面与
-//!   `CONFIGURATION.md` 字段表，属独立一批——登记在 [04 §3.2](../../../../../docs/plan/04-工程落地.md)。
+//! Q1 的三条判据（前缀 / 关键词 / 阈值）取 `SessionConfig` 的 `worker_force_prefix`
+//! / `worker_keywords` / `worker_min_chars`；出厂值的**单一真源在配置面**
+//! （`mod chat_loop` / `mod delegate` 皆私有，判定侧能 import 配置面、反过来不行），
+//! 本模块**不持第二份字面量**，出厂参数由判定侧的测试显式 import 同一批常量。
+//! 字段表同步 [CONFIGURATION](../../../../../docs/reference/CONFIGURATION.md)。
+//!
+//! ## 一件刻意未做的事
+//!
 //! - **Q3（worker 进展）也在本模块**，且**同样不记进程内账**——每次现读磁盘，
 //!   重启后与磁盘天然对得上。读侧走 [`PersistentChatSession::list_sub_sessions`]
 //!   （枚举 `<父>/sessions/`，**按路径天然只含本父之子**）+
@@ -36,22 +41,19 @@ use crate::symbio_core::{CapabilityMeta, PluginError};
 use std::collections::BTreeMap;
 
 use super::super::chat_session::PersistentChatSession;
+use super::super::config::SessionConfig;
 use super::super::types::{Session, SessionSummary};
 
 // ── Q1：worker 启动条件 ────────────────────────────────────────────────
 
 /// Q1 理由码。与 `classify::reasons` 同一条约定：理由码是**英文短词**，
 /// 可观测、可穷举、可被测试逐个钉住——没有理由码的判定不可审计（ADR-047 不变量）。
+///
+/// 出厂值（前缀 / 关键词 / 阈值）的真源在**配置面** `session::config`，本模块
+/// **不持有第二份字面量**；判定侧与它的测试各自显式 import 那三个常量。
 pub(crate) const REASON_PREFIX: &str = "explicit_prefix";
 pub(crate) const REASON_KEYWORD: &str = "keyword_hit";
 pub(crate) const REASON_LENGTH: &str = "topic_length";
-
-/// 出厂值：显式前缀，**带尾空格**——`/work 干活` 命中，`/worker 是什么` 不命中。
-pub(crate) const FORCE_PREFIX: &str = "/work ";
-/// 出厂值：关键词（子串、忽略大小写）。**空集 = 本层关闭**。
-pub(crate) const KEYWORDS: &[&str] = &[];
-/// 出厂值：主题长度阈值（字符数）。**0 = 本层关闭**。
-pub(crate) const MIN_CHARS: usize = 0;
 
 /// Q1 · worker 启动条件：三层判据**按序短路**，命中回理由码、未命中回 `None`。
 ///
@@ -334,16 +336,31 @@ fn worker_line(p: &WorkerProgress) -> String {
 /// **压根没判**（这正是本仓反复钉的「没有观测 = 静默失效」）。故未命中同样落一条
 /// 事实，只是不带理由码：`worker_start_reason` 的 `None` 语义（未命中不回理由）
 /// 由这条文本承载，函数本身不破例。
-pub(crate) fn delegate_section(
+///
+/// ## 三条判据按 `cfg` 取值
+///
+/// `cfg` 的 `worker_force_prefix` / `worker_keywords` / `worker_min_chars` 是**运行时的
+/// 当前值**，出厂值只是它们的默认（真源在配置面）。改配置即改判定，两者不会各自
+/// 漂移——判定侧不持第二份默认，生产路径与测试所测是**同一个函数体**。
+pub(crate) fn delegate_section_with(
     utterance: Option<&str>,
     tools: &[CapabilityMeta],
     workers: &[WorkerProgress],
+    cfg: &SessionConfig,
 ) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
 
     if let Some(text) = utterance {
+        // 关键词存**逗号串**（面板无数组控件），切开即用；空串由 `worker_start_reason`
+        // 的「空关键词跳过」处理 ⇒ 空串 = 空集 = 本层关闭，与出厂值同一语义。
+        let keywords: Vec<&str> = cfg.worker_keywords.split(',').collect();
         parts.push(
-            match worker_start_reason(text, FORCE_PREFIX, KEYWORDS, MIN_CHARS) {
+            match worker_start_reason(
+                text,
+                &cfg.worker_force_prefix,
+                &keywords,
+                cfg.worker_min_chars,
+            ) {
                 Some(reason) => format!("- 委派判定：本轮应启动 worker（reason={reason}）"),
                 None => "- 委派判定：未启动 worker（未命中任何委派判据）".to_string(),
             },
