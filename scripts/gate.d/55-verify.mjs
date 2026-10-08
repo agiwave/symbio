@@ -25,7 +25,7 @@
 import path from 'node:path'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { green, red, yellow } from '../color.mjs'
+import { green, red, yellow, dim } from '../color.mjs'
 import { BASELINE, ratchetVerdict, autoWork } from './_shared.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
@@ -68,7 +68,18 @@ export default {
       .map((file) => {
         // 反例能力由**源码自己声明**，不维护第二份名单——名单会漂移，源码不会。
         const src = fs.readFileSync(path.join(verifyDir, file), 'utf8')
-        return { file, name: file.replace(/\.rs$/, ''), hasNegative: src.includes('should_not_compile') }
+        return {
+          file,
+          name: file.replace(/\.rs$/, ''),
+          hasNegative: src.includes('should_not_compile'),
+          // 断言数（棘轮，只许涨）：前两格只到文件级，把某个程序的断言删到只剩
+          // 一条时程序数与反例数都不变 ⇒ 全绿。而 `03 §5.1` 纪律 1 写着「零断言的
+          // 程序不可能失败」——那条纪律此前没有任何机器判据。
+          //
+          // 口径是**文本出现次数**，含 `should_not_compile` 模块内正常档不执行的那些：
+          // 刻意保守（基线略高于实际执行量），而「删断言必减计数」这个方向不受影响。
+          asserts: (src.match(/\bassert!\s*\(|\bassert_eq!\s*\(|\bassert_ne!\s*\(/g) || []).length,
+        }
       })
     if (entries.length === 0) {
       yield { label: 'verify', run: async () => 'skipped', skipNote: 'verify/ 下没有 .rs 程序' }
@@ -80,8 +91,9 @@ export default {
     // C29 存在的理由正是不接受这种静默。三态判定走 `ratchetVerdict`（与测试数
     // 棘轮同一条判据，不在这里再决定一次红不红）。
     const negatives = entries.filter((e) => e.hasNegative).length
+    const asserts = entries.reduce((n, e) => n + e.asserts, 0)
     yield {
-      label: 'verify: 程序数与反例数棘轮',
+      label: 'verify: 程序数 · 反例数 · 断言数棘轮',
       run: async () => {
         const verdicts = [
           ratchetVerdict({
@@ -98,6 +110,13 @@ export default {
             kind: '反例',
             unit: '反例档',
           }),
+          ratchetVerdict({
+            actual: asserts,
+            baseline: BASELINE.verifyAsserts,
+            name: 'verifyAsserts',
+            kind: '断言',
+            unit: 'assert!',
+          }),
         ]
         const short = verdicts.filter((v) => !v.ok)
         if (short.length) {
@@ -107,7 +126,14 @@ export default {
         for (const v of verdicts) {
           if (v.warn) console.log(yellow(`      ↳ ${v.note}：请上调 scripts/gate.d/_shared.mjs 的 BASELINE`))
         }
-        console.log(green(`      ↳ 程序 ${entries.length}/${BASELINE.verifyPrograms} · 反例 ${negatives}/${BASELINE.verifyNegatives}`))
+        console.log(
+          green(`      ↳ 程序 ${entries.length}/${BASELINE.verifyPrograms} · 反例 ${negatives}/${BASELINE.verifyNegatives} · 断言 ${asserts}/${BASELINE.verifyAsserts}`),
+        )
+        // 逐文件明细：断言数掉下来时要能**归因到文件**。`_shared.mjs` 里那条经验
+        // 是「溯源方法有盲区，不等于来源不存在」——明细是归因的起点。
+        for (const e of entries) {
+          console.log(dim(`        ${e.name}: ${e.asserts}${e.hasNegative ? ' (+反例档)' : ''}`))
+        }
         return { ok: true }
       },
     }
