@@ -96,7 +96,7 @@
 | 数据 | 位置 | 后端 |
 |---|---|---|
 | 资源型插件条目（agent / model / mcp / skill / plugin_manager …） | `<homedir>/<类别>/<id>/<主文件>` | `providers/vdfs_service/` 三型：`SingleFileVdfs` / `DirVdfs` / `MemoryVdfs` |
-| 会话与其消息 | `<homedir>/session/<id>/{session.json,messages.json}` | **单一具体类型** `SessionStore`（持久=磁盘布局 / 临时=进程内驻留）。曾有 `store_kind` × file/sqlite/memory 三后端选型，**已删除** |
+| 会话与其消息 | `<homedir>/session/<id>/{session.json,messages.json}` | **单一具体类型** `SessionStore`（持久=磁盘布局 / 临时=进程内驻留）——**没有后端选型维度**，要换存储就是换类型 |
 | Agent 目录 | `agent/<id>`（工作区级 + 全局级双层） | `AgentDirStore` 自管，不经 `vdfs_service`；虚拟视图以 `<vdfs_root>/agent/<id>` 进入 |
 | 插件配置（含会话配置） | `<homedir>/<插件>/PLUGIN.yml`（系统级在 `<homedir>/PLUGIN.yml`） | `PluginConfigFile` 自读写，**无第二种后端、无第二条配置协议** |
 
@@ -120,4 +120,4 @@
 
 ---
 
-> 生成时间：2026-10-08 12:08:08 UTC · 源：`git rev-parse HEAD` = `176e01e`
+> 生成时间：2026-10-08 13:44:32 UTC · 源：`git rev-parse HEAD` = `a4b434f`

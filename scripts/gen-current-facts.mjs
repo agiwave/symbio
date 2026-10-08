@@ -433,7 +433,7 @@ function render() {
     "| 资源型插件条目（agent / model / mcp / skill / plugin_manager …） | `<homedir>/<类别>/<id>/<主文件>` | `providers/vdfs_service/` 三型：`SingleFileVdfs` / `DirVdfs` / `MemoryVdfs` |"
   );
   L.push(
-    "| 会话与其消息 | `<homedir>/session/<id>/{session.json,messages.json}` | **单一具体类型** `SessionStore`（持久=磁盘布局 / 临时=进程内驻留）。曾有 `store_kind` × file/sqlite/memory 三后端选型，**已删除** |"
+    "| 会话与其消息 | `<homedir>/session/<id>/{session.json,messages.json}` | **单一具体类型** `SessionStore`（持久=磁盘布局 / 临时=进程内驻留）——**没有后端选型维度**，要换存储就是换类型 |"
   );
           const vdfsRoot = "<vdfs_root>"; // grep-audit-allow S-010: CURRENT.md 约定用占位，不写字面量
   // 真实值来自 plugins/vdfs/fs.rs::VDFS_ADDR_ROOT（运行期抽取，防漂移）；
