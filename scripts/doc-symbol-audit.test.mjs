@@ -47,6 +47,7 @@ const RS = {
   'symbio/src/lib.rs': [
     'pub const PLUGIN_PAYLOAD_KEY: &str = "payload";',
     'pub const ROUTE_SESSION_CHAT_SEND: &str = "session/chat/send";',
+    'pub const WIRE_TOTAL: u32 = 2;',
     'fn register_option_field(order: i32) {}',
     'fn build() { let v = env!("CARGO_PKG_VERSION"); }',
   ].join('\n'),
@@ -128,6 +129,38 @@ test('D-009 前端族同样开闸：VDFS_ 有成员而这个名字查无 ⇒ 红
   const r = audit({ ...RS, ...TS, 'README.md': '分页大小取 `VDFS_PAGE_SZIE`。\n' })
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /D-009 .*VDFS_PAGE_SZIE/)
+})
+
+/** 最小工具脚本语料：`WIRE_` 一族由 Rust 开（见 RS），脚本里只声明其中一个名字 */
+const MS = {
+  'scripts/gate.d/30-docs.mjs': 'const WIRE_ONLY = new Set()\nconst ZZZ_RUNS = 1\n',
+}
+
+test('D-009 认工具脚本语料：只有 .mjs 里写过的名字，文档指认它合法（exit 0）', () => {
+  const r = audit({ ...RS, ...MS, 'README.md': '非守卫的测试列在 `WIRE_ONLY` 里。\n' })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-009 脚本语料不放宽判据：同族有成员而这个名字查无 ⇒ 红（exit 1）', () => {
+  const r = audit({ ...RS, ...MS, 'README.md': '非守卫的测试列在 `WIRE_ONLYE` 里。\n' })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-009 .*WIRE_ONLYE/)
+})
+
+test('D-009 脚本不开命名空间：ZZZ_ 只存在于脚本里 ⇒ 文档的 ZZZ_UNRELATED 不判（exit 0）', () => {
+  const r = audit({ ...RS, ...MS, 'README.md': '构建产物的目录是 `ZZZ_UNRELATED_DIR`。\n' })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-009 不认测试语料：只在 *.test.mjs 里出现过的假名不算存在（exit 1）', () => {
+  const r = audit({
+    ...RS,
+    ...MS,
+    'scripts/gate.d/30-docs.test.mjs': 'const WIRE_INVENTED = 1\n',
+    'README.md': '名单里还有一项 `WIRE_INVENTED`。\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-009 .*WIRE_INVENTED/)
 })
 
 test('D-009 单段全大写但没有下划线 ⇒ 与普通词无法区分，不查（exit 0）', () => {

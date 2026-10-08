@@ -11,7 +11,8 @@
  *     **每段为标识符**的路径（≥2 段，剥尾部 `()`），取最后一段查它是否以整词出现在
  *     Rust 源码（symbio/src、cli/src、tauri/src-tauri/src）的 .rs 语料里；查不到 ⇒ ERROR。
  *   **D-009**（裸常量名形态）：反引号里的单段全大写名（形如 `ROUTE_SESSION_CHAT_SEND`，
- *     `^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$`）必须在 Rust ∪ 前端（tauri/src）语料里逐字存在——
+ *     `^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$`）必须在 Rust ∪ 前端（tauri/src）∪ 门禁脚本
+ *     （scripts）语料里逐字存在——
  *     但**仅当它的同族**（首段 + `_`，如 `ROUTE_`）在代码里另有成员时才判红。
  *
  * 为什么 D-009 要「同族」这道闸：全大写 + 下划线不只是常量的形态，也是**环境变量、CI
@@ -19,11 +20,15 @@
  * 不在本仓代码里，硬查就得为每一处写豁免——而豁免喂到判据失效是这类守卫最容易的死法。
  * 同族把范围收成「本仓自己在用的常量命名空间」：改名漂移（文档写 `ROUTE_TRIAGE_DECIDE`、
  * 代码里实际叫 `ROUTE_CLASSIFY_DECIDE`）正好落在闸内，环境变量族自动落在闸外。
- * 族名只由**代码本体**开出（`gate.d/_shared.mjs` 的 `codeTextOf` 抹掉字符串内容与注释）：
+ * 族名只由**产品代码的本体**开出（`gate.d/_shared.mjs` 的 `codeTextOf` 抹掉字符串内容与注释）：
  * `env!("CARGO_PKG_VERSION")` 里的名字是外部约定、注释里的名字是叙述，都不算这一族存在。
+ * 工具脚本（`scripts`）**只回答「这个名字写过没有」，不开族**——脚本里的临时常量前缀
+ * 会把 cargo/CI 的环境变量族（`OUT_DIR`）误判成「本仓在用的命名空间」，那正是闸门要挡在外面的。
  *
  * 为什么两条判据的语料不同：`a::b::c` 是 Rust 语法，D-005 只查 Rust 侧；裸常量名是跨栈
- * 事实（前端 `VDFS_PAGE_SIZE` 与后端 `ROUTE_*` 一样会被文档指认），D-009 两侧都算存在。
+ * 事实（前端 `VDFS_PAGE_SIZE`、后端 `ROUTE_*` 与门禁脚本的 `TEST_ONLY` 一样会被文档指认），
+ * D-009 三侧都算存在。`*.test.mjs` 排除在外——测试里为了造反例而杜撰的名字若算「存在」，
+ * 每一个假名都会被自己的回归测试洗白，判据就此空转。
  *
  * 为什么 D-005 只查 ≥2 段、只验最后一段：单段反引号词（`PayloadKey`、CLI 选项、配置键）
  *   与普通词无法区分，查了必然误报一片、最后被豁免喂到失效（D-009 例外：全大写 + 下划线
@@ -76,6 +81,8 @@ const REPO_ROOT = rootArg ? resolve(rootArg.slice(7)) : resolve(__dirname, '..')
 const RS_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/plan/verify']
 /** D-009 的第二份语料：裸常量名是跨栈事实，前端声明的常量同样被文档指认 */
 const FE_ROOTS = ['tauri/src']
+/** D-009 的第三份语料：只回答存在性，不开族（原因见文件头） */
+const TOOL_ROOTS = ['scripts']
 /** 裸常量名的形态：全大写、至少一段下划线——单段大写词与普通词无法区分，不查 */
 const CONST_SHAPE = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/
 /** walk 时整树跳过的目录。`.symbio` 是运行时产物：每起一个会话就复制一份
@@ -134,6 +141,9 @@ function collectSource (relRoot, isSource) {
 
 const isRust = (n) => n.endsWith('.rs')
 const isFrontend = (n) => /\.(ts|vue|js)$/.test(n)
+/** 工具语料排除 `*.test.mjs`：测试为了造反例而杜撰名字（`ROUTE_TRIAGE_DECIDE` 这类），
+ *  把测试算进语料等于让每一个假名都被自己的回归测试洗白。 */
+const isTool = (n) => /\.mjs$/.test(n) && !/\.test\.mjs$/.test(n)
 
 // ── 主流程 ──────────────────────────────────────────────────────────────
 console.log('--- doc-symbol-audit: 文档符号指认审计（D-005 / D-009） ---')
@@ -151,6 +161,7 @@ if (rsFiles.length === 0) {
   process.exit(1)
 }
 const feFiles = FE_ROOTS.flatMap((r) => collectSource(r, isFrontend))
+const toolFiles = TOOL_ROOTS.flatMap((r) => collectSource(r, isTool))
 
 const identRe = /[A-Za-z_][A-Za-z0-9_]*/g
 /** D-005 的语料：只有 Rust */
@@ -162,6 +173,12 @@ const families = new Map()
 
 function indexRust (text) {
   for (const m of text.matchAll(identRe)) idents.add(m[0])
+}
+/** 工具脚本只回答「这个名字在本仓写过没有」，**不开命名空间**：脚本里的临时常量前缀
+ *  （`OUT_REL`）会把 cargo / CI 的环境变量族（`OUT_DIR`）当成「本仓在用」拉进闸门，
+ *  而那正是同族闸要挡在门外的一类。 */
+function indexExistence (raw) {
+  for (const m of raw.matchAll(identRe)) codeNames.add(m[0])
 }
 function indexCrossStack (raw) {
   for (const m of raw.matchAll(identRe)) codeNames.add(m[0])
@@ -178,6 +195,7 @@ for (const f of rsFiles) {
   indexCrossStack(text)
 }
 for (const f of feFiles) indexCrossStack(readFileSync(f, 'utf8'))
+for (const f of toolFiles) indexExistence(readFileSync(f, 'utf8'))
 
 let scanned = 0
 let refs = 0
