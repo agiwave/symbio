@@ -82,7 +82,8 @@
 {container}/{plugin}/{action}     例：worker/session/chat/send（worker 可省略）
 ```
 
-完整路由清单见 [reference/ROUTES.md](./reference/ROUTES.md)。
+- 完整路由清单见 [reference/ROUTES.md](./reference/ROUTES.md)。
+- **前端侧常量**：`tauri/src/constants/routes.gen.ts`——22 条静态可提取地址，由后端 `route()` 的 `match` 臂**生成**（`scripts/gen-routes-ts.mjs`），不是手写登记处；前端在别处写死同一条地址由 `mechanism-audit` 的 M-008 判红。
 
 ### 3.2 VDFS 操作（`plugins/vdfs/protocol.rs::VDFS_OPS`）
 
@@ -105,10 +106,10 @@
 
 | 范围 | 实现 | 测试 |
 |---|---|---|
-| `symbio/src` | 267 文件 / 70064 行 | 163 文件 / 39582 行 |
+| `symbio/src` | 267 文件 / 70069 行 | 163 文件 / 39582 行 |
 | `cli/src` | 4 文件 / 1571 行 | 1 文件 / 80 行 |
 | `tauri/src-tauri/src` | 3 文件 / 451 行 | 0 文件 / 0 行 |
-| `tauri/src` | 101 文件 / 22567 行 | 54 文件 / 12777 行 |
+| `tauri/src` | 101 文件 / 22577 行 | 54 文件 / 12777 行 |
 
 ### 5.2 宿主接缝（前端到底有多大）
 
@@ -119,4 +120,4 @@
 
 ---
 
-> 生成时间：2026-10-08 10:27:48 UTC · 源：`git rev-parse HEAD` = `4a8513d`
+> 生成时间：2026-10-08 11:09:17 UTC · 源：`git rev-parse HEAD` = `ec62308`

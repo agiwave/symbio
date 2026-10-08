@@ -257,29 +257,22 @@ async fn route(self: Arc<Self>, ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvo
 
 ## 前端集成
 
-### 添加路由常量
-
-```typescript
-// tauri/src/constants/pluginPaths.ts
-export const PLUGIN_PATHS = {
-  MY_PLUGIN: 'worker/my_plugin',
-};
-```
+新增一条控制面路由**不需要在前端登记**：`tauri/src/constants/routes.gen.ts` 是后端
+`route()` 的 `match` 臂的**生成物**（`scripts/gen-routes-ts.mjs`，门禁自动重跑并暂存），
+加一条臂就多一个同名常量 `ROUTE_<插件目录名>_<操作>`。在前端别处写死同一条地址，
+由 `mechanism-audit` 的 M-008 判红。
 
 ### 创建服务客户端
 
+出站请求一律经 `services/`（M-003：组件不得直接 `invoke`）：
+
 ```typescript
 // tauri/src/services/myPlugin.ts
-import { invoke } from '@tauri-apps/api/core';
-import { PLUGIN_PATHS } from '@/constants/pluginPaths';
+import { callPlugin } from './plugin';
+import { ROUTE_MY_PLUGIN_GREET } from '@/constants/routes.gen';
 
 export async function greet(name: string) {
-  return invoke('route_v2', {
-    request: {
-      metadata: { path: `${PLUGIN_PATHS.MY_PLUGIN}/greet` },
-      payload: { name }
-    }
-  });
+  return callPlugin<GreetResponse>(ROUTE_MY_PLUGIN_GREET, { name });
 }
 ```
 

@@ -250,8 +250,9 @@ mod tests;
 - 使用 `<script setup lang="ts">`，**不要**使用 Options API。
 - 严禁 `any`（callPlugin 泛型默认已是 `unknown`，调用方需显式标注）。
 - 日志：使用 `logger` from `@/utils/logger`，**不要**用 `console.*`（CI 会查）。
-- 插件路径：所有 worker 路径必须从 `@/constants/pluginPaths` 导入，
-  **不要**在 `services/` / `stores/` / `composables/` 中硬编码 `'worker/...'` 字符串。
+- 控制面路由地址：一律从 `@/constants/routes.gen.ts` 导入常量，**不要**在 `services/` /
+  `stores/` / `composables/` 里写死 `'plugin/arm'` 字符串——那份常量是门禁从后端 `route()` 的
+  `match` 臂**生成**的，写死同一条地址由 `mechanism-audit` 的 M-008 判红。
 
 ---
 
@@ -266,7 +267,8 @@ mod tests;
    **无需改 `init.rs`**：`home` 构造 `worker`(Composite) 时按目录扫描子插件——这正是"零配置"。
 4. 若插件**可配置**（要出现在设置页）：在 `home` 的 `ensure_defaults` 加插件名、在 `setting` 的
    `SETTING_SECTIONS` 加 `(id, 中文名)`、并在该插件自己的 `detail_definition()` 加返回 `config_definition(...)` 的分支。
-5. 若插件要出现在前端：在 `tauri/src/constants/pluginPaths.ts` 添加路由常量，`tauri/src/services/` 下加对应 TS 客户端。
+5. 若插件要出现在前端：**无需手写路由常量**——在插件 `route()` 里加一条 `match` 臂，门禁即把它生成进
+   `tauri/src/constants/routes.gen.ts`；再到 `tauri/src/services/` 下加对应 TS 客户端、导入那个常量。
 6. 文档按**唯一来源**更新：**新增路由只在 [ROUTES.md](./docs/reference/ROUTES.md) 登记**（模块 `README.md` 不抄路由表，只写机制并指向它）；配置项进 CONFIGURATION.md、错误码进 ERROR_CODES.md；插件 / 挂载点 / 工具变更后重跑 `node scripts/gen-current-facts.mjs`。
 
 > **变更历史就是 `git log`，本仓库不维护 `CHANGELOG.md`**——git 记录比手抄更准确、不会漂移，

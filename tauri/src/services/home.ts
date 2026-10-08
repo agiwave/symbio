@@ -14,12 +14,6 @@
  * - `getHomedirInfo` / `switchHomedir`：homedir 信息与切换
  * - `getWorkspacePath` / `setWorkspacePath`：当前 workdir 与切换
  *
- * 对应后端路由：
- * - `home/get_homedir` → `getHomedirInfo`
- * - `home/reload` → `switchHomedir`
- * - `work/get_workspace` → `getWorkspacePath`
- * - `work/set_workspace` → `setWorkspacePath`
- *
  * 对应后端代码：symbio/src/plugins/home/plugin.rs
  * 对应 schema：tauri/src/schemas/home_reload.ts（work_get/set_workspace 已内联）
  */
@@ -27,12 +21,11 @@ import { callPlugin, setLastWorkdir } from './plugin'
 import type { Response as ReloadResponse } from '../schemas/home_reload'
 import { withFallback } from './fallback'
 import {
-  DEFAULT_WORKSPACE,
-  HOME_GET_HOMEDIR,
-  HOME_RELOAD,
-  WORK_GET_WORKSPACE,
-  WORK_SET_WORKSPACE,
-} from '@/constants/pluginPaths'
+  ROUTE_HOME_GET_HOMEDIR,
+  ROUTE_HOME_RELOAD,
+  ROUTE_WORK_GET_WORKSPACE,
+  ROUTE_WORK_SET_WORKSPACE,
+} from '@/constants/routes.gen'
 
 // 原 schemas/work_get_workspace（仅本模块使用，内联）
 export interface WorkGetWorkspaceResponse {
@@ -74,7 +67,7 @@ export async function getHomedirInfo(): Promise<HomedirInfo> {
   const empty = (): HomedirInfo => ({ homedir: '', bootstrap_path: '' })
   return withFallback(
     async () => {
-      const resp = await callPlugin<HomedirInfo>(HOME_GET_HOMEDIR, {})
+      const resp = await callPlugin<HomedirInfo>(ROUTE_HOME_GET_HOMEDIR, {})
       return resp?.homedir ? resp : empty()
     },
     empty,
@@ -109,7 +102,7 @@ export async function switchHomedir(
   return withFallback(
     () =>
       callPlugin<ReloadResponse>(
-        HOME_RELOAD,
+        ROUTE_HOME_RELOAD,
         { homedir },
         undefined,
         opts?.forceNative ? { forceNative: true } : undefined
@@ -124,13 +117,20 @@ export async function switchHomedir(
 // =====================================================================
 
 /**
+ * 后端**还没配过 workdir** 时返回的占位值——它不代表真实目录。
+ *
+ * 前端据此**不把它记成最近使用目录**，否则新建会话会默认落到一个不存在的路径。
+ */
+const DEFAULT_WORKSPACE = '~/projects'
+
+/**
  * 获取当前工作区路径详情
  *
  * 调用 `work/get_workspace` 路由。返回 workdir、expanded_path、recent_workspaces 等。
  * 副作用：记录为最近使用目录（`setLastWorkdir`，仅作新建会话默认）。
  */
 export async function getWorkspacePath(): Promise<WorkGetWorkspaceResponse> {
-  const result = await callPlugin<WorkGetWorkspaceResponse>(WORK_GET_WORKSPACE, {})
+  const result = await callPlugin<WorkGetWorkspaceResponse>(ROUTE_WORK_GET_WORKSPACE, {})
   if (result) {
     const path = result.workdir || result.expanded_path
     if (path && path !== DEFAULT_WORKSPACE && !path.endsWith('/projects')) {
@@ -146,7 +146,7 @@ export async function getWorkspacePath(): Promise<WorkGetWorkspaceResponse> {
  * 调用 `work/set_workspace` 路由。副作用：记录为最近使用目录。
  */
 export async function setWorkspacePath(path: string): Promise<WorkSetWorkspaceResponse> {
-  const result = await callPlugin<WorkSetWorkspaceResponse>(WORK_SET_WORKSPACE, { path })
+  const result = await callPlugin<WorkSetWorkspaceResponse>(ROUTE_WORK_SET_WORKSPACE, { path })
   setLastWorkdir(path)
   return result
 }

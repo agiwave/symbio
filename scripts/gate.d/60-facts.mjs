@@ -10,6 +10,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
 const gen = path.join(scriptDir, '..', 'gen-current-facts.mjs')
 const genCodes = path.join(scriptDir, '..', 'gen-gate-codes.mjs')
+const genRoutes = path.join(scriptDir, '..', 'gen-routes-ts.mjs')
 
 export default {
   id: 'facts',
@@ -33,6 +34,18 @@ export default {
             label: 'gen-gate-codes',
             cmd: process.execPath,
             args: [genCodes],
+            cwd: repoRoot,
+          }),
+      },
+      {
+        // 前端的路由常量是后端 `route()` 臂的投影（真源只有一个）。手写那份是抄本：
+        // 它漂移时没有任何测试会红，只在运行期表现为后端回 `NotFound`。
+        label: 'gen-routes-ts（自动重新生成 tauri/src/constants/routes.gen.ts）',
+        run: (c) =>
+          autoWork(c, {
+            label: 'gen-routes-ts',
+            cmd: process.execPath,
+            args: [genRoutes],
             cwd: repoRoot,
           }),
       },

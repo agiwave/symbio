@@ -16,7 +16,15 @@ import {
   setCurrentLocation,
   setLocationError,
 } from './systemLocation'
-import { GATEWAY_PATH } from '@/constants/pluginPaths'
+
+/**
+ * 网关插件名（它的路由都是**控制面**接口：读写本机网关设置 / 出站协议）。
+ *
+ * 因此 `gateway/*` 必须始终走本机 native 传输——若跟随当前出站配置走 http，
+ * 就会去读远端实例的网关设置，既看不到本机配置，也切不回 native（死锁）。
+ * 判定在 `sendRouteRequest`。
+ */
+const GATEWAY_PATH = 'gateway'
 
 // ==================== 1. 协议定义 (与后端 transport.rs 严格对齐) ====================
 
@@ -386,11 +394,9 @@ async function sendRouteRequest(
   await initGatewayTransport();
   const ob = getOutboundConfig();
 
-  // 网关自身的接口（gateway/*）始终是本机 native 调用：
-  // 出站配置若设为 http，会指向远端实例，届时读取/修改「本机网关设置」反而会落到远端，
-  // 既看不到本机配置也无法切换回 native。故强制 native，与 initGatewayTransport 启动期读取一致。
+  // 网关自身（`gateway` / `gateway/…`）始终打本机 native，理由见文件顶部 `GATEWAY_PATH`；
+  // 与 initGatewayTransport 的启动期读取是同一个口径。
   const target = request.path.replace(/^\/+/, '');
-  // 网关自身 = `gateway` 或 `gateway/…`（插件名见 constants/pluginPaths）
   const isGatewaySelf = target === GATEWAY_PATH || target.startsWith(`${GATEWAY_PATH}/`);
 
   // 控制面操作（forceNative）一律命中本机后端，避免被当前 outbound 指到远端而陷入死锁。

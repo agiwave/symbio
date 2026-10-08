@@ -20,6 +20,7 @@
  * | M-005 | `schemas/` 不得依赖 `registry/` `components/` `composables/` | 数据契约零呈现依赖（防环） |
  * | M-006 | 各层不得用字面量比较消息词表（components / composables / services / stores / registry） | 词表只有 `schemas/chat_message` |
  * | M-007 | 地址常量只能在 `schemas/vdfs.ts` **定义**                | 段名常量不得有第二份真相      |
+ * | M-008 | 控制面路由名只能取自 `constants/routes.gen.ts`           | 它是后端生成的，手写一份就是抄本 |
  *
  * M-004 的例外是 `*Renderers.ts`：那是**刻意**的唯一组件装配点（把渲染器标识绑到
  * 具体组件），否则「新增一种形态只登记一行」就无从谈起。
@@ -29,6 +30,8 @@
  * 判定基于**去注释后的文本**，不是 AST。因此：
  * - 变量别名能绕过（`const m = node.meta; m.recoverable`）——M-001 抓不到；
  * - 字符串里的 `//`（如 URL）会被当成行注释起点，可能造成**漏报**；
+ * - M-008 的词表**就是那份生成物**：它缺失时本条无词可判。重生成不属于本条职责
+ *   （`gate.d/60-facts.mjs` 每次都重生成并暂存，CI 档任何未提交差异即红）；
  * - 它挡的是「顺手写回去」，不是「刻意绕过」。
  *
  * ## 用法
@@ -47,7 +50,7 @@
 
 // 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns M 机制表
-// @codes M-001 M-002 M-003 M-004 M-005 M-006 M-007
+// @codes M-001 M-002 M-003 M-004 M-005 M-006 M-007 M-008
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -173,6 +176,29 @@ const isVueOrTs = (p) => isVue(p) || isTs(p)
 
 const SRC = path.join(repoRoot, 'tauri', 'src')
 
+/** M-008 的判定对象：那份清单**本身**就是词表，不在脚本里抄一份 */
+const ROUTES_GEN = path.join(SRC, 'constants', 'routes.gen.ts')
+
+/**
+ * 生成物里已登记的控制面路由名。
+ *
+ * 词表取自 `routes.gen.ts` 而不是重新解析后端源码：后者要在本脚本里再写一遍
+ * 「什么算一条路由」，而那句话的 owner 是 `route-facts.mjs`（两份实现必然分叉）。
+ * 生成物缺失时本条**没有可判的词表**——补齐它是 `gate.d/60-facts.mjs` 的职责
+ * （它每次都重新生成并暂存），不是本条的。
+ */
+const GEN_ROUTES = (() => {
+  // 生成物缺失 ⇒ 没有词表可判（见上面那段边界）；除此之外一律不吞异常——
+  // 一个把实现错误当成「一切正常」亮绿灯的守卫，比没有守卫更糟。
+  if (!fs.existsSync(ROUTES_GEN)) return new Set()
+  return new Set(
+    stripComments(fs.readFileSync(ROUTES_GEN, 'utf8'))
+      .map((line) => line.match(/^\s*export const ROUTE_[A-Z0-9_]+\s*=\s*['"]([^'"]+)['"]/))
+      .filter(Boolean)
+      .map((m) => m[1]),
+  )
+})()
+
 /** 显示用路径：相对仓库根，统一正斜杠（跨平台一致） */
 const disp = (p) => path.relative(repoRoot, p).split(path.sep).join('/')
 
@@ -297,6 +323,32 @@ const RULES = {
     test: (c) => c.match(/\b(?:const|let|var)\s+(?:VDFS_[A-Z0-9_]+|vdfs[A-Z]\w*)\s*=\s*['"`](?!\/)/),
     message: '地址常量的定义权在 schemas/vdfs.ts —— 此处不得再定义一份（导入使用是允许的）',
   },
+  /**
+   * M-008 控制面路由名只能取自 `constants/routes.gen.ts`
+   *
+   * 那条地址的**注册处**是后端插件 `route()` 里的一条 `match` 臂，前端那份是它的
+   * 消费视图。手写常量是第二份真相：它漂移时没有任何测试会红，只在运行期表现为
+   * 后端报 `NotFound`，而报错里看不出前端写了个过期的词。
+   *
+   * 现在它由 `scripts/gen-routes-ts.mjs` 生成（门禁自动重跑），所以「前端知道的路由」
+   * 与「后端有的路由」在结构上无法分开演进。本条守的是另一半：**别绕开生成物**。
+   *
+   * 判据是**成员关系**而不是形状——只命中生成物里真有的那批地址。按形状判会把
+   * `application/json`、`schemas/vdfs` 这类无关字符串全报一遍，一个靠豁免活着的
+   * 守卫等于没有守卫。
+   */
+  routeLiteral: {
+    rule: 'M-008',
+    severity: 'error',
+    test: (c) => {
+      for (const m of c.matchAll(/['"`]([a-z_]+\/[a-z0-9_/-]+)['"`]/g)) {
+        if (GEN_ROUTES.has(m[1])) return m
+      }
+      return null
+    },
+    message:
+      '控制面路由名只能取自 constants/routes.gen.ts（后端 route() 臂的生成物）—— 此处不得写死',
+  },
 }
 
 // ── 主流程 ───────────────────────────────────────────────────────────────
@@ -370,10 +422,21 @@ auditFiles(
   [RULES.vdfsConstDef],
 )
 
+console.log('--- M-008: 控制面路由名只能取自 constants/routes.gen.ts ---')
+// 词表来自生成物本身：后端加一条臂 ⇒ 生成物多一行 ⇒ 前端任何手写同一条地址的地方
+// 下一次门禁就红。规则代码里因此没有一份路由清单。
+auditFiles(
+  `tauri/src（不含 constants/routes.gen.ts，词表 ${GEN_ROUTES.size} 条）`,
+  walk(SRC, isVueOrTs).filter((f) => f !== ROUTES_GEN),
+  [RULES.routeLiteral],
+)
+
 // ── 汇总 ─────────────────────────────────────────────────────────────────
 console.log()
 console.log('=== 汇总 ===')
-if (hitsByRule.size === 0) console.log(green('  七条规则全部通过'))
+// 条数从规则表取，不手写——手写的那个数每加一条规则就漂一次，而漂了也只是文案难看，
+// 没有守卫会红。
+if (hitsByRule.size === 0) console.log(green(`  ${Object.keys(RULES).length} 条规则全部通过`))
 else for (const [rule, n] of [...hitsByRule].sort()) console.log(`  ${rule}: ${n} 处`)
 console.log(`Errors:   ${errors}`)
 console.log(`Warnings: ${warnings}`)

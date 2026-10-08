@@ -21,7 +21,7 @@
 
 - `symbio/src/plugins/session/plugin.rs:436-437` 把两条路由交给 `self`——而 `self`
   是**收到这次 `route` 的那个 `SessionPlugin` 实例**。
-- 前端发的是 `worker/session/chat/send`（`tauri/src/constants/pluginPaths.ts:45`），
+- 会话发言只有**一条**绝对地址 `session/chat/send`（`symbio_core::ROUTE_SESSION_CHAT_SEND`），
   由**根 composite** 分发 ⇒ 恒为根实例。
 - 子智能体空间有**自己的** `SessionPlugin` 实例（`<根>/agent/<id>/session`），但它
   **没有路由入口**：`symbio/src/plugins/agent/host/plugin.rs:577-584` 明确

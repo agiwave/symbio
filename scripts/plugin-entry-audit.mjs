@@ -379,7 +379,7 @@ const pluginDirs = discoverPlugins()
 const dirNames = new Set(pluginDirs.map((p) => p.dirName))
 
 // 常量表：先收全仓（`plugin/ids.rs` 的 `PLUGIN_ID_*`、`plugin/route.rs` 的 `ROUTE_*`、
-// 前端 `pluginPaths.ts` 的模板串链）
+// 前端 `constants/routes.gen.ts` 的生成常量）
 //
 // `tauri/src-tauri/src` 也在列：它是第三个独立 cargo workspace，且**整棵插件树
 // 被编译进壳**——它引用内核的方式必须和 `symbio/src` 同一套规则（此前它不在任何

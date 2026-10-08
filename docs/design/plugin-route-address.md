@@ -83,7 +83,7 @@ HTTP 传输文档里那句「路由是运行时分形分发，各插件内部 `m
 | 位置 | 收什么 |
 |---|---|
 | `symbio_core::plugin::route` | **有真实调用方的绝对地址**（`&'static str`），命名 `<PLUGIN>_<OP>` |
-| 前端 `tauri/src/constants/pluginPaths.ts` | 同一批地址的前端侧常量（模板串链，含 `worker/` 前缀） |
+| 前端 `tauri/src/constants/routes.gen.ts` | 同一批地址的前端侧常量——**生成物**（`scripts/gen-routes-ts.mjs` 读各插件 `route()` 的 `match` 臂），不手写；在别处写死同一条地址由 M-008 判红 |
 | 定义它的模块 | **相对臂**常量（不带 `worker/` 前缀）；新增时照此落位，别塞进 `plugin/route.rs` |
 
 `plugin/route.rs` **不为「将来可能用到」的路由预置常量**。

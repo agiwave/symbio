@@ -29,7 +29,10 @@ import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { scopeRow as sharedScopeRow } from "./line-count.mjs";
-import { stripComments, stripTestModules } from "./rust-scan.mjs";
+import { stripComments } from "./rust-scan.mjs";
+// 路由提取只有一份实现（`route-facts.mjs`），与前端常量生成器共用——
+// 「什么算一条路由」这条判据若有两遍，它们会在没人注意时分叉。
+import { pluginSources, extractRouteArms } from "./route-facts.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -43,25 +46,6 @@ const IDS_FILE = path.join(ROOT, "symbio", "src", "symbio_core", "plugin", "ids.
 const ROUTE_FILE = path.join(ROOT, "symbio", "src", "symbio_core", "plugin", "route.rs");
 const VDFS_PROTOCOL_FILE = path.join(PLUGINS_DIR, "vdfs", "protocol.rs");
 const OUT = path.join(ROOT, "docs", "CURRENT.md");
-
-/** 递归收集插件源码（排除测试文件与 docs 目录：测试里的 meta 不是生产事实） */
-function collectRs(dir) {
-  const out = [];
-  for (const ent of readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, ent.name);
-    if (ent.isDirectory()) {
-      if (ent.name === "docs") continue;
-      out.push(...collectRs(p));
-    } else if (
-      ent.name.endsWith(".rs") &&
-      !ent.name.endsWith(".test.rs") &&
-      ent.name !== "tests.rs"
-    ) {
-      out.push(p);
-    }
-  }
-  return out;
-}
 
 const VDFS_FS_FILE = path.join(PLUGINS_DIR, "vdfs", "fs.rs");
 
@@ -150,73 +134,13 @@ function extractToolNames(t, consts) {
   return [...out].sort();
 }
 
-/**
- * 从 `async fn route(…)` 体内提取路由臂。
- *
- * 只认 `match` 臂形态（`"a/b" | "c" => …` 左侧的字符串字面量），
- * 不整段抓字符串——后者会把 `get("approved")` 这类参数名当成路由（实测踩坑）。
- *
- * 臂是**相对路径**：容器（composite）先剥掉首段，插件只分发剩下的部分，
- * 故渲染时要补回前缀。
- *
- * ## 前缀取**目录名**，不取 `PluginMeta::new` 的首参
- *
- * 容器按**目录名**建实例表并在 `route` 里按它分发（`composite.rs`「目录名 = 实例名」），
- * 所以目录名才是真正的路由前缀。`PluginMeta` 首参曾长期被当作前缀用，而它**不参与路由**
- * ——ADR-032 之后它只是**出厂 id**：身份取自 `PLUGIN.yml`，`composite/vdfs.rs` 只读它的
- * 「挂载点呈现」那部分（`order` / `hidden` / `root_access`）——`hook` 插件写成 `"hooks"`
- * 就由此产出了
- * `hooks/fire` 这类**不存在的路由**，并被本表与三处文档照抄。改用目录名后，
- * 「生成器说出的路由」与「容器真正认的路由」同源；`plugin-entry-audit.mjs` 的 E-001
- * 另外把「`PluginMeta` 首参 == 目录名」钉住，使两者不会再分叉。
- */
-function extractRouteArms(t, pluginName) {
-  const out = new Set();
-  const ri = t.indexOf("async fn route(");
-  if (ri < 0) return [];
-  const rest = t.slice(ri);
-  const nextFn = rest.indexOf("async fn ", 20);
-  const chunk = rest.slice(0, nextFn < 0 ? Math.min(6000, rest.length) : nextFn);
-  for (const line of chunk.split("\n")) {
-    const eq = line.indexOf("=>");
-    if (eq < 0) continue;
-    const left = line.slice(0, eq);
-    for (const mm of left.matchAll(/"([a-z][a-z0-9_/-]*)"/g)) {
-      if (mm[1] === "_") continue;
-      const arm = mm[1];
-      const full =
-        pluginName && pluginName !== "home" && !arm.startsWith(`${pluginName}/`)
-          ? `${pluginName}/${arm}`
-          : arm;
-      out.add(full);
-    }
-  }
-  return [...out].sort();
-}
-
 /** 核心 trait 白名单：只统计真正定义插件形态的 trait */
 const CORE_TRAITS = ["Plugin", "VdfsProvider", "Capability", "ModelProvider", "ConfigurableVisitor"];
-
-/**
- * 「未接线」标记：模块级 `#![allow(dead_code)]`。
- *
- * 为什么需要：模块级地整体抑制 dead_code，等于自述「这块代码还没有接线」。
- * 它里面的 `CapabilityMeta { name: … }` 是**未接线的定义**，不是 LLM 可见工具；
- * 不排除就会让 §2 报出一个模型根本看不到的工具。
- *
- * 判据取**模块级属性**而不是猜注释文案——可用 grep 复核。当前全仓**无实例**
- * （唯一的 `plugins/local/ask_user.rs` 已于 2026-09-17 接线注册并由 §2 正常收录）；
- * 保留此判据是为了将来再出现未接线模块时自动生效。
- */
-const UNWIRED_MARKER = "#![allow(dead_code)]";
 
 /** 单个插件的静态事实 */
 function analyzePlugin(dirName, ids) {
   const dir = path.join(PLUGINS_DIR, dirName);
-  const contents = collectRs(dir)
-    .map((f) => readFileSync(f, "utf8"))
-    .filter((raw) => !raw.includes(UNWIRED_MARKER))
-    .map((raw) => stripTestModules(stripComments(raw)));
+  const contents = pluginSources(dir);
   const consts = new Map();
   for (const t of contents) parseConsts(t, consts);
 
@@ -434,6 +358,8 @@ function render() {
     .map((e) => e.name)
     .sort();
   const plugins = pluginDirs.map((d) => analyzePlugin(d, ids));
+  // 静态可提取的地址全集（§3.1 报条数用；与前端生成物同一份提取口径）
+  const staticRoutes = [...new Set(plugins.flatMap((p) => p.routes))].sort();
 
   const L = [];
   L.push("# Symbio 当前事实表（自动生成）");
@@ -514,7 +440,12 @@ function render() {
   L.push("{container}/{plugin}/{action}     例：worker/session/chat/send（worker 可省略）");
   L.push("```");
   L.push("");
-  L.push("完整路由清单见 [reference/ROUTES.md](./reference/ROUTES.md)。");
+  L.push("- 完整路由清单见 [reference/ROUTES.md](./reference/ROUTES.md)。");
+  L.push(
+    `- **前端侧常量**：\`tauri/src/constants/routes.gen.ts\`——${staticRoutes.length} 条静态可提取地址，` +
+      "由后端 `route()` 的 `match` 臂**生成**（`scripts/gen-routes-ts.mjs`），不是手写登记处；" +
+      "前端在别处写死同一条地址由 `mechanism-audit` 的 M-008 判红。",
+  );
   L.push("");
   L.push("### 3.2 VDFS 操作（`plugins/vdfs/protocol.rs::VDFS_OPS`）");
   L.push("");

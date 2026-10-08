@@ -49,6 +49,11 @@
 //! （见 [`ROUTE_HOOK_FIRE`] 上方关于 `AGENT_CHAT` 的说明）。当前无调用方的路由由审计
 //! 脚本报告，由人决定去留，而不是先给它们一个体面的常量名。
 //!
+//! **前端要用的地址不在这里登记**：前端常量是各插件 `route()` 臂的**生成物**
+//! （`tauri/src/constants/routes.gen.ts`，见 `scripts/gen-routes-ts.mjs`），本模块只服务
+//! **Rust 侧调用方**。只被前端调用的路径（`home/*` / `work/*`）在这里没有常量——
+//! 给它加一个就是零 Rust 消费方的预留常量，上面那条规则同样拦它。
+//!
 //! 与 [`plugin::ids`](crate::symbio_core::plugin::ids) 的差别：
 //! - `ids` 描述「注册到注册表的对象 id」（插件工厂、服务）；
 //! - 本模块描述「运行期跨插件调用的路由路径」（`<插件目录名>/<子路径>`）。
@@ -100,8 +105,8 @@ pub const ROUTE_VDFS_UNWATCH: &str = "vdfs/unwatch";
 /// event_bus/subscribe — 建立进程内帧订阅连接
 ///
 /// 调用方有两处：Rust 侧 `cli/src/client.rs`（订阅 `vdfs` 频道），以及前端
-/// `tauri/src/constants/pluginPaths.ts::EVENT_BUS_SUBSCRIBE` + `services/eventBus.ts`
-/// ——两边都拿 `PluginFrame::Data` 收会话帧。
+/// `tauri/src/services/eventBus.ts`（它导入的地址常量来自生成物
+/// `tauri/src/constants/routes.gen.ts`）——两边都拿 `PluginFrame::Data` 收会话帧。
 pub const ROUTE_EVENT_BUS_SUBSCRIBE: &str = "event_bus/subscribe";
 
 // ============ Hook 插件 ============

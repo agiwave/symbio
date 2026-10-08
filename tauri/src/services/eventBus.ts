@@ -18,7 +18,7 @@ import { watchVdfs, unwatchVdfs } from './vdfs'
 import { logger } from '@/utils/logger'
 import { VDFS_BUS_RESYNC, VDFS_EVENT_KIND, type VdfsChange } from '@/schemas/vdfs'
 import { vdfsRoot } from '@/schemas/vdfsRoot'
-import { EVENT_BUS_SUBSCRIBE } from '@/constants/pluginPaths'
+import { ROUTE_EVENT_BUS_SUBSCRIBE } from '@/constants/routes.gen'
 
 /**
  * 从后端 `event_bus` 收到的统一事件结构
@@ -169,7 +169,7 @@ export async function connectEventBus(): Promise<Connection> {
         logger.warn('[event-bus]', 'Close stale connection failed:', e)
       }
     }
-    const conn = await connectPlugin(EVENT_BUS_SUBSCRIBE, {}, handleConnectionEvent, {})
+    const conn = await connectPlugin(ROUTE_EVENT_BUS_SUBSCRIBE, {}, handleConnectionEvent, {})
     // 重连判定必须在赋值之前取：`handleConnectionEvent` 在断开时已把
     // `S.connection` 置空，事后看是分不出「首连」与「重连」的。
     const isReconnect = S.everConnected

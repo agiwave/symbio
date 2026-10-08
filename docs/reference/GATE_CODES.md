@@ -16,7 +16,7 @@
 | **E** | 插件入口与门面 | `scripts/plugin-entry-audit.mjs` | E-001–009、E-011 | `E-012` |
 | **GC** | 判据码命名空间本身 | `scripts/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
 | **GW** | 门禁接线（测试文件与门禁名单的对账） | `scripts/gate-wiring-audit.mjs` | GW-001–003 | `GW-004` |
-| **M** | 机制表 | `scripts/mechanism-audit.mjs` | M-001–007 | `M-008` |
+| **M** | 机制表 | `scripts/mechanism-audit.mjs` | M-001–008 | `M-009` |
 | **N** | core 命名 | `scripts/core-naming-audit.mjs` | N-001–005 | `N-006` |
 | **NDC** | 主体直连 | `scripts/no-direct-call-audit.mjs` | NDC-001–002 | `NDC-003` |
 | **R** | 死代码 | `scripts/dead-code-audit.mjs` | R-001–002 | `R-003` |
@@ -64,6 +64,7 @@
 | **M-005** | `scripts/mechanism-audit.mjs` |
 | **M-006** | `scripts/mechanism-audit.mjs` |
 | **M-007** | `scripts/mechanism-audit.mjs` |
+| **M-008** | `scripts/mechanism-audit.mjs` |
 | **N-001** | `scripts/core-naming-audit.mjs` |
 | **N-002** | `scripts/core-naming-audit.mjs` |
 | **N-003** | `scripts/core-naming-audit.mjs` |

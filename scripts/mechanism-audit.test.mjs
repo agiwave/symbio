@@ -52,7 +52,7 @@ const CLEAN = {
 test('干净树通过（exit 0）', () => {
   const r = audit(CLEAN)
   assert.equal(r.status, 0, r.stdout)
-  assert.match(r.stdout, /七条规则全部通过/)
+  assert.match(r.stdout, /8 条规则全部通过/)
 })
 
 // ── M-001：组件不得解释后端 meta 字段 ────────────────────────────────────
@@ -236,6 +236,66 @@ test('M-007 不误报：浏览器路由常量（值以 / 开头）不是 vdfs �
     ...CLEAN,
     'schemas/Browser.ts': `export const VDFS_HOME_PATH = '/vdfs'
 `,
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+// ── M-008：控制面路由名只能取自 constants/routes.gen.ts ──────────────────
+
+/** 一棵带生成物的树：词表就是里面那两条地址 */
+const WITH_GEN = {
+  'constants/routes.gen.ts': `export const ROUTE_HOME_RELOAD = 'home/reload'\nexport const ROUTE_WORK_GET_WORKSPACE = 'work/get_workspace'\n`,
+}
+
+test('M-008 命中：service 里写死一条生成物已登记的路由（第二份真相）', () => {
+  const r = audit({
+    ...CLEAN,
+    ...WITH_GEN,
+    'services/Bad.ts': `export const p = callPlugin('home/reload', {})\n`,
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /\[ERROR\] M-008 .*services\/Bad\.ts:1/)
+})
+
+test('M-008 不误报：从生成物导入常量再使用', () => {
+  const r = audit({
+    ...CLEAN,
+    ...WITH_GEN,
+    'services/Ok.ts': `import { ROUTE_HOME_RELOAD } from '@/constants/routes.gen'\nexport const p = callPlugin(ROUTE_HOME_RELOAD, {})\n`,
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('M-008 不误报：带斜杠的无关字符串（词表按成员关系判，不按形状判）', () => {
+  const r = audit({
+    ...CLEAN,
+    ...WITH_GEN,
+    'services/Ok.ts': `export const ct = 'application/json'\nexport const z = 'no-such-plugin/no-such-action'\n`,
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('M-008 词表来自生成物：后端加一条臂，前端写死它当场红（规则代码不必跟着改）', () => {
+  const gen = `export const ROUTE_HOME_RELOAD = 'home/reload'\nexport const ROUTE_ZETA_PING = 'zeta/ping'\n`
+  const r = audit({
+    ...CLEAN,
+    'constants/routes.gen.ts': gen,
+    'services/Bad.ts': `export const p = callPlugin('zeta/ping', {})\n`,
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /\[ERROR\] M-008 .*services\/Bad\.ts:1/)
+})
+
+test('M-008 不误报：生成物自己在它的文件里写这些字面量', () => {
+  const r = audit({ ...CLEAN, ...WITH_GEN })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('M-008 不误报：注释里提到地址（判定看去注释后的代码）', () => {
+  const r = audit({
+    ...CLEAN,
+    ...WITH_GEN,
+    'services/Ok.ts': `// 走 home/reload 这条路由\nexport const p = callPlugin(ROUTE_HOME_RELOAD, {})\n`,
   })
   assert.equal(r.status, 0, r.stdout)
 })
