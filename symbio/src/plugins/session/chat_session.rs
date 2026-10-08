@@ -144,6 +144,27 @@ impl PersistentChatSession {
         self.store.load_session(&self.session_id).await
     }
 
+    /// 子会话清单（Q3 worker 进展的读侧入口）：委托 store 枚举
+    /// `<根>/<safe(本会话)>/sessions/*/session.json`——**按路径天然只含本父之子**，
+    /// 归属复核另走 [`Session::parent_session_id`](super::types::Session::parent_session_id)。
+    ///
+    /// 只读 `session.json`（「清单不碰消息」，与会话量脱钩）；`messages.json` 由
+    /// [`Self::load_sub_session`] 按需单独取。
+    pub(crate) async fn list_sub_sessions(
+        &self,
+    ) -> Result<Vec<super::types::SessionSummary>, PluginError> {
+        self.store.list_sub_sessions(&self.session_id).await
+    }
+
+    /// 载入**子**会话的完整转写（含 `messages.json`）——Q3 投影要 `Session.messages`。
+    /// store 的 `load_session` 走嵌套查找，子会话可凭自身 id 直接寻址。
+    pub(crate) async fn load_sub_session(
+        &self,
+        id: &str,
+    ) -> Result<super::types::Session, PluginError> {
+        self.store.load_session(id).await
+    }
+
     async fn save_session(&self, session: &super::types::Session) -> Result<(), PluginError> {
         self.store.save_session(session).await
     }

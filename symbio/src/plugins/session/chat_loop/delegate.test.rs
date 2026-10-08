@@ -213,12 +213,12 @@ fn digest_is_order_independent() {
 #[test]
 fn section_is_none_when_there_is_nothing_to_say() {
     // 无发言（resume / 心跳）且无能力 ⇒ 一个字节都不多。
-    assert_eq!(delegate_section(None, &[]), None);
+    assert_eq!(delegate_section(None, &[], &[]), None);
 }
 
 #[test]
 fn section_carries_the_hit_reason_verbatim() {
-    let section = delegate_section(Some("/work 帮我重构"), &[]).unwrap();
+    let section = delegate_section(Some("/work 帮我重构"), &[], &[]).unwrap();
     assert!(
         section.starts_with("- 委派判定：本轮应启动 worker（reason=explicit_prefix）"),
         "实际：{section}"
@@ -231,7 +231,7 @@ fn section_carries_the_hit_reason_verbatim() {
 fn section_records_a_miss_too() {
     // 「为什么这轮没动手」是 Q1 存在的理由——未命中也要落事实，否则分不清
     // 「判了不动」与「压根没判」。
-    let section = delegate_section(Some("今天天气不错"), &[]).unwrap();
+    let section = delegate_section(Some("今天天气不错"), &[], &[]).unwrap();
     assert!(
         section.contains("- 委派判定：未启动 worker（未命中任何委派判据）"),
         "实际：{section}"
@@ -248,6 +248,7 @@ fn section_without_utterance_omits_the_verdict_line() {
     let section = delegate_section(
         None,
         &[meta("file_read", Some(CapabilityCategory::FileOperation))],
+        &[],
     )
     .unwrap();
     assert!(!section.contains("委派判定"), "实际：{section}");
@@ -260,6 +261,7 @@ fn section_puts_verdict_before_digest() {
     let section = delegate_section(
         Some("/work 重构"),
         &[meta("file_read", Some(CapabilityCategory::FileOperation))],
+        &[],
     )
     .unwrap();
     let verdict = section.find("委派判定").unwrap();
@@ -270,7 +272,231 @@ fn section_puts_verdict_before_digest() {
 #[test]
 fn section_survives_empty_capability_list_when_verdict_exists() {
     // 能力空 ⇒ 目录不出现，但判定仍在（两条真源各自独立决定自己在不在）。
-    let section = delegate_section(Some("/work 重构"), &[]).unwrap();
+    let section = delegate_section(Some("/work 重构"), &[], &[]).unwrap();
     assert!(section.contains("reason=explicit_prefix"));
     assert!(!section.contains("【能力目录】"), "实际：{section}");
+}
+
+// ── Q3 · worker 进展（三个字段与 B2 逐字同名） ─────────────────────────
+
+/// 夹具：一条 worker 消息。
+fn wmsg(
+    id: &str,
+    role: cm::MessageRole,
+    status: Option<cm::MessageStatus>,
+    text: &str,
+) -> cm::ChatMessage {
+    cm::ChatMessage {
+        id: id.to_string(),
+        role: Some(role),
+        msg_type: Some(cm::MessageType::Text),
+        status,
+        content: Some(cm::MessageContent::Text(text.to_string())),
+        ..Default::default()
+    }
+}
+
+/// 夹具：子会话清单条目。`message_count` **故意与真实 Turn 数对不上**——它是总消息数，
+/// 投影若拿它顶 `rounds`，本文件的断言立刻红。
+fn sub(id: &str, title: &str, message_count: usize) -> SessionSummary {
+    SessionSummary {
+        id: id.to_string(),
+        title: title.to_string(),
+        created_at: 0,
+        updated_at: 0,
+        metadata: serde_json::json!({ "parent_session_id": "parent-1" }),
+        message_count,
+        summary: None,
+        meta_tags: Vec::new(),
+    }
+}
+
+/// 夹具：worker 的完整转写。
+fn wsession(messages: Vec<cm::ChatMessage>) -> Session {
+    Session {
+        id: "worker-1".to_string(),
+        messages,
+        created_at: 0,
+        updated_at: 0,
+        metadata: serde_json::json!({ "parent_session_id": "parent-1" }),
+    }
+}
+
+#[test]
+fn rounds_counts_user_messages_not_the_summary_count() {
+    // 判据 2「数值同源」的落点：前端数过程段 Turn 条数，后端数 user 消息——同一个量。
+    let s = wsession(vec![
+        wmsg(
+            "1",
+            cm::MessageRole::User,
+            Some(cm::MessageStatus::Completed),
+            "第一轮",
+        ),
+        wmsg(
+            "2",
+            cm::MessageRole::Assistant,
+            Some(cm::MessageStatus::Completed),
+            "答复一",
+        ),
+        wmsg(
+            "3",
+            cm::MessageRole::User,
+            Some(cm::MessageStatus::Completed),
+            "第二轮",
+        ),
+        wmsg(
+            "4",
+            cm::MessageRole::Assistant,
+            Some(cm::MessageStatus::Completed),
+            "答复二",
+        ),
+    ]);
+    let p = progress_of(&sub("worker-1", "重构", 99), &s);
+    assert_eq!(p.rounds, 2, "rounds 必须是 user 消息数");
+    assert_ne!(
+        p.rounds, 99,
+        "拿 summary.message_count 当 rounds ⇒ 与 B2 不同源（不同量）"
+    );
+}
+
+#[test]
+fn steps_skip_empty_nodes_and_user_prompts() {
+    // 判据 3：无内容节点不产出步骤；user 提示是**输入**不是进展。
+    let grouping = cm::ChatMessage {
+        id: "2".to_string(),
+        msg_type: Some(cm::MessageType::Turn),
+        ..Default::default()
+    };
+    let empty = cm::ChatMessage {
+        id: "3".to_string(),
+        role: Some(cm::MessageRole::Assistant),
+        msg_type: Some(cm::MessageType::Text),
+        content: Some(cm::MessageContent::Text(String::new())),
+        ..Default::default()
+    };
+    let s = wsession(vec![
+        wmsg(
+            "1",
+            cm::MessageRole::User,
+            Some(cm::MessageStatus::Completed),
+            "干活",
+        ),
+        grouping,
+        empty,
+        wmsg(
+            "4",
+            cm::MessageRole::Assistant,
+            Some(cm::MessageStatus::Completed),
+            "产出",
+        ),
+    ]);
+    let p = progress_of(&sub("worker-1", "重构", 0), &s);
+    assert_eq!(
+        p.steps,
+        vec!["产出".to_string()],
+        "空节点或用户提示都不得产出步骤"
+    );
+}
+
+#[test]
+fn in_flight_is_false_only_once_a_terminal_state_is_seen() {
+    let done = wsession(vec![wmsg(
+        "1",
+        cm::MessageRole::Assistant,
+        Some(cm::MessageStatus::Completed),
+        "完",
+    )]);
+    assert!(!progress_of(&sub("worker-1", "t", 0), &done).in_flight);
+
+    let running = wsession(vec![wmsg(
+        "1",
+        cm::MessageRole::Assistant,
+        Some(cm::MessageStatus::Streaming),
+        "写",
+    )]);
+    assert!(progress_of(&sub("worker-1", "t", 0), &running).in_flight);
+
+    // `status` 缺失 = 没观测到结束 ⇒ 不得宣称已结束。谎报"已完成"会让模型抢跑，
+    // 比多报在途糟得多（同「串台比没进展更糟」的取向）。
+    let no_status = wsession(vec![cm::ChatMessage {
+        id: "1".to_string(),
+        ..Default::default()
+    }]);
+    assert!(
+        progress_of(&sub("worker-1", "t", 0), &no_status).in_flight,
+        "status 缺失被判成终态 ⇒ 所有存量会话都显示「已结束」"
+    );
+}
+
+#[test]
+fn steps_keep_the_recent_capped_and_truncated() {
+    // 进展关心"到哪了"，不是"都干过什么"：超上限丢最早的、单步超长截断——
+    // 否则每轮请求都要背着 worker 的全部历史。
+    let long = "段".repeat(STEP_MAX_CHARS + 40);
+    let messages: Vec<cm::ChatMessage> = (0..STEPS_MAX + 3)
+        .map(|i| {
+            wmsg(
+                &format!("m{i}"),
+                cm::MessageRole::Assistant,
+                Some(cm::MessageStatus::Completed),
+                &format!("{i}:{long}"),
+            )
+        })
+        .collect();
+    let p = progress_of(&sub("worker-1", "t", 0), &wsession(messages));
+    assert_eq!(p.steps.len(), STEPS_MAX, "超上限必须丢最早的");
+    assert!(
+        p.steps[0].starts_with("3:"),
+        "丢错了端——应保留最近的（首条应为第 3 条），实际：{}",
+        p.steps[0]
+    );
+    assert!(
+        p.steps[0].chars().count() <= STEP_MAX_CHARS + 1,
+        "单步未截断（含省略号至多 {} 字）",
+        STEP_MAX_CHARS + 1
+    );
+}
+
+#[test]
+fn section_carries_worker_fields_verbatim() {
+    let p = WorkerProgress {
+        id: "worker-1".to_string(),
+        title: "重构".to_string(),
+        in_flight: true,
+        rounds: 3,
+        steps: vec!["读代码".to_string()],
+    };
+    let section = delegate_section(Some("/work 继续"), &[], &[p]).unwrap();
+    // 三个字段名逐字可见：与 B2 状态行同名，两处漂移时一眼对得出来。
+    assert!(section.contains("rounds=3"), "{section}");
+    assert!(section.contains("in_flight=true"), "{section}");
+    assert!(section.contains("steps=[读代码]"), "{section}");
+    assert!(section.contains("`重构`"), "{section}");
+}
+
+#[test]
+fn section_puts_workers_after_verdict_and_digest() {
+    // 次序：模型先看「本轮动不动手」、再看「我有哪些能力」、最后看「worker 到哪了」。
+    let p = WorkerProgress {
+        id: "w".to_string(),
+        title: "t".to_string(),
+        ..Default::default()
+    };
+    let section = delegate_section(
+        Some("/work 重构"),
+        &[meta("file_read", Some(CapabilityCategory::FileOperation))],
+        &[p],
+    )
+    .unwrap();
+    let verdict = section.find("委派判定").unwrap();
+    let digest = section.find("【能力目录】").unwrap();
+    let worker = section.find("worker `").unwrap();
+    assert!(verdict < digest && digest < worker, "次序反了：{section}");
+}
+
+#[test]
+fn section_omits_workers_when_there_are_none() {
+    // 没开 worker ⇒ Q3 一个字节都不占（与 Q2 空目录同一条纪律）。
+    let section = delegate_section(Some("/work 继续"), &[], &[]).unwrap();
+    assert!(!section.contains("worker `"), "{section}");
 }

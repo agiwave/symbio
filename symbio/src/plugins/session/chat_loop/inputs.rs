@@ -250,9 +250,15 @@ pub(crate) async fn prepare_turn_inputs(
     // Q1 的输入取 `turn.input_utterance`（循环**前**锚定的 `(消息 id, 正文)`）⇒
     // 同一请求内不随工具轮变化，判定不漂移；`None` = resume / 心跳这类没有用户新
     // 发言的请求，判决无从谈起（与判决侧「None 根本不进判决」同一条口径）。
+    // Q3：worker 进展现读磁盘（无子会话 ⇒ 零额外 IO）。读失败向上传播——
+    // 静默降级就是「没有观测 = 静默失效」：看不出是没 worker 还是没读到。
+    let workers = delegate::worker_progress(context.session.as_ref())
+        .await
+        .map_err(TurnExit::Failed)?;
     let delegate_section = delegate::delegate_section(
         turn.input_utterance.as_ref().map(|(_, text)| text.as_str()),
         &tools,
+        &workers,
     );
     let retention: HashMap<String, crate::symbio_core::CapabilityToolContextRetention> = tools
         .iter()

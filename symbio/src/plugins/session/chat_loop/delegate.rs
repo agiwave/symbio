@@ -2,7 +2,7 @@
 //!
 //! 目标形态是**主会话不持有工具**，于是它缺三样外部事实：worker 何时启动、自己有哪些
 //! 能力、进展如何。三问的答案都必须是**可穷举测试的数据**，否则主会话就得重新持有
-//! 工具——那正是「不持有工具」这个目标形态的反面。本模块是其中两样的生产处，
+//! 工具——那正是「不持有工具」这个目标形态的反面。本模块是**三样**的生产处，
 //! owner 是 [`prepare_turn_inputs`](super::inputs::prepare_turn_inputs)：
 //! **能力收集之后**才动笔，产出的段落并进 `build_request_view` 既有的请求视图次序。
 //!
@@ -24,11 +24,19 @@
 //! - **不往 `SessionConfig` 加旋钮**：ADR-047 要的是「答案是数据」，出厂值
 //!   （前缀 `/work `、关键词空集、阈值 0）由本模块的常量给出。旋钮会连带改配置面与
 //!   `CONFIGURATION.md` 字段表，属独立一批——登记在 [04 §3.2](../../../../../docs/plan/04-工程落地.md)。
-//! - **Q3（worker 进展）不在本模块**：它的读侧口径（`chat_loop` 如何枚举子会话、
-//!   子转写从哪来）尚未钉死，见 04 §3.2 的登记。先落 Q1/Q2，不给未定口径写死实现。
+//! - **Q3（worker 进展）也在本模块**，且**同样不记进程内账**——每次现读磁盘，
+//!   重启后与磁盘天然对得上。读侧走 [`PersistentChatSession::list_sub_sessions`]
+//!   （枚举 `<父>/sessions/`，**按路径天然只含本父之子**）+
+//!   [`PersistentChatSession::load_sub_session`]（取 `messages.json`），
+//!   投影是纯函数 [`progress_of`]。三处口径见
+//!   [04 §3.2](../../../../../docs/plan/04-工程落地.md)。
 
-use crate::symbio_core::CapabilityMeta;
+use crate::symbio_core::chat_message as cm;
+use crate::symbio_core::{CapabilityMeta, PluginError};
 use std::collections::BTreeMap;
+
+use super::super::chat_session::PersistentChatSession;
+use super::super::types::{Session, SessionSummary};
 
 // ── Q1：worker 启动条件 ────────────────────────────────────────────────
 
@@ -166,7 +174,147 @@ fn short_name(name: &str) -> String {
     name.rsplit('/').next().unwrap_or(name).to_string()
 }
 
-/// Q1 + Q2 合成**一条**请求视图段落——`prepare_turn_inputs` 的唯一装配入口。
+// ── Q3：worker 进展 ────────────────────────────────────────────────
+
+/// 单步文本上限（字符）。进展是**一眼看完的进度**，不是转写重放：把 worker 的
+/// 整段回复塞进每轮请求，等于让模型背着别人的全部历史跑。
+const STEP_MAX_CHARS: usize = 60;
+/// 步骤条数上限（**取最近的**）。进展关心"到哪了"，不是"都干过什么"。
+const STEPS_MAX: usize = 8;
+
+/// Q3 · 单个 worker 的进展投影。
+///
+/// 三个字段与 B2（前端把「过程段」收起成的那行状态）**逐字同名**：`in_flight` /
+/// `rounds` / `steps`。同名约束的是**字段名与语义**，不是算法——后端只见磁盘，
+/// 前端还看得见父工具状态（B2 判据 1 的 OR 式），两端各自用可见信息判定同一语义。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct WorkerProgress {
+    /// 子会话 id（`metadata.parent_session_id` 归属本会话）。
+    pub(crate) id: String,
+    /// 标题；存量文件缺投影字段时为空，装配时以 [`Self::id`] 兜底。
+    pub(crate) title: String,
+    /// 该 worker 是否仍在运行（末条消息**未见终态**即为真）。
+    pub(crate) in_flight: bool,
+    /// Turn 数 = 其 user 消息数 = **前端过程段 Turn 条数**——B2 判据 2「数值同源」
+    /// 的落点。**不能拿 `message_count` 顶**：那是总消息数，与 Turn 数不同量。
+    pub(crate) rounds: usize,
+    /// 非空内容节点产出的步骤；**无内容节点不产出步骤**（B2 判据 3）。
+    pub(crate) steps: Vec<String>,
+}
+
+/// Q3 投影：由子会话清单 + 完整转写算进展。**纯函数**（形参只有两个 `&`，可穷举测试）。
+pub(crate) fn progress_of(summary: &SessionSummary, session: &Session) -> WorkerProgress {
+    // rounds：只数 user 消息。`role` 为 `None` 是「还没接线」，不冒充一轮——
+    // 与 Q1 的 `None` 同一条纪律：没有观测就不要编出一个数来。
+    let rounds = session
+        .messages
+        .iter()
+        .filter(|m| matches!(m.role, Some(cm::MessageRole::User)))
+        .count();
+
+    // steps：非 user 节点的非空正文，**保留最近 STEPS_MAX 条**（drain 掉最早的）。
+    let mut steps: Vec<String> = session
+        .messages
+        .iter()
+        .filter(|m| !matches!(m.role, Some(cm::MessageRole::User)))
+        .filter_map(step_text)
+        .collect();
+    if steps.len() > STEPS_MAX {
+        steps.drain(..steps.len() - STEPS_MAX);
+    }
+
+    // in_flight：末条消息未见终态 ⇒ 仍在运行。**`status` 缺失也算在途**——
+    // 没观测到结束就不能宣称结束了（谎报"已完成"会让模型抢跑，比多报在途糟）。
+    let in_flight = session
+        .messages
+        .last()
+        .map(|m| !is_terminal(m.status.as_ref()))
+        .unwrap_or(false);
+
+    WorkerProgress {
+        id: summary.id.clone(),
+        title: summary.title.clone(),
+        in_flight,
+        rounds,
+        steps,
+    }
+}
+
+/// 一条步骤 = 非空内容节点的正文（截断到 [`STEP_MAX_CHARS`]）。
+///
+/// 判据 3「无内容节点不产出步骤」在此自然成立：组合节点（`Turn` / `ToolCall`）
+/// 本就不带 content，`as_ref()?` 直接返回 `None`；空字符串也被 `is_empty` 挡下。
+fn step_text(m: &cm::ChatMessage) -> Option<String> {
+    let content = m.content.as_ref()?;
+    if content.is_empty() {
+        return None;
+    }
+    let text = content.to_text();
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    Some(if text.chars().count() > STEP_MAX_CHARS {
+        let cut: String = text.chars().take(STEP_MAX_CHARS).collect();
+        format!("{cut}…")
+    } else {
+        text.to_string()
+    })
+}
+
+/// 终态集合（`MessageStatus` 的后四个变体）。
+fn is_terminal(status: Option<&cm::MessageStatus>) -> bool {
+    matches!(
+        status,
+        Some(cm::MessageStatus::Completed)
+            | Some(cm::MessageStatus::Aborted)
+            | Some(cm::MessageStatus::Failed)
+            | Some(cm::MessageStatus::Removed)
+    )
+}
+
+/// Q3 · 当前会话的 worker 进展：枚举子会话 → 逐个取转写 → 归属复核 → 投影。
+///
+/// **无子会话 ⇒ 零额外 IO**：`list_sub_sessions` 对不存在的 `sessions/` 直接返回空
+/// （`nested.exists()` 短路），[`PersistentChatSession::load_sub_session`] 一次都不调。
+/// 主会话没开 worker 时，本函数只多一次目录存在性判定。
+pub(crate) async fn worker_progress(
+    session: &PersistentChatSession,
+) -> Result<Vec<WorkerProgress>, PluginError> {
+    let mut out = Vec::new();
+    for summary in session.list_sub_sessions().await? {
+        let child = session.load_sub_session(&summary.id).await?;
+        // 归属复核：枚举路径已保证是本父之子，这里按 metadata 再判一次——
+        // 「串台比没进展更糟」，宁可少一个 worker，也不能把别人的进展注进来。
+        if child.parent_session_id() != Some(session.session_id()) {
+            continue;
+        }
+        out.push(progress_of(&summary, &child));
+    }
+    Ok(out)
+}
+
+/// Q3 一条进展的线格式——**字段名逐字可见**（`rounds=` / `in_flight=` / `steps=`），
+/// 与 B2 的状态行同名，两处漂移时一眼能对出来。
+fn worker_line(p: &WorkerProgress) -> String {
+    let title = if p.title.is_empty() {
+        p.id.as_str()
+    } else {
+        p.title.as_str()
+    };
+    let state = if p.in_flight { "在途" } else { "已结束" };
+    let steps = if p.steps.is_empty() {
+        String::new()
+    } else {
+        format!("、steps=[{}]", p.steps.join("；"))
+    };
+    format!(
+        "- worker `{title}`：rounds={}、in_flight={}（{state}）{steps}",
+        p.rounds, p.in_flight
+    )
+}
+
+/// Q1 + Q2 + Q3 合成**一条**请求视图段落——`prepare_turn_inputs` 的唯一装配入口。
 ///
 /// 为什么合成一条而不是三条：`build_request_view` 每条段落都是一个参数、一个位置，
 /// 三条 ⇒ 三个新位置要与记忆 0 / 就绪 1 的既有次序逐一排位，而三条真源的**出现条件**
@@ -177,7 +325,8 @@ fn short_name(name: &str) -> String {
 ///
 /// - `utterance = None`（resume / 心跳等无用户新发言的请求）⇒ Q1 不下结论；
 /// - `tools` 空 ⇒ Q2 整段不出现（给模型一段空目录只会诱导它瞎猜）；
-/// - 两者皆空 ⇒ 返回 `None`，视图**一个字节都不多**。
+/// - `workers` 空 ⇒ Q3 一条不写（没开 worker 时不占一个字节）；
+/// - 三者皆空 ⇒ 返回 `None`，视图**一个字节都不多**。
 ///
 /// ## 为什么「未命中」也要写出来
 ///
@@ -188,6 +337,7 @@ fn short_name(name: &str) -> String {
 pub(crate) fn delegate_section(
     utterance: Option<&str>,
     tools: &[CapabilityMeta],
+    workers: &[WorkerProgress],
 ) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
 
@@ -202,6 +352,11 @@ pub(crate) fn delegate_section(
 
     if let Some(digest) = capability_digest(tools) {
         parts.push(digest);
+    }
+
+    // Q3：每个 worker 一条，`rounds=` / `in_flight=` / `steps=` 三个字段名逐字可见。
+    for p in workers {
+        parts.push(worker_line(p));
     }
 
     if parts.is_empty() {
