@@ -13,11 +13,11 @@ use super::*;
 use crate::symbio_core::PluginSimpleRequest;
 use crate::symbio_core::{RunSnapshot, Verdict};
 
-use super::super::reasons::{
+use super::super::templates::{FALLBACK_ANSWERED, FALLBACK_ESCALATE};
+use crate::symbio_core::{
     REASON_ACK, REASON_EMPTY, REASON_GREETING, REASON_NEEDS_WORK, REASON_THANKS,
     REASON_UNCLASSIFIED,
 };
-use super::super::templates::{FALLBACK_ANSWERED, FALLBACK_ESCALATE};
 
 /// 造一个插件实例。
 ///

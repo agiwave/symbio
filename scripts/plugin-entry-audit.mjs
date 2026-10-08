@@ -31,7 +31,7 @@
  * | E-006 | **权威清单**（`ROUTES.md` / `CURRENT.md` / 插件 README）里的路径前缀必须合法 | `hooks/fire` 只出现在文档里，只扫代码的守卫会完整地漏掉它 |
  * | E-007 | 插件不得按**强引用**持有兄弟插件实例（`Arc<dyn Plugin>` 字段）  | 跨插件调用必须经 `ctx.parent()` 走容器；按值持有会绕过地址分发、并在插件重建后钉住旧实例（`telegram` 的 `llm_plugin` 就是这么烂掉的） |
  * | E-008 | 文档里标了 `<!-- vocab:PREFIX_ -->` 的**词表行**必须与代码常量逐字一致 | 闭集的第二份真相常驻文档：`vdfs.md` 的 status 行曾一直写 `error`，而代码早已改名为 `failed`——漂移会从文档**流回**代码 |
- * | E-009 | 插件不得直接 `use crate::plugins::<兄弟插件>`              | 「插件之间互不可见」**不是**编译器保证的：`plugins` 是共同父模块，而 Rust 的私有可见性包含"定义模块的后代" ⇒ `plugins::mcp` 能路径到私有的 `plugins::web`。当前代码恰好为 0，但没有守卫，一次顺手 import 就能破坏它且不留红（`plugins/mod.rs` 的架构原则只是约定） |
+ * | E-009 | 插件不得直接 `use crate::plugins::<兄弟插件>`，**测试代码同样判**  | 「插件之间互不可见」**不是**编译器保证的：`plugins` 是共同父模块，而 Rust 的私有可见性包含"定义模块的后代" ⇒ `plugins::mcp` 能路径到私有的 `plugins::web`。当前代码恰好为 0，但没有守卫，一次顺手 import 就能破坏它且不留红（`plugins/mod.rs` 的架构原则只是约定）。测试也在范围内：一条要跨插件比对数据的测试，本身就要求先把一个模块的隔离拆掉——那是这条规则要拦的形态，不是它的例外 |
  * | E-011 | 纯配置挂载点插件不得手写 `impl VdfsProvider`                    | 「挂载根 = 一份配置文档」的插件（`CONFIG_MOUNT_PLUGINS`）四臂 dispatch 骨架逐字相同，机制侧已提供唯一实现（`symbio_core::PluginConfigMount` 的泛型 blanket impl）。手写一份 = 把同一段语义复制出去：四份副本改一条错误文案要改四处，新增插件「记得抄对每条分支」是纯人肉负担。本条与行数棘轮互补——棘轮在**事后**度量规模，本条在**事前**禁止把已收口的语义再摊开 |
  *
  * （原 E-010「消费方不得深引 `symbio_core::<域>::`」已迁至
@@ -143,7 +143,9 @@ const isCode = (p) => p.endsWith('.rs') || p.endsWith('.ts') || p.endsWith('.vue
  * 等于没有守卫（`mechanism-audit` 文件头有同一段论证）。
  *
  * 因此 E-003 / E-004 / E-005 只扫生产文件。E-001（meta 首参）本来就只看生产实现
- * ——测试替身在 `#[cfg(test)] mod` 里，已被 `stripTestModules` 剥掉。
+ * ——测试替身在 `#[cfg(test)] mod` 里，已被 `blankTestModules` 剥掉。
+ * **E-009 是唯一反过来的**：插件互不可见对测试同样成立，故它单独走一遍，
+ * 测试文件与内联测试模块都在范围内。
  */
 const isTestFile = (p) =>
   p.endsWith('.test.rs') ||
@@ -608,33 +610,6 @@ for (const abs of codeFiles) {
       }
     }
 
-    // E-009：插件不得直接 `use crate::plugins::<兄弟插件>`
-    //
-    // 为什么需要：`plugins/mod.rs` 声称「所有 plugin 子模块都是私有，插件之间互相
-    // 不可见」——但 Rust 的私有可见性只到「定义模块**与它的后代**」。`plugins` 是共同
-    // 父模块，`plugins::mcp` 是它的后代 ⇒ `crate::plugins::web` 能被路径到并编译通过。
-    // 真正拦住它的是「没人这么写」，不是编译器——而这正是最容易被一次顺手 import 破坏、
-    // 且不会有任何测试变红的那类不变量（E-007 只管字段强持，管不到 import）。
-    //
-    // 注释已被 `readCode` 剥掉，故文档链接（[`web`](crate::plugins::web)）不会误报；
-    // 测试文件与内联测试模块也不参与（见 `isTestFile` / `blankTestModules`）。
-    if (isRust && isInPluginsDir(abs)) {
-      const ownDir = pluginDirOf(abs)
-      for (const m of line.matchAll(/crate\s*::\s*plugins\s*::\s*([a-z_][a-z0-9_]*)/g)) {
-        if (m[1] === ownDir) continue
-        if (exempted(raw, i, 'E-009')) continue
-        report(
-          'E-009',
-          'error',
-          rel(abs),
-          i + 1,
-          `\`crate::plugins::${m[1]}\` —— 插件不得直接引用兄弟插件模块；` +
-            `跨插件调用请用 \`ctx.parent()\` 取容器后 \`parent.route(ctx)\`，` +
-            `或经 \`symbio_core\` 的共享契约（见 \`symbio/src/plugins/mod.rs\` 的架构原则）`,
-        )
-      }
-    }
-
     // E-010 已退役：内核出口的深引检查迁至 `core-export-audit.mjs` 的 **C-002**
     // （域目录动态取自 core、额外拦裸 `use …::symbio_core::<域>;`）。深引是内核出口
     // 的事，不是插件门面的事——两处各判一遍必然分叉出两套域清单与豁免通道。
@@ -704,6 +679,42 @@ for (const abs of codeFiles) {
         rel(abs),
         i + 1,
         `\`${lit}\` 不对应任何一条真实 \`route\` 臂（\`${head}\` 插件是静态分派的）`,
+      )
+    }
+  }
+}
+
+// ── E-009：插件不得直接 `use crate::plugins::<兄弟插件>`（**测试代码也判**）──
+//
+// 为什么需要：`plugins/mod.rs` 声称「所有 plugin 子模块都是私有，插件之间互相
+// 不可见」——但 Rust 的私有可见性只到「定义模块**与它的后代**」。`plugins` 是共同
+// 父模块，`plugins::mcp` 是它的后代 ⇒ `crate::plugins::web` 能被路径到并编译通过。
+// 真正拦住它的是「没人这么写」，不是编译器——而这正是最容易被一次顺手 import 破坏、
+// 且不会有任何测试变红的那类不变量（E-007 只管字段强持，管不到 import）。
+//
+// 为什么单独一遍、不并进上面那个循环：那个循环开头 `if (isTestFile(abs)) continue`
+// ——测试会**故意**写假路径来验证 `NotFound`，地址规则对它们不成立。但「不得互引」
+// 对测试同样成立：让 `classify` 的一个模块为了比对词表而对仓内可见，就是为了喂一条
+// 测试，而那条测试一旦需要，插件隔离已经先被拆掉了一个模块。故本遍**不跳过测试文件**，
+// 也**不抹掉内联测试模块**（`blankTestModules` 是那个循环的前提），只剥注释——
+// 文档链接（[`web`](crate::plugins::web)）因此仍不会误报。
+for (const abs of codeFiles) {
+  if (!isRs(abs) || !isInPluginsDir(abs)) continue
+  const raw = fs.readFileSync(abs, 'utf8').split(/\r?\n/)
+  const code = blankComments(raw.join('\n'))
+  const ownDir = pluginDirOf(abs)
+  for (let i = 0; i < code.length; i++) {
+    for (const m of code[i].matchAll(/crate\s*::\s*plugins\s*::\s*([a-z_][a-z0-9_]*)/g)) {
+      if (m[1] === ownDir) continue
+      if (exempted(raw, i, 'E-009')) continue
+      report(
+        'E-009',
+        'error',
+        rel(abs),
+        i + 1,
+        `\`crate::plugins::${m[1]}\` —— 插件不得直接引用兄弟插件模块（测试代码同样判）；` +
+          `跨插件调用请用 \`ctx.parent()\` 取容器后 \`parent.route(ctx)\`，` +
+          `或经 \`symbio_core\` 的共享契约（见 \`symbio/src/plugins/mod.rs\` 的架构原则）`,
       )
     }
   }

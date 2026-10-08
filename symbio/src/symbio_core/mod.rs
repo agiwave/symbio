@@ -179,7 +179,11 @@ pub use schemas::detail::{
     DetailPreset, DetailPresetSpec, DetailSection, DETAIL_PICK_DIRECTORY,
 };
 pub use schemas::session::{chat_message, session_chat};
-pub use schemas::{ComposeRequest, DecideRequest, HookEvent, HookOutput, RunSnapshot, Verdict};
+pub use schemas::{
+    ComposeRequest, DecideRequest, HookEvent, HookOutput, RunSnapshot, Verdict, REASON_ACK,
+    REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT, REASON_GREETING, REASON_NEEDS_WORK,
+    REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED,
+};
 
 // ==================== 事件总线 ====================
 pub use event_bus::{

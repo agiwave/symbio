@@ -28,11 +28,11 @@ use crate::symbio_core::chat_message::{ChatMessage, MessageContent, MessageRole}
 use crate::symbio_core::Verdict;
 use crate::symbio_core::{
     llm_short_id, CapabilityVisitor, ExecAbortSignal, ExecEnv, ExecEventSink, ModelProvider,
-    PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_VISITOR,
+    PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_VISITOR, REASON_CLARIFY,
+    REASON_FROM_CONTEXT, REASON_NEEDS_WORK, REASON_REFUSE,
 };
 
 use super::config::ClassifyConfig;
-use super::reasons::{REASON_CLARIFY, REASON_FROM_CONTEXT, REASON_NEEDS_WORK, REASON_REFUSE};
 
 /// 分类器的系统提示词（**内置那份**，可被 `ClassifyConfig::system_prompt` 覆盖）。
 ///

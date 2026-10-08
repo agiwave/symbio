@@ -599,6 +599,48 @@ test('E-009 豁免理由为空视为未豁免', () => {
   assert.match(r.stdout, E009_HIT)
 })
 
+// 测试代码同样判：让一个插件的模块**为了喂一条测试**而对仓内可见，本身就是被
+// 这条规则拦下的那次拆隔离。上面 6 条全部只看生产文件——它们证明不了判据覆盖测试，
+// 而「只统计非测试的 0」正是原先那句绿灯的来源。
+
+test('E-009 命中**测试文件**里的跨插件引用', () => {
+  const r = audit({
+    ...CLEAN,
+    'symbio/src/plugins/mcp/caller.test.rs':
+      '#[test]\nfn t() { use crate::plugins::web::something; }\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /E-009\s+symbio\/src\/plugins\/mcp\/caller\.test\.rs:2/)
+})
+
+test('E-009 命中生产文件里的**内联测试模块**（`blankTestModules` 不是它的豁免口）', () => {
+  const r = audit({
+    ...CLEAN,
+    'symbio/src/plugins/mcp/caller.rs':
+      '#[cfg(test)]\nmod tests {\n    use crate::plugins::web::something;\n}\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /E-009\s+symbio\/src\/plugins\/mcp\/caller\.rs:3/)
+})
+
+test('E-009 放行对照：测试文件引用**自己**的插件模块仍通过', () => {
+  const r = audit({
+    ...CLEAN,
+    'symbio/src/plugins/mcp/caller.test.rs':
+      '#[test]\nfn t() { use crate::plugins::mcp::schemas::Foo; }\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('E-009 不误报：测试文件里的注释引用（判定仍只剥注释，不看注释）', () => {
+  const r = audit({
+    ...CLEAN,
+    'symbio/src/plugins/mcp/caller.test.rs':
+      '//! 与 [`web`](crate::plugins::web) 一致\n#[test]\nfn t() {}\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
 // ── E-010（已迁出）─────────────────────────────────────────────────────
 //
 // 原「消费方不得深引 `symbio_core::<域>::`」连同它在这里的 7 条用例一起迁到了

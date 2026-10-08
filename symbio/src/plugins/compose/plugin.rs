@@ -48,13 +48,12 @@ use crate::symbio_core::{
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH,
     PLUGIN_ID_COMPOSE,
 };
-use crate::symbio_core::{ComposeRequest, Verdict};
+use crate::symbio_core::{ComposeRequest, Verdict, REASON_FROM_CONTEXT};
 use crate::symbio_core::{DetailDefinition, DetailField};
 use async_trait::async_trait;
 use std::sync::Arc;
 
 use super::config::ComposeConfig;
-use super::reasons::REASON_FROM_CONTEXT;
 use super::templates::{progress_text, template_for};
 use super::wording::generate;
 

@@ -13,9 +13,10 @@
 //!
 //! 走真实模型的路径（快速档分类请求）由 e2e 覆盖，见 `e2e/cases/t21-classify.mjs`。
 
-use super::super::reasons::{REASON_ACK, REASON_EMPTY, REASON_GREETING, REASON_THANKS};
 use super::*;
-use crate::symbio_core::PluginSimpleRequest;
+use crate::symbio_core::{
+    PluginSimpleRequest, REASON_ACK, REASON_EMPTY, REASON_GREETING, REASON_THANKS,
+};
 
 /// 造一个插件实例。
 ///

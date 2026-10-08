@@ -18,20 +18,19 @@
 //!
 //! ## 兜底：未知码走通用模板
 //!
-//! 见 [`super::reasons`] 的说明——生产方加了码而这里忘了配措辞时，用户收到一句
-//! 通用话而不是空白。**降级而不失效**。
+//! 未知码有两个来源：外部调用方（网关原样转发 `reason`）直接发来一个没见过的词，
+//! 或生产方加了码而这里忘了配措辞。两种都让用户收到一句通用话而不是空白——
+//! **降级而不失效**。
 
-use crate::symbio_core::{RunSnapshot, Verdict};
-
-use super::reasons::{
-    REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_GREETING, REASON_NEEDS_WORK, REASON_REFUSE,
-    REASON_THANKS, REASON_UNCLASSIFIED,
+use crate::symbio_core::{
+    RunSnapshot, Verdict, REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_GREETING,
+    REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED,
 };
 
 /// 模板表：理由码 → 文本。
 ///
-/// 键是**线上词汇表**（见 [`super::reasons`]），不是本地枚举——两个变体的码在这张表里
-/// 不重叠，因此共用一张表不会歧义。
+/// 键是 `symbio_core` 的**线上词汇表**（`REASON_*`），不是本地枚举——两个变体的码
+/// 在这张表里不重叠，因此共用一张表不会歧义。
 const TEMPLATES: &[(&str, &str)] = &[
     (REASON_GREETING, "你好，我在。有什么事直接说就行。"),
     (REASON_THANKS, "不客气。"),

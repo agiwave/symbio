@@ -17,7 +17,8 @@
 契约跨插件（`session` 生产，本插件与 `compose` 消费），故落在 core（ADR-023）。
 
 `Verdict` 是**闭集枚举**（`Answered` / `Escalate` / `Report`），不是自由文本；
-其中的 `reason` 是**理由码**（数据），新增一类理由只加一行码表，不动 core。
+其中的 `reason` 是**理由码**（数据），词表就在同一个模块里（`REASON_*`）——新增一类
+理由是「加一行常量 + 本插件产出它 + `compose` 配一句措辞」，`Verdict` 的变体不变（J1）。
 `DecideRequest.context` 是 `session` 投影好的**对话线**（`conversation_view`）——
 本插件不读存储，读的是投影。
 

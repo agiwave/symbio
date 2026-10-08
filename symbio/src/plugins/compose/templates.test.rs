@@ -1,44 +1,23 @@
-//! 模板表的判据：抄本一致性 + 表的完整性 + 兜底方向。
+//! 模板表的判据：表的完整性 + 兜底方向。
 
 use super::*;
 // 走生成产线的那个码**不在模板表里**，因此它不在 `templates` 的 use 面上
 // （那正是下面 `from_context_has_no_template_row` 要钉的事）。
-use super::super::reasons::REASON_FROM_CONTEXT;
-
-/// **抄本一致性**：本插件的词表与 `classify` 的逐字一致。
-///
-/// 这是"两份抄本"这件事的判据。漂移的表现是**用户收到一句通用兜底话**——功能还在，
-/// 但没有任何错误信号，属于必须外置成断言的那类失效。
-#[test]
-fn the_vocabulary_matches_classify() {
-    use crate::plugins::classify::reasons as t;
-
-    assert_eq!(REASON_GREETING, t::REASON_GREETING);
-    assert_eq!(REASON_THANKS, t::REASON_THANKS);
-    assert_eq!(REASON_ACK, t::REASON_ACK);
-    assert_eq!(REASON_EMPTY, t::REASON_EMPTY);
-    assert_eq!(REASON_FROM_CONTEXT, t::REASON_FROM_CONTEXT);
-    assert_eq!(REASON_CLARIFY, t::REASON_CLARIFY);
-    assert_eq!(REASON_REFUSE, t::REASON_REFUSE);
-    assert_eq!(REASON_NEEDS_WORK, t::REASON_NEEDS_WORK);
-    assert_eq!(REASON_UNCLASSIFIED, t::REASON_UNCLASSIFIED);
-}
+use crate::symbio_core::REASON_FROM_CONTEXT;
 
 /// 表必须覆盖**每一个**走模板产线的理由码：漏一个 ⇒ 用户收到通用兜底
 /// （降级而不失效，但那是兜底，不是正常路径）。
 #[test]
 fn every_template_bound_reason_has_a_row() {
-    use crate::plugins::classify::reasons as t;
-
     for code in [
-        t::REASON_GREETING,
-        t::REASON_THANKS,
-        t::REASON_ACK,
-        t::REASON_EMPTY,
-        t::REASON_CLARIFY,
-        t::REASON_REFUSE,
-        t::REASON_NEEDS_WORK,
-        t::REASON_UNCLASSIFIED,
+        REASON_GREETING,
+        REASON_THANKS,
+        REASON_ACK,
+        REASON_EMPTY,
+        REASON_CLARIFY,
+        REASON_REFUSE,
+        REASON_NEEDS_WORK,
+        REASON_UNCLASSIFIED,
     ] {
         assert!(lookup(code).is_some(), "理由码「{code}」没有模板行");
     }
@@ -48,10 +27,8 @@ fn every_template_bound_reason_has_a_row() {
 /// ⇒ 表里那一行永远读不到。留着它比没有更糟——读表的人会以为它生效。
 #[test]
 fn from_context_has_no_template_row() {
-    use crate::plugins::classify::reasons as t;
-
     assert!(
-        lookup(t::REASON_FROM_CONTEXT).is_none(),
+        lookup(REASON_FROM_CONTEXT).is_none(),
         "`from_context` 走生成产线，模板表里不该有它的行"
     );
 }

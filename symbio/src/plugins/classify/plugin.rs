@@ -45,13 +45,12 @@ use crate::symbio_core::{
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH,
     PLUGIN_ID_CLASSIFY,
 };
-use crate::symbio_core::{DecideRequest, Verdict};
+use crate::symbio_core::{DecideRequest, Verdict, REASON_UNCLASSIFIED};
 use crate::symbio_core::{DetailDefinition, DetailField};
 use async_trait::async_trait;
 
 use super::config::ClassifyConfig;
 use super::decide::decide;
-use super::reasons::REASON_UNCLASSIFIED;
 use super::rules::classify_by_rule;
 
 /// Classify 插件（无状态、无副作用、不持有任何地址）

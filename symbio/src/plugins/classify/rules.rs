@@ -25,7 +25,7 @@
 //! 又让「哪几条算问候」成为一个无人 review 的运维事实。要改表就改这个文件，
 //! 它只有一屏。
 
-use super::reasons::{REASON_ACK, REASON_EMPTY, REASON_GREETING, REASON_THANKS};
+use crate::symbio_core::{REASON_ACK, REASON_EMPTY, REASON_GREETING, REASON_THANKS};
 
 /// 归一化时要剥掉的边缘字符（中英标点 + 空白）。
 ///

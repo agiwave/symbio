@@ -17,12 +17,16 @@
 //! 反过来，[`ComposeRequest`] 的产出是 `String`：措辞只被展示，不被执行。
 //! **判决不做措辞，措辞不做判决。**
 //!
-//! ## 理由码是 `String`，不是枚举
+//! ## 理由码是 `String`，词汇表与本契约同处
 //!
-//! [`Verdict::Answered`] / [`Verdict::Escalate`] 带的 `reason` 是**理由码**（如
-//! `"greeting"` / `"from_context"`），用来决定措辞走模板还是走生成。它是**数据**：
-//! 新增一类理由只加一行码表，不动 core（J1 —— 能用已有参数的新取值表达的，
-//! 就不是机制）。这与 `meta` 是自由 JSON 是同一条取舍。
+//! [`Verdict::Answered`] / [`Verdict::Escalate`] 带的 `reason` 是**理由码**（下方
+//! `REASON_*`），用来决定措辞走模板还是走生成。**字段**是 `String` 而不是枚举：
+//! 新增一类理由只加一行常量，`Verdict` 的**变体**不变（J1 —— 能用已有数据的取值
+//! 表达的，就不是机制）。而**词汇表**住在 core，因为它生产方与消费方分处两个插件
+//! （`classify` 产码、`compose` 按码选措辞），满足 `ADR-023` 的 core 准入判据。
+//! 同一份线上词表在两个插件各写一份，漂移的表现是**用户收到一句通用兜底话**——
+//! 功能还在、没有错误信号，而那正是必须外置成断言的那类失效；比断言更省的是让它
+//! 没有可漂的第二处。这与 `meta` 是自由 JSON 是同一条取舍。
 //!
 //! ## 运行现状（[`RunSnapshot`]）：**只放事实，不放判断**
 //!
@@ -111,6 +115,37 @@ pub enum Verdict {
     Report,
 }
 
+// ── 理由码词表：上面两个变体的 `reason` 取值 ──────────────────────────────
+//
+// 新增一类理由 = 在这里加一行常量，再去 `classify` 产出它、去 `compose` 给它措辞。
+// 三步都不动类型，因此它们都是**数据**；只有「这一轮多一条可执行的路」才是机制，
+// 而那要动 [`Verdict`] 的变体。
+
+/// 问候（「你好」「hello」…）
+pub const REASON_GREETING: &str = "greeting";
+/// 致谢（「谢谢」「thanks」…）
+pub const REASON_THANKS: &str = "thanks";
+/// 确认 / 收到（「好的」「ok」…）
+pub const REASON_ACK: &str = "ack";
+/// 空输入（只有空白 / 标点）
+pub const REASON_EMPTY: &str = "empty";
+
+/// 问的是**已有上下文**里的事实，能直接答 —— `compose` 侧唯一的**生成**产线
+/// （模板给不了「我们刚才聊了什么」的答案）
+pub const REASON_FROM_CONTEXT: &str = "from_context";
+/// 话没说清，需要反问一句
+pub const REASON_CLARIFY: &str = "clarify";
+/// 不该做 / 做不了，需要明确拒绝
+pub const REASON_REFUSE: &str = "refuse";
+/// 要干活，派给工具循环 —— `Escalate` 的首响（一句「我来处理」，不等判决之外的任何东西）
+pub const REASON_NEEDS_WORK: &str = "needs_work";
+
+/// **判不出来**（没有可用的模型服务 / 分类响应不可解析 / 本轮没有用户发言）。
+///
+/// 兜底方向是 `Escalate`，不是 `Answered`：后者会让「分类器坏了」表现成「这轮不用
+/// 干活」，用户看到的是**沉默**——这里最坏的失败形态，因为它没有任何错误信号。
+pub const REASON_UNCLASSIFIED: &str = "unclassified";
+
 /// **运行现状快照** —— `session` 在调用那一刻投影出来的事实（只放事实，见模块文档）。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunSnapshot {
@@ -149,3 +184,7 @@ pub struct ComposeRequest {
     #[serde(default)]
     pub snapshot: RunSnapshot,
 }
+
+#[cfg(test)]
+#[path = "dialog.test.rs"]
+mod tests;

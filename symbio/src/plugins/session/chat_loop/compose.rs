@@ -77,12 +77,12 @@ const SURFACE_REPLY: &str = "reply";
 
 /// 汇报节点的理由码（`meta.reason`）。
 ///
-/// ## 为什么它由 `session` 拥有，而不是 `compose` 的抄本
+/// ## 为什么它由 `session` 拥有，而不是共享词表里的一行
 ///
-/// `compose/reasons.rs` 与 `classify/reasons.rs` 是同一份词汇表的**两份抄本**，因为
-/// 生产方与消费方分处两个插件、不能共享常量。而汇报的理由码是**本侧自己产的**：
-/// 判决 `Report` 由 `session` 判出（见 `schemas/dialog.rs` 的变体表），措辞只是执行它
-/// ——`compose` 按判决分派，不看这个码。因此它没有"第二份抄本"可漂移，就地定义。
+/// 对话面的理由码词表在 `schemas::dialog`，因为它的生产方（`classify`）与消费方
+/// （`compose`）分处两个插件。而汇报的理由码是**本侧自己产的**：判决 `Report` 由
+/// `session` 判出（见 `schemas/dialog.rs` 的变体表），措辞只是执行它——`compose`
+/// 按判决分派，不看这个码。它没有第二个生产方，因此不进那份共享词表。
 const REASON_PROGRESS: &str = "progress";
 
 /// 判决的**执行点**：措辞 + 落点。

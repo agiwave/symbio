@@ -9,22 +9,16 @@
 //! |---|---|
 //! | [`plugin`] | 插件本体：路由臂 `decide` + 两条产线的顺序 |
 //! | [`rules`] | 反射档规则表（**纯函数**，零 LLM 往返） |
-//! | [`classify`] | 快速档分类（一次静默 LLM 往返，四选一） |
-//! | [`reasons`] | 理由码词表（`Verdict::reason` 的取值） |
+//! | [`decide`] | 快速档分类（一次静默 LLM 往返，四选一） |
 //! | [`config`] | 本插件自己的配置（`<本插件目录>/PLUGIN.yml`） |
 //!
-//! 四条内部依赖是单向的：`plugin` → `rules` / `classify` → `reasons`。
-//! 反过来没有边——`reasons` 不认识任何人，`rules` 与 `classify` 互不认识。
+//! 理由码词表**不在本插件里**：它是 `Verdict` 的 `reason` 取值，而消费方在
+//! `compose`，故住在 `symbio_core::schemas::dialog`（判据见那里的模块文档）。
+//!
+//! 内部依赖是单向的：`plugin` → `rules` / `decide`，两者互不认识，也都不认识
+//! `config` 之外的任何东西。
 
 mod config;
 mod decide;
 mod plugin;
-/// **唯一**对仓内可见的域内模块，理由只有一条：`compose` 要拿它比对措辞表的抄本
-/// （`compose/templates.test.rs` 的抄本一致性用例）。
-///
-/// 它**不放宽插件隔离**：生产代码里跨插件 `use crate::plugins::<兄弟>` 仍被
-/// `plugin-entry-audit` 的 E-009 拦着，本条只让**测试**能比对词表。词表是跨插件的
-/// 线上词汇表，而它的两份抄本一旦漂移，表现是"用户收到一句通用话"——没有错误信号。
-/// 那正是必须外置成断言的那类失效。
-pub(crate) mod reasons;
 mod rules;
