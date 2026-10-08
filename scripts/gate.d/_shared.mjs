@@ -1135,18 +1135,48 @@ export function ratchetVerdict({ actual, baseline, name, kind = '通过数', uni
  * **基准是「触碰过该文件的最近两个版本」，不是分支根**：远历史里基线本来就低，拿它比
  * 会让每一跑都红，于是豁免被喂到失效；只比最近一版又漏掉「已经提交的那次下调」。
  * 两版足够让**下调发生的当次**变红，无论它还在工作区还是已进 HEAD。
+ *
+ * ⚠️ 只判 `BASELINE` 一个对象是**覆盖面**问题而非正确性问题——plan/13 批 M12 把它
+ * 泛化成 {@link ratchetErosion}（多落点 + 两种方向），本函数保留为 `dir: 'floor'`
+ * 的那一格，语义一字未改。
  */
 export function baselineErosion(currentText, baseTexts) {
-  const current = parseBaselineCells(currentText)
-  const waived = new Set(baselineWaivers(currentText).keys())
+  return ratchetErosion({ dir: 'floor' }, parseBaselineCells, currentText, baseTexts, baselineWaivers(currentText))
+}
+
+/**
+ * **棘轮元判据**：把「当前值不得比基准版本更松」抽成一处。
+ *
+ * 两种方向，都是「只许往紧的方向改」：
+ * - `floor`（**只增**，下限）：当前值不得**小于**基准值。用于「测试数 / 覆盖率阈值」
+ *   这类**越多越严**的判据——调低就是削判据。
+ * - `ceiling`（**只减**，上限）：当前值不得**大于**基准值。用于「死码存量 / 未跨出
+ *   core 的符号数」这类**越少越严**的判据——调高就是削判据。
+ *
+ * 两者共用这一处，是为了让「什么算削判据」只定义一次：`35-baseline.mjs` 的
+ * `RATCHETS` 清单每加一条落点，不必重新决定一次红不红——那正是 M2 把
+ * `ratchetVerdict` 收进单点的同一条理由。
+ *
+ * `cellsOf(text)` 是**提取函数**，由调用方给（各落点的形状不同：`BASELINE` 是对象
+ * 字面量、`CORE_EXPORT_BASELINE` 是 `zero:one` 对、`vitest.config.ts` 是 `thresholds`
+ * 嵌套块）。取不到任何格时返回空 Map，**由调用方决定**是红还是跳过——本函数不替它猜。
+ *
+ * ⚠️ **契约：`cellsOf` 必须返回 `Number`，不能返回字符串。** 两个方向都靠 `<` / `>`
+ * 判定，而 JS 的字符串比较是**字典序**：`'9' < '10'` 为 **false**（`'9'` > `'1'`）。
+ * 一个返回字符串的提取器会让 `9 → 10` 这类**下调**静默通过——方向恰好是最危险的那一侧。
+ */
+export function ratchetErosion({ dir = 'floor' } = {}, cellsOf, currentText, baseTexts, waivers) {
+  const current = cellsOf(currentText)
+  const waivedKeys = waivers ? new Set(waivers.keys()) : new Set()
+  const loosened = (now, then) => (dir === 'ceiling' ? now > then : now < then)
   const worst = new Map()
   for (const { ref, text } of baseTexts) {
-    for (const [key, from] of parseBaselineCells(text)) {
-      const to = current.get(key)
-      if (to !== undefined && to >= from) continue
+    for (const [key, then] of cellsOf(text)) {
+      const now = current.get(key)
+      if (now !== undefined && !loosened(now, then)) continue
       const hit = worst.get(key)
-      if (hit && hit.from >= from) continue
-      worst.set(key, { key, from, to: to ?? null, waived: waived.has(key), source: ref })
+      if (hit && hit.from >= then) continue
+      worst.set(key, { key, from: then, to: now ?? null, waived: waivedKeys.has(key), source: ref })
     }
   }
   return [...worst.values()]

@@ -2,9 +2,10 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
-import { yellow, dim, stripAnsi } from '../color.mjs'
+import { yellow, red, dim, stripAnsi } from '../color.mjs'
 import {
   BASELINE,
+  BASELINE_GRACE,
   VITEST_TIMEOUT_MS,
   grabInt,
   coverageLinesPct,
@@ -84,10 +85,22 @@ export default {
           )
           const pct = coverageLinesPct(r.output)
           const thr = coverageThreshold(frontendDir)
+          // 覆盖率**高出阈值**同样要限期红，容差取 `BASELINE_GRACE`（与 `ratchetVerdict`
+          // 同一条）：高出的阈值不是无害的——阈值不跟着涨，删掉同样多的测试仍然全绿，
+          // 棘轮就被削掉了同样的点数，而提示可以被无限忽略（日志天天有、门禁天天绿）。
+          // 这正是 M2 把「高于基线只打黄字」改限期的同一条理由，此前只改了测试数那一半。
           if (pct !== null && thr !== null && pct - thr >= 10) {
+            const slack = pct - thr - 10
+            if (slack > BASELINE_GRACE) {
+              const line =
+                `行覆盖率 ${pct}% 已高出阈值 ${thr}% ${(pct - thr).toFixed(1)} 个点，` +
+                `超出回填容差 ${BASELINE_GRACE} ⇒ 上调 tauri/vitest.config.ts 的 thresholds.lines`
+              console.log(red(`      ↳ ${line}`))
+              return { ok: false, note: line }
+            }
             console.log(
               yellow(
-                `      ⚠ 行覆盖率 ${pct}% 已高出阈值 ${thr}% ${(pct - thr).toFixed(1)} 个点：阈值形同虚设，建议上调`,
+                `      ⚠ 行覆盖率 ${pct}% 已高出阈值 ${thr}% ${(pct - thr).toFixed(1)} 个点：阈值形同虚设，建议上调（还剩 ${BASELINE_GRACE - slack} 点容差）`,
               ),
             )
           } else if (pct !== null) {

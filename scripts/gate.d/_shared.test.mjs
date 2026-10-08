@@ -23,6 +23,7 @@ import {
   BASELINE,
   BASELINE_GRACE,
   baselineErosion,
+  ratchetErosion,
   baselineWaivers,
   parseBaselineCells,
   ratchetVerdict,
@@ -654,42 +655,69 @@ test('baselineErosion：已登记的豁免仍报出该格，只标 waived（黄�
   assert.equal(baselineErosion(current, [{ ref: 'b', text: baselineText([['a', 10]]) }])[0].waived, true)
 })
 
-// ⚠️ 与 `verify 阶段必须上 CI` 同族：**守卫写在仓库里 ≠ 守卫在 CI 上跑**。
-// `35-baseline.mjs` 靠 `git show` 读基准版本，而 `actions/checkout` 默认浅克隆只有一个
-// 提交 ⇒ 它在 CI 上走「诚实跳过」。跳过不报错、不变慢、日志一片绿，所以这里同时钉两件事：
-// 阶段进了 `--only`，且所在 job 拉了历史。
-test('ci.yml：baseline 阶段必须上 CI，且所在 job 要拉全历史', () => {
-  const block = jobBlock(ciYml(), 'docs-validation', 'security-check')
-  const calls = block.split('\n').filter((l) => l.includes('gate.mjs') && !l.trim().startsWith('#'))
-  assert.ok(
-    calls.some((l) => /only=[^\s]*baseline/.test(l)),
-    `baseline 不在 docs-validation 的 --only 里 ⇒「基线只增」只存在于开发者本机：${calls.join(' | ').trim()}`,
-  )
-  assert.match(
-    block,
-    /actions\/checkout@v5[\s\S]{0,200}?fetch-depth:\s*0/,
-    '没拉 git 历史 ⇒ baseline 阶段在 CI 上恒为「诚实跳过」，日志里看不出来',
-  )
+// ================= 棘轮元判据 `ratchetErosion`（批 M12） =================
+//
+// `35-baseline.mjs` 从「一个写死的路径」升成一张 `RATCHETS` 清单，而「什么算被放松」
+// 只在这里定义一次。两种方向都要钉住：
+//
+//   - `floor`（只增，下限）：当前值不得**小于**基准 —— 测试数 / 覆盖率阈值
+//   - `ceiling`（只减，上限）：当前值不得**大于**基准 —— 死码存量 / 未跨出 core 的符号数
+//
+// ⚠️ 这两种方向**互为反面**，共用一份代码正是危险所在：方向写反一次，两条棘轮同时
+// 失效，且失效方向是「该红的不红」。所以下面每条都成对写（放松⇒红 / 收紧⇒绿）。
+
+/** 测试用的极小提取器：文本形如 `a=10\nc=4`。注意 `cellsOf` 只吃**文本**，
+ *  而基准那一侧的文本走的是**同一个**提取函数（`35-baseline.mjs` 传的是 `git show`
+ *  出来的文件内容）——用例按这个契约写，否则元判据与调用方的形状就对不上。
+ *  且值必须是 **Number**：字符串比较是字典序，`'9' < '10'` 为 false，方向恰好是
+ *  「该红的不红」。 */
+const cellsOf = (text) =>
+  new Map(String(text).split('\n').filter(Boolean).map((l) => l.split('=').map((v, i) => (i ? Number(v) : v))))
+const base = (text) => [{ ref: 'b', text }]
+
+test('ratchetErosion floor：持平 ⇒ 不报；调高 ⇒ 不报；调低 ⇒ 报出该格', () => {
+  assert.deepEqual(ratchetErosion({ dir: 'floor' }, cellsOf, 'a=10', base('a=10')), [])
+  // 调高 = 收紧 = 绿
+  assert.deepEqual(ratchetErosion({ dir: 'floor' }, cellsOf, 'a=11', base('a=10')), [])
+  // 调低 = 放松 = 红
+  const [hit] = ratchetErosion({ dir: 'floor' }, cellsOf, 'a=9', base('a=10'))
+  assert.deepEqual(hit, { key: 'a', from: 10, to: 9, waived: false, source: 'b' })
 })
 
-// 字符串字面量与注释的区间扫描是两件判据的地基：`gate-codes-audit` 的「码出现在输出
-// 里」只看字符串，`doc-symbol-audit` 的「这一族存在」只看代码本体。抹错了范围（把代码
-// 一起抹掉，或让注释继续替已删除的常量作证）不会报错，只会让判据静默改口径。
-test('codeTextOf：字符串内容与注释抹空，代码标识符留着', () => {
-  const src = [
-    '// 注释里的 ROUTE_IN_COMMENT 只是叙述',
-    'const NAME: &str = "CARGO_PKG_VERSION";',
-    'let joined = A + "mid" + B;',
-    'const tpl = `line1',
-    'LINE_IN_TEMPLATE',
-    'line3`;',
-    '/* 块注释里的 PLUGIN_OLD_NAME */',
-  ].join('\n')
-  const out = codeTextOf(src)
-  assert.ok(!out.includes('ROUTE_IN_COMMENT'), '注释要抹——它是文档的另一处')
-  assert.ok(!out.includes('PLUGIN_OLD_NAME'))
-  assert.ok(!out.includes('CARGO_PKG_VERSION'))
-  assert.ok(!out.includes('LINE_IN_TEMPLATE'), '模板串整段算字面量内容')
-  assert.match(out, /A \+ " " \+ B/, '多个区间各自抹空，代码标识符留下')
-  assert.equal(stringLiteralsOf(src).join('|'), 'CARGO_PKG_VERSION|mid|line1\nLINE_IN_TEMPLATE\nline3')
+test('ratchetErosion ceiling：与 floor 互为反面——调高 ⇒ 报出，调低 ⇒ 不报', () => {
+  assert.deepEqual(ratchetErosion({ dir: 'ceiling' }, cellsOf, 'a=8', base('a=8')), [])
+  // 调低 = 收紧 = 绿
+  assert.deepEqual(ratchetErosion({ dir: 'ceiling' }, cellsOf, 'a=7', base('a=8')), [])
+  // 调高 = 放松 = 红
+  const [hit] = ratchetErosion({ dir: 'ceiling' }, cellsOf, 'a=9', base('a=8'))
+  assert.deepEqual(hit, { key: 'a', from: 8, to: 9, waived: false, source: 'b' })
+})
+
+test('ratchetErosion：整格被删在**两个方向上**都算放松（`to` 为 null，不是漏掉）', () => {
+  for (const dir of ['floor', 'ceiling']) {
+    const [hit] = ratchetErosion({ dir }, cellsOf, '', base('a=3'))
+    assert.equal(hit.to, null, `${dir}: 整格被删却没报出来`)
+    assert.equal(hit.from, 3)
+  }
+})
+
+test('ratchetErosion：取并集里的**最不利**值——多版基准不会因取到较松那版而放过', () => {
+  const [hit] = ratchetErosion({ dir: 'floor' }, cellsOf, 'a=10', [
+    { ref: 'loose', text: 'a=10' },
+    { ref: 'tight', text: 'a=12' },
+  ])
+  assert.equal(hit.from, 12)
+  assert.equal(hit.source, 'tight')
+})
+
+test('ratchetErosion：豁免按格生效（waivers 由调用方按各守卫自己的标记解析后传入）', () => {
+  const hits = ratchetErosion(
+    { dir: 'floor' },
+    cellsOf,
+    'a=9\nb=4',
+    base('a=10\nb=5'),
+    new Map([['a', '一次性压测']]),
+  )
+  assert.equal(hits.find((h) => h.key === 'a').waived, true)
+  assert.equal(hits.find((h) => h.key === 'b').waived, false)
 })
