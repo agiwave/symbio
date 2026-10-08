@@ -114,8 +114,8 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        // 任务表挂在**收束转写**（`v2_bridge::record`）上 ⇒ 与 t30 同款的 bridge 档。
-        session: { ...DIALOG_FACE_OFF, v2_mode: 'bridge' },
+        // 任务表挂在**收束转写**（`v2_facts::record`）上 ⇒ 与 t30 同款的 bridge 档。
+        session: { ...DIALOG_FACE_OFF, v2_mode: 'full' },
       },
     });
 
@@ -185,7 +185,14 @@ export default defineCase(
       );
       assertEq(progress[0].payload?.task_id, 't1', '推进的应是 t1');
 
-      // I2：任务事件带溯源；锚是**本轮**用户格；事件号带 `{user_id}-a{attempt}` 前缀。
+      // I2：任务事件带溯源；锚是**本轮**用户格；事件号带**轮次前缀**。
+      //
+      // ⚠️ 前缀的**形状随档位变过**（退役的转写路径用 `{user_id}-a{attempt}`，
+      // `full` 档的锚词是 `t{turn}` 一族）。本用例现在只钉「带了前缀」这件事——
+      // 前缀的具体拼法是 `v2_facts::record_derived` 与 `v2_tasks::write` 的内部约定，
+      // 两者都在同一批里改，一起改一起错，断言它等于把内部约定抄成第二份。
+      // 真正要防的是「没有前缀」：`todo_write` 的调用编号只在**一次模型响应内**唯一，
+      // 而 WAL 的幂等键是事件 id——不加前缀，跨轮复用同一编号会撞 `Duplicate`。
       assertEq(users.length, 2, `两轮各一格用户发言（实际 ${users.length}: ${kinds}）`);
       for (const e of [...opened, ...progress]) {
         assertEq(
@@ -194,8 +201,8 @@ export default defineCase(
           `任务事件溯源应锚在声明那一轮的用户格（${e.event_id} → ${e.produced_by}）`,
         );
         assert(
-          /^v2t-.+-a\d+-\d+$/.test(e.event_id),
-          `任务号须带 {user_id}-a{attempt} 前缀（调用编号只在一次响应内唯一，不加前缀会撞幂等键）：${e.event_id}`,
+          /^v2t-.+-\d+$/.test(e.event_id),
+          `任务号须带轮次前缀（调用编号只在一次响应内唯一，不加前缀会撞幂等键）：${e.event_id}`,
         );
         assertEq(e.actor, 'agent:main', '任务事件 actor = 收束 principal');
       }

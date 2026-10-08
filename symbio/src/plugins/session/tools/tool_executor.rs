@@ -741,7 +741,7 @@ pub(super) fn not_executed_result(tool_call_id: &str, reason: &str) -> ChatMessa
 /// 智能体接手这件事」。别的工具是本会话自办，办没办成是执行结果，不是承诺。
 ///
 /// 工具执行层**没有事实源**（它只写节点、不碰 WAL），所以这里是纯出参：
-/// 谁负责把承诺入格，谁负责开那扇门（收束转写 `v2_bridge::record_to_wal`）。
+/// 谁负责把承诺入格，谁负责开那扇门（收束转写 `v2_facts::record_to_wal`）。
 #[derive(Debug, Clone)]
 pub struct Delegation {
     /// 承诺号 = 本次调用在**转写里的 ToolCall 节点 id**（`c-offer-<id>` 由此成格）：

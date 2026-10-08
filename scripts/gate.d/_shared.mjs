@@ -424,7 +424,7 @@ export const BASELINE = {
   //      读侧出口接进生产路由：core 根导出 `slo_report` / `checkpoint` +
   //      `WalStore::open_readonly`（只读开档：不创建、不截断撕裂尾行），
   //      `plugins/session/stats.rs` 一次给四列（时延/兜底/成本/断点）。
-  //      写侧判据同步订正：`v2_bridge::first_user_utterance` 此前只认
+  //      写侧判据同步订正：`v2_facts::first_user_utterance` 此前只认
   //      `status = Completed`，而 `chat/send` 的用户消息不填该字段 ⇒ 转写恒
   //      不发生且**无告警**，事实源根本不曾存在（详见 04 §3.1 S2 行）。
   //      验收 = stats 3 例（复算 / 反向手术 / 缺源不创建）+ wal 只读 2 例
@@ -453,7 +453,7 @@ export const BASELINE = {
   //      `symbio/src/authz.rs`（能力名字符串 ⇒ `PermissionMatrix::from_names`
   //      按 7 项闭集校验、失败降级空矩阵；`PRINCIPAL_MAIN` / `PRINCIPAL_USER`
   //      与事件 actor 同源，判的对象 = 写的对象）；写侧
-  //      `v2_bridge::authorize_close`（收束入格前 `can_reply`，轮次→能力映射
+  //      `v2_facts::authorize_close`（收束入格前 `can_reply`，轮次→能力映射
   //      只在 core）；读侧 `session/stats` 载荷声明 `principal` 才 `can_see`
   //      （属主全量、矩阵外读数为空，不声明 = 今天行为逐字不变）。
   //      验收 = governance 3 例（`from_names` 成功 / 认不出的能力名**拒绝整体**
@@ -461,7 +461,7 @@ export const BASELINE = {
   //      + stats 2 例（属主全量 / 非属主全零）+ v2_bridge 写闸 1 例 + e2e t28
   //      读方三态（`principal` = user / agent:main / 未知 ⇒ 4 格 / 0 格 / 0 格）。
   // 1243（记忆三段接线，2026-10-04）——`1232 → 1243`，**+11**。
-  //      步 11–13 全部接入（04 §3.1 批⑦）：写方 `v2_bridge::record_to_wal` 收束时
+  //      步 11–13 全部接入（04 §3.1 批⑦）：写方 `v2_facts::record_to_wal` 收束时
   //      编码本轮用户发言（同文去重判定方 = core 的 `contains_content`）、把本轮
   //      检索落成 `memory.recalled`、再过 `consolidate::accept` 才巩固；读方
   //      `prepare_turn_inputs` 首轮扫跨会话事实源、`build_request_view` 置顶注入。
@@ -470,7 +470,7 @@ export const BASELINE = {
   //      请求视图置顶注入 1 例 + e2e `t29`（记忆进 prompt、跨会话召回、巩固可见）。
   // 1266（任务表，2026-10-04）——`1252 → 1266`，**+14**。
   //      04 §3.1 批⑨ 全量接线：`local/todo_write` 输入 schema 增 `depends_on`（任务图
-  //      是数据）、`note_tasks` 任务表出参 → `TurnState.task_decls` → `v2_bridge::record`
+  //      是数据）、`note_tasks` 任务表出参 → `TurnState.task_decls` → `v2_facts::record`
   //      → `v2_tasks::write` 逐批入格（opened / progress / asserted / 返工）、
   //      `readyset` 投影进 `stats` 读列、调度段 `prompt_section` → `build_request_view`
   //      置顶注入、`acyclic_deps` / `rework_bounded` 进 `check_all`（五条 → 七条）。
@@ -482,7 +482,7 @@ export const BASELINE = {
   //      `matrix_for`、`view::visible_to`、`build_request_view(viewer)`、
   //      `ChatMessage.principal` 落库单点 `append_and_publish::attributed`）、
   //      承诺写方（`note_delegation` 四个终态分支 → `TurnState.delegations` →
-  //      `v2_bridge::record_to_wal` 逐条入格）、声誉读列（`stats::read` 会话主体
+  //      `v2_facts::record_to_wal` 逐条入格）、声誉读列（`stats::read` 会话主体
   //      第 4 参 + `reputation` 列全有全无）。
   //      验收 = core 可见域 2 例 + 视图按主体过滤 1 例 + `note_delegation` 2 例 +
   //      桥承诺入格 2 例 + 声誉列 1 例 + `attributed` 身份补齐 1 例 + e2e `t30`
@@ -493,7 +493,7 @@ export const BASELINE = {
   //      判 `produce.artifact`、已耗走 `cost_ledger` 台账〔ADR-044〕、本次申请 =
   //      深度档预算、总预算 = 自主层预算），随后**每个调用点各判一次**
   //      `CircuitBreaker::gate`；`Refuse` 零事件、`Break` 经 `TurnState.gate_breaks`
-  //      出参交 `v2_bridge::record` 落 `control × opened`（与承诺 / 任务同锚
+  //      出参交 `v2_facts::record` 落 `control × opened`（与承诺 / 任务同锚
   //      `user_seq`）、`Allow` 照旧开窗。判据在批首读而非逐点重放：一次工具批几十
   //      个调用点 × 全量 WAL 重放会让闸门自己变成时延源。
   //      验收 = 判据读矩阵 1 例（非 agent 主体 fail-closed）+ 台账吃满即拒且走出参
@@ -610,10 +610,10 @@ export const BASELINE = {
   //      的坏值从「`max_messages: 1`（靠旧 min 边界）」改成「`max_messages: "不是数字"`（形状错误）」。
   // 1305（full 档补上收束派生事实里的记忆与学习，2026-10-06）——`1304 → 1305`，**+1**。
   //      `v2_mode = full` 档下 `chat_loop` 以 `TurnState::v2_executed` 拦下整段
-  //      `v2_bridge::record`（「同一轮两份记账是假象」），但记忆三段（S5 步 11–13）与
+  //      `v2_facts::record`（「同一轮两份记账是假象」），但记忆三段（S5 步 11–13）与
   //      技能观测 / 编译（S11 步 22）**不是轮次事实**、而是派生副作用——`v2_exec` 一处
   //      都不写 ⇒ 这个档位的长期记忆与自我改进**静默全丢**，而档位名还自称「整体切换」。
-  //      本批把「记忆 + 学习」从 `record_to_wal` 抽成 `v2_bridge::record_learning`
+  //      本批把「记忆 + 学习」从 `record_to_wal` 抽成 `v2_facts::record_learning`
   //      （同一函数、两个调用点：bridge 档经 `record_to_wal`，full 档在 `v2_exec` 轮末
   //      直接调，锚点分别是转写的 `v2u-*` 格与原生写的 `u-{turn}` 格）。仍只走 bridge 档
   //      的（承诺 / 任务表 / 熔断 / 写侧授权闸）已在 `v2_exec` 模块文档**诚实划界**。
@@ -678,10 +678,10 @@ export const BASELINE = {
   //      matrix_for_prefers_the_registered_row_over_derivation}`。
   // 1321（full 档补上承诺 / 任务表 / 熔断三份收束派生事实，2026-10-06）——`1320 → 1321`，**+1**。
   //      `full` 档的轮次事实由 v2 运行器原生记账，`chat_loop` 以 `v2_executed` 拦下整段
-  //      `v2_bridge::record`——但承诺 / 任务表 / 熔断**不是轮次事实**（数据来源在工具执行层），
+  //      `v2_facts::record`——但承诺 / 任务表 / 熔断**不是轮次事实**（数据来源在工具执行层），
   //      那一侧原先既不收集出参也不落格（`v2_tools` 三处 `&mut Vec::new()` 的「看得见的注记」），
   //      ⇒ `full` 档这三样**静默全丢**（与 t40 修的记忆/学习同一个坑）。本批：
-  //      ① 把 `record_to_wal` 里三段落格抽成 `v2_bridge::record_derived`（两档共用同一份
+  //      ① 把 `record_to_wal` 里三段落格抽成 `v2_facts::record_derived`（两档共用同一份
   //         实现、同一锚 `user_seq`，差别只在 `anchor_id` 词干：桥档 `{user_id}-a{attempt}`、
   //         full 档 `t{turn}`）——抽取保持行为逐字不变（既有 bridge 用例全绿）；
   //      ② `SessionDispatchPort` 新增 `DerivedFacts` + `take_derived` 取件面，`dispatch` 收下
@@ -730,10 +730,19 @@ export const BASELINE = {
   //      （`reason` 会原样写进转写节点 `meta.reason`，改值 = 老对话读不回当时的理由，
   //      与 `progress_reason_literal_is_the_wire_contract` 同一条判据）、`Verdict` 的
   //      serde 形状收下**词表之外**的码（未知码是可达输入，不是事故）。
-  // 1383（2026-10-08，批 C4）：1376 → 1383，**+7** = `FrameQueue` 的 7 条判据
-  //   （未满原序透传 / 慢消费者不超容量 / 正文零丢失 / 定格帧必达 / 定格排在自己增量之后 /
-  //   屏障满载仍回执 / 关闭后退出）。其中 6 条是这一批新写的慢消费者判据。
-  rustTests: 1383,
+  // 1378（2026-10-09，批 P3）：1383 → 1378，**−5**，且**分两向**：
+  //   −10 随退役的转写路径一起删掉的旧用例（发言抽取 3 / attempt 编号 1 / 轮次事实入格 1 /
+  //      `authorize_close` 1 / 记忆三段经 `record_to_wal` 1 / `off` 档 1 / 重开 1 改写后保留）；
+  //   +11 迁与新增：迁 4 条改直调存活写方（`record_derived` 3 + `record_learning` 1）、
+  //      新增 7 条（`prefix` 位置与不累积 1 / `keep == 0` 不截断 + `Some(1)` 对照 1 /
+  //      config 档位取值 1 / **双向完整性防线 3** —— 四类缺口各造一个的反向自检 1 +
+  //      平凡值无假红 1 + 工具轮重开复核 1）。
+  //   净 +1。**逐条归属已核**：删掉的每一条要么测的是被退役的函数，要么其覆盖面已由
+  //   `v2_exec.test.rs`（带反向自检）或新的 `v2_facts.test.rs` 接管。
+  //   ⚠️ 这是**下修**，不是回填容差——`ratchetErosion` 判的是「基线相对最近两个碰过本文件
+  //   的提交有没有变松」，所以这一格带 `baseline-allow` 豁免（理由见其上）。
+  // baseline-allow rustTests: 批 P3 退役 `bridge` 转写路径，`v2_bridge.test.rs` 的 15 条缩到 `v2_facts.test.rs` 的 5 条（净 −10），另加 11 条迁与新增判据，净 +1；逐条归属见上方注释，非侵蚀。
+  rustTests: 1381,
   /**
    * CI 口径的 Rust 通过数（**只增不减**）——与上面三个分包基线**是不同口径，不能互替**。
    *

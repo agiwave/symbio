@@ -70,6 +70,49 @@ const onceUsed = new Set();
 const failOutcome = new Map();
 const failLogicalHits = new Map(); // 场景 id → 已消耗的逻辑名额
 
+/**
+ * 「这条请求是工具结果轮」的**第二种**判据（v2 prompt 形状专用）。
+ *
+ * v2 形状下 `Reasoner::render_prompt` = `transcript` 投影的 `to_prompt`，它把多轮
+ * 历史包在 `<对话历史> … </对话历史>` 里、**当前轮平铺在标签之后**；本轮刚发生的
+ * 工具交换由运行器就地追加在这后面（`render_tool_exchange`）。
+ *
+ * 所以判据是：**`</对话历史>` 之后那段里有没有 `工具结果(` 行**。那一段在「本轮
+ * 第一次请求」时只有当前用户发言一行（不可能含工具结果），在「工具结果轮」时多出
+ * 整段 exchange。
+ *
+ * ## 试过两种都错的写法（记下来，因为它们的症状都不指这儿）
+ *
+ * 1. `/^工具结果\(…\)/m` —— `m` 让 `^` 匹配任意行首 ⇒ **历史里**上一轮
+ *    `artifact.added` 渲染出的那条也算命中 ⇒ 新一轮第一次请求被误判成工具结果轮 ⇒
+ *    直接返回收尾正文、**根本不请求工具**。症状落在下游「应恰好一格熔断，实得 0 格」。
+ * 2. 「最后一次 `助手请求工具` 之后有没有 `工具结果`」（次序判据）—— 也不行：
+ *    **投影路径的 `工具结果` 行前面没有 `助手请求工具` 行**（`transcript` 投影只渲染
+ *    调用结果、不渲染调用，见 `transcript.rs` 的 `EVENT_ARTIFACT_ADDED` 分支），
+ *    于是「最后一次调用行」恒为 −1，判据恒真 ⇒ 与第 1 种同样的误判。
+ *
+ * 顺带说明为什么**不能锚「末行是工具结果」**：`outcome.text` 与投影的 `entry.text`
+ * 都可能是多行正文（工具结果是 JSON 形态）⇒ 末行只是那段正文的一半 ⇒ 判据恒假 ⇒
+ * 退回「永不命中 `afterTool`」⇒ 无限工具循环，撞 `runCli` 的 120s 超时。
+ * 用标签切段则与正文是否多行无关。
+ *
+ * @param {string} prompt v2 形状下的整条 user 消息内容
+ * @returns {boolean} 本轮是否刚拿到工具结果、还没作答
+ */
+function endsWithToolResult(prompt) {
+  const text = String(prompt ?? '');
+  const cut = text.lastIndexOf('</对话历史>');
+  // 无标签 ⇒ 投影只有**一条**条目（`to_prompt` 的单条目分支返回裸文本）⇒ 整段就是
+  // 「当前轮 + 就地追加的 exchange」，扫全段。
+  //
+  // ⚠️ 这里正是先前两版判据栽跟头的地方，区别在**为什么**扫全段是安全的：只有
+  // 「投影 ≥ 2 条」才会带标签，而带标签时历史里必然可能有 `artifact.added` 渲染出的
+  // 工具结果行——那种情况一律被切段排除在外。零标签时投影里根本没有第二条，扫到的
+  // `工具结果(` 只可能来自运行器追加的 exchange。
+  const current = cut < 0 ? text : text.slice(cut + '</对话历史>'.length);
+  return current.split('\n').some((l) => l.startsWith('工具结果('));
+}
+
 /** 逻辑请求指纹：场景 id + 请求体（重发复用同一份字节 ⇒ 指纹相同）。 */
 function requestFingerprint(scenarioId, body) {
   return `${scenarioId}\n${JSON.stringify(body)}`;
@@ -82,9 +125,7 @@ function loadScenarios() {
 function pickScenario(body) {
   const msgs = body.messages ?? [];
   const last = msgs[msgs.length - 1];
-  // 工具结果轮：请求的最后一条是 role=tool（模型刚收到工具结果继续生成）。
-  // 这类请求必须用 afterTool 场景回应，否则带 match 的工具调用场景会反复命中 → 无限工具循环。
-  const isToolResultTurn = last?.role === 'tool';
+  // 本轮用户文本：**最后一条 role=user 的内容**（v1 形状下就是本轮那句话）。
   const lastUser = [...msgs].reverse().find((m) => m.role === 'user');
   const userText =
     typeof lastUser?.content === 'string'
@@ -92,12 +133,78 @@ function pickScenario(body) {
       : Array.isArray(lastUser?.content)
         ? lastUser.content.map((p) => p.text ?? '').join('')
         : '';
-  const pool = loadScenarios().filter((s) => (isToolResultTurn ? s.afterTool : !s.afterTool));
-  for (const s of pool) {
-    if (s.once && onceUsed.has(s.id)) continue;
-    if (s.match && !userText.includes(s.match)) continue;
-    if (s.once) onceUsed.add(s.id);
-    return { scenario: s, userText };
+
+  // ⚠️ **工具结果轮的判定必须同时认两种 prompt 形状**（出厂档位是 `full`，
+  // 不认它的后果是工具用例整体失效，且症状指不到这里）：
+  //
+  // - v1（`v2_mode` 非 `full`）：对话拆成 messages 数组，工具结果是独立的
+  //   `role=tool` 消息 ⇒ 判 `last.role === 'tool'`；
+  // - v2（`full` 档）：`ProviderLlmAdapter::generate_turn` 把
+  //   `Reasoner::render_prompt` 渲染的**整段窗口转写**作为**一条** user 消息发出
+  //   ⇒ **永远没有 `role=tool` 消息** ⇒ 只能判 prompt 的末行。
+  //
+  // 两种误判各自表现为：只认 v1 ⇒ `afterTool` 永不命中 ⇒ 带 `match` 的工具调用
+  // 场景反复命中 ⇒ **无限工具循环**（实测 t33 撞 `runCli` 120s 超时，节点转「挂起」，
+  // 不是断言红）；判宽了（只锚行首）⇒ 新一轮的第一次请求被误认成工具结果轮 ⇒
+  // 直接返回收尾正文、**根本不请求工具**（实测 t33 报「应恰好一格熔断，实得 0 格」，
+  // 而真因在 mock 里）。
+  const isToolResultTurn = last?.role === 'tool' || endsWithToolResult(lastUser?.content);
+
+  // ⚠️ `afterTool` 是**优先**而不是**硬过滤**。
+  //
+  // 原先这里是硬过滤（`filter(s => isToolResultTurn ? s.afterTool : !s.afterTool)`），
+  // 于是一个**没声明任何 `afterTool` 场景**的用例，在工具结果轮上池子被过滤成空 ⇒
+  // 直接落 `plan.fallback`（默认回复）。实测 t38 报「轮 1 历史应含轮 0 的收束正文」，
+  // 而真因在 mock 里：它要的 `r0-final`（无 `match` 的普通场景）本该在工具结果轮
+  // 继续可用。这类误判的杀伤力在于**症状落在下游的历史断言上**，离真因隔两层。
+  //
+  // 硬过滤唯一说得通的场景是「本轮必须用 `afterTool` 回应，否则带 `match` 的工具
+  // 调用场景会反复命中 → 无限工具循环」——而那件事由**下面的回退**已经兜住了：
+  // 优先池选不出东西时再退回全池，选中的场景若带 `match` 也照样按位置匹配。
+  const all = loadScenarios();
+  const pool = isToolResultTurn
+    ? all.filter((s) => s.afterTool)
+    : all.filter((s) => !s.afterTool);
+
+  // ⚠️ **取位置最靠后的那个匹配，不是第一个匹配的**——同样因为两种形状下
+  // `userText` 的含义不同：
+  //
+  // v1 下 `userText` = 本轮那句话（短）；v2 下它是**整段历史**（长，含此前每一轮）。
+  // 于是「先匹配 `普通提问`（第 1 轮）、后匹配 `触发故障`（第 2 轮）」这种场景表
+  // 在 v1 下按顺序命中第 2 轮的规则，在 v2 下会命中**第一条** ⇒ 故障注入静默不发生，
+  // 那一轮假成功、CLI 退出 0。症状出现在**被测系统之外**（用例断言「失败轮应非零退出」
+  // 失败），指向却像「v2 把失败吞了」，极易误诊成产品缺陷。
+  //
+  // 转写按事件序渲染、当前发言在**末尾**，所以「匹配位置最靠后」= 「匹配本轮发言」，
+  // 两种形状下同一条规则都指向同一轮。`match` 缺失的规则不参与位置比较（位置对它
+  // 没有意义），只在还没有任何位置命中时兜底。
+  const choose = (candidates) => {
+    let best = null;
+    let bestAt = -1;
+    for (const s of candidates) {
+      if (s.once && onceUsed.has(s.id)) continue;
+      if (s.match) {
+        const at = userText.lastIndexOf(s.match);
+        if (at < 0) continue;
+        if (at > bestAt) {
+          best = s;
+          bestAt = at;
+        }
+      } else if (best === null) {
+        best = s;
+      }
+    }
+    return best;
+  };
+
+  // 优先池（工具结果轮 = 只认 `afterTool`；否则只认非 `afterTool`）⇒ 选不出就
+  // **退回全池**。退回而不是直接落 fallback：前者让「没声明 afterTool 的用例」在
+  // 工具结果轮上照常用它声明过的普通场景，后者把整轮的回答换成默认回复——症状是
+  // 下游断言「历史里没有上一轮收束」，离真因隔两层。
+  const best = choose(pool) ?? (isToolResultTurn ? choose(all) : null);
+  if (best !== null) {
+    if (best.once) onceUsed.add(best.id);
+    return { scenario: best, userText };
   }
   return { scenario: plan.fallback ?? { id: 'default', content: '（mock 默认回复）' }, userText };
 }

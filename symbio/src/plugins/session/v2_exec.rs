@@ -34,13 +34,13 @@
 //! ## 收束派生事实（本档已覆盖）
 //!
 //! 轮次事实由运行器原生入格，`chat_loop` 因此以 `TurnState::v2_executed` 拦下整段
-//! `v2_bridge::record`。但**派生事实不是轮次事实**，而是本轮的派生副作用——运行器
+//! `v2_facts::record`。但**派生事实不是轮次事实**，而是本轮的派生副作用——运行器
 //! 一处都不写。本档因此在轮末直接调 bridge 档的两个写方（**同一份函数**，差别只在
 //! 溯源锚：这里是原生写的 `u-{turn}` 格）：
 //!
-//! - [`super::v2_bridge::record_learning`]：步 11 编码 / 步 12 检索锚 / 步 13 巩固 /
+//! - [`super::v2_facts::record_learning`]：步 11 编码 / 步 12 检索锚 / 步 13 巩固 /
 //!   步 22 技能观测与编译；
-//! - [`super::v2_bridge::record_derived`]：承诺（`commitment_events`，S08 §3）/
+//! - [`super::v2_facts::record_derived`]：承诺（`commitment_events`，S08 §3）/
 //!   任务表（`v2_tasks::write`，S7 步 16–18）/ 熔断（`CircuitBreaker::break_event`，
 //!   S8 步 20）——三者的数据来源都在工具执行层（`Delegation` / `TaskDeclaration` /
 //!   熔断理由），由 [`super::v2_tools::SessionDispatchPort`] 经 `take_derived` 交回。
@@ -453,7 +453,7 @@ pub(crate) struct V2Turn<'a> {
     /// `None` ⇒ 新开一轮。见 [`ResumedTool`] 与 core 的 `TurnResume`。
     pub resume: Option<ResumedTool>,
     /// 本轮开头召回的长期记忆视图（S5 步 12）——轮末由
-    /// [`super::v2_bridge::record_learning`] 落一条 `memory.recalled`。
+    /// [`super::v2_facts::record_learning`] 落一条 `memory.recalled`。
     ///
     /// 它**不是**轮次事实，因此不随 `v2_executed` 的拦截一起消失：v2 原生记账
     /// 只覆盖轮次事实，记忆与学习的写方两档共用同一个函数（见该函数文档）。
@@ -468,6 +468,23 @@ pub(crate) struct V2Turn<'a> {
     /// 那时本轮与接线前逐字同路（`run_with_tools`）。填充点唯一：
     /// `chat_loop/inputs.rs` 的 `fast_armed` 分支（与观测同一次 `route`）。
     pub skill_hits: &'a [super::v2_skills::SkillLlmHit],
+    /// **请求级前缀**：v1 请求视图层 `build_request_view` 置顶的三段——长期记忆召回 /
+    /// 就绪任务集 / 委派者真源——在这里拼成一段文本，排在本轮对话**之前**
+    /// （见 [`TurnInput::prefix`](crate::symbio_core::TurnInput::prefix)）。
+    ///
+    /// ## 为什么必须显式带进来
+    ///
+    /// `full` 档的 prompt 是**一条** user 消息（`ProviderLlmAdapter::generate_turn`
+    /// 把 `Reasoner::render_prompt` 的渲染结果整段发出），而那三段在 v1 里是**独立的
+    /// 消息**。于是档位翻成 `full` 的同时它们**静默**从模型眼前消失——事实照样入格、
+    /// `session/stats` 照样有数，只有模型看不见（实测 t29 / t35 在 `full` 下报
+    /// 「记忆段没注入」，而注入逻辑一行没改）。
+    ///
+    /// ## `None` 是常态
+    ///
+    /// 三段都空的情形：首轮没有记忆、没有就绪任务、判定不出委派者。取法见
+    /// `chat_loop` 的 `request_view_prefix`。
+    pub prefix: Option<String>,
 }
 
 /// 一轮 v2 原生产物的**全部出口**。
@@ -499,6 +516,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         recalled,
         skill_obs,
         skill_hits,
+        prefix,
     } = req;
     // 事实源：per-session v2 WAL（与桥同一个文件——两档共用一份网格）。
     let dir = session.session_dir().ok_or_else(|| {
@@ -665,6 +683,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
                 window_turns: Some(window_turns),
                 resume: resume_anchor,
                 actor,
+                prefix,
             };
             // 工具分发：core 只认契约（`DispatchPort`），实现是插件侧——它持插件宿主、
             // 请求上下文、转写出口与会话目录（core 认识这些即违 E-009）。
@@ -720,7 +739,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     // ── 收束派生事实（两半）：承诺 / 任务表 / 熔断 + 记忆与学习 ────────────────
     //
     // **本步的存在理由**：`full` 档的轮次事实由运行器原生入格，chat_loop 因此以
-    // `v2_executed` 拦下整段 `v2_bridge::record`。但这两半都**不是轮次事实**，而是
+    // `v2_executed` 拦下整段 `v2_facts::record`。但这两半都**不是轮次事实**，而是
     // 本轮的**派生副作用**——运行器一处都不写。不在这里补，full 档的代际立约（S08）/
     // 任务表（S7）/ 熔断（S9 §6 验收 2）/ 长期记忆（S06）/ 技能自我改进（S11）就整体
     // 失效，而档位名还自称「整体切换」。写方与 bridge 档**同一份函数**
@@ -763,7 +782,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
             // 承诺 / 任务表 / 熔断：与 bridge 档**同一写方**（`record_derived`）。
             // 承诺失败只记日志不冒泡——轮次已收束，派生事实失败不该把成功的一轮说成
             // 失败（与记忆三段同一条口径）。
-            if let Err(why) = super::v2_bridge::record_derived(
+            if let Err(why) = super::v2_facts::record_derived(
                 &wal,
                 &store,
                 &store.range(Seq::new(0)),
@@ -778,7 +797,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
                 crate::plugin_warn!("session", "[v2-exec] 承诺入格失败（turn={turn_no}）：{why}");
             }
             // 记忆与学习：同一函数（`record_learning`）。
-            super::v2_bridge::record_learning(
+            super::v2_facts::record_learning(
                 &wal,
                 &store,
                 &store.range(Seq::new(0)),

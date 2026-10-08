@@ -376,6 +376,8 @@ async fn real_provider_full_calibration() {
                     window_turns: None,
                     resume: None,
                     actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
+                    // 请求级前缀：测试不走请求视图层（三段皆空）。
+                    prefix: None,
                 },
                 delta_frames.clone() as Arc<dyn crate::symbio_core::DeltaSink>,
             )

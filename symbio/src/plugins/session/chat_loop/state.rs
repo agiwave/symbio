@@ -115,21 +115,21 @@ pub(crate) struct TurnState {
     /// 本轮的**代际立约记录**（[04 §3.1 批⑧](../../../../docs/plan/04-工程落地.md)，S08 §3）。
     ///
     /// 由工具执行层填（`process_tool_calls_async` 的出参），随收束转写入格
-    /// （`v2_bridge::record`）——两者之间必须有个**请求作用域**的地方存它：执行在
+    /// （`v2_facts::record`）——两者之间必须有个**请求作用域**的地方存它：执行在
     /// `close_turn`、入格在 `finish_turn`，中间隔着一整段本轮收尾。与 `TurnState`
     /// 的其它字段一样随请求复位，所以不会把上一轮的承诺带到这一轮。
     pub(crate) delegations: Vec<crate::plugins::session::tools::Delegation>,
     /// 本轮的**任务表声明**（[04 §3.1 批⑨](../../../../docs/plan/04-工程落地.md)，S7 步 16）。
     ///
     /// 形态与 [`TurnState::delegations`] 完全对称：工具执行层填
-    /// （`process_tool_calls_async` 的出参），轮末收束转写入格（`v2_bridge::record`
+    /// （`process_tool_calls_async` 的出参），轮末收束转写入格（`v2_facts::record`
     /// → `v2_tasks::write`），中间隔着同一段本轮收尾，所以要有个请求作用域的量存它。
     pub(crate) task_decls: Vec<crate::plugins::session::tools::TaskDeclaration>,
     /// 本轮**外部执行闸门判熔断**的理由（[04 §3.1 批⑩](../../../../docs/plan/04-工程落地.md)，
     /// S8 步 20，[roadmap/S09 §6](../../../../docs/plan/roadmap/S09-外部执行与熔断.md) 验收 2）。
     ///
     /// 形态与 [`TurnState::task_decls`] 对称：工具执行层填（`process_tool_calls_async`
-    /// 的出参），轮末收束转写入格（`v2_bridge::record` → `CircuitBreaker::break_event`）。
+    /// 的出参），轮末收束转写入格（`v2_facts::record` → `CircuitBreaker::break_event`）。
     /// 只有 `Break` 进这张表——`Refuse`（未授权）按验收 1 **不得产生事件**，
     /// 两种拒绝在事件面上必须分得开；这也是为什么它不复用 `delegations` 或
     /// `task_decls` 的出参：那是「做了什么」，这是「**不允许做**什么」。
@@ -153,22 +153,16 @@ pub(crate) struct TurnState {
     /// 实测与判据同源）。在「LLM 调用唯一发起处」用 `Instant` 累计——含工具轮
     /// 的多次请求；随轮次收束经 v2 事实桥写进事件网格的 `cost_ms`。
     pub(crate) model_elapsed_ms: u64,
-    /// 本轮是否已由 v2 路径**原生**入格（full 档）。
-    ///
-    /// `true` ⇒ 收束时**跳过** v2 桥转写——原生路径已把 user/final/fallback
-    /// 全部记账，同一轮再转写一份就是重复格（v1 行为不变：bridge/off 档恒
-    /// `false`，本字段不影响它们）。
-    pub(crate) v2_executed: bool,
     /// 本轮**输入**（消息 id + 正文），在 `single_message` 被消费之前锚定。
     ///
     /// 锚定而不现取，是因为 `context.messages` 装着**整段历史**（`load_history = true`
     /// 时每轮都重新加载）：从里面找「本轮用户发言」找到的永远是首轮那句——转写
-    /// （`v2_bridge::record` 的 `user.message` 文本与 `attempt` 判据）和记忆编码
+    /// （`v2_facts::record` 的 `user.message` 文本与 `attempt` 判据）和记忆编码
     /// （`v2_memory::encode`）会**一起**逐轮记错同一条事实。两处消费同一份锚，
     /// 判决（`first_utterance`）与转写才不会各读各的。
     ///
     /// `None` = 本请求没有用户新发言（`resume` 重跑等）——那时调用方回落到
-    /// `v2_bridge::first_user_utterance` 的兜底口径（历史首条）。
+    /// `v2_facts::first_user_utterance` 的兜底口径（历史首条）。
     pub(crate) input_utterance: Option<(String, String)>,
     /// 本轮的**长期记忆召回视图**（S5 步 12，`v2_memory::recall_view`）。
     ///
@@ -176,7 +170,7 @@ pub(crate) struct TurnState {
     /// 口径）：同一轮内记忆不该漂移，事实源也只扫一遍；后续工具轮复用同一份视图，
     /// 渲染 [`chat_loop::inputs`] 每次调用现算（纯内存，零 I/O）。
     ///
-    /// 落 `memory.recalled` 的时机在**轮末收束**（`v2_bridge::record`）而不是取视图
+    /// 落 `memory.recalled` 的时机在**轮末收束**（`v2_facts::record`）而不是取视图
     /// 那一刻：溯源锚是本轮 `user.message` 格，那时它才在事实源里。
     pub(crate) recall_view: Option<crate::symbio_core::RecallView>,
     /// 本轮**技能路由**的判定（S9 步 22，[04 §3.1 批⑪](../../../../docs/plan/04-工程落地.md)）：
@@ -184,7 +178,7 @@ pub(crate) struct TurnState {
     ///
     /// 形态与 [`TurnState::gate_breaks`] / [`TurnState::task_decls`] 完全对称：
     /// **读侧填**（`prepare_turn_inputs` 拿置信度闸判），**轮末收束入格**
-    /// （`v2_bridge::record` → 一条 `memory.recalled` 载荷 `{skill_id, fallback}`），
+    /// （`v2_facts::record` → 一条 `memory.recalled` 载荷 `{skill_id, fallback}`），
     /// 中间隔着同一段本轮收尾，所以要有个请求作用域的量存它。
     ///
     /// 为什么不能在收束那一刻现算：回退的判决同时**改写了 `recall_view`

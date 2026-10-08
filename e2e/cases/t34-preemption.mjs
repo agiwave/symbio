@@ -29,7 +29,7 @@ import './_selfrun.mjs';
 // ## 为什么 `final` 不能落在任务之后
 //
 // 判定顺序的第二句：任务开启后若已有收束发言 ⇒ 排队（已发出的发言不可撤回）。
-// 而收束转写的落笔顺序是**先 final 再派生事实**（`v2_bridge::record` 的注释）——
+// 而收束转写的落笔顺序是**先 final 再派生事实**（`v2_facts::record` 的注释）——
 // 所以任务开格的 seq 天然大于本轮 final 的 seq，判定落在「挂起」这一支。
 // 这也是为什么插话必须赶在**下一轮的 final 之前**：那一轮的 final 一落，
 // 同一个任务就变成「排队」了。
@@ -110,8 +110,8 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        // 抢占的写方挂在**收束转写**（`v2_bridge::record`）与收件箱上 ⇒ bridge 档。
-        session: { ...DIALOG_FACE_OFF, v2_mode: 'bridge' },
+        // 抢占的写方挂在**收束转写**（`v2_facts::record`）与收件箱上 ⇒ bridge 档。
+        session: { ...DIALOG_FACE_OFF, v2_mode: 'full' },
       },
     });
 

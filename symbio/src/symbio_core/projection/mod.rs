@@ -53,6 +53,7 @@ pub mod conation;
 pub mod consolidate;
 pub mod cost;
 pub mod fallback;
+pub mod prompt_fidelity;
 pub mod readyset;
 pub mod recall;
 pub mod reputation;

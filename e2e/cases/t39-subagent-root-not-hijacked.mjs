@@ -69,17 +69,30 @@ const READ_PATH = '.vdfsv2/memory/AGENTS.md';
 const FINAL = '读完了。';
 
 /**
- * 从请求体里取出**工具结果**正文（`role = tool` 的那些消息）。
+ * 从请求体里取出**工具结果**正文。
  *
- * 只认这一处：两份 `AGENTS.md` 都会以提示词段的形式进请求（设计如此），
+ * 两种形状都认，因为执行路径决定承载方式、与「结果回灌了没有」无关：
+ * - v1：独立的 `role=tool` 消息；
+ * - v2（`full` 档，出厂）：整段请求是一条 user 消息，工具交换渲染成
+ *   `工具结果(名): …` 行（`render_tool_exchange`），**永远没有 `role=tool` 消息**。
+ *
+ * 只认这一处内容：两份 `AGENTS.md` 都会以提示词段的形式进请求（设计如此），
  * 能把"根被劫持"分辨出来的只有这一次 `vdfs_read` 的返回。
  */
 function toolResultText(body) {
   const msgs = body?.messages ?? [];
-  return msgs
+  const asTool = msgs
     .filter((m) => m.role === 'tool')
-    .map((m) => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content)))
-    .join('\n');
+    .map((m) => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content)));
+  if (asTool.length) return asTool.join('\n');
+  // v2：从 prompt 文本里取「工具结果(…)」那些行（跨行正文也一并带上）
+  const text = msgs.map((m) => String(m.content ?? '')).join('\n');
+  const lines = text.split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith('工具结果(')) out.push(lines.slice(i, i + 12).join('\n'));
+  }
+  return out.join('\n');
 }
 
 export default defineCase(

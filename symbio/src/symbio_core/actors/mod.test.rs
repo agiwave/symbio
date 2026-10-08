@@ -1498,7 +1498,7 @@ fn scheduled_trigger_produces_event_not_side_channel() {
 /// ② 它**持** `define.work`（否则 ① 可能只是「矩阵整个是空的」的平凡真）；
 /// ③ 主智能体**持** `reply.first`（对照：拒绝是**针对这个主体**的，不是一律拒绝）。
 ///
-/// 「拒绝 ⇒ 不产生事件」的**执行**在写侧闸（`plugins/session/v2_bridge::authorize_close`
+/// 「拒绝 ⇒ 不产生事件」的**执行**在写侧闸（`plugins/session/v2_facts::authorize_close`
 /// 的 `can_reply`，其判据用例见 `v2_bridge.test.rs::a_closure_without_the_grant_is_refused`）
 /// ——core 这边只钉**表里的结论**，不假装自己跑过那条闸。
 #[test]
@@ -2264,6 +2264,8 @@ mod turn_runner_tests {
                     window_turns: None,
                     resume: None,
                     actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
+                    // 请求级前缀：测试不走请求视图层（三段皆空）。
+                    prefix: None,
                 },
                 got.clone() as Arc<dyn DeltaSink>,
             )
@@ -2302,6 +2304,8 @@ mod turn_runner_tests {
                     window_turns: None,
                     resume: None,
                     actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
+                    // 请求级前缀：测试不走请求视图层（三段皆空）。
+                    prefix: None,
                 },
                 got2.clone() as Arc<dyn DeltaSink>,
             )
@@ -2353,7 +2357,7 @@ mod turn_runner_tests {
     ///
     /// ## 这个用例挡的是什么
     ///
-    /// 收束格的写方**跟着执行路径走**：`bridge` 档由 `v2_bridge::record_to_wal` 落格
+    /// 收束格的写方**跟着执行路径走**：`bridge` 档由 `v2_facts::record_to_wal` 落格
     /// （那里有 `authorize_close`），`full` 档由**运行器**原生落格。闸原先只在桥档，
     /// 运行器这一侧整条漏判——而**没有任何东西会变红**（两条路径各写各的收束格，
     /// 谁也不看谁）。与 S12 那批查出的「文档断言了、生产数据里却相反」是同一类缺口。
@@ -2386,6 +2390,8 @@ mod turn_runner_tests {
                     window_turns: None,
                     resume: None,
                     actor: ActorSpec::trivial(PRINCIPAL_AUTONOMOUS),
+                    // 请求级前缀：测试不走请求视图层（三段皆空）。
+                    prefix: None,
                 },
                 std::sync::Arc::new(SilentDeltas),
                 &[],
@@ -2423,6 +2429,8 @@ mod turn_runner_tests {
                     window_turns: None,
                     resume: None,
                     actor: ActorSpec::trivial("agent:main"),
+                    // 请求级前缀：测试不走请求视图层（三段皆空）。
+                    prefix: None,
                 },
                 std::sync::Arc::new(SilentDeltas),
                 &[],
@@ -2490,6 +2498,51 @@ mod tool_round_tests {
                 text: "批准后已完成。".into(),
                 tool_calls: Vec::new(),
                 cost_ms: 5,
+            })
+        }
+    }
+
+    /// 假适配器：把收到的 prompt 首行当答复（`run` 系列会把答复反射进事实源，
+    /// 便于断言「历史里有哪几轮」）；记录每次收到的 prompt。
+    struct EchoLlm {
+        prompts: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl EchoLlm {
+        fn new() -> Self {
+            Self {
+                prompts: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LlmAdapter for EchoLlm {
+        fn model_id(&self) -> &str {
+            "echo-mock"
+        }
+        async fn generate(&self, _tok: &FullModel, _prompt: &str) -> Result<String, AdapterError> {
+            Err(AdapterError::GenerationFailed("unused".into()))
+        }
+        async fn generate_turn(
+            &self,
+            _tok: &FullModel,
+            prompt: &str,
+            _tools: &[CapabilityMeta],
+            _sink: Arc<dyn DeltaSink>,
+        ) -> Result<LlmTurn, AdapterError> {
+            self.prompts.lock().unwrap().push(prompt.to_string());
+            // 末行即当前轮发言（`to_prompt` 把历史包进 <对话历史>、当前轮平铺其后）
+            let echo = prompt
+                .lines()
+                .rfind(|l| !l.trim().is_empty())
+                .unwrap_or("答")
+                .trim()
+                .to_string();
+            Ok(LlmTurn {
+                text: echo,
+                tool_calls: Vec::new(),
+                cost_ms: 1,
             })
         }
     }
@@ -2588,7 +2641,150 @@ mod tool_round_tests {
             window_turns: None,
             resume: None,
             actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
+            // 请求级前缀：测试不走请求视图层（三段皆空）。
+            prefix: None,
         }
+    }
+
+    /// `TurnInput::prefix` 排在基线**之前**，且**不进**「就地累积」那条路。
+    ///
+    /// ## 为什么要钉「在之前」而不是只钉「在里面」
+    ///
+    /// 三段（记忆召回 / 就绪任务集 / 委派者真源）在 v1 里是**置顶**消息，语义上在
+    /// 对话之前。若前缀被追加到基线末尾（本轮发言之后），模型就是先答后看指令——
+    /// 而「模型有没有照着记忆段作答」这件事，网格与不变量都证明不了，只有回读
+    /// prompt 位置能证。
+    ///
+    /// ## 为什么要钉「不进就地累积」
+    ///
+    /// 就地累积（`exchange`）是**本轮**的工具交换追加位。前缀若走那里，每轮重算的
+    /// 上一轮前缀会残留在下一轮的上下文里——同一段记忆段被反复注入，且越滚越长。
+    ///
+    /// **反向自检**：把 `base_prompt` 的前置改成后置（拼到 `exchange` 之后），本用例必须红。
+    #[tokio::test]
+    async fn request_prefix_precedes_the_baseline_and_is_not_accumulated() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = ToolCallingLlm::new();
+        let prompts = llm.prompts.clone();
+        let dispatch = FakeDispatch {
+            pending: false,
+            rounds: Arc::new(Mutex::new(0)),
+        };
+        let mut i = input();
+        i.prefix = Some("【长期记忆】\n- 偏好：简洁".to_string());
+
+        TurnRunner
+            .run_with_tools(
+                &store,
+                &llm,
+                &tok,
+                i,
+                Arc::new(SilentDeltas),
+                &tools(),
+                Some(&dispatch),
+            )
+            .await
+            .expect("必答");
+
+        let seen = prompts.lock().unwrap().clone();
+        assert_eq!(seen.len(), 2, "工具轮 + 收尾轮：{seen:?}");
+        for (i, p) in seen.iter().enumerate() {
+            let at = p.find("【长期记忆】").expect("前缀两轮都在");
+            let spoken = p.find("读 a.md").expect("本轮发言两轮都在");
+            assert!(at < spoken, "第 {} 轮：前缀须在发言之前（{p}）", i + 1);
+            // 工具交换是就地追加的（基线之后），前缀不得混进那段
+            if let Some(call) = p.find("助手请求工具:") {
+                assert!(at < call, "第 {} 轮：前缀须在就地累积之前（{p}）", i + 1);
+            }
+        }
+        // 不累积：两轮各**一份**前缀，不是两份
+        assert_eq!(
+            seen.iter()
+                .map(|p| p.matches("【长期记忆】").count())
+                .sum::<usize>(),
+            2,
+            "前缀每轮一份，不得跨轮累积：{seen:?}"
+        );
+        // `None` / 空串 = 不加（平凡值必须真的什么都不加）
+        for empty in [None, Some(String::new()), Some("   \n ".to_string())] {
+            let store = EventStore::new();
+            let llm = ToolCallingLlm::new();
+            let prompts = llm.prompts.clone();
+            let mut i = input();
+            i.prefix = empty;
+            TurnRunner
+                .run_with_tools(&store, &llm, &tok, i, Arc::new(SilentDeltas), &[], None)
+                .await
+                .expect("必答");
+            let p = prompts.lock().unwrap().clone();
+            assert!(
+                !p[0].starts_with('\n') && p[0].contains("读 a.md"),
+                "空前缀不得留下空壳或多余换行：{:?}",
+                p[0]
+            );
+        }
+    }
+
+    /// `window_turns = Some(0)` = **不截断**，与 `SessionConfig::context_messages`
+    /// 的 `0` 同口径。
+    ///
+    /// ## 回归的是什么
+    ///
+    /// 原先 `window_by_turn` 的 `keep == 0` 分支返回**空切片**，于是同一个配置数在
+    /// 两条执行路径上含义相反：v1 读它作「不按轮次截断」、v2 读它作「历史全丢」。
+    /// 出厂档位翻到 `full` 之后，任何把 `context_messages` 配成 `0` 的实例，
+    /// **模型眼前的历史是空的**——静默、无告警、事实照样入格、`session/stats` 照样有数。
+    ///
+    /// **反向自检**：把 `keep == 0` 分支改回 `&events[events.len()..]`，本用例必须红。
+    #[tokio::test]
+    async fn zero_window_means_no_truncation_not_empty_history() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = EchoLlm::new();
+        let prompts = llm.prompts.clone();
+
+        for turn in 0..3u64 {
+            let mut i = input();
+            i.turn = turn;
+            i.text = format!("第 {turn} 轮问题");
+            i.window_turns = Some(0);
+            TurnRunner
+                .run_with_tools(&store, &llm, &tok, i, Arc::new(SilentDeltas), &[], None)
+                .await
+                .expect("必答");
+        }
+
+        let seen = prompts.lock().unwrap().clone();
+        assert_eq!(seen.len(), 3, "三轮各一次请求：{seen:?}");
+        let last = &seen[2];
+        assert!(
+            last.contains("第 0 轮问题") && last.contains("第 1 轮问题"),
+            "`window_turns = 0` 不得清空历史：{last}"
+        );
+        assert!(last.contains("第 2 轮问题"), "当前轮在历史之外：{last}");
+
+        // 对照：`Some(1)` 只留当前轮（窗口**确实**在裁）
+        let store = EventStore::new();
+        let llm = EchoLlm::new();
+        let prompts = llm.prompts.clone();
+        for turn in 0..3u64 {
+            let mut i = input();
+            i.turn = turn;
+            i.text = format!("第 {turn} 轮问题");
+            i.window_turns = Some(1);
+            TurnRunner
+                .run_with_tools(&store, &llm, &tok, i, Arc::new(SilentDeltas), &[], None)
+                .await
+                .expect("必答");
+        }
+        let last = prompts.lock().unwrap().clone().pop().unwrap();
+        assert!(
+            !last.contains("第 0 轮问题")
+                && !last.contains("第 1 轮问题")
+                && last.contains("第 2 轮问题"),
+            "`Some(1)` 只留当前轮，窗口本身仍在裁：{last}"
+        );
     }
 
     /// 工具轮：产物落 `artifact × asserted` 且溯源指向本轮用户格；final 只落一次；
@@ -2806,6 +3002,8 @@ mod tool_round_tests {
                         },
                         text: "文件内容：hello（已批准）".into(),
                     }),
+                    // 请求级前缀：测试不走请求视图层（三段皆空）。
+                    prefix: None,
                 },
                 Arc::new(SilentDeltas),
                 &tools(),

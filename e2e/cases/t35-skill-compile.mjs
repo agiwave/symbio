@@ -7,7 +7,7 @@ import './_selfrun.mjs';
 //
 // [11 批 2 ③](../../docs/plan/11-多执行器与多主体加固实施方案.md) 的接线判据：
 // 「每件接线一条 e2e（**接线前后行为可见地不同**，否则等于没接）」——这里钉的是
-// `SkillCompiler` / `SkillRouter`：写方挂在 `v2_bridge::record` 的收束转写上，
+// `SkillCompiler` / `SkillRouter`：写方挂在 `v2_facts::record` 的收束转写上，
 // 读方挂在 `chat_loop::inputs::prepare_turn_inputs` 的召回之后，闸立在
 // `calibration` 投影的置信度上。
 //
@@ -36,7 +36,7 @@ import './_selfrun.mjs';
 //
 // ## 判据分列（一个规则一个判定方）
 //
-// - **编译时机**：判定方是 `v2_bridge::record` 的 `success_text`（只有 `Final` 收束有），
+// - **编译时机**：判定方是 `v2_facts::record` 的 `success_text`（只有 `Final` 收束有），
 //   本用例只数条数（成功轮 ⇒ 一条，重复 trigger ⇒ 不再编）；
 // - **置信度闸**：判定方是 core 的 `SkillRouter::route(confidence, 0.8)`，本用例只读
 //   它**判完之后的落格**（`fallback` 标记）与**视图的增减**（注入段在不在）；
@@ -110,9 +110,44 @@ function textOf(m) {
   return '';
 }
 
-/** 请求包里以记忆抬头开头的那条（没有 ⇒ null）。 */
+/**
+ * 请求包里带记忆抬头的那条（没有 ⇒ null）。
+ *
+ * ⚠️ 判据是「**含**抬头」而非「以抬头开头」——`full` 档（出厂）下整段请求被渲染成
+ * **一条** user 消息（`ProviderLlmAdapter::generate_turn`），记忆段拼在它里面；`startsWith`
+ * 要求那条消息**整个**以抬头开头，前面多出任何东西就整条失配，症状是「技能没进召回
+ * 视图」。理由与 t29 的同名函数同源。
+ */
 function recallMessage(req) {
-  return (req?.body?.messages ?? []).find((m) => textOf(m).startsWith(HEAD)) ?? null;
+  return (req?.body?.messages ?? []).find((m) => textOf(m).includes(HEAD)) ?? null;
+}
+
+/**
+ * 请求包里**记忆段那一截**的文本（按 `HEAD` 起到下一个空行为止）。
+ *
+ * ## 为什么必须切段，不能拿整条消息断言
+ *
+ * 出厂档位（`full`）下发给模型的是**一条** user 消息：`chat_loop::request_view_prefix`
+ * 把请求视图层置顶的三段拼成前缀，`Reasoner::render_prompt` 的对话转写接在它后面。
+ * 于是同一条消息里同时有「记忆段 / 能力目录 / 对话历史 / 本轮发言」。
+ *
+ * 而这三段的内容**本来就在对话转写里出现过**——技能正文是上一轮的**收束发言**、
+ * trigger 是上一轮的**用户发言**，它们作为历史必然重现在 `<对话历史>` 里。所以
+ * 「技能正文被摘出注入段」这类断言若拿整条消息去 `includes`，**恒真**，
+ * 与接线是否生效无关。
+ *
+ * ## 切法：空行
+ *
+ * 三段之间由 `request_view_prefix` 用**空行**分隔（`parts.join("\n\n")`），
+ * 而 `v2_memory::prompt_section` 产出的段内只有 `\n- ` 行、没有空行 ⇒ 首个空行
+ * 就是本段的结束。比按「下一个抬头」切更稳：抬头是可改的展示文案，空行是分隔约定。
+ */
+function recallSectionText(req) {
+  const all = textOf((req?.body?.messages ?? []).find((m) => textOf(m).includes(HEAD)));
+  const at = all.indexOf(HEAD);
+  if (at < 0) return '';
+  const blank = all.indexOf('\n\n', at);
+  return blank < 0 ? all.slice(at) : all.slice(at, blank);
 }
 
 /** 事实源里带 `tag:"skill"` 的记忆事件（技能）。 */
@@ -150,7 +185,7 @@ export default defineCase(
         // `bridge` 档：每轮收束转写进 `<会话目录>/v2-events.wal`——技能编译挂在
         // 这条路上。`skill_compile_enabled` **显式打开**：它默认 off（S11 §4 平凡值
         // 「不编译，只检索」），本用例验的正是打开之后的行为，不能依赖默认值。
-        session: { ...DIALOG_FACE_OFF, v2_mode: 'bridge', skill_compile_enabled: true },
+        session: { ...DIALOG_FACE_OFF, v2_mode: 'full', skill_compile_enabled: true },
       },
     });
 
@@ -236,8 +271,8 @@ export default defineCase(
         `第 2 轮请求包应有注入段（技能进了召回视图，段就不该是空）`,
       );
       assert(
-        textOf(section2).includes(RESPONSE),
-        `技能正文应出现在注入段里（actor 归位后技能才进得了召回视图）：\n${textOf(section2)}`,
+        recallSectionText(reqs[1]).includes(RESPONSE),
+        `技能正文应出现在注入段里（actor 归位后技能才进得了召回视图）：\n${recallSectionText(reqs[1])}`,
       );
       assert(
         recallMessage(reqs[0]) === null,
@@ -283,13 +318,15 @@ export default defineCase(
       reqs = await llm.requests();
       const section3 = recallMessage(reqs[2]);
       assert(section3, '第 3 轮请求包仍应有注入段（还有别的记忆可召回）');
+      // ⚠️ 两条都只看**记忆段那一截**：`RESPONSE` / `TRIGGER` 是上一轮的收束与
+      // 发言，作为对话历史必然重现在同一条消息里——拿整条消息断言恒真，与接线无关。
       assert(
-        !textOf(section3).includes(RESPONSE),
-        `技能被摘出视图 ⇒ 注入段不得再带技能正文（这正是"接线前后行为可见地不同"）：\n${textOf(section3)}`,
+        !recallSectionText(reqs[2]).includes(RESPONSE),
+        `技能被摘出视图 ⇒ 注入段不得再带技能正文（这正是"接线前后行为可见地不同"）：\n${recallSectionText(reqs[2])}`,
       );
       assert(
-        textOf(section3).includes(TRIGGER),
-        `摘的是**技能**那一条，别的记忆原样在段里（不是把整段清空）：\n${textOf(section3)}`,
+        recallSectionText(reqs[2]).includes(TRIGGER),
+        `摘的是**技能**那一条，别的记忆原样在段里（不是把整段清空）：\n${recallSectionText(reqs[2])}`,
       );
 
       // ── 跨进程稳定：B 会话（**另一个进程**）编同一个 trigger ⇒ 同一个 skill_id ──

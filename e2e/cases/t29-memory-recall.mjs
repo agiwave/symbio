@@ -81,9 +81,48 @@ function textOf(m) {
   return '';
 }
 
-/** 请求包里以记忆抬头开头的那条（没有 ⇒ null）。 */
+/**
+ * 请求包里带记忆抬头的那条（没有 ⇒ null）。
+ *
+ * ⚠️ **不能只认「以抬头开头的那一条消息」**——两种 prompt 形状下它落在不同的地方：
+ *
+ * - v1：记忆段是**独立的一条** user 消息，排在请求包**最前** ⇒ `startsWith(HEAD)` 成立；
+ * - v2（`full` 档，出厂）：`ProviderLlmAdapter::generate_turn` 把整段请求渲染成
+ *   **一条** user 消息（`transcript` 投影 + 就地追加的 exchange），记忆段被 `build_request_view`
+ *   拼在这条消息的**开头** ⇒ 消息**本身**仍以 `HEAD` 开头，但它是**唯一**那条。
+ *
+ * 所以判据从「找以 HEAD 开头的消息」放宽成「找**含** HEAD 的消息」——两种形状都命中，
+ * 而 `startsWith` 在 v2 下要求整条消息以 HEAD 开头，一旦渲染前面多出任何东西
+ * （例如系统提示被并进来、或抬头前面加了别的段）就整条找不到，症状是
+ * 「记忆段没注入」，指向却像记忆链路坏了。
+ */
 function recallMessage(req) {
-  return (req?.body?.messages ?? []).find((m) => textOf(m).startsWith(HEAD)) ?? null;
+  return (req?.body?.messages ?? []).find((m) => textOf(m).includes(HEAD)) ?? null;
+}
+
+/**
+ * 请求包里**记忆段那一截**的文本（按 `HEAD` 起到下一个空行为止）。
+ *
+ * ## 为什么必须切段，不能拿整条消息断言
+ *
+ * 出厂档位（`full`）下发给模型的是**一条** user 消息：`chat_loop::request_view_prefix`
+ * 把请求视图层置顶的三段拼成前缀，`Reasoner::render_prompt` 的对话转写接在它后面。
+ * 同一条消息里因此同时有「记忆段 / 能力目录 / 对话历史 / 本轮发言」，而**对话历史
+ * 里必然重放着同一批内容**（上一轮的收束与发言）——拿整条消息去数 `- ` 行或判
+ * 「某条在不在」，数到的是合集、与注入段无关（实测 3 条记忆 + 6 行能力目录 = 9）。
+ *
+ * ## 切法：空行
+ *
+ * 三段之间由 `request_view_prefix` 用**空行**分隔（`parts.join("\n\n")`），而
+ * `v2_memory::prompt_section` 产出的段内只有 `\n- ` 行、没有空行 ⇒ 首个空行就是本段
+ * 结束。比按「下一个抬头」切更稳：抬头是可改的展示文案，空行是分隔约定。
+ */
+function recallSectionText(req) {
+  const all = textOf(recallMessage(req));
+  const at = all.indexOf(HEAD);
+  if (at < 0) return '';
+  const blank = all.indexOf('\n\n', at);
+  return blank < 0 ? all.slice(at) : all.slice(at, blank);
 }
 
 export default defineCase(
@@ -104,9 +143,9 @@ export default defineCase(
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
         // `bridge` 档：每轮收束转写进 `<会话目录>/v2-events.wal`——记忆写方只挂在这
-        // 条路上（full 档的记忆写随 full 档启用，见 `v2_bridge::record` 的注记）。
+        // 条路上（full 档的记忆写随 full 档启用，见 `v2_facts::record` 的注记）。
         // 对话面钉死：本用例按精确请求数下标断言，主题与对话面正交（见 `DIALOG_FACE_OFF`）。
-        session: { ...DIALOG_FACE_OFF, v2_mode: 'bridge' },
+        session: { ...DIALOG_FACE_OFF, v2_mode: 'full' },
       },
     });
 
@@ -298,10 +337,16 @@ export default defineCase(
         `B 首轮请求包应以记忆段开头（实际: ${JSON.stringify(reqs[5]?.body?.messages)}）`,
       );
       const section = textOf(bHead);
-      const lines = section.split('\n').filter((l) => l.startsWith('- '));
-      assertEq(lines.length, 3, `跨会话召回三行（4 − 2 遗忘 + 1 合并），实际: ${section}`);
-      assert(section.includes(T_WATER), `活记忆在段内（实际: ${section}）`);
-      assert(section.includes(T_REPORT), `活记忆在段内（实际: ${section}）`);
+      // 只数**记忆段自己**的那些 `- ` 行：请求包在 `full` 档（出厂）下是**一条**
+      // user 消息，同一条里还并列着委派者真源段（`【能力目录】` 下面也全是 `- ` 行）。
+      // 所以必须按抬头切出记忆段那一截再数，否则数到的是「记忆 + 能力目录」的合集
+      // （实测 3 条记忆 + 6 行能力目录 = 9）。这不是断言过时——记忆段照旧三条，
+      // 只是它不再独占一条消息。
+      const memSection = recallSectionText(reqs[5]);
+      const lines = memSection.split('\n').filter((l) => l.startsWith('- '));
+      assertEq(lines.length, 3, `跨会话召回三行（4 − 2 遗忘 + 1 合并），实际: ${memSection}`);
+      assert(memSection.includes(T_WATER), `活记忆在段内（实际: ${memSection}）`);
+      assert(memSection.includes(T_REPORT), `活记忆在段内（实际: ${memSection}）`);
       assert(
         section.includes(`${T_COFFEE}\n${T_MEET}`),
         `合并产物带两条源的原句（保真度 1 的落点，实际: ${section}）`,

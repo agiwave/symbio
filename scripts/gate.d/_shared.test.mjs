@@ -414,7 +414,7 @@ test('hook 测试：POSIX 分支必须引用 $1，否则裸 cat 去读被置空�
 // 单跑全绿。根因是临时目录按 **pid** 命名却**从不清理**——Windows 复用 pid 时旧
 // `v2-events.wal` 还在，而事件 id 是写死的，首个 append 就撞 Duplicate。
 test('v2 测试的临时目录必须用前先删（pid 复用会把残留 WAL 撞成 Duplicate）', () => {
-  for (const n of ['v2_bridge', 'v2_memory', 'v2_skills', 'v2_tasks']) {
+  for (const n of ['v2_facts', 'v2_memory', 'v2_skills', 'v2_tasks']) {
     const p = `symbio/src/plugins/session/${n}.test.rs`
     const src = fs.readFileSync(path.join(repoRoot, p), 'utf8')
     const fn = src.match(/^fn tmp_\w+\([\s\S]*?^\}/m)

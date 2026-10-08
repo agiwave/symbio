@@ -181,7 +181,7 @@ export default defineCase(
           inbound_readonly: false,
         },
         // `bridge` 档：每轮收束转写进 `<会话目录>/v2-events.wal`（actor = 会话主体）。
-        session: { ...DIALOG_FACE_OFF, v2_mode: 'bridge' },
+        session: { ...DIALOG_FACE_OFF, v2_mode: 'full' },
       },
     });
     makeAgentDir(hd.homedir, {
@@ -356,9 +356,17 @@ export default defineCase(
       assertEq(offers[0].payload.to, 'user', '承诺对象 = 会话外的另一方');
       assertEq(offers[0].payload.promise, PROMPT, '承诺内容 = 委托出去的那句话');
       assertEq(releases[0].payload.id, offers[0].payload.id, '了结按载荷 id 找回立约');
+      // 承诺号须带**轮次前缀**：调用编号只在**一次模型响应内**唯一，而 WAL 的幂等键是
+      // 事件 id——不加前缀，跨轮复用同一编号会让第二次立约撞 `Duplicate`、把整轮拖失败。
+      //
+      // ⚠️ 只钉「带了前缀」，**不钉前缀的拼法**：前缀的具体形状随档位变过（退役的转写
+      // 路径用 `{user_id}-a{attempt}`，`full` 档的锚词是 `t{turn}` 一族），而它由
+      // `v2_facts::record_derived` 与 `v2_tasks::write` 两个函数共同决定——把拼法抄进
+      // 断言等于在 e2e 里维护第三份约定，那两处一起改就会把这个用例留成红的。
+      // 形状由 `v2_facts.test.rs` 的单测钉（它就在写方旁边）。
       assert(
-        /^c-offer-v2c-.+-a\d+-.+$/.test(offers[0].event_id),
-        `承诺号须带 {user_id}-a{attempt} 前缀（调用编号只在一次响应内唯一，不加前缀会撞幂等键）：${offers[0].event_id}`,
+        /^c-offer-v2c-.+-.+$/.test(offers[0].event_id),
+        `承诺号须带轮次前缀（调用编号只在一次响应内唯一，不加前缀会撞幂等键）：${offers[0].event_id}`,
       );
       assert(
         grandEvents.every((e) => e.kind !== 'commitment.opened'),

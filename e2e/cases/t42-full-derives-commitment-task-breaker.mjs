@@ -4,7 +4,7 @@ import './_selfrun.mjs';
 // ## 本用例钉的是什么
 //
 // `full` 档的轮次事实（用户格 / final 格 / 产物格）由 v2 运行器原生记账，
-// `chat_loop` 因此以 `TurnState::v2_executed` 拦下整段 `v2_bridge::record`。
+// `chat_loop` 因此以 `TurnState::v2_executed` 拦下整段 `v2_facts::record`。
 // 但**承诺 / 任务表 / 熔断不是轮次事实**，而是本轮的派生副作用——数据来源都在工具
 // 执行层（`Delegation` / `TaskDeclaration` / 熔断理由），运行器一处都不写。这一半若
 // 也随轮次事实一起被拦下，`full` 档的代际立约（S08）/ 任务表（S7）/ 熔断（S9 §6

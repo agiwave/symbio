@@ -162,7 +162,7 @@ export default defineCase(
         // 刻意**不配 gateway**：本用例只关心事实源，不需要入站口；而 gateway 配置是
         // homedir 级的——配了它，下面两个一次性 CLI 会跟长驻 CLI 抢同一个端口，
         // 「网关就绪」于是时对时错（长驻进程没抢到端口时，轮询打到的是别人的端口）。
-        session: { ...DIALOG_FACE_OFF, v2_mode: 'bridge', conation_enabled: true },
+        session: { ...DIALOG_FACE_OFF, v2_mode: 'full', conation_enabled: true },
       },
     });
 

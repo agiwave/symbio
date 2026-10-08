@@ -65,7 +65,7 @@ fn seed_turn(store: &EventWalStore) -> u64 {
     anchor
 }
 
-/// 一条路由观测（生产写方是 `v2_bridge::record`，这里直写**同一形状**——
+/// 一条路由观测（生产写方是 `v2_facts::record`，这里直写**同一形状**——
 /// `calibration` 只认载荷里的 `skill_id` + `fallback`，格子叫什么它不管）。
 fn observe(store: &EventWalStore, n: usize, skill_id: &str, fallback: bool, anchor: u64) {
     store

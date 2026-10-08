@@ -44,8 +44,8 @@ use super::v2_exec::UiBridge;
 /// 工具执行层交回的**收束派生事实**（承诺 / 任务表 / 熔断）。
 ///
 /// 三者的数据来源都在工具执行层（`Delegation` / `TaskDeclaration` / 熔断理由），
-/// 而写方（落格）在收束处——`bridge` 档由 `v2_bridge::record` 写，`full` 档由
-/// `v2_exec::execute_turn` 轮末写（同一个 `v2_bridge::record_derived`）。本结构是
+/// 而写方（落格）在收束处——`bridge` 档由 `v2_facts::record` 写，`full` 档由
+/// `v2_exec::execute_turn` 轮末写（同一个 `v2_facts::record_derived`）。本结构是
 /// 那份出参从分发点回到运行器的**唯一通道**：不收集它，`full` 档这三样就静默全丢
 /// （与记忆/学习同一个坑——它们在 `full` 档整体失效，而档位名还自称「整体切换」）。
 ///
@@ -155,7 +155,7 @@ impl DispatchPort for SessionDispatchPort {
         //
         // 三份收束派生事实出参（承诺 / 任务表 / 熔断）：数据来源在工具执行层，
         // 写方在收束处——`full` 档由本分发方收下、`v2_exec` 轮末调
-        // `v2_bridge::record_derived` 落格（与 bridge 档**同一写方**）。不收这三份，
+        // `v2_facts::record_derived` 落格（与 bridge 档**同一写方**）。不收这三份，
         // `full` 档的代际立约 / 任务表 / 熔断就静默全丢（见 [`DerivedFacts`]）。
         let mut delegations: Vec<super::tools::Delegation> = Vec::new();
         let mut tasks: Vec<super::tools::TaskDeclaration> = Vec::new();

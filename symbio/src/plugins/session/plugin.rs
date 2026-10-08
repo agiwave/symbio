@@ -848,25 +848,22 @@ fn config_definition() -> DetailDefinition {
                         vec![
                             DetailOption {
                                 value: "off".into(),
-                                label: "off（纯 v1：不转写事实）".into(),
-                                description: None,
-                            },
-                            DetailOption {
-                                value: "bridge".into(),
-                                label: "bridge（v1 运行 + v2 事实累积，默认）".into(),
+                                label: "off（v1 执行，不落事实网格：默认档）".into(),
                                 description: None,
                             },
                             DetailOption {
                                 value: "full".into(),
-                                label: "full（整体切换：轮次走 v2 引擎）".into(),
+                                label: "full（v2 执行：轮次走 v2 运行器，默认档）".into(),
                                 description: None,
                             },
                         ],
                         v2_mode_name(d.v2_mode),
                     )
                     .with_description(
-                        "管辖范围 = v2 事实链路的切换档位。`full` 的覆盖面是**非交互轮次**\
-                         （有工具 / 无工具都走 v2）；交互轮（审批 / 问答等待）的恢复仍是独立一批",
+                        "管辖范围 = v2 事实链路的切换档位。`full`（出厂）的覆盖面 = **全部轮次**：\
+                         无工具轮、工具轮、审批与问答恢复都在内。`off` 关掉的是**事实网格**，\
+                         连带**静默**关掉三样读侧（长期记忆召回 / 就绪任务集 / 技能路由）——\
+                         它们都读事实源。",
                     ),
                 ],
             },
@@ -891,7 +888,6 @@ fn unbounded_number(key: &str, label: &str, description: &str, default: Value) -
 fn v2_mode_name(mode: V2Mode) -> &'static str {
     match mode {
         V2Mode::Off => "off",
-        V2Mode::Bridge => "bridge",
         V2Mode::Full => "full",
     }
 }

@@ -65,8 +65,74 @@ pub(crate) use self::state::{
     request_principal, Gate, SessionContext, TurnExit, TurnRequest, TurnResult, TurnState,
 };
 pub(crate) use self::turn::{close_turn, settle_reasoning};
+
+/// 把请求视图层**置顶的三段**拼成一段请求级前缀（`full` 档的 prompt 入口）。
+///
+/// ## 为什么需要它
+///
+/// v1 把长期记忆召回段 / 就绪任务集段 / 委派者真源段作为**独立的消息**发给模型
+/// （`build_request_view` 的第 5/6/7 条，三段都置顶、`meta.kind` 可观测、不落库）。
+/// 而 `full` 档的 prompt 是**一条** user 消息——`ProviderLlmAdapter::generate_turn`
+/// 只收 `TurnInput.text` 与渲染出的基线，那三段若不显式带进来就**静默**从模型眼前
+/// 消失：事实照样入格、`session/stats` 照样有数，只有模型看不见。
+///
+/// ## 取法：按 `meta.kind` 取，不按位置
+///
+/// 三段的 `kind` 是 `recall_context` / `readyset` / `delegate_context`，由
+/// `build_request_view` 单点写入。按 `kind` 取而不是按下标（0 / 1 / 2）——下标是
+/// 「三段都在场时」的巧合，缺一段时下标全部左移（`view.rs` 的注释自己写了这个
+/// 插入次序的由来），按下标取会取错段或漏段。
+///
+/// ## 顺序：按固定次序，不按它们在视图里的位置
+///
+/// `build_request_view` 的插入次序（先插 0 再插 0）产出的是「记忆 0 / 委派者 1 /
+/// 就绪 2」，而本函数按 **记忆 → 就绪 → 委派者** 拼——即它们各自的**语义优先级**
+/// （背景 → 调度候选 → 身份目录）。两者在「三段齐全」时**不一致**，这是刻意的：
+/// 请求级前缀是一段文本，模型读到的是先后顺序；把「谁先谁后」绑在插队算法上，
+/// 下次有人调 `build_request_view` 的次序就会连带改掉模型看到的优先级。
+///
+/// 三段都空 ⇒ `None`（不拼空壳：那会让每轮 prompt 都多一段空白，而三段皆空是常态）。
+fn request_view_prefix(view: &[ChatMessage]) -> Option<String> {
+    const KINDS: [&str; 3] = ["recall_context", "readyset", "delegate_context"];
+    // `Vec<String>` 而非 `Vec<&str>`：`to_text()` 按值产出一个 `String`，`trim()`
+    // 借的是那个临时值——收 `&str` 会把返回值绑到函数参数上（E0515）。
+    let mut parts: Vec<String> = Vec::new();
+    let mut kinds: Vec<&str> = Vec::new();
+    for kind in KINDS {
+        if let Some(text) = view
+            .iter()
+            .find(|m| {
+                m.meta
+                    .as_ref()
+                    .and_then(|v| v.get("kind"))
+                    .and_then(|v| v.as_str())
+                    == Some(kind)
+            })
+            .and_then(|m| m.content.as_ref().map(|c| c.to_text()))
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+        {
+            kinds.push(kind);
+            parts.push(text);
+        }
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    // **每轮都记一次「取到哪几段」**——三段皆空是常态（生产里绝大多数轮次），
+    // 而「记忆段明明有东西却没进 prompt」这类失效**没有任何东西会变红**：事实照样
+    // 入格、`session/stats` 照样有数。所以取值点自己出声：段在而模型看不见时，
+    // 日志里至少有「取到了却没送出」的对照可查。
+    crate::plugin_info!(
+        "session",
+        "[request-prefix] 本轮取到 {} 段（{}），拼进 prompt 前缀",
+        kinds.len(),
+        kinds.join(",")
+    );
+    Some(parts.join("\n\n"))
+}
+
 pub(crate) use super::context::{auto_compress_process, run_context_compact};
-use super::v2_bridge::V2Closure;
 
 use super::chat_session::{PersistentChatSession, SESSION_HANDLE};
 use super::model_chat;
@@ -135,7 +201,7 @@ pub async fn run_chat_loop(
     // 本轮输入（消息 id + 正文）：锚定在 `single_message` 被消费**之前**。
     //
     // 这是「本请求带了什么输入」这一事实，而不是「第几轮」的函数；两处消费它——
-    // 下面判决的 `first_utterance`，以及收束转写 `v2_bridge::record`（经
+    // 下面判决的 `first_utterance`，以及收束转写 `v2_facts::record`（经
     // `TurnState::input_utterance` 传到 `finish_turn`）。转写那一处不能改从
     // `context.messages` 现取：`load_history = true` 时那份列表装着整段历史，
     // 「第一条用户发言」逐轮都指回首轮那句（e2e t29 钉住这条）。
@@ -453,16 +519,16 @@ pub async fn run_chat_loop(
         }
 
         // ── 步骤 4：LLM 调用（唯一发起处）────────────────────────────────────
-        // **full 档分流**（切换日本体）：v2_mode = Full ⇒ v2 运行器执行——事实原生
-        // 入格、prompt 从转写出、流式经 UiBridge 回同一出口、工具轮经 `DispatchPort`
-        // 契约分发（工具节点与结果仍写进同一份对话图）；收口（步骤 5-7）两条路共享。
-        // 本轮一旦进入 v2 分支，网格记账归 v2 路径所有（`v2_executed` = true）：
-        // 成功原生入格，失败也已尽力入格（I3 兜底格 + Failed 出口），收束不再经桥
-        // 补记——同一轮两份记账是假象，不是冗余；重试即新一轮（N3 靠构造成立）。
+        // **`full` 档分流**（[ADR-048](../../../../docs/decisions/session.md)，出厂档）：
+        // v2_mode = Full ⇒ v2 运行器执行——事实原生入格、prompt 从转写出、流式经
+        // UiBridge 回同一出口、工具轮经 `DispatchPort` 契约分发（工具节点与结果仍写进
+        // 同一份对话图）；收口（步骤 5-7）两条路共享。
+        //
+        // `full` 档的轮次事实**只有这一个写方**：成功原生入格，失败也已尽力入格
+        // （I3 兜底格 + Failed 出口）。退役的转写路径曾靠 `TurnState::v2_executed`
+        // 在收束处跳过自己以免同轮两份记账——**那个字段随之删除**：同轮两份记账现在
+        // 不可能发生，因为转写路径本身已经不在了。
         let v2_takeover = matches!(context.session.v2_mode(), super::config::V2Mode::Full);
-        if v2_takeover {
-            turn.v2_executed = true;
-        }
         let out = if v2_takeover {
             // 本轮用户文本：轮首已入列的最后一条用户消息。
             let user_text = context
@@ -497,6 +563,8 @@ pub async fn run_chat_loop(
                 // 快路候选集（S11 执行半边）：命中一条 ⇒ 本轮走反射档、不调模型。
                 // 空表（默认）⇒ 与接线前逐字同路（`run_with_tools`）。
                 skill_hits: &turn.skill_hits,
+                // 请求级前缀 = 请求视图层置顶的三段（见 request_view_prefix）。
+                prefix: request_view_prefix(&inputs.request_view),
             })
             .await
             {
@@ -710,69 +778,6 @@ async fn finish_turn(
 
     // 增量落库（锚点已对齐时为空切片，天然 no-op）。
     persist_messages(context, turn.last_saved, sink).await;
-
-    // ── v2 事实桥：本轮事实转写进事件网格（ADR-044；v1 行为不变，纯增量记录）──
-    // Aborted（用户主动收束）/ ResumeDone（无增量）不转写——网格少一格是
-    // 诚实的缺口，不是假象。转写失败只记日志：桥的故障不得拖垮 v1 对话。
-    // full 档经 v2 原生入格的轮次（`v2_executed`）不转写——同一轮两份记账
-    // 是假象，不是冗余。
-    if !turn.v2_executed {
-        // 本轮发言优先用**循环前锚定**的那一份（`TurnState::input_utterance`）；
-        // 没有锚的请求（`resume` 重跑）才回落到历史首条——`context.messages` 装着
-        // 整段历史，现取「第一条」会逐轮指回首轮那句（见 `first_user_utterance`）。
-        let utterance = turn
-            .input_utterance
-            .clone()
-            .or_else(|| super::v2_bridge::first_user_utterance(&context.messages));
-        match &exit {
-            TurnExit::Completed | TurnExit::MaxToolRounds { .. } => {
-                if let Some((user_id, user_text)) = utterance {
-                    let closure = match super::v2_bridge::last_assistant_text(&context.messages) {
-                        Some(text) => V2Closure::Final {
-                            text,
-                            cost_ms: turn.model_elapsed_ms,
-                        },
-                        None => V2Closure::Fallback {
-                            why: "轮次收束但无助手文本".into(),
-                            cost_ms: turn.model_elapsed_ms,
-                        },
-                    };
-                    super::v2_bridge::record(
-                        &context.session,
-                        &context.principal,
-                        &user_id,
-                        &user_text,
-                        closure,
-                        turn.recall_view.as_ref(),
-                        &turn.delegations,
-                        &turn.task_decls,
-                        &turn.gate_breaks,
-                        &turn.skill_route,
-                    );
-                }
-            }
-            TurnExit::Failed(e) => {
-                if let Some((user_id, user_text)) = utterance {
-                    super::v2_bridge::record(
-                        &context.session,
-                        &context.principal,
-                        &user_id,
-                        &user_text,
-                        V2Closure::Fallback {
-                            why: e.to_string(),
-                            cost_ms: turn.model_elapsed_ms,
-                        },
-                        turn.recall_view.as_ref(),
-                        &turn.delegations,
-                        &turn.task_decls,
-                        &turn.gate_breaks,
-                        &turn.skill_route,
-                    );
-                }
-            }
-            _ => {}
-        }
-    }
 
     // Stop 钩子（幂等）：resume 出口发生在主循环之前，此时尚无消息列表
     // （收口前该分支即传空切片），其余出口一律携带当前消息列表。

@@ -4,7 +4,7 @@ import './_selfrun.mjs';
 // ## 本用例钉的是什么
 //
 // `full` 档的轮次事实（用户格 / final 格 / 产物格）由 v2 运行器原生记账，
-// `chat_loop` 因此以 `TurnState::v2_executed` 拦下整段 `v2_bridge::record`
+// `chat_loop` 因此以 `TurnState::v2_executed` 拦下整段 `v2_facts::record`
 // ——「同一轮两份记账是假象」。
 //
 // 但**记忆与学习不是轮次事实**，而是本轮的派生副作用：运行器一处都不写。

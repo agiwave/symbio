@@ -147,22 +147,25 @@ fn the_progress_switch_is_independent_of_the_other_two() {
     assert!(c.classify_enabled && c.compose_enabled && !c.progress_enabled);
 }
 
-/// v2 切换档位：出厂即 `bridge`（有数据、可关闭——见 `V2Mode` 文档的理由）；
-/// serde 用小写词，`off` 可显式配置回去。
+/// v2 切换档位：出厂即 `full`（ADR-048——v2 链路是出厂路径）。serde 用小写词，
+/// `off` 可显式配回去。
+///
+/// 两条要一起钉：出厂值，和**空配置回落到出厂值**（存量 `PLUGIN.yml` 不写这个键，
+/// 读侧必须拿到同一个值——否则「默认」只对新建配置成立，存量实例走的是另一条路）。
+///
+/// ⚠️ 本用例**只钉档位取值**，不钉 `off` 的后果（它静默关掉记忆召回 / 就绪任务集 /
+/// 技能路由三样读侧，判据在 `chat_loop/inputs.rs` 的三处 `V2Mode::Off` 闸）。
+/// 后果钉在读侧比钉在配置上有效——配置只声明意图，读侧才是它生效的地方。
 #[test]
-fn v2_mode_defaults_to_bridge_and_roundtrips() {
+fn v2_mode_defaults_to_full_and_roundtrips() {
     let c = SessionConfig::default();
-    assert_eq!(
-        c.v2_mode,
-        V2Mode::Bridge,
-        "出厂档位 = bridge（转写开、可关）"
-    );
-    assert_eq!(serde_json::to_string(&c.v2_mode).unwrap(), "\"bridge\"");
+    assert_eq!(c.v2_mode, V2Mode::Full, "出厂档位 = full（ADR-048）");
+    assert_eq!(serde_json::to_string(&c.v2_mode).unwrap(), "\"full\"");
     let off: SessionConfig = serde_json::from_str(r#"{"v2_mode":"off"}"#).unwrap();
     assert_eq!(off.v2_mode, V2Mode::Off);
     // 空配置（存量 PLUGIN.yml 不写这个键）= 出厂档位。
     let from_empty: SessionConfig = serde_json::from_str("{}").unwrap();
-    assert_eq!(from_empty.v2_mode, V2Mode::Bridge);
+    assert_eq!(from_empty.v2_mode, V2Mode::Full);
 }
 
 /// 「欲」升格开关出厂关着（E3 平凡值，02 §2.3）：关掉后心跳照常触发、「欲」照常

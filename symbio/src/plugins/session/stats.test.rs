@@ -341,7 +341,7 @@ fn reputation_column_reports_own_and_by_principal() {
         .seq()
         .map(|s| s.value())
         .expect("已入格");
-    // 一次守约的代际立约（写方 `v2_bridge::record_to_wal` 落的就是这三格）。
+    // 一次守约的代际立约（写方 `v2_facts::record_to_wal` 落的就是这三格）。
     for e in crate::symbio_core::commitment_events(
         "c-rep",
         crate::symbio_core::authz::PRINCIPAL_MAIN,

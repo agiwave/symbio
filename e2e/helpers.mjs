@@ -47,8 +47,20 @@ export function cliExe() {
 export const MOCK_LLM = join(HERE, 'mock-llm.mjs');
 export const MOCK_MCP = join(HERE, 'mock-mcp.mjs');
 
-// ---------- 端口分配（避让：18080 起，逐用例递增） ----------
-let portCursor = 18080;
+// ---------- 端口分配 ----------
+/**
+ * 端口游标。基址可由 `E2E_PORT_BASE` 覆盖——门禁**并发**跑用例时
+ * （`40-e2e.mjs`）按用例序号注入 `18080 + i*100`，使各用例子进程落在互不
+ * 重叠的号段上（每段 100 个，够一个用例的 gateway + mock LLM + mock MCP 用）。
+ *
+ * 为什么不用「按 pid 派生」：并发跑的进程数（40+）与可用槽位同量级，`pid % N`
+ * 的碰撞概率按生日问题算很高，而端口一撞用例就红——**确定性分段**（由调用方
+ * 给序号）没有这个问题。
+ *
+ * 不设 `E2E_PORT_BASE` 时退回 18080：`node e2e/cases/tNN.mjs` 单独跑、或
+ * `run-tests.mjs` 串行跑，都只有一个进程在用这段，安全。
+ */
+let portCursor = Number(process.env.E2E_PORT_BASE) || 18080;
 export function nextPort() {
   return ++portCursor;
 }

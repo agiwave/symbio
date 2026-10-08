@@ -68,6 +68,8 @@ fn tool_free_req<'a>(
         skill_obs: &[],
         // 快路候选集默认空 ⇒ 与接线前逐字同路（`run_with_tools`）。
         skill_hits: &[],
+        // 请求级前缀：测试不走请求视图层（三段皆空）。
+        prefix: None,
     }
 }
 
@@ -447,6 +449,8 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         recalled: None,
         skill_obs: &[],
         skill_hits: &[],
+        // 请求级前缀：本用例不走请求视图层（三段皆空）。
+        prefix: None,
     })
     .await
     .expect("工具轮执行成功");
@@ -559,7 +563,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
 /// ## 这个用例挡的是什么
 ///
 /// 轮次事实（用户格 / final 格 / 产物格）由 v2 运行器原生记账，`chat_loop` 因此以
-/// `TurnState::v2_executed` 拦下整段 `v2_bridge::record`。但记忆与学习**不是轮次事实**
+/// `TurnState::v2_executed` 拦下整段 `v2_facts::record`。但记忆与学习**不是轮次事实**
 /// ——运行器一处都不写。拦下时若把它们一起拦掉，`full` 档的长期记忆（S06）与技能
 /// 自我改进（S11）就**静默全丢**，而档位名还自称「整体切换」。
 ///
@@ -638,7 +642,7 @@ async fn full_turn_lands_memory_and_learning_facts() {
 /// ## 这个用例挡的是什么
 ///
 /// 承诺的数据来源在工具执行层（`Delegation`，`process_tool_calls_async` 的出参），
-/// 写方在收束处（`v2_bridge::record_derived`）。`full` 档不经 `v2_bridge::record`，
+/// 写方在收束处（`v2_facts::record_derived`）。`full` 档不经 `v2_facts::record`，
 /// 若分发方不把出参交回（`SessionDispatchPort` 的三个出参曾是 `&mut Vec::new()`），
 /// 承诺就**静默全丢**——代际立约在 full 档整体失效，而档位名还自称「整体切换」。
 ///
@@ -685,6 +689,8 @@ async fn full_turn_lands_derived_commitment_facts() {
         recalled: None,
         skill_obs: &[],
         skill_hits: &[],
+        // 请求级前缀：本用例不走请求视图层（三段皆空）。
+        prefix: None,
     })
     .await
     .expect("工具轮执行成功");

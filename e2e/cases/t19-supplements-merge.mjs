@@ -265,12 +265,23 @@ export default defineCase(
 
       const reqsB = await llm.requests();
       const reqB = reqsB[baseB + 1].body.messages;
-      const toolIdx = reqB.findIndex((m) => m.role === 'tool');
-      assert(toolIdx >= 0, 'B 线第 2 次请求应携带 role=tool 的工具结果');
-      const mergedIdx = reqB.findIndex(
-        (m) => m.role === 'user' && typeof m.content === 'string' && m.content.includes('B第二条'),
+      // 工具结果的**位置**判据：v1 下它是独立的 `role=tool` 消息；v2（`full` 档，
+      // 出厂）下整段请求是一条 user 消息、工具交换渲染成 `工具结果(名): …` 行，
+      // **永远没有 `role=tool` 消息**。所以「工具结果在合并消息**之前**」这条
+      // 次序判据在两种形状下都取「最后一次出现工具结果的位置」。
+      const toolIdx = Math.max(
+        reqB.findIndex((m) => m.role === 'tool'),
+        reqB.findIndex((m) => String(m.content ?? '').includes('工具结果(')),
       );
-      assert(mergedIdx >= 0, `B 线合并消息应进**同一轮**的第 2 次请求（实际消息序列：${reqB.map((m) => m.role).join(',')}）`);
+      assert(
+        toolIdx >= 0,
+        `B 线第 2 次请求应携带工具结果（v1 为 role=tool 消息，v2 为 prompt 里的「工具结果(名): …」行；实际消息序列：${reqB.map((m) => m.role).join(',')}）`,
+      );
+      const mergedIdx = reqB.findIndex((m) => String(m.content ?? '').includes('B第二条'));
+      assert(
+        mergedIdx >= 0,
+        `B 线合并消息应进**同一轮**的第 2 次请求（v1：独立的 user 消息；v2（出厂档位）：并进那条 user 消息的正文。实际消息序列：${reqB.map((m) => m.role).join(',')}）`,
+      );
       assert(
         mergedIdx > toolIdx,
         `合并消息必须出现在工具结果**之后**（tool@${toolIdx}，merged@${mergedIdx}）——` +

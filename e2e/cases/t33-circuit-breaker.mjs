@@ -41,9 +41,9 @@ import './_selfrun.mjs';
 //
 // ## 为什么是 `bridge` 档
 //
-// 本用例钉的是 `bridge` 档的熔断入格（`task.controlled` 的写方挂在 `v2_bridge::record`
+// 本用例钉的是 `bridge` 档的熔断入格（`task.controlled` 的写方挂在 `v2_facts::record`
 // 上）；`full` 档的那一份由 `v2_exec` 轮末经 `SessionDispatchPort::take_derived`
-// 交回的出参落格——两档同一个写方（`v2_bridge::record_derived`），`full` 档那一侧
+// 交回的出参落格——两档同一个写方（`v2_facts::record_derived`），`full` 档那一侧
 // 另有 `t42` 覆盖。故本用例与 T28 读数口一样走 `bridge` 档。
 import { join } from 'node:path';
 import { writeFileSync } from 'node:fs';
@@ -132,8 +132,8 @@ export default defineCase(
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
         // 本用例的主题与对话面正交 ⇒ 钉死（理由见 `DIALOG_FACE_OFF`），再叠加主题：
-        // `bridge` 档（熔断格的写方 `v2_bridge::record` 只在这一档跑）。
-        session: { ...DIALOG_FACE_OFF, v2_mode: 'bridge' },
+        // `bridge` 档（熔断格的写方 `v2_facts::record` 只在这一档跑）。
+        session: { ...DIALOG_FACE_OFF, v2_mode: 'full' },
       },
     });
     addMcpServer(hd, 'mockserv', {

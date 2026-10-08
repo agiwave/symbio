@@ -95,7 +95,7 @@ export default defineCase(
           inbound_readonly: false,
         },
         // `bridge` 档：每轮收束转写进 `<会话目录>/v2-events.wal`——读数口的事实源。
-        session: { ...DIALOG_FACE_OFF, v2_mode: 'bridge' },
+        session: { ...DIALOG_FACE_OFF, v2_mode: 'full' },
       },
     });
 

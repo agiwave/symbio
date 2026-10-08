@@ -820,6 +820,31 @@ pub struct TurnInput {
     /// （`plugins/session/v2_exec` 从会话元数据派生）。S08 §4 的平凡值是
     /// `agent:main`——所有主体同一身份时退化成单主体，与接线前逐字一致。
     pub actor: ActorSpec,
+    /// **请求级前缀**：排在基线 prompt **之前**的一段文本（通常是多行），
+    /// `None` / 空串 = 不加（生产里的绝大多数轮次）。
+    ///
+    /// ## 它解决的是什么
+    ///
+    /// `full` 档的 prompt 是**一条** user 消息（`ProviderLlmAdapter::generate_turn`
+    /// 把 `Reasoner::render_prompt` 的渲染结果整段发出），而 v1 的请求视图层
+    /// （`build_request_view`）产出的长期记忆召回段 / 就绪任务集段 / 委派者真源段
+    /// 是**独立的消息**。于是「档位翻成 `full`」的同时，这三段**静默**从模型眼前消失
+    /// ——事实照样入格、`session/stats` 照样有数，只有模型看不见（实测 t29 / t35
+    /// 在 `full` 下报「记忆段没注入」，而注入逻辑一行没改）。
+    ///
+    /// ## 为什么进 `TurnInput` 而不是让调用方拼进 `text`
+    ///
+    /// `text` 是**用户发言**，它要落进 `user.message` 的载荷、并参与记忆编码与
+    /// 技能命中判定。把前缀拼进去会让事实格里存进一段不是用户说的话——记忆编码
+    /// 照着它固化、技能命中拿它比对，两处一起记错同一件事。前缀是**请求级的**，
+    /// 不进事实源，所以它自己占一个字段。
+    ///
+    /// ## 落位：基线**之前**，不进「就地累积」
+    ///
+    /// 三段都是 `build_request_view` 的**置顶**段，语义上在对话之前；追加到基线
+    /// 末尾（`exchange` 那条路）会把它们排到本轮发言之后，模型先答后看指令。
+    /// 跨轮累积也一并排除：它们每轮重算，累积会让上一轮的前缀留在下一轮的上下文里。
+    pub prefix: Option<String>,
 }
 
 /// 续写锚点（审批 / 问答恢复）：本轮**续写**一个已开未收束的轮次，而不是新开。
@@ -904,6 +929,10 @@ fn filter_visible<'a>(events: &'a [Event], viewer: Option<&str>) -> Cow<'a, [Eve
 /// 对话窗口：保留 turn 号落在「当前轮往前数 `keep` 个」之内的事件
 /// （含当前轮）。事实是全量的，**视图**才是窗口——纯切片，不改数据。
 ///
+/// `keep == 0` = **不截断**（全量）——与 `SessionConfig::context_messages` 的 `0`
+/// 同口径。会话轮必填窗口值正是为了防「WAL 只增不减 ⇒ prompt 无界增长」，而
+/// 「配 0 换不截断」是这个防护的**显式关闭开关**，不是笔误。
+///
 /// 第二层是**可见域**（`viewer`，见 [`filter_visible`]）：窗口先按轮切，
 /// 再按主体滤——两层都只改视图，不改数据。
 fn window_by_turn<'a>(
@@ -913,7 +942,15 @@ fn window_by_turn<'a>(
     viewer: Option<&str>,
 ) -> Cow<'a, [Event]> {
     let windowed = if keep == 0 {
-        &events[events.len()..]
+        // `keep == 0` = **不截断**（全量）——与 `SessionConfig::context_messages`
+        // 的 `0` 同一条口径（那里 `0` 一直是「上下文窗口不按轮次截断」）。
+        //
+        // ⚠️ 原先这里是 `&events[events.len()..]`（**空切片**），于是同一份配置在
+        // 两条执行路径上含义相反：v1 读 `context_messages` 作「不截断」、v2 读同一个
+        // 数作「历史全丢」。出厂档位翻到 `full` 之后，任何把 `context_messages` 配成 0
+        // 的实例，**模型眼前的历史是空的**——静默、无告警、断言全绿（事实照样入格、
+        // `session/stats` 照样有数）。
+        events
     } else {
         let oldest = current_turn.saturating_sub(keep - 1);
         let cut = events
@@ -960,6 +997,8 @@ impl TurnRunner {
                 // 便捷入口跑在平凡值身份上（S08 §4：单主体 = 今天的状态）。
                 // 生产不走这里——`v2_exec` 自己构造 `ActorSpec` 再调 [`Self::run_with_tools`]。
                 actor: ActorSpec::trivial("agent:main"),
+                // 便捷入口没有请求视图层可拼（三段由调用方的 `build_request_view` 给出）。
+                prefix: None,
             },
             std::sync::Arc::new(crate::symbio_core::adapters::SilentDeltas),
         )
@@ -1038,6 +1077,7 @@ impl TurnRunner {
             window_turns,
             resume,
             actor,
+            prefix,
         } = input;
         // 本轮的 viewer：历史窗口只交**本主体看得见**的事件（plan/11 批1 ③）。
         // 身份是入参不是字面量——`actor.principal` 由调用方（生产：会话属于哪个
@@ -1072,7 +1112,34 @@ impl TurnRunner {
             Some(keep) => window_by_turn(&full_snapshot, turn, keep, viewer),
         };
         // prompt 基线：转写投影渲染一次（本轮内不变——本轮的新事实还没进投影）。
-        let base_prompt = Reasoner::render_prompt(&snapshot);
+        // 请求级前缀排在基线**之前**（见 `TurnInput::prefix`）：三段都是置顶段，
+        // 追加到末尾会把它们排到本轮发言之后。每轮重算、不跨轮累积。
+        // **双向完整性复核**（ADR-048 防线）：投影出的每条消息都必须能在网格里找到
+        // 出处，且 `role` 完好。缺口只出声不抛错——prompt 已经发出去了，此时抛错只会把
+        // 「模型看得不全」变成「这一轮直接失败」；而**看得不全恰恰是静默的**（不报错、
+        // 不告警、既有断言全绿），所以这里必须出声。
+        //
+        // 成本 = 对投影切片做一遍线性配对，无 IO；零缺口时只走一次全匹配。
+        {
+            let view = crate::symbio_core::transcript()
+                .apply(&snapshot, i64::MAX, crate::symbio_core::Budget::generous())
+                .value;
+            let rep =
+                crate::symbio_core::projection::prompt_fidelity::verify(&snapshot, &view.entries);
+            if !rep.is_complete() {
+                crate::plugin_warn!(
+                    "actors",
+                    "[prompt-fidelity] 投影与事实网格不完整：{}",
+                    rep.summary()
+                );
+            }
+        }
+
+        let rendered = Reasoner::render_prompt(&snapshot);
+        let base_prompt = match prefix.as_deref().map(str::trim) {
+            Some(p) if !p.is_empty() => format!("{p}\n{rendered}"),
+            _ => rendered,
+        };
 
         let started = std::time::Instant::now();
         // 本轮内已发生的工具交换（调用 + 结果），供下一轮 prompt 追加。
@@ -1442,7 +1509,7 @@ impl TurnRunner {
 ///
 /// ## 为什么运行器也要判（它原先只在桥档判）
 ///
-/// 收束格的写方**跟着执行路径走**：`bridge` 档由 `v2_bridge::record_to_wal` 落格
+/// 收束格的写方**跟着执行路径走**：`bridge` 档由 `v2_facts::record_to_wal` 落格
 /// （那里有 `authorize_close`），`full` 档由**本运行器**原生落格。闸只挂在其中一条
 /// 路径上，另一条就整条漏判——而**没有任何东西会变红**（两条路径各写各的收束格，
 /// 谁也不看谁）。这与 S12 那批查出的「文档断言了、生产数据里却相反」是同一类缺口。
