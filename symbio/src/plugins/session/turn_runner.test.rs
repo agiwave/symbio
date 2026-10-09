@@ -541,7 +541,7 @@ mod turn_runner_tests {
     }
 
     /// 中止（AdapterError::Aborted）：**不落收束格**——网格只剩已入格的用户
-    /// 消息（少一格是诚实的缺口，ADR-045 同源），`aborted` 为真且 `text` 为空；
+    /// 消息（少一格是诚实的缺口，ADR-044 同源），`aborted` 为真且 `text` 为空；
     /// 不变量照绿（C4 会看见这个缺口，那是设计而非缺陷：中止不是静默中断）。
     #[tokio::test]
     async fn aborted_run_leaves_only_user_event() {

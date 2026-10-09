@@ -2,15 +2,15 @@
 //!
 //! ## 位置：为什么在 model 插件里，而不在 `symbio_core`
 //!
-//! 本契约原先住在 `symbio_core::llm::sse`（[ADR-022](../../../../../docs/DECISIONS.md)：
-//! 「契约在 core，字段名在协议层」）。当时按行切分的循环 `parse_sse_stream` 也在 core，
+//! 本契约原先住在 `symbio_core::llm::sse`（[ADR-022](../../../../../docs/DECISIONS.md) 的
+//! 位置条款）。当时按行切分的循环 `parse_sse_stream` 也在 core，
 //! 于是 core 是**两侧共同可见的中立地**。后来该循环作为「实现细节而非契约」下沉到
 //! [`super::super::stream`]，契约的**唯一消费方**随之离开 core，本文件随即变成
 //! **单模块契约**（见下方依赖方对照表）。
 //!
 //! 按 [ADR-023](../../../../../docs/DECISIONS.md) 的准入判据（**依赖方数量**：
 //! 只被一个模块依赖的内容一律下沉回该模块），它应与实现方、消费方同处一个模块——
-//! 即本插件。位置变更记录在 [ADR-034](../../../../../docs/DECISIONS.md)；
+//! 即本插件。位置变更记录在 [ADR-022](../../../../../docs/DECISIONS.md)；
 //! ADR-022 的**形状**决策（拆成两个方法、UTF-8 边界对齐写进契约、
 //! 字段名与转义规则全留协议层、`ModelProtocol` 以 `SseLineParser` 为父 trait）**全部不变**。
 //!

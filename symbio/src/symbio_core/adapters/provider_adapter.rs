@@ -418,7 +418,7 @@ impl LlmAdapter for ProviderLlmAdapter {
             .execute_turn(self.system_prompt(), &wire, tools, &llm_short_id(), &env)
             .await
             .map_err(|e| match e {
-                // 中止不压成失败：调用方据此**不落兜底格**（ADR-045 同源纪律）。
+                // 中止不压成失败：调用方据此**不落兜底格**（ADR-044 同源纪律）。
                 PluginError::Aborted => AdapterError::Aborted,
                 other => AdapterError::GenerationFailed(format!("{other}")),
             })?;

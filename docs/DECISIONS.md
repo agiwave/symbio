@@ -34,7 +34,7 @@
 | [019](./decisions/core.md#adr-019-跨栈契约手工镜像--审计守卫不引入代码生成g3前端面板去语义否决) | 跨栈契约手工镜像 + 审计守卫；G3 否决 | 现行 |
 | [020](./decisions/core.md#adr-020-执行期与传输层分离eventsink出-abortsignal入取代-pluginchannel-的双职责) | `EventSink` + `AbortSignal` 取代 `PluginChannel` | 现行（决策 7 被 ADR-021 推翻） |
 | [021](./decisions/core.md#adr-021-两个执行接口同形execenv-具名化拆信封收口到一处) | 两个执行接口同形（`ExecEnv`） | 现行 |
-| [022](./decisions/model.md#adr-022-sse-增量解析契约在-core字段名在协议层) | SSE 增量解析：契约在 core，字段名在协议层 | 现行（**位置条款被 [ADR-034](./decisions/model.md#adr-034-sse-行解析契约随流循环迁入-model-插件) 取代**，形状不变） |
+| [022](./decisions/model.md#adr-022-sse-增量解析契约拆两个方法字段名留协议层) | SSE 增量解析：契约拆两个方法，字段名留协议层 | 现行（决策 1 / 6 的位置条款已失效） |
 | [023](./decisions/core.md#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层) | `symbio_core` 准入规则 = 依赖方数量 | 现行 |
 | [024](./decisions/session.md#adr-024-会话选项并入详情方言选项行是配置表单的字段不是独立协议) | 会话选项并入详情方言 | 现行 |
 | [025](./decisions/session.md#adr-025-顺序是节点属性delta-是-updated-的传输形态) | 顺序是节点属性；变更信封 = `{path, data?}` | 现行 |
@@ -46,22 +46,23 @@
 | [031](./decisions/session.md#adr-031-会话的输入是地址上的写入--动作路由不承担输入chatsend-与-chatabort-退役) | 会话输入 = 地址上的写入 / 动作 | 现行（含未完成项） |
 | [032](./decisions/core.md#adr-032-插件身份归-pluginymlpluginmeta-从元信息降为出厂自述) | 插件身份归 `PLUGIN.yml` | 现行（含未完成项） |
 | [033](./decisions/core.md#adr-033-生命周期钩子--start-同步stop-异步停用与卸载各给理由) | 生命周期钩子：`start` 同步、`stop` 异步 | 现行（含未完成项） |
-| [034](./decisions/model.md#adr-034-sse-行解析契约随流循环迁入-model-插件) | SSE 行解析契约随流循环迁入 `model` 插件 | 现行（**取代 ADR-022 的位置条款**） |
+| 034 | SSE 契约的**位置条款**（「契约在 core，字段名在协议层」） | **已并入 [ADR-022](./decisions/model.md#adr-022-sse-增量解析契约拆两个方法字段名留协议层)**——契约随流循环下沉迁入 `plugins/model/protocols/sse.rs`，位置条款失效 |
 | [035](./decisions/core.md#adr-035-provider-化的判据--三个条件与构造契约) | provider 化的三个条件与构造契约 | 现行 |
 | [036](./decisions/core.md#adr-036-对象创建机制独立成域--它是系统级反射机制不是插件专属) | 对象创建机制独立成 `creator` 域 | 现行 |
-| [037](./decisions/core.md#adr-037-实现可以离开-core--记忆整体迁往-providers) | **实现**可以离开 core：记忆整块迁 `providers` | 现行 |
-| [038](./decisions/core.md#adr-038-帧与消息构造家族按依赖方数量下沉) | 帧与消息构造家族按依赖方数量下沉插件 | 现行（**取代 [ADR-034](./decisions/model.md#adr-034-sse-行解析契约随流循环迁入-model-插件) 决策 2 的位置条款**） |
+| 037 | 共享 ≠ 契约：判据是**依赖方向**，含具体逻辑的实现默认住 `providers/` | **已并入 [ADR-023](./decisions/core.md#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层)** |
+| 038 | `symbio_core` 准入规则的**逐条执行**（数的是**符号**不是文件） | **已并入 [ADR-023](./decisions/core.md#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层)**（唯一登记例外 `llm_message_frame`） |
 | [039](./decisions/session.md#adr-039-session-按域重组一域一目录编排层与领域层分离) | `session` 按域重组：五个判据 | 现行（**取代 ADR-017**） |
 | [040](./decisions/agent.md#adr-040-work-并入-memory记忆的两个作用域同属一个所有者) | `work` 并入 `memory`：记忆的两个作用域同属一个所有者 | 现行 |
 | [041](./decisions/session.md#adr-041-会话的响应性由编排层调度--无副作用对话服务承担) | 会话的响应性由编排层调度 + 无副作用对话服务承担 | 现行 |
 | [042](./decisions/core.md#adr-042-跨插件调用一律经容器-route--路径常量不持有对方类型) | 跨插件调用一律经容器 `route` + 路径常量 | 现行 |
 | [043](./decisions/core.md#adr-043-v2-事件地基落地契约居中于中性层store--projection-按冻结形状进-symbio_core) | v2 事件地基：契约居中，`store` / `projection` 按冻结形状进 core | 现行 |
 | [044](./decisions/core.md#adr-044-实测与判据同源成本时延与兜底率是事件网格的一等数据不用旁路遥测) | 实测与判据同源：成本/时延/兜底率是事件网格一等数据 | 现行 |
-| [045](./decisions/core.md#adr-045-v2-事实桥生产流量经转写进事实源不等整体切换) | v2 事实桥：生产流量经转写进事实源，不等整体切换 | 现行 |
+| 045 | v2 事实桥：生产流量经转写进事实源，不等整体切换 | **已并入 [ADR-044](./decisions/core.md#adr-044-实测与判据同源成本时延与兜底率是事件网格的一等数据不用旁路遥测)**（转写纪律）+ [ADR-048](./decisions/session.md#adr-048-出厂档位改-fullv2-链路是出厂路径bridge-退役)（桥退役）；机制见 `symbio/src/plugins/session/docs/module-layout.md` |
 | [046](./decisions/core.md#adr-046-事实能力进-symbio_core不以可选插件承载必须有值的机制) | 事实能力进 core：不以「可选插件」承载必须有值的机制 | 现行（2026-10-07 补记） |
 | [047](./decisions/session.md#adr-047-委派者三项真源判定回-reason能力走注入进展读磁盘事实) | 委派者三项真源：判定回 `reason`、能力走注入、进展读磁盘事实 | 现行 |
 | [048](./decisions/session.md#adr-048-出厂档位改-fullv2-链路是出厂路径bridge-退役) | 出厂档位改 `full`——v2 链路是出厂路径，`bridge` 退役 | **部分接受**（2026-10-09：已落地 1/4 步，三条缺口见该条） |
 | [048a](./decisions/session.md#adr-048a2026-10-09v2-的-prompt-形状必须回到结构化消息) | v2 的 prompt 形状必须回到结构化消息（不把工具结果拍平成纯文本） | 已接受 · 未实现 |
+| 050 | `TurnRunner` 族按依赖方数量下沉 `plugins/session` | **非架构决策 / 特例，已删**——下沉 = 应用 [ADR-023](./decisions/core.md#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层) |
 
 ---
 

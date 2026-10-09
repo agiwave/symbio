@@ -60,7 +60,7 @@
 //! 重试）与 v1 保持一致；网格里已有兜底格，重试即新一轮（N3 靠构造成立）。
 //!
 //! 中止语义：生成被中止时运行器**不落收束格**（网格少一格是诚实缺口，
-//! ADR-045 同源），本函数上抛 `Aborted`——chat_loop 走独立出口，会话结局
+//! ADR-044 同源），本函数上抛 `Aborted`——chat_loop 走独立出口，会话结局
 //! `aborted`（**不是** `failed`）。中止与失败在**类型上**分开（`AdapterError`
 //! / `TurnOutcome.aborted`），不靠错误文本猜；两者出口因此可各自演化。
 //!
@@ -1078,7 +1078,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
         .await
         .map_err(|e| PluginError::InternalError(format!("流式发射任务失败：{e}")))?;
 
-    // 中止：运行器**未落收束格**（网格少一格是诚实缺口，ADR-045 同源），
+    // 中止：运行器**未落收束格**（网格少一格是诚实缺口，ADR-044 同源），
     // 出口走 Aborted——由 chat_loop/消费循环落库为 `MessageStatus::Aborted`
     // + 会话结局 `aborted`（**不是** `failed`），与 v1 的中止出口同形。
     // 记忆与学习也**不写**：与 bridge 档的中止出口同形（那一档的 `TurnExit::Aborted`

@@ -57,7 +57,7 @@ CI 每轮重测，数字回归会被当场抓住）。
    按 turn 归档，兜底轮不混入样本）+ `slo_scan_wal_roots` 扫描（opt-in，
    `SYMBIO_SLO_SCAN_ROOTS` 指向会话存储根，递归找 v2 事实桥落的
    `v2-events.wal`，跨会话合并出 P50/P95/P99 + 兜底率）——三列同一事实源，
-   判据零复制（[ADR-045](../decisions/core.md)）；
+   判据零复制（[ADR-044](../decisions/core.md)）；
 4. 兜底率（SLO §1.2 第三列）需要真实流量的 fallback 事件计数，同样待阶段三
    （读数口同上，`fallback_rate` 投影已被扫描口复用）。
 

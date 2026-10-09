@@ -62,9 +62,9 @@
 
 ---
 
-## ADR-022: SSE 增量解析——**契约在 core，字段名在协议层**
+## ADR-022: SSE 增量解析——**契约拆两个方法，字段名留协议层**
 
-**状态**：已接受。**本 ADR 决策 1 与决策 6 中的「位置」条款已被 [ADR-034](#adr-034-sse-行解析契约随流循环迁入-model-插件) 取代**——契约现已与流循环同处 `plugins/model/`；决策 2–5（两个方法、每行只问一次、UTF-8 对齐、字段名留协议层、`ModelProtocol` 以其为父 trait）全部不变。
+**状态**：已接受。**决策 1 / 决策 6 的「位置」条款已失效**——按 [ADR-023](./core.md#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层)（依赖方数量），该契约的唯一消费方在 `model`，现已与流循环同处 `plugins/model/protocols/sse.rs`（`symbio_core::llm::sse` 子模块消失）；**形状决策 2–5 全部不变**。
 
 **背景**：为了首字延迟，`parse_sse_stream` 在换行到达前会先尝试从半截 JSON 里挤出正文。这件事原先由 **core 内置的启发式解析器**代劳（在整行里搜五个硬编码字段名），三个后果：**加协议要改 core**；**两条路径两套转义**（core 的 `unescape_partial` 与协议解析器的 `serde_json` 对 `\uXXXX` 处理不同 ⇒ 按前缀截断会**吃字**，最隐蔽——不报错，只是偶尔少一个字）；**每块重扫整行** ⇒ 单行极长时 O(行长²)。
 
@@ -80,37 +80,3 @@
 
 **后果与风险**：扫描器必须**自己实现 JSON 字符串解码**并与 `serde_json` 对齐，这是本决策的**主要风险点**，靠两层测试压住（直接比对 `serde_json` 的解码结果 + 四个协议各一条「逐字节切分喂进去，增量拼出的文本必须等于完整行解析出的文本」的不变量测试）；对非法 JSON 转义比 `serde_json` 宽松，分歧只在非法输入上出现；下标未知就放弃本次增量（用错下标会把参数接到别的工具调用上，比「等换行」糟糕得多）。
 
----
-
-## ADR-034: SSE 行解析契约随流循环**迁入 `model` 插件**
-
-**状态**：已接受。**取代 [ADR-022](#adr-022-sse-增量解析契约在-core字段名在协议层) 决策 1 / 决策 6 中的「位置」条款**；决策 2 里「`turn` 装帧 / 消息构造家族」的**位置条款**已被 [ADR-038](./core.md#adr-038-帧与消息构造家族按依赖方数量下沉) 取代（形状不变）。
-
-**背景**：[ADR-022](#adr-022-sse-增量解析契约在-core字段名在协议层) 把 SSE 增量解析拆成两个方法（`parse_line` / `open_partial_line`），并把契约放在 core——当时的理由是「**core 负责按 `\n` 切行**，协议层负责『这一行是什么』」，即 core 是两侧共同可见的中立地。
-
-此后按行切分的循环 `parse_sse_stream` 作为「实现细节而非契约」下沉到 `plugins/model/stream.rs`（内核瘦身批次）。契约的**唯一消费方**随之离开 core，而实现方（四个协议适配器）本来就在 model。于是：
-
-- `SseLineParser` / `SsePartialLineExtractor` 的**实现与消费全在 model 一个模块内**；
-- `utf8_chunk`（`pub(crate)`）只有 `stream.rs` 一个调用点；
-- `ModelProtocolEvent`（协议事件方言）的生产方与消费方同样都在 model。
-
-按 [ADR-023](./core.md#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层) 的准入判据（**依赖方数量**：只被一个模块依赖的内容一律下沉回该模块），它们不应留在 core。ADR-022 决策 6 的「core 只负责：按 `\n` 切行 → …」在循环迁走的那一刻就已与代码不符，只是没人回头改——本条同时修掉这处漂移。
-
-**决策**：
-1. `SseLineParser` / `SsePartialLineExtractor` / `utf8_chunk` 迁入 `plugins/model/protocols/sse.rs`；`ModelProtocolEvent` 迁入 `plugins/model/protocols/mod.rs`（紧邻 `ModelProtocol`——它是该 trait `parse_line` 的返回类型）。
-2. `symbio_core::llm` 只剩 `model_provider`（`ModelProvider` / `ModelFinishReason` / `ModelUsage`）与 `turn`（`TurnOutput` 与帧 / 消息构造家族）——即**只有 session 与 model 两侧共用**的符号。
-3. ADR-022 的**形状**决策全部不变（见上方状态行）。
-
-**理由**：ADR-022 真正要保住的是「**core 不再认识任何协议字段名**」这条**负面约束**——在本决策下它**更强**（连协议抽象都不在 core 了）。位置本身不是目的：契约与实现方、消费方同处一个模块时，「谁实现、谁消费」一屏读完，改签名不会漏掉某个远处的调用点。
-
-**被否决的方案**：
-- **保留在 core 并登记为「预留契约」**：ADR-023 明确否定「先上提、等消费者」——`SseLineParser` 今天既没有第二个实现方，也没有第二个消费方，而「将来可能有」是不可证伪的理由。
-- **把 `parse_sse_stream` 移回 core**：那是往 core 搬实现（HTTP 重试机器与流循环），与 ADR-023 的方向相反。
-- **只改文档、不动代码**：会留下「文档说契约在 core、代码里 core 侧无人用」的持续漂移，正是 [ADR-012](./vdfs.md#adr-012-读侧成本是设计约束现在是什么必须有一张可核对的表) 要消灭的东西。
-
-**后果与不变量**：
-- 新增协议只需动 `plugins/model/`，core 不受影响。
-- `symbio_core::llm::sse` 子模块消失；`symbio_core` 不再导出 `SseLineParser` / `SsePartialLineExtractor` / `ModelProtocolEvent` / `utf8_chunk`。
-- 若将来出现**第二个** SSE 消费者（例如另一类流式 provider），按 ADR-023 再上提到 core——判据不变，上提成本是一次编译期可检的搬迁。
-
----

@@ -34,7 +34,7 @@ const PARTIAL_LINE_MIN_BYTES: usize = 256;
 /// 目标未知时写入点用帧内信息建占位（帧自给自足，不依赖任何先行帧）。
 ///
 /// 原住 `symbio_core::llm::turn`（帧家族），按 ADR-023 的「依赖方数量」判据随
-/// **唯一调用点**迁到本模块（ADR-038）：只有这里的流循环发增量帧。终态帧走
+/// **唯一调用点**迁到本模块（ADR-023）：只有这里的流循环发增量帧。终态帧走
 /// session 的 `llm_emit_state`（`plugins/session/transcript/frames.rs`），完整消息帧走 core 的
 /// `llm_emit_message`——三者同一套帧语义，位置由消费方数量决定。
 async fn llm_emit_delta(sink: &ExecEventSink, message_id: &str, delta: &str) {

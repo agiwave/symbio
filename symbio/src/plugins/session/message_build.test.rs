@@ -1,7 +1,7 @@
 //! `symbio/src/plugins/session/message_build.rs` 的单元测试 —— 与实现同级分文件
 //! （约定：`X.rs` + `X.test.rs`）。
 //!
-//! 本文件是**落库形状**的唯一契约测试（ADR-038 随迁而来的两批用例）：
+//! 本文件是**落库形状**的唯一契约测试（ADR-023 随迁而来的两批用例）：
 //! - 原 `symbio_core/llm/turn.test.rs`：`TurnOutput` 三个方法
 //!   （`is_reasoning_only` / `effective_text` / `into_messages`）的形状不变式；
 //! - 原 `plugins/model/message_builder.test.rs` 的用例 A / A2 / B / C / D 与两条

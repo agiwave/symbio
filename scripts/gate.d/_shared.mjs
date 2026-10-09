@@ -205,7 +205,7 @@ export const BASELINE = {
   //      `debug_assert!` 守前置条件）；`close_turn` 的 `finish.is_length() && had_tool`
   //      分支与 `TurnResult.had_tool` 字段（该意图已由 `tools/tool_executor.rs` 的
   //      `parse_error` 分支承担，且更靠前——拒绝执行 + 以协议错误回报模型）。
-  // 961：ADR-038 单消费方符号下沉（2026-09-26）——**净 0**（959 → 959），逐文件核对：
+  // 961：ADR-023 单消费方符号下沉（2026-09-26）——**净 0**（959 → 959），逐文件核对：
   //        −5  `symbio_core/llm/turn.test.rs` 整文件删除（构造器与 `impl TurnOutput`
   //            随迁 `plugins/session/message_build.rs`）。
   //        −7  `plugins/model/message_builder.test.rs`（21 → 14）——用例 A / A2 / B /
@@ -373,9 +373,9 @@ export const BASELINE = {
   //      时延列的正式口径：final 实测 cost_ms 按 turn 归档（declared_tier
   //      单源共享，兜底轮不混样本）；slo_scan_wal_roots（opt-in）walk 会话
   //      存储根的 v2-events.wal，跨会话合并 P50/P95/P99 + 兜底率——
-  //      v2 事实桥写、扫描口读，三列同源闭环（ADR-044/045）。
+  //      v2 事实桥写、扫描口读，三列同源闭环（ADR-044）。
   // 1203（v2_mode 总开关，2026-09-30）——`1201 → 1203`，**+2**。
-  //      ADR-045 过渡期的迁移总开关：off（纯 v1）/ bridge（默认，v1 运行
+  //      过渡期的迁移总开关（[ADR-048] 定档）：off（纯 v1）/ bridge（默认，v1 运行
   //      + 事实累积）；full 档待 v2 引擎切换落地时在同一枚举增设——
   //      「切到 v2 的哪一步」一个问题一个旋钮，不拆多个开关。
   // 1205（流式生成，2026-09-30）——`1203 → 1205`，**+2**。
@@ -394,7 +394,7 @@ export const BASELINE = {
   //      v2 路径的中止不再是「失败」：`AdapterError::Aborted` 与
   //      `GenerationFailed` 在类型上分开（压成一个变体，消费方只能靠错误
   //      文本猜）；`TurnOutcome.aborted` 让运行器**不落收束格**（网格少一格
-  //      是诚实缺口，ADR-045 同源），适配器保真映射 `PluginError::Aborted`
+  //      是诚实缺口，ADR-044 同源），适配器保真映射 `PluginError::Aborted`
   //      → `AdapterError::Aborted`，v2_exec 上抛 `PluginError::Aborted`，
   //      chat_loop 走独立 Aborted 出口。验收 = core 中止轮（只剩用户格 +
   //      C4 判得出缺口）/ session 中止轮（Aborted 上抛 + 网格一格）。

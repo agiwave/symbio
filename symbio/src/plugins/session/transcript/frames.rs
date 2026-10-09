@@ -2,7 +2,7 @@
 //!
 //! 它们原住 [`symbio_core::llm::turn`](crate::symbio_core::llm::turn)，按
 //! ADR-023 的「依赖方数量」判据（只被一个模块依赖的内容下沉回该模块，见
-//! ADR-038）整组迁下：`llm_emit_state` / `llm_state_frame` / `llm_emit_removed`
+//! ADR-023）整组迁下：`llm_emit_state` / `llm_state_frame` / `llm_emit_removed`
 //! 的**生产消费方只有 session**（`tool_executor` · `chat_loop` · `resume` ·
 //! `orchestrator::failure`）。
 //!
