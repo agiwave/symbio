@@ -387,6 +387,7 @@ async fn real_provider_full_calibration() {
                     turn: i as u64,
                     text: "用一句话说明什么是事件溯源。".into(),
                     tier: LatencyTier::Deep,
+                    inject: None,
                     window_turns: None,
                     resume: None,
                     actor: crate::symbio_core::ActorSpec::trivial("agent:main"),

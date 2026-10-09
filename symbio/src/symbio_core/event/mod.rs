@@ -47,6 +47,31 @@ pub type Timestamp = i64;
 
 /// 用户发言。落在 `turn × opened`。
 pub const EVENT_USER_MESSAGE: &str = "user.message";
+/// **轮边界折进的补充**（载荷 `{ text, count }`）。落在 `turn × asserted`。
+///
+/// ## 为什么它必须是一格事实（缺口 3）
+///
+/// 用户在助手干活途中补了一句话，那句话被折进 `context.messages` —— 但 `TurnInput.text`
+/// 在**轮首就定死了**，于是这句话：
+///
+/// - 进了 v1 的消息列表（会落库、会进 `messages.json`），
+/// - **没进事实网格**，而 prompt 是从事实网格投影的 ⇒ **模型看不见它**，
+/// - 且**完全静默**：不报错、不告警、既有断言全绿。
+///
+/// 「会话接受了一句用户话，但它从未成为事实」——补一句成为事实，最小的格子就是它。
+///
+/// ## 为什么不是 `user.message` 的第二次
+///
+/// `user.message` 落在 `turn × opened`，语义是「开轮」。轮已经开了（补充发生在
+/// 干活途中），再落一条 `opened` 会让「一个 turn 一个开轮格」这条不变量失效。
+///
+/// ## `count`：一次可能折进多条
+///
+/// 抽干是**批量**的（`merge_supplements` 把同窗口内的多条合并成一条消息）。
+/// `text` 是合并后的正文，`count` 是**原条数**——记下来是因为「模型收到一大段」
+/// 与「用户连说了 5 句」对模型是不同的输入，而网格不该只保留前者。
+pub const EVENT_TURN_SUPPLEMENTED: &str = "turn.supplemented";
+
 /// 助手最终答复（每 turn 至多 1 条——N3）。落在 `turn × closed`。
 pub const EVENT_ASSISTANT_FINAL: &str = "chat.assistant.final";
 /// 兜底话术——**普通事件，不是特殊通道**（生成失败也要有输出）。落在 `turn × closed`。

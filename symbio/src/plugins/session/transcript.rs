@@ -49,7 +49,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 mod frames;
-mod inbox;
+pub(crate) mod inbox;
 /// 补充整合：n 条收件箱条目 → 一条用户消息（纯函数，见模块文档）。
 pub(crate) mod supplements;
 

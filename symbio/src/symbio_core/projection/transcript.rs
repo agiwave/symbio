@@ -24,7 +24,7 @@
 
 use super::super::event::{
     Entity, Event, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_USER_MESSAGE,
+    EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
 use super::super::view::{Budget, View};
 use super::Projection;
@@ -220,6 +220,22 @@ pub fn transcript() -> Projection<TranscriptView> {
                         text: why.to_string(),
                         tool: None,
                     });
+                }
+                // 轮边界折进的补充（缺口 3）：它**是用户说的话**，所以 role=user——
+                // 不是为了「让它看起来像用户发言」，而是因为它字面上就是。
+                //
+                // ⚠️ 这条修的是**静默丢失**：补充进了 `context.messages`、会落库、
+                // 会出现在 `messages.json` 里，而 prompt 从事实网格投影 ⇒ 模型看不见。
+                // 落进投影之后它对下一轮可见，且**是这一轮**就该看见（不是下一轮）。
+                (Entity::Turn, Verb::Asserted, EVENT_TURN_SUPPLEMENTED) => {
+                    let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                    if !text.trim().is_empty() {
+                        entries.push(TranscriptEntry {
+                            role: "user".into(),
+                            text: text.to_string(),
+                            tool: None,
+                        });
+                    }
                 }
                 // 工具结果（`artifact × asserted`）：跨轮可见的「我调用过什么、拿到了什么」。
                 (Entity::Artifact, Verb::Asserted, EVENT_ARTIFACT_ADDED) => {

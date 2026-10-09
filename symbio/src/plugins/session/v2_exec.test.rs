@@ -70,6 +70,8 @@ fn tool_free_req<'a>(
         skill_hits: &[],
         // 请求级前缀：测试不走请求视图层（三段皆空）。
         prefix: None,
+        supplements: None,
+        supplemental_no: Default::default(),
     }
 }
 
@@ -81,6 +83,155 @@ impl ExecTranscriptWriter for CollectingFrames {
     async fn apply(&self, m: cm::ChatMessage) {
         self.0.lock().unwrap().push(m);
     }
+}
+
+/// 补充成为事实、并在**下一轮**仍可见（缺口 3 的真正判据，插件层那一半）。
+///
+/// ## 为什么这条在插件层而不在 core
+///
+/// core 只提供「工具循环里什么时候问一次」这个挂点（`TurnInput::inject`）；
+/// 「什么是补充」「它怎么落成 `turn.supplemented`」全在 `plugins/session`（收件箱、
+/// `merge_supplements`、`EventWalStore`）。core 那侧的判据是
+/// `injected_messages_reach_the_next_request_of_the_same_turn`（只验「进了本轮请求」）。
+///
+/// ## 三段各只能证明一件事
+///
+/// - **落格**（WAL 有 `turn.supplemented` + 溯源 + `count`）：它成为了事实；
+/// - **回读下一次请求**：它在**本轮**就对模型可见（用户就是在这轮说的话）；
+/// - **重开 WAL 再投影**：它在**下一轮**仍可见——这才是缺口 3 的原始症状
+///   （原来它只活在 v1 的消息列表里，下一轮就消失）。
+///
+/// ## 反向自检
+///
+/// 把闭包里的 `store.append` 去掉 ⇒ 第 1、3 段红（网格里没有它）；
+/// 把 `store.append` 保留但返回空 vec ⇒ 第 2 段红（本轮请求里没有它）。
+#[tokio::test]
+async fn supplements_become_facts_visible_next_turn() {
+    let (session, dir, _tmp) = setup_full().await;
+    let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
+    let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
+    let (provider, prompts) = FaithfulProvider::new(Behavior::ToolThenAnswer);
+
+    // 假的抽干口：第一次返回一批（**2 条合成 1 段**），之后空。
+    //
+    // 形状与生产一致（`DrainedSupplement`：正文 + 原条数）。用 2 条是因为「n 条
+    // 合成 1 段」是真实场景，而 `count` 填错（比如填 1）该被照出来。
+    // `Arc<dyn Fn>` 要求 `'static`，所以游标也得是 `Arc`（借用会在闭包逃逸时报错）。
+    let fired = Arc::new(Mutex::new(false));
+    let supplements = {
+        let fired = fired.clone();
+        Arc::new(move || {
+            let mut once = fired.lock().unwrap();
+            if *once {
+                return None;
+            }
+            *once = true;
+            Some(super::super::chat_loop::state::DrainedSupplement {
+                text: "顺便也看看 README".into(),
+                count: 2,
+                id: "sup-1".into(),
+                ids: vec!["sup-1".into(), "sup-2".into()],
+            })
+        }) as super::SupplementFn
+    };
+
+    execute_turn(V2Turn {
+        session: &session,
+        provider: Arc::new(provider),
+        parent: None,
+        session_dir: super::super::test_dir(),
+        ctx: test_ctx(),
+        system_prompt: "system",
+        abort: crate::symbio_core::ExecAbortSignal::new(),
+        root_id: "r-1",
+        sink: &sink,
+        user_text: "读一下 a.md",
+        window_turns: 6,
+        tools: &[CapabilityMeta {
+            name: "vdfs_read".into(),
+            description: "读文件".into(),
+            input_schema: serde_json::json!({ "type": "object" }),
+            keywords: vec![],
+            category: None,
+            examples: None,
+            context_retention: None,
+            ..Default::default()
+        }],
+        resume: None,
+        recalled: None,
+        skill_obs: &[],
+        skill_hits: &[],
+        prefix: None,
+        supplements: Some(supplements),
+        supplemental_no: Default::default(),
+    })
+    .await
+    .expect("工具轮执行成功");
+
+    // ── ① 落格：WAL 里有 `turn.supplemented`，带溯源与 `count` ──────────
+    //
+    // 句柄必须在 `execute_turn` 之后**重开**（写者令牌是独占的）——顺带满足
+    // 「不拿内存里的快照糊弄」：重开读的就是落盘状态。
+    let store = EventWalStore::open(dir.join("v2-events.wal")).expect("重开 WAL");
+    let snap = store.range(Seq::new(0));
+    let sup = snap
+        .iter()
+        .find(|e| e.kind == crate::symbio_core::EVENT_TURN_SUPPLEMENTED)
+        .unwrap_or_else(|| panic!("补充必须落成事实（否则下一轮就消失——那正是缺口 3）：{snap:?}"));
+    assert_eq!(
+        sup.entity,
+        crate::symbio_core::Entity::Turn,
+        "落在 Turn 实体上"
+    );
+    assert_eq!(sup.verb, crate::symbio_core::Verb::Asserted, "断言类动词");
+    assert_eq!(
+        sup.payload.get("count").and_then(|v| v.as_u64()),
+        Some(2),
+        "原条数要原样保留（2 条合成 1 段）"
+    );
+    let user_seq = snap
+        .iter()
+        .find(|e| e.kind == crate::symbio_core::EVENT_USER_MESSAGE)
+        .and_then(|e| e.seq)
+        .map(|s| s.value())
+        .expect("网格里有用户格");
+    assert_eq!(
+        sup.produced_by,
+        Some(user_seq),
+        "断言类事件必须带溯源（I2），且指向**本轮用户格**"
+    );
+    // ── ② 本轮可见：收尾轮的请求里带上了它，且是 role=user ──────────────
+    let seen = prompts.lock().unwrap().clone();
+    assert_eq!(seen.len(), 2, "工具轮 + 收尾轮：{seen:?}");
+    assert!(
+        !seen[0].iter().any(|(_, t)| t.contains("README")),
+        "第一次请求还没有注入内容（那时抽干口还没被问）：{seen:?}"
+    );
+    assert!(
+        seen[1]
+            .iter()
+            .any(|(r, t)| r == "user" && t.contains("README")),
+        "收尾轮请求须带上补充，且是 role=user：{seen:?}"
+    );
+
+    // ── ③ 下一轮可见：**重开 WAL** 再投影（不拿内存里的快照糊弄） ──────────
+    let reopened =
+        crate::symbio_core::EventWalStore::open(dir.join(super::super::paths::V2_WAL_FILE))
+            .expect("重开 WAL");
+    let projected = crate::symbio_core::transcript()
+        .apply(
+            &reopened.range(crate::symbio_core::Seq::new(0)),
+            i64::MAX,
+            crate::symbio_core::Budget::generous(),
+        )
+        .value;
+    assert!(
+        projected
+            .entries
+            .iter()
+            .any(|e| e.role == "user" && e.text.contains("README")),
+        "补充必须在**下一轮**仍可见（重开 WAL 后投影）：{projected:?}"
+    );
 }
 
 /// 假 provider 的行为档：忠实流式 / 生成失败 / 中止 / 工具轮。
@@ -472,6 +623,8 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         skill_hits: &[],
         // 请求级前缀：本用例不走请求视图层（三段皆空）。
         prefix: None,
+        supplements: None,
+        supplemental_no: Default::default(),
     })
     .await
     .expect("工具轮执行成功");
@@ -737,6 +890,8 @@ async fn full_turn_lands_derived_commitment_facts() {
         skill_hits: &[],
         // 请求级前缀：本用例不走请求视图层（三段皆空）。
         prefix: None,
+        supplements: None,
+        supplemental_no: Default::default(),
     })
     .await
     .expect("工具轮执行成功");

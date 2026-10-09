@@ -2288,6 +2288,7 @@ mod turn_runner_tests {
                     tier: LatencyTier::Deep,
                     window_turns: None,
                     resume: None,
+                    inject: None,
                     actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
@@ -2326,6 +2327,7 @@ mod turn_runner_tests {
                     turn: 0,
                     text: "问".into(),
                     tier: LatencyTier::Deep,
+                    inject: None,
                     window_turns: None,
                     resume: None,
                     actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
@@ -2412,6 +2414,7 @@ mod turn_runner_tests {
                     turn: 0,
                     text: "问".into(),
                     tier: LatencyTier::Deep,
+                    inject: None,
                     window_turns: None,
                     resume: None,
                     actor: ActorSpec::trivial(PRINCIPAL_AUTONOMOUS),
@@ -2451,6 +2454,7 @@ mod turn_runner_tests {
                     turn: 0,
                     text: "问".into(),
                     tier: LatencyTier::Deep,
+                    inject: None,
                     window_turns: None,
                     resume: None,
                     actor: ActorSpec::trivial("agent:main"),
@@ -2490,6 +2494,97 @@ mod tool_round_tests {
         TurnInput, TurnResume, TurnRunner, TurnToolCallInfo, Verb, EVENT_ARTIFACT_ADDED,
         EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
     };
+
+    /// 注入的消息必须**进本轮的下一次请求**。
+    ///
+    /// ## 为什么 core 层只验这一半
+    ///
+    /// 另一半——「注入的内容成为事实、下一轮仍可见」——**不在 core**：
+    /// 「什么是补充」「它怎么落成 `turn × asserted`」是插件侧的概念（收件箱、
+    /// `merge_supplements`、`EventWalStore` 都在 `plugins/session`），core 只提供
+    /// 「循环里什么时候问一次」这个挂点（见 [`TurnInput::inject`]）。
+    ///
+    /// 把落格也做进 core 会让 core 知道「补充」是什么——而它不必知道。
+    /// 那一半的判据在 `v2_exec.test.rs`（`supplements_become_facts_visible_next_turn`）。
+    ///
+    /// ## 反向自检
+    ///
+    /// 把 2f 那两行（`if let Some(inject) = &inject { exchange.extend(inject()); }`）
+    /// 删掉，本用例必红。
+    #[tokio::test]
+    async fn injected_messages_reach_the_next_request_of_the_same_turn() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = ToolCallingLlm::new();
+        let prompts = llm.prompts.clone();
+        let dispatch = FakeDispatch {
+            pending: false,
+            rounds: Arc::new(Mutex::new(0)),
+        };
+
+        // 注入口：只返回一次（模拟「用户在工具跑的时候插了一句」）。
+        let fired = Arc::new(Mutex::new(0usize));
+        let inject = {
+            let fired = fired.clone();
+            Arc::new(move |_anchor: Option<u64>| {
+                let mut n = fired.lock().unwrap();
+                if *n > 0 {
+                    return Vec::new();
+                }
+                *n += 1;
+                vec![PromptMessage {
+                    role: "user".into(),
+                    text: "顺便也看看 README".into(),
+                    tool_call_id: None,
+                    tool: None,
+                    tool_calls: None,
+                }]
+            }) as crate::symbio_core::RoundInjector
+        };
+
+        let mut i = input();
+        i.inject = Some(inject);
+        TurnRunner
+            .run_with_tools(
+                &store,
+                &llm,
+                &tok,
+                i,
+                Arc::new(SilentDeltas),
+                &tools(),
+                Some(&dispatch),
+            )
+            .await
+            .expect("工具轮必答");
+
+        let seen: Vec<Seen> = prompts
+            .lock()
+            .unwrap()
+            .clone()
+            .into_iter()
+            .map(Seen::from)
+            .collect();
+        assert_eq!(seen.len(), 2, "工具轮 + 收尾轮：{seen:?}");
+        // 第一次请求里还没有（那时注入口还没被问）。
+        assert!(
+            !seen[0]
+                .texts_of("user")
+                .iter()
+                .any(|t| t.contains("README")),
+            "第一次请求还没有注入内容：{seen:?}"
+        );
+        // 第二次请求里有了，且**作为独立的 user 消息**——不与别的 user 消息合并
+        // （合并会让模型分不清哪句是本轮提问、哪句是插话）。
+        assert_eq!(
+            seen[1]
+                .texts_of("user")
+                .into_iter()
+                .filter(|t| t.contains("README"))
+                .count(),
+            1,
+            "注入的消息必须在**本轮的下一次请求**里，且是独立一条 user 消息：{seen:?}"
+        );
+    }
 
     /// 假适配器：**直接作答**（无工具调用）——续写轮的收尾轮；记录收到的**消息数组**。
     struct AnsweringLlm {
@@ -2754,6 +2849,7 @@ mod tool_round_tests {
             turn: 0,
             text: "读 a.md".into(),
             tier: LatencyTier::Deep,
+            inject: None,
             window_turns: None,
             resume: None,
             actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
@@ -3196,6 +3292,7 @@ mod tool_round_tests {
                     turn: 0,
                     text: String::new(), // 续写不新开用户格，此字段不参与入格
                     tier: LatencyTier::Deep,
+                    inject: None,
                     window_turns: None,
                     actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
                     resume: Some(TurnResume {

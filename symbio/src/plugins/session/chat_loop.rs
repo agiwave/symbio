@@ -43,7 +43,7 @@ mod delegate;
 mod inputs;
 mod io;
 mod progress;
-mod state;
+pub(crate) mod state;
 mod turn;
 
 // 跨模块契约：`orchestrator.rs` / `resume.rs` 经 `chat_loop::X` 引用。
@@ -565,6 +565,14 @@ pub async fn run_chat_loop(
                 skill_hits: &turn.skill_hits,
                 // 请求级前缀 = 请求视图层置顶的三段（见 request_view_prefix）。
                 prefix: request_view_prefix(&inputs.request_view),
+                // 轮内注入（缺口 3）：把本会话的收件箱抽干口交给 v2 的工具循环，
+                // 让「用户中途插话」在 `full` 档下**折进本轮**（v1 档的折进在
+                // 下面那段循环里，两条路各抽一次、但只有一条会跑）。
+                supplements: orchestrator.supplements.as_ref().map(|s| {
+                    let s = s.clone();
+                    Arc::new(move || s.take_inbox_batch_sync()) as super::v2_exec::SupplementFn
+                }),
+                supplemental_no: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             })
             .await
             {

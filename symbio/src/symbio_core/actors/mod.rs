@@ -812,7 +812,11 @@ impl SkillRouter {
 // 未来 chat_loop 切到 v2 链路时复用本运行器；当前由真实端点校准彩排使用。
 
 /// 一轮的**调度输入**（full 档会话轮与彩排共用的入参包）。
-#[derive(Debug, Clone)]
+///
+/// `Debug` **手写**：`inject` 是闭包（`dyn Fn` 不实现 `Debug`）。那一行打印成
+/// `inject: <闭包>` 而不是把闭包捕获的东西摊开——闭包捕获什么与这个入参包的
+/// 可读性无关，而把它摊开会**打印用户对话正文**。
+#[derive(Clone)]
 pub struct TurnInput {
     /// 本轮 turn 号（调用方保证单调递增——N3 的轮次锚）。
     ///
@@ -864,6 +868,75 @@ pub struct TurnInput {
     /// 末尾（`exchange` 那条路）会把它们排到本轮发言之后，模型先答后看指令。
     /// 跨轮累积也一并排除：它们每轮重算，累积会让上一轮的前缀留在下一轮的上下文里。
     pub prefix: Option<String>,
+    /// **轮内折进的补充**：工具循环每跑完一轮就问一次「用户有没有补充」，
+    /// 有就折进本轮（成为一格事实 + 进下一次请求的消息数组）。
+    ///
+    /// ## 它解决的是什么（缺口 3）
+    ///
+    /// 用户在助手干活途中补了一句话。在 v1 路径上它被折进 `context.messages`
+    /// ——但 `full` 档走的是 `v2_exec` → `TurnRunner`，而 `v2_exec` 里**根本没有
+    /// 抽干补充的代码**（v1 那段被档位分叉绕过了）。于是：
+    ///
+    /// - 用户的话被收件箱队列**吸走**了（队列已消费、没人用它），
+    /// - 模型**看不见**（prompt 从事实网格投影，而它从未入格），
+    /// - 而这一切**完全静默**：不报错、不告警、既有断言全绿。
+    ///
+    /// 「会话接受了一句用户话，但它从未成为事实」。
+    ///
+    /// ## core 只知道「加消息」，不知道「加的是什么」
+    ///
+    /// **为什么是回调而不是「调用方开跑前把补充全取出来传进来」**：补充是**轮内**到达的
+    /// ——工具跑到一半用户才说话。调用方若只在开跑前取一次，之后到达的那些仍然丢，
+    /// 而那恰恰是补充最常见的形态（用户在等结果时插话）。回调把「什么时候问」放在
+    /// **唯一知道循环边界的地方**（`run_with_tools` 的每次迭代末尾），插件侧不必把
+    /// 循环搬到外面。
+    ///
+    /// 但 core **不该**知道那是「收件箱补充」——那是插件侧的概念（收件箱、
+    /// `merge_supplements`、`ChatMessage` 合并都在 `plugins/session`）。于是这个口
+    /// 收的是**已经折好的消息**（`PromptMessage` 本来就存在），落格也在插件侧做
+    /// （`v2_exec` 自己开着 `EventWalStore`）。
+    ///
+    /// 回调返回**要加进下一次请求的消息**；返回空 vec 是绝大多数轮次的情形。
+    ///
+    /// ## 为什么是闭包而不是 trait
+    ///
+    /// core 里为一个「取几个消息」的动作造 trait + 默认实现 + 关联类型，是**用抽象
+    /// 换不来任何东西**：接口面变大、可读性变差，收益是零。闭包就够。
+    ///
+    /// ⚠️ 调用方负责**取走语义**（同一条不会被注入两次）——core 不做去重。
+    pub inject: Option<RoundInjector>,
+}
+
+/// 「下一轮要加哪些消息」的取数口（见 [`TurnInput::inject`]）。
+///
+/// 每次工具循环迭代末尾调一次。
+/// 名字叫 `Round` 而不是 `Turn`：`Turn` 在本仓已被 `llm` 域占用（`TurnInput` /
+/// `TurnOutput` / `TurnResume`），而 core-naming-audit 的 N-003 判「撞别的域前缀」
+/// 即红。顺带语义更准：注入发生在**工具轮的边界**，不是轮的内部。
+///
+/// 入参 = 本轮用户格的 seq（`None` = 本轮没有用户格，续写轮的极端情形）。
+///
+/// **为什么把锚点传进来而不是让调用方自己找**：用户格是**运行器**落的，调用方
+/// 那边的快照取在它**之前**——于是「自己去网格里找本轮用户格」在开跑那一刻
+/// 必然找不到，于是补充格永远没有溯源（而 I2 要求断言类事件必须带溯源）。
+/// core 手里有那个 seq，给出去比让调用方猜更省事也更可靠。
+pub type RoundInjector =
+    std::sync::Arc<dyn Fn(Option<u64>) -> Vec<crate::symbio_core::PromptMessage> + Send + Sync>;
+
+impl std::fmt::Debug for TurnInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TurnInput")
+            .field("turn", &self.turn)
+            .field("text", &self.text)
+            .field("tier", &self.tier)
+            .field("window_turns", &self.window_turns)
+            .field("resume", &self.resume)
+            .field("actor", &self.actor)
+            .field("prefix", &self.prefix)
+            // 闭包**不展开**：展开会把捕获的东西（生产里是用户对话正文）打进日志。
+            .field("inject", &self.inject.as_ref().map(|_| "<闭包>"))
+            .finish()
+    }
 }
 
 /// 续写锚点（审批 / 问答恢复）：本轮**续写**一个已开未收束的轮次，而不是新开。
@@ -1012,6 +1085,9 @@ impl TurnRunner {
                 text: text.to_string(),
                 tier,
                 window_turns: None,
+                // `run` 是**单请求**入口（彩排 / 无工具轮），没有轮内循环 ⇒ 没有
+                // 注入时机。要注入请用 `run_with_tools`。
+                inject: None,
                 resume: None,
                 // 便捷入口跑在平凡值身份上（S08 §4：单主体 = 今天的状态）。
                 // 生产不走这里——`v2_exec` 自己构造 `ActorSpec` 再调 [`Self::run_with_tools`]。
@@ -1094,6 +1170,7 @@ impl TurnRunner {
             text,
             tier,
             window_turns,
+            inject,
             resume,
             actor,
             prefix,
@@ -1355,6 +1432,17 @@ impl TurnRunner {
                     // 2e. 把这一轮交换追加进 prompt，继续下一轮。
                     exchange.clear();
                     exchange.extend(tool_exchange_messages(&rt, &outcomes));
+
+                    // 2f. 轮内注入：调用方可能在这时候有新东西要加进下一次请求
+                    // （生产里是「用户中途补充」）。core **只把消息接上**——它不
+                    // 知道那是什么、也不落格（落格在调用方，它自己开着 store）。
+                    //
+                    // 挂在 2e 之后而不是之前：工具交换先接上，注入的内容排在它
+                    // 之后 —— **时间序**：工具结果先发生，用户随后才插话。
+                    if let Some(inject) = &inject {
+                        // 锚点 = 本轮用户格 seq（`user_seq` 在开轮那步就拿到了）。
+                        exchange.extend(inject(Some(user_seq)));
+                    }
                 }
                 Err(AdapterError::Aborted) => {
                     // 3a. 中止：**不落任何收束格**——用户消息已入格，少一格是诚实

@@ -96,15 +96,25 @@ VisScope:
       // 门禁已判定该豁免失效并要求删除——工具侧真的开始读它之后，多消费方是可证的，
       // 不再依赖豁免。风险等级改为由各工具在 `CapabilityMeta` 里自声明，
       // 消费方（local 审批闸门 / 各插件 meta）都是具名的。
-      // 「单消费方」在 `PromptMessage` 上不成立——它有**两个**消费方，而审计只数
-      // 跨出 core 的那一个（`plugins/model`），core 内的 `adapters` 不计。
       //
-      // 而它**不能**下沉到 `projection`：`LlmAdapter` 是 core 的**公开 trait**，
-      // 它的入参类型若是 core 私有的，core 外就**根本无法实现那个 trait**——
-      // 测试替身与外部适配器都写不出来。「公开 trait 的签名类型必须公开」比
-      // 「多消费方」是更强的理由，所以登记豁免而不是硬改路径。
-      PromptMessage:
-        'LlmAdapter 公开 trait 的入参类型：trait 在 core 外可实现（测试替身 / 外部适配器），其签名类型不能是 core 私有模块路径，否则 core 外无法实现该 trait。core 内消费方 = adapters（审计只数跨出 core 的那一个，故显为单消费方）',
+      // 同理 `PromptMessage`：P3e 时它是 `LlmAdapter` 公开 trait 的入参、只数到一个
+      // 跨 core 的消费方（`plugins/model` 的测试），本表据此给了豁免。P3c 之后
+      // `plugins/session` 也开始用 ⇒ 消费方 2 个 ⇒ **豁免失效，已删除**（门禁会主动
+      // 报这个，不靠人记得清理）。
+      //
+      // `RoundInjector` 则是另一回事：它在**公开 trait 的签名**里（`LlmAdapter::generate`
+      // 的入参经 `TurnInput::inject` 出现），trait 在 core 外可实现 ⇒ 签名类型不能是
+      // core 私有模块路径。消费方：`plugins/session`（生产）+ core 内 `actors`；审计的
+      // 跨 core 计数只数到前者，故显为单消费方。
+      // `EVENT_TURN_SUPPLEMENTED`（批 P3c 新增事件名，`turn × asserted`）：
+      // 与 `EVENT_ARTIFACT_ADDED` / `EVENT_ASSISTANT_*` / `EVENT_USER_MESSAGE` 同类——
+      // **事件名必须单点定义**（`event/mod.rs` 是唯一 owner，散落字面量必然漂），
+      // 而它们都占根出口供插件按名字引用。core 外唯一消费方是 `plugins/session`
+      // （落格与投影），与同域那几个事件同形——不是「新开的口子」。
+      EVENT_TURN_SUPPLEMENTED:
+        '事件名常量：与 EVENT_ARTIFACT_ADDED / EVENT_* 同类，event/mod.rs 单点定义、插件按名引用。core 外唯一消费方 = plugins/session（落格 + 投影），同域存量事件同形',
+      RoundInjector:
+        '公开 trait LlmAdapter 的入参类型（经 TurnInput::inject 出现）：trait 在 core 外可实现，其签名类型不能是 core 私有模块路径。core 内消费方 = actors（审计只数跨出 core 的那一个，故显为单消费方）',
     }
 
 /**

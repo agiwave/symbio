@@ -539,6 +539,35 @@ pub struct SupplementDrain {
     pub(crate) state: Arc<crate::plugins::session::active::ActiveSessionState>,
 }
 
+/// 抽干结果：**正文 + 原条数**。
+///
+/// `InboxItem` 是 `transcript::inbox` 的私有类型，所以同步孪生不返回它——
+/// 跨模块暴露内部类型会让「谁都能构造一个假的抽干结果」成为可能。
+///
+/// ⚠️ **不带原始 `ChatMessage`**：v1 路径要落进 `context.messages`，但它走的是
+/// 另一个方法（`drain`，返回 `ChatMessage` 本身）。这里只服务 v2 注入，而 v2 只要
+/// 正文——多带一个字段就是给下一个人留一个不必有的理由。
+#[derive(Debug, Clone)]
+pub(crate) struct DrainedSupplement {
+    /// 折进 prompt 的正文（多条已合并）。
+    pub text: String,
+    /// **原条数**：合并了 n 条时是 n。
+    ///
+    /// 记下来是因为「模型收到一大段」与「用户连说了 5 句」对模型是不同的输入，
+    /// 而事实网格不该只保留前者。
+    pub count: u64,
+    /// 合并消息的 **id** = **第一条补充的 id**（`merge_supplements` 的既有约定）。
+    ///
+    /// 为什么必须沿用而不是新造：前端按 id 合并权威帧（`useChatConnection.ts`），
+    /// 换 id 等于让同一句话在前端**出现两条**。t19 的 B 幕断言钉的就是「沿用 b2」。
+    pub id: String,
+    /// 批内**原始条目 id 列表**（顺序 = 入队顺序）。
+    ///
+    /// 落进 `meta.supplement_ids`：前端与事后审计都要能回答「这一条合并了几条、
+    /// 分别是哪几条」（t19 的 B 幕断言钉的就是这个列表）。
+    pub ids: Vec<String>,
+}
+
 impl SupplementDrain {
     pub fn new(
         plugin: Arc<crate::plugins::session::plugin::SessionPlugin>,
@@ -558,6 +587,56 @@ impl SupplementDrain {
     pub async fn drain(&self) -> Option<ChatMessage> {
         let batch = self.plugin.take_inbox_batch(&self.state).await;
         crate::plugins::session::transcript::supplements::merge_supplements(&batch)
+    }
+
+    /// [`Self::drain`] 的**同步**孪生（缺口 3：v2 工具循环里的注入挂点）。
+    ///
+    /// ## 为什么需要它
+    ///
+    /// core 的 [`TurnInjector`] 是同步闭包（`Fn() -> Vec<PromptMessage>`）——core 里
+    /// 不该为了「等一个异步取件」而开出 async trait，那会把整个 `run_with_tools`
+    /// 的接口面染成 async（它现在是同步调 LLM 适配器的）。
+    ///
+    /// 于是取件这一步在插件侧桥成同步。**判定与取件逻辑不复制**：与
+    /// [`Self::drain`] 共用同一个真源（`take_inbox_batch` 的同步版），差别只在
+    /// 锁的等法。
+    ///
+    /// ⚠️ **调用方负责 `block_in_place`**：本函数内部用 `blocking_read`，若在
+    /// 单线程 runtime 的 async 上下文里直接调会 panic。`v2_exec` 的注入闭包里有
+    /// flavor 判定（多线程才 `block_in_place`，否则裸调）。
+    pub fn take_inbox_batch_sync(&self) -> Option<DrainedSupplement> {
+        let batch = self.plugin.take_inbox_batch_sync(&self.state);
+        let merged = crate::plugins::session::transcript::supplements::merge_supplements(&batch)?;
+        let count = merged
+            .meta
+            .as_ref()
+            .and_then(|m| {
+                m.get(crate::plugins::session::transcript::supplements::META_SUPPLEMENT_COUNT)
+            })
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1);
+        Some(DrainedSupplement {
+            text: merged
+                .content
+                .as_ref()
+                .map(|c| c.to_text())
+                .unwrap_or_default(),
+            count,
+            id: merged.id,
+            ids: merged
+                .meta
+                .as_ref()
+                .and_then(|m| {
+                    m.get(crate::plugins::session::transcript::supplements::META_SUPPLEMENT_IDS)
+                })
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        })
     }
 }
 

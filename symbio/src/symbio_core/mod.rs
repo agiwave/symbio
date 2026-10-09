@@ -34,7 +34,10 @@ mod view;
 // ==================== 事件溯源契约（v2 阶段 S0） ====================
 // 共享类型层（`event` / `view`）与两个机制（`store` ④ / `projection` ③）。
 // 模块依赖纪律见 [plan/05 §3.1]：彼此只准依赖类型定义，不持有对方句柄。
-pub use event::{Entity, Event, EventEnvelope, Seq, Verb};
+pub use event::{Entity, Event, EventEnvelope, Seq, Verb, EVENT_TURN_SUPPLEMENTED};
+pub use event::{
+    EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+};
 pub use invariants::check_all;
 pub use projection::calibration::calibration;
 pub use projection::checkpoint::checkpoint;
@@ -58,7 +61,9 @@ pub use view::Budget;
 
 // ==================== 主体（v2 阶段 S1，② actors） ====================
 // 只收类型化输入、只产事件（plan/05 §3.1 ② 行）；S1 落 Decider 平凡值，S2 加 Reasoner。
-pub use actors::{Pattern, Reasoner, TurnInput, TurnOutcome, TurnResume, TurnRunner};
+pub use actors::{
+    Pattern, Reasoner, RoundInjector, TurnInput, TurnOutcome, TurnResume, TurnRunner,
+};
 // 外部执行闸门（S8 第 20 步）、插话抢占判定（S8 第 19 步）、自主发起 + 意图闸门
 // （S9 第 21 步）与技能编译 + 路由（S9 第 22 步）：判定在 core、接线在
 // `plugins/session`（闸门进工具执行闸，判定者进收件箱忙窗，自主侧进心跳 tick，
@@ -72,9 +77,6 @@ pub(crate) use actors::{
     IntentGate, Preemption, PreemptionDecider, SkillCompiler, SkillRoute, SkillRouter,
 };
 // 事件名字表（名字是数据，单点定义）。
-pub use event::{
-    EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
-};
 // 任务格名字表（S7 步 16–18，批⑨）：core 内的读方（`projection::readyset`、
 // `invariants` 的 `acyclic_deps` / `rework_bounded`）走域内路径，core 外的写方只有
 // `plugins/session/v2_tasks` 按名字落格——**单消费方**，故与记忆事件名字表（下）、

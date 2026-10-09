@@ -424,6 +424,13 @@ impl DeltaSink for UiBridge {
 /// 刻意**不持有 `ChatOrchestrator`**：那会把「执行一轮」与「编排器」绑死，
 /// 而这里需要的只是它的三项（模型服务 / 插件宿主 / 本插件目录）——捆成窄接口
 /// 之后，单测不必造一个完整编排器。
+/// 抽干口：返回一批补充（正文 + 原条数），或 `None` = 没有。
+///
+/// 由 `chat_loop` 从 `SupplementDrain` 适配而来（它要插件宿主 + 会话状态，那个
+/// 类型不进 `V2Turn`）。测试直接给闭包，于是能造「只返回一次」这种形状。
+pub(crate) type SupplementFn =
+    Arc<dyn Fn() -> Option<super::chat_loop::state::DrainedSupplement> + Send + Sync>;
+
 pub(crate) struct V2Turn<'a> {
     /// 会话（v2 WAL 目录与档位的持有者）。
     pub session: &'a PersistentChatSession,
@@ -457,6 +464,21 @@ pub(crate) struct V2Turn<'a> {
     ///
     /// 它**不是**轮次事实，因此不随 `v2_executed` 的拦截一起消失：v2 原生记账
     /// 只覆盖轮次事实，记忆与学习的写方两档共用同一个函数（见该函数文档）。
+    /// 补充抽干口（缺口 3）：工具循环每跑完一轮问一次「用户有没有中途插话」。
+    /// 有就折进**本轮**——落一格 `turn.supplemented` 事实 + 进下一次请求。
+    ///
+    /// **闭包而不是具体类型**：抽干的实现是 `SupplementDrain`（要插件宿主 + 会话
+    /// 状态），而这里只需要「取一批」这一个动作。绑具体类型的话，**测试造不出假件**
+    /// ——那等于这条链路没法在单测里验，只能靠 e2e，而 e2e 照不出「落格带没带溯源」
+    /// 「`count` 对不对」这种细节。
+    ///
+    /// 类型定义在插件侧（core 不参与这套，见 `TurnInput::inject`）。
+    pub supplements: Option<SupplementFn>,
+    /// 本轮补充事件的序号游标（事件 id `s-{turn}-{no}` 的一部分）。
+    ///
+    /// **必须是共享可变的**（`Arc<AtomicU64>`）：注入闭包是 core 在循环里调的，
+    /// 而闭包只捕获它自己那份——不共享的话第二次注入会用同一个 id，撞幂等键。
+    pub supplemental_no: Arc<std::sync::atomic::AtomicU64>,
     pub recalled: Option<&'a crate::symbio_core::RecallView>,
     /// 本轮技能路由判定（S11 步 22）：`(skill_id, fallback)` 逐条——轮末落
     /// `memory.recalled` 供 `calibration` 归并，是「回退会发生」的唯一数据源。
@@ -514,6 +536,8 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         tools,
         resume,
         recalled,
+        supplements,
+        supplemental_no,
         skill_obs,
         skill_hits,
         prefix,
@@ -523,8 +547,13 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         PluginError::InternalError("full 档需要持久会话（临时会话无事实源）".into())
     })?;
     let wal = dir.join(super::paths::V2_WAL_FILE);
-    let store = EventWalStore::open(&wal)
-        .map_err(|e| PluginError::InternalError(format!("v2 WAL 打开失败：{e}")))?;
+    // `Arc` 是给轮内注入闭包用的（`TurnInjector` 是 `'static` 闭包，而
+    // `WalStore` 不 `Clone`）。**只有它 clone**——`Arc` 共享同一份，注入的落格
+    // 与本函数末尾的落格进的是同一个文件，append-only 下不会打架。
+    let store = std::sync::Arc::new(
+        EventWalStore::open(&wal)
+            .map_err(|e| PluginError::InternalError(format!("v2 WAL 打开失败：{e}")))?,
+    );
     let snapshot = store.range(Seq::new(0));
 
     // turn 号与续写锚点：
@@ -556,6 +585,13 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
             )
         }
     };
+
+    // 折进的补充消息的收集器（缺口 3）：注入闭包（`'static`）往它 push，
+    // 执行完随 `V2TurnResult` 回灌进 `context.messages`——**与 v1 路径同动作**
+    //（那边是 `context.messages.push(merged)`）。不回灌就只活在这一次请求里，
+    // 重启即丢，而 t19 等的正是落库那条。
+    let collected: Arc<std::sync::Mutex<Vec<ChatMessage>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
 
     // 流式桥：分帧侧（同步回调）与发射侧（异步任务）经 unbounded 通道解耦。
     // 通道在桥 drop（生成结束）后关闭，接收端自然退出。
@@ -662,7 +698,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
             let tok = TokenIssuer::issue_reflex();
             TurnRunner
                 .run_reflex(
-                    &store,
+                    &*store,
                     &tok,
                     turn_no,
                     &actor,
@@ -682,8 +718,109 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
                 tier,
                 window_turns: Some(window_turns),
                 resume: resume_anchor,
-                actor,
+                actor: actor.clone(),
                 prefix,
+                // 轮内注入（缺口 3）：用户中途说的话折进**本轮**。
+                //
+                // core 只知道「加消息」——抽干、合并、**落格**全在这里（插件侧）。
+                // core 不该知道「收件箱补充」这个概念（队列、`merge_supplements`、
+                // `InboxItem` 都在 `plugins/session`），而落格也不需要 core 参与：
+                // 本函数自己就开着 `store`。
+                inject: supplements.map(|sup| {
+                    let store = store.clone();
+                    let actor = actor.clone();
+                    // 折进的消息往收集器 push（末尾随 `V2TurnResult` 回灌进落库镜像）。
+                    let sink_msgs = collected.clone();
+                    std::sync::Arc::new(move |anchor: Option<u64>| {
+                        // 同步取件：队列与配置都在 tokio RwLock 里，用 `blocking_read`
+                        // 桥过来。
+                        //
+                        // 抽干口是**闭包**：它内部用 `blocking_read` 跨过 tokio 锁，
+                        // 所以多线程 runtime 上要 `block_in_place`（**单线程 runtime 上
+                        // 调用会 panic**）——所以先判 flavor。
+                        let batch = match tokio::runtime::Handle::try_current() {
+                            Ok(h)
+                                if h.runtime_flavor()
+                                    == tokio::runtime::RuntimeFlavor::MultiThread =>
+                            {
+                                tokio::task::block_in_place(|| sup())
+                            }
+                            // 单线程 / 无 runtime（单测）：裸调（闭包内部是阻塞读）。
+                            _ => sup(),
+                        };
+                        let Some(drained) = batch else {
+                            return Vec::new();
+                        };
+                        let (text, count, ids) = (drained.text, drained.count, drained.ids);
+                        if text.trim().is_empty() {
+                            return Vec::new();
+                        }
+                        // **落格**：成为一格事实（`turn × asserted`）。不落格的话它
+                        // 只活在这一次请求里，下一轮又消失了——而「用户说过的话没有
+                        // 变成事实」正是缺口 3 本身。
+                        //
+                        // 事件 id 带序号（`s-{turn}-{no}`）：一次工具循环里可能折进
+                        // 多条，不带序号会撞幂等键（`Duplicate`）。
+                        //
+                        // 拿不到溯源锚点 ⇒ **不落也不注入**（见 `supplement_anchor`
+                        // 的注释）：I2 要求断言类事件带溯源，而无溯源的断言事件
+                        // 比不落更难查。
+                        let Some(anchor) = anchor else {
+                            crate::plugin_warn!(
+                                "session",
+                                "[Turn] 补充无溯源锚点，本轮丢弃（见 supplement_anchor 注释）"
+                            );
+                            return Vec::new();
+                        };
+                        let no = supplemental_no.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if let Err(e) = store.append(
+                            crate::symbio_core::Event::pending(
+                                format!("s-{turn_no}-{no}"),
+                                crate::symbio_core::EVENT_TURN_SUPPLEMENTED,
+                                crate::symbio_core::Entity::Turn,
+                                crate::symbio_core::Verb::Asserted,
+                                turn_no,
+                                &actor.principal,
+                            )
+                            .with_produced_by(anchor)
+                            .with_payload(serde_json::json!({ "text": text, "count": count })),
+                        ) {
+                            // 落格失败**不静默**：消息仍会进这一次请求，但事实网格里
+                            // 没有它 ⇒ 下一轮起不可见。所以出声。
+                            //
+                            // `{:?}` 不是 `{e}`：`AppendError` 只 derive 了 `Debug`。
+                            crate::plugin_warn!(
+                                "session",
+                                "[Turn] 补充落格失败（仍注入本轮，下一轮起不可见）: {e:?}"
+                            );
+                        }
+                        let msg = ChatMessage {
+                            // 沿用第一条补充的 id（见 `DrainedSupplement::id` 的说明）
+                            id: drained.id.clone(),
+                            role: Some(MessageRole::User),
+                            content: Some(MessageContent::Text(text.clone())),
+                            meta: Some(serde_json::json!({
+                                super::transcript::supplements::META_SUPPLEMENT: true,
+                                super::transcript::supplements::META_SUPPLEMENT_COUNT: count,
+                                super::transcript::supplements::META_SUPPLEMENT_IDS: ids,
+                            })),
+                            ..Default::default()
+                        };
+                        // 锁拿不到就**跳过回灌**，不 panic：这条补充**已经落格、
+                        // 已经进了本轮请求**，用户看得见——丢的只是落库镜像里的一条
+                        // （重启后少它）。为这个 panic 不值。
+                        if let Ok(mut sink) = sink_msgs.lock() {
+                            sink.push(msg.clone());
+                        }
+                        vec![crate::symbio_core::PromptMessage {
+                            role: "user".into(),
+                            text,
+                            tool_call_id: None,
+                            tool: None,
+                            tool_calls: None,
+                        }]
+                    }) as crate::symbio_core::RoundInjector
+                }),
             };
             // 工具分发：core 只认契约（`DispatchPort`），实现是插件侧——它持插件宿主、
             // 请求上下文、转写出口与会话目录（core 认识这些即违 E-009）。
@@ -699,7 +836,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
             let dispatch_ref: &dyn DispatchPort = &dispatcher;
             let r = TurnRunner
                 .run_with_tools(
-                    &store,
+                    &*store,
                     &llm,
                     &tok,
                     input,
@@ -799,7 +936,11 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
             // 记忆与学习：同一函数（`record_learning`）。
             super::v2_facts::record_learning(
                 &wal,
-                &store,
+                // `store` 是 `Arc<WalStore>`（轮内注入闭包要 `'static`），而本函数
+                // 收 `&WalStore` ⇒ 要一次显式 deref。写 `store.as_ref()` 而不是
+                // `&*store`：后者会被 clippy 判 `needless_borrow`（它建议 auto-deref，
+                // 但 auto-deref 到 `Arc` 本身，而 `Arc<WalStore>` 不实现 `Store`）。
+                store.as_ref(),
                 &store.range(Seq::new(0)),
                 turn_no,
                 user_seq,
@@ -830,13 +971,23 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     // （`WaitingUserAction`），v1 的呈现（卡片 + 恢复入口）不变；恢复时经
     // [`TurnResume`] 续写同一轮（不重开用户格）。此处的 `text` 只是模型在工具轮说过的话，不是终答。
 
+    // 折进的补充也要进落库镜像（缺口 3）：排在 `produced` **之前** ——
+    // 用户先插话、工具结果后到，这是时间序（`persist_messages` 只写尾部增量，
+    // 顺序错了落库就乱了）。
+    // 同上：锁拿不到就用空的（落库镜像少这批补充，其余不受影响）。
+    let mut all_messages: Vec<ChatMessage> = collected
+        .lock()
+        .map(|mut v| std::mem::take(&mut *v))
+        .unwrap_or_default();
+    all_messages.extend(produced);
+
     Ok(V2TurnResult {
         output: TurnOutput {
             text: outcome.text,
             response_text_child_id: child_id,
             ..Default::default()
         },
-        messages: produced,
+        messages: all_messages,
     })
 }
 

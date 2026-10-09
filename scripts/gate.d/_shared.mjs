@@ -741,8 +741,10 @@ export const BASELINE = {
   //   `v2_exec.test.rs`（带反向自检）或新的 `v2_facts.test.rs` 接管。
   //   ⚠️ 这是**下修**，不是回填容差——`ratchetErosion` 判的是「基线相对最近两个碰过本文件
   //   的提交有没有变松」，所以这一格带 `baseline-allow` 豁免（理由见其上）。
-  // baseline-allow rustTests: 批 P3 退役 `bridge` 转写路径，`v2_bridge.test.rs` 的 15 条缩到 `v2_facts.test.rs` 的 5 条（净 −10），另加 11 条迁与新增判据，净 +1；逐条归属见上方注释，非侵蚀。
-  rustTests: 1381,
+  // baseline-allow rustTests: 批 P3 退役 `bridge` 转写路径，`v2_bridge.test.rs` 的 15 条缩到 `v2_facts.test.rs` 的 5 条（净 −10），另加 11 条迁与新增判据，净 +3；逐条归属见上方注释，非侵蚀。
+  // 续 · 批 P3c（缺口 3）：**+2** 条新判据（core 层「注入的消息进了本轮的下一次请求」
+  //   1 + 插件层「补充落成事实 / 本轮可见 / 重开 WAL 后下一轮仍可见」1），无删除。
+  rustTests: 1383,
   /**
    * CI 口径的 Rust 通过数（**只增不减**）——与上面三个分包基线**是不同口径，不能互替**。
    *

@@ -491,6 +491,38 @@ impl SessionPlugin {
         batch
     }
 
+    /// 同上，但走 `blocking_read`（同步调用方用，见下条）。
+    /// [`Self::take_inbox_batch`] 的**同步**孪生（缺口 3 的注入挂点用它）。
+    ///
+    /// **判定与取件逻辑只有这一份**——异步版直接委托过来，两条路不可能漂。
+    ///
+    /// ⚠️ 调用方负责 `block_in_place`（见 `SupplementDrain::take_inbox_batch_sync`
+    /// 的说明）：单线程 runtime 的 async 上下文里 `blocking_read` 会 panic。
+    pub(crate) fn take_inbox_batch_sync(&self, state: &Arc<ActiveSessionState>) -> Vec<InboxItem> {
+        let limit = {
+            let cfg = self.config.blocking_read();
+            if cfg.supplements_enabled {
+                cfg.supplements_max_per_drain.max(1)
+            } else {
+                1
+            }
+        };
+
+        let batch: Vec<InboxItem> = {
+            let mut inner = state.inner.blocking_write();
+            let n = inner.inbox.len().min(limit);
+            inner.inbox.drain(..n).collect()
+        };
+
+        for item in &batch {
+            self.change_subs.notify(&VdfsChange::bare(inbox_item_path(
+                &state.session_id,
+                &item.id,
+            )));
+        }
+        batch
+    }
+
     /// 用收件箱条目驱动一轮（消费者调用；单测也直接调它以绕开后台任务）。
     ///
     /// 上下文**自己造**：只带目标会话 id 与工作目录。发起者的请求上下文刻意不沿用
