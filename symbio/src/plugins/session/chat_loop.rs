@@ -471,6 +471,47 @@ pub async fn run_chat_loop(
                             "session",
                             "[Classify] 本轮不进工具循环（verdict={verdict:?}）"
                         );
+                        // ── 缺口 5：full 档下这一轮的**轮次事实仍须入格** ────────────
+                        //
+                        // `Answered` 在这一步就收尾，而 `EVENT_USER_MESSAGE` 的写方是 v2
+                        // 运行器 ⇒ 不落这两格，下一轮 prompt 里这次问答**整个消失**，
+                        // `session/stats` 的轮次计数也不含它——而 `messages.json` 里有
+                        // （`apply_verdict` 刚 push 的答话会随 `finish_turn` 落库）
+                        // ⇒ **两条真源**。修法 = 把答话交给运行器落格（见
+                        // `v2_exec::execute_final_reply_turn` 的文档）。
+                        if matches!(context.session.v2_mode(), super::config::V2Mode::Full) {
+                            // 答话 = `apply_verdict` 刚 push 的那条对话面文本（末尾一条
+                            // assistant 消息）。取它而不是再算一遍：措辞归 `compose` 所有，
+                            // 这里只搬运。
+                            let reply = context
+                                .messages
+                                .iter()
+                                .rev()
+                                .find(|m| m.role == Some(MessageRole::Assistant))
+                                .and_then(|m| match &m.content {
+                                    Some(MessageContent::Text(t)) => Some(t.clone()),
+                                    _ => None,
+                                })
+                                .unwrap_or_default();
+                            if let Err(e) = super::v2_exec::execute_final_reply_turn(
+                                &context.session,
+                                &ctx,
+                                orchestrator.provider.clone(),
+                                turn.abort.clone(),
+                                utterance,
+                                &reply,
+                            )
+                            .await
+                            {
+                                // 落格失败**只告警**：答话已在 `context.messages` 里，用户
+                                // 照旧收得到。把它升级成整轮失败，等于用「记不下来」换
+                                // 「答不出来」——与缺口 4 的汇报落格同一条口径。
+                                plugin_warn!(
+                                    "session",
+                                    "[Session] v2 定稿答话入格失败（本轮照常收尾）: {e}"
+                                );
+                            }
+                        }
                         return finish_turn(
                             orchestrator,
                             &context,

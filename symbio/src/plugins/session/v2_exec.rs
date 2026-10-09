@@ -625,6 +625,103 @@ fn supplement_into_request(
     }]
 }
 
+/// 静默增量口：定稿答话轮一个模型请求都不发 ⇒ 没有任何增量可送。
+///
+/// **为什么不用 core 的 `SilentDeltas`**：它不在根出口（core 内部自己走域内路径用），
+/// 而 C-002 不许插件深引 `symbio_core::adapters::…`。为一次「什么都不做」去拓宽 core 的
+/// 公开面（并因此多一个单消费方符号、动棘轮）不划算——插件侧 4 行更干净。
+struct SilentDeltaSink;
+
+impl DeltaSink for SilentDeltaSink {
+    fn on_delta(&self, _text: &str) {}
+}
+
+/// **定稿答话轮**（缺口 5）：`classify` 判 `Answered` ⇒ 本轮**一个模型请求都不发**，
+/// 但轮次事实（用户格 + 收束格）仍须由 v2 运行器落。
+///
+/// ## 它解决的是什么
+///
+/// `Answered` 判决在 `chat_loop` 步骤 2 就短路收尾，**根本不进 [`execute_turn`]**；
+/// 而 `EVENT_USER_MESSAGE` 是**运行器落的**。⇒ 那一轮在事实网格里**一格都没有**：
+/// 没有用户格，也没有 `chat.assistant.final`。于是下一轮 prompt 里这次问答**整个消失**，
+/// `session/stats` 的轮次计数也不含它——而 `messages.json` 里有（`context.messages` 落库）
+/// ⇒ **两条真源**。完全静默：不报错、不告警、既有断言全绿。判据 = e2e `t22`。
+///
+/// ## 为什么走运行器，而不是本函数自己写那两格
+///
+/// 「一个 turn = 用户格 opened + 至多一条收束 closed」这条不变量由运行器守着。插件自己
+/// 补写就成了**第二个轮次事实写方**——同轮两份记账的假象随之回来（那正是
+/// `chat_loop` 的 `!turn.v2_executed` 拦截当年要防的形状）。所以答话交给运行器
+/// （`TurnInput::final_reply`），格仍由它落。
+///
+/// ## 与 [`execute_turn`] 的两处刻意差异
+///
+/// 1. **不写派生事实**：`record_learning` / `record_derived` 一律不调——`Answered` 轮没有
+///    工具交换、没有模型参与，与 v1 那条路（`finish_turn` 直接收尾、不转写）逐字一致。
+/// 2. **不上线 UI 帧**：答话节点已由 `apply_verdict` 推进 `context.messages`
+///    （`dialog_node`，`exclude_from_context = false`），由 `finish_turn` 落库 ⇒ 这里用
+///    [`SilentDeltaSink`]；再发一次就是同一条答话重复上屏。
+///
+/// ## `llm` / `tok` 是 `run_with_tools` 的端口，不是本路的依赖
+///
+/// 短路发生在**用到它们之前**（`TurnRunner::run_with_tools` 步骤 1b）——这一轮一次模型
+/// 往返都不发。仍然照签名传，是因为「工具轮入口」只有那一个：另开一个入口就得把
+/// 「用户格 + 收束格」的落格逻辑写第二遍，那才是真正的重复。
+pub(crate) async fn execute_final_reply_turn(
+    session: &PersistentChatSession,
+    ctx: &Arc<dyn crate::symbio_core::PluginInvokeRequest>,
+    provider: Arc<dyn ModelProvider>,
+    abort: ExecAbortSignal,
+    user_text: &str,
+    reply: &str,
+) -> Result<(), PluginError> {
+    let dir = session.session_dir().ok_or_else(|| {
+        PluginError::InternalError("full 档需要持久会话（临时会话无事实源）".into())
+    })?;
+    let wal = dir.join(super::paths::V2_WAL_FILE);
+    let store = EventWalStore::open(&wal)
+        .map_err(|e| PluginError::InternalError(format!("v2 WAL 打开失败：{e}")))?;
+    let snapshot = store.range(Seq::new(0));
+    // turn 号口径与 [`execute_turn`] 同源（WAL 内既有 `user.message` 计数）——两处各写
+    // 一套必然在「答话轮之后紧接着一个新轮」时错开一号。
+    let turn_no = count_user_messages(&snapshot);
+    // 身份与档位取值点同 [`execute_turn`]：主体 = 会话选定的那个 agent；档位 = 深度
+    // （`Answered` 轮没有可跳过的模型调用，不属于反射档）。
+    let principal = super::chat_loop::request_principal(ctx.as_ref());
+    let actor = ActorSpec {
+        budget_ms: LatencyTier::Deep.budget_ms(),
+        ..ActorSpec::trivial(principal)
+    };
+    let llm = ProviderLlmAdapter::for_turn(provider, "", abort.clone());
+    let tok = TokenIssuer::issue_deep();
+    let input = TurnInput {
+        turn: turn_no,
+        text: user_text.to_string(),
+        tier: LatencyTier::Deep,
+        // 不生成 ⇒ 没有 prompt，也就没有窗口可裁。
+        window_turns: None,
+        // `Answered` 只在轮首成立（`tool_rounds == 0`），不带恢复锚点。
+        resume: None,
+        actor,
+        prefix: None,
+        inject: None,
+        final_reply: Some(reply.to_string()),
+    };
+    TurnRunner
+        .run_with_tools(
+            &store,
+            &llm,
+            &tok,
+            input,
+            Arc::new(SilentDeltaSink),
+            &[],
+            None,
+        )
+        .await
+        .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?;
+    Ok(())
+}
+
 pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, PluginError> {
     let V2Turn {
         session,
@@ -932,6 +1029,9 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                         })
                     }) as crate::symbio_core::RoundInjector
                 }),
+                // 本路**恒**走生成：定稿答话轮（缺口 5）不经这里——它一个模型请求都不发，
+                // 由 `execute_final_reply_turn` 单独入口落格（见该函数）。
+                final_reply: None,
             };
             // 工具分发：core 只认契约（`DispatchPort`），实现是插件侧——它持插件宿主、
             // 请求上下文、转写出口与会话目录（core 认识这些即违 E-009）。

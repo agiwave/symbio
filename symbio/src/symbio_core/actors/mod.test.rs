@@ -2292,6 +2292,7 @@ mod turn_runner_tests {
                     actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
+                    final_reply: None,
                 },
                 got.clone() as Arc<dyn DeltaSink>,
             )
@@ -2333,6 +2334,7 @@ mod turn_runner_tests {
                     actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
+                    final_reply: None,
                 },
                 got2.clone() as Arc<dyn DeltaSink>,
             )
@@ -2420,6 +2422,7 @@ mod turn_runner_tests {
                     actor: ActorSpec::trivial(PRINCIPAL_AUTONOMOUS),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
+                    final_reply: None,
                 },
                 std::sync::Arc::new(SilentDeltas),
                 &[],
@@ -2460,6 +2463,7 @@ mod turn_runner_tests {
                     actor: ActorSpec::trivial("agent:main"),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
+                    final_reply: None,
                 },
                 std::sync::Arc::new(SilentDeltas),
                 &[],
@@ -2862,7 +2866,51 @@ mod tool_round_tests {
             actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
             // 请求级前缀：测试不走请求视图层（三段皆空）。
             prefix: None,
+            final_reply: None,
         }
+    }
+
+    /// 定稿答话轮（缺口 5）：`final_reply` 给定时**不调模型**，但两格照落。
+    ///
+    /// ## 为什么要钉「两格都在」
+    ///
+    /// `Answered` 那一轮在 v1 路径上**根本不进运行器** ⇒ 事实网格里一格都没有。下一轮
+    /// prompt 从网格投影 ⇒ 这次问答整个消失，而 `messages.json` 里有 ⇒ **两条真源**。
+    /// 判据钉的是「用户格 + 收束格都在、且收束格溯源指向用户格」，不是「答话文本对不对」。
+    ///
+    /// ## 为什么要钉「不调模型」
+    ///
+    /// 这一轮一次模型往返都不该发——那是 `Answered` 的全部意义。用记录型桩的 `prompts`
+    /// 长度来钉：它长了就说明请求发了出去。
+    ///
+    /// **反向自检**：把 `run_with_tools` 步骤 1b 那段短路删掉，本用例必红（桩会被调到）。
+    #[tokio::test]
+    async fn final_reply_lands_both_cells_without_calling_the_model() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = ToolCallingLlm::new();
+        let prompts = llm.prompts.clone();
+        let mut i = input();
+        i.final_reply = Some("北京今天晴。".into());
+        let out = TurnRunner
+            .run_with_tools(&store, &llm, &tok, i, Arc::new(SilentDeltas), &[], None)
+            .await
+            .unwrap();
+        assert_eq!(out.text, "北京今天晴。", "答话就是这一轮的输出");
+        assert!(!out.fell_back, "定稿答话不是兜底");
+        assert!(
+            prompts.lock().unwrap().is_empty(),
+            "定稿答话轮一次模型请求都不该发"
+        );
+        let ev = store.range(Seq::new(0));
+        assert_eq!(ev.len(), 2, "用户格 + 收束格，一格不多一格不少");
+        assert_eq!(ev[0].kind, EVENT_USER_MESSAGE);
+        assert_eq!(ev[1].kind, EVENT_ASSISTANT_FINAL);
+        assert_eq!(
+            ev[1].produced_by,
+            ev[0].seq.map(|s| s.value()),
+            "I2：收束格的溯源必须指向本轮用户格"
+        );
     }
 
     /// `TurnInput::prefix` 排在基线**之前**，且**不进**「就地累积」那条路。
@@ -3315,6 +3363,7 @@ mod tool_round_tests {
                     }),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
+                    final_reply: None,
                 },
                 Arc::new(SilentDeltas),
                 &tools(),

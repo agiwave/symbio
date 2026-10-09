@@ -744,7 +744,13 @@ export const BASELINE = {
   // baseline-allow rustTests: 批 P3 退役 `bridge` 转写路径，`v2_bridge.test.rs` 的 15 条缩到 `v2_facts.test.rs` 的 5 条（净 −10），另加 11 条迁与新增判据，净 +3；逐条归属见上方注释，非侵蚀。
   // 续 · 批 P3c（缺口 3）：**+2** 条新判据（core 层「注入的消息进了本轮的下一次请求」
   //   1 + 插件层「补充落成事实 / 本轮可见 / 重开 WAL 后下一轮仍可见」1），无删除。
-  rustTests: 1383,
+  // 2026-10-09 **回填 `1383 → 1387`（+4）**，两笔归属，无残差：
+  //   +3 = 批「缺口 4」（`ce86386`）新增的三条判据——**该提交当时未回填**，正是本文件
+  //        反复记下的那种欠账（「每天都没人回填 ⇒ 棘轮被削格」）；本次一并清偿；
+  //   +1 = 批「缺口 5」（`TurnInput::final_reply`）的
+  //        `final_reply_lands_both_cells_without_calling_the_model`。
+  //   实测口径同前：`cargo test -p symbio`，取首个 `test result: ok. N passed`。
+  rustTests: 1387,
   /**
    * CI 口径的 Rust 通过数（**只增不减**）——与上面三个分包基线**是不同口径，不能互替**。
    *

@@ -905,6 +905,28 @@ pub struct TurnInput {
     ///
     /// ⚠️ 调用方负责**取走语义**（同一条不会被注入两次）——core 不做去重。
     pub inject: Option<RoundInjector>,
+    /// **本轮已有定稿答话**：`Some(答话)` ⇒ 不调模型，这段文字直接成为本轮输出
+    /// （`chat.assistant.final` 那格照常落）。
+    ///
+    /// ## 它解决的是什么（缺口 5）
+    ///
+    /// `classify` 判 `Answered` ⇒ `compose` 出好答话 ⇒ 本仓这一轮**一个模型请求都不该
+    /// 发**。v1 的做法是把这个答话 push 进 `context.messages` 后收尾；而 `full` 档的
+    /// prompt 从事实网格投影 ⇒ 那次问答在网格里**完全不存在**（用户格与收束格都由
+    /// 本运行器落，而该轮根本不进运行器）⇒ 下一轮模型不知道自己刚回答过。
+    ///
+    /// ## 为什么由 core 承接而不是插件自己落那两格
+    ///
+    /// 「一个 turn = 用户格 opened + 至多一条收束 closed」这条不变量由运行器守着。
+    /// 插件自己补写就成了**第二个轮次事实写方**——那正是 `chat_loop` 的
+    /// `!turn.v2_executed` 拦截要防的形状（同轮两份记账的假象）。所以走这里：
+    /// 答话给运行器，格仍由它落。
+    ///
+    /// ## `model` 载荷字段留空
+    ///
+    /// 这一轮没有模型参与，`chat.assistant.final` 的 `model` 载荷记**空串**而不是
+    /// 任何模型的 id——记一个会变成「这次请求用的是那个模型」，而事实相反。
+    pub final_reply: Option<String>,
 }
 
 /// 「下一轮要加哪些消息」的取数口（见 [`TurnInput::inject`]）。
@@ -946,6 +968,7 @@ impl std::fmt::Debug for TurnInput {
             .field("resume", &self.resume)
             .field("actor", &self.actor)
             .field("prefix", &self.prefix)
+            .field("final_reply", &self.final_reply)
             // 闭包**不展开**：展开会把捕获的东西（生产里是用户对话正文）打进日志。
             .field("inject", &self.inject.as_ref().map(|_| "<闭包>"))
             .finish()
@@ -1107,6 +1130,9 @@ impl TurnRunner {
                 actor: ActorSpec::trivial("agent:main"),
                 // 便捷入口没有请求视图层可拼（三段由调用方的 `build_request_view` 给出）。
                 prefix: None,
+                // 便捷入口**恒**走生成：定稿答话轮要落的两格与「用户格 + 收束格」同形，
+                // 但它没有生成这一格，调用方得自己把答话交进来（生产：`v2_exec`）。
+                final_reply: None,
             },
             std::sync::Arc::new(crate::symbio_core::adapters::SilentDeltas),
         )
@@ -1187,6 +1213,7 @@ impl TurnRunner {
             resume,
             actor,
             prefix,
+            final_reply,
         } = input;
         // 本轮的 viewer：历史窗口只交**本主体看得见**的事件（plan/11 批1 ③）。
         // 身份是入参不是字面量——`actor.principal` 由调用方（生产：会话属于哪个
@@ -1213,6 +1240,65 @@ impl TurnRunner {
                 .map(|seq| seq.value())?,
             Some(r) => r.user_seq,
         };
+        // 1b. 定稿答话（缺口 5）：用户格照常开，答话照常收束，**模型不参与**。
+        //
+        // 为什么放在这里而不是循环里：这一轮一次请求都不发，循环的第一件事
+        // （渲染 prompt、调模型）对它全都是白工。放在用户格之后是因为收束格的
+        // 溯源必须指向本轮用户格（I2）——而那只有落完用户格才有。
+        //
+        // 空答话与模型返回空文本同一条纪律：不落收束，落到兜底话术上。把空串
+        // 记成「答了空话」会让「到点必答」这条线无声失效（I3）。
+        if let Some(reply) = final_reply.as_deref() {
+            if reply.trim().is_empty() {
+                // 耗时记 0：这一轮一次模型请求都没发（答话是调用方给好的
+                // `final_reply`），`started` 那条计时口径本来就是「模型往返」。
+                return self
+                    .append_fallback(store, &actor, turn, user_seq, "compose returned empty", 0)
+                    .await;
+            }
+            if !closure_granted(&actor.principal) {
+                crate::plugin_warn!(
+                    "actors",
+                    "[v2] 定稿答话被授权拒绝（{} 缺 reply.first），本轮不入格（turn={turn}）",
+                    actor.principal
+                );
+                return Ok(TurnOutcome {
+                    turn,
+                    text: reply.to_string(),
+                    cost_ms: 0,
+                    fell_back: false,
+                    aborted: false,
+                    awaits_user: false,
+                    closure_denied: true,
+                });
+            }
+            store.append(
+                Event::pending(
+                    format!("f-{turn}"),
+                    EVENT_ASSISTANT_FINAL,
+                    Entity::Turn,
+                    Verb::Closed,
+                    turn,
+                    &actor.principal,
+                )
+                .with_produced_by(user_seq)
+                .with_cost_ms(0)
+                .with_payload(serde_json::json!({
+                    "text": reply,
+                    // 空串：这轮没有模型参与（见 `TurnInput::final_reply` 的载荷说明）
+                    "model": "",
+                })),
+            )?;
+            return Ok(TurnOutcome {
+                turn,
+                text: reply.to_string(),
+                cost_ms: 0,
+                fell_back: false,
+                aborted: false,
+                awaits_user: false,
+                closure_denied: false,
+            });
+        }
         let full_snapshot = store.range(Seq::new(0));
         // 对话窗口：只把最近 N 个 turn 的事件交给 prompt（含当前轮）——
         // 窗口是**视图**问题，事实照常全量入格（append-only 不受影响）。

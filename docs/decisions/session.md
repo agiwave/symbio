@@ -278,7 +278,7 @@ e2e 覆盖支撑**（42 个用例里只有 4 个跑 `full`，其余全在 `bridg
 | 2 | `context_messages = 0` 的语义 | `window_by_turn`（读侧窗口） | **历史被清空** | **已修**（`keep == 0` = 不截断） |
 | 3 | 轮边界折进的补充 | `context.messages`（消息列表） | **否** | **已修**（`turn.supplemented`，见下「缺口 4」同一批） |
 | 4 | 轮边界汇报（中途说一句） | `context.messages`（消息列表） | **不进包**（按设计） | **已修**（`chat.assistant.reported`） |
-| 5 | compose 的 `Answered` 答话 | `context.messages`（消息列表） | **否** | **待修**（**整轮不入网格**，见下） |
+| 5 | compose 的 `Answered` 答话 | `context.messages`（消息列表） | **否** | **已修**（`TurnInput::final_reply` + `execute_final_reply_turn`，见下） |
 | 6 | token 估算的校准反馈 | `feedback_estimate` 的调用点 | **不校准** | **待修**（通路断在 v1 侧，见下） |
 | 7 | 思考通道增量（reasoning） | `DeltaSink::on_delta(text)` 单通道 | **丢** | **待修**（core 契约面变更，单独立批） |
 
@@ -318,9 +318,14 @@ e2e 覆盖支撑**（42 个用例里只有 4 个跑 `full`，其余全在 `bridg
   ⇒ 那轮在事实网格里**一格都没有**：没有用户格，也没有 `chat.assistant.final`。
   于是下一轮 prompt 里这次问答**整个消失**，`session/stats` 的轮次计数也不含它——
   而 `messages.json` 里有（`context.messages` 落库）⇒ **两条真源**。
-  **未修**：补它要让 `chat_loop` 成为轮次事实的第二个写方，那撞上
-  「`full` 档的轮次事实只有 v2 运行器一个写方」这条承重不变量。修法是让
-  `TurnInput` 承接一个「本轮已有定稿答复」的入口，属设计岔口，另立一批。
+  **已修**：`TurnInput::final_reply`（`Some(答话)` ⇒ 不调模型，两格仍由运行器落）+
+  `chat_loop` 的 `Answered` 分支在 `full` 档改走
+  `v2_exec::execute_final_reply_turn`（**同一份**落格纪律，不是第二个写方——
+  运行器仍是轮次事实的唯一写方，插件只把答话交进去）。两处刻意与 `execute_turn` 不同：
+  **不写派生事实**（`Answered` 轮没有工具交换与模型参与，与 v1 的 `finish_turn` 直接收尾
+  逐字一致）、**不上线 UI 帧**（答话节点已由 `apply_verdict` 进 `context.messages`，
+  再发一次就是重复上屏）。收束格 `model` 载荷记**空串**——这一轮没有模型参与。
+  落格失败**只告警**（答话已可呈现，用「记不下来」换「答不出来」是净亏）。
 - **缺口 6 机制**：`report_provider_usage`（`feedback_estimate`，全仓唯一校准反馈点）
   挂在 `chat_loop/turn.rs` 的 **v1 轮流程**里 ⇒ `full` 档从不执行 ⇒
   `CalibratedTokenizer.ratio` 永远停在初值（探针实测无任何 `[feedback]` 行）。bridge 档
