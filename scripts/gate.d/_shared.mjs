@@ -760,7 +760,12 @@ export const BASELINE = {
   //   （`provider_usage_survives_the_run_to_the_outcome`）：用量断了 ⇒ 校准比
   //   冻结在 1.0 ⇒ 压缩预检误判「注定超限」（e2e t8/t11/t18 的正因）。
   //   实测口径同前：`cargo test -p symbio`，取首个 `test result: ok. N passed`。
-  rustTests: 1389,
+  // 2026-10-09 **回填 `1389 → 1390`（+1）**：批「缺口 8」——`DeltaSink` 开第三条
+  //   **消息形状**出口 `on_tool_frame`，`plugins/model/bound_provider.test.rs` 加
+  //   桥接用例（`provider_adapter_routes_tool_frames_to_the_message_channel`）：
+  //   身份帧先于增量、全帧同 id（id 漂移 = 第二张卡）、Σ帧拼出完整参数 JSON。
+  //   实测口径同前：`cargo test -p symbio`，取首个 `test result: ok. N passed`。
+  rustTests: 1390,
   /**
    * CI 口径的 Rust 通过数（**只增不减**）——与上面三个分包基线**是不同口径，不能互替**。
    *

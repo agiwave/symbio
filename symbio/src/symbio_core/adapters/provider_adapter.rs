@@ -28,17 +28,21 @@ use crate::symbio_core::ExecEventSink;
 use crate::symbio_core::PromptMessage;
 use crate::symbio_core::{llm_short_id, ExecTranscriptWriter, ModelProvider, PluginError};
 
-/// 流式帧桥：把 `execute_turn` 的转写帧**择要**转成增量——正文与推理**两条流**
-/// 各自转发（[`DeltaSink::on_delta`] / [`DeltaSink::on_reasoning`]）：
-/// - 快照帧（`msg_type = Text | Reasoning` 且 `status = Streaming`）：登记节点 id，
-///   全文转发（首片即完整快照）；
-/// - 窄帧（`delta`）：只有**已登记的**节点才转发，按 id 落到它所属的那条流。
+/// 流式帧桥：把 `execute_turn` 的转写帧**择要**转成增量——三条出口各管一类：
+/// - **正文 / 推理**（[`DeltaSink::on_delta`] / [`DeltaSink::on_reasoning`]）：
+///   快照帧（`msg_type = Text | Reasoning` 且 `status = Streaming`）登记节点 id
+///   并全文转发（首片即完整快照）；窄帧（`delta`）只有**已登记的**节点才转发，
+///   按 id 落到它所属的那条流。
+/// - **工具调用**（[`DeltaSink::on_tool_frame`]）：**消息形状原样转发**，不登记、
+///   不拆装——快照帧自带完整身份（id / name / tool_call_id / 参数至今），窄增量
+///   只有 `id + delta`。
 ///
-/// 为什么不直接转发所有 delta：model 插件的窄帧只带 `id + delta`，不带
-/// `msg_type`——不记账就分不清正文增量、推理增量与工具参数增量。收束帧不经此桥：
-/// 终态由消费方负责（model 插件只发 Streaming 快照与窄帧，见 `state.rs` 的收口）。
-/// 工具参数增量**不进**这里：工具节点的构造权在分发方（`DispatchPort`），
-/// 两处各建一份必然出现重复卡片。
+/// 为什么正文/推理要记账而工具调用不记：model 插件的窄帧只带 `id + delta`、不带
+/// `msg_type`，正文与推理的归属只能靠登记表判；工具调用**不需要判**——它的节点
+/// 构造权在分发方（`DispatchPort`），model 插件的转写面与分发方共用**同一个节点 id**
+/// （见 `tool_accumulator`），消费端把帧原样送进自己的帧序即可，桥若自建节点或
+/// 拆装重组必然出现第二张卡。收束帧不经此桥：终态由消费方负责
+/// （model 插件只发 Streaming 快照与窄帧，见 `state.rs` 的收口）。
 struct DeltaBridge {
     sink: Arc<dyn DeltaSink>,
     /// 已登记的**增量节点** id → 它属于哪条流（正文 / 推理）。
@@ -55,11 +59,14 @@ impl ExecTranscriptWriter for DeltaBridge {
     async fn apply(&self, m: ChatMessage) {
         if let Some(d) = &m.delta {
             if !d.is_empty() {
-                // 窄帧不带 `msg_type` ⇒ 归属只能查登记表。没登记的 id（工具参数
-                // 增量）落 `_` 臂：它们的构造权在分发方（见结构体文档）。
+                // 窄帧不带 `msg_type` ⇒ 归属只能查登记表。
                 match self.nodes.lock().unwrap().get(&m.id) {
                     Some(MessageType::Text) => self.sink.on_delta(d),
                     Some(MessageType::Reasoning) => self.sink.on_reasoning(d),
+                    // 没登记的窄帧 = **工具参数增量**：快照帧不走登记表（它自带
+                    // 全量身份），消息形状原样递给消费端——工具节点的构造权在
+                    // 分发方，这里只递帧不建节点（见 [`DeltaSink::on_tool_frame`]）。
+                    None => self.sink.on_tool_frame(&m),
                     _ => {}
                 }
             }
@@ -68,13 +75,20 @@ impl ExecTranscriptWriter for DeltaBridge {
         if m.status != Some(MessageStatus::Streaming) {
             return;
         }
+        // 工具调用快照帧：**先于**「正文为空即返回」放行——首个增量常带
+        // `arguments: ""`，此时快照的参数正文为空但**身份是全的**（id / name /
+        // tool_call_id），把它丢掉，参数窄增量就没有身份帧可挂。
+        if m.msg_type == Some(MessageType::ToolCall) {
+            self.sink.on_tool_frame(&m);
+            return;
+        }
         let Some(MessageContent::Text(t)) = &m.content else {
             return;
         };
         if t.is_empty() {
             return;
         }
-        // 只登记**两条文本流**：工具参数增量不进这里（构造权在分发方）。
+        // 两条文本流登记进映射（窄帧归属靠它查）。
         let kind = match m.msg_type {
             Some(MessageType::Text) => MessageType::Text,
             Some(MessageType::Reasoning) => MessageType::Reasoning,

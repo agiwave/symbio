@@ -21,6 +21,7 @@
 
 use async_trait::async_trait;
 
+use crate::symbio_core::chat_message::ChatMessage;
 use crate::symbio_core::ModelUsage;
 use crate::symbio_core::PromptMessage;
 use crate::symbio_core::{CapabilityMeta, TurnToolCallInfo};
@@ -230,6 +231,22 @@ pub trait DeltaSink: Send + Sync + 'static {
     /// **必填而不是给个空默认实现**：漏实现的表现是「推理静默消失」——没有编译错误、
     /// 没有告警，只是界面上永远少一块。本仓对这类「静默失效」一律要求显式表态。
     fn on_reasoning(&self, text: &str);
+
+    /// 工具调用帧——**消息形状**的第三条出口。
+    ///
+    /// 两种帧都经这里（与 v1 的 `stream.rs` 同构，快照 / 增量由帧自身字段区分）：
+    /// - 快照（`delta = None`）：身份帧，`id` / `name` / `tool_call_id` / 参数至今
+    ///   全在上面——delta 必须落在身份帧之后（前端没有渲染语义可挂）；
+    /// - 窄增量（`delta = Some(片段)`）：只有 `id + delta`，接收端尾部拼接。
+    ///
+    /// ## 为什么是整条消息而不是拆开的参数
+    ///
+    /// **工具节点的构造权在分发方**（[`DispatchPort`]），不在这里：model 插件的
+    /// 转写面已经用**同一个节点 id** 广播（流式 / 落库 / 执行三处同 id，见
+    /// `tool_accumulator`），分发方稍后以同一 id 定格与落库。桥若在这里自建节点、
+    /// 或把帧拆成裸参数再让消费端重组，就会出现第二张卡。所以消费端的义务只是
+    /// **把帧原样送进自己的帧序**——不做类型推断，不改写身份。
+    fn on_tool_frame(&self, frame: &ChatMessage);
 }
 
 /// 静默接收口：会话侧执行器（`TurnRunner`，非流式形态）的委托目标——同一条
@@ -239,6 +256,7 @@ pub struct SilentDeltas;
 impl DeltaSink for SilentDeltas {
     fn on_delta(&self, _text: &str) {}
     fn on_reasoning(&self, _text: &str) {}
+    fn on_tool_frame(&self, _frame: &ChatMessage) {}
 }
 
 /// LLM 端口（⑤ 的抽象面）。**generate 只接受 `FullModel`**——反射/快速档

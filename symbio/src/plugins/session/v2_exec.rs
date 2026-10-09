@@ -157,6 +157,14 @@ enum UiFrame {
     /// 又直接写出口（工具节点，`process_tool_calls_async` 只认 `ExecEventSink`），
     /// 两条路不排序就会让工具卡片跑到正文之前。
     Barrier(tokio::sync::oneshot::Sender<()>),
+    /// 工具调用快照（身份帧）：**原样透传**的 `ChatMessage`。
+    ///
+    /// 为什么不拆进 [`UiFrame::Snapshot`]：工具节点的 `name` / `tool_call_id` /
+    /// 参数至今都是 model 插件转写面给出的事实，拆开再拼只会引入第二份形状；
+    /// 分发方稍后以**同一 id** 定格与落库（`llm_build_tool_call_nodes` 的节点 id
+    /// 就是转写面的节点 id），节点永远只有一张卡。参数窄增量**不走**本变体——
+    /// 它走 [`UiFrame::Delta`]（按 id 合并的语义与正文增量共用一条）。
+    Tool(Box<ChatMessage>),
 }
 
 /// UI 帧队列的**容量上限**。
@@ -512,6 +520,28 @@ impl DeltaSink for UiBridge {
         };
         let _ = self.tx.send(frame);
     }
+
+    /// 工具调用帧（快照 / 参数窄增量，见 [`DeltaSink::on_tool_frame`]）。
+    ///
+    /// 与 [`Self::on_delta`] 的差别：节点 id **不由本桥铸造**——快照帧的 id /
+    /// name / tool_call_id / 参数是 model 插件转写面的事实，分发方稍后以同一 id
+    /// 定格与落库；本桥只负责把帧送进**同一条**队列（与正文共用容量与屏障语义）。
+    fn on_tool_frame(&self, m: &ChatMessage) {
+        match &m.delta {
+            // 参数窄增量：并进与正文同款的 Delta 帧——队列满时按 id 合并的
+            // 无损语义因此对工具参数同样成立（不会因换了通道就退化成丢帧）。
+            Some(d) => {
+                let _ = self.tx.send(UiFrame::Delta {
+                    id: m.id.clone(),
+                    text: d.clone(),
+                });
+            }
+            // 快照（身份帧）：原样透传。
+            None => {
+                let _ = self.tx.send(UiFrame::Tool(Box::new(m.clone())));
+            }
+        }
+    }
 }
 
 /// 一轮 v2 执行的入参包（与 [`TurnInput`] 同族：职责不同的多项不摊成
@@ -732,6 +762,7 @@ struct SilentDeltaSink;
 impl DeltaSink for SilentDeltaSink {
     fn on_delta(&self, _text: &str) {}
     fn on_reasoning(&self, _text: &str) {}
+    fn on_tool_frame(&self, _frame: &ChatMessage) {}
 }
 
 /// **定稿答话轮**（缺口 5）：`classify` 判 `Answered` ⇒ 本轮**一个模型请求都不发**，
@@ -944,6 +975,9 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
                     let _ = done.send(());
                     continue;
                 }
+                // 工具调用快照：model 插件转写面的事实原样到达，这里不做任何改写
+                // （改写 = 第二份身份形状，分发方与落库用的是同一份）。
+                UiFrame::Tool(m) => *m,
             };
             emit_sink.emit(message).await;
         }

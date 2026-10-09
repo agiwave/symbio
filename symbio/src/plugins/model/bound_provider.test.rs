@@ -110,10 +110,35 @@ const SSE_REASONING: &str = concat!(
     "data: [DONE]\n\n",
 );
 
-/// 收集口：**两条流分开记**——合成一条就验不出「推理有没有走错通道」。
+/// 工具调用流：身份 + 名字先到，参数分两片（逼出「快照 → 窄增量」的帧序）。
+const SSE_TOOL: &str = concat!(
+    "HTTP/1.1 200 OK\r\n",
+    "Content-Type: text/event-stream\r\n",
+    "Connection: close\r\n",
+    "\r\n",
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_t\",\"type\":\"function\",\"function\":{\"name\":\"vdfs_write\",\"arguments\":\"\"}}]}}]}\n\n",
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"path\\\":\"}}]}}]}\n\n",
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"a.md\\\"}\"}}]}}]}\n\n",
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"好的\"}}]}\n\n",
+    "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+    "data: [DONE]\n\n",
+);
+
+/// 收集口：**三条流分开记**——合成一条就验不出「推理 / 工具有没有走错通道」。
 struct Collecting {
     text: Mutex<Vec<String>>,
     reasoning: Mutex<Vec<String>>,
+    /// 工具帧按**到达序**记录——「身份帧先于增量」是 t10 判据的一半。
+    tools: Mutex<Vec<ToolFrameRec>>,
+}
+
+/// 一条工具帧的断言视图（`snapshot` = 是否身份帧）。
+#[derive(Debug)]
+struct ToolFrameRec {
+    snapshot: bool,
+    id: String,
+    name: Option<String>,
+    text: String,
 }
 
 impl Collecting {
@@ -121,6 +146,7 @@ impl Collecting {
         Collecting {
             text: Mutex::new(Vec::new()),
             reasoning: Mutex::new(Vec::new()),
+            tools: Mutex::new(Vec::new()),
         }
     }
 }
@@ -131,6 +157,34 @@ impl crate::symbio_core::DeltaSink for Collecting {
     }
     fn on_reasoning(&self, text: &str) {
         self.reasoning.lock().unwrap().push(text.to_string());
+    }
+    fn on_tool_frame(&self, frame: &crate::symbio_core::chat_message::ChatMessage) {
+        use crate::symbio_core::chat_message::{MessageContent, MessageType};
+        let text = match &frame.content {
+            Some(MessageContent::Text(t)) => t.clone(),
+            _ => String::new(),
+        };
+        let rec = match (&frame.delta, &frame.msg_type) {
+            (Some(d), _) => ToolFrameRec {
+                snapshot: false,
+                id: frame.id.clone(),
+                name: frame.name.clone(),
+                text: d.clone(),
+            },
+            (None, Some(MessageType::ToolCall)) => ToolFrameRec {
+                snapshot: true,
+                id: frame.id.clone(),
+                name: frame.name.clone(),
+                text,
+            },
+            _ => ToolFrameRec {
+                snapshot: false,
+                id: frame.id.clone(),
+                name: frame.name.clone(),
+                text,
+            },
+        };
+        self.tools.lock().unwrap().push(rec);
     }
 }
 
@@ -208,6 +262,66 @@ async fn provider_adapter_routes_reasoning_deltas_to_the_reasoning_channel() {
     assert!(
         !text.contains("先想"),
         "推理内容不得混进正文（走错通道的形态）：{text}"
+    );
+}
+
+/// 工具调用走**消息形状**的第三条出口（缺口 8 的桥接锚）：快照帧带全量身份
+/// （id / name / tool_call_id / 参数至今），参数增量是窄追加，且**身份帧先到**——
+/// delta 落在没有身份的节点上，前端就没有渲染语义可挂（t10 判据的原话）。
+/// 桥在这里只递帧不建节点：节点 id 由转写面给出，分发方以同一 id 定格与落库。
+#[tokio::test]
+async fn provider_adapter_routes_tool_frames_to_the_message_channel() {
+    use crate::symbio_core::DeltaSink;
+
+    let (port, _captured) = spawn_mock(SSE_TOOL);
+    let adapter = ProviderLlmAdapter::new(mock_provider(port));
+    let tok = TokenIssuer::issue_deep();
+
+    let got = Arc::new(Collecting::new());
+    let ask = one("写个文件");
+    adapter
+        .generate_streaming(&tok, &ask, got.clone() as Arc<dyn DeltaSink>)
+        .await
+        .expect("真实传输层必答");
+
+    let tools = got.tools.lock().unwrap();
+    let snapshots: Vec<_> = tools.iter().filter(|r| r.snapshot).collect();
+    let deltas: Vec<_> = tools.iter().filter(|r| !r.snapshot).collect();
+    assert_eq!(
+        snapshots.len(),
+        1,
+        "身份帧恰好一条（首片建节点，此后窄追加）：{tools:?}"
+    );
+    assert_eq!(
+        snapshots[0].name.as_deref(),
+        Some("vdfs_write"),
+        "快照帧带工具名（身份字段只随快照下发）：{:?}",
+        snapshots[0]
+    );
+    assert!(!deltas.is_empty(), "参数应有窄增量帧（不得只发全量快照）");
+    // 同一节点的全部帧必须同 id——id 漂移 = 节点被建了两份（第二张卡的形态）。
+    assert!(
+        tools.iter().all(|r| r.id == snapshots[0].id),
+        "id 漂移 ⇒ 前端出现第二张卡：{tools:?}"
+    );
+    // 快照先于全部增量：身份先立，delta 才有挂靠。
+    let snap_pos = tools.iter().position(|r| r.snapshot).unwrap();
+    assert!(
+        tools[..snap_pos].iter().all(|r| r.snapshot),
+        "身份帧必须先于任何参数增量到达：{tools:?}"
+    );
+    // 参数不丢不重：Σ快照正文 + Σ增量拼出完整 JSON（与转写面聚合一致）；
+    // 首个增量的 arguments 常为空串，所以快照正文允许为空。
+    let mut joined = String::new();
+    for r in tools.iter().filter(|r| r.snapshot) {
+        joined.push_str(&r.text);
+    }
+    for r in &deltas {
+        joined.push_str(&r.text);
+    }
+    assert_eq!(
+        joined, "{\"path\":\"a.md\"}",
+        "快照 + Σ增量应拼出完整参数 JSON"
     );
 }
 

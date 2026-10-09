@@ -461,6 +461,7 @@ mod turn_runner_tests {
         // 本组用例的桩不产推理增量；推理通道由
         // `plugins/model/bound_provider.test.rs` 的桥接用例覆盖（那里有 SSE 级 fixture）。
         fn on_reasoning(&self, _text: &str) {}
+        fn on_tool_frame(&self, _frame: &crate::symbio_core::chat_message::ChatMessage) {}
     }
 
     /// 流式运行：分片按序进 sink；落格语义与 run() 同一条路径（final 照常、
@@ -1716,6 +1717,7 @@ mod reflex_turn_tests {
         }
         // 反射档不调模型 ⇒ 没有推理增量；通道由 `bound_provider.test.rs` 覆盖。
         fn on_reasoning(&self, _text: &str) {}
+        fn on_tool_frame(&self, _frame: &crate::symbio_core::chat_message::ChatMessage) {}
     }
 
     /// 正向：反射档一轮**只落两格**（开轮 + 收束），收束溯源指向开轮格、
