@@ -19,6 +19,10 @@ const msrvTargetDir = path.join(repoRoot, '.workbuddy-ai', 'msrv-target')
 export default {
   id: 'msrv',
   title: 'MSRV（rust-version 实编译校验）',
+  // 阶段级并发：CARGO_TARGET_DIR 指向独立的 `.workbuddy-ai/msrv-target`，与 backend
+  // 的编译**不争 `.cargo-lock`**；1.91 与 1.93 的产物本就互不复用，并发只是让两套
+  // rustc 同时推进（单 crate 编译的 CPU 上不去，两条编译流水线叠着跑才用得起来）。
+  parallel: true,
   *tasks(ctx) {
     const jobs = [
       ['symbio', path.join(repoRoot, 'symbio')],

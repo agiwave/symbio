@@ -207,6 +207,11 @@ function envLoosened(ratchet, defaults) {
 export default {
   id: 'baseline',
   title: '棘轮元守卫（每处基线只许往紧改）',
+  // 阶段级并发：本阶段**只读**（git log/show + 读落点文件），批次里没有另一个
+  // `.git` 写方——autoWork 的 `git add` 只发生在 fmt（05，已跑完）、verify（55，
+  // 不在批内）与 facts（60，最后），与本阶段并发的是 backend / docs / msrv 三个
+  // 只写 `target/` 或纯读的泳道。
+  parallel: true,
   tasks(ctx) {
     return RATCHETS.map((ratchet) => ({
       label: `${ratchet.file}：${ratchet.label} 不得比基准版本放松`,

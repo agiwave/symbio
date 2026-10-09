@@ -432,7 +432,7 @@ test('v2 测试的临时目录必须用前先删（pid 复用会把残留 WAL �
 })
 
 test('gate：e2e 失败详情不能按 ci 模式关掉（CI 上日志文件看不到）', () => {
-  const src = fs.readFileSync(path.join(repoRoot, 'scripts/gate.d', '40-e2e.mjs'), 'utf8')
+  const src = fs.readFileSync(path.join(repoRoot, 'scripts/gate.d', '58-e2e.mjs'), 'utf8')
   // 判据是**语句**不是字样：注释里可以（应当）记着这行代码曾经长什么样，
   // 所以按 `ctx.ci !== true` 这种裸字样去 doesNotMatch 会被自己的注释打中。
   assert.doesNotMatch(
@@ -440,7 +440,7 @@ test('gate：e2e 失败详情不能按 ci 模式关掉（CI 上日志文件看�
     /^\s*if\s*\(\s*ctx\.ci/m,
     // 本地有 `.workbuddy-ai/gate-logs/`，CI 上那个目录在 runner 里、没人上传 ⇒
     // 「（详见日志）+ 一条本机路径」是一条零信息的红。方向恰好反了。
-    '40-e2e.mjs 又用 ctx.ci 做条件 ⇒ CI 红了但零信息',
+    '58-e2e.mjs 又用 ctx.ci 做条件 ⇒ CI 红了但零信息',
   )
   // 关掉条件后打印语句必须还在，否则「整个删掉」也能让上一条通过。
   assert.match(

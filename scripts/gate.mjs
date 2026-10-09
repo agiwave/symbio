@@ -23,6 +23,20 @@
  * 适合并发的：只读审计脚本（扫文件）、`rustc` 独立编译、彼此隔离的 e2e 用例。
  * 不适合的：任何 cargo 命令、写同一个输出目录的任务。
  *
+ * 阶段级同构：阶段对象同样可以标 `parallel: true`——连续标了的**阶段**合成一批
+ * 并发跑，约束与任务级相同：**只有相互无数据依赖的阶段才可标**（每个阶段为什么
+ * 安全，写在它自己的文件头，不在本文件复述）。当前编排（2026-10-09）：
+ *
+ *   05-fmt（屏障，单独跑）→ [10-backend ∥ 30-docs ∥ 35-baseline ∥ 50-msrv]
+ *     → 55-verify → 56-frontend → 58-e2e → 60-facts（必须最后）
+ *
+ * 三个「看着能并发、实际不能」的坑，判据各归其主文件：
+ *   - verify 不进批：它的 `gen-verify-facts` 重写 `verify/facts/mod.rs`，而 docs 的
+ *     doc-count-audit 读同一个文件（55-verify.mjs）；
+ *   - frontend 不与 backend 并发：vite build 重写 `tauri/dist`，而 backend 编译
+ *     symbio-tauri 时 `generate_context!` 在**编译期**读它（56-frontend.mjs）；
+ *   - e2e 不与任何重负载并发：用例对 CPU 竞争时序敏感（58-e2e.mjs）。
+ *
  * 并发批内**不往 stdout 刷逐行输出**（会交错成乱码），详情落各自日志文件，
  * 控制台只留一行结论。
  *
@@ -226,10 +240,20 @@ for (const f of fs.readdirSync(gateDir).filter((f) => f.endsWith('.mjs') && !f.s
 
 const enabled = (id) => (only ? only.includes(id) : true) && !skip.includes(id)
 
-const results = []
+// 结果按**阶段分组缓冲**，report 时按阶段顺序摊平。并发泳道下各阶段的完成时刻
+// 交错，直接 push 会让汇总变成「谁快谁在前」；分组缓冲让中途（SIGINT）的汇总
+// 也保持「按阶段归组、组内按任务序」。
+const stageBuffers = new Map()
+function bufferOf(stageId) {
+  let buf = stageBuffers.get(stageId)
+  if (!buf) stageBuffers.set(stageId, (buf = []))
+  return buf
+}
 // 每条结果都记下自己的日志文件（可能为 null：跳过项没跑命令），失败汇总据此
 // 直接列出**这一项的文件名**——早先只给目录，68 个文件里要自己猜是哪个。
-const record = (r) => results.push(r)
+const record = (stageId, r) => bufferOf(stageId).push(r)
+const collectedResults = () =>
+  stages.filter((s) => stageBuffers.has(s.id)).flatMap((s) => stageBuffers.get(s.id))
 
 function normalize(outcome) {
   if (outcome === 'skipped') return { pass: 'skipped', note: '' }
@@ -239,7 +263,7 @@ function normalize(outcome) {
 }
 
 /**
- * 执行单个任务并**返回**结果（不再直接写 `results`）——并发批要按**原顺序**
+ * 执行单个任务并**返回**结果（由调用方经 `record` 落入所属阶段的缓冲）——并发批要按**原顺序**
  * 落结果，只能由调用方统一 `record`。`quiet` 透传给 `run`（见其说明）。
  */
 async function executeTask(stageId, t, { quiet = false } = {}) {
@@ -264,6 +288,7 @@ async function executeTask(stageId, t, { quiet = false } = {}) {
       ms: r.ms,
     }
   }
+  const started = Date.now()
   const outcome = normalize(await t.run(ctx))
   return {
     stage: stageId,
@@ -271,7 +296,7 @@ async function executeTask(stageId, t, { quiet = false } = {}) {
     pass: outcome.pass,
     note: outcome.note,
     logFile: outcome.logFile ?? null,
-    ms: null,
+    ms: Date.now() - started,
   }
 }
 
@@ -329,7 +354,7 @@ async function runConcurrent(stageId, tasks, limit) {
   await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker))
 
   for (const r of out) {
-    record(r)
+    record(stageId, r)
     const mark = r.pass === true ? green('✓') : r.pass === 'skipped' ? yellow('⊘') : red('✗')
     const took = r.ms != null ? dim(` (${fmtDuration(r.ms)})`) : ''
     console.log(`  ${mark} ${r.label}${took}${r.note ? yellow(` — ${r.note}`) : ''}`)
@@ -349,19 +374,54 @@ async function runStage(s, index) {
       while (i < tasks.length && tasks[i].parallel) batch.push(tasks[i++])
       await runConcurrent(s.id, batch, limit)
     } else {
-      record(await executeTask(s.id, tasks[i++]))
+      record(s.id, await executeTask(s.id, tasks[i++]))
     }
   }
 }
 
-for (const [i, s] of stages.entries()) {
-  if (!enabled(s.id)) continue
-  await runStage(s, i)
+/**
+ * 并发跑一批「相互无数据依赖」的阶段（连续标 `parallel: true` 的那些）。
+ * 与任务级批同构：worker 从共享游标取泳道。并发度沿用 `CONCURRENCY`
+ * （CI 的 4 核 runner 收到 3；本地 20 核足以让整批同时开跑）。
+ *
+ * 控制台输出是**行级交错**：所有输出都经主进程的单事件循环，每次
+ * `console.log` 是一整行、不会撕裂，各任务行自带标签可以辨认归属；
+ * 汇总不交错——`report` 按阶段顺序摊平（见 `stageBuffers`）。
+ */
+async function runStageBatch(batch) {
+  const limit = Math.min(batch.length, Math.max(2, CONCURRENCY))
+  let cursor = 0
+  const worker = async () => {
+    for (;;) {
+      const i = cursor++
+      if (i >= batch.length) return
+      await runStage(batch[i].s, batch[i].idx)
+    }
+  }
+  await Promise.all(Array.from({ length: limit }, worker))
+}
+
+const gateStarted = Date.now()
+// 泳道调度：连续标 `parallel` 的阶段合成一批并发，其余照旧串行。
+// `parallel` 语义见文件头「阶段级同构」一节；哪些阶段标了、为什么（以及为什么
+// 某些阶段**不能**标），判据在各阶段自己的文件头。
+const lanes = stages.map((s, idx) => ({ s, idx })).filter(({ s }) => enabled(s.id))
+for (let i = 0; i < lanes.length; ) {
+  const lane = lanes[i]
+  if (lane.s.parallel) {
+    const batch = []
+    while (i < lanes.length && lanes[i].s.parallel) batch.push(lanes[i++])
+    await runStageBatch(batch)
+  } else {
+    await runStage(lane.s, lane.idx)
+    i++
+  }
 }
 
 /** 汇总并给退出码。**中断时也走这里**（见下方 SIGINT/SIGTERM）——已跑完的结果、
  *  各自日志文件、失败归属都不该因为按了一次 Ctrl+C 就丢掉。 */
 function report(interrupted = false) {
+  const results = collectedResults()
   const failed = results.filter((r) => r.pass === false)
   const skipped = results.filter((r) => r.pass === 'skipped')
   const passed = results.length - failed.length - skipped.length
@@ -376,9 +436,11 @@ function report(interrupted = false) {
       '',
       ...results.map((r) => {
         const mark = r.pass === true ? '✓' : r.pass === 'skipped' ? '⊘' : '✗'
+        // 耗时进清单：瓶颈定位只看这一个文件就够，不必重跑（控制台会滚动丢失）。
+        const took = r.ms != null ? ` (${fmtDuration(r.ms)})` : ''
         const list = Array.isArray(r.logFile) ? r.logFile : r.logFile ? [r.logFile] : []
         const logs = list.map((f) => path.relative(repoRoot, f).replace(/\\/g, '/')).join(', ')
-        return `${mark} [${r.stage}] ${r.label}${r.note ? ` — ${r.note}` : ''}${logs ? `\n    日志：${logs}` : ''}`
+        return `${mark} [${r.stage}] ${r.label}${took}${r.note ? ` — ${r.note}` : ''}${logs ? `\n    日志：${logs}` : ''}`
       }),
       '',
     ]
@@ -391,12 +453,14 @@ function report(interrupted = false) {
   console.log(bold('══ 汇总 ══'))
   for (const r of results) {
     const mark = r.pass === true ? green('✓') : r.pass === 'skipped' ? yellow('⊘') : red('✗')
-    console.log(`  ${mark} ${r.label}${r.note ? yellow(` — ${r.note}`) : ''}`)
+    const took = r.ms != null ? dim(` (${fmtDuration(r.ms)})`) : ''
+    console.log(`  ${mark} ${r.label}${took}${r.note ? yellow(` — ${r.note}`) : ''}`)
   }
   console.log()
   console.log(
     `  通过 ${passed} / ${results.length}${skipped.length ? `（另有 ${skipped.length} 项未判定）` : ''}${interrupted ? '（中断，未跑完）' : ''}`,
   )
+  console.log(dim(`  总耗时 ${fmtDuration(Date.now() - gateStarted)}`))
 
   // 失败逐项直接给**文件**（早先只给目录，68 个日志里得自己猜）；聚合任务可以
   // 一次带回多个子日志（数组），没跑上命令的项（自己的断言失败、非子进程）如实说明。

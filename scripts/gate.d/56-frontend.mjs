@@ -1,4 +1,12 @@
 // frontend 阶段：vue-tsc / vitest --coverage / vite build / eslint。
+//
+// 文件名是 56- 而不是 20-（2026-10-09）：阶段级并发把 [10-backend / 30-docs /
+// 35-baseline / 50-msrv] 合成一批，本阶段**刻意不进那批**——backend 编译
+// symbio-tauri 时 `generate_context!` 在**编译期**读 `../dist`（tauri.conf.json 的
+// frontendDist，CI 的 rust-checks 也是先 npm build 再 backend gate，同一约束），
+// 而下面的 vite build 会清空重写同一目录；并发就是「编译读到半截 dist ⇒ 假红」。
+// 也**不与 58-e2e 并发**：e2e 用例对 CPU 竞争时序敏感（并发 6 是贴着实测最优调的，
+// 再叠加外部负载会把「等实时面收敛」的用例推过超时线，2026-10-08 实测）。
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'

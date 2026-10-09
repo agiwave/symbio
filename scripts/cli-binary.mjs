@@ -2,7 +2,7 @@
 /**
  * cli-binary — CLI release 二进制的**路径解析**与**新鲜度机制**。
  *
- * 门禁（`gate.d/40-e2e.mjs`）与 e2e（`e2e/helpers.mjs`、`e2e/run-tests.mjs`）
+ * 门禁（`gate.d/58-e2e.mjs`）与 e2e（`e2e/helpers.mjs`、`e2e/run-tests.mjs`）
  * 都只从这里取二进制，本文件是这条知识的**唯一真相**。
  *
  * ## 为什么要有这个文件：一个已发生的假失败

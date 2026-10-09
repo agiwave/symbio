@@ -12,7 +12,7 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
-import { BASELINE, autoWork, cargoTestRatchet } from './_shared.mjs'
+import { BASELINE, cargoTestRatchet } from './_shared.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -33,17 +33,19 @@ const DOC_LINT_ENV = { RUSTDOCFLAGS: '-D rustdoc::broken_intra_doc_links' }
 export default {
   id: 'backend',
   title: '后端（cargo，根 workspace）',
+  // 阶段级并发：本阶段只写 `target/`，与批内其他泳道无数据依赖——docs 守卫只读
+  // 源码与 scripts，baseline 只读 git 历史与 scripts，msrv 用独立的
+  // `.workbuddy-ai/msrv-target`（不与 backend 争 `.cargo-lock`）。fmt 已拆到
+  // `05-fmt.mjs` 屏障阶段（rustfmt 就地重写非原子，必须先于一切读 `.rs` 的泳道）。
+  // ⚠️ frontend 不能进这批：编译 symbio-tauri 时 `generate_context!` 在编译期读
+  //    `tauri/dist`，而 vite build 会重写它——见 `56-frontend.mjs`。
+  parallel: true,
   tasks(ctx) {
     const tasks = []
     if (!fs.existsSync(path.join(backendDir, 'Cargo.toml'))) return tasks
 
-    // 格式化是**门禁自己做的事**，不是判它「有没有做过」——见 `_shared.autoWork`。
-    // 放在最前：后面所有检查都跑在格式化后的代码上，避免「先报 clippy 再格式化」
-    // 这种让人以为要改两遍的顺序。
-    tasks.push({
-      label: 'cargo fmt --all（自动格式化）',
-      run: (c) => autoWork(c, { label: 'cargo fmt --all', cmd: 'cargo', args: ['fmt', '--all'], cwd: backendDir }),
-    })
+    // 格式化在 `05-fmt.mjs`（屏障阶段）：它必须先于本阶段与 docs 守卫完成，
+    // 而本阶段现在与 docs 并发，fmt 若还留在这里就等于和读方赛跑。
 
     // ⚠️ 这里**刻意没有** `cargo check --tests --workspace`——它曾是本阶段的第一步。
     //
@@ -102,7 +104,15 @@ export default {
     // （`emit_converge`、`VdfsProvider::write` / `delete` / `action`——该 trait 早已
     // 只剩 `dispatch`）。读文档的人被指到一个不存在的东西上，而这**不产生任何告警**，
     // 只能靠跑一次把它变成红灯。判据是 zero-tolerance（没有「几条以内可接受」）。
+    //
+    // 本地**默认跳过**（2026-10-09）：`cargo doc` 是对 workspace 的又一次**全量重编译**
+    // （doc 指纹与 test / clippy 互不复用），是本地门禁最贵的单步之一；它守的
+    // 断链由 CI 的 rust-checks job 必跑（`--ci` ⇒ 本任务在那边照常执行）。
+    // 本地需要核查时单独跑：
+    //   RUSTDOCFLAGS='-D rustdoc::broken_intra_doc_links' cargo doc --no-deps --workspace
     tasks.push({
+      when: (c) => c.ci,
+      skipNote: '本地跳过：doc 是全量重编译，断链判据由 CI 的 backend job 承担（上面有本地跑法）',
       label: 'cargo doc --no-deps --workspace（-D rustdoc::broken_intra_doc_links）',
       cmd: 'cargo',
       args: ['doc', '--no-deps', '--workspace'],

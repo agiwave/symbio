@@ -203,8 +203,7 @@ export const LIBS = [
   'gen-gate-codes',
   'line-count',
   'doc-find',
-  // e2e 并发度的**离线判据**（`scripts/e2e-concurrency.mjs`）：门内版本在
-  // `40-e2e.mjs` 里逐轮打印，本脚本供人工复核 + `--ci`。
+  // `e2e-concurrency` 的门内版本在 `58-e2e.mjs` 里逐轮打印，本脚本供人工复核 + `--ci`。
   //
   // 登记成 LIBS 而不是 GUARDS：它**不是一个独立的门禁步骤**，而是 e2e 阶段的
   // 判据在门外的可执行形态——跑两遍就是同一件事。GW-004 要的只是「它有落点」。
@@ -225,6 +224,13 @@ export default {
   // 守卫本体（下面的 `--strict`）**刻意不并行**：它们的结论行（「N 条规则全部通过」）
   // 是终端上的主要信息，而并发批会静音逐行输出（见 gate.mjs 的并发契约）——
   // 用「少看 16 行结论」换几秒不划算。
+  //
+  // 阶段级并发：本阶段**只读**（扫 `.rs` / docs / scripts，不写任何文件），与
+  // backend（只写 `target/`）、baseline（只读 git）、msrv（独立 target 目录）互不
+  // 干扰；fmt 已在 05 屏障阶段跑完，看到的源码是定格的。⚠️ verify 不能进这批：
+  // 它的 gen-verify-facts 会重写 `verify/facts/mod.rs`，而本阶段的 doc-count-audit
+  // 读同一个文件——并发就是「审计读到半截生成物」（见 55-verify.mjs）。
+  parallel: true,
   concurrency: 8,
   *tasks() {
     for (const name of [...GUARDS, ...TEST_ONLY]) {

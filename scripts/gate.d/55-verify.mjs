@@ -54,6 +54,11 @@ export default {
   // 每个验证程序是**独立的 rustc 调用**（各自一个源文件、各自的输出 exe），
   // 彼此无共享状态 ⇒ 并发跑。批的边界在 `facts 生成` 那一步：它必须**先**跑完
   // （程序吃的就是它生成的数据），所以那一步不标 `parallel`，天然把批次切开。
+  //
+  // 阶段级**刻意不标 `parallel`**（不进 [backend/docs/baseline/msrv] 并发批）：
+  // 本阶段的 `gen-verify-facts` 会重写 `verify/facts/mod.rs`，而 docs 阶段的
+  // doc-count-audit 读同一个文件——并发就是「审计读到半截生成物」。本阶段很快
+  // （17 组 rustc 并发 8，十几秒），不值得为它冒假红的险。
   concurrency: 8,
   *tasks(ctx) {
     if (!fs.existsSync(verifyDir)) {

@@ -56,7 +56,7 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
 3. `export default defineCase('T7 描述', async () => { ... })`，
    断言用 `helpers.mjs` 的 `assert` / `assertEq` / `assertTranscriptInvariants`。
 
-没有清单要登记：`run-tests.mjs` 与门控（`scripts/gate.d/40-e2e.mjs`）都按
+没有清单要登记：`run-tests.mjs` 与门控（`scripts/gate.d/58-e2e.mjs`）都按
 目录**发现式**加载，保存即生效。
 
 ## 场景编排（mock-llm）
@@ -166,7 +166,7 @@ await api.invoke('session/chat/send',
 
 ## 门控接入
 
-e2e 是 `scripts/gate.mjs` 的一个阶段（`scripts/gate.d/40-e2e.mjs`）：
+e2e 是 `scripts/gate.mjs` 的一个阶段（`scripts/gate.d/58-e2e.mjs`）：
 
 ```bash
 node scripts/gate.mjs --only=e2e      # 只跑 e2e 阶段（先按源码指纹确保二进制最新）

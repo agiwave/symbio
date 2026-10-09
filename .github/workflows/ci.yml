@@ -163,11 +163,13 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Backend gate
-        # 与本地**同一条命令**（含 cli/ 独立 workspace）：cargo check --tests、
-        # 单测、clippy -D warnings、cargo fmt --check，以及 --profile 指定的构建。
+        # 与本地**同一条命令**（含 cli/ 独立 workspace）：fmt 阶段（自动格式化，
+        # CI 语义 = 有差异即红）+ 单测、clippy -D warnings、cargo doc 断链（仅 --ci
+        # 跑），以及 --profile 指定的构建。fmt 单独成 `fmt` 阶段（阶段级并发的屏障，
+        # 见 scripts/gate.d/05-fmt.mjs），所以这里必须是 fmt,backend 两个 id。
         # ⚠️ 检查项只在 scripts/gate.mjs 里定义一处（CONTRIBUTING 的清单已删），
         #    要加 / 改检查就改脚本，不要在这里另写 cargo 命令。
-        run: node scripts/gate.mjs --only=backend --ci --profile=${{ matrix.profile }}
+        run: node scripts/gate.mjs --only=fmt,backend --ci --profile=${{ matrix.profile }}
         continue-on-error: false
 
   # MSRV 验证：`rust-version` 声明的最低版本必须**真能编译**。
@@ -268,7 +270,7 @@ jobs:
 
   # 端到端回归：构建 CLI 二进制后，按 e2e/cases/ 发现式运行全部用例
   # （CLI × mock LLM（OpenAI 兼容 SSE）× mock MCP（stdio JSON-RPC）× 临时 homedir）。
-  # 用例清单不在这里也不在 gate.d/40-e2e.mjs 里维护——新增 e2e/cases/*.mjs 即自动纳入。
+  # 用例清单不在这里也不在 gate.d/58-e2e.mjs 里维护——新增 e2e/cases/*.mjs 即自动纳入。
   # 需要系统库：mock 与被测 CLI 都是本地回环 HTTP，无外部依赖；OpenSSL 同 rust-checks。
   e2e-check:
     runs-on: ubuntu-latest
