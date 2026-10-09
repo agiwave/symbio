@@ -106,7 +106,7 @@
 |---|---|---|---|---|
 | `assembly` | — | `ASSEMBLY_` | — | 本域只有两个常量 |
 | `adapters` | 契约词 `LatencyTier` · `RuleOnly` · `ClassifyOnly` · `FullModel` · `CanClassify` · `CanGenerate` · `TokenIssuer` · `LlmAdapter` · `LlmTurn` · `AdapterError` · `StubLlmAdapter` · `ProviderLlmAdapter` · `DeltaSink` · `SilentDeltas` · `DispatchPort` · `DispatchOutcome` | — | — | `CanClassify` · `CanGenerate` · `StubLlmAdapter` 是 `#[cfg(test)]` 项（只有测试构建里存在：编译期正例与零 LLM 桩，**没有生产接入位**，故不参与接线清偿）；其余全部是 [plan/05 §3.3](../../../docs/plan/05-模块架构.md) 注入策略与 [plan/01 §10](../../../docs/plan/01-核心架构.md) 四层时延表的冻结契约名（出处 [`verify/latency_gate.rs`](../../../docs/plan/verify/latency_gate.rs)），名字先于模块存在——判据同 `schemas`。`LlmTurn` / `DispatchPort` / `DispatchOutcome` 是 [plan/10 §2](../../../docs/plan/10-工具轮v2化实施方案.md) 的两只端口（生成 / 工具分发），与前缀同域：**不能叫 `Tool*`**——那是 `capability` 域的子命名空间 |
-| `actors` | `Actor*`（`ActorSpec`）；契约词 `Pattern` · `Scope` · `Decider`（模式名）· `Reasoner` · `RecallTranslator` · `CommitmentKeeper` · `PreemptionDecider`（含 `Preemption`）· `CircuitBreaker`（含 `GateDecision`）· `AutonomousInitiator` · `IntentGate`（含 `ConationPolicy` / `ConationCandidate` / `GateWarrant` / `IntentDecision` / `ApprovedIntent`）· `SkillCompiler` · `SkillRouter`（含 `SkillRoute`）· `TurnRunner`（含 `TurnOutcome` / `TurnInput` / `TurnResume`）· `RoundInjector`· `RoundInjector`（**工具轮边界**的注入口：`Arc<dyn Fn(Option<u64>) -> Vec<PromptMessage>>`——收什么、落不落格全由插件决定，core 只提供「循环里什么时候问一次」） | — | — | [plan/01 §4](../../../docs/plan/01-核心架构.md) 的冻结契约名（名字先于模块存在，判据同 `schemas`）；`Decider` 是 [plan/05 §4](../../../docs/plan/05-模块架构.md) S8 反射档判定者的**模式名**（`Pattern::Decider`）——规则应答的语义由 [plan/06](../../../docs/archive/06-会话响应性落地.md) 的 `classify` 规则表承接，本域只留模式名 |
+| `actors` | `Actor*`（`ActorSpec`）；契约词 `Pattern` · `Scope` · `Decider`（模式名）· `Reasoner` · `RecallTranslator` · `CommitmentKeeper` · `PreemptionDecider`（含 `Preemption`）· `CircuitBreaker`（含 `GateDecision`）· `AutonomousInitiator` · `IntentGate`（含 `ConationPolicy` / `ConationCandidate` / `GateWarrant` / `IntentDecision` / `ApprovedIntent`）· `SkillCompiler` · `SkillRouter`（含 `SkillRoute`） | — | — | [plan/01 §4](../../../docs/plan/01-核心架构.md) 的冻结契约名（名字先于模块存在，判据同 `schemas`）；`Decider` 是 [plan/05 §4](../../../docs/plan/05-模块架构.md) S8 反射档判定者的**模式名**（`Pattern::Decider`）——规则应答的语义由 [plan/06](../../../docs/archive/06-会话响应性落地.md) 的 `classify` 规则表承接，本域只留模式名。**`TurnRunner` / `TurnOutcome` / `TurnInput` / `TurnResume` / `RoundInjector` 已于 2026-10-09 下沉 `plugins/session`**（单生产消费方，见 §4 第 1 问与 [ADR-050](../../../docs/decisions/core.md#adr-050-turnrunner-族按依赖方数量下沉-pluginssession)） |
 | `capability` | `Capability`；子命名空间 `Configurable*` · `Option*` · `Tool*` | — | `capability_` | 无常量；三个子命名空间各有对应文件 |
 | `clock` | — | — | `clock_` | 只有一个函数 |
 | `creator` | — | — | `creator_` | 通用对象创建注册表：按 id 装配**任意**类型对象，见 §2 |
@@ -127,15 +127,16 @@
 | `vdfs` | `Vdfs` | `VDFS_` | `vdfs_` | |
 | `view` | `View` / `Budget` / `Recall*`（`RecallView` / `RecallEntry`） | — | — | 投影产出的共享类型层（F2 后半句）：`View{value, degraded, used}`，`Budget` 是 I3 记账口径 |
 
-> **`RoundInjector`**（登记在 `actors`）：工具轮边界的注入口 ——
-> `Arc<dyn Fn(Option<u64>) -> Vec<PromptMessage>>`。收什么、落不落格**全由插件决定**，
-> core 只提供「循环里什么时候问一次」这个挂点（所以它不属于 `plan/01` 的冻结契约名）。
-> 入参那个 `Option<u64>` 是**本轮用户格的 seq**，由 core 给出去 —— 调用方自己去网格里
-> 找是找不到的（它的快照取在用户格落盘**之前**）。
->
-> 名字里的 `Round` 避开 `Turn`：那个前缀已被 `llm` 域的子命名空间占用。
-> ⚠️ 本行**刻意写短**：域表单元格里的长散文会把 `md-table` 的解析带偏——实测加半句解释
-> 就让 N-002 误报「`Turn` 前缀被两个域登记」。所以解释住在这里（表外），不进单元格。
+> **`TurnRunner` / `RoundInjector` 已下沉 `plugins/session`**（2026-10-09）：运行器本体
+> 与工具轮注入口都只有一个生产消费方（session），留在此层即「架构层挂业务钩子」的污染。
+> 判据见 §4 第 1 问；决定见 [ADR-050](../../../docs/decisions/core.md#adr-050-turnrunner-族按依赖方数量下沉-pluginssession)。两者**不属于**
+> `plan/01` 的冻结契约名——此前在 §1.2 表里登记为冻结契约名是口径误判。
+
+> **`ActorSpec` 反向升为根 `pub use`**（同批）：它是 **F3 冻结锚点**（`plan/01 §4` 主体规格
+> 五字段），下沉前靠 `TurnInput.actor`（当时的根导出）**顺带**可达、`pub(crate)` 够用；运行器
+> 搬走后这条路径消失，而它只能住 core（F3 冻的是字段集）⇒ 必须自己占根出口。它只有 1 个生产
+> 消费方（`plugins/session`），属 C-003 的「接缝」而非「该下沉」，登记在
+> `core-export-audit.mjs` 的 `WAIVERS`（同 `PermissionMatrix` / `VisScope`）。
 
 > 判据始终是「**调用点读不读得出归属**」，表只是把结论固化。所以 `logger` 用 `LOG_`
 > 而不是 `LOGGER_`（多出来的四个字母不增加任何信息）；而 `plugin` 域里 `PLUGIN_ID_*` /

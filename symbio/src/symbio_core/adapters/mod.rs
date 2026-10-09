@@ -209,8 +209,8 @@ pub trait DeltaSink: Send + Sync + 'static {
     fn on_delta(&self, text: &str);
 }
 
-/// 静默接收口：[`crate::symbio_core::TurnRunner::run`]（非流式形态）的委托目标——同一条执行路径，
-/// 不为「不要流式」造第二条。
+/// 静默接收口：会话侧执行器（`TurnRunner`，非流式形态）的委托目标——同一条
+/// 执行路径，不为「不要流式」造第二条。
 pub struct SilentDeltas;
 
 impl DeltaSink for SilentDeltas {

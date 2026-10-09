@@ -62,6 +62,7 @@
 | [047](./decisions/session.md#adr-047-委派者三项真源判定回-reason能力走注入进展读磁盘事实) | 委派者三项真源：判定回 `reason`、能力走注入、进展读磁盘事实 | 现行 |
 | [048](./decisions/session.md#adr-048-出厂档位改-fullv2-链路是出厂路径bridge-退役) | 出厂档位改 `full`——v2 链路是出厂路径，`bridge` 退役 | **部分接受**（2026-10-09：已落地 1/4 步，三条缺口见该条） |
 | [048a](./decisions/session.md#adr-048a2026-10-09v2-的-prompt-形状必须回到结构化消息) | v2 的 prompt 形状必须回到结构化消息（不把工具结果拍平成纯文本） | 已接受 · 未实现 |
+| [050](./decisions/core.md#adr-050-turnrunner-族按依赖方数量下沉-pluginssession) | `TurnRunner` 族按依赖方数量下沉 `plugins/session` | 现行 |
 
 ---
 

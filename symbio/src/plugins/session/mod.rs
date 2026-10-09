@@ -19,6 +19,7 @@ pub(crate) mod round_hook;
 mod stats;
 mod tokenizer;
 mod transcript;
+pub(crate) mod turn_runner;
 pub(crate) mod v2_exec;
 pub(crate) mod v2_facts;
 mod v2_memory;

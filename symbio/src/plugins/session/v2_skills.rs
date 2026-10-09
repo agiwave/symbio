@@ -17,7 +17,7 @@
 //! - **快路的作用点是执行**：`SkillFastPath` 命中时本轮**不调模型**，直接以技能正文
 //!   收束（S11 §2「命中技能后走 `budget_ms` 更小的 ActorSpec」、§6.2「命中后
 //!   `cost_ms` 显著低于未命中路径」）。执行侧由 core 的
-//!   [`TurnRunner::run_reflex`](crate::symbio_core::TurnRunner::run_reflex) 承担——
+//!   [`TurnRunner::run_reflex`](crate::plugins::session::turn_runner::TurnRunner::run_reflex) 承担——
 //!   它**没有 `llm` 形参**，因此"反射档调模型"在类型上写不出来
 //!   （`verify/latency_gate.rs::assemble(Reflex)` 的落地形态）。本模块只做**命中判定**
 //!   与候选集的装配：`route` 判出可用技能，`take_match` 判本轮发言命中哪一条。

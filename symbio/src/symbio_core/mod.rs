@@ -62,9 +62,21 @@ pub use view::Budget;
 
 // ==================== 主体（v2 阶段 S1，② actors） ====================
 // 只收类型化输入、只产事件（plan/05 §3.1 ② 行）；S1 落 Decider 平凡值，S2 加 Reasoner。
-pub use actors::{
-    Pattern, Reasoner, RoundInjector, TurnInput, TurnOutcome, TurnResume, TurnRunner,
-};
+//
+// ⚠️ `TurnRunner` / `TurnInput` / `TurnOutcome` / `TurnResume` / `RoundInjector`
+// **已不在本层**（2026-10-09 下沉到 `plugins/session/turn_runner.rs`）：它们是**执行引擎**
+// （流循环 + 落格顺序），生产消费方只有 session 一个，按 README §4 四问第 1 问该下沉；
+// 且它们**不是** F1–F6 冻结锚点（F3 冻的是 `ActorSpec` 字段集 + 档位→令牌映射，不是运行器）。
+// 曾登记为 `plan/01 §4` 冻结契约名是**误记**——`plan/01` 全文没有 `TurnRunner` 一词。
+//
+// `ActorSpec`（F3 冻结锚点：`plan/01 §4` 的**主体规格五字段**）**留根出口**（`pub use`，
+// 不是 `pub(crate)`）。下沉前它靠 `TurnInput.actor`（当时的根导出）**顺带**可达，故
+// `pub(crate)` 也够用；运行器搬走后这条顺带路径没了，而 F3 冻的是**字段集**、它只能住
+// core ⇒ 必须显式占根出口，否则 core 外（`plugins/session` 构造 / 读 `principal`）够不着它
+// （C-002 禁止插件深引域目录）。它只有 1 个生产消费方（`plugins/session`），属 C-003
+// 的「接缝」而非「该下沉」——下沉即等于把 F3 冻结契约搬出 core，故登记进
+// `core-export-audit.mjs` 的 `WAIVERS`（与 `PermissionMatrix` / `VisScope` 同一形态）。
+pub use actors::{ActorSpec, Pattern, Reasoner};
 // 外部执行闸门（S8 第 20 步）、插话抢占判定（S8 第 19 步）、自主发起 + 意图闸门
 // （S9 第 21 步）与技能编译 + 路由（S9 第 22 步）：判定在 core、接线在
 // `plugins/session`（闸门进工具执行闸，判定者进收件箱忙窗，自主侧进心跳 tick，
@@ -98,7 +110,12 @@ pub(crate) use event::{
 // 名字是数据，core 内与插件内各写一份字面量就等于两套事件名。
 // `recalled_event` 出根而不是主体类型本身：NDC-001（无直连）禁止定义域之外**提及
 // 主体名**——提及即可持有、持有即可绕过事实源。主体仍在 `actors` 内被本函数驱动。
-pub(crate) use actors::{commitment_events, recalled_event, ActorSpec};
+pub(crate) use actors::{commitment_events, recalled_event};
+// prompt 的结构化渲染出口（`Reasoner::render_messages` 的一跳封装）：运行器下沉
+// `plugins/session` 后要「事件切片 → 消息数组」，但 NDC-001 禁止它在定义域之外提及主体名
+// （`scripts/no-direct-call-audit.mjs`）⇒ 与 `recalled_event` 同一形态，主体仍在 `actors`
+// 内被本函数驱动。生产消费方是 session 的**生产**代码，故不带 `cfg(test)`。
+pub(crate) use actors::render_messages;
 // 承诺事件名字表：core 内的消费方（`commitment_events` 的 `CommitmentKeeper`、
 // `projection::reputation`）走**模块内**路径引用，插件侧只有**测试**要按名字断言
 // （`v2_bridge.test.rs`）——而 C-002 禁止 core 外深引、非测试构建里这四个名字又
@@ -133,6 +150,33 @@ pub use adapters::{
     DeltaSink, DispatchOutcome, DispatchPort, LatencyTier, LlmAdapter, LlmTurn, ProviderLlmAdapter,
     TokenIssuer,
 };
+// 执行引擎（`TurnRunner` 族）2026-10-09 下沉 `plugins/session/turn_runner.rs` 后，仍需要的
+// core 内部面。它们**不能下沉**——core 自己也在用（`TokenIssuer` 铸令牌、`provider_adapter`
+// 实现 trait、`store` 读写、`invariants` 判据、`prompt_fidelity` 复核）；插件又不能深引域
+// 目录（C-002）⇒ 以 `pub(crate)` 出根：只在本 crate 内可见、不进对外公开面（C-003 只数
+// `pub use`），与 `visible_to` / `recall` 同一形态。（`ActorSpec` 不在此列——它是 F3 冻结
+// 锚点，另以根 `pub use` 出，见上。）
+pub(crate) use adapters::{AdapterError, FullModel, RuleOnly};
+// 空增量口 `SilentDeltas` 的**根出口**只剩测试在用：生产侧 `v2_exec` 自带 `SilentDeltaSink`
+// （见其注释），core 内 `Reasoner::reply_timed` 走 `adapters::` 域内路径 ⇒ 同 `StubLlmAdapter`
+// 一形态，只在 `cfg(test)` 出根（下沉后的 `turn_runner.test.rs` 是唯一根出口消费者）。
+#[cfg(test)]
+pub(crate) use adapters::SilentDeltas;
+// 零 LLM 桩只在测试构建里存在（README §1.2 adapters 行）——`cfg(test)` 出根给下沉后的测试用。
+#[cfg(test)]
+pub(crate) use adapters::StubLlmAdapter;
+// C4 判据（`unresolved_turns`）只在**测试**里经根出口用：生产侧没有任何调用点（`check_all`
+// 在 core 内走域内路径），下沉后的 `turn_runner.test.rs` 是唯一根出口消费者，而 C-002 禁止
+// 它深引 `symbio_core::invariants::…` ⇒ 同 `StubLlmAdapter` 一形态，只在 `cfg(test)` 出根。
+#[cfg(test)]
+pub(crate) use invariants::unresolved_turns;
+// 事实网格 → prompt 的双向完整性复核（ADR-048 防线节）：下沉后的运行器组装 prompt 时调它。
+pub(crate) use projection::prompt_fidelity::verify as verify_prompt_fidelity;
+// `PromptMessage` 的结构化子件：`PromptMessage.tool_calls` 的载荷类型。此前只被 core 内
+// `actors` 用（故根注释曾写「留在模块路径」）；运行器下沉 `plugins/session` 后它跨出 core，
+// 而 C-002 禁止插件深引域目录 ⇒ 随 `PromptMessage` 一起以 `pub(crate)` 出根。
+pub(crate) use projection::transcript::PromptToolCall;
+pub(crate) use store::AppendError;
 
 // ==================== 权限与可见性（v2 阶段 S3，⑥ governance） ====================
 // 读写成对、fail-closed（plan/01 §7）。根出口只出**矩阵与可见域**两个类型：

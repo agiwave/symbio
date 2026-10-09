@@ -24,6 +24,8 @@
  * `TurnRunner` / `TurnInput`（生产只有 `plugins/session`，第二个单位来自
  * `plugins/model/bound_provider.test.rs` 的彩排）长期显为 ≥2，而同族的 `TurnOutcome` /
  * `TurnResume`（没被那个测试提到）一直显为单消费方——**同一个功能、四个名字、两种判决**。
+ * 这族符号已于 2026-10-09 整体下沉 `plugins/session`（见 `symbio_core/mod.rs` 的
+ * `actors` 导出注与 `plugins/session/turn_runner.rs` 文件头）——本条口径修正的动机即由此暴露。
  *
  * 但**「0 消费方」那一半仍按含测试计**：只被别模块测试用到的符号，收窄它当场把那些测试
  * 编译坏（C-002 又不许它们深引）⇒「测试在用」**足以**让它留在根出口。故本条实际分三档：
@@ -108,6 +110,15 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
         '插件-facing 治理契约类型：E-009/C-002 禁止插件深引 core 域目录，必须留根出口；core 内 authz 与 governance 亦用，无法下沉到唯一消费方',
 VisScope:
         '同上：读侧可见域参数类型，插件经 session/stats 读闸传入，core 内 authz 亦用，无法下沉',
+      // `ActorSpec`（F3 冻结锚点，`plan/01 §4` 主体规格五字段）：2026-10-09 `TurnRunner`
+      // 族下沉 `plugins/session` 后**新现**的单消费方根导出。它此前是 `pub(crate)`——靠
+      // `TurnInput.actor`（当时的根导出）**顺带**可达，故不必自己占根出口；运行器搬走后
+      // 这条顺带路径消失，而 C-002 又禁止插件深引 `symbio_core::actors::…` ⇒ 插件够不着它。
+      // 它**不可下沉**：F3 冻的是**字段集**，把 `ActorSpec` 搬出 core 就是架构变更
+      // （03 §1「修改 F1–F6 = 架构变更」的负向约束），与 `PermissionMatrix` / `VisScope`
+      // 同属 README §4 四问的「接缝」而非「单消费方该下沉」。
+      ActorSpec:
+        'F3 冻结锚点（plan/01 §4 主体规格五字段：principal/pattern/capabilities/budget_ms/scope）：core 外唯一生产消费方是 plugins/session（v2_exec 构造 + turn_runner 读 principal），但**不可下沉**——F3 冻的是它的字段集，搬出 core 即架构变更（03 §1）；且 C-002 禁止插件深引 core 域目录 ⇒ 插件只能经根出口拿它。属 README §4 四问的「接缝」而非「单消费方该下沉」（与 PermissionMatrix / VisScope 同形）',
       // 注：`CapabilityRiskLevel` 曾挂在这张豁免表上（「静态扫描只数到首个 use 点」）。
       // 门禁已判定该豁免失效并要求删除——工具侧真的开始读它之后，多消费方是可证的，
       // 不再依赖豁免。风险等级改为由各工具在 `CapabilityMeta` 里自声明，
@@ -118,10 +129,10 @@ VisScope:
       // `plugins/session` 也开始用 ⇒ 消费方 2 个 ⇒ **豁免失效，已删除**（门禁会主动
       // 报这个，不靠人记得清理）。
       //
-      // `RoundInjector` 则是另一回事：它在**公开 trait 的签名**里（`LlmAdapter::generate`
-      // 的入参经 `TurnInput::inject` 出现），trait 在 core 外可实现 ⇒ 签名类型不能是
-      // core 私有模块路径。消费方：`plugins/session`（生产）+ core 内 `actors`；审计的
-      // 跨 core 计数只数到前者，故显为单消费方。
+      // `RoundInjector` 曾挂在本表上（理由：它在 `LlmAdapter` 的入参链里、trait 在 core
+      // 外可实现）。**2026-10-09 已失效删除**：`TurnRunner` 族整体下沉 `plugins/session`
+      // 后，`RoundInjector` 也随之搬走（它只经 `TurnInput::inject` 出现），不再是 core
+      // 公开面符号 ⇒ 豁免条目必须删（门禁会主动报「已不在公开面」，不靠人记得清理）。
       // `EVENT_TURN_SUPPLEMENTED`（批 P3c 新增事件名，`turn × asserted`）：
       // 与 `EVENT_ARTIFACT_ADDED` / `EVENT_ASSISTANT_*` / `EVENT_USER_MESSAGE` 同类——
       // **事件名必须单点定义**（`event/mod.rs` 是唯一 owner，散落字面量必然漂），
@@ -135,8 +146,6 @@ VisScope:
       // 的消费方只有 session 那一个，与上面那条同形。
       EVENT_ASSISTANT_REPORTED:
         '事件名常量：与 EVENT_TURN_SUPPLEMENTED 同类同格（turn × asserted），event/mod.rs 单点定义、插件按名引用。Core 外唯一消费方 = plugins/session（v2_exec 落格），投影在 core 内走域内路径',
-      RoundInjector:
-        '公开 trait LlmAdapter 的入参类型（经 TurnInput::inject 出现）：trait 在 core 外可实现，其签名类型不能是 core 私有模块路径。core 内消费方 = actors（审计只数跨出 core 的那一个，故显为单消费方）',
     }
 
 /**
@@ -155,15 +164,23 @@ VisScope:
  * 口径一改，`zero` 不变（仍按**含测试**计——只被测试用到的符号收窄会编译坏那些测试），
  * `one` 从 61 涨到 77：**多出来的 16 个不是新增违规，是原先被测试计数遮住的存量**。
  * 它们按 README §4 四问逐条处置（下沉 / 豁免），处置一个就把这里降一格。
+ *
+ * `76` 是 **`TurnRunner` 族下沉后的存量**（2026-10-09 同日）。净变化 −1，但**内部换过**：
+ * - −5：`TurnRunner` / `TurnInput` / `TurnOutcome` / `TurnResume` / `RoundInjector`
+ *   整体下沉 `plugins/session`（不再占 core 根出口）；
+ * - +3：`Reasoner` / `LlmAdapter` / `EVENT_ARTIFACT_ADDED` 由「仅测试在用」升为「单消费方」
+ *   ——**不是新增违规，是运行器搬进 session 后，session 的生产代码成了它们的消费方**
+ *   （此前只有 `plugins/model` / `plugins/session` 的**测试**提到它们）。
+ * 两者都属「单消费方但不可下沉」的接缝（core 契约元素），随存量一起留在基线里。
  */
 const BASELINE = process.env.CORE_EXPORT_BASELINE
   ? (() => {
       const [zero, one] = process.env.CORE_EXPORT_BASELINE.split(':').map((n) => Number(n))
       return { zero, one }
     })()
-  : { zero: 0, one: 77 }
+  : { zero: 0, one: 76 }
 
-// core-export-allow one: 2026-10-09 口径修正——测试文件不再算架构消费方（口径全文见 core-surface.mjs 口径 4），此前被测试计数遮住的 24 个真·单消费方符号现形（TurnRunner / TurnInput / Store / Entity / PromptMessage / ProviderLlmAdapter …），故 one 61→77。**这是测量修正，不是放松判据**：那 24 个一直都在，旧口径把它们读成了 ≥2。零消费方那一格（zero）不变——它按含测试计，只被测试用到的符号收窄会当场编译坏那些测试。**退出条件**：这 24 个按 README §4 四问逐条处置（下沉或登记豁免），每处置一个就把 one 降一格；全部处置完（one 回落到 ≤61）时**必须删掉本行**，否则这条豁免会长期掩盖 one 的后续放松。
+// core-export-allow one: 2026-10-09 口径修正——测试文件不再算架构消费方（口径全文见 core-surface.mjs 口径 4），此前被测试计数遮住的 24 个真·单消费方符号现形（TurnRunner / TurnInput / Store / Entity / PromptMessage / ProviderLlmAdapter …），故 one 61→77（同日下沉 TurnRunner 族后为 76，见上）。**这是测量修正，不是放松判据**：那 24 个一直都在，旧口径把它们读成了 ≥2。零消费方那一格（zero）不变——它按含测试计，只被测试用到的符号收窄会当场编译坏那些测试。**退出条件**：这 24 个按 README §4 四问逐条处置（下沉或登记豁免），每处置一个就把 one 降一格；全部处置完（one 回落到 ≤61）时**必须删掉本行**，否则这条豁免会长期掩盖 one 的后续放松。
 
 
 const errors = []

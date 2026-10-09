@@ -282,7 +282,7 @@ e2e 覆盖支撑**（42 个用例里只有 4 个跑 `full`，其余全在 `bridg
 | 6 | token 估算的校准反馈 | `feedback_estimate` 的调用点 | **不校准** | **待修**（通路断在 v1 侧，见下） |
 | 7 | 思考通道增量（reasoning） | `DeltaSink::on_delta(text)` 单通道 | **丢** | **待修**（core 契约面变更，单独立批） |
 
-- **缺口 1 机制**：`full` 的 prompt 来自 `Reasoner::render_prompt` 对事件快照的渲染，
+- **缺口 1 机制**：`full` 的 prompt 来自 `Reasoner::render_messages` 对事件快照的渲染，
   经 `ProviderLlmAdapter::generate_turn` 作为**一条** user 消息发出；而三段在 v1 里是
   `build_request_view` 插进 `request_view` 的**独立消息**。`V2Turn` 没有承接它们的
   字段 ⇒ 不显式带进来就消失。**补法**：`TurnInput::prefix`（请求级前缀，排基线
@@ -524,8 +524,9 @@ LLM）——所以它便宜到可以每轮都跑，不会因为「太重」而�
 住在 `plugins/session`，且 core 不认识 `parent_id` 那套树）——**结构在 core、线格式在 adapter**。
 
 **投影加出口 `to_messages()`**，与 `to_prompt()` **并存**读同一份 `entries`：`to_prompt` 给只需要
-文本的调用方（诊断、断言、日志），`to_messages` 给**送模型的路径**。`render_prompt` 与
-`render_messages` 同理并存——**排版是消费方的事，事实只有一份**。
+文本的调用方（诊断、断言、日志），`to_messages` 给**送模型的路径**。`Reasoner` 侧**不再并存**——
+`render_prompt`（拍成一段文本）已随 ADR-050 删除，`render_messages` 是**唯一**出口
+（**排版是消费方的事，事实只有一份**）。
 
 #### 四条只有实测才知道的协议事实
 

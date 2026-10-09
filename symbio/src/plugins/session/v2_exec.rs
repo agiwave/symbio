@@ -88,11 +88,14 @@ use crate::symbio_core::chat_message::{
 use crate::symbio_core::{
     llm_short_id, ActorSpec, CapabilityMeta, DeltaSink, DispatchPort, Entity, Event, EventWalStore,
     ExecAbortSignal, ExecEventSink, LatencyTier, ModelProvider, Plugin, PluginError,
-    ProviderLlmAdapter, Seq, Store, TokenIssuer, TurnInput, TurnOutput, TurnResume, TurnRunner,
-    TurnToolCallInfo, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+    ProviderLlmAdapter, Seq, Store, TokenIssuer, TurnOutput, TurnToolCallInfo, Verb,
+    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 
 use super::chat_session::PersistentChatSession;
+// 运行器一族**已下沉到本插件**（2026-10-09，见 `turn_runner.rs` 的头注）：它们不是 core 的
+// 契约面，生产消费方只有本插件，按 README §4 四问第 1 问该住这里。
+use super::turn_runner::{TurnInput, TurnResume, TurnRunner};
 
 /// 恢复产生的工具交换（审批 / 问答恢复后，由 v1 恢复路径交回）。
 ///
@@ -509,12 +512,12 @@ pub(crate) struct V2Turn<'a> {
     pub skill_hits: &'a [super::v2_skills::SkillLlmHit],
     /// **请求级前缀**：v1 请求视图层 `build_request_view` 置顶的三段——长期记忆召回 /
     /// 就绪任务集 / 委派者真源——在这里拼成一段文本，排在本轮对话**之前**
-    /// （见 [`TurnInput::prefix`](crate::symbio_core::TurnInput::prefix)）。
+    /// （见 [`TurnInput::prefix`](crate::plugins::session::turn_runner::TurnInput::prefix)）。
     ///
     /// ## 为什么必须显式带进来
     ///
     /// `full` 档的 prompt 是**一条** user 消息（`ProviderLlmAdapter::generate_turn`
-    /// 把 `Reasoner::render_prompt` 的渲染结果整段发出），而那三段在 v1 里是**独立的
+    /// 把渲染结果整段发出），而那三段在 v1 里是**独立的
     /// 消息**。于是档位翻成 `full` 的同时它们**静默**从模型眼前消失——事实照样入格、
     /// `session/stats` 照样有数，只有模型看不见（实测 t29 / t35 在 `full` 下报
     /// 「记忆段没注入」，而注入逻辑一行没改）。
@@ -1027,7 +1030,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
 
                             injected
                         })
-                    }) as crate::symbio_core::RoundInjector
+                    }) as crate::plugins::session::turn_runner::RoundInjector
                 }),
                 // 本路**恒**走生成：定稿答话轮（缺口 5）不经这里——它一个模型请求都不发，
                 // 由 `execute_final_reply_turn` 单独入口落格（见该函数）。
