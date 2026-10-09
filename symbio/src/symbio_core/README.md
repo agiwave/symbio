@@ -106,7 +106,7 @@
 |---|---|---|---|---|
 | `assembly` | — | `ASSEMBLY_` | — | 本域只有两个常量 |
 | `adapters` | 契约词 `LatencyTier` · `RuleOnly` · `ClassifyOnly` · `FullModel` · `CanClassify` · `CanGenerate` · `TokenIssuer` · `LlmAdapter` · `LlmTurn` · `AdapterError` · `StubLlmAdapter` · `ProviderLlmAdapter` · `DeltaSink` · `SilentDeltas` · `DispatchPort` · `DispatchOutcome` | — | — | `CanClassify` · `CanGenerate` · `StubLlmAdapter` 是 `#[cfg(test)]` 项（只有测试构建里存在：编译期正例与零 LLM 桩，**没有生产接入位**，故不参与接线清偿）；其余全部是 [plan/05 §3.3](../../../docs/plan/05-模块架构.md) 注入策略与 [plan/01 §10](../../../docs/plan/01-核心架构.md) 四层时延表的冻结契约名（出处 [`verify/latency_gate.rs`](../../../docs/plan/verify/latency_gate.rs)），名字先于模块存在——判据同 `schemas`。`LlmTurn` / `DispatchPort` / `DispatchOutcome` 是 [plan/10 §2](../../../docs/plan/10-工具轮v2化实施方案.md) 的两只端口（生成 / 工具分发），与前缀同域：**不能叫 `Tool*`**——那是 `capability` 域的子命名空间 |
-| `actors` | `Actor*`（`ActorSpec`）；契约词 `Pattern` · `Scope` · `Decider`（模式名）· `Reasoner` · `RecallTranslator` · `CommitmentKeeper` · `PreemptionDecider`（含 `Preemption`）· `CircuitBreaker`（含 `GateDecision`）· `AutonomousInitiator` · `IntentGate`（含 `ConationPolicy` / `ConationCandidate` / `GateWarrant` / `IntentDecision` / `ApprovedIntent`）· `SkillCompiler` · `SkillRouter`（含 `SkillRoute`） | — | — | [plan/01 §4](../../../docs/plan/01-核心架构.md) 的冻结契约名（名字先于模块存在，判据同 `schemas`）；`Decider` 是 [plan/05 §4](../../../docs/plan/05-模块架构.md) S8 反射档判定者的**模式名**（`Pattern::Decider`）——规则应答的语义由 [plan/06](../../../docs/archive/06-会话响应性落地.md) 的 `classify` 规则表承接，本域只留模式名。**`TurnRunner` / `TurnOutcome` / `TurnInput` / `TurnResume` / `RoundInjector` 已于 2026-10-09 下沉 `plugins/session`**（单生产消费方，见 §4 第 1 问与 [ADR-050](../../../docs/decisions/core.md#adr-050-turnrunner-族按依赖方数量下沉-pluginssession)） |
+| `actors` | `Actor*`（`ActorSpec`）；契约词 `Pattern` · `Scope` · `Decider`（模式名）· `Reasoner` · `RecallTranslator` · `CommitmentKeeper` · `PreemptionDecider`（含 `Preemption`）· `CircuitBreaker`（含 `GateDecision`）· `AutonomousInitiator` · `IntentGate`（含 `ConationPolicy` / `ConationCandidate` / `GateWarrant` / `IntentDecision` / `ApprovedIntent`）· `SkillCompiler` · `SkillRouter`（含 `SkillRoute`） | — | — | [plan/01 §4](../../../docs/plan/01-核心架构.md) 的冻结契约名（名字先于模块存在，判据同 `schemas`）；`Decider` 是 [plan/05 §4](../../../docs/plan/05-模块架构.md) S8 反射档判定者的**模式名**（`Pattern::Decider`）——规则应答的语义由 [plan/06](../../../docs/archive/06-会话响应性落地.md) 的 `classify` 规则表承接，本域只留模式名。**`TurnRunner` / `TurnOutcome` / `TurnInput` / `TurnResume` / `RoundInjector` 已于 2026-10-09 下沉 `plugins/session`**（单生产消费方，见 §4 第 1 问与 [ADR-023](../../../docs/decisions/core.md#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层)） |
 | `capability` | `Capability`；子命名空间 `Configurable*` · `Option*` · `Tool*` | — | `capability_` | 无常量；三个子命名空间各有对应文件 |
 | `clock` | — | — | `clock_` | 只有一个函数 |
 | `creator` | — | — | `creator_` | 通用对象创建注册表：按 id 装配**任意**类型对象，见 §2 |
@@ -129,7 +129,7 @@
 
 > **`TurnRunner` / `RoundInjector` 已下沉 `plugins/session`**（2026-10-09）：运行器本体
 > 与工具轮注入口都只有一个生产消费方（session），留在此层即「架构层挂业务钩子」的污染。
-> 判据见 §4 第 1 问；决定见 [ADR-050](../../../docs/decisions/core.md#adr-050-turnrunner-族按依赖方数量下沉-pluginssession)。两者**不属于**
+> 判据见 §4 第 1 问（[ADR-023](../../../docs/decisions/core.md#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层)）。两者**不属于**
 > `plan/01` 的冻结契约名——此前在 §1.2 表里登记为冻结契约名是口径误判。
 
 > **`ActorSpec` 反向升为根 `pub use`**（同批）：它是 **F3 冻结锚点**（`plan/01 §4` 主体规格
