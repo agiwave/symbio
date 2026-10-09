@@ -300,14 +300,21 @@ export default defineCase(
 
         // ── 证据 ③：心跳那一轮真的跑了（触发不是只落事实、不发轮）────────────
         // 触发事实**先于**这一轮落格（`record_autonomous_trigger` 在 `handle_chat_send_oneoff`
-        // 之前跑，正是"事实没落成就不发这一轮"）⇒ 等到触发不等于等到这一轮收束，
-        // 必须再等收束转写把心跳轮的用户发言写进事实源。
+        // 之前跑，正是"事实没落成就不发这一轮"）⇒ 等到触发不等于等到这一轮收束。
+        //
+        // 所以等的是**收束**，不是开轮：两者之间隔着整个模型往返 + 写侧闸，只等开轮
+        // 会在慢机器上把「还在途」读成「没跑」——那是判据的时序形状错了，不是产品的
+        // 问题（t36 在满载门禁里就这么红过一次：开轮到了、收束还没到）。
         await waitFor(
           () =>
+            eventsOf(hd, SID_OK, 'chat.assistant.final').length >= 2 &&
             eventsOf(hd, SID_OK, 'user.message').some((e) =>
               String(e.payload?.text ?? '').includes(PROMPT_OK),
             ),
-          { what: '心跳轮收束转写落格（提示词作为一条用户发言进事实源）', timeoutMs: 40_000 },
+          {
+            what: '心跳轮收束转写落格（提示词进开轮格 + 收束格也到位）',
+            timeoutMs: 40_000,
+          },
         );
         assert(
           eventsOf(hd, SID_OK, 'chat.assistant.final').length >= 2,

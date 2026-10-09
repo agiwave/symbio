@@ -23,6 +23,7 @@
 | **PN** | 健壮性登记（每一处 panic 都是显式事实） | `scripts/panic-audit.mjs` | PN-001–003 | `PN-004` |
 | **R** | 死代码 | `scripts/dead-code-audit.mjs` | R-001–002 | `R-003` |
 | **S** | 源码 grep 形态 | `scripts/grep-audit.mjs` | S-001–003、S-006–012 | `S-013` |
+| **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
 
 ## 2. 逐码归属
 
@@ -95,3 +96,6 @@
 | **S-010** | `scripts/grep-audit.mjs` |
 | **S-011** | `scripts/grep-audit.mjs` |
 | **S-012** | `scripts/grep-audit.mjs` |
+| **SX-001** | `scripts/slo-exit-audit.mjs` |
+| **SX-002** | `scripts/slo-exit-audit.mjs` |
+| **SX-003** | `scripts/slo-exit-audit.mjs` |
