@@ -53,7 +53,7 @@ pub use self::progress::ProgressPolicy;
 pub use self::state::{ChatOrchestrator, CompressionEmitter, StopSignal, SupplementDrain};
 
 // 模块内共享面：子模块经 `use super::*;` 取用，测试亦同（`gate_tests` 等）。
-pub(crate) use self::compose::{apply_verdict, VerdictEffect};
+pub(crate) use self::compose::{apply_verdict, dialog_node, VerdictEffect};
 pub(crate) use self::decide::decide_turn;
 pub(crate) use self::inputs::prepare_turn_inputs;
 pub(crate) use self::io::{
@@ -65,6 +65,83 @@ pub(crate) use self::state::{
     request_principal, Gate, SessionContext, TurnExit, TurnRequest, TurnResult, TurnState,
 };
 pub(crate) use self::turn::{close_turn, settle_reasoning};
+
+/// `full` 档的轮边界回调（缺口 4）：判定与措辞都在本函数里，落格在 `v2_exec`。
+///
+/// ## 为什么返回**草稿**而不是 `()`
+///
+/// 落格要 `EventWalStore`，而开着它的是 `v2_exec`。交回一个 `()` 就等于让本函数
+/// 「说完了就算记下了」，而这两件事在 v1 里从来不是同一件事（v1 的汇报节点落进
+/// `context.messages`，由 `persist_messages` 落库，**不进事实网格**）。交回草稿
+/// 让「谁落格」这件事留在有 store 的那一侧。
+///
+/// ## `last_spoke_at` 为什么从 `turn` 取初值
+///
+/// 轮首 compose 说过话（`Escalate` 首响 / `Answered` 答话）就要把静默时钟归零，
+/// 而那件事改的是 `TurnState::last_user_facing_at`。本函数拿不到 `TurnState`，
+/// 所以只能在构造时**取一次快照**当起点——从那一刻起两边的语义就一致了
+/// （本档下 `TurnState` 那三格在轮内再也不会被改）。
+///
+/// ## 会话视图：只给**轮首**那一份
+///
+/// compose 的 `ComposeRequest` 带一段会话视图，而 `full` 档的轮边界上
+/// `context.messages` 里**只有轮首那一批**（工具轮的消息由 `v2_exec` 在轮末才
+/// 交回来）。所以本函数传的快照与那一刻 `context.messages` 的内容**逐字相同**，
+/// 不是近似。代价是它不含本轮工具节点——仓内的 `progress_text` 不读这一段
+/// （只用 `snapshot`），而要让仓外 compose 插件也拿到它就得再造一条把工具消息
+/// 实时送回来的通路，为一个字段不值得。真要那一条时该一起做，别在这里打补丁。
+pub(crate) fn round_report_hook(
+    orchestrator: Arc<super::chat_loop::state::ChatOrchestrator>,
+    ctx: Arc<dyn crate::symbio_core::PluginInvokeRequest>,
+    conversation: Vec<ChatMessage>,
+    last_spoke_at: i64,
+) -> super::v2_exec::RoundHookFn {
+    let progress = Arc::new(std::sync::Mutex::new(
+        super::chat_loop::progress::RoundProgress::new(
+            orchestrator.progress.clone(),
+            last_spoke_at,
+        ),
+    ));
+    Arc::new(move |_anchor: Option<u64>| {
+        let orchestrator = orchestrator.clone();
+        let ctx = ctx.clone();
+        let conversation = conversation.clone();
+        let progress = progress.clone();
+        Box::pin(async move {
+            // 轮首没有「进展」可报：那里刚问过模型，判定对象是用户那句话（归 decide.rs）。
+            let snapshot = {
+                let Ok(mut p) = progress.lock() else {
+                    return None;
+                };
+                let snap = p.advance();
+                if !p.due(&snap) {
+                    return None;
+                }
+                snap
+            };
+            let Some(text) = super::chat_loop::compose::report_text(
+                &orchestrator,
+                &ctx,
+                &conversation,
+                &snapshot,
+            )
+            .await
+            else {
+                // 拿不到措辞 ⇒ 没说话，也**不消耗配额**（下一个轮边界还会再试）——
+                // 与 `apply_verdict` 降级而不失效同一条方向。
+                return None;
+            };
+            if let Ok(mut p) = progress.lock() {
+                p.spoke();
+            }
+            Some(super::round_hook::ReportDraft {
+                text,
+                tool_rounds: snapshot.tool_rounds,
+                quiet_ms: snapshot.quiet_ms,
+            })
+        })
+    })
+}
 
 /// 把请求视图层**置顶的三段**拼成一段请求级前缀（`full` 档的 prompt 入口）。
 ///
@@ -160,7 +237,7 @@ use super::tools::{fire_hook, process_tool_calls_async};
 use super::transcript::{llm_emit_removed, llm_emit_state};
 
 pub async fn run_chat_loop(
-    orchestrator: &ChatOrchestrator,
+    orchestrator: std::sync::Arc<ChatOrchestrator>,
     ctx: Arc<dyn PluginInvokeRequest>,
     sink: ExecEventSink,
     abort: ExecAbortSignal,
@@ -172,6 +249,12 @@ pub async fn run_chat_loop(
     // `unwrap_or(false)` / `unwrap_or(15)` 三份影子默认值，与配置默认值恰好相等纯属
     // 巧合，改配置会静默失效。
     let turn_req = TurnRequest::new(&req);
+
+    // 编排器本体：下面多处按引用传（`&ChatOrchestrator`），而轮边界回调要
+    // **自己持有一份**（回调是 `Fn + Send + Sync + 'static`，见
+    // `round_report_hook` 的文档）。所以这里留一个借用、另clone 一份给回调。
+    let orchestrator_arc = orchestrator.clone();
+    let orchestrator = orchestrator.as_ref();
 
     plugin_info!(
         "session",
@@ -573,6 +656,14 @@ pub async fn run_chat_loop(
                     Arc::new(move || s.take_inbox_batch_sync()) as super::v2_exec::SupplementFn
                 }),
                 supplemental_no: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                // 轮边界汇报（缺口 4）：判定 + 措辞在这里（编排器 + compose 都在
+                // 本函数手里），**落格**在 `v2_exec`（store 在那边）。
+                on_round: Some(round_report_hook(
+                    orchestrator_arc.clone(),
+                    ctx.clone(),
+                    context.messages.clone(),
+                    turn.last_user_facing_at,
+                )),
             })
             .await
             {

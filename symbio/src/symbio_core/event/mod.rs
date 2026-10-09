@@ -72,6 +72,25 @@ pub const EVENT_USER_MESSAGE: &str = "user.message";
 /// 与「用户连说了 5 句」对模型是不同的输入，而网格不该只保留前者。
 pub const EVENT_TURN_SUPPLEMENTED: &str = "turn.supplemented";
 
+/// **轮边界汇报**（载荷 `{ text, tool_rounds, quiet_ms }`）。落在 `turn × asserted`。
+///
+/// ## 它为什么是事实（缺口 4）
+///
+/// 「干到一半也要能说一句话」。那句话由 `compose` 的模板产线生成（零 LLM 往返），
+/// 在 v1 里写进 `context.messages` —— 但 `full` 档的**工具循环搬进了 v2 运行器**，
+/// 而 chat_loop 的轮边界每个用户轮只经过一次、且判定头一句就是
+/// `tool_rounds == 0 ⇒ 不说`（那个计数只在 v1 的轮循环里递增）⇒ **恒不发**。
+///
+/// 汇报不是轮次事实（一轮可以报零到多次），所以它与 `turn.supplemented` 同格
+/// （`turn × asserted`），不占 `chat.assistant.final` 那格 N3 的「每轮至多一条」。
+///
+/// ## 为什么标注「不进请求包」
+///
+/// 汇报是**界面文本**：`exclude_from_context`（与 `Escalate` 首响同一条纪律）。
+/// 投影仍然收它 —— 用户看得见、落库要留住；只是 `to_messages()` 把它滤掉。
+/// 滤掉这件事由 `prompt_fidelity` 反向盯着：它一旦漏进请求包就报缺口。
+pub const EVENT_ASSISTANT_REPORTED: &str = "chat.assistant.reported";
+
 /// 助手最终答复（每 turn 至多 1 条——N3）。落在 `turn × closed`。
 pub const EVENT_ASSISTANT_FINAL: &str = "chat.assistant.final";
 /// 兜底话术——**普通事件，不是特殊通道**（生成失败也要有输出）。落在 `turn × closed`。

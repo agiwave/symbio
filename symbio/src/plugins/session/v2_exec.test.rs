@@ -72,6 +72,7 @@ fn tool_free_req<'a>(
         prefix: None,
         supplements: None,
         supplemental_no: Default::default(),
+        on_round: None,
     }
 }
 
@@ -164,6 +165,7 @@ async fn supplements_become_facts_visible_next_turn() {
         prefix: None,
         supplements: Some(supplements),
         supplemental_no: Default::default(),
+        on_round: None,
     })
     .await
     .expect("工具轮执行成功");
@@ -625,6 +627,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         prefix: None,
         supplements: None,
         supplemental_no: Default::default(),
+        on_round: None,
     })
     .await
     .expect("工具轮执行成功");
@@ -892,6 +895,7 @@ async fn full_turn_lands_derived_commitment_facts() {
         prefix: None,
         supplements: None,
         supplemental_no: Default::default(),
+        on_round: None,
     })
     .await
     .expect("工具轮执行成功");

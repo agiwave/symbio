@@ -24,7 +24,7 @@
 
 use super::super::event::{
     Entity, Event, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_REPORTED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
 use super::super::view::{Budget, View};
 use super::Projection;
@@ -44,6 +44,17 @@ pub struct TranscriptEntry {
     /// 非工具行的线格式保持 `{role, text}` 不变——新增角色不改旧角色的形状。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
+    /// **按设计不进请求包**（界面文本：轮边界汇报 / `Escalate` 首响一类）。
+    ///
+    /// 为什么投影**收**它而 `to_messages()` **滤**它：用户看得见它、落库要留住它，
+    /// 但它不是模型的对话内容——把它发进请求包会让线上出现连续两条 assistant
+    /// （模型会以为那是它自己刚说的）。
+    ///
+    /// 线上格式保持不变（`skip_serializing_if`）：这个标记是**投影内部的判别位**，
+    /// 不是线格式的一部分——落库那份 `ChatMessage` 上有它自己的 `meta` 字段
+    /// （`exclude_from_context`），那份才是前端与轮次窗口读的东西。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub exclude_from_context: bool,
 }
 
 /// 转写视图：按事件顺序（append-only ⇒ 时间序）。
@@ -184,7 +195,25 @@ impl TranscriptView {
     /// 任何「为了 prompt 好看」的加工都会让模型看到网格没有的东西——那正是
     /// `prompt_fidelity` 要报的「两条真源」。
     pub fn to_messages(&self) -> Vec<PromptMessage> {
-        self.entries.iter().map(PromptMessage::from).collect()
+        self.entries
+            .iter()
+            // 界面文本（汇报 / 首响）**不进请求包**——它们是给人看的，模型要是看见了
+            // 会当成「我刚说过这句」，于是线上出现连续两条 assistant。滤在这里而不是
+            // 在投影里不收，是因为落库与前端仍需要它们（用户得看得见自己被汇报了）。
+            .filter(|e| !e.exclude_from_context)
+            .map(PromptMessage::from)
+            .collect()
+    }
+
+    /// 视图里**按设计不进请求包**的条目（诊断 / 判据用）。
+    ///
+    /// 为什么要有这个出口：过滤之后「它们去哪了」就只剩投影实现这一处内部知识——
+    /// 测试与门禁无法从外面验证「汇报真的落了格、且真的没进请求包」。
+    pub fn excluded(&self) -> Vec<&TranscriptEntry> {
+        self.entries
+            .iter()
+            .filter(|e| e.exclude_from_context)
+            .collect()
     }
 }
 
@@ -203,6 +232,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                         role: "user".into(),
                         text: text.to_string(),
                         tool: None,
+                        exclude_from_context: false,
                     });
                 }
                 (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FINAL) => {
@@ -211,6 +241,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                         role: "assistant".into(),
                         text: text.to_string(),
                         tool: None,
+                        exclude_from_context: false,
                     });
                 }
                 (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FALLBACK) => {
@@ -219,6 +250,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                         role: "assistant".into(),
                         text: why.to_string(),
                         tool: None,
+                        exclude_from_context: false,
                     });
                 }
                 // 轮边界折进的补充（缺口 3）：它**是用户说的话**，所以 role=user——
@@ -234,6 +266,26 @@ pub fn transcript() -> Projection<TranscriptView> {
                             role: "user".into(),
                             text: text.to_string(),
                             tool: None,
+                            exclude_from_context: false,
+                        });
+                    }
+                }
+                // 轮边界汇报（缺口 4）：它是**助手说的话**（role=assistant），但**不是**
+                // 模型的对话内容——它是给人看的界面文本。
+                //
+                // 所以 `exclude_from_context: true` ⇒ 进转写（用户看得见、落库留得住）、
+                // 不进 `to_messages()`（模型看不见，否则线上会出现连续两条 assistant）。
+                //
+                // ⚠️ 它与 `chat.assistant.final` **不是**同一格：那格是 N3「每轮至多一条」，
+                // 而一轮可以汇报多次。挤进去会让「一轮一次最终答复」这条不变量失效。
+                (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_REPORTED) => {
+                    let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                    if !text.trim().is_empty() {
+                        entries.push(TranscriptEntry {
+                            role: "assistant".into(),
+                            text: text.to_string(),
+                            tool: None,
+                            exclude_from_context: true,
                         });
                     }
                 }
@@ -245,6 +297,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                         role: "tool".into(),
                         text: text.to_string(),
                         tool: Some(tool.to_string()),
+                        exclude_from_context: false,
                     });
                 }
                 _ => {}

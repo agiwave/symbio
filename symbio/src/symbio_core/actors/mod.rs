@@ -916,12 +916,25 @@ pub struct TurnInput {
 ///
 /// 入参 = 本轮用户格的 seq（`None` = 本轮没有用户格，续写轮的极端情形）。
 ///
+/// **为什么是 `Future` 而不是裸 `Vec`**（缺口 4 的实测）：同一个挂点上还挂着
+/// 「轮边界汇报」——它要 `await` compose 的路由（插件间调用）。同步闭包只能在
+/// `block_in_place` 里 `block_on`，而**单线程 runtime 上那样会 panic**（tokio 明令
+/// 禁止），于是汇报会变成「多线程能用、单线程静默失效」——那正是本仓最恨的那种
+/// 形态：行为随部署方式变，且没有任何信号。异步闭包没有这个问题：core 在自己的
+/// async上下文里 `.await`，调用方的实现随便异步还是同步。
+///
 /// **为什么把锚点传进来而不是让调用方自己找**：用户格是**运行器**落的，调用方
 /// 那边的快照取在它**之前**——于是「自己去网格里找本轮用户格」在开跑那一刻
 /// 必然找不到，于是补充格永远没有溯源（而 I2 要求断言类事件必须带溯源）。
 /// core 手里有那个 seq，给出去比让调用方猜更省事也更可靠。
-pub type RoundInjector =
-    std::sync::Arc<dyn Fn(Option<u64>) -> Vec<crate::symbio_core::PromptMessage> + Send + Sync>;
+pub type RoundInjector = std::sync::Arc<
+    dyn Fn(
+            Option<u64>,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Vec<crate::symbio_core::PromptMessage>> + Send>,
+        > + Send
+        + Sync,
+>;
 
 impl std::fmt::Debug for TurnInput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1441,7 +1454,7 @@ impl TurnRunner {
                     // 之后 —— **时间序**：工具结果先发生，用户随后才插话。
                     if let Some(inject) = &inject {
                         // 锚点 = 本轮用户格 seq（`user_seq` 在开轮那步就拿到了）。
-                        exchange.extend(inject(Some(user_seq)));
+                        exchange.extend(inject(Some(user_seq)).await);
                     }
                 }
                 Err(AdapterError::Aborted) => {

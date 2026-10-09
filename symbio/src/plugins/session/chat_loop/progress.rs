@@ -47,6 +47,7 @@ use super::{apply_verdict, VerdictEffect};
 /// 构造点唯一：`orchestrator/consume.rs`——那里拿着插件、能读配置，与
 /// `ChatOrchestrator::classify_enabled` / `compose_enabled` 是同一条取值纪律
 /// （取**值快照**，不把插件交给主循环）。
+#[derive(Debug, Clone)]
 pub struct ProgressPolicy {
     /// 总开关（`SessionConfig::progress_enabled`）
     pub enabled: bool,
@@ -76,6 +77,69 @@ impl ProgressPolicy {
             && quiet_ms >= self.interval_ms
             && tool_rounds >= self.min_rounds
             && reports < self.max_per_turn
+    }
+}
+
+/// **轮内**的汇报状态（缺口 4）。
+///
+/// ## 为什么它不是 [`TurnState`] 的字段
+///
+/// `TurnState::tool_rounds` / `progress_reports` / `last_user_facing_at` 三个字段
+/// 都属于 **v1 的轮循环**——而 `full` 档那个循环不存在（工具循环搬进了 v2 运行器，
+/// chat_loop 一轮只经过一次）。所以在本档下它们恒为初值，其中 `tool_rounds` 恒 0
+/// ——而 `report_if_due` 的头一句就是「`tool_rounds == 0` 不说」，于是汇报恒不发。
+///
+/// 把计数搬到轮边界回调**自己持有**的结构里，是因为那个回调是 Fn + 'static：它
+/// 捕获不了 `run_chat_loop` 的栈局部 `TurnState`。
+///
+/// ⚠️ 这是**同一轮内的两份数**（`TurnState` 那三格在本档下是死的），不是两个真源：
+/// 死字段与活字段不冲突，因为活的那份只被汇报判定读，而 `TurnState` 那三格在 `full`
+/// 下没有任何读方会看出差别。真要让它们一致，唯一办法是把 `TurnState` 整体搬进
+/// `Arc<Mutex<_>>`——那是为三个死字段翻整个主循环的借，不值。
+pub(crate) struct RoundProgress {
+    policy: ProgressPolicy,
+    /// 本轮已完成几轮工具调用（轮边界回调每跑一次 +1）。
+    rounds: usize,
+    /// 上一次「用户看得见的一句话」的时刻。
+    last_spoke_at: i64,
+    /// 本轮已汇报几次（配额）。
+    reports: u32,
+}
+
+impl RoundProgress {
+    /// `last_spoke_at` 由调用方给（轮首 compose 说过话就要传它，否则本轮第一次汇报
+    /// 会用「会话开头」当起点 ⇒ 静默时长虚高 ⇒ 抢在用户前面报进度）。
+    pub(crate) fn new(policy: ProgressPolicy, last_spoke_at: i64) -> Self {
+        Self {
+            policy,
+            rounds: 0,
+            last_spoke_at,
+            reports: 0,
+        }
+    }
+
+    /// 轮边界推进一格，返回此刻的运行现状。
+    pub(crate) fn advance(&mut self) -> RunSnapshot {
+        self.rounds += 1;
+        RunSnapshot {
+            tool_rounds: self.rounds,
+            quiet_ms: crate::symbio_core::clock_now_ms() - self.last_spoke_at,
+        }
+    }
+
+    /// 该不该说（纯判定，见 [`ProgressPolicy::due`]）。
+    pub(crate) fn due(&self, snapshot: &RunSnapshot) -> bool {
+        self.policy
+            .due(snapshot.quiet_ms, snapshot.tool_rounds, self.reports)
+    }
+
+    /// 说了：配额 +1、静默时钟归零。
+    ///
+    /// 归零的理由与 `report_if_due` 同一条：不归零的话下一个轮边界会因为「距上次
+    /// 说话仍然超过阈值」而立刻再说一句——配额会被同一段静默连续吃掉。
+    pub(crate) fn spoke(&mut self) {
+        self.reports += 1;
+        self.last_spoke_at = crate::symbio_core::clock_now_ms();
     }
 }
 

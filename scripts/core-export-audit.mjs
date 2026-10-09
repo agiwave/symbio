@@ -112,7 +112,13 @@ VisScope:
       // 而它们都占根出口供插件按名字引用。core 外唯一消费方是 `plugins/session`
       // （落格与投影），与同域那几个事件同形——不是「新开的口子」。
       EVENT_TURN_SUPPLEMENTED:
-        '事件名常量：与 EVENT_ARTIFACT_ADDED / EVENT_* 同类，event/mod.rs 单点定义、插件按名引用。core 外唯一消费方 = plugins/session（落格 + 投影），同域存量事件同形',
+        '事件名常量：与 EVENT_ARTIFACT_ADDED / EVENT_* 同类，event/mod.rs 单点定义、插件按名引用。Core 外唯一消费方 = plugins/session（落格 + 投影），同域存量事件同形',
+      // `EVENT_ASSISTANT_REPORTED`（缺口 4 的新事件名，`turn × asserted`）：
+      // 与 `EVENT_TURN_SUPPLEMENTED` 同批同格——落格在 `plugins/session/v2_exec`，
+      // 投影在 core 内（`projection/transcript.rs`，走域内路径不占根）。所以跨 core
+      // 的消费方只有 session 那一个，与上面那条同形。
+      EVENT_ASSISTANT_REPORTED:
+        '事件名常量：与 EVENT_TURN_SUPPLEMENTED 同类同格（turn × asserted），event/mod.rs 单点定义、插件按名引用。Core 外唯一消费方 = plugins/session（v2_exec 落格），投影在 core 内走域内路径',
       RoundInjector:
         '公开 trait LlmAdapter 的入参类型（经 TurnInput::inject 出现）：trait 在 core 外可实现，其签名类型不能是 core 私有模块路径。core 内消费方 = actors（审计只数跨出 core 的那一个，故显为单消费方）',
     }

@@ -279,8 +279,13 @@ impl SessionPlugin {
         let task_orchestrator = orchestrator.clone();
         let task_abort = abort.clone();
         let handle = tokio::spawn(async move {
-            super::super::chat_loop::run_chat_loop(&task_orchestrator, ctx_clone, sink, task_abort)
-                .await
+            super::super::chat_loop::run_chat_loop(
+                task_orchestrator.clone(),
+                ctx_clone,
+                sink,
+                task_abort,
+            )
+            .await
         });
 
         plugin_debug!(

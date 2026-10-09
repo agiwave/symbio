@@ -2526,20 +2526,27 @@ mod tool_round_tests {
         let fired = Arc::new(Mutex::new(0usize));
         let inject = {
             let fired = fired.clone();
-            Arc::new(move |_anchor: Option<u64>| {
-                let mut n = fired.lock().unwrap();
-                if *n > 0 {
-                    return Vec::new();
-                }
-                *n += 1;
-                vec![PromptMessage {
-                    role: "user".into(),
-                    text: "顺便也看看 README".into(),
-                    tool_call_id: None,
-                    tool: None,
-                    tool_calls: None,
-                }]
-            }) as crate::symbio_core::RoundInjector
+            Arc::new(
+                move |_anchor: Option<u64>| -> std::pin::Pin<
+                    Box<dyn std::future::Future<Output = Vec<PromptMessage>> + Send>,
+                > {
+                    let fired = fired.clone();
+                    Box::pin(async move {
+                        let mut n = fired.lock().unwrap();
+                        if *n > 0 {
+                            return Vec::new();
+                        }
+                        *n += 1;
+                        vec![PromptMessage {
+                            role: "user".into(),
+                            text: "顺便也看看 README".into(),
+                            tool_call_id: None,
+                            tool: None,
+                            tool_calls: None,
+                        }]
+                    })
+                },
+            ) as crate::symbio_core::RoundInjector
         };
 
         let mut i = input();

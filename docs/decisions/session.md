@@ -276,7 +276,11 @@ e2e 覆盖支撑**（42 个用例里只有 4 个跑 `full`，其余全在 `bridg
 |---|---|---|---|---|
 | 1 | 记忆召回 / 就绪任务集 / 委派者真源三段 | `build_request_view`（请求级，不落库） | **否** | **已修**（见下「补上缺口 1」） |
 | 2 | `context_messages = 0` 的语义 | `window_by_turn`（读侧窗口） | **历史被清空** | **已修**（`keep == 0` = 不截断） |
-| 3 | 轮边界折进的补充 | `context.messages`（消息列表） | **否** | **待修**（下一步） |
+| 3 | 轮边界折进的补充 | `context.messages`（消息列表） | **否** | **已修**（`turn.supplemented`，见下「缺口 4」同一批） |
+| 4 | 轮边界汇报（中途说一句） | `context.messages`（消息列表） | **不进包**（按设计） | **已修**（`chat.assistant.reported`） |
+| 5 | compose 的 `Answered` 答话 | `context.messages`（消息列表） | **否** | **待修**（**整轮不入网格**，见下） |
+| 6 | token 估算的校准反馈 | `feedback_estimate` 的调用点 | **不校准** | **待修**（通路断在 v1 侧，见下） |
+| 7 | 思考通道增量（reasoning） | `DeltaSink::on_delta(text)` 单通道 | **丢** | **待修**（core 契约面变更，单独立批） |
 
 - **缺口 1 机制**：`full` 的 prompt 来自 `Reasoner::render_prompt` 对事件快照的渲染，
   经 `ProviderLlmAdapter::generate_turn` 作为**一条** user 消息发出；而三段在 v1 里是
@@ -293,6 +297,41 @@ e2e 覆盖支撑**（42 个用例里只有 4 个跑 `full`，其余全在 `bridg
 - **缺口 3 机制**：`chat_loop.rs` 把抽干的补充 `push` 进 `context.messages`，v1 靠
   `request_view` 把它发给模型；而 `TurnInput.text` 在**轮首**就定死，补充在轮中途
   到达时网格里那条 `user.message` 记的还是原话 ⇒ 补充**从未成为事件** ⇒ 投影里没有。
+  **已修**：事件 kind `turn.supplemented`（`turn × asserted`）+ 投影 + `TurnInput::inject`
+  轮内注入，`full` 下同一轮内可见。判据 `a_supplement_lands_and_reaches_the_next_request`。
+- **缺口 4 机制**：**`full` 档下工具循环搬进了 `TurnRunner`，而 `chat_loop` 的轮边界
+  一个用户轮只经过一次** ⇒ `turn.tool_rounds`（只在 v1 轮循环里递增）恒为 0 ⇒
+  `report_if_due` 头一句 `tool_rounds == 0` 就返回 ⇒ **一句汇报都不发**。同样是静默的：
+  断言全绿，只是用户收不到那几句话。**已修**：`TurnInput::inject` 那个挂点本来就是
+  「每轮工具末尾问一次」，在它的插件侧闭包里再调一个 `on_round` 回调；轮数改由
+  `RoundProgress`（轮边界回调自己持有的状态）计。汇报节点落**事件**
+  `chat.assistant.reported`（`turn × asserted`，与 `turn.supplemented` 同格——一轮可报
+  多次，不占 N3 的「每轮一条 `chat.assistant.final`」），投影收它、`to_messages()`
+  **滤掉它**（界面文本，`exclude_from_context`，否则线上出现连续两条 assistant）。
+  判据 `a_progress_report_lands_but_stays_out_of_the_request`（两头都钉：不在请求包、
+  却在转写里）。
+  - **`RoundInjector` 因此改成异步闭包**：同一个挂点上次要抽干（读 tokio 锁）、这次
+    要 `await` compose 的路由。同步版只能在 `block_in_place` 里 `block_on`，而单线程
+    runtime 上那会 panic ⇒ 汇报会变成「多线程能用、单线程静默失效」。
+- **缺口 5 机制（比「答话不可见」更严重）**：`Answered` 判决在 chat_loop 步骤 2 就
+  短路收尾，**根本不进 `TurnRunner`**；而 `EVENT_USER_MESSAGE` 是**运行器落的**。
+  ⇒ 那轮在事实网格里**一格都没有**：没有用户格，也没有 `chat.assistant.final`。
+  于是下一轮 prompt 里这次问答**整个消失**，`session/stats` 的轮次计数也不含它——
+  而 `messages.json` 里有（`context.messages` 落库）⇒ **两条真源**。
+  **未修**：补它要让 `chat_loop` 成为轮次事实的第二个写方，那撞上
+  「`full` 档的轮次事实只有 v2 运行器一个写方」这条承重不变量。修法是让
+  `TurnInput` 承接一个「本轮已有定稿答复」的入口，属设计岔口，另立一批。
+- **缺口 6 机制**：`report_provider_usage`（`feedback_estimate`，全仓唯一校准反馈点）
+  挂在 `chat_loop/turn.rs` 的 **v1 轮流程**里 ⇒ `full` 档从不执行 ⇒
+  `CalibratedTokenizer.ratio` 永远停在初值（探针实测无任何 `[feedback]` 行）。bridge 档
+  该系数收敛到 **0.761** ⇒ 未校准启发式对中文内容**高估约 31%** ⇒ `InputOverLimit`
+  护栏判「摘要请求注定超限」提前放弃压缩（实测 `pending=9692 + overhead=6052 > 12000`）。
+  压缩就是不发生，无告警。**未修**：反馈点要挂到 `full` 的记账处（v2 原生记账写入方）。
+- **缺口 7 机制**：core 的 `DeltaSink` 只有 `on_delta(text)` 一条通道，而 v2 下
+  reasoning 增量无处可去 ⇒ `type = reasoning` 的工作节点一个都不落。**这是修缺口 4 时
+  照出来的**：t24 的 ③④ 形状锚有一条盯 `reasoning` 节点，补完汇报之后它成为该用例
+  剩下的红点。**未修**：给 `DeltaSink` 加 reasoning 通道属 core 契约面变更（所有实现
+  要跟着动），已定下单独立批。
 
 **下一步（缺口 3 的修法，已定方向）**
 
@@ -359,7 +398,9 @@ LLM）——所以它便宜到可以每轮都跑，不会因为「太重」而�
 **实现落点（2026-10-09，已建成）**
 
 `symbio_core/projection/prompt_fidelity.rs`（判据 + `PromptGap` / `PromptReport` +
-`verify`）与同名 `.test.rs`（四条反向自检 + 平凡值 + 工具轮重开复核，共 3 条）。
+`verify`）与同名 `.test.rs`（四条反向自检 + 平凡值 + 工具轮重开复核；缺口 4 那一批又
+补了「汇报落格但不进请求包」一条，并给 `expected_role` 补上 `turn.supplemented`
+的登记）。
 **接在生产路径上**：`TurnRunner::run_with_tools` 组装 prompt 的那一步跑一次 `verify`，
 缺口只 `plugin_warn` **不抛错**——prompt 已经发出去了，此时抛错只会把「模型看得不全」
 变成「这一轮直接失败」，而看得不全恰恰是静默的。

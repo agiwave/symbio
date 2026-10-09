@@ -15,6 +15,7 @@ mod options;
 mod orchestrator;
 pub(crate) mod paths;
 mod resume;
+pub(crate) mod round_hook;
 mod stats;
 mod tokenizer;
 mod transcript;

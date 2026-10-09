@@ -173,11 +173,24 @@ async fn compose_text(
     verdict: &Verdict,
     snapshot: &RunSnapshot,
 ) -> Option<String> {
+    compose_text_from(orchestrator, ctx, &context.messages, verdict, snapshot).await
+}
+
+/// [`compose_text`] 的真身：会话视图由调用方给。
+///
+/// 拆这一步不是为了「少一层」，而是轮边界那条路拿不到 `&SessionContext`
+/// （见 [`report_text`]）——两条路共用同一个路由调用，否则改措辞要改两处。
+async fn compose_text_from(
+    orchestrator: &ChatOrchestrator,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    messages: &[ChatMessage],
+    verdict: &Verdict,
+    snapshot: &RunSnapshot,
+) -> Option<String> {
     let parent = orchestrator.parent.as_ref()?;
     let session_id = ctx.get(SESSION_ID).unwrap_or_default();
 
-    let conversation: Vec<ChatMessage> =
-        conversation_view(&context.messages, CONVERSATION_VIEW_LIMIT);
+    let conversation: Vec<ChatMessage> = conversation_view(messages, CONVERSATION_VIEW_LIMIT);
 
     let req = ctx.fork();
     req.set(PATH, ROUTE_COMPOSE_WORDING.to_string());
@@ -218,11 +231,34 @@ async fn compose_text(
     }
 }
 
+/// 只取措辞、不落点（缺口 4 的轮边界路径）。
+///
+/// 与 [`apply_verdict`] 的差别有两条，都是接线逼出来的：
+/// 1. **不拿 `&mut SessionContext`**：轮边界回调是 `Fn + Send + Sync + 'static`，
+///    捕获不了 `run_chat_loop` 的栈局部 `context`。
+/// 2. **拿会话视图而不是整个 context**：`ComposeRequest` 里那一段就是
+///    `context.messages` 的一个切片，拆开传同一个信息、不丢东西。
+///
+/// 调用方（`chat_loop::round_report_hook`）拿到文本后交回 `v2_exec`——
+/// 因为落格要 `EventWalStore`，而开着它的是那边。
+pub(crate) async fn report_text(
+    orchestrator: &ChatOrchestrator,
+    ctx: &Arc<dyn PluginInvokeRequest>,
+    conversation: &[ChatMessage],
+    snapshot: &RunSnapshot,
+) -> Option<String> {
+    if !orchestrator.compose_enabled {
+        crate::plugin_debug!("session", "[Compose] 措辞未启用，本轮不汇报");
+        return None;
+    }
+    compose_text_from(orchestrator, ctx, conversation, &Verdict::Report, snapshot).await
+}
+
 /// 构造对话面文本节点（**纯函数**，可单测）。
 ///
 /// `exclude_from_context`：`Answered` 的答话为 `false`（它进请求包——它就是这一轮的
 /// 答复），`Escalate` 的首响为 `true`（界面开场白，不进请求包）。判据见模块文档。
-fn dialog_node(text: &str, reason: &str, exclude_from_context: bool) -> ChatMessage {
+pub(crate) fn dialog_node(text: &str, reason: &str, exclude_from_context: bool) -> ChatMessage {
     let mut meta = serde_json::json!({
         "surface": SURFACE_REPLY,
         "reason": reason,

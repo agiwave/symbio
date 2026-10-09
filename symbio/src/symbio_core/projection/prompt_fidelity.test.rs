@@ -12,7 +12,8 @@
 use super::super::transcript::{transcript, PromptMessage};
 use super::{verify, PromptGap as Gap};
 use crate::symbio_core::event::{
-    Entity, Event, Seq, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+    Entity, Event, Seq, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL,
+    EVENT_ASSISTANT_REPORTED, EVENT_USER_MESSAGE,
 };
 use crate::symbio_core::{EventWalStore, Store};
 
@@ -79,16 +80,21 @@ fn the_fidelity_check_reports_every_gap_it_claims_to() {
         user_turn(0, "帮我回显"),
         assistant_turn(0, "回显完成"),
         artifact(0, "vdfs_read", "文件内容：hello"),
-        // 新 kind：投影不认识它
+        // 投影不认识的新 kind。
+        //
+        // ⚠️ 这一条**换过**：原先用 `turn.supplemented`（P3c 落地前它确实不在投影里）。
+        // P3c 补进投影后忘了登记进 `expected_role`，于是它一直被当成「不在投影范围」
+        // 跳过——**补充漏进请求包时判据不会红**。所以现在补了登记，而这条用例必须
+        // 换一个真正未知的 kind，否则它钉的是「有东西没登记」而不是「投影不认识它」。
         Event::pending(
-            "s-0",
-            "turn.supplemented",
+            "x-0",
+            "future.kind.not_in_projection",
             Entity::Turn,
             Verb::Asserted,
             0,
             "user",
         )
-        .with_payload(serde_json::json!({ "text": "再补充一句" })),
+        .with_payload(serde_json::json!({ "text": "不认识的一格" })),
     ];
 
     // 三条投影内的 + 一条网格外的（无出处），另：tool entry 不带工具名
@@ -146,6 +152,72 @@ fn the_fidelity_check_reports_every_gap_it_claims_to() {
         "必须报出「角色不符」：{}",
         role_bad.summary()
     );
+    // ⑤ 界面文本泄漏进请求包（缺口 4 的判据方向）
+    let leaked = {
+        let evs = vec![user_turn(0, "问"), report(0, "已经完成 1 轮工具调用")];
+        let msgs = vec![
+            entry("user", "问", None),
+            entry("assistant", "已经完成 1 轮工具调用", None),
+        ];
+        verify(&evs, &msgs, None)
+    };
+    assert!(
+        leaked.gaps.iter().any(
+            |g| matches!(g, Gap::ExcludedLeakedIntoPrompt { kind, .. } if kind == EVENT_ASSISTANT_REPORTED)
+        ),
+        "必须报出「界面文本漏进请求包」：{}",
+        leaked.summary()
+    );
+}
+
+/// 轮边界汇报一格事实（缺口 4）。
+fn report(turn: u64, text: &str) -> Event {
+    Event::pending(
+        format!("r-{turn}"),
+        EVENT_ASSISTANT_REPORTED,
+        Entity::Turn,
+        Verb::Asserted,
+        turn,
+        "agent:main",
+    )
+    .with_payload(serde_json::json!({ "text": text, "tool_rounds": 1, "quiet_ms": 0 }))
+}
+
+/// 缺口 4 的**正向**判据：汇报落了格 ⇒ 转写里有它、送模型的那批里**没有**它。
+///
+/// 两侧都要钉，缺一不可：
+/// - 只有「不在请求包里」⇒ 事件压根没落格也绿（那是缺口的**原症状**）；
+/// - 只有「在转写里」⇒ 界面文本污染对话也绿（那是**反向**症状，线上会出现连续两条
+///   assistant）。
+#[test]
+fn a_progress_report_lands_but_stays_out_of_the_request() {
+    let events = vec![
+        user_turn(0, "跑个长任务"),
+        report(0, "已经完成 1 轮工具调用，用时约 3 秒，还在继续。"),
+    ];
+    let view = transcript()
+        .apply(&events, i64::MAX, crate::symbio_core::Budget::generous())
+        .value;
+
+    let excluded = view.excluded();
+    assert_eq!(
+        excluded.len(),
+        1,
+        "汇报必须被投影收下（用户看得见）：{view:?}"
+    );
+    assert_eq!(excluded[0].role, "assistant", "它是助手说的话");
+
+    let messages = view.to_messages();
+    assert_eq!(
+        messages.len(),
+        1,
+        "送模型的那批**不得**含汇报（否则线上出现连续两条 assistant）：{messages:?}"
+    );
+    assert_eq!(messages[0].role, "user");
+
+    let rep = verify(&events, &messages, None);
+    assert!(rep.is_complete(), "汇报轮必须双向完整：{}", rep.summary());
+    assert_eq!(rep.checked_events, 2, "汇报也在判据覆盖范围内");
 }
 
 /// 平凡值：单轮无工具 ⇒ 双向完整（判据在最简单的形状上不能有假红）。

@@ -27,7 +27,7 @@
 
 use super::super::event::{
     Entity, Event, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_REPORTED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
 
 /// 缺口的一条报告。**故意不 derive `PartialEq`**：报告要给门禁与日志读，字段顺序变动
@@ -40,6 +40,12 @@ pub enum PromptGap {
     NoSourceInGrid { role: String, text: String },
     /// `role == "tool"` 却没带工具名——工具结果的机器可读关联丢了。
     ToolEntryWithoutName { text: String },
+    /// **按设计不进请求包**的事件（界面文本）漏进了送模型的那批消息。
+    ///
+    /// 为什么独立成一条而不并进 DroppedFromPrompt：两者方向相反——那条是
+    /// 「该有的没有」，这条是「不该有的有了」。合成一个方向就会漏掉其中一半，
+    /// 而漏掉的那一半恰好是「界面文本污染了对话」这种用户直接看得见的退化。
+    ExcludedLeakedIntoPrompt { kind: String, turn: u64 },
     /// 角色与网格里那条事件的坐标不符（投影把 user 说成 assistant 之类）。
     RoleMismatch {
         expected: &'static str,
@@ -56,11 +62,30 @@ pub enum PromptGap {
 fn expected_role(e: &Event) -> Option<&'static str> {
     match (e.entity, e.verb, e.kind.as_str()) {
         (Entity::Turn, Verb::Opened, EVENT_USER_MESSAGE) => Some("user"),
+        // 轮边界折进的补充（缺口 3）：它**是用户说的话**，所以 role=user。
+        //
+        // (P3c 补记) 这一行是补的——补充落进投影时忘了登记进这里，于是
+        // expected_role 返回 None、判据把它当成「不在投影范围内」直接跳过。
+        // 后果很隐蔽：**补充漏进请求包时判据不会红**。凡是落进投影的 kind 都必须
+        // 在这里登记——判据的覆盖范围要与投影的实现范围同时长。
+        (Entity::Turn, Verb::Asserted, EVENT_TURN_SUPPLEMENTED) => Some("user"),
         (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FINAL) => Some("assistant"),
         (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FALLBACK) => Some("assistant"),
         (Entity::Artifact, Verb::Asserted, EVENT_ARTIFACT_ADDED) => Some("tool"),
         _ => None,
     }
+}
+
+/// **按设计不进请求包**的事件 kind（界面文本）。
+///
+/// 与 expected_role 是**互补**的两张表而不是一张表的两种取值：那张回答
+/// 「它该是什么角色」，这张回答「它根本不该出现」。合成一张的话，「不该出现」
+/// 就得靠某个假角色表达，而假角色会一路传到线格式去。
+fn excluded_from_prompt(e: &Event) -> bool {
+    matches!(
+        (e.entity, e.verb, e.kind.as_str()),
+        (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_REPORTED)
+    )
 }
 
 /// 事件载荷里该进 prompt 的正文（与 `transcript` 投影**同一取法**——两处各写一遍必然漂移，
@@ -120,6 +145,9 @@ impl PromptReport {
                     "role 退化：role=tool 却没带工具名（内容前 40 字：{:.40?}）",
                     text
                 ),
+                PromptGap::ExcludedLeakedIntoPrompt { kind, turn } => format!(
+                    "界面文本泄漏：{kind}（turn {turn}）标了「不进请求包」，却出现在送模型的消息里"
+                ),
                 PromptGap::RoleMismatch { expected, got, kind, turn } => format!(
                     "角色不符：{kind}（turn {turn}）应是 {expected}，prompt 里是 {got}"
                 ),
@@ -163,6 +191,23 @@ pub fn verify(
     // 网格侧：投影范围内的事件，逐条找对应 entry。
     let mut used = vec![false; messages.len()];
     for e in events {
+        // 按设计不进请求包的那一类：**方向反过来**——不是「网格有、prompt 没有」，
+        // 而是「网格标了不该进、prompt 里却出现了」。同样按正文配对，找得到就报缺口。
+        //
+        // 这条判据的存在理由与 `declared` 同源：漏进请求包的界面文本会让线上出现
+        // 连续两条 assistant，而**没有任何现有判据会红**——`expected_role` 对它返回
+        // None（它在投影里，但它不是对话内容）。
+        if excluded_from_prompt(e) {
+            rep.checked_events += 1;
+            let text = payload_text(e);
+            if messages.iter().any(|m| m.text == text) {
+                rep.gaps.push(PromptGap::ExcludedLeakedIntoPrompt {
+                    kind: e.kind.as_str().to_string(),
+                    turn: e.turn,
+                });
+            }
+            continue;
+        }
         let Some(role) = expected_role(e) else {
             continue;
         };

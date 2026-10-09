@@ -87,3 +87,61 @@ fn a_negative_quiet_span_is_not_due() {
     // 它必须落回"不汇报"，否则一次时钟跳变就会让每个轮边界都冒出一句话。
     assert!(!policy().due(-1, 2, 0));
 }
+
+// ── RoundProgress：轮边界回调持有的那份状态（缺口 4）────────────────
+//
+// 为什么有这组用例：`due` 的四条与关系上面已穷举，但它们都假设
+// `tool_rounds` **有人递增**。缺口 4 的病根就是 `full` 档下那个递增
+// 消失了（v1 的轮循环不存在），而 `due` 本身照绿——判定对、输入恒零。
+// 这组用例钉的是「推进 → 判定」这条链：轮数不到 `min_rounds` 不说、
+// 到了说、说了静默时钟归零、配额耗尽闭嘴。
+
+/// 距"上次说话"已 60 秒的策略状态（`interval_ms = 60_000` ⇒ 静默条件恒成立）。
+fn progressed() -> RoundProgress {
+    let last_spoke_at = clock_now_ms() - 60_000;
+    RoundProgress::new(policy(), last_spoke_at)
+}
+
+#[test]
+fn round_boundary_counts_up_and_gates_the_report() {
+    let mut p = progressed();
+
+    // 第 1 个轮边界：轮数 1 < `min_rounds`（2）⇒ 不说。
+    let first = p.advance();
+    assert_eq!(first.tool_rounds, 1, "轮边界推进一格");
+    assert!(!p.due(&first), "轮数不到 min_rounds：进展还谈不上");
+
+    // 第 2 个轮边界：轮数达标 ⇒ 说。
+    let second = p.advance();
+    assert_eq!(second.tool_rounds, 2);
+    assert!(p.due(&second), "轮数达标且静默够久：该说");
+    assert!(
+        second.quiet_ms >= 60_000,
+        "静默时长从构造时的 last_spoke_at 起算"
+    );
+}
+
+#[test]
+fn speaking_resets_the_quiet_clock_and_spends_the_quota() {
+    let mut p = progressed();
+    p.advance();
+    let snap = p.advance();
+    assert!(p.due(&snap));
+
+    p.spoke();
+
+    // 静默时钟归零 ⇒ 下一个轮边界「刚说过话」，即静默条件不成立。
+    let next = p.advance();
+    assert!(
+        next.quiet_ms < 60_000,
+        "说了之后时钟归零：{} 不该还顶着 60 秒的静默",
+        next.quiet_ms
+    );
+    assert!(!p.due(&next), "归零后同一段静默不能连续吃配额");
+
+    // 配额：max_per_turn = 5，汇报一次后还剩 4 次额度。
+    p.last_spoke_at = clock_now_ms() - 60_000;
+    let due_again = p.advance();
+    assert!(p.due(&due_again), "时钟重新计时后还能再说");
+    assert_eq!(p.reports, 1, "配额计了一次");
+}

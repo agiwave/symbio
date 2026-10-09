@@ -431,6 +431,13 @@ impl DeltaSink for UiBridge {
 pub(crate) type SupplementFn =
     Arc<dyn Fn() -> Option<super::chat_loop::state::DrainedSupplement> + Send + Sync>;
 
+/// 轮边界回调（缺口 4）：工具循环每跑完一轮问一次「要不要说点什么」。
+///
+/// 由 `chat_loop` 提供——它有编排器与 compose，判定与措辞都在那边；本函数只负责
+/// **把它交回来的草稿落格**（这里开着 `EventWalStore`）。类型定义与理由见
+/// `round_hook.rs`。
+pub(crate) use super::round_hook::RoundHookFn;
+
 pub(crate) struct V2Turn<'a> {
     /// 会话（v2 WAL 目录与档位的持有者）。
     pub session: &'a PersistentChatSession,
@@ -474,10 +481,20 @@ pub(crate) struct V2Turn<'a> {
     ///
     /// 类型定义在插件侧（core 不参与这套，见 `TurnInput::inject`）。
     pub supplements: Option<SupplementFn>,
-    /// 本轮补充事件的序号游标（事件 id `s-{turn}-{no}` 的一部分）。
+    /// 轮边界汇报（缺口 4）：`None` = 不汇报（`progress_enabled = false`，或未挂 compose）。
+    ///
+    /// 与 [`Self::supplements`] **共用同一个挂点**（`TurnInput::inject`）：core 只知道
+    /// 「一轮跑完了，问一次」。分成两个口就得让 core 记两件它不需要知道的事。
+    pub on_round: Option<RoundHookFn>,
+    /// 本轮**轮内注入事件**的序号游标（事件 id `s-{turn}-{no}` / `rp-{turn}-{no}`
+    /// 的那一段）。
     ///
     /// **必须是共享可变的**（`Arc<AtomicU64>`）：注入闭包是 core 在循环里调的，
     /// 而闭包只捕获它自己那份——不共享的话第二次注入会用同一个 id，撞幂等键。
+    ///
+    /// 补充与汇报**共用**这一支游标：两者都在同一个轮边界闭包里、都是
+    /// `turn × asserted`，事件 id 前缀已把它们分开；分开两支游标只会多一份要
+    /// 同步的状态（那才是真源变两处的形状）。
     pub supplemental_no: Arc<std::sync::atomic::AtomicU64>,
     pub recalled: Option<&'a crate::symbio_core::RecallView>,
     /// 本轮技能路由判定（S11 步 22）：`(skill_id, fallback)` 逐条——轮末落
@@ -520,6 +537,94 @@ pub(crate) struct V2TurnResult {
 }
 
 /// full 档的一轮执行：事实原生入格 + 生成（含工具循环）+ 流式回 UI。
+/// 抽干结果 → **落格 + 构造注入消息**（缺口 3 的全部逻辑，闭包之外）。
+///
+/// 为什么抽出来：闭包在 P3c 里已经 90 行，且一半是「抽干 / 落格 / 造节点」的直线代码。
+/// 缺口 4 要往同一个闭包里再加一段汇报逻辑，不抽出来的话那个闭包会奔到 200 行——
+/// 而它的可读性靠的正是「一眼看到这一轮边界上依次发生了什么」。
+///
+/// 返回**空 vec** = 本轮无可注入（没有补充 / 正文为空 / 拿不到溯源锚点）。三种情形
+/// 都**不消耗任何配额**、不留半截状态，与 `apply_verdict` 拿不到措辞时同一条方向。
+#[allow(clippy::too_many_arguments)] // 抽出来之后参数就是它的全部依赖，多一个都该重新想
+fn supplement_into_request(
+    batch: Option<super::chat_loop::state::DrainedSupplement>,
+    anchor: Option<u64>,
+    store: &crate::symbio_core::EventWalStore,
+    actor: &ActorSpec,
+    turn_no: u64,
+    sink_msgs: &Arc<std::sync::Mutex<Vec<ChatMessage>>>,
+    no_counter: &std::sync::atomic::AtomicU64,
+) -> Vec<crate::symbio_core::PromptMessage> {
+    let Some(drained) = batch else {
+        return Vec::new();
+    };
+    let (text, count, ids) = (drained.text, drained.count, drained.ids);
+    if text.trim().is_empty() {
+        return Vec::new();
+    }
+    // **落格**：成为一格事实（`turn × asserted`）。不落格的话它只活在这一次请求里，
+    // 下一轮又消失了——而「用户说过的话没有变成事实」正是缺口 3 本身。
+    //
+    // 事件 id 带序号（`s-{turn}-{no}`）：一次工具循环里可能折进多条，不带序号会撞
+    // 幂等键（`Duplicate`）。
+    //
+    // 拿不到溯源锚点 ⇒ **不落也不注入**：I2 要求断言类事件带溯源，而无溯源的断言
+    // 事件比不落更难查。
+    let Some(anchor) = anchor else {
+        crate::plugin_warn!(
+            "session",
+            "[Turn] 补充无溯源锚点，本轮丢弃（见本函数「拿不到溯源锚点」处）"
+        );
+        return Vec::new();
+    };
+    let no = no_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if let Err(e) = store.append(
+        crate::symbio_core::Event::pending(
+            format!("s-{turn_no}-{no}"),
+            crate::symbio_core::EVENT_TURN_SUPPLEMENTED,
+            crate::symbio_core::Entity::Turn,
+            crate::symbio_core::Verb::Asserted,
+            turn_no,
+            &actor.principal,
+        )
+        .with_produced_by(anchor)
+        .with_payload(serde_json::json!({ "text": text, "count": count })),
+    ) {
+        // 落格失败**不静默**：消息仍会进这一次请求，但事实网格里没有它 ⇒ 下一轮起
+        // 不可见。所以出声。
+        //
+        // `{:?}` 不是 `{e}`：`AppendError` 只 derive 了 `Debug`。
+        crate::plugin_warn!(
+            "session",
+            "[Turn] 补充落格失败（仍注入本轮，下一轮起不可见）: {e:?}"
+        );
+    }
+    let msg = ChatMessage {
+        // 沿用第一条补充的 id（见 `DrainedSupplement::id` 的说明）
+        id: drained.id.clone(),
+        role: Some(MessageRole::User),
+        content: Some(MessageContent::Text(text.clone())),
+        meta: Some(serde_json::json!({
+            super::transcript::supplements::META_SUPPLEMENT: true,
+            super::transcript::supplements::META_SUPPLEMENT_COUNT: count,
+            super::transcript::supplements::META_SUPPLEMENT_IDS: ids,
+        })),
+        ..Default::default()
+    };
+    // 锁拿不到就**跳过回灌**，不 panic：这条补充**已经落格、已经进了本轮请求**，
+    // 用户看得见——丢的只是落库镜像里的一条（重启后少它）。为这个 panic 不值。
+    if let Ok(mut sink) = sink_msgs.lock() {
+        sink.push(msg);
+    }
+    vec![crate::symbio_core::PromptMessage {
+        role: "user".into(),
+        text,
+        tool_call_id: None,
+        tool: None,
+        tool_calls: None,
+    }]
+}
+
 pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, PluginError> {
     let V2Turn {
         session,
@@ -537,6 +642,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         resume,
         recalled,
         supplements,
+        on_round,
         supplemental_no,
         skill_obs,
         skill_hits,
@@ -726,99 +832,104 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
                 // core 不该知道「收件箱补充」这个概念（队列、`merge_supplements`、
                 // `InboxItem` 都在 `plugins/session`），而落格也不需要 core 参与：
                 // 本函数自己就开着 `store`。
-                inject: supplements.map(|sup| {
+inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report)| {
                     let store = store.clone();
                     let actor = actor.clone();
                     // 折进的消息往收集器 push（末尾随 `V2TurnResult` 回灌进落库镜像）。
                     let sink_msgs = collected.clone();
-                    std::sync::Arc::new(move |anchor: Option<u64>| {
-                        // 同步取件：队列与配置都在 tokio RwLock 里，用 `blocking_read`
-                        // 桥过来。
-                        //
-                        // 抽干口是**闭包**：它内部用 `blocking_read` 跨过 tokio 锁，
-                        // 所以多线程 runtime 上要 `block_in_place`（**单线程 runtime 上
-                        // 调用会 panic**）——所以先判 flavor。
-                        let batch = match tokio::runtime::Handle::try_current() {
-                            Ok(h)
-                                if h.runtime_flavor()
-                                    == tokio::runtime::RuntimeFlavor::MultiThread =>
-                            {
-                                tokio::task::block_in_place(|| sup())
-                            }
-                            // 单线程 / 无 runtime（单测）：裸调（闭包内部是阻塞读）。
-                            _ => sup(),
-                        };
-                        let Some(drained) = batch else {
-                            return Vec::new();
-                        };
-                        let (text, count, ids) = (drained.text, drained.count, drained.ids);
-                        if text.trim().is_empty() {
-                            return Vec::new();
-                        }
-                        // **落格**：成为一格事实（`turn × asserted`）。不落格的话它
-                        // 只活在这一次请求里，下一轮又消失了——而「用户说过的话没有
-                        // 变成事实」正是缺口 3 本身。
-                        //
-                        // 事件 id 带序号（`s-{turn}-{no}`）：一次工具循环里可能折进
-                        // 多条，不带序号会撞幂等键（`Duplicate`）。
-                        //
-                        // 拿不到溯源锚点 ⇒ **不落也不注入**（见 `supplement_anchor`
-                        // 的注释）：I2 要求断言类事件带溯源，而无溯源的断言事件
-                        // 比不落更难查。
-                        let Some(anchor) = anchor else {
-                            crate::plugin_warn!(
-                                "session",
-                                "[Turn] 补充无溯源锚点，本轮丢弃（见 supplement_anchor 注释）"
-                            );
-                            return Vec::new();
-                        };
-                        let no = supplemental_no.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        if let Err(e) = store.append(
-                            crate::symbio_core::Event::pending(
-                                format!("s-{turn_no}-{no}"),
-                                crate::symbio_core::EVENT_TURN_SUPPLEMENTED,
-                                crate::symbio_core::Entity::Turn,
-                                crate::symbio_core::Verb::Asserted,
-                                turn_no,
-                                &actor.principal,
-                            )
-                            .with_produced_by(anchor)
-                            .with_payload(serde_json::json!({ "text": text, "count": count })),
-                        ) {
-                            // 落格失败**不静默**：消息仍会进这一次请求，但事实网格里
-                            // 没有它 ⇒ 下一轮起不可见。所以出声。
+                    std::sync::Arc::new(
+                        move |anchor: Option<u64>|
+                            -> std::pin::Pin<
+                                Box<
+                                    dyn std::future::Future<
+                                        Output = Vec<crate::symbio_core::PromptMessage>,
+                                    > + Send,
+                                >,
+                            > {
+                            // `async move` 块按值捕获，所以这里先各 clone 一份——
+                            // 否则第一次调用就把捕获物搬走，闭包退化成 `FnOnce`。
+                            let drain = drain.clone();
+                            let report = report.clone();
+                            let store = store.clone();
+                            let actor = actor.clone();
+                            let sink_msgs = sink_msgs.clone();
+                            let supplemental_no = supplemental_no.clone();
+                            Box::pin(async move {
+                            // 同步取件：队列与配置都在 tokio RwLock 里，用 `blocking_read`
+                            // 桥过来。
                             //
-                            // `{:?}` 不是 `{e}`：`AppendError` 只 derive 了 `Debug`。
-                            crate::plugin_warn!(
-                                "session",
-                                "[Turn] 补充落格失败（仍注入本轮，下一轮起不可见）: {e:?}"
+                            // 抽干口是**闭包**：它内部用 `blocking_read` 跨过 tokio 锁，
+                            // 所以多线程 runtime 上要 `block_in_place`（**单线程 runtime 上
+                            // 调用会 panic**）——所以先判 flavor。
+                            let batch = match tokio::runtime::Handle::try_current() {
+                                Ok(h)
+                                    if h.runtime_flavor()
+                                        == tokio::runtime::RuntimeFlavor::MultiThread =>
+                                {
+                                    tokio::task::block_in_place(|| drain())
+                                }
+                                // 单线程 / 无 runtime（单测）：裸调（闭包内部是阻塞读）。
+                                _ => drain(),
+                            };
+                            // 顺序：**先抽干、后汇报**（v1 同一条纪律，见 `chat_loop.rs`
+                            // 步骤 2d）——抽干会把静默时钟归零，反过来就会出现
+                            // 「用户刚说完话，助手抢着报了一句进度」。
+                            let injected = supplement_into_request(
+                                batch,
+                                anchor,
+                                &store,
+                                &actor,
+                                turn_no,
+                                &sink_msgs,
+                                &supplemental_no,
                             );
-                        }
-                        let msg = ChatMessage {
-                            // 沿用第一条补充的 id（见 `DrainedSupplement::id` 的说明）
-                            id: drained.id.clone(),
-                            role: Some(MessageRole::User),
-                            content: Some(MessageContent::Text(text.clone())),
-                            meta: Some(serde_json::json!({
-                                super::transcript::supplements::META_SUPPLEMENT: true,
-                                super::transcript::supplements::META_SUPPLEMENT_COUNT: count,
-                                super::transcript::supplements::META_SUPPLEMENT_IDS: ids,
-                            })),
-                            ..Default::default()
-                        };
-                        // 锁拿不到就**跳过回灌**，不 panic：这条补充**已经落格、
-                        // 已经进了本轮请求**，用户看得见——丢的只是落库镜像里的一条
-                        // （重启后少它）。为这个 panic 不值。
-                        if let Ok(mut sink) = sink_msgs.lock() {
-                            sink.push(msg.clone());
-                        }
-                        vec![crate::symbio_core::PromptMessage {
-                            role: "user".into(),
-                            text,
-                            tool_call_id: None,
-                            tool: None,
-                            tool_calls: None,
-                        }]
+
+                            // 轮边界汇报（缺口 4）：判定与措辞在 chat_loop 那边（它有编排器），
+                            // **落格在这里**（本函数开着 store）。所以回调交回来的是一份
+                            // **草稿**，不是已落的事实——落格这一半不外包出去。
+                            if let Some(report) = report {
+                                if let Some(draft) = report(anchor).await {
+                                    match anchor {
+                                        Some(anchor) => {
+                                            let no = supplemental_no.fetch_add(
+                                                1,
+                                                std::sync::atomic::Ordering::Relaxed,
+                                            );
+                                            if let Err(e) = store.append(
+                                                crate::symbio_core::Event::pending(
+                                                    format!("rp-{turn_no}-{no}"),
+                                                    crate::symbio_core::EVENT_ASSISTANT_REPORTED,
+                                                    crate::symbio_core::Entity::Turn,
+                                                    crate::symbio_core::Verb::Asserted,
+                                                    turn_no,
+                                                    &actor.principal,
+                                                )
+                                                .with_produced_by(anchor)
+                                                .with_payload(serde_json::json!({
+                                                    "text": draft.text,
+                                                    "tool_rounds": draft.tool_rounds,
+                                                    "quiet_ms": draft.quiet_ms,
+                                                })),
+                                            ) {
+                                                crate::plugin_warn!(
+                                                    "session",
+                                                    "[Turn] 汇报落格失败（仍回灌落库镜像，下一轮起模型看不见）: {e:?}"
+                                                );
+                                            }
+                                            if let Ok(mut sink) = sink_msgs.lock() {
+                                                sink.push(draft.to_message());
+                                            }
+                                        }
+                                        None => crate::plugin_warn!(
+                                            "session",
+                                            "[Turn] 汇报无溯源锚点，本轮丢弃（I2：断言类事件必须带溯源）"
+                                        ),
+                                    }
+                                }
+                            }
+
+                            injected
+                        })
                     }) as crate::symbio_core::RoundInjector
                 }),
             };
