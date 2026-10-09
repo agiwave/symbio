@@ -60,9 +60,10 @@
 | 045 | v2 事实桥：生产流量经转写进事实源，不等整体切换 | **已并入 [ADR-044](./decisions/core.md#adr-044-实测与判据同源成本时延与兜底率是事件网格的一等数据不用旁路遥测)**（转写纪律）+ [ADR-048](./decisions/session.md#adr-048-出厂档位改-fullv2-链路是出厂路径bridge-退役)（桥退役）；机制见 `symbio/src/plugins/session/docs/module-layout.md` |
 | [046](./decisions/core.md#adr-046-事实能力进-symbio_core不以可选插件承载必须有值的机制) | 事实能力进 core：不以「可选插件」承载必须有值的机制 | 现行 |
 | [047](./decisions/session.md#adr-047-委派者三项真源判定回-reason能力走注入进展读磁盘事实) | 委派者三项真源：判定回 `reason`、能力走注入、进展读磁盘事实 | 现行 |
-| [048](./decisions/session.md#adr-048-出厂档位改-fullv2-链路是出厂路径bridge-退役) | 出厂档位改 `full`——v2 链路是出厂路径，`bridge` 退役 | **已接受 · 已落地**（2026-10-09：余反射档开关与 prompt 形状基线未开工；红点见 [13 §已知未闭合](./plan/13-质量改进总纲.md)） |
+| [048](./decisions/session.md#adr-048-出厂档位改-fullv2-链路是出厂路径bridge-退役) | 出厂档位改 `full`——v2 链路是出厂路径，`bridge` 退役 | **已接受 · 已落地**（2026-10-09：八个静默缺口已全部修完、prompt 形状基线已落地；余反射档样本为零，未决原因见 [13 §P3b](./plan/13-质量改进总纲.md)） |
 | [048a](./decisions/session.md#adr-048a2026-10-09v2-的-prompt-形状必须回到结构化消息) | v2 的 prompt 形状必须回到结构化消息（不把工具结果拍平成纯文本） | **已接受 · 已实现**（2026-10-09） |
 | 050 | `TurnRunner` 族按依赖方数量下沉 `plugins/session` | **非架构决策 / 特例，已删**——下沉 = 应用 [ADR-023](./decisions/core.md#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层) |
+| [049](./decisions/session.md#adr-049-wal-是会话唯一事实源sessionstore-降为缓存轨-s-的起点) | WAL 是会话唯一事实源，`SessionStore` 降为缓存——**轨 S 的起点** | **已接受 · 未实施**（2026-10-10：只定目标态与迁移/回退语义，S1–S6 各自单独立批） |
 
 ---
 
