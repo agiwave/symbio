@@ -304,13 +304,9 @@ fn window_by_turn<'a>(
 ) -> Cow<'a, [Event]> {
     let windowed = if keep == 0 {
         // `keep == 0` = **不截断**（全量）——与 `SessionConfig::context_messages`
-        // 的 `0` 同一条口径（那里 `0` 一直是「上下文窗口不按轮次截断」）。
-        //
-        // ⚠️ 原先这里是 `&events[events.len()..]`（**空切片**），于是同一份配置在
-        // 两条执行路径上含义相反：v1 读 `context_messages` 作「不截断」、v2 读同一个
-        // 数作「历史全丢」。出厂档位翻到 `full` 之后，任何把 `context_messages` 配成 0
-        // 的实例，**模型眼前的历史是空的**——静默、无告警、断言全绿（事实照样入格、
-        // `session/stats` 照样有数）。
+        // 的 `0` 同一条口径（那里 `0` 一直是「上下文窗口不按轮次截断」）。两条执行路径
+        // 对同一个数必须同义：否则出厂 `full` 档下配 `0` 的实例会**静默**丢掉全部历史
+        // ——事实照样入格、`session/stats` 照样有数，只有模型看不见。
         events
     } else {
         let oldest = current_turn.saturating_sub(keep - 1);
@@ -474,7 +470,7 @@ impl TurnRunner {
             None => filter_visible(&full_snapshot, viewer),
             Some(keep) => window_by_turn(&full_snapshot, turn, keep, viewer),
         };
-        // 基线：**结构化**消息数组（ADR-048a）。不再是「一整段 prompt 字符串」。
+        // 基线：**结构化**消息数组（ADR-048a）。
         //
         // prefix（请求视图三段：记忆召回 / 就绪任务 / 委派者真源）作为**最前的
         // 一条独立消息**插进去，而不是拼进第一段正文——拼进去的话它会与用户本轮
@@ -529,11 +525,9 @@ impl TurnRunner {
         let started = std::time::Instant::now();
         // 本轮内已发生的工具交换（调用 + 结果），供下一次请求追加。
         //
-        // **结构化**（ADR-048a）：曾几何时它是 `String`，由 `render_tool_exchange`
-        // 拍成「助手请求工具: … / 工具结果(x): …」的散文再拼到基线末尾。那条路让
-        // 模型在本轮的工具结果里看到的是**自己说的话**（role=assistant）和
-        // **一坨没有角色的文本**，且无 `tool_call_id`。现在它们是三条真消息：
-        // assistant(tool_calls) / tool(结果, 带 call id)。
+        // **结构化**（ADR-048a）：assistant（带 `tool_calls`）+ tool（带 `tool_call_id`）。
+        // 拍成散文会让模型把工具调用当成「自己说的话」、把结果当成无角色文本，且丢掉
+        // `tool_call_id`（协议要求它配对）——所以这里是真消息，不是一段文本。
         let mut exchange: Vec<crate::symbio_core::PromptMessage> = Vec::new();
         // 实测耗时：跨轮累加（一次用户轮可能有多次 LLM 请求，ADR-044 的实测口径）。
         let mut cost_ms = 0u64;
@@ -569,8 +563,7 @@ impl TurnRunner {
         }
 
         loop {
-            // 基线 + 本轮交换。**拼接消息数组**，不拼字符串——拼字符串正是
-            // ADR-048a 判定的退步：它把角色拍平、丢掉 `tool_call_id`。
+            // 基线 + 本轮交换。**拼接消息数组**：拼字符串会把角色拍平、丢掉 `tool_call_id`。
             let mut messages = base_messages.clone();
             messages.extend(exchange.iter().cloned());
 
@@ -935,24 +928,10 @@ fn closure_granted(principal: &str) -> bool {
 
 /// 一轮工具交换 → **结构化**消息（ADR-048a）。
 ///
-/// ## 这里曾几何时返回 `String`，由 `render_tool_exchange` 拍成散文
-///
-/// ```ignore
-/// 助手: <text>
-/// 助手请求工具: read {args}
-/// 工具结果(read): <result>
-/// ```
-///
-/// 那条路的三个问题，**都出在同一个动作上**（拼字符串）：
-///
-/// 1. `助手请求工具: ` 那行被当成 **assistant 说的话**——模型于是「说过」一句
-///    人类不会说的话；
-/// 2. `工具结果(read): ` 那行**没有角色**，混在对话流里，模型分不出它是工具输出
-///    还是用户输入；
-/// 3. **没有 `tool_call_id`**——而 provider 侧的协议要求 `tool` 消息关联到具体
-///    那次调用，否则多工具并发时无法配对。
-///
-/// 现在是三条真消息：assistant（带 tool_calls 摘要）/ tool（带 `tool_call_id`）。
+/// 出的是真消息：assistant（带 `tool_calls` 摘要）/ tool（带 `tool_call_id`）。
+/// 拍成散文（`助手请求工具: … / 工具结果(x): …`）会同时坏三件事——把工具调用当成
+/// **assistant 说的话**、把结果做成**没有角色的文本**、**丢掉 `tool_call_id`**
+/// （provider 侧协议要求 `tool` 消息关联到具体那次调用，否则多工具并发时无法配对）。
 ///
 /// ## `tool_call_id` 怎么来（**已定的合成，不是缺失**）
 ///

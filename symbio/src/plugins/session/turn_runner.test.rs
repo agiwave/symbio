@@ -243,15 +243,8 @@ mod turn_runner_tests {
 
     /// 多轮对话带历史：③ transcript 投影读同一事实源，第二轮请求含第一轮。
     ///
-    /// ## 判据换过一次：从「有 `<对话历史>` 标记」到「历史以多条消息在场」
-    ///
-    /// 旧断言钉的是**拍平的产物**——那个标签是 `to_prompt()` 拼出来的，结构化
-    /// 之后它理应消失（历史就是消息序列，不需要分隔符）。继续钉它等于**逼着代码
-    /// 保留拍平**。
-    ///
-    /// 换成按角色查之后，这条判据**更强**：它不只问「历史在不在」，还问「上一轮的
-    /// 提问是 `role: user`、答复是 `role: assistant`」——拍平形态下两者都是 user，
-    /// 所以这条**照得出拍平**。旧形态照不出。
+    /// 判据按**角色**查（不只问「历史在不在」，还问「上一轮的提问是 `role: user`、
+    /// 答复是 `role: assistant`」）——历史就是消息序列，没有分隔符。
     #[tokio::test]
     async fn multi_turn_transcript_carries_history_from_fact_source() {
         let store = EventStore::new();
@@ -286,7 +279,7 @@ mod turn_runner_tests {
         assert!(
             last.iter()
                 .any(|m| m.role == "assistant" && m.text.contains("stub-model")),
-            "历史里有上一轮答复，且它是 assistant 说的（拍平会把这条变成 user）：{last:?}"
+            "历史里有上一轮答复，且它是 assistant 说的：{last:?}"
         );
         assert!(
             last.iter().any(|m| m.text.contains("第二轮问题")),
@@ -355,8 +348,9 @@ mod turn_runner_tests {
     }
 
     /// 工具结果进转写（`tool` / 工具名 + text）——跨轮 prompt 因此能重建**含工具**的
-    /// 对话（[plan/10 批 3](../../../../docs/plan/10-工具轮v2化实施方案.md)）；且工具行在
-    /// prompt 里渲染成 `工具结果(<tool>): <text>`，与轮内交换（`render_tool_exchange`）同形。
+    /// 对话（[plan/10 批 3](../../../../docs/plan/10-工具轮v2化实施方案.md)）；且工具行
+    /// 投影成 `role: "tool"` 的**结构化消息**（带工具名与合成 `tool_call_id`），与轮内
+    /// 交换（`tool_exchange_messages`）同形。
     #[test]
     fn transcript_includes_artifact_as_tool_line() {
         use crate::symbio_core::{
@@ -433,15 +427,20 @@ mod turn_runner_tests {
         assert_eq!(entries[0].tool, None, "非工具行不带 tool");
         assert_eq!(entries[2].role, "assistant");
 
-        // prompt：轮 1 的历史里含工具结果行，形态与轮内交换逐字同形。
-        let prompt = view.value.to_prompt();
-        assert!(
-            prompt.contains("工具结果(mcp__mockserv__echo): 回显内容"),
-            "工具行进 prompt：{prompt}"
+        // prompt：轮 1 的历史里含工具结果行，投影成结构化消息（与轮内交换同形）。
+        let messages = view.value.to_messages();
+        assert_eq!(messages.len(), 4, "四格 → 四条消息：{messages:?}");
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[1].role, "tool");
+        assert_eq!(messages[1].tool.as_deref(), Some("mcp__mockserv__echo"));
+        assert_eq!(
+            messages[1].tool_call_id.as_deref(),
+            Some("call_mcp__mockserv__echo_0"),
+            "工具消息带合成 tool_call_id"
         );
-        assert!(prompt.contains("用户: 帮我回显"), "{prompt}");
-        assert!(prompt.contains("助手: 回显完成"), "{prompt}");
-        assert!(prompt.ends_with("用户: 再问一句"), "{prompt}");
+        assert_eq!(messages[1].text, "回显内容");
+        assert_eq!(messages[2].role, "assistant");
+        assert_eq!(messages[3].role, "user");
 
         // 线格式：非工具行保持 `{role, text}`（新增角色不改旧角色的形状）；工具行多一个 `tool`。
         let wire = serde_json::to_value(&view.value).unwrap();
@@ -834,10 +833,9 @@ mod tool_round_tests {
     ///
     /// ## 为什么记录消息而不是 prompt 字符串（ADR-048a）
     ///
-    /// 旧形状记录 `prompt: String`，断言按 `lines()` 解析（「末行即当前轮发言」）。
-    /// 结构化之后「末行」这个概念**消失了**——没有行了，只有消息序列。硬把消息
-    /// 拍回文本再让断言解析，等于把拍平重新塞回测试里，而测试是唯一能照出
-    /// 「role 有没有丢」的地方。所以这里记 `Vec<PromptMessage>`，断言直接看角色。
+    /// 断言要看**角色**有没有丢——把消息拍回文本再解析，等于把拍平塞回测试里，而
+    /// 测试是唯一能照出「role 有没有丢」的地方。所以这里记 `Vec<PromptMessage>`，
+    /// 断言直接看角色。
     struct EchoLlm {
         prompts: Arc<Mutex<Vec<Vec<PromptMessage>>>>,
     }
@@ -1336,8 +1334,7 @@ mod tool_round_tests {
 
         // ── ADR-048a 的核心断言：结果带**角色**与 **tool_call_id** ──
         //
-        // 拍平成散文时这两样都没有，所以这条断言**直接**照出那个退步。改回
-        // `String` 拼接的旧实现（`助手请求工具: ` / `工具结果(x): `），本条必红。
+        // 拍成散文时这两样都没有——所以这条断言直接钉住「结果是不是真消息」。
         let tools_in_2nd = seen[1].tools();
         assert_eq!(
             tools_in_2nd.len(),
@@ -1364,9 +1361,8 @@ mod tool_round_tests {
             seen[1]
         );
 
-        // 角色**序列**：工具结果必须夹在 assistant 的调用之后，不能被拍到序列之外。
-        // 拍平成一条散文时整段只有一个 role，这条会立刻红——所以它是「拍平不可逆」
-        // 的一条独立判据（不依赖正文里有没有某个词）。
+        // 角色**序列**：工具结果必须夹在 assistant 的调用之后——这是一条独立判据
+        // （不依赖正文里有没有某个词）。
         let roles = seen[1].roles();
         let tool_at = roles
             .iter()

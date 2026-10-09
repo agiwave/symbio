@@ -29,11 +29,10 @@ import './_selfrun.mjs';
 // ## 为什么工具调用场景要 `once: true`（与 v1 的 T2 不同）
 //
 // T2（v1）里工具结果轮的**最后一条消息 role = tool**，mock 靠 `afterTool` 场景区分。
-// 但 v2 运行器把整轮 prompt **平铺成一条 user 消息**（`render_prompt` + 工具交换
-// 追加，见 `symbio_core/actors/mod.rs::render_tool_exchange`）——第二次请求的最后一条
-// 仍是 user，`afterTool` 分支**永不命中**。因此这里改用 `once: true`：
-// 带 `match` 的工具场景只烧一次，第二次请求落到下一条无 `match` 场景上。
-// 这不是绕路，而是 v2 的 prompt 形态与 v1 不同这一事实的**直接后果**。
+// v2 同样是结构化消息（末条也是 `role: tool`），但**本用例不声明 `afterTool` 场景**：
+// mock 的 `afterTool` 是**优先池**而非硬过滤，池子选不出就退回全池，于是带 `match` 的
+// 工具场景会在工具结果轮**再次命中** ⇒ 无限工具循环。所以给工具场景加 `once: true`：
+// 它只烧一次，第二次请求落到下一条无 `match` 场景（`after-echo`）上。
 //
 // ## 为什么把对话面钉死（`DIALOG_FACE_OFF`）
 //
@@ -74,8 +73,9 @@ export default defineCase(
   async () => {
     const llm = await new MockLlm([
       // 第一次请求：模型请求一个工具（带一段中途正文，逼出「定格并切节点」路径）。
-      // `once: true` —— 第二次请求的最后一条仍是 user（v2 平铺 prompt），
-      // 不带 `once` 会让本场景反复命中 ⇒ 无限工具循环（见文件头）。
+      // `once: true` —— 第二次请求（工具结果轮）若不声明 `afterTool` 场景，优先池选不出
+      // 就退回全池，本场景（带 `match`）会**再次命中** ⇒ 无限工具循环；`once` 烧一次断开
+      // 重入（见文件头）。
       {
         id: 'call-echo',
         match: '帮我回显',
@@ -143,13 +143,8 @@ export default defineCase(
 
       // 第二次请求：模型请求过的工具 + 工具结果都在请求里。
       //
-      // ⚠️ 判据从「文本里有 `助手请求工具: ` / `工具结果(x): ` 两行」改成
-      // 「**消息层上有 `tool_calls` 与 `role=tool` 的结果**」（ADR-048a）。
-      //
-      // 旧判据钉的是**拍平的产物**（`render_tool_exchange` 拼的那两行前缀）。
-      // 结构化之后那两行不再是文本行，而是协议要求的节点形状——继续钉它们等于
-      // **逼着代码保留拍平**。新判据更强：它验「调用在」「结果在」「结果是 tool
-      // 角色」「工具名对得上」，而旧判据只验「某个字符串出现过」。
+      // ⚠️ 判据在**消息层**上：验「调用在」「结果在」「结果是 `tool` 角色」「工具名
+      // 对得上」（ADR-048a）——而不是「某个字符串出现过」。
       const secondBody = reqs[1].body;
       const secondMsgs = secondBody.messages ?? [];
       const llmCalls = secondMsgs.flatMap((m) => m.tool_calls ?? []);

@@ -63,16 +63,8 @@ export default defineCase('T2 工具回路（MCP stdio）：tool_calls → 执�
     assertEq(reqs.length, 2, 'mock-llm 应收到两次请求（工具轮 + 收尾轮）');
     const toolWireNames = (reqs[0].body.tools ?? []).map((t) => t.function?.name);
     assert(toolWireNames.includes('mcp__mockserv__echo'), `MCP 工具应注册进请求（实际: ${toolWireNames.join(',')}）`);
-    // 第二次请求里工具结果**以什么形状**出现，随执行路径变：
-    //
-    // - v1：工具结果是独立的 `role=tool` 消息；
-    // - v2（`full` 档，出厂）：整段请求被渲染成**一条** user 消息，工具交换由运行器
-    //   就地累积成 `助手请求工具: …` / `工具结果(名): …` 两类行（`render_tool_exchange`），
-    //   **永远没有 `role=tool` 消息**。
-    //
-    // 所以判据取「**结果行**」这一层——它才是「结果真的回灌给模型了」这件事本身；
-    // `role=tool` 只是 v1 的承载方式。断言承载方式会在翻档位那天整体失效，而那时
-    // 承载方式的变化与「结果有没有回灌」毫无关系。
+    // 第二次请求里工具结果以 `role=tool` 消息出现——判据取「**结果正文**」这一层：
+    // 它才是「结果真的回灌给模型了」这件事本身，`role=tool` 只是承载方式。
     const secondBody = reqs[1].body;
     const toolMsg =
       (secondBody.messages ?? []).find((m) => m.role === 'tool') ??
@@ -82,7 +74,7 @@ export default defineCase('T2 工具回路（MCP stdio）：tool_calls → 执�
         .join('\n');
     assert(
       toolMsg,
-      '第二次请求应携带工具结果（v1 为 role=tool 消息，v2 为 prompt 里的「工具结果(名): …」行）',
+      '第二次请求应携带工具结果（`role=tool` 消息）',
     );
     assert(
       JSON.stringify(toolMsg).includes('mock 回显内容'),

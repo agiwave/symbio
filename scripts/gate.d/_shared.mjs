@@ -576,7 +576,7 @@ export const BASELINE = {
   //      （`artifact × asserted`）进 `transcript` 投影，成 `role = "tool"` 行
   //      （另带 `tool` = 工具名；非工具行 `skip_serializing_if` 保持 `{role, text}` 旧形状）。
   //      口径从「三格 → 两角色」变成「四格 → 三角色」——跨轮的 prompt 因此能重建
-  //      **含工具**的对话（此前只有轮内交换 `render_tool_exchange`，跨轮就丢了工具结果
+  //      **含工具**的对话（此前只有轮内交换，跨轮就丢了工具结果
   //      ⇒ 模型会重复调用同一个工具）。判据 2 例：① `transcript_includes_artifact_as_tool_line`
   //      （四格 → 四行 + 工具名/正文 + prompt 里渲染成 `工具结果(<tool>): <text>`，与轮内
   //      交换同形 + 线格式：非工具行仍是 `{role, text}`）；② `transcript_column_surfaces_tool_rows`

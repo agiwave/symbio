@@ -13,14 +13,15 @@
 //!
 //! ## 工具结果为什么也在转写里（[plan/10 批 3](../../../../docs/plan/10-工具轮v2化实施方案.md)）
 //!
-//! 工具轮**当轮**的交换由运行器就地追加（`render_tool_exchange`：网格里还没有
-//! 那部分历史，见 `actors::Reasoner::render_messages` 的文档）；而**跨轮**的工具结果
+//! 工具轮**当轮**的交换由运行器就地追加（网格里还没有那部分历史，见
+//! [`crate::symbio_core::actors::render_messages`] 的文档）；而**跨轮**的工具结果
 //! 若不进投影，第二轮起的 prompt 就只剩「用户问过 X、助手答过 Y」——模型看不见
 //! 自己调用过什么、拿到了什么，会**重复调用同一个工具**。所以 `artifact.added`
 //! 进投影：多轮 prompt 因此能重建**含工具**的对话。
 //!
-//! 工具行渲染成 `工具结果(<tool>): <text>`——与轮内交换（`render_tool_exchange`）
-//! **同一形态**，于是「历史里的工具轮」与「本轮的工具轮」在 prompt 里长得一样。
+//! 工具行投影成 `role: "tool"` 的**结构化消息**（带工具名与合成 `tool_call_id`，
+//! 见 [`PromptMessage`]）——与轮内交换（`tool_exchange_messages`）**同一形态**，
+//! 于是「历史里的工具轮」与「本轮的工具轮」在 prompt 里长得一样。
 
 use super::super::event::{
     Entity, Event, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
@@ -39,8 +40,8 @@ pub struct TranscriptEntry {
     pub text: String,
     /// 工具结果行的**工具名**（`role == "tool"` 时才有；其余角色为 `None`）。
     ///
-    /// 单独成字段而不是拼进 `text`：工具名是**事实**（载荷里就有），渲染
-    /// （`工具结果(<tool>): ` 前缀）是消费方的事。`skip_serializing_if` 让
+    /// 单独成字段而不是拼进 `text`：工具名是**事实**（载荷里就有），怎么呈现
+    /// （消息的 `tool` 字段）是消费方的事。`skip_serializing_if` 让
     /// 非工具行的线格式保持 `{role, text}` 不变——新增角色不改旧角色的形状。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
@@ -63,18 +64,6 @@ pub struct TranscriptView {
     pub entries: Vec<TranscriptEntry>,
 }
 
-/// 一条转写条目的渲染行（角色前缀 + 正文）。
-///
-/// 工具行用 `工具结果(<tool>): ` 前缀——与轮内交换（`render_tool_exchange`）
-/// 逐字同形；用户 / 助手行沿用 `用户: ` / `助手: `。
-fn render_line(e: &TranscriptEntry) -> String {
-    match e.role.as_str() {
-        "user" => format!("用户: {}", e.text),
-        "tool" => format!("工具结果({}): {}", e.tool.as_deref().unwrap_or(""), e.text),
-        _ => format!("助手: {}", e.text),
-    }
-}
-
 /// 一条**结构化**的 prompt 消息：角色与正文分开，工具关联单独成字段。
 ///
 /// ## 为什么 core 自己定义这个类型，而不是直接用 provider 的 `ChatMessage`
@@ -90,10 +79,10 @@ fn render_line(e: &TranscriptEntry) -> String {
 ///
 /// ## 为什么必须有它（ADR-048a）
 ///
-/// `to_prompt()` 把 `role: tool` **降级**成 user 消息里的纯文本，于是模型收到的是
-/// 「一整段散文里夹着工具结果」，看不到 `role: tool` 也拿不到 `tool_call_id`。而
-/// `ModelProvider::execute_turn` 的签名本身就是 `(system_prompt, messages: &[ChatMessage], …)`
-/// —— `role` + `tool_call_id` 是**跨栈契约**不是排版。拍平是已判定的退步。
+/// `ModelProvider::execute_turn` 的签名本身就是
+/// `(system_prompt, messages: &[ChatMessage], …)`——`role` + `tool_call_id` 是**跨栈契约**
+/// 不是排版。把消息拍平成一段文本会把 `role: tool` 降级成 user 消息里的纯文本，模型就
+/// 看不到「这是工具结果」、也拿不到 `tool_call_id`——那是已判定的退步。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromptMessage {
     /// `"user"` / `"assistant"` / `"tool"`。
@@ -164,32 +153,7 @@ impl From<&TranscriptEntry> for PromptMessage {
 }
 
 impl TranscriptView {
-    /// 平铺成单 prompt（多轮历史 + 当前消息）。单轮 ⇒ 裸文本（与无历史形态等价）。
-    pub fn to_prompt(&self) -> String {
-        match self.entries.as_slice() {
-            [] => String::new(),
-            [only] => only.text.clone(),
-            many => {
-                let history = &many[..many.len() - 1];
-                let current = &many[many.len() - 1];
-                let mut out = String::from("<对话历史>\n");
-                for e in history {
-                    out.push_str(&render_line(e));
-                    out.push('\n');
-                }
-                out.push_str("</对话历史>\n");
-                out.push_str(&render_line(current));
-                out
-            }
-        }
-    }
-
-    /// 投影成**消息数组**（ADR-048a 的结构化出口）。
-    ///
-    /// 与 [`Self::to_prompt`] 的关系：两者读**同一份** `entries`，所以「唯一真源」
-    /// 与「结构化协议」不冲突——**排版是消费方的事，事实不是**。
-    /// `to_prompt` 留给「只需要一段文本」的调用方（诊断、断言、日志）；
-    /// **送给模型的路径必须走这里**，否则 `role` 会退化成纯文本。
+    /// 投影成**消息数组**（ADR-048a 的结构化出口，**唯一出口**）。
     ///
     /// 不裁剪、不改写、不补分隔符：**它就是网格里的那些条**，按事件顺序。
     /// 任何「为了 prompt 好看」的加工都会让模型看到网格没有的东西——那正是

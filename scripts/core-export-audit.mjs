@@ -156,31 +156,25 @@ VisScope:
  * （定义留在原域 `pub`，core 内走域内路径），只被测试/无人使用的存量另由
  * `dead-code-audit` R-002 逐项承认。
  *
- * `77` 是 **2026-10-09 口径修正后的存量**（此前为 61）。修正内容：**测试文件不再算
- * 架构消费方**（口径全文见 `core-surface.mjs` 的 `collectConsumers`）。旧口径下，
- * 「一个模块在生产用、另一个模块的测试顺手写了一次名字」读成「两个模块依赖」，
- * 于是 24 个真·单消费方符号（含 `TurnRunner` / `TurnInput` / `Store` / `Entity` /
- * `PromptMessage` / `ProviderLlmAdapter` …）长期显为 ≥2 而逃过本条。
- * 口径一改，`zero` 不变（仍按**含测试**计——只被测试用到的符号收窄会编译坏那些测试），
- * `one` 从 61 涨到 77：**多出来的 16 个不是新增违规，是原先被测试计数遮住的存量**。
- * 它们按 README §4 四问逐条处置（下沉 / 豁免），处置一个就把这里降一格。
+ * `75` 是当前存量。它由两条来源构成，**都不是新增违规**：
+ * - **口径修正**（2026-10-09）：**测试文件不再算架构消费方**（口径全文见
+ *   `core-surface.mjs` 的 `collectConsumers`）——此前「一个模块在生产用、另一个模块的
+ *   测试顺手写了一次名字」被读成「两个模块依赖」，遮住了一批真·单消费方符号。
+ *   `zero` 不受影响（仍按**含测试**计——只被测试用到的符号收窄会编译坏那些测试）。
+ * - **`TurnRunner` 族下沉**（2026-10-09）：−5 整体下沉 `plugins/session`（判据 ADR-023）；
+ *   +2（`LlmAdapter` / `EVENT_ARTIFACT_ADDED`）因 session 生产代码新消费而升为单消费方。
  *
- * `76` 是 **`TurnRunner` 族下沉后的存量**（2026-10-09 同日）。净变化 −1，但**内部换过**：
- * - −5：`TurnRunner` / `TurnInput` / `TurnOutcome` / `TurnResume` / `RoundInjector`
- *   整体下沉 `plugins/session`（不再占 core 根出口）；
- * - +3：`Reasoner` / `LlmAdapter` / `EVENT_ARTIFACT_ADDED` 由「仅测试在用」升为「单消费方」
- *   ——**不是新增违规，是运行器搬进 session 后，session 的生产代码成了它们的消费方**
- *   （此前只有 `plugins/model` / `plugins/session` 的**测试**提到它们）。
- * 两者都属「单消费方但不可下沉」的接缝（core 契约元素），随存量一起留在基线里。
+ * 这些都是**单消费方但不可下沉**的接缝（core 契约元素），按 README §4 四问逐条处置
+ * （下沉 / 豁免），处置一个就把这里降一格。
  */
 const BASELINE = process.env.CORE_EXPORT_BASELINE
   ? (() => {
       const [zero, one] = process.env.CORE_EXPORT_BASELINE.split(':').map((n) => Number(n))
       return { zero, one }
     })()
-  : { zero: 0, one: 76 }
+  : { zero: 0, one: 75 }
 
-// core-export-allow one: 2026-10-09 口径修正——测试文件不再算架构消费方（口径全文见 core-surface.mjs 口径 4），此前被测试计数遮住的 24 个真·单消费方符号现形（TurnRunner / TurnInput / Store / Entity / PromptMessage / ProviderLlmAdapter …），故 one 61→77（同日下沉 TurnRunner 族后为 76，见上）。**这是测量修正，不是放松判据**：那 24 个一直都在，旧口径把它们读成了 ≥2。零消费方那一格（zero）不变——它按含测试计，只被测试用到的符号收窄会当场编译坏那些测试。**退出条件**：这 24 个按 README §4 四问逐条处置（下沉或登记豁免），每处置一个就把 one 降一格；全部处置完（one 回落到 ≤61）时**必须删掉本行**，否则这条豁免会长期掩盖 one 的后续放松。
+// core-export-allow one: 2026-10-09 口径修正——测试文件不再算架构消费方（口径全文见 core-surface.mjs 口径 4），此前被测试计数遮住的 24 个真·单消费方符号现形（TurnRunner / TurnInput / Store / Entity / PromptMessage / ProviderLlmAdapter …），故 one 61→77（同日下沉 TurnRunner 族后为 75，见上）。**这是测量修正，不是放松判据**：那 24 个一直都在，旧口径把它们读成了 ≥2。零消费方那一格（zero）不变——它按含测试计，只被测试用到的符号收窄会当场编译坏那些测试。**退出条件**：这 24 个按 README §4 四问逐条处置（下沉或登记豁免），每处置一个就把 one 降一格；全部处置完（one 回落到 ≤61）时**必须删掉本行**，否则这条豁免会长期掩盖 one 的后续放松。
 
 
 const errors = []

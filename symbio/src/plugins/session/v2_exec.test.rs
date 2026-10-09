@@ -263,9 +263,8 @@ struct FaithfulProvider {
     behavior: Behavior,
     /// 每次请求收到的**消息数组**（工具轮的验收要回读**下一次请求**）。
     ///
-    /// 记的是 `execute_turn` 真正收到的 `&[ChatMessage]` —— 即**线格式那一侧**。
-    /// 旧形状记 `Vec<String>`（且只取 `messages.first()`），于是「整段被塞进一条
-    /// user 消息」这件事**测不出来**：拍平与结构化在那个断言下同样绿。
+    /// 记的是 `execute_turn` 真正收到的 `&[ChatMessage]` —— 即**线格式那一侧**，
+    /// **全部消息**（不只 `first()`）：只取首条时「整段被塞进一条 user 消息」测不出来。
     prompts: Arc<Mutex<ReceivedMessages>>,
 }
 
@@ -310,9 +309,8 @@ impl ModelProvider for FaithfulProvider {
         // 记下本次请求的**全部消息**（角色 + 正文）——工具轮的硬契约是「工具结果
         // 进了下一次请求」，那条断言只能回读请求体（不变量/网格都证明不了）。
         //
-        // ⚠️ 旧形状只取 `messages.first()`。那在拍平下「恰好」等于全部内容，于是
-        // 断言对两种形态同样成立——**它测不出 role 有没有丢**。记全部消息之后，
-        // 「工具结果是 role=tool」就成了可断的（见下方 `tool_round` 用例）。
+        // ⚠️ 记**全部消息**，不只 `messages.first()`：只取首条时「工具结果是
+        // `role=tool`」不可断（整段挤在一条 user 消息里也照样绿）。
         let received: Vec<(String, String)> = messages
             .iter()
             .map(|m| {
@@ -667,14 +665,11 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         "第二次请求要带上工具结果正文（含失败——失败也是信息）：{}",
         joined(1)
     );
-    // ADR-048a 的核心断言：工具结果与助手发言**各带各的角色**。
-    //
-    // 这两条在旧形状下**测不出来**：那时只取 `messages.first()`，整段历史挤在一条
-    // user 消息里，`role == "tool"` 永远不会命中，而断言仍然绿——拍平与结构化在
-    // 旧断言下同样成立。改回 `messages.first()` 的单条形态，这两条立刻红。
+    // ADR-048a 的核心断言：工具结果与助手发言**各带各的角色**（只取 `messages.first()`
+    // 的单条形态测不出它——整段挤在一条 user 消息里，`role == "tool"` 也不会命中）。
     assert!(
         has_role(1, "tool", "No parent plugin"),
-        "第二次请求的工具结果须是 role=tool 消息（拍平形态下这条会红）：{:?}",
+        "第二次请求的工具结果须是 role=tool 消息：{:?}",
         seen[1]
     );
     assert!(

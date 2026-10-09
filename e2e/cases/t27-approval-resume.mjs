@@ -41,10 +41,9 @@ import './_selfrun.mjs';
 //
 // ## 为什么工具调用场景要 `once: true`（与 T26 同因）
 //
-// v2 运行器把整轮 prompt **平铺成一条 user 消息**，第二次请求的最后一条仍是 user
-// （见 `symbio_core/actors/mod.rs::render_tool_exchange`）。且本用例的恢复轮 prompt
-// 里**仍含**首轮用户那句话（转写投影照实渲染）——不带 `once` 会让带 `match` 的
-// 工具场景反复命中 ⇒ 无限工具循环。
+// 本用例不声明 `afterTool` 场景，而 mock 的 `afterTool` 是**优先池**而非硬过滤——
+// 池子选不出就退回全池。且本用例的恢复轮 prompt 里**仍含**首轮用户那句话（转写投影
+// 照实渲染），带 `match` 的工具场景会在工具结果轮**再次命中** ⇒ 无限工具循环。
 //
 // ## 为什么把对话面钉死（`DIALOG_FACE_OFF`）
 //
@@ -293,15 +292,8 @@ export default defineCase(
             .join('\n');
         const reqs = await llm.requests();
         assertEq(reqs.length, 2, 'mock-llm 应收到两次请求（提问轮 + 恢复收尾轮）');
-        // ⚠️ 判据从「文本里有 `助手请求工具: ` / `工具结果(x): ` 这两行」改成
-        // 「**消息层上有 tool_calls 与 tool 结果**」（ADR-048a）。
-        //
-        // 旧判据钉的是**拍平的产物**——那两行前缀是 `render_tool_exchange` 拼出来的。
-        // 结构化之后它们不再是文本行，而是协议要求的节点形状（`ToolCall` 节点 +
-        // 它的结果子节点）。所以**继续钉文本前缀等于逼着代码保留拍平**。
-        //
-        // 新判据**更强**：它同时验「调用在」「结果在」「结果是 tool 角色」，
-        // 而旧判据只验「某个字符串出现过」。
+        // ⚠️ 判据在**消息层**上：验「调用在」「结果在」「结果是 `tool` 角色」（ADR-048a）
+        // ——而不是「某个字符串出现过」。
         const secondMsgs = reqs[1].body.messages ?? [];
         const second = promptOf(reqs[1].body);
         const calls = secondMsgs.flatMap((m) => m.tool_calls ?? []);
