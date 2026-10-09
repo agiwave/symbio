@@ -258,7 +258,12 @@ jobs:
         # ⚠️ 检查项只在 scripts/gate.mjs 里定义一处（不依赖 npx；脚本直接跑
         #    node_modules 里的二进制，避免 CI 上 npx 解析差异）。
         #    构建此前只在上线打 tag 时才跑 ⇒ 构建错误要等发布才暴露，现已前置到 PR。
-        run: node scripts/gate.mjs --only=frontend
+        # ⚠️ 前端是**两个阶段**（2026-10-09 拆分）：`frontend-static`（类型 / 单测 / lint）
+        #    与 `frontend-build`（vite build）。本地前者在并发批里、后者在批后（vite build
+        #    会重写 tauri/dist，与 backend 的 generate_context! 编译期读冲突）；CI 这边
+        #    没有并发批的约束，但**两个 id 都要写**——只写 `frontend-static` 是个合法 id，
+        #    不会报错，只会**静默丢掉构建**。
+        run: node scripts/gate.mjs --only=frontend-static,frontend-build
         continue-on-error: false
 
       - name: Validate package.json

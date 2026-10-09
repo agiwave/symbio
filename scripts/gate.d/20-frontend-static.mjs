@@ -1,16 +1,46 @@
-// frontend 阶段：vue-tsc / vitest --coverage / vite build / eslint。
+// frontend-static 阶段：vue-tsc / vitest --coverage / eslint。
 //
-// 文件名是 56- 而不是 20-（2026-10-09）：阶段级并发把 [10-backend / 30-docs /
-// 35-baseline / 50-msrv] 合成一批，本阶段**刻意不进那批**——backend 编译
-// symbio-tauri 时 `generate_context!` 在**编译期**读 `../dist`（tauri.conf.json 的
-// frontendDist，CI 的 rust-checks 也是先 npm build 再 backend gate，同一约束），
-// 而下面的 vite build 会清空重写同一目录；并发就是「编译读到半截 dist ⇒ 假红」。
-// 也**不与 58-e2e 并发**：e2e 用例对 CPU 竞争时序敏感（并发 6 是贴着实测最优调的，
-// 再叠加外部负载会把「等实时面收敛」的用例推过超时线，2026-10-08 实测）。
+// 文件名 `20-` 与 `parallel: true`（2026-10-09）：本阶段进并发批
+// `[10-backend ∥ 20-frontend-static ∥ 30-docs ∥ 35-baseline ∥ 50-msrv]`。
+//
+// ## 为什么它能进批，而同属前端的 `vite build` 不能
+//
+// backend 编译 `symbio-tauri` 时 `generate_context!` 在**编译期**读 `tauri/dist`，
+// 而 `vite build` 会**清空重写**那个目录 ⇒ 并发就是「编译读到半截 dist ⇒ 假红」。
+// 所以构建留在 `56-frontend-build.mjs`（批后）。
+//
+// 本阶段的三个任务**都不碰 `dist`**，而且对磁盘几乎**只读**：
+//   - `vue-tsc --noEmit`   只读类型，不产出文件
+//   - `vitest run`         coverage 走 `reporter: ['text']`（`tauri/vitest.config.ts`），
+//                          只打印不落盘 ⇒ 连 `coverage/` 都不写
+//   - `eslint .`           只读（不带 `--fix`）
+// 反过来，批内没有哪个阶段会写本阶段要读的东西（backend 只写 `target/`，docs 只读，
+// baseline 只读 git，msrv 写 `.workbuddy-ai/msrv-target`）。
+//
+// ## 收益（2026-10-09 A/B 实测，两轮都先 `touch symbio/src/lib.rs` 强制重编译）
+//
+//   旧编排（前端整段在批后）  6m19s：backend 4m59s ∥ docs 2m10s ∥ msrv 1m28s
+//                                    → verify 16s → frontend 30s → e2e 29s → facts 1s
+//   新编排（本阶段进批）      5m21s：backend 4m36s ∥ 本阶段 1m17s ∥ docs 2m49s ∥ msrv 1m51s
+//                                    → verify 10s → frontend-build 3s → e2e 28s → facts 1s
+//
+// 关键路径上的**串行尾**从 `verify + frontend + e2e`（76s）变成
+// `verify + vite build + e2e`（42s）：本阶段整段藏在 backend 的墙钟里（1m17s < 4m36s，
+// 且 1m17s 已是**与 cargo 争 CPU 之后**的数——它单独跑只要 34s）。
+//
+// ⚠️ 两轮的 backend 相差 23s（4m59s vs 4m36s），那是 cargo 缓存差异，**不归本次改动**；
+// 结构上可归因的收益就是「前端静态检查离开串行尾」，其大小 = 本阶段墙钟，随前端工具链
+// 冷热变化很大（热 30s，冷可达 ~2m——`eslint` 冷启动实测过 1m7s）。
+//
+// ## 为什么任务级**不**并发
+//
+// 三个 node 进程同时跑只是把它们与吃满全部核的 cargo 一起拖慢，本阶段墙钟不会
+// 因此变短（任务彼此无重叠收益，都是 CPU 密集）。顺序保持与原 `56-frontend`
+// 一致：vue-tsc → vitest → eslint。
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
-import { yellow, red, dim, stripAnsi } from '../color.mjs'
+import { yellow, red, stripAnsi } from '../color.mjs'
 import {
   BASELINE,
   BASELINE_GRACE,
@@ -28,8 +58,9 @@ const frontendDir = path.join(repoRoot, 'tauri')
 const bin = (p) => path.join(frontendDir, 'node_modules', p)
 
 export default {
-  id: 'frontend',
-  title: '前端（vue-tsc / vitest）',
+  id: 'frontend-static',
+  title: '前端静态检查（vue-tsc / vitest / eslint）',
+  parallel: true,
   tasks(ctx) {
     if (!fs.existsSync(path.join(frontendDir, 'package.json'))) return []
 
@@ -115,25 +146,6 @@ export default {
             console.log(`      行覆盖率 ${pct}%${thr === null ? '' : `（阈值 ${thr}%）`}`)
           }
           return { ok: true, note: grew ? `文件/用例数 ${files}/${tests}（基线待更新）` : '' }
-        },
-      },
-      {
-        label: 'vite build',
-        // 类型检查过了不代表打包得过（循环依赖、动态导入、chunk 配置错误只在 build 暴露）。
-        run: async () => {
-          const r = await ctx.run({
-            label: 'vite build',
-            cmd: process.execPath,
-            args: [bin('vite/bin/vite.js'), 'build'],
-            cwd: frontendDir,
-          })
-          if (!r.ok) {
-            console.log('      ↳ 构建失败：本地复现用 `npm run build`（在 tauri/ 下）')
-            maybeSandboxDeleteHint(r.output)
-            if (blockedBySandboxDelete(r.output)) return 'skipped'
-            return { ok: false, note: `exit=${r.code}`, logFile: r.logFile }
-          }
-          return { ok: true }
         },
       },
       {

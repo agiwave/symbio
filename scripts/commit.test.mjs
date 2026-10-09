@@ -20,6 +20,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { stripAnsi } from './color.mjs'
 
 const repoRoot = path.resolve(import.meta.dirname, '..')
 const commitScript = path.join(repoRoot, 'scripts', 'commit.mjs')
@@ -101,16 +102,35 @@ test('★ 默认不跑门禁：提交不该等门禁，也不该让 autoWork 改
   assert.match(r.stdout, /门禁：本次跳过/, 'gateSummary 应明示跳过')
 })
 
-test('--gate 显式要求时才进入门禁阶段（真仓库里会红，重点是「它开始跑了」）', () => {
+test('★ --gate 不被 --dry-run 吞掉：真的进门禁步骤，且门禁拒绝在**别的仓库**上跑', () => {
   const { root, git } = repo()
   fs.writeFileSync(path.join(root, 'd.md'), 'x\n')
   git(['add', 'd.md'])
+  const headBefore = git(['rev-parse', 'HEAD']).stdout.trim()
 
-  // 临时仓库不是 symbio：门禁必然失败/找不到阶段，但只要它**开始跑**，
-  // 输出里就会出现阶段表头或门禁产物（.workbuddy-ai/）。
+  // 本用例**不再**让门禁真跑一遍（旧版就是那样：临时仓库里 `--gate` 会去门禁
+  // **symbio** 本身——白跑 60s 被自己的 timeout 砍断，起的 cargo 还抢走
+  // `.cargo-lock` 让**正在跑的门禁**卡在 `Blocking waiting for file lock` 上，
+  // 并把 symbio 上一轮的失败日志覆盖掉）。现在门禁会拒绝跨仓库调用，判据变成
+  // 「它真的去调了门禁 + 门禁拒绝 + 没有留下任何产物」——比旧版更强，且是秒级的。
   const r = runCommit(root, ['--dry-run', '--gate'])
-  const started = /── 阶段 \d\/\d/.test(r.stdout) || fs.existsSync(path.join(root, '.workbuddy-ai'))
-  assert.ok(started, `--gate 没有真的去跑门禁：\n${r.stdout}\n${r.stderr}`)
+  const out = stripAnsi(r.stdout + r.stderr)
+
+  // ① --gate 必须真的被送到门禁那一步（被 --dry-run 吞掉就看不到这一步）
+  assert.match(out, /第 1 步 · 门禁/, `--gate 被 --dry-run 吞了：\n${out}`)
+
+  // ② 门禁在别的仓库上必须**拒绝**，而不是转头去门禁 symbio
+  assert.notEqual(r.status, 0, `门禁在别的仓库上必须拒绝：\n${out}`)
+  assert.match(out, /拒绝执行/, `应说明拒绝理由：\n${out}`)
+
+  // ③ 反证（absence）：门禁**没有**进入主流程。少了这一条，一个「照跑另一个仓库」
+  //    的实现也能满足上面两条——它同样会打印第 1 步、同样会（在别处）跑起来。
+  assert.doesNotMatch(out, /══ 门禁 ══/, `门禁不得进入主流程：\n${out}`)
+  assert.doesNotMatch(out, /── 阶段 \d+\/\d+/, `门禁不得执行任何阶段：\n${out}`)
+
+  // ④ 调用方仓库里不得留下门禁产物（日志目录就是「它在这儿跑过」的物证）
+  assert.ok(!fs.existsSync(path.join(root, '.workbuddy-ai')), '门禁不得在调用方仓库里留下产物')
+  assert.equal(git(['rev-parse', 'HEAD']).stdout.trim(), headBefore, '不得产生提交')
 })
 
 // ================= 3. 推断可用 =================
@@ -265,4 +285,32 @@ test('★ `--help` 只打印用法并退出 0，绝不提交（否则查用法 =
     /h\.md/,
     '`--help` 不消费暂存区（索引应原样保留）',
   )
+})
+
+// ================= 5. 未识别的参数不产生副作用 =================
+
+test('★ 未识别的参数拒绝：`--dryrun`（漏一个 -）不得静默变成一次**真提交**', () => {
+  const { root, git } = repo()
+  fs.writeFileSync(path.join(root, 'i.md'), 'x\n')
+  git(['add', 'i.md'])
+  const headBefore = git(['rev-parse', 'HEAD']).stdout.trim()
+
+  const r = runCommit(root, ['--dryrun'])
+  const out = r.stdout + r.stderr
+  assert.equal(r.status, 2, `未知参数应拒绝（退出码 2）：${out}`)
+  assert.match(out, /无法识别的参数/, `应指出未知参数：${out}`)
+  assert.match(out, /用法：node scripts\/commit\.mjs/, '应打印用法')
+  // 反证：本脚本的默认动作是**真提交**，所以「没提交」才是这条判据的重点——
+  // 只断言退出码的话，一个「忽略未知参数、照常提交」的实现同样会满足前两条。
+  assert.equal(git(['rev-parse', 'HEAD']).stdout.trim(), headBefore, '不得产生提交')
+  assert.match(git(['diff', '--cached', '--name-only']).stdout, /i\.md/, '索引应原样保留')
+})
+
+test('保留的 no-op 开关仍被接受（历史调用不受影响）', () => {
+  const { root, git } = repo()
+  fs.writeFileSync(path.join(root, 'j.md'), 'x\n')
+  git(['add', 'j.md'])
+
+  const r = runCommit(root, ['--dry-run', '--no-gate', '--yes'])
+  assert.equal(r.status, 0, `--no-gate / --yes 应被接受（no-op）：${r.stdout}\n${r.stderr}`)
 })

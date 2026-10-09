@@ -59,8 +59,8 @@ symbio/
 
 ```bash
 node scripts/gate.mjs                 # 全量
-node scripts/gate.mjs --only=frontend # 单阶段（也有 --skip=）
-node scripts/gate.mjs --only=msrv     # 用 rust-version 声明的最低工具链真跑一次 check
+node scripts/gate.mjs --only=msrv     # 单阶段（也有 --skip=）
+node scripts/gate.mjs --only=frontend-static,frontend-build # 前端两段：静态检查 + 构建
 node scripts/gate.mjs --ci            # 对齐 CI（cargo test --workspace）
 ```
 
@@ -121,7 +121,7 @@ MSRV 阶段会换编译器（`RUSTUP_TOOLCHAIN` 覆盖 `rust-toolchain.toml`）�
 `//!` / `///`）。项目文档是下沉的，**知识只写一处**；发现缺文档就补那一处，不要把摘要抄到别处。
 
 CI（[.github/workflows/ci.yml](./.github/workflows/ci.yml)）跑的是**同一个脚本**
-（`--only=backend --ci --profile=<dev|release>` / `--only=frontend` / `--only=docs,facts --ci`
+（`--only=backend --ci --profile=<dev|release>` / `--only=frontend-static,frontend-build` / `--only=docs,facts --ci`
 / `--only=msrv`——最后一个由独立的 `msrv-check` job 跑，它会先装 1.91 工具链），
 所以本地通过 ≈ CI 通过。注意后两个 `--ci` 不是可选项：`backend` 含 `cargo fmt`、
 `docs,facts` 含事实文件生成，两者都是门禁**自动执行**的工作，少了 `--ci` 就没有判红手段。

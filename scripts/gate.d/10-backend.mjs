@@ -37,8 +37,10 @@ export default {
   // 源码与 scripts，baseline 只读 git 历史与 scripts，msrv 用独立的
   // `.workbuddy-ai/msrv-target`（不与 backend 争 `.cargo-lock`）。fmt 已拆到
   // `05-fmt.mjs` 屏障阶段（rustfmt 就地重写非原子，必须先于一切读 `.rs` 的泳道）。
-  // ⚠️ frontend 不能进这批：编译 symbio-tauri 时 `generate_context!` 在编译期读
-  //    `tauri/dist`，而 vite build 会重写它——见 `56-frontend.mjs`。
+  // ⚠️ frontend-build 不能进这批：编译 symbio-tauri 时 `generate_context!` 在编译期读
+  //    `tauri/dist`，而 vite build 会重写它——见 `56-frontend-build.mjs`。前端另外三个
+  //    任务不碰 `dist`，故拆到 `20-frontend-static.mjs` 进批（上面那句「只写 `target/`」
+  //    对它同样成立）。
   parallel: true,
   tasks(ctx) {
     const tasks = []
