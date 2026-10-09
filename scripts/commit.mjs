@@ -18,8 +18,10 @@
  *   node scripts/commit.mjs --help                  # 打印用法并退出（**不提交**）
  *
  * （`--no-gate` / `--yes` 保留为 no-op：历史调用不受影响。）
- * ⚠️ 查用法一律用 `--help`：本脚本**只认已识别的开关**，把 `--help` 当未知参数会让它
- * 照常走完并**真的提交一次**（2026-10-05 实测踩过）。
+ * ⚠️ 参数是**白名单**：未识别的参数一律拒绝（退出码 2），用法见 `--help`。本脚本的
+ * 默认动作是**真的提交一次**，所以「未知参数不报错、照常走默认动作」会把
+ * `--dryrun`（漏一个 `-`）这类手滑变成一次误提交——此前 `--help` 被当未知参数时
+ * 正是如此（2026-10-05 实测踩过）。
  *
  * 分节来源优先级：`--section=`（可多次）> 交互逐条输入 > **自动从暂存 diff 归纳**。
  * 自动归纳只给「改了什么」的事实清单（文件 + 增删行数），不下判断、不编理由——
@@ -70,15 +72,7 @@ const valOf = (p) => {
   return a ? a.slice(p.length).trim() : null
 }
 
-// `--help` / `-h`：**在任何副作用之前**退出。
-//
-// 补它的理由：脚本原先不认 `--help`，于是 `node scripts/commit.mjs --help` 会**真的
-// 提交一次**（把暂存区里的东西提上去）——想查用法，代价是一次误提交（只能
-// `git reset --soft HEAD~1` 回退）。与 `gate.mjs` 的 `--help` 同类陷阱（那里是白跑
-// 十分钟门禁 + 覆盖 `.workbuddy-ai/gate-logs/*.log`，最需要日志的那一刻它没了）。
-// 判据 = `commit.test.mjs` 的 `--help` 用例：退出 0、打印用法、**不产生提交**。
-if (hasFlag('--help') || hasFlag('-h')) {
-  console.log(`用法：node scripts/commit.mjs [选项]
+const USAGE = `用法：node scripts/commit.mjs [选项]
 
   （无参数）          非交互：type / scope / 标题从暂存内容推断，分节从 diff 归纳
   --type=<t>          显式 type（覆盖推断）
@@ -90,8 +84,48 @@ if (hasFlag('--help') || hasFlag('-h')) {
   --dry-run           只生成消息文件与暂存清单，不提交
   --help, -h          打印本用法并退出（不提交任何东西）
 
-  注意：本脚本**只提交已暂存的文件**（先 git add；未暂存的不进本次提交）。`)
+  注意：本脚本**只提交已暂存的文件**（先 git add；未暂存的不进本次提交）。
+  未识别的参数一律拒绝（退出码 2）：本脚本的默认动作是**真的提交一次**，
+  「未知参数不报错、照常提交」会让 --dryrun（漏了 -）这样的手滑变成一次误提交。`
+
+// `--help` / `-h`：**在任何副作用之前**退出。
+//
+// 补它的理由：脚本原先不认 `--help`，于是 `node scripts/commit.mjs --help` 会**真的
+// 提交一次**（把暂存区里的东西提上去）——想查用法，代价是一次误提交（只能
+// `git reset --soft HEAD~1` 回退）。与 `gate.mjs` 的 `--help` 同类陷阱（那里是白跑
+// 十分钟门禁 + 覆盖 `.workbuddy-ai/gate-logs/*.log`，最需要日志的那一刻它没了）。
+// 判据 = `commit.test.mjs` 的 `--help` 用例：退出 0、打印用法、**不产生提交**。
+if (hasFlag('--help') || hasFlag('-h')) {
+  console.log(USAGE)
   process.exit(0)
+}
+
+// ── 参数白名单：**未识别的参数一律拒绝** ────────────────────────────────────
+//
+// 本脚本的默认动作是**真的提交一次**（不可逆，只能 `reset --soft` 回退）。在这个
+// 默认动作上「未知参数不报错」是最坏的组合：`--dryrun`（漏一个 `-`）、`--interactve`
+// 这类手滑都会静默走完默认路径——**真的提交**，而人以为只是预览。`--help` 已在上面
+// 处理（它必须在任何副作用之前），这里拦的是其余未识别参数。
+//
+// `--no-gate` / `--yes` 是**刻意保留的 no-op**（历史调用不受影响），故在白名单里。
+const KNOWN_FLAGS = new Set([
+  '--dry-run',
+  '--gate',
+  '--no-gate',
+  '--interactive',
+  '--yes',
+  '--help',
+  '-h',
+])
+const KNOWN_PREFIXES = ['--type=', '--scope=', '--title=', '--section=', '--only=', '--skip=', '--ci']
+const unknownArgs = argv.filter(
+  (a) => !KNOWN_FLAGS.has(a) && !KNOWN_PREFIXES.some((p) => a.startsWith(p)),
+)
+if (unknownArgs.length) {
+  console.error(red(`✗ 无法识别的参数：${unknownArgs.join(' ')}`))
+  console.error('')
+  console.error(USAGE)
+  process.exit(2)
 }
 
 const DRY_RUN = hasFlag('--dry-run')

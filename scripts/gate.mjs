@@ -49,8 +49,19 @@
  *   node scripts/gate.mjs --skip=id1,id2        跳过指定阶段
  *   node scripts/gate.mjs --ci                  CI 对齐模式（语义由任务模块自行解释）
  *   node scripts/gate.mjs --profile=<p>         附加构建档位（语义由任务模块自行解释）
+ *   node scripts/gate.mjs --base=<ref>          棘轮基准版本（只对 baseline 阶段有意义）
  *   node scripts/gate.mjs --list                只列出阶段与任务，不执行
  *   node scripts/gate.mjs --help                打印用法并退出（**不跑任何阶段**）
+ *
+ * 参数是**白名单**：未识别的参数、`--only=` 的空清单、`--only` / `--skip` 里不存在的
+ * 阶段 id 一律**拒绝**（退出码 2，用法见 `--help`）。理由：本脚本的默认动作是全量门禁
+ * （10+ 分钟）且会覆盖 `.workbuddy-ai/gate-logs/`——「未知参数不报错、照常跑默认动作」
+ * 会让人以为只跑了一个阶段，却把上一轮的失败日志冲掉；而拼错的阶段 id 更糟：它让
+ * **0 个阶段**「全部通过」退出 0（静默假绿）。
+ *
+ * 从**别的仓库**调用会被**拒绝**（退出码 2）：门禁的每个阶段都以脚本所在的仓库为准，
+ * 从别处调用会静默地门禁另一个仓库（写它的 target/、覆盖它的日志、替它 git add）。
+ * 判据见下方「仓库身份」一节。
  *
  * ## 判定 vs 执行：门禁会**做掉**确定性的机械工作
  *
@@ -67,7 +78,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { red, green, yellow, dim, bold, stripAnsi } from './color.mjs'
 
@@ -99,11 +110,35 @@ const valOf = (p) => {
   const a = argv.find((x) => x.startsWith(p))
   return a ? a.slice(p.length).trim() : null
 }
+const splitIds = (s) => s.split(',').map((x) => x.trim()).filter(Boolean)
 const CI = hasFlag('--ci')
 const profile = valOf('--profile=')
-const only = valOf('--only=') ? valOf('--only=').split(',').map((s) => s.trim()).filter(Boolean) : null
-const skip = valOf('--skip=') ? valOf('--skip=').split(',').map((s) => s.trim()).filter(Boolean) : []
+// `--only=` 给空值时解析成 `[]`（而不是 null）——**空清单与「没给开关」是两件事**，
+// 前者是「一个阶段都不要跑」，必须被下面的校验拦下，不能静默退化成「跑全部」。
+const onlyRaw = valOf('--only=')
+const skipRaw = valOf('--skip=')
+const only = onlyRaw === null ? null : splitIds(onlyRaw)
+const skip = skipRaw === null ? [] : splitIds(skipRaw)
 const listOnly = hasFlag('--list')
+
+const USAGE = `用法：node scripts/gate.mjs [选项]
+
+  （无参数）            跑全部阶段
+  --only=id1,id2        只跑指定阶段（id 见 --list；拼错会报错，不会静默跑 0 个阶段）
+  --skip=id1,id2        跳过指定阶段（id 同上）
+  --ci                  CI 对齐模式（语义由各任务模块自行解释）
+  --profile=<p>         附加构建档位（语义由各任务模块自行解释）
+  --base=<ref>          棘轮基准版本（只对 baseline 阶段有意义；缺省取最近触碰该落点的提交）
+  --list                只列出阶段与任务，不执行
+  --help, -h            打印本用法并退出（**不跑任何阶段**）
+
+  查用法一律用 --help。本脚本的默认动作是**全量门禁**（10+ 分钟）且会覆盖
+  .workbuddy-ai/gate-logs/，所以**未识别的参数一律拒绝**（退出码 2）：在默认动作
+  昂贵的脚本上「未知参数不报错、照常跑默认动作」是最坏的组合——--only backend
+  （漏了 =）会静默变成一次全量门禁，把上一轮的失败日志冲掉。
+
+  从**别的仓库**调用会被拒绝（退出码 2）：门禁的每个阶段都以本脚本所在的仓库为准，
+  从别处调用会静默门禁另一个仓库。要门禁本仓库就 cd 到它下面。`
 
 // `--help` / `-h`：**在任何副作用之前**退出。
 //
@@ -112,19 +147,88 @@ const listOnly = hasFlag('--list')
 // 丢掉上一次的失败日志（最需要它的那一刻它没了，只能重跑）。与 `commit.mjs` 的 `--help`
 // 同类陷阱（那里更贵：会真的提交一次）。判据 = `gate.test.mjs`：退出 0、打印用法、**不跑任何阶段**。
 if (hasFlag('--help') || hasFlag('-h')) {
-  console.log(`用法：node scripts/gate.mjs [选项]
-
-  （无参数）            跑全部阶段
-  --only=id1,id2        只跑指定阶段（id 见 --list）
-  --skip=id1,id2        跳过指定阶段
-  --ci                  CI 对齐模式（语义由各任务模块自行解释）
-  --profile=<p>         附加构建档位（语义由各任务模块自行解释）
-  --list                只列出阶段与任务，不执行
-  --help, -h            打印本用法并退出（**不跑任何阶段**）
-
-  查用法一律用 --help：本脚本只认已识别的开关，未知参数不会报错——--help 被当未知
-  参数时会照常跑完全量门禁并覆盖日志。`)
+  console.log(USAGE)
   process.exit(0)
+}
+
+// ── 参数白名单：**未识别的参数一律拒绝** ────────────────────────────────────
+//
+// 这个脚本的默认动作是**全量门禁**（10+ 分钟）且会覆盖 `.workbuddy-ai/gate-logs/`。
+// 在这样一个脚本上「未知参数不报错、照常跑默认动作」是最坏的组合：`--only backend`
+// （漏了 `=`）或 `--fix`（早已删除的开关）都会静默变成一次全量门禁，把上一轮的失败
+// 日志冲掉——而人以为自己只跑了一个阶段。所以未知参数在这里就停住，不进入任何阶段。
+//
+// `--base=<ref>` 由 `35-baseline.mjs` 直接读 `process.argv`（棘轮基准的显式覆盖口，
+// 见该文件），它不经过本文件的解析，但**是**合法参数，故一并放行并登记进用法。
+const KNOWN_FLAGS = new Set(['--ci', '--list', '--help', '-h'])
+const KNOWN_PREFIXES = ['--only=', '--skip=', '--profile=', '--base=']
+const unknownArgs = argv.filter(
+  (a) => !KNOWN_FLAGS.has(a) && !KNOWN_PREFIXES.some((p) => a.startsWith(p)),
+)
+if (unknownArgs.length) {
+  console.error(red(`✗ 无法识别的参数：${unknownArgs.join(' ')}`))
+  console.error('')
+  console.error(USAGE)
+  process.exit(2)
+}
+if (onlyRaw !== null && only.length === 0) {
+  console.error(red('✗ `--only=` 是空清单（一个阶段都没有）'))
+  console.error(dim('  要跑全部就不要给这个开关；要跑指定阶段就写 id（见 --list）。'))
+  process.exit(2)
+}
+
+// ── 仓库身份：拒绝在**别的仓库**上跑 ────────────────────────────────────────
+//
+// 门禁的每个阶段都以**脚本所在的仓库**为准：各阶段模块自己解析 `repoRoot`
+// （`path.resolve(scriptDir, '..', '..')`），docs 的守卫也各自锚定自己所在的位置。
+// 所以从另一个仓库调用它，跑的是**另一个仓库**的门禁——而且会真的写它的
+// `target/`、覆盖它的 `.workbuddy-ai/gate-logs/`（**把上一轮的失败日志冲掉**，
+// 恰恰是最需要它的那一刻），本地模式还会替它 `git add`。
+//
+// 这不是「参数用错了」，是**静默作用在错误的仓库上**，所以这里拒绝而不是照跑。
+// 实测形态（2026-10-09）：`commit.test.mjs` 的 `--gate` 用例在一个临时 git 仓库里
+// 跑 `commit.mjs --dry-run --gate`，于是门禁在 symbio 上真的跑了起来——不但白跑
+// 60s（被测试自己的 timeout 砍断），它起的 cargo 还**抢走了 `.cargo-lock`**，
+// 让**正在跑的门禁**的 `cargo test -p symbio` 卡在 `Blocking waiting for file lock`
+// 上（实测日志首行即是它）。回归测试替被测系统制造锁争用，是这一条要断掉的。
+//
+// 判据 = 调用方 cwd 的 git 根 ≠ 本脚本所在仓库根。调用方**不在任何 git 仓库里**时
+// 不判（没有「另一个仓库」可言，且此时不存在「静默门禁错仓库」这个失败模式）。
+const callerRoot = (() => {
+  const r = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    shell: false,
+  })
+  return r.status === 0 && r.stdout.trim() ? r.stdout.trim() : null
+})()
+/** 路径等价：realpath 规范化 + Windows 下大小写不敏感（`d:\` 与 `D:\` 是同一个目录）。 */
+const samePath = (a, b) => {
+  const norm = (p) => {
+    let q = p
+    try {
+      q = fs.realpathSync.native(p)
+    } catch {
+      /* 路径不存在也照比，只是少一层规范化 */
+    }
+    q = path.resolve(q).replace(/\\/g, '/')
+    return process.platform === 'win32' ? q.toLowerCase() : q
+  }
+  return norm(a) === norm(b)
+}
+if (callerRoot && !samePath(callerRoot, repoRoot)) {
+  console.error(red('✗ 门禁拒绝执行：调用方在**别的仓库**里'))
+  console.error(`    调用方仓库：${callerRoot}`)
+  console.error(`    本门禁属于：${repoRoot}`)
+  console.error('')
+  console.error('  门禁的每个阶段都以**脚本所在的仓库**为准（阶段模块自己解析仓库根，')
+  console.error('  docs 的守卫也各自锚定自己所在的位置），所以从这里跑它，跑的是上面')
+  console.error('  那个仓库的门禁——会真的写它的 target/、覆盖它的 .workbuddy-ai/')
+  console.error('  gate-logs/（冲掉上一轮的失败日志），本地模式还会替它 git add。')
+  console.error('')
+  console.error('  要门禁本仓库：cd 到它下面再跑；要门禁别的仓库：那个仓库得有自己的')
+  console.error('  scripts/gate.mjs。')
+  process.exit(2)
 }
 
 const NOISE =
@@ -240,6 +344,21 @@ for (const f of fs.readdirSync(gateDir).filter((f) => f.endsWith('.mjs') && !f.s
 
 const enabled = (id) => (only ? only.includes(id) : true) && !skip.includes(id)
 
+// ── 阶段 id 必须真的存在 ────────────────────────────────────────────────────
+//
+// **这是「静默假绿」唯一的入口**：`--only=backedn`（拼错）会让 `enabled()` 对每个
+// 阶段都返回 false ⇒ 0 个阶段 ⇒ 报告「通过 0 / 0 全部通过」并退出 0。CI 上等于
+// 悄悄少跑一整个 job，而日志里一片绿。同理 `--only=`（空清单，上面已拦）。
+// 判据 = `gate.test.mjs`：拼错的 id 退出 2，且**不进入门禁主流程**。
+const stageIds = new Set(stages.map((s) => s.id))
+const unknownIds = [...new Set([...(only ?? []), ...skip])].filter((id) => !stageIds.has(id))
+if (unknownIds.length) {
+  console.error(red(`✗ --only / --skip 里的阶段 id 不存在：${unknownIds.join(', ')}`))
+  console.error(dim(`  已知阶段：${stages.map((s) => s.id).join(', ')}`))
+  console.error(dim('  拼错的 id 不会自己报错——它会让 0 个阶段「全部通过」，这正是这里要断掉的。'))
+  process.exit(2)
+}
+
 // 结果按**阶段分组缓冲**，report 时按阶段顺序摊平。并发泳道下各阶段的完成时刻
 // 交错，直接 push 会让汇总变成「谁快谁在前」；分组缓冲让中途（SIGINT）的汇总
 // 也保持「按阶段归组、组内按任务序」。
@@ -249,6 +368,15 @@ function bufferOf(stageId) {
   if (!buf) stageBuffers.set(stageId, (buf = []))
   return buf
 }
+/**
+ * 阶段 → **墙钟**耗时（ms）。`report` 据此给出「哪个阶段是瓶颈」。
+ *
+ * 为什么需要它：逐任务耗时在并发批里是相互争用后的数（同一批里 cargo 与 30 份
+ * `node --test` 抢 CPU），加起来既不等于阶段耗时也不等于门禁耗时；而**阶段墙钟**
+ * 才是可比的量。此前没有这一层，想回答「门禁的时间花在哪」只能重跑一遍并手工掐表
+ * ——「重跑一遍才看得到」正是这份清单要消掉的东西（与失败日志同一条理由）。
+ */
+const stageMs = new Map()
 // 每条结果都记下自己的日志文件（可能为 null：跳过项没跑命令），失败汇总据此
 // 直接列出**这一项的文件名**——早先只给目录，68 个文件里要自己猜是哪个。
 const record = (stageId, r) => bufferOf(stageId).push(r)
@@ -363,6 +491,7 @@ async function runConcurrent(stageId, tasks, limit) {
 
 async function runStage(s, index) {
   stageHeader(index + 1, s.title)
+  const stageStart = Date.now()
   const tasks = materialize(s)
   const limit = s.concurrency ?? CONCURRENCY
   let i = 0
@@ -377,6 +506,9 @@ async function runStage(s, index) {
       record(s.id, await executeTask(s.id, tasks[i++]))
     }
   }
+  // 阶段**墙钟**耗时（不是任务耗时之和）：瓶颈定位要的是「这一阶段占了多少墙钟」。
+  // 并发批下逐任务耗时是相互争用后的数，加起来没有意义；阶段墙钟才是可比的量。
+  stageMs.set(s.id, (stageMs.get(s.id) ?? 0) + (Date.now() - stageStart))
 }
 
 /**
@@ -426,6 +558,11 @@ function report(interrupted = false) {
   const skipped = results.filter((r) => r.pass === 'skipped')
   const passed = results.length - failed.length - skipped.length
 
+  // 阶段耗时（墙钟）：瓶颈定位的第二层。逐任务耗时在并发批里是**争用后**的数，
+  // 加起来没有意义；阶段墙钟才是可比的量。并发批里的阶段相互重叠，故合计可能
+  // 大于总耗时——这一点写在表头，免得读者拿它去加。
+  const stageRows = [...stageMs.entries()].sort((a, b) => b[1] - a[1])
+
   // 运行清单落盘：终端的滚动缓冲会丢，文件不会。**中断路径也写**——正是那条
   // 路径最可能只剩这一个物证。逐项带日志文件名，供事后核对。
   try {
@@ -433,6 +570,7 @@ function report(interrupted = false) {
       `# 门禁运行清单${interrupted ? '（中断，未跑完）' : ''}`,
       `时间：${new Date().toISOString()}`,
       `结论：通过 ${passed} / ${results.length}${skipped.length ? `（另有 ${skipped.length} 项未判定）` : ''}`,
+      `总耗时：${fmtDuration(Date.now() - gateStarted)}`,
       '',
       ...results.map((r) => {
         const mark = r.pass === true ? '✓' : r.pass === 'skipped' ? '⊘' : '✗'
@@ -443,6 +581,18 @@ function report(interrupted = false) {
         return `${mark} [${r.stage}] ${r.label}${took}${r.note ? ` — ${r.note}` : ''}${logs ? `\n    日志：${logs}` : ''}`
       }),
       '',
+      ...(stageRows.length
+        ? [
+            '## 阶段耗时（墙钟，降序）',
+            '',
+            '| 阶段 | 墙钟 |',
+            '|---|---|',
+            ...stageRows.map(([id, ms]) => `| ${id} | ${fmtDuration(ms)} |`),
+            '',
+            '> 并发批里的阶段相互重叠，故合计可能大于总耗时；逐任务耗时在批内是争用后的数。',
+            '',
+          ]
+        : []),
     ]
     fs.writeFileSync(path.join(logDir, '_summary.md'), lines.join('\n'), 'utf8')
   } catch {
@@ -461,6 +611,14 @@ function report(interrupted = false) {
     `  通过 ${passed} / ${results.length}${skipped.length ? `（另有 ${skipped.length} 项未判定）` : ''}${interrupted ? '（中断，未跑完）' : ''}`,
   )
   console.log(dim(`  总耗时 ${fmtDuration(Date.now() - gateStarted)}`))
+  // 阶段墙钟（降序）：一眼看出瓶颈在哪，不必重跑。与清单里那张表同源。
+  if (stageRows.length) {
+    console.log(
+      dim(
+        `  阶段耗时（墙钟，降序）：${stageRows.map(([id, ms]) => `${id} ${fmtDuration(ms)}`).join(' · ')}`,
+      ),
+    )
+  }
 
   // 失败逐项直接给**文件**（早先只给目录，68 个日志里得自己猜）；聚合任务可以
   // 一次带回多个子日志（数组），没跑上命令的项（自己的断言失败、非子进程）如实说明。
