@@ -99,16 +99,26 @@ enum Behavior {
     ToolThenAgentRun,
 }
 
+/// 一次请求被记下来的形状：`(role, 正文)` 逐条（顺序即发送顺序）。
+///
+/// 提成别名不是洁癖——它出现在两个字段与一个返回值上，内联写要占一行长类型，
+/// 而**读的人要的是「这是什么」不是「它是几层泛型嵌套」**。
+type ReceivedMessages = Vec<Vec<(String, String)>>;
+
 /// 忠实假 provider：行为由 [`Behavior`] 选定（同一传输形状，只换结局）。
 struct FaithfulProvider {
     behavior: Behavior,
-    /// 每次请求收到的 prompt（工具轮的验收要回读**下一次请求**）。
-    prompts: Arc<Mutex<Vec<String>>>,
+    /// 每次请求收到的**消息数组**（工具轮的验收要回读**下一次请求**）。
+    ///
+    /// 记的是 `execute_turn` 真正收到的 `&[ChatMessage]` —— 即**线格式那一侧**。
+    /// 旧形状记 `Vec<String>`（且只取 `messages.first()`），于是「整段被塞进一条
+    /// user 消息」这件事**测不出来**：拍平与结构化在那个断言下同样绿。
+    prompts: Arc<Mutex<ReceivedMessages>>,
 }
 
 impl FaithfulProvider {
-    fn new(behavior: Behavior) -> (Self, Arc<Mutex<Vec<String>>>) {
-        let prompts: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    fn new(behavior: Behavior) -> (Self, Arc<Mutex<ReceivedMessages>>) {
+        let prompts: Arc<Mutex<ReceivedMessages>> = Arc::new(Mutex::new(Vec::new()));
         (
             Self {
                 behavior,
@@ -144,16 +154,27 @@ impl ModelProvider for FaithfulProvider {
         _root_id: &str,
         env: &crate::symbio_core::ExecEnv,
     ) -> Result<TurnOutput, PluginError> {
-        // 记下本次请求的 prompt——工具轮的硬契约是「工具结果进了下一次请求」，
-        // 那条断言只能回读请求体（不变量/网格都证明不了）。
-        let prompt = messages
-            .first()
-            .and_then(|m| m.content.as_ref())
-            .map(|c| c.to_text())
-            .unwrap_or_default();
+        // 记下本次请求的**全部消息**（角色 + 正文）——工具轮的硬契约是「工具结果
+        // 进了下一次请求」，那条断言只能回读请求体（不变量/网格都证明不了）。
+        //
+        // ⚠️ 旧形状只取 `messages.first()`。那在拍平下「恰好」等于全部内容，于是
+        // 断言对两种形态同样成立——**它测不出 role 有没有丢**。记全部消息之后，
+        // 「工具结果是 role=tool」就成了可断的（见下方 `tool_round` 用例）。
+        let received: Vec<(String, String)> = messages
+            .iter()
+            .map(|m| {
+                // `role` 是 `Option<MessageRole>`：`Debug` 会打成 `Some(user)`，
+                // 而断言要的是 `user`。所以 `unwrap_or` 之后再小写——**不要**对
+                // 整个 `Option` 做 `to_lowercase`，那会留下 `some(...)` 包装。
+                let role =
+                    format!("{:?}", m.role.as_ref().unwrap_or(&Default::default())).to_lowercase();
+                let text = m.content.as_ref().map(|c| c.to_text()).unwrap_or_default();
+                (role, text)
+            })
+            .collect();
         let round = {
             let mut p = self.prompts.lock().unwrap();
-            p.push(prompt);
+            p.push(received);
             p.len()
         };
         match self.behavior {
@@ -460,24 +481,49 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
     // ── 回读请求体：工具结果进了下一次请求 ────────────────────────────────
     let seen = prompts.lock().unwrap().clone();
     assert_eq!(seen.len(), 2, "工具轮 + 收尾轮 = 两次请求：{seen:?}");
+    let joined = |i: usize| -> String {
+        seen[i]
+            .iter()
+            .map(|(_, text)| text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let has_role = |i: usize, role: &str, needle: &str| -> bool {
+        seen[i].iter().any(|(r, t)| r == role && t.contains(needle))
+    };
     assert!(
-        seen[0].contains("读一下 a.md"),
+        joined(0).contains("读一下 a.md"),
         "第一次请求带本轮用户发言：{}",
+        joined(0)
+    );
+    assert!(
+        !seen[0].iter().any(|(r, _)| r == "tool"),
+        "第一次请求还没有 role=tool 消息可言：{:?}",
         seen[0]
     );
     assert!(
-        !seen[0].contains("工具结果"),
-        "第一次请求还没有工具结果可言：{}",
-        seen[0]
-    );
-    assert!(
-        seen[1].contains("vdfs_read"),
+        joined(1).contains("vdfs_read"),
         "第二次请求要带上模型请求过的工具名：{}",
+        joined(1)
+    );
+    assert!(
+        joined(1).contains("No parent plugin"),
+        "第二次请求要带上工具结果正文（含失败——失败也是信息）：{}",
+        joined(1)
+    );
+    // ADR-048a 的核心断言：工具结果与助手发言**各带各的角色**。
+    //
+    // 这两条在旧形状下**测不出来**：那时只取 `messages.first()`，整段历史挤在一条
+    // user 消息里，`role == "tool"` 永远不会命中，而断言仍然绿——拍平与结构化在
+    // 旧断言下同样成立。改回 `messages.first()` 的单条形态，这两条立刻红。
+    assert!(
+        has_role(1, "tool", "No parent plugin"),
+        "第二次请求的工具结果须是 role=tool 消息（拍平形态下这条会红）：{:?}",
         seen[1]
     );
     assert!(
-        seen[1].contains("No parent plugin"),
-        "第二次请求要带上工具结果正文（含失败——失败也是信息）：{}",
+        has_role(1, "assistant", "我先查一下"),
+        "助手的工具轮发言须是 role=assistant：{:?}",
         seen[1]
     );
 

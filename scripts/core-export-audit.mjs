@@ -96,6 +96,15 @@ VisScope:
       // 门禁已判定该豁免失效并要求删除——工具侧真的开始读它之后，多消费方是可证的，
       // 不再依赖豁免。风险等级改为由各工具在 `CapabilityMeta` 里自声明，
       // 消费方（local 审批闸门 / 各插件 meta）都是具名的。
+      // 「单消费方」在 `PromptMessage` 上不成立——它有**两个**消费方，而审计只数
+      // 跨出 core 的那一个（`plugins/model`），core 内的 `adapters` 不计。
+      //
+      // 而它**不能**下沉到 `projection`：`LlmAdapter` 是 core 的**公开 trait**，
+      // 它的入参类型若是 core 私有的，core 外就**根本无法实现那个 trait**——
+      // 测试替身与外部适配器都写不出来。「公开 trait 的签名类型必须公开」比
+      // 「多消费方」是更强的理由，所以登记豁免而不是硬改路径。
+      PromptMessage:
+        'LlmAdapter 公开 trait 的入参类型：trait 在 core 外可实现（测试替身 / 外部适配器），其签名类型不能是 core 私有模块路径，否则 core 外无法实现该 trait。core 内消费方 = adapters（审计只数跨出 core 的那一个，故显为单消费方）',
     }
 
 /**

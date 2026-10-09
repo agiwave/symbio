@@ -21,8 +21,8 @@ use crate::plugins::model::model_providers::ModelProviderConfig;
 use crate::plugins::model::protocols::openai_chat::OpenaiChatProtocol;
 use crate::symbio_core::ProviderLlmAdapter;
 use crate::symbio_core::{
-    check_all, cost_ledger, fallback_rate, turnstate, Budget, Entity, Event, EventStore, Reasoner,
-    Seq, Store, Verb, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+    check_all, cost_ledger, fallback_rate, turnstate, Budget, Entity, Event, EventStore,
+    PromptMessage, Reasoner, Seq, Store, Verb, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 use crate::symbio_core::{LatencyTier, LlmAdapter as _, TokenIssuer};
 
@@ -129,12 +129,9 @@ async fn provider_adapter_streams_text_deltas_through_bridge() {
     let tok = TokenIssuer::issue_deep();
 
     let got = Arc::new(Collecting(Mutex::new(Vec::new())));
+    let ask = one("写一句关于秋天的诗");
     let (text, cost_ms) = adapter
-        .generate_streaming(
-            &tok,
-            "写一句关于秋天的诗",
-            got.clone() as Arc<dyn DeltaSink>,
-        )
+        .generate_streaming(&tok, &ask, got.clone() as Arc<dyn DeltaSink>)
         .await
         .expect("真实传输层必答");
 
@@ -228,6 +225,21 @@ async fn provider_adapter_drives_full_chain_over_real_http() {
     assert!(request.to_lowercase().contains("bearer test-key"));
 }
 
+/// 一条 user 消息的请求包（结构化入参，ADR-048a）。
+///
+/// 本文件测的是**传输层**，不是 prompt 组装，所以这里用最短形态即可——但它
+/// 必须**真的**走消息数组入参，否则这个测试在签名回退到 `&str` 时仍会绿，
+/// 那就等于没测到边界。
+fn one(text: &str) -> Vec<PromptMessage> {
+    vec![PromptMessage {
+        role: "user".into(),
+        text: text.into(),
+        tool_call_id: None,
+        tool: None,
+        tool_calls: None,
+    }]
+}
+
 /// 空流：HTTP 200 但零 content ⇒ `GenerationFailed`（调用方走兜底，I3：
 /// 「模型没答」不允许被当成「答了空话」落成 final）。
 #[tokio::test]
@@ -235,8 +247,9 @@ async fn empty_stream_is_a_failure_not_an_empty_answer() {
     let (port, _) = spawn_mock(SSE_EMPTY);
     let adapter = ProviderLlmAdapter::new(mock_provider(port));
     let tok = TokenIssuer::issue_deep();
+    let anything = one("任何话");
     let err = adapter
-        .generate(&tok, "任何话")
+        .generate(&tok, &anything)
         .await
         .expect_err("空流必须按失败返回");
     assert!(format!("{err:?}").contains("empty"), "{err:?}");
@@ -248,7 +261,8 @@ async fn unreachable_endpoint_maps_to_generation_failed() {
     // 端口 1（tcpmux）几乎必然无人监听；即便个别环境有，也是真实边界行为。
     let adapter = ProviderLlmAdapter::new(mock_provider(1));
     let tok = TokenIssuer::issue_deep();
-    let result = adapter.generate(&tok, "任何话").await;
+    let anything = one("任何话");
+    let result = adapter.generate(&tok, &anything).await;
     assert!(result.is_err(), "不可达端点必须失败");
 }
 

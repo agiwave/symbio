@@ -135,34 +135,59 @@ export default defineCase(
       const p1 = promptOf(reqs[1].body);
       const p2 = promptOf(reqs[2].body);
 
+      // ⚠️ 判据从「文本里有 `工具结果(x): ` / `用户: ` / `助手: `」改成
+      // 「**消息层上的角色与内容**」（ADR-048a）。
+      //
+      // 旧判据钉的是**拍平的产物**——那三种前缀都是 `to_prompt()` /
+      // `render_tool_exchange` 拼出来的文本。结构化之后它们不再是前缀，而是
+      // `role: user` / `role: assistant` / `role: tool` 三种消息。**继续钉前缀等于
+      // 逼着代码保留拍平。**
+      //
+      // 新判据**更强**：旧判据只验「某个字符串出现过」，新判据验「这条内容在**哪个
+      // 角色**的消息里」——所以「把用户发言标成 assistant」这类退化现在会红。
+      // ⚠️ 形参不叫 `msgs`——本用例后面 `readMessagesJson` 的结果就叫 `msgs`。
+      const msgsOf = (i) => reqs[i].body.messages ?? [];
+      const textsOf = (i, role) =>
+        msgsOf(i)
+          .filter((m) => m.role === role)
+          .map((m) => (typeof m.content === 'string' ? m.content : ''));
+      const toolTexts = (i) => textsOf(i, 'tool');
+      // 跨轮工具结果在请求里是 **assistant 消息**，不是 `role: tool`——
+      // 见 `provider_adapter` 里的降级与理由（协议要求 tool 消息配对**本次**请求
+      // 的 tool_calls，跨轮的调用在上一轮，于是那条消息会被清洗段当孤儿丢掉）。
+      const crossTurnTexts = (i) => textsOf(i, 'assistant');
+      const saw = (i, role, needle) => textsOf(i, role).some((t) => t.includes(needle));
+
       // 反向：轮 0 首轮请求里不该有工具结果（那时还没执行）。
       assert(
-        !p0.includes(`工具结果(${ECHO_TOOL}):`),
-        `轮 0 首轮请求不该出现工具结果（实际片段: ${p0.slice(0, 600)}）`,
+        toolTexts(0).length === 0,
+        `轮 0 首轮请求不该出现 role=tool 消息（实际: ${JSON.stringify(msgsOf(0).map((m) => m.role))}）`,
       );
 
       // 当轮路径照常（与 T26 同形）：轮 0 收尾轮的工具结果来自**轮内交换**。
       assert(
-        p1.includes(`工具结果(${ECHO_TOOL}):`),
-        `轮 0 收尾轮应带工具结果（轮内交换）（实际片段: ${p1.slice(0, 600)}）`,
+        toolTexts(1).some((t) => t.includes(ECHO_TEXT)),
+        `轮 0 收尾轮应带 role=tool 的结果（轮内交换）（实际: ${JSON.stringify(toolTexts(1)).slice(0, 400)}）`,
       );
-      assert(p1.includes(ECHO_TEXT), '轮内交换应带工具结果正文');
 
-      // ── 证据 ②：**本批的主题**——轮 1 的 prompt 带轮 0 的工具结果（投影消费）──
-      // 轮 1 的 prompt 由 `render_prompt`（= `transcript` 投影 → `to_prompt`）渲染，
+      // ── 证据 ②：**本用例的主题**——轮 1 的请求带轮 0 的工具结果（投影消费）──
+      // 轮 1 的消息由 `render_messages`（= `transcript` 投影 → `to_messages`）产出，
       // 轮内交换**不跨轮**。它带得着，只可能是因为 `artifact.added` 进了投影。
       assert(
-        p2.includes(`工具结果(${ECHO_TOOL}):`),
-        `轮 1 请求应带**第一轮**的工具结果（跨轮投影消费）（实际片段: ${p2.slice(0, 800)}）`,
+        crossTurnTexts(2).some((t) => t.includes(ECHO_TEXT)),
+        `轮 1 请求应带**第一轮**的工具结果（跨轮投影消费）（实际: ${JSON.stringify(crossTurnTexts(2)).slice(0, 400)}）`,
+      );
+      // 轮 1 的历史里也看得见轮 0 的问与答（投影的多轮形态没被工具消息挤掉），
+      // 且**角色正确**——问是 user 说的、答是 assistant 说的。
+      assert(saw(2, 'user', '帮我回显一下'), '轮 1 历史应含轮 0 的用户发言（role=user）');
+      assert(
+        saw(2, 'assistant', '第一答：回显完成。'),
+        '轮 1 历史应含轮 0 的收束正文（role=assistant——拍平会把这条变成 user）',
       );
       assert(
-        p2.includes(ECHO_TEXT),
-        '轮 1 请求应带工具结果正文（跨轮）',
+        textsOf(2, 'user').at(-1)?.includes('再问一句') ?? false,
+        `当前发言在历史之外且是最后一条 user（实际末条: ${JSON.stringify(textsOf(2, 'user').at(-1))}）`,
       );
-      // 轮 1 的历史里也看得见轮 0 的问与答（投影的多轮形态没被工具行挤掉）。
-      assert(p2.includes('用户: 帮我回显一下'), '轮 1 历史应含轮 0 的用户发言');
-      assert(p2.includes('助手: 第一答：回显完成。'), '轮 1 历史应含轮 0 的收束正文');
-      assert(p2.endsWith('用户: 再问一句'), '当前发言在历史之外（投影的多轮形态）');
 
       // ── 证据 ③：事实源——两轮各收束，工具格恰一格且带溯源 ──────────────────
       const walRaw = readFileSyncSafe(join(hd.homedir, 'session', SID, V2_WAL));

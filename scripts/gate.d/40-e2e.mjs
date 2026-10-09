@@ -73,6 +73,47 @@ export default {
       },
     })
 
+
+    // 并发度判据（离线脚本 `scripts/e2e-concurrency.mjs` 的门内版本）。
+    //
+    // 为什么**只印不判红**：并发度过低只让门禁慢、不让它说错话；而过高的风险
+    // 已由「默认贴着理论最优」消掉——余量在那儿，不靠这条红。判红会让
+    // 「某个用例变慢了」直接变成门禁失败，而那时该做的是优化那个用例。
+    // 复核：`node scripts/e2e-concurrency.mjs`（`--ci` 供 CI 用）。
+    tasks.push({
+      label: 'e2e: 并发度判据（理论最优 = 总工作量 / 最慢单例）',
+      run: async () => {
+        const cases = discoverCases()
+        const logsDir = path.join(repoRoot, '.workbuddy-ai', 'gate-logs')
+        if (!fs.existsSync(logsDir)) {
+          console.log(dim('      ↳ 尚无上一轮日志（首次运行跳过）'))
+          return { ok: true }
+        }
+        const times = fs
+          .readdirSync(logsDir)
+          .filter((f) => /^e2e-t.*\.log$/.test(f))
+          .map((f) => {
+            const t = fs.readFileSync(path.join(logsDir, f), 'utf8')
+            const ms = [...t.matchAll(/\((\d+)ms\)/g)].map((m) => +m[1])
+            return ms.length ? ms[ms.length - 1] : 0
+          })
+          .filter((ms) => ms > 0)
+        if (times.length === 0) return { ok: true }
+        const total = times.reduce((a, b) => a + b, 0)
+        const slowest = Math.max(...times)
+        const optimal = (total / slowest).toFixed(1)
+        console.log(
+          dim(
+            `      ↳ ${cases.length} 例｜总工作量 ${(total / 1000).toFixed(1)}s` +
+              `｜最慢单例 ${(slowest / 1000).toFixed(1)}s｜理论最优 ${optimal}` +
+              `｜墙钟下界 ${(slowest / 1000).toFixed(1)}s`,
+          ),
+        )
+        return { ok: true }
+      },
+    })
+
+
     tasks.push({
       label: 'e2e 用例集',
       // 自定义任务：用例子进程隔离运行（与 run-tests.mjs 同构），聚合判定。

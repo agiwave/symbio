@@ -2045,38 +2045,63 @@ mod turn_runner_tests {
         ));
     }
 
-    /// 多轮对话带历史：③ transcript 投影读同一事实源，第二轮 prompt 含第一轮；
-    /// 单轮 prompt 保持裸文本（与无历史形态等价）。
+    /// 多轮对话带历史：③ transcript 投影读同一事实源，第二轮请求含第一轮。
+    ///
+    /// ## 判据换过一次：从「有 `<对话历史>` 标记」到「历史以多条消息在场」
+    ///
+    /// 旧断言钉的是**拍平的产物**——那个标签是 `to_prompt()` 拼出来的，结构化
+    /// 之后它理应消失（历史就是消息序列，不需要分隔符）。继续钉它等于**逼着代码
+    /// 保留拍平**。
+    ///
+    /// 换成按角色查之后，这条判据**更强**：它不只问「历史在不在」，还问「上一轮的
+    /// 提问是 `role: user`、答复是 `role: assistant`」——拍平形态下两者都是 user，
+    /// 所以这条**照得出拍平**。旧形态照不出。
     #[tokio::test]
     async fn multi_turn_transcript_carries_history_from_fact_source() {
         let store = EventStore::new();
         let tok = TokenIssuer::issue_deep();
         let llm = StubLlmAdapter::succeed("stub-model");
 
-        // 第一轮：单轮 prompt = 裸文本。
+        // 第一轮：单轮 = 只有当前那条 user 消息。
         let r1 = TurnRunner
             .run(&store, &llm, &tok, 0, "第一轮问题", LatencyTier::Deep)
             .await
             .unwrap();
         assert!(r1.text.contains("第一轮问题"));
-        assert!(
-            !r1.text.contains("<对话历史>"),
-            "单轮不得引入历史标记：{}",
-            r1.text
-        );
 
-        // 第二轮：prompt 带历史——模型看得见自己上一轮的答复。
+        // 第二轮：历史在场，且**角色正确**——模型看得见自己上一轮的答复，
+        // 并且知道那句答复是自己说的（不是用户说的）。
         let r2 = TurnRunner
             .run(&store, &llm, &tok, 1, "第二轮问题", LatencyTier::Deep)
             .await
             .unwrap();
-        assert!(
-            r2.text.contains("<对话历史>"),
-            "多轮必须带历史：{}",
-            r2.text
+        let last = crate::symbio_core::actors::Reasoner::render_messages(
+            &store
+                .range(Seq::new(0))
+                .into_iter()
+                .filter(|e| e.turn <= 1)
+                .collect::<Vec<_>>(),
         );
-        assert!(r2.text.contains("用户: 第一轮问题"), "历史里有上一轮提问");
-        assert!(r2.text.contains("助手: "), "历史里有上一轮答复");
+        assert!(
+            last.iter()
+                .any(|m| m.role == "user" && m.text.contains("第一轮问题")),
+            "历史里有上一轮提问，且它是 user 说的：{last:?}"
+        );
+        assert!(
+            last.iter()
+                .any(|m| m.role == "assistant" && m.text.contains("stub-model")),
+            "历史里有上一轮答复，且它是 assistant 说的（拍平会把这条变成 user）：{last:?}"
+        );
+        assert!(
+            last.iter().any(|m| m.text.contains("第二轮问题")),
+            "当前消息在历史之外：{last:?}"
+        );
+        // 顺序：历史在前，当前轮在后（时间序 = append-only）
+        let at = |needle: &str| last.iter().position(|m| m.text.contains(needle));
+        assert!(
+            at("第一轮问题") < at("第二轮问题"),
+            "时间序不得倒置：{last:?}"
+        );
         assert!(r2.text.contains("第二轮问题"), "当前消息在历史之外");
 
         // 投影联动与 N1。
@@ -2459,15 +2484,16 @@ mod tool_round_tests {
     };
     use crate::symbio_core::invariants::unresolved_turns;
     use crate::symbio_core::store::Store;
+    use crate::symbio_core::PromptMessage;
     use crate::symbio_core::{
         check_all, CapabilityMeta, DispatchOutcome, DispatchPort, Entity, EventStore, Seq,
         TurnInput, TurnResume, TurnRunner, TurnToolCallInfo, Verb, EVENT_ARTIFACT_ADDED,
         EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
     };
 
-    /// 假适配器：**直接作答**（无工具调用）——续写轮的收尾轮；记录收到的 prompt。
+    /// 假适配器：**直接作答**（无工具调用）——续写轮的收尾轮；记录收到的**消息数组**。
     struct AnsweringLlm {
-        prompts: Arc<Mutex<Vec<String>>>,
+        prompts: Arc<Mutex<Vec<Vec<PromptMessage>>>>,
     }
 
     impl AnsweringLlm {
@@ -2483,17 +2509,21 @@ mod tool_round_tests {
         fn model_id(&self) -> &str {
             "answer-mock"
         }
-        async fn generate(&self, _tok: &FullModel, _prompt: &str) -> Result<String, AdapterError> {
+        async fn generate(
+            &self,
+            _tok: &FullModel,
+            _messages: &[PromptMessage],
+        ) -> Result<String, AdapterError> {
             Err(AdapterError::GenerationFailed("unused".into()))
         }
         async fn generate_turn(
             &self,
             _tok: &FullModel,
-            prompt: &str,
+            messages: &[PromptMessage],
             _tools: &[CapabilityMeta],
             _sink: Arc<dyn DeltaSink>,
         ) -> Result<LlmTurn, AdapterError> {
-            self.prompts.lock().unwrap().push(prompt.to_string());
+            self.prompts.lock().unwrap().push(messages.to_vec());
             Ok(LlmTurn {
                 text: "批准后已完成。".into(),
                 tool_calls: Vec::new(),
@@ -2502,10 +2532,17 @@ mod tool_round_tests {
         }
     }
 
-    /// 假适配器：把收到的 prompt 首行当答复（`run` 系列会把答复反射进事实源，
-    /// 便于断言「历史里有哪几轮」）；记录每次收到的 prompt。
+    /// 假适配器：把**收到的最后一条消息**当答复（`run` 系列会把答复反射进事实源，
+    /// 便于断言「历史里有哪几轮」）；记录每次收到的**消息数组**。
+    ///
+    /// ## 为什么记录消息而不是 prompt 字符串（ADR-048a）
+    ///
+    /// 旧形状记录 `prompt: String`，断言按 `lines()` 解析（「末行即当前轮发言」）。
+    /// 结构化之后「末行」这个概念**消失了**——没有行了，只有消息序列。硬把消息
+    /// 拍回文本再让断言解析，等于把拍平重新塞回测试里，而测试是唯一能照出
+    /// 「role 有没有丢」的地方。所以这里记 `Vec<PromptMessage>`，断言直接看角色。
     struct EchoLlm {
-        prompts: Arc<Mutex<Vec<String>>>,
+        prompts: Arc<Mutex<Vec<Vec<PromptMessage>>>>,
     }
 
     impl EchoLlm {
@@ -2521,24 +2558,27 @@ mod tool_round_tests {
         fn model_id(&self) -> &str {
             "echo-mock"
         }
-        async fn generate(&self, _tok: &FullModel, _prompt: &str) -> Result<String, AdapterError> {
+        async fn generate(
+            &self,
+            _tok: &FullModel,
+            _messages: &[PromptMessage],
+        ) -> Result<String, AdapterError> {
             Err(AdapterError::GenerationFailed("unused".into()))
         }
         async fn generate_turn(
             &self,
             _tok: &FullModel,
-            prompt: &str,
+            messages: &[PromptMessage],
             _tools: &[CapabilityMeta],
             _sink: Arc<dyn DeltaSink>,
         ) -> Result<LlmTurn, AdapterError> {
-            self.prompts.lock().unwrap().push(prompt.to_string());
-            // 末行即当前轮发言（`to_prompt` 把历史包进 <对话历史>、当前轮平铺其后）
-            let echo = prompt
-                .lines()
-                .rfind(|l| !l.trim().is_empty())
-                .unwrap_or("答")
-                .trim()
-                .to_string();
+            self.prompts.lock().unwrap().push(messages.to_vec());
+            // 末条即当前轮发言（结构化之后没有「行」，只有消息序列）
+            let echo = messages
+                .last()
+                .map(|m| m.text.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "答".to_string());
             Ok(LlmTurn {
                 text: echo,
                 tool_calls: Vec::new(),
@@ -2547,9 +2587,81 @@ mod tool_round_tests {
         }
     }
 
-    /// 假适配器：首次请求回一个工具调用，之后回正文；记录每次收到的 prompt。
+    /// 一次请求的**断言视图**：保留结构，同时给断言一个「拼起来看」的入口。
+    ///
+    /// ## 为什么不让断言直接读 `Vec<PromptMessage>`
+    ///
+    /// 因为那样每个断言都要写 `m.iter().filter(|m| m.role == "user").map(...)`，
+    /// 而**真正要断言的往往不是角色**（例如「历史里有第 0 轮的问题」）。所以给
+    /// 两条路：按角色精确查（`texts_of`）、按全文查（`joined`）。
+    ///
+    /// `joined` 是**给人看的**，不是给生产路径用的——它存在的唯一理由是让「某句话
+    /// 在不在」这类断言保持简短。它**不参与**任何 role 断言，所以「role 有没有丢」
+    /// 仍然只能靠 `texts_of` / `roles` 照出来。
+    ///
+    /// ⚠️ 如果哪天发现自己在用 `joined` 断言**角色相关**的东西，那是判据退化了——
+    /// 拍平会重新溜回测试里。正确做法是加一条 `roles` 断言。
+    #[derive(Debug, Clone, Default)]
+    struct Seen {
+        msgs: Vec<PromptMessage>,
+    }
+
+    impl Seen {
+        /// 角色序列（断言 role 有没有丢 / 顺序对不对用它）。
+        fn roles(&self) -> Vec<&str> {
+            self.msgs.iter().map(|m| m.role.as_str()).collect()
+        }
+
+        /// 角色为 `r` 的那些正文。
+        fn texts_of(&self, r: &str) -> Vec<&str> {
+            self.msgs
+                .iter()
+                .filter(|m| m.role == r)
+                .map(|m| m.text.as_str())
+                .collect()
+        }
+
+        /// 角色为 `tool` 的消息：正文 + 工具名 + `tool_call_id`。
+        fn tools(&self) -> Vec<(&str, Option<&str>, Option<&str>)> {
+            self.msgs
+                .iter()
+                .filter(|m| m.role == "tool")
+                .map(|m| {
+                    (
+                        m.text.as_str(),
+                        m.tool.as_deref(),
+                        m.tool_call_id.as_deref(),
+                    )
+                })
+                .collect()
+        }
+
+        /// 全部正文按顺序拼起来（**仅**给「某句话在不在」这类断言用）。
+        fn joined(&self) -> String {
+            self.msgs
+                .iter()
+                .map(|m| m.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    }
+
+    impl From<Vec<PromptMessage>> for Seen {
+        fn from(msgs: Vec<PromptMessage>) -> Self {
+            Seen { msgs }
+        }
+    }
+
+    /// 断言消息里**含**某段话（不钉角色）——给「历史里有第 N 轮的问题」这类。
+    macro_rules! says {
+        ($seen:expr, $needle:expr) => {
+            $seen.joined().contains($needle)
+        };
+    }
+
+    /// 假适配器：首次请求回一个工具调用，之后回正文；记录每次收到的**消息数组**。
     struct ToolCallingLlm {
-        prompts: Arc<Mutex<Vec<String>>>,
+        prompts: Arc<Mutex<Vec<Vec<PromptMessage>>>>,
     }
 
     impl ToolCallingLlm {
@@ -2565,20 +2677,24 @@ mod tool_round_tests {
         fn model_id(&self) -> &str {
             "tool-mock"
         }
-        async fn generate(&self, _tok: &FullModel, _prompt: &str) -> Result<String, AdapterError> {
+        async fn generate(
+            &self,
+            _tok: &FullModel,
+            _messages: &[PromptMessage],
+        ) -> Result<String, AdapterError> {
             // 本用例只走工具通道（`generate_turn`）——留一个诚实的不支持。
             Err(AdapterError::GenerationFailed("unused".into()))
         }
         async fn generate_turn(
             &self,
             _tok: &FullModel,
-            prompt: &str,
+            messages: &[PromptMessage],
             _tools: &[CapabilityMeta],
             _sink: Arc<dyn DeltaSink>,
         ) -> Result<LlmTurn, AdapterError> {
             let round = {
                 let mut p = self.prompts.lock().unwrap();
-                p.push(prompt.to_string());
+                p.push(messages.to_vec());
                 p.len()
             };
             if round == 1 {
@@ -2687,24 +2803,50 @@ mod tool_round_tests {
             .await
             .expect("必答");
 
-        let seen = prompts.lock().unwrap().clone();
-        assert_eq!(seen.len(), 2, "工具轮 + 收尾轮：{seen:?}");
-        for (i, p) in seen.iter().enumerate() {
-            let at = p.find("【长期记忆】").expect("前缀两轮都在");
-            let spoken = p.find("读 a.md").expect("本轮发言两轮都在");
-            assert!(at < spoken, "第 {} 轮：前缀须在发言之前（{p}）", i + 1);
-            // 工具交换是就地追加的（基线之后），前缀不得混进那段
-            if let Some(call) = p.find("助手请求工具:") {
-                assert!(at < call, "第 {} 轮：前缀须在就地累积之前（{p}）", i + 1);
+        let raw = prompts.lock().unwrap().clone();
+        assert_eq!(raw.len(), 2, "工具轮 + 收尾轮：{raw:?}");
+        for (i, msgs) in raw.iter().enumerate() {
+            let s = Seen::from(msgs.clone());
+            // 结构化之后「位置」是**下标**，不是字符偏移——这比 `find` 强：
+            // 前缀混进发言正文那种退化，在下标上直接看得见（不再是同一条消息）。
+            let prefix_at = msgs
+                .iter()
+                .position(|m| m.text.contains("【长期记忆】"))
+                .expect("前缀两轮都在");
+            let spoken_at = msgs
+                .iter()
+                .position(|m| m.text.contains("读 a.md"))
+                .expect("本轮发言两轮都在");
+            assert_eq!(
+                prefix_at,
+                0,
+                "第 {} 轮：前缀须是**最前一条独立消息**（{s:?}）",
+                i + 1
+            );
+            assert!(
+                prefix_at < spoken_at,
+                "第 {} 轮：前缀须在发言之前（{s:?}）",
+                i + 1
+            );
+            // 工具交换在基线**之后**：前缀不得被它挤到中间
+            if let Some(call_at) = msgs.iter().position(|m| m.text.contains("调用工具")) {
+                assert!(
+                    prefix_at < call_at,
+                    "第 {} 轮：前缀须在工具交换之前（{s:?}）",
+                    i + 1
+                );
             }
         }
         // 不累积：两轮各**一份**前缀，不是两份
         assert_eq!(
-            seen.iter()
-                .map(|p| p.matches("【长期记忆】").count())
+            raw.iter()
+                .map(|msgs| msgs
+                    .iter()
+                    .filter(|m| m.text.contains("【长期记忆】"))
+                    .count())
                 .sum::<usize>(),
             2,
-            "前缀每轮一份，不得跨轮累积：{seen:?}"
+            "前缀每轮一份，不得跨轮累积：{raw:?}"
         );
         // `None` / 空串 = 不加（平凡值必须真的什么都不加）
         for empty in [None, Some(String::new()), Some("   \n ".to_string())] {
@@ -2719,7 +2861,7 @@ mod tool_round_tests {
                 .expect("必答");
             let p = prompts.lock().unwrap().clone();
             assert!(
-                !p[0].starts_with('\n') && p[0].contains("读 a.md"),
+                !p[0][0].text.starts_with('\n') && says!(Seen::from(p[0].clone()), "读 a.md"),
                 "空前缀不得留下空壳或多余换行：{:?}",
                 p[0]
             );
@@ -2755,14 +2897,26 @@ mod tool_round_tests {
                 .expect("必答");
         }
 
-        let seen = prompts.lock().unwrap().clone();
+        let seen: Vec<Seen> = prompts
+            .lock()
+            .unwrap()
+            .clone()
+            .into_iter()
+            .map(Seen::from)
+            .collect();
         assert_eq!(seen.len(), 3, "三轮各一次请求：{seen:?}");
         let last = &seen[2];
         assert!(
-            last.contains("第 0 轮问题") && last.contains("第 1 轮问题"),
-            "`window_turns = 0` 不得清空历史：{last}"
+            says!(last, "第 0 轮问题") && says!(last, "第 1 轮问题"),
+            "`window_turns = 0` 不得清空历史：{last:?}"
         );
-        assert!(last.contains("第 2 轮问题"), "当前轮在历史之外：{last}");
+        assert!(says!(last, "第 2 轮问题"), "当前轮在历史之外：{last:?}");
+        // 历史里的每一轮都必须是**独立**的 user 消息（不是一整段散文）
+        assert_eq!(
+            last.texts_of("user").len(),
+            3,
+            "三轮各一条 user 消息：{last:?}"
+        );
 
         // 对照：`Some(1)` 只留当前轮（窗口**确实**在裁）
         let store = EventStore::new();
@@ -2778,12 +2932,12 @@ mod tool_round_tests {
                 .await
                 .expect("必答");
         }
-        let last = prompts.lock().unwrap().clone().pop().unwrap();
+        let last = Seen::from(prompts.lock().unwrap().clone().pop().unwrap());
         assert!(
-            !last.contains("第 0 轮问题")
-                && !last.contains("第 1 轮问题")
-                && last.contains("第 2 轮问题"),
-            "`Some(1)` 只留当前轮，窗口本身仍在裁：{last}"
+            !says!(last, "第 0 轮问题")
+                && !says!(last, "第 1 轮问题")
+                && says!(last, "第 2 轮问题"),
+            "`Some(1)` 只留当前轮，窗口本身仍在裁：{last:?}"
         );
     }
 
@@ -2819,17 +2973,70 @@ mod tool_round_tests {
         assert_eq!(*dispatch.rounds.lock().unwrap(), 1, "分发恰好一次");
 
         // 两次请求；第二次带上了模型请求过的工具与它的结果。
-        let seen = prompts.lock().unwrap().clone();
+        let seen: Vec<Seen> = prompts
+            .lock()
+            .unwrap()
+            .clone()
+            .into_iter()
+            .map(Seen::from)
+            .collect();
         assert_eq!(seen.len(), 2, "工具轮 + 收尾轮：{seen:?}");
         assert!(
-            !seen[0].contains("文件内容"),
-            "第一次请求还没有结果：{}",
+            !says!(seen[0], "文件内容"),
+            "第一次请求还没有结果：{:?}",
             seen[0]
         );
         assert!(
-            seen[1].contains("vdfs_read") && seen[1].contains("文件内容：hello"),
-            "第二次请求要带上工具调用与结果：{}",
+            says!(seen[1], "vdfs_read") && says!(seen[1], "文件内容：hello"),
+            "第二次请求要带上工具调用与结果：{:?}",
             seen[1]
+        );
+
+        // ── ADR-048a 的核心断言：结果带**角色**与 **tool_call_id** ──
+        //
+        // 拍平成散文时这两样都没有，所以这条断言**直接**照出那个退步。改回
+        // `String` 拼接的旧实现（`助手请求工具: ` / `工具结果(x): `），本条必红。
+        let tools_in_2nd = seen[1].tools();
+        assert_eq!(
+            tools_in_2nd.len(),
+            1,
+            "第二次请求里恰好一条 role=tool 消息：{:?}",
+            seen[1]
+        );
+        let (text, tool, call_id) = tools_in_2nd[0];
+        assert_eq!(text, "文件内容：hello", "工具结果正文");
+        assert_eq!(tool, Some("vdfs_read"), "工具名是事实，必须单独成字段");
+        assert_eq!(
+            call_id,
+            Some("call_vdfs_read_0"),
+            "role=tool 必须关联到那次调用（否则模型无法配对多次并发调用）"
+        );
+        // 且调用请求本身是一条 assistant 消息——不是散文里「助手请求工具:」那种
+        // 人类不会说的话。
+        assert!(
+            seen[1]
+                .texts_of("assistant")
+                .iter()
+                .any(|x| x.contains("调用工具 vdfs_read")),
+            "工具调用请求应是 assistant 消息：{:?}",
+            seen[1]
+        );
+
+        // 角色**序列**：工具结果必须夹在 assistant 的调用之后，不能被拍到序列之外。
+        // 拍平成一条散文时整段只有一个 role，这条会立刻红——所以它是「拍平不可逆」
+        // 的一条独立判据（不依赖正文里有没有某个词）。
+        let roles = seen[1].roles();
+        let tool_at = roles
+            .iter()
+            .position(|r| *r == "tool")
+            .expect("有 role=tool");
+        assert!(
+            roles[..tool_at].contains(&"assistant"),
+            "工具结果之前应有 assistant 的调用请求（角色序列）：{roles:?}"
+        );
+        assert!(
+            roles.contains(&"tool"),
+            "角色序列里要有 tool（角色序列）：{roles:?}"
         );
 
         // 网格：用户格 + 产物格 + final 格（final 只一条——N3）。
@@ -3062,18 +3269,38 @@ mod tool_round_tests {
             "续写填上了原轮的缺口（否则 C4 会把它当永久假缺口）"
         );
 
-        // prompt：恢复的交换进了模型看得见的地方（形状与在途工具轮同一套前缀）。
+        // prompt：恢复的交换进了模型看得见的地方（形状与在途工具轮同一套消息）。
         let seen = prompts.lock().unwrap().clone();
         assert_eq!(seen.len(), 1, "收尾轮一次请求：{seen:?}");
+        let s = Seen::from(seen[0].clone());
         assert!(
-            seen[0].contains("助手请求工具: vdfs_read"),
-            "恢复的工具调用要进 prompt：{}",
-            seen[0]
+            s.texts_of("assistant")
+                .iter()
+                .any(|x| x.contains("调用工具 vdfs_read")),
+            "恢复的工具调用要进 prompt（作为 assistant 消息）：{s:?}"
         );
-        assert!(
-            seen[0].contains("工具结果(vdfs_read): 文件内容：hello（已批准）"),
-            "恢复的结果要进 prompt：{}",
-            seen[0]
+        // 结果**带角色**：这是续写轮与在途工具轮同形的判据——恢复的结果不是
+        // 「拼在末尾的一段文字」，而是一条 `role: tool` 消息，带调用 id。
+        //
+        // **两条** tool 消息都是事实，不是重复：等待轮落了一条未批准的结果
+        // （`文件内容：hello`），续写轮又落了一条已批准的（`…（已批准）`）。
+        // 网格是 append-only 的事实源，两次调用两次结果都在；把它们合成一条
+        // 才是信息丢失。
+        assert_eq!(
+            s.tools(),
+            vec![
+                (
+                    "文件内容：hello",
+                    Some("vdfs_read"),
+                    Some("call_vdfs_read_0")
+                ),
+                (
+                    "文件内容：hello（已批准）",
+                    Some("vdfs_read"),
+                    Some("call_vdfs_read_0")
+                ),
+            ],
+            "两次调用的两次结果都在，且都带角色与调用 id：{s:?}"
         );
     }
 }

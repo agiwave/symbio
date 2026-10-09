@@ -9,18 +9,27 @@
 //! 生产路径上的第一条绿线，后续每一步（prompt 结构化、`turn.supplemented`）都必须保持
 //! 它绿。
 
-use super::super::transcript::{transcript, TranscriptEntry};
+use super::super::transcript::{transcript, PromptMessage};
 use super::{verify, PromptGap as Gap};
 use crate::symbio_core::event::{
     Entity, Event, Seq, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 use crate::symbio_core::{EventWalStore, Store};
 
-fn entry(role: &str, text: &str, tool: Option<&str>) -> TranscriptEntry {
-    TranscriptEntry {
+/// 一条送进模型的消息。
+///
+/// ⚠️ 这里**必须**构造 `PromptMessage` 而不是 `TranscriptEntry`：判据验的是
+/// 「送进模型的那批」，而那条路上 `tool` 消息还带着 `tool_call_id`。用投影条目
+/// 构造会让判据少验一样东西（而那恰恰是 ADR-048a 要保的东西）。
+fn entry(role: &str, text: &str, tool: Option<&str>) -> PromptMessage {
+    PromptMessage {
         role: role.to_string(),
         text: text.to_string(),
+        // `role == "tool"` 必带调用 id（模型侧协议要求）——见 transcript 的
+        // `From<&TranscriptEntry>`：缺了会被 provider 整条拒绝。
+        tool_call_id: tool.map(|t| format!("call_{t}_0")),
         tool: tool.map(|t| t.to_string()),
+        tool_calls: None,
     }
 }
 
@@ -90,7 +99,7 @@ fn the_fidelity_check_reports_every_gap_it_claims_to() {
         entry("assistant", "事实源里没有这句", None), // 无出处
     ];
 
-    let rep = verify(&events, &entries);
+    let rep = verify(&events, &entries, None);
     assert!(!rep.is_complete(), "判据必须报出缺口（否则它恒绿、无用）");
     assert_eq!(rep.checked_events, 3, "只把投影内的三条计入");
     assert_eq!(rep.checked_entries, 3);
@@ -124,7 +133,7 @@ fn the_fidelity_check_reports_every_gap_it_claims_to() {
     let role_bad = {
         let evs = vec![user_turn(0, "问")];
         let msgs = vec![entry("assistant", "问", None)];
-        verify(&evs, &msgs)
+        verify(&evs, &msgs, None)
     };
     assert!(
         role_bad.gaps.iter().any(|g| matches!(
@@ -147,7 +156,7 @@ fn a_single_turn_is_complete() {
         entry("user", "你好", None),
         entry("assistant", "你好呀", None),
     ];
-    let rep = verify(&events, &entries);
+    let rep = verify(&events, &entries, None);
     assert!(rep.is_complete(), "平凡值必须无假红：{}", rep.summary());
 }
 
@@ -182,7 +191,7 @@ fn an_artifact_round_is_complete_after_reopen() {
     let view = transcript()
         .apply(&events, i64::MAX, crate::symbio_core::Budget::generous())
         .value;
-    let entries: Vec<TranscriptEntry> = view.entries.clone();
+    let entries: Vec<PromptMessage> = view.to_messages();
     assert_eq!(entries.len(), 3, "三条都要进 prompt：{entries:?}");
     assert_eq!(entries[1].role, "tool");
     assert_eq!(
@@ -191,7 +200,7 @@ fn an_artifact_round_is_complete_after_reopen() {
         "工具名是事实"
     );
 
-    let rep = verify(&events, &entries);
+    let rep = verify(&events, &entries, None);
     assert!(rep.is_complete(), "工具轮必须双向完整：{}", rep.summary());
 
     std::fs::remove_dir_all(&dir).ok();

@@ -42,6 +42,15 @@ pub use projection::cost::cost_ledger;
 pub use projection::fallback::fallback_rate;
 pub use projection::slo::slo_report;
 pub use projection::transcript::transcript;
+// 结构化 prompt 消息（ADR-048a）：core 的**最小结构化出口**——角色、正文、
+// `tool_call_id`、`tool_calls`。线格式（`ChatMessage`）由 adapter 边界翻译，
+// core 内部不认识 provider 的图语义。
+//
+// **为什么它占根出口而 `PromptToolCall` 不占**：C-003 的准则是「只有一个模块消费
+// 的不算架构元素」。`PromptMessage` 跨了 core 边界——`LlmAdapter` 是 core 的公开
+// trait，它的入参类型不能是 core 私有的（否则 core 外**根本无法实现那个 trait**，
+// 测试替身 / 外部适配器都写不出来）。`PromptToolCall` 只被 `actors` 用，留在模块路径。
+pub use projection::transcript::PromptMessage;
 pub use projection::turnstate::{turnstate, TurnState};
 pub use store::wal::{EventWalStore, WalStore};
 pub use store::{EventStore, Store};

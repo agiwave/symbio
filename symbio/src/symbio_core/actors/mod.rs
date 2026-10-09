@@ -143,8 +143,8 @@ impl Reasoner {
         events: &[Event],
         sink: std::sync::Arc<dyn crate::symbio_core::adapters::DeltaSink>,
     ) -> Result<(String, u64), AdapterError> {
-        let prompt = Self::render_prompt(events);
-        llm.generate_streaming(tok, &prompt, sink).await
+        let messages = Self::render_messages(events);
+        llm.generate_streaming(tok, &messages, sink).await
     }
 
     /// prompt 的**唯一渲染点**：事件切片 → 转写投影 → 单条 prompt。
@@ -164,6 +164,25 @@ impl Reasoner {
             .apply(events, i64::MAX, crate::symbio_core::Budget::generous())
             .value
             .to_prompt()
+    }
+
+    /// prompt 的**结构化**渲染点（[ADR-048a](../../../../docs/decisions/session.md)）：
+    /// 事件切片 → 转写投影 → **消息数组**。
+    ///
+    /// ## 为什么与 [`Self::render_prompt`] 并存，而不是替换它
+    ///
+    /// 两者读**同一份** `entries`，差别只在出口：`render_prompt` 给「只需要一段
+    /// 文本」的调用方（诊断、断言、日志、`.workbuddy-ai` 里的回读），`render_messages`
+    /// 给**送往模型的路径**。**排版是消费方的事，事实不是**——所以事实只有一份。
+    ///
+    /// ⚠️ 但**送模型的路径必须走结构化那份**：经 `render_prompt` 的那路会由
+    /// `to_prompt()` 把 `role: tool` 拍成散文里的纯文本，模型就看不到「这是工具
+    /// 结果」也拿不到 `tool_call_id`。这是已判定的退步，不是排版偏好。
+    pub fn render_messages(events: &[Event]) -> Vec<crate::symbio_core::PromptMessage> {
+        crate::symbio_core::transcript()
+            .apply(events, i64::MAX, crate::symbio_core::Budget::generous())
+            .value
+            .to_messages()
     }
 }
 
@@ -1111,39 +1130,70 @@ impl TurnRunner {
             None => filter_visible(&full_snapshot, viewer),
             Some(keep) => window_by_turn(&full_snapshot, turn, keep, viewer),
         };
-        // prompt 基线：转写投影渲染一次（本轮内不变——本轮的新事实还没进投影）。
-        // 请求级前缀排在基线**之前**（见 `TurnInput::prefix`）：三段都是置顶段，
-        // 追加到末尾会把它们排到本轮发言之后。每轮重算、不跨轮累积。
-        // **双向完整性复核**（ADR-048 防线）：投影出的每条消息都必须能在网格里找到
-        // 出处，且 `role` 完好。缺口只出声不抛错——prompt 已经发出去了，此时抛错只会把
-        // 「模型看得不全」变成「这一轮直接失败」；而**看得不全恰恰是静默的**（不报错、
-        // 不告警、既有断言全绿），所以这里必须出声。
+        // 基线：**结构化**消息数组（ADR-048a）。不再是「一整段 prompt 字符串」。
         //
-        // 成本 = 对投影切片做一遍线性配对，无 IO；零缺口时只走一次全匹配。
+        // prefix（请求视图三段：记忆召回 / 就绪任务 / 委派者真源）作为**最前的
+        // 一条独立消息**插进去，而不是拼进第一段正文——拼进去的话它会与用户本轮
+        // 的原话混成一句，模型分不清哪部分是系统给的背景、哪部分是用户说的。
+        //
+        // ## 为什么 role 是 `system` 而不是 `user`
+        //
+        // 标成 `user` 就是**在说「这是用户说的话」**，而它是系统注入的读视图。
+        // 这个错有实测代价：e2e 的 mock 按「最后一条 user 消息 = 本轮用户发言」
+        // 选场景，于是 prefix 顶掉用户原话 ⇒ 场景匹配全落空 ⇒ t36 报「恰好一次
+        // 触发，实得 2 次」（两次都拿到兜底场景）。**心跳轮本来没有用户发言**，
+        // 所以那里 prefix 成了唯一一条 user —— 错得最彻底。
+        //
+        // 标成 `system` 同时解决两件事：模型知道这是背景（不当作用户指令），
+        // 而「本轮用户说了什么」在消息层上**不再有歧义**。
+        let mut base_messages = Reasoner::render_messages(&snapshot);
+        if let Some(p) = prefix.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+            base_messages.insert(
+                0,
+                crate::symbio_core::PromptMessage {
+                    role: "system".into(),
+                    text: p.to_string(),
+                    tool_call_id: None,
+                    tool: None,
+                    tool_calls: None,
+                },
+            );
+        }
+
+        // **双向完整性复核**（ADR-048 防线）：送进模型的每条消息都必须能在网格里
+        // 找到出处，且 `role` 完好。缺口只出声不抛错——prompt 已经发出去了，此时抛错
+        // 只会把「模型看得不全」变成「这一轮直接失败」；而**看得不全恰恰是静默的**
+        // （不报错、不告警、既有断言全绿），所以这里必须出声。
+        //
+        // `declared` 是**按设计**不进网格的那一条（prefix）。它是**声明过的例外**
+        // 而不是「判据放宽」：三段请求视图是**读视图**（本次请求临时投影出来的），
+        // 不是事件，所以它**理应**报「无出处」——但把已知的那条一并放过，判据才
+        // 有用。**一个永远红的守卫等于没有守卫。**
         {
-            let view = crate::symbio_core::transcript()
-                .apply(&snapshot, i64::MAX, crate::symbio_core::Budget::generous())
-                .value;
-            let rep =
-                crate::symbio_core::projection::prompt_fidelity::verify(&snapshot, &view.entries);
+            let declared = prefix.as_deref().map(str::trim).filter(|p| !p.is_empty());
+            let rep = crate::symbio_core::projection::prompt_fidelity::verify(
+                &snapshot,
+                &base_messages,
+                declared,
+            );
             if !rep.is_complete() {
                 crate::plugin_warn!(
                     "actors",
-                    "[prompt-fidelity] 投影与事实网格不完整：{}",
+                    "[prompt-fidelity] 送出的消息与事实网格不完整：{}",
                     rep.summary()
                 );
             }
         }
 
-        let rendered = Reasoner::render_prompt(&snapshot);
-        let base_prompt = match prefix.as_deref().map(str::trim) {
-            Some(p) if !p.is_empty() => format!("{p}\n{rendered}"),
-            _ => rendered,
-        };
-
         let started = std::time::Instant::now();
-        // 本轮内已发生的工具交换（调用 + 结果），供下一轮 prompt 追加。
-        let mut exchange = String::new();
+        // 本轮内已发生的工具交换（调用 + 结果），供下一次请求追加。
+        //
+        // **结构化**（ADR-048a）：曾几何时它是 `String`，由 `render_tool_exchange`
+        // 拍成「助手请求工具: … / 工具结果(x): …」的散文再拼到基线末尾。那条路让
+        // 模型在本轮的工具结果里看到的是**自己说的话**（role=assistant）和
+        // **一坨没有角色的文本**，且无 `tool_call_id`。现在它们是三条真消息：
+        // assistant(tool_calls) / tool(结果, 带 call id)。
+        let mut exchange: Vec<crate::symbio_core::PromptMessage> = Vec::new();
         // 实测耗时：跨轮累加（一次用户轮可能有多次 LLM 请求，ADR-044 的实测口径）。
         let mut cost_ms = 0u64;
         // 产物格的事件 id 需要在本轮内唯一（同一工具可被调用多次）。续写轮从**该轮
@@ -1174,18 +1224,17 @@ impl TurnRunner {
                 })),
             )?;
             artifact_no += 1;
-            exchange.push_str(&render_resume_exchange(&r.call, &r.text));
+            exchange.extend(exchange_messages(&r.call, &r.text));
         }
 
         loop {
-            let prompt = if exchange.is_empty() {
-                base_prompt.clone()
-            } else {
-                format!("{base_prompt}\n{exchange}")
-            };
+            // 基线 + 本轮交换。**拼接消息数组**，不拼字符串——拼字符串正是
+            // ADR-048a 判定的退步：它把角色拍平、丢掉 `tool_call_id`。
+            let mut messages = base_messages.clone();
+            messages.extend(exchange.iter().cloned());
 
             // 2. 生成（实测耗时在 adapter 边界取得；失败路径的耗时从调用起点算）。
-            match llm.generate_turn(tok, &prompt, tools, sink.clone()).await {
+            match llm.generate_turn(tok, &messages, tools, sink.clone()).await {
                 Ok(rt) => {
                     cost_ms += rt.cost_ms;
 
@@ -1304,7 +1353,8 @@ impl TurnRunner {
                     }
 
                     // 2e. 把这一轮交换追加进 prompt，继续下一轮。
-                    exchange.push_str(&render_tool_exchange(&rt, &outcomes));
+                    exchange.clear();
+                    exchange.extend(tool_exchange_messages(&rt, &outcomes));
                 }
                 Err(AdapterError::Aborted) => {
                     // 3a. 中止：**不落任何收束格**——用户消息已入格，少一格是诚实
@@ -1531,48 +1581,137 @@ fn closure_granted(principal: &str) -> bool {
     crate::symbio_core::authz::matrix_for(principal).can_reply(principal, true)
 }
 
-/// 把一轮工具交换渲染成 prompt 片段（调用 + 结果），供下一轮追加。
+/// 一轮工具交换 → **结构化**消息（ADR-048a）。
 ///
-/// 形状与 `transcript` 投影的平铺口径同族（`用户:` / `助手:` 前缀），使模型看到
-/// 的是一段连贯的对话流，而不是另一种协议。
-fn render_tool_exchange(
+/// ## 这里曾几何时返回 `String`，由 `render_tool_exchange` 拍成散文
+///
+/// ```ignore
+/// 助手: <text>
+/// 助手请求工具: read {args}
+/// 工具结果(read): <result>
+/// ```
+///
+/// 那条路的三个问题，**都出在同一个动作上**（拼字符串）：
+///
+/// 1. `助手请求工具: ` 那行被当成 **assistant 说的话**——模型于是「说过」一句
+///    人类不会说的话；
+/// 2. `工具结果(read): ` 那行**没有角色**，混在对话流里，模型分不出它是工具输出
+///    还是用户输入；
+/// 3. **没有 `tool_call_id`**——而 provider 侧的协议要求 `tool` 消息关联到具体
+///    那次调用，否则多工具并发时无法配对。
+///
+/// 现在是三条真消息：assistant（带 tool_calls 摘要）/ tool（带 `tool_call_id`）。
+///
+/// ## `tool_call_id` 怎么来（**已定的合成，不是缺失**）
+///
+/// 网格里的 `artifact.added` 只记了工具名与正文——**那才是事实**，没有调用 id
+/// （调用 id 是本次运行的句柄，不是跨轮事实）。所以这里按「工具名 + 本轮序号」
+/// 合成一个**稳定 id**（见 [`synthetic_call_id`]），而不是让消息裸奔：
+/// 裸奔会被「拒绝未知 tool_call_id」的 provider 整条拒绝，那**比拍平更糟**
+/// （拍平至少还能答）。
+fn tool_exchange_messages(
     turn: &crate::symbio_core::adapters::LlmTurn,
     outcomes: &[crate::symbio_core::DispatchOutcome],
-) -> String {
-    let mut out = String::new();
+) -> Vec<crate::symbio_core::PromptMessage> {
+    let mut out: Vec<crate::symbio_core::PromptMessage> = Vec::new();
     if !turn.text.trim().is_empty() {
-        out.push_str("助手: ");
-        out.push_str(turn.text.trim());
-        out.push('\n');
+        out.push(crate::symbio_core::PromptMessage {
+            role: "assistant".into(),
+            text: turn.text.trim().to_string(),
+            tool_call_id: None,
+            tool: None,
+            tool_calls: None,
+        });
     }
-    for call in &turn.tool_calls {
-        out.push_str("助手请求工具: ");
-        out.push_str(call.name.as_deref().unwrap_or("<unnamed>"));
-        out.push(' ');
-        out.push_str(&call.arguments.to_string());
-        out.push('\n');
+    // 调用请求：作为 assistant 消息，**带真正的 `tool_calls` 结构**。
+    //
+    // ⚠️ `tool_calls` 字段不能省（实测踩过）：协议层的请求包清洗会丢弃「无对应
+    // `tool_call` 的 tool 结果」，而「对应的 tool_call」是从 assistant 消息的
+    // `tool_calls` **结构**里认的，不是从正文里认的。只在正文写「调用工具 x」的话，
+    // 后面每一条 tool 结果都成孤儿被丢 ⇒ 模型永远收不到结果 ⇒ **无限工具循环**
+    // （实测 9905 次请求、CLI 撞 120s 超时，症状完全指不到这一层）。
+    //
+    // 正文那行仍然保留：它是给人读的（诊断 / 日志 / 断言），不是给协议用的。
+    for (i, call) in turn.tool_calls.iter().enumerate() {
+        let name = call.name.as_deref().unwrap_or("<unnamed>");
+        let id = synthetic_call_id(name, i);
+        out.push(crate::symbio_core::PromptMessage {
+            role: "assistant".into(),
+            text: format!("调用工具 {} {}", name, call.arguments),
+            tool_call_id: Some(id.clone()),
+            tool: Some(name.to_string()),
+            tool_calls: Some(vec![
+                crate::symbio_core::projection::transcript::PromptToolCall {
+                    id,
+                    name: name.to_string(),
+                    arguments: call.arguments.clone(),
+                },
+            ]),
+        });
     }
+    // 结果：逐条 tool 消息，带上**对应那次调用**的合成 id。
+    //
+    // 按工具名配对（`DispatchOutcome` 不带调用 id，见其文档：core 不认识
+    // `ChatMessage` 的图语义）。同名多次调用时退化为「都关联第一条」——
+    // 记在 TODO 里而不是假装能配准：**配不准时多给信息好过给错的关联**，
+    // 而当前的 `artifact.added` 事实里确实没有足以配准的信息。
     for outcome in outcomes {
-        out.push_str("工具结果(");
-        out.push_str(&outcome.name);
-        out.push_str("): ");
-        out.push_str(&outcome.text);
-        out.push('\n');
+        let same_named = turn
+            .tool_calls
+            .iter()
+            .position(|c| c.name.as_deref() == Some(outcome.name.as_str()));
+        out.push(crate::symbio_core::PromptMessage {
+            role: "tool".into(),
+            text: outcome.text.clone(),
+            tool_call_id: Some(synthetic_call_id(
+                &outcome.name,
+                same_named.unwrap_or(usize::MAX),
+            )),
+            tool: Some(outcome.name.clone()),
+            tool_calls: None,
+        });
     }
     out
 }
 
-/// 把**续写轮**的恢复交换（工具调用 + 恢复后的结果）渲染成 prompt 片段。
-///
-/// 形状与 [`render_tool_exchange`] 同族（同一套 `助手请求工具: ` / `工具结果(name): `
-/// 前缀）：模型看到的必须是一段连贯的对话流——「这一轮是续写」是调度事实，不该
-/// 变成模型眼里的另一种协议（换一种写法等于给同一件事两套措辞）。
-fn render_resume_exchange(call: &crate::symbio_core::TurnToolCallInfo, text: &str) -> String {
+/// 续写轮的恢复交换 → 结构化消息。与 [`tool_exchange_messages`] 同形：
+/// 「这一轮是续写」是**调度事实**，不该变成模型眼里的另一种协议。
+fn exchange_messages(
+    call: &crate::symbio_core::TurnToolCallInfo,
+    text: &str,
+) -> Vec<crate::symbio_core::PromptMessage> {
     let name = call.name.as_deref().unwrap_or("<unnamed>");
-    format!(
-        "助手请求工具: {name} {}\n工具结果({name}): {text}\n",
-        call.arguments
-    )
+    let id = synthetic_call_id(name, 0);
+    vec![
+        crate::symbio_core::PromptMessage {
+            role: "assistant".into(),
+            text: format!("调用工具 {} {}", name, call.arguments),
+            tool_call_id: Some(id.clone()),
+            tool: Some(name.to_string()),
+            tool_calls: Some(vec![
+                crate::symbio_core::projection::transcript::PromptToolCall {
+                    id: id.clone(),
+                    name: name.to_string(),
+                    arguments: call.arguments.clone(),
+                },
+            ]),
+        },
+        crate::symbio_core::PromptMessage {
+            role: "tool".into(),
+            text: text.to_string(),
+            tool_call_id: Some(id),
+            tool: Some(name.to_string()),
+            tool_calls: None,
+        },
+    ]
+}
+
+/// 合成的 `tool_call_id`：`call_<tool>_<序号>`。
+///
+/// 前缀 `call_` 是**故意的**：它让 id 一眼可辨是合成的（provider 侧回填时若
+/// 与真实调用 id 空间混淆，冲突能被看见而不是静默）。
+fn synthetic_call_id(tool: &str, index: usize) -> String {
+    format!("call_{tool}_{index}")
 }
 
 #[cfg(test)]

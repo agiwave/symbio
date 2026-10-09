@@ -293,21 +293,33 @@ export default defineCase(
             .join('\n');
         const reqs = await llm.requests();
         assertEq(reqs.length, 2, 'mock-llm 应收到两次请求（提问轮 + 恢复收尾轮）');
+        // ⚠️ 判据从「文本里有 `助手请求工具: ` / `工具结果(x): ` 这两行」改成
+        // 「**消息层上有 tool_calls 与 tool 结果**」（ADR-048a）。
+        //
+        // 旧判据钉的是**拍平的产物**——那两行前缀是 `render_tool_exchange` 拼出来的。
+        // 结构化之后它们不再是文本行，而是协议要求的节点形状（`ToolCall` 节点 +
+        // 它的结果子节点）。所以**继续钉文本前缀等于逼着代码保留拍平**。
+        //
+        // 新判据**更强**：它同时验「调用在」「结果在」「结果是 tool 角色」，
+        // 而旧判据只验「某个字符串出现过」。
+        const secondMsgs = reqs[1].body.messages ?? [];
         const second = promptOf(reqs[1].body);
+        const calls = secondMsgs.flatMap((m) => m.tool_calls ?? []);
         assert(
-          second.includes(`助手请求工具: ${PENDING_TOOL}`),
-          `恢复轮 prompt 应带上被恢复的工具调用（实际片段: ${second.slice(0, 800)}）`,
+          calls.some((c) => c.function?.name === PENDING_TOOL),
+          `恢复轮请求应带上被恢复的工具调用（实际: ${JSON.stringify(calls).slice(0, 400)}）`,
         );
+        const toolResults = secondMsgs.filter((m) => m.role === 'tool');
         assert(
-          second.includes(`工具结果(${PENDING_TOOL}):`),
-          `恢复轮 prompt 应带上恢复结果行（实际片段: ${second.slice(0, 800)}）`,
+          toolResults.some((m) => String(m.content ?? '').includes('"choice"')),
+          `恢复轮请求应带上恢复结果，且是 role=tool 消息（实际: ${JSON.stringify(toolResults).slice(0, 400)}）`,
         );
         assert(second.includes('"choice"'), '回填的答案键（choice）应原样回灌给模型');
         assert(second.includes('"A"'), '回填的答案值（A）应原样回灌给模型');
         // 反向：第一次请求里不该有恢复结果（那时还没恢复）。
         assert(
-          !promptOf(reqs[0].body).includes(`工具结果(${PENDING_TOOL}):`),
-          '第一次请求不该出现恢复结果（答案尚未回填）',
+          (reqs[0].body.messages ?? []).every((m) => m.role !== 'tool'),
+          '第一次请求不该出现 role=tool 消息（答案尚未回填）',
         );
 
         // ── 转写不变量：恢复后节点仍成对、seq 严格递增 ───────────────────────

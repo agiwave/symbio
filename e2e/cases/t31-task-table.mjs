@@ -140,10 +140,10 @@ export default defineCase(
         reqs.length,
         3,
         `三发请求（声明 + 结果回灌 + 下一轮）：实际 ${reqs.length}\n` +
-          `各发最后一条 user：${JSON.stringify(
+          `各发最后一条 system（请求级三段）：${JSON.stringify(
             reqs.map((r) => {
               const ms = r.body.messages ?? [];
-              const u = [...ms].reverse().find((m) => m.role === 'user');
+              const u = [...ms].reverse().find((m) => m.role === 'system');
               return typeof u?.content === 'string' ? u.content.slice(0, 40) : '(非字符串)';
             }),
           )}`,
@@ -213,8 +213,10 @@ export default defineCase(
       // （`落地实现` 在 `todo_write` 的入参里），拿整包当判据等于在断言「历史里
       // 有历史」。
       const nextMsgs = reqs[2].body.messages ?? [];
+      // 请求级三段是**系统注入的读视图** ⇒ `role: system`（ADR-048a；标成 `user`
+      // 会让「最后一条 user = 本轮发言」这个判据失真——t36 就是这么红的）。
       const sections = nextMsgs.filter(
-        (m) => m.role === 'user' && textOf(m).includes('【任务调度】'),
+        (m) => m.role === 'system' && textOf(m).includes('【任务调度】'),
       );
       assertEq(
         sections.length,

@@ -203,6 +203,12 @@ export const LIBS = [
   'gen-gate-codes',
   'line-count',
   'doc-find',
+  // e2e 并发度的**离线判据**（`scripts/e2e-concurrency.mjs`）：门内版本在
+  // `40-e2e.mjs` 里逐轮打印，本脚本供人工复核 + `--ci`。
+  //
+  // 登记成 LIBS 而不是 GUARDS：它**不是一个独立的门禁步骤**，而是 e2e 阶段的
+  // 判据在门外的可执行形态——跑两遍就是同一件事。GW-004 要的只是「它有落点」。
+  'e2e-concurrency',
 ]
 /** 不进门禁的辅助脚本：登记它们是为了让 GW-004 的「谁引用它」这条判据有落点。 */
 export const OUT_OF_GATE = ['check-commit-msg', 'cargo-offline-refresh', 'gate']

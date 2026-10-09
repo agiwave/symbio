@@ -311,13 +311,30 @@ export default defineCase(
       for (const i of [1, 2, 3, 4]) {
         const head = recallMessage(reqs[i]);
         assert(head, `第 ${i + 1} 轮请求包应以记忆段开头`);
-        assertEq(head.role, 'user', '记忆段是 role=user 的请求级消息（不进系统提示词）');
+        // 请求级三段是**系统注入的读视图**，不是用户说的话 ⇒ `role: system`。
+        //
+        // 标成 `user` 有实测代价：e2e 的 mock 按「最后一条 user = 本轮用户发言」
+        // 选场景，于是 prefix 顶掉用户原话 ⇒ 心跳轮（本来没有用户发言）场景匹配
+        // 全落空 ⇒ t36 报「恰好一次触发，实得 2 次」。
+        assertEq(
+          head.role,
+          'system',
+          '记忆段是 role=system 的请求级消息——它是系统给的背景，不是用户说的话',
+        );
         const msgs = reqs[i].body.messages;
         const roles = msgs.map((m) => `${m.role}:${textOf(m).slice(0, 12)}`).join(' | ');
-        assertEq(
-          msgs.indexOf(head),
-          msgs.findIndex((m) => m.role !== 'system'),
-          `记忆段必须是第一条非系统消息（置尾会顶掉「最后一条 user 消息」），roles=${roles}`,
+        // 记忆段必须排在**第一条对话消息（user/assistant/tool）之前**。
+        //
+        // 判据钉的是「相对顺序」，不是下标：协议层会插一条真的 `system_prompt`、
+        // 请求级 prefix 又是 `system`，所以「下标 0」这种绝对位置是无关细节。
+        // 而「排在所有对话消息之前」正是本用例要防的东西——置尾会让 prefix 顶掉
+        // 「最后一条 user 消息」，mock 的场景匹配与轮次窗口都会随之失真。
+        const firstDialogAt = msgs.findIndex((m) =>
+          ['user', 'assistant', 'tool'].includes(m.role),
+        );
+        assert(
+          msgs.indexOf(head) < firstDialogAt,
+          `记忆段必须排在所有对话消息之前（置尾会顶掉「最后一条 user 消息」），roles=${roles}`,
         );
         const lastUser = [...msgs].reverse().find((m) => m.role === 'user');
         assert(

@@ -21,6 +21,7 @@
 
 use async_trait::async_trait;
 
+use crate::symbio_core::PromptMessage;
 use crate::symbio_core::{CapabilityMeta, TurnToolCallInfo};
 
 // ── 四层时延（[plan/01 §10](../../../../docs/plan/01-核心架构.md)，一等契约） ──
@@ -226,7 +227,17 @@ pub trait LlmAdapter: Send + Sync {
     /// 模型标识（入 final 事件的载荷，可观测）。
     fn model_id(&self) -> &str;
     /// 生成。`tok` 是闸门：没有 `FullModel` 就调不到这里。
-    async fn generate(&self, tok: &FullModel, prompt: &str) -> Result<String, AdapterError>;
+    ///
+    /// **入参是消息数组而不是一段文本**（[ADR-048a](../../../../docs/decisions/session.md)）：
+    /// 角色与正文分开，工具结果保持 `role: "tool"`。曾几何时这里是 `prompt: &str`，
+    /// 于是每个实现都只能把整段当**一条** user 消息——`role` 在 adapter 边界被拍平，
+    /// 模型收到的是散文而不是消息序列（`ModelProvider::execute_turn` 的签名
+    /// `(system_prompt, messages: &[ChatMessage], …)` 本来就是消息数组）。
+    async fn generate(
+        &self,
+        tok: &FullModel,
+        messages: &[PromptMessage],
+    ) -> Result<String, AdapterError>;
 
     /// 埋点版生成（SLO 校准，[plan/04 §1](../../../../docs/plan/04-工程落地.md)）：
     /// 除文本外返回 **adapter 边界实测耗时**（毫秒）。默认实现包一层
@@ -236,10 +247,10 @@ pub trait LlmAdapter: Send + Sync {
     async fn generate_timed(
         &self,
         tok: &FullModel,
-        prompt: &str,
+        messages: &[PromptMessage],
     ) -> Result<(String, u64), AdapterError> {
         let start = std::time::Instant::now();
-        let out = self.generate(tok, prompt).await?;
+        let out = self.generate(tok, messages).await?;
         Ok((out, start.elapsed().as_millis() as u64))
     }
 
@@ -252,10 +263,10 @@ pub trait LlmAdapter: Send + Sync {
     async fn generate_streaming(
         &self,
         tok: &FullModel,
-        prompt: &str,
+        messages: &[PromptMessage],
         sink: std::sync::Arc<dyn DeltaSink>,
     ) -> Result<(String, u64), AdapterError> {
-        let out = self.generate_timed(tok, prompt).await?;
+        let out = self.generate_timed(tok, messages).await?;
         sink.on_delta(&out.0);
         Ok(out)
     }
@@ -271,11 +282,11 @@ pub trait LlmAdapter: Send + Sync {
     async fn generate_turn(
         &self,
         tok: &FullModel,
-        prompt: &str,
+        messages: &[PromptMessage],
         _tools: &[CapabilityMeta],
         sink: std::sync::Arc<dyn DeltaSink>,
     ) -> Result<LlmTurn, AdapterError> {
-        let (text, cost_ms) = self.generate_streaming(tok, prompt, sink).await?;
+        let (text, cost_ms) = self.generate_streaming(tok, messages, sink).await?;
         Ok(LlmTurn {
             text,
             tool_calls: Vec::new(),
@@ -411,7 +422,11 @@ impl LlmAdapter for StubLlmAdapter {
         self.model
     }
 
-    async fn generate(&self, _tok: &FullModel, prompt: &str) -> Result<String, AdapterError> {
+    async fn generate(
+        &self,
+        _tok: &FullModel,
+        messages: &[PromptMessage],
+    ) -> Result<String, AdapterError> {
         if self.abort {
             return Err(AdapterError::Aborted);
         }
@@ -423,7 +438,14 @@ impl LlmAdapter for StubLlmAdapter {
             None => match &self.chunks {
                 // 分片桩：全文 = 各片拼接（与单发等价——流式只是帧的形态）。
                 Some(chunks) => Ok(chunks.concat()),
-                None => Ok(format!("[{}] {}", self.model, prompt)),
+                // 回显**末条正文**：旧签名是单段文本，所以这里就是全文；改成消息数组后
+                // 若仍拼全部消息，桩的输出会随轮次线性变长，进而**改变既有断言的
+                // 字面量**。取末条 = 与「模型只答最后一句」一致，也最贴近真实形态。
+                None => Ok(format!(
+                    "[{}] {}",
+                    self.model,
+                    messages.last().map(|m| m.text.as_str()).unwrap_or("")
+                )),
             },
         }
     }
@@ -431,7 +453,7 @@ impl LlmAdapter for StubLlmAdapter {
     async fn generate_streaming(
         &self,
         tok: &FullModel,
-        prompt: &str,
+        messages: &[PromptMessage],
         sink: std::sync::Arc<dyn DeltaSink>,
     ) -> Result<(String, u64), AdapterError> {
         if self.abort {
@@ -439,7 +461,7 @@ impl LlmAdapter for StubLlmAdapter {
         }
         let Some(chunks) = &self.chunks else {
             // 无分片配置 ⇒ 走默认降级（一次性全文）。
-            return LlmAdapter::generate_streaming(&DelegateGen(self), tok, prompt, sink).await;
+            return LlmAdapter::generate_streaming(&DelegateGen(self), tok, messages, sink).await;
         };
         if self.delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(self.delay_ms)).await;
@@ -466,8 +488,12 @@ impl LlmAdapter for DelegateGen<'_> {
     fn model_id(&self) -> &str {
         self.0.model_id()
     }
-    async fn generate(&self, tok: &FullModel, prompt: &str) -> Result<String, AdapterError> {
-        self.0.generate(tok, prompt).await
+    async fn generate(
+        &self,
+        tok: &FullModel,
+        messages: &[PromptMessage],
+    ) -> Result<String, AdapterError> {
+        self.0.generate(tok, messages).await
     }
 }
 

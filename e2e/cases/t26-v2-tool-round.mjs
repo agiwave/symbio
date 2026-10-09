@@ -141,26 +141,36 @@ export default defineCase(
         `MCP 工具应注册进第一次请求（实际: ${tools0.join(',')}）`,
       );
 
-      // 第二次请求：模型请求过的工具名 + 工具结果正文都在 prompt 里。
-      // 判据取 `render_tool_exchange` 的**两种前缀**，因为它们是这条回灌链路的
-      // 唯一可见形态（网格与 UI 帧都证明不了"结果进了 prompt"）。
-      const second = JSON.stringify(reqs[1].body);
+      // 第二次请求：模型请求过的工具 + 工具结果都在请求里。
+      //
+      // ⚠️ 判据从「文本里有 `助手请求工具: ` / `工具结果(x): ` 两行」改成
+      // 「**消息层上有 `tool_calls` 与 `role=tool` 的结果**」（ADR-048a）。
+      //
+      // 旧判据钉的是**拍平的产物**（`render_tool_exchange` 拼的那两行前缀）。
+      // 结构化之后那两行不再是文本行，而是协议要求的节点形状——继续钉它们等于
+      // **逼着代码保留拍平**。新判据更强：它验「调用在」「结果在」「结果是 tool
+      // 角色」「工具名对得上」，而旧判据只验「某个字符串出现过」。
+      const secondBody = reqs[1].body;
+      const secondMsgs = secondBody.messages ?? [];
+      const llmCalls = secondMsgs.flatMap((m) => m.tool_calls ?? []);
       assert(
-        second.includes('助手请求工具: mcp__mockserv__echo'),
-        `第二次请求应带上模型请求过的工具名（实际请求体片段: ${second.slice(0, 800)}）`,
+        llmCalls.some((c) => c.function?.name === 'mcp__mockserv__echo'),
+        `第二次请求应带上模型请求过的工具（实际: ${JSON.stringify(llmCalls).slice(0, 400)}）`,
       );
+      const toolResults = secondMsgs.filter((m) => m.role === 'tool');
       assert(
-        second.includes('工具结果(mcp__mockserv__echo):'),
-        `第二次请求应带上工具结果行（实际请求体片段: ${second.slice(0, 800)}）`,
+        toolResults.length > 0,
+        `第二次请求应带上 role=tool 的结果（实际: ${JSON.stringify(secondMsgs.map((m) => m.role)).slice(0, 300)}）`,
       );
+      const second = JSON.stringify(secondBody);
       assert(
         second.includes(ECHO_TEXT),
         '工具结果正文（回显内容）应原样回灌给模型',
       );
       // 反向：第一次请求里不该有工具结果（那时还没执行）。
       assert(
-        !JSON.stringify(reqs[0].body).includes('工具结果(mcp__mockserv__echo):'),
-        '第一次请求不该出现工具结果（结果尚未产生）',
+        (reqs[0].body.messages ?? []).every((m) => m.role !== 'tool'),
+        '第一次请求不该出现 role=tool 消息（结果尚未产生）',
       );
 
       // ── 证据 ③：事实入了格（v2 WAL 的 artifact.added + 溯源）──────────────

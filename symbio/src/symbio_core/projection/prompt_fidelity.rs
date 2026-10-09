@@ -29,7 +29,6 @@ use super::super::event::{
     Entity, Event, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
     EVENT_USER_MESSAGE,
 };
-use super::transcript::TranscriptEntry;
 
 /// 缺口的一条报告。**故意不 derive `PartialEq`**：报告要给门禁与日志读，字段顺序变动
 /// 不该让「内容相同」的报告变成另一种类型。
@@ -82,8 +81,10 @@ pub struct PromptReport {
     pub gaps: Vec<PromptGap>,
     /// 参与复核的网格事件数（投影范围内）。
     pub checked_events: usize,
-    /// 参与复核的 prompt entry 数。
+    /// 参与复核的 prompt 消息数。
     pub checked_entries: usize,
+    /// **被显式声明**为「按设计不进网格」的消息数（当前只有 `prefix` 三段读视图）。
+    pub declared: usize,
 }
 
 impl PromptReport {
@@ -96,8 +97,8 @@ impl PromptReport {
     pub fn summary(&self) -> String {
         if self.is_complete() {
             return format!(
-                "完整：{} 条网格事件 → {} 条 prompt 消息",
-                self.checked_events, self.checked_entries
+                "完整：{} 条网格事件 → {} 条 prompt 消息（声明 {} 条请求级）",
+                self.checked_events, self.checked_entries, self.declared
             );
         }
         let mut s = format!(
@@ -131,16 +132,36 @@ impl PromptReport {
     }
 }
 
-/// **双向**完整性复核：网格 ↔ prompt 消息。
+/// **双向**完整性复核：网格 ↔ **送进模型的消息**。
 ///
-/// `events` = 事实网格的可见切片（窗口 / 可见域已在上游裁好），`entries` = 交给模型的那
-/// 批消息。**入参不含「投影」**——本函数自己按 `expected_role` 重算一遍，这样它能同时
-/// 照出「投影漏了」与「prompt 里有网格之外的」。
-pub fn verify(events: &[Event], entries: &[TranscriptEntry]) -> PromptReport {
+/// `events` = 事实网格的可见切片（窗口 / 可见域已在上游裁好），`messages` = 交给模型
+/// 的那批消息。**入参不含「投影」**——本函数自己按 `expected_role` 重算一遍，这样它能
+/// 同时照出「投影漏了」与「prompt 里有网格之外的」。
+///
+/// 验的是**送出去的那批**（含 prefix 与本轮工具交换），不是投影中间产物——
+///
+/// 投影绿 ≠ 模型看得全。缺口 1 / 缺口 3 都发生在投影**之外**：前者是请求视图三段没进
+/// 投影（所以判据看不见它），后者是补充根本没成为事实（网格里就没有它，判据同样看不见）。
+/// 验「送出去的」能多抓住一类：**投影有、但组包时丢了**。
+///
+/// ## `declared`：按设计不进网格的内容
+///
+/// 请求视图三段（记忆召回 / 就绪任务 / 委派者真源）是**读视图**——本次请求临时投影出来的，
+/// 不是事件，所以它们**理应**报「无出处」。但把已知的那一条放过，判据才有用：
+/// **一个永远红的守卫等于没有守卫。**
+///
+/// 放过是**声明**（这个参数），不是「判据放宽」——声明之后判据仍会报「多了一条无出处
+/// 消息」，只是不再把**已知的那一条**算成缺口，而且 `Report::declared` 会把条数记下来，
+/// 于是「例外有没有悄悄变多」是看得见的。
+pub fn verify(
+    events: &[Event],
+    messages: &[crate::symbio_core::PromptMessage],
+    declared: Option<&str>,
+) -> PromptReport {
     let mut rep = PromptReport::default();
 
     // 网格侧：投影范围内的事件，逐条找对应 entry。
-    let mut used = vec![false; entries.len()];
+    let mut used = vec![false; messages.len()];
     for e in events {
         let Some(role) = expected_role(e) else {
             continue;
@@ -153,7 +174,7 @@ pub fn verify(events: &[Event], entries: &[TranscriptEntry]) -> PromptReport {
         //
         // 取**未用过**的第一条：同一轮可能有多个同正文事件（重试各成一格）；事件按 seq
         // 有序、prompt 消息也按序，于是「首个未用」保持原序配对。
-        let hit = entries
+        let hit = messages
             .iter()
             .enumerate()
             .position(|(i, m)| !used[i] && m.text == text);
@@ -164,7 +185,7 @@ pub fn verify(events: &[Event], entries: &[TranscriptEntry]) -> PromptReport {
             }),
             Some(i) => {
                 used[i] = true;
-                let m = &entries[i];
+                let m = &messages[i];
                 if m.role != role {
                     rep.gaps.push(PromptGap::RoleMismatch {
                         expected: role,
@@ -182,15 +203,22 @@ pub fn verify(events: &[Event], entries: &[TranscriptEntry]) -> PromptReport {
         }
     }
 
-    // prompt 侧：每条 entry 都得被网格认领过（未认领 = 网格之外的东西进了 prompt）。
-    for (i, m) in entries.iter().enumerate() {
+    // prompt 侧：每条消息都得被网格认领过，或被**显式声明**为请求级内容。
+    for (i, m) in messages.iter().enumerate() {
         rep.checked_entries += 1;
-        if !used[i] {
-            rep.gaps.push(PromptGap::NoSourceInGrid {
-                role: m.role.clone(),
-                text: m.text.clone(),
-            });
+        if used[i] {
+            continue;
         }
+        // 声明过的例外（如 `prefix` 三段读视图）：放过，但**记一笔**——
+        // 放过本身不可见，例外就会悄悄变多。写进 `declared` 让它每次都看得见。
+        if declared.is_some_and(|d| d == m.text) {
+            rep.declared += 1;
+            continue;
+        }
+        rep.gaps.push(PromptGap::NoSourceInGrid {
+            role: m.role.clone(),
+            text: m.text.clone(),
+        });
     }
 
     rep
