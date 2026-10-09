@@ -1,9 +1,10 @@
 // e2e 阶段：CLI 端到端回归（mock LLM / mock MCP / 临时 homedir，见 e2e/README.md）。
 //
-// 文件名 58-（原 40-，2026-10-09）：阶段级并发批 [10-backend / 30-docs / 35-baseline /
-// 50-msrv] 结束后本阶段才跑——cli 的 release 构建与 backend 共用 `target/` 的
-// `.cargo-lock`，并发只会排成 `Blocking waiting for file lock`；且用例对 CPU 竞争
-// 时序敏感，不与 frontend 等重负载叠跑。也不进批的原因同源：顺序敏感，见上。
+// 文件名 58-（原 40-，2026-10-09）：阶段级并发批 [10-backend / 20-frontend-static /
+// 30-docs / 35-baseline / 50-msrv] 与紧随其后的 56-frontend-build 都结束后，本阶段
+// 才跑——cli 的 release 构建与 backend 共用 `target/` 的 `.cargo-lock`，并发只会排成
+// `Blocking waiting for file lock`；且用例对 CPU 竞争时序敏感，不与前端等重负载叠跑。
+// 也不进批的原因同源：顺序敏感，见上。
 //
 // 以机制接入：用例清单**不在这里维护**——`e2e/cases/*.mjs` 按文件名序逐个以
 // 独立子进程运行（与 `node e2e/run-tests.mjs` 同一套发现逻辑），新增用例文件

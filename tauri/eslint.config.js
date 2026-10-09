@@ -18,7 +18,8 @@
  * - mechanism-audit 管**文件里写了什么**（字面量地址、词表比较、meta 字段解释）。
  *   那是文本层面的业务知识泄漏，import 图看不见。
  *
- * 跑法：`npx eslint .`（或 `npm run lint`）；CI 经 `scripts/gate.mjs` 的 frontend 阶段。
+ * 跑法：`npx eslint .`（或 `npm run lint`）；CI 经 `scripts/gate.mjs` 的
+ * `frontend-static` 阶段（与 `vue-tsc` / `vitest` 同阶段）。
  */
 
 import tseslint from 'typescript-eslint'

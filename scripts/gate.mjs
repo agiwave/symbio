@@ -27,14 +27,17 @@
  * 并发跑，约束与任务级相同：**只有相互无数据依赖的阶段才可标**（每个阶段为什么
  * 安全，写在它自己的文件头，不在本文件复述）。当前编排（2026-10-09）：
  *
- *   05-fmt（屏障，单独跑）→ [10-backend ∥ 30-docs ∥ 35-baseline ∥ 50-msrv]
- *     → 55-verify → 56-frontend → 58-e2e → 60-facts（必须最后）
+ *   05-fmt（屏障，单独跑）
+ *     → [10-backend ∥ 20-frontend-static ∥ 30-docs ∥ 35-baseline ∥ 50-msrv]
+ *     → 55-verify → 56-frontend-build → 58-e2e → 60-facts（必须最后）
  *
  * 三个「看着能并发、实际不能」的坑，判据各归其主文件：
  *   - verify 不进批：它的 `gen-verify-facts` 重写 `verify/facts/mod.rs`，而 docs 的
  *     doc-count-audit 读同一个文件（55-verify.mjs）；
- *   - frontend 不与 backend 并发：vite build 重写 `tauri/dist`，而 backend 编译
- *     symbio-tauri 时 `generate_context!` 在**编译期**读它（56-frontend.mjs）；
+ *   - frontend-build 不与 backend 并发：vite build 重写 `tauri/dist`，而 backend 编译
+ *     symbio-tauri 时 `generate_context!` 在**编译期**读它（56-frontend-build.mjs）。
+ *     前端另外三个任务**不碰 `dist`**，故拆到 `20-frontend-static.mjs` 进批——那是
+ *     同一个阶段的另一半，拆开只是为了让不冲突的那一半不再串行；
  *   - e2e 不与任何重负载并发：用例对 CPU 竞争时序敏感（58-e2e.mjs）。
  *
  * 并发批内**不往 stdout 刷逐行输出**（会交错成乱码），详情落各自日志文件，
