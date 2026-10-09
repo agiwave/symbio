@@ -56,6 +56,10 @@ use symbio::symbio_core::{
     Plugin, PluginFrame, PluginInvokeRequestExt, PluginPayload, PluginSimpleRequest, PATH,
     ROUTE_EVENT_BUS_SUBSCRIBE, SESSION_ID, WORKDIR,
 };
+// 读数面板方言（P4）：后端下发描述、CLI 只渲染。
+//  这三个名字随返回值流动（C-002：插件侧不深引 core 域目录），与 Tauri 前端
+//  `schemas/reading.ts` 是同一份契约的两半。
+use symbio::symbio_core::{ReadingPanel, ReadingTone};
 
 use crate::render::Renderer;
 
@@ -680,5 +684,49 @@ impl SymbioClient {
         self.provider
             .clone()
             .unwrap_or_else(|| "default（系统目录配置）".to_string())
+    }
+
+    /// 读当前会话的读数并打到 stderr（REPL 的 `/stats`，P4）。
+    ///
+    /// ## 本方法是**渲染器**，不是统计器
+    ///
+    /// 它只做三件事：调 `session/stats`、取响应里的 `panel` 描述（
+    /// `symbio_core::ReadingPanel`——与 Tauri 前端的 `ReadingPanel` 组件吃的是
+    /// **同一份**）、按终端排版打出来。**没有任何一个数的含义在这里**：标签、
+    /// 单位、精度、语气全由后端排好。
+    ///
+    /// 这正是「两个前端都是渲染器」的落点：换一个产者（成本、记忆、任何只读
+    /// 路由）本方法零改动，Tauri 侧同样零改动。
+    pub async fn print_stats(&self) -> Result<(), String> {
+        let resp = self
+            .route("session/stats", json!({}), Some(&self.session_id))
+            .await?;
+        let panel: ReadingPanel =
+            serde_json::from_value(resp.get("panel").cloned().ok_or_else(|| {
+                "session/stats 响应里没有 panel 字段（后端形状变了？）".to_string()
+            })?)
+            .map_err(|e| format!("读取读数面板失败: {e}"))?;
+
+        eprintln!("── {} ──", panel.title);
+        if let Some(sub) = panel.subtitle.as_deref() {
+            eprintln!("   {sub}");
+        }
+        for sec in &panel.sections {
+            if let Some(t) = sec.title.as_deref() {
+                eprintln!(" [{t}]");
+            }
+            for row in &sec.rows {
+                // 需留意的行加前缀标记；含义不进来，只按 tone 换符号。
+                let mark = match row.tone {
+                    ReadingTone::Warn => "! ",
+                    ReadingTone::Normal => "  ",
+                };
+                eprintln!("{mark}{}：{}", row.label, row.value);
+                if let Some(hint) = row.hint.as_deref() {
+                    eprintln!("    ↳ {hint}");
+                }
+            }
+        }
+        Ok(())
     }
 }

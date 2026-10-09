@@ -26,6 +26,19 @@
             <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
           </svg>
         </button>
+        <!-- 读数抽屉开关（P4）：按钮只声明「打开」，面板里显示什么由后端下发的
+             描述决定——这里不出现任何读数语义。 -->
+        <button
+          class="header-btn"
+          :class="{ 'is-active': panelOpen }"
+          title="读数"
+          :disabled="!hasActive"
+          @click="panelOpen = !panelOpen"
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 19V10M10 19V5M16 19v-7M22 19H2" />
+          </svg>
+        </button>
         <!-- 动作区 = 会话自有动作（进入下一级）+ 机制动作（删除），
              去重合并由机制唯一实现（schemas/vdfs-form.mergeDetailActions）。
              **排在最后**：写在本区末位，机制再把「进入下一级」归到行尾
@@ -82,6 +95,29 @@
         />
       </template>
     </main>
+
+    <!-- 读数抽屉（P4）。**滑出式**而不是占版面：读数是要「按一下看一眼」的东西，
+         常驻会把对话区挤窄，而对话才是这个面板的主体。
+         内容由后端下发的描述渲染（ReadingPanel）——本文件不写任何读数语义。 -->
+    <aside v-if="panelOpen && hasActive" class="reading-drawer">
+      <header class="drawer-head">
+        <span class="drawer-title">读数</span>
+        <div class="drawer-actions">
+          <button class="drawer-btn" :disabled="statsLoading" title="重新读取" @click="loadStats">
+            {{ statsLoading ? '读取中…' : '刷新' }}
+          </button>
+          <button class="drawer-btn" title="关闭" @click="panelOpen = false">✕</button>
+        </div>
+      </header>
+
+      <div class="drawer-body">
+        <p v-if="statsError" class="drawer-error">{{ statsError }}</p>
+        <p v-else-if="statsLoading && !stats" class="drawer-loading">正在读取读数…</p>
+        <!-- 空态：没有事实源 ⇒ 后端仍给一份合法面板（sections 为空或只有提示行）。
+             「没有数」与「读不到」由 panel 自己的行区分，这里不再判一次。 -->
+        <ReadingPanel v-else-if="stats" :panel="stats.panel" />
+      </div>
+    </aside>
   </div>
 </template>
 
@@ -92,8 +128,10 @@ import { logger } from '@/utils/logger'
 import EmptyWorkdirState from './EmptyWorkdirState.vue'
 import ModelChatPanel from '../ModelChatPanel.vue'
 import VdfsActions from '@/components/vdfs/VdfsActions.vue'
+import ReadingPanel from '@/components/common/ReadingPanel.vue'
 import { useGenerationGuard } from '@/composables/useGenerationGuard'
 import { mergeDetailActions, type DetailAction } from '@/schemas/vdfs'
+import { readSessionStats, type SessionStats } from '@/services/sessionStats'
 
 const props = defineProps<{
   /** 会话自有动作（如「进入下一级」），由 Session ← VdfsSessionDetail 从节点定义投影 */
@@ -229,6 +267,70 @@ async function submitRename() {
   if (!title || title === store.activeTitle) return
   await store.rename(id, title)
 }
+
+// ── 读数抽屉（P4）────────────────────────────────────────────────────────
+//
+// ## 这里不出现任何读数语义
+//
+// 按钮只声明「打开 / 关闭」，`loadStats` 只负责把路由结果搬进 `stats`，
+// 面板里显示什么由后端下发的 `panel` 描述决定（`ReadingPanel` 组件排版）。
+// 本文件的全部逻辑只有三件：开关、代次守卫、错误上浮。
+//
+// ## 为什么过代次守卫
+//
+// 读数是一次**往返**。抽屉开着时连切会话，先发的那次可能后回来——它会把旧会话的
+// 读数显示在新会话的抽屉里，而两个文件看起来都正常（数字不报错）。
+// 与消息加载同一个守卫机制（`useGenerationGuard`），不另写一套。
+
+const panelOpen = ref(false)
+const stats = ref<SessionStats | null>(null)
+const statsLoading = ref(false)
+const statsError = ref<string | null>(null)
+
+/**
+ * 读当前会话的读数。
+ *
+ * 失败**不静默**：抽屉里显示错误行而不是空白——空白会被读成「这个会话没有读数」，
+ * 而事实可能是路由不可用或权限不足。两者的处置完全不同。
+ */
+async function loadStats() {
+  const id = store.activeId
+  if (!id) return
+  const rev = panelGuard.advance()
+  statsLoading.value = true
+  statsError.value = null
+  try {
+    const got = await readSessionStats(id)
+    // 代次过期即丢：抽屉已经切到别的会话，这次响应不属于当前界面
+    if (panelGuard.revision() !== rev) return
+    stats.value = got
+  } catch (e) {
+    if (panelGuard.revision() !== rev) return
+    statsError.value = e instanceof Error ? e.message : String(e || '读取读数失败')
+    logger.error('ChatMainPanel', `readSessionStats(${id}) failed`, e)
+  } finally {
+    if (panelGuard.revision() === rev) statsLoading.value = false
+  }
+}
+
+/** 抽屉自己的代次守卫（与消息加载分开：两条往返互不打断计数）。 */
+const panelGuard = useGenerationGuard()
+
+// 打开就读一次（抽屉无内容时）。**不自动轮询**：读数是「看一眼」的东西，
+// 常驻轮询会给每次打开都带来一整套实例级扫描（`fleet` 列的成本，见 stats.rs）。
+watch(panelOpen, (open) => {
+  if (open) void loadStats()
+})
+
+// 切会话 ⇒ 抽屉内容作废（下一次打开会重读）。不做「当前会话变了就自动重读」：
+// 抽屉关着时的读取是白花代价，而用户下一次打开本来就会读到新的。
+watch(
+  () => store.activeId,
+  () => {
+    stats.value = null
+    statsError.value = null
+  }
+)
 </script>
 
 <style scoped>
@@ -323,6 +425,87 @@ async function submitRename() {
   color: var(--text-primary);
 }
 
+/* ── 读数抽屉（P4）───────────────────────────────────────────────────────
+   绝对定位于右、宽度固定、带左边界：它盖在对话区之上而不是把它挤窄——
+   对话是这个面板的主体，读数是「按一下看一眼」的旁支。 */
+.reading-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(360px, 42vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-panel);
+  border-left: 1px solid var(--border-default);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+  z-index: 5;
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border-default);
+  flex-shrink: 0;
+}
+
+.drawer-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.drawer-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.drawer-btn {
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.drawer-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
+/* 抽屉开着 ⇒ 按钮呈按下态。颜色用 text-primary（与 hover 同一支），
+   靠底色区分「开着」与「悬停」——不再引入新令牌。 */
+.header-btn.is-active {
+  color: var(--text-primary);
+  background: var(--surface-hover, rgba(128, 128, 128, 0.12));
+}
+
+.drawer-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.75rem;
+}
+
+.drawer-loading,
+.drawer-error {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.drawer-error {
+  color: var(--danger-fg);
+}
 .chat-body {
   flex: 1;
   min-height: 0;

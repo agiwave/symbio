@@ -280,6 +280,152 @@ fn fleet_is_empty_when_the_reader_may_not_read() {
     );
 }
 
+// ── 读数面板（P4：后端下发描述，前端零业务知识）────────────────────────────
+//
+// ## 这个机制唯一的失效形态
+//
+// 面板里的每个数都是从**同一份 SessionStats 的其它字段**搬过来的（`panel_of` 的签名
+// 收 `&SessionStats`）。若哪天有人在 `panel_of` 里「顺手重算一遍」，两份口径就能
+// 各自漂移，而**两个数单独看都对**——只有并排比才看得出来。所以这里的判据不验
+// 「面板长什么样」，验「面板里的数 = 列里的数」。
+
+/// 面板里的每个数都必须能在列里对上（同源，不是「看起来差不多」）。
+#[test]
+fn panel_matches_the_columns_it_describes() {
+    let wal = seed("panel");
+    let got = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
+    let panel = &got.panel;
+
+    // 分区固定三段：时延兜底 / 事实源 / 不变量
+    assert_eq!(panel.sections.len(), 3, "分区固定：{:?}", panel.sections);
+    assert_eq!(panel.subtitle.as_deref(), Some("s1"), "副标题带会话 id");
+
+    // ① 时延段：一行对应一个档位，值与列逐字对上
+    let perf = &panel.sections[0];
+    assert_eq!(perf.rows.len(), got.tiers.len(), "一行一档，不多不少");
+    for (row, col) in perf.rows.iter().zip(&got.tiers) {
+        assert!(
+            row.value.contains(&format!("{} 轮", col.turns)),
+            "轮数要对上：{} vs {}",
+            row.value,
+            col.turns
+        );
+        assert!(
+            row.value.contains(&format!("{:.0}%", col.rate * 100.0)),
+            "兜底率要对上（0.* → 取整百分比）"
+        );
+        assert!(
+            row.hint
+                .as_deref()
+                .unwrap_or("")
+                .contains(&format!("P99 {}ms", col.p99)),
+            "P99 要对上：{:?}",
+            row.hint
+        );
+    }
+
+    // ② 事实源段：条数 = 断点列的 event_count
+    let cont = &panel.sections[1];
+    let facts_row = cont
+        .rows
+        .iter()
+        .find(|r| r.label == "已记录事实")
+        .expect("有条数行");
+    assert!(
+        facts_row.value.contains(
+            &got.checkpoint["event_count"]
+                .as_u64()
+                .unwrap_or(0)
+                .to_string()
+        ),
+        "事实条数 = 断点列：{} vs {}",
+        facts_row.value,
+        got.checkpoint["event_count"]
+    );
+    let has_row = cont
+        .rows
+        .iter()
+        .find(|r| r.label == "事实源在不在")
+        .expect("有在不在行");
+    assert_eq!(has_row.value, "在", "seed 造过事实源");
+    assert_eq!(has_row.tone, crate::symbio_core::ReadingTone::Normal);
+
+    // ③ 不变量段：seed 的 4 格干净 ⇒ 0 条违规、平常语气
+    let inv = &panel.sections[2];
+    assert_eq!(inv.rows.len(), 1);
+    assert_eq!(inv.rows[0].value, "0 条", "干净的事实源 ⇒ 0 违规");
+    assert_eq!(inv.rows[0].tone, crate::symbio_core::ReadingTone::Normal);
+    // 反过来：seed 的兜底率是 1/2 = 50%，远超 5% 阈值 ⇒ 时延段**本该**是 warn。
+    // 这一条与下面「有违规 ⇒ warn」合起来覆盖两个方向：该标色的标、不该标的不标。
+    assert_eq!(
+        perf.rows[0].tone,
+        crate::symbio_core::ReadingTone::Warn,
+        "兜底率 50% > 5% ⇒ 那一行需留意（面板不许把问题显示成没事）"
+    );
+    assert!(panel.has_warn(), "有 warn 行 ⇒ `has_warn()` 为真");
+}
+
+/// 反向：**有违规 ⇒ 那一行变「需留意」**，否则面板把问题显示成没事。
+///
+/// 手术刀 = 复制一格开轮事件（N-C2 的「每轮至多一条开轮」立刻违规）。
+#[test]
+fn a_warn_row_appears_when_the_invariants_are_broken() {
+    let wal = seed("panel-warn");
+    {
+        let raw = std::fs::read_to_string(&wal).expect("读 WAL");
+        let first = raw
+            .lines()
+            .find(|l| l.contains("\"user.message\""))
+            .expect("有开轮行")
+            .to_string();
+        // 同一 event_id 会被幂等拦下，故改 id 再追加（复制成「两条开轮」）
+        let dup = first.replace("\"u0\"", "\"u0-copy\"");
+        std::fs::write(&wal, format!("{raw}{dup}\n")).expect("追加重复开轮");
+    }
+
+    let got = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
+    let inv = &got.panel.sections[2];
+    let row = &inv.rows[0];
+    assert_eq!(
+        row.tone,
+        crate::symbio_core::ReadingTone::Warn,
+        "违规 ⇒ 需留意"
+    );
+    assert!(row.value != "0 条", "且不再显示 0 条：{}", row.value);
+    assert!(got.panel.has_warn(), "`has_warn()` 必须为真");
+}
+
+/// 没有事实源 ⇒ 「在不在」那一行变成需留意（用户一眼看见「这个会话还没跑过」）。
+#[test]
+fn a_missing_wal_is_a_warn_row_not_a_silent_zero() {
+    let dir = std::env::temp_dir().join(format!("symbio-stats-nowal-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("临时目录");
+    let wal = dir.join(super::super::paths::V2_WAL_FILE);
+    let root = dir.clone();
+
+    let got = read(
+        "s1",
+        &wal,
+        None,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        &root,
+    )
+    .expect("没有事实源不是错");
+    assert!(!got.has_wal, "没有源");
+    let row = got.panel.sections[1]
+        .rows
+        .iter()
+        .find(|r| r.label == "事实源在不在")
+        .expect("有在不在行");
+    assert_eq!(row.value, "不在");
+    assert_eq!(
+        row.tone,
+        crate::symbio_core::ReadingTone::Warn,
+        "没跑过 ⇒ 需留意"
+    );
+}
+
 /// 出口读数 == 直接 `apply`（复算：同源，不是「看起来差不多」）。
 #[test]
 fn stats_recompute_equals_direct_apply() {

@@ -306,7 +306,7 @@ async fn handle_command(client: &mut SymbioClient, cmd: &str) -> Result<bool, St
         "exit" | "quit" | "q" => Ok(false),
         "help" | "h" | "?" => {
             eprintln!(
-                "命令:\n  /new                新建会话\n  /session <ID>       切换/续接会话\n  /provider [ID]      查看或切换 Provider（ID 传 default = 系统默认）\n  /workdir [路径]     查看或切换工作目录\n  /exit | /quit       退出"
+                "命令:\n  /new                新建会话\n  /session <ID>       切换/续接会话\n  /provider [ID]      查看或切换 Provider（ID 传 default = 系统默认）\n  /workdir [路径]     查看或切换工作目录\n  /stats              查看当前会话读数\n  /exit | /quit       退出"
             );
             Ok(true)
         }
@@ -355,6 +355,19 @@ async fn handle_command(client: &mut SymbioClient, cmd: &str) -> Result<bool, St
             // 工作目录属于会话元数据，改完立即落库（下一个请求才会带上新值）
             client.ensure_session().await?;
             eprintln!("→ 工作目录 {}", client.workdir);
+            Ok(true)
+        }
+        "stats" => {
+            // 读数（P4）：调 `session/stats` 只读路由，把后端下发的**面板描述**
+            // 原样打到 stderr。
+            //
+            // ## 为什么 CLI 不自己拼这些数
+            //
+            // 「这些数是什么意思、单位与精度怎么取」只有产者知道。CLI 自己拼就是把
+            // 口径抄进第二处，而读数一改，抄本不报错、只静静显示旧标签。
+            // 这里与 Tauri 前端的 `ReadingPanel` 组件**吃同一份描述**，两个前端都
+            // 是渲染器——差别只在排版（终端 vs DOM）。
+            client.print_stats().await?;
             Ok(true)
         }
         other => {

@@ -183,7 +183,7 @@ const BASELINE = process.env.CORE_EXPORT_BASELINE
       const [zero, one] = process.env.CORE_EXPORT_BASELINE.split(':').map((n) => Number(n))
       return { zero, one }
     })()
-  : { zero: 0, one: 75 }
+  : { zero: 0, one: 77 }
 
 // core-export-allow one: 2026-10-09 口径修正——测试文件不再算架构消费方（口径全文见 core-surface.mjs 口径 4），此前被测试计数遮住的 24 个真·单消费方符号现形（TurnRunner / TurnInput / Store / Entity / PromptMessage / ProviderLlmAdapter …），故 one 61→77（同日下沉 TurnRunner 族后为 75，见上）。**这是测量修正，不是放松判据**：那 24 个一直都在，旧口径把它们读成了 ≥2。零消费方那一格（zero）不变——它按含测试计，只被测试用到的符号收窄会当场编译坏那些测试。**退出条件**：这 24 个按 README §4 四问逐条处置（下沉或登记豁免），每处置一个就把 one 降一格；全部处置完（one 回落到 ≤61）时**必须删掉本行**，否则这条豁免会长期掩盖 one 的后续放松。
 

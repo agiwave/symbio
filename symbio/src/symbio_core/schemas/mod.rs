@@ -2,6 +2,7 @@ pub mod common;
 pub mod detail;
 pub mod dialog;
 pub mod hook;
+pub mod reading;
 pub mod session;
 
 pub use dialog::{

@@ -765,6 +765,9 @@ export const BASELINE = {
   //   桥接用例（`provider_adapter_routes_tool_frames_to_the_message_channel`）：
   //   身份帧先于增量、全帧同 id（id 漂移 = 第二张卡）、Σ帧拼出完整参数 JSON。
   //   实测口径同前：`cargo test -p symbio`，取首个 `test result: ok. N passed`。
+  // 2026-10-09 **回填 `1397 → 1404`（+7）**：批「P4」——读数面板方言
+  //   `symbio_core/schemas/reading.rs`（4 条形状判据）+ `plugins/session/stats.rs`
+  //   的 `panel` 字段与 `panel_of`（3 条「面板与列同源」判据）。
   // 2026-10-09 **回填 `1390 → 1397`（+7）**：批「P2」——
   //   `SloLatencyView::merge` / `FallbackRateView::merge` 两个纯合并函数升为生产
   //   代码（跨会话聚合口径从测试代码里搬进 core），配 3 条穷举判据（并集非覆盖 /
@@ -773,7 +776,7 @@ export const BASELINE = {
   //   整列、读侧闸 ⇒ 空且不扫）。同批退役 `#[ignore]` 的 `slo_scan_wal_roots`
   //   手工扫描口（职责被上面两件接走）。
   //   实测口径同前：`cargo test -p symbio -p symbio-cli`，取首个 `test result: ok. N passed`。
-  rustTests: 1397,
+  rustTests: 1404,
   /**
    * CI 口径的 Rust 通过数（**只增不减**）——与上面三个分包基线**是不同口径，不能互替**。
    *

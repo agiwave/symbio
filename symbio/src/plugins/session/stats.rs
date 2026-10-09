@@ -39,7 +39,7 @@ use serde::Serialize;
 use crate::symbio_core::{
     calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Budget,
     EventWalStore, PermissionMatrix, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginPayload, Seq, Store, VisScope, SESSION_ID,
+    PluginInvokeResponse, PluginPayload, ReadingPanel, Seq, Store, VisScope, SESSION_ID,
 };
 
 use super::plugin::SessionPlugin;
@@ -136,6 +136,22 @@ pub(crate) struct SessionStats {
     /// 的呈现面过滤（S08 的 `vis_scope`），落地前本列只有**整列**闸——与其余各列同款，
     /// 不在这里先造一个半开的判据。
     pub transcript: serde_json::Value,
+    /// **读数面板**（P4：读数的**呈现描述**，前端零业务知识地渲染它）。
+    ///
+    /// ## 为什么读数也要一份描述
+    ///
+    /// 「这些数是什么意思、该叫什么、单位与精度怎么取」只有**产者**知道。前端自己
+    /// 拼就等于把口径抄进第二处（ADR-044 的反面），而读数一改，抄本不报错、只静静
+    /// 显示旧标签。故本字段由 [`Self::panel_of`] 从**上面各列已算出的值**生成——
+    /// 前端只按 [`ReadingPanel`] 排版，不解析任何会话/统计语义。
+    ///
+    /// ## 与各列的关系：一份事实、两种用法
+    ///
+    /// 各列（`tiers` / `cost` / `fleet` …）是**机器可读**的读数，判据与脚本读它们
+    /// （`slo-exit-audit` 对的就是这些列）；本字段是**人读**的那一份，同一个数的
+    /// 另一种说法。两者由同一个源算出，且判据 `panel_matches_the_columns_it_describes`
+    /// 钉住「不脱节」——否则就是两份真相。
+    pub panel: crate::symbio_core::ReadingPanel,
     /// **实例级聚合**（P2：跨会话的 SLO 真数）。
     ///
     /// 上面每一列回答「**这一个会话**怎么样」；本列回答「**整个实例**怎么样」——
@@ -244,6 +260,120 @@ fn fleet_reading(storage_root: &std::path::Path) -> serde_json::Value {
             })).collect::<Vec<_>>(),
         },
     })
+}
+
+/// 从本函数的真实数据生成面板描述（`session/stats` 的呈现，concern 在**产者**）。
+///
+/// ## 只吃 `SessionStats` 的**其它字段**，一目了然、无法漂移
+///
+/// 签名故意收 `&SessionStats`：生成过程读到的每个数都是从**同一份数据**上算出来的，
+/// 不存在「另算一遍」的可能。反过来若在这里重新扫 WAL 或重算分位数，两份口径就
+/// 可以各自漂移——而判据 `panel_matches_the_columns_it_describes` 只看结果，
+/// 看不住过程。写在这里的转换只有三类：起标签、定单位、挑语气。
+fn panel_of(stats: &SessionStats) -> ReadingPanel {
+    use crate::symbio_core::{ReadingRow, ReadingSection, ReadingTone};
+
+    // 档位列 → 一段「时延与兜底」。tiers 已按档位排序，此处原序输出（顺序是
+    // 数据给的事实，不是排版选择）。
+    let perf = ReadingSection {
+        title: Some("时延与兜底".into()),
+        rows: stats
+            .tiers
+            .iter()
+            .map(|t| ReadingRow {
+                label: format!("{} 档", t.tier),
+                value: format!("{} 轮 · 兜底率 {:.0}%", t.turns, t.rate * 100.0),
+                hint: Some(format!(
+                    "P50 {}ms / P95 {}ms / P99 {}ms（{} 个成功样本）",
+                    t.p50, t.p95, t.p99, t.samples
+                )),
+                tone: if t.rate > 0.05 {
+                    ReadingTone::Warn
+                } else {
+                    ReadingTone::Normal
+                },
+            })
+            .collect(),
+    };
+
+    // 断点列：事实条数 / 事实源在不在，再加一行种类分布。
+    let ck = &stats.checkpoint;
+    let events = ck.get("event_count").and_then(|v| v.as_u64()).unwrap_or(0);
+    let kinds = ck.get("kind_counts").and_then(|v| v.as_object());
+    let last = ck.get("last_seq").and_then(|v| v.as_u64());
+    let mut continuity_rows = vec![
+        ReadingRow {
+            label: "已记录事实".into(),
+            value: format!("{events} 条"),
+            hint: Some(format!(
+                "末条 seq = {}",
+                last.map(|s| s.to_string()).unwrap_or_else(|| "—".into())
+            )),
+            tone: ReadingTone::Normal,
+        },
+        ReadingRow {
+            label: "事实源在不在".into(),
+            value: if stats.has_wal {
+                "在".into()
+            } else {
+                "不在".into()
+            },
+            hint: Some("不在 = 这个会话还没跑过一轮，其余各列是有据的零".into()),
+            tone: if stats.has_wal {
+                ReadingTone::Normal
+            } else {
+                ReadingTone::Warn
+            },
+        },
+    ];
+    // 事实种类的分布（BTreeMap 序列化 ⇒ 有序）。只列前 6 种：全部铺开是把
+    // 「概览」变成清单，而清单归各列自己的读法。
+    if let Some(kinds) = kinds {
+        continuity_rows.push(ReadingRow {
+            label: "事实种类".into(),
+            value: kinds
+                .iter()
+                .take(6)
+                .map(|(k, v)| format!("{k} × {}", v.as_u64().unwrap_or(0)))
+                .collect::<Vec<_>>()
+                .join(" · "),
+            hint: Some("按事件 kind 计数（本面板只列前 6 种）".into()),
+            tone: ReadingTone::Normal,
+        });
+    }
+    let continuity = ReadingSection {
+        title: Some("事实源".into()),
+        rows: continuity_rows,
+    };
+
+    // 不变量：违规清单为空 ⇒ 一句「全绿」；非空 ⇒ 一条一行、语气需留意。
+    let violations = stats.invariants.as_array().map(|a| a.len()).unwrap_or(0);
+    let invariants = ReadingSection {
+        title: Some("不变量".into()),
+        rows: vec![ReadingRow {
+            label: "违规".into(),
+            value: if violations == 0 {
+                "0 条".into()
+            } else {
+                format!("{violations} 条")
+            },
+            hint: Some(
+                "seq 单调 / 每轮一条开轮与收束 / 断言带溯源 / 未收束 / 超预算 / 依赖环 / 返工界"
+                    .into(),
+            ),
+            tone: if violations == 0 {
+                ReadingTone::Normal
+            } else {
+                ReadingTone::Warn
+            },
+        }],
+    };
+
+    ReadingPanel {
+        title: "会话读数".into(),
+        subtitle: Some(stats.session_id.clone()),
+        sections: vec![perf, continuity, invariants],
+    }
 }
 
 /// `session/stats` 的请求体：**全部可选**——不传 = 本机默认（今天的行为）。
@@ -404,7 +534,7 @@ pub(crate) fn read(
         serde_json::json!({ "wals": 0, "sessions": 0 })
     };
 
-    Ok(SessionStats {
+    let reading = SessionStats {
         session_id: session_id.to_string(),
         wal: wal.display().to_string(),
         has_wal,
@@ -417,6 +547,11 @@ pub(crate) fn read(
         readyset,
         transcript,
         fleet,
+        panel: ReadingPanel::default(),
+    };
+    Ok(SessionStats {
+        panel: panel_of(&reading),
+        ..reading
     })
 }
 
