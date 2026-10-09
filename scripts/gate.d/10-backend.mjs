@@ -44,7 +44,21 @@ export default {
       label: 'cargo fmt --all（自动格式化）',
       run: (c) => autoWork(c, { label: 'cargo fmt --all', cmd: 'cargo', args: ['fmt', '--all'], cwd: backendDir }),
     })
-    tasks.push({ label: 'cargo check --tests --workspace', cmd: 'cargo', args: ['check', '--tests', '--workspace'], cwd: backendDir })
+
+    // ⚠️ 这里**刻意没有** `cargo check --tests --workspace`——它曾是本阶段的第一步。
+    //
+    // 它被当成「比 clippy 快的类型检查」放在最前，但两者的产物**互不复用**：clippy
+    // 走 `clippy-driver`，fingerprint 带 lint 标记，`check` 编出来的缓存一律不命中。
+    // 实测（2026-10-08，本机 Windows / 20 核，改一处 symbio 源码后）：
+    //   cargo check  -p symbio --tests       → 13.3s
+    //   cargo clippy -p symbio --all-targets → 19.1s（**完全重新 Checking**，非复用）
+    // 而 `clippy --all-targets` 的 target 集合是 `check --tests` 的**超集**
+    // （lib + bins + tests + examples + benches ⊇ lib + bins + tests），且 clippy
+    // 本身含完整类型检查 ⇒ check 那一遍是纯冗余。删掉它，workspace 级每次少一整遍
+    // 编译（本次实测该步 31s）。
+    //
+    // 需要「只要类型错误、不要 lint」的快速档时，正确做法是**单独跑** `cargo check`，
+    // 而不是把它塞回门禁的必跑链里。
 
     // 测试：CI 跑一次 `--workspace` 全量（求和**并比对 CI 口径基线**）；本地按 crate 分包比对基线。
     if (ctx.ci) {

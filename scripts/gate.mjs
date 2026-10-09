@@ -13,6 +13,19 @@
  *   { label, when: (ctx) => bool, ... }                          条件不满足记 skipped
  * 结果取值：true / false / 'skipped' / { ok, note }
  *
+ * ## 并发：默认串行，`parallel: true` 才并发
+ *
+ * 任务加 `parallel: true` 表示「与同批其他任务互不干扰」，连续的一批会以
+ * `concurrency`（阶段级，缺省取核数-1 且 ≤8）并发执行。**默认串行**是刻意的：
+ * 同一 `target/` 目录的 cargo 命令并发只会争 `.cargo-lock`（排成
+ * `Blocking waiting for file lock`），收益为零还要多写一轮日志。
+ *
+ * 适合并发的：只读审计脚本（扫文件）、`rustc` 独立编译、彼此隔离的 e2e 用例。
+ * 不适合的：任何 cargo 命令、写同一个输出目录的任务。
+ *
+ * 并发批内**不往 stdout 刷逐行输出**（会交错成乱码），详情落各自日志文件，
+ * 控制台只留一行结论。
+ *
  * ctx：{ repoRoot, scriptDir, logDir, ci, profile, run(o), log(name, text) }
  *   run(o) 执行命令：实时逐行转发（echo: filtered|all|none）+ 全文落日志 + 只信退出码。
  *
@@ -38,10 +51,24 @@
  */
 
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { red, green, yellow, dim, bold, stripAnsi } from './color.mjs'
+
+/**
+ * 默认并发度（阶段可用 `concurrency` 覆盖）。
+ *
+ * **只用于「互不干扰」的任务**：同一 `target/` 目录的 cargo 命令**必须串行**
+ * （cargo 自己会争 `.cargo-lock`，并发跑只会排成 `Blocking waiting for file
+ * lock`，白等一轮还扰乱日志）。因此并发是**按任务声明**（`parallel: true`）的，
+ * 不是全局默认——没标的照旧一个一个跑。
+ *
+ * 上限取 `核数 - 1` 且不超过 8：审计类脚本是 IO 密集（扫文件），给满核会与
+ * 主进程和其他任务抢调度；`-1` 留一个核给 spawn / 日志落盘。
+ */
+const CONCURRENCY = Math.max(2, Math.min((os.availableParallelism?.() ?? os.cpus().length) - 1, 8))
 
 // realpathSync.**native** 规范化盘符大小写：启动 cwd 可能以小写盘符传入（会话
 // 环境实测 `d:\...`；JS 版 realpathSync 与 libuv 一致地**保留**输入大小写，只有
@@ -97,8 +124,11 @@ const fmtDuration = (ms) => {
 }
 
 function run(o) {
-  const { label, cmd, args = [], cwd = repoRoot, timeoutMs = 0, echo = 'filtered', env } = o
-  process.stdout.write(`  ▸ ${label} … `)
+  const { label, cmd, args = [], cwd = repoRoot, timeoutMs = 0, echo = 'filtered', env, quiet = false } = o
+  // `quiet`：并发批里**不往 stdout 写任何东西**——多个任务同时 echo 会交错成
+  // 不可读的乱码（`▸ a … ▸ b … ok (1s) ok (2s)`）。详情仍完整落在各自的日志
+  // 文件里，批跑完由调用方按原顺序打印一行结论。单任务（非并行）行为不变。
+  if (!quiet) process.stdout.write(`  ▸ ${label} … `)
 
   return new Promise((resolve) => {
     const started = Date.now()
@@ -140,10 +170,20 @@ function run(o) {
 
     child.on('error', (err) => {
       if (timer) clearTimeout(timer)
-      console.log(red('启动失败'))
-      console.log(red(`      ${err.message}`))
+      if (!quiet) {
+        console.log(red('启动失败'))
+        console.log(red(`      ${err.message}`))
+      }
       sink.end(err.message)
-      resolve({ ok: false, code: null, signal: null, output: output + err.message, timedOut, logFile })
+      resolve({
+        ok: false,
+        code: null,
+        signal: null,
+        output: output + err.message,
+        timedOut,
+        logFile,
+        ms: Date.now() - started,
+      })
     })
 
     child.on('close', (code, signal) => {
@@ -151,10 +191,12 @@ function run(o) {
       const ok = code === 0 && signal === null && !timedOut
       const ms = Date.now() - started
       sink.end()
-      if (timedOut) console.log(yellow(`超时（已 kill，${fmtDuration(ms)}）`))
-      else if (ok) console.log(green(`ok (${fmtDuration(ms)})`))
-      else console.log(red(`失败 (exit=${code}${signal ? `, ${signal}` : ''}, ${fmtDuration(ms)})`))
-      resolve({ ok, code, signal, output, timedOut, logFile })
+      if (!quiet) {
+        if (timedOut) console.log(yellow(`超时（已 kill，${fmtDuration(ms)}）`))
+        else if (ok) console.log(green(`ok (${fmtDuration(ms)})`))
+        else console.log(red(`失败 (exit=${code}${signal ? `, ${signal}` : ''}, ${fmtDuration(ms)})`))
+      }
+      resolve({ ok, code, signal, output, timedOut, logFile, ms })
     })
   })
 }
@@ -187,8 +229,7 @@ const enabled = (id) => (only ? only.includes(id) : true) && !skip.includes(id)
 const results = []
 // 每条结果都记下自己的日志文件（可能为 null：跳过项没跑命令），失败汇总据此
 // 直接列出**这一项的文件名**——早先只给目录，68 个文件里要自己猜是哪个。
-const record = (stage, label, pass, note, logFile = null) =>
-  results.push({ stage, label, pass, note, logFile })
+const record = (r) => results.push(r)
 
 function normalize(outcome) {
   if (outcome === 'skipped') return { pass: 'skipped', note: '' }
@@ -197,24 +238,41 @@ function normalize(outcome) {
   return { pass: outcome.ok !== false, note: outcome.note ?? '', logFile: outcome.logFile ?? null }
 }
 
-async function executeTask(stageId, t) {
+/**
+ * 执行单个任务并**返回**结果（不再直接写 `results`）——并发批要按**原顺序**
+ * 落结果，只能由调用方统一 `record`。`quiet` 透传给 `run`（见其说明）。
+ */
+async function executeTask(stageId, t, { quiet = false } = {}) {
   if (t.when && !t.when(ctx)) {
-    record(stageId, t.label, 'skipped', t.skipNote ?? '条件不满足')
-    return
+    return {
+      stage: stageId,
+      label: t.label,
+      pass: 'skipped',
+      note: t.skipNote ?? '条件不满足',
+      logFile: null,
+      ms: null,
+    }
   }
   if (t.cmd) {
-    const r = await run({ ...t, env: t.env })
-    record(
-      stageId,
-      t.label,
-      r.ok,
-      r.timedOut ? '超时终止' : r.ok ? '' : `exit=${r.code}${r.signal ? `, ${r.signal}` : ''}`,
-      r.logFile,
-    )
-    return
+    const r = await run({ ...t, env: t.env, quiet })
+    return {
+      stage: stageId,
+      label: t.label,
+      pass: r.ok,
+      note: r.timedOut ? '超时终止' : r.ok ? '' : `exit=${r.code}${r.signal ? `, ${r.signal}` : ''}`,
+      logFile: r.logFile,
+      ms: r.ms,
+    }
   }
   const outcome = normalize(await t.run(ctx))
-  record(stageId, t.label, outcome.pass, outcome.note, outcome.logFile ?? null)
+  return {
+    stage: stageId,
+    label: t.label,
+    pass: outcome.pass,
+    note: outcome.note,
+    logFile: outcome.logFile ?? null,
+    ms: null,
+  }
 }
 
 function stageHeader(index, title) {
@@ -248,10 +306,57 @@ console.log(dim(`  阶段：${stages.filter((s) => enabled(s.id)).map((s) => s.i
 const relLog = (path.relative(repoRoot, logDir) || '.').replace(/\\/g, '/')
 console.log(dim(`  完整日志：${relLog}/（每次运行都写；失败项下方会直接列出文件名）`))
 
+/**
+ * 并发跑一批任务（连续标记 `parallel: true` 的那些），并发度 `limit`。
+ *
+ * **结果按原顺序落**：`out` 预分配 + worker 从共享游标取任务，因此汇总表的顺序
+ * 恒等于任务声明顺序，不受完成先后影响（否则「谁快谁排前面」，两次运行的日志
+ * 顺序都不同，对比就白费力气）。
+ *
+ * 批内强制 `quiet`：多个子进程同时往 stdout 写会交错成乱码，详情改由各自日志
+ * 承载（失败时汇总会直接列出文件名），控制台只保留一行结论。
+ */
+async function runConcurrent(stageId, tasks, limit) {
+  const out = new Array(tasks.length)
+  let cursor = 0
+  const worker = async () => {
+    for (;;) {
+      const idx = cursor++
+      if (idx >= tasks.length) return
+      out[idx] = await executeTask(stageId, tasks[idx], { quiet: true })
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker))
+
+  for (const r of out) {
+    record(r)
+    const mark = r.pass === true ? green('✓') : r.pass === 'skipped' ? yellow('⊘') : red('✗')
+    const took = r.ms != null ? dim(` (${fmtDuration(r.ms)})`) : ''
+    console.log(`  ${mark} ${r.label}${took}${r.note ? yellow(` — ${r.note}`) : ''}`)
+  }
+}
+
+async function runStage(s, index) {
+  stageHeader(index + 1, s.title)
+  const tasks = materialize(s)
+  const limit = s.concurrency ?? CONCURRENCY
+  let i = 0
+  while (i < tasks.length) {
+    // 连续标记 `parallel` 的任务合成一批并发跑；其余照旧串行——cargo 命令
+    // **必须**串行（同 target 目录会争 `.cargo-lock`，见 CONCURRENCY 处说明）。
+    if (tasks[i].parallel) {
+      const batch = []
+      while (i < tasks.length && tasks[i].parallel) batch.push(tasks[i++])
+      await runConcurrent(s.id, batch, limit)
+    } else {
+      record(await executeTask(s.id, tasks[i++]))
+    }
+  }
+}
+
 for (const [i, s] of stages.entries()) {
   if (!enabled(s.id)) continue
-  stageHeader(i + 1, s.title)
-  for (const t of materialize(s)) await executeTask(s.id, t)
+  await runStage(s, i)
 }
 
 /** 汇总并给退出码。**中断时也走这里**（见下方 SIGINT/SIGTERM）——已跑完的结果、

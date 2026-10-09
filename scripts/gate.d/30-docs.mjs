@@ -214,6 +214,12 @@ const REPORT_ONLY = ['schema-audit', 'core-surface-audit']
 export default {
   id: 'docs',
   title: '静态审计',
+  // 回归测试彼此独立（各自 spawn 一个 `node --test`），并发跑省掉 30+ 次串行启动。
+  //
+  // 守卫本体（下面的 `--strict`）**刻意不并行**：它们的结论行（「N 条规则全部通过」）
+  // 是终端上的主要信息，而并发批会静音逐行输出（见 gate.mjs 的并发契约）——
+  // 用「少看 16 行结论」换几秒不划算。
+  concurrency: 8,
   *tasks() {
     for (const name of [...GUARDS, ...TEST_ONLY]) {
       yield {
@@ -221,6 +227,7 @@ export default {
         cmd: process.execPath,
         args: ['--test', path.join(scriptDir, '..', `${name}.test.mjs`)],
         cwd: repoRoot,
+        parallel: true,
       }
     }
     for (const name of GUARDS) {

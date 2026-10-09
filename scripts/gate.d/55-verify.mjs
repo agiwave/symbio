@@ -51,6 +51,10 @@ const matchErrorCodes = (output) => {
 export default {
   id: 'verify',
   title: '验证程序（docs/plan/verify · 含编译期反例 C29）',
+  // 每个验证程序是**独立的 rustc 调用**（各自一个源文件、各自的输出 exe），
+  // 彼此无共享状态 ⇒ 并发跑。批的边界在 `facts 生成` 那一步：它必须**先**跑完
+  // （程序吃的就是它生成的数据），所以那一步不标 `parallel`，天然把批次切开。
+  concurrency: 8,
   *tasks(ctx) {
     if (!fs.existsSync(verifyDir)) {
       yield {
@@ -157,6 +161,7 @@ export default {
     for (const { file, name, hasNegative } of entries) {
       yield {
         label: `verify: ${name}`,
+        parallel: true,
         run: async () => {
           const exe = path.join(outDir, `${name}${exeSuffix}`)
 
@@ -195,6 +200,7 @@ export default {
 
       yield {
         label: `verify: ${name} · 反例（C29）`,
+        parallel: true,
         run: async () => {
           const exe = path.join(outDir, `${name}-should-fail${exeSuffix}`)
           const r = await ctx.run({

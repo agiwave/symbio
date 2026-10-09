@@ -9,6 +9,7 @@
 // `BASELINE.e2eCases` 棘轮（只许涨），三态判定走 `ratchetVerdict`——与单测数
 // 同一条判据，不在这里再决定一次红不红。
 import path from 'node:path'
+import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import { dim, yellow, red } from '../color.mjs'
@@ -74,39 +75,125 @@ export default {
 
     tasks.push({
       label: 'e2e 用例集',
-      // 自定义任务：逐用例子进程隔离运行（与 run-tests.mjs 同构），聚合判定。
+      // 自定义任务：用例子进程隔离运行（与 run-tests.mjs 同构），聚合判定。
+      //
+      // **默认并发 6**（`GATE_E2E_CONCURRENCY` 可覆盖）。并行有**两个**前提，
+      // 缺一个就不能开：
+      //
+      // ① **端口分段**已生效——`E2E_PORT_BASE` 按**用例序号**注入（不是按 worker
+      // 序号），所以每个用例的 mock LLM / MCP / gateway 各占一段。少了它，40+ 个
+      // 子进程会全从 18080 起算、互相撞端口，症状是「mock-llm 收到 31 次请求」——
+      // 比串行更难排查，因为失败点随机漂。
+      // ② **并发度已到收益拐点**（见下）。
+      //
+      // ## 为什么是 6：墙钟下界由**单个慢例**决定，不由总工作量决定
+      //
+      // 实测（本机 20 核，`.workbuddy-ai/gate-logs/` 逐例耗时）：
+      //
+      // ```
+      // 总工作量（串行等效）= 88.1s
+      // 最慢的单个用例      = 15.5s（t36-autonomous-initiator）
+      // ⇒ 任何并发度的墙钟下界 = 15.5s；理论最优并发度 = 88.1 / 15.5 ≈ 5.7 → 取 6
+      //
+      // 实测墙钟：并发 1 → 88s    4 → 22s    6 → 19s    16 → 17.2s
+      // ```
+      //
+      // 读法：**并发吃不掉慢例**。下界由 `t36` 一个用例决定（15.5s），不看总量——
+      // 再往上加，门禁耗时由它说了算。6 到 16 只差 1.8s（9%），而进程数翻 2.7 倍、
+      // 抢同一份 CPU。**继续加并发买到的是调度抖动，卖出去的是判定稳定性。**
+      //
+      // ⚠️ 「更高并发会不会改变结论」**实测过**：6 与 16 **各连跑 3 轮，失败集逐轮完全
+      // 相同**（32/42，同 10 个红）。所以上限不是「怕它不稳」——**是不值**。选 6 是
+      // 贴着理论最优，不是贴着实测上限。
+      //
+      // ⚠️ 这里换过一次判据。原来写的是「最慢通过例 15.5s vs 最小内层 `waitFor` 10s，
+      // 余量 5.5s」——**那是错的**：`t36` 的整例耗时是很多次等待之和，跟 `t11` 的
+      // 单次预算不是一回事，跨用例比预算算出 −5.5s 这种没有意义的负数。判据换成
+      // 「总工作量 / 最慢单例」后**不依赖「哪个用例最慢」**，只依赖两个总和。
+      //
+      // ## 若要重算：跑 `node scripts/e2e-concurrency.mjs`
+      //
+      // 它从上一轮 `.workbuddy-ai/gate-logs/e2e-*.log` 读逐例耗时，算出
+      // `总工作量 / 最慢单例` 并与本文件的默认值对照；不一致时按「上调要验失败集
+      // 三轮稳定 / 下调直接照办」给处置。**慢用例被优化掉时它自己会给出更小的建议值**
+      // ——所以别在这里硬写一个「感觉够用」的数字。
+      //
+      // 另外：单个用例失败要走满它自己的超时（实测 3s–120s，`t2` 一轮 120s），
+      // 所以**失败多的时候**门禁会显著变慢——那是用例失败的表现，不是门禁的锅。
       run: async () => {
         const cases = discoverCases()
         if (cases.length === 0) return { ok: false, note: '未发现任何用例（e2e/cases/）' }
+
+        // 默认 6，理由见上方注释（理论最优 = 总工作量/最慢单例 ≈ 5.7，实测三轮稳定）。
+        // 核数少时往下收：核不够时并发再高只是把 CPU 竞争推高超时敏感度。
+        const cpuCap = Math.max(1, Math.min(6, os.availableParallelism?.() ?? os.cpus().length))
+        const limit = Math.max(1, Number(process.env.GATE_E2E_CONCURRENCY) || cpuCap)
+        const results = new Array(cases.length)
+        let cursor = 0
+        const worker = async () => {
+          for (;;) {
+            const i = cursor++
+            if (i >= cases.length) return
+            const c = cases[i]
+            const r = await ctx.run({
+              label: `e2e: ${c.name}`,
+              cmd: process.execPath,
+              args: [c.file],
+              cwd: repoRoot,
+              timeoutMs: 180_000,
+              echo: 'none',
+              env: { E2E_CASE_SELF: '1', E2E_PORT_BASE: String(18080 + i * 100) },
+            })
+            results[i] = r
+            // 逐例耗时回填到结果上：并发度的判据要用**本轮**的数（见下方
+            // `cpuCap` 那段注释）。从上一轮日志取数有个坏处——那轮的耗时是**旧代码**
+            // 的，于是「默认值是否还合适」永远在拿过时数据回答。
+            r.caseMs = r.ms
+            r.caseName = c.name
+            console.log(r.ok ? `      ✓ ${c.name}` : `      ✗ ${c.name}（详见日志）`)
+          }
+        }
+        await Promise.all(Array.from({ length: Math.min(limit, cases.length) }, worker))
+
         let pass = 0
         const failures = []
         const failedLogs = []
-        for (const c of cases) {
-          const r = await ctx.run({
-            label: `e2e: ${c.name}`,
-            cmd: process.execPath,
-            args: [c.file],
-            cwd: repoRoot,
-            timeoutMs: 180_000,
-            echo: 'none',
-            env: { E2E_CASE_SELF: '1' },
-          })
+        for (const [i, r] of results.entries()) {
           if (r.ok) {
             pass++
-            console.log(`      ✓ ${c.name}`)
-          } else {
-            failures.push(c.name)
-            if (r.logFile) failedLogs.push(r.logFile)
-            console.log(`      ✗ ${c.name}（详见日志）`)
-            // ⚠️ 这行**原先带 `if (ctx.ci !== true)`**：本地打印、CI 不打印。
-            // 方向恰好反了——本地有 `.workbuddy-ai/gate-logs/` 可以打开，CI 上那个
-            // 目录在 runner 里、没人上传，于是「（详见日志）+ 一条本机路径」就是一条
-            // **零信息的红**。2026-10-07 首次在 v2-plan 上跑 CI 正是如此：42/42 全红，
-            // 日志里只有 42 个文件名，真正的原因（缺 `tauri/node_modules`）一行没露。
-            // 失败项才打印、只取末 6 行，撑不爆 CI 日志。
-            console.log(dim(r.output.split('\n').slice(-6).join('\n      ')))
+            continue
           }
+          failures.push(cases[i].name)
+          if (r.logFile) failedLogs.push(r.logFile)
+          // 失败项才打印、只取末 6 行，撑不爆 CI 日志。
+          //
+          // ⚠️ 这行**原先带 `if (ctx.ci !== true)`**：本地打印、CI 不打印。方向恰好
+          // 反了——本地有 `.workbuddy-ai/gate-logs/` 可以打开，CI 上那个目录在 runner
+          // 里、没人上传，于是「（详见日志）+ 一条本机路径」就是一条**零信息的红**。
+          // 2026-10-07 首次在 v2-plan 上跑 CI 正是如此：42/42 全红，日志里只有 42 个
+          // 文件名，真正的原因（缺 `tauri/node_modules`）一行没露。
+          console.log(dim(r.output.split('\n').slice(-6).join('\n      ')))
         }
+        // 并发度判据：用**本轮**逐例耗时当场算，结论印出来（不单独判红）。
+        //
+        // 为什么只印不判：并发度过低只让门禁**慢**，不会让它**说错话**；而过高的
+        // 风险（改变判定）已由「默认贴着理论最优」消掉——余量在那儿，不靠这条红。
+        // 判红会让「某个用例变慢了」直接变成门禁失败，而那时该做的是优化那个用例。
+        // 离线复核：`node scripts/e2e-concurrency.mjs`。
+        const times = results.filter((r) => r && r.caseMs > 0).map((r) => r.caseMs)
+        if (times.length > 0) {
+          const totalMs = times.reduce((a, b) => a + b, 0)
+          const slowest = Math.max(...times)
+          const optimal = totalMs / slowest
+          console.log(
+            dim(
+              `      ↳ 并发 ${limit}｜总工作量 ${(totalMs / 1000).toFixed(1)}s` +
+                `｜最慢单例 ${(slowest / 1000).toFixed(1)}s` +
+                `｜理论最优 ${optimal.toFixed(1)}｜墙钟下界 ${(slowest / 1000).toFixed(1)}s`,
+            ),
+          )
+        }
+
         const note =
           failures.length === 0
             ? `${pass}/${cases.length} 通过`
