@@ -14,7 +14,22 @@
  * |---|---|---|
  * | C-001 | 根 `mod.rs` 不得有 `pub mod <域>;` | 域目录一旦 `pub mod`，整个子树就是公共面：`core-surface` 枚举的「公开面 = 根重导出」当场失真，外部还能直接深引绕过根 |
  * | C-002 | core 外的**代码**不得出现 `symbio_core::<域>`（含裸 `use crate::symbio_core::<域>;`） | 深引 = 消费方绕过根出口：符号从根导出移除后深引点照样编译通过，公开面变成两套。裸模块导入此前**没有**任何审计在拦（旧 E-010 的正则要求尾 `::`） |
- * | C-003 | 根导出符号的消费方数必须 ≥2 | ADR-023 的判据（依赖方数量）此前只有**报告型** `core-surface-audit` 在数、判定权在人手里，于是长期停在 0 消费方 139 / 单消费方 64 上不动 |
+ * | C-003 | 根导出符号的**生产**消费方数必须 ≥2 | ADR-023 的判据（依赖方数量）此前只有**报告型** `core-surface-audit` 在数、判定权在人手里，于是长期停在 0 消费方 139 / 单消费方 64 上不动 |
+ *
+ * ## 「消费方」的口径（2026-10-09 修正，C-003 的判据输入）
+ *
+ * **测试文件不算架构消费方。** 本条要回答的是「谁依赖它」，而测试依赖的是**被测对象**，
+ * 不是它要长期持有的接口。旧口径把测试算进来 ⇒「一个模块在生产用、另一个模块的测试
+ * 顺手写了一次名字」读成「两个模块依赖」⇒ 真·单消费方符号逃过下沉。实测：
+ * `TurnRunner` / `TurnInput`（生产只有 `plugins/session`，第二个单位来自
+ * `plugins/model/bound_provider.test.rs` 的彩排）长期显为 ≥2，而同族的 `TurnOutcome` /
+ * `TurnResume`（没被那个测试提到）一直显为单消费方——**同一个功能、四个名字、两种判决**。
+ *
+ * 但**「0 消费方」那一半仍按含测试计**：只被别模块测试用到的符号，收窄它当场把那些测试
+ * 编译坏（C-002 又不许它们深引）⇒「测试在用」**足以**让它留在根出口。故本条实际分三档：
+ * `0 消费方`（含测试，必须收窄）/ `单消费方`（不含测试，下沉或豁免）/ `仅测试在用`
+ * （合法根出口，不动）。两个口径的实现同一处：`core-surface.mjs` 的 `collectConsumers`
+ * （`opts.includeTests`）。
  *
  * ## 与既有审计的分工（别在两处写两套判据）
  *
@@ -31,7 +46,8 @@
  *
  * ## 存量怎么办：棘轮基线
  *
- * 今天全仓 0 消费方 140 个、单消费方 67 个。一次性下沉 200+ 符号等于把 core 翻一遍，
+ * 口径修正后全仓 0 消费方 0 个、单消费方 77 个（修正前 61）、仅测试在用 10 个。
+ * 一次性下沉 200+ 符号等于把 core 翻一遍，
  * 不可独立回退；故按本仓既有棘轮口径（`_shared.mjs` 的 `BASELINE.rustTests`、
  * `test-layout-audit` 基线）：**计数只许降，超了就红**。降到基线以下时脚本会提示同步
  * `BASELINE`。
@@ -129,16 +145,26 @@ VisScope:
  *
  * `0` 是规则 2 首批整改的结果：140 个「名字没跨出 core」的符号已从根出口收窄
  * （定义留在原域 `pub`，core 内走域内路径），只被测试/无人使用的存量另由
- * `dead-code-audit` R-002 逐项承认。`61` 是宏展开消费计入口径后的单消费方存量——
- * 授权表迁入 core（`authz` 不再充当第 2 个消费方）后从 62 降为 61，掉出的
- * `PermissionMatrix` / `VisScope` 两个走 `WAIVERS`（见上）。
+ * `dead-code-audit` R-002 逐项承认。
+ *
+ * `77` 是 **2026-10-09 口径修正后的存量**（此前为 61）。修正内容：**测试文件不再算
+ * 架构消费方**（口径全文见 `core-surface.mjs` 的 `collectConsumers`）。旧口径下，
+ * 「一个模块在生产用、另一个模块的测试顺手写了一次名字」读成「两个模块依赖」，
+ * 于是 24 个真·单消费方符号（含 `TurnRunner` / `TurnInput` / `Store` / `Entity` /
+ * `PromptMessage` / `ProviderLlmAdapter` …）长期显为 ≥2 而逃过本条。
+ * 口径一改，`zero` 不变（仍按**含测试**计——只被测试用到的符号收窄会编译坏那些测试），
+ * `one` 从 61 涨到 77：**多出来的 16 个不是新增违规，是原先被测试计数遮住的存量**。
+ * 它们按 README §4 四问逐条处置（下沉 / 豁免），处置一个就把这里降一格。
  */
 const BASELINE = process.env.CORE_EXPORT_BASELINE
   ? (() => {
       const [zero, one] = process.env.CORE_EXPORT_BASELINE.split(':').map((n) => Number(n))
       return { zero, one }
     })()
-  : { zero: 0, one: 61 }
+  : { zero: 0, one: 77 }
+
+// core-export-allow one: 2026-10-09 口径修正——测试文件不再算架构消费方（口径全文见 core-surface.mjs 口径 4），此前被测试计数遮住的 24 个真·单消费方符号现形（TurnRunner / TurnInput / Store / Entity / PromptMessage / ProviderLlmAdapter …），故 one 61→77。**这是测量修正，不是放松判据**：那 24 个一直都在，旧口径把它们读成了 ≥2。零消费方那一格（zero）不变——它按含测试计，只被测试用到的符号收窄会当场编译坏那些测试。**退出条件**：这 24 个按 README §4 四问逐条处置（下沉或登记豁免），每处置一个就把 one 降一格；全部处置完（one 回落到 ≤61）时**必须删掉本行**，否则这条豁免会长期掩盖 one 的后续放松。
+
 
 const errors = []
 const report = (rule, msg, loc = '') => errors.push({ rule, msg, loc })
@@ -222,13 +248,18 @@ for (const r of CODE_ROOTS) {
 
 // ==================== C-003 双消费方 ====================
 
+// 两份计数，问两个不同的问题（口径全文见 `core-surface.mjs` 的 `collectConsumers`）：
+// - `units`（**不含测试**）：判「算不算架构元素」⇒ 单消费方要下沉；
+// - `unitsAll`（含测试）：判「够不够格占根出口」⇒ 只有测试在用的，收窄会把测试编译坏。
 const consumers = collectConsumers(ROOT, symbols, CORE_REL)
+const consumersAll = collectConsumers(ROOT, symbols, CORE_REL, { includeTests: true })
 const byName = (a, b) => a.domain.localeCompare(b.domain) || a.name.localeCompare(b.name)
 const rows = [...symbols.keys()]
   .map((name) => ({
     name,
     domain: symbols.get(name),
     units: [...(consumers.get(name) ?? [])].sort(),
+    unitsAll: [...(consumersAll.get(name) ?? [])].sort(),
     isModule: modules.has(name),
   }))
   .sort(byName)
@@ -252,10 +283,16 @@ for (const [name, reason] of Object.entries(WAIVERS)) {
 }
 
 const selfRef = rows.filter((r) => isSelfReference(r))
-const zero = rows.filter((r) => r.units.length === 0 && !waivedNow.has(r.name))
+// 「没人用」按**含测试**的口径：只有别模块的测试在用的符号，收窄它当场把那些测试编译坏
+// （C-002 又不许它们深引）⇒ 它够格占根出口，不进本条。
+const zero = rows.filter((r) => r.unitsAll.length === 0 && !waivedNow.has(r.name))
+// 「只有测试在用」单列一档：它是**合法的根出口**，但也不是架构元素——既不收窄、不下沉。
+const testOnly = rows.filter((r) => r.units.length === 0 && r.unitsAll.length > 0)
+// 「该不该下沉」按**不含测试**的口径：测试依赖的是被测对象，不是长期接口。
 const one = rows.filter(
   (r) => r.units.length === 1 && !isSelfReference(r) && !waivedNow.has(r.name),
 )
+const many = rows.filter((r) => r.units.length >= 2)
 
 if (zero.length > BASELINE.zero) {
   report(
@@ -285,7 +322,7 @@ if (errors.length === 0) {
     true,
     'C-003',
     `双消费方棘轮：0 消费方 ${zero.length}/${BASELINE.zero} · 单消费方 ${one.length}/${BASELINE.one}` +
-      ` · 自引用 ${selfRef.length} · ≥2 ${rows.length - zero.length - one.length - selfRef.length}`,
+      ` · 仅测试在用 ${testOnly.length} · 自引用 ${selfRef.length} · ≥2 ${many.length}`,
   )
   if (zero.length < BASELINE.zero || one.length < BASELINE.one) {
     console.log(
@@ -296,6 +333,8 @@ if (errors.length === 0) {
   }
   if (VERBOSE) {
     for (const r of zero) console.log(`  [ 0] ${(r.domain ?? '?').padEnd(12)} ${r.name}`)
+    for (const r of testOnly)
+      console.log(`  [ T] ${(r.domain ?? '?').padEnd(12)} ${r.name} -> 仅测试在用：${r.unitsAll.join(', ')}`)
     for (const r of one) console.log(`  [ 1] ${(r.domain ?? '?').padEnd(12)} ${r.name} -> ${r.units.join(', ')}`)
   }
   process.exit(0)
@@ -313,6 +352,8 @@ console.error(
 )
 if (VERBOSE) {
   for (const r of zero) console.error(`  [ 0] ${(r.domain ?? '?').padEnd(12)} ${r.name}`)
+  for (const r of testOnly)
+    console.error(`  [ T] ${(r.domain ?? '?').padEnd(12)} ${r.name} -> 仅测试在用：${r.unitsAll.join(', ')}`)
   for (const r of one) console.error(`  [ 1] ${(r.domain ?? '?').padEnd(12)} ${r.name} -> ${r.units.join(', ')}`)
 }
 process.exit(1)

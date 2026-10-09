@@ -67,10 +67,14 @@ const symbols = surface.symbols
 
 // ==================== 数消费方 ====================
 //
-// 计数口径（`unitOf` 的单位划分、自引用不算下放候选、一个文件都不能跳过）收在
-// [`core-surface.mjs`](./core-surface.mjs)——判定型的 `core-export-audit.mjs` 判
-// 「≥2 个模块消费」走的是**同一份**计数，避免「报告说 A、判定说 B」。
+// 计数口径收在 [`core-surface.mjs`](./core-surface.mjs)——判定型的 `core-export-audit.mjs`
+// 判「≥2 个模块消费」走的是**同一份**计数，避免「报告说 A、判定说 B」。
+//
+// **两个口径，问两个问题**（2026-10-09 修正，理由见 `core-surface.mjs` 的 `collectConsumers`）：
+// - `units`（**不含测试**）：判「算不算架构元素」⇒ 单消费方是下放候选；
+// - `unitsAll`（含测试）：判「够不够格占根出口」⇒ 只被测试用到的符号收窄会编译坏那些测试。
 const consumers = collectConsumers(ROOT, symbols, CORE_REL)
+const consumersAll = collectConsumers(ROOT, symbols, CORE_REL, { includeTests: true })
 
 // ==================== 报告 ====================
 
@@ -79,17 +83,19 @@ const rows = allNames.map((name) => ({
   name,
   domain: symbols.get(name),
   units: [...(consumers.get(name) ?? [])].sort(),
+  unitsAll: [...(consumersAll.get(name) ?? [])].sort(),
 }))
 
-const zero = rows.filter((r) => r.units.length === 0)
+const zero = rows.filter((r) => r.unitsAll.length === 0)
+const testOnly = rows.filter((r) => r.units.length === 0 && r.unitsAll.length > 0)
 const one = rows.filter((r) => r.units.length === 1 && !isSelfReference(r))
 const selfRef = rows.filter(isSelfReference)
 const many = rows.filter((r) => r.units.length >= 2)
 
 console.log(`\n== symbio_core 公开面消费方统计 ==`)
 console.log(
-  `   公开符号 ${rows.length} · ≥2 消费方 ${many.length} · 仅 1 个 ${one.length}` +
-    ` · 自引用 ${selfRef.length} · 0 个 ${zero.length}`,
+  `   公开符号 ${rows.length} · ≥2 生产消费方 ${many.length} · 仅 1 个 ${one.length}` +
+    ` · 仅测试在用 ${testOnly.length} · 自引用 ${selfRef.length} · 0 个 ${zero.length}`,
 )
 
 const byName = (a, b) => a.domain.localeCompare(b.domain) || a.name.localeCompare(b.name)
@@ -102,10 +108,16 @@ for (const r of one.sort(byName)) {
   console.log(`  ${(r.domain ?? '?').padEnd(12)} ${r.name.padEnd(32)} -> ${r.units.join(', ')}`)
 }
 
-console.log(`\n--- 0 个消费方（**名字**未在本 crate 外出现；先确认是否只经字段访问被用到）---`)
+console.log(`\n--- 0 个消费方（**含测试**也没人引用；先确认是否只经字段访问被用到）---`)
 if (zero.length === 0) console.log('  （无）')
 for (const r of zero.sort(byName)) {
   console.log(`  ${(r.domain ?? '?').padEnd(12)} ${r.name}`)
+}
+
+console.log(`\n--- 仅测试在用（**合法根出口**：收窄它会把那些测试编译坏；也不下沉）---`)
+if (testOnly.length === 0) console.log('  （无）')
+for (const r of testOnly.sort(byName)) {
+  console.log(`  ${(r.domain ?? '?').padEnd(12)} ${r.name.padEnd(32)} -> ${r.unitsAll.join(', ')}`)
 }
 
 if (VERBOSE) {

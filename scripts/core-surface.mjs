@@ -22,7 +22,16 @@
  * 3. **宏生成的公开符号扫不到 `pub` 关键字**：`define_string_key!(PathKey, PATH, "path")`
  *    展开出的类型与常量都不带 `pub`，`^pub\s+(struct|…)` 完全看不见它们——而它们恰是
  *    **消费方最多**的一批（`PATH` 有 17 个消费方）。故按宏的形参位置取。
- * 4. **`symbio/src/` 直属文件（`lib.rs` / `plugins/mod.rs` 这类不在插件子目录里的）
+ * 4. **测试文件不是消费方**（`X.test.rs` 与 `tests.rs`，约定见 `test-layout-audit.mjs`）：
+ *    消费方数要回答的是「**谁依赖它**」，而测试依赖的是**被测对象**，不是它要长期持有的
+ *    接口。把测试算进来会让「一个模块在生产用、另一个模块的测试顺手写了一次名字」读成
+ *    「两个模块依赖」——`TurnRunner` 就是这样长期显为 2 消费方（生产只有 `plugins/session`，
+ *    第二个单位来自 `plugins/model/bound_provider.test.rs` 的彩排），而同族的
+ *    `TurnOutcome` / `TurnResume` 因为没被那个测试提到，一直显为单消费方。**同一个功能、
+ *    四个名字，两种判决**——差别只在测试里恰好写了哪几个名字，那与「该不该住 core」无关。
+ *    ⚠️ 本条是 2026-10-09 补的**口径修正**：此前测试算消费方，棘轮基线（单消费方 61）按
+ *    那个口径算；口径一改，基线随之一并重定（见 `core-export-audit.mjs` 的 `BASELINE`）。
+ * 5. **`symbio/src/` 直属文件（`lib.rs` / `plugins/mod.rs` 这类不在插件子目录里的）
  *    也是消费方**：第一版把它们跳过，于是「只在注册表里被用到」的符号被算成 0——
  *    `PluginErrorCode` / `PluginIdentity` 一族全部假报。**「数不到」与「真的没人用」
  *    是两件事**，归属函数因此**永不返回 null**（见 `core-surface-audit.mjs` 的 `unitOf`）。
@@ -275,13 +284,35 @@ export function collectMacroBodies(root, coreRel, symbols) {
 }
 
 /**
+ * 测试文件（命名约定见 `test-layout-audit.mjs`：`X.test.rs` 与 `tests.rs`）。
+ *
+ * **测试不是架构消费方**——见文件头口径 4。这条判据只有这一处实现，三个审计共用。
+ */
+export function isTestFile(file) {
+  return file.endsWith('.test.rs') || path.basename(file) === 'tests.rs'
+}
+
+/**
  * 数每个公开符号的消费方单位（`Map<符号, Set<单位>>`）。
  *
  * - core 自身不算消费方（口径：公开面是给 core **外**用的）；
- * - 一个文件都不能跳过（口径 4）：`symbio/src/` 直属文件也算；
- * - 宏调用点算消费方（见 `collectMacroBodies`）。
+ * - 一个**生产**文件都不能跳过（口径 5）：`symbio/src/` 直属文件也算；
+ * - 宏调用点算消费方（见 `collectMacroBodies`）；
+ * - **测试文件默认不算**（口径 4）——`opts.includeTests` 为真时才计入。
+ *
+ * ## 为什么给测试留一个开关，而不是一律排除
+ *
+ * 两条判定问的是**两个不同的问题**，答案因此不能共用同一个数：
+ *
+ * | 问题 | 口径 | 为什么 |
+ * |---|---|---|
+ * | 「它够不够格占根出口？」（0 消费方 → 收窄） | **含测试** | 测试也是 core 外的编译单元。一个只被别模块测试用到的符号，收窄它当场把那些测试编译坏（C-002 又不许它们深引）——所以「测试在用」**足以**让它留在根出口 |
+ * | 「它算不算架构元素？」（单消费方 → 下沉） | **不含测试** | 测试依赖的是**被测对象**，不是它要长期持有的接口。让测试凑出第二个单位，等于「谁在测试里顺手写了一次名字」决定一个实现的归属 |
+ *
+ * 两者混成一个数，就是 `TurnRunner` 长期逃过下沉的机制（见口径 4）。
  */
-export function collectConsumers(root, symbols, coreRel = 'symbio/src/symbio_core') {
+export function collectConsumers(root, symbols, coreRel = 'symbio/src/symbio_core', opts = {}) {
+  const includeTests = opts.includeTests === true
   const allNames = [...symbols.keys()]
   const macros = collectMacroBodies(root, coreRel, symbols)
   const consumers = new Map()
@@ -291,6 +322,7 @@ export function collectConsumers(root, symbols, coreRel = 'symbio/src/symbio_cor
       if (!file.endsWith('.rs')) continue
       const rel = path.relative(root, file)
       if (rel.split(path.sep).join('/').startsWith(coreRel + '/')) continue // core 自身不算消费方
+      if (!includeTests && isTestFile(file)) continue // 测试不是架构消费方（口径 4）
       const unit = unitOf(rel)
       if (!unit) continue
       const src = stripComments(fs.readFileSync(file, 'utf8'))

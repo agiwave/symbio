@@ -229,3 +229,33 @@ test('自引用：`PLUGIN_ID_ALPHA` 被同名插件用，不算单消费方', ()
   )
   assert.equal(r.status, 0, r.stderr + r.stdout)
 })
+
+test('C-003 口径：测试文件不算架构消费方（生产 1 + 测试 1 ⇒ 单消费方）', () => {
+  // 第二个「消费方」只来自 `*.test.rs`。旧口径把它算成 ≥2 ⇒ 放行；那正是 `TurnRunner`
+  // 长期逃过下沉的机制（生产只有 `plugins/session`，第二个单位来自 model 的彩排测试）。
+  const r = audit(
+    clean({
+      [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, LonelyThing};\n',
+      [ACTORS_MOD]: 'pub struct AlphaThing;\npub struct LonelyThing;\n',
+      'symbio/src/plugins/alpha/lonely.rs':
+        'use crate::symbio_core::LonelyThing;\npub fn l(_: LonelyThing) {}\n',
+      'symbio/src/plugins/beta/lonely.test.rs':
+        'use crate::symbio_core::LonelyThing;\n#[test]\nfn t() { let _ = size_of::<LonelyThing>(); }\n',
+    }),
+  )
+  assert.equal(r.status, 1, '测试不算消费方 ⇒ 仍应判单消费方')
+  assert.match(r.stderr, /单消费方/)
+})
+
+test('C-003 口径：仅测试在用 ⇒ 合法根出口（放行，不收窄）', () => {
+  // 收窄它会把那个测试编译坏（C-002 又不许它深引）⇒「测试在用」足以让它留在根出口。
+  const r = audit(
+    clean({
+      [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, TestOnlyThing};\n',
+      [ACTORS_MOD]: 'pub struct AlphaThing;\npub struct TestOnlyThing;\n',
+      'symbio/src/plugins/beta/only.test.rs':
+        'use crate::symbio_core::TestOnlyThing;\n#[test]\nfn t() { let _ = size_of::<TestOnlyThing>(); }\n',
+    }),
+  )
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+})
