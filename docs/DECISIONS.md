@@ -58,10 +58,10 @@
 | [043](./decisions/core.md#adr-043-v2-事件地基落地契约居中于中性层store--projection-按冻结形状进-symbio_core) | v2 事件地基：契约居中，`store` / `projection` 按冻结形状进 core | 现行 |
 | [044](./decisions/core.md#adr-044-实测与判据同源成本时延与兜底率是事件网格的一等数据不用旁路遥测) | 实测与判据同源：成本/时延/兜底率是事件网格一等数据 | 现行 |
 | 045 | v2 事实桥：生产流量经转写进事实源，不等整体切换 | **已并入 [ADR-044](./decisions/core.md#adr-044-实测与判据同源成本时延与兜底率是事件网格的一等数据不用旁路遥测)**（转写纪律）+ [ADR-048](./decisions/session.md#adr-048-出厂档位改-fullv2-链路是出厂路径bridge-退役)（桥退役）；机制见 `symbio/src/plugins/session/docs/module-layout.md` |
-| [046](./decisions/core.md#adr-046-事实能力进-symbio_core不以可选插件承载必须有值的机制) | 事实能力进 core：不以「可选插件」承载必须有值的机制 | 现行（2026-10-07 补记） |
+| [046](./decisions/core.md#adr-046-事实能力进-symbio_core不以可选插件承载必须有值的机制) | 事实能力进 core：不以「可选插件」承载必须有值的机制 | 现行 |
 | [047](./decisions/session.md#adr-047-委派者三项真源判定回-reason能力走注入进展读磁盘事实) | 委派者三项真源：判定回 `reason`、能力走注入、进展读磁盘事实 | 现行 |
-| [048](./decisions/session.md#adr-048-出厂档位改-fullv2-链路是出厂路径bridge-退役) | 出厂档位改 `full`——v2 链路是出厂路径，`bridge` 退役 | **部分接受**（2026-10-09：已落地 1/4 步，三条缺口见该条） |
-| [048a](./decisions/session.md#adr-048a2026-10-09v2-的-prompt-形状必须回到结构化消息) | v2 的 prompt 形状必须回到结构化消息（不把工具结果拍平成纯文本） | 已接受 · 未实现 |
+| [048](./decisions/session.md#adr-048-出厂档位改-fullv2-链路是出厂路径bridge-退役) | 出厂档位改 `full`——v2 链路是出厂路径，`bridge` 退役 | **已接受 · 已落地**（2026-10-09：余反射档开关与 prompt 形状基线未开工；红点见 [13 §已知未闭合](./plan/13-质量改进总纲.md)） |
+| [048a](./decisions/session.md#adr-048a2026-10-09v2-的-prompt-形状必须回到结构化消息) | v2 的 prompt 形状必须回到结构化消息（不把工具结果拍平成纯文本） | **已接受 · 已实现**（2026-10-09） |
 | 050 | `TurnRunner` 族按依赖方数量下沉 `plugins/session` | **非架构决策 / 特例，已删**——下沉 = 应用 [ADR-023](./decisions/core.md#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层) |
 
 ---

@@ -170,7 +170,7 @@ pub(crate) use adapters::StubLlmAdapter;
 // 它深引 `symbio_core::invariants::…` ⇒ 同 `StubLlmAdapter` 一形态，只在 `cfg(test)` 出根。
 #[cfg(test)]
 pub(crate) use invariants::unresolved_turns;
-// 事实网格 → prompt 的双向完整性复核（ADR-048 防线节）：下沉后的运行器组装 prompt 时调它。
+// 事实网格 → prompt 的双向完整性复核（ADR-048）：下沉后的运行器组装 prompt 时调它。
 pub(crate) use projection::prompt_fidelity::verify as verify_prompt_fidelity;
 // `PromptMessage` 的结构化子件：`PromptMessage.tool_calls` 的载荷类型。此前只被 core 内
 // `actors` 用（故根注释曾写「留在模块路径」）；运行器下沉 `plugins/session` 后它跨出 core，

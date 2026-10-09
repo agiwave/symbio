@@ -1,4 +1,4 @@
-//! 事实网格 → prompt 的**双向完整性**判据（[ADR-048「系统性失败的防线」节](../../../../docs/decisions/session.md#adr-048-出厂档位改-fullv2-链路是出厂路径bridge-退役)）。
+//! 事实网格 → prompt 的**双向完整性**判据（[ADR-048](../../../../docs/decisions/session.md#adr-048-出厂档位改-fullv2-链路是出厂路径bridge-退役)）。
 //!
 //! ## 它防的是什么
 //!
