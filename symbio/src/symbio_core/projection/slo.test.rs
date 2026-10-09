@@ -1,9 +1,9 @@
 //! `slo_report` 验收——时延列口径（final 实测、按 turn 归档、兜底不混入）；
 //! 末尾附**阶段三扫描口**（opt-in：walk 各会话的 v2 WAL，三投影同源出报告）。
 
-use super::super::fallback::fallback_rate;
+use super::super::fallback::{fallback_rate, FallbackRateView, TierStats};
 use super::slo_report;
-use crate::symbio_core::projection::slo::TierLatency;
+use crate::symbio_core::projection::slo::{SloLatencyView, TierLatency};
 use crate::symbio_core::{
     cost_ledger, Budget, Entity, Event, EventStore, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK,
     EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
@@ -144,103 +144,112 @@ fn three_slo_columns_share_one_event_slice() {
     assert_eq!(ledger.of("agent:main").spent_ms, 5000);
 }
 
-// ── 阶段三扫描口（opt-in）────────────────────────────────────────────────────
+// ── 跨会话合并（P2：聚合逻辑升为生产代码，[plan/13 批 P2]）──────────────────
 //
-// 用法：设 `SYMBIO_SLO_SCAN_ROOTS`（**分号**分隔的目录列表——Windows 盘符
-// 自带冒号，`:` 不能当分隔符；通常是会话存储根，扫描器在其下递归找
-// `v2-events.wal`，即 v2 事实桥的落盘处），然后
-//   cargo test -p symbio --lib slo_scan_wal_roots -- --ignored --nocapture
-// 输出 P50/P95/P99、兜底率与成本台账——三列全部出自同一事实源（ADR-044）。
-// 未设环境变量时打印说明后直接通过（CI 不受影响）。
+// ## 为什么单测在这里而不是只在 e2e
+//
+// 合并是**纯函数**，而它承载两条「错了不会报错」的决定：① 样本是并集不是覆盖；
+// ② 计是相加不是取新。两条反过来都静默——并集错成覆盖会让 P99 只反映最后一个
+// 会话，计数错成取新会让兜底率随扫描顺序变。e2e 只验「两个会话都读到了」，
+// 这两种错它一个都照不出来，所以必须在纯函数层穷举。
 
-/// 汇总多个 WAL 的时延样本（跨会话合并——P99 是全量口径，不是单会话口径）。
-fn merge_samples(roots: &[std::path::PathBuf]) -> (Vec<u64>, u64, u64) {
-    let mut samples: Vec<u64> = Vec::new();
-    let mut turns = 0u64;
-    let mut fallbacks = 0u64;
-    for wal in roots {
-        let Ok(store) = crate::symbio_core::EventWalStore::open(wal) else {
-            println!("⚠ 无法打开 {}（跳过）", wal.display());
-            continue;
-        };
-        let snapshot = store.range(Seq::new(0));
-        let latency = slo_report()
-            .apply(&snapshot, i64::MAX, Budget::generous())
-            .value;
-        for t in latency.by_tier.values() {
-            samples.extend_from_slice(&t.samples);
-        }
-        let fr = fallback_rate()
-            .apply(&snapshot, i64::MAX, Budget::generous())
-            .value;
-        for st in fr.by_tier.values() {
-            turns += st.turns;
-            fallbacks += st.fallbacks;
-        }
-    }
-    samples.sort_unstable();
-    (samples, turns, fallbacks)
-}
-
-fn collect_wals(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
+/// 两份视图的样本**并集**（同档位），不是覆盖。
+#[test]
+fn merge_unions_samples_per_tier_rather_than_overwriting() {
+    let mk = |tier: &str, xs: &[u64]| SloLatencyView {
+        by_tier: [(
+            tier.to_string(),
+            TierLatency {
+                tier: tier.into(),
+                samples: xs.to_vec(),
+            },
+        )]
+        .into_iter()
+        .collect(),
     };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_wals(&path, out);
-        } else if path.file_name().is_some_and(|n| n == "v2-events.wal") {
-            out.push(path);
-        }
-    }
-}
+    let a = mk("deep", &[10, 30]);
+    let b = mk("deep", &[20]);
+    let c = mk("fast", &[5]);
 
-#[tokio::test]
-#[ignore = "阶段三扫描口：需 SYMBIO_SLO_SCAN_ROOTS（见上方用法说明）"]
-async fn slo_scan_wal_roots() {
-    let Some(spec) = std::env::var("SYMBIO_SLO_SCAN_ROOTS")
-        .ok()
-        .filter(|s| !s.is_empty())
-    else {
-        println!("未设 SYMBIO_SLO_SCAN_ROOTS——跳过扫描（用法见 slo.test.rs 头注释）");
-        return;
-    };
-    let mut roots: Vec<std::path::PathBuf> = Vec::new();
-    for dir in spec.split(';').filter(|s| !s.is_empty()) {
-        collect_wals(std::path::Path::new(dir), &mut roots);
-    }
-    if roots.is_empty() {
-        println!("给定根下没有 v2-events.wal——桥还没有真实流量可扫（先跑会话）");
-        return;
-    }
-    println!(
-        "═══ SLO 扫描（{} 个 WAL，ADR-044 同一事实源）═══",
-        roots.len()
+    let merged = SloLatencyView::merge(&[a, b, c]);
+    assert_eq!(
+        merged.of("deep").samples,
+        vec![10, 20, 30],
+        "并集且升序（percentile 的前提）"
     );
-
-    let (samples, turns, fallbacks) = merge_samples(&roots);
-    if samples.is_empty() {
-        println!("有 WAL 但没有 final 样本（可能全是中止/空轮）");
-        return;
-    }
-    let all = TierLatency {
-        tier: "all".into(),
-        samples,
-    };
-    let rate = if turns == 0 {
-        0.0
-    } else {
-        fallbacks as f64 / turns as f64
-    };
-    println!(
-        "时延（成功轮）：P50 = {}ms · P95 = {}ms · P99 = {}ms · max = {}ms（{} 样本）",
-        all.p50(),
-        all.p95(),
-        all.p99(),
-        all.percentile(100),
-        all.count()
+    assert_eq!(
+        merged.of("fast").samples,
+        vec![5],
+        "只在一个输入里的档位照常进结果"
     );
-    println!("兜底率：{fallbacks}/{turns} = {:.2}%", rate * 100.0);
-    println!("（成本台账逐会话差异大，按需对各 WAL 单独跑 cost_ledger——三列同源，口径见 ADR-044）");
+    // 合并后再算分位数 = 全量口径（3 个样本的 P99 是 30，不是任一份自己的）
+    assert_eq!(merged.of("deep").p99(), 30);
+    assert_eq!(merged.of("deep").count(), 3);
 }
+
+/// 档位集合取**并集**，输入里没有的档位不造空账。
+#[test]
+fn merge_does_not_invent_empty_tiers() {
+    let mk = |tier: &str, xs: &[u64]| SloLatencyView {
+        by_tier: [(
+            tier.to_string(),
+            TierLatency {
+                tier: tier.into(),
+                samples: xs.to_vec(),
+            },
+        )]
+        .into_iter()
+        .collect(),
+    };
+    let merged = SloLatencyView::merge(&[mk("deep", &[1])]);
+    assert!(
+        !merged.by_tier.contains_key("fast"),
+        "没出现过的档位不在结果里（`of()` 负责给空账）"
+    );
+    // 空输入 ⇒ 有据的空，不是错误
+    assert!(SloLatencyView::merge(&[]).by_tier.is_empty());
+}
+
+/// 计数**相加**（分子分母都是加法），率是纯查询故合并后再算与分开算逐字相同。
+#[test]
+fn fallback_merge_adds_counts_and_keeps_the_rate_pure() {
+    let mk = |turns: u64, fallbacks: u64| FallbackRateView {
+        by_tier: [(
+            "deep".to_string(),
+            TierStats {
+                tier: "deep".into(),
+                turns,
+                fallbacks,
+            },
+        )]
+        .into_iter()
+        .collect(),
+    };
+    let merged = FallbackRateView::merge(&[mk(10, 1), mk(20, 2)]);
+    let st = merged.of("deep");
+    assert_eq!(
+        (st.turns, st.fallbacks),
+        (30, 3),
+        "分子分母都相加，不取较新的一份"
+    );
+    assert_eq!(st.rate(), 0.1, "率在合并后由纯查询算出");
+    assert!(
+        FallbackRateView::merge(&[]).by_tier.is_empty(),
+        "空输入 ⇒ 有据的空"
+    );
+}
+
+// ── 阶段三扫描口（已退役，2026-10-09，P2）──────────────────────────────────
+//
+// 原形态：`#[ignore]` + 需 `SYMBIO_SLO_SCAN_ROOTS` 手工跑。**退役理由**：它的
+// 全部职责已被两件事接走，且都从「手工 opt-in」变成「每轮门禁自动跑」：
+//
+//   ① 跨会话**聚合口径**（并集 / 重排 / 相加）⇒ 升为 core 的
+//      `SloLatencyView::merge` / `FallbackRateView::merge`，由
+//      `merge_unions_samples_per_tier_rather_than_overwriting` 等三条纯函数判据钉；
+//   ② **扫描 + 落成读数** ⇒ 生产路径 `plugins/session/stats.rs` 的聚合列
+//      （`fleet`），由 `fleet_aggregates_every_session_in_the_instance` 等四条判据钉，
+//      其中「只走一层」「坏 WAL 不拖垮整列」是原 `#[ignore]` 测试**从未覆盖**的两条。
+//
+// 保留它只会多一份要走环境变量的手工入口，而那份入口与生产读数之间没有任何
+// 对账——正是「一个事实两个 owner」。故删，不保留 deprecated 形态。

@@ -1,7 +1,7 @@
 import './_selfrun.mjs';
-// T28 读数口 `session/stats`：跑一轮成功 + 一轮兜底，从**生产出口**读四列
+// T28 读数口 `session/stats`：跑一轮成功 + 一轮兜底，从**生产出口**读各列
 // 与一份不变量清单，与同一份 `v2-events.wal` 逐列对账；再对事实源做手术，
-// 验证列和清单真的会动。
+// 验证列和清单真的会动。P2 起多一列**实例级聚合**（`fleet`），一并对账。
 //
 // ## 编号为什么是 28
 //
@@ -196,6 +196,29 @@ export default defineCase(
         assertEq(row.fallbacks, 1, '恰好一轮兜底');
         assertEq(row.samples, 1, '恰好一轮成功');
         assertEq(row.rate, 0.5, '兜底率 1/2');
+
+        // ── 证据 ②″：实例级聚合列（P2，2026-10-09）──────────────────
+        // `fleet` = 本实例下**所有**会话的时延 / 兜底合并。本用例只跑了一个会话，
+        // 于是聚合列必须与单会话列**逐字同数**（口径同一套，差别只肯能在范围上：
+        // 一个会话的「全量」就是它自己）。这条钉的正是「范围」：若扫描进了 archive
+        // 或别人的目录，两个数立刻分家。
+        assertEq(
+          stats.fleet.sessions,
+          1,
+          `本实例只有一个会话（实际: ${JSON.stringify(stats.fleet)}）`,
+        );
+        assertEq(stats.fleet.wals, 1, '读进来一个 WAL');
+        assertEq(
+          stats.fleet.turns,
+          row.turns,
+          '聚合列的分母 = 单会话列的分母（全量 = 一个会话时逐字相同）',
+        );
+        assertEq(stats.fleet.fallbacks, row.fallbacks, '分子同理');
+        assertEq(
+          stats.fleet.by_tier.latency[0].samples,
+          row.samples,
+          '样本数同理（并集不是覆盖：一个会话时恰好等于自己）',
+        );
 
         // ── 证据 ②′：读侧可见域（[04 §3.1 批⑥](../../docs/plan/04-工程落地.md)）──
         // 载荷声明**读方身份**才判可见域（`thread_private` 缺省，C10）；不声明 =

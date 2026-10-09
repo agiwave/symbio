@@ -146,6 +146,17 @@ VisScope:
       // 的消费方只有 session 那一个，与上面那条同形。
       EVENT_ASSISTANT_REPORTED:
         '事件名常量：与 EVENT_TURN_SUPPLEMENTED 同类同格（turn × asserted），event/mod.rs 单点定义、插件按名引用。Core 外唯一消费方 = plugins/session（v2_exec 落格），投影在 core 内走域内路径',
+      // `SloLatencyView` / `FallbackRateView`（P2 的跨会话聚合）：**被 core 外消费的
+      // 类型**，与 `TurnState` / `PromptMessage` 同族。`merge` 是类型的行为——提成根
+      // 函数会让它变成无主函数（谁的数据谁的行为）；而 C-002 禁止插件深引
+      // `symbio_core::projection::…` ⇒ 类型必须占根出口。core 内另有消费方
+      // （`actors` / `fallback` 自身），审计只数跨出 core 的那一个（plugins/session
+      // 的实例级聚合列），故显为单消费方。两者**成对**：时延与兜底两列一起合并，
+      // 少任一个另一个无意义，故一并登记而不是各写半句。
+      SloLatencyView:
+        'P2 跨会话聚合的视图类型：merge 是类型行为（提成根函数即无主函数），C-002 禁插件深引 ⇒ 类型必须占根。core 内另有消费方（actors），审计只数 plugins/session 的聚合列那一个',
+      FallbackRateView:
+        '同上：与 SloLatencyView 成对（时延 + 兜底一起合并），core 外唯一消费方同为 plugins/session 的实例级聚合列',
     }
 
 /**

@@ -39,6 +39,15 @@ impl TierStats {
             self.fallbacks as f64 / self.turns as f64
         }
     }
+
+    /// 零账（`merge` 的累加起点；与 [`Self::of`] 查不到时给的是同一形态）。
+    pub(crate) fn empty(tier: &str) -> Self {
+        Self {
+            tier: tier.to_string(),
+            turns: 0,
+            fallbacks: 0,
+        }
+    }
 }
 
 /// 兜底率视图：按档位名字典序（BTreeMap ⇒ 逐字节确定，N1）。
@@ -55,6 +64,27 @@ impl FallbackRateView {
             turns: 0,
             fallbacks: 0,
         })
+    }
+
+    /// 合并多份视图（**跨会话聚合**）。与 [`SloLatencyView::merge`] 同族同理由：
+    /// 分子分母都是**计数**，逐档位相加即可——率不在这时候算（`TierStats::rate`
+    /// 是纯查询，合并后再算与分开算逐字相同，因为率是除法而不是累加）。
+    ///
+    /// 空输入 ⇒ 空视图。同档位在两份输入里都有时**相加**，不取较新的一份：
+    /// 取新会让「上一次计算的 persist」悄悄覆盖历史，而 WAL 是 append-only 的，
+    /// 读数没有「哪一份更新」可谈。
+    pub fn merge(parts: &[FallbackRateView]) -> FallbackRateView {
+        let mut by_tier: BTreeMap<String, TierStats> = BTreeMap::new();
+        for part in parts {
+            for (tier, st) in &part.by_tier {
+                let acc = by_tier
+                    .entry(tier.clone())
+                    .or_insert_with(|| TierStats::empty(tier));
+                acc.turns += st.turns;
+                acc.fallbacks += st.fallbacks;
+            }
+        }
+        FallbackRateView { by_tier }
     }
 }
 

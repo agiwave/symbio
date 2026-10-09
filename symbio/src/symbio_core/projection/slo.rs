@@ -79,6 +79,40 @@ impl SloLatencyView {
             samples: Vec::new(),
         })
     }
+
+    /// 合并多份视图（**跨会话聚合**，[plan/13 批 P2](../../../../docs/plan/13-质量改进总纲.md)）。
+    ///
+    /// ## 为什么它在生产代码里而不是调用方
+    ///
+    /// 「跨会话合并」此前只活在 `slo.test.rs` 的一个 `#[ignore]` 扫描测试里：并集、
+    /// 重排、再算分位数。放在调用方（插件）就意味着**统计口径有两份**——单会话那份
+    /// 在 core，跨会话那份在插件，而两者算的是同一个数。分位数取法与
+    /// [`TierLatency::percentile`] 是绑在一起的（最近邻、`ceil(p/100 × n) - 1`），
+    /// 拆开就是让「P99 是什么」有两个答案。
+    ///
+    /// ## 形状
+    ///
+    /// 同档位样本**并集后重排**（升序是 `percentile` 的前提，不是巧合）；
+    /// 输入里没有的档位不出现在结果里（不造空账；`of()` 已经负责「查不到给空」）。
+    /// 输入为空 ⇒ 空视图（有据的空，不是错误）。
+    pub fn merge(parts: &[SloLatencyView]) -> SloLatencyView {
+        let mut by_tier: BTreeMap<String, Vec<u64>> = BTreeMap::new();
+        for part in parts {
+            for (tier, lat) in &part.by_tier {
+                by_tier
+                    .entry(tier.clone())
+                    .or_default()
+                    .extend(&lat.samples);
+            }
+        }
+        let mut view = SloLatencyView::default();
+        for (tier, mut samples) in by_tier {
+            samples.sort_unstable();
+            view.by_tier
+                .insert(tier.clone(), TierLatency { tier, samples });
+        }
+        view
+    }
 }
 
 /// `slo_report` 投影：从事件切片统计各档位的实测时延样本（final 的 cost_ms）。

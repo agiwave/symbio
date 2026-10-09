@@ -45,6 +45,19 @@ pub use projection::checkpoint::checkpoint;
 pub use projection::cost::cost_ledger;
 pub use projection::fallback::fallback_rate;
 pub use projection::slo::slo_report;
+// 跨会话聚合的两个视图类型（P2，C-003 的单消费方判定见下）。
+//
+// **为什么它们必须占根出口而投影函数不必**：`SloLatencyView::merge` /
+// `FallbackRateView::merge` 是**跨会话聚合**的口径，调用方在 core 之外
+// （`plugins/session/stats.rs` 的实例级列）。C-002 禁深引域目录，所以「插件要调
+// 一个 core 私有模块上的方法」只有两条路：把方法提成根函数（那会让 `merge` 变成
+// 无主函数，而它明明是 `SloLatencyView` 的行为），或者让**类型**占根出口。
+// 选后者：方法留在类型上（谁的数据谁的行为），插件经根路径拿到类型再调。
+//
+// 它们与 `TurnState` / `PromptMessage` 同族——**被 core 外消费的类型**，不是
+// 「顺手导出的内部件」。
+pub use projection::fallback::FallbackRateView;
+pub use projection::slo::SloLatencyView;
 pub use projection::transcript::transcript;
 // 结构化 prompt 消息（ADR-048a）：core 的**最小结构化出口**——角色、正文、
 // `tool_call_id`、`tool_calls`。线格式（`ChatMessage`）由 adapter 边界翻译，

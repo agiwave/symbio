@@ -16,6 +16,19 @@ use crate::symbio_core::{
 };
 use std::path::{Path, PathBuf};
 
+/// 读数（**测试专用窄口**）：`storage_root` 固定成 WAL 所在目录本身。
+///
+/// 于是每个用例都只有一个会话 ⇒ 聚合列读到的就是「一个 WAL」的形状，可与
+/// per-session 各列对照。P2 的多会话判据另建目录、不走这个窄口。
+///
+/// 为什么包一层而不是给 21 处调用都加第五个参数：测试要盯的是**各列口径**，
+/// 聚合列的扫描范围由它自己那条判据钉。两件事混在一个入口上，改聚合范围
+/// 就要动 21 处。
+fn read_at(wal: &Path, principal: &str) -> super::SessionStats {
+    let root = wal.parent().expect("WAL 有父目录").to_path_buf();
+    read("s1", wal, None, principal, &root).expect("读数")
+}
+
 /// 播种一个事实源：两轮（一轮成功 final、一轮兜底 fallback），共 4 格。
 ///
 /// 两轮都声明 `tier = deep`——分母 / 分子 / 样本数因此都落在同一行上，
@@ -99,11 +112,179 @@ fn drop_line(wal: &Path, event_id: &str) {
     std::fs::write(wal, format!("{}\n", kept.join("\n"))).expect("回写 WAL");
 }
 
+// ── 实例级聚合列（P2）──────────────────────────────────────────────────────
+//
+// ## 为什么单独一组用例
+//
+// 其余各列的口径是「一个会话、一份切片、一套投影」；聚合列的口径是「**实例下所有
+// 会话**、多份切片、合并后再出数」。它多出来的自由度正是它独有的失效形态：
+// 少扫一个会话、把 archive 扫进来、一个坏 WAL 拖垮整列——三条都**不报错**，
+// 只是数字悄悄不对（样本少几个、目录多几个）。
+
+/// 造一个有 N 个会话的实例根，每个会话一格 final（同档位 `deep`）。
+///
+/// 返回 `(实例根, 各会话的 WAL 路径)`。**会话目录 = 存储根的直接子目录**
+/// （`paths::session_dir` 的形状），故意按真布局造——判据要盯的正是
+/// 「扫描范围对不对」，用假布局就照不出范围错。
+fn seed_instance(tag: &str, n: usize) -> (PathBuf, Vec<PathBuf>) {
+    let root = std::env::temp_dir().join(format!("symbio-fleet-{}-{tag}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("实例根");
+    let mut wals = Vec::new();
+    for i in 0..n {
+        let dir = root.join(format!("session-{i}"));
+        std::fs::create_dir_all(&dir).expect("会话目录");
+        let wal = dir.join(super::super::paths::V2_WAL_FILE);
+        let store = EventWalStore::open(&wal).expect("WAL");
+        // 每个会话一轮：final 实测各不相同 ⇒ 合并后样本数与分位数都可判
+        let u = store
+            .append(
+                Event::pending(
+                    format!("u{i}"),
+                    EVENT_USER_MESSAGE,
+                    Entity::Turn,
+                    Verb::Opened,
+                    0,
+                    "user",
+                )
+                .with_payload(serde_json::json!({ "text": "问", "tier": "deep" })),
+            )
+            .unwrap()
+            .value();
+        store
+            .append(
+                Event::pending(
+                    format!("f{i}"),
+                    EVENT_ASSISTANT_FINAL,
+                    Entity::Turn,
+                    Verb::Closed,
+                    0,
+                    "agent:main",
+                )
+                .with_produced_by(u)
+                .with_cost_ms(100 * (i as u64 + 1)),
+            )
+            .unwrap();
+        wals.push(wal);
+    }
+    (root, wals)
+}
+
+/// **正向**：三个会话 ⇒ `wals = 3`、样本 3 个、时延取全量口径。
+///
+/// 这条是 P2 的出口判据本身——它红的方式有两种，都是静默的：扫不到（`wals` 少）、
+/// 扫错范围（`wals` 多）。两者都不抛错，所以必须有一个断言直接盯数字。
+#[test]
+fn fleet_aggregates_every_session_in_the_instance() {
+    let (root, wals) = seed_instance("agg", 3);
+    let got = read(
+        "session-0",
+        &wals[0],
+        None,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        &root,
+    )
+    .expect("读数");
+
+    assert_eq!(
+        got.fleet["wals"], 3,
+        "实例下三个会话的 WAL 全部读进来（少一个就是静默漏扫）"
+    );
+    assert_eq!(got.fleet["sessions"], 3, "目录里有 WAL 的会话数");
+    assert_eq!(
+        got.fleet["by_tier"]["latency"][0]["samples"], 3,
+        "三个会话各一格 final ⇒ 合并后 3 个样本（并集，不是覆盖）"
+    );
+    // 样本是 100/200/300 ⇒ P50 = 200（全量口径）。若只扫到本会话，P50 会是 100。
+    assert_eq!(
+        got.fleet["by_tier"]["latency"][0]["p50"], 200,
+        "分位数按合并后的全量样本算，不是任一会话自己的"
+    );
+    // 兜底分母同样是全量口径（三格开轮，零兜底）
+    assert_eq!(got.fleet["turns"], 3);
+    assert_eq!(got.fleet["fallbacks"], 0);
+}
+
+/// **反向（范围）**：只走一层——`tool_archives` 里的同名文件不算事实源。
+///
+/// 递归扫会把 archive 读进来，`wals` 于是虚高、样本混入归档。这条把假 WAL
+/// 塞进 **两层深**的子目录，`wals` 必须不动。
+#[test]
+fn fleet_scan_does_not_descend_into_session_subdirectories() {
+    let (root, wals) = seed_instance("shallow", 1);
+    // 会话子目录里再放一个同名文件（形如 `<root>/session-0/tool_archives/v2-events.wal`）
+    let nested = wals[0].parent().unwrap().join("tool_archives");
+    std::fs::create_dir_all(&nested).expect("子目录");
+    std::fs::copy(&wals[0], nested.join(super::super::paths::V2_WAL_FILE)).expect("放假 WAL");
+
+    let got = read(
+        "session-0",
+        &wals[0],
+        None,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        &root,
+    )
+    .expect("读数");
+    assert_eq!(
+        got.fleet["wals"], 1,
+        "只扫一层：子目录里的同名文件不是事实源（递归会虚高）"
+    );
+}
+
+/// **反向（韧性）**：一个**根本不是 WAL** 的会话不拖垮整列。
+///
+/// 撕裂尾行被写方修复是正常状态，`open_readonly` 对「读得出一部分」是会成功的
+/// （实测写坏内容仍开得出、只是 0 条事件）。真正打不开的是**路径不是文件**
+/// 一类（例如目录被替换、权限不通）——那才是这条判据要钉的：其余会话的读数照出。
+#[test]
+fn fleet_survives_a_session_whose_wal_cannot_be_opened() {
+    let (root, wals) = seed_instance("torn", 2);
+    // 把第二个会话的 WAL 换成一个**目录**：路径存在但不是文件 ⇒ 开不了。
+    let _ = std::fs::remove_file(&wals[1]);
+    std::fs::create_dir_all(&wals[1]).expect("把 WAL 换成目录");
+
+    let got = read(
+        "session-0",
+        &wals[0],
+        None,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        &root,
+    )
+    .expect("读数");
+    assert_eq!(got.fleet["wals"], 1, "打不开的那个不计入");
+    assert_eq!(
+        got.fleet["sessions"], 2,
+        "但目录层面仍承认有两个会话（差就是被跳过的）"
+    );
+    assert_eq!(got.fleet["by_tier"]["latency"][0]["samples"], 1);
+}
+
+/// **读侧闸**：不给读的人 ⇒ 聚合列是空形状，且**不扫**。
+///
+/// 扫遍实例再报「不给你看」是白花代价；结论与空形状相同，故直接走空。
+#[test]
+fn fleet_is_empty_when_the_reader_may_not_read() {
+    let (root, wals) = seed_instance("gate", 2);
+    let got = read(
+        "session-0",
+        &wals[0],
+        Some(crate::symbio_core::authz::PRINCIPAL_MAIN),
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        &root,
+    )
+    .expect("读数");
+    assert_eq!(
+        got.fleet,
+        serde_json::json!({ "wals": 0, "sessions": 0 }),
+        "不给你读 ⇒ 空形状（与四列同族），不扫也不报数"
+    );
+}
+
 /// 出口读数 == 直接 `apply`（复算：同源，不是「看起来差不多」）。
 #[test]
 fn stats_recompute_equals_direct_apply() {
     let wal = seed("recompute");
-    let got = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).expect("读数");
+    let got = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
 
     assert!(got.has_wal);
     assert_eq!(got.session_id, "s1");
@@ -162,16 +343,13 @@ fn stats_recompute_equals_direct_apply() {
 fn reverse_case_each_column_moves_when_the_wal_changes() {
     let wal = seed("reverse");
     assert_eq!(
-        read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN)
-            .unwrap()
-            .tiers[0]
-            .samples,
+        read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN).tiers[0].samples,
         1
     );
 
     // 删收束格 ⇒ 时延样本列归零、P95 归零
     drop_line(&wal, "f0");
-    let after = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).unwrap();
+    let after = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
     assert_eq!(after.tiers[0].samples, 0, "删掉唯一的 final ⇒ 样本 1 → 0");
     assert_eq!(after.tiers[0].p95, 0, "无样本 ⇒ 分位数为 0（空档位不报警）");
     assert_eq!(after.tiers[0].turns, 2, "开轮格还在 ⇒ 分母不受收束格影响");
@@ -179,7 +357,7 @@ fn reverse_case_each_column_moves_when_the_wal_changes() {
 
     // 删开轮格 ⇒ 兜底率的**分母**必须变（2 → 1），比率随之变成 1.0
     drop_line(&wal, "u0");
-    let after = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).unwrap();
+    let after = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
     assert_eq!(
         after.tiers[0].turns, 1,
         "删掉一个 user.message ⇒ 分母 2 → 1"
@@ -194,7 +372,7 @@ fn reverse_case_each_column_moves_when_the_wal_changes() {
 #[test]
 fn invariants_move_when_the_wal_changes() {
     let wal = seed("invariants");
-    let clean = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).unwrap();
+    let clean = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
 
     // 复算：出口的清单与直接 `check_all` 逐字相等（口径只活在 core，出口不复判）。
     let store = EventWalStore::open_readonly(&wal).unwrap();
@@ -211,9 +389,7 @@ fn invariants_move_when_the_wal_changes() {
 
     // 删轮 0 的收束格 ⇒ 轮 0 被轮 1 越过 ⇒ C4 报未收束；行删了 ⇒ C1 报 seq 跳号。
     drop_line(&wal, "f0");
-    let list = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN)
-        .unwrap()
-        .invariants;
+    let list = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN).invariants;
     let list = list.as_array().expect("清单是数组");
     assert_eq!(list.len(), 2, "{list:?}");
     assert!(
@@ -240,8 +416,7 @@ fn missing_wal_is_an_honest_zero_and_creates_nothing() {
     std::fs::create_dir_all(&dir).expect("临时目录");
     let wal = dir.join(super::super::paths::V2_WAL_FILE);
 
-    let got = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN)
-        .expect("没有事实源不是错误");
+    let got = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
     assert!(!got.has_wal);
     assert!(got.tiers.is_empty());
     assert_eq!(got.checkpoint["event_count"], 0);
@@ -263,13 +438,14 @@ fn missing_wal_is_an_honest_zero_and_creates_nothing() {
 #[test]
 fn declaring_the_owner_reads_everything() {
     let wal = seed("gate-owner");
-    let plain =
-        read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).expect("本机默认读数");
+    let root = wal.parent().expect("WAL 有父目录").to_path_buf();
+    let plain = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
     let as_owner = read(
         "s1",
         &wal,
         Some("user"),
         crate::symbio_core::authz::PRINCIPAL_MAIN,
+        &root,
     )
     .expect("属主读数");
     assert_eq!(
@@ -286,12 +462,14 @@ fn declaring_the_owner_reads_everything() {
 #[test]
 fn a_non_owner_reads_nothing_at_all() {
     let wal = seed("gate-nonowner");
+    let root = wal.parent().expect("WAL 有父目录").to_path_buf();
     for viewer in ["agent:main", "agent:ghost"] {
         let got = read(
             "s1",
             &wal,
             Some(viewer),
             crate::symbio_core::authz::PRINCIPAL_MAIN,
+            &root,
         )
         .expect("读数");
         assert!(got.has_wal, "{viewer}: 事实源存在，只是不给你看");
@@ -332,6 +510,7 @@ fn a_non_owner_reads_nothing_at_all() {
 #[test]
 fn reputation_column_reports_own_and_by_principal() {
     let wal = seed("rep");
+    let root = wal.parent().expect("WAL 有父目录").to_path_buf();
     let store = EventWalStore::open(&wal).unwrap();
     let snap = store.range(Seq::new(0));
     let user_seq = snap
@@ -354,7 +533,7 @@ fn reputation_column_reports_own_and_by_principal() {
         store.append(e).expect("承诺入格");
     }
 
-    let got = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).expect("读数");
+    let got = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
     assert_eq!(
         got.reputation["own"],
         serde_json::json!({
@@ -383,6 +562,7 @@ fn reputation_column_reports_own_and_by_principal() {
         &wal,
         Some(crate::symbio_core::authz::PRINCIPAL_MAIN),
         crate::symbio_core::authz::PRINCIPAL_MAIN,
+        &root,
     )
     .expect("读数");
     assert_eq!(denied.reputation, serde_json::json!({}));
@@ -398,6 +578,7 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("临时目录");
     let wal = dir.join(super::super::paths::V2_WAL_FILE);
+    let root = dir.clone();
     let store = EventWalStore::open(&wal).expect("WAL");
     for (id, deps) in [("t1", vec![]), ("t2", vec!["t1"])] {
         store
@@ -425,6 +606,7 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
         &wal,
         None,
         crate::symbio_core::authz::PRINCIPAL_MAIN,
+        &root,
     )
     .expect("读数");
     assert_eq!(
@@ -452,6 +634,7 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
         &wal,
         Some(crate::symbio_core::authz::PRINCIPAL_MAIN),
         crate::symbio_core::authz::PRINCIPAL_MAIN,
+        &root,
     )
     .expect("读数");
     assert_eq!(denied.readyset, serde_json::json!({ "ready": [] }));
@@ -468,6 +651,7 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
 #[test]
 fn calibration_column_recomputes_and_moves_with_the_wal() {
     let wal = seed("calibration");
+    let root = wal.parent().expect("WAL 有父目录").to_path_buf();
     {
         let store = EventWalStore::open(&wal).expect("WAL");
         for (id, fallback) in [("recalled-1", false), ("recalled-2", true)] {
@@ -492,7 +676,7 @@ fn calibration_column_recomputes_and_moves_with_the_wal() {
         }
     }
 
-    let got = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).expect("读数");
+    let got = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
 
     // 复算：出口的校准列与直接 `apply` 逐字相等（口径只活在 core，出口不复判）。
     let ro = EventWalStore::open_readonly(&wal).expect("WAL 只读");
@@ -510,7 +694,7 @@ fn calibration_column_recomputes_and_moves_with_the_wal() {
 
     // 反向：删掉回退那条 ⇒ 回退数 1 → 0（读数跟着事实源动）。
     drop_line(&wal, "recalled-2");
-    let after = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).expect("读数");
+    let after = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
     assert_eq!(after.calibration["by_skill"]["sk-a"]["uses"], 1);
     assert_eq!(after.calibration["by_skill"]["sk-a"]["fallbacks"], 0);
 
@@ -520,6 +704,7 @@ fn calibration_column_recomputes_and_moves_with_the_wal() {
         &wal,
         Some(crate::symbio_core::authz::PRINCIPAL_MAIN),
         crate::symbio_core::authz::PRINCIPAL_MAIN,
+        &root,
     )
     .expect("读数");
     assert_eq!(denied.calibration, serde_json::json!({ "by_skill": {} }));
@@ -535,7 +720,8 @@ fn calibration_column_recomputes_and_moves_with_the_wal() {
 #[test]
 fn transcript_column_reads_the_conversation_back_from_the_wal() {
     let wal = seed("transcript");
-    let got = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).expect("读数");
+    let root = wal.parent().expect("WAL 有父目录").to_path_buf();
+    let got = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
 
     // 复算：出口的转写列与直接 `apply` 逐字相等（口径只活在 core 的投影，出口不复判）。
     let ro = EventWalStore::open_readonly(&wal).expect("WAL 只读");
@@ -563,7 +749,7 @@ fn transcript_column_reads_the_conversation_back_from_the_wal() {
 
     // 反向：删掉成功轮的收束格 ⇒ 对应那一句必须从转写里消失（证明它真的在读文件，不是常数）。
     drop_line(&wal, "f0");
-    let after = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).expect("读数");
+    let after = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
     let entries = after.transcript["entries"].as_array().expect("条目数组");
     assert_eq!(entries.len(), 3, "删一条 final ⇒ 转写 4 → 3：{entries:?}");
     assert!(
@@ -577,6 +763,7 @@ fn transcript_column_reads_the_conversation_back_from_the_wal() {
         &wal,
         Some(crate::symbio_core::authz::PRINCIPAL_MAIN),
         crate::symbio_core::authz::PRINCIPAL_MAIN,
+        &root,
     )
     .expect("读数");
     assert_eq!(denied.transcript, serde_json::json!({ "entries": [] }));
@@ -609,7 +796,7 @@ fn transcript_column_surfaces_tool_rows() {
         )
         .expect("追加工具格");
 
-    let got = read("s1", &wal, None, crate::symbio_core::authz::PRINCIPAL_MAIN).expect("读数");
+    let got = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
     let entries = got.transcript["entries"].as_array().expect("条目数组");
     let tool_row = entries
         .iter()

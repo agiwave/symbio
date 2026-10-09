@@ -20,6 +20,11 @@
 //!   `symbio_core::<符号>`），插件侧因此只出现**根导出的函数名**，类型随返回值
 //!   流动、在出口边界一次性序列化。这里没有 `SloLatencyView` 之类的名字，也
 //!   不需要为类型加根导出。
+//!   ⚠️ **P2 破了一处，理由记在这里**：聚合列要调 `SloLatencyView::merge` /
+//!   `FallbackRateView::merge`——**方法是类型的行为**，提成根函数会让 `merge`
+//!   变成无主函数（谁的数据谁的行为）。故这两个**视图类型**破例占根出口
+//!   （与 `TurnState` / `PromptMessage` 同族：被 core 外消费的类型）。
+//!   投影**函数**仍然不在这里出现名字——`slo_report()` 照旧随返回值流动。
 //!
 //! ## as-of 口径
 //!
@@ -131,6 +136,114 @@ pub(crate) struct SessionStats {
     /// 的呈现面过滤（S08 的 `vis_scope`），落地前本列只有**整列**闸——与其余各列同款，
     /// 不在这里先造一个半开的判据。
     pub transcript: serde_json::Value,
+    /// **实例级聚合**（P2：跨会话的 SLO 真数）。
+    ///
+    /// 上面每一列回答「**这一个会话**怎么样」；本列回答「**整个实例**怎么样」——
+    /// 口径是把本插件目录下**所有**会话的 WAL 各跑一遍四列里的两个投影
+    /// （时延 / 兜底），再交给 core 的 `SloLatencyView::merge` /
+    /// `FallbackRateView::merge` 合并。分子分母与分位数因此与单会话列**逐字同一套
+    /// 口径**（ADR-044：实测与判据同源），本处不另写一套统计。
+    ///
+    /// ## 为什么这不是「多一份真相」
+    ///
+    /// 它读的是**同一批 WAL、同一批投影**，只是切片范围从「一个会话」扩到
+    /// 「整个实例」。真正的第二份真相是「另写一套合并算式」——那正是这里避免的。
+    ///
+    /// ## 读不到的时候给什么
+    ///
+    /// `may_read = false` ⇒ `{ wals: 0, sessions: 0 }`（与四列同族的空，不给零值
+    /// 条目：不给读的人报数）。实例里一个 WAL 都没有 ⇒ `wals: 0`，同形状。
+    ///
+    /// ⚠️ 成本：本列要**遍历实例下的每个会话**。会话数上去之后它是本读数口最贵的
+    /// 一列（其余各列只读一个文件）。今天没有生产调用方（P4 登记），接进前端时应
+    /// 连同这一条成本一起考虑——要么按需取（单独一条路），要么增量缓存。
+    pub fleet: serde_json::Value,
+}
+
+/// 实例级聚合列（P2）：把 `storage_root` 下**所有**会话的 WAL 合并成一份读数。
+///
+/// ## 为什么在插件侧遍历、在 core 侧合并
+///
+/// 「会话目录长什么样」是插件自己的布局知识（[`super::paths::session_dir`]），
+/// 而「多个视图怎么合成一个」是统计口径——后者必须单点，故进 core 的
+/// `SloLatencyView::merge` / `FallbackRateView::merge`。本函数只做遍历 + 开档 +
+/// 套投影 + 交出去合并。
+///
+/// ## 遍历的形状
+///
+/// **只走一层**：会话目录是存储根的直接子目录（`session_dir` = `root.join(safe_id)`），
+/// 再往下是 `tool_archives` / `transcripts` 等与会话事实源无关的子树。递归扫会把
+/// archive 里的东西也当事实源读——那不是「更彻底」，是**读错范围**。
+///
+/// 单个 WAL 打不开 ⇒ 跳过并出声（撕裂尾行正在被写方修复是正常状态），不因此让
+/// 整列失败：一列读数是**诊断**，为一个坏会话让整个实例的读数消失是本末倒置。
+fn fleet_reading(storage_root: &std::path::Path) -> serde_json::Value {
+    let mut wals: Vec<std::path::PathBuf> = Vec::new();
+    let mut sessions = 0usize;
+    if let Ok(entries) = std::fs::read_dir(storage_root) {
+        for entry in entries.flatten() {
+            if !entry.path().is_dir() {
+                continue;
+            }
+            let wal = entry.path().join(super::paths::V2_WAL_FILE);
+            if !wal.exists() {
+                continue;
+            }
+            sessions += 1;
+            // 本会话那一份也**算进聚合**：实例 = 全部会话，少一个就不是全量口径。
+            // `session_dir` 一对一，不存在同一会话两个目录，故不去重。
+            wals.push(wal);
+        }
+    }
+
+    let mut lat_parts = Vec::new();
+    let mut fb_parts = Vec::new();
+    for wal in &wals {
+        let Ok(store) = EventWalStore::open_readonly(wal) else {
+            crate::plugin_warn!(
+                "session",
+                "[stats] 实例聚合跳过打不开的 WAL：{}",
+                wal.display()
+            );
+            continue;
+        };
+        let snapshot = store.range(Seq::new(0));
+        lat_parts.push(
+            slo_report()
+                .apply(&snapshot, i64::MAX, Budget::generous())
+                .value,
+        );
+        fb_parts.push(
+            fallback_rate()
+                .apply(&snapshot, i64::MAX, Budget::generous())
+                .value,
+        );
+    }
+
+    let latency = crate::symbio_core::SloLatencyView::merge(&lat_parts);
+    let fallback = crate::symbio_core::FallbackRateView::merge(&fb_parts);
+    let turns: u64 = fallback.by_tier.values().map(|s| s.turns).sum();
+    let fallbacks: u64 = fallback.by_tier.values().map(|s| s.fallbacks).sum();
+
+    serde_json::json!({
+        // 实际读进来的 WAL 数（打不开的不计——见上面出声处）
+        "wals": lat_parts.len(),
+        // 目录里有 WAL 的会话数（含打不开的），与 `wals` 的差就是被跳过的
+        "sessions": sessions,
+        "turns": turns,
+        "fallbacks": fallbacks,
+        // 逐档位并集：合并后由 `of()` / 分位数纯查询取，与单会话列同一套口径
+        "by_tier": {
+            "latency": latency.by_tier.values().map(|t| serde_json::json!({
+                "tier": t.tier, "samples": t.samples.len(),
+                "p50": t.p50(), "p95": t.p95(), "p99": t.p99(),
+            })).collect::<Vec<_>>(),
+            "fallback": fallback.by_tier.values().map(|s| serde_json::json!({
+                "tier": s.tier, "turns": s.turns, "fallbacks": s.fallbacks,
+                "rate": s.rate(),
+            })).collect::<Vec<_>>(),
+        },
+    })
 }
 
 /// `session/stats` 的请求体：**全部可选**——不传 = 本机默认（今天的行为）。
@@ -163,6 +276,7 @@ pub(crate) fn read(
     wal: &Path,
     viewer: Option<&str>,
     session_principal: &str,
+    storage_root: &Path,
 ) -> Result<SessionStats, PluginError> {
     let has_wal = wal.exists();
     let store = EventWalStore::open_readonly(wal)
@@ -282,6 +396,14 @@ pub(crate) fn read(
     )
     .map_err(|e| PluginError::InternalError(format!("转写序列化失败：{e}")))?;
 
+    // 实例级聚合列（P2）。`may_read = false` 时**不扫**：扫遍实例再报「不给你看」
+    // 是白花代价，而结论与空形状相同。
+    let fleet = if may_read {
+        fleet_reading(storage_root)
+    } else {
+        serde_json::json!({ "wals": 0, "sessions": 0 })
+    };
+
     Ok(SessionStats {
         session_id: session_id.to_string(),
         wal: wal.display().to_string(),
@@ -294,6 +416,7 @@ pub(crate) fn read(
         reputation,
         readyset,
         transcript,
+        fleet,
     })
 }
 
@@ -335,6 +458,9 @@ impl SessionPlugin {
             // 本会话主体与转写侧同一个取值点（`request_principal`）：会话主体错一点，
             // `own` 就会把别人的承诺记到这个会话头上。
             &super::chat_loop::request_principal(ctx.as_ref()),
+            // 实例根（聚合列 P2 的扫描范围）：本插件自己的目录，即 `session_dir` 的
+            // 上一层。与 WAL 路径同源，不另立一个根。
+            self.storage_dir().as_path(),
         )?;
         Ok(PluginPayload::new(&stats))
     }
