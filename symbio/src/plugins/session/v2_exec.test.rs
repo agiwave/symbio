@@ -1096,6 +1096,7 @@ async fn flush_returns_when_the_emitter_drops_the_barrier() {
         tx: q,
         root_id: "root".to_string(),
         node: Arc::new(Mutex::new(None)),
+        reasoning: Arc::new(Mutex::new(None)),
     };
     tokio::time::timeout(std::time::Duration::from_secs(2), bridge.flush())
         .await
@@ -1112,6 +1113,7 @@ async fn flush_returns_immediately_when_the_channel_is_already_closed() {
         tx,
         root_id: "root".to_string(),
         node: Arc::new(Mutex::new(None)),
+        reasoning: Arc::new(Mutex::new(None)),
     };
     tokio::time::timeout(std::time::Duration::from_secs(2), bridge.flush())
         .await
@@ -1196,7 +1198,8 @@ fn queue_passes_frames_through_in_order_when_not_full() {
     assert!(q.send(UiFrame::Snapshot {
         id: "n1".into(),
         parent: "root".into(),
-        text: "a".into()
+        text: "a".into(),
+        kind: UiNodeKind::Text,
     }));
     assert!(q.send(UiFrame::Delta {
         id: "n1".into(),
@@ -1205,7 +1208,8 @@ fn queue_passes_frames_through_in_order_when_not_full() {
     assert!(q.send(UiFrame::Finalize {
         id: "n1".into(),
         parent: "root".into(),
-        text: "ab".into()
+        text: "ab".into(),
+        kind: UiNodeKind::Text,
     }));
     assert_eq!(q.len(), 3);
     let (_text, order) = drained(q);
@@ -1271,6 +1275,7 @@ fn slow_consumer_still_delivers_the_finalize_frame() {
         id: "n1".into(),
         parent: "root".into(),
         text: "done".into(),
+        kind: UiNodeKind::Text,
     });
     let (_text, order) = drained(q);
     assert!(
@@ -1287,6 +1292,7 @@ fn finalize_stays_after_its_own_deltas_when_the_queue_is_full() {
         id: "n1".into(),
         parent: "root".into(),
         text: "done".into(),
+        kind: UiNodeKind::Text,
     });
     let (_text, order) = drained(q);
     let last_delta = order.iter().rposition(|x| x == "n1");

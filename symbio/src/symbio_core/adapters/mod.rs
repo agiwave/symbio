@@ -207,6 +207,16 @@ pub struct LlmTurn {
 pub trait DeltaSink: Send + Sync + 'static {
     /// 正文增量（按序追加；适配器保证语义为「追加到正文尾部」）。
     fn on_delta(&self, text: &str);
+    /// 推理增量（`reasoning_content`——模型在正文之前的思考）。
+    ///
+    /// 与 [`Self::on_delta`] **分属两条流**：消费端各自建节点（`msg_type` 不同），
+    /// 既不合并也不互相追加。合成一条会让「模型在想什么」与「模型说了什么」在节点上
+    /// 再也分不开，而这两件事在界面与事实网格里都是分开的（v1 的 `ReasoningDelta`
+    /// 走的就是两条子节点）。
+    ///
+    /// **必填而不是给个空默认实现**：漏实现的表现是「推理静默消失」——没有编译错误、
+    /// 没有告警，只是界面上永远少一块。本仓对这类「静默失效」一律要求显式表态。
+    fn on_reasoning(&self, text: &str);
 }
 
 /// 静默接收口：会话侧执行器（`TurnRunner`，非流式形态）的委托目标——同一条
@@ -215,6 +225,7 @@ pub struct SilentDeltas;
 
 impl DeltaSink for SilentDeltas {
     fn on_delta(&self, _text: &str) {}
+    fn on_reasoning(&self, _text: &str) {}
 }
 
 /// LLM 端口（⑤ 的抽象面）。**generate 只接受 `FullModel`**——反射/快速档

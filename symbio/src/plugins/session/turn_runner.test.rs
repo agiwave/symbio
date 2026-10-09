@@ -458,6 +458,9 @@ mod turn_runner_tests {
         fn on_delta(&self, text: &str) {
             self.0.lock().unwrap().push(text.to_string());
         }
+        // 本组用例的桩不产推理增量；推理通道由
+        // `plugins/model/bound_provider.test.rs` 的桥接用例覆盖（那里有 SSE 级 fixture）。
+        fn on_reasoning(&self, _text: &str) {}
     }
 
     /// 流式运行：分片按序进 sink；落格语义与 run() 同一条路径（final 照常、
@@ -1670,6 +1673,8 @@ mod reflex_turn_tests {
         fn on_delta(&self, text: &str) {
             self.0.lock().unwrap().push(text.to_string());
         }
+        // 反射档不调模型 ⇒ 没有推理增量；通道由 `bound_provider.test.rs` 覆盖。
+        fn on_reasoning(&self, _text: &str) {}
     }
 
     /// 正向：反射档一轮**只落两格**（开轮 + 收束），收束溯源指向开轮格、

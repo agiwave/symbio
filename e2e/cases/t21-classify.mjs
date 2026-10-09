@@ -249,16 +249,20 @@ export default defineCase(
         'C 线应有模型给出的正文（判决放行后工具循环照旧跑完）',
       );
       // 分类请求是**内部请求**，必须静默。但 C 线不能照抄 B 线那条"零助手节点"的
-      // 判据：这里 session 循环本身就在发节点，而 Turn 根节点是**每轮一个**
-      // （`prepare_turn_inputs` 内的 `emit_streaming_start`，`meta.turn` = 轮序）。
-      // 能成立的是**数量对齐**：工具循环发了几次请求，就有几个 Turn 根节点——
-      // 分类请求那一次不在其中。它若泄漏成可见轮次，这里会多一个。
+      // 判据：这里 session 循环本身就在发节点。C 线能成立的不变量是
+      // **一句用户输入恰开一个 Turn 根**。
+      //
+      // ⚠️ 这里**不是**「工具循环发几次请求就有几个 Turn 根」——那是 v1 的记账口径。
+      // `full` 档下 `run_chat_loop` 每轮只跑一次收尾（步骤 7 `finalize_turn_root`），
+      // 工具循环里的 N 次模型往返全落在**同一个** Turn 根之下。所以「请求数 - 1」
+      // 会把正确的行为判成红的；真正该拦的是**分类请求泄漏成可见轮次**，
+      // 而那在「恰一个 Turn 根」下同样会被照出来（泄漏 ⇒ 读到 2）。
       const cReqs = (await reqCount()) - base;
       const turnCount = workMsgs.filter((m) => m.type === 'turn').length;
       assertEq(
         turnCount,
-        cReqs - 1,
-        `C 线的 Turn 数应等于工具循环请求数（共 ${cReqs} 次请求，含 1 次静默分类）`,
+        1,
+        `一句用户输入应恰开一个 Turn 根（本轮共 ${cReqs} 次模型请求，含 1 次静默分类；工具循环的多次往返在同一轮内）`,
       );
 
       // ── D 开关平凡值：`classify_enabled = false` ⇒ 行为与今天逐字一致 ──

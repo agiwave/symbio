@@ -30,7 +30,9 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
-use crate::symbio_core::chat_message::{ChatMessage, MessageStatus, MessageType};
+use crate::symbio_core::chat_message::{
+    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
+};
 use crate::symbio_core::{
     llm_emit_message, DispatchOutcome, DispatchPort, ExecAbortSignal, ExecEventSink, LlmTurn,
     Plugin, PluginInvokeRequest,
@@ -123,13 +125,17 @@ impl DispatchPort for SessionDispatchPort {
     async fn dispatch(&self, turn: &LlmTurn) -> Vec<DispatchOutcome> {
         let mut produced: Vec<ChatMessage> = Vec::new();
 
-        // ① 定格本轮正文（若有）：节点已由 UI 桥逐片广播，这里只迁状态并切节点。
+        // ① 定格本轮正文与推理（若有）：节点已由 UI 桥逐片广播，这里只迁状态并切节点。
         //    没有正文（纯工具调用轮）就不建节点——空节点是噪声。
+        //
+        //    两条流**一起定格**：都由桥建节点、都在本轮结束时收口，分两处做只是把同一个
+        //    动作写两遍，且漏一处就有一条流永远转「流式中」（界面上表现为思考块卡住）。
         let text_node = if turn.text.trim().is_empty() {
             None
         } else {
             self.bridge.finalize_node(&turn.text)
         };
+        let reason_node = self.bridge.finalize_reasoning_node();
         // 同步点：定格帧在桥的通道里排队，而下面的工具节点**直接**写出口
         // （`process_tool_calls_async` 只认 `ExecEventSink`）。不先排空队列，
         // 工具卡片会跑到正文之前。
@@ -137,6 +143,20 @@ impl DispatchPort for SessionDispatchPort {
         if let Some(node_id) = text_node {
             let msg = llm_build_text_node(&self.root_id, &turn.text, None, node_id);
             // 状态帧：正文已由增量帧传过，重发正文会与队列里的增量打架。
+            llm_emit_state(&self.sink, msg.clone()).await;
+            produced.push(msg);
+        }
+        if let Some((node_id, text)) = reason_node {
+            let msg = ChatMessage {
+                id: node_id,
+                parent_id: Some(self.root_id.clone()),
+                role: Some(MessageRole::Assistant),
+                msg_type: Some(MessageType::Reasoning),
+                content: Some(MessageContent::Text(text)),
+                status: Some(MessageStatus::Completed),
+                ..Default::default()
+            };
+            // 状态帧：推理正文已由增量帧传过，同上——重发会与队列里的增量打架。
             llm_emit_state(&self.sink, msg.clone()).await;
             produced.push(msg);
         }

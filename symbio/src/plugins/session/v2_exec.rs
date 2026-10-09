@@ -112,23 +112,45 @@ pub(crate) struct ResumedTool {
     pub text: String,
 }
 
+/// UI 桥承载的节点类型：正文与推理**分属两条流**，各自一个节点，不合并。
+///
+/// 只有建节点（`Snapshot`）与定格（`Finalize`）需要它——窄追加（`Delta`）只带
+/// `id + text`，归属由节点 id 决定（与 model 插件的帧面同一形状）。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UiNodeKind {
+    Text,
+    Reasoning,
+}
+
+impl UiNodeKind {
+    /// 该流在事实网格 / 界面上的节点类型。
+    fn msg_type(self) -> MessageType {
+        match self {
+            UiNodeKind::Text => MessageType::Text,
+            UiNodeKind::Reasoning => MessageType::Reasoning,
+        }
+    }
+}
+
 /// UI 桥的帧：首片建节点（快照），后续窄追加，收束定格。语义与 model 插件的流式帧同构。
 enum UiFrame {
     Snapshot {
         id: String,
         parent: String,
         text: String,
+        kind: UiNodeKind,
     },
     Delta {
         id: String,
         text: String,
     },
-    /// 收束本轮的正文节点（工具轮的中途正文）：工具调用节点紧接着就来，
+    /// 收束本轮的节点（工具轮的中途正文 / 中途推理）：工具调用节点紧接着就来，
     /// 正文必须先在**同一个**节点上定格，否则它会一直转「流式中」。
     Finalize {
         id: String,
         parent: String,
         text: String,
+        kind: UiNodeKind,
     },
     /// 屏障：收到即回执。给「通道外的发射方」一个**同步点**——
     /// 分发方（[`super::v2_tools::SessionDispatchPort`]）既走通道（定格正文）
@@ -318,6 +340,16 @@ pub(crate) struct UiBridge {
     root_id: String,
     /// 正文节点 id：首片分配、此后稳定；`finalize_node` 交还并置空（下一轮另开）。
     node: Arc<Mutex<Option<String>>>,
+    /// 推理节点 `(id, 累积正文)`：与正文同形，但**多带一份累积正文**。
+    ///
+    /// 为什么正文不需要累积而推理需要：正文的收束帧由调用方带全文
+    /// （`LlmTurn::text`，见 [`super::v2_tools::SessionDispatchPort`]），而推理
+    /// 正文**没有别的持有者**——`LlmTurn` 只装 `text` 与 `tool_calls`。
+    /// 不在这里攒，收束帧就只能写「推理到此为止」而不带内容。
+    ///
+    /// 累积是无损的：每一片都先经这里再进队列，队列满了是**合并**同节点增量
+    /// （见 `FrameQueue`），不丢。
+    reasoning: Arc<Mutex<Option<(String, String)>>>,
 }
 
 /// `UiBridge` drop 时**关闭队列**：接收端的 `pop` 因此返回 `None` 而退出。
@@ -339,6 +371,16 @@ impl UiBridge {
         self.node.lock().unwrap().clone()
     }
 
+    /// 当前推理节点 `(id, 累积正文)`（未定格的最后一轮推理；本轮无推理 ⇒ `None`）。
+    ///
+    /// 与 [`Self::current_node`] 的分工：正文的末轮由 `chat_loop` 的
+    /// `finalize_assistant_turn` 收口（那里拿着 `TurnOutput.text`），推理那侧同理
+    /// 但正文得**从这里取**——`TurnOutput` 的 `reasoning` 字段正是由本函数回填的
+    /// （见 [`execute_turn`] 轮末）。
+    pub(crate) fn current_reasoning(&self) -> Option<(String, String)> {
+        self.reasoning.lock().unwrap().clone()
+    }
+
     /// 定格本轮正文节点并**重置**（返回被定格的节点 id；本轮无正文 ⇒ `None`）。
     ///
     /// ## 为什么必须切节点
@@ -357,8 +399,24 @@ impl UiBridge {
             id: id.clone(),
             parent: self.root_id.clone(),
             text: text.to_string(),
+            kind: UiNodeKind::Text,
         });
         Some(id)
+    }
+
+    /// 定格本轮推理节点并**重置**（返回 `(id, 累积正文)`；本轮无推理 ⇒ `None`）。
+    ///
+    /// 与 [`Self::finalize_node`] 同形、同理由（切节点 + 经通道），两处差别只有
+    /// 全文的来源：正文由调用方给（`LlmTurn::text`），推理由桥自己攒（见 `reasoning` 字段）。
+    pub(crate) fn finalize_reasoning_node(&self) -> Option<(String, String)> {
+        let (id, text) = self.reasoning.lock().unwrap().take()?;
+        let _ = self.tx.send(UiFrame::Finalize {
+            id: id.clone(),
+            parent: self.root_id.clone(),
+            text: text.clone(),
+            kind: UiNodeKind::Reasoning,
+        });
+        Some((id, text))
     }
 
     /// 等通道里**已排队**的帧全部落到出口（屏障）。
@@ -411,11 +469,47 @@ impl DeltaSink for UiBridge {
                     id,
                     parent: self.root_id.clone(),
                     text: text.to_string(),
+                    kind: UiNodeKind::Text,
                 }
             }
         };
         // 有界队列：入队不阻塞（`on_delta` 是同步回调，不能 await），满了合并
         // 增量而不是丢——丢增量等于丢正文。见 `FrameQueue`。
+        let _ = self.tx.send(frame);
+    }
+
+    /// 推理增量：与 [`Self::on_delta`] **同形**（首片建节点、此后窄追加），
+    /// 只差两处——节点类型是 `Reasoning`，且正文要**累积**（见 `reasoning` 字段）。
+    fn on_reasoning(&self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        // 取 id、累积与建帧**一次锁内做完**：三个动作必须原子（同一片既进累积
+        // 又定帧序）。分两次锁会让「首片」的判定与累积不同步，且首片那侧还得
+        // 再锁一次把刚写进去的 id 取回来（`as_ref().unwrap()` 那种写法）。
+        // 帧在锁内建好、`send` 在锁外——`send` 会去开队列自己的锁，没必要叠着。
+        let frame = {
+            let mut guard = self.reasoning.lock().unwrap();
+            match guard.as_mut() {
+                Some((id, acc)) => {
+                    acc.push_str(text);
+                    UiFrame::Delta {
+                        id: id.clone(),
+                        text: text.to_string(),
+                    }
+                }
+                None => {
+                    let id = llm_short_id();
+                    *guard = Some((id.clone(), text.to_string()));
+                    UiFrame::Snapshot {
+                        id,
+                        parent: self.root_id.clone(),
+                        text: text.to_string(),
+                        kind: UiNodeKind::Reasoning,
+                    }
+                }
+            }
+        };
         let _ = self.tx.send(frame);
     }
 }
@@ -637,6 +731,7 @@ struct SilentDeltaSink;
 
 impl DeltaSink for SilentDeltaSink {
     fn on_delta(&self, _text: &str) {}
+    fn on_reasoning(&self, _text: &str) {}
 }
 
 /// **定稿答话轮**（缺口 5）：`classify` 判 `Answered` ⇒ 本轮**一个模型请求都不发**，
@@ -806,16 +901,22 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         tx: tx.clone(),
         root_id: root_id.to_string(),
         node: Arc::new(Mutex::new(None)),
+        reasoning: Arc::new(Mutex::new(None)),
     });
     let emit_sink = sink.clone();
     let emitter = tokio::spawn(async move {
         while let Some(frame) = tx.pop().await {
             let message = match frame {
-                UiFrame::Snapshot { id, parent, text } => ChatMessage {
+                UiFrame::Snapshot {
+                    id,
+                    parent,
+                    text,
+                    kind,
+                } => ChatMessage {
                     id,
                     parent_id: Some(parent),
                     role: Some(MessageRole::Assistant),
-                    msg_type: Some(MessageType::Text),
+                    msg_type: Some(kind.msg_type()),
                     content: Some(MessageContent::Text(text)),
                     status: Some(MessageStatus::Streaming),
                     ..Default::default()
@@ -825,11 +926,16 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
                     delta: Some(text),
                     ..Default::default()
                 },
-                UiFrame::Finalize { id, parent, text } => ChatMessage {
+                UiFrame::Finalize {
+                    id,
+                    parent,
+                    text,
+                    kind,
+                } => ChatMessage {
                     id,
                     parent_id: Some(parent),
                     role: Some(MessageRole::Assistant),
-                    msg_type: Some(MessageType::Text),
+                    msg_type: Some(kind.msg_type()),
                     content: Some(MessageContent::Text(text)),
                     status: Some(MessageStatus::Completed),
                     ..Default::default()
@@ -1069,9 +1175,15 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
     }
     .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?;
 
-    // 本轮的正文节点 id 必须在桥 drop 之前取走（收束帧由 chat_loop 的
-    // `finalize_assistant_turn` 发出，用的就是它）。
+    // 本轮**未定格**的正文与推理节点必须在桥 drop 之前取走：它们的收束帧由
+    // chat_loop 的 `finalize_assistant_turn` 发出（用 `TurnOutput` 里的这两个 id），
+    // 而**落库**则由 `TurnOutput::into_messages` 按同一批 id 建节点。
+    //
+    // 工具轮的那几轮在 `v2_tools::dispatch` 里已经定格并取走了 ⇒ 这里拿到的是
+    // **最后一轮**（无工具调用那一轮）的节点；没有推理就是 `None`（`on_reasoning`
+    // 一次都没被调过），不是空节点。
     let child_id = bridge.current_node().unwrap_or_default();
+    let (reasoning_child_id, reasoning_text) = bridge.current_reasoning().unwrap_or_default();
     // 桥归零 ⇒ 通道关闭 ⇒ 发射端排空后退出。
     drop(bridge);
     emitter
@@ -1115,7 +1227,9 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
         return Ok(V2TurnResult {
             output: TurnOutput {
                 text: outcome.text,
+                reasoning: reasoning_text,
                 response_text_child_id: child_id,
+                reasoning_child_id,
                 ..Default::default()
             },
             messages: produced,
@@ -1198,7 +1312,9 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
     Ok(V2TurnResult {
         output: TurnOutput {
             text: outcome.text,
+            reasoning: reasoning_text,
             response_text_child_id: child_id,
+            reasoning_child_id,
             ..Default::default()
         },
         messages: all_messages,
@@ -1250,8 +1366,11 @@ mod tests;
 // 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
 // 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
 // panic-allow symbio/src/plugins/session/v2_exec.rs::current_node: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/v2_exec.rs::current_reasoning: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow symbio/src/plugins/session/v2_exec.rs::finalize_node: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/v2_exec.rs::finalize_reasoning_node: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow symbio/src/plugins/session/v2_exec.rs::on_delta: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/plugins/session/v2_exec.rs::on_reasoning: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow symbio/src/plugins/session/v2_exec.rs::send: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow symbio/src/plugins/session/v2_exec.rs::close: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow symbio/src/plugins/session/v2_exec.rs::pop: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。

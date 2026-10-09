@@ -750,7 +750,12 @@ export const BASELINE = {
   //   +1 = 批「缺口 5」（`TurnInput::final_reply`）的
   //        `final_reply_lands_both_cells_without_calling_the_model`。
   //   实测口径同前：`cargo test -p symbio`，取首个 `test result: ok. N passed`。
-  rustTests: 1387,
+  // 2026-10-09 **回填 `1387 → 1388`（+1）**：批「缺口 7」——`DeltaSink` 新增
+  //   `on_reasoning` 通道，`plugins/model/bound_provider.test.rs` 加一条桥接用例
+  //   （`provider_adapter_routes_reasoning_deltas_to_the_reasoning_channel`，含
+  //   两个方向的反向判据：推理走错通道 ⇒ 正文里多出思考内容 / 推理通道为空）。
+  //   实测口径同前：`cargo test -p symbio`，取首个 `test result: ok. N passed`。
+  rustTests: 1388,
   /**
    * CI 口径的 Rust 通过数（**只增不减**）——与上面三个分包基线**是不同口径，不能互替**。
    *
@@ -1127,7 +1132,19 @@ export const BASELINE = {
   //   这不是新增的债面而是**新增的守卫**：
   //   C7 上线当天就把这 5 处抓了出来（未登记 ⇒ PN-001 红），登记后才放行——
   //   同一批里 `Drop for UiBridge` 补上了「桥 drop 必须关队列」，否则发射任务每轮永久挂起。
-  panicSites: 67,
+  // 67 → 70（2026-10-09，缺口 7：`DeltaSink` 加推理通道）：**+3**，全部是
+  //   `UiBridge` 的 `Mutex` 取锁，且与同文件已有的 6 处**同一条登记理由**（std 锁中毒
+  //   只在持锁期间 panic 时传播，本仓把这些锁当无中毒用）：
+  //   `current_reasoning` / `finalize_reasoning_node` / `on_reasoning` 各一处。
+  //   为什么这 3 处值得留着而不是去掉：推理流的节点 id 与**累积正文**必须有一个
+  //   持有者——`LlmTurn` 只带 `text` / `tool_calls`，模型侧的 `TurnOutput.reasoning`
+  //   在适配器边界就被丢掉了（那是 core 契约的既有形状，不是本次改的），不在这里
+  //   攒，收束帧就只能写「推理到此为止」而不带内容。去掉累积 = 推理正文在
+  //   `full` 档整体消失，比多 3 处取锁严重得多。
+  //   注意这 3 处**没有**变成「同一件事写两遍」：`DeltaBridge` 的窄帧热路径原本要连开
+  //   两次锁（判正文、判推理），本次一并收敛成**一张 id → 流 的映射**（1 次锁），
+  //   与 `on_reasoning` 的双重取锁一起消掉了 3 处，净增才只有 3。
+  panicSites: 70,
 }
 
 /**

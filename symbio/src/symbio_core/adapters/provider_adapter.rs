@@ -28,35 +28,66 @@ use crate::symbio_core::ExecEventSink;
 use crate::symbio_core::PromptMessage;
 use crate::symbio_core::{llm_short_id, ExecTranscriptWriter, ModelProvider, PluginError};
 
-/// 流式帧桥：把 `execute_turn` 的转写帧**择要**转成正文增量——
-/// - 快照帧（`msg_type = Text × status = Streaming`）：登记节点 id，全文转发；
-/// - 窄帧（`delta`）：只有**已登记的正文节点**才转发（reasoning / 工具增量
-///   不进 v2 文本面——v2 的推理帧桥接是独立的一步，不在这里顺手做）。
+/// 流式帧桥：把 `execute_turn` 的转写帧**择要**转成增量——正文与推理**两条流**
+/// 各自转发（[`DeltaSink::on_delta`] / [`DeltaSink::on_reasoning`]）：
+/// - 快照帧（`msg_type = Text | Reasoning` 且 `status = Streaming`）：登记节点 id，
+///   全文转发（首片即完整快照）；
+/// - 窄帧（`delta`）：只有**已登记的**节点才转发，按 id 落到它所属的那条流。
 ///
 /// 为什么不直接转发所有 delta：model 插件的窄帧只带 `id + delta`，不带
-/// `msg_type`——不记账就分不清正文增量与推理增量。收束帧不经此桥：终态由
-/// 消费方负责（model 插件只发 Streaming 快照与窄帧，见 `state.rs` 的收口）。
+/// `msg_type`——不记账就分不清正文增量、推理增量与工具参数增量。收束帧不经此桥：
+/// 终态由消费方负责（model 插件只发 Streaming 快照与窄帧，见 `state.rs` 的收口）。
+/// 工具参数增量**不进**这里：工具节点的构造权在分发方（`DispatchPort`），
+/// 两处各建一份必然出现重复卡片。
 struct DeltaBridge {
     sink: Arc<dyn DeltaSink>,
-    text_nodes: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// 已登记的**增量节点** id → 它属于哪条流（正文 / 推理）。
+    ///
+    /// 窄帧只带 `id + delta`、不带 `msg_type`，归属只能查这张表。用**一张映射**
+    /// 而不是两张集合：节点 id 唯一 ⇒「一个节点恰好属于一条流」是结构事实，
+    /// 两张集合只能靠人工保证不重叠；而且窄帧是**每个 token 一次**的热路径，
+    /// 两张集合要连开两次锁（一次判正文、一次判推理）。
+    nodes: std::sync::Mutex<std::collections::HashMap<String, MessageType>>,
 }
 
 #[async_trait]
 impl ExecTranscriptWriter for DeltaBridge {
     async fn apply(&self, m: ChatMessage) {
         if let Some(d) = &m.delta {
-            if !d.is_empty() && self.text_nodes.lock().unwrap().contains(&m.id) {
-                self.sink.on_delta(d);
+            if !d.is_empty() {
+                // 窄帧不带 `msg_type` ⇒ 归属只能查登记表。没登记的 id（工具参数
+                // 增量）落 `_` 臂：它们的构造权在分发方（见结构体文档）。
+                match self.nodes.lock().unwrap().get(&m.id) {
+                    Some(MessageType::Text) => self.sink.on_delta(d),
+                    Some(MessageType::Reasoning) => self.sink.on_reasoning(d),
+                    _ => {}
+                }
             }
             return;
         }
-        if m.msg_type == Some(MessageType::Text) && m.status == Some(MessageStatus::Streaming) {
-            if let Some(MessageContent::Text(t)) = &m.content {
-                if !t.is_empty() {
-                    self.text_nodes.lock().unwrap().insert(m.id.clone());
-                    self.sink.on_delta(t);
-                }
-            }
+        if m.status != Some(MessageStatus::Streaming) {
+            return;
+        }
+        let Some(MessageContent::Text(t)) = &m.content else {
+            return;
+        };
+        if t.is_empty() {
+            return;
+        }
+        // 只登记**两条文本流**：工具参数增量不进这里（构造权在分发方）。
+        let kind = match m.msg_type {
+            Some(MessageType::Text) => MessageType::Text,
+            Some(MessageType::Reasoning) => MessageType::Reasoning,
+            _ => return,
+        };
+        self.nodes
+            .lock()
+            .unwrap()
+            .insert(m.id.clone(), kind.clone());
+        match kind {
+            MessageType::Text => self.sink.on_delta(t),
+            MessageType::Reasoning => self.sink.on_reasoning(t),
+            _ => {}
         }
     }
 }
@@ -409,7 +440,7 @@ impl LlmAdapter for ProviderLlmAdapter {
         let env = ExecEnv::new(
             ExecEventSink::direct(Arc::new(DeltaBridge {
                 sink,
-                text_nodes: Default::default(),
+                nodes: Default::default(),
             })),
             self.abort_signal(),
         );

@@ -97,6 +97,43 @@ const SSE_EMPTY: &str = concat!(
     "data: [DONE]\n\n",
 );
 
+/// 带推理增量的流：`reasoning_content` 先来、正文后到（真实模型的输出次序）。
+const SSE_REASONING: &str = concat!(
+    "HTTP/1.1 200 OK\r\n",
+    "Content-Type: text/event-stream\r\n",
+    "Connection: close\r\n",
+    "\r\n",
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"reasoning_content\":\"先想\"}}]}\n\n",
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"一下\"}}]}\n\n",
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"答案\"}}]}\n\n",
+    "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+    "data: [DONE]\n\n",
+);
+
+/// 收集口：**两条流分开记**——合成一条就验不出「推理有没有走错通道」。
+struct Collecting {
+    text: Mutex<Vec<String>>,
+    reasoning: Mutex<Vec<String>>,
+}
+
+impl Collecting {
+    fn new() -> Self {
+        Collecting {
+            text: Mutex::new(Vec::new()),
+            reasoning: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl crate::symbio_core::DeltaSink for Collecting {
+    fn on_delta(&self, text: &str) {
+        self.text.lock().unwrap().push(text.to_string());
+    }
+    fn on_reasoning(&self, text: &str) {
+        self.reasoning.lock().unwrap().push(text.to_string());
+    }
+}
+
 fn mock_provider(port: u16) -> Arc<BoundProvider> {
     let cfg: ModelProviderConfig = serde_json::from_value(json!({
         "id": "mock-provider",
@@ -115,27 +152,19 @@ fn mock_provider(port: u16) -> Arc<BoundProvider> {
 #[tokio::test]
 async fn provider_adapter_streams_text_deltas_through_bridge() {
     use crate::symbio_core::DeltaSink;
-    use std::sync::Mutex;
-
-    struct Collecting(Mutex<Vec<String>>);
-    impl DeltaSink for Collecting {
-        fn on_delta(&self, text: &str) {
-            self.0.lock().unwrap().push(text.to_string());
-        }
-    }
 
     let (port, _captured) = spawn_mock(SSE_OK);
     let adapter = ProviderLlmAdapter::new(mock_provider(port));
     let tok = TokenIssuer::issue_deep();
 
-    let got = Arc::new(Collecting(Mutex::new(Vec::new())));
+    let got = Arc::new(Collecting::new());
     let ask = one("写一句关于秋天的诗");
     let (text, cost_ms) = adapter
         .generate_streaming(&tok, &ask, got.clone() as Arc<dyn DeltaSink>)
         .await
         .expect("真实传输层必答");
 
-    let frames = got.0.lock().unwrap();
+    let frames = got.text.lock().unwrap();
     assert_eq!(
         frames.concat(),
         text,
@@ -148,6 +177,38 @@ async fn provider_adapter_streams_text_deltas_through_bridge() {
     assert!(cost_ms > 0, "实测耗时必须为正（真实网络往返）");
     // 注：mock 每实例只收一次连接，「generate() 与流式同源」由实现保证
     // （generate = 流式路径 + SilentDeltas，见 provider_adapter.rs）。
+}
+
+/// 推理增量走**另一条通道**：`reasoning_content` 的片落 `on_reasoning`，正文落
+/// `on_delta`，两条流不混。
+///
+/// 反向判据（改坏即红）：把 `DeltaBridge` 的推理分支去掉或误接到 `on_delta`，
+/// `text` 里就会多出「先想一下」而 `reasoning` 为空——两条断言各拦一个方向。
+#[tokio::test]
+async fn provider_adapter_routes_reasoning_deltas_to_the_reasoning_channel() {
+    use crate::symbio_core::DeltaSink;
+
+    let (port, _captured) = spawn_mock(SSE_REASONING);
+    let adapter = ProviderLlmAdapter::new(mock_provider(port));
+    let tok = TokenIssuer::issue_deep();
+
+    let got = Arc::new(Collecting::new());
+    let ask = one("想一下再答");
+    let (text, _) = adapter
+        .generate_streaming(&tok, &ask, got.clone() as Arc<dyn DeltaSink>)
+        .await
+        .expect("真实传输层必答");
+
+    assert_eq!(got.text.lock().unwrap().concat(), text, "正文流只装正文");
+    assert_eq!(
+        got.reasoning.lock().unwrap().concat(),
+        "先想一下",
+        "推理增量必须走 on_reasoning"
+    );
+    assert!(
+        !text.contains("先想"),
+        "推理内容不得混进正文（走错通道的形态）：{text}"
+    );
 }
 
 /// 全链路：事件网格 → Reasoner（持令牌）→ **真实 HTTP/SSE** → final 落事件
