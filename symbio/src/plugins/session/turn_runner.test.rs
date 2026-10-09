@@ -827,6 +827,10 @@ mod tool_round_tests {
                 text: "批准后已完成。".into(),
                 tool_calls: Vec::new(),
                 cost_ms: 5,
+                usage: Some(crate::symbio_core::ModelUsage {
+                    input: Some(11),
+                    output: Some(22),
+                }),
             })
         }
     }
@@ -881,6 +885,7 @@ mod tool_round_tests {
                 text: echo,
                 tool_calls: Vec::new(),
                 cost_ms: 1,
+                usage: None,
             })
         }
     }
@@ -1006,12 +1011,14 @@ mod tool_round_tests {
                         parse_error: None,
                     }],
                     cost_ms: 3,
+                    usage: None,
                 })
             } else {
                 Ok(LlmTurn {
                     text: "读到了。".into(),
                     tool_calls: Vec::new(),
                     cost_ms: 4,
+                    usage: None,
                 })
             }
         }
@@ -1486,6 +1493,40 @@ mod tool_round_tests {
         assert_eq!(
             snapshot[1].kind,
             crate::symbio_core::EVENT_ASSISTANT_FALLBACK
+        );
+    }
+
+    /// **缺口 6 的锚**：provider 实测用量必须沿 `LlmTurn → TurnOutcome` 带出来。
+    ///
+    /// 唯一消费方是 session 的 token 估算校准（`chat_loop/turn.rs::feedback_estimate`）：
+    /// 这一格断掉，校准比就冻结在初值 1.0，未校准启发式的系统偏差（实测对 CJK
+    /// 高估约 31%）永久无人修正，压缩预检把本可成功的摘要请求误判成「注定超限」
+    /// ——e2e `t8` / `t11` / `t18` 红的正因。链路后半段（`TurnOutcome.usage` →
+    /// `TurnOutput.usage`）在 `v2_exec` 是两处同名字段直通，不另设旁路。
+    #[tokio::test]
+    async fn provider_usage_survives_the_run_to_the_outcome() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = AnsweringLlm::new();
+        let out = TurnRunner
+            .run_with_tools(
+                &store,
+                &llm,
+                &tok,
+                input(),
+                Arc::new(SilentDeltas),
+                &[],
+                None,
+            )
+            .await
+            .expect("桩必答");
+        assert_eq!(
+            out.usage,
+            Some(crate::symbio_core::ModelUsage {
+                input: Some(11),
+                output: Some(22)
+            }),
+            "用量断了 ⇒ 校准永远停在 1.0（缺口 6）"
         );
     }
 

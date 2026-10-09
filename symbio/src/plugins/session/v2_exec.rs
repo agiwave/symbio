@@ -1230,6 +1230,10 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                 reasoning: reasoning_text,
                 response_text_child_id: child_id,
                 reasoning_child_id,
+                // 实测用量直通：校准反馈的唯一数据源（缺口 6）。此前这一格
+                // 恒为 `None`，校准比冻结在初值 1.0，压缩预检把本可成功的
+                // 摘要请求误判成「注定超限」。
+                usage: outcome.usage,
                 ..Default::default()
             },
             messages: produced,
@@ -1315,6 +1319,8 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
             reasoning: reasoning_text,
             response_text_child_id: child_id,
             reasoning_child_id,
+            // 实测用量直通：校准反馈的唯一数据源（缺口 6），与上面被拒出口同一条。
+            usage: outcome.usage,
             ..Default::default()
         },
         messages: all_messages,

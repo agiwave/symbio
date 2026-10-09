@@ -755,7 +755,12 @@ export const BASELINE = {
   //   （`provider_adapter_routes_reasoning_deltas_to_the_reasoning_channel`，含
   //   两个方向的反向判据：推理走错通道 ⇒ 正文里多出思考内容 / 推理通道为空）。
   //   实测口径同前：`cargo test -p symbio`，取首个 `test result: ok. N passed`。
-  rustTests: 1388,
+  // 2026-10-09 **回填 `1388 → 1389`（+1）**：批「缺口 6」——provider 实测用量沿
+  //   `LlmTurn → TurnOutcome` 穿回，`turn_runner.test.rs` 加锚用例
+  //   （`provider_usage_survives_the_run_to_the_outcome`）：用量断了 ⇒ 校准比
+  //   冻结在 1.0 ⇒ 压缩预检误判「注定超限」（e2e t8/t11/t18 的正因）。
+  //   实测口径同前：`cargo test -p symbio`，取首个 `test result: ok. N passed`。
+  rustTests: 1389,
   /**
    * CI 口径的 Rust 通过数（**只增不减**）——与上面三个分包基线**是不同口径，不能互替**。
    *

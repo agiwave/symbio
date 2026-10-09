@@ -21,6 +21,7 @@
 
 use async_trait::async_trait;
 
+use crate::symbio_core::ModelUsage;
 use crate::symbio_core::PromptMessage;
 use crate::symbio_core::{CapabilityMeta, TurnToolCallInfo};
 
@@ -198,6 +199,18 @@ pub struct LlmTurn {
     pub tool_calls: Vec<TurnToolCallInfo>,
     /// adapter 边界实测耗时（毫秒）——与 [`LlmAdapter::generate_timed`] 同一口径。
     pub cost_ms: u64,
+    /// provider **实测用量**（本轮这一次响应的）。与 [`Self::cost_ms`] 同族：
+    /// 都是 adapter 边界上已经看在眼里的实测数，只是观察对象不同（耗时 vs token）。
+    ///
+    /// 为什么必须带出来：唯一消费方是 session 插件的 token 估算校准
+    /// （`chat_loop/turn.rs` 的 `feedback_estimate`）——provider 返回的真实
+    /// `output_tokens` 是校准比的分子，断在这里校准就永远停在初值 1.0，
+    /// 未校准启发式的系统偏差（实测对 CJK 高估约 31%）永久无人修正，
+    /// 压缩预检会把本可成功的摘要请求误判成「注定超限」（缺口 6）。
+    ///
+    /// 缺省 `None`：provider 不一定给（协议或桩都不保证有），校准侧本就按
+    /// 可选处理——**缺是正常的，断链才是缺陷**。
+    pub usage: Option<ModelUsage>,
 }
 
 /// 流式增量接收口（[`LlmAdapter::generate_streaming`] 的回调面）。
@@ -301,6 +314,7 @@ pub trait LlmAdapter: Send + Sync {
             text,
             tool_calls: Vec::new(),
             cost_ms,
+            usage: None,
         })
     }
 }

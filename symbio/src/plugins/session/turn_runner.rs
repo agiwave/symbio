@@ -242,6 +242,13 @@ pub struct TurnOutcome {
     pub turn: u64,
     pub text: String,
     pub cost_ms: u64,
+    /// 本轮**最后一次**模型响应的实测用量（provider 没给就是 `None`）。
+    ///
+    /// 为什么只带最后一次：[`Self::text`] / 推理正文都是最后一轮的产物，校准比
+    /// 的分子分母必须**同一次响应**（`chat_loop/turn.rs` 的 `feedback_estimate`）
+    /// ——拿多轮的合计用量对最后一轮的文本做分母，观测比会系统性偏高。
+    /// 反射档 / 兜底 / 中止没有模型参与，恒 `None`。
+    pub usage: Option<crate::symbio_core::ModelUsage>,
     pub fell_back: bool,
     /// 中止（用户主动停止 / 会话销毁）：**既无 final 也无兜底格**——网格只留
     /// 已入格的用户消息，少一格是诚实的缺口（ADR-044 的转写纪律同源）；
@@ -430,6 +437,7 @@ impl TurnRunner {
                     turn,
                     text: reply.to_string(),
                     cost_ms: 0,
+                    usage: None,
                     fell_back: false,
                     aborted: false,
                     awaits_user: false,
@@ -457,6 +465,7 @@ impl TurnRunner {
                 turn,
                 text: reply.to_string(),
                 cost_ms: 0,
+                usage: None,
                 fell_back: false,
                 aborted: false,
                 awaits_user: false,
@@ -603,6 +612,7 @@ impl TurnRunner {
                                 turn,
                                 text: rt.text,
                                 cost_ms,
+                                usage: rt.usage,
                                 fell_back: false,
                                 aborted: false,
                                 awaits_user: false,
@@ -629,6 +639,7 @@ impl TurnRunner {
                             turn,
                             text: rt.text,
                             cost_ms,
+                            usage: rt.usage,
                             fell_back: false,
                             aborted: false,
                             awaits_user: false,
@@ -679,6 +690,7 @@ impl TurnRunner {
                             turn,
                             text: rt.text,
                             cost_ms,
+                            usage: rt.usage,
                             fell_back: false,
                             aborted: false,
                             awaits_user: true,
@@ -711,6 +723,7 @@ impl TurnRunner {
                         turn,
                         text: String::new(),
                         cost_ms: cost,
+                        usage: None,
                         fell_back: false,
                         aborted: true,
                         awaits_user: false,
@@ -809,6 +822,7 @@ impl TurnRunner {
                 turn,
                 text: text.to_string(),
                 cost_ms,
+                usage: None,
                 fell_back: false,
                 aborted: false,
                 awaits_user: false,
@@ -835,6 +849,7 @@ impl TurnRunner {
             turn,
             text: text.to_string(),
             cost_ms,
+            usage: None,
             fell_back: false,
             aborted: false,
             awaits_user: false,
@@ -867,6 +882,7 @@ impl TurnRunner {
                 turn,
                 text: why.to_string(),
                 cost_ms,
+                usage: None,
                 fell_back: true,
                 aborted: false,
                 awaits_user: false,
@@ -890,6 +906,7 @@ impl TurnRunner {
             turn,
             text: why.to_string(),
             cost_ms,
+            usage: None,
             fell_back: true,
             aborted: false,
             awaits_user: false,

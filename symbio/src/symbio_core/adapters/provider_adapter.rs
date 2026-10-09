@@ -457,6 +457,8 @@ impl LlmAdapter for ProviderLlmAdapter {
             text: output.text,
             tool_calls: output.tool_calls,
             cost_ms: started.elapsed().as_millis() as u64,
+            // provider 实测用量直通：这是校准反馈链的唯一数据源（见 `LlmTurn::usage`）。
+            usage: output.usage,
         })
     }
 }
