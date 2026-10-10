@@ -117,6 +117,11 @@ MSRV 阶段会换编译器（`RUSTUP_TOOLCHAIN` 覆盖 `rust-toolchain.toml`）�
 ⚠️ **检查项的权威清单只在 `scripts/gate.mjs`**——本文档、CI、记忆里都不另抄一份，
 抄了必然漂移。要加检查就改 `gate.mjs`。
 
+同理，**判据码的全表只在 [docs/reference/GATE_CODES.md](./docs/reference/GATE_CODES.md)**
+（由各脚本的 `@codes` 声明生成）：文档指认判据码时只写**具体那一条**（如 D-004），
+**不数条数、不写号段**（「四条规矩」「E-001–E-011」这类）——条数会增、号段会跳，
+抄了必然漂移。
+
 找不到某条机制 / 约定写在哪：`node scripts/doc-find.mjs <关键词>`（搜全仓 `*.md` 与源码
 `//!` / `///`）。项目文档是下沉的，**知识只写一处**；发现缺文档就补那一处，不要把摘要抄到别处。
 
@@ -198,7 +203,7 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
   别人了」或「该拆篇了」的信号，按上面那张职责边界表处置。同一脚本的 D-004 另判**变更史残留**
   （「曾经 / 修订 / 后记 / 测试基线 A → B」），历史一律归 `git log`。
   ```bash
-  node scripts/doc-link-audit.mjs   # 四条规矩（链接 / 归档 / 行数 / 变更史），任一命中即失败
+  node scripts/doc-link-audit.mjs   # 文档体检（D 系判据），任一命中即失败
   ```
 
 ### Rust 侧

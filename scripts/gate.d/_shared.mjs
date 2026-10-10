@@ -765,6 +765,10 @@ export const BASELINE = {
   //   桥接用例（`provider_adapter_routes_tool_frames_to_the_message_channel`）：
   //   身份帧先于增量、全帧同 id（id 漂移 = 第二张卡）、Σ帧拼出完整参数 JSON。
   //   实测口径同前：`cargo test -p symbio`，取首个 `test result: ok. N passed`。
+  // 2026-10-10 **回填 `1412 → 1417`（+5）**：批「S2」——Q3 进展读切 WAL，
+  //   `plugins/session/v2_worker_progress.rs` 5 条判据（两读法同答案 ×3 形态 /
+  //   无 WAL 不产出 / 空正文占位不算步骤）。
+  //   实测口径同前：`cargo test -p symbio`，取首个 `test result: ok. N passed`。
   // 2026-10-10 **回填 `1404 → 1412`（+8）**：批「S1」——双源对账
   //   `plugins/session/v2_reconcile.rs`（8 条：同源一致 / 正文改 / 条数少 /
   //   WAL 不在不报 / 幂等 / 空正文占位不算分歧 / 判据自身可反向）。
@@ -779,7 +783,7 @@ export const BASELINE = {
   //   整列、读侧闸 ⇒ 空且不扫）。同批退役 `#[ignore]` 的 `slo_scan_wal_roots`
   //   手工扫描口（职责被上面两件接走）。
   //   实测口径同前：`cargo test -p symbio -p symbio-cli`，取首个 `test result: ok. N passed`。
-  rustTests: 1412,
+  rustTests: 1417,
   /**
    * CI 口径的 Rust 通过数（**只增不减**）——与上面三个分包基线**是不同口径，不能互替**。
    *
@@ -795,14 +799,16 @@ export const BASELINE = {
    * 照样绿。这与 ci.yml 漏掉 `v2-plan` 是同一课的第三次：**只信退出码**能抓住
    * 「测试失败」，抓不住「测试消失」——后者不留任何痕迹。
    *
-   * 1384 = 1376 + 8 + 0 + 0（**推算**：+1 与 `rustTests` 同源，即 C1 词表归一的净增；
-   * 下一次 CI 以实测复核）。第 4 行是 doctest `0 passed; 7 ignored`。
+   * 1425 = 1417 + 8 + 0 + 0（2026-10-10 **实测**：`cargo test --workspace` 全部
+   * `test result: ok` 行求和，依次 symbio lib 1417 / cli 8 / tauri 0 /
+   * doctest `0 passed; 8 ignored`）。前值 1384 是推算值（1376 + 8 + 0 + 0），
+   * 本次按其自述「下一次 CI 以实测复核」回填，推算误差吸收在 `1384 → 1425` 里。
    * 口径的出处是 CI run 37647725557：`rust-checks (dev)` 四行依次
    * `1341 / 8 / 0 / 0 passed`，并打黄字 `⚠ CI 全量 1349 > 基线 1347：
    * 请更新 BASELINE.ciRustTestsTotal`。**本地与 CI 是两条独立的格子**，同一个增量
    * 会各欠一次，回填时必须两边一起看。
    */
-  ciRustTestsTotal: 1384,
+  ciRustTestsTotal: 1425,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *
@@ -1085,8 +1091,12 @@ export const BASELINE = {
   // 54 文件 / 851（2026-10-08，**清偿欠账、不是新账**）：`vitestTests` 847 → **851**。
   //      +4 全部来自 `MessageNode.spec`（`f982874` 的工具状态行三判据 + 反例），那一次
   //      只留了注没改数字 ⇒ 同一格欠四格，棘轮被静默削掉。加了测试就回填。
-  vitestFiles: 54,
-  vitestTests: 851,
+  // 55 文件 / 856（2026-10-10，**清偿欠账**）：`vitestFiles` 54 → **55**、
+  //      `vitestTests` 851 → **856**，+1 文件 / +5 用例——P4 读数面板方言的前端
+  //      判据 `schemas/__tests__/reading.spec.ts`（两个访问器与后端语义对齐），
+  //      该批当时未回填。
+  vitestFiles: 55,
+  vitestTests: 856,
   /**
    * `docs/plan/verify/` 的**验证程序数**（棘轮，只许涨）——见 `gate.d/55-verify.mjs`。
    *
@@ -1094,9 +1104,10 @@ export const BASELINE = {
    * 而**少跑一跑在日志里与"全绿"长得一模一样**。程序被删掉时没有编译错误、没有
    * 测试失败、没有任何红灯——证据凭空消失而门禁照旧 51/51。数量是唯一能看见它的信号。
    *
-   * 14 = `docs/plan/README.md §4` 的表（逐个核对过文件名），2026-10-07 实测 14/14 通过。
+   * 15 = 2026-10-10 实测（`docs/plan/verify/` 下 15 个程序，`README §4` 的表逐个
+   * 核对过文件名）；回填 `14 → 15` 的增量是 P5 的 `recall_eval.rs`（该批当时未回填）。
    */
-  verifyPrograms: 14,
+  verifyPrograms: 15,
   /**
    * 带 `should_not_compile` 的**反例程序数**（棘轮，只许涨）——同上。
    *
@@ -1133,10 +1144,11 @@ export const BASELINE = {
    * 刻意保守：把它们算进来让基线略高于实际执行量，而「删断言必减计数」这个方向
    * 不受口径影响——棘轮要抓的是消失，不是精确。
    *
-   * 165 = 2026-10-08 实测，14 个程序逐文件数清（逐文件明细由 `55-verify` 打进日志，
+   * 170 = 2026-10-10 实测，15 个程序逐文件数清；回填 `165 → 170` 的增量含 P5
+   * `recall_eval.rs` 的断言（该批当时未回填）。逐文件明细由 `55-verify` 打进日志，
    * 便于按 `_shared.mjs` 里那条经验归因：「溯源方法有盲区，不等于来源不存在」）。
    */
-  verifyAsserts: 165,
+  verifyAsserts: 170,
   /**
    * 非测试 Rust 里的 **panic 面处数**（棘轮，**只许减**）——见 `scripts/panic-audit.mjs`。
    *

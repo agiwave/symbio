@@ -66,7 +66,9 @@ impl FallbackRateView {
         })
     }
 
-    /// 合并多份视图（**跨会话聚合**）。与 [`SloLatencyView::merge`] 同族同理由：
+    /// 合并多份视图（**跨会话聚合**）。与
+    /// [`SloLatencyView::merge`](crate::symbio_core::projection::slo::SloLatencyView::merge)
+    /// 同族同理由：
     /// 分子分母都是**计数**，逐档位相加即可——率不在这时候算（`TierStats::rate`
     /// 是纯查询，合并后再算与分开算逐字相同，因为率是除法而不是累加）。
     ///

@@ -228,15 +228,61 @@ test('D-004：流转箭头不误报（turn → opened 这类图示是现行语�
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('D-004：头部豁免带理由 → 通过（定义该规矩的文档要能引用反例措辞）', () => {
+test('D-004：全文豁免（首行非空内容）→ 整篇通过（定义该规矩的文档要能引用反例措辞）', () => {
   const allowed =
     '<!-- doc-link-allow D-004: 本文定义该规矩，需引用反例措辞 -->\n# A\n\n不写「曾经是什么」。\n'
+  assert.equal(audit({ 'docs/a.md': allowed }).status, 0)
+})
+
+test('D-004：全文豁免认「首行非空内容」——豁免注释前有空行也算', () => {
+  const allowed =
+    '\n<!-- doc-link-allow D-004: 本文定义该规矩，需引用反例措辞 -->\n# A\n\n不写「曾经是什么」。\n'
   assert.equal(audit({ 'docs/a.md': allowed }).status, 0)
 })
 
 test('D-004：豁免理由为空 → 仍失败（同 D-002 的口径）', () => {
   const empty = '<!-- doc-link-allow D-004:   -->\n# A\n\n这条曾经存在过。\n'
   assert.equal(audit({ 'docs/a.md': empty }).status, 1)
+})
+
+test('D-004：行内豁免（写在被豁免行的前一行）只免该行，其余行仍红', () => {
+  const r = audit({
+    'docs/a.md': [
+      '# A',
+      '',
+      '<!-- doc-link-allow D-004: 引用反例措辞 -->',
+      '反例：「曾经是什么」。',
+      '但这条是变更史叙述，曾经走过另一条路。',
+      '',
+    ].join('\n'),
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /docs\/a\.md:5/)
+  assert.doesNotMatch(r.stdout, /docs\/a\.md:4/, '被豁免的行不应出现在报告里')
+})
+
+test('D-004：行内豁免写在同一行 → 同样生效', () => {
+  const r = audit({
+    'docs/a.md': '# A\n\n本句引用反例措辞「曾经」。 <!-- doc-link-allow D-004: 引用反例 -->\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-004：正文后的豁免注释不整篇豁免（全文档只认首行非空内容）', () => {
+  const r = audit({
+    'docs/a.md': [
+      '# A',
+      '',
+      '这条曾经存在过。',
+      '',
+      '<!-- doc-link-allow D-004: 以为挂在这里能整篇豁免 -->',
+      '那条也曾经存在过。',
+      '',
+    ].join('\n'),
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /docs\/a\.md:3/)
+  assert.doesNotMatch(r.stdout, /docs\/a\.md:6/, '注释只免它的下一行，第 6 行免、第 3 行不免')
 })
 
 // ── D-006：反引号里的文件路径（D-001 的盲区补丁）─────────────────────────
@@ -303,7 +349,7 @@ test('D-006：行内豁免（写在被豁免行的前一行）→ 通过，且�
   assert.doesNotMatch(r.stdout, /not-real\.md/, '被豁免的行不应出现在报告里')
 })
 
-test('D-006：全文豁免（头部注释）→ 整篇通过', () => {
+test('D-006：全文豁免（首行非空内容）→ 整篇通过', () => {
   const r = audit({
     'docs/a.md': '<!-- doc-link-allow D-006: 本文举例说明路径写法，路径均非入链 -->\n# A\n\n`docs/x.md`\n',
   })

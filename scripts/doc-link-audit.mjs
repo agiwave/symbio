@@ -40,7 +40,8 @@
  *     规则文档（`session/docs/README.md` 用 `` `docs/x.md` `` 举例说明路径怎么写）
  *     与缺陷记录（`frontend-ui-ux-plan.md` 引用两个已不存在的文件名，以记录"已修"）
  *     都属此类——它们的"坏路径"是**内容**，不是**入链**。
- *   · **全文**：写在头部（前 `DOCTYPE_HEAD_LINES` 行）的豁免注释，豁免**整篇**。
+ *   · **全文**：豁免注释须为文件**第一行非空内容**（判据不用「头部若干行」——那会让
+ *     行内档不可达：开头就写行内豁免的文档会被整篇放行），豁免**整篇**。
  *     实测全文豁免会被滥用（一篇讲文档规矩的文章给整篇挂豁免，等于规则对它失效），
  *     故只在确需时用；行内豁免覆盖绝大多数真实场景。
  *
@@ -69,8 +70,16 @@
  * D-004 存在的理由：现行文档写「曾经是什么、后来改成了什么」，代价不是"多几句话"，而是
  *   **每次重构都要回头改历史**——历史既不可能与现状保持一致，改了又等于篡改。判据是
  *   机械的：这类叙述总带着固定的措辞标记（`曾经` / `更正（` / `后记（` / 测试基线 `A → B`）。
- *   豁免走头部注释 `<!-- doc-link-allow D-004: 理由 -->`（理由不可为空）——本条与 D-002 同源，
- *   都需要一个"我确实在引用反例措辞"的出口（`docs/README.md` 定义这条规矩时就在引用它）。
+ *   豁免 `<!-- doc-link-allow D-004: 理由 -->`（理由不可为空）**分两档**——与 D-006 同一口径：
+ *   **行内**（本行或前一行）只豁免该行；**全文**须为文件**第一行非空内容**是豁免注释，
+ *   且理由写明它买断的是什么（`docs/README.md` 定义这条规矩时就在引用反例措辞，
+ *   `plan/13` 那类批次登记的状态列是唯一的全过程信息）。全文档判据取「第一行非空内容」
+ *   而不是「头部 15 行内」，是 D-006 踩过的坑：后者让行内档**永远不可达**——
+ *   开头就写行内豁免的文档会被整篇放行。
+ *   **判据边界**（在 docs/README.md 成文，边界不成文就会被当成守卫失灵）：只判词表与
+ *   **带量词**的计数箭头（`五条 → 七条`）；**不判**裸数字箭头（`56 → 46`——04 §3.1 的
+ *   状态表合法记着测试数增减）与叙事式历史（「一度掉到 20/42」）。只收「不会出现在正常
+ *   论述里的措辞」，理由同上一段：守卫一旦开始误报，下场是被整体豁免，比没有还糟。
  *
  * 扫描范围（与「文档下沉原则」对齐：单模块文档在该模块目录内）：
  *   docs/                系统级文档（**archive/ 除外**，见下）
@@ -89,7 +98,7 @@
  *   node scripts/doc-link-audit.mjs --root=<dir> # 换仓库根（回归测试用）
  *
  * 退出码：
- *   0 = 六条规矩全过
+ *   0 = 各条判据全过（全表见 docs/reference/GATE_CODES.md）
  *   1 = 有命中（**默认即失败**，不需要 `--strict`
  *       ——2026-09-20 前失效链接只在 `--strict` 下失败，而门禁从不带该参数 ⇒ 从未真的红过）
  *
@@ -235,21 +244,38 @@ const HISTORY_MARKERS = [
 ]
 const WAIVER_D004_RE = /<!--\s*doc-link-allow\s+D-004\s*:\s*(\S.*?)\s*-->/
 
-/** 正文里的变更史痕迹（行号 + 命中标记），最多报 `limit` 处 */
+/**
+ * 行内豁免：本行或**前一行**带 `<!-- doc-link-allow D-004: 理由 -->`（理由不可为空）。
+ * 与 D-006 的行内档同口径——注释既可写在被豁免行之前（不打断排版），也可写在同行。
+ */
+function waivedD004Line(lines, i) {
+  if (WAIVER_D004_RE.test(lines[i])) return true
+  return i > 0 && WAIVER_D004_RE.test(lines[i - 1])
+}
+
+/**
+ * 全文豁免：**文件第一行非空内容**是豁免注释（与 D-006 的全文档同口径）。
+ * 判据取「第一行非空内容」而不是「头部 15 行内」——后者会让行内档不可达
+ * （开头就写行内豁免的文档整篇被放行，D-006 已踩过这个坑）。
+ */
+function waivedD004Whole(text) {
+  for (const line of text.split('\n').slice(0, DOCTYPE_HEAD_LINES)) {
+    if (line.trim() === '') continue
+    return WAIVER_D004_RE.test(line)
+  }
+  return false
+}
+
+/** 正文里的变更史痕迹（行号 + 命中标记），最多报 `limit` 处；行内豁免的行跳过 */
 function historyHits(text, limit = 5) {
   const hits = []
   const lines = text.split('\n')
   for (let i = 0; i < lines.length && hits.length < limit; i++) {
+    if (waivedD004Line(lines, i)) continue
     const marker = HISTORY_MARKERS.find((re) => re.test(lines[i]))
     if (marker) hits.push({ line: i + 1, text: lines[i].trim().slice(0, 60), marker })
   }
   return hits
-}
-
-/** 头部是否声明了 D-004 豁免（理由不可为空） */
-function waivedD004(text) {
-  const head = text.split('\n').slice(0, DOCTYPE_HEAD_LINES).join('\n')
-  return WAIVER_D004_RE.test(head)
 }
 
 // ==================== D-006：反引号里的文件路径 ====================
@@ -564,7 +590,7 @@ function scanBody(file) {
   const lines = lineCount(text)
   if (lines > MAX_DOC_LINES) oversized.push({ rel, lines })
 
-  if (!waivedD004(text)) {
+  if (!waivedD004Whole(text)) {
     const hits = historyHits(text)
     if (hits.length > 0) historical.push({ rel, hits })
   }
@@ -636,7 +662,8 @@ if (historical.length > 0) {
   console.log('\n提示：现行文档只描述「现在是什么」——把过去写成现在，代价是每次重构都要回头改历史，')
   console.log('      而历史改成与现状一致就不再是历史。改为陈述当前行为（需要论证则指向 ADR，')
   console.log('      需要过程记录则 `git mv` 进 docs/archive/）。确实在引用反例措辞时（如定义该规矩的那篇），')
-  console.log('      头部写 `<!-- doc-link-allow D-004: 理由 -->`（理由不可为空）。')
+  console.log('      写 `<!-- doc-link-allow D-004: 理由 -->`（理由不可为空）：行内（本行或前一行）只豁免该行；')
+  console.log('      全文豁免须写在文件首行非空内容处，且理由写明它买断的是什么。')
 }
 
 // ---- D-006：反引号里的文件路径 ----
@@ -648,7 +675,8 @@ if (backtickBad.length > 0) {
   console.log('\n提示：行内反引号写出的文件路径 D-001 看不见（它只认 `[文字](目标)`）。两种处置：')
   console.log('      · 真断链 → 改正路径（多为文件移动 / 改名后未更新入链）；')
   console.log('      · 缩写 / 示意性路径（如 `session/docs/core-loop.md` 指插件内同名文件）→')
-  console.log('        改为完整路径，或头部写 `<!-- doc-link-allow D-006: 理由 -->`（理由不可为空）。')
+  console.log('        改为完整路径，或写 `<!-- doc-link-allow D-006: 理由 -->`（理由不可为空）：')
+  console.log('        行内（本行或前一行）只豁免该行，全文豁免须写在文件首行非空内容处。')
 }
 
 // ---- D-007：站内锚点 ----
