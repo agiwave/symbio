@@ -21,7 +21,6 @@
 
 use super::chat_session::PersistentChatSession;
 pub use super::config::SessionConfig;
-use super::config::V2Mode;
 use super::types::{Session, SessionSummary};
 use crate::providers::MemoryFile;
 use crate::symbio_core::{chat_message as cm, session_chat};
@@ -31,8 +30,8 @@ use crate::symbio_core::{
     PLUGIN_FILE, PLUGIN_ID_SESSION, SESSION_ID,
 };
 use crate::symbio_core::{
-    DetailDefinition, DetailField, DetailOption, DetailSection, DynVdfsProvider, VdfsAccess,
-    VdfsChange, VdfsChangeSubscriptions,
+    DetailDefinition, DetailField, DetailSection, DynVdfsProvider, VdfsAccess, VdfsChange,
+    VdfsChangeSubscriptions,
 };
 use crate::symbio_core::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
 use async_trait::async_trait;
@@ -839,31 +838,8 @@ fn config_definition() -> DetailDefinition {
                         "skill_fast_path",
                         "技能快路（命中时跳过模型）",
                         "本轮发言逐字命中某条已编译技能时，直接以技能正文收束、不调模型。\
-                         命中判据取恒等（更宽的「同类」判定是算法问题）；只在 full 档生效",
+                         命中判据取恒等（更宽的「同类」判定是算法问题）",
                         d.skill_fast_path,
-                    ),
-                    DetailField::select(
-                        "v2_mode",
-                        "事实链路档位",
-                        vec![
-                            DetailOption {
-                                value: "off".into(),
-                                label: "off（v1 执行，不落事实网格：默认档）".into(),
-                                description: None,
-                            },
-                            DetailOption {
-                                value: "full".into(),
-                                label: "full（v2 执行：轮次走 v2 运行器，默认档）".into(),
-                                description: None,
-                            },
-                        ],
-                        v2_mode_name(d.v2_mode),
-                    )
-                    .with_description(
-                        "管辖范围 = v2 事实链路的切换档位。`full`（出厂）的覆盖面 = **全部轮次**：\
-                         无工具轮、工具轮、审批与问答恢复都在内。`off` 关掉的是**事实网格**，\
-                         连带**静默**关掉三样读侧（长期记忆召回 / 就绪任务集 / 技能路由）——\
-                         它们都读事实源。",
                     ),
                 ],
             },
@@ -879,16 +855,6 @@ fn unbounded_number(key: &str, label: &str, description: &str, default: Value) -
         min: None,
         max: None,
         ..DetailField::number(key, label, description, 0.0, 0.0, default)
-    }
-}
-
-/// 档位名（[`V2Mode`] 的 serde 表示）——面板的候选值与默认值共用它，不在 schema 侧
-/// 另写一份档位字面量。漂移由 `config_definition_defaults_come_from_session_config`
-/// 兜底（它比的就是这里的默认值与 `SessionConfig::default()` 的序列化结果）。
-fn v2_mode_name(mode: V2Mode) -> &'static str {
-    match mode {
-        V2Mode::Off => "off",
-        V2Mode::Full => "full",
     }
 }
 

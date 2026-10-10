@@ -53,8 +53,7 @@ pub enum ResumeOutcome {
     /// 恢复成功，turn 循环应继续（历史已含新工具结果，或 Failed Turn 已删除）。
     ///
     /// `resumed` 是本次恢复**实际产生的工具交换**（`Some` = 真的重跑/生成了结果）。
-    /// v2 原生路径（`v2_mode = full`）据此**续写同一轮**——把这段交换落格并拼进
-    /// 下一轮 prompt；v1 路径不需要它（它从转写读，见 `v2_bridge`）。
+    /// 运行器据此**续写同一轮**——把这段交换落格并拼进下一轮 prompt。
     Continue { resumed: Option<ResumedTool> },
     /// 恢复失败或 reject/answer 已终态，turn 循环应退出（留 Failed 等下次 resume）。
     Done,

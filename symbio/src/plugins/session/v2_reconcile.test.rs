@@ -182,7 +182,7 @@ fn a_missing_wal_is_not_a_mismatch() {
     let store_side = vec![msg(MessageRole::User, "问 A")];
     let r = reconcile(&dir, &store_side);
 
-    assert!(r.wal_missing, "WAL 不在要单独标（off 档 / 还没跑过 v2）");
+    assert!(r.wal_missing, "WAL 不在要单独标（还没跑过任何一轮）");
     assert_eq!(r.mismatches, 0, "没有第二源可比 ⇒ 不算不一致");
     assert!(
         r.is_consistent(),
@@ -238,7 +238,7 @@ fn is_consistent_requires_both_count_and_content_to_match() {
         wal_missing: false,
     };
     assert!(!r.is_consistent(), "条数不同即使逐条都相同也不算一致");
-    // WAL 不在时恒判一致（否则 off 档天天响）
+    // WAL 不在时恒判一致（否则还没跑过轮的会话会让它天天响）
     let w = Reconciliation {
         store_msgs: 9,
         wal_entries: 0,

@@ -51,7 +51,7 @@ flowchart TD
 以下是**与本节机制直接相关的键**的示例（不是全表）：全字段真源见
 `config.rs::SessionConfig`，配置面总表见 [`docs/reference/CONFIGURATION.md`](../../../../docs/reference/CONFIGURATION.md)。
 （`classify_enabled` / `compose_enabled` / `progress_*` / `supplements_*` /
-`conation_enabled` / `skill_compile_enabled` / `v2_mode` 等键不在下方示例中，
+`conation_enabled` / `skill_compile_enabled` 等键不在下方示例中，
 它们归「对话面机制」与「自主与学习」两节。）
 
 ```yaml

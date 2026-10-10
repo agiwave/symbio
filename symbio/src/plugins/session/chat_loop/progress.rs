@@ -85,16 +85,16 @@ impl ProgressPolicy {
 /// ## 为什么它不是 [`TurnState`] 的字段
 ///
 /// `TurnState::tool_rounds` / `progress_reports` / `last_user_facing_at` 三个字段
-/// 都属于 **v1 的轮循环**——而 `full` 档那个循环不存在（工具循环搬进了 v2 运行器，
-/// chat_loop 一轮只经过一次）。所以在本档下它们恒为初值，其中 `tool_rounds` 恒 0
+/// 在会话轮上**恒为初值**——工具循环在 v2 运行器里，chat_loop 一轮只经过一次，
+/// 没有谁来递增它们。其中 `tool_rounds` 恒 0
 /// ——而 `report_if_due` 的头一句就是「`tool_rounds == 0` 不说」，于是汇报恒不发。
 ///
 /// 把计数搬到轮边界回调**自己持有**的结构里，是因为那个回调是 Fn + 'static：它
 /// 捕获不了 `run_chat_loop` 的栈局部 `TurnState`。
 ///
-/// ⚠️ 这是**同一轮内的两份数**（`TurnState` 那三格在本档下是死的），不是两个真源：
-/// 死字段与活字段不冲突，因为活的那份只被汇报判定读，而 `TurnState` 那三格在 `full`
-/// 下没有任何读方会看出差别。真要让它们一致，唯一办法是把 `TurnState` 整体搬进
+/// ⚠️ 这是**同一轮内的两份数**（`TurnState` 那三格是死字段），不是两个真源：
+/// 死字段与活字段不冲突，因为活的那份只被汇报判定读，而 `TurnState` 那三格
+/// 没有任何读方会看出差别。真要让它们一致，唯一办法是把 `TurnState` 整体搬进
 /// `Arc<Mutex<_>>`——那是为三个死字段翻整个主循环的借，不值。
 pub(crate) struct RoundProgress {
     policy: ProgressPolicy,

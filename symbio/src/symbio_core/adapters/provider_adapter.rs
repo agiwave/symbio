@@ -110,9 +110,9 @@ impl ExecTranscriptWriter for DeltaBridge {
 /// 折进 `LlmAdapter::generate`（prompt 入、文本出）的最小适配。
 pub struct ProviderLlmAdapter {
     provider: Arc<dyn ModelProvider>,
-    /// 会话级系统提示词（full 档经 `for_turn` 注入；缺省 = 彩排用的通用提示）。
+    /// 会话级系统提示词（会话轮经 `for_turn` 注入；缺省 = 彩排用的通用提示）。
     system: Option<String>,
-    /// 本轮的中止信号（full 档经 `for_turn` 注入；缺省自建——彩排无需中止）。
+    /// 本轮的中止信号（会话轮经 `for_turn` 注入；缺省自建——彩排无需中止）。
     abort: Option<ExecAbortSignal>,
 }
 
@@ -126,8 +126,8 @@ impl ProviderLlmAdapter {
     }
 
     /// 会话轮构造：系统提示词 + 本轮中止信号直通——中止与提示词是**调用方的
-    /// 语境**，适配器不再自作主张（此前硬编码通用提示 + 自建中止信号，
-    /// full 档接管会话轮后两者都必须由 chat_loop 传入）。
+    /// 语境**，适配器不自作主张（通用提示与自建中止信号只是彩排缺省，会话轮的
+    /// 两者都由 chat_loop 传入）。
     pub fn for_turn(
         provider: Arc<dyn ModelProvider>,
         system: &str,
@@ -317,8 +317,8 @@ impl LlmAdapter for ProviderLlmAdapter {
                             role: Some(MessageRole::Assistant),
                             msg_type: Some(MessageType::ToolCall),
                             name: Some(c.name.clone()),
-                            // 参数走 content（展平时从这里 re-parse）——与 v1 落库
-                            // 时的规范化口径一致（`tc.arguments.to_string()`）。
+                            // 参数走 content（展平时从这里 re-parse）——规范化
+                            // 口径是 `tc.arguments.to_string()`。
                             content: Some(MessageContent::Text(c.arguments.to_string())),
                             tool_call_id: Some(c.id.clone()),
                             ..Default::default()

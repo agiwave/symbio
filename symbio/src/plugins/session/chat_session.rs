@@ -129,13 +129,8 @@ impl PersistentChatSession {
             .unwrap_or_default()
     }
 
-    /// 当前 v2 切换档位（`v2_bridge` 转写与否的唯一判据；锁被占时回落默认档）。
-    pub(crate) fn v2_mode(&self) -> super::config::V2Mode {
-        self.cfg_or_default().v2_mode
-    }
-
     /// 对话窗口（最近轮数，**含当前轮**）——v2 执行器的 prompt 窗口
-    /// （锁被占回落默认；与 [`Self::v2_mode`] 同一读取纪律）。
+    /// （锁被占回落默认，与 [`Self::cfg_or_default`] 同一读取纪律）。
     pub(crate) fn context_window(&self) -> u64 {
         self.cfg_or_default().context_messages as u64
     }
@@ -169,7 +164,7 @@ impl PersistentChatSession {
         self.store.save_session(session).await
     }
 
-    /// 会话目录（v2 事实桥的 WAL 安放处）；临时会话 ⇒ `None`。
+    /// 会话目录（v2 事实源的 WAL 安放处）；临时会话 ⇒ `None`。
     pub(crate) fn session_dir(&self) -> Option<std::path::PathBuf> {
         self.store.session_dir(&self.session_id)
     }
@@ -196,13 +191,13 @@ impl PersistentChatSession {
     }
 
     /// 技能编译开关（步 22 · [roadmap/S11](../../../../docs/plan/roadmap/S11-技能编译与自我改进.md)；
-    /// 锁被占回落默认 off——与 [`Self::v2_mode`] 同一读取纪律）。
+    /// 锁被占回落默认 off——与 [`Self::context_window`] 同一读取纪律）。
     pub(crate) fn skill_compile_enabled(&self) -> bool {
         self.cfg_or_default().skill_compile_enabled
     }
 
     /// 技能快路开关（步 22 的**执行半边**，S11 §4 的 `actor.pattern`；
-    /// 锁被占回落默认 off——与 [`Self::v2_mode`] 同一读取纪律）。
+    /// 锁被占回落默认 off——与 [`Self::context_window`] 同一读取纪律）。
     pub(crate) fn skill_fast_path(&self) -> bool {
         self.cfg_or_default().skill_fast_path
     }

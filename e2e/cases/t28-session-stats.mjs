@@ -94,8 +94,8 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        // `bridge` 档：每轮收束转写进 `<会话目录>/v2-events.wal`——读数口的事实源。
-        session: { ...DIALOG_FACE_OFF, v2_mode: 'full' },
+        // 每轮收束把事实写进 `<会话目录>/v2-events.wal`——读数口的事实源。
+        session: { ...DIALOG_FACE_OFF },
       },
     });
 
@@ -166,7 +166,7 @@ export default defineCase(
         );
         assertEq(stats.tiers.length, 1, `两轮同档 ⇒ 一档（实际: ${JSON.stringify(stats.tiers)})`);
         const row = stats.tiers[0];
-        assertEq(row.tier, 'deep', 'v2 桥的档位恒 deep');
+        assertEq(row.tier, 'deep', '档位恒 deep');
 
         assertEq(row.turns, opens.length, '兜底率分母 = 开轮事件数');
         assertEq(row.fallbacks, fallbacks.length, '兜底率分子 = 兜底事件数');

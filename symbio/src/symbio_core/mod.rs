@@ -145,7 +145,7 @@ pub(crate) use actors::{commitment_events, recalled_event};
 pub(crate) use actors::render_messages;
 // 承诺事件名字表：core 内的消费方（`commitment_events` 的 `CommitmentKeeper`、
 // `projection::reputation`）走**模块内**路径引用，插件侧只有**测试**要按名字断言
-// （`v2_bridge.test.rs`）——而 C-002 禁止 core 外深引、非测试构建里这四个名字又
+// （`v2_facts.test.rs` / `v2_exec.test.rs`）——而 C-002 禁止 core 外深引、非测试构建里这四个名字又
 // 没有消费者。故只在 `cfg(test)` 出根：出根是给测试用的，不出根不是把它们藏着。
 #[cfg(test)]
 pub(crate) use event::{

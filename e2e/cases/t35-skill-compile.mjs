@@ -7,7 +7,7 @@ import './_selfrun.mjs';
 //
 // [11 批 2 ③](../../docs/plan/11-多执行器与多主体加固实施方案.md) 的接线判据：
 // 「每件接线一条 e2e（**接线前后行为可见地不同**，否则等于没接）」——这里钉的是
-// `SkillCompiler` / `SkillRouter`：写方挂在 `v2_facts::record` 的收束转写上，
+// `SkillCompiler` / `SkillRouter`：写方挂在 `v2_facts::record_learning`（`v2_exec` 轮末）上，
 // 读方挂在 `chat_loop::inputs::prepare_turn_inputs` 的召回之后，闸立在
 // `calibration` 投影的置信度上。
 //
@@ -28,7 +28,7 @@ import './_selfrun.mjs';
 //    观测永不落格、校准账零使用——整条链路**接好了却永远不跑**（S11 §5 静默失效）。
 //    这一条只有在**真实轮次**里跑得出来：单测可以手工把 `actor` 设对，测不出写方有没有做。
 // 2. **观测真的落格、校准真的累计**：`route` 的返回值要在**轮末收束**时落成
-//    `memory.recalled{skill_id, fallback}`（`v2_bridge` 的步 22），下一轮的置信度
+//    `memory.recalled{skill_id, fallback}`（`v2_facts::record_learning` 的步 22），下一轮的置信度
 //    才判得动。这是「取视图那一刻」与「收束入格」两处的接线，单测各证一半。
 // 3. **注入段真的被改写**：`route` 摘技能改的是 `turn.recall_view`，而注入段
 //    （`prompt_section`）在它**之后**才排——顺序反了，摘了也白摘（模型照样看得见）。
@@ -36,7 +36,7 @@ import './_selfrun.mjs';
 //
 // ## 判据分列（一个规则一个判定方）
 //
-// - **编译时机**：判定方是 `v2_facts::record` 的 `success_text`（只有 `Final` 收束有），
+// - **编译时机**：判定方是收束的 `success_text`（`v2_facts::record_learning` 的 `response` 入参，只有 `Final` 收束有），
 //   本用例只数条数（成功轮 ⇒ 一条，重复 trigger ⇒ 不再编）；
 // - **置信度闸**：判定方是 core 的 `SkillRouter::route(confidence, 0.8)`，本用例只读
 //   它**判完之后的落格**（`fallback` 标记）与**视图的增减**（注入段在不在）；
@@ -113,10 +113,9 @@ function textOf(m) {
 /**
  * 请求包里带记忆抬头的那条（没有 ⇒ null）。
  *
- * ⚠️ 判据是「**含**抬头」而非「以抬头开头」——`full` 档（出厂）下整段请求被渲染成
- * **一条** user 消息（`ProviderLlmAdapter::generate_turn`），记忆段拼在它里面；`startsWith`
- * 要求那条消息**整个**以抬头开头，前面多出任何东西就整条失配，症状是「技能没进召回
- * 视图」。理由与 t29 的同名函数同源。
+ * ⚠️ 判据是「**含**抬头」而非「以抬头开头」——记忆段是 `chat_loop::request_view_prefix`
+ * 拼进置顶前缀消息里的一段；`startsWith` 要求那条消息**整个**以抬头开头，前面多出
+ * 任何东西就整条失配，症状是「技能没进召回视图」。理由与 t29 的同名函数同源。
  */
 function recallMessage(req) {
   return (req?.body?.messages ?? []).find((m) => textOf(m).includes(HEAD)) ?? null;
@@ -127,7 +126,7 @@ function recallMessage(req) {
  *
  * ## 为什么必须切段，不能拿整条消息断言
  *
- * 出厂档位（`full`）下发给模型的请求里，`chat_loop::request_view_prefix` 把请求视图层
+ * 发给模型的请求里，`chat_loop::request_view_prefix` 把请求视图层
  * 置顶的三段拼成**一条** `system` 消息（排在消息数组最前），其后是 `Reasoner::render_messages`
  * 投影出的对话转写与本轮发言。于是同一批内容**在注入段与转写里各出现一次**。
  *
@@ -182,10 +181,10 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        // `bridge` 档：每轮收束转写进 `<会话目录>/v2-events.wal`——技能编译挂在
-        // 这条路上。`skill_compile_enabled` **显式打开**：它默认 off（S11 §4 平凡值
+        // 每轮收束把事实写进 `<会话目录>/v2-events.wal`——技能编译挂在这条路上。
+        // `skill_compile_enabled` **显式打开**：它默认 off（S11 §4 平凡值
         // 「不编译，只检索」），本用例验的正是打开之后的行为，不能依赖默认值。
-        session: { ...DIALOG_FACE_OFF, v2_mode: 'full', skill_compile_enabled: true },
+        session: { ...DIALOG_FACE_OFF, skill_compile_enabled: true },
       },
     });
 

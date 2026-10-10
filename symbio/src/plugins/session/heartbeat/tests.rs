@@ -217,7 +217,7 @@ async fn no_fact_source_or_a_live_writer_both_block_the_trigger() {
     seed_one_fact(&p, sid);
     let state = p.active_mgr.get_or_create(sid).await;
 
-    // 收束期写方 `record_to_wal` 跑在 `is_working` 复位之前 ⇒ 忙窗里让开。
+    // 收束期写方（v2 运行器的轮末收束）跑在 `is_working` 复位之前 ⇒ 忙窗里让开。
     state.inner.write().await.is_working = true;
     assert!(
         !p.record_autonomous_trigger(sid, 100, "看一眼").await,

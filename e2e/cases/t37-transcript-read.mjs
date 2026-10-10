@@ -1,6 +1,6 @@
 import './_selfrun.mjs';
 // T37 转写读列（**对话面读侧**，[plan/12 批 2](../../docs/plan/12-价值验收与基线埋点.md)）：
-// 两轮真实对话（bridge 档 ⇒ 收束转写进 `<会话目录>/v2-events.wal`）⇒ 读出口
+// 两轮真实对话（每轮收束把事实写进 `<会话目录>/v2-events.wal`）⇒ 读出口
 // `session/stats` 的 `transcript` 列，与**同一份事实源**逐条对账；再对事实源做手术、
 // 验读侧闸。
 //
@@ -109,8 +109,8 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        // `bridge` 档：每轮收束转写进 `<会话目录>/v2-events.wal`——转写列的事实源。
-        session: { ...DIALOG_FACE_OFF, v2_mode: 'full' },
+        // 每轮收束把事实写进 `<会话目录>/v2-events.wal`——转写列的事实源。
+        session: { ...DIALOG_FACE_OFF },
       },
     });
 

@@ -42,7 +42,7 @@ pub struct Reconciliation {
     pub wal_entries: usize,
     /// 两边**不一致**的条数（按下标逐条比 `(role, 正文)`）。
     pub mismatches: usize,
-    /// WAL 不在（`v2_mode = off` / 还没跑过任何一轮 v2）——这不是错误，
+    /// WAL 不在（还没跑过任何一轮）——这不是错误，
     /// 是「这一份本来就是空的」，故与 `mismatches` 分开报。
     pub wal_missing: bool,
 }
@@ -51,7 +51,7 @@ impl Reconciliation {
     /// 一致 = 条数相同且逐条相同。
     ///
     /// **WAL 不在时判「一致」**（`wal_missing` 优先）：没有第二源可比，就谈不上不一致。
-    /// 把它算成不一致会让 `off` 档 / 还没跑过 v2 的会话天天出声——诊断吵到没人再听，
+    /// 把它算成不一致会让还没跑过轮的会话天天出声——诊断吵到没人再听，
     /// 正是"该报的不报、不该报的乱报"的后半句。「在不在」由 `wal_missing` 单独回答。
     pub fn is_consistent(&self) -> bool {
         self.wal_missing || (self.mismatches == 0 && self.store_msgs == self.wal_entries)

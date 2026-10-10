@@ -1,13 +1,13 @@
 import './_selfrun.mjs';
-// T42 `v2_mode = full` 档的**收束派生事实**：承诺 / 任务表 / 熔断也入格。
+// T42 **收束派生事实**：承诺 / 任务表 / 熔断也入格。
 //
 // ## 本用例钉的是什么
 //
-// `full` 档的轮次事实（用户格 / final 格 / 产物格）由 v2 运行器原生记账，
-// `chat_loop` 因此以 `TurnState::v2_executed` 拦下整段 `v2_facts::record`。
+// 轮次事实（用户格 / final 格 / 产物格）由 v2 运行器原生记账，`chat_loop`
+// 因此以 `TurnState::v2_executed` 拦下自己那份轮次记账。
 // 但**承诺 / 任务表 / 熔断不是轮次事实**，而是本轮的派生副作用——数据来源都在工具
 // 执行层（`Delegation` / `TaskDeclaration` / 熔断理由），运行器一处都不写。这一半若
-// 也随轮次事实一起被拦下，`full` 档的代际立约（S08）/ 任务表（S7）/ 熔断（S9 §6
+// 也随轮次事实一起被拦下，代际立约（S08）/ 任务表（S7）/ 熔断（S9 §6
 // 验收 2）就**静默全丢**——与记忆/学习同一个坑（t40 钉的是那一半）。
 //
 // | 要证的事 | 唯一能看见它的地方 |
@@ -100,7 +100,7 @@ function userSeqOf(events, turn) {
 }
 
 export default defineCase(
-  'T42 full 档收束派生事实：承诺 / 任务表 / 熔断也入格（不再随轮次事实一起被拦下）',
+  'T42 收束派生事实：承诺 / 任务表 / 熔断也入格',
   async () => {
     const llm = await new MockLlm([
       // ── 第 1 轮：声明任务图（工具真的执行）──────────────────────────────
@@ -141,8 +141,8 @@ export default defineCase(
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
-        // 主题：full 档。对话面三项按 `DIALOG_FACE_OFF` 钉死。
-        session: { ...DIALOG_FACE_OFF, v2_mode: 'full' },
+        // 对话面三项按 `DIALOG_FACE_OFF` 钉死。
+        session: { ...DIALOG_FACE_OFF },
       },
     });
     // 子智能体目录：`agent_run` 的落点（t30 同款）。
@@ -214,15 +214,15 @@ export default defineCase(
       );
       assert(
         events.some((e) => e.kind === 'chat.assistant.final'),
-        `轮次事实应原生入格（full 档）：${kinds}`,
+        `轮次事实应原生入格：${kinds}`,
       );
 
-      // ── ② 任务表：`todo_write` 的声明入格（修复前 full 档恒为 0）──────────
+      // ── ② 任务表：`todo_write` 的声明入格───────────────────────────
       const opened = events.filter((e) => e.kind === 'task.opened');
       assertEq(
         opened.length,
         3,
-        `三条任务各开一格（修复前 full 档恒为 0——任务表整段被拦下）：${kinds}`,
+        `三条任务各开一格：${kinds}`,
       );
       assertEq(
         opened.find((e) => e.payload?.task_id === 't2')?.payload?.depends_on,
@@ -237,17 +237,17 @@ export default defineCase(
         );
         assert(
           /^v2t-t0-\d+$/.test(e.event_id),
-          `full 档任务号词干是 t{turn}（调用编号跨轮会撞幂等键）：${e.event_id}`,
+          `任务号词干是 t{turn}（调用编号跨轮会撞幂等键）：${e.event_id}`,
         );
       }
 
-      // ── ③ 承诺：`agent_run` 的代际立约入格（修复前 full 档恒为 0）─────────
+      // ── ③ 承诺：`agent_run` 的代际立约入格──────────────────────────
       const offers = events.filter((e) => e.kind === 'commitment.opened');
       const releases = events.filter((e) => e.kind === 'commitment.released');
       assertEq(
         offers.length,
         1,
-        `第 2 轮委托 ⇒ 一格立约（修复前 full 档恒为 0——承诺整段被拦下）：${kinds}`,
+        `第 2 轮委托 ⇒ 一格立约：${kinds}`,
       );
       assertEq(releases.length, 1, `委托成功 ⇒ 一格守约：${kinds}`);
       assertEq(
@@ -267,15 +267,15 @@ export default defineCase(
       );
       assert(
         /^c-offer-v2c-t1-/.test(offers[0].event_id),
-        `full 档承诺号词干是 t{turn}：${offers[0].event_id}`,
+        `承诺号词干是 t{turn}：${offers[0].event_id}`,
       );
 
-      // ── ④ 熔断：闸门判 Break ⇒ `task.controlled` 入格（修复前 full 档恒为 0）──
+      // ── ④ 熔断：闸门判 Break ⇒ `task.controlled` 入格──────────────────
       const controlled = events.filter((e) => e.kind === KIND_CONTROLLED);
       assertEq(
         controlled.length,
         1,
-        `应恰好一格熔断（修复前 full 档恒为 0——熔断整段被拦下）：${kinds}`,
+        `应恰好一格熔断：${kinds}`,
       );
       assertEq(controlled[0].entity, 'Control', '熔断格实体坐标');
       assertEq(controlled[0].verb, 'Opened', '熔断格动词坐标');

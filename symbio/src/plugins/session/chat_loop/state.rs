@@ -114,22 +114,22 @@ pub(crate) struct TurnState {
     pub(crate) in_flight_tools: HashSet<String>,
     /// 本轮的**代际立约记录**（[04 §3.1 批⑧](../../../../docs/plan/04-工程落地.md)，S08 §3）。
     ///
-    /// 由工具执行层填（`process_tool_calls_async` 的出参），随收束转写入格
-    /// （`v2_facts::record`）——两者之间必须有个**请求作用域**的地方存它：执行在
-    /// `close_turn`、入格在 `finish_turn`，中间隔着一整段本轮收尾。与 `TurnState`
-    /// 的其它字段一样随请求复位，所以不会把上一轮的承诺带到这一轮。
+    /// 由工具执行层填（`process_tool_calls_async` 的出参），轮末收束入格
+    /// （`v2_facts::record_derived`）——两者之间必须有个**请求作用域**的地方存它：
+    /// 执行在 `close_turn`、入格在轮末（`v2_exec`），中间隔着一整段本轮收尾。与
+    /// `TurnState` 的其它字段一样随请求复位，所以不会把上一轮的承诺带到这一轮。
     pub(crate) delegations: Vec<crate::plugins::session::tools::Delegation>,
     /// 本轮的**任务表声明**（[04 §3.1 批⑨](../../../../docs/plan/04-工程落地.md)，S7 步 16）。
     ///
     /// 形态与 [`TurnState::delegations`] 完全对称：工具执行层填
-    /// （`process_tool_calls_async` 的出参），轮末收束转写入格（`v2_facts::record`
+    /// （`process_tool_calls_async` 的出参），轮末收束入格（`v2_facts::record_derived`
     /// → `v2_tasks::write`），中间隔着同一段本轮收尾，所以要有个请求作用域的量存它。
     pub(crate) task_decls: Vec<crate::plugins::session::tools::TaskDeclaration>,
     /// 本轮**外部执行闸门判熔断**的理由（[04 §3.1 批⑩](../../../../docs/plan/04-工程落地.md)，
     /// S8 步 20，[roadmap/S09 §6](../../../../docs/plan/roadmap/S09-外部执行与熔断.md) 验收 2）。
     ///
     /// 形态与 [`TurnState::task_decls`] 对称：工具执行层填（`process_tool_calls_async`
-    /// 的出参），轮末收束转写入格（`v2_facts::record` → `CircuitBreaker::break_event`）。
+    /// 的出参），轮末收束入格（`v2_facts::record_derived` → `CircuitBreaker::break_event`）。
     /// 只有 `Break` 进这张表——`Refuse`（未授权）按验收 1 **不得产生事件**，
     /// 两种拒绝在事件面上必须分得开；这也是为什么它不复用 `delegations` 或
     /// `task_decls` 的出参：那是「做了什么」，这是「**不允许做**什么」。
@@ -151,18 +151,17 @@ pub(crate) struct TurnState {
     pub(crate) progress_reports: u32,
     /// 本轮模型调用的**实测累计耗时**（毫秒，[ADR-044](../../../../docs/decisions/core.md)：
     /// 实测与判据同源）。在「LLM 调用唯一发起处」用 `Instant` 累计——含工具轮
-    /// 的多次请求；随轮次收束经 v2 事实桥写进事件网格的 `cost_ms`。
+    /// 的多次请求；随轮次收束写进事件网格的 `cost_ms`。
     pub(crate) model_elapsed_ms: u64,
     /// 本轮**输入**（消息 id + 正文），在 `single_message` 被消费之前锚定。
     ///
     /// 锚定而不现取，是因为 `context.messages` 装着**整段历史**（`load_history = true`
-    /// 时每轮都重新加载）：从里面找「本轮用户发言」找到的永远是首轮那句——转写
-    /// （`v2_facts::record` 的 `user.message` 文本与 `attempt` 判据）和记忆编码
-    /// （`v2_memory::encode`）会**一起**逐轮记错同一条事实。两处消费同一份锚，
-    /// 判决（`first_utterance`）与转写才不会各读各的。
+    /// 时每轮都重新加载）：从里面找「本轮用户发言」找到的永远是首轮那句。消费方是
+    /// 判决（`first_utterance`）与委派段的 Q1（`inputs.rs`）——共用同一份锚，
+    /// 两处才不会各读各的。
     ///
-    /// `None` = 本请求没有用户新发言（`resume` 重跑等）——那时调用方回落到
-    /// `v2_facts::first_user_utterance` 的兜底口径（历史首条）。
+    /// `None` = 本请求没有用户新发言（`resume` 重跑等）——判决无从谈起，
+    /// Q1 也不下结论（见 `delegate.rs`）。
     pub(crate) input_utterance: Option<(String, String)>,
     /// 本轮的**长期记忆召回视图**（S5 步 12，`v2_memory::recall_view`）。
     ///
@@ -170,15 +169,15 @@ pub(crate) struct TurnState {
     /// 口径）：同一轮内记忆不该漂移，事实源也只扫一遍；后续工具轮复用同一份视图，
     /// 渲染 [`chat_loop::inputs`] 每次调用现算（纯内存，零 I/O）。
     ///
-    /// 落 `memory.recalled` 的时机在**轮末收束**（`v2_facts::record`）而不是取视图
-    /// 那一刻：溯源锚是本轮 `user.message` 格，那时它才在事实源里。
+    /// 落 `memory.recalled` 的时机在**轮末收束**（`v2_facts::record_learning`）而不是
+    /// 取视图那一刻：溯源锚是本轮 `user.message` 格，那时它才在事实源里。
     pub(crate) recall_view: Option<crate::symbio_core::RecallView>,
     /// 本轮**技能路由**的判定（S9 步 22，[04 §3.1 批⑪](../../../../docs/plan/04-工程落地.md)）：
     /// 每条 `(skill_id, fallback)`，即 `v2_skills::route` 对召回视图里一条技能的判决。
     ///
     /// 形态与 [`TurnState::gate_breaks`] / [`TurnState::task_decls`] 完全对称：
     /// **读侧填**（`prepare_turn_inputs` 拿置信度闸判），**轮末收束入格**
-    /// （`v2_facts::record` → 一条 `memory.recalled` 载荷 `{skill_id, fallback}`），
+    /// （`v2_facts::record_learning` → 一条 `memory.recalled` 载荷 `{skill_id, fallback}`），
     /// 中间隔着同一段本轮收尾，所以要有个请求作用域的量存它。
     ///
     /// 为什么不能在收束那一刻现算：回退的判决同时**改写了 `recall_view`
@@ -194,10 +193,9 @@ pub(crate) struct TurnState {
     /// 观测供校准归并，这一份供执行侧装配反射档。分两处各判一遍必然漂移成
     /// 「摘出视图的那条」与「拿去执行的那条」不是同一条。
     ///
-    /// 它只在 `skill_fast_path` **开着且档位是 `full`** 时被填充（见
-    /// `chat_loop::inputs` 的 `fast_armed`）：跳过的是 v2 运行器里的那一次模型调用，
-    /// `bridge` / `off` 档的轮次由 v1 执行，没有可跳过的东西。开关关着时这里是空表，
-    /// 但**判定照常发生**（`route` 只在 `off` 档不算）——观测照常落格，那正是
+    /// 它只在 `skill_fast_path` **开着**时被填充（见
+    /// `chat_loop::inputs` 的 `fast_armed`）：跳过的是 v2 运行器里的那一次模型调用。
+    /// 开关关着时这里是空表，但**判定照常发生**——观测照常落格，那正是
     /// 「只编译、不加速」的观察形态；只是没人拿这一份去装配。
     pub(crate) skill_hits: Vec<crate::plugins::session::v2_skills::SkillLlmHit>,
     /// 本轮的**调度段**（S7 步 16–17，[04 §3.1 批⑨](../../../../docs/plan/04-工程落地.md)）：
@@ -205,7 +203,7 @@ pub(crate) struct TurnState {
     ///
     /// 与 [`TurnState::recall_view`] 同一条取用口径（`tool_rounds == 0` 取一次、
     /// 本轮各工具轮复用）：同一轮内任务集不该漂移，也省得每个工具轮都重开一次
-    /// 事实源。它**只读不写**——算不出来（没开过任务 / 就绪集空 / `off` 档）就是
+    /// 事实源。它**只读不写**——算不出来（没开过任务 / 就绪集空）就是
     /// `None`，请求视图里就少一段，不存在"空占位"。
     pub(crate) ready_section: Option<String>,
 }
@@ -544,8 +542,8 @@ pub struct SupplementDrain {
 /// `InboxItem` 是 `transcript::inbox` 的私有类型，所以同步孪生不返回它——
 /// 跨模块暴露内部类型会让「谁都能构造一个假的抽干结果」成为可能。
 ///
-/// ⚠️ **不带原始 `ChatMessage`**：v1 路径要落进 `context.messages`，但它走的是
-/// 另一个方法（`drain`，返回 `ChatMessage` 本身）。这里只服务 v2 注入，而 v2 只要
+/// ⚠️ **不带原始 `ChatMessage`**：落库那条路走的是另一个方法（[`SupplementDrain::drain`]，
+/// 返回 `ChatMessage` 本身）。这里只服务工具循环里的 prompt 注入，而注入只要
 /// 正文——多带一个字段就是给下一个人留一个不必有的理由。
 #[derive(Debug, Clone)]
 pub(crate) struct DrainedSupplement {

@@ -1,17 +1,14 @@
 import './_selfrun.mjs';
-// T40 `v2_mode = full` 档的**收束派生事实**：记忆三段 + 技能观测/编译也入格。
+// T40 **收束派生事实**：记忆三段 + 技能观测/编译也入格。
 //
 // ## 本用例钉的是什么
 //
-// `full` 档的轮次事实（用户格 / final 格 / 产物格）由 v2 运行器原生记账，
-// `chat_loop` 因此以 `TurnState::v2_executed` 拦下整段 `v2_facts::record`
-// ——「同一轮两份记账是假象」。
+// 轮次事实（用户格 / final 格 / 产物格）由 v2 运行器原生记账，`chat_loop`
+// 因此以 `TurnState::v2_executed` 拦下自己那份轮次记账——「同一轮两份记账是假象」。
 //
 // 但**记忆与学习不是轮次事实**，而是本轮的派生副作用：运行器一处都不写。
-// 这一半若也随轮次事实一起被拦下，`full` 档下「编码 / 检索锚 / 巩固 / 技能观测 /
-// 技能编译」会**静默全丢**——S06 的长期记忆与 S11 的自我改进在这个档位整体失效，
-// 而档位名还自称「整体切换」。（`v2_bridge.rs` 曾写「记忆写方同此档位……见
-// `v2_exec` 侧的同批注记」，而那一侧既无注记也无实现。）
+// 这一半若也随轮次事实一起被拦下，「编码 / 检索锚 / 巩固 / 技能观测 /
+// 技能编译」会**静默全丢**——S06 的长期记忆与 S11 的自我改进整体失效。
 //
 // | 要证的事 | 唯一能看见它的地方 |
 // |---|---|
@@ -84,7 +81,7 @@ function userSeqOf(events, turn) {
 }
 
 export default defineCase(
-  'T40 full 档收束派生事实：记忆三段 + 技能观测/编译也入格（不再随轮次事实一起被拦下）',
+  'T40 收束派生事实：记忆三段 + 技能观测/编译也入格',
   async () => {
     const llm = await new MockLlm([
       // 第 1 轮：成功收束 ⇒ 编译技能。
@@ -96,10 +93,9 @@ export default defineCase(
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
-        // 主题：full 档 + 技能编译开。对话面三项按 `DIALOG_FACE_OFF` 钉死。
+        // 主题：技能编译开。对话面三项按 `DIALOG_FACE_OFF` 钉死。
         session: {
           ...DIALOG_FACE_OFF,
-          v2_mode: 'full',
           skill_compile_enabled: true,
         },
       },
@@ -136,7 +132,7 @@ export default defineCase(
       );
       assert(
         events.some((e) => e.kind === 'chat.assistant.final'),
-        `轮次事实应原生入格（full 档）：${JSON.stringify(kinds)}`,
+        `轮次事实应原生入格：${JSON.stringify(kinds)}`,
       );
 
       // ── ② 步 11 编码：**逐轮**一条情景记忆，锚 = 本轮用户格（I2）──────────
@@ -146,7 +142,7 @@ export default defineCase(
       assertEq(
         encoded.length,
         2,
-        `两轮各编码一条情景记忆（修复前这里恒为 0——记忆整段被拦下）：${JSON.stringify(kinds)}`,
+        `两轮各编码一条情景记忆：${JSON.stringify(kinds)}`,
       );
       for (const e of encoded) {
         assertEq(
@@ -179,9 +175,7 @@ export default defineCase(
       assertEq(
         obs.length,
         1,
-        `第 2 轮恰好一条技能路由观测（修复前恒为 0 ⇒ calibration 恒读「零使用」）：${JSON.stringify(
-          kinds,
-        )}`,
+        `第 2 轮恰好一条技能路由观测：${JSON.stringify(kinds)}`,
       );
       assertEq(obs[0].payload.fallback, false, '零使用的技能按置信度 1.0 判快路（不判回退）');
       assertEq(
@@ -197,7 +191,7 @@ export default defineCase(
       assertEq(
         skills.length,
         2,
-        `两轮各编一条技能（修复前恒为 0——下一轮因此无技能可用）：${JSON.stringify(kinds)}`,
+        `两轮各编一条技能：${JSON.stringify(kinds)}`,
       );
       const s1 = skills.find((e) => e.payload.trigger === ASK);
       const s2 = skills.find((e) => e.payload.trigger === ASK2);

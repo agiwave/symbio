@@ -16,8 +16,8 @@ import './_selfrun.mjs';
 // | 代际立约真的入格 | 父会话 WAL 的 `commitment.opened` → `commitment.released` |
 // | 声誉列真的在读这份事实源 | gateway `session/stats` 的 `reputation.own` |
 //
-// 单测各自只看得见自己那一层（`context::view` 的两主体视图过滤、`v2_bridge` 的
-// 立约转写、`stats` 的声誉列取数）；没有任何单测**同时**看得见「请求包」
+// 单测各自只看得见自己那一层（`context::view` 的两主体视图过滤、`v2_facts::record_derived`
+// 的立约入格、`stats` 的声誉列取数）；没有任何单测**同时**看得见「请求包」
 // 「落盘 actor」「出口读数」三者指向同一个会话主体——那正是端到端的增量。
 //
 // ## 轮次顺序为什么是 父 → 子 → 父
@@ -180,8 +180,8 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        // `bridge` 档：每轮收束转写进 `<会话目录>/v2-events.wal`（actor = 会话主体）。
-        session: { ...DIALOG_FACE_OFF, v2_mode: 'full' },
+        // 每轮收束把事实写进 `<会话目录>/v2-events.wal`（actor = 会话主体）。
+        session: { ...DIALOG_FACE_OFF },
       },
     });
     makeAgentDir(hd.homedir, {
@@ -359,8 +359,7 @@ export default defineCase(
       // 承诺号须带**轮次前缀**：调用编号只在**一次模型响应内**唯一，而 WAL 的幂等键是
       // 事件 id——不加前缀，跨轮复用同一编号会让第二次立约撞 `Duplicate`、把整轮拖失败。
       //
-      // ⚠️ 只钉「带了前缀」，**不钉前缀的拼法**：前缀的具体形状随档位变过（退役的转写
-      // 路径用 `{user_id}-a{attempt}`，`full` 档的锚词是 `t{turn}` 一族），而它由
+      // ⚠️ 只钉「带了前缀」，**不钉前缀的拼法**：拼法由
       // `v2_facts::record_derived` 与 `v2_tasks::write` 两个函数共同决定——把拼法抄进
       // 断言等于在 e2e 里维护第三份约定，那两处一起改就会把这个用例留成红的。
       // 形状由 `v2_facts.test.rs` 的单测钉（它就在写方旁边）。

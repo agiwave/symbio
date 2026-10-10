@@ -341,7 +341,7 @@ fn wal_path(p: &SessionPlugin, sid: &str) -> std::path::PathBuf {
         .join(crate::plugins::session::paths::V2_WAL_FILE)
 }
 
-/// 往该会话的事实源写一批事实（模拟上一轮的收束转写）。
+/// 往该会话的事实源写一批事实（模拟上一轮的轮末收束入格）。
 ///
 /// 目录要自己建：`WalStore::open` 是「写方已经就位」的入口，盘上没这层目录属
 /// 存储层灾难、直接 panic（生产里由统一发送链路先落会话目录）。
@@ -361,7 +361,8 @@ fn read_wal(p: &SessionPlugin, sid: &str) -> Vec<crate::symbio_core::Event> {
 }
 
 /// 一轮的事实。`final_first` = 收束发言在 `task.opened` **之前**——这正是
-/// `record_to_wal` 的落笔顺序（04 §2.1 的判据输入，见那里的「顺序是判据」注记）。
+/// 轮末收束的落笔顺序（收束格先落、派生事实后补；04 §2.1 的判据输入，见那里的
+/// 「顺序是判据」注记）。
 fn turn_facts(final_first: bool) -> Vec<crate::symbio_core::Event> {
     use crate::symbio_core::{Entity, Event, Verb, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE};
 

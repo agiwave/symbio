@@ -822,8 +822,9 @@ fn external_execution_capability_is_read_from_the_matrix() {
 ///
 /// 这条用例钉的是 [roadmap/S09 §6](../../../../docs/plan/roadmap/S09-外部执行与熔断.md)
 /// 验收 2 的前半句（预算耗尽必须判得出来，不允许静默继续）；后半句——
-/// 理由真的落成一条 `control × opened` 事件——在 `v2_bridge` 的用例里，
-/// 因为工具执行层没有事实源，入格要到收束那一步才发生。
+/// 理由真的落成一条 `control × opened` 事件——钉在事实源入格那一侧的用例里
+/// （写方是 `v2_facts::record_derived`，由 v2 运行器在轮末收束调用）；工具执行层
+/// 没有事实源，入格要到轮末收束那一步才发生。
 #[tokio::test]
 async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
     let dir = std::env::temp_dir().join("symbio-test/session-tool-executor-gate");

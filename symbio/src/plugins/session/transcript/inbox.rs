@@ -212,7 +212,7 @@ impl SessionPlugin {
     /// 与 `session/stats` 同一条口径；读不开 ⇒ 空切片（没有事实就没有在跑任务）。
     ///
     /// 判据里只有两族事件被 [`PreemptionDecider::decide`] 消费——`task.*` 与
-    /// `chat.assistant.final`，两者都只在**收束转写**时入格。这就是「一忙窗一判」
+    /// `chat.assistant.final`，两者都只在**轮末收束**时入格。这就是「一忙窗一判」
     /// 成立的前提：忙窗内本切片不会变，判过一次不等于漏判。
     fn preemption_facts(&self, session_id: &str) -> Vec<Event> {
         let path = super::super::paths::session_dir(&self.storage_dir(), session_id)
@@ -235,8 +235,8 @@ impl SessionPlugin {
     ///
     /// ## 为什么写点只在空闲分支
     ///
-    /// `WalStore::open` 各自 replay，两个写方并存会重复 `head` ⇒ 本轮为止唯一的
-    /// 写方是收束期的 `record_to_wal`。它跑在 `is_working` 复位**之前**
+    /// `WalStore::open` 各自 replay，两个写方并存会重复 `head` ⇒ 与本写方并存的
+    /// 只有收束期写方（v2 运行器的轮末收束）。它跑在 `is_working` 复位**之前**
     /// （`emit_session_state(Finished)` 才复位），所以空闲分支落笔与它不重叠。
     ///
     /// ## 锚 = 落格前的 `head`，不是任务开格 seq

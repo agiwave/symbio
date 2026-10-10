@@ -1,6 +1,6 @@
 import './_selfrun.mjs';
 // T31 任务表（S7 步 16–18，[04 §3.1 批⑨](../../docs/plan/04-工程落地.md)）：
-// 模型调 `todo_write` 声明一张**带依赖的任务图** ⇒ 收束转写把声明落成 `task.*` 事件 ⇒
+// 模型调 `todo_write` 声明一张**带依赖的任务图** ⇒ 收束时把声明落成 `task.*` 事件 ⇒
 // 读出口 `session/stats` 的 `readyset` 列与请求视图的**调度段**都从同一份事实源算出来；
 // 对事实源做手术，两者跟着变。
 //
@@ -33,7 +33,7 @@ import './_selfrun.mjs';
 // ## 为什么调度段要在**第二轮**才断言
 //
 // 调度段按 `tool_rounds == 0` 取一次（`chat_loop::inputs`），而 `readyset` 要等
-// 第一轮**收束转写**落完格才有数据。首轮请求发出去的那一刻，任务还只是模型嘴里
+// 第一轮收束落完格才有数据。首轮请求发出去的那一刻，任务还只是模型嘴里
 // 的一段 JSON——把断言放在那里等于断言「还没有发生的事没发生」。
 import { join } from 'node:path';
 import { writeFileSync } from 'node:fs';
@@ -98,7 +98,7 @@ export default defineCase(
           { id: 'call_1', name: 'todo_write', arguments: { todos: TODOS } },
         ],
       },
-      // 工具结果回灌（bridge 档是 v1 消息形态 ⇒ 最后一条 role = tool）。
+      // 工具结果回灌（结构化消息 ⇒ 最后一条 role = tool）。
       { id: 'after-todo', afterTool: true, content: '任务清单已登记。' },
     ]).start();
 
@@ -114,8 +114,8 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        // 任务表挂在**收束转写**（`v2_facts::record`）上 ⇒ 与 t30 同款的 bridge 档。
-        session: { ...DIALOG_FACE_OFF, v2_mode: 'full' },
+        // 任务表挂在轮末收束的 `v2_facts::record_derived` 上（与 t30 同款）。
+        session: { ...DIALOG_FACE_OFF },
       },
     });
 
@@ -187,9 +187,8 @@ export default defineCase(
 
       // I2：任务事件带溯源；锚是**本轮**用户格；事件号带**轮次前缀**。
       //
-      // ⚠️ 前缀的**形状随档位变过**（退役的转写路径用 `{user_id}-a{attempt}`，
-      // `full` 档的锚词是 `t{turn}` 一族）。本用例现在只钉「带了前缀」这件事——
-      // 前缀的具体拼法是 `v2_facts::record_derived` 与 `v2_tasks::write` 的内部约定，
+      // ⚠️ 本用例只钉「带了前缀」这件事，**不钉前缀的形状**——拼法是
+      // `v2_facts::record_derived` 与 `v2_tasks::write` 的内部约定，
       // 两者都在同一批里改，一起改一起错，断言它等于把内部约定抄成第二份。
       // 真正要防的是「没有前缀」：`todo_write` 的调用编号只在**一次模型响应内**唯一，
       // 而 WAL 的幂等键是事件 id——不加前缀，跨轮复用同一编号会撞 `Duplicate`。

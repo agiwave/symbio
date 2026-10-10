@@ -32,9 +32,9 @@ mod window;
 pub use self::conversation_view::{conversation_view, CONVERSATION_VIEW_LIMIT};
 pub(crate) use self::pipeline::{auto_compress_process, retry_compaction, run_context_compact};
 pub use self::prompt::{
-    build_compression_request, compression_prompt_fingerprint, context_compact_tool_meta,
-    extract_snapshot, get_compression_prompt, render_snapshot_for_history,
-    COMPRESSION_PROTOCOL_VERSION, CONTEXT_COMPACT_TOOL_NAME,
+    build_compression_request, compression_prompt_fingerprint, extract_snapshot,
+    get_compression_prompt, render_snapshot_for_history, COMPRESSION_PROTOCOL_VERSION,
+    CONTEXT_COMPACT_TOOL_NAME,
 };
 pub use self::view::build_request_view;
 

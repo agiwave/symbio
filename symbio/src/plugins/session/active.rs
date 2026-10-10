@@ -51,7 +51,7 @@ pub struct InboxItem {
 ///
 /// 判定与落格必须分开，因为两者要的时刻不同：
 /// - **判定**只能在忙窗（`is_working == true` 且有插话排着）做——那时事实源里只有
-///   上一轮的收束转写，而写方（`record_to_wal`）还在等这一轮收尾，并发 append 会
+///   上一轮的收束入格，而写方（v2 运行器的轮末收束）还在等这一轮收尾，并发 append 会
 ///   重复 `head`（同会话不许两个写方并存）；
 /// - **落格**只能在空闲分支做——`task.held` 要在插话轮**开跑之前**就位，
 ///   `task.progress`（恢复）要等插话轮**结束之后**再写。
@@ -134,7 +134,7 @@ pub struct ActiveSessionStateInner {
     /// 「正在处理的那条」在转写里，不在队列里（取消它走中止，不走删条目）。
     pub inbox: VecDeque<InboxItem>,
     /// **一忙窗一判**的标记（见 [`PreemptPending`]）：`task.*` 与
-    /// `chat.assistant.final` 都只在收束转写时入格，
+    /// `chat.assistant.final` 都只在轮末收束时入格，
     /// 忙窗内事实源不会长出新的判据，所以判过一次就够了——留个标记免得每 50ms
     /// 重放一遍整条 WAL。空闲分支复位它，下一轮忙窗重新判。
     pub preempt_judged: bool,

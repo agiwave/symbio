@@ -93,9 +93,8 @@ export default defineCase(
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
-        // 本用例的主题与对话面正交 ⇒ 把三个开关钉死（理由见 `DIALOG_FACE_OFF`），
-        // 再叠加**本用例的主题**：full 档（v2 原生执行，prompt 从转写投影出）。
-        session: { ...DIALOG_FACE_OFF, v2_mode: 'full' },
+        // 本用例的主题与对话面正交 ⇒ 把三个开关钉死（理由见 `DIALOG_FACE_OFF`）。
+        session: { ...DIALOG_FACE_OFF },
       },
     });
     // MCP stdio 工具：`echo` 的返回是确定的（`JSON.stringify(参数)`），断言

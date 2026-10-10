@@ -2,7 +2,7 @@
 //! **会话任务清单 → v2 事实源 → 两个消费方**（读出口 `session/stats` 的 `readyset`
 //! 列 + 交给执行者的调度段）。
 //!
-//! 与 `super::v2_memory`、`super::v2_bridge` 同族：任务不是另开一份存储，任务就是
+//! 与 `super::v2_memory` 同族：任务不是另开一份存储，任务就是
 //! `v2-events.wal` 里的 `task.*` 事件（ADR-044 同族纪律）。清单本身（
 //! `local/todo_write`）是**纯内存、会话作用域**的（见其模块头）；事实源是同一份
 //! 状态的持久化，两处各算一次就是两套真相——所以本模块只**转写观察到的声明**，
@@ -38,15 +38,15 @@
 //!   这正是 `rework_bounded` 的**生产写方**：不是一条永远空转的断言。
 //! - **溯源锚**：全部锚在本轮 `user.message` 格（`user_seq`）——任务是「这轮模型
 //!   说该做什么」，出处是这一轮的开口；`task.asserted` 是断言类事件，无溯源即违规
-//!   （I2）。事件号 `{id_prefix}-{n}` 带 `{user_id}-a{attempt}` 前缀 + 本次序号，
-//!   跨轮不撞幂等键。
-//! - **档位**：写方住收束处，两档共用同一份——`bridge` 档由
-//!   [`super::v2_facts::record_to_wal`] 调本模块，`full` 档由 `v2_exec` 轮末调
-//!   [`super::v2_facts::record_derived`]（同一个调用点形状、同一锚 `user_seq`）。
-//!   别按「与记忆同档位」推断——记忆与学习住
+//!   （I2）。事件号 `{id_prefix}-{n}`：`id_prefix` 由调用方给
+//!   （[`super::v2_facts::record_derived`] 给 `v2t-{anchor_id}`，一轮一个前缀）
+//!   + 本次序号，跨轮不撞幂等键。
+//! - **写方**：写方住收束处——`v2_exec` 轮末调
+//!   [`super::v2_facts::record_derived`]，后者调本模块（同一锚 `user_seq`）。
+//!   别按「与记忆同一个写方」推断——记忆与学习住
 //!   [`super::v2_facts::record_learning`]，承诺 / 任务表 / 熔断住
-//!   [`super::v2_facts::record_derived`]，两档都在其中；只有**写侧授权闸**仍只挂
-//!   桥档（见 `v2_exec` 模块文档的「本档不覆盖：写侧授权闸」）。
+//!   [`super::v2_facts::record_derived`]；写侧授权闸判在运行器
+//!   （见 `v2_exec` 模块文档的「写侧授权闸」）。
 //!
 //! ## 诚实划界
 //!
@@ -75,7 +75,7 @@ struct Emitted {
 }
 
 /// 清单 id → 观察状态（**从事件序列重建**，不跨轮持有内存记账——同一份切片
-/// 必须永远算出同一套状态，否则桥档与 full 档、单测与生产会各走一套）。
+/// 必须永远算出同一套状态，否则单测与生产会各走一套）。
 #[derive(Debug, Default, Clone)]
 struct Entry {
     /// 该清单 id 当前对应的**存活节点**（返工后是 `{id}-r{n}`）。
@@ -245,11 +245,12 @@ fn step(entry: &mut Entry, list_id: &str, item: &TaskItem) -> Vec<Emitted> {
     out
 }
 
-/// 把本轮的 `todo_write` 声明写进事实源（收束转写的第三个写方，批⑨）。
+/// 把本轮的 `todo_write` 声明写进事实源（任务表写方，批⑨；由
+/// [`super::v2_facts::record_derived`] 轮末调用）。
 ///
 /// - `produced_by` = 本轮 `user.message` 的 seq（溯源锚，I2）；
-/// - `id_prefix` = `v2t-{user_id}-a{attempt}`，事件号是 `{id_prefix}-{n}`；
-/// - 失败冒泡给调用方记日志（与记忆三段同款：附加事实失败不算转写失败）。
+/// - `id_prefix` = `v2t-t{turn}`，事件号是 `{id_prefix}-{n}`；
+/// - 失败冒泡给调用方记日志（与记忆三段同款：附加事实失败不算收束失败）。
 pub(crate) fn write(
     store: &EventWalStore,
     snapshot: &[Event],

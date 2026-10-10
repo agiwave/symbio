@@ -1,17 +1,16 @@
-//! v2 执行器——`v2_mode = full` 档下，轮次经 v2 运行器**原生执行**。
+//! v2 执行器——轮次经 v2 运行器**原生执行**（唯一执行路径，[ADR-051](../../../../docs/decisions/session.md)）。
 //!
-//! 与 [`super::v2_bridge`] 的分工（两档覆盖面互补，网格不漏轮也不双记）：
-//! - bridge 档：v1 执行 + 事实**转写**进网格（收束时补记）；
-//! - full 档：v2 **原生执行**——事实在生成路径上直接入格（不经转写），
-//!   prompt 从转写出（同一事实源，ADR-044 同族），流式增量经 [`UiBridge`]
-//!   回到 v1 的事件出口（用户看到的仍是逐字上屏的对话面）。
+//! 事实与呈现同源（网格不漏轮也不双记）：事实在生成路径上**直接入格**——轮次事实
+//! （`u-{turn}` 开口 / 收束格）由 v2 运行器落，派生事实由本模块轮末补（见下）；
+//! prompt 从转写出（同一事实源，ADR-044 同族），流式增量经 [`UiBridge`]
+//! 回到事件出口（用户看到的仍是逐字上屏的对话面）。
 //!
-//! 覆盖面（诚实划界）：**无工具轮与工具轮**。工具分发仍走 v1 的执行器
+//! 覆盖面（诚实划界）：**无工具轮与工具轮**。工具分发走工具执行层
 //! （`process_tool_calls_async`：超长结果存档、生命周期钩子、审批与恢复都在里面），
 //! 由 [`super::v2_tools::SessionDispatchPort`] 经 core 的 [`crate::symbio_core::DispatchPort`]
-//! 契约接入——**分发在 v2 是插件侧的实现细节，不是第二条执行链**。
+//! 契约接入——**分发是插件侧的实现细节，不是第二条执行链**。
 //!
-//! ## 反射档（S11 快路）：本档的第三条路，也是唯一不调模型的一条
+//! ## 反射档（S11 快路）：第三条路，也是唯一不调模型的一条
 //!
 //! 开 `skill_fast_path` 且本轮发言**逐字命中**一条已编译技能时，本轮改走
 //! [`TurnRunner::run_reflex`]——以技能正文收束，**一次模型调用都不发生**。
@@ -19,11 +18,10 @@
 //! 收束后仍走同一段 `record_learning`，收口（步骤 5–7）也完全共享；变的只是
 //! **生成那一格**由谁产出（反射档没有 `llm` 形参 ⇒ "反射档调模型"写不出来）。
 //!
-//! 三条边界，缺一条都会静默走错：
+//! 两条边界，缺一条都会静默走错：
 //! - **只对新开轮**：续写轮不新开用户格（复用 `resume.user_seq`），而反射档的落格形状
 //!   就是新开一轮 ⇒ 走它会撞幂等键（`Duplicate`），既完不成收束也把本轮变成错误；
-//! - **只在 `full` 档**：跳过的是本档里的那一次模型调用，`bridge` / `off` 档没有可跳过的；
-//! - **开关默认关**：关着时候选集恒空，本档与接线前逐字同路。
+//! - **开关默认关**：关着时候选集恒空，本轮照常走 `run_with_tools`。
 //!
 //! 一处**诚实缺口**：反射档把 `actor.budget_ms` 按档位派生
 //! （`LatencyTier::Reflex.budget_ms()`），但该字段在生产里仍**没有读方**
@@ -31,12 +29,11 @@
 //! 今天是"算了却看不见"——读方归 `invariants` 那一侧（它读 `tier` 还是读这个字段，
 //! 是那边的决定），见 `execute_turn` 里派生点旁的注记。
 //!
-//! ## 收束派生事实（本档已覆盖）
+//! ## 收束派生事实（本模块已覆盖）
 //!
-//! 轮次事实由运行器原生入格，`chat_loop` 因此以 `TurnState::v2_executed` 拦下整段
-//! `v2_facts::record`。但**派生事实不是轮次事实**，而是本轮的派生副作用——运行器
-//! 一处都不写。本档因此在轮末直接调 bridge 档的两个写方（**同一份函数**，差别只在
-//! 溯源锚：这里是原生写的 `u-{turn}` 格）：
+//! 轮次事实（`u-{turn}` 开口 / 收束格）由运行器原生入格；**派生事实不是轮次事实**，
+//! 而是本轮的派生副作用——运行器一处都不写，写方只有轮末这两个函数
+//! （溯源锚 = 这里原生写的 `u-{turn}` 格）：
 //!
 //! - [`super::v2_facts::record_learning`]：步 11 编码 / 步 12 检索锚 / 步 13 巩固 /
 //!   步 22 技能观测与编译；
@@ -45,19 +42,20 @@
 //!   S8 步 20）——三者的数据来源都在工具执行层（`Delegation` / `TaskDeclaration` /
 //!   熔断理由），由 [`super::v2_tools::SessionDispatchPort`] 经 `take_derived` 交回。
 //!
-//! ## 本档不覆盖：写侧授权闸
+//! ## 写侧授权闸（判在运行器）
 //!
-//! 只剩一类：**写侧授权闸**（`authorize_close`，
-//! [plan/01 §7](../../../docs/plan/01-核心架构.md)）——bridge 档在落收束格**之前**判
-//! `reply.first` / `reply.append`，运行器不判。补它要先决定运行器的落格路径怎么接闸，
-//! 那是 core 侧的一处独立改动，不在本档的收束收尾里。
+//! **写侧授权闸**（[plan/01 §7](../../../docs/plan/01-核心架构.md)）判的是「主体此刻
+//! 能否写本轮的收束格」（`reply.first` / `reply.append`），由运行器在落收束格**之前**
+//! 判（`turn_runner::closure_granted`，谓词 `can_reply` 只定义一次）。拒绝 ⇒ 收束格
+//! 不落、该轮留在未收束态（`check_all` 的 C4 报得出），本模块据 `closure_denied`
+//! 跳过本轮的派生事实（见下方收束派生事实的收尾）。
 //!
 //! 窗口：prompt 只带最近 `context_messages` 轮（含当前轮）——事实全量
 //! 入格（append-only），**视图**才是窗口。
 //!
 //! 兜底语义：生成失败时运行器落 fallback 事件（I3）后，本函数把失败
 //! **上抛**给 chat_loop（`Failed` 出口）——用户侧的失败呈现（错误状态 +
-//! 重试）与 v1 保持一致；网格里已有兜底格，重试即新一轮（N3 靠构造成立）。
+//! 重试）走那条出口；网格里已有兜底格，重试即新一轮（N3 靠构造成立）。
 //!
 //! 中止语义：生成被中止时运行器**不落收束格**（网格少一格是诚实缺口，
 //! ADR-044 同源），本函数上抛 `Aborted`——chat_loop 走独立出口，会话结局
@@ -67,18 +65,16 @@
 //! 等待用户语义：工具报 `failure_kind = pending`（confirm / ask_user）时运行器
 //! 停止工具循环且**不落收束格**（本轮还没了结），本函数按正常收束返回——
 //! 待用户动作由分发方广播的 `user_prompt` 节点承载（`WaitingUserAction`），
-//! 与 v1 的呈现一致。恢复（用户答完续跑同一轮）走 [`TurnResume`]，**不重开用户格**。
+//! 呈现为卡片 + 恢复入口。恢复（用户答完续跑同一轮）走 [`TurnResume`]，**不重开用户格**。
 //!
 //! 但**派生事实两幕都写**（等待幕与恢复幕都走到本函数轮末）：步 11 编码按**内容**
 //! 去重（`RecallView::contains_content`）⇒ 同一轮不会编出第二条；恢复幕的召回视图
 //! 非空（首幕刚编的那条）⇒ 会落一条 `memory.recalled`。两条的溯源锚都指原轮用户格
 //! （I2：恢复不新开用户格）。判据 = e2e `t27`（`turnFacts` 数轮次事实、派生事实另数）。
 //!
-//! 与 bridge 档的**已知差异**（中止轮 / 等待轮）：bridge 档在收束时原子转写，
-//! 中止即整轮不转写（网格零增长）；full 档必须先落用户格——prompt 从网格出，
-//! 用户发言不入格就会从下一轮的 prompt 里消失。同一「诚实缺口」原则的两种落地，
-//! 差别源于 prompt 来源（v1 读转写 / v2 读网格）。影响面：中止轮在 full 档
-//! 计入兜底率的**分母**（用户格在网格里），bridge 档不计——分子两档都不计。
+//! 中止轮 / 等待轮的形态：用户格**先落**——prompt 从网格出，用户发言不入格就会从
+//! 下一轮的 prompt 里消失；收束格**不落**（网格少一格是诚实缺口，见上）。影响面：
+//! 中止轮计入兜底率的**分母**（用户格在网格里），**分子不计**（中止不是失败）。
 
 use std::sync::{Arc, Mutex};
 
@@ -97,7 +93,7 @@ use super::chat_session::PersistentChatSession;
 // 契约面，生产消费方只有本插件，按 README §4 四问第 1 问该住这里。
 use super::turn_runner::{TurnInput, TurnResume, TurnRunner};
 
-/// 恢复产生的工具交换（审批 / 问答恢复后，由 v1 恢复路径交回）。
+/// 恢复产生的工具交换（审批 / 问答恢复后，由恢复路径交回）。
 ///
 /// **为什么由恢复路径交回而不是 v2 自己从会话读**：恢复方（`resume.rs`）是唯一
 /// 知道「刚重跑了哪个工具、拿到什么」的地方；让 v2 去会话存储里猜「哪条是刚恢复的
@@ -566,7 +562,7 @@ pub(crate) type SupplementFn =
 pub(crate) use super::round_hook::RoundHookFn;
 
 pub(crate) struct V2Turn<'a> {
-    /// 会话（v2 WAL 目录与档位的持有者）。
+    /// 会话（v2 WAL 目录与会话配置的持有者）。
     pub session: &'a PersistentChatSession,
     /// 本轮生效的模型服务（core trait 的 trait object）。
     pub provider: Arc<dyn ModelProvider>,
@@ -576,13 +572,13 @@ pub(crate) struct V2Turn<'a> {
     pub session_dir: crate::symbio_core::PluginDir,
     /// 本轮请求上下文（工具路由与能力注册表都在它上面）。
     pub ctx: Arc<dyn crate::symbio_core::PluginInvokeRequest>,
-    /// 会话级系统提示词（与 v1 同一取值点——`prepare_turn_inputs`）。
+    /// 会话级系统提示词（取值点 = `prepare_turn_inputs`）。
     pub system_prompt: &'a str,
-    /// 本轮中止信号（与 v1 同一份，中止语义不因换执行路径而丢）。
+    /// 本轮中止信号（同样由 chat_loop 传入）。
     pub abort: ExecAbortSignal,
     /// 本轮 Turn 根节点 id（UI 帧挂载的父节点）。
     pub root_id: &'a str,
-    /// v1 的事件出口（UI 帧经此回到对话面）。
+    /// 事件出口（UI 帧经此回到对话面）。
     pub sink: &'a ExecEventSink,
     /// 本轮用户发言（事实入格与 prompt 的同一来源）。
     pub user_text: &'a str,
@@ -596,8 +592,8 @@ pub(crate) struct V2Turn<'a> {
     /// 本轮开头召回的长期记忆视图（S5 步 12）——轮末由
     /// [`super::v2_facts::record_learning`] 落一条 `memory.recalled`。
     ///
-    /// 它**不是**轮次事实，因此不随 `v2_executed` 的拦截一起消失：v2 原生记账
-    /// 只覆盖轮次事实，记忆与学习的写方两档共用同一个函数（见该函数文档）。
+    /// 它**不是**轮次事实（轮次事实由运行器原生入格），而是派生事实——写方是
+    /// [`super::v2_facts::record_learning`]（见该函数文档）。
     /// 补充抽干口（缺口 3）：工具循环每跑完一轮问一次「用户有没有中途插话」。
     /// 有就折进**本轮**——落一格 `turn.supplemented` 事实 + 进下一次请求。
     ///
@@ -630,21 +626,20 @@ pub(crate) struct V2Turn<'a> {
     /// 本轮**可用**的技能集（S11 快路的候选）：本轮发言逐字命中其中一条 ⇒ 本轮
     /// 走**反射档**（[`TurnRunner::run_reflex`]），一次模型调用都不发生。
     ///
-    /// 空表是**常态**（没开 `skill_fast_path` / 没编过技能 / 档位不是 `full`）——
-    /// 那时本轮与接线前逐字同路（`run_with_tools`）。填充点唯一：
+    /// 空表是**常态**（没开 `skill_fast_path` / 没编过技能）——
+    /// 那时本轮照常走 `run_with_tools`。填充点唯一：
     /// `chat_loop/inputs.rs` 的 `fast_armed` 分支（与观测同一次 `route`）。
     pub skill_hits: &'a [super::v2_skills::SkillLlmHit],
-    /// **请求级前缀**：v1 请求视图层 `build_request_view` 置顶的三段——长期记忆召回 /
+    /// **请求级前缀**：请求视图层 `build_request_view` 置顶的三段——长期记忆召回 /
     /// 就绪任务集 / 委派者真源——在这里拼成一段文本，排在本轮对话**之前**
     /// （见 [`TurnInput::prefix`](crate::plugins::session::turn_runner::TurnInput::prefix)）。
     ///
     /// ## 为什么必须显式带进来
     ///
-    /// `full` 档的 prompt 是**一条** user 消息（`ProviderLlmAdapter::generate_turn`
-    /// 把渲染结果整段发出），而那三段在 v1 里是**独立的
-    /// 消息**。于是档位翻成 `full` 的同时它们**静默**从模型眼前消失——事实照样入格、
-    /// `session/stats` 照样有数，只有模型看不见（实测 t29 / t35 在 `full` 下报
-    /// 「记忆段没注入」，而注入逻辑一行没改）。
+    /// 会话轮的 prompt 是**一条** user 消息（`ProviderLlmAdapter::generate_turn`
+    /// 把渲染结果整段发出），而那三段是**独立的消息**。不显式带进来它们就会
+    /// **静默**从模型眼前消失——事实照样入格、`session/stats` 照样有数，只有模型
+    /// 看不见（实测 t29 / t35 报「记忆段没注入」，而注入逻辑一行没改）。
     ///
     /// ## `None` 是常态
     ///
@@ -655,15 +650,15 @@ pub(crate) struct V2Turn<'a> {
 
 /// 一轮 v2 原生产物的**全部出口**。
 pub(crate) struct V2TurnResult {
-    /// 收口用产物（正文 / 节点 id）——与 v1 的 `TurnOutput` 同形，使步骤 5–7 两条路共享。
+    /// 收口用产物（正文 / 节点 id）——`TurnOutput` 同形，收口步骤 5–7 只认这一份结构。
     pub output: TurnOutput,
     /// 本轮 v2 原生**额外产生**的消息（工具轮：助手中途正文 + ToolCall + 工具结果），
-    /// 按产生顺序。chat_loop 把它们并入 `context.messages`——v1 的落库权威是那份
+    /// 按产生顺序。chat_loop 把它们并入 `context.messages`——落库权威是那份
     /// 内存镜像（`persist_messages` 只写它的尾部增量），不并入就只看得见不落库。
     pub messages: Vec<ChatMessage>,
 }
 
-/// full 档的一轮执行：事实原生入格 + 生成（含工具循环）+ 流式回 UI。
+/// 一轮的执行：事实原生入格 + 生成（含工具循环）+ 流式回 UI。
 /// 抽干结果 → **落格 + 构造注入消息**（缺口 3 的全部逻辑，闭包之外）。
 ///
 /// 为什么抽出来：闭包在 P3c 里已经 90 行，且一半是「抽干 / 落格 / 造节点」的直线代码。
@@ -779,14 +774,13 @@ impl DeltaSink for SilentDeltaSink {
 /// ## 为什么走运行器，而不是本函数自己写那两格
 ///
 /// 「一个 turn = 用户格 opened + 至多一条收束 closed」这条不变量由运行器守着。插件自己
-/// 补写就成了**第二个轮次事实写方**——同轮两份记账的假象随之回来（那正是
-/// `chat_loop` 的 `!turn.v2_executed` 拦截当年要防的形状）。所以答话交给运行器
+/// 补写就成了**第二个轮次事实写方**——同轮两份记账的假象随之回来。所以答话交给运行器
 /// （`TurnInput::final_reply`），格仍由它落。
 ///
 /// ## 与 [`execute_turn`] 的两处刻意差异
 ///
 /// 1. **不写派生事实**：`record_learning` / `record_derived` 一律不调——`Answered` 轮没有
-///    工具交换、没有模型参与，与 v1 那条路（`finish_turn` 直接收尾、不转写）逐字一致。
+///    工具交换、没有模型参与，`finish_turn` 直接收尾，没有派生副作用可记。
 /// 2. **不上线 UI 帧**：答话节点已由 `apply_verdict` 推进 `context.messages`
 ///    （`dialog_node`，`exclude_from_context = false`），由 `finish_turn` 落库 ⇒ 这里用
 ///    [`SilentDeltaSink`]；再发一次就是同一条答话重复上屏。
@@ -805,7 +799,7 @@ pub(crate) async fn execute_final_reply_turn(
     reply: &str,
 ) -> Result<(), PluginError> {
     let dir = session.session_dir().ok_or_else(|| {
-        PluginError::InternalError("full 档需要持久会话（临时会话无事实源）".into())
+        PluginError::InternalError("v2 执行需要持久会话（临时会话无事实源）".into())
     })?;
     let wal = dir.join(super::paths::V2_WAL_FILE);
     let store = EventWalStore::open(&wal)
@@ -874,9 +868,9 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         skill_hits,
         prefix,
     } = req;
-    // 事实源：per-session v2 WAL（与桥同一个文件——两档共用一份网格）。
+    // 事实源：per-session v2 WAL（与运行器落格同一个文件——一份网格）。
     let dir = session.session_dir().ok_or_else(|| {
-        PluginError::InternalError("full 档需要持久会话（临时会话无事实源）".into())
+        PluginError::InternalError("v2 执行需要持久会话（临时会话无事实源）".into())
     })?;
     let wal = dir.join(super::paths::V2_WAL_FILE);
     // `Arc` 是给轮内注入闭包用的（`TurnInjector` 是 `'static` 闭包，而
@@ -889,7 +883,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     let snapshot = store.range(Seq::new(0));
 
     // turn 号与续写锚点：
-    // - 新开轮：号 = WAL 内既有 `user.message` 计数（与桥同一口径）；
+    // - 新开轮：号 = WAL 内既有 `user.message` 计数；
     // - 续写轮：号 = **已开未收束**的那一轮（审批 / 问答恢复），并取它的用户格 seq
     //   作溯源锚点——续写**不新开用户格**，收束仍记在该轮上（C4 按 turn 配对，
     //   另开新轮会把原轮变成永久假缺口，见 core `TurnResume`）。
@@ -919,8 +913,8 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     };
 
     // 折进的补充消息的收集器（缺口 3）：注入闭包（`'static`）往它 push，
-    // 执行完随 `V2TurnResult` 回灌进 `context.messages`——**与 v1 路径同动作**
-    //（那边是 `context.messages.push(merged)`）。不回灌就只活在这一次请求里，
+    // 执行完随 `V2TurnResult` 回灌进 `context.messages`（落库动作就是
+    // `context.messages.push(merged)`）。不回灌就只活在这一次请求里，
     // 重启即丢，而 t19 等的正是落库那条。
     let collected: Arc<std::sync::Mutex<Vec<ChatMessage>>> =
         Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1014,7 +1008,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     };
     // 身份进事件（[plan/11 批 1](../../../docs/plan/11-多执行器与多主体加固实施方案.md) ①）：
     // 本轮以**会话选定的那个 agent** 为主体——`ActorSpec` 首次在生产构造，
-    // `agent:main` 从字面量变成数据。取值点与转写侧同一个（`request_principal`），
+    // `agent:main` 从字面量变成数据。取值点与 chat_loop 同一个（`request_principal`），
     // 写侧闸判的正是它 ⇒ 判的对象 = 写的对象。未选智能体 ⇒ `agent:main`
     // （S08 §4 平凡值，与接线前逐字一致）。
     //
@@ -1028,7 +1022,8 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
 
     let mut produced = Vec::new();
     // 工具执行层交回的收束派生事实（承诺 / 任务表 / 熔断）——只有工具轮（深度档）才有，
-    // 反射档与无工具轮保持默认空值。轮末随收束落格（与 bridge 档同一写方，见下方）。
+    // 反射档与无工具轮保持默认空值。轮末随收束落格（写方 = `v2_facts::record_derived`，
+    // 见下方）。
     let mut derived = super::v2_tools::DerivedFacts::default();
     let outcome = match &hit {
         // ── 反射档（S11 §2）：**没有 `llm` 形参**的那条路 ────────────────────
@@ -1111,7 +1106,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                                 // 单线程 / 无 runtime（单测）：裸调（闭包内部是阻塞读）。
                                 _ => drain(),
                             };
-                            // 顺序：**先抽干、后汇报**（v1 同一条纪律，见 `chat_loop.rs`
+                            // 顺序：**先抽干、后汇报**（同一条纪律，见 `chat_loop.rs`
                             // 步骤 2d）——抽干会把静默时钟归零，反过来就会出现
                             // 「用户刚说完话，助手抢着报了一句进度」。
                             let injected = supplement_into_request(
@@ -1226,35 +1221,30 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
 
     // 中止：运行器**未落收束格**（网格少一格是诚实缺口，ADR-044 同源），
     // 出口走 Aborted——由 chat_loop/消费循环落库为 `MessageStatus::Aborted`
-    // + 会话结局 `aborted`（**不是** `failed`），与 v1 的中止出口同形。
-    // 记忆与学习也**不写**：与 bridge 档的中止出口同形（那一档的 `TurnExit::Aborted`
-    // 同样不转写）——中止的轮次没有收束，没有可固化的东西。
+    // + 会话结局 `aborted`（**不是** `failed`）。
+    // 记忆与学习也**不写**——中止的轮次没有收束，没有可固化的东西。
     if outcome.aborted {
         return Err(PluginError::Aborted);
     }
 
     // ── 收束派生事实（两半）：承诺 / 任务表 / 熔断 + 记忆与学习 ────────────────
     //
-    // **本步的存在理由**：`full` 档的轮次事实由运行器原生入格，chat_loop 因此以
-    // `v2_executed` 拦下整段 `v2_facts::record`。但这两半都**不是轮次事实**，而是
-    // 本轮的**派生副作用**——运行器一处都不写。不在这里补，full 档的代际立约（S08）/
-    // 任务表（S7）/ 熔断（S9 §6 验收 2）/ 长期记忆（S06）/ 技能自我改进（S11）就整体
-    // 失效，而档位名还自称「整体切换」。写方与 bridge 档**同一份函数**
-    // （`record_derived` / `record_learning`），差别只在锚点：这里是 v2 原生写的
-    // `u-{turn}` 格，那里是转写的 `v2u-*` 格。
+    // **本步的存在理由**：轮次事实由运行器原生入格，这两半都**不是轮次事实**，而是
+    // 本轮的**派生副作用**——运行器一处都不写，写方就是这里的 `record_derived` /
+    // `record_learning`（溯源锚 = 运行器原生写的 `u-{turn}` 格）。不在这里补，
+    // 代际立约（S08）/ 任务表（S7）/ 熔断（S9 §6 验收 2）/ 长期记忆（S06）/
+    // 技能自我改进（S11）就整体失效。
     //
     // 兜底收束的 `response` 为 `None`：兜底说明这条路没走通，固化它等于把失败写成
-    // 套路（与 bridge 档 `V2Closure::Fallback` → `success_text = None` 同一条口径）。
-    // 写侧闸拒（`closure_denied`，见 core 的 `closure_granted`）：收束格**未入格**
-    // ⇒ 本轮的派生事实**也不写**——与 bridge 档 `authorize_close` 拒绝时同形（那一档的
-    // `record_to_wal` 在闸处提前返回，承诺 / 任务 / 熔断 / 记忆全不写）。用户的答案
-    // 照旧经 `produced` 回给调用方——收束格是**记录**，不是呈现。
+    // 套路。写侧闸拒（`closure_denied`，见运行器的 `closure_granted`）：收束格
+    // **未入格** ⇒ 本轮的派生事实**也不写**（承诺 / 任务 / 熔断 / 记忆全不写）。
+    // 用户的答案照旧经 `produced` 回给调用方——收束格是**记录**，不是呈现。
     if outcome.closure_denied {
         crate::plugin_warn!(
             "session",
             "[v2-exec] 收束被授权拒绝，本轮派生事实不入格（turn={turn_no}）"
         );
-        // 被拒的兜底仍是**失败**（I3）：呈现走 v1 的 Failed 出口，与未拒时同形。
+        // 被拒的兜底仍是**失败**（I3）：呈现走 Failed 出口，与未拒时同形。
         if outcome.fell_back {
             return Err(PluginError::InternalError(outcome.text));
         }
@@ -1282,7 +1272,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
         .and_then(|e| e.seq.map(|s| s.value()))
     {
         Some(user_seq) => {
-            // 承诺 / 任务表 / 熔断：与 bridge 档**同一写方**（`record_derived`）。
+            // 承诺 / 任务表 / 熔断：写方是 `record_derived`。
             // 承诺失败只记日志不冒泡——轮次已收束，派生事实失败不该把成功的一轮说成
             // 失败（与记忆三段同一条口径）。
             if let Err(why) = super::v2_facts::record_derived(
@@ -1328,13 +1318,13 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
         ),
     }
 
-    // 兜底已入格（I3），失败呈现交回 v1 语义（Failed 出口 + 重试）。
+    // 兜底已入格（I3），失败呈现走 Failed 出口 + 重试。
     if outcome.fell_back {
         return Err(PluginError::InternalError(outcome.text));
     }
     // 等待用户（`outcome.awaits_user`）：本轮尚未了结（运行器未落收束格），但
     // **按正常收束返回**——待用户动作由分发方广播的 `user_prompt` 节点承载
-    // （`WaitingUserAction`），v1 的呈现（卡片 + 恢复入口）不变；恢复时经
+    // （`WaitingUserAction`），呈现是卡片 + 恢复入口；恢复时经
     // [`TurnResume`] 续写同一轮（不重开用户格）。此处的 `text` 只是模型在工具轮说过的话，不是终答。
 
     // 折进的补充也要进落库镜像（缺口 3）：排在 `produced` **之前** ——

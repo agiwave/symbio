@@ -20,8 +20,9 @@
 //!
 //! 1. **构造期**：认不出的能力名 ⇒ 拒绝整体构造（`PolicyError`，core 定义），
 //!    降级为**空矩阵**并告警——不是「跳过那一行」，笔误不能变成一条悄悄生效的拒绝；
-//! 2. **写侧**：`v2_bridge` 收束入格前 [`can_reply`](PermissionMatrix::can_reply)，
-//!    未持有 ⇒ 拒绝入格（该轮留在未收束态，`check_all` 会把它报出来）；
+//! 2. **写侧**：运行器落收束格前判 [`can_reply`](PermissionMatrix::can_reply)
+//!    （`turn_runner::closure_granted`），未持有 ⇒ 拒绝入格（该轮留在未收束态，
+//!    `check_all` 会把它报出来）；
 //! 3. **读侧**：`stats` 按读方声明判 [`can_see`](PermissionMatrix::can_see)——属主
 //!    是**内容的属主**（`SESSION_OWNER`，部署事实）而非事件作者，于是今天的判读
 //!    就是「属主放行、其余整体拒绝」；`thread_private` 缺省（C10）。
@@ -49,12 +50,12 @@ use std::sync::OnceLock;
 
 use crate::symbio_core::{PermissionMatrix, VisScope, AGENT_PREFIX};
 
-/// 本机主智能体的身份——**表里那一行的名字**与 `v2_bridge` 收束事件的 `actor`
+/// 本机主智能体的身份——**表里那一行的名字**与收束事件的 `actor`
 /// 是同一个常量：授权判定的对象若与实际写入的主体各写一份字符串，两边迟早漂移
 /// 到「判的是 A、写的是 B」而没有任何东西会变红。
 pub(crate) const PRINCIPAL_MAIN: &str = "agent:main";
 
-/// 本机用户的身份——`v2_bridge` 用户发言事件的 `actor`。
+/// 本机用户的身份——用户发言事件的 `actor`。
 pub(crate) const PRINCIPAL_USER: &str = "user";
 
 /// 自主发起者的身份（[roadmap/S12 §3](../../../docs/plan/roadmap/S12-自主层与长期目标.md)）
@@ -125,8 +126,8 @@ static MATRIX: OnceLock<PermissionMatrix> = OnceLock::new();
 /// ——「什么形状算智能体身份」只定义一次，可见域判据与身份派生共用它，
 /// 两处各写一个字面量迟早漂移成「判的是 A、写的是 B」。
 ///
-/// 平凡值（S08 §4）：今天所有会话未选智能体 ⇒ 恒为 `agent:main`，与接线前
-/// `v2_bridge` 里那个写死的常量**逐字一致**。
+/// 平凡值（S08 §4）：今天所有会话未选智能体 ⇒ 恒为 `agent:main`，与
+/// [`PRINCIPAL_MAIN`] **逐字一致**（收束事件的 `actor` 取的正是它）。
 pub(crate) fn principal_of(agent_id: Option<&str>) -> String {
     match agent_id.map(str::trim).filter(|s| !s.is_empty()) {
         None => PRINCIPAL_MAIN.to_string(),

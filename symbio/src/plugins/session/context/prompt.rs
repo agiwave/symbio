@@ -191,42 +191,6 @@ fn compression_instruction(hints: Option<&str>) -> ChatMessage {
     }
 }
 
-/// `context_compact` 工具定义：暴露给模型，由模型在任务阶段间隙主动调用。
-///
-/// 不进 CapabilityVisitor 分发——由 chat_loop 拦截执行（需要编排器内部的
-/// 压缩链路：LLM 摘要 + 上下文替换 + 会话持久化）。
-pub fn context_compact_tool_meta() -> crate::symbio_core::CapabilityMeta {
-    crate::symbio_core::CapabilityMeta {
-        name: CONTEXT_COMPACT_TOOL_NAME.to_string(),
-        context_retention: None,
-        description: "Compact the conversation history: distill older messages into a \
-            structured state snapshot and keep only recent context in the session. \
-            Call this when you have just finished a major subtask, when the context is \
-            filled with intermediate outputs you no longer need, or when a system note \
-            warns that context usage is high. The session continues seamlessly from the \
-            snapshot. Pass `hints` describing information that MUST be preserved \
-            (file paths, plans, constraints, open questions)."
-            .to_string(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "properties": {
-                "hints": {
-                    "type": "string",
-                    "description": "Key facts/plans/constraints that must be preserved in the snapshot"
-                }
-            }
-        }),
-        keywords: vec![
-            "compact".to_string(),
-            "压缩".to_string(),
-            "上下文".to_string(),
-        ],
-        category: Some(crate::symbio_core::CapabilityCategory::Core),
-        examples: None,
-        ..Default::default()
-    }
-}
-
 #[cfg(test)]
 #[path = "prompt.test.rs"]
 mod tests;

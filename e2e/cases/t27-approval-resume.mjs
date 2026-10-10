@@ -1,5 +1,5 @@
 import './_selfrun.mjs';
-// T27 审批与恢复（v2 full 档）：工具停在等用户 → 回填答案 → 续写**同一轮**并收束。
+// T27 审批与恢复：工具停在等用户 → 回填答案 → 续写**同一轮**并收束。
 //
 // ## 本用例钉的是什么
 //
@@ -130,9 +130,8 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        // 本用例的主题与对话面正交 ⇒ 把三个开关钉死（理由见 `DIALOG_FACE_OFF`），
-        // 再叠加**本用例的主题**：full 档（v2 原生执行，工具轮走 `DispatchPort`）。
-        session: { ...DIALOG_FACE_OFF, v2_mode: 'full' },
+        // 本用例的主题与对话面正交 ⇒ 把三个开关钉死（理由见 `DIALOG_FACE_OFF`）。
+        session: { ...DIALOG_FACE_OFF },
       },
     });
 

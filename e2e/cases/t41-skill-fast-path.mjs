@@ -90,8 +90,8 @@ export default defineCase(
   'T41 技能快路：命中已编译技能 ⇒ 不调模型、以技能正文收束、走反射档',
   async () => {
     const llm = await new MockLlm([
-      // 顺序即优先级：`match` 是对**最后一条 user 消息**的子串匹配，而 `full` 档的
-      // prompt 是整段转写（含召回注入段）——第 3 轮的 prompt 里**同时**含 `TRIGGER`
+      // 顺序即优先级：`match` 是对**最后一条 user 消息**的子串匹配，而 prompt 是
+      // 整段转写（含召回注入段）——第 3 轮的 prompt 里**同时**含 `TRIGGER`
       // （注入段里那条记忆的正文）与 `OTHER`（本轮发言）。更具体的那个必须排在前面，
       // 否则第 3 轮永远命中 `TRIGGER` 的场景（表现为"未命中却答了技能正文"）。
       { id: 'other', match: OTHER, content: OTHER_REPLY },
@@ -103,12 +103,11 @@ export default defineCase(
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
-        // `full` 档：轮次由 v2 运行器原生执行——"跳过模型"跳的正是它里面那一次调用。
+        // 轮次由 v2 运行器原生执行——"跳过模型"跳的正是它里面那一次调用。
         // 两个开关都**显式打开**：它们默认 off（S11 §4 的平凡值），本用例验的正是
         // 打开之后的行为，不能依赖默认值。
         session: {
           ...DIALOG_FACE_OFF,
-          v2_mode: 'full',
           skill_compile_enabled: true,
           skill_fast_path: true,
         },

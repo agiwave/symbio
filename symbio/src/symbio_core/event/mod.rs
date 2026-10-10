@@ -54,7 +54,7 @@ pub const EVENT_USER_MESSAGE: &str = "user.message";
 /// 用户在助手干活途中补了一句话，那句话被折进 `context.messages` —— 但 `TurnInput.text`
 /// 在**轮首就定死了**，于是这句话：
 ///
-/// - 进了 v1 的消息列表（会落库、会进 `messages.json`），
+/// - 进了消息列表（会落库、会进 `messages.json`），
 /// - **没进事实网格**，而 prompt 是从事实网格投影的 ⇒ **模型看不见它**，
 /// - 且**完全静默**：不报错、不告警、既有断言全绿。
 ///
@@ -77,9 +77,9 @@ pub const EVENT_TURN_SUPPLEMENTED: &str = "turn.supplemented";
 /// ## 它为什么是事实（缺口 4）
 ///
 /// 「干到一半也要能说一句话」。那句话由 `compose` 的模板产线生成（零 LLM 往返），
-/// 在 v1 里写进 `context.messages` —— 但 `full` 档的**工具循环搬进了 v2 运行器**，
-/// 而 chat_loop 的轮边界每个用户轮只经过一次、且判定头一句就是
-/// `tool_rounds == 0 ⇒ 不说`（那个计数只在 v1 的轮循环里递增）⇒ **恒不发**。
+/// 不能只靠 chat_loop 的轮边界发——工具循环在 v2 运行器里，轮边界每个用户轮只经过
+/// 一次、且判定头一句就是 `tool_rounds == 0 ⇒ 不说`（那个计数只在工具循环里递增）
+/// ⇒ **恒不发**。
 ///
 /// 汇报不是轮次事实（一轮可以报零到多次），所以它与 `turn.supplemented` 同格
 /// （`turn × asserted`），不占 `chat.assistant.final` 那格 N3 的「每轮至多一条」。

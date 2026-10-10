@@ -741,7 +741,7 @@ export const BASELINE = {
   //   `v2_exec.test.rs`（带反向自检）或新的 `v2_facts.test.rs` 接管。
   //   ⚠️ 这是**下修**，不是回填容差——`ratchetErosion` 判的是「基线相对最近两个碰过本文件
   //   的提交有没有变松」，所以这一格带 `baseline-allow` 豁免（理由见其上）。
-  // baseline-allow rustTests: 批 P3 退役 `bridge` 转写路径，`v2_bridge.test.rs` 的 15 条缩到 `v2_facts.test.rs` 的 5 条（净 −10），另加 11 条迁与新增判据，净 +3；逐条归属见上方注释，非侵蚀。
+  // baseline-allow rustTests: 两次已归因的下修非侵蚀——批 P3 退役 `bridge` 转写路径（`v2_bridge.test.rs` 15 条缩到 `v2_facts.test.rs` 5 条 + 11 条迁与新增，逐条归属见上方注释）与批 S2.5 删 `v2_mode_defaults_to_full_and_roundtrips` 1 条（被测对象 `V2Mode` 随 ADR-051 退役）。
   // 续 · 批 P3c（缺口 3）：**+2** 条新判据（core 层「注入的消息进了本轮的下一次请求」
   //   1 + 插件层「补充落成事实 / 本轮可见 / 重开 WAL 后下一轮仍可见」1），无删除。
   // 2026-10-09 **回填 `1383 → 1387`（+4）**，两笔归属，无残差：
@@ -765,6 +765,12 @@ export const BASELINE = {
   //   桥接用例（`provider_adapter_routes_tool_frames_to_the_message_channel`）：
   //   身份帧先于增量、全帧同 id（id 漂移 = 第二张卡）、Σ帧拼出完整参数 JSON。
   //   实测口径同前：`cargo test -p symbio`，取首个 `test result: ok. N passed`。
+  // 2026-10-10 批「S2.5」（[ADR-051] 废 v1 档）：**下修 `1417 → 1416`（−1）**，
+  //      `ciRustTestsTotal` 同步 `1425 → 1424`（同一增量在 CI 口径各欠一次，两边一起动）。
+  //      归因无残差：只删 `config.test.rs::v2_mode_defaults_to_full_and_roundtrips`
+  //      一条——被测对象 `V2Mode` 随档位旋钮整体退役（不留兼容层），覆盖面无需接管
+  //      （被测配置键已不存在）。两格各带 `baseline-allow` 豁免（下修非侵蚀）。
+  // baseline-allow ciRustTestsTotal: 批 S2.5 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   // 2026-10-10 **回填 `1412 → 1417`（+5）**：批「S2」——Q3 进展读切 WAL，
   //   `plugins/session/v2_worker_progress.rs` 5 条判据（两读法同答案 ×3 形态 /
   //   无 WAL 不产出 / 空正文占位不算步骤）。
@@ -783,7 +789,7 @@ export const BASELINE = {
   //   整列、读侧闸 ⇒ 空且不扫）。同批退役 `#[ignore]` 的 `slo_scan_wal_roots`
   //   手工扫描口（职责被上面两件接走）。
   //   实测口径同前：`cargo test -p symbio -p symbio-cli`，取首个 `test result: ok. N passed`。
-  rustTests: 1417,
+  rustTests: 1416,
   /**
    * CI 口径的 Rust 通过数（**只增不减**）——与上面三个分包基线**是不同口径，不能互替**。
    *
@@ -799,16 +805,16 @@ export const BASELINE = {
    * 照样绿。这与 ci.yml 漏掉 `v2-plan` 是同一课的第三次：**只信退出码**能抓住
    * 「测试失败」，抓不住「测试消失」——后者不留任何痕迹。
    *
-   * 1425 = 1417 + 8 + 0 + 0（2026-10-10 **实测**：`cargo test --workspace` 全部
-   * `test result: ok` 行求和，依次 symbio lib 1417 / cli 8 / tauri 0 /
+   * 1424 = 1416 + 8 + 0 + 0（2026-10-10 **实测**：`cargo test --workspace` 全部
+   * `test result: ok` 行求和，依次 symbio lib 1416 / cli 8 / tauri 0 /
    * doctest `0 passed; 8 ignored`）。前值 1384 是推算值（1376 + 8 + 0 + 0），
-   * 本次按其自述「下一次 CI 以实测复核」回填，推算误差吸收在 `1384 → 1425` 里。
+   * 其自述「下一次 CI 以实测复核」的推算误差已吸收在 `1384 → 1425` 里。
    * 口径的出处是 CI run 37647725557：`rust-checks (dev)` 四行依次
    * `1341 / 8 / 0 / 0 passed`，并打黄字 `⚠ CI 全量 1349 > 基线 1347：
    * 请更新 BASELINE.ciRustTestsTotal`。**本地与 CI 是两条独立的格子**，同一个增量
    * 会各欠一次，回填时必须两边一起看。
    */
-  ciRustTestsTotal: 1425,
+  ciRustTestsTotal: 1424,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

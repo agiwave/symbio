@@ -335,7 +335,7 @@ impl SessionPlugin {
     ///
     /// 会话事实源只有两个写窗口，本函数把两条互斥条件都检查掉：
     ///
-    /// - 收束期写方 `record_to_wal` 跑在 `is_working` 复位**之前** ⇒ 要求
+    /// - 收束期写方（v2 运行器的轮末收束）跑在 `is_working` 复位**之前** ⇒ 要求
     ///   `is_working == false`；
     /// - 收件箱的空闲写方（挂起落格 / 恢复落格）**只在 `preempt != None` 时**才
     ///   落格 ⇒ 要求 `preempt == PreemptPending::None`。

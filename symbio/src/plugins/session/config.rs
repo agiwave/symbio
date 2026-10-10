@@ -22,47 +22,6 @@
 
 use serde::{Deserialize, Serialize};
 
-/// v2 会话链路的切换档位（[ADR-048](../../../../docs/decisions/session.md) 定档）。
-///
-/// 两档，各自可独立退：
-///
-/// - `off`：v1 执行 + **不落事实网格**；
-/// - `full`（出厂）：v2 执行（`v2_exec`）——事实原生入格、prompt 从转写渲染出、
-///   流式经桥回 UI、工具轮经 `DispatchPort` 分发。覆盖面 = **全部轮次**：无工具轮、
-///   工具轮、审批与问答恢复都在内（恢复续写同一 `turn`、用户格不重开）。
-///
-/// 出厂 `full` 的理由：`docs/plan/10` 的三批（非交互工具轮 / 审批恢复机制 / 恢复的
-/// e2e 入口）全部落地，切默认档位**不再有覆盖面缺口**；而 `bridge` 档是过渡设施
-/// （v2 事实桥），留作出厂默认等于过渡态永久化。
-///
-/// ⚠️ **`off` 不是中性的「v1 模式」**——它关掉的是**四样**东西，且**全部静默**
-/// （不报错、不告警，系统只是变笨）：
-///
-/// | 关掉 | 判据位置 |
-/// |---|---|
-/// | 长期记忆召回（跨会话读视图） | `chat_loop/inputs.rs` 步 ⑤ |
-/// | 就绪任务集（**模型唯一的调度候选来源**） | 同上，步 ⑥ |
-/// | 技能路由与校准 | 同上，步 ⑤ 末 |
-/// | 轮次事实入格 ⇒ P99 / 兜底率的**新**样本 | 无转写路径（`full` 档的入格在 v2 侧） |
-///
-/// 存量 WAL 仍可读：`session/stats` **无条件**读 `v2-events.wal`，不看本档位 ⇒
-/// 回退之后历史 P99 / 兜底率照样读得到（能看清当初为什么要回退），只是不再累积。
-///
-/// ⚠️ **`full` 档不代表反射档会产样本**：反射档要三个开关同时开——本档 +
-/// `skill_compile_enabled` + `skill_fast_path`。出厂后两个仍是 `false`
-/// （各有成文理由），所以 `session/stats` 的 `reflex` 桶**恒为零**。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum V2Mode {
-    /// v1 执行，**不落事实网格**。⚠️ 连带关掉记忆召回 / 就绪任务集 / 技能路由
-    /// （三样都读事实源），且**静默**——判据位置见本类型文档的表。
-    Off,
-    /// v2 执行：轮次走 v2 运行器（`v2_exec`——事实原生入格、prompt 从转写出、
-    /// 流式经桥回 UI、工具轮经 `DispatchPort` 分发）。
-    #[default]
-    Full,
-}
-
 /// 会话配置 —— 本插件的旋钮（字段真源）。
 ///
 /// ## 存储目录
@@ -305,7 +264,7 @@ pub struct SessionConfig {
     ///
     /// ## 它控制什么
     ///
-    /// 轮末收束时，本轮的**成功轨迹**（`V2Closure::Final`）要不要被固化成一条
+    /// 轮末收束时，本轮的**成功轨迹**（`chat.assistant.final` 收束格）要不要被固化成一条
     /// `memory.encoded{tag:"skill"}`——S11 §4 的平凡值 `projection = recall` 说的
     /// 正是「不编译，只检索」：
     /// - `true`：`v2_skills::compile` 在收束时写技能事件（同文去重，同一句 trigger
@@ -347,22 +306,12 @@ pub struct SessionConfig {
     /// **重复发言**，不取决于语义相似。这是诚实划界，不是缺陷：后续接入匹配算法时，
     /// 改的是**数据**（`v2_skills::take_match` 一处），不是结构。
     ///
-    /// ## 只在 `full` 档生效
+    /// ## 跳过的是 v2 运行器里的那一次模型调用
     ///
-    /// 快路要"跳过模型"，而模型调用发生在 v2 运行器（`v2_exec`）里；`bridge` 档的轮次
-    /// 由 v1 执行，没有可跳过的那一次调用。故本开关在 `bridge` / `off` 档**不产生任何
-    /// 后果**——但两档的"不算"不是一回事：`bridge` 档判定照常发生（观测照常落格，与
-    /// 关着时同形），只是没人拿它去装配；`off` 档连判定都不算（没有事实源，无从判）。
-    /// 见 `chat_loop/inputs.rs` 的 `fast_armed` 与 `routing` 两处条件。
+    /// 判定照常发生（观测照常落格，与关着时同形），只是没人拿它去装配——
+    /// 这就是它作为一个独立开关的全部含义。见 `chat_loop/inputs.rs` 的 `fast_armed`。
     #[serde(default = "default_skill_fast_path")]
     pub skill_fast_path: bool,
-    /// v2 会话链路的切换档位（`off` / `bridge` / `full`；默认 `bridge`，见 [`V2Mode`]）。
-    ///
-    /// 管辖范围：从「只转写事实」到「整体切换引擎」的**同一根旋钮**——
-    /// `off` 不转写、`bridge` 转写、`full` 走 v2 引擎（`v2_exec`）。
-    /// 「切到 v2 的哪一步」是一个问题，因此不拆成多个开关。
-    #[serde(default)]
-    pub v2_mode: V2Mode,
     // ── Q1：worker 启动判据的三条旋钮（ADR-047 批 B 的「独立一批」）────────
     //
     // 出厂值即判据原样，两个平凡值都是**这一层关闭**，不是「永远命中」：
@@ -545,7 +494,6 @@ impl Default for SessionConfig {
             conation_enabled: default_conation_enabled(),
             skill_compile_enabled: default_skill_compile_enabled(),
             skill_fast_path: default_skill_fast_path(),
-            v2_mode: V2Mode::default(),
             worker_force_prefix: default_worker_force_prefix(),
             worker_keywords: default_worker_keywords(),
             worker_min_chars: default_worker_min_chars(),

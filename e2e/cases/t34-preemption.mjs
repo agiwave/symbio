@@ -23,13 +23,13 @@ import './_selfrun.mjs';
 //
 // `decide` 的判定顺序（04 §2.1）第一句就是「无在跑任务 → 放行」。在跑任务 =
 // 最新一个 `task.opened`、且未被 `task.asserted` 收掉、也未被 `task.held` 挂起。
-// 任务格由 `todo_write` 声明在**收束转写**时落（[T31](../cases/t31-task-table.mjs) 同源），
+// 任务格由 `todo_write` 声明在**收束**时落（[T31](../cases/t31-task-table.mjs) 同源），
 // 因此第一步必须真的跑一轮带 `todo_write` 的对话。
 //
 // ## 为什么 `final` 不能落在任务之后
 //
 // 判定顺序的第二句：任务开启后若已有收束发言 ⇒ 排队（已发出的发言不可撤回）。
-// 而收束转写的落笔顺序是**先 final 再派生事实**（`v2_facts::record` 的注释）——
+// 而收束的落笔顺序是**先 final 再派生事实**（`v2_facts` 的注释）——
 // 所以任务开格的 seq 天然大于本轮 final 的 seq，判定落在「挂起」这一支。
 // 这也是为什么插话必须赶在**下一轮的 final 之前**：那一轮的 final 一落，
 // 同一个任务就变成「排队」了。
@@ -110,8 +110,8 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        // 抢占的写方挂在**收束转写**（`v2_facts::record`）与收件箱上 ⇒ bridge 档。
-        session: { ...DIALOG_FACE_OFF, v2_mode: 'full' },
+        // 抢占的写方挂在**收束落格**与收件箱上。
+        session: { ...DIALOG_FACE_OFF },
       },
     });
 
@@ -134,7 +134,7 @@ export default defineCase(
       // ── 第 1 轮：登记一个在跑任务 ─────────────────────────────────────────
       cli.send(`请${DECLARE}`);
       await waitFor(() => eventsOf('task.opened').length >= 1, {
-        what: '任务开格（`todo_write` 经收束转写落成 task.opened）',
+        what: '任务开格（`todo_write` 经收束落成 task.opened）',
         timeoutMs: 40_000,
       });
       const opened = eventsOf('task.opened');
@@ -187,7 +187,7 @@ export default defineCase(
 
       // ── 证据 ②：插话轮结束后挂起被**收掉**（只挂不收 = 任务永久消失）──────
       //
-      // 插话格的落笔在**插话轮收束**时（与其余收束转写同一处）⇒ 顺序判据要等恢复
+      // 插话格的落笔在**插话轮收束**时（与其余收束落格同一处）⇒ 顺序判据要等恢复
       // 落格之后才比得全。
       await waitFor(
         () => readEvents(walPath).some((e) => String(e.event_id).startsWith('res-')),

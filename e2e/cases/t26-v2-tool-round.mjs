@@ -1,5 +1,5 @@
 import './_selfrun.mjs';
-// T26 工具轮 v2 化：`v2_mode = full` 下工具调用真的执行、结果真的回灌下一次请求。
+// T26 工具轮 v2 化：工具调用真的执行、结果真的回灌下一次请求。
 //
 // ## 本用例钉的是什么
 //
@@ -69,7 +69,7 @@ const ECHO_TEXT = 'mock 回显内容';
 const V2_WAL = 'v2-events.wal';
 
 export default defineCase(
-  'T26 工具轮 v2 化：full 档工具调用执行 → 结果回灌下一次请求 → artifact.added 带溯源',
+  'T26 工具轮 v2 化：工具调用真的执行 → 结果回灌下一次请求 → artifact.added 带溯源',
   async () => {
     const llm = await new MockLlm([
       // 第一次请求：模型请求一个工具（带一段中途正文，逼出「定格并切节点」路径）。
@@ -92,9 +92,8 @@ export default defineCase(
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
-        // 本用例的主题与对话面正交 ⇒ 把三个开关钉死（理由见 `DIALOG_FACE_OFF`），
-        // 再叠加**本用例的主题**：full 档。
-        session: { ...DIALOG_FACE_OFF, v2_mode: 'full' },
+        // 本用例的主题与对话面正交 ⇒ 把三个开关钉死（理由见 `DIALOG_FACE_OFF`）。
+        session: { ...DIALOG_FACE_OFF },
       },
     });
     // MCP stdio 工具：`--record` 是「工具真的执行过」的进程外证据。
@@ -179,7 +178,7 @@ export default defineCase(
       assertEq(
         facts.length,
         3,
-        `full 档一轮应恰好 3 格轮次事实（用户 + 产物 + final），实得 ${facts.length}: ${kinds}`,
+        `一轮应恰好 3 格轮次事实（用户 + 产物 + final），实得 ${facts.length}: ${kinds}`,
       );
 
       const user = events.find((e) => e.kind === 'user.message');

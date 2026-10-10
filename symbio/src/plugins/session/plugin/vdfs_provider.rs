@@ -959,7 +959,7 @@ impl SessionPlugin {
         let r = super::super::v2_reconcile::reconcile(&dir, &merged);
 
         if r.wal_missing || r.is_consistent() {
-            // WAL 不在不是不一致（off 档 / 还没跑过任何一轮 v2）
+            // WAL 不在不是不一致（还没跑过任何一轮）
             return;
         }
         // 出声：不静默是本仓对"静默失效"的一贯处置（八个缺口的共同教训）

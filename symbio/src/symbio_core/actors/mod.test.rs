@@ -1498,8 +1498,9 @@ fn scheduled_trigger_produces_event_not_side_channel() {
 /// ② 它**持** `define.work`（否则 ① 可能只是「矩阵整个是空的」的平凡真）；
 /// ③ 主智能体**持** `reply.first`（对照：拒绝是**针对这个主体**的，不是一律拒绝）。
 ///
-/// 「拒绝 ⇒ 不产生事件」的**执行**在写侧闸（`plugins/session/v2_facts::authorize_close`
-/// 的 `can_reply`，其判据用例见 `v2_bridge.test.rs::a_closure_without_the_grant_is_refused`）
+/// 「拒绝 ⇒ 不产生事件」的**执行**在写侧闸（`plugins/session` 运行器的
+/// `turn_runner::closure_granted`，其判据用例见
+/// `turn_runner.test.rs::closure_is_withheld_when_the_principal_lacks_the_grant`）
 /// ——core 这边只钉**表里的结论**，不假装自己跑过那条闸。
 #[test]
 fn autonomous_actor_cannot_write_to_dialog() {

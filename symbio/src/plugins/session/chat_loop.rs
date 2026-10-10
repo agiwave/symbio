@@ -66,12 +66,12 @@ pub(crate) use self::state::{
 };
 pub(crate) use self::turn::{close_turn, settle_reasoning};
 
-/// `full` 档的轮边界回调（缺口 4）：判定与措辞都在本函数里，落格在 `v2_exec`。
+/// 轮边界回调（缺口 4）：判定与措辞都在本函数里，落格在 `v2_exec`。
 ///
 /// ## 为什么返回**草稿**而不是 `()`
 ///
 /// 落格要 `EventWalStore`，而开着它的是 `v2_exec`。交回一个 `()` 就等于让本函数
-/// 「说完了就算记下了」，而这两件事在 v1 里从来不是同一件事（v1 的汇报节点落进
+/// 「说完了就算记下了」，而这两件事不是同一件事（汇报的对话面节点落进
 /// `context.messages`，由 `persist_messages` 落库，**不进事实网格**）。交回草稿
 /// 让「谁落格」这件事留在有 store 的那一侧。
 ///
@@ -80,11 +80,11 @@ pub(crate) use self::turn::{close_turn, settle_reasoning};
 /// 轮首 compose 说过话（`Escalate` 首响 / `Answered` 答话）就要把静默时钟归零，
 /// 而那件事改的是 `TurnState::last_user_facing_at`。本函数拿不到 `TurnState`，
 /// 所以只能在构造时**取一次快照**当起点——从那一刻起两边的语义就一致了
-/// （本档下 `TurnState` 那三格在轮内再也不会被改）。
+/// （这条路径上 `TurnState` 那三格在轮内再也不会被改）。
 ///
 /// ## 会话视图：只给**轮首**那一份
 ///
-/// compose 的 `ComposeRequest` 带一段会话视图，而 `full` 档的轮边界上
+/// compose 的 `ComposeRequest` 带一段会话视图，而轮边界上
 /// `context.messages` 里**只有轮首那一批**（工具轮的消息由 `v2_exec` 在轮末才
 /// 交回来）。所以本函数传的快照与那一刻 `context.messages` 的内容**逐字相同**，
 /// 不是近似。代价是它不含本轮工具节点——仓内的 `progress_text` 不读这一段
@@ -143,13 +143,13 @@ pub(crate) fn round_report_hook(
     })
 }
 
-/// 把请求视图层**置顶的三段**拼成一段请求级前缀（`full` 档的 prompt 入口）。
+/// 把请求视图层**置顶的三段**拼成一段请求级前缀（v2 运行器的 prompt 入口）。
 ///
 /// ## 为什么需要它
 ///
-/// v1 把长期记忆召回段 / 就绪任务集段 / 委派者真源段作为**独立的消息**发给模型
+/// 长期记忆召回段 / 就绪任务集段 / 委派者真源段在请求视图里是**独立的消息**
 /// （`build_request_view` 的第 5/6/7 条，三段都置顶、`meta.kind` 可观测、不落库）。
-/// 而 `full` 档的 prompt 是**一条** user 消息——`ProviderLlmAdapter::generate_turn`
+/// 而 v2 运行器的 prompt 是**一条** user 消息——`ProviderLlmAdapter::generate_turn`
 /// 只收 `TurnInput.text` 与渲染出的基线，那三段若不显式带进来就**静默**从模型眼前
 /// 消失：事实照样入格、`session/stats` 照样有数，只有模型看不见。
 ///
@@ -223,8 +223,8 @@ use crate::symbio_core::{
     TurnToolCallInfo,
 };
 use crate::symbio_core::{
-    CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, ModelProvider, ModelUsage, Plugin,
-    PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    ExecAbortSignal, ExecEventSink, ModelProvider, ModelUsage, Plugin, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -234,7 +234,7 @@ use super::config::SessionConfig;
 use super::context;
 use super::message_build::llm_build_tool_message;
 use super::tools::{fire_hook, process_tool_calls_async};
-use super::transcript::{llm_emit_removed, llm_emit_state};
+use super::transcript::llm_emit_state;
 
 pub async fn run_chat_loop(
     orchestrator: std::sync::Arc<ChatOrchestrator>,
@@ -284,9 +284,9 @@ pub async fn run_chat_loop(
     // 本轮输入（消息 id + 正文）：锚定在 `single_message` 被消费**之前**。
     //
     // 这是「本请求带了什么输入」这一事实，而不是「第几轮」的函数；两处消费它——
-    // 下面判决的 `first_utterance`，以及收束转写 `v2_facts::record`（经
-    // `TurnState::input_utterance` 传到 `finish_turn`）。转写那一处不能改从
-    // `context.messages` 现取：`load_history = true` 时那份列表装着整段历史，
+    // 下面判决的 `first_utterance`，以及委派段 Q1 的输入（`inputs.rs` 取
+    // `turn.input_utterance`）。锚定的那一份不能改从 `context.messages` 现取：
+    // `load_history = true` 时那份列表装着整段历史，
     // 「第一条用户发言」逐轮都指回首轮那句（e2e t29 钉住这条）。
     turn.input_utterance = single_message.as_ref().and_then(|m| {
         let text = m.content.as_ref()?.to_text();
@@ -316,7 +316,7 @@ pub async fn run_chat_loop(
     // 成功 → `Continue`：turn 循环从 session 加载含新工具结果的历史，续写 LLM
     //   （RetryTurn 也走此路径，但因为是删除整个 Failed Turn 后重新请求，等价于普通 send）。
     // 失败/reject/answer → `Done`：退出循环，留 Failed/Completed 等下次 resume。
-    // 恢复产生的工具交换（v2 原生路径续写同一轮用；v1 路径不读它）。只作用于
+    // 恢复产生的工具交换（运行器续写同一轮用）。只作用于
     // 恢复后的**第一轮**——`take()` 一次即空，后续工具轮照常走 `DispatchPort`。
     let mut pending_resume: Option<super::v2_exec::ResumedTool> = None;
     if let Some(tr) = req.resume.take() {
@@ -471,7 +471,7 @@ pub async fn run_chat_loop(
                             "session",
                             "[Classify] 本轮不进工具循环（verdict={verdict:?}）"
                         );
-                        // ── 缺口 5：full 档下这一轮的**轮次事实仍须入格** ────────────
+                        // ── 缺口 5：这一轮的**轮次事实仍须入格** ──────────────────
                         //
                         // `Answered` 在这一步就收尾，而 `EVENT_USER_MESSAGE` 的写方是 v2
                         // 运行器 ⇒ 不落这两格，下一轮 prompt 里这次问答**整个消失**，
@@ -479,38 +479,36 @@ pub async fn run_chat_loop(
                         // （`apply_verdict` 刚 push 的答话会随 `finish_turn` 落库）
                         // ⇒ **两条真源**。修法 = 把答话交给运行器落格（见
                         // `v2_exec::execute_final_reply_turn` 的文档）。
-                        if matches!(context.session.v2_mode(), super::config::V2Mode::Full) {
-                            // 答话 = `apply_verdict` 刚 push 的那条对话面文本（末尾一条
-                            // assistant 消息）。取它而不是再算一遍：措辞归 `compose` 所有，
-                            // 这里只搬运。
-                            let reply = context
-                                .messages
-                                .iter()
-                                .rev()
-                                .find(|m| m.role == Some(MessageRole::Assistant))
-                                .and_then(|m| match &m.content {
-                                    Some(MessageContent::Text(t)) => Some(t.clone()),
-                                    _ => None,
-                                })
-                                .unwrap_or_default();
-                            if let Err(e) = super::v2_exec::execute_final_reply_turn(
-                                &context.session,
-                                &ctx,
-                                orchestrator.provider.clone(),
-                                turn.abort.clone(),
-                                utterance,
-                                &reply,
-                            )
-                            .await
-                            {
-                                // 落格失败**只告警**：答话已在 `context.messages` 里，用户
-                                // 照旧收得到。把它升级成整轮失败，等于用「记不下来」换
-                                // 「答不出来」——与缺口 4 的汇报落格同一条口径。
-                                plugin_warn!(
-                                    "session",
-                                    "[Session] v2 定稿答话入格失败（本轮照常收尾）: {e}"
-                                );
-                            }
+                        // 答话 = `apply_verdict` 刚 push 的那条对话面文本（末尾一条
+                        // assistant 消息）。取它而不是再算一遍：措辞归 `compose` 所有，
+                        // 这里只搬运。
+                        let reply = context
+                            .messages
+                            .iter()
+                            .rev()
+                            .find(|m| m.role == Some(MessageRole::Assistant))
+                            .and_then(|m| match &m.content {
+                                Some(MessageContent::Text(t)) => Some(t.clone()),
+                                _ => None,
+                            })
+                            .unwrap_or_default();
+                        if let Err(e) = super::v2_exec::execute_final_reply_turn(
+                            &context.session,
+                            &ctx,
+                            orchestrator.provider.clone(),
+                            turn.abort.clone(),
+                            utterance,
+                            &reply,
+                        )
+                        .await
+                        {
+                            // 落格失败**只告警**：答话已在 `context.messages` 里，用户
+                            // 照旧收得到。把它升级成整轮失败，等于用「记不下来」换
+                            // 「答不出来」——与缺口 4 的汇报落格同一条口径。
+                            plugin_warn!(
+                                "session",
+                                "[Session] v2 定稿答话入格失败（本轮照常收尾）: {e}"
+                            );
                         }
                         return finish_turn(
                             orchestrator,
@@ -643,156 +641,82 @@ pub async fn run_chat_loop(
         }
 
         // ── 步骤 4：LLM 调用（唯一发起处）────────────────────────────────────
-        // **`full` 档分流**（[ADR-048](../../../../docs/decisions/session.md)，出厂档）：
-        // v2_mode = Full ⇒ v2 运行器执行——事实原生入格、prompt 从转写出、流式经
-        // UiBridge 回同一出口、工具轮经 `DispatchPort` 契约分发（工具节点与结果仍写进
-        // 同一份对话图）；收口（步骤 5-7）两条路共享。
+        // 轮次经 v2 运行器（[`super::v2_exec`]）执行——事实原生入格、prompt 从转写出、
+        // 流式经 UiBridge 回同一出口、工具轮经 `DispatchPort` 契约分发（工具节点与
+        // 结果仍写进同一份对话图）；收口（步骤 5-7）与之共享。
         //
-        // `full` 档的轮次事实**只有这一个写方**：成功原生入格，失败也已尽力入格
-        // （I3 兜底格 + Failed 出口）。退役的转写路径曾靠 `TurnState::v2_executed`
-        // 在收束处跳过自己以免同轮两份记账——**那个字段随之删除**：同轮两份记账现在
-        // 不可能发生，因为转写路径本身已经不在了。
-        let v2_takeover = matches!(context.session.v2_mode(), super::config::V2Mode::Full);
-        let out = if v2_takeover {
-            // 本轮用户文本：轮首已入列的最后一条用户消息。
-            let user_text = context
-                .messages
-                .iter()
-                .rev()
-                .find(|m| m.role == Some(MessageRole::User))
-                .map(|m| match &m.content {
-                    Some(MessageContent::Text(t)) => t.clone(),
-                    _ => String::new(),
-                })
-                .unwrap_or_default();
-            let v2_started = std::time::Instant::now();
-            match super::v2_exec::execute_turn(super::v2_exec::V2Turn {
-                session: &context.session,
-                provider: orchestrator.provider.clone(),
-                parent: orchestrator.parent.clone(),
-                session_dir: orchestrator.session_dir.clone(),
-                ctx: ctx.clone(),
-                system_prompt: &inputs.system_prompt,
-                abort: turn.abort.clone(),
-                root_id: &inputs.root_id,
-                sink: &sink,
-                user_text: &user_text,
-                window_turns: context.session.context_window(),
-                tools: &inputs.tools,
-                resume: pending_resume.take(),
-                // 记忆与学习的入参：轮次事实由 v2 原生记账，这两项**不在其中**
-                // ——full 档的记忆写与 bridge 档共用 `record_learning`（见其文档）。
-                recalled: turn.recall_view.as_ref(),
-                skill_obs: &turn.skill_route,
-                // 快路候选集（S11 执行半边）：命中一条 ⇒ 本轮走反射档、不调模型。
-                // 空表（默认）⇒ 与接线前逐字同路（`run_with_tools`）。
-                skill_hits: &turn.skill_hits,
-                // 请求级前缀 = 请求视图层置顶的三段（见 request_view_prefix）。
-                prefix: request_view_prefix(&inputs.request_view),
-                // 轮内注入（缺口 3）：把本会话的收件箱抽干口交给 v2 的工具循环，
-                // 让「用户中途插话」在 `full` 档下**折进本轮**（v1 档的折进在
-                // 下面那段循环里，两条路各抽一次、但只有一条会跑）。
-                supplements: orchestrator.supplements.as_ref().map(|s| {
-                    let s = s.clone();
-                    Arc::new(move || s.take_inbox_batch_sync()) as super::v2_exec::SupplementFn
-                }),
-                supplemental_no: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-                // 轮边界汇报（缺口 4）：判定 + 措辞在这里（编排器 + compose 都在
-                // 本函数手里），**落格**在 `v2_exec`（store 在那边）。
-                on_round: Some(round_report_hook(
-                    orchestrator_arc.clone(),
-                    ctx.clone(),
-                    context.messages.clone(),
-                    turn.last_user_facing_at,
-                )),
+        // 轮次事实**只有这一个写方**：成功原生入格，失败也已尽力入格
+        // （I3 兜底格 + Failed 出口），因此同轮两份记账不可能发生。
+        // 本轮用户文本：轮首已入列的最后一条用户消息。
+        let user_text = context
+            .messages
+            .iter()
+            .rev()
+            .find(|m| m.role == Some(MessageRole::User))
+            .map(|m| match &m.content {
+                Some(MessageContent::Text(t)) => t.clone(),
+                _ => String::new(),
             })
-            .await
-            {
-                Ok(res) => {
-                    turn.model_elapsed_ms += v2_started.elapsed().as_millis() as u64;
-                    // v2 原生产生的消息（工具轮：助手中途正文 + ToolCall + 工具结果）
-                    // 并入落库权威镜像——`persist_messages` 只写这份的尾部增量，
-                    // 不并入就只看得见、不落库（重启即丢）。
-                    context.messages.extend(res.messages);
-                    res.output
-                }
-                Err(PluginError::Aborted) => {
-                    // 与 v1 的中止出口同形：在途 Turn 交消费循环落库为
-                    // `MessageStatus::Aborted` + 会话结局 `aborted`（**不是**
-                    // `failed`——中止不是错误），与 v1 分支逐字同路。
-                    return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Aborted)
-                        .await;
-                }
-                Err(e) => {
-                    plugin_warn!("session", "[Session] v2 执行失败，走 Failed 出口: {e}");
-                    return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Failed(e))
-                        .await;
-                }
+            .unwrap_or_default();
+        let v2_started = std::time::Instant::now();
+        let out = match super::v2_exec::execute_turn(super::v2_exec::V2Turn {
+            session: &context.session,
+            provider: orchestrator.provider.clone(),
+            parent: orchestrator.parent.clone(),
+            session_dir: orchestrator.session_dir.clone(),
+            ctx: ctx.clone(),
+            system_prompt: &inputs.system_prompt,
+            abort: turn.abort.clone(),
+            root_id: &inputs.root_id,
+            sink: &sink,
+            user_text: &user_text,
+            window_turns: context.session.context_window(),
+            tools: &inputs.tools,
+            resume: pending_resume.take(),
+            // 记忆与学习的入参：轮次事实由 v2 原生记账，这两项**不在其中**
+            // （它们的写方是 `v2_facts::record_learning`，见其文档）。
+            recalled: turn.recall_view.as_ref(),
+            skill_obs: &turn.skill_route,
+            // 快路候选集（S11 执行半边）：命中一条 ⇒ 本轮走反射档、不调模型。
+            // 空表（默认）⇒ 与接线前逐字同路（`run_with_tools`）。
+            skill_hits: &turn.skill_hits,
+            // 请求级前缀 = 请求视图层置顶的三段（见 request_view_prefix）。
+            prefix: request_view_prefix(&inputs.request_view),
+            // 轮内注入（缺口 3）：把本会话的收件箱抽干口交给 v2 的工具循环，
+            // 让「用户中途插话」**折进本轮**。
+            supplements: orchestrator.supplements.as_ref().map(|s| {
+                let s = s.clone();
+                Arc::new(move || s.take_inbox_batch_sync()) as super::v2_exec::SupplementFn
+            }),
+            supplemental_no: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            // 轮边界汇报（缺口 4）：判定 + 措辞在这里（编排器 + compose 都在
+            // 本函数手里），**落格**在 `v2_exec`（store 在那边）。
+            on_round: Some(round_report_hook(
+                orchestrator_arc.clone(),
+                ctx.clone(),
+                context.messages.clone(),
+                turn.last_user_facing_at,
+            )),
+        })
+        .await
+        {
+            Ok(res) => {
+                turn.model_elapsed_ms += v2_started.elapsed().as_millis() as u64;
+                // v2 原生产生的消息（工具轮：助手中途正文 + ToolCall + 工具结果）
+                // 并入落库权威镜像——`persist_messages` 只写这份的尾部增量，
+                // 不并入就只看得见、不落库（重启即丢）。
+                context.messages.extend(res.messages);
+                res.output
             }
-        } else {
-            // 执行期环境一次给全：出口（可见流）+ 中止（本轮信号）。
-            let env = ExecEnv::new(sink.clone(), turn.abort.clone());
-            // v2 事实桥的实测口径（ADR-044）：模型耗时在唯一发起处累计（含工具轮
-            // 的多次请求），随轮次收束写进事件网格的 cost_ms。
-            let v2_started = std::time::Instant::now();
-            let result = orchestrator
-                .provider
-                .execute_turn(
-                    &inputs.system_prompt,
-                    &inputs.request_view,
-                    &inputs.tools,
-                    &inputs.root_id,
-                    &env,
-                )
-                .await;
-            turn.model_elapsed_ms += v2_started.elapsed().as_millis() as u64;
-
-            match result {
-                Err(PluginError::RetryWithoutContextId) => {
-                    for m in &mut context.messages {
-                        m.response_id = None;
-                    }
-                    // 清除本轮未完成的 Streaming 半截内容（来自上一轮被中断的 LLM 流），
-                    // 避免下轮 get_context_messages 加载到半截消息污染 LLM 上下文。
-                    // RetryWithoutContextId 表示 LLM 提供商返回的 context_id 无效（会话不存在），
-                    // 本轮流式产出的 Streaming 节点都是无效半截响应，应直接删除而非保留为 Failed 终态。
-                    //
-                    // 删除是**状态迁移**（`removed`）：对每个被废弃的节点发一条删除帧，
-                    // 接收端据此就地移除视图——取代原先被消费循环静默丢弃的
-                    // `StreamEvent::Abort` 事件帧（那正是"Reason 块不结束 /
-                    // 半截节点永远挂着流式动画"的根因）。
-                    for m in context
-                        .messages
-                        .iter()
-                        .filter(|m| m.status == Some(MessageStatus::Streaming))
-                    {
-                        llm_emit_removed(&sink, &m.id).await;
-                    }
-                    context
-                        .messages
-                        .retain(|m| m.status != Some(MessageStatus::Streaming));
-                    // 持久化清除后的 response_id 与 Streaming 删除结果，确保下轮加载到干净版本
-                    let _ = context
-                        .session
-                        .replace_messages(context.messages.clone())
-                        .await;
-                    continue;
-                }
-                Err(PluginError::Aborted) => {
-                    // 用户手动中止：向上冒泡 Err(Aborted)，由消费循环识别
-                    // `PluginErrorCode::Aborted` 后走 persist_failure —— 在途 Turn
-                    // 落库为 `MessageStatus::Aborted` + error，会话结局 `aborted`
-                    // （**不是** `failed`），前端可渲染错误条与重试入口；若在此直接
-                    // 返回 Ok，在途 Turn 不落库，刷新即消失且无重试入口。
-                    return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Aborted)
-                        .await;
-                }
-                Err(e) => {
-                    plugin_warn!("session", "[Session] 发送请求失败: {e}");
-                    return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Failed(e))
-                        .await;
-                }
-                Ok(out) => out,
+            Err(PluginError::Aborted) => {
+                // 中止：在途 Turn 交消费循环落库为 `MessageStatus::Aborted` +
+                // 会话结局 `aborted`（**不是** `failed`——中止不是错误）。
+                return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Aborted).await;
+            }
+            Err(e) => {
+                plugin_warn!("session", "[Session] v2 执行失败，走 Failed 出口: {e}");
+                return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Failed(e))
+                    .await;
             }
         };
 

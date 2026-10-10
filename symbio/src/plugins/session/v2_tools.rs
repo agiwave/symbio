@@ -6,15 +6,15 @@
 //! 会话 id / 工作区）、事件出口（结果节点写进对话图）、会话目录（超长结果存档）。
 //! core 认识这些即违 E-009；契约留在 core、实现留在插件，依赖方向由编译器保证。
 //!
-//! ## 与 v1 的关系：**不是第二条执行链**
+//! ## 与工具执行层的关系：**不是第二条执行链**
 //!
-//! 实际执行仍走 `process_tool_calls_async`——超长结果存档、生命周期钩子、
+//! 实际执行走 `process_tool_calls_async`——超长结果存档、生命周期钩子、
 //! 审批/问答的「待用户动作」、批尾未执行收口、中止提前收口全在里面。本模块只补
-//! 两件 v2 独有的事：
+//! 两件事：
 //!
-//! 1. **补建助手轮消息**。v1 的工具调用节点是 model 插件在**流式期**逐帧广播的
-//!    （`parse_sse_stream` 的 `ToolCallDelta`）；v2 经 `LlmAdapter` 拿到的是收口后的
-//!    `LlmTurn`，没有那条帧流。节点形状必须与 v1 **同一份**（前端读同一套字段），
+//! 1. **补建助手轮消息**。工具调用节点不是流式逐帧广播出来的
+//!    （`LlmAdapter` 交回的是收口后的 `LlmTurn`，没有那条帧流），由本处补建。
+//!    节点形状与其余对话节点**同一份**（前端读同一套字段），
 //!    因此复用 `llm_build_tool_call_nodes` / `llm_build_text_node`。
 //! 2. **把结果映射成 core 的事实形状**（[`DispatchOutcome`]），供运行器落
 //!    `artifact.added` 格与拼下一轮 prompt。
@@ -46,10 +46,9 @@ use super::v2_exec::UiBridge;
 /// 工具执行层交回的**收束派生事实**（承诺 / 任务表 / 熔断）。
 ///
 /// 三者的数据来源都在工具执行层（`Delegation` / `TaskDeclaration` / 熔断理由），
-/// 而写方（落格）在收束处——`bridge` 档由 `v2_facts::record` 写，`full` 档由
-/// `v2_exec::execute_turn` 轮末写（同一个 `v2_facts::record_derived`）。本结构是
-/// 那份出参从分发点回到运行器的**唯一通道**：不收集它，`full` 档这三样就静默全丢
-/// （与记忆/学习同一个坑——它们在 `full` 档整体失效，而档位名还自称「整体切换」）。
+/// 而写方（落格）在轮末——`v2_exec` 调 [`super::v2_facts::record_derived`] 写。
+/// 本结构是那份出参从分发点回到运行器的**唯一通道**：不收集它，这三样就静默全丢
+/// （与记忆 / 学习同一个坑——出参不交回，写方就无从落格）。
 ///
 /// 形态仿 [`SessionDispatchPort::produced`]：`dispatch` 在 `&self` 上跑，出参却要
 /// 跨 await 累积，故用 `Mutex` 收，调用方在桥释放前 `take_derived` 取走。
@@ -161,7 +160,7 @@ impl DispatchPort for SessionDispatchPort {
             produced.push(msg);
         }
 
-        // ② 工具调用节点：v2 没有流式工具帧，由本处按 v1 的同一形状补建。
+        // ② 工具调用节点：这条路径没有流式工具帧，由本处补建。
         //    先以 `Streaming` 广播（工具还没跑，卡片应显示运行中），落库副本用终态。
         let call_nodes = llm_build_tool_call_nodes(&self.root_id, &turn.tool_calls);
         for node in &call_nodes {
@@ -170,13 +169,13 @@ impl DispatchPort for SessionDispatchPort {
             llm_emit_message(&self.sink, frame).await;
         }
 
-        // ③ 分发（v1 的执行器：存档 / 钩子 / 审批 / 批尾收口全在里面）。
+        // ③ 分发（工具执行层：存档 / 钩子 / 审批 / 批尾收口全在里面）。
         //    父节点查询用刚广播的这批节点——它们与执行器要求的形状同源。
         //
         // 三份收束派生事实出参（承诺 / 任务表 / 熔断）：数据来源在工具执行层，
-        // 写方在收束处——`full` 档由本分发方收下、`v2_exec` 轮末调
-        // `v2_facts::record_derived` 落格（与 bridge 档**同一写方**）。不收这三份，
-        // `full` 档的代际立约 / 任务表 / 熔断就静默全丢（见 [`DerivedFacts`]）。
+        // 写方在轮末——由本分发方收下、`v2_exec` 轮末调
+        // `v2_facts::record_derived` 落格。不收这三份，
+        // 代际立约 / 任务表 / 熔断就静默全丢（见 [`DerivedFacts`]）。
         let mut delegations: Vec<super::tools::Delegation> = Vec::new();
         let mut tasks: Vec<super::tools::TaskDeclaration> = Vec::new();
         let mut breaks: Vec<&'static str> = Vec::new();

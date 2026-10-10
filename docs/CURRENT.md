@@ -60,7 +60,6 @@
 | `codebase_search` | `local` | 语义代码搜索 |
 | `content_search` | `local` | 正则内容搜索（ripgrep 库） |
 | `todo_write` | `local` | 任务清单（`LastOnly` 保留策略） |
-| `context_compact` | `session` | 主动压缩上下文（开关打开时才暴露给模型） |
 | `heartbeat` | `session` | 会话心跳配置 |
 | `read_skill` | `skill` | 读取技能定义 |
 | `vdfs_list` | `vdfs` |  |
@@ -106,7 +105,7 @@
 
 | 范围 | 实现 | 测试 |
 |---|---|---|
-| `symbio/src` | 273 文件 / 73235 行 | 168 文件 / 41827 行 |
+| `symbio/src` | 273 文件 / 72963 行 | 168 文件 / 41827 行 |
 | `cli/src` | 4 文件 / 1632 行 | 1 文件 / 80 行 |
 | `tauri/src-tauri/src` | 3 文件 / 451 行 | 0 文件 / 0 行 |
 | `tauri/src` | 104 文件 / 23058 行 | 55 文件 / 12838 行 |
@@ -120,4 +119,4 @@
 
 ---
 
-> 生成时间：2026-10-10 02:37:00 UTC · 源：`git rev-parse HEAD` = `5b3e5d6`
+> 生成时间：2026-10-10 06:00:58 UTC · 源：`git rev-parse HEAD` = `49faaf1`

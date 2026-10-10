@@ -105,9 +105,8 @@ export default defineCase(
 
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
-      // `full` 档 = 轮次走 `v2_exec`：store 在**轮首** open、持整轮。
-      // `bridge` 档要等收束转写才落格，写窗口太短，测不出重叠。
-      pluginConfigs: { session: { ...DIALOG_FACE_OFF, v2_mode: 'full' } },
+      // 轮次走 `v2_exec`：store 在**轮首** open、持整轮。
+      pluginConfigs: { session: { ...DIALOG_FACE_OFF } },
     });
     const base = { homedir: hd.homedir, workdir: hd.workdir, provider: PROVIDER_ID };
     const walPath = join(hd.homedir, 'session', SID, V2_WAL);

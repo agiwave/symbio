@@ -32,7 +32,7 @@
 //!
 //! | 侧 | 调用点 | 判什么 |
 //! |---|---|---|
-//! | 写侧 | `v2_bridge` 收束入格前 | `can_reply`（首条 → `ReplyFirst`，后续 → `ReplyAppend`） |
+//! | 写侧 | 运行器落收束格前（`turn_runner::closure_granted`） | `can_reply`（首条 → `ReplyFirst`，后续 → `ReplyAppend`） |
 //! | 读侧 | `stats` 按读方声明判（属主 = `SESSION_OWNER`，部署事实） | `can_see`（`thread_private` 缺省，C10）⇒ 非属主读数为空 |
 //!
 //! 表为什么与机制同住 core：它是**架构元素**——「谁持有什么能力」与本域的 7 项闭集
@@ -277,7 +277,7 @@ impl PermissionMatrix {
         Capability::from_name(name).is_some_and(|cap| self.can_write(principal, cap))
     }
 
-    /// 写侧判定（收束闸）：主体能否**收束一轮发言**——`v2_bridge` 入格前的判据。
+    /// 写侧判定（收束闸）：主体能否**收束一轮发言**——运行器落收束格前的判据。
     ///
     /// `first` = 该轮尚无收束格：首条 → [`Capability::ReplyFirst`]，后续（重试 /
     /// 追加）→ [`Capability::ReplyAppend`]。「轮次位置 → 能力」的映射只在这一处

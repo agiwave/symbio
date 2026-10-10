@@ -176,7 +176,7 @@ pub fn llm_build_text_node(
 /// ToolCall 组合节点自身携带请求参数（`content` = JSON 文本），不设独立的请求子节点。
 /// `id` 是节点 id（与流式帧一致），provider 的 wire id 存 `tool_call_id`。
 ///
-/// 单点定义：v1 的落库视图（[`llm_build_assistant_messages`]）与 v2 的分发方
+/// 单点定义：落库视图（[`llm_build_assistant_messages`]）与工具分发方
 /// （`plugins/session/v2_tools.rs`）都经此构造——两处各写一份，工具卡片的形状
 /// 迟早会分叉（前端读的是同一套字段）。
 pub fn llm_build_tool_call_nodes(

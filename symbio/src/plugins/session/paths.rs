@@ -21,7 +21,7 @@
 
 /// v2 事实源文件名（per-session 的事件 WAL）。
 ///
-/// **写方（`v2_bridge` / `v2_exec`）与读方（`stats` 读数口）共用这一个拼法**——
+/// **写方（`v2_exec`）与读方（`stats` 读数口）共用这一个拼法**——
 /// 文件名是事实源的身份，两处各写一份字面量就等于两份事实源。
 pub(crate) const V2_WAL_FILE: &str = "v2-events.wal";
 

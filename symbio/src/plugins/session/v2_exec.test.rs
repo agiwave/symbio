@@ -1,11 +1,10 @@
-//! v2 执行器验收——full 档无工具轮的三条硬契约：
+//! v2 执行器验收——无工具轮的四条硬契约：
 //!
-//! 1. **事实原生入格**：用户格 + final 格落在本会话的 v2 WAL，不变量全绿
-//!    （与 bridge 档同一份网格口径——切换开关只换写法，不换网格）；
-//! 2. **流式回同一出口**：生成增量经 UiBridge 变成 v1 的 UI 帧（首片快照
+//! 1. **事实原生入格**：用户格 + final 格落在本会话的 v2 WAL，不变量全绿；
+//! 2. **流式回同一出口**：生成增量经 UiBridge 变成 UI 帧（首片快照
 //!    建节点 + 后续窄帧），帧语义与 model 插件直发同构；
 //! 3. **兜底也是一句话**（I3）：生成失败落 fallback 格后上抛——用户侧
-//!    失败呈现走 v1 的 Failed 出口，网格里不缺格；
+//!    失败呈现走 `Failed` 出口，网格里不缺格；
 //! 4. **中止不是失败**：生成被中止时**不落收束格**（网格少一格是诚实缺口，
 //!    ADR-044 同源），上抛 `Aborted` 走独立出口——不呈现「失败」也不进兜底率
 //!    分母。中止与失败的差别在**类型上**可见，不靠错误文本猜。
@@ -19,7 +18,7 @@ use crate::symbio_core::{
     EVENT_ASSISTANT_FINAL,
 };
 
-use super::super::config::{SessionConfig, V2Mode};
+use super::super::config::SessionConfig;
 use super::super::store::SessionStore;
 use super::super::types::Session;
 
@@ -100,7 +99,7 @@ impl ExecTranscriptWriter for CollectingFrames {
 /// - **落格**（WAL 有 `turn.supplemented` + 溯源 + `count`）：它成为了事实；
 /// - **回读下一次请求**：它在**本轮**就对模型可见（用户就是在这轮说的话）；
 /// - **重开 WAL 再投影**：它在**下一轮**仍可见——这才是缺口 3 的原始症状
-///   （原来它只活在 v1 的消息列表里，下一轮就消失）。
+///   （只进消息列表、不进事实网格的补充，下一轮就从模型眼前消失）。
 ///
 /// ## 反向自检
 ///
@@ -247,7 +246,7 @@ enum Behavior {
     Abort,
     /// 首次请求回一个工具调用（附中途正文），第二次回正文——演练工具轮。
     ToolThenAnswer,
-    /// 首次请求回一个 `agent_run` 工具调用，第二次回正文——演练 full 档**代际立约**
+    /// 首次请求回一个 `agent_run` 工具调用，第二次回正文——演练**代际立约**
     /// 的入格通道（承诺出参经 `SessionDispatchPort::take_derived` 回到运行器）。
     ToolThenAgentRun,
 }
@@ -419,7 +418,7 @@ impl ModelProvider for FaithfulProvider {
     }
 }
 
-/// 持久会话 + Full 档装配；返回 (会话, 会话目录, 清理句柄)。
+/// 持久会话装配（事实源落会话目录）；返回 (会话, 会话目录, 清理句柄)。
 async fn setup_full() -> (PersistentChatSession, std::path::PathBuf, tempfile::TempDir) {
     setup_full_with(false).await
 }
@@ -437,7 +436,6 @@ async fn setup_full_with(
     store.save_session(&seed).await.expect("种子会话落盘失败");
     let dir = store.session_dir(&session_id).expect("应返回会话目录");
     let config = SessionConfig {
-        v2_mode: V2Mode::Full,
         skill_compile_enabled: skill_compile,
         ..Default::default()
     };
@@ -465,7 +463,7 @@ async fn tool_free_turn_writes_grid_and_streams_ui() {
         crate::symbio_core::ExecAbortSignal::new(),
     ))
     .await
-    .expect("full 档执行成功");
+    .expect("v2 执行成功");
     let out = res.output;
     assert!(
         res.messages.is_empty(),
@@ -513,7 +511,7 @@ async fn tool_free_turn_writes_grid_and_streams_ui() {
 }
 
 /// 失败轮（I3）：fallback 格照落（网格不缺格），错误上抛给 chat_loop 走
-/// Failed 出口——用户侧失败呈现与 v1 一致。
+/// Failed 出口。
 #[tokio::test]
 async fn tool_free_turn_failure_leaves_fallback_event_and_bubbles() {
     let (session, dir, _tmp) = setup_full().await;
@@ -597,7 +595,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         provider: Arc::new(provider),
         // 无插件宿主 ⇒ 工具分发按「没有父插件」诚实失败——本用例验的是**链路**
         // （落格 / 帧 / 回灌），工具真正跑起来由 e2e 覆盖。失败是信息性的：
-        // 结果照样回灌，循环照常继续（正是 v1 的口径）。
+        // 结果照样回灌，循环照常继续。
         parent: None,
         session_dir: super::super::test_dir(),
         ctx: test_ctx(),
@@ -755,14 +753,14 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
 
 // ==================== 收束派生事实：记忆与学习（步 11–13 + 步 22）====================
 
-/// `full` 档的**收束派生事实**：记忆三段（步 11–13）与技能观测 / 编译（步 22）必须入格。
+/// **收束派生事实**：记忆三段（步 11–13）与技能观测 / 编译（步 22）必须入格。
 ///
 /// ## 这个用例挡的是什么
 ///
-/// 轮次事实（用户格 / final 格 / 产物格）由 v2 运行器原生记账，`chat_loop` 因此以
-/// `TurnState::v2_executed` 拦下整段 `v2_facts::record`。但记忆与学习**不是轮次事实**
-/// ——运行器一处都不写。拦下时若把它们一起拦掉，`full` 档的长期记忆（S06）与技能
-/// 自我改进（S11）就**静默全丢**，而档位名还自称「整体切换」。
+/// 轮次事实（用户格 / final 格 / 产物格）由 v2 运行器原生记账，而记忆与学习
+/// **不是轮次事实**——运行器一处都不写，写方是 `v2_facts::record_learning`。
+/// 写方若不被调用（或出参没交回），长期记忆（S06）与技能
+/// 自我改进（S11）就**静默全丢**。
 ///
 /// 三条断言各自钉一段：
 /// ① 步 11 编码（`memory.encoded{tag:"经验"}`，锚 = 本轮用户格）；
@@ -834,14 +832,14 @@ async fn full_turn_lands_memory_and_learning_facts() {
 
 // ==================== 收束派生事实：承诺 / 任务表 / 熔断 ====================
 
-/// `full` 档的**收束派生事实**：承诺（`agent_run` 的代际立约）必须入格。
+/// **收束派生事实**：承诺（`agent_run` 的代际立约）必须入格。
 ///
 /// ## 这个用例挡的是什么
 ///
 /// 承诺的数据来源在工具执行层（`Delegation`，`process_tool_calls_async` 的出参），
-/// 写方在收束处（`v2_facts::record_derived`）。`full` 档不经 `v2_facts::record`，
-/// 若分发方不把出参交回（`SessionDispatchPort` 的三个出参曾是 `&mut Vec::new()`），
-/// 承诺就**静默全丢**——代际立约在 full 档整体失效，而档位名还自称「整体切换」。
+/// 写方是 `v2_facts::record_derived`（`v2_exec` 轮末调）。若分发方不把出参交回
+/// （`SessionDispatchPort` 的三个出参收在本地 `Vec`、经 `take_derived` 交回，
+/// 不收不交就等于丢），承诺就**静默全丢**——代际立约整体失效。
 ///
 /// 本用例走的是**真实通道**：假 provider 回一个 `agent_run` 工具调用 ⇒
 /// `SessionDispatchPort::dispatch` 收集出参 ⇒ `execute_turn` 轮末调 `record_derived`
@@ -909,7 +907,7 @@ async fn full_turn_lands_derived_commitment_facts() {
     let offered = events
         .iter()
         .find(|e| e.kind == EVENT_COMMITMENT_OFFERED)
-        .unwrap_or_else(|| panic!("代际立约必须入格（full 档出参通道）：{kinds:?}"));
+        .unwrap_or_else(|| panic!("代际立约必须入格（出参通道）：{kinds:?}"));
     assert_eq!(
         offered.payload["promise"], "让 reviewer 复查这段",
         "承诺内容 = 委托出去的那句话（`agent_run` 的 prompt）"

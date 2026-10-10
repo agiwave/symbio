@@ -16,7 +16,7 @@ import './_selfrun.mjs';
 // | 要证的事 | 唯一能看见它的地方 |
 // |---|---|
 // | 工具**真的没被执行** | mock-mcp 的 `--record`（进程外证据，不看后端自述） |
-// | 熔断**真的入了格** | `<会话目录>/v2-events.wal` 的 `task.controlled`（写方在 `v2_bridge`） |
+// | 熔断**真的入了格** | `<会话目录>/v2-events.wal` 的 `task.controlled`（写方在 `v2_facts::record_derived`） |
 // | 闸门的判据**真的来自台账** | 注入一条已耗账 ⇒ 同形状的调用从「执行」翻成「不执行」 |
 //
 // 第三条是本用例的核心：**同一份编排、同一次工具调用**，只因台账里多了一条已耗，
@@ -39,12 +39,11 @@ import './_selfrun.mjs';
 // 不是闸门）。被抄的是本轮真实落下的收束格——它的 `actor` 已经是 `agent:main`
 // （`BreakerInputs::of` 要按同一主体取账），`ts` / `produced_by` 也都合法。
 //
-// ## 为什么是 `bridge` 档
+// ## 熔断入格的写方
 //
-// 本用例钉的是 `bridge` 档的熔断入格（`task.controlled` 的写方挂在 `v2_facts::record`
-// 上）；`full` 档的那一份由 `v2_exec` 轮末经 `SessionDispatchPort::take_derived`
-// 交回的出参落格——两档同一个写方（`v2_facts::record_derived`），`full` 档那一侧
-// 另有 `t42` 覆盖。故本用例与 T28 读数口一样走 `bridge` 档。
+// `task.controlled` 的写方是 `v2_facts::record_derived`——`v2_exec` 轮末经
+// `SessionDispatchPort::take_derived` 交回的出参落格（承诺 / 任务表同一写方，
+// 派生事实入格那一侧另有 `t42` 覆盖）。
 import { join } from 'node:path';
 import { writeFileSync } from 'node:fs';
 import {
@@ -131,9 +130,9 @@ export default defineCase(
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
-        // 本用例的主题与对话面正交 ⇒ 钉死（理由见 `DIALOG_FACE_OFF`），再叠加主题：
-        // `bridge` 档（熔断格的写方 `v2_facts::record` 只在这一档跑）。
-        session: { ...DIALOG_FACE_OFF, v2_mode: 'full' },
+        // 本用例的主题与对话面正交 ⇒ 钉死（理由见 `DIALOG_FACE_OFF`）。
+        // 熔断格的写方是 `v2_facts::record_derived`（`v2_exec` 轮末落格）。
+        session: { ...DIALOG_FACE_OFF },
       },
     });
     addMcpServer(hd, 'mockserv', {
