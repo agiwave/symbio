@@ -40,7 +40,7 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
-import { yellow, red, stripAnsi } from '../color.mjs'
+import { yellow, red, green, stripAnsi } from '../color.mjs'
 import {
   BASELINE,
   BASELINE_GRACE,
@@ -50,6 +50,7 @@ import {
   coverageThreshold,
   blockedBySandboxDelete,
   maybeSandboxDeleteHint,
+  acceptBaseline,
 } from './_shared.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
@@ -117,9 +118,16 @@ export default {
             }
           }
           const grew = files > BASELINE.vitestFiles || tests > BASELINE.vitestTests
+          if (grew && ctx.autoBump) {
+            // 向上：自动写回新基线（只增，无注释），不要求手写理由。
+            acceptBaseline('vitestFiles', files, { stage: true })
+            acceptBaseline('vitestTests', tests, { stage: true })
+          }
           console.log(
             grew
-              ? `      ⚠ ${files} 文件 / ${tests} 用例 > 基线 ${BASELINE.vitestFiles}/${BASELINE.vitestTests}：请更新 scripts/gate.d/_shared.mjs 的 BASELINE.vitestFiles / vitestTests`
+              ? green(
+                  `      ${files} 文件 / ${tests} 用例 > 基线 ${BASELINE.vitestFiles}/${BASELINE.vitestTests}：已自动上调（无注释）`,
+                )
               : `      ${files} 文件 / ${tests} 用例（基线 ${BASELINE.vitestFiles}/${BASELINE.vitestTests}）`,
           )
           const pct = coverageLinesPct(r.output)

@@ -12,14 +12,14 @@
 //
 // ⚠️ **「自动纳入」只管加，不管减**：删掉一份 `tNN.mjs`，这一跑仍是「41/41 通过」、
 // 门禁照旧全绿，而 `plan/13` 的 S5 批次正文正引用着「现 42 例」。所以用例数进
-// `BASELINE.e2eCases` 棘轮（只许涨），三态判定走 `ratchetVerdict`——与单测数
+// `BASELINE.e2eCases` 棘轮（只许涨），三态判定走 `ratchetOrBump`——向上自动上调、向下才红，与单测数
 // 同一条判据，不在这里再决定一次红不红。
 import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
-import { dim, yellow, red } from '../color.mjs'
-import { BASELINE, ratchetVerdict } from './_shared.mjs'
+import { dim, yellow, red, green } from '../color.mjs'
+import { BASELINE, ratchetOrBump } from './_shared.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -62,18 +62,19 @@ export default {
       label: 'e2e: 用例数棘轮',
       run: async () => {
         const actual = discoverCases().length
-        const v = ratchetVerdict({
+        const v = ratchetOrBump({
           actual,
           baseline: BASELINE.e2eCases,
           name: 'e2eCases',
           kind: 'e2e 用例数',
           unit: '用例',
+          ctx,
         })
         if (!v.ok) {
           console.log(red(`      ↳ ${v.note}`))
           return { ok: false, note: v.note }
         }
-        if (v.warn) console.log(yellow(`      ↳ ${v.note}：请上调 scripts/gate.d/_shared.mjs 的 BASELINE.e2eCases`))
+        if (v.note) console.log(green(`      ↳ ${v.note}`))
         else console.log(dim(`      ↳ 用例 ${actual}/${BASELINE.e2eCases}`))
         return { ok: true }
       },

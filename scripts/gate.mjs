@@ -328,6 +328,8 @@ const ctx = {
   logDir,
   ci: CI,
   profile,
+  // 棘轮向上自动上调：仅本地门禁写回并暂存（CI 无法提交，只亮绿灯）。见 `_shared.ratchetOrBump`。
+  autoBump: !CI,
   run,
   /** 手写日志（自定义任务自己产出的文本）。返回落盘路径，便于结果里带回去。 */
   log(name, text) {

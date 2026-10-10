@@ -543,10 +543,10 @@ test('cargoTestRatchet：CI 全量按各行求和（不是首行）', async () =
   assert.equal(low.ok, false)
   assert.match(low.note, /10 < 基线 11/)
 })
-test('cargoTestRatchet：高出基线但**超出回填容差** ⇒ 判红（不回填就没有棘轮）', async () => {
+test('cargoTestRatchet：高出基线（无论是否超容差） ⇒ 判绿并自动上调（不再因「未回填」判红）', async () => {
   const r = await ratchet(`test result: ok. ${10 + BASELINE_GRACE + 1} passed; 0 failed`).run()
-  assert.equal(r.ok, false)
-  assert.match(r.note, /超出回填容差/)
+  assert.equal(r.ok, true)
+  assert.match(r.note, /基线待更新|自动上调/)
 })
 
 // ================= 棘轮三态判定的唯一定义：`ratchetVerdict` =================

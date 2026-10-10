@@ -26,7 +26,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { green, red, yellow, dim } from '../color.mjs'
-import { BASELINE, ratchetVerdict, autoWork } from './_shared.mjs'
+import { BASELINE, ratchetOrBump, autoWork } from './_shared.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -97,7 +97,7 @@ export default {
 
     // 棘轮（只许涨）：**数量本身也是判据**。程序被人删掉、或某个文件里的
     // `should_not_compile` 被摘走时，"少跑一跑"在日志里与"全绿"长得一模一样——
-    // C29 存在的理由正是不接受这种静默。三态判定走 `ratchetVerdict`（与测试数
+    // C29 存在的理由正是不接受这种静默。三态判定走 `ratchetOrBump`（与测试数
     // 棘轮同一条判据，不在这里再决定一次红不红）。
     const negatives = entries.filter((e) => e.hasNegative).length
     const asserts = entries.reduce((n, e) => n + e.asserts, 0)
@@ -105,26 +105,29 @@ export default {
       label: 'verify: 程序数 · 反例数 · 断言数棘轮',
       run: async () => {
         const verdicts = [
-          ratchetVerdict({
+          ratchetOrBump({
             actual: entries.length,
             baseline: BASELINE.verifyPrograms,
             name: 'verifyPrograms',
             kind: '程序',
             unit: '验证程序',
+            ctx,
           }),
-          ratchetVerdict({
+          ratchetOrBump({
             actual: negatives,
             baseline: BASELINE.verifyNegatives,
             name: 'verifyNegatives',
             kind: '反例',
             unit: '反例档',
+            ctx,
           }),
-          ratchetVerdict({
+          ratchetOrBump({
             actual: asserts,
             baseline: BASELINE.verifyAsserts,
             name: 'verifyAsserts',
             kind: '断言',
             unit: 'assert!',
+            ctx,
           }),
         ]
         const short = verdicts.filter((v) => !v.ok)
@@ -133,7 +136,7 @@ export default {
           return { ok: false, note: short.map((v) => v.note).join('；') }
         }
         for (const v of verdicts) {
-          if (v.warn) console.log(yellow(`      ↳ ${v.note}：请上调 scripts/gate.d/_shared.mjs 的 BASELINE`))
+          if (v.note) console.log(green(`      ↳ ${v.note}`))
         }
         console.log(
           green(`      ↳ 程序 ${entries.length}/${BASELINE.verifyPrograms} · 反例 ${negatives}/${BASELINE.verifyNegatives} · 断言 ${asserts}/${BASELINE.verifyAsserts}`),
