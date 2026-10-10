@@ -146,6 +146,12 @@ VisScope:
       // 的消费方只有 session 那一个，与上面那条同形。
       EVENT_ASSISTANT_REPORTED:
         '事件名常量：与 EVENT_TURN_SUPPLEMENTED 同类同格（turn × asserted），event/mod.rs 单点定义、插件按名引用。Core 外唯一消费方 = plugins/session（v2_exec 落格），投影在 core 内走域内路径',
+      // `EVENT_SESSION_RECONCILED`（轨 S 第一步的双源对账事件，`system × asserted`）：
+      // 与上面几条同族同由——事件名必须单点定义（散落字面量必然漂），core 外唯一
+      // 消费方是 `plugins/session/v2_reconcile`（对账落格）。落在 `System` 而不是
+      // 新开 `Session` 实体：`Entity` 是闭集，加臂要 ADR 登记，而对账是运维诊断。
+      EVENT_SESSION_RECONCILED:
+        '事件名常量：与 EVENT_* 同类，event/mod.rs 单点定义、插件按名引用。core 外唯一消费方 = plugins/session/v2_reconcile（双源对账落格）',
       // `SloLatencyView` / `FallbackRateView`（P2 的跨会话聚合）：**被 core 外消费的
       // 类型**，与 `TurnState` / `PromptMessage` 同族。`merge` 是类型的行为——提成根
       // 函数会让它变成无主函数（谁的数据谁的行为）；而 C-002 禁止插件深引

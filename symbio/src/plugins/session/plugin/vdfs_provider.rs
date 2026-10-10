@@ -175,7 +175,12 @@ impl SessionPlugin {
                 // `loadMessages`（读叶子）会在流式期间看不到正在跑的那一轮。
                 // 详见 `session_content` 的文档。
                 let live = self.live_messages_of(id).await;
-                Ok(VdfsResponse::Read(session_content(&session, live)?))
+                Ok(VdfsResponse::Read({
+                    // 双源对账（轨 S 第一步）：与 transcript_of 走同一个入口，
+                    // 口径只有一份（实际算法在 v2_reconcile::reconcile）。
+                    self.reconcile_sources(id, &session, &live).await;
+                    session_content(&session, live, id)?
+                }))
             }
             // 会话本身（`path` 即会话 id —— 具名新建时它就是**身份**，见
             // `session_upsert` 的 `create` 分支；`id` 由地址末段给出，不再由
@@ -752,7 +757,12 @@ impl SessionPlugin {
                 // 子会话是**独立会话**（有自己的 id 与活跃状态），因此叠加的是它
                 // 自己的在途缓冲，而不是父会话的——父会话的在途消息不属于它。
                 let live = self.live_messages_of(&session.id).await;
-                Ok(VdfsResponse::Read(session_content(&session, live)?))
+                Ok(VdfsResponse::Read({
+                    // 双源对账（轨 S 第一步）：与 transcript_of 走同一个入口，
+                    // 口径只有一份（实际算法在 v2_reconcile::reconcile）。
+                    self.reconcile_sources(id, &session, &live).await;
+                    session_content(&session, live, id)?
+                }))
             }
             VdfsRequest::Write { .. } => Err(VdfsError::invalid(format!("该路径不可写入：{path}"))),
             VdfsRequest::Delete { .. } => {
@@ -911,7 +921,54 @@ impl SessionPlugin {
     async fn transcript_of(&self, id: &str) -> VdfsResult<Vec<cm::ChatMessage>> {
         let session = self.session_of(id).await?;
         let live = self.live_messages_of(id).await;
+        // 双源对账（轨 S 第一步，ADR-049）：**并读两源、只记不断流**。
+        //
+        // 调用点在**模块内**而不是抽成跨模块 helper：对账要先还原"读侧真正给出的
+        // 那一份"（`overlay_live` 的组合），而那个函数住在本文件的兄弟模块
+        // `nodes` 里且是模块私有——抽出去只会在两个模块之间开一条仅供对账用的
+        // 通道。**口径仍然只有一份**：实际算法全在 `v2_reconcile::reconcile`，
+        // 这里只负责"取哪两样来比"。
+        //
+        // 返回值一字不改——不一致时的处置是出声 + 落一条 `session.reconciled`
+        // 事实，绝不是改读哪一份（那是 S2–S4 的事）。
+        self.reconcile_sources(id, &session, &live).await;
         Ok(ordered(overlay_live(session.messages, live)))
+    }
+
+    /// 双源对账（轨 S 第一步，[ADR-049](../../../../docs/decisions/session.md#adr-049-wal-是会话唯一事实源sessionstore-降为缓存轨-s-的起点)）。
+    ///
+    /// **入口只有这一个**，`transcript_of` 与会话叶子（`session_content`）都经它：
+    /// 那两处是同一份数据的两个地址，对账口径各写一份就会对出不同的结论，而
+    /// "不一致"必须有唯一答案。
+    ///
+    /// 在途消息**参与**对账：流式期间 `persist_messages` 还没落盘，而 WAL 里已有
+    /// 开轮格——拿落库那一份直接比会得出"WAL 多一条"的**稳定误报**（正常时序差，
+    /// 不是缺陷）。故先按本方法调用方的同一种组合还原读侧真正给出的那一份。
+    ///
+    /// 零行为变更：本方法不返回任何影响读路径的值，只可能出声 + 落一条
+    /// `session.reconciled` 事件；两者失败一律静默（对账的失败形态必须是
+    /// "少一条诊断"，不能是"会话读不出来"）。
+    async fn reconcile_sources(
+        &self,
+        session_id: &str,
+        session: &super::super::types::Session,
+        live: &[cm::ChatMessage],
+    ) {
+        let dir = super::super::paths::session_dir(&self.storage_dir(), session_id);
+        let merged = ordered(overlay_live(session.messages.clone(), live.to_vec()));
+        let r = super::super::v2_reconcile::reconcile(&dir, &merged);
+
+        if r.wal_missing || r.is_consistent() {
+            // WAL 不在不是不一致（off 档 / 还没跑过任何一轮 v2）
+            return;
+        }
+        // 出声：不静默是本仓对"静默失效"的一贯处置（八个缺口的共同教训）
+        crate::plugin_warn!(
+            "session",
+            "[reconcile] {session_id} 双源不一致：{}",
+            r.summary()
+        );
+        super::super::v2_reconcile::record(&dir, session_id, &r);
     }
 
     /// 该会话本轮的在途消息（无活跃状态 ⇒ 无在途消息）

@@ -709,6 +709,10 @@ pub(crate) fn message_of<'a>(
 pub(crate) fn session_content(
     session: &super::super::types::Session,
     live: Vec<cm::ChatMessage>,
+    // 对账用（轨 S 第一步）：会话 id。**与本函数的呈现逻辑无关**——它由调用方
+    // （`vdfs_provider` 的两个 Read 分支）在同一个作用域里做过对账后传入，
+    // 仅为让"两处是同一份数据的两个地址、对账口径只有一份"这件事在签名上可见。
+    _reconcile_with: &str,
 ) -> VdfsResult<VdfsContent> {
     // 与 `transcript_of` 同一组合（`ordered(overlay_live(..))`），不另立口径：
     // 同 id 在途版本胜出（它更新），顺序锚点仍由存储分配的 `seq` 决定。

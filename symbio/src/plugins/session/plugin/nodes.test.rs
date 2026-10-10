@@ -586,7 +586,7 @@ fn vdfs_session_node_carries_list_fields() {
 fn vdfs_session_content_is_json() {
     let mut s = Session::new("abc");
     s.updated_at = 1_700_000_000_000;
-    let c = session_content(&s, Vec::new()).unwrap();
+    let c = session_content(&s, Vec::new(), "s").unwrap();
     let text = c.text.as_deref().unwrap_or("");
     let v: Value = serde_json::from_str(text).unwrap();
     assert_eq!(v["id"], "abc");
@@ -604,7 +604,7 @@ fn vdfs_session_content_overlays_live_messages() {
     let mut s = Session::new("abc");
     s.messages = vec![msg("stored-1", None)];
 
-    let c = session_content(&s, vec![msg("live-1", None)]).unwrap();
+    let c = session_content(&s, vec![msg("live-1", None)], "s").unwrap();
     let v: Value = serde_json::from_str(c.text.as_deref().unwrap_or("")).unwrap();
     let ids: Vec<&str> = v["messages"]
         .as_array()
@@ -622,7 +622,7 @@ fn vdfs_session_content_overlays_live_messages() {
     live.content = Some(cm::MessageContent::Text("新".into()));
     let mut s2 = Session::new("abc");
     s2.messages = vec![stored];
-    let c = session_content(&s2, vec![live]).unwrap();
+    let c = session_content(&s2, vec![live], "s2").unwrap();
     let v: Value = serde_json::from_str(c.text.as_deref().unwrap_or("")).unwrap();
     let only = &v["messages"].as_array().unwrap()[0];
     assert_eq!(only["content"], "新");

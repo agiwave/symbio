@@ -184,6 +184,16 @@ pub const EVENT_CONTROL_OPENED: &str = "task.controlled";
 pub const EVENT_SYSTEM_TRIGGERED: &str = "system.triggered";
 /// 健康自检。落在 `system × progressed`。
 pub const EVENT_SYSTEM_HEALTH: &str = "system.health";
+/// **双源对账**（轨 S 第一步，[ADR-049](../../../../docs/decisions/session.md#adr-049-wal-是会话唯一事实源sessionstore-降为缓存轨-s--的起点)）：
+/// `SessionStore`（`messages.json`）与 WAL 投影不一致时落一条。落在 `system × asserted`。
+///
+/// **为什么是诊断而非会话事实**：它说的不是「这个会话发生了什么」，而是「两个读源
+/// 此刻是否一致」。落成事件而不是只打日志，是为了 S5 的判据能回答「迁移期间有没有
+/// 不一致、有多少」（日志会滚且没有判据能读它，ADR-044 同族的同源纪律）。
+///
+/// **幂等键 `r-{session_id}`**：同一会话在同一时刻只该有一条待处理记录；重复对账
+/// 撞 `Duplicate` 即静默跳过——对账是诊断，重复记录它本身没有信息量。
+pub const EVENT_SESSION_RECONCILED: &str = "session.reconciled";
 /// 「欲」的表达：一条意图出现（E1：欲是数据，走 I1 单通道、I2 带溯源——
 /// 无 `produced_by` 的欲事件**构造不出**候选意图，见 ② IntentGate）。
 /// 落在 `conation × opened`。
