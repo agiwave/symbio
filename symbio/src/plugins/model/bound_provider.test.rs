@@ -28,6 +28,18 @@ use crate::symbio_core::{LlmAdapter as _, TokenIssuer};
 
 /// 一次性 OpenAI-SSE mock：收一个请求、回一段流、把收到的原始请求存档。
 fn spawn_mock(response: &'static str) -> (u16, Arc<Mutex<String>>) {
+    spawn_mock_after(response, std::time::Duration::ZERO)
+}
+
+/// 带应答延迟的一次性 mock。延迟只给在 mock 侧、实测口径不动：`cost_ms` 以
+/// 整毫秒计（`as_millis`），即答的回环往返可不足 1ms ⇒ 实测合法地落 0——
+/// 「实测耗时必须为正」要成立，前提是真实往返 ≥1ms（应答延迟 5ms）。
+/// SLO 校准口径（「mock 即答量的是系统自身开销」）不受影响：那条用例仍走
+/// 无延迟的 [`spawn_mock`]。
+fn spawn_mock_after(
+    response: &'static str,
+    delay: std::time::Duration,
+) -> (u16, Arc<Mutex<String>>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().unwrap().port();
     let captured = Arc::new(Mutex::new(String::new()));
@@ -54,6 +66,9 @@ fn spawn_mock(response: &'static str) -> (u16, Arc<Mutex<String>>) {
             }
         }
         *cap.lock().unwrap() = String::from_utf8_lossy(&raw).to_string();
+        if !delay.is_zero() {
+            std::thread::sleep(delay);
+        }
         let _ = stream.write_all(response.as_bytes());
         let _ = stream.flush();
         // Connection: close + 落地 drop ⇒ 对端读到 EOF（流结束）。
@@ -207,7 +222,7 @@ fn mock_provider(port: u16) -> Arc<BoundProvider> {
 async fn provider_adapter_streams_text_deltas_through_bridge() {
     use crate::symbio_core::DeltaSink;
 
-    let (port, _captured) = spawn_mock(SSE_OK);
+    let (port, _captured) = spawn_mock_after(SSE_OK, std::time::Duration::from_millis(5));
     let adapter = ProviderLlmAdapter::new(mock_provider(port));
     let tok = TokenIssuer::issue_deep();
 
@@ -228,7 +243,10 @@ async fn provider_adapter_streams_text_deltas_through_bridge() {
         frames.iter().any(|f| f.contains("秋天")),
         "首片快照帧的全文要过桥：{frames:?}"
     );
-    assert!(cost_ms > 0, "实测耗时必须为正（真实网络往返）");
+    assert!(
+        cost_ms > 0,
+        "实测耗时必须为正（mock 应答延迟 5ms ⇒ 真实往返必 ≥1ms，写死 0 即红）"
+    );
     // 注：mock 每实例只收一次连接，「generate() 与流式同源」由实现保证
     // （generate = 流式路径 + SilentDeltas，见 provider_adapter.rs）。
 }
@@ -329,7 +347,7 @@ async fn provider_adapter_routes_tool_frames_to_the_message_channel() {
 /// → 不变量全绿 → mock 收到的请求体里确实带着我们的 prompt。
 #[tokio::test]
 async fn provider_adapter_drives_full_chain_over_real_http() {
-    let (port, captured) = spawn_mock(SSE_OK);
+    let (port, captured) = spawn_mock_after(SSE_OK, std::time::Duration::from_millis(5));
     let adapter = ProviderLlmAdapter::new(mock_provider(port));
 
     // 彩排链路（与 S2 同形，只换适配器）：用户消息入库 → Reasoner 生成。
@@ -355,7 +373,10 @@ async fn provider_adapter_drives_full_chain_over_real_http() {
         .await
         .expect("真实传输层必答");
     assert!(reply.contains("秋天"), "SSE 聚合文本：{reply}");
-    assert!(cost_ms > 0, "实测耗时必须为正（真实网络往返）");
+    assert!(
+        cost_ms > 0,
+        "实测耗时必须为正（mock 应答延迟 5ms ⇒ 真实往返必 ≥1ms，写死 0 即红）"
+    );
 
     // final 落事件（溯源 + 模型可观测 + **实测成本**）——不变量与收束投影照常工作。
     store
