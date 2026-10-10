@@ -63,7 +63,8 @@
 | [048](./decisions/session.md#adr-048-出厂档位改-fullv2-链路是出厂路径bridge-退役) | 出厂档位改 `full`——v2 链路是出厂路径，`bridge` 退役 | **已接受 · 已落地**（2026-10-09：八个静默缺口已全部修完、prompt 形状基线已落地；余反射档样本为零，未决原因见 [13 §P3b](./plan/13-质量改进总纲.md)） |
 | [048a](./decisions/session.md#adr-048a2026-10-09v2-的-prompt-形状必须回到结构化消息) | v2 的 prompt 形状必须回到结构化消息（不把工具结果拍平成纯文本） | **已接受 · 已实现**（2026-10-09） |
 | 050 | `TurnRunner` 族按依赖方数量下沉 `plugins/session` | **非架构决策 / 特例，已删**——下沉 = 应用 [ADR-023](./decisions/core.md#adr-023-symbio_core-的准入规则--依赖方数量不是够不够底层) |
-| [049](./decisions/session.md#adr-049-wal-是会话唯一事实源sessionstore-降为缓存轨-s-的起点) | WAL 是会话唯一事实源，`SessionStore` 降为缓存——**轨 S 的起点** | **已接受 · 未实施**（2026-10-10：只定目标态与迁移/回退语义，S1–S6 各自单独立批） |
+| [049](./decisions/session.md#adr-049-wal-是会话唯一事实源sessionstore-降为缓存轨-s-的起点) | WAL 是会话唯一事实源，`SessionStore` 降为缓存——**轨 S 的起点** | **已接受 · 未实施**（2026-10-10：只定目标态与迁移/回退语义，S1–S2.6 各自单独立批） |
+| [051](./decisions/session.md#adr-051-v1-执行档与-v2mode-旋钮退役) | v1 执行档与 `V2Mode` 旋钮退役——v2 是唯一执行路径 | **已接受 · 未实施**（2026-10-10：落地批 = [13 §轨 S2.5](./plan/13-质量改进总纲.md)） |
 
 ---
 
