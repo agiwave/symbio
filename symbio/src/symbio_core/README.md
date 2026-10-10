@@ -111,7 +111,7 @@
 | `clock` | — | — | `clock_` | 只有一个函数 |
 | `creator` | — | — | `creator_` | 通用对象创建注册表：按 id 装配**任意**类型对象，见 §2 |
 | `embedding` | `Embedding` | `EMBEDDING_` | — | 服务 id 在 `embedding/ids.rs` |
-| `event` | `Event` / `EventEnvelope`；契约词 `Seq` · `Entity` · `Verb` · `Timestamp` | `EVENT_` | — | 契约词来自 [plan/01 §2](../../../docs/plan/01-核心架构.md) 的冻结契约文本，名字先于模块存在（判据同 `schemas`：改名 = 代码与契约漂移）。见 [ADR-043](../../../docs/DECISIONS.md)。常量 = 事件**名字表**（名字是数据，单点定义） |
+| `event` | `Event` / `EventEnvelope`；契约词 `Seq` · `Entity` · `Verb` · `Timestamp` | `EVENT_` | `event_` | 契约词来自 [plan/01 §2](../../../docs/plan/01-核心架构.md) 的冻结契约文本，名字先于模块存在（判据同 `schemas`：改名 = 代码与契约漂移）。见 [ADR-043](../../../docs/DECISIONS.md)。常量 = 事件**名字表**（名字是数据，单点定义）。函数 = 载荷里的**节点身份**规则（`event_payload_node_id` / `event_produced_text_node_id` / `event_tool_result_node_id` / `event_node_of`，[ADR-053](../../../docs/decisions/session.md)）：写侧与三个读侧出口（`rebuild` / `transcript` / `prompt_fidelity`）必须给出**同一个**「这条事件承载哪个节点」的答案，各写一遍的后果是静默的（`message.edited` 定位不上要改的节点 = 「编辑没生效」而无人报错） |
 | `event_bus` | `EventBus` | `EVENT_BUS_` | `event_bus_` | |
 | `exec` | `Exec` | — | — | 本域无常量 |
 | `governance` | 契约词 `PermissionMatrix` · `PrincipalPolicy` · `PairingViolation` · `VisScope`；**Capability（7 个封顶）刻意不进根平铺** | — | — | [plan/01 §7](../../../docs/plan/01-核心架构.md) 的冻结契约名。governance 的 Capability（权限矩阵的键）与 `capability` 域的 `Capability`（LLM 工具描述符）是**两个概念**、计划文本同名——以路径限定消歧：两个 Capability 同时出现在调用点正是命名纪律要阻止的错位，故本域不把它登记为前缀 |
@@ -165,7 +165,7 @@
 | `clock` | 全项目「当前时间（Unix 毫秒）」唯一实现 | `clock_now_ms` | — |
 | `creator` | 通用对象创建注册表：按 id 装配**任意**类型对象（见 [ADR-036](../../../docs/DECISIONS.md)） | `creator_create_object` · `creator_has` · `creator_ids` | — |
 | `embedding` | 嵌入服务的**抽象**（实现在 `src/providers/embedding`） | `EmbeddingService` · `EmbeddingError` · `EMBEDDING_LOCAL` / `EMBEDDING_NOOP` | `ids` |
-| `event` | v2 事件契约的**中性共享类型层**（④ store 与 ③ projection 都只 import 本域，见 [ADR-043](../../../docs/DECISIONS.md)） | `Seq`（私有构造：只有 `Store` 能分配）· `Event`（信封：幂等键 / 网格坐标 / 溯源 / 记账）· `EventEnvelope` · 语法网格闭集 `Entity`(10) × `Verb`(5)（F5） | — |
+| `event` | v2 事件契约的**中性共享类型层**（④ store 与 ③ projection 都只 import 本域，见 [ADR-043](../../../docs/DECISIONS.md)） | `Seq`（私有构造：只有 `Store` 能分配）· `Event`（信封：幂等键 / 网格坐标 / 溯源 / 记账）· `EventEnvelope` · 语法网格闭集 `Entity`(11) × `Verb`(5)（F5）· 节点身份规则 `event_node_of`（`event_payload_node_id` / `event_produced_text_node_id` / `event_tool_result_node_id`） | — |
 | `event_bus` | 跨插件全局发布设施门面 + 频道词表 | `EventBus` · `EventBusSubscribeRequest` · `EVENT_BUS_KIND_SYSTEM` · `EVENT_BUS_KIND_VDFS` · `EVENT_BUS_RESYNC_MARKER_TYPE` | — |
 | `governance` | v2 ⑥ 权限与可见性（第零天，[plan/01 §7](../../../docs/plan/01-核心架构.md)）：授权**读写成对**（构造即拒绝单侧策略）、查询 fail-closed；`thread_private` 缺省（C10 越界读取 0）。**生产接线**（[04 §3.1 批⑥](../../../docs/plan/04-工程落地.md)）：表与机制同住本层（`symbio_core::authz` 模块，能力名字符串 ⇒ `from_names` 按 7 项闭集校验），判定是 `plugins/session` 的闸（写侧收束、读侧可见域、外部执行闸门的授权判据） | `PermissionMatrix`（**根导出**；`new` 成对性校验 · `from_names` 表构造 · `grants_of` / `can_write` / `can_write_name` / `can_reply` 写侧 · `sees_of` / `can_see` 读侧）· `PrincipalPolicy` · `Capability`（7 个封顶，**路径限定** `governance::Capability`，不进根平铺；授权表写能力名）· `VisScope`（**根导出**）· `PairingViolation` · `PolicyError`（表构造失败：认不出的能力名 / 不成对） | — |
 | `exec` | 执行期原语：事件出口（出）与中止信号（入） | `ExecEventSink` · `ExecAbortSignal` · `ExecEnv` · `ExecTranscriptWriter` | — |

@@ -807,7 +807,23 @@ export const BASELINE = {
   //   （`useChatConnection.ts` 把 `status` 算在内）失效、历史里冒重复节点。修正后
   //   用户 / 补充 / 汇报三格的形状一律复刻落库侧，故补判据钉死。归因无残差（+2 −0）。
   //   `ciRustTestsTotal` 同步 `1437 → 1439`（同一增量两边一起动）。实测口径同前。
-  rustTests: 1431,
+  // 2026-10-10 **回填 `1431 → 1454`（+23）**：批「S2.7-b1 CRUD 入格」——
+  //   把消息的编辑 / 删除升为**事实**（ADR-053：`message.edited` = message × asserted /
+  //   `message.removed` = message × closed），落 WAL 并由重建 / 投影回放。新增判据 23 条、
+  //   零删除，逐文件归因：
+  //     · `plugins/session/rebuild.test.rs` +6（改后原地替换且保位置锚 `seq` / 删后留空洞 /
+  //       全删成空表 / 未知节点不新增 / 重建确定性 / 坏载荷跳过）；
+  //     · `symbio_core/projection/transcript.test.rs` +6（新文件：编辑原地替换、落到助手条目、
+  //       删除丢弃条目、折叠与事件顺序无关、无变更格时零影响、未知节点为 no-op）；
+  //     · `symbio_core/projection/mutations.test.rs` +4（新文件：两格载荷解析、末次编辑胜出、
+  //       坏载荷跳过不致命、只收变更格）；
+  //     · `plugins/session/v2_messages.test.rs` +6（新文件：编辑落一条事实且带改后消息 /
+  //       删除一条事实携带全部 id / 空删除不落 / 缺真源不落且不 panic / 反复编辑 id 各异 /
+  //       承载事件缺 `seq` 时退化到切片末尾而不是丢事实）；
+  //     · `symbio_core/projection/prompt_fidelity.test.rs` +1（变更格被折叠而非静默丢弃）。
+  //   归因无残差（+23 −0）。`ciRustTestsTotal` 同步 `1439 → 1462`（同一增量两边一起动）。
+  //   实测口径同前：`cargo test --lib -p symbio` 取首个 `test result: ok. N passed`。
+  rustTests: 1454,
   /**
    * CI 口径的 Rust 通过数（**只增不减**）——与上面三个分包基线**是不同口径，不能互替**。
    *
@@ -836,8 +852,12 @@ export const BASELINE = {
    *
    * 1439 = 1431 + 8 + 0 + 0（2026-10-10 批「S2.7 步 1 判据补全」同步 +2，见
    * `rustTests` 的同日注）。前值 1437 = 1429 + 8 + 0 + 0（批 S2.6 同步 +5）。
+   * 1461 = 1453 + 8 + 0 + 0（2026-10-10 批「S2.7-b1 CRUD 入格」同步 +22，见
+   * `rustTests` 的同日注）。
+   * 1462 = 1454 + 8 + 0 + 0（同批又 +1：`v2_messages.test.rs` 的「承载事件缺 seq」
+   * 退化判据，见 `rustTests` 的同日注）。
    */
-  ciRustTestsTotal: 1439,
+  ciRustTestsTotal: 1462,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *
@@ -1161,8 +1181,12 @@ export const BASELINE = {
    * 的发现逻辑同一条判据，不另写一份数法）。42 → 43 的 +1 是 `t43`——S2.7 的
    * ADR-049 判据「删掉 `messages.json` 后会话仍能开且历史完整」。前值 42 =
    * 2026-10-08 实测。
+   * 44 = 2026-10-10 实测。43 → 44 的 +1 是 `t44`——批「S2.7-b1 CRUD 入格」的判据：
+   * 两次真实对话后走 vdfs 编辑 / 截断消息，断言 WAL 各落一条 `message.edited` /
+   * `message.removed`，随后**删掉 `messages.json`**，重建结果与 CRUD 后的缓存逐字节一致
+   * （编辑生效、旧文本消失、被截断的一轮不复活、缓存仍缺席、两次读幂等）。
    */
-  e2eCases: 43,
+  e2eCases: 44,
   /**
    * verify 程序的 `assert!` **总数**（棘轮，只许涨）——见 `gate.d/55-verify.mjs`。
    *

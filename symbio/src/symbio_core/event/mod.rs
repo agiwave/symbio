@@ -124,6 +124,47 @@ pub const EVENT_ASSISTANT_PROGRESS: &str = "chat.assistant.progress";
 /// 落在 `artifact × asserted`（网格坐标见 [plan/01 §6](../../../../docs/plan/01-核心架构.md)）。
 pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
 
+// ── 消息变更格子（S2.7-b1，[ADR-053](../../../../docs/decisions/session.md#adr-053-消息的变更即事实编辑与删除入格压缩走快照)）──
+//
+// 「消息列表被改过」也是**发生过什么**。在轨 S 之前，编辑 / 截断只重写
+// `messages.json`，事实源里一个字都没有 ⇒ 主读路径一旦切到「从 WAL 重建」，
+// **被截断的消息会复活、编辑过的内容会回退**。这两格补的就是这个缺口。
+//
+// ## 为什么是 `message` 实体而不是 `turn`
+//
+// §6 已预留 `user.message.edited`（`turn × opened`），那是「用户改刚发的那句话」
+// 这一**窄义**。而 CRUD 是**列表级、跨轮**的：一次截断可以横跨多轮，归 `turn`
+// 会把「一轮开始」与「一段历史被删」压进同一格（准入三问「能归入已有实体？」的
+// 否定一侧）。
+
+/// 编辑一条消息（载荷 `{ message: <ChatMessage 的 JSON> }`——补丁**应用后**的整条）。
+/// 落在 `message × asserted`。
+///
+/// ## 为什么载荷是整条而不是字段子集
+///
+/// 重建与转写都按 **id 替换**：拿到整条就不必再猜「这次改的是哪几个字段」——
+/// 补丁语义本来就是「未提供的保持不变」，而应用后的整条**就是**那个结果。
+/// 只记子集等于把「合并」这件事留一份实现给重建，两份必然漂移。
+///
+/// ## 为什么它必须带 `produced_by`
+///
+/// 它是断言类（I2 无溯源不声明），且溯源有确切的答案：**被改的那条事实**
+/// （`produced_by` = 承载该节点的那条事件的 seq）。「这次编辑源自那条发言」——
+/// 而不是拿一个「此刻」的号凑数。
+pub const EVENT_MESSAGE_EDITED: &str = "message.edited";
+/// 一段消息没了（载荷 `{ ids: [...] }`）。落在 `message × closed`。
+///
+/// ## 为什么一次操作只落一条（区间用 id 列表表达）
+///
+/// 截断的语义是「从 X 起全没了」——**一个动作**。逐条发事件会把一个动作拆成 n 条
+/// 事实，n 随消息量增长，而事实网格的价值正在于「一件事一个键」。与
+/// `memory.forgotten` 同形：收束格表达「没了」，载荷说清「哪些」。
+///
+/// `ids` 是**被删节点 id 的完整列表**（与 `truncate_messages` 回执里那份同源）——
+/// 重建与转写据此丢弃节点，不做「从某条起」的区间推断（区间推断要求重建知道
+/// 列表顺序，而顺序是呈现细节，不是事实）。
+pub const EVENT_MESSAGE_REMOVED: &str = "message.removed";
+
 // ── 记忆格子（S5，[roadmap/S06 §3](../../../../docs/plan/roadmap/S06-长期记忆与语义检索.md)）────
 
 /// 编码：学到的语义内容 + embedding（`payload: { content, tag, generation, vec }`）。
@@ -216,7 +257,7 @@ pub const EVENT_SESSION_RECONCILED: &str = "session.reconciled";
 /// 落在 `conation × opened`。
 pub const EVENT_CONATION_EXPRESSED: &str = "conation.expressed";
 
-/// 事件实体 —— 语法网格的**行**，闭集（F5，10 个）。
+/// 事件实体 —— 语法网格的**行**，闭集（F5，11 个）。
 ///
 /// 新增实体是 L-schema 变化（[plan/03 §2](../../../../docs/plan/03-演进与验证.md)）：
 /// 加枚举臂 + ADR 登记，不是机制变更。
@@ -232,6 +273,11 @@ pub enum Entity {
     Thread,
     Control,
     System,
+    /// 消息列表上的一次**变更**（编辑 / 删除）。见 [`EVENT_MESSAGE_EDITED`]。
+    ///
+    /// 与 `Turn` 的分界：`turn` 记的是「这一轮说了什么」，本实体记的是
+    /// 「列表里的某条被改成 / 去掉了」——它跨轮、不开始任何一轮。
+    Message,
 }
 
 /// 事件动词 —— 语法网格的**列**，闭集（F5，5 个）。
@@ -323,6 +369,105 @@ impl Event {
         self.payload = payload;
         self
     }
+}
+
+// ── 载荷里的节点身份（读侧共享）────────────────────────────────────────────
+//
+// 「一条事件承载哪个消息节点」这件事，**写侧与读侧必须给出同一个答案**：写侧落格
+// 时把节点 id 记进载荷，读侧（`rebuild` 折节点树 / `transcript` 折对话行）按同一
+// 规则取出来。三个消费方各写一遍的后果是**静默**的——`message.edited` 定位不到它
+// 要改的那条节点，表现为「编辑没生效」，而没有任何东西会红。
+//
+// 规则本体因此住在这里（core 的中性契约层），而不是住在任一读侧实现里。它们只读
+// 载荷、不碰任何状态，是纯函数。
+
+/// 载荷里的节点身份：`payload[key]` 优先；缺失（该格不记身份）⇒ 按事件 id 稳定合成。
+///
+/// ## 「稳定」是硬要求
+///
+/// 合成 id 用**事件 id**（写方按「一件事一个键」给出，如 `s-{turn}-{n}`）——
+/// 同一条事件每次读都得同一个值。若用随机值，每次重开会话都会多出一批「新」节点
+/// （前端按 id 合并，id 一变同一句话就是两个身份）。
+pub fn event_payload_node_id(e: &Event, key: &str) -> String {
+    payload_str(e, key).unwrap_or_else(|| e.event_id.clone())
+}
+
+/// 收束 / 进展 / 兜底格的**正文子节点** id。
+///
+/// ## 为什么不是「读 `text_id` 就完了」
+///
+/// 落库侧（`message_build::llm_build_assistant_messages`）有一条 **reasoning-only**
+/// 规则：思考与正文是同一段内容且没有独立文本回复时，那段内容归 **Text 子节点**、
+/// 并**复用 reasoning 的流式 id**（否则同一段内容在存储层出现两份）。重建若只认
+/// `text_id`，reasoning-only 那一轮会得到 `{turn_id}-text` 这个**落库侧并不存在**的
+/// id——于是那条正文在实时面与重建面是两个身份，且 `message.edited` 永远定位不上它。
+///
+/// 判据与落库侧**逐字相同**（同一段文本比较），因为它就是同一个问题的答案。
+pub fn event_produced_text_node_id(e: &Event) -> String {
+    let text = payload_str(e, "text").unwrap_or_default();
+    let reasoning = payload_str(e, "reasoning").unwrap_or_default();
+    let reasoning_only = !reasoning.trim().is_empty() && reasoning.trim() == text.trim();
+    let id = if reasoning_only {
+        payload_str(e, "reasoning_id").or_else(|| payload_str(e, "text_id"))
+    } else {
+        payload_str(e, "text_id")
+    };
+    id.unwrap_or_else(|| {
+        // 载荷连 `turn_id` 都没有（答话轮 / 反射档：没有流式节点）⇒ 与落库侧同一条
+        // 回退：正文子节点的名字由 Turn 根派生。
+        format!("{}-text", payload_str(e, "turn_id").unwrap_or_default())
+    })
+}
+
+/// 工具**结果**节点的 id（`artifact.added` 载荷 `result_id`）。
+///
+/// 恢复路记 `null`（那一轮没有流式结果节点）⇒ 按**事件 id** 合成。合成用的**不是**
+/// `tool_call_id`：结果与调用是两张卡，共用 id 会让前端把它们合成一条。
+pub fn event_tool_result_node_id(e: &Event) -> String {
+    payload_str(e, "result_id").unwrap_or_else(|| format!("{}-result", e.event_id))
+}
+
+/// 一条事件在**读侧**承载的节点身份（`None` = 该格不产节点）。
+///
+/// ## 它是「哪一格对应哪个节点」的单点答案
+///
+/// 三个消费方都按它认节点：`rebuild`（节点树）、`transcript`（对话行）、
+/// `prompt_fidelity`（变更索引的配对）。各写一遍的后果是**静默**的——
+/// `message.edited` 定位不上要改的那条节点，表现为「编辑没生效」。
+///
+/// ## 只给「内容节点」，不给全部节点
+///
+/// 收束格一次承载 `[Turn 根, Reasoning 子, Text 子, rounds…]` 一串节点，这里只回
+/// **正文子节点**（对话里那一句就是它）。对话读侧（转写行 / prompt 复核）只需要它；
+/// 节点树（`rebuild`）要的是全部，所以它自己按节点逐个取。
+pub fn event_node_of(e: &Event) -> Option<String> {
+    match (e.entity, e.verb, e.kind.as_str()) {
+        (Entity::Turn, Verb::Opened, EVENT_USER_MESSAGE) => Some(event_payload_node_id(e, "id")),
+        (Entity::Turn, Verb::Asserted, EVENT_TURN_SUPPLEMENTED) => {
+            Some(event_payload_node_id(e, "id"))
+        }
+        (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_REPORTED) => {
+            Some(event_payload_node_id(e, "id"))
+        }
+        (
+            Entity::Turn,
+            Verb::Closed | Verb::Progressed,
+            EVENT_ASSISTANT_FINAL | EVENT_ASSISTANT_FALLBACK | EVENT_ASSISTANT_PROGRESS,
+        ) => Some(event_produced_text_node_id(e)),
+        (Entity::Artifact, Verb::Asserted, EVENT_ARTIFACT_ADDED) => {
+            Some(event_tool_result_node_id(e))
+        }
+        _ => None,
+    }
+}
+
+/// 取载荷里的**非空**字符串字段（空串读出来是「这个字段没记」，不是「记了空」）。
+fn payload_str(e: &Event, key: &str) -> Option<String> {
+    e.payload
+        .get(key)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 /// 信封的最小契约（[plan/01 §2](../../../../docs/plan/01-核心架构.md) 的 `type Event: EventEnvelope`）。

@@ -324,6 +324,13 @@ impl SessionPlugin {
         // 要说的事（不需要先删再建：删除帧表达的是"这个节点没了"，而编辑后它还在）。
         self.transcript_apply(session_id, crate::symbio_core::llm_message_frame(&updated))
             .await;
+        // **事实入格**（S2.7-b1，ADR-053）：缓存之外另落一条 `message.edited`，
+        // 载荷 = 补丁应用后的整条消息。此刻无人消费（主读切换在 b3），它是
+        // 「切源后编辑不回退」的全部依据。放在缓存写成功之后：缓存是 b1 的读侧
+        // 真源，事实是它的影子——影子失败不该让本体失败（见 `v2_messages` 的失败口径）。
+        if let Some(dir) = chat_session.session_dir() {
+            super::v2_messages::edited(&dir, &updated);
+        }
         Ok(updated)
     }
 
@@ -363,6 +370,13 @@ impl SessionPlugin {
                 .map(|id| crate::symbio_core::llm_removed_frame(id))
                 .collect();
             self.transcript_apply_all(session_id, frames).await;
+        }
+        // **事实入格**（S2.7-b1，ADR-053）：一次截断落**一条** `message.removed`，
+        // 区间用 `ids` 列表表达——逐条发事件会把一个动作拆成 n 条事实，n 随消息量
+        // 增长，而事实网格的价值正在于「一件事一个键」。空列表不落格（`removed`
+        // 自己判）：与上面不发变更帧同一条判据。
+        if let Some(dir) = chat_session.session_dir() {
+            super::v2_messages::removed(&dir, &deleted_ids);
         }
         Ok(deleted_ids)
     }

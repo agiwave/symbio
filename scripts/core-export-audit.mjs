@@ -158,6 +158,30 @@ VisScope:
       // 新开 `Session` 实体：`Entity` 是闭集，加臂要 ADR 登记，而对账是运维诊断。
       EVENT_SESSION_RECONCILED:
         '事件名常量：与 EVENT_* 同类，event/mod.rs 单点定义、插件按名引用。core 外唯一消费方 = plugins/session/v2_reconcile（双源对账落格）',
+      // `EVENT_MESSAGE_EDITED` / `EVENT_MESSAGE_REMOVED`（S2.7-b1 的变更格，
+      // `message × asserted` / `message × closed`，见 ADR-053）：
+      // 与上面四条事件名同族同由——事件名必须单点定义（散落字面量必然漂），
+      // 落格在 `plugins/session`（`v2_messages` 写、`rebuild` 回放），投影在 core 内
+      // （`projection/mutations` + `transcript` + `prompt_fidelity`）走域内路径。
+      // 所以跨 core 的消费方只有 session 那一个，与同域存量事件名同形。
+      EVENT_MESSAGE_EDITED:
+        '事件名常量：与 EVENT_TURN_SUPPLEMENTED / EVENT_SESSION_RECONCILED 同类，event/mod.rs 单点定义、插件按名引用。Core 外唯一消费方 = plugins/session（v2_messages 落格 + rebuild 回放），折叠索引与投影在 core 内走域内路径',
+      EVENT_MESSAGE_REMOVED:
+        '事件名常量：与 EVENT_MESSAGE_EDITED 同批同格（message × closed，与 memory.forgotten 同形），event/mod.rs 单点定义、插件按名引用。Core 外唯一消费方 = plugins/session（truncate 落格 + rebuild 丢弃）',
+      // 节点身份规则（S2.7-b1，ADR-053）：`event_payload_node_id` /
+      // `event_produced_text_node_id` / `event_tool_result_node_id`。
+      // 与 `turnstate` / `transcript` 同族同形——**规则只在 core 有一份实现**，
+      // 插件（`plugins/session/rebuild` 折节点树）经根函数名调用（C-002 禁深引
+      // `symbio_core::event::…`）。core 内另有消费方（`projection/transcript` 折对话行、
+      // `projection/prompt_fidelity` 复核），审计只数跨出 core 的那一个，故显为单消费方。
+      // **不可下沉**：三处读侧若各写一份「这条事件承载哪个节点」，不一致会静默表现为
+      // 「编辑没生效」——单点定义正是本组函数存在的理由。
+      event_payload_node_id:
+        '载荷节点身份规则：core 内一份实现（transcript 折对话行 / prompt_fidelity 复核），插件经根名调用（C-002 禁深引 event 域）。core 外唯一消费方 = plugins/session/rebuild（折节点树）。不可下沉——三处读侧各写一份必然漂，而漂的后果是静默的',
+      event_produced_text_node_id:
+        '同上：收束 / 进展 / 兜底格的正文子节点 id（含 reasoning-only 复用 reasoning 流式 id 的规则）。与 event_payload_node_id 成组，core 外唯一消费方同为 plugins/session/rebuild',
+      event_tool_result_node_id:
+        '同上：工具结果节点 id（恢复路载荷记 null ⇒ 按事件 id 合成，不复用 tool_call_id——结果与调用是两张卡）。与上面两条成组，core 外唯一消费方同为 plugins/session/rebuild',
       // `turnstate`（轨 S 第二步才接上第一个 core 外消费方）：与同族的
       // `transcript` / `slo_report` / `fallback_rate` / `checkpoint` 同形——**投影只该
       // 在 core 有一份实现**，插件经根函数名调用（C-002 禁深引域目录）。S2 的

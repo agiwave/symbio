@@ -34,11 +34,14 @@ mod view;
 // ==================== 事件溯源契约（v2 阶段 S0） ====================
 // 共享类型层（`event` / `view`）与两个机制（`store` ④ / `projection` ③）。
 // 模块依赖纪律见 [plan/05 §3.1]：彼此只准依赖类型定义，不持有对方句柄。
-pub use event::{Entity, Event, EventEnvelope, Seq, Verb, EVENT_TURN_SUPPLEMENTED};
+pub use event::{
+    event_payload_node_id, event_produced_text_node_id, event_tool_result_node_id, Entity, Event,
+    EventEnvelope, Seq, Verb, EVENT_TURN_SUPPLEMENTED,
+};
 pub use event::{
     EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_SESSION_RECONCILED,
-    EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_EDITED,
+    EVENT_MESSAGE_REMOVED, EVENT_SESSION_RECONCILED, EVENT_USER_MESSAGE,
 };
 pub use invariants::check_all;
 pub use projection::calibration::calibration;

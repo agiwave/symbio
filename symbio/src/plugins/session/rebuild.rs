@@ -33,6 +33,13 @@
 //! （把 `status` 算在内）当场失效。**重建不得"改进"形状**：改进属写侧，重建只负责
 //! 把发生过的事原样折回来（ADR-049 的零行为变更）。
 //!
+//! ## 变更格不产节点（[ADR-053](../../../../docs/decisions/session.md)）
+//!
+//! `message.edited` / `message.removed` 不在上表里，因为它们**没有自己的节点**——
+//! 它们说的是「已有的某个节点现在读作 Y / 已经没了」，因此不经过 `nodes_of`，
+//! 由 [`rebuild`] 主循环**先一步**按 id 折叠（表见 [`rebuild`] 的文档）。
+//! 把它们塞进 `nodes_of` 会得到「一次编辑多出一条节点」，而那正是折叠要防的事。
+//!
 //! **唯一允许的覆写是 `timestamp`**：构造器取「此刻」（`clock_now_ms`），而重建必须
 //! 是**纯函数**（同一事件序列 ⇒ 逐字相同的输出，N1）。故本模块一律把时间戳覆写成
 //! 事件自身的 `ts`——它才是「这件事发生在什么时候」的权威答案。
@@ -44,7 +51,8 @@
 //! `rounds[]`；`artifact.added` 带 `tool_call_id` / `wire_id` / `args` / `result_id` /
 //! `success` / `turn_id`；`turn.supplemented` 带 `id` / `ids`。**节点身份因此是
 //! 事实的一部分**，重建不必凭空造号——只有「载荷确实没记的」（旧事件的补充格、
-//! 恢复路的结果节点）才由事件 id 稳定合成（合成必须**稳定**，见 [`synthetic_id`]）。
+//! 恢复路的结果节点）才由事件 id 稳定合成（合成必须**稳定**，见
+//! [`crate::symbio_core::event_payload_node_id`]）。
 //!
 //! ## `seq`：重建的顺序锚点
 //!
@@ -58,37 +66,119 @@ use crate::symbio_core::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
 use crate::symbio_core::{
-    Entity, Event, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_TURN_SUPPLEMENTED,
-    EVENT_USER_MESSAGE,
+    event_payload_node_id, event_produced_text_node_id, event_tool_result_node_id, Entity, Event,
+    Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
+    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_EDITED,
+    EVENT_MESSAGE_REMOVED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
 
 use super::message_build::{llm_build_text_node, llm_build_tool_call_node, llm_build_tool_message};
 
 /// 从事件序列重建会话消息节点树（**纯函数**：同输入 ⇒ 逐字同输出）。
 ///
+/// ## 顺序与去重
+///
 /// 顺序 = 事件的发射顺序；`seq` 按发射顺序单调发号。同 id 的节点只保留**首次**
 /// 出现的那一份——收束载荷的 `tool_calls[]` 与 `artifact.added` 记的是同一批调用，
 /// 只认先到的那条（它们形状相同，但结果正文只归 `artifact.added`，见模块文档）。
+///
+/// ## 折叠：不只是追加（S2.7-b1，[ADR-053](../../../../docs/decisions/session.md)）
+///
+/// 事实网格里除了「追加了什么」，还有「**改过什么**」——`message.edited` /
+/// `message.removed`。它们是**变更格**，语义不是「加一条节点」而是：
+///
+/// | 变更格 | 折叠动作 |
+/// |---|---|
+/// | `message.edited` | 按 id **整条替换**该节点（位置与 `seq` 原样保留） |
+/// | `message.removed` | 按 id **丢弃**该节点（列表整体前移） |
+///
+/// 少了这一段，一次截断在重建面上等于**没发生过**——被删的消息会复活。
+///
+/// ## 为什么被删节点的 `seq` 留缺口
+///
+/// 号按**发射顺序**发，删节点不回收号：`seq` 是**顺序锚**（谁在谁前面），不是
+/// 条数。补号会让「同一段历史在删一条前后的两次重建里拿到不同的号」，而号是
+/// 前端的排序键——补号的收益（连续）小于它带来的不稳定。
 pub fn rebuild(events: &[Event]) -> Vec<ChatMessage> {
     let mut out: Vec<ChatMessage> = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
+    // 节点 id → 它在 `out` 里的位置。
+    //
+    // 与 `out` 的对应关系必须**始终成立**，因此删除**不在循环里做**（`Vec::remove`
+    // 会让它之后的所有位置失效）：先把要删的 id 记进 `gone`，循环结束再一次性
+    // `retain`。这样 `at` 在整个循环里都是有效的，编辑能直接按下标改写。
+    let mut at: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    // 被 `message.removed` 判死的节点 id（循环末尾统一剔除）。
+    let mut gone: HashSet<String> = HashSet::new();
     let mut seq: i64 = 0;
 
     for e in events {
+        match (e.entity, e.verb, e.kind.as_str()) {
+            (Entity::Message, Verb::Asserted, EVENT_MESSAGE_EDITED) => {
+                if let Some(m) = edited_node(e) {
+                    if let Some(&i) = at.get(&m.id) {
+                        // 位置与顺序锚**原样保留**：编辑改的是内容，不是这条在历史里
+                        // 的位置。重新发号等于把这条挪了个地方——前端按 `seq` 排序，
+                        // 轮次窗口按位置切片，两者都会因此错位。
+                        let kept = out[i].seq;
+                        out[i] = m;
+                        out[i].seq = kept;
+                    }
+                    // id 不在 `at` 里 ⇒ 这条节点的事实不在这段切片里（v1 时代的历史
+                    // 消息、或切片被裁过）。**不硬插到末尾**：那会把它放到一个错误的
+                    // 位置，比不显示更糟。与「同 id 只认首次」同一条纪律。
+                }
+                continue;
+            }
+            (Entity::Message, Verb::Closed, EVENT_MESSAGE_REMOVED) => {
+                gone.extend(removed_ids(e));
+                continue;
+            }
+            _ => {}
+        }
         for mut m in nodes_of(e) {
             // 同 id 只认首次：同一批调用在两个载荷里各记一次（收束的 `tool_calls[]`
             // 是**引用**，结果正文归 `artifact.added`）。丢后者不丢信息——先到的那条
             // 已经带着结果节点 id。
-            if !seen.insert(m.id.clone()) {
+            if gone.contains(&m.id) || at.contains_key(&m.id) {
                 continue;
             }
             seq += 1;
             m.seq = Some(seq);
+            at.insert(m.id.clone(), out.len());
             out.push(m);
         }
     }
+
+    // 变更格判死的节点在这里一次性剔除（见 `at` 的文档：循环里删会让下标失效）。
+    if !gone.is_empty() {
+        out.retain(|m| !gone.contains(&m.id));
+    }
     out
+}
+
+/// `message.edited` → **补丁应用后**的整条消息（载荷 `message`）。
+///
+/// 载荷不是合法 `ChatMessage` ⇒ `None`（静默跳过）。与 `nodes_of` 对缺失字段的
+/// 处置同一条口径：**重建必须对任意历史事件容错**（旧版本写下的、手工改过的
+/// WAL 都不该让整次重建失败）。形状的唯一生产者是写侧 `v2_messages::edited`，
+/// 它给出的形状由 `rebuild.test.rs` 的往返用例钉住。
+fn edited_node(e: &Event) -> Option<ChatMessage> {
+    let m: ChatMessage = serde_json::from_value(e.payload.get("message")?.clone()).ok()?;
+    (!m.id.is_empty()).then_some(m)
+}
+
+/// `message.removed` → 被丢弃的节点 id 列表（载荷 `ids`）。
+fn removed_ids(e: &Event) -> Vec<String> {
+    e.payload
+        .get("ids")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// 一条事件 → 它承载的节点（顺序即树内顺序）。
@@ -127,7 +217,7 @@ fn nodes_of(e: &Event) -> Vec<ChatMessage> {
 /// 不归重建——重建只负责把发生过的事原样折回来（ADR-049 的零行为变更）。
 fn user_node(e: &Event) -> ChatMessage {
     ChatMessage {
-        id: node_id(e, "id"),
+        id: event_payload_node_id(e, "id"),
         role: Some(MessageRole::User),
         msg_type: Some(MessageType::Text),
         content: Some(MessageContent::Text(text_of(e, "text"))),
@@ -157,7 +247,7 @@ fn supplement_node(e: &Event) -> ChatMessage {
         .cloned()
         .unwrap_or_else(|| serde_json::json!([]));
     ChatMessage {
-        id: node_id(e, "id"),
+        id: event_payload_node_id(e, "id"),
         role: Some(MessageRole::User),
         content: Some(MessageContent::Text(text_of(e, "text"))),
         meta: Some(serde_json::json!({
@@ -196,7 +286,7 @@ fn reported_node(e: &Event) -> ChatMessage {
             .unwrap_or(0),
     };
     let mut m = draft.to_message();
-    m.id = node_id(e, "id");
+    m.id = event_payload_node_id(e, "id");
     m.timestamp = Some(e.ts);
     m
 }
@@ -243,12 +333,9 @@ fn produced_nodes(e: &Event) -> Vec<ChatMessage> {
     }
 
     if !text.trim().is_empty() {
-        let child_id = if reasoning_only {
-            str_of(e, "reasoning_id").or_else(|| str_of(e, "text_id"))
-        } else {
-            str_of(e, "text_id")
-        }
-        .unwrap_or_else(|| format!("{turn_id}-text"));
+        // 正文子节点的 id 由 core 的 [`event_produced_text_node_id`] 给（含 reasoning-only
+        // 那条分支）——它与落库侧同源，`message.edited` 才定位得到这条节点。
+        let child_id = event_produced_text_node_id(e);
         // 形状经 `llm_build_text_node`（单点定义），只覆写「此刻」为事件时刻。
         let mut m = llm_build_text_node(&turn_id, &text, None, child_id);
         m.timestamp = Some(e.ts);
@@ -339,10 +426,10 @@ fn artifact_nodes(e: &Event) -> Vec<ChatMessage> {
     call.timestamp = Some(e.ts);
     call.status = Some(MessageStatus::Completed);
 
-    // 结果节点 id：载荷有就用；恢复路记 `null` ⇒ 按事件 id 稳定合成（同一条事件
-    // 每次重建得同一个 id）。合成用的**不是** call_id——结果与调用是两张卡，
+    // 结果节点 id 由 core 的 [`event_tool_result_node_id`] 给（载荷有就用；恢复路记 `null`
+    // ⇒ 按事件 id 稳定合成）。合成用的**不是** call_id——结果与调用是两张卡，
     // 共用 id 会让前端把它们合成一条。
-    let result_id = str_of(e, "result_id").unwrap_or_else(|| format!("{}-result", e.event_id));
+    let result_id = event_tool_result_node_id(e);
     let mut result = llm_build_tool_message(
         &call_id,
         &text_of(e, "text"),
@@ -372,20 +459,6 @@ fn text_of(e: &Event, key: &str) -> String {
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string()
-}
-
-/// 节点 id：载荷字段优先；缺失（该格不记节点身份）⇒ 按事件 id 稳定合成。
-///
-/// 「稳定」是硬要求：同一条事件每次重建必须得同一个 id，否则每次重开会话都会
-/// 多出一批「新」节点（前端按 id 合并）。
-fn node_id(e: &Event, key: &str) -> String {
-    str_of(e, key).unwrap_or_else(|| synthetic_id(e))
-}
-
-/// 该格不记节点身份时的合成 id：**事件 id 本身就是最稳的那个键**——它由写方按
-/// 「一件事一个键」的规则给出（`s-{turn}-{n}` / `a-{turn}-{n}`），同一条事件恒得同值。
-fn synthetic_id(e: &Event) -> String {
-    e.event_id.clone()
 }
 
 /// 载荷 `status` → 消息状态（未知 / 缺失按 `Completed`——网格里能落格的产出，

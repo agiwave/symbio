@@ -11,6 +11,9 @@
 //!   兜底话术是用户实际看到的回复，模型必须知道它「说」过这个；
 //! - `artifact.added`（`artifact × asserted`）→ `tool` 行（载荷 `tool` + `text`）。
 //!
+//! 另有**两个变更格**（`message.edited` / `message.removed`）——它们**不产行**，
+//! 而是改写 / 丢弃既有行。见 [`transcript`] 的文档。
+//!
 //! ## 工具结果为什么也在转写里（[plan/10 批 3](../../../../docs/plan/10-工具轮v2化实施方案.md)）
 //!
 //! 工具轮**当轮**的交换由运行器就地追加（网格里还没有那部分历史，见
@@ -24,9 +27,10 @@
 //! 于是「历史里的工具轮」与「本轮的工具轮」在 prompt 里长得一样。
 
 use super::super::event::{
-    Entity, Event, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_TURN_SUPPLEMENTED,
-    EVENT_USER_MESSAGE,
+    event_payload_node_id, event_produced_text_node_id, event_tool_result_node_id, Entity, Event,
+    Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
+    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_EDITED,
+    EVENT_MESSAGE_REMOVED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
 use super::super::view::{Budget, View};
 use super::Projection;
@@ -183,34 +187,88 @@ impl TranscriptView {
 }
 
 /// `transcript` 投影：从事件切片读出对话转写。
+///
+/// ## 折叠：不只是追加（S2.7-b1，[ADR-053](../../../../docs/decisions/session.md)）
+///
+/// 事实网格里除了「追加了什么」，还有「**改过什么**」——`message.edited` /
+/// `message.removed`。少了这一段，一次截断在 prompt 面上等于**没发生过**：模型
+/// 下一轮仍看得见被删掉的那几句；编辑过的发言也仍以**旧**正文出现（prompt 从
+/// 事实网格投影，而网格里那条事件还是旧的）。
+///
+/// | 变更格 | 折叠动作 |
+/// |---|---|
+/// | `message.edited` | 按节点身份**换正文 / 角色**（位置不变） |
+/// | `message.removed` | 按节点身份**丢条目** |
+///
+/// ## 折叠是「先收索引、再投影」，不是「边投影边回头改」
+///
+/// 变更格在事件序列里排在它改的那条**之后**（先有事实，才有「它变了」），所以一趟
+/// 顺序回放没法在处理原事件时就知道它后来被改了。做法是先把两个变更格收成一份索引
+/// （[`super::mutations::MessageMutations::collect`]），再投影——每条条目**出生时就
+/// 带着最终读法**，于是折叠与事件顺序无关（切片被裁过、手工改过也不会漏），也不
+/// 需要「先 push 再回头改」那套下标维护。
+///
+/// 索引本体与 `prompt_fidelity` 的复核**共用同一份**：两个出口因此不可能对同一条
+/// 消息给出两种读法（而那种分叉是静默的）。
 pub fn transcript() -> Projection<TranscriptView> {
     Projection::new(|events: &[Event], now, _budget: Budget| {
-        let mut entries = Vec::new();
+        let mutations = super::mutations::MessageMutations::collect(events);
+        let mut entries: Vec<TranscriptEntry> = Vec::new();
+
+        // 收一条条目：**出生时就按索引定稿**（被删的不收；被编辑过的用新读法）。
+        //
+        // `node` = 该条目对应的节点身份（与 `rebuild` / 变更格同一套 id，见
+        // [`crate::symbio_core::event_payload_node_id`]）。它**不进线格式**——`TranscriptEntry`
+        // 的字段一个没多，折叠键只在投影内部存在。
+        let mut push = |mut entry: TranscriptEntry, node: String| {
+            if mutations.is_removed(&node) {
+                return;
+            }
+            if let Some(ed) = mutations.edited(&node) {
+                if let Some(r) = &ed.role {
+                    entry.role = r.clone();
+                }
+                if let Some(t) = &ed.text {
+                    entry.text = t.clone();
+                }
+            }
+            entries.push(entry);
+        };
+
         for e in events {
             if e.ts > now {
                 continue;
             }
             match (e.entity, e.verb, e.kind.as_str()) {
+                // ── 变更格：**不产条目**——它们改的是既有条目（见函数文档）──────
+                (Entity::Message, Verb::Asserted, EVENT_MESSAGE_EDITED)
+                | (Entity::Message, Verb::Closed, EVENT_MESSAGE_REMOVED) => {}
                 (Entity::Turn, Verb::Opened, EVENT_USER_MESSAGE) => {
                     let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                    entries.push(TranscriptEntry {
-                        role: "user".into(),
-                        text: text.to_string(),
-                        tool: None,
-                        exclude_from_context: false,
-                    });
+                    push(
+                        TranscriptEntry {
+                            role: "user".into(),
+                            text: text.to_string(),
+                            tool: None,
+                            exclude_from_context: false,
+                        },
+                        event_payload_node_id(e, "id"),
+                    );
                 }
                 (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FINAL) => {
                     let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
                     // 空正文的收束格不进转写：空行不是对话内容（空正文跳过，
                     // 与补充 / 汇报两条臂同一判据）。
                     if !text.trim().is_empty() {
-                        entries.push(TranscriptEntry {
-                            role: "assistant".into(),
-                            text: text.to_string(),
-                            tool: None,
-                            exclude_from_context: false,
-                        });
+                        push(
+                            TranscriptEntry {
+                                role: "assistant".into(),
+                                text: text.to_string(),
+                                tool: None,
+                                exclude_from_context: false,
+                            },
+                            event_produced_text_node_id(e),
+                        );
                     }
                 }
                 // 进展格（`turn × progressed`）：等待用户时模型说过的话——它是**助手
@@ -220,22 +278,28 @@ pub fn transcript() -> Projection<TranscriptView> {
                 (Entity::Turn, Verb::Progressed, EVENT_ASSISTANT_PROGRESS) => {
                     let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
                     if !text.trim().is_empty() {
-                        entries.push(TranscriptEntry {
-                            role: "assistant".into(),
-                            text: text.to_string(),
-                            tool: None,
-                            exclude_from_context: false,
-                        });
+                        push(
+                            TranscriptEntry {
+                                role: "assistant".into(),
+                                text: text.to_string(),
+                                tool: None,
+                                exclude_from_context: false,
+                            },
+                            event_produced_text_node_id(e),
+                        );
                     }
                 }
                 (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FALLBACK) => {
                     let why = e.payload.get("why").and_then(|v| v.as_str()).unwrap_or("");
-                    entries.push(TranscriptEntry {
-                        role: "assistant".into(),
-                        text: why.to_string(),
-                        tool: None,
-                        exclude_from_context: false,
-                    });
+                    push(
+                        TranscriptEntry {
+                            role: "assistant".into(),
+                            text: why.to_string(),
+                            tool: None,
+                            exclude_from_context: false,
+                        },
+                        event_produced_text_node_id(e),
+                    );
                 }
                 // 轮边界折进的补充（缺口 3）：它**是用户说的话**，所以 role=user——
                 // 不是为了「让它看起来像用户发言」，而是因为它字面上就是。
@@ -246,12 +310,15 @@ pub fn transcript() -> Projection<TranscriptView> {
                 (Entity::Turn, Verb::Asserted, EVENT_TURN_SUPPLEMENTED) => {
                     let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
                     if !text.trim().is_empty() {
-                        entries.push(TranscriptEntry {
-                            role: "user".into(),
-                            text: text.to_string(),
-                            tool: None,
-                            exclude_from_context: false,
-                        });
+                        push(
+                            TranscriptEntry {
+                                role: "user".into(),
+                                text: text.to_string(),
+                                tool: None,
+                                exclude_from_context: false,
+                            },
+                            event_payload_node_id(e, "id"),
+                        );
                     }
                 }
                 // 轮边界汇报（缺口 4）：它是**助手说的话**（role=assistant），但**不是**
@@ -265,24 +332,30 @@ pub fn transcript() -> Projection<TranscriptView> {
                 (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_REPORTED) => {
                     let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
                     if !text.trim().is_empty() {
-                        entries.push(TranscriptEntry {
-                            role: "assistant".into(),
-                            text: text.to_string(),
-                            tool: None,
-                            exclude_from_context: true,
-                        });
+                        push(
+                            TranscriptEntry {
+                                role: "assistant".into(),
+                                text: text.to_string(),
+                                tool: None,
+                                exclude_from_context: true,
+                            },
+                            event_payload_node_id(e, "id"),
+                        );
                     }
                 }
                 // 工具结果（`artifact × asserted`）：跨轮可见的「我调用过什么、拿到了什么」。
                 (Entity::Artifact, Verb::Asserted, EVENT_ARTIFACT_ADDED) => {
                     let tool = e.payload.get("tool").and_then(|v| v.as_str()).unwrap_or("");
                     let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                    entries.push(TranscriptEntry {
-                        role: "tool".into(),
-                        text: text.to_string(),
-                        tool: Some(tool.to_string()),
-                        exclude_from_context: false,
-                    });
+                    push(
+                        TranscriptEntry {
+                            role: "tool".into(),
+                            text: text.to_string(),
+                            tool: Some(tool.to_string()),
+                            exclude_from_context: false,
+                        },
+                        event_tool_result_node_id(e),
+                    );
                 }
                 _ => {}
             }
@@ -294,3 +367,7 @@ pub fn transcript() -> Projection<TranscriptView> {
         }
     })
 }
+
+#[cfg(test)]
+#[path = "transcript.test.rs"]
+mod tests;

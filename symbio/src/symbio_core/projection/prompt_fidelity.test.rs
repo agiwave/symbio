@@ -13,7 +13,7 @@ use super::super::transcript::{transcript, PromptMessage};
 use super::{verify, PromptGap as Gap};
 use crate::symbio_core::event::{
     Entity, Event, Seq, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL,
-    EVENT_ASSISTANT_REPORTED, EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_USER_MESSAGE,
 };
 use crate::symbio_core::{EventWalStore, Store};
 
@@ -43,7 +43,7 @@ fn user_turn(turn: u64, text: &str) -> Event {
         turn,
         "user",
     )
-    .with_payload(serde_json::json!({ "text": text, "tier": "deep" }))
+    .with_payload(serde_json::json!({ "text": text, "tier": "deep", "id": format!("u-{turn}") }))
 }
 
 fn assistant_turn(turn: u64, text: &str) -> Event {
@@ -55,7 +55,12 @@ fn assistant_turn(turn: u64, text: &str) -> Event {
         turn,
         "agent:main",
     )
-    .with_payload(serde_json::json!({ "text": text, "model": "deep" }))
+    .with_payload(serde_json::json!({
+        "text": text,
+        "model": "deep",
+        "turn_id": format!("t-{turn}"),
+        "text_id": format!("f-{turn}-text"),
+    }))
 }
 
 fn artifact(turn: u64, tool: &str, text: &str) -> Event {
@@ -276,4 +281,89 @@ fn an_artifact_round_is_complete_after_reopen() {
     assert!(rep.is_complete(), "工具轮必须双向完整：{}", rep.summary());
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+/// 变更格（**第三类**）：既不产 entry、也不是「按设计不进请求包」。
+///
+/// 三条断言各钉一件事，缺一条这类就会被**静默跳过**（那正是本模块自己警告过的
+/// 失败形态：`turn.supplemented` 漏登记那次）：
+///
+/// 1. **计入**（`mutations`）——不是「不在投影范围内」；
+/// 2. 编辑过的原事件按**新**正文复核 ⇒ 折叠正确时**完整**（否则每次编辑都会报
+///    「网格→prompt 丢事实」：网格里是旧正文、prompt 里是新正文，两边都「对」）；
+/// 3. 没折叠时**报得出来**（prompt 里还是旧正文 ⇒ 丢事实；被删的那句还在
+///    ⇒ 无出处）。
+#[test]
+fn mutation_events_are_folded_not_silently_skipped() {
+    let events = vec![
+        user_turn(0, "原始问题"),
+        assistant_turn(0, "原始回答"),
+        edited("u-0", "user", "改过的问题"),
+        removed(&["f-0-text"]),
+    ];
+
+    // ① + ② 正确折叠后的那批（转写的产出）：改过的那句在，被删的那句没了。
+    let folded = vec![entry("user", "改过的问题", None)];
+    let rep = verify(&events, &folded, None);
+    assert_eq!(rep.mutations, 2, "两个变更格都要计入：{}", rep.summary());
+    assert!(
+        rep.is_complete(),
+        "折叠正确时必须完整（否则每次编辑都假红）：{}",
+        rep.summary()
+    );
+
+    // ③a 没折叠：prompt 里还是**旧**正文 ⇒ 网格→prompt 丢事实。
+    let unfolded = vec![entry("user", "原始问题", None)];
+    let rep_unfolded = verify(&events, &unfolded, None);
+    assert!(
+        rep_unfolded
+            .gaps
+            .iter()
+            .any(|g| matches!(g, Gap::DroppedFromPrompt { .. })),
+        "没折叠必须报出来：{}",
+        rep_unfolded.summary()
+    );
+
+    // ③b 没折叠：**被删的那句**还在 prompt 里 ⇒ 反方向报「无出处」
+    //（它已经没有事件认领了）。
+    let leaked = vec![
+        entry("user", "改过的问题", None),
+        entry("assistant", "原始回答", None),
+    ];
+    let rep_leaked = verify(&events, &leaked, None);
+    assert!(
+        rep_leaked
+            .gaps
+            .iter()
+            .any(|g| matches!(g, Gap::NoSourceInGrid { role, .. } if role == "assistant")),
+        "被删的那句留在 prompt 里必须报出来：{}",
+        rep_leaked.summary()
+    );
+}
+
+/// 变更格的载荷构造函数（与写侧 `v2_messages` 落下的形状逐字同源）。
+fn edited(node: &str, role: &str, text: &str) -> Event {
+    Event::pending(
+        format!("m-edit-{node}"),
+        EVENT_MESSAGE_EDITED,
+        Entity::Message,
+        Verb::Asserted,
+        0,
+        "user",
+    )
+    .with_payload(serde_json::json!({
+        "message": { "id": node, "role": role, "content": text }
+    }))
+}
+
+fn removed(ids: &[&str]) -> Event {
+    Event::pending(
+        "m-del-0",
+        EVENT_MESSAGE_REMOVED,
+        Entity::Message,
+        Verb::Closed,
+        0,
+        "user",
+    )
+    .with_payload(serde_json::json!({ "ids": ids }))
 }

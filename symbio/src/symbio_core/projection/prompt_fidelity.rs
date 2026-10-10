@@ -20,15 +20,31 @@
 //! | `role` 完好 | `role == "tool"` 的 entry 必须带工具名 | 工具结果的机器可读关联 |
 //! | prompt → 网格 | 每条 entry 都能在网格里找到出处 | 「模型看到了事实源没有的东西」= 两条真源 |
 //!
+//! ## 第三类：变更格（S2.7-b1，[ADR-053](../../../../docs/decisions/session.md)）
+//!
+//! `message.edited` / `message.removed` **既不产 entry**（它们不是新的对话内容），
+//! **也不是**「按设计不进请求包」的界面文本（那是汇报 / 首响）。缺了这一类，
+//! 判据会把它们当成「不在投影范围内」**静默跳过**——而本模块自己已经警告过
+//! 「判据的覆盖范围要与投影的实现范围同时长」（`turn.supplemented` 漏登记那次）。
+//!
+//! 处理方式分两条，都是**共用同一份折叠索引**（[`super::mutations::MessageMutations`]）：
+//!
+//! - **编辑**：被编辑的那条**原事件**改按**新**正文复核（否则每次编辑都会报
+//!   「网格→prompt 丢事实」——网格里是旧正文，prompt 里是新正文，两边都「对」）；
+//! - **删除**：被删节点从「网格→prompt」这一向**跳过**（它**本就不该**在 prompt 里）。
+//!   它若仍出现在 prompt 里，**反方向**的 [`PromptGap::NoSourceInGrid`] 会照出来——
+//!   除非有别的格子认领那段正文，而那种情况恰恰是「删掉之后又被重新说了一遍」，
+//!   本来就不该报。于是这条判据**不需要按正文去猜**「这句话是不是被删的那句」。
+//!
 //! ## 为什么它便宜到每轮都跑
 //!
 //! 纯函数 + 单测层：不起 CLI、不 mock LLM、不碰 IO。所以它不会被「太重」跳过——这一点
 //! 是本条存在的意义，全量 e2e 反而做不到（每步都要重起进程、跑 42 个用例）。
 
 use super::super::event::{
-    Entity, Event, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_TURN_SUPPLEMENTED,
-    EVENT_USER_MESSAGE,
+    event_node_of, Entity, Event, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK,
+    EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED,
+    EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
 
 /// 缺口的一条报告。**故意不 derive `PartialEq`**：报告要给门禁与日志读，字段顺序变动
@@ -96,6 +112,20 @@ fn excluded_from_prompt(e: &Event) -> bool {
     )
 }
 
+/// **变更格**（第三类）：既不产 entry，也不是「按设计不进请求包」。
+///
+/// 与 `excluded_from_prompt` 分开成两个函数而不是合成一个「特殊格」判定：那张表
+/// 说的是「它不该出现在 prompt 里」，这张说的是「它根本不是一条对话内容，它改的是
+/// 别的东西」——两者的**检查动作相反**（前者要报「出现了」，后者要**跳过**并折叠）。
+/// 合成一个 `matches!` 会让后来的人无从判断该往哪边加。
+fn is_mutation(e: &Event) -> bool {
+    matches!(
+        (e.entity, e.verb, e.kind.as_str()),
+        (Entity::Message, Verb::Asserted, EVENT_MESSAGE_EDITED)
+            | (Entity::Message, Verb::Closed, EVENT_MESSAGE_REMOVED)
+    )
+}
+
 /// 事件载荷里该进 prompt 的正文（与 `transcript` 投影**同一取法**——两处各写一遍必然漂移，
 /// 所以这里只做「有没有」，正文比对交给 `SourceRef` 的坐标）。
 fn payload_text(e: &Event) -> &str {
@@ -118,6 +148,12 @@ pub struct PromptReport {
     pub checked_entries: usize,
     /// **被显式声明**为「按设计不进网格」的消息数（当前只有 `prefix` 三段读视图）。
     pub declared: usize,
+    /// 复核里遇到的**变更格**数（`message.edited` / `message.removed`）。
+    ///
+    /// 单列一格而不是并进 `checked_events`：这一类**不产 entry**（见模块文档的
+    /// 「第三类」），所以「它们有多少条」是判断「折叠有没有真的发生」的唯一外部
+    /// 可见量——并进去就看不出来了。
+    pub mutations: usize,
 }
 
 impl PromptReport {
@@ -130,8 +166,8 @@ impl PromptReport {
     pub fn summary(&self) -> String {
         if self.is_complete() {
             return format!(
-                "完整：{} 条网格事件 → {} 条 prompt 消息（声明 {} 条请求级）",
-                self.checked_events, self.checked_entries, self.declared
+                "完整：{} 条网格事件 → {} 条 prompt 消息（声明 {} 条请求级 / 折叠 {} 条变更）",
+                self.checked_events, self.checked_entries, self.declared, self.mutations
             );
         }
         let mut s = format!(
@@ -195,10 +231,21 @@ pub fn verify(
     declared: Option<&str>,
 ) -> PromptReport {
     let mut rep = PromptReport::default();
+    // 变更格的折叠索引（与 `transcript` **共用同一份**）：编辑过的条目在网格侧
+    // 按**新**正文复核，被删掉的从「网格→prompt」跳过。见模块文档「第三类」。
+    let mutations = super::mutations::MessageMutations::collect(events);
 
     // 网格侧：投影范围内的事件，逐条找对应 entry。
     let mut used = vec![false; messages.len()];
     for e in events {
+        // 变更格自己**不产 entry**：它们不是新的对话内容，也不是「按设计不进请求包」
+        // 的界面文本。计数单列（`mutations`）——并进 `checked_events` 就看不出
+        // 「折叠有没有真的发生」了。
+        if is_mutation(e) {
+            rep.checked_events += 1;
+            rep.mutations += 1;
+            continue;
+        }
         // 按设计不进请求包的那一类：**方向反过来**——不是「网格有、prompt 没有」，
         // 而是「网格标了不该进、prompt 里却出现了」。同样按正文配对，找得到就报缺口。
         //
@@ -216,11 +263,26 @@ pub fn verify(
             }
             continue;
         }
-        let Some(role) = expected_role(e) else {
+        let Some(expected) = expected_role(e) else {
             continue;
         };
         rep.checked_events += 1;
-        let text = payload_text(e);
+        // 生效读法：该节点被编辑过 ⇒ 用**新**正文 / 角色；被删掉 ⇒ **跳过**
+        // （它本就不该在 prompt 里，若仍在，反方向的 `NoSourceInGrid` 会照出来）。
+        let node = event_node_of(e);
+        if let Some(node) = node.as_deref() {
+            if mutations.is_removed(node) {
+                continue;
+            }
+        }
+        let edited = node.as_deref().and_then(|n| mutations.edited(n));
+        let role: String = edited
+            .and_then(|ed| ed.role.clone())
+            .unwrap_or_else(|| expected.to_string());
+        let text: String = match edited.and_then(|ed| ed.text.clone()) {
+            Some(t) => t,
+            None => payload_text(e).to_string(),
+        };
         // ⚠️ **只按正文配对，不把 role 放进配对键**——放进去了，「角色不符」就永远匹配
         // 不上，于是会被误报成「丢事实」。那两类缺口的区别恰恰是 role：正文在、角色错，
         // 与正文根本不在，是两种不同的病，判据必须分得开。
@@ -241,7 +303,7 @@ pub fn verify(
                 let m = &messages[i];
                 if m.role != role {
                     rep.gaps.push(PromptGap::RoleMismatch {
-                        expected: role,
+                        expected,
                         got: m.role.clone(),
                         kind: e.kind.as_str().to_string(),
                         turn: e.turn,

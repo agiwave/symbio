@@ -352,3 +352,171 @@ fn text_content_is_plain_text() {
     let msgs = rebuild(&events);
     assert!(matches!(msgs[0].content, Some(MessageContent::Text(_))));
 }
+
+// ── ⑥ 变更格：编辑 / 删除（S2.7-b1，ADR-053）──────────────────────────
+
+/// 一条 `message.edited`：载荷由**写侧同一条序列化路径**造出来
+/// （`serde_json::to_value(&msg)` 再包一层 `{"message": …}`，见
+/// `v2_messages::edited`）。手写 JSON 会让判据钉住我抄的那份，而不是写侧真的落的东西。
+fn edited_event(msg: crate::symbio_core::chat_message::ChatMessage) -> Event {
+    Event::pending(
+        "m-edit-0",
+        crate::symbio_core::EVENT_MESSAGE_EDITED,
+        Entity::Message,
+        Verb::Asserted,
+        0,
+        "user",
+    )
+    .with_payload(serde_json::json!({
+        "message": serde_json::to_value(&msg).expect("ChatMessage 必然可序列化"),
+    }))
+}
+
+/// 一条 `message.removed`（载荷 = 被删 id 列表）。
+fn removed_event(ids: &[&str]) -> Event {
+    Event::pending(
+        "m-del-0",
+        crate::symbio_core::EVENT_MESSAGE_REMOVED,
+        Entity::Message,
+        Verb::Closed,
+        0,
+        "user",
+    )
+    .with_payload(serde_json::json!({ "ids": ids }))
+}
+
+/// 编辑：**换内容，不动位置**（`seq` 原样保留）。
+///
+/// 「不动位置」是硬要求：`seq` 是前端的排序键、轮次窗口按位置切片。换号等于把这条
+/// 消息挪到别处——历史次序当场错乱，而错乱的表现是「模型把后说的话当成先说的」。
+#[test]
+fn an_edit_replaces_the_node_in_place() {
+    let events = vec![
+        user_event("u-node", "原始问题"),
+        final_event(serde_json::json!({
+            "text": "答", "turn_id": "T1", "text_id": "T1-text", "status": "completed",
+        })),
+        edited_event(crate::symbio_core::chat_message::ChatMessage {
+            id: "u-node".into(),
+            role: Some(MessageRole::User),
+            msg_type: Some(MessageType::Text),
+            content: Some(MessageContent::Text("改过的问题".into())),
+            timestamp: Some(1_500),
+            ..Default::default()
+        }),
+    ];
+
+    let msgs = rebuild(&events);
+    let got = shapes(&msgs);
+    assert_eq!(got.len(), 3, "编辑**不新增节点**：{got:?}");
+    assert_eq!(got[0].id, "u-node", "位置不变（还是第一条）");
+    assert_eq!(got[0].text, "改过的问题", "内容换成新的");
+    assert_eq!(got[0].role, Some(MessageRole::User));
+    // 位置锚：编辑前后 `seq` 逐字相同（号不重发）。
+    assert_eq!(
+        msgs[0].seq,
+        Some(1),
+        "编辑保留原顺序锚——重发号会让这条在前后两次重建里换个位置"
+    );
+    assert_eq!(msgs[2].seq, Some(3), "它之后的节点号不受影响");
+}
+
+/// 删除：被删节点**消失**，其余保持原序；`seq` 留缺口（顺序锚不是条数）。
+#[test]
+fn a_removal_drops_the_nodes_and_leaves_seq_gaps() {
+    let events = vec![
+        user_event("u-node", "第一问"),
+        final_event(serde_json::json!({
+            "text": "第一答", "turn_id": "T1", "text_id": "T1-text", "status": "completed",
+        })),
+        // 从 Turn 根起截断（起点 + 其子节点，与 `truncate_messages` 的区间同形）
+        removed_event(&["T1", "T1-text"]),
+    ];
+
+    let msgs = rebuild(&events);
+    let got = shapes(&msgs);
+    assert_eq!(got.len(), 1, "被删的两个节点都要没了：{got:?}");
+    assert_eq!(got[0].id, "u-node");
+    assert_eq!(
+        msgs[0].seq,
+        Some(1),
+        "留下的那条号不变（不重编号——号是顺序锚，不是条数）"
+    );
+}
+
+/// 整段截断：删掉**全部**节点 ⇒ 空列表（不是「删了但还剩几条」）。
+#[test]
+fn truncating_everything_yields_an_empty_list() {
+    let events = vec![
+        user_event("u-node", "问"),
+        final_event(serde_json::json!({
+            "text": "答", "turn_id": "T1", "text_id": "T1-text", "status": "completed",
+        })),
+        removed_event(&["u-node", "T1", "T1-text"]),
+    ];
+    assert!(rebuild(&events).is_empty(), "全删 ⇒ 空");
+}
+
+/// 编辑一个**不在切片里**的节点是空操作——不硬插到末尾。
+///
+/// 「硬插」会让一段历史在错误的时刻冒出一句话，比不显示更糟。
+#[test]
+fn an_edit_for_an_unknown_node_adds_nothing() {
+    let events = vec![
+        user_event("u-node", "问"),
+        edited_event(crate::symbio_core::chat_message::ChatMessage {
+            id: "ghost".into(),
+            role: Some(MessageRole::User),
+            content: Some(MessageContent::Text("谁都不是".into())),
+            ..Default::default()
+        }),
+    ];
+    let got = shapes(&rebuild(&events));
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].id, "u-node");
+}
+
+/// 折叠之后**仍是纯函数**（N1）：同输入 ⇒ 逐字同输出。
+///
+/// 这条不是形式：折叠引入了两张表（索引 / 判死集合），用 `HashMap` 的迭代顺序
+/// 写实现就会让它变成**不确定**的——而表现是「同一份 WAL 两次重建次序不同」，
+/// 前端按 id 合并时当场错乱。
+#[test]
+fn rebuild_with_mutations_is_deterministic() {
+    let events = vec![
+        user_event("u-node", "问"),
+        final_event(serde_json::json!({
+            "text": "答", "turn_id": "T1", "text_id": "T1-text", "status": "completed",
+        })),
+        edited_event(crate::symbio_core::chat_message::ChatMessage {
+            id: "u-node".into(),
+            role: Some(MessageRole::User),
+            content: Some(MessageContent::Text("改过".into())),
+            ..Default::default()
+        }),
+        removed_event(&["T1-text"]),
+    ];
+    assert_eq!(shapes(&rebuild(&events)), shapes(&rebuild(&events)));
+}
+
+/// 坏载荷（不是合法 `ChatMessage`）**跳过**，不让整次重建失败。
+///
+/// 读侧必须对任意历史事件容错：手工改过的 WAL / 未来版本写的载荷都不该让会话打不开。
+#[test]
+fn a_malformed_edit_payload_is_skipped() {
+    let events = vec![
+        user_event("u-node", "问"),
+        Event::pending(
+            "m-edit-9",
+            crate::symbio_core::EVENT_MESSAGE_EDITED,
+            Entity::Message,
+            Verb::Asserted,
+            0,
+            "user",
+        )
+        .with_payload(serde_json::json!({ "message": "我不是一条消息" })),
+    ];
+    let got = shapes(&rebuild(&events));
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].text, "问");
+}
