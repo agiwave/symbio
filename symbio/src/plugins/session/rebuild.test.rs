@@ -14,7 +14,8 @@ use super::rebuild;
 use crate::symbio_core::chat_message::{MessageContent, MessageRole, MessageStatus, MessageType};
 use crate::symbio_core::{Entity, Event, Verb};
 use crate::symbio_core::{
-    EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
+    EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_REPORTED, EVENT_TURN_SUPPLEMENTED,
+    EVENT_USER_MESSAGE,
 };
 
 /// 一条事件的**可断言摘要**——`ChatMessage` 没有 `PartialEq`（它是增量帧的形状，
@@ -101,7 +102,9 @@ fn final_builds_turn_root_with_reasoning_and_text_children() {
                 ty: Some(MessageType::Text),
                 role: Some(MessageRole::User),
                 text: "问 A".into(),
-                status: Some(MessageStatus::Completed),
+                // 落库的用户消息**没有** status（调用方 `..Default::default()`）——
+                // 重建不得补（补了就是两个身份，前端按 status 参与合并键）。
+                status: None,
             },
             Shape {
                 id: "T1".into(),
@@ -256,9 +259,72 @@ fn supplement_gets_a_stable_synthetic_id() {
     let a = shapes(&rebuild(std::slice::from_ref(&ev)));
     let b = shapes(&rebuild(&[ev]));
     assert_eq!(a, b, "同一条事件每次重建必须得同一个 id");
-    assert_eq!(a[0].id, "s-1-0", "合成 id 取事件 id");
+    assert_eq!(a[0].id, "s-1-0", "载荷缺 id 时合成 id 取事件 id");
     assert_eq!(a[0].role, Some(MessageRole::User));
     assert_eq!(a[0].text, "插一句");
+}
+
+/// 补充格的形状必须**逐字复刻落库那一份**（`v2_exec::supplement_into_request`）：
+/// 无 `msg_type`、无 `status`、带 `meta.supplement*` 三键。任一格不同，同一条补充
+/// 在实时面与重建面就是两个节点。
+#[test]
+fn supplement_mirrors_the_persisted_shape() {
+    let ev = Event::pending(
+        "s-1-0",
+        EVENT_TURN_SUPPLEMENTED,
+        Entity::Turn,
+        Verb::Asserted,
+        1,
+        "user",
+    )
+    .with_ts(1_200)
+    .with_payload(serde_json::json!({
+        "text": "插一句", "count": 2, "id": "inbox-a", "ids": ["inbox-a", "inbox-b"],
+    }));
+
+    let msgs = rebuild(std::slice::from_ref(&ev));
+    let m = &msgs[0];
+    assert_eq!(m.id, "inbox-a", "载荷带 id ⇒ 复刻该身份（不合成）");
+    assert_eq!(m.msg_type, None, "落库的补充消息没有 msg_type");
+    assert_eq!(m.status, None, "落库的补充消息没有 status");
+    let meta = m.meta.as_ref().expect("补充必须带 meta");
+    assert_eq!(meta["supplement"], serde_json::json!(true));
+    assert_eq!(meta["supplement_count"], serde_json::json!(2));
+    assert_eq!(
+        meta["supplement_ids"],
+        serde_json::json!(["inbox-a", "inbox-b"])
+    );
+}
+
+/// 汇报格的形状复用写入侧的 `ReportDraft::to_message`（`dialog_node(text, "progress", true)`）
+/// ——`surface` / `reason` / `exclude_from_context` 三键缺一不可，`exclude_from_context`
+/// 更是轮次窗口「不进模型请求包」的判别位。
+#[test]
+fn reported_mirrors_the_persisted_shape() {
+    let ev = Event::pending(
+        "rp-1-0",
+        EVENT_ASSISTANT_REPORTED,
+        Entity::Turn,
+        Verb::Asserted,
+        1,
+        "agent:main",
+    )
+    .with_ts(3_000)
+    .with_payload(serde_json::json!({
+        "text": "还在跑", "tool_rounds": 2, "quiet_ms": 5_000,
+    }));
+
+    let msgs = rebuild(std::slice::from_ref(&ev));
+    let m = &msgs[0];
+    assert_eq!(m.id, "rp-1-0", "载荷缺 id ⇒ 合成 id 取事件 id");
+    assert_eq!(m.role, Some(MessageRole::Assistant));
+    assert_eq!(m.msg_type, Some(MessageType::Text));
+    assert_eq!(m.status, Some(MessageStatus::Completed));
+    assert_eq!(m.timestamp, Some(3_000), "时间戳覆写为事件自身的 ts");
+    let meta = m.meta.as_ref().expect("汇报必须带 meta");
+    assert_eq!(meta["surface"], serde_json::json!("reply"));
+    assert_eq!(meta["reason"], serde_json::json!("progress"));
+    assert_eq!(meta["exclude_from_context"], serde_json::json!(true));
 }
 
 // ── ⑤ 状态是产出事实的状态，落到根与正文上 ────────────────────────────

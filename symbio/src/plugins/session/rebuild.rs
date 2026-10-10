@@ -18,12 +18,23 @@
 //!
 //! ## 形状来源：不在这里定义
 //!
-//! 节点形状一律经 [`super::message_build`] 的 `llm_build_*` 构造——那是落库形状的
-//! **单点定义**。本模块只负责「从事件载荷取哪几个字段、按什么顺序拼」。形状若改动，
-//! 改那一处，重建自动跟随；两处各写一份必然漂移（前端读的是同一套字段）。
+//! **写入侧怎么构造，重建就怎么构造**——同一个节点只有一份形状定义。生产侧已经在
+//! 哪里定义了它，就复用那一个：
 //!
-//! **唯一例外是 `timestamp`**：构造器取「此刻」（`clock_now_ms`），而重建必须是
-//! **纯函数**（同一事件序列 ⇒ 逐字相同的输出，N1）。故本模块一律把时间戳覆写成
+//! | 节点 | 形状的单点定义 | 重建怎么拿到 |
+//! |---|---|---|
+//! | Turn / Reasoning / Text / ToolCall / 工具结果 | [`super::message_build`] 的 `llm_build_*` | 直接调用 |
+//! | 轮边界汇报 | [`super::round_hook::ReportDraft::to_message`]（`dialog_node`） | 直接调用 |
+//! | 用户发言 / 补充 | **写入侧内联构造**（CLI 请求体 / `v2_exec::supplement_into_request`） | 逐字复刻（无共享构造器） |
+//!
+//! 「逐字复刻」那两格是**已知的脆弱点**：没有共享构造器可调，只能靠判据钉住
+//! （`rebuild.test.rs` 的形状复刻用例）。曾经在这里自作主张给用户消息补 `status`
+//! ——落库那份没有，于是同一条发言在实时面与重建面是两个身份，前端的节点合并键
+//! （把 `status` 算在内）当场失效。**重建不得"改进"形状**：改进属写侧，重建只负责
+//! 把发生过的事原样折回来（ADR-049 的零行为变更）。
+//!
+//! **唯一允许的覆写是 `timestamp`**：构造器取「此刻」（`clock_now_ms`），而重建必须
+//! 是**纯函数**（同一事件序列 ⇒ 逐字相同的输出，N1）。故本模块一律把时间戳覆写成
 //! 事件自身的 `ts`——它才是「这件事发生在什么时候」的权威答案。
 //!
 //! ## 载荷里的节点结构（S2.6 铺的路）
@@ -31,8 +42,9 @@
 //! 收束 / 进展 / 兜底三种格子共用一份产出形状（`turn_runner::produced_payload`），
 //! 载荷里带 `turn_id` / `text_id` / `reasoning_id` / `reasoning` / `tool_calls[]` /
 //! `rounds[]`；`artifact.added` 带 `tool_call_id` / `wire_id` / `args` / `result_id` /
-//! `success` / `turn_id`。**节点身份因此是事实的一部分**，重建不必凭空造号——
-//! 只有「载荷没记的」（如补充格的节点 id、恢复路的结果节点 id）才由事件 id 稳定合成。
+//! `success` / `turn_id`；`turn.supplemented` 带 `id` / `ids`。**节点身份因此是
+//! 事实的一部分**，重建不必凭空造号——只有「载荷确实没记的」（旧事件的补充格、
+//! 恢复路的结果节点）才由事件 id 稳定合成（合成必须**稳定**，见 [`synthetic_id`]）。
 //!
 //! ## `seq`：重建的顺序锚点
 //!
@@ -103,30 +115,56 @@ fn nodes_of(e: &Event) -> Vec<ChatMessage> {
 ///
 /// `id` 是**流式期已广播的节点 id**（`user_node_id` 入格）——前端按 id 合并，
 /// 重建必须复用它，否则同一条发言在实时面与重建面是两个身份。
+///
+/// ## 为什么不设 `status`（与"用户发言是完成态"的直觉相反）
+///
+/// 形状必须**逐字复刻落库那一份**，而落库的用户消息由调用方给（CLI 的
+/// `session/chat/send` 请求体，`..Default::default()`）——它**没有** `status`。
+/// 重建若自作主张补一个 `Completed`，同一条发言在实时面（无 status）与重建面
+/// （`completed`）就是两个身份：前端的节点合并键把 `status` 算在内
+/// （`useChatConnection.ts` 的 `own` 键），合并当场失效、历史里冒出重复节点。
+/// 「用户发言算不算完成态」是一个可以单独讨论的形状改进，但它属于**写侧**，
+/// 不归重建——重建只负责把发生过的事原样折回来（ADR-049 的零行为变更）。
 fn user_node(e: &Event) -> ChatMessage {
     ChatMessage {
         id: node_id(e, "id"),
         role: Some(MessageRole::User),
         msg_type: Some(MessageType::Text),
         content: Some(MessageContent::Text(text_of(e, "text"))),
-        status: Some(MessageStatus::Completed),
         timestamp: Some(e.ts),
         ..Default::default()
     }
 }
 
-/// 轮边界折进的补充（`turn × asserted`，缺口 3）：载荷 `{ text, count }`。
+/// 轮边界折进的补充（`turn × asserted`，缺口 3）：载荷 `{ text, count, id, ids }`。
 ///
-/// 载荷**没有节点 id**（补充的 id 由抽干侧分配，不是跨轮事实）——按事件 id 稳定合成。
-/// 合成的后果已判定可接受：重开后这条的 id 与实时面那份不同，但**内容与角色一致**，
-/// 且补充发生在轮内、落库后不再有实时副本与之并存（ADR-049 的「呈现细节可能不同」）。
+/// 形状**逐字复刻落库那一份**（`v2_exec::supplement_into_request` 的 `ChatMessage`）：
+/// 它**没有** `msg_type`、**没有** `status`，但**有** `meta.supplement*` 三键
+/// （用户消息的合并标记，前端据它认出「这是一次折进」）。重建必须三样都对上，
+/// 否则同一条补充在实时面与重建面是两个节点。
+///
+/// `id` 与 `ids` 由**载荷**给出（S2.6 的原则：节点身份是事实的一部分）。载荷缺 `id`
+/// （旧事件）时按事件 id 稳定合成——合成的后果已判定可接受：重开后这条的 id 与
+/// 实时面那份不同，但**内容与角色一致**（ADR-049 的「呈现细节可能不同」）。
 fn supplement_node(e: &Event) -> ChatMessage {
+    use super::transcript::supplements::{
+        META_SUPPLEMENT, META_SUPPLEMENT_COUNT, META_SUPPLEMENT_IDS,
+    };
+    let count = e.payload.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+    let ids = e
+        .payload
+        .get("ids")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
     ChatMessage {
-        id: synthetic_id(e),
+        id: node_id(e, "id"),
         role: Some(MessageRole::User),
-        msg_type: Some(MessageType::Text),
         content: Some(MessageContent::Text(text_of(e, "text"))),
-        status: Some(MessageStatus::Completed),
+        meta: Some(serde_json::json!({
+            META_SUPPLEMENT: true,
+            META_SUPPLEMENT_COUNT: count,
+            META_SUPPLEMENT_IDS: ids,
+        })),
         timestamp: Some(e.ts),
         ..Default::default()
     }
@@ -134,20 +172,33 @@ fn supplement_node(e: &Event) -> ChatMessage {
 
 /// 轮边界汇报（`turn × asserted`，缺口 4）：界面文本。
 ///
-/// `meta.exclude_from_context` 是**前端与轮次窗口**读的判别位（`to_messages()` 另有一套
-/// 同名的内部标记，见 `transcript` 投影的文档）——它必须落在这份 `ChatMessage` 上，
-/// 否则轮次窗口会把「给人看的汇报」当成模型的对话内容发进请求包。
+/// 形状**复用写入侧的构造** [`ReportDraft::to_message`](super::round_hook::ReportDraft::to_message)
+/// ——它就是落库镜像上那一格的定义（`dialog_node(text, "progress", true)`）。
+/// 复抄一遍的代价是已知的：上一版落库侧抄漏 `msg_type`，节点落了库却不成形状；
+/// 重建这边再抄一遍，迟早各错各的。`meta.exclude_from_context` 因此随构造一并得到
+/// ——它是**前端与轮次窗口**读的判别位，缺了轮次窗口会把「给人看的汇报」当成模型的
+/// 对话内容发进请求包。
+///
+/// `id` 由载荷给（缺则按事件 id 合成，同 [`supplement_node`]）；`timestamp` 覆写成
+/// 事件自身的 `ts`（构造器取「此刻」会破坏纯函数性，见模块头）。
 fn reported_node(e: &Event) -> ChatMessage {
-    ChatMessage {
-        id: synthetic_id(e),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Text),
-        content: Some(MessageContent::Text(text_of(e, "text"))),
-        status: Some(MessageStatus::Completed),
-        timestamp: Some(e.ts),
-        meta: Some(serde_json::json!({ "exclude_from_context": true })),
-        ..Default::default()
-    }
+    let draft = super::round_hook::ReportDraft {
+        text: text_of(e, "text"),
+        tool_rounds: e
+            .payload
+            .get("tool_rounds")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize,
+        quiet_ms: e
+            .payload
+            .get("quiet_ms")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0),
+    };
+    let mut m = draft.to_message();
+    m.id = node_id(e, "id");
+    m.timestamp = Some(e.ts);
+    m
 }
 
 /// 收束 / 进展 / 兜底格 → `[Turn 根, Reasoning 子?, Text 子?, rounds 的中途产出…]`。

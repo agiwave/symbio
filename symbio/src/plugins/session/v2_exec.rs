@@ -728,7 +728,16 @@ fn supplement_into_request(
             &actor.principal,
         )
         .with_produced_by(anchor)
-        .with_payload(serde_json::json!({ "text": text, "count": count })),
+        // 载荷带上**节点身份**（S2.6 的原则：节点身份是事实的一部分）：重建按 `id`
+        // 复刻这条用户消息的身份、按 `ids` 复刻 `meta.supplement_ids`。缺了它们，
+        // 重建只能合成 id（每次重开都换一批），且合并标记里的原始条目 id 无处可寻
+        // ——而「合并后原始条目只此一处留痕」（见 `transcript::supplements` 的模块头）。
+        .with_payload(serde_json::json!({
+            "text": text,
+            "count": count,
+            "id": drained.id.clone(),
+            "ids": ids.clone(),
+        })),
     ) {
         // 落格失败**不静默**：消息仍会进这一次请求，但事实网格里没有它 ⇒ 下一轮起
         // 不可见。所以出声。

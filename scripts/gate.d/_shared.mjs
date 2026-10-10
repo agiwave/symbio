@@ -799,7 +799,15 @@ export const BASELINE = {
   //   整列、读侧闸 ⇒ 空且不扫）。同批退役 `#[ignore]` 的 `slo_scan_wal_roots`
   //   手工扫描口（职责被上面两件接走）。
   //   实测口径同前：`cargo test -p symbio -p symbio-cli`，取首个 `test result: ok. N passed`。
-  rustTests: 1429,
+  // 2026-10-10 **回填 `1429 → 1431`（+2）**：批「S2.7 步 1 判据补全」——
+  //   `plugins/session/rebuild.test.rs` 补两条**形状复刻**判据
+  //   （`supplement_mirrors_the_persisted_shape` / `reported_mirrors_the_persisted_shape`）。
+  //   起因是 e2e `t43`（删 `messages.json` 后会话仍能开）照出一处**静默形状漂移**：
+  //   重建给用户消息补了 `status=completed`，而落库那份没有 `status` ⇒ 前端节点合并键
+  //   （`useChatConnection.ts` 把 `status` 算在内）失效、历史里冒重复节点。修正后
+  //   用户 / 补充 / 汇报三格的形状一律复刻落库侧，故补判据钉死。归因无残差（+2 −0）。
+  //   `ciRustTestsTotal` 同步 `1437 → 1439`（同一增量两边一起动）。实测口径同前。
+  rustTests: 1431,
   /**
    * CI 口径的 Rust 通过数（**只增不减**）——与上面三个分包基线**是不同口径，不能互替**。
    *
@@ -825,8 +833,11 @@ export const BASELINE = {
    * `1341 / 8 / 0 / 0 passed`，并打黄字 `⚠ CI 全量 1349 > 基线 1347：
    * 请更新 BASELINE.ciRustTestsTotal`。**本地与 CI 是两条独立的格子**，同一个增量
    * 会各欠一次，回填时必须两边一起看。
+   *
+   * 1439 = 1431 + 8 + 0 + 0（2026-10-10 批「S2.7 步 1 判据补全」同步 +2，见
+   * `rustTests` 的同日注）。前值 1437 = 1429 + 8 + 0 + 0（批 S2.6 同步 +5）。
    */
-  ciRustTestsTotal: 1437,
+  ciRustTestsTotal: 1439,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *
@@ -1146,10 +1157,12 @@ export const BASELINE = {
    * 在日志里与「全绿」长得一模一样。而 `plan/13` 的 S5 批次正文正引用着「现 42 例」，
    * 也就是说这个数字**已经在正文里被复述**，却没有任何东西守它。
    *
-   * 42 = 2026-10-08 实测（`e2e/cases/` 下 `^t\d.*\.mjs$` 的文件数，与 `58-e2e`
-   * 的发现逻辑同一条判据，不另写一份数法）。
+   * 43 = 2026-10-10 实测（`e2e/cases/` 下 `^t\d.*\.mjs$` 的文件数，与 `58-e2e`
+   * 的发现逻辑同一条判据，不另写一份数法）。42 → 43 的 +1 是 `t43`——S2.7 的
+   * ADR-049 判据「删掉 `messages.json` 后会话仍能开且历史完整」。前值 42 =
+   * 2026-10-08 实测。
    */
-  e2eCases: 42,
+  e2eCases: 43,
   /**
    * verify 程序的 `assert!` **总数**（棘轮，只许涨）——见 `gate.d/55-verify.mjs`。
    *
