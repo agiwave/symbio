@@ -799,7 +799,7 @@ export const BASELINE = {
   //   整列、读侧闸 ⇒ 空且不扫）。同批退役 `#[ignore]` 的 `slo_scan_wal_roots`
   //   手工扫描口（职责被上面两件接走）。
   //   实测口径同前：`cargo test -p symbio -p symbio-cli`，取首个 `test result: ok. N passed`。
-  rustTests: 1421,
+  rustTests: 1429,
   /**
    * CI 口径的 Rust 通过数（**只增不减**）——与上面三个分包基线**是不同口径，不能互替**。
    *
@@ -826,7 +826,7 @@ export const BASELINE = {
    * 请更新 BASELINE.ciRustTestsTotal`。**本地与 CI 是两条独立的格子**，同一个增量
    * 会各欠一次，回填时必须两边一起看。
    */
-  ciRustTestsTotal: 1429,
+  ciRustTestsTotal: 1437,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

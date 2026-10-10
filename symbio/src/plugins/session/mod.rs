@@ -14,6 +14,7 @@ mod model_chat;
 mod options;
 mod orchestrator;
 pub(crate) mod paths;
+pub(crate) mod rebuild;
 mod resume;
 pub(crate) mod round_hook;
 mod stats;

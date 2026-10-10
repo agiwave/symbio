@@ -179,7 +179,11 @@ impl SessionPlugin {
                     // 双源对账（轨 S 第一步）：与 transcript_of 走同一个入口，
                     // 口径只有一份（实际算法在 v2_reconcile::reconcile）。
                     self.reconcile_sources(id, &session, &live).await;
-                    session_content(&session, live, id)?
+                    // 与转写列表取**同一份**消息集合（含「缓存不在 ⇒ WAL 重建」那一步），
+                    // 否则叶子与列表会在缓存缺失时分叉：列表有历史、叶子空。
+                    let mut view = session;
+                    view.messages = self.stored_messages_of(id, view.messages).await;
+                    session_content(&view, live, id)?
                 }))
             }
             // 会话本身（`path` 即会话 id —— 具名新建时它就是**身份**，见
@@ -932,7 +936,53 @@ impl SessionPlugin {
         // 返回值一字不改——不一致时的处置是出声 + 落一条 `session.reconciled`
         // 事实，绝不是改读哪一份（那是 S2–S4 的事）。
         self.reconcile_sources(id, &session, &live).await;
-        Ok(ordered(overlay_live(session.messages, live)))
+        // 落库转写：`messages.json` 缓存优先，缓存不在 ⇒ 从 WAL **重建**（见下）。
+        let stored = self.stored_messages_of(id, session.messages).await;
+        Ok(ordered(overlay_live(stored, live)))
+    }
+
+    /// 落库转写的**读源**：`messages.json` 缓存优先；缓存不在（被删 / 尚未落盘）
+    /// ⇒ 从 WAL **重建**节点树。
+    ///
+    /// ## 为什么是「缓存不在才重建」而不是「一律重建」
+    ///
+    /// 这是 S2.7 的**第一步**（[ADR-049](../../../../docs/decisions/session.md#adr-049-wal-是会话唯一事实源sessionstore-降为缓存轨-s-的起点)
+    /// 的目标态：WAL 是唯一事实源、`messages.json` 是可重建的缓存）。两步分开走，
+    /// 每步独立可回退：
+    ///
+    /// 1. **本步**：缓存缺失时用重建兜底——判据「删掉 `messages.json` 后会话仍能开且
+    ///    历史完整」由此成立；缓存**在**时仍读缓存 ⇒ 对存量会话**零行为变更**；
+    /// 2. 下一步：主读路径整体切到重建，`messages.json` 彻底降为缓存。
+    ///
+    /// 一步做完的风险是「重建的形状与缓存有出入」与「读源切换」两件事同时发生，
+    /// 出了偏差分不清是谁的——S1 的并读对账就是为这种中间态存在的。
+    async fn stored_messages_of(
+        &self,
+        id: &str,
+        cached: Vec<cm::ChatMessage>,
+    ) -> Vec<cm::ChatMessage> {
+        if !cached.is_empty() {
+            return cached;
+        }
+        self.rebuild_from_wal(id).await.unwrap_or(cached)
+    }
+
+    /// 从 WAL 重建节点树（WAL 不在 / 读不了 ⇒ `None`，由调用方决定回落）。
+    ///
+    /// 只读打开（`open_readonly`：不创建文件、不截尾）——与 `v2_reconcile` 同一条纪律，
+    /// 读路径不得有写副作用。
+    async fn rebuild_from_wal(&self, id: &str) -> Option<Vec<cm::ChatMessage>> {
+        let dir = super::super::paths::session_dir(&self.storage_dir(), id);
+        let path = dir.join(super::super::paths::V2_WAL_FILE);
+        if !path.exists() {
+            return None;
+        }
+        let store = crate::symbio_core::EventWalStore::open_readonly(&path).ok()?;
+        // `range` 是 `Store` trait 的方法：trait 必须在作用域里（局部引入，
+        // 不为一次读取把这个 trait 抬进本文件的顶层导入）。
+        use crate::symbio_core::Store as _;
+        let snapshot = store.range(crate::symbio_core::Seq::new(0));
+        Some(super::super::rebuild::rebuild(&snapshot))
     }
 
     /// 双源对账（轨 S 第一步，[ADR-049](../../../../docs/decisions/session.md#adr-049-wal-是会话唯一事实源sessionstore-降为缓存轨-s-的起点)）。
