@@ -165,6 +165,30 @@ pub const EVENT_MESSAGE_EDITED: &str = "message.edited";
 /// 列表顺序，而顺序是呈现细节，不是事实）。
 pub const EVENT_MESSAGE_REMOVED: &str = "message.removed";
 
+/// 会话历史的**压缩快照**（载荷 `{ messages: [<ChatMessage JSON>…] }`——压缩后的整份列表）。
+/// 落在 `message × progressed`。
+///
+/// ## 为什么是 `message × progressed` 而不是 `system`
+///
+/// 用 [ADR-053](../../../../docs/decisions/session.md) 自己的判据：`session.reconciled`
+/// 归 `system` 是因为「它说的不是『这个会话发生了什么』，而是『两个读源此刻是否一致』」
+/// ——诊断。而压缩**确实发生过**：一段历史被摘要取代、列表从此读作快照那一份。那是
+/// **会话事实**，故归 `message`（本实体正是「消息列表上的变更」）。动词取 `progressed`
+/// 与 `memory.consolidated` 同——两者都是「巩固」。
+///
+/// ## 它取代前缀：live 段就是全史
+///
+/// 一条 `session.consolidated` **取代**它之前的所有消息事实：此后所有读侧
+/// （`rebuild` 折节点树、`transcript` 折对话行、`stats` 扫水位…）看到的「历史」
+/// 都是「最近快照 + 其后事实」。被取代的那一段**不删**——它移入归档段
+/// （`WalStore::archive_before`），留作审计与回溯。**不删是因为事实不可凭空消失**；
+/// 移出 live 段是因为「压缩」的语义就是「那段历史已被摘要取代」，而 live 段
+/// 承载的是**当前有效的历史**。
+///
+/// 于是「WAL 无界增长」与「上下文压缩」由**同一个机制**解决（ADR-053 决策 6）：
+/// 一次压缩 = 多一条快照事件 + 把被取代的前缀移入归档段。
+pub const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
+
 // ── 记忆格子（S5，[roadmap/S06 §3](../../../../docs/plan/roadmap/S06-长期记忆与语义检索.md)）────
 
 /// 编码：学到的语义内容 + embedding（`payload: { content, tag, generation, vec }`）。
@@ -273,10 +297,10 @@ pub enum Entity {
     Thread,
     Control,
     System,
-    /// 消息列表上的一次**变更**（编辑 / 删除）。见 [`EVENT_MESSAGE_EDITED`]。
+    /// 消息列表上的一次**变更**（编辑 / 删除 / 压缩快照）。见 [`EVENT_MESSAGE_EDITED`]。
     ///
     /// 与 `Turn` 的分界：`turn` 记的是「这一轮说了什么」，本实体记的是
-    /// 「列表里的某条被改成 / 去掉了」——它跨轮、不开始任何一轮。
+    /// 「列表里的某条被改成 / 去掉了 / 整段被摘要取代了」——它跨轮、不开始任何一轮。
     Message,
 }
 

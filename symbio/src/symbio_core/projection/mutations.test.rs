@@ -125,3 +125,90 @@ fn only_mutation_cells_are_collected() {
         "坐标不对 ⇒ 不收（载荷长得像不算）"
     );
 }
+
+// ── 压缩快照（取代格，S2.7-b2）──────────────────────────────────────
+
+use super::mutations_latest_snapshot;
+use crate::symbio_core::EVENT_SESSION_CONSOLIDATED;
+
+/// 一条 `session.consolidated`：载荷 `messages` = 压缩后的整份列表。
+fn snapshot(tag: &str, msgs: &[(&str, &str, &str)]) -> Event {
+    let messages: Vec<serde_json::Value> = msgs
+        .iter()
+        .map(|(id, role, text)| serde_json::json!({ "id": id, "role": role, "type": "text", "content": text }))
+        .collect();
+    Event::pending(
+        format!("snap-{tag}"),
+        EVENT_SESSION_CONSOLIDATED,
+        Entity::Message,
+        Verb::Progressed,
+        0,
+        "agent:main",
+    )
+    .with_payload(serde_json::json!({ "messages": messages }))
+}
+
+/// 取**最近**一条，并原样收下它那份列表。
+#[test]
+fn latest_snapshot_picks_the_most_recent_one() {
+    let evs = vec![
+        snapshot("a", &[("s-0", "user", "摘要一")]),
+        snapshot(
+            "b",
+            &[("s-1", "user", "摘要二"), ("k-0", "assistant", "近轮")],
+        ),
+    ];
+    let (i, msgs) = mutations_latest_snapshot(&evs).expect("有快照");
+    assert_eq!(i, 1, "取最近一条的**下标**（折方要的是「从哪接着折」）");
+    let ids: Vec<&str> = msgs.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(ids, vec!["s-1", "k-0"], "载荷里的列表按序收下");
+}
+
+/// 平凡值：没有快照事件 ⇒ `None`（整段历史照常折，与接线前逐字一致）。
+#[test]
+fn without_a_snapshot_event_there_is_nothing_to_rebase() {
+    assert!(mutations_latest_snapshot(&[edited("u-0", "user", "改过")]).is_none());
+}
+
+/// **空列表不是一份快照**：压缩恒产出「至少那条摘要消息」，而空数组若被当成有效
+/// 快照，后果是**整段历史被抹掉**——容错方向必须是「少折」而不是「多抹」。
+#[test]
+fn an_empty_snapshot_list_is_not_a_snapshot() {
+    assert!(mutations_latest_snapshot(&[snapshot("a", &[])]).is_none());
+}
+
+/// 坏载荷跳过、**继续往前找**：一条坏快照不该把此前有效的那一份一起吃掉。
+#[test]
+fn a_malformed_snapshot_does_not_eat_the_valid_one() {
+    let broken = Event::pending(
+        "snap-x",
+        EVENT_SESSION_CONSOLIDATED,
+        Entity::Message,
+        Verb::Progressed,
+        0,
+        "agent:main",
+    )
+    .with_payload(serde_json::json!({ "messages": "我不是数组" }));
+    let evs = vec![snapshot("a", &[("s-0", "user", "摘要一")]), broken];
+    let (i, msgs) = mutations_latest_snapshot(&evs).expect("前面那份仍然有效");
+    assert_eq!(i, 0);
+    assert_eq!(msgs.len(), 1);
+}
+
+/// 格子是 `(entity, verb)` 的**坐标**，不是 `kind` 一个词：同 kind 落在别的格子上
+/// 不是快照（否则「谁在什么位置说话」就没有判据了）。
+#[test]
+fn the_cell_must_be_message_progressed() {
+    let wrong_cell = Event::pending(
+        "snap-y",
+        EVENT_SESSION_CONSOLIDATED,
+        Entity::System,
+        Verb::Progressed,
+        0,
+        "agent:main",
+    )
+    .with_payload(serde_json::json!({
+        "messages": [{ "id": "s", "role": "user", "content": "x" }]
+    }));
+    assert!(mutations_latest_snapshot(&[wrong_cell]).is_none());
+}

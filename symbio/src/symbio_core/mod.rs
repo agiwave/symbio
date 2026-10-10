@@ -41,13 +41,15 @@ pub use event::{
 pub use event::{
     EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
     EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_EDITED,
-    EVENT_MESSAGE_REMOVED, EVENT_SESSION_RECONCILED, EVENT_USER_MESSAGE,
+    EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED, EVENT_SESSION_RECONCILED,
+    EVENT_USER_MESSAGE,
 };
 pub use invariants::check_all;
 pub use projection::calibration::calibration;
 pub use projection::checkpoint::checkpoint;
 pub use projection::cost::cost_ledger;
 pub use projection::fallback::fallback_rate;
+pub use projection::mutations::mutations_latest_snapshot;
 pub use projection::slo::slo_report;
 // 跨会话聚合的两个视图类型（P2，C-003 的单消费方判定见下）。
 //

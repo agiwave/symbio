@@ -183,3 +183,187 @@ fn an_edit_for_an_unknown_node_is_a_no_op() {
         vec![("user".to_string(), "问".to_string())]
     );
 }
+
+// ── 压缩快照：**换基**（取代格，S2.7-b2）──────────────────────────────
+
+/// 一条 `session.consolidated`（载荷 `messages` = 压缩后的整份列表）。
+fn snapshot(tag: &str, msgs: Vec<serde_json::Value>) -> Event {
+    Event::pending(
+        format!("snap-{tag}"),
+        crate::symbio_core::EVENT_SESSION_CONSOLIDATED,
+        Entity::Message,
+        Verb::Progressed,
+        0,
+        "agent:main",
+    )
+    .with_payload(serde_json::json!({ "messages": msgs }))
+}
+
+/// 快照列表里的一条消息（`ty = None` 即不写 `type`，与折进的补充同形）。
+fn msg(id: &str, role: &str, ty: Option<&str>, text: &str) -> serde_json::Value {
+    let mut v = serde_json::json!({ "id": id, "role": role, "content": text });
+    if let Some(t) = ty {
+        v["type"] = serde_json::json!(t);
+    }
+    v
+}
+
+/// 投影出的**完整条目**（折叠关心的不止 `(role, text)`——工具名与「不进请求包」
+/// 标记也是读侧语义）。
+fn full(events: &[Event]) -> Vec<super::TranscriptEntry> {
+    transcript()
+        .apply(events, i64::MAX, Budget::generous())
+        .value
+        .entries
+}
+
+/// 快照**取代**前缀：它之前的事件不参与，条目从载荷那份列表起。
+///
+/// 少了这一段，一次压缩在 prompt 面上等于**没发生过**——被压掉的历史全部复活，
+/// 而压缩的全部意义就是让它们不再进入上下文。
+#[test]
+fn a_snapshot_replaces_the_superseded_prefix() {
+    let events = vec![
+        user(0, "u-0", "被压掉的问题"),
+        assistant(0, "f-0", "被压掉的答复"),
+        snapshot(
+            "a",
+            vec![
+                msg("snap-root", "user", Some("text"), "[CONTEXT SNAPSHOT] 摘要"),
+                msg("u-1", "user", Some("text"), "保留的近轮问题"),
+                msg("f-1", "assistant", Some("text"), "保留的近轮答复"),
+            ],
+        ),
+        user(2, "u-2", "压缩之后的问题"),
+    ];
+    assert_eq!(
+        entries(&events),
+        vec![
+            ("user".to_string(), "[CONTEXT SNAPSHOT] 摘要".to_string()),
+            ("user".to_string(), "保留的近轮问题".to_string()),
+            ("assistant".to_string(), "保留的近轮答复".to_string()),
+            ("user".to_string(), "压缩之后的问题".to_string()),
+        ],
+        "换基之后：快照载荷 + 其后的事实，被压掉的一条都不在"
+    );
+}
+
+/// **只认最近一次**：更早的快照连它自己的列表都已被后来的快照取代。
+#[test]
+fn only_the_latest_snapshot_counts() {
+    let events = vec![
+        user(0, "u-0", "更早的问题"),
+        snapshot("a", vec![msg("s-a", "user", Some("text"), "第一份摘要")]),
+        user(1, "u-1", "中间的问题"),
+        snapshot(
+            "b",
+            vec![
+                msg("s-b", "user", Some("text"), "第二份摘要"),
+                msg("u-2", "user", Some("text"), "保留的近轮"),
+            ],
+        ),
+    ];
+    assert_eq!(
+        entries(&events),
+        vec![
+            ("user".to_string(), "第二份摘要".to_string()),
+            ("user".to_string(), "保留的近轮".to_string()),
+        ]
+    );
+}
+
+/// 空列表 / 坏载荷都**不是**快照 ⇒ 历史照常折。
+///
+/// 容错方向必须是「少折」而不是「多抹」：把一条坏载荷当快照，后果是整段历史
+/// 被抹掉——而列表短了没有任何东西会红。
+#[test]
+fn an_empty_or_malformed_snapshot_does_not_wipe_the_history() {
+    let broken = Event::pending(
+        "snap-x",
+        crate::symbio_core::EVENT_SESSION_CONSOLIDATED,
+        Entity::Message,
+        Verb::Progressed,
+        0,
+        "agent:main",
+    )
+    .with_payload(serde_json::json!({ "messages": "我不是数组" }));
+    let base = vec![user(0, "u-0", "问"), assistant(0, "f-0", "答")];
+    let mut with_broken = base.clone();
+    with_broken.push(broken);
+    assert_eq!(entries(&base), entries(&with_broken), "坏载荷不得抹掉历史");
+    let mut with_empty = base.clone();
+    with_empty.push(snapshot("empty", Vec::new()));
+    assert_eq!(entries(&base), entries(&with_empty), "空列表不得抹掉历史");
+}
+
+/// 快照**之后**的变更格照常折叠（换基不是终点，后面还有一整段 live 事实要折）。
+#[test]
+fn mutations_after_the_snapshot_still_fold() {
+    let events = vec![
+        user(0, "u-0", "被压掉的"),
+        snapshot(
+            "a",
+            vec![
+                msg("snap-root", "user", Some("text"), "摘要"),
+                msg("u-keep", "user", Some("text"), "保留的"),
+                msg("u-drop", "user", Some("text"), "保留但被删"),
+            ],
+        ),
+        edited("u-keep", "user", "保留的（改过）"),
+        removed(&["u-drop"]),
+    ];
+    assert_eq!(
+        entries(&events),
+        vec![
+            ("user".to_string(), "摘要".to_string()),
+            ("user".to_string(), "保留的（改过）".to_string()),
+        ]
+    );
+}
+
+/// 快照里的工具结果：`tool` 名取**父 ToolCall 节点**的 `name`
+/// （结果子节点只记 `parent_id`——事件投影里工具名来自 `artifact.added` 载荷，
+/// 两条路径取的是同一件事）。
+#[test]
+fn a_snapshot_tool_result_keeps_the_name_from_its_parent_call() {
+    let mut call = msg("T-call", "assistant", Some("tool_call"), "{\"path\":\"a\"}");
+    call["name"] = serde_json::json!("vdfs_read");
+    let mut result = msg("T-res", "tool", Some("text"), "文件正文");
+    result["parent_id"] = serde_json::json!("T-call");
+    let events = vec![snapshot("a", vec![call, result])];
+    let got = full(&events);
+    assert_eq!(got.len(), 1, "组合节点（ToolCall）自己不产行");
+    assert_eq!(got[0].role, "tool");
+    assert_eq!(got[0].text, "文件正文");
+    assert_eq!(
+        got[0].tool.as_deref(),
+        Some("vdfs_read"),
+        "工具名必须带上：role=tool 没名字会让 provider 整条拒绝"
+    );
+}
+
+/// 快照里的**界面文本**（`meta.exclude_from_context`）进转写但**不进请求包**。
+#[test]
+fn a_snapshot_report_node_stays_out_of_the_request_package() {
+    let mut report = msg("r-0", "assistant", Some("text"), "已经完成 1 轮工具调用");
+    report["meta"] = serde_json::json!({ "exclude_from_context": true });
+    let events = vec![
+        user(0, "u-0", "问"),
+        snapshot("a", vec![msg("s", "user", Some("text"), "摘要"), report]),
+        user(2, "u-2", "压缩之后的问"),
+    ];
+    let view = transcript()
+        .apply(&events, i64::MAX, Budget::generous())
+        .value;
+    assert_eq!(
+        view.entries.len(),
+        3,
+        "摘要 + 界面文本 + 压缩后的问：界面文本仍在转写里（用户看得见）"
+    );
+    assert_eq!(view.excluded().len(), 1, "且被标出来");
+    let sent: Vec<String> = view.to_messages().into_iter().map(|m| m.text).collect();
+    assert!(
+        !sent.iter().any(|t| t.contains("已经完成 1 轮")),
+        "界面文本不得进请求包：模型会以为那是它自己刚说的"
+    );
+}

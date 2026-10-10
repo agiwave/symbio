@@ -5,6 +5,9 @@
 
 use super::*;
 use crate::symbio_core::PluginSimpleRequest;
+// `Store` 是**测试自己**要的（`store.append` 是 trait 方法；父模块把它从顶层
+// 导入里删了——生产侧只读 `history()`）；`use super::*` 因此带不过来。
+use crate::symbio_core::Store;
 
 fn test_ctx() -> Arc<dyn PluginInvokeRequest> {
     Arc::new(PluginSimpleRequest::new(None, None))

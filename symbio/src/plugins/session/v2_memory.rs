@@ -140,7 +140,10 @@ pub(crate) fn recall_view(session_dir: &Path) -> Option<RecallView> {
             break;
         }
         match EventWalStore::open_readonly(&path) {
-            Ok(store) => events.extend(store.range(Seq::new(0))),
+            // `history()` 而非 `range()`（S2.7-b2）：召回是**跨会话累计**口径——
+            // 压缩归档把被取代的前缀移出 live 段后，只读 live 会**静默**丢掉
+            // 压缩前记下的记忆（那些 `memory.*` 事实仍在归档段里）。
+            Ok(store) => events.extend(store.history()),
             Err(e) => crate::plugin_warn!(
                 "session",
                 "[memory] 召回读取失败（{}）：{e}",

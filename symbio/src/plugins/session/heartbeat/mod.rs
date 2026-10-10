@@ -495,9 +495,13 @@ impl SessionPlugin {
 /// as-of 取上界 `i64::MAX`：问的是「这条目标**曾经**声明过吗」，与 `session/stats`
 /// 的复算同口径。升格靠**溯源**认（`task.opened` 的 `produced_by` 指回欲 seq），
 /// 不靠 goal 字符串相等，见 `conation` 模块头的边界一节。
+///
+/// 读 `history()` 而非 `range()`（S2.7-b2）：「**曾经**声明过」是累计口径——
+/// 压缩归档把被取代的前缀移出 live 段后，只读 live 会把压缩前声明过的目标
+/// 读成「没声明过」⇒ 每 tick 重开一条目标（静默的重复开工）。
 fn long_goal_declared(store: &EventWalStore, goal: &str) -> bool {
     conation()
-        .apply(&store.range(Seq::new(0)), i64::MAX, Budget::generous())
+        .apply(&store.history(), i64::MAX, Budget::generous())
         .value
         .is_declared(goal)
 }

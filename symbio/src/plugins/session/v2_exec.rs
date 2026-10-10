@@ -664,6 +664,17 @@ pub(crate) struct V2Turn<'a> {
     /// 三段都空的情形：首轮没有记忆、没有就绪任务、判定不出委派者。取法见
     /// `chat_loop` 的 `request_view_prefix`。
     pub prefix: Option<String>,
+    /// **本轮之前发生过压缩** ⇒ 压缩后的整份消息列表（S2.7-b2）。
+    ///
+    /// 由 `chat_loop` 从 [`SessionContext::consolidated`] 带来。落格动作在
+    /// [`execute_turn`] 里做——那是本插件**唯一**持写者令牌的时刻（见
+    /// `consolidate_into_wal` 的文档：压缩现场落格会拿到 `NotTheWriter`，而那是
+    /// 静默的）。
+    ///
+    /// `None` = 本轮没压过（常态）。
+    ///
+    /// [`SessionContext::consolidated`]: super::chat_loop::SessionContext::consolidated
+    pub consolidation: Option<&'a [ChatMessage]>,
 }
 
 /// 一轮 v2 原生产物的**全部出口**。
@@ -787,6 +798,159 @@ impl DeltaSink for SilentDeltaSink {
     fn on_tool_frame(&self, _frame: &ChatMessage) {}
 }
 
+/// **压缩入格 + 归档**（S2.7-b2）：把「本轮之前发生过一次压缩」变成一格事实
+/// （`message × progressed` = `session.consolidated`），并把被它取代的前缀移出 live 段。
+///
+/// ## 为什么写方是这里，而不是压缩现场
+///
+/// 事实只能由**持写者令牌**的一方落格（[`EventWalStore`] 的单写者闸门）。压缩跑在
+/// 步骤 3（`prepare_turn_inputs`）与步骤 6（`close_turn`），两处都**不持**令牌；令牌在
+/// 执行轮里随 WAL 打开而取。压缩现场落格会拿到 `NotTheWriter`，而那是**静默**的——
+/// 压缩照常生效、界面照常变短，只有事实源里少一条事件（于是切源之后，压缩在重建面
+/// 上等于没发生过）。所以压缩把「压成了什么」寄存在
+/// [`SessionContext::consolidated`](super::chat_loop::SessionContext::consolidated)
+/// （见该字段文档），由本函数在**下一个**执行轮落格。
+///
+/// ## 幂等：按**内容**比对，不按事件 id
+///
+/// 同一轮里执行口可能被调多次，而压缩只发生一次 ⇒ 第二次不该再落一条。判据是与
+/// live 段里**最近一份**快照逐 id 比对（[`crate::symbio_core::mutations_latest_snapshot`]）：
+/// 一致 ⇒ 这份已经落过了。用内容而不是事件 id 判，是因为「该不该落」这件事由
+/// **压成了什么**决定，而事件 id 只是它的名字。
+///
+/// ## 归档：快照即取代（b2 的语义）
+///
+/// 落格成功后调 [`EventWalStore::archive_before`]，把 `seq < 快照` 的事件整段移入归档段。
+/// **「上下文压缩」与「WAL 无界增长」因此由同一个机制解决**（ADR-053 决策 6）：一次压缩
+/// = 多一条快照事件 + 把被取代的前缀移走。归档段不删——ADR-053 迁移表 b2 行的
+/// 「零回退损失」正靠它（各段按号序拼接 + live，逐条不重不漏 = 原 WAL）。
+///
+/// ## 载荷带**轮次水位**（`turns`）
+///
+/// 归档把被取代的轮次移出 live 段，而轮号是数 live 段里的 `user.message` 得来的
+/// （[`count_user_messages`]）⇒ 不补水位，压缩之后轮号会**从 1 重新数起**，而
+/// `u-{turn}` 是幂等键：重号会让新轮的用户格撞 `Duplicate` 静默落不进去。所以快照
+/// 必须把「我取代了多少轮」一起带走——水位是历史状态的一部分，不是派生细节。
+///
+/// ## 失败一律**不致命**
+///
+/// 落格失败 ⇒ 告警并放弃归档（live 段保持完整）。归档失败 ⇒ 告警。两者都不回错给
+/// 调用方：压缩**已经发生**（消息列表已重写、界面已变短），把它升级成整轮失败等于
+/// 用「记不下来」换「答不出来」——与缺口 4 的汇报落格同一条口径。
+///
+/// 返回新落快照事件的 `seq`（`None` = 没有要落的，或这份已经落过）。
+///
+/// 入参是 `principal` 而不是 `ActorSpec`：本格只用到主体名，而两个调用点一个在轮内
+/// （有 `ActorSpec`）、一个在轮外（只有名字）——收窄到真正用到的那一项。
+pub(crate) fn consolidate_into_wal(
+    store: &EventWalStore,
+    messages: &[ChatMessage],
+    principal: &str,
+) -> Option<Seq> {
+    let existing = store.range(Seq::new(0));
+    if let Some((_, prev)) = crate::symbio_core::mutations_latest_snapshot(&existing) {
+        if same_message_ids(&prev, messages) {
+            return None;
+        }
+    }
+    // 被取代前缀的末号 = 此刻 live 段的最后一条（新事件尚未落）。事件 id 取它：
+    // 同一份历史只压一次 ⇒ 同一个 id ⇒ 重放撞幂等键（`Duplicate`）而不是多出一条
+    // 快照；号空间单调 ⇒ 不同压缩点必不同 id。
+    let head = store.head().value();
+    let superseded_last = head.saturating_sub(1);
+    // 水位 = 被取代前缀里数得出的轮数（**同一个** `count_user_messages`，故套娃压缩
+    // 会逐层累加：上一份快照的 `turns` 已计入它的前缀，本份自然接得上）。
+    let turns = count_user_messages(&existing);
+    let event = Event::pending(
+        format!("v2sc-{superseded_last}"),
+        crate::symbio_core::EVENT_SESSION_CONSOLIDATED,
+        Entity::Message,
+        Verb::Progressed,
+        // `turn = 0`：压缩不属于任何一轮——它发生在轮**边界**上，被取代的是**多轮**的
+        // 历史（与 `memory.*` / `session.reconciled` 同一约定，见 plan/01 §6）。
+        0,
+        principal,
+    )
+    .with_ts(crate::symbio_core::clock_now_ms())
+    .with_payload(serde_json::json!({
+        "messages": messages,
+        "turns": turns,
+    }));
+    // 溯源锚 = 被取代前缀的末号（「这份快照是在那段历史之上压出来的」）。空 WAL
+    // （迁移前的历史只存在于 `messages.json`）时**无锚可指** ⇒ 不设：I2 不要求
+    // `progressed` 带溯源，编一个 `0` 反而是假锚。
+    let event = if head > 0 {
+        event.with_produced_by(superseded_last)
+    } else {
+        event
+    };
+    let seq = match store.append(event) {
+        Ok(seq) => seq,
+        Err(e) => {
+            crate::plugin_warn!(
+                "session",
+                "[Session] 压缩入格失败（压缩已生效，事实源缺这一格）: {e:?}"
+            );
+            return None;
+        }
+    };
+    // 快照即取代：被取代的前缀移出 live 段（归档段不删）。失败**不回错**——归档是
+    // 增长优化、不是正确性前提；live 段一字未动（见 `archive_before` 的崩溃安全说明）。
+    match store.archive_before(seq) {
+        Ok(_) => {}
+        Err(e) => crate::plugin_warn!(
+            "session",
+            "[Session] 压缩归档失败（live 段保持完整，仅未缩短）: {e}"
+        ),
+    }
+    Some(seq)
+}
+
+/// 两份消息列表的 id 序列是否一致（压缩入格的幂等判据）。
+///
+/// **只比 id、不比正文**：快照的语义是「这份列表**取代**了它之前的一切」——判据是
+/// **身份**，不是内容。正文在快照落格之后仍可被 `message.edited` 改（那是另一条事实），
+/// 把它也算进判据会让「同一份快照」在编辑之后不再相等。
+fn same_message_ids(a: &[ChatMessage], b: &[ChatMessage]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.id == y.id)
+}
+
+/// **轮外**压缩落格（S2.7-b2）：给 `context::retry_compaction` 用。
+///
+/// ## 为什么它需要一条自己的路
+///
+/// 用户重试压缩跑在 turn 循环**之前**（`process_resume` 在循环前调用它，之后一律
+/// `Done`），所以没有「下一个 [`execute_turn`]」可以寄存——那条路唯一能落格的时刻
+/// 就是它自己。此刻无人持写者令牌（循环还没开始），于是自己开一次 WAL 并交给
+/// [`consolidate_into_wal`]——**落格实现仍是同一个**，差别只在谁持令牌。
+///
+/// ## 失败只告警
+///
+/// 打不开 / 拿不到令牌（同会话上有并发请求）⇒ 只告警并放弃。口径与轮内一致：压缩
+/// **已经生效**（消息列表已重写、界面已变短），把它升级成整轮失败等于用「记不下来」
+/// 换「答不出来」。
+pub(crate) fn consolidate_outside_turn(
+    session: &PersistentChatSession,
+    messages: &[ChatMessage],
+    principal: &str,
+) {
+    let Some(dir) = session.session_dir() else {
+        return;
+    };
+    let wal = dir.join(super::paths::V2_WAL_FILE);
+    let store = match EventWalStore::open(&wal) {
+        Ok(s) => s,
+        Err(e) => {
+            crate::plugin_warn!(
+                "session",
+                "[Session] 轮外压缩入格：WAL 打开失败（压缩已生效，事实源缺这一格）: {e}"
+            );
+            return;
+        }
+    };
+    consolidate_into_wal(&store, messages, principal);
+}
+
 /// **定稿答话轮**（缺口 5）：`classify` 判 `Answered` ⇒ 本轮**一个模型请求都不发**，
 /// 但轮次事实（用户格 + 收束格）仍须由 v2 运行器落。
 ///
@@ -817,6 +981,10 @@ impl DeltaSink for SilentDeltaSink {
 /// 短路发生在**用到它们之前**（`TurnRunner::run_with_tools` 步骤 1b）——这一轮一次模型
 /// 往返都不发。仍然照签名传，是因为「工具轮入口」只有那一个：另开一个入口就得把
 /// 「用户格 + 收束格」的落格逻辑写第二遍，那才是真正的重复。
+///
+/// 形参到 8 个（`consolidation` 是 S2.7-b2 加的）：与 [`execute_turn`] 同一条口径
+/// ——「一轮的全部输入」本就是一个宽签名，收成结构体只会把同一次调用拆成两处。
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_final_reply_turn(
     session: &PersistentChatSession,
     ctx: &Arc<dyn crate::symbio_core::PluginInvokeRequest>,
@@ -825,6 +993,10 @@ pub(crate) async fn execute_final_reply_turn(
     user_text: &str,
     user_node_id: Option<String>,
     reply: &str,
+    // 本轮之前发生过压缩 ⇒ 压缩后的整份消息列表（S2.7-b2，与 [`execute_turn`] 同源）。
+    // 答话轮在步骤 2 就短路收尾，**不进** [`execute_turn`]，所以它也得自己落这一格
+    // ——否则「上一轮末尾压过一次、这一轮是答话轮」时那次压缩永远不入格。
+    consolidation: Option<&[ChatMessage]>,
 ) -> Result<(), PluginError> {
     let dir = session.session_dir().ok_or_else(|| {
         PluginError::InternalError("v2 执行需要持久会话（临时会话无事实源）".into())
@@ -839,6 +1011,12 @@ pub(crate) async fn execute_final_reply_turn(
     // 身份与档位取值点同 [`execute_turn`]：主体 = 会话选定的那个 agent；档位 = 深度
     // （`Answered` 轮没有可跳过的模型调用，不属于反射档）。
     let principal = super::chat_loop::request_principal(ctx.as_ref());
+    // 压缩入格 + 归档：与 [`execute_turn`] 同序（在 `turn_no` 之后、运行器之前）。
+    // 放在 `actor` 构造**之前**：`ActorSpec::trivial` 按值吃 `principal`（无克隆），
+    // 顺序反了就得为一次借用多克隆一个字符串。
+    if let Some(msgs) = consolidation {
+        consolidate_into_wal(&store, msgs, &principal);
+    }
     let actor = ActorSpec {
         budget_ms: LatencyTier::Deep.budget_ms(),
         ..ActorSpec::trivial(principal)
@@ -901,6 +1079,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         skill_obs,
         skill_hits,
         prefix,
+        consolidation,
     } = req;
     // 事实源：per-session v2 WAL（与运行器落格同一个文件——一份网格）。
     let dir = session.session_dir().ok_or_else(|| {
@@ -1053,6 +1232,19 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         budget_ms: tier.budget_ms(),
         ..ActorSpec::trivial(principal.clone())
     };
+
+    // ── 压缩入格 + 归档（S2.7-b2）─────────────────────────────────────────
+    //
+    // **必须在 `(turn_no, resume_anchor)` 之后**：归档把被取代的轮次移出 live 段，而
+    // `last_open_turn`（续写轮靠它找未收束的那一轮）与 `count_user_messages`（轮号）
+    // 都是在归档**之前**的 live 段上算出来的。顺序反了，续写会报「找不到未收束的轮次」。
+    //
+    // 也必须**在运行器之前**：本轮自己的用户格是运行器落的，先归档才能让
+    // 「本轮之前的一切」被完整取代（否则快照与它后面的新事件之间会夹着被取代的旧事件，
+    // live 段不再自洽）。
+    if let Some(msgs) = consolidation {
+        consolidate_into_wal(&store, msgs, &principal);
+    }
 
     let mut produced = Vec::new();
     // 工具执行层交回的收束派生事实（承诺 / 任务表 / 熔断）——只有工具轮（深度档）才有，
@@ -1351,8 +1543,16 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
     }
 
     let response = (!outcome.fell_back).then_some(outcome.text.as_str());
-    match store
-        .range(Seq::new(0))
+    // 本轮开口格（`u-{turn}`）的 seq —— 记忆 / 任务 / 承诺的溯源锚。
+    //
+    // 读 `history()` 而非 `range()`（S2.7-b2）：这三个写方（`record_derived` 的
+    // 承诺与任务表 / `record_learning` 的记忆三段）都是**累计口径**——它们的幂等
+    // 判据与状态推导要看**曾经**落过什么。压缩归档把被取代的前缀移出 live 段后，
+    // 只读 live 会让它们看不见压缩前的事实：幂等判据失效 ⇒ 重复落格，或状态
+    // 丢失（例如压缩前开的任务在就绪集里消失）。`user_seq` 本身取的是**本轮**
+    // 开口（在 live 段里），但同一次读取顺带把历史带上，省一次 IO。
+    let all = store.history();
+    match all
         .iter()
         .find(|e| e.kind == EVENT_USER_MESSAGE && e.turn == turn_no)
         .and_then(|e| e.seq.map(|s| s.value()))
@@ -1364,7 +1564,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
             if let Err(why) = super::v2_facts::record_derived(
                 &wal,
                 &store,
-                &store.range(Seq::new(0)),
+                &all,
                 turn_no,
                 user_seq,
                 &principal,
@@ -1383,7 +1583,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                 // `&*store`：后者会被 clippy 判 `needless_borrow`（它建议 auto-deref，
                 // 但 auto-deref 到 `Arc` 本身，而 `Arc<WalStore>` 不实现 `Store`）。
                 store.as_ref(),
-                &store.range(Seq::new(0)),
+                &all,
                 turn_no,
                 user_seq,
                 user_text,
@@ -1439,13 +1639,36 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
 }
 
 /// WAL 内 `user.message` 计数（新开轮的 turn 号；与桥同一口径）。
+///
+/// ## 为什么必须加上快照水位（S2.7-b2）
+///
+/// 压缩把被取代的轮次**移出 live 段**（[`consolidate_into_wal`] 的归档），而归档后的
+/// live 段里可能一条 `user.message` 都不剩（只剩快照 + 本轮新落的事件）⇒ 只数 live 段
+/// 会让轮号**倒退**：压缩之后从 1 重新数起。而 `u-{turn}` 是幂等键，重号会让新轮的
+/// 用户格撞 `Duplicate` —— 那是**静默**的（那一轮在事实网格里没有用户格，下一轮 prompt
+/// 里整段消失）。所以水位必须随快照一起带过来：快照载荷的 `turns` = 它取代了多少轮。
+///
+/// 口径仍是「数 `user.message`」，只是分成「快照之前（读它的 `turns`）」+
+/// 「快照之后（数 live 事件）」两段相加——套娃压缩因此逐层累加，不会丢也不会重。
 fn count_user_messages(events: &[Event]) -> u64 {
-    events
+    let (start, base) = match crate::symbio_core::mutations_latest_snapshot(events) {
+        Some((i, _)) => (i + 1, consolidated_turns(&events[i])),
+        None => (0, 0),
+    };
+    base + events[start..]
         .iter()
         .filter(|e| {
             e.entity == Entity::Turn && e.verb == Verb::Opened && e.kind == EVENT_USER_MESSAGE
         })
         .count() as u64
+}
+
+/// 快照事件载荷里的**轮次水位**（[`EVENT_SESSION_CONSOLIDATED`] 的 `turns`）。
+///
+/// 缺失 / 非数 ⇒ `0`：那是旧版本写的快照（水位字段是 b2 才加的）。降级方向是
+/// 「轮号从头数起」而不是「算出一个错的水位」——宁可保守。
+fn consolidated_turns(e: &Event) -> u64 {
+    e.payload.get("turns").and_then(|v| v.as_u64()).unwrap_or(0)
 }
 
 /// **已开未收束**的轮次（`turn × opened` 无同号收束）：返回 `(turn, 用户格 seq)`。

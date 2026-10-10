@@ -94,6 +94,31 @@ fn lock_path(wal: &Path) -> PathBuf {
     wal.with_file_name(name)
 }
 
+/// 归档段的存放子目录（相对 WAL 所在目录）。
+///
+/// 与 [`plugins::session::paths`](../../plugins/session/paths.rs) 的
+/// `TRANSCRIPTS_SUBDIR` **同字面量**，但**不 import** 它：`symbio_core` 不得依赖
+/// plugins（分层，core-naming-audit N-002）。这是有意保留的一处重复——改这里
+/// 必须同步改 `paths.rs`（那边有对应注释指向本常量）。
+///
+/// 放在 `transcripts/` 之下而不是与会话文件同级：VDFS 会话树是**显式构造**的
+/// （不走 `read_dir`），故这个子目录不会漏进前端的文件列表。
+const WAL_ARCHIVE_SUBDIR: &str = "transcripts/wal-archive";
+
+/// 归档段的路径：`<wal 所在目录>/transcripts/wal-archive/<wal 文件名>.<first>-<last>`。
+///
+/// 段名带上首末号：①「这段覆盖哪一号区间」在文件名上直接可读；② 同一次归档
+/// 重复执行会落到同一个名字（幂等，`File::create` 覆盖），不同次归档天然不同名，
+/// 不会互相覆盖。
+fn archive_path(wal: &Path, first: u64, last: u64) -> PathBuf {
+    let mut name = wal.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".{first}-{last}"));
+    wal.parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(WAL_ARCHIVE_SUBDIR)
+        .join(name)
+}
+
 impl<E> WalStore<E>
 where
     E: EventEnvelope + serde::Serialize + serde::de::DeserializeOwned,
@@ -188,12 +213,217 @@ where
     /// 由已重放的事件构造内存形态（`ids` / `head` 都是它的派生量）。
     fn build(path: PathBuf, events: Vec<E>, writer: Option<File>) -> Self {
         let ids = events.iter().map(|e| e.event_id().to_string()).collect();
-        let head = events.len() as u64;
+        // **head 是「下一个号」，不是「已有几条」**。
+        //
+        // 两者只在「号从 0 起、无缺口」时相等——而那正是**归档之前**的形态。
+        // 段归档把被取代的前缀移走之后，live 文件里的号从 `cut` 起，条数少于号：
+        // 此时按条数算 head 会**倒退**（例：live 段只剩 seq 10/11/12，条数 3 ⇒ head=3
+        // ⇒ 下一次 append 分配 3，与既有的 10 撞号且不单调——N2 静默破裂）。
+        // 故取两者上界：正常文件得 `max_seq+1`（= 条数），归档后得 `max_seq+1`（> 条数），
+        // 旧版本写下的 `seq: null` 行退回条数（与归档前的行为逐字相同）。
+        let head = events
+            .iter()
+            .filter_map(|e| e.seq())
+            .map(|s| s.value() + 1)
+            .max()
+            .unwrap_or(0)
+            .max(events.len() as u64);
         WalStore {
             path,
             writer,
             inner: RwLock::new(WalInner { events, ids, head }),
         }
+    }
+
+    /// **段归档**：把 `seq < cut` 的事件移入归档段，live 文件从 `cut` 起。
+    ///
+    /// 由 [`EVENT_SESSION_CONSOLIDATED`](crate::symbio_core::EVENT_SESSION_CONSOLIDATED)
+    /// 的写方调用（压缩成功之后）：快照**取代**了它之前的一切，那些事件对 live 读侧
+    /// 不再有意义（读侧要的是「当前有效的历史」），而它们仍然**不可删**（审计 / 回溯）。
+    /// 于是「上下文压缩」与「WAL 无界增长」由同一个机制解决（ADR-053 决策 6）。
+    ///
+    /// ## 返回值
+    ///
+    /// - `Ok(Some(n))`：`n` 条事件移入归档段；
+    /// - `Ok(None)`：**没有可归档的前缀**（`cut` 落在第一条上），或本实例不持写者令牌
+    ///   ——两者都是「这次不归档」，不是失败。调用方在调用前已成功 `append` 过
+    ///   （那是它拿到令牌的证据），故第二条实际不可达，留着只为方法自身可独立使用。
+    ///
+    /// ## 崩溃安全：**先归档、后换 live**
+    ///
+    /// 1. 把当前 live 文件的**被取代前缀**逐字节写进归档段（先写 `<archive>.tmp`、
+    ///    `sync_all`、再 `rename` ⇒ 归档段原子出现），不重序列化 ⇒ 不引入序列化漂移；
+    /// 2. 把**尾部**逐行**原样**写进 `<wal>.new`（同样不重序列化），`sync_all`；
+    /// 3. `rename(<wal>.new, <wal>)`——原子替换。
+    ///
+    /// 任一步失败 ⇒ live 文件**一字未动**（归档是增长优化，不是正确性前提）。
+    /// 步骤 1 之前 / 之中崩溃：live 完整，归档段尚未出现（`.tmp` 残留无害）。
+    /// 步骤 1 与 3 之间崩溃：live 仍完整（归档段多一份前缀副本，重跑幂等）。
+    /// **不存在「归档成功但 live 丢了」的窗口**。
+    ///
+    /// ## 段与段之间不重叠
+    ///
+    /// 归档段**只装被取代的前缀**，不装尾部。于是「全部归档段（按号序拼接）+
+    /// live」恰好等于完整事件史，**逐条不重不漏**——这是 ADR-053 迁移表 b2 行
+    /// 「零回退损失」的可执行依据：回退时把各段与 live 依次拼接即得原 WAL。
+    /// （若归档段改成复制整份世界，则相邻段的尾部会重复，拼接就不再是无损还原。）
+    ///
+    /// ## 号与幂等键
+    ///
+    /// `head`（下一个号）**不变**——归档挪走的是历史，不是号空间。归档段的
+    /// `event_id` 随之离开内存里的幂等键集合：重放一条已归档的事件不会再撞
+    /// `Duplicate`。这是可接受的——幂等键防的是**同一次操作重复落格**，而归档
+    /// 之后不会再有人重放那些操作。
+    ///
+    /// ## 归档段保留策略：**不自动删除**
+    ///
+    /// 归档段是「回退零损失」的依据（ADR-053 迁移表 b2 行）：它们不参与常规读，
+    /// 但必须还在。删除策略要单独定——那是在决定「哪些事实可以不再可回溯」，
+    /// 与 ADR-049「事实是发生过什么」直接相关，不该顺手做。
+    pub fn archive_before(&self, cut: Seq) -> std::io::Result<Option<usize>> {
+        let mut inner = self.inner.write().expect("WalStore 锁中毒");
+        if self.writer.is_none() {
+            return Ok(None);
+        }
+        if !self.path.exists() {
+            return Ok(None);
+        }
+        // 第一个「不该被归档」的事件。`seq` 缺失（旧版本行）按最大处理 ⇒ 不归档它。
+        let cut = cut.value();
+        let split = inner
+            .events
+            .iter()
+            .position(|e| e.seq().map(Seq::value).unwrap_or(u64::MAX) >= cut)
+            .unwrap_or(inner.events.len());
+        if split == 0 {
+            return Ok(None);
+        }
+
+        // 原文只读一次：前缀与尾部都从这同一份字节切出（不重序列化）。
+        let raw = std::fs::read(&self.path)?;
+        let mut lines: Vec<&[u8]> = raw.split(|b| *b == b'\n').collect();
+        if lines.last().is_some_and(|l| l.is_empty()) {
+            lines.pop(); // 末行的换行符切出的空尾
+        }
+        // `replay` 遇到第一条坏行即停 ⇒ 前 `events.len()` 行**就是**那些事件。
+        let good = &lines[..lines.len().min(inner.events.len())];
+
+        // ── 1. 归档段 = 被取代的前缀（逐字节，原子出现）────────────────────
+        let (first, last) = (
+            inner.events[0].seq().map(Seq::value).unwrap_or(0),
+            inner.events[split - 1].seq().map(Seq::value).unwrap_or(0),
+        );
+        let archive = archive_path(&self.path, first, last);
+        if let Some(dir) = archive.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let mut tmp_name = archive.file_name().unwrap_or_default().to_os_string();
+        tmp_name.push(".tmp");
+        let archive_tmp = archive.with_file_name(tmp_name);
+        {
+            let mut f = std::fs::File::create(&archive_tmp)?;
+            for line in &good[..split] {
+                f.write_all(line)?;
+                f.write_all(b"\n")?;
+            }
+            f.sync_all()?;
+        }
+        // 归档段先落稳，再动 live——顺序反了就会存在「live 已换、归档未稳」的窗口。
+        std::fs::rename(&archive_tmp, &archive)?;
+
+        // ── 2. 尾部逐行原样写出 ────────────────────────────────────────────
+        // 逐行**搬运原文**而不是 `serde_json::to_vec` 重序列化：`payload` 是
+        // `serde_json::Value`，重序列化的键序与原文不保证一致，而 WAL 是**盘上
+        // 权威**——搬运应当逐字节保真，判据（`recovery_*`）也才有意义。
+        let mut staged_name = self.path.file_name().unwrap_or_default().to_os_string();
+        staged_name.push(".new");
+        let staged = self.path.with_file_name(staged_name);
+        {
+            let mut f = std::fs::File::create(&staged)?;
+            for line in &good[split..] {
+                f.write_all(line)?;
+                f.write_all(b"\n")?;
+            }
+            f.sync_all()?;
+        }
+
+        // ── 3. 原子替换 live ───────────────────────────────────────────────
+        std::fs::rename(&staged, &self.path)?;
+
+        // ── 4. 内存跟着走（`head` 不动——见方法文档）────────────────────────
+        let kept = inner.events.split_off(split);
+        inner.ids = kept.iter().map(|e| e.event_id().to_string()).collect();
+        inner.events = kept;
+        Ok(Some(split))
+    }
+
+    /// **完整事件史**：全部归档段（按号序）+ live 段。
+    ///
+    /// ## 为什么读侧需要一个「含归档」的口
+    ///
+    /// [`archive_before`](Self::archive_before) 把被取代的前缀移出 live 段，于是
+    /// [`range`](Store::range) 看到的 live 段只是全局号空间的一个**窗口**——首号不是 0。
+    /// 对**消息 / 上下文**类读者（转写 / 重建 / 请求包）这正是要的：快照**取代**了
+    /// 那段历史，它们读 live 窗口 + 快照即可（`mutations_latest_snapshot` 会把
+    /// 快照之前的事件整段跳过）。
+    ///
+    /// 但对**累计口径**的读者（不变量 C1 的「无跳号」/ SLO 四列 / 声誉 / 成本台账 /
+    /// 记忆召回与巩固 / 任务状态）而言，被归档的事件**仍然发生过**——钱花过、声誉
+    /// 挣过、记忆记过。只读 live 窗口会让它们**静默**少算（例如 C1 把窗口首号读成
+    /// 「应为 0 却得 k」⇒ 每次压缩后读数口凭空多一条违规）。故这类读者走本方法。
+    ///
+    /// 两种读者读的是**同一份事实**的两个投影，不是两份真源：`history() ⊇ range()`，
+    /// 差集恰是被取代的前缀（在归档段里，逐条不重不漏）。
+    ///
+    /// ## 归档段的读法
+    ///
+    /// 段名 `<wal 文件名>.<first>-<last>`（见 [`archive_path`]）：`first` 既是段内
+    /// 首号、也是排序键。逐段 `replay` 后**按段名首号升序拼接**，再把 live 段接上
+    /// ——不重排、不排序。归档段的号恒**严格小于** live 的号（`archive_before` 只搬
+    /// `seq < cut` 的前缀），故拼接结果对正常事件就是 `seq` 升序；而对旧版本落下的
+    /// `seq: null` 事件，保持它与 live 的**物理相对位置**（`range` 的口径）——
+    /// 若按 `seq` 排序，`None` 会被挤到末尾，把「退化到切片末尾」这类兜底判据搞反。
+    /// 目录不存在 / 某段读不开 ⇒ 跳过（与 `range` 的「读不开就是没有」同一口径）。
+    pub fn history(&self) -> Vec<E> {
+        let mut all: Vec<E> = Vec::new();
+        // ── 归档段（按段名首号升序读）──────────────────────────────────────
+        if let Some(dir) = self.path.parent().map(|p| p.join(WAL_ARCHIVE_SUBDIR)) {
+            let mut prefix = self.path.file_name().unwrap_or_default().to_os_string();
+            prefix.push(".");
+            let prefix = prefix.to_string_lossy().to_string();
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                let mut segments: Vec<(u64, PathBuf)> = Vec::new();
+                for ent in entries.flatten() {
+                    let name = ent.file_name().to_string_lossy().to_string();
+                    let Some(rest) = name.strip_prefix(&prefix) else {
+                        continue;
+                    };
+                    let Some((first, _last)) = rest.split_once('-') else {
+                        continue;
+                    };
+                    let Ok(first) = first.parse::<u64>() else {
+                        continue;
+                    };
+                    segments.push((first, ent.path()));
+                }
+                segments.sort_by_key(|(first, _)| *first);
+                for (_, path) in segments {
+                    if let Ok((events, _)) = Self::replay(&path) {
+                        all.extend(events);
+                    }
+                }
+            }
+        }
+        // ── live 段（原序接上）────────────────────────────────────────────
+        all.extend(
+            self.inner
+                .read()
+                .expect("WalStore 锁中毒")
+                .events
+                .iter()
+                .cloned(),
+        );
+        all
     }
 
     /// 已入库事件数（== `head().value()`；测试与断言用）。
@@ -274,3 +504,5 @@ mod tests;
 // panic-allow symbio/src/symbio_core/store/wal.rs::range: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow symbio/src/symbio_core/store/wal.rs::head: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
 // panic-allow symbio/src/symbio_core/store/wal.rs::append: 存储层灾难不可静默：WAL 打不开 / 写不进时继续跑等于事实源与读侧悄悄分叉。序列化自有类型失败同理。
+// panic-allow symbio/src/symbio_core/store/wal.rs::archive_before: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。
+// panic-allow symbio/src/symbio_core/store/wal.rs::history: std 锁中毒只在持锁期间 panic 时传播，本仓把这些锁当无中毒用（同一条约定）。改成毒后恢复是行为变更，需单独 ADR。

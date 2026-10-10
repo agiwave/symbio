@@ -12,7 +12,9 @@
 //! - `artifact.added`（`artifact × asserted`）→ `tool` 行（载荷 `tool` + `text`）。
 //!
 //! 另有**两个变更格**（`message.edited` / `message.removed`）——它们**不产行**，
-//! 而是改写 / 丢弃既有行。见 [`transcript`] 的文档。
+//! 而是改写 / 丢弃既有行；以及**一个取代格**（`session.consolidated`，压缩快照）——
+//! 它也不产行，而是把此前整段历史**换基**成载荷里那份列表。三者都见 [`transcript`]
+//! 的文档。
 //!
 //! ## 工具结果为什么也在转写里（[plan/10 批 3](../../../../docs/plan/10-工具轮v2化实施方案.md)）
 //!
@@ -30,10 +32,15 @@ use super::super::event::{
     event_payload_node_id, event_produced_text_node_id, event_tool_result_node_id, Entity, Event,
     Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
     EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_EDITED,
-    EVENT_MESSAGE_REMOVED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
+    EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
+};
+use super::super::schemas::session::chat_message::{
+    ChatMessage, MessageContent, MessageRole, MessageType,
 };
 use super::super::view::{Budget, View};
 use super::Projection;
+
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -186,6 +193,83 @@ impl TranscriptView {
     }
 }
 
+/// 压缩快照的载荷（压缩后的整份消息列表）→ 转写条目（含节点身份）。
+///
+/// ## 为什么必须有且只有这一处翻译
+///
+/// 快照载荷是**图语义**（[`ChatMessage`]：`parent_id` / `type` / 工具调用的父子），
+/// 而转写是**扁平三角色**。两者之间必须翻译一次。若 [`transcript`] 与
+/// `prompt_fidelity` 各译一遍，两份迟早对同一条给出两种读法——而那种分叉是
+/// **静默**的（一份折了、一份没折，没有任何东西会红），正是本仓反复栽的那个坑。
+///
+/// ## 翻译规则（与事件投影**同源**）
+///
+/// | 载荷里的节点 | 条目 |
+/// |---|---|
+/// | `role=user`（快照摘要那条 / 折进的补充 / 普通发言） | `user` 行 |
+/// | `role=assistant, type=text` | `assistant` 行（`meta.exclude_from_context` ⇒ 不进请求包） |
+/// | `role=tool, type=text` | `tool` 行（工具名取**父 ToolCall 节点**的 `name`） |
+/// | 其余（`Turn` / `ToolCall` / `Reasoning` 组合或非对话节点） | **不产行** |
+///
+/// 跳过 `Turn` / `ToolCall` / `Reasoning` **不是丢事实**：事件投影里它们同样不产行
+/// ——收束格产的那条 `assistant` 行**就是**它的 Text 子节点，工具格产的那条 `tool`
+/// 行**就是**结果子节点。组合节点只是承载结构。
+pub(crate) fn snapshot_entries(msgs: &[ChatMessage]) -> Vec<(String, TranscriptEntry)> {
+    // 工具名在**父 ToolCall 节点**上：结果子节点只记 `parent_id`（事件投影里工具名
+    // 来自 `artifact.added` 的载荷，两条路径取的是同一件事）。
+    let tool_names: HashMap<&str, &str> = msgs
+        .iter()
+        .filter(|m| m.msg_type == Some(MessageType::ToolCall))
+        .filter_map(|m| m.name.as_deref().map(|n| (m.id.as_str(), n)))
+        .collect();
+    msgs.iter()
+        .filter_map(|m| {
+            let role = m.role.as_ref()?;
+            let text = m
+                .content
+                .as_ref()
+                .map(MessageContent::to_text)
+                .unwrap_or_default();
+            let entry = match (role, &m.msg_type) {
+                (MessageRole::User, None | Some(MessageType::Text)) => TranscriptEntry {
+                    role: "user".into(),
+                    text,
+                    tool: None,
+                    exclude_from_context: false,
+                },
+                (MessageRole::Assistant, Some(MessageType::Text)) => TranscriptEntry {
+                    role: "assistant".into(),
+                    text,
+                    tool: None,
+                    exclude_from_context: meta_flag(m, "exclude_from_context"),
+                },
+                (MessageRole::Tool, None | Some(MessageType::Text)) => TranscriptEntry {
+                    role: "tool".into(),
+                    text,
+                    tool: m
+                        .parent_id
+                        .as_deref()
+                        .and_then(|p| tool_names.get(p))
+                        .map(|s| (*s).to_string()),
+                    exclude_from_context: false,
+                },
+                _ => return None,
+            };
+            Some((m.id.clone(), entry))
+        })
+        .collect()
+}
+
+/// `meta` 里的布尔标记（缺失 / 非布尔一律 `false`——容错方向是「少标记」而不是
+/// 「多标记」：多标一个 `exclude_from_context` 会让界面文本**静默**漏出请求包）。
+fn meta_flag(m: &ChatMessage, key: &str) -> bool {
+    m.meta
+        .as_ref()
+        .and_then(|v| v.get(key))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
 /// `transcript` 投影：从事件切片读出对话转写。
 ///
 /// ## 折叠：不只是追加（S2.7-b1，[ADR-053](../../../../docs/decisions/session.md)）
@@ -199,6 +283,16 @@ impl TranscriptView {
 /// |---|---|
 /// | `message.edited` | 按节点身份**换正文 / 角色**（位置不变） |
 /// | `message.removed` | 按节点身份**丢条目** |
+/// | `session.consolidated` | **换基**：此前整段历史由载荷里那份列表取代（S2.7-b2） |
+///
+/// ## 换基（压缩快照，S2.7-b2）
+///
+/// `session.consolidated` 的载荷是**压缩后的整份消息列表**。折叠动作是：先把它
+/// 经 [`snapshot_entries`] 收成基线，再从它**下标之后**接着折事实；它之前的事件
+/// 一律不参与。少了这一段，一次压缩在 prompt 面上等于**没发生过**——被压掉的
+/// 历史会全部复活，而压缩的全部意义就是让它们不再进入上下文。
+///
+/// **只认最近一次**：更早的快照连它自己的列表都已被后来的快照取代。
 ///
 /// ## 折叠是「先收索引、再投影」，不是「边投影边回头改」
 ///
@@ -206,7 +300,7 @@ impl TranscriptView {
 /// 顺序回放没法在处理原事件时就知道它后来被改了。做法是先把两个变更格收成一份索引
 /// （[`super::mutations::MessageMutations::collect`]），再投影——每条条目**出生时就
 /// 带着最终读法**，于是折叠与事件顺序无关（切片被裁过、手工改过也不会漏），也不
-/// 需要「先 push 再回头改」那套下标维护。
+/// 需要「先 push 再回头改」那套下标维护。快照同理：先定位它，再从它之后折。
 ///
 /// 索引本体与 `prompt_fidelity` 的复核**共用同一份**：两个出口因此不可能对同一条
 /// 消息给出两种读法（而那种分叉是静默的）。
@@ -235,7 +329,19 @@ pub fn transcript() -> Projection<TranscriptView> {
             entries.push(entry);
         };
 
-        for e in events {
+        // ── 换基：先收下快照那份列表，再从其下标之后接着折（见函数文档）────────
+        //
+        // 快照事件自身也受 `now` 约束（as-of 读视图：晚于 `now` 的压缩在那一刻
+        // 还没发生，历史就该按压缩**前**的样子读）。
+        let (start, snapshot) = match super::mutations::mutations_latest_snapshot(events) {
+            Some((i, msgs)) if events[i].ts <= now => (i + 1, msgs),
+            _ => (0, Vec::new()),
+        };
+        for (node, entry) in snapshot_entries(&snapshot) {
+            push(entry, node);
+        }
+
+        for e in &events[start..] {
             if e.ts > now {
                 continue;
             }
@@ -243,6 +349,9 @@ pub fn transcript() -> Projection<TranscriptView> {
                 // ── 变更格：**不产条目**——它们改的是既有条目（见函数文档）──────
                 (Entity::Message, Verb::Asserted, EVENT_MESSAGE_EDITED)
                 | (Entity::Message, Verb::Closed, EVENT_MESSAGE_REMOVED) => {}
+                // ── 取代格（压缩快照）：**不产条目**——它的那份列表已在上面换基
+                //    收下（见函数文档「换基」）。在这里再产一次就是同一段历史读两遍。
+                (Entity::Message, Verb::Progressed, EVENT_SESSION_CONSOLIDATED) => {}
                 (Entity::Turn, Verb::Opened, EVENT_USER_MESSAGE) => {
                     let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
                     push(

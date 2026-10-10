@@ -61,7 +61,7 @@ export const BASELINE = {
   // 向下（删测试）必须配 `// baseline-allow <key>: <理由>`（见 `35-baseline.mjs` 元守卫，防『悄悄下调基线』）。
   // 向上：门禁实测超过即自动把数字写回本文件，不在此堆各批次变更注释——变更原因看提交历史。
   // baseline-allow rustTests: 两次已归因的下修非侵蚀——批 P3 退役 `bridge` 转写路径（`v2_bridge.test.rs` 15 条缩到 `v2_facts.test.rs` 5 条 + 11 条迁与新增，逐条归属见上方注释）与批 S2.5 删 `v2_mode_defaults_to_full_and_roundtrips` 1 条（被测对象 `V2Mode` 随 ADR-051 退役）。
-  rustTests: 1454,
+  rustTests: 1492,
   // baseline-allow ciRustTestsTotal: 批 S2.5 的同一增量在 CI 口径下修一格（1425 → 1424，删 `v2_mode_defaults_to_full_and_roundtrips`），非侵蚀。
   ciRustTestsTotal: 1462,
   cliRustTests: 8,
@@ -70,9 +70,14 @@ export const BASELINE = {
   vitestTests: 856,
   verifyPrograms: 15,
   verifyNegatives: 3,
-  e2eCases: 44,
+  e2eCases: 45,
   verifyAsserts: 170,
-  panicSites: 70,
+  // 唯一一处**向上**的 panic 面（实测 71）：S2.7-b2 段归档新增 `WalStore::archive_before`
+  // 与 `WalStore::history`，两者各要拿一次同一个 `RwLock`，沿用本模块既有的「锁当无中毒用」
+  // 约定（同 `len`/`range`/`head` 的 `expect("WalStore 锁中毒")`）。两处均已按 PN-001 登记，
+  // 理由同构：改成毒后恢复是行为变更，需单独 ADR。这不是放宽棘轮——两处都是既有约定的
+  // 复制，不是新引入的健壮性缺口。
+  panicSites: 71,
 }
 
 

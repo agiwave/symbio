@@ -40,6 +40,10 @@
 //! 由 [`rebuild`] 主循环**先一步**按 id 折叠（表见 [`rebuild`] 的文档）。
 //! 把它们塞进 `nodes_of` 会得到「一次编辑多出一条节点」，而那正是折叠要防的事。
 //!
+//! `session.consolidated`（压缩快照）同理不产节点，但折法不同：它不是「改一条」而是
+//! 「**整段被摘要取代**」，所以由 [`rebuild`] 的**前置换基**处理——先把它载荷里那份
+//! 列表收成基线，再从它的下标之后接着折（见 [`rebuild`] 的文档）。
+//!
 //! **唯一允许的覆写是 `timestamp`**：构造器取「此刻」（`clock_now_ms`），而重建必须
 //! 是**纯函数**（同一事件序列 ⇒ 逐字相同的输出，N1）。故本模块一律把时间戳覆写成
 //! 事件自身的 `ts`——它才是「这件事发生在什么时候」的权威答案。
@@ -94,6 +98,19 @@ use super::message_build::{llm_build_text_node, llm_build_tool_call_node, llm_bu
 ///
 /// 少了这一段，一次截断在重建面上等于**没发生过**——被删的消息会复活。
 ///
+/// ## 压缩快照：**取代**前缀（S2.7-b2）
+///
+/// `session.consolidated`（`message × progressed`）不是「改一条」，而是「**整段被摘要
+/// 取代**」：它的载荷就是压缩后的整份消息列表，因此重建从它**开始**——先把它那份列表
+/// 按序收下，再从它的**下标之后**接着折事实。它之前的事件一律不再参与（live 段承载的
+/// 是**当前有效的历史**；被取代的那一段移入归档段，见 [`crate::symbio_core::EventWalStore`]）。
+///
+/// 少了这一段，一次压缩在重建面上等于**没发生过**——被压掉的消息会全部复活，
+/// 而压缩的全部意义就是让它们不再进入上下文。
+///
+/// **只认最近一次**：更早的快照连它自己的列表都已被后来的快照取代。与变更格同一纪律
+/// （先收索引、再投影）：快照排在它取代的那些事件之后，一趟顺序回放没法边扫边定。
+///
 /// ## 为什么被删节点的 `seq` 留缺口
 ///
 /// 号按**发射顺序**发，删节点不回收号：`seq` 是**顺序锚**（谁在谁前面），不是
@@ -111,7 +128,23 @@ pub fn rebuild(events: &[Event]) -> Vec<ChatMessage> {
     let mut gone: HashSet<String> = HashSet::new();
     let mut seq: i64 = 0;
 
-    for e in events {
+    // ── 压缩快照：先收下它那份列表，再从其下标之后接着折（见函数文档）────────
+    let (start, snapshot_messages) = match crate::symbio_core::mutations_latest_snapshot(events) {
+        Some((i, msgs)) => (i + 1, msgs),
+        None => (0, Vec::new()),
+    };
+    for mut m in snapshot_messages {
+        // 号按**本函数自己的发号器**重发，不用载荷里那份：载荷那份是**存储层**的槽位号
+        // （`snapshot_slot_seq` 的口径），而重建的号是重建自己的顺序锚。两套号混用会让
+        // 「快照列表内部单调、与后继事件不单调」——而前端的排序键只有一个。
+        // ADR-049 已判定「切源后 `seq` 分配属呈现细节」。
+        seq += 1;
+        m.seq = Some(seq);
+        at.insert(m.id.clone(), out.len());
+        out.push(m);
+    }
+
+    for e in &events[start..] {
         match (e.entity, e.verb, e.kind.as_str()) {
             (Entity::Message, Verb::Asserted, EVENT_MESSAGE_EDITED) => {
                 if let Some(m) = edited_node(e) {

@@ -149,10 +149,7 @@ fn the_fidelity_check_reports_every_gap_it_claims_to() {
     assert!(
         role_bad.gaps.iter().any(|g| matches!(
             g,
-            Gap::RoleMismatch {
-                expected: "user",
-                ..
-            }
+            Gap::RoleMismatch { expected, .. } if expected == "user"
         )),
         "必须报出「角色不符」：{}",
         role_bad.summary()
@@ -366,4 +363,76 @@ fn removed(ids: &[&str]) -> Event {
         "user",
     )
     .with_payload(serde_json::json!({ "ids": ids }))
+}
+
+// ── 第四类：取代格（压缩快照，S2.7-b2）────────────────────────────────
+
+/// 一条 `session.consolidated`（载荷 `messages` = 压缩后的整份列表）。
+fn snapshot(msgs: &[(&str, &str, &str)]) -> Event {
+    let messages: Vec<serde_json::Value> = msgs
+        .iter()
+        .map(|(id, role, text)| {
+            serde_json::json!({ "id": id, "role": role, "type": "text", "content": text })
+        })
+        .collect();
+    Event::pending(
+        "snap-0",
+        crate::symbio_core::EVENT_SESSION_CONSOLIDATED,
+        Entity::Message,
+        Verb::Progressed,
+        0,
+        "agent:main",
+    )
+    .with_payload(serde_json::json!({ "messages": messages }))
+}
+
+/// **压缩之后判据必须仍为绿**：快照的出处**就是它自己**（被压掉的那些事件已不在
+/// 主张范围内，快照载荷承载了它们的历史）。
+///
+/// 少了这条分支，每次压缩之后判据都会把「快照 + 被保留的近轮」整批报成
+/// `NoSourceInGrid`——一个**恒红**的守卫，与没有守卫等价。
+#[test]
+fn a_compacted_history_is_complete_after_the_snapshot() {
+    let events = vec![
+        user_turn(0, "被压掉的问题"),
+        assistant_turn(0, "被压掉的答复"),
+        snapshot(&[
+            ("snap-root", "user", "[CONTEXT SNAPSHOT] 摘要"),
+            ("u-1", "user", "保留的近轮问题"),
+            ("f-1-text", "assistant", "保留的近轮答复"),
+        ]),
+        user_turn(2, "压缩之后的问题"),
+    ];
+    let msgs = vec![
+        entry("user", "[CONTEXT SNAPSHOT] 摘要", None),
+        entry("user", "保留的近轮问题", None),
+        entry("assistant", "保留的近轮答复", None),
+        entry("user", "压缩之后的问题", None),
+    ];
+    let rep = verify(&events, &msgs, None);
+    assert!(rep.is_complete(), "压缩之后必须双向完整：{}", rep.summary());
+    assert_eq!(
+        rep.consolidations, 1,
+        "换基要计入——并进 checked_events 就看不出「换基有没有发生」"
+    );
+}
+
+/// 反向：快照载荷里的一条**没进 prompt** ⇒ 报「丢事实」。
+///
+/// 这条证明上面那条绿不是恒绿：把一条摘要消息从 prompt 里拿掉，判据当场红。
+#[test]
+fn a_snapshot_entry_missing_from_the_prompt_is_reported() {
+    let events = vec![snapshot(&[
+        ("s", "user", "摘要"),
+        ("u-1", "user", "保留的近轮"),
+    ])];
+    let msgs = vec![entry("user", "摘要", None)];
+    let rep = verify(&events, &msgs, None);
+    assert!(
+        rep.gaps
+            .iter()
+            .any(|g| matches!(g, Gap::DroppedFromPrompt { .. })),
+        "必须报出「快照条目没进 prompt」：{}",
+        rep.summary()
+    );
 }

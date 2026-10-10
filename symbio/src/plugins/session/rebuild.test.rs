@@ -520,3 +520,168 @@ fn a_malformed_edit_payload_is_skipped() {
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].text, "问");
 }
+
+// ── ⑦ 压缩快照：**取代**前缀（S2.7-b2）────────────────────────────────
+
+/// 一条 `session.consolidated`：载荷 = 压缩后的整份消息列表（写侧把
+/// `context.messages` 逐条序列化进去，与落库那一份同源）。
+fn snapshot_event(msgs: Vec<crate::symbio_core::chat_message::ChatMessage>) -> Event {
+    Event::pending(
+        "snap-0",
+        crate::symbio_core::EVENT_SESSION_CONSOLIDATED,
+        Entity::Message,
+        Verb::Progressed,
+        0,
+        "agent:main",
+    )
+    .with_ts(3_000)
+    .with_payload(serde_json::json!({
+        "messages": msgs
+            .iter()
+            .map(|m| serde_json::to_value(m).expect("ChatMessage 必然可序列化"))
+            .collect::<Vec<_>>(),
+    }))
+}
+
+/// 快照列表里的一条普通文本节点。
+fn text_msg(
+    id: &str,
+    role: MessageRole,
+    text: &str,
+) -> crate::symbio_core::chat_message::ChatMessage {
+    crate::symbio_core::chat_message::ChatMessage {
+        id: id.into(),
+        role: Some(role),
+        msg_type: Some(MessageType::Text),
+        content: Some(MessageContent::Text(text.into())),
+        ..Default::default()
+    }
+}
+
+/// 快照**取代**前缀：它之前的事实一律不参与，重建从载荷那份列表开始。
+///
+/// 少了这一段，一次压缩在重建面上等于**没发生过**——被压掉的消息全部复活，
+/// 而压缩的全部意义就是让它们不再进入上下文。
+#[test]
+fn a_snapshot_rebases_the_prefix() {
+    let events = vec![
+        user_event("u-old", "被压掉的问题"),
+        final_event(serde_json::json!({
+            "text": "被压掉的答复", "turn_id": "T-old", "text_id": "T-old-text",
+            "status": "completed",
+        })),
+        snapshot_event(vec![
+            text_msg("snap-root", MessageRole::User, "[CONTEXT SNAPSHOT] 摘要"),
+            text_msg("u-keep", MessageRole::User, "保留的近轮问题"),
+            text_msg("T-keep-text", MessageRole::Assistant, "保留的近轮答复"),
+        ]),
+        user_event("u-new", "压缩之后的问题"),
+    ];
+    let got = shapes(&rebuild(&events));
+    let ids: Vec<&str> = got.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec!["snap-root", "u-keep", "T-keep-text", "u-new"],
+        "重建从快照载荷起，之前的事实不参与"
+    );
+    assert!(
+        got.iter()
+            .all(|s| s.text != "被压掉的问题" && s.text != "被压掉的答复"),
+        "被压掉的不复活"
+    );
+}
+
+/// **只认最近一次**：更早的快照连它自己的列表都已被后来的快照取代。
+#[test]
+fn only_the_latest_snapshot_rebases() {
+    let events = vec![
+        user_event("u-old", "更早的问题"),
+        snapshot_event(vec![text_msg("snap-a", MessageRole::User, "第一份摘要")]),
+        user_event("u-mid", "中间的问题"),
+        snapshot_event(vec![
+            text_msg("snap-b", MessageRole::User, "第二份摘要"),
+            text_msg("u-keep", MessageRole::User, "保留的近轮"),
+        ]),
+    ];
+    let got = shapes(&rebuild(&events));
+    let ids: Vec<&str> = got.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, vec!["snap-b", "u-keep"], "取最近一份快照的列表");
+}
+
+/// 载荷不是合法列表（`messages` 不是数组）⇒ **不是快照**，整段历史照常折。
+///
+/// 容错方向必须是「少折」而不是「多抹」：把一条坏载荷当快照，后果是**整段历史
+/// 被抹掉**——而那是静默的（列表短了没人会红）。
+#[test]
+fn a_malformed_snapshot_payload_is_not_a_snapshot() {
+    let broken = Event::pending(
+        "snap-x",
+        crate::symbio_core::EVENT_SESSION_CONSOLIDATED,
+        Entity::Message,
+        Verb::Progressed,
+        0,
+        "agent:main",
+    )
+    .with_payload(serde_json::json!({ "messages": "我不是数组" }));
+    let events = vec![user_event("u-node", "问"), broken];
+    let got = shapes(&rebuild(&events));
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].id, "u-node");
+}
+
+/// 空列表同样**不是**快照：压缩恒产出「至少那条摘要消息」，空数组若被当成有效
+/// 快照，整段历史当场消失。
+#[test]
+fn an_empty_snapshot_list_is_not_a_snapshot() {
+    let events = vec![user_event("u-node", "问"), snapshot_event(Vec::new())];
+    let got = shapes(&rebuild(&events));
+    assert_eq!(got.len(), 1, "空列表不得抹掉历史");
+}
+
+/// 快照**之后**的变更格照常折叠：被删的从快照列表里剔除，被编辑的换成新读法。
+///
+/// 这条钉的是「换基不是终点」——快照之后还有一整段 live 事实要接着折。
+#[test]
+fn mutations_after_the_snapshot_still_fold() {
+    let events = vec![
+        user_event("u-old", "被压掉的问题"),
+        snapshot_event(vec![
+            text_msg("snap-root", MessageRole::User, "摘要"),
+            text_msg("u-keep", MessageRole::User, "保留的问题"),
+            text_msg("u-drop", MessageRole::User, "保留但随后被删"),
+        ]),
+        edited_event(crate::symbio_core::chat_message::ChatMessage {
+            id: "u-keep".into(),
+            role: Some(MessageRole::User),
+            content: Some(MessageContent::Text("保留的问题（改过）".into())),
+            ..Default::default()
+        }),
+        removed_event(&["u-drop"]),
+    ];
+    let got = shapes(&rebuild(&events));
+    let ids: Vec<&str> = got.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, vec!["snap-root", "u-keep"], "被删的从快照列表里剔除");
+    assert_eq!(got[1].text, "保留的问题（改过）", "编辑照常生效");
+}
+
+/// 快照列表的号由**重建自己的发号器**重发，且与后继事件**同一套**（单调）。
+///
+/// 载荷里那份号是**存储层**的槽位号，与重建的号不是同一套。混用会让
+/// 「快照列表内部单调、与后继事件不单调」——而前端的排序键只有一个。
+#[test]
+fn seq_is_renumbered_monotonically_across_the_snapshot_boundary() {
+    let mut snap_msg = text_msg("snap-root", MessageRole::User, "摘要");
+    snap_msg.seq = Some(9_999); // 存储层的号：重建必须无视它
+    let events = vec![
+        user_event("u-old", "被压掉的问题"),
+        snapshot_event(vec![
+            snap_msg,
+            text_msg("u-keep", MessageRole::User, "保留"),
+        ]),
+        user_event("u-new", "压缩之后"),
+    ];
+    let got = rebuild(&events);
+    let seqs: Vec<i64> = got.iter().filter_map(|m| m.seq).collect();
+    assert_eq!(seqs.len(), got.len(), "每条都有号");
+    assert_eq!(seqs, vec![1, 2, 3], "从 1 起重发，跨快照边界仍单调");
+}

@@ -115,7 +115,13 @@ fn append(
             return;
         }
     };
-    let snapshot = store.range(Seq::new(0));
+    // `history()` 而非 `range()`（S2.7-b2）：
+    // - **溯源锚**：被编辑的消息若来自压缩前（其定义事件在归档段里），只读 live 会
+    //   找不到载体 ⇒ 退回 `last()` 的弱锚（`provenance` 的兜底）；
+    // - **幂等键**：`n` = 本会话内 `Message` 实体的**全局**计数。压缩归档把前缀移出
+    //   live 后，只读 live 会让 `n` 从头数起 ⇒ `{prefix}-{n}` 与归档段里的 id 重号
+    //   （归档后旧 id 已离开内存幂等键集合，故不报错，但全局 id 唯一性被打破）。
+    let snapshot = store.history();
     let Some(anchor) = provenance(&snapshot, target) else {
         // 切片为空（或切片内所有事件都没有 seq）⇒ 连「这次变更站在哪一份状态上」
         // 都无从谈起。会话还没有任何事实（v1 时代建的会话 / 从未走过 v2 轮）。

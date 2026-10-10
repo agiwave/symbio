@@ -445,6 +445,12 @@ async fn compress_snapshot_inner(
 
     let mut new_messages = vec![snapshot_message];
     new_messages.extend(keep_messages);
+    // 寄存给落格方（见 `SessionContext::consolidated` 的文档）：压缩现场不持写者
+    // 令牌，`session.consolidated` 这条事实只能由下一个 `execute_turn` 落。
+    //
+    // ⚠️ 只在这里寄存、**不在这里落格**——就地落格会拿到 `NotTheWriter`，而那是
+    // 静默的（压缩照常生效、界面照常变短，只有事实源里少一条事件）。
+    context.consolidated = Some(new_messages.clone());
     context.messages = new_messages;
 
     let _ = context
@@ -736,6 +742,10 @@ pub(crate) async fn retry_compaction(
         messages: session.get_context_messages(None).await.unwrap_or_default(),
         session: session.clone(),
         principal: super::super::chat_loop::request_principal(ctx.as_ref()),
+        // 重试路径是**独立的**压缩会话（`retry_compaction`）：它的产出在这里就地落格
+        // （见本函数末尾的 `consolidate_outside_turn`）——轮外没有「下一个 `execute_turn`」
+        // 可以寄存，所以不走那条回流。
+        consolidated: None,
     };
     // 请求级固定开销与自动路径同源（压缩提示词 + 工具定义）：口径不一致会让
     // "是否超限"的预判比自动路径乐观，重试的结论就与首次失败对不上。
@@ -809,6 +819,19 @@ pub(crate) async fn retry_compaction(
             // 失败节点已由内核落库并广播（含 `meta.failure_kind` + 原因），这里只记日志
             plugin_warn!("session", "[Compress] 用户重试仍失败: {f}");
         }
+    }
+    // ── 压缩入格 + 归档（S2.7-b2）───────────────────────────────────────────
+    //
+    // **轮外**：`process_resume` 在 turn 循环**之前**调用本函数，之后一律返回 `Done`
+    // ——没有「下一个 `execute_turn`」可以把 `consolidated` 寄存过去，所以这里就地落格。
+    // 失败路径上 `consolidated` 恒为 `None`（内核回滚时不设它），于是这一段对失败
+    // 与「未触发」两种结局都是 no-op。
+    if let Some(msgs) = context.consolidated.take() {
+        super::super::v2_exec::consolidate_outside_turn(
+            &context.session,
+            &msgs,
+            &context.principal,
+        );
     }
     Ok(())
 }

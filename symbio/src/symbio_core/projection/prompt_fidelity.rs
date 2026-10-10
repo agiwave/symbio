@@ -36,6 +36,18 @@
 //!   除非有别的格子认领那段正文，而那种情况恰恰是「删掉之后又被重新说了一遍」，
 //!   本来就不该报。于是这条判据**不需要按正文去猜**「这句话是不是被删的那句」。
 //!
+//! ## 第四类：取代格（压缩快照，S2.7-b2）
+//!
+//! `session.consolidated` 是**换基**格：它不产 entry，但它载荷里那份列表的**每一条**
+//! 都该在 prompt 里（投影已把它收成基线）。这一类的「出处」与别处不同——**出处就是
+//! 这个事件本身**，不是某条更早的事件（那些事件已被移入归档段，不在本切片里）。
+//!
+//! 少了这一条分支，每次压缩之后判据都会把「快照 + 被保留的近轮」整批报成
+//! `NoSourceInGrid`——一个**恒红**的守卫，与没有守卫等价（本模块开头那条纪律）。
+//!
+//! 认领仍走**同一份**翻译（[`super::transcript::snapshot_entries`]）与**同一份**
+//! 折叠索引：两个出口不可能对同一条给出两种读法。
+//!
 //! ## 为什么它便宜到每轮都跑
 //!
 //! 纯函数 + 单测层：不起 CLI、不 mock LLM、不碰 IO。所以它不会被「太重」跳过——这一点
@@ -44,7 +56,8 @@
 use super::super::event::{
     event_node_of, Entity, Event, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK,
     EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED,
-    EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
+    EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED,
+    EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
 
 /// 缺口的一条报告。**故意不 derive `PartialEq`**：报告要给门禁与日志读，字段顺序变动
@@ -64,8 +77,13 @@ pub enum PromptGap {
     /// 而漏掉的那一半恰好是「界面文本污染了对话」这种用户直接看得见的退化。
     ExcludedLeakedIntoPrompt { kind: String, turn: u64 },
     /// 角色与网格里那条事件的坐标不符（投影把 user 说成 assistant 之类）。
+    ///
+    /// `expected` 是 `String` 而不是 `&'static str`：**快照条目**的期望角色来自
+    /// [`super::transcript::snapshot_entries`] 的产出（运行时值），不是事件 kind
+    /// 编译期定下的那几种。收成 `String` 让两类来源共用同一条报告——若为快照另立
+    /// 一个变体，两类缺口的措辞与判定迟早各自演化。
     RoleMismatch {
-        expected: &'static str,
+        expected: String,
         got: String,
         kind: String,
         turn: u64,
@@ -126,6 +144,18 @@ fn is_mutation(e: &Event) -> bool {
     )
 }
 
+/// **取代格**（第四类）：压缩快照。
+///
+/// 与前两类都不同：它不产 entry，但它**认领**一整批 entry（载荷里那份列表）。
+/// 单列成函数而不是并进 `is_mutation`：那类的检查动作是「跳过并折叠既有条目」，
+/// 这类的动作是「按载荷**新建**一批期望条目」——合成一个 `matches!` 会让后来的人
+/// 无从判断该往哪边加。
+fn is_snapshot(e: &Event) -> bool {
+    e.entity == Entity::Message
+        && e.verb == Verb::Progressed
+        && e.kind == EVENT_SESSION_CONSOLIDATED
+}
+
 /// 事件载荷里该进 prompt 的正文（与 `transcript` 投影**同一取法**——两处各写一遍必然漂移，
 /// 所以这里只做「有没有」，正文比对交给 `SourceRef` 的坐标）。
 fn payload_text(e: &Event) -> &str {
@@ -154,6 +184,11 @@ pub struct PromptReport {
     /// 「第三类」），所以「它们有多少条」是判断「折叠有没有真的发生」的唯一外部
     /// 可见量——并进去就看不出来了。
     pub mutations: usize,
+    /// 复核里遇到的**取代格**数（`session.consolidated`）。
+    ///
+    /// 与 `mutations` 同理单列：这类同样**不产 entry**（它换基），
+    /// 「它有多少条」是判断「换基有没有真的发生」的唯一外部可见量。
+    pub consolidations: usize,
 }
 
 impl PromptReport {
@@ -166,8 +201,9 @@ impl PromptReport {
     pub fn summary(&self) -> String {
         if self.is_complete() {
             return format!(
-                "完整：{} 条网格事件 → {} 条 prompt 消息（声明 {} 条请求级 / 折叠 {} 条变更）",
-                self.checked_events, self.checked_entries, self.declared, self.mutations
+                "完整：{} 条网格事件 → {} 条 prompt 消息（声明 {} 条请求级 / 折叠 {} 条变更 / 换基 {} 次）",
+                self.checked_events, self.checked_entries, self.declared, self.mutations,
+                self.consolidations
             );
         }
         let mut s = format!(
@@ -225,6 +261,56 @@ impl PromptReport {
 /// 放过是**声明**（这个参数），不是「判据放宽」——声明之后判据仍会报「多了一条无出处
 /// 消息」，只是不再把**已知的那一条**算成缺口，而且 `Report::declared` 会把条数记下来，
 /// 于是「例外有没有悄悄变多」是看得见的。
+/// 认领一条**期望**消息：在 prompt 里找**首个未用过**的同正文条目，标记已用并复核角色。
+///
+/// 抽成自由函数（而不是在 `verify` 里写两遍）是为了让「事件来的条目」与「快照来的
+/// 条目」走**同一条**配对与复核——两类缺口（丢事实 / 角色错）若各写一套判据，
+/// 迟早对同一件事给出两种结论。
+///
+/// ⚠️ **只按正文配对，不把 role 放进配对键**——放进去了，「角色不符」就永远匹配不上，
+/// 于是会被误报成「丢事实」。那两类缺口的区别恰恰是 role：正文在、角色错，与正文
+/// 根本不在，是两种不同的病，判据必须分得开。
+///
+/// 取**未用过**的第一条：同一轮可能有多个同正文事件（重试各成一格）；事件按 seq
+/// 有序、prompt 消息也按序，于是「首个未用」保持原序配对。
+fn claim(
+    rep: &mut PromptReport,
+    used: &mut [bool],
+    messages: &[crate::symbio_core::PromptMessage],
+    text: &str,
+    role: &str,
+    kind: &str,
+    turn: u64,
+) {
+    let hit = messages
+        .iter()
+        .enumerate()
+        .position(|(i, m)| !used[i] && m.text == text);
+    match hit {
+        None => rep.gaps.push(PromptGap::DroppedFromPrompt {
+            kind: kind.to_string(),
+            turn,
+        }),
+        Some(i) => {
+            used[i] = true;
+            let m = &messages[i];
+            if m.role != role {
+                rep.gaps.push(PromptGap::RoleMismatch {
+                    expected: role.to_string(),
+                    got: m.role.clone(),
+                    kind: kind.to_string(),
+                    turn,
+                });
+            }
+            if m.role == "tool" && m.tool.as_deref().map(str::trim).unwrap_or("").is_empty() {
+                rep.gaps.push(PromptGap::ToolEntryWithoutName {
+                    text: m.text.clone(),
+                });
+            }
+        }
+    }
+}
+
 pub fn verify(
     events: &[Event],
     messages: &[crate::symbio_core::PromptMessage],
@@ -234,16 +320,66 @@ pub fn verify(
     // 变更格的折叠索引（与 `transcript` **共用同一份**）：编辑过的条目在网格侧
     // 按**新**正文复核，被删掉的从「网格→prompt」跳过。见模块文档「第三类」。
     let mutations = super::mutations::MessageMutations::collect(events);
+    // 最近一次压缩快照（与 `transcript` **共用同一份**）：只有它是活的，更早的
+    // 连自己的列表都已被取代。见模块文档「第四类」。
+    let snapshot = super::mutations::mutations_latest_snapshot(events);
 
     // 网格侧：投影范围内的事件，逐条找对应 entry。
     let mut used = vec![false; messages.len()];
-    for e in events {
+    for (idx, e) in events.iter().enumerate() {
+        // 被最近一次快照**取代**的事件不再对 prompt 有主张：它们承载的那段历史已被
+        // 快照载荷换基。跳过它们，与投影 [`super::transcript`] 的换基同一口径——
+        // 否则每次压缩之后判据都会把整段被压掉的历史报成「丢事实」（恒红 = 无用）。
+        //
+        // 这一步与 `window_by_turn` 的裁剪**不重复**：窗口裁的是「更早的轮次」，
+        // 而 `keep == 0`（不截断）时窗口是全量，被取代的事件就在切片里。
+        if snapshot.as_ref().is_some_and(|(si, _)| idx < *si) {
+            continue;
+        }
         // 变更格自己**不产 entry**：它们不是新的对话内容，也不是「按设计不进请求包」
         // 的界面文本。计数单列（`mutations`）——并进 `checked_events` 就看不出
         // 「折叠有没有真的发生」了。
         if is_mutation(e) {
             rep.checked_events += 1;
             rep.mutations += 1;
+            continue;
+        }
+        // 取代格（压缩快照）：**认领**它载荷里那份列表（见模块文档「第四类」）。
+        if is_snapshot(e) {
+            rep.checked_events += 1;
+            rep.consolidations += 1;
+            if let Some((si, msgs)) = snapshot.as_ref() {
+                if *si == idx {
+                    for (node, entry) in super::transcript::snapshot_entries(msgs) {
+                        // 与投影同一份折叠索引：被删的跳过（它本就不该在 prompt 里），
+                        // 被编辑过的按新读法认领。
+                        if mutations.is_removed(&node) {
+                            continue;
+                        }
+                        let (role, text) = match mutations.edited(&node) {
+                            Some(ed) => (
+                                ed.role.clone().unwrap_or_else(|| entry.role.clone()),
+                                ed.text.clone().unwrap_or_else(|| entry.text.clone()),
+                            ),
+                            None => (entry.role.clone(), entry.text.clone()),
+                        };
+                        // 「按设计不进请求包」的界面文本**不该**出现在 prompt 里：
+                        // 不认领它（与事件侧 `excluded_from_prompt` 同一处置）。
+                        if entry.exclude_from_context {
+                            continue;
+                        }
+                        claim(
+                            &mut rep,
+                            &mut used,
+                            messages,
+                            &text,
+                            &role,
+                            e.kind.as_str(),
+                            e.turn,
+                        );
+                    }
+                }
+            }
             continue;
         }
         // 按设计不进请求包的那一类：**方向反过来**——不是「网格有、prompt 没有」，
@@ -283,39 +419,15 @@ pub fn verify(
             Some(t) => t,
             None => payload_text(e).to_string(),
         };
-        // ⚠️ **只按正文配对，不把 role 放进配对键**——放进去了，「角色不符」就永远匹配
-        // 不上，于是会被误报成「丢事实」。那两类缺口的区别恰恰是 role：正文在、角色错，
-        // 与正文根本不在，是两种不同的病，判据必须分得开。
-        //
-        // 取**未用过**的第一条：同一轮可能有多个同正文事件（重试各成一格）；事件按 seq
-        // 有序、prompt 消息也按序，于是「首个未用」保持原序配对。
-        let hit = messages
-            .iter()
-            .enumerate()
-            .position(|(i, m)| !used[i] && m.text == text);
-        match hit {
-            None => rep.gaps.push(PromptGap::DroppedFromPrompt {
-                kind: e.kind.as_str().to_string(),
-                turn: e.turn,
-            }),
-            Some(i) => {
-                used[i] = true;
-                let m = &messages[i];
-                if m.role != role {
-                    rep.gaps.push(PromptGap::RoleMismatch {
-                        expected,
-                        got: m.role.clone(),
-                        kind: e.kind.as_str().to_string(),
-                        turn: e.turn,
-                    });
-                }
-                if m.role == "tool" && m.tool.as_deref().map(str::trim).unwrap_or("").is_empty() {
-                    rep.gaps.push(PromptGap::ToolEntryWithoutName {
-                        text: m.text.clone(),
-                    });
-                }
-            }
-        }
+        claim(
+            &mut rep,
+            &mut used,
+            messages,
+            &text,
+            &role,
+            e.kind.as_str(),
+            e.turn,
+        );
     }
 
     // prompt 侧：每条消息都得被网格认领过，或被**显式声明**为请求级内容。

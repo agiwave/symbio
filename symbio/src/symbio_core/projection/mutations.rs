@@ -1,18 +1,17 @@
-//! 消息变更的**读侧索引**（[ADR-053](../../../../docs/decisions/session.md)）。
+//! 消息列表变更的**读侧索引**（[ADR-053](../../../../docs/decisions/session.md)）。
 //!
 //! ## 它为什么存在
 //!
-//! 事实网格里除了「追加了什么」，还有「**改过什么**」：`message.edited`（这条现在
-//! 读作 Y）与 `message.removed`（这一段没了）。它们既**不产 prompt entry**（它们不是
-//! 新的对话内容），也**不是**「按设计不进请求包」的界面文本（那是汇报 / 首响）——
-//! 它们是**第三类**：对既有内容的**改写**。
+//! 事实网格里除了「追加了什么」，还有「**改过什么**」。三类变更各有各的折法：
 //!
-//! 本模块把这两个格子的载荷收成一张可查的索引，供两个读侧出口共用：
+//! | 变更格 | 折法 | 出口 |
+//! |---|---|---|
+//! | `message.edited`（这条现在读作 Y） | 按节点身份换正文 / 角色 | [`MessageMutations`] |
+//! | `message.removed`（这一段没了） | 按节点身份丢条目 | [`MessageMutations`] |
+//! | `session.consolidated`（整段被摘要取代） | **重置**成快照那一份列表 | [`mutations_latest_snapshot`] |
 //!
-//! | 出口 | 怎么用它 |
-//! |---|---|
-//! | [`super::transcript`] | 条目按节点身份查：编辑 ⇒ 换正文；删除 ⇒ 丢条目 |
-//! | [`super::prompt_fidelity`] | 同上——判据必须**看见**折叠，否则编辑过的正文会被报成「网格→prompt 丢事实」（事件里还是旧正文，prompt 里已是新正文） |
+//! 前两类**不产 prompt entry**（它们不是新的对话内容），也**不是**「按设计不进请求包」
+//! 的界面文本（那是汇报 / 首响）——它们是第三类：对既有内容的**改写**。
 //!
 //! ## 为什么必须是共享的
 //!
@@ -22,12 +21,15 @@
 //!
 //! ## 纯函数
 //!
-//! [`MessageMutations::collect`] 只读事件切片、不碰任何状态：同一份切片恒得同一份
-//! 索引。这是投影纯函数性（N1）的一部分，也是「连读两次逐字相同」那条判据的前提。
+//! [`MessageMutations::collect`] 与 [`mutations_latest_snapshot`] 只读事件切片、不碰
+//! 任何状态：同一份切片恒得同一份索引。这是投影纯函数性（N1）的一部分，也是
+//! 「连读两次逐字相同」那条判据的前提。
 
 use std::collections::{HashMap, HashSet};
 
-use crate::symbio_core::event::{Entity, Event, Verb, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED};
+use crate::symbio_core::event::{
+    Entity, Event, Verb, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED,
+};
 use crate::symbio_core::schemas::session::chat_message::{ChatMessage, MessageContent};
 
 /// 一条消息被编辑后**在对话里读作什么**。
@@ -122,6 +124,50 @@ fn ids_of(e: &Event) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// **最近一次压缩快照**：`(快照事件在本切片里的下标, 压缩后的整份消息列表)`。
+///
+/// ## 为什么返回下标而不是 seq
+///
+/// 折方要问的是「从哪一条起接着折」——那是**切片内**的位置。用 seq 要求事件
+/// 都带 seq（旧版本写下的 WAL 行 `seq: null`），而位置对任意切片都成立
+/// （切片被裁过、手工改过也照折）。与 [`MessageMutations`] 的「先收索引、再投影」
+/// 同一条纪律：读侧不得依赖呈现细节。
+///
+/// ## 为什么只认**最近**一次
+///
+/// 快照取代它之前的一切：更早的快照连它自己的消息列表都已被后来的快照取代。
+/// 取最近一条即可，前面那几条的作用只剩「历史上有过几次压缩」（审计读归档段）。
+///
+/// 载荷不是合法列表（旧版本 / 手工改过的 WAL）⇒ **跳过那条**继续往前找：读侧必须
+/// 对任意历史事件容错，一条坏载荷不该让整次投影失败——但也不该让一个坏快照
+/// 把此前有效的那一份吃掉。
+pub fn mutations_latest_snapshot(events: &[Event]) -> Option<(usize, Vec<ChatMessage>)> {
+    events
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(i, e)| snapshot_messages(e).map(|msgs| (i, msgs)))
+}
+
+/// `session.consolidated` 的载荷 → 压缩后的整份消息列表。
+fn snapshot_messages(e: &Event) -> Option<Vec<ChatMessage>> {
+    if !(e.entity == Entity::Message && e.verb == Verb::Progressed) {
+        return None;
+    }
+    if e.kind != EVENT_SESSION_CONSOLIDATED {
+        return None;
+    }
+    let arr = e.payload.get("messages")?.as_array()?;
+    // 逐条解：**一条坏条目不该吃掉整份快照**（与 `parse_edited` 同一条容错口径）。
+    let msgs: Vec<ChatMessage> = arr
+        .iter()
+        .filter_map(|v| serde_json::from_value::<ChatMessage>(v.clone()).ok())
+        .collect();
+    // 空列表不是一份快照：压缩恒产出「至少那条摘要消息」。空数组若被当成有效快照，
+    // 后果是**整段历史被抹掉**——容错的方向必须是「少折」而不是「多抹」。
+    (!msgs.is_empty()).then_some(msgs)
 }
 
 #[cfg(test)]

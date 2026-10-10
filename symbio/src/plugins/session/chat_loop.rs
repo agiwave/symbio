@@ -279,6 +279,8 @@ pub async fn run_chat_loop(
         messages: Vec::new(),
         session,
         principal: request_principal(ctx.as_ref()),
+        // 本轮压缩的寄存位：压缩内核压成之后写这里，由本轮的 `execute_turn` 落格。
+        consolidated: None,
     };
 
     // 本轮输入（消息 id + 正文）：锚定在 `single_message` 被消费**之前**。
@@ -500,6 +502,9 @@ pub async fn run_chat_loop(
                             utterance,
                             turn.input_utterance.as_ref().map(|(id, _)| id.clone()),
                             &reply,
+                            // 答话轮同样要落「本轮之前那次压缩」这一格——它不进
+                            // `execute_turn`，不带上就漏了（见该函数的入参文档）。
+                            context.consolidated.take().as_deref(),
                         )
                         .await
                         {
@@ -671,6 +676,10 @@ pub async fn run_chat_loop(
             })
             .unwrap_or((None, String::new()));
         let v2_started = std::time::Instant::now();
+        // 压缩的寄存位**取走**（S2.7-b2）：`take` 而不是 `clone`——同一份快照只该落一次，
+        // 而本轮的压缩已在此刻之前发生完（步骤 3）或已经过去（上一轮步骤 6）。落格与归档
+        // 由 `execute_turn` 做（唯一持写者令牌之处），这里只负责把「压成了什么」递过去。
+        let consolidation = context.consolidated.take();
         let out = match super::v2_exec::execute_turn(super::v2_exec::V2Turn {
             session: &context.session,
             provider: orchestrator.provider.clone(),
@@ -695,6 +704,8 @@ pub async fn run_chat_loop(
             skill_hits: &turn.skill_hits,
             // 请求级前缀 = 请求视图层置顶的三段（见 request_view_prefix）。
             prefix: request_view_prefix(&inputs.request_view),
+            // 压缩的寄存位（S2.7-b2）：`None` = 本轮没压过（常态）。
+            consolidation: consolidation.as_deref(),
             // 轮内注入（缺口 3）：把本会话的收件箱抽干口交给 v2 的工具循环，
             // 让「用户中途插话」**折进本轮**。
             supplements: orchestrator.supplements.as_ref().map(|s| {

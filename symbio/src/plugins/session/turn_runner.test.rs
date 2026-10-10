@@ -880,9 +880,10 @@ mod tool_round_tests {
     use super::super::{RoundInjector, TurnInput, TurnResume, TurnRunner};
     use crate::symbio_core::{
         check_all, unresolved_turns, AdapterError, CapabilityMeta, DeltaSink, DispatchOutcome,
-        DispatchPort, Entity, EventStore, FullModel, LatencyTier, LlmAdapter, LlmTurn,
+        DispatchPort, Entity, Event, EventStore, FullModel, LatencyTier, LlmAdapter, LlmTurn,
         PromptMessage, Seq, SilentDeltas, Store, TokenIssuer, TurnToolCallInfo, Verb,
-        EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_PROGRESS, EVENT_USER_MESSAGE,
+        EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_PROGRESS,
+        EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
     };
 
     /// 注入的消息必须**进本轮的下一次请求**。
@@ -1489,6 +1490,82 @@ mod tool_round_tests {
                 && !says!(last, "第 1 轮问题")
                 && says!(last, "第 2 轮问题"),
             "`Some(1)` 只留当前轮，窗口本身仍在裁：{last:?}"
+        );
+    }
+
+    /// **压缩快照不在窗口内也要带上**（S2.7-b2）：它是当前历史的**基线**。
+    ///
+    /// ## 回归的是什么
+    ///
+    /// 段归档之后 live 段只剩「快照事件 + 压缩后的新事件」，而快照事件的 `turn`
+    /// （按约定 `message.*` 一律 `0`）**不在窗口内** ⇒ 纯按轮切会把它切掉。后果是
+    /// 模型**既看不见摘要、也看不见刚聊过什么**——被保留的近轮在快照载荷里，不在
+    /// live 段里。两者都静默（prompt 短了没有任何东西会红）。
+    ///
+    /// **反向自检**：把 `window_by_turn` 里 `latest_snapshot_index` 那段拿掉，本用例必红。
+    #[tokio::test]
+    async fn the_compaction_snapshot_is_always_in_the_window() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = EchoLlm::new();
+        let prompts = llm.prompts.clone();
+
+        // ① 先落一格压缩快照：载荷 = 压缩后的整份列表（摘要 + 被保留的近轮）。
+        store
+            .append(
+                Event::pending(
+                    "snap-0",
+                    EVENT_SESSION_CONSOLIDATED,
+                    Entity::Message,
+                    Verb::Progressed,
+                    0,
+                    "agent:main",
+                )
+                .with_payload(serde_json::json!({
+                    "messages": [
+                        { "id": "snap-root", "role": "user", "type": "text",
+                          "content": "[CONTEXT SNAPSHOT] 被压掉的历史摘要" },
+                        { "id": "u-keep", "role": "user", "type": "text",
+                          "content": "保留的近轮问题" },
+                    ]
+                })),
+            )
+            .expect("快照入格");
+
+        // ② 其后的两轮真实事实。
+        for turn in 0..2u64 {
+            let mut i = input();
+            i.turn = turn;
+            i.text = format!("第 {turn} 轮问题");
+            i.window_turns = Some(0);
+            TurnRunner
+                .run_with_tools(&store, &llm, &tok, i, Arc::new(SilentDeltas), &[], None)
+                .await
+                .expect("必答");
+        }
+
+        // ③ 第 3 轮：窗口只留最近 1 轮（快照的 turn 不在窗口内）。
+        let mut i = input();
+        i.turn = 2;
+        i.text = "压缩之后的问题".to_string();
+        i.window_turns = Some(1);
+        TurnRunner
+            .run_with_tools(&store, &llm, &tok, i, Arc::new(SilentDeltas), &[], None)
+            .await
+            .expect("必答");
+
+        let last = Seen::from(prompts.lock().unwrap().clone().pop().unwrap());
+        assert!(
+            says!(last, "[CONTEXT SNAPSHOT] 被压掉的历史摘要"),
+            "快照必须在窗口内（它是当前历史的基线）：{last:?}"
+        );
+        assert!(
+            says!(last, "保留的近轮问题"),
+            "快照载荷里的近轮也在——它不在 live 段里：{last:?}"
+        );
+        assert!(
+            !says!(last, "第 0 轮问题"),
+            "窗口仍裁更早的轮次（带快照不等于不裁）：{last:?}"
         );
     }
 

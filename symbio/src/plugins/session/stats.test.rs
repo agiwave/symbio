@@ -11,8 +11,8 @@ use super::read;
 use crate::symbio_core::{
     calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Budget,
     Entity, Event, EventEnvelope as _, EventWalStore, Seq, Store, Verb, EVENT_ARTIFACT_ADDED,
-    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_MEMORY_RECALLED, EVENT_TASK_OPENED,
-    EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_MEMORY_RECALLED,
+    EVENT_SESSION_CONSOLIDATED, EVENT_TASK_OPENED, EVENT_USER_MESSAGE,
 };
 use std::path::{Path, PathBuf};
 
@@ -521,8 +521,9 @@ fn invariants_move_when_the_wal_changes() {
     let clean = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
 
     // 复算：出口的清单与直接 `check_all` 逐字相等（口径只活在 core，出口不复判）。
+    // 切片口径 = `history()`（归档段 + live，S2.7-b2）：出口读什么，复算就比什么。
     let store = EventWalStore::open_readonly(&wal).unwrap();
-    let snap = store.range(Seq::new(0));
+    let snap = store.history();
     assert_eq!(
         clean.invariants,
         serde_json::to_value(check_all(&snap)).unwrap()
@@ -552,6 +553,68 @@ fn invariants_move_when_the_wal_changes() {
             .any(|v| v["why"].as_str().unwrap_or_default().contains("seq")),
         "C1：删掉中间一行 ⇒ 后续 seq 跳号：{list:?}"
     );
+}
+
+/// **归档不缩小读数**（S2.7-b2）：压缩把被取代的前缀移出 live 段后，读数口必须读
+/// `history()`（归档段 + live）而不是 live 窗口。
+///
+/// ## 只读 live 会错在两处（都是静默的）
+///
+/// 1. **C1 假红**：live 窗口的首号不是 0（它是全局号空间的一个窗口），
+///    `seq_monotonic` 会把「应为 0 却得 4」报成违规 ⇒ 每次压缩后读数口凭空多一条；
+/// 2. **四列缩水**：被归档的轮次仍然发生过（钱花过、兜底过），只读 live 会把
+///    它们从分母 / 分子 / 样本里抹掉。
+///
+/// ## 反向自检
+///
+/// 把 `stats::read` 里的 `store.history()` 换回 `store.range(Seq::new(0))` ⇒ 本用例红
+/// （`invariants` 非空、`tiers` 从 2 轮掉到 0 轮）。
+#[test]
+fn archival_does_not_shrink_the_readout() {
+    let wal = seed("archive");
+    let before = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
+    assert_eq!(before.tiers.len(), 1, "两轮同档 ⇒ 一行");
+    assert_eq!(before.tiers[0].turns, 2, "分母 = 两轮");
+    assert_eq!(before.tiers[0].fallbacks, 1, "分子 = 一轮兜底");
+
+    // 压缩：落一条快照，再把被取代的前缀整段归档（live 段只剩快照一条）。
+    let store = EventWalStore::open(&wal).unwrap();
+    let seq = store
+        .append(
+            Event::pending(
+                "v2sc-3",
+                EVENT_SESSION_CONSOLIDATED,
+                Entity::Message,
+                Verb::Progressed,
+                0,
+                "agent:main",
+            )
+            .with_payload(serde_json::json!({
+                "messages": [{ "id": "snap-1" }],
+                "turns": 2,
+            })),
+        )
+        .unwrap();
+    assert_eq!(
+        store.archive_before(seq).unwrap(),
+        Some(4),
+        "前缀 4 条全进归档段"
+    );
+    assert_eq!(store.len(), 1, "live 段只剩快照");
+    drop(store);
+
+    // 读数口仍看完整史：不变量不假红，四列与成本一分不缩。
+    let after = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
+    assert_eq!(
+        after.invariants,
+        serde_json::json!([]),
+        "归档是号空间的窗口边界，不是「事件被丢弃」——C1 不该报违规"
+    );
+    assert_eq!(
+        after.tiers, before.tiers,
+        "分母 / 分子 / 样本不因归档而缩水"
+    );
+    assert_eq!(after.cost, before.cost, "成本台账看的是完整史");
 }
 
 /// 没有事实源 = 有据的零，且读方不许创建文件（真·只读）。

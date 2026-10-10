@@ -38,6 +38,24 @@ pub(crate) struct SessionContext {
     /// 「判的是 A、写的是 B」。放在上下文里而不是每个阶段各推一次：一个事实一个
     /// 取值点，且它随会话走、不随阶段变。
     pub principal: String,
+    /// **本轮发生过的压缩**（压缩后的整份消息列表，S2.7-b2）。
+    ///
+    /// ## 为什么不在压缩现场直接落格
+    ///
+    /// `session.consolidated` 是**事实**，而事实只能由持写者令牌的一方落格
+    /// （[`crate::symbio_core::EventWalStore`] 的单写者闸门）。压缩跑在
+    /// `prepare_turn_inputs`（步骤 3）与 `close_turn`（步骤 6），两处都**不持**令牌
+    /// ——令牌在 `execute_turn`（步骤 4）里随 WAL 打开而取。所以在压缩现场落格会拿到
+    /// `NotTheWriter`，而那是**静默**的：压缩照常生效、界面照常变短，只有事实源里
+    /// 少了一条事件（于是切源之后压缩在重建面上等于没发生过）。
+    ///
+    /// 于是压缩把「压成了什么」寄存在这里，由下一个 `execute_turn` 落格并归档
+    /// （见 `v2_exec::consolidate_into_wal`）。寄存而不是就地落格，是**唯一**能同时
+    /// 满足「事实必须落格」与「落格必须持令牌」两条约束的形态。
+    ///
+    /// 幂等由落格那一侧保证（与 WAL 里最近一份快照逐 id 比对）：同一轮里
+    /// `execute_turn` 可能被调多次，而压缩只发生一次。
+    pub consolidated: Option<Vec<ChatMessage>>,
 }
 
 /// 请求级不可变配置（`model_chat::Request` 的取值快照，全程只读）。

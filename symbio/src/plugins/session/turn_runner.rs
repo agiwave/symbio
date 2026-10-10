@@ -32,7 +32,7 @@
 use crate::symbio_core::{
     visible_to, ActorSpec, AdapterError, Entity, Event, FullModel, LatencyTier, LlmAdapter,
     PromptToolCall, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_ASSISTANT_PROGRESS, EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_PROGRESS, EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
 };
 use std::borrow::Cow;
 
@@ -479,27 +479,57 @@ fn filter_visible<'a>(events: &'a [Event], viewer: Option<&str>) -> Cow<'a, [Eve
 ///
 /// 第二层是**可见域**（`viewer`，见 [`filter_visible`]）：窗口先按轮切，
 /// 再按主体滤——两层都只改视图，不改数据。
+///
+/// ## 压缩快照**不在窗口内也要带上**（S2.7-b2）
+///
+/// `session.consolidated` 是当前历史的**基线**（它的载荷就是压缩后的整份列表），
+/// 窗口裁的是「更早的轮次」，不是基线本身。而段归档之后 live 段只剩
+/// 「快照事件 + 压缩后的新事件」，且快照事件的 `turn` 不在窗口内 ⇒ 纯按轮切会把
+/// 它切掉，于是模型**既看不见摘要、也看不见刚聊过什么**（被保留的近轮也在快照
+/// 载荷里，不在 live 段里）。
+///
+/// 故窗口 = `[最近一次快照] ++ 窗口内的事件`。只带**最近**一条：更早的快照连它
+/// 自己的列表都已被后来的快照取代（与投影 [`crate::symbio_core::transcript`] 同一口径）。
 fn window_by_turn<'a>(
     events: &'a [Event],
     current_turn: u64,
     keep: u64,
     viewer: Option<&str>,
 ) -> Cow<'a, [Event]> {
-    let windowed = if keep == 0 {
+    if keep == 0 {
         // `keep == 0` = **不截断**（全量）——与 `SessionConfig::context_messages`
         // 的 `0` 同一条口径（那里 `0` 一直是「上下文窗口不按轮次截断」）。两处
         // 对同一个数必须同义：否则配 `0` 的实例会**静默**丢掉全部历史
         // ——事实照样入格、`session/stats` 照样有数，只有模型看不见。
-        events
-    } else {
-        let oldest = current_turn.saturating_sub(keep - 1);
-        let cut = events
-            .iter()
-            .position(|e| e.entity == Entity::Turn && e.turn >= oldest)
-            .unwrap_or(events.len());
-        &events[cut..]
-    };
-    filter_visible(windowed, viewer)
+        return filter_visible(events, viewer);
+    }
+    let oldest = current_turn.saturating_sub(keep - 1);
+    let cut = events
+        .iter()
+        .position(|e| e.entity == Entity::Turn && e.turn >= oldest)
+        .unwrap_or(events.len());
+    match latest_snapshot_index(events) {
+        // 快照在窗口外 ⇒ 单独把它拎到最前（见函数文档）。
+        Some(ci) if ci < cut => {
+            let mut w: Vec<Event> = Vec::with_capacity(1 + events.len() - cut);
+            w.push(events[ci].clone());
+            w.extend_from_slice(&events[cut..]);
+            if let Some(v) = viewer {
+                w.retain(|e| visible_to(&e.actor, v));
+            }
+            Cow::Owned(w)
+        }
+        _ => filter_visible(&events[cut..], viewer),
+    }
+}
+
+/// 切片里**最近一次**压缩快照（`session.consolidated`）的下标。
+fn latest_snapshot_index(events: &[Event]) -> Option<usize> {
+    events.iter().rposition(|e| {
+        e.entity == Entity::Message
+            && e.verb == Verb::Progressed
+            && e.kind == EVENT_SESSION_CONSOLIDATED
+    })
 }
 
 /// turn 运行器：持令牌的调用方对每个会话轮调用一次。

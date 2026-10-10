@@ -168,6 +168,23 @@ VisScope:
         '事件名常量：与 EVENT_TURN_SUPPLEMENTED / EVENT_SESSION_RECONCILED 同类，event/mod.rs 单点定义、插件按名引用。Core 外唯一消费方 = plugins/session（v2_messages 落格 + rebuild 回放），折叠索引与投影在 core 内走域内路径',
       EVENT_MESSAGE_REMOVED:
         '事件名常量：与 EVENT_MESSAGE_EDITED 同批同格（message × closed，与 memory.forgotten 同形），event/mod.rs 单点定义、插件按名引用。Core 外唯一消费方 = plugins/session（truncate 落格 + rebuild 丢弃）',
+      // `EVENT_SESSION_CONSOLIDATED`（S2.7-b2 的压缩快照，`message × progressed`，
+      // 见 ADR-053 决策 6）：与上面五条事件名同族同由——事件名必须单点定义
+      // （散落字面量必然漂）。落格在 `plugins/session/v2_exec`（压缩入格 + 段归档），
+      // 取窗口在 `turn_runner`，换基在 `rebuild`；投影与快照定位在 core 内
+      // （`projection/transcript` / `prompt_fidelity` / `mutations`）走域内路径。
+      // 所以跨 core 的消费方只有 session 那一个，与同域存量事件名同形。
+      EVENT_SESSION_CONSOLIDATED:
+        '事件名常量：与 EVENT_MESSAGE_EDITED / EVENT_SESSION_RECONCILED 同类，event/mod.rs 单点定义、插件按名引用。Core 外唯一消费方 = plugins/session（v2_exec 落格并归档 / turn_runner 取窗口 / rebuild 换基），投影与快照定位在 core 内走域内路径',
+      // `mutations_latest_snapshot`（S2.7-b2）：读侧要「最近一份压缩快照 + 它取代了
+      // 多少轮」。与 `turnstate` / `transcript` 同族同形——**判据只在 core 有一份实现**
+      // （`projection/mutations`），插件经根函数名调用（C-002 禁深引域目录）。core 内
+      // 另有消费方（`transcript` 换基 / `prompt_fidelity` 跳过被取代段），审计只数跨出
+      // core 的那一个（`plugins/session` 的 `turn_runner` / `v2_exec` / `rebuild`），
+      // 故显为单消费方。**不可下沉**：五处读侧若各写一份「哪一份是最近的」，不一致
+      // 会静默表现为「重建用旧快照、请求包用新快照」。
+      mutations_latest_snapshot:
+        '快照定位规则：core 内一份实现（transcript 换基 / prompt_fidelity 跳过被取代段），插件经根名调用（C-002 禁深引 projection 域）。core 外唯一消费方 = plugins/session（turn_runner 取窗口 / v2_exec 判幂等并取轮次水位 / rebuild 换基）。不可下沉——五处读侧各写一份必然漂，而漂的后果是静默的',
       // 节点身份规则（S2.7-b1，ADR-053）：`event_payload_node_id` /
       // `event_produced_text_node_id` / `event_tool_result_node_id`。
       // 与 `turnstate` / `transcript` 同族同形——**规则只在 core 有一份实现**，

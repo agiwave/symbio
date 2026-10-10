@@ -17,7 +17,7 @@ use crate::symbio_core::{llm_emit_message, llm_short_id, TurnToolCallInfo};
 use crate::symbio_core::{
     chat_message::{ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType},
     failure_kind, Budget, EventWalStore, HookEvent, HookOutput, LatencyTier,
-    PluginInvokeRequestExt, Seq, Store,
+    PluginInvokeRequestExt,
 };
 use crate::symbio_core::{
     ExecAbortSignal, ExecEventSink, Plugin, PluginError, PluginInvokeRequest, PluginPayload,
@@ -980,7 +980,10 @@ fn session_cost_ms(
     let Ok(store) = EventWalStore::open_readonly(&path) else {
         return 0;
     };
-    let snapshot = store.range(Seq::new(0));
+    // `history()` 而非 `range()`（S2.7-b2）：成本台账是**会话累计**口径——
+    // 压缩归档把被取代的前缀移出 live 段后，只读 live 会**静默**少算压缩前的
+    // 花费 ⇒ 闸门说「还有余量」而实际已耗尽（ADR-044 的熔断随之形同虚设）。
+    let snapshot = store.history();
     crate::symbio_core::cost_ledger()
         .apply(&snapshot, i64::MAX, Budget::generous())
         .value
