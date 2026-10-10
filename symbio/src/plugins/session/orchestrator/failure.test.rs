@@ -216,6 +216,82 @@ async fn converge_inflight_marks_root_turn_aborted_and_children_completed() {
     );
 }
 
+/// `persist_failure` 的 `partial` 合并：中止时已产出的半截正文 / 思考是事实，
+/// 必须落进存储——用户中断后重建的历史里那半句话还在（追问名词才有前置上下文）。
+///
+/// 三条合并语义各钉一条断言：同 id **整条覆盖**（partial 是定稿内容，镜像那份只是
+/// 流式快照的一截）、新节点**补写**（父存在）、孤儿**丢弃**。
+#[tokio::test]
+async fn persist_failure_merges_partial_output() {
+    let (_dir, p) = fixture();
+    let sid = "s-partial";
+    let store = p.get_store().await.expect("存储不可用");
+    store.save_session(&Session::new(sid)).await.unwrap();
+
+    // 在途镜像：根 Turn + 一条流式半截正文（快照只攒到半句）
+    let transcript = Arc::new(tokio::sync::Mutex::new(
+        crate::plugins::session::transcript::Transcript::new(
+            sid.into(),
+            Arc::new(VdfsChangeSubscriptions::default()),
+        ),
+    ));
+    transcript
+        .lock()
+        .await
+        .apply(turn_node("turn-p", cm::MessageStatus::Streaming));
+    let mut snap_half = node("text-p", Some("turn-p"), cm::MessageStatus::Streaming);
+    snap_half.content = Some(cm::MessageContent::Text("说到一半提到一个名词".into()));
+    transcript.lock().await.apply(snap_half);
+
+    // partial：同 id 正文（定稿到中断处）+ 新增思考节点 + 一个孤儿
+    let mut full_half = node("text-p", Some("turn-p"), cm::MessageStatus::Completed);
+    full_half.content = Some(cm::MessageContent::Text(
+        "说到一半提到一个名词，然后被中断".into(),
+    ));
+    let mut reason = node("reason-p", Some("turn-p"), cm::MessageStatus::Completed);
+    reason.msg_type = Some(cm::MessageType::Reasoning);
+    reason.content = Some(cm::MessageContent::Text("半截思考".into()));
+    let orphan = node(
+        "orphan-p",
+        Some("ghost-parent"),
+        cm::MessageStatus::Completed,
+    );
+
+    p.persist_failure(
+        sid,
+        &transcript,
+        "用户手动中止了本次回复",
+        cm::MessageStatus::Aborted,
+        vec![full_half, reason, orphan],
+    )
+    .await;
+
+    let after = p
+        .open_chat_session(sid)
+        .await
+        .unwrap()
+        .get_messages()
+        .await
+        .unwrap();
+    let get = |id: &str| after.iter().find(|m| m.id == id).cloned();
+    let text = get("text-p").expect("半截正文必须落库");
+    assert_eq!(
+        text.content.as_ref().map(|c| c.to_text()),
+        Some("说到一半提到一个名词，然后被中断".to_string()),
+        "partial 是定稿内容：同 id 节点整条覆盖镜像快照那份半截"
+    );
+    assert!(
+        get("reason-p").is_some(),
+        "半截思考是事实：父存在的新节点必须补写"
+    );
+    assert!(get("orphan-p").is_none(), "孤儿不得写入存储");
+    assert_eq!(
+        get("turn-p").and_then(|m| m.status),
+        Some(cm::MessageStatus::Aborted),
+        "根 Turn 落中止终态（可重试），不挂 error"
+    );
+}
+
 /// 幂等：已经收口过的会话再收一次不得产生任何变更（`handle_abort` 与消费循环的
 /// ABORTED 分支都会调用它，两者都可能先跑）。
 #[tokio::test]

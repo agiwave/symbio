@@ -57,15 +57,19 @@
 //! **上抛**给 chat_loop（`Failed` 出口）——用户侧的失败呈现（错误状态 +
 //! 重试）走那条出口；网格里已有兜底格，重试即新一轮（N3 靠构造成立）。
 //!
-//! 中止语义：生成被中止时运行器**不落收束格**（网格少一格是诚实缺口，
-//! ADR-044 同源），本函数上抛 `Aborted`——chat_loop 走独立出口，会话结局
-//! `aborted`（**不是** `failed`）。中止与失败在**类型上**分开（`AdapterError`
-//! / `TurnOutcome.aborted`），不靠错误文本猜；两者出口因此可各自演化。
+//! 中止语义：生成被中止时运行器**照落收束格**（`f-{turn}`，kind 仍是
+//! `chat.assistant.final`——中止是事实的**状态**，不是另一种事实；载荷
+//! `status: "aborted"` + `terminated: { reason, at }`），本函数上抛
+//! `Aborted { partial }`——chat_loop 走独立出口，会话结局 `aborted`
+//! （**不是** `failed`），半截产出随 `partial` 双写进 `messages.json`。
+//! 中止与失败在**类型上**分开（`AdapterError` / `TurnOutcome.aborted`），
+//! 不靠错误文本猜；两者出口因此可各自演化。
 //!
 //! 等待用户语义：工具报 `failure_kind = pending`（confirm / ask_user）时运行器
-//! 停止工具循环且**不落收束格**（本轮还没了结），本函数按正常收束返回——
-//! 待用户动作由分发方广播的 `user_prompt` 节点承载（`WaitingUserAction`），
-//! 呈现为卡片 + 恢复入口。恢复（用户答完续跑同一轮）走 [`TurnResume`]，**不重开用户格**。
+//! 停止工具循环，落一格**进展格**（`chat.assistant.progress`，`turn × progressed`，
+//! 载荷 `status: "pending"`）——本轮还没了结，收束格留给恢复幕（一轮至多一条）。
+//! 本函数按正常收束返回——待用户动作由分发方广播的 `user_prompt` 节点承载
+//! （`WaitingUserAction`），呈现为卡片 + 恢复入口。恢复（用户答完续跑同一轮）走 [`TurnResume`]，**不重开用户格**。
 //!
 //! 但**派生事实两幕都写**（等待幕与恢复幕都走到本函数轮末）：步 11 编码按**内容**
 //! 去重（`RecallView::contains_content`）⇒ 同一轮不会编出第二条；恢复幕的召回视图
@@ -73,7 +77,8 @@
 //! （I2：恢复不新开用户格）。判据 = e2e `t27`（`turnFacts` 数轮次事实、派生事实另数）。
 //!
 //! 中止轮 / 等待轮的形态：用户格**先落**——prompt 从网格出，用户发言不入格就会从
-//! 下一轮的 prompt 里消失；收束格**不落**（网格少一格是诚实缺口，见上）。影响面：
+//! 下一轮的 prompt 里消失；中止落收束格（`status: "aborted"` + `terminated`）、
+//! 等待落进展格（`status: "pending"`），两条都不另立事件 kind。影响面：
 //! 中止轮计入兜底率的**分母**（用户格在网格里），**分子不计**（中止不是失败）。
 
 use std::sync::{Arc, Mutex};
@@ -342,17 +347,18 @@ impl FrameQueue {
 pub(crate) struct UiBridge {
     tx: Arc<FrameQueue>,
     root_id: String,
-    /// 正文节点 id：首片分配、此后稳定；`finalize_node` 交还并置空（下一轮另开）。
-    node: Arc<Mutex<Option<String>>>,
-    /// 推理节点 `(id, 累积正文)`：与正文同形，但**多带一份累积正文**。
+    /// 正文节点 `(id, 累积正文)`：首片分配 id、此后稳定；`finalize_node` 交还并置空
+    /// （下一轮另开）。
     ///
-    /// 为什么正文不需要累积而推理需要：正文的收束帧由调用方带全文
-    /// （`LlmTurn::text`，见 [`super::v2_tools::SessionDispatchPort`]），而推理
-    /// 正文**没有别的持有者**——`LlmTurn` 只装 `text` 与 `tool_calls`。
-    /// 不在这里攒，收束帧就只能写「推理到此为止」而不带内容。
-    ///
-    /// 累积是无损的：每一片都先经这里再进队列，队列满了是**合并**同节点增量
-    /// （见 `FrameQueue`），不丢。
+    /// 正文也要**累积**（与推理同形）：`LlmTurn::text` 只在生成**完整结束**时才有，
+    /// 而中止时那半截正文只有桥攒着——**半截正文是事实**，不入格/不落库就等于
+    /// 用户中断后那半句话消失（追问名词就没了前置上下文）。累积是无损的：
+    /// 每一片都先经这里再进队列，队列满了是**合并**同节点增量（见 `FrameQueue`），
+    /// 不丢。
+    node: Arc<Mutex<Option<(String, String)>>>,
+    /// 推理节点 `(id, 累积正文)`：与正文同形。推理正文**没有别的持有者**——
+    /// `LlmTurn` 只装 `text` 与 `tool_calls`，不在这里攒，收束帧就只能写
+    /// 「推理到此为止」而不带内容，网格里也查不到 reasoning。
     reasoning: Arc<Mutex<Option<(String, String)>>>,
 }
 
@@ -370,8 +376,11 @@ impl Drop for UiBridge {
 }
 
 impl UiBridge {
-    /// 当前正文节点 id（未定格的最后一轮正文）。
-    pub(crate) fn current_node(&self) -> Option<String> {
+    /// 当前正文节点 `(id, 累积正文)`（未定格的最后一轮正文；本轮无正文 ⇒ `None`）。
+    ///
+    /// 累积正文的消费点有两个：`chat_loop` 的 `finalize_assistant_turn`（收口末轮）
+    /// 与中止出口（半截正文入格 + 双写 `messages.json`，见 [`execute_turn`]）。
+    pub(crate) fn current_node(&self) -> Option<(String, String)> {
         self.node.lock().unwrap().clone()
     }
 
@@ -398,7 +407,7 @@ impl UiBridge {
     /// 定格（`content` 整条替换）先到、增量后到，接收端在定格正文后**继续追加**，
     /// 结果比模型说的多出一截。
     pub(crate) fn finalize_node(&self, text: &str) -> Option<String> {
-        let id = self.node.lock().unwrap().take()?;
+        let (id, _) = self.node.lock().unwrap().take()?;
         let _ = self.tx.send(UiFrame::Finalize {
             id: id.clone(),
             parent: self.root_id.clone(),
@@ -457,23 +466,28 @@ impl DeltaSink for UiBridge {
         if text.is_empty() {
             return;
         }
-        // 先把已有节点 id 取到局部量再判分支：`match self.node.lock()…` 的
-        // 临时 guard 会存活**整个 match**（含 None 臂），在臂里再 lock 即
-        // 同线程自死锁（Mutex 不可重入）。
-        let existing = self.node.lock().unwrap().clone();
-        let frame = match existing {
-            Some(id) => UiFrame::Delta {
-                id,
-                text: text.to_string(),
-            },
-            None => {
-                let id = llm_short_id();
-                *self.node.lock().unwrap() = Some(id.clone());
-                UiFrame::Snapshot {
-                    id,
-                    parent: self.root_id.clone(),
-                    text: text.to_string(),
-                    kind: UiNodeKind::Text,
+        // 取 id、累积与建帧**一次锁内做完**（与 [`Self::on_reasoning`] 同形、同理由：
+        // 三个动作必须原子，分两次锁会让「首片」的判定与累积不同步）。帧在锁内
+        // 建好、`send` 在锁外——`send` 会去开队列自己的锁，没必要叠着。
+        let frame = {
+            let mut guard = self.node.lock().unwrap();
+            match guard.as_mut() {
+                Some((id, acc)) => {
+                    acc.push_str(text);
+                    UiFrame::Delta {
+                        id: id.clone(),
+                        text: text.to_string(),
+                    }
+                }
+                None => {
+                    let id = llm_short_id();
+                    *guard = Some((id.clone(), text.to_string()));
+                    UiFrame::Snapshot {
+                        id,
+                        parent: self.root_id.clone(),
+                        text: text.to_string(),
+                        kind: UiNodeKind::Text,
+                    }
                 }
             }
         };
@@ -482,8 +496,8 @@ impl DeltaSink for UiBridge {
         let _ = self.tx.send(frame);
     }
 
-    /// 推理增量：与 [`Self::on_delta`] **同形**（首片建节点、此后窄追加），
-    /// 只差两处——节点类型是 `Reasoning`，且正文要**累积**（见 `reasoning` 字段）。
+    /// 推理增量：与 [`Self::on_delta`] **同形**（首片建节点、此后窄追加 + 累积正文），
+    /// 只差节点类型是 `Reasoning`。
     fn on_reasoning(&self, text: &str) {
         if text.is_empty() {
             return;
@@ -582,6 +596,10 @@ pub(crate) struct V2Turn<'a> {
     pub sink: &'a ExecEventSink,
     /// 本轮用户发言（事实入格与 prompt 的同一来源）。
     pub user_text: &'a str,
+    /// 本轮用户消息节点 id（落库镜像里那条用户消息的 id）——收束格 / 进展格的
+    /// 载荷记它，重建侧据此把本轮锚回用户发言。id 由 chat_loop 分配（消息镜像的
+    /// 写方），这里只读不生成。
+    pub user_node_id: Option<String>,
     /// 对话窗口（最近轮数，含当前轮）。
     pub window_turns: u64,
     /// 本轮装配进模型的工具清单（空 = 无工具轮）。
@@ -796,6 +814,7 @@ pub(crate) async fn execute_final_reply_turn(
     provider: Arc<dyn ModelProvider>,
     abort: ExecAbortSignal,
     user_text: &str,
+    user_node_id: Option<String>,
     reply: &str,
 ) -> Result<(), PluginError> {
     let dir = session.session_dir().ok_or_else(|| {
@@ -829,6 +848,11 @@ pub(crate) async fn execute_final_reply_turn(
         prefix: None,
         inject: None,
         final_reply: Some(reply.to_string()),
+        // 答话轮没有流式节点 ⇒ 无半截可记：载荷 `turn_id` 记空串（重建侧按事件 id
+        // 稳定合成），取数口不挂（`nodes: None`）。
+        turn_root_id: String::new(),
+        user_node_id,
+        nodes: None,
     };
     TurnRunner
         .run_with_tools(
@@ -857,6 +881,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         root_id,
         sink,
         user_text,
+        user_node_id,
         window_turns,
         tools,
         resume,
@@ -1170,6 +1195,32 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                 // 本路**恒**走生成：定稿答话轮（缺口 5）不经这里——它一个模型请求都不发，
                 // 由 `execute_final_reply_turn` 单独入口落格（见该函数）。
                 final_reply: None,
+                // 落格身份三件套：本轮 Turn 根 id（载荷 `turn_id`）、用户消息节点 id
+                // （用户格载荷记它）、流式节点取数口。取数口是**快照闭包**：运行器每轮
+                // 收束 / 进展 / 兜底时问一次「此刻桥上攒着哪两个节点」，中途正文与思考
+                // 因此逐轮入格（半截中止时它们是唯一幸存者）。
+                turn_root_id: root_id.to_string(),
+                user_node_id,
+                nodes: Some(std::sync::Arc::new({
+                    let bridge = bridge.clone();
+                    move || {
+                        let (text_id, text) = bridge
+                            .current_node()
+                            .map(|(id, acc)| (Some(id), Some(acc)))
+                            .unwrap_or((None, None));
+                        let (reasoning_id, reasoning) = bridge
+                            .current_reasoning()
+                            .map(|(id, acc)| (Some(id), Some(acc)))
+                            .unwrap_or((None, None));
+                        crate::plugins::session::turn_runner::StreamNodeFacts {
+                            text_id,
+                            text,
+                            reasoning_id,
+                            reasoning,
+                        }
+                    }
+                })
+                    as crate::plugins::session::turn_runner::NodeFactsFn),
             };
             // 工具分发：core 只认契约（`DispatchPort`），实现是插件侧——它持插件宿主、
             // 请求上下文、转写出口与会话目录（core 认识这些即违 E-009）。
@@ -1211,7 +1262,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
     // 工具轮的那几轮在 `v2_tools::dispatch` 里已经定格并取走了 ⇒ 这里拿到的是
     // **最后一轮**（无工具调用那一轮）的节点；没有推理就是 `None`（`on_reasoning`
     // 一次都没被调过），不是空节点。
-    let child_id = bridge.current_node().unwrap_or_default();
+    let (child_id, child_text) = bridge.current_node().unwrap_or_default();
     let (reasoning_child_id, reasoning_text) = bridge.current_reasoning().unwrap_or_default();
     // 桥归零 ⇒ 通道关闭 ⇒ 发射端排空后退出。
     drop(bridge);
@@ -1219,12 +1270,38 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
         .await
         .map_err(|e| PluginError::InternalError(format!("流式发射任务失败：{e}")))?;
 
-    // 中止：运行器**未落收束格**（网格少一格是诚实缺口，ADR-044 同源），
+    // 中止：收束格已由运行器落格（`f-{turn}`，载荷 `status: "aborted"` + `terminated`），
     // 出口走 Aborted——由 chat_loop/消费循环落库为 `MessageStatus::Aborted`
     // + 会话结局 `aborted`（**不是** `failed`）。
-    // 记忆与学习也**不写**——中止的轮次没有收束，没有可固化的东西。
+    // 记忆与学习也**不写**——中止的轮次没有定稿产出，没有可固化的东西。
+    //
+    // **半截产出随出口带走**（`partial`）：末轮正文 / 思考此刻还只攒在桥上，丢了它们
+    // 用户中断前看到的那半句话就消失。消费循环把 `partial` 双写进 `messages.json`
+    // （按 id 去重、整条覆盖、孤儿丢弃，见 `persist_failure`）；工具轮已定格的节点
+    // （`produced`）同走这条通道——中止出口不再回灌 `V2TurnResult`，不带上就没了。
     if outcome.aborted {
-        return Err(PluginError::Aborted);
+        let mut partial = produced;
+        if !child_text.is_empty() {
+            partial.push(super::message_build::llm_build_text_node(
+                root_id,
+                &child_text,
+                None,
+                child_id,
+            ));
+        }
+        if !reasoning_text.trim().is_empty() {
+            partial.push(ChatMessage {
+                id: reasoning_child_id,
+                parent_id: Some(root_id.to_string()),
+                role: Some(MessageRole::Assistant),
+                msg_type: Some(MessageType::Reasoning),
+                content: Some(MessageContent::Text(reasoning_text.clone())),
+                status: Some(MessageStatus::Completed),
+                timestamp: Some(crate::symbio_core::clock_now_ms()),
+                ..Default::default()
+            });
+        }
+        return Err(PluginError::Aborted { partial });
     }
 
     // ── 收束派生事实（两半）：承诺 / 任务表 / 熔断 + 记忆与学习 ────────────────
@@ -1322,10 +1399,11 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
     if outcome.fell_back {
         return Err(PluginError::InternalError(outcome.text));
     }
-    // 等待用户（`outcome.awaits_user`）：本轮尚未了结（运行器未落收束格），但
-    // **按正常收束返回**——待用户动作由分发方广播的 `user_prompt` 节点承载
-    // （`WaitingUserAction`），呈现是卡片 + 恢复入口；恢复时经
-    // [`TurnResume`] 续写同一轮（不重开用户格）。此处的 `text` 只是模型在工具轮说过的话，不是终答。
+    // 等待用户（`outcome.awaits_user`）：本轮尚未了结（运行器只落了进展格
+    // `status: "pending"`，收束格留给恢复幕），但**按正常收束返回**——待用户动作由
+    // 分发方广播的 `user_prompt` 节点承载（`WaitingUserAction`），呈现是卡片 +
+    // 恢复入口；恢复时经 [`TurnResume`] 续写同一轮（不重开用户格）。
+    // 此处的 `text` 只是模型在工具轮说过的话，不是终答。
 
     // 折进的补充也要进落库镜像（缺口 3）：排在 `produced` **之前** ——
     // 用户先插话、工具结果后到，这是时间序（`persist_messages` 只写尾部增量，
@@ -1364,8 +1442,8 @@ fn count_user_messages(events: &[Event]) -> u64 {
 /// **已开未收束**的轮次（`turn × opened` 无同号收束）：返回 `(turn, 用户格 seq)`。
 ///
 /// 与 core 的 `invariants::unresolved_turns`（C4）同一口径——等待用户动作的那一轮
-/// 就是它（运行器有意不落收束格，那是「还没完」的诚实缺口）。取**最后**一个：
-/// 恢复请求总是续写最近一次停顿。
+/// 就是它（进展格 `chat.assistant.progress` 不是收束格：本轮还没了结，收束格留给
+/// 恢复幕）。取**最后**一个：恢复请求总是续写最近一次停顿。
 fn last_open_turn(events: &[Event]) -> Option<(u64, u64)> {
     let mut open: Vec<(u64, u64)> = Vec::new();
     for e in events {

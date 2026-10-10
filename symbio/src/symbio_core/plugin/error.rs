@@ -24,7 +24,12 @@ pub enum PluginError {
     #[error("操作被拒绝：{0}")]
     Forbidden(String),
     #[error("操作中止")]
-    Aborted,
+    Aborted {
+        /// 中止时**已产出的半截消息**（正文 / 思考 / 工具节点）——思考与正文是事实，
+        /// 不因没说完就不记：它们随错误一路带到落库镜像（`persist_failure` 的
+        /// `partial` 参数），双写进 `messages.json`。
+        partial: Vec<crate::symbio_core::chat_message::ChatMessage>,
+    },
     #[error("上下文丢失，需要重试")]
     RetryWithoutContextId,
     #[error("流解析错误：{0}")]
@@ -120,7 +125,7 @@ impl PluginError {
             PluginError::ParseError(_) => PluginErrorCode::ParseError,
             PluginError::Timeout => PluginErrorCode::Timeout,
             PluginError::Forbidden(_) => PluginErrorCode::Forbidden,
-            PluginError::Aborted => PluginErrorCode::Aborted,
+            PluginError::Aborted { .. } => PluginErrorCode::Aborted,
             PluginError::RetryWithoutContextId => PluginErrorCode::RetryWithoutContextId,
             PluginError::StreamError(_) => PluginErrorCode::StreamError,
             PluginError::CompressionFailed => PluginErrorCode::CompressionFailed,
@@ -129,7 +134,7 @@ impl PluginError {
 
     /// 是否为"用户主动中止"语义（非业务失败：不落错误事件、不冒泡给前端为 Error）。
     pub fn is_abort(&self) -> bool {
-        matches!(self, PluginError::Aborted)
+        matches!(self, PluginError::Aborted { .. })
     }
 
     /// 将 PluginError 转换为通用的传输帧

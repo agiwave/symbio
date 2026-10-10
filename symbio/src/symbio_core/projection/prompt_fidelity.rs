@@ -27,7 +27,8 @@
 
 use super::super::event::{
     Entity, Event, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_ASSISTANT_REPORTED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_TURN_SUPPLEMENTED,
+    EVENT_USER_MESSAGE,
 };
 
 /// 缺口的一条报告。**故意不 derive `PartialEq`**：报告要给门禁与日志读，字段顺序变动
@@ -69,7 +70,14 @@ fn expected_role(e: &Event) -> Option<&'static str> {
         // 后果很隐蔽：**补充漏进请求包时判据不会红**。凡是落进投影的 kind 都必须
         // 在这里登记——判据的覆盖范围要与投影的实现范围同时长。
         (Entity::Turn, Verb::Asserted, EVENT_TURN_SUPPLEMENTED) => Some("user"),
-        (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FINAL) => Some("assistant"),
+        (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FINAL) => {
+            // 空正文的收束格不进投影（同 `transcript` 的空正文跳过）⇒ 也不在复核范围。
+            (!payload_text(e).trim().is_empty()).then_some("assistant")
+        }
+        // 进展格（等待用户）：同样投影成 assistant 行；空正文照跳。
+        (Entity::Turn, Verb::Progressed, EVENT_ASSISTANT_PROGRESS) => {
+            (!payload_text(e).trim().is_empty()).then_some("assistant")
+        }
         (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FALLBACK) => Some("assistant"),
         (Entity::Artifact, Verb::Asserted, EVENT_ARTIFACT_ADDED) => Some("tool"),
         _ => None,

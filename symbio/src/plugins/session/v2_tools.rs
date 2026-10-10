@@ -196,7 +196,7 @@ impl DispatchPort for SessionDispatchPort {
         )
         .await;
 
-        produced.extend(call_nodes);
+        produced.extend(call_nodes.iter().cloned());
         // 父节点终态同步进落库副本——整条替换（执行器交回的就是完整快照）。
         // id 不存在的（协议失败兜底父节点）补入，使结果子节点不悬空。
         for full in &parent_updates {
@@ -230,6 +230,14 @@ impl DispatchPort for SessionDispatchPort {
                             .and_then(|tc| tc.name.clone())
                     })
                     .unwrap_or_default();
+                // 节点结构三字段（载荷补全）：`wire_id` / `args` 从 ToolCall 节点取
+                //（结果子节点的 `parent_id` 就是它的节点 id；wire id 存 `tool_call_id`
+                // 字段、定稿参数存 `content`），`result_id` 是结果子节点自己的 id——
+                // 重建按这三个 id 复刻同一个工具卡片（与落库视图同源）。
+                let call_node = call_nodes
+                    .iter()
+                    .chain(parent_updates.iter())
+                    .find(|n| n.id == call_id && n.msg_type == Some(MessageType::ToolCall));
                 DispatchOutcome {
                     call_id,
                     name,
@@ -242,6 +250,13 @@ impl DispatchPort for SessionDispatchPort {
                         .unwrap_or(true),
                     needs_user_action: m.msg_type == Some(MessageType::UserPrompt)
                         && m.status == Some(MessageStatus::WaitingUserAction),
+                    wire_id: call_node
+                        .and_then(|n| n.tool_call_id.clone())
+                        .unwrap_or_default(),
+                    args: call_node
+                        .and_then(|n| n.content.as_ref().map(|c| c.to_text()))
+                        .unwrap_or_default(),
+                    result_id: m.id.clone(),
                 }
             })
             .collect()

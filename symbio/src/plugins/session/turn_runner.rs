@@ -32,7 +32,7 @@
 use crate::symbio_core::{
     visible_to, ActorSpec, AdapterError, Entity, Event, FullModel, LatencyTier, LlmAdapter,
     PromptToolCall, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_PROGRESS, EVENT_USER_MESSAGE,
 };
 use std::borrow::Cow;
 
@@ -159,6 +159,180 @@ pub struct TurnInput {
     /// 这一轮没有模型参与，`chat.assistant.final` 的 `model` 载荷记**空串**而不是
     /// 任何模型的 id——记一个会变成「这次请求用的是那个模型」，而事实相反。
     pub final_reply: Option<String>,
+    /// **本轮 Turn 根节点 id**（落库时 `into_messages(root_id)` 的入参）。
+    ///
+    /// 由**调用方分配**（`chat_loop/inputs.rs` 的 `llm_short_id()`，那里是唯一的
+    /// 分配点），运行器只把它记进收束事件的载荷——「谁分配谁记录」要求事件载荷与
+    /// 落库回包用的是**同一个 id**，两边各自现造就必然对不上（重建出的 Turn 根与
+    /// 落库的 Turn 根是两个节点）。
+    pub turn_root_id: String,
+    /// 本轮**用户消息节点 id**（`user.message` 载荷记它）。`None` = 本轮没有用户
+    /// 节点（续写轮不新开用户格，不消费）。
+    ///
+    /// 与 [`Self::turn_root_id`] 同一条纪律：id 由调用方生成（用户消息在进运行器
+    /// 之前就已存在），这里只负责**记**。
+    pub user_node_id: Option<String>,
+    /// **流式期已分配的节点身份**（正文 / 推理子节点的 id 与推理正文）——收束事件
+    /// 的载荷要记它们（WAL 载荷补全：消息节点 id 入格，重建才无损）。
+    ///
+    /// 为什么是闭包而不是直接给值：节点在**流式期间**由 UI 桥的首片分配，而收束
+    /// 事件写在流结束之后——运行器与桥之间隔着 `dyn DeltaSink`，拿不到桥的内部
+    /// 状态。闭包把「取此刻的节点事实」留给唯一知道它的那一侧（与
+    /// [`Self::inject`] 同形态的理由：core 不认识桥）。
+    pub nodes: Option<NodeFactsFn>,
+}
+
+/// 流式期已分配的节点事实（见 [`TurnInput::nodes`]）。
+///
+/// 四个字段一起取：收束 / 进展载荷要的是「这一轮的正文 / 推理节点是哪两个、两段正文
+/// 是什么」——拆成四个回调只会让取值点变四处。
+#[derive(Clone, Default)]
+pub struct StreamNodeFacts {
+    /// 正文子节点 id（`TurnOutput::response_text_child_id` 同源）。
+    pub text_id: Option<String>,
+    /// 正文累积（**半截也是事实**：中止时它就是要入格的那半句话）。
+    pub text: Option<String>,
+    /// 推理子节点 id（`TurnOutput::reasoning_child_id` 同源）。
+    pub reasoning_id: Option<String>,
+    /// 推理正文（reasoning-only 判据在重建侧要复算，故正文也要记）。
+    pub reasoning: Option<String>,
+}
+
+/// 「取此刻的流式节点事实」的取数口（见 [`TurnInput::nodes`]）。
+/// 与 [`RoundInjector`] 同一条「闭包而不是 trait」的判据：一个取值动作不立 trait。
+pub type NodeFactsFn = std::sync::Arc<dyn Fn() -> StreamNodeFacts + Send + Sync>;
+
+/// 一次工具调用的事实形状（收束 / 进展载荷的 `tool_calls` 条目）。
+///
+/// `result_id` 是**引用**而不是结果正文：工具结果正文归 `artifact.added`（一个事实
+/// 一个 owner），这里只记「结果落在哪个节点」。配不上结果的调用记 `None`——不静默
+/// 补空串（空串读出来是「结果节点 id 是空的」，而事实是「还没有结果」）。
+#[derive(Debug, Clone)]
+pub struct ToolCallFact {
+    /// ToolCall 节点 id（`llm_build_tool_call_nodes` 的同源 id）。
+    pub id: String,
+    /// 工具名（LLM 可见名）。
+    pub name: String,
+    /// 定稿参数文本（JSON 文本 / 解析失败的残破原文，与
+    /// [`super::message_build::tool_call_args_text`] 同一取法）。
+    pub args: String,
+    /// provider wire id（`tool_call_id` 字段——节点身份的一部分）。
+    pub wire_id: String,
+    /// 结果子节点 id（`None` = 尚无结果：无分发通道 / 等待用户 / 恢复路）。
+    pub result_id: Option<String>,
+}
+
+/// 取此刻的流式节点事实（无桥 ⇒ 空事实，不是错误）。
+fn node_facts(nodes: &Option<NodeFactsFn>) -> StreamNodeFacts {
+    nodes.as_ref().map(|f| f()).unwrap_or_default()
+}
+
+/// 产出部分的载荷（收束 / 进展 / 兜底格共用的形状）。
+///
+/// 一处定义的理由：三种格子记的是**同一批产出事实**（末轮正文 / 思考 / 本轮全部
+/// 工具调用 / 工具轮的中途产出），差别只在状态字段——形状写三遍必然漂移，而重建
+/// 只按一个形状读。半截正文 / 半截思考照原样进 `text` / `reasoning` / `rounds`：
+/// **它们是事实**，不因「没说完」就不记。
+fn produced_payload(
+    text: &str,
+    model: &str,
+    turn_root_id: &str,
+    facts: &StreamNodeFacts,
+    tool_calls: &[ToolCallFact],
+    rounds: &[StreamNodeFacts],
+) -> serde_json::Value {
+    serde_json::json!({
+        "text": text,
+        // 空串 = 这一轮没有模型参与（定稿答话 / 反射档），不是「忘了记」。
+        "model": model,
+        // 节点结构入格：重建按这批 id 复刻落库形状（载荷补全）。
+        "turn_id": turn_root_id,
+        "text_id": facts.text_id,
+        "reasoning_id": facts.reasoning_id,
+        "reasoning": facts.reasoning,
+        "tool_calls": tool_calls_payload(tool_calls),
+        "rounds": rounds_payload(rounds),
+    })
+}
+
+/// `tool_calls` 载荷条目（形状见 [`ToolCallFact`]）。
+fn tool_calls_payload(calls: &[ToolCallFact]) -> Vec<serde_json::Value> {
+    calls
+        .iter()
+        .map(|c| {
+            serde_json::json!({
+                "id": c.id,
+                "name": c.name,
+                "args": c.args,
+                "wire_id": c.wire_id,
+                "result_id": c.result_id,
+            })
+        })
+        .collect()
+}
+
+/// `rounds` 载荷条目：工具轮的**中途产出**（每轮正文 / 思考 + 节点 id）。
+fn rounds_payload(rounds: &[StreamNodeFacts]) -> Vec<serde_json::Value> {
+    rounds
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "text_id": r.text_id,
+                "text": r.text,
+                "reasoning_id": r.reasoning_id,
+                "reasoning": r.reasoning,
+            })
+        })
+        .collect()
+}
+
+/// 一次工具调用 → 事实条目（结果配不上的记 `result_id: None`）。
+fn tool_fact_of(
+    tc: &crate::symbio_core::TurnToolCallInfo,
+    outcome: Option<&crate::symbio_core::DispatchOutcome>,
+) -> ToolCallFact {
+    ToolCallFact {
+        id: outcome
+            .map(|o| o.call_id.clone())
+            .or_else(|| tc.id.clone())
+            .unwrap_or_default(),
+        name: tc.name.clone().unwrap_or_default(),
+        args: super::message_build::tool_call_args_text(tc),
+        wire_id: outcome
+            .map(|o| o.wire_id.clone())
+            .or_else(|| tc.wire_id.clone())
+            .unwrap_or_default(),
+        result_id: outcome
+            .map(|o| o.result_id.clone())
+            .filter(|s| !s.is_empty()),
+    }
+}
+
+/// 从本轮结果里配对出 `tc` 的那条（按 ToolCall 节点 id / wire id；配不上 ⇒ `None`）。
+fn outcome_of<'a>(
+    outcomes: &'a [crate::symbio_core::DispatchOutcome],
+    tc: &crate::symbio_core::TurnToolCallInfo,
+) -> Option<&'a crate::symbio_core::DispatchOutcome> {
+    outcomes.iter().find(|o| {
+        tc.id.as_deref().map(|id| id == o.call_id).unwrap_or(false)
+            || (!o.wire_id.is_empty() && tc.wire_id.as_deref() == Some(o.wire_id.as_str()))
+    })
+}
+
+/// 给产出载荷补**状态**字段（完成 / 终止 / 等待是事实的状态，不进产出形状本身）。
+fn with_status(mut produced: serde_json::Value, status: &str) -> serde_json::Value {
+    produced["status"] = serde_json::Value::String(status.to_string());
+    produced
+}
+
+/// 终止信息（`terminated: { reason, at }`，仅终止时有）：终止的事实被截到哪一刻、
+/// 被什么截断——半截正文停在哪里由此可观测。
+fn with_terminated(mut payload: serde_json::Value) -> serde_json::Value {
+    payload["terminated"] = serde_json::json!({
+        "reason": "aborted",
+        "at": crate::symbio_core::clock_now_ms(),
+    });
+    payload
 }
 
 /// 「下一轮要加哪些消息」的取数口（见 [`TurnInput::inject`]）。
@@ -201,8 +375,11 @@ impl std::fmt::Debug for TurnInput {
             .field("actor", &self.actor)
             .field("prefix", &self.prefix)
             .field("final_reply", &self.final_reply)
+            .field("turn_root_id", &self.turn_root_id)
+            .field("user_node_id", &self.user_node_id)
             // 闭包**不展开**：展开会把捕获的东西（生产里是用户对话正文）打进日志。
             .field("inject", &self.inject.as_ref().map(|_| "<闭包>"))
+            .field("nodes", &self.nodes.as_ref().map(|_| "<闭包>"))
             .finish()
     }
 }
@@ -249,16 +426,17 @@ pub struct TurnOutcome {
     /// 反射档 / 兜底 / 中止没有模型参与，恒 `None`。
     pub usage: Option<crate::symbio_core::ModelUsage>,
     pub fell_back: bool,
-    /// 中止（用户主动停止 / 会话销毁）：**既无 final 也无兜底格**——网格只留
-    /// 已入格的用户消息，少一格是诚实的缺口（与 ADR-044 同一条纪律）；
-    /// `text` 为空。与 `fell_back` 互斥（失败要落兜底格，中止不落），因此
-    /// **绝不进兜底分子**（兜底率是失败的指标）。
+    /// 中止（用户主动停止 / 会话销毁）：**中止照落收束格**（`chat.assistant.final`，
+    /// 载荷 `status: "aborted"` + `terminated: { reason, at }`）——模型已产出的半截
+    /// 正文 / 半截思考是事实，`text` 就是那半截正文（可为空）。收束 kind 绝不复用
+    /// 兜底格（`chat.assistant.fallback` 是**失败**的形状），因此与 `fell_back` 互斥、
+    /// **绝不进兜底分子**（兜底率是失败的指标：用户按的停止不是「模型答不出」）。
     pub aborted: bool,
     /// 本轮**收束于等待用户动作**（工具报了 `failure_kind = pending`，如 confirm /
-    /// ask_user）：运行器停止工具循环并**不落收束格**——本轮尚未了结，等用户答完
-    /// 才续（恢复是 [plan/11 批 2](../../../../docs/plan/11-多执行器与多主体加固实施方案.md) 的
-    /// 能力）。与 `aborted` 同样是「网格少一格的诚实缺口」，但原因不同：一个是被放弃，
-    /// 一个是还没完。
+    /// ask_user）：运行器停止工具循环并落**进展格**（`chat.assistant.progress`，
+    /// `turn × progressed`，载荷 `status: "pending"`）——本轮尚未了结，模型说过的话
+    /// 照样是事实；恢复是 [plan/11 批 2](../../../../docs/plan/11-多执行器与多主体加固实施方案.md) 的
+    /// 能力，恢复后以收束格了结（进展格不占「一轮至多一条收束格」）。
     pub awaits_user: bool,
     /// 本轮收束**被写侧闸拒绝**（主体不持 `reply.first`，见 [`closure_granted`]）：
     /// 收束格未入格，该轮留在未收束态（`check_all` 的 C4 报得出）。与 `aborted` /
@@ -349,9 +527,13 @@ impl TurnRunner {
     ///
     /// ## 中止 / 等待用户
     ///
-    /// 两者都**不落收束格**（网格少一格是诚实缺口，ADR-044 同源），差别在原因：
-    /// 中止是被放弃（`aborted`），等待用户是还没完（`awaits_user`，
-    /// [plan/11 批 2](../../../../docs/plan/11-多执行器与多主体加固实施方案.md) 续跑）。
+    /// 两者都照落一格事实——**思考 / 正文 / 工具是事实，完成 / 终止 / 等待是状态**：
+    /// 中止落收束格（`chat.assistant.final`，载荷 `status: "aborted"` +
+    /// `terminated: { reason, at }`，半截正文 / 半截思考一并入格），绝不复用兜底格
+    /// （那是**失败**的形状，且会污染兜底率）；等待用户落进展格
+    /// （`chat.assistant.progress`，`turn × progressed`，载荷 `status: "pending"`），
+    /// 不收束轮次（[plan/11 批 2](../../../../docs/plan/11-多执行器与多主体加固实施方案.md)
+    /// 恢复后续写同一轮、以收束格了结）。「一轮至多一条收束格」不变。
     ///
     /// ## 为什么参数多到要 `allow`
     ///
@@ -383,6 +565,9 @@ impl TurnRunner {
             actor,
             prefix,
             final_reply,
+            turn_root_id,
+            user_node_id,
+            nodes,
         } = input;
         // 本轮的 viewer：历史窗口只交**本主体看得见**的事件（plan/11 批1 ③）。
         // 身份是入参不是字面量——`actor.principal` 由调用方（生产：会话属于哪个
@@ -404,7 +589,12 @@ impl TurnRunner {
                         turn,
                         "user",
                     )
-                    .with_payload(serde_json::json!({ "text": text, "tier": tier.name() })),
+                    .with_payload(serde_json::json!({
+                        "text": text,
+                        "tier": tier.name(),
+                        // 用户消息节点 id 入格：重建按它复刻节点身份（前端按 id 合并）。
+                        "id": user_node_id,
+                    })),
                 )
                 .map(|seq| seq.value())?,
             Some(r) => r.user_seq,
@@ -418,12 +608,23 @@ impl TurnRunner {
         // 空答话与模型返回空文本同一条纪律：不落收束，落到兜底话术上。把空串
         // 记成「答了空话」会让「到点必答」这条线无声失效（I3）。
         if let Some(reply) = final_reply.as_deref() {
+            let facts = node_facts(&nodes);
+            // 产出部分的载荷一处构造（收束 / 进展 / 兜底共用同一形状），状态字段由
+            // 各落格分支自己补——状态是事实的状态，不进产出形状本身。
+            let produced = produced_payload(reply, "", &turn_root_id, &facts, &[], &[]);
             if reply.trim().is_empty() {
                 // 耗时记 0：这一轮一次模型请求都没发（答话是调用方给好的
                 // `final_reply`），`started` 那条计时口径本来就是「模型往返」。
-                return self
-                    .append_fallback(store, &actor, turn, user_seq, "compose returned empty", 0)
-                    .await;
+                return Self::append_fallback(
+                    store,
+                    &actor,
+                    turn,
+                    user_seq,
+                    "compose returned empty",
+                    0,
+                    produced,
+                )
+                .await;
             }
             if !closure_granted(&actor.principal) {
                 crate::plugin_warn!(
@@ -453,11 +654,7 @@ impl TurnRunner {
                 )
                 .with_produced_by(user_seq)
                 .with_cost_ms(0)
-                .with_payload(serde_json::json!({
-                    "text": reply,
-                    // 空串：这轮没有模型参与（见 `TurnInput::final_reply` 的载荷说明）
-                    "model": "",
-                })),
+                .with_payload(with_status(produced, "completed")),
             )?;
             return Ok(TurnOutcome {
                 turn,
@@ -544,6 +741,12 @@ impl TurnRunner {
             .iter()
             .filter(|e| e.turn == turn && e.kind == crate::symbio_core::EVENT_ARTIFACT_ADDED)
             .count() as u64;
+        // 本轮**全部**工具调用的结构（跨工具轮累积）——收束 / 进展事件载荷记它，
+        // 重建才有「这一轮请求过什么」的完整事实（载荷补全）。
+        let mut all_tool_calls: Vec<ToolCallFact> = Vec::new();
+        // 工具轮的**中途产出**（每轮正文 / 思考的节点事实，跨轮累积）——末轮之外的
+        // 每一轮都进 `rounds`，收束 / 进展载荷记它（半截正文 / 半截思考照入格）。
+        let mut rounds: Vec<StreamNodeFacts> = Vec::new();
 
         // 续写轮：恢复产生的工具交换是**本轮已发生的事实**——先落格（`artifact.added`，
         // 溯源指向本轮用户格，I2）再拼进 prompt。落格之后它固然进了投影，但本轮的
@@ -563,9 +766,27 @@ impl TurnRunner {
                 .with_payload(serde_json::json!({
                     "tool": r.call.name.clone().unwrap_or_default(),
                     "text": r.text,
+                    // 节点结构入格：ToolCall / 结果节点的身份与参数（重建复刻同一批）。
+                    // 恢复路的节点 id 由恢复方分配（此处 `call.id` 可能为空）——
+                    // 空缺由重建侧按事件 id 稳定合成（见 rebuild）。
+                    "tool_call_id": r.call.id,
+                    "wire_id": r.call.wire_id,
+                    "args": super::message_build::tool_call_args_text(&r.call),
+                    "result_id": null,
+                    "success": true,
+                    "turn_id": turn_root_id,
                 })),
             )?;
             artifact_no += 1;
+            all_tool_calls.push(ToolCallFact {
+                id: r.call.id.clone().unwrap_or_default(),
+                name: r.call.name.clone().unwrap_or_default(),
+                args: super::message_build::tool_call_args_text(&r.call),
+                wire_id: r.call.wire_id.clone().unwrap_or_default(),
+                // 恢复路的结果正文直接在场（`r.text`），结果子节点由恢复方落库——
+                // 身份不在这里记，重建侧按事件 id 稳定合成（与上一行同一约定）。
+                result_id: None,
+            });
             exchange.extend(exchange_messages(&r.call, &r.text));
         }
 
@@ -578,6 +799,9 @@ impl TurnRunner {
             match llm.generate_turn(tok, &messages, tools, sink.clone()).await {
                 Ok(rt) => {
                     cost_ms += rt.cost_ms;
+                    // 每轮的流式节点事实在**分发之前**取定：工具分发的定稿会重置桥，
+                    // 之后再取只拿得到下一轮的节点——本轮的中途正文 / 思考就静默丢了。
+                    let round_facts = node_facts(&nodes);
 
                     // 2a. 本轮不再请求工具 ⇒ 收束（落 final）。
                     if rt.tool_calls.is_empty() {
@@ -586,16 +810,24 @@ impl TurnRunner {
                             // 落成 final 会把「没答」记成「答了空话」（I3 的到点必答
                             // 要求有一句话，兜底话术承担它）。
                             let cost = started.elapsed().as_millis() as u64;
-                            return self
-                                .append_fallback(
-                                    store,
-                                    &actor,
-                                    turn,
-                                    user_seq,
-                                    "model returned empty text",
-                                    cost,
-                                )
-                                .await;
+                            let produced = produced_payload(
+                                &rt.text,
+                                llm.model_id(),
+                                &turn_root_id,
+                                &round_facts,
+                                &all_tool_calls,
+                                &rounds,
+                            );
+                            return Self::append_fallback(
+                                store,
+                                &actor,
+                                turn,
+                                user_seq,
+                                "model returned empty text",
+                                cost,
+                                produced,
+                            )
+                            .await;
                         }
                         if !closure_granted(&actor.principal) {
                             // 写侧闸拒：**不落收束格**——该轮留在未收束态，`check_all`
@@ -617,6 +849,14 @@ impl TurnRunner {
                                 closure_denied: true,
                             });
                         }
+                        let produced = produced_payload(
+                            &rt.text,
+                            llm.model_id(),
+                            &turn_root_id,
+                            &round_facts,
+                            &all_tool_calls,
+                            &rounds,
+                        );
                         store.append(
                             Event::pending(
                                 format!("f-{turn}"),
@@ -628,10 +868,7 @@ impl TurnRunner {
                             )
                             .with_produced_by(user_seq)
                             .with_cost_ms(cost_ms)
-                            .with_payload(serde_json::json!({
-                                "text": rt.text,
-                                "model": llm.model_id(),
-                            })),
+                            .with_payload(with_status(produced, "completed")),
                         )?;
                         return Ok(TurnOutcome {
                             turn,
@@ -649,20 +886,34 @@ impl TurnRunner {
                     //     缺口**（无工具轮不该出现工具调用），按失败诚实回报。
                     let Some(dispatch) = dispatch else {
                         let cost = started.elapsed().as_millis() as u64;
-                        return self
-                            .append_fallback(
-                                store,
-                                &actor,
-                                turn,
-                                user_seq,
-                                "模型请求了工具，但本轮没有工具分发通道",
-                                cost,
-                            )
-                            .await;
+                        // 调用本身是事实：没有分发通道也要记「请求过什么」
+                        // （`result_id` 记 `None`——还没有结果，不是空结果）。
+                        all_tool_calls
+                            .extend(rt.tool_calls.iter().map(|tc| tool_fact_of(tc, None)));
+                        let produced = produced_payload(
+                            &rt.text,
+                            llm.model_id(),
+                            &turn_root_id,
+                            &round_facts,
+                            &all_tool_calls,
+                            &rounds,
+                        );
+                        return Self::append_fallback(
+                            store,
+                            &actor,
+                            turn,
+                            user_seq,
+                            "模型请求了工具，但本轮没有工具分发通道",
+                            cost,
+                            produced,
+                        )
+                        .await;
                     };
                     let outcomes = dispatch.dispatch(&rt).await;
 
                     // 2c. 产物落格：每条工具结果一格，溯源指向本轮用户格。
+                    //     节点结构入格（与恢复路同形）：结果正文归这一格（一个事实一个
+                    //     owner），收束 / 进展载荷的 `tool_calls` 只记 `result_id` 引用。
                     for outcome in &outcomes {
                         store.append(
                             Event::pending(
@@ -677,13 +928,55 @@ impl TurnRunner {
                             .with_payload(serde_json::json!({
                                 "tool": outcome.name,
                                 "text": outcome.text,
+                                "tool_call_id": outcome.call_id,
+                                "wire_id": outcome.wire_id,
+                                "args": outcome.args,
+                                "result_id": outcome.result_id,
+                                "success": outcome.ok,
+                                "turn_id": turn_root_id,
                             })),
                         )?;
                         artifact_no += 1;
                     }
+                    // 本轮工具调用的结构进累积（配得上结果的记结果节点 id）。
+                    all_tool_calls.extend(
+                        rt.tool_calls
+                            .iter()
+                            .map(|tc| tool_fact_of(tc, outcome_of(&outcomes, tc))),
+                    );
 
-                    // 2d. 收束于等待用户 ⇒ 停止循环且**不落收束格**（见函数文档）。
+                    // 2d. 收束于等待用户 ⇒ 落**进展格**（`status: "pending"`：模型已
+                    //     说过的话照样是事实，等待是状态），不收束轮次——恢复续写同一轮、
+                    //     以收束格了结（见函数文档）。
                     if outcomes.iter().any(|o| o.needs_user_action) {
+                        let produced = produced_payload(
+                            &rt.text,
+                            llm.model_id(),
+                            &turn_root_id,
+                            &round_facts,
+                            &all_tool_calls,
+                            &rounds,
+                        );
+                        // 进展格的事件 id 按**本轮已有进展格数**编号（同产物格的幂等
+                        // 模式）：等待轮可能已落过进展格（恢复后又等待），从 0 起会撞
+                        // 幂等键（`Duplicate`）。
+                        let progress_no = full_snapshot
+                            .iter()
+                            .filter(|e| e.turn == turn && e.kind == EVENT_ASSISTANT_PROGRESS)
+                            .count() as u64;
+                        store.append(
+                            Event::pending(
+                                format!("p-{turn}-{progress_no}"),
+                                EVENT_ASSISTANT_PROGRESS,
+                                Entity::Turn,
+                                Verb::Progressed,
+                                turn,
+                                &actor.principal,
+                            )
+                            .with_produced_by(user_seq)
+                            .with_cost_ms(cost_ms)
+                            .with_payload(with_status(produced, "pending")),
+                        )?;
                         return Ok(TurnOutcome {
                             turn,
                             text: rt.text,
@@ -697,6 +990,9 @@ impl TurnRunner {
                     }
 
                     // 2e. 把这一轮交换追加进 prompt，继续下一轮。
+                    //     本轮（工具轮）的中途产出进 `rounds`——它不是末轮，收束载荷的
+                    //     顶层字段留给末轮 / 中止 / 兜底那一轮，避免同一段正文记两遍。
+                    rounds.push(round_facts);
                     exchange.clear();
                     exchange.extend(tool_exchange_messages(&rt, &outcomes));
 
@@ -712,14 +1008,57 @@ impl TurnRunner {
                     }
                 }
                 Err(AdapterError::Aborted) => {
-                    // 3a. 中止：**不落任何收束格**——用户消息已入格，少一格是诚实
-                    // 的缺口（ADR-044 同一纪律）。兜底格是**失败**的形状（`fell_back`
-                    // 专有），中止落了它就等于把「用户按了停止」记成「模型答不出」，
-                    // 还会抬高兜底率——那是假象。
+                    // 3a. 中止：照落收束格（`chat.assistant.final`，`status: "aborted"` +
+                    // `terminated: { reason, at }`）——**思考 / 正文是事实，终止是状态**：
+                    // 半截正文 / 半截思考照样入格（`text` 就是那半截），不因没说完就不记。
+                    // 收束 kind 绝不复用兜底格：那是**失败**的形状（`fell_back` 专有），
+                    // 落了它就等于把「用户按了停止」记成「模型答不出」，还会抬高兜底率。
                     let cost = started.elapsed().as_millis() as u64;
+                    let facts = node_facts(&nodes);
+                    let partial_text = facts.text.clone().unwrap_or_default();
+                    if !closure_granted(&actor.principal) {
+                        // 中止的收束格同过写侧闸（收束格是同一个事实，不论哪条路径
+                        // 写出）：拒绝 ⇒ 不入格，该轮留在未收束态（C4 报得出）。
+                        crate::plugin_warn!(
+                            "actors",
+                            "[v2] 中止收束被授权拒绝（{} 缺 reply.first），本轮不入格（turn={turn}）",
+                            actor.principal
+                        );
+                        return Ok(TurnOutcome {
+                            turn,
+                            text: partial_text,
+                            cost_ms: cost,
+                            usage: None,
+                            fell_back: false,
+                            aborted: true,
+                            awaits_user: false,
+                            closure_denied: true,
+                        });
+                    }
+                    let produced = produced_payload(
+                        &partial_text,
+                        llm.model_id(),
+                        &turn_root_id,
+                        &facts,
+                        &all_tool_calls,
+                        &rounds,
+                    );
+                    store.append(
+                        Event::pending(
+                            format!("f-{turn}"),
+                            EVENT_ASSISTANT_FINAL,
+                            Entity::Turn,
+                            Verb::Closed,
+                            turn,
+                            &actor.principal,
+                        )
+                        .with_produced_by(user_seq)
+                        .with_cost_ms(cost)
+                        .with_payload(with_terminated(with_status(produced, "aborted"))),
+                    )?;
                     return Ok(TurnOutcome {
                         turn,
-                        text: String::new(),
+                        text: partial_text,
                         cost_ms: cost,
                         usage: None,
                         fell_back: false,
@@ -730,10 +1069,27 @@ impl TurnRunner {
                 }
                 Err(e) => {
                     // 3b. 兜底落格（I3：到点必答——失败也是一句话，不是静默）。
+                    //     失败前已产出的半截正文 / 思考照样进载荷（它们是事实）。
                     let cost = started.elapsed().as_millis() as u64;
-                    return self
-                        .append_fallback(store, &actor, turn, user_seq, &e.to_string(), cost)
-                        .await;
+                    let facts = node_facts(&nodes);
+                    let produced = produced_payload(
+                        &facts.text.clone().unwrap_or_default(),
+                        llm.model_id(),
+                        &turn_root_id,
+                        &facts,
+                        &all_tool_calls,
+                        &rounds,
+                    );
+                    return Self::append_fallback(
+                        store,
+                        &actor,
+                        turn,
+                        user_seq,
+                        &e.to_string(),
+                        cost,
+                        produced,
+                    )
+                    .await;
                 }
             }
         }
@@ -838,10 +1194,20 @@ impl TurnRunner {
             )
             .with_produced_by(user_seq)
             .with_cost_ms(cost_ms)
-            .with_payload(serde_json::json!({
-                "text": text,
-                "model": LatencyTier::Reflex.name(),
-            })),
+            // 与深度档同一个产出形状（`produced_payload`）+ 状态字段：反射档无模型、
+            // 无流式节点，`turn_id` 记空串（重建侧按事件 id 稳定合成）、取数口不挂。
+            // 载荷形状不另写一份——重建只按一个形状读。
+            .with_payload(with_status(
+                produced_payload(
+                    text,
+                    LatencyTier::Reflex.name(),
+                    "",
+                    &StreamNodeFacts::default(),
+                    &[],
+                    &[],
+                ),
+                "completed",
+            )),
         )?;
         Ok(TurnOutcome {
             turn,
@@ -856,14 +1222,18 @@ impl TurnRunner {
     }
 
     /// 兜底落格（I3）的唯一构造点：失败也是一句话。
+    ///
+    /// 载荷 = **产出部分**（`produced`，失败前已产出的半截正文 / 思考 / 工具事实——
+    /// 它们是事实，不因失败就不记）+ `why`（失败原因）+ `status: "failed"`（失败是
+    /// 状态，不进产出形状本身）。
     async fn append_fallback<S>(
-        &self,
         store: &S,
         actor: &ActorSpec,
         turn: u64,
         user_seq: u64,
         why: &str,
         cost_ms: u64,
+        produced: serde_json::Value,
     ) -> Result<TurnOutcome, crate::symbio_core::AppendError>
     where
         S: Store<Event = Event>,
@@ -887,6 +1257,8 @@ impl TurnRunner {
                 closure_denied: true,
             });
         }
+        let mut payload = with_status(produced, "failed");
+        payload["why"] = serde_json::Value::String(why.to_string());
         store.append(
             Event::pending(
                 format!("fb-{turn}"),
@@ -898,7 +1270,7 @@ impl TurnRunner {
             )
             .with_produced_by(user_seq)
             .with_cost_ms(cost_ms)
-            .with_payload(serde_json::json!({ "why": why })),
+            .with_payload(payload),
         )?;
         Ok(TurnOutcome {
             turn,

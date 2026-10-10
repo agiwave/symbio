@@ -498,6 +498,7 @@ pub async fn run_chat_loop(
                             orchestrator.provider.clone(),
                             turn.abort.clone(),
                             utterance,
+                            turn.input_utterance.as_ref().map(|(id, _)| id.clone()),
                             &reply,
                         )
                         .await
@@ -637,7 +638,14 @@ pub async fn run_chat_loop(
         // （错误条 + 重试入口），会话结局 `aborted`（**不是** `failed`）；
         // 不会波及上一轮已成功的 Turn（persist_failure 按 failing_turn 子树收窄）。
         if turn.abort.is_aborted() {
-            return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Aborted).await;
+            return finish_turn(
+                orchestrator,
+                &context,
+                &sink,
+                &turn,
+                TurnExit::Aborted(Vec::new()),
+            )
+            .await;
         }
 
         // ── 步骤 4：LLM 调用（唯一发起处）────────────────────────────────────
@@ -647,17 +655,21 @@ pub async fn run_chat_loop(
         //
         // 轮次事实**只有这一个写方**：成功原生入格，失败也已尽力入格
         // （I3 兜底格 + Failed 出口），因此同轮两份记账不可能发生。
-        // 本轮用户文本：轮首已入列的最后一条用户消息。
-        let user_text = context
+        // 本轮用户文本与用户消息节点 id：轮首已入列的最后一条用户消息（同一取值点，
+        // 落格载荷的 `id` 记的就是这个节点 id，重建侧据此锚回用户发言）。
+        let (user_node_id, user_text) = context
             .messages
             .iter()
             .rev()
             .find(|m| m.role == Some(MessageRole::User))
-            .map(|m| match &m.content {
-                Some(MessageContent::Text(t)) => t.clone(),
-                _ => String::new(),
+            .map(|m| {
+                let text = match &m.content {
+                    Some(MessageContent::Text(t)) => t.clone(),
+                    _ => String::new(),
+                };
+                (Some(m.id.clone()), text)
             })
-            .unwrap_or_default();
+            .unwrap_or((None, String::new()));
         let v2_started = std::time::Instant::now();
         let out = match super::v2_exec::execute_turn(super::v2_exec::V2Turn {
             session: &context.session,
@@ -670,6 +682,7 @@ pub async fn run_chat_loop(
             root_id: &inputs.root_id,
             sink: &sink,
             user_text: &user_text,
+            user_node_id,
             window_turns: context.session.context_window(),
             tools: &inputs.tools,
             resume: pending_resume.take(),
@@ -708,10 +721,19 @@ pub async fn run_chat_loop(
                 context.messages.extend(res.messages);
                 res.output
             }
-            Err(PluginError::Aborted) => {
+            Err(PluginError::Aborted { partial }) => {
                 // 中止：在途 Turn 交消费循环落库为 `MessageStatus::Aborted` +
-                // 会话结局 `aborted`（**不是** `failed`——中止不是错误）。
-                return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Aborted).await;
+                // 会话结局 `aborted`（**不是** `failed`——中止不是错误）。半截产出
+                // （正文 / 思考 / 工具节点）随 `partial` 一路带到 `persist_failure`，
+                // 双写进 `messages.json`——它们是事实，不因没说完就不记。
+                return finish_turn(
+                    orchestrator,
+                    &context,
+                    &sink,
+                    &turn,
+                    TurnExit::Aborted(partial),
+                )
+                .await;
             }
             Err(e) => {
                 plugin_warn!("session", "[Session] v2 执行失败，走 Failed 出口: {e}");
@@ -725,8 +747,16 @@ pub async fn run_chat_loop(
             // 同样向上冒泡，由消费循环统一收尾（在途 Turn → `Aborted` + error +
             // 可重试，会话结局 `aborted`）。仅 send_request 之后的 abort 冒泡；
             // turn 循环顶部的边界检查点不冒泡——上一轮已定稿落库，冒泡会把成功的
-            // Turn 误回滚为失败。
-            return finish_turn(orchestrator, &context, &sink, &turn, TurnExit::Aborted).await;
+            // Turn 误回滚为失败。本轮已完整产出（`res.messages` 已并入镜像并随
+            // `persist_messages` 落库），没有半截要补 ⇒ `partial` 空。
+            return finish_turn(
+                orchestrator,
+                &context,
+                &sink,
+                &turn,
+                TurnExit::Aborted(Vec::new()),
+            )
+            .await;
         }
 
         // ── 步骤 5：推理收尾（定稿内容子节点 → 校准估算 → 并入上下文）────────
@@ -852,9 +882,10 @@ async fn finish_turn(
     fire_stop_hook(orchestrator, messages).await;
 
     // 返回语义：中止与失败向上冒泡，由消费循环统一收尾（在途 Turn 落 `Aborted`
-    // 或 `Failed`，各自结局分明 + 可重试）。
+    // 或 `Failed`，各自结局分明 + 可重试）。中止携带的半截产出一路带到
+    // `persist_failure`（双写 `messages.json`：它们是事实，不因没说完就不记）。
     match exit {
-        TurnExit::Aborted => Err(PluginError::Aborted),
+        TurnExit::Aborted(partial) => Err(PluginError::Aborted { partial }),
         TurnExit::Failed(e) => Err(e),
         _ => Ok(()),
     }

@@ -139,7 +139,10 @@ impl ModelProvider for BoundProvider {
                     "[LLM] 轮次中止 (耗时 {:?})",
                     turn_started.elapsed()
                 );
-                return Err(PluginError::Aborted);
+                return Err(PluginError::Aborted {
+                    // 半截流的清除不在本层（见下）：这里没有可携带的半截产出。
+                    partial: Vec::new(),
+                });
             }
             PostResult::RetryWithoutContextId => {
                 plugin_warn!(

@@ -96,6 +96,23 @@ pub const EVENT_ASSISTANT_FINAL: &str = "chat.assistant.final";
 /// 兜底话术——**普通事件，不是特殊通道**（生成失败也要有输出）。落在 `turn × closed`。
 pub const EVENT_ASSISTANT_FALLBACK: &str = "chat.assistant.fallback";
 
+/// 等待用户（本轮尚未了结，如工具报了 confirm / ask_user）。落在 `turn × progressed`。
+///
+/// ## 为什么它是事实而不是「什么都没发生」
+///
+/// 思考 / 正文 / 工具是**事实**；完成 / 终止 / 等待是事实的**状态**。等待用户时模型
+/// 已经说过话（"需要你确认一下"）——那句话是事实，必须入格（载荷 `status` 记
+/// `pending`），否则恢复续写后模型看不见自己问过什么，会把同一句再问一遍。
+/// **不为「等待」新增收束语义**：本格不收束轮次（`turn × progressed` 不是
+/// `closed`），恢复后照常以收束格了结，「一轮至多一条收束格」不变。
+///
+/// ## 为什么不是 `chat.assistant.reported` 的第二次
+///
+/// 汇报是**界面文本**（`exclude_from_context`，不进请求包），而等待用户那句话是
+/// **对话事实**——恢复续写时模型必须看得见它。两者角色相同（assistant）、
+/// 进不进请求包相反，混在一处必然让其中一半被静默滤掉。
+pub const EVENT_ASSISTANT_PROGRESS: &str = "chat.assistant.progress";
+
 // ── 产物格子（S02 §3，[roadmap/S02-工具调用与产物.md](../../../../docs/plan/roadmap/S02-工具调用与产物.md)）──
 //
 // 工具**结果**是产物事实：模型请求了工具、工具产出了这段东西。工具调用**本身**

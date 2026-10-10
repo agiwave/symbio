@@ -356,6 +356,14 @@ pub struct DispatchOutcome {
     /// 运行器据此**停止工具循环**（恢复前提见
     /// [plan/11 批 2](../../../../docs/plan/11-多执行器与多主体加固实施方案.md)）。
     pub needs_user_action: bool,
+    /// ToolCall 节点的 provider wire id（`tool_call_id` 字段）。节点身份的一部分：
+    /// 事件载荷记录它，重建才能复刻同一个工具卡片（`call_id` 只是节点 id）。
+    pub wire_id: String,
+    /// ToolCall 节点的**定稿参数文本**（JSON 文本 / 解析失败的残破原文）。
+    /// 重建直接回放这段文本，不经 `Value` 重序列化（键序漂移即失真）。
+    pub args: String,
+    /// 结果子节点（`role=Tool`）的节点 id——落库时由分发方分配，记进载荷供重建复用。
+    pub result_id: String,
 }
 
 /// 工具分发端口（⑤ 的抽象面，与 [`LlmAdapter`] 并列的第二只端口）。

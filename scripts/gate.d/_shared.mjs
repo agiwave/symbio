@@ -765,6 +765,16 @@ export const BASELINE = {
   //   桥接用例（`provider_adapter_routes_tool_frames_to_the_message_channel`）：
   //   身份帧先于增量、全帧同 id（id 漂移 = 第二张卡）、Σ帧拼出完整参数 JSON。
   //   实测口径同前：`cargo test -p symbio`，取首个 `test result: ok. N passed`。
+  // 2026-10-10 **回填 `1416 → 1421`（+5）**：批「S2.6」（[ADR-052] 事实完整性——
+  //   思考与半截产出入格，状态不另立事实 kind）：`turn_runner.test.rs` +3
+  //   （`abort_keeps_the_half_sentence_in_the_grid` / `reasoning_is_queryable_in_the_grid` /
+  //   `abort_does_not_pollute_fallback_semantics`）、`v2_exec.test.rs` +1
+  //   （`aborted_half_sentence_survives_in_partial_and_grid`）、`failure.test.rs` +1
+  //   （`persist_failure_merges_partial_output`：同 id 整条覆盖 / 补写 / 孤儿丢弃）。
+  //   另 3 条改名扩写（无净增）：`aborted_run_closes_the_cell_with_aborted_status` /
+  //   `pending_tool_lands_progress_cell_without_closing` /
+  //   `tool_free_turn_abort_closes_the_cell_and_bubbles_aborted`——归因无残差（+5 −0）。
+  //   `ciRustTestsTotal` 同步 `1424 → 1429`（同一个增量两边一起动）。实测口径同前。
   // 2026-10-10 批「S2.5」（[ADR-051] 废 v1 档）：**下修 `1417 → 1416`（−1）**，
   //      `ciRustTestsTotal` 同步 `1425 → 1424`（同一增量在 CI 口径各欠一次，两边一起动）。
   //      归因无残差：只删 `config.test.rs::v2_mode_defaults_to_full_and_roundtrips`
@@ -789,7 +799,7 @@ export const BASELINE = {
   //   整列、读侧闸 ⇒ 空且不扫）。同批退役 `#[ignore]` 的 `slo_scan_wal_roots`
   //   手工扫描口（职责被上面两件接走）。
   //   实测口径同前：`cargo test -p symbio -p symbio-cli`，取首个 `test result: ok. N passed`。
-  rustTests: 1416,
+  rustTests: 1421,
   /**
    * CI 口径的 Rust 通过数（**只增不减**）——与上面三个分包基线**是不同口径，不能互替**。
    *
@@ -805,7 +815,9 @@ export const BASELINE = {
    * 照样绿。这与 ci.yml 漏掉 `v2-plan` 是同一课的第三次：**只信退出码**能抓住
    * 「测试失败」，抓不住「测试消失」——后者不留任何痕迹。
    *
-   * 1424 = 1416 + 8 + 0 + 0（2026-10-10 **实测**：`cargo test --workspace` 全部
+   * 1429 = 1421 + 8 + 0 + 0（2026-10-10 **实测**：`cargo test --workspace` 全部
+   * `test result: ok` 行求和，依次 symbio lib 1421 / cli 8 / tauri 0 /
+   * doctest `0 passed; 8 ignored`）。1424 = 1416 + 8 + 0 + 0（同日实测：
    * `test result: ok` 行求和，依次 symbio lib 1416 / cli 8 / tauri 0 /
    * doctest `0 passed; 8 ignored`）。前值 1384 是推算值（1376 + 8 + 0 + 0），
    * 其自述「下一次 CI 以实测复核」的推算误差已吸收在 `1384 → 1425` 里。
@@ -814,7 +826,7 @@ export const BASELINE = {
    * 请更新 BASELINE.ciRustTestsTotal`。**本地与 CI 是两条独立的格子**，同一个增量
    * 会各欠一次，回填时必须两边一起看。
    */
-  ciRustTestsTotal: 1424,
+  ciRustTestsTotal: 1429,
   /**
    * `cli` crate 的通过数（**只增不减**，判据与 `rustTests` 完全相同）。
    *

@@ -51,6 +51,9 @@ impl TurnRunner {
                 prefix: None,
                 // 恒走生成：定稿答话轮由 `v2_exec` 自己把答话交进来。
                 final_reply: None,
+                turn_root_id: String::new(),
+                user_node_id: None,
+                nodes: None,
             },
             std::sync::Arc::new(SilentDeltas),
         )
@@ -80,10 +83,11 @@ impl TurnRunner {
 // ── v2 会话运行时：TurnRunner 验收（不变量靠构造成立 + WAL 持久 + 兜底联动）──
 
 mod turn_runner_tests {
-    use super::super::{TurnInput, TurnRunner};
+    use super::super::{NodeFactsFn, StreamNodeFacts, TurnInput, TurnRunner};
     use crate::symbio_core::{
         check_all, cost_ledger, fallback_rate, transcript, Budget, Event, EventStore, LatencyTier,
-        Seq, Store, StubLlmAdapter, TokenIssuer, WalStore, EVENT_USER_MESSAGE,
+        Seq, SilentDeltas, Store, StubLlmAdapter, TokenIssuer, WalStore, EVENT_ASSISTANT_FALLBACK,
+        EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
     };
 
     /// 成功轮：final 落格、溯源指向本轮用户消息、实测 cost_ms > 0、
@@ -492,6 +496,9 @@ mod turn_runner_tests {
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
                     final_reply: None,
+                    turn_root_id: String::new(),
+                    user_node_id: None,
+                    nodes: None,
                 },
                 got.clone() as Arc<dyn DeltaSink>,
             )
@@ -534,6 +541,9 @@ mod turn_runner_tests {
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
                     final_reply: None,
+                    turn_root_id: String::new(),
+                    user_node_id: None,
+                    nodes: None,
                 },
                 got2.clone() as Arc<dyn DeltaSink>,
             )
@@ -544,11 +554,34 @@ mod turn_runner_tests {
         assert!(frames[0].contains("问"));
     }
 
-    /// 中止（AdapterError::Aborted）：**不落收束格**——网格只剩已入格的用户
-    /// 消息（少一格是诚实的缺口，ADR-044 同源），`aborted` 为真且 `text` 为空；
-    /// 不变量照绿（C4 会看见这个缺口，那是设计而非缺陷：中止不是静默中断）。
+    /// 中止轮的入参包：半截产出事实经 `nodes` 闭包随收束入格（生产里这个闭包读
+    /// UI 桥上攒的半截正文 / 思考；测试直接给值）。
+    fn abort_input(nodes: NodeFactsFn) -> TurnInput {
+        TurnInput {
+            turn: 0,
+            text: "问".into(),
+            tier: LatencyTier::Deep,
+            window_turns: None,
+            inject: None,
+            resume: None,
+            actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
+            // 请求级前缀：测试不走请求视图层（三段皆空）。
+            prefix: None,
+            final_reply: None,
+            turn_root_id: "r-1".into(),
+            user_node_id: None,
+            nodes: Some(nodes),
+        }
+    }
+
+    /// 中止（AdapterError::Aborted）：**照落收束格**（`chat.assistant.final`，
+    /// 载荷 `status: "aborted"` + `terminated: { reason, at }`）——思考 / 正文是
+    /// 事实，完成 / 终止是**状态**：「用户按了停止」是本轮的结局，不是另一种
+    /// 事实种类，kind 不为它新增变体，也绝不复用兜底格（`chat.assistant.fallback`
+    /// 是**失败**的形状）。本轮无半截产出时 `text` 为空，收束格照落：轮次必须
+    /// 收束，未收束的缺口才真的合得上（C4）。
     #[tokio::test]
-    async fn aborted_run_leaves_only_user_event() {
+    async fn aborted_run_closes_the_cell_with_aborted_status() {
         use crate::symbio_core::unresolved_turns;
 
         let store = EventStore::new();
@@ -562,21 +595,176 @@ mod turn_runner_tests {
 
         assert!(out.aborted, "中止必须在结果里可见");
         assert!(!out.fell_back, "中止不是兜底（两者互斥）");
-        assert!(out.text.is_empty(), "中止没有答复文本");
+        assert!(out.text.is_empty(), "本轮没有半截产出");
 
         let snapshot = store.range(Seq::new(0));
-        assert_eq!(snapshot.len(), 1, "只剩用户格：{snapshot:?}");
+        assert_eq!(snapshot.len(), 2, "用户格 + 收束格：{snapshot:?}");
         assert_eq!(snapshot[0].kind, EVENT_USER_MESSAGE);
+        assert_eq!(snapshot[1].kind, EVENT_ASSISTANT_FINAL, "中止照落收束格");
+        assert_eq!(snapshot[1].payload["status"], "aborted", "终止是状态字段");
+        assert_eq!(
+            snapshot[1].payload["terminated"]["reason"], "aborted",
+            "终止原因入格（半截产出停在哪里由此可观测）"
+        );
+        assert!(
+            snapshot[1].payload["terminated"]["at"].as_u64().is_some(),
+            "终止时刻是时间戳"
+        );
         assert!(
             check_all(&snapshot).is_empty(),
             "{:?}",
             check_all(&snapshot)
         );
-        assert_eq!(
-            unresolved_turns(&snapshot, false).len(),
-            1,
-            "缺口要**可被判出**（不是假装收束）——C4 看得见它"
+        assert!(
+            unresolved_turns(&snapshot, false).is_empty(),
+            "收束格了结本轮——中止不是未收束缺口"
         );
+    }
+
+    /// 事实完整性：**用户中断后重建的历史里那半句话还在**——模型说到一半被打断
+    /// （"让我想想这个名词的含义……"），那半句照原样入格（`text` + 节点身份
+    /// `text_id` + 本轮 `turn_id`），重建投影里仍是 assistant 的一行。中止不落
+    /// 这半句 = 用户追问名词时前置上下文消失，那才是真正的丢事实。
+    #[tokio::test]
+    async fn abort_keeps_the_half_sentence_in_the_grid() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = StubLlmAdapter::aborting("stub-model");
+
+        let out = TurnRunner
+            .run_with_tools(
+                &store,
+                &llm,
+                &tok,
+                abort_input(std::sync::Arc::new(|| StreamNodeFacts {
+                    text_id: Some("n-text".into()),
+                    text: Some("让我想想这个名词的含义……".into()),
+                    reasoning_id: None,
+                    reasoning: None,
+                })),
+                std::sync::Arc::new(SilentDeltas),
+                &[],
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert!(out.aborted);
+        assert_eq!(out.text, "让我想想这个名词的含义……", "半截正文随结果带走");
+
+        let snapshot = store.range(Seq::new(0));
+        assert_eq!(snapshot.len(), 2, "用户格 + 收束格：{snapshot:?}");
+        let cell = &snapshot[1];
+        assert_eq!(cell.kind, EVENT_ASSISTANT_FINAL);
+        assert_eq!(
+            cell.payload["text"], "让我想想这个名词的含义……",
+            "半截正文照原样入格（不因没说完就不记）"
+        );
+        assert_eq!(
+            cell.payload["text_id"], "n-text",
+            "节点身份入格（重建复刻同一节点）"
+        );
+        assert_eq!(cell.payload["turn_id"], "r-1", "本轮 Turn 根 id 入格");
+        assert_eq!(cell.payload["status"], "aborted");
+
+        // 重建侧：网格投影出的历史里那半句仍在（判据原文说的「重建的历史」）。
+        let view = transcript().apply(&snapshot, i64::MAX, Budget::generous());
+        assert!(
+            view.value
+                .entries
+                .iter()
+                .any(|e| e.role == "assistant" && e.text.contains("让我想想这个名词的含义")),
+            "重建的历史里那半句话还在：{:?}",
+            view.value.entries
+        );
+        assert!(
+            check_all(&snapshot).is_empty(),
+            "{:?}",
+            check_all(&snapshot)
+        );
+    }
+
+    /// 事实完整性：**reasoning 在网格里查得到**——半截思考与正文同等对待（它也是
+    /// 事实），`reasoning` / `reasoning_id` 入格，重建可查。
+    #[tokio::test]
+    async fn reasoning_is_queryable_in_the_grid() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = StubLlmAdapter::aborting("stub-model");
+
+        TurnRunner
+            .run_with_tools(
+                &store,
+                &llm,
+                &tok,
+                abort_input(std::sync::Arc::new(|| StreamNodeFacts {
+                    text_id: None,
+                    text: None,
+                    reasoning_id: Some("n-rea".into()),
+                    reasoning: Some("这个名词需要先定义。".into()),
+                })),
+                std::sync::Arc::new(SilentDeltas),
+                &[],
+                None,
+            )
+            .await
+            .unwrap();
+
+        let snapshot = store.range(Seq::new(0));
+        let cell = snapshot
+            .iter()
+            .find(|e| e.kind == EVENT_ASSISTANT_FINAL)
+            .expect("收束格在");
+        assert_eq!(
+            cell.payload["reasoning"], "这个名词需要先定义。",
+            "半截思考照原样入格"
+        );
+        assert_eq!(cell.payload["reasoning_id"], "n-rea", "推理节点身份入格");
+        assert!(
+            check_all(&snapshot).is_empty(),
+            "{:?}",
+            check_all(&snapshot)
+        );
+    }
+
+    /// 中止不污染兜底语义：收束 kind 仍是 `chat.assistant.final`（网格里**没有**
+    /// `chat.assistant.fallback` 格），`fell_back = false`，兜底率的分子不认它——
+    /// 用户按的停止不是「模型答不出」，两者在格与指标上都要分得开。
+    #[tokio::test]
+    async fn abort_does_not_pollute_fallback_semantics() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = StubLlmAdapter::aborting("stub-model");
+
+        let out = TurnRunner
+            .run_with_tools(
+                &store,
+                &llm,
+                &tok,
+                abort_input(std::sync::Arc::new(|| StreamNodeFacts {
+                    text_id: Some("n-text".into()),
+                    text: Some("让我想想这个名词的含义……".into()),
+                    reasoning_id: None,
+                    reasoning: None,
+                })),
+                std::sync::Arc::new(SilentDeltas),
+                &[],
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert!(out.aborted && !out.fell_back, "中止与兜底互斥");
+        let snapshot = store.range(Seq::new(0));
+        assert!(
+            snapshot.iter().all(|e| e.kind != EVENT_ASSISTANT_FALLBACK),
+            "中止绝不落兜底格：{snapshot:?}"
+        );
+        assert_eq!(snapshot[1].kind, EVENT_ASSISTANT_FINAL, "收束 kind 不换");
+        let fr = fallback_rate().apply(&snapshot, i64::MAX, Budget::generous());
+        let deep = fr.value.of("deep");
+        assert_eq!((deep.turns, deep.fallbacks), (1, 0), "中止不进兜底分子");
+        assert_eq!(deep.rate(), 0.0);
     }
 
     /// 写侧闸（[04 §3.1 批⑥](../../../../docs/plan/04-工程落地.md)）：
@@ -599,7 +787,6 @@ mod turn_runner_tests {
         use crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS;
         use crate::symbio_core::unresolved_turns;
         use crate::symbio_core::ActorSpec;
-        use crate::symbio_core::SilentDeltas;
 
         // ── 拒绝：自主发起者不持 `reply.first` ⇒ 收束格不落 ────────────────
         let store = EventStore::new();
@@ -621,6 +808,9 @@ mod turn_runner_tests {
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
                     final_reply: None,
+                    turn_root_id: String::new(),
+                    user_node_id: None,
+                    nodes: None,
                 },
                 std::sync::Arc::new(SilentDeltas),
                 &[],
@@ -662,6 +852,9 @@ mod turn_runner_tests {
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
                     final_reply: None,
+                    turn_root_id: String::new(),
+                    user_node_id: None,
+                    nodes: None,
                 },
                 std::sync::Arc::new(SilentDeltas),
                 &[],
@@ -689,7 +882,7 @@ mod tool_round_tests {
         check_all, unresolved_turns, AdapterError, CapabilityMeta, DeltaSink, DispatchOutcome,
         DispatchPort, Entity, EventStore, FullModel, LatencyTier, LlmAdapter, LlmTurn,
         PromptMessage, Seq, SilentDeltas, Store, TokenIssuer, TurnToolCallInfo, Verb,
-        EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+        EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_PROGRESS, EVENT_USER_MESSAGE,
     };
 
     /// 注入的消息必须**进本轮的下一次请求**。
@@ -1042,6 +1235,11 @@ mod tool_round_tests {
                     text: "文件内容：hello".into(),
                     ok: true,
                     needs_user_action: self.pending,
+                    // 节点身份与参数随结果入格（载荷补全）；假分发方不建结果节点
+                    // （`result_id` 空串 = 无结果子节点）。
+                    wire_id: tc.wire_id.clone().unwrap_or_default(),
+                    args: crate::plugins::session::message_build::tool_call_args_text(tc),
+                    result_id: String::new(),
                 })
                 .collect()
         }
@@ -1066,6 +1264,9 @@ mod tool_round_tests {
             // 请求级前缀：测试不走请求视图层（三段皆空）。
             prefix: None,
             final_reply: None,
+            turn_root_id: String::new(),
+            user_node_id: None,
+            nodes: None,
         }
     }
 
@@ -1410,10 +1611,13 @@ mod tool_round_tests {
         assert_eq!(snapshot[2].payload["text"], "读到了。");
     }
 
-    /// 收束于等待用户：运行器**停下且不落收束格**——本轮还没了结（网格少一格是
-    /// 诚实缺口，与中止同纪律），且这个缺口必须**可被判出**（C4 看得见它）。
+    /// 收束于等待用户：运行器停下并落**进展格**（`chat.assistant.progress`，
+    /// `turn × progressed`，载荷 `status: "pending"`）——模型说过的话照样是事实
+    /// （"我先查一下。"），等待是**状态**不是另一种事实种类；本轮尚未了结，
+    /// 不落收束格（进展格不占「一轮至多一条收束格」），恢复续写后以收束格了结。
+    /// 未收束的缺口必须**可被判出**（C4 看得见它）。
     #[tokio::test]
-    async fn pending_tool_stops_loop_without_closing_cell() {
+    async fn pending_tool_lands_progress_cell_without_closing() {
         let store = EventStore::new();
         let tok = TokenIssuer::issue_deep();
         let llm = ToolCallingLlm::new();
@@ -1445,10 +1649,24 @@ mod tool_round_tests {
         let snapshot = store.range(Seq::new(0));
         assert_eq!(
             snapshot.len(),
-            2,
-            "用户格 + 产物格，**没有**收束格：{snapshot:?}"
+            3,
+            "用户格 + 产物格 + 进展格，**没有**收束格：{snapshot:?}"
         );
         assert_eq!(snapshot[1].kind, EVENT_ARTIFACT_ADDED);
+        let progress = &snapshot[2];
+        assert_eq!(progress.kind, EVENT_ASSISTANT_PROGRESS);
+        assert_eq!(progress.entity, Entity::Turn);
+        assert_eq!(progress.verb, Verb::Progressed);
+        assert_eq!(progress.payload["status"], "pending", "等待是状态字段");
+        assert_eq!(
+            progress.payload["text"], "我先查一下。",
+            "等待前说过的话照样是事实"
+        );
+        assert_eq!(
+            progress.produced_by,
+            Some(0),
+            "进展格溯源指向本轮用户格（I2）"
+        );
         assert!(
             check_all(&snapshot).is_empty(),
             "{:?}",
@@ -1457,7 +1675,7 @@ mod tool_round_tests {
         assert_eq!(
             unresolved_turns(&snapshot, false).len(),
             1,
-            "缺口要可被判出（不是假装收束）"
+            "本轮尚未了结——缺口可被判出（恢复续写把它合上）"
         );
     }
 
@@ -1541,7 +1759,7 @@ mod tool_round_tests {
         let store = EventStore::new();
         let tok = TokenIssuer::issue_deep();
 
-        // ① 等待轮：工具报 pending ⇒ 停下、不落收束格（网格留 1 个可判出的缺口）。
+        // ① 等待轮：工具报 pending ⇒ 停下、落进展格、不落收束格（网格留 1 个可判出的缺口）。
         let pending_llm = ToolCallingLlm::new();
         let pending_dispatch = FakeDispatch {
             pending: true,
@@ -1595,6 +1813,9 @@ mod tool_round_tests {
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
                     final_reply: None,
+                    turn_root_id: String::new(),
+                    user_node_id: None,
+                    nodes: None,
                 },
                 Arc::new(SilentDeltas),
                 &tools(),
@@ -1618,10 +1839,11 @@ mod tool_round_tests {
             vec![
                 EVENT_USER_MESSAGE,
                 EVENT_ARTIFACT_ADDED,
+                EVENT_ASSISTANT_PROGRESS,
                 EVENT_ARTIFACT_ADDED,
                 EVENT_ASSISTANT_FINAL
             ],
-            "续写**不重开用户格**（否则 5 格），只补产物格与收束格：{snapshot:?}"
+            "续写**不重开用户格**（否则 6 格），只补产物格与收束格：{snapshot:?}"
         );
         assert_eq!(
             snapshot
@@ -1632,17 +1854,17 @@ mod tool_round_tests {
             "同一句话在网格里只能出现一次"
         );
         assert_eq!(
-            snapshot[2].payload["tool"], "vdfs_read",
+            snapshot[3].payload["tool"], "vdfs_read",
             "恢复的产物格记被恢复的工具"
         );
-        assert_eq!(snapshot[2].payload["text"], "文件内容：hello（已批准）");
+        assert_eq!(snapshot[3].payload["text"], "文件内容：hello（已批准）");
         assert_eq!(
-            snapshot[2].produced_by,
+            snapshot[3].produced_by,
             Some(0),
             "溯源仍指向**原轮**用户格（I2）"
         );
-        assert_eq!(snapshot[3].turn, 0, "收束格记在原轮号上");
-        assert_eq!(snapshot[3].payload["text"], "批准后已完成。");
+        assert_eq!(snapshot[4].turn, 0, "收束格记在原轮号上");
+        assert_eq!(snapshot[4].payload["text"], "批准后已完成。");
         assert!(
             check_all(&snapshot).is_empty(),
             "{:?}",

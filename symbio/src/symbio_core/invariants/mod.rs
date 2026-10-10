@@ -175,12 +175,14 @@ fn needs_provenance(e: &Event) -> bool {
     e.verb == Verb::Asserted
         || e.entity == Entity::Memory
         || (e.entity == Entity::Turn
-            && e.verb == Verb::Closed
-            && matches!(
-                e.kind.as_str(),
-                crate::symbio_core::event::EVENT_ASSISTANT_FINAL
-                    | crate::symbio_core::event::EVENT_ASSISTANT_FALLBACK
-            ))
+            && ((e.verb == Verb::Closed
+                && matches!(
+                    e.kind.as_str(),
+                    crate::symbio_core::event::EVENT_ASSISTANT_FINAL
+                        | crate::symbio_core::event::EVENT_ASSISTANT_FALLBACK
+                ))
+                || (e.verb == Verb::Progressed
+                    && e.kind == crate::symbio_core::event::EVENT_ASSISTANT_PROGRESS)))
 }
 
 /// 一条任务**最多返工几轮**：超过即违规（进 `check_all` 的清单，读出口与 e2e 共用）。

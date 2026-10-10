@@ -5,9 +5,11 @@
 //!    建节点 + 后续窄帧），帧语义与 model 插件直发同构；
 //! 3. **兜底也是一句话**（I3）：生成失败落 fallback 格后上抛——用户侧
 //!    失败呈现走 `Failed` 出口，网格里不缺格；
-//! 4. **中止不是失败**：生成被中止时**不落收束格**（网格少一格是诚实缺口，
-//!    ADR-044 同源），上抛 `Aborted` 走独立出口——不呈现「失败」也不进兜底率
-//!    分母。中止与失败的差别在**类型上**可见，不靠错误文本猜。
+//! 4. **中止不是失败**：生成被中止时**照落收束格**（`chat.assistant.final`，
+//!    载荷 `status: "aborted"` + `terminated`），上抛 `Aborted` 走独立出口——
+//!    不呈现「失败」也不进兜底分子；半截产出随出口带走（`partial`），由消费
+//!    循环双写进 `messages.json`。中止与失败的差别在**类型上**可见，不靠错误
+//!    文本猜。
 
 use std::sync::{Arc, Mutex};
 
@@ -38,6 +40,7 @@ fn turn_facts(e: &Event) -> bool {
         EVENT_USER_MESSAGE
             | EVENT_ASSISTANT_FINAL
             | EVENT_ASSISTANT_FALLBACK
+            | crate::symbio_core::EVENT_ASSISTANT_PROGRESS
             | crate::symbio_core::EVENT_ARTIFACT_ADDED
     )
 }
@@ -60,6 +63,7 @@ fn tool_free_req<'a>(
         root_id: "r-1",
         sink,
         user_text: "你好",
+        user_node_id: None,
         window_turns: 6,
         tools: &[],
         resume: None,
@@ -146,6 +150,7 @@ async fn supplements_become_facts_visible_next_turn() {
         root_id: "r-1",
         sink: &sink,
         user_text: "读一下 a.md",
+        user_node_id: None,
         window_turns: 6,
         tools: &[CapabilityMeta {
             name: "vdfs_read".into(),
@@ -242,8 +247,10 @@ enum Behavior {
     Faithful,
     /// 按生成失败返回（演练 I3 兜底格）。
     Fail,
-    /// 按中止返回（演练「中止不落收束格」）。
+    /// 按中止返回（演练「中止照落收束格」，本轮无半截产出）。
     Abort,
+    /// 先流出半截思考与半截正文、再按中止返回——演练「半截产出随出口带走」。
+    AbortAfterPartial,
     /// 首次请求回一个工具调用（附中途正文），第二次回正文——演练工具轮。
     ToolThenAnswer,
     /// 首次请求回一个 `agent_run` 工具调用，第二次回正文——演练**代际立约**
@@ -329,7 +336,40 @@ impl ModelProvider for FaithfulProvider {
         };
         match self.behavior {
             Behavior::Fail => return Err(PluginError::InternalError("模型断了".into())),
-            Behavior::Abort => return Err(PluginError::Aborted),
+            Behavior::Abort => {
+                return Err(PluginError::Aborted {
+                    partial: Vec::new(),
+                })
+            }
+            Behavior::AbortAfterPartial => {
+                // 真实链路的半截形态：推理快照帧 + 正文快照帧先行（首片即快照），
+                // 生成被中止在半句话上——帧进桥的累积，收束与出口按累积取半截。
+                env.sink()
+                    .emit(cm::ChatMessage {
+                        id: "n-rea".into(),
+                        parent_id: Some("r-1".into()),
+                        role: Some(cm::MessageRole::Assistant),
+                        msg_type: Some(cm::MessageType::Reasoning),
+                        content: Some(cm::MessageContent::Text("这个名词需要先定义。".into())),
+                        status: Some(cm::MessageStatus::Streaming),
+                        ..Default::default()
+                    })
+                    .await;
+                env.sink()
+                    .emit(cm::ChatMessage {
+                        id: "n-half".into(),
+                        parent_id: Some("r-1".into()),
+                        role: Some(cm::MessageRole::Assistant),
+                        msg_type: Some(cm::MessageType::Text),
+                        content: Some(cm::MessageContent::Text("让我想想这个名词".into())),
+                        status: Some(cm::MessageStatus::Streaming),
+                        ..Default::default()
+                    })
+                    .await;
+                return Err(PluginError::Aborted {
+                    partial: Vec::new(),
+                });
+            }
             Behavior::Faithful => {}
             Behavior::ToolThenAnswer => {
                 if round == 1 {
@@ -544,10 +584,11 @@ async fn tool_free_turn_failure_leaves_fallback_event_and_bubbles() {
     assert!(why.contains("模型断了"), "兜底格要记失败原因：{why}");
 }
 
-/// 中止轮：**不落收束格**（网格只剩用户格），上抛 `Aborted` 走独立出口——
-/// 用户自己按的停止不该有错误条与重试入口，也不该进兜底率分母。
+/// 中止轮：**照落收束格**（`chat.assistant.final`，载荷 `status: "aborted"` +
+/// `terminated`），上抛 `Aborted` 走独立出口——用户自己按的停止不该有错误条与
+/// 重试入口，也不进兜底分子；本轮无半截产出时 `partial` 为空。
 #[tokio::test]
-async fn tool_free_turn_abort_leaves_only_user_event_and_bubbles_aborted() {
+async fn tool_free_turn_abort_closes_the_cell_and_bubbles_aborted() {
     let (session, dir, _tmp) = setup_full().await;
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
     let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
@@ -562,17 +603,81 @@ async fn tool_free_turn_abort_leaves_only_user_event_and_bubbles_aborted() {
     .err()
     .expect("中止必须上抛（Aborted 出口，不是 Failed）");
 
+    let PluginError::Aborted { partial } = &err else {
+        panic!("上抛的是中止本体，不被压成失败：{err:?}");
+    };
+    assert!(partial.is_empty(), "本轮没有半截产出：{partial:?}");
+
+    // 网格：用户格 + 收束格——中止照落收束格（kind 不换），绝不落兜底格。
+    let store = EventWalStore::open(dir.join("v2-events.wal")).expect("open wal");
+    let all = store.range(Seq::new(0));
+    let snap: Vec<&Event> = all.iter().filter(|e| turn_facts(e)).collect();
+    assert_eq!(snap.len(), 2, "用户格 + 收束格：{snap:?}");
+    assert_eq!(snap[1].kind, EVENT_ASSISTANT_FINAL, "中止照落收束格");
+    assert_eq!(snap[1].payload["status"], "aborted", "终止是状态字段");
+    assert_eq!(
+        snap[1].payload["terminated"]["reason"], "aborted",
+        "终止原因入格"
+    );
+    assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
+}
+
+/// 事实完整性（S2.6 判据）：**中止后那半句话还在**——模型说到一半（"让我想想
+/// 这个名词"）被打断，半截正文 / 半截思考（一）随出口带走（`Aborted { partial }`，
+/// 由消费循环 `persist_failure` 双写进 `messages.json`），（二）照原样入格
+/// （收束格载荷 `text` / `reasoning`）。用户随后追问那个名词时，前置上下文
+/// （那半句 + 半截思考）在重建的历史里都在。
+#[tokio::test]
+async fn aborted_half_sentence_survives_in_partial_and_grid() {
+    let (session, dir, _tmp) = setup_full().await;
+    let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
+    let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
+
+    let err = execute_turn(tool_free_req(
+        &session,
+        Arc::new(FaithfulProvider::new(Behavior::AbortAfterPartial).0),
+        &sink,
+        crate::symbio_core::ExecAbortSignal::new(),
+    ))
+    .await
+    .err()
+    .expect("中止必须上抛（Aborted 出口）");
+
+    // ① 随出口带走：正文节点 + 推理节点都进 `partial`（落库镜像的双写源）。
+    let PluginError::Aborted { partial } = &err else {
+        panic!("上抛的是中止本体：{err:?}");
+    };
+    let texts: Vec<String> = partial
+        .iter()
+        .filter_map(|m| m.content.as_ref().map(|c| c.to_text()))
+        .collect();
+    assert_eq!(
+        texts,
+        ["让我想想这个名词", "这个名词需要先定义。"],
+        "半截正文与半截思考都要在（正文节点在前）：{partial:?}"
+    );
     assert!(
-        matches!(err, PluginError::Aborted),
-        "上抛的是中止本体，不被压成失败：{err:?}"
+        partial
+            .iter()
+            .any(|m| m.msg_type == Some(cm::MessageType::Reasoning)),
+        "推理单独成节点（不是拼进正文）：{partial:?}"
     );
 
-    // 网格里**只有用户格**——中止不是失败，不落兜底格；少一格是诚实缺口。
+    // ② 入格：收束格载荷里那半句话与半截思考照原样可查。
     let store = EventWalStore::open(dir.join("v2-events.wal")).expect("open wal");
-    let snap = store.range(Seq::new(0));
-    assert_eq!(snap.len(), 1, "只剩用户格（中止不落收束格）：{snap:?}");
-    assert_eq!(snap[0].kind, EVENT_USER_MESSAGE);
-    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+    let all = store.range(Seq::new(0));
+    let snap: Vec<&Event> = all.iter().filter(|e| turn_facts(e)).collect();
+    assert_eq!(snap.len(), 2, "用户格 + 收束格：{snap:?}");
+    let cell = snap[1];
+    assert_eq!(cell.kind, EVENT_ASSISTANT_FINAL);
+    assert_eq!(cell.payload["status"], "aborted");
+    assert_eq!(cell.payload["terminated"]["reason"], "aborted");
+    assert_eq!(cell.payload["text"], "让我想想这个名词", "半截正文入格");
+    assert_eq!(
+        cell.payload["reasoning"], "这个名词需要先定义。",
+        "半截思考入格（reasoning 在网格里查得到）"
+    );
+    assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
 }
 
 /// 工具轮：一次工具调用 ⇒ 产物落格 + 中途正文定格 + 工具节点成形 +
@@ -604,6 +709,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         root_id: "r-1",
         sink: &sink,
         user_text: "读一下 a.md",
+        user_node_id: None,
         window_turns: 6,
         tools: &[CapabilityMeta {
             name: "vdfs_read".into(),
@@ -869,6 +975,7 @@ async fn full_turn_lands_derived_commitment_facts() {
         root_id: "r-1",
         sink: &sink,
         user_text: "请委托评审",
+        user_node_id: None,
         window_turns: 6,
         tools: &[CapabilityMeta {
             name: "agent_run".into(),

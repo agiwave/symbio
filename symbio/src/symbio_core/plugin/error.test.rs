@@ -34,7 +34,12 @@ fn error_code_roundtrip_through_frame() {
             PluginError::Forbidden("x".into()),
             PluginErrorCode::Forbidden,
         ),
-        (PluginError::Aborted, PluginErrorCode::Aborted),
+        (
+            PluginError::Aborted {
+                partial: Vec::new(),
+            },
+            PluginErrorCode::Aborted,
+        ),
         (
             PluginError::RetryWithoutContextId,
             PluginErrorCode::RetryWithoutContextId,
@@ -59,7 +64,10 @@ fn error_code_roundtrip_through_frame() {
 /// abort 分派只认错误码，不受文案影响（防止文案改动静默失效）。
 #[test]
 fn abort_dispatch_ignores_message_text() {
-    let frame = PluginError::Aborted.to_frame();
+    let frame = PluginError::Aborted {
+        partial: Vec::new(),
+    }
+    .to_frame();
     assert!(frame.is_abort());
     // 非 abort 错误即使文案含 "abort" 字样也不应被判为中止
     let decoy = PluginFrame::Error(
@@ -85,7 +93,10 @@ fn unknown_or_missing_code_is_none() {
 /// `is_abort` 谓词与错误码保持一致。
 #[test]
 fn is_abort_predicate_matches_code() {
-    assert!(PluginError::Aborted.is_abort());
+    assert!(PluginError::Aborted {
+        partial: Vec::new()
+    }
+    .is_abort());
     assert!(!PluginError::Timeout.is_abort());
     assert!(!PluginError::RetryWithoutContextId.is_abort());
 }

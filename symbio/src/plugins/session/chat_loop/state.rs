@@ -223,8 +223,9 @@ pub(crate) enum TurnExit {
     MaxToolRounds { max: usize },
     /// 用户中止且**在途 Turn 尚未定稿**：冒泡 `Err(Aborted)`，由消费循环落库为
     /// `MessageStatus::Aborted` + 会话结局 `aborted`（**不是** `failed`），
-    /// 前端渲染错误条与重试入口。
-    Aborted,
+    /// 前端渲染错误条与重试入口。携带**半截产出**（正文 / 思考 / 工具节点）——
+    /// 它们是事实，随收尾双写进 `messages.json`（`persist_failure` 的 `partial`）。
+    Aborted(Vec<ChatMessage>),
     /// LLM / 编排失败：冒泡原始错误。
     Failed(PluginError),
     /// resume 已完成，无需进入主循环。

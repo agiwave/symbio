@@ -202,6 +202,9 @@ impl Drop for WorkingGuard {
                         &collected,
                         &crash_msg,
                         cm::MessageStatus::Failed,
+                        // 崩溃路径没有半截产出通道（panic 载荷只进日志）——
+                        // 在途半截由镜像子树合并承担。
+                        Vec::new(),
                     )
                     .await;
                 // 运行态收敛为「以错误结束」：`status = failed` + `attributes.error`

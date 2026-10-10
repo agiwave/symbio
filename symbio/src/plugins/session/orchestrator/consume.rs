@@ -70,8 +70,14 @@ impl SessionPlugin {
     ) {
         let err = error.into();
         crate::plugin_error!("session", "{}", &err);
-        self.persist_failure(session_id, collected, &err, cm::MessageStatus::Failed)
-            .await;
+        self.persist_failure(
+            session_id,
+            collected,
+            &err,
+            cm::MessageStatus::Failed,
+            Vec::new(),
+        )
+        .await;
         // 本轮无 transcript（loop 未产生任何消息）→ last_message 为空串
         stop.fire(&[]).await;
         self.broadcast_error_with_idle(state, err).await;
@@ -100,8 +106,14 @@ impl SessionPlugin {
         abort_guard: &mut AbortGuard,
         error: String,
     ) {
-        self.persist_failure(session_id, collected, &error, cm::MessageStatus::Failed)
-            .await;
+        self.persist_failure(
+            session_id,
+            collected,
+            &error,
+            cm::MessageStatus::Failed,
+            Vec::new(),
+        )
+        .await;
         self.broadcast_error_with_idle(state, error).await;
         guard.done = true;
         abort_guard.disarm().await;
@@ -325,37 +337,45 @@ impl SessionPlugin {
                 );
                 // 分派依据为类型化错误码（PluginErrorCode::Aborted），不再对
                 // meta["code"] 做字符串字面量比较（session-mechanism-unification.md §4.2）。
-                if matches!(e, PluginError::Aborted) {
-                    // 用户手动中止：在途 Turn 落库为 Aborted + error，前端据此渲染
-                    // 错误条与重试入口；但**不收敛为「失败」结局**——中止不是错误：
-                    // 会话节点回 `active` + `outcome = aborted`（由 handle_abort 收口，
-                    // 流式动画随之停止）。
-                    //
-                    // 这里与 `handle_abort` 的 `converge_inflight` 写同一个值，因此
-                    // 谁先谁后都不影响结果（此前两者分别是 `Failed` 与 `Completed`，
-                    // 重试入口的出现与否取决于 abort 信号落在哪个检查点）。
-                    self.persist_failure(
-                        &session_id,
-                        &transcript,
-                        "用户手动中止了本次回复",
-                        cm::MessageStatus::Aborted,
-                    )
-                    .await;
-                    exit_state = SessionStateChange::aborted();
-                } else {
-                    // 业务级失败：把"仍在进行中"的 AI 消息持久化为 Failed + 错误原因，
-                    // 这样切回会话时能看到上次失败的终态；随后复位 `is_working` +
-                    // 广播 Error + idle（不复位的后果见 `teardown_failed_turn`）。
-                    self.teardown_failed_turn(
-                        &state,
-                        &session_id,
-                        &transcript,
-                        &mut guard,
-                        &mut abort_guard,
-                        e.to_string(),
-                    )
-                    .await;
-                    return;
+                match e {
+                    PluginError::Aborted { partial } => {
+                        // 用户手动中止：在途 Turn 落库为 Aborted + error，前端据此渲染
+                        // 错误条与重试入口；但**不收敛为「失败」结局**——中止不是错误：
+                        // 会话节点回 `active` + `outcome = aborted`（由 handle_abort 收口，
+                        // 流式动画随之停止）。
+                        //
+                        // 这里与 `handle_abort` 的 `converge_inflight` 写同一个值，因此
+                        // 谁先谁后都不影响结果（此前两者分别是 `Failed` 与 `Completed`，
+                        // 重试入口的出现与否取决于 abort 信号落在哪个检查点）。
+                        //
+                        // `partial` = 中止时**已产出的半截消息**（正文 / 思考 / 工具节点）：
+                        // 它们是事实，随 `persist_failure` 双写进 `messages.json`——
+                        // 用户中断后重建的历史里那半句话还在。
+                        self.persist_failure(
+                            &session_id,
+                            &transcript,
+                            "用户手动中止了本次回复",
+                            cm::MessageStatus::Aborted,
+                            partial,
+                        )
+                        .await;
+                        exit_state = SessionStateChange::aborted();
+                    }
+                    e => {
+                        // 业务级失败：把"仍在进行中"的 AI 消息持久化为 Failed + 错误原因，
+                        // 这样切回会话时能看到上次失败的终态；随后复位 `is_working` +
+                        // 广播 Error + idle（不复位的后果见 `teardown_failed_turn`）。
+                        self.teardown_failed_turn(
+                            &state,
+                            &session_id,
+                            &transcript,
+                            &mut guard,
+                            &mut abort_guard,
+                            e.to_string(),
+                        )
+                        .await;
+                        return;
+                    }
                 }
             }
             TurnOutcome::Finished(Err(join_err)) => {

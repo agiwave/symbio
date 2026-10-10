@@ -989,7 +989,9 @@ async fn run_compression_llm(
         .await?;
 
     if abort.is_aborted() {
-        return Err(PluginError::Aborted);
+        return Err(PluginError::Aborted {
+            partial: Vec::new(),
+        });
     }
 
     let effective = out.effective_text().to_owned();

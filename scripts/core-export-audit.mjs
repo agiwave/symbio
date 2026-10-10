@@ -146,6 +146,12 @@ VisScope:
       // 的消费方只有 session 那一个，与上面那条同形。
       EVENT_ASSISTANT_REPORTED:
         '事件名常量：与 EVENT_TURN_SUPPLEMENTED 同类同格（turn × asserted），event/mod.rs 单点定义、插件按名引用。Core 外唯一消费方 = plugins/session（v2_exec 落格），投影在 core 内走域内路径',
+      // `EVENT_ASSISTANT_PROGRESS`（轨 S2.6 的进展格，`turn × progressed`）：
+      // 与上面两条同族同由——事件名必须单点定义，落格在
+      // `plugins/session/turn_runner`，投影在 core 内（`projection/transcript.rs` /
+      // `prompt_fidelity.rs`）走域内路径。所以跨 core 的消费方只有 session 那一个。
+      EVENT_ASSISTANT_PROGRESS:
+        '事件名常量：与 EVENT_TURN_SUPPLEMENTED / EVENT_ASSISTANT_REPORTED 同类（event/mod.rs 单点定义、插件按名引用）。Core 外唯一消费方 = plugins/session（turn_runner 落进展格），投影在 core 内走域内路径',
       // `EVENT_SESSION_RECONCILED`（轨 S 第一步的双源对账事件，`system × asserted`）：
       // 与上面几条同族同由——事件名必须单点定义（散落字面量必然漂），core 外唯一
       // 消费方是 `plugins/session/v2_reconcile`（对账落格）。落在 `System` 而不是

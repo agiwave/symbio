@@ -25,7 +25,8 @@
 
 use super::super::event::{
     Entity, Event, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_ASSISTANT_REPORTED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_TURN_SUPPLEMENTED,
+    EVENT_USER_MESSAGE,
 };
 use super::super::view::{Budget, View};
 use super::Projection;
@@ -201,12 +202,31 @@ pub fn transcript() -> Projection<TranscriptView> {
                 }
                 (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FINAL) => {
                     let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                    entries.push(TranscriptEntry {
-                        role: "assistant".into(),
-                        text: text.to_string(),
-                        tool: None,
-                        exclude_from_context: false,
-                    });
+                    // 空正文的收束格不进转写：空行不是对话内容（空正文跳过，
+                    // 与补充 / 汇报两条臂同一判据）。
+                    if !text.trim().is_empty() {
+                        entries.push(TranscriptEntry {
+                            role: "assistant".into(),
+                            text: text.to_string(),
+                            tool: None,
+                            exclude_from_context: false,
+                        });
+                    }
+                }
+                // 进展格（`turn × progressed`）：等待用户时模型说过的话——它是**助手
+                // 说过的话**（role=assistant）且进请求包（下一轮模型看得见自己在等什么）。
+                // 等待是事实的**状态**（载荷 `status: "pending"`），不是另一种事实：
+                // kind 仍是对话事实网格里的进展格，这里照常投影。
+                (Entity::Turn, Verb::Progressed, EVENT_ASSISTANT_PROGRESS) => {
+                    let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                    if !text.trim().is_empty() {
+                        entries.push(TranscriptEntry {
+                            role: "assistant".into(),
+                            text: text.to_string(),
+                            tool: None,
+                            exclude_from_context: false,
+                        });
+                    }
                 }
                 (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FALLBACK) => {
                     let why = e.payload.get("why").and_then(|v| v.as_str()).unwrap_or("");

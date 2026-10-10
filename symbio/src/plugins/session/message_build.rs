@@ -183,31 +183,57 @@ pub fn llm_build_tool_call_nodes(
     parent_id: &str,
     tool_calls: &[TurnToolCallInfo],
 ) -> Vec<ChatMessage> {
-    let timestamp = crate::symbio_core::clock_now_ms();
     tool_calls
         .iter()
         .map(|tc| {
             let tc_id = tc.id.clone().unwrap_or_else(llm_short_id);
-            // 解析失败时落库**残破原文**而非占位 `{}`：存储层保真，事后能看出模型
-            // 究竟发了什么（截断在哪一字符），而不是留下一个看似合法的假空参数。
-            let args_text = match &tc.parse_error {
-                Some(raw) => raw.clone(),
-                None => tc.arguments.to_string(),
-            };
-            ChatMessage {
-                id: tc_id,
-                parent_id: Some(parent_id.to_string()),
-                role: Some(MessageRole::Assistant),
-                msg_type: Some(MessageType::ToolCall),
-                name: tc.name.clone(),
-                content: Some(MessageContent::Text(args_text)),
-                status: Some(MessageStatus::Completed),
-                timestamp: Some(timestamp),
-                tool_call_id: tc.wire_id.clone(),
-                ..Default::default()
-            }
+            llm_build_tool_call_node(
+                parent_id,
+                tc_id,
+                tc.name.clone(),
+                tool_call_args_text(tc),
+                tc.wire_id.clone(),
+            )
         })
         .collect()
+}
+
+/// ToolCall 节点的**定稿参数文本**（JSON 文本；解析失败 ⇒ 残破原文而非占位 `{}`：
+/// 存储层保真，事后能看出模型究竟发了什么，而不是留下一个看似合法的假空参数）。
+///
+/// 落库构造（[`llm_build_tool_call_nodes`]）与事件载荷（`turn_runner` 的
+/// `artifact.added`）共用这一个取法——两处各写一份必然漂移。
+pub fn tool_call_args_text(tc: &TurnToolCallInfo) -> String {
+    match &tc.parse_error {
+        Some(raw) => raw.clone(),
+        None => tc.arguments.to_string(),
+    }
+}
+
+/// 助手**单个工具调用**子节点（`msg_type = ToolCall`，`parent_id = Turn 根`）。
+///
+/// `args_text` 是**已定稿的参数文本**（JSON 文本，或解析失败时的残破原文）——
+/// 重建引擎从事件载荷直接回放这段文本，不再经 `Value` 重序列化（键序一变，
+/// 同一次调用在重建前后就是两个内容）。形状与 [`llm_build_tool_call_nodes`] 同源。
+pub fn llm_build_tool_call_node(
+    parent_id: &str,
+    id: String,
+    name: Option<String>,
+    args_text: String,
+    wire_id: Option<String>,
+) -> ChatMessage {
+    ChatMessage {
+        id,
+        parent_id: Some(parent_id.to_string()),
+        role: Some(MessageRole::Assistant),
+        msg_type: Some(MessageType::ToolCall),
+        name,
+        content: Some(MessageContent::Text(args_text)),
+        status: Some(MessageStatus::Completed),
+        timestamp: Some(crate::symbio_core::clock_now_ms()),
+        tool_call_id: wire_id,
+        ..Default::default()
+    }
 }
 
 /// 构造工具执行结果消息（role: Tool，msg_type: Text，parent_id 指向 tool_call）。

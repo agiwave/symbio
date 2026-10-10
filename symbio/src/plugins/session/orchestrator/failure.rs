@@ -91,6 +91,12 @@ impl SessionPlugin {
         transcript: &Arc<tokio::sync::Mutex<crate::plugins::session::transcript::Transcript>>,
         error: &str,
         terminal: cm::MessageStatus,
+        // 半截产出（中止时模型已产出、尚未并入镜像的节点）：思考 / 正文 / 工具
+        // 节点是**事实**，不因「没说完」就不记——用户中断后重建的历史里那半句话
+        // 必须还在。镜像（流式快照）可能只含半截的一部分，`partial` 那份是分发方 /
+        // 桥累积的定稿内容，合并时**整条覆盖**同 id 节点。失败路径没有半截可言
+        // （模型没有产出），传空。
+        partial: Vec<cm::ChatMessage>,
     ) {
         // 1. 定位失败 Turn。
         //    在途图为空表示错误发生在任何 Turn 节点创建之前（例如能力收集失败、
@@ -231,6 +237,35 @@ impl SessionPlugin {
                         changed.push(new);
                     }
                     // 孤儿子节点：直接丢弃，不写入存储。
+                }
+            }
+        }
+
+        // 5b. 合并**半截产出**（中止时已产出、尚未并入镜像的正文 / 思考 / 工具节点）。
+        //
+        //     按 id 去重，`partial` **整条覆盖**同 id 节点：镜像那份可能只有流式
+        //     快照的一部分，而 partial 是分发方 / 桥累积的定稿内容（半截正文停在
+        //     哪里就记到哪里）。父节点缺失的孤儿丢弃——与上面同一条孤儿规则。
+        //     状态不在此改写：子节点的定稿态由构造方给出（中止的子节点按
+        //     [`abort_terminal_of`] 的映射已是 `Completed`，根 Turn 的 `Aborted`
+        //     由上面的失败 Turn 处理承担）。
+        for p in &partial {
+            match all.iter_mut().find(|m| m.id == p.id) {
+                Some(existing) => {
+                    *existing = p.clone();
+                    changed.push(existing.clone());
+                }
+                None => {
+                    let parent_exists = p
+                        .parent_id
+                        .as_ref()
+                        .map(|pid| all.iter().any(|m| m.id == *pid))
+                        .unwrap_or(true);
+                    if parent_exists {
+                        all.push(p.clone());
+                        changed.push(p.clone());
+                    }
+                    // 孤儿：直接丢弃，不写入存储。
                 }
             }
         }
