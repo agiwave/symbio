@@ -2,7 +2,7 @@
 
 mod active;
 mod capabilities;
-mod chat_loop;
+pub(crate) mod chat_loop;
 mod chat_session;
 mod commands;
 pub(crate) mod config;
@@ -27,6 +27,7 @@ pub(crate) mod v2_reconcile;
 mod v2_skills;
 mod v2_tasks;
 pub(crate) mod v2_tools;
+pub(crate) mod v2_worker_progress;
 // `plugin` / `types` 作为公共契约层（crate 内可见），让 `lib.rs` 能直接
 // `pub use plugins::session::xxx::X` 拿到公共类型（避免在 session 顶层做中间
 // reexport 引入 unused_imports 警告）。

@@ -152,6 +152,13 @@ VisScope:
       // 新开 `Session` 实体：`Entity` 是闭集，加臂要 ADR 登记，而对账是运维诊断。
       EVENT_SESSION_RECONCILED:
         '事件名常量：与 EVENT_* 同类，event/mod.rs 单点定义、插件按名引用。core 外唯一消费方 = plugins/session/v2_reconcile（双源对账落格）',
+      // `turnstate`（轨 S 第二步才接上第一个 core 外消费方）：与同族的
+      // `transcript` / `slo_report` / `fallback_rate` / `checkpoint` 同形——**投影只该
+      // 在 core 有一份实现**，插件经根函数名调用（C-002 禁深引域目录）。S2 的
+      // Q3 进展读切用它判「末轮已开未收束」（in_flight 的 WAL 侧判据），
+      // 与旧读法的"末条消息未见终态"同源。
+      turnstate:
+        '投影函数：与 transcript / slo_report / fallback_rate / checkpoint 同族同形（core 内一份实现、插件经根名调用）。core 外唯一消费方 = plugins/session/v2_worker_progress（S2 的 in_flight 判据）',
       // `SloLatencyView` / `FallbackRateView`（P2 的跨会话聚合）：**被 core 外消费的
       // 类型**，与 `TurnState` / `PromptMessage` 同族。`merge` 是类型的行为——提成根
       // 函数会让它变成无主函数（谁的数据谁的行为）；而 C-002 禁止插件深引

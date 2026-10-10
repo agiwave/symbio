@@ -39,7 +39,7 @@
 
 mod compose;
 mod decide;
-mod delegate;
+pub(crate) mod delegate;
 mod inputs;
 mod io;
 mod progress;
