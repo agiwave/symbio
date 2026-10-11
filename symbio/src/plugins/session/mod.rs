@@ -25,7 +25,6 @@ pub(crate) mod v2_exec;
 pub(crate) mod v2_facts;
 mod v2_memory;
 pub(crate) mod v2_messages;
-pub(crate) mod v2_reconcile;
 mod v2_skills;
 mod v2_tasks;
 pub(crate) mod v2_tools;

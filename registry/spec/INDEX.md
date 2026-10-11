@@ -30,7 +30,7 @@
 | `V51-3` | 03 §5.1 纪律 3——每条断言配一个反向用例 | docs/plan/03-演进与验证.md §5.1 纪律 3（条文 owner 所在） | `scripts/gate.d/_shared.mjs` | — | — |
 | `V51-4` | 03 §5.1 纪律 4——「编译期强制」必须附已知编译不过的反例 | docs/plan/03-演进与验证.md §5.1 纪律 4（条文 owner 所在） | 人工 | — | — |
 | `V51-5` | 03 §5.1 纪律 5——编译期反例必须写在外部模块里 | docs/plan/03-演进与验证.md §5.1 纪律 5（条文 owner 所在） | 人工 | — | — |
-| `WVR-01` | C-003 根出口单消费方豁免账本（6 条） | scripts/core-export-audit.mjs 的 WAIVERS 账本（ActorSpec / EVENT_SESSION_RECONCILED / turnstate / SloLatencyView / FallbackRateView / mutations_latest_snapshot） | `scripts/core-export-audit.mjs` | W1 | — |
+| `WVR-01` | C-003 根出口单消费方豁免账本（5 条） | scripts/core-export-audit.mjs 的 WAIVERS 账本（ActorSpec / turnstate / SloLatencyView / FallbackRateView / mutations_latest_snapshot） | `scripts/core-export-audit.mjs` | W1 | — |
 | `WVR-02` | doc-link D-004 全文豁免（定义变更史禁区的两处反例措辞） | docs/plan/13-质量改进总纲.md 首行与 docs/README.md 首行的 doc-link-allow D-004 | `scripts/doc-link-audit.mjs` | W2 | — |
 | `WVR-03` | dead-code R-002 契约登记存量（8 处） | scripts/dead-code-audit.mjs 的 R-002 死码承认账本（终局基线 8，见 docs/plan/04-工程落地.md §3.1） | `scripts/dead-code-audit.mjs` | W2 | — |
 | `WVR-04` | panic-allow 不变量登记（C7，56 个登记项 / 71 处 panic 面） | symbio/src/** 的 panic-allow 注释、scripts/panic-audit.mjs 账本与 scripts/_shared.mjs 的 BASELINE.panicSites | `scripts/panic-audit.mjs` | W2 | — |

@@ -175,16 +175,7 @@ impl SessionPlugin {
                 // `loadMessages`（读叶子）会在流式期间看不到正在跑的那一轮。
                 // 详见 `session_content` 的文档。
                 let live = self.live_messages_of(id).await;
-                Ok(VdfsResponse::Read({
-                    // 双源对账（轨 S 第一步）：与 transcript_of 走同一个入口，
-                    // 口径只有一份（实际算法在 v2_reconcile::reconcile）。
-                    self.reconcile_sources(id).await;
-                    // 与转写列表取**同一份**消息集合（含「缓存不在 ⇒ WAL 重建」那一步），
-                    // 否则叶子与列表会在缓存缺失时分叉：列表有历史、叶子空。
-                    let mut view = session;
-                    view.messages = self.stored_messages_of(id, view.messages).await;
-                    session_content(&view, live, id)?
-                }))
+                Ok(VdfsResponse::Read(session_content(&session, live, id)?))
             }
             // 会话本身（`path` 即会话 id —— 具名新建时它就是**身份**，见
             // `session_upsert` 的 `create` 分支；`id` 由地址末段给出，不再由
@@ -761,12 +752,7 @@ impl SessionPlugin {
                 // 子会话是**独立会话**（有自己的 id 与活跃状态），因此叠加的是它
                 // 自己的在途缓冲，而不是父会话的——父会话的在途消息不属于它。
                 let live = self.live_messages_of(&session.id).await;
-                Ok(VdfsResponse::Read({
-                    // 双源对账（轨 S 第一步）：与 transcript_of 走同一个入口，
-                    // 口径只有一份（实际算法在 v2_reconcile::reconcile）。
-                    self.reconcile_sources(id).await;
-                    session_content(&session, live, id)?
-                }))
+                Ok(VdfsResponse::Read(session_content(&session, live, id)?))
             }
             VdfsRequest::Write { .. } => Err(VdfsError::invalid(format!("该路径不可写入：{path}"))),
             VdfsRequest::Delete { .. } => {
@@ -922,98 +908,18 @@ impl SessionPlugin {
     /// 「转写即列表」当场失效。
     ///
     /// 存在性校验在此一并完成（`session_of`），因此调用方不必再查一次。
+    ///
+    /// ## 落库那份已由存储层交给真源（S2.7-a）
+    ///
+    /// [`Self::session_of`] 走 `load_session`，而存储层的 `load_messages` **已是
+    /// WAL 重建优先**、`messages.json` 只作 v1 遗留兜底（见 `store::load_messages`）。
+    /// 因此这里取 `session.messages` 拿到的就是真源那一份——本函数不再自己判断
+    /// 「缓存在不在、要不要重建」：那是**存储层的职责**，在插件层再判一次就是同一条
+    /// 规矩的第二份口径（S2.7 早期「缓存不在才重建」的过渡形态，S2.7-a 收敛掉）。
     async fn transcript_of(&self, id: &str) -> VdfsResult<Vec<cm::ChatMessage>> {
         let session = self.session_of(id).await?;
         let live = self.live_messages_of(id).await;
-        // 双源对账（轨 S 第一步，ADR-049）：**并读两源、只记不断流**。
-        //
-        // 调用点在**模块内**而不是抽成跨模块 helper：对账要先还原"读侧真正给出的
-        // 那一份"（`overlay_live` 的组合），而那个函数住在本文件的兄弟模块
-        // `nodes` 里且是模块私有——抽出去只会在两个模块之间开一条仅供对账用的
-        // 通道。**口径仍然只有一份**：实际算法全在 `v2_reconcile::reconcile`，
-        // 这里只负责"取哪两样来比"。
-        //
-        // 返回值一字不改——不一致时的处置是出声 + 落一条 `session.reconciled`
-        // 事实，绝不是改读哪一份（那是 S2–S4 的事）。
-        self.reconcile_sources(id).await;
-        // 落库转写：`messages.json` 缓存优先，缓存不在 ⇒ 从 WAL **重建**（见下）。
-        let stored = self.stored_messages_of(id, session.messages).await;
-        Ok(ordered(overlay_live(stored, live)))
-    }
-
-    /// 落库转写的**读源**：`messages.json` 缓存优先；缓存不在（被删 / 尚未落盘）
-    /// ⇒ 从 WAL **重建**节点树。
-    ///
-    /// ## 为什么是「缓存不在才重建」而不是「一律重建」
-    ///
-    /// 这是 S2.7 的**第一步**（[ADR-049](../../../../docs/decisions/session.md#adr-049-wal-是会话唯一事实源sessionstore-降为缓存轨-s-的起点)
-    /// 的目标态：WAL 是唯一事实源、`messages.json` 是可重建的缓存）。两步分开走，
-    /// 每步独立可回退：
-    ///
-    /// 1. **本步**：缓存缺失时用重建兜底——判据「删掉 `messages.json` 后会话仍能开且
-    ///    历史完整」由此成立；缓存**在**时仍读缓存 ⇒ 对存量会话**零行为变更**；
-    /// 2. 下一步：主读路径整体切到重建，`messages.json` 彻底降为缓存。
-    ///
-    /// 一步做完的风险是「重建的形状与缓存有出入」与「读源切换」两件事同时发生，
-    /// 出了偏差分不清是谁的——S1 的并读对账就是为这种中间态存在的。
-    async fn stored_messages_of(
-        &self,
-        id: &str,
-        cached: Vec<cm::ChatMessage>,
-    ) -> Vec<cm::ChatMessage> {
-        if !cached.is_empty() {
-            return cached;
-        }
-        self.rebuild_from_wal(id).await.unwrap_or(cached)
-    }
-
-    /// 从 WAL 重建节点树（WAL 不在 / 读不了 ⇒ `None`，由调用方决定回落）。
-    ///
-    /// 只读打开（`open_readonly`：不创建文件、不截尾）——与 `v2_reconcile` 同一条纪律，
-    /// 读路径不得有写副作用。
-    async fn rebuild_from_wal(&self, id: &str) -> Option<Vec<cm::ChatMessage>> {
-        let dir = super::super::paths::session_dir(&self.storage_dir(), id);
-        let path = dir.join(super::super::paths::V2_WAL_FILE);
-        if !path.exists() {
-            return None;
-        }
-        let store = crate::symbio_core::EventWalStore::open_readonly(&path).ok()?;
-        // `range` 是 `Store` trait 的方法：trait 必须在作用域里（局部引入，
-        // 不为一次读取把这个 trait 抬进本文件的顶层导入）。
-        use crate::symbio_core::Store as _;
-        let snapshot = store.range(crate::symbio_core::Seq::new(0));
-        Some(super::super::rebuild::rebuild(&snapshot))
-    }
-
-    /// 双源对账（轨 S 第一步，[ADR-049](../../../../docs/decisions/session.md#adr-049-wal-是会话唯一事实源sessionstore-降为缓存轨-s-的起点)）。
-    ///
-    /// **入口只有这一个**，`transcript_of` 与会话叶子（`session_content`）都经它：
-    /// 那两处是同一份数据的两个地址，对账口径各写一份就会对出不同的结论，而
-    /// "不一致必须有唯一答案。
-    ///
-    /// 两个源都必须**从存储读**，不能拿调用方手里的读侧结果去比：切源后读侧已是
-    /// WAL 重建（`load_session` 走 WAL），再和 WAL 投影比就是"真源跟真源比"——
-    /// 口径差异会变成**稳定误报**，每次读都落一条无溯源的 `session.reconciled`。
-    /// 因此 legacy 侧（`messages.json`）的读取收进了 `v2_reconcile::reconcile`。
-    ///
-    /// 零行为变更：本方法不返回任何影响读路径的值，只可能出声 + 落一条
-    /// `session.reconciled` 事件；两者失败一律静默（对账的失败形态必须是
-    /// "少一条诊断"，不能是"会话读不出来"）。
-    async fn reconcile_sources(&self, session_id: &str) {
-        let dir = super::super::paths::session_dir(&self.storage_dir(), session_id);
-        let r = super::super::v2_reconcile::reconcile(&dir);
-
-        if r.wal_missing || r.is_consistent() {
-            // 任一侧不在（含切源后 messages.json 停写）都不是不一致
-            return;
-        }
-        // 出声：不静默是本仓对"静默失效"的一贯处置（八个缺口的共同教训）
-        crate::plugin_warn!(
-            "session",
-            "[reconcile] {session_id} 双源不一致：{}",
-            r.summary()
-        );
-        super::super::v2_reconcile::record(&dir, session_id, &r);
+        Ok(ordered(overlay_live(session.messages, live)))
     }
 
     /// 该会话本轮的在途消息（无活跃状态 ⇒ 无在途消息）

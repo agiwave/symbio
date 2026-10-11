@@ -80,10 +80,7 @@ fn an_edit_lands_one_fact_with_the_patched_message() {
     let e = &facts[0];
     assert_eq!(e.kind, EVENT_MESSAGE_EDITED);
     assert_eq!((e.entity, e.verb), (Entity::Message, Verb::Asserted));
-    assert_eq!(
-        e.turn, 0,
-        "变更不属于任何一轮（与 memory.* / session.reconciled 同约定）"
-    );
+    assert_eq!(e.turn, 0, "变更不属于任何一轮（与 memory.* 同约定）");
     assert_eq!(e.actor, "user", "编辑是用户对列表的操作");
     assert_eq!(
         e.produced_by,

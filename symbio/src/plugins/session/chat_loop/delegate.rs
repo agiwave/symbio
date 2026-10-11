@@ -293,35 +293,23 @@ pub(crate) async fn worker_progress(
         }
         // 子会话目录 = 父会话目录下的 <safe_id(子 id)>（`paths::session_dir` 的
         // 同一套寻址，与 stats / v2_exec 同一个取值点）。父会话本身没有目录
-        // （临时会话）⇒ 回落旧读法：那种会话没有 WAL，进展只在 messages.json 里。
+        // （临时会话）⇒ 回落旧读法：那种会话没有 WAL，进展只在落库消息里。
         let Some(parent_dir) = session.session_dir() else {
             out.push(progress_of(&summary, &child));
             continue;
         };
         let dir = super::super::paths::session_dir(&parent_dir, &summary.id);
-        let old_read = progress_of(&summary, &child);
-        // 新读法（WAL）优先；**没有 WAL ⇒ 回落旧读法**。
+        // 新读法（WAL）；**没有 WAL ⇒ 回落旧读法**（v1 遗留会话的事实从未入格）。
+        //
+        // S2.7-a 退掉了这里的**双源并读对账**：切源之后落库消息就是 WAL 重建的
+        // 那一份（`store::load_messages` 已 WAL 优先），再拿它跟 WAL 投影比是
+        // 「真源跟真源比」——口径差异会变成稳定误报。对账对象已随单源消失。
         let Some(wal_read) =
             super::super::v2_worker_progress::progress_from_wal(&dir, &summary.id, &summary.title)
         else {
-            out.push(old_read);
+            out.push(progress_of(&summary, &child));
             continue;
         };
-        // 双源对账（轨 S 第二步自带的观测）：旧读法仍有生产消费方——它就是
-        // S1 立的「并读两源、只记不断流」在 Q3 这一路的落地。两读法不一致 ⇒ 出声，
-        // 但**继续用新读法的结果**（切流已经发生，回退不是本步的选项）。
-        if wal_read != old_read {
-            crate::plugin_warn!(
-                "session",
-                "[reconcile] worker {} 的进展两读法不一致：WAL rounds={} in_flight={} vs \
-                 store rounds={} in_flight={}",
-                summary.id,
-                wal_read.rounds,
-                wal_read.in_flight,
-                old_read.rounds,
-                old_read.in_flight,
-            );
-        }
         out.push(wal_read);
     }
     Ok(out)

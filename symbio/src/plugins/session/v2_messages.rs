@@ -378,7 +378,7 @@ fn append_into(
         Entity::Message,
         verb,
         // `turn = 0`：变更不属于任何一轮（截断跨轮）。与 `memory.recalled` /
-        // `commitment.*` / `session.reconciled` 同一条既有约定。
+        // `commitment.*` 同一条既有约定。
         0,
         // 变更由**用户对列表的操作**发起（VDFS 边界由前端 / CLI 代表用户）——
         // 与 `user.message` 的 actor 同源（`plugin::attributed` 用的是同一个常量）。

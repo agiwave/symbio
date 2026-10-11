@@ -115,13 +115,11 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
       // 显为单消费方 ⇒ 豁免自行失效并被删除（纪律 2：豁免是在补口径的洞，补洞该补
       // 口径，不该把洞登记成永久账目）。
       //
-      // 剩下 6 条是**真·单消费方接缝**：core 内确实没有第二个模块（生产）在用，但既
+      // 剩下 5 条是**真·单消费方接缝**：core 内确实没有第二个模块（生产）在用，但既
       // 下沉不了（core 不得反向依赖插件 / 类型行为无处安放），又必须占根出口（C-002
       // 禁插件深引 core 域目录）。
       ActorSpec:
         'F3 冻结锚点（plan/01 §4 主体规格五字段：principal/pattern/capabilities/budget_ms/scope）：core 外唯一生产消费方是 plugins/session（v2_exec 构造 + turn_runner 读 principal），但**不可下沉**——F3 冻的是它的字段集，搬出 core 即架构变更（03 §1）；且 C-002 禁止插件深引 core 域目录 ⇒ 插件只能经根出口拿它。属 README §4 四问的「接缝」而非「单消费方该下沉」',
-      EVENT_SESSION_RECONCILED:
-        '事件名常量：与 EVENT_* 同类，event/mod.rs 单点定义、插件按名引用。core 外唯一生产消费方 = plugins/session/v2_reconcile（双源对账落格）；core 内没有第二个生产模块引用这个常量（对账只在插件侧落格），故下沉不了而必须留根出口',
       turnstate:
         '投影函数：与 transcript / slo_report / fallback_rate / checkpoint 同族同形——**投影只该在 core 有一份实现**，插件经根函数名调用（C-002 禁深引域目录）。core 外唯一生产消费方 = plugins/session/v2_worker_progress（S2 的 in_flight 判据）。core 内没有第二个生产模块用它（同域内只有测试彩排），故显为单消费方',
       SloLatencyView:

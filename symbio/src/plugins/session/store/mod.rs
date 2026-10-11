@@ -78,7 +78,7 @@ const SUB_SESSIONS_DIR: &str = "sessions";
 /// 消息文件名 —— **与元数据分开存放**（见模块头「元数据与消息分文件」）。
 /// 清单只读 `session.json`，**不读**本文件；只有真的要取转写时才读。
 ///
-/// `pub(crate)`：对账模块（`v2_reconcile`）要按同一常量读 legacy 缓存，
+/// `pub(crate)`：`load_messages` / 迁移路径按同一常量寻址 legacy 缓存，
 /// 「文件名只有一份口径」不得各自硬编码字符串。
 pub(crate) const MESSAGES_FILE_NAME: &str = "messages.json";
 
@@ -639,8 +639,8 @@ fn session_dirs_deep(base: &Path) -> Vec<PathBuf> {
 /// **v1 遗留目录**服务——那些把消息内联在 `session.json` 里、事实从未入格的会话。
 /// 因此判据是「**有内联消息吗**」：没有内联消息的目录（新布局会话 / 已迁过的）
 /// 一律跳过。少了这条，新会话会在首次迁移时被写出一份**空 `messages.json`**
-/// ——把我们刚停写的缓存又凭空造出来，且让双源对账把它读成「空第二源 ⇒ 不一致」
-/// （诊断误报的根因）。存量补投影那半仍保留（`title` 空的旧文件要补）。
+/// ——把我们刚停写的缓存又凭空造出来（读侧虽已不读它，但凭空多一份空文件是布局污染）。
+/// 存量补投影那半仍保留（`title` 空的旧文件要补）。
 async fn split_inline_messages(dir: &Path) -> Result<(), PluginError> {
     let Some(meta) = read_meta(dir) else {
         return Ok(());
