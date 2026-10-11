@@ -8,6 +8,10 @@ use crate::symbio_core::PluginSimpleRequest;
 // `Store` 是**测试自己**要的（`store.append` 是 trait 方法；父模块把它从顶层
 // 导入里删了——生产侧只读 `history()`）；`use super::*` 因此带不过来。
 use crate::symbio_core::Store;
+// `EventWalStore` / `LatencyTier` 同由：它们只被父模块里的熔断段用到，那段已按域
+// 拆去 `tool_executor/breaker.rs`（[plan/13 C3](../../../../../docs/plan/13-质量改进总纲.md)），
+// 父模块顶层不再导入，`use super::*` 便带不过来——测试自己拿。
+use crate::symbio_core::{EventWalStore, LatencyTier};
 
 fn test_ctx() -> Arc<dyn PluginInvokeRequest> {
     Arc::new(PluginSimpleRequest::new(None, None))

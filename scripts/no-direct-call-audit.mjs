@@ -42,12 +42,15 @@ const repoRoot = path.resolve(scriptDir, '..')
 /** 主体类型名单（显式，S6 起维护；新增主体在此登记）。 */
 const PRINCIPALS = ['Decider', 'Reasoner', 'RecallTranslator', 'CommitmentKeeper']
 
-/** 相对 ROOT 的豁免路径：定义域 + 根重导出 + 同域测试。 */
-const ALLOWED = new Set([
-  'symbio_core/actors/mod.rs',
-  'symbio_core/actors/mod.test.rs',
-  'symbio_core/mod.rs',
-])
+/**
+ * 定义域 = 整个 `symbio_core/actors` 模块树（不只是 `mod.rs`）：主体类型在**该域内**
+ * 被定义与驱动是合法的（持有即可直连的风险只在该域**之外**）。按**目录**判而不是逐
+ * 文件列举——域内按顶层类型拆文件（plan/13 批 C3）不该顺带把定义域收窄成一张会漂的
+ * 清单（那正是本守卫最该防的：域内新增一个主体文件就被误报成 NDC-001）。
+ */
+const DEFINITION_DIR = 'symbio_core/actors/'
+/** 另外两处合法出口：core 根重导出（`symbio_core/mod.rs`）与测试文件（排演驱动方）。 */
+const ALLOWED_FILES = new Set(['symbio_core/mod.rs'])
 
 /** 主体句柄形态（任何文件都禁止——含定义域内部；泛型与 `::new` 构造两种写法都拦）。 */
 const HANDLE_RE = new RegExp(
@@ -72,7 +75,8 @@ function audit(root) {
     const rel = path.relative(root, file).split(path.sep).join('/')
     const text = fs.readFileSync(file, 'utf8')
     const lines = text.split('\n')
-    const allowed = ALLOWED.has(rel) || rel.endsWith('.test.rs')
+    const allowed =
+      ALLOWED_FILES.has(rel) || rel.startsWith(DEFINITION_DIR) || rel.endsWith('.test.rs')
     lines.forEach((line, i) => {
       // 剥注释：文档提到主体名 ≠ 对象图边。
       const code = line.split('//')[0]

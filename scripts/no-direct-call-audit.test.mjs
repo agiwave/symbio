@@ -88,3 +88,21 @@ test('定义域 / 根重导出 / 测试引用 + 注释提及 → 放行', () => 
   })
   assert.equal(r.status, 0, r.stderr + r.stdout)
 })
+
+test('定义域是整个 actors 模块树：域内新拆出的文件不被误报', () => {
+  const r = audit({
+    'symbio_core/actors/mod.rs': DEFINITION,
+    'symbio_core/actors/reasoner.rs': 'impl Reasoner { fn reply() {} }\n',
+    'symbio_core/actors/commitment.rs': 'pub struct CommitmentKeeper;\n',
+  })
+  assert.equal(r.status, 0, '按顶层类型拆出的域内文件是定义域的一部分：' + r.stderr + r.stdout)
+})
+
+test('定义域**之外**的 actors 相邻文件仍判 NDC-001（目录判据不得漏拦）', () => {
+  const r = audit({
+    'symbio_core/actors/mod.rs': DEFINITION,
+    'symbio_core/actors_extra/foo.rs': 'let r = Reasoner;\n',
+  })
+  assert.equal(r.status, 1, 'actors_extra 不在定义域内，必须红')
+  assert.match(r.stderr, /NDC-001/)
+})
