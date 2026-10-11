@@ -731,6 +731,12 @@ pub(crate) async fn retry_compaction(
     // 拿过滤视图去删会「删了个空气」，节点反而留在存储里。
     messages.retain(|m| m.id != target_id);
     session.replace_messages(messages).await?;
+    // **事实入格**（S2.7-b3 前置，[ADR-053](../../../../docs/decisions/session.md)）：
+    // 旧失败节点被删。不落格的话，主读切到「从 WAL 重建」之后它会**复活**——而这条
+    // 路径的全部意义就是「重试不留旧失败痕迹」。与 `resume.rs` 的删除-重建同款。
+    if let Some(dir) = session.session_dir() {
+        super::super::v2_messages::removed(&dir, std::slice::from_ref(&target_id.to_string()));
+    }
     // 删除帧：`status = removed`，一次状态迁移。
     llm_emit_removed(sink, target_id).await;
 

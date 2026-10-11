@@ -153,6 +153,16 @@ async fn process_retry_turn(
     // 5. 持久化
     session.replace_messages(messages).await?;
 
+    // 5b. **事实入格**（S2.7-b3 前置，[ADR-053](../../../../docs/decisions/session.md)）：
+    //     删掉的是一**棵子树**（Failed Turn 及其全部子孙）。不落格的话，主读路径切到
+    //     「从 WAL 重建」之后这些节点会**整棵复活**——重建只看事实，而事实里从未有过
+    //     「它们没了」这句话。一次动作落**一条**（区间用 `ids` 表达），与
+    //     `commands::truncate_messages` 同形（同一个理由：一个动作一个键）。
+    if let Some(dir) = session.session_dir() {
+        let ids: Vec<String> = deleted_messages.iter().map(|m| m.id.clone()).collect();
+        super::v2_messages::removed(&dir, &ids);
+    }
+
     // 6. 广播删除（每个被删除的消息一条 `status = removed` 的删除帧）
     for msg in &deleted_messages {
         llm_emit_removed(sink, &msg.id).await;
@@ -335,6 +345,13 @@ async fn process_tool_resume_action(
                 e
             );
         }
+        // **事实入格**（S2.7-b3 前置）：父 ToolCall 的状态被就地改写成终态。不落格的话，
+        // 主读切到「从 WAL 重建」之后这条节点会退回**恢复前的**状态——重建看到的事实
+        // 里没有任何一条说它定稿过。载荷是**改写后的整条**（`message.edited` 的既有约定：
+        // 重建按 id 整条替换，不猜「这次改了哪几个字段」）。
+        if let Some(dir) = session.session_dir() {
+            super::v2_messages::edited(&dir, &parent_update);
+        }
         llm_emit_state(sink, parent_update).await;
         return Ok(ResumeOutcome::Done);
     }
@@ -399,6 +416,19 @@ async fn process_tool_resume_action(
 
     // 9. 持久化（replace_messages：删除旧子 + 新增新子 + 更新父节点）
     session.replace_messages(messages).await?;
+
+    // 9b. **事实入格**（S2.7-b3 前置，[ADR-053](../../../../docs/decisions/session.md)）：
+    //     这一步改了**三件事**，两件需要落格（新子节点由 `turn_runner` 的续写轮落
+    //     `artifact.added`，见该处注释——它记的是「恢复产生的工具交换是已发生的事实」）：
+    //     - **旧子没了** ⇒ `message.removed`（不落格则重建后旧结果与新结果**同时存在**，
+    //       同一次调用出现两条结果）；
+    //     - **父 ToolCall 被改写**（status / `meta` / supply 时的 args 正文）⇒
+    //       `message.edited`（不落格则重建后它退回恢复前的状态）。
+    //     两条都落在「缓存写成功之后」：缓存此刻仍是读侧真源，事实是它的影子。
+    if let Some(dir) = session.session_dir() {
+        super::v2_messages::removed(&dir, std::slice::from_ref(&old_child_id));
+        super::v2_messages::edited(&dir, &updated_parent);
+    }
 
     // 10. 广播：旧子删除（`status = removed`）+ 新子完整消息（正文首次上线）
     //     + 父节点完整消息（supply 可能改写了它的 args 正文 ⇒ 整条替换）
