@@ -36,7 +36,7 @@
  */
 // 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns RG 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认）
-// @codes RG-001 RG-002 RG-003 RG-004 RG-005 RG-006 RG-007 RG-008 RG-009 RG-010 RG-011 RG-012 RG-013 RG-014 RG-015
+// @codes RG-001 RG-002 RG-003 RG-004 RG-005 RG-006 RG-007 RG-008 RG-009 RG-010 RG-011 RG-012 RG-013 RG-014 RG-015 RG-016
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -73,7 +73,7 @@ export const KINDS = {
   spec: {
     label: '规范',
     required: ['scope'],
-    optional: ['reason', 'supersedes'],
+    optional: ['reason', 'supersedes', 'clears'],
     sections: ['规范', '判据'],
     refFields: [],
     refSections: ['判据'],
@@ -467,6 +467,32 @@ export function auditEntries(entries, root) {
     if (cycle) out.push(`RG-015 supersedes 成环：${cycle.join(' -> ')}（取代链必须有尽头）`)
   }
 
+  // ---- RG-016：spec 的 clears（豁免的清除任务指认） ----
+  // clears 是**指认**不是前置（与 deps 的语义分界）：豁免可以合法地挂在**开放**的
+  // 清除任务上——那正是「现在不修 + 倒计时」的语义，所以这里**不**做 RG-008 式的闭环要求。
+  for (const e of entries) {
+    if (!e.meta || e.kind !== 'spec' || !('clears' in e.meta)) continue
+    const v = e.meta.clears
+    if (isEmpty(v)) continue
+    if (!Array.isArray(v)) {
+      out.push(`${e.rel}：RG-016 clears 必须是 \`[编号]\` 列表，读到：${JSON.stringify(v)}`)
+      continue
+    }
+    const seen = new Set()
+    for (const t of v) {
+      if (seen.has(t)) out.push(`${e.rel}：RG-016 clears 重复指认 \`${t}\``)
+      seen.add(t)
+      const target = byId.get(t)
+      if (!target) {
+        out.push(`${e.rel}：RG-016 clears 指到不存在的编号 \`${t}\`（清除任务必须先登记）`)
+        continue
+      }
+      if (target.kind !== 'task') {
+        out.push(`${e.rel}：RG-016 clears 指向 ${target.kind}（\`${t}\`）——清除任务是任务，不是规范`)
+      }
+    }
+  }
+
   // ---- RG-011：SP-001 的字段表必须恰好等于代码侧 schema ----
   const sp = entries.find((e) => e.kind === 'spec' && e.meta && e.meta.id === 'SP-001')
   if (!sp) {
@@ -608,6 +634,9 @@ function guardCell(e) {
 /** supersedes 列：显式取代链（冲突消解留下的数据痕迹）。 */
 const supCell = (e) => (Array.isArray(e.meta.supersedes) && e.meta.supersedes.length ? e.meta.supersedes.join('、') : '—')
 
+/** clears 列：豁免类规范的清除任务指认（存在性由 RG-016 保证）。 */
+const clearsCell = (e) => (Array.isArray(e.meta.clears) && e.meta.clears.length ? e.meta.clears.join('、') : '—')
+
 function renderSpecIndex(allEntries) {
   const mine = allEntries.filter((e) => e.kind === 'spec').slice().sort((a, b) => (a.meta.id < b.meta.id ? -1 : 1))
   const count = (s) => mine.filter((e) => e.meta.status === s).length
@@ -619,8 +648,8 @@ function renderSpecIndex(allEntries) {
     '',
     '## 现行规范（active）',
     table(
-      ['编号', '规范', '适用范围', '判据', '取代'],
-      mine.filter((e) => e.meta.status === 'active').map((e) => [`\`${e.meta.id}\``, cell(e.meta.title), cell(e.meta.scope), guardCell(e), supCell(e)]),
+      ['编号', '规范', '适用范围', '判据', '清除', '取代'],
+      mine.filter((e) => e.meta.status === 'active').map((e) => [`\`${e.meta.id}\``, cell(e.meta.title), cell(e.meta.scope), guardCell(e), clearsCell(e), supCell(e)]),
     ),
     '',
     '## 草案（draft）',

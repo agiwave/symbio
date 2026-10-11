@@ -5,7 +5,7 @@
  * ## 它守什么
  *
  * 「单文档 + 元信息 + 自动汇总」这套顶层机制的**全部强制力**都在这里（判据码
- * RG-001…RG-015，逐条语义与消息住 `registry-lib`，登记表见 `docs/reference/GATE_CODES.md`）：
+ * RG-001…RG-016，逐条语义与消息住 `registry-lib`，登记表见 `docs/reference/GATE_CODES.md`）：
  *
  *   - **RG-001** front-matter 可解析（受限 YAML 子集），未知 / 重复字段按 kind 判；
  *   - **RG-002** 必填字段非空，`kind` 与所在目录一致；
@@ -26,6 +26,8 @@
  *     只影响同层排序，**不参与冲突裁决**；
  *   - **RG-015** spec 的 `supersedes`（显式取代链）：目标存在且为 spec、不自指、不重复、
  *     不成环，且 `active` 的规范不得取代另一条仍 `active` 的规范——矛盾必须显式消解。
+ *   - **RG-016** spec 的 `clears`（豁免的清除任务指认）：目标存在且为 task；
+ *     **不要求闭环**——豁免挂在开放的清除任务上是合法语义（`clears` 是指认，`deps` 是前置）。
  *
  * ## 失效形态
  *
@@ -74,7 +76,7 @@ export function runRegistryAudit(argv) {
     else return { code: 2, lines: [red(`[ERROR] 参数不识别：${a}`), USAGE] }
   }
 
-  const lines = ['--- registry-audit: 登记条目校验（RG-001…RG-015） ---']
+  const lines = ['--- registry-audit: 登记条目校验（RG-001…RG-016） ---']
   const registryDir = path.join(root, 'registry')
   const { entries, errors, notes, missing } = loadEntries(registryDir, root)
   if (missing) return { code: 2, lines: lines.concat(red(`[ERROR] RG-010 registry/ 不存在（${registryDir}）——登记范围读不出`)) }

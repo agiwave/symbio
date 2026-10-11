@@ -23,7 +23,7 @@
 | **NDC** | 主体直连 | `scripts/no-direct-call-audit.mjs` | NDC-001–002 | `NDC-003` |
 | **PN** | 健壮性登记（每一处 panic 都是显式事实） | `scripts/panic-audit.mjs` | PN-001–003 | `PN-004` |
 | **R** | 死代码 | `scripts/dead-code-audit.mjs` | R-001–002 | `R-003` |
-| **RG** | 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认） | `scripts/registry-lib.mjs` | RG-001–015 | `RG-016` |
+| **RG** | 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认） | `scripts/registry-lib.mjs` | RG-001–016 | `RG-017` |
 | **S** | 源码 grep 形态 | `scripts/grep-audit.mjs` | S-001–003、S-006–012 | `S-013` |
 | **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
 
@@ -105,6 +105,7 @@
 | **RG-013** | `scripts/registry-lib.mjs` |
 | **RG-014** | `scripts/registry-lib.mjs` |
 | **RG-015** | `scripts/registry-lib.mjs` |
+| **RG-016** | `scripts/registry-lib.mjs` |
 | **S-001** | `scripts/grep-audit.mjs` |
 | **S-002** | `scripts/grep-audit.mjs` |
 | **S-003** | `scripts/grep-audit.mjs` |

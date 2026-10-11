@@ -249,6 +249,30 @@ test('RG-015：supersedes 目标不存在 / 指向 task / 自身 / 双 active / 
   expectOnly(errsOf(cyc), /RG-015 supersedes 成环/)
 })
 
+test('RG-016：clears 指到不存在 / 指向非 task 变红；指向开放 task 放行（反向）', () => {
+  const missing = caseRoot({ 'spec/WVR-10.md': specDoc('WVR-10', { clears: ['W99'] }) })
+  expectOnly(errsOf(missing), /RG-016 clears 指到不存在的编号/)
+
+  const wrongKind = caseRoot({
+    'spec/WVR-11.md': specDoc('WVR-11', { clears: ['SP-010'] }),
+    'spec/SP-010.md': specDoc('SP-010'),
+  })
+  expectOnly(errsOf(wrongKind), /RG-016 clears 指向 spec/)
+
+  // 反向：清除任务**开放**（todo）不判红——clears 是指认不是前置，与 deps 的语义相反
+  const base = caseRoot({
+    'task/T-060.md': taskDoc('T-060'),
+    'spec/WVR-12.md': specDoc('WVR-12', { clears: ['T-060'] }),
+  })
+  assert.deepEqual(errsOf(base), [], 'clears 指到 task 合法，且不要求其闭环')
+
+  // 渲染：spec INDEX 的 active 表带「清除」列，clears 编号落列（列被删要有回归兜住）
+  const { entries } = loadEntries(path.join(base, 'registry'), base)
+  const idx = renderKindIndex('spec', entries)
+  assert.match(idx, /\| 编号 \| 规范 \| 适用范围 \| 判据 \| 清除 \| 取代 \|/, 'active 表含清除列')
+  assert.match(idx, /\| 人工 \| T-060 \| — \|/, 'clears 编号渲染进清除列')
+})
+
 // ================= 状态矩阵（RG-007） =================
 
 test('RG-007：done 必须有 evidence、不得留 signal；wont / retired 必须有 reason', () => {
