@@ -213,7 +213,24 @@ impl PersistentChatSession {
 
         // ② 折列表 + ③ 写缓存。
         match change {
-            MessageChange::Born { nodes, .. } => self.append_messages(nodes).await,
+            MessageChange::Born { nodes, .. } => {
+                let (persisted, removed) = self.append_messages(nodes).await?;
+                // 写入期裁剪（`prune_tool_history` / `max_messages`）是**列表变更**，
+                // 必须入格（S2.7-b · ADR-054 决策 1 的「关闭」原语）。裁剪发生在
+                // `append_messages` 的存储临界区内（它才拿得到权威列表与配置），
+                // 故由本处补落 `message.removed`——**事实仍由 `apply` 这一个入口落**，
+                // 没有开出第二个写入口。
+                //
+                // 不落格的后果是**静默的**：WAL（唯一真源）里那些节点还在，只是
+                // `messages.json` 缓存里少了。切主读后重建照 WAL 折回 ⇒ **被裁节点
+                // 复活**——用户会看到早已淘汰的旧工具链重新出现在历史里。
+                if !removed.is_empty() {
+                    if let Some(dir) = self.store.session_dir(&self.session_id) {
+                        super::super::v2_messages::removed(&dir, &removed);
+                    }
+                }
+                Ok(persisted)
+            }
             MessageChange::Edited(msgs) => {
                 let mut list = self.get_messages().await?;
                 for m in &msgs {
@@ -233,7 +250,7 @@ impl PersistentChatSession {
         }
     }
 
-    /// 追加消息并落库，返回**落库后的权威副本**（含存储分配的 `seq` / `timestamp`）。
+    /// 追加消息并落库，返回 `(落库后的权威副本, 被写入期裁剪删掉的 id)`。
     ///
     /// ## 为什么回消息，而不是回条数
     ///
@@ -247,11 +264,16 @@ impl PersistentChatSession {
     /// 被写入期工具链裁剪动过的，以存储里的最终形态为准——交回一条存储里并不
     /// 存在的消息，等于让前端"对齐"到幻影。
     ///
+    /// 第二个返回值（**S2.7-b**）是本次写入期裁剪删掉的 id：调用方（`apply`）
+    /// 据此落 `message.removed`。为什么由调用方落而不是本函数落——本函数是
+    /// **存储原语**，事实落格收在 `apply` 一个入口（ADR-054 决策 2/3 的类型强制）；
+    /// 本函数只**报告**它动了哪些节点。空 `Vec` = 没裁任何节点。
+    ///
     /// 顺序与入参一致（不含被淘汰项）；落库失败则整体失败，不返回部分结果。
     pub(super) async fn append_messages(
         &self,
         messages: Vec<ChatMessage>,
-    ) -> Result<Vec<ChatMessage>, PluginError> {
+    ) -> Result<(Vec<ChatMessage>, Vec<String>), PluginError> {
         // 持久层写入不变量（见 `ensure_durable_states`）：瞬态状态不得落盘
         ensure_durable_states(&messages, "append_messages")?;
         // 临界区：整段「读 → 改 → 整份写回」必须串行。会话写入是整份覆盖，
@@ -316,11 +338,18 @@ impl PersistentChatSession {
         let max_turns = cfg.max_messages;
         drop(cfg);
 
+        // 写入期裁剪删掉的全部 id（两类裁剪的并集，按被删顺序累积）——回给调用方
+        // 落 `message.removed`（S2.7-b）。空 = 没裁任何节点。
+        let mut removed_ids: Vec<String> = Vec::new();
+
         // 写入期工具链裁剪：架构原则（存储保持完整原文）的唯一例外，默认开启以
         // 控制磁盘与节点树体积；置 `prune_tool_history: false` 后存储严格保留全文，
         // 工具链裁剪完全交给请求视图层（build_request_view 的骨架化/淡化）。
         if prune_tool_history {
-            prune_historical_tool_calls(&mut session.messages, context_messages);
+            removed_ids.extend(prune_historical_tool_calls(
+                &mut session.messages,
+                context_messages,
+            ));
         }
 
         let mut user_indices = Vec::new();
@@ -338,6 +367,7 @@ impl PersistentChatSession {
             // 既与"淘汰旧轮"无关（旧轮引用的往往是最新的那几个存档），又让配置项
             // `max_messages` 变成静默删文件的破坏性操作。
             let dropped = start_idx;
+            removed_ids.extend(session.messages[..start_idx].iter().map(|m| m.id.clone()));
             session.messages.drain(0..start_idx);
             if dropped > 0 {
                 plugin_info!(
@@ -364,7 +394,7 @@ impl PersistentChatSession {
             .cloned()
             .collect();
 
-        Ok(persisted)
+        Ok((persisted, removed_ids))
     }
 
     pub(crate) async fn replace_all(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError> {
@@ -480,12 +510,21 @@ pub(super) fn ensure_durable_states(
 /// `tool_result_guard` 的每会话滚动保留（最新 `TOOL_ARCHIVE_KEEP` 个，按修改时间）
 /// 统一回收。写入路径此前把不可信的消息 meta 当删除依据（需额外做 `..` 与根目录
 /// 双重校验），且"淘汰旧轮"删掉的常是最新存档——职责错位，故收敛为纯节点裁剪。
-pub fn prune_historical_tool_calls(messages: &mut Vec<ChatMessage>, keep_turns: usize) {
+///
+/// 返回**被删节点 id**（顺序 = 原列表顺序）——调用方据此落 `message.removed` 事实。
+/// 这是 [S2.7-b](../../../../../registry/task/S2.7-b.md) 的承重面：裁剪是**列表变更**，
+/// 而列表变更必须入格（[ADR-054](../../../../docs/decisions/session.md)
+/// 决策 1 的「关闭」原语）。裁剪改了列表却不落事实 ⇒ 切主读后**被裁节点复活**
+/// ——WAL 里它们还在，只是缓存里少了（而缓存已经不再是真源）。
+pub fn prune_historical_tool_calls(
+    messages: &mut Vec<ChatMessage>,
+    keep_turns: usize,
+) -> Vec<String> {
     // keep_turns == 0 语义为「不限制」（与 `SessionConfig::context_messages` 的 0 值语义、
     // `sliding_window` 保持一致）。此处缺失守卫时，下面 `user_indices[len - keep_turns]`
     // 会取到下标 `len`（越界）并 panic，导致整次 `append_messages` 失败。
     if keep_turns == 0 {
-        return;
+        return Vec::new();
     }
     let mut user_indices = Vec::new();
     for (idx, msg) in messages.iter().enumerate() {
@@ -495,7 +534,7 @@ pub fn prune_historical_tool_calls(messages: &mut Vec<ChatMessage>, keep_turns: 
     }
 
     if user_indices.len() <= keep_turns {
-        return;
+        return Vec::new();
     }
 
     let limit_idx = user_indices[user_indices.len() - keep_turns];
@@ -543,5 +582,13 @@ pub fn prune_historical_tool_calls(messages: &mut Vec<ChatMessage>, keep_turns: 
         }
     }
 
+    // 被删的那批，**按原列表顺序**取出（`to_remove` 是 `HashSet`，顺序不定；
+    // 事实与回执里的 id 序列必须稳定——与 `truncate_messages` 的回执同一条纪律）。
+    let removed: Vec<String> = messages
+        .iter()
+        .filter(|m| to_remove.contains(&m.id))
+        .map(|m| m.id.clone())
+        .collect();
     messages.retain(|msg| !to_remove.contains(&msg.id));
+    removed
 }

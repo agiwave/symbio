@@ -11,7 +11,7 @@
 //! 已由 `vdfs_provider.test.rs` 覆盖——同一段语义不在两处各钉一遍
 //! （`docs/module-layout.md` §2）。本文件只钉「事实本身」。
 
-use super::{edited, removed};
+use super::{drain_parked, edited, removed};
 use crate::symbio_core::chat_message::{ChatMessage, MessageContent, MessageRole, MessageType};
 use crate::symbio_core::{
     Entity, EventWalStore, Seq, Store, Verb, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED,
@@ -233,5 +233,169 @@ fn a_carrier_without_seq_falls_back_to_the_slice_tail() {
         "退化到切片末尾的 seq（仍回答「站在哪份状态上」）"
     );
 
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// ── S2.7-c：写者令牌被占时**寄存**，由持令牌方补落 ─────────────────────────
+
+/// **S2.7-c 的承重判据**：令牌被占时编辑**不丢**——寄存，补落后仍在。
+///
+/// 这条就是「编辑偶发不生效」的对偶：不寄存时，`append` 拿 `NotTheWriter`、
+/// 出声后丢弃，用户以为改了、切源后一看没改，而**没有任何机制会纠正**。
+///
+/// 复现手法：**持有一个活的 `EventWalStore`**（它就是令牌持有方），此刻调
+/// `edited` —— 进程内两条 `open` 抢同一把文件锁，第二把拿不到（`NotTheWriter`）。
+/// 这与「一轮正在跑时用户编辑」在生产上是同一个形态。
+///
+/// 补落**必须传那个持令牌的实例**：令牌是文件锁，`drain_parked` 自己 `open`
+/// 出来的第二个实例同样不是写者（那正是本任务修的形态本身）。
+#[test]
+fn an_edit_while_the_token_is_held_is_parked_not_dropped() {
+    let (dir, _user_seq) = seeded_dir("parked");
+    // 令牌持有方：它一活着，后来的 `EventWalStore::open` 就拿不到写者令牌。
+    let holder = EventWalStore::open(dir.join(crate::plugins::session::paths::V2_WAL_FILE))
+        .expect("持令牌打开");
+
+    edited(&dir, &patched_user("u-1", "跑着的时候改的"));
+
+    // 此刻**还没落**（令牌不在编辑这条链上）。
+    assert!(
+        read_facts(&dir).is_empty(),
+        "令牌被占时不得就地落格（就地落会拿到 NotTheWriter、静默丢弃）"
+    );
+
+    // 持令牌方走「下一个落格窗口」：补落——**复用它自己那个持令牌的实例**。
+    drain_parked(&dir, &holder);
+
+    let facts = read_facts(&dir);
+    assert_eq!(facts.len(), 1, "补落后这条编辑必须真的进网格，而不是消失");
+    assert_eq!(facts[0].kind, EVENT_MESSAGE_EDITED);
+    let msg: ChatMessage =
+        serde_json::from_value(facts[0].payload["message"].clone()).expect("载荷里是整条消息");
+    assert_eq!(
+        msg.content.as_ref().map(MessageContent::to_text).as_deref(),
+        Some("跑着的时候改的"),
+        "补落的必须是那条被寄存的编辑，逐字不差"
+    );
+
+    drop(holder);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// 补落之后寄存区**清空**——同一份变更不会被落两次。
+#[test]
+fn draining_the_park_is_idempotent_across_windows() {
+    let (dir, _) = seeded_dir("park-drain-once");
+    let holder = EventWalStore::open(dir.join(crate::plugins::session::paths::V2_WAL_FILE))
+        .expect("持令牌打开");
+    edited(&dir, &patched_user("u-1", "一次"));
+
+    // 连续两次补落窗口（生产上「一轮结束后又开一轮」）：第二次必须是空操作。
+    drain_parked(&dir, &holder);
+    drain_parked(&dir, &holder);
+
+    assert_eq!(read_facts(&dir).len(), 1, "同一份寄存变更只落一次");
+
+    drop(holder);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// 令牌**没被占**时，谁也不会走寄存这条路（`drain_parked` 是空操作）。
+///
+/// 防止「顺手调 drain」变成常规路径：它只在寄存区非空时才有事做，
+/// 而寄存区只在令牌被占时才被写入。
+///
+/// 这里没有令牌持有方（`edited` 是就地落格的）⇒ 补落**在读寄存区之前就返回**，
+/// 因此传进来的 `store` 是什么状态都无所谓（传一个刚开的即可）。
+#[test]
+fn draining_an_empty_park_is_a_noop() {
+    let (dir, _) = seeded_dir("park-empty");
+    edited(&dir, &patched_user("u-1", "直接落的"));
+    let before = read_facts(&dir).len();
+    let store = EventWalStore::open(dir.join(crate::plugins::session::paths::V2_WAL_FILE))
+        .expect("打开事实源");
+    drain_parked(&dir, &store);
+    assert_eq!(read_facts(&dir).len(), before, "空寄存区补落应什么都不做");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// 截断（`removed`）同样走寄存——两类变更共用同一条寄存通道。
+#[test]
+fn a_truncate_while_the_token_is_held_is_parked_not_dropped() {
+    let (dir, _user_seq) = seeded_dir("parked-remove");
+    let holder = EventWalStore::open(dir.join(crate::plugins::session::paths::V2_WAL_FILE))
+        .expect("持令牌打开");
+
+    removed(&dir, &["u-1".into(), "T1".into()]);
+    assert!(read_facts(&dir).is_empty(), "令牌被占 ⇒ 寄存");
+
+    drain_parked(&dir, &holder);
+    let facts = read_facts(&dir);
+    assert_eq!(facts.len(), 1);
+    assert_eq!(facts[0].kind, EVENT_MESSAGE_REMOVED);
+    assert_eq!(facts[0].payload["ids"], serde_json::json!(["u-1", "T1"]));
+
+    drop(holder);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// 补落**重新算溯源锚**：锚必须按「落格那一刻」的切片算，而不是寄存那一刻。
+///
+/// 寄存发生在编辑的链路（切片里可能只有旧事件），补落发生在执行口（切片已经长出
+/// 了本轮的开轮事件）。用旧锚会把这条事实指到一个**过期状态**上——I2 要的
+/// 「这次变更站在哪份状态上」就成了一句关于过去的话。
+///
+/// ## 怎么让「补落那一刻」与「寄存那一刻」可区分
+///
+/// 被改的节点必须是**事实源里没有承载**的那种（这里用一个 v1 遗留的节点 id
+/// `ghost`）——那样 `provenance` 会退化到**切片末尾的 seq**。于是：
+/// 寄存时切片末尾 = seq 0（seed 的那条），补落时末尾 = seq 1（新落的 u-2）。
+/// 断言拿到 1 就证明锚是补落时算的；拿到 0 就说明用了寄存时的旧锚（本用例要
+/// 抓的回归）。
+#[test]
+fn a_parked_change_re_resolves_its_anchor_at_drain_time() {
+    let (dir, _first_seq) = seeded_dir("park-anchor");
+    let holder = EventWalStore::open(dir.join(crate::plugins::session::paths::V2_WAL_FILE))
+        .expect("持令牌打开");
+
+    // 令牌被占 ⇒ 编辑寄存（此刻锚还没算）。
+    // `ghost` 无承载 ⇒ 若此刻算锚会是切片末尾 = 0。
+    edited(&dir, &patched_user("ghost", "改"));
+    assert!(read_facts(&dir).is_empty());
+
+    // 令牌持有方又落了本轮的开轮事件（切片长长了一条：末尾从 0 变 1）——这是生产上
+    // 常态：寄存的编辑在**同一轮**的落格窗口被补落，而那时切片已经含本轮事件。
+    // 落格必须走**持令牌的那个实例**（另开一个拿不到锁）。
+    let new_seq = holder
+        .append(
+            crate::symbio_core::Event::pending(
+                "u-2",
+                EVENT_USER_MESSAGE,
+                Entity::Turn,
+                Verb::Opened,
+                1,
+                "user",
+            )
+            .with_ts(2_000)
+            .with_payload(serde_json::json!({ "text": "第二轮", "id": "u-2" })),
+        )
+        .expect("落第二轮用户格")
+        .value();
+
+    drain_parked(&dir, &holder);
+
+    let facts = read_facts(&dir);
+    let edit = facts
+        .iter()
+        .find(|e| e.kind == EVENT_MESSAGE_EDITED)
+        .expect("编辑事实必须在");
+    assert_eq!(
+        edit.produced_by,
+        Some(new_seq),
+        "锚按**补落时刻**的切片算（无承载节点退化到切片末尾 = 新落的 u-2），\
+         而不是寄存那一刻的末尾（0）"
+    );
+
+    drop(holder);
     std::fs::remove_dir_all(&dir).ok();
 }

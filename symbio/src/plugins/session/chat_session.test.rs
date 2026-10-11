@@ -261,7 +261,7 @@ async fn prune_keeps_recent_turns_and_drops_older_tool_chain() {
     msgs.extend(tool_round("u1", "t1", "r1"));
     msgs.extend(tool_round("u2", "t2", "r2"));
 
-    prune_historical_tool_calls(&mut msgs, 1);
+    let removed = prune_historical_tool_calls(&mut msgs, 1);
 
     assert!(
         !msgs.iter().any(|m| m.id == "r1"),
@@ -272,6 +272,52 @@ async fn prune_keeps_recent_turns_and_drops_older_tool_chain() {
         "对应的 ToolCall 应一并裁剪"
     );
     assert!(msgs.iter().any(|m| m.id == "r2"), "最近一轮工具结果应保留");
+    // S2.7-b：裁剪必须报出被删的 id（调用方据此落 `message.removed`）。
+    assert!(
+        removed.contains(&"r1".to_string()) && removed.contains(&"t1".to_string()),
+        "被裁节点 id 必须全部报出（否则切主后它们会复活）：{removed:?}"
+    );
+    assert!(
+        !removed.contains(&"r2".to_string()) && !removed.contains(&"u2".to_string()),
+        "保留区节点不得进裁剪集合：{removed:?}"
+    );
+}
+
+/// S2.7-b：裁剪集合**按原列表顺序**给出（事实与回执的 id 序列必须稳定——
+/// `to_remove` 是 `HashSet`，顺序不定；直接倒它会让同一会话的两次裁剪给出不同的序列）。
+#[tokio::test]
+async fn prune_removed_ids_follow_original_list_order() {
+    let mut msgs = Vec::new();
+    msgs.extend(tool_round("u1", "t1", "r1"));
+    msgs.extend(tool_round("u2", "t2", "r2"));
+    msgs.extend(tool_round("u3", "t3", "r3"));
+
+    let removed = prune_historical_tool_calls(&mut msgs, 1);
+
+    assert_eq!(
+        removed,
+        vec![
+            "t1".to_string(),
+            "r1".to_string(),
+            "t2".to_string(),
+            "r2".to_string(),
+        ],
+        "被裁 id 必须按原列表顺序（t1 在 r1 前、第一轮整体在第二轮前）"
+    );
+}
+
+/// 无裁剪 ⇒ 空集合（`keep_turns = 0` / 空列表 / 轮数不超窗口，三条早退路径）。
+#[tokio::test]
+async fn prune_reports_nothing_when_it_removes_nothing() {
+    let mut msgs = Vec::new();
+    msgs.extend(tool_round("u1", "t1", "r1"));
+    // 轮数不超窗口 ⇒ 不动
+    assert!(prune_historical_tool_calls(&mut msgs, 2).is_empty());
+    // 0 = 不限制 ⇒ 不动
+    assert!(prune_historical_tool_calls(&mut msgs, 0).is_empty());
+    // 空列表 ⇒ 不动
+    let mut empty: Vec<ChatMessage> = Vec::new();
+    assert!(prune_historical_tool_calls(&mut empty, 1).is_empty());
 }
 
 /// 回归（审计 A3）：写入期裁剪**只删节点、不删文件**。
@@ -325,7 +371,7 @@ async fn append_messages_with_zero_context_messages_does_not_fail() {
     msgs.extend(tool_round("u1", "t1", "r1"));
     msgs.extend(tool_round("u2", "t2", "r2"));
 
-    let kept = session
+    let (kept, _removed) = session
         .append_messages(msgs)
         .await
         .expect("context_messages=0 时落库不得失败");
@@ -348,7 +394,7 @@ async fn append_messages_keeps_tool_chain_when_prune_disabled() {
     let mut msgs = Vec::new();
     msgs.extend(tool_round("u1", "t1", "r1"));
     msgs.extend(tool_round("u2", "t2", "r2"));
-    let kept = session.append_messages(msgs).await.expect("初始落库失败");
+    let (kept, _removed) = session.append_messages(msgs).await.expect("初始落库失败");
     assert!(
         kept.iter().any(|m| m.id == "r1"),
         "关闭写入期裁剪后，窗口外的工具结果应保留在回执里"
@@ -376,6 +422,114 @@ async fn append_messages_prunes_tool_chain_by_default() {
     );
 }
 
+/// **S2.7-b 的承重判据**：写入期裁剪是**列表变更**，必须落 `message.removed`。
+///
+/// 不落格的后果是**静默的**（这是它被登记成任务的原因）：WAL（唯一真源）里那些
+/// 被裁节点还在，只是 `messages.json` 缓存里少了。切主读后重建照 WAL 折回 ⇒
+/// **被裁节点复活**——用户会看到早已淘汰的旧工具链重新出现在历史里。
+///
+/// 本测试走**生产路径**（`apply(Born)` → `append_messages` 的存储临界区），
+/// 判据落在事实源上：裁剪之后，被裁的那些 id 必须在 WAL 里有 `message.removed`。
+#[tokio::test]
+async fn prune_on_write_lands_a_removed_fact() {
+    let config = SessionConfig {
+        context_messages: 1,
+        ..Default::default()
+    };
+    let (session, dir, _tmp) = setup_with_config(config).await;
+    // 溯源锚：断言类事实（`message.removed`）必须有 `produced_by`（I2），
+    // 空的切片连锚都解不出 ⇒ 事实被按口径丢弃（WARN 有据）。先种一条事实。
+    seed_fact(&dir);
+
+    // 两轮工具链，`context_messages = 1` ⇒ 第一轮的工具链应被裁掉。
+    let mut msgs = Vec::new();
+    msgs.extend(tool_round("u1", "t1", "r1"));
+    msgs.extend(tool_round("u2", "t2", "r2"));
+    session
+        .apply(super::MessageChange::Born {
+            nodes: msgs,
+            carrier: super::Carrier::Here,
+        })
+        .await
+        .expect("落库失败");
+
+    // 缓存侧：被裁节点确实不在列表里。
+    let list = session.get_messages().await.expect("读列表失败");
+    assert!(
+        !list.iter().any(|m| m.id == "t1" || m.id == "r1"),
+        "窗口外工具链应被裁剪：{list:?}"
+    );
+
+    // **事实侧**：被裁的 id 必须进了网格。
+    let events = events_of(&dir);
+    let removed_ids: Vec<String> = events
+        .iter()
+        .filter(|e| e.kind == "message.removed")
+        .filter_map(|e| e.payload.get("ids"))
+        .filter_map(|v| v.as_array())
+        .flatten()
+        .filter_map(|v| v.as_str())
+        .map(str::to_string)
+        .collect();
+    for id in ["t1", "r1"] {
+        assert!(
+            removed_ids.contains(&id.to_string()),
+            "被裁节点 {id} 必须落 `message.removed`（否则切主后复活）：{removed_ids:?}"
+        );
+    }
+    assert!(
+        !removed_ids.contains(&"r2".to_string()),
+        "保留区节点不得进删除事实：{removed_ids:?}"
+    );
+}
+
+/// **S2.7-b 的另一半**：轮次窗口淘汰（`max_messages`）同样是列表变更，必须落事实。
+#[tokio::test]
+async fn turn_window_eviction_lands_a_removed_fact() {
+    let config = SessionConfig {
+        max_messages: 2,
+        prune_tool_history: false,
+        context_messages: 0,
+        ..Default::default()
+    };
+    let (session, dir, _tmp) = setup_with_config(config).await;
+    seed_fact(&dir);
+
+    let mut msgs = Vec::new();
+    for i in 1..=5 {
+        msgs.push(plain_msg(&format!("u{}", i)));
+    }
+    session
+        .apply(super::MessageChange::Born {
+            nodes: msgs,
+            carrier: super::Carrier::Here,
+        })
+        .await
+        .expect("落库失败");
+
+    let events = events_of(&dir);
+    let removed_ids: Vec<String> = events
+        .iter()
+        .filter(|e| e.kind == "message.removed")
+        .filter_map(|e| e.payload.get("ids"))
+        .filter_map(|v| v.as_array())
+        .flatten()
+        .filter_map(|v| v.as_str())
+        .map(str::to_string)
+        .collect();
+    // max_messages=2 ⇒ 前 3 条被 FIFO 淘汰。
+    for id in ["u1", "u2", "u3"] {
+        assert!(
+            removed_ids.contains(&id.to_string()),
+            "被窗口淘汰的 {id} 必须落 `message.removed`：{removed_ids:?}"
+        );
+    }
+    assert!(
+        !removed_ids.contains(&"u5".to_string()),
+        "最近一轮不得进删除事实：{removed_ids:?}"
+    );
+}
+
 /// 回归（P0-3）：`max_messages` 不再被存储层 `.max(500)` 硬下限钳制，小值真实生效。
 #[tokio::test]
 async fn max_messages_below_legacy_store_floor_is_honored() {
@@ -391,7 +545,7 @@ async fn max_messages_below_legacy_store_floor_is_honored() {
     for i in 1..=5 {
         msgs.push(plain_msg(&format!("u{}", i)));
     }
-    let kept = session.append_messages(msgs).await.expect("落库失败");
+    let (kept, _removed) = session.append_messages(msgs).await.expect("落库失败");
     assert!(
         !kept.iter().any(|m| m.id == "u1"),
         "max_messages=2 应触发 FIFO 淘汰；被 500 下限钳制时 u1 会留在回执里"
@@ -422,7 +576,7 @@ async fn max_messages_zero_means_unlimited() {
     for i in 1..=5 {
         msgs.push(plain_msg(&format!("u{}", i)));
     }
-    let kept = session.append_messages(msgs).await.expect("落库失败");
+    let (kept, _removed) = session.append_messages(msgs).await.expect("落库失败");
     assert_eq!(kept.len(), 5, "max_messages=0 表示不限制");
 }
 
@@ -560,7 +714,7 @@ async fn append_messages_returns_storage_authoritative_copies() {
     let mut assistant = plain_msg("a1");
     assistant.seq = Some(inflight + 1);
 
-    let returned = session
+    let (returned, _removed) = session
         .append_messages(vec![plain_msg("u1"), assistant])
         .await
         .expect("落库失败");
@@ -601,7 +755,7 @@ async fn append_messages_omits_messages_dropped_by_turn_window() {
     };
     let (session, _dir, _tmp) = setup_with_config(config).await;
 
-    let returned = session
+    let (returned, _removed) = session
         .append_messages(vec![plain_msg("u1"), plain_msg("u2"), plain_msg("u3")])
         .await
         .expect("落库失败");

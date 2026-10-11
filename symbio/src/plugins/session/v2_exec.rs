@@ -1039,6 +1039,10 @@ pub(crate) async fn execute_final_reply_turn(
     let wal = dir.join(super::paths::V2_WAL_FILE);
     let store = EventWalStore::open(&wal)
         .map_err(|e| PluginError::InternalError(format!("v2 WAL 打开失败：{e}")))?;
+    // **补落寄存的变更**（S2.7-c）：答话轮同样持写者令牌，故它也是一个落格窗口。
+    // 与 `execute_turn` 同序（在 `snapshot` 之前——本函数后面的 turn 号口径从切片折）。
+    // 复用的是**上面这个持令牌的 `store`**，不是另开一个（令牌是文件锁，见 `drain_parked`）。
+    super::v2_messages::drain_parked(&dir, &store);
     let snapshot = store.range(Seq::new(0));
     // turn 号口径与 [`execute_turn`] 同源（WAL 内既有 `user.message` 计数）——两处各写
     // 一套必然在「答话轮之后紧接着一个新轮」时错开一号。
@@ -1142,6 +1146,14 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         EventWalStore::open(&wal)
             .map_err(|e| PluginError::InternalError(format!("v2 WAL 打开失败：{e}")))?,
     );
+    // **补落寄存的变更**（S2.7-c）：一轮正在跑时它持着写者令牌，此刻来的编辑 /
+    // 截断拿不到令牌 ⇒ `NotTheWriter` ⇒ 该变更被寄存在进程内（`v2_messages::PARKED`）。
+    // 本函数是**持令牌的那一刻**，寄存的变更在此补落。
+    //
+    // 位置在 `snapshot` 之前：本函数后面的所有判据（turn 号 / 续写锚 / 幂等键）
+    // 都从 `store.range(...)` 折，补落改变了 live 段 ⇒ 必须在读切片之前落完，
+    // 否则本轮会站在一份**缺了那次编辑**的状态上做判断。
+    super::v2_messages::drain_parked(&dir, &store);
     let snapshot = store.range(Seq::new(0));
 
     // turn 号与续写锚点：
