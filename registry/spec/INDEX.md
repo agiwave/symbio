@@ -3,7 +3,7 @@
 > ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `registry/spec/*.md` 生成，请勿手改。**
 > 状态的唯一登记处是各规范文件本身，本页是投影。字段规范见 [SP-001](./SP-001.md)，原则与流程见 [14 · 登记与汇总机制](../../docs/plan/14-登记与汇总机制.md)。
 
-**计数**：active 27 · draft 0 · retired 0（共 27）
+**计数**：active 30 · draft 0 · retired 0（共 30）
 
 ## 现行规范（active）
 | 编号 | 规范 | 适用范围 | 判据 | 清除 | 取代 |
@@ -20,6 +20,9 @@
 | `D13-3` | 13 §0 纪律 3——不新增真相：先确认 owner，只链接不复述 | docs/plan/13-质量改进总纲.md §0 纪律 3（条文 owner 所在） | 人工 | — | — |
 | `D13-4` | 13 §0 纪律 4——出口可核对：守卫或脚本可核对的锚 | docs/plan/13-质量改进总纲.md §0 纪律 4（条文 owner 所在） | 人工 | — | — |
 | `D13-5` | 13 §0 纪律 5——豁免必有清除任务：无清除任务的豁免不许登记 | docs/plan/13-质量改进总纲.md §0 纪律 5（条文 owner 所在） | 人工 | — | — |
+| `S31-1` | 04 §3.1 死码承认台账口径——承认挂计划步 + 棘轮只许降 + 终局基线 8 | docs/plan/04-工程落地.md §3.1（22 步状态与死码清偿登记）；owner = scripts/dead-code-audit.mjs 的 R-002 段 | `scripts/dead-code-audit.mjs` | — | — |
+| `S31-2` | 04 §1.3 逐阶出口表的口径——用户可见出口必须是 session/stats 真存在的一列 | docs/plan/04-工程落地.md §1.3（逐阶出口 SLO 表）；owner = scripts/slo-exit-audit.mjs | `scripts/slo-exit-audit.mjs` | — | — |
+| `S31-3` | 04 §4 CI 断言清单口径——每条断言必须落成一条可执行判据，禁止生产调用点 | docs/plan/04-工程落地.md §4（CI 断言清单 C1–C29 / C-D2–C-D4）；owner = 各守卫与 verify 程序 | `scripts/no-direct-call-audit.mjs` | — | — |
 | `SP-001` | 登记条目 front-matter 与状态规范 | registry/ 下全部登记条目（task / spec 及后续新增的 kind） | 人工 | — | — |
 | `V4-1` | plan/README §4 验证纪律 1——每条声称对应一条可执行断言（零断言的程序不可能失败） | docs/plan/README.md §4 验证纪律 1（条文 owner 所在） | `scripts/gate.d/_shared.mjs` | — | — |
 | `V4-2` | plan/README §4 验证纪律 2——断言的输入不得包含结论 | docs/plan/README.md §4 验证纪律 2（条文 owner 所在） | 人工 | — | — |

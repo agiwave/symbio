@@ -378,14 +378,31 @@ function r002Reason(lines, i) {
 //    且批号必须真实存在于 `docs/plan/04-工程落地.md §3.1` 的清偿批次表。
 //    于是「一处死码 ↔ 一个计划步」双向可查：`grep "04 §3.1 批⑥"` = 该批待摘清单，
 //    表里的 `-N` = 该批完成判据；批次号以表为唯一来源，写不存在的批号等于没挂。
+//
+//    T-006 起两处**登记形态**（不迁事实）：① 本段的 3 条口径已登记为条目
+//    [`registry/spec/S31-1.md`](../registry/spec/S31-1.md)——批号**闭集**（`批①…批⑫` + `C 类`）
+//    随口径一并登记在该条目里；② 规则源改读 `S31-1`（批号词表），04 §3.1 只留指路。
+//    「批号必须真实存在」这条对账关系（防写不存在的批号）是价值所在，规则源跟着词表走。
 const PLAN_04_PATH = join(REPO, 'docs', 'plan', '04-工程落地.md')
-// 回归测试用 `--root=` 注入最小仓库，那里没有计划文档——**没有台账就不判这一条**
-// （否则 fixture 全红，守卫的测试自己成了噪音）；真仓里文档在，规则才生效。
+const S31_1_PATH = join(REPO, 'registry', 'spec', 'S31-1.md')
+// 回归测试用 `--root=` 注入最小仓库，那里没有条目——**没有台账就不判这一条**
+// （否则 fixture 全红，守卫的测试自己成了噪音）；真仓里条目在，规则才生效。
+//
+// 规则源优先读 `registry/spec/S31-1.md`（T-006 起的批号闭集 owner），
+// 读不到再退回 04 §3.1 的旧表（迁移期兼容 / fixture 无条目）。
+const S31_1 = existsSync(S31_1_PATH) ? readFileSync(S31_1_PATH, 'utf8') : null
 const PLAN_04 = existsSync(PLAN_04_PATH) ? readFileSync(PLAN_04_PATH, 'utf8') : null
-const planStart = PLAN_04 ? PLAN_04.indexOf('### 3.1') : -1
-const PLAN_04_SECTION = planStart >= 0 ? PLAN_04.slice(planStart) : PLAN_04
-const validBatches = PLAN_04_SECTION ? new Set([...PLAN_04_SECTION.matchAll(/\|\s*([①-⑳])\s*\|/g)].map((m) => `批${m[1]}`)) : new Set()
-const hasCClass = PLAN_04_SECTION ? /C\. 结构性承认/.test(PLAN_04_SECTION) : false
+// 批号是**写法**（`批①`…）；`S31-1` 写 `批① 摘 9`，04 §3.1 旧表写 `| ① |`——
+// 两种都认（规则源迁移期的兼容），故同时收「批+圈号」与「| 圈号 |」。
+const batchSource = S31_1 ?? PLAN_04
+const validBatches = batchSource
+  ? new Set([
+      ...[...batchSource.matchAll(/批([①-⑳])/g)].map((m) => `批${m[1]}`),
+      ...[...batchSource.matchAll(/\|\s*([①-⑳])\s*\|/g)].map((m) => `批${m[1]}`),
+    ])
+  : new Set()
+// `C 类` 是独立的承认档（无批号）：规则源里写 `C. 结构性承认` 或 `C 类` 都认。
+const hasCClass = batchSource ? /C\.?\s*(结构性承认|类)/.test(batchSource) : false
 const REF_RE = /04 §3\.1 (批[①-⑳]|C 类)/
 
 const r002NoReason = []
@@ -406,7 +423,7 @@ for (const [file, code] of rustCorpus) {
       r002NoReason.push(`${repoRel(file)}:${i + 1}`)
       continue
     }
-    if (!PLAN_04) continue // 无台账（fixture 仓库）⇒ 本条不判
+    if (!batchSource) continue // 无规则源（fixture 仓库）⇒ 本条不判
     const ref = reason.match(REF_RE)
     if (!ref) {
       r002BadPlan.push(`${repoRel(file)}:${i + 1}  理由未指向 04 §3.1：${reason.slice(0, 60)}`)
@@ -441,7 +458,7 @@ if (r002OverRatchet) {
 }
 if (!r002NoReason.length && !r002BadPlan.length && !r002OverRatchet) {
   console.log('  ✓ 标记均带理由并挂到计划步，数量未超基线')
-  if (PLAN_04) {
+  if (batchSource) {
     const tally = [...r002ByBatch].sort((a, b) => a[0].localeCompare(b[0], 'zh'))
     console.log(`  · 各清偿批待摘：${tally.map(([k, n]) => `${k} ${n}`).join(' · ')}`)
   }
