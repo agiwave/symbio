@@ -3,13 +3,12 @@
 > ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `registry/task/*.md` 生成，请勿手改。**
 > 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，原则与流程见 [14 · 登记与汇总机制](../../docs/plan/14-登记与汇总机制.md)。
 
-**计数**：☐ todo 6 · 🟡 doing 0 · ☑ done 44 · ❌ wont 0（共 50）
+**计数**：☐ todo 5 · 🟡 doing 0 · ☑ done 45 · ❌ wont 0（共 50）
 
 ## 待处理（按依赖顺序）
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
 | `C2` | `VdfsProvider` 的 match 样板在每一处生产实现里各写一遍 | — | C | — |
-| `P3b` | 反射档样本恒为零：两个出厂 `false` 的开关缺一不可 | — | P | P3 |
 | `S-end①` | 没有一份 prompt 形状基线，无法回答「结构化对模型是变好还是变坏」——没有它，任何「更有效」的判断都是凭感觉拍板 | — | S | — |
 | `S-end②` | `full` 没被真实会话负载压过：e2e 全绿只是必要条件，不是「跑过真实负载」 | — | S | P3 |
 | `T-004` | 散落决策清点与登记形态定案（决策类元素的接管边界） | later | meta | T-001 |
@@ -48,6 +47,7 @@
 | `P1` | 规划缺产品层：无目标用户、无用户任务，出口判据是「git diff 没改 F1–F6」而非任何用户可见指标 | P | `git log --grep=P1` |
 | `P2` | SLO 数字基于 mock 毫秒，唯一扫描口是 `#[ignore]` 测试 ⇒ 从未在 CI 出数 | P | `git log --grep=P2` |
 | `P3` | 反射 / 快路在出厂档位下结构上产生不了样本；照出的八个静默缺口已全部修完 | P | `git log --grep=P3` |
+| `P3b` | 反射档样本恒为零：两个出厂 `false` 的开关缺一不可 | P | 13 §2「P3b 未开工的理由」（只登记、不动默认值的定案）+ `config.rs` 的 `default_skill_compile_enabled` / `default_skill_fast_path` 两条成文理由 |
 | `P4` | 读数口「读得出」但「看不见」：`session/stats` 八列在生产前端与 CLI 零调用方 | P | `git log --grep=P4` |
 | `P5` | 召回率无评测集（`vec` 恒空、检索判据只吃 tag），但对应阶段状态记为已完成 | P | `git log --grep=P5` |
 | `S0` | 会话消息的事实源是 `SessionStore`，WAL 轮末入格但读侧不以它为准 ⇒「Store 是唯一原语」在生产路径上不成立 | S | `git log --grep=S0` |
