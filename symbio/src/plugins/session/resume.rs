@@ -150,7 +150,7 @@ async fn process_retry_turn(
         .cloned()
         .collect();
 
-    // 5. **顺序反转**（[ADR-054](../../../../docs/decisions/session.md) 决策 2）：
+    // 5. **顺序反转**（ADR-054 决策 2）：
     //    经唯一写入口 `apply` 落。删掉的是一**棵子树**（Failed Turn 及其全部子孙）⇒
     //    一次动作落**一条** `message.removed`（区间用 `ids` 表达，与
     //    `commands::truncate_messages` 同形——一个动作一个键）。不落格则主读路径切到
@@ -413,7 +413,7 @@ async fn process_tool_resume_action(
     }
     let updated_parent = tc.clone();
 
-    // 9. **顺序反转**（[ADR-054](../../../../docs/decisions/session.md) 决策 2）：
+    // 9. **顺序反转**（ADR-054 决策 2）：
     //    经唯一写入口 `apply` 落。这一步改了**三件事**：
     //    - **旧子没了** ⇒ `Removed`（不落格则重建后旧结果与新结果**同时存在**，
     //      同一次调用出现两条结果）；

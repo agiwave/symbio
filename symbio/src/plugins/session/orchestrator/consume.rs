@@ -20,7 +20,7 @@
 //! 「就地 return」的两条出口自行完成收尾，因此前端不会收到第二条 idle 事件。
 //!
 //! ⚠️ **事故敏感区**：`StopSignal` 配对语义与「中止不是失败」的结局判定曾出过事故
-//! （189 个 Turn 被误标 Failed），改动前先读 `docs/DECISIONS.md` 对应条目。
+//! （189 个 Turn 被误标 Failed），改动前先读 ADR-018 与相关条目。
 //!
 //! 可见性：`run_chat_loop_task` 被 `entry.rs` 的 `handle_chat_send_oneoff` 调用，
 //! 故标 `pub(super)`。

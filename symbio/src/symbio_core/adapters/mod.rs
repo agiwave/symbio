@@ -270,7 +270,7 @@ pub trait LlmAdapter: Send + Sync {
     fn model_id(&self) -> &str;
     /// 生成。`tok` 是闸门：没有 `FullModel` 就调不到这里。
     ///
-    /// **入参是消息数组而不是一段文本**（[ADR-048a](../../../../docs/decisions/session.md)）：
+    /// **入参是消息数组而不是一段文本**（ADR-048a）：
     /// 角色与正文分开，工具结果保持 `role: "tool"`——`ModelProvider::execute_turn` 的签名
     /// `(system_prompt, messages: &[ChatMessage], …)` 本来就是消息数组；拍成一段文本会让
     /// `role` 在 adapter 边界被拍平，模型收到的是散文而不是消息序列。

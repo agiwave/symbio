@@ -3,11 +3,12 @@
 > ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `registry/spec/*.md` 生成，请勿手改。**
 > 状态的唯一登记处是各规范文件本身，本页是投影。字段规范见 [SP-001](./SP-001.md)，原则与流程见 [14 · 登记与汇总机制](../../docs/plan/14-登记与汇总机制.md)。
 
-**计数**：active 30 · draft 0 · retired 0（共 30）
+**计数**：active 31 · draft 0 · retired 0（共 31）
 
 ## 现行规范（active）
 | 编号 | 规范 | 适用范围 | 判据 | 清除 | 取代 |
 |---|---|---|---|---|---|
+| `ADR-DOM` | ADR 的域分配——按「这条决策约束谁」归域，域是条目的可筛字段 | registry/adr/ 下全部决策条目的 domain 字段 | `scripts/registry-audit.mjs` | — | — |
 | `D08-1` | 08 §0 纪律 1——先实现 → 单测 → e2e（含 LLM mock）→ 全门禁，绿才提交 | docs/plan/08-分步实施计划.md §0 纪律 1（条文 owner 所在） | `scripts/gate.mjs` | — | — |
 | `D08-1b` | 08 §0 纪律 1b——跨批行为变更的中间态提交 | docs/plan/08-分步实施计划.md §0.3（条文 owner 所在） | 人工 | — | — |
 | `D08-1c` | 08 §0 纪律 1c——原子批次：多开关必须同翻 | docs/plan/08-分步实施计划.md §0.3b（条文 owner 所在） | 人工 | — | — |
@@ -23,7 +24,7 @@
 | `S31-1` | 04 §3.1 死码承认台账口径——承认挂计划步 + 棘轮只许降 + 终局基线 8 | docs/plan/04-工程落地.md §3.1（22 步状态与死码清偿登记）；owner = scripts/dead-code-audit.mjs 的 R-002 段 | `scripts/dead-code-audit.mjs` | — | — |
 | `S31-2` | 04 §1.3 逐阶出口表的口径——用户可见出口必须是 session/stats 真存在的一列 | docs/plan/04-工程落地.md §1.3（逐阶出口 SLO 表）；owner = scripts/slo-exit-audit.mjs | `scripts/slo-exit-audit.mjs` | — | — |
 | `S31-3` | 04 §4 CI 断言清单口径——每条断言必须落成一条可执行判据，禁止生产调用点 | docs/plan/04-工程落地.md §4（CI 断言清单 C1–C29 / C-D2–C-D4）；owner = 各守卫与 verify 程序 | `scripts/no-direct-call-audit.mjs` | — | — |
-| `SP-001` | 登记条目 front-matter 与状态规范 | registry/ 下全部登记条目（task / spec 及后续新增的 kind） | 人工 | — | — |
+| `SP-001` | 登记条目 front-matter 与状态规范 | registry/ 下全部登记条目（task / spec / adr 及后续新增的 kind） | 人工 | — | — |
 | `V4-1` | plan/README §4 验证纪律 1——每条声称对应一条可执行断言（零断言的程序不可能失败） | docs/plan/README.md §4 验证纪律 1（条文 owner 所在） | `scripts/gate.d/_shared.mjs` | — | — |
 | `V4-2` | plan/README §4 验证纪律 2——断言的输入不得包含结论 | docs/plan/README.md §4 验证纪律 2（条文 owner 所在） | 人工 | — | — |
 | `V4-3` | plan/README §4 验证纪律 3——每条断言配一个反向用例（改输入结论必须变） | docs/plan/README.md §4 验证纪律 3（条文 owner 所在） | `scripts/gate.d/_shared.mjs` | — | — |

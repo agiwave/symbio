@@ -275,7 +275,7 @@ impl SessionPlugin {
             }
         }
 
-        // **顺序反转**（[ADR-054](../../../../docs/decisions/session.md) 决策 2）：经唯一
+        // **顺序反转**（ADR-054 决策 2）：经唯一
         // 写入口 `apply` 落，按「改写已有 / 补写缺失」拆成两个原语——
         // - **断言**（`Edited`）：根 Turn 的 Failed + error、子节点定稿 Completed、
         //   `partial` 对同 id 节点的整条覆盖；
@@ -413,7 +413,7 @@ impl SessionPlugin {
             return 0;
         }
 
-        // **顺序反转**（[ADR-054](../../../../docs/decisions/session.md) 决策 2）：经唯一
+        // **顺序反转**（ADR-054 决策 2）：经唯一
         // 写入口 `apply` 落 `Born`。本函数只**补写**存储里没有的节点（已在存储的
         // 一律跳过，见上面的过滤），所以这里只有「诞生」一个原语。
         //

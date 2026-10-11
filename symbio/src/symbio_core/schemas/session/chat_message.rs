@@ -384,7 +384,7 @@ pub struct ResumeRequest {
 /// **实时面不在这个目录上**：一条消息的流式 = 它**自己那个地址**
 /// （`<id>/message/<mid>`）上的 `delta` 增量，目录只承载列表。把实时面挂在目录上
 /// 会让 `path` 的含义随帧类型漂移，且无法推广到第二类集合——理由见
-/// `docs/DECISIONS.md` 的 ADR-025 追记。
+/// ADR-025 追记。
 pub const SEG_MESSAGES: &str = "message";
 
 /// [`ChatMessage`] 的**逆投影**：VDFS 节点 + 正文 ⇒ 一条消息。

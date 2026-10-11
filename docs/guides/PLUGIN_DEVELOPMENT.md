@@ -175,7 +175,7 @@ async fn route(
 > `ChatMessage`；会话级告警走 `sink.warn(...)` 独立通道）。
 > 工具侧不再自己读信封里的键——`ExecEnv` 由分发点 `symbio_core::capability_invoke`
 > 从 `ctx` 装配（缺席 ⇒ 静默 / 永不中止，故 `route()` 直连调用照常可用）。
-> 理由与代价见 [ADR-020](../DECISIONS.md)、[ADR-021](../DECISIONS.md) 与
+> 理由与代价见 [ADR-020](../../registry/adr/INDEX.md)、[ADR-021](../../registry/adr/INDEX.md) 与
 > [`symbio/src/plugins/session/docs/core-loop.md`](../../symbio/src/plugins/session/docs/core-loop.md) §7、§9。
 
 ### traverse()
@@ -300,4 +300,4 @@ mod tests {
 
 ---
 
-> **维护原则**：插件接口变更必须保持向后兼容，并在 DECISIONS.md 记录原因。
+> **维护原则**：插件接口变更必须保持向后兼容，并在 `registry/adr/` 记一条 ADR。

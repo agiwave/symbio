@@ -1,4 +1,4 @@
-//! 生成档主体（`pattern = Reasoner`）与 prompt 的结构化渲染入口（[ADR-048a](../../../../../docs/decisions/session.md)）。
+//! 生成档主体（`pattern = Reasoner`）与 prompt 的结构化渲染入口（ADR-048a）。
 
 use crate::symbio_core::adapters::{AdapterError, FullModel, LlmAdapter};
 use crate::symbio_core::Event;
@@ -59,7 +59,7 @@ impl Reasoner {
         llm.generate_streaming(tok, &messages, sink).await
     }
 
-    /// prompt 的**唯一渲染点**（[ADR-048a](../../../../../docs/decisions/session.md)）：
+    /// prompt 的**唯一渲染点**（ADR-048a）：
     /// 事件切片 → 转写投影 → **消息数组**。
     ///
     /// prompt 从**转写投影**出（多轮带历史）——历史来自同一份事实源，不另存副本

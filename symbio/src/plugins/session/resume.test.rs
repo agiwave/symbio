@@ -77,7 +77,7 @@ fn aborted_resume_panics_on_out_of_range_index() {
     let _ = finalize_aborted_parent(&mut messages, 7, "tc-gone");
 }
 
-// ── 恢复路的**列表变更入格**（S2.7-b3 前置，[ADR-053](../../../../docs/decisions/session.md)）──
+// ── 恢复路的**列表变更入格**（S2.7-b3 前置，ADR-053）──
 //
 // ## 为什么需要这一批
 //

@@ -36,7 +36,7 @@
  */
 // 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns RG 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认）
-// @codes RG-001 RG-002 RG-003 RG-004 RG-005 RG-006 RG-007 RG-008 RG-009 RG-010 RG-011 RG-012 RG-013 RG-014 RG-015 RG-016
+// @codes RG-001 RG-002 RG-003 RG-004 RG-005 RG-006 RG-007 RG-008 RG-009 RG-010 RG-011 RG-012 RG-013 RG-014 RG-015 RG-016 RG-017 RG-018 RG-019
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -85,13 +85,61 @@ export const KINDS = {
     closedStatus: 'active',
     requiresDepsDone: ['active'],
   },
+  adr: {
+    label: '架构决策',
+    required: ['adr', 'impl', 'domain'],
+    optional: ['reason', 'supersedes'],
+    sections: ['决策'],
+    refFields: [],
+    refSections: [],
+    statusRules: {
+      active: { require: [], forbid: ['reason'] },
+      superseded: { require: ['reason'], forbid: [] },
+      withdrawn: { require: ['reason'], forbid: [] },
+    },
+    closedStatus: 'active',
+    requiresDepsDone: [],
+  },
 }
+
+/**
+ * `adr` 的**域**闭集（原来住 `docs/DECISIONS.md §0.1` 的「按约束谁归域」表）。
+ *
+ * 域回答「这条决策**约束谁**」——它决定 README 该往哪指、读者该去哪找。
+ * 五册合流进 registry 后，册不再是边界，域退化成**条目上的一个字段**：
+ * 过滤 / 分组从「翻到哪一册」变成「按字段筛」，而字段是机读的、可判的。
+ * 闭集由 RG-019 执行——新增域必须同批进这张表与 SP-001，不能随手写。
+ */
+export const ADR_DOMAIN = {
+  平台基座: '插件架构 / 路由 / 注册 / 执行接口 / symbio_core 准入 / 身份 / 生命周期 / 对象创建',
+  会话与执行: '编排 / 上下文 / 转写节点与实时面 / 输入 / 响应性',
+  资源与地址: 'VdfsProvider / 读侧成本 / 变更信封 / 新建与导入 / 地址归属',
+  模型与协议: '多协议适配 / TLS / 本地嵌入 / SSE 解析',
+  智能体与记忆: 'agent 目录宿主 / 记忆的两个作用域',
+}
+
+/**
+ * `adr` 的**落地进展**词表（与 `status` 正交的第二个字段）。
+ *
+ * `status` 回答「这条决策**还算不算数**」（规范合法性），`impl` 回答「**做到哪一步**」
+ * （落地进展）——两者此前被压在同一列状态里（「现行（含未完成项）」「已接受 · 部分实施」），
+ * 于是「一条现行决策只落地了一半」这种最常见的状态在机读面根本表达不出来。
+ * 拆开之后：`status` 走 `KINDS.adr.statusRules` 的闭集，`impl` 走这张表（RG-017）。
+ *
+ * 词的语义**按序单调**：`planned` < `partial` < `done`——渲染按此序分组，
+ * 断言「`done` ⇒ 必有落地证据」时也读这张表。
+ */
+export const ADR_IMPL = { planned: '未实施', partial: '部分实施', done: '已落地' }
+/** `impl` 之外的终结词：决策被否决 / 从未实施便退出——不进单调序，单列。 */
+export const ADR_IMPL_OTHER = { none: '未落地' }
 
 /** SP-001 字段表必须**恰好**覆盖的键集（= 公共 + 各 kind 的并集）。 */
 export const ALL_KEYS = [
   ...COMMON_REQUIRED,
   ...COMMON_OPTIONAL,
-  ...new Set([...KINDS.task.required, ...KINDS.task.optional, ...KINDS.spec.required, ...KINDS.spec.optional]),
+  ...new Set(
+    Object.values(KINDS).flatMap((cfg) => [...cfg.required, ...cfg.optional]),
+  ),
 ].sort()
 
 // 编号必须能当文件名：字母开头，其后为字母数字 / . _ - 与 Unicode 字母数字。
@@ -243,6 +291,11 @@ export function isEmpty(v) {
   return v == null || (typeof v === 'string' && !v.trim()) || (Array.isArray(v) && v.length === 0)
 }
 
+/** 某 kind 的「闭环 / 成立」状态词（取代链与 deps 都用它判「还算不算数」）。 */
+export function cfgClosedStatus(kind) {
+  return KINDS[kind]?.closedStatus
+}
+
 /** 取 `## <name>` 小节正文（到下一个二级标题为止）；不存在返回 ''。 */
 export function sectionOf(body, name) {
   const m = body.match(new RegExp(`^##\\s+${name}\\s*$`, 'm'))
@@ -350,6 +403,25 @@ export function auditEntries(entries, root) {
     if (!isEmpty(meta.prio) && !(typeof meta.prio === 'string' && meta.prio in PRIO)) {
       out.push(`${e.rel}：RG-014 prio 不在词表（${Object.keys(PRIO).join(' / ')}）：${JSON.stringify(meta.prio)}`)
     }
+    // RG-017 adr 的落地进展词表（与 status 正交：status 管「算不算数」，impl 管「做到哪一步」）
+    if (e.kind === 'adr' && !isEmpty(meta.impl)) {
+      const implWords = { ...ADR_IMPL, ...ADR_IMPL_OTHER }
+      if (!(typeof meta.impl === 'string' && meta.impl in implWords)) {
+        out.push(
+          `${e.rel}：RG-017 impl 不在词表（${Object.keys(implWords).join(' / ')}）：${JSON.stringify(meta.impl)}` +
+            '——status 管规范合法性、impl 管落地进展，两者不得混成同一字段',
+        )
+      }
+    }
+    // RG-019 adr 的域闭集（原来住 DECISIONS.md §0.1 的分册表；合流后按字段过滤）
+    if (e.kind === 'adr' && !isEmpty(meta.domain)) {
+      if (!(typeof meta.domain === 'string' && meta.domain in ADR_DOMAIN)) {
+        out.push(
+          `${e.rel}：RG-019 domain 不在闭集（${Object.keys(ADR_DOMAIN).join(' / ')}）：${JSON.stringify(meta.domain)}` +
+            '——域是「这条决策约束谁」，新增域须同批进 ADR_DOMAIN 与 SP-001',
+        )
+      }
+    }
     // RG-006 deps 形状 / 自指 / 重复（存在性与成环在跨文件段判）
     if ('deps' in meta && !isEmpty(meta.deps) && !Array.isArray(meta.deps)) {
       out.push(`${e.rel}：RG-006 deps 必须是 \`[]\` / \`[A, B]\` / 块列表，读到：${JSON.stringify(meta.deps)}`)
@@ -425,8 +497,10 @@ export function auditEntries(entries, root) {
   }
 
   // ---- RG-015：spec 的 supersedes（显式取代链——冲突靠数据消解，不靠优先级裁决） ----
+  // 取代关系只在规范之间：`spec` 取代 `spec`、`adr` 取代 `adr`（决策也有被推翻的形态）。
+  // 跨 kind 取代（spec 取代 adr）没有语义——规范是「必须成立的条文」，决策是「为什么这样设计」。
   for (const e of entries) {
-    if (!e.meta || e.kind !== 'spec' || !('supersedes' in e.meta)) continue
+    if (!e.meta || !['spec', 'adr'].includes(e.kind) || !('supersedes' in e.meta)) continue
     const v = e.meta.supersedes
     if (isEmpty(v)) continue
     if (!Array.isArray(v)) {
@@ -446,24 +520,29 @@ export function auditEntries(entries, root) {
         out.push(`${e.rel}：RG-015 supersedes 指到不存在的编号 \`${t}\``)
         continue
       }
-      if (target.kind !== 'spec') {
-        out.push(`${e.rel}：RG-015 supersedes 指向 ${target.kind}（\`${t}\`）——取代关系只在规范之间`)
+      if (target.kind !== e.kind) {
+        out.push(`${e.rel}：RG-015 supersedes 指向 ${target.kind}（\`${t}\`）——取代关系只在同 kind 之间（spec↔spec / adr↔adr）`)
         continue
       }
-      if (e.meta.status === 'active' && target.meta && target.meta.status === 'active') {
+      if (e.meta.status === cfgClosedStatus(e.kind) && target.meta && target.meta.status === cfgClosedStatus(target.kind)) {
         out.push(
-          `${e.rel}：RG-015 status=active 的规范不得取代另一条 active 规范（\`${t}\`）` +
-            '——两条现行规范同框即矛盾未消解，先把旧条 retired',        )
+          `RG-015 status=${e.meta.status} 的${KINDS[e.kind].label}不得取代另一条 ${target.meta.status} ` +
+            `${KINDS[target.kind].label}（\`${t}\`）——两条同框即矛盾未消解，先把旧条改状态`,
+        )
       }
     }
   }
   {
-    const specIds = [...byId.values()].filter((x) => x.kind === 'spec').map((x) => x.meta.id)
+    const supIds = [...byId.values()]
+      .filter((x) => x.kind === 'spec' || x.kind === 'adr')
+      .map((x) => x.meta.id)
     const supOf = (id) => {
       const m = byId.get(id).meta
-      return Array.isArray(m.supersedes) ? m.supersedes.filter((t) => t !== id && byId.has(t)) : []
+      return Array.isArray(m.supersedes)
+        ? m.supersedes.filter((t) => t !== id && byId.has(t) && byId.get(t).kind === byId.get(id).kind)
+        : []
     }
-    const cycle = findCycle(specIds, supOf)
+    const cycle = findCycle(supIds, supOf)
     if (cycle) out.push(`RG-015 supersedes 成环：${cycle.join(' -> ')}（取代链必须有尽头）`)
   }
 
@@ -520,6 +599,20 @@ export function auditEntries(entries, root) {
           )
         }
       }
+    }
+  }
+
+  // ---- RG-018：adr 的 `adr` 字段与 id 两面对账 ----
+  // `id` 是登记身份（`ADR-048a`），`adr` 是 ADR 序号本身（`048a`）——两者必须只差
+  // 一个 `ADR-` 前缀（存在的理由：文件名可改名 / 可手抄错，`adr` 字段会与
+  // 取代链、渲染列一起被机器读，它是序号的**数据面**，必须与身份严格对账）。
+  for (const e of entries) {
+    if (!e.meta || e.kind !== 'adr') continue
+    if (isEmpty(e.meta.adr)) continue // 必填性由 RG-002 判
+    const num = e.meta.adr
+    const idNum = String(e.meta.id ?? '').replace(/^ADR-/, '')
+    if (num !== idNum) {
+      out.push(`${e.rel}：RG-018 adr=\`${num}\` 与 id \`${e.meta.id}\` 不一致（adr 应等于 id 去掉 \`ADR-\` 前缀：\`${idNum}\`）`)
     }
   }
 
@@ -582,6 +675,12 @@ const HEADER_SPEC =
   '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `registry/spec/*.md` 生成，请勿手改。**\n' +
   '> 状态的唯一登记处是各规范文件本身，本页是投影。字段规范见 [SP-001](./SP-001.md)，' +
   '原则与流程见 [14 · 登记与汇总机制](../../docs/plan/14-登记与汇总机制.md)。\n'
+
+const HEADER_ADR =
+  '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `registry/adr/*.md` 生成，请勿手改。**\n' +
+  '> **ADR 的唯一真相源是 `registry/adr/`**：每条 ADR 的正文（决策 / 理由 / 被否决的方案 /\n' +
+  '> 后果与不变量）住它自己的 `## 决策` 小节，规范合法性（`status`）与落地进展（`impl`）住 front-matter。\n' +
+  '> 字段规范见 [SP-001](../spec/SP-001.md)，机制见 [14 · 登记与汇总机制](../../docs/plan/14-登记与汇总机制.md)。\n'
 
 function table(header, rows) {
   if (rows.length === 0) return '（无）'
@@ -668,7 +767,79 @@ function renderSpecIndex(allEntries) {
   return lines.join('\n')
 }
 
-const RENDERERS = { task: renderTaskIndex, spec: renderSpecIndex }
+/** adr 的落地进展列：`impl` 的中文标签（词表见 `ADR_IMPL` / `ADR_IMPL_OTHER`）。 */
+function implCell(e) {
+  const v = e.meta.impl
+  if (typeof v !== 'string' || !v) return '—'
+  return ADR_IMPL[v] ?? ADR_IMPL_OTHER[v] ?? v
+}
+
+/**
+ * `adr` 汇总页。
+ *
+ * 与前两个 kind 不同的一点：**状态分两组**——`status` 是规范合法性（决定分组），
+ * `impl` 是落地进展（决定组内列）。这正是「一条现行决策只落地了一半」能在机读面
+ * 表达出来的原因；把它压回单列就会退化成自由文本。
+ *
+ * 每条另带 `domain`（域）——五册合流后，域从「翻到哪一册」退化为可筛字段。
+ */
+function renderAdrIndex(allEntries) {
+  const mine = allEntries
+    .filter((e) => e.kind === 'adr')
+    .slice()
+    .sort((a, b) => (a.meta.id < b.meta.id ? -1 : 1))
+  const count = (s) => mine.filter((e) => e.meta.status === s).length
+  const domainOf = (e) => cell(e.meta.domain)
+  const lines = [
+    '# 架构决策登记索引（自动生成）',
+    '',
+    HEADER_ADR,
+    `**计数**：active ${count('active')} · superseded ${count('superseded')} · withdrawn ${count('withdrawn')}（共 ${mine.length}）`,
+    '',
+    '## 现行决策（active）',
+    table(
+      ['编号', '决策', '域', '落地', '取代'],
+      mine
+        .filter((e) => e.meta.status === 'active')
+        .map((e) => [`\`${e.meta.id}\``, cell(e.meta.title), domainOf(e), implCell(e), supCell(e)]),
+    ),
+    '',
+    '## 已被取代（superseded）',
+    table(
+      ['编号', '决策', '域', '理由', '取代'],
+      mine
+        .filter((e) => e.meta.status === 'superseded')
+        .map((e) => [`\`${e.meta.id}\``, cell(e.meta.title), domainOf(e), cell(e.meta.reason), supCell(e)]),
+    ),
+    '',
+    '## 已回退 / 未落地（withdrawn）',
+    table(
+      ['编号', '决策', '理由'],
+      mine.filter((e) => e.meta.status === 'withdrawn').map((e) => [`\`${e.meta.id}\``, cell(e.meta.title), cell(e.meta.reason)]),
+    ),
+    '',
+    '## 按域分组',
+    '',
+    ...Object.keys(ADR_DOMAIN).flatMap((dom) => {
+      const rows = mine.filter((e) => e.meta.domain === dom)
+      if (rows.length === 0) return []
+      return [
+        `### ${dom}（${rows.length}）`,
+        '',
+        `> ${ADR_DOMAIN[dom]}`,
+        '',
+        table(
+          ['编号', '决策', '状态', '落地'],
+          rows.map((e) => [`\`${e.meta.id}\``, cell(e.meta.title), cell(e.meta.status), implCell(e)]),
+        ),
+        '',
+      ]
+    }),
+  ]
+  return lines.join('\n')
+}
+
+const RENDERERS = { task: renderTaskIndex, spec: renderSpecIndex, adr: renderAdrIndex }
 
 /** 某 kind 的汇总页全文（确定性：同输入同输出，无时间戳）。 */
 export function renderKindIndex(kind, allEntries) {

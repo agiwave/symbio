@@ -50,6 +50,16 @@ test('失效链接 → 失败（默认即失败，不再需要 --strict）', () 
   assert.match(r.stdout, /nope\.md/)
 })
 
+test('registry/ 也是扫描根：ADR 条目里的失效链接同样判（2026-10-11 ADR 迁入 registry）', () => {
+  const r = audit({
+    'docs/a.md': '# A\n',
+    'registry/adr/ADR-001.md': '# ADR-001\n\n见 [兄弟](./ADR-999.md)。\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /registry\/adr\/ADR-001\.md/)
+  assert.match(r.stdout, /ADR-999\.md/)
+})
+
 test('失效链接：带锚点也要判（先把 # 后段剥掉再查文件）', () => {
   const r = audit({ 'docs/a.md': '[去这儿](./nope.md#section)\n' })
   assert.equal(r.status, 1)
@@ -307,8 +317,8 @@ test('D-006：双根解析——相对当前文件命中即通过', () => {
 test('D-006：双根解析——相对仓库根命中即通过（模块 README 引用系统文档的写法）', () => {
   assert.equal(
     audit({
-      'symbio/src/plugins/foo/README.md': '# Foo\n\n见 `docs/DECISIONS.md`。\n',
-      'docs/DECISIONS.md': '# 决策\n',
+      'symbio/src/plugins/foo/README.md': '# Foo\n\n见 `registry/adr/INDEX.md`。\n',
+      'registry/adr/INDEX.md': '# 索引\n',
     }).status,
     0,
     '相对仓库根应命中'
@@ -386,7 +396,7 @@ test('D-007：锚点指向真实标题 → 通过', () => {
 })
 
 test('D-007：slug 算法钉住真实形状——加粗 / 反引号 / 全角括号 / —— / + 全被丢，空格逐个转 -', () => {
-  // 标题取自 `docs/decisions/core.md` ADR-020 的真实形状：`EventSink`（出）后**无空格**，
+  // 标题取自 `registry/adr/INDEX.md` ADR-020 的真实形状：`EventSink`（出）后**无空格**，
   // 而 `+ ` 那个空格才产生连字符 ⇒ `eventsink出-abortsignal入`。
   const heading =
     '## ADR-020: 执行期与传输层**分离**——`EventSink`（出）+ `AbortSignal`（入）取代 `PluginChannel` 的双职责'

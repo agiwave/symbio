@@ -166,7 +166,7 @@ export interface VdfsAccess {
  * 「怎么把它造出来」不在这里——**导入整包是详情页上的一条动作**
  * （`VDFS_ACTION_IMPORT`，载荷见 `DetailAction.pack`），与「导出」「删除」同级。
  * 曾经它带 `source` / `import` 两个字段承载导入，那让一个呈现结构承担了操作语义，
- * 也让 `VdfsProvider` 上多出一个系统级接口（见 `docs/DECISIONS.md` ADR-029）。
+ * 也让 `VdfsProvider` 上多出一个系统级接口（见 ADR-029）。
  *
  * ## 两条独立的键：`ext` 与 `node_ext`
  *
@@ -243,7 +243,7 @@ export interface VdfsNode {
    *
    * 一个目录接受的是**一类**东西——「可新建两类」是伪命题：那其实是同一个类型的
    * 两种落盘路径，而第二条（整包导入）是详情页上的一条**动作**，不是第二种类型
-   * （见 {@link VdfsNewType} 与 `docs/DECISIONS.md` ADR-029）。
+   * （见 {@link VdfsNewType} 与 ADR-029）。
    */
   new_type?: VdfsNewType
   /** 场景扩展字段（flatten 到顶层） */

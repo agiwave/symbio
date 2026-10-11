@@ -21,7 +21,7 @@
  *   而 D-001 报「失效 0 条」已经很久了。**守卫报 0 不等于没有坏链，只等于它看不见。**
  *
  * D-006 的两条防误报设计（缺任一条都会让规则被豁免喂到失效）：
- *   ① **双根解析**：`docs/DECISIONS.md` 这类路径在模块 README 里是**相对仓库根**
+ *   ① **双根解析**：`registry/adr/INDEX.md` 这类路径在模块 README 里是**相对仓库根**
  *      写的，在 `docs/` 内部又是相对当前文件——先试文件目录、再试仓库根，任一命中即通过。
  *      实测把失败数从 34 降到 9。
  *   ② **只判定「不含 `./` `../` 且至少含一个 `/`」的路径**：无斜杠的（`` `README.md` ``）
@@ -46,7 +46,7 @@
  *     故只在确需时用；行内豁免覆盖绝大多数真实场景。
  *
  * D-008 存在的理由（**编号引用**这一类的首条规则）：2026-10-08 复核时发现
- *   `docs/plan/04` §3.2 与 `docs/decisions/session.md` 的 ADR-047 都写着「R1」，
+ *   `docs/plan/04` §3.2 与 [`ADR-047`](../registry/adr/ADR-047.md) 都写着「R1」，
  *   而本仓的 `R1` 有**两个**含义——`04` 风险登记表的 R1（从未写过可运行系统代码）
  *   与从 `feat` 分支并入的 `docs/plan/06` §10.2 的 R1（「主会话不持有工具」的架构定案）。
  *   后者那篇文档**不在本仓**：引用悬空，却撞进了前者的编号空间。
@@ -133,7 +133,7 @@ const repoRoot = rootArg ? path.resolve(rootArg.slice(7)) : defaultRoot
 // "没加 --strict 所以没拦住"是预期行为。
 
 /** 扫描根（相对 repoRoot）；目录递归，文件直接检查 */
-const ROOTS = ['docs', 'symbio/src', 'tauri', 'cli', 'examples']
+const ROOTS = ['docs', 'symbio/src', 'tauri', 'cli', 'examples', 'registry']
 
 /** 根目录下的散落 Markdown */
 const ROOT_FILES = ['README.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md']
@@ -308,7 +308,7 @@ function isJudgeableBacktickPath(t) {
  *
  * 为什么必须双根：本仓两种写法都合法且在用——
  *   · `docs/` 内部互相引用走相对（`./vdfs.md`）
- *   · 模块 README 引用系统文档走仓库根（`docs/DECISIONS.md`）
+ *   · 模块 README 引用系统文档走仓库根（`docs/CURRENT.md`）
  * 只认一种会把另一种全部误报（实测：单根时 34 条失败，双根后 9 条）。
  */
 function backtickPathExists(fromFile, t) {
@@ -555,8 +555,13 @@ function check(file) {
 for (const rel of ROOTS) {
   const dir = path.join(repoRoot, rel)
   if (!fs.existsSync(dir)) {
-    console.error(`找不到扫描根：${dir}`)
-    process.exit(1)
+    // `docs` 是本守卫的根基（活文档都在其下），缺了即配置错位——报错。
+    // 其余根（模块文档 / registry）在极小夹具里可以缺席，跳过即可（不再「一缺即 exit」）。
+    if (rel === 'docs') {
+      console.error(`找不到扫描根：${dir}`)
+      process.exit(1)
+    }
+    continue
   }
   walk(dir)
 }
@@ -647,7 +652,7 @@ for (const { rel, lines } of oversized) {
 }
 if (oversized.length > 0) {
   console.log('\n提示：超限即「内容不属于这里」或「该拆篇」的信号，按 docs/README.md 的 owner 表处置：')
-  console.log('      · 模块内部机制 → 该模块 README.md；· 论证与被否决的方案 → DECISIONS.md（只留 ADR 引用）')
+  console.log('      · 模块内部机制 → 该模块 README.md；· 论证与被否决的方案 → registry/adr/（只留 ADR 引用）')
   console.log('      · 协议线上形状 → architecture/PROTOCOLS.md；· 列表类事实 → CURRENT.md（自动生成，不手抄）')
   console.log('      · 实例 / 范例 → 由被举例的那个模块的 README 持有')
   console.log('      本条**不给豁免**：拆分方向由 owner 表给出，不需要逐篇解释。')

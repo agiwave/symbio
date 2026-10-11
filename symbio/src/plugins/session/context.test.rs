@@ -273,7 +273,7 @@ fn test_prepare_compression_rejects_when_no_split() {
 // ── 水位提醒（chat_loop 直接调用，审计 §4.2 补测）──────────────────────────
 //
 // 本文件**不再**有"本地兜底压缩"的测试：`emergency_tail_compression` 已随
-// "压缩失败不得裁剪历史"一并删除（见本文件末节与 `docs/DECISIONS.md` ADR-018）。
+// "压缩失败不得裁剪历史"一并删除（见本文件末节与 ADR-018）。
 
 /// 长度可预测的中文消息（CJK ≈ 1 token/字 + 8 框架开销）。
 fn cn_msg(text: &str) -> ChatMessage {

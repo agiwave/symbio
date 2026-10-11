@@ -167,7 +167,7 @@ pub(crate) struct TurnState {
     /// 它随请求复位（`TurnState` 即请求作用域）：`progress_max_per_turn` 说的是
     /// "这一轮最多打断几次"，跨轮累加会让第二次请求一开始就没有配额。
     pub(crate) progress_reports: u32,
-    /// 本轮模型调用的**实测累计耗时**（毫秒，[ADR-044](../../../../docs/decisions/core.md)：
+    /// 本轮模型调用的**实测累计耗时**（毫秒，ADR-044：
     /// 实测与判据同源）。在「LLM 调用唯一发起处」用 `Instant` 累计——含工具轮
     /// 的多次请求；随轮次收束写进事件网格的 `cost_ms`。
     pub(crate) model_elapsed_ms: u64,

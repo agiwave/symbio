@@ -149,7 +149,7 @@ pub const EVENT_ASSISTANT_PROGRESS: &str = "chat.assistant.progress";
 /// 落在 `artifact × asserted`（网格坐标见 [plan/01 §6](../../../../docs/plan/01-核心架构.md)）。
 pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
 
-// ── 消息列表变更的格子（S2.7，[ADR-053](../../../../docs/decisions/session.md#adr-053-消息的变更即事实编辑与删除入格压缩走快照) / [ADR-054](../../../../docs/decisions/session.md)）──
+// ── 消息列表变更的格子（S2.7，ADR-053 / ADR-054）──
 //
 // 「消息列表被改过」也是**发生过什么**。在轨 S 之前，编辑 / 截断只重写
 // `messages.json`，事实源里一个字都没有 ⇒ 主读路径一旦切到「从 WAL 重建」，
@@ -178,13 +178,13 @@ pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
 /// 不是任何一轮的产出，也不属于任何工具调用。
 ///
 /// 少了这一格，那类节点在事实源里**从来没有出生过** ⇒ 切主读路径之后它们整条消失
-/// （[ADR-054](../../../../docs/decisions/session.md) 决策 1 的「诞生」原语）。
+/// （ADR-054 决策 1 的「诞生」原语）。
 ///
 /// ## 边界：它是「没有语义承载」的那一格
 ///
 /// 判据是**否定的**——只有当一条节点的诞生**找不到别的格**时才用它。承载着对话内容的
 /// 节点（用户发言 / 助手正文 / 工具结果）必须由它们自己的事实落，否则同一条节点
-/// 有两个 owner（[ADR-049](../../../../docs/decisions/session.md#adr-049-wal-是会话唯一事实源sessionstore-降为缓存轨-s-的起点) 理由 1）。
+/// 有两个 owner（ADR-049 理由 1）。
 /// 因此本格的节点是**界面文本**类（`prompt_fidelity` 的 `excluded_from_prompt`），
 /// 不进模型请求包。
 ///
@@ -226,7 +226,7 @@ pub const EVENT_MESSAGE_REMOVED: &str = "message.removed";
 ///
 /// ## 为什么是 `message × progressed` 而不是 `system`
 ///
-/// 用 [ADR-053](../../../../docs/decisions/session.md) 自己的判据：双源对账
+/// 用 ADR-053 自己的判据：双源对账
 /// （`session.reconciled`，已随 S2.7-a 退役）曾归 `system`，理由是「它说的不是
 /// 『这个会话发生了什么』，而是『两个读源此刻是否一致』」——诊断。而压缩**确实发生过**：
 /// 一段历史被摘要取代、列表从此读作快照那一份。那是

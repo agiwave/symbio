@@ -2,7 +2,7 @@
 //! 两个存储原语（[`PersistentChatSession::append_messages`] /
 //! [`PersistentChatSession::replace_all`]）。
 //!
-//! 顺序反转（[ADR-054](../../../../docs/decisions/session.md) 决策 2）在这里落地：
+//! 顺序反转（ADR-054 决策 2）在这里落地：
 //! `apply` **先落事实**、再折列表、再写缓存——内存列表是事实的一个渲染，
 //! 不是「正在被编辑的真相」。事实与缓存从此不可能分开（决策 3 的类型强制）。
 //!
@@ -122,9 +122,9 @@ pub(super) fn assign_seq(messages: &mut [ChatMessage], base: i64) -> i64 {
     cursor
 }
 
-/// 一次**消息列表变更**（[ADR-054](../../../../docs/decisions/session.md) 决策 2 + 3）。
+/// 一次**消息列表变更**（ADR-054 决策 2 + 3）。
 ///
-/// 这是 [ADR-054](../../../../docs/decisions/session.md) 的**闭集原语**落到类型上：
+/// 这是 ADR-054 的**闭集原语**落到类型上：
 /// 消息列表的变更只有「诞生 / 断言 / 关闭」三种节点级原语（第四种「取代」是列表级的
 /// 压缩快照，见 [`PersistentChatSession::replace_all`]——它的事实 owner 不同）。
 ///
@@ -166,7 +166,7 @@ pub(crate) enum Carrier {
 }
 
 impl PersistentChatSession {
-    /// 一次消息列表变更的**唯一写入口**（[ADR-054](../../../../docs/decisions/session.md)
+    /// 一次消息列表变更的**唯一写入口**（ADR-054
     /// 决策 2 的「顺序反转」）。
     ///
     /// 顺序是**先落事实、再折列表、再写缓存**。这与旧形态（`读列表 → 改 Vec →
@@ -512,8 +512,8 @@ pub(super) fn ensure_durable_states(
 /// 双重校验），且"淘汰旧轮"删掉的常是最新存档——职责错位，故收敛为纯节点裁剪。
 ///
 /// 返回**被删节点 id**（顺序 = 原列表顺序）——调用方据此落 `message.removed` 事实。
-/// 这是 [S2.7-b](../../../../../registry/task/S2.7-b.md) 的承重面：裁剪是**列表变更**，
-/// 而列表变更必须入格（[ADR-054](../../../../docs/decisions/session.md)
+/// 这是 S2.7-b 的承重面：裁剪是**列表变更**，
+/// 而列表变更必须入格（ADR-054
 /// 决策 1 的「关闭」原语）。裁剪改了列表却不落事实 ⇒ 切主读后**被裁节点复活**
 /// ——WAL 里它们还在，只是缓存里少了（而缓存已经不再是真源）。
 pub fn prune_historical_tool_calls(

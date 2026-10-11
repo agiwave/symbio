@@ -4,7 +4,7 @@
 //!
 //! **没有可切换的存储后端**：会话只有一种落盘布局，临时会话只是「不持久化」。
 //! 为什么不做多后端选型（以及当初那个形状被推翻的两个前提），见
-//! [ADR-008](docs/DECISIONS.md)——此处不复述。
+//! ADR-008——此处不复述。
 //!
 //! 差异收成构造时的一次选型：
 //!
@@ -519,7 +519,7 @@ fn parse_or_self_heal<T: serde::de::DeserializeOwned>(content: &str) -> Option<T
     }
 }
 
-/// 读消息——**真源是 `v2-events.wal`**（[ADR-049](../../../../docs/decisions/session.md#adr-049-wal-是会话唯一事实源sessionstore-降为缓存轨-s-的起点)）：
+/// 读消息——**真源是 `v2-events.wal`**（ADR-049）：
 /// 有 WAL 就从它重建；WAL 不在才回落 `messages.json` / 元数据内联（v1 时代
 /// 的遗留布局——那批会话的事实从未入格，文件是它们的唯一记录）。
 async fn load_messages(dir: &Path, meta: &SessionMetaFile) -> Vec<ChatMessage> {

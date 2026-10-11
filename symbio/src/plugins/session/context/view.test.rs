@@ -590,7 +590,7 @@ fn test_build_request_view_prepends_readyset_section() {
     assert_eq!(msgs.len(), 3, "注入不得回写存储");
 }
 
-/// 委派者真源段落落 **index 2**（[ADR-047](../../../../docs/decisions/session.md)）。
+/// 委派者真源段落落 **index 2**（ADR-047）。
 ///
 /// 三个位置**一起**断言：只测「委派段存在」的话，把它插在末尾、插在 index 0，
 /// 或者干脆让记忆段把它顶掉，全都能过——而段位置就是模型读到的上下文次序，

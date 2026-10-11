@@ -5,7 +5,7 @@
 > [`../README.md`](../README.md)（六大压缩策略）；节点状态与流的词汇见
 > [`./node-state-streaming.md`](./node-state-streaming.md)；模块拆分与符号落点见
 > [`./module-layout.md`](./module-layout.md)；「为什么这样设计」见
-> [`docs/DECISIONS.md`](../../../../../docs/DECISIONS.md)。
+> [`registry/adr/INDEX.md`](../../../../../registry/adr/INDEX.md)。
 > 代码位置一律按**符号名**检索——模块拆分后行号会漂移。
 
 ---
@@ -397,7 +397,7 @@ pub async fn run_chat_loop(
 ## 5. 不得改动的机制（不变量）
 
 - **压缩四层**（L0 守卫 / L1 自动 / L2 主动 / 输入超限预判）——预判层只跳过注定失败的
-  请求，**不本地截断历史**（[`docs/DECISIONS.md`](../../../../../docs/DECISIONS.md) ADR-018）；
+  请求，**不本地截断历史**（[`registry/adr/ADR-018.md`](../../../../../registry/adr/ADR-018.md)）；
 - **`compress_with_snapshot_core` 单一实现**（被动与主动共用内核）；
 - **`StopSignal` 幂等 + RAII 兜底** 与 **`WorkingGuard` / `AbortGuard`** 的收敛保证（§6）；
 - **`finalize_assistant_turn` 的 reasoning-only 分支**、**Turn 子树完整性守卫**
@@ -412,7 +412,7 @@ pub async fn run_chat_loop(
 
 > 本节描述**宿主层与执行层之间的协议**：`EventSink`（出）与 `AbortSignal`（入）
 > 是两个语义单一的原语；`PluginChannel` 只作**纯跨进程传输**，不承担执行期协议。
-> 决策与理由见 [`docs/DECISIONS.md`](../../../../../docs/DECISIONS.md) ADR-020。
+> 决策与理由见 [`registry/adr/ADR-020.md`](../../../../../registry/adr/ADR-020.md)。
 
 ### 6.1 原语
 
@@ -578,7 +578,7 @@ Capability::execute(args, env, ctx)      -> Result<Value, PluginError>
 ModelProvider::execute_turn(inputs, env) -> Result<TurnOutput, PluginError>
 ```
 
-决策与理由见 [`docs/DECISIONS.md`](../../../../../docs/DECISIONS.md) ADR-021；
+决策与理由见 [`registry/adr/ADR-021.md`](../../../../../registry/adr/ADR-021.md)；
 差别只在 `ctx`——工具**被路由、被注册**故需信封，模型执行不被路由故没有，不强行抹平。
 
 ### 9.2 唯一「拆信封」的地方
@@ -606,7 +606,7 @@ payload）⇒ `Value::Null`，仍由工具自己给出「缺少必填参数」�
 
 ## 10. SSE 增量解析
 
-> 契约拆成「完整行」与「未结束行」两个方法，协议知识留在协议层；决策与理由见 [`docs/DECISIONS.md`](../../../../../docs/DECISIONS.md) ADR-022。
+> 契约拆成「完整行」与「未结束行」两个方法，协议知识留在协议层；决策与理由见 [`registry/adr/ADR-022.md`](../../../../../registry/adr/ADR-022.md)。
 
 ### 10.1 形状
 
@@ -677,7 +677,7 @@ gemini           ["candidates","content","parts","text"]                -> 内�
 
 > 工具名怎么发出去、怎么认回来，以及工具结果怎么读。三件事，共同点：它们都是
 > 跨插件 / 跨层的**约定**，需要写成契约。名字归属的准入规则见
-> [`docs/DECISIONS.md`](../../../../../docs/DECISIONS.md) ADR-023。
+> [`registry/adr/ADR-023.md`](../../../../../registry/adr/ADR-023.md)。
 
 ### 11.1 名字的线上形态：投影 + 查表，不反演
 
@@ -702,7 +702,7 @@ pub fn resolve<'a>(wire: &str, known: impl IntoIterator<Item = &'a str>) -> Opti
 
 **为什么在 core**：`capability_to_wire`（`model` 出）与 `resolve`（`session` 入）是同一份契约的两半，
 两个插件互相不可见，core 是唯一共同可见处——准入规则见
-[`docs/DECISIONS.md`](../../../../../docs/DECISIONS.md) ADR-023。
+[`registry/adr/ADR-023.md`](../../../../../registry/adr/ADR-023.md)。
 
 ### 11.2 工具结果：顺序即约定
 

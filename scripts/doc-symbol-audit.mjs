@@ -37,9 +37,9 @@
  *   `register_option_field`。
  *
  * 豁免（都对应「文档说的不是现状」）：
- *   1. `docs/DECISIONS.md`、`docs/archive/`、`docs/decisions/` 整体排除——
- *      ADR（索引与分域正文）与归档都是历史快照，当时的符号指认不随代码
- *      改名回改（回改反而篡改历史）；
+ *   1. `docs/DECISIONS.md`、`docs/archive/`、`docs/decisions/`、`registry/adr/`
+ *      整体排除——ADR（索引与分域正文，自 2026-10-11 起正文迁入 `registry/adr/`）
+ *      与归档都是历史快照，当时的符号指认不随代码改名回改（回改反而篡改历史）；
  *   2. 行内含历史词（已删除 / 已退役 / 已废弃 / deprecated / 取代 / 判为删除）⇒ 跳过，
  *      如迁移表里「已删除」的行、台账里「`X` 判为删除」的行；
  *   3. 承认通道：行内 `<!-- doc-symbol-allow: <理由> -->`，**理由不可为空**
@@ -91,8 +91,10 @@ const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'tmp', '.workbuddy-
 /** 整文件排除（历史快照，指认不随代码改名回改） */
 const EXCLUDE_MD = new Set(['docs/DECISIONS.md'])
 /** 整目录排除：ADR 正文分册与索引同源——ADR 记的是**当时**的设计，
- *  其中被指认的符号可能早已改名 / 删除，按现行代码判它会永久误报。 */
-const EXCLUDE_MD_DIRS = ['docs/archive', 'docs/decisions']
+ *  其中被指认的符号可能早已改名 / 删除，按现行代码判它会永久误报。
+ *  `registry/adr` 同理：ADR 正文自 2026-10-11 起迁入 registry 单文档（原
+ *  `docs/decisions/` 五册），记的仍是**当时**的设计——同一个理由，同一个排除。 */
+const EXCLUDE_MD_DIRS = ['docs/archive', 'docs/decisions', 'registry/adr']
 /** 行内历史词：这行说的是过去，符号现在不存在是正常的。
  *  「判为删除 / 已判：删除」是台账（04 §3.1）对被删符号的固定说法——它和「已删除」
  *  是同一类叙述：这行明说那个名字已经不在了，按现行代码判它必然是误红。 */

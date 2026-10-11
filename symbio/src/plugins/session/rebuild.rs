@@ -1,4 +1,4 @@
-//! 重建引擎 —— 事件网格 → `ChatMessage` 节点树（[ADR-049](../../../../docs/decisions/session.md#adr-049-wal-是会话唯一事实源sessionstore-降为缓存轨-s-的起点) 的读侧真源）。
+//! 重建引擎 —— 事件网格 → `ChatMessage` 节点树（ADR-049 的读侧真源）。
 //!
 //! ## 为什么需要它
 //!
@@ -33,14 +33,14 @@
 //! （把 `status` 算在内）当场失效。**重建不得"改进"形状**：改进属写侧，重建只负责
 //! 把发生过的事原样折回来（ADR-049 的零行为变更）。
 //!
-//! ## 变更格不产节点（[ADR-053](../../../../docs/decisions/session.md)）
+//! ## 变更格不产节点（ADR-053）
 //!
 //! `message.edited` / `message.removed` 不在上表里，因为它们**没有自己的节点**——
 //! 它们说的是「已有的某个节点现在读作 Y / 已经没了」，因此不经过 `nodes_of`，
 //! 由 [`rebuild`] 主循环**先一步**按 id 折叠（表见 [`rebuild`] 的文档）。
 //! 把它们塞进 `nodes_of` 会得到「一次编辑多出一条节点」，而那正是折叠要防的事。
 //!
-//! `message.added`（[ADR-054](../../../../docs/decisions/session.md)）恰恰相反：它是
+//! `message.added`（ADR-054）恰恰相反：它是
 //! **诞生格**，载荷里每条消息自带完整形状（写侧 `v2_messages::added` 直给），所以
 //! **每条都产节点**、经 `nodes_of` 的 `added_nodes` 逐条收下。边界同样封闭：只准
 //! 「无其他承载方的节点」（压缩记录等界面文本）搭这格；带对话内容的节点必须由
@@ -93,7 +93,7 @@ use super::message_build::{llm_build_text_node, llm_build_tool_call_node, llm_bu
 /// 出现的那一份——收束载荷的 `tool_calls[]` 与 `artifact.added` 记的是同一批调用，
 /// 只认先到的那条（它们形状相同，但结果正文只归 `artifact.added`，见模块文档）。
 ///
-/// ## 折叠：不只是追加（S2.7-b1，[ADR-053](../../../../docs/decisions/session.md)）
+/// ## 折叠：不只是追加（S2.7-b1，ADR-053）
 ///
 /// 事实网格里除了「追加了什么」，还有「**改过什么**」——`message.edited` /
 /// `message.removed`。它们是**变更格**，语义不是「加一条节点」而是：

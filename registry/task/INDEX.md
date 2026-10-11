@@ -3,7 +3,7 @@
 > ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `registry/task/*.md` 生成，请勿手改。**
 > 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，原则与流程见 [14 · 登记与汇总机制](../../docs/plan/14-登记与汇总机制.md)。
 
-**计数**：☐ todo 4 · 🟡 doing 0 · ☑ done 48 · ❌ wont 0（共 52）
+**计数**：☐ todo 4 · 🟡 doing 0 · ☑ done 49 · ❌ wont 0（共 53）
 
 ## 待处理（按依赖顺序）
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
@@ -64,6 +64,7 @@
 | `T-004` | 散落决策清点与登记形态定案（决策类元素的接管边界） | meta | 清点结论：唯一散落处 = `docs/design/third-party-plugin-spec.md §10`（6 条待确认决策）⇒ 登记为 T-007；形态定案写回 14 §6；验证：registry-audit 零违规 |
 | `T-005` | 接管 13 §2.1 豁免登记表（豁免 → spec + clears 字段） | meta | c167e00（clears + RG-016 机制扩展与 5 条豁免迁移；验证：77 条零违规 · 回归 24/24 · gate 58/58） |
 | `T-006` | 接管 04 §3.1 工具台账（先分清守卫投影行与人维护登记行） | meta | S22（22 步状态）+ S31-1…3（三张守卫表的投影口径）；04 §3.1 已收敛为指路索引；验证：registry-audit 零违规 · gate docs 阶段全绿 |
+| `T-008` | ADR 接管 registry（新开 adr kind：索引与正文一并迁入，删除 DECISIONS.md 与 decisions/*.md） | meta | adr kind（KINDS.adr + renderAdrIndex + RG-017/RG-018/RG-019）；registry/adr/ADR-001…054 共 55 条（44 条并入正文、11 条索引-only）；DECISIONS.md 与五个分册已删除；验证：registry-audit 零违规 · registry-audit.test.mjs 绿 · doc-link 全绿 · doc-symbol 全绿 · gate --only=docs,facts 绿 |
 | `T-002` | 接管 13 §1 问题登记（状态表格迁成任务单文档） | meta | 提交 82d7f9f（44 条目 + §1 收敛 + 9 处锚点引用改写；docs+facts 门禁 58/58） |
 | `W1` | core 根出口豁免账本 18 条，大半条目在补一个口径的洞（「core 内另有消费方，审计只数跨出 core 的那一个」） | W | `27922b8` |
 | `W2` | 其余四条豁免通道（doc-link / dead-code / panic / color）的清除任务挂在不存在的批次上 | W | `7eabd54` |

@@ -1,4 +1,4 @@
-//! 消息变更事实的写方（S2.7-b1，[ADR-053](../../../../docs/decisions/session.md)）。
+//! 消息变更事实的写方（S2.7-b1，ADR-053）。
 //!
 //! 「编辑一条消息」「截断一段消息」在轨 S 之前只重写 `messages.json`——事实源里
 //! 一个字都没有。后果是**正确性**的：主读路径一旦切到「从 WAL 重建」，被截断的
@@ -209,7 +209,7 @@ pub(crate) fn edited(session_dir: &Path, msg: &ChatMessage) {
 ///
 /// 只服务「**没有别的格可搭车**」的节点（压缩记录节点是最典型的一个）——承载着
 /// 对话内容的节点（用户发言 / 助手正文 / 工具结果）必须由它们自己的事实落，
-/// 否则同一条节点有两个 owner（[ADR-049](../../../../docs/decisions/session.md#adr-049-wal-是会话唯一事实源sessionstore-降为缓存轨-s-的起点) 理由 1）。
+/// 否则同一条节点有两个 owner（ADR-049 理由 1）。
 ///
 /// 空列表不落格：「没有节点诞生」不该在事实源上留下痕迹，与 [`removed`] 同一条判据。
 pub(crate) fn added(session_dir: &Path, msgs: &[ChatMessage]) {

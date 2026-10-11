@@ -31,7 +31,7 @@
 //! 它的**写入者是全体插件**（在 `traverse` 里注册字段），安装它的宿主只是其中之一，
 //! 故不隶属于任何插件；契约（trait）在 core，无策略的内存实现在实现层。
 //! **收集管线**（`collect_options` / `collect_capabilities`）只有 session 一个消费方，
-//! 按「依赖方数量」判据（[ADR-023](../../../../docs/DECISIONS.md)）下沉到
+//! 按「依赖方数量」判据（ADR-023）下沉到
 //! `plugins/session/capabilities.rs`——两者是同一件事的两半，同处一地。
 //!
 //! ```text

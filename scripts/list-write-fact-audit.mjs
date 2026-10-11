@@ -2,7 +2,7 @@
 /**
  * list-write-fact-audit — 列表写原语的**结构性**判定
  *
- * [ADR-054](docs/decisions/session.md) 的目标态**已经落地**：`MessageChange` +
+ * ADR-054 的目标态**已经落地**：`MessageChange` +
  * `apply`（`chat_session/write.rs`）是消息列表的唯一写入口，顺序反转成
  * 「先落事实，列表是折叠出来的」，「改了列表却没落事实」由**类型**表达不出来。
  * 因此本守卫从过渡期的「就地登记」（v1，指令行 + pending 棘轮）升级为**结构性判定**

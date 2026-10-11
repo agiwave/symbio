@@ -28,7 +28,7 @@ use super::words::{VDFS_KIND_DIR, VDFS_KIND_FILE, VDFS_STATUS_ACTIVE};
 /// 现在只留**类型**这一层：本结构描述「这类东西落成后长什么样」，由 provider
 /// 自持。**导入不是类型的一种**，它是详情页上的一条动作
 /// （[`VDFS_ACTION_IMPORT`](super::VDFS_ACTION_IMPORT)），与 [`VDFS_ACTION_EXPORT`](super::VDFS_ACTION_EXPORT) / `delete` 同级——
-/// 见 `docs/DECISIONS.md` ADR-029。
+/// 见 ADR-029。
 ///
 /// ## 两条独立的键：`ext` 与 `node_ext`
 ///

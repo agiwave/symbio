@@ -29,6 +29,7 @@ let caseNo = 0
 
 const TASK_BODY = '## 内容\n说明。\n\n## 处理过程\n- 待补\n'
 const SPEC_BODY = '## 规范\n条文。\n\n## 判据\n人工核对。\n'
+const ADR_BODY = '## 决策\n一句话结论。\n\n## 状态\n- status：现行。\n'
 
 /** front-matter 序列化（夹具写文件用）。 */
 function fm(meta) {
@@ -55,6 +56,25 @@ function specDoc(id, over = {}) {
   return (
     fm({ kind: 'spec', id, title: `${id} 规范`, status: 'active', created: '2026-10-11', scope: '夹具', deps: [], ...meta }) +
     (body ?? SPEC_BODY)
+  )
+}
+
+/** adr 夹具：`adr` 序号默认从 id 去前缀推得（正向用例不该因手抄不对账）。 */
+function adrDoc(id, over = {}) {
+  const { body, ...meta } = over
+  return (
+    fm({
+      kind: 'adr',
+      id,
+      title: `${id} 决策`,
+      status: 'active',
+      impl: 'done',
+      domain: '平台基座',
+      created: '2026-10-11',
+      adr: id.replace(/^ADR-/, ''),
+      deps: [],
+      ...meta,
+    }) + (body ?? ADR_BODY)
   )
 }
 
@@ -235,7 +255,6 @@ test('RG-015：supersedes 目标不存在 / 指向 task / 自身 / 双 active / 
     'spec/SP-020.md': specDoc('SP-020'),
   })
   expectOnly(errsOf(bothActive), /RG-015 status=active 的规范不得取代另一条 active 规范/)
-
   const retiredTarget = caseRoot({
     'spec/SP-010.md': specDoc('SP-010', { supersedes: ['SP-020'] }),
     'spec/SP-020.md': specDoc('SP-020', { status: 'retired', reason: '被 SP-010 取代' }),
@@ -273,8 +292,79 @@ test('RG-016：clears 指到不存在 / 指向非 task 变红；指向开放 tas
   assert.match(idx, /\| 人工 \| T-060 \| — \|/, 'clears 编号渲染进清除列')
 })
 
-// ================= 状态矩阵（RG-007） =================
+// ================= adr kind（RG-017 / RG-018） =================
+//
+// `adr` 是与 `task` / `spec` 并列的第三个 kind，存在的核心理由只有一条：
+// **把「这条决策还算不算数」（`status`）与「做到哪一步」（`impl`）拆成两个字段**。
+// 所以它必须有独立的回归——退化成一列自由文本就等于这个 kind 白开了。
 
+test('RG-017：adr 的 impl 词表外变红；合法值放行（反向）', () => {
+  const bad = caseRoot({ 'adr/ADR-100.md': adrDoc('ADR-100', { impl: '半成品' }) })
+  expectOnly(errsOf(bad), /RG-017 impl 不在词表/)
+
+  const ok = caseRoot({ 'adr/ADR-101.md': adrDoc('ADR-101', { impl: 'partial' }) })
+  assert.deepEqual(errsOf(ok), [], 'impl=partial 是合法词 ⇒ 放行（现行但只落地了一半）')
+})
+
+test('RG-017：adr 状态机（active / superseded / withdrawn）——superseded 必填 reason', () => {
+  const badStatus = caseRoot({ 'adr/ADR-110.md': adrDoc('ADR-110', { status: 'retired', reason: 'x' }) })
+  expectOnly(errsOf(badStatus), /RG-004 status="retired" 不在 adr 的状态词/)
+
+  const noReason = caseRoot({ 'adr/ADR-111.md': adrDoc('ADR-111', { status: 'superseded' }) })
+  expectOnly(errsOf(noReason), /RG-007 status=superseded 必须填 `reason`/)
+
+  const withdrawn = caseRoot({ 'adr/ADR-112.md': adrDoc('ADR-112', { status: 'withdrawn', reason: '已回退' }) })
+  assert.deepEqual(errsOf(withdrawn), [], 'withdrawn + reason ⇒ 放行（反向）')
+})
+
+test('RG-018：adr 字段与 id 不一致变红；一致则放行（反向）', () => {
+  const idMismatch = caseRoot({ 'adr/ADR-120.md': adrDoc('ADR-120', { adr: '999' }) })
+  expectOnly(errsOf(idMismatch), /RG-018 adr=`999` 与 id `ADR-120` 不一致/)
+
+  const ok = caseRoot({ 'adr/ADR-122.md': adrDoc('ADR-122') })
+  assert.deepEqual(errsOf(ok), [], 'id ↔ adr 对上 ⇒ 放行（反向）')
+})
+
+test('adr 渲染：status 分组、impl 成列（「现行但只落地一半」能在机读面表达）', () => {
+  const base = caseRoot({
+    'adr/ADR-200.md': adrDoc('ADR-200', { impl: 'partial', title: '半落地的现行决策' }),
+    'adr/ADR-201.md': adrDoc('ADR-201', { status: 'superseded', reason: '被 ADR-200 取代' }),
+  })
+  const { entries } = loadEntries(path.join(base, 'registry'), base)
+  const a = renderKindIndex('adr', entries)
+  assert.equal(a, renderKindIndex('adr', entries), '同输入逐字节同输出')
+  assert.match(a, /现行决策（active）/)
+  assert.match(a, /已被取代（superseded）/)
+  assert.match(a, /\| 编号 \| 决策 \| 域 \| 落地 \| 取代 \|/, 'active 表含「落地」列')
+  assert.match(a, /ADR-200.*部分实施/, 'impl=partial 渲染成「部分实施」')
+  assert.match(a, /计数.*active 1 · superseded 1/)
+})
+
+test('RG-015（adr）：取代链方向属于**取代者**——旧条 superseded 不写 supersedes', () => {
+  // 方向语义：`supersedes` 是新条指认「我取代了谁」。这条回归钉的是**语义方向**——
+  // 把 supersedes 写到被取代的旧条上是本仓真实出过的错（ADR-014/016 互指反了）。
+  const ok = caseRoot({
+    'adr/ADR-300.md': adrDoc('ADR-300', { supersedes: ['ADR-301'] }),
+    'adr/ADR-301.md': adrDoc('ADR-301', { status: 'superseded', reason: '被 ADR-300 取代' }),
+  })
+  assert.deepEqual(errsOf(ok), [], '新条 supersedes 旧条（旧条 superseded）⇒ 合法')
+
+  // 反向：两条都 active 时 supersedes 仍是未消解的矛盾（与 spec 同判）
+  const bothActive = caseRoot({
+    'adr/ADR-302.md': adrDoc('ADR-302', { supersedes: ['ADR-303'] }),
+    'adr/ADR-303.md': adrDoc('ADR-303'),
+  })
+  expectOnly(errsOf(bothActive), /RG-015 status=active 的架构决策不得取代另一条 active 架构决策/)
+
+  // 跨 kind 取代没有语义
+  const crossKind = caseRoot({
+    'adr/ADR-304.md': adrDoc('ADR-304', { supersedes: ['SP-010'] }),
+    'spec/SP-010.md': specDoc('SP-010'),
+  })
+  expectOnly(errsOf(crossKind), /RG-015 supersedes 指向 spec（`SP-010`）——取代关系只在同 kind 之间/)
+})
+
+// ================= 状态矩阵（RG-007） =================
 test('RG-007：done 必须有 evidence、不得留 signal；wont / retired 必须有 reason', () => {
   const noEvidence = caseRoot({ 'task/T-001.md': taskDoc('T-001', { status: 'done' }) })
   expectOnly(errsOf(noEvidence), /RG-007 status=done 必须填 `evidence`/)
@@ -438,8 +528,10 @@ test('本仓当前登记自洽，且真的读到了条目', () => {
   const { entries } = loadEntries(path.join(repoRoot, 'registry'), repoRoot)
   const tasks = entries.filter((e) => e.kind === 'task')
   const specs = entries.filter((e) => e.kind === 'spec')
+  const adrs = entries.filter((e) => e.kind === 'adr')
   assert.ok(tasks.length >= 3, `只读到 ${tasks.length} 个任务——装载口径或种子有问题`)
   assert.ok(specs.length >= 1, `只读到 ${specs.length} 个规范——SP-001 装载不到`)
+  assert.ok(adrs.length >= 1, `只读到 ${adrs.length} 个决策——adr kind 装载不到`)
   assert.ok(
     specs.some((e) => e.meta.id === 'SP-001'),
     'SP-001 必须在（RG-011 的对账对象）',

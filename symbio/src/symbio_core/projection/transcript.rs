@@ -290,7 +290,7 @@ fn meta_flag(m: &ChatMessage, key: &str) -> bool {
 
 /// `transcript` 投影：从事件切片读出对话转写。
 ///
-/// ## 折叠：不只是追加（S2.7-b1，[ADR-053](../../../../docs/decisions/session.md)）
+/// ## 折叠：不只是追加（S2.7-b1，ADR-053）
 ///
 /// 事实网格里除了「追加了什么」，还有「**改过什么**」——`message.edited` /
 /// `message.removed`。少了这一段，一次截断在 prompt 面上等于**没发生过**：模型
@@ -502,7 +502,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                         event_tool_result_node_id(e),
                     );
                 }
-                // 诞生格（`message × opened`，[ADR-054](../../../../docs/decisions/session.md)
+                // 诞生格（`message × opened`，ADR-054
                 // 决策 1）：**没有别的格可搭车**的节点在这里出生——今天只有压缩记录节点
                 // （「已压缩上下文」那张卡）。
                 //

@@ -2,7 +2,7 @@
 
 > 状态：**现行规范**（域划分、判据与落点）
 > 范围：`symbio/src/plugins/session/`
-> 判据的「为什么」与被否决的方案见 [ADR-039](../../../../../docs/DECISIONS.md)
+> 判据的「为什么」与被否决的方案见 [ADR-039](../../../../../registry/adr/INDEX.md)
 > （`session` 按域重组）；文件清单与行数属**结构事实**，由代码生成，
 > 见 [CURRENT.md](../../../../../docs/CURRENT.md)，本文件不抄。
 > 相关：[`./core-loop.md`](./core-loop.md)（主循环结构与收口点）、
@@ -54,7 +54,7 @@
 | 请求构造 | `message_build.rs` | 发给 LLM 的请求消息数组与工具结果节点构造，及挂在用户消息 `prompt` 上的时间上下文 |
 | 会话恢复 | `resume.rs` | 会话恢复与历史重写 |
 | 运行态 | `active.rs` | 进程内运行态注册表：待消费请求、请求 id、中止信号、变更订阅 |
-| 派生事实 | `v2_facts.rs` | 轮末把派生事实（承诺 / 任务表 / 熔断）与学习产物（记忆三段 + 技能观测 / 编译）写进 per-session 的 v2 WAL——写方只有 `record_derived` / `record_learning`，调用点都在 `v2_exec`——[ADR-048](../../../../../docs/decisions/session.md) |
+| 派生事实 | `v2_facts.rs` | 轮末把派生事实（承诺 / 任务表 / 熔断）与学习产物（记忆三段 + 技能观测 / 编译）写进 per-session 的 v2 WAL——写方只有 `record_derived` / `record_learning`，调用点都在 `v2_exec`——[ADR-048](../../../../../registry/adr/INDEX.md) |
 
 ### 1.3 支撑单件（一文件一职责）
 

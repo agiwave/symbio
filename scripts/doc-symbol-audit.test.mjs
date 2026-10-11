@@ -218,6 +218,15 @@ test('docs/decisions/ 整目录排除：ADR 分域正文与索引同源（exit 0
   assert.equal(r.status, 0, r.stdout)
 })
 
+test('registry/adr/ 整目录排除：ADR 正文迁入 registry 后仍是历史快照（exit 0）', () => {
+  const r = audit({
+    ...RS,
+    'registry/adr/ADR-001.md': '当年引入 `symbio_core::GONE_FN` 又删掉了。\n',
+    'README.md': '正常文档。\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
 test('docs/archive/ 整目录排除：归档是历史快照（exit 0）', () => {
   const r = audit({
     ...RS,

@@ -72,11 +72,11 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 | 协议线上形状（帧 / 载荷 / 通道 / 线格式） | [architecture/PROTOCOLS.md](./architecture/PROTOCOLS.md) | — |
 | 系统拓扑（谁挂在谁下面） | [SYSTEM_MAP.md](./SYSTEM_MAP.md) | 其它图只画自己那一层 |
 | 排障链路（一次请求经过哪些代码） | [architecture/DATA_FLOW.md](./architecture/DATA_FLOW.md) | — |
-| 为什么这样设计（含被否决的方案与理由） | [DECISIONS.md](./DECISIONS.md)（**索引**）+ `decisions/*.md`（**分域正文**） | 其它文档只引用 ADR 编号 |
+| 为什么这样设计（含被否决的方案与理由） | [`registry/adr/`](../registry/adr/) 下的单文档（**每条 ADR 正文 + 状态**）；索引与域分组见 [adr/INDEX.md](../registry/adr/INDEX.md)（生成） | 其它文档只引用 ADR 编号 |
 | 模块内部机制 | 该模块 `README.md` | 系统级文档不复述 |
 | 模块深度设计与不变量 | 该模块 `docs/` | — |
 | **目标架构（v2）与迁移计划** | [plan/README.md](./plan/README.md) | 其余文档只引用，不复述取舍 |
-| 条目级登记（任务 / 规范的编号、状态、优先级、依赖、处理过程） | `registry/<kind>/` 下的**单文档**（机制见 [plan/14](./plan/14-登记与汇总机制.md)；汇总页由脚本生成） | 各处不手抄条目清单，引用 INDEX |
+| 条目级登记（任务 / 规范 / 决策的编号、状态、优先级、依赖、处理过程） | `registry/<kind>/` 下的**单文档**（机制见 [plan/14](./plan/14-登记与汇总机制.md)；汇总页由脚本生成） | 各处不手抄条目清单，引用 INDEX |
 | 变更历史（改了什么、何时改的） | `git log` | **现行文档不写变更史**（见下） |
 | 一次性评审 / 迁移记录 / 体检报告 | `docs/archive/` | 活文档不保留过程日志 |
 
@@ -86,7 +86,7 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 
 1. **现行文档只描述「现在是什么」**，不写「曾经是什么、后来改成了什么」。
    这类追溯一律走 `git log -S<符号>` / `git log --grep=<词>`；需要保留「为什么否决 A 选 B」的
-   结论，就写进 `DECISIONS.md` 的一条 ADR——**那才是它的 owner**。
+   结论，就写进 `registry/adr/` 的一条 ADR——**那才是它的 owner**。
    判据：一条叙述如果随每次重构都要跟着改，它就不该活在现行文档里。
 2. **代码注释与文档各有边界**：注释写「读这个文件需要知道的不变量与陷阱」，
    文档写「机制与取舍」。**注释不复述文档，文档不复述注释**（签名、方法清单、字段表以代码为准）。
@@ -122,7 +122,7 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 | 快速上手 | [QUICK_START.md](./guides/QUICK_START.md) |
 | 开发新插件 | [PLUGIN_DEVELOPMENT.md](./guides/PLUGIN_DEVELOPMENT.md) |
 | 排查问题 | [TROUBLESHOOTING.md](./guides/TROUBLESHOOTING.md) |
-| 了解设计决策 | [DECISIONS.md](./DECISIONS.md)（索引；正文按域在 `decisions/`） |
+| 了解设计决策 | [registry/adr/INDEX.md](../registry/adr/INDEX.md)（按域分组；正文即条目本身） |
 | 了解**目标架构（v2）**与分步迁移计划 | [plan/README.md](./plan/README.md)（**先读其 §0.1：v2 是本仓的目标架构**） |
 | 查「某条约定写在哪」 | `node scripts/doc-find.mjs <词>`（全仓 md + Rust 文档注释检索） |
 | 查**任务 / 规范登记**与待办 | `node scripts/registry-board.mjs`（条目在仓根 `registry/`，规则见 [plan/14](./plan/14-登记与汇总机制.md)） |
@@ -135,7 +135,6 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 | 位置 | 放什么 |
 |------|--------|
 | `docs/`（本目录） | 系统级跨模块文档；`CURRENT.md` 自动生成、勿手改 |
-| `docs/decisions/` | **ADR 正文分册**（按域拆）——索引与域分配规则在 [DECISIONS.md](./DECISIONS.md) |
 | `docs/architecture/` | 架构总览 / 协议形状 / 排障链路 |
 | `docs/reference/` | 路由 / 错误码 / 配置的权威参考页 |
 | `docs/guides/` | 上手 / 插件开发 / 排障 |

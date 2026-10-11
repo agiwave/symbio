@@ -2,7 +2,7 @@
 //!
 //! 对应源文件: `local.rs`
 //!
-//! 数值对齐验证是迁移 spike 阶段的实测结论（见 `docs/DECISIONS.md` ADR-016）：
+//! 数值对齐验证是迁移 spike 阶段的实测结论（见 ADR-016）：
 //! 参考管线（fastembed / tract）的依赖本体已移除，无法在单测中再跑。
 
 use super::*;

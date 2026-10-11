@@ -41,7 +41,7 @@
 //!   离线构建会静默退化为「不链接」，到链接期才报 `undefined symbol: OrtGetApiBase`。
 //! - 分词继续用 `tokenizers` + `fancy-regex`（纯 Rust 正则后端，无 onig）。
 //!
-//! 完整的取舍与实测数据见 `docs/DECISIONS.md` ADR-016。
+//! 完整的取舍与实测数据见 ADR-016。
 //!
 //! ## 数值基线
 //!

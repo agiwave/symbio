@@ -203,7 +203,7 @@ const CONTEXT_NUDGE_TEXT: &str =
 ///    单独存在时各自在 0）。
 ///    它给的是 `readyset` 投影的**候选集**，不是替模型决定做哪件事——选哪一个是
 ///    执行者的选择（`projection::readyset` 模块头的边界）。
-/// 7. 委派者真源段（[ADR-047](../../../docs/decisions/session.md)）：
+/// 7. 委派者真源段（ADR-047）：
 ///    `delegate_section` 非空时插一条 `meta.kind = delegate_context`，落 **index 2**。
 ///    插入次序是判据的一部分：本段在 `ready_section` **之前**插，于是记忆 0 /
 ///    就绪 1 / 委派 2（记忆段最后插的那个 0 会把两者依次下推）；顺序反了会把

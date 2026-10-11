@@ -63,7 +63,7 @@ pub(crate) struct TierRow {
     pub samples: usize,
 }
 
-/// 会话级读数（四列同源，[ADR-044](../../../docs/decisions/core.md)）。
+/// 会话级读数（四列同源，ADR-044）。
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct SessionStats {
     /// 会话 id。
