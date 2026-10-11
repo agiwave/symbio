@@ -275,7 +275,6 @@ impl SessionPlugin {
             }
         }
 
-        // list-write-fact persist_failure: pending — 就地改写了根 Turn 与子节点的状态，并可能**新增** `partial` 节点；按 ADR-054：状态改写 = `message.edited`、新节点 = `message.added`。
         // **顺序反转**（[ADR-054](../../../../docs/decisions/session.md) 决策 2）：经唯一
         // 写入口 `apply` 落，按「改写已有 / 补写缺失」拆成两个原语——
         // - **断言**（`Edited`）：根 Turn 的 Failed + error、子节点定稿 Completed、
