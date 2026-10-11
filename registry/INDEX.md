@@ -6,5 +6,5 @@
 
 | 类别 | 条目数 | 状态分布 | 汇总页 |
 |---|---|---|---|
-| [task · 任务](./task/INDEX.md) | 3 | todo 2 · doing 1 · done 0 · wont 0 | [task/INDEX.md](./task/INDEX.md) |
+| [task · 任务](./task/INDEX.md) | 3 | todo 2 · doing 0 · done 1 · wont 0 | [task/INDEX.md](./task/INDEX.md) |
 | [spec · 规范](./spec/INDEX.md) | 1 | draft 0 · active 1 · retired 0 | [spec/INDEX.md](./spec/INDEX.md) |
