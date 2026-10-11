@@ -603,7 +603,7 @@ WAL 原生记账（`v2_exec` 落格、`session/stats` 读格），但**读侧**�
 
 ## ADR-054: 消息列表的变更收成**闭集原语**——顺序反转（事实先落）与类型强制
 
-**状态**：已接受 · **部分实施**（2026-10-11 · 守卫已落地；顺序反转与类型强制随 S2.7-b3 推进）
+**状态**：已接受 · **类型强制已落地**（2026-10-12 · `MessageChange` + `apply` 收口全部 14 处写入口；守卫升级为结构判定）
 
 **背景**：[ADR-053](#adr-053-消息的变更即事实编辑与删除入格压缩走快照) 把「编辑 / 删除 / 压缩」
 逐个补进事实网格。补到 S2.7-b3 前置时出现一个信号：**每遇到一个新场景，就发现「这里也没有事实」**
@@ -710,3 +710,24 @@ WAL 原生记账（`v2_exec` 落格、`session/stats` 读格），但**读侧**�
 - WAL 仍 append-only；本条不引入任何改写历史的机制（「取代」仍是**多一条快照事件**）。
 - 与 ADR-053 的边界：ADR-053 定**格子**（哪三个格子表达变更）；本条定**纪律与强制**
   （顺序、闭集、类型）。ADR-053 是「有哪些原语」，本条是「怎么保证只有这些、且真的被用」。
+
+**实施补记（2026-10-12，S2.7-b3 前置）**：类型强制已按上面决策 3 落地，实际形态与草图有三处
+**有理由的差别**，记录在此防止后人当它们是漂移：
+
+1. **「诞生」是 `Born { nodes, carrier }` 而不是 `Added(msg)`。** 诞生多一个问题要答：
+   「这条节点的承载事实由谁落？」——用户发言归 `turn × opened`、助手正文归收束格、工具结果归
+   `artifact × added`，这些**不能**再落一条 `message.added`（一个事实只能有一个 owner）；
+   只有「没有别的格可搭车」的节点（压缩记录等界面文本）才由 `apply` 落 `message.added`。
+   答案收进 [`Carrier`] 枚举（`Runner` / `Here`），代价不对称写在其文档里：
+   该 `Runner` 写成 `Here` 无害（「同 id 只认首次」去重），该 `Here` 写成 `Runner` 是
+   **数据丢失**——所以拿不准时选 `Here`。
+2. **「取代」不是 `MessageChange` 的变体。** 草图里的 `Consolidated(...)` 没有进枚举：
+   取代是**列表级**原语，它的事实 owner 是执行口的令牌窗口（`v2_exec::consolidate_into_wal`），
+   而压缩现场**不持令牌**——`apply` 若就地落 `session.consolidated` 会拿到 `NotTheWriter`，
+   且那是静默的。所以取代保持独立入口（`replace_all` + `SessionContext::consolidated` 寄存 +
+   `V2Request::consolidation` 落格），`apply` 只收节点级三原语。
+3. **守卫同步升级为结构判定（v2）**。`list-write-fact-audit.mjs` 不再要登记行、不再有
+   `pending` 棘轮，改为判**结构**：`append_messages` 与 `v2_messages::{added,edited,removed}`
+   出了 `write.rs` ⇒ LWF-001；`replace_all` 出了 `write.rs` 而窗口内没有
+   `consolidated = Some(...)` 的真实赋值 ⇒ LWF-002。待补缺口 4 处**全部经 `apply` 收口，
+   pending 归零**——14 处写入口全部在类型强制之下，不再是守卫钉住的存量。

@@ -685,3 +685,65 @@ fn seq_is_renumbered_monotonically_across_the_snapshot_boundary() {
     assert_eq!(seqs.len(), got.len(), "每条都有号");
     assert_eq!(seqs, vec![1, 2, 3], "从 1 起重发，跨快照边界仍单调");
 }
+
+// ── ⑦ 诞生格：`message.added`（S2.7-b3 前置，ADR-054）─────────────────
+
+/// 一条 `message.added`：载荷 = 完整 `ChatMessage` 列表（写侧 `v2_messages::added`
+/// 直给，同一条序列化路径——手写 JSON 会钉住我抄的那份）。
+fn added_event(msgs: Vec<crate::symbio_core::chat_message::ChatMessage>) -> Event {
+    Event::pending(
+        "m-add-0",
+        crate::symbio_core::EVENT_MESSAGE_ADDED,
+        Entity::Message,
+        Verb::Opened,
+        0,
+        "user",
+    )
+    .with_payload(serde_json::json!({
+        "messages": msgs
+            .iter()
+            .map(|m| serde_json::to_value(m).expect("ChatMessage 必然可序列化"))
+            .collect::<Vec<_>>(),
+    }))
+}
+
+/// 诞生格：载荷里每条消息**逐条出生**、形状逐字保留（不补 `status`、不改内容），
+/// 按发射顺序排在已有节点之后。
+#[test]
+fn an_added_event_births_the_payload_nodes_verbatim() {
+    let record = crate::symbio_core::chat_message::ChatMessage {
+        id: "compact-record".into(),
+        role: Some(MessageRole::Assistant),
+        msg_type: Some(MessageType::Text),
+        content: Some(MessageContent::Text("〔本轮已压缩〕".into())),
+        // 故意**不带** status：重建不得替它补（补了就是两个身份）。
+        ..Default::default()
+    };
+    let events = vec![user_event("u-node", "问"), added_event(vec![record])];
+
+    let msgs = rebuild(&events);
+    let got = shapes(&msgs);
+    assert_eq!(got.len(), 2, "诞生格产节点（与变更格相反）：{got:?}");
+    assert_eq!(got[1].id, "compact-record");
+    assert_eq!(got[1].text, "〔本轮已压缩〕");
+    assert_eq!(got[1].status, None, "载荷没有的状态不得由重建补");
+    assert_eq!(msgs[1].seq, Some(2), "按发射顺序排在既有节点之后");
+}
+
+/// 同一 id 二次诞生 ⇒ **只认首次**（`Carrier` 文档声称的那一半无害：
+/// 该 `Runner` 写成 `Here` 只是多一条被去重的事实，不是多一个节点）。
+#[test]
+fn a_second_birth_for_a_known_id_does_not_duplicate() {
+    let record = crate::symbio_core::chat_message::ChatMessage {
+        id: "u-node".into(),
+        role: Some(MessageRole::User),
+        msg_type: Some(MessageType::Text),
+        content: Some(MessageContent::Text("重复出生".into())),
+        ..Default::default()
+    };
+    let events = vec![user_event("u-node", "首次出生"), added_event(vec![record])];
+
+    let got = shapes(&rebuild(&events));
+    assert_eq!(got.len(), 1, "同 id 只认首次：{got:?}");
+    assert_eq!(got[0].text, "首次出生", "留下的是先到的那条");
+}

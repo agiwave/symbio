@@ -19,7 +19,7 @@
 //! 本文件保留：插件结构体与构造、内部能力（`impl SessionPlugin`）、协议路由与
 //! 能力注册（`impl Plugin`）、配置定义，以及各子模块的**共享面重导出**。
 
-use super::chat_session::PersistentChatSession;
+use super::chat_session::{Carrier, MessageChange, PersistentChatSession};
 pub use super::config::SessionConfig;
 use super::types::{Session, SessionSummary};
 use crate::providers::MemoryFile;
@@ -117,7 +117,7 @@ impl PublishTarget<'_> {
 
 /// 落库 + **落库回包**的唯一实现（`docs/vdfs-session-messages.md` §3.4）。
 ///
-/// 两步顺序写死在这里：`append_messages` 落库（存储在临界区内给消息补权威 `seq` /
+/// 两步顺序写死在这里：`apply(Born)` 落库（存储在临界区内给消息补权威 `seq` /
 /// `timestamp`，交回**权威副本**），随即把权威副本逐条下发——权威号由此换入实时面。
 ///
 /// ## 为什么发的是交回的那份，而不是入参那份
@@ -133,7 +133,7 @@ impl PublishTarget<'_> {
 ///
 /// ## 落库补身份在这里，不在别处（[plan/11 批 1](../../../docs/plan/11-多执行器与多主体加固实施方案.md) ②）
 ///
-/// 本函数是**唯一的**消息追加写点（生产代码里 `append_messages` 只有这一处调用），
+/// 本函数是**唯一的**消息追加写点（生产代码里没有第二处往列表里追加节点），
 /// 所以 [`attributed`] 补在这里就等于「每条持久化消息都带身份」——补在各处建消息
 /// 的地方则必然漏：建消息的写点有七八处（用户发言 / 助手正文 / 工具结果 / 压缩
 /// 记录 / 系统说明），漏一处就造出「有身份、没有身份」两种同义消息。
@@ -152,17 +152,21 @@ impl PublishTarget<'_> {
 pub(crate) async fn append_and_publish(
     session: &PersistentChatSession,
     messages: Vec<cm::ChatMessage>,
+    carrier: Carrier,
     to: PublishTarget<'_>,
     session_principal: &str,
 ) -> Result<(), PluginError> {
-    // list-write-fact append_and_publish: by-design — 唯一的消息追加写点**本体**（包装层）；它自己不落事实，落事实是**调用方**的事——这条登记让「`append_messages` 只有这一处调用」有落点。
+    // 事实落格收在 `apply` 里（[ADR-054] 决策 2 的顺序反转）：`carrier` 声明
+    // 「这条节点的诞生事实由谁落」——运行器承载的（用户发言 / 助手正文 / 工具结果）
+    // 不另落，没有承载格的（压缩记录）落 `message.added`。
     let persisted = session
-        .append_messages(
-            messages
+        .apply(MessageChange::Born {
+            nodes: messages
                 .into_iter()
                 .map(|m| attributed(m, session_principal))
                 .collect(),
-        )
+            carrier,
+        })
         .await?;
     for message in persisted {
         to.publish(message).await;

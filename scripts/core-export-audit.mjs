@@ -166,6 +166,14 @@ VisScope:
       // 所以跨 core 的消费方只有 session 那一个，与同域存量事件名同形。
       EVENT_MESSAGE_EDITED:
         '事件名常量：与 EVENT_TURN_SUPPLEMENTED / EVENT_SESSION_RECONCILED 同类，event/mod.rs 单点定义、插件按名引用。Core 外唯一消费方 = plugins/session（v2_messages 落格 + rebuild 回放），折叠索引与投影在 core 内走域内路径',
+      // `EVENT_MESSAGE_ADDED`（S2.7-b3 前置的诞生格，`message × opened`，
+      // 见 ADR-054）：与 EVENT_MESSAGE_EDITED / REMOVED 同族同由——事件名必须
+      // 单点定义（散落字面量必然漂）。落格在 `plugins/session`（`v2_messages::added`
+      // 经唯一写入口 `apply`、`rebuild::added_nodes` 回放），投影在 core 内
+      // （`projection/transcript` + `prompt_fidelity`）走域内路径。所以跨 core 的
+      // 消费方只有 session 那一个，与同域存量事件名同形。
+      EVENT_MESSAGE_ADDED:
+        '事件名常量：与 EVENT_MESSAGE_EDITED 同族（message × opened 诞生格，ADR-054 闭集第 4 原语），event/mod.rs 单点定义、插件按名引用。Core 外唯一消费方 = plugins/session（apply 落格 + rebuild 回放），投影在 core 内走域内路径',
       EVENT_MESSAGE_REMOVED:
         '事件名常量：与 EVENT_MESSAGE_EDITED 同批同格（message × closed，与 memory.forgotten 同形），event/mod.rs 单点定义、插件按名引用。Core 外唯一消费方 = plugins/session（truncate 落格 + rebuild 丢弃）',
       // `EVENT_SESSION_CONSOLIDATED`（S2.7-b2 的压缩快照，`message × progressed`，

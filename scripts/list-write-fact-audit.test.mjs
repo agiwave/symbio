@@ -1,14 +1,16 @@
 /**
  * list-write-fact-audit 回归测试 —— 证明它**会红**
  *
- * 一个只会亮绿灯的守卫等于没有守卫。本用例注入真实违规并断言脚本变红：
- *   ① 干净夹具（调用 + 就地登记 + 事实在现场）→ exit 0；
- *   ② 调用没有就地登记 → LWF-001；
- *   ③ 登记的理由为空 → LWF-002（空理由 = 没有登记）；
- *   ④ 登记声明的事实不在现场 → LWF-002；
- *   ⑤ 登记在、调用不在（函数改名 / 调用点搬走）→ LWF-004；
- *   ⑥ 待补（`pending`）超过棘轮基线 → LWF-003；
- *   ⑦ `by-design` 与 `pending` 是**放行**而不是漏判（不误报）。
+ * 一个只会亮绿灯的守卫等于没有守卫。本用例注入真实违规并断言脚本变红
+ * （守卫 v2：结构性判定，无登记行）：
+ *   ① 干净夹具（write.rs 里的原语 + apply 汇聚）→ exit 0；
+ *   ② `append_messages` 出了 write.rs → LWF-001（绕过唯一写入口）；
+ *   ③ `replace_all` 出了 write.rs 且没有寄存锚 → LWF-002；
+ *   ④ `replace_all` 出了 write.rs 但 ±NEAR 行内有真实的 `consolidated = Some(...)` → 放行；
+ *   ⑤ 寄存锚只在**注释**里 → LWF-002（锚必须是真代码）；
+ *   ⑥ 寄存锚在窗口边界之外 → LWF-002；
+ *   ⑦ `v2_messages::edited` 出了 write.rs → LWF-001（第二个写入口）；
+ *   ⑧ `.test.rs` 与注释里的提及不触发（不误报）。
  *
  * 用法：node --test scripts/list-write-fact-audit.test.mjs
  */
@@ -55,104 +57,95 @@ function audit(files) {
   }
 }
 
-/** 一处「调用 + 就地登记 + 事实在现场」的干净写法。 */
-const CLEAN = [
-  'async fn patch_message(session: &S) {',
-  '    // list-write-fact patch_message: v2_messages::edited — 编辑是「这条现在读作 Y」',
-  '    session.replace_messages(messages).await?;',
-  '    super::v2_messages::edited(&dir, &updated);',
+/** 唯一写入口本体的干净写法：原语实现 + apply 汇聚，全在 write.rs 里。 */
+const WRITER = [
+  'pub(crate) async fn apply(&self, change: MessageChange) -> Result<Vec<ChatMessage>, PluginError> {',
+  '    match change {',
+  '        MessageChange::Born { nodes, .. } => self.append_messages(nodes).await,',
+  '        MessageChange::Edited(msgs) => { self.replace_all(list).await?; Ok(msgs) }',
+  '        MessageChange::Removed(ids) => { self.replace_all(list).await?; Ok(Vec::new()) }',
+  '    }',
   '}',
   '',
 ].join('\n')
 
-test('干净夹具通过（调用 + 登记 + 事实在现场）', () => {
-  const r = audit({ 'plugins/session/commands.rs': CLEAN })
+test('干净夹具通过（write.rs 内的原语 + apply 汇聚）', () => {
+  const r = audit({ 'plugins/session/chat_session/write.rs': WRITER })
   assert.equal(r.status, 0, r.stderr + r.stdout)
 })
 
-test('调用没有就地登记 → LWF-001 变红', () => {
+test('append_messages 出了 write.rs → LWF-001 变红（绕过唯一写入口）', () => {
   const r = audit({
-    'plugins/session/commands.rs': 'async fn patch_message(session: &S) {\n    session.replace_messages(m).await?;\n}\n',
+    'plugins/session/commands.rs': 'async fn patch(session: &S) {\n    session.append_messages(msgs).await?;\n}\n',
   })
-  assert.equal(r.status, 1, '未登记的列表写入口必须红')
+  assert.equal(r.status, 1, '绕过 apply 的节点级写原语必须红')
+  assert.match(r.stderr, /LWF-001/)
+  assert.doesNotMatch(r.stderr, /LWF-002/, '此例只应报 LWF-001')
+})
+
+test('replace_all 出了 write.rs 且没有寄存锚 → LWF-002 变红', () => {
+  const r = audit({
+    'plugins/session/other.rs': 'async fn rewrite(session: &S) {\n    session.replace_all(list).await?;\n}\n',
+  })
+  assert.equal(r.status, 1, '无寄存锚的取代原语必须红')
+  assert.match(r.stderr, /LWF-002/)
+})
+
+test('replace_all 带真实寄存锚（±20 行内的 consolidated = Some(...)）→ 放行', () => {
+  const lines = []
+  for (let i = 0; i < 15; i++) lines.push(`    let filler_${i} = ${i};`)
+  lines.push('    context.consolidated = Some(new_messages.clone());')
+  lines.push('    let _ = context.session.replace_all(context.messages.clone()).await;')
+  lines.push('    Ok(())')
+  lines.push('}')
+  const r = audit({ 'plugins/session/context/pipeline.rs': lines.join('\n') + '\n' })
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+})
+
+test('寄存锚只在注释里 → LWF-002 变红（锚必须是真代码）', () => {
+  const r = audit({
+    'plugins/session/other.rs': [
+      'async fn rewrite(session: &S) {',
+      '    // 寄存：context.consolidated = Some(new_messages.clone());——只是说说',
+      '    session.replace_all(list).await?;',
+      '}',
+      '',
+    ].join('\n'),
+  })
+  assert.equal(r.status, 1, '注释里的「锚」不算锚')
+  assert.match(r.stderr, /LWF-002/)
+})
+
+test('寄存锚在窗口边界之外（>20 行）→ LWF-002 变红', () => {
+  const lines = ['    context.consolidated = Some(new_messages.clone());']
+  for (let i = 0; i < 25; i++) lines.push(`    let filler_${i} = ${i};`)
+  lines.push('    session.replace_all(list).await?;')
+  lines.push('}')
+  const r = audit({ 'plugins/session/other.rs': lines.join('\n') + '\n' })
+  assert.equal(r.status, 1, '锚离调用点太远就不算这次的锚')
+  assert.match(r.stderr, /LWF-002/)
+})
+
+test('v2_messages::edited 出了 write.rs → LWF-001 变红（第二个写入口）', () => {
+  const r = audit({
+    'plugins/session/commands.rs': 'fn land(dir: &Path, m: &ChatMessage) {\n    v2_messages::edited(dir, m);\n}\n',
+  })
+  assert.equal(r.status, 1, '事实落格函数不得有第二个调用方')
   assert.match(r.stderr, /LWF-001/)
 })
 
-test('登记的理由为空 → LWF-002 变红（空着就等于没有登记）', () => {
+test('.test.rs 与注释里的提及不触发（不误报）', () => {
   const r = audit({
-    'plugins/session/commands.rs': [
-      'async fn patch_message(session: &S) {',
-      '    // list-write-fact patch_message: v2_messages::edited —',
-      '    session.replace_messages(m).await?;',
-      '    super::v2_messages::edited(&dir, &updated);',
+    'plugins/session/commands.test.rs': [
+      'async fn patch(session: &S) {',
+      '    session.append_messages(msgs).await?; // 测试是排演驱动方',
       '}',
       '',
     ].join('\n'),
-  })
-  assert.equal(r.status, 1, '空理由必须红')
-  assert.match(r.stderr, /LWF-002/)
-})
-
-test('登记声明的事实不在现场 → LWF-002 变红', () => {
-  const r = audit({
-    'plugins/session/commands.rs': [
-      'async fn patch_message(session: &S) {',
-      '    // list-write-fact patch_message: v2_messages::removed — 说要删，但代码里只有编辑',
-      '    session.replace_messages(m).await?;',
-      '    super::v2_messages::edited(&dir, &updated);',
-      '}',
-      '',
-    ].join('\n'),
-  })
-  assert.equal(r.status, 1, '声明的事实不在现场必须红')
-  assert.match(r.stderr, /LWF-002/)
-})
-
-test('登记在、调用不在（函数改名 / 调用点搬走）→ LWF-004 变红', () => {
-  const r = audit({
-    'plugins/session/commands.rs': [
-      'async fn renamed_away(session: &S) {',
-      '    // list-write-fact patch_message: v2_messages::edited — 这个函数已经不存在了',
-      '    session.replace_messages(m).await?;',
-      '    super::v2_messages::edited(&dir, &updated);',
-      '}',
-      '',
-    ].join('\n'),
-  })
-  assert.equal(r.status, 1, '登记指着一个不存在的函数必须红')
-  assert.match(r.stderr, /LWF-004/)
-})
-
-test('待补（pending）超过棘轮基线 → LWF-003 变红', () => {
-  const files = {}
-  for (let i = 0; i < 5; i++) {
-    files[`plugins/session/f${i}.rs`] = [
-      `async fn f${i}(session: &S) {`,
-      `    // list-write-fact f${i}: pending — 已知缺口 ${i}`,
-      '    session.replace_messages(m).await?;',
-      '}',
-      '',
-    ].join('\n')
-  }
-  const r = audit(files)
-  assert.equal(r.status, 1, '待补只降不升：多出来的必须红')
-  assert.match(r.stderr, /LWF-003/)
-})
-
-test('by-design 与 pending 是放行（不误报）', () => {
-  const r = audit({
-    'plugins/session/io.rs': [
-      'async fn persist_messages(session: &S) {',
-      '    // list-write-fact persist_messages: by-design — 事实由运行器在别处落',
-      '    append_and_publish(&s, m, to, p).await?;',
-      '}',
-      '',
-    ].join('\n'),
-    'plugins/session/failure.rs': [
-      'async fn persist_failure(session: &S) {',
-      '    // list-write-fact persist_failure: pending — 状态改写 + partial 新节点待补',
-      '    session.replace_messages(all).await?;',
-      '}',
+    'plugins/session/docs.rs': [
+      '//! 文档里提到 `append_messages` 与 `v2_messages::edited` 不算调用。',
+      '/// 另一段：`replace_all` 的契约是只补缺号。',
+      'pub fn unrelated() {}',
       '',
     ].join('\n'),
   })

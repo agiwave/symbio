@@ -9,6 +9,8 @@
 
 use super::*;
 
+use crate::plugins::session::chat_session::{Carrier, MessageChange};
+
 /// 「这个节点还在飞行中」——**唯一**判据。
 ///
 /// 收口类操作（失败降级 / 中止收口）都必须用同一份定义：漏掉一个状态，
@@ -167,6 +169,9 @@ impl SessionPlugin {
                 return;
             }
         };
+        // 变更前已在存储里的节点 id——合并结束后据此把 `changed` 拆成 **断言**（改写
+        // 已有节点）与 **诞生**（补写存储里没有的节点），分别交给 `apply` 的两个原语。
+        let known: std::collections::HashSet<String> = all.iter().map(|m| m.id.clone()).collect();
 
         // 仅记录本次真正发生状态变化的消息，最后只广播这些，
         // 避免对未变化的消息重复推送（也避免把错误刷屏到每条文本）。
@@ -271,8 +276,45 @@ impl SessionPlugin {
         }
 
         // list-write-fact persist_failure: pending — 就地改写了根 Turn 与子节点的状态，并可能**新增** `partial` 节点；按 ADR-054：状态改写 = `message.edited`、新节点 = `message.added`。
-        if let Err(e) = chat_session.replace_messages(all).await {
-            crate::plugin_error!("session", "persist_failure: replace_messages failed: {}", e);
+        // **顺序反转**（[ADR-054](../../../../docs/decisions/session.md) 决策 2）：经唯一
+        // 写入口 `apply` 落，按「改写已有 / 补写缺失」拆成两个原语——
+        // - **断言**（`Edited`）：根 Turn 的 Failed + error、子节点定稿 Completed、
+        //   `partial` 对同 id 节点的整条覆盖；
+        // - **诞生**（`Carrier::Here`）：崩溃时刚流式出来、尚未落库的节点。按
+        //   `Carrier` 文档的「拿不准选 `Here`」原则取 `Here`——在途镜像的那批节点
+        //   是否已有承载事实此处无从判定，而 `Here` 的代价只是多一条会被
+        //   「同 id 只认首次」去重的事实，`Runner` 的代价是节点在事实源里没有出生
+        //   记录（切主读后整条消失）。
+        //
+        // 同一 id 在 `changed` 里可能出现多次（镜像半截先入、`partial` 定稿覆盖）。
+        // 旧写法 `replace_messages(all)` 靠 `all` 天然按 id 去重而无感；逐条照
+        // `changed` 落会把**中间版本**也写进去。写集合取每个 id 的**最后一次**——
+        // 事实源只关心终局，中间版本从没存在过。顺序按首现保持（Born 的追加序
+        // 即树内序）。
+        let mut latest: Vec<cm::ChatMessage> = Vec::new();
+        let mut at: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for m in changed.clone() {
+            match at.get(&m.id) {
+                Some(&i) => latest[i] = m,
+                None => {
+                    at.insert(m.id.clone(), latest.len());
+                    latest.push(m);
+                }
+            }
+        }
+        let (edited, born): (Vec<_>, Vec<_>) =
+            latest.into_iter().partition(|m| known.contains(&m.id));
+        if let Err(e) = chat_session.apply(MessageChange::Edited(edited)).await {
+            crate::plugin_error!("session", "persist_failure: apply(Edited) failed: {}", e);
+        }
+        if let Err(e) = chat_session
+            .apply(MessageChange::Born {
+                nodes: born,
+                carrier: Carrier::Here,
+            })
+            .await
+        {
+            crate::plugin_error!("session", "persist_failure: apply(Born) failed: {}", e);
         }
 
         // 6. 仅发布本次状态真正变化的消息（服务端权威终态，前端只信服务端）：
@@ -372,33 +414,43 @@ impl SessionPlugin {
             return 0;
         }
 
-        // list-write-fact converge_inflight: pending — 在途图收敛把在途副本的权威形态写回存储（含状态改写与 `partial` 新节点），同 `persist_failure`。
-        if let Err(e) = chat_session.replace_messages(all).await {
-            crate::plugin_error!(
-                "session",
-                "converge_inflight: replace_messages failed: {}",
-                e
-            );
+        // **顺序反转**（[ADR-054](../../../../docs/decisions/session.md) 决策 2）：经唯一
+        // 写入口 `apply` 落 `Born`。本函数只**补写**存储里没有的节点（已在存储的
+        // 一律跳过，见上面的过滤），所以这里只有「诞生」一个原语。
+        //
+        // `Carrier::Here`：与 `persist_failure` 同一条「拿不准选 `Here`」的原则——
+        // 在途镜像那批节点的承载事实此处无从判定，`Here` 的代价只是多一条会被
+        // 「同 id 只认首次」去重的事实，`Runner` 的代价是切主读后整条消失。
+        let converged = changed.len();
+        if let Err(e) = chat_session
+            .apply(MessageChange::Born {
+                // 克隆移入：广播（下方）语义上依赖落库成功——先落、后广播；
+                // 失败路径直接 return，不广播也不清在途图。
+                nodes: changed.clone(),
+                carrier: Carrier::Here,
+            })
+            .await
+        {
+            crate::plugin_error!("session", "converge_inflight: apply(Born) failed: {}", e);
             return 0;
         }
 
         crate::plugin_info!(
             "session",
             "converge_inflight: {} 个节点定稿（根 Turn → Aborted，子节点 → Completed；原因：{}）",
-            changed.len(),
+            converged,
             reason
         );
-        let converged = changed.len();
 
         // 广播：这些终态同样是**消息变更**，VDFS 列表必须同步收敛
         // （列表读存储 + 在途叠加，而存储已被改写）。这些都是本次新落库的
         // 节点，以 `created` 报出——VDFS 列表里它们此前不存在。
-        for m in changed {
+        for m in &changed {
             state
                 .transcript
                 .lock()
                 .await
-                .apply(crate::plugins::session::transcript::llm_state_frame(&m));
+                .apply(crate::plugins::session::transcript::llm_state_frame(m));
         }
 
         // 权威副本已回到存储，在途图作废（与 `persist_failure` 步骤 7 同一理由）。

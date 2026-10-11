@@ -10,7 +10,7 @@
 use super::*;
 
 use super::super::chat_loop::{ChatOrchestrator, SessionContext};
-use super::super::chat_session::PersistentChatSession;
+use super::super::chat_session::{Carrier, MessageChange, PersistentChatSession};
 use super::super::plugin::append_and_publish;
 use super::super::tools::fire_hook;
 use super::super::transcript::llm_emit_removed;
@@ -453,11 +453,23 @@ async fn compress_snapshot_inner(
     context.consolidated = Some(new_messages.clone());
     context.messages = new_messages;
 
-    // list-write-fact compress_snapshot_inner: context.consolidated — 压缩腿的变更**寄存**于此，由持令牌方落 `session.consolidated`；就地落格会拿到 `NotTheWriter`，而那是静默的（压缩照常生效，事实源里却少一条）。
-    let _ = context
-        .session
-        .replace_messages(context.messages.clone())
-        .await;
+    // **取代原语**（[ADR-054] 闭集的第四种，列表级）：走 `replace_all`——它的
+    // **事实 owner 是执行口**，不是这里。压缩现场不持写者令牌，就地落
+    // `session.consolidated` 会拿到 `NotTheWriter`，而那是静默的（压缩照常生效、
+    // 界面照常变短，只有事实源里少一条事件）。所以这份快照**寄存**在上面那行
+    // `context.consolidated`，由下一个 `execute_turn` 在令牌窗口内落格（见
+    // `V2Request::consolidation` 的文档）。这是它与节点级原语（`apply`）的真实差别。
+    //
+    // 失败口径：**不致命但不吞**。缓存写失败时压缩在内存里已经生效（`context.messages`
+    // 已换），本轮照常继续——把它升级成整轮失败等于用「记不下来」换「答不出来」；
+    // 但静默吞掉会让「重启后回到压缩前」无迹可查，warn 一条。
+    if let Err(e) = context.session.replace_all(context.messages.clone()).await {
+        plugin_warn!(
+            "session",
+            "压缩快照缓存落库失败（内存已生效，重启后回退到压缩前）: {}",
+            e
+        );
+    }
     // 整表重写 → 广播（否则前端转写停在压缩前：被压掉的消息不消失、快照不出现）
     emit_transcript_rewrite(orchestrator, context, &dropped, &head).await;
 
@@ -604,10 +616,15 @@ async fn compress_with_snapshot_core(
         // 落库 + 落库回包：压缩是会话里真实发生的一步，应当留下记录。否则用户刷新后
         // 只看到"历史突然变短了"，却没有任何东西说明发生过什么。回包那一步换入
         // `finish` 帧还缺的存储权威号（§3.4）；失败只记日志——前端已收到终态。
-        // list-write-fact compress_with_snapshot_core: pending — 压缩**记录节点**是新节点（此前不存在），按 ADR-054 该落 `message.added`（`message × opened`）；它没有既有事实可搭车，切主读后这条记录会整条消失。
+        //
+        // `Carrier::Here`：压缩**记录节点**是一次压缩的**记录**，不是任何一轮的产出、
+        // 也不属于任何工具调用——它的诞生**没有别的格可搭车**，所以由 `apply` 落
+        // `message.added`（[ADR-054] 决策 1 的「诞生」原语）。不落格则切主读后这条
+        // 记录整条消失——用户只会看到「历史突然变短」，却没有任何东西解释为什么。
         if let Err(err) = append_and_publish(
             &context.session,
             vec![node],
+            Carrier::Here,
             e.target(context.session.session_id()),
             &context.principal,
         )
@@ -716,7 +733,7 @@ pub(crate) async fn retry_compaction(
     session: &Arc<PersistentChatSession>,
     target_id: &str,
 ) -> Result<(), PluginError> {
-    let mut messages = session.get_messages().await?;
+    let messages = session.get_messages().await?;
     // 只接受**压缩节点**：重试入口长在压缩失败节点上，目标错位说明前端与存储已经
     // 不一致——此时按 NotFound 拒绝，比"顺着 target_id 猜一个节点"安全。
     let found = messages
@@ -731,15 +748,13 @@ pub(crate) async fn retry_compaction(
     // 删除旧失败节点必须针对**原始列表**（`get_messages`）：失败节点在
     // `get_context_messages` 的过滤里本就看不见（它会滤掉 Failed 消息），
     // 拿过滤视图去删会「删了个空气」，节点反而留在存储里。
-    messages.retain(|m| m.id != target_id);
-    // list-write-fact retry_compaction: v2_messages::removed — 旧失败节点被删；这条路径的全部意义就是「重试不留旧失败痕迹」，不落格则切主读后它复活。
-    session.replace_messages(messages).await?;
-    // **事实入格**（S2.7-b3 前置，[ADR-053](../../../../docs/decisions/session.md)）：
-    // 旧失败节点被删。不落格的话，主读切到「从 WAL 重建」之后它会**复活**——而这条
-    // 路径的全部意义就是「重试不留旧失败痕迹」。与 `resume.rs` 的删除-重建同款。
-    if let Some(dir) = session.session_dir() {
-        super::super::v2_messages::removed(&dir, std::slice::from_ref(&target_id.to_string()));
-    }
+    //
+    // **顺序反转**（[ADR-054] 决策 2）：经唯一写入口 `apply` 落 `Removed`。这条路径的
+    // 全部意义就是「重试不留旧失败痕迹」——不落格的话，主读切到「从 WAL 重建」之后
+    // 它会**复活**。与 `resume.rs` 的删除-重建同款。
+    session
+        .apply(MessageChange::Removed(vec![target_id.to_string()]))
+        .await?;
     // 删除帧：`status = removed`，一次状态迁移。
     llm_emit_removed(sink, target_id).await;
 
@@ -803,11 +818,13 @@ pub(crate) async fn retry_compaction(
                     )
                     .await;
                 let sid = context.session.session_id();
-                // list-write-fact retry_compaction: pending — 「未触发压缩」记录节点同 `compress_with_snapshot_core`：新节点，需 `message.added`。
+                // `Carrier::Here`：同 `compress_with_snapshot_core`——「未触发压缩」的记录
+                // 节点也是一次压缩的**记录**，它的诞生没有别的格可搭车 ⇒ `message.added`。
                 // 落库 + 回包：同上，换回存储分配的权威 `seq`（§3.4）。
                 if let Err(err) = append_and_publish(
                     &context.session,
                     vec![node],
+                    Carrier::Here,
                     em.target(sid),
                     &context.principal,
                 )

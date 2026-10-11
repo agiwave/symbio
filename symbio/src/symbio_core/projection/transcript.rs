@@ -31,7 +31,7 @@
 use super::super::event::{
     event_payload_node_id, event_produced_text_node_id, event_tool_result_node_id, Entity, Event,
     Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_EDITED,
+    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED,
     EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
 use super::super::schemas::session::chat_message::{
@@ -260,6 +260,23 @@ pub(crate) fn snapshot_entries(msgs: &[ChatMessage]) -> Vec<(String, TranscriptE
         .collect()
 }
 
+/// 诞生格（`message.added`）的载荷 → 节点列表（载荷 `{ messages: [...] }`）。
+///
+/// 与 `snapshot_messages` 同一条容错口径：**一条坏条目不吃掉整批**——逐条解，
+/// 解不出就跳过。空列表不是一次诞生：落一条空事实等于在事实源上留下「什么都没发生」
+/// 的痕迹。
+fn added_messages(e: &Event) -> Vec<ChatMessage> {
+    e.payload
+        .get("messages")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| serde_json::from_value::<ChatMessage>(v.clone()).ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// `meta` 里的布尔标记（缺失 / 非布尔一律 `false`——容错方向是「少标记」而不是
 /// 「多标记」：多标一个 `exclude_from_context` 会让界面文本**静默**漏出请求包）。
 fn meta_flag(m: &ChatMessage, key: &str) -> bool {
@@ -465,6 +482,19 @@ pub fn transcript() -> Projection<TranscriptView> {
                         },
                         event_tool_result_node_id(e),
                     );
+                }
+                // 诞生格（`message × opened`，[ADR-054](../../../../docs/decisions/session.md)
+                // 决策 1）：**没有别的格可搭车**的节点在这里出生——今天只有压缩记录节点
+                // （「已压缩上下文」那张卡）。
+                //
+                // `exclude_from_context` **恒为 `true`**：本格的节点按定义就是界面文本
+                // （见 `EVENT_MESSAGE_ADDED` 的边界——承载对话内容的节点必须由它自己的
+                // 事实落）。让它进请求包会让模型看见一条没有对话语义的记录行。
+                (Entity::Message, Verb::Opened, EVENT_MESSAGE_ADDED) => {
+                    for (node, mut entry) in snapshot_entries(&added_messages(e)) {
+                        entry.exclude_from_context = true;
+                        push(entry, node);
+                    }
                 }
                 _ => {}
             }

@@ -92,7 +92,7 @@ async fn test_replace_messages_never_deletes_archives() {
         tool_msg_with_archive("m2", kept.to_str().unwrap()),
     ];
     session
-        .replace_messages(new_msgs)
+        .replace_all(new_msgs)
         .await
         .expect("replace_messages 失败");
 
@@ -124,7 +124,7 @@ async fn test_replace_messages_keeps_archives_when_all_referenced() {
     // 新列表仍引用同一存档（消息 id 变了但引用未丢）。
     let new_msgs = vec![tool_msg_with_archive("m1", a.to_str().unwrap())];
     session
-        .replace_messages(new_msgs)
+        .replace_all(new_msgs)
         .await
         .expect("replace_messages 失败");
 
@@ -150,7 +150,7 @@ async fn test_replace_messages_rejects_path_traversal() {
 
     let new_msgs = vec![plain_msg("s1")];
     session
-        .replace_messages(new_msgs)
+        .replace_all(new_msgs)
         .await
         .expect("replace_messages 失败");
 
@@ -176,7 +176,7 @@ async fn test_replace_messages_rejects_absolute_escape() {
 
     let new_msgs = vec![plain_msg("s1")];
     session
-        .replace_messages(new_msgs)
+        .replace_all(new_msgs)
         .await
         .expect("replace_messages 失败");
 
@@ -645,7 +645,7 @@ async fn replace_messages_replaces_inflight_placeholder_seq() {
     let mut live = plain_msg("turn1");
     live.seq = Some(inflight + 3);
     session
-        .replace_messages(vec![kept, live])
+        .replace_all(vec![kept, live])
         .await
         .expect("整表重写失败");
 
@@ -784,4 +784,182 @@ fn assign_seq_places_trailing_run_after_last_existing() {
     assign_seq(&mut msgs, max_seq(&old));
     assert_eq!(msgs[0].seq, Some(5));
     assert_eq!(msgs[1].seq, Some(6));
+}
+
+// ── `apply`：唯一写入口（S2.7-b3 前置，ADR-054 决策 2 + 3）──────────────
+
+use super::super::paths::V2_WAL_FILE;
+use crate::symbio_core::{Event, EventWalStore, Seq, Store};
+
+/// 只读读回事实源里的全部事件（与 `resume.test.rs::events_of` 同款）。
+fn events_of(dir: &std::path::Path) -> Vec<Event> {
+    let wal = dir.join(V2_WAL_FILE);
+    let store = EventWalStore::open_readonly(&wal).expect("只读打开事实源失败");
+    store.range(Seq::new(0))
+}
+
+/// 往事实源里种一条事实，让 `v2_messages` 的溯源锚有处可站。
+///
+/// 空切片（会话还没有任何事实）时变更事实会被按口径丢弃（「不硬造一个号」）——
+/// 生产里压缩记录出现前必然已有轮次事实，测试里补的就是这颗种子。
+/// **作用域包住**：种子的写者令牌必须释放，否则 `v2_messages` 自己开 WAL 时
+/// 拿到 `NotTheWriter` ⇒ 事实静默丢弃。
+fn seed_fact(dir: &std::path::Path) {
+    let wal = dir.join(V2_WAL_FILE);
+    let s = EventWalStore::open(&wal).expect("打开事实源失败");
+    s.append(
+        Event::pending(
+            "u-seed",
+            crate::symbio_core::EVENT_USER_MESSAGE,
+            crate::symbio_core::Entity::Turn,
+            crate::symbio_core::Verb::Opened,
+            1,
+            "user",
+        )
+        .with_payload(serde_json::json!({ "text": "第一问", "id": "u-seed" })),
+    )
+    .expect("种子事实落格失败");
+}
+
+/// **Born + `Carrier::Here`**：落一条 `message.added` 事实 + 追加进列表。
+///
+/// 这条判据钉的就是「顺序反转」：事实与列表在**同一次调用**里都发生了，
+/// 「改了列表却没落事实」在 `apply` 里表达不出来。
+#[tokio::test]
+async fn apply_born_here_lands_an_added_fact_and_appends() {
+    let (session, dir, _tmp) = setup().await;
+    seed_fact(&dir);
+
+    let landed = session
+        .apply(super::MessageChange::Born {
+            nodes: vec![plain_msg("c1")],
+            carrier: super::Carrier::Here,
+        })
+        .await
+        .expect("apply(Born, Here) 失败");
+    assert_eq!(landed.len(), 1, "返回受影响的权威副本：{landed:?}");
+    assert_eq!(landed[0].id, "c1");
+
+    let list = session.get_messages().await.expect("读列表失败");
+    assert_eq!(list.len(), 1, "节点进了列表");
+    assert_eq!(list[0].id, "c1");
+
+    let events = events_of(&dir);
+    let added: Vec<&Event> = events
+        .iter()
+        .filter(|e| e.kind == "message.added")
+        .collect();
+    assert_eq!(added.len(), 1, "落了恰好一条诞生事实：{added:?}");
+    let first = added[0]
+        .payload
+        .get("messages")
+        .and_then(|v| v.as_array())
+        .expect("载荷有 messages")
+        .first()
+        .and_then(|v| v.get("id"))
+        .and_then(|v| v.as_str())
+        .expect("载荷首条带 id");
+    assert_eq!(first, "c1", "承载的正是这次诞生的节点");
+}
+
+/// **Born + `Carrier::Runner`**：只追加、**不落事实**——承载事实归运行器的格子
+/// （用户发言 / 助手正文 / 工具结果），`apply` 再落一条就是第二个 owner。
+#[tokio::test]
+async fn apply_born_runner_appends_without_a_fact() {
+    let (session, dir, _tmp) = setup().await;
+    seed_fact(&dir);
+
+    session
+        .apply(super::MessageChange::Born {
+            nodes: vec![plain_msg("u1")],
+            carrier: super::Carrier::Runner,
+        })
+        .await
+        .expect("apply(Born, Runner) 失败");
+
+    let list = session.get_messages().await.expect("读列表失败");
+    assert_eq!(list.len(), 1, "节点照样进列表（本轮缓存仍是读侧真源）");
+    assert!(
+        events_of(&dir).iter().all(|e| e.kind != "message.added"),
+        "运行器承载 ⇒ 这里不落诞生事实"
+    );
+}
+
+/// **Edited**：每条落一个 `message.edited`，列表**原位改写**（不新增、不动序）。
+#[tokio::test]
+async fn apply_edited_lands_facts_and_rewrites_in_place() {
+    let (session, dir, _tmp) = setup().await;
+    seed_fact(&dir);
+    session
+        .apply(super::MessageChange::Born {
+            nodes: vec![plain_msg("m1"), plain_msg("m2")],
+            carrier: super::Carrier::Runner,
+        })
+        .await
+        .expect("种子落库失败");
+
+    let mut edited = plain_msg("m1");
+    edited.content = Some(MessageContent::Text("改过的话".to_string()));
+    let landed = session
+        .apply(super::MessageChange::Edited(vec![edited]))
+        .await
+        .expect("apply(Edited) 失败");
+    assert_eq!(landed.len(), 1, "返回改写后的权威副本");
+
+    let list = session.get_messages().await.expect("读列表失败");
+    assert_eq!(list.len(), 2, "编辑**不新增节点**");
+    assert_eq!(list[0].id, "m1", "位置不变");
+    assert_eq!(
+        list[0].content.as_ref().map(|c| c.to_text()),
+        Some("改过的话".to_string()),
+        "内容换成新的"
+    );
+    assert_eq!(list[1].id, "m2", "其余节点不受影响");
+
+    let events = events_of(&dir);
+    let edits: Vec<&Event> = events
+        .iter()
+        .filter(|e| e.kind == "message.edited")
+        .collect();
+    assert_eq!(edits.len(), 1, "每条变更各落一条断言事实：{edits:?}");
+}
+
+/// **Removed**：落一条 `message.removed`（区间用 `ids` 表达），列表里节点消失。
+#[tokio::test]
+async fn apply_removed_lands_a_fact_and_drops_nodes() {
+    let (session, dir, _tmp) = setup().await;
+    seed_fact(&dir);
+    session
+        .apply(super::MessageChange::Born {
+            nodes: vec![plain_msg("m1"), plain_msg("m2"), plain_msg("m3")],
+            carrier: super::Carrier::Runner,
+        })
+        .await
+        .expect("种子落库失败");
+
+    let landed = session
+        .apply(super::MessageChange::Removed(vec![
+            "m1".into(),
+            "m3".into(),
+        ]))
+        .await
+        .expect("apply(Removed) 失败");
+    assert!(
+        landed.is_empty(),
+        "被删的节点不交回（交回等于让前端对齐幻影）"
+    );
+
+    let list = session.get_messages().await.expect("读列表失败");
+    assert_eq!(
+        list.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        vec!["m2"],
+        "只留没被删的"
+    );
+
+    let events = events_of(&dir);
+    let removed: Vec<&Event> = events
+        .iter()
+        .filter(|e| e.kind == "message.removed")
+        .collect();
+    assert_eq!(removed.len(), 1, "一次删除落**一条**事实（ids 表达区间）");
 }

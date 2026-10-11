@@ -124,11 +124,16 @@ pub const EVENT_ASSISTANT_PROGRESS: &str = "chat.assistant.progress";
 /// 落在 `artifact × asserted`（网格坐标见 [plan/01 §6](../../../../docs/plan/01-核心架构.md)）。
 pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
 
-// ── 消息变更格子（S2.7-b1，[ADR-053](../../../../docs/decisions/session.md#adr-053-消息的变更即事实编辑与删除入格压缩走快照)）──
+// ── 消息列表变更的格子（S2.7，[ADR-053](../../../../docs/decisions/session.md#adr-053-消息的变更即事实编辑与删除入格压缩走快照) / [ADR-054](../../../../docs/decisions/session.md)）──
 //
 // 「消息列表被改过」也是**发生过什么**。在轨 S 之前，编辑 / 截断只重写
 // `messages.json`，事实源里一个字都没有 ⇒ 主读路径一旦切到「从 WAL 重建」，
-// **被截断的消息会复活、编辑过的内容会回退**。这两格补的就是这个缺口。
+// **被截断的消息会复活、编辑过的内容会回退**。
+//
+// 这一族是**闭集**（ADR-054 决策 1）——列表的改动只有四种，三个节点级 + 一个列表级：
+// 诞生（本格）/ 断言（`message.edited`）/ 关闭（`message.removed`）/ 取代
+// （`session.consolidated`）。任何场景都是它们的组合；**新场景若需要第五种 ⇒ 模型错了**，
+// 应当改模型而不是加一格。
 //
 // ## 为什么是 `message` 实体而不是 `turn`
 //
@@ -137,6 +142,32 @@ pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
 // 会把「一轮开始」与「一段历史被删」压进同一格（准入三问「能归入已有实体？」的
 // 否定一侧）。
 
+/// 一条消息**诞生**（载荷 `{ messages: [<ChatMessage JSON>…] }`）。落在 `message × opened`。
+///
+/// ## 为什么需要它（`turn` / `artifact` 不是已经承载了节点吗）
+///
+/// 大部分节点的诞生**由别的事实承载**：用户发言归 `turn × opened`、助手正文归
+/// `turn × closed|progressed`、工具结果归 `artifact × asserted`（重建侧的
+/// `nodes_of` 就是从这些格取出节点的）。但有一类节点**没有别的格可搭车**——
+/// 压缩记录节点（「已压缩上下文」那张卡）是最典型的一个：它是一次压缩的**记录**，
+/// 不是任何一轮的产出，也不属于任何工具调用。
+///
+/// 少了这一格，那类节点在事实源里**从来没有出生过** ⇒ 切主读路径之后它们整条消失
+/// （[ADR-054](../../../../docs/decisions/session.md) 决策 1 的「诞生」原语）。
+///
+/// ## 边界：它是「没有语义承载」的那一格
+///
+/// 判据是**否定的**——只有当一条节点的诞生**找不到别的格**时才用它。承载着对话内容的
+/// 节点（用户发言 / 助手正文 / 工具结果）必须由它们自己的事实落，否则同一条节点
+/// 有两个 owner（[ADR-049](../../../../docs/decisions/session.md#adr-049-wal-是会话唯一事实源sessionstore-降为缓存轨-s-的起点) 理由 1）。
+/// 因此本格的节点是**界面文本**类（`prompt_fidelity` 的 `excluded_from_prompt`），
+/// 不进模型请求包。
+///
+/// ## 为什么载荷是列表而不是单条
+///
+/// 与 `message.removed` 的 `ids` 同一条判据：**一个动作一条事实**。一次「诞生若干节点」
+/// 的操作（压缩收口时把记录节点连同收口节点一起写回）落一条，而不是 n 条。
+pub const EVENT_MESSAGE_ADDED: &str = "message.added";
 /// 编辑一条消息（载荷 `{ message: <ChatMessage 的 JSON> }`——补丁**应用后**的整条）。
 /// 落在 `message × asserted`。
 ///

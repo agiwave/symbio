@@ -114,7 +114,7 @@ async fn converge_inflight_finalizes_live_buffer_nodes() {
 
     // 存储侧：全部终态（上一轮已收口的世界）
     let chat = p.open_chat_session(sid).await.unwrap();
-    chat.replace_messages(vec![node("turn", None, cm::MessageStatus::Completed)])
+    chat.replace_all(vec![node("turn", None, cm::MessageStatus::Completed)])
         .await
         .unwrap();
 

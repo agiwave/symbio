@@ -1,8 +1,13 @@
-//! 写路径：两条写入路径（[`PersistentChatSession::append_messages`] /
-//! [`PersistentChatSession::replace_messages`]）与它们的存储边界策略纯函数。
+//! 写路径：消息列表变更的**唯一写入口**（[`PersistentChatSession::apply`]）与
+//! 两个存储原语（[`PersistentChatSession::append_messages`] /
+//! [`PersistentChatSession::replace_all`]）。
+//!
+//! 顺序反转（[ADR-054](../../../../docs/decisions/session.md) 决策 2）在这里落地：
+//! `apply` **先落事实**、再折列表、再写缓存——内存列表是事实的一个渲染，
+//! 不是「正在被编辑的真相」。事实与缓存从此不可能分开（决策 3 的类型强制）。
 //!
 //! 序号分配、时间戳回填、写入不变量与存储期裁剪都在这里——它们是**存储写入
-//! 边界**的策略，与两条写入路径同处一文件便于对照；读侧的视图策略见
+//! 边界**的策略，与写入路径同处一文件便于对照；读侧的视图策略见
 //! [`super::read`]。
 
 use super::*;
@@ -29,7 +34,7 @@ pub(super) fn max_seq(messages: &[ChatMessage]) -> i64 {
 ///
 /// 自 `symbio_core::chat_message` 迁入。`seq` **字段**是跨栈 schema
 /// （前端逐字段镜像，必须留 core，见该字段文档）；而「怎么补号」是会话存储的实现策略
-/// ——调用点只有本文件的 `replace_messages` 一处，故与它的兄弟 `append_messages`
+/// ——调用点只有本文件的 `replace_all` 一处，故与它的兄弟 `append_messages`
 /// （另一条分配路径）同处一文件，两条路径可以直接对照着读。
 ///
 /// # 三条不变式（前两条由本函数保证，第三条由调用方保证）
@@ -41,7 +46,7 @@ pub(super) fn max_seq(messages: &[ChatMessage]) -> i64 {
 ///    本地游标排好了序，整表重写若把既有消息改成新号，两边就各持一套互不相容的序号
 ///    ——同一条消息会排到列表的两个位置，压缩后顺序看起来就乱了；
 /// 3. **前置条件**：无号项只出现在**开头**或**末尾**，不夹在两个既有序号之间。
-///    `replace_messages` 的全部调用点都满足：压缩 → 快照在**开头**（且已带槽位号）；
+///    `replace_all` 的全部调用点都满足：压缩 → 快照在**开头**（且已带槽位号）；
 ///    追加 / 补写 / 恢复 / 清空 → 新节点在**末尾**。违反会被函数末尾的
 ///    `debug_assert!` 当场拦下。
 ///
@@ -117,7 +122,117 @@ pub(super) fn assign_seq(messages: &mut [ChatMessage], base: i64) -> i64 {
     cursor
 }
 
+/// 一次**消息列表变更**（[ADR-054](../../../../docs/decisions/session.md) 决策 2 + 3）。
+///
+/// 这是 [ADR-054](../../../../docs/decisions/session.md) 的**闭集原语**落到类型上：
+/// 消息列表的变更只有「诞生 / 断言 / 关闭」三种节点级原语（第四种「取代」是列表级的
+/// 压缩快照，见 [`PersistentChatSession::replace_all`]——它的事实 owner 不同）。
+///
+/// ## 为什么它是枚举而不是「一份列表 + 一个说明」
+///
+/// 旧形态是 `replace_messages(整份列表)`：调用方自己折好列表再整体写入，事实
+/// **事后补**——于是「改了列表却没落事实」在编译期**表达得出来**（实测 10 个
+/// 写入口里 6 个没落）。收成枚举之后，`apply` 在**同一个函数里**落事实、折列表、
+/// 写缓存，那句话在类型上**表达不出来**——这就是 ADR-054 决策 3 要的类型强制。
+pub(crate) enum MessageChange {
+    /// **诞生**：一个此前不存在的节点出现。
+    Born {
+        nodes: Vec<ChatMessage>,
+        /// 它的**承载事实**由谁落——一个事实只能有一个 owner（[ADR-049] 理由 1）。
+        carrier: Carrier,
+    },
+    /// **断言**：一个已存在的节点现在读作 Y ⇒ 落 `message.edited`。
+    Edited(Vec<ChatMessage>),
+    /// **关闭**：这些节点没了 ⇒ 落 `message.removed`。
+    Removed(Vec<String>),
+}
+
+/// 诞生的节点**由谁落事实**。
+///
+/// 这是 [`MessageChange::Born`] 唯一需要调用方回答的问题，而它**不是实现细节**：
+/// 「这条节点诞生了」的 owner 必须唯一，写错方向的两半代价不对称——
+/// - 该 `Runner` 写成 `Here` ⇒ 多一条 `message.added`，重建按「同 id 只认首次」
+///   去重，**无害**；
+/// - 该 `Here` 写成 `Runner` ⇒ 节点在事实源里**没有出生记录**，切主读后整条消失，
+///   **是数据丢失**。
+///
+/// 所以拿不准时选 `Here`——宁可多一条被去重的事实，不可少一条出生记录。
+pub(crate) enum Carrier {
+    /// 由**运行器**落：用户发言归 `turn × opened`、助手正文归 `turn × closed|progressed`、
+    /// 工具结果归 `artifact × asserted`。`apply` **不另落事实**。
+    Runner,
+    /// **没有别的格可搭车**（压缩记录节点）⇒ `apply` 落 `message.added`。
+    Here,
+}
+
 impl PersistentChatSession {
+    /// 一次消息列表变更的**唯一写入口**（[ADR-054](../../../../docs/decisions/session.md)
+    /// 决策 2 的「顺序反转」）。
+    ///
+    /// 顺序是**先落事实、再折列表、再写缓存**。这与旧形态（`读列表 → 改 Vec →
+    /// replace_messages → 事后补一条事实`）的区别不是风格：旧形态里事实是**事后补的**，
+    /// 所以它天然是可选项——忘了补，代码照样编译、测试照样绿。本函数把「落事实」
+    /// 收进写入路径本身，**没有「补」这一步**，也就没有「忘了补」这个失败。
+    ///
+    /// ## 失败口径：事实失败不冒泡
+    ///
+    /// 与 [`super::super::v2_messages`] 的既有口径同一条：b3 之前缓存仍是读侧真源，
+    /// 事实是它的影子——影子失败不该让本体失败（拿不到写者令牌 / 撞幂等键只记日志）。
+    /// b3 切主读之后这里升级为错误，那是 b3 批内的工序（ADR-053 迁移表的 b3 行）。
+    ///
+    /// ## 返回值
+    ///
+    /// **受这次变更影响、且仍留在存储里的节点的权威副本**：`Born` 回追加进去的那批
+    /// （按追加顺序，含存储分配的 `seq`——落库回包靠它），`Edited` 回改写后的那批，
+    /// `Removed` 回空（被删的节点不在存储里，交回它们等于让前端对齐幻影）。
+    pub(crate) async fn apply(
+        &self,
+        change: MessageChange,
+    ) -> Result<Vec<ChatMessage>, PluginError> {
+        // ① 落事实（**先于**写缓存）。
+        if let Some(dir) = self.store.session_dir(&self.session_id) {
+            match &change {
+                MessageChange::Born {
+                    nodes,
+                    carrier: Carrier::Here,
+                } => super::super::v2_messages::added(&dir, nodes),
+                MessageChange::Edited(msgs) => {
+                    for m in msgs {
+                        super::super::v2_messages::edited(&dir, m);
+                    }
+                }
+                MessageChange::Removed(ids) => super::super::v2_messages::removed(&dir, ids),
+                // 承载事实由运行器落（用户发言 / 助手正文 / 工具结果）——此处再落
+                // 一条 `message.added` 就是第二个 owner。
+                MessageChange::Born {
+                    carrier: Carrier::Runner,
+                    ..
+                } => {}
+            }
+        }
+
+        // ② 折列表 + ③ 写缓存。
+        match change {
+            MessageChange::Born { nodes, .. } => self.append_messages(nodes).await,
+            MessageChange::Edited(msgs) => {
+                let mut list = self.get_messages().await?;
+                for m in &msgs {
+                    if let Some(existing) = list.iter_mut().find(|e| e.id == m.id) {
+                        *existing = m.clone();
+                    }
+                }
+                self.replace_all(list).await?;
+                Ok(msgs)
+            }
+            MessageChange::Removed(ids) => {
+                let mut list = self.get_messages().await?;
+                list.retain(|m| !ids.contains(&m.id));
+                self.replace_all(list).await?;
+                Ok(Vec::new())
+            }
+        }
+    }
+
     /// 追加消息并落库，返回**落库后的权威副本**（含存储分配的 `seq` / `timestamp`）。
     ///
     /// ## 为什么回消息，而不是回条数
@@ -133,7 +248,7 @@ impl PersistentChatSession {
     /// 存在的消息，等于让前端"对齐"到幻影。
     ///
     /// 顺序与入参一致（不含被淘汰项）；落库失败则整体失败，不返回部分结果。
-    pub(crate) async fn append_messages(
+    pub(super) async fn append_messages(
         &self,
         messages: Vec<ChatMessage>,
     ) -> Result<Vec<ChatMessage>, PluginError> {
@@ -244,12 +359,9 @@ impl PersistentChatSession {
         Ok(persisted)
     }
 
-    pub(crate) async fn replace_messages(
-        &self,
-        messages: Vec<ChatMessage>,
-    ) -> Result<(), PluginError> {
+    pub(crate) async fn replace_all(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError> {
         // 持久层写入不变量（见 `ensure_durable_states`）：瞬态状态不得落盘
-        ensure_durable_states(&messages, "replace_messages")?;
+        ensure_durable_states(&messages, "replace_all")?;
         // 临界区：与 append / update 共用同一把 per-session 写锁（整份覆盖语义）
         let _write = self.store.lock_writes(&self.session_id).await;
         let mut session = self.load_session().await?;
@@ -271,7 +383,7 @@ impl PersistentChatSession {
             }
         }
         assign_seq(&mut messages, max_seq(&session.messages));
-        // 孤儿存档：`replace_messages` 整体重写消息列表（L2 语义压缩 /
+        // 孤儿存档：`replace_all` 整体重写消息列表（L2 语义压缩 /
         // Streaming 清理），被丢弃消息引用的 L0 `tool_archives/` 存档随之失去引用。
         // 此处**只统计不删除**（审计 A3）：归档的磁盘生命周期由 `tool_result_guard`
         // 的每会话滚动保留（最新 `TOOL_ARCHIVE_KEEP` 个）统一负责，写入路径不再
@@ -298,7 +410,7 @@ impl PersistentChatSession {
             if orphans > 0 {
                 plugin_info!(
                     "session",
-                    "replace_messages: {} 个工具存档失去引用（保留于 {}，等待 L0 滚动回收）",
+                    "replace_all: {} 个工具存档失去引用（保留于 {}，等待 L0 滚动回收）",
                     orphans,
                     dir.display()
                 );

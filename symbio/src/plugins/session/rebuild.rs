@@ -40,6 +40,12 @@
 //! 由 [`rebuild`] 主循环**先一步**按 id 折叠（表见 [`rebuild`] 的文档）。
 //! 把它们塞进 `nodes_of` 会得到「一次编辑多出一条节点」，而那正是折叠要防的事。
 //!
+//! `message.added`（[ADR-054](../../../../docs/decisions/session.md)）恰恰相反：它是
+//! **诞生格**，载荷里每条消息自带完整形状（写侧 `v2_messages::added` 直给），所以
+//! **每条都产节点**、经 `nodes_of` 的 `added_nodes` 逐条收下。边界同样封闭：只准
+//! 「无其他承载方的节点」（压缩记录等界面文本）搭这格；带对话内容的节点必须由
+//! 自己的诞生事实承载。
+//!
 //! `session.consolidated`（压缩快照）同理不产节点，但折法不同：它不是「改一条」而是
 //! 「**整段被摘要取代**」，所以由 [`rebuild`] 的**前置换基**处理——先把它载荷里那份
 //! 列表收成基线，再从它的下标之后接着折（见 [`rebuild`] 的文档）。
@@ -72,7 +78,7 @@ use crate::symbio_core::chat_message::{
 use crate::symbio_core::{
     event_payload_node_id, event_produced_text_node_id, event_tool_result_node_id, Entity, Event,
     Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_EDITED,
+    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED,
     EVENT_MESSAGE_REMOVED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
 
@@ -214,6 +220,24 @@ fn removed_ids(e: &Event) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// `message.added` → 载荷里的节点列表（`{ messages: [...] }`）。
+///
+/// 载荷是**写侧**给定的形状（`v2_messages::added`），一条坏条目不吃掉整批——
+/// 与 `nodes_of` 对其它格的容错同一条口径：**重建必须对任意历史事件容错**。
+/// 与 `message.edited` 不同，这里**照单全收**：诞生格的节点本就带着它自己的
+/// 位置语义（发射顺序），不存在「硬插到错误位置」的问题。
+fn added_nodes(e: &Event) -> Vec<ChatMessage> {
+    e.payload
+        .get("messages")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| serde_json::from_value::<ChatMessage>(v.clone()).ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// 一条事件 → 它承载的节点（顺序即树内顺序）。
 fn nodes_of(e: &Event) -> Vec<ChatMessage> {
     match (e.entity, e.verb, e.kind.as_str()) {
@@ -230,6 +254,9 @@ fn nodes_of(e: &Event) -> Vec<ChatMessage> {
         (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_REPORTED) => vec![reported_node(e)],
         // 工具结果：调用与结果两张卡都归这一格（一个事实一个 owner）。
         (Entity::Artifact, Verb::Asserted, EVENT_ARTIFACT_ADDED) => artifact_nodes(e),
+        // 诞生格：**没有别的格可搭车**的节点在这里出生（压缩记录节点是最典型的
+        // 一个）。按**发射顺序**插到列表末尾——顺序锚由本函数统一发号。
+        (Entity::Message, Verb::Opened, EVENT_MESSAGE_ADDED) => added_nodes(e),
         _ => Vec::new(),
     }
 }

@@ -29,6 +29,7 @@
 //! （地址 → 回执 + 变更帧）比直接调本域方法更接近真实调用面。故本域不另立
 //! 测试文件，避免同一段语义被两处用例各自钉一遍（见 `docs/module-layout.md` §2）。
 
+use super::chat_session::MessageChange;
 use super::paths::session_id_from_new_path;
 use super::plugin::SessionPlugin;
 use super::types::Session;
@@ -319,19 +320,16 @@ impl SessionPlugin {
         }
 
         let updated = existing.clone();
-        // list-write-fact patch_message: v2_messages::edited — 编辑是「这条现在读作 Y」，落 `message.edited`（[ADR-053](../../../../docs/decisions/session.md)）；不落格则切主读后内容回退到编辑前。
-        chat_session.replace_messages(messages).await?;
+        // **顺序反转**（[ADR-054] 决策 2）：变更经唯一写入口 `apply` 落——事实先落、
+        // 列表随后折叠写入。旧形态是「先写缓存、再补一条事实」，事实是事后补的，
+        // 所以它天然是可选项；收进 `apply` 之后「改了列表却没落事实」表达不出来。
+        chat_session
+            .apply(MessageChange::Edited(vec![updated.clone()]))
+            .await?;
         // 变更：一条**完整消息**帧——`content` 的语义是整条替换，正是"这次编辑"
         // 要说的事（不需要先删再建：删除帧表达的是"这个节点没了"，而编辑后它还在）。
         self.transcript_apply(session_id, crate::symbio_core::llm_message_frame(&updated))
             .await;
-        // **事实入格**（S2.7-b1，ADR-053）：缓存之外另落一条 `message.edited`，
-        // 载荷 = 补丁应用后的整条消息。此刻无人消费（主读切换在 b3），它是
-        // 「切源后编辑不回退」的全部依据。放在缓存写成功之后：缓存是 b1 的读侧
-        // 真源，事实是它的影子——影子失败不该让本体失败（见 `v2_messages` 的失败口径）。
-        if let Some(dir) = chat_session.session_dir() {
-            super::v2_messages::edited(&dir, &updated);
-        }
         Ok(updated)
     }
 
@@ -349,19 +347,22 @@ impl SessionPlugin {
         mid: &str,
     ) -> Result<Vec<String>, PluginError> {
         let chat_session = self.open_chat_session(session_id).await?;
-        let mut messages = chat_session.get_messages().await?;
+        let messages = chat_session.get_messages().await?;
 
+        // 定位截断起点：被删的是「它及其之后的所有消息」——一个动作。
         let deleted_ids: Vec<String> = match messages.iter().position(|m| m.id == mid) {
-            Some(i) => {
-                let removed: Vec<String> = messages[i..].iter().map(|m| m.id.clone()).collect();
-                messages.drain(i..);
-                removed
-            }
+            Some(i) => messages[i..].iter().map(|m| m.id.clone()).collect(),
             None => Vec::new(),
         };
 
-        // list-write-fact truncate_messages: v2_messages::removed — 截断是「这段没了」，**一次动作一条**（区间用 `ids` 表达）；不落格则切主读后被截断的消息整段复活。
-        chat_session.replace_messages(messages).await?;
+        // **顺序反转**（[ADR-054] 决策 2）：经唯一写入口 `apply` 落。一次截断落
+        // **一条** `message.removed`，区间用 `ids` 表达——逐条发事件会把一个动作拆成
+        // n 条事实，n 随消息量增长，而事实网格的价值正在于「一件事一个键」。
+        // 空列表不落格（`apply` 里 `removed` 自己判）：「什么都没删」不该在事实源上
+        // 留下痕迹，与下面不发变更帧同一条判据。
+        chat_session
+            .apply(MessageChange::Removed(deleted_ids.clone()))
+            .await?;
         // 变更：转写的**尾部区间**没了——逐条删除帧（`status = removed`）。协议里
         // 没有「清空重读」这种形态，而让消费端整份重读会把**保留的**消息也重传
         // 一遍：对"删掉若干条"这个动作，逐条通知恰好是更便宜的形态。回执里的
@@ -372,13 +373,6 @@ impl SessionPlugin {
                 .map(|id| crate::symbio_core::llm_removed_frame(id))
                 .collect();
             self.transcript_apply_all(session_id, frames).await;
-        }
-        // **事实入格**（S2.7-b1，ADR-053）：一次截断落**一条** `message.removed`，
-        // 区间用 `ids` 列表表达——逐条发事件会把一个动作拆成 n 条事实，n 随消息量
-        // 增长，而事实网格的价值正在于「一件事一个键」。空列表不落格（`removed`
-        // 自己判）：与上面不发变更帧同一条判据。
-        if let Some(dir) = chat_session.session_dir() {
-            super::v2_messages::removed(&dir, &deleted_ids);
         }
         Ok(deleted_ids)
     }

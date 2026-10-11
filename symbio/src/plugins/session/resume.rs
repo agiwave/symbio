@@ -34,6 +34,7 @@
 
 use super::chat_loop::ChatOrchestrator;
 use super::chat_session::PersistentChatSession;
+use super::chat_session::{Carrier, MessageChange};
 use super::tools::{apply_not_executed, execute_tool_async};
 use super::transcript::{llm_emit_removed, llm_emit_state};
 use super::v2_exec::ResumedTool;
@@ -117,7 +118,7 @@ async fn process_retry_turn(
     req: &ResumeRequest,
 ) -> Result<ResumeOutcome, PluginError> {
     // 1. 加载会话消息
-    let mut messages = session.get_messages().await?;
+    let messages = session.get_messages().await?;
 
     // 2. 定位 Failed Turn（target_id 指向，msg_type=Turn）
     let turn_exists = messages
@@ -148,21 +149,18 @@ async fn process_retry_turn(
         .filter(|m| to_delete.contains(&m.id))
         .cloned()
         .collect();
-    messages.retain(|m| !to_delete.contains(&m.id));
 
-    // list-write-fact process_retry_turn: v2_messages::removed — 删掉的是一**棵子树**（Failed Turn 及其全部子孙），一次动作一条（区间用 `ids` 表达）；不落格则切主读后整棵复活。
-    // 5. 持久化
-    session.replace_messages(messages).await?;
-
-    // 5b. **事实入格**（S2.7-b3 前置，[ADR-053](../../../../docs/decisions/session.md)）：
-    //     删掉的是一**棵子树**（Failed Turn 及其全部子孙）。不落格的话，主读路径切到
-    //     「从 WAL 重建」之后这些节点会**整棵复活**——重建只看事实，而事实里从未有过
-    //     「它们没了」这句话。一次动作落**一条**（区间用 `ids` 表达），与
-    //     `commands::truncate_messages` 同形（同一个理由：一个动作一个键）。
-    if let Some(dir) = session.session_dir() {
-        let ids: Vec<String> = deleted_messages.iter().map(|m| m.id.clone()).collect();
-        super::v2_messages::removed(&dir, &ids);
-    }
+    // 5. **顺序反转**（[ADR-054](../../../../docs/decisions/session.md) 决策 2）：
+    //    经唯一写入口 `apply` 落。删掉的是一**棵子树**（Failed Turn 及其全部子孙）⇒
+    //    一次动作落**一条** `message.removed`（区间用 `ids` 表达，与
+    //    `commands::truncate_messages` 同形——一个动作一个键）。不落格则主读路径切到
+    //    「从 WAL 重建」之后这棵子树**整棵复活**——重建只看事实，而事实里从未有过
+    //    「它们没了」这句话。
+    session
+        .apply(MessageChange::Removed(
+            deleted_messages.iter().map(|m| m.id.clone()).collect(),
+        ))
+        .await?;
 
     // 6. 广播删除（每个被删除的消息一条 `status = removed` 的删除帧）
     for msg in &deleted_messages {
@@ -339,20 +337,19 @@ async fn process_tool_resume_action(
         // 恢复前的终态（Failed），故此处落库的收口补丁同样是终态。
         plugin_info!("session", "[Resume] aborted during tool re-execution");
         let parent_update = finalize_aborted_parent(&mut messages, tc_idx, &req.target_id);
-        // list-write-fact process_tool_resume_action: v2_messages::edited — abort 收口把父 ToolCall 就地改写成终态；不落格则切主读后它退回**恢复前的**状态。
-        if let Err(e) = session.replace_messages(messages).await {
+        // **顺序反转**（[ADR-054] 决策 2）：经唯一写入口 `apply` 落。父 ToolCall 的
+        // 状态被就地改写成终态 ⇒ `message.edited`（载荷是改写后的**整条**：重建按 id
+        // 整条替换，不猜「这次改了哪几个字段」）。不落格的话，主读切到「从 WAL 重建」
+        // 之后这条节点会退回**恢复前的**状态。
+        if let Err(e) = session
+            .apply(MessageChange::Edited(vec![parent_update.clone()]))
+            .await
+        {
             plugin_error!(
                 "session",
                 "[Resume] 中止收口落库失败（前端仍会收到定稿补丁）: {}",
                 e
             );
-        }
-        // **事实入格**（S2.7-b3 前置）：父 ToolCall 的状态被就地改写成终态。不落格的话，
-        // 主读切到「从 WAL 重建」之后这条节点会退回**恢复前的**状态——重建看到的事实
-        // 里没有任何一条说它定稿过。载荷是**改写后的整条**（`message.edited` 的既有约定：
-        // 重建按 id 整条替换，不猜「这次改了哪几个字段」）。
-        if let Some(dir) = session.session_dir() {
-            super::v2_messages::edited(&dir, &parent_update);
         }
         llm_emit_state(sink, parent_update).await;
         return Ok(ResumeOutcome::Done);
@@ -416,22 +413,29 @@ async fn process_tool_resume_action(
     }
     let updated_parent = tc.clone();
 
-    // list-write-fact process_tool_resume_action: v2_messages::removed — 旧子没了；不落格则重建后旧结果与新结果**同时存在**（同一次调用出现两条结果）。
-    // 9. 持久化（replace_messages：删除旧子 + 新增新子 + 更新父节点）
-    session.replace_messages(messages).await?;
-
-    // 9b. **事实入格**（S2.7-b3 前置，[ADR-053](../../../../docs/decisions/session.md)）：
-    //     这一步改了**三件事**，两件需要落格（新子节点由 `turn_runner` 的续写轮落
-    //     `artifact.added`，见该处注释——它记的是「恢复产生的工具交换是已发生的事实」）：
-    //     - **旧子没了** ⇒ `message.removed`（不落格则重建后旧结果与新结果**同时存在**，
-    //       同一次调用出现两条结果）；
-    //     - **父 ToolCall 被改写**（status / `meta` / supply 时的 args 正文）⇒
-    //       `message.edited`（不落格则重建后它退回恢复前的状态）。
-    //     两条都落在「缓存写成功之后」：缓存此刻仍是读侧真源，事实是它的影子。
-    if let Some(dir) = session.session_dir() {
-        super::v2_messages::removed(&dir, std::slice::from_ref(&old_child_id));
-        super::v2_messages::edited(&dir, &updated_parent);
-    }
+    // 9. **顺序反转**（[ADR-054](../../../../docs/decisions/session.md) 决策 2）：
+    //    经唯一写入口 `apply` 落。这一步改了**三件事**：
+    //    - **旧子没了** ⇒ `Removed`（不落格则重建后旧结果与新结果**同时存在**，
+    //      同一次调用出现两条结果）；
+    //    - **父 ToolCall 被改写**（status / `meta` / supply 时的 args 正文）⇒
+    //      `Edited`（不落格则重建后它退回恢复前的状态）；
+    //    - **新子诞生** ⇒ `Born { carrier: Runner }`：只写缓存、**不落事实**——
+    //      它的承载事实由续写轮落 `artifact.added`（成功 → `ResumeOutcome::Continue`
+    //      交回 `v2` 原生路径）。旧形态里这一项搭 `replace_messages` 整表写的车，
+    //      拆原语后必须显式申报，否则结果节点只在广播里存在、缓存里没有
+    //      （T27 端到端抓过：WAL 有事实、`messages.json` 没有结果子节点）。
+    session
+        .apply(MessageChange::Removed(vec![old_child_id.clone()]))
+        .await?;
+    session
+        .apply(MessageChange::Edited(vec![updated_parent.clone()]))
+        .await?;
+    session
+        .apply(MessageChange::Born {
+            nodes: vec![new_child.clone()],
+            carrier: Carrier::Runner,
+        })
+        .await?;
 
     // 10. 广播：旧子删除（`status = removed`）+ 新子完整消息（正文首次上线）
     //     + 父节点完整消息（supply 可能改写了它的 args 正文 ⇒ 整条替换）

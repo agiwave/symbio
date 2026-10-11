@@ -37,7 +37,8 @@ use serde_json::Value;
 
 use crate::symbio_core::chat_message::ChatMessage;
 use crate::symbio_core::{
-    Entity, Event, EventWalStore, Seq, Store, Verb, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED,
+    Entity, Event, EventWalStore, Seq, Store, Verb, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED,
+    EVENT_MESSAGE_REMOVED,
 };
 
 use super::paths::V2_WAL_FILE;
@@ -69,6 +70,35 @@ pub(crate) fn edited(session_dir: &Path, msg: &ChatMessage) {
         "m-edit",
         &msg.id,
         serde_json::json!({ "message": payload }),
+    );
+}
+
+/// 一条消息**诞生** ⇒ 落一条 `message.added`（载荷 `{ messages: [...] }`）。
+///
+/// 只服务「**没有别的格可搭车**」的节点（压缩记录节点是最典型的一个）——承载着
+/// 对话内容的节点（用户发言 / 助手正文 / 工具结果）必须由它们自己的事实落，
+/// 否则同一条节点有两个 owner（[ADR-049](../../../../docs/decisions/session.md#adr-049-wal-是会话唯一事实源sessionstore-降为缓存轨-s-的起点) 理由 1）。
+///
+/// 空列表不落格：「没有节点诞生」不该在事实源上留下痕迹，与 [`removed`] 同一条判据。
+pub(crate) fn added(session_dir: &Path, msgs: &[ChatMessage]) {
+    if msgs.is_empty() {
+        return;
+    }
+    let payload = match serde_json::to_value(msgs) {
+        Ok(v) => v,
+        Err(e) => {
+            crate::plugin_warn!("session", "[message] 诞生事实未入格：序列化失败：{e}");
+            return;
+        }
+    };
+    append(
+        session_dir,
+        EVENT_MESSAGE_ADDED,
+        Verb::Opened,
+        "m-add",
+        // 溯源锚取**第一条**：与 [`removed`] 同形——一次诞生的一个动作，锚在它身上。
+        msgs.first().map(|m| m.id.as_str()).unwrap_or_default(),
+        serde_json::json!({ "messages": payload }),
     );
 }
 

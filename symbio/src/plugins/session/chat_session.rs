@@ -40,6 +40,11 @@ use tokio::sync::RwLock;
 mod read;
 mod write;
 
+// 变更原语是**唯一写入口** `write::apply` 的入参类型——它们的消费方在 `session`
+// 域的各个写点，所以从这里重导出（`mod write` 本身保持私有：两个存储原语
+// `append_messages` / `replace_all` 不得被 `write.rs` 之外直接调用，可见性即守卫）。
+pub(crate) use write::{Carrier, MessageChange};
+
 /// 会话引擎句柄（`SESSION_HANDLE` 键的值类型）。
 pub struct ChatSessionHandle(pub Arc<PersistentChatSession>);
 
