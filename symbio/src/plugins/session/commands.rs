@@ -319,6 +319,7 @@ impl SessionPlugin {
         }
 
         let updated = existing.clone();
+        // list-write-fact patch_message: v2_messages::edited — 编辑是「这条现在读作 Y」，落 `message.edited`（[ADR-053](../../../../docs/decisions/session.md)）；不落格则切主读后内容回退到编辑前。
         chat_session.replace_messages(messages).await?;
         // 变更：一条**完整消息**帧——`content` 的语义是整条替换，正是"这次编辑"
         // 要说的事（不需要先删再建：删除帧表达的是"这个节点没了"，而编辑后它还在）。
@@ -359,6 +360,7 @@ impl SessionPlugin {
             None => Vec::new(),
         };
 
+        // list-write-fact truncate_messages: v2_messages::removed — 截断是「这段没了」，**一次动作一条**（区间用 `ids` 表达）；不落格则切主读后被截断的消息整段复活。
         chat_session.replace_messages(messages).await?;
         // 变更：转写的**尾部区间**没了——逐条删除帧（`status = removed`）。协议里
         // 没有「清空重读」这种形态，而让消费端整份重读会把**保留的**消息也重传

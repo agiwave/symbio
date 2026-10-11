@@ -402,6 +402,7 @@ impl SessionPlugin {
                     // 存储分配的权威 `seq`——两套序号空间并存正是「排序偶尔错位、
                     // 刷新才恢复」的根源。落库与回包合并在 `append_and_publish` 里，
                     // 这里只声明「走插件出口、按本会话 id 解析转写」。
+                    // list-write-fact start_turn: by-design — 用户消息落库；`turn × opened`（`EVENT_USER_MESSAGE`）由**运行器**落（`v2_exec` 的注释写明了这一点），本处只做「落库 + 回包」，把存储分配的权威 `seq` 换进实时面。
                     let appended = async {
                         let session = this_spawn.open_chat_session(&sid_spawn).await?;
                         append_and_publish(

@@ -453,6 +453,7 @@ async fn compress_snapshot_inner(
     context.consolidated = Some(new_messages.clone());
     context.messages = new_messages;
 
+    // list-write-fact compress_snapshot_inner: context.consolidated — 压缩腿的变更**寄存**于此，由持令牌方落 `session.consolidated`；就地落格会拿到 `NotTheWriter`，而那是静默的（压缩照常生效，事实源里却少一条）。
     let _ = context
         .session
         .replace_messages(context.messages.clone())
@@ -603,6 +604,7 @@ async fn compress_with_snapshot_core(
         // 落库 + 落库回包：压缩是会话里真实发生的一步，应当留下记录。否则用户刷新后
         // 只看到"历史突然变短了"，却没有任何东西说明发生过什么。回包那一步换入
         // `finish` 帧还缺的存储权威号（§3.4）；失败只记日志——前端已收到终态。
+        // list-write-fact compress_with_snapshot_core: pending — 压缩**记录节点**是新节点（此前不存在），按 ADR-054 该落 `message.added`（`message × opened`）；它没有既有事实可搭车，切主读后这条记录会整条消失。
         if let Err(err) = append_and_publish(
             &context.session,
             vec![node],
@@ -730,6 +732,7 @@ pub(crate) async fn retry_compaction(
     // `get_context_messages` 的过滤里本就看不见（它会滤掉 Failed 消息），
     // 拿过滤视图去删会「删了个空气」，节点反而留在存储里。
     messages.retain(|m| m.id != target_id);
+    // list-write-fact retry_compaction: v2_messages::removed — 旧失败节点被删；这条路径的全部意义就是「重试不留旧失败痕迹」，不落格则切主读后它复活。
     session.replace_messages(messages).await?;
     // **事实入格**（S2.7-b3 前置，[ADR-053](../../../../docs/decisions/session.md)）：
     // 旧失败节点被删。不落格的话，主读切到「从 WAL 重建」之后它会**复活**——而这条
@@ -800,6 +803,7 @@ pub(crate) async fn retry_compaction(
                     )
                     .await;
                 let sid = context.session.session_id();
+                // list-write-fact retry_compaction: pending — 「未触发压缩」记录节点同 `compress_with_snapshot_core`：新节点，需 `message.added`。
                 // 落库 + 回包：同上，换回存储分配的权威 `seq`（§3.4）。
                 if let Err(err) = append_and_publish(
                     &context.session,

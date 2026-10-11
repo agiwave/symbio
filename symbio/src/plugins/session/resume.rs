@@ -150,6 +150,7 @@ async fn process_retry_turn(
         .collect();
     messages.retain(|m| !to_delete.contains(&m.id));
 
+    // list-write-fact process_retry_turn: v2_messages::removed — 删掉的是一**棵子树**（Failed Turn 及其全部子孙），一次动作一条（区间用 `ids` 表达）；不落格则切主读后整棵复活。
     // 5. 持久化
     session.replace_messages(messages).await?;
 
@@ -338,6 +339,7 @@ async fn process_tool_resume_action(
         // 恢复前的终态（Failed），故此处落库的收口补丁同样是终态。
         plugin_info!("session", "[Resume] aborted during tool re-execution");
         let parent_update = finalize_aborted_parent(&mut messages, tc_idx, &req.target_id);
+        // list-write-fact process_tool_resume_action: v2_messages::edited — abort 收口把父 ToolCall 就地改写成终态；不落格则切主读后它退回**恢复前的**状态。
         if let Err(e) = session.replace_messages(messages).await {
             plugin_error!(
                 "session",
@@ -414,6 +416,7 @@ async fn process_tool_resume_action(
     }
     let updated_parent = tc.clone();
 
+    // list-write-fact process_tool_resume_action: v2_messages::removed — 旧子没了；不落格则重建后旧结果与新结果**同时存在**（同一次调用出现两条结果）。
     // 9. 持久化（replace_messages：删除旧子 + 新增新子 + 更新父节点）
     session.replace_messages(messages).await?;
 

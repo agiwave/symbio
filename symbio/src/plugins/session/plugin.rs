@@ -155,6 +155,7 @@ pub(crate) async fn append_and_publish(
     to: PublishTarget<'_>,
     session_principal: &str,
 ) -> Result<(), PluginError> {
+    // list-write-fact append_and_publish: by-design — 唯一的消息追加写点**本体**（包装层）；它自己不落事实，落事实是**调用方**的事——这条登记让「`append_messages` 只有这一处调用」有落点。
     let persisted = session
         .append_messages(
             messages

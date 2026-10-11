@@ -270,6 +270,7 @@ impl SessionPlugin {
             }
         }
 
+        // list-write-fact persist_failure: pending — 就地改写了根 Turn 与子节点的状态，并可能**新增** `partial` 节点；按 ADR-054：状态改写 = `message.edited`、新节点 = `message.added`。
         if let Err(e) = chat_session.replace_messages(all).await {
             crate::plugin_error!("session", "persist_failure: replace_messages failed: {}", e);
         }
@@ -371,6 +372,7 @@ impl SessionPlugin {
             return 0;
         }
 
+        // list-write-fact converge_inflight: pending — 在途图收敛把在途副本的权威形态写回存储（含状态改写与 `partial` 新节点），同 `persist_failure`。
         if let Err(e) = chat_session.replace_messages(all).await {
             crate::plugin_error!(
                 "session",

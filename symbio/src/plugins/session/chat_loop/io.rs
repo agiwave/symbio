@@ -59,6 +59,7 @@ pub(crate) async fn persist_messages(
         return;
     }
 
+    // list-write-fact persist_messages: by-design — 在途助手 / 工具节点落库（`last_saved..` 那一段）；它们的事实由**运行器**落（助手正文走 `v2_exec` 的 `assistant.progressed`、工具结果走 `turn_runner` 的 `artifact.added`），本处只做「落库 + 回包」——两处都落就是两个 owner。
     match append_and_publish(
         &context.session,
         new_messages.to_vec(),

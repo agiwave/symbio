@@ -17,6 +17,7 @@
 | **E** | 插件入口与门面 | `scripts/plugin-entry-audit.mjs` | E-001–009、E-011–012 | `E-013` |
 | **GC** | 判据码命名空间本身 | `scripts/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
 | **GW** | 门禁接线（测试文件与门禁名单的对账） | `scripts/gate-wiring-audit.mjs` | GW-001–005 | `GW-006` |
+| **LWF** | 列表写入口事实 | `scripts/list-write-fact-audit.mjs` | LWF-001–004 | `LWF-005` |
 | **M** | 机制表 | `scripts/mechanism-audit.mjs` | M-001–008 | `M-009` |
 | **N** | core 命名 | `scripts/core-naming-audit.mjs` | N-001–005 | `N-006` |
 | **NDC** | 主体直连 | `scripts/no-direct-call-audit.mjs` | NDC-001–002 | `NDC-003` |
@@ -66,6 +67,10 @@
 | **GW-003** | `scripts/gate-wiring-audit.mjs` |
 | **GW-004** | `scripts/gate-wiring-audit.mjs` |
 | **GW-005** | `scripts/gate-wiring-audit.mjs` |
+| **LWF-001** | `scripts/list-write-fact-audit.mjs` |
+| **LWF-002** | `scripts/list-write-fact-audit.mjs` |
+| **LWF-003** | `scripts/list-write-fact-audit.mjs` |
+| **LWF-004** | `scripts/list-write-fact-audit.mjs` |
 | **M-001** | `scripts/mechanism-audit.mjs` |
 | **M-002** | `scripts/mechanism-audit.mjs` |
 | **M-003** | `scripts/mechanism-audit.mjs` |
