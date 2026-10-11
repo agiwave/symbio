@@ -11,6 +11,7 @@ const repoRoot = path.resolve(scriptDir, '..', '..')
 const gen = path.join(scriptDir, '..', 'gen-current-facts.mjs')
 const genCodes = path.join(scriptDir, '..', 'gen-gate-codes.mjs')
 const genRoutes = path.join(scriptDir, '..', 'gen-routes-ts.mjs')
+const regAudit = path.join(scriptDir, '..', 'registry-audit.mjs')
 
 export default {
   id: 'facts',
@@ -46,6 +47,18 @@ export default {
             label: 'gen-routes-ts',
             cmd: process.execPath,
             args: [genRoutes],
+            cwd: repoRoot,
+          }),
+      },
+      {
+        // 登记汇总页是**条目文件的投影**（同 CURRENT.md 是代码的投影）：确定性输出，
+        // 写成 --check 只会因为「人忘了重跑」而红。校验判据在 30-docs 的 registry-audit。
+        label: 'registry-audit --write（自动重新生成登记汇总页）',
+        run: (c) =>
+          autoWork(c, {
+            label: 'registry-audit --write',
+            cmd: process.execPath,
+            args: [regAudit, '--write'],
             cwd: repoRoot,
           }),
       },

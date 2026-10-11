@@ -20,6 +20,18 @@
 判断一件事要不要做只问两件事——**它属哪个迁移步**、**本步混进去还能不能独立回退**。
 标尺（哪一层可妥协）见 [`docs/plan/README.md`](docs/plan/README.md) §0.1。
 
+## 任务 / 规范登记：状态只写在 registry/*.md
+
+顶层机制（总纲：[`docs/plan/14-登记与汇总机制.md`](docs/plan/14-登记与汇总机制.md)）：
+任务、规范等条目各是**一个带 front-matter 的单文档**，住 `registry/<kind>/`；
+`registry/` 下各级 `INDEX.md` 由脚本生成，**不手改**。
+
+- 查待办 / 已完成 / 某一条：`node scripts/registry-board.mjs`（`--kind=` / `--status=` / `--id=`）
+- 登记新条目、改状态 = 改条目文件本身（字段规范：`registry/spec/SP-001.md`）
+- 改完跑 `node scripts/registry-audit.mjs`；门禁自动重生成汇总页并暂存（`gate.d/60-facts.mjs`）
+- `prio`（now / next / later）只排同层顺序，**不裁决冲突**；冲突按总纲 §4 分层消解
+- 接管既有手写汇总表 = 登记一个 task（清单见总纲 §6）；**别再新建手写汇总表**
+
 ## 压缩快照不是事实来源
 
 快照只承载**只有本对话知道的东西**：偏好、已做的决策与被否决的方案及理由、死路、

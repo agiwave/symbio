@@ -108,6 +108,15 @@ export const GUARDS = [
   // 临时目录名比前缀，盘符大小写不同必然假红）。它反向也判：名单指名的文件不存在 ⇒
   // 那一步跑的是空气。判据是「名单 vs 目录事实」两个方向的差集，不是词表。
   'gate-wiring-audit',
+  // `registry-audit`（RG-001…013）判**登记条目本身**——「单文档 + 元信息 + 自动汇总」
+  // 这套顶层机制（plan/14）的全部强制力：front-matter 可解析、字段按 kind 收口、
+  // 编号唯一且文件名即编号、状态机与状态×字段矩阵（done 必有 evidence、wont 必有
+  // reason）、依赖不悬空 / 不成环 / 开工时前置已闭环、正文小节齐、SP-001 字段表与
+  // 代码 schema 恰好相等（RG-011）、出口判据指认的脚本必须存在（RG-012）。
+  // 它治的病是 13 §0 纪律 2 / 4 在**状态登记处自身**上的缺口：手工表格的状态流转
+  // 此前没有任何机械核对。失效形态只有一种——判定写宽 ⇒ 违规条目照样过且日志一片绿，
+  // 故回归测试逐条注入钉「必须红、且只红这一条」，外加本仓 dogfood 断言防「读空即全绿」。
+  'registry-audit',
 ]
 // 不是**判定型**审计脚本，只跑回归测试（共享库 / 门禁原语 / 报告型脚本）：
 //   - `color` 带一道「scripts/ 下不得手写 ANSI」守卫；
@@ -214,6 +223,9 @@ export const TEST_ONLY = [
  *  - `gen-gate-codes`：`reference/GATE_CODES.md` 的生成器，由本阶段 spawn；
  *  - `line-count`：门禁报告里的行数统计；
  *  - `doc-find`：「某条约定写在哪」的检索入口（`docs/README.md` 导航里对用户承诺的命令）。
+ *  - `registry-lib`：登记机制（plan/14）的共享实现——front-matter 解析、schema 校验
+ *    （RG-001…013 的判据与消息字面量都在它身上，判据码声明在它文件头）、汇总渲染；
+ *    被 `registry-audit` 与 `registry-board` 共读，判据只写一份。
  *
  * 刻意**不在**这里：`check-commit-msg` 与 `cargo-offline-refresh` 由 git hook /
  * 人工触发，不是门禁的一环；`gate.mjs` 自己即门禁入口。
@@ -229,6 +241,7 @@ export const LIBS = [
   'gen-gate-codes',
   'line-count',
   'doc-find',
+  'registry-lib',
   // `e2e-concurrency` 的门内版本在 `58-e2e.mjs` 里逐轮打印，本脚本供人工复核 + `--ci`。
   //
   // 登记成 LIBS 而不是 GUARDS：它**不是一个独立的门禁步骤**，而是 e2e 阶段的
@@ -236,7 +249,15 @@ export const LIBS = [
   'e2e-concurrency',
 ]
 /** 不进门禁的辅助脚本：登记它们是为了让 GW-004 的「谁引用它」这条判据有落点。 */
-export const OUT_OF_GATE = ['check-commit-msg', 'cargo-offline-refresh', 'gate']
+export const OUT_OF_GATE = [
+  'check-commit-msg',
+  'cargo-offline-refresh',
+  'gate',
+  // `registry-board`：登记看板的**查询台**（stdout 打印，支持 --kind / --status / --id）。
+  // 登记成 OUT_OF_GATE 而不是 GUARDS：校验判据全在 `registry-audit`（它进门禁），
+  // 本脚本是同一条校验的只读出口——先校验后打印，有违规拒绝出结论，本身无新判据。
+  'registry-board',
+]
 // 报告型：只防崩溃（退出码恒 0，判定需人工复核），走日志不刷屏。
 // 刻意 `echo: 'none'`：这份报告的候选会长期存在（大部分是签名组成部分与自引用），
 // 每次门禁都刷一遍只会训练人忽略它。要看结论就单独跑一次脚本。
