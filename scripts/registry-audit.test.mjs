@@ -159,6 +159,10 @@ test('RG-003：id 形状 / 文件名对账 / 跨 kind 重复 各自变红', () =
   const shape = caseRoot({ 'task/bad-id.md': taskDoc('1bad', { body: undefined }) })
   expectOnly(errsOf(shape), /RG-003 id 不合形状/)
 
+  // 历史批次号含圈号（S-end①）：编号是身份、不得重排，ID 形状必须放行 Unicode 字母数字
+  const circle = caseRoot({ 'task/S-end①.md': taskDoc('S-end①') })
+  assert.deepEqual(errsOf(circle), [], 'S-end① 必须合法')
+
   const renamed = caseRoot({ 'task/wrong.md': taskDoc('T-040') })
   expectOnly(errsOf(renamed), /RG-003 文件名必须等于编号（应为 `T-040\.md`）/)
 

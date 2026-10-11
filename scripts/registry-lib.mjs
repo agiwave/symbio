@@ -94,7 +94,9 @@ export const ALL_KEYS = [
   ...new Set([...KINDS.task.required, ...KINDS.task.optional, ...KINDS.spec.required, ...KINDS.spec.optional]),
 ].sort()
 
-export const ID_RE = /^[A-Za-z][A-Za-z0-9]*(?:[._-][A-Za-z0-9]+)*$/
+// 编号必须能当文件名：字母开头，其后为字母数字 / . _ - 与 Unicode 字母数字。
+// 历史批次号里有 `S-end①` 这类圈号——编号是**身份**不是代号，迁移登记时不得重排。
+export const ID_RE = /^[A-Za-z][A-Za-z0-9._\-\p{L}\p{N}\p{M}]+$/u
 export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
 /**
@@ -324,7 +326,7 @@ export function auditEntries(entries, root) {
     // RG-003 编号形状 / 文件名对账 / 全 registry 唯一
     if (!isEmpty(meta.id)) {
       if (typeof meta.id !== 'string' || !ID_RE.test(meta.id)) {
-        out.push(`${e.rel}：RG-003 id 不合形状（字母开头，后接字母数字与 . _ - 分段）：${JSON.stringify(meta.id)}`)
+        out.push(`${e.rel}：RG-003 id 不合形状（字母开头，其后为字母数字 / . _ - 与 Unicode 字母数字；必须可作文件名）：${JSON.stringify(meta.id)}`)
       } else {
         if (e.name !== `${meta.id}.md`) {
           out.push(`${e.rel}：RG-003 文件名必须等于编号（应为 \`${meta.id}.md\`）——文件名即编号的对账`)
