@@ -242,14 +242,13 @@ import {
   type DetailPick,
 } from '@/schemas/vdfs-form'
 import {
-  widgetFromEdit,
   widgetInitialOf,
   widgetIsFullWidth,
-  widgetIsReadonly,
   widgetPlaceholderOf,
   widgetSpecOf,
   widgetToEdit,
 } from '@/registry/formWidgets'
+import { buildSave, type SaveContext } from './detailForm/save'
 import type {
   DetailAction,
   DetailBadge,
@@ -576,7 +575,7 @@ function runAction(a: DetailAction) {
     case 'save': {
       // info 只读：没有 save 语义
       if (isInfo.value) return
-      const values = buildSave()
+      const values = buildSave(saveCtx())
       if (!isUpload.value) {
         // 数据来自外部的绑定：只交回纯字段值，不让动作载荷污染它
         emit('save', values)
@@ -609,66 +608,21 @@ function runAction(a: DetailAction) {
   }
 }
 
-// ==================== 保存（upload 绑定）：id/name 派生回落链 ====================
-function isEmpty(v: unknown): boolean {
-  return v == null || v === '' || (Array.isArray(v) && v.length === 0)
-}
-
-/** 可读 slug + `-2` 递增去重（机制内唯一实现，新建态 id 派生用） */
-function generateId(base: string): string {
-  const used = new Set(props.existingIds)
-  const slug =
-    base
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9-_]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'resource'
-  let id = slug
-  let counter = 2
-  while (used.has(id)) {
-    id = `${slug}-${counter}`
-    counter++
+// ==================== 保存（upload 绑定）：载荷派生住在 `detailForm/save` ====================
+// 序列化 / id 派生 / name 回落链是纯函数（见 `./detailForm/save`）；本组件只把当前
+// props/form 装成它的 `SaveContext`。`valueOf`（含 `is_existing` / `cap.*` 机制键）
+// 留在组件里，因为它依赖表单模型。
+function saveCtx(): SaveContext {
+  return {
+    definition: props.definition,
+    form,
+    isVisible: fieldVisible,
+    isUpload: isUpload.value,
+    node: props.node,
+    existingIds: props.existingIds,
+    idFrom: firstNonEmpty(props.definition.id_from),
+    nameFrom: firstNonEmpty(props.definition.name_from),
   }
-  return id
-}
-
-/**
- * 字段序列化（机制唯一实现）：list → string[]、map → 对象；static 只读。
- *
- * `ignoreVisibility = false`（upload 绑定）时，`visible_when` 不满足的字段
- * 不参与保存（如 mcp 的 stdio/http 互斥字段）；
- * `ignoreVisibility = true`（其余绑定）时保存全部字段——表单对应的是一份
- * **完整配置对象**（如心跳任务：关闭开关不得丢失间隔/提示词）。
- */
-function buildValues(ignoreVisibility: boolean): Record<string, unknown> {
-  const out: Record<string, unknown> = {}
-  for (const sec of props.definition.sections) {
-    for (const f of sec.fields) {
-      if (widgetIsReadonly(f.widget)) continue
-      if (!ignoreVisibility && !fieldVisible(f)) continue
-      out[f.key] = widgetFromEdit(f.widget, form[f.key])
-    }
-  }
-  return out
-}
-
-/**
- * 保存载荷（机制唯一入口）：
- * - 非 upload 绑定：纯字段值，由页面写回它自己的通道；
- * - upload 绑定：带上 id（既有节点用 `node.name`，新建态按定义派生），
- *   并补齐 name 回落链（首个非空字段补 name，不覆盖用户已填的 name）。
- */
-function buildSave(): Record<string, unknown> {
-  if (!isUpload.value) return buildValues(true)
-  const id = props.node?.name || generateId(firstNonEmpty(props.definition.id_from) || 'resource')
-  const values = buildValues(false)
-  const manifest: Record<string, unknown> = { id, ...values }
-  const nameFrom = firstNonEmpty(props.definition.name_from)
-  const nameKey = props.definition.name_from?.[0]
-  if (nameKey && nameFrom && isEmpty(form[nameKey])) {
-    manifest[nameKey] = nameFrom
-  }
-  return manifest
 }
 
 // ==================== 生命周期 ====================
