@@ -284,6 +284,66 @@ export function collectMacroBodies(root, coreRel, symbols) {
 }
 
 /**
+ * 符号 → **core 内“另一个模块”** 也在用它（`Map<符号, Set<core 模块>>`）。
+ *
+ * ## 为什么要单独数这一层（2026-10-11，C-003 的第二口径）
+ *
+ * `collectConsumers` 把 core 自身整个排除（「公开面是给 core 外用的」）。那条口径回答
+ * 的是 **zero 那一半**——「它够不够格占根出口」（core 内自用而对外无人用的符号不该出根）。
+ * 它**不**适合回答 **one 那一半**——「该不该下沉回那个唯一消费方」。
+ *
+ * 后果在豁免账本里看得最清楚：账本上大半条目的理由逐字写着
+ * 「core 内另有消费方（transcript / prompt_fidelity），审计只数跨出 core 的那一个」——
+ * 即**豁免是在补口径的盲区**，不是在记录符号的属性。本函数把盲区填上：
+ * 一个符号若**另有一个 core 模块**在用，那把它下沉到那唯一的外部消费方（一个插件）
+ * 就编译不过（core 不得反向依赖插件），它**本来就**是 ≥2 个模块共享的机制。
+ *
+ * ## 口径（三条，都影响结果）
+ *
+ * 1. **核心模块 = 域目录的第一段**（`projection/transcript.rs` ⇒ `projection`）；
+ *    直接住在 core 根下的文件取**文件名词干**（`authz.rs` ⇒ `authz`）——`authz` 是一个
+ *    真实的内部消费方，不是「根」；
+ * 2. **根 `mod.rs` 不算消费方**：它是**导出清单**（`pub use <域>::{…}` 会把几乎每个
+ *    符号都写成命中），把它算进来等于让每个符号自己给自己凑一个消费方；
+ * 3. **声明域自身不算**（同名命中是自引用）——要的是「**另一个**模块也在用」。
+ *
+ * 与 `collectConsumers` 共享「测试不是消费方」的口径（口径 4），故同样跳过测试文件。
+ */
+export function collectCoreDomainConsumers(root, symbols, coreRel = 'symbio/src/symbio_core') {
+  const coreDir = path.join(root, coreRel)
+  const names = [...symbols.keys()]
+  const out = new Map()
+  for (const file of walk(coreDir)) {
+    if (!file.endsWith('.rs')) continue
+    if (isTestFile(file)) continue
+    const rel = path.relative(coreDir, file).split(path.sep).join('/')
+    const head = rel.includes('/') ? rel.split('/')[0] : null
+    const stem = rel.replace(/\.rs$/, '')
+    const domain = head ?? (stem === 'mod' ? '(root)' : stem)
+    if (domain === '(root)') continue // 口径 2：导出清单不是消费方
+    const src = stripComments(fs.readFileSync(file, 'utf8'))
+    for (const name of names) {
+      if (domain === symbols.get(name)) continue // 口径 3：声明域自身是自引用
+      if (!new RegExp(`\\b${name}\\b`).test(src)) continue
+      if (!out.has(name)) out.set(name, new Set())
+      out.get(name).add(domain)
+    }
+  }
+  return out
+}
+
+/**
+ * 「该不该下沉」的唯一判据（判定型与报告型**共用**，防止两处各演化一条）：
+ * 跨 core 的**生产**消费方恰 1 个，**且 core 内没有另一个模块**在用，**且**不是自引用。
+ * 三条任一不成立都不算下放候选——见 `collectCoreDomainConsumers` 的口径说明。
+ */
+export function isSinkCandidate(row, coreConsumers) {
+  if (row.units.length !== 1) return false
+  if ((coreConsumers.get(row.name)?.size ?? 0) > 0) return false
+  return !isSelfReference({ name: row.name, units: row.units })
+}
+
+/**
  * 测试文件（命名约定见 `test-layout-audit.mjs`：`X.test.rs` 与 `tests.rs`）。
  *
  * **测试不是架构消费方**——见文件头口径 4。这条判据只有这一处实现，三个审计共用。

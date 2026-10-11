@@ -48,7 +48,7 @@
  *
  * ## 存量怎么办：棘轮基线
  *
- * 口径修正后全仓 0 消费方 0 个、单消费方 77 个（修正前 61）、仅测试在用 10 个。
+ * 口径各归其位后全仓 0 消费方 0 个、单消费方 58 个（自然 64 − 账本 6）、仅测试在用 7 个。
  * 一次性下沉 200+ 符号等于把 core 翻一遍，
  * 不可独立回退；故按本仓既有棘轮口径（`_shared.mjs` 的 `BASELINE.rustTests`、
  * `test-layout-audit` 基线）：**计数只许降，超了就红**。降到基线以下时脚本会提示同步
@@ -77,7 +77,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, yellow, green, dim } from './color.mjs'
-import { collectCoreSurface, collectConsumers, isSelfReference } from './core-surface.mjs'
+import {
+  collectCoreSurface,
+  collectConsumers,
+  collectCoreDomainConsumers,
+  isSelfReference,
+  isSinkCandidate,
+} from './core-surface.mjs'
 import { blankComments } from './rust-scan.mjs'
 
 const argv = process.argv.slice(2)
@@ -101,130 +107,29 @@ const CODE_ROOTS = ['symbio/src', 'cli/src', 'tauri/src', 'tauri/src-tauri/src']
 const WAIVERS = process.env.CORE_EXPORT_WAIVERS
   ? JSON.parse(process.env.CORE_EXPORT_WAIVERS)
   : {
-      // 治理矩阵与可见域参数（04 §3.1 批⑥ 接线）。core 外唯一消费方是 `plugins/session`
-      // 的两道闸，但它们**不能**下沉：core 内 `authz` / `governance` 自己也在用（core 不
-      // 依赖插件），而插件又够不着 `governance` 域目录的深引（C-002）⇒ 必须留根出口。
-      // 属 README §4 四问的「接缝」而非「单消费方该下沉」的情形（`authz` 迁入 core 后
-      // 它们掉了原本由 `crate::authz` 充当的第 2 个消费方，见 `symbio_core/mod.rs` 注）。
-      PermissionMatrix:
-        '插件-facing 治理契约类型：E-009/C-002 禁止插件深引 core 域目录，必须留根出口；core 内 authz 与 governance 亦用，无法下沉到唯一消费方',
-VisScope:
-        '同上：读侧可见域参数类型，插件经 session/stats 读闸传入，core 内 authz 亦用，无法下沉',
-      // `ActorSpec`（F3 冻结锚点，`plan/01 §4` 主体规格五字段）：2026-10-09 `TurnRunner`
-      // 族下沉 `plugins/session` 后**新现**的单消费方根导出。它此前是 `pub(crate)`——靠
-      // `TurnInput.actor`（当时的根导出）**顺带**可达，故不必自己占根出口；运行器搬走后
-      // 这条顺带路径消失，而 C-002 又禁止插件深引 `symbio_core::actors::…` ⇒ 插件够不着它。
-      // 它**不可下沉**：F3 冻的是**字段集**，把 `ActorSpec` 搬出 core 就是架构变更
-      // （03 §1「修改 F1–F6 = 架构变更」的负向约束），与 `PermissionMatrix` / `VisScope`
-      // 同属 README §4 四问的「接缝」而非「单消费方该下沉」。
+      // 2026-10-11（W1）：账本从 18 条清到 **6 条**。清掉的那 12 条，理由逐字写着
+      // 「core 内另有消费方（transcript / prompt_fidelity / authz …），审计只数跨出
+      // core 的那一个」——那是**口径的盲区**，不是符号的属性。C-003 的「该不该下沉」
+      // 现在按 core-surface.mjs 的 isSinkCandidate 判（跨 core 的生产消费方恰 1 个
+      // **且 core 内没有另一个模块在生产用它**）；盲区填上后那 12 条**结构上**已不再
+      // 显为单消费方 ⇒ 豁免自行失效并被删除（纪律 2：豁免是在补口径的洞，补洞该补
+      // 口径，不该把洞登记成永久账目）。
+      //
+      // 剩下 6 条是**真·单消费方接缝**：core 内确实没有第二个模块（生产）在用，但既
+      // 下沉不了（core 不得反向依赖插件 / 类型行为无处安放），又必须占根出口（C-002
+      // 禁插件深引 core 域目录）。
       ActorSpec:
-        'F3 冻结锚点（plan/01 §4 主体规格五字段：principal/pattern/capabilities/budget_ms/scope）：core 外唯一生产消费方是 plugins/session（v2_exec 构造 + turn_runner 读 principal），但**不可下沉**——F3 冻的是它的字段集，搬出 core 即架构变更（03 §1）；且 C-002 禁止插件深引 core 域目录 ⇒ 插件只能经根出口拿它。属 README §4 四问的「接缝」而非「单消费方该下沉」（与 PermissionMatrix / VisScope 同形）',
-      // 注：`CapabilityRiskLevel` 曾挂在这张豁免表上（「静态扫描只数到首个 use 点」）。
-      // 门禁已判定该豁免失效并要求删除——工具侧真的开始读它之后，多消费方是可证的，
-      // 不再依赖豁免。风险等级改为由各工具在 `CapabilityMeta` 里自声明，
-      // 消费方（local 审批闸门 / 各插件 meta）都是具名的。
-      //
-      // 同理 `PromptMessage`：P3e 时它是 `LlmAdapter` 公开 trait 的入参、只数到一个
-      // 跨 core 的消费方（`plugins/model` 的测试），本表据此给了豁免。P3c 之后
-      // `plugins/session` 也开始用 ⇒ 消费方 2 个 ⇒ **豁免失效，已删除**（门禁会主动
-      // 报这个，不靠人记得清理）。
-      //
-      // `RoundInjector` 曾挂在本表上（理由：它在 `LlmAdapter` 的入参链里、trait 在 core
-      // 外可实现）。**2026-10-09 已失效删除**：`TurnRunner` 族整体下沉 `plugins/session`
-      // 后，`RoundInjector` 也随之搬走（它只经 `TurnInput::inject` 出现），不再是 core
-      // 公开面符号 ⇒ 豁免条目必须删（门禁会主动报「已不在公开面」，不靠人记得清理）。
-      // `EVENT_TURN_SUPPLEMENTED`（批 P3c 新增事件名，`turn × asserted`）：
-      // 与 `EVENT_ARTIFACT_ADDED` / `EVENT_ASSISTANT_*` / `EVENT_USER_MESSAGE` 同类——
-      // **事件名必须单点定义**（`event/mod.rs` 是唯一 owner，散落字面量必然漂），
-      // 而它们都占根出口供插件按名字引用。core 外唯一消费方是 `plugins/session`
-      // （落格与投影），与同域那几个事件同形——不是「新开的口子」。
-      EVENT_TURN_SUPPLEMENTED:
-        '事件名常量：与 EVENT_ARTIFACT_ADDED / EVENT_* 同类，event/mod.rs 单点定义、插件按名引用。Core 外唯一消费方 = plugins/session（落格 + 投影），同域存量事件同形',
-      // `EVENT_ASSISTANT_REPORTED`（缺口 4 的新事件名，`turn × asserted`）：
-      // 与 `EVENT_TURN_SUPPLEMENTED` 同批同格——落格在 `plugins/session/v2_exec`，
-      // 投影在 core 内（`projection/transcript.rs`，走域内路径不占根）。所以跨 core
-      // 的消费方只有 session 那一个，与上面那条同形。
-      EVENT_ASSISTANT_REPORTED:
-        '事件名常量：与 EVENT_TURN_SUPPLEMENTED 同类同格（turn × asserted），event/mod.rs 单点定义、插件按名引用。Core 外唯一消费方 = plugins/session（v2_exec 落格），投影在 core 内走域内路径',
-      // `EVENT_ASSISTANT_PROGRESS`（轨 S2.6 的进展格，`turn × progressed`）：
-      // 与上面两条同族同由——事件名必须单点定义，落格在
-      // `plugins/session/turn_runner`，投影在 core 内（`projection/transcript.rs` /
-      // `prompt_fidelity.rs`）走域内路径。所以跨 core 的消费方只有 session 那一个。
-      EVENT_ASSISTANT_PROGRESS:
-        '事件名常量：与 EVENT_TURN_SUPPLEMENTED / EVENT_ASSISTANT_REPORTED 同类（event/mod.rs 单点定义、插件按名引用）。Core 外唯一消费方 = plugins/session（turn_runner 落进展格），投影在 core 内走域内路径',
-      // `EVENT_SESSION_RECONCILED`（轨 S 第一步的双源对账事件，`system × asserted`）：
-      // 与上面几条同族同由——事件名必须单点定义（散落字面量必然漂），core 外唯一
-      // 消费方是 `plugins/session/v2_reconcile`（对账落格）。落在 `System` 而不是
-      // 新开 `Session` 实体：`Entity` 是闭集，加臂要 ADR 登记，而对账是运维诊断。
+        'F3 冻结锚点（plan/01 §4 主体规格五字段：principal/pattern/capabilities/budget_ms/scope）：core 外唯一生产消费方是 plugins/session（v2_exec 构造 + turn_runner 读 principal），但**不可下沉**——F3 冻的是它的字段集，搬出 core 即架构变更（03 §1）；且 C-002 禁止插件深引 core 域目录 ⇒ 插件只能经根出口拿它。属 README §4 四问的「接缝」而非「单消费方该下沉」',
       EVENT_SESSION_RECONCILED:
-        '事件名常量：与 EVENT_* 同类，event/mod.rs 单点定义、插件按名引用。core 外唯一消费方 = plugins/session/v2_reconcile（双源对账落格）',
-      // `EVENT_MESSAGE_EDITED` / `EVENT_MESSAGE_REMOVED`（S2.7-b1 的变更格，
-      // `message × asserted` / `message × closed`，见 ADR-053）：
-      // 与上面四条事件名同族同由——事件名必须单点定义（散落字面量必然漂），
-      // 落格在 `plugins/session`（`v2_messages` 写、`rebuild` 回放），投影在 core 内
-      // （`projection/mutations` + `transcript` + `prompt_fidelity`）走域内路径。
-      // 所以跨 core 的消费方只有 session 那一个，与同域存量事件名同形。
-      EVENT_MESSAGE_EDITED:
-        '事件名常量：与 EVENT_TURN_SUPPLEMENTED / EVENT_SESSION_RECONCILED 同类，event/mod.rs 单点定义、插件按名引用。Core 外唯一消费方 = plugins/session（v2_messages 落格 + rebuild 回放），折叠索引与投影在 core 内走域内路径',
-      // `EVENT_MESSAGE_ADDED`（S2.7-b3 前置的诞生格，`message × opened`，
-      // 见 ADR-054）：与 EVENT_MESSAGE_EDITED / REMOVED 同族同由——事件名必须
-      // 单点定义（散落字面量必然漂）。落格在 `plugins/session`（`v2_messages::added`
-      // 经唯一写入口 `apply`、`rebuild::added_nodes` 回放），投影在 core 内
-      // （`projection/transcript` + `prompt_fidelity`）走域内路径。所以跨 core 的
-      // 消费方只有 session 那一个，与同域存量事件名同形。
-      EVENT_MESSAGE_ADDED:
-        '事件名常量：与 EVENT_MESSAGE_EDITED 同族（message × opened 诞生格，ADR-054 闭集第 4 原语），event/mod.rs 单点定义、插件按名引用。Core 外唯一消费方 = plugins/session（apply 落格 + rebuild 回放），投影在 core 内走域内路径',
-      EVENT_MESSAGE_REMOVED:
-        '事件名常量：与 EVENT_MESSAGE_EDITED 同批同格（message × closed，与 memory.forgotten 同形），event/mod.rs 单点定义、插件按名引用。Core 外唯一消费方 = plugins/session（truncate 落格 + rebuild 丢弃）',
-      // `EVENT_SESSION_CONSOLIDATED`（S2.7-b2 的压缩快照，`message × progressed`，
-      // 见 ADR-053 决策 6）：与上面五条事件名同族同由——事件名必须单点定义
-      // （散落字面量必然漂）。落格在 `plugins/session/v2_exec`（压缩入格 + 段归档），
-      // 取窗口在 `turn_runner`，换基在 `rebuild`；投影与快照定位在 core 内
-      // （`projection/transcript` / `prompt_fidelity` / `mutations`）走域内路径。
-      // 所以跨 core 的消费方只有 session 那一个，与同域存量事件名同形。
-      EVENT_SESSION_CONSOLIDATED:
-        '事件名常量：与 EVENT_MESSAGE_EDITED / EVENT_SESSION_RECONCILED 同类，event/mod.rs 单点定义、插件按名引用。Core 外唯一消费方 = plugins/session（v2_exec 落格并归档 / turn_runner 取窗口 / rebuild 换基），投影与快照定位在 core 内走域内路径',
-      // `mutations_latest_snapshot`（S2.7-b2）：读侧要「最近一份压缩快照 + 它取代了
-      // 多少轮」。与 `turnstate` / `transcript` 同族同形——**判据只在 core 有一份实现**
-      // （`projection/mutations`），插件经根函数名调用（C-002 禁深引域目录）。core 内
-      // 另有消费方（`transcript` 换基 / `prompt_fidelity` 跳过被取代段），审计只数跨出
-      // core 的那一个（`plugins/session` 的 `turn_runner` / `v2_exec` / `rebuild`），
-      // 故显为单消费方。**不可下沉**：五处读侧若各写一份「哪一份是最近的」，不一致
-      // 会静默表现为「重建用旧快照、请求包用新快照」。
-      mutations_latest_snapshot:
-        '快照定位规则：core 内一份实现（transcript 换基 / prompt_fidelity 跳过被取代段），插件经根名调用（C-002 禁深引 projection 域）。core 外唯一消费方 = plugins/session（turn_runner 取窗口 / v2_exec 判幂等并取轮次水位 / rebuild 换基）。不可下沉——五处读侧各写一份必然漂，而漂的后果是静默的',
-      // 节点身份规则（S2.7-b1，ADR-053）：`event_payload_node_id` /
-      // `event_produced_text_node_id` / `event_tool_result_node_id`。
-      // 与 `turnstate` / `transcript` 同族同形——**规则只在 core 有一份实现**，
-      // 插件（`plugins/session/rebuild` 折节点树）经根函数名调用（C-002 禁深引
-      // `symbio_core::event::…`）。core 内另有消费方（`projection/transcript` 折对话行、
-      // `projection/prompt_fidelity` 复核），审计只数跨出 core 的那一个，故显为单消费方。
-      // **不可下沉**：三处读侧若各写一份「这条事件承载哪个节点」，不一致会静默表现为
-      // 「编辑没生效」——单点定义正是本组函数存在的理由。
-      event_payload_node_id:
-        '载荷节点身份规则：core 内一份实现（transcript 折对话行 / prompt_fidelity 复核），插件经根名调用（C-002 禁深引 event 域）。core 外唯一消费方 = plugins/session/rebuild（折节点树）。不可下沉——三处读侧各写一份必然漂，而漂的后果是静默的',
-      event_produced_text_node_id:
-        '同上：收束 / 进展 / 兜底格的正文子节点 id（含 reasoning-only 复用 reasoning 流式 id 的规则）。与 event_payload_node_id 成组，core 外唯一消费方同为 plugins/session/rebuild',
-      event_tool_result_node_id:
-        '同上：工具结果节点 id（恢复路载荷记 null ⇒ 按事件 id 合成，不复用 tool_call_id——结果与调用是两张卡）。与上面两条成组，core 外唯一消费方同为 plugins/session/rebuild',
-      // `turnstate`（轨 S 第二步才接上第一个 core 外消费方）：与同族的
-      // `transcript` / `slo_report` / `fallback_rate` / `checkpoint` 同形——**投影只该
-      // 在 core 有一份实现**，插件经根函数名调用（C-002 禁深引域目录）。S2 的
-      // Q3 进展读切用它判「末轮已开未收束」（in_flight 的 WAL 侧判据），
-      // 与旧读法的"末条消息未见终态"同源。
+        '事件名常量：与 EVENT_* 同类，event/mod.rs 单点定义、插件按名引用。core 外唯一生产消费方 = plugins/session/v2_reconcile（双源对账落格）；core 内没有第二个生产模块引用这个常量（对账只在插件侧落格），故下沉不了而必须留根出口',
       turnstate:
-        '投影函数：与 transcript / slo_report / fallback_rate / checkpoint 同族同形（core 内一份实现、插件经根名调用）。core 外唯一消费方 = plugins/session/v2_worker_progress（S2 的 in_flight 判据）',
-      // `SloLatencyView` / `FallbackRateView`（P2 的跨会话聚合）：**被 core 外消费的
-      // 类型**，与 `TurnState` / `PromptMessage` 同族。`merge` 是类型的行为——提成根
-      // 函数会让它变成无主函数（谁的数据谁的行为）；而 C-002 禁止插件深引
-      // `symbio_core::projection::…` ⇒ 类型必须占根出口。core 内另有消费方
-      // （`actors` / `fallback` 自身），审计只数跨出 core 的那一个（plugins/session
-      // 的实例级聚合列），故显为单消费方。两者**成对**：时延与兜底两列一起合并，
-      // 少任一个另一个无意义，故一并登记而不是各写半句。
+        '投影函数：与 transcript / slo_report / fallback_rate / checkpoint 同族同形——**投影只该在 core 有一份实现**，插件经根函数名调用（C-002 禁深引域目录）。core 外唯一生产消费方 = plugins/session/v2_worker_progress（S2 的 in_flight 判据）。core 内没有第二个生产模块用它（同域内只有测试彩排），故显为单消费方',
       SloLatencyView:
-        'P2 跨会话聚合的视图类型：merge 是类型行为（提成根函数即无主函数），C-002 禁插件深引 ⇒ 类型必须占根。core 内另有消费方（actors），审计只数 plugins/session 的聚合列那一个',
+        'P2 跨会话聚合的视图类型：merge 是类型行为（提成根函数即无主函数），C-002 禁插件深引 ⇒ 类型必须占根。core 内没有第二个生产消费模块（跨会话聚合实现在插件侧），故显为单消费方',
       FallbackRateView:
-        '同上：与 SloLatencyView 成对（时延 + 兜底一起合并），core 外唯一消费方同为 plugins/session 的实例级聚合列',
+        '同上：与 SloLatencyView 成对（时延 + 兜底一起合并），core 外唯一生产消费方同为 plugins/session 的实例级聚合列，core 内没有第二个生产消费模块',
+      mutations_latest_snapshot:
+        '快照定位规则（S2.7-b2）：core 内一份实现（transcript 换基 / prompt_fidelity 跳过被取代段），插件经根名调用（C-002 禁深引 projection 域）。core 外唯一生产消费方 = plugins/session（turn_runner 取窗口 / v2_exec 判幂等并取轮次水位 / rebuild 换基）。core 内没有第二个生产消费模块（store 侧只有测试），故显为单消费方。不可下沉——五处读侧各写一份必然漂，而漂的后果是静默的',
     }
 
 /**
@@ -235,25 +140,31 @@ VisScope:
  * （定义留在原域 `pub`，core 内走域内路径），只被测试/无人使用的存量另由
  * `dead-code-audit` R-002 逐项承认。
  *
- * `75` 是当前存量。它由两条来源构成，**都不是新增违规**：
+ * `58` 是当前存量（自然单消费方 64，其中 6 条登记在 `WAIVERS`），两条来源都不是新增违规：
  * - **口径修正**（2026-10-09）：**测试文件不再算架构消费方**（口径全文见
  *   `core-surface.mjs` 的 `collectConsumers`）——此前「一个模块在生产用、另一个模块的
  *   测试顺手写了一次名字」被读成「两个模块依赖」，遮住了一批真·单消费方符号。
  *   `zero` 不受影响（仍按**含测试**计——只被测试用到的符号收窄会编译坏那些测试）。
- * - **`TurnRunner` 族下沉**（2026-10-09）：−5 整体下沉 `plugins/session`（判据 ADR-023）；
- *   +2（`LlmAdapter` / `EVENT_ARTIFACT_ADDED`）因 session 生产代码新消费而升为单消费方。
+ * - **W1 的第二口径**（2026-10-11）：「该不该下沉」不再只看跨 core 的消费方，而是按
+ *   `isSinkCandidate` 判——**core 内另有生产模块在用**的符号本来就下沉不了（core 不得
+ *   反向依赖插件），把它留在根出口不是「豁免」而是口径本该如此。此前的豁免账本大半
+ *   条目正是在补这个盲区（见上方 `WAIVERS` 注），现在账本 18 → 6，一格计数随之下沉。
+ *   ⚠️ 这**抵消了** 2026-10-09 那次口径修正引入的一格虚高（当时 one 61→77 是测量口径
+ *   的一次真实变化；这次把 two 条口径各归其位后回落到 58，不再需要
+ *   `core-export-allow one` 那条棘轮格下修豁免）。
  *
- * 这些都是**单消费方但不可下沉**的接缝（core 契约元素），按 README §4 四问逐条处置
- * （下沉 / 豁免），处置一个就把这里降一格。
+ * 存量的处置判据仍是 README §4 四问（下沉 / 成文契约 / 登记豁免），处置一个就把这里
+ * 降一格。**注意**：本格只数「既没跨 core 第二个模块用、又不是自引用」的单消费方；
+ * 一个符号在 `--verbose` 的 `[ 1]` 里出现即代表它仍待处置。
  */
+
 const BASELINE = process.env.CORE_EXPORT_BASELINE
   ? (() => {
       const [zero, one] = process.env.CORE_EXPORT_BASELINE.split(':').map((n) => Number(n))
       return { zero, one }
     })()
-  : { zero: 0, one: 77 }
+  : { zero: 0, one: 58 }
 
-// core-export-allow one: 2026-10-09 口径修正——测试文件不再算架构消费方（口径全文见 core-surface.mjs 口径 4），此前被测试计数遮住的 24 个真·单消费方符号现形（TurnRunner / TurnInput / Store / Entity / PromptMessage / ProviderLlmAdapter …），故 one 61→77（同日下沉 TurnRunner 族后为 75，见上）。**这是测量修正，不是放松判据**：那 24 个一直都在，旧口径把它们读成了 ≥2。零消费方那一格（zero）不变——它按含测试计，只被测试用到的符号收窄会当场编译坏那些测试。**退出条件**：这 24 个按 README §4 四问逐条处置（下沉或登记豁免），每处置一个就把 one 降一格；全部处置完（one 回落到 ≤61）时**必须删掉本行**，否则这条豁免会长期掩盖 one 的后续放松。
 
 
 const errors = []
@@ -343,6 +254,10 @@ for (const r of CODE_ROOTS) {
 // - `unitsAll`（含测试）：判「够不够格占根出口」⇒ 只有测试在用的，收窄会把测试编译坏。
 const consumers = collectConsumers(ROOT, symbols, CORE_REL)
 const consumersAll = collectConsumers(ROOT, symbols, CORE_REL, { includeTests: true })
+// 「该不该下沉」的第二个输入：core 内**另一个生产模块**也在用它（口径见 core-surface.mjs
+// 的 collectCoreDomainConsumers）。一个符号若有第二个 core 生产消费模块，下沉到那唯一的
+// 外部消费方（插件）当场编译不过 ⇒ 它本来就该留根出口，不是「单消费方接缝」。
+const coreConsumers = collectCoreDomainConsumers(ROOT, symbols, CORE_REL)
 const byName = (a, b) => a.domain.localeCompare(b.domain) || a.name.localeCompare(b.name)
 const rows = [...symbols.keys()]
   .map((name) => ({
@@ -379,9 +294,7 @@ const zero = rows.filter((r) => r.unitsAll.length === 0 && !waivedNow.has(r.name
 // 「只有测试在用」单列一档：它是**合法的根出口**，但也不是架构元素——既不收窄、不下沉。
 const testOnly = rows.filter((r) => r.units.length === 0 && r.unitsAll.length > 0)
 // 「该不该下沉」按**不含测试**的口径：测试依赖的是被测对象，不是长期接口。
-const one = rows.filter(
-  (r) => r.units.length === 1 && !isSelfReference(r) && !waivedNow.has(r.name),
-)
+const one = rows.filter((r) => isSinkCandidate(r, coreConsumers) && !waivedNow.has(r.name))
 const many = rows.filter((r) => r.units.length >= 2)
 
 if (zero.length > BASELINE.zero) {

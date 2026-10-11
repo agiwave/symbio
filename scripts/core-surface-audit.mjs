@@ -45,7 +45,13 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, yellow, green, dim } from './color.mjs'
-import { collectCoreSurface, collectConsumers, isSelfReference } from './core-surface.mjs'
+import {
+  collectCoreSurface,
+  collectConsumers,
+  collectCoreDomainConsumers,
+  isSelfReference,
+  isSinkCandidate,
+} from './core-surface.mjs'
 
 const argv = process.argv.slice(2)
 const VERBOSE = argv.includes('--verbose')
@@ -70,11 +76,15 @@ const symbols = surface.symbols
 // 计数口径收在 [`core-surface.mjs`](./core-surface.mjs)——判定型的 `core-export-audit.mjs`
 // 判「≥2 个模块消费」走的是**同一份**计数，避免「报告说 A、判定说 B」。
 //
-// **两个口径，问两个问题**（2026-10-09 修正，理由见 `core-surface.mjs` 的 `collectConsumers`）：
-// - `units`（**不含测试**）：判「算不算架构元素」⇒ 单消费方是下放候选；
-// - `unitsAll`（含测试）：判「够不够格占根出口」⇒ 只被测试用到的符号收窄会编译坏那些测试。
+// **两问两口径**（理由见 `core-surface.mjs` 的 `collectConsumers` 与
+// `collectCoreDomainConsumers`）：
+// - 「够不够格占根出口」（`unitsAll`，含测试）：core 外没人用的得收窄；
+// - 「算不算架构元素 / 该不该下沉」（`isSinkCandidate`）：跨 core 生产消费方恰 1 个
+//   **且 core 内没有另一个生产模块在用**（2026-10-11，W1）——core 内有人用的符号
+//   下沉出去就编译不过，它本来就该留根出口。
 const consumers = collectConsumers(ROOT, symbols, CORE_REL)
 const consumersAll = collectConsumers(ROOT, symbols, CORE_REL, { includeTests: true })
+const coreConsumers = collectCoreDomainConsumers(ROOT, symbols, CORE_REL)
 
 // ==================== 报告 ====================
 
@@ -88,7 +98,7 @@ const rows = allNames.map((name) => ({
 
 const zero = rows.filter((r) => r.unitsAll.length === 0)
 const testOnly = rows.filter((r) => r.units.length === 0 && r.unitsAll.length > 0)
-const one = rows.filter((r) => r.units.length === 1 && !isSelfReference(r))
+const one = rows.filter((r) => isSinkCandidate(r, coreConsumers))
 const selfRef = rows.filter(isSelfReference)
 const many = rows.filter((r) => r.units.length >= 2)
 
@@ -101,6 +111,8 @@ console.log(
 const byName = (a, b) => a.domain.localeCompare(b.domain) || a.name.localeCompare(b.name)
 
 console.log(`\n--- 仅 1 个消费方（ADR-023 的**下放候选**，逐条判定，见 README §4 四问）---`)
+console.log(`    口径：跨 core 生产消费方恰 1 个**且 core 内没有另一个生产模块在用**；`)
+console.log(`    core 内有人用的已排除（下沉出去就编译不过）。判定型另扣 WAIVERS 账本（现 6 条）。`)
 console.log(`    ⚠️ 动手前先排除两类误判：① 它是某个**多消费方函数的形参/返回类型**吗？`)
 console.log(`       ② 消费点是不是走**字段访问**（类型名不出现）？`)
 if (one.length === 0) console.log('  （无）')
@@ -127,8 +139,10 @@ if (VERBOSE) {
   }
   console.log(`\n--- 全部符号 ---`)
   for (const r of rows.sort(byName)) {
+    const coreUsed = [...(coreConsumers.get(r.name) ?? [])]
     console.log(
-      `  [${String(r.units.length).padStart(2)}] ${(r.domain ?? '?').padEnd(12)} ${r.name.padEnd(32)} ${dim(r.units.join(', '))}`,
+      `  [${String(r.units.length).padStart(2)}] ${(r.domain ?? '?').padEnd(12)} ${r.name.padEnd(32)} ${dim(r.units.join(', '))}` +
+        (coreUsed.length ? dim(`  (core 内亦用: ${coreUsed.join(', ')})`) : ''),
     )
   }
 }

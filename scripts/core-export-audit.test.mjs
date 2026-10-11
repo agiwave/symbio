@@ -247,6 +247,39 @@ test('C-003 口径：测试文件不算架构消费方（生产 1 + 测试 1 ⇒
   assert.match(r.stderr, /单消费方/)
 })
 
+test('C-003 口径：core 内另一生产模块也在用 ⇒ 不算下放候选（放行，W1）', () => {
+  // 一个符号只跨出 core 到一个插件，但**另一个 core 域**也在用它：下沉到那个插件当场
+  // 编译不过（core 不得反向依赖插件）⇒ 它本来就该留根出口，不是「单消费方接缝」。
+  // 这正是豁免账本大半条目的理由（「core 内另有消费方，审计只数跨出 core 的那一个」）。
+  const r = audit(
+    clean({
+      [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, SharedThing};\n',
+      [ACTORS_MOD]: 'pub struct AlphaThing;\npub struct SharedThing;\n',
+      'symbio/src/plugins/alpha/shared.rs':
+        'use crate::symbio_core::SharedThing;\npub fn s(_: SharedThing) {}\n',
+      'symbio/src/symbio_core/projection/p.rs':
+        'use crate::symbio_core::actors::SharedThing;\npub fn p(_: SharedThing) {}\n',
+    }),
+  )
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+})
+
+test('C-003 口径：声明域自身 / 根导出清单提及，都不算第二个消费模块（仍判红）', () => {
+  const r = audit(
+    clean({
+      [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, LonelyThing};\n',
+      [ACTORS_MOD]: 'pub struct AlphaThing;\npub struct LonelyThing;\n',
+      'symbio/src/plugins/alpha/lonely.rs':
+        'use crate::symbio_core::LonelyThing;\npub fn l(_: LonelyThing) {}\n',
+      // 同域内再提一次 = 自引用；根 mod.rs 的 `pub use` = 导出清单。两者都不是消费方。
+      'symbio/src/symbio_core/actors/other.rs':
+        'use crate::symbio_core::LonelyThing;\npub fn o(_: LonelyThing) {}\n',
+    }),
+  )
+  assert.equal(r.status, 1, '同域提及与导出清单都不能救一个真·单消费方符号')
+  assert.match(r.stderr, /单消费方/)
+})
+
 test('C-003 口径：仅测试在用 ⇒ 合法根出口（放行，不收窄）', () => {
   // 收窄它会把那个测试编译坏（C-002 又不许它深引）⇒「测试在用」足以让它留在根出口。
   const r = audit(
