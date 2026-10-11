@@ -37,7 +37,7 @@ import {
   nextPort,
   providerConfig,
   PROVIDER_ID,
-  readMessagesJson,
+  readSessionMessages,
   assertTranscriptInvariants,
   assertSeqAnchorIsNodeAttribute,
 } from '../helpers.mjs';
@@ -195,8 +195,8 @@ export default defineCase('T9 gateway WS 实时面：vdfs 变更帧序与增量�
         '——否则「不忙 ⇒ 本轮已终态」推不出来',
     );
 
-    // ⑪ 落盘同源：实时面与存储是同一份事实
-    assertTranscriptInvariants(readMessagesJson(hd.homedir, 'e2e-t9'), 'T9');
+    // ⑪ 落盘同源：实时面与存储是同一份事实（经生产读出口读）
+    assertTranscriptInvariants(await readSessionMessages(cli, 'e2e-t9'), 'T9');
   } finally {
     rt?.close();
     cli.stop();

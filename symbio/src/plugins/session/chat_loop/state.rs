@@ -224,6 +224,18 @@ pub(crate) struct TurnState {
     /// 事实源。它**只读不写**——算不出来（没开过任务 / 就绪集空）就是
     /// `None`，请求视图里就少一段，不存在"空占位"。
     pub(crate) ready_section: Option<String>,
+    /// 本轮**对话面开场白**正文（S2.7）：`Escalate` 首响。
+    ///
+    /// 由步骤 2b 的 `apply_verdict`（`VerdictEffect::Spoke`）填充，交 `execute_turn`
+    /// 落成 `chat.assistant.opening` 格。**落格不在本文件**——写者令牌只在执行口，
+    /// 与缺口 5 的答话同一条分割（判定与措辞在 chat_loop，落格在 v2_exec）。
+    /// `None` = 本轮没有开场白（常态）。
+    pub(crate) opening_text: Option<String>,
+    /// 开场白**对话面节点**的身份与标记（仅 [`TurnState::opening_text`] 有值时消费）。
+    ///
+    /// 三样（`id` / `reason` / `exclude_from_context`）是节点形状的一部分，必须随
+    /// 事实入格，否则重建折出的节点与实时面是两个身份（见 `TurnInput::opening_dialog`）。
+    pub(crate) opening_dialog: Option<crate::plugins::session::turn_runner::DialogFacts>,
 }
 
 /// 主循环的唯一退出原因。

@@ -770,9 +770,16 @@ async fn new_session_ids_are_distinct() {
 // 表达不了这种集合操作）。
 
 /// 造一个带 N 条消息的会话：id 为 `m0..mN`、`seq` 单调（顺序的唯一权威锚点）。
+///
+/// 切主后（ADR-049）消息正文的真源是**事实源**，缓存只留元数据：
+/// 先种一条开场事件（给 `message.added` 立溯源锚——空切片上变更事实按口径
+/// 不落格），再落诞生事实。开场事件**不带节点 id**：它只当锚，不该在投影里
+/// 多出一条虚构发言（转写列表 = `m0..mN`）。
 async fn seed_messages(p: &SessionPlugin, id: &str, texts: &[&str]) {
-    let mut s = Session::new(id);
-    s.messages = texts
+    let s = Session::new(id);
+    p.save_session(&s).await.unwrap();
+
+    let nodes: Vec<cm::ChatMessage> = texts
         .iter()
         .enumerate()
         .map(|(i, t)| cm::ChatMessage {
@@ -784,7 +791,34 @@ async fn seed_messages(p: &SessionPlugin, id: &str, texts: &[&str]) {
             ..Default::default()
         })
         .collect();
-    p.save_session(&s).await.unwrap();
+    let store = p.get_store().await.unwrap();
+    let Some(dir) = store.session_dir(id) else {
+        panic!("会话目录未建出（save_session 应已创建）");
+    };
+    // 直落一条诞生事实：形状与 `v2_messages::added` 产出的一致（同一载荷键），
+    // 省掉它为立溯源锚而多要的那跳开场（投影只认载荷，锚是写侧的要求）。
+    {
+        use crate::symbio_core::Store as _;
+        let payload = match serde_json::to_value(&nodes) {
+            Ok(v) => v,
+            Err(e) => panic!("序列化种子消息失败：{e}"),
+        };
+        let wal = dir.join(crate::plugins::session::paths::V2_WAL_FILE);
+        let fs = crate::symbio_core::EventWalStore::open(&wal).expect("打开事实源失败");
+        fs.append(
+            crate::symbio_core::Event::pending(
+                "m-add-0",
+                crate::symbio_core::EVENT_MESSAGE_ADDED,
+                crate::symbio_core::Entity::Message,
+                // `turn = 0`：种子是裸数据，不属于任何一轮（与 v2_messages::append 同约定）。
+                crate::symbio_core::Verb::Opened,
+                0,
+                crate::symbio_core::authz::PRINCIPAL_USER,
+            )
+            .with_payload(serde_json::json!({ "messages": payload })),
+        )
+        .expect("种诞生事实失败");
+    }
 }
 
 /// 转写列表里现有哪几条（经 VDFS 的 `消息` 列表，即使用方看到的那一份）。

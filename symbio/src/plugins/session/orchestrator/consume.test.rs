@@ -26,6 +26,28 @@ fn fixture() -> (tempfile::TempDir, SessionPlugin) {
     (dir, plugin)
 }
 
+/// 直落一条用户发言格（生产中每轮首帧的事实，`v2_exec` 落的 `u-{turn}`）。
+///
+/// 切主后（ADR-049）存储里的正文 = 事实投影：空切片上，收口要落的变更事实
+/// （`v2_messages::append`）连溯源锚都解不出、会按口径被丢弃。
+fn seed_user_message(dir: &std::path::Path) {
+    use crate::symbio_core::Store as _;
+    let wal = dir.join(crate::plugins::session::paths::V2_WAL_FILE);
+    let s = crate::symbio_core::EventWalStore::open(&wal).expect("打开事实源失败");
+    s.append(
+        crate::symbio_core::Event::pending(
+            "u-open",
+            crate::symbio_core::EVENT_USER_MESSAGE,
+            crate::symbio_core::Entity::Turn,
+            crate::symbio_core::Verb::Opened,
+            1,
+            crate::symbio_core::authz::PRINCIPAL_USER,
+        )
+        .with_payload(serde_json::json!({ "text": "第一问", "id": "u-open" })),
+    )
+    .expect("种子事实落格失败");
+}
+
 fn node(id: &str, parent: Option<&str>, status: cm::MessageStatus) -> cm::ChatMessage {
     cm::ChatMessage {
         id: id.into(),
@@ -57,12 +79,10 @@ fn turn_node(id: &str, status: cm::MessageStatus) -> cm::ChatMessage {
 async fn handle_abort_signals_registered_turn_and_converges() {
     let (_dir, p) = fixture();
     let sid = "s-abort-entry";
-    p.get_store()
-        .await
-        .unwrap()
-        .save_session(&Session::new(sid))
-        .await
-        .unwrap();
+    let store = p.get_store().await.unwrap();
+    store.save_session(&Session::new(sid)).await.unwrap();
+    // 每轮首帧的用户发言格：切片非空 ⇒ 收口的变更事实有溯源锚可解。
+    seed_user_message(&store.session_dir(sid).expect("会话目录未建出"));
 
     let state = Arc::new(ActiveSessionState::with_session_id(
         sid.into(),

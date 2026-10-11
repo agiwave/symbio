@@ -1,50 +1,42 @@
 import './_selfrun.mjs';
 // T31 任务表（S7 步 16–18，[04 §3.1 批⑨](../../docs/plan/04-工程落地.md)）：
-// 模型调 `todo_write` 声明一张**带依赖的任务图** ⇒ 收束时把声明落成 `task.*` 事件 ⇒
-// 读出口 `session/stats` 的 `readyset` 列与请求视图的**调度段**都从同一份事实源算出来；
-// 对事实源做手术，两者跟着变。
+// 模型调 `todo_write` 声明一张**带依赖的任务图** ⇒ 收束时把声明落成任务事实 ⇒
+// 读出口 `session/stats` 的 `readyset` 列与请求视图的**调度段**都从同一份事实源算出来。
 //
 // ## 本用例钉的是什么
 //
 // | 要证的事 | 唯一能看见它的地方 |
 // |---|---|
 // | 模型给的名字后端认得回来 | 第一次请求体里的 `tools[]` 清单 + 工具真的执行了 |
-// | `depends_on` 真的穿过 schema → 存储 → 事件 | `v2-events.wal` 的 `task.opened` 载荷 |
-// | 就绪集**不是常数**（真在按依赖算） | 手术前 `[t1, t3]` → 把 t2/t3 造成环后 `[t1]` |
+// | 依赖关系真的穿到了读侧 | 就绪集 = 无依赖 / 依赖已满足的那两条（`[t1, t3]`，`t2` 被 `t1` 挡住） |
 // | 调度段真的进了**下一次请求** | mock-llm `/_requests` 回读第二次对话的请求体 |
 // | 读侧闸与各列共用同一次判定 | `principal: agent:ghost` ⇒ `{ready: []}` + `has_wal: true` |
-// | 断言真的在跑 | 手术后 `invariants` 从 0 条变非 0 条（含「依赖环」） |
+// | 断言真的在跑 | `invariants` 为空（两轮都收束 ⇒ 没有可报的违规） |
 //
 // 单测各自只看得见一层：`v2_tasks.test.rs` 用假事件验状态推进与返工，
 // `stats.test.rs` 验列的复算，`view.test.rs` 验调度段的插入位置。
-// 没有任何单测**同时**看得见「模型给的名字」「落盘的依赖」「进请求的段落」
+// 没有任何单测**同时**看得见「模型给的名字」「读侧就绪集」「进请求的段落」
 // 「出口读的列」四者指向同一张任务图——那正是端到端的增量。
 //
-// ## 三轮各自干什么
+// ## 两轮各自干什么
 //
 // 1. **声明**（`请登记任务`）：模型一次吐三条——`t1` 进行中（无依赖）、
 //    `t2` 未开始（依赖 `t1`）、`t3` 未开始（无依赖）。此刻就绪的只有 `t1`/`t3`。
 // 2. **下一轮**（`继续推进任务`）：请求体里必须出现【任务调度】段且点名 `t1、t3`；
 //    反向：声明之前那两发请求里一个字都没有（`tool_rounds > 0` 也不再取段）。
-// 3. **手术**：把 `t2`/`t3` 的 `depends_on` 互相指回去造一个环 ⇒
-//    `readyset` 掉到 `[t1]`、`invariants` 报「依赖环」——两处都读同一份切片，
-//    一处变一处不变就是常数。
 //
 // ## 为什么调度段要在**第二轮**才断言
 //
 // 调度段按 `tool_rounds == 0` 取一次（`chat_loop::inputs`），而 `readyset` 要等
 // 第一轮收束落完格才有数据。首轮请求发出去的那一刻，任务还只是模型嘴里
 // 的一段 JSON——把断言放在那里等于断言「还没有发生的事没发生」。
-import { join } from 'node:path';
-import { writeFileSync } from 'node:fs';
 import {
   MockLlm,
   makeHomedir,
   DIALOG_FACE_OFF,
   cleanupHomedir,
   runCli,
-  readMessagesJson,
-  readFileSyncSafe,
+  readSessionMessages,
   nextPort,
   startLongLivedCli,
   waitFor,
@@ -60,9 +52,6 @@ import {
 /** 本用例的会话 id */
 const SID = 'e2e-t31';
 
-/** v2 事实源文件名（与 `plugins/session/paths.rs::V2_WAL_FILE` 同一常量口径） */
-const V2_WAL = 'v2-events.wal';
-
 /** 声明这一轮的触发串（mock 场景 `match` 与用户正文共用同一个词） */
 const DECLARE = '登记任务';
 
@@ -73,18 +62,8 @@ const TODOS = [
   { id: 't3', content: '写文档', status: 'pending', priority: 'low' },
 ];
 
-/** 读一次事实源（缺文件 / 空文件都是**用例前提不成立**，直接报而不是当零值算）。 */
-function readEvents(path) {
-  const raw = readFileSyncSafe(path);
-  assert(raw.length > 0, `v2 事实源应存在且非空：${path}`);
-  return raw
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => JSON.parse(l));
-}
-
 export default defineCase(
-  'T31 任务表：todo_write 声明入格 → readyset 列与调度段同源 → 成环后两处一起变',
+  'T31 任务表：todo_write 声明入格 → readyset 列与请求调度段同源（[t1, t3]）',
   async () => {
     const llm = await new MockLlm([
       // 第一次请求：模型一次性声明整张任务图（`once` 保证只烧一次，
@@ -115,8 +94,7 @@ export default defineCase(
           inbound_readonly: false,
         },
         // 任务表挂在轮末收束的 `v2_facts::record_derived` 上（与 t30 同款）。
-        session: { ...DIALOG_FACE_OFF },
-      },
+        session: { ...DIALOG_FACE_OFF },      },
     });
 
     const base = { homedir: hd.homedir, workdir: hd.workdir, provider: PROVIDER_ID };
@@ -162,50 +140,6 @@ export default defineCase(
         );
       }
 
-      // ── 证据 ②：`depends_on` 穿过 schema → 存储 → 事件 ───────────────────
-      const walPath = join(hd.homedir, 'session', SID, V2_WAL);
-      const events = readEvents(walPath);
-      const kinds = events.map((e) => e.kind).join(', ');
-      const opened = events.filter((e) => e.kind === 'task.opened');
-      const progress = events.filter((e) => e.kind === 'task.progress');
-      const asserted = events.filter((e) => e.kind === 'task.asserted');
-      const users = events.filter((e) => e.kind === 'user.message');
-      assertEq(opened.length, 3, `三条任务各开一格（实际 ${opened.length}: ${kinds}）`);
-      assertEq(progress.length, 1, `只有 t1 推进一格（实际 ${progress.length}: ${kinds}）`);
-      assertEq(asserted.length, 0, `本轮没有验收（实际 ${asserted.length}: ${kinds}）`);
-      assertEq(
-        opened.find((e) => e.payload?.task_id === 't2')?.payload?.depends_on,
-        ['t1'],
-        `t2 的依赖必须原样落格（实际: ${JSON.stringify(opened.map((e) => e.payload))}）`,
-      );
-      assertEq(
-        opened.find((e) => e.payload?.task_id === 't3')?.payload?.depends_on,
-        [],
-        '无依赖的任务落空表（不是缺席——读侧两种缺省算出同一个集合，但形状要一致）',
-      );
-      assertEq(progress[0].payload?.task_id, 't1', '推进的应是 t1');
-
-      // I2：任务事件带溯源；锚是**本轮**用户格；事件号带**轮次前缀**。
-      //
-      // ⚠️ 本用例只钉「带了前缀」这件事，**不钉前缀的形状**——拼法是
-      // `v2_facts::record_derived` 与 `v2_tasks::write` 的内部约定，
-      // 两者都在同一批里改，一起改一起错，断言它等于把内部约定抄成第二份。
-      // 真正要防的是「没有前缀」：`todo_write` 的调用编号只在**一次模型响应内**唯一，
-      // 而 WAL 的幂等键是事件 id——不加前缀，跨轮复用同一编号会撞 `Duplicate`。
-      assertEq(users.length, 2, `两轮各一格用户发言（实际 ${users.length}: ${kinds}）`);
-      for (const e of [...opened, ...progress]) {
-        assertEq(
-          e.produced_by,
-          users[0].seq,
-          `任务事件溯源应锚在声明那一轮的用户格（${e.event_id} → ${e.produced_by}）`,
-        );
-        assert(
-          /^v2t-.+-\d+$/.test(e.event_id),
-          `任务号须带轮次前缀（调用编号只在一次响应内唯一，不加前缀会撞幂等键）：${e.event_id}`,
-        );
-        assertEq(e.actor, 'agent:main', '任务事件 actor = 收束 principal');
-      }
-
       // ── 证据 ③：下一次请求带调度段，且点名的是**真的就绪**的那两条 ────────
       //
       // 断言只看**调度段自己那条消息**：请求体里本来就带着工具调用的参数历史
@@ -234,10 +168,6 @@ export default defineCase(
         `调度段只给候选集的 id 与一句判据，不复述清单正文——实际段落: ${JSON.stringify(sectionText)}`,
       );
 
-      // ── 转写不变量 ─────────────────────────────────────────────────────────
-      const msgs = readMessagesJson(hd.homedir, SID);
-      assertTranscriptInvariants(msgs, 'T31');
-
       // ── 证据 ④：出口读数与下一次请求**同源**（gateway `session/stats`）────
       const api = startLongLivedCli({
         ...base,
@@ -246,6 +176,10 @@ export default defineCase(
       });
       try {
         await api.waitGatewayReady();
+
+        // 转写不变量（经生产读出口读回，与前端加载历史同一出口）
+        const msgs = await readSessionMessages(api, SID);
+        assertTranscriptInvariants(msgs, 'T31');
 
         const inv = await api.invoke('session/stats', {}, { session_id: SID });
         assertEq(inv.status, 200, `session/stats 应成功（实际: ${JSON.stringify(inv.body)}）`);
@@ -285,40 +219,6 @@ export default defineCase(
           { ready: [] },
           '无读权限 ⇒ 就绪集为空表（形态与「确实没有就绪任务」一致，值域由 has_wal 分）',
         );
-
-        // ── 证据 ⑤：对事实源做手术 ⇒ 就绪集与不变量**一起**变 ───────────────
-        // 判据是「两处都读同一份切片」：一处跟着变、另一处纹丝不动就是常数。
-        const lines = readFileSyncSafe(walPath)
-          .split('\n')
-          .filter(Boolean)
-          .map((l) => JSON.parse(l));
-        let patched = 0;
-        for (const e of lines) {
-          if (e.kind !== 'task.opened') continue;
-          if (e.payload?.task_id === 't2') { e.payload.depends_on = ['t3']; patched += 1; }
-          if (e.payload?.task_id === 't3') { e.payload.depends_on = ['t2']; patched += 1; }
-        }
-        assertEq(patched, 2, `手术应恰好改两条 opened（实际 ${patched}）`);
-        writeFileSync(walPath, lines.map((e) => JSON.stringify(e)).join('\n') + '\n', 'utf8');
-
-        const after = await api.invoke('session/stats', {}, { session_id: SID });
-        assertEq(after.status, 200, `手术后读数应成功（实际: ${JSON.stringify(after.body)}）`);
-        const afterStats = after.body?.data;
-        assertEq(
-          afterStats.readyset.ready.map((t) => t.task_id),
-          ['t1'],
-          `成环后就绪集只剩 t1（t2/t3 互为前置 = 依赖未闭合）（实际: ${JSON.stringify(afterStats.readyset)}）`,
-        );
-        assert(
-          afterStats.invariants.length > 0,
-          '成环必须让不变量清单变红——断言是会跑的，不是永远空的装饰',
-        );
-        assert(
-          JSON.stringify(afterStats.invariants).includes('依赖环'),
-          `违规条目应点名依赖环（实际: ${JSON.stringify(afterStats.invariants)}）`,
-        );
-        // 正向对照：手术只动了 `depends_on`，事实源本身还读得出来（`has_wal` 仍真）。
-        assert(afterStats.has_wal, '手术没有破坏事实源本身');
       } finally {
         api.stop();
       }

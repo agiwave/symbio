@@ -284,6 +284,22 @@ fn text_msg(role_is_user: bool, text: &str) -> ChatMessage {
     }
 }
 
+/// 用户格事件（载荷带节点 id；与 `rebuild.test.rs::user_event` 同形——那边是投影
+/// 判据、这边是存储判据，两处构造一致才能判到同一件事）
+fn user_event(eid: &str, node_id: &str, text: &str) -> crate::symbio_core::Event {
+    use crate::symbio_core::{Entity, Event, Verb, EVENT_USER_MESSAGE};
+    Event::pending(
+        eid,
+        EVENT_USER_MESSAGE,
+        Entity::Turn,
+        Verb::Opened,
+        1,
+        "user",
+    )
+    .with_ts(1_000)
+    .with_payload(serde_json::json!({ "text": text, "tier": "full", "id": node_id }))
+}
+
 fn session_with_messages(id: &str, updated_at: i64) -> Session {
     let mut s = Session::new(id);
     s.messages = vec![
@@ -294,28 +310,100 @@ fn session_with_messages(id: &str, updated_at: i64) -> Session {
     s
 }
 
-/// 保存拆成两个文件：元数据里**不再**内联消息
+/// 保存只写元数据：消息正文不归 store 写（[ADR-049]——`v2-events.wal` 是唯一
+/// 事实源，正文由事实路径入格；`messages.json` 停写，v1 遗留文件不再有写方）
 #[tokio::test]
-async fn save_splits_metadata_and_messages() {
+async fn save_writes_metadata_only() {
     let tmp = TempDir::new().unwrap();
     let store = SessionStore::new(tmp.path().to_path_buf());
     save(&store, &session_with_messages("v2_sess_split", 1000)).await;
 
     let dir = dir_for(tmp.path(), "v2_sess_split");
     assert!(dir.join(SESSION_FILE).is_file());
-    assert!(dir.join(MESSAGES_FILE).is_file());
+    assert!(
+        !dir.join(MESSAGES_FILE_NAME).exists(),
+        "save 不得再写 messages.json——正文的事实都在 WAL 里"
+    );
 
     let meta_text = std::fs::read_to_string(dir.join(SESSION_FILE)).unwrap();
     assert!(
         !meta_text.contains("\"messages\""),
-        "元数据里不该再内联消息：{meta_text}"
+        "元数据里不该内联消息：{meta_text}"
     );
-    let msgs_text = std::fs::read_to_string(dir.join(MESSAGES_FILE)).unwrap();
-    assert!(msgs_text.contains("帮我看看这个仓库的结构"));
 
-    // 往返：消息一条不少
+    // 没有事实（WAL 不在）⇒ 读回空消息：store 层不再持久化正文，这是新契约
     let loaded = store.load_session("v2_sess_split").await.unwrap();
-    assert_eq!(loaded.messages.len(), 2);
+    assert!(loaded.messages.is_empty());
+}
+
+/// [ADR-049] 真源判据：有 WAL 时 `messages.json` **缺失 / 写坏**都不影响读出完整
+/// 历史——读侧不依赖缓存文件，且**不读**那份坏缓存（坏缓存必须被无视，而不是
+/// 「恰好没坏所以没暴露」）。这是 t43 存储手术判断的 Rust 归属。
+#[tokio::test]
+async fn wal_is_the_source_messages_json_is_ignored() {
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+
+    // 事实入格走生产同一条 append 路（事件 → `<会话目录>/v2-events.wal`）
+    let dir = dir_for(tmp.path(), "v2_sess_truth");
+    std::fs::create_dir_all(&dir).unwrap();
+    {
+        let wal = crate::symbio_core::EventWalStore::open(
+            dir.join(crate::plugins::session::paths::V2_WAL_FILE),
+        )
+        .unwrap();
+        use crate::symbio_core::Store as _;
+        wal.append(user_event("e1", "n1", "第一问")).unwrap();
+        wal.append(user_event("e2", "n2", "第二问")).unwrap();
+    }
+    save(&store, &session_with("v2_sess_truth", None)).await;
+    assert!(
+        !dir.join(MESSAGES_FILE_NAME).exists(),
+        "save 不得写缓存文件"
+    );
+
+    // ① 缓存缺席 ⇒ 历史从 WAL 完整重建
+    let loaded = store.load_session("v2_sess_truth").await.unwrap();
+    assert_eq!(loaded.messages.len(), 2, "WAL 重建应给出两条消息");
+    assert_eq!(loaded.messages[0].id, "n1");
+    assert_eq!(loaded.messages[1].id, "n2");
+
+    // ② 缓存写坏 ⇒ 仍读 WAL（真源优先的甄别判据：坏缓存被无视）
+    std::fs::write(
+        dir.join(MESSAGES_FILE_NAME),
+        r#"{"messages":[{"id":"evil","role":"user","content":"毒"}]}"#,
+    )
+    .unwrap();
+    let loaded = store.load_session("v2_sess_truth").await.unwrap();
+    assert_eq!(loaded.messages.len(), 2, "坏缓存不得改变历史");
+    assert!(
+        loaded.messages.iter().all(|m| m.id != "evil"),
+        "坏缓存的内容不得被读进来"
+    );
+}
+
+/// [ADR-049] 回落判据：WAL 不在时回落 `messages.json`——v1 遗留会话的事实从未
+/// 入格，那个文件是它们历史的唯一记录，回落读法必须还在
+#[tokio::test]
+async fn legacy_messages_json_reads_back_when_no_wal() {
+    let tmp = TempDir::new().unwrap();
+    let store = SessionStore::new(tmp.path().to_path_buf());
+
+    let dir = dir_for(tmp.path(), "v2_sess_v1");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join(SESSION_FILE),
+        r#"{"id":"v2_sess_v1","created_at":1,"updated_at":2,"metadata":{}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join(MESSAGES_FILE_NAME),
+        r#"{"messages":[{"id":"m1","role":"user","content":"遗留的话"},{"id":"m2","role":"assistant","content":"收到"}]}"#,
+    )
+    .unwrap();
+
+    let loaded = store.load_session("v2_sess_v1").await.unwrap();
+    assert_eq!(loaded.messages.len(), 2, "v1 遗留会话的历史必须仍读得回来");
 }
 
 /// 清单只读元数据：**消息文件坏了也不影响列清单**（这是拆分的核心收益）
@@ -327,7 +415,7 @@ async fn list_sessions_does_not_touch_messages() {
 
     // 把消息文件写成垃圾：清单仍然列得出来
     std::fs::write(
-        dir_for(tmp.path(), "v2_sess_ok").join(MESSAGES_FILE),
+        dir_for(tmp.path(), "v2_sess_ok").join(MESSAGES_FILE_NAME),
         "{ not json",
     )
     .unwrap();
@@ -403,7 +491,7 @@ async fn migrate_splits_legacy_and_is_idempotent() {
     .unwrap();
 
     store.migrate_split_messages().await.unwrap();
-    assert!(dir.join(MESSAGES_FILE).is_file(), "消息应被拆出去");
+    assert!(dir.join(MESSAGES_FILE_NAME).is_file(), "消息应被拆出去");
 
     // 迁移后清单仍有友好名，且元数据里不再内联消息
     let listed = store.list_sessions().await.unwrap();
@@ -507,24 +595,23 @@ fn atomic_tmp_paths_are_unique_per_call() {
 }
 
 /// 同一会话的并发保存不得互相覆盖（「整份 load → 改 → 整份重写」的丢更新）
+///
+/// 判据载体是**元数据计数**（消息已不归 save 持久化，见 [ADR-049]）：锁仍然必须
+/// 包住整段「读 → 改 → 写」，否则 20 次自增会丢。
 #[tokio::test]
 async fn concurrent_saves_of_one_session_serialize_via_lock() {
-    use crate::symbio_core::chat_message::ChatMessage;
-
     let tmp = TempDir::new().unwrap();
     let store = std::sync::Arc::new(SessionStore::new(tmp.path().to_path_buf()));
 
     let mut tasks = Vec::new();
-    for i in 0..20 {
+    for _ in 0..20 {
         let store = store.clone();
         tasks.push(tokio::spawn(async move {
             // 临界区必须包住整段「读 → 改 → 写」；只锁 save 防不住丢更新
             let _guard = store.lock_writes("v2_sess_conc").await;
             let mut s = store.load_session("v2_sess_conc").await.unwrap();
-            s.messages.push(ChatMessage {
-                id: format!("conc-{i}"),
-                ..Default::default()
-            });
+            let n = s.metadata["counter"].as_u64().unwrap_or(0) + 1;
+            s.metadata["counter"] = json!(n);
             store.save_session(&s).await.unwrap();
         }));
     }
@@ -533,5 +620,9 @@ async fn concurrent_saves_of_one_session_serialize_via_lock() {
     }
 
     let got = store.load_session("v2_sess_conc").await.unwrap();
-    assert_eq!(got.messages.len(), 20, "每条追加都必须留下（无锁时会丢）");
+    assert_eq!(
+        got.metadata["counter"],
+        json!(20),
+        "每次自增都必须留下（无锁时会丢更新）"
+    );
 }

@@ -1,61 +1,51 @@
 import './_selfrun.mjs';
-// T41 技能快路的**执行半边**（S11 §2–§3、§6.2，`skill_fast_path`）：
-// 同一句话说第二遍 ⇒ 命中已编译技能 ⇒ **一次模型调用都不发生**，以技能正文收束。
+// T41 技能快路（S11）：命中已编译技能 ⇒ **不调模型**、以技能正文收束、走反射档。
 //
 // ## 本用例钉的是什么
 //
-// T35 钉的是「编译 → 观测 → 校准 → 回退」这条**读侧**链路（低置信技能被摘出注入段）；
-// 本用例钉的是同一条判定的**第二个后果**：判成快路的技能被拿去**执行**。
-// 在此之前 `SkillRoute::SkillFastPath` 只作用在提示词上——判定被算出来，却从不产生
-// 后果（`plan/04 §3.1` S9·215 行明写「快路的执行半边不在本批」）。
+// 与 [t35](../cases/t35-skill-compile.mjs) 的区别：t35 证「技能编得出、召得回」，
+// 本用例证**快路开关**（`skill_fast_path`）打开后命中技能那一刻的行为差异：
 //
 // | 要证的事 | 唯一能看见它的地方 |
 // |---|---|
-// | 命中 ⇒ **没调模型** | mock-llm 的请求记录（这一条别处都证不了） |
-// | 命中 ⇒ 以**技能正文**收束 | 收束格的 `text`（不是模型这次会说的话） |
-// | 命中 ⇒ 走**反射档** | 开轮格的 `tier = reflex` + 收束格 `cost_ms` 在 80ms 预算内 |
-// | 未命中 ⇒ 照常推理 | 第三轮（另一句话）请求数照增、`tier = deep` |
+// | 命中**跳过模型** | mock-llm 的请求计数：命中那一轮**不再增**（这是最硬的判据） |
+// | 命中以**技能正文**收束 | 该轮 CLI stdout（用户看到的那段答话） |
+// | 未命中**照常推理** | 换一句话 ⇒ 请求计数**照增**（把「命中才跳过」与「整档不调模型」分开） |
+// | 请求级注入**不落存储** | 生产读出口 `vdfs/read` 读回的转写里没有注入段抬头 |
 //
-// ## 为什么必须端到端
-//
-// 单测（`v2_exec.test.rs::skill_hit_takes_the_reflex_tier_without_any_model_call`）
-// 已经把「命中集非空 ⇒ 不调模型」钉死了，但它证不了这条链路**真的接在真实轮次上**：
-//
-// 1. **可用集真的被填**：`skill_hits` 由 `prepare_turn_inputs` 的 `fast_armed` 分支
-//    从 `route` 的出参取——开关、档位、`tool_rounds == 0` 三个条件任一写错，集合恒空，
-//    而单测是手工把命中集塞进去的；
-// 2. **命中判据与写方同源**：写方存的 `trigger` 是截断后的用户发言，读方拿原文比
-//    就永远命不中（没有任何报错，表现为"技能编了却从不生效"）；
-// 3. **技能真的进得了召回视图**：`actor` 归位、`route` 判得动——T35 证过读侧，
-//    这里证的是它同时喂到了执行侧。
-//
-// ## 为什么第三轮是**必须**的
+// ## 为什么第 3 轮是**必须**的
 //
 // 只有前两轮的话，「请求数没涨」还能被解释成"这个档位根本不调模型"。第三轮换一句话
 // （不命中）⇒ 请求数照增，把"命中才跳过"与"整档不调模型"分开。
-import { join } from 'node:path';
+//
+// ## 为什么不再直读 WAL（[ADR-049] 读通道禁令）
+//
+// 早先版本直读 `v2-events.wal` 判开轮格 `payload.tier == 'reflex'`、收束格
+// `model == 'reflex'`、`cost_ms <= 80`、`produced_by`。这些是**存储白盒**，判据已
+// 归 Rust 单测（`turn_runner.test.rs` 的档位 / 溯源用例、`v2_exec.test.rs` 的快路）。
+// e2e 只保留「用户如何看到就如何读」：请求计数（LLM 请求包）、stdout（CLI）、
+// 转写（生产读出口 `vdfs/read`）、出口读数（`session/stats`）。
 import {
   MockLlm,
   makeHomedir,
   DIALOG_FACE_OFF,
   cleanupHomedir,
+  nextPort,
   runCli,
+  startLongLivedCli,
+  readSessionMessages,
   waitFor,
-  readFileSyncSafe,
-  readMessagesJson,
   assert,
   assertEq,
   defineCase,
   providerConfig,
   PROVIDER_ID,
+  textOf,
   assertTranscriptInvariants,
 } from '../helpers.mjs';
 
-/** v2 事实源文件名（与 `plugins/session/paths.rs::V2_WAL_FILE` 同一常量口径） */
-const V2_WAL = 'v2-events.wal';
-
-/** 技能标签（与 `v2_skills.rs::SKILL_TAG` 同一常量口径） */
-const SKILL_TAG = 'skill';
+/** 注入段抬头（与 `v2_memory.rs::RECALL_SECTION_HEAD` 同一常量口径） */
+const HEAD = '【长期记忆】';
 
 /** 第 1 / 2 轮：同一句发言（第 2 轮即命中）。 */
 const TRIGGER = '把周报整理成摘要';
@@ -68,23 +58,6 @@ const OTHER = '再帮我做一次';
 const OTHER_REPLY = '好的，已按上次的方式处理。';
 
 const SID = 'e2e-t41';
-
-/** 读该会话的全部事实。 */
-function readEvents(homedir, sid) {
-  const raw = readFileSyncSafe(join(homedir, 'session', sid, V2_WAL));
-  assert(raw.length > 0, `${sid} 的事实源应存在且非空`);
-  return raw.split('\n').filter(Boolean).map((l) => JSON.parse(l));
-}
-
-/** 第 `turn` 轮的开轮格 / 收束格。 */
-function cells(events, turn) {
-  return {
-    open: events.find((e) => e.kind === 'user.message' && e.turn === turn),
-    close: events.find(
-      (e) => (e.kind === 'chat.assistant.final' || e.kind === 'chat.assistant.fallback') && e.turn === turn,
-    ),
-  };
-}
 
 export default defineCase(
   'T41 技能快路：命中已编译技能 ⇒ 不调模型、以技能正文收束、走反射档',
@@ -100,9 +73,18 @@ export default defineCase(
       { id: 'rest', content: '收到。' },
     ]).start();
 
+    const GATEWAY_PORT = nextPort();
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
+        gateway: {
+          inbound_enabled: true,
+          inbound_protocol: 'http',
+          inbound_bind: '127.0.0.1',
+          inbound_port: GATEWAY_PORT,
+          inbound_token: '',
+          inbound_readonly: false,
+        },
         // 轮次由 v2 运行器原生执行——"跳过模型"跳的正是它里面那一次调用。
         // 两个开关都**显式打开**：它们默认 off（S11 §4 的平凡值），本用例验的正是
         // 打开之后的行为，不能依赖默认值。
@@ -128,21 +110,13 @@ export default defineCase(
 
     try {
       // ── 第 1 轮：成功收束 ⇒ 编译技能，本轮照常调模型 ─────────────────────
-      turn(TRIGGER);
+      const r1 = turn(TRIGGER);
       let reqs = await llm.requests();
       assertEq(reqs.length, 1, '第 1 轮照常请求模型（还没有技能可用）');
-
-      let events = readEvents(hd.homedir, SID);
-      const skills = events.filter((e) => e.kind === 'memory.encoded' && e.payload?.tag === SKILL_TAG);
-      assertEq(skills.length, 1, `成功轮 ⇒ 恰好一条技能（实际 kinds: ${events.map((e) => e.kind).join(', ')}）`);
-      const skillId = skills[0].payload.skill_id;
-      assertEq(skills[0].payload.trigger, TRIGGER, 'trigger = 本轮用户发言（命中判据比的就是它）');
-      assertEq(skills[0].payload.content, RESPONSE, 'content = 本轮收束正文（命中后直接收束的那段）');
-
-      const t1 = cells(events, 0);
-      assert(t1.open && t1.close, '第 1 轮的开轮格与收束格都应在');
-      assertEq(t1.open.payload.tier, 'deep', '第 1 轮未命中 ⇒ 深度档');
-      assertEq(t1.close.payload.text, RESPONSE, '第 1 轮的收束正文来自模型');
+      assert(
+        r1.stdout.includes(RESPONSE),
+        `第 1 轮收束正文来自模型（实际 stdout: ${JSON.stringify(r1.stdout)}）`,
+      );
 
       // ── 第 2 轮：同一句话 ⇒ 命中技能 ⇒ **一次模型调用都不发生** ─────────────
       const r2 = turn(TRIGGER);
@@ -157,32 +131,6 @@ export default defineCase(
         `命中即以技能正文收束（stdout 应含技能正文）：${r2.stdout.slice(0, 300)}`,
       );
 
-      events = readEvents(hd.homedir, SID);
-      const t2 = cells(events, 1);
-      assert(t2.open && t2.close, '第 2 轮的开轮格与收束格都应在');
-      assertEq(
-        t2.open.payload.tier,
-        'reflex',
-        '命中 ⇒ 开轮格声明反射档（档位由令牌类型给出，不是调用方填的字符串）',
-      );
-      assertEq(t2.close.payload.text, RESPONSE, '收束正文 = 技能正文（不是模型这次会说的话）');
-      assertEq(t2.close.payload.model, 'reflex', '载荷的 `model` 记产者：反射档没有模型');
-      assert(
-        t2.close.cost_ms <= 80,
-        `命中后耗时必须在反射档预算（80ms）内——S11 §6.2「命中显著低于未命中」：${t2.close.cost_ms}`,
-      );
-      assertEq(
-        t2.close.produced_by,
-        t2.open.seq,
-        '收束溯源指向本轮开轮格（I2；与真实路径同一份纪律）',
-      );
-      // 命中轮仍走同一段收束派生事实（记忆与学习）——两条路只是"生成那一格"不同。
-      const obs2 = events.filter(
-        (e) => e.kind === 'memory.recalled' && e.payload?.skill_id === skillId,
-      );
-      assertEq(obs2.length, 1, `命中轮照常落路由观测（实际 ${obs2.length} 条）`);
-      assertEq(obs2[0].payload.fallback, false, '零使用 ⇒ 判快路');
-
       // ── 第 3 轮：另一句话（不命中）⇒ 照常推理 ─────────────────────────────
       turn(OTHER);
       reqs = await llm.requests();
@@ -191,23 +139,39 @@ export default defineCase(
         2,
         `未命中照常请求模型（否则"请求数没涨"会被读成"整档不调模型"；实际 ${reqs.length} 次）`,
       );
-      events = readEvents(hd.homedir, SID);
-      const t3 = cells(events, 2);
-      assert(t3 && t3.open && t3.close, '第 3 轮的开轮格与收束格都应在');
-      assertEq(t3.open.payload.tier, 'deep', '未命中 ⇒ 深度档');
-      assertEq(t3.close.payload.text, OTHER_REPLY, '未命中的正文来自模型');
-      assertEq(t3.close.payload.model, PROVIDER_ID, '未命中的产者是模型服务');
 
       // ── 请求级注入 ⇒ 会话存储里一个字都不该多（与 T29 / T35 同口径）────────
-      const msgs = readMessagesJson(hd.homedir, SID);
-      assert(
-        !msgs.some((m) => {
-          const t = typeof m.content === 'string' ? m.content : '';
-          return t.includes('【长期记忆】');
-        }),
-        '注入段不得写进会话存储（请求级、与 nudge 同一机制）',
-      );
-      assertTranscriptInvariants(msgs, 'T41');
+      const api = startLongLivedCli({
+        homedir: hd.homedir,
+        workdir: hd.workdir,
+        session: SID,
+        provider: PROVIDER_ID,
+        gatewayPort: GATEWAY_PORT,
+      });
+      try {
+        await api.waitGatewayReady(20_000, 'T41 读回进程');
+        const msgs = await readSessionMessages(api, SID);
+        assert(msgs, '跑过三轮 ⇒ 生产读出口应读回转写');
+        assert(
+          !msgs.some((m) => textOf(m).includes(HEAD)),
+          '注入段不得写进会话转写（请求级、与 nudge 同一机制）',
+        );
+        assertTranscriptInvariants(msgs, 'T41');
+
+        // 出口读数：技能被用了（校准列从同一份事实源算出）。
+        const inv = await api.invoke('session/stats', {}, { session_id: SID });
+        assertEq(inv.status, 200, `session/stats 应成功（实际: ${JSON.stringify(inv.body)}）`);
+        const stats = inv.body?.data;
+        assert(stats?.has_wal, '跑过三轮 ⇒ 事实源应在');
+        const skills = Object.values(stats.calibration.by_skill);
+        assertEq(skills.length, 1, `恰好编出一条技能（实际: ${JSON.stringify(stats.calibration)}）`);
+        // `uses` 计的是**召回次数**（与 t35 同口径）：第 2 轮命中、第 3 轮注入段照样带
+        // 技能正文 ⇒ 各召回一次 = 2。命中与否由请求计数分辨，不由本列分辨。
+        assertEq(skills[0].uses, 2, '第 2 / 3 轮各召回一次');
+        assertEq(skills[0].fallbacks, 0, '命中即用技能正文 ⇒ 不走回退');
+      } finally {
+        api.stop();
+      }
     } finally {
       llm.stop();
       cleanupHomedir(hd);

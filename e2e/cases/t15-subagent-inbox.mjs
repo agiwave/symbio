@@ -15,7 +15,7 @@ import {
   makeAgentDir,
   cleanupHomedir,
   startLongLivedCli,
-  readAgentMessagesJson,
+  readTranscriptAt,
   waitFor,
   assert,
   assertEq,
@@ -73,12 +73,8 @@ export default defineCase('T15 子智能体空间自驱动：写 inbox → 空�
     gatewayPort: GATEWAY_PORT,
   });
 
+  /** 子空间在 VDFS 里的地址段：`agent/<id>/session/<sid>` */
   const subSession = `agent/${AGENT_ID}/session/${SUB_SESSION}`;
-  const subMessages = () => readAgentMessagesJson(hd.homedir, AGENT_ID, SUB_SESSION) ?? [];
-
-  /** 空间内地址：`<根>/agent/<id>/session/<sid>/inbox[/<iid>]` */
-  const inboxAddr = (root, iid) =>
-    `${root.replace(/\/+$/, '')}/${subSession}/inbox${iid ? `/${iid}` : ''}`;
 
   try {
     await cli.waitGatewayReady();
@@ -86,6 +82,15 @@ export default defineCase('T15 子智能体空间自驱动：写 inbox → 空�
     const rootResp = await cli.invoke('vdfs/root', {});
     const root = rootResp.body?.data?.path;
     assert(typeof root === 'string' && root.length > 0, 'vdfs/root 应返回根地址');
+
+    /** 空间内会话叶子的地址：`<根>/agent/<id>/session/<sid>`（读它 = 前端打开该会话的同一出口） */
+    const subSessionAddr = `${root.replace(/\/+$/, '')}/${subSession}`;
+    /** 子空间里的消息集合（生产读出口：`vdfs/read` 会话叶子，与前端加载历史同一出口） */
+    const subMessages = async () => (await readTranscriptAt(cli, subSessionAddr)) ?? [];
+
+    /** 空间内地址：`<根>/agent/<id>/session/<sid>/inbox[/<iid>]` */
+    const inboxAddr = (iid) =>
+      `${subSessionAddr}/inbox${iid ? `/${iid}` : ''}`;
 
     // ── ① 空间里的会话：经 VDFS 创建（元数据带 workdir，与 CLI `ensure_session` 同一手法）
     const created = await cli.invoke('vdfs/write', {
@@ -151,12 +156,12 @@ export default defineCase('T15 子智能体空间自驱动：写 inbox → 空�
     );
 
     // ── ② 收件箱是会话内部的**一个普通集合**（与会话转写并列），地址可 stat
-    const inboxStat = await cli.invoke('vdfs/stat', { path: inboxAddr(root) });
+    const inboxStat = await cli.invoke('vdfs/stat', { path: inboxAddr() });
     assertEq(inboxStat.body?.data?.kind, 'inbox', `收件箱的 kind 是稳定协议词（${JSON.stringify(inboxStat.body)?.slice(0, 300)}）`);
 
     // ── ③ 写入收件箱 = 发消息（无 create 位，与 `vdfs_write` 工具同一形状）
     const first = await cli.invoke('vdfs/write', {
-      path: inboxAddr(root),
+      path: inboxAddr(),
       text: '第一步：报告。',
     });
     assertEq(first.status, 200, `写收件箱应成功（${JSON.stringify(first.body)?.slice(0, 300)}）`);
@@ -172,18 +177,18 @@ export default defineCase('T15 子智能体空间自驱动：写 inbox → 空�
       what: '子空间的首轮 LLM 请求（证明消费确实发生了）',
       timeoutMs: 20_000,
     });
-    const second = await cli.invoke('vdfs/write', { path: inboxAddr(root), text: '第二步：总结。' });
-    const third = await cli.invoke('vdfs/write', { path: inboxAddr(root), text: '第三步：收尾。' });
+    const second = await cli.invoke('vdfs/write', { path: inboxAddr(), text: '第二步：总结。' });
+    const third = await cli.invoke('vdfs/write', { path: inboxAddr(), text: '第三步：收尾。' });
     assertEq([second.status, third.status], [200, 200], '忙碌期间的写入照样成功（入队即返回）');
 
     // 取消一条**排队中**的条目：delete 条目自身地址
     const thirdName = third.body?.data?.name;
     const cancelled = await cli.invoke('vdfs/delete', {
-      path: `${inboxAddr(root)}/${thirdName}`,
+      path: `${inboxAddr()}/${thirdName}`,
     });
     assertEq(cancelled.status, 200, `取消排队中的条目（${JSON.stringify(cancelled.body)?.slice(0, 300)}）`);
 
-    const queued = await cli.invoke('vdfs/list', { path: inboxAddr(root) });
+    const queued = await cli.invoke('vdfs/list', { path: inboxAddr() });
     const queuedItems = queued.body?.data?.items ?? [];
     assert(
       !queuedItems.some((n) => n.name === thirdName),
@@ -191,16 +196,20 @@ export default defineCase('T15 子智能体空间自驱动：写 inbox → 空�
     );
 
     // ── ④ 最终收敛：取消掉的那条**从未**变成消息；其余两条按序被消费
-    await waitFor(() => subMessages().some((m) => textOf(m).includes('收到第二步了')), {
+    await waitFor(async () => (await subMessages()).some((m) => textOf(m).includes('收到第二步了')), {
       what: '第二条消息在会话空闲后被消费',
       timeoutMs: 30_000,
     });
-    await waitFor(() => subMessages().filter((m) => m.type === 'text' && m.role === 'assistant').length >= 2, {
-      what: '两轮回答都落进子智能体自己的存储',
-      timeoutMs: 30_000,
-    });
+    await waitFor(
+      async () =>
+        (await subMessages()).filter((m) => m.type === 'text' && m.role === 'assistant').length >= 2,
+      {
+        what: '两轮回答都落进子智能体自己的会话（经读出口可见）',
+        timeoutMs: 30_000,
+      },
+    );
 
-    const msgs = subMessages();
+    const msgs = await subMessages();
     assertTranscriptInvariants(msgs, 'T15');
     const userTexts = msgs.filter((m) => m.role === 'user' && m.type === 'text').map(textOf);
     assertEq(
@@ -210,7 +219,7 @@ export default defineCase('T15 子智能体空间自驱动：写 inbox → 空�
     );
 
     // 队列已排空（条目出队即消失——「正在处理的那条」在转写里，不在队列里）
-    const drained = await cli.invoke('vdfs/list', { path: inboxAddr(root) });
+    const drained = await cli.invoke('vdfs/list', { path: inboxAddr() });
     assertEq((drained.body?.data?.items ?? []).length, 0, '消费完的收件箱应为空');
 
     // ── ⑤ 子智能体带的是**它自己**的指令层与模型服务

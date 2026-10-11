@@ -45,22 +45,32 @@ pub struct Reconciliation {
     /// WAL 不在（还没跑过任何一轮）——这不是错误，
     /// 是「这一份本来就是空的」，故与 `mismatches` 分开报。
     pub wal_missing: bool,
+    /// `messages.json` 不在（[ADR-049] 之后**是常态**：消息真源已切到 WAL，
+    /// legacy 缓存停写）。没有第二源可比 ⇒ 与 `wal_missing` 同样判「一致」：
+    /// 对账的失效形态必须是「少一条诊断」，不能是「天天误报」。
+    pub store_missing: bool,
 }
 
 impl Reconciliation {
     /// 一致 = 条数相同且逐条相同。
     ///
-    /// **WAL 不在时判「一致」**（`wal_missing` 优先）：没有第二源可比，就谈不上不一致。
-    /// 把它算成不一致会让还没跑过轮的会话天天出声——诊断吵到没人再听，
-    /// 正是"该报的不报、不该报的乱报"的后半句。「在不在」由 `wal_missing` 单独回答。
+    /// **任一侧不在时判「一致」**（`wal_missing` / `store_missing` 优先）：没有第二源
+    /// 可比，就谈不上不一致。把它们算成不一致会让还没跑过轮的会话（WAL 缺）或切源后
+    /// 的正常会话（`messages.json` 缺）天天出声——诊断吵到没人再听，
+    /// 正是"该报的不报、不该报的乱报"的后半句。「在不在」由两个 `*_missing` 单独回答。
     pub fn is_consistent(&self) -> bool {
-        self.wal_missing || (self.mismatches == 0 && self.store_msgs == self.wal_entries)
+        self.wal_missing
+            || self.store_missing
+            || (self.mismatches == 0 && self.store_msgs == self.wal_entries)
     }
 
     /// 日志用的一句话（人读）。
     pub fn summary(&self) -> String {
         if self.wal_missing {
             return format!("双源对账：WAL 不在（store {} 条）", self.store_msgs);
+        }
+        if self.store_missing {
+            return "双源对账：messages.json 不在（真源已切 WAL，无第二源可比）".to_string();
         }
         if self.is_consistent() {
             format!("双源对账：一致（{} 条）", self.store_msgs)
@@ -95,14 +105,22 @@ fn project(msg: &crate::symbio_core::chat_message::ChatMessage) -> (String, Stri
 
 /// 对账**一个会话**的两个源。
 ///
-/// `store_msgs` = `SessionStore` 那一侧的消息列表（调用方已有，不必再读一次盘）。
-/// `session_dir` = 会话目录（WAL 就在它下面）。
+/// ## 两个源各是什么（[ADR-049] 之后）
 ///
-/// 零 IO 副作用之外的读取：WAL 经 `open_readonly` 打开——不创建文件、不截尾。
-pub fn reconcile(
-    session_dir: &Path,
-    store_msgs: &[crate::symbio_core::chat_message::ChatMessage],
-) -> Reconciliation {
+/// - **WAL 侧**：`v2-events.wal` 经 `transcript()` 投影出的条目——今天的**唯一真源**；
+/// - **legacy 侧**：`messages.json`（v1 遗留缓存）。**切源后本文件停写**，多数会话
+///   根本没有它 ⇒ [`Reconciliation::store_missing`] 判「一致」（无第二源可比）。
+///
+/// ## 为什么自己读文件、不再由调用方传「store 侧消息」
+///
+/// 切源前调用方传的是 `load_session` 读出的那份——那时它就是 `messages.json`。
+/// 切源后 `load_session` 走 WAL 重建，**同一个入参已经变成 WAL 的另一种投影**；
+/// 再拿它和 `transcript()` 比，是拿真源跟真源比（口径不同 ⇒ 稳定误报），
+/// 且每次读都落一条无溯源的 `session.reconciled`（违反 I2）。对账要比的从来是
+/// **两份存储**，因此「怎么读 legacy 那份」必须收进本模块，与 WAL 一侧同处一地。
+///
+/// 零 IO 副作用：两文件都只读打开（WAL 经 `open_readonly`：不创建、不截尾）。
+pub fn reconcile(session_dir: &Path) -> Reconciliation {
     let path = session_dir.join(super::paths::V2_WAL_FILE);
     // **在不在看文件，不看 open 的结果**：`EventWalStore::open_readonly` 对不存在
     // 的文件返回 `Ok(空 store)`（`wal.rs::replay` 的「文件不存在 ⇒ 空」）——那是
@@ -110,21 +128,27 @@ pub fn reconcile(
     // 而这两件事对对账是**不同的**：前者不可比（不该出声音），后者可比且大概率不一致。
     if !path.exists() {
         return Reconciliation {
-            store_msgs: store_msgs.len(),
-            wal_entries: 0,
-            mismatches: 0,
             wal_missing: true,
+            ..Default::default()
         };
     }
     let Ok(store) = EventWalStore::open_readonly(&path) else {
         // 存在但读不了（权限 / 撕裂到无法重放）⇒ 同样不可比，不是不一致
         return Reconciliation {
-            store_msgs: store_msgs.len(),
-            wal_entries: 0,
-            mismatches: 0,
             wal_missing: true,
+            ..Default::default()
         };
     };
+    // legacy 侧同样**看文件在不在**：不在 = 真源已切 WAL（停写 messages.json 后的
+    // 常态），无第二源可比 ⇒ 判一致、不出声。
+    let legacy_path = session_dir.join(super::store::MESSAGES_FILE_NAME);
+    let Some(legacy) = read_legacy_messages(&legacy_path) else {
+        return Reconciliation {
+            store_missing: true,
+            ..Default::default()
+        };
+    };
+
     let snapshot = store.range(Seq::new(0));
     let view = crate::symbio_core::transcript()
         .apply(&snapshot, i64::MAX, Budget::generous())
@@ -133,7 +157,7 @@ pub fn reconcile(
     // 空正文 = 呈现态占位（turn 容器 / 流式半截），不是一句话 ⇒ 不参与对账。
     // e2e 探针实测：messages.json 每轮多一条空 assistant，WAL 侧无对应事件
     // （store 6 条 vs wal 4 条）。ADR-049：呈现态不入格、也不是对账对象。
-    let store_side: Vec<(String, String)> = store_msgs
+    let store_side: Vec<(String, String)> = legacy
         .iter()
         .map(project)
         .filter(|(_, text)| !text.is_empty())
@@ -158,7 +182,32 @@ pub fn reconcile(
         wal_entries: wal_side.len(),
         mismatches,
         wal_missing: false,
+        store_missing: false,
     }
+}
+
+/// 读 legacy 侧 `messages.json`（v1 遗留缓存）。
+///
+/// 不存在 / 读不出 / 解析不了 ⇒ `None`（对账眼里 = 「没有第二源」，不是「空的第二源」）。
+/// 形状与 [`super::store`] 的 `MessagesFile` 同构：`{ "messages": [...] }`。
+fn read_legacy_messages(path: &Path) -> Option<Vec<crate::symbio_core::chat_message::ChatMessage>> {
+    let content = std::fs::read_to_string(path).ok()?;
+    #[derive(serde::Deserialize)]
+    struct MessagesFile {
+        #[serde(default)]
+        messages: Vec<crate::symbio_core::chat_message::ChatMessage>,
+    }
+    // 与 store 层同一份自愈纪律：整体解析失败则取首个完整对象。
+    serde_json::from_str::<MessagesFile>(&content)
+        .or_else(|_| {
+            serde_json::Deserializer::from_str(&content)
+                .into_iter::<MessagesFile>()
+                .next()
+                .and_then(Result::ok)
+                .ok_or(())
+        })
+        .ok()
+        .map(|f| f.messages)
 }
 
 /// 对账结果落到**事实源**里的一条事件（`session.reconciled`）。

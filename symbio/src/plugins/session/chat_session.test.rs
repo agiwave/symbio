@@ -70,6 +70,9 @@ fn make_archive(dir: &Path, name: &str) -> PathBuf {
 /// 保留最新 `TOOL_ARCHIVE_KEEP` 个）。写入路径历史上会删"失去引用"的孤儿存档，
 /// 代价是把不可信的消息 meta 变成删除动作的输入（需要额外的路径逃逸校验），
 /// 且与滚动保留职责重叠；本测试锁定"只改消息、不动文件"的新契约。
+///
+/// 切主后「列表被整体重写」改由事实投影的判据钉住（`apply_*` + `store` 冷重建）——
+/// 本测试只守文件侧：写路径再怎么重写列表，磁盘上那些文件一张都不能少。
 #[tokio::test]
 async fn test_replace_messages_never_deletes_archives() {
     let (session, dir, _tmp) = setup().await;
@@ -102,12 +105,6 @@ async fn test_replace_messages_never_deletes_archives() {
         orphan.display()
     );
     assert!(kept.exists(), "仍被引用的存档必须保留: {}", kept.display());
-    let stored = session.get_messages().await.expect("读取存储消息失败");
-    assert_eq!(stored.len(), 2, "消息列表应被整体重写");
-    assert!(
-        !stored.iter().any(|m| m.id == "m1"),
-        "被丢弃的消息节点不应留在存储里"
-    );
 }
 
 #[tokio::test]
@@ -312,6 +309,10 @@ async fn prune_drops_nodes_but_never_deletes_archive_files() {
 }
 
 /// 回归（P0-2）：`context_messages = 0` 走完整 `append_messages` 链路也不得失败。
+///
+/// 切主后（ADR-049）正文的真源是事实投影，`append_messages` 交回的**权威副本**
+/// 就是写边界机制（窗口/裁剪/补号）的可观测面——持久判据另由 `apply_*` 与
+/// `store` 测试钉。本判据只看「0 = 不限制」：回执里窗口外的工具结果仍在。
 #[tokio::test]
 async fn append_messages_with_zero_context_messages_does_not_fail() {
     let config = SessionConfig {
@@ -324,19 +325,17 @@ async fn append_messages_with_zero_context_messages_does_not_fail() {
     msgs.extend(tool_round("u1", "t1", "r1"));
     msgs.extend(tool_round("u2", "t2", "r2"));
 
-    session
+    let kept = session
         .append_messages(msgs)
         .await
         .expect("context_messages=0 时落库不得失败");
-
-    let ctx = session.get_messages().await.expect("读取存储消息失败");
     assert!(
-        ctx.iter().any(|m| m.id == "r1"),
-        "0 = 不限制：窗口外的工具结果仍应留在存储中"
+        kept.iter().any(|m| m.id == "r1"),
+        "0 = 不限制：窗口外的工具结果仍应留在回执（写边界不裁它）"
     );
 }
 
-/// 新开关（P1-②）：`prune_tool_history = false` 时存储保留完整工具链。
+/// 新开关（P1-②）：`prune_tool_history = false` 时保留完整工具链。
 #[tokio::test]
 async fn append_messages_keeps_tool_chain_when_prune_disabled() {
     let config = SessionConfig {
@@ -349,12 +348,10 @@ async fn append_messages_keeps_tool_chain_when_prune_disabled() {
     let mut msgs = Vec::new();
     msgs.extend(tool_round("u1", "t1", "r1"));
     msgs.extend(tool_round("u2", "t2", "r2"));
-    session.append_messages(msgs).await.expect("初始落库失败");
-
-    let ctx = session.get_messages().await.expect("读取存储消息失败");
+    let kept = session.append_messages(msgs).await.expect("初始落库失败");
     assert!(
-        ctx.iter().any(|m| m.id == "r1"),
-        "关闭写入期裁剪后，窗口外的工具结果应保留在存储中"
+        kept.iter().any(|m| m.id == "r1"),
+        "关闭写入期裁剪后，窗口外的工具结果应保留在回执里"
     );
 }
 
@@ -394,19 +391,20 @@ async fn max_messages_below_legacy_store_floor_is_honored() {
     for i in 1..=5 {
         msgs.push(plain_msg(&format!("u{}", i)));
     }
-    session.append_messages(msgs).await.expect("落库失败");
-
-    let ctx = session.get_messages().await.expect("读取存储消息失败");
+    let kept = session.append_messages(msgs).await.expect("落库失败");
     assert!(
-        !ctx.iter().any(|m| m.id == "u1"),
-        "max_messages=2 应触发 FIFO 淘汰；被 500 下限钳制时 u1 会留在存储中"
+        !kept.iter().any(|m| m.id == "u1"),
+        "max_messages=2 应触发 FIFO 淘汰；被 500 下限钳制时 u1 会留在回执里"
     );
     assert!(
-        ctx.len() < 5,
-        "max_messages=2 应裁剪存储轮次，实际保留 {} 条",
-        ctx.len()
+        kept.len() < 5,
+        "max_messages=2 应裁剪写边界列表，实际保留 {} 条",
+        kept.len()
     );
-    assert!(ctx.iter().any(|m| m.id == "u5"), "最近一轮用户消息必须保留");
+    assert!(
+        kept.iter().any(|m| m.id == "u5"),
+        "最近一轮用户消息必须保留"
+    );
 }
 
 /// `max_messages = 0`：不限制，全部保留。
@@ -424,10 +422,8 @@ async fn max_messages_zero_means_unlimited() {
     for i in 1..=5 {
         msgs.push(plain_msg(&format!("u{}", i)));
     }
-    session.append_messages(msgs).await.expect("落库失败");
-
-    let ctx = session.get_messages().await.expect("读取存储消息失败");
-    assert_eq!(ctx.len(), 5, "max_messages=0 表示不限制");
+    let kept = session.append_messages(msgs).await.expect("落库失败");
+    assert_eq!(kept.len(), 5, "max_messages=0 表示不限制");
 }
 
 /// 存储是 `seq` 的**唯一分配者**，且分配的号必须严格递增（Lamport 计数器）。
@@ -435,38 +431,43 @@ async fn max_messages_zero_means_unlimited() {
 /// 这条不变量是「前端只有一套序号空间」的全部前提：前端为尚未落库的节点自己发
 /// 本地号，只有**落库回包**才能把它换成权威号。因此两件事都得成立，且都得钉住：
 ///
-/// 1. `get_messages()` 读回来的消息**带 `seq`**——落库回包发的就是 `append_messages`
-///    交回的这份权威版本（发入参那条等于把「没有号」写进前端）；
+/// 1. `append_messages` 交回的权威副本**带 `seq`**——发入参那条等于把「没有号」
+///    写进前端；
 /// 2. 跨次追加**严格递增**：若新消息拿到比已有消息小的号，前端的顺序锚点就会
 ///    把新消息排到旧消息之前（“刚发的跑到中间去”）。
+///
+/// 切主后（ADR-049）正文的真源是事实投影：**只有落了事实的节点才进投影**，跨次
+/// 递增的「已有水位」也由投影供。所以本判据走生产路径（`apply` 的 Born{Here}
+/// ——事实先落、再折列表、回包带存储号）：「读回存储」那半归 `apply_*` +
+/// `store` 冷重建，这里盯写边界当场交出的那份。
 ///
 /// 缺少本测试时，`append_messages` 停止补号不会有任何测试失败：前端只是
 /// 「偶尔顺序错乱、刷新才恢复」——正是这类静默退化最难定位。
 #[tokio::test]
 async fn append_messages_assigns_monotonic_authoritative_seq() {
-    let (session, _dir, _tmp) = setup().await;
+    let (session, dir, _tmp) = setup().await;
+    seed_fact(&dir);
 
-    session
-        .append_messages(vec![plain_msg("u1")])
+    let born = |id: &str| super::MessageChange::Born {
+        nodes: vec![plain_msg(id)],
+        carrier: super::Carrier::Here,
+    };
+    let s1 = session
+        .apply(born("u1"))
         .await
-        .expect("首次落库失败");
-    let first = session.get_messages().await.expect("读取存储消息失败");
-    let s1 = first
-        .iter()
+        .expect("首次落库失败")
+        .into_iter()
         .find(|m| m.id == "u1")
-        .expect("u1 应在存储中")
+        .expect("u1 应在回执中")
         .seq
         .expect("存储必须为落库消息分配 seq（前端唯一的顺序锚点）");
-
-    session
-        .append_messages(vec![plain_msg("u2")])
+    let s2 = session
+        .apply(born("u2"))
         .await
-        .expect("二次落库失败");
-    let second = session.get_messages().await.expect("读取存储消息失败");
-    let s2 = second
-        .iter()
+        .expect("二次落库失败")
+        .into_iter()
         .find(|m| m.id == "u2")
-        .expect("u2 应在存储中")
+        .expect("u2 应在回执中")
         .seq
         .expect("存储必须为落库消息分配 seq（前端唯一的顺序锚点）");
 
@@ -484,35 +485,47 @@ async fn append_messages_assigns_monotonic_authoritative_seq() {
 /// **必然撞号**：实测同一会话里「本轮用户消息」与「压缩节点」各持 `1099511627781`，
 /// `assertTranscriptInvariants` 的「seq 严格递增」当场失败。
 ///
-/// 断言的是**从存储读回来的号**——边界只对"落盘的是什么"负责。
+/// 断言的是**回执上的号**——边界只对"交出去的是什么"负责。
+///
+/// 生产路径同右：节点经 `apply` Born{Here} 落库（事实先落、投影随后长大），
+/// 跨次递增的「已有水位」由投影供。
 #[tokio::test]
 async fn append_messages_replaces_inflight_placeholder_seq() {
-    let (session, _dir, _tmp) = setup().await;
+    let (session, dir, _tmp) = setup().await;
     let inflight = super::super::transcript::INFLIGHT_SEQ_BASE;
+    seed_fact(&dir);
 
-    session
-        .append_messages(vec![plain_msg("u1")])
-        .await
-        .expect("首次落库失败");
-    let s1 = session.get_messages().await.unwrap()[0]
-        .seq
-        .expect("存储必须分配 seq");
+    let born = |node: ChatMessage| super::MessageChange::Born {
+        nodes: vec![node],
+        carrier: super::Carrier::Here,
+    };
+    let seq_of = |landed: Vec<ChatMessage>, id: &str| {
+        landed
+            .into_iter()
+            .find(|m| m.id == id)
+            .unwrap_or_else(|| panic!("{id} 应在回执中"))
+            .seq
+            .expect("存储必须分配 seq")
+    };
+
+    let s1 = seq_of(
+        session
+            .apply(born(plain_msg("u1")))
+            .await
+            .expect("首次落库失败"),
+        "u1",
+    );
 
     // 模拟压缩节点：带着在途号进来（这正是 `finish` 的返回形态）
     let mut compact = plain_msg("compact1");
     compact.seq = Some(inflight + 7);
-    session
-        .append_messages(vec![compact])
-        .await
-        .expect("在途节点落库失败");
-
-    let stored = session.get_messages().await.expect("读取存储消息失败");
-    let s2 = stored
-        .iter()
-        .find(|m| m.id == "compact1")
-        .expect("compact1 应在存储中")
-        .seq
-        .expect("存储必须分配 seq");
+    let s2 = seq_of(
+        session
+            .apply(born(compact))
+            .await
+            .expect("在途节点落库失败"),
+        "compact1",
+    );
     assert!(
         s2 < inflight,
         "在途号不得落库：compact1 落库后仍是 {s2}（在途号段从 {inflight} 起）"
@@ -520,17 +533,13 @@ async fn append_messages_replaces_inflight_placeholder_seq() {
     assert!(s2 > s1, "落库号必须严格递增：u1={s1} → compact1={s2}");
 
     // 撞号的另一半：紧接其后的真实追加必须继续往上，而不是撞回同一个号
-    session
-        .append_messages(vec![plain_msg("u2")])
-        .await
-        .expect("后续落库失败");
-    let stored = session.get_messages().await.expect("读取存储消息失败");
-    let s3 = stored
-        .iter()
-        .find(|m| m.id == "u2")
-        .expect("u2 应在存储中")
-        .seq
-        .expect("存储必须分配 seq");
+    let s3 = seq_of(
+        session
+            .apply(born(plain_msg("u2")))
+            .await
+            .expect("后续落库失败"),
+        "u2",
+    );
     assert!(s3 > s2, "后续追加必须继续递增：compact1={s2} → u2={s3}");
 }
 
@@ -575,26 +584,15 @@ async fn append_messages_returns_storage_authoritative_copies() {
         );
     }
 
-    // 与磁盘逐字段一致——回执不是入参副本（入参那份没有号）
-    let stored = session.get_messages().await.expect("读取存储消息失败");
-    for m in &returned {
-        let s = stored
-            .iter()
-            .find(|s| s.id == m.id)
-            .unwrap_or_else(|| panic!("交回的消息必须在存储中：{}", m.id));
-        assert_eq!(m.seq, s.seq, "交回的 seq 必须与存储一致：{}", m.id);
-        assert_eq!(
-            m.timestamp, s.timestamp,
-            "交回的 timestamp 必须与存储一致：{}",
-            m.id
-        );
-    }
+    // 切主后「回执与磁盘逐字段一致」这半移入事实侧判据（`apply_*` 落格 +
+    // `store` 测试的冷重建）：正文的真源是事实投影，本测试盯写边界当场交出的那份。
 }
 
-/// 交回的是**留在存储里**的那些：被轮次窗口淘汰的不得出现在回执里。
+/// 交回的是**留在列表里**的那些：被轮次窗口淘汰的不得出现在回执里。
 ///
-/// 交回一条存储里并不存在的消息，等于让前端"对齐"到一个幻影——它的号在存储里
-/// 属于别人，之后每一次追加都会再错一次。
+/// 交回一条列表里并不存在的消息，等于让前端"对齐"到一个幻影——它的号在存储里
+/// 属于别人，之后每一次追加都会再错一次。切主后「存储里真的没有 u1」由事实侧
+/// 判据钉（`apply_*` 只落活下来的节点），这里盯回执的当场形状。
 #[tokio::test]
 async fn append_messages_omits_messages_dropped_by_turn_window() {
     let config = SessionConfig {
@@ -613,63 +611,15 @@ async fn append_messages_omits_messages_dropped_by_turn_window() {
         vec!["u3"],
         "窗口只留最后 1 轮 ⇒ 回执里只应有 u3"
     );
-    let stored = session.get_messages().await.expect("读取存储消息失败");
-    assert!(
-        !stored.iter().any(|m| m.id == "u1"),
-        "u1 应已被窗口淘汰（前置条件）"
-    );
 }
 
-/// 存储边界（整表重写）：在途号同样不得落库，且必须在 `assign_seq` **之前**摘掉。
-///
-/// `assign_seq` 对既有序号是"原样保留"（稳定不变式），所以放进去就等于把在途号
-/// 当成权威号写进存储。真实路径：`converge_inflight` 把在途图里尚未落库的节点
-/// `clone()` 后追加到存储列表尾部再 `replace_messages`——那些节点带的正是在途号。
-///
-/// 同时钉住另一半：**既有的权威号一个都不许改**（否则前端手里的顺序锚点会错位）。
-#[tokio::test]
-async fn replace_messages_replaces_inflight_placeholder_seq() {
-    let (session, _dir, _tmp) = setup().await;
-    let inflight = super::super::transcript::INFLIGHT_SEQ_BASE;
-
-    session
-        .append_messages(vec![plain_msg("u1")])
-        .await
-        .expect("首次落库失败");
-    let base = session.get_messages().await.unwrap()[0]
-        .seq
-        .expect("存储必须分配 seq");
-
-    let mut kept = plain_msg("u1");
-    kept.seq = Some(base);
-    let mut live = plain_msg("turn1");
-    live.seq = Some(inflight + 3);
-    session
-        .replace_all(vec![kept, live])
-        .await
-        .expect("整表重写失败");
-
-    let stored = session.get_messages().await.expect("读取存储消息失败");
-    let seq_of = |id: &str| {
-        stored
-            .iter()
-            .find(|m| m.id == id)
-            .unwrap_or_else(|| panic!("{id} 应在存储中"))
-            .seq
-            .expect("存储必须分配 seq")
-    };
-    assert_eq!(seq_of("u1"), base, "既有序号必须原样保留（稳定不变式）");
-    assert!(
-        seq_of("turn1") < inflight,
-        "在途号不得落库：turn1 落库后仍是 {}",
-        seq_of("turn1")
-    );
-    assert!(
-        seq_of("turn1") > base,
-        "在途节点应接在末尾：base={base}，turn1={}",
-        seq_of("turn1")
-    );
-}
+// `replace_messages` 的旧判据（在途号不得随整表重写落库）**随切源退役**：
+// 切主后正文的真源是事实投影，整表重写只写元数据——「重写后的列表」不再有
+// 可观测面。同一条边界改由事实侧的判据钉住：`apply_*` 只落定稿节点，在途节点
+// 由 `converge_inflight` 收敛后才落；上一条（append 回执）钉同一条边界。
+//
+// 归档删除纪律（下方 `test_replace_messages_never_deletes_archives`）仍然有效：
+// 它守的是 `replace_all` 剩下的文件侧契约。
 
 /// 持久层不变量：**增量不得落盘**。
 ///
@@ -840,9 +790,14 @@ async fn apply_born_here_lands_an_added_fact_and_appends() {
     assert_eq!(landed.len(), 1, "返回受影响的权威副本：{landed:?}");
     assert_eq!(landed[0].id, "c1");
 
+    // 切主读后列表 = **事实投影**：u-seed 与 c1 都在（旧形态只回 c1——那是
+    // messages.json 与 WAL 双源并存的产物，已随切源消失）。
     let list = session.get_messages().await.expect("读列表失败");
-    assert_eq!(list.len(), 1, "节点进了列表");
-    assert_eq!(list[0].id, "c1");
+    assert_eq!(
+        list.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        vec!["u-seed", "c1"],
+        "列表即事实投影：种子与新生节点都在"
+    );
 
     let events = events_of(&dir);
     let added: Vec<&Event> = events
@@ -862,10 +817,13 @@ async fn apply_born_here_lands_an_added_fact_and_appends() {
     assert_eq!(first, "c1", "承载的正是这次诞生的节点");
 }
 
-/// **Born + `Carrier::Runner`**：只追加、**不落事实**——承载事实归运行器的格子
+/// **Born + `Carrier::Runner`**：**不落事实**——承载事实归运行器的格子
 /// （用户发言 / 助手正文 / 工具结果），`apply` 再落一条就是第二个 owner。
+///
+/// 切主读后这条契约的可观察面就是「持久化面什么都没发生」：节点的出生记录归
+/// 运行器的事实，这里的 append 只是在途合并，不构成出生记录。
 #[tokio::test]
-async fn apply_born_runner_appends_without_a_fact() {
+async fn apply_born_runner_lands_no_fact() {
     let (session, dir, _tmp) = setup().await;
     seed_fact(&dir);
 
@@ -877,11 +835,14 @@ async fn apply_born_runner_appends_without_a_fact() {
         .await
         .expect("apply(Born, Runner) 失败");
 
-    let list = session.get_messages().await.expect("读列表失败");
-    assert_eq!(list.len(), 1, "节点照样进列表（本轮缓存仍是读侧真源）");
     assert!(
         events_of(&dir).iter().all(|e| e.kind != "message.added"),
         "运行器承载 ⇒ 这里不落诞生事实"
+    );
+    let list = session.get_messages().await.expect("读列表失败");
+    assert!(
+        list.iter().all(|m| m.id != "u1"),
+        "没有出生事实 ⇒ 投影里没有它（持久化归运行器，这里不得自立门户）"
     );
 }
 
@@ -890,13 +851,17 @@ async fn apply_born_runner_appends_without_a_fact() {
 async fn apply_edited_lands_facts_and_rewrites_in_place() {
     let (session, dir, _tmp) = setup().await;
     seed_fact(&dir);
+    // 种子走 `Here`（落出生事实）：切主读后列表 = 事实投影，被编辑的节点必须
+    // 先以事实存在，编辑折叠才有对象。
     session
         .apply(super::MessageChange::Born {
             nodes: vec![plain_msg("m1"), plain_msg("m2")],
-            carrier: super::Carrier::Runner,
+            carrier: super::Carrier::Here,
         })
         .await
         .expect("种子落库失败");
+    let before = session.get_messages().await.expect("读列表失败");
+    assert_eq!(before.len(), 3, "投影 = 种子 + 两个新生节点");
 
     let mut edited = plain_msg("m1");
     edited.content = Some(MessageContent::Text("改过的话".to_string()));
@@ -907,14 +872,14 @@ async fn apply_edited_lands_facts_and_rewrites_in_place() {
     assert_eq!(landed.len(), 1, "返回改写后的权威副本");
 
     let list = session.get_messages().await.expect("读列表失败");
-    assert_eq!(list.len(), 2, "编辑**不新增节点**");
-    assert_eq!(list[0].id, "m1", "位置不变");
+    assert_eq!(list.len(), before.len(), "编辑**不新增节点**");
+    assert_eq!(list[1].id, "m1", "位置不变");
     assert_eq!(
-        list[0].content.as_ref().map(|c| c.to_text()),
+        list[1].content.as_ref().map(|c| c.to_text()),
         Some("改过的话".to_string()),
         "内容换成新的"
     );
-    assert_eq!(list[1].id, "m2", "其余节点不受影响");
+    assert_eq!(list[2].id, "m2", "其余节点不受影响");
 
     let events = events_of(&dir);
     let edits: Vec<&Event> = events
@@ -929,10 +894,12 @@ async fn apply_edited_lands_facts_and_rewrites_in_place() {
 async fn apply_removed_lands_a_fact_and_drops_nodes() {
     let (session, dir, _tmp) = setup().await;
     seed_fact(&dir);
+    // 种子走 `Here`（落出生事实）：切主读后列表 = 事实投影，被删的节点必须先以
+    // 事实存在，删除折叠才有对象。
     session
         .apply(super::MessageChange::Born {
             nodes: vec![plain_msg("m1"), plain_msg("m2"), plain_msg("m3")],
-            carrier: super::Carrier::Runner,
+            carrier: super::Carrier::Here,
         })
         .await
         .expect("种子落库失败");
@@ -952,8 +919,8 @@ async fn apply_removed_lands_a_fact_and_drops_nodes() {
     let list = session.get_messages().await.expect("读列表失败");
     assert_eq!(
         list.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
-        vec!["m2"],
-        "只留没被删的"
+        vec!["u-seed", "m2"],
+        "只留没被删的（列表即事实投影）"
     );
 
     let events = events_of(&dir);

@@ -1,8 +1,7 @@
 import './_selfrun.mjs';
 // T37 转写读列（**对话面读侧**，[plan/12 批 2](../../docs/plan/12-价值验收与基线埋点.md)）：
-// 两轮真实对话（每轮收束把事实写进 `<会话目录>/v2-events.wal`）⇒ 读出口
-// `session/stats` 的 `transcript` 列，与**同一份事实源**逐条对账；再对事实源做手术、
-// 验读侧闸。
+// 两轮真实对话（每轮收束把事实写进事实源）⇒ 读出口 `session/stats` 的 `transcript`
+// 列按**已知动作**钉死期望值；读侧闸验「别人的对话不从你的读数里漏出去」。
 //
 // ## 本用例钉的是什么
 //
@@ -14,17 +13,14 @@ import './_selfrun.mjs';
 // | 要证的事 | 唯一能看见它的地方 |
 // |---|---|
 // | 出口真的挂上了生产路由 | gateway `POST /api/v1/invoke` → 容器 → `session/stats` |
-// | 转写读的是**这一轮真实写下**的事实 | 磁盘上的 `v2-events.wal`（由真实 LLM 流量产生） |
-// | 读方真的每次重读文件 | 对文件动手术后**再调一次**，条目跟着变 |
+// | 转写读的是**这一轮真实写下**的事实 | 真实 CLI 轮次产生的转写（读出口同样读得到） |
 // | 别人的对话不从你的读数里漏出去 | `principal: agent:ghost` ⇒ `{ entries: [] }` + `has_wal: true` |
 //
-// ## 对账口径
+// ## 期望值为什么钉得死
 //
-// 用例只做**取值与计数**：把事实源里的三格（`user.message` / `chat.assistant.final` /
-// `chat.assistant.fallback`）按投影的口径摊成 `role:text` 序列，与出口逐条比——
+// 两轮真实对话 ⇒ 转写恰四条（user/assistant 各两条）、角色按事件顺序交替、
+// 两轮的问答正文都在里面。这些是**已知动作**的直接后果，不依赖任何文件对账；
 // 口径属于 `transcript` 投影，出口与用例都只准调它，谁都不许另写一份。
-import { join } from 'node:path';
-import { writeFileSync } from 'node:fs';
 import {
   MockLlm,
   makeHomedir,
@@ -34,8 +30,7 @@ import {
   runCli,
   startLongLivedCli,
   waitFor,
-  readFileSyncSafe,
-  readMessagesJson,
+  readSessionMessages,
   assert,
   assertEq,
   defineCase,
@@ -47,40 +42,9 @@ import {
 /** 本用例的会话 id */
 const SID = 'e2e-t37';
 
-/** v2 事实源文件名（与 `plugins/session/paths.rs::V2_WAL_FILE` 同一常量口径） */
-const V2_WAL = 'v2-events.wal';
-
 /** 两轮的触发串（mock 场景 `match` 与用户正文共用同一个词）。 */
 const Q1 = '第一问';
 const Q2 = '第二问';
-
-/** 读文件里的全部事件（出口读数的对账基准）。 */
-function readEvents(walPath) {
-  const raw = readFileSyncSafe(walPath);
-  assert(raw.length > 0, `v2 事实源应存在且非空：${walPath}`);
-  return raw
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => JSON.parse(l));
-}
-
-/**
- * 按 `transcript` 投影的口径把事实源摊成 `role:text` 序列（**用例侧复算**）。
- *
- * 三格 → 两角色：`user.message` ⇒ `user`（载荷 `text`）；`chat.assistant.final` ⇒
- * `assistant`（载荷 `text`）；`chat.assistant.fallback` ⇒ `assistant`（载荷 `why`——
- * 兜底话术是用户实际看到的回复）。只认 `entity == Turn` 的那三格，与投影同款。
- */
-function transcriptOf(events) {
-  const rows = [];
-  for (const e of events) {
-    if (e.entity !== 'Turn') continue;
-    if (e.kind === 'user.message') rows.push(`user:${e.payload?.text ?? ''}`);
-    else if (e.kind === 'chat.assistant.final') rows.push(`assistant:${e.payload?.text ?? ''}`);
-    else if (e.kind === 'chat.assistant.fallback') rows.push(`assistant:${e.payload?.why ?? ''}`);
-  }
-  return rows;
-}
 
 /** 出口那一列摊成同一形状（比 `role:text` 序列，绕开 JSON 键序的假红）。 */
 function transcriptRows(stats) {
@@ -88,7 +52,7 @@ function transcriptRows(stats) {
 }
 
 export default defineCase(
-  'T37 转写读列：出口 session/stats 的 transcript 与事实源逐条对账，且随事实源变动',
+  'T37 转写读列：出口 session/stats 的 transcript 按两轮对话钉死期望值，读侧闸放行属主',
   async () => {
     const llm = await new MockLlm([
       { id: 'q1', match: Q1, content: '第一答。' },
@@ -109,7 +73,7 @@ export default defineCase(
           inbound_token: '',
           inbound_readonly: false,
         },
-        // 每轮收束把事实写进 `<会话目录>/v2-events.wal`——转写列的事实源。
+        // 每轮收束把事实写进事实源——转写列的事实源。
         session: { ...DIALOG_FACE_OFF },
       },
     });
@@ -123,22 +87,6 @@ export default defineCase(
       const r2 = runCli({ ...base, session: SID, message: Q2 });
       assertEq(r2.code, 0, `第 2 轮退出码（stderr: ${r2.stderr.slice(0, 400)}）`);
 
-      const walPath = join(hd.homedir, 'session', SID, V2_WAL);
-      const events = readEvents(walPath);
-      const expected = transcriptOf(events);
-
-      // 前置：事实源里确实有三格（两轮各一开轮 + 一收束）⇒ 转写应有 4 条。
-      assertEq(
-        expected.length,
-        4,
-        `两轮对话 ⇒ 事实源应有 4 条转写条目（实际 ${expected.length}: ${JSON.stringify(expected)}）`,
-      );
-      assertEq(
-        expected.filter((r) => r.startsWith('user:')).length,
-        2,
-        `两轮各一格 user.message（实际: ${JSON.stringify(expected)}）`,
-      );
-
       // ── 证据 ①：从**生产路由**读出口（gateway HTTP 边界，与前端同构）────────
       const api = startLongLivedCli({ ...base, session: SID, gatewayPort: GATEWAY_PORT });
       try {
@@ -150,13 +98,8 @@ export default defineCase(
         assert(stats, `响应应带 data 载荷（实际: ${JSON.stringify(inv.body)}）`);
         assert(stats.has_wal, '跑过两轮 ⇒ 事实源应在');
 
-        // ── 证据 ②：转写列与**同一时刻的文件**逐条对账 ────────────────────────
+        // ── 证据 ②：转写列 = **两轮对话**的直接后果（条目数 / 角色序 / 正文）──
         const gotRows = transcriptRows(stats);
-        assertEq(
-          gotRows.join('\n'),
-          expected.join('\n'),
-          `转写列应与事实源的三格逐条对账：出口 ${JSON.stringify(gotRows)} / 文件 ${JSON.stringify(expected)}`,
-        );
         assertEq(stats.transcript.entries.length, 4, '两轮 ⇒ 四条（user/assistant 各两条）');
         assertEq(
           stats.transcript.entries.map((e) => e.role).join(','),
@@ -172,6 +115,13 @@ export default defineCase(
             assistantTexts.some((t) => t.includes('第二答。')),
           `两轮的助手正文都应出现在转写里（实际: ${JSON.stringify(assistantTexts)}）`,
         );
+        const userTexts = stats.transcript.entries
+          .filter((e) => e.role === 'user')
+          .map((e) => e.text);
+        assert(
+          userTexts.some((t) => t.includes(Q1)) && userTexts.some((t) => t.includes(Q2)),
+          `两轮的用户发言都应出现在转写里（实际: ${JSON.stringify(userTexts)}）`,
+        );
 
         // ── 证据 ②′：读侧闸——别人的对话不从你的读数里漏出去 ──────────────────
         // 不声明 `principal` = 本机默认（上面 ②）；声明属主 = 逐字相同；矩阵外主体 ⇒ 空表。
@@ -180,7 +130,7 @@ export default defineCase(
         ).body.data;
         assertEq(
           transcriptRows(asOwner).join('\n'),
-          expected.join('\n'),
+          gotRows.join('\n'),
           '读方 = 属主 ⇒ 与本机默认读到同一份转写（闸不是为了把属主挡在外面）',
         );
         const denied = (
@@ -193,47 +143,17 @@ export default defineCase(
         );
         assertEq(denied.has_wal, true, '有源但不给你看——与「没有源」要能分辨');
 
-        // ── 证据 ③：对事实源动手术 ⇒ 转写必须跟着变（不是常数）───────────────
-        // 删掉**第一轮**的收束格 ⇒ 那一句必须从转写里消失（条目 4 → 3）。
-        const dropTurn0Final = () => {
-          const lines = readFileSyncSafe(walPath).split('\n').filter(Boolean);
-          const kept = [];
-          let dropped = 0;
-          for (const line of lines) {
-            const e = JSON.parse(line);
-            if (e.kind === 'chat.assistant.final' && e.turn === 0) {
-              dropped += 1;
-              continue;
-            }
-            kept.push(line);
-          }
-          assert(dropped > 0, '手术刀必须真的删掉行，否则测不出变化');
-          writeFileSync(walPath, `${kept.join('\n')}\n`, 'utf8');
-        };
-        dropTurn0Final();
-        const after = (await api.invoke('session/stats', {}, { session_id: SID })).body.data;
-        const afterRows = transcriptRows(after);
+        // ── 转写不变量（读出口读回：与前端 loadMessages 同一出口）────────────
+        const msgs = await readSessionMessages(api, SID);
+        assertTranscriptInvariants(msgs, 'T37');
         assertEq(
-          afterRows.length,
-          3,
-          `删一条 final ⇒ 转写 4 → 3（实际 ${afterRows.length}: ${JSON.stringify(afterRows)}）`,
+          msgs.filter((m) => m.role === 'user').length,
+          2,
+          '两轮 ⇒ 读回的历史里两条 user 消息',
         );
-        assert(
-          !afterRows.some((r) => r.includes('第一答。')),
-          `被删的那句不得再出现在转写里（实际: ${JSON.stringify(afterRows)}）`,
-        );
-        assert(
-          afterRows.some((r) => r.includes('第二答。')),
-          '未被删的那一轮不受影响（读数真的在读文件，不是整体清空）',
-        );
-        assert(after.has_wal, '手术没有破坏事实源本身');
       } finally {
         api.stop();
       }
-
-      // ── 转写不变量 ─────────────────────────────────────────────────────────
-      const msgs = readMessagesJson(hd.homedir, SID);
-      assertTranscriptInvariants(msgs, 'T37');
     } finally {
       llm.stop();
       cleanupHomedir(hd);

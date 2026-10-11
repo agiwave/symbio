@@ -78,8 +78,9 @@ use crate::symbio_core::chat_message::{
 use crate::symbio_core::{
     event_payload_node_id, event_produced_text_node_id, event_tool_result_node_id, Entity, Event,
     Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED,
-    EVENT_MESSAGE_REMOVED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED,
+    EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_TURN_SUPPLEMENTED,
+    EVENT_USER_MESSAGE,
 };
 
 use super::message_build::{llm_build_text_node, llm_build_tool_call_node, llm_build_tool_message};
@@ -252,6 +253,10 @@ fn nodes_of(e: &Event) -> Vec<ChatMessage> {
         ) => produced_nodes(e),
         // 轮边界汇报：界面文本，进列表（用户看得见），但不是模型的对话内容。
         (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_REPORTED) => vec![reported_node(e)],
+        // 对话面开场白（S2.7，`Escalate` 首响）：与汇报同形（根级 / 带
+        // `meta.surface = "reply"` / `exclude_from_context`），只有理由码不同。
+        // 形状经 `dialog` 载荷里的 `reason` / `exclude_from_context` 复刻。
+        (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_OPENING) => vec![opening_node(e)],
         // 工具结果：调用与结果两张卡都归这一格（一个事实一个 owner）。
         (Entity::Artifact, Verb::Asserted, EVENT_ARTIFACT_ADDED) => artifact_nodes(e),
         // 诞生格：**没有别的格可搭车**的节点在这里出生（压缩记录节点是最典型的
@@ -281,6 +286,10 @@ fn user_node(e: &Event) -> ChatMessage {
         role: Some(MessageRole::User),
         msg_type: Some(MessageType::Text),
         content: Some(MessageContent::Text(text_of(e, "text"))),
+        // `meta` 随载荷复刻（折进的合并补充带 `meta.supplement*`）：双写期它随整份
+        // `messages.json` 落盘，切源后必须随用户格事实入格，否则同一条发言在实时面与
+        // 重建面是两个身份。载荷没有该键 ⇒ `None`（普通发言），与落库那份同形。
+        meta: e.payload.get("meta").filter(|m| !m.is_null()).cloned(),
         timestamp: Some(e.ts),
         ..Default::default()
     }
@@ -351,12 +360,65 @@ fn reported_node(e: &Event) -> ChatMessage {
     m
 }
 
+/// 对话面开场白（`turn × asserted`，S2.7）：`Escalate` 首响。
+///
+/// 形状经 [`super::chat_loop::dialog_node`] **同一构造器**复刻（与 [`dialog_node`]
+/// 及 `reported_node` 同一条纪律：构造只有一份，漂移才不可能）。理由码与
+/// `exclude_from_context` 从载荷读——它们是这条节点的形状（`meta.reason` /
+/// `meta.exclude_from_context`），由写侧 `apply_verdict` 原样透传。
+///
+/// `id` 由载荷给（缺则按事件 id 合成，同 [`reported_node`]）；`timestamp` 覆写成
+/// 事件自身的 `ts`（构造器取「此刻」会破坏纯函数性，见模块头）。
+fn opening_node(e: &Event) -> ChatMessage {
+    let reason = e
+        .payload
+        .get("reason")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let exclude = e
+        .payload
+        .get("exclude_from_context")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let mut node = super::chat_loop::dialog_node(text_of(e, "text").as_str(), reason, exclude);
+    node.id = event_payload_node_id(e, "id");
+    node.timestamp = Some(e.ts);
+    node
+}
+
 /// 收束 / 进展 / 兜底格 → `[Turn 根, Reasoning 子?, Text 子?, rounds 的中途产出…]`。
 ///
 /// 形状与 [`super::message_build::llm_build_assistant_messages`] 同源（同一判据：
 /// reasoning-only 时那段内容归 Text 子节点，不另立 Reasoning 子，否则同一段内容
 /// 在存储层出现两份）。
 fn produced_nodes(e: &Event) -> Vec<ChatMessage> {
+    // 定稿答话（`Answered` / `Escalate` 的对话面节点）：收束格带 `dialog` 载荷 ⇒
+    // 它是一条**根级**节点，不是某个 Turn 的子节点（`parent_id = None`，与用户发言
+    // 互为兄弟）。形状经 `compose::dialog_node` **同一构造器**复刻——落库侧那一格
+    // 就是它产的，重建再抄一遍迟早各错各的（同 `ReportDraft::to_message` 的纪律）。
+    if let Some(dialog) = e.payload.get("dialog") {
+        let id = dialog.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let reason = dialog
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let exclude = dialog
+            .get("exclude_from_context")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let text = text_of(e, "text");
+        let mut node = super::chat_loop::dialog_node(text.as_str(), reason, exclude);
+        // id 由载荷给（缺则按事件 id 稳定合成——旧事件容错，与 `user_node` 同口径）。
+        node.id = if id.is_empty() {
+            e.event_id.clone()
+        } else {
+            id.to_string()
+        };
+        // 时间戳覆写成事件自身（构造器取「此刻」会破坏纯函数性，见模块头）。
+        node.timestamp = Some(e.ts);
+        node.status = Some(status_of(e));
+        return vec![node];
+    }
     let Some(turn_id) = str_of(e, "turn_id") else {
         return Vec::new();
     };
@@ -490,12 +552,41 @@ fn artifact_nodes(e: &Event) -> Vec<ChatMessage> {
     // ⇒ 按事件 id 稳定合成）。合成用的**不是** call_id——结果与调用是两张卡，
     // 共用 id 会让前端把它们合成一条。
     let result_id = event_tool_result_node_id(e);
-    let mut result = llm_build_tool_message(
-        &call_id,
-        &text_of(e, "text"),
-        Some(success),
-        Some(result_id),
-    );
+    // 等待用户的结果节点是**待用户动作的卡**（`user_prompt` + `waiting_user_action`），
+    // 不是普通结果文本：它的形状（`msg_type` / `status` / `meta.prompt`）随载荷入格，
+    // 重建照复刻——否则实时面看得见的审批卡，重启后会变成一条普通工具结果
+    // （`resume` 也就找不到可恢复的提问节点）。
+    let needs_user_action = e
+        .payload
+        .get("needs_user_action")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let mut result = if needs_user_action {
+        ChatMessage {
+            id: result_id,
+            parent_id: Some(call_id.clone()),
+            role: Some(MessageRole::Tool),
+            msg_type: Some(MessageType::UserPrompt),
+            content: Some(MessageContent::Text(text_of(e, "text"))),
+            status: Some(MessageStatus::WaitingUserAction),
+            meta: Some(serde_json::json!({
+                "prompt": e.payload.get("prompt").cloned().unwrap_or(serde_json::Value::Null),
+                "failure_kind": e
+                    .payload
+                    .get("failure_kind")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default(),
+            })),
+            ..Default::default()
+        }
+    } else {
+        llm_build_tool_message(
+            &call_id,
+            &text_of(e, "text"),
+            Some(success),
+            Some(result_id),
+        )
+    };
     result.timestamp = Some(e.ts);
 
     vec![call, result]

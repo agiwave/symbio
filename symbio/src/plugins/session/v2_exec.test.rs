@@ -76,7 +76,11 @@ fn tool_free_req<'a>(
         consolidation: None,
         supplements: None,
         supplemental_no: Default::default(),
+        user_meta: None,
         on_round: None,
+        // 开场白（S2.7）：本夹具不产生（`Escalate` 首响由 chat_loop 递入）。
+        opening_text: None,
+        opening_dialog: None,
     }
 }
 
@@ -171,7 +175,11 @@ async fn supplements_become_facts_visible_next_turn() {
         consolidation: None,
         supplements: Some(supplements),
         supplemental_no: Default::default(),
+        user_meta: None,
         on_round: None,
+        // 开场白（S2.7）：本夹具不产生。
+        opening_text: None,
+        opening_dialog: None,
     })
     .await
     .expect("工具轮执行成功");
@@ -732,7 +740,11 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         consolidation: None,
         supplements: None,
         supplemental_no: Default::default(),
+        user_meta: None,
         on_round: None,
+        // 开场白（S2.7）：本夹具不产生。
+        opening_text: None,
+        opening_dialog: None,
     })
     .await
     .expect("工具轮执行成功");
@@ -999,7 +1011,11 @@ async fn full_turn_lands_derived_commitment_facts() {
         consolidation: None,
         supplements: None,
         supplemental_no: Default::default(),
+        user_meta: None,
         on_round: None,
+        // 开场白（S2.7）：本夹具不产生。
+        opening_text: None,
+        opening_dialog: None,
     })
     .await
     .expect("工具轮执行成功");
@@ -1164,6 +1180,11 @@ async fn a_skill_hit_never_takes_over_a_resumed_turn() {
         name: "vdfs_read".into(),
         args: serde_json::json!({ "path": "a.md" }),
         text: "文件内容：hello".into(),
+        // 节点身份（调用 / 轮根 / 结果）：本用例验的是续写路径与技能不顶替，
+        // 不验节点挂靠——留空 ⇒ 回落合成。
+        call_id: String::new(),
+        turn_id: String::new(),
+        result_id: String::new(),
     });
 
     let res = execute_turn(req).await.expect("续写轮执行成功");

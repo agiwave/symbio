@@ -37,7 +37,7 @@ import {
   nextPort,
   providerConfig,
   PROVIDER_ID,
-  readMessagesJson,
+  readSessionMessages,
   assertTranscriptInvariants,
 } from '../helpers.mjs';
 
@@ -160,8 +160,8 @@ export default defineCase('T16 实时面顺序 = 存储顺序（多轮：每条�
       live.set(m.mid, cur);
     }
 
-    // ④ 落盘权威版本
-    const stored = readMessagesJson(hd.homedir, SID);
+    // ④ 存储权威版本（经生产读出口读：`vdfs/read` = 前端加载历史那一出口）
+    const stored = await readSessionMessages(cli, SID);
     assertTranscriptInvariants(stored, 'T16');
     assertEq(stored.filter((m) => m.role === 'user').length, 2, '落盘应有两条 user 消息');
 

@@ -33,6 +33,16 @@ fn tmp(tag: &str) -> (std::path::PathBuf, std::path::PathBuf) {
     (dir, wal)
 }
 
+/// 手写 legacy 侧 `messages.json`（切源后生产已停写，只有 v1 遗留会话才有）。
+fn seed_legacy(dir: &std::path::Path, msgs: &[ChatMessage]) {
+    let json = serde_json::json!({ "messages": msgs });
+    std::fs::write(
+        dir.join(crate::plugins::session::store::MESSAGES_FILE_NAME),
+        serde_json::to_string(&json).unwrap(),
+    )
+    .expect("写 messages.json");
+}
+
 /// 往 WAL 里写一段对话（user + assistant final）。
 fn seed_wal(wal: &std::path::Path, turns: &[(&str, &str)]) {
     let tag = "e";
@@ -82,8 +92,9 @@ fn identical_sources_are_consistent() {
         msg(MessageRole::User, "问 B"),
         msg(MessageRole::Assistant, "答 B"),
     ];
+    seed_legacy(&dir, &store_side);
 
-    let r = reconcile(&dir, &store_side);
+    let r = reconcile(&dir);
     assert!(r.is_consistent(), "同内容必须判一致：{}", r.summary());
     assert_eq!(r.store_msgs, 4);
     assert_eq!(r.wal_entries, 4);
@@ -104,8 +115,9 @@ fn a_changed_line_is_reported() {
         msg(MessageRole::User, "问 A"),
         msg(MessageRole::Assistant, "答 A'"),
     ];
+    seed_legacy(&dir, &store_side);
 
-    let r = reconcile(&dir, &store_side);
+    let r = reconcile(&dir);
     assert!(!r.is_consistent(), "正文不同必须判不一致");
     assert_eq!(r.mismatches, 1, "逐条比，差的那一处要数出来");
     assert!(record(&dir, "s1", &r), "不一致 ⇒ 落一条事件");
@@ -136,8 +148,9 @@ fn a_missing_line_is_reported_too() {
         msg(MessageRole::User, "问 A"),
         msg(MessageRole::Assistant, "答 A"),
     ];
+    seed_legacy(&dir, &store_side);
 
-    let r = reconcile(&dir, &store_side);
+    let r = reconcile(&dir);
     assert!(!r.is_consistent(), "条数不同必须判不一致");
     assert_eq!(
         r.mismatches, 2,
@@ -163,8 +176,9 @@ fn empty_placeholder_nodes_are_not_a_mismatch() {
         msg(MessageRole::Assistant, ""),
         msg(MessageRole::Assistant, "答 A"),
     ];
+    seed_legacy(&dir, &store_side);
 
-    let r = reconcile(&dir, &store_side);
+    let r = reconcile(&dir);
     assert_eq!(
         r.store_msgs, 2,
         "空正文那条不计入（对账眼里它有话才算一句话）"
@@ -179,8 +193,8 @@ fn empty_placeholder_nodes_are_not_a_mismatch() {
 #[test]
 fn a_missing_wal_is_not_a_mismatch() {
     let (dir, _wal) = tmp("nowal");
-    let store_side = vec![msg(MessageRole::User, "问 A")];
-    let r = reconcile(&dir, &store_side);
+    seed_legacy(&dir, &[msg(MessageRole::User, "问 A")]);
+    let r = reconcile(&dir);
 
     assert!(r.wal_missing, "WAL 不在要单独标（还没跑过任何一轮）");
     assert_eq!(r.mismatches, 0, "没有第二源可比 ⇒ 不算不一致");
@@ -198,7 +212,8 @@ fn a_missing_wal_is_not_a_mismatch() {
 fn recording_twice_is_idempotent() {
     let (dir, wal) = tmp("idem");
     seed_wal(&wal, &[("问 A", "答 A")]);
-    let r = reconcile(&dir, &[msg(MessageRole::Assistant, "答 A'")]);
+    seed_legacy(&dir, &[msg(MessageRole::Assistant, "答 A'")]);
+    let r = reconcile(&dir);
 
     assert!(record(&dir, "s1", &r), "第一次落");
     assert!(
@@ -221,8 +236,28 @@ fn recording_twice_is_idempotent() {
 fn both_empty_is_consistent() {
     let (dir, wal) = tmp("empty");
     seed_wal(&wal, &[]);
-    let r = reconcile(&dir, &[]);
+    seed_legacy(&dir, &[]);
+    let r = reconcile(&dir);
     assert!(r.is_consistent(), "两个源都空 ⇒ 一致（有据的零，不是错误）");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── 切源后常态：`messages.json` 不在 = 无第二源可比，不出声 ─────────────
+
+#[test]
+fn absent_legacy_messages_is_not_a_mismatch() {
+    let (dir, wal) = tmp("nolegacy");
+    seed_wal(&wal, &[("问 A", "答 A"), ("问 B", "答 B")]);
+    // 切源后**生产不再写** messages.json ⇒ 它不存在。此时读侧看到的 WAL 内容是
+    // 唯一真源，没有任何"第二份存储"跟它打架 ⇒ 判一致，绝不能让诊断天天误报。
+    let r = reconcile(&dir);
+    assert!(r.store_missing, "legacy 不在要单独标（切源后的常态）");
+    assert_eq!(r.mismatches, 0, "没有第二源可比 ⇒ 不算不一致");
+    assert!(r.is_consistent(), "legacy 不在时判「一致」");
+    assert!(
+        !record(&dir, "s1", &r),
+        "legacy 不在不落事件——这正是 I2 误报的修复点"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -236,6 +271,7 @@ fn is_consistent_requires_both_count_and_content_to_match() {
         wal_entries: 4,
         mismatches: 0,
         wal_missing: false,
+        store_missing: false,
     };
     assert!(!r.is_consistent(), "条数不同即使逐条都相同也不算一致");
     // WAL 不在时恒判一致（否则还没跑过轮的会话会让它天天响）
@@ -244,6 +280,16 @@ fn is_consistent_requires_both_count_and_content_to_match() {
         wal_entries: 0,
         mismatches: 0,
         wal_missing: true,
+        store_missing: false,
     };
     assert!(w.is_consistent());
+    // legacy 不在时恒判一致（切源后的常态，同一条纪律的另一侧）
+    let l = Reconciliation {
+        store_msgs: 0,
+        wal_entries: 9,
+        mismatches: 0,
+        wal_missing: false,
+        store_missing: true,
+    };
+    assert!(l.is_consistent());
 }

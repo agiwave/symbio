@@ -75,12 +75,15 @@ use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
 /// 父会话目录内存放子会话的固定子目录名
 const SUB_SESSIONS_DIR: &str = "sessions";
 
-/// 会话主文件名（一个会话目录内的唯一真源）
-const SESSION_FILE: &str = "session.json";
-
 /// 消息文件名 —— **与元数据分开存放**（见模块头「元数据与消息分文件」）。
 /// 清单只读 `session.json`，**不读**本文件；只有真的要取转写时才读。
-const MESSAGES_FILE: &str = "messages.json";
+///
+/// `pub(crate)`：对账模块（`v2_reconcile`）要按同一常量读 legacy 缓存，
+/// 「文件名只有一份口径」不得各自硬编码字符串。
+pub(crate) const MESSAGES_FILE_NAME: &str = "messages.json";
+
+/// 会话主文件名（一个会话目录内的唯一真源）
+const SESSION_FILE: &str = "session.json";
 
 /// 会话存储：一个具体类型，落盘与不落盘由构造时选定（见模块头）
 pub struct SessionStore {
@@ -210,23 +213,15 @@ impl SessionStore {
             .await
             .map_err(|e| PluginError::InternalError(format!("创建会话目录失败: {e}")))?;
 
-        // 元数据与消息**分两个文件**落盘：清单只读 `session.json`（恒定小成本），
-        // `messages.json` 只有真的要取转写时才读——这是清单与消息量脱钩的关键。
+        // 元数据落盘（[ADR-049]：**消息正文不再由 store 写**）：`v2-events.wal` 是
+        // 会话消息的唯一事实源（由事实路径 `chat_session/write.rs` 入格），`messages.json`
+        // 停写——它是 v1 遗留会话的唯一记录，只在「WAL 不在」时作回落读法被读。
         //
-        // 顺序是**先消息、后元数据**（先数据后索引）：中途崩溃最坏情况是元数据
-        // 落后一版，不会出现「索引指向没有的消息」。
-        //
-        // 原子写（两个文件各一份 tmp + rename）：直接 fs::write（O_TRUNC + write）
-        // 在多个并发保存交错时会留下"短 JSON + 长旧内容残留"，产生 trailing
-        // characters 损坏；rename 覆盖保证磁盘上永远是某一刻的完整版本。
+        // 只写 `session.json`（标题 / 条数 / 摘要 / 标签等清单投影）：列一次清单的
+        // 成本与会话聊了多久无关。原子写（tmp + rename）：直接 fs::write 在多个并发
+        // 保存交错时会留下"短 JSON + 长旧内容残留"，rename 覆盖保证磁盘上永远是
+        // 某一刻的完整版本。
         let summary = SessionSummary::of(session);
-        atomic_write(
-            &dir.join(MESSAGES_FILE),
-            &MessagesFile {
-                messages: session.messages.clone(),
-            },
-        )
-        .await?;
         atomic_write(&dir.join(SESSION_FILE), &SessionMetaFile::of(&summary)).await
     }
 
@@ -524,10 +519,14 @@ fn parse_or_self_heal<T: serde::de::DeserializeOwned>(content: &str) -> Option<T
     }
 }
 
-/// 读 `messages.json`；缺失或不可解析时回落到元数据里的内联消息
-/// （旧布局），两者都没有则空。
+/// 读消息——**真源是 `v2-events.wal`**（[ADR-049](../../../../docs/decisions/session.md#adr-049-wal-是会话唯一事实源sessionstore-降为缓存轨-s-的起点)）：
+/// 有 WAL 就从它重建；WAL 不在才回落 `messages.json` / 元数据内联（v1 时代
+/// 的遗留布局——那批会话的事实从未入格，文件是它们的唯一记录）。
 async fn load_messages(dir: &Path, meta: &SessionMetaFile) -> Vec<ChatMessage> {
-    let path = dir.join(MESSAGES_FILE);
+    if let Some(msgs) = rebuild_from_wal_dir(dir) {
+        return msgs;
+    }
+    let path = dir.join(MESSAGES_FILE_NAME);
     if let Ok(content) = tokio::fs::read_to_string(&path).await {
         if let Some(msgs) = parse_messages_content(&content) {
             return msgs;
@@ -536,9 +535,26 @@ async fn load_messages(dir: &Path, meta: &SessionMetaFile) -> Vec<ChatMessage> {
     meta.messages.clone().unwrap_or_default()
 }
 
+/// 从 `<会话目录>/v2-events.wal` 重建消息列表（真源读取）。
+///
+/// WAL 不在 / 打不开 ⇒ `None`（调用方回落遗留读法——**没有 WAL 不等于没有历史**，
+/// v1 时代落的 `messages.json` 仍是那批会话的唯一记录）。只读打开：读路径无写副作用。
+fn rebuild_from_wal_dir(dir: &Path) -> Option<Vec<ChatMessage>> {
+    let path = dir.join(crate::plugins::session::paths::V2_WAL_FILE);
+    if !path.exists() {
+        return None;
+    }
+    let store = crate::symbio_core::EventWalStore::open_readonly(&path).ok()?;
+    // `range` 是 `Store` trait 的方法：trait 必须在作用域里（局部引入，
+    // 不为一次读取把这个 trait 抬进本文件的顶层导入）。
+    use crate::symbio_core::Store as _;
+    let snapshot = store.range(crate::symbio_core::Seq::new(0));
+    Some(super::rebuild::rebuild(&snapshot))
+}
+
 /// 同步版读 `messages.json`
 fn read_messages_sync(dir: &Path) -> Option<Vec<ChatMessage>> {
-    let content = std::fs::read_to_string(dir.join(MESSAGES_FILE)).ok()?;
+    let content = std::fs::read_to_string(dir.join(MESSAGES_FILE_NAME)).ok()?;
     parse_messages_content(&content)
 }
 
@@ -548,11 +564,14 @@ fn read_meta(dir: &Path) -> Option<SessionMetaFile> {
     parse_meta_content(&content)
 }
 
-/// 读整个会话目录 = 元数据 + 消息（同步；嵌套查找的 miss 路径用）
+/// 读整个会话目录 = 元数据 + 消息（同步；嵌套查找的 miss 路径用）。
+///
+/// 消息同样以 WAL 为准（与 [`load_messages`] 同一条真源纪律），遗留读法是回落。
 fn read_session_dir(dir: &Path) -> Option<Session> {
     let meta = read_meta(dir)?;
-    // 两个来源都没有消息 = 空会话（不是「不存在」），别把「没有消息」当成「不存在」
-    let messages = read_messages_sync(dir)
+    // 「两个来源都没有消息」= 空会话（不是「不存在」），别把「没有消息」当成「不存在」
+    let messages = rebuild_from_wal_dir(dir)
+        .or_else(|| read_messages_sync(dir))
         .or_else(|| meta.messages.clone())
         .unwrap_or_default();
     Some(meta.into_session(messages))
@@ -613,14 +632,28 @@ fn session_dirs_deep(base: &Path) -> Vec<PathBuf> {
 }
 
 /// 把一个旧布局目录（消息内联）拆成两个文件，并补写缺失的投影。幂等。
+///
+/// ## 迁移边界（[ADR-049]）
+///
+/// `messages.json` 已**不再是**布局的一部分：真源是 `v2-events.wal`，本函数只为
+/// **v1 遗留目录**服务——那些把消息内联在 `session.json` 里、事实从未入格的会话。
+/// 因此判据是「**有内联消息吗**」：没有内联消息的目录（新布局会话 / 已迁过的）
+/// 一律跳过。少了这条，新会话会在首次迁移时被写出一份**空 `messages.json`**
+/// ——把我们刚停写的缓存又凭空造出来，且让双源对账把它读成「空第二源 ⇒ 不一致」
+/// （诊断误报的根因）。存量补投影那半仍保留（`title` 空的旧文件要补）。
 async fn split_inline_messages(dir: &Path) -> Result<(), PluginError> {
     let Some(meta) = read_meta(dir) else {
         return Ok(());
     };
-    let has_split = dir.join(MESSAGES_FILE).is_file();
+    let has_split = dir.join(MESSAGES_FILE_NAME).is_file();
     let inline = meta.messages.clone();
-    // 已是新布局、投影齐全、也没有残留的内联消息 → 无需改动
-    if has_split && inline.is_none() && !meta.title.is_empty() {
+    // 已是新布局（消息文件在 / 内联已空）、且投影齐全 → 无需改动。
+    //
+    // 「有内联消息」是唯一的迁移触发条件：`messages.json` 停写后，一份**既无**
+    // 消息文件、**又无**内联消息的目录就是新布局的正常态，绝不能因此补写空缓存。
+    let needs_split = inline.as_ref().is_some_and(|m| !m.is_empty());
+    let projection_missing = meta.title.is_empty();
+    if !needs_split && !projection_missing {
         return Ok(());
     }
 
@@ -634,9 +667,10 @@ async fn split_inline_messages(dir: &Path) -> Result<(), PluginError> {
         inline.unwrap_or_default()
     };
 
-    if !has_split {
+    // 只在**确有内联消息要拆**时才落 `messages.json`（停写后不再凭空补一份空缓存）。
+    if !has_split && needs_split {
         atomic_write(
-            &dir.join(MESSAGES_FILE),
+            &dir.join(MESSAGES_FILE_NAME),
             &MessagesFile {
                 messages: messages.clone(),
             },

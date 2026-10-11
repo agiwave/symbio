@@ -1,6 +1,6 @@
 import './_selfrun.mjs';
 // T36 自主层接线（`AutonomousInitiator` + `IntentGate`，S9 第 21 步，S12）：
-// 心跳调度器到点 ⇒ 触发事实落格 ⇒ 「欲」入格 ⇒ 闸门判 ⇒ 过了才开出长任务。
+// 会话空闲到点 ⇒ 心跳触发一轮 ⇒ 「欲」过闸门 ⇒ 过了才真的发出那一轮。
 //
 // ## 本用例钉的是什么
 //
@@ -11,11 +11,10 @@ import './_selfrun.mjs';
 //
 // | 要证的事 | 唯一能看见它的地方 |
 // |---|---|
-// | 自主层**真的被定时器驱动**（不是只在测试里被调用） | 真进程里跑够一个 tick，事实源长出 `system.triggered` |
-// | 三个 initiator 事实**成链**（触发 → 自检 → 欲） | 事实源里 `system.triggered` / `system.health` / `conation.expressed` 三条 + 溯源 |
-// | 闸门**真的在链上**（不是摆设） | 同一条链路，闸门放行 ⇒ `task.opened`；闸门拒 ⇒ **没有** `task.opened` |
+// | 心跳**真的被定时器驱动**（不是只在测试里被调用） | 真进程里跑够一个 tick，转写里长出心跳提示词那一轮 |
+// | 闸门**真的在链上**（不是摆设） | 就绪集（`session/stats.readyset`）：过闸 ⇒ 那条长任务在其中；拒收 ⇒ 就绪集里没有它 |
 //
-// ## 为什么必须端到端（单测证不了的三件事）
+// ## 为什么必须端到端（单测证不了的两件事）
 //
 // 单测（`heartbeat/tests.rs`）直接调 `record_autonomous_trigger`，把三种「不触发」
 // 与四个事实的形状钉死了，但它证不了：
@@ -27,9 +26,7 @@ import './_selfrun.mjs';
 //    `record_autonomous_trigger` 里，紧跟在「欲入格」之后——单测可以自己拿令牌
 //    调 `approve`，但证不了**生产路径**有没有绕过它。本用例用「同一条链路、
 //    只换闸门的判决」来钉：两个会话走完全相同的代码，只有提示词长度不同，
-//    一个开出长任务、一个开不出。
-// 3. **长任务的溯源真的指向被批准的欲**：`task.opened` 的 `produced_by` 必须是
-//    `conation.expressed` 的 seq（`approved.from_seq`），而不是触发本身。
+//    一个真的跑出心跳轮、一个什么都没有。
 //
 // ## 闸门的两个判决怎么在一条用例里都跑到
 //
@@ -44,49 +41,41 @@ import './_selfrun.mjs';
 // 于是**同一个 tick、同一条链路**同时给出闸门的两侧判决——「行为可见地不同」的
 // 唯一变量就是闸门，不是别的。
 //
-// ## 为什么把 `updated_at` 往回拨
+// ## 心跳怎么装：经 **heartbeat 工具**（用户可见入口），不碰内部存储
 //
-// 调度器每 15s 扫一次，空闲基线取 `max(内存锚点, 磁盘侧 updated_at)`（新进程内存
-// 锚点为空 ⇒ 就是 `updated_at`）。要触发得等会话空闲满 `interval + 抖动(0–30s)`——
-// 空等墙上时钟会把这个用例拖到 45s。回拨 `updated_at` 是把这个**前置条件**
-// （「这个会话已经空闲 3 分钟了」）直接摆好：被绕过的只是等待，调度器、触发链、
-// 闸门一个都没少。
+// 装心跳的正路是模型在会话里调 `heartbeat` 工具（`action=set`，session 插件内聚的
+// 设置入口）——它与触发、调度走同一条生产机制。`interval_seconds` 取下限 10s
+// （调度器 15s 一 tick + 0–30s 抖动），触发轮以心跳提示词作为用户发言落进转写，
+// 于是「有没有过闸」在**转写读出口**上直接可读（`vdfs/read` 会话叶子，前端加载
+// 历史同一出口）。
 //
-// 两处配套：`interval_seconds` 取 60（> 一个 tick 的 15s），使一趟触发之后**不会**
-// 在同一个观测窗内再触发一次——否则「恰好一次触发」的判据会随 tick 数漂移；
-// 长驻 CLI 用**中立会话 id**，因为 REPL 启动时会把自己那个会话落一次盘
-// （`updated_at = now`），拿被测会话当 REPL 会话就会把回拨的空闲基线抹掉。
-import { join } from 'node:path';
-import { writeFileSync } from 'node:fs';
+// 长驻 CLI 用**中立会话 id**：REPL 启动时会把自己那个会话的 `updated_at` 推到 now，
+// 拿被测会话当 REPL 会话就会把被测会话的空闲基线抹掉（SID_OK 于是比 SID_BROAD
+// 晚触发）。
 import {
   MockLlm,
   makeHomedir,
   DIALOG_FACE_OFF,
   cleanupHomedir,
-  runCli,
   startLongLivedCli,
+  nextPort,
   waitFor,
-  readFileSyncSafe,
-  readMessagesJson,
   assert,
   assertEq,
   defineCase,
   providerConfig,
   PROVIDER_ID,
-  assertTranscriptInvariants,
+  readSessionMessages,
 } from '../helpers.mjs';
 
 /** 两个会话：同一份代码、同一条链路，只有心跳提示词长度不同 ⇒ 闸门判决不同。 */
 const SID_OK = 'e2e-t36-ok';
 const SID_BROAD = 'e2e-t36-broad';
 
-/** v2 事实源文件名（与 `plugins/session/paths.rs::V2_WAL_FILE` 同一常量口径） */
-const V2_WAL = 'v2-events.wal';
-
-/** 第 1 轮的用户发言：只为把会话与事实源建出来（心跳的空闲基线要靠它之后的 updated_at）。 */
+/** 装心跳那一轮的用户发言（两个会话同文，靠 `once` + 数组顺序各自消耗各自那条场景）。 */
 const MSG = '开始工作';
 
-/** 闸门**放行**的提示词：短（远低于 200 字节上界）⇒ 应开出长任务。 */
+/** 闸门**放行**的提示词：短（远低于 200 字节上界）⇒ 应开出心跳轮。 */
 const PROMPT_OK = '推进待办';
 
 /**
@@ -99,43 +88,11 @@ const PROMPT_BROAD =
   '把当前所有尚未完成的工作项、它们各自的上下文、可能影响这些工作项推进的外部因素、' +
   '以及此前每一次尝试留下的结论都仔细检查一遍，然后持续不断地推进直到全部完成';
 
-/** 调度器扫描周期 = 15s（`heartbeat/mod.rs::HEARTBEAT_TICK_SECS`）——注释用，不参与判定。 */
-
-/** 读一个会话的全部事实。 */
-function readEvents(hd, sid) {
-  const raw = readFileSyncSafe(join(hd.homedir, 'session', sid, V2_WAL));
-  assert(raw.length > 0, `${sid} 的事实源应存在且非空`);
-  return raw.split('\n').filter(Boolean).map((l) => JSON.parse(l));
-}
-
-/** 某会话某类事实。 */
-function eventsOf(hd, sid, kind) {
-  return readEvents(hd, sid).filter((e) => e.kind === kind);
-}
-
-/**
- * 给会话装上心跳（直接写 `session.json` 的 `metadata.heartbeat`，与
- * `HeartbeatConfig::from_metadata` 的读侧同构），并把 `updated_at` 回拨 3 分钟。
- *
- * `interval_seconds` 取 60（> 一个 tick 的 15s）：一趟触发之后不会在同一观测窗内
- * 再触发一次，「恰好一次触发」的判据因此不随 tick 数漂移。
- */
-function armHeartbeat(hd, sid, prompt) {
-  const p = join(hd.homedir, 'session', sid, 'session.json');
-  const raw = readFileSyncSafe(p);
-  assert(raw.length > 0, `${sid} 的 session.json 应已存在（先跑一轮把会话建出来）`);
-  const s = JSON.parse(raw);
-  assertEq(s.id, sid, '会话 id 原样落盘');
-  s.metadata = {
-    ...(s.metadata ?? {}),
-    heartbeat: { enabled: true, interval_seconds: 60, prompt, include_history: true },
-  };
-  s.updated_at = Date.now() - 180_000;
-  writeFileSync(p, JSON.stringify(s), 'utf8');
-}
+/** 心跳间隔取下限 10s（调度器 15s 一 tick + 0–30s 抖动）。 */
+const INTERVAL = 10;
 
 export default defineCase(
-  'T36 自主层接线：心跳触发成链，闸门放行开长任务 / 拒收则不开',
+  'T36 自主层接线：心跳到点成轮，闸门放行的会话真的跑出来 / 拒收的什么都没有',
   async () => {
     // 上界是字节：先把这个前置条件本身钉住（否则「拒收」可能只是提示词太短没触发）。
     assert(
@@ -148,186 +105,203 @@ export default defineCase(
     );
 
     const llm = await new MockLlm([
-      { id: 'turn1', match: MSG, content: '好的，开始。' },
+      // 装心跳：两个会话各一次（数组顺序即消耗顺序——SID_OK 先跑，拿第一条）。
+      // `once` 保证同文输入在两会话上各自落到各自那条场景上。
+      {
+        id: 'hb-ok',
+        match: MSG,
+        once: true,
+        content: '我先把心跳设置好。',
+        toolCalls: [
+          {
+            id: 'call_hb_ok',
+            name: 'heartbeat',
+            arguments: { action: 'set', interval_seconds: INTERVAL, prompt: PROMPT_OK },
+          },
+        ],
+      },
+      {
+        id: 'hb-broad',
+        match: MSG,
+        once: true,
+        content: '我先把心跳设置好。',
+        toolCalls: [
+          {
+            id: 'call_hb_broad',
+            name: 'heartbeat',
+            arguments: { action: 'set', interval_seconds: INTERVAL, prompt: PROMPT_BROAD },
+          },
+        ],
+      },
+      // 工具结果轮（末条 role=tool）：两条线共用。
+      { id: 'hb-after', afterTool: true, content: '心跳已设置。' },
+      // 心跳触发轮：提示词没有专属场景 ⇒ 落末条兜底。
       { id: 'rest', content: '收到。' },
     ]).start();
 
+    const GATEWAY_PORT = nextPort();
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
+        // 读回走读出口（gateway `invoke` → `vdfs/read`），入站口必须开着
+        // （与 T28/T31 同一约定）。
+        gateway: {
+          inbound_enabled: true,
+          inbound_protocol: 'http',
+          inbound_bind: '127.0.0.1',
+          inbound_port: GATEWAY_PORT,
+          inbound_token: '',
+          inbound_readonly: false,
+        },
         // `conation_enabled` **显式打开**：它默认 false（S12 §4 平凡值「关掉后系统
         // 退化为纯响应式」），本用例验的是打开之后闸门**能放行**的那条路。
         // 拒收那条路不靠这个开关，靠提示词长度——两个判决因此可以并存。
-        //
-        // 刻意**不配 gateway**：本用例只关心事实源，不需要入站口；而 gateway 配置是
-        // homedir 级的——配了它，下面两个一次性 CLI 会跟长驻 CLI 抢同一个端口，
-        // 「网关就绪」于是时对时错（长驻进程没抢到端口时，轮询打到的是别人的端口）。
         session: { ...DIALOG_FACE_OFF, conation_enabled: true },
       },
     });
 
-    try {
-      // ── 前置：两个会话各跑一轮，把会话与事实源建出来 ──────────────────────
-      for (const sid of [SID_OK, SID_BROAD]) {
-        const r = runCli({
-          homedir: hd.homedir,
-          workdir: hd.workdir,
-          message: MSG,
-          provider: PROVIDER_ID,
-          session: sid,
-        });
-        assertEq(r.code, 0, `${sid} 建会话轮退出码（stderr: ${r.stderr.slice(0, 400)}）`);
-        assert(
-          !eventsOf(hd, sid, 'system.triggered').length,
-          `${sid}: 还没装心跳，不该有任何触发事实（触发是**到点判出来的**，不是声明出来的）`,
-        );
-      }
+    // 长驻进程：调度器随插件树构建启动，第一个 tick 在 15s 后。用**中立会话 id**
+    // （不是被测的两个）：REPL 启动时会把自己会话的 updated_at 推到 now，拿被测
+    // 会话当 REPL 会话会把回拨的空闲基线抹掉。
+    const cli = startLongLivedCli({
+      homedir: hd.homedir,
+      workdir: hd.workdir,
+      session: 'e2e-t36-live',
+      provider: PROVIDER_ID,
+      gatewayPort: GATEWAY_PORT,
+    });
 
-      // ── 装心跳（短提示词 ⇒ 放行；长提示词 ⇒ 拒收）────────────────────────
-      armHeartbeat(hd, SID_OK, PROMPT_OK);
-      armHeartbeat(hd, SID_BROAD, PROMPT_BROAD);
-
-      // ── 起长驻进程：调度器随插件树构建启动，第一个 tick 在 15s 后 ──────────
-      // 用**中立会话 id**（不是被测的两个）：REPL 会在启动时把自己的会话落一次盘
-      // （`updated_at = now`），若直接拿被测会话当 REPL 会话，回拨的空闲基线会被
-      // 这次启动写盘抹掉——SID_OK 于是比 SID_BROAD 晚触发，等「两个都触发」就得多等
-      // 一整个 tick，还把「恰好一次触发」的判据变成「三次」。
-      const cli = startLongLivedCli({
-        homedir: hd.homedir,
-        workdir: hd.workdir,
-        session: 'e2e-t36-live',
-        provider: PROVIDER_ID,
+    /** 建会话并把一条消息写进收件箱（唯一输入入口：与 T16/T20 同一手法） */
+    const send = async (sid, text) => {
+      const root = (await cli.invoke('vdfs/root', {})).body?.data?.path;
+      assert(typeof root === 'string' && root.length > 0, 'vdfs/root 应返回根地址');
+      const sessionAddr = `${root.replace(/\/+$/, '')}/session/${sid}`;
+      const created = await cli.invoke('vdfs/write', {
+        path: sessionAddr,
+        create: true,
+        text: JSON.stringify({ metadata: { workdir: hd.workdir, mode: 'auto', risk_level: 'medium' } }),
       });
+      assertEq(created.status, 200, `创建会话 ${sid}（${JSON.stringify(created.body)?.slice(0, 300)}）`);
+      const w = await cli.invoke('vdfs/write', { path: `${sessionAddr}/inbox`, text });
+      assertEq(w.status, 200, `写收件箱 ${sid}（${JSON.stringify(w.body)?.slice(0, 300)}）`);
+    };
+
+    /** 该会话转写里的用户发言正文（经读出口读回 = 前端加载历史同一出口） */
+    const userTexts = async (sid) => {
+      const msgs = (await readSessionMessages(cli, sid)) ?? [];
+      return msgs
+        .filter((m) => m.role === 'user')
+        .map((m) => (typeof m.content === 'string' ? m.content : ''));
+    };
+
+    try {
+      await cli.waitGatewayReady(20_000, 'T36 长驻进程');
+
+      // ── 装心跳：SID_OK 先跑（拿 hb-ok 场景），SID_BROAD 后跑（拿 hb-broad）──
+      // once + 数组顺序 = 两条同文输入各自消耗各自那条场景（见 mock-llm 的匹配规则）。
+      await send(SID_OK, MSG);
+      await send(SID_BROAD, MSG);
+
+      // 两个装心跳的轮次都真的跑了（工具调用各一次，参数各带各的提示词）。
+      await waitFor(async () => (await llm.requests()).length >= 4, {
+        what: '两个装心跳轮次跑完（各一次工具调用 + 一次结果回灌）',
+        timeoutMs: 60_000,
+      });
+      const calls = (await llm.requests())
+        .flatMap((r) => (r.body.messages ?? []).flatMap((m) => m.tool_calls ?? []))
+        .filter((c) => c.function?.name === 'heartbeat')
+        .map((c) => c.function?.arguments ?? '');
+      assert(
+        calls.some((a) => a.includes(PROMPT_OK)),
+        `SID_OK 应装上短提示词的心跳（实际: ${JSON.stringify(calls)}）`,
+      );
+      assert(
+        calls.some((a) => a.includes(PROMPT_BROAD)),
+        `SID_BROAD 应装上长提示词的心跳（实际: ${JSON.stringify(calls)}）`,
+      );
+
+      // ── 等一个 tick：真进程里的调度器到点触发 ───────────────────────────
+      // 放行侧应长出心跳轮（提示词作为用户发言落进转写）；拒收侧什么都不该有。
       try {
-        // ── 等一个 tick：真进程里的调度器到点触发 ───────────────────────────
-        try {
-          await waitFor(
-            () =>
-              eventsOf(hd, SID_OK, 'system.triggered').length >= 1 &&
-              eventsOf(hd, SID_BROAD, 'system.triggered').length >= 1,
-            {
-              what: '两个会话的心跳到点（`system.triggered` 落格；调度器 15s 一 tick）',
-              timeoutMs: 70_000,
-            },
-          );
-        } catch (e) {
-          // 超时必带诊断：调度器没触发的线索在 CLI stderr。
-          throw new Error(`${e.message}\n--- 长驻 CLI stderr 尾部 ---\n${cli.out.stderr.slice(-1200) || '（空）'}`);
-        }
-
-        // ── 证据 ①：三个 initiator 事实成链，且溯源指得对 ──────────────────────
-        for (const sid of [SID_OK, SID_BROAD]) {
-          const triggered = eventsOf(hd, sid, 'system.triggered');
-          assertEq(triggered.length, 1, `${sid}: 恰好一次触发（实际 ${triggered.length}）`);
-          assertEq(triggered[0].entity, 'System', `${sid}: 触发格实体坐标`);
-          assertEq(triggered[0].verb, 'Opened', `${sid}: 触发格动词坐标（system × opened）`);
-          assertEq(triggered[0].payload.kind, 'scheduled', `${sid}: 触发种类是"定时"`);
-          assertEq(
-            triggered[0].actor,
-            'agent:autonomous',
-            `${sid}: 自主行为记在自主主体头上（不冒充用户对话）`,
-          );
-          assert(triggered[0].produced_by != null, `${sid}: 触发必带溯源（I2：指向上一格）`);
-
-          const health = eventsOf(hd, sid, 'system.health');
-          assertEq(health.length, 1, `${sid}: 触发即自检一格（实际 ${health.length}）`);
-          assertEq(health[0].entity, 'System', `${sid}: 自检格实体坐标`);
-          assertEq(health[0].verb, 'Progressed', `${sid}: 自检格动词坐标（system × progressed）`);
-          assert(
-            health[0].payload.idle_ms > 0,
-            `${sid}: 自检记下触发时测得的空闲时长（实际 ${health[0].payload.idle_ms}）`,
-          );
-          assertEq(
-            health[0].produced_by,
-            triggered[0].seq,
-            `${sid}: 自检是**这一次触发**的观测附录（锚在触发格上）`,
-          );
-
-          const conation = eventsOf(hd, sid, 'conation.expressed');
-          assertEq(conation.length, 1, `${sid}: 恰好一条「欲」（实际 ${conation.length}）`);
-          assertEq(conation[0].entity, 'Conation', `${sid}: 欲格实体坐标`);
-          assertEq(conation[0].verb, 'Opened', `${sid}: 欲格动词坐标（conation × opened）`);
-          assertEq(
-            conation[0].payload.goal,
-            sid === SID_OK ? PROMPT_OK : PROMPT_BROAD,
-            `${sid}: 欲的目标就是心跳提示词本身`,
-          );
-          assertEq(
-            conation[0].produced_by,
-            triggered[0].seq,
-            `${sid}: 欲溯源到触发（E1：欲是数据、必带溯源，否则过不了闸门）`,
-          );
-        }
-
-        // ── 证据 ②：闸门的**两侧判决**——同一条链路，只有闸门在分岔 ─────────────
-        const openedOk = eventsOf(hd, SID_OK, 'task.opened');
-        assertEq(
-          openedOk.length,
-          1,
-          `短提示词过闸 ⇒ 恰好开出一个长任务（实际 ${openedOk.length}）`,
-        );
-        const okTriggered = eventsOf(hd, SID_OK, 'system.triggered')[0];
-        const okConation = eventsOf(hd, SID_OK, 'conation.expressed')[0];
-        assertEq(openedOk[0].entity, 'Task', '长任务实体坐标');
-        assertEq(openedOk[0].verb, 'Opened', '长任务动词坐标（task × opened）');
-        assertEq(openedOk[0].payload.goal, PROMPT_OK, '长目标就是被批准的那条欲');
-        assertEq(
-          openedOk[0].payload.task_id,
-          `hb-${okTriggered.seq}`,
-          '长任务号按触发 seq 派生（同一次触发只开一个）',
-        );
-        assertEq(
-          openedOk[0].payload.budget_ms,
-          86_400_000,
-          '长任务取自主档预算（`LatencyTier::Autonomic` = 24h）',
-        );
-        assertEq(
-          openedOk[0].produced_by,
-          okConation.seq,
-          '★ 长任务溯源到**被批准的欲**（`approved.from_seq`），不是触发本身——闸门真的在链上',
-        );
-        assertEq(
-          openedOk[0].actor,
-          'agent:autonomous',
-          '长任务由自主主体开出（不冒充用户）',
-        );
-
-        assertEq(
-          eventsOf(hd, SID_BROAD, 'task.opened').length,
-          0,
-          '超长提示词被闸门判「目标过宽」⇒ **不得**开出长任务（同一链路，只有闸门在分岔）',
-        );
-
-        // ── 证据 ③：心跳那一轮真的跑了（触发不是只落事实、不发轮）────────────
-        // 触发事实**先于**这一轮落格（`record_autonomous_trigger` 在 `handle_chat_send_oneoff`
-        // 之前跑，正是"事实没落成就不发这一轮"）⇒ 等到触发不等于等到这一轮收束。
-        //
-        // 所以等的是**收束**，不是开轮：两者之间隔着整个模型往返 + 写侧闸，只等开轮
-        // 会在慢机器上把「还在途」读成「没跑」——那是判据的时序形状错了，不是产品的
-        // 问题（t36 在满载门禁里就这么红过一次：开轮到了、收束还没到）。
         await waitFor(
-          () =>
-            eventsOf(hd, SID_OK, 'chat.assistant.final').length >= 2 &&
-            eventsOf(hd, SID_OK, 'user.message').some((e) =>
-              String(e.payload?.text ?? '').includes(PROMPT_OK),
-            ),
+          async () => (await userTexts(SID_OK)).some((t) => t.includes(PROMPT_OK)),
           {
-            what: '心跳轮收束落格（提示词进开轮格 + 收束格也到位）',
-            timeoutMs: 40_000,
+            what: 'SID_OK 的心跳轮落进转写（闸门放行 ⇒ 那一轮真的发生了）',
+            timeoutMs: 100_000,
           },
         );
-        assert(
-          eventsOf(hd, SID_OK, 'chat.assistant.final').length >= 2,
-          `心跳轮应真的走完（建会话轮 + 心跳轮各一条收束，实际 ${eventsOf(hd, SID_OK, 'chat.assistant.final').length}）`,
-        );
-
-        // ── 证据 ④：转写不变量在两份事实源上都成立 ────────────────────────────
-        assertTranscriptInvariants(readMessagesJson(hd.homedir, SID_OK), 'T36(ok)');
-        assertTranscriptInvariants(readMessagesJson(hd.homedir, SID_BROAD), 'T36(broad)');
-      } finally {
-        cli.stop();
+      } catch (e) {
+        // 超时必带诊断：调度器没触发的线索在 CLI stderr。
+        throw new Error(`${e.message}\n--- 长驻 CLI stderr 尾部 ---\n${cli.out.stderr.slice(-1200) || '（空）'}`);
       }
+
+      // ── 证据：闸门的两侧判决——同一条链路，只有闸门在分岔 ───────────────
+      //
+      // ## 判据落在**就绪集**上，不落在转写上
+      //
+      // 闸门管的是「欲**升格成任务**」这件事（`conation.expressed` → `task.opened`），
+      // **不是**「心跳轮开不开」。这条边界由单测钉死并写在文档里
+      // （`heartbeat/tests.rs::an_over_broad_goal_is_refused_even_with_the_gate_open`：
+      // 「拒绝同样是**事实**——触发与欲照样入格，只是不长成任务；静默拒绝就等于
+      // 没有闸门」）。所以两侧会话的**心跳轮都会跑**、提示词都进转写；拿转写判
+      // 「拒收侧不发轮」是把闸门的职责读大了，判据本身错了。
+      //
+      // 闸门判决在用户可见面上的唯一形态是**就绪集**：过闸 ⇒ `task.opened` 落格
+      // ⇒ 该任务进 `readyset.ready`；拒收 ⇒ 没有 `task.opened` ⇒ 就绪集里没有它。
+      // 读口是生产路由 `session/stats`（与 T31 同一出口、同一列），不碰内部存储。
+      const statsOf = async (sid) =>
+        (await cli.invoke('session/stats', {}, { session_id: sid })).body?.data;
+
+      // 放行侧：等到就绪集里长出那条心跳任务（调度器 15s 一 tick + 抖动）。
+      try {
+        await waitFor(
+          async () => ((await statsOf(SID_OK))?.readyset?.ready ?? []).length >= 1,
+          {
+            what: 'SID_OK 的心跳任务进就绪集（闸门放行 ⇒ 真的升格成 task.opened）',
+            timeoutMs: 100_000,
+          },
+        );
+      } catch (e) {
+        // 超时必带诊断：调度器没触发的线索在 CLI stderr。
+        throw new Error(`${e.message}\n--- 长驻 CLI stderr 尾部 ---\n${cli.out.stderr.slice(-1200) || '（空）'}`);
+      }
+
+      const okReady = (await statsOf(SID_OK))?.readyset?.ready ?? [];
+      assert(
+        okReady.length >= 1,
+        `短提示词过闸 ⇒ 恰好开出一条心跳任务（同一条链路，只有闸门在分岔；实际: ${JSON.stringify(okReady)}）`,
+      );
+      // 任务号按触发 seq 派生（`hb-{triggered_seq}`，见 `heartbeat::mod.rs`）——这是
+      // 「这条就绪任务确实出自心跳触发」在就绪集（只有 `task_id`/`seq`/`depends_on`
+      // 三列）里唯一可辨识的形态。
+      assert(
+        okReady.every((t) => /^hb-\d+$/.test(t.task_id)),
+        `就绪的那条必须是心跳任务（task_id 形如 hb-{触发 seq}；实际: ${JSON.stringify(okReady)}）`,
+      );
+
+      // 拒收侧：同样等到心跳轮跑过一轮（它照样开轮），但就绪集必须**始终为空**。
+      await waitFor(
+        async () => (await userTexts(SID_BROAD)).some((t) => t.includes(PROMPT_BROAD)),
+        {
+          what: 'SID_BROAD 的心跳轮落进转写（拒绝的是升格，不是开轮——轮照样开）',
+          timeoutMs: 100_000,
+        },
+      );
+      const broadReady = (await statsOf(SID_BROAD))?.readyset?.ready ?? [];
+      assertEq(
+        broadReady.length,
+        0,
+        `超长提示词被闸门判「目标过宽」⇒ **不得**升格成任务（就绪集必须空；实际: ${JSON.stringify(broadReady)}）`,
+      );
+      // 反向对照：拒收侧**也有**心跳轮（上面那条 waitFor 已证）——所以「就绪集空」
+      // 不是因为「什么都没跑」，而正是闸门那一处分岔。两句话缺一，判据都能被
+      // 「调度器压根没触发」这种平凡原因满足。
+      assert(
+        !JSON.stringify(broadReady).includes(PROMPT_BROAD),
+        `拒收的目标不得出现在就绪集里（实际: ${JSON.stringify(broadReady)}）`,
+      );
     } finally {
+      cli.stop();
       llm.stop();
       cleanupHomedir(hd);
       // 收尾必须等子进程真的退干净（与 t28/t34 同一约定：Windows 上带活子进程退出会

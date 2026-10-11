@@ -40,7 +40,7 @@ import {
   nextPort,
   providerConfig,
   PROVIDER_ID,
-  readMessagesJson,
+  readSessionMessages,
   assertTranscriptInvariants,
   assertSeqAnchorIsNodeAttribute,
 } from '../helpers.mjs';
@@ -301,8 +301,8 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
       );
     }
 
-    // ⑬ 落盘侧同源：实时面与存储是同一份事实
-    const stored = readMessagesJson(hd.homedir, 'e2e-t10');
+    // ⑬ 落盘侧同源：实时面与存储是同一份事实（经生产读出口读）
+    const stored = await readSessionMessages(cli, 'e2e-t10');
     assertTranscriptInvariants(stored, 'T10');
     for (const m of [reasonNode, textNode, tcNode]) {
       const row = stored.find((x) => x.id === m.id);

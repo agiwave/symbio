@@ -39,7 +39,7 @@ import {
   makeHomedir,
   cleanupHomedir,
   startLongLivedCli,
-  readMessagesJson,
+  readSessionMessages,
   nextPort,
   waitFor,
   assert,
@@ -173,11 +173,11 @@ export default defineCase(
       assertEq(w.status, 200, `写收件箱 ${sid}（${JSON.stringify(w.body)?.slice(0, 300)}）`);
     };
 
-    /** 等该会话出现一条指定理由码的对话面节点 */
-    const waitReplyNode = (homedir, sid, reason) =>
+    /** 等该会话出现一条指定理由码的对话面节点（读出口判据） */
+    const waitReplyNode = (c, sid, reason) =>
       waitFor(
-        () =>
-          (readMessagesJson(homedir, sid) ?? []).some(
+        async () =>
+          ((await readSessionMessages(c, sid)) ?? []).some(
             (m) => m.meta?.surface === 'reply' && m.meta?.reason === reason,
           ),
         { what: `${sid} 出现对话面节点（reason=${reason}）`, timeoutMs: 40_000 },
@@ -202,7 +202,7 @@ export default defineCase(
 
       let base = (await llm.requests()).length;
       await send(a, '我们刚才聊了什么');
-      await waitReplyNode(a.hd.homedir, SIDS.independent, 'from_context');
+      await waitReplyNode(a.cli, SIDS.independent, 'from_context');
 
       let reqs = await since(base);
       // 分类：system 段**逐字等于**配置里那段 ⇒ 提示词覆盖生效，于是它就是分类请求
@@ -242,7 +242,7 @@ export default defineCase(
       base = (await llm.requests()).length;
       await send(a, '读一下 README');
       await waitFor(
-        () => (readMessagesJson(a.hd.homedir, SIDS.independent) ?? []).some((m) => m.role === 'tool'),
+        async () => ((await readSessionMessages(a.cli, SIDS.independent)) ?? []).some((m) => m.role === 'tool'),
         { what: 'A 线工具结果落库', timeoutMs: 40_000 },
       );
 
@@ -262,7 +262,7 @@ export default defineCase(
       assertEq(cls2.length, 1, '第二句也应恰有一次分类请求');
       assertEq(cls2[0].body.model, PROVIDERS.classify.model, '第二句的分类仍用 classify 的模型');
 
-      const aMsgs = readMessagesJson(a.hd.homedir, SIDS.independent);
+      const aMsgs = await readSessionMessages(a.cli, SIDS.independent);
       assertTranscriptInvariants(aMsgs, 'T25-A');
       assert(
         aMsgs.some((m) => m.meta?.surface === 'reply' && m.meta?.reason === 'from_context'),
@@ -275,7 +275,7 @@ export default defineCase(
 
       base = (await llm.requests()).length;
       await send(b, 'B 线聊过什么');
-      await waitReplyNode(b.hd.homedir, SIDS.defaults, 'from_context');
+      await waitReplyNode(b.cli, SIDS.defaults, 'from_context');
 
       reqs = await since(base);
       assert(reqs.length >= 2, `B 线应有分类与生成各一次（实得 ${reqs.length}）`);
@@ -305,7 +305,7 @@ export default defineCase(
 
       base = (await llm.requests()).length;
       await send(c, 'C 线聊过什么');
-      await waitReplyNode(c.hd.homedir, SIDS.typo, 'from_context');
+      await waitReplyNode(c.cli, SIDS.typo, 'from_context');
 
       reqs = await since(base);
       assert(reqs.length >= 2, `C 线应有分类与生成各一次（实得 ${reqs.length}）`);
@@ -320,7 +320,7 @@ export default defineCase(
         '取不到配置的 provider ⇒ 落回会话选定值（降级而不失效）',
       );
 
-      const cMsgs = readMessagesJson(c.hd.homedir, SIDS.typo);
+      const cMsgs = await readSessionMessages(c.cli, SIDS.typo);
       assertTranscriptInvariants(cMsgs, 'T25-C');
       assert(
         cMsgs.some((m) => m.meta?.surface === 'reply' && m.meta?.reason === 'from_context'),

@@ -91,6 +91,31 @@ pub const EVENT_TURN_SUPPLEMENTED: &str = "turn.supplemented";
 /// 滤掉这件事由 `prompt_fidelity` 反向盯着：它一旦漏进请求包就报缺口。
 pub const EVENT_ASSISTANT_REPORTED: &str = "chat.assistant.reported";
 
+/// **对话面开场白**（载荷 `{ text, id, reason, exclude_from_context }`）。落在 `turn × asserted`。
+///
+/// ## 它为什么是事实（S2.7）
+///
+/// `Escalate` 判决在轮首产出一句首响（「好，我来处理」），随后本轮**继续**进工具循环
+/// ——它与 `chat.assistant.final` 不是同一条：收束格是干活干完之后的答复，本格干活
+/// **开始前**的开场白。双写期这句随整份 `messages.json` 落盘，切源（WAL 为唯一真源）
+/// 后若不入格，重建便折不出这条根级对话面节点——实测 t20 / t22 的「恰有一条对话面
+/// 节点」全部落空（`meta.surface = "reply"` / `meta.reason = needs_work`）。
+/// 节点形状是事实的一部分（S2.6 原则），故单立一格。
+///
+/// ## 为什么与 `chat.assistant.reported` 分格而不是复用
+///
+/// 汇报的理由码恒为 `progress`（界面进度），本格的理由码是上游判决原样透传
+/// （`needs_work` 等）；两者的 `exclude_from_context` 虽同为真（都是界面文本、
+/// 不进模型请求包），但**理由码是数据**，把「开场白」塞进「汇报」那格会让
+/// `session/stats` / 前端面板把开场白读成进度汇报。名字是数据，加名字不加枚举。
+///
+/// ## 为什么标注「不进请求包」
+///
+/// 与 [`EVENT_ASSISTANT_REPORTED`] 同一条纪律：开场白是**界面文本**，
+/// `exclude_from_context = true`。投影仍然收它（用户看得见、落库要留住），
+/// 只是 `to_messages()` 把它滤掉——由 `prompt_fidelity` 反向盯着。
+pub const EVENT_ASSISTANT_OPENING: &str = "chat.assistant.opening";
+
 /// 助手最终答复（每 turn 至多 1 条——N3）。落在 `turn × closed`。
 pub const EVENT_ASSISTANT_FINAL: &str = "chat.assistant.final";
 /// 兜底话术——**普通事件，不是特殊通道**（生成失败也要有输出）。落在 `turn × closed`。
@@ -502,6 +527,9 @@ pub fn event_node_of(e: &Event) -> Option<String> {
             Some(event_payload_node_id(e, "id"))
         }
         (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_REPORTED) => {
+            Some(event_payload_node_id(e, "id"))
+        }
+        (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_OPENING) => {
             Some(event_payload_node_id(e, "id"))
         }
         (

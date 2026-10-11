@@ -20,7 +20,10 @@ import {
   makeHomedir,
   cleanupHomedir,
   runCli,
-  readMessagesJson,
+  nextPort,
+  startReadbackCli,
+  readSessionMessages,
+  waitFor,
   assert,
   assertEq,
   defineCase,
@@ -54,13 +57,26 @@ export default defineCase('T8 上下文压缩：水位触发自动压缩，快�
     // 普通轮：回复超大文本，把历史水位顶过 70% 阈值
     { id: 'big', match: '轮问题', content: REPLY },
   ]).start();
+  const GATEWAY_PORT = nextPort();
   const hd = makeHomedir({
     providers: [
       { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 12000 }) },
     ],
     // context_messages: 0 = 上下文窗口不按轮次截断（压缩判定的原料是完整历史）
-    pluginConfigs: { session: { auto_compress: true, context_messages: 0 } },
+    pluginConfigs: {
+      // 转写经生产读出口读（gateway `invoke` → `vdfs/read`），入站口必须开着。
+      gateway: {
+        inbound_enabled: true,
+        inbound_protocol: 'http',
+        inbound_bind: '127.0.0.1',
+        inbound_port: GATEWAY_PORT,
+        inbound_token: '',
+        inbound_readonly: false,
+      },
+      session: { auto_compress: true, context_messages: 0 },
+    },
   });
+  let api = null;
   try {
     const r = runCli({
       homedir: hd.homedir,
@@ -85,7 +101,14 @@ export default defineCase('T8 上下文压缩：水位触发自动压缩，快�
     assert(compReqIdx < reqs.length - 1, '压缩请求应先于最后一轮主请求');
 
     // ② 快照消息落库
-    const msgs = readMessagesJson(hd.homedir, 'e2e-t8');
+    api = await startReadbackCli({
+      homedir: hd.homedir,
+      workdir: hd.workdir,
+      session: 'e2e-t8',
+      provider: PROVIDER_ID,
+      gatewayPort: GATEWAY_PORT,
+    });
+    const msgs = await readSessionMessages(api, 'e2e-t8');
     assertTranscriptInvariants(msgs, 'T8');
     const snap = msgs.find((m) => m.meta?.compacted === true);
     assert(snap, `应有 meta.compacted=true 的快照消息（现有 ${msgs.length} 条）`);
@@ -108,7 +131,12 @@ export default defineCase('T8 上下文压缩：水位触发自动压缩，快�
       `压缩触发的当前轮应照常完成回复（stdout 尾部: ${r.stdout.slice(-200)}）`,
     );
   } finally {
+    api?.stop();
     llm.stop();
     cleanupHomedir(hd);
+    // 收尾等子进程退干净（Windows 上带活子进程退出会撞 libuv 断言）。
+    await waitFor(() => !process.getActiveResourcesInfo().includes('ProcessWrap'), {
+      what: '读回 CLI / mock-llm 子进程退出',
+    });
   }
 });

@@ -12,7 +12,7 @@ import {
   makeHomedir,
   cleanupHomedir,
   startLongLivedCli,
-  readMessagesJson,
+  readSessionMessages,
   waitFor,
   assert,
   defineCase,
@@ -62,10 +62,10 @@ export default defineCase('T7 中止收敛：运行中 chat/abort，节点全部
     const ab = await cli.invoke('session/chat/abort', { session_id: 'e2e-t7' }, { session_id: 'e2e-t7' });
     assert(ab.status === 200, `abort 调用应成功（${ab.status}: ${JSON.stringify(ab.body)?.slice(0, 200)}）`);
 
-    // ④ 收敛判据：轮询存储直到无节点停在 streaming/pending
+    // ④ 收敛判据：轮询**生产读出口**（vdfs/read）直到无节点停在 streaming/pending
     await waitFor(
-      () => {
-        const msgs = readMessagesJson(hd.homedir, 'e2e-t7') ?? [];
+      async () => {
+        const msgs = (await readSessionMessages(cli, 'e2e-t7')) ?? [];
         const nonTerminal = msgs.filter((m) => ['streaming', 'pending', 'waiting_user_action'].includes(m.status));
         return msgs.length > 0 && nonTerminal.length === 0;
       },
@@ -73,7 +73,7 @@ export default defineCase('T7 中止收敛：运行中 chat/abort，节点全部
     );
 
     // ⑤ 不变量断言
-    const msgs = readMessagesJson(hd.homedir, 'e2e-t7');
+    const msgs = await readSessionMessages(cli, 'e2e-t7');
     assertTranscriptInvariants(msgs, 'T7');
 
     // Turn 根 → Aborted；Turn 子节点（本用例无工具）→ 正文不悬空

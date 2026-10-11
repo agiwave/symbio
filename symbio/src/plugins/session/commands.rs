@@ -319,7 +319,13 @@ impl SessionPlugin {
             }
         }
 
-        let updated = existing.clone();
+        // **规范化只做一次**（S2.7·t44 抓过）：事实与帧必须是**同一条节点**。
+        // 旧形态里事实落 `updated`（原样）、帧发 `llm_message_frame(&updated)`（补
+        // `status: completed`）——两者对同一节点给出两种读法，于是「编辑后立刻读」
+        // 与「重启后从 WAL 重建」差一个 `status` 字段。这不是视图差异，是**事实
+        // 与视图不一致**：`status` 一旦缺失，重建就再也补不回来（事实源里没有它）。
+        // 统一口径：规范化后的那条同时进事实与帧，重建与实时读读的是同一条。
+        let updated = crate::symbio_core::llm_message_frame(&existing.clone());
         // **顺序反转**（[ADR-054] 决策 2）：变更经唯一写入口 `apply` 落——事实先落、
         // 列表随后折叠写入。旧形态是「先写缓存、再补一条事实」，事实是事后补的，
         // 所以它天然是可选项；收进 `apply` 之后「改了列表却没落事实」表达不出来。
@@ -328,8 +334,7 @@ impl SessionPlugin {
             .await?;
         // 变更：一条**完整消息**帧——`content` 的语义是整条替换，正是"这次编辑"
         // 要说的事（不需要先删再建：删除帧表达的是"这个节点没了"，而编辑后它还在）。
-        self.transcript_apply(session_id, crate::symbio_core::llm_message_frame(&updated))
-            .await;
+        self.transcript_apply(session_id, updated.clone()).await;
         Ok(updated)
     }
 

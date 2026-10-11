@@ -456,6 +456,17 @@ async fn process_tool_resume_action(
                 name: tool_name,
                 args: base_args,
                 text: final_result_text,
+                // 被恢复的调用节点 id（= `target_id`）与它所在的 Turn 根：续写轮落
+                // `artifact.added` 时把结果挂回**原来那张卡**之下，而不是新长一张。
+                call_id: req.target_id.clone(),
+                turn_id: messages
+                    .iter()
+                    .find(|m| m.id == req.target_id)
+                    .and_then(|m| m.parent_id.clone())
+                    .unwrap_or_default(),
+                // 结果子节点 id：与步骤 7 广播出去的那一份**同一个**——`Carrier::Runner`
+                // 意味着这条节点没有出生事实，承载它的就是本次 `artifact.added`。
+                result_id: new_child_id,
             }),
         })
     } else {

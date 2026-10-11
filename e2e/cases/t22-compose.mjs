@@ -51,7 +51,7 @@ import {
   makeHomedir,
   cleanupHomedir,
   startLongLivedCli,
-  readMessagesJson,
+  readSessionMessages,
   nextPort,
   waitFor,
   assert,
@@ -168,11 +168,11 @@ export default defineCase(
       assertEq(w.status, 200, `写收件箱 ${sid}（${JSON.stringify(w.body)?.slice(0, 300)}）`);
     };
 
-    /** 等该会话出现一条指定理由码的对话面节点 */
-    const waitReplyNode = (homedir, sid, reason) =>
+    /** 等该会话出现一条指定理由码的对话面节点（读出口判据） */
+    const waitReplyNode = (c, sid, reason) =>
       waitFor(
-        () =>
-          (readMessagesJson(homedir, sid) ?? []).some(
+        async () =>
+          ((await readSessionMessages(c, sid)) ?? []).some(
             (m) => m.meta?.surface === 'reply' && m.meta?.reason === reason,
           ),
         { what: `${sid} 出现对话面节点（reason=${reason}）`, timeoutMs: 40_000 },
@@ -182,7 +182,7 @@ export default defineCase(
       // ── A 模板路径：「谢谢」⇒ 规则短路 ⇒ 模板 ⇒ **零** LLM 请求 ──
       let base = await reqCount();
       await send(cli, SIDS.template, '谢谢', hd.workdir);
-      await waitReplyNode(hd.homedir, SIDS.template, 'thanks');
+      await waitReplyNode(cli, SIDS.template, 'thanks');
       // 轮次收尾与"请求已发出"之间没有顺序保证，因此这里必须**等一个确定的量**：
       // 等到对话面节点落库之后，若模板路径真付了一次往返，它必然已经发出。
       await new Promise((r) => setTimeout(r, 800));
@@ -192,7 +192,7 @@ export default defineCase(
         '模板产线必须零 LLM 请求（致谢这类输入不该付任何往返）',
       );
 
-      const tplMsgs = readMessagesJson(hd.homedir, SIDS.template);
+      const tplMsgs = await readSessionMessages(cli, SIDS.template);
       assertTranscriptInvariants(tplMsgs, 'T22-A');
       const tplReply = tplMsgs.filter((m) => m.meta?.surface === 'reply');
       assertEq(tplReply.length, 1, 'A 线应恰有一条对话面节点');
@@ -220,13 +220,13 @@ export default defineCase(
       // ── B 生成路径：「我们刚才聊了什么」⇒ 分类 + 生成（各一次静默请求）──
       base = await reqCount();
       await send(cli, SIDS.generate, '我们刚才聊了什么', hd.workdir);
-      await waitReplyNode(hd.homedir, SIDS.generate, 'from_context');
+      await waitReplyNode(cli, SIDS.generate, 'from_context');
       assertEq(
         (await reqCount()) - base,
         2,
         'B 线第 1 步应是"1 次分类 + 1 次生成"（都是无工具的内部请求）',
       );
-      const genMsgs = readMessagesJson(hd.homedir, SIDS.generate);
+      const genMsgs = await readSessionMessages(cli, SIDS.generate);
       assertTranscriptInvariants(genMsgs, 'T22-B1');
       const genReply = genMsgs.filter((m) => m.meta?.surface === 'reply');
       assertEq(genReply.length, 1, 'B 线应恰有一条对话面节点');
@@ -243,10 +243,9 @@ export default defineCase(
       // ── B 首响剔除：再接一句「读一下 README」⇒ Escalate ⇒ 首响 + 工具循环 ──
       base = await reqCount();
       await send(cli, SIDS.generate, '读一下 README', hd.workdir);
-      await waitReplyNode(hd.homedir, SIDS.generate, 'needs_work');
+      await waitReplyNode(cli, SIDS.generate, 'needs_work');
       await waitFor(
-        () =>
-          (readMessagesJson(hd.homedir, SIDS.generate) ?? []).some((m) => m.role === 'tool'),
+        async () => ((await readSessionMessages(cli, SIDS.generate)) ?? []).some((m) => m.role === 'tool'),
         { what: 'B 线第 2 步工具结果落库', timeoutMs: 40_000 },
       );
 
@@ -265,7 +264,7 @@ export default defineCase(
         );
       }
 
-      const escMsgs = readMessagesJson(hd.homedir, SIDS.generate);
+      const escMsgs = await readSessionMessages(cli, SIDS.generate);
       assertTranscriptInvariants(escMsgs, 'T22-B2');
       const escOpening = escMsgs.find((m) => m.meta?.reason === 'needs_work');
       assert(escOpening, 'B 线第 2 步应有首响节点');
@@ -315,15 +314,17 @@ export default defineCase(
         const unmBase = await reqCount();
         await send(cli2, SIDS.unmounted, '谢谢', hdUn.workdir);
         // 降级方向 = **进工具循环**（不是沉默）：因此必然出现 worker 请求与 Turn 节点。
-        await waitFor(() => (readMessagesJson(hdUn.homedir, SIDS.unmounted) ?? []).some((m) => m.type === 'turn'), {
-          what: 'C 线出现 Turn 节点（降级进工具循环）',
-          timeoutMs: 40_000,
-        });
-        assert(
-          (await reqCount()) - unmBase >= 1,
-          'C 线应发一次 worker 请求——措辞拿不到时降级进工具循环，而不是沉默',
+        // 两个判据**在同一个轮询里一起等**，而不是「先等 Turn 再数请求」——后者有竞态：
+        // Turn 节点与 worker 请求几乎同时可见，`waitFor` 一返回就立刻 `reqCount()`
+        // 可能抢在请求被 mock 记账之前（实测偶发 C 线「应发一次 worker 请求」失败，
+        // 单独重跑必过）。把两者合成一个条件，「等到」与「判据」就是同一个瞬间。
+        await waitFor(
+          async () =>
+            (await reqCount()) - unmBase >= 1 &&
+            ((await readSessionMessages(cli2, SIDS.unmounted)) ?? []).some((m) => m.type === 'turn'),
+          { what: 'C 线降级进工具循环（worker 请求 + Turn 节点）', timeoutMs: 40_000 },
         );
-        const unmMsgs = readMessagesJson(hdUn.homedir, SIDS.unmounted);
+        const unmMsgs = await readSessionMessages(cli2, SIDS.unmounted);
         assertTranscriptInvariants(unmMsgs, 'T22-C');
         assert(
           !unmMsgs.some((m) => m.meta?.surface === 'reply'),
@@ -357,15 +358,14 @@ export default defineCase(
       try {
         const offBase = await reqCount();
         await send(cli3, SIDS.off, '谢谢', hdOff.workdir);
-        await waitFor(() => (readMessagesJson(hdOff.homedir, SIDS.off) ?? []).some((m) => m.type === 'turn'), {
-          what: 'D 线出现 Turn 节点（降级进工具循环）',
-          timeoutMs: 40_000,
-        });
-        assert(
-          (await reqCount()) - offBase >= 1,
-          'D 线应发一次 worker 请求——关掉措辞后判决仍会降级进工具循环',
+        // 同 C 线：两个判据合成一个轮询（理由见 C 线的注释）。
+        await waitFor(
+          async () =>
+            (await reqCount()) - offBase >= 1 &&
+            ((await readSessionMessages(cli3, SIDS.off)) ?? []).some((m) => m.type === 'turn'),
+          { what: 'D 线降级进工具循环（worker 请求 + Turn 节点）', timeoutMs: 40_000 },
         );
-        const offMsgs = readMessagesJson(hdOff.homedir, SIDS.off);
+        const offMsgs = await readSessionMessages(cli3, SIDS.off);
         assertTranscriptInvariants(offMsgs, 'T22-D');
         assert(
           !offMsgs.some((m) => m.meta?.surface === 'reply'),

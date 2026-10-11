@@ -356,6 +356,16 @@ pub struct DispatchOutcome {
     /// 运行器据此**停止工具循环**（恢复前提见
     /// [plan/11 批 2](../../../../docs/plan/11-多执行器与多主体加固实施方案.md)）。
     pub needs_user_action: bool,
+    /// 等待用户时卡片载荷（工具自决的 `prompt` 形状：审批卡 / 提问卡不同）。
+    ///
+    /// **它是事实的一部分**：`needs_user_action` 只说明「这轮停在等用户」，而恢复
+    /// （`resume`）要拿 `meta.prompt` 复现那张卡。S2.7 起读路径走 WAL 重建 ⇒ 这张卡
+    /// 必须能从事实折出来，故随载荷入格（`Some` 仅当 [`Self::needs_user_action`]）。
+    /// core 不认识它的形状——原样透传（与 `text` 同一条：core 只搬数据，不解释）。
+    pub prompt: Option<serde_json::Value>,
+    /// 等待用户的原因码（`failure_kind` 里的 pending 取值：`needs_approval` /
+    /// `needs_interaction`……）。与 [`Self::prompt`] 同批入库、同批复现。
+    pub failure_kind: String,
     /// ToolCall 节点的 provider wire id（`tool_call_id` 字段）。节点身份的一部分：
     /// 事件载荷记录它，重建才能复刻同一个工具卡片（`call_id` 只是节点 id）。
     pub wire_id: String,

@@ -36,7 +36,7 @@ import {
   DIALOG_FACE_OFF,
   cleanupHomedir,
   startLongLivedCli,
-  readMessagesJson,
+  readSessionMessages,
   waitFor,
   assert,
   assertEq,
@@ -190,13 +190,13 @@ export default defineCase(
       const a3 = await a.write('A第三条：还有一点。');
 
       // 收敛：两条补充合并成**第二条**用户消息（不是第二、第三条）
-      await waitFor(() => userTexts(readMessagesJson(hd.homedir, sidA) ?? []).length >= 2, {
+      await waitFor(async () => userTexts((await readSessionMessages(cli, sidA)) ?? []).length >= 2, {
         what: 'A 线合并后的用户消息落库',
         timeoutMs: 30_000,
       });
       // 等合并后的那一轮**真的跑完**——判据必须是**请求数**，不能是节点总数。
       //
-      // 一轮在 `messages.json` 里是 **3 个节点**（user + turn 容器 + 正文子节点，
+      // 一轮在会话消息集合里是 **3 个节点**（user + turn 容器 + 正文子节点，
       // 对话面关掉时没有根级首响），所以 `length >= 4` 会在"第二轮刚起头、请求还没
       // 发出"时成立；紧接着数请求就会读到 `baseA + 1`。**等一个确定的量，别等节点数**：
       // 请求在到达 mock 时即记录，`reqCount` 是这里唯一"收尾即成立"的判据。
@@ -205,7 +205,7 @@ export default defineCase(
         timeoutMs: 30_000,
       });
 
-      const msgsA = readMessagesJson(hd.homedir, sidA);
+      const msgsA = await readSessionMessages(cli, sidA);
       assertTranscriptInvariants(msgsA, 'T19-A');
       assertEq(
         userTexts(msgsA),
@@ -254,7 +254,7 @@ export default defineCase(
       const b2 = await b.write('B第二条：另外再补充。');
       const b3 = await b.write('B第三条：还有。');
 
-      await waitFor(() => userTexts(readMessagesJson(hd.homedir, sidB) ?? []).length >= 2, {
+      await waitFor(async () => userTexts((await readSessionMessages(cli, sidB)) ?? []).length >= 2, {
         what: 'B 线合并消息落库',
         timeoutMs: 30_000,
       });
@@ -291,7 +291,7 @@ export default defineCase(
         'B 线合并正文应含两条补充',
       );
 
-      const msgsB = readMessagesJson(hd.homedir, sidB);
+      const msgsB = await readSessionMessages(cli, sidB);
       assertTranscriptInvariants(msgsB, 'T19-B');
       assertEq(userTexts(msgsB).length, 2, 'B 线：两条补充在存储里仍算**一轮**（共两条用户消息）');
       const mergedB = msgsB.find((m) => m.id === b2);
@@ -315,7 +315,7 @@ export default defineCase(
       await c.write('C第二条：再补充一点。');
       await c.write('C第三条：还有一点。');
 
-      await waitFor(() => userTexts(readMessagesJson(hdOff.homedir, sidC) ?? []).length >= 3, {
+      await waitFor(async () => userTexts((await readSessionMessages(cliOff, sidC)) ?? []).length >= 3, {
         what: 'C 线三条补充各自成轮',
         timeoutMs: 40_000,
       });
@@ -327,7 +327,7 @@ export default defineCase(
         timeoutMs: 40_000,
       });
 
-      const msgsC = readMessagesJson(hdOff.homedir, sidC);
+      const msgsC = await readSessionMessages(cliOff, sidC);
       assertTranscriptInvariants(msgsC, 'T19-C');
       assertEq(
         userTexts(msgsC),

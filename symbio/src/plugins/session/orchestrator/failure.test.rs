@@ -27,6 +27,51 @@ fn fixture() -> (tempfile::TempDir, SessionPlugin) {
     (dir, plugin)
 }
 
+/// 直落一条 `message.added` 事实（形状同 `v2_messages::added` 的产出）。
+///
+/// 切主后（ADR-049）存储里的正文 = **事实投影**：夹具里「上一轮的世界」也必须
+/// 以事实在场。空切片上，生产收口路径要落的变更事实（`v2_messages::append`）
+/// 连溯源锚都解不出、会按口径被丢弃——测的就不再是收口本身。
+fn seed_added(dir: &std::path::Path, nodes: Vec<cm::ChatMessage>) {
+    use crate::symbio_core::Store as _;
+    let payload = serde_json::to_value(nodes).expect("序列化种子消息失败");
+    let wal = dir.join(crate::plugins::session::paths::V2_WAL_FILE);
+    let s = crate::symbio_core::EventWalStore::open(&wal).expect("打开事实源失败");
+    s.append(
+        crate::symbio_core::Event::pending(
+            "m-add-0",
+            crate::symbio_core::EVENT_MESSAGE_ADDED,
+            crate::symbio_core::Entity::Message,
+            crate::symbio_core::Verb::Opened,
+            0,
+            crate::symbio_core::authz::PRINCIPAL_USER,
+        )
+        .with_payload(serde_json::json!({ "messages": payload })),
+    )
+    .expect("种子事实落格失败");
+}
+
+/// 直落一条用户发言格（生产中每轮首帧的事实，`v2_exec` 落的 `u-{turn}`）。
+///
+/// 它是「切片非空」的来处：没有它，后续变更事实连溯源锚都解不出。
+fn seed_user_message(dir: &std::path::Path) {
+    use crate::symbio_core::Store as _;
+    let wal = dir.join(crate::plugins::session::paths::V2_WAL_FILE);
+    let s = crate::symbio_core::EventWalStore::open(&wal).expect("打开事实源失败");
+    s.append(
+        crate::symbio_core::Event::pending(
+            "u-open",
+            crate::symbio_core::EVENT_USER_MESSAGE,
+            crate::symbio_core::Entity::Turn,
+            crate::symbio_core::Verb::Opened,
+            1,
+            crate::symbio_core::authz::PRINCIPAL_USER,
+        )
+        .with_payload(serde_json::json!({ "text": "第一问", "id": "u-open" })),
+    )
+    .expect("种子事实落格失败");
+}
+
 fn node(id: &str, parent: Option<&str>, status: cm::MessageStatus) -> cm::ChatMessage {
     cm::ChatMessage {
         id: id.into(),
@@ -112,11 +157,11 @@ async fn converge_inflight_finalizes_live_buffer_nodes() {
     let store = p.get_store().await.expect("存储不可用");
     store.save_session(&Session::new(sid)).await.unwrap();
 
-    // 存储侧：全部终态（上一轮已收口的世界）
+    // 存储侧：全部终态（上一轮已收口的世界）。切主后正文在事实投影里——
+    // 上一轮的节点也要以 `message.added` 事实在场（缓存只留元数据）。
     let chat = p.open_chat_session(sid).await.unwrap();
-    chat.replace_all(vec![node("turn", None, cm::MessageStatus::Completed)])
-        .await
-        .unwrap();
+    let dir = store.session_dir(sid).expect("会话目录未建出");
+    seed_added(&dir, vec![node("turn", None, cm::MessageStatus::Completed)]);
 
     // 在途侧：Turn 下未落库的 reasoning(Streaming) 与一个父不存在的孤儿
     let state = Arc::new(ActiveSessionState::with_session_id(
@@ -175,6 +220,9 @@ async fn converge_inflight_marks_root_turn_aborted_and_children_completed() {
     let sid = "s-abort-turn";
     let store = p.get_store().await.expect("存储不可用");
     store.save_session(&Session::new(sid)).await.unwrap();
+    // 生产中每轮首帧是用户发言格（`v2_exec` 落的 `u-{turn}`）——切片非空是收口
+    // 要落的变更事实的溯源锚来处。
+    seed_user_message(&store.session_dir(sid).expect("会话目录未建出"));
 
     // 在途缓冲：根 Turn（未落库）+ 其子节点。子节点晚于父节点入列——
     // 父存在性判据按序检查，与真实广播顺序一致。
@@ -227,6 +275,7 @@ async fn persist_failure_merges_partial_output() {
     let sid = "s-partial";
     let store = p.get_store().await.expect("存储不可用");
     store.save_session(&Session::new(sid)).await.unwrap();
+    seed_user_message(&store.session_dir(sid).expect("会话目录未建出"));
 
     // 在途镜像：根 Turn + 一条流式半截正文（快照只攒到半句）
     let transcript = Arc::new(tokio::sync::Mutex::new(

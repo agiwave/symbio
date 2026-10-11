@@ -36,7 +36,7 @@ import {
   nextPort,
   providerConfig,
   PROVIDER_ID,
-  readMessagesJson,
+  readSessionMessages,
   assertTranscriptInvariants,
   assertSeqAnchorIsNodeAttribute,
 } from '../helpers.mjs';
@@ -230,8 +230,8 @@ export default defineCase('T11 压缩节点协议：compression 节点的开始/
       );
     }
 
-    // ⑨ 落盘同源：快照节点真的进了存储
-    const msgs = readMessagesJson(hd.homedir, 'e2e-t11');
+    // ⑨ 落盘同源：快照节点真的进了存储（经生产读出口读，与前端 loadMessages 同一出口）
+    const msgs = await readSessionMessages(cli, 'e2e-t11');
     assertTranscriptInvariants(msgs, 'T11');
     const snapshotIds = new Set(snapshotFrames.map((f) => f.mid));
     const storedSnap = msgs.find((m) => m.meta?.compacted === true);

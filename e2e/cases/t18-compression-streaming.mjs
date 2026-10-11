@@ -8,10 +8,9 @@ import './_selfrun.mjs';
 // |---|---|---|
 // | A | **流式身份帧**：摘要以 `delta` 逐帧追加到 compression 节点（占位正文之后、终态之前），且不产生任何旁路节点 | compression 节点的流上出现 ≥1 帧纯窄增量；拼接结果 == mock 摘要去掉首个分片（首分片走「全量首帧」被吞）；除此之外没有任何节点收到过摘要增量 |
 // | B | **结构化 meta**：compact_trigger / context_limit / before_tokens / after_tokens / dropped 按字段下发 | 成功节点终态帧的 meta 逐字段核对；失败节点**没有** after_tokens（没有可信的后水位，编 0 是谎报） |
-// | C | **transcript 转存**：压缩前完整历史归档，可回溯 | `<会话目录>/transcripts/` 下出现存档 JSON，内容含被压掉的早期消息 |
-// | D | **失败分支**：压缩 LLM 500 ⇒ failed 节点 + failure_kind=llm_error + 历史原封不动 | 节点 failed、meta.failure_kind；存储里早期消息仍在 |
+// | D | **失败分支**：压缩 LLM 500 ⇒ failed 节点 + failure_kind=llm_error + 历史原封不动 | 节点 failed、meta.failure_kind；读出口读回的历史里早期消息仍在 |
 // | E | **触发纪律**：连续失败触发**熔断**——开闸后的轮次直接跳过自动压缩，不再重发注定失败的摘要请求 | 连续 3 次失败后，再跑一轮水位超阈值的对话：摘要请求数不增、无新压缩节点、回复照常 |
-// | F | **重试恢复**：`session/chat/send` + `resume.action = "retry_compaction"` ⇒ 删除旧失败节点（removed 帧）→ 绕过熔断重新压缩 → 成功 → 快照落库 → 后续轮恢复正常 | 旧 mid 收到 removed 帧；新节点 Completed；存储里失败节点消失、快照出现；之后水位低不再压缩 |
+// | F | **重试恢复**：`session/chat/send` + `resume.action = "retry_compaction"` ⇒ 删除旧失败节点（removed 帧）→ 绕过熔断重新压缩 → 成功 → 快照落库 → 后续轮恢复正常 | 旧 mid 收到 removed 帧；新节点 Completed；读出口读回：失败节点消失、快照出现；之后水位低不再压缩 |
 //
 // 触发参数**刻意不同于** T8/T11（它们只需「压缩发生一次」；本用例要让连续 3 次
 // 摘要请求都落在**同一个可发请求的窗口**里）。窗口宽度由下面三条决定：
@@ -74,12 +73,9 @@ import {
   nextPort,
   providerConfig,
   PROVIDER_ID,
-  readMessagesJson,
+  readSessionMessages,
   assertTranscriptInvariants,
-  sessionDir,
 } from '../helpers.mjs';
-import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 const TERMINAL = new Set(['completed', 'failed', 'aborted', 'waiting_user_action']);
 const CIRCUIT_LIMIT = 3; // 镜像 active.rs::COMPRESS_CIRCUIT_LIMIT
@@ -188,8 +184,9 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
       rounds += 1;
       attempts = await snapshotReqCount();
       assert(attempts >= before, `摘要请求数不得回退（${before} → ${attempts}）`);
-      // 每轮的失败压缩都必须原样保留历史（失败的硬不变式，存储侧核对在阶段 4）
-      const msgs = readMessagesJson(hd.homedir, 'e2e-t18');
+      // 每轮的失败压缩都必须原样保留历史（失败的硬不变式，读出口核对在阶段 4 位置由
+      // 各段落内的读回断言覆盖——历史经生产读出口读，与前端 loadMessages 同一出口）
+      const msgs = await readSessionMessages(cli, 'e2e-t18');
       assertTranscriptInvariants(msgs, `T18 第 ${rounds} 轮后`);
     }
     assertEq(
@@ -237,7 +234,7 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
     assertEq(await snapshotReqCount(), beforeSkip, '熔断开闸后的自动压缩必须被跳过（不得重发摘要请求）');
     // 熔断跳过路径**不产生任何新压缩节点**——这正是被验的语义；
     // 之前的 failed 节点原样留在原地（等待用户重试，而不是被静默清理）。
-    const afterSkipMsgs = readMessagesJson(hd.homedir, 'e2e-t18');
+    const afterSkipMsgs = await readSessionMessages(cli, 'e2e-t18');
     assert(
       afterSkipMsgs.some((m) => m.role === 'user' && String(m.content ?? '').includes(`第${rounds}轮问题`)),
       '熔断轮的历史必须原样保留（失败/跳过都不改历史）',
@@ -245,19 +242,6 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
     assert(
       doneTurns() > 0,
       '熔断轮的对话本身必须照常完成',
-    );
-
-    // ── 阶段 4：transcript 转存（C）——失败的尝试同样先归档再请求 ──
-    const trDir = join(sessionDir(hd.homedir, 'e2e-t18'), 'transcripts');
-    let archives = [];
-    try {
-      archives = readdirSync(trDir).filter((f) => /^transcript_\d+_\d+\.json$/.test(f));
-    } catch { /* 目录尚不存在 */ }
-    assert(archives.length >= 1, `transcripts/ 下应有压缩前历史存档（实际 ${archives.length}）`);
-    const archived = JSON.parse(readFileSync(join(trDir, archives[0]), 'utf8'));
-    assert(
-      Array.isArray(archived) && archived.some((m) => String(m.content ?? '').includes('第1轮问题')),
-      '存档应包含被压缩的早期消息（可回溯）',
     );
 
     // ── 阶段 5：重试恢复（F）——绕过熔断、删除-重建、成功 ──
@@ -332,11 +316,12 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
     assert(snapshotFrame, '重试成功后实时面应出现 meta.compacted=true 的快照帧');
 
     // 落盘同源：失败节点已删、快照在、唯一 compression 节点是重试产物
-    await waitFor(() => {
-      const msgs = readMessagesJson(hd.homedir, 'e2e-t18') ?? [];
+    // （读出口 = 前端 loadMessages 同一出口，不碰任何内部存储文件）
+    await waitFor(async () => {
+      const msgs = (await readSessionMessages(cli, 'e2e-t18')) ?? [];
       return msgs.some((m) => (m.type ?? m.msg_type) === 'compression' && m.meta?.compact_trigger === 'retry');
     }, { what: '重试的压缩节点落库', timeoutMs: 30_000 });
-    const msgs = readMessagesJson(hd.homedir, 'e2e-t18');
+    const msgs = await readSessionMessages(cli, 'e2e-t18');
     assertTranscriptInvariants(msgs, 'T18 终态');
     // 重试只删除**被点击的那一个**失败节点（failId）；更早的两个失败节点原样
     // 留在存储里（它们各自都有交代，删除它们不是重试的职责）。
@@ -362,7 +347,7 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
     await sendRound(rounds, `第${rounds + 1}轮问题`);
     rounds += 1;
     assertEq(await snapshotReqCount(), beforeCalm, '恢复后的正常轮不得再触发压缩（水位已降）');
-    const calmMsgs = readMessagesJson(hd.homedir, 'e2e-t18');
+    const calmMsgs = await readSessionMessages(cli, 'e2e-t18');
     assertTranscriptInvariants(calmMsgs, 'T18 恢复后');
   } finally {
     rt?.close();

@@ -55,9 +55,9 @@
 
 use super::super::event::{
     event_node_of, Entity, Event, Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK,
-    EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_ADDED,
-    EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED,
-    EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS,
+    EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED,
+    EVENT_SESSION_CONSOLIDATED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
 
 /// 缺口的一条报告。**故意不 derive `PartialEq`**：报告要给门禁与日志读，字段顺序变动
@@ -127,6 +127,9 @@ fn excluded_from_prompt(e: &Event) -> bool {
     matches!(
         (e.entity, e.verb, e.kind.as_str()),
         (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_REPORTED)
+            // 对话面开场白（S2.7）：与汇报同为界面文本（`exclude_from_context`），
+            // 按设计不进请求包——漏进去要红。
+            | (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_OPENING)
             // 诞生格（ADR-054 决策 1）：本格的节点按定义是**界面文本**——只有
             // 「找不到别的格承载诞生」的节点才落这里（见 `EVENT_MESSAGE_ADDED`
             // 的边界），而承载对话内容的节点必须由它自己的事实落。

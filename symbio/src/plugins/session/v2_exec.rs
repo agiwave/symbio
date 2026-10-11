@@ -111,6 +111,23 @@ pub(crate) struct ResumedTool {
     pub args: serde_json::Value,
     /// 恢复产生的结果正文。
     pub text: String,
+    /// **被恢复的 ToolCall 节点 id**（= 恢复请求的 `target_id`）。
+    ///
+    /// 续写轮落 `artifact.added` 时要把它记进载荷的 `tool_call_id`：读路径走 WAL
+    /// 重建后，「结果节点挂在哪个调用之下」只能靠这条事实复刻。缺了它，重建会
+    /// 按事件 id 合成一个新调用节点 ⇒ 原调用成了**孤儿**（有请求无响应，e2e t27 抓过）。
+    pub call_id: String,
+    /// **被恢复轮次的 Turn 根节点 id**（原调用节点的 `parent_id`）。
+    ///
+    /// 同上：重建把结果节点挂在 `tool_id` 之下，而调用节点自身要落在**原来那一轮**
+    /// 的 Turn 根上——否则同一轮会长出第二个 Turn 根。
+    pub turn_id: String,
+    /// 结果**子节点**的节点 id（恢复方分配，`resume.rs` 步 7 的 `new_child_id`）。
+    ///
+    /// `Carrier::Runner` 的语义是「这条节点由运行器承载、不落出生事实」；承载它的
+    /// 事实就是本次 `artifact.added`——载荷必须复用**同一个 id**，否则实时面与重建
+    /// 面是两条不同的节点（前端按 id 合并，换 id 即多出一条）。
+    pub result_id: String,
 }
 
 /// UI 桥承载的节点类型：正文与推理**分属两条流**，各自一个节点，不合并。
@@ -600,6 +617,10 @@ pub(crate) struct V2Turn<'a> {
     /// 载荷记它，重建侧据此把本轮锚回用户发言。id 由 chat_loop 分配（消息镜像的
     /// 写方），这里只读不生成。
     pub user_node_id: Option<String>,
+    /// 本轮用户消息节点的 `meta`（`None` = 无 meta）。折进的合并补充带
+    /// `meta.supplement*`——它是节点形状的一部分，必须随用户格事实入格（见
+    /// [`super::turn_runner::TurnInput::user_meta`]）。
+    pub user_meta: Option<serde_json::Value>,
     /// 对话窗口（最近轮数，含当前轮）。
     pub window_turns: u64,
     /// 本轮装配进模型的工具清单（空 = 无工具轮）。
@@ -675,6 +696,15 @@ pub(crate) struct V2Turn<'a> {
     ///
     /// [`SessionContext::consolidated`]: super::chat_loop::SessionContext::consolidated
     pub consolidation: Option<&'a [ChatMessage]>,
+    /// **对话面开场白正文**（S2.7）：`Escalate` 首响，本轮随后照进工具循环。
+    ///
+    /// 由 `chat_loop::apply_verdict` 产出（`VerdictEffect::Spoke` 且理由码非
+    /// `progress`——汇报走 `on_round`/`EVENT_ASSISTANT_REPORTED`）。落格在
+    /// [`execute_turn`] 里做（本插件唯一持写者令牌处），运行器据它落
+    /// `chat.assistant.opening` 格。`None` = 本轮没有开场白（常态）。
+    pub opening_text: Option<&'a str>,
+    /// 开场白节点身份与标记（仅 [`Self::opening_text`] 有值时消费）。
+    pub opening_dialog: Option<crate::plugins::session::turn_runner::DialogFacts>,
 }
 
 /// 一轮 v2 原生产物的**全部出口**。
@@ -992,7 +1022,12 @@ pub(crate) async fn execute_final_reply_turn(
     abort: ExecAbortSignal,
     user_text: &str,
     user_node_id: Option<String>,
+    user_meta: Option<serde_json::Value>,
     reply: &str,
+    // 答话**对话面节点**的身份与标记（`id` / `reason` / `exclude_from_context`）：
+    // 收束格据它复刻那条根级节点（`Answered` 答话 `exclude = false`）；双写期它随
+    // `messages.json` 落盘，切源后必须随事实入格（见 `TurnInput::dialog`）。
+    dialog: super::turn_runner::DialogFacts,
     // 本轮之前发生过压缩 ⇒ 压缩后的整份消息列表（S2.7-b2，与 [`execute_turn`] 同源）。
     // 答话轮在步骤 2 就短路收尾，**不进** [`execute_turn`]，所以它也得自己落这一格
     // ——否则「上一轮末尾压过一次、这一轮是答话轮」时那次压缩永远不入格。
@@ -1035,11 +1070,22 @@ pub(crate) async fn execute_final_reply_turn(
         prefix: None,
         inject: None,
         final_reply: Some(reply.to_string()),
-        // 答话轮没有流式节点 ⇒ 无半截可记：载荷 `turn_id` 记空串（重建侧按事件 id
-        // 稳定合成），取数口不挂（`nodes: None`）。
+        // 答话**对话面节点**的身份与标记：收束格据它复刻那条根级节点。答话轮没有
+        // 流式节点 ⇒ 无半截可记：载荷 `turn_id` 记空串（重建侧按 `dialog.id` 与
+        // 事件 id 复刻），取数口不挂（`nodes: None`）。
+        dialog: Some(dialog),
+        // 答话轮**不收束前的开场白**：`Answered` 在轮首就判定了（`Spoke` 是
+        // `Escalate` 的效应），本入口只处理已定稿的答话。
+        opening_text: None,
+        opening_dialog: None,
         turn_root_id: String::new(),
         user_node_id,
+        user_meta,
         nodes: None,
+        // 定稿答话轮不经过工具循环的闸门空隙——它一次请求都不发（`final_reply` 走
+        // 1b 分支直接收束）。但信号照传：若用户在答话落格前按下停止，1c 的中止检查
+        // 会在落完用户格后接管，与其它轮同一条路径（终止是状态，不是特例）。
+        abort: Some(abort),
     };
     TurnRunner
         .run_with_tools(
@@ -1069,6 +1115,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         sink,
         user_text,
         user_node_id,
+        user_meta,
         window_turns,
         tools,
         resume,
@@ -1080,6 +1127,8 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         skill_hits,
         prefix,
         consolidation,
+        opening_text,
+        opening_dialog,
     } = req;
     // 事实源：per-session v2 WAL（与运行器落格同一个文件——一份网格）。
     let dir = session.session_dir().ok_or_else(|| {
@@ -1120,6 +1169,11 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
                         parse_error: None,
                     },
                     text: r.text.clone(),
+                    // 节点身份（调用 / 轮根 / 结果）随恢复方直给的取值入格——续写轮的
+                    // `artifact.added` 复用它们，重建才把结果挂回**原来那张卡**之下。
+                    call_id: Some(r.call_id.clone()),
+                    turn_id: Some(r.turn_id.clone()),
+                    result_id: Some(r.result_id.clone()),
                 }),
             )
         }
@@ -1396,12 +1450,20 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                 // 本路**恒**走生成：定稿答话轮（缺口 5）不经这里——它一个模型请求都不发，
                 // 由 `execute_final_reply_turn` 单独入口落格（见该函数）。
                 final_reply: None,
+                // 本路恒走生成 ⇒ 没有对话面节点（定稿答话轮不走这里）。
+                dialog: None,
+                // 对话面开场白（S2.7，`Escalate` 首响）：由 `chat_loop::apply_verdict`
+                // 产出、随 `V2Turn` 递进来，运行器据它落 `chat.assistant.opening` 格
+                // （开场白后面照常进工具循环，故不占收束格）。
+                opening_text: opening_text.map(str::to_string),
+                opening_dialog,
                 // 落格身份三件套：本轮 Turn 根 id（载荷 `turn_id`）、用户消息节点 id
                 // （用户格载荷记它）、流式节点取数口。取数口是**快照闭包**：运行器每轮
                 // 收束 / 进展 / 兜底时问一次「此刻桥上攒着哪两个节点」，中途正文与思考
                 // 因此逐轮入格（半截中止时它们是唯一幸存者）。
                 turn_root_id: root_id.to_string(),
                 user_node_id,
+                user_meta,
                 nodes: Some(std::sync::Arc::new({
                     let bridge = bridge.clone();
                     move || {
@@ -1422,6 +1484,9 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                     }
                 })
                     as crate::plugins::session::turn_runner::NodeFactsFn),
+                // 中途中止信号（ADR-052 决策 1）：闸门与首请求之间的空隙由运行器
+                // 接管——落完用户格、发第一个请求前检查，已中止则走中止收束格。
+                abort: Some(abort.clone()),
             };
             // 工具分发：core 只认契约（`DispatchPort`），实现是插件侧——它持插件宿主、
             // 请求上下文、转写出口与会话目录（core 认识这些即违 E-009）。

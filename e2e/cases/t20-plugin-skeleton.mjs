@@ -58,7 +58,7 @@ import {
   makeHomedir,
   cleanupHomedir,
   startLongLivedCli,
-  readMessagesJson,
+  readSessionMessages,
   nextPort,
   waitFor,
   assert,
@@ -144,6 +144,7 @@ export default defineCase(
      *
      * 落库判据用**节点数**而不是"有没有回复"：一轮的节点是
      * user + tool_call + tool 结果 + assistant 正文 ≥ 4 条，取到 4 条即本轮已收尾。
+     * 节点数经**生产读出口**轮询（`vdfs/read` 会话叶子，前端加载历史的同一条路）。
      * 阈值写成「基线 + 本轮新增」的形式——写死绝对条数会让"再加一条线"变成"改三处断言"。
      */
     const runTurn = async (cli, sid, text) => {
@@ -162,11 +163,11 @@ export default defineCase(
       const w = await cli.invoke('vdfs/write', { path: `${sessionAddr}/inbox`, text });
       assertEq(w.status, 200, `写收件箱 ${sid}（${JSON.stringify(w.body)?.slice(0, 300)}）`);
 
-      await waitFor(() => (readMessagesJson(hd.homedir, sid) ?? []).length >= 4, {
+      await waitFor(async () => ((await readSessionMessages(cli, sid)) ?? []).length >= 4, {
         what: `${sid} 一轮工具回路落库（user + tool_call + tool + assistant）`,
         timeoutMs: 40_000,
       });
-      return readMessagesJson(hd.homedir, sid);
+      return readSessionMessages(cli, sid);
     };
 
     let cli = await startCli();

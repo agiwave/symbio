@@ -42,7 +42,7 @@ import {
   makeHomedir,
   cleanupHomedir,
   startLongLivedCli,
-  readMessagesJson,
+  readSessionMessages,
   nextPort,
   waitFor,
   assert,
@@ -165,16 +165,16 @@ export default defineCase(
       assertEq(w.status, 200, `写收件箱 ${sid}（${JSON.stringify(w.body)?.slice(0, 300)}）`);
     };
 
-    /** 等这一轮真正收尾：末轮正文落库（它是本轮最后一条消息） */
-    const waitDone = ({ hd, sid }) =>
+    /** 等这一轮真正收尾：末轮正文落库（它是本轮最后一条消息；经读出口看） */
+    const waitDone = ({ cli, sid }) =>
       waitFor(
-        () => (readMessagesJson(hd.homedir, sid) ?? []).some((m) => m.content === '两轮工具都跑完了。'),
+        async () => ((await readSessionMessages(cli, sid)) ?? []).some((m) => m.content === '两轮工具都跑完了。'),
         { what: `${sid} 末轮正文落库`, timeoutMs: 60_000 },
       );
 
-    /** 该会话的汇报节点（按落点标记筛，不按文案筛） */
-    const reportsOf = (homedir, sid) =>
-      (readMessagesJson(homedir, sid) ?? []).filter(
+    /** 该会话的汇报节点（按落点标记筛，不按文案筛；读出口 = 前端加载历史同一出口） */
+    const reportsOf = async (c, sid) =>
+      ((await readSessionMessages(c, sid)) ?? []).filter(
         (m) => m.meta?.surface === 'reply' && m.meta?.reason === 'progress',
       );
 
@@ -186,9 +186,9 @@ export default defineCase(
       await send(a);
       await waitDone(a);
 
-      const aMsgs = readMessagesJson(a.hd.homedir, SIDS.report);
+      const aMsgs = await readSessionMessages(a.cli, SIDS.report);
       assertTranscriptInvariants(aMsgs, 'T23-A');
-      const aReports = reportsOf(a.hd.homedir, SIDS.report);
+      const aReports = await reportsOf(a.cli, SIDS.report);
       assertEq(aReports.length, 2, `A 线两个轮边界应各汇报一次（实得 ${aReports.length} 条）`);
       for (const r of aReports) {
         assertEq(r.role, 'assistant', '汇报是助手说的话');
@@ -230,9 +230,9 @@ export default defineCase(
       await send(b);
       await waitDone(b);
 
-      const bMsgs = readMessagesJson(b.hd.homedir, SIDS.capped);
+      const bMsgs = await readSessionMessages(b.cli, SIDS.capped);
       assertTranscriptInvariants(bMsgs, 'T23-B');
-      const bReports = reportsOf(b.hd.homedir, SIDS.capped);
+      const bReports = await reportsOf(b.cli, SIDS.capped);
       assertEq(
         bReports.length,
         1,
@@ -260,10 +260,10 @@ export default defineCase(
       await send(c);
       await waitDone(c);
 
-      const cMsgs = readMessagesJson(c.hd.homedir, SIDS.off);
+      const cMsgs = await readSessionMessages(c.cli, SIDS.off);
       assertTranscriptInvariants(cMsgs, 'T23-C');
       assertEq(
-        reportsOf(c.hd.homedir, SIDS.off).length,
+        (await reportsOf(c.cli, SIDS.off)).length,
         0,
         '关掉总开关后一句都不说——行为与引入汇报之前逐字一致',
       );

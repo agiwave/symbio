@@ -10,7 +10,10 @@ import {
   addMcpServer,
   cleanupHomedir,
   runCli,
-  readMessagesJson,
+  nextPort,
+  startReadbackCli,
+  readSessionMessages,
+  waitFor,
   readFileSyncSafe,
   assert,
   assertEq,
@@ -30,9 +33,21 @@ export default defineCase('T2 工具回路（MCP stdio）：tool_calls → 执�
     { id: 'after-echo', afterTool: true, content: '工具调用完成，回显成功。' },
   ]).start();
   // 本用例的主题与对话面正交 ⇒ 把两个开关钉死（理由见 `DIALOG_FACE_OFF`）。
+  const GATEWAY_PORT = nextPort();
   const hd = makeHomedir({
     providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
-    pluginConfigs: { session: { ...DIALOG_FACE_OFF } },
+    pluginConfigs: {
+      // 转写经生产读出口读（gateway `invoke` → `vdfs/read`），入站口必须开着。
+      gateway: {
+        inbound_enabled: true,
+        inbound_protocol: 'http',
+        inbound_bind: '127.0.0.1',
+        inbound_port: GATEWAY_PORT,
+        inbound_token: '',
+        inbound_readonly: false,
+      },
+      session: { ...DIALOG_FACE_OFF },
+    },
   });
   addMcpServer(hd, 'mockserv', {
     type: 'stdio',
@@ -40,6 +55,7 @@ export default defineCase('T2 工具回路（MCP stdio）：tool_calls → 执�
     args: [join(E2E_ROOT, 'e2e', 'mock-mcp.mjs'), '--record', join(hd.homedir, 'mcp-record.ndjson')],
     enabled: true,
   });
+  let api = null;
   try {
     const r = runCli({ homedir: hd.homedir, workdir: hd.workdir, message: '帮我回显一下', provider: PROVIDER_ID, session: 'e2e-t2' });
     assertEq(r.code, 0, `CLI 退出码（stderr: ${r.stderr.slice(0, 400)}）`);
@@ -81,14 +97,26 @@ export default defineCase('T2 工具回路（MCP stdio）：tool_calls → 执�
       `工具结果应回灌给模型（实际: ${JSON.stringify(toolMsg).slice(0, 400)}）`,
     );
 
-    // 转写落盘：tool_call 与结果成对
-    const msgs = readMessagesJson(hd.homedir, 'e2e-t2');
+    // 转写落盘：tool_call 与结果成对——经生产读出口读
+    api = await startReadbackCli({
+      homedir: hd.homedir,
+      workdir: hd.workdir,
+      session: 'e2e-t2',
+      provider: PROVIDER_ID,
+      gatewayPort: GATEWAY_PORT,
+    });
+    const msgs = await readSessionMessages(api, 'e2e-t2');
     assertTranscriptInvariants(msgs, 'T2');
     const tc = msgs.find((m) => m.type === 'tool_call');
     assert(tc, '应有 tool_call 节点');
     assertEq(tc.status, 'completed', 'tool_call 终态应为 completed');
   } finally {
+    api?.stop();
     llm.stop();
     cleanupHomedir(hd);
+    // 收尾等子进程退干净（Windows 上带活子进程退出会撞 libuv 断言）。
+    await waitFor(() => !process.getActiveResourcesInfo().includes('ProcessWrap'), {
+      what: '读回 CLI / mock-llm 子进程退出',
+    });
   }
 });

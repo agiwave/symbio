@@ -483,36 +483,132 @@ export async function subscribeSessionRealtime(cli, { sessionId, gatewayPort }) 
   };
 }
 
-// ---------- 会话落盘读取 ----------
-export function sessionDir(homedir, sid) {
-  return join(homedir, 'session', sid);
+/**
+ * 经 REPL 发一轮消息，并在**会话实时面**上等这一轮真正跑完。
+ *
+ * 判据是「会话节点见过 working、且最后一次离开 working」：那一帧是本轮实时面的
+ * 最后一帧（后端先清在途、再复位运行态，两者走同一条订阅 FIFO）。水位线 `mark`
+ * 不可省——否则订阅后首帧的空闲态会让条件在开跑前就成立（t16 踩过）。
+ *
+ * 这是「边跑边等、等到了再断言」的统一入口：等的是**实时面**（用户如何看到就
+ * 如何等），转写 / 读数断言随后走 `cli.invoke`（`vdfs/read` 等生产路由）。
+ * REPL 与 chat/send 走同一条 `session/chat/send` 路（`cli/src/client.rs`），
+ * 因此会话节点的运行态帧对这条入口一样成立。
+ *
+ * @param cli `startLongLivedCli` / `startRealtimeSession` 给出的进程句柄
+ * @param sub `subscribeSessionRealtime` 给出的实时面句柄
+ * @param message 本轮用户发言（写进 REPL stdin）
+ */
+export async function sendAndSettle(cli, sub, message, { timeoutMs = 60_000 } = {}) {
+  const mark = sub.sessionChanges().length;
+  cli.send(message);
+  await waitFor(
+    () => {
+      const sc = sub.sessionChanges().slice(mark);
+      return (
+        sc.length > 0 &&
+        sc.some((c) => c.data?.status === 'working') &&
+        sc[sc.length - 1]?.data?.status !== 'working'
+      );
+    },
+    { what: '本轮跑完（实时面离开 working）', timeoutMs },
+  );
 }
 
-export function readSessionJson(homedir, sid) {
-  const p = join(sessionDir(homedir, sid), 'session.json');
-  return existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : null;
-}
+// ---------- 会话读出口（生产路由，不落盘读数） ----------
+//
+// 转写 / 元数据的读数只走两条**用户可见**的出口（与前端同构）：
+// - 消息集合：`vdfs/root` → `vdfs/read(<根>/session/<sid>)` → `JSON.parse(text).messages`
+//   （前端 `loadMessages` 走的同一条地址）；
+// - 其余列：gateway `invoke` 的其它路由（`session/stats` 等）。
+//
+// 会话的内部存储文件是**实现细节**，用例不读它：形状一变、缓存策略一改，
+// 与被测行为无关的断言就会红，而那种红没有诊断价值。
 
-export function readMessagesJson(homedir, sid) {
-  const p = join(sessionDir(homedir, sid), 'messages.json');
-  return existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')).messages : null;
+/**
+ * 起一个**长驻读回 CLI** 并等它的 gateway 就绪——一次性轮次跑完后读转写 / 读数的入口。
+ *
+ * 前置：该 homedir 的 gateway 插件配置必须以**同一个 `gatewayPort`** 开启入站
+ * （`inbound_enabled: true`，与 T28/T31 同一约定），否则进程里没有监听口。
+ */
+export async function startReadbackCli({
+  homedir,
+  workdir,
+  session = 'e2e-readback',
+  mode = 'auto',
+  provider = PROVIDER_ID,
+  gatewayPort = nextPort(),
+}) {
+  const cli = startLongLivedCli({ homedir, workdir, session, mode, provider, gatewayPort });
+  try {
+    await cli.waitGatewayReady();
+  } catch (e) {
+    cli.stop();
+    throw e;
+  }
+  return cli;
 }
 
 /**
- * 子智能体空间里的会话目录：`<homedir>/agent/<agentId>/session/<sid>`。
+ * 起读回 CLI 并订阅它的**会话实时面**——「边跑边等、等到了再断言」的用例的统一入口。
  *
- * 子 Agent 目录是**一棵与系统树同构的 composite 子树**（根 = `<homedir>/agent/<id>`），
- * 子树里的插件目录因此是 `<根>/<插件名>`——子会话与父会话**不是同一个 store**，
- * 这是「子智能体在自己的空间里跑完整会话」的落盘判据。
+ * 这是 e2e 读转写的**正道**（用户如何看到就如何读）：等消息 / 读历史都经这条
+ * 句柄——`sub.messages()` 是前端实时面所见，`cli.invoke('vdfs/read', …)` 是前端
+ * 加载历史的同一出口。会话尚不存在也能订阅（`vdfs/watch` 挂的是父目录
+ * `<根>/session`，归属按作用域过滤）；CLI 以 `--session <session>` 启动，会话
+ * 由首条消息 / `vdfs/write` 建立。
+ *
+ * @returns `{ cli, sub }`；收尾 `sub.close()` + `cli.stop()`（子进程退出仍由用例的
+ * `waitFor(!ProcessWrap)` 兜底）
  */
-export function agentSessionDir(homedir, agentId, sid) {
-  return join(homedir, 'agent', agentId, 'session', sid);
+export async function startRealtimeSession({
+  homedir,
+  workdir,
+  session,
+  mode = 'auto',
+  provider = PROVIDER_ID,
+  gatewayPort = nextPort(),
+}) {
+  const cli = await startReadbackCli({ homedir, workdir, session, mode, provider, gatewayPort });
+  try {
+    const sub = await subscribeSessionRealtime(cli, { sessionId: session, gatewayPort });
+    return { cli, sub };
+  } catch (e) {
+    cli.stop();
+    throw e;
+  }
 }
 
-/** 读子智能体空间里某会话的消息（文件不存在 ⇒ `null`，与 `readMessagesJson` 同形） */
-export function readAgentMessagesJson(homedir, agentId, sid) {
-  const p = join(agentSessionDir(homedir, agentId, sid), 'messages.json');
-  return existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')).messages : null;
+/**
+ * 按**地址**读一个会话叶子的转写（`{ messages: [...] }`）。
+ *
+ * 叶子尚不存在（或正文为空）⇒ `null`：与「先跑一轮、再读」的用例前提配合，
+ * `assertTranscriptInvariants` 拿到 `null` 会当场报缺。传给 `.some()` 之类的调用
+ * 会以 TypeError 失败——同样是失败，不会静默变绿。
+ */
+export async function readTranscriptAt(cli, addr) {
+  const resp = await cli.invoke('vdfs/read', { path: addr });
+  if (resp.status !== 200) return null;
+  const text = resp.body?.data?.text;
+  if (typeof text !== 'string' || text.length === 0) return null;
+  const leaf = JSON.parse(text);
+  return leaf?.messages ?? null;
+}
+
+/**
+ * 读某个会话的消息集合（生产读出口版的「转写读数」）。
+ *
+ * 先取根地址（`vdfs/root`，前端 `ensureVdfsRoot` 同款），再按
+ * `<根>/session/<sid>` 读叶子——这条地址就是前端加载历史用的那一条。
+ */
+export async function readSessionMessages(cli, sid) {
+  const rootResp = await cli.invoke('vdfs/root', {});
+  const root = rootResp.body?.data?.path;
+  assert(
+    typeof root === 'string' && root.length > 0,
+    `vdfs/root 应返回根地址（${JSON.stringify(rootResp.body)?.slice(0, 200)}）`,
+  );
+  return readTranscriptAt(cli, `${root.replace(/\/+$/, '')}/session/${sid}`);
 }
 
 /**
@@ -633,7 +729,7 @@ export function turnFacts(events) {
  * - 每个 tool_call 必有 role=tool 的结果子节点（「有请求必有响应」）。
  */
 export function assertTranscriptInvariants(messages, label) {
-  assert(Array.isArray(messages), `${label}: messages.json 缺失`);
+  assert(Array.isArray(messages), `${label}: 会话转写（消息集合）读不到`);
   let lastSeq = -Infinity;
   const ids = new Set();
   for (const m of messages) {

@@ -130,6 +130,24 @@ async fn setup_with_failed_turn() -> (
     let session_id = "resume_test".to_string();
 
     let mut seed = Session::new(&session_id);
+    let failed_turn = ChatMessage {
+        id: "t-failed".into(),
+        role: Some(MessageRole::Assistant),
+        msg_type: Some(MessageType::Turn),
+        status: Some(MessageStatus::Failed),
+        seq: Some(2),
+        ..Default::default()
+    };
+    let partial = ChatMessage {
+        id: "n-1".into(),
+        parent_id: Some("t-failed".into()),
+        role: Some(MessageRole::Assistant),
+        msg_type: Some(MessageType::Text),
+        content: Some(MessageContent::Text("半截".into())),
+        status: Some(MessageStatus::Completed),
+        seq: Some(3),
+        ..Default::default()
+    };
     seed.messages = vec![
         ChatMessage {
             id: "u-1".into(),
@@ -140,24 +158,8 @@ async fn setup_with_failed_turn() -> (
             seq: Some(1),
             ..Default::default()
         },
-        ChatMessage {
-            id: "t-failed".into(),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Turn),
-            status: Some(MessageStatus::Failed),
-            seq: Some(2),
-            ..Default::default()
-        },
-        ChatMessage {
-            id: "n-1".into(),
-            parent_id: Some("t-failed".into()),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Text),
-            content: Some(MessageContent::Text("半截".into())),
-            status: Some(MessageStatus::Completed),
-            seq: Some(3),
-            ..Default::default()
-        },
+        failed_turn.clone(),
+        partial.clone(),
     ];
     store.save_session(&seed).await.expect("种子会话落盘失败");
     let dir = store.session_dir(&session_id).expect("应返回会话目录");
@@ -184,6 +186,23 @@ async fn setup_with_failed_turn() -> (
             .with_payload(json!({ "text": "第一问", "id": "u-1" })),
         )
         .expect("种子事实落格失败");
+        // 失败子树也走出生事实：切主后列表 = 事实投影（ADR-049），重试要找的
+        // `t-failed` 节点必须**在投影里**才轮得到「删掉一整棵」。直落形状与
+        // `v2_messages::added` 产出一致（同一载荷键）。
+        let failed = serde_json::to_value(vec![failed_turn.clone(), partial.clone()])
+            .expect("序列化种子子树失败");
+        s.append(
+            Event::pending(
+                "m-add-0",
+                crate::symbio_core::EVENT_MESSAGE_ADDED,
+                Entity::Message,
+                Verb::Opened,
+                0,
+                PRINCIPAL_USER,
+            )
+            .with_payload(json!({ "messages": failed })),
+        )
+        .expect("子树事实落格失败");
     }
 
     (session, dir, tmp)

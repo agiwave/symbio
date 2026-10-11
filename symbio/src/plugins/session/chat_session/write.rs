@@ -274,6 +274,14 @@ impl PersistentChatSession {
         // L2 上下文摘要在 Turn 开始、内容节点淡化在请求视图组装（build_request_view）。
         // 落库前不做任何内容改写：压缩原料不被污染，UI（reason 面板等）读到的也是全文。
         for mut chat_msg in messages {
+            // WAL 投影已含该节点（事实先落——`Born{Here}` 在进本函数前已入格，
+            // 运行器承载格同理）⇒ **不重复追加**：投影就是权威，回包取投影里那份。
+            // 少了这一段，apply 落完事实再 append 会把同一节点写成两条
+            // （一条重建号、一条本地补号）——切主读后同一句话在列表里出现两次。
+            if session.messages.iter().any(|m| m.id == chat_msg.id) {
+                appended_ids.push(chat_msg.id);
+                continue;
+            }
             if chat_msg.timestamp.unwrap_or(0) == 0 {
                 chat_msg.timestamp = Some(now);
             }

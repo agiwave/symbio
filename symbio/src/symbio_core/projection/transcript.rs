@@ -31,8 +31,9 @@
 use super::super::event::{
     event_payload_node_id, event_produced_text_node_id, event_tool_result_node_id, Entity, Event,
     Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED, EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED,
-    EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS, EVENT_ASSISTANT_REPORTED,
+    EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED,
+    EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
 use super::super::schemas::session::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageType,
@@ -456,6 +457,24 @@ pub fn transcript() -> Projection<TranscriptView> {
                 // ⚠️ 它与 `chat.assistant.final` **不是**同一格：那格是 N3「每轮至多一条」，
                 // 而一轮可以汇报多次。挤进去会让「一轮一次最终答复」这条不变量失效。
                 (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_REPORTED) => {
+                    let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                    if !text.trim().is_empty() {
+                        push(
+                            TranscriptEntry {
+                                role: "assistant".into(),
+                                text: text.to_string(),
+                                tool: None,
+                                exclude_from_context: true,
+                            },
+                            event_payload_node_id(e, "id"),
+                        );
+                    }
+                }
+                // 对话面开场白（S2.7，`Escalate` 首响）：与轮边界汇报同一条纪律
+                // ——助手说的界面文本，`exclude_from_context = true`（进转写、
+                // 不进 `to_messages()`）。理由码不同只影响 `meta.reason`，转写这层
+                // 只关心「谁说了一句给人看的话」。
+                (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_OPENING) => {
                     let text = e.payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
                     if !text.trim().is_empty() {
                         push(

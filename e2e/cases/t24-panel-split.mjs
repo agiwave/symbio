@@ -42,7 +42,7 @@ import {
   makeHomedir,
   cleanupHomedir,
   startLongLivedCli,
-  readMessagesJson,
+  readSessionMessages,
   nextPort,
   waitFor,
   subscribeSessionRealtime,
@@ -150,11 +150,11 @@ export default defineCase(
       assertEq(w.status, 200, `写收件箱（${JSON.stringify(w.body)?.slice(0, 300)}）`);
 
       await waitFor(
-        () => (readMessagesJson(hd.homedir, SID) ?? []).some((m) => textOf(m) === ANSWER),
+        async () => ((await readSessionMessages(cli, SID)) ?? []).some((m) => textOf(m) === ANSWER),
         { what: 'T24 末轮正文落库', timeoutMs: 60_000 },
       );
 
-      const msgs = readMessagesJson(hd.homedir, SID);
+      const msgs = await readSessionMessages(cli, SID);
       assertTranscriptInvariants(msgs, 'T24');
 
       /** 落库的节点类型词（后端可能写 `type` 或 `msg_type`，两处都认） */

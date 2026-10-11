@@ -32,7 +32,8 @@
 use crate::symbio_core::{
     visible_to, ActorSpec, AdapterError, Entity, Event, FullModel, LatencyTier, LlmAdapter,
     PromptToolCall, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
-    EVENT_ASSISTANT_PROGRESS, EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS, EVENT_SESSION_CONSOLIDATED,
+    EVENT_USER_MESSAGE,
 };
 use std::borrow::Cow;
 
@@ -59,6 +60,23 @@ pub struct TurnInput {
     pub turn: u64,
     /// 用户发言。续写轮不新开用户格，此字段不参与入格（用户没再说话）。
     pub text: String,
+    /// **本轮的中止信号**（ADR-052：中止是事实的**状态**，不是「什么都没发生」）。
+    ///
+    /// ## 为什么运行器要拿它
+    ///
+    /// 中止可以在**用户格落完之后、第一次 LLM 请求之前**到达（用户按下停止的
+    /// 那一刻恰好落在闸门与请求之间）。此前这一档由 `chat_loop` 在进运行器**之前**
+    /// 拦下（`TurnExit::Aborted`）——运行器于是从不落 `user.message` 格，WAL 全空，
+    /// 中止这一轮**一条事实都没有**（实测 e2e t7：`v2-events.wal` 不存在，
+    /// `恢复后重建的历史里看不到这轮说过什么`）。而 ADR-052 决策 1 要求
+    /// 「一轮的产出无论完成、失败、被中断还是悬在等待用户，都入格」。
+    ///
+    /// 修法 = 把检查点**下沉**到运行器：落完用户格后、发第一个请求前检查一次，
+    /// 已中止则直接走**中止收束格**（`chat.assistant.final` + `status: "aborted"` +
+    /// `terminated`）——与 adapter 中途返回 `AdapterError::Aborted` 落的是同一格。
+    ///
+    /// `None` = 调用方不提供信号（单测 / 无中止语义的路径），行为与接线前逐字一致。
+    pub abort: Option<crate::symbio_core::ExecAbortSignal>,
     /// 本轮装配进哪一时延档（调度决定是数据，ADR-044）。
     pub tier: LatencyTier,
     /// 对话窗口（最近的 turn 数，**含当前轮**）；`None` = 全量。
@@ -159,6 +177,29 @@ pub struct TurnInput {
     /// 这一轮没有模型参与，`chat.assistant.final` 的 `model` 载荷记**空串**而不是
     /// 任何模型的 id——记一个会变成「这次请求用的是那个模型」，而事实相反。
     pub final_reply: Option<String>,
+    /// 定稿答话**对话面节点**的身份与标记（仅 `final_reply` 有值时消费）。
+    ///
+    /// ## 为什么答话要带这三样，而不是只有正文
+    ///
+    /// `Answered` 的答话是一条**根级**对话面节点（`parent_id = None`，带
+    /// `meta.surface = "reply"` / `meta.reason` / 可选的 `meta.exclude_from_context`）。
+    /// 双写期它的形状随整份 `messages.json` 落盘；切源后收束格只记了正文
+    /// （`final_reply`），重建便**折不出这条节点**——实测 t20 / t21 / t22 / t25 全部
+    /// 「0 条对话面节点」。节点形状是事实的一部分（S2.6 原则），故随收束格一并入格。
+    pub dialog: Option<DialogFacts>,
+    /// **对话面开场白**（S2.7）：`Escalate` 首响正文（`Some` = 本轮有一句开场白）。
+    ///
+    /// 与 [`Self::final_reply`] 的区别只在**时机**：答话是干活干完之后的收束，
+    /// 开场白是干活**开始前**说的一句（本轮随后照进工具循环）。两者都产出一条
+    /// **根级**对话面节点（同 `dialog_node` 形状），但收束格那格（`chat.assistant.final`）
+    /// 是 N3「每轮至多一条」，开场白不能挤进去——故它单立一格
+    /// （`chat.assistant.opening`，`turn × asserted`，见 core 常量文档）。
+    ///
+    /// 承载事实由运行器落（与收束格同一条纪律：节点诞生归运行器，`apply` 不另落）。
+    /// 载荷带 `opening_dialog` 的 `id` / `reason` / `exclude_from_context`。
+    pub opening_text: Option<String>,
+    /// 开场白节点身份与标记（仅 [`Self::opening_text`] 有值时消费）。
+    pub opening_dialog: Option<DialogFacts>,
     /// **本轮 Turn 根节点 id**（落库时 `into_messages(root_id)` 的入参）。
     ///
     /// 由**调用方分配**（`chat_loop/inputs.rs` 的 `llm_short_id()`，那里是唯一的
@@ -172,6 +213,16 @@ pub struct TurnInput {
     /// 与 [`Self::turn_root_id`] 同一条纪律：id 由调用方生成（用户消息在进运行器
     /// 之前就已存在），这里只负责**记**。
     pub user_node_id: Option<String>,
+    /// 本轮**用户消息节点的 `meta`**（`user.message` 载荷记它；`None` = 无 meta）。
+    ///
+    /// ## 为什么 `meta` 也是事实的一部分
+    ///
+    /// 用户消息不只有正文：折进的那一条（合并补充）带 `meta.supplement*` 三键——
+    /// 前端据它认出「这是一次折进」，重建据它复刻节点形状。双写期这些键随整份
+    /// `messages.json` 落盘，切源后若不随事实入格，重建出的用户节点就**丢了这些键**，
+    /// 于是同一条发言在实时面与重建面是两个身份（t19 的空闲抽干线照出来的正是这一处）。
+    /// 与 `id` 同属「节点身份/形状是事实的一部分」（S2.6 原则）。
+    pub user_meta: Option<serde_json::Value>,
     /// **流式期已分配的节点身份**（正文 / 推理子节点的 id 与推理正文）——收束事件
     /// 的载荷要记它们（WAL 载荷补全：消息节点 id 入格，重建才无损）。
     ///
@@ -180,6 +231,22 @@ pub struct TurnInput {
     /// 状态。闭包把「取此刻的节点事实」留给唯一知道它的那一侧（与
     /// [`Self::inject`] 同形态的理由：core 不认识桥）。
     pub nodes: Option<NodeFactsFn>,
+}
+
+/// 定稿答话**对话面节点**的身份与标记（见 [`TurnInput::dialog`]）。
+///
+/// 三样缺一不可：`id` 是节点身份（前端按 id 合并、`message.edited` 按 id 定位）、
+/// `reason` 是上游判决原样透传（`meta.reason`）、`exclude_from_context` 决定这句
+/// 话进不进模型请求包。重建按这三样经**同一个构造器**（`compose::dialog_node`）
+/// 复刻，形状漂移因此不可能。
+#[derive(Debug, Clone, Default)]
+pub struct DialogFacts {
+    /// 对话面节点 id（写侧 `dialog_node` 分配的 `id`）。
+    pub id: String,
+    /// 理由码（`meta.reason`；上游判决原样透传）。
+    pub reason: String,
+    /// 是否不进模型请求包（`Escalate` 首响为真，`Answered` 答话为假）。
+    pub exclude_from_context: bool,
 }
 
 /// 流式期已分配的节点事实（见 [`TurnInput::nodes`]）。
@@ -325,6 +392,21 @@ fn with_status(mut produced: serde_json::Value, status: &str) -> serde_json::Val
     produced
 }
 
+/// 把定稿答话的**对话面节点身份**并入收束格载荷（见 [`TurnInput::dialog`]）。
+///
+/// 缺席（`None` = 这一轮不是答话轮）⇒ 载荷原样返回：普通收束格的重建路径不受影响，
+/// 「有对话面节点」因此是一个**由载荷显式声明**的事实，不靠重建去猜。
+fn with_dialog(mut produced: serde_json::Value, dialog: Option<&DialogFacts>) -> serde_json::Value {
+    if let Some(d) = dialog {
+        produced["dialog"] = serde_json::json!({
+            "id": d.id,
+            "reason": d.reason,
+            "exclude_from_context": d.exclude_from_context,
+        });
+    }
+    produced
+}
+
 /// 终止信息（`terminated: { reason, at }`，仅终止时有）：终止的事实被截到哪一刻、
 /// 被什么截断——半截正文停在哪里由此可观测。
 fn with_terminated(mut payload: serde_json::Value) -> serde_json::Value {
@@ -369,14 +451,21 @@ impl std::fmt::Debug for TurnInput {
         f.debug_struct("TurnInput")
             .field("turn", &self.turn)
             .field("text", &self.text)
+            // 中止信号只打印「有没有」：`ExecAbortSignal` 是内部句柄（AtomicBool +
+            // 通知），展开它对本入参包的可读性没有增量，反而多出一堆内部字段。
+            .field("abort", &self.abort.as_ref().map(|_| "<信号>"))
             .field("tier", &self.tier)
             .field("window_turns", &self.window_turns)
             .field("resume", &self.resume)
             .field("actor", &self.actor)
             .field("prefix", &self.prefix)
             .field("final_reply", &self.final_reply)
+            .field("dialog", &self.dialog)
+            .field("opening_text", &self.opening_text)
+            .field("opening_dialog", &self.opening_dialog)
             .field("turn_root_id", &self.turn_root_id)
             .field("user_node_id", &self.user_node_id)
+            .field("user_meta", &self.user_meta)
             // 闭包**不展开**：展开会把捕获的东西（生产里是用户对话正文）打进日志。
             .field("inject", &self.inject.as_ref().map(|_| "<闭包>"))
             .field("nodes", &self.nodes.as_ref().map(|_| "<闭包>"))
@@ -409,6 +498,21 @@ pub struct TurnResume {
     pub call: crate::symbio_core::TurnToolCallInfo,
     /// 恢复后的结果正文（落 `artifact.added`，并作为交换段的结果行）。
     pub text: String,
+    /// **被恢复的 ToolCall 节点 id**（恢复请求的 `target_id`）。
+    ///
+    /// 续写轮落 `artifact.added` 时记进载荷的 `tool_call_id`：读路径走 WAL 重建后，
+    /// 「结果挂在哪个调用之下」只能靠这条事实复刻。空缺（老调用点 / 单测）时回落到
+    /// 按本轮 `turn_root_id` 合成——与接线前同形，但那会让原调用成孤儿（e2e t27）。
+    pub call_id: Option<String>,
+    /// **被恢复轮次的 Turn 根节点 id**（原调用节点的 `parent_id`）。
+    ///
+    /// 与 [`Self::call_id`] 同批入格：重建把调用节点落在这一轮上，缺了就长出新 Turn 根。
+    pub turn_id: Option<String>,
+    /// 恢复方分配的**结果子节点 id**（`resume.rs` 步 7）。
+    ///
+    /// `Carrier::Runner` = 这条节点没有出生事实，承载它的是续写轮的 `artifact.added`；
+    /// 载荷复用同一个 id，实时面与重建面才是同一条节点。
+    pub result_id: Option<String>,
 }
 
 /// 一轮的结果：`fell_back = false` ⇒ 模型作答；`true` ⇒ 兜底（`text` 即
@@ -595,9 +699,14 @@ impl TurnRunner {
             actor,
             prefix,
             final_reply,
+            dialog,
+            opening_text,
+            opening_dialog,
             turn_root_id,
             user_node_id,
+            user_meta,
             nodes,
+            abort,
         } = input;
         // 本轮的 viewer：历史窗口只交**本主体看得见**的事件（plan/11 批1 ③）。
         // 身份是入参不是字面量——`actor.principal` 由调用方（生产：会话属于哪个
@@ -609,26 +718,62 @@ impl TurnRunner {
         // 出现两次、把那一轮数成两轮；且 C4 按 turn 号配对——续写轮要的正是让**原轮**
         // 收到收束事件（见 [`TurnResume`]）。此时复用该轮既有的用户格 seq 作溯源锚点。
         let user_seq = match &resume {
-            None => store
-                .append(
-                    Event::pending(
-                        format!("u-{turn}"),
-                        EVENT_USER_MESSAGE,
-                        Entity::Turn,
-                        Verb::Opened,
-                        turn,
-                        "user",
+            None => {
+                // 载荷：正文 + 档位 + 节点身份（id / meta）。`meta` **按需带上**——
+                // 空对象不入格，与落库那些「没有 meta 就不序列化该键」的节点同形
+                // （前端按 id 合并、重建按 `meta` 复刻形状，两者都读这份载荷）。
+                let mut payload = serde_json::json!({
+                    "text": text,
+                    "tier": tier.name(),
+                    // 用户消息节点 id 入格：重建按它复刻节点身份（前端按 id 合并）。
+                    "id": user_node_id,
+                });
+                if let Some(meta) = user_meta.as_ref().filter(|m| !m.is_null()) {
+                    payload["meta"] = meta.clone();
+                }
+                store
+                    .append(
+                        Event::pending(
+                            format!("u-{turn}"),
+                            EVENT_USER_MESSAGE,
+                            Entity::Turn,
+                            Verb::Opened,
+                            turn,
+                            "user",
+                        )
+                        .with_payload(payload),
                     )
-                    .with_payload(serde_json::json!({
-                        "text": text,
-                        "tier": tier.name(),
-                        // 用户消息节点 id 入格：重建按它复刻节点身份（前端按 id 合并）。
-                        "id": user_node_id,
-                    })),
-                )
-                .map(|seq| seq.value())?,
+                    .map(|seq| seq.value())?
+            }
             Some(r) => r.user_seq,
         };
+        // 1a. 对话面开场白（S2.7）：`Escalate` 首响——本轮随后**照进工具循环**，
+        // 所以它落在 `turn × asserted`（不是收束格 N3「每轮至多一条」）。
+        //
+        // 放在用户格之后：断言类事件必须带溯源锚点（I2），而那只有落完用户格才有。
+        // 空正文不落格（与汇报 / 收束同一条纪律）：把空串记成「说了句开场白」会让
+        // 前端多出一条空节点。
+        if let (Some(opening), Some(dialog)) = (opening_text.as_deref(), opening_dialog.as_ref()) {
+            if !opening.trim().is_empty() {
+                store.append(
+                    Event::pending(
+                        format!("op-{turn}"),
+                        EVENT_ASSISTANT_OPENING,
+                        Entity::Turn,
+                        Verb::Asserted,
+                        turn,
+                        &actor.principal,
+                    )
+                    .with_produced_by(user_seq)
+                    .with_payload(serde_json::json!({
+                        "text": opening,
+                        "id": dialog.id,
+                        "reason": dialog.reason,
+                        "exclude_from_context": dialog.exclude_from_context,
+                    })),
+                )?;
+            }
+        }
         // 1b. 定稿答话（缺口 5）：用户格照常开，答话照常收束，**模型不参与**。
         //
         // 为什么放在这里而不是循环里：这一轮一次请求都不发，循环的第一件事
@@ -684,7 +829,10 @@ impl TurnRunner {
                 )
                 .with_produced_by(user_seq)
                 .with_cost_ms(0)
-                .with_payload(with_status(produced, "completed")),
+                .with_payload(with_dialog(
+                    with_status(produced, "completed"),
+                    dialog.as_ref(),
+                )),
             )?;
             return Ok(TurnOutcome {
                 turn,
@@ -797,27 +945,56 @@ impl TurnRunner {
                     "tool": r.call.name.clone().unwrap_or_default(),
                     "text": r.text,
                     // 节点结构入格：ToolCall / 结果节点的身份与参数（重建复刻同一批）。
-                    // 恢复路的节点 id 由恢复方分配（此处 `call.id` 可能为空）——
-                    // 空缺由重建侧按事件 id 稳定合成（见 rebuild）。
-                    "tool_call_id": r.call.id,
+                    //
+                    // 恢复路的两张卡（调用与结果）在实时面已经由 `resume.rs` 分配了 id
+                    // （`Born{Carrier::Runner}`：节点在、但出生事实由**本格**承载）——
+                    // 载荷复用**同一批 id**，重建才复刻出同一条节点。缺 `tool_call_id`
+                    // 会让重建按事件 id 合成一个新调用 ⇒ 原调用成孤儿（e2e t27）；
+                    // 缺 `result_id` 会让结果节点换个身份（前端按 id 合并 ⇒ 多一条）。
+                    "tool_call_id": r.call_id.clone().or_else(|| r.call.id.clone()),
                     "wire_id": r.call.wire_id,
                     "args": super::message_build::tool_call_args_text(&r.call),
-                    "result_id": null,
+                    "result_id": r.result_id,
                     "success": true,
-                    "turn_id": turn_root_id,
+                    // 调用节点落回**原来那一轮**的 Turn 根：续写不新开轮，也不该长出
+                    // 第二个 Turn 根。空缺（老调用点）时回落到本轮的根，与接线前同形。
+                    "turn_id": r.turn_id.clone().unwrap_or_else(|| turn_root_id.to_string()),
                 })),
             )?;
             artifact_no += 1;
             all_tool_calls.push(ToolCallFact {
-                id: r.call.id.clone().unwrap_or_default(),
+                id: r
+                    .call_id
+                    .clone()
+                    .or_else(|| r.call.id.clone())
+                    .unwrap_or_default(),
                 name: r.call.name.clone().unwrap_or_default(),
                 args: super::message_build::tool_call_args_text(&r.call),
                 wire_id: r.call.wire_id.clone().unwrap_or_default(),
-                // 恢复路的结果正文直接在场（`r.text`），结果子节点由恢复方落库——
-                // 身份不在这里记，重建侧按事件 id 稳定合成（与上一行同一约定）。
-                result_id: None,
+                // 结果子节点身份 = 恢复方分配的那一个（随载荷入格，见上）。
+                result_id: r.result_id.clone(),
             });
             exchange.extend(exchange_messages(&r.call, &r.text));
+        }
+
+        // 1c. **闸门与首请求之间的中止**（ADR-052 决策 1）。
+        //
+        // 用户按下停止的那一刻可能恰好落在「用户格已落、第一个 LLM 请求还没发」这段
+        // 空隙里。此前这一段由 `chat_loop` 在**进运行器之前**拦下（`TurnExit::Aborted`），
+        // 于是运行器从不落 `user.message`，中止这一轮**一条事实都没有**——WAL 全空，
+        // 溯源锚解不出，投影里看不到用户说过什么（实测 e2e t7）。
+        //
+        // 修法 = 检查点**下沉**到这里：用户格已落、请求未发，已中止则直接走**中止收束格**
+        // （`chat.assistant.final` + `status: "aborted"` + `terminated`），与 adapter 中途
+        // 返回 `AdapterError::Aborted` 落的是**同一格**——终止是事实的**状态**，不是新种类。
+        // 半截产出此时为空（还没发请求），载荷照样带上（`produced_payload` 对空正文是合法的）。
+        //
+        // `abort` 为 `None`（单测 / 无中止语义的路径）时这一整段是空操作，行为与接线前逐字一致。
+        if let Some(sig) = abort.as_ref() {
+            if sig.is_aborted() {
+                return Self::append_aborted(store, &actor, turn, user_seq, llm, &turn_root_id)
+                    .await;
+            }
         }
 
         loop {
@@ -963,6 +1140,12 @@ impl TurnRunner {
                                 "args": outcome.args,
                                 "result_id": outcome.result_id,
                                 "success": outcome.ok,
+                                // 等待用户：结果节点是一张**待用户动作的卡**（`user_prompt` +
+                                // `waiting_user_action`），不是普通结果文本。重建据此复刻
+                                // 同一个节点形状与卡片载荷（S2.7：读路径走 WAL 重建）。
+                                "needs_user_action": outcome.needs_user_action,
+                                "prompt": outcome.prompt,
+                                "failure_kind": outcome.failure_kind,
                                 "turn_id": turn_root_id,
                             })),
                         )?;
@@ -1309,6 +1492,82 @@ impl TurnRunner {
             usage: None,
             fell_back: true,
             aborted: false,
+            awaits_user: false,
+            closure_denied: false,
+        })
+    }
+
+    /// 中止收束格的构造点（ADR-052 决策 1）：**闸门与首请求之间**到达的中止。
+    ///
+    /// 与 adatper 中途返回 `AdapterError::Aborted` 落的是**同一格**
+    /// （`chat.assistant.final` + `status: "aborted"` + `terminated`）——终止是事实的
+    /// **状态**，不是新种类（ADR-052 决策 3 明令「不为中止 / 等待新增事实 kind」）。
+    /// 两处落格**共用形状**：本函数与 3a 分支构造的载荷逐字一致，只差半截产出为空
+    /// （此时还没发请求，模型什么都没产出）。
+    ///
+    /// 为什么它必须存在而不是让调用方自己落格：`user.message` 已由本运行器在本函数
+    /// 之前落了（1 步），**收束格与本轮用户格配对**（N3/C4）的不变量归本运行器守，
+    /// 插件侧不得自己补写那两格（见文件头「落格纪律」）。中止轮若由插件自行收束，
+    /// 就绕过了这道闸。
+    async fn append_aborted<S>(
+        store: &S,
+        actor: &ActorSpec,
+        turn: u64,
+        user_seq: u64,
+        llm: &dyn LlmAdapter,
+        turn_root_id: &str,
+    ) -> Result<TurnOutcome, crate::symbio_core::AppendError>
+    where
+        S: Store<Event = Event>,
+    {
+        if !closure_granted(&actor.principal) {
+            // 中止的收束格同过写侧闸（与 3a 分支同一条纪律）：拒绝 ⇒ 不入格，
+            // 该轮留在未收束态（C4 报得出）。
+            crate::plugin_warn!(
+                "actors",
+                "[v2] 中止收束被授权拒绝（{} 缺 reply.first），本轮不入格（turn={turn}）",
+                actor.principal
+            );
+            return Ok(TurnOutcome {
+                turn,
+                text: String::new(),
+                cost_ms: 0,
+                usage: None,
+                fell_back: false,
+                aborted: true,
+                awaits_user: false,
+                closure_denied: true,
+            });
+        }
+        // 半截产出为空：请求还没发出，模型没产出任何正文 / 思考 / 工具事实。
+        let produced = produced_payload(
+            "",
+            llm.model_id(),
+            turn_root_id,
+            &StreamNodeFacts::default(),
+            &[],
+            &[],
+        );
+        store.append(
+            Event::pending(
+                format!("f-{turn}"),
+                EVENT_ASSISTANT_FINAL,
+                Entity::Turn,
+                Verb::Closed,
+                turn,
+                &actor.principal,
+            )
+            .with_produced_by(user_seq)
+            .with_cost_ms(0)
+            .with_payload(with_terminated(with_status(produced, "aborted"))),
+        )?;
+        Ok(TurnOutcome {
+            turn,
+            text: String::new(),
+            cost_ms: 0,
+            usage: None,
+            fell_back: false,
+            aborted: true,
             awaits_user: false,
             closure_denied: false,
         })

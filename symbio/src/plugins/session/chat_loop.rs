@@ -294,6 +294,9 @@ pub async fn run_chat_loop(
         let text = m.content.as_ref()?.to_text();
         Some((m.id.clone(), text))
     });
+    // 同一个锚点取本轮输入的 `meta`（折进的合并补充带 `meta.supplement*`）：它与 id /
+    // 正文同属一条用户消息的形状，必须一起入格（见 `TurnInput::user_meta`）。
+    let user_meta: Option<serde_json::Value> = single_message.as_ref().and_then(|m| m.meta.clone());
 
     // 本轮用户发言（**判决的输入**）。
     //
@@ -494,6 +497,32 @@ pub async fn run_chat_loop(
                                 _ => None,
                             })
                             .unwrap_or_default();
+                        // 答话**对话面节点**的身份与标记：`apply_verdict` 刚 push 的那条
+                        // （末尾一条 assistant）。取它而不是再算一遍：措辞归 `compose`
+                        // 所有，这里只搬运（同 `reply` 的取法）。`reason` /
+                        // `exclude_from_context` 从它的 `meta` 读——那条节点带
+                        // `meta.surface = "reply"`，重建据这三样复刻。
+                        let dialog = context
+                            .messages
+                            .iter()
+                            .rev()
+                            .find(|m| m.role == Some(MessageRole::Assistant))
+                            .map(|m| {
+                                let meta = m.meta.as_ref();
+                                super::turn_runner::DialogFacts {
+                                    id: m.id.clone(),
+                                    reason: meta
+                                        .and_then(|v| v.get("reason"))
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or_default()
+                                        .to_string(),
+                                    exclude_from_context: meta
+                                        .and_then(|v| v.get("exclude_from_context"))
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(false),
+                                }
+                            })
+                            .unwrap_or_default();
                         if let Err(e) = super::v2_exec::execute_final_reply_turn(
                             &context.session,
                             &ctx,
@@ -501,7 +530,10 @@ pub async fn run_chat_loop(
                             turn.abort.clone(),
                             utterance,
                             turn.input_utterance.as_ref().map(|(id, _)| id.clone()),
+                            // 用户格 `meta`（折进的合并补充带 `meta.supplement*`）。
+                            user_meta.clone(),
                             &reply,
+                            dialog,
                             // 答话轮同样要落「本轮之前那次压缩」这一格——它不进
                             // `execute_turn`，不带上就漏了（见该函数的入参文档）。
                             context.consolidated.take().as_deref(),
@@ -524,6 +556,43 @@ pub async fn run_chat_loop(
                             TurnExit::Completed,
                         )
                         .await;
+                    }
+                    // ── S2.7：`Escalate` 首响必须入格（本批新增）────────────────
+                    //
+                    // `Escalate` 的效应是 `Spoke`（不是 `Silent` / `Finish`）：本轮
+                    // **继续**进工具循环，开场白只是干活前说的一句话。轮首这里唯一
+                    // 能产出 `Spoke` 的判决就是 `Escalate`（`Report` 不在轮首产生，
+                    // 见上方注释与步骤 2d）。
+                    //
+                    // 双写期这句随整份 `messages.json` 落盘；切源（WAL 为唯一真源）
+                    // 后若不入格，重建折不出这条根级对话面节点 ⇒ t20 / t22 的
+                    // 「恰有一条对话面节点」全部落空。落格在 `execute_turn`（唯一持
+                    // 写者令牌处）——这里只把「说了什么 / 节点身份」递过去，与缺口 5
+                    // 的答话同一条分割（判定与措辞在 chat_loop，落格在 v2_exec）。
+                    if effect == VerdictEffect::Spoke {
+                        let node =
+                            context.messages.iter().rev().find(|m| {
+                                m.meta.as_ref().is_some_and(|v| v.get("surface").is_some())
+                            });
+                        if let Some(m) = node {
+                            let meta = m.meta.as_ref();
+                            turn.opening_dialog = Some(super::turn_runner::DialogFacts {
+                                id: m.id.clone(),
+                                reason: meta
+                                    .and_then(|v| v.get("reason"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or_default()
+                                    .to_string(),
+                                exclude_from_context: meta
+                                    .and_then(|v| v.get("exclude_from_context"))
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(true),
+                            });
+                            turn.opening_text = Some(match &m.content {
+                                Some(MessageContent::Text(t)) => t.clone(),
+                                _ => String::new(),
+                            });
+                        }
                     }
                 }
             }
@@ -634,24 +703,20 @@ pub async fn run_chat_loop(
             }
         };
 
-        // Turn 创建后的首个 abort 检查点：覆盖"压缩阶段中止"等 send_request
-        // 之前置位的场景。压缩失败已就地降级（不冒泡），但 abort_flag 仍为
-        // true 且 abort 帧已被压缩请求消费——若不在此拦截，execute_turn 会
-        // 发起一次多余的 LLM 请求。此处 Turn 已创建（上方 emit_streaming_start），
-        // 冒泡 Err(Aborted) → 消费循环 ABORTED 分支 → persist_failure 把本轮
-        // Turn 收尾为 `MessageStatus::Aborted` + "用户手动中止了本次回复"
-        // （错误条 + 重试入口），会话结局 `aborted`（**不是** `failed`）；
-        // 不会波及上一轮已成功的 Turn（persist_failure 按 failing_turn 子树收窄）。
-        if turn.abort.is_aborted() {
-            return finish_turn(
-                orchestrator,
-                &context,
-                &sink,
-                &turn,
-                TurnExit::Aborted(Vec::new()),
-            )
-            .await;
-        }
+        // **不要在这里拦中止**（S2.7 / ADR-052）：此前这一档在此处 `return
+        // TurnExit::Aborted(Vec::new())`——运行器于是从不落 `user.message`，中止
+        // 这一轮**一条事实都没有**（实测 e2e t7：`v2-events.wal` 不存在、投影里
+        // 看不到用户说过什么）。ADR-052 决策 1 要求「一轮的产出无论完成 / 失败 /
+        // 被中断 / 悬在等待用户，都入格」，决策 2 要求终止以**状态**入账。
+        //
+        // 检查点已**下沉**到 `turn_runner::run_with_tools` 的 1c 步：用户格已落、
+        // 第一个 LLM 请求未发，已中止则落**中止收束格**（`chat.assistant.final` +
+        // `status: "aborted"` + `terminated`）。因此：
+        //   - 压缩阶段置位的中止：`execute_turn` 进运行器后被 1c 接住，**不会**多发
+        //     一次 LLM 请求（与原意图一致）；
+        //   - 用户格与中止收束格成对入格（N3/C4 的不变量在运行器内守住）。
+        // 出口形态不变：运行器回 `aborted`，`v2_exec` 上抛 `PluginError::Aborted`，
+        // 走下方 812 分支 → `finish_turn(TurnExit::Aborted(..))`。
 
         // ── 步骤 4：LLM 调用（唯一发起处）────────────────────────────────────
         // 轮次经 v2 运行器（[`super::v2_exec`]）执行——事实原生入格、prompt 从转写出、
@@ -692,6 +757,7 @@ pub async fn run_chat_loop(
             sink: &sink,
             user_text: &user_text,
             user_node_id,
+            user_meta: user_meta.clone(),
             window_turns: context.session.context_window(),
             tools: &inputs.tools,
             resume: pending_resume.take(),
@@ -721,6 +787,10 @@ pub async fn run_chat_loop(
                 context.messages.clone(),
                 turn.last_user_facing_at,
             )),
+            // 对话面开场白（S2.7）：步骤 2b 的 `Escalate` 首响。落格在 `v2_exec`
+            // （唯一持写者令牌处），本函数只递「说了什么 / 节点身份」。
+            opening_text: turn.opening_text.as_deref(),
+            opening_dialog: turn.opening_dialog.take(),
         })
         .await
         {

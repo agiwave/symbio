@@ -613,6 +613,26 @@ async fn compress_with_snapshot_core(
             before.saturating_sub(after),
         );
         let node = e.finish(&node_id, status, &text, kind, Some(stats)).await;
+        // 成功的那一次压缩会**取代**前缀（`session.consolidated` 的载荷是压缩后的整份
+        // 消息列表，重建从它开始、它之前的事件一律不再参与）。而这条记录节点诞生在
+        // 快照事件**之前**（先 `finish` → 再寄存/落格快照）——只把它落成
+        // `message.added`，重建就会在快照那一刀上把它连同前缀一起切掉。后果是
+        // **实时面与重建面不一致**：前端此刻看得见「本次压缩已完成」，刷新（或换进程）
+        // 后这条记录凭空消失，而它的 `removed` 帧从没发过（它不在 `dropped` 里——
+        // 它是**本次压缩**自己产出的，不在被压掉的那份 `original_messages` 里）。
+        // T18 终态读回抓过这一条：实时面 `completed`（trigger=retry）的节点在
+        // 读出口一个都没有。
+        //
+        // 修法：把记录节点**补进快照那份列表**——快照承载的是「压缩后的当前历史」，
+        // 而这次压缩的记录正是这段历史的一部分（且是最新的那一条，故排在末尾）。
+        // 顺序：`keep_messages` 之后。失败节点不在快照里（它是 `dropped` 的一员，
+        // 由 removed 帧交代）——只有**成功**这条路才会走到「快照已在寄存队列里」。
+        if matches!(result, Ok(Some(_))) {
+            if let Some(consolidated) = context.consolidated.as_mut() {
+                consolidated.push(node.clone());
+            }
+            context.messages.push(node.clone());
+        }
         // 落库 + 落库回包：压缩是会话里真实发生的一步，应当留下记录。否则用户刷新后
         // 只看到"历史突然变短了"，却没有任何东西说明发生过什么。回包那一步换入
         // `finish` 帧还缺的存储权威号（§3.4）；失败只记日志——前端已收到终态。

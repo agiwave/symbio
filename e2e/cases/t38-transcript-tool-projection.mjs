@@ -42,14 +42,16 @@ import {
   addMcpServer,
   cleanupHomedir,
   runCli,
-  readFileSyncSafe,
+  startReadbackCli,
+  readSessionMessages,
+  nextPort,
+  waitFor,
   assert,
   assertEq,
   defineCase,
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
-  readMessagesJson,
   E2E_ROOT,
 } from '../helpers.mjs';
 
@@ -61,9 +63,6 @@ const ECHO_TEXT = '跨轮回显内容';
 
 /** 被调工具名（MCP 前缀 + 服务名 + 工具名，与 T26 同一口径） */
 const ECHO_TOOL = 'mcp__mockserv__echo';
-
-/** v2 事实源文件名（与 `plugins/session/paths.rs::V2_WAL_FILE` 同一常量口径） */
-const V2_WAL = 'v2-events.wal';
 
 /** 取请求体的**未转义 prompt 正文**（摊所有 message 的字符串 content）。 */
 function promptOf(body) {
@@ -90,9 +89,19 @@ export default defineCase(
       { id: 'r1-final', content: '第二答。' },
     ]).start();
 
+    const GATEWAY_PORT = nextPort();
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
+        // 转写经生产读出口读（gateway `invoke` → `vdfs/read`），入站口必须开着。
+        gateway: {
+          inbound_enabled: true,
+          inbound_protocol: 'http',
+          inbound_bind: '127.0.0.1',
+          inbound_port: GATEWAY_PORT,
+          inbound_token: '',
+          inbound_readonly: false,
+        },
         // 本用例的主题与对话面正交 ⇒ 把三个开关钉死（理由见 `DIALOG_FACE_OFF`）。
         session: { ...DIALOG_FACE_OFF },
       },
@@ -138,7 +147,8 @@ export default defineCase(
       // ⚠️ 判据在**消息层**上：验「这条内容在**哪个角色**的消息里」（ADR-048a）
       // ——`role: user` / `role: assistant` / `role: tool` 三种消息，而不是文本前缀；
       // 「把用户发言标成 assistant」这类退化因此会红。
-      // ⚠️ 形参不叫 `msgs`——本用例后面 `readMessagesJson` 的结果就叫 `msgs`。
+      // ⚠️ 只读 **LLM 请求包**里的消息——「用户如何对话就如何读」：
+      // 请求消息 = 模型真正看到的那一份（前端发什么，这里就断言什么）。
       const msgsOf = (i) => reqs[i].body.messages ?? [];
       const textsOf = (i, role) =>
         msgsOf(i)
@@ -182,37 +192,34 @@ export default defineCase(
         `当前发言在历史之外且是最后一条 user（实际末条: ${JSON.stringify(textsOf(2, 'user').at(-1))}）`,
       );
 
-      // ── 证据 ③：事实源——两轮各收束，工具格恰一格且带溯源 ──────────────────
-      const walRaw = readFileSyncSafe(join(hd.homedir, 'session', SID, V2_WAL));
-      assert(walRaw.length > 0, 'v2 事实源应存在且非空');
-      const events = walRaw.split('\n').filter(Boolean).map((l) => JSON.parse(l));
-      const opens = events.filter((e) => e.kind === 'user.message');
-      const finals = events.filter((e) => e.kind === 'chat.assistant.final');
-      const artifacts = events.filter((e) => e.kind === 'artifact.added');
-      assertEq(opens.length, 2, '两轮各一条用户格');
-      assertEq(finals.length, 2, '两轮各一条收束格');
-      assertEq(artifacts.length, 1, '轮 0 恰好一格工具产物');
-      const artifact = artifacts[0];
-      assertEq(artifact.entity, 'Artifact', '产物格实体坐标');
-      assertEq(artifact.verb, 'Asserted', '产物格动词坐标');
-      assertEq(artifact.payload.tool, ECHO_TOOL, '产物格记录被调工具名');
-      assert(
-        String(artifact.payload.text ?? '').includes(ECHO_TEXT),
-        `产物格落的是结果正文（实际: ${JSON.stringify(artifact.payload)}）`,
-      );
-      // I2：产物格溯源指向**它那一轮**的用户格（轮 0）。
-      assertEq(
-        artifact.produced_by,
-        opens.find((e) => e.turn === artifact.turn).seq,
-        '产物格溯源应指向本轮用户格（caused_by 锚点）',
-      );
-
-      // ── 转写不变量 ─────────────────────────────────────────────────────────
-      const msgs = readMessagesJson(hd.homedir, SID);
-      assertTranscriptInvariants(msgs, 'T38');
+      // ── 转写不变量（经生产读出口读回：与前端 loadMessages 同一出口）────────
+      const api = await startReadbackCli({
+        homedir: hd.homedir,
+        workdir: hd.workdir,
+        session: SID,
+        provider: PROVIDER_ID,
+        gatewayPort: GATEWAY_PORT,
+      });
+      try {
+        const msgs = await readSessionMessages(api, SID);
+        assertTranscriptInvariants(msgs, 'T38');
+        const tc = msgs.find((m) => (m.type ?? m.msg_type) === 'tool_call');
+        assert(tc, `转写里应有 tool_call 节点（实得类型: ${msgs.map((m) => m.type).join(',')}）`);
+        assert(
+          msgs.some((m) => m.role === 'tool' && m.parent_id === tc.id),
+          '工具结果必须挂在 tool_call 节点之下（有请求必有响应）',
+        );
+      } finally {
+        api.stop();
+      }
     } finally {
       llm.stop();
       cleanupHomedir(hd);
+      // 收尾必须等子进程真的退干净（与 t26 同一约定：Windows 上带活子进程退出会撞
+      // libuv 断言，表现为「断言全过、退出码 0xC0000409」）。
+      await waitFor(() => !process.getActiveResourcesInfo().includes('ProcessWrap'), {
+        what: '读回 CLI / mock-llm 子进程退出',
+      });
     }
   },
 );

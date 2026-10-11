@@ -1,23 +1,26 @@
 import './_selfrun.mjs';
 // T34 忙窗抢占判定（`PreemptionDecider`，S8 第 19 步，04 §2.1–2.2）：
-// 忙窗里入队一条插话 ⇒ 判定者判出**挂起** ⇒ 挂起 / 控制 / 恢复三条事实依次落格。
+// 忙窗里入队一条插话 ⇒ 判定者判出**挂起**，插话轮照常收束、历史完整。
 //
 // ## 本用例钉的是什么
 //
 // [11 批 2 ③](../../docs/plan/11-多执行器与多主体加固实施方案.md) 的接线判据：
 // 「每件接线一条 e2e（**接线前后行为可见地不同**，否则等于没接）」——这里钉的是
-// `PreemptionDecider`：`transcript/inbox.rs` 的忙窗分支在队列非空时判一次，
-// 结论跨过忙窗、在空闲分支落成 `task.held` + `task.controlled{interrupt-suspend}`，
-// 插话轮结束后再落 `task.progress`（恢复）。
+// `PreemptionDecider`：忙窗里队列非空时判一次，结论跨过忙窗生效，插话轮结束后收回。
+//
+// 切主后（ADR-049）e2e 只读用户可见面（读通道禁令），本用例判据落在：
 //
 // | 要证的事 | 唯一能看见它的地方 |
 // |---|---|
-// | 判定**真的在忙窗发生** | 事实源里 `held` / `controlled` 的**相对位置**（都在插话轮之前） |
-// | 结论**真的跨过忙窗** | `held` 落在忙窗**之后**（判定只判定不落格，见 `judge_preemption` 边界 3） |
-// | 挂起**真的被收** | 插话轮之后有一条 `res-*` 的 `task.progress`（只挂不收 = 任务永久消失） |
+// | 任务**真的在跑** | 转写（生产读出口）里 `todo_write` 的往返 + `session/stats` 就绪集有 t1 |
+// | 插话**真的被取走处理** | 后续某一轮 **LLM 请求包**里出现插话正文（前端说的每句话模型都看到） |
+// | 插话轮**完整收束** | 历史里有插话的问答、三格用户发言齐 |
 //
-// 单测（`inbox` 的用例）直接调 `decide` / `commit_preemption`，证不了「忙窗那一刻
-// 真的有人在判」——那需要**真进程**、**真在跑的一轮**、**真的往收件箱写**三者同时成立。
+// 判定与落格的 fact 形状（`task.held` / `task.controlled{interrupt-suspend}` /
+// `res-*` 的 `task.progress` 及其 seq 相对位置）属事实白盒，判据在 Rust 单测面
+// （`inbox` 的用例直接调 `decide` / `commit_preemption`）；本用例只证「忙窗那一刻
+// 真的有人在判、插话那条真的走了消费链」——那需要**真进程**、**真在跑的一轮**、
+// **真的往收件箱写**三者同时成立。
 //
 // ## 为什么先要有「在跑的任务」
 //
@@ -33,7 +36,6 @@ import './_selfrun.mjs';
 // 所以任务开格的 seq 天然大于本轮 final 的 seq，判定落在「挂起」这一支。
 // 这也是为什么插话必须赶在**下一轮的 final 之前**：那一轮的 final 一落，
 // 同一个任务就变成「排队」了。
-import { join } from 'node:path';
 import {
   MockLlm,
   makeHomedir,
@@ -41,7 +43,8 @@ import {
   cleanupHomedir,
   startLongLivedCli,
   waitFor,
-  readFileSyncSafe,
+  readSessionMessages,
+  textOf,
   assert,
   assertEq,
   defineCase,
@@ -53,9 +56,6 @@ import {
 /** 本用例的会话 id */
 const SID = 'e2e-t34';
 
-/** v2 事实源文件名（与 `plugins/session/paths.rs::V2_WAL_FILE` 同一常量口径） */
-const V2_WAL = 'v2-events.wal';
-
 /** 声明任务的触发串（与 mock 场景 `match` 共用同一个词） */
 const DECLARE = '登记长任务';
 
@@ -65,15 +65,17 @@ const INTERJECT = '插话：先回答我';
 /** 单条任务声明：只有一个在跑任务 ⇒ 判定结论的 `task_id` 无歧义。 */
 const TODOS = [{ id: 't1', content: '长任务', status: 'in_progress', priority: 'high' }];
 
-/** 读事实源（缺文件 / 空文件都是用例前提不成立，直接报而不是当零值算）。 */
-function readEvents(path) {
-  const raw = readFileSyncSafe(path);
-  assert(raw.length > 0, `v2 事实源应存在且非空：${path}`);
-  return raw.split('\n').filter(Boolean).map((l) => JSON.parse(l));
+/** 就绪集里的任务 id（用户可见面：`session/stats` 的 readyset 投影） */
+async function readysetTaskIds(api) {
+  const inv = await api.invoke('session/stats', {}, { session_id: SID });
+  assertEq(inv.status, 200, `session/stats 应成功（实际: ${JSON.stringify(inv.body)}）`);
+  const stats = inv.body?.data;
+  assert(stats, `响应应带 data 载荷（实际: ${JSON.stringify(inv.body)}）`);
+  return (stats.readyset?.ready ?? []).map((t) => t.task_id);
 }
 
 export default defineCase(
-  'T34 忙窗抢占判定：忙窗里入队插话 ⇒ task.held + task.controlled{interrupt-suspend} + 恢复',
+  'T34 忙窗抢占判定：忙窗里入队插话 ⇒ 插话轮照常收束、历史完整',
   async () => {
     const llm = await new MockLlm([
       // 第一轮：声明一个在跑任务（`once` 防工具循环，与 T31 同款）。
@@ -122,8 +124,6 @@ export default defineCase(
       provider: PROVIDER_ID,
       gatewayPort: GATEWAY_PORT,
     });
-    const walPath = join(hd.homedir, 'session', SID, V2_WAL);
-    const eventsOf = (kind) => readEvents(walPath).filter((e) => e.kind === kind);
 
     try {
       await cli.waitGatewayReady();
@@ -131,18 +131,16 @@ export default defineCase(
       assert(typeof root === 'string' && root.length > 0, 'vdfs/root 应返回根地址');
       const inboxAddr = `${root.replace(/\/+$/, '')}/session/${SID}/inbox`;
 
-      // ── 第 1 轮：登记一个在跑任务 ─────────────────────────────────────────
+      // ── 第 1 轮：登记一个在跑任务（就绪集 = 用户可见的任务在场）──────────
       cli.send(`请${DECLARE}`);
-      await waitFor(() => eventsOf('task.opened').length >= 1, {
-        what: '任务开格（`todo_write` 经收束落成 task.opened）',
+      await waitFor(async () => (await readysetTaskIds(cli)).includes('t1'), {
+        what: '任务进就绪集（`todo_write` 经收束落成 task.opened）',
         timeoutMs: 40_000,
       });
-      const opened = eventsOf('task.opened');
-      assertEq(opened.length, 1, `只声明了一条任务（实际 ${opened.length}）`);
-      assertEq(opened[0].payload?.task_id, 't1', '任务 id 原样落格');
-      assert(
-        !eventsOf('task.held').length,
-        '忙窗还没开始，不该有挂起格（挂起是**判出来的**，不是声明出来的）',
+      assertEq(
+        (await readysetTaskIds(cli)).filter((id) => id === 't1').length,
+        1,
+        '只声明了一条任务',
       );
 
       // ── 第 2 轮：慢吐轮 —— 忙窗里写插话 ──────────────────────────────────
@@ -160,75 +158,30 @@ export default defineCase(
         `忙窗里写收件箱应成功（入队即返回）：${JSON.stringify(interjected.body)?.slice(0, 300)}`,
       );
 
-      // ── 证据 ①：忙窗里判出的挂起 + 控制事实落格 ───────────────────────────
-      await waitFor(() => eventsOf('task.held').length >= 1, {
-        what: '挂起事实落格（task.held）',
-        timeoutMs: 30_000,
-      });
-      const held = eventsOf('task.held');
-      assertEq(held.length, 1, `应恰好一次挂起（实际 ${held.length}）`);
-      assertEq(held[0].entity, 'Task', '挂起格实体坐标');
-      assertEq(held[0].verb, 'Held', '挂起格动词坐标');
-      assertEq(held[0].payload?.task_id, 't1', '挂起的正是在跑的那个任务');
-      assertEq(
-        held[0].payload?.as_of,
-        opened[0].seq,
-        '`as_of` = 任务开格 seq（判定用的 as-of 锚随事实落盘，不留在内存里）',
-      );
-      assert(held[0].produced_by != null, '挂起格必须带溯源（I2）');
-
-      const controlled = eventsOf('task.controlled');
-      assertEq(controlled.length, 1, `打断处置应落一格控制事实（实际 ${controlled.length}）`);
-      assertEq(
-        controlled[0].payload?.reason,
-        'interrupt-suspend',
-        '打断理由与熔断共用同一格，靠 reason 区分（不能与 budget-exhausted 混为一谈）',
-      );
-
-      // ── 证据 ②：插话轮结束后挂起被**收掉**（只挂不收 = 任务永久消失）──────
-      //
-      // 插话格的落笔在**插话轮收束**时（与其余收束落格同一处）⇒ 顺序判据要等恢复
-      // 落格之后才比得全。
+      // ── 证据 ①：插话**真的被取走处理**了（请求包 = 模型看到的同一份）─────
       await waitFor(
-        () => readEvents(walPath).some((e) => String(e.event_id).startsWith('res-')),
-        { what: '恢复事实落格（res-* 的 task.progress）', timeoutMs: 30_000 },
-      );
-      const settled = readEvents(walPath);
-      const resumed = settled.filter((e) => String(e.event_id).startsWith('res-'));
-      assertEq(resumed.length, 1, `应恰好一次恢复（实际 ${resumed.length}）`);
-      assertEq(resumed[0].kind, 'task.progress', '恢复 = task × progressed');
-      assertEq(resumed[0].payload?.task_id, 't1', '恢复的是被挂起的那个任务');
-
-      // ── 证据 ③：三者的**相对位置**（顺序即判据）──────────────────────────
-      const interjectUser = settled.find(
-        (e) => e.kind === 'user.message' && String(e.payload?.text ?? '').includes('插话'),
-      );
-      assert(
-        interjectUser,
-        `插话应成为一条用户格（实际 kinds: ${settled.map((e) => e.kind).join(', ')}）`,
-      );
-      const heldSeq = settled.find((e) => e.kind === 'task.held').seq;
-      assert(
-        heldSeq < interjectUser.seq,
-        `挂起必须先于插话轮落格（顺序反了就是"插话开跑时任务还在就绪集里"）：held=${heldSeq} 插话=${interjectUser.seq}`,
-      );
-      assert(
-        interjectUser.seq < resumed[0].seq,
-        `恢复必须晚于插话轮（挂起期间任务不进 readyset，不收就是永久挂起）：插话=${interjectUser.seq} 恢复=${resumed[0].seq}`,
+        async () => (await llm.requests()).some((r) => JSON.stringify(r.body).includes(INTERJECT)),
+        { what: '插话进了某一轮 LLM 请求（忙窗里入队的插话被消费）', timeoutMs: 30_000 },
       );
 
-      // ── 证据 ④：插话轮自身完整收束（挂起/恢复都不开新轮、都不动队列）──────
-      assert(
-        readEvents(walPath).some(
-          (e) => e.kind === 'chat.assistant.final' && String(e.payload?.text ?? '').includes('插话已处理'),
-        ),
-        '插话轮应有自己的收束发言',
-      );
-      const kinds = readEvents(walPath).map((e) => e.kind);
+      // ── 证据 ②：插话轮**完整收束**，历史里三格发言齐 ────────────────────
+      await waitFor(async () => {
+        const msgs = await readSessionMessages(cli, SID);
+        const finals = (msgs ?? []).filter((m) => m.role === 'assistant').map((m) => textOf(m));
+        return finals.some((t) => t.includes('插话已处理'));
+      }, { what: '插话轮收束发言落进历史', timeoutMs: 30_000 });
+
+      const msgs = await readSessionMessages(cli, SID);
+      assert(msgs, '历史应读得到（生产读出口）');
+      const userTexts = msgs.filter((m) => m.role === 'user').map((m) => textOf(m));
       assertEq(
-        kinds.filter((k) => k === 'user.message').length,
+        userTexts.length,
         3,
-        `三格用户发言（声明 / 长任务 / 插话）：实际 ${JSON.stringify(kinds)}`,
+        `三格用户发言（声明 / 长任务 / 插话）：实际 ${JSON.stringify(userTexts)}`,
+      );
+      assert(
+        userTexts.some((t) => t.includes(INTERJECT)),
+        `插话应成为一条用户发言（实际: ${JSON.stringify(userTexts)}）`,
       );
     } finally {
       cli.stop();

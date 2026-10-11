@@ -13,7 +13,7 @@ import './_selfrun.mjs';
 // |---|---|
 // | 工具**真的执行**了 | mock-mcp 的 `--record`（进程外证据，不看后端自述） |
 // | 结果**真的回了模型** | mock-llm 的 `/_requests` 回读**第二次请求体** |
-// | 事实**真的入了格** | `<会话目录>/v2-events.wal` 的 `artifact.added` + 溯源 |
+// | 转写里 tool_call 与结果**成对** | 生产读出口 `vdfs/read` 会话叶子（与前端 `loadMessages` 同一出口） |
 //
 // 单测（`v2_exec.test.rs::tool_round_lands_artifact_and_feeds_next_request`）用假 provider
 // 覆盖了同一形状，但它证不了"真实 provider + 真实 MCP 工具 + 真实落盘"这条链——
@@ -48,15 +48,17 @@ import {
   addMcpServer,
   cleanupHomedir,
   runCli,
-  readMessagesJson,
   readFileSyncSafe,
+  startReadbackCli,
+  readSessionMessages,
+  nextPort,
   assert,
   assertEq,
   defineCase,
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
-  turnFacts,
+  waitFor,
 } from '../helpers.mjs';
 
 /** 本用例的会话 id */
@@ -65,11 +67,8 @@ const SID = 'e2e-t26';
 /** mock-mcp 回显的内容标记：它必须从工具结果一路走到第二次请求体 */
 const ECHO_TEXT = 'mock 回显内容';
 
-/** v2 事实源文件名（与 `plugins/session/v2_exec.rs` 同一常量口径） */
-const V2_WAL = 'v2-events.wal';
-
 export default defineCase(
-  'T26 工具轮 v2 化：工具调用真的执行 → 结果回灌下一次请求 → artifact.added 带溯源',
+  'T26 工具轮 v2 化：工具调用真的执行 → 结果回灌下一次请求 → 转写里 tool_call 与结果成对',
   async () => {
     const llm = await new MockLlm([
       // 第一次请求：模型请求一个工具（带一段中途正文，逼出「定格并切节点」路径）。
@@ -89,9 +88,19 @@ export default defineCase(
       { id: 'after-echo', content: '工具调用完成，回显成功。' },
     ]).start();
 
+    const GATEWAY_PORT = nextPort();
     const hd = makeHomedir({
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
+        // 转写经生产读出口读（gateway `invoke` → `vdfs/read`），入站口必须开着。
+        gateway: {
+          inbound_enabled: true,
+          inbound_protocol: 'http',
+          inbound_bind: '127.0.0.1',
+          inbound_port: GATEWAY_PORT,
+          inbound_token: '',
+          inbound_readonly: false,
+        },
         // 本用例的主题与对话面正交 ⇒ 把三个开关钉死（理由见 `DIALOG_FACE_OFF`）。
         session: { ...DIALOG_FACE_OFF },
       },
@@ -167,53 +176,34 @@ export default defineCase(
         '第一次请求不该出现 role=tool 消息（结果尚未产生）',
       );
 
-      // ── 证据 ③：事实入了格（v2 WAL 的 artifact.added + 溯源）──────────────
-      const walRaw = readFileSyncSafe(join(hd.homedir, 'session', SID, V2_WAL));
-      assert(walRaw.length > 0, `v2 事实源应存在且非空：${join(hd.homedir, 'session', SID, V2_WAL)}`);
-      const events = walRaw.split('\n').filter(Boolean).map((l) => JSON.parse(l));
-      const kinds = events.map((e) => e.kind).join(', ');
-      // 只数**轮次事实**：网格里同时住着派生副作用（`memory.encoded`，S5 步 11），
-      // 按总数断言会把两类混在一起（见 `helpers.mjs::turnFacts`）。
-      const facts = turnFacts(events);
-      assertEq(
-        facts.length,
-        3,
-        `一轮应恰好 3 格轮次事实（用户 + 产物 + final），实得 ${facts.length}: ${kinds}`,
-      );
-
-      const user = events.find((e) => e.kind === 'user.message');
-      const artifact = events.find((e) => e.kind === 'artifact.added');
-      const final = events.find((e) => e.kind === 'chat.assistant.final');
-      assert(user, `网格缺用户格（实得: ${kinds}）`);
-      assert(artifact, `网格缺产物格 artifact.added（实得: ${kinds}）`);
-      assert(final, `网格缺收束格 chat.assistant.final（实得: ${kinds}）`);
-
-      // 产物格的坐标（`artifact × asserted`）与载荷形状。
-      assertEq(artifact.entity, 'Artifact', '产物格实体坐标');
-      assertEq(artifact.verb, 'Asserted', '产物格动词坐标');
-      assertEq(artifact.payload.tool, 'mcp__mockserv__echo', '产物格记录被调工具名');
-      assert(
-        String(artifact.payload.text ?? '').includes(ECHO_TEXT),
-        `产物格落的是结果正文（实际: ${JSON.stringify(artifact.payload)}）`,
-      );
-      // I2：断言类事件必带溯源；产物格溯源指向**本轮用户格**。
-      assert(artifact.produced_by != null, '产物格必须带溯源（I2）');
-      assertEq(artifact.produced_by, user.seq, '产物格溯源应指向本轮用户格（caused_by 锚点）');
-      assert(final.produced_by != null, '收束格必须带溯源（I2）');
-      assertEq(final.payload.text, '工具调用完成，回显成功。', 'final 落的是收尾轮正文');
-
-      // ── 转写不变量：tool_call 与结果成对（v2 侧补建的两类节点）────────────
-      const msgs = readMessagesJson(hd.homedir, SID);
-      assertTranscriptInvariants(msgs, 'T26');
-      const tc = msgs.find((m) => m.type === 'tool_call');
-      assert(tc, `应有 tool_call 节点（实得类型: ${msgs.map((m) => m.type).join(',')}）`);
-      assert(
-        msgs.some((m) => m.role === 'tool' && m.parent_id === tc.id),
-        '工具结果必须挂在 tool_call 节点之下',
-      );
+      // ── 转写不变量：tool_call 与结果成对（经生产读出口读回）────────────────
+      const api = await startReadbackCli({
+        homedir: hd.homedir,
+        workdir: hd.workdir,
+        session: SID,
+        provider: PROVIDER_ID,
+        gatewayPort: GATEWAY_PORT,
+      });
+      try {
+        const msgs = await readSessionMessages(api, SID);
+        assertTranscriptInvariants(msgs, 'T26');
+        const tc = msgs.find((m) => m.type === 'tool_call');
+        assert(tc, `应有 tool_call 节点（实得类型: ${msgs.map((m) => m.type).join(',')}）`);
+        assert(
+          msgs.some((m) => m.role === 'tool' && m.parent_id === tc.id),
+          '工具结果必须挂在 tool_call 节点之下',
+        );
+      } finally {
+        api.stop();
+      }
     } finally {
       llm.stop();
       cleanupHomedir(hd);
+      // 收尾必须等子进程真的退干净（与 t4 同一约定：Windows 上带活子进程退出会撞
+      // libuv 断言，表现为「断言全过、退出码 0xC0000409」）。
+      await waitFor(() => !process.getActiveResourcesInfo().includes('ProcessWrap'), {
+        what: '长驻 CLI / mock-llm 子进程退出',
+      });
     }
   },
 );

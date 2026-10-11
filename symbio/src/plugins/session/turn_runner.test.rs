@@ -53,7 +53,13 @@ impl TurnRunner {
                 final_reply: None,
                 turn_root_id: String::new(),
                 user_node_id: None,
+                user_meta: None,
+                dialog: None,
+                opening_text: None,
+                opening_dialog: None,
                 nodes: None,
+                // 无中止语义的路径：`None` ⇒ 1c 的检查是空操作。
+                abort: None,
             },
             std::sync::Arc::new(SilentDeltas),
         )
@@ -498,7 +504,12 @@ mod turn_runner_tests {
                     final_reply: None,
                     turn_root_id: String::new(),
                     user_node_id: None,
+                    user_meta: None,
+                    dialog: None,
+                    opening_text: None,
+                    opening_dialog: None,
                     nodes: None,
+                    abort: None,
                 },
                 got.clone() as Arc<dyn DeltaSink>,
             )
@@ -543,7 +554,12 @@ mod turn_runner_tests {
                     final_reply: None,
                     turn_root_id: String::new(),
                     user_node_id: None,
+                    user_meta: None,
+                    dialog: None,
+                    opening_text: None,
+                    opening_dialog: None,
                     nodes: None,
+                    abort: None,
                 },
                 got2.clone() as Arc<dyn DeltaSink>,
             )
@@ -570,7 +586,14 @@ mod turn_runner_tests {
             final_reply: None,
             turn_root_id: "r-1".into(),
             user_node_id: None,
+            user_meta: None,
+            dialog: None,
+            opening_text: None,
+            opening_dialog: None,
             nodes: Some(nodes),
+            // 无中止语义：本夹具走 `AdapterError::Aborted`（模型中途返回），
+            // 不测 1c 的闸门空隙。
+            abort: None,
         }
     }
 
@@ -810,7 +833,12 @@ mod turn_runner_tests {
                     final_reply: None,
                     turn_root_id: String::new(),
                     user_node_id: None,
+                    user_meta: None,
+                    dialog: None,
+                    opening_text: None,
+                    opening_dialog: None,
                     nodes: None,
+                    abort: None,
                 },
                 std::sync::Arc::new(SilentDeltas),
                 &[],
@@ -854,7 +882,12 @@ mod turn_runner_tests {
                     final_reply: None,
                     turn_root_id: String::new(),
                     user_node_id: None,
+                    user_meta: None,
+                    dialog: None,
+                    opening_text: None,
+                    opening_dialog: None,
                     nodes: None,
+                    abort: None,
                 },
                 std::sync::Arc::new(SilentDeltas),
                 &[],
@@ -1236,6 +1269,18 @@ mod tool_round_tests {
                     text: "文件内容：hello".into(),
                     ok: true,
                     needs_user_action: self.pending,
+                    // 等待用户时的卡片载荷与原因码：假分发方建的是 `user_prompt` 节点，
+                    // 这里给一份最小可辨形状（真值由 `v2_tools` 从节点 `meta` 取）。
+                    prompt: if self.pending {
+                        Some(serde_json::json!({ "question": "选哪个" }))
+                    } else {
+                        None
+                    },
+                    failure_kind: if self.pending {
+                        "needs_interaction".into()
+                    } else {
+                        String::new()
+                    },
                     // 节点身份与参数随结果入格（载荷补全）；假分发方不建结果节点
                     // （`result_id` 空串 = 无结果子节点）。
                     wire_id: tc.wire_id.clone().unwrap_or_default(),
@@ -1267,7 +1312,12 @@ mod tool_round_tests {
             final_reply: None,
             turn_root_id: String::new(),
             user_node_id: None,
+            user_meta: None,
+            dialog: None,
+            opening_text: None,
+            opening_dialog: None,
             nodes: None,
+            abort: None,
         }
     }
 
@@ -1886,13 +1936,23 @@ mod tool_round_tests {
                             parse_error: None,
                         },
                         text: "文件内容：hello（已批准）".into(),
+                        // 单测不验节点身份（那条判据在 e2e t27）：留空 ⇒ 走回落合成，
+                        // 与接线前同形。
+                        call_id: None,
+                        turn_id: None,
+                        result_id: None,
                     }),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
                     final_reply: None,
                     turn_root_id: String::new(),
                     user_node_id: None,
+                    user_meta: None,
+                    dialog: None,
+                    opening_text: None,
+                    opening_dialog: None,
                     nodes: None,
+                    abort: None,
                 },
                 Arc::new(SilentDeltas),
                 &tools(),

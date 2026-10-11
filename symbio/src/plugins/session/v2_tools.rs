@@ -250,6 +250,16 @@ impl DispatchPort for SessionDispatchPort {
                         .unwrap_or(true),
                     needs_user_action: m.msg_type == Some(MessageType::UserPrompt)
                         && m.status == Some(MessageStatus::WaitingUserAction),
+                    // 卡片载荷与原因码：随事实入格，恢复（`resume`）据它复现那张卡。
+                    // 只有等待用户的结果节点才带（其余为 `None` / 空串）。
+                    prompt: m.meta.as_ref().and_then(|meta| meta.get("prompt")).cloned(),
+                    failure_kind: m
+                        .meta
+                        .as_ref()
+                        .and_then(|meta| meta.get("failure_kind"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
                     wire_id: call_node
                         .and_then(|n| n.tool_call_id.clone())
                         .unwrap_or_default(),

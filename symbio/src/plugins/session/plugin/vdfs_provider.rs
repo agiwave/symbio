@@ -178,7 +178,7 @@ impl SessionPlugin {
                 Ok(VdfsResponse::Read({
                     // 双源对账（轨 S 第一步）：与 transcript_of 走同一个入口，
                     // 口径只有一份（实际算法在 v2_reconcile::reconcile）。
-                    self.reconcile_sources(id, &session, &live).await;
+                    self.reconcile_sources(id).await;
                     // 与转写列表取**同一份**消息集合（含「缓存不在 ⇒ WAL 重建」那一步），
                     // 否则叶子与列表会在缓存缺失时分叉：列表有历史、叶子空。
                     let mut view = session;
@@ -764,7 +764,7 @@ impl SessionPlugin {
                 Ok(VdfsResponse::Read({
                     // 双源对账（轨 S 第一步）：与 transcript_of 走同一个入口，
                     // 口径只有一份（实际算法在 v2_reconcile::reconcile）。
-                    self.reconcile_sources(id, &session, &live).await;
+                    self.reconcile_sources(id).await;
                     session_content(&session, live, id)?
                 }))
             }
@@ -935,7 +935,7 @@ impl SessionPlugin {
         //
         // 返回值一字不改——不一致时的处置是出声 + 落一条 `session.reconciled`
         // 事实，绝不是改读哪一份（那是 S2–S4 的事）。
-        self.reconcile_sources(id, &session, &live).await;
+        self.reconcile_sources(id).await;
         // 落库转写：`messages.json` 缓存优先，缓存不在 ⇒ 从 WAL **重建**（见下）。
         let stored = self.stored_messages_of(id, session.messages).await;
         Ok(ordered(overlay_live(stored, live)))
@@ -989,27 +989,22 @@ impl SessionPlugin {
     ///
     /// **入口只有这一个**，`transcript_of` 与会话叶子（`session_content`）都经它：
     /// 那两处是同一份数据的两个地址，对账口径各写一份就会对出不同的结论，而
-    /// "不一致"必须有唯一答案。
+    /// "不一致必须有唯一答案。
     ///
-    /// 在途消息**参与**对账：流式期间 `persist_messages` 还没落盘，而 WAL 里已有
-    /// 开轮格——拿落库那一份直接比会得出"WAL 多一条"的**稳定误报**（正常时序差，
-    /// 不是缺陷）。故先按本方法调用方的同一种组合还原读侧真正给出的那一份。
+    /// 两个源都必须**从存储读**，不能拿调用方手里的读侧结果去比：切源后读侧已是
+    /// WAL 重建（`load_session` 走 WAL），再和 WAL 投影比就是"真源跟真源比"——
+    /// 口径差异会变成**稳定误报**，每次读都落一条无溯源的 `session.reconciled`。
+    /// 因此 legacy 侧（`messages.json`）的读取收进了 `v2_reconcile::reconcile`。
     ///
     /// 零行为变更：本方法不返回任何影响读路径的值，只可能出声 + 落一条
     /// `session.reconciled` 事件；两者失败一律静默（对账的失败形态必须是
     /// "少一条诊断"，不能是"会话读不出来"）。
-    async fn reconcile_sources(
-        &self,
-        session_id: &str,
-        session: &super::super::types::Session,
-        live: &[cm::ChatMessage],
-    ) {
+    async fn reconcile_sources(&self, session_id: &str) {
         let dir = super::super::paths::session_dir(&self.storage_dir(), session_id);
-        let merged = ordered(overlay_live(session.messages.clone(), live.to_vec()));
-        let r = super::super::v2_reconcile::reconcile(&dir, &merged);
+        let r = super::super::v2_reconcile::reconcile(&dir);
 
         if r.wal_missing || r.is_consistent() {
-            // WAL 不在不是不一致（还没跑过任何一轮）
+            // 任一侧不在（含切源后 messages.json 停写）都不是不一致
             return;
         }
         // 出声：不静默是本仓对"静默失效"的一贯处置（八个缺口的共同教训）

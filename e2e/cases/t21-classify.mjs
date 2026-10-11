@@ -47,7 +47,7 @@ import {
   makeHomedir,
   cleanupHomedir,
   startLongLivedCli,
-  readMessagesJson,
+  readSessionMessages,
   nextPort,
   waitFor,
   assert,
@@ -150,9 +150,9 @@ export default defineCase(
       assertEq(w.status, 200, `写收件箱 ${sid}（${JSON.stringify(w.body)?.slice(0, 300)}）`);
     };
 
-    /** 等该会话的消息数达到 n（`readMessagesJson` 落盘判据） */
-    const waitMessages = (sid, n, what) =>
-      waitFor(() => (readMessagesJson(hd.homedir, sid) ?? []).length >= n, {
+    /** 等该会话的消息数达到 n（读出口判据：`vdfs/read` 会话叶子，与前端同一条路） */
+    const waitMessages = (c, sid, n, what) =>
+      waitFor(async () => ((await readSessionMessages(c, sid)) ?? []).length >= n, {
         what,
         timeoutMs: 40_000,
       });
@@ -161,16 +161,16 @@ export default defineCase(
      * 等一条**注定不产生任何 LLM 请求**的轮次收尾。
      *
      * 判据是"输入被消费"：收件箱条目被抽干后写入的 user 消息会落库
-     * （`readMessagesJson` 能看到它），而本轮没有后续节点。等它出现再断言请求数，
+     * （读出口看得到它），而本轮没有后续节点。等它出现再断言请求数，
      * 断言才有意义——否则可能在会话还没开始跑的时候就读到一个空请求表。
      */
-    const waitTurnConsumed = (sid) => waitMessages(sid, 1, `${sid} 的输入被消费并落库`);
+    const waitTurnConsumed = (c, sid) => waitMessages(c, sid, 1, `${sid} 的输入被消费并落库`);
 
     try {
       // ── A 规则短路：「谢谢」⇒ 判决在规则表里出结果，零 LLM 请求 ──
       let base = await reqCount();
       await send(SIDS.rule, '谢谢');
-      await waitTurnConsumed(SIDS.rule);
+      await waitTurnConsumed(cli, SIDS.rule);
       // 轮次收尾与"请求已发出"之间没有顺序保证，因此这里必须**等一个确定的量**：
       // 等到该会话有输入落库之后，再给分类请求留出的窗口若真存在，它必然已经发出。
       await new Promise((r) => setTimeout(r, 800));
@@ -179,7 +179,7 @@ export default defineCase(
         0,
         '规则短路必须零 LLM 请求（问候 / 致谢这类输入不该付一次分类往返）',
       );
-      const ruleMsgs = readMessagesJson(hd.homedir, SIDS.rule);
+      const ruleMsgs = await readSessionMessages(cli, SIDS.rule);
       assertTranscriptInvariants(ruleMsgs, 'T21-A');
       assert(
         !ruleMsgs.some((m) => m.type === 'tool_call'),
@@ -193,8 +193,8 @@ export default defineCase(
         what: 'B 线出现分类请求',
         timeoutMs: 40_000,
       });
-      await waitMessages(SIDS.classify, 1, 'B 线的输入落库');
-      const clsMsgs = readMessagesJson(hd.homedir, SIDS.classify);
+      await waitMessages(cli, SIDS.classify, 1, 'B 线的输入落库');
+      const clsMsgs = await readSessionMessages(cli, SIDS.classify);
       assertTranscriptInvariants(clsMsgs, 'T21-B');
       assert(
         !clsMsgs.some((m) => m.type === 'tool_call'),
@@ -230,15 +230,15 @@ export default defineCase(
       // ── C 需要干活：「读一下 README」⇒ Escalate ⇒ 工具真的跑 ──
       base = await reqCount();
       await send(SIDS.work, '读一下 README');
-      await waitFor(() => (readMessagesJson(hd.homedir, SIDS.work) ?? []).some((m) => m.type === 'tool_call'), {
+      await waitFor(async () => ((await readSessionMessages(cli, SIDS.work)) ?? []).some((m) => m.type === 'tool_call'), {
         what: 'C 线出现工具调用节点',
         timeoutMs: 40_000,
       });
-      await waitFor(() => (readMessagesJson(hd.homedir, SIDS.work) ?? []).some((m) => m.role === 'tool'), {
+      await waitFor(async () => ((await readSessionMessages(cli, SIDS.work)) ?? []).some((m) => m.role === 'tool'), {
         what: 'C 线工具结果落库',
         timeoutMs: 40_000,
       });
-      const workMsgs = readMessagesJson(hd.homedir, SIDS.work);
+      const workMsgs = await readSessionMessages(cli, SIDS.work);
       assertTranscriptInvariants(workMsgs, 'T21-C');
       assert(
         (await reqCount()) - base >= 2,
@@ -352,7 +352,7 @@ export default defineCase(
           what: 'E 线（卸载判决插件）出现 LLM 请求',
           timeoutMs: 40_000,
         });
-        const unmMsgs = readMessagesJson(hdUn.homedir, SIDS.unmounted) ?? [];
+        const unmMsgs = (await readSessionMessages(cli2, SIDS.unmounted)) ?? [];
         assertTranscriptInvariants(unmMsgs, 'T21-E');
       } finally {
         cli2.stop();
