@@ -45,9 +45,9 @@ const ARCH = `
 | \`principal\` | \`*\`（身份是数据，不判取值） | — | 身份 |
 `
 
-// 02 的七张表：三张定义（§2 维度 / §3 轴 / §3.1 天梯）+ 一张名册（§6.1）
-// + 三张声明（§2 条数列、§5 说法、§6.2 空格、§7 社交）。声明与名册在这里刻意自洽——
-// 自洽与否由 verify 程序判，生成器只管读得出读不出。
+// 02 的九张表：三张定义（§2 维度 / §3 轴+极性 / §3.1 刻度 / §3.2 天梯 / §3.3 共线）
+// + 名册与类型闭集（§6.1）+ 四张声明（§2 条数列、§5 说法、§6.2 空格、§7 社交、§3.3 共线登记）。
+// 声明与名册在这里刻意自洽——自洽与否由 verify 程序判，生成器只管读得出读不出。
 const FRAME = `
 ## 2. 横向：五维
 
@@ -58,19 +58,35 @@ const FRAME = `
 
 ## 3. 纵向：五轴
 
-| 轴 | 低阶 | 高阶 |
-|---|---|---|
-| **主动性** | 只在被要求时行动 | 自己发起 |
-| **时域跨度** | 单轮、当下 | 跨会话 |
-| **抽象层级** | 具体指令 | 归纳规则 |
+| 轴 | 低阶 | 高阶 | 要求的性质 | 禁止的性质 |
+|---|---|---|---|---|
+| **主动性** | 只在被要求时行动 | 自己发起 | \`unprompted\` | \`prompt_only\` |
+| **时域跨度** | 单轮、当下 | 跨会话 | \`cross_session\` | \`turn_local\` |
+| **抽象层级** | 具体指令 | 归纳规则 | \`generalize\` | \`literal_only\` |
 
-### 3.1 天梯 T1–T3 = 五轴的递进
+### 3.1 五轴的刻度
 
-| 级 | 名称 | 提升的轴 |
-|---|---|---|
-| T1 | 能对话 | 抽象层级 |
-| T2 | 能干活 | 主动性 |
-| T3 | 能记住 | 时域跨度 |
+| 轴 | L1 | L2 | L3 |
+|---|---|---|---|
+| **主动性** | 被要求才动 | 规则内触发 | 主动提出 |
+| **时域跨度** | 单轮内 | 单会话内 | 跨会话 |
+| **抽象层级** | 逐字执行 | 按意图归纳 | 抽象出规则 |
+
+### 3.2 天梯 T1–T3 = 五轴的递进
+
+| 级 | 名称 | 核心能力 | 工具层级 |
+|---|---|---|:-:|
+| T1 | 能对话 | 多轮对话 | L1 |
+| T2 | 能干活 | 工具接入 | L1–L2 |
+| T3 | 能记住 | 情景记忆 | L2 |
+
+### 3.3 轴与轴之间：共线的上限与登记
+
+**超限上限 = 2**（3 阶的一半）。
+
+| 轴对 | 共同抬起的阶数（算出） | 为什么接受这条共线 |
+|---|:-:|---|
+| 时域跨度 × 抽象层级 | 3 | 记忆类能力同时抬高两者，属同一件事的两面 |
 
 ## 5. 伪高阶识别
 
@@ -83,18 +99,23 @@ const FRAME = `
 
 ### 6.1 能力名册
 
-| 能力 | 维 | 轴 | 天梯 |
-|---|---|---|:-:|
-| 多轮对话 | 知 | 抽象层级 | T1 |
-| 情景记忆 | 知 | 时域跨度 | T3 |
-| 工具接入 | 行 | 主动性 | T2 |
-| 对等协商 | 行 | 抽象层级 | T2 |
+| 类型 | 它管什么 |
+|---|---|
+| **认知** | 模型、记忆、推理本身 |
+| **工程** | 可靠性、时延、容量 |
+
+| 能力 | 维 | 轴 | 天梯 | 等级 | 类型 | 落点 |
+|---|---|---|:-:|:-:|:-:|:-:|
+| 多轮对话 | 知 | 抽象层级 | T1 | L2 | 认知 | S01 |
+| 情景记忆 | 知 | 时域跨度 | T3 | L3 | 认知 | S01 |
+| 工具接入 | 行 | 主动性 | T2 | L1 | 工程 | S02 |
+| 对等协商 | 行 | 抽象层级 | T2 | L3 | 认知 | S02 |
 
 ### 6.2 覆盖矩阵与生长位
 
 | 空格 | 可能的生长方向 |
 |---|---|
-| 知 × 主动性 | 自主决定记什么 |
+| 知 × 自我模型精度 | 自主决定记什么 |
 | 行 × 时域跨度 | 长时任务 |
 
 ## 7. 社会性
@@ -107,11 +128,11 @@ const FRAME = `
 const LADDER = `
 ## 1. 阶梯总表
 
-| 阶 | 场景 | 天梯 | 新能力 | **新增机制键** | 参数变化 | 文件 |
-|---|---|:-:|---|:-:|:-:|---|
-| S01 | 最小闭环 | T1 | 能对话 | **2** | 2 | [→](./S01-a.md) |
-| S02 | 工具与产物 | T2 | 能动手 | **2** | 2 | [→](./S02-b.md) |
-| S10 | 认知注入 | T4 | 像谁那样想 | **0** | 2 | [→](./S10-c.md) |
+| 阶 | 场景 | 新能力 | **新增机制键** | 参数变化 | 文件 |
+|---|:-:|:-:|:-:|:-:|---|
+| S01 | 最小闭环 | 能对话 | **2** | 2 | [→](./S01-a.md) |
+| S02 | 工具与产物 | 能动手 | **2** | 2 | [→](./S02-b.md) |
+| S10 | 认知注入 | 像谁那样想 | **0** | 2 | [→](./S10-c.md) |
 
 **机制键累计**：2 → 4
 `
@@ -228,26 +249,46 @@ test('新增一个真正的顶层键，MECHANISMS 才会变长——「10 还是
   assert.equal(mechanismsOf(withNew).top.length, mechanismsOf(ARCH).top.length + 1)
 })
 
-test('02 的七张表各归各位：定义、名册、三处声明都按所在小节读，不吃错表', () => {
+test('02 的九张表各归各位：定义、极性、刻度、天梯、名册、四处声明都按所在小节读，不吃错表', () => {
   const f = frameOf(FRAME)
   assert.deepEqual(f.dimensions, ['知', '行'])
   assert.deepEqual(f.axes, ['主动性', '时域跨度', '抽象层级'])
   assert.equal(f.tierMax, 3)
+  assert.equal(f.levelMax, 3, '刻度格数由 §3.1 表的列数算出，不写死')
+  assert.equal(f.overlapLimit, 2)
+  assert.deepEqual(f.kinds, ['认知', '工程'])
+  assert.deepEqual(f.polarities[0], { axis: '主动性', requires: 'unprompted', forbids: 'prompt_only' })
   assert.deepEqual(f.dimCounts, [['知', 2], ['行', 2]])
-  assert.deepEqual(f.caps[3], { name: '对等协商', dim: '行', axis: '抽象层级', tier: 2 })
+  assert.deepEqual(f.caps[3], {
+    name: '对等协商',
+    dim: '行',
+    axis: '抽象层级',
+    tier: 2,
+    level: 3,
+    kind: '认知',
+    stages: ['S02'],
+  })
+  assert.deepEqual(f.tierCores[0], { tier: 1, names: ['多轮对话'] })
+  assert.deepEqual(f.overlap, [['时域跨度', '抽象层级', 3]])
   assert.deepEqual(f.pseudo, ['工具数量多', '会写代码'])
-  assert.deepEqual(f.growth, [['知', '主动性'], ['行', '时域跨度']])
+  assert.deepEqual(f.growth, [['知', '自我模型精度'], ['行', '时域跨度']])
   assert.deepEqual(f.social, [['对等协商', '抽象层级']])
 })
 
-test('名册与三处声明一起进生成物——program 侧不再有一份 54 行抄本', () => {
+test('名册与各处声明一起进生成物——program 侧不再有一份 54 行抄本', () => {
   const text = buildFacts(fixture())
   assert.match(text, /pub const DIMENSIONS: &\[&str\] = &\[\n {4}"知",/)
   assert.match(text, /pub const CAPABILITIES: &\[Capability\] = &\[\n {4}Capability \{/)
   assert.match(text, /pub const DECLARED_DIM_COUNTS: &\[\(&str, usize\)\] = &\[\n {4}\("知", 2\),/)
   assert.match(text, /pub const PSEUDO: &\[&str\] = &\[\n {4}"工具数量多",/)
-  assert.match(text, /pub const DECLARED_GROWTH: &\[\(&str, &str\)\] = &\[\n {4}\("知", "主动性"\),/)
+  assert.match(text, /pub const DECLARED_GROWTH: &\[\(&str, &str\)\] = &\[\n {4}\("知", "自我模型精度"\),/)
   assert.match(text, /pub const DECLARED_SOCIAL: &\[\(&str, &str\)\] = &\[\n {4}\("对等协商", "抽象层级"\),/)
+  assert.match(text, /pub const AXIS_POLARITIES: &\[AxisPolarity\] = &\[/)
+  assert.match(text, /pub const LEVEL_MAX: usize = 3;/)
+  assert.match(text, /pub const OVERLAP_LIMIT: usize = 2;/)
+  assert.match(text, /pub const DECLARED_OVERLAP: &\[\(&str, &str, usize\)\]/)
+  assert.match(text, /pub const KINDS: &\[&str\]/)
+  assert.match(text, /pub struct TierCore/)
 })
 
 // ── 反向用例：读不出来 / 两处各说各话，都必须抛，不得静默产出残缺 facts ────
@@ -386,19 +427,48 @@ test('反向：总表缺「新增机制键」那一列 ⇒ 声明读不出来，
   )
 })
 
-test('反向：§6.1 名册少一列 ⇒ 四列的形状不成立，抛错', () => {
-  const three = FRAME.replace('| 能力 | 维 | 轴 | 天梯 |\n|---|---|---|:-:|', '| 能力 | 维 | 轴 |\n|---|---|---|')
-  assert.throws(() => frameOf(three), /名册必须是「能力 \/ 维 \/ 轴 \/ 天梯」四列/)
+test('反向：§6.1 名册少一列 ⇒ 七列的形状不成立，抛错', () => {
+  const six = FRAME.replace(
+    '| 能力 | 维 | 轴 | 天梯 | 等级 | 类型 | 落点 |\n|---|---|---|:-:|:-:|:-:|:-:|',
+    '| 能力 | 维 | 轴 | 天梯 | 等级 | 类型 |\n|---|---|---|:-:|:-:|:-:|',
+  )
+  assert.throws(() => frameOf(six), /名册必须是「能力 \/ 维 \/ 轴 \/ 天梯 \/ 等级 \/ 类型 \/ 落点」七列/)
 })
 
 test('反向：名册里有重名行 ⇒ 计数会静默翻倍，抛错', () => {
-  const dup = FRAME.replace('| 对等协商 | 行 | 抽象层级 | T2 |', '| 情景记忆 | 行 | 抽象层级 | T2 |')
+  const dup = FRAME.replace('| 对等协商 | 行 | 抽象层级 | T2 | L3 | 认知 | S02 |', '| 情景记忆 | 行 | 抽象层级 | T2 | L3 | 认知 | S02 |')
   assert.throws(() => frameOf(dup), /名册有重名行/)
 })
 
 test('反向：名册的天梯列写成汉字 ⇒ 读不出整数，抛错（不当成 T0）', () => {
-  const odd = FRAME.replace('| 多轮对话 | 知 | 抽象层级 | T1 |', '| 多轮对话 | 知 | 抽象层级 | 第一级 |')
+  const odd = FRAME.replace('| 多轮对话 | 知 | 抽象层级 | T1 | L2 | 认知 | S01 |', '| 多轮对话 | 知 | 抽象层级 | 第一级 | L2 | 认知 | S01 |')
   assert.throws(() => frameOf(odd), /§6\.1「多轮对话」的天梯 读不出整数/)
+})
+
+test('反向：等级写成裸数字 / 落点不是阶号 ⇒ 各自抛错（形状错不许被当成合法值）', () => {
+  assert.throws(
+    () => frameOf(FRAME.replace('| 多轮对话 | 知 | 抽象层级 | T1 | L2 | 认知 | S01 |', '| 多轮对话 | 知 | 抽象层级 | T1 | 2 | 认知 | S01 |')),
+    /等级必须写成/,
+  )
+  assert.throws(
+    () => frameOf(FRAME.replace('| 多轮对话 | 知 | 抽象层级 | T1 | L2 | 认知 | S01 |', '| 多轮对话 | 知 | 抽象层级 | T1 | L2 | 认知 | 第一阶段 |')),
+    /落点必须写成/,
+  )
+})
+
+test('反向：§3 的极性两列不是反引号 token ⇒ 抛错（形容词不是判据）', () => {
+  const vague = FRAME.replace('| **主动性** | 只在被要求时行动 | 自己发起 | `unprompted` | `prompt_only` |', '| **主动性** | 只在被要求时行动 | 自己发起 | 更主动 | 更被动 |')
+  assert.throws(() => frameOf(vague), /不是反引号形态/)
+})
+
+test('反向：§3.3 的超限上限写不出来 ⇒ 抛错（上限是判断，不写等于没有上限）', () => {
+  const noLimit = FRAME.replace('**超限上限 = 2**（3 阶的一半）。', '上限自定。')
+  assert.throws(() => frameOf(noLimit), /读不出「超限上限 = N」/)
+})
+
+test('反向：§3.3 登记的轴对不是 §3 的轴 ⇒ 抛错', () => {
+  const bogus = FRAME.replace('| 时域跨度 × 抽象层级 | 3 |', '| 时域跨度 × 气场 | 3 |')
+  assert.throws(() => frameOf(bogus), /里有一条不是 §3 的轴/)
 })
 
 test('反向：§2 的条数列写成文字 ⇒ 声明读不出来，抛错', () => {
@@ -407,14 +477,15 @@ test('反向：§2 的条数列写成文字 ⇒ 声明读不出来，抛错', ()
 })
 
 test('反向：§6.2 的空格不写「维 × 轴」⇒ 生长位读不出归属，抛错', () => {
-  const odd = FRAME.replace('| 知 × 主动性 | 自主决定记什么 |', '| 自我模型精度 | 自主决定记什么 |')
+  const odd = FRAME.replace('| 知 × 自我模型精度 | 自主决定记什么 |', '| 自我模型精度 | 自主决定记什么 |')
   assert.throws(() => frameOf(odd), /空格必须写成「维 × 轴」/)
 })
 
-test('反向：§3.1 的小节标题改名 ⇒ 天梯表按节定位失败，抛错而不是读成 §3 的五轴表', () => {
-  const renamed = FRAME.replace('### 3.1 天梯 T1–T3 = 五轴的递进', '### 3.1 天梯与递进')
-    .replace(/^### 3\.1/m, '### 3-1')
-  assert.throws(() => frameOf(renamed), /找不到 §3\.1 天梯表/)
+test('反向：§3.1 / §3.2 的小节标题改名 ⇒ 按节定位失败，抛错而不是读成 §3 的五轴表', () => {
+  const noRubric = FRAME.replace(/^### 3\.1/m, '### 3-1')
+  assert.throws(() => frameOf(noRubric), /找不到 §3\.1 五轴刻度表/)
+  const noTiers = FRAME.replace(/^### 3\.2/m, '### 3-2')
+  assert.throws(() => frameOf(noTiers), /找不到 §3\.2 天梯表/)
 })
 
 test('反向：§5 的表不见而小节还在 ⇒ 抛错，绝不在程序里退回一份词表', () => {
@@ -423,7 +494,7 @@ test('反向：§5 的表不见而小节还在 ⇒ 抛错，绝不在程序里�
 })
 
 test('反向：§6.1 名册整张不见 ⇒ 抛错，绝不返回空名册（空名册会让所有维都变空）', () => {
-  const gone = FRAME.replace(/\| 能力 \| 维 \| 轴 \| 天梯 \|\n(\|[^\n]*\n)+\n/, '')
+  const gone = FRAME.replace(/\| 能力 \| 维 \| 轴 \| 天梯 \| 等级 \| 类型 \| 落点 \|\n(\|[^\n]*\n)+\n/, '')
   assert.throws(() => frameOf(gone), /§6\.1 名册里找不到表头首列为「能力」的表/)
 })
 

@@ -21,10 +21,16 @@
  * | DC-001 | `check_all` 条数 | `symbio_core/invariants/mod.rs` 的函数体 | 活跃文档陈述它有 N 条时，N 必须相等 |
  * | DC-002 | 机制表顶层键数 | `docs/plan/verify/facts/mod.rs` 的 `MECHANISMS`（M1 的生成物） | 同上 |
  * | DC-003 | §8 登记的键数（含子键） | 同上文件的 `PARAM_KEYS` | 同上 |
+ * | DC-004 | 验证程序数 | `docs/plan/verify/*.rs` 的文件数（门禁 55 阶段逐个编译运行的那批） | 同上 |
  *
- * **为什么只判这三个**：判据必须可穷举。本仓的文档里有几百个数字（行数、版本、
+ * **DC-004 治的是哪一类漂移**：文档与门禁**读同一批文件**、却各数各的。
+ * 一个新程序落进 `verify/` 之后，门禁当天就会跑它，而文档里「N 个验证程序」那句话
+ * 没有任何东西跟着变——于是"证据已经变多、声称没变"这件事在日志里与全绿长得一模一样。
+ * 数它的唯一来源是文件系统，因为那里就是**实际会被编译**的那一份。
+ *
+ * **为什么只判这几个**：判据必须可穷举。本仓的文档里有几百个数字（行数、版本、
  * 档位毫秒、事件格），给它们全都配来源就是「写第二份真相」——那正是
- * `docs/README.md` 纪律 3 要防的。而这三个是**机制面的计数**：它们出现在冻结锚点
+ * `docs/README.md` 纪律 3 要防的。而这几个是**机制面的计数**：它们出现在冻结锚点
  * 的描述里（`README §0.1.2` 的「机制表 10 个顶层键」），一旦对不上，「架构面不得
  * 妥协」这句话本身就在骗人。
  *
@@ -38,7 +44,7 @@
  */
 // 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns DC 文档计数对账（文档里的少数几个数 vs 代码）
-// @codes DC-001 DC-002 DC-003
+// @codes DC-001 DC-002 DC-003 DC-004
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -106,6 +112,16 @@ const m = txt.match(new RegExp(`(?:const|pub const)\\s+${name}\\b[^=]*=\\s*&?\\s
   return { mechanisms, paramKeys }
 }
 
+/** `docs/plan/verify/` 下的验证程序数——**门禁 55 阶段会逐个编译运行的那一批**。
+ *  口径取顶层 `.rs` 文件：`facts/` 是被它们 `mod facts;` 进来的共享数据，
+ *  `recursion` 子目录不参与（它们不是独立程序）。 */
+function verifyProgramCount(root) {
+  const dir = path.join(root, 'docs', 'plan', 'verify')
+  if (!fs.existsSync(dir)) return null
+  const n = fs.readdirSync(dir).filter((f) => f.endsWith('.rs') && fs.statSync(path.join(dir, f)).isFile()).length
+  return n > 0 ? n : null
+}
+
 /** 递归收集活跃文档（`docs/` + 仓根 `*.md`；跳过 archive 与垃圾目录） */
 function activeDocs(root) {
   const out = []
@@ -140,6 +156,7 @@ const RULES = [
   { code: 'DC-001', name: '`check_all`', re: /`check_all`/ },
   { code: 'DC-002', name: '顶层键', re: /顶层键/ },
   { code: 'DC-003', name: '登记的键（含子键）', re: /登记的键（含子键）/ },
+  { code: 'DC-004', name: '验证程序', re: /验证程序/ },
 ]
 const WIN = 6
 const ARROW_WIN = 12
@@ -179,15 +196,16 @@ function findings(docs, rule, expected) {
   return out
 }
 
-console.log('--- doc-count-audit: 文档计数 vs 代码（DC-001…003） ---')
+console.log('--- doc-count-audit: 文档计数 vs 代码（DC-001…004） ---')
 
 const checkAll = checkAllCount(REPO_ROOT)
 const facts = factListCounts(REPO_ROOT)
-if (checkAll == null || facts == null) {
+const verifyPrograms = verifyProgramCount(REPO_ROOT)
+if (checkAll == null || facts == null || verifyPrograms == null) {
   console.log(
     red(
       '[ERROR] DC-001 审计范围读不出：' +
-        `check_all=${checkAll} facts=${facts ? 'ok' : 'null'} ⇒ 来源读不出来，` +
+        `check_all=${checkAll} facts=${facts ? 'ok' : 'null'} verify=${verifyPrograms} ⇒ 来源读不出来，` +
         '此时退化成「什么都没检查」是最坏的一种失败',
     ),
   )
@@ -199,7 +217,12 @@ if (docs.length === 0) {
   process.exit(2)
 }
 
-const expected = { 'DC-001': checkAll, 'DC-002': facts.mechanisms, 'DC-003': facts.paramKeys }
+const expected = {
+  'DC-001': checkAll,
+  'DC-002': facts.mechanisms,
+  'DC-003': facts.paramKeys,
+  'DC-004': verifyPrograms,
+}
 let errors = 0
 for (const rule of RULES) {
   const hits = findings(docs, rule, expected[rule.code])
@@ -216,12 +239,12 @@ for (const rule of RULES) {
 }
 
 if (errors) {
-  console.log(`doc-count-audit 未通过：${errors} 处计数对不上（扫 ${docs.length} 份活跃文档 / 3 个计数）`)
+  console.log(`doc-count-audit 未通过：${errors} 处计数对不上（扫 ${docs.length} 份活跃文档 / ${RULES.length} 个计数）`)
   process.exit(1)
 }
 console.log(
   green(
     `doc-count-audit 通过：扫 ${docs.length} 份活跃文档，` +
-      `check_all ${checkAll} 条 / 顶层键 ${facts.mechanisms} 个 / 含子键 ${facts.paramKeys} 个，无手填漂移`,
+      `check_all ${checkAll} 条 / 顶层键 ${facts.mechanisms} 个 / 含子键 ${facts.paramKeys} 个 / 验证程序 ${verifyPrograms} 个，无手填漂移`,
   ),
 )

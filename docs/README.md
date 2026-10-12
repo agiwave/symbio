@@ -26,7 +26,7 @@ D-004 判**措辞标记**而不判**叙事**，边界在此写明（免得读到
 只收「不会出现在正常论述里的措辞」，因为**守卫一旦开始误报，下场是被整体豁免，比没有还糟**。
 豁免分两档（与 D-006 同口径）：**行内**（`<!-- doc-link-allow D-004: 理由 -->` 写在本行或
 前一行）只豁免该行；**全文**须为文件首行非空内容，且理由写明它买断的是什么
-（如 [13](./plan/13-质量改进总纲.md) 那篇批次登记，状态列是唯一的过程信息）。
+（如 [WVR-02](./registry/spec/WVR-02.md) 那篇豁免登记，`## 处理过程` 是唯一的过程信息）。
 
 D-006 是 D-001 的盲区补丁：D-001 只认 Markdown 链接语法（方括号文字 + 圆括号目标），
 而本仓正文**更常**用行内反引号指路（「详见 `docs/design/vdfs.md`」）——这类写法 D-001
@@ -70,6 +70,7 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 | 配置项 | [reference/CONFIGURATION.md](./reference/CONFIGURATION.md) | 模块 `README.md` 只写机制 + 指向它 |
 | 判据码（各守卫的编号地址） | [reference/GATE_CODES.md](./reference/GATE_CODES.md)（脚本声明生成） | 守卫脚本只写自己判什么，不抄全表 |
 | 出厂 prompt 的**形状基线** | [reference/PROMPT_SHAPE.md](./reference/PROMPT_SHAPE.md)（真实链路生成，不手改） | 口径（什么进判据 / 规模只作观测）在 ADR-057，别处不复述 |
+| 结构化 vs 拍平的**模型侧对照读数** | [reference/PROMPT_AB.md](./reference/PROMPT_AB.md)（门外实验生成，不手改） | 判据口径在 `e2e/ab/tasks.mjs`，结论与边界在 task/S-end③ |
 | 协议线上形状（帧 / 载荷 / 通道 / 线格式） | [architecture/PROTOCOLS.md](./architecture/PROTOCOLS.md) | — |
 | 系统拓扑（谁挂在谁下面） | [SYSTEM_MAP.md](./SYSTEM_MAP.md) | 其它图只画自己那一层 |
 | 排障链路（一次请求经过哪些代码） | [architecture/DATA_FLOW.md](./architecture/DATA_FLOW.md) | — |
@@ -103,7 +104,7 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 （机制见 [plan/14](./plan/14-登记与汇总机制.md)）——「哪条纪律其实没人守」由登记条目的判据节
 回答，判据码全表在 [reference/GATE_CODES.md](./reference/GATE_CODES.md)。条文正文各归定义篇，
 此处不复述：[08 §0](./plan/08-分步实施计划.md#0-执行纪律五步每步都不得跳过) ·
-[13 §0](./plan/13-质量改进总纲.md#0-五条改进纪律) ·
+[D13-1…D13-5](./registry/spec/INDEX.md) ·
 [03 §5.1](./plan/03-演进与验证.md#51-五条纪律) ·
 [plan/README §4](./plan/README.md#4-硬证据全部实际编译运行通过)。
 
@@ -121,6 +122,7 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 | 配置系统 | [CONFIGURATION.md](./reference/CONFIGURATION.md) |
 | 给门禁加一条判据、要挑不撞的号 | [GATE_CODES.md](./reference/GATE_CODES.md) |
 | 看 prompt 实际送出去的形状 / 结构化的代价 | [PROMPT_SHAPE.md](./reference/PROMPT_SHAPE.md)（重生成：`PROMPT_SHAPE_UPDATE=1 node e2e/cases/t46-prompt-shape-baseline.mjs`） |
+| 看「结构化 vs 拍平」在真实模型上的对照读数 | [PROMPT_AB.md](./reference/PROMPT_AB.md)（门外实验：`node e2e/ab/run.mjs`，会打真 provider、不进门禁） |
 | 快速上手 | [QUICK_START.md](./guides/QUICK_START.md) |
 | 开发新插件 | [PLUGIN_DEVELOPMENT.md](./guides/PLUGIN_DEVELOPMENT.md) |
 | 排查问题 | [TROUBLESHOOTING.md](./guides/TROUBLESHOOTING.md) |

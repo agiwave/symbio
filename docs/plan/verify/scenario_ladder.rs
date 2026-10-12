@@ -32,7 +32,6 @@ struct Stage {
     /// roadmap 目录里的那篇（名册与文档一一对应的凭据）
     file: &'static str,
     name: &'static str,
-    tier: &'static str,
     /// 本阶点亮的机制键 → 取值（§3 的赋值块）
     assigns: &'static [(&'static str, &'static str)],
     /// J2 退路口：机制键 → 平凡值（§4 的加粗行）
@@ -58,7 +57,6 @@ fn stages() -> Vec<Stage> {
                 id: c.id,
                 file: doc.file,
                 name: c.name,
-                tier: c.tier,
                 assigns: doc.assigns,
                 fallback: doc.fallback,
                 claimed_new_keys: c.claimed_new_keys,
@@ -161,14 +159,11 @@ fn main() {
 
     let nk = new_keys_per_stage(&roster);
     let cum_all = cumulative_keys(&roster, roster.len()).len();
-    println!("| 阶 | 场景 | 天梯 | 新增键（算出） | 总表声明 | 累计 |");
-    println!("|---|---|:-:|:-:|:-:|:-:|");
+    println!("| 阶 | 场景 | 新增键（算出） | 总表声明 | 累计 |");
+    println!("|---|---|:-:|:-:|:-:|");
     for (i, s) in roster.iter().enumerate() {
         let cum = cumulative_keys(&roster, i + 1).len();
-        println!(
-            "| {} | {} | {} | {} | {} | {} |",
-            s.id, s.name, s.tier, nk[i], s.claimed_new_keys, cum
-        );
+        println!("| {} | {} | {} | {} | {} |", s.id, s.name, nk[i], s.claimed_new_keys, cum);
     }
 
     let bad = out_of_bounds(&roster);
@@ -211,7 +206,6 @@ fn main() {
         id: "S98",
         file: "（反例）不在名册里",
         name: "（反例）主体自改架构",
-        tier: "T9",
         assigns: fake_assigns,
         fallback: ("scope", "root"),
         claimed_new_keys: 1,
@@ -226,7 +220,6 @@ fn main() {
         id: "S99",
         file: "（反例）不在名册里",
         name: "（反例）假回退",
-        tier: "T1",
         assigns: fake_assigns2,
         fallback: ("actor.pattern", "reasoner"),
         claimed_new_keys: 0,
@@ -263,7 +256,6 @@ fn main() {
         id: "S97",
         file: "（反例）不在名册里",
         name: "（反例）换了个存储后端",
-        tier: "T2",
         assigns: fake_assigns5,
         fallback: ("actor.pattern", "decider"),
         claimed_new_keys: 0,

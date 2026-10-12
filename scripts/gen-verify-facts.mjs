@@ -16,8 +16,10 @@
  * |---|---|
  * | `MECHANISMS` | [01 §8 权威参数表](../docs/plan/01-核心架构.md) 的「参数键」列 |
  * | `DOMAINS` | 01 §8 的「取值域」列——读法写在那张表下面，`↳ §N` 的集合去那一节读 |
- * | `DIMENSIONS` / `AXES` / `TIER_MAX` | [02 §2 / §3 / §3.1](../docs/plan/02-能力坐标系.md) 的三张坐标系定义表 |
- * | `CAPABILITIES` | 02 §6.1 能力名册（全仓唯一一份 54 行名册） |
+ * | `DIMENSIONS` / `AXES` / `AXIS_POLARITIES` | [02 §2 五维表 / §3 五轴表（末两列是极性）](../docs/plan/02-能力坐标系.md) |
+ * | `LEVEL_MAX` / `TIER_MAX` / `TIER_CORES` | 02 §3.1 刻度表（**列数** = 等级格数）/ §3.2 天梯表 |
+ * | `OVERLAP_LIMIT` / `DECLARED_OVERLAP` | 02 §3.3 共线上限与登记表 |
+ * | `CAPABILITIES` / `KINDS` | 02 §6.1 能力名册（七列）与类型闭集表 |
  * | `DECLARED_*` | 02 §2「条数」列、§6.2 生长位表、§7 社交能力表——**是被验的声明** |
  * | `PSEUDO` | 02 §5 伪高阶表的「说法」列 |
  * | `STAGE_CLAIMS` | [路线图总览 §1 阶梯总表](../docs/plan/roadmap/00-路线图总览.md) |
@@ -253,6 +255,12 @@ export function frameOf(frameMd) {
     if (!Number.isInteger(n)) throw new Error(`${FRAME_REL}：${where} 读不出整数：\`${s}\``)
     return n
   }
+  /** 反引号里那一个 token（§3 的「要求的性质 / 禁止的性质」两列） */
+  const token = (cell, where) => {
+    const m = (cell || '').match(/`([^`]+)`/)
+    if (!m) throw new Error(`${FRAME_REL}：${where} 不是反引号形态——这两格是**极性**，必须写成 \`token\``)
+    return m[1]
+  }
 
   const dims = table('维度', /^## 2\./, '§2 五维表')
   if (dims.header.length < 4) {
@@ -261,24 +269,96 @@ export function frameOf(frameMd) {
   const dimensions = dims.rows.map((r) => plain(r[0]).split(/\s+/)[0])
   const dimCounts = dims.rows.map((r, i) => [dimensions[i], int(plain(r[3]), `§2「${dimensions[i]}」的条数`)])
 
-  const axes = table('轴', /^## 3\./, '§3 五轴表').rows.map((r) => plain(r[0]))
-  const tiers = table('级', /^### 3\.1/, '§3.1 天梯表')
-    .rows.map((r) => int(plain(r[0]).replace(/^T/i, ''), '§3.1 的天梯级'))
-  if (!tiers.length) throw new Error(`${FRAME_REL} §3.1：天梯表没有行`)
-
-  const roster = table('能力', /^### 6\.1/, '§6.1 名册')
-  if (roster.header.length !== 4) {
-    throw new Error(`${FRAME_REL} §6.1：名册必须是「能力 / 维 / 轴 / 天梯」四列，实际 ${roster.header.join(' | ')}`)
+  // §3 五轴表：末两列是**极性**（要求 / 禁止），不是描述。判据见 02 §3——
+  // 两轴的要求与禁止完全相同 ⇒ 同一条轴；A 的要求命中 B 的禁止 ⇒ 互相抵消。
+  const axesTable = table('轴', /^## 3\./, '§3 五轴表')
+  if (axesTable.header.length !== 5) {
+    throw new Error(
+      `${FRAME_REL} §3：五轴表必须是「轴 / 低阶 / 高阶 / 要求的性质 / 禁止的性质」五列，实际 ${axesTable.header.join(' | ')}`,
+    )
   }
+  const axes = axesTable.rows.map((r) => plain(r[0]))
+  const polarities = axesTable.rows.map((r) => ({
+    axis: plain(r[0]),
+    requires: token(r[3], `§3「${plain(r[0])}」要求的性质`),
+    forbids: token(r[4], `§3「${plain(r[0])}」禁止的性质`),
+  }))
+
+  // §3.1 刻度表：列数 = 等级数。刻度的格数是**算出来的**，程序不写死「四级」——
+  // 刻度加一级而程序上限不动，断言会以「越界等级」把新一级漏在判据之外。
+  const rubric = table('轴', /^### 3\.1/, '§3.1 五轴刻度表')
+  const levelMax = rubric.header.length - 1
+  if (levelMax < 2) throw new Error(`${FRAME_REL} §3.1：刻度表只有 ${levelMax} 级（表头 ${rubric.header.join(' | ')}）`)
+  const rubricAxes = rubric.rows.map((r) => plain(r[0]))
+  const missingRubric = axes.filter((a) => !rubricAxes.includes(a))
+  if (missingRubric.length) {
+    throw new Error(`${FRAME_REL} §3.1：刻度表少了 ${missingRubric.join(', ')}——每条轴都要有刻度，缺一条那条轴就没有刻度`)
+  }
+
+  // §3.2 天梯表：「核心能力」列必须逐条对应名册里**该级**的行，故按顿号切开带走。
+  const tierTable = table('级', /^### 3\.2/, '§3.2 天梯表')
+  if (!tierTable.rows.length) throw new Error(`${FRAME_REL} §3.2：天梯表没有行`)
+  const tierCores = tierTable.rows.map((r) => ({
+    tier: int(plain(r[0]).replace(/^T/i, ''), '§3.2 的天梯级'),
+    names: plain(r[2])
+      .split(/[、,]/)
+      .map((s) => s.trim())
+      .filter(Boolean),
+  }))
+  if (tierCores.some((t) => !t.names.length)) throw new Error(`${FRAME_REL} §3.2：有一级的「核心能力」列是空的`)
+
+  // §3.3 共线登记：上限写在正文里（`超限上限 = N`），逐条登记写在表里。
+  const overlapSec = section(/^### 3\.3/, '§3.3 共线上限与登记')
+  const limitMatch = overlapSec.match(/超限上限\s*=\s*\*{0,2}(\d+)/)
+  if (!limitMatch) {
+    throw new Error(`${FRAME_REL} §3.3：读不出「超限上限 = N」——上限是判断，必须写出来（不写等于没有上限）`)
+  }
+  const overlapLimit = int(limitMatch[1], '§3.3 的超限上限')
+  const overlap = table('轴对', /^### 3\.3/, '§3.3 共线登记表').rows.map((r) => {
+    const parts = plain(r[0]).split('×').map((x) => x.trim())
+    if (parts.length !== 2) throw new Error(`${FRAME_REL} §3.3：轴对必须写成「轴 × 轴」，实际 \`${r[0]}\``)
+    if (axes.indexOf(parts[0]) < 0 || axes.indexOf(parts[1]) < 0) {
+      throw new Error(`${FRAME_REL} §3.3：\`${r[0]}\` 里有一条不是 §3 的轴`)
+    }
+    return [parts[0], parts[1], int(plain(r[1]), `§3.3「${plain(r[0])}」的阶数`)]
+  })
+
+  // §6.1 名册：七列。「落点」把坐标系接到实施阶梯（`SNN` 或 `SNN+SNN`），
+  // 「类型」的闭集由同一节里那张小表拥有——程序不写死「认知 / 工程 / 治理」三个词。
+  const roster = table('能力', /^### 6\.1/, '§6.1 名册')
+  if (roster.header.length !== 7) {
+    throw new Error(
+      `${FRAME_REL} §6.1：名册必须是「能力 / 维 / 轴 / 天梯 / 等级 / 类型 / 落点」七列，实际 ${roster.header.join(' | ')}`,
+    )
+  }
+  const kinds = table('类型', /^### 6\.1/, '§6.1 类型闭集表').rows.map((r) => plain(r[0]))
+  if (!kinds.length) throw new Error(`${FRAME_REL} §6.1：类型闭集表没有行`)
   const names = roster.rows.map((r) => plain(r[0]))
   const dup = names.filter((n, i) => names.indexOf(n) !== i)
   if (dup.length) throw new Error(`${FRAME_REL} §6.1：名册有重名行 ${dup.join(', ')}——重名会让计数静默翻倍`)
-  const caps = roster.rows.map((r) => ({
-    name: plain(r[0]),
-    dim: plain(r[1]),
-    axis: plain(r[2]),
-    tier: int(plain(r[3]).replace(/^T/i, ''), `§6.1「${plain(r[0])}」的天梯`),
-  }))
+  const caps = roster.rows.map((r) => {
+    const name = plain(r[0])
+    const stages = plain(r[6])
+      .split('+')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    if (!stages.length || stages.some((s) => !/^S\d\d$/.test(s))) {
+      throw new Error(`${FRAME_REL} §6.1「${name}」：落点必须写成 \`SNN\` 或 \`SNN+SNN\`，实际 \`${stages.join('+')}\``)
+    }
+    const lv = (plain(r[4]).match(/^L(\d+)$/i) || [])[1]
+    if (!lv) {
+      throw new Error(`${FRAME_REL} §6.1「${name}」：等级必须写成 \`L<n>\`（见 §3.1），实际 \`${plain(r[4])}\``)
+    }
+    return {
+      name,
+      dim: plain(r[1]),
+      axis: plain(r[2]),
+      tier: int(plain(r[3]).replace(/^T/i, ''), `§6.1「${name}」的天梯`),
+      level: int(lv, `§6.1「${name}」的等级`),
+      kind: plain(r[5]),
+      stages,
+    }
+  })
 
   const pseudo = table('说法', /^## 5\./, '§5 伪高阶表').rows.map((r) => plain(r[0]))
   const growth = table('空格', /^### 6\.2/, '§6.2 生长位表').rows.map((r) => {
@@ -291,12 +371,18 @@ export function frameOf(frameMd) {
   return {
     dimensions,
     axes,
-    tierMax: Math.max(...tiers),
+    polarities,
+    levelMax,
+    tierCores,
+    overlapLimit,
+    overlap,
     caps,
+    kinds,
     dimCounts,
     pseudo,
     growth,
     social,
+    tierMax: Math.max(...tierCores.map((t) => t.tier)),
   }
 }
 
@@ -402,7 +488,6 @@ export function claimsOf(ladderMd) {
   return table.rows.map((r) => ({
     id: plain(r[0]),
     name: plain(r[1]),
-    tier: plain(r[2]),
     newKeys: Number(plain(r[newIdx])),
     paramChanges: Number(plain(r[chgIdx])),
   }))
@@ -555,22 +640,75 @@ pub fn in_domain(key: &str, value: &str) -> bool {
   out.push('/// 02 §3 的五轴（名册「轴」列的合法取值）')
   out.push(`pub const AXES: &[&str] = &[${frame.axes.map((k) => `\n    ${rs(k)},`).join('')}\n];`)
   out.push('')
+  out.push('/// 02 §3 每条轴的**极性**：它要求什么性质、禁止什么性质。判据（`axis_orthogonality.rs`）：')
+  out.push('/// 要求与禁止都相同 ⇒ 同一条轴（必须合并）；A 的要求命中 B 的禁止 ⇒ 两条轴互相抵消。')
+  out.push('#[derive(Clone, Copy)]')
+  out.push(`pub struct AxisPolarity {
+    pub axis: &'static str,
+    pub requires: &'static str,
+    pub forbids: &'static str,
+}`)
+  out.push('')
+  out.push(`pub const AXIS_POLARITIES: &[AxisPolarity] = &[${frame.polarities
+    .map(
+      (p) =>
+        `\n    AxisPolarity {\n        axis: ${rs(p.axis)},\n        requires: ${rs(p.requires)},\n` +
+        `        forbids: ${rs(p.forbids)},\n    },`,
+    )
+    .join('')}\n];`)
+  out.push('')
+  out.push('/// 02 §3.1 刻度表的**列数** = 等级的格数（L1..Ln）。名册「等级」列的上界取自这里，')
+  out.push('/// 程序不写死「四级」——刻度加一级而判据不动，新一级就静默落在判据之外。')
+  out.push(`pub const LEVEL_MAX: usize = ${frame.levelMax};`)
+  out.push('')
+  out.push('/// 02 §6.1「类型」列的闭集（那张小表拥有它，程序不另抄一份）')
+  out.push(`pub const KINDS: &[&str] = &[${frame.kinds.map((k) => `\n    ${rs(k)},`).join('')}\n];`)
+  out.push('')
+  out.push('/// 02 §3.2 天梯每一级的「核心能力」——必须逐条是名册里**该级**的行')
+  out.push(`pub struct TierCore {
+    pub tier: usize,
+    pub names: &'static [&'static str],
+}`)
+  out.push('')
+  out.push(`pub const TIER_CORES: &[TierCore] = &[${frame.tierCores
+    .map(
+      (t) =>
+        `\n    TierCore {\n        tier: ${t.tier},\n        names: &[${t.names.map((n) => rs(n)).join(', ')}],\n    },`,
+    )
+    .join('')}\n];`)
+  out.push('')
+  out.push('/// 02 §3.3 的共线规则：同一对轴在多少阶里同时被抬起算**超限**（上限是判断，写在文档里）')
+  out.push(`pub const OVERLAP_LIMIT: usize = ${frame.overlapLimit};`)
+  out.push('')
+  out.push('/// 02 §3.3 登记的超限轴对与它声明的阶数——**声明**，与程序算出的同集合才对')
+  out.push(`pub const DECLARED_OVERLAP: &[(&str, &str, usize)] = &[${frame.overlap
+    .map(([a, b, n]) => `\n    (${rs(a)}, ${rs(b)}, ${n}),`)
+    .join('')}\n];`)
+  out.push('')
   out.push('/// 02 §3.1 天梯的最高级——名册「天梯」列的取值上界')
   out.push(`pub const TIER_MAX: usize = ${frame.tierMax};`)
   out.push('')
   out.push('/// 02 §6.1 名册的一行——坐标系审计的**输入**（全仓唯一一份能力名册就在文档里）')
+  out.push('#[derive(Clone, Copy)]')
   out.push(`pub struct Capability {
     pub name: &'static str,
     pub dim: &'static str,
     pub axis: &'static str,
     pub tier: usize,
+    /// 把这条轴抬到第几级（§3.1 的刻度），不是"抬了几级"——起点是该轴当时的已知等级
+    pub level: usize,
+    /// 认知 / 工程 / 治理（闭集见 \`KINDS\`）
+    pub kind: &'static str,
+    /// 由哪几阶点亮（roadmap 阶梯的阶号）——坐标系与实施阶梯的咬合处
+    pub stages: &'static [&'static str],
 }`)
   out.push('')
   out.push(`pub const CAPABILITIES: &[Capability] = &[${frame.caps
     .map(
       (c) =>
         `\n    Capability {\n        name: ${rs(c.name)},\n        dim: ${rs(c.dim)},\n` +
-        `        axis: ${rs(c.axis)},\n        tier: ${c.tier},\n    },`,
+        `        axis: ${rs(c.axis)},\n        tier: ${c.tier},\n        level: ${c.level},\n` +
+        `        kind: ${rs(c.kind)},\n        stages: &[${c.stages.map((s) => rs(s)).join(', ')}],\n    },`,
     )
     .join('')}\n];`)
   out.push('')
@@ -596,7 +734,6 @@ pub fn in_domain(key: &str, value: &str) -> bool {
   out.push(`pub struct StageClaim {
     pub id: &'static str,
     pub name: &'static str,
-    pub tier: &'static str,
     /// 总表声明的「新增机制键」
     pub claimed_new_keys: usize,
     /// 总表声明的「参数变化」——等于该阶 §3 赋值块的行数
@@ -606,7 +743,7 @@ pub fn in_domain(key: &str, value: &str) -> bool {
   out.push(`pub const STAGE_CLAIMS: &[StageClaim] = &[${claims
     .map(
       (c) =>
-        `\n    StageClaim {\n        id: ${rs(c.id)},\n        name: ${rs(c.name)},\n        tier: ${rs(c.tier)},\n` +
+        `\n    StageClaim {\n        id: ${rs(c.id)},\n        name: ${rs(c.name)},\n` +
         `        claimed_new_keys: ${c.newKeys},\n        claimed_param_changes: ${c.paramChanges},\n    },`,
     )
     .join('')}\n];`)

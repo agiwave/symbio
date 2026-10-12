@@ -4,7 +4,7 @@ id: WVR-02
 title: doc-link D-004 全文豁免（定义变更史禁区的两处反例措辞）
 status: active
 created: 2026-10-11
-scope: docs/plan/13-质量改进总纲.md 首行与 docs/README.md 首行的 doc-link-allow D-004
+scope: docs/archive/13-质量改进总纲.md 首行与 docs/README.md 首行的 doc-link-allow D-004
 clears: [W2]
 ---
 

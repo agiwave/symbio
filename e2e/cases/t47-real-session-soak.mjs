@@ -4,7 +4,7 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// [plan/13 终点第 3 条](../../docs/plan/13-质量改进总纲.md)：「`full` 是出厂路径，且被
+// [plan/13 终点第 3 条](../../docs/archive/13-质量改进总纲.md)：「`full` 是出厂路径，且被
 // 真实负载压过——不是『跑过 e2e』，是『跑过真实会话』」（登记条目
 // [S-end②](../../docs/registry/task/S-end②.md)，口径见
 // [ADR-058](../../docs/registry/adr/ADR-058.md)）。此前的 43 例里最长的会话是 4 轮，

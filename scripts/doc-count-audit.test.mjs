@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url'
 const script = fileURLToPath(new URL('./doc-count-audit.mjs', import.meta.url))
 
 /** 造一棵最小仓库：`docs/` 一份文档，`invariants` 与 `facts` 两处来源可覆写 */
-function audit ({ doc = 'docs/a.md', body = '# A\n', checkAll = 8, facts = { mechanisms: 10, paramKeys: 11 } } = {}) {
+function audit ({ doc = 'docs/a.md', body = '# A\n', checkAll = 8, facts = { mechanisms: 10, paramKeys: 11 }, verify = 1 } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-count-'))
   try {
     const write = (rel, content) => {
@@ -51,6 +51,8 @@ function audit ({ doc = 'docs/a.md', body = '# A\n', checkAll = 8, facts = { mec
         `pub const PARAM_KEYS: &[&str] = &[${Array.from({ length: facts.paramKeys }, (_, i) => `"k${i}"`).join(', ')}];`,
       ].join('\n'),
     )
+    // DC-004 的来源：`docs/plan/verify/` 顶层那几个 `.rs`（门禁 55 阶段逐个编译运行的那批）
+    for (let i = 0; i < verify; i++) write(`docs/plan/verify/p${i + 1}.rs`, 'fn main() {}')
     const r = spawnSync(process.execPath, [script, `--root=${root}`], {
       env: { ...process.env, NO_COLOR: '1' },
       encoding: 'utf8',
@@ -94,6 +96,17 @@ test('代码里的数变了而文档没跟 ⇒ 红（这是它存在的理由）
   const r = audit({ body: OK, checkAll: 9, facts: { mechanisms: 11, paramKeys: 12 } })
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /DC-002/)
+})
+
+test('DC-004 文档说 3 个验证程序而目录里只有 1 个 ⇒ 红（新程序落地而没人改文档的那种漂移）', () => {
+  const r = audit({ body: '# A\n\n证据是 3 个验证程序，全部带反向用例。\n', verify: 1 })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /DC-004/)
+})
+
+test('DC-004 数对得上 ⇒ 绿（数的是目录里那几个会被编译的文件）', () => {
+  const r = audit({ body: '# A\n\n证据是 1 个验证程序。\n', verify: 1 })
+  assert.equal(r.status, 0, r.stdout + r.stderr)
 })
 
 // ── ② 不误报（本仓真有的三种邻近形态） ───────────────────────────────
