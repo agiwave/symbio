@@ -23,6 +23,7 @@
 | **N** | core 命名 | `scripts/core-naming-audit.mjs` | N-001–005 | `N-006` |
 | **NDC** | 主体直连 | `scripts/no-direct-call-audit.mjs` | NDC-001–002 | `NDC-003` |
 | **PN** | 健壮性登记（每一处 panic 都是显式事实） | `scripts/panic-audit.mjs` | PN-001–003 | `PN-004` |
+| **PS** | prompt 形状基线 | `scripts/prompt-shape-audit.mjs` | PS-001–003 | `PS-004` |
 | **R** | 死代码 | `scripts/dead-code-audit.mjs` | R-001–002 | `R-003` |
 | **RG** | 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认） | `scripts/registry-lib.mjs` | RG-001–019 | `RG-020` |
 | **S** | 源码 grep 形态 | `scripts/grep-audit.mjs` | S-001–003、S-006–012 | `S-013` |
@@ -91,6 +92,9 @@
 | **PN-001** | `scripts/panic-audit.mjs` |
 | **PN-002** | `scripts/panic-audit.mjs` |
 | **PN-003** | `scripts/panic-audit.mjs` |
+| **PS-001** | `scripts/prompt-shape-audit.mjs` |
+| **PS-002** | `scripts/prompt-shape-audit.mjs` |
+| **PS-003** | `scripts/prompt-shape-audit.mjs` |
 | **R-001** | `scripts/dead-code-audit.mjs` |
 | **R-002** | `scripts/dead-code-audit.mjs` |
 | **RG-001** | `scripts/registry-lib.mjs` |

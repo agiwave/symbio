@@ -3,14 +3,13 @@
 > ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/registry/task/*.md` 生成，请勿手改。**
 > 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，原则与流程见 [14 · 登记与汇总机制](../../plan/14-登记与汇总机制.md)。
 
-**计数**：☐ todo 5 · 🟡 doing 0 · ☑ done 50 · ❌ wont 0（共 55）
+**计数**：☐ todo 4 · 🟡 doing 0 · ☑ done 51 · ❌ wont 0（共 55）
 
 ## 待处理（按依赖顺序）
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
 | `T-009` | C2 的形态定案——去 dispatch 样板要不要动 VdfsProvider 的契约面（先 ADR，后实施） | now | meta | — |
 | `C2` | `VdfsProvider` 的 match 样板在每一处生产实现里各写一遍 | — | C | T-009 |
-| `S-end①` | 没有一份 prompt 形状基线，无法回答「结构化对模型是变好还是变坏」——没有它，任何「更有效」的判断都是凭感觉拍板 | — | S | — |
 | `S-end②` | `full` 没被真实会话负载压过：e2e 全绿只是必要条件，不是「跑过真实负载」 | — | S | P3 |
 | `T-007` | 第三方插件规范 §10 待确认决策（D2–D6）逐条写 ADR | later | meta | T-004 |
 
@@ -50,6 +49,7 @@
 | `P3b` | 反射档样本恒为零：两个出厂 `false` 的开关缺一不可 | P | 13 §2「P3b 未开工的理由」（只登记、不动默认值的定案）+ `config.rs` 的 `default_skill_compile_enabled` / `default_skill_fast_path` 两条成文理由 |
 | `P4` | 读数口「读得出」但「看不见」：`session/stats` 八列在生产前端与 CLI 零调用方 | P | `git log --grep=P4` |
 | `P5` | 召回率无评测集（`vec` 恒空、检索判据只吃 tag），但对应阶段状态记为已完成 | P | `git log --grep=P5` |
+| `S-end①` | 没有一份 prompt 形状基线，无法回答「结构化对模型是变好还是变坏」——没有它，任何「更有效」的判断都是凭感觉拍板 | S | 判据住 `scripts/prompt-shape-audit.mjs`（PS-001…003）+ 门内执行方 `e2e/cases/t46-prompt-shape-baseline.mjs`；基线本体 `docs/reference/PROMPT_SHAPE.md`；口径见 `docs/registry/adr/ADR-057.md`。回归测试 `node --test scripts/prompt-shape-audit.test.mjs` → 20/20；反向验证（手改基线里一个工具名）⇒ t46 红 |
 | `S0` | 会话消息的事实源是 `SessionStore`，WAL 轮末入格但读侧不以它为准 ⇒「Store 是唯一原语」在生产路径上不成立 | S | `git log --grep=S0` |
 | `S1` | 读路径不并读两源 ⇒ 真源切换的偏差无声 | S | `git log --grep=S1` |
 | `S2` | Q3 进展读不走 WAL | S | `git log --grep=S2` |

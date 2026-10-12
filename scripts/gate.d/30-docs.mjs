@@ -188,6 +188,13 @@ export const TEST_ONLY = [
   // 14 条是反向用例（文档与声明各说各话必须抛）——不跑它，「外置」就只是把
   // 手填数据从程序里搬进脚本，绿灯照样可能是假的。
   'gen-verify-facts',
+  // `prompt-shape-audit`（PS-001…003）是 prompt 形状基线的**提取与比对**实现，
+  // 登记成 TEST_ONLY 而不是 GUARDS：它的输入是**运行时抓的真实请求体**，静态跑不出来
+  // ——门内的执行方是 `e2e/cases/t46-prompt-shape-baseline.mjs`（58-e2e 阶段自动纳入）。
+  // 这里跑的是它的回归测试，防的是本仓最坏的那一类失效形态：**提取写宽 ⇒ 结构载体
+  // 没进形状 ⇒ 拍平红不了**，以及反向的**提取写严 ⇒ 规模成了判据 ⇒ 改一句用例措辞就红**。
+  // 两头各钉一条，见 `prompt-shape-audit.test.mjs`。
+  'prompt-shape-audit',
   // `gen-routes-ts` + `route-facts` 是前端路由契约的**唯一真源链**（后端 `route()` 臂 →
   // `constants/routes.gen.ts`）。它的失效形态是静默少一条：提取口径一旦把某个形态
   // （复合臂 / 根容器 home）读漏，前端就拿到一份「后端没有的地址」，而 M-008 的词表

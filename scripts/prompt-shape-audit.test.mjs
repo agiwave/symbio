@@ -1,0 +1,283 @@
+/**
+ * prompt-shape-audit 回归测试 —— 证明它**会红**，且**不误报**
+ *
+ * 这个守卫的失效形态有两头，与 `core-shape-audit` 同族：
+ * ① **提取写宽**：结构载体（`tool_calls` / `tool_call_id`）没进形状 ⇒ ADR-048a 判过的
+ *    「拍平」这件事红不了，基线退化成一份没人信的文档；
+ * ② **提取写严**：把负载决定的字节数当成判据 ⇒ 改一句用例措辞就红，
+ *    红到没人再看——本仓为这种结局写过一整节（`core-export-audit` 的 W1 注）。
+ * 所以**每个判据都配一条反向用例**：该红的红、不该红的不得红。
+ *
+ * 覆盖：
+ *   1. `sectionsOf` 的「行首才算标签」口径（正文里引用别的【标签】不得切出假小节）；
+ *   2. PS-001 各类形状漂移各自变红：拍平 / 请求数 / 小节标签顺序 / 工具面 / 信封；
+ *   3. 反向：正文措辞与规模变化**不得**红（规模不是判据）；
+ *   4. PS-002 基线缺失 / JSON 块读不出 ⇒ 退出 2（不是 1，也不得静默通过）；
+ *   5. PS-003 现场请求数为 0 ⇒ 退出 2 ——「空形状与空基线一致」是本仓最坏的假绿灯；
+ *   6. 渲染 ↔ 解析往返：基线文件里的 JSON 块与提取出的形状逐字段相等；
+ *   7. 一致 ⇒ 退出 0（三条判据都在结论行里出现，缺一说明有一格没在工作）。
+ *
+ * 用法：node --test scripts/prompt-shape-audit.test.mjs
+ */
+
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import {
+  extractShape,
+  extractObservations,
+  diffShapes,
+  sectionsOf,
+  renderBaselineDoc,
+  parseBaselineDoc,
+} from './prompt-shape-audit.mjs'
+import { stripAnsi } from './color.mjs'
+
+const script = fileURLToPath(new URL('./prompt-shape-audit.mjs', import.meta.url))
+
+function tmpDir (tag) {
+  return fs.mkdtempSync(path.join(os.tmpdir(), `symbio-ps-${tag}-`))
+}
+
+/** 出厂 full 路径的**最小真实形状**：system 前缀（无标签段 + 两个小节）+ user + 工具面。 */
+function baseRequests () {
+  return [
+    {
+      body: {
+        model: 'mock-model',
+        stream: true,
+        temperature: 0.1,
+        tool_choice: 'auto',
+        max_tokens: 1024,
+        messages: [
+          { role: 'system', content: '【工作区记忆】（与【智能体记忆】相互独立）\n内容\n\n【会话记忆】\n（暂无内容）\n' },
+          { role: 'system', content: '- 委派判定：未启动 worker\n【能力目录】\n- Chat: agent_run\n' },
+          { role: 'user', content: '帮我回显' },
+        ],
+        tools: [{ function: { name: 'zzz_tool', description: 'd' } }, { function: { name: 'aaa_tool', description: 'e' } }],
+      },
+    },
+    {
+      body: {
+        model: 'mock-model',
+        stream: true,
+        temperature: 0.1,
+        tool_choice: 'auto',
+        max_tokens: 1024,
+        messages: [
+          { role: 'system', content: '【工作区记忆】x\n【会话记忆】y\n' },
+          { role: 'system', content: '- 委派判定\n【能力目录】z\n' },
+          { role: 'user', content: '帮我回显' },
+          { role: 'assistant', content: '我先回显一下。', tool_calls: [{ id: 'call_1', function: { name: 'mcp__mockserv__echo', arguments: '{}' } }] },
+          { role: 'tool', tool_call_id: 'call_1', content: '{"echo":1}' },
+          { role: 'assistant', content: '回显成功。' },
+        ],
+        tools: [{ function: { name: 'aaa_tool' } }, { function: { name: 'zzz_tool' } }],
+      },
+    },
+  ]
+}
+
+// ================= 提取口径 =================
+
+test('sectionsOf：只有行首的【…】算小节标签（正文里引用别的标签不得切出假小节）', () => {
+  const secs = sectionsOf('【工作区记忆】（全工作区共享，与【智能体记忆】相互独立；改写前先读）\n（暂无内容）\n\n【会话记忆】\n（本会话私有）\n')
+  assert.deepEqual(secs.map((s) => s.tag), ['工作区记忆', '会话记忆'])
+})
+
+test('sectionsOf：首个标签之前的残留是一节无标签正文（出厂前缀里的委派判定那段）', () => {
+  const secs = sectionsOf('- 委派判定：未启动 worker\n【能力目录】\n- Chat: agent_run\n')
+  assert.deepEqual(secs.map((s) => s.tag), [null, '能力目录'])
+})
+
+test('sectionsOf：整段没有标签 ⇒ 一节 null；空正文 ⇒ 零节', () => {
+  assert.deepEqual(sectionsOf('一段没有任何标签的正文').map((s) => s.tag), [null])
+  assert.deepEqual(sectionsOf(''), [])
+})
+
+test('extractShape：结构载体进形状（assistant 的 tool_calls 条数、tool 结果的 tool_call_id）', () => {
+  const shape = extractShape(baseRequests(), { scenario: 'unit' })
+  const second = shape.requests[1].message_shape
+  assert.deepEqual(
+    second.map((m) => `${m.role}:${m.tool_calls}:${m.tool_call_id}`),
+    ['system:0:false', 'system:0:false', 'user:0:false', 'assistant:1:false', 'tool:0:true', 'assistant:0:false'],
+  )
+})
+
+test('extractShape：工具名排序后入形状（wire 侧 tools 数组顺序每次不同，判据不能依赖它）', () => {
+  const a = extractShape(baseRequests())
+  const shuffled = baseRequests()
+  shuffled[0].body.tools.reverse()
+  const b = extractShape(shuffled)
+  assert.deepEqual(diffShapes(a, b), [], '同一套工具、顺序不同 ⇒ 不得红')
+  assert.deepEqual(a.requests[0].tools.names, ['aaa_tool', 'zzz_tool'])
+})
+
+// ================= PS-001：该红的红 =================
+
+test('PS-001 拍平（ADR-048a 判过的那次退步）⇒ 红：system 小节合成一条 user 消息', () => {
+  const live = baseRequests()
+  // 拍平的形态：两条 system 消息并成一条 user 纯文本，工具结果也不再是 role: tool
+  live[0].body.messages = [{ role: 'user', content: live[0].body.messages.map((m) => m.content).join('\n') }]
+  const d = diffShapes(extractShape(baseRequests()), extractShape(live))
+  assert.ok(d.some((x) => x.includes('消息序列')), d.join('\n'))
+  assert.ok(d.some((x) => x.includes('system 小节标签')), d.join('\n'))
+})
+
+test('PS-001 请求数变化 ⇒ 红（多一轮 / 少一轮都算）', () => {
+  const live = baseRequests().slice(0, 1)
+  const d = diffShapes(extractShape(baseRequests()), extractShape(live))
+  assert.ok(d.some((x) => /请求数：基线 2 ≠ 现场 1/.test(x)), d.join('\n'))
+})
+
+test('PS-001 小节标签序列漂移 ⇒ 红（新增一节 / 换顺序）', () => {
+  const live = baseRequests()
+  live[0].body.messages[1].content = '【新小节】\n【能力目录】\n'
+  const d = diffShapes(extractShape(baseRequests()), extractShape(live))
+  assert.ok(d.some((x) => x.includes('system 小节标签')), d.join('\n'))
+})
+
+test('PS-001 工具面漂移 ⇒ 红：新增 / 移除各自说清', () => {
+  const live = baseRequests()
+  live[0].body.tools.push({ function: { name: 'new_tool' } })
+  live[0].body.tools = live[0].body.tools.filter((t) => t.function.name !== 'aaa_tool')
+  const d = diffShapes(extractShape(baseRequests()), extractShape(live))
+  assert.ok(d.some((x) => x.includes('新增 [new_tool]') && x.includes('移除 [aaa_tool]')), d.join('\n'))
+})
+
+test('PS-001 信封参数漂移 ⇒ 红（装配侧改 temperature 这类取值是有影响的改动）', () => {
+  const live = baseRequests()
+  live[0].body.temperature = 0.9
+  const d = diffShapes(extractShape(baseRequests()), extractShape(live))
+  assert.ok(d.some((x) => x.includes('req0 信封')), d.join('\n'))
+})
+
+test('PS-001 结构载体消失 ⇒ 红：工具结果被降级成正文（tool_call_id 不再带）', () => {
+  const live = baseRequests()
+  const msgs = live[1].body.messages
+  const i = msgs.findIndex((m) => m.role === 'tool')
+  msgs[i] = { role: 'user', content: `工具结果：${msgs[i].content}` }
+  const d = diffShapes(extractShape(baseRequests()), extractShape(live))
+  assert.ok(d.some((x) => x.includes('消息序列')), d.join('\n'))
+})
+
+// ================= PS-001 的反向：不该红的不得红 =================
+
+test('反向：正文措辞与规模变化不得红（规模由负载决定，不是判据）', () => {
+  const live = baseRequests()
+  // 标签序列**保持不变**，只把字变长——这正是「改用例措辞」的形状：结构没动。
+  live[0].body.messages[0].content =
+    '【工作区记忆】（这一节的字比基线长了很多很多，因为用例文本被改了；与【智能体记忆】相互独立）\n内容更多更更长\n\n【会话记忆】\n（本会话私有，现在字也长了）\n'
+  live[0].body.messages[2].content = '帮我把这段话改得更长一些再回显'
+  assert.deepEqual(diffShapes(extractShape(baseRequests()), extractShape(live)), [])
+})
+
+test('反向：观测列如实带规模，但它不参与比对', () => {
+  const obs = extractObservations(baseRequests())
+  assert.equal(obs.length, 2)
+  assert.ok(obs[0].message_bytes > 0 && obs[0].request_bytes > obs[0].message_bytes)
+  // 同一形状、正文更长 ⇒ 观测值必须变大（观测确实反映规模），但判据不得红
+  const longer = baseRequests()
+  longer[0].body.messages[2].content = '帮我把这段话改得更长一些再回显'.repeat(8)
+  const obsLonger = extractObservations(longer)
+  assert.ok(obsLonger[0].message_bytes > obs[0].message_bytes, '观测列必须随正文规模变大')
+  assert.deepEqual(diffShapes(extractShape(baseRequests()), extractShape(longer)), [])
+})
+
+// ================= 基线文件往返 =================
+
+test('渲染 ↔ 解析往返：基线文件里的 JSON 块与提取形状逐字段相等', () => {
+  const shape = extractShape(baseRequests(), { scenario: 'unit' })
+  const doc = renderBaselineDoc(shape, extractObservations(baseRequests()), { capturedAt: '2026-10-12' })
+  assert.deepEqual(parseBaselineDoc(doc), shape)
+  assert.match(doc, /不手改/)
+  assert.match(doc, /规模观测（\*\*不进判据/)
+})
+
+test('解析读不出 ⇒ null（缺块 / JSON 坏 / requests 不是数组），由调用方判 PS-002', () => {
+  assert.equal(parseBaselineDoc('# 没有围栏的文档\n'), null)
+  assert.equal(parseBaselineDoc('```json:prompt-shape\n{坏掉的\n```'), null)
+  assert.equal(parseBaselineDoc('```json:prompt-shape\n{"schema":1}\n```'), null)
+})
+
+// ================= CLI：退出码三态 =================
+
+function runCli (args) {
+  const r = spawnSync(process.execPath, [script, ...args], { encoding: 'utf8' })
+  return { code: r.status, out: stripAnsi(r.stdout ?? '') + stripAnsi(r.stderr ?? '') }
+}
+
+function writeLive (dir, requests) {
+  const p = path.join(dir, 'live.json')
+  fs.writeFileSync(p, JSON.stringify(requests))
+  return p
+}
+
+function writeBaseline (dir, requests) {
+  const shape = extractShape(requests, { scenario: 'unit' })
+  const p = path.join(dir, 'PROMPT_SHAPE.md')
+  fs.writeFileSync(p, renderBaselineDoc(shape, extractObservations(requests), { capturedAt: '2026-10-12' }))
+  return p
+}
+
+test('一致 ⇒ 退出 0，且 PS-001 / PS-002 / PS-003 三条结论都打出来', () => {
+  const dir = tmpDir('ok')
+  const reqs = baseRequests()
+  const r = runCli([`--from=${writeLive(dir, reqs)}`, `--baseline=${writeBaseline(dir, reqs)}`, '--scenario=unit'])
+  assert.equal(r.code, 0, r.out)
+  for (const code of ['PS-001', 'PS-002', 'PS-003']) assert.match(r.out, new RegExp(code), `${code} 没出现在结论里 ⇒ 那一格没在工作`)
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('PS-001 漂移 ⇒ 退出 1 并列出差异', () => {
+  const dir = tmpDir('drift')
+  const baseline = writeBaseline(dir, baseRequests())
+  const mutated = baseRequests()
+  mutated[0].body.messages.shift() // 少一条 system 小节
+  const r = runCli([`--from=${writeLive(dir, mutated)}`, `--baseline=${baseline}`, '--scenario=unit'])
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /PS-001/)
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('PS-002 基线缺失 / 块读不出 ⇒ 退出 2（不是 1，也不得静默通过）', () => {
+  const dir = tmpDir('nobase')
+  const live = writeLive(dir, baseRequests())
+  const missing = path.join(dir, 'gone.md')
+  const r1 = runCli([`--from=${live}`, `--baseline=${missing}`, '--scenario=unit'])
+  assert.equal(r1.code, 2, r1.out)
+  assert.match(r1.out, /PS-002/)
+
+  const broken = path.join(dir, 'broken.md')
+  fs.writeFileSync(broken, '# 生成物\n')
+  const r2 = runCli([`--from=${live}`, `--baseline=${broken}`, '--scenario=unit'])
+  assert.equal(r2.code, 2, r2.out)
+  assert.match(r2.out, /PS-002/)
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('PS-003 现场零请求 ⇒ 退出 2：空形状与空基线「一致」是本脚本最坏的假绿灯', () => {
+  const dir = tmpDir('empty')
+  const reqs = baseRequests()
+  const baseline = writeBaseline(dir, reqs)
+  const r = runCli([`--from=${writeLive(dir, [])}`, `--baseline=${baseline}`, '--scenario=unit'])
+  assert.equal(r.code, 2, r.out)
+  assert.match(r.out, /PS-003/)
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('--write ⇒ 用现场形状重写基线，随后再判即一致', () => {
+  const dir = tmpDir('write')
+  const reqs = baseRequests()
+  const target = path.join(dir, 'PROMPT_SHAPE.md')
+  const w = runCli([`--from=${writeLive(dir, reqs)}`, `--baseline=${target}`, `--scenario=unit`, '--write'])
+  assert.equal(w.code, 0, w.out)
+  assert.ok(fs.existsSync(target))
+  const r = runCli([`--from=${writeLive(dir, reqs)}`, `--baseline=${target}`, '--scenario=unit'])
+  assert.equal(r.code, 0, r.out)
+  fs.rmSync(dir, { recursive: true, force: true })
+})

@@ -69,6 +69,7 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 | 错误码 | [reference/ERROR_CODES.md](./reference/ERROR_CODES.md) | PROTOCOLS 不再列错误码表 |
 | 配置项 | [reference/CONFIGURATION.md](./reference/CONFIGURATION.md) | 模块 `README.md` 只写机制 + 指向它 |
 | 判据码（各守卫的编号地址） | [reference/GATE_CODES.md](./reference/GATE_CODES.md)（脚本声明生成） | 守卫脚本只写自己判什么，不抄全表 |
+| 出厂 prompt 的**形状基线** | [reference/PROMPT_SHAPE.md](./reference/PROMPT_SHAPE.md)（真实链路生成，不手改） | 口径（什么进判据 / 规模只作观测）在 ADR-057，别处不复述 |
 | 协议线上形状（帧 / 载荷 / 通道 / 线格式） | [architecture/PROTOCOLS.md](./architecture/PROTOCOLS.md) | — |
 | 系统拓扑（谁挂在谁下面） | [SYSTEM_MAP.md](./SYSTEM_MAP.md) | 其它图只画自己那一层 |
 | 排障链路（一次请求经过哪些代码） | [architecture/DATA_FLOW.md](./architecture/DATA_FLOW.md) | — |
@@ -119,6 +120,7 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 | 理解错误码 | [ERROR_CODES.md](./reference/ERROR_CODES.md) |
 | 配置系统 | [CONFIGURATION.md](./reference/CONFIGURATION.md) |
 | 给门禁加一条判据、要挑不撞的号 | [GATE_CODES.md](./reference/GATE_CODES.md) |
+| 看 prompt 实际送出去的形状 / 结构化的代价 | [PROMPT_SHAPE.md](./reference/PROMPT_SHAPE.md)（重生成：`PROMPT_SHAPE_UPDATE=1 node e2e/cases/t46-prompt-shape-baseline.mjs`） |
 | 快速上手 | [QUICK_START.md](./guides/QUICK_START.md) |
 | 开发新插件 | [PLUGIN_DEVELOPMENT.md](./guides/PLUGIN_DEVELOPMENT.md) |
 | 排查问题 | [TROUBLESHOOTING.md](./guides/TROUBLESHOOTING.md) |
