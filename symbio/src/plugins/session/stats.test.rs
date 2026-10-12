@@ -1,4 +1,4 @@
-//! `session/stats` 读数口的判据（[plan/12 §4](../../../../docs/goal/12-价值验收与基线埋点.md "docs/goal/12-价值验收与基线埋点")）：
+//! `session/stats` 读数口的判据（[plan/12 §4](../../../../docs/plan/12-价值验收与基线埋点.md "docs/plan/12-价值验收与基线埋点")）：
 //!
 //! 1. **复算**——出口的读数与直接 `apply` 逐字相等。同一切片、同一个 as-of：
 //!    出口只能调已有的投影，不许另写一份统计（否则两套口径会静默漂移）。
@@ -713,7 +713,7 @@ fn a_non_owner_reads_nothing_at_all() {
     }
 }
 
-/// 声誉列（[plan/12 批 2](../../../../docs/goal/12-价值验收与基线埋点.md "docs/goal/12-价值验收与基线埋点")，S6 第 15 步的读侧）：
+/// 声誉列（[plan/12 批 2](../../../../docs/plan/12-价值验收与基线埋点.md "docs/plan/12-价值验收与基线埋点")，S6 第 15 步的读侧）：
 /// `own` 取**本会话主体**，`by_principal` 把这份事实源里的主体原样摊开（`own` 在其中，
 /// 不另造口径）；判据只有一处——core 的 `reputation` 投影，本处只取数 + 排版。
 #[test]
@@ -851,7 +851,7 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
     assert!(denied.has_wal, "has_wal 独立于可见域：文件在，只是不给你看");
 }
 
-/// 校准列（S9 步 22 的读侧，[plan/12 批 1](../../../../docs/goal/12-价值验收与基线埋点.md "docs/goal/12-价值验收与基线埋点")）：
+/// 校准列（S9 步 22 的读侧，[plan/12 批 1](../../../../docs/plan/12-价值验收与基线埋点.md "docs/plan/12-价值验收与基线埋点")）：
 /// 读数 == 直接 `apply`（复算）+ 随事实源**反向**变化（证明它在算，不是常数）。
 ///
 /// 观测面 = 路由收束时落的 `memory.recalled{skill_id, fallback}`（`v2_skills::route`
@@ -920,7 +920,7 @@ fn calibration_column_recomputes_and_moves_with_the_wal() {
     assert!(denied.has_wal, "has_wal 独立于可见域");
 }
 
-/// 转写列（**对话面读侧**，[plan/12 批 2](../../../../docs/goal/12-价值验收与基线埋点.md "docs/goal/12-价值验收与基线埋点")）：
+/// 转写列（**对话面读侧**，[plan/12 批 2](../../../../docs/plan/12-价值验收与基线埋点.md "docs/plan/12-价值验收与基线埋点")）：
 /// 读的是**事实源**（`user.message` / `chat.assistant.final` / `chat.assistant.fallback` /
 /// `artifact.added` 四格）而不是会话存储里的消息副本。
 ///

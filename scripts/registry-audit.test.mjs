@@ -258,6 +258,43 @@ test('RG-008：doing 要求前置已闭环；前置 done 则放行（反向）',
   assert.deepEqual(errsOf(ok), [], '前置已闭环 ⇒ 开工不判')
 })
 
+test('RG-008：依赖机制全部 kind 同一套——文档类 / adr 的 active 同样要求前置已闭环', () => {
+  // 文档类不搞特殊化：`active` 断言「这篇现行」，其 `deps` 前置就必须已闭环
+  // （文档类编号 = 仓根相对路径去 `.md`，与真仓同形）
+  const blockedDoc = caseRoot({
+    'docs/plan/a.md': docDoc('docs/plan/a.md', { kind: 'plan', deps: ['docs/plan/b'] }),
+    'docs/plan/b.md': docDoc('docs/plan/b.md', { kind: 'plan', status: 'draft' }),
+  })
+  expectOnly(errsOf(blockedDoc), /RG-008 status=active 要求前置 `docs\/plan\/b` 已闭环，而它是 draft/)
+
+  const okDoc = caseRoot({
+    'docs/plan/a.md': docDoc('docs/plan/a.md', { kind: 'plan', deps: ['docs/plan/b'] }),
+    'docs/plan/b.md': docDoc('docs/plan/b.md', { kind: 'plan' }),
+  })
+  assert.deepEqual(errsOf(okDoc), [], '前置 active ⇒ 放行')
+
+  // 跨 kind 同样强制：文档的 active 前置可以是一条已闭环的 task
+  const okTask = caseRoot({
+    'docs/plan/a.md': docDoc('docs/plan/a.md', { kind: 'plan', deps: ['T-002'] }),
+    'task/T-002.md': taskDoc('T-002', { status: 'done', evidence: 'abc1234' }),
+  })
+  assert.deepEqual(errsOf(okTask), [], '前置 task 已 done ⇒ 放行')
+
+  // adr 与 spec / 文档类同构：active 要求前置已闭环
+  const blockedAdr = caseRoot({
+    'adr/ADR-090.md': adrDoc('ADR-090', { deps: ['ADR-091'] }),
+    'adr/ADR-091.md': adrDoc('ADR-091', { status: 'withdrawn', reason: '夹具' }),
+  })
+  expectOnly(errsOf(blockedAdr), /RG-008 status=active 要求前置 `ADR-091` 已闭环，而它是 withdrawn/)
+
+  // draft 文档可以引草案——门槛只档「生效中」状态
+  const draft = caseRoot({
+    'docs/plan/a.md': docDoc('docs/plan/a.md', { kind: 'plan', status: 'draft', deps: ['docs/plan/b'] }),
+    'docs/plan/b.md': docDoc('docs/plan/b.md', { kind: 'plan', status: 'draft' }),
+  })
+  assert.deepEqual(errsOf(draft), [], 'draft 引 draft 不判')
+})
+
 test('RG-015：supersedes 目标不存在 / 指向 task / 自身 / 双 active / 成环 变红；旧条 retired 则放行', () => {
   const missing = caseRoot({ 'spec/SP-010.md': specDoc('SP-010', { supersedes: ['SP-999'] }) })
   expectOnly(errsOf(missing), /RG-015 supersedes 指到不存在的编号 `SP-999`/)

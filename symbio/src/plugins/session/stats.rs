@@ -3,12 +3,12 @@
 //! 背景：网格**只写不读**——SLO §1.2 的四列（时延 / 兜底 / 成本 / 断点）早就
 //! 有投影算得出数，却没有任何生产出口能读到它们，于是这些投影只能挂
 //! `#[allow(dead_code)]` 承认「接线未落地」（[04 §3.1 批③](../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地")）。
-//! 本模块就是那一格的读侧出口：[plan/12 §3 批 0](../../../../docs/goal/12-价值验收与基线埋点.md "docs/goal/12-价值验收与基线埋点")
+//! 本模块就是那一格的读侧出口：[plan/12 §3 批 0](../../../../docs/plan/12-价值验收与基线埋点.md "docs/plan/12-价值验收与基线埋点")
 //! 的出口形态②（只读路由）。
 //!
 //! ## 三条纪律
 //!
-//! - **只调已有投影，不另写一份统计**（[plan/12 §4](../../../../docs/goal/12-价值验收与基线埋点.md "docs/goal/12-价值验收与基线埋点")）：
+//! - **只调已有投影，不另写一份统计**（[plan/12 §4](../../../../docs/plan/12-价值验收与基线埋点.md "docs/plan/12-价值验收与基线埋点")）：
 //!   本文件里没有分位数 / 占比 / 累计的算式——口径只活在 core 的投影里，出口
 //!   只做「取数 + 排版」。否则同一份事实会长出两套口径，读数与投影静默漂移，
 //!   而两边都自称是 SLO。**不变量同理**：清单只调 `check_all`，宽限与预算判据
@@ -78,7 +78,7 @@ pub(crate) struct SessionStats {
     pub tiers: Vec<TierRow>,
     /// 成本台账（`cost_ledger` 视图原样序列化）。
     pub cost: serde_json::Value,
-    /// 校准（S9 步 22 的**读侧**，[plan/12 批 1](../../../../docs/goal/12-价值验收与基线埋点.md "docs/goal/12-价值验收与基线埋点")）：
+    /// 校准（S9 步 22 的**读侧**，[plan/12 批 1](../../../../docs/plan/12-价值验收与基线埋点.md "docs/plan/12-价值验收与基线埋点")）：
     /// `calibration` 投影原样序列化（`{ by_skill: { <skill_id>: { skill_id, uses,
     /// fallbacks } } }`，按 `skill_id` 字典序）——`confidence = 1 − 回退率` 的口径活在
     /// core 的投影里，本处不重算。
@@ -100,7 +100,7 @@ pub(crate) struct SessionStats {
     /// 的「不变量进 CI/读侧」：e2e 断言的就是这一列。
     pub invariants: serde_json::Value,
     /// 声誉（S6 第 15 步的**读侧**，[04 §3.1 批⑧](../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地") +
-    /// [plan/12 批 2](../../../../docs/goal/12-价值验收与基线埋点.md "docs/goal/12-价值验收与基线埋点")）：`own` = 本会话
+    /// [plan/12 批 2](../../../../docs/plan/12-价值验收与基线埋点.md "docs/plan/12-价值验收与基线埋点")）：`own` = 本会话
     /// 主体自己的条目，`by_principal` = 这份事实源里每个主体的条目（`own` 在其中，
     /// 原样摊开、不另造口径）。
     ///
@@ -117,7 +117,7 @@ pub(crate) struct SessionStats {
     /// 与「没有任务 / 依赖未闭合」本来就同值，两种「空」由 `has_wal` 与本列的
     /// 上下游（清单在不在）分辨，不靠列的形状。
     pub readyset: serde_json::Value,
-    /// 转写（**对话面读侧**，[plan/12 批 2](../../../../docs/goal/12-价值验收与基线埋点.md "docs/goal/12-价值验收与基线埋点")）：
+    /// 转写（**对话面读侧**，[plan/12 批 2](../../../../docs/plan/12-价值验收与基线埋点.md "docs/plan/12-价值验收与基线埋点")）：
     /// `transcript` 投影原样序列化（`{ entries: [ { role, text } ] }`，按事件顺序 =
     /// append-only 的时间序；`role` 是 `"user"` / `"assistant"` / `"tool"`，
     /// 工具行另带 `tool` = 工具名）。
@@ -452,7 +452,7 @@ pub(crate) fn read(
     let cost = cost_ledger()
         .apply(&snapshot, i64::MAX, Budget::generous())
         .value;
-    // 校准列（[plan/12 批 1](../../../../docs/goal/12-价值验收与基线埋点.md "docs/goal/12-价值验收与基线埋点")）：与四列同一份
+    // 校准列（[plan/12 批 1](../../../../docs/plan/12-价值验收与基线埋点.md "docs/plan/12-价值验收与基线埋点")）：与四列同一份
     // 切片、同一个 as-of。观测面 = 路由收束时落的 `memory.recalled{skill_id, fallback}`。
     let cal = calibration()
         .apply(&snapshot, i64::MAX, Budget::generous())
@@ -520,7 +520,7 @@ pub(crate) fn read(
     )
     .map_err(|e| PluginError::InternalError(format!("就绪集序列化失败：{e}")))?;
 
-    // 转写列（对话面读侧，[plan/12 批 2](../../../../docs/goal/12-价值验收与基线埋点.md "docs/goal/12-价值验收与基线埋点")）：
+    // 转写列（对话面读侧，[plan/12 批 2](../../../../docs/plan/12-价值验收与基线埋点.md "docs/plan/12-价值验收与基线埋点")）：
     // 与四列同一份切片、同一个 as-of。口径（四格 → 三角色，含
     // [plan/10 批 3](../../../../docs/plan/10-工具轮v2化实施方案.md "docs/plan/10-工具轮v2化实施方案") 的工具结果）只活在 core
     // 的 `transcript` 投影里，本处只取数 + 排版；`may_read = false` 时切片已空 ⇒

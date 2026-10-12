@@ -333,7 +333,7 @@ fn the_hit_judgement_is_literal_after_the_writers_normalisation() {
     );
 }
 
-/// 链路前提（[plan/12 批 1](../../../../docs/goal/12-价值验收与基线埋点.md "docs/goal/12-价值验收与基线埋点") 的「写侧
+/// 链路前提（[plan/12 批 1](../../../../docs/plan/12-价值验收与基线埋点.md "docs/plan/12-价值验收与基线埋点") 的「写侧
 /// 前提」+ [plan/11 批 2 ③](../../../../docs/plan/11-多执行器与多主体加固实施方案.md "docs/plan/11-多执行器与多主体加固实施方案")
 /// 的接线判据）：技能入格后，**生产读方** `v2_memory::recall_view` 必须把它召回，
 /// 随后 `route` 必须真的判出观测。

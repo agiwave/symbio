@@ -9,7 +9,7 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// [12 批 0 / 批 1](../../docs/goal/12-价值验收与基线埋点.md "docs/goal/12-价值验收与基线埋点") 的出口判据（原文见该处）：
+// [12 批 0 / 批 1](../../docs/plan/12-价值验收与基线埋点.md "docs/plan/12-价值验收与基线埋点") 的出口判据（原文见该处）：
 // 从出口读到的每一列必须**真的在算**——按**已知动作**（跑两轮、成一败一）钉死期望值，
 // 反向再用读侧闸验「读数随读方身份收放」。校准列另加**一注**（没编过技能 ⇒ 有据的空）。
 //
@@ -145,7 +145,7 @@ export default defineCase(
           Number(stats.cost.total_ms) > 0,
           `成本台账应记下真实耗时（实际: ${stats.cost.total_ms}）`,
         );
-        // 校准列（[12 批 1](../../docs/goal/12-价值验收与基线埋点.md "docs/goal/12-价值验收与基线埋点")）：本会话没编过技能
+        // 校准列（[12 批 1](../../docs/plan/12-价值验收与基线埋点.md "docs/plan/12-价值验收与基线埋点")）：本会话没编过技能
         // （`skill_compile_enabled` 默认 off）⇒ **有据的空**，不是缺列。
         assertEq(
           stats.calibration.by_skill,

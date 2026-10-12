@@ -7,7 +7,7 @@
 
 > **这个 kind 回答什么**：查数据——路由 / 错误码 / 配置等权威表
 
-**计数**：active 3 · draft 0 · retired 0（共 3）
+**计数**：active 4 · draft 0 · retired 0（共 4）
 
 ## 现行文档（active）
 | 编号 | 标题 |
@@ -15,6 +15,7 @@
 | [`docs/ref/CONFIGURATION`](CONFIGURATION.md) | Symbio 配置参考 |
 | [`docs/ref/ERROR_CODES`](ERROR_CODES.md) | Symbio 错误码参考 |
 | [`docs/ref/ROUTES`](ROUTES.md) | Symbio 路由参考 |
+| [`docs/ref/slo-calibration`](slo-calibration.md) | SLO 校准 · 首测（2026-09-30） |
 
 ## 草案（draft）
 （无）

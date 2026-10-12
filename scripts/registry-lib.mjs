@@ -74,6 +74,12 @@ const DOC_STATUS_RULES = {
  * 文档类 kind 的通用形状：**在位存放、正文即条目**——所以没有必有小节
  * （正文结构由文档自己定，按 kind 强切只会逼出空壳小节），编号 = 路径。
  * `blurb` 是这个 kind 回答的问题（写进汇总页，兼作新文档选 kind 的指路）。
+ *
+ * `requiresDepsDone: ['active']` 与 `spec` 同款：**依赖是义务，不是注释**——
+ * `deps` 对全部 kind 同一套强制性机制（RG-006 存在性 / 不自指 / 不重复 / 不成环
+ * + RG-008 状态门槛），文档类不搞特殊化：`active` 断言「这篇文档现行」，
+ * 其前置就必须已闭环（闭环态按目标 kind 取：task = `done`，其余 = `active`）。
+ * `draft` / `retired` 不在门槛里——草案可以引草案，废止不因前置废止而红。
  */
 const docKind = (label, blurb) => ({
   label,
@@ -86,7 +92,7 @@ const docKind = (label, blurb) => ({
   refSections: [],
   statusRules: DOC_STATUS_RULES,
   closedStatus: 'active',
-  requiresDepsDone: [],
+  requiresDepsDone: ['active'],
 })
 
 export const KINDS = {
@@ -143,7 +149,9 @@ export const KINDS = {
       withdrawn: { require: ['reason'], forbid: [] },
     },
     closedStatus: 'active',
-    requiresDepsDone: [],
+    // 与 spec / 文档类同构：`active` 断言「这条决策现行」，其 `deps` 前置就必须已闭环。
+    // 依赖机制不按 kind 打折——RG-008 的门槛档位对全部 kind 同一套。
+    requiresDepsDone: ['active'],
   },
 }
 
@@ -226,6 +234,9 @@ export const SCAN_SKIP_DIRS = new Set([
   '.venv',
   // 工作区数据与对外模板：不是本仓的阅读文档（内容由会话 / 模板自己管）
   '.workbuddy-ai',
+  // 会话工作区（记忆 / 项目数据）：与 `.workbuddy-ai` 同性质，`.gitignore` 的
+  // `.workbuddy*/` 一并盖住；内容由会话自己管，不进本仓登记
+  '.workbuddy',
   '.symbio',
   '.agents',
   'examples',

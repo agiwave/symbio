@@ -106,7 +106,7 @@ created: 2026-09-07
 > `stats` 是读数——三者都不是数据操作。前两者的**实时面**都走 `event_bus` 的 `vdfs` 频道
 > （见 [PROTOCOLS.md](../arch/PROTOCOLS.md "docs/arch/PROTOCOLS") §事件总线频道）。
 >
-> `stats` 的读数只能调已有的投影、不得另写一份统计口径（[plan/12 §4](../goal/12-价值验收与基线埋点.md "docs/goal/12-价值验收与基线埋点")
+> `stats` 的读数只能调已有的投影、不得另写一份统计口径（[plan/12 §4](../plan/12-价值验收与基线埋点.md "docs/plan/12-价值验收与基线埋点")
 > 的复算判据）；实现见 [`symbio/src/plugins/session/stats.rs`](../../symbio/src/plugins/session/stats.rs)。
 >
 > 读侧闸（[plan/01 §7](../plan/01-核心架构.md "docs/plan/01-核心架构")）：**不声明 `principal` = 本机默认读数**；
