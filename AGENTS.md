@@ -20,6 +20,15 @@
 判断一件事要不要做只问两件事——**它属哪个迁移步**、**本步混进去还能不能独立回退**。
 标尺（哪一层可妥协）见 [`docs/plan/README.md`](docs/plan/README.md) §0.1。
 
+## 核心形状：改宽之前先立决策
+
+`symbio_core` 是**影响面最大**的模块，它的质量高于任何单个插件的质量——不要拿机制面去付实现面的账。
+这条纪律（`08 §0 纪律 3`，登记条目 `registry/spec/D08-3.md`）现在有执行方：
+`node scripts/core-shape-audit.mjs`（CS-001）把 core 的三格形状冻结成**只许降**——
+`pub trait` 数 / `fn` 成员总数 / 带默认体的成员数。变宽就红，而把它推下去只有一条路：
+改基线数字，那需要一条挂在旁边的 `core-shape-allow <格>: ADR-NNN <理由>`，且那个 ADR 必须存在（CS-002）。
+**收窄不需要批准，变宽需要论证**（机制的决策见 [`registry/adr/ADR-055.md`](registry/adr/ADR-055.md)）。
+
 ## 任务 / 规范登记：状态只写在 registry/*.md
 
 顶层机制（总纲：[`docs/plan/14-登记与汇总机制.md`](docs/plan/14-登记与汇总机制.md)）：

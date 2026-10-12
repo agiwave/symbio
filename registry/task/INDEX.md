@@ -3,12 +3,13 @@
 > ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `registry/task/*.md` 生成，请勿手改。**
 > 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，原则与流程见 [14 · 登记与汇总机制](../../docs/plan/14-登记与汇总机制.md)。
 
-**计数**：☐ todo 4 · 🟡 doing 0 · ☑ done 49 · ❌ wont 0（共 53）
+**计数**：☐ todo 5 · 🟡 doing 0 · ☑ done 49 · ❌ wont 0（共 54）
 
 ## 待处理（按依赖顺序）
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
-| `C2` | `VdfsProvider` 的 match 样板在每一处生产实现里各写一遍 | — | C | — |
+| `T-009` | C2 的形态定案——去 dispatch 样板要不要动 VdfsProvider 的契约面（先 ADR，后实施） | now | meta | — |
+| `C2` | `VdfsProvider` 的 match 样板在每一处生产实现里各写一遍 | — | C | T-009 |
 | `S-end①` | 没有一份 prompt 形状基线，无法回答「结构化对模型是变好还是变坏」——没有它，任何「更有效」的判断都是凭感觉拍板 | — | S | — |
 | `S-end②` | `full` 没被真实会话负载压过：e2e 全绿只是必要条件，不是「跑过真实负载」 | — | S | P3 |
 | `T-007` | 第三方插件规范 §10 待确认决策（D2–D6）逐条写 ADR | later | meta | T-004 |

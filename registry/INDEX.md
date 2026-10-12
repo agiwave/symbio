@@ -6,6 +6,6 @@
 
 | 类别 | 条目数 | 状态分布 | 汇总页 |
 |---|---|---|---|
-| [task · 任务](./task/INDEX.md) | 53 | todo 4 · doing 0 · done 49 · wont 0 | [task/INDEX.md](./task/INDEX.md) |
+| [task · 任务](./task/INDEX.md) | 54 | todo 5 · doing 0 · done 49 · wont 0 | [task/INDEX.md](./task/INDEX.md) |
 | [spec · 规范](./spec/INDEX.md) | 31 | draft 0 · active 31 · retired 0 | [spec/INDEX.md](./spec/INDEX.md) |
-| [adr · 架构决策](./adr/INDEX.md) | 55 | active 45 · superseded 7 · withdrawn 3 | [adr/INDEX.md](./adr/INDEX.md) |
+| [adr · 架构决策](./adr/INDEX.md) | 56 | active 46 · superseded 7 · withdrawn 3 | [adr/INDEX.md](./adr/INDEX.md) |

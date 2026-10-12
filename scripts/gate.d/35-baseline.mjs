@@ -34,7 +34,7 @@ const repoRoot = path.resolve(scriptDir, '..', '..')
 
 const git = (ctx, args, label) => ctx.run({ label, cmd: 'git', args, cwd: repoRoot, echo: 'none' })
 
-// ── 三个提取函数：各落点的形状不同，判据的**读法**也必须不同 ─────────
+// ── 提取函数：各落点的形状不同，判据的**读法**也必须不同 ─────────
 
 /** `scripts/core-export-audit.mjs` 的 `BASELINE`：默认值写在三元里，形如 `{ zero: 0, one: 61 }`。
  *  **只取默认分支**（`: { … }` 那一侧）——env 覆盖值不进基线判定，它由 `envLoosened` 单判。 */
@@ -44,6 +44,22 @@ function coreExportCells(text) {
   if (m) {
     cells.set('zero', Number(m[1]))
     cells.set('one', Number(m[2]))
+  }
+  return cells
+}
+
+/** `scripts/core-shape-audit.mjs` 的 `SHAPE_BASELINE`：同样是三元尾部的对象字面量，三格。
+ *  键名与键序就是 `CORE_SHAPE_BASELINE=<traits>:<methods>:<defaults>` 的位置口径，
+ *  也必须是审计侧读的那三格——任何一边单改，这里就会读不出格（⇒ 判红，不是判绿）。 */
+function coreShapeCells(text) {
+  const cells = new Map()
+  const m = /:\s*\{\s*traits:\s*(\d+),\s*methods:\s*(\d+),\s*defaults:\s*(\d+)\s*\}/.exec(
+    text.replace(/\r\n/g, '\n'),
+  )
+  if (m) {
+    cells.set('traits', Number(m[1]))
+    cells.set('methods', Number(m[2]))
+    cells.set('defaults', Number(m[3]))
   }
   return cells
 }
@@ -119,6 +135,18 @@ const RATCHETS = [
     label: 'core 根出口的 0 / 单消费方符号存量（只许降）',
   },
   {
+    // 形状三格（`pub trait` 数 / `fn` 成员总数 / 带默认体的成员数）。放宽的**资格**由
+    // `core-shape-audit` 的 CS-002 判（注释里必须有能打开的 ADR），本条只判「数字有没有比
+    // 上一版更松」——两半合起来才是「放宽 = 写一份决策」。
+    id: 'core-shape',
+    file: 'scripts/core-shape-audit.mjs',
+    dir: 'ceiling',
+    cellsOf: coreShapeCells,
+    waivers: waiverReader('core-shape-allow'),
+    envVar: 'CORE_SHAPE_BASELINE',
+    label: 'core 公共形状三格（trait 数 / 成员数 / 默认体数，只许降）',
+  },
+  {
     id: 'dead-code',
     file: 'scripts/dead-code-audit.mjs',
     dir: 'ceiling',
@@ -182,15 +210,22 @@ function envLoosened(ratchet, defaults) {
   if (!ratchet.envVar) return null
   const raw = process.env[ratchet.envVar]
   if (raw === undefined || raw === '') return null
-  const override = new Map()
-  if (raw.includes(':')) {
-    const [zero, one] = raw.split(':').map((n) => Number(n))
-    override.set('zero', zero).set('one', one)
-  } else {
-    const n = Number(raw)
-    if (Number.isNaN(n)) return { error: `${ratchet.envVar}=${raw} 不是数字` }
-    override.set('R-002', n)
+  const keys = [...defaults.keys()]
+  const nums = raw.split(':').map((n) => Number(n))
+  if (nums.some((n) => Number.isNaN(n))) {
+    return { error: `${ratchet.envVar}=${raw} 不是数字（或冒号分隔的数字）` }
   }
+  // 覆盖值与默认值**按位置**对齐：`0:58` → 默认值的第一、二格；`20:72:24` 同理三格。
+  // 早先这里写死 `[zero, one]` 两个键名，落点一多就露底：第三格的形状是「数得清格、
+  // 但对不上键名」，报出来的红指向一个不存在的格——判据本身没错，错在读法只认一处形状。
+  if (nums.length !== keys.length) {
+    return {
+      error:
+        `${ratchet.envVar}=${raw} 给了 ${nums.length} 格，而默认值是 ${keys.length} 格` +
+        `（${keys.join(':')}）—— 按位置给全，少一格等于把那格的判据删掉`,
+    }
+  }
+  const override = new Map(keys.map((k, i) => [k, nums[i]]))
   const bad = []
   for (const [key, want] of override) {
     const have = defaults.get(key)

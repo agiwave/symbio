@@ -12,6 +12,7 @@
 | 前缀 | 归属 | 声明脚本 | 已用号段 | 下一个可用号 |
 |---|---|---|---|---|
 | **C** | core 出口 | `scripts/core-export-audit.mjs` | C-001–003 | `C-004` |
+| **CS** | core 形状 | `scripts/core-shape-audit.mjs` | CS-001–002 | `CS-003` |
 | **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–009 | `D-010` |
 | **DC** | 文档计数对账（文档里的少数几个数 vs 代码） | `scripts/doc-count-audit.mjs` | DC-001–003 | `DC-004` |
 | **E** | 插件入口与门面 | `scripts/plugin-entry-audit.mjs` | E-001–009、E-011–012 | `E-013` |
@@ -34,6 +35,8 @@
 | **C-001** | `scripts/core-export-audit.mjs` |
 | **C-002** | `scripts/core-export-audit.mjs` |
 | **C-003** | `scripts/core-export-audit.mjs` |
+| **CS-001** | `scripts/core-shape-audit.mjs` |
+| **CS-002** | `scripts/core-shape-audit.mjs` |
 | **D-001** | `scripts/doc-link-audit.mjs` |
 | **D-002** | `scripts/doc-link-audit.mjs` |
 | **D-003** | `scripts/doc-link-audit.mjs` |
