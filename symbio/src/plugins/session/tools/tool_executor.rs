@@ -401,7 +401,7 @@ pub async fn execute_tool_async(
     //   1. 工具照跑（最长到空闲超时），整个 Turn 继续推进——用户以为停了，其实没停；
     //   2. `handle_abort` 的 3s 兜底把 `is_working` 复位，消费循环在下一帧醒来时
     //      因 `!is_working` 直接 break，**跳过 `persist_failure`**，于是工具节点
-    //      永远停在 `Streaming`（违反 `docs/node-state-streaming.md` §8 #11）；
+    //      永远停在 `Streaming`（违反 `symbio/src/plugins/session/docs/node-state-streaming.md` §8 #11）；
     //   3. 工具返回后的 `Completed` 补丁被那个已 break 的消费循环丢弃，前端收不到。
     // 因此「中止」必须是与「工具返回」「空闲超时」并列的第三个出口。
     //
@@ -588,7 +588,7 @@ async fn record_protocol_failure(
 /// 「运行中」迹象：参数流完画面静止，直到结果突然出现——用户无法判断
 /// 是"还在跑"还是"卡死了"。
 ///
-/// 状态机（`docs/node-state-streaming.md` §2.3）：
+/// 状态机（`symbio/src/plugins/session/docs/node-state-streaming.md` §2.3）：
 /// `pending → streaming（参数流式 + 执行）→ waiting_user_action → completed / failed`。
 /// 因此 `Streaming` 在这里**不是**"正在接收流"，而是"这次调用正在跑"。
 ///
@@ -944,7 +944,7 @@ pub async fn process_tool_calls_async(
 
         let result_msg_id = uuid::Uuid::new_v4().to_string();
 
-        // ── 外部执行闸门（S8 第 20 步，[roadmap/S09 §6](../../../../docs/stage/S09-外部执行与熔断.md)）──
+        // ── 外部执行闸门（S8 第 20 步，[roadmap/S09 §6](../../../../../docs/stage/S09-外部执行与熔断.md "docs/stage/S09-外部执行与熔断")）──
         //
         // 判定紧贴执行窗口之前、**先于 PreToolUse 钩子**：钩子是给「要执行的调用」
         // 准备的用户策略，对一通马上要被拒的调用先跑一遍钩子，等于让拒绝白白付一次

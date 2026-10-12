@@ -30,7 +30,7 @@ pub(crate) fn request_principal(ctx: &dyn crate::symbio_core::PluginInvokeReques
 pub(crate) struct SessionContext {
     pub messages: Vec<ChatMessage>,
     pub session: Arc<PersistentChatSession>,
-    /// **本会话的主体身份**（[plan/11 批 1](../../../../docs/plan/11-多执行器与多主体加固实施方案.md)
+    /// **本会话的主体身份**（[plan/11 批 1](../../../../../docs/plan/11-多执行器与多主体加固实施方案.md "docs/plan/11-多执行器与多主体加固实施方案")
     /// ② 的取值点）：会话选定的 agent ⇒ 主体名，未选 ⇒ `agent:main`。
     ///
     /// 派生只有一处（[`crate::symbio_core::authz::principal_of`]），转写事件的 `actor`、消息的
@@ -130,21 +130,21 @@ pub(crate) struct TurnState {
     /// 级别 2（异步工具调用）：`settle_turn` 把每个工具 spawn 出去并登记 id，
     /// 完成回调逐个移除；全部移除后唤醒主循环——**不完整不唤醒**。
     pub(crate) in_flight_tools: HashSet<String>,
-    /// 本轮的**代际立约记录**（[04 §3.1 批⑧](../../../../docs/plan/04-工程落地.md)，S08 §3）。
+    /// 本轮的**代际立约记录**（[04 §3.1 批⑧](../../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地")，S08 §3）。
     ///
     /// 由工具执行层填（`process_tool_calls_async` 的出参），轮末收束入格
     /// （`v2_facts::record_derived`）——两者之间必须有个**请求作用域**的地方存它：
     /// 执行在 `close_turn`、入格在轮末（`v2_exec`），中间隔着一整段本轮收尾。与
     /// `TurnState` 的其它字段一样随请求复位，所以不会把上一轮的承诺带到这一轮。
     pub(crate) delegations: Vec<crate::plugins::session::tools::Delegation>,
-    /// 本轮的**任务表声明**（[04 §3.1 批⑨](../../../../docs/plan/04-工程落地.md)，S7 步 16）。
+    /// 本轮的**任务表声明**（[04 §3.1 批⑨](../../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地")，S7 步 16）。
     ///
     /// 形态与 [`TurnState::delegations`] 完全对称：工具执行层填
     /// （`process_tool_calls_async` 的出参），轮末收束入格（`v2_facts::record_derived`
     /// → `v2_tasks::write`），中间隔着同一段本轮收尾，所以要有个请求作用域的量存它。
     pub(crate) task_decls: Vec<crate::plugins::session::tools::TaskDeclaration>,
-    /// 本轮**外部执行闸门判熔断**的理由（[04 §3.1 批⑩](../../../../docs/plan/04-工程落地.md)，
-    /// S8 步 20，[roadmap/S09 §6](../../../../docs/stage/S09-外部执行与熔断.md) 验收 2）。
+    /// 本轮**外部执行闸门判熔断**的理由（[04 §3.1 批⑩](../../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地")，
+    /// S8 步 20，[roadmap/S09 §6](../../../../../docs/stage/S09-外部执行与熔断.md "docs/stage/S09-外部执行与熔断") 验收 2）。
     ///
     /// 形态与 [`TurnState::task_decls`] 对称：工具执行层填（`process_tool_calls_async`
     /// 的出参），轮末收束入格（`v2_facts::record_derived` → `CircuitBreaker::break_event`）。
@@ -190,7 +190,7 @@ pub(crate) struct TurnState {
     /// 落 `memory.recalled` 的时机在**轮末收束**（`v2_facts::record_learning`）而不是
     /// 取视图那一刻：溯源锚是本轮 `user.message` 格，那时它才在事实源里。
     pub(crate) recall_view: Option<crate::symbio_core::RecallView>,
-    /// 本轮**技能路由**的判定（S9 步 22，[04 §3.1 批⑪](../../../../docs/plan/04-工程落地.md)）：
+    /// 本轮**技能路由**的判定（S9 步 22，[04 §3.1 批⑪](../../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地")）：
     /// 每条 `(skill_id, fallback)`，即 `v2_skills::route` 对召回视图里一条技能的判决。
     ///
     /// 形态与 [`TurnState::gate_breaks`] / [`TurnState::task_decls`] 完全对称：
@@ -216,7 +216,7 @@ pub(crate) struct TurnState {
     /// 开关关着时这里是空表，但**判定照常发生**——观测照常落格，那正是
     /// 「只编译、不加速」的观察形态；只是没人拿这一份去装配。
     pub(crate) skill_hits: Vec<crate::plugins::session::v2_skills::SkillLlmHit>,
-    /// 本轮的**调度段**（S7 步 16–17，[04 §3.1 批⑨](../../../../docs/plan/04-工程落地.md)）：
+    /// 本轮的**调度段**（S7 步 16–17，[04 §3.1 批⑨](../../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地")）：
     /// 就绪任务集渲染成的一段提示，交给**本轮的执行者**（模型）。
     ///
     /// 与 [`TurnState::recall_view`] 同一条取用口径（`tool_rounds == 0` 取一次、
@@ -896,7 +896,7 @@ impl ChatOrchestrator {
         //   执行后 `Completed` / `WaitingUserAction`；未执行的批尾统一收口）
         // - 恢复执行：`resume::process_tool_resume_action`（approve/retry/supply）
         //
-        // 状态机见 `docs/node-state-streaming.md` §2.3；
+        // 状态机见 `symbio/src/plugins/session/docs/node-state-streaming.md` §2.3；
         // 「每个 ToolCall 必然到达终态」这条不变量由上面两处负责保证。
 
         // 根 Turn 的终态**不在此发出**。

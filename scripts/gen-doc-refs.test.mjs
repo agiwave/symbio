@@ -190,3 +190,55 @@ test('--check：漂移即非零退出（CI 用），且不写盘', () => {
   assert.match(out(r), /RF-002 docs\/plan\/x\.md/)
   assert.equal(read(base, 'docs/plan/x.md'), before, '--check 不得写盘')
 })
+
+// ---- 源码注释 pass（RF-004）：审计判的行与改写的行必须是同一批 ----
+
+test('RF-004 源码注释：手工地址按登记表唯一识别后自动接管（补编号标题 + 重算成本文件相对地址）', () => {
+  const base = caseRoot({
+    'docs/task/T-001.md': taskDoc('T-001'),
+    'symbio/src/plugins/session/x.rs': ['//! 会话见 [T-001](../task/T-001.md) 与', '// 详见 [会话总纲](../docs/task/T-001.md)（多一层 `../` 也认）。', ''].join('\n'),
+  })
+  const r = runGenDocRefs([`--root=${base}`])
+  assert.equal(r.code, 0, out(r))
+  const text = read(base, 'symbio/src/plugins/session/x.rs')
+  // 标签即编号：身份已在标签上 ⇒ 只重算地址，不加标题（同 md 侧的身份载体形态）
+  assert.match(text, /\[T-001\]\(\.\.\/\.\.\/\.\.\/\.\.\/docs\/task\/T-001\.md\)/, '标签即编号 ⇒ 不加标题，只重算地址')
+  // 自由文字标签的手工地址：**自动接管**（不是判红）——文档正文明文地址判 RF-003
+  assert.match(text, /\[会话总纲\]\(\.\.\/\.\.\/\.\.\/\.\.\/docs\/task\/T-001\.md "T-001"\)/, 'RF-004 接管：补编号标题 + 重算相对本文件的地址')
+  assert.equal(runGenDocRefs([`--root=${base}`]).changed.length, 0, '第二次零改动（幂等）——门禁 autoWork 天天跑它')
+})
+
+test('RF-004 源码注释：代码行里的链接一律不动（字符串与字面量是内容，不是入链）', () => {
+  const base = caseRoot({
+    'docs/task/T-001.md': taskDoc('T-001'),
+    'symbio/src/x.rs': ['const A = "[T-001](../task/OLD.md)"; // 注释外', '// 注释内的照改：[T-001](../task/OLD.md)', ''].join('\n'),
+  })
+  const r = runGenDocRefs([`--root=${base}`])
+  assert.equal(r.code, 0, out(r))
+  const text = read(base, 'symbio/src/x.rs')
+  assert.match(text, /const A = "\[T-001\]\(\.\.\/task\/OLD\.md\)";/, '代码行的字符串一个字都不动')
+  assert.match(text, /注释内的照改：\[T-001\]\(\.\.\/\.\.\/docs\/task\/T-001\.md\)/, '标签即编号 ⇒ 只重算地址，不加标题')
+})
+
+test('RF-004 源码注释：指向非登记文件的地址不动（存在性交给 D-010，本机制不是通用重写器）', () => {
+  const base = caseRoot({
+    'docs/task/T-001.md': taskDoc('T-001'),
+    'symbio/src/x.rs': ['// 见 [构建脚本](../scripts/build.mjs) 与 [外链](https://example.com)。', ''].join('\n'),
+  })
+  const r = runGenDocRefs([`--root=${base}`])
+  assert.equal(r.code, 0, out(r))
+  assert.equal(r.changed.length, 0, '非登记目标不得被改写')
+  assert.match(read(base, 'symbio/src/x.rs'), /\[构建脚本\]\(\.\.\/scripts\/build\.mjs\)/)
+})
+
+test('源码注释里的 `[[记号]]`：能解析的展开；形如编号却解析不出 ⇒ RF-001；字面量不动', () => {
+  const base = caseRoot({
+    'docs/task/T-001.md': taskDoc('T-001'),
+    'symbio/src/x.rs': ['// 见 [[T-001]]；错号 [[T-999]]；字面量 [[bin]] / [[false]] 不动。', ''].join('\n'),
+  })
+  const r = runGenDocRefs([`--root=${base}`])
+  assert.equal(r.code, 1, out(r))
+  assert.match(out(r), /symbio\/src\/x\.rs:1：RF-001 源码注释引用了未登记的编号 `\[\[T-999\]\]`/)
+  assert.equal(r.changed.length, 0, '有 RF-001 就一个文件都不改（改一半 = 两份半截状态）')
+})
+

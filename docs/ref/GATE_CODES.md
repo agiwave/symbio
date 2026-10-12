@@ -13,7 +13,7 @@
 |---|---|---|---|---|
 | **C** | core 出口 | `scripts/core-export-audit.mjs` | C-001–003 | `C-004` |
 | **CS** | core 形状 | `scripts/core-shape-audit.mjs` | CS-001–002 | `CS-003` |
-| **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–009 | `D-010` |
+| **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–010 | `D-011` |
 | **DC** | 文档计数对账（文档里的少数几个数 vs 代码） | `scripts/doc-count-audit.mjs` | DC-001–004 | `DC-005` |
 | **E** | 插件入口与门面 | `scripts/plugin-entry-audit.mjs` | E-001–009、E-011–012 | `E-013` |
 | **GC** | 判据码命名空间本身 | `scripts/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
@@ -25,7 +25,7 @@
 | **PN** | 健壮性登记（每一处 panic 都是显式事实） | `scripts/panic-audit.mjs` | PN-001–003 | `PN-004` |
 | **PS** | prompt 形状基线 | `scripts/prompt-shape-audit.mjs` | PS-001–003 | `PS-004` |
 | **R** | 死代码 | `scripts/dead-code-audit.mjs` | R-001–002 | `R-003` |
-| **RF** | 文档引用（编号 → 地址由机制生成） | `scripts/gen-doc-refs.mjs` | RF-001–003 | `RF-004` |
+| **RF** | 文档引用（编号 → 地址由机制生成） | `scripts/gen-doc-refs.mjs` | RF-001–004 | `RF-005` |
 | **RG** | 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认） | `scripts/registry-lib.mjs` | RG-001–021 | `RG-022` |
 | **S** | 源码 grep 形态 | `scripts/grep-audit.mjs` | S-001–003、S-006–012 | `S-013` |
 | **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
@@ -48,6 +48,7 @@
 | **D-007** | `scripts/doc-link-audit.mjs` |
 | **D-008** | `scripts/doc-link-audit.mjs` |
 | **D-009** | `scripts/doc-symbol-audit.mjs` |
+| **D-010** | `scripts/doc-link-audit.mjs` |
 | **DC-001** | `scripts/doc-count-audit.mjs` |
 | **DC-002** | `scripts/doc-count-audit.mjs` |
 | **DC-003** | `scripts/doc-count-audit.mjs` |
@@ -102,6 +103,7 @@
 | **RF-001** | `scripts/gen-doc-refs.mjs` |
 | **RF-002** | `scripts/gen-doc-refs.mjs` |
 | **RF-003** | `scripts/gen-doc-refs.mjs` |
+| **RF-004** | `scripts/gen-doc-refs.mjs` |
 | **RG-001** | `scripts/registry-lib.mjs` |
 | **RG-002** | `scripts/registry-lib.mjs` |
 | **RG-003** | `scripts/registry-lib.mjs` |

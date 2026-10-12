@@ -1,4 +1,4 @@
-//! `session/stats` 读数口的判据（[plan/12 §4](../../../../docs/plan/12-价值验收与基线埋点.md)）：
+//! `session/stats` 读数口的判据（[plan/12 §4](../../../../docs/goal/12-价值验收与基线埋点.md "docs/goal/12-价值验收与基线埋点")）：
 //!
 //! 1. **复算**——出口的读数与直接 `apply` 逐字相等。同一切片、同一个 as-of：
 //!    出口只能调已有的投影，不许另写一份统计（否则两套口径会静默漂移）。
@@ -513,7 +513,7 @@ fn reverse_case_each_column_moves_when_the_wal_changes() {
     assert_eq!(after.checkpoint["event_count"], 2);
 }
 
-/// 不变量列随事实源反向变化（[04 §3.1 批④](../../../../docs/plan/04-工程落地.md)）：
+/// 不变量列随事实源反向变化（[04 §3.1 批④](../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地")）：
 /// 真实形状的两轮全绿 ⇒ 空；删掉收束格 ⇒ C4 必须报出那个缺口。
 #[test]
 fn invariants_move_when_the_wal_changes() {
@@ -642,7 +642,7 @@ fn missing_wal_is_an_honest_zero_and_creates_nothing() {
     );
 }
 
-/// 读侧闸（[04 §3.1 批⑥](../../../../docs/plan/04-工程落地.md)）：声明**属主**
+/// 读侧闸（[04 §3.1 批⑥](../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地")）：声明**属主**
 /// 身份 ⇒ 与不声明逐字相同——闸的存在不是为了把属主挡在外面。
 #[test]
 fn declaring_the_owner_reads_everything() {
@@ -713,7 +713,7 @@ fn a_non_owner_reads_nothing_at_all() {
     }
 }
 
-/// 声誉列（[plan/12 批 2](../../../../docs/plan/12-价值验收与基线埋点.md)，S6 第 15 步的读侧）：
+/// 声誉列（[plan/12 批 2](../../../../docs/goal/12-价值验收与基线埋点.md "docs/goal/12-价值验收与基线埋点")，S6 第 15 步的读侧）：
 /// `own` 取**本会话主体**，`by_principal` 把这份事实源里的主体原样摊开（`own` 在其中，
 /// 不另造口径）；判据只有一处——core 的 `reputation` 投影，本处只取数 + 排版。
 #[test]
@@ -851,7 +851,7 @@ fn readyset_column_lists_candidates_and_obeys_the_read_gate() {
     assert!(denied.has_wal, "has_wal 独立于可见域：文件在，只是不给你看");
 }
 
-/// 校准列（S9 步 22 的读侧，[plan/12 批 1](../../../../docs/plan/12-价值验收与基线埋点.md)）：
+/// 校准列（S9 步 22 的读侧，[plan/12 批 1](../../../../docs/goal/12-价值验收与基线埋点.md "docs/goal/12-价值验收与基线埋点")）：
 /// 读数 == 直接 `apply`（复算）+ 随事实源**反向**变化（证明它在算，不是常数）。
 ///
 /// 观测面 = 路由收束时落的 `memory.recalled{skill_id, fallback}`（`v2_skills::route`
@@ -920,7 +920,7 @@ fn calibration_column_recomputes_and_moves_with_the_wal() {
     assert!(denied.has_wal, "has_wal 独立于可见域");
 }
 
-/// 转写列（**对话面读侧**，[plan/12 批 2](../../../../docs/plan/12-价值验收与基线埋点.md)）：
+/// 转写列（**对话面读侧**，[plan/12 批 2](../../../../docs/goal/12-价值验收与基线埋点.md "docs/goal/12-价值验收与基线埋点")）：
 /// 读的是**事实源**（`user.message` / `chat.assistant.final` / `chat.assistant.fallback` /
 /// `artifact.added` 四格）而不是会话存储里的消息副本。
 ///
@@ -979,7 +979,7 @@ fn transcript_column_reads_the_conversation_back_from_the_wal() {
     assert!(denied.has_wal, "has_wal 独立于可见域：文件在，只是不给你看");
 }
 
-/// 转写列把**工具结果**也读出来（[plan/10 批 3](../../../../docs/plan/10-工具轮v2化实施方案.md)）：
+/// 转写列把**工具结果**也读出来（[plan/10 批 3](../../../../docs/plan/10-工具轮v2化实施方案.md "docs/plan/10-工具轮v2化实施方案")）：
 /// `artifact.added` 进投影 ⇒ 列里多一条 `role = "tool"`（带 `tool` = 工具名）。
 ///
 /// 这是「口径只活在 core 投影」的直接后果——出口不加任何判断，投影多一格，列就多一行。

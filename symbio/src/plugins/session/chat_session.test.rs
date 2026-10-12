@@ -138,7 +138,7 @@ async fn test_replace_messages_rejects_path_traversal() {
     let outside = dir.parent().unwrap().join("outside_secret.txt");
     std::fs::write(&outside, "secret").expect("外部文件写入失败");
 
-    // 旧消息引用 `../outside_secret.txt`（相对路径逃逸）。
+    // 旧消息引用 `../outside_secret.txt`（相对路径逃逸）。// doc-link-allow D-010: 示意路径（被测契约的输入不是入链）
     let old_msgs = vec![tool_msg_with_archive("m1", "../outside_secret.txt")];
     session
         .append_messages(old_msgs)

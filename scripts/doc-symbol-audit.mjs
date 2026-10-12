@@ -37,6 +37,7 @@
  *   `register_option_field`。
  *
  * 豁免（都对应「文档说的不是现状」）：
+ * doc-link-allow D-010: 下一行的 `ADR-NNN.md` 是占位编号示例（真正的 ADR 文件名是 ADR-001…）
  *   1. `docs/archive/`、`docs/adr/` 整体排除——ADR 正文（`docs/adr/ADR-NNN.md`）
  *      与归档都是历史快照，当时的符号指认不随代码改名回改（回改反而篡改历史）；
  *   2. 行内含历史词（已删除 / 已退役 / 已废弃 / deprecated / 取代 / 判为删除）⇒ 跳过，

@@ -14,17 +14,17 @@
  *
  * | 生成物 | 真源 |
  * |---|---|
- * | `MECHANISMS` | [01 §8 权威参数表](../docs/plan/01-核心架构.md) 的「参数键」列 |
+ * | `MECHANISMS` | [01 §8 权威参数表](../docs/plan/01-核心架构.md "docs/plan/01-核心架构") 的「参数键」列 |
  * | `DOMAINS` | 01 §8 的「取值域」列——读法写在那张表下面，`↳ §N` 的集合去那一节读 |
- * | `DIMENSIONS` / `AXES` / `AXIS_POLARITIES` | [02 §2 五维表 / §3 五轴表（末两列是极性）](../docs/plan/02-能力坐标系.md) |
+ * | `DIMENSIONS` / `AXES` / `AXIS_POLARITIES` | [02 §2 五维表 / §3 五轴表（末两列是极性）](../docs/plan/02-能力坐标系.md "docs/plan/02-能力坐标系") |
  * | `LEVEL_MAX` / `TIER_MAX` / `TIER_CORES` | 02 §3.1 刻度表（**列数** = 等级格数）/ §3.2 天梯表 |
  * | `OVERLAP_LIMIT` / `DECLARED_OVERLAP` | 02 §3.3 共线上限与登记表 |
  * | `CAPABILITIES` / `KINDS` | 02 §6.1 能力名册（七列）与类型闭集表 |
  * | `DECLARED_*` | 02 §2「条数」列、§6.2 生长位表、§7 社交能力表——**是被验的声明** |
  * | `PSEUDO` | 02 §5 伪高阶表的「说法」列 |
- * | `STAGE_CLAIMS` | [路线图总览 §1 阶梯总表](../docs/stage/00-路线图总览.md) |
+ * | `STAGE_CLAIMS` | [路线图总览 §1 阶梯总表](../docs/stage/00-路线图总览.md "docs/stage/00-路线图总览") |
  * | `STAGE_DOCS` | 每阶 `S0N-*.md` §3 的 ```capability-assign``` 块 + §4 的加粗平凡值行 |
- * | `COGNITIVE_DEMANDS` | [S10 §2 需求映射表](../docs/stage/S10-个人认知体系注入.md)——全仓唯一一份认知体系需求清单 |
+ * | `COGNITIVE_DEMANDS` | [S10 §2 需求映射表](../docs/stage/S10-个人认知体系注入.md "docs/stage/S10-个人认知体系注入")——全仓唯一一份认知体系需求清单 |
  *
  * **顶层键 vs 子键**：`projection.param` 在 §8 里与顶层键同列一张表，但 01 §8 自己写明
  * 「它不是第 11 个机制键，是 `projection` 的子键」。判据因此是形状而非名单：

@@ -160,7 +160,7 @@ pub(crate) async fn prepare_turn_inputs(
             Some(dir) => crate::plugins::session::v2_tasks::prompt_section(&dir),
             None => None,
         };
-        // 技能路由（S9 步 22，[04 §3.1 批⑪](../../../../docs/plan/04-工程落地.md)）：
+        // 技能路由（S9 步 22，[04 §3.1 批⑪](../../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地")）：
         // 置信度闸判 + 把低置信的技能**摘出本轮召回视图**（反自动化回退，S11 §5）。
         // 与召回 / 调度段同一条 `tool_rounds == 0` 口径（同一轮内判定不漂移）；
         // 临时会话同「不读不写」——没有事实源就没有技能，无从判。

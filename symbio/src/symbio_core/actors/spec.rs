@@ -1,6 +1,6 @@
-//! 主体规格、模式与作用域（[plan/01 §4](../../../../../docs/plan/01-核心架构.md)）。
+//! 主体规格、模式与作用域（[plan/01 §4](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")）。
 
-/// 主体模式（[plan/01 §4](../../../../../docs/plan/01-核心架构.md)：机制，**3 个封顶**）。
+/// 主体模式（[plan/01 §4](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")：机制，**3 个封顶**）。
 ///
 /// 模式选择的判据是函数不是清单：可写成确定性规则 → [`Pattern::Decider`]；
 /// 只需重述已有事实 → [`Pattern::Translator`]；否则 → [`Pattern::Reasoner`]。
@@ -14,7 +14,7 @@ pub enum Pattern {
     Translator,
 }
 
-/// 作用域（[plan/01 §8](../../../../../docs/plan/01-核心架构.md)）。
+/// 作用域（[plan/01 §8](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")）。
 ///
 /// `root` 是**一等输入**，不是"没有子智能体"的特例（03 §2 推论：
 /// 不出现 `if (children.is_empty())` 分支）。
@@ -25,7 +25,7 @@ pub enum Scope {
     Child(String),
 }
 
-/// 主体规格（[plan/01 §4](../../../../../docs/plan/01-核心架构.md) 的 `ActorSpec`，五字段）。
+/// 主体规格（[plan/01 §4](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构") 的 `ActorSpec`，五字段）。
 #[derive(Debug, Clone)]
 pub struct ActorSpec {
     /// 身份（数据，无限增长——如 `"agent:main"`）。
@@ -41,7 +41,7 @@ pub struct ActorSpec {
 }
 
 impl ActorSpec {
-    /// S01 的平凡值主体（[roadmap/S01 §4](../../../../../docs/stage/S01-最小闭环.md)）：
+    /// S01 的平凡值主体（[roadmap/S01 §4](../../../../docs/stage/S01-最小闭环.md "docs/stage/S01-最小闭环")）：
     /// 全规则驱动、预算放宽、单主体——平凡值下系统完整运行。
     pub fn trivial(principal: impl Into<String>) -> Self {
         ActorSpec {

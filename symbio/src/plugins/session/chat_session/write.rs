@@ -254,7 +254,7 @@ impl PersistentChatSession {
     ///
     /// ## 为什么回消息，而不是回条数
     ///
-    /// `seq` 只在存储写入时分配（见 `docs/vdfs-session-messages.md` §3.4），调用方
+    /// `seq` 只在存储写入时分配（见 `symbio/src/plugins/session/docs/vdfs-session-messages.md` §3.4），调用方
     /// 手里那条**没有号**——所以「每一条被落库的消息都必须发一次带存储 `seq` 的
     /// 变更」这条不变量，只有在调用方能拿到权威副本时才成立。回条数等于让调用方
     /// 拿不到可下发的载荷，于是"落库"与"换号"之间必然出现断口：前端留下转写分配的
@@ -381,7 +381,7 @@ impl PersistentChatSession {
         session.updated_at = now;
         self.save_session(&session).await?;
 
-        // 落库回包（见 `docs/vdfs-session-messages.md` §3.4）：取**存储里的最终形态**
+        // 落库回包（见 `symbio/src/plugins/session/docs/vdfs-session-messages.md` §3.4）：取**存储里的最终形态**
         // 交回调用方下发。从 `session.messages` 取而非回传入参副本——上面两道写入期
         // 变换（轮次窗口淘汰、工具链裁剪）可能已经动过它们，回执必须与磁盘逐字段一致。
         // 已被淘汰的（批量追加超过窗口时可能发生）自然被滤掉：交回一条存储里并不

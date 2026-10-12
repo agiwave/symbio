@@ -1,9 +1,9 @@
-//! `adapters` —— 外部资源的唯一接缝（v2 ⑤，[plan/05 §3.3](../../../../docs/plan/05-模块架构.md)）。
+//! `adapters` —— 外部资源的唯一接缝（v2 ⑤，[plan/05 §3.3](../../../../docs/plan/05-模块架构.md "docs/plan/05-模块架构")）。
 //!
 //! ## 为什么令牌住这里
 //!
 //! 「能不能碰模型」本质是「能不能拿到外部资源句柄」——归属 ⑤ 是唯一的正确位置
-//! （[plan/05 §3.3](../../../../docs/plan/05-模块架构.md)）。时延闸门不是新机制，
+//! （[plan/05 §3.3](../../../../docs/plan/05-模块架构.md "docs/plan/05-模块架构")）。时延闸门不是新机制，
 //! 就是本包的**依赖注入策略**：`assemble` / 令牌签发按档位给证，调用方拿到的
 //! 令牌类型决定它能调哪些方法——**反射档超时不是被检测到，而是不可能发生**。
 //!
@@ -11,7 +11,7 @@
 //!
 //! 形状逐字来自可执行论证
 //! [`docs/plan/verify/latency_gate.rs`](../../../../docs/plan/verify/latency_gate.rs)；
-//! 四层预算表来自 [plan/01 §10](../../../../docs/plan/01-核心架构.md)。
+//! 四层预算表来自 [plan/01 §10](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")。
 //!
 //! ## 「依赖」的边界（诚实划界）
 //!
@@ -26,7 +26,7 @@ use crate::symbio_core::ModelUsage;
 use crate::symbio_core::PromptMessage;
 use crate::symbio_core::{CapabilityMeta, TurnToolCallInfo};
 
-// ── 四层时延（[plan/01 §10](../../../../docs/plan/01-核心架构.md)，一等契约） ──
+// ── 四层时延（[plan/01 §10](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")，一等契约） ──
 
 /// 时延档位。**判据是时延，不是形式**——约束的是 `budget_ms`，不是"工具"这个名词。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -42,7 +42,7 @@ pub enum LatencyTier {
 }
 
 impl LatencyTier {
-    /// 四层预算（[plan/01 §8](../../../../docs/plan/01-核心架构.md) 参数表）。
+    /// 四层预算（[plan/01 §8](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构") 参数表）。
     pub fn budget_ms(self) -> u64 {
         match self {
             LatencyTier::Reflex => 80,
@@ -280,7 +280,7 @@ pub trait LlmAdapter: Send + Sync {
         messages: &[PromptMessage],
     ) -> Result<String, AdapterError>;
 
-    /// 埋点版生成（SLO 校准，[plan/04 §1](../../../../docs/plan/04-工程落地.md)）：
+    /// 埋点版生成（SLO 校准，[plan/04 §1](../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地")）：
     /// 除文本外返回 **adapter 边界实测耗时**（毫秒）。默认实现包一层
     /// `Instant`——桩与真实适配器零改动共享；调用方把它写到 final 事件的
     /// `cost_ms`，成本台账（③ cost_ledger）与熔断判据从此有了真实来源
@@ -354,7 +354,7 @@ pub struct DispatchOutcome {
     pub ok: bool,
     /// 本次调用**收束于等待用户动作**（confirm / ask_user ⇒ 本轮停下等用户）。
     /// 运行器据此**停止工具循环**（恢复前提见
-    /// [plan/11 批 2](../../../../docs/plan/11-多执行器与多主体加固实施方案.md)）。
+    /// [plan/11 批 2](../../../../docs/plan/11-多执行器与多主体加固实施方案.md "docs/plan/11-多执行器与多主体加固实施方案")）。
     pub needs_user_action: bool,
     /// 等待用户时卡片载荷（工具自决的 `prompt` 形状：审批卡 / 提问卡不同）。
     ///

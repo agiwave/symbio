@@ -224,6 +224,7 @@ test('S-010 stays silent inside the vdfs plugin (the owner)', () => {
 })
 
 test('S-010 exempts historical records (archive)', () => {
+  // doc-link-allow D-010: 下一行讲的是「已删除的旧豁免」，文件确实不存在——史实叙述
   // `docs/CHANGELOG.md` 曾与 archive 并列豁免；该机制已废除（变更历史以 `git log` 为准），
   // 文件也随之删除，故这里只保留 archive 这一条豁免。
   const r = s010Audit({

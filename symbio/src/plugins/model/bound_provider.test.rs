@@ -462,7 +462,7 @@ async fn unreachable_endpoint_maps_to_generation_failed() {
     assert!(result.is_err(), "不可达端点必须失败");
 }
 
-/// SLO 校准实测（G2，[plan/04 §1](../../../../docs/plan/04-工程落地.md) §1.2）：
+/// SLO 校准实测（G2，[plan/04 §1](../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地") §1.2）：
 /// **系统自身开销**（不含模型推理——mock 即答）在 N 轮真实 HTTP/SSE 全链路上的
 /// 分布。这个数字回答 G2 的缺口「只有预算断言，没有实测」：
 ///
@@ -471,7 +471,7 @@ async fn unreachable_endpoint_maps_to_generation_failed() {
 ///   给模型留出主导份额）、**max ≤ 300ms**（快速档——最坏情况不得溢出快速档；
 ///   溢出说明链路自身失控，与模型无关）。
 ///
-/// 实测值记录在 [docs/plan/slo-calibration.md](../../../../docs/plan/slo-calibration.md)。
+/// 实测值记录在 [docs/plan/slo-calibration.md](../../../../docs/plan/slo-calibration.md "docs/plan/slo-calibration")。
 #[tokio::test]
 async fn reflex_tier_system_overhead_is_measured_and_bounded() {
     let mut samples: Vec<u64> = Vec::new();

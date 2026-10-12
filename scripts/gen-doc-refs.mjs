@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * gen-doc-refs — 文档间引用只写编号，链接地址由机制生成与更新（RF-001 / RF-002 / RF-003）
+ * gen-doc-refs — 文档间引用只写编号，链接地址由机制生成与更新（RF-001 / RF-002 / RF-003 / RF-004）
  *
  * ## 它治的病
  *
@@ -26,28 +26,47 @@
  *     **RF-003 判红**（这正是不受机制的地址：搬走后没人改得动它）。改写方式两种，
  *     都在编号里选一个：`[[编号]]` 或 `[[编号|显示文字]]`。
  *
- * ## 三个方向的分工
+ * ## 源码注释也归本机制管（RF-004）
+ *
+ * 源码注释（`.rs` / `.ts` / `.mjs` / … 的注释行）里同样有大量指路链接——实测 319 条，
+ * 其中 88 条已因文档搬家而静默失效。**同一处病灶不能两套待遇**：本脚本对源码注释做同样的
+ * 展开与重算，差别只有一处——**手工地址不判红，而是自动接管**（RF-004）：
+ *
+ *   - 源码里的存量地址是一次性历史（300+ 条逐条手改正是「人工维护」本身），而只要登记表里
+ *     能**唯一**识别出目标（dir 解析 / 根解析 / 尾缀匹配 / 唯一文件名），改写就是机械的；
+ *   - 接管 = 补上编号标题并重算成**相对本文件**的地址，此后文档搬家由 RF-002 自愈；
+ *   - 识别不出唯一目标（非登记文件 / 歧义）⇒ 不动，存在性交给 `doc-link-audit` 的 D-010；
+ *   - 源码注释里的 `[[记号]]`：能解析的照常展开；**编号形状却解析不出**（前缀存在但整号
+ *     未登记，如 `[[T-999]]`）⇒ RF-001 判红；`[[bin]]` / `[[false]]` 这类非编号字面量不动
+ *     （源码注释天然充满方括号语法，照文档口径全判红会把守卫喂死）。
+ *
+ * 扫描口径（注释行、扩展名、跳过目录）导出给 `doc-link-audit` 共用——**审计判的行
+ * 必须与改写的行是同一批**，两边各数一遍必然漂移。
+ *
+ * ## 四个方向的分工
  *
  * | 码 | 判什么 | 怎么处置 |
  * |---|---|---|
  * | **RF-001** | `[[编号]]` 解析不出目标（未登记 / 拼错 / 目标文件不在） | 判红，**不改任何文件**（改一半等于两份半截状态） |
  * | **RF-002** | 已展开的 `[编号](地址)` / `[文字](地址 "编号")` 里，地址 ≠ 该编号当前所在文件 | 本脚本自动改成当前地址（门禁 `60-facts` 的 autoWork 跑它并暂存） |
- * | **RF-003** | 地址指向已登记文档，但链接既不认编号标签也不认编号标题（手工地址） | 判红并要求写成 `[[编号]]` / `[[编号\|显示文字]]`（这种地址机制搬不动） |
+ * | **RF-003** | 地址指向已登记文档，但链接既不认编号标签也不认编号标题（手工地址，**文档正文**） | 判红并要求写成 `[[编号]]` / `[[编号\|显示文字]]`（这种地址机制搬不动） |
+ * | **RF-004** | 手工地址指向已登记文档且**目标可唯一识别**（**源码注释**） | 自动接管：补编号标题 + 重算成相对本文件的地址（改完即受 RF-002 管） |
  *
  * ## 不碰什么
  *
  * 链接**认不出编号**、且**指向的不是已登记文档**的一律不动（外链 / 图片 / 锚点 / 指向代码、
  * 脚本、归档与生成页的普通链接）：本机制只接管「登记条目的引用」，不是通用链接重写器。
+ * 源码侧另有一条：**只碰注释行**——代码行里的字符串与字面量是内容，不是入链。
  *
  * 用法：
- *   node scripts/gen-doc-refs.mjs            改写（展开 `[[编号]]` + 重算地址）
+ *   node scripts/gen-doc-refs.mjs            改写（展开 `[[编号]]` + 重算地址 + 接管源码地址）
  *   node scripts/gen-doc-refs.mjs --check    只比对，漂移则非零退出（CI 用）
  *   node scripts/gen-doc-refs.mjs --root=<仓库根>   （回归测试夹具用）
  * 退出码：0 = 一致 / 已改写；1 = RF-001 / RF-003 有违规（不写盘）；2 = 参数不识别。
  */
 // 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns RF 文档引用（编号 → 地址由机制生成）
-// @codes RF-001 RF-002 RF-003
+// @codes RF-001 RF-002 RF-003 RF-004
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -61,7 +80,8 @@ const defaultRoot = path.resolve(scriptDir, '..')
 const USAGE =
   '用法：node scripts/gen-doc-refs.mjs [--write] [--check] [--root=<仓库根>]\n' +
   '  [[编号]] / [[编号|显示文字]] / [[编号#锚点]] 展开成站内链接；已展开的地址按编号重算；\n' +
-  '  编号解析不出即红且不写盘（RF-001）；指向已登记文档的手工地址判红（RF-003）。\n' +
+  '  源码注释里的手工地址按登记表唯一识别后自动接管（RF-004）；\n' +
+  '  编号解析不出即红且不写盘（RF-001）；文档正文里指向已登记文档的手工地址判红（RF-003）。\n' +
   '  退出码：0 = 通过；1 = 违规 / --check 漂移；2 = 参数不识别'
 
 /**
@@ -84,7 +104,7 @@ const LINK_RE = /\[(`?)([^\]]+?)\1\]\(\s*([^)\s]+)(?:\s+"([^"]*)")?\s*\)/g
  * 判据用「匹配起点是否落在代码段内」：`` [`T-002`](../task/T-002.md) `` 的链接起点在段外
  * （段只包住标签），仍按真引用重算地址；`` `[T-002](…)` `` 整条在段内，不动。
  */
-function codeRanges(line) {
+export function codeRanges(line) {
   const out = []
   for (let i = 0; i < line.length; ) {
     const bt = line.indexOf('`', i)
@@ -98,7 +118,7 @@ function codeRanges(line) {
   }
   return out
 }
-const inCode = (ranges, at) => ranges.some(([a, b]) => at >= a && at < b)
+export const inCode = (ranges, at) => ranges.some(([a, b]) => at >= a && at < b)
 
 /** 按行处理，跳过 ``` / ~~~ 围栏内的内容（示例代码里的链接不是引用）。 */
 function mapOutsideFences(text, fn) {
@@ -129,6 +149,94 @@ const resolveFrom = (fromRel, target) => {
   return path.posix.normalize(path.posix.join(dir === '.' ? '' : dir, have))
 }
 
+// ==================== 源码注释扫描口径（与 doc-link-audit 共用） ====================
+/**
+ * 源码扫描根（相对仓库根）。**只收仓库跟踪的源码树**：`docs/` 是 Markdown 的地盘，
+ * 根目录散件没有注释形态的入链，`.symbio` / `.workbuddy*` / `tmp` 是本地产物。
+ */
+export const SRC_ROOTS = ['symbio', 'tauri', 'cli', 'scripts', 'e2e', 'examples', '.github']
+
+/** 参与注释扫描的源码扩展名（`.md` 刻意不在：它由文档 pass 与 D-001 管）。 */
+export const SRC_EXT = new Set([
+  '.rs', '.ts', '.tsx', '.js', '.mjs', '.cjs', '.vue',
+  '.yml', '.yaml', '.toml', '.sh', '.ps1', '.html', '.css',
+])
+
+/**
+ * 递归时跳过的目录：依赖 / 产物 / **机器本地配置**。
+ * `.cargo` 必须在列——根 `.gitignore` 用 `.cargo` 前缀通配把它挡在版本库外，
+ * 扫描它等于让判定依赖「这台机器上恰好有什么」（不可复现），
+ * 改写它更是把内容写进 git 看不见的文件。
+ */
+export const SRC_SKIP_DIRS = new Set([
+  'node_modules', 'target', 'dist', 'build', 'vendor', '.git', '.venv', '.cargo',
+])
+
+/** `#` 注释族（yaml / toml / shell）；其余按 `//` `/*` `*` `<!--` 判。 */
+const HASH_COMMENT_EXT = new Set(['.yml', '.yaml', '.toml', '.sh', '.ps1'])
+
+/**
+ * 该行是否为**注释行**——审计与改写共用的唯一口径（判的行与改的行必须是同一批）。
+ * 判据是「去空白后以注释前缀起始」：行首即注释才算，行内尾注释不判
+ * （`- run: x # see [y](z)` 这类把注释当内容的边界不值得猜）。
+ */
+export function isSourceCommentLine(line, ext) {
+  const t = line.trim()
+  if (HASH_COMMENT_EXT.has(ext)) return t.startsWith('#')
+  if (t.startsWith('//') || t.startsWith('/*') || t.startsWith('*')) return true
+  if ((ext === '.html' || ext === '.vue') && t.startsWith('<!--')) return true
+  return false
+}
+
+/** 收集 `root` 下参与扫描的源码文件：`{file, rel, ext}`，`rel` 为仓根相对 posix 路径。 */
+export function listSourceFiles(root) {
+  const out = []
+  const walk = (dir) => {
+    let ents
+    try {
+      ents = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of ents) {
+      const abs = path.join(dir, e.name)
+      if (e.isDirectory()) {
+        if (!SRC_SKIP_DIRS.has(e.name)) walk(abs)
+        continue
+      }
+      const ext = path.extname(e.name).toLowerCase()
+      if (!SRC_EXT.has(ext)) continue
+      const rel = path.relative(root, abs).split(path.sep).join('/')
+      if (rel.startsWith('docs/archive/')) continue // 归档是历史快照（同 md 口径）
+      out.push({ file: abs, rel, ext })
+    }
+  }
+  for (const r of SRC_ROOTS) walk(path.join(root, r))
+  return out
+}
+
+/**
+ * 源码注释里的手工地址 → 登记条目（**必须唯一**，否则返回 null 不动）。
+ * 四级解析：相对本文件 → 相对仓库根（剥前导 `../`）→ 地址尾缀含仓根相对路径
+ * （治「`../` 层数写错」这一最大死链类）→ 文件名在登记表里唯一。
+ */
+function matchSourceEntry(rel, target, byRel) {
+  const have = target.split('#')[0]
+  const dirHit = resolveFrom(rel, have)
+  if (byRel.has(dirHit)) return byRel.get(dirHit)
+  const norm = path.posix.normalize(have)
+  if (byRel.has(norm)) return byRel.get(norm)
+  const stripped = path.posix.normalize(have.replace(/^(\.\.\/)+/, ''))
+  if (byRel.has(stripped)) return byRel.get(stripped)
+  const suffixHits = [...byRel.keys()].filter((r) => have.endsWith('/' + r))
+  if (suffixHits.length === 1) return byRel.get(suffixHits[0])
+  if (suffixHits.length > 1) return null // 多个登记文件共享尾缀 ⇒ 歧义，不猜
+  const base = path.posix.basename(have)
+  const baseHits = [...byRel.keys()].filter((r) => path.posix.basename(r) === base)
+  if (baseHits.length === 1) return byRel.get(baseHits[0])
+  return null
+}
+
 /**
  * CLI 入口（导出供回归测试直接调用，不 spawn）。
  * @param {string[]} argv 不含 node 与脚本路径的 argv 片段
@@ -146,7 +254,7 @@ export function runGenDocRefs(argv) {
   }
 
   const { entries, errors, missing } = loadEntries(root)
-  const lines = ['--- gen-doc-refs: 引用只写编号（RF-001 / RF-002 / RF-003） ---']
+  const lines = ['--- gen-doc-refs: 引用只写编号（RF-001 / RF-002 / RF-003 / RF-004） ---']
   if (missing || entries.length === 0) {
     const msg = errors.length ? errors : ['登记范围读不出：扫不到任何已登记条目']
     return { code: 2, lines: lines.concat(msg.map((e) => red(`[ERROR] ${e}`)), red('[ERROR] 无条目可解析引用——不退化成「什么都没检查」')), changed: [] }
@@ -214,6 +322,7 @@ export function runGenDocRefs(argv) {
         const frag = target.includes('#') ? target.slice(target.indexOf('#')) : ''
         // 身份载体的规范形态：标签是编号 ⇒ 不加标题；标题带编号（显示文字自由）⇒ 保留标题
         const carry = byTitle ? `${want}${frag} "${title}"` : `${want}${frag}`
+        // doc-link-allow D-010: 下一行是本条判据讲的路径形态示例（`a.md` 是占位名）
         // 已经解析到同一个文件 ⇒ 不动（避免把 `./a.md` 与 `a.md` 这类等价写法来回改）
         if (path.posix.normalize(path.posix.join(dir, have)) === entry.rel) return m
         addressesFixed += 1
@@ -224,6 +333,85 @@ export function runGenDocRefs(argv) {
     if (after !== before) {
       changed.push(e.rel)
       pending.push({ file: e.file, after })
+    }
+  }
+
+  // ---- 源码注释 pass（RF-004）：同一批注释行里做展开 / 重算 / 接管 ----
+  // 与 md pass 共用 `bad` / `changed` / `pending`：写盘决策仍然是「有任何 RF-001 / RF-003
+  // 就一个文件都不改」，源码的红同样拦在写盘之前。
+  let srcChecked = 0
+  let srcTakeovers = 0
+  let srcTokens = 0
+  const srcTakeoverRels = new Set()
+  // 已知编号前缀（`T` / `ADR` / `SP` …）：源码里**形如编号却解析不出** ⇒ 拼错，RF-001 判红；
+  // 没有前缀的字面量（`[[bin]]` / `[[false]]`）不判——源码注释天然充满方括号语法。
+  const knownIdPrefixes = new Set(
+    [...byId.keys()]
+      .filter((id) => id.includes('-'))
+      .map((id) => id.slice(0, id.lastIndexOf('-'))),
+  )
+  for (const { file, rel, ext } of listSourceFiles(root)) {
+    const before = fs.readFileSync(file, 'utf8')
+    const after = before
+      .split('\n')
+      .map((line, li) => {
+        if (!isSourceCommentLine(line, ext)) return line // 只碰注释行：代码里的字符串是内容
+        // ① 记号：能解析的展开；编号形状解析不出 ⇒ RF-001；其余字面量不动
+        const code1 = codeRanges(line)
+        let out = line.replace(TOKEN_RE, (m, id, frag, label, off) => {
+          if (inCode(code1, off)) return m
+          const target = byId.get(id)
+          if (!target) {
+            const prefix = id.includes('-') ? id.slice(0, id.lastIndexOf('-')) : ''
+            if (prefix && knownIdPrefixes.has(prefix)) {
+              bad.push(
+                `${rel}:${li + 1}：RF-001 源码注释引用了未登记的编号 \`[[${id}${frag ?? ''}]]\`（拼错？还是目标还没登记？）`,
+              )
+            }
+            return m
+          }
+          srcTokens += 1
+          const addr = `${relFrom(path.posix.dirname(rel) === '.' ? '' : path.posix.dirname(rel), target.rel)}${frag ?? ''}`
+          return label ? `[${label}](${addr} "${id}")` : `[${id}](${addr})`
+        })
+        // ② 链接：已带编号 ⇒ 重算（RF-002）；不带编号但目标可唯一识别 ⇒ 接管（RF-004）
+        const code2 = codeRanges(out)
+        out = out.replace(LINK_RE, (m, _tick, label, target, title, off) => {
+          if (inCode(code2, off)) return m
+          if (!isManagedTarget(target)) return m
+          const key = label.replace(/`/g, '').trim()
+          const byTitle = title ? byId.get(title) : undefined
+          let entry = byTitle ?? byId.get(key)
+          let takeover = false
+          if (!entry) {
+            entry = matchSourceEntry(rel, target, byRel)
+            if (!entry) return m // 非登记目标 / 歧义：不动，存在性交给 D-010
+            if (title) return m // 已有非编号标题：不猜人的意图，留给人工
+            takeover = true
+          }
+          srcChecked += 1
+          const dir = path.posix.dirname(rel)
+          const want = relFrom(dir === '.' ? '' : dir, entry.rel)
+          const have = target.split('#')[0]
+          const frag = target.includes('#') ? target.slice(target.indexOf('#')) : ''
+          if (takeover) {
+            srcTakeovers += 1
+            srcTakeoverRels.add(rel)
+            return `[${_tick}${label}${_tick}](${want}${frag} "${entry.meta.id}")`
+          }
+          // doc-link-allow D-010: 下一行是本条判据讲的路径形态示例（`a.md` 是占位名）
+          // 已经解析到同一个文件 ⇒ 不动（`./a.md` 与 `a.md` 这类等价写法不来回改）
+          if (path.posix.normalize(path.posix.join(dir, have)) === entry.rel) return m
+          addressesFixed += 1
+          const carry = byTitle ? `${want}${frag} "${title}"` : `${want}${frag}`
+          return `[${_tick}${label}${_tick}](${carry})`
+        })
+        return out
+      })
+      .join('\n')
+    if (after !== before) {
+      changed.push(rel)
+      pending.push({ file, after })
     }
   }
 
@@ -242,19 +430,25 @@ export function runGenDocRefs(argv) {
 
   if (changed.length) {
     if (check) {
-      for (const c of changed) lines.push(red(`[ERROR] RF-002 ${c} 的引用地址与编号不一致（重跑 node scripts/gen-doc-refs.mjs）`))
+      for (const c of changed) {
+        if (srcTakeoverRels.has(c)) {
+          lines.push(red(`[ERROR] RF-004 ${c} 的源码注释地址待接管 / 重算（重跑 node scripts/gen-doc-refs.mjs）`))
+        } else {
+          lines.push(red(`[ERROR] RF-002 ${c} 的引用地址与编号不一致（重跑 node scripts/gen-doc-refs.mjs）`))
+        }
+      }
       lines.push(red(`gen-doc-refs 未通过（--check）：${changed.length} 个文件的引用需要重算`))
       return { code: 1, lines, changed }
     }
     lines.push(
       green(
-        `gen-doc-refs 已改写 ${changed.length} 个文件（展开记号 ${tokensExpanded} 处 · 重算地址 ${addressesFixed} 处）`,
+        `gen-doc-refs 已改写 ${changed.length} 个文件（展开记号 ${tokensExpanded} 处 · 重算地址 ${addressesFixed} 处 · 源码注释：接管 ${srcTakeovers} 处 · 重算 ${srcChecked - srcTakeovers} 处 · 记号 ${srcTokens} 处）`,
       ),
     )
   } else {
     lines.push(
       green(
-        `gen-doc-refs 通过：引用地址与编号一致（核对 ${linksChecked} 条受管链接 / ${tokensExpanded} 个记号）`,
+        `gen-doc-refs 通过：引用地址与编号一致（核对 ${linksChecked} 条受管链接 / ${tokensExpanded} 个记号 · 源码注释 ${srcChecked} 条 / 记号 ${srcTokens} 个）`,
       ),
     )
   }

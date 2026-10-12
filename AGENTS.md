@@ -64,7 +64,7 @@
   单文档，索引与域分组由 `registry-audit --write` 生成，不在别处复述
 - 路由 / 错误码 / 配置 → 各自的 `ROUTES.md` / `ERROR_CODES.md` / `CONFIGURATION.md`
 - 模块机制 → 该模块 `README.md`
-- **现行文档不写变更史**（「曾经…已改为…」）——那是 `git log` 与 ADR 的事
+- **现行文档不写变更史**（「曾经…已改为…」）——那是 `git log` 与 ADR 的事<!-- doc-link-allow D-004: 本行引用的就是「变更史措辞」这个判据对象本身 -->
 
 复述即重复：同一事实写两处，改一次要动两处，且必然漂移。见
 [CONTRIBUTING.md §4](CONTRIBUTING.md) 的注释边界。

@@ -1,9 +1,9 @@
-//! `checkpoint` 投影（S4 第 9 步，[plan/05 §4](../../../../docs/plan/05-模块架构.md)：③ 加 checkpoint；
-//! [plan/01 §8](../../../../docs/plan/01-核心架构.md) `projection = checkpoint`）。
+//! `checkpoint` 投影（S4 第 9 步，[plan/05 §4](../../../../docs/plan/05-模块架构.md "docs/plan/05-模块架构")：③ 加 checkpoint；
+//! [plan/01 §8](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构") `projection = checkpoint`）。
 //!
 //! **checkpoint 可序列化**（S05 §5 的 J3 条目：序列化失败有信号，无需额外强制）——
 //! 它是「断点」的数据形态：恢复 = 重放 WAL 到断点 seq 之后 + 投影纯函数，**不需要
-//! 任何状态迁移代码**（[roadmap/S05 §2](../../../../docs/stage/S05-长会话与断点恢复.md)）。
+//! 任何状态迁移代码**（[roadmap/S05 §2](../../../../docs/stage/S05-长会话与断点恢复.md "docs/stage/S05-长会话与断点恢复")）。
 
 use std::collections::BTreeMap;
 
@@ -16,7 +16,7 @@ use super::Projection;
 /// 可序列化的断点状态（`projection = checkpoint` 的产出）。
 ///
 /// **断点是派生视图，不是落盘的锚**：恢复 = 重放 WAL + 投影纯函数（见模块头），
-/// 所以没有「把状态再写回事件」的写方——[04 §3.1](../../../../docs/plan/04-工程落地.md)
+/// 所以没有「把状态再写回事件」的写方——[04 §3.1](../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地")
 /// 批⑤ 的判定即以此为准（要落锚，属 S4 第 10 步，不是本投影的事）。
 ///
 /// `BTreeMap` 保证序列化顺序确定（同一事件序列 ⇒ 逐字节相同的断点，N1 不因

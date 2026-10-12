@@ -2,6 +2,7 @@
 //!
 //! ⚠️ 文件头曾写着 `// Corresponding Frontend: tauri/src/schemas/common.ts`，而那个文件
 //! **从来没在版本史里出现过**（`git log --diff-filter=A -- 'tauri/src/protocols/*'` 为空）
+//! doc-link-allow D-010: 下一行的目录正是 E 组判出的那批悬空，史实叙述不是入链
 //! ——同时另有 6 条同类头指向同样不存在的 `tauri/src/protocols/`。约定现在由
 //! `protocol-mirror-audit` 的 **E 组**判定：写了就必须指向真实存在的文件。
 //! 前端没有镜像本文件的类型，故**不写**这条头（写一条假的比不写更糟）。

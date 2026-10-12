@@ -86,7 +86,7 @@ tauri signer generate
 | `APPLE_PASSWORD` | 应用专用密码 |
 | `APPLE_TEAM_ID` | 团队 ID |
 
-详细配置指南: [SECRETS_SETUP.md](.github/workflows/SECRETS_SETUP.md)
+详细配置指南: [SECRETS_SETUP.md](SECRETS_SETUP.md ".github/workflows/SECRETS_SETUP")
 
 ---
 
@@ -102,9 +102,9 @@ tauri signer generate
 
 ## 📖 完整文档
 
-- [密钥配置指南](.github/workflows/SECRETS_SETUP.md)
-- [工作流配置](.github/workflows/release.yml)
-- [配置脚本](.github/workflows/setup-secrets.ps1)
+- [密钥配置指南](SECRETS_SETUP.md ".github/workflows/SECRETS_SETUP")
+- [工作流配置](release.yml)
+- [配置脚本](setup-secrets.ps1)
 
 ---
 

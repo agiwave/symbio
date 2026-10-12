@@ -13,7 +13,7 @@
 //
 // 典型触发：`cli/` 与 `symbio/` 是兄弟目录，`../symbio/rust-toolchain.toml`（锁 1.93.1）
 // 管不到 cli/，于是 cli 曾用 default channel（本机 stable = 1.98）构建，把 1.98 的产物
-// 写进了 symbio 共用的 target 目录。（已由 `cli/rust-toolchain.toml` 根治，本脚本
+// 写进了 symbio 共用的 target 目录。（已由根 `rust-toolchain.toml` 根治——合并 workspace 后 cli/ 不再有自己的工具链文件，本脚本
 // 只负责清掉历史污染。）
 //
 // ## 做法：以构建日志为唯一证据

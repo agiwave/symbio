@@ -201,7 +201,7 @@ pub struct ChatMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<MessageRole>,
 
-    /// **这条发言是谁说的**（[plan/11 批 1](../../../../docs/plan/11-多执行器与多主体加固实施方案.md)
+    /// **这条发言是谁说的**（[plan/11 批 1](../../../../../docs/plan/11-多执行器与多主体加固实施方案.md "docs/plan/11-多执行器与多主体加固实施方案")
     /// ② 的跨栈身份字段）：主体名，取值点只有 `chat_loop::request_principal`。
     ///
     /// `None` = 尚未标身份（历史消息、未接入的写方）——可见域判据把它当**可见**：

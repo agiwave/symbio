@@ -1,9 +1,9 @@
-//! `Store` —— 一切事实的唯一写入口与读取面（v2 ④，[plan/01 §2](../../../../docs/plan/01-核心架构.md)）。
+//! `Store` —— 一切事实的唯一写入口与读取面（v2 ④，[plan/01 §2](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")）。
 //!
 //! ## 冻结锚点 F1
 //!
 //! trait 签名（`append` / `range` / `head`）**冻结**：修改它 = 架构变更
-//! （[plan/03 §1](../../../../docs/plan/03-演进与验证.md)）。
+//! （[plan/03 §1](../../../../docs/plan/03-演进与验证.md "docs/plan/03-演进与验证")）。
 //!
 //! ## 五条语义与强制方式
 //!
@@ -16,14 +16,14 @@
 //! | 原子 | 单事件要么完整在、要么不在 | 运行时 |
 //!
 //! **实现替换不构成架构改动**：内存 / WAL / 分片 / 分布式都是 `impl Store`，
-//! 调用方零改动（S4 长会话的 `wal` 实现从这里长出来，[plan/05 §4](../../../../docs/plan/05-模块架构.md)）。
+//! 调用方零改动（S4 长会话的 `wal` 实现从这里长出来，[plan/05 §4](../../../../docs/plan/05-模块架构.md "docs/plan/05-模块架构")）。
 
 use std::collections::HashSet;
 use std::sync::RwLock;
 
 use super::event::{Event, EventEnvelope, Seq};
 
-/// 唯一写入口的失败形态（[plan/01 §2](../../../../docs/plan/01-核心架构.md)）。
+/// 唯一写入口的失败形态（[plan/01 §2](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppendError {
     /// 幂等去重命中：同 `event_id` 已存在。
@@ -34,7 +34,7 @@ pub enum AppendError {
     ///
     /// 谁发这个令牌是各实现的事（[`wal::WalStore`] 用文件锁，**跨进程**）；trait 只
     /// 承诺「拿不到令牌的写入口会**返回**它，而不是静默写坏网格」。在
-    /// [plan/11 批 0](../../../../docs/plan/11-多执行器与多主体加固实施方案.md) 之前，
+    /// [plan/11 批 0](../../../../docs/plan/11-多执行器与多主体加固实施方案.md "docs/plan/11-多执行器与多主体加固实施方案") 之前，
     /// 这个形态全仓零构造——错误定义在那儿，却永远不可达。
     NotTheWriter,
 }
@@ -53,7 +53,7 @@ pub trait Store: Send + Sync {
     fn head(&self) -> Seq;
 }
 
-/// 内存实现（[plan/05 §4](../../../../docs/plan/05-模块架构.md) S0：「先 `memory` 实现」；
+/// 内存实现（[plan/05 §4](../../../../docs/plan/05-模块架构.md "docs/plan/05-模块架构") S0：「先 `memory` 实现」；
 /// 权威参数表 `store = memory`，平凡值）。
 ///
 /// `RwLock` 串行化写入 ⇒ append 内「查重 → 赋 seq → 落库」是原子区间，

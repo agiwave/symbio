@@ -2,7 +2,8 @@
 /**
  * doc-link-audit — 文档相对链接审计
  *
- * 用途：**活跃文档体检**——七条机械可判定的规矩，每条都对应一类「没人看着就必然腐烂」的文档病：
+ * 用途：**活跃文档 + 源码注释的连接体检**——八条机械可判定的规矩，每条都对应一类
+ * 「没人看着就必然腐烂」的连接病：
  *
  *   D-001 站内相对链接：文档移动 / 归档（`git mv`）最容易留下静默坏链——阅读时才发现，
  *     而它本可以在提交前被机械地查出来。
@@ -13,10 +14,15 @@
  *   D-007 站内锚点：链接的 `#fragment` 必须等于目标文件某个标题的 slug（含纯锚点 `#x`）。
  *   D-008 裸风险编号：正文里的 `R\d+` 必须是**定义**（`| Rn |` 表行的首列）或
  *     **限定引用**（编号紧邻「风险」二字），其余一律报红。
+ *   D-010 源码注释里的站内连接（**非 .md 文件**）：`.rs` / `.ts` / `.mjs` / … 的注释行里，
+ *     Markdown 形式的站内链接必须可达（精确判定），反引号仓库路径必须存在（启发式档，
+ *     带行内豁免）。扫描口径（哪些文件、哪些是注释行）**从 `gen-doc-refs` 导入**——
+ *     审计判的行必须与自动改写的行是同一批，两边各数一遍必然漂移。
  *
  * D-006 存在的理由（它是 D-001 的**盲区补丁**）：D-001 只认 Markdown 链接语法
  *   `[文字](目标)`，而本仓正文里指路**更常**写成行内反引号（"详见 `docs/arch/vdfs.md`"）。
  *   这种写法 D-001 一个字都看不到——实测 `tauri/docs/FRONTEND.md` 首段引用的
+ *   doc-link-allow D-010: 下行是讲述 D-006 缺陷的史实指认（文件确已不存在），非入链
  *   `docs/arch/frontend-ui-ux-prd.md` 与 `-design.md` **两个文件均不存在**，
  *   而 D-001 报「失效 0 条」已经很久了。**守卫报 0 不等于没有坏链，只等于它看不见。**
  *
@@ -25,6 +31,7 @@
  *      写的，在 `docs/` 内部又是相对当前文件——先试文件目录、再试仓库根，任一命中即通过。
  *      实测把失败数从 34 降到 9。
  *   ② **只判定「不含 `./` `../` 且至少含一个 `/`」的路径**：无斜杠的（`` `README.md` ``）
+ *   doc-link-allow D-010: 下行 `../x.md` 是规则讲解里的路径形态示例
  *      无法判定相对谁；显式相对路径（`../x.md`）另行处理。实测 193 次出现里只有
  *      79 次进入判定——剩余 114 次是说明性文字（`` `x.md` `` / `` `CHANGELOG.md` ``），
  *      判定它们会让守卫满屏误报。
@@ -59,6 +66,27 @@
  *   **不给豁免**：`R\d+` 在本仓只表示风险编号，处置只有两种且都不需要解释——
  *   要么它是 `| Rn |` 表行的首列（定义），要么紧邻「风险」二字（限定引用）。
  *
+ * D-010 存在的理由（**源码注释**是本审计此前的整片盲区）：D-001 / D-006 只读 `.md`，
+ *   而源码注释里的入链同样是手写地址——实测 306 条（注释行、代码段外、含 `/` 的目标），
+ *   其中 **78 条已因文档搬家而静默失效**（`../../../docs/plan/…` 的层数错、
+ *   `docs/plan/12-…` 搬去 `docs/goal/`）。守卫报 0 不等于没有坏链，只等于它看不见；
+ *   这批坏链在 IDE 里点开就是 404，而没有任何门禁看它们。
+ *
+ *   **两档判定**（与 D-001/D-006 的分工同构）：
+ *   · **链接档**（`[文字](相对地址)`）：精确判定，目标要么存在要么不存在——双根解析
+ *     （相对本文件 / 相对仓库根），可带 `#锚点` 时锚点照 D-007 判。
+ *   · **反引号档**（`` `docs/x.md` ``）：启发式，带**行内豁免**
+ *     `doc-link-allow D-010: 理由`（本行或前一行，理由不可为空）。防误报的过滤
+ *     是判据的一部分：只判「仓库根前缀或 `./` `../` 起头」的路径，剥掉
+ *     `§小节` / `::符号` 尾巴，跳过通配 / 模板（`*` `$`）、占位符（`<…>`）、
+ *     无扩展名缩写（`docs/stage/S03`）、构建产物目录（`target` `.cargo` 等
+ *     ——gitignore 掉的东西「存不存在」本身就不可复现）。
+ *
+ *   与 `gen-doc-refs` 的分工：**指向已登记文档的地址归机制自动接管重算（RF-004），
+ *   机制搬不动的存在性归本条**。同一行两者都报也各自成立——审计说的是「此刻是坏的」，
+ *   机制说的是「我能修」；修复动作发生在门禁 `60-facts`，下次审计即绿。
+ *   不给链接档豁免（精确判定），反引号档给——理由同 D-006：缩写与示意在字面上不可分。
+ *
  * D-003 存在的理由（为什么是「行数」这个粗指标）：文档臃肿不是美学问题，而是**职责失守的
  *   可观测代理**。实测 `docs/arch/vdfs.md` 涨到 1045 行时，超出的部分是 §13「范例」——
  *   它自述「非机制组成部分」，内容却与四个模块 README 逐段重复；`DECISIONS.md` 涨到 1782 行时，
@@ -86,8 +114,14 @@
  *   symbio/src/          插件模块文档（plugins/<plugin>/README.md + plugins/<plugin>/docs/）
  *   tauri/               前端模块文档（README.md + docs/）
  *   cli/                 命令行模块文档（README.md + docs/）
+ *   e2e/                 e2e 用例说明（README.md）
+ *   .github/             工作流说明文档
  *   examples/            示例文档
- *   根目录 *.md          README / CONTRIBUTING / CODE_OF_CONDUCT
+ *   根目录 *.md          AGENTS / README / CONTRIBUTING / CODE_OF_CONDUCT
+ *
+ * 源码注释（D-010）的范围由 `gen-doc-refs` 的 `SRC_ROOTS` / `listSourceFiles` 给出
+ *   （symbio / tauri / cli / scripts / e2e / examples / .github 下的非 .md 源码），
+ *   两边共用同一份口径。
  *
  * **整体豁免 `docs/archive/`**：归档记录的是**当时形态**，其中指向的兄弟文档可能
  *   早已被合并 / 删除，改写归档链接等于篡改历史。故该目录整体跳过（跳过文件数会打印）。
@@ -112,17 +146,21 @@
  *   D-001 / D-003 **不给豁免**——「目标文件是否存在」与「行数是否超限」都是精确判定，
  *   没有需要解释的中间态。（D-006 与 D-001 的差别就在这：前者判的是反引号文本，
  *   与「缩写」「示意」在字面上不可分，故必须留豁免出口。）
+ *   D-010 的豁免只有**行内档**（`doc-link-allow D-010: 理由`，本行或前一行），
+ *   只对反引号档生效——链接档是精确判定不给豁免；源码文件不设全文档豁免
+ *   （一篇几万行的 .rs 挂整篇豁免等于这片源码永久脱检）。
  *
  * 与仓库约定一致：纯 Node 实现，不依赖 bash / ripgrep，Windows / macOS / Linux 通用。
  */
 
 // 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns D 文档正文与链接
-// @codes D-001 D-002 D-003 D-004 D-006 D-007 D-008
+// @codes D-001 D-002 D-003 D-004 D-006 D-007 D-008 D-010
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { listSourceFiles, isSourceCommentLine, codeRanges, inCode } from './gen-doc-refs.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const defaultRoot = path.resolve(scriptDir, '..')
@@ -136,10 +174,10 @@ const repoRoot = rootArg ? path.resolve(rootArg.slice(7)) : defaultRoot
 // "没加 --strict 所以没拦住"是预期行为。
 
 /** 扫描根（相对 repoRoot）；目录递归，文件直接检查 */
-const ROOTS = ['docs', 'symbio/src', 'tauri', 'cli', 'examples']
+const ROOTS = ['docs', 'symbio/src', 'tauri', 'cli', 'e2e', '.github', 'examples']
 
 /** 根目录下的散落 Markdown */
-const ROOT_FILES = ['README.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md']
+const ROOT_FILES = ['AGENTS.md', 'README.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md']
 
 /**
  * 整体豁免的目录（相对 repoRoot，以 `/` 结尾）。
@@ -168,6 +206,7 @@ const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'dist', 'build', '.
  * 而这批文档**每一篇都在开头写明了自己的类型**，读它们自己写的话比猜文件名准。
  *
  * 扫描范围覆盖**模块文档**，不只 `docs/`——过程文档同样会沉积在模块目录里：
+ * doc-link-allow D-010: 下行引用的是已迁入 archive 的文件当时的路径（叙述历史）
  * `symbio/src/plugins/session/docs/legacy-route-migration.md`（已完成的迁移审计，
  * 每行都是「已删 / 已下线」）就这样在活目录里躺了多轮，每次路由改动都被回改一次。
  * 只扫 `docs/` 时它**永远不会被提示**——这类漏网正是「改一个功能要动十几个文档」的来源之一。
@@ -310,6 +349,7 @@ function isJudgeableBacktickPath(t) {
  * 任一命中即视为存在。
  *
  * 为什么必须双根：本仓两种写法都合法且在用——
+ * doc-link-allow D-010: 下行 `./vdfs.md` 是「相对写法」的形态示例
  *   · `docs/` 内部互相引用走相对（`./vdfs.md`）
  *   · 模块 README 引用系统文档走仓库根（`docs/CURRENT.md`）
  * 只认一种会把另一种全部误报（实测：单根时 34 条失败，双根后 9 条）。
@@ -581,10 +621,10 @@ for (const rel of ROOT_FILES) {
 }
 
 // ---- D-002 / D-003 / D-004：活跃文档的三条体检 ----
-// 扫描范围 = 活文档根（`docs/` + 模块文档 + 根目录散落 md）；`examples/` 是示例包内容，
-// 不是项目文档，跳过（同 D-002 一直以来的口径）。三条规矩**共用同一次读盘**：
-// 分三遍读等于让守卫的代价翻三倍，而它们的扫描范围完全一致。
-const BODY_ROOTS = ['docs', 'symbio/src', 'tauri', 'cli']
+// 扫描范围 = 活文档根（`docs/` + 模块文档 + `e2e` / `.github` 说明 + 根目录散落 md）；
+// `examples/` 是示例包内容，不是项目文档，跳过（同 D-002 一直以来的口径）。
+// 三条规矩**共用同一次读盘**：分三遍读等于让守卫的代价翻三倍，而它们的扫描范围完全一致。
+const BODY_ROOTS = ['docs', 'symbio/src', 'tauri', 'cli', 'e2e', '.github']
 /**
  * 散文体检不适用于 `docs/task/` `docs/spec/` `docs/adr/`：那里的 `.md` 是**登记条目**
  * （不是现行阅读文档）——`## 处理过程` 的职责就是记「初版怎么想、后来为什么改」，
@@ -663,6 +703,87 @@ for (const rel of ROOT_FILES) {
   const file = path.join(repoRoot, rel)
   if (fs.existsSync(file)) scanBody(file)
 }
+
+// ==================== D-010：源码注释里的站内连接 ====================
+/**
+ * 行内豁免（本行或前一行，理由不可为空）——只作用于**反引号档**；
+ * 链接档是精确判定，不看豁免。写法 `doc-link-allow D-010: 理由`
+ * （源码注释里没有 HTML 注释壳，与 `grep-audit-allow` 同一形态）。
+ */
+const WAIVER_D010_RE = /doc-link-allow\s+D-010\s*:\s*\S/
+
+/**
+ * 反引号路径的候选形态：仓库根前缀（与 `gen-doc-refs` 的 `SRC_ROOTS` 对齐）或显式相对路径。
+ * 无前缀的缩写（`session/docs/x.md`）判定不了相对谁——D-006 在 md 侧靠双根解析收窄过，
+ * 源码侧的缩写变体太多（同一份文档被写成 4 种短路径），只收这一闭集，宁可漏判不误报。
+ */
+const SRC_TICK_CANDIDATE = /^(?:docs|scripts|symbio|tauri|cli|e2e|examples|\.github)\/|^\.\.?\//
+
+/** 构建产物 / 机器本地段：gitignore 掉的目录「存不存在」在别的机器上不可复现 */
+const SRC_SEG_SKIP = new Set(['target', 'dist', 'build', 'node_modules', 'vendor', '.cargo', '.git'])
+
+/** 双根解析：相对本文件优先，退回仓库根；都不存在 ⇒ null（调用方报） */
+function srcDualRoot(fromFile, t) {
+  const base = t.split('#')[0]
+  const byFile = path.resolve(path.dirname(fromFile), base)
+  if (fs.existsSync(byFile)) return byFile
+  const byRoot = path.resolve(repoRoot, base)
+  if (fs.existsSync(byRoot)) return byRoot
+  return null
+}
+
+const srcLinkBad = []
+const srcTickBad = []
+let srcLinksChecked = 0
+let srcTicksChecked = 0
+
+function scanSourceComments() {
+  for (const { file, rel, ext } of listSourceFiles(repoRoot)) {
+    const lines = fs.readFileSync(file, 'utf8').split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      if (!isSourceCommentLine(line, ext)) continue
+      const waived = WAIVER_D010_RE.test(line) || (i > 0 && WAIVER_D010_RE.test(lines[i - 1]))
+
+      // ① 链接档：`[文字](相对地址)` —— 精确判定，不给豁免
+      const code = codeRanges(line)
+      for (const m of line.matchAll(LINK)) {
+        const raw = stripTitle(m[1]).trim()
+        if (raw === '' || raw.startsWith('#') || raw.startsWith('/')) continue // 纯锚点 / 绝对路径不判
+        if (isExternal(raw)) continue
+        if (inCode(code, m.index)) continue // 反引号段内 = 示例字面量
+        const hash = raw.indexOf('#')
+        const target = (hash >= 0 ? raw.slice(0, hash) : raw).trim()
+        // 只判「像个路径」的目标：含 `/`（`[文字](目标)` 这类占位词判不了相对谁）
+        if (isExternal(target) || target === '' || !target.includes('/') || /\s/.test(target)) continue
+        srcLinksChecked += 1
+        const abs = srcDualRoot(file, target)
+        if (!abs) {
+          srcLinkBad.push({ rel, line: i + 1, target })
+          continue
+        }
+        // 带锚的 .md 目标：锚点照 D-007 判（复用同一 slug 判定与计数）
+        if (hash >= 0 && target.endsWith('.md')) checkAnchor(rel, abs, raw.slice(hash + 1), target)
+      }
+
+      // ② 反引号档：`` `docs/x.md` `` —— 启发式，行内豁免生效处
+      if (waived) continue
+      for (const m of line.matchAll(/`([^`]+)`/g)) {
+        const first = m[1].split(/\s+/)[0] // 剥 `path §小节` 这类尾巴
+        if (!SRC_TICK_CANDIDATE.test(first)) continue
+        if (/[*$]/.test(first) || /[<>]/.test(first)) continue // 通配 / 模板 / 占位符
+        const target = first.split('::')[0] // `x.ts::符号` → 查文件
+        const segs = target.replace(/\/$/, '').split('/')
+        if (segs.some((s) => SRC_SEG_SKIP.has(s))) continue
+        const isDir = m[1].trim().endsWith('/')
+        if (!isDir && !/\.[A-Za-z0-9]+$/.test(segs[segs.length - 1])) continue // 无扩展名 = 缩写
+        srcTicksChecked += 1
+        if (!srcDualRoot(file, target)) srcTickBad.push({ rel, line: i + 1, target })
+      }
+    }
+  }
+}
+scanSourceComments()
 
 const exemptNote = skippedFiles > 0 ? `（豁免 docs/archive/ 下 ${skippedFiles} 个文件）` : ''
 console.log(`扫描相对链接 ${total} 条，失效 ${bad.length} 条${exemptNote}`)
@@ -758,6 +879,21 @@ if (bareRisk.length > 0) {
   console.log('      本条**不给豁免**：判定的是编号的形态，不是语义。')
 }
 
+// ---- D-010：源码注释里的站内连接 ----
+console.log(
+  `D-010 源码注释连接：链接判定 ${srcLinksChecked} 条，失效 ${srcLinkBad.length} 条 · ` +
+    `反引号路径判定 ${srcTicksChecked} 条，失效 ${srcTickBad.length} 条`,
+)
+for (const { rel, line, target } of srcLinkBad) console.log(`  ✗ ${rel}:${line}  [链接](${target})  不存在`)
+for (const { rel, line, target } of srcTickBad) console.log(`  ✗ ${rel}:${line}  \`${target}\`  不存在`)
+if (srcLinkBad.length > 0 || srcTickBad.length > 0) {
+  console.log('\n提示：源码注释里的入链此前无人看（D-001 只读 .md），文档搬家后整批静默失效。处置：')
+  console.log('      · 指向**已登记文档**的链接地址不用手改——门禁 gen-doc-refs 会按编号自动接管重算（RF-004），')
+  console.log('        但**此刻坏的照判**：先重跑 `node scripts/gen-doc-refs.mjs`，下次审计即绿；')
+  console.log('      · 指向非登记文件（脚本 / 源码 / 配置）的死链：改正路径或删掉入链（机制搬不动它）；')
+  console.log('      · 反引号档确属缩写 / 示意 / 历史叙述：写 `doc-link-allow D-010: 理由`（本行或前一行）。')
+}
+
 process.exit(
   bad.length > 0 ||
     misplaced.length > 0 ||
@@ -765,7 +901,9 @@ process.exit(
     historical.length > 0 ||
     backtickBad.length > 0 ||
     badAnchors.length > 0 ||
-    bareRisk.length > 0
+    bareRisk.length > 0 ||
+    srcLinkBad.length > 0 ||
+    srcTickBad.length > 0
     ? 1
     : 0
 )

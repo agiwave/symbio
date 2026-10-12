@@ -44,7 +44,7 @@
 //!
 //! ## 写侧授权闸（判在运行器）
 //!
-//! **写侧授权闸**（[plan/01 §7](../../../docs/plan/01-核心架构.md)）判的是「主体此刻
+//! **写侧授权闸**（[plan/01 §7](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")）判的是「主体此刻
 //! 能否写本轮的收束格」（`reply.first` / `reply.append`），由运行器在落收束格**之前**
 //! 判（`turn_runner::closure_granted`，谓词 `can_reply` 只定义一次）。拒绝 ⇒ 收束格
 //! 不落、该轮留在未收束态（`check_all` 的 C4 报得出），本模块据 `closure_denied`
@@ -1285,7 +1285,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     } else {
         LatencyTier::Deep
     };
-    // 身份进事件（[plan/11 批 1](../../../docs/plan/11-多执行器与多主体加固实施方案.md) ①）：
+    // 身份进事件（[plan/11 批 1](../../../../docs/plan/11-多执行器与多主体加固实施方案.md "docs/plan/11-多执行器与多主体加固实施方案") ①）：
     // 本轮以**会话选定的那个 agent** 为主体——`ActorSpec` 首次在生产构造，
     // `agent:main` 从字面量变成数据。取值点与 chat_loop 同一个（`request_principal`），
     // 写侧闸判的正是它 ⇒ 判的对象 = 写的对象。未选智能体 ⇒ `agent:main`

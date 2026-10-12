@@ -1,12 +1,12 @@
-//! 可执行不变量检查（v2 F4，[plan/01 §5](../../../../docs/plan/01-核心架构.md)、[plan/04 §4](../../../../docs/plan/04-工程落地.md)）。
+//! 可执行不变量检查（v2 F4，[plan/01 §5](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")、[plan/04 §4](../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地")）。
 //!
 //! ## 形态：纯函数，不是 trait
 //!
 //! 每条检查 = 「事件切片 ⇒ 违规清单」。输入是数据，输出是数据——它可以被
 //! 单测双跑、可以挂 CI、可以离线跑在导出的事件序列上，而不需要任何运行时。
 //!
-//! ## 覆盖的 CI 断言（S0 步骤 2 出口判据 + S1 步骤 4 故障注入，[roadmap/S01 §5](../../../../docs/stage/S01-最小闭环.md)；
-//! [`open_unique_per_turn`] 随 [plan/11 批 0](../../../../docs/plan/11-多执行器与多主体加固实施方案.md) 补入）
+//! ## 覆盖的 CI 断言（S0 步骤 2 出口判据 + S1 步骤 4 故障注入，[roadmap/S01 §5](../../../../docs/stage/S01-最小闭环.md "docs/stage/S01-最小闭环")；
+//! [`open_unique_per_turn`] 随 [plan/11 批 0](../../../../docs/plan/11-多执行器与多主体加固实施方案.md "docs/plan/11-多执行器与多主体加固实施方案") 补入）
 //!
 //! | 断言 | 不变量 | 检查 | 函数 |
 //! |---|---|---|---|
@@ -83,7 +83,7 @@ pub fn seq_monotonic(events: &[Event]) -> Vec<Violation> {
 
 /// C2 / N3（I1）：每 `turn` 至多 1 条 final。
 ///
-/// 「final」= `turn × closed` 格子上的 `chat.assistant.final` 名字（[plan/01 §6](../../../../docs/plan/01-核心架构.md)）。
+/// 「final」= `turn × closed` 格子上的 `chat.assistant.final` 名字（[plan/01 §6](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")）。
 /// 一轮对用户说两次「最终答复」，转写的收敛性就没了——这是 I1 在发言路径上的形状。
 pub fn final_unique_per_turn(events: &[Event]) -> Vec<Violation> {
     let mut seen: Vec<(u64, &str)> = Vec::new();
@@ -111,11 +111,11 @@ pub fn final_unique_per_turn(events: &[Event]) -> Vec<Violation> {
 
 /// I1 单通道（C2 的对偶）：每 `turn` 至多 1 条**开轮**事件（`u-{turn}`）。
 ///
-/// 开轮 = `turn × opened` 格子上的 `user.message`（[plan/01 §6](../../../../docs/plan/01-核心架构.md)），
+/// 开轮 = `turn × opened` 格子上的 `user.message`（[plan/01 §6](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")），
 /// 与 [`final_unique_per_turn`] 是同一枚硬币的两面——一轮只能**开**一次、只能**收**一次。
 /// 开两次 = 同一个 `u-{turn}` 事件号落进网格两回：那一轮的输入成了两条、`turn` 计数
 /// 跟着虚增（兜底率的分母就在这条上），而**没有任何下游会察觉**——单写者被绕过的
-/// 典型痕迹。[plan/11 批 0](../../../../docs/plan/11-多执行器与多主体加固实施方案.md)
+/// 典型痕迹。[plan/11 批 0](../../../../docs/plan/11-多执行器与多主体加固实施方案.md "docs/plan/11-多执行器与多主体加固实施方案")
 /// 的 0-A 在**写入侧**用写者令牌堵住并发写，本检查是它在**事实源上**的观测面：
 /// 令牌漏了、或有人绕过唯一写入口直接落盘，这里就红。
 pub fn open_unique_per_turn(events: &[Event]) -> Vec<Violation> {
@@ -144,11 +144,11 @@ pub fn open_unique_per_turn(events: &[Event]) -> Vec<Violation> {
 
 /// C3 / N5（I2）：**声明类**事件必须带溯源。
 ///
-/// 「声明」= 宣称某件事为真或已发生，三类（[plan/03 §2 I2](../../../../docs/plan/03-演进与验证.md)）：
+/// 「声明」= 宣称某件事为真或已发生，三类（[plan/03 §2 I2](../../../../docs/plan/03-演进与验证.md "docs/plan/03-演进与验证")）：
 /// - **断言类**（`verb == Asserted`）：`task.verified` / `artifact.added` / `classify.verdict`…
 /// - **收束类**（`turn × closed` 的 `chat.assistant.final` / `chat.assistant.fallback`）：
-///   宣称"已经答复"（[roadmap/S01 §5](../../../../docs/stage/S01-最小闭环.md)）；
-/// - **记忆类**（`entity == memory`，S5）：宣称"学到了什么"（[roadmap/S06](../../../../docs/stage/S06-长期记忆与语义检索.md)
+///   宣称"已经答复"（[roadmap/S01 §5](../../../../docs/stage/S01-最小闭环.md "docs/stage/S01-最小闭环")）；
+/// - **记忆类**（`entity == memory`，S5）：宣称"学到了什么"（[roadmap/S06](../../../../docs/stage/S06-长期记忆与语义检索.md "docs/stage/S06-长期记忆与语义检索")
 ///   步骤 11 出口判据：溯源覆盖 100%——无溯源的记忆无法审计，也无法在遗忘时被追溯）。
 ///
 /// 没有溯源的声明**无法审计也无法撤销**——静默失效的温床（J3）。
@@ -190,7 +190,7 @@ fn needs_provenance(e: &Event) -> bool {
 /// 政策常量（不是配置）——[`rework_bounded`] 的上界从这里取，`check_all` 与
 /// 读出口 `session/stats` 因此共享同一条口径，e2e 不必自己挑一个数字。
 /// 取 3：返工两轮还在返，说明当初的任务拆得或验收得有问题，该被看见而不是被
-/// 默许（[roadmap/S03 §5](../../../../docs/stage/S03-多步任务与返工.md)
+/// 默许（[roadmap/S03 §5](../../../../docs/stage/S03-多步任务与返工.md "docs/stage/S03-多步任务与返工")
 /// 的「返工次数有界」）。
 const MAX_REWORK_ROUNDS: u32 = 3;
 
@@ -211,7 +211,7 @@ const MAX_REWORK_ROUNDS: u32 = 3;
 ///   宁可漏报、不可假红：拿最严档比，会把别的档位的正常流量整片报成违规）。
 ///
 /// 末两条是任务表的判定（[`acyclic_deps`]：依赖成环 / 悬空，即
-/// [04 §4 断言清单](../../../../docs/plan/04-工程落地.md) 的 C14；
+/// [04 §4 断言清单](../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地") 的 C14；
 /// [`rework_bounded`]：同一任务的返工轮数不超过 [`MAX_REWORK_ROUNDS`]）——
 /// 都是**结构判定、无宽限**：环与超界不是「读取瞬间的时序假象」，不会假红
 /// （04 §3.1 批⑨ 的「断言进 CI」）。
@@ -251,7 +251,7 @@ fn declared_budget_ms(events: &[Event]) -> Option<u64> {
 
 /// C4（I3 到点必答）：开过的 turn 必须收束。
 ///
-/// 「收到」与「发出」是一对端点（[roadmap/S01 §1](../../../../docs/stage/S01-最小闭环.md)）：
+/// 「收到」与「发出」是一对端点（[roadmap/S01 §1](../../../../docs/stage/S01-最小闭环.md "docs/stage/S01-最小闭环")）：
 /// 有 `user.message`（`turn × opened`）却始终等不到 `chat.assistant.final` /
 /// `chat.assistant.fallback`（`turn × closed`），就是**对话静默中断**——超时后
 /// 什么都没发生，没有任何错误信号的那类失效。兜底必须产生事件（I3）。
@@ -332,12 +332,12 @@ pub fn budget_exceeded(events: &[Event], budget_ms: Option<u64>) -> Vec<Violatio
 
 /// C14（终止性前提 3）：任务依赖图**无环且无悬空依赖**（Kahn 拓扑排序）。
 ///
-/// 有环的依赖图违反时**没有任何信号**——可能只是永远跑不完（[roadmap/S03 §5](../../../../docs/stage/S03-多步任务与返工.md)），
+/// 有环的依赖图违反时**没有任何信号**——可能只是永远跑不完（[roadmap/S03 §5](../../../../docs/stage/S03-多步任务与返工.md "docs/stage/S03-多步任务与返工")），
 /// 所以必须是 CI 断言。任务图从 `task.opened` 事件的载荷提取：
 /// `{ task_id, depends_on }`——**图是数据，不是机制**。
 /// 悬空依赖（依赖不存在的任务）同样判违规。反向用例见测试区（验收 1 / 4）。
 ///
-/// 接进 [`check_all`]（[04 §3.1 批⑨](../../../../docs/plan/04-工程落地.md) 的
+/// 接进 [`check_all`]（[04 §3.1 批⑨](../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地") 的
 /// 「断言进 CI」）：读出口 `session/stats` 的 `invariants` 列与 e2e 都跑它。
 pub fn acyclic_deps(events: &[Event]) -> Vec<Violation> {
     use std::collections::{BTreeMap, BTreeSet};
@@ -417,7 +417,7 @@ pub fn acyclic_deps(events: &[Event]) -> Vec<Violation> {
 /// 返工 = `task.rework_created` 事件（新增一条事实，不是修改历史）；同一被返工
 /// 节点的返工轮数超过 `max_rework` ⇒ 违规——无上界的返工可能永不终止
 /// （[docs/plan/verify/termination.rs](../../../../docs/plan/verify/termination.rs) 前提 2）。
-/// 接进 [`check_all`]（[04 §3.1 批⑨](../../../../docs/plan/04-工程落地.md)）。
+/// 接进 [`check_all`]（[04 §3.1 批⑨](../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地")）。
 pub fn rework_bounded(events: &[Event], max_rework: u32) -> Vec<Violation> {
     use std::collections::BTreeMap;
     let mut counts: BTreeMap<String, u32> = BTreeMap::new();

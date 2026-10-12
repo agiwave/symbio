@@ -177,7 +177,7 @@ pub fn parse_pack(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, PackError> {
         if file.is_dir() {
             continue;
         }
-        // 先规范化再判隐藏：否则 `./a/b.txt` 的首段 `.` 会被当成隐藏文件整条丢弃
+        // 先规范化再判隐藏：否则 `./a/b.txt` 的首段 `.` 会被当成隐藏文件整条丢弃 // doc-link-allow D-010: 路径形态示例
         let rel = normalize_pack_path(&raw);
         if rel.is_empty() {
             continue;

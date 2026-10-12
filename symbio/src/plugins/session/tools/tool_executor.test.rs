@@ -9,7 +9,7 @@ use crate::symbio_core::PluginSimpleRequest;
 // 导入里删了——生产侧只读 `history()`）；`use super::*` 因此带不过来。
 use crate::symbio_core::Store;
 // `EventWalStore` / `LatencyTier` 同由：它们只被父模块里的熔断段用到，那段已按域
-// 拆去 `tool_executor/breaker.rs`（[plan/13 C3](../../../../../docs/plan/13-质量改进总纲.md)），
+// 拆去 `tool_executor/breaker.rs`（[plan/13 C3](../../../../../docs/archive/13-质量改进总纲.md)），
 // 父模块顶层不再导入，`use super::*` 便带不过来——测试自己拿。
 use crate::symbio_core::{EventWalStore, LatencyTier};
 
@@ -827,7 +827,7 @@ fn external_execution_capability_is_read_from_the_matrix() {
 
 /// 事实源那一半：台账累计把预算吃满 ⇒ 工具**不执行**，且 `Break` 走出参。
 ///
-/// 这条用例钉的是 [roadmap/S09 §6](../../../../docs/stage/S09-外部执行与熔断.md)
+/// 这条用例钉的是 [roadmap/S09 §6](../../../../../docs/stage/S09-外部执行与熔断.md "docs/stage/S09-外部执行与熔断")
 /// 验收 2 的前半句（预算耗尽必须判得出来，不允许静默继续）；后半句——
 /// 理由真的落成一条 `control × opened` 事件——钉在事实源入格那一侧的用例里
 /// （写方是 `v2_facts::record_derived`，由 v2 运行器在轮末收束调用）；工具执行层

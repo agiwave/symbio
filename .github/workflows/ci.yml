@@ -387,6 +387,7 @@ jobs:
       
       - name: Run security audit
         # ⚠️ **必须在仓库根跑**：本仓是单 workspace，`Cargo.lock` 只有根目录那一份
+        # doc-link-allow D-010: 下一行是这条配置约束的判据（那两份本就不该存在），不是入链
         # （`symbio/Cargo.lock` / `cli/Cargo.lock` 都不存在）。原先这里写着
         # `working-directory: symbio`，而 cargo-audit 只在 cwd 找 `Cargo.lock`、**不向
         # 上找 workspace 根**，于是它必然失败：

@@ -152,7 +152,7 @@ export const ENTRY_KINDS = Object.keys(KINDS).filter((k) => KINDS[k].idRule === 
 export const DOC_KINDS = Object.keys(KINDS).filter((k) => KINDS[k].idRule === 'path')
 
 /**
- * `adr` 的**域**闭集（归域规则见 [`docs/spec/ADR-DOM.md`](../docs/spec/ADR-DOM.md)）。
+ * `adr` 的**域**闭集（归域规则见 [`docs/spec/ADR-DOM.md`](../docs/spec/ADR-DOM.md "ADR-DOM")）。
  *
  * 域回答「这条决策**约束谁**」——它决定读者该去哪找、README 该往哪指。
  * 它是**条目上的一个字段**（不是目录、不是分册）：过滤 / 分组都是「按字段筛」，
@@ -451,6 +451,7 @@ export function sectionOf(body, name) {
   return next < 0 ? after : after.slice(0, next)
 }
 
+// doc-link-allow D-010: 下一行是这条判据的形态示例（x / y / z 是占位名），不是入链
 /** 正文 / 字段里形如 `docs/x.md`、`scripts/y.mjs`、`e2e/z.mjs` 的反引号指认。 */
 export function refsIn(text) {
   return [...text.matchAll(/`((?:docs|scripts|e2e)\/[^`\s]+\.(?:mjs|md|rs))`/g)].map((m) => m[1])

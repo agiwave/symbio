@@ -187,7 +187,7 @@ impl McpToolCallResponse {
 /// 「配置了 MCP server，工具列表里却什么都没有」——排查成本极高。
 ///
 /// 已在真实链路验证：修复前 mock server 只收到 `initialize`，`tools/list`
-/// 根本没发出（见 `symbio/src/plugins/mcp/docs/` 与批次 J 的端到端记录）。
+/// 根本没发出（见 `symbio/src/plugins/mcp/README.md` 与批次 J 的端到端记录）。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpInitializeResponse {

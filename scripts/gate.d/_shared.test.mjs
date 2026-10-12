@@ -361,6 +361,7 @@ test('ci.yml：rust-checks 必须自己产出 tauri/dist，否则 generate_conte
 
 test('ci.yml：cargo audit 必须在仓库根跑（symbio/ 下没有 Cargo.lock）', () => {
   const block = jobBlock(ciYml(), 'security-check', null)
+  // doc-link-allow D-010: 下一行是这条测试的判据（该文件本就不该存在），不是入链
   // 本仓是单 workspace：`Cargo.lock` 只有根目录那一份，`symbio/Cargo.lock` 不存在。
   // cargo-audit 只在 cwd 找 Cargo.lock、不向上找 workspace 根 ⇒ `working-directory:
   // symbio` 必然失败（`Couldn't load Cargo.lock`）。此前从未暴露是因为它连装都装不上。
