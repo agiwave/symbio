@@ -395,8 +395,8 @@ async fn aborted_batch_terminates_every_tool_call() {
                 .as_ref()
                 .and_then(|m| m.get("failure_kind"))
                 .and_then(|v| v.as_str()),
-            Some("not_executed"),
-            "未执行必须留下可区分的标记，否则与「跑完了」无从分辨"
+            Some("aborted"),
+            "中止批的未执行必须如实标 aborted（`6cf9520d` 教训：全写成 not_executed 是成因谎报）"
         );
         assert!(u.error.is_none(), "未执行不是错误：挂 error 会让前端渲染 ⚠");
     }

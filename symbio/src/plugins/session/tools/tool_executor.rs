@@ -1224,14 +1224,19 @@ pub async fn process_tool_calls_async(
         // **结果子节点 + 父节点补丁，一个都不能少**（顺序与正常路径一致：
         // 先结果、后父状态）。只发父节点补丁会让卡片有请求、无响应——
         // 那正是「工具没有响应节点，会话却继续往后」的成因。
-        let result_msg = not_executed_result(id, "not_executed");
+        //
+        // reason 必须分辨中止：`6cf9520d` 号会话的 56 条占位全写成了
+        // `not_executed`（批被用户中止，收口却报「同批前序未结束」）——
+        // 成因被谎报，事后排查就得靠猜。中止即 `aborted`，其余才是批跳过。
+        let reason = if abort.is_aborted() { "aborted" } else { "not_executed" };
+        let result_msg = not_executed_result(id, reason);
         llm_emit_message(sink, result_msg.clone()).await;
         if let Some(parent_update) = emit_parent_finalized(
             sink,
             context_messages,
             id,
             MessageStatus::Completed,
-            json!({ "success": false, "failure_kind": "not_executed" }),
+            json!({ "success": false, "failure_kind": reason }),
             None,
         )
         .await

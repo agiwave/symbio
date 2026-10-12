@@ -29,6 +29,15 @@ use super::tool_accumulator::TurnToolCallAccumulator;
 /// 太短时开提取器没有意义（下一块多半就把整行补齐了），反而多付一次字段扫描。
 const PARTIAL_LINE_MIN_BYTES: usize = 256;
 
+/// 单次响应内工具调用数上限。
+///
+/// 为什么必须存在：`6cf9520d` 号会话里，模型在**一条响应**内流式输出了 56 个工具
+/// 调用（同一批 9 个调用原样复读 6 遍），而批执行器要等流结束才开工——60 余秒零
+/// 结果，用户视角即「工具永远不闭合的死循环」，只能手动终止。空闲超时防不了它
+/// （复读也是字节）。超限即以协议错误终止本轮（响亮失败），见
+/// `dispatch_and_track` 的 ToolCallDelta 分支。
+const MAX_TOOL_CALLS_PER_RESPONSE: usize = 32;
+
 /// 发送一帧**增量**：`delta` 追加到目标节点正文尾部（流式热路径，O(delta)）。
 ///
 /// 目标未知时写入点用帧内信息建占位（帧自给自足，不依赖任何先行帧）。
@@ -418,6 +427,26 @@ async fn dispatch_protocol_event(
             let (tc_id, wire_id, full_args, full_name, snapshot_required) =
                 tool_acc.process_delta(idx, id.as_deref(), name.as_deref(), args.as_deref());
 
+            // ── 单响应工具调用数上限（`6cf9520d` 号会话的死循环守卫）──────────
+            //
+            // 那次会话模型在**一次响应**内流式输出了 56 个工具调用（同一批 9 个
+            // 调用原样复读 6 遍，`tool_call_id` 全部唯一），批执行器要等流结束才
+            // 开工 ⇒ 60 余秒零结果，用户视角即「工具永远不闭合」，只能手动终止。
+            // 空闲超时防不了它——复读也是字节，`STREAM_IDLE_TIMEOUT` 永远不触发。
+            // 故在**流的源头**判：超过上限即以协议错误终止本轮（响亮失败，
+            // `Err` 沿 `dispatch_and_track` 的 `?` 传播使整轮 Failed），绝不静默
+            // 吞掉后续调用。上限取 32：本仓健康的单批在个位数～十几个，32 已是
+            // 两倍余量；真需要更多调用应该分轮发起（每轮拿到结果再继续）。
+            if snapshot_required && tool_acc.call_count() > MAX_TOOL_CALLS_PER_RESPONSE {
+                let msg = format!(
+                    "单次响应内工具调用数超过上限（{MAX_TOOL_CALLS_PER_RESPONSE}），本轮终止：\
+                     疑似模型退化复读（同一批调用在一条响应里反复输出）。\
+                     请重试；若复现请缩小任务范围或更换模型。"
+                );
+                plugin_error!("model", "[LLM] {}", msg);
+                return Err(msg);
+            }
+
             // ToolCall 组合节点：自身 content 即**请求参数**（不设独立的请求子节点，
             // 见 `symbio/src/plugins/session/docs/AR-018-node-state-streaming.md` §2.2）。两条路径与 Text / Reasoning
             // **同构**——帧面只有两种语义，由覆盖方式决定，接收端不做类型推断：
@@ -478,3 +507,7 @@ fn safe_substring(s: &str, start: usize) -> String {
 // 文件内而不是集中一张表：理由与它解释的那段代码会一起被 review、一起被删。
 // 判据见 `scripts/panic-audit.mjs`。**加一处 panic 必须同时加一行登记，理由非空。**
 // panic-allow symbio/src/plugins/model/stream.rs::parse_sse_stream: 前序步骤已记下该值，取不到说明本函数的前置条件被破坏，属代码缺陷。
+
+#[cfg(test)]
+#[path = "stream.test.rs"]
+mod tests;
