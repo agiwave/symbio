@@ -394,10 +394,14 @@ test('E-007 不误报：`Weak`（向上引用父）', () => {
   assert.doesNotMatch(r.stdout, E007_HIT)
 })
 
-test('E-007 不误报：容器按名持有多个子实例（HashMap）', () => {
-  const r = audit(withField('instances: Arc<RwLock<HashMap<String, Arc<dyn Plugin>>>>,'))
-  assert.equal(r.status, 0, r.stdout)
-  assert.doesNotMatch(r.stdout, E007_HIT)
+test('E-007 不误报：容器按名持有多个子实例（豁免认**容器形态**，不认某一种表）', () => {
+  // `composite.instances` 为保挂载序把 `HashMap` 换成 `IndexMap`（ADR-057），
+  // 豁免只列 `HashMap` 时它就被报成「按值持有兄弟插件」——一条判据拦住了它本该放行的形态。
+  for (const map of ['HashMap', 'IndexMap', 'BTreeMap']) {
+    const r = audit(withField(`instances: Arc<RwLock<${map}<String, Arc<dyn Plugin>>>>,`))
+    assert.equal(r.status, 0, `${map}\n${r.stdout}`)
+    assert.doesNotMatch(r.stdout, E007_HIT)
+  }
 })
 
 test('E-007 不误报：字段名是 parent / router（本仓专指向上引用）', () => {

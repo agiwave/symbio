@@ -31,7 +31,7 @@ fn put_plugin(root: &Path, name: &str, manifest: &str) {
 /// 空实例表的注册表（判据只看磁盘时用它）
 fn registry_at(root: &Path, required: Vec<String>) -> PluginRegistry {
     PluginRegistry::with_instances(
-        Arc::new(RwLock::new(HashMap::new())),
+        Arc::new(RwLock::new(IndexMap::new())),
         root.to_path_buf(),
         required,
     )
@@ -191,7 +191,7 @@ crate::submit_object_creator!("symbio-test-seed", SeedPlugin::build, dyn Plugin)
 #[tokio::test]
 async fn installable_excludes_mounted_and_system_level() {
     let root = temp_root("installable");
-    let mut instances: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
+    let mut instances: IndexMap<String, Arc<dyn Plugin>> = IndexMap::new();
     // 用 `composite` 自己当「已挂载」的实例：它一定已注册，且无需构造具体插件
     instances.insert("local".to_string(), Arc::new(NopPlugin));
     let reg =
@@ -219,6 +219,36 @@ async fn installable_excludes_mounted_and_system_level() {
     );
 
     let _ = std::fs::remove_dir_all(&root);
+}
+
+// ==================== 快照次序 = 能力收集的广播序 ====================
+
+/// `snapshot()` 的次序是**挂载次序**，不是哈希迭代序。
+///
+/// 消费方是 `Composite::traverse`：它按这张表的次序向子插件广播收集，而
+/// `CapabilityVisitor::register_system_prompt` 的「谁在前谁在后 = 注册顺序」直接吃这条序。
+/// 表写成 `HashMap` 时迭代序按进程随机化 ⇒ **系统提示词里各记忆小节的相对顺序每起一个进程
+/// 重洗一次**（`e2e/cases/t46` 的形状基线实测：同一份装配跑 20 次，13 次是另一种顺序）。
+///
+/// 判据因此钉在最小的那一步：插一张**逆着字母序**的表，读回来还得是这个顺序。
+/// 哪天这里换回哈希表、或给 `snapshot()` 加了排序，本条先红。
+#[test]
+fn snapshot_keeps_mount_order_not_hash_order() {
+    let root = temp_root("snapshot-order");
+    let mut instances: IndexMap<String, Arc<dyn Plugin>> = IndexMap::new();
+    for name in ["zebra", "mid", "alpha"] {
+        instances.insert(name.to_string(), Arc::new(NopPlugin));
+    }
+    let reg = PluginRegistry::with_instances(Arc::new(RwLock::new(instances)), root, Vec::new());
+
+    let names: Vec<String> = reg.snapshot().into_iter().map(|(n, _)| n).collect();
+    assert_eq!(
+        names,
+        vec!["zebra".to_string(), "mid".to_string(), "alpha".to_string()],
+        "快照次序 = 挂载次序（字母序说明被重排过，其它顺序说明是哈希迭代序）"
+    );
+    // 停用 / 卸载摘除走的也是保序的 `shift_remove`（见 `set_enabled` / `uninstall`）：
+    // 那两条要落配置位、删目录，不是本条判据的对象，故不在这里演一遍。
 }
 
 /// 什么都答 `NotFound` 的占位插件（只为了让实例表里有一项）
@@ -270,7 +300,7 @@ async fn disabling_writes_the_flag_and_drops_the_instance() {
     let root = temp_root("disable");
     put_plugin(&root, "alpha", r#"{"plugin_provider": "alpha"}"#);
 
-    let mut instances: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
+    let mut instances: IndexMap<String, Arc<dyn Plugin>> = IndexMap::new();
     instances.insert("alpha".to_string(), Arc::new(NopPlugin));
     let reg =
         PluginRegistry::with_instances(Arc::new(RwLock::new(instances)), root.clone(), Vec::new());
@@ -318,7 +348,7 @@ async fn uninstall_removes_the_instance_and_the_directory() {
     let root = temp_root("uninstall-ok");
     put_plugin(&root, "alpha", r#"{"plugin_provider": "alpha"}"#);
 
-    let mut instances: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
+    let mut instances: IndexMap<String, Arc<dyn Plugin>> = IndexMap::new();
     instances.insert("alpha".to_string(), Arc::new(NopPlugin));
     let reg =
         PluginRegistry::with_instances(Arc::new(RwLock::new(instances)), root.clone(), Vec::new());

@@ -76,7 +76,7 @@ function baseRequests () {
           { role: 'tool', tool_call_id: 'call_1', content: '{"echo":1}' },
           { role: 'assistant', content: '回显成功。' },
         ],
-        tools: [{ function: { name: 'aaa_tool' } }, { function: { name: 'zzz_tool' } }],
+        tools: [{ function: { name: 'zzz_tool' } }, { function: { name: 'aaa_tool' } }],
       },
     },
   ]
@@ -108,13 +108,18 @@ test('extractShape：结构载体进形状（assistant 的 tool_calls 条数、t
   )
 })
 
-test('extractShape：工具名排序后入形状（wire 侧 tools 数组顺序每次不同，判据不能依赖它）', () => {
+test('extractShape：工具名按**送出的原始顺序**入形状（顺序就是装配的产物，换序必须红）', () => {
   const a = extractShape(baseRequests())
+  // 两轮的同一条判据因此能读：注册序稳定 ⇒ 每一轮的 `tools` 顺序一致（工具面是 prompt
+  // 里最大的一段，两轮各换一次序等于每轮都把这段前缀作废）。
+  assert.deepEqual(a.requests[0].tools.names, ['zzz_tool', 'aaa_tool'])
+  assert.deepEqual(a.requests[1].tools.names, ['zzz_tool', 'aaa_tool'])
+
   const shuffled = baseRequests()
   shuffled[0].body.tools.reverse()
   const b = extractShape(shuffled)
-  assert.deepEqual(diffShapes(a, b), [], '同一套工具、顺序不同 ⇒ 不得红')
-  assert.deepEqual(a.requests[0].tools.names, ['aaa_tool', 'zzz_tool'])
+  const diffs = diffShapes(a, b)
+  assert.ok(diffs.length > 0, '同一套工具、顺序不同 ⇒ 必须红（判据不靠排序兜住顺序）')
 })
 
 // ================= PS-001：该红的红 =================

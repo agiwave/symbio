@@ -8,6 +8,7 @@ use crate::symbio_core::{vdfs_context, VdfsItem, VDFS_KIND_DIR};
 use crate::symbio_core::{
     PluginError, PluginInvokeRequest, PluginPayload, PluginSimpleRequest, CAPABILITY_VISITOR,
 };
+use indexmap::IndexMap;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
@@ -156,7 +157,7 @@ fn put_manifest(root: &Path, dir: &str, title: &str) {
     .unwrap();
 }
 
-fn container_map_at(root: PathBuf, map: HashMap<String, Arc<dyn Plugin>>) -> CompositeVdfs {
+fn container_map_at(root: PathBuf, map: IndexMap<String, Arc<dyn Plugin>>) -> CompositeVdfs {
     CompositeVdfs::new(Arc::new(PluginRegistry::with_instances(
         Arc::new(RwLock::new(map)),
         root,
@@ -164,7 +165,7 @@ fn container_map_at(root: PathBuf, map: HashMap<String, Arc<dyn Plugin>>) -> Com
     )))
 }
 
-fn container_map(map: HashMap<String, Arc<dyn Plugin>>) -> CompositeVdfs {
+fn container_map(map: IndexMap<String, Arc<dyn Plugin>>) -> CompositeVdfs {
     container_map_at(fresh_root(), map)
 }
 
@@ -174,7 +175,7 @@ fn container_map(map: HashMap<String, Arc<dyn Plugin>>) -> CompositeVdfs {
 /// 假插件的 `meta()`——两类字段两个来源，正是本文件要锁住的契约。
 fn container(children: Vec<FakeChild>) -> CompositeVdfs {
     let root = fresh_root();
-    let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
+    let mut map: IndexMap<String, Arc<dyn Plugin>> = IndexMap::new();
     for c in children {
         put_manifest(&root, c.dir, c.label);
         map.insert(c.dir.to_string(), Arc::new(c));
@@ -184,7 +185,7 @@ fn container(children: Vec<FakeChild>) -> CompositeVdfs {
 
 /// 只含一个子插件的容器，子插件把 `provider` 暴露在 `dir` 下
 fn container_of(dir: &'static str, provider: Arc<dyn VdfsProvider>) -> CompositeVdfs {
-    let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
+    let mut map: IndexMap<String, Arc<dyn Plugin>> = IndexMap::new();
     map.insert(dir.to_string(), Arc::new(ProviderChild { dir, provider }));
     container_map(map)
 }
@@ -387,7 +388,7 @@ async fn hidden_children_from_any_provider_are_filtered() {
         }
     }
 
-    let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
+    let mut map: IndexMap<String, Arc<dyn Plugin>> = IndexMap::new();
     map.insert("mixed".to_string(), Arc::new(MixedChild));
     let vdfs = container_map(map);
     let VdfsResponse::List(items) = vdfs
@@ -445,7 +446,7 @@ async fn per_child_collection_keeps_ownership() {
 /// 不合并（目录名唯一性由容器实例表的键保证）。列表顺序按 meta.order 升序。
 #[tokio::test]
 async fn distinct_mount_names_each_get_a_dir() {
-    let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
+    let mut map: IndexMap<String, Arc<dyn Plugin>> = IndexMap::new();
     map.insert(
         "plugin_a".to_string(),
         Arc::new(FakeChild {
@@ -639,7 +640,7 @@ async fn deleting_child_dir_root_uninstalls_the_plugin() {
     )
     .unwrap();
 
-    let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
+    let mut map: IndexMap<String, Arc<dyn Plugin>> = IndexMap::new();
     map.insert(
         "alpha".to_string(),
         Arc::new(FakeChild {
@@ -849,7 +850,7 @@ impl VdfsProvider for EchoProvider {
 /// 目录名 = 实例表的挂载名；与 LLM 链路经 `CapabilityVisitor` 收集互不干扰。
 #[tokio::test]
 async fn sub_provider_fetched_via_trait_method() {
-    let mut map: HashMap<String, Arc<dyn Plugin>> = HashMap::new();
+    let mut map: IndexMap<String, Arc<dyn Plugin>> = IndexMap::new();
     map.insert(
         "agent".to_string(),
         Arc::new(ProviderChild {

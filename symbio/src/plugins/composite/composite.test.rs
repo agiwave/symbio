@@ -5,7 +5,7 @@
 use super::*;
 
 use crate::symbio_core::PluginSimpleRequest;
-use std::collections::HashMap;
+use indexmap::IndexMap;
 use std::sync::{Mutex, RwLock};
 
 ///  在本作用域是泛型别名，测试里的 trait impl 需要具体化
@@ -70,12 +70,12 @@ impl Plugin for Probe {
 /// 实例表：容器与它的 VDFS 视图共用同一份（唯一持有者是 `PluginRegistry`）
 fn plugin_map(
     entries: Vec<(&str, Arc<dyn Plugin>)>,
-) -> Arc<RwLock<HashMap<String, Arc<dyn Plugin>>>> {
+) -> Arc<RwLock<IndexMap<String, Arc<dyn Plugin>>>> {
     Arc::new(RwLock::new(
         entries
             .into_iter()
             .map(|(n, p)| (n.to_string(), p))
-            .collect(),
+            .collect::<IndexMap<_, _>>(),
     ))
 }
 

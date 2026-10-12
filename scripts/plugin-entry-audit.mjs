@@ -454,8 +454,11 @@ const UPWARD_FIELD_NAMES = new Set(['parent', 'router'])
  *
  * 四条豁免，逐条都有实据（不是猜的）：
  * 1. 类型含 `Weak` —— 向上引用父，且**不阻止**实例释放；
- * 2. 类型含 `HashMap` / `BTreeMap` / `Vec` —— 容器按名持有**多个子实例**
- *    （`composite.instances`、`home.instances`、`agent.host.sub_agents`）；
+ * 2. 类型含 `HashMap` / `BTreeMap` / `IndexMap` / `Vec` —— 容器按名持有**多个子实例**
+ *    （`composite.instances`、`home.instances`、`agent.host.sub_agents`）。枚举的是
+ *    **容器形态**而非某一种表：`composite.instances` 为让挂载序确定改成了保插入序的
+ *    `IndexMap`（见 `ADR-057`），豁免跟着形态走——跟错了就会把「容器的正常形态」报成
+ *    「按值持有兄弟插件」。
  * 3. 字段名是 `parent` / `router` —— 向上引用，见 `UPWARD_FIELD_NAMES`；
  * 4. 类型以 `&` 开头 —— 借用，**字段不可能长这样**（没有生命周期的结构体字段
  *    编译不过），所以这类行必然是形参（`agent.host::…(tree: &Arc<dyn Plugin>)`）。
@@ -466,7 +469,7 @@ const UPWARD_FIELD_NAMES = new Set(['parent', 'router'])
 function isSiblingPluginRef(name, typeText) {
   if (!/Arc<\s*dyn\s+Plugin\s*>/.test(typeText)) return false
   if (/Weak/.test(typeText)) return false
-  if (/(?:HashMap|BTreeMap|Vec)\s*</.test(typeText)) return false
+  if (/(?:HashMap|BTreeMap|IndexMap|Vec)\s*</.test(typeText)) return false
   if (UPWARD_FIELD_NAMES.has(name)) return false
   if (typeText.trimStart().startsWith('&')) return false
   return true

@@ -62,7 +62,7 @@ use serde_json::Value;
 /// 依赖方判据从 `symbio_core::plugin::ids` 下沉到**执行它的地方**——规则的 owner
 /// 与实现同处，不再隔着两层。
 const SYSTEM_LEVEL_PROVIDERS: &[&str] = &[PLUGIN_ID_HOME, PLUGIN_ID_COMPOSITE];
-use std::collections::HashMap;
+use indexmap::IndexMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock, Weak};
 
@@ -73,7 +73,15 @@ pub struct PluginRegistry {
     /// 用 `std::sync::RwLock` 而非 tokio 版：临界区只有「取一张表的快照」或
     /// 「插一项」，没有任何 await；而装配期（`build`）是**同步**上下文，拿不到
     /// `.await`。同一个锁两种上下文都能用，才不必把装配拆成两份实现。
-    instances: Arc<RwLock<HashMap<String, Arc<dyn Plugin>>>>,
+    ///
+    /// 表型是 **`IndexMap`（保插入序）而不是 `HashMap`**：`snapshot()` 的次序就是
+    /// 能力收集 `traverse` 的广播次序，而 `CapabilityVisitor::register_system_prompt`
+    /// 的「谁在前谁在后 = 注册顺序」直接消费它——写成哈希表时迭代序按进程随机化，
+    /// 于是**系统提示词里各记忆小节的相对顺序每起一个进程重洗一次**
+    /// （`e2e/cases/t46` 的形状基线实测：同一份装配跑 20 次，13 次是另一种顺序）。
+    /// 挂载序本身由装配扫描给出（见 `dir_names` 的 `names.sort()`），所以这张表
+    /// 一旦保序，整条链就是确定的。
+    instances: Arc<RwLock<IndexMap<String, Arc<dyn Plugin>>>>,
     /// 插件根（= 本容器的目录；系统级容器的目录就是系统根）
     root: PathBuf,
     /// 构造者声明的必需插件（目录必须存在；**不可删除**，但可停用）
@@ -96,7 +104,7 @@ impl PluginRegistry {
             .expect("composite 需要父插件经 PLUGIN_DIR 告知自己的目录");
         let required = ctx.get(REQUIRED_PLUGINS).unwrap_or_default();
         Self {
-            instances: Arc::new(RwLock::new(HashMap::new())),
+            instances: Arc::new(RwLock::new(IndexMap::new())),
             root,
             required,
             ctx,
@@ -111,7 +119,7 @@ impl PluginRegistry {
     /// 只有测试——真实装配的根永远来自 `ctx`。生产路径没有它，所以不进 `pub` 面。
     #[cfg(test)]
     pub fn with_instances(
-        instances: Arc<RwLock<HashMap<String, Arc<dyn Plugin>>>>,
+        instances: Arc<RwLock<IndexMap<String, Arc<dyn Plugin>>>>,
         root: PathBuf,
         required: Vec<String>,
     ) -> Self {
@@ -125,11 +133,14 @@ impl PluginRegistry {
     }
 
     /// 实例表句柄（`Composite` 需要它与容器共享同一份，见 `composite.rs`）
-    pub fn instances(&self) -> &Arc<RwLock<HashMap<String, Arc<dyn Plugin>>>> {
+    pub fn instances(&self) -> &Arc<RwLock<IndexMap<String, Arc<dyn Plugin>>>> {
         &self.instances
     }
 
-    /// 已挂载实例的快照（容器 `route` / `traverse` / 资源树共用）
+    /// 已挂载实例的快照（容器 `route` / `traverse` / 资源树共用）。
+    ///
+    /// **次序 = 挂载次序**（`instances` 字段文档：这条序就是能力收集的广播序，
+    /// 系统提示词的小节序由它决定）——不要在这里重新排。
     pub fn snapshot(&self) -> Vec<(String, Arc<dyn Plugin>)> {
         lock_read(&self.instances)
             .iter()
@@ -367,7 +378,9 @@ impl PluginRegistry {
             }
         } else {
             // 先摘出来再 await：写锁守卫不能跨 await（future 会失去 Send）。
-            let plugin = lock_write(&self.instances).remove(name);
+            // `shift_remove` = **保序摘除**（`remove` 已被 indexmap 标废弃：它打乱顺序）：
+            // 停用一个插件不得重排其余挂载顺序（见 `instances` 字段文档）。
+            let plugin = lock_write(&self.instances).shift_remove(name);
             if let Some(p) = plugin {
                 // ADR-033：摘出实例表**之后立即** stop（Disabled = 可恢复，目录与数据都还在）。
                 // 失败只告警、不阻断——用户按下「停用」就该生效，清理没做完不该反过来
@@ -432,7 +445,9 @@ impl PluginRegistry {
         // 与停用同一口径：清理失败只告警，删除继续——目录随后就没了，
         // 再卡在这里只会留下一个「卸不掉」的僵尸。
         // 先把实例摘出来再 await：写锁守卫不能跨 await（future 会失去 Send）。
-        let plugin = lock_write(&self.instances).remove(name);
+        // `shift_remove` = **保序摘除**：卸载一个插件不得把其余挂载顺序重排——那条顺序
+        // 就是能力收集的广播序（见 `instances` 字段文档）。
+        let plugin = lock_write(&self.instances).shift_remove(name);
         if let Some(p) = plugin {
             if let Err(e) = p.stop(PluginStopReason::Uninstalled).await {
                 crate::plugin_warn!("composite", "插件卸载时清理失败 {name}：{e}");

@@ -21,7 +21,7 @@
  *
  * **形状 = 由装配代码决定的部分**，它进判据：
  * 信封参数、消息序列（`role` + `tool_calls` 条数 + 工具结果是否带 `tool_call_id` +
- * 正文形态）、system 前缀的**小节标签序列**、工具面的**数量与名字**。
+ * 正文形态）、system 前缀的**小节标签序列**、工具面的**数量与名字顺序**（原序直比）。
  *
  * **字节数不进判据**，只作观测：正文规模同时由**负载**（用例里的固定文本、召回的记忆内容）
  * 决定，把它钉进判据 ⇒ 改一个用例措辞就红，而那与 prompt 装配无关。判据管「结构在不在」，
@@ -136,7 +136,11 @@ export function extractShape (requests, meta = {}) {
     requests: seen.map((body, i) => {
       const msgs = Array.isArray(body.messages) ? body.messages : []
       const tools = Array.isArray(body.tools) ? body.tools : []
-      const toolNames = tools.map((t) => t?.function?.name ?? t?.name ?? '?').sort()
+      // 工具面记**送出的原始顺序**：顺序本身就是装配的产物（注册序 = 能力收集的广播序）。
+      // 曾经在这里 `.sort()`——那不是口径，是遮丑：当时 `tools` 表是哈希表，数组顺序
+      // **每起一个进程重洗一次**，比原序必然天天红。表改成保序的（`IndexMap`）之后，
+      // 这条判据就把「谁先谁后」一起钉住了（ADR-057 的口径随本次一并收紧）。
+      const toolNames = tools.map((t) => t?.function?.name ?? t?.name ?? '?')
       return {
         index: i,
         envelope: envelopeOf(body),

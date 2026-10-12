@@ -13,11 +13,10 @@ use crate::symbio_core::{
 };
 use async_trait::async_trait;
 use indexmap::IndexMap;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-/// 默认能力管理器：内存 HashMap 实现，一次会话请求一个实例
+/// 默认能力管理器：内存注册表实现，一次会话请求一个实例
 ///
 /// 除工具外，同时承载四组注册（与工具同一 traverse 收集机制）：
 /// - `provider` / `model_catalog`：模型服务的**生效者**（单槽）与**已启用目录**
@@ -26,6 +25,10 @@ use tokio::sync::RwLock;
 ///   两者由 model 插件在**同一次** `register_model_providers` 里交来：生效者必然
 ///   是目录里的一员，拆成两次注册就会允许"生效者不在目录里"这个没有错误信号的
 ///   非法状态（见 `CapabilityVisitor::register_model_providers`）。
+/// - `tools`：能力表，**按注册顺序**保序。这条顺序就是送给模型的 `tools` 数组顺序：
+///   注册序来自能力收集的广播序，写成哈希表时**每起一个进程重洗一次**，而工具面是
+///   prompt 里最大的一段（`docs/reference/PROMPT_SHAPE.md` 实测 18KB 对正文 1.1KB），
+///   换序等于每轮把这段前缀作废——这也是 ADR-057 一度记下「数组顺序每次不同」的根因。
 /// - `system_prompts`：系统提示词（按名称保序；**全部**送达模型，不做竞争）
 /// - `vdfs_providers`：VDFS 挂载点（按挂载名去重，`order` 升序对外）。
 ///   这是 **LLM 可控挂载机制**的清单（子智能体经 `SubAgentVisitor` 在此加
@@ -34,7 +37,7 @@ use tokio::sync::RwLock;
 ///   `vdfs_*` 工具取根走 `vdfs_root` 单槽，本清单暂无消费方——**预留，勿删**。
 /// - `vdfs_root`：VDFS 根 provider（单槽；组合容器注册，访问层据此转发）
 pub struct DefaultToolVisitor {
-    tools: Arc<RwLock<HashMap<String, Arc<dyn Capability>>>>,
+    tools: Arc<RwLock<IndexMap<String, Arc<dyn Capability>>>>,
     provider: Arc<RwLock<Option<Arc<dyn ModelProvider>>>>,
     model_catalog: Arc<RwLock<IndexMap<String, Arc<dyn ModelProvider>>>>,
     system_prompts: Arc<RwLock<IndexMap<String, String>>>,
@@ -45,7 +48,7 @@ pub struct DefaultToolVisitor {
 impl DefaultToolVisitor {
     pub fn new() -> Self {
         Self {
-            tools: Arc::new(RwLock::new(HashMap::new())),
+            tools: Arc::new(RwLock::new(IndexMap::new())),
             provider: Arc::new(RwLock::new(None)),
             model_catalog: Arc::new(RwLock::new(IndexMap::new())),
             system_prompts: Arc::new(RwLock::new(IndexMap::new())),
