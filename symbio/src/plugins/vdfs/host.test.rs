@@ -708,3 +708,58 @@ async fn resolve_fs_fetches_root_via_trait_method() {
     assert_eq!(items[0].node.name, "mem");
     assert_eq!(items[0].path, ".vdfsv2/mem");
 }
+
+// ── 截断必须自带续查地址（2026-10-13，`d781a6c7` 号会话）────────────────────
+//
+// 那次会话一次 `vdfs_tree({"depth":3})` 用 500 个配额打根目录，长度被
+// `.workbuddy-ai` 这类噪声吃掉大半，`docs/adr` 只剩一个目录节点——回执却只说
+// `truncated: true`，没说缺了什么。于是模型开始**猜**文件名（一路猜到 `ADR-213.md`），
+// 132 次「找不到文件」后被用户中止，会话零产出。
+//
+// 教训：**只声明「被截断了」而不给补全地址，等于把补全交给猜**。
+
+#[tokio::test]
+async fn a_truncated_tree_names_what_it_did_not_expand() {
+    let (fs, _) = fs_roots();
+    // limit=2 ⇒ 只塞得下根层的前两格，其余目录一次都不会被展开
+    let ctx = ctx_with(json!({ "path": ".vdfsv2", "limit": 2 }));
+    let t = dispatch(&fs, VDFS_TREE, &ctx)
+        .await
+        .unwrap()
+        .unwrap()
+        .get::<VdfsTreeResponse>()
+        .unwrap();
+
+    assert!(t.truncated, "配额不足 ⇒ 截断");
+    assert!(
+        !t.pending.is_empty(),
+        "截断必须列出没展开的目录——否则调用方只能靠猜去补（`d781a6c7` 就是这么跑飞的）"
+    );
+    assert!(
+        t.message.contains("pending") && t.message.contains("vdfs_list"),
+        "message 要指明续查办法（用什么工具、看哪个字段），写着截断两个字不够：{:?}",
+        t.message
+    );
+    assert!(
+        t.message.contains('2'),
+        "message 要点出本次配额是多少（知道上限才知道要不要调大）：{:?}",
+        t.message
+    );
+}
+
+/// 反向：没截断时回执不带任何新字段——不截断的输出与改动前逐字一致（零回归面）。
+#[tokio::test]
+async fn an_untruncated_tree_carries_no_extra_facts() {
+    let (fs, _) = fs_roots();
+    let ctx = ctx_with(json!({ "path": ".vdfsv2" }));
+    let t = dispatch(&fs, VDFS_TREE, &ctx)
+        .await
+        .unwrap()
+        .unwrap()
+        .get::<VdfsTreeResponse>()
+        .unwrap();
+
+    assert!(!t.truncated);
+    assert!(t.pending.is_empty(), "没截断 ⇒ 没有待续查目录");
+    assert!(t.message.is_empty(), "没截断 ⇒ 不啰嗦");
+}

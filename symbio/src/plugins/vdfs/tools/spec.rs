@@ -367,6 +367,7 @@ async fn tree_receipt(
     let count_limit = req.limit.unwrap_or(500).max(1) as usize;
 
     let mut out: Vec<VdfsItem> = Vec::new();
+    let mut pending: Vec<String> = Vec::new();
     let mut truncated = false;
 
     // 队列元素 = (目录地址, 深度)；地址始终是大模型地址空间，由封装 provider 翻译
@@ -385,9 +386,11 @@ async fn tree_receipt(
 
         // 子地址 = 父目录 + 子名（`/` 与 `""` 都视为根，子地址直接用子名）
         let base = dir.trim_end_matches('/').to_string();
+        let mut listed_all = true;
         for mut item in children {
             if out.len() >= count_limit {
                 truncated = true;
+                listed_all = false;
                 break;
             }
             let child_addr = if base.is_empty() {
@@ -406,15 +409,26 @@ async fn tree_receipt(
                 queue.push_back((child_addr, depth + 1));
             }
         }
+        // 这一层没列完 ⇒ 它是续查入口，要出现在回执上而不是被静默吞掉
+        if !listed_all {
+            pending.push(dir.clone());
+        }
         if truncated {
             break;
         }
     }
 
-    Ok(serde_json::to_value(
-        &super::super::protocol::VdfsTreeResponse {
-            nodes: out,
-            truncated,
-        },
-    )?)
+    // 配额耗尽时队列里剩下的目录**一次都没展开过**，一并报出：它们的子条目是全缺的，
+    // 比「某个目录没列完」更彻底、更需要点名。
+    if truncated {
+        pending.extend(queue.into_iter().map(|(addr, _)| addr));
+    }
+
+    Ok(serde_json::to_value(super::super::protocol::VdfsTreeResponse::finish(
+        out,
+        truncated,
+        pending,
+        count_limit,
+        &req.path,
+    ))?)
 }

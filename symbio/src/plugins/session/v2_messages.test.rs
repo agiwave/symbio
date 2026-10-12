@@ -396,3 +396,115 @@ fn a_parked_change_re_resolves_its_anchor_at_drain_time() {
     drop(holder);
     std::fs::remove_dir_all(&dir).ok();
 }
+
+// ── actor / ts 的归属（2026-10-13 从 `d781a6c7` 号会话复查出来）──────────────
+//
+// 那次会话 363 条 `message.edited` 里 **role=user 的是 0 条**——全是助手流式正文与
+// 工具结果，却一条不落地被记成 `actor: "user"`，548 个事件的 `ts` 又全是 0。假的
+// 主体 + 假的时刻，任何按主体过滤/计数/排序的投影都得错，且**错得看不出来**。
+
+/// 助手正文的编辑 ⇒ 落 `agent:main`，不是 user。
+#[test]
+fn an_assistant_edit_is_attributed_to_the_agent_not_the_user() {
+    let (dir, _) = seeded_dir("actor-assistant");
+    edited(&dir, &patched_msg("u-1", "流式累积的一段", MessageRole::Assistant, None, 1_500));
+
+    let edit = read_facts(&dir).into_iter().find(|e| e.kind == EVENT_MESSAGE_EDITED).expect("编辑事实");
+    assert_eq!(edit.actor, "agent:main", "助手产出署本会话主体——署成 user 是冒用身份");
+    assert_eq!(edit.ts, 1_500, "时刻取自消息本身，不是一律 0");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// 工具结果的编辑 ⇒ 也不是 user（`d781a6c7` 里这类占了 181/363）。
+#[test]
+fn a_tool_result_edit_is_attributed_to_the_agent_not_the_user() {
+    let (dir, _) = seeded_dir("actor-tool");
+    edited(&dir, &patched_msg("u-1", "找不到文件", MessageRole::Tool, None, 1_700));
+
+    let edit = read_facts(&dir).into_iter().find(|e| e.kind == EVENT_MESSAGE_EDITED).expect("编辑事实");
+    assert_eq!(edit.actor, "agent:main");
+    assert_eq!(edit.ts, 1_700);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// 只有用户自己的消息才署 `user`——这是唯一该出现 PRINCIPAL_USER 的地方。
+#[test]
+fn only_a_user_message_is_attributed_to_the_user() {
+    let (dir, _) = seeded_dir("actor-user");
+    edited(&dir, &patched_msg("u-1", "改过的问题", MessageRole::User, None, 1_600));
+
+    let edit = read_facts(&dir).into_iter().find(|e| e.kind == EVENT_MESSAGE_EDITED).expect("编辑事实");
+    assert_eq!(edit.actor, "user", "用户的话才署用户");
+    assert_eq!(edit.ts, 1_600);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// 消息自带 `principal` 时**认它**——转播进来的别的会话/子智能体不能被本会话覆盖
+/// （`plugin::attributed` 的同一条纪律，写侧不许例外）。
+#[test]
+fn an_explicit_principal_wins_over_the_role() {
+    let (dir, _) = seeded_dir("actor-relayed");
+    edited(
+        &dir,
+        &patched_msg("u-1", "别人说的话", MessageRole::Assistant, Some("agent:sub-1".into()), 1_800),
+    );
+
+    let edit = read_facts(&dir).into_iter().find(|e| e.kind == EVENT_MESSAGE_EDITED).expect("编辑事实");
+    assert_eq!(edit.actor, "agent:sub-1", "自带主体优先于按 role 派生——不许串主体");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// 造一条待编辑的消息（role / principal / 时刻都由用例指定）。
+fn patched_msg(
+    id: &str,
+    text: &str,
+    role: MessageRole,
+    principal: Option<String>,
+    ts: i64,
+) -> ChatMessage {
+    ChatMessage {
+        id: id.into(),
+        role: Some(role),
+        principal,
+        msg_type: Some(MessageType::Text),
+        content: Some(MessageContent::Text(text.into())),
+        timestamp: Some(ts),
+        ..Default::default()
+    }
+}
+
+/// 消息**自带**的时刻是事实，优先用它。
+#[test]
+fn the_messages_own_timestamp_wins() {
+    let (dir, _) = seeded_dir("ts-given");
+    edited(&dir, &patched_msg("u-1", "带时刻", MessageRole::Assistant, None, 1_234_567));
+
+    let edit = read_facts(&dir).into_iter().find(|e| e.kind == EVENT_MESSAGE_EDITED).expect("编辑事实");
+    assert_eq!(edit.ts, 1_234_567, "消息自带时刻 ⇒ 原样用作事实的时刻");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// 消息**没带**时刻 ⇒ 退到落格时刻，**不是 0**。
+///
+/// `d781a6c7` 里 548 个事件的 ts 全为 0：上游 9 处 assistant 构造点只有 1 处填了
+/// timestamp，其余全裸。0 不是「未知」而是假话（假装都发生在纪元起点），时序因此
+/// 无从谈起。这里守住的是「宁可用落格时刻，也不许写 0」。
+#[test]
+fn a_missing_timestamp_falls_back_to_now_never_to_zero() {
+    let (dir, _) = seeded_dir("ts-missing");
+    let mut m = patched_msg("u-1", "没填时刻", MessageRole::Assistant, None, 0);
+    m.timestamp = Some(0); // 上游把「没填」写成 0，一并兜住
+    m.principal = None;
+    edited(&dir, &m);
+
+    let edit = read_facts(&dir).into_iter().find(|e| e.kind == EVENT_MESSAGE_EDITED).expect("编辑事实");
+    assert_ne!(edit.ts, 0, "没带时刻也不许写 0——那是谎报，不是未知");
+    assert!(edit.ts > 1_700_000_000_000, "退到的是真实时钟读数：{ts}", ts = edit.ts);
+
+    std::fs::remove_dir_all(&dir).ok();
+}

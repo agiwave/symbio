@@ -296,6 +296,53 @@ fn append(
     }
 }
 
+/// 从变更载荷里解出这次变更的**主体与时刻**。
+///
+/// 载荷的三张脸：`{ message: {...} }`（编辑）/ `{ messages: [...] }`（诞生）/
+/// `{ ids: [...] }`（删除）。只有前两种谈得上主体，且口径与 `plugin::attributed`
+/// 一致：消息自带 `principal` 就认它，否则按 `role` 派生 —— **只有 `role=user` 才是
+/// 用户**；助手正文 / 工具结果 / 压缩记录 / 系统说明都属本会话主体（`agent:main`）。
+///
+/// 取不到时回落到 `user` + `ts = 0`（旧行为）。回落是为了老写方不被这次修正打懵，
+/// 但它是**兜底不是默认**：有 principal / role 可判时绝不落到上面。
+fn actor_and_ts(payload: &Value) -> (String, i64) {
+    use crate::symbio_core::authz::{PRINCIPAL_MAIN, PRINCIPAL_USER};
+
+    let msg = payload.get("message").cloned().or_else(|| {
+        payload
+            .get("messages")
+            .and_then(Value::as_array)
+            .and_then(|a| a.first())
+            .cloned()
+    });
+    let Some(msg) = msg else {
+        // 删除类载荷没有对象可言：npm 变更本身的确不知道是谁留下的那些条。
+        // 保留旧行为，宁可标 user 也不编一个。
+        return (PRINCIPAL_USER.to_string(), 0);
+    };
+
+    let principal = msg.get("principal").and_then(Value::as_str).map(str::to_string);
+    let actor = principal.unwrap_or_else(|| {
+        match msg.get("role").and_then(Value::as_str) {
+            Some("user") => PRINCIPAL_USER.to_string(),
+            // assistant / tool / system —— 都是本会话主体的产出
+            _ => PRINCIPAL_MAIN.to_string(),
+        }
+    });
+    // `ts`：消息自带的时刻是**事实**，优先用它；没有则退到「这条变更是何时落下的」
+    // ——那是此刻，也是事实。
+    //
+    // 曾经一律写 0，于是 548 个事件的时间戳全是一坨相同的 0，时序无从谈起。0 不是
+    // 「未知」，是**一句假话**（假装都发生在纪元起点）。根因在上游：`MessageRole::
+    // Assistant` 的构造点有 9 处，只有 1 处填了 `timestamp`（其余是复制胚胎的各份
+    // 手写实现）。逐个去补那 8 处是同一类错误的第三次重演——这里兜底一层，无论谁
+    // 写的消息，落到事实上都有真实时刻。
+    let ts = msg.get("timestamp").and_then(Value::as_i64)
+        .filter(|t| *t > 0) // 上游把「没填」写成 0，这里一并兜住
+        .unwrap_or_else(crate::symbio_core::clock_now_ms);
+    (actor, ts)
+}
+
 /// [`append`] 的实现：打开事实源、解锚、落格——**不寄存**（寄存留给调用方决定）。
 ///
 /// 抽出来是为了让 [`drain_parked`] 能复用**同一份**落格逻辑（一种变更只有一个
@@ -372,6 +419,20 @@ fn append_into(
         .iter()
         .filter(|e| e.entity == Entity::Message)
         .count();
+    // —— actor 与 ts：从**被变更的消息本身**取，不写死 ——
+    //
+    // 曾经这里写死 `PRINCIPAL_USER`，理由是「变更由用户对列表的操作发起」。`d781a6c7`
+    // 号会话把它证伪：那次会话 363 条 `message.edited` 里 **role=user 的是 0 条**——全是
+    // 助手流式正文与工具结果，却一条不落地被记成了 `user`。后果不是「标签不好看」：
+    // actor 是**鉴权语义**（谁在说话 / 谁的行为），把 agent 的产出署成用户，等于让
+    // agent 拿用户身份落账；任何按主体过滤或计数的地方都会算错（真消息 1 条被读成
+    // 364 条）。
+    //
+    // -correct- 口径照抄 `plugin::attributed`（「落库前补身份的唯一执行点」）：
+    // 消息自带 `principal` 就认它；没有则按 role 派生——`user` 才是用户，其余（助手
+    // 正文 / 工具结果 / 系统说明）都是本会话主体。两者都缺才回落到 `user`（历史写方），
+    // 那时确实无从判断，但不再是「一律」。
+    let (actor, ts) = actor_and_ts(&payload);
     let event = Event::pending(
         format!("{id_prefix}-{n}"),
         kind,
@@ -380,11 +441,10 @@ fn append_into(
         // `turn = 0`：变更不属于任何一轮（截断跨轮）。与 `memory.recalled` /
         // `commitment.*` 同一条既有约定。
         0,
-        // 变更由**用户对列表的操作**发起（VDFS 边界由前端 / CLI 代表用户）——
-        // 与 `user.message` 的 actor 同源（`plugin::attributed` 用的是同一个常量）。
-        crate::symbio_core::authz::PRINCIPAL_USER,
+        actor,
     )
     .with_produced_by(anchor)
+    .with_ts(ts)
     .with_payload(payload);
     match store.append(event) {
         Ok(_) => AppendOutcome::Landed,

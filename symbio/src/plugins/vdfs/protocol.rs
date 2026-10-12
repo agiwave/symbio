@@ -210,6 +210,54 @@ pub struct VdfsTreeResponse {
     /// 是否因深度 / 数量上限被截断
     #[serde(default)]
     pub truncated: bool,
+    /// 因**配额耗尽**而没能展开的目录（截断时才非空）。
+    ///
+    /// 为什么必须回这一份：`d781a6c7` 号会话里，一次 `vdfs_tree({"depth":3})` 的 500 个
+    /// 配额被 `.workbuddy-ai`(180) + `.git`(73) + `.symbio`(60) 吃掉大半，`docs/adr`
+    /// 只剩一个目录节点——那 63 个 ADR 一个都没有，而回执**只说 `truncated: true`，
+    /// 没说缺了什么**。于是模型开始**猜** ADR 编号（`docs/adr/ADR-064.md` …一路猜到  doc-link-allow D-010: 同行反引号路径是历史叙述——记录 d781a6c7 会话里模型实际猜过的编号（仓库只到 ADR-062，该文件当时不存在），非入链。
+    /// `ADR-213.md`），逐个用 shell 试，132 次全是「系统找不到指定的文件」，会话跑
+    /// 188 秒 181 次工具调用后被用户中止，**最终零产出**。
+    ///
+    ///
+    /// 教训是通用的：**只声明「被截断了」而不说「缺了哪部分」，等于把补全工作交给
+    /// 猜**。截断必须自带续查地址，消费者不必发挥想象力。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending: Vec<String>,
+    /// 自解释说明（截断时给出规模 + 续查指引；不截断时为空）。
+    ///
+    /// 与 `vdfs_search` 的 `message` 同款——那个回执会写「[结果已截断：显示前 1000 个
+    /// 匹配]」，tree 此前什么都不写，于是同样的截断在 tree 上无声、在 search 上有声。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub message: String,
+}
+
+impl VdfsTreeResponse {
+    /// 收尾构造——**文案口径只有这一处**。
+    ///
+    /// 本仓 tree 有两份实现（`agent tools` 的 vdfs_tree 与 `host` 的 tree handler），
+    /// 遍历部分各自 parent 走不同 provider，但**截断该怎么说**必须一个答案：两份各自
+    /// 写一遍文案的结果是口径漂移（`PROTOCOL.md` 里那种「两个地方解释同一件事」的老
+    /// 毛病），终有一天只有一份会带上新加的续查指引。
+    pub fn finish(
+        nodes: Vec<VdfsItem>,
+        truncated: bool,
+        pending: Vec<String>,
+        count_limit: usize,
+        root: &str,
+    ) -> Self {
+        let message = if !truncated {
+            String::new()
+        } else {
+            format!(
+                "[树已截断：本次最多返回 {count_limit} 个节点，部分目录未展开或只列了一部分]\n\
+                 未展开的目录列在 `pending` 字段里——请对它们逐个 `vdfs_list`（或对子树单独\n\
+                 `vdfs_tree` 并调大 limit）来补全。**不要凭这份输出推断里面有哪些文件名**：\n\
+                 本次 {root} 的结果不完整，照编号或名字猜子路径必然出错。"
+            )
+        };
+        Self { nodes, truncated, pending, message }
+    }
 }
 
 /// `vdfs/edit` 响应 —— 编辑是**访问层的组合操作**（`read` → 精确替换 → `write`），

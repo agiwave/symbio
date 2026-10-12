@@ -107,6 +107,9 @@ impl<E: EventEnvelope> Store for MemoryStore<E> {
         }
         let seq = Seq::new(inner.head);
         event.assign_seq(seq);
+        // 刻意**不**做时刻兜底：MemoryStore 是平凡基线（`store = memory`，S0），
+        // 大量测试靠 `ts = 0`（时间起点）+ 小 `now` 做 as-of 断言——兜底会毁掉
+        // 这份确定性。时刻完整性由**权威事实源**（WalStore）负责。
         inner.ids.insert(event.event_id().to_string());
         inner.events.push(event);
         inner.head += 1;

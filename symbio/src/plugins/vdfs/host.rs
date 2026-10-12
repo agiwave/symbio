@@ -778,6 +778,7 @@ async fn tree(
     let count_limit = req.limit.unwrap_or(500).max(1) as usize;
 
     let mut out: Vec<VdfsItem> = Vec::new();
+    let mut pending: Vec<String> = Vec::new();
     let mut truncated = false;
 
     // 队列元素 = (目录地址, 深度)
@@ -807,9 +808,11 @@ async fn tree(
         };
         fill_paths(&dir, &mut children);
 
+        let mut listed_all = true;
         for child in children {
             if out.len() >= count_limit {
                 truncated = true;
+                listed_all = false;
                 break;
             }
             let descend =
@@ -820,15 +823,29 @@ async fn tree(
                 queue.push_back((path, depth + 1));
             }
         }
+        // 这一层没列完 ⇒ 它是续查入口，要回给调用方而不是被静默吞掉
+        if !listed_all {
+            pending.push(dir.clone());
+        }
         if truncated {
             break;
         }
     }
 
-    Ok(PluginPayload::new(&VdfsTreeResponse {
-        nodes: out,
+    // 配额耗尽时队列里剩下的目录**一次都没展开过**，子条目全缺，比「列了一半」更需要点名
+    if truncated {
+        pending.extend(queue.into_iter().map(|(addr, _)| addr));
+    }
+
+    // 文案口径与 `tools::spec` 的 vdfs_tree 共用 `VdfsTreeResponse::finish`（同一份实现
+    // 有两份拷贝，98% 逐字相同——最危险的就是这种：改一处会以为改全了）
+    Ok(PluginPayload::new(&VdfsTreeResponse::finish(
+        out,
         truncated,
-    }))
+        pending,
+        count_limit,
+        &req.path,
+    )))
 }
 
 #[cfg(test)]

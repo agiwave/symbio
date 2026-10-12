@@ -558,6 +558,16 @@ pub trait EventEnvelope: Clone + Send + Sync {
     fn seq(&self) -> Option<Seq>;
     /// **仅由 `Store` 在唯一写入口内调用。**
     fn assign_seq(&mut self, seq: Seq);
+    /// 落格前给「没带时刻」的信封兜底——**仅由 `Store` 在唯一写入口内调用**，
+    /// 与 [`EventEnvelope::assign_seq`] 同一条纪律（入库形态由存储层说了算）。
+    ///
+    /// 为什么必须存在：`d781a6c7` 号会话 548 个事件的 `ts` 全为 0——上游十余处
+    /// `Event::pending` 构造点，填了 `timestamp` 的是少数，`0` 便一路漏进事实源。
+    /// `0` 不是「未知」而是**谎报**（假装都发生在纪元起点），时序投影因此整体失真。
+    /// 逐构造点手改必然再漏（同一件事的手写实现已证明会漂移），故收口在入库处：
+    /// 没带时刻的事件以**落格时刻**为准，事实源里不再有 `ts = 0` 的事件。
+    /// 默认实现不动——没有时刻概念的信封保持原样。
+    fn fallback_timestamp(&mut self, _now_ms: i64) {}
 }
 
 impl EventEnvelope for Event {
@@ -571,5 +581,12 @@ impl EventEnvelope for Event {
 
     fn assign_seq(&mut self, seq: Seq) {
         self.seq = Some(seq);
+    }
+
+    fn fallback_timestamp(&mut self, now_ms: i64) {
+        // `0` 是 [`Event::pending`] 的「没填」哨兵，不是事实；带了时刻的不碰。
+        if self.ts == 0 {
+            self.ts = now_ms;
+        }
     }
 }
