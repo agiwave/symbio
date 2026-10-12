@@ -310,6 +310,26 @@ fn main() {
         "有任何一阶取了 01 §8 值域之外的值——那是**值域扩展**，得先改那张表并走 ADR"
     );
 
+    // ── ADR-061 的落点：`store` 值域里不得有 `distributed` ──────────────────
+    //
+    // 这一格在**多副本下必然违反 I1（seq 单调）**，而溯源边依赖 seq 严格递增
+    // （01 §13.3）——留着它等于值域自己宣称一个 I1 不成立的取值合法。ADR-061 判
+    // 「多副本不在计划内 ⇒ 退役」，本断言就是那条决策**能红的落点**：谁把它加回
+    // 01 §8 的表，facts 里就会有它，这里立刻红。决策由此不是「写完了」而是有人看着。
+    //
+    // 重新引入的正道是写一条新 ADR 取代 ADR-061 并答全那四问（全局序来源 / 同
+    // event_id 冲突裁决 / 溯源边指向 / 脑裂与 I3），而不是删掉这条断言。
+    let store_forms = facts::domain_of("store").expect("01 §8 必须有 store 的取值域行");
+    assert!(
+        !store_forms.forms.contains(&"distributed"),
+        "`store` 的值域里出现 `distributed`——它在多副本下与 I1（seq 单调）冲突，\
+         已由 ADR-061 退役；要加回来先取代那条 ADR 并答全四问"
+    );
+    assert!(
+        !facts::in_domain("store", "distributed"),
+        "`store = distributed` 被判为合法取值——退役后它必须是**越界**（值域自己看着，不靠自觉）"
+    );
+
     assert_eq!(bad_new.len(), 1, "反向用例：需要新机制的那一阶必须被抓到");
     assert!(
         bad_new[0].1.contains("meta.architecture"),

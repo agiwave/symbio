@@ -323,12 +323,19 @@ export function frameOf(frameMd) {
     return [parts[0], parts[1], int(plain(r[1]), `§3.3「${plain(r[0])}」的阶数`)]
   })
 
-  // §6.1 名册：七列。「落点」把坐标系接到实施阶梯（`SNN` 或 `SNN+SNN`），
-  // 「类型」的闭集由同一节里那张小表拥有——程序不写死「认知 / 工程 / 治理」三个词。
+  // §6.1 名册：七列（+ 可选的第八列「锚点」）。「落点」把坐标系接到实施阶梯
+  // （`SNN` 或 `SNN+SNN`），「类型」的闭集由同一节里那张小表拥有——程序不写死
+  // 「认知 / 工程 / 治理」三个词。
+  //
+  // **锚点列是第八列、且不由本生成器搬运**：它判的是「这条能力在代码里是哪几行」，
+  // 落点在 `doc-symbol-audit` 的 D-011（那里有 Rust 语料）。facts 是**文档之间**的
+  // 对账数据，把代码锚点搬进来只会长出第二份判据——两份口径必然漂移。故此处只
+  // **容忍**这一列（列数变了要认识，不是要它的数据）。
   const roster = table('能力', /^### 6\.1/, '§6.1 名册')
-  if (roster.header.length !== 7) {
+  if (roster.header.length !== 7 && !(roster.header.length === 8 && plain(roster.header[7]) === '锚点')) {
     throw new Error(
-      `${FRAME_REL} §6.1：名册必须是「能力 / 维 / 轴 / 天梯 / 等级 / 类型 / 落点」七列，实际 ${roster.header.join(' | ')}`,
+      `${FRAME_REL} §6.1：名册必须是「能力 / 维 / 轴 / 天梯 / 等级 / 类型 / 落点」七列` +
+        `（可选第八列「锚点」），实际 ${roster.header.join(' | ')}`,
     )
   }
   const kinds = table('类型', /^### 6\.1/, '§6.1 类型闭集表').rows.map((r) => plain(r[0]))

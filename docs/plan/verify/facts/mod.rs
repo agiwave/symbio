@@ -48,7 +48,7 @@ pub struct Domain {
 pub const DOMAINS: &[Domain] = &[
     Domain {
         key: "store",
-        forms: &["memory", "wal", "sharded", "distributed"],
+        forms: &["memory", "wal", "sharded"],
         open: false,
     },
     Domain {
