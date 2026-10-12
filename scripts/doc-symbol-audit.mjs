@@ -80,8 +80,11 @@ const REPO_ROOT = rootArg ? resolve(rootArg.slice(7)) : resolve(__dirname, '..')
 const RS_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/plan/verify']
 /** D-009 的第二份语料：裸常量名是跨栈事实，前端声明的常量同样被文档指认 */
 const FE_ROOTS = ['tauri/src']
-/** D-009 的第三份语料：只回答存在性，不开族（原因见文件头） */
-const TOOL_ROOTS = ['scripts']
+/** D-009 的第三份语料：只回答存在性，不开族（原因见文件头）。
+ *  `e2e` 与 `scripts` 同侧：md 侧本来就扫 `e2e/README.md`，代码侧却不认 `e2e` 里声明的
+ *  常量 ⇒ 文档指向夹具旋钮（`CONTEXT_WINDOW_TOKENS` 这类）恒假红。存在性口径下加它
+ *  不会开出新命名空间，同族闸的行为不变。 */
+const TOOL_ROOTS = ['scripts', 'e2e']
 /** 裸常量名的形态：全大写、至少一段下划线——单段大写词与普通词无法区分，不查 */
 const CONST_SHAPE = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/
 /** walk 时整树跳过的目录。`.symbio` 是运行时产物：每起一个会话就复制一份

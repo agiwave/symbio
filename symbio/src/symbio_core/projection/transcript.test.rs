@@ -248,6 +248,63 @@ fn a_snapshot_replaces_the_superseded_prefix() {
     );
 }
 
+/// **换基边界上的同一个节点只产一行**（自动压缩把本轮的用户发言**原文**留在快照载荷
+/// 尾部，而那条发言同时是本轮的开场格 `turn × opened`——它落在快照**之后**）。
+///
+/// 少了这一步，每次压缩之后对话网格里就多一条重复的用户发言，而 `rebuild` 那边只认
+/// 一条（它的 `at` 先被快照播种）——两个出口对同一段历史给两种读法，正是本仓反复栽的
+/// **静默**分叉。这条判据由 e2e 的真实会话负载抓出来（`e2e/cases/t47-real-session-soak.mjs`）。
+#[test]
+fn the_user_turn_a_snapshot_carries_is_not_emitted_twice() {
+    let events = vec![
+        user(0, "u-0", "被压掉的问题"),
+        snapshot(
+            "a",
+            vec![
+                msg("snap-root", "user", Some("text"), "摘要"),
+                msg(
+                    "u-1",
+                    "user",
+                    Some("text"),
+                    "本轮的发言（快照尾部留着原文）",
+                ),
+            ],
+        ),
+        user(1, "u-1", "本轮的发言（快照尾部留着原文）"),
+    ];
+    assert_eq!(
+        entries(&events),
+        vec![
+            ("user".to_string(), "摘要".to_string()),
+            (
+                "user".to_string(),
+                "本轮的发言（快照尾部留着原文）".to_string()
+            ),
+        ],
+        "基线占了的节点身份，快照之后的同 id 事实不再产第二行"
+    );
+}
+
+/// 去重**只**作用在换基边界，不在事实事件彼此之间：兜底 / 汇报那几格的节点身份是按
+/// `turn_id` 派生的合成 id（[`crate::symbio_core::event_produced_text_node_id`]），同一轮里
+/// 两条不同事件可能撞到同一个合成 id，而它们在 `rebuild` 里是两个不同的节点——把它们
+/// 合并就是**另一种**分叉。这条钉住判据的边界，免得后来人把它「顺手」改成全局去重。
+#[test]
+fn two_live_events_sharing_a_node_id_are_both_projected() {
+    let events = vec![
+        assistant(0, "t-0-text", "等用户时说的话"),
+        assistant(0, "t-0-text", "同一轮后来的收束"),
+    ];
+    assert_eq!(
+        entries(&events),
+        vec![
+            ("assistant".to_string(), "等用户时说的话".to_string()),
+            ("assistant".to_string(), "同一轮后来的收束".to_string()),
+        ],
+        "没有快照就没有换基边界：事实事件彼此不按时份 id 合并"
+    );
+}
+
 /// **只认最近一次**：更早的快照连它自己的列表都已被后来的快照取代。
 #[test]
 fn only_the_latest_snapshot_counts() {

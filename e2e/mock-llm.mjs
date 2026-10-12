@@ -25,7 +25,11 @@
 //! }
 //! ```
 //! 匹配规则：按数组顺序，`match` 是对**最后一条 user 消息**的子串匹配；
-//! 不带 `match` 的场景可设 `once: true`（只用一次，适合「第 N 轮调工具」的编排）。
+//! 不带 `match` 的场景可设 `once: true`（只用一次，适合「第 N 轮调工具」的编排）
+//! 或 `times: N`（**最多被选中 N 次**，`once` 就是 `times: 1` 的别名）。
+//! `times` 是为**一长串连续工具轮**准备的：`{ afterTool: true, times: 24, toolCalls: [...] }`
+//! 让同一轮里连调 24 次工具，第 25 次选中时它已耗尽，池子里下一条（通常就是收束那条）接上。
+//! 名额按**选中次数**计，与 `failTimes`（按**逻辑请求**计）是两套计数器，别混。
 //! `failTimes: N`：前 N 次**逻辑请求**返回 `errorStatus`（默认 500）错误，之后同场景正常应答。
 //! 无匹配时走 `fallback`；都没有则回复固定占位文本。
 //!
@@ -64,7 +68,17 @@ if (SCENARIOS_PATH) {
   plan = JSON.parse(await import('node:fs/promises').then((fs) => fs.readFile(SCENARIOS_PATH, 'utf8')));
 }
 const requests = []; // 每次调用的完整请求体 + 时间戳
-const onceUsed = new Set();
+/**
+ * 场景已消耗次数（`once` ≡ `times: 1`，`times: N` ≡ 至多 N 次）。
+ *
+ * 计的是**选中次数**（一次 HTTP 命中算一次），与 `failTimes` 的「逻辑请求」口径
+ * **故意不同**：`failTimes` 要判的是「这类请求在这段时间是坏的」，重发必须沿用同一结论；
+ * 而 `times` 是**编排名额**——它存在的意义就是「这条场景最多再被吐 N 次」，用来给工具
+ * 循环收尾。按请求体指纹去重的话，静态参数的工具循环（每轮读同一份文件 ⇒ 滑窗内的
+ * 消息数组逐字节相同 ⇒ 指纹相同）会一轮名额都不消耗，症状是**无限工具循环**跑到
+ * 几千次请求后撞用例超时。
+ */
+const useCounts = new Map();
 // `failTimes` 的名额按**逻辑请求**消耗：键 = 场景 id + 请求体指纹，值 = 该请求
 // 定下的结论（fail / ok）。同一请求体的退避重放沿用首次结论（见文件头说明）。
 const failOutcome = new Map();
@@ -91,6 +105,12 @@ function requestFingerprint(scenarioId, body) {
 
 function loadScenarios() {
   return plan.scenarios ?? [];
+}
+
+/** 本场景还可被选中几次（`once` = 1，`times: N` = N，都没写 = 不限）。 */
+function usageCap(scenario) {
+  if (scenario.times != null) return scenario.times;
+  return scenario.once ? 1 : Infinity;
 }
 
 function pickScenario(body) {
@@ -132,7 +152,7 @@ function pickScenario(body) {
     let best = null;
     let bestAt = -1;
     for (const s of candidates) {
-      if (s.once && onceUsed.has(s.id)) continue;
+      if (usageCap(s) <= (useCounts.get(s.id) ?? 0)) continue;
       if (s.match) {
         const at = userText.lastIndexOf(s.match);
         if (at < 0) continue;
@@ -153,10 +173,15 @@ function pickScenario(body) {
   // 下游断言「历史里没有上一轮收束」，离真因隔两层。
   const best = choose(pool) ?? (isToolResultTurn ? choose(all) : null);
   if (best !== null) {
-    if (best.once) onceUsed.add(best.id);
-    return { scenario: best, userText };
+    // 名额按**选中次数**扣（每 HTTP 命中一次；口径与 `failTimes` 不同，理由见 `useCounts`）。
+    let useIndex = 0;
+    if (Number.isFinite(usageCap(best))) {
+      useCounts.set(best.id, (useCounts.get(best.id) ?? 0) + 1);
+      useIndex = useCounts.get(best.id);
+    }
+    return { scenario: best, userText, useIndex };
   }
-  return { scenario: plan.fallback ?? { id: 'default', content: '（mock 默认回复）' }, userText };
+  return { scenario: plan.fallback ?? { id: 'default', content: '（mock 默认回复）' }, userText, useIndex: 0 };
 }
 
 // ---------- 故障注入：逻辑请求的判定与响应头 ----------
@@ -204,8 +229,20 @@ function chunkOf(id, model, delta, finish = null, usage = null) {
   return c;
 }
 
-/** 把场景编译成 [delta, finish] 事件序列（不区分 stream/非 stream，最后统一折算）。 */
-function* buildEvents(scenario, model, requestId) {
+/**
+ * 把场景编译成 [delta, finish] 事件序列（不区分 stream/非 stream，最后统一折算）。
+ *
+ * `toolCallId` 对 **`times` 复用型场景**加选中次数后缀：一条场景被连选 N 次就是模型
+ * 连发 N 次工具调用，id 相同的话后端按 id 归并 ⇒ 转写里只剩一格、请求视图里只剩一个
+ * 工具结果（症状：长轮的字节曲线是一条水平线，「45 步」压不出任何累积）。
+ * 其余场景（`once` / 无限）逐字节保持原样——用例里写死的 `call_1` 之类不该被改动。
+ */
+function buildToolCallId(scenario, tc, i, useIndex) {
+  const base = tc.id ?? `call_${i}`;
+  return scenario.times != null && useIndex > 0 ? `${base}#${useIndex}` : base;
+}
+
+function* buildEvents(scenario, model, requestId, useIndex = 0) {
   // ⓪ 思考（reasoning_content，真实模型在正文之前输出）
   for (const piece of scenario.reasoning ?? []) {
     yield chunkOf(requestId, model, { reasoning_content: piece });
@@ -215,7 +252,7 @@ function* buildEvents(scenario, model, requestId) {
     const argsStr = typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments ?? {});
     yield chunkOf(requestId, model, {
       tool_calls: [
-        { index: i, id: tc.id ?? `call_${i}`, type: 'function', function: { name: tc.name, arguments: '' } },
+        { index: i, id: buildToolCallId(scenario, tc, i, useIndex), type: 'function', function: { name: tc.name, arguments: '' } },
       ],
     });
     // 参数分两片流式吐出，逼出后端「参数流式聚合」路径
@@ -247,7 +284,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === '/_reset') {
     requests.length = 0;
-    onceUsed.clear();
+    useCounts.clear();
     failOutcome.clear();
     failLogicalHits.clear();
     res.writeHead(200, noKeepAlive);
@@ -272,7 +309,7 @@ const server = http.createServer(async (req, res) => {
     try { parsed = JSON.parse(body); } catch { /* 容错：空体 */ }
     requests.push({ at: Date.now(), path: url.pathname, body: parsed, contentType: req.headers['content-type'] ?? null });
 
-    const { scenario } = pickScenario(parsed);
+    const { scenario, useIndex } = pickScenario(parsed);
     const model = parsed.model ?? 'mock-model';
     const requestId = `chatcmpl-${Date.now().toString(16)}-${requests.length}`;
 
@@ -300,13 +337,13 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    const events = [...buildEvents(scenario, model, requestId)];
+    const events = [...buildEvents(scenario, model, requestId, useIndex)];
 
     // 非 stream：一次性 JSON
     if (parsed.stream === false) {
       const text = (scenario.chunks ?? [scenario.content ?? '']).join('');
       const toolMsgs = (scenario.toolCalls ?? []).map((tc, i) => ({
-        id: tc.id ?? `call_${i}`,
+        id: buildToolCallId(scenario, tc, i, useIndex),
         type: 'function',
         function: { name: tc.name, arguments: typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments ?? {}) },
       }));

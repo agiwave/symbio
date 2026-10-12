@@ -330,6 +330,19 @@ pub fn verify(
     // 最近一次压缩快照（与 `transcript` **共用同一份**）：只有它是活的，更早的
     // 连自己的列表都已被取代。见模块文档「第四类」。
     let snapshot = super::mutations::mutations_latest_snapshot(events);
+    // 快照基线**已经占住**的节点身份。复核与投影 `transcript` 共用同一条「换基边界不
+    // 重复」纪律（见那里的文档）：本轮的用户发言既原文躺在快照载荷尾部、又在快照之后
+    // 作为开场格落了一事实，于是它会被**两条来源各认领一次**——第一次用掉请求包里那
+    // 一条，第二次找不到「还没被用掉」的匹配，报成「网格→prompt 丢事实」。
+    // 那是恒假警报（prompt 一个字都不缺），但每次压缩之后每轮都叫一次，真缺口就淹在
+    // 里面——本仓的判据一旦恒红就等于没有判据。
+    let carried: std::collections::HashSet<String> = match snapshot.as_ref() {
+        Some((_, msgs)) => super::transcript::snapshot_entries(msgs)
+            .into_iter()
+            .map(|(node, _)| node)
+            .collect(),
+        None => std::collections::HashSet::new(),
+    };
 
     // 网格侧：投影范围内的事件，逐条找对应 entry。
     let mut used = vec![false; messages.len()];
@@ -415,6 +428,12 @@ pub fn verify(
         let node = event_node_of(e);
         if let Some(node) = node.as_deref() {
             if mutations.is_removed(node) {
+                continue;
+            }
+            // 换基边界：这条事实的节点身份已被快照基线认领过（上面 `carried`），不再
+            // 对 prompt 提第二次主张。它与 `idx < *si` 那个跳过**不是**同一件事：那些是
+            // 被整段取代的事件，而这一条是**取代之后**才落的格，只是载荷里已带了原文。
+            if carried.contains(node) {
                 continue;
             }
         }

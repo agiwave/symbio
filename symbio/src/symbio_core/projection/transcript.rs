@@ -327,13 +327,42 @@ pub fn transcript() -> Projection<TranscriptView> {
         let mutations = super::mutations::MessageMutations::collect(events);
         let mut entries: Vec<TranscriptEntry> = Vec::new();
 
+        // ── 换基：先收下快照那份列表，再从其下标之后接着折（见函数文档）────────
+        //
+        // 快照事件自身也受 `now` 约束（as-of 读视图：晚于 `now` 的压缩在那一刻
+        // 还没发生，历史就该按压缩**前**的样子读）。
+        let (start, snapshot) = match super::mutations::mutations_latest_snapshot(events) {
+            Some((i, msgs)) if events[i].ts <= now => (i + 1, msgs),
+            _ => (0, Vec::new()),
+        };
+        let baseline = snapshot_entries(&snapshot);
+        // 基线里已经占了的节点身份：快照之后再来同 id 的事实不再产第二行。见 `push`。
+        let superseded: std::collections::HashSet<String> =
+            baseline.iter().map(|(node, _)| node.clone()).collect();
+
         // 收一条条目：**出生时就按索引定稿**（被删的不收；被编辑过的用新读法）。
         //
         // `node` = 该条目对应的节点身份（与 `rebuild` / 变更格同一套 id，见
         // [`crate::symbio_core::event_payload_node_id`]）。它**不进线格式**——`TranscriptEntry`
         // 的字段一个没多，折叠键只在投影内部存在。
-        let mut push = |mut entry: TranscriptEntry, node: String| {
+        //
+        // **换基边界不重复产行**（`from_snapshot` 为假时才查 `superseded`）：自动压缩把
+        // **本轮**的用户发言原文留在快照载荷尾部，而那条发言同时是本轮的开场格
+        // （`turn × opened`，落在快照之后）。于是同一个节点被两条来源各产一次——每次压缩
+        // 之后网格里多一条重复的用户发言。这是「两个出口对同一段历史给两种读法」那种
+        // **静默**分叉：`rebuild` 的 `at` 先被快照播种、后来的同 id 事件不认（「同 id 只认
+        // 首次」），而这里此前没有那一步。
+        //
+        // 判据**只作用在换基边界上**（事实事件 ↔ 快照载荷之间），不在事实事件彼此之间：
+        // 兜底 / 汇报那几格的节点身份是按 `turn_id` 派生的合成 id（见
+        // [`crate::symbio_core::event_produced_text_node_id`]），同一轮里两条不同事件可能
+        // 撞到同一个合成 id，而它们在 `rebuild` 里是两个不同的节点——把它们去重就是另一种
+        // 分叉。播种集合只装基线里那份，正是这个边界。
+        let mut push = |mut entry: TranscriptEntry, node: String, from_snapshot: bool| {
             if mutations.is_removed(&node) {
+                return;
+            }
+            if !from_snapshot && superseded.contains(&node) {
                 return;
             }
             if let Some(ed) = mutations.edited(&node) {
@@ -347,16 +376,8 @@ pub fn transcript() -> Projection<TranscriptView> {
             entries.push(entry);
         };
 
-        // ── 换基：先收下快照那份列表，再从其下标之后接着折（见函数文档）────────
-        //
-        // 快照事件自身也受 `now` 约束（as-of 读视图：晚于 `now` 的压缩在那一刻
-        // 还没发生，历史就该按压缩**前**的样子读）。
-        let (start, snapshot) = match super::mutations::mutations_latest_snapshot(events) {
-            Some((i, msgs)) if events[i].ts <= now => (i + 1, msgs),
-            _ => (0, Vec::new()),
-        };
-        for (node, entry) in snapshot_entries(&snapshot) {
-            push(entry, node);
+        for (node, entry) in baseline {
+            push(entry, node, true);
         }
 
         for e in &events[start..] {
@@ -380,6 +401,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                             exclude_from_context: false,
                         },
                         event_payload_node_id(e, "id"),
+                        false,
                     );
                 }
                 (Entity::Turn, Verb::Closed, EVENT_ASSISTANT_FINAL) => {
@@ -395,6 +417,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                                 exclude_from_context: false,
                             },
                             event_produced_text_node_id(e),
+                            false,
                         );
                     }
                 }
@@ -413,6 +436,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                                 exclude_from_context: false,
                             },
                             event_produced_text_node_id(e),
+                            false,
                         );
                     }
                 }
@@ -426,6 +450,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                             exclude_from_context: false,
                         },
                         event_produced_text_node_id(e),
+                        false,
                     );
                 }
                 // 轮边界折进的补充（缺口 3）：它**是用户说的话**，所以 role=user——
@@ -445,6 +470,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                                 exclude_from_context: false,
                             },
                             event_payload_node_id(e, "id"),
+                            false,
                         );
                     }
                 }
@@ -467,6 +493,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                                 exclude_from_context: true,
                             },
                             event_payload_node_id(e, "id"),
+                            false,
                         );
                     }
                 }
@@ -485,6 +512,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                                 exclude_from_context: true,
                             },
                             event_payload_node_id(e, "id"),
+                            false,
                         );
                     }
                 }
@@ -500,6 +528,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                             exclude_from_context: false,
                         },
                         event_tool_result_node_id(e),
+                        false,
                     );
                 }
                 // 诞生格（`message × opened`，ADR-054
@@ -512,7 +541,7 @@ pub fn transcript() -> Projection<TranscriptView> {
                 (Entity::Message, Verb::Opened, EVENT_MESSAGE_ADDED) => {
                     for (node, mut entry) in snapshot_entries(&added_messages(e)) {
                         entry.exclude_from_context = true;
-                        push(entry, node);
+                        push(entry, node, false);
                     }
                 }
                 _ => {}

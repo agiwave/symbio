@@ -66,6 +66,7 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
 | `match` | 对最后一条 user 消息做子串匹配 |
 | `afterTool` | 只匹配「工具结果回灌轮」（最后一条消息 role=tool）；**不带它**的场景只匹配用户轮，防止工具循环 |
 | `once` | 场景只消费一次（适合「第 N 轮才调工具」的编排） |
+| `times: N` | 场景**至多被选中 N 次**（`once` 就是 `times: 1`）。给「同一轮里连调 N 次工具」用：`{ afterTool: true, times: 24, toolCalls: [...] }` 耗尽后，池子里**下一条**同族场景接上——不带 `match` 的候选是**先声明的先用**，所以循环要排在收束那条之前 |
 | `chunks` + `chunkDelayMs` | 正文分片逐帧吐出（流式逼真） |
 | `toolCalls` | 先吐 `tool_calls` delta（参数分两片流式），再吐正文 |
 | `reasoning` | 正文前输出 `reasoning_content` SSE 分片（驱动 reasoning 节点） |
@@ -101,8 +102,10 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
 - 每个 `tool_call` 必有 `role=tool` 结果子节点（「有请求必有响应」）；
 - 失败路径不得留非终态节点（无「永远运行中」）。
 
-> 上表**停在 T18**（用例已到 T41，中间的行没有补）——它是一份人工索引，不是清单；
-> 权威清单 = `ls e2e/cases/`（runner 与门控都按目录发现式加载，新增文件即生效）。
+> 上表**停在 T18**，后面的行没有补——它是一份人工索引，不是清单，也不写「现在共几例」
+> （例数的 owner 是 `ls e2e/cases/` 与 `35-baseline` 的棘轮格，写在这里必然漂移）。
+> **某一条用例测什么**归它自己的文件头（每条都在头部写清「钉的是什么 / 为什么这样取」），
+> 新增文件即被 runner 与门控按目录发现式加载，无需在本表登记。
 
 ## 常见夹具陷阱（跨用例，踩过的）
 
@@ -139,6 +142,26 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
    第二个句柄只能拿到**只读降级**（`append` 恒 `NotTheWriter`）——被测函数的落格会
    全线失败。播种要在**独立的块里做完并 drop**（参考 `v2_exec.test.rs` 的
    `a_skill_hit_never_takes_over_a_resumed_turn`）。
+9. **REPL 的 stdin 是按行消费的**。一条带 `\n` 的发言写进去就是**两轮**（症状：轮次账
+   比设计的多出几倍，而系统没坏）。负载类用例的发言文本必须单行；要多字节材料就让
+   **工具结果**去承担。参考 `t47` 的 `TOPICS`。
+10. **没有 `match` 的场景是「先声明者先被消费」**，而 `match` 命中者一律优先。于是长
+    工具轮的**启动器**如果写成无 `match` 兜底项，会被第一个普通轮吃掉——表现为「长轮
+    根本没跑，负载没压到机制」，而所有断言仍然绿（它判的是别的东西）。给每一个要按
+    时序出场的场景配一个唯一 marker 做 `match`。参考 `t47`（`early-read` / `deep-start`）。
+11. **`times: N` 与 `failTimes: N` 是两套计数器**：前者按**选中次数**（一次 HTTP 命中）
+    计，后者按**逻辑请求**（请求体指纹）计。静态参数的工具循环里每个请求体逐字节相同，
+    所以按 `times` 的名额会被一次用光 ⇒ 循环停不下来（实测 3400+ 次请求）。反过来说：
+    需要「这条场景只被选 N 次」就用 `times`，别拿 `failTimes` 的口径去想它。
+12. **压缩水位线要跟估算器对表，不是跟字节数**。mock 每轮恒报 `prompt_tokens: 64`，
+    校准比值被压到下限 `0.2`（`tokenizer.rs::feedback` 的 clamp），于是估算 token 只有
+    真实体量的两成——按字节算「该压了」的窗口值会让压缩**永不触发**，再小一档则顶到
+    「摘要请求本身超上限」的注定失败分支并触发熔断。取值靠实测矩阵（见 `t47` 的
+    `CONTEXT_WINDOW_TOKENS` 文档），而窗口大小本身**不是**判据。
+13. **等「某一个」子进程退出不要用全局 `ProcessWrap` 探针**。用例跑到一半时 mock-llm
+    还活着，全局探针永远非空 ⇒ 恒超时；那是等待写错了对象。挂在句柄的事件上：
+    `cli.proc.once('exit', …)`（Windows 的 `kill()` 走信号路径，`exitCode` 恒 `null`，
+    只盯 `exitCode` 同样会等到超时）。全局那条只用在 `finally`（第 6 条）。
 
 **新增「接线判据」用例时另加一条纪律**：机制已经接进生产、只是缺判据时，用例必须证
 **「接线前后行为可见地不同」**——把开关翻掉（如 `skill_compile_enabled` /

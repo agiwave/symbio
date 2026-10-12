@@ -3,14 +3,14 @@
 > ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/registry/task/*.md` 生成，请勿手改。**
 > 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，原则与流程见 [14 · 登记与汇总机制](../../plan/14-登记与汇总机制.md)。
 
-**计数**：☐ todo 3 · 🟡 doing 0 · ☑ done 51 · ❌ wont 0（共 54）
+**计数**：☐ todo 3 · 🟡 doing 0 · ☑ done 52 · ❌ wont 0（共 55）
 
 ## 待处理（按依赖顺序）
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
 | `T-009` | C2 的形态定案——去 dispatch 样板要不要动 VdfsProvider 的契约面（先 ADR，后实施） | now | meta | — |
 | `C2` | `VdfsProvider` 的 match 样板在每一处生产实现里各写一遍 | — | C | T-009 |
-| `S-end②` | `full` 没被真实会话负载压过：e2e 全绿只是必要条件，不是「跑过真实负载」 | — | S | P3 |
+| `S-end③` | 「结构化对模型是变好还是变坏」仍无读数：门内判据只到形状与有界性，模型侧对照需要一次独立的可授权实验 | later | S | S-end① |
 
 ## 进行中
 （无）
@@ -49,6 +49,7 @@
 | `P4` | 读数口「读得出」但「看不见」：`session/stats` 八列在生产前端与 CLI 零调用方 | P | `git log --grep=P4` |
 | `P5` | 召回率无评测集（`vec` 恒空、检索判据只吃 tag），但对应阶段状态记为已完成 | P | `git log --grep=P5` |
 | `S-end①` | 没有一份 prompt 形状基线，无法回答「结构化对模型是变好还是变坏」——没有它，任何「更有效」的判断都是凭感觉拍板 | S | 判据住 `scripts/prompt-shape-audit.mjs`（PS-001…003）+ 门内执行方 `e2e/cases/t46-prompt-shape-baseline.mjs`；基线本体 `docs/reference/PROMPT_SHAPE.md`；口径见 `docs/registry/adr/ADR-057.md`。回归测试 `node --test scripts/prompt-shape-audit.test.mjs` → 20/20；反向验证（手改基线里一个工具名）⇒ t46 红 |
+| `S-end②` | `full` 没被真实会话负载压过：e2e 全绿只是必要条件，不是「跑过真实负载」 | S | 压测执行方 `e2e/cases/t47-real-session-soak.mjs`（21 轮 = 20 正文 + 1 个 45 步工具长轮，跑过两次压缩）；口径决策 `docs/registry/adr/ADR-058.md`；压出的两个静默分叉修在 `symbio/src/symbio_core/projection/transcript.rs` 与 `prompt_fidelity.rs`，各带双向单点判据（`the_user_turn_a_snapshot_carries_is_not_emitted_twice` / `..._claims_only_once`）。全量 e2e 44/44 绿、`cargo test` 0、CS-001 三格未变宽 |
 | `S0` | 会话消息的事实源是 `SessionStore`，WAL 轮末入格但读侧不以它为准 ⇒「Store 是唯一原语」在生产路径上不成立 | S | `git log --grep=S0` |
 | `S1` | 读路径不并读两源 ⇒ 真源切换的偏差无声 | S | `git log --grep=S1` |
 | `S2` | Q3 进展读不走 WAL | S | `git log --grep=S2` |

@@ -112,12 +112,6 @@ export class MockLlm {
     return this;
   }
 
-  /** 更换场景脚本（用例运行中重新编排）。 */
-  setScenarios(scenarios, fallback = null) {
-    this.plan = { scenarios, fallback };
-    writeFileSync(this.scenarioPath, JSON.stringify(this.plan));
-  }
-
   async requests() {
     const { body } = await fetchJson(`${this.base}/_requests`);
     return body?.requests ?? [];

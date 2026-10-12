@@ -417,6 +417,37 @@ fn a_compacted_history_is_complete_after_the_snapshot() {
     );
 }
 
+/// **换基边界上的同一条发言只认领一次**（自动压缩把本轮的用户发言原文留在快照载荷尾部，
+/// 而它就是本轮的开场格 ⇒ 那条事实落在快照**之后**）。
+///
+/// 少了这一步，复核会对同一条发言主张两次：第一次用掉请求包里那一条，第二次找不到
+/// 「还没被用掉」的匹配，于是每次压缩之后每轮都报一次「网格→prompt 丢事实」——而
+/// prompt 一个字都不缺。这条恒假警报由 e2e 的真实会话负载暴露
+/// （`e2e/cases/t47-real-session-soak.mjs`），它与 `transcript` 的换基边界去重是**同一条**
+/// 纪律的两个出口。
+#[test]
+fn the_user_turn_a_snapshot_carries_claims_only_once() {
+    let events = vec![
+        user_turn(0, "被压掉的问题"),
+        snapshot(&[
+            ("snap-root", "user", "[CONTEXT SNAPSHOT] 摘要"),
+            // 快照尾部留着**本轮**发言的原文，节点身份与下面那条开场格同一个。
+            ("u-1", "user", "本轮的发言"),
+        ]),
+        user_turn(1, "本轮的发言"),
+    ];
+    let msgs = vec![
+        entry("user", "[CONTEXT SNAPSHOT] 摘要", None),
+        entry("user", "本轮的发言", None),
+    ];
+    let rep = verify(&events, &msgs, None);
+    assert!(
+        rep.is_complete(),
+        "同一条发言两个出处不是两个缺口：{}",
+        rep.summary()
+    );
+}
+
 /// 反向：快照载荷里的一条**没进 prompt** ⇒ 报「丢事实」。
 ///
 /// 这条证明上面那条绿不是恒绿：把一条摘要消息从 prompt 里拿掉，判据当场红。
