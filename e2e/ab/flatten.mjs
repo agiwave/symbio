@@ -196,6 +196,17 @@ const FN_OPEN = '<' + 'function=';
 const PARAM_OPEN = '<' + 'parameter=';
 
 /**
+ * 正文里是否出现过内部调用标记——**与调用是从哪一处读回来的无关**，问的是「它写了什么」。
+ *
+ * 这两个问题必须分开：实测有道题把两枚 `OPEN_CALL` 写在前面、后面照样跟了一行合法 JSON，
+ * 按「出处」判它「遵守了协议」是对的（工具名确实从协议那一行来），按「漏没漏」判它
+ * 「没漏」就是假的。协议那一句是「只输出一行 JSON，不要输出别的内容」。
+ */
+export function hasNativeMarkup(text) {
+  return String(text ?? '').includes(FN_OPEN) || String(text ?? '').includes(OPEN_CALL);
+}
+
+/**
  * 臂 B 的第二种出处：模型**没按文本协议答，而是把训练形态里的调用标记漏进正文**
  * （实测 MiMo 在拍平臂上多次直接输出 `OPEN_CALL + FN_OPEN` 那一族标记）。
  *

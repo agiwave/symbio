@@ -38,7 +38,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TASKS, structuredBodyFor } from './tasks.mjs';
-import { flattenRequest, parseFlatCalls, parseNativeMarkupCalls, structuredCalls } from './flatten.mjs';
+import { flattenRequest, parseFlatCalls, parseNativeMarkupCalls, hasNativeMarkup, structuredCalls } from './flatten.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -152,10 +152,10 @@ function buildArmBody(label, structuredBody) {
  */
 function flatCalls(content) {
   const json = parseFlatCalls(content).calls;
-  if (json.length > 0) return { calls: json, source: 'text-protocol', leaked: false };
+  if (json.length > 0) return { calls: json, source: 'text-protocol' };
   const markup = parseNativeMarkupCalls(content);
-  if (markup.length > 0) return { calls: markup, source: 'native-markup', leaked: true };
-  return { calls: [], source: 'prose', leaked: false };
+  if (markup.length > 0) return { calls: markup, source: 'native-markup' };
+  return { calls: [], source: 'prose' };
 }
 
 function requiredKeysOf(toolByName, name) {
@@ -236,12 +236,16 @@ async function runOneArm({ label, task, provider, corpus, toolByName, temperatur
   }
   const flatMeta = label === 'structured' ? null : flatCalls(result.message?.content);
   const calls = label === 'structured' ? structuredCalls(result.message) : flatMeta.calls;
-  const g = grade(task, label, calls, result, toolByName);  if (flatMeta && calls.length > 0 && !g.inconclusive) {
+  const g = grade(task, label, calls, result, toolByName);
+  if (flatMeta && !g.inconclusive) {
+    // 「漏没漏」读正文，「从哪读回调用」读出处——两者可以不一致（见 flatten.mjs 的 hasNativeMarkup）
+    g.native_markup_leaked = hasNativeMarkup(result.message?.content);
+  }
+  if (flatMeta && calls.length > 0 && !g.inconclusive) {
     g.answer_via = flatMeta.source;
-    g.native_markup_leaked = flatMeta.leaked;
     // 「按协议答了」不等于「能解析出来」：从内部标记里读回工具名是解析器认得的，不是模型照办的。
     g.protocol_followed = flatMeta.source === 'text-protocol';
-  } else if (flatMeta && !g.inconclusive) {
+  } else if (flatMeta) {
     g.answer_via = flatMeta.source;
   }
   const asked =
@@ -459,6 +463,11 @@ if (flag('dry-run')) {
 }
 
 const rows = [];
+const jsonOut = arg('json');
+// 每一轮收束就先落一次行数据：这些请求是要花真钱的，收尾环节出错不该把整批读数丢掉。
+const saveRows = (at) => {
+  if (jsonOut) writeFileSync(resolve(jsonOut), JSON.stringify({ generatedAt: at, provider: { id: provider.id, model: provider.model }, temperature, repeat, rows }, null, 2));
+};
 // 两臂**逐题交替**（同一道题的 A 与 B 紧挨着发）：按臂分块的跑法一旦本机服务在
 // 中途变慢 / 变坏，那段漂移会**整块落在后跑的那一臂**上——实测撞到过一次
 // （一整段 `<unused32>` 复读把臂 B 的一轮尾巴全打掉）。交替之后环境漂移对两臂同等。
@@ -467,6 +476,7 @@ for (let i = 0; i < repeat; i++) {
   for (const task of tasks) {
     rows.push(...(await runTask({ task, i: i + 1, provider, corpus, toolByName, temperature })));
   }
+  saveRows(new Date().toISOString());
 }
 
 const generatedAt = new Date().toISOString();
@@ -474,6 +484,5 @@ const report = renderReport({ corpus, provider, temperature, rows, repeat, gener
 writeFileSync(REPORT_PATH, report);
 console.log(`\n报告已写 ${REPORT_PATH.replace(/\\/g, '/')}`);
 
-const jsonOut = arg('json');
-if (jsonOut) writeFileSync(resolve(jsonOut), JSON.stringify({ generatedAt, provider: { id: provider.id, model: provider.model }, temperature, repeat, rows }, null, 2));
+if (jsonOut) saveRows(generatedAt);
 console.log(`原始行 ${rows.length} 条${jsonOut ? ` · json 已写 ${resolve(jsonOut)}` : '（加 --json=<路径> 落盘）'}`);
