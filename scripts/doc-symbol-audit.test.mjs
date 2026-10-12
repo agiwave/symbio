@@ -200,24 +200,6 @@ test('历史行豁免：台账的「判为删除」说的就是这名字不在�
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('DECISIONS.md 整体排除：ADR 是历史快照（exit 0）', () => {
-  const r = audit({
-    ...RS,
-    'docs/DECISIONS.md': '当年引入 `symbio_core::GONE_FN` 又删掉了。\n',
-    'README.md': '正常文档。\n',
-  })
-  assert.equal(r.status, 0, r.stdout)
-})
-
-test('docs/decisions/ 整目录排除：ADR 分域正文与索引同源（exit 0）', () => {
-  const r = audit({
-    ...RS,
-    'docs/decisions/core.md': '当年引入 `symbio_core::GONE_FN` 又删掉了。\n',
-    'README.md': '正常文档。\n',
-  })
-  assert.equal(r.status, 0, r.stdout)
-})
-
 test('registry/adr/ 整目录排除：ADR 正文迁入 registry 后仍是历史快照（exit 0）', () => {
   const r = audit({
     ...RS,
@@ -236,14 +218,14 @@ test('docs/archive/ 整目录排除：归档是历史快照（exit 0）', () => 
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('排除只认整目录前缀：docs/decisions.md 这类同名前缀文件仍受查（exit 1）', () => {
+test('排除只认整目录：docs/archive.md 这类同名前缀文件仍受查（exit 1）', () => {
   const r = audit({
     ...RS,
-    'docs/decisions.md': '指认 `symbio_core::GONE_FN`。\n',
+    'docs/archive.md': '指认 `symbio_core::GONE_FN`。\n',
     'README.md': '正常文档。\n',
   })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /docs\/decisions\.md:1/)
+  assert.match(r.stdout, /docs\/archive\.md:1/)
 })
 
 test('承认通道：理由非空则放行（exit 0）', () => {

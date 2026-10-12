@@ -2,7 +2,7 @@
 
 > 本文回答「**还能怎么提升**」，是**提案**，不是既定事实。
 > 「现在是什么」看 [CURRENT.md](../CURRENT.md)（自动生成，唯一权威）；
-> 「为什么这样设计」看 [DECISIONS.md](../../registry/adr/INDEX.md)；
+> 「为什么这样设计」看 [ADR 索引](../../registry/adr/INDEX.md)；
 > 前端代码结构看 [tauri/docs/FRONTEND.md](../../tauri/docs/FRONTEND.md)（本文不重复）。
 
 ---

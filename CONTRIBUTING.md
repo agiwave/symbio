@@ -296,7 +296,7 @@ mod tests;
    scope 例：`agent` / `tauri/services` / `docs`。
 3. 推送后通过 PR 提交，CI 必须全绿。
 4. 至少 1 位 maintainer 审阅通过后可合入。
-5. 涉及架构变更的 PR：决策写进 [DECISIONS.md](./registry/adr/INDEX.md)（一条 ADR），
+5. 涉及架构变更的 PR：决策写进 [ADR 索引](./registry/adr/INDEX.md)（一条 ADR），
    「改了什么 / 为什么」写在提交信息里。
 
 ---

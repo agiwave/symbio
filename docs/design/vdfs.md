@@ -336,7 +336,7 @@ size  updated_at  children  binary  hidden  schema  new_type  attributes
   由 provider 解释为「用这个包建出 / 覆盖本目录下的一份资源」。
 
 **导入不是「新建类型」的一种**，因此 `VdfsNewType` 里没有它的位置
-（见 [DECISIONS.md](../../registry/adr/INDEX.md) ADR-029）。动作声明 `pack` 表明「载荷是一个
+（见 [ADR 索引](../../registry/adr/INDEX.md) ADR-029）。动作声明 `pack` 表明「载荷是一个
 本地文件」，使用方据此先取文件再执行；provider 不支持时返回 `NotImplemented`，
 使用方据此不给出入口（详见 [vdfs-frontend.md](vdfs-frontend.md) §5）。
 
@@ -761,7 +761,7 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
   内部层级由各 provider 的 `list` 表达（§2.5）。
 - **资源存储（`providers/vdfs_service`）**：属**宿主实现层**，**不在** §2.1 / §2.2 的
   纯接口层里；三型 `VdfsProvider` 实现（单文件 / 目录 / 内存）与磁盘布局见
-  [CURRENT.md](../CURRENT.md) §4，选型理由见 [DECISIONS.md](../../registry/adr/INDEX.md)
+  [CURRENT.md](../CURRENT.md) §4，选型理由见 [ADR 索引](../../registry/adr/INDEX.md)
   ADR-010 / ADR-011。它与广播机制的**唯一接触点**是 `symbio_core::vdfs::host` 的
   `vdfs_notify_change` / `vdfs_watch_changes` / `vdfs_unwatch_changes`。
 - **详情定义**：`DetailDefinition` 是 symbio 的 `schema` **方言**，VDFS 只透传、不解释。
@@ -795,6 +795,6 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
 | 13.1 | 设置（plugin_manager） | 只读清单：自有分区 + 各插件配置条目 | [plugin_manager/README.md](../../symbio/src/plugins/plugin_manager/README.md) |
 | 13.2 | 组合容器（composite） | `CompositeVdfs`——恰好包含若干子目录的 provider | [composite/README.md](../../symbio/src/plugins/composite/README.md) |
 | 13.3 | VDFS 插件（vdfs） | 访问层 + 统一文件系统（`UnifiedFs`） | [vdfs/README.md](../../symbio/src/plugins/vdfs/README.md) |
-| 13.4 | 资源插件与资源存储 | session / model / skill / mcp / agent 各自 `impl VdfsProvider`；落盘共用 `providers/vdfs_service` 三型（单文件 / 目录 / 内存） | 各模块 README（[agent](../../symbio/src/plugins/agent/README.md) 等）；[DECISIONS.md](../../registry/adr/INDEX.md) ADR-010 / ADR-011 |
+| 13.4 | 资源插件与资源存储 | session / model / skill / mcp / agent 各自 `impl VdfsProvider`；落盘共用 `providers/vdfs_service` 三型（单文件 / 目录 / 内存） | 各模块 README（[agent](../../symbio/src/plugins/agent/README.md) 等）；[ADR 索引](../../registry/adr/INDEX.md) ADR-010 / ADR-011 |
 
 > 拓扑见 [SYSTEM_MAP.md](../SYSTEM_MAP.md)；实例 × 挂载点的权威清单见 [CURRENT.md](../CURRENT.md)。

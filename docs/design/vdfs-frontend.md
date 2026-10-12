@@ -253,7 +253,7 @@
 
 **整包导入不在这条路上**：它是详情页上的一条**动作**（`VDFS_ACTION_IMPORT`），
 与「导出」「删除」同级——不是第二种新建入口（见
-[DECISIONS.md](../../registry/adr/INDEX.md) ADR-029）。
+[ADR 索引](../../registry/adr/INDEX.md) ADR-029）。
 
 名字**不由前端先问**：它是 provider 的私有知识（`id 归 provider`）。名字要么在
 详情页里产生（会话由**最后一条用户消息**派生标题——列表名跟随「最近在聊什么」，

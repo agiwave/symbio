@@ -37,8 +37,7 @@
  *   `register_option_field`。
  *
  * 豁免（都对应「文档说的不是现状」）：
- *   1. `docs/DECISIONS.md`、`docs/archive/`、`docs/decisions/`、`registry/adr/`
- *      整体排除——ADR（索引与分域正文，自 2026-10-11 起正文迁入 `registry/adr/`）
+ *   1. `docs/archive/`、`registry/adr/` 整体排除——ADR 正文（`registry/adr/ADR-NNN.md`）
  *      与归档都是历史快照，当时的符号指认不随代码改名回改（回改反而篡改历史）；
  *   2. 行内含历史词（已删除 / 已退役 / 已废弃 / deprecated / 取代 / 判为删除）⇒ 跳过，
  *      如迁移表里「已删除」的行、台账里「`X` 判为删除」的行；
@@ -49,7 +48,7 @@
  *
  * 失效形态（回归测试逐条钉住）：
  *   - 审计范围读不出来（没有 md 或没有 .rs 语料）却亮绿灯 ⇒ 必须 exit 1；
- *   - 判据写宽（注释 / 普通词 / DECISIONS / 单段词误报）⇒ 断言仍 exit 0；
+ *   - 判据写宽（注释 / 普通词 / ADR 正文 / 单段词误报）⇒ 断言仍 exit 0；
  *   - 判据写窄（同族闸失效、引号里或注释里的名字开出了族）⇒ 断言仍 exit 0；
  *   - 承认通道空理由不能放行。
  *
@@ -88,13 +87,9 @@ const CONST_SHAPE = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/
 /** walk 时整树跳过的目录。`.symbio` 是运行时产物：每起一个会话就复制一份
  *  `AGENTS.md` / `SKILL.md`，把它们算进「活跃文档」会让命中数无上界。 */
 const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'tmp', '.workbuddy-ai', '.symbio'])
-/** 整文件排除（历史快照，指认不随代码改名回改） */
-const EXCLUDE_MD = new Set(['docs/DECISIONS.md'])
-/** 整目录排除：ADR 正文分册与索引同源——ADR 记的是**当时**的设计，
- *  其中被指认的符号可能早已改名 / 删除，按现行代码判它会永久误报。
- *  `registry/adr` 同理：ADR 正文自 2026-10-11 起迁入 registry 单文档（原
- *  `docs/decisions/` 五册），记的仍是**当时**的设计——同一个理由，同一个排除。 */
-const EXCLUDE_MD_DIRS = ['docs/archive', 'docs/decisions', 'registry/adr']
+/** 整目录排除：ADR 记的是**当时**的设计，其中被指认的符号可能早已改名 / 删除，
+ *  按现行代码判它会永久误报；归档同理。两者都是「文档说的不是现状」。 */
+const EXCLUDE_MD_DIRS = ['docs/archive', 'registry/adr']
 /** 行内历史词：这行说的是过去，符号现在不存在是正常的。
  *  「判为删除 / 已判：删除」是台账（04 §3.1）对被删符号的固定说法——它和「已删除」
  *  是同一类叙述：这行明说那个名字已经不在了，按现行代码判它必然是误红。 */
@@ -117,7 +112,7 @@ function collectMd (dir, prefix = '') {
       if (SKIP_DIRS.has(ent.name)) continue
       if (EXCLUDE_MD_DIRS.includes(rel)) continue
       out.push(...collectMd(join(dir, ent.name), rel))
-    } else if (ent.name.endsWith('.md') && !EXCLUDE_MD.has(rel)) {
+    } else if (ent.name.endsWith('.md')) {
       out.push(rel)
     }
   }

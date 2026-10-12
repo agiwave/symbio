@@ -5,7 +5,7 @@
 > **边界**：本文只画**逻辑分层与契约**（哲学、内核分工、`Plugin` trait、寻址规则）。
 > **运行时拓扑**（谁挂在谁下面）以 [SYSTEM_MAP.md](../SYSTEM_MAP.md) 为准；
 > **插件 × 挂载点 × 路由 × 工具**的权威清单以 [CURRENT.md](../CURRENT.md) §1 为准；
-> 单条决策的**来龙去脉**以 [DECISIONS.md](../../registry/adr/INDEX.md) 为准——本文不复述。
+> 单条决策的**来龙去脉**以 [ADR 索引](../../registry/adr/INDEX.md) 为准——本文不复述。
 
 ## 核心设计哲学
 
@@ -52,7 +52,7 @@ Symbio 的设计核心是**分形插件架构 (Fractal Plugin Architecture)**。
 ## 关键设计决策 → 见 [registry/adr/INDEX.md](../../registry/adr/INDEX.md)
 
 「为什么用 `inventory` 静态注册」「为什么 Session 是唯一编排入口」「为什么 Model 支持多协议」
-这类问题的答案**只在 [DECISIONS.md](../../registry/adr/INDEX.md) 各一条 ADR 里**（ADR-007 / ADR-003 / ADR-004），
+这类问题的答案**只在 [ADR 索引](../../registry/adr/INDEX.md) 各一条 ADR 里**（ADR-007 / ADR-003 / ADR-004），
 本文不复述——复述就会在下次改动时漏掉一处。
 
 ---
