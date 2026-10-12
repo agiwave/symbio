@@ -61,19 +61,22 @@ pub use projection::slo::slo_report;
 //
 // 它们与 `TurnState` / `PromptMessage` 同族——**被 core 外消费的类型**，不是
 // 「顺手导出的内部件」。
-// 跨会话聚合的两个视图类型（P2，C-003 的单消费方判定见下）。
-//
-// **为什么它们必须占根出口而投影函数不必**：`SloLatencyView::merge` /
-// `FallbackRateView::merge` 是**跨会话聚合**的口径，调用方在 core 之外
-// （`plugins/session/stats.rs` 的实例级列）。C-002 禁深引域目录，所以「插件要调
-// 一个 core 私有模块上的方法」只有两条路：把方法提成根函数（那会让 `merge` 变成
-// 无主函数，而它明明是 `SloLatencyView` 的行为），或者让**类型**占根出口。
-// 选后者：方法留在类型上（谁的数据谁的行为），插件经根路径拿到类型再调。
-//
-// 它们与 `TurnState` / `PromptMessage` 同族——**被 core 外消费的类型**，不是
-// 「顺手导出的内部件」。
 pub use projection::fallback::FallbackRateView;
 pub use projection::slo::SloLatencyView;
+// ── 外部效标三族（02 §3.1：主动性 / 时域跨度 / 自主程度）────────────────────
+//
+// 投影函数与视图类型都走 **`pub(crate)`**：它们的消费方只有 `plugins/session/stats.rs`，
+// 与 core 同 crate——不需要跨出公开面，也就**不该**占根出口（C-003 棘轮只许降，
+// 新增单消费方的 `pub use` 会撞线）。`pub(crate)` 不进对外公开面，同时仍满足
+// C-002（插件不深引 `projection::` 域目录，经根路径取用）。
+//
+// 统计口径仍单点：`ConationView::merge` / `SpanView::merge` / `AutonomyView::merge`
+// 是跨会话聚合的唯一答案，方法留在类型上（谁的数据谁的行为），与上面两个同族。
+pub(crate) use projection::autonomy::{autonomy, AutonomyView};
+pub(crate) use projection::conation::ConationView;
+// `SpanSummary` 不另起别名：`merge` 的返回类型随调用走，消费方不需要点它的名字
+// （要断言它内部形状的测试走 `projection::span::` 完整路径）。
+pub(crate) use projection::span::{span, SpanView};
 // 读数面板方言（P4）：后端下发描述、前端零业务知识渲染。同族——消费方在两个
 // 前端（Tauri + CLI），都必须经根路径拿类型，不能深引 `schemas` 域目录。
 pub use projection::transcript::transcript;
@@ -128,8 +131,12 @@ pub(crate) use actors::{
 // `readyset` 出根（同批）同一形态：`pub(crate)` 出根（C-003 数 `pub use`），只在本
 // crate 内可见、不进对外公开面。收窄成「下沉到 `plugins/session`」会让写方复述字面量、
 // 制造第二处真相，违反 ADR-043「名字是数据、单点定义」——可下沉的只有消费方，字典不行。
+// 名字表的根别名：生产写方走 `event::` 完整路径（`actors/` 各处），此处别名主要
+// 服务测试与插件写方——故非测试构建下允许无引用，不为此造 `pub` 出口。
+#[allow(unused_imports)]
 pub(crate) use event::{
-    EVENT_TASK_ASSERTED, EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
+    EVENT_CONATION_EXPRESSED, EVENT_SYSTEM_TRIGGERED, EVENT_TASK_ASSERTED, EVENT_TASK_HELD,
+    EVENT_TASK_OPENED, EVENT_TASK_PROGRESS, EVENT_TASK_REWORK_CREATED,
 };
 
 // ==================== 记忆三段（v2 阶段 S5 步 11–13） ====================

@@ -35,10 +35,14 @@ use super::super::event::{Entity, Event, Timestamp, EVENT_CONATION_EXPRESSED, EV
 use super::super::view::{Budget, View};
 use super::Projection;
 
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// 一条已表达的「欲」及其升格状态。
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// **可序列化**：`session/stats` 的主动性列（02 §3.1 外部效标）原样下发——
+/// 与 `CalibrationState` / `CheckpointState` 同族，J3（序列化失败有信号）的前提。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConationIntent {
     /// `conation.expressed` 事件的 seq——也是候选意图的溯源锚（I2）。
     pub seq: u64,
@@ -51,7 +55,7 @@ pub struct ConationIntent {
 }
 
 /// 欲视图：按 seq 升序（欲是**流**，顺序即发生顺序——BTreeMap 收集 ⇒ 逐字节确定）。
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ConationView {
     pub intents: Vec<ConationIntent>,
 }
@@ -66,6 +70,60 @@ impl ConationView {
         self.intents
             .iter()
             .any(|i| i.goal == goal && i.task_id.is_some())
+    }
+
+    /// 已升格为任务的欲的条数（「被采纳」：`IntentGate` 批准后开了格）。
+    pub fn escalated(&self) -> usize {
+        self.intents.iter().filter(|i| i.task_id.is_some()).count()
+    }
+
+    /// **自发发起且被采纳率** = 已升格 / 已表达（[02 §3.1 外部效标 · 主动性](../../../../docs/plan/PL-002-能力坐标系.md "PL-002-能力坐标系")）。
+    ///
+    /// 分母含「被否决 / 被忽略」的欲（表达过但没升格——升不了格的欲照常入视图，
+    /// 它是事实，见模块头「边界」）。无表达 ⇒ 0.0（**有据的零**：没主动发起过，
+    /// 不是「采纳率未知」）。投影只报数，达标判定归读方。
+    pub fn adoption_rate(&self) -> f64 {
+        if self.intents.is_empty() {
+            return 0.0;
+        }
+        self.escalated() as f64 / self.intents.len() as f64
+    }
+}
+
+/// 跨会话汇总（实例级聚合列 `fleet` 的主动性族）。
+///
+/// 只收分子 / 分母（率由 `adoption_rate` 从汇总值重算）——与
+/// [`FallbackRateView::merge`](super::fallback::FallbackRateView::merge) 同款：
+/// 合并的是**可加的量**，率是同一套算式在汇总值上的再应用，不是另一份口径。
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ConationSummary {
+    /// 各会话已表达的欲的总数。
+    pub expressed: usize,
+    /// 其中已升格的总数。
+    pub escalated: usize,
+}
+
+impl ConationSummary {
+    /// 跨会话采纳率（无表达 ⇒ 0.0，与 [`ConationView::adoption_rate`] 同口径）。
+    pub fn adoption_rate(&self) -> f64 {
+        if self.expressed == 0 {
+            return 0.0;
+        }
+        self.escalated as f64 / self.expressed as f64
+    }
+}
+
+impl ConationView {
+    /// 合并多份视图（**跨会话聚合**，与 `SloLatencyView::merge` 同地位：
+    /// 统计口径单点，不进调用方）。输入为空 ⇒ 空汇总（有据的空）。
+    pub fn merge(parts: &[ConationView]) -> ConationSummary {
+        let mut expressed = 0usize;
+        let mut escalated = 0usize;
+        for p in parts {
+            expressed += p.intents.len();
+            escalated += p.escalated();
+        }
+        ConationSummary { expressed, escalated }
     }
 }
 

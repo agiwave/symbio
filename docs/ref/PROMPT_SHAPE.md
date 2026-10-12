@@ -11,9 +11,9 @@
 
 | 请求 | 消息数 | 消息序列（role + 结构载体） | system 小节标签序列 | 工具数 |
 |---|---|---|---|---|
-| req0 | 3 | system → system → user | 【工作区记忆】【会话记忆】 【无标签】【能力目录】  | 21 |
-| req1 | 6 | system → system → user → assistant → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】 【无标签】【能力目录】     | 21 |
-| req2 | 6 | system → system → user → assistant → assistant → user | 【工作区记忆】【会话记忆】 【长期记忆】【能力目录】     | 21 |
+| req0 | 2 | system → user | 【工作区记忆】【会话记忆】【能力目录】  | 21 |
+| req1 | 5 | system → user → assistant → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】【能力目录】     | 21 |
+| req2 | 5 | system → user → assistant → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】【能力目录】     | 21 |
 
 ## 规模观测（**不进判据**：同一列里既有装配代码的字，也有负载的字）
 
@@ -22,9 +22,9 @@
 
 | 请求 | 消息数 | 消息序列 | system 小节标签 | 工具数 | 正文字节 | 工具 schema 字节 | 请求体总字节 |
 |---|---|---|---|---|---|---|---|
-| req0 | 3 | system → system → user | 【工作区记忆】【会话记忆】 【无标签】【能力目录】  | 21 | 1119 | 18247 | 19607 |
-| req1 | 6 | system → system → user → assistant → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】 【无标签】【能力目录】     | 21 | 1175 | 18247 | 19975 |
-| req2 | 6 | system → system → user → assistant → assistant → user | 【工作区记忆】【会话记忆】 【长期记忆】【能力目录】     | 21 | 1369 | 18247 | 19961 |
+| req0 | 2 | system → user | 【工作区记忆】【会话记忆】【能力目录】  | 21 | 1121 | 18247 | 19580 |
+| req1 | 5 | system → user → assistant → assistant[calls=1] → tool[id] | 【工作区记忆】【会话记忆】【能力目录】     | 21 | 1177 | 18247 | 19948 |
+| req2 | 5 | system → user → assistant → assistant → user | 【工作区记忆】【会话记忆】【长期记忆】【能力目录】     | 21 | 1371 | 18247 | 19934 |
 
 ## 基线（判据本体）
 
@@ -50,12 +50,6 @@
           "content": "text"
         },
         {
-          "role": "system",
-          "tool_calls": 0,
-          "tool_call_id": false,
-          "content": "text"
-        },
-        {
           "role": "user",
           "tool_calls": 0,
           "tool_call_id": false,
@@ -70,13 +64,7 @@
           },
           {
             "tag": "会话记忆",
-            "chars": 147
-          }
-        ],
-        [
-          {
-            "tag": null,
-            "chars": 29
+            "chars": 178
           },
           {
             "tag": "能力目录",
@@ -130,12 +118,6 @@
           "content": "text"
         },
         {
-          "role": "system",
-          "tool_calls": 0,
-          "tool_call_id": false,
-          "content": "text"
-        },
-        {
           "role": "user",
           "tool_calls": 0,
           "tool_call_id": false,
@@ -168,13 +150,7 @@
           },
           {
             "tag": "会话记忆",
-            "chars": 147
-          }
-        ],
-        [
-          {
-            "tag": null,
-            "chars": 29
+            "chars": 178
           },
           {
             "tag": "能力目录",
@@ -231,12 +207,6 @@
           "content": "text"
         },
         {
-          "role": "system",
-          "tool_calls": 0,
-          "tool_call_id": false,
-          "content": "text"
-        },
-        {
           "role": "user",
           "tool_calls": 0,
           "tool_call_id": false,
@@ -269,10 +239,8 @@
           },
           {
             "tag": "会话记忆",
-            "chars": 147
-          }
-        ],
-        [
+            "chars": 149
+          },
           {
             "tag": "长期记忆",
             "chars": 69

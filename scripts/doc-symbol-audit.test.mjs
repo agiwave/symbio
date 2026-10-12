@@ -255,3 +255,82 @@ test('审计范围读不出：没有 .rs 语料 ⇒ 失败而非绿灯（exit 1�
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /0 个 \.rs 语料根/)
 })
+
+// ── D-011：能力名册的「锚点」列（02 §6.1）──────────────────────────────
+//
+// 名册是坐标系的**唯一一份清单**，但清单本身不证明"这条能力在代码里存在"。
+// 这一组用例钉的是「写了锚点就必须指得到」——不可证伪的锚点等于把 E6
+// （验的是文档自洽，不是文档 == 代码）原样搬进坐标系。
+
+/** 最小名册：一行「工作记忆」，锚点列由用例填 */
+const roster = (anchor) => ({
+  'docs/plan/PL-002-能力坐标系.md': [
+    '| 能力 | 维 | 轴 | 天梯 | 等级 | 类型 | 落点 | 锚点 |',
+    '|---|---|---|:-:|:-:|:-:|:-:|---|',
+    `| 工作记忆 | 知 | 抽象层级 | T1 | L1 | 认知 | S01 | ${anchor} |`,
+    '',
+  ].join('\n'),
+})
+/** 锚点指向的文件（最小仓库里真有这个文件，D-011 才验得到「文件存在」之外的部分） */
+const ROSTER_RS = { 'symbio/src/plugins/session/context.rs': 'pub fn ctx_load() {}\n' }
+
+test('D-011 锚点指向不存在的符号 ⇒ 红（改一处即红，这是本条的硬要求）', () => {
+  const r = audit({ ...RS, ...ROSTER_RS, ...roster('`symbio/src/plugins/session/context.rs::GONE_FN`') })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-011 .*锚点符号在 Rust 源码中不存在/)
+  assert.match(r.stdout, /GONE_FN/)
+})
+
+test('D-011 锚点指向仓内不存在的文件 ⇒ 红（文件改名了还是从来没落地？）', () => {
+  const r = audit({ ...RS, ...roster('`symbio/src/plugins/session/gone.rs`') })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-011 .*文件不在仓内/)
+})
+
+test('D-011 锚点列不是反引号形态 ⇒ 红（列必须有形状，不是自由文本）', () => {
+  const r = audit({ ...RS, ...ROSTER_RS, ...roster('在 context 里') })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-011 .*反引号形态/)
+})
+
+test('D-011 有效锚点通过：`文件` 与 `文件::符号` 两种形态都认（exit 0）', () => {
+  const r = audit({
+    ...RS,
+    ...ROSTER_RS,
+    'docs/plan/PL-002-能力坐标系.md': [
+      '| 能力 | 维 | 轴 | 天梯 | 等级 | 类型 | 落点 | 锚点 |',
+      '|---|---|---|:-:|:-:|:-:|:-:|---|',
+      '| 工作记忆 | 知 | 抽象层级 | T1 | L1 | 认知 | S01 | `symbio/src/plugins/session/context.rs` |',
+      '| 语义记忆 | 知 | 时域跨度 | T3 | L3 | 认知 | S06 | `symbio/src/plugins/session/context.rs::ctx_load` |',
+      '',
+    ].join('\n'),
+  })
+  assert.equal(r.status, 0, r.stdout)
+  assert.match(r.stdout, /名册锚点 2\/2 已锚定/, '锚定率进日志——名册在长、锚定率不动要看得见')
+})
+
+test('D-011 `—` 是「尚未落地」：不判红，且不计入已锚定（exit 0）', () => {
+  const r = audit({ ...RS, ...ROSTER_RS, ...roster('—') })
+  assert.equal(r.status, 0, r.stdout)
+  assert.match(r.stdout, /名册锚点 0\/1 已锚定/)
+})
+
+test('D-011 名册不在扫描范围 ⇒ 本条不适用，不为「没有名册」陪跑（exit 0）', () => {
+  const r = audit({ ...RS, 'README.md': '正常文档。\n' })
+  assert.equal(r.status, 0, r.stdout)
+  assert.match(r.stdout, /D-011 不适用/)
+})
+
+test('D-011 名册一行都读不出 ⇒ 红（表格结构变了还是维的闭集写错了？）', () => {
+  const r = audit({
+    ...RS,
+    'docs/plan/PL-002-能力坐标系.md': [
+      '| 能力 | 维 | 轴 | 天梯 | 等级 | 类型 | 落点 | 锚点 |',
+      '|---|---|---|:-:|:-:|:-:|:-:|---|',
+      '| 工作记忆 | 未知维 | 抽象层级 | T1 | L1 | 认知 | S01 | — |',
+      '',
+    ].join('\n'),
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-011 .*名册一行都没读出/)
+})

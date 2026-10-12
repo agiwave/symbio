@@ -275,8 +275,259 @@ fn fleet_is_empty_when_the_reader_may_not_read() {
     .expect("读数");
     assert_eq!(
         got.fleet,
-        serde_json::json!({ "wals": 0, "sessions": 0 }),
-        "不给你读 ⇒ 空形状（与四列同族），不扫也不报数"
+        serde_json::json!({
+            "wals": 0, "sessions": 0, "turns": 0, "fallbacks": 0,
+            "by_tier": { "latency": [], "fallback": [] },
+            "axes": {
+                "conation": { "expressed": 0, "escalated": 0, "adoption_rate": 0.0 },
+                "span": { "sessions": 0, "median_ms": null },
+                "autonomy": { "closed": 0, "unattended": 0, "unattended_rate": 0.0 },
+            },
+        }),
+        "不给你读 ⇒ 空形状（与满读数同键：三族给有据的零 / 空，不缺列），不扫也不报数"
+    );
+}
+
+// ── 外部效标两列（02 §3.1：主动性 / 时域跨度）────────────────────────────────
+//
+// ## 为什么单独一组用例
+//
+// 这两列与四列同族（同切片、同 as-of、同一条读侧闸），判据因此复用
+// 「改输入会变红」的手术刀（`drop_line`）：把一条欲事件删掉 ⇒ 分子 / 分母跟着动；
+// 把末事件删掉 ⇒ 跨度缩短。**读数口是这两列的全部意义**——没有反向用例的
+// 「效标」只是表格里的一行字。
+
+/// 主动性列：分子（已升格）/ 分母（已表达）同出一列；`may_read = false` 时
+/// 走四列形态（空切片 ⇒ 空视图），不报零值条目。
+#[test]
+fn conation_column_recomputes_and_moves_with_the_wal() {
+    let dir = std::env::temp_dir().join(format!("symbio-stats-conation-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("临时目录");
+    let wal = dir.join(super::super::paths::V2_WAL_FILE);
+    let store = EventWalStore::open(&wal).unwrap();
+
+    // 链路：触发 → 欲 A（升格：task.opened 的 produced_by 指回它）/ 欲 B（未升格）。
+    let trigger = store
+        .append(
+            Event::pending(
+                "sys-0",
+                crate::symbio_core::EVENT_SYSTEM_TRIGGERED,
+                Entity::System,
+                Verb::Opened,
+                0,
+                crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS,
+            )
+            .with_ts(10)
+            .with_payload(serde_json::json!({ "kind": "scheduled" })),
+        )
+        .unwrap()
+        .value();
+    let want_a = store
+        .append(
+            Event::pending(
+                "want-a",
+                crate::symbio_core::EVENT_CONATION_EXPRESSED,
+                Entity::Conation,
+                Verb::Opened,
+                0,
+                crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS,
+            )
+            .with_ts(20)
+            .with_produced_by(trigger)
+            .with_payload(serde_json::json!({ "goal": "目标 A" })),
+        )
+        .unwrap()
+        .value();
+    store
+        .append(
+            Event::pending(
+                "want-b",
+                crate::symbio_core::EVENT_CONATION_EXPRESSED,
+                Entity::Conation,
+                Verb::Opened,
+                0,
+                crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS,
+            )
+            .with_ts(30)
+            .with_produced_by(trigger)
+            .with_payload(serde_json::json!({ "goal": "目标 B" })),
+        )
+        .unwrap();
+    store
+        .append(
+            Event::pending(
+                "task-a",
+                crate::symbio_core::EVENT_TASK_OPENED,
+                Entity::Task,
+                Verb::Opened,
+                0,
+                crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS,
+            )
+            .with_ts(40)
+            .with_produced_by(want_a)
+            .with_payload(serde_json::json!({ "task_id": "t-a" })),
+        )
+        .unwrap();
+
+    let got = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
+    let intents = got.conation.get("intents").and_then(|v| v.as_array()).expect("intents 列");
+    assert_eq!(intents.len(), 2, "分母 = 全部已表达");
+    assert_eq!(
+        intents.iter().filter(|i| i.get("task_id").is_some_and(|t| !t.is_null())).count(),
+        1,
+        "分子 = 已升格"
+    );
+
+    // 手术刀：删掉升格事件 ⇒ 分子归零（率跟着动，不是死数字）
+    drop_line(&wal, "task-a");
+    let after = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
+    let intents = after
+        .conation
+        .get("intents")
+        .and_then(|v| v.as_array())
+        .expect("intents 列");
+    assert!(
+        intents.iter().all(|i| i.get("task_id").is_none_or(|t| t.is_null())),
+        "删掉 task.opened ⇒ 没有任何欲算已升格"
+    );
+
+    // 读侧闸：非属主 ⇒ 四列形态的空（不是零值条目）
+    let gated = read(
+        "s1",
+        &wal,
+        Some(crate::symbio_core::authz::PRINCIPAL_MAIN),
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        &dir,
+    )
+    .expect("读数");
+    assert_eq!(
+        gated.conation,
+        serde_json::json!({ "intents": [], "adoption_rate": 0.0 }),
+        "空切片 ⇒ 流为空且率是有据的零"
+    );
+}
+
+/// 时域跨度列：跨度 = 末事件 ts − 首事件 ts；删末事件 ⇒ 跨度缩短（读数口会动）。
+#[test]
+fn span_column_recomputes_and_moves_with_the_wal() {
+    let dir = std::env::temp_dir().join(format!("symbio-stats-span-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("临时目录");
+    let wal = dir.join(super::super::paths::V2_WAL_FILE);
+    let store = EventWalStore::open(&wal).unwrap();
+    for (id, ts) in [("e0", 1_000i64), ("e1", 1_500), ("e2", 4_200)] {
+        store
+            .append(
+                Event::pending(id, EVENT_USER_MESSAGE, Entity::Turn, Verb::Opened, 0, "user")
+                    .with_ts(ts)
+                    .with_payload(serde_json::json!({ "text": "问" })),
+            )
+            .unwrap();
+    }
+
+    let got = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
+    assert_eq!(got.span.get("events").and_then(|v| v.as_u64()), Some(3));
+    assert_eq!(got.span.get("span_ms").and_then(|v| v.as_u64()), Some(3_200));
+
+    // 手术刀：删掉末事件 ⇒ 跨度从 3200 缩到 500（读数跟着输入走）
+    drop_line(&wal, "e2");
+    let after = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
+    assert_eq!(after.span.get("span_ms").and_then(|v| v.as_u64()), Some(500));
+}
+
+/// 实例级 axes 两族：跨会话合并（分子分母可加 / 中位数只收有跨度的会话）。
+#[test]
+fn fleet_axes_aggregate_across_sessions() {
+    let (root, wals) = seed_instance("axes", 2);
+    // 第二个会话补一条更晚的事件 ⇒ 跨度更长；两会话都只有 2 事件 ⇒ 都进中位数。
+    {
+        let store = EventWalStore::open(&wals[1]).unwrap();
+        store
+            .append(
+                Event::pending("late", EVENT_USER_MESSAGE, Entity::Turn, Verb::Opened, 1, "user")
+                    .with_ts(9_000)
+                    .with_payload(serde_json::json!({ "text": "再问", "tier": "deep" })),
+            )
+            .unwrap();
+    }
+    let got = read(
+        "session-0",
+        &wals[0],
+        None,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        &root,
+    )
+    .expect("读数");
+    let axes = got.fleet.get("axes").expect("axes 族");
+    assert_eq!(axes["conation"]["expressed"].as_u64(), Some(0), "实例里没有欲 ⇒ 有据的零");
+    assert_eq!(axes["span"]["sessions"].as_u64(), Some(2), "两会话都有 ≥2 事件 ⇒ 都进分母");
+    assert!(axes["span"]["median_ms"].is_u64(), "中位数有数（不是 null）");
+    assert_eq!(axes["autonomy"]["closed"].as_u64(), Some(0), "没有闭环任务 ⇒ 有据的零");
+    assert_eq!(axes["autonomy"]["unattended_rate"].as_f64(), Some(0.0));
+}
+
+/// 自主程度列：闭环且未挂起 / 闭环；删掉那条 `task.held` ⇒ 率从 0.5 升到 1.0
+/// （读数口会动，不是表格里的一行字）。
+#[test]
+fn autonomy_column_recomputes_and_moves_with_the_wal() {
+    let dir = std::env::temp_dir().join(format!("symbio-stats-autonomy-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("临时目录");
+    let wal = dir.join(super::super::paths::V2_WAL_FILE);
+    let store = EventWalStore::open(&wal).unwrap();
+    let task_ev = |id: &str, kind: &str, verb: Verb, task: &str, ts: i64| {
+        Event::pending(
+            id,
+            kind,
+            Entity::Task,
+            verb,
+            0,
+            crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS,
+        )
+        .with_ts(ts)
+        .with_payload(serde_json::json!({ "task_id": task }))
+    };
+    // t1 全程自主闭环；t2 被挂起过再闭环 ⇒ 不进分子
+    store
+        .append(task_ev(
+            "h-2",
+            crate::symbio_core::EVENT_TASK_HELD,
+            Verb::Held,
+            "t2",
+            100,
+        ))
+        .unwrap();
+    store
+        .append(task_ev(
+            "a-1",
+            crate::symbio_core::EVENT_TASK_ASSERTED,
+            Verb::Asserted,
+            "t1",
+            200,
+        ))
+        .unwrap();
+    store
+        .append(task_ev(
+            "a-2",
+            crate::symbio_core::EVENT_TASK_ASSERTED,
+            Verb::Asserted,
+            "t2",
+            300,
+        ))
+        .unwrap();
+
+    let got = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
+    assert_eq!(got.autonomy.get("closed").and_then(|v| v.as_u64()), Some(2));
+    assert_eq!(got.autonomy.get("unattended").and_then(|v| v.as_u64()), Some(1));
+
+    // 手术刀：删掉挂起事件 ⇒ t2 也算全程自主（率从 0.5 升到 1.0）
+    drop_line(&wal, "h-2");
+    let after = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
+    assert_eq!(
+        after.autonomy.get("unattended").and_then(|v| v.as_u64()),
+        Some(2),
+        "删掉 task.held ⇒ 干预事实消失，分子跟着动"
     );
 }
 

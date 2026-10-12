@@ -55,3 +55,88 @@ fn non_data_lines_produce_nothing() {
         );
     }
 }
+
+// ── 出厂只发一条 system（T-015）──────────────────────────────────────────
+//
+// 部分 OpenAI 兼容网关只认「消息数组第一条是 system **且只有一条**」，两条 system
+// 直接 400（`System message must be at the beginning.`）——那类 provider 上 `full`
+// 档第一轮就走不出去。故前缀段并进基础 system，空行分段。
+
+use crate::plugins::model::types::{MessageContent, MessageRole, NativeMessage};
+
+fn sys(text: &str) -> NativeMessage {
+    NativeMessage {
+        role: MessageRole::System,
+        content: Some(MessageContent::Text(text.to_string())),
+        ..Default::default()
+    }
+}
+
+/// 基础 system + 一条前缀 ⇒ 一条消息，文本按「基础 → 前缀」空行分段。
+#[test]
+fn leading_system_is_merged_into_one_message() {
+    let (text, eaten) = merge_leading_system("基础", &[sys("记忆段"), sys("就绪段")]);
+    assert_eq!(eaten, 2, "最前的连续 system 段全部并掉");
+    assert_eq!(text, "基础\n\n记忆段\n\n就绪段", "顺序不变，空行分段");
+}
+
+/// 吃掉 0 条时行为与改前逐字相同（基础 system 原样，不产生前导空行）。
+#[test]
+fn no_leading_system_leaves_the_baseline_untouched() {
+    let msgs = [NativeMessage { role: MessageRole::User, ..Default::default() }];
+    let (text, eaten) = merge_leading_system("基础", &msgs);
+    assert_eq!(eaten, 0);
+    assert_eq!(text, "基础");
+}
+
+/// 基础 system 为空时不产生前导空行——「空 + 前缀」不得拼成 "\n\n前缀"。
+#[test]
+fn empty_baseline_does_not_leave_a_leading_blank_line() {
+    let (text, eaten) = merge_leading_system("", &[sys("前缀")]);
+    assert_eq!(eaten, 1);
+    assert_eq!(text, "前缀");
+}
+
+/// 边界：遇到非纯文本的 system 段（Parts）就停下不再吃——拼错比多一条 system 更糟。
+#[test]
+fn non_text_system_segment_stops_the_merge() {
+    let parts = NativeMessage {
+        role: MessageRole::System,
+        content: Some(MessageContent::Parts(vec![])),
+        ..Default::default()
+    };
+    let (text, eaten) = merge_leading_system("基础", &[parts, sys("后面这条")]);
+    assert_eq!(eaten, 0, "Parts 形态不猜，停下");
+    assert_eq!(text, "基础");
+}
+
+/// 端到端：请求体里 system 消息**只有一条**，且前缀文本没有丢。
+#[test]
+fn prepared_request_carries_exactly_one_system_message() {
+    let cfg = crate::plugins::model::model_providers::ModelProviderConfig {
+        model: "m".to_string(),
+        api_base: "http://localhost".to_string(),
+        ..Default::default()
+    };
+    let msgs = vec![
+        crate::symbio_core::chat_message::ChatMessage {
+            id: "s1".to_string(),
+            role: Some(MessageRole::System),
+            content: Some(MessageContent::Text("记忆段".to_string())),
+            ..Default::default()
+        },
+        crate::symbio_core::chat_message::ChatMessage {
+            id: "u1".to_string(),
+            role: Some(MessageRole::User),
+            content: Some(MessageContent::Text("问".to_string())),
+            ..Default::default()
+        },
+    ];
+    let req = OpenaiChatProtocol.prepare_request(&cfg, "基础", &msgs, &[]);
+    let arr = req["messages"].as_array().expect("messages 数组");
+    let n = arr.iter().filter(|m| m["role"] == "system").count();
+    assert_eq!(n, 1, "出厂只发一条 system（两条会被部分网关 400）");
+    assert_eq!(arr[0]["role"], "system", "它在最前");
+    assert_eq!(arr[0]["content"], "基础\n\n记忆段", "两段文本都在，没丢");
+    assert_eq!(arr[1]["role"], "user", "后续消息原序跟进");
+}

@@ -190,3 +190,50 @@ fn declaring_one_goal_does_not_declare_another() {
     assert!(v.is_declared("目标 A"));
     assert!(!v.is_declared("目标 B"), "只有升格过的那条才算声明");
 }
+
+/// 自发发起且被采纳率 = 已升格 / 已表达（02 §3.1 外部效标 · 主动性）。
+/// 分母含「表达过但没升格」的欲——被否决 / 被忽略也是事实，不藏。
+#[test]
+fn adoption_rate_counts_unpromoted_intents_in_the_denominator() {
+    let store = EventStore::new();
+    let anchor = seed_trigger(&store);
+    let a = express(&store, "want-a", "目标 A", anchor, 100);
+    express(&store, "want-b", "目标 B", anchor, 110);
+    express(&store, "want-c", "目标 C", anchor, 120);
+    open_task(&store, "o-a", "hb-a", "目标 A", a, 200);
+
+    let v = view(&store, i64::MAX);
+    assert_eq!(v.intents.len(), 3, "分母 = 全部已表达");
+    assert_eq!(v.escalated(), 1, "分子 = 已升格");
+    assert!((v.adoption_rate() - 1.0 / 3.0).abs() < 1e-9);
+
+    // 空视图 ⇒ 有据的零（没主动发起过，不是「采纳率未知」）
+    let empty = view(&EventStore::new(), i64::MAX);
+    assert_eq!(empty.adoption_rate(), 0.0);
+}
+
+/// 跨会话合并：分子 / 分母可加，率是同一套算式在汇总值上的再应用——
+/// 不是第二份口径（与 fallback 的合并同款）。
+#[test]
+fn merge_aggregates_numerator_and_denominator() {
+    let s1 = ConationView {
+        intents: vec![
+            ConationIntent { seq: 1, ts: 10, goal: "A".into(), task_id: Some("t1".into()) },
+            ConationIntent { seq: 2, ts: 20, goal: "B".into(), task_id: None },
+        ],
+    };
+    let s2 = ConationView {
+        intents: vec![ConationIntent {
+            seq: 3,
+            ts: 30,
+            goal: "C".into(),
+            task_id: Some("t2".into()),
+        }],
+    };
+    let sum = ConationView::merge(&[s1, s2]);
+    assert_eq!(sum.expressed, 3);
+    assert_eq!(sum.escalated, 2);
+    assert!((sum.adoption_rate() - 2.0 / 3.0).abs() < 1e-9);
+    // 空输入 ⇒ 空汇总（有据的空，不是 0/0）
+    assert_eq!(ConationView::merge(&[]).adoption_rate(), 0.0);
+}

@@ -136,6 +136,27 @@ pub(crate) struct SessionStats {
     /// 的呈现面过滤（S08 的 `vis_scope`），落地前本列只有**整列**闸——与其余各列同款，
     /// 不在这里先造一个半开的判据。
     pub transcript: serde_json::Value,
+    /// 主动性（[02 §3.1 外部效标](../../../../docs/plan/PL-002-能力坐标系.md "PL-002-能力坐标系") · 主动性）：
+    /// `conation` 投影原样序列化（`{ intents: [ { seq, ts, goal, task_id } ] }`，按 seq 升序）——
+    /// 「自发发起且被采纳」的分子 / 分母同出一列：已升格（`task_id` 非空）/ 已表达。
+    ///
+    /// 归**四列**那一族（同切片、同 as-of、`may_read = false ⇒ { intents: [] }`）：
+    /// 欲是流，截断它等于悄悄丢掉「想要过什么」的事实（conation 投影不设配额）。
+    pub conation: serde_json::Value,
+    /// 时域跨度（同上 · 时域跨度）：`span` 投影序列化
+    /// （`{ events, span_ms }`——本会话事实源的首末事件 `ts` 跨度，Unix 毫秒）。
+    ///
+    /// 归**四列**那一族（同切片、同 as-of、`may_read = false ⇒ { events: 0, span_ms: 0 }`）。
+    /// 实例级「任务级时长中位数」在 `fleet` 的 `axes.span` 族（单会话一个跨度没有
+    /// 中位数可言，见 `SpanView::merge` 的「为什么」）。
+    pub span: serde_json::Value,
+    /// 自主程度（同上 · 自主程度）：`autonomy` 投影序列化
+    /// （`{ closed, unattended }`——已闭环任务数与其中全程未被 `task.held` 挂起的数量）。
+    ///
+    /// 归**四列**那一族（同切片、同 as-of、`may_read = false ⇒ { closed: 0, unattended: 0 }`）。
+    /// 率是**纯查询**（`AutonomyView::unattended_rate`），不落第二个数——与 `tiers` 的
+    /// `rate()` 同款：存分子分母，读时再除。
+    pub autonomy: serde_json::Value,
     /// **读数面板**（P4：读数的**呈现描述**，前端零业务知识地渲染它）。
     ///
     /// ## 为什么读数也要一份描述
@@ -214,6 +235,11 @@ fn fleet_reading(storage_root: &std::path::Path) -> serde_json::Value {
 
     let mut lat_parts = Vec::new();
     let mut fb_parts = Vec::new();
+    // 外部效标两族（02 §3.1 · 主动性 / 时域跨度）：与 lat/fb 同批扫描、同一份
+    // snapshot——「多扫一遍」不是更彻底，是多一次读错范围的机会。
+    let mut con_parts = Vec::new();
+    let mut span_parts = Vec::new();
+    let mut aut_parts = Vec::new();
     for wal in &wals {
         let Ok(store) = EventWalStore::open_readonly(wal) else {
             crate::plugin_warn!(
@@ -236,12 +262,32 @@ fn fleet_reading(storage_root: &std::path::Path) -> serde_json::Value {
                 .apply(&snapshot, i64::MAX, Budget::generous())
                 .value,
         );
+        con_parts.push(
+            crate::symbio_core::conation()
+                .apply(&snapshot, i64::MAX, Budget::generous())
+                .value,
+        );
+        span_parts.push(
+            crate::symbio_core::span()
+                .apply(&snapshot, i64::MAX, Budget::generous())
+                .value,
+        );
+        aut_parts.push(
+            crate::symbio_core::autonomy()
+                .apply(&snapshot, i64::MAX, Budget::generous())
+                .value,
+        );
     }
 
     let latency = crate::symbio_core::SloLatencyView::merge(&lat_parts);
     let fallback = crate::symbio_core::FallbackRateView::merge(&fb_parts);
     let turns: u64 = fallback.by_tier.values().map(|s| s.turns).sum();
     let fallbacks: u64 = fallback.by_tier.values().map(|s| s.fallbacks).sum();
+    // 两族的跨会话合并都在 core（统计口径单点）：分子分母可加、率是同一套算式的
+    // 再应用；span 的「一个事件的会话不进分母」也在 core 判，不在这边挑数据。
+    let conation = crate::symbio_core::ConationView::merge(&con_parts);
+    let span = crate::symbio_core::SpanView::merge(&span_parts);
+    let autonomy = crate::symbio_core::AutonomyView::merge(&aut_parts);
 
     serde_json::json!({
         // 实际读进来的 WAL 数（打不开的不计——见上面出声处）
@@ -260,6 +306,25 @@ fn fleet_reading(storage_root: &std::path::Path) -> serde_json::Value {
                 "tier": s.tier, "turns": s.turns, "fallbacks": s.fallbacks,
                 "rate": s.rate(),
             })).collect::<Vec<_>>(),
+        },
+        // 外部效标两族（02 §3.1）：与 by_tier 同地位——同一个实例、同一批 WAL、
+        // 同一批投影，只是问的问题不同（「哪条轴被抬高了」而不是「哪档跑得好」）。
+        // 键名稳定（不随文档改字号）：conation ↔ 主动性、span ↔ 时域跨度。
+        "axes": {
+            "conation": {
+                "expressed": conation.expressed,
+                "escalated": conation.escalated,
+                "adoption_rate": conation.adoption_rate(),
+            },
+            "span": {
+                "sessions": span.sessions,
+                "median_ms": span.median_ms(),
+            },
+            "autonomy": {
+                "closed": autonomy.closed,
+                "unattended": autonomy.unattended,
+                "unattended_rate": autonomy.unattended_rate(),
+            },
         },
     })
 }
@@ -532,12 +597,54 @@ pub(crate) fn read(
     )
     .map_err(|e| PluginError::InternalError(format!("转写序列化失败：{e}")))?;
 
+    // 主动性列（02 §3.1 外部效标）：与四列同一份切片、同一个 as-of。观测面是
+    // `conation.expressed`（欲）与 `task.opened`（升格，溯源认）——「自发发起」的
+    // 分子分母都是事实源里已有的事件，不加新格子。`may_read = false` 时切片已空
+    // ⇒ `{ intents: [], adoption_rate: 0.0 }`（四列形态）。
+    //
+    // 率与流同列给出：流是**事实**（不截断，见列定义），率是**读数**（纯查询，
+    // 与 `tiers` 的 `rate()`、跨会话 `ConationSummary::adoption_rate` 同一套算式）。
+    let conation_view = crate::symbio_core::conation()
+        .apply(&snapshot, i64::MAX, Budget::generous())
+        .value;
+    let conation = serde_json::json!({
+        "intents": conation_view.intents,
+        "adoption_rate": conation_view.adoption_rate(),
+    });
+
+    // 时域跨度列（同上）：`span` 投影只读事件信封的 `ts`（入库时间，与 `cost_ms`
+    // 同源的实测面），as-of 之后的事件一概不见。
+    let span = serde_json::to_value(
+        crate::symbio_core::span()
+            .apply(&snapshot, i64::MAX, Budget::generous())
+            .value,
+    )
+    .map_err(|e| PluginError::InternalError(format!("时域跨度序列化失败：{e}")))?;
+
+    // 自主程度列（同上）：`autonomy` 投影认 `task.held`（插话抢占 = 外部介入在事实源
+    // 里唯一的痕迹）与 `task.asserted`（闭环）。率是纯查询，此处只落分子分母。
+    let autonomy = serde_json::to_value(
+        crate::symbio_core::autonomy()
+            .apply(&snapshot, i64::MAX, Budget::generous())
+            .value,
+    )
+    .map_err(|e| PluginError::InternalError(format!("自主程度序列化失败：{e}")))?;
+
     // 实例级聚合列（P2）。`may_read = false` 时**不扫**：扫遍实例再报「不给你看」
-    // 是白花代价，而结论与空形状相同。
+    // 是白花代价，而结论与空形状相同。空形状与满读数**同键**（ axes 两族给有据的
+    // 零 / 空，不给「缺列」——读方不必为每个键分诊它在不在）。
     let fleet = if may_read {
         fleet_reading(storage_root)
     } else {
-        serde_json::json!({ "wals": 0, "sessions": 0 })
+        serde_json::json!({
+            "wals": 0, "sessions": 0, "turns": 0, "fallbacks": 0,
+            "by_tier": { "latency": [], "fallback": [] },
+            "axes": {
+                "conation": { "expressed": 0, "escalated": 0, "adoption_rate": 0.0 },
+                "span": { "sessions": 0, "median_ms": null },
+                "autonomy": { "closed": 0, "unattended": 0, "unattended_rate": 0.0 },
+            },
+        })
     };
 
     let reading = SessionStats {
@@ -552,6 +659,9 @@ pub(crate) fn read(
         reputation,
         readyset,
         transcript,
+        conation,
+        span,
+        autonomy,
         fleet,
         panel: ReadingPanel::default(),
     };

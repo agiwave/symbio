@@ -3,12 +3,11 @@
 > ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/task/*.md` 生成，请勿手改。**
 > 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，原则与流程见 [PL-011 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。
 
-**计数**：☐ todo 5 · 🟡 doing 0 · ☑ done 57 · ❌ wont 0（共 62）
+**计数**：☐ todo 4 · 🟡 doing 0 · ☑ done 58 · ❌ wont 0（共 62）
 
 ## 待处理（按依赖顺序）
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
-| `T-011` | 五轴的外部效标：每条轴挂一个可复现的读数，而不是形容词 | next | plan | ADR-059 |
 | `T-012` | 能力名册 ↔ 代码锚点：名册的每一条能力都要指到实现它的地方 | next | plan | ADR-059 |
 | `T-015` | 出厂 prompt 在线上是两条 system 消息，部分 provider 直接 400 拒收——full 档在那类 provider 上第一轮就失败 | next | S | — |
 | `T-013` | Rust 覆盖率阈值：与 C7 同族的已知盲区，排在会话真源归一之后 | later | plan | — |
@@ -21,6 +20,7 @@
 | 编号 | 任务 | 轨 | 证据 |
 |---|---|---|---|
 | `T-061` | 登记机制支持条目分解：parent 字段（父子机制） | meta | registry-lib.mjs RG-024（parent 形状 / 存在 / 同 kind / 自指 / 成环）+ RG-025（子生效⇒父生效、父退场⇒子退场，档位表按 KINDS 取）；INDEX 分解树小节（条件渲染，无 parent 数据零变化）；board --children / --parent；SP-001 字段表 + PL-011 §1.2 + docs/README 两字段口径同批落地（RG-011 对账）；验证：registry-audit 249 条目零违规 · registry-audit.test.mjs 41/41 · gen-doc-refs.test.mjs 14/14 · doc-link-audit 0 失效；子任务 T-062 / T-063 / T-064 全部 done（RG-025 父退场⇒子退场的正向用例） |
+| `T-011` | 五轴的外部效标：每条轴挂一个可复现的读数，而不是形容词 | plan | PL-002 新增 §3.1.1 外部效标表（五轴逐条挂读数口，纪律三条：读数没出来不得改可测量口吻 / 设定值必标 / 给不出就写"本轴目前只能人工判"）；三条轴新落生产读数口——时域跨度 = span 投影（会话首末事件 ts 跨度 + 跨会话 P50 中位数）、主动性 = conation 的 adoption_rate（已升格 / 已表达，未升格算分母）、自主程度 = autonomy 投影（闭环且全程未 task.held / 已闭环，progress 恢复不洗掉干预事实）；自我模型精度沿用 calibration 列既有口径；抽象层级写明只能人工判（跨域迁移要离线评测，不在生产读数口内）。三族各配 core 判据（含 as-of、曾 held 不算自主、未闭环不进分母、空输入有据的零）+ stats 层「删事件 ⇒ 读数跟着动」的手术刀用例；core-export-audit C-003 单消费方 58/58 未增（新导出收窄为 pub(crate)）；cargo test --lib 1526 全绿、clippy 零警告 |
 | `T-001` | 登记机制落地：单文档 + 守卫 + 汇总 + 总纲 | meta | 提交 8252c4a（机制全量落地：4 脚本 + 23 项回归测试 + docs/plan/14 总纲 + 门禁接线，docs+facts 58/58） |
 | `T-003` | 接管 docs/README 纪律地图（每条纪律成为 spec 条目） | doc | 提交 36a9eb3（21 条 spec 条目 + 地图收敛指路；docs+facts 门禁 58/58） |
 | `T-004` | 散落决策清点与登记形态定案（决策类元素的接管边界） | meta | 清点结论：唯一散落处 = `docs/arch/AR-011-third-party-plugin-spec.md §10`（6 条待确认决策）⇒ 处置为「原表自持、不另登 task」；形态定案写回 14 §6；验证：registry-audit 零违规 |
@@ -94,7 +94,7 @@
 - [`T-006`](T-006.md) 接管 PL-004 §3.1 工具台账（先分清守卫投影行与人维护登记行）（done）
 - [`T-008`](T-008.md) ADR 接管 registry（新开 adr kind：索引与正文一并迁入，删除 DECISIONS.md 与 decisions/*.md）（done）
 - [`T-010`](T-010.md) registry 迁入 docs——条目库与文档目录合一（done）
-- [`T-011`](T-011.md) 五轴的外部效标：每条轴挂一个可复现的读数，而不是形容词（todo）
+- [`T-011`](T-011.md) 五轴的外部效标：每条轴挂一个可复现的读数，而不是形容词（done）
 - [`T-012`](T-012.md) 能力名册 ↔ 代码锚点：名册的每一条能力都要指到实现它的地方（todo）
 - [`T-013`](T-013.md) Rust 覆盖率阈值：与 C7 同族的已知盲区，排在会话真源归一之后（todo）
 - [`T-014`](T-014.md) 分布式 Store 的 seq 单调与「无溯源不声明」如何共存（G4）（todo）

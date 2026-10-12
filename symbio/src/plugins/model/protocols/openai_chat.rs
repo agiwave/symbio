@@ -17,6 +17,52 @@ use crate::symbio_core::{ModelFinishReason, ModelUsage, PluginError, PluginInvok
 
 pub struct OpenaiChatProtocol;
 
+/// 把消息数组**最前**的连续 `system` 段并进基础 `system`，返回（合并文本，吃掉几条）。
+///
+/// ## 为什么要并
+///
+/// 出厂形状原本是**两条** system：这里 prepend 一条，而消息数组的第一元素按
+/// [ADR-048a](../../../../../docs/adr/ADR-048a.md) 后果节本身就是一条 system（记忆段 /
+/// 就绪段 / 委派者段）。两条都排在最前、位置合法，但**部分 OpenAI 兼容网关只认一条**
+/// ——它们直接回 `HTTP 400 {"message":"System message must be at the beginning."}`
+/// （T-015 的门外对照：同一份请求体，MiMo 收、qwen3-8-flash-next 拒）。
+/// 后果不是「格式不好看」而是硬失败：那类 provider 上 `full` 档第一轮就走不出去。
+///
+/// ## 为什么是「并入基础 system」而不是让各协议自己并
+///
+/// 后者要把「合并」写进每一家协议，而**形状基线（ADR-057）钉的是出厂送出了什么形状**——
+/// 形状只该有一个产地。故在此处一次并掉：前缀的文本拼到基础 system 之后（原顺序，
+/// 先基础后前缀），空行分段。
+///
+/// ## 边界（不猜）
+///
+/// 只合 `content` 是**纯文本**的那些段；遇到 Parts（多模态）就停下不再吃——
+/// 拼错比多一条 system 更糟。吃掉 0 条时行为与改前逐字相同。
+fn merge_leading_system(system: &str, msgs: &[crate::plugins::model::types::NativeMessage]) -> (String, usize) {
+    let mut merged = system.to_string();
+    let mut consumed = 0usize;
+    for m in msgs {
+        if m.role != crate::plugins::model::types::MessageRole::System {
+            break
+        }
+        // 取 `to_api_value` 算出的最终 content（含 `prompt` 前缀的拼接结果），
+        // 而不是自己再拼一遍——拼接口径单点，不在这里开第二份。
+        let Some(text) = m.to_api_value().get("content").and_then(|c| c.as_str()).map(str::to_string) else {
+            break // Parts / 空：不猜它的文本形态，停下
+        };
+        if text.trim().is_empty() {
+            consumed += 1 // 空段不吃进文本，但仍算已并（它不该再单独发出去）
+        } else {
+            if !merged.is_empty() {
+                merged.push_str("\n\n")
+            }
+            merged.push_str(&text);
+            consumed += 1
+        }
+    }
+    (merged, consumed)
+}
+
 #[async_trait]
 impl ModelProtocol for OpenaiChatProtocol {
     fn get_api_url(&self, cfg: &ModelProviderConfig) -> String {
@@ -47,8 +93,12 @@ impl ModelProtocol for OpenaiChatProtocol {
     ) -> Value {
         let flattened_messages =
             crate::plugins::model::message_builder::flatten_chat_messages(messages);
-        let mut openai_msgs = vec![json!({"role": "system", "content": system})];
-        for m in &flattened_messages {
+        // **出厂只发一条 system**：基础 `system` 与数组最前的 system 前缀段并成一条，
+        // 中间空行分段（空行分段是本仓既有的拼接惯例，`NativeMessage::to_api_value`
+        // 拼 `prompt` 用的就是它）。
+        let (system_text, consumed) = merge_leading_system(system, &flattened_messages);
+        let mut openai_msgs = vec![json!({"role": "system", "content": system_text})];
+        for m in &flattened_messages[consumed..] {
             openai_msgs.push(m.to_api_value());
         }
 

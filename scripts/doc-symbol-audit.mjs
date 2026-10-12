@@ -14,6 +14,13 @@
  *     `^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$`）必须在 Rust ∪ 前端（tauri/src）∪ 门禁脚本
  *     （scripts）语料里逐字存在——
  *     但**仅当它的同族**（首段 + `_`，如 `ROUTE_`）在代码里另有成员时才判红。
+ *   **D-011**（名册锚点列）：[02 §6.1 能力名册](../docs/plan/PL-002-能力坐标系.md "PL-002-能力坐标系")
+ *     的「锚点」列——名册 54 行能力若没有任何一行能回答"它在代码里是哪几行"，
+ *     "坐标系已归位"与"这条能力真的存在"在日志里长得一模一样。
+ *     取值 `文件` / `文件::符号`（反引号形态）或 `—`：**非 `—` 的必须指得到**
+ *     （文件在仓内存在；`::符号` 的最后一段查 D-005 的同一份 Rust 语料）。
+ *     `—` 只允许出现在真的没落地的行上——故锚定 / 未锚定**计数进日志**，让
+ *     "名册在长、锚定率不动"这件事看得见。复用本文件的语料，**不另起一份符号解析**。
  *
  * 为什么 D-009 要「同族」这道闸：全大写 + 下划线不只是常量的形态，也是**环境变量、CI
  * 密钥、线上错误码**的形态（`APPLE_CERTIFICATE`、`GITHUB_TOKEN`）。那些名字的正确出处
@@ -62,7 +69,7 @@
  */
 // 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns D 文档正文与链接
-// @codes D-005 D-009
+// @codes D-005 D-009 D-011
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join, dirname, resolve, relative } from 'node:path'
@@ -198,6 +205,79 @@ for (const f of rsFiles) {
 for (const f of feFiles) indexCrossStack(readFileSync(f, 'utf8'))
 for (const f of toolFiles) indexExistence(readFileSync(f, 'utf8'))
 
+/** D-011 的名册表所在文件（02 §6.1，全仓唯一一份能力名册）。 */
+const ROSTER_MD = 'docs/plan/PL-002-能力坐标系.md'
+/** 名册行的判别：第 2 列是「维」闭集（知 / 行 / 言 / 省 / 欲）——只看列数会撞上
+ *  02 里其它同样 8 列的表，靠维的闭集把它钉住。 */
+const DIMS = new Set(['知', '行', '言', '省', '欲'])
+
+/**
+ * D-011：名册「锚点」列——非 `—` 的指认必须指得到。
+ *
+ * 返回 `{ total, anchored }` 供日志出锚定率。
+ *
+ * ## 名册不在扫描范围内 ⇒ 本条不适用（不判红）
+ *
+ * 回归测试造的是**最小仓库**（只有 README.md 与一小片语料），里面没有全仓唯一那份
+ * 名册——那是夹具的性质，不是漂移。真仓若真把名册删了，`registry-audit` 的 RG-020
+ * 会先在登记侧红（PL-002 是登记条目），不需要这条跨文档判据再补一刀。**判据只在
+ * 判据的对象存在时才有意义**，硬判只会让每条夹具用例都为「没有名册」陪跑。
+ *
+ * 反向用例（回归测试注入）：锚点指向不存在的符号 / 不存在的文件 ⇒ 红。这条是硬要求——
+ * 「名册写了锚点」若不可证伪，就等于把 E6（验的是文档自洽，不是文档 == 代码）
+ * 原样搬进了坐标系。
+ */
+function auditRosterAnchors () {
+  const abs = join(REPO_ROOT, ROSTER_MD)
+  if (!existsSync(abs)) {
+    console.log(dim(`（D-011 不适用：${ROSTER_MD} 不在扫描范围内）`))
+    return null
+  }
+  let total = 0
+  let anchored = 0
+  const lines = readFileSync(abs, 'utf8').split(/\r?\n/)
+  lines.forEach((line, i) => {
+    if (!line.startsWith('|')) return
+    const cells = line.split('|').slice(1, -1).map((c) => c.trim())
+    if (cells.length < 8) return
+    if (!DIMS.has(cells[1])) return // 不是名册行
+    total++
+    const name = cells[0].replace(/`/g, '')
+    const anchor = cells[7]
+    if (anchor === '—' || anchor === '') return // 尚未落地：计数，不判
+    const m = anchor.match(/^`([^`]+)`$/)
+    if (!m) {
+      report(ROSTER_MD, i + 1, 'D-011',
+        `「${name}」的锚点列须是 \`文件\` / \`文件::符号\`（反引号形态）或 \`—\`，读到：${anchor}`)
+      return
+    }
+    const inner = m[1].trim().replace(/\(\)$/, '')
+    const [file, ...rest] = inner.split('::')
+    if (!existsSync(join(REPO_ROOT, file))) {
+      report(ROSTER_MD, i + 1, 'D-011',
+        `「${name}」的锚点指向的文件不在仓内：\`${file}\`——文件改名了还是从来没落地？`)
+      return
+    }
+    if (rest.length === 0) {
+      anchored++
+      return
+    }
+    // `文件::符号`：符号存在性查 D-005 的同一份语料（不另起一份解析）
+    const sym = rest[rest.length - 1]
+    if (!idents.has(sym)) {
+      report(ROSTER_MD, i + 1, 'D-011',
+        `「${name}」的锚点符号在 Rust 源码中不存在：\`${inner}\`——符号改名了，还是这一行标错了能力？`)
+      return
+    }
+    anchored++
+  })
+  if (total === 0) {
+    report(ROSTER_MD, 1, 'D-011', '名册一行都没读出——表格结构变了还是维的闭集写错了？')
+    return null
+  }
+  return { total, anchored }
+}
+
 let scanned = 0
 let refs = 0
 let constRefs = 0
@@ -237,8 +317,18 @@ for (const rel of mdFiles) {
   })
 }
 
+// ── D-011：能力名册的「锚点」列 ─────────────────────────────────────────
+//
+// 名册是**表**，不是散文：D-005 的逐行反引号扫描管不到「这一列必须填、填了必须指得到」。
+// 故单列一条判据，但它**不解析符号**——符号存在性查的就是上面那份 `idents`
+// （D-005 的语料），多一份解析就多一处口径漂移。
+const roster = auditRosterAnchors()
+
 if (errors > 0) {
   console.log(red(`\ndoc-symbol-audit 未通过：${errors} 处失效指认（扫描 ${scanned} 条候选，${mdFiles.length} 篇 md）`))
   process.exit(1)
 }
-console.log(green(`\ndoc-symbol-audit 通过：${mdFiles.length} 篇 md、${rsFiles.length} 个 .rs + ${feFiles.length} 个前端语料，${refs} 条符号指认与 ${constRefs} 个常量名全部存在${dim(`（候选 ${scanned} 条）`)}`))
+const rosterLine = roster
+  ? dim(` · 名册锚点 ${roster.anchored}/${roster.total} 已锚定`)
+  : ''
+console.log(green(`\ndoc-symbol-audit 通过：${mdFiles.length} 篇 md、${rsFiles.length} 个 .rs + ${feFiles.length} 个前端语料，${refs} 条符号指认与 ${constRefs} 个常量名全部存在${dim(`（候选 ${scanned} 条）`)}${rosterLine}`))
