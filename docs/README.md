@@ -1,7 +1,60 @@
+---
+kind: guide
+id: docs/README
+title: Symbio 文档中心
+status: active
+created: 2026-07-20
+---
+
 <!-- doc-link-allow D-004: 本文定义「现行文档不写变更史」这条规矩及其判据边界，需引用反例措辞（「曾经…已改为…」「五条 → 七条」）界定禁止范围 -->
 # Symbio 文档中心
 
 > **文档驱动开发**：本文档体系是 Symbio 项目的"单一事实来源"。
+
+## 文档登记：每篇文档都是登记条目
+
+全仓的活跃 `.md` 都在**同一套登记机制**里（机制见 [plan/14](plan/14-登记与汇总机制.md "docs/plan/14-登记与汇总机制")，字段见
+[SP-001](./spec/SP-001.md)）：每篇文档开头是五行 front-matter，**文件本身就是条目**，没有第二处登记表。
+
+    ---
+    kind: arch
+    id: docs/arch/vdfs
+    title: VDFS —— 虚拟动态文件系统规范
+    status: active
+    created: 2026-09-13
+    ---
+
+- **`kind` 回答「这篇文档在回答什么问题」**——九类，各有自己的目录与汇总页：
+
+| kind | 回答什么 | 住的目录 |
+|---|---|---|
+| `goal` 目标 | 要达成什么（价值主张与可度量判据） | `docs/goal/` |
+| `stage` 阶段 | 分几步走、现在在哪一步 | `docs/stage/` |
+| `plan` 计划 | 要变成什么样（目标架构与实施方案） | `docs/plan/` |
+| `arch` 架构 | 现在是什么样（系统结构 / 设计规范 / 模块机制） | `docs/arch/` + **模块目录** |
+| `ref` 参考 | 查数据（路由 / 错误码 / 配置） | `docs/ref/` |
+| `guide` 指南 | 怎么用（上手 / 贡献 / 排障） | `docs/guide/` + 仓根 |
+| `task` 任务 | 要推进的事 | `docs/task/` |
+| `spec` 规范 | 必须成立的条文（条文 + 判据） | `docs/spec/` |
+| `adr` 决策 | 为什么这样选（含被否决的方案） | `docs/adr/` |
+
+- **`id` 是文档的身份**：条目类（task / spec / adr）等于文件名，文档类等于**仓根相对路径**（去
+  `.md`，所以「编号 + 名字」天然合法，如 `docs/plan/01-核心架构`）；`title` 逐字等于正文首个 H1。
+  两条都是**两面对账**，写错即红（RG-003 / RG-021）。
+- **`status` 是唯一的状态处**：本文档现行吗（`draft` / `active` / `retired`）；任务另有
+  `todo` / `doing` / `done` / `wont`，决策另有 `impl`（落地到哪一步）。
+- **目录不参与判定**：`kind` 只来自 front-matter，文档搬去别的目录不会破机制，只需把 `id`
+  与它一起改（判据会拦）。**模块文档就地登记**（`symbio/src/plugins/*/README.md` 与模块 `docs/`
+  不搬进 `docs/`）——「就近放置」优先于「按类归堆」。
+- **引用只写编号**：文档之间互相引用时只写 `[[编号]]`（如 `[[SP-001]]`、`[[ADR-047]]`；
+  要显示文字写 `[[编号|显示文字]]`），**地址既不手写也不维护**——
+  由 `node scripts/gen-doc-refs.mjs` 从登记解析生成，并且每次门禁**重算全仓已展开的地址**
+  （文档搬走后入链自愈）。判据三条：编号不存在判红（RF-001）、
+  地址漂移自动重算（RF-002）、**指向已登记文档的手工地址判红**（RF-003——那种地址机制搬不动）。
+  编号是身份（稳定），地址是位置（会变）。
+- **汇总页是投影**：全项目文档索引在 [docs/INDEX.md](./INDEX.md)，各 kind 的汇总页在
+  `docs/<kind>/INDEX.md`，都由 `node scripts/registry-audit.mjs --write` 生成（门禁自动重跑），
+  **不要手改**。查询看 `node scripts/registry-board.mjs`。
 
 ## 文档下沉原则
 
@@ -9,7 +62,7 @@
 
 - **单模块文档**放在该模块目录内（`README.md` + 可选 `docs/`），只写该模块自身机制，不重复系统级内容；
 - **系统级文档**（本目录）只保留**跨模块**的核心逻辑、边界与约定，涉及单模块内部实现时**引用**模块文档，不复制细节；
-- **历史实施记录**一律进 `archive/`，现行文档只描述当前行为。
+- **历史实施记录**一律进 `archive/`（归档不进登记），现行文档只描述当前行为。
 
 下面这些由 `node scripts/doc-link-audit.mjs` 机械判定（任一命中即失败）：**站内链接必须有效**、
 **过程文档不得滞留活跃目录**（D-002）、**活跃文档不得超过 800 行**（D-003）、**正文不得写
@@ -26,10 +79,10 @@ D-004 判**措辞标记**而不判**叙事**，边界在此写明（免得读到
 只收「不会出现在正常论述里的措辞」，因为**守卫一旦开始误报，下场是被整体豁免，比没有还糟**。
 豁免分两档（与 D-006 同口径）：**行内**（`<!-- doc-link-allow D-004: 理由 -->` 写在本行或
 前一行）只豁免该行；**全文**须为文件首行非空内容，且理由写明它买断的是什么
-（如 [WVR-02](./registry/spec/WVR-02.md) 那篇豁免登记，`## 处理过程` 是唯一的过程信息）。
+（如 [WVR-02](./spec/WVR-02.md) 那篇豁免登记，`## 处理过程` 是唯一的过程信息）。
 
 D-006 是 D-001 的盲区补丁：D-001 只认 Markdown 链接语法（方括号文字 + 圆括号目标），
-而本仓正文**更常**用行内反引号指路（「详见 `docs/design/vdfs.md`」）——这类写法 D-001
+而本仓正文**更常**用行内反引号指路（「详见 `docs/arch/vdfs.md`」）——这类写法 D-001
 一个字都看不见。它是启发式判定（缩写式引用与示意性路径在文本上与真断链不可分），故留
 豁免出口 `<!-- doc-link-allow D-006: 理由 -->`：**行内**（本行或前一行）只豁免该行，
 **全文**须为文件首行非空内容。
@@ -55,7 +108,7 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 （相当一部分机制就写在模块文档注释里，如 `providers::memory`）。
 **知识只写一处**——不要以摘要形式复制到别处，复制必然漂移。
 
-示例：会话上下文压缩的 L0-L6 分层总览在 [session/docs/context-compression-design.md](../symbio/src/plugins/session/docs/context-compression-design.md)，各层阈值与代码实现在 [session/README.md](../symbio/src/plugins/session/README.md)——**会话相关的一切文档都在 `symbio/src/plugins/session/docs/` 内**；系统级目录只保留跨模块规范（如 [design/vdfs.md](./design/vdfs.md)）。
+示例：会话上下文压缩的 L0-L6 分层总览在 [session/docs/context-compression-design.md](../symbio/src/plugins/session/docs/context-compression-design.md "symbio/src/plugins/session/docs/context-compression-design")，各层阈值与代码实现在 [session/README.md](../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README")——**会话相关的一切文档都在 `symbio/src/plugins/session/docs/` 内**；系统级目录只保留跨模块规范（如 [arch/vdfs.md](arch/vdfs.md "docs/arch/vdfs")）。
 
 ## 文档职责边界（一个事实只有一个 owner）
 
@@ -65,34 +118,34 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 | 事实 | 唯一 owner | 其它文档 |
 |---|---|---|
 | 现在是什么（插件 / 挂载点 / 路由 / 工具 / 规模） | [CURRENT.md](./CURRENT.md)（代码生成） | **不手抄**，需要就引用 |
-| 路由语义与调用方 | [reference/ROUTES.md](./reference/ROUTES.md) | 模块 `README.md` 不抄路由表 |
-| 错误码 | [reference/ERROR_CODES.md](./reference/ERROR_CODES.md) | PROTOCOLS 不再列错误码表 |
-| 配置项 | [reference/CONFIGURATION.md](./reference/CONFIGURATION.md) | 模块 `README.md` 只写机制 + 指向它 |
-| 判据码（各守卫的编号地址） | [reference/GATE_CODES.md](./reference/GATE_CODES.md)（脚本声明生成） | 守卫脚本只写自己判什么，不抄全表 |
-| 出厂 prompt 的**形状基线** | [reference/PROMPT_SHAPE.md](./reference/PROMPT_SHAPE.md)（真实链路生成，不手改） | 口径（什么进判据 / 规模只作观测）在 ADR-057，别处不复述 |
-| 结构化 vs 拍平的**模型侧对照读数** | [reference/PROMPT_AB.md](./reference/PROMPT_AB.md)（门外实验生成，不手改） | 判据口径在 `e2e/ab/tasks.mjs`，结论与边界在 task/S-end③ |
-| 协议线上形状（帧 / 载荷 / 通道 / 线格式） | [architecture/PROTOCOLS.md](./architecture/PROTOCOLS.md) | — |
-| 系统拓扑（谁挂在谁下面） | [SYSTEM_MAP.md](./SYSTEM_MAP.md) | 其它图只画自己那一层 |
-| 排障链路（一次请求经过哪些代码） | [architecture/DATA_FLOW.md](./architecture/DATA_FLOW.md) | — |
-| 为什么这样设计（含被否决的方案与理由） | [`docs/registry/adr/`](registry/adr) 下的单文档（**每条 ADR 正文 + 状态**）；索引与域分组见 [adr/INDEX.md](registry/adr/INDEX.md)（生成） | 其它文档只引用 ADR 编号 |
+| 路由语义与调用方 | [ref/ROUTES.md](ref/ROUTES.md "docs/ref/ROUTES") | 模块 `README.md` 不抄路由表 |
+| 错误码 | [ref/ERROR_CODES.md](ref/ERROR_CODES.md "docs/ref/ERROR_CODES") | PROTOCOLS 不再列错误码表 |
+| 配置项 | [ref/CONFIGURATION.md](ref/CONFIGURATION.md "docs/ref/CONFIGURATION") | 模块 `README.md` 只写机制 + 指向它 |
+| 判据码（各守卫的编号地址） | [ref/GATE_CODES.md](./ref/GATE_CODES.md)（脚本声明生成） | 守卫脚本只写自己判什么，不抄全表 |
+| 出厂 prompt 的**形状基线** | [ref/PROMPT_SHAPE.md](./ref/PROMPT_SHAPE.md)（真实链路生成，不手改） | 口径（什么进判据 / 规模只作观测）在 ADR-057，别处不复述 |
+| 结构化 vs 拍平的**模型侧对照读数** | [ref/PROMPT_AB.md](./ref/PROMPT_AB.md)（门外实验生成，不手改） | 判据口径在 `e2e/ab/tasks.mjs`，结论与边界在 task/S-end③ |
+| 协议线上形状（帧 / 载荷 / 通道 / 线格式） | [arch/PROTOCOLS.md](arch/PROTOCOLS.md "docs/arch/PROTOCOLS") | — |
+| 系统拓扑（谁挂在谁下面） | [arch/SYSTEM_MAP.md](arch/SYSTEM_MAP.md "docs/arch/SYSTEM_MAP") | 其它图只画自己那一层 |
+| 排障链路（一次请求经过哪些代码） | [arch/DATA_FLOW.md](arch/DATA_FLOW.md "docs/arch/DATA_FLOW") | — |
+| 为什么这样设计（含被否决的方案与理由） | [`docs/adr/`](adr/INDEX.md) 下的单文档（**每条 ADR 正文 + 状态**）；索引与域分组见 [adr/INDEX.md](adr/INDEX.md)（生成） | 其它文档只引用 ADR 编号 |
 | 模块内部机制 | 该模块 `README.md` | 系统级文档不复述 |
 | 模块深度设计与不变量 | 该模块 `docs/` | — |
-| **目标架构（v2）与迁移计划** | [plan/README.md](./plan/README.md) | 其余文档只引用，不复述取舍 |
-| 条目级登记（任务 / 规范 / 决策的编号、状态、优先级、依赖、处理过程） | `docs/registry/<kind>/` 下的**单文档**（机制见 [plan/14](./plan/14-登记与汇总机制.md)；汇总页由脚本生成） | 各处不手抄条目清单，引用 INDEX |
+| **目标架构（v2）与迁移计划** | [plan/README.md](plan/README.md "docs/plan/README") | 其余文档只引用，不复述取舍 |
+| 条目级登记（任务 / 规范 / 决策的编号、状态、优先级、依赖、处理过程） | `docs/<kind>/` 下的**单文档**（机制见 [plan/14](plan/14-登记与汇总机制.md "docs/plan/14-登记与汇总机制")；汇总页由脚本生成） | 各处不手抄条目清单，引用 INDEX |
 | 变更历史（改了什么、何时改的） | `git log` | **现行文档不写变更史**（见下） |
 | 一次性评审 / 迁移记录 / 体检报告 | `docs/archive/` | 活文档不保留过程日志 |
 
-**变更时只改 owner 那一处**：结构事实重跑 `node scripts/gen-current-facts.mjs`（CI 有 `--check` 门禁）；跨模块架构改 [OVERVIEW.md](./architecture/OVERVIEW.md) + [SYSTEM_MAP.md](./SYSTEM_MAP.md) 各自己那一层；常见问题进 [TROUBLESHOOTING.md](./guides/TROUBLESHOOTING.md)。
+**变更时只改 owner 那一处**：结构事实重跑 `node scripts/gen-current-facts.mjs`（CI 有 `--check` 门禁）；跨模块架构改 [OVERVIEW.md](arch/OVERVIEW.md "docs/arch/OVERVIEW") + [SYSTEM_MAP.md](arch/SYSTEM_MAP.md "docs/arch/SYSTEM_MAP") 各自己那一层；常见问题进 [TROUBLESHOOTING.md](guide/TROUBLESHOOTING.md "docs/guide/TROUBLESHOOTING")。
 
 ### 两条硬规则
 
 1. **现行文档只描述「现在是什么」**，不写「曾经是什么、后来改成了什么」。
    这类追溯一律走 `git log -S<符号>` / `git log --grep=<词>`；需要保留「为什么否决 A 选 B」的
-   结论，就写进 `docs/registry/adr/` 的一条 ADR——**那才是它的 owner**。
+   结论，就写进 `docs/adr/` 的一条 ADR——**那才是它的 owner**。
    判据：一条叙述如果随每次重构都要跟着改，它就不该活在现行文档里。
 2. **代码注释与文档各有边界**：注释写「读这个文件需要知道的不变量与陷阱」，
    文档写「机制与取舍」。**注释不复述文档，文档不复述注释**（签名、方法清单、字段表以代码为准）。
-   详见 [CONTRIBUTING.md §4](../CONTRIBUTING.md)。
+   详见 [CONTRIBUTING.md §4](../CONTRIBUTING.md "CONTRIBUTING")。
 
 ## 纪律地图
 
@@ -100,36 +153,37 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 「纪律 3」且不同义。**跨篇引用必须带限定名**；同篇内的裸引（「纪律 3」）指**本篇 §0** 的那条。
 不新开编号命名空间。
 
-每条纪律的**登记**（限定名 + 判据对账）在 [docs/registry/spec/](registry/spec/INDEX.md)
-（机制见 [plan/14](./plan/14-登记与汇总机制.md)）——「哪条纪律其实没人守」由登记条目的判据节
-回答，判据码全表在 [reference/GATE_CODES.md](./reference/GATE_CODES.md)。条文正文各归定义篇，
-此处不复述：[08 §0](./plan/08-分步实施计划.md#0-执行纪律五步每步都不得跳过) ·
-[D13-1…D13-5](./registry/spec/INDEX.md) ·
-[03 §5.1](./plan/03-演进与验证.md#51-五条纪律) ·
-[plan/README §4](./plan/README.md#4-硬证据全部实际编译运行通过)。
+每条纪律的**登记**（限定名 + 判据对账）在 [docs/spec/](spec/INDEX.md)
+（机制见 [plan/14](plan/14-登记与汇总机制.md "docs/plan/14-登记与汇总机制")）——「哪条纪律其实没人守」由登记条目的判据节
+回答，判据码全表在 [ref/GATE_CODES.md](./ref/GATE_CODES.md)。条文正文各归定义篇，
+此处不复述：[08 §0](plan/08-分步实施计划.md#0-执行纪律五步每步都不得跳过 "docs/plan/08-分步实施计划") ·
+[D13-1…D13-5](./spec/INDEX.md) ·
+[03 §5.1](plan/03-演进与验证.md#51-五条纪律 "docs/plan/03-演进与验证") ·
+[plan/README §4](plan/README.md#4-硬证据全部实际编译运行通过 "docs/plan/README")。
 
 ## 快速导航
 
 | 我想... | 查阅 |
 |---------|------|
 | 核对"现在是什么"（插件 × 挂载点 × 路由 × 工具，自动生成） | [CURRENT.md](./CURRENT.md) |
-| 了解系统全貌 | [SYSTEM_MAP.md](./SYSTEM_MAP.md) |
-| 理解架构设计 | [OVERVIEW.md](./architecture/OVERVIEW.md) |
-| 查看协议规范 | [PROTOCOLS.md](./architecture/PROTOCOLS.md) |
-| 追踪请求全链路 | [DATA_FLOW.md](./architecture/DATA_FLOW.md) |
-| 查找路由路径 | [ROUTES.md](./reference/ROUTES.md) |
-| 理解错误码 | [ERROR_CODES.md](./reference/ERROR_CODES.md) |
-| 配置系统 | [CONFIGURATION.md](./reference/CONFIGURATION.md) |
-| 给门禁加一条判据、要挑不撞的号 | [GATE_CODES.md](./reference/GATE_CODES.md) |
-| 看 prompt 实际送出去的形状 / 结构化的代价 | [PROMPT_SHAPE.md](./reference/PROMPT_SHAPE.md)（重生成：`PROMPT_SHAPE_UPDATE=1 node e2e/cases/t46-prompt-shape-baseline.mjs`） |
-| 看「结构化 vs 拍平」在真实模型上的对照读数 | [PROMPT_AB.md](./reference/PROMPT_AB.md)（门外实验：`node e2e/ab/run.mjs`，会打真 provider、不进门禁） |
-| 快速上手 | [QUICK_START.md](./guides/QUICK_START.md) |
-| 开发新插件 | [PLUGIN_DEVELOPMENT.md](./guides/PLUGIN_DEVELOPMENT.md) |
-| 排查问题 | [TROUBLESHOOTING.md](./guides/TROUBLESHOOTING.md) |
-| 了解设计决策 | [docs/registry/adr/INDEX.md](registry/adr/INDEX.md)（按域分组；正文即条目本身） |
-| 了解**目标架构（v2）**与分步迁移计划 | [plan/README.md](./plan/README.md)（**先读其 §0.1：v2 是本仓的目标架构**） |
+| 了解系统全貌 | [SYSTEM_MAP.md](arch/SYSTEM_MAP.md "docs/arch/SYSTEM_MAP") |
+| 理解架构设计 | [OVERVIEW.md](arch/OVERVIEW.md "docs/arch/OVERVIEW") |
+| 查看协议规范 | [PROTOCOLS.md](arch/PROTOCOLS.md "docs/arch/PROTOCOLS") |
+| 追踪请求全链路 | [DATA_FLOW.md](arch/DATA_FLOW.md "docs/arch/DATA_FLOW") |
+| 查找路由路径 | [ROUTES.md](ref/ROUTES.md "docs/ref/ROUTES") |
+| 理解错误码 | [ERROR_CODES.md](ref/ERROR_CODES.md "docs/ref/ERROR_CODES") |
+| 配置系统 | [CONFIGURATION.md](ref/CONFIGURATION.md "docs/ref/CONFIGURATION") |
+| 给门禁加一条判据、要挑不撞的号 | [GATE_CODES.md](./ref/GATE_CODES.md) |
+| 看 prompt 实际送出去的形状 / 结构化的代价 | [PROMPT_SHAPE.md](./ref/PROMPT_SHAPE.md)（重生成：`PROMPT_SHAPE_UPDATE=1 node e2e/cases/t46-prompt-shape-baseline.mjs`） |
+| 看「结构化 vs 拍平」在真实模型上的对照读数 | [PROMPT_AB.md](./ref/PROMPT_AB.md)（门外实验：`node e2e/ab/run.mjs`，会打真 provider、不进门禁） |
+| 快速上手 | [QUICK_START.md](guide/QUICK_START.md "docs/guide/QUICK_START") |
+| 开发新插件 | [PLUGIN_DEVELOPMENT.md](guide/PLUGIN_DEVELOPMENT.md "docs/guide/PLUGIN_DEVELOPMENT") |
+| 排查问题 | [TROUBLESHOOTING.md](guide/TROUBLESHOOTING.md "docs/guide/TROUBLESHOOTING") |
+| 看**全项目文档索引**（九类 kind × 标题 × 状态） | [docs/INDEX.md](./INDEX.md) |
+| 了解设计决策 | [adr/INDEX.md](adr/INDEX.md)（按域分组；正文即条目本身） |
+| 了解**目标架构（v2）**与分步迁移计划 | [plan/README.md](plan/README.md "docs/plan/README")（**先读其 §0.1：v2 是本仓的目标架构**） |
 | 查「某条约定写在哪」 | `node scripts/doc-find.mjs <词>`（全仓 md + Rust 文档注释检索） |
-| 查**任务 / 规范登记**与待办 | `node scripts/registry-board.mjs`（条目在 `docs/registry/`，规则见 [plan/14](./plan/14-登记与汇总机制.md)） |
+| 查**任务 / 规范登记**与待办 | `node scripts/registry-board.mjs`（九类条目同一机制，规则见 [plan/14](plan/14-登记与汇总机制.md "docs/plan/14-登记与汇总机制")） |
 | 看某个插件/前端的职责与机制 | 各模块 `README.md`（见下方模块文档地图） |
 
 ## 文档放在哪
@@ -138,37 +192,40 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 
 | 位置 | 放什么 |
 |------|--------|
-| `docs/`（本目录） | 系统级跨模块文档；`CURRENT.md` 自动生成、勿手改 |
-| `docs/architecture/` | 架构总览 / 协议形状 / 排障链路 |
-| `docs/reference/` | 路由 / 错误码 / 配置的权威参考页 |
-| `docs/guides/` | 上手 / 插件开发 / 排障 |
-| `docs/design/` | 跨层设计规范（VDFS、agent 目录、HTTP 传输…）；**只放规范** |
-| `docs/plan/` | **目标架构（v2）+ 迁移计划**：核心架构 / 能力坐标系 / 演进验证 / 工程落地 / 模块架构，附 `roadmap/`（13 阶能力扩充）与 `verify/`（可编译运行的验证程序）；**读之前先看 [plan/README.md §0.1](./plan/README.md)** |
-| `docs/archive/` | 历史归档：已废止的旧机制 / 旧规范、一次性评审与体检、已落地的实施方案与迁移；**变更历史以 `git log` 为准，本仓库不维护 CHANGELOG** |
-| 模块目录 | `symbio/src/plugins/<plugin>/README.md`（+ 可选 `docs/`）、`tauri/`、`cli/`——就近放置，受同一「过程文档必须归档」约束 |
+| `docs/`（本目录） | 文档中心入口：`README.md`（本文）、`INDEX.md`（登记总账，生成）、`CURRENT.md`（结构事实，生成） |
+| `docs/goal/` · `docs/stage/` · `docs/plan/` | 目标 / 路线图阶段 / 目标架构与实施方案；`plan/verify/` 是随计划的可编译验证程序（Rust） |
+| `docs/arch/` | 系统结构与设计规范：架构总览 / 协议形状 / 排障链路 / VDFS / agent 目录 / HTTP 传输… |
+| `docs/ref/` | 路由 / 错误码 / 配置的权威参考页（含生成物 GATE_CODES / PROMPT_SHAPE / PROMPT_AB） |
+| `docs/guide/` | 上手 / 插件开发 / 排障 |
+| `docs/task/` · `docs/spec/` · `docs/adr/` | 任务 / 规范 / 决策三类条目（每条一个单文档，文件名即编号） |
+| `docs/archive/` | 历史归档：已废止的旧机制 / 旧规范、一次性评审与体检、已落地的实施方案与迁移；**不进登记**，**变更历史以 `git log` 为准，本仓库不维护 CHANGELOG** |
+| 模块目录 | `symbio/src/plugins/<plugin>/README.md`（+ 可选 `docs/`）、`tauri/`、`cli/`、`e2e/`——就近放置，同一套登记机制管（`kind` 按内容定，不按目录定） |
+
+**加一篇文档 = 建文件 + 写 front-matter**（五行：`kind` / `id` / `title` / `status` / `created`），
+不需要改任何清单：汇总页由脚本重生成，漏了 front-matter 的 `.md` 会被 RG-020 判红。
 
 ## 模块文档地图
 
 | 模块 | 文档 | 一句话职责 |
 |------|------|-----------|
-| symbio_core | [symbio_core/README.md](../symbio/src/symbio_core/README.md) | 内核契约层：命名与结构规范 + 域清单（trait / 协议类型 / 词表 / 纯工具） |
-| session | [plugins/session/README.md](../symbio/src/plugins/session/README.md) | 会话编排唯一入口：工具循环、提示词组装、上下文压缩 |
-| model | [plugins/model/README.md](../symbio/src/plugins/model/README.md) | 无状态单轮 LLM 网关（execute_turn），多协议适配 |
-| agent | [plugins/agent/README.md](../symbio/src/plugins/agent/README.md) | 智能体域唯一所有者：agent 目录库、子树装配、子智能体委托（agent_run） |
-| mcp | [plugins/mcp/README.md](../symbio/src/plugins/mcp/README.md) | MCP 外部工具接入与能力注册 |
-| skill | [plugins/skill/README.md](../symbio/src/plugins/skill/README.md) | 技能脚本（loader/plugin）发现与装载 |
-| local | [plugins/local/README.md](../symbio/src/plugins/local/README.md) | 本地原生工具（shell / 内容与语义搜索 / 任务清单）；文件操作已迁 VDFS |
-| vdfs | [plugins/vdfs/README.md](../symbio/src/plugins/vdfs/README.md) | 文件系统本身：`vdfs/*` 协议入口 + `vdfs_*` LLM 工具（规范见 design/vdfs.md） |
-| web | [plugins/web/README.md](../symbio/src/plugins/web/README.md) | 网页抓取/搜索工具 |
-| home | [plugins/home/README.md](../symbio/src/plugins/home/README.md) | 根插件：持应用级状态（`<homedir>/PLUGIN.yml`），构造 worker(Composite) 并传入必需插件清单 |
-| composite | [plugins/composite/README.md](../symbio/src/plugins/composite/README.md) | 子插件容器：扫描自己的目录（其下一层目录即一个插件）+ 路径合并分发 |
-| memory | [plugins/memory/README.md](../symbio/src/plugins/memory/README.md) | 记忆（两个作用域）：智能体自身（分形 `{宿主目录}/AGENTS.md`）+ 工作区（`{workdir}/AGENTS.md`），经 `<根>/memory` 编辑 |
-| setting | [plugins/setting/README.md](../symbio/src/plugins/setting/README.md) | 当前智能体自身的信息设置：档案（名字 / 描述）+ 偏好（语言 / 详略） |
-| gateway | [plugins/gateway/README.md](../symbio/src/plugins/gateway/README.md) | HTTP/WS 入站网关 |
-| plugin_manager | [plugins/plugin_manager/README.md](../symbio/src/plugins/plugin_manager/README.md) | 插件管理入口：列全部插件 + 启用/停用/添加/卸载 + 各插件配置条目 + 自有分区（appearance/about） |
-| hook | [plugins/hook/README.md](../symbio/src/plugins/hook/README.md) | 生命周期钩子 |
-| event_bus | [plugins/event_bus/README.md](../symbio/src/plugins/event_bus/README.md) | 进程内事件总线 |
-| telegram | [plugins/telegram/README.md](../symbio/src/plugins/telegram/README.md) | Telegram 通道接入 |
-| tauri 前端 | [tauri/README.md](../tauri/README.md) → [docs/FRONTEND.md](../tauri/docs/FRONTEND.md) | Vue3 + Tauri2 桌面前端 |
+| symbio_core | [symbio_core/README.md](../symbio/src/symbio_core/README.md "symbio/src/symbio_core/README") | 内核契约层：命名与结构规范 + 域清单（trait / 协议类型 / 词表 / 纯工具） |
+| session | [plugins/session/README.md](../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README") | 会话编排唯一入口：工具循环、提示词组装、上下文压缩 |
+| model | [plugins/model/README.md](../symbio/src/plugins/model/README.md "symbio/src/plugins/model/README") | 无状态单轮 LLM 网关（execute_turn），多协议适配 |
+| agent | [plugins/agent/README.md](../symbio/src/plugins/agent/README.md "symbio/src/plugins/agent/README") | 智能体域唯一所有者：agent 目录库、子树装配、子智能体委托（agent_run） |
+| mcp | [plugins/mcp/README.md](../symbio/src/plugins/mcp/README.md "symbio/src/plugins/mcp/README") | MCP 外部工具接入与能力注册 |
+| skill | [plugins/skill/README.md](../symbio/src/plugins/skill/README.md "symbio/src/plugins/skill/README") | 技能脚本（loader/plugin）发现与装载 |
+| local | [plugins/local/README.md](../symbio/src/plugins/local/README.md "symbio/src/plugins/local/README") | 本地原生工具（shell / 内容与语义搜索 / 任务清单）；文件操作已迁 VDFS |
+| vdfs | [plugins/vdfs/README.md](../symbio/src/plugins/vdfs/README.md "symbio/src/plugins/vdfs/README") | 文件系统本身：`vdfs/*` 协议入口 + `vdfs_*` LLM 工具（规范见 [arch/vdfs.md](arch/vdfs.md "docs/arch/vdfs")） |
+| web | [plugins/web/README.md](../symbio/src/plugins/web/README.md "symbio/src/plugins/web/README") | 网页抓取/搜索工具 |
+| home | [plugins/home/README.md](../symbio/src/plugins/home/README.md "symbio/src/plugins/home/README") | 根插件：持应用级状态（`<homedir>/PLUGIN.yml`），构造 worker(Composite) 并传入必需插件清单 |
+| composite | [plugins/composite/README.md](../symbio/src/plugins/composite/README.md "symbio/src/plugins/composite/README") | 子插件容器：扫描自己的目录（其下一层目录即一个插件）+ 路径合并分发 |
+| memory | [plugins/memory/README.md](../symbio/src/plugins/memory/README.md "symbio/src/plugins/memory/README") | 记忆（两个作用域）：智能体自身（分形 `{宿主目录}/AGENTS.md`）+ 工作区（`{workdir}/AGENTS.md`），经 `<根>/memory` 编辑 |
+| setting | [plugins/setting/README.md](../symbio/src/plugins/setting/README.md "symbio/src/plugins/setting/README") | 当前智能体自身的信息设置：档案（名字 / 描述）+ 偏好（语言 / 详略） |
+| gateway | [plugins/gateway/README.md](../symbio/src/plugins/gateway/README.md "symbio/src/plugins/gateway/README") | HTTP/WS 入站网关 |
+| plugin_manager | [plugins/plugin_manager/README.md](../symbio/src/plugins/plugin_manager/README.md "symbio/src/plugins/plugin_manager/README") | 插件管理入口：列全部插件 + 启用/停用/添加/卸载 + 各插件配置条目 + 自有分区（appearance/about） |
+| hook | [plugins/hook/README.md](../symbio/src/plugins/hook/README.md "symbio/src/plugins/hook/README") | 生命周期钩子 |
+| event_bus | [plugins/event_bus/README.md](../symbio/src/plugins/event_bus/README.md "symbio/src/plugins/event_bus/README") | 进程内事件总线 |
+| telegram | [plugins/telegram/README.md](../symbio/src/plugins/telegram/README.md "symbio/src/plugins/telegram/README") | Telegram 通道接入 |
+| tauri 前端 | [tauri/README.md](../tauri/README.md "tauri/README") → [docs/FRONTEND.md](../tauri/docs/FRONTEND.md "tauri/docs/FRONTEND") | Vue3 + Tauri2 桌面前端 |
 
 > **维护原则**：本文是文档体系的入口；结构性变更（新增/删除目录、职责改属）先改此文件。单条事实的增改只动它的 owner，不必回头改本文。

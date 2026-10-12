@@ -1,3 +1,11 @@
+---
+kind: guide
+id: cli/README
+title: symbio-cli
+status: active
+created: 2026-09-11
+---
+
 # symbio-cli
 
 与 [`../tauri`](../tauri) **并列**的第二种 Symbio 前端形态：纯 Rust 的命令行客户端，
@@ -28,11 +36,11 @@
 
 ## 📚 文档
 
-详细的架构、构建、用法文档在 [`cli/docs/`](./docs/README.md)：
+详细的架构、构建、用法文档在 [`cli/docs/`](docs/README.md "cli/docs/README")：
 
-- [架构](./docs/architecture.md) — 进程内客户端、`event_bus` 通道选择、渲染器、模式选择、消息增量合并
-- [构建](./docs/building.md) — 为什么不能裸 `cargo build`、C 工具链注入三要素、target 缓存修复
-- [用法](./docs/usage.md) — 四种模式示例、完整参数、REPL 命令、输出通道、已知边界
+- [架构](docs/architecture.md "cli/docs/architecture") — 进程内客户端、`event_bus` 通道选择、渲染器、模式选择、消息增量合并
+- [构建](docs/building.md "cli/docs/building") — 为什么不能裸 `cargo build`、C 工具链注入三要素、target 缓存修复
+- [用法](docs/usage.md "cli/docs/usage") — 四种模式示例、完整参数、REPL 命令、输出通道、已知边界
 
 ## 快速开始
 
@@ -103,7 +111,7 @@ subscriber（默认过滤级别 `info,symbio=debug`），把插件日志混进�
 ## 构建（要点）
 
 **统一走 `node scripts/build-cli.mjs`**（它负责把 C 工具链喂给 cc-rs，并保证环境字节级一致）。
-关键环节与坑见 [cli/docs/building.md](./docs/building.md)，三句话概括：
+关键环节与坑见 [cli/docs/building.md](docs/building.md "cli/docs/building")，三句话概括：
 
 1. **C 编译器必须显式注入**（`CC`/`CXX`/`INCLUDE`/`LIB`，不碰 `PATH`）；`aws-lc-sys` 0.44 自带
    prebuilt NASM 对象，**既不需要 cmake 也不需要 nasm**。

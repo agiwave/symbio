@@ -3,7 +3,7 @@
  *
  * 域类型与常量对齐后端纯接口：symbio/src/symbio_core/vdfs/
  * 操作路径/信封对齐后端线路层：symbio/src/plugins/vdfs/protocol.rs
- * 规范：docs/design/vdfs.md
+ * 规范：docs/arch/vdfs.md
  *
  * 前端只消费协议形状；**资源类型、能力、标签、路径模板一律来自后端**，
  * 前端仅持有 ext → 渲染器、资源类别 → 图标这类纯 UI 映射（见 registry/vdfsTypes.ts）。

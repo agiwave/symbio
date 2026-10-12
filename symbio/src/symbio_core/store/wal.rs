@@ -1,4 +1,4 @@
-//! `store = wal` —— 持久化事实源（v2 阶段 S4 第 9 步，[roadmap/S05 §2](../../../../docs/plan/roadmap/S05-长会话与断点恢复.md)）。
+//! `store = wal` —— 持久化事实源（v2 阶段 S4 第 9 步，[roadmap/S05 §2](../../../../docs/stage/S05-长会话与断点恢复.md)）。
 //!
 //! ## F1 冻结的第一次兑现
 //!

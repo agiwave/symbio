@@ -3,7 +3,7 @@
 //!
 //! 彩排把 S0 的地基（store / projection / invariants）与 S1 的 ② `actors`
 //! 拧成一条完整链路，验收断言逐条对应
-//! [roadmap/S01 §6](../../../../docs/plan/roadmap/S01-最小闭环.md)。
+//! [roadmap/S01 §6](../../../../docs/stage/S01-最小闭环.md)。
 
 use super::*;
 use crate::symbio_core::event::{

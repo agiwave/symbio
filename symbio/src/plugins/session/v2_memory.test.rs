@@ -315,7 +315,7 @@ fn consolidate_merges_the_two_oldest_and_forgets_the_sources() {
 /// 技能正文、两条技能被排除式遗忘——**技能静默消失，没有任何报错**。
 ///
 /// 两条技能刻意比四条经验**更旧**：这样"选错了"必然可见（选对时它们根本不在候选里）。
-/// 这也是「读侧过滤」这条设计（[roadmap/S10 §5](../../../../docs/plan/roadmap/S10-个人认知体系注入.md)）
+/// 这也是「读侧过滤」这条设计（[roadmap/S10 §5](../../../../docs/stage/S10-个人认知体系注入.md)）
 /// 在生产链上唯一可观察的后果——过滤本身的纯函数性质在 core 的 `recall.test.rs` 钉。
 #[test]
 fn consolidation_never_merges_across_tags() {

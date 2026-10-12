@@ -9,13 +9,17 @@
  * 正是 `plan/13` 纪律 2（机制优先）与纪律 4（出口可核对）要治的形态。
  * 顶层解法只有三段：
  *
- *   1. **条目 = 数据**：每条任务 / 规范是一个带 front-matter 的单文档
- *      （`docs/registry/<kind>/<id>.md`），编号、状态、依赖、证据全在机读字段里；
+ *   1. **条目 = 数据**：每条任务 / 规范 / **文档**都是一个带 front-matter 的单文档，
+ *      编号、状态、依赖、证据全在机读字段里。登记形态分两类，**由 kind 决定、与目录无关**：
+ *        · **条目类**（task / spec / adr）：编号 = 文件名（去 `.md`），住 `docs/` 下；
+ *        · **文档类**（goal / stage / plan / arch / ref / guide）：**文档即条目、在位存放**——
+ *          文件本身就是登记，编号 = 仓根相对路径（去 `.md`），`title` = 正文首个 H1（两面对账）。
  *   2. **汇总 = 投影**：任何「列表 / 看板 / 总账」都由本库渲染，
  *      `registry/` 下各级 `INDEX.md` 由门禁自动重生成（`gate.d/60-facts.mjs` 的 `autoWork`），
  *      不存在第二处手抄；
  *   3. **校验 = 守卫**：`scripts/registry-audit.mjs` 把字段 / 状态机 / 依赖 /
- *      优先级 / 取代链 / 判据指认全部机械判定（RG-001…RG-015），违规即红，范围读不出 exit 2。
+ *      优先级 / 取代链 / 判据指认 / **未登记文档**全部机械判定（RG-001…RG-021），
+ *      违规即红，范围读不出 exit 2。
  *
  * ## 受限 YAML 子集（front-matter）
  *
@@ -36,9 +40,9 @@
  * 声明的码在本文件里出现）。CLI 出口只有两个：`registry-audit`（守卫）与
  * `registry-board`（查询），它们只 import，不重复判据。
  */
-// 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns RG 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认）
-// @codes RG-001 RG-002 RG-003 RG-004 RG-005 RG-006 RG-007 RG-008 RG-009 RG-010 RG-011 RG-012 RG-013 RG-014 RG-015 RG-016 RG-017 RG-018 RG-019
+// @codes RG-001 RG-002 RG-003 RG-004 RG-005 RG-006 RG-007 RG-008 RG-009 RG-010 RG-011 RG-012 RG-013 RG-014 RG-015 RG-016 RG-017 RG-018 RG-019 RG-020 RG-021
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -52,12 +56,49 @@ export const COMMON_OPTIONAL = ['deps']
 
 /**
  * 每个 kind 一份配置——**新增一个 kind = 在这里加一项 + 一个渲染器 + 回归测试**，
- * 不新开脚本、不新开命名空间。字段事实的文档侧真相是 `docs/registry/spec/SP-001.md`
+ * 不新开脚本、不新开命名空间。字段事实的文档侧真相是 `docs/spec/SP-001.md`
  * （其字段表由 RG-011 与本配置对账，两边不等即红）。
  */
+/**
+ * 文档类 kind 的**共享状态机**：`draft`（草案）/ `active`（现行）/ `retired`（废止）。
+ * 与 `spec` 同轴——文档只有一条状态轴：**这篇文档还算不算数**；「做到哪一步」由
+ * `task` 承载，不压进文档的状态列（同 adr 的 status/impl 拆轴之理）。
+ */
+const DOC_STATUS_RULES = {
+  draft: { require: [], forbid: ['reason'] },
+  active: { require: [], forbid: ['reason'] },
+  retired: { require: ['reason'], forbid: [] },
+}
+
+/**
+ * 文档类 kind 的通用形状：**在位存放、正文即条目**——所以没有必有小节
+ * （正文结构由文档自己定，按 kind 强切只会逼出空壳小节），编号 = 路径。
+ * `blurb` 是这个 kind 回答的问题（写进汇总页，兼作新文档选 kind 的指路）。
+ */
+const docKind = (label, blurb) => ({
+  label,
+  blurb,
+  idRule: 'path',
+  required: [],
+  optional: [],
+  sections: [],
+  refFields: [],
+  refSections: [],
+  statusRules: DOC_STATUS_RULES,
+  closedStatus: 'active',
+  requiresDepsDone: [],
+})
+
 export const KINDS = {
+  goal: docKind('目标', '要达成什么——价值主张与可度量的验收判据'),
+  stage: docKind('阶段', '分几步走、现在在哪一步——路线图与能力扩充阶段'),
+  plan: docKind('计划', '要变成什么样——目标架构与实施方案'),
+  arch: docKind('架构', '现在是什么样——系统结构 / 设计规范 / 模块机制'),
+  ref: docKind('参考', '查数据——路由 / 错误码 / 配置等权威表'),
+  guide: docKind('指南', '怎么用——上手 / 贡献 / 排障'),
   task: {
     label: '任务',
+    idRule: 'file',
     required: ['track'],
     optional: ['where', 'exit', 'signal', 'evidence', 'reason', 'prio'],
     sections: ['内容', '处理过程'],
@@ -74,6 +115,7 @@ export const KINDS = {
   },
   spec: {
     label: '规范',
+    idRule: 'file',
     required: ['scope'],
     optional: ['reason', 'supersedes', 'clears'],
     sections: ['规范', '判据'],
@@ -89,6 +131,7 @@ export const KINDS = {
   },
   adr: {
     label: '架构决策',
+    idRule: 'file',
     required: ['adr', 'impl', 'domain'],
     optional: ['reason', 'supersedes'],
     sections: ['决策'],
@@ -104,12 +147,16 @@ export const KINDS = {
   },
 }
 
+/** 条目类 kind（编号 = 文件名）与文档类 kind（编号 = 路径）——由 `idRule` 区分。 */
+export const ENTRY_KINDS = Object.keys(KINDS).filter((k) => KINDS[k].idRule === 'file')
+export const DOC_KINDS = Object.keys(KINDS).filter((k) => KINDS[k].idRule === 'path')
+
 /**
- * `adr` 的**域**闭集（原来住 `docs/DECISIONS.md §0.1` 的「按约束谁归域」表）。
+ * `adr` 的**域**闭集（归域规则见 [`docs/spec/ADR-DOM.md`](../docs/spec/ADR-DOM.md)）。
  *
- * 域回答「这条决策**约束谁**」——它决定 README 该往哪指、读者该去哪找。
- * 五册合流进 registry 后，册不再是边界，域退化成**条目上的一个字段**：
- * 过滤 / 分组从「翻到哪一册」变成「按字段筛」，而字段是机读的、可判的。
+ * 域回答「这条决策**约束谁**」——它决定读者该去哪找、README 该往哪指。
+ * 它是**条目上的一个字段**（不是目录、不是分册）：过滤 / 分组都是「按字段筛」，
+ * 而字段是机读的、可判的。
  * 闭集由 RG-019 执行——新增域必须同批进这张表与 SP-001，不能随手写。
  */
 export const ADR_DOMAIN = {
@@ -144,10 +191,61 @@ export const ALL_KEYS = [
   ),
 ].sort()
 
-// 编号必须能当文件名：字母开头，其后为字母数字 / . _ - 与 Unicode 字母数字。
-// 历史批次号里有 `S-end①` 这类圈号——编号是**身份**不是代号，迁移登记时不得重排。
-export const ID_RE = /^[A-Za-z][A-Za-z0-9._\-\p{L}\p{N}\p{M}]+$/u
+// 编号必须能当标识：字母 / 数字 / 点开头，其后为字母数字 / . _ - / 与 Unicode 字母数字。
+// 文档类的编号是**仓根相对路径**（如 `docs/plan/01-核心架构`、`.github/workflows/README`），
+// 所以放行 `/`、数字开头与隐藏目录前导点（`01-核心架构` / `S01-最小闭环` 这类「编号 + 名字」
+// 天然合法）；条目类的历史批次号里有 `S-end①` 这类圈号——编号是**身份**不是代号，
+// 迁移登记时不得重排。
+export const ID_RE = /^[A-Za-z0-9.][A-Za-z0-9._\/\-\p{L}\p{N}\p{M}]+$/u
+/** 路径形编号的额外约束：不空段、不以 `/` 起止、不含 `..` 段（ID_RE 管字符集，这里管形状）。 */
+export function validId(s) {
+  return (
+    typeof s === 'string' &&
+    ID_RE.test(s) &&
+    !s.startsWith('/') &&
+    !s.endsWith('/') &&
+    !s.includes('//') &&
+    !s.split('/').includes('..')
+  )
+}
 export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/**
+ * 登记范围的**扫描跳过**（目录）与**豁免**（单文件）。
+ *
+ * 判据是「仓内每一篇活跃 `.md` 都必须登记」（RG-020），所以下面这张表是它的**反面**：
+ * 进表的要么不是阅读文档，要么已有别的 owner（职责表）。每项都写明理由——
+ * **豁免不是方便门，是归属声明**，新增一项必须能回答「为什么它不受登记机制管」。
+ */
+export const SCAN_SKIP_DIRS = new Set([
+  'node_modules',
+  'target',
+  '.git',
+  'dist',
+  'build',
+  '.venv',
+  // 工作区数据与对外模板：不是本仓的阅读文档（内容由会话 / 模板自己管）
+  '.workbuddy-ai',
+  '.symbio',
+  '.agents',
+  'examples',
+])
+/** 目录前缀豁免（相对仓根，以 `/` 结尾）：归档是历史快照，现行登记不接管。 */
+export const SCAN_SKIP_PREFIXES = ['docs/archive/']
+/** 单文件豁免：路径 → 理由（与职责表 / plan/14「明确不接管」同口径）。 */
+export const SCAN_SKIP_FILES = new Map([
+  ['docs/CURRENT.md', '代码投影（gen-current-facts 生成，owner 是生成器）'],
+  ['docs/ref/GATE_CODES.md', '代码投影（gen-gate-codes 生成）'],
+  ['docs/ref/PROMPT_SHAPE.md', '真实链路生成（e2e t46 生成）'],
+  ['docs/ref/PROMPT_AB.md', '门外实验生成（e2e/ab 生成）'],
+  ['AGENTS.md', '指令注入面（每会话直接进上下文，不是阅读文档）'],
+])
+/** 生成的汇总页（投影不是条目）：仓根总账 + 各 kind 的汇总页。 */
+export function isGeneratedIndex(rel) {
+  if (rel === 'docs/INDEX.md') return true
+  const m = rel.match(/^docs\/([^/]+)\/INDEX\.md$/)
+  return !!m && m[1] in KINDS
+}
 
 /**
  * task 的排序提示词表。**prio 是提示（判断），deps 是义务（事实）**：
@@ -158,7 +256,7 @@ export const PRIO = { now: 0, next: 1, later: 2 }
 
 /** RG-010 的消息以常量形式住本文件（GC-003：声明的码必须在声明文件里出现）。 */
 export const SCOPE_ERROR =
-  'RG-010 登记范围读不出：docs/registry/ 下没有任何条目——退化成「什么都没校验」是最坏的失败'
+  'RG-010 登记范围读不出：仓内扫不到任何已登记条目——退化成「什么都没校验」是最坏的失败'
 
 // ==================== front-matter 解析 ====================
 
@@ -248,43 +346,89 @@ export function parseEntryText(text, name) {
 
 // ==================== 装载 ====================
 
+/** 正文首个 H1（跳过代码围栏）；不存在返回 null。RG-021 与迁移脚本共用同一口径。 */
+export function firstH1(body) {
+  let fence = null
+  for (const line of body.split(/\r?\n/)) {
+    const f = line.match(/^\s*(```+|~~~+)/)
+    if (f) {
+      if (fence === null) fence = f[1][0]
+      else if (f[1][0] === fence) fence = null
+      continue
+    }
+    if (fence !== null) continue
+    const h = line.match(/^#\s+(.+?)\s*$/)
+    if (h) return h[1]
+  }
+  return null
+}
+
 /**
- * 扫 `registry/`：每个**已登记**子目录按其 kind 装载 `*.md`（`INDEX.md` 是生成物，跳过）。
+ * 扫描**整个仓**（按 `SCAN_SKIP_*` 豁免）：每个活跃 `.md` 都必须登记——
+ * 带合法 front-matter 且 `kind` 在 `KINDS` 闭集内。kind 只来自 front-matter，
+ * **目录不参与判定**（文档在哪个目录下是组织问题，不是机制问题）。
  *
- * @param registryDir `<root>/registry`
- * @param root 仓根（算相对路径用）
+ * @param root 仓根
  * @returns {{entries: Array, errors: string[], notes: string[], missing: boolean}}
+ *          `missing` = 扫不到任何 md（范围读不出，RG-010 走 exit 2）
  */
-export function loadEntries(registryDir, root) {
+export function loadEntries(root) {
   const errors = []
   const notes = []
   const entries = []
-  if (!fs.existsSync(registryDir)) return { entries, errors, notes, missing: true }
-  for (const ent of fs.readdirSync(registryDir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
-    if (!ent.isDirectory()) continue // 仓根 INDEX.md 是生成物
-    const kind = ent.name
-    const cfg = KINDS[kind]
-    if (!cfg) {
-      errors.push(
-        `RG-013 docs/registry/${kind}/：未登记的 kind 目录——命名空间必须闭合，先在 registry-lib 的 KINDS 里声明`,
-      )
-      continue
+  let scanned = 0
+  const walk = (dir) => {
+    let list
+    try {
+      list = fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))
+    } catch {
+      return
     }
-    const dir = path.join(registryDir, kind)
-    const files = fs
-      .readdirSync(dir)
-      .filter((n) => n.endsWith('.md') && n !== 'INDEX.md')
-      .sort()
-    if (files.length === 0) notes.push(`docs/registry/${kind}/：暂无条目（${cfg.label}）`)
-    for (const name of files) {
-      const file = path.join(dir, name)
-      const text = fs.readFileSync(file, 'utf8')
-      const rel = path.relative(root, file).split(path.sep).join('/')
+    for (const ent of list) {
+      const abs = path.join(dir, ent.name)
+      const rel = path.relative(root, abs).split(path.sep).join('/')
+      if (ent.isDirectory()) {
+        if (SCAN_SKIP_DIRS.has(ent.name)) continue
+        if (SCAN_SKIP_PREFIXES.some((p) => rel + '/' === p)) continue
+        walk(abs)
+        continue
+      }
+      if (!ent.name.endsWith('.md')) continue
+      if (SCAN_SKIP_FILES.has(rel) || isGeneratedIndex(rel)) continue
+      scanned += 1
+      const text = fs.readFileSync(abs, 'utf8')
+      const first = text.replace(/^\uFEFF/, '').split(/\r?\n/, 1)[0]?.trim()
+      if (first !== '---') {
+        errors.push(
+          `${rel}：RG-020 未登记文档——活跃 \`.md\` 必须自带 front-matter 声明 kind（豁免名单住 registry-lib 的 SCAN_SKIP_*）`,
+        )
+        continue
+      }
       const { meta, body, errors: perr } = parseEntryText(text, rel)
-      entries.push({ file, rel, kind, name, meta, body, errors: perr })
+      if (!meta) {
+        entries.push({ file: abs, rel, kind: null, name: ent.name, meta: null, body: '', errors: perr })
+        continue
+      }
+      if (isEmpty(meta.kind)) {
+        errors.push(`${rel}：RG-020 front-matter 缺 \`kind\`——文档未登记到任何 kind`)
+        continue
+      }
+      if (!(meta.kind in KINDS)) {
+        errors.push(
+          `RG-013 ${rel}：kind=${JSON.stringify(meta.kind)} 不在 KINDS 闭集（${Object.keys(KINDS).join(' / ')}）` +
+            '——命名空间必须闭合，先在 registry-lib 的 KINDS 里声明',
+        )
+        continue
+      }
+      entries.push({ file: abs, rel, kind: meta.kind, name: ent.name, meta, body, errors: perr })
     }
   }
-  return { entries, errors, notes, missing: false }
+  walk(root)
+
+  for (const [kind, cfg] of Object.entries(KINDS)) {
+    if (!entries.some((e) => e.kind === kind)) notes.push(`kind ${kind}（${cfg.label}）：暂无条目`)
+  }
+  return { entries, errors, notes, missing: scanned === 0 }
 }
 
 // ==================== 校验 ====================
@@ -371,26 +515,28 @@ export function auditEntries(entries, root) {
     for (const k of Object.keys(meta)) {
       if (!allowed.has(k)) out.push(`${e.rel}：RG-001 未知字段 \`${k}\`（${e.kind} 允许：${[...allowed].sort().join('、')}）`)
     }
-    // RG-002 必填非空 + kind 与目录一致
+    // RG-002 必填非空（kind 即装载时的目录判据已取消：kind 只来自 front-matter，目录不参与判定）
     for (const k of [...COMMON_REQUIRED, ...cfg.required]) {
       if (isEmpty(meta[k])) out.push(`${e.rel}：RG-002 必填字段 \`${k}\` 缺失或为空`)
     }
-    if (!isEmpty(meta.kind) && meta.kind !== e.kind) {
-      out.push(`${e.rel}：RG-002 kind=${meta.kind} 与所在目录不一致（目录声明它是 ${e.kind}）`)
-    }
-    // RG-003 编号形状 / 文件名对账 / 全 registry 唯一
+    // RG-003 编号形状 / 编号 ↔ 文件对账 / 全 registry 唯一
+    // 对账面按 kind 分：条目类（idRule=file）编号 = 文件名；文档类（idRule=path）编号 = 仓根相对路径。
     if (!isEmpty(meta.id)) {
-      if (typeof meta.id !== 'string' || !ID_RE.test(meta.id)) {
-        out.push(`${e.rel}：RG-003 id 不合形状（字母开头，其后为字母数字 / . _ - 与 Unicode 字母数字；必须可作文件名）：${JSON.stringify(meta.id)}`)
+      if (typeof meta.id !== 'string' || !validId(meta.id)) {
+        out.push(
+          `${e.rel}：RG-003 id 不合形状（字母 / 数字 / 点开头，其后为字母数字 / . _ - / 与 Unicode 字母数字）：${JSON.stringify(meta.id)}`,
+        )
+      } else if (cfg.idRule === 'file' && e.name !== `${meta.id}.md`) {
+        out.push(`${e.rel}：RG-003 文件名必须等于编号（应为 \`${meta.id}.md\`）——文件名即编号的对账`)
+      } else if (cfg.idRule === 'path' && meta.id !== e.rel.replace(/\.md$/, '')) {
+        out.push(
+          `${e.rel}：RG-003 文档类编号必须等于仓根相对路径（去 \`.md\`）（应为 \`${e.rel.replace(/\.md$/, '')}\`）`,
+        )
+      }
+      if (byId.has(meta.id)) {
+        out.push(`${e.rel}：RG-003 编号 \`${meta.id}\` 重复（已登记于 ${byId.get(meta.id).rel}）`)
       } else {
-        if (e.name !== `${meta.id}.md`) {
-          out.push(`${e.rel}：RG-003 文件名必须等于编号（应为 \`${meta.id}.md\`）——文件名即编号的对账`)
-        }
-        if (byId.has(meta.id)) {
-          out.push(`${e.rel}：RG-003 编号 \`${meta.id}\` 重复（已登记于 ${byId.get(meta.id).rel}）`)
-        } else {
-          byId.set(meta.id, e)
-        }
+        byId.set(meta.id, e)
       }
     }
     // RG-004 状态词
@@ -446,10 +592,21 @@ export function auditEntries(entries, root) {
         if (!isEmpty(meta[k])) out.push(`${e.rel}：RG-007 status=${meta.status} 不得带 \`${k}\`（已填非空值）`)
       }
     }
-    // RG-009 正文小节
+    // RG-009 正文小节（文档类的 sections 为空：正文结构由文档自己定）
     for (const sec of cfg.sections) {
       if (!new RegExp(`^##\\s+${sec}\\s*$`, 'm').test(e.body)) {
         out.push(`${e.rel}：RG-009 正文缺 \`## ${sec}\` 小节`)
+      }
+    }
+    // RG-021：文档类的 title 必须逐字等于正文首个 H1（title 的唯一来源是 H1，两面对账）
+    if (cfg.idRule === 'path' && !isEmpty(meta.title)) {
+      const h1 = firstH1(e.body)
+      if (h1 == null) {
+        out.push(`${e.rel}：RG-021 文档类缺正文首个 \`# 标题\`（title 的唯一来源读不出）`)
+      } else if (h1 !== meta.title) {
+        out.push(
+          `${e.rel}：RG-021 title=${JSON.stringify(meta.title)} 与正文首个 H1 ${JSON.stringify(h1)} 不一致——title 逐字等于 H1`,
+        )
       }
     }
     // RG-012 判据指认的文件必须存在（落点 `where` 不判——落点可以尚不存在）
@@ -577,16 +734,16 @@ export function auditEntries(entries, root) {
   // ---- RG-011：SP-001 的字段表必须恰好等于代码侧 schema ----
   const sp = entries.find((e) => e.kind === 'spec' && e.meta && e.meta.id === 'SP-001')
   if (!sp) {
-    out.push('RG-011 docs/registry/spec/SP-001.md 不存在——schema 的文档侧真相没有登记')
+    out.push('RG-011 docs/spec/SP-001.md 不存在——schema 的文档侧真相没有登记')
   } else {
     const m = sp.body.match(/^##\s+字段\s*$/m)
     if (!m) {
-      out.push('RG-011 docs/registry/spec/SP-001.md 缺 \`## 字段\` 小节——字段表读不出')
+      out.push('RG-011 docs/spec/SP-001.md 缺 \`## 字段\` 小节——字段表读不出')
     } else {
       const section = sectionOf(sp.body, '字段')
       const keys = [...section.matchAll(/^\|\s*`([A-Za-z][A-Za-z0-9_-]*)`\s*\|/gm)].map((x) => x[1])
       if (keys.length === 0) {
-        out.push('RG-011 docs/registry/spec/SP-001.md 字段表读不出（\`## 字段\` 小节里没有 \`| \`键\` |\` 形状的行）')
+        out.push('RG-011 docs/spec/SP-001.md 字段表读不出（\`## 字段\` 小节里没有 \`| \`键\` |\` 形状的行）')
       } else {
         const got = new Set(keys)
         const want = new Set(ALL_KEYS)
@@ -594,7 +751,7 @@ export function auditEntries(entries, root) {
         const extra = keys.filter((k) => !want.has(k))
         if (missing.length || extra.length) {
           out.push(
-            'RG-011 docs/registry/spec/SP-001.md 字段表与代码 schema 不一致' +
+            'RG-011 docs/spec/SP-001.md 字段表与代码 schema 不一致' +
               (missing.length ? `；表里缺：${missing.join('、')}` : '') +
               (extra.length ? `；表里多出：${extra.join('、')}` : '') +
               '（改 schema 必须同批更新 SP-001，反之亦然）',
@@ -669,20 +826,29 @@ const cell = (s) => String(s ?? '')
 const depsCell = (e) => (Array.isArray(e.meta.deps) && e.meta.deps.length ? e.meta.deps.join('、') : '—')
 
 const HEADER_TASK =
-  '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/registry/task/*.md` 生成，请勿手改。**\n' +
+  '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/task/*.md` 生成，请勿手改。**\n' +
   '> 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，' +
-  '原则与流程见 [14 · 登记与汇总机制](../../plan/14-登记与汇总机制.md)。\n'
+  '原则与流程见 [14 · 登记与汇总机制](../plan/14-登记与汇总机制.md)。\n'
 
 const HEADER_SPEC =
-  '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/registry/spec/*.md` 生成，请勿手改。**\n' +
+  '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/spec/*.md` 生成，请勿手改。**\n' +
   '> 状态的唯一登记处是各规范文件本身，本页是投影。字段规范见 [SP-001](./SP-001.md)，' +
-  '原则与流程见 [14 · 登记与汇总机制](../../plan/14-登记与汇总机制.md)。\n'
+  '原则与流程见 [14 · 登记与汇总机制](../plan/14-登记与汇总机制.md)。\n'
 
 const HEADER_ADR =
-  '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/registry/adr/*.md` 生成，请勿手改。**\n' +
-  '> **ADR 的唯一真相源是 `docs/registry/adr/`**：每条 ADR 的正文（决策 / 理由 / 被否决的方案 /\n' +
+  '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/adr/*.md` 生成，请勿手改。**\n' +
+  '> **ADR 的唯一真相源是 `docs/adr/`**：每条 ADR 的正文（决策 / 理由 / 被否决的方案 /\n' +
   '> 后果与不变量）住它自己的 `## 决策` 小节，规范合法性（`status`）与落地进展（`impl`）住 front-matter。\n' +
-  '> 字段规范见 [SP-001](../spec/SP-001.md)，机制见 [14 · 登记与汇总机制](../../plan/14-登记与汇总机制.md)。\n'
+  '> 字段规范见 [SP-001](../spec/SP-001.md)，机制见 [14 · 登记与汇总机制](../plan/14-登记与汇总机制.md)。\n'
+
+/** posix 相对路径：从目录 `fromDir` 到文件 `toRel`（确定性，不依赖 path.relative 的平台差异）。 */
+export function relFrom(fromDir, toRel) {
+  const from = fromDir === '' || fromDir === '.' ? [] : fromDir.split('/')
+  const to = toRel.split('/')
+  let i = 0
+  while (i < from.length && i < to.length - 1 && from[i] === to[i]) i++
+  return '../'.repeat(from.length - i) + to.slice(i).join('/')
+}
 
 function table(header, rows) {
   if (rows.length === 0) return '（无）'
@@ -841,7 +1007,48 @@ function renderAdrIndex(allEntries) {
   return lines.join('\n')
 }
 
+/**
+ * 文档类汇总页。
+ *
+ * 与条目类不同：条目住在 `docs/` 下，而**文档在位存放**——本页的每行都是
+ * 一个真实文件，「编号」列同时是链接（从本页到文档的相对路径），读者从索引一步到正文。
+ * 分组按 `status`（文档只有一条状态轴：这篇文档还算不算数）。
+ */
+function renderDocIndex(kind, allEntries) {
+  const cfg = KINDS[kind]
+  const mine = allEntries.filter((e) => e.kind === kind).slice().sort((a, b) => (a.meta.id < b.meta.id ? -1 : 1))
+  const count = (s) => mine.filter((e) => e.meta.status === s).length
+  // 从 `docs/<kind>/INDEX.md` 到文档的相对路径（posix，确定性；能一步点到正文）
+  const href = (e) => relFrom(`docs/${kind}`, e.rel)
+  const idCell = (e) => `[\`${e.meta.id}\`](${href(e)})`
+  const lines = [
+    `# ${cfg.label}登记索引（自动生成）`,
+    '',
+    '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 生成，请勿手改。**',
+    `> \`${kind}\`（${cfg.label}）的条目**在位存放**：文件本身就是登记，编号 = 仓根相对路径（去 \`.md\`），`,
+    '> `title` 逐字等于正文首个 H1（RG-021 两面对账）；本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，',
+    '> 机制见 [14 · 登记与汇总机制](../plan/14-登记与汇总机制.md)。',
+    '',
+    `> **这个 kind 回答什么**：${cfg.blurb}`,
+    '',
+    `**计数**：active ${count('active')} · draft ${count('draft')} · retired ${count('retired')}（共 ${mine.length}）`,
+    '',
+    '## 现行文档（active）',
+    table(['编号', '标题'], mine.filter((e) => e.meta.status === 'active').map((e) => [idCell(e), cell(e.meta.title)])),
+    '',
+    '## 草案（draft）',
+    table(['编号', '标题'], mine.filter((e) => e.meta.status === 'draft').map((e) => [idCell(e), cell(e.meta.title)])),
+    '',
+    '## 废止（retired）',
+    table(['编号', '标题', '理由'], mine.filter((e) => e.meta.status === 'retired').map((e) => [idCell(e), cell(e.meta.title), cell(e.meta.reason)])),
+    '',
+  ]
+  return lines.join('\n')
+}
+
 const RENDERERS = { task: renderTaskIndex, spec: renderSpecIndex, adr: renderAdrIndex }
+// 文档类 kind 共用同一个渲染器（kind 的差异只在 `KINDS` 的配置里，不新开脚本）。
+for (const kind of DOC_KINDS) RENDERERS[kind] = (allEntries) => renderDocIndex(kind, allEntries)
 
 /** 某 kind 的汇总页全文（确定性：同输入同输出，无时间戳）。 */
 export function renderKindIndex(kind, allEntries) {
@@ -855,16 +1062,24 @@ export function renderRootIndex(allEntries) {
     const dist = Object.keys(cfg.statusRules)
       .map((s) => `${s} ${mine.filter((e) => e.meta && e.meta.status === s).length}`)
       .join(' · ')
-    return [`[${kind} · ${cfg.label}](./${kind}/INDEX.md)`, String(mine.length), dist, `[${kind}/INDEX.md](./${kind}/INDEX.md)`]
+    const identity = cfg.idRule === 'path' ? '文档（编号 = 路径，在位存放）' : '条目（编号 = 文件名）'
+    return [
+      `[${kind} · ${cfg.label}](./${kind}/INDEX.md)`,
+      identity,
+      String(mine.length),
+      dist,
+      `[${kind}/INDEX.md](./${kind}/INDEX.md)`,
+    ]
   })
   return [
     '# 登记总账（自动生成）',
     '',
     '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 生成，请勿手改。**',
-    '> 条目各是一个单文档（`docs/registry/<kind>/<id>.md`）；机制见 [14 · 登记与汇总机制](../plan/14-登记与汇总机制.md)，',
-    '> 字段规范见 [SP-001](./spec/SP-001.md)。',
+    '> 条目各是一个单文档：条目类（task / spec / adr）住 `docs/<kind>/`，文档类（goal / stage / plan /',
+    '> arch / ref / guide）**在位存放**（文件即条目，kind 只来自 front-matter，目录不参与判定）；',
+    '> 机制见 [14 · 登记与汇总机制](./plan/14-登记与汇总机制.md)，字段规范见 [SP-001](./spec/SP-001.md)。',
     '',
-    table(['类别', '条目数', '状态分布', '汇总页'], rows),
+    table(['类别', '身份', '条目数', '状态分布', '汇总页'], rows),
     '',
   ].join('\n')
 }

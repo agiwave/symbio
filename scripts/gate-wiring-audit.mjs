@@ -38,7 +38,7 @@
  *      （`--strict` 与其他判定型守卫同参数，本脚本没有 WARNING 级判定，带不带同义）
  * 退出码：0 = 通过；1 = 有失效；2 = 审计范围读不出（名单或目录都取不到）。
  */
-// 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns GW 门禁接线（测试文件与门禁名单的对账）
 // @codes GW-001 GW-002 GW-003 GW-004 GW-005
 

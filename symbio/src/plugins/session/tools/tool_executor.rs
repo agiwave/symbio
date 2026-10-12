@@ -944,7 +944,7 @@ pub async fn process_tool_calls_async(
 
         let result_msg_id = uuid::Uuid::new_v4().to_string();
 
-        // ── 外部执行闸门（S8 第 20 步，[roadmap/S09 §6](../../../../docs/plan/roadmap/S09-外部执行与熔断.md)）──
+        // ── 外部执行闸门（S8 第 20 步，[roadmap/S09 §6](../../../../docs/stage/S09-外部执行与熔断.md)）──
         //
         // 判定紧贴执行窗口之前、**先于 PreToolUse 钩子**：钩子是给「要执行的调用」
         // 准备的用户策略，对一通马上要被拒的调用先跑一遍钩子，等于让拒绝白白付一次

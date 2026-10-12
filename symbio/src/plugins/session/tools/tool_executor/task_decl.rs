@@ -31,7 +31,7 @@ pub struct TaskItem {
     pub id: String,
     /// 任务内容（入 `task.opened` 的 `goal`）。
     pub goal: String,
-    /// 依赖的任务 id。任务图是**数据不是机制**（`docs/plan/roadmap/S03` §2），
+    /// 依赖的任务 id。任务图是**数据不是机制**（`docs/stage/S03` §2），
     /// 声明在清单里，成环 / 悬空由读侧 `acyclic_deps` 报。
     pub depends_on: Vec<String>,
     /// 声明状态。

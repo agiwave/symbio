@@ -11,7 +11,7 @@
  * | CS-001 | `traits` | `pub trait` 声明数（冻结 20） | **新增接缝**：每多一个抽象，就多一处「所有实现方都得知道」的地方 |
  * | CS-001 | `methods` | 这些 trait 的 `fn` 成员总数（冻结 72） | **契约变宽**：既有接缝上挂新方法，影响面 = 全部实现方 |
  * | CS-001 | `defaults` | 其中**带默认体**的成员数（冻结 24） | **接口上长实现**：行为代码住进架构模块 |
- * | CS-002 | —— | 放宽上面任何一个数字，必须写 `core-shape-allow <格>: ADR-NNN <非空理由>`，且那个 ADR 文件在 `docs/registry/adr/` **能打开** | **改一个数字**看起来像维护，而它实际是在改架构 |
+ * | CS-002 | —— | 放宽上面任何一个数字，必须写 `core-shape-allow <格>: ADR-NNN <非空理由>`，且那个 ADR 文件在 `docs/adr/` **能打开** | **改一个数字**看起来像维护，而它实际是在改架构 |
  *
  * ## 为什么需要它（2026-10-12 的实测缺口）
  *
@@ -26,7 +26,7 @@
  *
  * ⇒ 一次把核心契约面扩到十倍、并在接口上多挂 9 个默认体的改动，**门禁全绿也能提交**。
  * 而这条纪律本仓早就写了：`08 §0 纪律 3`「架构改动必须逐条论证『必需』」，登记条目
- * [D08-3](../docs/registry/spec/D08-3.md)——它的判据写的是「论证不出即删（**人工核对**）」。
+ * [D08-3](../docs/spec/D08-3.md)——它的判据写的是「论证不出即删（**人工核对**）」。
  * 于是「架构改动」的全部约束，取决于执行的人**记得**去核对；而批次执行时最不缺的就是
  * 合理化：「加 9 个方法是实现层的样板收敛，不算架构改动」。
  *
@@ -50,7 +50,7 @@
  * | 本脚本 | core 公共**形状**的量（三格）+ 放宽痕迹必须挂得住一条决策 |
  * | `core-export-audit`（C-001…C-003） | 根出口的**归属**：什么能出现在公共面上、谁在用 |
  * | `gate.d/35-baseline` | 基线数字本身**不得比上一版更松**（比对 git 基准版本）；本脚本的三格登记在它的 `RATCHETS` 清单里，`CORE_SHAPE_BASELINE` 的环境变量覆盖由它兜 |
- * | [D08-3](../docs/registry/spec/D08-3.md) | 纪律**条文**本身（owner 在 `08 §3`），本脚本是它的判据执行方 |
+ * | [D08-3](../docs/spec/D08-3.md) | 纪律**条文**本身（owner 在 `08 §3`），本脚本是它的判据执行方 |
  *
  * CS-002 与 `35-baseline` 各判半条：那边只发现「数字变松了」（红不红取决于有没有豁免注释），
  * 这边判「这条豁免**够不够格**」。两边合起来才是完整的「放宽 = 写决策」。
@@ -75,7 +75,7 @@
  * 「覆盖值不得比默认值更松」。
  */
 
-// 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns CS core 形状
 // @codes CS-001 CS-002
 
@@ -98,7 +98,7 @@ const CORE_REL = 'symbio/src/symbio_core'
 const SELF_REL = 'scripts/core-shape-audit.mjs'
 
 /**
- * 形状基线（2026-10-12 冻结，决策与理由见 [ADR-055](../docs/registry/adr/ADR-055.md)）。
+ * 形状基线（2026-10-12 冻结，决策与理由见 [ADR-055](../docs/adr/ADR-055.md)）。
  * 三格都是**上限**，只许降。数字本身不是判据，**改数字才是**：任何让形状变宽的改动都会
  * 撞红，而把它继续推下去只有一条路——改这一行的数字，那又会要求 CS-002 的一条
  * `core-shape-allow <格>: ADR-NNN <理由>`，且那个 ADR 文件必须真实存在。
@@ -225,7 +225,7 @@ for (const [key, cap] of Object.entries(SHAPE_BASELINE)) {
     report(
       'CS-001',
       `核心形状变宽：${CELL_LABEL[key]} 实测 ${now} > 基线 ${cap} —— symbio_core 的公共形状只许收窄。` +
-        `要让这一步成立，先在 \`docs/registry/adr/\` 立一条 ADR 逐条论证「必需」（08 §0 纪律 3，登记条目 D08-3；` +
+        `要让这一步成立，先在 \`docs/adr/\` 立一条 ADR 逐条论证「必需」（08 §0 纪律 3，登记条目 D08-3；` +
         `被这份棘轮钉住的先例见 ADR-055），再在基线旁写 core-shape-allow ${key}: ADR-NNN <理由>。逐 trait 清单：--verbose`,
     )
   }
@@ -266,10 +266,10 @@ if (fs.existsSync(selfPath)) {
       continue
     }
     for (const id of refs) {
-      if (!fs.existsSync(path.join(ROOT, 'docs', 'registry', 'adr', `ADR-${id}.md`))) {
+      if (!fs.existsSync(path.join(ROOT, 'docs', 'adr', `ADR-${id}.md`))) {
         report(
           'CS-002',
-          `放宽 \`${key}\` 引用了 \`ADR-${id}\`，但 \`docs/registry/adr/ADR-${id}.md\` 打不开 —— 指向不存在的决策的豁免不算豁免`,
+          `放宽 \`${key}\` 引用了 \`ADR-${id}\`，但 \`docs/adr/ADR-${id}.md\` 打不开 —— 指向不存在的决策的豁免不算豁免`,
         )
       }
     }
@@ -316,7 +316,7 @@ console.error(`\n== core-shape-audit：${errors.length} 处违规 ==`)
 for (const e of errors) console.error(`  ${red(e.rule)}  ${e.msg}`)
 console.error(
   `\n${yellow('提示')}：形状量的口径与不判什么见本脚本文件头；放宽口径见 ` +
-    `${green('docs/registry/adr/ADR-055.md')}；逐 trait 清单跑 node scripts/core-shape-audit.mjs --verbose`,
+    `${green('docs/adr/ADR-055.md')}；逐 trait 清单跑 node scripts/core-shape-audit.mjs --verbose`,
 )
 if (VERBOSE) {
   for (const r of shape.rows)

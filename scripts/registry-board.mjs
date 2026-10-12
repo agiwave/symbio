@@ -8,14 +8,15 @@
  * 所以有违规时**只报错、不打印结论**。
  *
  * 用法：
- *   node scripts/registry-board.mjs                    全部分组（待处理 / 进行中 / 已完成 / 不做 / 现行规范…）
- *   node scripts/registry-board.mjs --kind=task        只看某个 kind
+ *   node scripts/registry-board.mjs                    全部分组（任务 / 规范 / 决策 / 各文档类 kind）
+ *   node scripts/registry-board.mjs --kind=task        只看某个 kind（含 goal / stage / plan / arch / ref / guide）
  *   node scripts/registry-board.mjs --status=todo      按状态过滤
- *   node scripts/registry-board.mjs --id=T-001         打印单条（字段 + 正文全文）
+ *   node scripts/registry-board.mjs --id=T-001         打印单条（字段 + 正文全文；文档类的 id 是相对路径）
  *   node scripts/registry-board.mjs --root=<仓库根>    （回归测试夹具用）
  *
  * 退出码：0 = 通过；1 = 条目有违规（不打印看板）；2 = 范围读不出 / 参数不识别。
- * 汇总页的文件形态在 `registry/` 各级 `INDEX.md`（门禁自动重生成）；本脚本只服务「现在要干什么」。
+ * 汇总页的文件形态在 `docs/INDEX.md` 与 `docs/<kind>/INDEX.md`（门禁自动重生成）；
+ * 本脚本只服务「现在要干什么」。
  */
 
 import path from 'node:path'
@@ -44,6 +45,21 @@ const SPEC_GROUPS = [
   ['draft', '规范 · 草案'],
   ['retired', '规范 · 废止'],
 ]
+
+/** 其余 kind（adr + 文档类）的状态图标与理由列——按各自的状态词表分组。 */
+const GENERIC_GLYPH = { active: '✅', draft: '📝', retired: '❌', superseded: '↩️', withdrawn: '🚫' }
+
+function printGenericGroup(lines, entries, status, title) {
+  const mine = entries.filter((e) => e.meta.status === status)
+  lines.push(`—— ${title} ${mine.length ? '' : '——（无）'}`)
+  if (!mine.length) return
+  const pad = Math.max(...mine.map((e) => e.meta.id.length))
+  for (const e of mine) {
+    const impl = e.kind === 'adr' && e.meta.impl ? ` 落地 ${e.meta.impl}` : ''
+    const why = e.meta.reason ? `  理由 ${e.meta.reason}` : ''
+    lines.push(`  ${GENERIC_GLYPH[status] ?? '·'} ${e.meta.id.padEnd(pad)}  ${e.meta.title}${impl}${why}`)
+  }
+}
 
 function printTaskGroup(lines, entries, status, title) {
   const mine = entries.filter((e) => e.meta.status === status)
@@ -100,15 +116,15 @@ export function runRegistryBoard(argv) {
     return { code: 2, lines: [red(`[ERROR] 未知 kind：${kindFilter}（可选：${Object.keys(KINDS).join(' / ')}）`), USAGE] }
   }
 
-  const { entries, errors, missing } = loadEntries(path.join(root, 'docs', 'registry'), root)
-  if (missing) return { code: 2, lines: [red(`[ERROR] RG-010 registry/ 不存在（${root}）——登记范围读不出`)] }
+  const { entries, errors, missing } = loadEntries(root)
+  if (missing) return { code: 2, lines: [red(`[ERROR] RG-010 登记范围读不出（${root}）——仓内扫不到任何已登记条目`)] }
   if (entries.length === 0) {
     if (errors.length) {
       const lines = [red('registry-board：条目有违规，拒绝打印（报告说假话比没有更坏）')]
       for (const e of errors) lines.push(red(`[ERROR] ${e}`))
       return { code: 1, lines }
     }
-    return { code: 2, lines: [red('[ERROR] RG-010 registry/ 下没有任何条目——登记范围读不出')] }
+    return { code: 2, lines: [red('[ERROR] RG-010 仓内扫不到任何已登记条目——登记范围读不出')] }
   }
   const errs = [...errors, ...auditEntries(entries, root)]
   if (errs.length) {
@@ -136,7 +152,7 @@ export function runRegistryBoard(argv) {
       return `${kind} ${mine.length}（${parts}）`
     })
     .join(' · ')
-  lines.push(`=== 登记看板（registry/）===`)
+  lines.push(`=== 登记看板（全仓登记条目）===`)
   lines.push(`共 ${shown.length} 个条目：${dist}`)
 
   const byKind = (kind, groups, printer) => {
@@ -154,6 +170,11 @@ export function runRegistryBoard(argv) {
   }
   byKind('task', TASK_GROUPS, printTaskGroup)
   byKind('spec', SPEC_GROUPS, printSpecGroup)
+  for (const [kind, cfg] of Object.entries(KINDS)) {
+    if (kind === 'task' || kind === 'spec') continue
+    const groups = Object.keys(cfg.statusRules).map((s) => [s, `${cfg.label} · ${s}`])
+    byKind(kind, groups, printGenericGroup)
+  }
   if (lines.length === 2) lines.push(dim('（没有匹配的分组）'))
   return { code: 0, lines }
 }

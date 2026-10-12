@@ -1,3 +1,11 @@
+---
+kind: arch
+id: symbio/src/plugins/hook/README
+title: Hook 插件
+status: active
+created: 2026-09-09
+---
+
 # Hook 插件
 
 钩子插件：在生命周期关键点（如会话压缩前 PreCompact）注册并触发钩子。
@@ -7,7 +15,7 @@
 > **命名空间是目录名 `hook`**（不是 `hooks`）——容器按目录名建实例表并按它分发
 > （`composite.rs`「目录名 = 实例名」）；`Plugin::meta()` 的名字**从不参与路由**。
 >
-> 清单见 `docs/reference/ROUTES.md` §Hook 插件（**权威**）：`hook/register`、`hook/fire`、`hook/list`；
+> 清单见 `docs/ref/ROUTES.md` §Hook 插件（**权威**）：`hook/register`、`hook/fire`、`hook/list`；
 > 触发臂是 `fire`（无 `trigger`），调用侧唯一入口是 `symbio_core::ROUTE_HOOK_FIRE`。
 
 ## 机制

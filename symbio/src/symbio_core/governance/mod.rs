@@ -140,7 +140,7 @@ pub enum PairingViolation {
     ReadOnly { principal: String },
     /// 同一主体同时持有 `DefineWork` 与 `AssertVerification`（C15：不自验）——拒绝。
     /// 验证者 ≠ 产出者不是纪律是构造期约束：双持的主体给自己的产物盖章，
-    /// 质量闸门等于没有（S7 第 17 步，[roadmap/S03 §5](../../../../docs/plan/roadmap/S03-多步任务与返工.md)）。
+    /// 质量闸门等于没有（S7 第 17 步，[roadmap/S03 §5](../../../../docs/stage/S03-多步任务与返工.md)）。
     SelfVerifier { principal: String },
 }
 
@@ -205,7 +205,7 @@ impl PermissionMatrix {
                 });
             }
             // C15（不自验）：DefineWork + AssertVerification 不得同持（S7 第 17 步）；
-            // 高风险组合（S9，[roadmap/S09 §5](../../../../docs/plan/roadmap/S09-外部执行与熔断.md)
+            // 高风险组合（S9，[roadmap/S09 §5](../../../../docs/stage/S09-外部执行与熔断.md)
             // 验收 3）：外部执行（ProduceArtifact）+ AssertVerification 同样不得同持——
             // 给自己的外部动作盖章 = 质量闸门等于没有。
             let verifies = p.grants.contains(&Capability::AssertVerification);

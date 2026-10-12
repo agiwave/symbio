@@ -1,5 +1,5 @@
-//! `readyset` 投影（S7 第 16 步，[roadmap/S03 §3](../../../../docs/plan/roadmap/S03-多步任务与返工.md)、
-//! [roadmap/S04](../../../../docs/plan/roadmap/S04-并发调度与租约.md)）。
+//! `readyset` 投影（S7 第 16 步，[roadmap/S03 §3](../../../../docs/stage/S03-多步任务与返工.md)、
+//! [roadmap/S04](../../../../docs/stage/S04-并发调度与租约.md)）。
 //!
 //! **就绪判定是纯函数，从事件序列算**：`ready = 非终态 ∧ depends_on 全部终态`。
 //! 调度器不需要任何内部状态——同一份事件切片永远算出同一个就绪集（N1）。

@@ -24,7 +24,7 @@
  * 3. **不渲染机制级字段**：访问位（`w` = 可写）是能力判据，决定「能不能保存 /
  *    删除 / 新建」，不是给用户看的标签；`ext` / `path` / `kind` 同理。
  *
- * 规范：docs/design/vdfs-frontend.md · docs/design/vdfs.md
+ * 规范：docs/arch/vdfs-frontend.md · docs/arch/vdfs.md
  */
 
 import type { Component } from 'vue'

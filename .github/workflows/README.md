@@ -1,3 +1,11 @@
+---
+kind: guide
+id: .github/workflows/README
+title: CI/CD 配置说明
+status: active
+created: 2026-07-20
+---
+
 # CI/CD 配置说明
 
 ## GitHub Actions 工作流

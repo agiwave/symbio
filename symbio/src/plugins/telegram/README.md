@@ -1,3 +1,11 @@
+---
+kind: arch
+id: symbio/src/plugins/telegram/README
+title: Telegram 插件
+status: active
+created: 2026-07-20
+---
+
 # Telegram 插件
 
 Telegram Bot 集成插件：长轮询收发与"继续会话"交互。
@@ -19,7 +27,7 @@ Telegram Bot 集成插件：长轮询收发与"继续会话"交互。
 | `stop_listener` | 停止消息监听 |
 | `status` | 查询 Bot 状态 |
 
-> 清单以 `docs/reference/ROUTES.md` §Telegram 插件为准（**权威**）。
+> 清单以 `docs/ref/ROUTES.md` §Telegram 插件为准（**权威**）。
 
 ## 怎么被调用
 
@@ -29,7 +37,7 @@ Telegram Bot 集成插件：长轮询收发与"继续会话"交互。
 
 监听器收到消息后要调 LLM，走的是 **`ctx.parent()` → `parent.route(ctx)`**，
 地址 `session/chat/send`（绝对地址由容器分发）。**不要**按值持有 session 实例——
-`docs/design/plugin-route-address.md` 规则五，守卫 E-007 会拦。
+`docs/arch/plugin-route-address.md` 规则五，守卫 E-007 会拦。
 
 ## 配置
 

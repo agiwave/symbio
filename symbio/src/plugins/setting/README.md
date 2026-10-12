@@ -1,3 +1,11 @@
+---
+kind: arch
+id: symbio/src/plugins/setting/README
+title: Setting 插件
+status: active
+created: 2026-09-09
+---
+
 # Setting 插件
 
 **本智能体自身的信息设置** —— 我是谁（显示名 / 简介），以及我默认怎么说话

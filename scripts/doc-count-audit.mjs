@@ -42,7 +42,7 @@
  * 退出码：0 = 通过；1 = 有对不上；2 = 审计范围读不出（来源读不出来即 exit 2，
  *      **不退化成「什么都没检查」**——那正是这类守卫最安静的死法）。
  */
-// 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns DC 文档计数对账（文档里的少数几个数 vs 代码）
 // @codes DC-001 DC-002 DC-003 DC-004
 

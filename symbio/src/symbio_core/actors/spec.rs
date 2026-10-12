@@ -41,7 +41,7 @@ pub struct ActorSpec {
 }
 
 impl ActorSpec {
-    /// S01 的平凡值主体（[roadmap/S01 §4](../../../../../docs/plan/roadmap/S01-最小闭环.md)）：
+    /// S01 的平凡值主体（[roadmap/S01 §4](../../../../../docs/stage/S01-最小闭环.md)）：
     /// 全规则驱动、预算放宽、单主体——平凡值下系统完整运行。
     pub fn trivial(principal: impl Into<String>) -> Self {
         ActorSpec {

@@ -1,10 +1,18 @@
+---
+kind: arch
+id: symbio/src/plugins/vdfs/README
+title: VDFS 插件
+status: active
+created: 2026-09-16
+---
+
 # VDFS 插件
 
 **文件系统本身**——对前端、对大模型的统一资源与数据访问层（Virtual Dynamic File System）。
 本插件不含任何资源语义、不持有拓扑：不认识会话/模型/设置，不认识挂载点，
 只认识「根 provider + 全路径」。虚拟根归组合容器所有（见 `../composite/README.md`）。
 
-机制规范（权威、跨模块）在 [`docs/design/vdfs.md`](../../../../docs/design/vdfs.md)；
+机制规范（权威、跨模块）在 [`docs/arch/vdfs.md`](../../../../docs/arch/vdfs.md "docs/arch/vdfs")；
 本文件只写插件自身的落位。
 
 ## 一棵树的两半
@@ -62,8 +70,8 @@
 
 ## 关联
 
-- 机制规范：[`docs/design/vdfs.md`](../../../../docs/design/vdfs.md)
-- 前端页面规范：[`docs/design/vdfs-frontend.md`](../../../../docs/design/vdfs-frontend.md)
+- 机制规范：[`docs/arch/vdfs.md`](../../../../docs/arch/vdfs.md "docs/arch/vdfs")
+- 前端页面规范：[`docs/arch/vdfs-frontend.md`](../../../../docs/arch/vdfs-frontend.md "docs/arch/vdfs-frontend")
 - 纯接口（trait + 域类型）：`symbio_core::vdfs`
 - symbio 桥（上下文注入 / 错误翻译）：`symbio_core::vdfs::host`
 - 虚拟层拓扑（容器聚合 + 注册为根）：`../composite/README.md`

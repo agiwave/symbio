@@ -1,3 +1,11 @@
+---
+kind: arch
+id: symbio/src/plugins/agent/README
+title: Agent 插件
+status: active
+created: 2026-07-20
+---
+
 # Agent 插件
 
 **智能体域的唯一所有者**。三件事在同一处：**托管**（把 `<homedir>/agent/<id>/` 挂成
@@ -76,7 +84,7 @@
 
 **不可删除**：要清空就写入空内容（两个作用域同一约定）。
 
-## 寻址（无自有路由，权威登记见 [ROUTES.md](../../../../docs/reference/ROUTES.md) §Agent 插件）
+## 寻址（无自有路由，权威登记见 [ROUTES.md](../../../../docs/ref/ROUTES.md "docs/ref/ROUTES") §Agent 插件）
 
 agent 目录的寻址是**挂载点语义**而非平铺三段（`route()` 直接返回 `NotFound` 并指引到 VDFS）：
 
@@ -95,5 +103,5 @@ agent 目录的寻址是**挂载点语义**而非平铺三段（`route()` 直接
 - 另外几层记忆：`../work/README.md`（工作区）、`../session/README.md`（会话）、
   `../plugin_manager/README.md`（设置入口，**不拥有任何记忆文件**）
 - 记忆的共享实现（各层共用）：`providers/memory`
-- Agent 目录规范：`docs/design/agent-directory-spec.md`
-- VDFS 机制（`<根>/agent` 挂载点由本插件自持 `impl VdfsProvider`）：`docs/design/vdfs.md` §13.4
+- Agent 目录规范：`docs/arch/agent-directory-spec.md`
+- VDFS 机制（`<根>/agent` 挂载点由本插件自持 `impl VdfsProvider`）：`docs/arch/vdfs.md` §13.4

@@ -154,7 +154,7 @@ export function useVdfs(opts: UseVdfsOptions) {
    * 图标查找**必须与列表卡片同一函数**（[`iconForNode`]，回退链与其顺序规则见该
    * 函数文档）。这一行曾引发重大回归：`<根>` 的挂载点 `kind` 全是 `"dir"`，
    * 按 kind 优先会让六个挂载点整排退成同一张默认图——完整记录见
-   * `docs/design/frontend-ui-ux-plan.md` §9。护栏见本文件同目录的 spec。
+   * `docs/arch/frontend-ui-ux-plan.md` §9。护栏见本文件同目录的 spec。
    */
   const navItems = computed<WorkbenchRailItem[]>(() => {
     // 挂载层的高亮是**当前挂载**（地址导出的身份），不是 selectedName——

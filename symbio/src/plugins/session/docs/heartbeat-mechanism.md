@@ -1,3 +1,11 @@
+---
+kind: arch
+id: symbio/src/plugins/session/docs/heartbeat-mechanism
+title: 会话心跳机制（heartbeat）
+status: active
+created: 2026-09-11
+---
+
 # 会话心跳机制（heartbeat）
 
 > **文档类型：Design（机制设计）** — 会话空闲心跳的调度语义、设置工具与 CLI 守护模式。

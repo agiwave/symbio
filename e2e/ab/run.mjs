@@ -11,7 +11,7 @@
 // --------------
 // system 前缀与 `tools` 数组整体取自一次**真实链路捕获**（`capture-corpus.mjs`：
 // CLI × mock-llm × mock-mcp，出厂 `full` 档，对话面关闭 —— 与
-// [ADR-057](../../docs/registry/adr/ADR-057.md) 形状基线同一条链路同一个场景名）。
+// [ADR-057](../../docs/adr/ADR-057.md) 形状基线同一条链路同一个场景名）。
 // 题目只替换尾部消息。缺 `--corpus=` 就现场跑一次捕获。
 //
 // 判据（全部机械可读回，口径归 `tasks.mjs`）
@@ -31,7 +31,7 @@
 //     node e2e/ab/run.mjs --provider=LMStudio [--corpus=<file>] [--tasks=id1,id2]
 //                         [--repeat=1] [--temperature=0] [--json=<out>] [--dry-run]
 // `--dry-run` 只打印两臂的请求体形状与字节数，**一个请求都不发**（不花任何预算）。
-// 报告默认写 `docs/reference/PROMPT_AB.md`（生成物，唯一写者是本脚本）。
+// 报告默认写 `docs/ref/PROMPT_AB.md`（生成物，唯一写者是本脚本）。
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -42,7 +42,7 @@ import { flattenRequest, parseFlatCalls, parseNativeMarkupCalls, hasNativeMarkup
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
-const REPORT_PATH = join(REPO, 'docs', 'reference', 'PROMPT_AB.md');
+const REPORT_PATH = join(REPO, 'docs', 'ref', 'PROMPT_AB.md');
 
 function arg(name, dflt = undefined) {
   const hit = process.argv.slice(2).find((a) => a.startsWith(`--${name}=`));
@@ -346,7 +346,7 @@ function renderReport({ corpus, provider, temperature, rows, repeat, generatedAt
   lines.push('');
   lines.push('> ⚠️ **生成物，不手改。** 唯一写者是 `node e2e/ab/run.mjs`。');
   lines.push('> 判据口径归 `e2e/ab/tasks.mjs` 与 `e2e/ab/flatten.mjs`，');
-  lines.push('> **结论与边界**归 [`docs/registry/task/S-end③.md`](../registry/task/S-end③.md)（本文件不写结论）。');
+  lines.push('> **结论与边界**归 [`docs/task/S-end③.md`](../task/S-end③.md)（本文件不写结论）。');
   lines.push('');
   lines.push(`生成于 ${generatedAt} · 模型 \`${provider.model}\`（provider \`${provider.id}\`）· 题 ${byTask.size} 道 × 两臂 × ${repeat} 次`);
   lines.push(

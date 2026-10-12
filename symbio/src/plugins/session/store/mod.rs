@@ -25,7 +25,7 @@
 //! 共用的只是**寻址**：根由调用方传入，id→段名取
 //! [`crate::providers::vdfs_safe_segment`]
 //! （经 [`super::paths::safe_id`]），与资源条目同一份规则。判据见
-//! `docs/design/vdfs.md` §13.4（agent 目录是先例）。
+//! `docs/arch/vdfs.md` §13.4（agent 目录是先例）。
 //!
 //! ## 磁盘布局
 //!
@@ -46,7 +46,7 @@
 //! `messages` 字段；投影缺失时用内联消息**就地补算**（[`SessionMetaFile::into_summary`]）
 //! ——缺了这条兜底，清单会静默退化成显示 id。
 //!
-//! ### 子会话嵌套存储（机制约定，见 docs/design/vdfs.md）
+//! ### 子会话嵌套存储（机制约定，见 docs/arch/vdfs.md）
 //!
 //! 会话可派生子会话：子会话不是顶层平级条目，而是存放在父会话目录内的
 //! `sessions/` 子目录——`<根>/<safe(父)>/sessions/<safe(子)>/`。

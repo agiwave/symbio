@@ -27,7 +27,7 @@ use tokio::sync::RwLock;
 ///   非法状态（见 `CapabilityVisitor::register_model_providers`）。
 /// - `tools`：能力表，**按注册顺序**保序。这条顺序就是送给模型的 `tools` 数组顺序：
 ///   注册序来自能力收集的广播序，写成哈希表时**每起一个进程重洗一次**，而工具面是
-///   prompt 里最大的一段（`docs/reference/PROMPT_SHAPE.md` 实测 18KB 对正文 1.1KB），
+///   prompt 里最大的一段（`docs/ref/PROMPT_SHAPE.md` 实测 18KB 对正文 1.1KB），
 ///   换序等于每轮把这段前缀作废——这也是 ADR-057 一度记下「数组顺序每次不同」的根因。
 /// - `system_prompts`：系统提示词（按名称保序；**全部**送达模型，不做竞争）
 /// - `vdfs_providers`：VDFS 挂载点（按挂载名去重，`order` 升序对外）。

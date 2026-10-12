@@ -24,7 +24,7 @@
 //!
 //! - **`manifest.yaml` 是接入契约**：随包分发、导入即校验、宿主不改——它回答
 //!   「这个包是谁、能不能挂上来」（`agent` 插件的门槛，见
-//!   `docs/design/agent-directory-spec.md` §5 / §10）；
+//!   `docs/arch/agent-directory-spec.md` §5 / §10）；
 //! - **`setting` 是本实例的自述与偏好**：运行期可改、不参与接入判定。
 //!
 //! ## 一个插件，两个实例：**分形**

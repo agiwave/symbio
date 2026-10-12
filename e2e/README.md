@@ -1,3 +1,11 @@
+---
+kind: guide
+id: e2e/README
+title: e2e 测试环境（CLI 模式）
+status: active
+created: 2026-09-22
+---
+
 # e2e 测试环境（CLI 模式）
 
 以 `cli/`（进程内直连插件树）为被测前端，mock 与测试脚本全部为 Node `.mjs`，
@@ -191,9 +199,9 @@ await api.invoke('session/chat/send',
 
 `node e2e/ab/run.mjs` 跑的是**真 provider**（本机 `.symbio/model/` 里配好的那一个），CI 上没有
 LMStudio / 付费端点 ⇒ 它**天然不进 58-e2e，也不进任何门禁阶段**（`e2e/ab/` 不在用例发现范围内）。
-它把出厂形状与被 [ADR-048a](../docs/registry/adr/ADR-048a.md) 否决的拍平形状，在同一份真实链路
+它把出厂形状与被 [ADR-048a](../docs/adr/ADR-048a.md) 否决的拍平形状，在同一份真实链路
 捕获的请求体上各发一遍，比模型侧读数。判据口径归 `e2e/ab/tasks.mjs` 的文件头，
-形状变换归 `e2e/ab/flatten.mjs`，读数落 `docs/reference/PROMPT_AB.md`（生成物）——
+形状变换归 `e2e/ab/flatten.mjs`，读数落 `docs/ref/PROMPT_AB.md`（生成物）——
 本处只留指路，不复述。
 
 ## 门控接入

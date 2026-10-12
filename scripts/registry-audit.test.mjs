@@ -13,7 +13,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { stripAnsi } from './color.mjs'
-import { ALL_KEYS, parseEntryText, loadEntries, auditEntries, renderKindIndex } from './registry-lib.mjs'
+import { ALL_KEYS, DOC_KINDS, parseEntryText, loadEntries, auditEntries, renderKindIndex } from './registry-lib.mjs'
 import { runRegistryAudit } from './registry-audit.mjs'
 import { runRegistryBoard } from './registry-board.mjs'
 
@@ -89,15 +89,32 @@ function sp001Doc(rows = ALL_KEYS.map((k) => `| \`${k}\` | 说明 |`)) {
 }
 
 /**
- * 一个用例一座目录：扫描范围是整个 registry/，夹具共用目录会互相串断言。
+ * 文档类夹具：**在位存放**的条目——编号 = 仓根相对路径，title = 正文首个 H1。
+ * 写到 `docs/<rel>`（rel 不带 `docs/` 前缀时补上；以 `docs/` 开头则原样）。
+ */
+function docDoc(relWithDocs, over = {}) {
+  const rel = relWithDocs.startsWith('docs/') ? relWithDocs : `docs/${relWithDocs}`
+  const { body, ...meta } = over
+  const title = over.title ?? `${rel.replace(/\.md$/, '')} 文档`
+  return (
+    fm({ kind: 'arch', id: rel.replace(/\.md$/, ''), title, status: 'active', created: '2026-10-11', ...meta }) +
+    (body ?? `# ${title}\n\n正文。\n`)
+  )
+}
+
+/**
+ * 一个用例一座目录：扫描范围是**整个仓**，夹具共用目录会互相串断言。
  * 默认自带 SP-001（RG-011 对它有要求）；`noSp` 用于测 SP-001 缺失。
+ * 键以 `docs/` 开头 ⇒ 按仓根相对路径写；否则写到 `docs/<kind>/` 下（条目与文档同构：
+ * **kind 只来自 front-matter，目录不参与判定**）。
  */
 function caseRoot(files, { noSp = false } = {}) {
   const base = path.join(tmp, `case${++caseNo}`)
   const all = { ...files }
   if (!noSp && !all['spec/SP-001.md']) all['spec/SP-001.md'] = sp001Doc()
   for (const [rel, content] of Object.entries(all)) {
-    const p = path.join(base, 'docs', 'registry', rel)
+    // 键以 `/` 开头 = 仓根相对（如 `/AGENTS.md`）；以 `docs/` 开头 = 仓根相对；否则住 `docs/<kind>/`
+    const p = path.join(base, rel.startsWith('/') ? rel.slice(1) : rel.startsWith('docs/') ? rel : path.join('docs', rel))
     fs.mkdirSync(path.dirname(p), { recursive: true })
     fs.writeFileSync(p, content)
   }
@@ -105,7 +122,7 @@ function caseRoot(files, { noSp = false } = {}) {
 }
 
 function errsOf(base) {
-  const { entries, errors } = loadEntries(path.join(base, 'docs', 'registry'), base)
+  const { entries, errors } = loadEntries(base)
   return [...errors, ...auditEntries(entries, base)]
 }
 
@@ -167,16 +184,17 @@ test('RG-001：错域字段被指名（task 里写 scope）', () => {
 
 // ================= 字段与编号（RG-002…005） =================
 
-test('RG-002：必填字段缺失变红；kind 与目录不一致变红', () => {
+test('RG-002：必填字段缺失变红；**目录不参与判定**（kind 只来自 front-matter）', () => {
   const missing = caseRoot({ 'task/T-001.md': fm({ kind: 'task', id: 'T-001', title: 'x', status: 'todo', created: '2026-10-11', deps: [] }) + TASK_BODY })
   expectOnly(errsOf(missing), /RG-002 必填字段 `track`/)
 
-  const mismatch = caseRoot({ 'task/T-001.md': taskDoc('T-001', { kind: 'spec' }) })
-  expectOnly(errsOf(mismatch), /RG-002 kind=spec 与所在目录不一致/)
+  // 反向：条目放在别的目录下不再判红——目录只是组织，kind 是数据（机制不写死目录结构）。
+  const elsewhere = caseRoot({ 'docs/plan/T-001.md': taskDoc('T-001') })
+  assert.deepEqual(errsOf(elsewhere), [], 'task 放在 docs/plan/ 下必须合法')
 })
 
 test('RG-003：id 形状 / 文件名对账 / 跨 kind 重复 各自变红', () => {
-  const shape = caseRoot({ 'task/bad-id.md': taskDoc('1bad', { body: undefined }) })
+  const shape = caseRoot({ 'task/bad!id.md': taskDoc('bad!id') })
   expectOnly(errsOf(shape), /RG-003 id 不合形状/)
 
   // 历史批次号含圈号（S-end①）：编号是身份、不得重排，ID 形状必须放行 Unicode 字母数字
@@ -286,7 +304,7 @@ test('RG-016：clears 指到不存在 / 指向非 task 变红；指向开放 tas
   assert.deepEqual(errsOf(base), [], 'clears 指到 task 合法，且不要求其闭环')
 
   // 渲染：spec INDEX 的 active 表带「清除」列，clears 编号落列（列被删要有回归兜住）
-  const { entries } = loadEntries(path.join(base, 'docs', 'registry'), base)
+  const { entries } = loadEntries(base)
   const idx = renderKindIndex('spec', entries)
   assert.match(idx, /\| 编号 \| 规范 \| 适用范围 \| 判据 \| 清除 \| 取代 \|/, 'active 表含清除列')
   assert.match(idx, /\| 人工 \| T-060 \| — \|/, 'clears 编号渲染进清除列')
@@ -330,7 +348,7 @@ test('adr 渲染：status 分组、impl 成列（「现行但只落地一半」�
     'adr/ADR-200.md': adrDoc('ADR-200', { impl: 'partial', title: '半落地的现行决策' }),
     'adr/ADR-201.md': adrDoc('ADR-201', { status: 'superseded', reason: '被 ADR-200 取代' }),
   })
-  const { entries } = loadEntries(path.join(base, 'docs', 'registry'), base)
+  const { entries } = loadEntries(base)
   const a = renderKindIndex('adr', entries)
   assert.equal(a, renderKindIndex('adr', entries), '同输入逐字节同输出')
   assert.match(a, /现行决策（active）/)
@@ -399,7 +417,7 @@ test('RG-012：出口判据指认的脚本不存在变红；存在则放行（�
   const live = caseRoot({
     'task/T-001.md': taskDoc('T-001', { exit: '由 `scripts/registry-audit.mjs` 守' }),
   })
-  // 占位脚本落在**仓根**（RG-012 按仓根相对路径解析），不是 registry/ 里
+  // 占位脚本落在**仓根**（RG-012 按仓根相对路径解析），不是 docs/ 里
   fs.mkdirSync(path.join(live, 'scripts'), { recursive: true })
   fs.writeFileSync(path.join(live, 'scripts', 'registry-audit.mjs'), '// 夹具占位\n')
   assert.deepEqual(errsOf(live), [], '指认的脚本真实存在 ⇒ 放行')
@@ -407,24 +425,26 @@ test('RG-012：出口判据指认的脚本不存在变红；存在则放行（�
 
 // ================= 范围与命名空间（RG-010 / RG-013） =================
 
-test('RG-010：registry/ 缺失或零条目 ⇒ exit 2（不退化成什么都没校验）', () => {
-  const missing = fs.mkdtempSync(path.join(os.tmpdir(), 'symbio-registry-none-'))
-  const r1 = runRegistryAudit([`--root=${missing}`])
+test('RG-010：扫不到任何 `.md` ⇒ exit 2（不退化成什么都没校验）', () => {
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'symbio-registry-none-'))
+  const r1 = runRegistryAudit([`--root=${empty}`])
   assert.equal(r1.code, 2)
-  assert.match(stripAnsi(r1.lines.join('\n')), /RG-010 docs\/registry\/ 不存在/)
-  fs.rmSync(missing, { recursive: true, force: true })
+  assert.match(stripAnsi(r1.lines.join('\n')), /RG-010 登记范围读不出/)
+  fs.rmSync(empty, { recursive: true, force: true })
 
-  const emptyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'symbio-registry-empty-'))
-  fs.mkdirSync(path.join(emptyRoot, 'docs', 'registry'), { recursive: true })
-  const r2 = runRegistryAudit([`--root=${emptyRoot}`])
-  assert.equal(r2.code, 2)
-  assert.match(stripAnsi(r2.lines.join('\n')), /RG-010 .*没有任何条目/)
-  fs.rmSync(emptyRoot, { recursive: true, force: true })
+  // 有 `.md` 但没有登记 ⇒ 不是 exit 2 而是 exit 1（RG-020 指名道姓）
+  const unregistered = fs.mkdtempSync(path.join(os.tmpdir(), 'symbio-registry-empty-'))
+  fs.mkdirSync(path.join(unregistered, 'docs'), { recursive: true })
+  fs.writeFileSync(path.join(unregistered, 'docs', 'x.md'), '# 裸文档\n')
+  const r2 = runRegistryAudit([`--root=${unregistered}`])
+  assert.equal(r2.code, 1)
+  assert.match(stripAnsi(r2.lines.join('\n')), /docs\/x\.md：RG-020 未登记文档/)
+  fs.rmSync(unregistered, { recursive: true, force: true })
 })
 
-test('RG-013：registry/ 下未登记的 kind 目录变红（命名空间闭合）', () => {
-  const base = caseRoot({ 'weird/x.md': '---\nkind: weird\n---\n' })
-  expectOnly(errsOf(base), /RG-013 docs\/registry\/weird\//)
+test('RG-013：front-matter 的 kind 不在 KINDS 闭集变红（命名空间闭合）', () => {
+  const base = caseRoot({ 'docs/weird/x.md': '---\nkind: weird\n---\n' })
+  expectOnly(errsOf(base), /RG-013 docs\/weird\/x\.md：kind="weird" 不在 KINDS 闭集/)
 })
 
 // ================= SP-001 字段表对账（RG-011） =================
@@ -447,7 +467,7 @@ test('渲染确定性：同输入同输出；待处理列表里前置排在后�
     'task/T-010.md': taskDoc('T-010'),
     'task/T-011.md': taskDoc('T-011', { deps: ['T-010'] }),
   })
-  const { entries } = loadEntries(path.join(base, 'docs', 'registry'), base)
+  const { entries } = loadEntries(base)
   const a = renderKindIndex('task', entries)
   const b = renderKindIndex('task', entries)
   assert.equal(a, b, '同输入必须逐字节同输出（这是 autoWork 重生成的前提）')
@@ -462,7 +482,7 @@ test('排序：拓扑序永远在前；同层按 prio 再按编号（确定性�
     'task/T-032.md': taskDoc('T-032'), // 缺席 = 最低档
     'task/T-033.md': taskDoc('T-033', { prio: 'now', deps: ['T-030'] }), // 有依赖 ⇒ 拓扑压过 prio
   })
-  const { entries } = loadEntries(path.join(base, 'docs', 'registry'), base)
+  const { entries } = loadEntries(base)
   const out = renderKindIndex('task', entries)
   const pos = (id) => out.indexOf(`\`${id}\``)
   assert.ok(pos('T-030') < pos('T-033'), 'T-030 虽 later，但它是前置 ⇒ 排在 T-033 前（deps 是义务）')
@@ -470,16 +490,85 @@ test('排序：拓扑序永远在前；同层按 prio 再按编号（确定性�
   assert.ok(pos('T-030') < pos('T-032'), '缺席 = 最低档：later 在无 prio 前')
 })
 
+// ================= 在位文档（文档类 kind）=================
+//
+// 文档类与条目类的区别只有两条，各自必须有回归：
+//   ① **文档即条目、在位存放**：编号 = 仓根相对路径（RG-003）、title = 正文首个 H1（RG-021）；
+//   ② **目录不参与判定**：文档在哪个目录下与 kind 无关，搬迁不破机制（RG-002 反向用例）。
+// 另加「全仓 .md 必须登记」的执行方（RG-020）与豁免面。
+
+test('RG-020：未登记文档（无 front-matter / 缺 kind）变红', () => {
+  const bare = caseRoot({ 'docs/plan/notes.md': '# 裸文档\n\n没有 front-matter。\n' })
+  expectOnly(errsOf(bare), /docs\/plan\/notes\.md：RG-020 未登记文档/)
+
+  const noKind = caseRoot({ 'docs/plan/notes.md': '---\nstatus: active\ncreated: 2026-10-11\n---\n\n# 裸文档\n' })
+  expectOnly(errsOf(noKind), /docs\/plan\/notes\.md：RG-020 front-matter 缺 `kind`/)
+})
+
+test('RG-003（文档类）：编号必须等于仓根相对路径；写错即红（反向：写对放行）', () => {
+  const wrong = caseRoot({ 'docs/plan/x.md': docDoc('docs/plan/x.md', { id: 'docs/other/x' }) })
+  expectOnly(errsOf(wrong), /RG-003 文档类编号必须等于仓根相对路径（去 `\.md`）（应为 `docs\/plan\/x`）/)
+
+  const ok = caseRoot({ 'docs/plan/x.md': docDoc('docs/plan/x.md') })
+  assert.deepEqual(errsOf(ok), [], '编号 = 路径 ⇒ 放行（反向）')
+})
+
+test('RG-021：title 必须逐字等于正文首个 H1；缺 H1 或不对账即红', () => {
+  const mismatch = caseRoot({ 'docs/plan/x.md': docDoc('docs/plan/x.md', { title: '标题 A', body: '# 标题 B\n\n正文。\n' }) })
+  expectOnly(errsOf(mismatch), /RG-021 title="标题 A" 与正文首个 H1 "标题 B" 不一致/)
+
+  const noH1 = caseRoot({ 'docs/plan/x.md': docDoc('docs/plan/x.md', { title: '标题 A', body: '没有标题。\n' }) })
+  expectOnly(errsOf(noH1), /RG-021 文档类缺正文首个 `# 标题`/)
+
+  // 反向：代码围栏里的 `# ` 不算 H1（第一行 H1 才是 title 的来源）
+  const fenced = caseRoot({ 'docs/plan/x.md': docDoc('docs/plan/x.md', { title: '标题 A', body: '```\n# 不是标题\n```\n\n# 标题 A\n' }) })
+  assert.deepEqual(errsOf(fenced), [], '围栏内的 # 不算 H1 ⇒ 放行（反向）')
+})
+
+test('RG-020 豁免：archive / 生成页 / 指令面不进登记范围（反向）', () => {
+  const base = caseRoot({
+    'docs/archive/old.md': '# 历史快照（无 front-matter）\n',
+    'docs/INDEX.md': '# 总账（生成页）\n',
+    'docs/plan/INDEX.md': '# 计划索引（生成页）\n',
+    '/AGENTS.md': '# 指令（无 front-matter）\n',
+  })
+  assert.deepEqual(errsOf(base), [], '豁免面不得误报')
+})
+
+test('文档类渲染：按 status 分组、编号列是可点的相对链接（从索引一步到正文）', () => {
+  const base = caseRoot({
+    'docs/plan/a.md': docDoc('docs/plan/a.md', { kind: 'plan', title: 'A 文档' }),
+    'docs/plan/b.md': docDoc('docs/plan/b.md', { kind: 'plan', title: 'B 草案', status: 'draft' }),
+    'docs/plan/c.md': docDoc('docs/plan/c.md', { kind: 'plan', title: 'C 废止', status: 'retired', reason: '被 A 取代' }),
+  })
+  const { entries } = loadEntries(base)
+  const out = renderKindIndex('plan', entries)
+  assert.equal(out, renderKindIndex('plan', entries), '同输入逐字节同输出')
+  assert.match(out, /现行文档（active）/)
+  assert.match(out, /草案（draft）/)
+  assert.match(out, /废止（retired）/)
+  assert.match(out, /\[`docs\/plan\/a`\]\(a\.md\)/, '同目录文档应渲染成同目录相对链接（从索引一步到正文）')
+  // 跨目录：从 docs/plan/INDEX.md 到 docs/arch/x.md 必须写成 ../arch/x.md
+  const cross = caseRoot({ 'docs/arch/x.md': docDoc('docs/arch/x.md', { title: 'X 文档' }) })
+  assert.match(
+    renderKindIndex('arch', loadEntries(cross).entries),
+    /\[`docs\/arch\/x`\]\(x\.md\)/,
+    '索引到正文的链接必须能从汇总页直接点开',
+  )
+  assert.match(out, /被 A 取代/, 'retired 表带理由列')
+  assert.match(out, /计数.*active 1 · draft 1 · retired 1/)
+})
+
 test('--write：生成三个汇总页，再跑一次显示已是最新', () => {
   const base = caseRoot({ 'task/T-001.md': taskDoc('T-001', { status: 'done', evidence: 'abc1234' }) })
   const first = runRegistryAudit([`--root=${base}`, '--write'])
   assert.equal(first.code, 0, stripAnsi(first.lines.join('\n')))
-  for (const rel of ['docs/registry/INDEX.md', 'docs/registry/task/INDEX.md', 'docs/registry/spec/INDEX.md']) {
+  for (const rel of ['docs/INDEX.md', 'docs/task/INDEX.md', 'docs/spec/INDEX.md']) {
     assert.ok(fs.existsSync(path.join(base, rel)), `${rel} 应被生成`)
   }
-  const board = fs.readFileSync(path.join(base, 'docs/registry/task/INDEX.md'), 'utf8')
+  const board = fs.readFileSync(path.join(base, 'docs/task/INDEX.md'), 'utf8')
   assert.match(board, /`T-001`.*abc1234/, '已完成表应带证据列')
-  assert.match(fs.readFileSync(path.join(base, 'docs/registry/INDEX.md'), 'utf8'), /task · 任务/)
+  assert.match(fs.readFileSync(path.join(base, 'docs/INDEX.md'), 'utf8'), /task · 任务/)
 
   const second = runRegistryAudit([`--root=${base}`, '--write'])
   assert.equal(second.code, 0)
@@ -490,7 +579,7 @@ test('registry-audit：违规时拒绝写汇总页（exit 1）；参数不识别
   const base = caseRoot({ 'task/T-001.md': taskDoc('T-001', { status: 'done' }) })
   const r = runRegistryAudit([`--root=${base}`, '--write'])
   assert.equal(r.code, 1)
-  assert.ok(!fs.existsSync(path.join(base, 'docs/registry/task/INDEX.md')), '有违规不得写汇总页')
+  assert.ok(!fs.existsSync(path.join(base, 'docs/task/INDEX.md')), '有违规不得写汇总页')
   assert.equal(runRegistryAudit(['--bogus']).code, 2)
 })
 
@@ -520,18 +609,30 @@ test('registry-board：先校验后打印；有违规只报错不打印看板', 
 
 // ================= 本仓真实登记（dogfood） =================
 
-// 守卫对自己也要成立：本仓真实 registry/ 必须零违规，且条目数非零——
-// 只断言「exit 0」挡不住「读空即全绿」（解析口径失效时什么条目都读不到）。
-test('本仓当前登记自洽，且真的读到了条目', () => {
+// 守卫对自己也要成立：本仓真实登记必须零违规，且**每一类 kind 都真的读到了条目**——
+// 只断言「exit 0」挡不住「读空即全绿」（解析口径失效时什么条目都读不到），
+// 只数总数也挡不住「某一类整体装载不到」——所以九个 kind 逐个断言非空。
+test('本仓当前登记自洽，且每类 kind 都读到了条目', () => {
   const r = runRegistryAudit([`--root=${repoRoot}`])
   assert.equal(r.code, 0, stripAnsi(r.lines.join('\n')))
-  const { entries } = loadEntries(path.join(repoRoot, 'docs', 'registry'), repoRoot)
+  const { entries } = loadEntries(repoRoot)
   const tasks = entries.filter((e) => e.kind === 'task')
   const specs = entries.filter((e) => e.kind === 'spec')
   const adrs = entries.filter((e) => e.kind === 'adr')
   assert.ok(tasks.length >= 3, `只读到 ${tasks.length} 个任务——装载口径或种子有问题`)
   assert.ok(specs.length >= 1, `只读到 ${specs.length} 个规范——SP-001 装载不到`)
   assert.ok(adrs.length >= 1, `只读到 ${adrs.length} 个决策——adr kind 装载不到`)
+  for (const kind of DOC_KINDS) {
+    assert.ok(entries.filter((e) => e.kind === kind).length >= 1, `文档类 kind \`${kind}\` 一个条目都没读到`)
+  }
+  assert.ok(
+    entries.some((e) => e.kind === 'arch' && e.rel.startsWith('docs/arch/')),
+    '系统级文档必须真的进了 arch（在位文档装载口径）',
+  )
+  assert.ok(
+    entries.some((e) => e.kind === 'arch' && e.rel.includes('symbio/src/')),
+    '模块级文档（模块 README / docs）必须在同一机制内',
+  )
   assert.ok(
     specs.some((e) => e.meta.id === 'SP-001'),
     'SP-001 必须在（RG-011 的对账对象）',

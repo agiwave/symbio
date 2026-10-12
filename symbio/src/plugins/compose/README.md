@@ -1,9 +1,17 @@
+---
+kind: arch
+id: symbio/src/plugins/compose/README
+title: Compose 插件（对话面：措辞）
+status: active
+created: 2026-09-29
+---
+
 # Compose 插件（对话面：措辞）
 
 「首响 / 答话 / 汇报」的措辞——**只输出文本，不做判决**。
 
 判决的产出方见 `schemas::dialog::Verdict` 的变体表：`Answered` / `Escalate` 归
-[`../classify/README.md`](../classify/README.md)，`Report` 由 `session` 自己判出。
+[`../classify/README.md`](../classify/README.md "symbio/src/plugins/classify/README")，`Report` 由 `session` 自己判出。
 本插件**不知道任何一个产出方存在**：它执行上游给出的判决结果，而两条调用边都从
 `session` 出发 —— 插件之间没有边。
 
@@ -12,7 +20,7 @@
 
 ## 路由
 
-清单见 [`docs/reference/ROUTES.md`](../../../../docs/reference/ROUTES.md) §Compose 插件（**权威**）：
+清单见 [`docs/ref/ROUTES.md`](../../../../docs/ref/ROUTES.md "docs/ref/ROUTES") §Compose 插件（**权威**）：
 `compose/compose`。
 
 ## 契约
@@ -133,4 +141,4 @@ owner）。取不到（写错 / 该条目已禁用）⇒ **落回会话选定值
 
 - 判决：`../classify/README.md`
 - 切分依据（为什么是两个插件）：`docs/plan/09-对话面插件拆分实施方案.md`
-- 地址规则：`docs/design/plugin-route-address.md`
+- 地址规则：`docs/arch/plugin-route-address.md`

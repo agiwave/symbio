@@ -22,9 +22,9 @@
  * | `CAPABILITIES` / `KINDS` | 02 §6.1 能力名册（七列）与类型闭集表 |
  * | `DECLARED_*` | 02 §2「条数」列、§6.2 生长位表、§7 社交能力表——**是被验的声明** |
  * | `PSEUDO` | 02 §5 伪高阶表的「说法」列 |
- * | `STAGE_CLAIMS` | [路线图总览 §1 阶梯总表](../docs/plan/roadmap/00-路线图总览.md) |
+ * | `STAGE_CLAIMS` | [路线图总览 §1 阶梯总表](../docs/stage/00-路线图总览.md) |
  * | `STAGE_DOCS` | 每阶 `S0N-*.md` §3 的 ```capability-assign``` 块 + §4 的加粗平凡值行 |
- * | `COGNITIVE_DEMANDS` | [S10 §2 需求映射表](../docs/plan/roadmap/S10-个人认知体系注入.md)——全仓唯一一份认知体系需求清单 |
+ * | `COGNITIVE_DEMANDS` | [S10 §2 需求映射表](../docs/stage/S10-个人认知体系注入.md)——全仓唯一一份认知体系需求清单 |
  *
  * **顶层键 vs 子键**：`projection.param` 在 §8 里与顶层键同列一张表，但 01 §8 自己写明
  * 「它不是第 11 个机制键，是 `projection` 的子键」。判据因此是形状而非名单：
@@ -64,8 +64,8 @@ const OUT_REL = path.join('docs', 'plan', 'verify', 'facts', 'mod.rs')
 
 const ARCH_REL = path.join('docs', 'plan', '01-核心架构.md')
 const FRAME_REL = path.join('docs', 'plan', '02-能力坐标系.md')
-const LADDER_REL = path.join('docs', 'plan', 'roadmap', '00-路线图总览.md')
-const STAGE_DIR_REL = path.join('docs', 'plan', 'roadmap')
+const LADDER_REL = path.join('docs', 'stage', '00-路线图总览.md')
+const STAGE_DIR_REL = path.join('docs', 'stage')
 
 const read = (rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8')
 

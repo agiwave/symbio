@@ -1,3 +1,11 @@
+---
+kind: arch
+id: symbio/src/plugins/session/README
+title: Unified Session & Memory Orchestration Architecture (会话与记忆系统化管理架构说明书)
+status: active
+created: 2026-07-20
+---
+
 # Unified Session & Memory Orchestration Architecture (会话与记忆系统化管理架构说明书)
 
 Session 插件是 Symbio 架构中的**会话持久化与编排中心**，也是**唯一的会话编排入口**：加载历史、**解析**系统提示词（收集各插件经 `register_system_prompt` 注册的段，本层不自己拼）、经 CapabilityVisitor 汇集工具、直接获取 model 插件注册的唯一生效 `ModelProvider`（core 纯 trait，`Arc<dyn ModelProvider>` 单一契约；协议适配细节内化于 model 插件）并在进程内驱动会话循环；Model 插件是**无状态 LLM 网关**（按上下文注册 Provider + 协议适配），对 session 零依赖。
@@ -5,7 +13,7 @@ Session 插件是 Symbio 架构中的**会话持久化与编排中心**，也是
 本文档将系统性地阐述 Symbio 的会话保存、内容压缩、工具迭代限制以及发送过滤策略，说明其具体规则、参数配置及 Rust 底层实现策略。
 
 > **深度设计与专题文档**（核心循环收口、模块分工、历史审计、前端性能、心跳、VDFS 会话消息映射、级联选项……）
-> 见 [`docs/`](./docs/README.md)——本文只写**现行机制与配置面**，`docs/` 写**为什么这样设计**。
+> 见 [`docs/`](docs/README.md "symbio/src/plugins/session/docs/README")——本文只写**现行机制与配置面**，`docs/` 写**为什么这样设计**。
 
 ---
 
@@ -49,7 +57,7 @@ flowchart TD
 字段真源是本插件的 `config.rs::SessionConfig`（**定义由配置的拥有者产出**：设置页的表单定义从 `SessionConfig::default()` 读出，不写第二份字面量，避免「面板显示值与实际行为漂移」）。
 
 以下是**与本节机制直接相关的键**的示例（不是全表）：全字段真源见
-`config.rs::SessionConfig`，配置面总表见 [`docs/reference/CONFIGURATION.md`](../../../../docs/reference/CONFIGURATION.md)。
+`config.rs::SessionConfig`，配置面总表见 [`docs/ref/CONFIGURATION.md`](../../../../docs/ref/CONFIGURATION.md "docs/ref/CONFIGURATION")。
 （`classify_enabled` / `compose_enabled` / `progress_*` / `supplements_*` /
 `conation_enabled` / `skill_compile_enabled` 等键不在下方示例中，
 它们归「对话面机制」与「自主与学习」两节。）
@@ -393,7 +401,7 @@ S5 的**事件记忆**是另一层：`v2_memory.rs` 把每轮用户发言编码�
 |---|---|---|
 | `session-memory` | 本会话的 `MEMORY.md`（**会话记忆**） | 可读写：有地址、两道闸门 |
 
-> 智能体自身的 `AGENTS.md`（两个作用域）归 `agent` 插件，不经本通道——见 [`../agent/README.md`](../agent/README.md)。
+> 智能体自身的 `AGENTS.md`（两个作用域）归 `agent` 插件，不经本通道——见 [`../agent/README.md`](../agent/README.md "symbio/src/plugins/agent/README")。
 
 ### VDFS 侧
 

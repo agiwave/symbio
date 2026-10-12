@@ -2,7 +2,7 @@
 /**
  * no-direct-call-audit — 无直连静态扫描（v2 阶段 S6 第 14 步，
  * [plan/04 §3](docs/plan/04-工程落地.md) 出口判据「直连调用 0」；
- * [roadmap/S08 §5/§6](docs/plan/roadmap/S08-多主体与对等承诺.md) 验收 2）。
+ * [roadmap/S08 §5/§6](docs/stage/S08-多主体与对等承诺.md) 验收 2）。
  *
  * ## 规则（I1 的直接推论：任意两主体无直连——一切经事实源）
  *
@@ -27,7 +27,7 @@
  * 平台无关（纯 Node，不依赖 bash / ripgrep），带回归测试（no-direct-call-audit.test.mjs）。
  */
 
-// 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns NDC 主体直连
 // @codes NDC-001 NDC-002
 

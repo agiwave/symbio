@@ -1,3 +1,11 @@
+---
+kind: arch
+id: symbio/src/plugins/home/README
+title: Home 插件
+status: active
+created: 2026-09-09
+---
+
 # Home 插件
 
 系统根插件：插件树顶端，持有自己的应用级状态，并仅挂载一个子插件 `worker`
@@ -15,12 +23,12 @@
 ## 路由
 
 `home/*` 与 `work/*` 由本插件自身终结；其余路径剥离首段后转发给 `worker`。
-**完整清单以 [ROUTES.md](../../../../docs/reference/ROUTES.md) §Home 插件为准**——本 README 不抄路由表。
+**完整清单以 [ROUTES.md](../../../../docs/ref/ROUTES.md "docs/ref/ROUTES") §Home 插件为准**——本 README 不抄路由表。
 
 > 资源类别清单不设终结路由：`<根>` 自身的 `vdfs/list` 就是子目录清单
-> （由组合容器逐子插件收集，见 `../composite/README.md` 与 `docs/design/vdfs.md` §2.5）。
+> （由组合容器逐子插件收集，见 `../composite/README.md` 与 `docs/arch/vdfs.md` §2.5）。
 
 ## 关联
 
 - 动态容器机制：`../composite/README.md`
-- 架构层级图：`docs/architecture/OVERVIEW.md`
+- 架构层级图：`docs/arch/OVERVIEW.md`

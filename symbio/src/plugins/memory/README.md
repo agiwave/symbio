@@ -1,3 +1,11 @@
+---
+kind: arch
+id: symbio/src/plugins/memory/README
+title: Memory 插件
+status: active
+created: 2026-09-28
+---
+
 # Memory 插件
 
 **记忆** —— 让模型记得住长期成立的事，也改得动它们。一个插件管**两个作用域**：
@@ -53,7 +61,7 @@
 工作区记忆空文件也注入（带空内容提示，教会模型建立记忆）；智能体记忆空文件整段省略
 （没写过就不占上下文）。
 
-> 这一腿原属独立的 `work` 插件（2026-09 并入，见 [ADR-040](../../../../docs/registry/adr/ADR-040.md)）：
+> 这一腿原属独立的 `work` 插件（2026-09 并入，见 [ADR-040](../../../../docs/adr/ADR-040.md)）：
 > 两个作用域同属「记忆」，收进同一个所有者后，「谁能读写它，谁负责注入它」在插件内
 > 一次成立。
 
@@ -87,4 +95,4 @@
 - 会话级记忆（另一层记忆）：`../session/README.md`
 - 记忆的共享实现（各层共用）：`../../../providers/` 下的 `providers/memory`
 - 子智能体目录与子树装配：`../agent/README.md`
-- Agent 目录规范 §6：`docs/design/agent-directory-spec.md`
+- Agent 目录规范 §6：`docs/arch/agent-directory-spec.md`

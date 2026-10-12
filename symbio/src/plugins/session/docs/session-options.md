@@ -1,8 +1,16 @@
+---
+kind: arch
+id: symbio/src/plugins/session/docs/session-options
+title: 会话选项 = 会话配置表单
+status: active
+created: 2026-09-23
+---
+
 # 会话选项 = 会话配置表单
 
 状态：现行规范
 范围：会话页输入区下方的「选项栏」与会话详情页的可修改项（**同一批字段、两种渲染形态**）
-关联：`docs/design/vdfs.md`（`node.schema` 详情方言）、
+关联：`docs/arch/vdfs.md`（`node.schema` 详情方言）、
 `symbio/src/symbio_core/schemas/detail.rs`（`DetailDefinition` / `DetailField` 方言权威定义）、
 `symbio/src/symbio_core/capability/option.rs`（收集机制 `OptionVisitor` / `collect_options`）、
 `symbio/src/plugins/session/options/mod.rs`（选项宿主：会话自有字段的声明）、

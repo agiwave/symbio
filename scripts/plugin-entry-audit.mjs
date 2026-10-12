@@ -78,7 +78,7 @@
  * 平台无关（Windows / macOS / Linux 通用）：纯 Node，不依赖 bash / ripgrep。
  */
 
-// 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns E 插件入口与门面
 // @codes E-001 E-002 E-003 E-004 E-005 E-006 E-007 E-008 E-009 E-011 E-012
 
@@ -586,7 +586,7 @@ for (const abs of codeFiles) {
           i + 1,
           `\`${m[1]}: ${m[2]}\` —— 插件不得按值持有兄弟插件实例；` +
             `跨插件调用请用 \`ctx.parent()\` 取容器后 \`parent.route(ctx)\`` +
-            `（绝对地址由容器分发，见 \`docs/design/plugin-route-address.md\`）`,
+            `（绝对地址由容器分发，见 \`docs/arch/plugin-route-address.md\`）`,
         )
       }
     }
@@ -704,7 +704,7 @@ for (const abs of codeFiles) {
 // ── E-006：路由**权威清单**里的路径前缀必须是插件目录名（文档侧）─────────
 //
 // 为什么只扫这几个文件：`hooks/fire` 这个幽灵路径**不在任何代码里**——它出现在
-// `docs/CURRENT.md`、`docs/reference/ROUTES.md` 与 `hook/README.md` 三处文档中。
+// `docs/CURRENT.md`、`docs/ref/ROUTES.md` 与 `hook/README.md` 三处文档中。
 // 只扫代码的守卫会**完整地漏掉它**。
 //
 // 为什么只判**前缀**、不判整条路径是否存在：权威清单里**必须**能提到已退役的路由
@@ -718,7 +718,7 @@ for (const abs of codeFiles) {
 // 只扫「自称是当前权威清单」的那几份。
 const ROUTE_AUTHORITY_FILES = [
   path.join(repoRoot, 'docs', 'CURRENT.md'),
-  path.join(repoRoot, 'docs', 'reference', 'ROUTES.md'),
+  path.join(repoRoot, 'docs', 'ref', 'ROUTES.md'),
   ...(() => {
     try {
       return fs
@@ -759,7 +759,7 @@ for (const abs of ROUTE_AUTHORITY_FILES) {
 // ── E-008：文档标了 `<!-- vocab:PREFIX_ -->` 的词表行必须与代码常量逐字一致 ──
 //
 // 为什么需要：词表是**闭集**，而闭集的第二份真相最常驻在文档里。真实事故：
-// `docs/design/vdfs.md` §3.2 的 status 行一直写 `error`，而代码早已把该词改名为
+// `docs/arch/vdfs.md` §3.2 的 status 行一直写 `error`，而代码早已把该词改名为
 // `failed`（理由见 `vdfs/words.rs::VDFS_STATUS_FAILED`）——两边各说各话，没有任何
 // 测试因此变红。而人读文档写的代码会照 `error` 写，于是漂移**从文档流回代码**
 //（`schemas/options.rs` 里那枚 `OPTION_STATUS_ERROR = "error"` 就是这么活下来的；

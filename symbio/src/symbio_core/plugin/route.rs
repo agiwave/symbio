@@ -3,7 +3,7 @@
 //! # 地址规则
 //!
 //! > 本模块文档是地址规则的**权威表述**；展开版（含审计结果与守卫边界）见
-//! > [`docs/design/plugin-route-address.md`](../../../docs/design/plugin-route-address.md)。
+//! > [`docs/arch/plugin-route-address.md`](../../../docs/arch/plugin-route-address.md)。
 //!
 //! ## 一、地址只有两种形态
 //!

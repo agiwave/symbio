@@ -1,12 +1,20 @@
+---
+kind: arch
+id: symbio/src/plugins/session/docs/module-layout
+title: Session 插件模块分工
+status: active
+created: 2026-09-16
+---
+
 # Session 插件模块分工
 
 > 状态：**现行规范**（域划分、判据与落点）
 > 范围：`symbio/src/plugins/session/`
-> 判据的「为什么」与被否决的方案见 [ADR-039](../../../../../docs/registry/adr/INDEX.md)
+> 判据的「为什么」与被否决的方案见 [ADR-039](../../../../../docs/adr/ADR-039.md)
 > （`session` 按域重组）；文件清单与行数属**结构事实**，由代码生成，
 > 见 [CURRENT.md](../../../../../docs/CURRENT.md)，本文件不抄。
-> 相关：[`./core-loop.md`](./core-loop.md)（主循环结构与收口点）、
-> [`../README.md`](../README.md)（现行机制与配置面）
+> 相关：[`./core-loop.md`](core-loop.md "symbio/src/plugins/session/docs/core-loop")（主循环结构与收口点）、
+> [`../README.md`](../README.md "symbio/src/plugins/session/README")（现行机制与配置面）
 
 ---
 
@@ -54,7 +62,7 @@
 | 请求构造 | `message_build.rs` | 发给 LLM 的请求消息数组与工具结果节点构造，及挂在用户消息 `prompt` 上的时间上下文 |
 | 会话恢复 | `resume.rs` | 会话恢复与历史重写 |
 | 运行态 | `active.rs` | 进程内运行态注册表：待消费请求、请求 id、中止信号、变更订阅 |
-| 派生事实 | `v2_facts.rs` | 轮末把派生事实（承诺 / 任务表 / 熔断）与学习产物（记忆三段 + 技能观测 / 编译）写进 per-session 的 v2 WAL——写方只有 `record_derived` / `record_learning`，调用点都在 `v2_exec`——[ADR-048](../../../../../docs/registry/adr/INDEX.md) |
+| 派生事实 | `v2_facts.rs` | 轮末把派生事实（承诺 / 任务表 / 熔断）与学习产物（记忆三段 + 技能观测 / 编译）写进 per-session 的 v2 WAL——写方只有 `record_derived` / `record_learning`，调用点都在 `v2_exec`——[ADR-048](../../../../../docs/adr/ADR-048.md) |
 
 ### 1.3 支撑单件（一文件一职责）
 
@@ -74,7 +82,7 @@
 > [`scripts/plugin-entry-audit.mjs`](../../../../../scripts/plugin-entry-audit.mjs)
 > 与 [`scripts/core-export-audit.mjs`](../../../../../scripts/core-export-audit.mjs)
 > 的规则表（各是自己那批规则的唯一定义处；
-> [`plugin-route-address.md`](../../../../../docs/design/plugin-route-address.md)
+> [`plugin-route-address.md`](../../../../../docs/arch/plugin-route-address.md "docs/arch/plugin-route-address")
 > 只收地址类规则 E-001 ~ E-007）。
 
 **存量豁免（登记于此，只减不增）**——领域层当前仍引用的编排层符号及归位方向。
@@ -153,7 +161,7 @@ X/mod.rs + X/tests.rs      模块文件是 mod.rs 的（如 store/、heartbeat/�
 
 - **不动机制语义**：分工只回答「代码落在哪」，不改判定、阈值、文案、执行顺序。
 - **不动单点结构**：`close_turn` 与压缩内核的内部结构是「单一实现」约束的落点，
-  拆开会让两条入口各自维护一套流水线——见 [`./core-loop.md`](./core-loop.md)。
+  拆开会让两条入口各自维护一套流水线——见 [`./core-loop.md`](core-loop.md "symbio/src/plugins/session/docs/core-loop")。
 - **不顺手收窄 / 放宽可见性**：搬移阶段只做归位；可见性调整是独立决策，
   要有跨域共享面或域内分工的判据支撑（§3）。
 - **不抄结构快照**：文件数、行数、代码规模一律以

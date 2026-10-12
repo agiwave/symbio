@@ -4,7 +4,7 @@
  *
  * ## 它治的病
  *
- * [P1](./docs/registry/task/P1.md) 登记的原始问题：**出口判据是
+ * [P1](./docs/task/P1.md) 登记的原始问题：**出口判据是
  * 「测试有没有过」，不是「用户看见的数变了没有」**。`04 §1.3` 那张逐阶出口表有 14 行
  * 指标， measured 方式一栏全是「埋点 / 日志扫描 / 投影比对 / 单测」——**没有一行说得出
  * 用户在界面上读哪里**。而 `session/stats` 这个只读口早就存在（八列 + 四列），
@@ -33,7 +33,7 @@
  * 用法：node scripts/slo-exit-audit.mjs [--root=<仓库根>] [--strict]
  * 退出码：0 = 通过；1 = SX-001；2 = 范围读不出（**不退化成「什么都没检查」**）。
  */
-// 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns SX SLO 出口表 vs session/stats 读数列（用户可见出口）
 // @codes SX-001 SX-002 SX-003
 

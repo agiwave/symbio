@@ -276,7 +276,7 @@ impl TelegramPlugin {
     /// 启动监听器
     ///
     /// **不接受「注入 LLM 插件」参数**：跨插件调用一律经 `ctx.parent()` 走容器，
-    /// 见 `docs/design/plugin-route-address.md`。
+    /// 见 `docs/arch/plugin-route-address.md`。
     ///
     /// 原先的 `llm_plugin: Option<Arc<dyn Plugin>>` 参数是个从未生效的设计：
     /// 它只在传 `Some(..)` 时写入字段，而唯一调用点传的是 `None`，于是

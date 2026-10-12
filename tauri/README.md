@@ -1,3 +1,11 @@
+---
+kind: arch
+id: tauri/README
+title: Tauri 前端
+status: active
+created: 2026-09-09
+---
+
 # Tauri 前端
 
 Symbio 桌面前端：Vue 3 + TypeScript + Tauri 2。
@@ -27,4 +35,4 @@ tauri/
 
 - 前端架构与机制：`docs/FRONTEND.md`
 - 交互语义（屏幕 / 动作 / 状态 / 流式时间轴）：`docs/INTERACTION.md`
-- 后端总览：`../README.md`、`../docs/SYSTEM_MAP.md`
+- 后端总览：`../README.md`、`../docs/arch/SYSTEM_MAP.md`

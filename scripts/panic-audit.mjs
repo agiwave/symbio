@@ -39,7 +39,7 @@
  * 用法：node scripts/panic-audit.mjs [--root=<仓库根>] [--strict]
  * 退出码：0 = 通过；1 = 有失效；2 = 审计范围读不出。
  */
-// 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns PN 健壮性登记（每一处 panic 都是显式事实）
 // @codes PN-001 PN-002 PN-003
 

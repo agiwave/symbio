@@ -1,11 +1,19 @@
+---
+kind: arch
+id: symbio/src/plugins/session/docs/vdfs-session-messages
+title: 会话消息的 VDFS 化 —— 转写即列表，流式即追加
+status: active
+created: 2026-09-15
+---
+
 # 会话消息的 VDFS 化 —— 转写即列表，流式即追加
 
-> 前置阅读：[vdfs.md](../../../../../docs/design/vdfs.md)（机制规范）、[vdfs-frontend.md](../../../../../docs/design/vdfs-frontend.md)（前端页面规范）。
+> 前置阅读：[vdfs.md](../../../../../docs/arch/vdfs.md "docs/arch/vdfs")（机制规范）、[vdfs-frontend.md](../../../../../docs/arch/vdfs-frontend.md "docs/arch/vdfs-frontend")（前端页面规范）。
 >
 > 本文回答一个问题：**会话消息如何整体并入 VDFS 体系**，以及为什么
 > 「会话列表本身也是列表，流模式其实就是列表项的变更」不是一句类比，
 > 而是可以直接落地的机制判断。取舍的裁决见
-> [ADR-025](../../../../../docs/registry/adr/INDEX.md)。
+> [ADR-025](../../../../../docs/adr/ADR-025.md)。
 
 ---
 
@@ -306,7 +314,7 @@ store 提交与消息树重建。合帧是**投递层**的优化：线上形状�
 
 **运行由空间自己起**：入队后唤醒该实例的收件箱消费者，它在会话**空闲**时取出队首、
 调与 `chat/send` 完全相同的执行路径跑一轮，跑完再取下一条（FIFO、忙则排队、不抢占）。
-这就是「子智能体空间没有调用方也能跑完整会话」的全部机制（[ADR-026](../../../../../docs/registry/adr/INDEX.md)）。
+这就是「子智能体空间没有调用方也能跑完整会话」的全部机制（[ADR-026](../../../../../docs/adr/ADR-026.md)）。
 
 条目**出队即消失**：消费后它已经是转写里的一条消息，不再回队列。因此两种「取消」作用在
 不同对象上，各走各的入口：
@@ -373,12 +381,12 @@ store 提交与消息树重建。合帧是**投递层**的优化：线上形状�
 
 ## 8. 与既有文档的关系
 
-- [vdfs.md](../../../../../docs/design/vdfs.md)：机制规范。本文是它在**会话场景**上的应用，
+- [vdfs.md](../../../../../docs/arch/vdfs.md "docs/arch/vdfs")：机制规范。本文是它在**会话场景**上的应用，
   不引入新机制——`消息` 是一个普通子目录，`ext = message` 是一个普通扩展名，
   流式追加是节点内容的一次变更。
-- [vdfs.md](../../../../../docs/design/vdfs.md) §13.4：会话子目录由 `session` 插件自己的
+- [vdfs.md](../../../../../docs/arch/vdfs.md "docs/arch/vdfs") §13.4：会话子目录由 `session` 插件自己的
   `impl VdfsProvider` 提供——清单与消息视图背后是**同一份存储**，不存在第二份数据。
-- [vdfs-frontend.md](../../../../../docs/design/vdfs-frontend.md)：前端页面规范与现行装配形态。
-- [node-state-streaming.md](./node-state-streaming.md)：节点分类与状态机（消息节点状态词的
+- [vdfs-frontend.md](../../../../../docs/arch/vdfs-frontend.md "docs/arch/vdfs-frontend")：前端页面规范与现行装配形态。
+- [node-state-streaming.md](node-state-streaming.md "symbio/src/plugins/session/docs/node-state-streaming")：节点分类与状态机（消息节点状态词的
   来源、组合节点的终态跟随子树）。
-- [ADR-025](../../../../../docs/registry/adr/INDEX.md)：顺序是节点属性、`delta` 是传输形态的裁决与理由。
+- [ADR-025](../../../../../docs/adr/ADR-025.md)：顺序是节点属性、`delta` 是传输形态的裁决与理由。

@@ -1,10 +1,18 @@
+---
+kind: arch
+id: symbio/src/plugins/local/README
+title: Local 插件
+status: active
+created: 2026-09-09
+---
+
 # Local 插件
 
 本地工具集：提供宿主机文件系统与命令执行能力，经 `traverse` 向会话贡献工具。
 
 ## 工具
 
-清单与逐项说明见 `docs/reference/ROUTES.md` §Local 插件（**权威**）。共 5 个原生工具：
+清单与逐项说明见 `docs/ref/ROUTES.md` §Local 插件（**权威**）。共 5 个原生工具：
 
 | 工具 | 说明 |
 |------|------|

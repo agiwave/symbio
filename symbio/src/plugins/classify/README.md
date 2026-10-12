@@ -1,13 +1,21 @@
+---
+kind: arch
+id: symbio/src/plugins/classify/README
+title: Classify 插件（对话面：判决）
+status: active
+created: 2026-09-29
+---
+
 # Classify 插件（对话面：判决）
 
 「这一轮该直接回答、还是派给工具循环」——**只输出枚举，不产出面向用户的文本**。
 
-措辞归 [`../compose/README.md`](../compose/README.md)。判决与措辞分开的理由不是「拆得越细越好」，
+措辞归 [`../compose/README.md`](../compose/README.md "symbio/src/plugins/compose/README")。判决与措辞分开的理由不是「拆得越细越好」，
 而是编排层要能**执行**判决（收尾 / 进工具循环 / 只说一句）——执行一段自由文本只能靠字符串匹配。
 
 ## 路由
 
-清单见 [`docs/reference/ROUTES.md`](../../../../docs/reference/ROUTES.md) §Classify 插件（**权威**）：
+清单见 [`docs/ref/ROUTES.md`](../../../../docs/ref/ROUTES.md "docs/ref/ROUTES") §Classify 插件（**权威**）：
 `classify/decide`。
 
 ## 契约
@@ -79,4 +87,4 @@ decide(utterance)
 
 - 措辞：`../compose/README.md`
 - 切分依据（为什么是两个插件）：`docs/plan/09-对话面插件拆分实施方案.md`
-- 地址规则：`docs/design/plugin-route-address.md`
+- 地址规则：`docs/arch/plugin-route-address.md`

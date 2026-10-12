@@ -12,6 +12,7 @@ const gen = path.join(scriptDir, '..', 'gen-current-facts.mjs')
 const genCodes = path.join(scriptDir, '..', 'gen-gate-codes.mjs')
 const genRoutes = path.join(scriptDir, '..', 'gen-routes-ts.mjs')
 const regAudit = path.join(scriptDir, '..', 'registry-audit.mjs')
+const docRefs = path.join(scriptDir, '..', 'gen-doc-refs.mjs')
 
 export default {
   id: 'facts',
@@ -59,6 +60,19 @@ export default {
             label: 'registry-audit --write',
             cmd: process.execPath,
             args: [regAudit, '--write'],
+            cwd: repoRoot,
+          }),
+      },
+      {
+        // 文档间引用**只写编号**（`[[T-008]]`），地址由本步生成/重算：编号不变则地址永远正确，
+        // 文档搬家后入链自愈——「不手写地址」这句话的执行方。未登记的编号由它判红（RF-001）。
+        // 放在 registry-audit --write 之后：汇总页里的链接是渲染出来的，本步只管正文引用。
+        label: 'gen-doc-refs（自动重算文档引用地址）',
+        run: (c) =>
+          autoWork(c, {
+            label: 'gen-doc-refs',
+            cmd: process.execPath,
+            args: [docRefs],
             cwd: repoRoot,
           }),
       },

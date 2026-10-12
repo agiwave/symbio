@@ -1,3 +1,11 @@
+---
+kind: guide
+id: CODE_OF_CONDUCT
+title: Contributor Covenant Code of Conduct
+status: active
+created: 2026-07-20
+---
+
 # Contributor Covenant Code of Conduct
 
 ## Our Pledge
@@ -36,7 +44,7 @@
 
 ## Enforcement
 
-不当行为的报告请联系 maintainers（参见 [README.md](./README.md) 中的联系方式）。
+不当行为的报告请联系 maintainers（参见 [README.md](README.md "README") 中的联系方式）。
 所有投诉都会被及时、公平地审阅与处理。
 
 ## Attribution

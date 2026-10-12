@@ -1,4 +1,4 @@
-//! 控制面主体：抢占判定（[roadmap/S07](../../../../../docs/plan/roadmap/S07-插话与实时打断.md)）与外部执行闸门（[roadmap/S09](../../../../../docs/plan/roadmap/S09-外部执行与熔断.md)）。
+//! 控制面主体：抢占判定（[roadmap/S07](../../../../../docs/stage/S07-插话与实时打断.md)）与外部执行闸门（[roadmap/S09](../../../../../docs/stage/S09-外部执行与熔断.md)）。
 
 use crate::symbio_core::Event;
 
@@ -16,7 +16,7 @@ pub enum Preemption {
     TimeoutDefaultContinue,
 }
 
-/// 抢占判定者（S8 第 19 步，[roadmap/S07 §3](../../../../../docs/plan/roadmap/S07-插话与实时打断.md)）。
+/// 抢占判定者（S8 第 19 步，[roadmap/S07 §3](../../../../../docs/stage/S07-插话与实时打断.md)）。
 ///
 /// `pattern = decider`、`capabilities = [JudgeIntent]`、`budget_ms = 80`——
 /// 系统第一次需要在几十毫秒内对外部信号做决策。**判定者只产控制事件**
@@ -134,7 +134,7 @@ impl PreemptionDecider {
     }
 }
 
-/// 闸门结论（S8 第 20 步，[roadmap/S09 §6](../../../../../docs/plan/roadmap/S09-外部执行与熔断.md)）。
+/// 闸门结论（S8 第 20 步，[roadmap/S09 §6](../../../../../docs/stage/S09-外部执行与熔断.md)）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GateDecision {
     /// 未授权——调用方**不得产生任何事件**（验收 1：拒绝且无事件）。
@@ -146,7 +146,7 @@ pub enum GateDecision {
     Allow,
 }
 
-/// 熔断闸门（S8 第 20 步，[roadmap/S09](../../../../../docs/plan/roadmap/S09-外部执行与熔断.md)）。
+/// 熔断闸门（S8 第 20 步，[roadmap/S09](../../../../../docs/stage/S09-外部执行与熔断.md)）。
 ///
 /// `budget_ms = 80` 的反射档判定：超预算 / 超时**熔断**而不是"先做了再说"。
 /// 授权判定留在调用方（读路径持矩阵）——本体的输入是判据数据，不是 ⑥ 的句柄。

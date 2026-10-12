@@ -200,7 +200,7 @@ const S010_SUSPECT_MD = '# 指南\n\n会话在 `.vdfs/session` 之下。\n'
 test('S-010 fires outside the vdfs plugin (ts / md / rust)', () => {
   for (const [rel, content] of [
     ['tauri/src/schemas/x.ts', S010_SUSPECT_TS],
-    ['docs/guides/x.md', S010_SUSPECT_MD],
+    ['docs/guide/x.md', S010_SUSPECT_MD],
     ['symbio/src/plugins/session/memory.rs', 'pub const A: &str = ".vdfs/session";\n'],
   ]) {
     const r = s010Audit({ [rel]: content })
@@ -261,7 +261,7 @@ test('S-010 still fires inside the repo tree when runtime dirs are present', () 
   const r = s010Audit({
     'symbio/src/plugins/vdfs/fs.rs': '', // 标记：这是一个仓库树
     '.symbio/session/09d74431/MEMORY.md': '会话落在 `.vdfs/session/<id>` 之下。\n',
-    'docs/guides/x.md': S010_SUSPECT_MD,
+    'docs/guide/x.md': S010_SUSPECT_MD,
   })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /S-010/)

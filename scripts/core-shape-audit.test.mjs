@@ -171,7 +171,7 @@ test('放宽注释挂着能打开的 ADR ⇒ 通过（棘轮不判论证内容�
   const r = audit(
     core(ONE, {
       'scripts/core-shape-audit.mjs': '// core-shape-allow methods: ADR-077 扩到 2 个成员的理由\n',
-      'docs/registry/adr/ADR-077.md': '---\nkind: adr\n---\n',
+      'docs/adr/ADR-077.md': '---\nkind: adr\n---\n',
     }),
     { baseline: '1:2:0' },
   )
@@ -182,7 +182,7 @@ test('放宽一个不存在的格 ⇒ CS-002 变红（拼错的键名不能当�
   const r = audit(
     core(ONE, {
       'scripts/core-shape-audit.mjs': '// core-shape-allow methodz: ADR-077 打错了键名\n',
-      'docs/registry/adr/ADR-077.md': '---\nkind: adr\n---\n',
+      'docs/adr/ADR-077.md': '---\nkind: adr\n---\n',
     }),
     { baseline: '1:2:0' },
   )

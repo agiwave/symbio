@@ -51,7 +51,7 @@ export const GUARDS = [
   // 看不见：doc-link 只管链接、gen-current-facts 只生成结构表，都不校验散文
   // 里的符号指认——校准日一次就抓出五处改名残留（`KEY_PAYLOAD` →
   // `PLUGIN_PAYLOAD_KEY`、`HOOK_FIRE` → `ROUTE_HOOK_FIRE` 等，先修后建）。
-  // 豁免出口只对应「文档说的是历史」：`docs/registry/adr/`（ADR 正文）与 `archive`
+  // 豁免出口只对应「文档说的是历史」：`docs/adr/`（ADR 正文）与 `archive`
   // 行内历史词、`<!-- doc-symbol-allow: 理由 -->` 承认通道（空理由不算）。
   // 回归测试双向钉住：违规必须变红，注释/单段词/ADR 不得误报，范围读不出必须 exit 1。
   'doc-symbol-audit',
@@ -86,7 +86,7 @@ export const GUARDS = [
   // 退出 0。回归测试因此拿真实仓库的登记项 / 命中数做非零对照。
   'panic-audit',
   // `no-direct-call-audit`（S6 第 14 步，出口判据「直连调用 0」）判「**任意两主体
-  // 无直连——一切经事实源**」（[roadmap/S08 §5](docs/plan/roadmap/S08-多主体与对等承诺.md)）：
+  // 无直连——一切经事实源**」（[roadmap/S08 §5](docs/stage/S08-多主体与对等承诺.md)）：
   // 直接调用的前提是持有对方句柄，故禁两类形态——NDC-001 主体类型名出现在
   // 定义域/根重导出/测试文件之外的运行时代码（注释不算，文档 ≠ 对象图边）；
   // NDC-002 任何文件里的主体句柄（`Arc<P>` / `Rc<P>` / `Arc::new(P)` /
@@ -195,6 +195,12 @@ export const TEST_ONLY = [
   // 没进形状 ⇒ 拍平红不了**，以及反向的**提取写严 ⇒ 规模成了判据 ⇒ 改一句用例措辞就红**。
   // 两头各钉一条，见 `prompt-shape-audit.test.mjs`。
   'prompt-shape-audit',
+  // `gen-doc-refs`（RF-001 / RF-002）是「文档引用只写编号、地址由机制生成」的执行方：
+  // `[[编号]]` 展开成链接，已展开的地址按编号**重算**（文档搬家后入链自愈），
+  // 解析不出的编号判红。它是**生成器**（门内执行方是 `60-facts` 的 autoWork），
+  // 这里跑的是它的回归测试——防的失效形态与前几个生成器同源：**提取/重写字宽 ⇒
+  // 该改的不改（入链静默失效）或不该改的乱改（守卫开始改坏正文）**。
+  'gen-doc-refs',
   // `gen-routes-ts` + `route-facts` 是前端路由契约的**唯一真源链**（后端 `route()` 臂 →
   // `constants/routes.gen.ts`）。它的失效形态是静默少一条：提取口径一旦把某个形态
   // （复合臂 / 根容器 home）读漏，前端就拿到一份「后端没有的地址」，而 M-008 的词表
@@ -254,6 +260,7 @@ export const LIBS = [
   'route-facts',
   'gen-current-facts',
   'gen-gate-codes',
+  'gen-doc-refs',
   'line-count',
   'doc-find',
   'registry-lib',

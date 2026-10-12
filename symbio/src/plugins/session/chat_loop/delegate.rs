@@ -25,7 +25,7 @@
 //! / `worker_keywords` / `worker_min_chars`；出厂值的**单一真源在配置面**
 //! （`mod chat_loop` / `mod delegate` 皆私有，判定侧能 import 配置面、反过来不行），
 //! 本模块**不持第二份字面量**，出厂参数由判定侧的测试显式 import 同一批常量。
-//! 字段表同步 [CONFIGURATION](../../../../../docs/reference/CONFIGURATION.md)。
+//! 字段表同步 [CONFIGURATION](../../../../../docs/ref/CONFIGURATION.md)。
 //!
 //! ## Q3 现读磁盘，不记进程内账
 //!

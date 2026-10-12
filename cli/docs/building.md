@@ -1,3 +1,11 @@
+---
+kind: guide
+id: cli/docs/building
+title: 构建
+status: active
+created: 2026-09-11
+---
+
 # 构建
 
 > **一句话**：不要直接 `cargo build`。用 `node scripts/build-cli.mjs`，由脚本把 C 工具链喂给

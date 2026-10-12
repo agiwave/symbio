@@ -30,7 +30,7 @@
  * R-002 同理只认**字面属性**：`cfg_attr` 里拼出来的 `allow`、宏内部生成的属性
  * （`define_string_key!` 靠调用点透传臂转发）都按调用点那行算。
  */
-// 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns R 死代码
 // @codes R-001 R-002
 
@@ -384,11 +384,11 @@ function r002Reason(lines, i) {
 //    随口径一并登记在该条目里；② 规则源改读 `S31-1`（批号词表），04 §3.1 只留指路。
 //    「批号必须真实存在」这条对账关系（防写不存在的批号）是价值所在，规则源跟着词表走。
 const PLAN_04_PATH = join(REPO, 'docs', 'plan', '04-工程落地.md')
-const S31_1_PATH = join(REPO, 'docs', 'registry', 'spec', 'S31-1.md')
+const S31_1_PATH = join(REPO, 'docs', 'spec', 'S31-1.md')
 // 回归测试用 `--root=` 注入最小仓库，那里没有条目——**没有台账就不判这一条**
 // （否则 fixture 全红，守卫的测试自己成了噪音）；真仓里条目在，规则才生效。
 //
-// 规则源优先读 `docs/registry/spec/S31-1.md`（T-006 起的批号闭集 owner），
+// 规则源优先读 `docs/spec/S31-1.md`（T-006 起的批号闭集 owner），
 // 读不到再退回 04 §3.1 的旧表（迁移期兼容 / fixture 无条目）。
 const S31_1 = existsSync(S31_1_PATH) ? readFileSync(S31_1_PATH, 'utf8') : null
 const PLAN_04 = existsSync(PLAN_04_PATH) ? readFileSync(PLAN_04_PATH, 'utf8') : null

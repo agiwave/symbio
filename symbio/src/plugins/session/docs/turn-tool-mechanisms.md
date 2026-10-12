@@ -1,3 +1,11 @@
+---
+kind: arch
+id: symbio/src/plugins/session/docs/turn-tool-mechanisms
+title: 工具失败回传与 Turn 终态机制
+status: active
+created: 2026-09-09
+---
+
 # 工具失败回传与 Turn 终态机制
 
 > 历史实施记录见 `docs/archive/implementation-logs/`。

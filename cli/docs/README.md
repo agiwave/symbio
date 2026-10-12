@@ -1,3 +1,11 @@
+---
+kind: guide
+id: cli/docs/README
+title: symbio-cli 文档中心
+status: active
+created: 2026-09-11
+---
+
 # symbio-cli 文档中心
 
 `symbio-cli` 是与 [`../tauri`](../..) **并列**的第二种 Symbio 前端形态：纯 Rust 的命令行客户端，
@@ -7,9 +15,9 @@
 
 | 文档 | 内容 |
 | --- | --- |
-| [架构 (architecture.md)](./architecture.md) | 进程内客户端设计、`event_bus` 下行通道选择、终端渲染器、模式选择逻辑、消息增量合并模型 |
-| [构建 (building.md)](./building.md) | 为什么不能裸 `cargo build`、C 工具链注入三要素、共享 target 的绝对路径陷阱、target 缓存修复 |
-| [用法 (usage.md)](./usage.md) | 三种运行模式示例、完整参数表、REPL 内置命令、输出通道约定、系统目录与 Provider 语义、已知边界 |
+| [架构 (architecture.md)](architecture.md "cli/docs/architecture") | 进程内客户端设计、`event_bus` 下行通道选择、终端渲染器、模式选择逻辑、消息增量合并模型 |
+| [构建 (building.md)](building.md "cli/docs/building") | 为什么不能裸 `cargo build`、C 工具链注入三要素、共享 target 的绝对路径陷阱、target 缓存修复 |
+| [用法 (usage.md)](usage.md "cli/docs/usage") | 三种运行模式示例、完整参数表、REPL 内置命令、输出通道约定、系统目录与 Provider 语义、已知边界 |
 
 ## 速览
 

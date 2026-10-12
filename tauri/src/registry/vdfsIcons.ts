@@ -63,7 +63,7 @@ export function registerVdfsIcon(kind: string, icon: Component): void {
  * `<根>` 的六个挂载点由 `VdfsNode::dir(...)` 产出，`kind` **全是 `"dir"`**
  * （后端自测 `composite/vdfs.test.rs` 断言了此值）。曾把顺序写成 kind 优先，
  * 六个挂载点**全部**命中 `dir` 那张图 → 主界面左栏整排退成同一个默认文件夹。
- * 完整事故记录见 `docs/design/frontend-ui-ux-plan.md` §9。
+ * 完整事故记录见 `docs/arch/frontend-ui-ux-plan.md` §9。
  *
  * 从前还有两个中间层 `getVdfsIcon` / `getVdfsIconFor`，各自带一条「回退到
  * `icons[kind]`」的尾巴——那条尾巴会抢先命中笼统 kind，把名字查询挡死。已删除，

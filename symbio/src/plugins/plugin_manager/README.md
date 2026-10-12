@@ -1,3 +1,11 @@
+---
+kind: arch
+id: symbio/src/plugins/plugin_manager/README
+title: Plugin_manager 插件（插件管理）
+status: active
+created: 2026-09-25
+---
+
 # Plugin_manager 插件（插件管理）
 
 `<根>/plugin_manager` 挂载点的实现者：本智能体**插件集合**的门面——列出全部插件、
@@ -19,7 +27,7 @@
 
 ## 路由
 
-**无**（权威登记见 [ROUTES.md](../../../../docs/reference/ROUTES.md) §Plugin_manager 插件）。
+**无**（权威登记见 [ROUTES.md](../../../../docs/ref/ROUTES.md "docs/ref/ROUTES") §Plugin_manager 插件）。
 本插件是无状态 provider，`route` 恒 `NotFound`。
 
 ## 清单 = 各插件的条目 + 自有分区
@@ -86,5 +94,5 @@
   `symbio/src/plugins/composite/vdfs.rs`
 - 插件目录与配置：`symbio_core::plugin::dir`（`PLUGIN.yml` 的保留键）
 - 可配置声明通道：`symbio_core::capability::configurable`（`ConfigurableVisitor` / `CONFIG_VISITOR`）
-- VDFS 机制：`docs/design/vdfs.md`（`DetailDefinition` 是 `ext = form` 节点的
+- VDFS 机制：`docs/arch/vdfs.md`（`DetailDefinition` 是 `ext = form` 节点的
   `schema` 方言；配置文件地址 = `<插件目录>/PLUGIN.yml`，见 §3.4 / §13.1）

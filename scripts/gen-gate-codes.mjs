@@ -11,7 +11,7 @@
  * 本表只给地址地图，不复述。
  *
  * 用法：
- *   node scripts/gen-gate-codes.mjs            # 写 docs/reference/GATE_CODES.md
+ *   node scripts/gen-gate-codes.mjs            # 写 docs/ref/GATE_CODES.md
  *   node scripts/gen-gate-codes.mjs --check    # 只比对，漂移则非零退出（CI 用）
  */
 
@@ -22,7 +22,7 @@ import { collect } from './gate-codes-audit.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..')
-const OUT = path.join(repoRoot, 'docs', 'reference', 'GATE_CODES.md')
+const OUT = path.join(repoRoot, 'docs', 'ref', 'GATE_CODES.md')
 
 const num = (code) => Number(code.slice(code.indexOf('-') + 1))
 
@@ -102,14 +102,14 @@ function render() {
 const content = render()
 if (process.argv.includes('--check')) {
   if (!fs.existsSync(OUT)) {
-    console.error('✗ docs/reference/GATE_CODES.md 不存在——先运行 `node scripts/gen-gate-codes.mjs`')
+    console.error('✗ docs/ref/GATE_CODES.md 不存在——先运行 `node scripts/gen-gate-codes.mjs`')
     process.exit(1)
   }
   if (fs.readFileSync(OUT, 'utf8') !== content) {
-    console.error('✗ docs/reference/GATE_CODES.md 与脚本声明不一致——重跑 `node scripts/gen-gate-codes.mjs`')
+    console.error('✗ docs/ref/GATE_CODES.md 与脚本声明不一致——重跑 `node scripts/gen-gate-codes.mjs`')
     process.exit(1)
   }
-  console.log('✓ docs/reference/GATE_CODES.md 与脚本声明一致')
+  console.log('✓ docs/ref/GATE_CODES.md 与脚本声明一致')
   process.exit(0)
 }
 fs.mkdirSync(path.dirname(OUT), { recursive: true })

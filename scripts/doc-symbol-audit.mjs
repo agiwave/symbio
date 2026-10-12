@@ -37,7 +37,7 @@
  *   `register_option_field`。
  *
  * 豁免（都对应「文档说的不是现状」）：
- *   1. `docs/archive/`、`docs/registry/adr/` 整体排除——ADR 正文（`docs/registry/adr/ADR-NNN.md`）
+ *   1. `docs/archive/`、`docs/adr/` 整体排除——ADR 正文（`docs/adr/ADR-NNN.md`）
  *      与归档都是历史快照，当时的符号指认不随代码改名回改（回改反而篡改历史）；
  *   2. 行内含历史词（已删除 / 已退役 / 已废弃 / deprecated / 取代 / 判为删除）⇒ 跳过，
  *      如迁移表里「已删除」的行、台账里「`X` 判为删除」的行；
@@ -59,7 +59,7 @@
  * D-009 只在同族存在时才判，一个**整族都不存在**的杜撰名（`ROUTE_` 全没了还写 `ROUTE_X`）
  * 落在闸外——那是结构事实，归 CURRENT.md 的生成表管。
  */
-// 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns D 文档正文与链接
 // @codes D-005 D-009
 
@@ -92,7 +92,7 @@ const CONST_SHAPE = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/
 const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'tmp', '.workbuddy-ai', '.symbio'])
 /** 整目录排除：ADR 记的是**当时**的设计，其中被指认的符号可能早已改名 / 删除，
  *  按现行代码判它会永久误报；归档同理。两者都是「文档说的不是现状」。 */
-const EXCLUDE_MD_DIRS = ['docs/archive', 'docs/registry/adr']
+const EXCLUDE_MD_DIRS = ['docs/archive', 'docs/adr']
 /** 行内历史词：这行说的是过去，符号现在不存在是正常的。
  *  「判为删除 / 已判：删除」是台账（04 §3.1）对被删符号的固定说法——它和「已删除」
  *  是同一类叙述：这行明说那个名字已经不在了，按现行代码判它必然是误红。 */

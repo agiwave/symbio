@@ -1,3 +1,11 @@
+---
+kind: arch
+id: tauri/docs/INTERACTION
+title: 前端交互面（用户视角）
+status: active
+created: 2026-09-28
+---
+
 # 前端交互面（用户视角）
 
 > 本文是**交互语义**的 owner：用户看到哪些屏幕与区域、每个动作产生什么可见反馈、
@@ -8,11 +16,11 @@
 > | 事实 | owner |
 > |---|---|
 > | 现在有什么（路由 / 工具 / 规模） | `docs/CURRENT.md`（自动生成） |
-> | 路由语义与调用方 | `docs/reference/ROUTES.md` |
-> | VDFS 三栏规范（左栏 / 中栏 / 详情 / 浏览内部） | `docs/design/vdfs-frontend.md` |
+> | 路由语义与调用方 | `docs/ref/ROUTES.md` |
+> | VDFS 三栏规范（左栏 / 中栏 / 详情 / 浏览内部） | `docs/arch/vdfs-frontend.md` |
 > | 「发言是入队、流式渲染」等前端机制约定 | `tauri/docs/FRONTEND.md` |
 > | 会话后端机制（消息词表、压缩分层、变更帧语义） | `symbio/src/plugins/session/README.md` 与 `symbio/src/plugins/session/docs/` |
-> | 「还能怎么提升」的提案 | `docs/design/frontend-ui-ux-plan.md` |
+> | 「还能怎么提升」的提案 | `docs/arch/frontend-ui-ux-plan.md` |
 
 ---
 
@@ -41,7 +49,7 @@
 
 - 页面**不出现面包屑**、**不出现「新建目录」按钮**——路径即导航，新建 = 新建一种资源类型。
 - 一个地址 = 一个可回退的页面；层级靠「左栏切目录 + 中栏钻入 + 返回键上溯」三段承担。
-  规范见 `docs/design/vdfs-frontend.md`。
+  规范见 `docs/arch/vdfs-frontend.md`。
 
 ---
 

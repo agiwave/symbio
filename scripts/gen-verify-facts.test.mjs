@@ -593,7 +593,7 @@ test('真实 02 读得出坐标系：名册、定义表与三处声明吃的是�
 })
 
 test('真实 S10 读得出 16 条认知需求，其中恰有一条不占参数面', () => {
-  const s10 = fs.readFileSync(path.join(REPO, 'docs', 'plan', 'roadmap', 'S10-个人认知体系注入.md'), 'utf8')
+  const s10 = fs.readFileSync(path.join(REPO, 'docs', 'stage', 'S10-个人认知体系注入.md'), 'utf8')
   const ds = demandsOf(s10, 'S10')
   assert.equal(ds.length, 16, 'S10 §2 与 03 §7.1 都说 16 条——数一下，别信')
   assert.equal(ds.filter((d) => !d.assignments.length).length, 1, '只有 C06（索引）不占参数面')

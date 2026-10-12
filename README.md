@@ -1,3 +1,11 @@
+---
+kind: guide
+id: README
+title: Symbio
+status: active
+created: 2026-07-20
+---
+
 # Symbio
 
 > **一个可组合、多协议的 AI Agent 平台**：一条 Rust 核心库 + 三种接入方式（桌面 / 命令行 / 网关），由**分形插件架构**统一编排对话、记忆、工具调用与外部集成。一条规则：每个能力都是一个**路径**。
@@ -21,8 +29,8 @@
 - **VDFS** — 文件、模型、Agent、技能、MCP、设置……统统是有地址的资源，一个心智模型。
 - **Agent = 一个目录** — 技能 / MCP 复用宿主的子树，没有独立二进制。
 
-> 展开的架构说明见 [架构总览](docs/architecture/OVERVIEW.md)；运行时拓扑（谁挂在谁下面）见
-> [系统地图](docs/SYSTEM_MAP.md)——本文不复述这两者。
+> 展开的架构说明见 [架构总览](docs/arch/OVERVIEW.md "docs/arch/OVERVIEW")；运行时拓扑（谁挂在谁下面）见
+> [系统地图](docs/arch/SYSTEM_MAP.md "docs/arch/SYSTEM_MAP")——本文不复述这两者。
 
 ---
 
@@ -55,7 +63,7 @@ cd symbio && cargo build --lib && cargo test --lib
 cargo clippy --lib --tests -- -D warnings
 ```
 
-> 完整教程见 [快速上手](docs/guides/QUICK_START.md)。
+> 完整教程见 [快速上手](docs/guide/QUICK_START.md "docs/guide/QUICK_START")。
 
 ---
 
@@ -88,15 +96,15 @@ symbio/
 
 | | |
 | --- | --- |
-| **入门** | [快速上手](docs/guides/QUICK_START.md) · [系统地图](docs/SYSTEM_MAP.md) |
-| **架构** | [总览](docs/architecture/OVERVIEW.md) · [数据流](docs/architecture/DATA_FLOW.md) · [协议](docs/architecture/PROTOCOLS.md) · [决策记录](docs/registry/adr/INDEX.md) |
-| **参考** | [事实表](docs/CURRENT.md) · [路由](docs/reference/ROUTES.md) · [错误码](docs/reference/ERROR_CODES.md) · [配置](docs/reference/CONFIGURATION.md) |
-| **开发** | [插件开发](docs/guides/PLUGIN_DEVELOPMENT.md) · [排障](docs/guides/TROUBLESHOOTING.md) · [任务 / 规范登记](docs/registry/INDEX.md) · [贡献指南](CONTRIBUTING.md) |
-| **设计** | [VDFS 规范](docs/design/vdfs.md) · [上下文压缩分层](symbio/src/plugins/session/docs/context-compression-design.md) · [Agent 目录规范 v2](docs/design/agent-directory-spec.md) |
-| **CLI** | [cli/README.md](cli/README.md) · [架构](cli/docs/architecture.md) · [构建](cli/docs/building.md) · [用法](cli/docs/usage.md) |
-| **变更** | 变更历史 = `git log`（本仓库不另维护变更日志，理由见 [贡献指南](CONTRIBUTING.md)）· [历史归档](docs/archive/) |
+| **入门** | [快速上手](docs/guide/QUICK_START.md "docs/guide/QUICK_START") · [系统地图](docs/arch/SYSTEM_MAP.md "docs/arch/SYSTEM_MAP") |
+| **架构** | [总览](docs/arch/OVERVIEW.md "docs/arch/OVERVIEW") · [数据流](docs/arch/DATA_FLOW.md "docs/arch/DATA_FLOW") · [协议](docs/arch/PROTOCOLS.md "docs/arch/PROTOCOLS") · [决策记录](docs/adr/INDEX.md) |
+| **参考** | [事实表](docs/CURRENT.md) · [路由](docs/ref/ROUTES.md "docs/ref/ROUTES") · [错误码](docs/ref/ERROR_CODES.md "docs/ref/ERROR_CODES") · [配置](docs/ref/CONFIGURATION.md "docs/ref/CONFIGURATION") |
+| **开发** | [插件开发](docs/guide/PLUGIN_DEVELOPMENT.md "docs/guide/PLUGIN_DEVELOPMENT") · [排障](docs/guide/TROUBLESHOOTING.md "docs/guide/TROUBLESHOOTING") · [任务 / 规范登记](docs/INDEX.md) · [贡献指南](CONTRIBUTING.md "CONTRIBUTING") |
+| **设计** | [VDFS 规范](docs/arch/vdfs.md "docs/arch/vdfs") · [上下文压缩分层](symbio/src/plugins/session/docs/context-compression-design.md "symbio/src/plugins/session/docs/context-compression-design") · [Agent 目录规范 v2](docs/arch/agent-directory-spec.md "docs/arch/agent-directory-spec") |
+| **CLI** | [cli/README.md](cli/README.md "cli/README") · [架构](cli/docs/architecture.md "cli/docs/architecture") · [构建](cli/docs/building.md "cli/docs/building") · [用法](cli/docs/usage.md "cli/docs/usage") |
+| **变更** | 变更历史 = `git log`（本仓库不另维护变更日志，理由见 [贡献指南](CONTRIBUTING.md "CONTRIBUTING")）· [历史归档](docs/archive/) |
 
-> 每个插件与前端都维护自己的 `README.md`，详见 [文档中心 · 模块文档地图](docs/README.md#模块文档地图)。
+> 每个插件与前端都维护自己的 `README.md`，详见 [文档中心 · 模块文档地图](docs/README.md#模块文档地图 "docs/README")。
 
 ---
 

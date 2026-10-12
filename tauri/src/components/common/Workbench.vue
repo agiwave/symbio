@@ -18,7 +18,7 @@
   （styles/controls.css）：`rail-header` 插槽内容属宿主作用域，只有全局类才能命中。
 
   VDFS 的三栏页面 = VdfsWorkbench 控件（components/vdfs）+ useVdfs 数据逻辑
-  （绑定数据地址，自取左栏/中栏/详情）。规范：docs/design/vdfs.md。
+  （绑定数据地址，自取左栏/中栏/详情）。规范：docs/arch/vdfs.md。
 
   **列表为空且右栏正铺着新建详情**时中栏整栏收起（判据见 `showList`）。
 -->

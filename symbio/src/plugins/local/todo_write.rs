@@ -61,7 +61,7 @@ impl TodoWriteTool {
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| format!("task_{}", i + 1));
-            // 依赖：任务图是**数据不是机制**（`docs/plan/roadmap/S03` §2），所以它必须
+            // 依赖：任务图是**数据不是机制**（`docs/stage/S03` §2），所以它必须
             // 由调用方声明在清单里，而不是由框架推断。省略 ⇒ `[]`（默认无依赖，日常
             // 调用不受影响；成环由 `acyclic_deps` 在读侧报，不在这里拦——拦下它就变成
             // 了框架替模型决定任务图）。

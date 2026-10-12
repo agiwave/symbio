@@ -2,16 +2,16 @@
 //
 // - 臂 A（结构化 / 出厂现状）：`tools` 数组走原生协议字段， assistant 侧带
 //   `tool_calls`，工具结果走 `role=tool` + `tool_call_id`。这就是
-//   [`docs/reference/PROMPT_SHAPE.md`](../../docs/reference/PROMPT_SHAPE.md) 钉住的形状。
+//   [`docs/ref/PROMPT_SHAPE.md`](../../docs/ref/PROMPT_SHAPE.md) 钉住的形状。
 // - 臂 B（拍平 / 被否决的那条路）：删掉 `tools`，工具明细渲染进 system 正文；
 //   `tool_calls` 渲染成正文里的 JSON 行；`role=tool` 的结果并进一条 user 消息的散文。
-//   这正是 [ADR-048a](../../docs/registry/adr/ADR-048a.md) 当年判为退步的那个形态。
+//   这正是 [ADR-048a](../../docs/adr/ADR-048a.md) 当年判为退步的那个形态。
 //
 // 拍平是**纯函数**：同样的输入必然同样的输出，两臂除这里以外没有任何差别
 // （同一条 system 前缀、同一份 user 提问、同一个信封）。判据要的「只比形状」就靠这个。
 //
 // ⚠️ 本文件只服务门外实验（`node e2e/ab/run.mjs`），不进任何一条产品代码路径，
-// 也不进门禁——[ADR-058](../../docs/registry/adr/ADR-058.md) 被否决方案第 1 条明令
+// 也不进门禁——[ADR-058](../../docs/adr/ADR-058.md) 被否决方案第 1 条明令
 // 真实模型对照不能当门内判据。
 
 /** 把一个工具渲染成正文里的一段（名称 / 描述 / 完整参数 Schema 原样进文本）。 */

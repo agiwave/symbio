@@ -50,28 +50,28 @@ test('失效链接 → 失败（默认即失败，不再需要 --strict）', () 
   assert.match(r.stdout, /nope\.md/)
 })
 
-test('docs/registry/ 条目里的失效链接照判（迁入 docs/ 后不再单列扫描根，D-001 不适用豁免）', () => {
+test('docs/ 条目里的失效链接照判（迁入 docs/ 后不再单列扫描根，D-001 不适用豁免）', () => {
   const r = audit({
     'docs/a.md': '# A\n',
-    'docs/registry/adr/ADR-001.md': '# ADR-001\n\n见 [兄弟](./ADR-999.md)。\n',
+    'docs/adr/ADR-001.md': '# ADR-001\n\n见 [兄弟](./ADR-999.md)。\n',
   })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /registry\/adr\/ADR-001\.md/)
+  assert.match(r.stdout, /docs\/adr\/ADR-001\.md/)
   assert.match(r.stdout, /ADR-999\.md/)
 })
 
-test('散文体检不碰 docs/registry/：条目的处理过程天生记历史、引用当时存在的路径', () => {
+test('散文体检不碰 docs/：条目的处理过程天生记历史、引用当时存在的路径', () => {
   // D-004（变更史词）与 D-006（反引号路径存在性）在 docs/ 下都会判，
   // 但登记条目是台账不是现行文档——把这两条判据套上去，等于判台账漏记历史。
   const r = audit({
     'docs/a.md': '# A\n',
-    'docs/registry/task/T-001.md':
+    'docs/task/T-001.md':
       '---\nkind: task\nid: T-001\n---\n\n## 内容\n\n原本写 `docs/GONE.md`，已改为 `docs/live.md`。\n',
   })
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('散文体检仍照判 docs/ 下的现行文档（豁免只归 docs/registry/ 这一子树）', () => {
+test('散文体检仍照判 docs/ 下的现行文档（豁免只归 docs/ 这一子树）', () => {
   const r = audit({
     'docs/a.md': '# A\n\n原本写 `docs/GONE.md`，已改为 `docs/live.md`。\n',
   })
@@ -95,6 +95,30 @@ test('有效链接 → 通过', () => {
     'docs/b.md': '# B\n',
   })
   assert.equal(r.status, 0)
+})
+
+// 带显示文字的引用（`[文字](./b.md "docs/b")`）由 gen-doc-refs 生成，标题是身份载体：
+// 判定路径 / 锚点前必须剔掉它，否则机制生成的全仓入链会被扩成一片假失效。
+test('链接标题（`…"编号"`）是身份载体、不参与路径判定：D-001 与 D-007 都不被它带偏', () => {
+  const r = audit({
+    'docs/a.md':
+      '# A\n\n见 [某个小节](./b.md#sect "docs/b") 与 [整篇](./b.md "docs/b")。\n',
+    'docs/b.md': '# B\n\n## sect\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+  assert.match(r.stdout, /扫描相对链接 2 条/)
+  assert.match(r.stdout, /D-007 站内锚点：判定 1 条，失效 0 条/)
+})
+
+test('链接标题也挡不住真失效：地址错 / 锚点错照判（反向）', () => {
+  const r = audit({
+    'docs/a.md': '# A\n\n[没了](./nope.md "docs/b")\n',
+    'docs/c.md': '# C\n\n[错锚点](./d.md#没有这个小节 "docs/d")\n',
+    'docs/d.md': '# D\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /nope\.md/)
+  assert.match(r.stdout, /没有这个小节/)
 })
 
 test('外链 / 空目标一律跳过（不是失效链接）；纯锚点归 D-007 判标题存在性', () => {
@@ -121,10 +145,10 @@ test('docs/archive/ 整体豁免 → 其中的失效链接不判（改写归档�
 const REVIEW_DOC = '# 某系统评审\n\n> **文档类型：评审（一次性结论，不是规范）**\n\n正文。\n'
 const IMPLEMENTED_DOC = '# 某改动实施方案\n\n状态：**已实施**（S1–S6 全部落地）\n\n正文。\n'
 
-test('D-002：评审类文档留在 docs/design/ → 失败', () => {
-  const r = audit({ 'docs/design/review.md': REVIEW_DOC })
+test('D-002：评审类文档留在 docs/arch/ → 失败', () => {
+  const r = audit({ 'docs/arch/review.md': REVIEW_DOC })
   assert.equal(r.status, 1)
-  assert.match(r.stdout, /docs\/design\/review\.md/)
+  assert.match(r.stdout, /docs\/arch\/review\.md/)
 })
 
 test('D-002：过程文档留在**模块目录**同样失败（只扫 docs/ 会漏掉这一整类）', () => {
@@ -139,7 +163,7 @@ test('D-002：examples/ 不扫（是示例包内容，不是项目文档）', ()
 })
 
 test('D-002：已落地的实施方案留在活跃目录 → 失败', () => {
-  const r = audit({ 'docs/design/plan.md': IMPLEMENTED_DOC })
+  const r = audit({ 'docs/arch/plan.md': IMPLEMENTED_DOC })
   assert.equal(r.status, 1)
 })
 
@@ -154,22 +178,22 @@ test('D-002：同样的内容放进 docs/archive/ → 通过', () => {
 
 test('D-002：现行规范不误报（「状态：现行规范」不是过程文档）', () => {
   const r = audit({
-    'docs/design/vdfs.md': '# VDFS 规范\n\n状态：现行规范（纯接口 + 统一文件系统 + 容器拓扑）\n',
+    'docs/arch/vdfs.md': '# VDFS 规范\n\n状态：现行规范（纯接口 + 统一文件系统 + 容器拓扑）\n',
   })
   assert.equal(r.status, 0)
 })
 
 test('D-002：豁免必须带理由，空理由视为未豁免', () => {
   const withReason = `<!-- doc-link-allow D-002: 本文是现行规范，「评审」指代码评审流程 -->\n${REVIEW_DOC}`
-  assert.equal(audit({ 'docs/design/kept.md': withReason }).status, 0)
+  assert.equal(audit({ 'docs/arch/kept.md': withReason }).status, 0)
 
   const emptyReason = `<!-- doc-link-allow D-002:    -->\n${REVIEW_DOC}`
-  assert.equal(audit({ 'docs/design/kept.md': emptyReason }).status, 1, '空理由不算豁免')
+  assert.equal(audit({ 'docs/arch/kept.md': emptyReason }).status, 1, '空理由不算豁免')
 })
 
 test('D-002：豁免写在第 15 行之后无效（只看头部自述）', () => {
   const late = `${REVIEW_DOC}\n${'填充行\n'.repeat(20)}<!-- doc-link-allow D-002: 理由 -->\n`
-  assert.equal(audit({ 'docs/design/late.md': late }).status, 1)
+  assert.equal(audit({ 'docs/arch/late.md': late }).status, 1)
 })
 
 // ── D-003：行数预算（活跃文档 ≤ 800 行）────────────────────────────────
@@ -335,8 +359,8 @@ test('D-006：双根解析——相对当前文件命中即通过', () => {
 test('D-006：双根解析——相对仓库根命中即通过（模块 README 引用系统文档的写法）', () => {
   assert.equal(
     audit({
-      'symbio/src/plugins/foo/README.md': '# Foo\n\n见 `docs/registry/adr/INDEX.md`。\n',
-      'docs/registry/adr/INDEX.md': '# 索引\n',
+      'symbio/src/plugins/foo/README.md': '# Foo\n\n见 `docs/adr/INDEX.md`。\n',
+      'docs/adr/INDEX.md': '# 索引\n',
     }).status,
     0,
     '相对仓库根应命中'
@@ -414,7 +438,7 @@ test('D-007：锚点指向真实标题 → 通过', () => {
 })
 
 test('D-007：slug 算法钉住真实形状——加粗 / 反引号 / 全角括号 / —— / + 全被丢，空格逐个转 -', () => {
-  // 标题取自 `docs/registry/adr/INDEX.md` ADR-020 的真实形状：`EventSink`（出）后**无空格**，
+  // 标题取自 `docs/adr/INDEX.md` ADR-020 的真实形状：`EventSink`（出）后**无空格**，
   // 而 `+ ` 那个空格才产生连字符 ⇒ `eventsink出-abortsignal入`。
   const heading =
     '## ADR-020: 执行期与传输层**分离**——`EventSink`（出）+ `AbortSignal`（入）取代 `PluginChannel` 的双职责'

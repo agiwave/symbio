@@ -144,7 +144,7 @@ pub(crate) struct TurnState {
     /// → `v2_tasks::write`），中间隔着同一段本轮收尾，所以要有个请求作用域的量存它。
     pub(crate) task_decls: Vec<crate::plugins::session::tools::TaskDeclaration>,
     /// 本轮**外部执行闸门判熔断**的理由（[04 §3.1 批⑩](../../../../docs/plan/04-工程落地.md)，
-    /// S8 步 20，[roadmap/S09 §6](../../../../docs/plan/roadmap/S09-外部执行与熔断.md) 验收 2）。
+    /// S8 步 20，[roadmap/S09 §6](../../../../docs/stage/S09-外部执行与熔断.md) 验收 2）。
     ///
     /// 形态与 [`TurnState::task_decls`] 对称：工具执行层填（`process_tool_calls_async`
     /// 的出参），轮末收束入格（`v2_facts::record_derived` → `CircuitBreaker::break_event`）。

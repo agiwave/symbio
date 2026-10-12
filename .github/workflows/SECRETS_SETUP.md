@@ -1,3 +1,11 @@
+---
+kind: guide
+id: .github/workflows/SECRETS_SETUP
+title: GitHub Actions 密钥配置指南
+status: active
+created: 2026-07-20
+---
+
 # GitHub Actions 密钥配置指南
 
 本文档详细说明如何生成和配置 GitHub Actions 所需的所有密钥，以实现自动打包各平台应用。

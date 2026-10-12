@@ -1,3 +1,11 @@
+---
+kind: guide
+id: cli/docs/usage
+title: 用法
+status: active
+created: 2026-09-11
+---
+
 # 用法
 
 ## 先构建
@@ -8,7 +16,7 @@ node scripts/build-cli.mjs
 ```
 
 详细构建约束（C 工具链注入、路径分隔符归一化、绝对 target-dir、toolchain 锁、缓存修复）见
-[构建 (building.md)](./building.md)。
+[构建 (building.md)](building.md "cli/docs/building")。
 
 ---
 
@@ -52,7 +60,7 @@ printf '第一轮\n/provider\n/exit\n' | ./../symbio/target/debug/symbio-cli.exe
 
 驻留进程，为本 homedir 下**所有启用了心跳的会话**按各自配置触发空闲心跳（空闲 N 秒自动注入
 心跳提示词驱动一轮工作），并把工作/空闲/错误状态渲染到 stderr。与 `-m`、`--repl` 互斥。
-机制细节见 [symbio/src/plugins/session/docs/heartbeat-mechanism.md](../../symbio/src/plugins/session/docs/heartbeat-mechanism.md)。
+机制细节见 [symbio/src/plugins/session/docs/heartbeat-mechanism.md](../../symbio/src/plugins/session/docs/heartbeat-mechanism.md "symbio/src/plugins/session/docs/heartbeat-mechanism")。
 
 模式判定顺序：`--heartbeat` → `-m`/位置参数 → `--repl` → stdin 非终端则走管道 → 否则 REPL。
 

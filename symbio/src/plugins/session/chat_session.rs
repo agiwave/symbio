@@ -195,7 +195,7 @@ impl PersistentChatSession {
         self.cfg_or_default().fade_activate_rounds
     }
 
-    /// 技能编译开关（步 22 · [roadmap/S11](../../../../docs/plan/roadmap/S11-技能编译与自我改进.md)；
+    /// 技能编译开关（步 22 · [roadmap/S11](../../../../docs/stage/S11-技能编译与自我改进.md)；
     /// 锁被占回落默认 off——与 [`Self::context_window`] 同一读取纪律）。
     pub(crate) fn skill_compile_enabled(&self) -> bool {
         self.cfg_or_default().skill_compile_enabled

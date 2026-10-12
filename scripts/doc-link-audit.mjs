@@ -15,13 +15,13 @@
  *     **限定引用**（编号紧邻「风险」二字），其余一律报红。
  *
  * D-006 存在的理由（它是 D-001 的**盲区补丁**）：D-001 只认 Markdown 链接语法
- *   `[文字](目标)`，而本仓正文里指路**更常**写成行内反引号（"详见 `docs/design/vdfs.md`"）。
+ *   `[文字](目标)`，而本仓正文里指路**更常**写成行内反引号（"详见 `docs/arch/vdfs.md`"）。
  *   这种写法 D-001 一个字都看不到——实测 `tauri/docs/FRONTEND.md` 首段引用的
- *   `docs/design/frontend-ui-ux-prd.md` 与 `-design.md` **两个文件均不存在**，
+ *   `docs/arch/frontend-ui-ux-prd.md` 与 `-design.md` **两个文件均不存在**，
  *   而 D-001 报「失效 0 条」已经很久了。**守卫报 0 不等于没有坏链，只等于它看不见。**
  *
  * D-006 的两条防误报设计（缺任一条都会让规则被豁免喂到失效）：
- *   ① **双根解析**：`docs/registry/adr/INDEX.md` 这类路径在模块 README 里是**相对仓库根**
+ *   ① **双根解析**：`docs/adr/INDEX.md` 这类路径在模块 README 里是**相对仓库根**
  *      写的，在 `docs/` 内部又是相对当前文件——先试文件目录、再试仓库根，任一命中即通过。
  *      实测把失败数从 34 降到 9。
  *   ② **只判定「不含 `./` `../` 且至少含一个 `/`」的路径**：无斜杠的（`` `README.md` ``）
@@ -46,7 +46,7 @@
  *     故只在确需时用；行内豁免覆盖绝大多数真实场景。
  *
  * D-008 存在的理由（**编号引用**这一类的首条规则）：2026-10-08 复核时发现
- *   `docs/plan/04` §3.2 与 [`ADR-047`](../docs/registry/adr/ADR-047.md) 都写着「R1」，
+ *   `docs/plan/04` §3.2 与 [`ADR-047`](../docs/adr/ADR-047.md) 都写着「R1」，
  *   而本仓的 `R1` 有**两个**含义——`04` 风险登记表的 R1（从未写过可运行系统代码）
  *   与从 `feat` 分支并入的 `docs/plan/06` §10.2 的 R1（「主会话不持有工具」的架构定案）。
  *   后者那篇文档**不在本仓**：引用悬空，却撞进了前者的编号空间。
@@ -60,7 +60,7 @@
  *   要么它是 `| Rn |` 表行的首列（定义），要么紧邻「风险」二字（限定引用）。
  *
  * D-003 存在的理由（为什么是「行数」这个粗指标）：文档臃肿不是美学问题，而是**职责失守的
- *   可观测代理**。实测 `docs/design/vdfs.md` 涨到 1045 行时，超出的部分是 §13「范例」——
+ *   可观测代理**。实测 `docs/arch/vdfs.md` 涨到 1045 行时，超出的部分是 §13「范例」——
  *   它自述「非机制组成部分」，内容却与四个模块 README 逐段重复；`DECISIONS.md` 涨到 1782 行时，
  *   超出的部分是变更史与实施过程记录。两处的病灶不同，但都表现为「比它该有的大」。
  *   行数因此是一个**代价极低、不会误报**（不设"疑似"档）的触发器：超了就必须拆分，
@@ -98,15 +98,15 @@
  *   node scripts/doc-link-audit.mjs --root=<dir> # 换仓库根（回归测试用）
  *
  * 退出码：
- *   0 = 各条判据全过（全表见 docs/reference/GATE_CODES.md）
+ *   0 = 各条判据全过（全表见 docs/ref/GATE_CODES.md）
  *   1 = 有命中（**默认即失败**，不需要 `--strict`
  *       ——2026-09-20 前失效链接只在 `--strict` 下失败，而门禁从不带该参数 ⇒ 从未真的红过）
  *
  * 豁免：
  *   整体豁免 `docs/archive/`（历史快照，不做逐条留痕）；
- *   散文体检（D-002 / D-003 / D-004 / D-006 / D-008）整体豁免 `docs/registry/`——
+ *   散文体检（D-002 / D-003 / D-004 / D-006 / D-008）整体豁免 `docs/`——
  *   那里是登记条目与生成投影，`## 处理过程` 的职责就是记历史，条目由 RG 判据管；
- *   D-001 / D-007 对 `docs/registry/` **照常判**（链接与锚点没有中间态）；
+ *   D-001 / D-007 对 `docs/` **照常判**（链接与锚点没有中间态）；
  *   D-002 / D-004 另有头部注释豁免（`<!-- doc-link-allow D-00X: 理由 -->`，理由不可为空）；
  *   D-006 的豁免**分两档**——行内（本行或前一行，只豁免该行）/ 全文（须为文件首行非空内容）；
  *   D-001 / D-003 **不给豁免**——「目标文件是否存在」与「行数是否超限」都是精确判定，
@@ -116,7 +116,7 @@
  * 与仓库约定一致：纯 Node 实现，不依赖 bash / ripgrep，Windows / macOS / Linux 通用。
  */
 
-// 判据码命名空间（登记表 docs/reference/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns D 文档正文与链接
 // @codes D-001 D-002 D-003 D-004 D-006 D-007 D-008
 
@@ -155,7 +155,7 @@ const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'dist', 'build', '.
  * 归档是**动作**，能保持住的才是机制。
  *
  * `docs/README.md` 早写明「历史实施记录一律进 `archive/`，现行文档只描述当前行为」，
- * 但它只是一句话，没有任何东西检查——于是 2026-09-23 前的 `docs/design/` 里躺着
+ * 但它只是一句话，没有任何东西检查——于是 2026-09-23 前的 `docs/arch/` 里躺着
  * 8 篇自述「一次性复核报告」「文档类型：评审」「实施前的方案（已全部落地）」的过程文档，
  * 活跃文档 9,662 行里有约 2,200 行是**第 N 轮的评审与整改记录**。
  *
@@ -203,7 +203,7 @@ function processDocMarker(text) {
  * 而这两个动作都不需要一个理由字段来正当化。
  *
  * 数值取 800 而非更小，是为了不逼人把**必须在一起**的规范切碎——实测本仓库最长的
- * 两篇（`docs/design/vdfs.md` 1045、`session/docs/core-loop.md` 881）都不是"差一点点"，
+ * 两篇（`docs/arch/vdfs.md` 1045、`session/docs/core-loop.md` 881）都不是"差一点点"，
  * 而是各自含着一整类可归给他处的内容。
  */
 const MAX_DOC_LINES = 800
@@ -418,6 +418,13 @@ function walkDocs(dir, out = []) {
 // 形如 [文字](目标)；目标里的括号不常见，按非贪婪取到第一个右括号
 const LINK = /\[[^\]]*\]\(([^)]+)\)/g
 
+/**
+ * 去掉 Markdown 链接标题：`[显示文字](地址 "编号")` 里的 `"编号"` 是**身份载体**，
+ * 由 `gen-doc-refs` 生成与重算（见 plan/14 §1.1）——它不是路径的一部分，
+ * 判定路径 / 锚点前必须先剔掉；否则每一条带显示文字的引用都会被扩成假失效。
+ */
+const stripTitle = (raw) => raw.replace(/\s+"[^"]*"\s*$/, '').replace(/\s+'[^']*'\s*$/, '').trim()
+
 /** 应跳过的目标：外链 / 协议 / 纯锚点 / 空 */
 const isExternal = (t) =>
   t === '' ||
@@ -532,7 +539,7 @@ function check(file) {
   }
   const text = fs.readFileSync(file, 'utf8')
   for (const m of text.matchAll(LINK)) {
-    const raw = m[1].trim()
+    const raw = stripTitle(m[1])
     if (raw.startsWith('#')) {
       // 纯锚点：查本文件的标题（这类链接 D-001 完全看不见）
       checkAnchor(rel, file, raw.slice(1), rel)
@@ -579,14 +586,37 @@ for (const rel of ROOT_FILES) {
 // 分三遍读等于让守卫的代价翻三倍，而它们的扫描范围完全一致。
 const BODY_ROOTS = ['docs', 'symbio/src', 'tauri', 'cli']
 /**
- * 散文体检不适用于 `docs/registry/`：那里的 `.md` 是**登记条目与生成投影**，
- * 不是现行文档——`## 处理过程` 的职责就是记「初版怎么想、后来为什么改」，
+ * 散文体检不适用于 `docs/task/` `docs/spec/` `docs/adr/`：那里的 `.md` 是**登记条目**
+ * （不是现行阅读文档）——`## 处理过程` 的职责就是记「初版怎么想、后来为什么改」，
  * 按 D-004 判它写历史等于判台账漏记；D-006 同理（闭环条目引用当时存在、
  * 后来删掉的路径是事实）。条目自己由 registry-audit 的 RG 判据管
  * （`exit:` 里指认的路径由 RG-012 验存在）。
  * **D-001 / D-007 仍然适用**——链接与锚点要么存在要么不存在，没有中间态。
  */
-const BODY_EXEMPT_DIRS = ['docs/registry/']
+const BODY_EXEMPT_DIRS = ['docs/task/', 'docs/spec/', 'docs/adr/']
+
+/**
+ * front-matter（首行 `---` … `---`）剥离。
+ *
+ * 登记机制（plan/14）让**文档即条目**：活跃文档开头是机读元信息（kind / id / title /
+ * status / created）。散文体检判的是**内容**，不是元信息——所以 D-002 / D-003 / D-004 /
+ * D-006 / D-008 一律在剥离后的正文上判：
+ *   · D-003 行数预算不把 front-matter 算进内容（否则 800 行预算实际变成 792）；
+ *   · D-004 / D-006 的「全文豁免须为首行非空内容」认的是**正文首行**——
+ *     豁免注释写在 front-matter 之后仍然合法，否则会静默失效（这正是「守卫被
+ *     新机制静默喂死」的形态）；
+ *   · 报告行号用 `offset` 补回 front-matter 行数，仍是文件里的真实行号。
+ * 未配 front-matter 的文件原样返回（offset 0）；`---` 未闭合也原样返回——
+ * 解析失败交给 registry-audit 的 RG-001 / RG-020 判，这里不重复报。
+ */
+function splitFrontMatter(text) {
+  const lines = text.split(/\r?\n/)
+  if (lines[0]?.replace(/^\uFEFF/, '').trim() !== '---') return { body: text, offset: 0 }
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === '---') return { body: lines.slice(i + 1).join('\n'), offset: i + 1 }
+  }
+  return { body: text, offset: 0 }
+}
 const misplaced = []
 const oversized = []
 const historical = []
@@ -600,25 +630,29 @@ function scanBody (file) {
   if (EXEMPT_DIRS.some((d) => rel.startsWith(d))) return
   if (BODY_EXEMPT_DIRS.some((d) => rel.startsWith(d))) return
   docsScanned += 1
-  const text = fs.readFileSync(file, 'utf8')
+  const raw = fs.readFileSync(file, 'utf8')
+  const { body, offset } = splitFrontMatter(raw)
 
-  const marker = processDocMarker(text)
+  const marker = processDocMarker(body)
   if (marker) misplaced.push({ rel, why: marker.source })
 
-  const lines = lineCount(text)
+  const lines = lineCount(body)
   if (lines > MAX_DOC_LINES) oversized.push({ rel, lines })
 
-  if (!waivedD004Whole(text)) {
-    const hits = historyHits(text)
+  if (!waivedD004Whole(body)) {
+    const hits = historyHits(body)
+    for (const h of hits) h.line += offset
     if (hits.length > 0) historical.push({ rel, hits })
   }
 
-  if (!waivedD006Whole(text)) {
-    const dead = backtickHits(file, text)
+  if (!waivedD006Whole(body)) {
+    const dead = backtickHits(file, body)
+    for (const h of dead) h.line += offset
     if (dead.length > 0) backtickBad.push({ rel, dead })
   }
 
-  const bare = riskIdHits(text)
+  const bare = riskIdHits(body)
+  for (const h of bare) h.line += offset
   if (bare.length > 0) bareRisk.push({ rel, hits: bare })
 }
 
@@ -665,7 +699,7 @@ for (const { rel, lines } of oversized) {
 }
 if (oversized.length > 0) {
   console.log('\n提示：超限即「内容不属于这里」或「该拆篇」的信号，按 docs/README.md 的 owner 表处置：')
-  console.log('      · 模块内部机制 → 该模块 README.md；· 论证与被否决的方案 → docs/registry/adr/（只留 ADR 引用）')
+  console.log('      · 模块内部机制 → 该模块 README.md；· 论证与被否决的方案 → docs/adr/（只留 ADR 引用）')
   console.log('      · 协议线上形状 → architecture/PROTOCOLS.md；· 列表类事实 → CURRENT.md（自动生成，不手抄）')
   console.log('      · 实例 / 范例 → 由被举例的那个模块的 README 持有')
   console.log('      本条**不给豁免**：拆分方向由 owner 表给出，不需要逐篇解释。')

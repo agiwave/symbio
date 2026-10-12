@@ -35,7 +35,7 @@ const SLOW_WARN_THROTTLE: Duration = Duration::from_secs(5);
 /// `chat_message.rs` 那段「枚举改名时就会出现不一致」警告的形状。
 ///
 /// **闭集只有一个家**：词表住在这里，哪怕发布方在别的插件（`EVENT_BUS_KIND_VDFS` 由 vdfs 发）。
-/// 文档见 `docs/architecture/PROTOCOLS.md` §事件总线频道——那一行带
+/// 文档见 `docs/arch/PROTOCOLS.md` §事件总线频道——那一行带
 /// `<!-- vocab:KIND_ -->` 标记，由 `plugin-entry-audit` 的 E-008 与代码**双向**比对；
 /// 「发布点写裸字面量」由 `grep-audit` 的 S-009 拦。
 ///

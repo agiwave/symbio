@@ -1,3 +1,11 @@
+---
+kind: arch
+id: symbio/src/plugins/composite/README
+title: Composite 插件
+status: active
+created: 2026-09-09
+---
+
 # Composite 插件
 
 通用容器：按**插件目录**实例化子插件，是"分形插件架构"的关键。它不内置任何插件
@@ -12,7 +20,7 @@
   「必需插件」清单由**构造者**经 ctx 键 `REQUIRED_PLUGINS` 传入（`home` 传的是
   `SYSTEM_PLUGINS`），容器只负责把缺失的目录 / 配置文件补出来。
 - **配置归插件**：构造子插件时把**它的目录**经 ctx 键 `PLUGIN_DIR` 告知它，插件据此
-  自己读写 `PLUGIN.yml`；容器不碰任何子插件的配置（见 `docs/design/vdfs.md` §3.4）。
+  自己读写 `PLUGIN.yml`；容器不碰任何子插件的配置（见 `docs/arch/vdfs.md` §3.4）。
 - **路由转发**：`route()` 内按 `PATH` 剥离当前层级前缀，转发给对应子插件；本地指令（如查询自身拓扑）就地处理。
 - **traverse 聚合**：`traverse()` 深度优先聚合全子树的能力贡献（工具 / 人格 / VDFS 资源注册项），供 session、home 等消费。
 - **VDFS 拓扑唯一持有者**（两条链路分开）：
@@ -21,7 +29,7 @@
     目录名 = 实例表挂载名。
   - **LLM 链路**：在 `traverse(TRAVERSE_AVAILABLE_TOOLS)` 中经 `register_vdfs_root` 槽位
     登记该视图，供 `vdfs_*` 工具取根。
-  它没有任何「根级别」概念（见 `docs/design/vdfs.md` §2.5 / §6.4）。
+  它没有任何「根级别」概念（见 `docs/arch/vdfs.md` §2.5 / §6.4）。
 - **分发与守卫**：`dispatch` 对**所有操作**做同一件事——现场 `children_of(ctx)` 取
   子目录清单、剥掉 `path` 首段定位子 provider、把剩余路径与请求**整体**递下去（与
   操作种类无关）。自身目录除 `list` / `stat` 外一概拒绝；子目录根不可读 / 删 / `mkdir`，
@@ -32,5 +40,5 @@
 
 ## 关联
 
-- 架构哲学：`docs/architecture/OVERVIEW.md`
+- 架构哲学：`docs/arch/OVERVIEW.md`
 - 注册机制：`symbio_core/creator/`（`submit_object_creator!`）

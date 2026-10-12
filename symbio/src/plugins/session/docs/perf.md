@@ -1,3 +1,11 @@
+---
+kind: arch
+id: symbio/src/plugins/session/docs/perf
+title: 会话 / 转写的前端性能设计
+status: active
+created: 2026-09-15
+---
+
 # 会话 / 转写的前端性能设计
 
 > 目标：解决「会话列表显示效率很低」。

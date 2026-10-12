@@ -6,7 +6,7 @@ use crate::symbio_core::{
     Budget, EventWalStore, LatencyTier, PluginInvokeRequest, PluginInvokeRequestExt,
 };
 
-/// 熔断闸门的**判据**（S8 第 20 步，[roadmap/S09 §6](../../../../../../docs/plan/roadmap/S09-外部执行与熔断.md)）。
+/// 熔断闸门的**判据**（S8 第 20 步，[roadmap/S09 §6](../../../../../../docs/stage/S09-外部执行与熔断.md)）。
 ///
 /// 判据在**批首**读一次，随后每个调用点只做一次纯判定：授权表与成本台账都是
 /// 只读的，闸门不该为了拿到自己的判据就把整个事实源重放进工具循环

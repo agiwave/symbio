@@ -40,7 +40,7 @@
 //! 04 §3.1 批⑧）落地时，子智能体各成一行——行的形状不变，仍是
 //! `(主体, 能力名, 可见域)`。
 //!
-//! 自主发起者那一行已按 [S12 §3](../../../docs/plan/roadmap/S12-自主层与长期目标.md)
+//! 自主发起者那一行已按 [S12 §3](../../../docs/stage/S12-自主层与长期目标.md)
 //! 先落地：它是本表里**第一行「比主智能体窄」**的记录（只持 `define.work`）。这行同时
 //! 说明一件事——**「同角色」是平凡值而不是规则**：派生只服务**未登记**的主体，
 //! 一旦某个主体被显式登记，那一行就是它的权威能力集。
@@ -58,7 +58,7 @@ pub(crate) const PRINCIPAL_MAIN: &str = "agent:main";
 /// 本机用户的身份——用户发言事件的 `actor`。
 pub(crate) const PRINCIPAL_USER: &str = "user";
 
-/// 自主发起者的身份（[roadmap/S12 §3](../../../docs/plan/roadmap/S12-自主层与长期目标.md)）
+/// 自主发起者的身份（[roadmap/S12 §3](../../../docs/stage/S12-自主层与长期目标.md)）
 /// ——表里那一行的名字与 `AutonomousInitiator` 四个事件的 `actor` 是同一个常量。
 ///
 /// 与 [`PRINCIPAL_MAIN`] 同理：判定用的主体名与实际写入的主体名各写一份字符串，两边
@@ -76,7 +76,7 @@ pub(crate) const PRINCIPAL_AUTONOMOUS: &str = "agent:autonomous";
 pub(crate) const SESSION_OWNER: &str = PRINCIPAL_USER;
 
 /// **外部执行**能力名（`ProduceArtifact` 的书写形态）——熔断闸门的授权判据
-/// （[roadmap/S09 §6](../../../docs/plan/roadmap/S09-外部执行与熔断.md) 验收 1）。
+/// （[roadmap/S09 §6](../../../docs/stage/S09-外部执行与熔断.md) 验收 1）。
 ///
 /// 提成常量而不是在闸门那里再写一遍字面量：能力名只有一个拼法，写两处迟早漂移成
 /// 「表授予 A、闸门判 B」，而这种错位**没有任何东西会变红**（两边都是合法能力名）。

@@ -1,3 +1,11 @@
+---
+kind: guide
+id: .github/workflows/QUICKSTART_CN
+title: 🚀 自动构建指南
+status: active
+created: 2026-07-20
+---
+
 # 🚀 自动构建指南
 
 ## 快速开始（5 分钟）
