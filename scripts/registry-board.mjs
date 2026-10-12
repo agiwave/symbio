@@ -112,8 +112,28 @@ function printChildren(lines, entries, rootId) {
   const root = entries.find((e) => e.meta && e.meta.id === rootId)
   if (!root) return notFound(lines, entries, rootId, '条目')
   const kids = (id) => entries.filter((e) => e.meta && e.meta.parent === id).sort(idCmp)
-  const count = entries.filter((e) => e.meta && e.meta.parent === rootId).length
-  lines.push(`=== ${rootId} 的分解子树（parent 字段，共 ${count} 个直接子条目）===`)
+  const direct = kids(root.meta.id)
+  // 递归总数（含各级孙辈；seen 防环——环已被 RG-024 判红，这里只是不赌）
+  const seenAll = new Set([root.meta.id])
+  let total = 0
+  const countAll = (id) => {
+    for (const c of kids(id)) {
+      if (seenAll.has(c.meta.id)) continue
+      seenAll.add(c.meta.id)
+      total++
+      countAll(c.meta.id)
+    }
+  }
+  countAll(root.meta.id)
+  // 直接子项的状态分布（「大任务完成多少了」的最短答案，按该 kind 状态机顺序）
+  const statusOrder = Object.keys(KINDS[root.kind].statusRules ?? {})
+  const sc = new Map()
+  for (const k of direct) sc.set(k.meta.status, (sc.get(k.meta.status) ?? 0) + 1)
+  const parts = statusOrder.filter((s) => sc.has(s)).map((s) => `${s} ${sc.get(s)}`)
+  const head = direct.length
+    ? `：直接子 ${direct.length}（${parts.join(' / ')}）${total > direct.length ? ` · 递归共 ${total} 个` : ''}`
+    : ''
+  lines.push(`=== ${rootId} 的分解子树（parent 字段）${head}===`)
   const seen = new Set()
   const walk = (e, d) => {
     if (seen.has(e.meta.id)) return
@@ -122,7 +142,7 @@ function printChildren(lines, entries, rootId) {
     for (const c of kids(e.meta.id)) walk(c, d + 1)
   }
   walk(root, 0)
-  if (!count) lines.push(dim('（该条目没有子条目——顶层条目）'))
+  if (!direct.length) lines.push(dim('（该条目没有子条目——顶层条目）'))
   return { code: 0, lines }
 }
 

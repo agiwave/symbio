@@ -96,7 +96,7 @@ export function runRegistryAudit(argv) {
     else return { code: 2, lines: [red(`[ERROR] 参数不识别：${a}`), USAGE] }
   }
 
-  const lines = ['--- registry-audit: 登记条目校验（RG-001…RG-023） ---']
+  const lines = ['--- registry-audit: 登记条目校验（RG-001…RG-025） ---']
   const docsDir = path.join(root, 'docs')
   const { entries, errors, notes, missing } = loadEntries(root)
   if (missing) return { code: 2, lines: lines.concat(red(`[ERROR] ${SCOPE_ERROR}`)) }

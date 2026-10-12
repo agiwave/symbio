@@ -24,7 +24,7 @@
  *      `registry/` 下各级 `INDEX.md` 由门禁自动重生成（`gate.d/60-facts.mjs` 的 `autoWork`），
  *      不存在第二处手抄；
  *   3. **校验 = 守卫**：`scripts/registry-audit.mjs` 把字段 / 状态机 / 依赖 /
- *      优先级 / 取代链 / 判据指认 / **未登记文档**全部机械判定（RG-001…RG-023），
+ *      优先级 / 取代链 / 判据指认 / **未登记文档** / **分解**全部机械判定（RG-001…RG-025），
  *      违规即红，范围读不出 exit 2。
  *
  * ## 受限 YAML 子集（front-matter）
@@ -1028,7 +1028,19 @@ function treeSection(kind, allEntries) {
   }
   for (const list of children.values()) list.sort(byIdCmp)
   const href = (e) => relFrom(`docs/${kind}`, e.rel)
-  const line = (e, depth) => `${'  '.repeat(depth)}- [\`${e.meta.id}\`](${href(e)}) ${cell(e.meta.title)}（${e.meta.status}）`
+  // 子项状态计数：父行追加「· 子项 done 2 / todo 1」——「大任务完成多少了」是分解机制
+  // 最常用的查询，纯投影（数 children map 的 status，按该 kind 状态机顺序列），不新增字段。
+  const statusOrder = Object.keys(KINDS[kind].statusRules ?? {})
+  const childSummary = (id) => {
+    const kids = children.get(id)
+    if (!kids || !kids.length) return ''
+    const c = new Map()
+    for (const k of kids) c.set(k.meta.status, (c.get(k.meta.status) ?? 0) + 1)
+    return `· 子项 ${statusOrder.filter((s) => c.has(s)).map((s) => `${s} ${c.get(s)}`).join(' / ')}`
+  }
+  const line = (e, depth) =>
+    `${'  '.repeat(depth)}- [\`${e.meta.id}\`](${href(e)}) ${cell(e.meta.title)}（${e.meta.status}）` +
+    (childSummary(e.meta.id) ? ` ${childSummary(e.meta.id)}` : '')
   const lines = [
     '## 分解树',
     '',
@@ -1062,18 +1074,18 @@ function withTree(kind, allEntries, lines) {
 const HEADER_TASK =
   '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/task/*.md` 生成，请勿手改。**\n' +
   '> 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，' +
-  '原则与流程见 [14 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。\n'
+  '原则与流程见 [PL-011 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。\n'
 
 const HEADER_SPEC =
   '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/spec/*.md` 生成，请勿手改。**\n' +
   '> 状态的唯一登记处是各规范文件本身，本页是投影。字段规范见 [SP-001](./SP-001.md)，' +
-  '原则与流程见 [14 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。\n'
+  '原则与流程见 [PL-011 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。\n'
 
 const HEADER_ADR =
   '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/adr/*.md` 生成，请勿手改。**\n' +
   '> **ADR 的唯一真相源是 `docs/adr/`**：每条 ADR 的正文（决策 / 理由 / 被否决的方案 /\n' +
   '> 后果与不变量）住它自己的 `## 决策` 小节，规范合法性（`status`）与落地进展（`impl`）住 front-matter。\n' +
-  '> 字段规范见 [SP-001](../spec/SP-001.md)，机制见 [14 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。\n'
+  '> 字段规范见 [SP-001](../spec/SP-001.md)，机制见 [PL-011 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。\n'
 
 /** posix 相对路径：从目录 `fromDir` 到文件 `toRel`（确定性，不依赖 path.relative 的平台差异）。 */
 export function relFrom(fromDir, toRel) {
@@ -1261,7 +1273,7 @@ function renderDocIndex(kind, allEntries) {
     '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 生成，请勿手改。**',
     `> \`${kind}\`（${cfg.label}）的条目**在位存放**：文件本身就是登记，编号 = 仓根相对路径（去 \`.md\`），`,
     '> `title` 逐字等于正文首个 H1（RG-021 两面对账）；本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，',
-    '> 机制见 [14 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。',
+    '> 机制见 [PL-011 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。',
     '',
     `> **这个 kind 回答什么**：${cfg.blurb}`,
     '',
@@ -1291,7 +1303,7 @@ export function renderKindIndex(kind, allEntries) {
   return RENDERERS[kind](allEntries)
 }
 
-/** 仓根总账页：各 kind 的条目数、状态分布、汇总页链接。 */
+/** 仓根总账页：各 kind 的条目数、状态分布、分解边数、汇总页链接。 */
 export function renderRootIndex(allEntries) {
   const rows = Object.entries(KINDS).map(([kind, cfg]) => {
     const mine = allEntries.filter((e) => e.kind === kind)
@@ -1299,11 +1311,15 @@ export function renderRootIndex(allEntries) {
       .map((s) => `${s} ${mine.filter((e) => e.meta && e.meta.status === s).length}`)
       .join(' · ')
     const identity = `编号前缀 \`${ID_PREFIX[kind]}-\``
+    // 分解维度：该 kind 的有效 parent 边数（RG-024 保证边都存在且同 kind，这里只数数）。
+    const ids = new Set(mine.filter((e) => e.meta && !isEmpty(e.meta.id)).map((e) => e.meta.id))
+    const edges = mine.filter((e) => e.meta && typeof e.meta.parent === 'string' && ids.has(e.meta.parent)).length
     return [
       `[${kind} · ${cfg.label}](./${kind}/INDEX.md)`,
       identity,
       String(mine.length),
       dist,
+      edges ? `${edges} 条分解边` : '—',
       `[${kind}/INDEX.md](./${kind}/INDEX.md)`,
     ]
   })
@@ -1313,9 +1329,9 @@ export function renderRootIndex(allEntries) {
     '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 生成，请勿手改。**',
     '> 条目各是一个单文档：条目类（task / spec / adr）住 `docs/<kind>/`，文档类（goal / stage / plan /',
     '> arch / ref / guide）**在位存放**（文件即条目，kind 只来自 front-matter，目录不参与判定）；',
-    '> 机制见 [14 · 登记与汇总机制](./plan/PL-011-登记与汇总机制.md)，字段规范见 [SP-001](./spec/SP-001.md)。',
+    '> 机制见 [PL-011 · 登记与汇总机制](./plan/PL-011-登记与汇总机制.md)，字段规范见 [SP-001](./spec/SP-001.md)。',
     '',
-    table(['类别', '身份', '条目数', '状态分布', '汇总页'], rows),
+    table(['类别', '身份', '条目数', '状态分布', '分解', '汇总页'], rows),
     '',
   ].join('\n')
 }

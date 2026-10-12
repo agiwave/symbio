@@ -13,7 +13,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { stripAnsi } from './color.mjs'
-import { ALL_KEYS, KINDS, parseEntryText, loadEntries, auditEntries, renderKindIndex } from './registry-lib.mjs'
+import { ALL_KEYS, KINDS, parseEntryText, loadEntries, auditEntries, renderKindIndex, renderRootIndex } from './registry-lib.mjs'
 import { runRegistryAudit } from './registry-audit.mjs'
 import { runRegistryBoard } from './registry-board.mjs'
 
@@ -465,6 +465,26 @@ test('分解渲染：INDEX 分解树缩进到孙层、同层按编号序、无 p
   assert.ok(!renderKindIndex('task', loadEntries(flat).entries).includes('## 分解树'), '无 parent 数据 ⇒ 无树小节')
 })
 
+test('分解投影增强：父行子项状态计数 + 总账分解列 + 渲染器样板文字不残留旧编号', () => {
+  const base = caseRoot({
+    'task/T-050.md': taskDoc('T-050', { title: '大任务' }),
+    'task/T-051.md': taskDoc('T-051', { title: '小任务一', parent: 'T-050' }),
+    'task/T-052.md': taskDoc('T-052', { title: '小任务二', parent: 'T-050', status: 'done', evidence: '提交 x' }),
+    'task/T-053.md': taskDoc('T-053', { title: '孙任务', parent: 'T-051' }),
+  })
+  const { entries } = loadEntries(base)
+  const out = renderKindIndex('task', entries)
+  assert.match(out, /`T-050`\]\(T-050\.md\)[^|]*· 子项 todo 1 \/ done 1/, '父行带直接子项状态计数（按 kind 状态机顺序）')
+  assert.match(out, /`T-051`\]\(T-051\.md\)[^|]*· 子项 todo 1/, '中间层父行也计数')
+  assert.match(out, /`T-052`\]\(T-052\.md\)[^|]*（done）\n/, '叶子行不计数（无直接子条）')
+  assert.ok(!out.includes('14 · 登记与汇总机制'), '渲染器样板文字与编号对齐——不残留 PLN-14 旧号')
+
+  const root = renderRootIndex(entries)
+  assert.match(root, /\| 分解 \|/, '总账表有分解列')
+  assert.match(root, /\[task · 任务\]\([^)]*\)\s*\|[^|]*\|\s*4\s*\|[^|]*\|\s*3 条分解边/, 'task 行报有效 parent 边数（3）')
+  assert.match(root, /\[spec · 规范\]\([^)]*\)\s*\|[^|]*\|[^|]*\|[^|]*\|\s*—/, '无分解的 kind 显示 —')
+})
+
 test('board --children / --parent：分解子树与父链两个查询出口；互斥与不存在有出口', () => {
   const base = caseRoot({
     'task/T-050.md': taskDoc('T-050', { title: '大任务' }),
@@ -474,7 +494,7 @@ test('board --children / --parent：分解子树与父链两个查询出口；�
   const ch = runRegistryBoard([`--root=${base}`, '--children=T-050'])
   assert.equal(ch.code, 0, stripAnsi(ch.lines.join('\n')))
   const chText = stripAnsi(ch.lines.join('\n'))
-  assert.match(chText, /=== T-050 的分解子树（parent 字段，共 1 个直接子条目）===/)
+  assert.match(chText, /=== T-050 的分解子树（parent 字段）：直接子 1（todo 1） ?· 递归共 2 个===/, '标题行带直接子状态分布与递归总数')
   assert.match(chText, /T-051[\s\S]*T-052/, '子树递归到孙辈')
 
   const par = runRegistryBoard([`--root=${base}`, '--parent=T-052'])
