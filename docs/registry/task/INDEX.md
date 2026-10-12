@@ -3,7 +3,7 @@
 > ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/registry/task/*.md` 生成，请勿手改。**
 > 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，原则与流程见 [14 · 登记与汇总机制](../../plan/14-登记与汇总机制.md)。
 
-**计数**：☐ todo 4 · 🟡 doing 0 · ☑ done 51 · ❌ wont 0（共 55）
+**计数**：☐ todo 3 · 🟡 doing 0 · ☑ done 52 · ❌ wont 0（共 55）
 
 ## 待处理（按依赖顺序）
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
@@ -11,7 +11,6 @@
 | `T-009` | C2 的形态定案——去 dispatch 样板要不要动 VdfsProvider 的契约面（先 ADR，后实施） | now | meta | — |
 | `C2` | `VdfsProvider` 的 match 样板在每一处生产实现里各写一遍 | — | C | T-009 |
 | `S-end②` | `full` 没被真实会话负载压过：e2e 全绿只是必要条件，不是「跑过真实负载」 | — | S | P3 |
-| `T-007` | 第三方插件规范 §10 待确认决策（D2–D6）逐条写 ADR | later | meta | T-004 |
 
 ## 进行中
 （无）
@@ -65,6 +64,7 @@
 | `T-004` | 散落决策清点与登记形态定案（决策类元素的接管边界） | meta | 清点结论：唯一散落处 = `docs/design/third-party-plugin-spec.md §10`（6 条待确认决策）⇒ 登记为 T-007；形态定案写回 14 §6；验证：registry-audit 零违规 |
 | `T-005` | 接管 13 §2.1 豁免登记表（豁免 → spec + clears 字段） | meta | c167e00（clears + RG-016 机制扩展与 5 条豁免迁移；验证：77 条零违规 · 回归 24/24 · gate 58/58） |
 | `T-006` | 接管 04 §3.1 工具台账（先分清守卫投影行与人维护登记行） | meta | S22（22 步状态）+ S31-1…3（三张守卫表的投影口径）；04 §3.1 已收敛为指路索引；验证：registry-audit 零违规 · gate docs 阶段全绿 |
+| `T-007` | 第三方插件规范 §10 待确认决策（D2–D6）逐条写 ADR | meta | D2–D6 五条已各立一条 ADR：ADR-058（外部插件形态）/ ADR-059（权限强制程度）/ ADR-060（连接信息放哪）/ ADR-061（不引入 JSON-RPC）/ ADR-062（生命周期钩子形态）；D1 = ADR-032 维持。`docs/design/third-party-plugin-spec.md` §10 改为「只留指回 ADR 的行」，不再复述结论。验证：`node scripts/registry-audit.mjs` 零违规、`node scripts/doc-link-audit.mjs` 失效 0、ADR 索引已重生成 |
 | `T-008` | ADR 接管 registry（新开 adr kind：索引与正文一并迁入，删除 DECISIONS.md 与 decisions/*.md） | meta | adr kind（KINDS.adr + renderAdrIndex + RG-017/RG-018/RG-019）；docs/registry/adr/ADR-001…054 共 55 条（44 条并入正文、11 条索引-only）；DECISIONS.md 与五个分册已删除；验证：registry-audit 零违规 · registry-audit.test.mjs 绿 · doc-link 全绿 · doc-symbol 全绿 · gate --only=docs,facts 绿 |
 | `T-002` | 接管 13 §1 问题登记（状态表格迁成任务单文档） | meta | 提交 82d7f9f（44 条目 + §1 收敛 + 9 处锚点引用改写；docs+facts 门禁 58/58） |
 | `T-010` | registry 迁入 docs/registry——条目库与文档目录合一 | meta | ADR-056（决策与四条被否决的方案）；`git mv registry docs/registry` + 链接重算 675 处 / 反引号路径 133 处（304 篇 md）；装载与豁免口径改动落在 registry-audit / registry-board / registry-lib（RG-010 / RG-013 消息）、doc-link-audit（扫描根去 registry、新增 BODY_EXEMPT_DIRS）、doc-symbol-audit、core-shape-audit（CS-002 执照路径）、dead-code-audit（S31-1 规则源）、gen-current-facts；验证：registry-audit 143 条目零违规 · doc-link-audit 941 条链接 0 失效 · gate --only=docs,facts 60/60 · doc-link 回归测试 62/62（含「条目写历史不判 / 条目失效链接照判」两条新增双向用例） |
