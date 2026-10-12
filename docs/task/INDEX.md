@@ -3,7 +3,7 @@
 > ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/task/*.md` 生成，请勿手改。**
 > 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，原则与流程见 [14 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。
 
-**计数**：☐ todo 5 · 🟡 doing 0 · ☑ done 53 · ❌ wont 0（共 58）
+**计数**：☐ todo 5 · 🟡 doing 0 · ☑ done 57 · ❌ wont 0（共 62）
 
 ## 待处理（按依赖顺序）
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
@@ -20,6 +20,7 @@
 ## 已完成
 | 编号 | 任务 | 轨 | 证据 |
 |---|---|---|---|
+| `T-061` | 登记机制支持条目分解：parent 字段（父子机制） | meta | registry-lib.mjs RG-024（parent 形状 / 存在 / 同 kind / 自指 / 成环）+ RG-025（子生效⇒父生效、父退场⇒子退场，档位表按 KINDS 取）；INDEX 分解树小节（条件渲染，无 parent 数据零变化）；board --children / --parent；SP-001 字段表 + PL-011 §1.2 + docs/README 两字段口径同批落地（RG-011 对账）；验证：registry-audit 249 条目零违规 · registry-audit.test.mjs 41/41 · gen-doc-refs.test.mjs 14/14 · doc-link-audit 0 失效；子任务 T-062 / T-063 / T-064 全部 done（RG-025 父退场⇒子退场的正向用例） |
 | `T-001` | 登记机制落地：单文档 + 守卫 + 汇总 + 总纲 | meta | 提交 8252c4a（机制全量落地：4 脚本 + 23 项回归测试 + docs/plan/14 总纲 + 门禁接线，docs+facts 58/58） |
 | `T-003` | 接管 docs/README 纪律地图（每条纪律成为 spec 条目） | doc | 提交 36a9eb3（21 条 spec 条目 + 地图收敛指路；docs+facts 门禁 58/58） |
 | `T-004` | 散落决策清点与登记形态定案（决策类元素的接管边界） | meta | 清点结论：唯一散落处 = `docs/arch/AR-011-third-party-plugin-spec.md §10`（6 条待确认决策）⇒ 处置为「原表自持、不另登 task」；形态定案写回 14 §6；验证：registry-audit 零违规 |
@@ -73,6 +74,77 @@
 | `T-057` | Q3 进展读不走 WAL | S | `git log --grep=S2` |
 | `T-059` | core 根出口豁免账本 18 条，大半条目在补一个口径的洞（「core 内另有消费方，审计只数跨出 core 的那一个」） | W | `27922b8` |
 | `T-060` | 其余四条豁免通道（doc-link / dead-code / panic / color）的清除任务挂在不存在的批次上 | W | `7eabd54` |
+| `T-062` | parent 机制实现：schema + RG-024/025 + 分解树渲染 + board 查询 | meta | registry-lib.mjs（COMMON_OPTIONAL 加 parent；KINDS 加 retiredStates 退场档，与 requiresDepsDone 生效档成对；auditEntries 增 RG-024 结构段 / RG-025 档位单调段；topoOrder 纳入 parent 边；treeSection + withTree 条件渲染；parentDepth 导出）；registry-board.mjs（--children 子树递归 / --parent 父链 / 组内按深度缩进 / notFound 前缀提示）；验证：registry-audit.test.mjs 41/41（新增 3 个 parent 用例） |
+| `T-063` | parent 规范与总纲更新：SP-001 / PL-011 / docs/README | meta | docs/spec/SP-001.md（字段表 parent 行 + 「分解：parent」小节：与 deps 正交表 / 同 kind / 编号不体现层级 / 档位单调 / 呈现=投影；编号规范段与判据段连带）；docs/plan/PL-011-登记与汇总机制.md（§1.2 新节 + §0 判据范围 RG-025 + §3 父子档位单调 + §5 命令表 + §7 明确不做「不把层级编进编号」）；docs/README.md（目标分层节两字段口径 + 编号不体现分解层级）；验证：RG-011 字段对账通过 |
+| `T-064` | parent 回归测试与数据示范：注入用例 + GO/T 两棵分解树 | meta | registry-audit.test.mjs 新增 3 个 test（RG-024 五形态各红一条 + 同 kind 反向；RG-025 两规则 + 「父 doing 子 todo / 子 wont 父 doing / 父子同档」三合法组合 + 文档类同款；渲染缩进到孙层 / 同层编号序 / 无数据零变化；board --children 递归孙辈 / --parent 深度链 / 三选一互斥 / 编号不存在有出口）41/41 全绿；dogfood 数据：GO-001 前端去业务化 → GO-002 三栏机制 / GO-003 表单机制 / GO-004 统一资源管理，T-061 → T-062/063/064；实测：goal/INDEX 与 task/INDEX 分解树小节缩进呈现、board --children=GO-001-前端去业务化 三子、--parent=T-064 父链深度 1；gen-doc-refs 展开编号引用 8 处 |
 
 ## 不做
 （无）
+
+## 分解树
+
+分解关系只写在 `parent` 字段（子条目指向父条目、同 kind；编号平铺不体现层级——层级是投影不是身份）。
+同状态的父子在上面的分组表里相邻；本小节是跨状态的分解全景。
+
+- [`T-001`](T-001.md) 登记机制落地：单文档 + 守卫 + 汇总 + 总纲（done）
+- [`T-002`](T-002.md) 接管 13 §1 问题登记（状态表格迁成任务单文档）（done）
+- [`T-003`](T-003.md) 接管 docs/README 纪律地图（每条纪律成为 spec 条目）（done）
+- [`T-004`](T-004.md) 散落决策清点与登记形态定案（决策类元素的接管边界）（done）
+- [`T-005`](T-005.md) 接管 13 §2.1 豁免登记表（豁免 → spec + clears 字段）（done）
+- [`T-006`](T-006.md) 接管 PL-004 §3.1 工具台账（先分清守卫投影行与人维护登记行）（done）
+- [`T-008`](T-008.md) ADR 接管 registry（新开 adr kind：索引与正文一并迁入，删除 DECISIONS.md 与 decisions/*.md）（done）
+- [`T-010`](T-010.md) registry 迁入 docs——条目库与文档目录合一（done）
+- [`T-011`](T-011.md) 五轴的外部效标：每条轴挂一个可复现的读数，而不是形容词（todo）
+- [`T-012`](T-012.md) 能力名册 ↔ 代码锚点：名册的每一条能力都要指到实现它的地方（todo）
+- [`T-013`](T-013.md) Rust 覆盖率阈值：与 C7 同族的已知盲区，排在会话真源归一之后（todo）
+- [`T-014`](T-014.md) 分布式 Store 的 seq 单调与「无溯源不声明」如何共存（G4）（todo）
+- [`T-015`](T-015.md) 出厂 prompt 在线上是两条 system 消息，部分 provider 直接 400 拒收——full 档在那类 provider 上第一轮就失败（todo）
+- [`T-016`](T-016.md) 对话面理由词表是两份抄本，靠一条跨插件测试防漂移（done）
+- [`T-017`](T-017.md) 两个巨型文件混域（`tool_executor.rs` / `actors/mod.rs`）（done）
+- [`T-018`](T-018.md) 无界队列一处：流式 UI 帧通道不设界（done）
+- [`T-019`](T-019.md) 前端两个热点文件混域（`sessions.ts` / `DetailForm.vue`）（done）
+- [`T-020`](T-020.md) 健壮性面无任何判据：非测试 Rust 的 `unwrap` / `expect` / `panic!` 逐处无登记（done）
+- [`T-021`](T-021.md) 文档里的数字既没有守卫、也没有 owner（D3 / D4 的出口写着「由新增计数守卫守」而那个守卫不存在）（done）
+- [`T-022`](T-022.md) 已全批落地的施工文档仍是活跃文档（done）
+- [`T-023`](T-023.md) 同一事实在多处分册复述（机制矩阵 / C-D 断言 / OUTPUT.md / PL-002 §2.3）（done）
+- [`T-024`](T-024.md) 口径不一致，其中一条论证本身写错（共 7 处，不止原登记的 1 处）（done）
+- [`T-025`](T-025.md) 计数与代码脱节（「N 条」对不上号）（done）
+- [`T-026`](T-026.md) 归档与变更史卫生（`WINDOWS-RESTART*.md`、生成模板的变更史措辞）（done）
+- [`T-027`](T-027.md) verify 程序的数据全部手填 ⇒ 验的是「计划自洽」，不是「计划 == 代码」（直接违反 README §4 纪律 2「断言的输入不得包含结论」）（done）
+- [`T-028`](T-028.md) 路由常量的名↔值与值是否真实存在两条都没有判据，而 `plugin/route.rs` 的模块文档声称有守卫（done）
+- [`T-029`](T-029.md) 门禁自身的结构约定靠约定：重生成阶段（`autoWork`）必须最后跑，无任何东西判这一点；守卫命名空间未闭合（一份既无回归测试又不在任何名单里的 `.mjs` 是完全隐形的）（done）
+- [`T-030`](T-030.md) 棘轮覆盖面只到一处：`35-baseline.mjs` 只守 `_shared.mjs` 的 `BASELINE` 一个对象，同类 floor / ceiling 三条在守卫之外（done）
+- [`T-031`](T-031.md) 棘轮计量单位只到文件级：verify 只数程序数、e2e 侧完全无数，删到只剩一条 `assert!` 两个数都不变（done）
+- [`T-032`](T-032.md) `BASELINE` 是源码常量，任一格可被 PR 静默下调；高于基线只打黄字不红（done）
+- [`T-033`](T-033.md) 守卫判据码无中央登记处，防撞号纯靠约定（done）
+- [`T-034`](T-034.md) 前后端契约手写两份：除 3 条别名外其余 `ROUTE_*` 无前端对账（done）
+- [`T-035`](T-035.md) 文档指认的符号名与代码实名不逐字（done）
+- [`T-036`](T-036.md) 代码注释以批次口径叙述实施排期（done）
+- [`T-037`](T-037.md) 测试文件存在 ≠ 会被门禁跑：两份名单无人对账（done）
+- [`T-038`](T-038.md) 「13 阶全程 0 值域扩展」这句话没有可执行判据（done）
+- [`T-039`](T-039.md) 值域判据套到 16 条外部需求上撞出标注与 §8 不符（done）
+- [`T-040`](T-040.md) 规划缺产品层：无目标用户、无用户任务，出口判据是「git diff 没改 F1–F6」而非任何用户可见指标（done）
+- [`T-041`](T-041.md) SLO 数字基于 mock 毫秒，唯一扫描口是 `#[ignore]` 测试 ⇒ 从未在 CI 出数（done）
+- [`T-042`](T-042.md) 反射 / 快路在出厂档位下结构上产生不了样本；照出的八个静默缺口已全部修完（done）
+- [`T-043`](T-043.md) 反射档样本恒为零：两个出厂 `false` 的开关缺一不可（done）
+- [`T-044`](T-044.md) 读数口「读得出」但「看不见」：`session/stats` 八列在生产前端与 CLI 零调用方（done）
+- [`T-045`](T-045.md) 召回率无评测集（`vec` 恒空、检索判据只吃 tag），但对应阶段状态记为已完成（done）
+- [`T-046`](T-046.md) 没有一份 prompt 形状基线，无法回答「结构化对模型是变好还是变坏」——没有它，任何「更有效」的判断都是凭感觉拍板（done）
+- [`T-047`](T-047.md) `full` 没被真实会话负载压过：e2e 全绿只是必要条件，不是「跑过真实负载」（done）
+- [`T-048`](T-048.md) 「结构化对模型是变好还是变坏」仍无读数：门内判据只到形状与有界性，模型侧对照需要一次独立的可授权实验（done）
+- [`T-049`](T-049.md) 会话消息的事实源是 `SessionStore`，WAL 轮末入格但读侧不以它为准 ⇒「Store 是唯一原语」在生产路径上不成立（done）
+- [`T-050`](T-050.md) 读路径不并读两源 ⇒ 真源切换的偏差无声（done）
+- [`T-051`](T-051.md) v1 档与 `V2Mode` 旋钮仍在，v2 无法独立运行（done）
+- [`T-052`](T-052.md) 思考与半截产出不入格 ⇒ 中断后历史里那半句话消失，上下文悬空（done）
+- [`T-053`](T-053.md) 主读路径没切：缓存不在才重建，写侧仍整份落正文；S1 双源对账与 S2 旧读法尚未退役（切源后单源、无对账对象）（done）
+- [`T-054`](T-054.md) 写入期裁剪不落事实 ⇒ 切源后被裁节点复活（ADR-054 后果节：裁剪入格 or 读侧按同一窗口裁，无第三种）（done）
+- [`T-055`](T-055.md) 写者令牌会静默丢事实：编辑恰逢一轮运行中拿 `NotTheWriter` ⇒ 该 `message.edited` / `removed` 被丢弃（切源后即「编辑偶发不生效」且无人报错）（done）
+- [`T-056`](T-056.md) 会话消息的事实源仍是 `SessionStore`（`messages.json` 整份覆盖），WAL 只是读侧兜底（done）
+- [`T-057`](T-057.md) Q3 进展读不走 WAL（done）
+- [`T-058`](T-058.md) 22 步实施状态闭环（PL-004 §3.1 A 表——每步实际接入 + 死码归零 + 门禁绿 + 出厂档位压过）（done）
+- [`T-059`](T-059.md) core 根出口豁免账本 18 条，大半条目在补一个口径的洞（「core 内另有消费方，审计只数跨出 core 的那一个」）（done）
+- [`T-060`](T-060.md) 其余四条豁免通道（doc-link / dead-code / panic / color）的清除任务挂在不存在的批次上（done）
+- [`T-061`](T-061.md) 登记机制支持条目分解：parent 字段（父子机制）（done）
+  - [`T-062`](T-062.md) parent 机制实现：schema + RG-024/025 + 分解树渲染 + board 查询（done）
+  - [`T-063`](T-063.md) parent 规范与总纲更新：SP-001 / PL-011 / docs/README（done）
+  - [`T-064`](T-064.md) parent 回归测试与数据示范：注入用例 + GO/T 两棵分解树（done）

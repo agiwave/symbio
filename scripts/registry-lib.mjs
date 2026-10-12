@@ -17,6 +17,9 @@
  *          `id` = 仓根相对路径（去 `.md`），**禁止进 `deps`**（RG-023：依赖图只收编号条目）。
  *      文档类（goal/stage/plan/arch/ref/guide）仍**在位存放**（就近放置优先于按类归堆），
  *      `title` = 正文首个 H1（两面对账，RG-021）。
+ *      **编号平铺不体现层级**：分解关系（总目标→子目标、大任务→小任务）走 `parent` 字段
+ *      （RG-024 结构 / RG-025 父子状态一致性），层级只是投影（INDEX 分解树小节、board
+ *      `--children`）——与「目录不参与判定」同款哲学：位置与层级都会变，身份不朽。
  *   2. **汇总 = 投影**：任何「列表 / 看板 / 总账」都由本库渲染，
  *      `registry/` 下各级 `INDEX.md` 由门禁自动重生成（`gate.d/60-facts.mjs` 的 `autoWork`），
  *      不存在第二处手抄；
@@ -44,8 +47,8 @@
  * `registry-board`（查询），它们只 import，不重复判据。
  */
 // 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
-// @ns RG 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认）
-// @codes RG-001 RG-002 RG-003 RG-004 RG-005 RG-006 RG-007 RG-008 RG-009 RG-010 RG-011 RG-012 RG-013 RG-014 RG-015 RG-016 RG-017 RG-018 RG-019 RG-020 RG-021 RG-022 RG-023
+// @ns RG 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解）
+// @codes RG-001 RG-002 RG-003 RG-004 RG-005 RG-006 RG-007 RG-008 RG-009 RG-010 RG-011 RG-012 RG-013 RG-014 RG-015 RG-016 RG-017 RG-018 RG-019 RG-020 RG-021 RG-022 RG-023 RG-024 RG-025
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -54,8 +57,15 @@ import path from 'node:path'
 
 /** 公共必填字段：所有 kind 一致。 */
 export const COMMON_REQUIRED = ['kind', 'id', 'title', 'status', 'created']
-/** 公共可选字段：`deps` 允许跨 kind（全 registry 编号唯一才敢跨）。 */
-export const COMMON_OPTIONAL = ['deps']
+/**
+ * 公共可选字段：
+ * - `deps` 是**前置义务**（依赖图的边，允许跨 kind——全 registry 编号唯一才敢跨）；
+ * - `parent` 是**分解归属**（父子分解树的边，只许同 kind，RG-024）——「总目标分解出子目标、
+ *   大任务分解出小任务、产品功能分解出子功能」这类「整体与部分」的关系。两者语义正交：
+ *   deps 回答「必须先有什么」，parent 回答「是谁的一部分」。同一对条目之间可以两条都有
+ *   （子任务的前置是别的任务，同时它是大任务的一部分），互不替代。
+ */
+export const COMMON_OPTIONAL = ['deps', 'parent']
 
 /**
  * 每个 kind 一份配置——**新增一个 kind = 在这里加一项 + 一个渲染器 + 回归测试**，
@@ -86,8 +96,12 @@ const DOC_STATUS_RULES = {
  * `active` 断言「这篇文档现行」，其前置就必须已闭环（闭环态按目标 kind 取：
  * task = `done`，其余 = `active`）。`draft` / `retired` 不在门槛里——草案可以引草案，
  * 废止不因前置废止而红。
+ *
+ * `retiredStates` 是**退场档**（RG-025 读它）：父条目进入退场档 ⇒ 不得有子条目停在生效档
+ * （「大任务已经 done/wont，还有小任务 doing」是状态谎报）。与 `requiresDepsDone`
+ * （生效档）成对：子生效 ⇒ 父生效；父退场 ⇒ 子退场——父子状态档位单调。
  */
-const docKind = (label, blurb) => ({
+const docKind = (label, blurb, retiredStates = ['retired']) => ({
   label,
   blurb,
   titleEqualsH1: true,
@@ -99,6 +113,7 @@ const docKind = (label, blurb) => ({
   statusRules: DOC_STATUS_RULES,
   closedStatus: 'active',
   requiresDepsDone: ['active'],
+  retiredStates,
 })
 
 export const KINDS = {
@@ -123,6 +138,9 @@ export const KINDS = {
     },
     closedStatus: 'done',
     requiresDepsDone: ['doing', 'done'],
+    // 退场档（RG-025 R2）：大任务 done / wont ⇒ 小任务必须同处退场档——「父已完成、子还开着」
+    // 是谎报；反过来（子 wont 父 doing）合法：分解允许中途砍掉某个子项。
+    retiredStates: ['done', 'wont'],
   },
   spec: {
     label: '规范',
@@ -138,6 +156,7 @@ export const KINDS = {
     },
     closedStatus: 'active',
     requiresDepsDone: ['active'],
+    retiredStates: ['retired'],
   },
   adr: {
     label: '架构决策',
@@ -155,6 +174,7 @@ export const KINDS = {
     // 与 spec / 文档类同构：`active` 断言「这条决策现行」，其 `deps` 前置就必须已闭环。
     // 依赖机制不按 kind 打折——RG-008 的门槛档位对全部 kind 同一套。
     requiresDepsDone: ['active'],
+    retiredStates: ['superseded', 'withdrawn'],
   },
 }
 
@@ -633,6 +653,22 @@ export function auditEntries(entries, root) {
         seen.add(d)
       }
     }
+    // RG-024 parent 形状（单文件段）：单值标量——一个子条目只有一个父亲（树不是 DAG），
+    // 「共同归属」没有语义（那正是 deps 的场景）。存在性 / 同 kind / 成环在跨文件段判。
+    if ('parent' in meta && !isEmpty(meta.parent)) {
+      const p = meta.parent
+      if (typeof p !== 'string' || !validId(p)) {
+        out.push(
+          `${e.rel}：RG-024 parent 必须是编号条目 id（字母 / 数字 / 点开头，其后为字母数字 / . _ - 与 Unicode 字母数字），读到：${JSON.stringify(p)}`,
+        )
+      } else if (p.includes('/')) {
+        out.push(
+          `${e.rel}：RG-024 parent 不得含 \`/\`（读到 \`${p}\`）——parent 是编号（身份）不是路径（位置）；跨位置或跨 kind 的关联走 deps / \`[[引用]]\``,
+        )
+      } else if (p === meta.id) {
+        out.push(`${e.rel}：RG-024 parent 含自身（自己不能分解出自己——分解环没有父）`)
+      }
+    }
     // RG-007 状态 × 字段矩阵
     const rule = typeof meta.status === 'string' ? cfg.statusRules[meta.status] : null
     if (rule) {
@@ -704,6 +740,67 @@ export function auditEntries(entries, root) {
     const depsOf = (id) => (Array.isArray(byId.get(id).meta.deps) ? byId.get(id).meta.deps.filter((d) => byId.has(d)) : [])
     const cycle = findCycle(ids, depsOf)
     if (cycle) out.push(`RG-006 依赖成环：${cycle.join(' -> ')}（环上的编号永远等不到前置闭环）`)
+  }
+
+  // ---- RG-024：parent 的存在性 / 同 kind / 不成环（分解树的边） ----
+  // 分解是**同类事物的大小之分**：总目标→子目标、大任务→小任务、产品功能→子功能、
+  // 大阶段→子阶段——所以 parent 只许同 kind。跨 kind 的关联（任务服务于某阶段）走 deps
+  // （前置）或正文引用（导航），不塞进 parent：一个字段一种语义，塞两种就两种都读不出。
+  {
+    const parentOf = new Map()
+    for (const e of entries) {
+      if (!e.meta || isEmpty(e.meta.parent) || typeof e.meta.parent !== 'string') continue
+      if (e.meta.parent === e.meta.id) continue // 自指已在单文件段判（不重复进环检测）
+      if (e.meta.parent.includes('/')) continue // 形状错已在单文件段判（一个违规只红一条）
+      const parent = byId.get(e.meta.parent)
+      if (!parent) {
+        out.push(`${e.rel}：RG-024 parent 指到不存在的编号 \`${e.meta.parent}\``)
+        continue
+      }
+      if (parent.kind !== e.kind) {
+        out.push(
+          `${e.rel}：RG-024 parent \`${e.meta.parent}\` 是${KINDS[parent.kind].label}（${parent.kind}），` +
+            `而本篇是${KINDS[e.kind].label}（${e.kind}）——分解只发生在同 kind 之间；` +
+            '跨 kind 的关联用 deps（前置）或正文引用（导航）',
+        )
+        continue
+      }
+      parentOf.set(e.meta.id, e.meta.parent)
+    }
+    const cycle = findCycle([...parentOf.keys()], (id) => (parentOf.has(id) ? [parentOf.get(id)] : []))
+    if (cycle) out.push(`RG-024 parent 成环：${cycle.join(' -> ')}（分解环上的条目永远说不清谁是父）`)
+  }
+
+  // ---- RG-025：父子状态一致性（分解树上的档位单调——状态只许说真话） ----
+  // 两条规则，对全部 kind 同一套（档位表按 kind 取，与 RG-008「依赖机制不按 kind 打折」同风）：
+  //   R1 子生效 ⇒ 父生效：子条目进入生效档 ⇒ 父不得停在未生效档
+  //     （「三个小任务已经 doing，大任务还写着 todo」是谎报——父确实已开始推进）；
+  //   R2 父退场 ⇒ 子退场：父条目进入退场档 ⇒ 不得有子条目停在生效档
+  //     （「大任务已经 done / wont，还有小任务 doing」同样是谎报）。
+  // 中间组合合法：父 doing 子 todo（分解未动）、子 wont 父 doing（中途砍子项）——
+  // 分解允许部分未动，不允许档位倒挂。draft / 草案引草案的同款宽容这里也有：
+  // 草案子条目不触发 R1（未生效档本来就可以引未生效档）。
+  for (const e of entries) {
+    if (!e.meta || isEmpty(e.meta.parent) || typeof e.meta.parent !== 'string') continue
+    if (e.meta.parent === e.meta.id) continue
+    if (e.meta.parent.includes('/')) continue // 形状错已在单文件段判（一个违规只红一条）
+    const parent = byId.get(e.meta.parent)
+    if (!parent || !parent.meta || parent.kind !== e.kind) continue // 存在性 / 同 kind 归 RG-024
+    const cfg = KINDS[e.kind]
+    const childStatus = e.meta.status
+    const parentStatus = parent.meta.status
+    if (cfg.requiresDepsDone.includes(childStatus) && !cfg.requiresDepsDone.includes(parentStatus)) {
+      out.push(
+        `${e.rel}：RG-025 子条目 status=${childStatus}（生效档）要求父条目 \`${e.meta.parent}\` 同在生效档` +
+          `（${cfg.requiresDepsDone.join(' / ')}），而它是 ${parentStatus}——部分子项已推进、父整体却停在未生效档，是状态谎报`,
+      )
+    }
+    if (cfg.retiredStates.includes(parentStatus) && !cfg.retiredStates.includes(childStatus)) {
+      out.push(
+        `${e.rel}：RG-025 父条目 \`${e.meta.parent}\` status=${parentStatus}（退场档）要求子条目同处退场档` +
+          `（${cfg.retiredStates.join(' / ')}），而它是 ${childStatus}——父整体已退场、子项却停在生效档，是状态谎报`,
+      )
+    }
   }
 
   // ---- RG-015：spec 的 supersedes（显式取代链——冲突靠数据消解，不靠优先级裁决） ----
@@ -833,7 +930,9 @@ export function auditEntries(entries, root) {
 
 /**
  * 拓扑序（前置在前），同层按 id 字典序——**确定性**，是汇总页可再生的前提。
- * 有环时退回字典序（环已被 RG-006 判红，渲染不再抢报）。
+ * 边有两类：`deps`（前置义务，RG-006 成环判红）与 `parent`（分解归属，RG-024 成环判红）——
+ * 后者只贡献「父先于子」的渲染序（子开工不要求父闭环，那是 RG-025 的档位单调），
+ * 让父子条目在分组表里相邻。有环时退回字典序（环已被判红，渲染不再抢报）。
  */
 export function topoOrder(entries) {
   const withMeta = entries.filter((e) => e.meta && !isEmpty(e.meta.id))
@@ -846,6 +945,11 @@ export function topoOrder(entries) {
       if (!idSet.has(d)) continue
       indeg.set(e.meta.id, indeg.get(e.meta.id) + 1)
       dependents.get(d).push(e.meta.id)
+    }
+    const p = e.meta.parent
+    if (typeof p === 'string' && idSet.has(p) && p !== e.meta.id) {
+      indeg.set(e.meta.id, indeg.get(e.meta.id) + 1)
+      dependents.get(p).push(e.meta.id)
     }
   }
   const byIdEntry = new Map(withMeta.map((e) => [e.meta.id, e]))
@@ -869,12 +973,91 @@ export function topoOrder(entries) {
   return order.map((id) => byIdEntry.get(id)).filter(Boolean)
 }
 
+/**
+ * parent 链深度（顶层 = 0）——board 组内缩进读它。跨 kind / 指不到的 parent 不计
+ * （树按 kind 渲染；那种边已被 RG-024 判红）。visiting 兜底防环上无限递归
+ * （board 打印前先跑审计，有环根本到不了这里）。
+ */
+export function parentDepth(entries) {
+  const byId = new Map(entries.filter((e) => e.meta && !isEmpty(e.meta.id)).map((e) => [e.meta.id, e]))
+  const depth = new Map()
+  const visiting = new Set()
+  const of = (e) => {
+    if (depth.has(e.meta.id)) return depth.get(e.meta.id)
+    if (visiting.has(e.meta.id)) return 0
+    visiting.add(e.meta.id)
+    const p = e.meta.parent
+    const parent = typeof p === 'string' ? byId.get(p) : null
+    const d = parent && parent.kind === e.kind ? of(parent) + 1 : 0
+    visiting.delete(e.meta.id)
+    depth.set(e.meta.id, d)
+    return d
+  }
+  for (const e of entries) if (e.meta && !isEmpty(e.meta.id)) of(e)
+  return depth
+}
+
 const cell = (s) => String(s ?? '')
   .replace(/\|/g, '\\|')
   .replace(/\s*\n\s*/g, ' ')
   .trim() || '—'
 
 const depsCell = (e) => (Array.isArray(e.meta.deps) && e.meta.deps.length ? e.meta.deps.join('、') : '—')
+
+const byIdCmp = (a, b) => (a.meta.id < b.meta.id ? -1 : 1)
+
+/**
+ * 分解树小节：`parent` 字段的投影——按父子关系组织成森林（缩进列表）。
+ *
+ * **只在该 kind 真的用到了 parent 时出现**：没有分解数据的 kind，汇总页与加机制之前
+ * 逐字节一致（新机制零回归面）。编号平铺不体现层级——层级是投影不是身份，
+ * 与「目录不参与判定」同款哲学；同状态的父子在分组表里已相邻（topoOrder 纳入
+ * parent 边），本小节给跨状态的分解全景（父 doing 子 todo 时表里看不到完整树）。
+ * 环防御：seen 之外的平铺补行——环已被 RG-024 判红，渲染不抢报也不死循环。
+ */
+function treeSection(kind, allEntries) {
+  const mine = allEntries.filter((e) => e.kind === kind && e.meta && !isEmpty(e.meta.id))
+  if (!mine.some((e) => !isEmpty(e.meta.parent))) return ''
+  const byId = new Map(mine.map((e) => [e.meta.id, e]))
+  const children = new Map()
+  for (const e of mine) {
+    const p = e.meta.parent
+    if (typeof p !== 'string' || p === e.meta.id || !byId.has(p)) continue
+    if (!children.has(p)) children.set(p, [])
+    children.get(p).push(e)
+  }
+  for (const list of children.values()) list.sort(byIdCmp)
+  const href = (e) => relFrom(`docs/${kind}`, e.rel)
+  const line = (e, depth) => `${'  '.repeat(depth)}- [\`${e.meta.id}\`](${href(e)}) ${cell(e.meta.title)}（${e.meta.status}）`
+  const lines = [
+    '## 分解树',
+    '',
+    '分解关系只写在 `parent` 字段（子条目指向父条目、同 kind；编号平铺不体现层级——层级是投影不是身份）。',
+    '同状态的父子在上面的分组表里相邻；本小节是跨状态的分解全景。',
+    '',
+  ]
+  const seen = new Set()
+  const walk = (e, depth) => {
+    if (seen.has(e.meta.id)) return
+    seen.add(e.meta.id)
+    lines.push(line(e, depth))
+    for (const c of children.get(e.meta.id) ?? []) walk(c, depth + 1)
+  }
+  for (const e of mine.filter((e) => !(typeof e.meta.parent === 'string' && byId.has(e.meta.parent))).sort(byIdCmp)) {
+    walk(e, 0)
+  }
+  for (const e of mine) {
+    if (!seen.has(e.meta.id)) lines.push(line(e, 0))
+  }
+  return lines.join('\n')
+}
+
+/** 渲染收尾：有分解数据的 kind 追加「分解树」小节（无 parent 数据时输出不变）。 */
+function withTree(kind, allEntries, lines) {
+  const tree = treeSection(kind, allEntries)
+  if (tree) lines.push(tree, '')
+  return lines
+}
 
 const HEADER_TASK =
   '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/task/*.md` 生成，请勿手改。**\n' +
@@ -940,7 +1123,7 @@ function renderTaskIndex(allEntries) {
     ),
     '',
   ]
-  return lines.join('\n')
+  return withTree('task', allEntries, lines).join('\n')
 }
 
 /** spec 的判据列：`## 判据` 里第一个 `scripts/*.mjs` 指认；没有则是人工判据。 */
@@ -983,7 +1166,7 @@ function renderSpecIndex(allEntries) {
     ),
     '',
   ]
-  return lines.join('\n')
+  return withTree('spec', allEntries, lines).join('\n')
 }
 
 /** adr 的落地进展列：`impl` 的中文标签（词表见 `ADR_IMPL` / `ADR_IMPL_OTHER`）。 */
@@ -1055,7 +1238,7 @@ function renderAdrIndex(allEntries) {
       ]
     }),
   ]
-  return lines.join('\n')
+  return withTree('adr', allEntries, lines).join('\n')
 }
 
 /**
@@ -1094,7 +1277,7 @@ function renderDocIndex(kind, allEntries) {
     table(['编号', '标题', '理由'], mine.filter((e) => e.meta.status === 'retired').map((e) => [idCell(e), cell(e.meta.title), cell(e.meta.reason)])),
     '',
   ]
-  return lines.join('\n')
+  return withTree(kind, allEntries, lines).join('\n')
 }
 
 const RENDERERS = { task: renderTaskIndex, spec: renderSpecIndex, adr: renderAdrIndex }

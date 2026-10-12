@@ -12,6 +12,8 @@
  *   node scripts/registry-board.mjs --kind=task        只看某个 kind（含 goal / stage / plan / arch / ref / guide）
  *   node scripts/registry-board.mjs --status=todo      按状态过滤
  *   node scripts/registry-board.mjs --id=T-001         打印单条（字段 + 正文全文；文档类的 id 是相对路径）
+ *   node scripts/registry-board.mjs --children=T-056   打印该条目的分解子树（parent 字段，递归孙辈）
+ *   node scripts/registry-board.mjs --parent=T-062     打印该条目的父链（从顶层祖先到当前条目）
  *   node scripts/registry-board.mjs --root=<仓库根>    （回归测试夹具用）
  *
  * 退出码：0 = 通过；1 = 条目有违规（不打印看板）；2 = 范围读不出 / 参数不识别。
@@ -22,13 +24,13 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, dim } from './color.mjs'
-import { KINDS, loadEntries, auditEntries, topoOrder, sectionOf, isEmpty } from './registry-lib.mjs'
+import { KINDS, loadEntries, auditEntries, topoOrder, sectionOf, isEmpty, parentDepth } from './registry-lib.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const defaultRoot = path.resolve(scriptDir, '..')
 
 const USAGE =
-  '用法：node scripts/registry-board.mjs [--kind=<kind>] [--status=<状态>] [--id=<编号>] [--root=<仓库根>]\n' +
+  '用法：node scripts/registry-board.mjs [--kind=<kind>] [--status=<状态>] [--id=<编号>] [--children=<编号>] [--parent=<编号>] [--root=<仓库根>]\n' +
   '退出码：0 = 通过；1 = 条目有违规；2 = 范围读不出 / 参数不识别'
 
 const TASK_GLYPH = { todo: '☐', doing: '🟡', done: '☑', wont: '❌' }
@@ -49,7 +51,7 @@ const SPEC_GROUPS = [
 /** 其余 kind（adr + 文档类）的状态图标与理由列——按各自的状态词表分组。 */
 const GENERIC_GLYPH = { active: '✅', draft: '📝', retired: '❌', superseded: '↩️', withdrawn: '🚫' }
 
-function printGenericGroup(lines, entries, status, title) {
+function printGenericGroup(lines, entries, status, title, depth) {
   const mine = entries.filter((e) => e.meta.status === status)
   lines.push(`—— ${title} ${mine.length ? '' : '——（无）'}`)
   if (!mine.length) return
@@ -57,11 +59,11 @@ function printGenericGroup(lines, entries, status, title) {
   for (const e of mine) {
     const impl = e.kind === 'adr' && e.meta.impl ? ` 落地 ${e.meta.impl}` : ''
     const why = e.meta.reason ? `  理由 ${e.meta.reason}` : ''
-    lines.push(`  ${GENERIC_GLYPH[status] ?? '·'} ${e.meta.id.padEnd(pad)}  ${e.meta.title}${impl}${why}`)
+    lines.push(`  ${GENERIC_GLYPH[status] ?? '·'} ${'  '.repeat(depth?.get(e.meta.id) ?? 0)}${e.meta.id.padEnd(pad)}  ${e.meta.title}${impl}${why}`)
   }
 }
 
-function printTaskGroup(lines, entries, status, title) {
+function printTaskGroup(lines, entries, status, title, depth) {
   const mine = entries.filter((e) => e.meta.status === status)
   lines.push(`—— ${title} ${mine.length ? '' : '——（无）'}`)
   if (!mine.length) return
@@ -71,18 +73,79 @@ function printTaskGroup(lines, entries, status, title) {
     const prio = e.meta.prio ? `·${e.meta.prio}` : ''
     const extra = status === 'done' && e.meta.evidence ? `  证据 ${e.meta.evidence}` : ''
     const why = status === 'wont' && e.meta.reason ? `  理由 ${e.meta.reason}` : ''
-    lines.push(`  ${TASK_GLYPH[status]} ${e.meta.id.padEnd(pad)}  ${e.meta.title}  [${e.meta.track}${prio}]${deps}${extra}${why}`)
+    lines.push(
+      `  ${TASK_GLYPH[status]} ${'  '.repeat(depth?.get(e.meta.id) ?? 0)}${e.meta.id.padEnd(pad)}  ${e.meta.title}  [${e.meta.track}${prio}]${deps}${extra}${why}`,
+    )
   }
 }
 
-function printSpecGroup(lines, entries, status, title) {
+function printSpecGroup(lines, entries, status, title, depth) {
   const mine = entries.filter((e) => e.meta.status === status)
   lines.push(`—— ${title} ${mine.length ? '' : '——（无）'}`)
   if (!mine.length) return
   const pad = Math.max(...mine.map((e) => e.meta.id.length))
   for (const e of mine) {
-    lines.push(`  ${status === 'retired' ? '❌' : status === 'draft' ? '📝' : '✅'} ${e.meta.id.padEnd(pad)}  ${e.meta.title}  ${e.meta.scope}`)
+    lines.push(
+      `  ${status === 'retired' ? '❌' : status === 'draft' ? '📝' : '✅'} ${'  '.repeat(depth?.get(e.meta.id) ?? 0)}${e.meta.id.padEnd(pad)}  ${e.meta.title}  ${e.meta.scope}`,
+    )
   }
+}
+
+const glyphOf = (e) => TASK_GLYPH[e.meta.status] ?? GENERIC_GLYPH[e.meta.status] ?? '·'
+const idCmp = (a, b) => (a.meta.id < b.meta.id ? -1 : 1)
+
+/**
+ * 编号找不到时的友好提示：文档类编号带名称段（`GO-001-前端去业务化`），
+ * 传裸前缀（`GO-001`）时指出唯一候选——查询仍保持精确匹配（与 `--id` 同语义）。
+ */
+function notFound(lines, entries, id, what) {
+  const hits = entries.filter((e) => e.meta && e.meta.id.startsWith(`${id}-`))
+  const hint = hits.length === 1 ? `（是否想找 \`${hits[0].meta.id}\`？文档类编号带名称段，查询用完整 id）` : ''
+  return { code: 1, lines: [red(`[ERROR] 没有编号为 ${id} 的${what}${hint}`)] }
+}
+
+/**
+ * `--children=<编号>`：以该条目为根的**分解子树**（parent 字段的投影）。
+ * 跨状态全景（子条目 wont / done 也显示）——与 INDEX 的分解树小节同一数据两个出口。
+ */
+function printChildren(lines, entries, rootId) {
+  const root = entries.find((e) => e.meta && e.meta.id === rootId)
+  if (!root) return notFound(lines, entries, rootId, '条目')
+  const kids = (id) => entries.filter((e) => e.meta && e.meta.parent === id).sort(idCmp)
+  const count = entries.filter((e) => e.meta && e.meta.parent === rootId).length
+  lines.push(`=== ${rootId} 的分解子树（parent 字段，共 ${count} 个直接子条目）===`)
+  const seen = new Set()
+  const walk = (e, d) => {
+    if (seen.has(e.meta.id)) return
+    seen.add(e.meta.id)
+    lines.push(`${'  '.repeat(d)}${glyphOf(e)} ${e.meta.id}  ${e.meta.title}（${e.meta.status}）`)
+    for (const c of kids(e.meta.id)) walk(c, d + 1)
+  }
+  walk(root, 0)
+  if (!count) lines.push(dim('（该条目没有子条目——顶层条目）'))
+  return { code: 0, lines }
+}
+
+/** `--parent=<编号>`：该条目的**父链**（从顶层祖先到当前条目，一级一缩进）。 */
+function printParentChain(lines, entries, id) {
+  const byId = new Map(entries.filter((e) => e.meta).map((e) => [e.meta.id, e]))
+  const cur = byId.get(id)
+  if (!cur) return notFound(lines, entries, id, '条目')
+  const chain = []
+  const guard = new Set()
+  let e = cur
+  while (e && !guard.has(e.meta.id)) {
+    guard.add(e.meta.id)
+    chain.unshift(e)
+    e = typeof e.meta.parent === 'string' ? byId.get(e.meta.parent) : null
+  }
+  lines.push(`=== ${id} 的父链（parent 字段，深度 ${chain.length - 1}）===`)
+  chain.forEach((x, i) => {
+    const mark = i === chain.length - 1 ? '  ← 当前' : ''
+    lines.push(`${'  '.repeat(i)}${glyphOf(x)} ${x.meta.id}  ${x.meta.title}（${x.meta.status}）${mark}`)
+  })
+  if (chain.length === 1) lines.push(dim('（无 parent——顶层条目）'))
+  return { code: 0, lines }
 }
 
 function printRecord(lines, e) {
@@ -104,16 +167,23 @@ export function runRegistryBoard(argv) {
   let kindFilter = null
   let statusFilter = null
   let idFilter = null
+  let childrenFilter = null
+  let parentFilter = null
   for (const a of argv) {
     if (a === '--strict') continue
     else if (a.startsWith('--root=')) root = path.resolve(a.slice(7))
     else if (a.startsWith('--kind=')) kindFilter = a.slice(7)
     else if (a.startsWith('--status=')) statusFilter = a.slice(9)
     else if (a.startsWith('--id=')) idFilter = a.slice(5)
+    else if (a.startsWith('--children=')) childrenFilter = a.slice(11)
+    else if (a.startsWith('--parent=')) parentFilter = a.slice(9)
     else return { code: 2, lines: [red(`[ERROR] 参数不识别：${a}`), USAGE] }
   }
   if (kindFilter && !(kindFilter in KINDS)) {
     return { code: 2, lines: [red(`[ERROR] 未知 kind：${kindFilter}（可选：${Object.keys(KINDS).join(' / ')}）`), USAGE] }
+  }
+  if ((idFilter && (childrenFilter || parentFilter)) || (childrenFilter && parentFilter)) {
+    return { code: 2, lines: [red('[ERROR] --id / --children / --parent 三选一（单条视图与分解视图不混用）'), USAGE] }
   }
 
   const { entries, errors, missing } = loadEntries(root)
@@ -140,8 +210,11 @@ export function runRegistryBoard(argv) {
     printRecord(lines, e)
     return { code: 0, lines }
   }
+  if (childrenFilter) return printChildren(lines, entries, childrenFilter)
+  if (parentFilter) return printParentChain(lines, entries, parentFilter)
 
   const shown = entries.filter((e) => !kindFilter || e.kind === kindFilter)
+  const depth = parentDepth(shown)
   const dist = Object.entries(KINDS)
     .filter(([kind]) => !kindFilter || kind === kindFilter)
     .map(([kind, cfg]) => {
@@ -165,7 +238,8 @@ export function runRegistryBoard(argv) {
     }
     for (const [status, title] of groups) {
       if (statusFilter && statusFilter !== status) continue
-      printer(lines, mine, status, title)
+      // 组内按 parent 深度缩进（顶层 = 0，无 parent 数据时全部为 0——输出与加机制前一致）
+      printer(lines, mine, status, title, depth)
     }
   }
   byKind('task', TASK_GROUPS, printTaskGroup)

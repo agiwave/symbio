@@ -361,6 +361,134 @@ test('RG-023：deps 是依赖图的边，只收编号条目——导航文档（
   assert.deepEqual(errsOf(ok), [], '编号条目互依赖放行')
 })
 
+// ================= 分解：parent（RG-024 / RG-025） =================
+//
+// parent 与 deps 正交：deps 答「必须先有什么」（DAG、可跨 kind），parent 答「是谁的一部分」
+// （树、同 kind）。回归钉三件事：① 结构判据（存在 / 同 kind / 自指 / 不成环）；
+// ② 状态档位单调（子生效 ⇒ 父生效、父退场 ⇒ 子退场）；③ 呈现（分解树小节缩进 +
+// board --children/--parent），以及「无 parent 数据时汇总页零变化」这个反向面。
+
+test('RG-024：parent 含 / / 不存在 / 跨 kind / 自指 / 成环 各自变红；同 kind 放行（反向）', () => {
+  // 含 / ⇒ parent 是编号不是路径（跨位置关联走引用，不走 parent）
+  const slash = caseRoot({
+    'task/T-050.md': taskDoc('T-050', { parent: 'docs/task/T-051' }),
+    'task/T-051.md': taskDoc('T-051'),
+  })
+  expectOnly(errsOf(slash), /RG-024 parent 不得含/)
+
+  const missing = caseRoot({ 'task/T-050.md': taskDoc('T-050', { parent: 'T-999' }) })
+  expectOnly(errsOf(missing), /RG-024 parent 指到不存在的编号 `T-999`/)
+
+  // 跨 kind：分解是同类事物的大小之分——task 挂到 plan 下没有语义（走 deps / 引用）
+  const cross = caseRoot({
+    'task/T-050.md': taskDoc('T-050', { parent: 'PL-001-a' }),
+    'docs/plan/PL-001-a.md': docDoc('docs/plan/PL-001-a.md', { kind: 'plan', id: 'PL-001-a' }),
+  })
+  expectOnly(errsOf(cross), /RG-024 parent `PL-001-a` 是计划/)
+
+  const self = caseRoot({ 'task/T-050.md': taskDoc('T-050', { parent: 'T-050' }) })
+  expectOnly(errsOf(self), /RG-024 parent 含自身/)
+
+  const cyc = caseRoot({
+    'task/T-050.md': taskDoc('T-050', { parent: 'T-051' }),
+    'task/T-051.md': taskDoc('T-051', { parent: 'T-050' }),
+  })
+  expectOnly(errsOf(cyc), /RG-024 parent 成环/)
+
+  // 反向：同 kind 父子（大任务 → 小任务）合法
+  const ok = caseRoot({
+    'task/T-050.md': taskDoc('T-050'),
+    'task/T-051.md': taskDoc('T-051', { parent: 'T-050' }),
+  })
+  assert.deepEqual(errsOf(ok), [], '同 kind 分解放行（反向）')
+})
+
+test('RG-025：父子状态档位单调——子 doing 父 todo / 父 done 子 doing 变红；中间组合放行', () => {
+  // R1：子生效 ⇒ 父不得停在未生效档（「小任务都 doing 了，大任务还写着 todo」是谎报）
+  const r1 = caseRoot({
+    'task/T-050.md': taskDoc('T-050'),
+    'task/T-051.md': taskDoc('T-051', { parent: 'T-050', status: 'doing' }),
+  })
+  expectOnly(errsOf(r1), /RG-025 子条目 status=doing（生效档）要求父条目 `T-050` 同在生效档/)
+
+  // R2：父退场 ⇒ 子不得停在生效档（「大任务都 done 了，还有小任务 doing」是谎报）
+  const r2 = caseRoot({
+    'task/T-050.md': taskDoc('T-050', { status: 'done', evidence: 'abc' }),
+    'task/T-051.md': taskDoc('T-051', { parent: 'T-050', status: 'doing' }),
+  })
+  expectOnly(errsOf(r2), /RG-025 父条目 `T-050` status=done（退场档）要求子条目同处退场档/)
+
+  // 反向：中间组合合法——分解允许部分未动、允许中途砍子项
+  const notStarted = caseRoot({
+    'task/T-050.md': taskDoc('T-050', { status: 'doing' }),
+    'task/T-051.md': taskDoc('T-051', { parent: 'T-050' }),
+  })
+  assert.deepEqual(errsOf(notStarted), [], '父 doing 子 todo ⇒ 放行（分解未动）')
+  const cut = caseRoot({
+    'task/T-050.md': taskDoc('T-050', { status: 'doing' }),
+    'task/T-051.md': taskDoc('T-051', { parent: 'T-050', status: 'wont', reason: '不需要了' }),
+  })
+  assert.deepEqual(errsOf(cut), [], '子 wont 父 doing ⇒ 放行（中途砍子项）')
+  const same = caseRoot({
+    'task/T-050.md': taskDoc('T-050', { status: 'doing' }),
+    'task/T-051.md': taskDoc('T-051', { parent: 'T-050', status: 'doing' }),
+  })
+  assert.deepEqual(errsOf(same), [], '父子同处 doing ⇒ 放行')
+
+  // 文档类同款：子 active ⇒ 父不得停在 draft（goal 树：子目标现行、总目标草案 = 谎报）
+  const docR1 = caseRoot({
+    'docs/plan/PL-010-a.md': docDoc('docs/plan/PL-010-a.md', { kind: 'plan', id: 'PL-010-a', status: 'draft' }),
+    'docs/plan/PL-010-b.md': docDoc('docs/plan/PL-010-b.md', { kind: 'plan', id: 'PL-010-b', parent: 'PL-010-a' }),
+  })
+  expectOnly(errsOf(docR1), /RG-025 子条目 status=active（生效档）要求父条目 `PL-010-a` 同在生效档/)
+})
+
+test('分解渲染：INDEX 分解树缩进到孙层、同层按编号序、无 parent 数据时零变化（反向）', () => {
+  const base = caseRoot({
+    'task/T-050.md': taskDoc('T-050', { title: '大任务' }),
+    'task/T-051.md': taskDoc('T-051', { title: '小任务一', parent: 'T-050' }),
+    'task/T-052.md': taskDoc('T-052', { title: '小任务二', parent: 'T-050' }),
+    'task/T-053.md': taskDoc('T-053', { title: '孙任务', parent: 'T-051' }),
+  })
+  const { entries } = loadEntries(base)
+  const out = renderKindIndex('task', entries)
+  assert.equal(out, renderKindIndex('task', entries), '同输入逐字节同输出')
+  assert.match(out, /## 分解树/)
+  assert.match(out, /^- \[`T-050`\]\(T-050\.md\)/m, '顶层不缩进')
+  assert.match(out, /\n {2}- \[`T-051`\]\(T-051\.md\)/, '子层缩进两格')
+  assert.match(out, /\n {4}- \[`T-053`\]\(T-053\.md\)/, '孙层缩进四格')
+  assert.ok(out.indexOf('`T-051`') < out.indexOf('`T-052`'), '同层按编号序（确定性）')
+  assert.ok(out.indexOf('`T-050`') < out.indexOf('`T-051`'), '分组表里父先于子（parent 边进拓扑序）')
+
+  // 反向：没有分解数据的 kind，汇总页不出现分解树小节（新机制零回归面）
+  const flat = caseRoot({ 'task/T-060.md': taskDoc('T-060') })
+  assert.ok(!renderKindIndex('task', loadEntries(flat).entries).includes('## 分解树'), '无 parent 数据 ⇒ 无树小节')
+})
+
+test('board --children / --parent：分解子树与父链两个查询出口；互斥与不存在有出口', () => {
+  const base = caseRoot({
+    'task/T-050.md': taskDoc('T-050', { title: '大任务' }),
+    'task/T-051.md': taskDoc('T-051', { title: '小任务一', parent: 'T-050' }),
+    'task/T-052.md': taskDoc('T-052', { title: '孙任务', parent: 'T-051' }),
+  })
+  const ch = runRegistryBoard([`--root=${base}`, '--children=T-050'])
+  assert.equal(ch.code, 0, stripAnsi(ch.lines.join('\n')))
+  const chText = stripAnsi(ch.lines.join('\n'))
+  assert.match(chText, /=== T-050 的分解子树（parent 字段，共 1 个直接子条目）===/)
+  assert.match(chText, /T-051[\s\S]*T-052/, '子树递归到孙辈')
+
+  const par = runRegistryBoard([`--root=${base}`, '--parent=T-052'])
+  assert.equal(par.code, 0, stripAnsi(par.lines.join('\n')))
+  const parText = stripAnsi(par.lines.join('\n'))
+  assert.match(parText, /=== T-052 的父链（parent 字段，深度 2）===/)
+  assert.match(parText, /T-050[\s\S]*T-051[\s\S]*T-052.*← 当前/, '从顶层祖先到当前条目')
+
+  // 单条视图 / 子树 / 父链三选一；编号不存在有明确出口（不是静默空输出）
+  assert.equal(runRegistryBoard([`--root=${base}`, '--id=T-050', '--children=T-050']).code, 2)
+  assert.equal(runRegistryBoard([`--root=${base}`, '--children=T-050', '--parent=T-050']).code, 2)
+  assert.equal(runRegistryBoard([`--root=${base}`, '--children=T-999']).code, 1)
+})
+
 test('RG-015：supersedes 目标不存在 / 指向 task / 自身 / 双 active / 成环 变红；旧条 retired 则放行', () => {
   const missing = caseRoot({ 'spec/SP-010.md': specDoc('SP-010', { supersedes: ['SP-999'] }) })
   expectOnly(errsOf(missing), /RG-015 supersedes 指到不存在的编号 `SP-999`/)
