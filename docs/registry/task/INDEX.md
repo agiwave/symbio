@@ -3,13 +3,11 @@
 > ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/registry/task/*.md` 生成，请勿手改。**
 > 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，原则与流程见 [14 · 登记与汇总机制](../../plan/14-登记与汇总机制.md)。
 
-**计数**：☐ todo 3 · 🟡 doing 0 · ☑ done 52 · ❌ wont 0（共 55）
+**计数**：☐ todo 1 · 🟡 doing 0 · ☑ done 52 · ❌ wont 0（共 53）
 
 ## 待处理（按依赖顺序）
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
-| `T-009` | C2 的形态定案——去 dispatch 样板要不要动 VdfsProvider 的契约面（先 ADR，后实施） | now | meta | — |
-| `C2` | `VdfsProvider` 的 match 样板在每一处生产实现里各写一遍 | — | C | T-009 |
 | `S-end③` | 「结构化对模型是变好还是变坏」仍无读数：门内判据只到形状与有界性，模型侧对照需要一次独立的可授权实验 | later | S | S-end① |
 
 ## 进行中
