@@ -3,7 +3,7 @@
 > ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/task/*.md` 生成，请勿手改。**
 > 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，原则与流程见 [PL-011 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。
 
-**计数**：☐ todo 1 · 🟡 doing 0 · ☑ done 62 · ❌ wont 0（共 63）
+**计数**：☐ todo 1 · 🟡 doing 0 · ☑ done 63 · ❌ wont 0（共 64）
 
 ## 待处理（按依赖顺序）
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
@@ -17,6 +17,7 @@
 | 编号 | 任务 | 轨 | 证据 |
 |---|---|---|---|
 | `T-061` | 登记机制支持条目分解：parent 字段（父子机制） | meta | registry-lib.mjs RG-024（parent 形状 / 存在 / 同 kind / 自指 / 成环）+ RG-025（子生效⇒父生效、父退场⇒子退场，档位表按 KINDS 取）；INDEX 分解树小节（条件渲染，无 parent 数据零变化）；board --children / --parent；SP-001 字段表 + PL-011 §1.2 + docs/README 两字段口径同批落地（RG-011 对账）；验证：registry-audit 249 条目零违规 · registry-audit.test.mjs 41/41 · gen-doc-refs.test.mjs 14/14 · doc-link-audit 0 失效；子任务 T-062 / T-063 / T-064 全部 done（RG-025 父退场⇒子退场的正向用例） |
+| `T-066` | megabatch 守卫：单响应工具调用数上限 + 中止原因如实标注（`6cf9520d` 会话死循环） | quality | 1. 单响应上限32（stream.rs ToolCallDelta 分支，`MAX_TOOL_CALLS_PER_RESPONSE`，超限即 Err）2. abort-reason 如实标注（tool_executor.rs 收口循环，`aborted` vs `not_executed`）3. 测试 stream.test.rs×2 + aborted_batch_terminates_every_tool_call；`cargo test --lib` 1541 通过 / clippy 0 警告 |
 | `T-011` | 五轴的外部效标：每条轴挂一个可复现的读数，而不是形容词 | plan | PL-002 新增 §3.1.1 外部效标表（五轴逐条挂读数口，纪律三条：读数没出来不得改可测量口吻 / 设定值必标 / 给不出就写"本轴目前只能人工判"）；三条轴新落生产读数口——时域跨度 = span 投影（会话首末事件 ts 跨度 + 跨会话 P50 中位数）、主动性 = conation 的 adoption_rate（已升格 / 已表达，未升格算分母）、自主程度 = autonomy 投影（闭环且全程未 task.held / 已闭环，progress 恢复不洗掉干预事实）；自我模型精度沿用 calibration 列既有口径；抽象层级写明只能人工判（跨域迁移要离线评测，不在生产读数口内）。三族各配 core 判据（含 as-of、曾 held 不算自主、未闭环不进分母、空输入有据的零）+ stats 层「删事件 ⇒ 读数跟着动」的手术刀用例；core-export-audit C-003 单消费方 58/58 未增（新导出收窄为 pub(crate)）；cargo test --lib 1526 全绿、clippy 零警告 |
 | `T-012` | 能力名册 ↔ 代码锚点：名册的每一条能力都要指到实现它的地方 | plan | PL-002 §6.1 名册新增「锚点」列（54 行，取值 `文件` / `文件::符号` 反引号形态或 `—` 表示尚未落地），已填 30 行真实锚点；判据落到 doc-symbol-audit 的 D-011（复用 D-005 的同一份 Rust 语料，不新建第二份符号解析）：文件须在仓内存在、`::符号` 查语料存在、列须是反引号形态、名册读不出即红；锚定率进日志「名册锚点 30/54 已锚定」，使「名册在长、锚定率不动」看得见；回归 7 个用例双向钉住（不存在符号 / 不存在文件 / 非反引号形态 ⇒ 红；两种有效形态、`—` 不判红、名册不在范围不适用、名册读不出 ⇒ 红）——doc-symbol-audit.test.mjs 35/35；capability_frame.rs 编译运行全绿（名册多一列未破坏 facts 解析） |
 | `T-015` | 出厂 prompt 在线上是两条 system 消息，部分 provider 直接 400 拒收——full 档在那类 provider 上第一轮就失败 | S | 口径取「前缀并入基础 system」（形状只该有一个产地，不让每家协议各并一次）：openai_chat::prepare_request 新增 merge_leading_system，吃掉数组最前的连续 system 段、按「基础 → 前缀」空行分段拼成一条（空行分段是本仓既有惯例，NativeMessage::to_api_value 拼 prompt 用的就是它）；边界——只合纯文本段，遇 Parts（多模态）停下不再吃（拼错比多一条 system 更糟），吃掉 0 条时行为与改前逐字相同；判据三层接住：① 5 个单元测试（合并顺序 / 0 条不变 / 空基础不留前导空行 / Parts 停下 / 端到端断言请求体里 system 恰好一条且前缀文本未丢）；② 形状基线 PROMPT_SHAPE.md 随形状重生成（req0 消息序列 system → system → user 变 system → user、消息数 3→2），改回两条即红；③ cargo test --lib 1531 全绿 |
@@ -150,3 +151,4 @@
   - [`T-063`](T-063.md) parent 规范与总纲更新：SP-001 / PL-011 / docs/README（done）
   - [`T-064`](T-064.md) parent 回归测试与数据示范：注入用例 + GO/T 两棵分解树（done）
 - [`T-065`](T-065.md) 修复 e2e t30 既有失败：父会话线程里出现了子会话的用户正文（todo）
+- [`T-066`](T-066.md) megabatch 守卫：单响应工具调用数上限 + 中止原因如实标注（`6cf9520d` 会话死循环）（done）
