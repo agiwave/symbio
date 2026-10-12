@@ -38,7 +38,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TASKS, structuredBodyFor } from './tasks.mjs';
-import { flattenRequest, parseFlatCalls, structuredCalls } from './flatten.mjs';
+import { flattenRequest, parseFlatCalls, parseNativeMarkupCalls, structuredCalls } from './flatten.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -82,7 +82,9 @@ function loadProvider(id) {
     max_tokens: Number(cfg.max_tokens ?? 4096),
     timeout_secs: Number(cfg.timeout_secs ?? 300),
     // 配置里写了节流就照节流走：这是本仓对这个 provider 的既有承诺，实验不该绕过它。
-    min_interval_ms: Number(cfg.rate_limit_ms ?? 0),
+    // 实测踩过：这个端点另有「20 次/分钟」的服务端闸，一次都没躲过去 ⇒ 88 个请求里 44 个 429，
+    // 判据分母被环境削掉一半。节奏不是可选优化——**读数的分母就是它**。
+    min_interval_ms: Math.max(Number(cfg.rate_limit_ms ?? 0), Number(arg('pace', '3500'))),
   };
 }
 
@@ -94,21 +96,33 @@ async function throttle(provider) {
   lastCallAt = Date.now();
 }
 
+async function postOnce(provider, body, signal) {
+  const res = await fetch(`${provider.api_base}/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${provider.api_key}` },
+    body: JSON.stringify(body),
+    signal,
+  });
+  const text = await res.text();
+  return { ok: res.ok, status: res.status, text };
+}
+
 async function callModel(provider, body) {
   await throttle(provider);
   const t0 = Date.now();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), provider.timeout_secs * 1000);
   try {
-    const res = await fetch(`${provider.api_base}/chat/completions`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${provider.api_key}` },
-      body: JSON.stringify(body),
-      signal: ctrl.signal,
-    });
-    const text = await res.text();
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 400)}`);
-    const json = JSON.parse(text);
+    let hit = await postOnce(provider, body, ctrl.signal);
+    // 429 / 5xx 是**服务端说等一等**，不是模型的答卷：退避重试，绝不计成失败。
+    for (let attempt = 1; !hit.ok && (hit.status === 429 || hit.status >= 500) && attempt <= 4; attempt++) {
+      const wait = hit.status === 429 ? 20_000 * attempt : 5_000 * attempt;
+      console.log(`    （${hit.status} ⇒ 退避 ${wait / 1000}s 后重试，第 ${attempt}/4 次）`);
+      await sleep(wait);
+      hit = await postOnce(provider, body, ctrl.signal);
+    }
+    if (!hit.ok) throw new Error(`HTTP ${hit.status}: ${hit.text.slice(0, 400)}`);
+    const json = JSON.parse(hit.text);
     const choice = json.choices?.[0] ?? {};
     return {
       message: choice.message ?? {},
@@ -127,6 +141,21 @@ async function callModel(provider, body) {
 /** 一臂的请求体：臂 B 永远是臂 A 输入的**派生**，不存在手抄两份题目的偏差源。 */
 function buildArmBody(label, structuredBody) {
   return label === 'structured' ? structuredBody : flattenRequest(structuredBody);
+}
+
+/**
+ * 臂 B 的调用取用：先认文本协议那一行 JSON，认不到再认模型漏进正文的**内部调用标记**。
+ *
+ * 两列判据都保留，不合并成一列——「能不能把工具名读回来」与「它听没听懂你要的格式」
+ * 是两件事（实测拍平臂会有一道直接把训练形态的 `<function=…>` 打进正文，
+ * 工具选对了、格式却没按协议来；把它记成「没调用」就是拿解析器的盲区冒充模型的能力）。
+ */
+function flatCalls(content) {
+  const json = parseFlatCalls(content).calls;
+  if (json.length > 0) return { calls: json, source: 'text-protocol', leaked: false };
+  const markup = parseNativeMarkupCalls(content);
+  if (markup.length > 0) return { calls: markup, source: 'native-markup', leaked: true };
+  return { calls: [], source: 'prose', leaked: false };
 }
 
 function requiredKeysOf(toolByName, name) {
@@ -204,8 +233,15 @@ async function runOneArm({ label, task, provider, corpus, toolByName, temperatur
     console.log(`  [${label}] ${task.id} → 失败：${String(e.message).slice(0, 120)}`);
     return row;
   }
-  const calls = label === 'structured' ? structuredCalls(result.message) : parseFlatCalls(result.message?.content).calls;
+  const calls = label === 'structured' ? structuredCalls(result.message) : flatCalls(result.message?.content).calls;
+  const flatMeta = label === 'structured' ? null : flatCalls(result.message?.content);
   const g = grade(task, label, calls, result, toolByName);
+  if (flatMeta) {
+    g.answer_via = flatMeta.source;
+    g.native_markup_leaked = flatMeta.leaked;
+    // 漏了内部标记又没按文本协议答：`protocol_followed` 必须是「按协议答了」，不是「能解析出来」
+    if (flatMeta.leaked) g.protocol_followed = false;
+  }
   const asked =
     label === 'structured'
       ? calls.map((c) => `${c.name}(${c.arguments_raw ?? ''})`).join(' + ')
@@ -261,6 +297,7 @@ function tally(rows, arm) {
     control_spurious: rate(ctl, 'spurious_call'),
     attribution: rate(attr, 'attributed_correctly'),
     protocol: rate(sel.concat(attr), 'protocol_followed'),
+    native_leak: rate(sel.concat(ctl, attr), 'native_markup_leaked'),
     prompt_tokens: sum(sel.concat(ctl, attr), 'prompt_tokens'),
     bytes: sum(sel.concat(ctl, attr), 'request_bytes'),
     ms: sum(sel.concat(ctl, attr), 'latency_ms'),
@@ -326,6 +363,7 @@ function renderReport({ corpus, provider, temperature, rows, repeat, generatedAt
   row('control：不该调用却调用（越少越好）', 'control_spurious');
   row('attribution：结果↔调用对应得回来', 'attribution');
   row('拍平侧：文本协议被遵守（臂 A 不适用）', 'protocol');
+  row('拍平侧：正文漏出模型内部调用格式（越少越好）', 'native_leak');
   lines.push('');
   lines.push('## 观测列（**不进判据**，与 ADR-057 同一取舍）');
   lines.push('');

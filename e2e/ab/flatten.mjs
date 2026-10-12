@@ -189,3 +189,38 @@ export function structuredCalls(message) {
     return { name: c.function?.name ?? c.name ?? '', arguments: args, arguments_raw: raw, json_ok: parsed };
   });
 }
+
+// 模型自己训练形态里的调用标记（下面三行拼出来，避免在源码里写出会被模板吃掉的字面量）。
+const OPEN_CALL = '<' + '|tool_call|' + '>';
+const FN_OPEN = '<' + 'function=';
+const PARAM_OPEN = '<' + 'parameter=';
+
+/**
+ * 臂 B 的第二种出处：模型**没按文本协议答，而是把训练形态里的调用标记漏进正文**
+ * （实测 MiMo 在拍平臂上多次直接输出 `OPEN_CALL + FN_OPEN` 那一族标记）。
+ *
+ * 这件事本身要测，所以解析器必须认得它——否则「选没选对工具」和「听没听懂文本协议」
+ * 混成一列，臂 B 会比拍平本身的代价更差，读数是假的。于是判据拆两列：
+ * `tool_name_hit` 走「两种出处都算」，`protocol_followed` 只走文本协议那一行。
+ */
+export function parseNativeMarkupCalls(text) {
+  const src = String(text ?? '');
+  if (!src.includes(FN_OPEN)) return [];
+  const out = [];
+  const callRe = new RegExp(FN_OPEN + '([\\w.\\-:]+)>([\\s\\S]*?)<\\/' + 'function>', 'g');
+  let m;
+  while ((m = callRe.exec(src))) {
+    const args = {};
+    const pRe = new RegExp(PARAM_OPEN + '([\\w.\\-:]+)>([\\s\\S]*?)<\\/' + 'parameter>', 'g');
+    let p;
+    while ((p = pRe.exec(m[2]))) {
+      const rawVal = p[2].trim();
+      let val = rawVal;
+      try { val = JSON.parse(rawVal); } catch { /* 不是 JSON 就当字符串 */ }
+      args[p[1]] = val;
+    }
+    out.push({ name: m[1], arguments: args, raw: (OPEN_CALL + m[0]).replace(/\s+/g, ' ').slice(0, 200) });
+  }
+  return out;
+}
+
