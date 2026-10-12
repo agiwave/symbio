@@ -200,7 +200,8 @@ function grade(task, arm, calls, result, toolByName) {
       !called && answer.includes(task.expected_marker) && !answer.includes(task.forbidden_marker);
     if (!g.attributed_correctly && !called && answer.includes(task.expected_marker)) g.misattributed = true;
   }
-  if (arm === 'flat') g.protocol_followed = called ? calls.every((c) => typeof c.raw === 'string') : null;
+  // `protocol_followed` 不在这里定：它取决于「这一答是从文本协议那一行读回来的，
+  // 还是从漏进正文的内部标记读的」，那是 `flatCalls` 的出处信息，只有调用侧知道。
   // **本轮没跑完，不是模型没做到**：`finish_reason=length` 时回答没有收束（实测撞到过
   // 一整段 `<unused32>` 复读——那是本地服务进入坏状态的一段尾巴）。把它计成「失败」会让
   // 环境噪声进判据分母，读数和现状无法区分；单独计一列「未收束」，判据只认收束过的题。
@@ -233,14 +234,15 @@ async function runOneArm({ label, task, provider, corpus, toolByName, temperatur
     console.log(`  [${label}] ${task.id} → 失败：${String(e.message).slice(0, 120)}`);
     return row;
   }
-  const calls = label === 'structured' ? structuredCalls(result.message) : flatCalls(result.message?.content).calls;
   const flatMeta = label === 'structured' ? null : flatCalls(result.message?.content);
-  const g = grade(task, label, calls, result, toolByName);
-  if (flatMeta) {
+  const calls = label === 'structured' ? structuredCalls(result.message) : flatMeta.calls;
+  const g = grade(task, label, calls, result, toolByName);  if (flatMeta && calls.length > 0 && !g.inconclusive) {
     g.answer_via = flatMeta.source;
     g.native_markup_leaked = flatMeta.leaked;
-    // 漏了内部标记又没按文本协议答：`protocol_followed` 必须是「按协议答了」，不是「能解析出来」
-    if (flatMeta.leaked) g.protocol_followed = false;
+    // 「按协议答了」不等于「能解析出来」：从内部标记里读回工具名是解析器认得的，不是模型照办的。
+    g.protocol_followed = flatMeta.source === 'text-protocol';
+  } else if (flatMeta && !g.inconclusive) {
+    g.answer_via = flatMeta.source;
   }
   const asked =
     label === 'structured'
@@ -264,7 +266,6 @@ async function runOneArm({ label, task, provider, corpus, toolByName, temperatur
     completion_tokens: result.usage?.completion_tokens ?? null,
     cost: result.cost,
     request_bytes: result.request_bytes,
-    cost: result.cost,
     calls: calls.map((c) => c.name),
     emitted: asked.slice(0, 300),
     answer_head: String(result.message?.content ?? '').replace(/\s+/g, ' ').trim().slice(0, 160),
@@ -418,7 +419,8 @@ function renderReport({ corpus, provider, temperature, rows, repeat, generatedAt
     }
     for (const [label, r] of [['A 结构化', e.structured], ['B 拍平', e.flat]]) {
       if (!r) continue;
-      lines.push(`- **${label}**：finish=${r.finish ?? '–'} · ${r.latency_ms ?? '–'}ms · prompt ${r.prompt_tokens ?? '–'}tok · ${r.request_bytes ?? '–'}B`);
+      const via = r.answer_via ? ` · 调用从「${r.answer_via}」读回` : '';
+      lines.push(`- **${label}**：finish=${r.finish ?? '–'} · ${r.latency_ms ?? '–'}ms · prompt ${r.prompt_tokens ?? '–'}tok · ${r.request_bytes ?? '–'}B${via}`);
       if (r.emitted) lines.push(`  - 送出：\`${r.emitted}\``);
       if (r.answer_head) lines.push(`  - 正文：\`${r.answer_head}\``);
       if (r.error) lines.push(`  - 错误：\`${r.error}\``);
