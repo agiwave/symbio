@@ -236,7 +236,7 @@ console.log()
 
 // ── S-008: VdfsNode.status 不得用裸字面量 ──────────────────────────────
 //
-// 词表只有一套：`symbio_core::vdfs::VDFS_STATUS_*`（`docs/arch/vdfs.md`
+// 词表只有一套：`symbio_core::vdfs::VDFS_STATUS_*`（`docs/arch/AR-013-vdfs.md`
 // §3.2）。裸字面量的危险不是拼错（那会立刻看见），而是**改名时不会编译失败**——
 // `status` 是跨进程边界的字符串，改了常量而漏掉字面量，前端只会静默认不出状态。
 //
@@ -283,7 +283,7 @@ console.log()
 // ── S-009: 事件总线 kind 不得用裸字面量 ────────────────────────────────
 //
 // 词表只有一套：`symbio_core::event_bus::KIND_*`（文档见
-// `docs/arch/PROTOCOLS.md` §事件总线频道）。与 S-008 同源：`kind` 是
+// `docs/arch/AR-004-PROTOCOLS.md` §事件总线频道）。与 S-008 同源：`kind` 是
 // **跨进程**字符串，改名不会编译失败，只会让消费方的「按 kind 分派」静默失效。
 //
 // 为什么单独立一条：真实事故就是「发布点写裸字面量 → 常量声明出来却无人引用」，
@@ -426,7 +426,7 @@ console.log()
 //   · 移进工具批次中间（`assistant(tool_calls)` 与 `tool` 结果之间）⇒ 部分协议直接
 //     400——这是三种里**唯一会响**的那种。
 // 正是 J3 的形态：**违反时不产生错误信号的约束，必须外置为断言**。
-// 文档侧的定义见 `docs/plan/09-对话面插件拆分实施方案.md` §5 S0 的 C-D2b。
+// 文档侧的定义见 `docs/plan/PL-007-对话面插件拆分实施方案.md` §5 S0 的 C-D2b。
 //
 // 判据（只认 `plugins/session/chat_loop.rs` 一个文件，且**只认代码行**）：
 //   line(`gate_turn(` 调用) < line(`orchestrator.supplements`) < line(`prepare_turn_inputs(` 调用)
@@ -482,7 +482,7 @@ if (!s011Entry) {
   if (missing.length > 0) {
     err(
       `${rel}  S-011 锚点缺失：${missing.join(' / ')}——抽干点被删除或改名了？` +
-        `守卫不得悄悄退化成空转：同步更新本规则与 docs/plan/09 §5 S0 的 C-D2b`,
+        `守卫不得悄悄退化成空转：同步更新本规则与 PL-007-对话面插件拆分实施方案 §5 S0 的 C-D2b`,
     )
   } else if (!(gateAt < drainAt && drainAt < prepAt)) {
     if (WAIVER_S011_RE.test(s011Lines[drainAt - 1])) {

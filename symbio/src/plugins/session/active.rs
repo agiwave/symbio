@@ -47,7 +47,7 @@ pub struct InboxItem {
     pub workdir: Option<String>,
 }
 
-/// 抢占判定的**待结算项**（S8 第 19 步，[plan/04 §2.2](../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地")）。
+/// 抢占判定的**待结算项**（S8 第 19 步，[plan/04 §2.2](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地")）。
 ///
 /// 判定与落格必须分开，因为两者要的时刻不同：
 /// - **判定**只能在忙窗（`is_working == true` 且有插话排着）做——那时事实源里只有
@@ -94,7 +94,7 @@ pub struct ActiveSessionStateInner {
     ///
     /// 这是**状态**而不是事件：提示音 / 错误条 / 重试入口都据此判定，
     /// 不需要「Abort 与 Error 谁先到」这种顺序知识（见
-    /// `session/docs/node-state-streaming.md` §3.3）。
+    /// `session/docs/AR-018-node-state-streaming.md` §3.3）。
     ///
     /// `None` = 本进程内还没有跑完过一轮（或刚被新一轮请求复位）。
     pub last_outcome: Option<String>,

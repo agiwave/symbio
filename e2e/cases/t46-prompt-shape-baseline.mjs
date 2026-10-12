@@ -7,7 +7,7 @@ import './_selfrun.mjs';
 // 能回答『这样对模型是变好还是变坏』」。[ADR-048a](../../docs/adr/ADR-048a.md)
 // 判过「拍平是退步」，但那次判定依据的是**论证**，不是记录——连「现在送出去的是什么形状」
 // 都没有一份可核对的东西，「结构化一定更好」同样未经测量（登记条目
-// [S-end①](../../docs/task/S-end①.md)）。
+// [T-046](../../docs/task/T-046.md)）。
 //
 // 基线本体在 [`docs/ref/PROMPT_SHAPE.md`](../../docs/ref/PROMPT_SHAPE.md)
 // （生成物，唯一写者是本用例带 `PROMPT_SHAPE_UPDATE=1`），**判据口径**（什么进基线、

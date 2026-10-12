@@ -216,7 +216,7 @@ impl PersistentChatSession {
             MessageChange::Born { nodes, .. } => {
                 let (persisted, removed) = self.append_messages(nodes).await?;
                 // 写入期裁剪（`prune_tool_history` / `max_messages`）是**列表变更**，
-                // 必须入格（S2.7-b · ADR-054 决策 1 的「关闭」原语）。裁剪发生在
+                // 必须入格（T-054 · ADR-054 决策 1 的「关闭」原语）。裁剪发生在
                 // `append_messages` 的存储临界区内（它才拿得到权威列表与配置），
                 // 故由本处补落 `message.removed`——**事实仍由 `apply` 这一个入口落**，
                 // 没有开出第二个写入口。
@@ -254,7 +254,7 @@ impl PersistentChatSession {
     ///
     /// ## 为什么回消息，而不是回条数
     ///
-    /// `seq` 只在存储写入时分配（见 `symbio/src/plugins/session/docs/vdfs-session-messages.md` §3.4），调用方
+    /// `seq` 只在存储写入时分配（见 `symbio/src/plugins/session/docs/AR-022-vdfs-session-messages.md` §3.4），调用方
     /// 手里那条**没有号**——所以「每一条被落库的消息都必须发一次带存储 `seq` 的
     /// 变更」这条不变量，只有在调用方能拿到权威副本时才成立。回条数等于让调用方
     /// 拿不到可下发的载荷，于是"落库"与"换号"之间必然出现断口：前端留下转写分配的
@@ -264,7 +264,7 @@ impl PersistentChatSession {
     /// 被写入期工具链裁剪动过的，以存储里的最终形态为准——交回一条存储里并不
     /// 存在的消息，等于让前端"对齐"到幻影。
     ///
-    /// 第二个返回值（**S2.7-b**）是本次写入期裁剪删掉的 id：调用方（`apply`）
+    /// 第二个返回值（**T-054**）是本次写入期裁剪删掉的 id：调用方（`apply`）
     /// 据此落 `message.removed`。为什么由调用方落而不是本函数落——本函数是
     /// **存储原语**，事实落格收在 `apply` 一个入口（ADR-054 决策 2/3 的类型强制）；
     /// 本函数只**报告**它动了哪些节点。空 `Vec` = 没裁任何节点。
@@ -339,7 +339,7 @@ impl PersistentChatSession {
         drop(cfg);
 
         // 写入期裁剪删掉的全部 id（两类裁剪的并集，按被删顺序累积）——回给调用方
-        // 落 `message.removed`（S2.7-b）。空 = 没裁任何节点。
+        // 落 `message.removed`（T-054）。空 = 没裁任何节点。
         let mut removed_ids: Vec<String> = Vec::new();
 
         // 写入期工具链裁剪：架构原则（存储保持完整原文）的唯一例外，默认开启以
@@ -381,7 +381,7 @@ impl PersistentChatSession {
         session.updated_at = now;
         self.save_session(&session).await?;
 
-        // 落库回包（见 `symbio/src/plugins/session/docs/vdfs-session-messages.md` §3.4）：取**存储里的最终形态**
+        // 落库回包（见 `symbio/src/plugins/session/docs/AR-022-vdfs-session-messages.md` §3.4）：取**存储里的最终形态**
         // 交回调用方下发。从 `session.messages` 取而非回传入参副本——上面两道写入期
         // 变换（轮次窗口淘汰、工具链裁剪）可能已经动过它们，回执必须与磁盘逐字段一致。
         // 已被淘汰的（批量追加超过窗口时可能发生）自然被滤掉：交回一条存储里并不
@@ -512,7 +512,7 @@ pub(super) fn ensure_durable_states(
 /// 双重校验），且"淘汰旧轮"删掉的常是最新存档——职责错位，故收敛为纯节点裁剪。
 ///
 /// 返回**被删节点 id**（顺序 = 原列表顺序）——调用方据此落 `message.removed` 事实。
-/// 这是 S2.7-b 的承重面：裁剪是**列表变更**，
+/// 这是 T-054 的承重面：裁剪是**列表变更**，
 /// 而列表变更必须入格（ADR-054
 /// 决策 1 的「关闭」原语）。裁剪改了列表却不落事实 ⇒ 切主读后**被裁节点复活**
 /// ——WAL 里它们还在，只是缓存里少了（而缓存已经不再是真源）。

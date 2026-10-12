@@ -121,7 +121,7 @@ impl PersistentChatSession {
         max_turns: Option<usize>,
     ) -> Result<Vec<ChatMessage>, PluginError> {
         let messages = self.get_messages().await?;
-        // **不过滤 Failed 消息**（"继续会话"中断可见性，docs/turn-tool-mechanisms.md 2.6）：
+        // **不过滤 Failed 消息**（"继续会话"中断可见性，docs/AR-021-turn-tool-mechanisms.md 2.6）：
         // 用户选择不重试、直接继续对话时，模型必须看到上一轮的中断现场——
         // 失败 Turn 的半截输出 + 中断说明——否则思维链断裂。
         // persist_failure 只把根 Turn 标 Failed（半截子节点定稿 Completed），

@@ -1,5 +1,5 @@
-//! `adapters` 单测 —— 四层预算表与令牌层级（[plan/01 §10](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")、
-//! [plan/05 §3.3](../../../../docs/plan/05-模块架构.md "docs/plan/05-模块架构")）。
+//! `adapters` 单测 —— 四层预算表与令牌层级（[plan/01 §10](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")、
+//! [plan/05 §3.3](../../../../docs/plan/PL-005-模块架构.md "PL-005-模块架构")）。
 //!
 //! 编译期负例（`RuleOnly` 不满足 `CanClassify` / `ClassifyOnly` 不满足 `CanGenerate`）
 //! 无法在常规测试里表达——它们由**签名**承载：`generate` 只收 `&FullModel`，

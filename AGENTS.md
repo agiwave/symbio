@@ -23,7 +23,7 @@
 ## 核心形状：改宽之前先立决策
 
 `symbio_core` 是**影响面最大**的模块，它的质量高于任何单个插件的质量——不要拿机制面去付实现面的账。
-这条纪律（`08 §0 纪律 3`，登记条目 `docs/spec/D08-3.md`）现在有执行方：
+这条纪律（`08 §0 纪律 3`，登记条目 `docs/spec/SP-007.md`）现在有执行方：
 `node scripts/core-shape-audit.mjs`（CS-001）把 core 的三格形状冻结成**只许降**——
 `pub trait` 数 / `fn` 成员总数 / 带默认体的成员数。变宽就红，而把它推下去只有一条路：
 改基线数字，那需要一条挂在旁边的 `core-shape-allow <格>: ADR-NNN <理由>`，且那个 ADR 必须存在（CS-002）。
@@ -31,7 +31,7 @@
 
 ## 文档即登记：状态只写在文档自己的 front-matter
 
-顶层机制（总纲：[`docs/plan/14-登记与汇总机制.md`](docs/plan/14-登记与汇总机制.md)）：
+顶层机制（总纲：[`docs/plan/PL-011-登记与汇总机制.md`](docs/plan/PL-011-登记与汇总机制.md)）：
 **仓内每一篇活跃 `.md` 都是一条登记**——开头是五行 front-matter（`kind` / `id` / `title` /
 `status` / `created`），**文件本身就是条目**，没有第二处登记表。九类 kind，
 目录按 kind 归一（`docs/<kind>/` + 模块文档就地），但**目录不参与判定**——`kind` 只来自 front-matter。
@@ -60,9 +60,9 @@
 
 - 结构事实 → `CURRENT.md`（自动生成，不手改）
 - 「为什么这样设计」→ [`docs/adr/`](docs/adr/)（**每条 ADR 单文档**，
-  归域规则见 [`docs/spec/ADR-DOM.md`](docs/spec/ADR-DOM.md)）；新增一条 ADR = 新增一个
+  归域规则见 [`docs/spec/SP-002.md`](docs/spec/SP-002.md)）；新增一条 ADR = 新增一个
   单文档，索引与域分组由 `registry-audit --write` 生成，不在别处复述
-- 路由 / 错误码 / 配置 → 各自的 `ROUTES.md` / `ERROR_CODES.md` / `CONFIGURATION.md`
+- 路由 / 错误码 / 配置 → 各自的 `RE-003-ROUTES.md` / `RE-002-ERROR_CODES.md` / `RE-001-CONFIGURATION.md`
 - 模块机制 → 该模块 `README.md`
 - **现行文档不写变更史**（「曾经…已改为…」）——那是 `git log` 与 ADR 的事<!-- doc-link-allow D-004: 本行引用的就是「变更史措辞」这个判据对象本身 -->
 

@@ -44,7 +44,7 @@
 //!
 //! ## 写侧授权闸（判在运行器）
 //!
-//! **写侧授权闸**（[plan/01 §7](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")）判的是「主体此刻
+//! **写侧授权闸**（[plan/01 §7](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")）判的是「主体此刻
 //! 能否写本轮的收束格」（`reply.first` / `reply.append`），由运行器在落收束格**之前**
 //! 判（`turn_runner::closure_granted`，谓词 `can_reply` 只定义一次）。拒绝 ⇒ 收束格
 //! 不落、该轮留在未收束态（`check_all` 的 C4 报得出），本模块据 `closure_denied`
@@ -696,7 +696,7 @@ pub(crate) struct V2Turn<'a> {
     ///
     /// [`SessionContext::consolidated`]: super::chat_loop::SessionContext::consolidated
     pub consolidation: Option<&'a [ChatMessage]>,
-    /// **对话面开场白正文**（S2.7）：`Escalate` 首响，本轮随后照进工具循环。
+    /// **对话面开场白正文**（T-056）：`Escalate` 首响，本轮随后照进工具循环。
     ///
     /// 由 `chat_loop::apply_verdict` 产出（`VerdictEffect::Spoke` 且理由码非
     /// `progress`——汇报走 `on_round`/`EVENT_ASSISTANT_REPORTED`）。落格在
@@ -769,7 +769,7 @@ fn supplement_into_request(
             &actor.principal,
         )
         .with_produced_by(anchor)
-        // 载荷带上**节点身份**（S2.6 的原则：节点身份是事实的一部分）：重建按 `id`
+        // 载荷带上**节点身份**（T-052 的原则：节点身份是事实的一部分）：重建按 `id`
         // 复刻这条用户消息的身份、按 `ids` 复刻 `meta.supplement_ids`。缺了它们，
         // 重建只能合成 id（每次重开都换一批），且合并标记里的原始条目 id 无处可寻
         // ——而「合并后原始条目只此一处留痕」（见 `transcript::supplements` 的模块头）。
@@ -1039,7 +1039,7 @@ pub(crate) async fn execute_final_reply_turn(
     let wal = dir.join(super::paths::V2_WAL_FILE);
     let store = EventWalStore::open(&wal)
         .map_err(|e| PluginError::InternalError(format!("v2 WAL 打开失败：{e}")))?;
-    // **补落寄存的变更**（S2.7-c）：答话轮同样持写者令牌，故它也是一个落格窗口。
+    // **补落寄存的变更**（T-055）：答话轮同样持写者令牌，故它也是一个落格窗口。
     // 与 `execute_turn` 同序（在 `snapshot` 之前——本函数后面的 turn 号口径从切片折）。
     // 复用的是**上面这个持令牌的 `store`**，不是另开一个（令牌是文件锁，见 `drain_parked`）。
     super::v2_messages::drain_parked(&dir, &store);
@@ -1146,7 +1146,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         EventWalStore::open(&wal)
             .map_err(|e| PluginError::InternalError(format!("v2 WAL 打开失败：{e}")))?,
     );
-    // **补落寄存的变更**（S2.7-c）：一轮正在跑时它持着写者令牌，此刻来的编辑 /
+    // **补落寄存的变更**（T-055）：一轮正在跑时它持着写者令牌，此刻来的编辑 /
     // 截断拿不到令牌 ⇒ `NotTheWriter` ⇒ 该变更被寄存在进程内（`v2_messages::PARKED`）。
     // 本函数是**持令牌的那一刻**，寄存的变更在此补落。
     //
@@ -1285,7 +1285,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     } else {
         LatencyTier::Deep
     };
-    // 身份进事件（[plan/11 批 1](../../../../docs/plan/11-多执行器与多主体加固实施方案.md "docs/plan/11-多执行器与多主体加固实施方案") ①）：
+    // 身份进事件（[plan/11 批 1](../../../../docs/plan/PL-009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") ①）：
     // 本轮以**会话选定的那个 agent** 为主体——`ActorSpec` 首次在生产构造，
     // `agent:main` 从字面量变成数据。取值点与 chat_loop 同一个（`request_principal`），
     // 写侧闸判的正是它 ⇒ 判的对象 = 写的对象。未选智能体 ⇒ `agent:main`
@@ -1464,7 +1464,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                 final_reply: None,
                 // 本路恒走生成 ⇒ 没有对话面节点（定稿答话轮不走这里）。
                 dialog: None,
-                // 对话面开场白（S2.7，`Escalate` 首响）：由 `chat_loop::apply_verdict`
+                // 对话面开场白（T-056，`Escalate` 首响）：由 `chat_loop::apply_verdict`
                 // 产出、随 `V2Turn` 递进来，运行器据它落 `chat.assistant.opening` 格
                 // （开场白后面照常进工具循环，故不占收束格）。
                 opening_text: opening_text.map(str::to_string),

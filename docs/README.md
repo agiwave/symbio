@@ -13,12 +13,12 @@ created: 2026-07-20
 
 ## 文档登记：每篇文档都是登记条目
 
-全仓的活跃 `.md` 都在**同一套登记机制**里（机制见 [plan/14](plan/14-登记与汇总机制.md "docs/plan/14-登记与汇总机制")，字段见
+全仓的活跃 `.md` 都在**同一套登记机制**里（机制见 [plan/PL-011](plan/PL-011-登记与汇总机制.md "PL-011-登记与汇总机制")，字段见
 [SP-001](./spec/SP-001.md)）：每篇文档开头是五行 front-matter，**文件本身就是条目**，没有第二处登记表。
 
     ---
     kind: arch
-    id: docs/arch/vdfs
+    id: AR-013-vdfs
     title: VDFS —— 虚拟动态文件系统规范
     status: active
     created: 2026-09-13
@@ -26,17 +26,24 @@ created: 2026-07-20
 
 - **`kind` 回答「这篇文档在回答什么问题」**——九类，各有自己的目录与汇总页：
 
-| kind | 回答什么 | 住的目录 |
-|---|---|---|
-| `goal` 目标 | 要达成什么（价值主张与可度量判据） | `docs/goal/` |
-| `stage` 阶段 | 分几步走、现在在哪一步 | `docs/stage/` |
-| `plan` 计划 | 要变成什么样（目标架构与实施方案） | `docs/plan/` |
-| `arch` 架构 | 现在是什么样（系统结构 / 设计规范 / 模块机制） | `docs/arch/` + **模块目录** |
-| `ref` 参考 | 查数据（路由 / 错误码 / 配置 / 实测记录） | `docs/ref/` |
-| `guide` 指南 | 怎么用（上手 / 贡献 / 排障） | `docs/guide/` + 仓根 |
-| `task` 任务 | 要推进的事 | `docs/task/` |
-| `spec` 规范 | 必须成立的条文（条文 + 判据） | `docs/spec/` |
-| `adr` 决策 | 为什么这样选（含被否决的方案） | `docs/adr/` |
+| kind | 回答什么 | 编号前缀 | 住的目录 |
+|---|---|---|---|
+| `goal` 目标 | 要达成什么（价值主张与可度量判据） | `GO-` | `docs/goal/` |
+| `stage` 阶段 | 分几步走、现在在哪一步 | `ST-` | `docs/stage/` |
+| `plan` 计划 | 要变成什么样（目标架构与实施方案） | `PL-` | `docs/plan/` |
+| `arch` 架构 | 现在是什么样（系统结构 / 设计规范 / 模块机制） | `AR-` | `docs/arch/` + **模块目录** |
+| `ref` 参考 | 查数据（路由 / 错误码 / 配置 / 实测记录） | `RE-` | `docs/ref/` |
+| `guide` 指南 | 怎么用（上手 / 贡献 / 排障） | `GU-` | `docs/guide/` + 仓根 |
+| `task` 任务 | 要推进的事 | `T-` | `docs/task/` |
+| `spec` 规范 | 必须成立的条文（条文 + 判据） | `SP-` | `docs/spec/` |
+| `adr` 决策 | 为什么这样选（含被否决的方案） | `ADR-` | `docs/adr/` |
+
+**编号规范全仓一套**（字段细节见 [SP-001](./spec/SP-001.md)，机读判据 RG-022 / RG-023）：
+编号条目 `id` = 文件名（去 `.md`）= `<前缀>-<三位序号>[-名称]`，**前缀一 kind 一个且与 kind
+对账**——`plan` 的编号必须 `PL-` 开头，`stage` 必须 `ST-` 开头。序号三类条目（task / spec /
+adr）用纯编号（`T-016`），文档类六种带名称段（`PL-001-核心架构`）。
+**`README` / `INDEX` 与仓根门户是导航文档，不发编号**（通用名没有编号段、不构成命名空间），
+id = 仓根相对路径，且**不进 `deps`**——依赖图只收编号条目。
 
 ### 目标分层与依赖链（goal / stage / plan / task 怎么衔接）
 
@@ -55,7 +62,7 @@ created: 2026-07-20
   且条目进入「生效中」状态时前置必须已闭环（RG-008：task 的 `doing` / `done`，
   spec / adr / 文档类的 `active`）——**依赖是义务，不是注释**。
   `draft` / `retired` / `todo` 不在门槛里（草案可以引草案）。
-  状态流转与门槛档位的完整定义在 [plan/14 · 状态流转](plan/14-登记与汇总机制.md "docs/plan/14-登记与汇总机制")，
+  状态流转与门槛档位的完整定义在 [plan/PL-011 · 状态流转](plan/PL-011-登记与汇总机制.md "PL-011-登记与汇总机制")，
   本文不复述。
 - **`deps` 的值域与语义（严格约束，供程序建图）见 [SP-001 · deps 的值域与语义](./spec/SP-001.md "SP-001")**：
   只收确切编号、条目级粒度、集合语义、字典序书写。正文「上游」块是出处清单（可指向归档
@@ -64,9 +71,10 @@ created: 2026-07-20
 - **判据只引用、不复制**：下层文档引用上层的判据编号（目标的可度量判据、阶段的验收断言），
   不把数字抄进自己正文——「同一个事实写了多遍」是文档腐化的起点。
 
-- **`id` 是文档的身份**：条目类（task / spec / adr）等于文件名，文档类等于**仓根相对路径**（去
-  `.md`，所以「编号 + 名字」天然合法，如 `docs/plan/01-核心架构`）；`title` 逐字等于正文首个 H1。
-  两条都是**两面对账**，写错即红（RG-003 / RG-021）。
+- **`id` 是文档的身份**：**全仓一套编号规范**——编号条目 id = 文件名（去 `.md`）=
+  `<前缀>-<三位序号>[-名称]`（前缀见上表，与 kind 对账，RG-022）；`README` / `INDEX`
+  与仓根门户是导航文档，id = 仓根相对路径、不进 `deps`（RG-023）。文档类 `title` 逐字等于
+  正文首个 H1。三条都是**两面对账**，写错即红（RG-003 / RG-021 / RG-022）。
 - **`status` 是唯一的状态处**：本文档现行吗（`draft` / `active` / `retired`）；任务另有
   `todo` / `doing` / `done` / `wont`，决策另有 `impl`（落地到哪一步）。
 - **目录不参与判定**：`kind` 只来自 front-matter，文档搬去别的目录不会破机制，只需把 `id`
@@ -105,10 +113,10 @@ D-004 判**措辞标记**而不判**叙事**，边界在此写明（免得读到
 只收「不会出现在正常论述里的措辞」，因为**守卫一旦开始误报，下场是被整体豁免，比没有还糟**。
 豁免分两档（与 D-006 同口径）：**行内**（`<!-- doc-link-allow D-004: 理由 -->` 写在本行或
 前一行）只豁免该行；**全文**须为文件首行非空内容，且理由写明它买断的是什么
-（如 [WVR-02](./spec/WVR-02.md) 那篇豁免登记，`## 处理过程` 是唯一的过程信息）。
+（如 [SP-028](./spec/SP-028.md) 那篇豁免登记，`## 处理过程` 是唯一的过程信息）。
 
 D-006 是 D-001 的盲区补丁：D-001 只认 Markdown 链接语法（方括号文字 + 圆括号目标），
-而本仓正文**更常**用行内反引号指路（「详见 `docs/arch/vdfs.md`」）——这类写法 D-001
+而本仓正文**更常**用行内反引号指路（「详见 `docs/arch/AR-013-vdfs.md`」）——这类写法 D-001
 一个字都看不见。它是启发式判定（缩写式引用与示意性路径在文本上与真断链不可分），故留
 豁免出口 `<!-- doc-link-allow D-006: 理由 -->`：**行内**（本行或前一行）只豁免该行，
 **全文**须为文件首行非空内容。
@@ -124,8 +132,8 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 是限定引用、还是裸的」，而撞号正是裸编号的产物。精确判定，**不给豁免**：处置只有两种
 （写成 `| Rn |` 表行首列 / 紧邻「风险」二字），都不需要解释。
 
-**文档文件名不含空格**（用 `-` 或直接相连，如 `10-工具轮v2化实施方案.md`、
-`10-工具轮v2化实施方案.md`）。D-001 不做 URL 解码，所以按 Markdown 惯例写成
+**文档文件名不含空格**（用 `-` 或直接相连，如 `PL-008-工具轮v2化实施方案.md`、
+`PL-008-工具轮v2化实施方案.md`）。D-001 不做 URL 解码，所以按 Markdown 惯例写成
 `%20` 的链接（`./10-工具轮%20v2%20化.md`）会被判为**失效**——报错信息里路径看着
 "对"，实际是转义后的串与磁盘名不相等。带空格的名字只在**标题**里出现，不在文件名里。
 
@@ -134,7 +142,7 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 （相当一部分机制就写在模块文档注释里，如 `providers::memory`）。
 **知识只写一处**——不要以摘要形式复制到别处，复制必然漂移。
 
-示例：会话上下文压缩的 L0-L6 分层总览在 [session/docs/context-compression-design.md](../symbio/src/plugins/session/docs/context-compression-design.md "symbio/src/plugins/session/docs/context-compression-design")，各层阈值与代码实现在 [session/README.md](../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README")——**会话相关的一切文档都在 `symbio/src/plugins/session/docs/` 内**；系统级目录只保留跨模块规范（如 [arch/vdfs.md](arch/vdfs.md "docs/arch/vdfs")）。
+示例：会话上下文压缩的 L0-L6 分层总览在 [session/docs/AR-014-context-compression-design.md](../symbio/src/plugins/session/docs/AR-014-context-compression-design.md "AR-014-context-compression-design")，各层阈值与代码实现在 [session/README.md](../symbio/src/plugins/session/README.md "symbio/src/plugins/session/README")——**会话相关的一切文档都在 `symbio/src/plugins/session/docs/` 内**；系统级目录只保留跨模块规范（如 [arch/AR-013-vdfs.md](arch/AR-013-vdfs.md "AR-013-vdfs")）。
 
 ## 文档职责边界（一个事实只有一个 owner）
 
@@ -144,25 +152,25 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 | 事实 | 唯一 owner | 其它文档 |
 |---|---|---|
 | 现在是什么（插件 / 挂载点 / 路由 / 工具 / 规模） | [CURRENT.md](./CURRENT.md)（代码生成） | **不手抄**，需要就引用 |
-| 路由语义与调用方 | [ref/ROUTES.md](ref/ROUTES.md "docs/ref/ROUTES") | 模块 `README.md` 不抄路由表 |
-| 错误码 | [ref/ERROR_CODES.md](ref/ERROR_CODES.md "docs/ref/ERROR_CODES") | PROTOCOLS 不再列错误码表 |
-| 配置项 | [ref/CONFIGURATION.md](ref/CONFIGURATION.md "docs/ref/CONFIGURATION") | 模块 `README.md` 只写机制 + 指向它 |
+| 路由语义与调用方 | [ref/RE-003-ROUTES.md](ref/RE-003-ROUTES.md "RE-003-ROUTES") | 模块 `README.md` 不抄路由表 |
+| 错误码 | [ref/RE-002-ERROR_CODES.md](ref/RE-002-ERROR_CODES.md "RE-002-ERROR_CODES") | PROTOCOLS 不再列错误码表 |
+| 配置项 | [ref/RE-001-CONFIGURATION.md](ref/RE-001-CONFIGURATION.md "RE-001-CONFIGURATION") | 模块 `README.md` 只写机制 + 指向它 |
 | 判据码（各守卫的编号地址） | [ref/GATE_CODES.md](./ref/GATE_CODES.md)（脚本声明生成） | 守卫脚本只写自己判什么，不抄全表 |
 | 出厂 prompt 的**形状基线** | [ref/PROMPT_SHAPE.md](./ref/PROMPT_SHAPE.md)（真实链路生成，不手改） | 口径（什么进判据 / 规模只作观测）在 ADR-057，别处不复述 |
-| 结构化 vs 拍平的**模型侧对照读数** | [ref/PROMPT_AB.md](./ref/PROMPT_AB.md)（门外实验生成，不手改） | 判据口径在 `e2e/ab/tasks.mjs`，结论与边界在 task/S-end③ |
-| 协议线上形状（帧 / 载荷 / 通道 / 线格式） | [arch/PROTOCOLS.md](arch/PROTOCOLS.md "docs/arch/PROTOCOLS") | — |
-| 系统拓扑（谁挂在谁下面） | [arch/SYSTEM_MAP.md](arch/SYSTEM_MAP.md "docs/arch/SYSTEM_MAP") | 其它图只画自己那一层 |
-| 排障链路（一次请求经过哪些代码） | [arch/DATA_FLOW.md](arch/DATA_FLOW.md "docs/arch/DATA_FLOW") | — |
+| 结构化 vs 拍平的**模型侧对照读数** | [ref/PROMPT_AB.md](./ref/PROMPT_AB.md)（门外实验生成，不手改） | 判据口径在 `e2e/ab/tasks.mjs`，结论与边界在 task/T-048 |
+| 协议线上形状（帧 / 载荷 / 通道 / 线格式） | [arch/AR-004-PROTOCOLS.md](arch/AR-004-PROTOCOLS.md "AR-004-PROTOCOLS") | — |
+| 系统拓扑（谁挂在谁下面） | [arch/AR-005-SYSTEM_MAP.md](arch/AR-005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP") | 其它图只画自己那一层 |
+| 排障链路（一次请求经过哪些代码） | [arch/AR-002-DATA_FLOW.md](arch/AR-002-DATA_FLOW.md "AR-002-DATA_FLOW") | — |
 | 为什么这样设计（含被否决的方案与理由） | [`docs/adr/`](adr/INDEX.md) 下的单文档（**每条 ADR 正文 + 状态**）；索引与域分组见 [adr/INDEX.md](adr/INDEX.md)（生成） | 其它文档只引用 ADR 编号 |
 | 模块内部机制 | 该模块 `README.md` | 系统级文档不复述 |
 | 模块深度设计与不变量 | 该模块 `docs/` | — |
-| **要达成什么（价值主张与可度量判据）** | [goal/00-价值主张.md](goal/00-价值主张.md "docs/goal/00-价值主张") | 其余文档只引用编号，不抄判据数字 |
+| **要达成什么（价值主张与可度量判据）** | [goal/GO-000-价值主张.md](goal/GO-000-价值主张.md "GO-000-价值主张") | 其余文档只引用编号，不抄判据数字 |
 | **目标架构（v2）与迁移计划** | [plan/README.md](plan/README.md "docs/plan/README") | 其余文档只引用，不复述取舍 |
-| 条目级登记（任务 / 规范 / 决策的编号、状态、优先级、依赖、处理过程） | `docs/<kind>/` 下的**单文档**（机制见 [plan/14](plan/14-登记与汇总机制.md "docs/plan/14-登记与汇总机制")；汇总页由脚本生成） | 各处不手抄条目清单，引用 INDEX |
+| 条目级登记（任务 / 规范 / 决策的编号、状态、优先级、依赖、处理过程） | `docs/<kind>/` 下的**单文档**（机制见 [plan/PL-011](plan/PL-011-登记与汇总机制.md "PL-011-登记与汇总机制")；汇总页由脚本生成） | 各处不手抄条目清单，引用 INDEX |
 | 变更历史（改了什么、何时改的） | `git log` | **现行文档不写变更史**（见下） |
 | 一次性评审 / 迁移记录 / 体检报告 | `docs/archive/` | 活文档不保留过程日志 |
 
-**变更时只改 owner 那一处**：结构事实重跑 `node scripts/gen-current-facts.mjs`（CI 有 `--check` 门禁）；跨模块架构改 [OVERVIEW.md](arch/OVERVIEW.md "docs/arch/OVERVIEW") + [SYSTEM_MAP.md](arch/SYSTEM_MAP.md "docs/arch/SYSTEM_MAP") 各自己那一层；常见问题进 [TROUBLESHOOTING.md](guide/TROUBLESHOOTING.md "docs/guide/TROUBLESHOOTING")。
+**变更时只改 owner 那一处**：结构事实重跑 `node scripts/gen-current-facts.mjs`（CI 有 `--check` 门禁）；跨模块架构改 [AR-003-OVERVIEW.md](arch/AR-003-OVERVIEW.md "AR-003-OVERVIEW") + [AR-005-SYSTEM_MAP.md](arch/AR-005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP") 各自己那一层；常见问题进 [GU-007-TROUBLESHOOTING.md](guide/GU-007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING")。
 
 ### 两条硬规则
 
@@ -181,11 +189,11 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 不新开编号命名空间。
 
 每条纪律的**登记**（限定名 + 判据对账）在 [docs/spec/](spec/INDEX.md)
-（机制见 [plan/14](plan/14-登记与汇总机制.md "docs/plan/14-登记与汇总机制")）——「哪条纪律其实没人守」由登记条目的判据节
+（机制见 [plan/PL-011](plan/PL-011-登记与汇总机制.md "PL-011-登记与汇总机制")）——「哪条纪律其实没人守」由登记条目的判据节
 回答，判据码全表在 [ref/GATE_CODES.md](./ref/GATE_CODES.md)。条文正文各归定义篇，
-此处不复述：[08 §0](plan/08-分步实施计划.md#0-执行纪律五步每步都不得跳过 "docs/plan/08-分步实施计划") ·
-[D13-1…D13-5](./spec/INDEX.md) ·
-[03 §5.1](plan/03-演进与验证.md#51-五条纪律 "docs/plan/03-演进与验证") ·
+此处不复述：[PL-006 §0](plan/PL-006-分步实施计划.md#0-执行纪律五步每步都不得跳过 "PL-006-分步实施计划") ·
+[SP-010…SP-014](./spec/INDEX.md) ·
+[PL-003 §5.1](plan/PL-003-演进与验证.md#51-五条纪律 "PL-003-演进与验证") ·
 [plan/README §4](plan/README.md#4-硬证据全部实际编译运行通过 "docs/plan/README")。
 
 ## 快速导航
@@ -193,25 +201,25 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 | 我想... | 查阅 |
 |---------|------|
 | 核对"现在是什么"（插件 × 挂载点 × 路由 × 工具，自动生成） | [CURRENT.md](./CURRENT.md) |
-| 了解系统全貌 | [SYSTEM_MAP.md](arch/SYSTEM_MAP.md "docs/arch/SYSTEM_MAP") |
-| 理解架构设计 | [OVERVIEW.md](arch/OVERVIEW.md "docs/arch/OVERVIEW") |
-| 查看协议规范 | [PROTOCOLS.md](arch/PROTOCOLS.md "docs/arch/PROTOCOLS") |
-| 追踪请求全链路 | [DATA_FLOW.md](arch/DATA_FLOW.md "docs/arch/DATA_FLOW") |
-| 查找路由路径 | [ROUTES.md](ref/ROUTES.md "docs/ref/ROUTES") |
-| 理解错误码 | [ERROR_CODES.md](ref/ERROR_CODES.md "docs/ref/ERROR_CODES") |
-| 配置系统 | [CONFIGURATION.md](ref/CONFIGURATION.md "docs/ref/CONFIGURATION") |
+| 了解系统全貌 | [AR-005-SYSTEM_MAP.md](arch/AR-005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP") |
+| 理解架构设计 | [AR-003-OVERVIEW.md](arch/AR-003-OVERVIEW.md "AR-003-OVERVIEW") |
+| 查看协议规范 | [AR-004-PROTOCOLS.md](arch/AR-004-PROTOCOLS.md "AR-004-PROTOCOLS") |
+| 追踪请求全链路 | [AR-002-DATA_FLOW.md](arch/AR-002-DATA_FLOW.md "AR-002-DATA_FLOW") |
+| 查找路由路径 | [RE-003-ROUTES.md](ref/RE-003-ROUTES.md "RE-003-ROUTES") |
+| 理解错误码 | [RE-002-ERROR_CODES.md](ref/RE-002-ERROR_CODES.md "RE-002-ERROR_CODES") |
+| 配置系统 | [RE-001-CONFIGURATION.md](ref/RE-001-CONFIGURATION.md "RE-001-CONFIGURATION") |
 | 给门禁加一条判据、要挑不撞的号 | [GATE_CODES.md](./ref/GATE_CODES.md) |
 | 看 prompt 实际送出去的形状 / 结构化的代价 | [PROMPT_SHAPE.md](./ref/PROMPT_SHAPE.md)（重生成：`PROMPT_SHAPE_UPDATE=1 node e2e/cases/t46-prompt-shape-baseline.mjs`） |
 | 看「结构化 vs 拍平」在真实模型上的对照读数 | [PROMPT_AB.md](./ref/PROMPT_AB.md)（门外实验：`node e2e/ab/run.mjs`，会打真 provider、不进门禁） |
-| 快速上手 | [QUICK_START.md](guide/QUICK_START.md "docs/guide/QUICK_START") |
-| 开发新插件 | [PLUGIN_DEVELOPMENT.md](guide/PLUGIN_DEVELOPMENT.md "docs/guide/PLUGIN_DEVELOPMENT") |
-| 排查问题 | [TROUBLESHOOTING.md](guide/TROUBLESHOOTING.md "docs/guide/TROUBLESHOOTING") |
+| 快速上手 | [GU-006-QUICK_START.md](guide/GU-006-QUICK_START.md "GU-006-QUICK_START") |
+| 开发新插件 | [GU-005-PLUGIN_DEVELOPMENT.md](guide/GU-005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT") |
+| 排查问题 | [GU-007-TROUBLESHOOTING.md](guide/GU-007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING") |
 | 看**全项目文档索引**（九类 kind × 标题 × 状态） | [docs/INDEX.md](./INDEX.md) |
 | 了解设计决策 | [adr/INDEX.md](adr/INDEX.md)（按域分组；正文即条目本身） |
-| 了解平台**要达成什么**（价值主张与可度量判据） | [goal/00 · 价值主张](goal/00-价值主张.md "docs/goal/00-价值主张") |
+| 了解平台**要达成什么**（价值主张与可度量判据） | [goal/GO-000 · 价值主张](goal/GO-000-价值主张.md "GO-000-价值主张") |
 | 了解**目标架构（v2）**与分步迁移计划 | [plan/README.md](plan/README.md "docs/plan/README")（**先读其 §0.1：v2 是本仓的目标架构**） |
 | 查「某条约定写在哪」 | `node scripts/doc-find.mjs <词>`（全仓 md + Rust 文档注释检索） |
-| 查**任务 / 规范登记**与待办 | `node scripts/registry-board.mjs`（九类条目同一机制，规则见 [plan/14](plan/14-登记与汇总机制.md "docs/plan/14-登记与汇总机制")） |
+| 查**任务 / 规范登记**与待办 | `node scripts/registry-board.mjs`（九类条目同一机制，规则见 [plan/PL-011](plan/PL-011-登记与汇总机制.md "PL-011-登记与汇总机制")） |
 | 看某个插件/前端的职责与机制 | 各模块 `README.md`（见下方模块文档地图） |
 
 ## 文档放在哪
@@ -230,7 +238,9 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 | 模块目录 | `symbio/src/plugins/<plugin>/README.md`（+ 可选 `docs/`）、`tauri/`、`cli/`、`e2e/`——就近放置，同一套登记机制管（`kind` 按内容定，不按目录定） |
 
 **加一篇文档 = 建文件 + 写 front-matter**（五行：`kind` / `id` / `title` / `status` / `created`），
-不需要改任何清单：汇总页由脚本重生成，漏了 front-matter 的 `.md` 会被 RG-020 判红。
+文件名按编号规范起（`<前缀>-<序号>[-名称].md`，前缀见上表），`id` 与文件名一致；
+不需要改任何清单：汇总页由脚本重生成，漏了 front-matter 的 `.md` 会被 RG-020 判红，
+编号不合规范会被 RG-022 判红。
 
 ## 模块文档地图
 
@@ -243,7 +253,7 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 | mcp | [plugins/mcp/README.md](../symbio/src/plugins/mcp/README.md "symbio/src/plugins/mcp/README") | MCP 外部工具接入与能力注册 |
 | skill | [plugins/skill/README.md](../symbio/src/plugins/skill/README.md "symbio/src/plugins/skill/README") | 技能脚本（loader/plugin）发现与装载 |
 | local | [plugins/local/README.md](../symbio/src/plugins/local/README.md "symbio/src/plugins/local/README") | 本地原生工具（shell / 内容与语义搜索 / 任务清单）；文件操作已迁 VDFS |
-| vdfs | [plugins/vdfs/README.md](../symbio/src/plugins/vdfs/README.md "symbio/src/plugins/vdfs/README") | 文件系统本身：`vdfs/*` 协议入口 + `vdfs_*` LLM 工具（规范见 [arch/vdfs.md](arch/vdfs.md "docs/arch/vdfs")） |
+| vdfs | [plugins/vdfs/README.md](../symbio/src/plugins/vdfs/README.md "symbio/src/plugins/vdfs/README") | 文件系统本身：`vdfs/*` 协议入口 + `vdfs_*` LLM 工具（规范见 [arch/AR-013-vdfs.md](arch/AR-013-vdfs.md "AR-013-vdfs")） |
 | web | [plugins/web/README.md](../symbio/src/plugins/web/README.md "symbio/src/plugins/web/README") | 网页抓取/搜索工具 |
 | home | [plugins/home/README.md](../symbio/src/plugins/home/README.md "symbio/src/plugins/home/README") | 根插件：持应用级状态（`<homedir>/PLUGIN.yml`），构造 worker(Composite) 并传入必需插件清单 |
 | composite | [plugins/composite/README.md](../symbio/src/plugins/composite/README.md "symbio/src/plugins/composite/README") | 子插件容器：扫描自己的目录（其下一层目录即一个插件）+ 路径合并分发 |
@@ -254,6 +264,6 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 | hook | [plugins/hook/README.md](../symbio/src/plugins/hook/README.md "symbio/src/plugins/hook/README") | 生命周期钩子 |
 | event_bus | [plugins/event_bus/README.md](../symbio/src/plugins/event_bus/README.md "symbio/src/plugins/event_bus/README") | 进程内事件总线 |
 | telegram | [plugins/telegram/README.md](../symbio/src/plugins/telegram/README.md "symbio/src/plugins/telegram/README") | Telegram 通道接入 |
-| tauri 前端 | [tauri/README.md](../tauri/README.md "tauri/README") → [docs/FRONTEND.md](../tauri/docs/FRONTEND.md "tauri/docs/FRONTEND") | Vue3 + Tauri2 桌面前端 |
+| tauri 前端 | [tauri/README.md](../tauri/README.md "tauri/README") → [docs/AR-023-FRONTEND.md](../tauri/docs/AR-023-FRONTEND.md "AR-023-FRONTEND") | Vue3 + Tauri2 桌面前端 |
 
 > **维护原则**：本文是文档体系的入口；结构性变更（新增/删除目录、职责改属）先改此文件。单条事实的增改只动它的 owner，不必回头改本文。

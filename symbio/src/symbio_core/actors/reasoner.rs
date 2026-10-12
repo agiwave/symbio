@@ -3,12 +3,12 @@
 use crate::symbio_core::adapters::{AdapterError, FullModel, LlmAdapter};
 use crate::symbio_core::Event;
 
-/// 生成档主体（`pattern = Reasoner` 的 S2 形态，[plan/01 §4](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")）。
+/// 生成档主体（`pattern = Reasoner` 的 S2 形态，[plan/01 §4](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")）。
 ///
 /// ## 闸门在签名上
 ///
 /// [`Reasoner::reply`] 要求 `&FullModel` 令牌——**反射 / 快速档拿不到这个令牌**，
-/// 所以「反射层调模型」不是被检测到，而是**编译不过**（J3，[plan/01 §10](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")
+/// 所以「反射层调模型」不是被检测到，而是**编译不过**（J3，[plan/01 §10](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")
 /// 第 4 条语义）。令牌由 ⑤ `adapters` 的 [`crate::symbio_core::adapters::TokenIssuer`]
 /// 按档位签发，装配时注入；`Reasoner` 自身不持有任何适配器句柄。
 pub struct Reasoner;
@@ -17,7 +17,7 @@ impl Reasoner {
     /// 生成答复：从事件切片取最后一条用户消息作输入，经端口生成。
     ///
     /// 失败形态是 [`AdapterError`]——**调用方必须产出 `chat.assistant.fallback` 事件**
-    /// （I3 到点必答：禁止静默超时，[plan/01 §10](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构") 第 2 条）。
+    /// （I3 到点必答：禁止静默超时，[plan/01 §10](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构") 第 2 条）。
     pub async fn reply(
         &self,
         llm: &dyn LlmAdapter,
@@ -27,7 +27,7 @@ impl Reasoner {
         Ok(self.reply_timed(llm, tok, events).await?.0)
     }
 
-    /// 埋点版 reply（SLO 校准，[plan/04 §1](../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地")）：
+    /// 埋点版 reply（SLO 校准，[plan/04 §1](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地")）：
     /// 除文本外返回 adapter 边界实测耗时（毫秒）。调用方把它写到 final 事件的
     /// `cost_ms`——成本台账与熔断判据（② CircuitBreaker）从此读**实测值**
     /// 而不是声明值（G3：成本模型有了实测数字）。
@@ -69,7 +69,7 @@ impl Reasoner {
     ///
     /// ## 为什么运行器仍要就地追加工具交换
     ///
-    /// 投影读的是**已落格**的事实（[plan/10 批 3](../../../../docs/plan/10-工具轮v2化实施方案.md "docs/plan/10-工具轮v2化实施方案")
+    /// 投影读的是**已落格**的事实（[plan/10 批 3](../../../../docs/plan/PL-008-工具轮v2化实施方案.md "PL-008-工具轮v2化实施方案")
     /// 起，跨轮的工具结果也在其中）；而**本轮**刚发生的工具交换，快照取在它落格
     /// **之前**（`run_with_tools` 先取 `base_messages`、再逐轮追加），投影里当然没有。
     /// 所以运行器把这一轮的交换就地累积成 `exchange` 追加到基线上——**一条基线 +

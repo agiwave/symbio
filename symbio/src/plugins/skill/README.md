@@ -14,7 +14,7 @@ created: 2026-09-09
 
 只有一条自有路由 `skill/execute`（载荷 `{name, args}`，按名称执行技能）。
 技能清单与内容**不设私有路由**——已安装技能经 `<根>/skill` 寻址（一个技能 = 一个目录，主文件 `SKILL.md`）。
-见 `docs/ref/ROUTES.md` §Skill 插件（**权威**）。
+见 `docs/ref/RE-003-ROUTES.md` §Skill 插件（**权威**）。
 
 ## 机制
 

@@ -20,7 +20,7 @@ created: 2026-09-29
 
 ## 路由
 
-清单见 [`docs/ref/ROUTES.md`](../../../../docs/ref/ROUTES.md "docs/ref/ROUTES") §Compose 插件（**权威**）：
+清单见 [`docs/ref/RE-003-ROUTES.md`](../../../../docs/ref/RE-003-ROUTES.md "RE-003-ROUTES") §Compose 插件（**权威**）：
 `compose/compose`。
 
 ## 契约
@@ -140,5 +140,5 @@ owner）。取不到（写错 / 该条目已禁用）⇒ **落回会话选定值
 ## 关联
 
 - 判决：`../classify/README.md`
-- 切分依据（为什么是两个插件）：`docs/plan/09-对话面插件拆分实施方案.md`
-- 地址规则：`docs/arch/plugin-route-address.md`
+- 切分依据（为什么是两个插件）：`docs/plan/PL-007-对话面插件拆分实施方案.md`
+- 地址规则：`docs/arch/AR-009-plugin-route-address.md`

@@ -911,7 +911,7 @@ pub struct StageDoc {
 pub const STAGE_DOCS: &[StageDoc] = &[
     StageDoc {
         id: "S01",
-        file: "S01-最小闭环.md",
+        file: "ST-001-最小闭环.md",
         assigns: &[
             ("event.entity", "turn"),
             ("event.verb", "closed"),
@@ -924,7 +924,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S02",
-        file: "S02-工具调用与产物.md",
+        file: "ST-002-工具调用与产物.md",
         assigns: &[
             ("event.entity", "artifact"),
             ("event.verb", "asserted"),
@@ -935,7 +935,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S03",
-        file: "S03-多步任务与返工.md",
+        file: "ST-003-多步任务与返工.md",
         assigns: &[
             ("event.entity", "task"),
             ("event.verb", "progressed"),
@@ -947,7 +947,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S04",
-        file: "S04-并发调度与租约.md",
+        file: "ST-004-并发调度与租约.md",
         assigns: &[
             ("event.verb", "held"),
             ("actor.capability", "assign.work"),
@@ -958,7 +958,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S05",
-        file: "S05-长会话与断点恢复.md",
+        file: "ST-005-长会话与断点恢复.md",
         assigns: &[
             ("event.entity", "thread"),
             ("projection", "checkpoint"),
@@ -968,7 +968,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S06",
-        file: "S06-长期记忆与语义检索.md",
+        file: "ST-006-长期记忆与语义检索.md",
         assigns: &[
             ("event.entity", "memory"),
             ("event.verb", "asserted"),
@@ -979,7 +979,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S07",
-        file: "S07-插话与实时打断.md",
+        file: "ST-007-插话与实时打断.md",
         assigns: &[
             ("event.entity", "control"),
             ("event.verb", "held"),
@@ -990,7 +990,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S08",
-        file: "S08-多主体与对等承诺.md",
+        file: "ST-008-多主体与对等承诺.md",
         assigns: &[
             ("event.entity", "commitment"),
             ("principal", "agent:peer-b"),
@@ -1002,7 +1002,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S09",
-        file: "S09-外部执行与熔断.md",
+        file: "ST-009-外部执行与熔断.md",
         assigns: &[
             ("event.entity", "control"),
             ("event.verb", "asserted"),
@@ -1013,7 +1013,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S10",
-        file: "S10-个人认知体系注入.md",
+        file: "ST-010-个人认知体系注入.md",
         assigns: &[
             ("event.entity", "memory"),
             ("event.verb", "asserted"),
@@ -1025,7 +1025,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S11",
-        file: "S11-技能编译与自我改进.md",
+        file: "ST-011-技能编译与自我改进.md",
         assigns: &[
             ("event.entity", "memory"),
             ("event.verb", "progressed"),
@@ -1036,7 +1036,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S12",
-        file: "S12-自主层与长期目标.md",
+        file: "ST-012-自主层与长期目标.md",
         assigns: &[
             ("event.entity", "system"),
             ("event.verb", "opened"),
@@ -1047,7 +1047,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
     StageDoc {
         id: "S13",
-        file: "S13-多智能体社会.md",
+        file: "ST-013-多智能体社会.md",
         assigns: &[
             ("event.entity", "commitment"),
             ("event.verb", "asserted"),
@@ -1059,7 +1059,7 @@ pub const STAGE_DOCS: &[StageDoc] = &[
     },
 ];
 
-/// 认知体系的一条需求（S10 §2 的映射表，roadmap/S10-个人认知体系注入.md）
+/// 认知体系的一条需求（S10 §2 的映射表，roadmap/ST-010-个人认知体系注入.md）
 #[derive(Clone, Copy)]
 pub struct CognitiveDemand {
     pub id: &'static str,

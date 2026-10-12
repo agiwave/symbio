@@ -23,12 +23,12 @@ created: 2026-09-09
 ## 路由
 
 `home/*` 与 `work/*` 由本插件自身终结；其余路径剥离首段后转发给 `worker`。
-**完整清单以 [ROUTES.md](../../../../docs/ref/ROUTES.md "docs/ref/ROUTES") §Home 插件为准**——本 README 不抄路由表。
+**完整清单以 [RE-003-ROUTES.md](../../../../docs/ref/RE-003-ROUTES.md "RE-003-ROUTES") §Home 插件为准**——本 README 不抄路由表。
 
 > 资源类别清单不设终结路由：`<根>` 自身的 `vdfs/list` 就是子目录清单
-> （由组合容器逐子插件收集，见 `../composite/README.md` 与 `docs/arch/vdfs.md` §2.5）。
+> （由组合容器逐子插件收集，见 `../composite/README.md` 与 `docs/arch/AR-013-vdfs.md` §2.5）。
 
 ## 关联
 
 - 动态容器机制：`../composite/README.md`
-- 架构层级图：`docs/arch/OVERVIEW.md`
+- 架构层级图：`docs/arch/AR-003-OVERVIEW.md`

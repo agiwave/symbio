@@ -29,8 +29,8 @@ created: 2026-07-20
 - **VDFS** — 文件、模型、Agent、技能、MCP、设置……统统是有地址的资源，一个心智模型。
 - **Agent = 一个目录** — 技能 / MCP 复用宿主的子树，没有独立二进制。
 
-> 展开的架构说明见 [架构总览](docs/arch/OVERVIEW.md "docs/arch/OVERVIEW")；运行时拓扑（谁挂在谁下面）见
-> [系统地图](docs/arch/SYSTEM_MAP.md "docs/arch/SYSTEM_MAP")——本文不复述这两者。
+> 展开的架构说明见 [架构总览](docs/arch/AR-003-OVERVIEW.md "AR-003-OVERVIEW")；运行时拓扑（谁挂在谁下面）见
+> [系统地图](docs/arch/AR-005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP")——本文不复述这两者。
 
 ---
 
@@ -63,7 +63,7 @@ cd symbio && cargo build --lib && cargo test --lib
 cargo clippy --lib --tests -- -D warnings
 ```
 
-> 完整教程见 [快速上手](docs/guide/QUICK_START.md "docs/guide/QUICK_START")。
+> 完整教程见 [快速上手](docs/guide/GU-006-QUICK_START.md "GU-006-QUICK_START")。
 
 ---
 
@@ -96,12 +96,12 @@ symbio/
 
 | | |
 | --- | --- |
-| **入门** | [快速上手](docs/guide/QUICK_START.md "docs/guide/QUICK_START") · [系统地图](docs/arch/SYSTEM_MAP.md "docs/arch/SYSTEM_MAP") |
-| **架构** | [总览](docs/arch/OVERVIEW.md "docs/arch/OVERVIEW") · [数据流](docs/arch/DATA_FLOW.md "docs/arch/DATA_FLOW") · [协议](docs/arch/PROTOCOLS.md "docs/arch/PROTOCOLS") · [决策记录](docs/adr/INDEX.md) |
-| **参考** | [事实表](docs/CURRENT.md) · [路由](docs/ref/ROUTES.md "docs/ref/ROUTES") · [错误码](docs/ref/ERROR_CODES.md "docs/ref/ERROR_CODES") · [配置](docs/ref/CONFIGURATION.md "docs/ref/CONFIGURATION") |
-| **开发** | [插件开发](docs/guide/PLUGIN_DEVELOPMENT.md "docs/guide/PLUGIN_DEVELOPMENT") · [排障](docs/guide/TROUBLESHOOTING.md "docs/guide/TROUBLESHOOTING") · [任务 / 规范登记](docs/INDEX.md) · [贡献指南](CONTRIBUTING.md "CONTRIBUTING") |
-| **设计** | [VDFS 规范](docs/arch/vdfs.md "docs/arch/vdfs") · [上下文压缩分层](symbio/src/plugins/session/docs/context-compression-design.md "symbio/src/plugins/session/docs/context-compression-design") · [Agent 目录规范 v2](docs/arch/agent-directory-spec.md "docs/arch/agent-directory-spec") |
-| **CLI** | [cli/README.md](cli/README.md "cli/README") · [架构](cli/docs/architecture.md "cli/docs/architecture") · [构建](cli/docs/building.md "cli/docs/building") · [用法](cli/docs/usage.md "cli/docs/usage") |
+| **入门** | [快速上手](docs/guide/GU-006-QUICK_START.md "GU-006-QUICK_START") · [系统地图](docs/arch/AR-005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP") |
+| **架构** | [总览](docs/arch/AR-003-OVERVIEW.md "AR-003-OVERVIEW") · [数据流](docs/arch/AR-002-DATA_FLOW.md "AR-002-DATA_FLOW") · [协议](docs/arch/AR-004-PROTOCOLS.md "AR-004-PROTOCOLS") · [决策记录](docs/adr/INDEX.md) |
+| **参考** | [事实表](docs/CURRENT.md) · [路由](docs/ref/RE-003-ROUTES.md "RE-003-ROUTES") · [错误码](docs/ref/RE-002-ERROR_CODES.md "RE-002-ERROR_CODES") · [配置](docs/ref/RE-001-CONFIGURATION.md "RE-001-CONFIGURATION") |
+| **开发** | [插件开发](docs/guide/GU-005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT") · [排障](docs/guide/GU-007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING") · [任务 / 规范登记](docs/INDEX.md) · [贡献指南](CONTRIBUTING.md "CONTRIBUTING") |
+| **设计** | [VDFS 规范](docs/arch/AR-012-vdfs-frontend.md "AR-012-vdfs-frontend") · [上下文压缩分层](symbio/src/plugins/session/docs/AR-014-context-compression-design.md "AR-014-context-compression-design") · [Agent 目录规范 v2](docs/arch/AR-006-agent-directory-spec.md "AR-006-agent-directory-spec") |
+| **CLI** | [cli/README.md](cli/README.md "cli/README") · [架构](cli/docs/AR-001-architecture.md "AR-001-architecture") · [构建](cli/docs/GU-003-building.md "GU-003-building") · [用法](cli/docs/GU-004-usage.md "GU-004-usage") |
 | **变更** | 变更历史 = `git log`（本仓库不另维护变更日志，理由见 [贡献指南](CONTRIBUTING.md "CONTRIBUTING")）· [历史归档](docs/archive/) |
 
 > 每个插件与前端都维护自己的 `README.md`，详见 [文档中心 · 模块文档地图](docs/README.md#模块文档地图 "docs/README")。

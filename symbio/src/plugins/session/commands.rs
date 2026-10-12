@@ -27,7 +27,7 @@
 //! `truncate_*` / `clear_*` / `named_create_*` / `write_merges_*` 等用例）：
 //! 这些操作在线上本来就是**按地址寻址**的，把它们放到 provider 那一侧观察
 //! （地址 → 回执 + 变更帧）比直接调本域方法更接近真实调用面。故本域不另立
-//! 测试文件，避免同一段语义被两处用例各自钉一遍（见 `docs/module-layout.md` §2）。
+//! 测试文件，避免同一段语义被两处用例各自钉一遍（见 `docs/AR-017-module-layout.md` §2）。
 
 use super::chat_session::MessageChange;
 use super::paths::session_id_from_new_path;
@@ -319,7 +319,7 @@ impl SessionPlugin {
             }
         }
 
-        // **规范化只做一次**（S2.7·t44 抓过）：事实与帧必须是**同一条节点**。
+        // **规范化只做一次**（T-056·t44 抓过）：事实与帧必须是**同一条节点**。
         // 旧形态里事实落 `updated`（原样）、帧发 `llm_message_frame(&updated)`（补
         // `status: completed`）——两者对同一节点给出两种读法，于是「编辑后立刻读」
         // 与「重启后从 WAL 重建」差一个 `status` 字段。这不是视图差异，是**事实

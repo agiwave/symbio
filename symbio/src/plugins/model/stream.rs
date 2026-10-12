@@ -419,7 +419,7 @@ async fn dispatch_protocol_event(
                 tool_acc.process_delta(idx, id.as_deref(), name.as_deref(), args.as_deref());
 
             // ToolCall 组合节点：自身 content 即**请求参数**（不设独立的请求子节点，
-            // 见 `symbio/src/plugins/session/docs/node-state-streaming.md` §2.2）。两条路径与 Text / Reasoning
+            // 见 `symbio/src/plugins/session/docs/AR-018-node-state-streaming.md` §2.2）。两条路径与 Text / Reasoning
             // **同构**——帧面只有两种语义，由覆盖方式决定，接收端不做类型推断：
             // - 身份字段变化（新建节点 / 首次定名）→ 完整快照（`Upsert`）；
             // - 纯参数增长 → 窄追加（`Append`，O(delta)），接收端尾部拼接。

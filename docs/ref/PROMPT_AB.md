@@ -2,7 +2,7 @@
 
 > ⚠️ **生成物，不手改。** 唯一写者是 `node e2e/ab/run.mjs`。
 > 判据口径归 `e2e/ab/tasks.mjs` 与 `e2e/ab/flatten.mjs`，
-> **结论与边界**归 [`docs/task/S-end③.md`](../task/S-end③.md)（本文件不写结论）。
+> **结论与边界**归 [`docs/task/T-048.md`](../task/T-048.md)（本文件不写结论）。
 
 生成于 2026-10-12T05:48:01.497Z · 模型 `MiMo-V2.6-Flash`（provider `AMD-MiMo-V2.6-Flash`）· 题 22 道 × 两臂 × 2 次
 温度 0（两臂同值，实验只认「两臂一样」不认「出厂默认」）· max_tokens 4096 · 两臂的信封差别只有 `tools` / `tool_choice` 是否存在

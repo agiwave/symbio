@@ -423,7 +423,7 @@ test('S-012 fires on a batch number with no plan anchor', () => {
 
 test('S-012 accepts the same batch number with its plan anchor', () => {
   const src =
-    '/// 恢复前提见 [plan/11 批 2](../../../../docs/plan/11-多执行器与多主体加固实施方案.md)。\n'
+    '/// 恢复前提见 [plan/11 批 2](../../../../docs/plan/PL-009-多执行器与多主体加固实施方案.md)。\n'
   assert.equal(s010Audit({ [S012_FILE]: src }).status, 0)
 })
 

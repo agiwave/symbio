@@ -95,7 +95,7 @@ fn section_of(id: &str) -> Option<&'static SectionSpec> {
 ///
 /// ⚠️ **显式声明无状态**（[`VDFS_STATUS_NONE`]）：分区是静态的，没有「运行中 / 就绪」
 /// 可言。节点 `status` 缺省是 `active`，不清掉就会在列表里画一个绿点——那是个不存在
-/// 的信息（见 `docs/arch/vdfs-frontend.md` §4.2）。
+/// 的信息（见 `docs/arch/AR-012-vdfs-frontend.md` §4.2）。
 ///
 /// [`VDFS_STATUS_NONE`]: crate::symbio_core::VDFS_STATUS_NONE
 fn section_node(s: &SectionSpec) -> VdfsNode {

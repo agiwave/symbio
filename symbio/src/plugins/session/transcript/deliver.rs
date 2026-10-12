@@ -19,7 +19,7 @@
 //!
 //! 经**域测试文件** `transcript.test.rs` 覆盖（合帧 / 折行 / 帧日志的用例在那里）：
 //! 这些行为只在 `Transcript::apply` 之后才可观察，脱离状态机单独测等于把
-//! 同一段语义钉两遍（见 `symbio/src/plugins/session/docs/module-layout.md` §2）。
+//! 同一段语义钉两遍（见 `symbio/src/plugins/session/docs/AR-017-module-layout.md` §2）。
 
 use super::*;
 

@@ -224,8 +224,8 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
   - 项目在 `tauri/src-tauri/src/main.rs` 已初始化 `tracing-subscriber`。
 - 错误：实现 `thiserror` 派生 `PluginError` 变体，不要用 `String` 当错误类型。
 - 新增能力：优先在合适的 `Plugin` 下添加子路径（`worker/xxx/yyy`），
-  路由规则见 [docs/arch/OVERVIEW.md](docs/arch/OVERVIEW.md "docs/arch/OVERVIEW")，
-  请求全链路见 [docs/arch/DATA_FLOW.md](docs/arch/DATA_FLOW.md "docs/arch/DATA_FLOW")。
+  路由规则见 [docs/arch/AR-003-OVERVIEW.md](docs/arch/AR-003-OVERVIEW.md "AR-003-OVERVIEW")，
+  请求全链路见 [docs/arch/AR-002-DATA_FLOW.md](docs/arch/AR-002-DATA_FLOW.md "AR-002-DATA_FLOW")。
 
 #### 测试文件布局（约定）
 
@@ -275,20 +275,20 @@ mod tests;
 
 1. 在 `symbio/src/plugins/<name>/` 下创建 `mod.rs` + `plugin.rs`。
 2. 在 `symbio/src/plugins/mod.rs` 加一行**私有** `mod <name>;`（`mod` 刻意私有——插件之间互不可见）。
-3. 实现 [`Plugin`](docs/arch/PROTOCOLS.md "docs/arch/PROTOCOLS") trait 的 `route()` 与 `traverse()`；在文件末尾用
+3. 实现 [`Plugin`](docs/arch/AR-004-PROTOCOLS.md "AR-004-PROTOCOLS") trait 的 `route()` 与 `traverse()`；在文件末尾用
    `submit_object_creator!(PLUGIN_<NAME>, <Name>Plugin::build, dyn Plugin)` 自注册。
    **无需改 `init.rs`**：`home` 构造 `worker`(Composite) 时按目录扫描子插件——这正是"零配置"。
 4. 若插件**可配置**（要出现在设置页）：在 `home` 的 `ensure_defaults` 加插件名、在 `setting` 的
    `SETTING_SECTIONS` 加 `(id, 中文名)`、并在该插件自己的 `detail_definition()` 加返回 `config_definition(...)` 的分支。
 5. 若插件要出现在前端：**无需手写路由常量**——在插件 `route()` 里加一条 `match` 臂，门禁即把它生成进
    `tauri/src/constants/routes.gen.ts`；再到 `tauri/src/services/` 下加对应 TS 客户端、导入那个常量。
-6. 文档按**唯一来源**更新：**新增路由只在 [ROUTES.md](docs/ref/ROUTES.md "docs/ref/ROUTES") 登记**（模块 `README.md` 不抄路由表，只写机制并指向它）；配置项进 CONFIGURATION.md、错误码进 ERROR_CODES.md；插件 / 挂载点 / 工具变更后重跑 `node scripts/gen-current-facts.mjs`。
+6. 文档按**唯一来源**更新：**新增路由只在 [RE-003-ROUTES.md](docs/ref/RE-003-ROUTES.md "RE-003-ROUTES") 登记**（模块 `README.md` 不抄路由表，只写机制并指向它）；配置项进 RE-001-CONFIGURATION.md、错误码进 RE-002-ERROR_CODES.md；插件 / 挂载点 / 工具变更后重跑 `node scripts/gen-current-facts.mjs`。
 
 > **变更历史就是 `git log`，本仓库不维护 `CHANGELOG.md`**——git 记录比手抄更准确、不会漂移，
 > 且提交信息**与代码同一次提交**。要查「某次改动为什么」：`git log --grep=<词>` / `git log -S<符号>`；
 > 要查「某条机制写在哪」：`node scripts/doc-find.mjs <词>`。
 
-完整教程见 [docs/guide/PLUGIN_DEVELOPMENT.md](docs/guide/PLUGIN_DEVELOPMENT.md "docs/guide/PLUGIN_DEVELOPMENT")。
+完整教程见 [docs/guide/GU-005-PLUGIN_DEVELOPMENT.md](docs/guide/GU-005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT")。
 
 ---
 

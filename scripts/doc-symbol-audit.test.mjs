@@ -171,7 +171,7 @@ test('D-009 单段全大写但没有下划线 ⇒ 与普通词无法区分，不
 test('D-009 承认通道：目标态指认写明落在哪一批即放行（exit 0）', () => {
   const r = audit({
     ...RS,
-    'docs/plan/09.md': '新增 `ROUTE_TRIAGE_DECIDE`<!-- doc-symbol-allow: 目标态，09 的 S2 才落这个常量 -->\n',
+    'PL-007-对话面插件拆分实施方案.md': '新增 `ROUTE_TRIAGE_DECIDE`<!-- doc-symbol-allow: 目标态，09 的 S2 才落这个常量 -->\n',
   })
   assert.equal(r.status, 0, r.stdout)
 })
@@ -195,7 +195,7 @@ test('历史行豁免：行内含「已删除」（exit 0）', () => {
 test('历史行豁免：台账的「判为删除」说的就是这名字不在了（exit 0）', () => {
   const r = audit({
     ...RS,
-    'docs/plan/04.md': '| ⑫ | `ROUTE_GONE_ARM` 判为删除（只删 Rust 常量，路由保留） |\n',
+    'PL-004-工程落地.md': '| ⑫ | `ROUTE_GONE_ARM` 判为删除（只删 Rust 常量，路由保留） |\n',
   })
   assert.equal(r.status, 0, r.stdout)
 })

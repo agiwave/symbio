@@ -3,7 +3,7 @@
 
 use serde_json::Value;
 
-/// 任务表声明（S7 步 16–18，[04 §3.1 批⑨](../../../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地")）：
+/// 任务表声明（S7 步 16–18，[04 §3.1 批⑨](../../../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地")）：
 /// 一次**成功**的 `todo_write` 调用所声明的清单状态。
 ///
 /// 与 [`Delegation`](super::Delegation) 同一个观察点（[`process_tool_calls_async`](super::process_tool_calls_async)）——任务表的写方
@@ -31,7 +31,7 @@ pub struct TaskItem {
     pub id: String,
     /// 任务内容（入 `task.opened` 的 `goal`）。
     pub goal: String,
-    /// 依赖的任务 id。任务图是**数据不是机制**（`docs/stage/S03` §2），
+    /// 依赖的任务 id。任务图是**数据不是机制**（`ST-003-多步任务与返工` §2），
     /// 声明在清单里，成环 / 悬空由读侧 `acyclic_deps` 报。
     pub depends_on: Vec<String>,
     /// 声明状态。

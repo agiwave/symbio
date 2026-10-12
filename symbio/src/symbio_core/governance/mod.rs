@@ -1,9 +1,9 @@
-//! `governance` —— 权限与可见性（v2 ⑥，[plan/01 §7](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")）。
+//! `governance` —— 权限与可见性（v2 ⑥，[plan/01 §7](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")）。
 //!
 //! ## 为什么第零天就位
 //!
 //! 权限是**静默失效**的——违反时没有测试会失败（J3）。事后补，代价是重写所有
-//! 历史事件（[plan/01 §7](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")）。所以 S3 一阶
+//! 历史事件（[plan/01 §7](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")）。所以 S3 一阶
 //! 只做两件事：授权矩阵（第 7 步）与默认隔离（第 8 步），其余一切等它。
 //!
 //! ## 授权必须成对（01 §7 的核心设计）
@@ -14,7 +14,7 @@
 //! | 读侧 | [`PermissionMatrix::can_see`] | 只有写侧 = 看得到一切 |
 //!
 //! 因此矩阵**构造时**就拒绝不成对的主体策略：只有写侧 → 拒绝（出口判据，
-//! [plan/04 §3](../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地") 第 7 步）；查询对未知主体
+//! [plan/04 §3](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地") 第 7 步）；查询对未知主体
 //! 一律 fail-closed——「没说允许」就是拒绝，不是放行。
 //!
 //! ## 与 `capability` 域的同名辨析
@@ -25,7 +25,7 @@
 //! 本枚举只经 `governance::Capability` 引用，**不进根平铺**——两个 `Capability`
 //! 同时出现在调用点，正是命名纪律要阻止的错位。
 //!
-//! ## 生产接线（[04 §3.1 批⑥](../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地")）
+//! ## 生产接线（[04 §3.1 批⑥](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地")）
 //!
 //! 矩阵**构造**在 [`crate::symbio_core::authz`]（本机主体清单，与本域同住一棵模块树），
 //! **判定**在 `plugins/session` 两处：
@@ -41,12 +41,12 @@
 //! 引用），也**不进对外公开面**（`pub(crate)` 开给全 crate）——表里写的是部署事实，
 //! 不是契约。
 //!
-//! ## 依赖纪律（[plan/05 §3.1](../../../../docs/plan/05-模块架构.md "docs/plan/05-模块架构") ⑥ 行）
+//! ## 依赖纪律（[plan/05 §3.1](../../../../docs/plan/PL-005-模块架构.md "PL-005-模块架构") ⑥ 行）
 //!
 //! 只依赖类型定义 + ④ store 的**读面**（事件切片），只读写事件——不持有
 //! ①②③⑤ 的任何句柄。
 
-/// 权限能力（[plan/01 §7](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")：**7 个封顶**）。
+/// 权限能力（[plan/01 §7](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")：**7 个封顶**）。
 ///
 /// 按「权威动作的种类」划分，不按「有多少个智能体」划分——新主体不新增能力，
 /// 新动作种类才走 ADR（03 §3）。
@@ -86,9 +86,9 @@ impl Capability {
     }
 }
 
-/// 可见域（[plan/01 §8](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构") 参数表：3 个取值）。
+/// 可见域（[plan/01 §8](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构") 参数表：3 个取值）。
 ///
-/// **C10**（[plan/04 §4](../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地")）：默认
+/// **C10**（[plan/04 §4](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地")）：默认
 /// `thread_private`——默认隔离是**缺省值**，不是需要每个主体记得配置的东西。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum VisScope {
@@ -140,7 +140,7 @@ pub enum PairingViolation {
     ReadOnly { principal: String },
     /// 同一主体同时持有 `DefineWork` 与 `AssertVerification`（C15：不自验）——拒绝。
     /// 验证者 ≠ 产出者不是纪律是构造期约束：双持的主体给自己的产物盖章，
-    /// 质量闸门等于没有（S7 第 17 步，[roadmap/S03 §5](../../../../docs/stage/S03-多步任务与返工.md "docs/stage/S03-多步任务与返工")）。
+    /// 质量闸门等于没有（S7 第 17 步，[roadmap/S03 §5](../../../../docs/stage/ST-003-多步任务与返工.md "ST-003-多步任务与返工")）。
     SelfVerifier { principal: String },
 }
 
@@ -191,7 +191,7 @@ pub struct PermissionMatrix {
 
 impl PermissionMatrix {
     /// 由主体策略集构造。**任何一侧缺失即整体拒绝**（出口判据「只有写侧 → 拒绝」，
-    /// [plan/04 §3](../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地") 第 7 步）。
+    /// [plan/04 §3](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地") 第 7 步）。
     pub fn new(policies: Vec<PrincipalPolicy>) -> Result<Self, PairingViolation> {
         for p in &policies {
             if p.grants.is_empty() {
@@ -205,7 +205,7 @@ impl PermissionMatrix {
                 });
             }
             // C15（不自验）：DefineWork + AssertVerification 不得同持（S7 第 17 步）；
-            // 高风险组合（S9，[roadmap/S09 §5](../../../../docs/stage/S09-外部执行与熔断.md "docs/stage/S09-外部执行与熔断")
+            // 高风险组合（S9，[roadmap/S09 §5](../../../../docs/stage/ST-009-外部执行与熔断.md "ST-009-外部执行与熔断")
             // 验收 3）：外部执行（ProduceArtifact）+ AssertVerification 同样不得同持——
             // 给自己的外部动作盖章 = 质量闸门等于没有。
             let verifies = p.grants.contains(&Capability::AssertVerification);

@@ -33,7 +33,7 @@
 //!
 //! 旧的 `kind = "session"` 事件频道（`Status` / `Update` / `Abort` 帧）已废除
 //! ——会话运行态由**会话节点**（`status` + `attributes.outcome` / `.error`）承载
-//! （见 `session/docs/node-state-streaming.md`）。
+//! （见 `session/docs/AR-018-node-state-streaming.md`）。
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};

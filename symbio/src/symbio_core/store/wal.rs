@@ -1,10 +1,10 @@
-//! `store = wal` —— 持久化事实源（v2 阶段 S4 第 9 步，[roadmap/S05 §2](../../../../docs/stage/S05-长会话与断点恢复.md "docs/stage/S05-长会话与断点恢复")）。
+//! `store = wal` —— 持久化事实源（v2 阶段 S4 第 9 步，[roadmap/S05 §2](../../../../docs/stage/ST-005-长会话与断点恢复.md "ST-005-长会话与断点恢复")）。
 //!
 //! ## F1 冻结的第一次兑现
 //!
 //! [`Store`](super::Store) trait 在 S0 冻结（append / range / head）——本实现
 //! **零接口改动**换掉内存形态：调用方把 `EventStore` 换成 `WalStore`，其余代码
-//! 一行不动（[plan/05 §4](../../../../docs/plan/05-模块架构.md "docs/plan/05-模块架构")：实现替换不构成架构改动）。
+//! 一行不动（[plan/05 §4](../../../../docs/plan/PL-005-模块架构.md "PL-005-模块架构")：实现替换不构成架构改动）。
 //!
 //! ## 形态
 //!
@@ -16,7 +16,7 @@
 //! 「每 thread 一个 FIFO，串行」（[`Store`](super::Store) 五条语义之首）在
 //! S4 之前只由**进程内** `RwLock` 保证：两个进程各持一份 `WalStore`，各自
 //! `head` 从文件重放算出，`append` 只 append 不校验 ⇒ seq 重号 / 事件交错，
-//! 且**没有任何错误信号**（[plan/11 §2-B](../../../../docs/plan/11-多执行器与多主体加固实施方案.md "docs/plan/11-多执行器与多主体加固实施方案")）。
+//! 且**没有任何错误信号**（[plan/11 §2-B](../../../../docs/plan/PL-009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")）。
 //!
 //! 本实现把它升级为**跨进程**的写者令牌：`open` 对一个**旁挂锁文件**
 //! （`<wal>.lock`）取一次非阻塞独占锁（[`File::try_lock`](std::fs::File::try_lock)：
@@ -30,7 +30,7 @@
 //!
 //! 拿不到令牌**不报错、降级成「非写者」**：读照常（`range` / `head` 不看令牌），
 //! 只有写被拒。这样「第二个写者」拿到的是一个可判别的信号，而不是一个静默的
-//! 重复 seq——[plan/11 §4](../../../../docs/plan/11-多执行器与多主体加固实施方案.md "docs/plan/11-多执行器与多主体加固实施方案")
+//! 重复 seq——[plan/11 §4](../../../../docs/plan/PL-009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")
 //! 要的正是这个反向用例。
 //!
 //! ### 锁为什么落在旁挂文件、而不是 WAL 文件自身
@@ -67,7 +67,7 @@ use std::sync::RwLock;
 use super::{AppendError, Seq, Store};
 use crate::symbio_core::event::EventEnvelope;
 
-/// 持久化 Store（`store = wal`，[plan/01 §8](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构") 参数表取值）。
+/// 持久化 Store（`store = wal`，[plan/01 §8](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构") 参数表取值）。
 pub struct WalStore<E: EventEnvelope> {
     path: PathBuf,
     /// 写者令牌：`Some` = 本实例持有该事实源的跨进程独占锁，`None` = 非写者。

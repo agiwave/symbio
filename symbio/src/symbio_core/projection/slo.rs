@@ -1,4 +1,4 @@
-//! `slo_report` 投影（SLO §1.2 时延列的统计口径，[plan/04 §1.2](../../../../docs/plan/04-工程落地.md "docs/plan/04-工程落地")）。
+//! `slo_report` 投影（SLO §1.2 时延列的统计口径，[plan/04 §1.2](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地")）。
 //!
 //! 时延样本 = `chat.assistant.final` 的 `cost_ms`（实测成功轮，ADR-044：
 //! 实测与判据同源——埋点在 adapter 边界，实测值随事件入账）。**兜底轮不计入

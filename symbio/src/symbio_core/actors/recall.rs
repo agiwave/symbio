@@ -1,8 +1,8 @@
-//! 检索 Translator（`pattern = Translator`）：读视图 → 一格 `memory.recalled` 事实（[plan/01 §9.2](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")）。
+//! 检索 Translator（`pattern = Translator`）：读视图 → 一格 `memory.recalled` 事实（[plan/01 §9.2](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")）。
 
 use crate::symbio_core::Event;
 
-/// 检索 Translator（`pattern = Translator` 的 S5 形态，[plan/01 §9.2](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")）。
+/// 检索 Translator（`pattern = Translator` 的 S5 形态，[plan/01 §9.2](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")）。
 ///
 /// **Translator 不创造信息**：召回内容原样来自 `RecallView`（③ 的投影产出），
 /// 本体的职责只是把「读视图」落成「一条事实」——`memory.recalled` 事件

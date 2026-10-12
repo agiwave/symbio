@@ -9,7 +9,7 @@
 //! 生产路径是 `commands::patch_message` / `truncate_messages` → 本模块（见那两个
 //! 方法的文档）。两条 `append` 调用点各一行、没有分支，而 VDFS 边界的回执 / 变更帧
 //! 已由 `vdfs_provider.test.rs` 覆盖——同一段语义不在两处各钉一遍
-//! （`docs/module-layout.md` §2）。本文件只钉「事实本身」。
+//! （`docs/AR-017-module-layout.md` §2）。本文件只钉「事实本身」。
 
 use super::{drain_parked, edited, removed};
 use crate::symbio_core::chat_message::{ChatMessage, MessageContent, MessageRole, MessageType};
@@ -233,9 +233,9 @@ fn a_carrier_without_seq_falls_back_to_the_slice_tail() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-// ── S2.7-c：写者令牌被占时**寄存**，由持令牌方补落 ─────────────────────────
+// ── T-055：写者令牌被占时**寄存**，由持令牌方补落 ─────────────────────────
 
-/// **S2.7-c 的承重判据**：令牌被占时编辑**不丢**——寄存，补落后仍在。
+/// **T-055 的承重判据**：令牌被占时编辑**不丢**——寄存，补落后仍在。
 ///
 /// 这条就是「编辑偶发不生效」的对偶：不寄存时，`append` 拿 `NotTheWriter`、
 /// 出声后丢弃，用户以为改了、切源后一看没改，而**没有任何机制会纠正**。

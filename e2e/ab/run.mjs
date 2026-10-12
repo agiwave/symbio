@@ -1,4 +1,4 @@
-// S-end③ 的 runner：**门外**实验，真实模型上的「结构化 vs 拍平」对照。
+// T-048 的 runner：**门外**实验，真实模型上的「结构化 vs 拍平」对照。
 //
 // 为什么是**回放**而不是「跑两次端到端会话」
 // --------------------------------------
@@ -346,7 +346,7 @@ function renderReport({ corpus, provider, temperature, rows, repeat, generatedAt
   lines.push('');
   lines.push('> ⚠️ **生成物，不手改。** 唯一写者是 `node e2e/ab/run.mjs`。');
   lines.push('> 判据口径归 `e2e/ab/tasks.mjs` 与 `e2e/ab/flatten.mjs`，');
-  lines.push('> **结论与边界**归 [`docs/task/S-end③.md`](../task/S-end③.md)（本文件不写结论）。');
+  lines.push('> **结论与边界**归 [`docs/task/T-048.md`](../task/T-048.md)（本文件不写结论）。');
   lines.push('');
   lines.push(`生成于 ${generatedAt} · 模型 \`${provider.model}\`（provider \`${provider.id}\`）· 题 ${byTask.size} 道 × 两臂 × ${repeat} 次`);
   lines.push(

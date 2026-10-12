@@ -54,7 +54,7 @@
 //! 是**纯函数**（同一事件序列 ⇒ 逐字相同的输出，N1）。故本模块一律把时间戳覆写成
 //! 事件自身的 `ts`——它才是「这件事发生在什么时候」的权威答案。
 //!
-//! ## 载荷里的节点结构（S2.6 铺的路）
+//! ## 载荷里的节点结构（T-052 铺的路）
 //!
 //! 收束 / 进展 / 兜底三种格子共用一份产出形状（`turn_runner::produced_payload`），
 //! 载荷里带 `turn_id` / `text_id` / `reasoning_id` / `reasoning` / `tool_calls[]` /
@@ -253,7 +253,7 @@ fn nodes_of(e: &Event) -> Vec<ChatMessage> {
         ) => produced_nodes(e),
         // 轮边界汇报：界面文本，进列表（用户看得见），但不是模型的对话内容。
         (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_REPORTED) => vec![reported_node(e)],
-        // 对话面开场白（S2.7，`Escalate` 首响）：与汇报同形（根级 / 带
+        // 对话面开场白（T-056，`Escalate` 首响）：与汇报同形（根级 / 带
         // `meta.surface = "reply"` / `exclude_from_context`），只有理由码不同。
         // 形状经 `dialog` 载荷里的 `reason` / `exclude_from_context` 复刻。
         (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_OPENING) => vec![opening_node(e)],
@@ -302,7 +302,7 @@ fn user_node(e: &Event) -> ChatMessage {
 /// （用户消息的合并标记，前端据它认出「这是一次折进」）。重建必须三样都对上，
 /// 否则同一条补充在实时面与重建面是两个节点。
 ///
-/// `id` 与 `ids` 由**载荷**给出（S2.6 的原则：节点身份是事实的一部分）。载荷缺 `id`
+/// `id` 与 `ids` 由**载荷**给出（T-052 的原则：节点身份是事实的一部分）。载荷缺 `id`
 /// （旧事件）时按事件 id 稳定合成——合成的后果已判定可接受：重开后这条的 id 与
 /// 实时面那份不同，但**内容与角色一致**（ADR-049 的「呈现细节可能不同」）。
 fn supplement_node(e: &Event) -> ChatMessage {
@@ -360,7 +360,7 @@ fn reported_node(e: &Event) -> ChatMessage {
     m
 }
 
-/// 对话面开场白（`turn × asserted`，S2.7）：`Escalate` 首响。
+/// 对话面开场白（`turn × asserted`，T-056）：`Escalate` 首响。
 ///
 /// 形状经 [`super::chat_loop::dialog_node`] **同一构造器**复刻（与 [`dialog_node`]
 /// 及 `reported_node` 同一条纪律：构造只有一份，漂移才不可能）。理由码与

@@ -18,7 +18,7 @@ Web 工具集：提供网络请求与检索能力，经 `traverse` 向会话贡�
 | `web/web_search` | 网络搜索 |
 | `web/web_fetch` | 抓取网页内容（HTTP/HTTPS） |
 
-> 清单以 `docs/ref/ROUTES.md` §Web 插件为准（**权威**）；此处仅列机制相关的简表。
+> 清单以 `docs/ref/RE-003-ROUTES.md` §Web 插件为准（**权威**）；此处仅列机制相关的简表。
 
 ## 机制
 

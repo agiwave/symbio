@@ -12,7 +12,7 @@ created: 2026-09-16
 本插件不含任何资源语义、不持有拓扑：不认识会话/模型/设置，不认识挂载点，
 只认识「根 provider + 全路径」。虚拟根归组合容器所有（见 `../composite/README.md`）。
 
-机制规范（权威、跨模块）在 [`docs/arch/vdfs.md`](../../../../docs/arch/vdfs.md "docs/arch/vdfs")；
+机制规范（权威、跨模块）在 [`docs/arch/AR-013-vdfs.md`](../../../../docs/arch/AR-012-vdfs-frontend.md "AR-012-vdfs-frontend")；
 本文件只写插件自身的落位。
 
 ## 一棵树的两半
@@ -70,8 +70,8 @@ created: 2026-09-16
 
 ## 关联
 
-- 机制规范：[`docs/arch/vdfs.md`](../../../../docs/arch/vdfs.md "docs/arch/vdfs")
-- 前端页面规范：[`docs/arch/vdfs-frontend.md`](../../../../docs/arch/vdfs-frontend.md "docs/arch/vdfs-frontend")
+- 机制规范：[`docs/arch/AR-013-vdfs.md`](../../../../docs/arch/AR-012-vdfs-frontend.md "AR-012-vdfs-frontend")
+- 前端页面规范：[`docs/arch/AR-012-vdfs-frontend.md`](../../../../docs/arch/AR-012-vdfs-frontend.md "AR-012-vdfs-frontend")
 - 纯接口（trait + 域类型）：`symbio_core::vdfs`
 - symbio 桥（上下文注入 / 错误翻译）：`symbio_core::vdfs::host`
 - 虚拟层拓扑（容器聚合 + 注册为根）：`../composite/README.md`

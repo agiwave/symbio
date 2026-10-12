@@ -28,9 +28,9 @@
  * | E-003 | `set(PATH, "<字面量>")` 一律违规                                | 调用侧的绝对地址必须来自 `symbio_core::plugin::route` 常量，否则改名不会编译失败 |
  * | E-004 | `traverse` 内不得出现 `available_tools` / `available_options` 字面量 | 协议端点只有两个，且必须是常量（`TRAVERSE_AVAILABLE_*`） |
  * | E-005 | 引用的路径必须对应到某条真实 `route` 臂                        | 抓「路径写错一截」：`session/chat` 少了 `/send` |
- * | E-006 | **权威清单**（`ROUTES.md` / `CURRENT.md` / 插件 README）里的路径前缀必须合法 | `hooks/fire` 只出现在文档里，只扫代码的守卫会完整地漏掉它 |
+ * | E-006 | **权威清单**（`RE-003-ROUTES.md` / `CURRENT.md` / 插件 README）里的路径前缀必须合法 | `hooks/fire` 只出现在文档里，只扫代码的守卫会完整地漏掉它 |
  * | E-007 | 插件不得按**强引用**持有兄弟插件实例（`Arc<dyn Plugin>` 字段）  | 跨插件调用必须经 `ctx.parent()` 走容器；按值持有会绕过地址分发、并在插件重建后钉住旧实例（`telegram` 的 `llm_plugin` 就是这么烂掉的） |
- * | E-008 | 文档里标了 `<!-- vocab:PREFIX_ -->` 的**词表行**必须与代码常量逐字一致 | 闭集的第二份真相常驻文档：`vdfs.md` 的 status 行曾一直写 `error`，而代码早已改名为 `failed`——漂移会从文档**流回**代码 |
+ * | E-008 | 文档里标了 `<!-- vocab:PREFIX_ -->` 的**词表行**必须与代码常量逐字一致 | 闭集的第二份真相常驻文档：`AR-013-vdfs.md` 的 status 行曾一直写 `error`，而代码早已改名为 `failed`——漂移会从文档**流回**代码 |
  * | E-009 | 插件不得直接 `use crate::plugins::<兄弟插件>`，**测试代码同样判**  | 「插件之间互不可见」**不是**编译器保证的：`plugins` 是共同父模块，而 Rust 的私有可见性包含"定义模块的后代" ⇒ `plugins::mcp` 能路径到私有的 `plugins::web`。当前代码恰好为 0，但没有守卫，一次顺手 import 就能破坏它且不留红（`plugins/mod.rs` 的架构原则只是约定）。测试也在范围内：一条要跨插件比对数据的测试，本身就要求先把一个模块的隔离拆掉——那是这条规则要拦的形态，不是它的例外 |
  * | E-011 | 纯配置挂载点插件不得手写 `impl VdfsProvider`                    | 「挂载根 = 一份配置文档」的插件（`CONFIG_MOUNT_PLUGINS`）四臂 dispatch 骨架逐字相同，机制侧已提供唯一实现（`symbio_core::PluginConfigMount` 的泛型 blanket impl）。手写一份 = 把同一段语义复制出去：四份副本改一条错误文案要改四处，新增插件「记得抄对每条分支」是纯人肉负担。本条与行数棘轮互补——棘轮在**事后**度量规模，本条在**事前**禁止把已收口的语义再摊开 |
  * | E-012 | `ROUTE_*` 常量：**名**去掉前缀后逐字等于**值**的大写，且**值**必须是真实分发目标 | 名字与值分叉 ⇒ 照名字拼出的地址不存在；值不在 `route()` 的臂也不在 `VDFS_OPS` ⇒ 登记的是一条没人能到达的地址（`AGENT_CHAT` 就是这个形态）。E-005 判「引用」不判「定义」，这两条此前无守卫，而 `route.rs` 的文档还声称有 |
@@ -586,7 +586,7 @@ for (const abs of codeFiles) {
           i + 1,
           `\`${m[1]}: ${m[2]}\` —— 插件不得按值持有兄弟插件实例；` +
             `跨插件调用请用 \`ctx.parent()\` 取容器后 \`parent.route(ctx)\`` +
-            `（绝对地址由容器分发，见 \`docs/arch/plugin-route-address.md\`）`,
+            `（绝对地址由容器分发，见 \`docs/arch/AR-009-plugin-route-address.md\`）`,
         )
       }
     }
@@ -704,7 +704,7 @@ for (const abs of codeFiles) {
 // ── E-006：路由**权威清单**里的路径前缀必须是插件目录名（文档侧）─────────
 //
 // 为什么只扫这几个文件：`hooks/fire` 这个幽灵路径**不在任何代码里**——它出现在
-// `docs/CURRENT.md`、`docs/ref/ROUTES.md` 与 `hook/README.md` 三处文档中。
+// `docs/CURRENT.md`、`docs/ref/RE-003-ROUTES.md` 与 `hook/README.md` 三处文档中。
 // 只扫代码的守卫会**完整地漏掉它**。
 //
 // 为什么只判**前缀**、不判整条路径是否存在：权威清单里**必须**能提到已退役的路由
@@ -718,7 +718,7 @@ for (const abs of codeFiles) {
 // 只扫「自称是当前权威清单」的那几份。
 const ROUTE_AUTHORITY_FILES = [
   path.join(repoRoot, 'docs', 'CURRENT.md'),
-  path.join(repoRoot, 'docs', 'ref', 'ROUTES.md'),
+  path.join(repoRoot, 'docs', 'ref', 'RE-003-ROUTES.md'),
   ...(() => {
     try {
       return fs
@@ -759,7 +759,7 @@ for (const abs of ROUTE_AUTHORITY_FILES) {
 // ── E-008：文档标了 `<!-- vocab:PREFIX_ -->` 的词表行必须与代码常量逐字一致 ──
 //
 // 为什么需要：词表是**闭集**，而闭集的第二份真相最常驻在文档里。真实事故：
-// `docs/arch/vdfs.md` §3.2 的 status 行一直写 `error`，而代码早已把该词改名为
+// `docs/arch/AR-013-vdfs.md` §3.2 的 status 行一直写 `error`，而代码早已把该词改名为
 // `failed`（理由见 `vdfs/words.rs::VDFS_STATUS_FAILED`）——两边各说各话，没有任何
 // 测试因此变红。而人读文档写的代码会照 `error` 写，于是漂移**从文档流回代码**
 //（`schemas/options.rs` 里那枚 `OPTION_STATUS_ERROR = "error"` 就是这么活下来的；

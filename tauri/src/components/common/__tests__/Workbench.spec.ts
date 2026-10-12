@@ -1,7 +1,7 @@
 /**
  * Workbench — 三栏工作台容器单测（happy-dom）
  *
- * 它是全项目**唯一**的三栏容器（`docs/arch/vdfs-frontend.md`），此前只有
+ * 它是全项目**唯一**的三栏容器（`docs/arch/AR-012-vdfs-frontend.md`），此前只有
  * 经 VdfsWorkbench 间接覆盖的 80% 语句 / 23.5% 分支——分支缺口正是侧栏那几个
  * 条件渲染（有/无图标、计数角标、空态与加载态的互斥）。这里直接测容器本身。
  *

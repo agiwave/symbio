@@ -78,7 +78,7 @@ fn tool_free_req<'a>(
         supplemental_no: Default::default(),
         user_meta: None,
         on_round: None,
-        // 开场白（S2.7）：本夹具不产生（`Escalate` 首响由 chat_loop 递入）。
+        // 开场白（T-056）：本夹具不产生（`Escalate` 首响由 chat_loop 递入）。
         opening_text: None,
         opening_dialog: None,
     }
@@ -177,7 +177,7 @@ async fn supplements_become_facts_visible_next_turn() {
         supplemental_no: Default::default(),
         user_meta: None,
         on_round: None,
-        // 开场白（S2.7）：本夹具不产生。
+        // 开场白（T-056）：本夹具不产生。
         opening_text: None,
         opening_dialog: None,
     })
@@ -632,7 +632,7 @@ async fn tool_free_turn_abort_closes_the_cell_and_bubbles_aborted() {
     assert!(check_all(&all).is_empty(), "{:?}", check_all(&all));
 }
 
-/// 事实完整性（S2.6 判据）：**中止后那半句话还在**——模型说到一半（"让我想想
+/// 事实完整性（T-052 判据）：**中止后那半句话还在**——模型说到一半（"让我想想
 /// 这个名词"）被打断，半截正文 / 半截思考（一）随出口带走（`Aborted { partial }`，
 /// 由消费循环 `persist_failure` 双写进 `messages.json`），（二）照原样入格
 /// （收束格载荷 `text` / `reasoning`）。用户随后追问那个名词时，前置上下文
@@ -742,7 +742,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         supplemental_no: Default::default(),
         user_meta: None,
         on_round: None,
-        // 开场白（S2.7）：本夹具不产生。
+        // 开场白（T-056）：本夹具不产生。
         opening_text: None,
         opening_dialog: None,
     })
@@ -1013,7 +1013,7 @@ async fn full_turn_lands_derived_commitment_facts() {
         supplemental_no: Default::default(),
         user_meta: None,
         on_round: None,
-        // 开场白（S2.7）：本夹具不产生。
+        // 开场白（T-056）：本夹具不产生。
         opening_text: None,
         opening_dialog: None,
     })

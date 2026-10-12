@@ -95,4 +95,4 @@ created: 2026-09-28
 - 会话级记忆（另一层记忆）：`../session/README.md`
 - 记忆的共享实现（各层共用）：`../../../providers/` 下的 `providers/memory`
 - 子智能体目录与子树装配：`../agent/README.md`
-- Agent 目录规范 §6：`docs/arch/agent-directory-spec.md`
+- Agent 目录规范 §6：`docs/arch/AR-006-agent-directory-spec.md`

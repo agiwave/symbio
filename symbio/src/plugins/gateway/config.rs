@@ -68,7 +68,7 @@ impl Default for GatewayConfig {
 /// 这条，但会把「可读范围」从「你点名要的那份」扩大到「当前全部在途内容」。
 /// 这是一条**保守取舍，不是遗漏**：若将来确需只读客户端看实时输出，应把它作为
 /// 显式配置项加入，而不是顺手塞进白名单。详见
-/// `symbio/src/plugins/session/docs/node-state-streaming.md` §11。
+/// `symbio/src/plugins/session/docs/AR-018-node-state-streaming.md` §11。
 pub fn is_readonly_allowed(path: &str, payload: &serde_json::Value) -> bool {
     let p = path.trim_start_matches('/');
     if p == "vdfs/read" && reads_config_document(payload) {

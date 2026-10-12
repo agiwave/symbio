@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * no-direct-call-audit — 无直连静态扫描（v2 阶段 S6 第 14 步，
- * [plan/04 §3](../docs/plan/04-工程落地.md "docs/plan/04-工程落地") 出口判据「直连调用 0」；
- * [roadmap/S08 §5/§6](../docs/stage/S08-多主体与对等承诺.md "docs/stage/S08-多主体与对等承诺") 验收 2）。
+ * [plan/04 §3](../docs/plan/PL-004-工程落地.md "PL-004-工程落地") 出口判据「直连调用 0」；
+ * [roadmap/S08 §5/§6](../docs/stage/ST-008-多主体与对等承诺.md "ST-008-多主体与对等承诺") 验收 2）。
  *
  * ## 规则（I1 的直接推论：任意两主体无直连——一切经事实源）
  *

@@ -12,7 +12,7 @@ created: 2026-09-09
 
 ## 路由
 
-清单见 `docs/ref/ROUTES.md` §Event Bus 插件（**权威**）：`event_bus/subscribe`、
+清单见 `docs/ref/RE-003-ROUTES.md` §Event Bus 插件（**权威**）：`event_bus/subscribe`、
 `event_bus/ping`。
 
 > `event_bus/publish` **不存在**：本插件是进程内帧广播（VDFS 变更、总线自身握手），
@@ -22,11 +22,11 @@ created: 2026-09-09
 
 - 推送（VDFS 变更、`connected` 握手）经 event_bus 取得广播帧；前端 / CLI / tauri 宿主同理。
 - 帧 payload 与 PluginChannel 的 Session 帧同构，客户端按 `kind` 分发（闭集与常量见
-  `docs/arch/PROTOCOLS.md` §事件总线频道）。
+  `docs/arch/AR-004-PROTOCOLS.md` §事件总线频道）。
 - 本插件是**纯传输层**：不认识任何业务频道语义；会话域只有 `vdfs` 一条频道
-  （见 `docs/arch/PROTOCOLS.md` §事件总线频道）。
+  （见 `docs/arch/AR-004-PROTOCOLS.md` §事件总线频道）。
 
 ## 关联
 
 - 入站网关：`../gateway/README.md`
-- 通道协议：`docs/arch/PROTOCOLS.md`
+- 通道协议：`docs/arch/AR-004-PROTOCOLS.md`

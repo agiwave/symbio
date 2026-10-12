@@ -26,7 +26,7 @@ use crate::symbio_core::{
 ///
 /// 它是「会话节点状态」的唯一来源：节点 `status` 与 `attributes.outcome` /
 /// `attributes.error` 全部由它投影，因此「会话忙不忙 / 上一轮怎么结束的」
-/// 在任何消费端都只有一处判据（见 `session/docs/node-state-streaming.md` §2.3）。
+/// 在任何消费端都只有一处判据（见 `session/docs/AR-018-node-state-streaming.md` §2.3）。
 ///
 /// 为什么不是一个 `is_working: bool` 参数：布尔只能表达两态，而会话需要三态
 /// （`working` / `active` / `failed`），且 `failed` 还要带上错误文案。

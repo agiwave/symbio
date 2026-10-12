@@ -12,7 +12,7 @@ created: 2026-09-09
 
 ## 工具
 
-清单与逐项说明见 `docs/ref/ROUTES.md` §Local 插件（**权威**）。共 5 个原生工具：
+清单与逐项说明见 `docs/ref/RE-003-ROUTES.md` §Local 插件（**权威**）。共 5 个原生工具：
 
 | 工具 | 说明 |
 |------|------|
@@ -34,4 +34,4 @@ created: 2026-09-09
 ## 关联
 
 - 工具收集管线：`plugins/session/capabilities.rs`
-- 压缩守卫：`../session/README.md` 策略③ / `symbio/src/plugins/session/docs/context-compression-design.md`
+- 压缩守卫：`../session/README.md` 策略③ / `symbio/src/plugins/session/docs/AR-014-context-compression-design.md`

@@ -1,4 +1,4 @@
-//! `rebuild` 的判据（轨 S2.7 第一步）。
+//! `rebuild` 的判据（轨 T-056 第一步）。
 //!
 //! 这个模块的失效形态是**静默的形状漂移**：重建出的树与落库树长得像但不一样
 //! （父节点接错、`msg_type` 差一档、工具结果挂到 Turn 根而不是 ToolCall 上）。
@@ -173,7 +173,7 @@ fn artifact_builds_call_and_result_under_the_call() {
         .with_payload(serde_json::json!({
             "tool": "read",
             "text": "文件内容",
-            "tool_call_id": "C1",
+            "tool_call_id": "T-016",
             "wire_id": "call_wire_1",
             "args": "{\"path\":\"a.md\"}",
             "result_id": "C1-res",
@@ -185,14 +185,14 @@ fn artifact_builds_call_and_result_under_the_call() {
     let got = shapes(&rebuild(&events));
     assert_eq!(got.len(), 3);
     // 调用卡：ToolCall，挂在 Turn 根下，正文是**已定稿的参数文本**
-    assert_eq!(got[1].id, "C1");
+    assert_eq!(got[1].id, "T-016");
     assert_eq!(got[1].parent, Some("T1".into()));
     assert_eq!(got[1].ty, Some(MessageType::ToolCall));
     assert_eq!(got[1].role, Some(MessageRole::Assistant));
     assert_eq!(got[1].text, "{\"path\":\"a.md\"}");
     // 结果卡：role=Tool，挂在**调用**下（不是 Turn 根）
     assert_eq!(got[2].id, "C1-res");
-    assert_eq!(got[2].parent, Some("C1".into()));
+    assert_eq!(got[2].parent, Some("T-016".into()));
     assert_eq!(got[2].role, Some(MessageRole::Tool));
     assert_eq!(got[2].text, "文件内容");
     assert_eq!(got[2].status, Some(MessageStatus::Completed));
@@ -212,19 +212,19 @@ fn tool_calls_reference_does_not_duplicate_the_card() {
             "agent:main",
         )
         .with_payload(serde_json::json!({
-            "tool": "read", "text": "内容", "tool_call_id": "C1", "wire_id": "w1",
+            "tool": "read", "text": "内容", "tool_call_id": "T-016", "wire_id": "w1",
             "args": "{}", "result_id": "C1-res", "success": true, "turn_id": "T1",
         })),
         final_event(serde_json::json!({
             "text": "读完了",
             "turn_id": "T1",
             "text_id": "T1-text",
-            "tool_calls": [{ "id": "C1", "name": "read", "args": "{}", "wire_id": "w1", "result_id": "C1-res" }],
+            "tool_calls": [{ "id": "T-016", "name": "read", "args": "{}", "wire_id": "w1", "result_id": "C1-res" }],
             "status": "completed",
         })),
     ];
     let got = shapes(&rebuild(&events));
-    let calls = got.iter().filter(|s| s.id == "C1").count();
+    let calls = got.iter().filter(|s| s.id == "T-016").count();
     assert_eq!(calls, 1, "同一张工具卡只能有一份，实得 {calls}");
 }
 

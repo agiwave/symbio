@@ -4,7 +4,7 @@
  *
  * ## 它治的病
  *
- * [P1](../docs/task/P1.md) 登记的原始问题：**出口判据是
+ * [T-040](../docs/task/T-040.md) 登记的原始问题：**出口判据是
  * 「测试有没有过」，不是「用户看见的数变了没有」**。`04 §1.3` 那张逐阶出口表有 14 行
  * 指标， measured 方式一栏全是「埋点 / 日志扫描 / 投影比对 / 单测」——**没有一行说得出
  * 用户在界面上读哪里**。而 `session/stats` 这个只读口早就存在（八列 + 四列），
@@ -13,7 +13,7 @@
  * 本脚本就是那一层对账。它不判「产品判断对不对」（纪律 4：那不可机械化），
  * 只判一条可核对的锚：**表里指认的每一列，代码里真有一列**。
  *
- * T-006 起，这套口径已登记为条目 `S31-2`
+ * T-006 起，这套口径已登记为条目 `SP-016`
  * （owner = 本脚本；条目只固化「指认必须落到真列 + `—` 是待建」两条对账关系，不复述规则正文）。
  *
  * ## 判据
@@ -47,7 +47,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const REPO_ROOT = rootArg ? path.resolve(rootArg.slice(7)) : path.resolve(scriptDir, '..')
 
-const PLAN04_REL = path.join('docs', 'plan', '04-工程落地.md')
+const PLAN04_REL = path.join('docs', 'plan', 'PL-004-工程落地.md')
 const STATS_REL = path.join('symbio', 'src', 'plugins', 'session', 'stats.rs')
 
 /** 出口表的表头第一格——用它定位 §1.3 那张表（全文只有一张以此为头的表）。 */

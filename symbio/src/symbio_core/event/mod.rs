@@ -1,14 +1,14 @@
-//! 事件契约 —— v2 事件溯源的共享类型层（[plan/01 §2 / §6](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")）。
+//! 事件契约 —— v2 事件溯源的共享类型层（[plan/01 §2 / §6](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")）。
 //!
 //! ## 为什么是独立模块
 //!
 //! 施工视图的六个包（`actors` / `projections` / `store` / `adapters` / `governance`）
 //! 彼此**禁止互相依赖**，唯一例外是「事件与 View 的类型定义」——那是共享契约
-//! （[plan/05 §3.1](../../../../docs/plan/05-模块架构.md "docs/plan/05-模块架构")，01 §13.5「契约从边上挪到中心」）。
+//! （[plan/05 §3.1](../../../../docs/plan/PL-005-模块架构.md "PL-005-模块架构")，01 §13.5「契约从边上挪到中心」）。
 //! 因此事件类型必须住在**中性层**：`store`（④）与 `projection`（③）都只 import 本模块，
 //! 谁也拿不到谁的句柄。
 //!
-//! ## 冻结锚点（[plan/03 §1](../../../../docs/plan/03-演进与验证.md "docs/plan/03-演进与验证")）
+//! ## 冻结锚点（[plan/03 §1](../../../../docs/plan/PL-003-演进与验证.md "PL-003-演进与验证")）
 //!
 //! - **F5**：动词 5 个、能力 7 个、模式 3 个 —— 本模块冻结动词与实体的**闭集**
 //!   （`Verb` / `Entity` 枚举）。新增格子 = `match` 加一臂，是数据变化不是机制变化；
@@ -18,7 +18,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// 不可伪造的单调序号（[plan/01 §2](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")）。
+/// 不可伪造的单调序号（[plan/01 §2](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")）。
 ///
 /// 字段私有：**只有 `Store` 能构造**（`pub(crate)`），调用方只能拿到与比较——
 /// 自己 `Seq(5)` 伪造一个序号编译不过。这就是「类型强制单调」的构造侧。
@@ -39,7 +39,7 @@ impl Seq {
 /// 事件时间戳：Unix 毫秒（UTC），口径同 [`crate::symbio_core::clock_now_ms`]。
 pub type Timestamp = i64;
 
-// ── 事件名字表（S01：turn/* 全部，[roadmap/S01 §3](../../../../docs/stage/S01-最小闭环.md "docs/stage/S01-最小闭环")）────
+// ── 事件名字表（S01：turn/* 全部，[roadmap/S01 §3](../../../../docs/stage/ST-001-最小闭环.md "ST-001-最小闭环")）────
 //
 // 名字是**数据**（加名字不加枚举，01 §6）；但名字必须**单点定义**——散在调用点的
 // 字符串字面量必然漂移（同 merge_supplements 的单点判据）。常量只钉名字，
@@ -93,14 +93,14 @@ pub const EVENT_ASSISTANT_REPORTED: &str = "chat.assistant.reported";
 
 /// **对话面开场白**（载荷 `{ text, id, reason, exclude_from_context }`）。落在 `turn × asserted`。
 ///
-/// ## 它为什么是事实（S2.7）
+/// ## 它为什么是事实（T-056）
 ///
 /// `Escalate` 判决在轮首产出一句首响（「好，我来处理」），随后本轮**继续**进工具循环
 /// ——它与 `chat.assistant.final` 不是同一条：收束格是干活干完之后的答复，本格干活
 /// **开始前**的开场白。双写期这句随整份 `messages.json` 落盘，切源（WAL 为唯一真源）
 /// 后若不入格，重建便折不出这条根级对话面节点——实测 t20 / t22 的「恰有一条对话面
 /// 节点」全部落空（`meta.surface = "reply"` / `meta.reason = needs_work`）。
-/// 节点形状是事实的一部分（S2.6 原则），故单立一格。
+/// 节点形状是事实的一部分（T-052 原则），故单立一格。
 ///
 /// ## 为什么与 `chat.assistant.reported` 分格而不是复用
 ///
@@ -138,7 +138,7 @@ pub const EVENT_ASSISTANT_FALLBACK: &str = "chat.assistant.fallback";
 /// 进不进请求包相反，混在一处必然让其中一半被静默滤掉。
 pub const EVENT_ASSISTANT_PROGRESS: &str = "chat.assistant.progress";
 
-// ── 产物格子（S02 §3，[roadmap/S02-工具调用与产物.md](../../../../docs/stage/S02-工具调用与产物.md "docs/stage/S02-工具调用与产物")）──
+// ── 产物格子（S02 §3，[roadmap/ST-002-工具调用与产物.md](../../../../docs/stage/ST-002-工具调用与产物.md "ST-002-工具调用与产物")）──
 //
 // 工具**结果**是产物事实：模型请求了工具、工具产出了这段东西。工具调用**本身**
 // 不单独占格（同一件事两格必然漂移）；`produced_by` 指向**本轮用户格**，即
@@ -146,10 +146,10 @@ pub const EVENT_ASSISTANT_PROGRESS: &str = "chat.assistant.progress";
 // 它的 `task/turn`。
 
 /// 产物产出：一次工具调用的**结果**（载荷 `{ tool, text }`）。
-/// 落在 `artifact × asserted`（网格坐标见 [plan/01 §6](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构")）。
+/// 落在 `artifact × asserted`（网格坐标见 [plan/01 §6](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")）。
 pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
 
-// ── 消息列表变更的格子（S2.7，ADR-053 / ADR-054）──
+// ── 消息列表变更的格子（T-056，ADR-053 / ADR-054）──
 //
 // 「消息列表被改过」也是**发生过什么**。在轨 S 之前，编辑 / 截断只重写
 // `messages.json`，事实源里一个字都没有 ⇒ 主读路径一旦切到「从 WAL 重建」，
@@ -227,7 +227,7 @@ pub const EVENT_MESSAGE_REMOVED: &str = "message.removed";
 /// ## 为什么是 `message × progressed` 而不是 `system`
 ///
 /// 用 ADR-053 自己的判据：双源对账
-/// （`session.reconciled`，已随 S2.7-a 退役）曾归 `system`，理由是「它说的不是
+/// （`session.reconciled`，已随 T-053 退役）曾归 `system`，理由是「它说的不是
 /// 『这个会话发生了什么』，而是『两个读源此刻是否一致』」——诊断。而压缩**确实发生过**：
 /// 一段历史被摘要取代、列表从此读作快照那一份。那是
 /// **会话事实**，故归 `message`（本实体正是「消息列表上的变更」）。动词取 `progressed`
@@ -246,7 +246,7 @@ pub const EVENT_MESSAGE_REMOVED: &str = "message.removed";
 /// 一次压缩 = 多一条快照事件 + 把被取代的前缀移入归档段。
 pub const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
 
-// ── 记忆格子（S5，[roadmap/S06 §3](../../../../docs/stage/S06-长期记忆与语义检索.md "docs/stage/S06-长期记忆与语义检索")）────
+// ── 记忆格子（S5，[roadmap/S06 §3](../../../../docs/stage/ST-006-长期记忆与语义检索.md "ST-006-长期记忆与语义检索")）────
 
 /// 编码：学到的语义内容 + embedding（`payload: { content, tag, generation, vec }`）。
 /// 落在 `memory × opened`。**记忆必带溯源**（I2 扩展：溯源覆盖 100%）。
@@ -261,7 +261,7 @@ pub const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
 /// 召回：检索 Translator 的产出（读视图 → 产出事实）。落在 `memory × asserted`。
 pub const EVENT_MEMORY_RECALLED: &str = "memory.recalled";
 
-// ── 承诺格子（S6 第 15 步，[roadmap/S08 §3](../../../../docs/stage/S08-多主体与对等承诺.md "docs/stage/S08-多主体与对等承诺")）──
+// ── 承诺格子（S6 第 15 步，[roadmap/S08 §3](../../../../docs/stage/ST-008-多主体与对等承诺.md "ST-008-多主体与对等承诺")）──
 //
 // 立约 = `commitment` 实体的一格事件（**加格子，不加机制**——对等协作是图，
 // 子智能体递归的树表达不了，才需要这组格子）。声誉是它的投影（`projection = reputation`）。
@@ -277,7 +277,7 @@ pub const EVENT_COMMITMENT_BROKEN: &str = "commitment.broken";
 /// 落在 `commitment × asserted`。
 pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
 
-// ── 任务格子（S7 第 16–18 步，[roadmap/S03 §3](../../../../docs/stage/S03-多步任务与返工.md "docs/stage/S03-多步任务与返工")）──
+// ── 任务格子（S7 第 16–18 步，[roadmap/S03 §3](../../../../docs/stage/ST-003-多步任务与返工.md "ST-003-多步任务与返工")）──
 //
 // 任务图（DAG）= 事件的 `depends_on` 载荷字段——**数据，不是机制**；
 // 返工 = 新增一条事件（`task.rework_created`），不是修改历史（append-only
@@ -290,7 +290,7 @@ pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
 pub const EVENT_TASK_OPENED: &str = "task.opened";
 /// 推进：执行中的普通事实。落在 `task × progressed`。
 pub const EVENT_TASK_PROGRESS: &str = "task.progress";
-/// 暂挂（插话抢占 / 等外部资源；[roadmap/S07](../../../../docs/stage/S07-插话与实时打断.md "docs/stage/S07-插话与实时打断")
+/// 暂挂（插话抢占 / 等外部资源；[roadmap/S07](../../../../docs/stage/ST-007-插话与实时打断.md "ST-007-插话与实时打断")
 /// 里这一格的事件名叫 `task.blocked`，本仓库以 `task.held` 单点定义）。
 /// 落在 `task × held`。
 pub const EVENT_TASK_HELD: &str = "task.held";
@@ -300,8 +300,8 @@ pub const EVENT_TASK_ASSERTED: &str = "task.asserted";
 /// 落在 `task × asserted`（返工本身是一次质量判定的事实）。
 pub const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
 
-// ── 控制格子（S8 第 19–20 步，[roadmap/S07 §3](../../../../docs/stage/S07-插话与实时打断.md "docs/stage/S07-插话与实时打断")、
-//    [roadmap/S09 §3](../../../../docs/stage/S09-外部执行与熔断.md "docs/stage/S09-外部执行与熔断")）────
+// ── 控制格子（S8 第 19–20 步，[roadmap/S07 §3](../../../../docs/stage/ST-007-插话与实时打断.md "ST-007-插话与实时打断")、
+//    [roadmap/S09 §3](../../../../docs/stage/ST-009-外部执行与熔断.md "ST-009-外部执行与熔断")）────
 //
 // 打断信号与熔断**共用一格**：`control/opened`（kinds 都是 `task.controlled`，
 // 以载荷 `reason` 区分）——插话的"停/继续/改道"与外部的"熔断"是同一类事实：
@@ -312,7 +312,7 @@ pub const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
 /// 判定者不得直接发言（S07 §5）。
 pub const EVENT_CONTROL_OPENED: &str = "task.controlled";
 
-// ── 系统与「欲」格子（S9 第 21 步，[roadmap/S12 §3](../../../../docs/stage/S12-自主层与长期目标.md "docs/stage/S12-自主层与长期目标")）──
+// ── 系统与「欲」格子（S9 第 21 步，[roadmap/S12 §3](../../../../docs/stage/ST-012-自主层与长期目标.md "ST-012-自主层与长期目标")）──
 //
 // 自主层**不是新架构层**：定时触发 = 触发器产出事件（不是旁路）；长目标 = 一条
 // `task.opened`，`budget_ms = 86400000`（四层时延的第四个取值，同一参数）；
@@ -330,7 +330,7 @@ pub const EVENT_CONATION_EXPRESSED: &str = "conation.expressed";
 
 /// 事件实体 —— 语法网格的**行**，闭集（F5，11 个）。
 ///
-/// 新增实体是 L-schema 变化（[plan/03 §2](../../../../docs/plan/03-演进与验证.md "docs/plan/03-演进与验证")）：
+/// 新增实体是 L-schema 变化（[plan/03 §2](../../../../docs/plan/PL-003-演进与验证.md "PL-003-演进与验证")）：
 /// 加枚举臂 + ADR 登记，不是机制变更。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Entity {
@@ -544,7 +544,7 @@ fn payload_str(e: &Event, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// 信封的最小契约（[plan/01 §2](../../../../docs/plan/01-核心架构.md "docs/plan/01-核心架构") 的 `type Event: EventEnvelope`）。
+/// 信封的最小契约（[plan/01 §2](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构") 的 `type Event: EventEnvelope`）。
 ///
 /// `Store` 只需要知道三件事：幂等键是什么、seq 在不在、seq 怎么赋值。
 /// 剩余字段对存储层不可见——将来 WAL / 分片实现携带更富的信封也不动 trait（F1）。

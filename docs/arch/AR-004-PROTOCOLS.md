@@ -1,0 +1,305 @@
+---
+kind: arch
+id: AR-004-PROTOCOLS
+title: Symbio 协议规范
+status: active
+created: 2026-09-07
+---
+
+# Symbio 协议规范
+
+> **文档类型：参考** — 帧/载荷/通道的准确规格。
+
+## 帧协议 (PluginFrame)
+
+沿 `PluginChannel` 发送的最小消息单位，是 **2 态穷尽枚举**（定义在 `symbio_core`）：
+`Data(serde_json::Value)` 或 `Error(message, details)`，其中 `details` 约定含
+`{ "code": "ERR_CODE" }`（错误码见 [RE-002-ERROR_CODES.md](../ref/RE-002-ERROR_CODES.md "RE-002-ERROR_CODES")）。
+
+### 帧类型
+
+| 类型 | 用途 | 示例 |
+|------|------|------|
+| `Data` | 正常业务数据 | `{"type": "text_delta", "content": "Hello"}` |
+| `Error` | 执行异常 | `("API key missing", Some({"code": "CONFIG_ERROR"}))` |
+
+---
+
+## 载荷协议 (PluginPayload)
+
+`route()` 和 `traverse()` 的返回类型，是 **3 态穷尽枚举**（定义在 `symbio_core`，
+变体名即下表左列）：
+
+### 载荷类型
+
+| 类型 | 用途 | 序列化行为 |
+|------|------|-----------|
+| `Empty` | 操作成功但无返回值 | `null` |
+| `Data` | 一次性返回的数据 | 跨进程 → JSON；进程内 → 零拷贝 |
+| `Session` | 长连接流式会话 | 返回 channel，后续用帧通信 |
+
+> **构造与访问的签名以代码为准**：`PluginPayload::new` 自动推断载荷类型、
+> `payload.get::<T>()` 进程内零拷贝 downcast、`payload.serialize()` 强制 JSON。
+>
+> **为什么没有「原生对象」变体**：历史上有一个 `Native(Arc<dyn Any>)`（自述
+> 「进程内原生接口」），但它**从未有过构造点**——`Arc<dyn Any>` 恰恰是协议层
+> 表达不了的东西，唯二的匹配点只能写「拒绝跨传输」。进程内对象的透传走 `ctx`
+> 的扩展桶（`PluginInvokeRequest::set_raw`），与载荷枚举无关：载荷描述「这次调用
+> **返回**什么」，扩展桶描述「这次调用**带着**什么」。
+>
+> **交付分类只有一处**：`gateway::server::classify_payload` 把 3 态分成
+> 「一次性」（`Data` / `Empty`）与「长连接」（`Session`），两个传输入口
+> （HTTP / WS）共用它，各自只保留**真差异**——HTTP 把 `Session` 折叠为最后一帧、
+> WS 做双向转发；`Empty` 在 HTTP 写 `null`、在 WS 直接关连接。
+
+---
+
+## 通道协议 (PluginChannel)
+
+全双工流式会话的底层通道（收发两端各持一个 `mpsc` 端，定义在 `symbio_core`）。
+
+> **职责边界：`PluginChannel` 只管跨进程传输，不承担执行期协议。**
+> 执行层（LLM 单轮 / 工具调用）与宿主层之间的出口 / 入口是 `EventSink` / `AbortSignal`
+> （[ADR-020](../adr/ADR-020.md)；机制见 [`symbio/src/plugins/session/docs/AR-015-core-loop.md`](../../symbio/src/plugins/session/docs/AR-015-core-loop.md "AR-015-core-loop") §6）——
+> 因此**帧里不存在中止帧**。本文件不复述该分离。
+
+### 通道生命周期
+
+```
+1. 创建: PluginChannel::pair(buffer_size)
+2. 返回: PluginPayload::Session(peer_channel)  ← 给调用方
+3. 使用: 后端通过 my_channel.tx 发送帧
+4. 结束: channel drop → rx 收到 None (EOF)
+```
+
+### 缓冲区大小
+
+```rust
+// 典型用法
+let (my_channel, peer_channel) = PluginChannel::pair(64);
+// 64 = 缓冲区帧数，防止慢消费者阻塞生产者
+```
+
+---
+
+## 路由上下文 (PluginInvokeRequest)
+
+请求的上下文注入接口（trait 定义在 core，签名以代码为准）。标准键：
+
+### 标准上下文键
+
+| 键 | 类型 | 用途 |
+|----|------|------|
+| `PATH` | String | 目标路径 (如 `session/chat/send`；资源类走 `vdfs/*` + `<根>/…` 地址) |
+| `payload` | 任意（调用方定） | 交互载荷数据（桶名见 `symbio_core::PLUGIN_PAYLOAD_KEY`） |
+| `WORKDIR` | String | 当前工作区根路径 |
+| `SESSION_ID` | String | 会话唯一标识 |
+| `TRACE_ID` | String | 调用链追踪 ID |
+| `AGENT_ID` | String | 当前 Agent 标识 |
+| `CONTENT` | String | 通用内容字段 |
+| `KIND` | String | 通用类型字段 |
+| `ID` | String | 通用 ID 字段 |
+| `NAME` | String | 通用名称字段 |
+| `SCOPE` | String | 作用域 |
+| `DESCRIPTION` | String | 描述 |
+
+> **哪些键能跨进程**：`SymbioKey::WIRE`（缺省 `true`）声明「本键能否在进程外表达」。
+> 标 `false` 的是 6 个**进程内专用**键——`parent`（`Weak<dyn Plugin>`）、
+> `tool_visitor` / `option_visitor` / `configurable_visitor`（trait object）、
+> `event_sink`（闭包）、`abort_signal`（`CancellationToken`）——它们的值无字符串 /
+> JSON 形态，`parse` 恒返 `None`。这是「一次调用能否送到进程外插件」的准入判据。
+
+---
+
+## 工具发现协议 (traverse)
+
+### 触发常量
+
+```rust
+pub const TRAVERSE_AVAILABLE_TOOLS: &str = "available_tools";
+```
+
+### 发现流程
+
+```
+1. 调用 root.traverse("available_tools", ctx)
+2. 容器插件将自身 path 前缀下发给子插件
+3. 叶子插件返回 ToolDefinition 列表
+4. 工具对模型的全名 = `<挂载点>/<短名>` (如 "local/content_search")
+```
+
+### 工具定义
+
+```rust
+pub struct CapabilityMeta {
+    pub name: String,           // 工具名称 (带路径前缀)
+    pub description: String,    // 工具描述
+    pub input_schema: Value,    // JSON Schema 参数定义
+    pub keywords: Vec<String>,  // 意图识别关键词
+    pub category: Option<CapabilityCategory>, // 能力分类
+    pub examples: Option<Vec<String>>,        // 使用示例
+}
+```
+
+---
+
+## 跨进程通信 (Tauri IPC)
+
+### 线格式 (Wire Format)
+
+```rust
+// 请求
+pub struct PluginMessageWire {
+    pub metadata: serde_json::Value,  // { path, trace_id, origin?, ... }
+    pub payload: serde_json::Value,   // 业务数据
+}
+
+// 响应载荷
+pub enum PluginPayloadWire {
+    Data(serde_json::Value),
+    Connection(String),  // 返回连接 ID
+}
+```
+
+### Tauri Commands
+
+宿主命令面（3 个：`route_v2` / `route_v2_send` / `route_v2_close`）**以
+[CURRENT.md](../CURRENT.md) §5 为准**（自动生成）——本文不抄一份会漂移的副本。
+
+### 流式会话建立
+
+```
+1. 前端调用 route_v2 (带 client_id)
+2. 后端返回 Connection(conn_id)
+3. 后端通过 Tauri emit 推送帧到 `route/{conn_id}` 事件
+4. 前端通过 route_v2_send 发送后续帧
+5. 前端调用 route_v2_close 关闭连接
+```
+
+---
+
+## 错误码
+
+错误码是 **ABI 的一部分**（跨版本禁止随意变更）。**完整清单与处理建议见
+[reference/RE-002-ERROR_CODES.md](../ref/RE-002-ERROR_CODES.md "RE-002-ERROR_CODES")**——本文不复制那张表。
+
+---
+
+## AI 会话流式规范
+
+**没有会话专用流协议**：发言 = `vdfs/write(<根>/session/<id>/inbox)`（`chat/send` 是它的
+薄包装），输出 = `kind = "vdfs"` 的变更（消息落在 `<id>/message/<mid>`、运行态落在
+`<id>`），两端都只需既有的 VDFS 能力：
+
+1. **发一条消息**：`vdfs/write(<根>/session/<id>/inbox, text)` —— 写即入队，响应立刻返回；
+2. **看输出**：`event_bus/subscribe` + `vdfs/watch(<根>/session/<id>)`（两步缺一不可，见
+   `e2e/cases/t9-ws-stream.mjs`）——首帧带全量、后续带窄 `delta`，顺序由节点属性 `seq` 决定；
+3. **终止判据**：会话节点 `status` 离开 `working`（结局在 `attributes.outcome` / `error`），
+   它必然排在**本轮全部消息帧之后**（同一 FIFO）。
+
+> 机制与不变量见 [`symbio/src/plugins/session/docs/AR-022-vdfs-session-messages.md`](../../symbio/src/plugins/session/docs/AR-022-vdfs-session-messages.md "AR-022-vdfs-session-messages")；
+> 旧形态（`PluginPayload::Session(channel)` + `PluginFrame::Data(done)`）已随 ADR-025 退役。
+
+---
+
+## 事件总线频道 (`kind`)
+
+AI 增量与资源变更**不随请求返回**，而是经全局事件总线广播：客户端建立连接后另发一帧
+`event_bus/subscribe`（HTTP/WS 入口见 [design/AR-008-http-api-transport.md](AR-008-http-api-transport.md "AR-008-http-api-transport") §5.3），
+之后持续收到 `{ type: "bus_event", data: { kind, session_id, data } }` 帧，**按 `kind` 分派**。
+
+`kind` 的闭集是 `system` / `vdfs` <!-- vocab:EVENT_BUS_KIND_ -->，常量定义在
+`symbio_core::event_bus`（`EVENT_BUS_KIND_SYSTEM` / `EVENT_BUS_KIND_VDFS`）。**发布方一律引
+常量**——`kind` 是跨进程字符串，改名不会编译失败，只会让消费方静默失效（`grep-audit`
+的 S-009 拦裸字面量）：
+
+| `kind` | 发布方 | 消费方 |
+|--------|--------|--------|
+| `system` | 总线插件自身（`event_bus/subscribe` 的 `connected` 握手） | 前端订阅连接 |
+| `vdfs` | vdfs 宿主的变更投递（`plugins/vdfs/host.rs`） | **一切资源与转写的实时消费方**：前端（`composables/useVdfs.ts` 通用浏览器、`stores/sessionNodeSync.ts` 会话清单、会话转写）——都按**地址**分派，不依赖事件到达顺序 |
+
+> **会话域不另设频道**：消息与运行态都是 VDFS 变更——消息是 `<根>/session/<id>/message/<mid>`
+> 这个**文件**，运行态是会话节点（`<根>/session/<id>`）的 `status`，因此都走 `kind = "vdfs"`。
+> 顺序是**节点属性**（`ChatMessage.seq`，消费端按它排序），**不是投递属性**——所以「到达顺序」
+> 与「显示顺序」无关，无需任何投递层的顺序保证
+> （[ADR-025](../adr/ADR-025.md)）。
+>
+> **资源变更不另设频道**：一切资源的生命周期与状态变化都是 VDFS 变更，统一走 `vdfs`。
+
+---
+
+## 数据契约 (Schemas)
+
+所有跨端数据结构集中定义在 [`symbio/src/symbio_core/schemas/`](../../symbio/src/symbio_core/schemas/)
+（该目录按业务域拆分，**文件清单以目录为准**，本文不抄一份会漂移的副本）。
+
+两条命名约定：
+
+- 所有结构派生 `Serialize` / `Deserialize`，命名**全程 `snake_case`**——线上键名与 Rust 字段名
+  逐字相同，**没有任何 host 侧的 `camelCase` 转换**；
+- 唯一例外是 [`plugins/mcp/types.rs`](../../symbio/src/plugins/mcp/types.rs)：它镜像 MCP 的**外部
+  规范报文**（`readOnlyHint` 等），camelCase 由规范规定，故用 `#[serde(rename_all = "camelCase")]`
+  显式声明。
+
+---
+
+## 注册与扩展
+
+### `submit_object_creator!` 宏
+
+每个插件模块在其 `plugin.rs` 末尾调用：
+
+```rust
+submit_object_creator!(PLUGIN_X, XPlugin::build, dyn Plugin);
+```
+
+宏利用 [`inventory`](https://docs.rs/inventory) 在编译期把构造函数注册到全局 `ObjectCreatorRegistry`。宿主首次调用 `creator_create_object::<dyn Plugin>(id, ctx)` 时惰性收集完毕，**无需手动注册**。
+
+### 工厂只给「有第二种实现」的服务
+
+`creator_create_object::<dyn T>(名字, ctx)` 的价值是**换实现不改调用方**，因此只有可替换的
+宿主服务登记工厂项（`dyn Plugin`、`dyn EmbeddingService`）。
+
+**资源存储不走工厂**：`providers/vdfs_service` 的三个实现（`SingleFileVdfs` /
+`DirVdfs` / `MemoryVdfs`）本身就是 `VdfsProvider`（接口在 core 已定，不会换），
+插件**直接组合具体类型**——`use crate::providers::{DirVdfs, SingleFileVdfs,
+MemoryVdfs}`（`providers` 是唯一出口，子目录私有、不深引）。套一层 `dyn` 工厂只会把一次构造换成一次字符串查表。
+（历史上这里有一个工厂项 `"storage_service"`，随 `StorageService` / `EntityStore`
+一并废除；定位与依赖边界见 [design/AR-013-vdfs.md](AR-012-vdfs-frontend.md "AR-012-vdfs-frontend") §11 与 §13.4。）
+
+### 容器动态挂载
+
+`home` 构造 `worker`（Composite）时经 ctx 键 `REQUIRED_PLUGINS` 传入**必需插件清单**
+（`home::SYSTEM_PLUGINS`）；容器据此**扫描自己的目录**（其下一层目录即一个插件）——逐目录读
+`PLUGIN.yml`，`plugin_provider` 指向已注册工厂（`creator_has`）即 `creator_create_object`
+实例化，并把该目录经 ctx 键 `PLUGIN_DIR` 告知插件（插件据此读写**自己的**配置）。
+容器**不内置任何清单**（它是通用容器，可以嵌套另一个容器）。
+
+### `PLUGIN.yml` 的保留键
+
+保留键属于**装配方**（容器 / 插件管理插件），插件自己的配置不得占用同名键。
+单一清单见 `symbio_core::plugin::dir::PLUGIN_RESERVED_KEYS`——读写时的「剥离 / 保留」都遍历它。
+
+| 键 | 谁写 | 说明 |
+|---|---|---|
+| `plugin_provider` | 装配方 | 工厂 id（装配方据此构造） |
+| `plugin_name` | 装配方 | 实例名；缺省 = 目录名 |
+| `plugin_enabled` | 装配方 | 装配位；键不存在 = 启用 |
+| `plugin_title` / `plugin_description` / `plugin_version` / `plugin_author` | 装配期**一次性**投影 | 插件**身份**（运行期唯一来源，见 ADR-032） |
+| `plugin_api` | 插件作者手写 | 要求的宿主插件 API 版本（第三期起强制校验） |
+| `plugin_grants` | 宿主手写 | 宿主**授予**的能力闭集（第三方插件规范 §7） |
+
+**身份的投影方向是单向的**：出厂声明（`Plugin::meta()`）→ 装配期落进 manifest →
+此后 manifest 权威（用户可改），运行期一切消费（`PluginEntry`、挂载点目录节点）
+都读 manifest。因此**停用的插件也有身份**——它只是不被构造，而不是不存在
+（ADR-032）。
+
+新增插件只需：
+1. 把目录放到 `symbio/src/plugins/` 并实现 `Plugin`
+2. 调用 `submit_object_creator!` 注册工厂
+3. 若要随系统启动，把插件名加进 `home::SYSTEM_PLUGINS`
+4. 在配置里挂载
+
+---
+
+> **维护原则**：协议变更必须向后兼容，错误码字符串是 ABI 的一部分。

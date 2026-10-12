@@ -20,7 +20,7 @@
  * 由应用外壳（`MainLayout`）显式启动；本 store 只提供状态与收敛动作，
  * 因此可被独立构造与测试。
  *
- * 规范见 `symbio/src/plugins/session/docs/node-state-streaming.md`。
+ * 规范见 `symbio/src/plugins/session/docs/AR-018-node-state-streaming.md`。
  *
  * ## 关键状态
  *

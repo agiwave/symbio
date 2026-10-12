@@ -1,7 +1,7 @@
 //! SESSION 聊天主循环
 //!
 //! 本文件只保留**主循环骨架**，其余按职责拆到子模块
-//! （切分依据见 `docs/module-layout.md` §0 五判据与 §1.1 编排层落点）：
+//! （切分依据见 `docs/AR-017-module-layout.md` §0 五判据与 §1.1 编排层落点）：
 //!
 //! ```text
 //! 前步骤 ① 请求快照 ② 开会话 ③ TurnState+容器 ④ resume
@@ -557,7 +557,7 @@ pub async fn run_chat_loop(
                         )
                         .await;
                     }
-                    // ── S2.7：`Escalate` 首响必须入格（本批新增）────────────────
+                    // ── T-056：`Escalate` 首响必须入格（本批新增）────────────────
                     //
                     // `Escalate` 的效应是 `Spoke`（不是 `Silent` / `Finish`）：本轮
                     // **继续**进工具循环，开场白只是干活前说的一句话。轮首这里唯一
@@ -703,7 +703,7 @@ pub async fn run_chat_loop(
             }
         };
 
-        // **不要在这里拦中止**（S2.7 / ADR-052）：此前这一档在此处 `return
+        // **不要在这里拦中止**（T-056 / ADR-052）：此前这一档在此处 `return
         // TurnExit::Aborted(Vec::new())`——运行器于是从不落 `user.message`，中止
         // 这一轮**一条事实都没有**（实测 e2e t7：`v2-events.wal` 不存在、投影里
         // 看不到用户说过什么）。ADR-052 决策 1 要求「一轮的产出无论完成 / 失败 /
@@ -787,7 +787,7 @@ pub async fn run_chat_loop(
                 context.messages.clone(),
                 turn.last_user_facing_at,
             )),
-            // 对话面开场白（S2.7）：步骤 2b 的 `Escalate` 首响。落格在 `v2_exec`
+            // 对话面开场白（T-056）：步骤 2b 的 `Escalate` 首响。落格在 `v2_exec`
             // （唯一持写者令牌处），本函数只递「说了什么 / 节点身份」。
             opening_text: turn.opening_text.as_deref(),
             opening_dialog: turn.opening_dialog.take(),

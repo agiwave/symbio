@@ -159,12 +159,12 @@ pub const PLUGIN_KEY_AUTHOR: &str = "plugin_author";
 
 // ==================== 第三方插件保留键（A5：本期只定义与解析，不强制） ====================
 
-/// 保留键：要求的**宿主插件 API 版本**（见 design/third-party-plugin-spec.md §4）
+/// 保留键：要求的**宿主插件 API 版本**（见 design/AR-011-third-party-plugin-spec.md §4）
 ///
 /// 宿主必须在**启动子进程之前**就知道「这个插件我认不认识」——否则要么盲目启动
 /// （可能挂），要么启动后才发现不兼容（已产生副作用）。
 pub const PLUGIN_KEY_API: &str = "plugin_api";
-/// 保留键：宿主**授予**的能力（闭集见 design/third-party-plugin-spec.md §7）
+/// 保留键：宿主**授予**的能力（闭集见 design/AR-011-third-party-plugin-spec.md §7）
 ///
 /// 权限是**宿主**的决定，必须在宿主侧可审计。「插件**需要**什么」不在这里——
 /// 那是插件自己在 `init` 响应里声明的；两者分开，才能有「授予 < 需要」这个可检测状态。

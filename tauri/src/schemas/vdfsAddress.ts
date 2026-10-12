@@ -20,7 +20,7 @@
  *
  * 根叫什么不归本文件：一律读 [`vdfsRoot`]（启动期经 `vdfs/root` 引导）。
  *
- * 规范：docs/arch/vdfs-frontend.md（路由宿主只做承载）
+ * 规范：docs/arch/AR-012-vdfs-frontend.md（路由宿主只做承载）
  */
 
 import { vdfsRoot } from './vdfsRoot'

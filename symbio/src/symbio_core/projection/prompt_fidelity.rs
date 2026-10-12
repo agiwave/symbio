@@ -127,7 +127,7 @@ fn excluded_from_prompt(e: &Event) -> bool {
     matches!(
         (e.entity, e.verb, e.kind.as_str()),
         (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_REPORTED)
-            // 对话面开场白（S2.7）：与汇报同为界面文本（`exclude_from_context`），
+            // 对话面开场白（T-056）：与汇报同为界面文本（`exclude_from_context`），
             // 按设计不进请求包——漏进去要红。
             | (Entity::Turn, Verb::Asserted, EVENT_ASSISTANT_OPENING)
             // 诞生格（ADR-054 决策 1）：本格的节点按定义是**界面文本**——只有

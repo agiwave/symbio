@@ -909,13 +909,13 @@ impl SessionPlugin {
     ///
     /// 存在性校验在此一并完成（`session_of`），因此调用方不必再查一次。
     ///
-    /// ## 落库那份已由存储层交给真源（S2.7-a）
+    /// ## 落库那份已由存储层交给真源（T-053）
     ///
     /// [`Self::session_of`] 走 `load_session`，而存储层的 `load_messages` **已是
     /// WAL 重建优先**、`messages.json` 只作 v1 遗留兜底（见 `store::load_messages`）。
     /// 因此这里取 `session.messages` 拿到的就是真源那一份——本函数不再自己判断
     /// 「缓存在不在、要不要重建」：那是**存储层的职责**，在插件层再判一次就是同一条
-    /// 规矩的第二份口径（S2.7 早期「缓存不在才重建」的过渡形态，S2.7-a 收敛掉）。
+    /// 规矩的第二份口径（T-056 早期「缓存不在才重建」的过渡形态，T-053 收敛掉）。
     async fn transcript_of(&self, id: &str) -> VdfsResult<Vec<cm::ChatMessage>> {
         let session = self.session_of(id).await?;
         let live = self.live_messages_of(id).await;

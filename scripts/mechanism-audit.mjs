@@ -314,7 +314,7 @@ const RULES = {
    * **浏览器路径不判**（值以 `/` 开头）：`schemas/vdfsAddress.ts` 的
    * `VDFS_HOME_PATH = '/vdfs'` 是 vue-router 的路由前缀——那是路由的承载形式，
    * 不是 VDFS 数据地址。数据地址要么是 `<根>` 打头的展示地址，要么是裸段名 /
-   * 树内相对路径，**从不以 `/` 开头**（`vdfs.md` §3.1 的 normalize_addr 会剥掉
+   * 树内相对路径，**从不以 `/` 开头**（`AR-013-vdfs.md` §3.1 的 normalize_addr 会剥掉
    * 首部分隔符，且「不强加前导 `/`」）。
    */
   vdfsConstDef: {

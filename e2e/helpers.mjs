@@ -754,7 +754,7 @@ export const INFLIGHT_SEQ_BASE = 1 << 50;
  * 断言一个节点流上的 `seq` 是**节点属性**、不是投递序号。
  *
  * `seq` 只在存储写入时分配（见
- * `symbio/src/plugins/session/docs/vdfs-session-messages.md` §3.4），而节点是先以
+ * `symbio/src/plugins/session/docs/AR-022-vdfs-session-messages.md` §3.4），而节点是先以
  * **在途号**上线的；落库后由一条带存储号的完整帧把它交回权威号——这是**唯一**的
  * 换号时机。因此一条节点流的合法形态只有：
  *

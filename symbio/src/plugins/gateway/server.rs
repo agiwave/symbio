@@ -478,7 +478,7 @@ async fn dispatch_once(
         .get("path")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    // `trace_id`：ERROR_CODES.md 约定「每个请求的 metadata 应包含 trace_id，后端会记录在
+    // `trace_id`：RE-002-ERROR_CODES.md 约定「每个请求的 metadata 应包含 trace_id，后端会记录在
     // 日志中」。壳层 `route_v2` 一直记着，网关这侧（CLI / e2e / 第三方客户端的唯一入口）
     // 此前连读都不读——**链路恰好断在它身上**。缺席统一写 `-`：字段恒在，日志行的形状才
     // 稳定（与壳层 `origin` 的缺省同一取向）；键名取自键面（`TRACE_ID.name()`），

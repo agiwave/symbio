@@ -111,7 +111,7 @@ test('DC-004 数对得上 ⇒ 绿（数的是目录里那几个会被编译的�
 
 // ── ② 不误报（本仓真有的三种邻近形态） ───────────────────────────────
 
-test('不误报：数后面紧跟逗号（本仓 ROUTES.md 的真形：`check_all` 八条，空 = 全绿）', () => {
+test('不误报：数后面紧跟逗号（本仓 RE-003-ROUTES.md 的真形：`check_all` 八条，空 = 全绿）', () => {
   const r = audit({ body: '# A\n\n不变量清单 `invariants`（`check_all` 八条，空 = 全绿）——纯读。\n' })
   assert.equal(r.status, 0, r.stdout)
 })
