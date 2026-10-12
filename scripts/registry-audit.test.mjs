@@ -97,7 +97,7 @@ function caseRoot(files, { noSp = false } = {}) {
   const all = { ...files }
   if (!noSp && !all['spec/SP-001.md']) all['spec/SP-001.md'] = sp001Doc()
   for (const [rel, content] of Object.entries(all)) {
-    const p = path.join(base, 'registry', rel)
+    const p = path.join(base, 'docs', 'registry', rel)
     fs.mkdirSync(path.dirname(p), { recursive: true })
     fs.writeFileSync(p, content)
   }
@@ -105,7 +105,7 @@ function caseRoot(files, { noSp = false } = {}) {
 }
 
 function errsOf(base) {
-  const { entries, errors } = loadEntries(path.join(base, 'registry'), base)
+  const { entries, errors } = loadEntries(path.join(base, 'docs', 'registry'), base)
   return [...errors, ...auditEntries(entries, base)]
 }
 
@@ -286,7 +286,7 @@ test('RG-016：clears 指到不存在 / 指向非 task 变红；指向开放 tas
   assert.deepEqual(errsOf(base), [], 'clears 指到 task 合法，且不要求其闭环')
 
   // 渲染：spec INDEX 的 active 表带「清除」列，clears 编号落列（列被删要有回归兜住）
-  const { entries } = loadEntries(path.join(base, 'registry'), base)
+  const { entries } = loadEntries(path.join(base, 'docs', 'registry'), base)
   const idx = renderKindIndex('spec', entries)
   assert.match(idx, /\| 编号 \| 规范 \| 适用范围 \| 判据 \| 清除 \| 取代 \|/, 'active 表含清除列')
   assert.match(idx, /\| 人工 \| T-060 \| — \|/, 'clears 编号渲染进清除列')
@@ -330,7 +330,7 @@ test('adr 渲染：status 分组、impl 成列（「现行但只落地一半」�
     'adr/ADR-200.md': adrDoc('ADR-200', { impl: 'partial', title: '半落地的现行决策' }),
     'adr/ADR-201.md': adrDoc('ADR-201', { status: 'superseded', reason: '被 ADR-200 取代' }),
   })
-  const { entries } = loadEntries(path.join(base, 'registry'), base)
+  const { entries } = loadEntries(path.join(base, 'docs', 'registry'), base)
   const a = renderKindIndex('adr', entries)
   assert.equal(a, renderKindIndex('adr', entries), '同输入逐字节同输出')
   assert.match(a, /现行决策（active）/)
@@ -411,20 +411,20 @@ test('RG-010：registry/ 缺失或零条目 ⇒ exit 2（不退化成什么都�
   const missing = fs.mkdtempSync(path.join(os.tmpdir(), 'symbio-registry-none-'))
   const r1 = runRegistryAudit([`--root=${missing}`])
   assert.equal(r1.code, 2)
-  assert.match(stripAnsi(r1.lines.join('\n')), /RG-010 registry\/ 不存在/)
+  assert.match(stripAnsi(r1.lines.join('\n')), /RG-010 docs\/registry\/ 不存在/)
   fs.rmSync(missing, { recursive: true, force: true })
 
-  const empty = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'symbio-registry-empty-')), 'registry')
-  fs.mkdirSync(empty, { recursive: true })
-  const r2 = runRegistryAudit([`--root=${path.dirname(empty)}`])
+  const emptyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'symbio-registry-empty-'))
+  fs.mkdirSync(path.join(emptyRoot, 'docs', 'registry'), { recursive: true })
+  const r2 = runRegistryAudit([`--root=${emptyRoot}`])
   assert.equal(r2.code, 2)
   assert.match(stripAnsi(r2.lines.join('\n')), /RG-010 .*没有任何条目/)
-  fs.rmSync(path.dirname(empty), { recursive: true, force: true })
+  fs.rmSync(emptyRoot, { recursive: true, force: true })
 })
 
 test('RG-013：registry/ 下未登记的 kind 目录变红（命名空间闭合）', () => {
   const base = caseRoot({ 'weird/x.md': '---\nkind: weird\n---\n' })
-  expectOnly(errsOf(base), /RG-013 registry\/weird\//)
+  expectOnly(errsOf(base), /RG-013 docs\/registry\/weird\//)
 })
 
 // ================= SP-001 字段表对账（RG-011） =================
@@ -447,7 +447,7 @@ test('渲染确定性：同输入同输出；待处理列表里前置排在后�
     'task/T-010.md': taskDoc('T-010'),
     'task/T-011.md': taskDoc('T-011', { deps: ['T-010'] }),
   })
-  const { entries } = loadEntries(path.join(base, 'registry'), base)
+  const { entries } = loadEntries(path.join(base, 'docs', 'registry'), base)
   const a = renderKindIndex('task', entries)
   const b = renderKindIndex('task', entries)
   assert.equal(a, b, '同输入必须逐字节同输出（这是 autoWork 重生成的前提）')
@@ -462,7 +462,7 @@ test('排序：拓扑序永远在前；同层按 prio 再按编号（确定性�
     'task/T-032.md': taskDoc('T-032'), // 缺席 = 最低档
     'task/T-033.md': taskDoc('T-033', { prio: 'now', deps: ['T-030'] }), // 有依赖 ⇒ 拓扑压过 prio
   })
-  const { entries } = loadEntries(path.join(base, 'registry'), base)
+  const { entries } = loadEntries(path.join(base, 'docs', 'registry'), base)
   const out = renderKindIndex('task', entries)
   const pos = (id) => out.indexOf(`\`${id}\``)
   assert.ok(pos('T-030') < pos('T-033'), 'T-030 虽 later，但它是前置 ⇒ 排在 T-033 前（deps 是义务）')
@@ -474,12 +474,12 @@ test('--write：生成三个汇总页，再跑一次显示已是最新', () => {
   const base = caseRoot({ 'task/T-001.md': taskDoc('T-001', { status: 'done', evidence: 'abc1234' }) })
   const first = runRegistryAudit([`--root=${base}`, '--write'])
   assert.equal(first.code, 0, stripAnsi(first.lines.join('\n')))
-  for (const rel of ['registry/INDEX.md', 'registry/task/INDEX.md', 'registry/spec/INDEX.md']) {
+  for (const rel of ['docs/registry/INDEX.md', 'docs/registry/task/INDEX.md', 'docs/registry/spec/INDEX.md']) {
     assert.ok(fs.existsSync(path.join(base, rel)), `${rel} 应被生成`)
   }
-  const board = fs.readFileSync(path.join(base, 'registry/task/INDEX.md'), 'utf8')
+  const board = fs.readFileSync(path.join(base, 'docs/registry/task/INDEX.md'), 'utf8')
   assert.match(board, /`T-001`.*abc1234/, '已完成表应带证据列')
-  assert.match(fs.readFileSync(path.join(base, 'registry/INDEX.md'), 'utf8'), /task · 任务/)
+  assert.match(fs.readFileSync(path.join(base, 'docs/registry/INDEX.md'), 'utf8'), /task · 任务/)
 
   const second = runRegistryAudit([`--root=${base}`, '--write'])
   assert.equal(second.code, 0)
@@ -490,7 +490,7 @@ test('registry-audit：违规时拒绝写汇总页（exit 1）；参数不识别
   const base = caseRoot({ 'task/T-001.md': taskDoc('T-001', { status: 'done' }) })
   const r = runRegistryAudit([`--root=${base}`, '--write'])
   assert.equal(r.code, 1)
-  assert.ok(!fs.existsSync(path.join(base, 'registry/task/INDEX.md')), '有违规不得写汇总页')
+  assert.ok(!fs.existsSync(path.join(base, 'docs/registry/task/INDEX.md')), '有违规不得写汇总页')
   assert.equal(runRegistryAudit(['--bogus']).code, 2)
 })
 
@@ -525,7 +525,7 @@ test('registry-board：先校验后打印；有违规只报错不打印看板', 
 test('本仓当前登记自洽，且真的读到了条目', () => {
   const r = runRegistryAudit([`--root=${repoRoot}`])
   assert.equal(r.code, 0, stripAnsi(r.lines.join('\n')))
-  const { entries } = loadEntries(path.join(repoRoot, 'registry'), repoRoot)
+  const { entries } = loadEntries(path.join(repoRoot, 'docs', 'registry'), repoRoot)
   const tasks = entries.filter((e) => e.kind === 'task')
   const specs = entries.filter((e) => e.kind === 'spec')
   const adrs = entries.filter((e) => e.kind === 'adr')

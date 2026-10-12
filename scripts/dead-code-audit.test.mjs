@@ -29,11 +29,11 @@ function audit(rustFiles, { waiver = null, env: extraEnv = {}, plan = null, spec
       const text = waiver === null ? src : src.replace('WAIVER', waiver)
       fs.writeFileSync(path.join(root, 'symbio/src', name), text)
     }
-    // 规则源（T-006 后）：批号闭集的 owner 是 `registry/spec/S31-1.md`；
+    // 规则源（T-006 后）：批号闭集的 owner 是 `docs/registry/spec/S31-1.md`；
     // 04 §3.1 退为迁移期兼容来源。R-002 ③「承认必须挂到计划步」只在规则源存在时判。
     if (spec) {
-      fs.mkdirSync(path.join(root, 'registry/spec'), { recursive: true })
-      fs.writeFileSync(path.join(root, 'registry/spec/S31-1.md'), spec)
+      fs.mkdirSync(path.join(root, 'docs/registry/spec'), { recursive: true })
+      fs.writeFileSync(path.join(root, 'docs/registry/spec/S31-1.md'), spec)
     }
     if (plan) {
       fs.mkdirSync(path.join(root, 'docs/plan'), { recursive: true })
@@ -158,7 +158,7 @@ test('R-002 counts the module-level marker too', () => {
   assert.match(r.stdout, /a\.rs:1/)
 })
 
-// R-002 ③：**承认 ↔ 计划步**。批号闭集的 owner 是 `registry/spec/S31-1.md`
+// R-002 ③：**承认 ↔ 计划步**。批号闭集的 owner 是 `docs/registry/spec/S31-1.md`
 // （T-006 起；04 §3.1 退为迁移期兼容来源）。每处 `allow` 的理由必须指向真实的批号——
 // 否则「计划完成」只是一句自述，门禁查不出「步已标完成、标记还挂着」这种漂移。
 const SPEC_FIXTURE = [

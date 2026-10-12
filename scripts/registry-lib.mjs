@@ -10,7 +10,7 @@
  * 顶层解法只有三段：
  *
  *   1. **条目 = 数据**：每条任务 / 规范是一个带 front-matter 的单文档
- *      （`registry/<kind>/<id>.md`），编号、状态、依赖、证据全在机读字段里；
+ *      （`docs/registry/<kind>/<id>.md`），编号、状态、依赖、证据全在机读字段里；
  *   2. **汇总 = 投影**：任何「列表 / 看板 / 总账」都由本库渲染，
  *      `registry/` 下各级 `INDEX.md` 由门禁自动重生成（`gate.d/60-facts.mjs` 的 `autoWork`），
  *      不存在第二处手抄；
@@ -22,6 +22,8 @@
  * 零外部依赖（Node 无内置 YAML），所以**只认以下形状**，其余一律报 RG-001（宁红不漏）：
  *
  *   - 首行 `---` 起始、`---` 闭合；键形如 `key: value`（取**第一个**冒号之后整段为值）；
+ *   - **值与键同一行**：块标量 `|` / `>` 与缩进续行都不解析——续行没有冒号，
+ *     按下面那条「不合形状的行」判红，不会静默吃掉半截值；
  *   - 整行注释以 `#` 开头；**行内 `#` 属于值的一部分**（不剥离，避免吞掉正当内容）；
  *   - 值四种形态：裸标量、`"..."` / `'...'`（去外层引号，不支持转义）、
  *     `[]` / `[a, b]` 行内列表、键后换行的 `  - item` 块列表；
@@ -50,7 +52,7 @@ export const COMMON_OPTIONAL = ['deps']
 
 /**
  * 每个 kind 一份配置——**新增一个 kind = 在这里加一项 + 一个渲染器 + 回归测试**，
- * 不新开脚本、不新开命名空间。字段事实的文档侧真相是 `registry/spec/SP-001.md`
+ * 不新开脚本、不新开命名空间。字段事实的文档侧真相是 `docs/registry/spec/SP-001.md`
  * （其字段表由 RG-011 与本配置对账，两边不等即红）。
  */
 export const KINDS = {
@@ -156,7 +158,7 @@ export const PRIO = { now: 0, next: 1, later: 2 }
 
 /** RG-010 的消息以常量形式住本文件（GC-003：声明的码必须在声明文件里出现）。 */
 export const SCOPE_ERROR =
-  'RG-010 登记范围读不出：registry/ 下没有任何条目——退化成「什么都没校验」是最坏的失败'
+  'RG-010 登记范围读不出：docs/registry/ 下没有任何条目——退化成「什么都没校验」是最坏的失败'
 
 // ==================== front-matter 解析 ====================
 
@@ -264,7 +266,7 @@ export function loadEntries(registryDir, root) {
     const cfg = KINDS[kind]
     if (!cfg) {
       errors.push(
-        `RG-013 registry/${kind}/：未登记的 kind 目录——命名空间必须闭合，先在 registry-lib 的 KINDS 里声明`,
+        `RG-013 docs/registry/${kind}/：未登记的 kind 目录——命名空间必须闭合，先在 registry-lib 的 KINDS 里声明`,
       )
       continue
     }
@@ -273,7 +275,7 @@ export function loadEntries(registryDir, root) {
       .readdirSync(dir)
       .filter((n) => n.endsWith('.md') && n !== 'INDEX.md')
       .sort()
-    if (files.length === 0) notes.push(`registry/${kind}/：暂无条目（${cfg.label}）`)
+    if (files.length === 0) notes.push(`docs/registry/${kind}/：暂无条目（${cfg.label}）`)
     for (const name of files) {
       const file = path.join(dir, name)
       const text = fs.readFileSync(file, 'utf8')
@@ -575,16 +577,16 @@ export function auditEntries(entries, root) {
   // ---- RG-011：SP-001 的字段表必须恰好等于代码侧 schema ----
   const sp = entries.find((e) => e.kind === 'spec' && e.meta && e.meta.id === 'SP-001')
   if (!sp) {
-    out.push('RG-011 registry/spec/SP-001.md 不存在——schema 的文档侧真相没有登记')
+    out.push('RG-011 docs/registry/spec/SP-001.md 不存在——schema 的文档侧真相没有登记')
   } else {
     const m = sp.body.match(/^##\s+字段\s*$/m)
     if (!m) {
-      out.push('RG-011 registry/spec/SP-001.md 缺 \`## 字段\` 小节——字段表读不出')
+      out.push('RG-011 docs/registry/spec/SP-001.md 缺 \`## 字段\` 小节——字段表读不出')
     } else {
       const section = sectionOf(sp.body, '字段')
       const keys = [...section.matchAll(/^\|\s*`([A-Za-z][A-Za-z0-9_-]*)`\s*\|/gm)].map((x) => x[1])
       if (keys.length === 0) {
-        out.push('RG-011 registry/spec/SP-001.md 字段表读不出（\`## 字段\` 小节里没有 \`| \`键\` |\` 形状的行）')
+        out.push('RG-011 docs/registry/spec/SP-001.md 字段表读不出（\`## 字段\` 小节里没有 \`| \`键\` |\` 形状的行）')
       } else {
         const got = new Set(keys)
         const want = new Set(ALL_KEYS)
@@ -592,7 +594,7 @@ export function auditEntries(entries, root) {
         const extra = keys.filter((k) => !want.has(k))
         if (missing.length || extra.length) {
           out.push(
-            'RG-011 registry/spec/SP-001.md 字段表与代码 schema 不一致' +
+            'RG-011 docs/registry/spec/SP-001.md 字段表与代码 schema 不一致' +
               (missing.length ? `；表里缺：${missing.join('、')}` : '') +
               (extra.length ? `；表里多出：${extra.join('、')}` : '') +
               '（改 schema 必须同批更新 SP-001，反之亦然）',
@@ -667,20 +669,20 @@ const cell = (s) => String(s ?? '')
 const depsCell = (e) => (Array.isArray(e.meta.deps) && e.meta.deps.length ? e.meta.deps.join('、') : '—')
 
 const HEADER_TASK =
-  '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `registry/task/*.md` 生成，请勿手改。**\n' +
+  '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/registry/task/*.md` 生成，请勿手改。**\n' +
   '> 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，' +
-  '原则与流程见 [14 · 登记与汇总机制](../../docs/plan/14-登记与汇总机制.md)。\n'
+  '原则与流程见 [14 · 登记与汇总机制](../../plan/14-登记与汇总机制.md)。\n'
 
 const HEADER_SPEC =
-  '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `registry/spec/*.md` 生成，请勿手改。**\n' +
+  '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/registry/spec/*.md` 生成，请勿手改。**\n' +
   '> 状态的唯一登记处是各规范文件本身，本页是投影。字段规范见 [SP-001](./SP-001.md)，' +
-  '原则与流程见 [14 · 登记与汇总机制](../../docs/plan/14-登记与汇总机制.md)。\n'
+  '原则与流程见 [14 · 登记与汇总机制](../../plan/14-登记与汇总机制.md)。\n'
 
 const HEADER_ADR =
-  '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `registry/adr/*.md` 生成，请勿手改。**\n' +
-  '> **ADR 的唯一真相源是 `registry/adr/`**：每条 ADR 的正文（决策 / 理由 / 被否决的方案 /\n' +
+  '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/registry/adr/*.md` 生成，请勿手改。**\n' +
+  '> **ADR 的唯一真相源是 `docs/registry/adr/`**：每条 ADR 的正文（决策 / 理由 / 被否决的方案 /\n' +
   '> 后果与不变量）住它自己的 `## 决策` 小节，规范合法性（`status`）与落地进展（`impl`）住 front-matter。\n' +
-  '> 字段规范见 [SP-001](../spec/SP-001.md)，机制见 [14 · 登记与汇总机制](../../docs/plan/14-登记与汇总机制.md)。\n'
+  '> 字段规范见 [SP-001](../spec/SP-001.md)，机制见 [14 · 登记与汇总机制](../../plan/14-登记与汇总机制.md)。\n'
 
 function table(header, rows) {
   if (rows.length === 0) return '（无）'
@@ -859,7 +861,7 @@ export function renderRootIndex(allEntries) {
     '# 登记总账（自动生成）',
     '',
     '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 生成，请勿手改。**',
-    '> 条目各是一个单文档（`registry/<kind>/<id>.md`）；机制见 [14 · 登记与汇总机制](../docs/plan/14-登记与汇总机制.md)，',
+    '> 条目各是一个单文档（`docs/registry/<kind>/<id>.md`）；机制见 [14 · 登记与汇总机制](../plan/14-登记与汇总机制.md)，',
     '> 字段规范见 [SP-001](./spec/SP-001.md)。',
     '',
     table(['类别', '条目数', '状态分布', '汇总页'], rows),

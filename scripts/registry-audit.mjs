@@ -41,8 +41,8 @@
  * ## 用法
  *
  *   node scripts/registry-audit.mjs            校验 registry/ 全部条目
- *   node scripts/registry-audit.mjs --write    校验通过后重生成 registry/INDEX.md
- *                                              与 registry/<kind>/INDEX.md
+ *   node scripts/registry-audit.mjs --write    校验通过后重生成 docs/registry/INDEX.md
+ *                                              与 docs/registry/<kind>/INDEX.md
  *   node scripts/registry-audit.mjs --root=<仓库根>   （回归测试夹具用）
  *
  * 退出码：0 = 通过；1 = 有违规 / 解析失败；2 = 范围读不出（registry/ 缺失或零条目、
@@ -80,9 +80,9 @@ export function runRegistryAudit(argv) {
   }
 
   const lines = ['--- registry-audit: 登记条目校验（RG-001…RG-019） ---']
-  const registryDir = path.join(root, 'registry')
+  const registryDir = path.join(root, 'docs', 'registry')
   const { entries, errors, notes, missing } = loadEntries(registryDir, root)
-  if (missing) return { code: 2, lines: lines.concat(red(`[ERROR] RG-010 registry/ 不存在（${registryDir}）——登记范围读不出`)) }
+  if (missing) return { code: 2, lines: lines.concat(red(`[ERROR] RG-010 docs/registry/ 不存在（${registryDir}）——登记范围读不出`)) }
 
   // 零条目时只看**目录级**错误（如 RG-013）：条目级判据（RG-011 等）在没有任何条目时
   // 只会产生噪音，把「范围读不出」这个 exit 2 挤成 exit 1——那会让测试与 CI 读错故障。

@@ -100,7 +100,7 @@ export function runRegistryBoard(argv) {
     return { code: 2, lines: [red(`[ERROR] 未知 kind：${kindFilter}（可选：${Object.keys(KINDS).join(' / ')}）`), USAGE] }
   }
 
-  const { entries, errors, missing } = loadEntries(path.join(root, 'registry'), root)
+  const { entries, errors, missing } = loadEntries(path.join(root, 'docs', 'registry'), root)
   if (missing) return { code: 2, lines: [red(`[ERROR] RG-010 registry/ 不存在（${root}）——登记范围读不出`)] }
   if (entries.length === 0) {
     if (errors.length) {

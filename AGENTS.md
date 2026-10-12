@@ -11,7 +11,7 @@
 - 代码规模、Tauri 命令面、CLI 选项与命令 → §5
 
 改完代码重跑生成脚本（CI 用 `--check` 防漂移）。「为什么这样设计」看
-[`registry/adr/`](registry/adr/) 的单文档（每条 ADR 的正文 + 状态），不要塞进 CURRENT.md。
+[`docs/registry/adr/`](docs/registry/adr/) 的单文档（每条 ADR 的正文 + 状态），不要塞进 CURRENT.md。
 
 ## 目标架构（v2）：是目标，不是"别人的设计"
 
@@ -23,20 +23,20 @@
 ## 核心形状：改宽之前先立决策
 
 `symbio_core` 是**影响面最大**的模块，它的质量高于任何单个插件的质量——不要拿机制面去付实现面的账。
-这条纪律（`08 §0 纪律 3`，登记条目 `registry/spec/D08-3.md`）现在有执行方：
+这条纪律（`08 §0 纪律 3`，登记条目 `docs/registry/spec/D08-3.md`）现在有执行方：
 `node scripts/core-shape-audit.mjs`（CS-001）把 core 的三格形状冻结成**只许降**——
 `pub trait` 数 / `fn` 成员总数 / 带默认体的成员数。变宽就红，而把它推下去只有一条路：
 改基线数字，那需要一条挂在旁边的 `core-shape-allow <格>: ADR-NNN <理由>`，且那个 ADR 必须存在（CS-002）。
-**收窄不需要批准，变宽需要论证**（机制的决策见 [`registry/adr/ADR-055.md`](registry/adr/ADR-055.md)）。
+**收窄不需要批准，变宽需要论证**（机制的决策见 [`docs/registry/adr/ADR-055.md`](docs/registry/adr/ADR-055.md)）。
 
 ## 任务 / 规范登记：状态只写在 registry/*.md
 
 顶层机制（总纲：[`docs/plan/14-登记与汇总机制.md`](docs/plan/14-登记与汇总机制.md)）：
-任务、规范等条目各是**一个带 front-matter 的单文档**，住 `registry/<kind>/`；
-`registry/` 下各级 `INDEX.md` 由脚本生成，**不手改**。
+任务、规范等条目各是**一个带 front-matter 的单文档**，住 `docs/registry/<kind>/`；
+`docs/registry/` 下各级 `INDEX.md` 由脚本生成，**不手改**。
 
 - 查待办 / 已完成 / 某一条：`node scripts/registry-board.mjs`（`--kind=` / `--status=` / `--id=`）
-- 登记新条目、改状态 = 改条目文件本身（字段规范：`registry/spec/SP-001.md`）
+- 登记新条目、改状态 = 改条目文件本身（字段规范：`docs/registry/spec/SP-001.md`）
 - 改完跑 `node scripts/registry-audit.mjs`；门禁自动重生成汇总页并暂存（`gate.d/60-facts.mjs`）
 - `prio`（now / next / later）只排同层顺序，**不裁决冲突**；冲突按总纲 §4 分层消解
 - 接管既有文档里的条目性元素（任务 / 规范 / 机制 / 散落决策）= 登记一个 task，
@@ -54,7 +54,7 @@
 [`docs/README.md`](docs/README.md#文档职责边界一个事实只有一个-owner)）：
 
 - 结构事实 → `CURRENT.md`（自动生成，不手改）
-- 「为什么这样设计」→ [`registry/adr/`](registry/adr/)（**每条 ADR 单文档**，
+- 「为什么这样设计」→ [`docs/registry/adr/`](docs/registry/adr/)（**每条 ADR 单文档**，
   域分配规则见其 §0.1）；新增一条 ADR 只动它自己那一册 + 索引一行，不在别处复述
 - 路由 / 错误码 / 配置 → 各自的 `ROUTES.md` / `ERROR_CODES.md` / `CONFIGURATION.md`
 - 模块机制 → 该模块 `README.md`

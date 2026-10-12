@@ -21,7 +21,7 @@
  *   而 D-001 报「失效 0 条」已经很久了。**守卫报 0 不等于没有坏链，只等于它看不见。**
  *
  * D-006 的两条防误报设计（缺任一条都会让规则被豁免喂到失效）：
- *   ① **双根解析**：`registry/adr/INDEX.md` 这类路径在模块 README 里是**相对仓库根**
+ *   ① **双根解析**：`docs/registry/adr/INDEX.md` 这类路径在模块 README 里是**相对仓库根**
  *      写的，在 `docs/` 内部又是相对当前文件——先试文件目录、再试仓库根，任一命中即通过。
  *      实测把失败数从 34 降到 9。
  *   ② **只判定「不含 `./` `../` 且至少含一个 `/`」的路径**：无斜杠的（`` `README.md` ``）
@@ -46,7 +46,7 @@
  *     故只在确需时用；行内豁免覆盖绝大多数真实场景。
  *
  * D-008 存在的理由（**编号引用**这一类的首条规则）：2026-10-08 复核时发现
- *   `docs/plan/04` §3.2 与 [`ADR-047`](../registry/adr/ADR-047.md) 都写着「R1」，
+ *   `docs/plan/04` §3.2 与 [`ADR-047`](../docs/registry/adr/ADR-047.md) 都写着「R1」，
  *   而本仓的 `R1` 有**两个**含义——`04` 风险登记表的 R1（从未写过可运行系统代码）
  *   与从 `feat` 分支并入的 `docs/plan/06` §10.2 的 R1（「主会话不持有工具」的架构定案）。
  *   后者那篇文档**不在本仓**：引用悬空，却撞进了前者的编号空间。
@@ -103,7 +103,10 @@
  *       ——2026-09-20 前失效链接只在 `--strict` 下失败，而门禁从不带该参数 ⇒ 从未真的红过）
  *
  * 豁免：
- *   整体豁免 `docs/archive/`（唯一例外，不做逐条留痕）；
+ *   整体豁免 `docs/archive/`（历史快照，不做逐条留痕）；
+ *   散文体检（D-002 / D-003 / D-004 / D-006 / D-008）整体豁免 `docs/registry/`——
+ *   那里是登记条目与生成投影，`## 处理过程` 的职责就是记历史，条目由 RG 判据管；
+ *   D-001 / D-007 对 `docs/registry/` **照常判**（链接与锚点没有中间态）；
  *   D-002 / D-004 另有头部注释豁免（`<!-- doc-link-allow D-00X: 理由 -->`，理由不可为空）；
  *   D-006 的豁免**分两档**——行内（本行或前一行，只豁免该行）/ 全文（须为文件首行非空内容）；
  *   D-001 / D-003 **不给豁免**——「目标文件是否存在」与「行数是否超限」都是精确判定，
@@ -133,7 +136,7 @@ const repoRoot = rootArg ? path.resolve(rootArg.slice(7)) : defaultRoot
 // "没加 --strict 所以没拦住"是预期行为。
 
 /** 扫描根（相对 repoRoot）；目录递归，文件直接检查 */
-const ROOTS = ['docs', 'symbio/src', 'tauri', 'cli', 'examples', 'registry']
+const ROOTS = ['docs', 'symbio/src', 'tauri', 'cli', 'examples']
 
 /** 根目录下的散落 Markdown */
 const ROOT_FILES = ['README.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md']
@@ -575,6 +578,15 @@ for (const rel of ROOT_FILES) {
 // 不是项目文档，跳过（同 D-002 一直以来的口径）。三条规矩**共用同一次读盘**：
 // 分三遍读等于让守卫的代价翻三倍，而它们的扫描范围完全一致。
 const BODY_ROOTS = ['docs', 'symbio/src', 'tauri', 'cli']
+/**
+ * 散文体检不适用于 `docs/registry/`：那里的 `.md` 是**登记条目与生成投影**，
+ * 不是现行文档——`## 处理过程` 的职责就是记「初版怎么想、后来为什么改」，
+ * 按 D-004 判它写历史等于判台账漏记；D-006 同理（闭环条目引用当时存在、
+ * 后来删掉的路径是事实）。条目自己由 registry-audit 的 RG 判据管
+ * （`exit:` 里指认的路径由 RG-012 验存在）。
+ * **D-001 / D-007 仍然适用**——链接与锚点要么存在要么不存在，没有中间态。
+ */
+const BODY_EXEMPT_DIRS = ['docs/registry/']
 const misplaced = []
 const oversized = []
 const historical = []
@@ -583,9 +595,10 @@ const bareRisk = []
 let docsScanned = 0
 let backtickChecked = 0
 
-function scanBody(file) {
+function scanBody (file) {
   const rel = path.relative(repoRoot, file).split(path.sep).join('/')
   if (EXEMPT_DIRS.some((d) => rel.startsWith(d))) return
+  if (BODY_EXEMPT_DIRS.some((d) => rel.startsWith(d))) return
   docsScanned += 1
   const text = fs.readFileSync(file, 'utf8')
 
@@ -652,7 +665,7 @@ for (const { rel, lines } of oversized) {
 }
 if (oversized.length > 0) {
   console.log('\n提示：超限即「内容不属于这里」或「该拆篇」的信号，按 docs/README.md 的 owner 表处置：')
-  console.log('      · 模块内部机制 → 该模块 README.md；· 论证与被否决的方案 → registry/adr/（只留 ADR 引用）')
+  console.log('      · 模块内部机制 → 该模块 README.md；· 论证与被否决的方案 → docs/registry/adr/（只留 ADR 引用）')
   console.log('      · 协议线上形状 → architecture/PROTOCOLS.md；· 列表类事实 → CURRENT.md（自动生成，不手抄）')
   console.log('      · 实例 / 范例 → 由被举例的那个模块的 README 持有')
   console.log('      本条**不给豁免**：拆分方向由 owner 表给出，不需要逐篇解释。')

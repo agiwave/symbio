@@ -176,7 +176,7 @@ WS /api/v1/ws?token=<token>
 > ① 早期版本让第三方订阅 `kind = "vdfs"` 看流式（消息与运行态都寄生在资源变更频道上）；
 > ② 2026-09-21 起改走 `session/stream` 转写流，本节随之改写为「另开一条连接订阅
 > `session/stream`」；
-> ③ 2026-09-23（[ADR-025](../../registry/adr/ADR-025.md)）
+> ③ 2026-09-23（[ADR-025](../registry/adr/ADR-025.md)）
 > 判定 ② 的两条理由**把「数据的属性」当成了「传输的属性」**——顺序是**节点属性**
 > （`ChatMessage.seq`），「追加」不是新取值而是 `updated` 上的 `delta` 字段——实时面
 > **迁回** `vdfs/watch`，本节再次改写。② 那一版（「订阅 `session/stream`」）已随
@@ -216,7 +216,7 @@ GET /api/v1/health  → { "ok": true }
   `danger`）：**预留**，现行只有只读白名单一层。
 - 审计：`trace_id` 随 `metadata` 透传进上下文，invoke 记入 tracing。
 - **HTTPS**：不做。策略：默认纯 HTTP + 回环绑定；远程/HTTPS 交由外部反代（Caddy / ssh tunnel / cloudflared）。
-  依赖不是阻碍——HTTP 出口的 TLS 走平台原生栈，不引入 C 编译（[ADR-013](../../registry/adr/INDEX.md)）；若要让网关
+  依赖不是阻碍——HTTP 出口的 TLS 走平台原生栈，不引入 C 编译（[ADR-013](../registry/adr/INDEX.md)）；若要让网关
   自带 HTTPS，需另行设计证书配置面（签发方式 / 证书存放 / 与 `inbound_token` 的关系 / 绑定非回环时的
   取舍）——那是产品决策，不是依赖问题。
 
@@ -265,7 +265,7 @@ curl -H "Authorization: Bearer $T" -X POST http://127.0.0.1:9231/api/v1/invoke \
 | 开放接口 = 第三方可执行 shell / 写文件 | **高** | 默认关闭 + 回环绑定 + token + 只读模式（危险分级为预留层） |
 | 插件拿不到转发目标 / reload 后失效 | 中 | 构造期登记 `Weak` 父级（`parent.route`），reload 时网关实例随树重建 |
 | 端口占用 / 重启端口未释放 | 中 | `CancellationToken` + `abort` + 启动失败信息回写到设置页 |
-| ~~HTTPS 与"无 C 编译"冲突~~ **已消解** | 低 | 依赖不再是阻碍（[ADR-013](../../registry/adr/INDEX.md)：TLS 已走平台原生栈）；现状仍默认回环 HTTP，TLS 交外部反代 |
+| ~~HTTPS 与"无 C 编译"冲突~~ **已消解** | 低 | 依赖不再是阻碍（[ADR-013](../registry/adr/INDEX.md)：TLS 已走平台原生栈）；现状仍默认回环 HTTP，TLS 交外部反代 |
 | 第三方以为连上 WS 就有 AI 流 | 中 | §5.3 显式设计 + SDK 内置"连接即自动订阅"默认行为 |
 | `chat/send` 无 `is_working` 守卫，多客户端并发互踩 | 低 | 文档声明需自行串行；预留方向：会话租约 |
 | 路由无注册表 → 文档漂移 | 低 | 预留方向：manifest 机制（§7） |

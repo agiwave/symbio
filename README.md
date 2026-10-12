@@ -89,9 +89,9 @@ symbio/
 | | |
 | --- | --- |
 | **入门** | [快速上手](docs/guides/QUICK_START.md) · [系统地图](docs/SYSTEM_MAP.md) |
-| **架构** | [总览](docs/architecture/OVERVIEW.md) · [数据流](docs/architecture/DATA_FLOW.md) · [协议](docs/architecture/PROTOCOLS.md) · [决策记录](./registry/adr/INDEX.md) |
+| **架构** | [总览](docs/architecture/OVERVIEW.md) · [数据流](docs/architecture/DATA_FLOW.md) · [协议](docs/architecture/PROTOCOLS.md) · [决策记录](docs/registry/adr/INDEX.md) |
 | **参考** | [事实表](docs/CURRENT.md) · [路由](docs/reference/ROUTES.md) · [错误码](docs/reference/ERROR_CODES.md) · [配置](docs/reference/CONFIGURATION.md) |
-| **开发** | [插件开发](docs/guides/PLUGIN_DEVELOPMENT.md) · [排障](docs/guides/TROUBLESHOOTING.md) · [任务 / 规范登记](registry/INDEX.md) · [贡献指南](CONTRIBUTING.md) |
+| **开发** | [插件开发](docs/guides/PLUGIN_DEVELOPMENT.md) · [排障](docs/guides/TROUBLESHOOTING.md) · [任务 / 规范登记](docs/registry/INDEX.md) · [贡献指南](CONTRIBUTING.md) |
 | **设计** | [VDFS 规范](docs/design/vdfs.md) · [上下文压缩分层](symbio/src/plugins/session/docs/context-compression-design.md) · [Agent 目录规范 v2](docs/design/agent-directory-spec.md) |
 | **CLI** | [cli/README.md](cli/README.md) · [架构](cli/docs/architecture.md) · [构建](cli/docs/building.md) · [用法](cli/docs/usage.md) |
 | **变更** | 变更历史 = `git log`（本仓库不另维护变更日志，理由见 [贡献指南](CONTRIBUTING.md)）· [历史归档](docs/archive/) |

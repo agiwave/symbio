@@ -200,10 +200,10 @@ test('历史行豁免：台账的「判为删除」说的就是这名字不在�
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('registry/adr/ 整目录排除：ADR 正文迁入 registry 后仍是历史快照（exit 0）', () => {
+test('docs/registry/adr/ 整目录排除：ADR 正文迁入 registry 后仍是历史快照（exit 0）', () => {
   const r = audit({
     ...RS,
-    'registry/adr/ADR-001.md': '当年引入 `symbio_core::GONE_FN` 又删掉了。\n',
+    'docs/registry/adr/ADR-001.md': '当年引入 `symbio_core::GONE_FN` 又删掉了。\n',
     'README.md': '正常文档。\n',
   })
   assert.equal(r.status, 0, r.stdout)

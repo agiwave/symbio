@@ -52,7 +52,7 @@
 
 > **职责边界：`PluginChannel` 只管跨进程传输，不承担执行期协议。**
 > 执行层（LLM 单轮 / 工具调用）与宿主层之间的出口 / 入口是 `EventSink` / `AbortSignal`
-> （[ADR-020](../../registry/adr/INDEX.md)；机制见 [`symbio/src/plugins/session/docs/core-loop.md`](../../symbio/src/plugins/session/docs/core-loop.md) §6）——
+> （[ADR-020](../registry/adr/INDEX.md)；机制见 [`symbio/src/plugins/session/docs/core-loop.md`](../../symbio/src/plugins/session/docs/core-loop.md) §6）——
 > 因此**帧里不存在中止帧**。本文件不复述该分离。
 
 ### 通道生命周期
@@ -214,7 +214,7 @@ AI 增量与资源变更**不随请求返回**，而是经全局事件总线广�
 > 这个**文件**，运行态是会话节点（`<根>/session/<id>`）的 `status`，因此都走 `kind = "vdfs"`。
 > 顺序是**节点属性**（`ChatMessage.seq`，消费端按它排序），**不是投递属性**——所以「到达顺序」
 > 与「显示顺序」无关，无需任何投递层的顺序保证
-> （[ADR-025](../../registry/adr/ADR-025.md)）。
+> （[ADR-025](../registry/adr/ADR-025.md)）。
 >
 > **资源变更不另设频道**：一切资源的生命周期与状态变化都是 VDFS 变更，统一走 `vdfs`。
 

@@ -10,7 +10,7 @@
 > - **退役路由**：不在此处保留叙述——去向见本文 §退役路由索引。
 >
 > ⚠️ **本文只写「现在有哪些路由」**。某条路由**为什么**被删 / 被迁，是决策与变更史，
-> 归 [ADR 索引](../../registry/adr/INDEX.md) 与 `git log`（见 [docs/README.md](../README.md#文档职责边界一个事实只有一个-owner)）。
+> 归 [ADR 索引](../registry/adr/INDEX.md) 与 `git log`（见 [docs/README.md](../README.md#文档职责边界一个事实只有一个-owner)）。
 
 ## 路由语法
 
@@ -202,7 +202,7 @@
 | `gemini_api` | Google | `generateContent` |
 
 > 协议适配内化于 `symbio/src/plugins/model/protocols/`，机制见 `symbio/src/plugins/model/README.md`；
-> 为什么支持多协议见 [ADR-004](../../registry/adr/INDEX.md)。
+> 为什么支持多协议见 [ADR-004](../registry/adr/INDEX.md)。
 
 ---
 
@@ -388,7 +388,7 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 ## 退役路由索引
 
-**只登记「路径 → 现在去哪」，不写过程叙述**（决策与理由见 [ADR 索引](../../registry/adr/INDEX.md)、
+**只登记「路径 → 现在去哪」，不写过程叙述**（决策与理由见 [ADR 索引](../registry/adr/INDEX.md)、
 变更史见 `git log`，完整迁移审计见
 [`docs/archive/legacy-route-migration.md`](../archive/legacy-route-migration.md)）：
 
