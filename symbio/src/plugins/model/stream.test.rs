@@ -10,7 +10,10 @@
 //! 2. 收口时上限之外的调用带 `overflow_notice`（执行层据此落反馈结果）；
 //! 3. 上限内的健康批次完全不受影响。
 
-use super::{dispatch_and_track, mark_overflow_dropped, MAX_TOOL_CALLS_PER_RESPONSE};
+use super::{
+    classify_stream_error, dispatch_and_track, mark_overflow_dropped, StreamFailure,
+    MAX_TOOL_CALLS_PER_RESPONSE,
+};
 use crate::plugins::model::protocols::ModelProtocolEvent;
 use crate::plugins::model::tool_accumulator::TurnToolCallAccumulator;
 use crate::symbio_core::chat_message::{ChatMessage, MessageType};
@@ -33,7 +36,7 @@ async fn feed_call(
     sink: &ExecEventSink,
     idx: usize,
     args: &str,
-) -> Result<(), String> {
+) -> Result<(), StreamFailure> {
     dispatch_and_track(
         ModelProtocolEvent::ToolCallDelta(
             idx,
@@ -48,6 +51,7 @@ async fn feed_call(
         &mut false,
         std::time::Instant::now(),
         &mut std::collections::HashSet::new(),
+        &mut None,
     )
     .await
 }
@@ -155,4 +159,58 @@ async fn a_healthy_multi_call_response_passes() {
         tool_calls.iter().all(|tc| tc.overflow_notice.is_none()),
         "健康批次不得带丢弃标记"
     );
+}
+
+// ==================== 流中途断线的分类与重发判据 ====================
+//
+// 主判据：`c2a87a21` 号会话的形态——5 个工具跑完后，**后续**请求在流已建立之后被
+// 上游网关掐断（`UND_ERR_SOCKET` / 502）。请求级重试（`http.rs`）只覆盖「响应头
+// 之前」，因此这一层必须自己给出「值得原样重发」的结论，否则整轮失败、会话停在
+// 错误态，用户只能手动重发。
+
+/// 会话 `c2a87a21` 里用户实际看到的错误体（原样）。
+const GATEWAY_STREAM_ERROR: &str = r#"{"code":"streaming_error","details":{"cause":"SocketError: other side closed (code: UND_ERR_SOCKET)","errorCode":"UND_ERR_SOCKET","errorName":"TypeError","statusCode":502,"statusText":"Upstream Stream Terminated"},"message":"Upstream stream terminated unexpectedly before completion","param":null,"responseText":"\n\n","type":"gateway_error"}"#;
+
+/// 网关的流中途断线必须判为**瞬时**（调用方据此原样重发），而不是整轮失败。
+#[test]
+fn gateway_stream_termination_is_classified_transient() {
+    let f = classify_stream_error(GATEWAY_STREAM_ERROR);
+    assert!(
+        f.transient,
+        "上游流中途终止必须判为瞬时——否则会话停在错误态，用户只能手动重发"
+    );
+}
+
+/// 错误条不得把网关的原始 JSON 糊给用户：只留人读的 `message` 一行。
+#[test]
+fn gateway_error_json_is_not_echoed_verbatim() {
+    let f = classify_stream_error(GATEWAY_STREAM_ERROR);
+    assert!(
+        !f.message.contains("UND_ERR_SOCKET"),
+        "`details.cause` 是机器可读字段，不该出现在面向用户的文案里"
+    );
+    assert!(
+        !f.message.contains("responseText"),
+        "网关的空 `responseText` 对用户毫无意义"
+    );
+    assert!(
+        f.message.contains("Upstream stream terminated unexpectedly before completion"),
+        "人读原因（message 字段）必须保留，实际：{}",
+        f.message
+    );
+}
+
+/// 反向：鉴权/上下文类错误**不得**判为瞬时——原样重发只会再被拒，白等两次。
+#[test]
+fn authentication_failure_is_not_transient() {
+    for raw in [
+        r#"{"error":{"message":"Invalid API key provided"}}"#,
+        r#"{"error":{"message":"context_length_exceeded"}}"#,
+        r#"{"error":{"message":"401 unauthorized"}}"#,
+    ] {
+        assert!(
+            !classify_stream_error(raw).transient,
+            "鉴权/上下文类错误不该重发（重试注定失败）：{raw}"
+        );
+    }
 }

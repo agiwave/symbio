@@ -84,6 +84,32 @@ pub fn sse_data(line: &str) -> Option<&str> {
     Some(rest.trim_end())
 }
 
+/// 从协议错误对象里取**面向用户的一句话**。
+///
+/// 网关的内联错误帧长这样（AMD Radeon 网关实测）：
+/// `{"code":"streaming_error","details":{...},"message":"Upstream stream terminated…"}`。
+///
+/// 为什么必须提取而不是 `err.to_string()`：整个 error 对象直接当消息会变成一屏
+/// JSON 糊在用户脸上（本仓 `http.rs` 的同名纪律：**不回显原始 API JSON**），且
+/// `code` 这类机读字段本是给判据用的，不是给人读的。
+///
+/// 降级顺序：`message` → `code` → 原样 JSON。**最后一级不是摆设**：只认
+/// `message` 的旧写法在 `{"error":{"code":"streaming_error"}}` 这种没有
+/// `message` 的帧上**一条事件都不发**，网关故障于是伪装成正常空流——
+/// 那比报错难看得多（错误被吞，排查无迹）。
+pub(crate) fn error_text(err: &Value) -> String {
+    for key in ["message", "code"] {
+        if let Some(s) = err
+            .get(key)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+        {
+            return s.to_string();
+        }
+    }
+    err.to_string()
+}
+
 /// LLM 可见的工具描述：把 `CapabilityMeta.examples` 追加到 description 之后。
 ///
 /// ## 为什么在 model 而不在 core

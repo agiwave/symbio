@@ -62,7 +62,13 @@ fn is_retryable_status(status: u16) -> bool {
 }
 
 /// 计算退避时长：优先尊重服务端 `Retry-After`，否则指数退避（500ms 起，封顶 8s）。
-fn backoff_delay(attempt: u32, retry_after: Option<std::time::Duration>) -> std::time::Duration {
+///
+/// `pub(crate)`：流阶段的重发（`bound_provider` 的重试外壳）与这里的 POST 重试
+/// **共用同一份退避曲线**——同一个插件里两处瞬时故障不该各有一套节奏。
+pub(crate) fn backoff_delay(
+    attempt: u32,
+    retry_after: Option<std::time::Duration>,
+) -> std::time::Duration {
     if let Some(d) = retry_after {
         // 服务端给的等待时间通常已合理，仍封顶到 30s 避免极端值卡死。
         return d.min(std::time::Duration::from_secs(30));
@@ -80,7 +86,9 @@ fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<std::time::
 }
 
 /// 退避等待期间持续响应中止信号，避免 abort 必须等满整个退避窗口。
-async fn sleep_with_abort(d: std::time::Duration, abort: &ExecAbortSignal) {
+///
+/// `pub(crate)`：与 `backoff_delay` 同理由（流阶段重发共用）。
+pub(crate) async fn sleep_with_abort(d: std::time::Duration, abort: &ExecAbortSignal) {
     tokio::select! {
         _ = tokio::time::sleep(d) => {}
         _ = abort.cancelled() => {}

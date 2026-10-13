@@ -10,7 +10,7 @@ use super::super::types::CapabilityMeta;
 use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
 use super::sse::{SseLineParser, SsePartialLineExtractor};
 use super::ModelProtocolEvent;
-use super::{description_for_llm, sse_data, ModelProtocol, MODEL_PROTOCOL_OPENAI_CHAT};
+use super::{description_for_llm, error_text, sse_data, ModelProtocol, MODEL_PROTOCOL_OPENAI_CHAT};
 use crate::plugins::model::http::get_http_client;
 use crate::symbio_core::capability_to_wire;
 use crate::symbio_core::{ModelFinishReason, ModelUsage, PluginError, PluginInvokeRequest};
@@ -203,7 +203,7 @@ impl SseLineParser for OpenaiChatProtocol {
             if line.trim().starts_with('{') {
                 if let Ok(json) = serde_json::from_str::<Value>(line) {
                     if let Some(err) = json.get("error") {
-                        evs.push(ModelProtocolEvent::Error(err.to_string()));
+                        evs.push(ModelProtocolEvent::Error(error_text(err)));
                     }
                 }
             }
@@ -268,7 +268,7 @@ impl SseLineParser for OpenaiChatProtocol {
                 }));
             }
             if let Some(err) = json.get("error") {
-                evs.push(ModelProtocolEvent::Error(err.to_string()));
+                evs.push(ModelProtocolEvent::Error(error_text(err)));
             }
         }
         evs

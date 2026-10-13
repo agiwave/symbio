@@ -216,3 +216,83 @@ fn only_first_args_fragment_requires_snapshot() {
     assert_eq!(args2, "{\"path\": \".\"}");
     assert_eq!(args3, args2, "空片不改变累积值");
 }
+
+// ==================== 重试播种（流中途断线后原样重发） ====================
+//
+// 会话 `c2a87a21`：5 个工具跑完后，后续请求被 AMD 网关掐断
+// （`UND_ERR_SOCKET` / 502 Upstream Stream Terminated）。请求级重试只管响应头
+// 之前，流一旦建立就再无重试 ⇒ 整轮失败、会话停在错误态。修法是在流层原样
+// 重发（`bound_provider::execute_turn` 的 `MAX_STREAM_RETRIES`），本组用例钉住
+// 那个重试轴赖以成立的两条不变量。
+
+/// 重发时必须**复用**上一批已广播的节点 id。
+///
+/// 换 id 的后果是前端同时留着上一批的半截卡片与这一批的新卡片（后端两条都在、
+/// 用户看到重复）；复用 id 则首片增量即发完整快照，把它整条覆盖成新值。
+#[test]
+fn retry_seeds_the_node_ids_of_the_failed_attempt() {
+    let seeded = vec!["node-a".to_string(), "node-b".to_string()];
+    let mut acc = TurnToolCallAccumulator::with_node_ids(&seeded);
+
+    let (node0, _, _, _, snap0) =
+        acc.process_delta(0, Some("call_a"), Some("f1"), Some(r#"{"n":1}"#));
+    let (node1, _, _, _, snap1) =
+        acc.process_delta(1, Some("call_b"), Some("f2"), Some(r#"{"n":2}"#));
+
+    assert_eq!(node0, "node-a", "重发必须复用第一批的节点 id");
+    assert_eq!(node1, "node-b");
+    assert!(
+        snap0 && snap1,
+        "播种条目首次收到增量即首触 ⇒ 必须发完整快照（旧节点上已有半截参数，\\
+         窄追加会叠成两批尝试的拼接）"
+    );
+}
+
+/// 重发**不必**原样产出同样多的调用（上游只吐了 3 个而上一批有 5 个）。
+///
+/// 播种进来的槽位若这一批没有对应增量，就不得收口成调用——否则是名字与参数全空
+/// 的幽灵，执行层照它们发请求，provider 侧于是报「tool_call 无对应结果」。
+#[test]
+fn seeded_slots_without_new_deltas_do_not_become_ghost_calls() {
+    let mut acc =
+        TurnToolCallAccumulator::with_node_ids(&["n0".into(), "n1".into(), "n2".into()]);
+
+    // 这一批只产出 1 个调用
+    acc.process_delta(0, Some("call_a"), Some("f1"), Some("{}"));
+
+    let done = acc.finish();
+    assert_eq!(done.len(), 1, "未收到增量的播种槽位不得变成幽灵调用");
+    assert_eq!(done[0].id.as_deref(), Some("n0"));
+    assert!(done[0].name.is_some(), "产物必须是完整调用，不是空壳");
+}
+
+/// 播种条目**单独**存在（一个增量都没收到）时，收口产物为空——不得凭空产出调用。
+#[test]
+fn seeded_accumulator_with_no_delta_yields_nothing() {
+    let acc = TurnToolCallAccumulator::with_node_ids(&["n0".into(), "n1".into()]);
+    assert!(
+        acc.finish().is_empty(),
+        "播种只是预留 id 槽位，本身不是调用"
+    );
+}
+
+/// 空 id 不播种：`with_node_ids` 过滤空白项，避免用空串覆盖真实节点 id。
+///
+/// 过滤**先于**按 wire index 播种，故槽位对应的是「第几个非空 id」而不是「原始下标」——
+/// 这是有意的取舍：宁可让 index 1 复用 `n2`，也不能把节点 id 设成空串（空 id 会让
+/// 前端按 id 的 map 撞键，后端两条节点显示成同一条）。
+#[test]
+fn blank_seed_ids_are_ignored() {
+    let mut acc = TurnToolCallAccumulator::with_node_ids(&["   ".into(), "".into(), "n2".into()]);
+
+    // 三个播种位里只有 `n2` 非空 ⇒ 它落在（非空序号 0 =）index 0 上。
+    let (node, _, _, _, _) = acc.process_delta(0, Some("call_x"), Some("f"), Some("{}"));
+    assert_eq!(node, "n2", "空白 id 不得占用槽位，非空的顺次前移");
+
+    let done = acc.finish();
+    assert_eq!(done.len(), 1);
+    assert!(
+        done.iter().all(|tc| tc.id.as_deref() != Some("")),
+        "产物里不得出现空 id"
+    );
+}

@@ -52,6 +52,50 @@ struct AccumulatedToolCall {
     node_id: String,
     name: Option<String>,
     arguments: String,
+    /// 本条目在**当前这一次**流里是否真的收到过增量。
+    ///
+    /// 默认 `false`，只在 [`process_delta`] 里置真。为什么需要它：重试播种
+    /// （[`TurnToolCallAccumulator::with_node_ids`]）会带着上一批尝试的节点 id
+    /// 建条目，而重试未必原样产出同样多的调用——上一批有 5 个、这一批只有 3 个时，
+    /// 若按「有 entry 就有调用」收口，`finish` 会吐出 2 个**名字与参数全空**的幽灵
+    /// 调用，执行层照它们发请求（provider 侧于是报「tool_call 无对应结果」）。
+    /// 判据必须是「这一批真的收到了它」，而不是「这个槽位存在过」。
+    touched: bool,
+}
+
+impl TurnToolCallAccumulator {
+    /// 以**上一批尝试已用过的节点 id** 播种（重试专用）。
+    ///
+    /// `ids` 按 wire `index` 升序（与 [`finish`] 的产出同序）。播种条目初始
+    /// `touched = false`：它只有在本次流里真的收到增量才会进入产物。
+    ///
+    /// 为什么重试要复用节点 id：流已广播出去的节点是**接收端已有的实体**。重试若
+    /// 换 id，前端会同时留着上一批的半截卡片与这一批的新卡片（后端两条都在、用户
+    /// 看到重复）；复用 id 则首片增量即发**完整快照**（见 `process_delta` 的
+    /// `first_touch` 分支）把它整条覆盖成新值。
+    pub(crate) fn with_node_ids(ids: &[String]) -> Self {
+        // 过滤**先于**编号：槽位键取「第几个非空 id」。若反过来先 enumerate 再 filter，
+        // 槽位键就是原始下标——空白 id 虽然不占条目，却会让后面的 id 落到错位的
+        // index 上，重试时那一批节点就与模型的 wire index 对不上。
+        let calls = ids
+            .iter()
+            .filter(|id| !id.trim().is_empty())
+            .enumerate()
+            .map(|(index, id)| {
+                (
+                    index,
+                    AccumulatedToolCall {
+                        id: None,
+                        node_id: id.clone(),
+                        name: None,
+                        arguments: String::new(),
+                        touched: false,
+                    },
+                )
+            })
+            .collect();
+        Self { calls }
+    }
 }
 
 /// 把增量工具调用分片累积成完整的调用（**过程形态**）。
@@ -92,6 +136,12 @@ impl TurnToolCallAccumulator {
     ) -> (String, String, String, Option<String>, bool) {
         let entry = self.calls.entry(index).or_default();
 
+        // 首次触碰必须发快照。新建节点（尚无 id）自不必说；**重试播种**进来的条目
+        // 已带旧 id、前端可能已渲染过半截参数——只有整条快照能把它覆盖成新值
+        // （窄追加只会叠在旧尾巴后面，参数就成了两批尝试的拼接）。
+        let first_touch = !entry.touched;
+        entry.touched = true;
+
         // 节点 id 在诞生时确定并写入 entry：流式广播、落库（llm_build_assistant_messages）、
         // 执行（process_tool_calls_async）三处使用同一节点 id。
         let is_new_node = entry.node_id.is_empty();
@@ -100,7 +150,7 @@ impl TurnToolCallAccumulator {
         }
         // 新建节点必须发快照（接收端尚无此节点）；首次定名亦然——身份字段
         // （name / tool_call_id / 父子）只随快照下发，之后的增量只带参数片段。
-        let mut snapshot_required = is_new_node;
+        let mut snapshot_required = first_touch;
 
         // 仅接受非空 id/name：
         // 部分 OpenAI 兼容网关（如实测 apinex qwen-3.8-max）只在首个增量携带合法 id，
@@ -172,6 +222,9 @@ impl TurnToolCallAccumulator {
 
         entries
             .into_iter()
+            // 只收口**本批真的收到过增量**的条目：重试播种进来的槽位若这一批没有对应
+            // 增量，就不能变成调用（否则是名字参数全空的幽灵，详见 `touched` 的注释）。
+            .filter(|(_, call)| call.touched)
             .map(|(_, call)| {
                 // wire id：供应商提供了合法 id 才携带；否则 None（请求构建回退节点 id）
                 let wire_id = call.id.filter(|s| !s.trim().is_empty());

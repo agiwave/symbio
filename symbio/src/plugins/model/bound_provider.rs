@@ -11,7 +11,12 @@
 //!   `status = removed` 的删除帧清除）；
 //! - `Err(msg)` → `PluginError::InternalError`；
 //! - `RateLimited(msg)` → `PluginError::RateLimited`；
-//! - `Ok(resp)` → `parse_sse_stream`（`Err` → `PluginError::StreamError`）。
+//! - `Ok(resp)` → `parse_sse_stream`（`Err(StreamFailure)` → `PluginError::StreamError`）。
+//!
+//! **两个重试轴**（互不覆盖，见 `execute_turn`）：
+//! 1. 请求级（`http::execute_post_with_abort`）：响应头之前——连接失败 / 瞬时 5xx；
+//! 2. 流级（本文件）：**流已建立之后**被上游掐断（`UND_ERR_SOCKET` / 502 断流）——
+//!    请求级重试此时早已 `Ok`，一次都不会触发，故必须在这里补。
 //!
 //! 协议差异全部被 `ModelProtocol` 钩子吸收，本实现对所有协议通用。
 
@@ -125,7 +130,7 @@ impl ModelProvider for BoundProvider {
             body_bytes.len()
         );
 
-        let response = match execute_post_with_abort(
+        let mut response = match execute_post_with_abort(
             &self.protocol.get_api_url(&self.cfg),
             self.protocol.get_headers(&self.cfg),
             &body_bytes,
@@ -184,22 +189,114 @@ impl ModelProvider for BoundProvider {
         // 行解析契约直接由协议实例提供（`ModelProtocol: SseLineParser`）：
         // 完整行与「未结束行」的增量提取都在协议层，core 不认识任何字段名。
         let parser: &dyn SseLineParser = self.protocol.as_ref();
-        match parse_sse_stream(response, root_id, sink, abort, parser).await {
-            Err(msg) => {
-                plugin_error!(
-                    "model",
-                    "[LLM] 轮次异常结束：{msg} (总耗时 {:?})",
-                    turn_started.elapsed()
-                );
-                Err(PluginError::StreamError(msg))
-            }
-            Ok(out) => {
-                plugin_info!(
-                    "model",
-                    "[LLM] 轮次完成 (总耗时 {:?})",
-                    turn_started.elapsed()
-                );
-                Ok(out)
+
+        // ── 流中途断线：原样重发（本函数的第二个重试轴）──────────────────
+        //
+        // 请求级重试（`http::execute_post_with_abort`）覆盖的是**响应头之前**：拿不到
+        // 连接、拿不到 2xx 才重发。但上游常见故障发生在**流已建立之后**——网关读到一半
+        // 把 TCP 关掉（`UND_ERR_SOCKET` / 502 Upstream Stream Terminated），此时
+        // `PostResult` 早已是 `Ok`，请求级重试一次都不会触发，`parse_sse_stream` 直接
+        // `Err` ⇒ 整轮失败、会话停在错误态，用户只能手动重发。`c2a87a21` 号会话正是
+        // 这个形态（5 个工具跑完后，后续请求被上游掐断）。
+        //
+        // 重发是安全的，因为副作用都在**流层**且可被覆盖：
+        // - 已广播的正文 / 推理子节点 id 记在 `out` 里，跨尝试保留 ⇒ 重试时同一节点
+        //   被完整快照覆盖，不新建第二条（`dispatch_and_track` 的首增量为整条快照）；
+        // - 已广播的 ToolCall 节点 id 由 `reuse_node_ids` 播种进累积器，同理整条覆盖；
+        // - 根 Turn 节点由 session 侧在轮次开头创建一次，不在这里产生；
+        // ⇒ 重试不产生任何「重复卡片」。
+        //
+        // 只重发**瞬时**故障（`StreamFailure::transient`）：协议帧里的 `error` 事件是
+        // 上游明确拒绝，原样重发只会再被拒，白等 N 次。
+        const MAX_STREAM_RETRIES: u32 = 2;
+        let mut stream_attempt: u32 = 0;
+        let mut out = TurnOutput::default();
+        let mut reuse_node_ids: Vec<String> = Vec::new();
+        loop {
+            match parse_sse_stream(
+                response,
+                root_id,
+                sink,
+                abort,
+                parser,
+                &reuse_node_ids,
+                &mut out,
+            )
+            .await
+            {
+                Ok(()) => return Ok(out),
+                Err(fail) if fail.transient && stream_attempt < MAX_STREAM_RETRIES => {
+                    stream_attempt += 1;
+                    plugin_warn!(
+                        "model",
+                        "[LLM] 流中途断线，第{stream_attempt}/{MAX_STREAM_RETRIES}次原样重发\
+                         （已建 {} 个工具调用节点将复用 id）",
+                        out.tool_calls.len()
+                    );
+                    // 本批尝试已广播的节点 id 交给下一批：重发时整条覆盖而不是新建。
+                    reuse_node_ids = out
+                        .tool_calls
+                        .iter()
+                        .filter_map(|tc| tc.id.clone())
+                        .collect();
+                    // 退避与请求级重试**同一条曲线**（`http::backoff_delay`）：断流多因上游
+                    // 瞬时过载，立刻重打只会再断一次。等待同样响应中止信号。
+                    let delay = super::http::backoff_delay(stream_attempt, None);
+                    plugin_info!(
+                        "model",
+                        "[LLM] 流重发退避 {:?}（第{stream_attempt}次，与请求级同曲线）",
+                        delay
+                    );
+                    super::http::sleep_with_abort(delay, abort).await;
+                    if abort.is_aborted() {
+                        return Err(PluginError::Aborted {
+                            // 半截流的清除不在本层（见 `PostResult::Aborted` 首次分支）。
+                            partial: Vec::new(),
+                        });
+                    }
+                    // 响应体已被上一批读掉（`bytes_stream` 消费），必须重新 POST。
+                    // 重发请求不再递归重试：请求级语义（含它自己的 4 次重试）已覆盖。
+                    match execute_post_with_abort(
+                        &self.protocol.get_api_url(&self.cfg),
+                        self.protocol.get_headers(&self.cfg),
+                        &body_bytes,
+                        abort,
+                    )
+                    .await
+                    {
+                        PostResult::Ok(r) => response = r,
+                        // 重发连请求都没发出去：即时失败也没得重试了，按请求级措辞收场。
+                        PostResult::Err(m) | PostResult::RateLimited(m) => {
+                            plugin_error!(
+                                "model",
+                                "[LLM] 流重发失败（请求级）：{m} (总耗时 {:?})",
+                                turn_started.elapsed()
+                            );
+                            return Err(PluginError::StreamError(m));
+                        }
+                        PostResult::Aborted => {
+                            plugin_info!("model", "[LLM] 轮次中止 (耗时 {:?})", turn_started.elapsed());
+                            return Err(PluginError::Aborted {
+                                // 半截流的清除不在本层（见 `PostResult::Aborted` 首次分支）。
+                                partial: Vec::new(),
+                            });
+                        }
+                        // 交给上层清 response_id 后重发整轮（与请求级首次尝试同口径）。
+                        PostResult::RetryWithoutContextId => {
+                            return Err(PluginError::RetryWithoutContextId);
+                        }
+                    }
+                }
+                Err(fail) => {
+                    plugin_error!(
+                        "model",
+                        "[LLM] 轮次异常结束：{} (总耗时 {:?}, 流重发 {} 次)",
+                        fail.message,
+                        turn_started.elapsed(),
+                        stream_attempt
+                    );
+                    return Err(PluginError::StreamError(fail.message));
+                }
             }
         }
     }

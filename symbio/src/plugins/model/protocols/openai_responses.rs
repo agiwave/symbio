@@ -10,7 +10,7 @@ use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRo
 use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
 use super::sse::{SseLineParser, SsePartialLineExtractor};
 use super::ModelProtocolEvent;
-use super::{description_for_llm, sse_data, ModelProtocol, MODEL_PROTOCOL_OPENAI_RESPONSES};
+use super::{description_for_llm, error_text, sse_data, ModelProtocol, MODEL_PROTOCOL_OPENAI_RESPONSES};
 use crate::plugins::model::http::get_http_client;
 use crate::symbio_core::capability_to_wire;
 use crate::symbio_core::{ModelFinishReason, ModelUsage, PluginError, PluginInvokeRequest};
@@ -328,12 +328,10 @@ impl SseLineParser for OpenaiResponsesProtocol {
                     }
                 }
                 "error" => {
-                    if let Some(err) = json
-                        .get("error")
-                        .and_then(|e| e.get("message"))
-                        .and_then(|v| v.as_str())
-                    {
-                        evs.push(ModelProtocolEvent::Error(err.to_string()));
+                    // 只认 `message` 的旧写法在 `{"error":{"code":"streaming_error"}}`
+                    // （无 message）这种帧上一条事件都不发 ⇒ 网关故障伪装成正常空流。
+                    if let Some(err) = json.get("error") {
+                        evs.push(ModelProtocolEvent::Error(error_text(err)));
                     }
                 }
                 _ => {}

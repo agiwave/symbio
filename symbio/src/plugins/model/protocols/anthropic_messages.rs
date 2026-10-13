@@ -13,7 +13,7 @@ use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRo
 use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
 use super::sse::{SseLineParser, SsePartialLineExtractor};
 use super::ModelProtocolEvent;
-use super::{description_for_llm, sse_data, ModelProtocol, MODEL_PROTOCOL_ANTHROPIC_MESSAGES};
+use super::{description_for_llm, error_text, sse_data, ModelProtocol, MODEL_PROTOCOL_ANTHROPIC_MESSAGES};
 use crate::plugins::model::http::get_http_client;
 use crate::symbio_core::capability_to_wire;
 use crate::symbio_core::{ModelFinishReason, ModelUsage, PluginError, PluginInvokeRequest};
@@ -421,12 +421,9 @@ impl SseLineParser for AnthropicProtocol {
                     }
                 }
                 "error" => {
-                    if let Some(m) = json
-                        .get("error")
-                        .and_then(|e| e.get("message"))
-                        .and_then(|v| v.as_str())
-                    {
-                        evs.push(ModelProtocolEvent::Error(m.into()));
+                    // 同 openai_responses：无 `message` 时降级 `code`，不静默吞掉。
+                    if let Some(err) = json.get("error") {
+                        evs.push(ModelProtocolEvent::Error(error_text(err)));
                     }
                 }
                 _ => {}
