@@ -11,8 +11,8 @@
 | [stage · 阶段](./stage/INDEX.md) | 编号前缀 `ST-` | 14 | draft 0 · active 14 · retired 0 | — | [stage/INDEX.md](./stage/INDEX.md) |
 | [plan · 计划](./plan/INDEX.md) | 编号前缀 `PL-` | 12 | draft 0 · active 12 · retired 0 | — | [plan/INDEX.md](./plan/INDEX.md) |
 | [arch · 架构](./arch/INDEX.md) | 编号前缀 `AR-` | 46 | draft 0 · active 46 · retired 0 | — | [arch/INDEX.md](./arch/INDEX.md) |
-| [ref · 参考](./ref/INDEX.md) | 编号前缀 `RE-` | 4 | draft 0 · active 4 · retired 0 | — | [ref/INDEX.md](./ref/INDEX.md) |
+| [ref · 参考](./ref/INDEX.md) | 编号前缀 `RE-` | 5 | draft 0 · active 5 · retired 0 | — | [ref/INDEX.md](./ref/INDEX.md) |
 | [guide · 指南](./guide/INDEX.md) | 编号前缀 `GU-` | 15 | draft 0 · active 15 · retired 0 | — | [guide/INDEX.md](./guide/INDEX.md) |
-| [task · 任务](./task/INDEX.md) | 编号前缀 `T-` | 69 | todo 3 · doing 0 · done 66 · wont 0 | 3 条分解边 | [task/INDEX.md](./task/INDEX.md) |
+| [task · 任务](./task/INDEX.md) | 编号前缀 `T-` | 69 | todo 1 · doing 0 · done 68 · wont 0 | 3 条分解边 | [task/INDEX.md](./task/INDEX.md) |
 | [spec · 规范](./spec/INDEX.md) | 编号前缀 `SP-` | 31 | draft 0 · active 31 · retired 0 | — | [spec/INDEX.md](./spec/INDEX.md) |
 | [adr · 架构决策](./adr/INDEX.md) | 编号前缀 `ADR-` | 64 | active 54 · superseded 7 · withdrawn 3 | — | [adr/INDEX.md](./adr/INDEX.md) |

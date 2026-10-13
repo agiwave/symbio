@@ -7,7 +7,7 @@
 
 > **这个 kind 回答什么**：查数据——路由 / 错误码 / 配置等权威表
 
-**计数**：active 4 · draft 0 · retired 0（共 4）
+**计数**：active 5 · draft 0 · retired 0（共 5）
 
 ## 现行文档（active）
 | 编号 | 标题 |
@@ -16,6 +16,7 @@
 | [`RE-002-ERROR_CODES`](RE-002-ERROR_CODES.md) | Symbio 错误码参考 |
 | [`RE-003-ROUTES`](RE-003-ROUTES.md) | Symbio 路由参考 |
 | [`RE-004-slo-calibration`](RE-004-slo-calibration.md) | SLO 校准 · 首测（2026-09-30） |
+| [`RE-005-e2e覆盖矩阵`](RE-005-e2e覆盖矩阵.md) | e2e 覆盖矩阵 · 能力域 × 场景形态 |
 
 ## 草案（draft）
 （无）
