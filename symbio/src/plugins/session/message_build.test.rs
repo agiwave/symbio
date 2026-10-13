@@ -48,6 +48,7 @@ fn tool_call(name: &str) -> TurnToolCallInfo {
         name: Some(name.to_string()),
         arguments: serde_json::json!({ "path": "." }),
         parse_error: None,
+        overflow_notice: None,
     }
 }
 

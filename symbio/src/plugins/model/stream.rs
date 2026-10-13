@@ -16,7 +16,7 @@ use crate::symbio_core::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
 };
 use crate::symbio_core::ModelUsage;
-use crate::symbio_core::{llm_emit_message, llm_short_id, TurnOutput};
+use crate::symbio_core::{llm_emit_message, llm_short_id, TurnOutput, TurnToolCallInfo};
 use crate::symbio_core::{ExecAbortSignal, ExecEventSink};
 use futures::StreamExt;
 use std::collections::HashMap;
@@ -34,9 +34,34 @@ const PARTIAL_LINE_MIN_BYTES: usize = 256;
 /// 为什么必须存在：`6cf9520d` 号会话里，模型在**一条响应**内流式输出了 56 个工具
 /// 调用（同一批 9 个调用原样复读 6 遍），而批执行器要等流结束才开工——60 余秒零
 /// 结果，用户视角即「工具永远不闭合的死循环」，只能手动终止。空闲超时防不了它
-/// （复读也是字节）。超限即以协议错误终止本轮（响亮失败），见
-/// `dispatch_and_track` 的 ToolCallDelta 分支。
+/// （复读也是字节）。
+///
+/// 处置是**丢弃 + 反馈**，不是整轮失败：超限的调用不再上线 UI 节点（防刷屏），
+/// 流结束后由 [`mark_overflow_dropped`] 打上丢弃标记，执行层据此各落一条结果
+/// 子节点、正文即提示——模型在下一轮从工具结果里读到「超限了、后面的调用被
+/// 丢了、该分批发起」。整轮 `Err` 会让模型对发生了什么一无所知（流程无故中断），
+/// 已被否决。见 `dispatch_and_track` 的 ToolCallDelta 分支。
 const MAX_TOOL_CALLS_PER_RESPONSE: usize = 32;
+
+/// 超限丢弃调用的**工具结果正文**（模型下一轮读到的反馈）。
+fn overflow_notice_text() -> String {
+    format!(
+        "本次调用未执行：本条响应内的工具调用数超过上限（{MAX_TOOL_CALLS_PER_RESPONSE}），\
+         超出上限的调用已被系统丢弃。请减少单轮发起的工具调用数量（至多 \
+         {MAX_TOOL_CALLS_PER_RESPONSE} 个），把剩余调用放到收到结果后的下一轮再发起。"
+    )
+}
+
+/// 收口：把上限之外的调用打上丢弃标记（正文 = [`overflow_notice_text`]）。
+///
+/// `tool_calls` 按**首次出现顺序**排列（累加器 `finish` 保序），故位置 ≥ 上限
+/// 的即超限调用。执行层读到 `overflow_notice` 非空就不执行、直接落结果。
+fn mark_overflow_dropped(tool_calls: &mut [TurnToolCallInfo]) {
+    let notice = overflow_notice_text();
+    for tc in tool_calls.iter_mut().skip(MAX_TOOL_CALLS_PER_RESPONSE) {
+        tc.overflow_notice = Some(notice.clone());
+    }
+}
 
 /// 发送一帧**增量**：`delta` 追加到目标节点正文尾部（流式热路径，O(delta)）。
 ///
@@ -141,6 +166,8 @@ pub async fn parse_sse_stream(
     let mut total_bytes: u64 = 0;
 
     let mut progress = LineProgress::default();
+    // 超限调用集合（见 `dispatch_and_track` 的 ToolCallDelta 分支）
+    let mut overflow_ids = std::collections::HashSet::<String>::new();
 
     // 当前「未结束的行」的增量提取状态（见 `llm::sse`）。
     // - `partial`：协议层给的提取器；`None` = 本行没有（尚未开 / 已放弃）
@@ -238,6 +265,7 @@ pub async fn parse_sse_stream(
                         &mut tool_acc,
                         &mut first_content_logged,
                         started,
+                        &mut overflow_ids,
                     )
                     .await?;
                 }
@@ -288,6 +316,7 @@ pub async fn parse_sse_stream(
                         &mut tool_acc,
                         &mut first_content_logged,
                         started,
+                        &mut overflow_ids,
                     )
                     .await?;
                 }
@@ -299,6 +328,8 @@ pub async fn parse_sse_stream(
     // 收口：分片累积器按值消费，产物以**结果形态**写回单轮产物。
     // 位置在日志之前——下面的「空流」判据要看 `tool_calls`，它必须已经就位。
     out.tool_calls = tool_acc.finish();
+    // 超限丢弃标记：上限之外的调用带上反馈正文，执行层据此落「超限丢弃」结果。
+    mark_overflow_dropped(&mut out.tool_calls);
 
     // ③ 流结束日志：正常结束 / 中止 / 空流，均带统计信息。
     // 若此处之后长时间无下文（工具执行/下一轮请求），可据此定位卡死发生在「流结束后」阶段。
@@ -333,6 +364,7 @@ pub async fn parse_sse_stream(
 ///
 /// ④「获取到第一条消息」日志：第一条文本/推理/工具调用内容事件到达时打点，
 /// 标志「模型已开始实际产出」。此后若卡死，可确定卡在「产出过程中」或「产出完成后」。
+#[allow(clippy::too_many_arguments)] // 参数全部是流级状态（进度记账 + 超限集合），拆结构体反而隔一层
 async fn dispatch_and_track(
     ev: ModelProtocolEvent,
     root_id: &str,
@@ -341,6 +373,9 @@ async fn dispatch_and_track(
     tool_acc: &mut TurnToolCallAccumulator,
     first_content_logged: &mut bool,
     started: std::time::Instant,
+    // 超限调用的节点 id 集合（跨事件持续——同一调用的后续参数增量靠它识别）。
+    // 命中的调用不再上线 UI 节点，收口时由 `mark_overflow_dropped` 打丢弃标记。
+    overflow_ids: &mut std::collections::HashSet<String>,
 ) -> Result<(), String> {
     if !*first_content_logged {
         let kind = match &ev {
@@ -359,7 +394,7 @@ async fn dispatch_and_track(
             );
         }
     }
-    dispatch_protocol_event(ev, root_id, sink, out, tool_acc).await
+    dispatch_protocol_event(ev, root_id, sink, out, tool_acc, overflow_ids).await
 }
 
 async fn dispatch_protocol_event(
@@ -368,6 +403,8 @@ async fn dispatch_protocol_event(
     sink: &ExecEventSink,
     out: &mut TurnOutput,
     tool_acc: &mut TurnToolCallAccumulator,
+    // 超限调用集合（语义见 `dispatch_and_track` 的参数说明）
+    overflow_ids: &mut std::collections::HashSet<String>,
 ) -> Result<(), String> {
     match ev {
         ModelProtocolEvent::ContentDelta(c) => {
@@ -433,18 +470,26 @@ async fn dispatch_protocol_event(
             // 调用原样复读 6 遍，`tool_call_id` 全部唯一），批执行器要等流结束才
             // 开工 ⇒ 60 余秒零结果，用户视角即「工具永远不闭合」，只能手动终止。
             // 空闲超时防不了它——复读也是字节，`STREAM_IDLE_TIMEOUT` 永远不触发。
-            // 故在**流的源头**判：超过上限即以协议错误终止本轮（响亮失败，
-            // `Err` 沿 `dispatch_and_track` 的 `?` 传播使整轮 Failed），绝不静默
-            // 吞掉后续调用。上限取 32：本仓健康的单批在个位数～十几个，32 已是
-            // 两倍余量；真需要更多调用应该分轮发起（每轮拿到结果再继续）。
-            if snapshot_required && tool_acc.call_count() > MAX_TOOL_CALLS_PER_RESPONSE {
-                let msg = format!(
-                    "单次响应内工具调用数超过上限（{MAX_TOOL_CALLS_PER_RESPONSE}），本轮终止：\
-                     疑似模型退化复读（同一批调用在一条响应里反复输出）。\
-                     请重试；若复现请缩小任务范围或更换模型。"
+            //
+            // 处置（反馈语义，见常量文档）：第 33 个调用诞生起记入 `overflow_ids`，
+            // **不再上线 UI 节点**（防刷屏），但照常入账——流结束后由
+            // `mark_overflow_dropped` 打丢弃标记，执行层据此落「超限丢弃」结果，
+            // 模型下一轮从工具结果里读到发生了什么。上限取 32：本仓健康的单批在
+            // 个位数～十几个，32 已是两倍余量；真需要更多调用应该分轮发起
+            // （每轮拿到结果再继续）。
+            let is_overflow = if snapshot_required && tool_acc.call_count() > MAX_TOOL_CALLS_PER_RESPONSE {
+                overflow_ids.insert(tc_id.clone());
+                plugin_warn!(
+                    "model",
+                    "[LLM] 单响应内工具调用数超过上限（{MAX_TOOL_CALLS_PER_RESPONSE}），\
+                     自本调用起丢弃（不执行、不显示），执行层将向模型反馈超限原因"
                 );
-                plugin_error!("model", "[LLM] {}", msg);
-                return Err(msg);
+                true
+            } else {
+                overflow_ids.contains(&tc_id)
+            };
+            if is_overflow {
+                return Ok(());
             }
 
             // ToolCall 组合节点：自身 content 即**请求参数**（不设独立的请求子节点，

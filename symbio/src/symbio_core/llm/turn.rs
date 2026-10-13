@@ -69,6 +69,14 @@ pub struct TurnToolCallInfo {
     ///
     /// `None` 且 `arguments == {}` 是合法的：无参工具的空串/纯空白参数。
     pub parse_error: Option<String>,
+    /// 非空 = 本调用因超出**单响应工具调用数上限**被系统丢弃（未执行）。
+    ///
+    /// 文本即反馈给模型的**工具结果正文**（流层生成，执行层原样落成结果子节点）。
+    /// 存在理由：超限的处置必须是**反馈**而不是整轮失败——模型必须从工具结果里
+    /// 读到「为什么后面的调用没了、下一步该怎么办」；整轮 `Err` 会让模型对发生
+    /// 了什么一无所知，表现为流程无故中断（`6cf9520d` 死循环守卫的反馈面，
+    /// 检测面在 `plugins/model/stream.rs` 的 `ToolCallDelta` 分支）。
+    pub overflow_notice: Option<String>,
 }
 
 // id 原语（消息节点 id 的统一格式，两侧共用）

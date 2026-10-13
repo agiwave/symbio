@@ -1179,6 +1179,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
                         name: Some(r.name.clone()),
                         arguments: r.args.clone(),
                         parse_error: None,
+                        overflow_notice: None,
                     },
                     text: r.text.clone(),
                     // 节点身份（调用 / 轮根 / 结果）随恢复方直给的取值入格——续写轮的

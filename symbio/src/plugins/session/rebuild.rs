@@ -548,6 +548,24 @@ fn artifact_nodes(e: &Event) -> Vec<ChatMessage> {
     call.timestamp = Some(e.ts);
     call.status = Some(MessageStatus::Completed);
 
+    // 「没跑」类结果的**成因机读码**（not_executed / aborted / overflow_dropped…）：
+    // 随载荷入格（`v2_tools` 从结果 meta 提取）就必须随重建出格——只在实时面可见、
+    // 重启后消失 = 成因排查靠猜。父节点的 meta 与执行器落格口径一致
+    // （`emit_parent_finalized`：success + failure_kind）。pending 类
+    // （needs_user_action）走下面的复刻分支，不在这里。
+    let failure_kind = e
+        .payload
+        .get("failure_kind")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if !failure_kind.is_empty() {
+        call.meta = Some(serde_json::json!({
+            "success": success,
+            "failure_kind": failure_kind,
+        }));
+    }
+
     // 结果节点 id 由 core 的 [`event_tool_result_node_id`] 给（载荷有就用；恢复路记 `null`
     // ⇒ 按事件 id 稳定合成）。合成用的**不是** call_id——结果与调用是两张卡，
     // 共用 id 会让前端把它们合成一条。
@@ -580,12 +598,23 @@ fn artifact_nodes(e: &Event) -> Vec<ChatMessage> {
             ..Default::default()
         }
     } else {
-        llm_build_tool_message(
+        let mut msg = llm_build_tool_message(
             &call_id,
             &text_of(e, "text"),
             Some(success),
             Some(result_id),
-        )
+        );
+        // 「没跑」不是「跑失败」：带成因码（非 pending）的结果按 Completed 重建，
+        // 与执行器落格时的口径一致（`not_executed_result` / 超限丢弃分支都标
+        // Completed——标 Failed 会被上下文过滤并多渲染一条 ⚠）。成因码随行入
+        // meta（机读），正文本身已是人读的提示。
+        if !failure_kind.is_empty() {
+            msg.status = Some(MessageStatus::Completed);
+            if let Some(obj) = msg.meta.as_mut().and_then(|m| m.as_object_mut()) {
+                obj.insert("failure_kind".into(), serde_json::json!(failure_kind));
+            }
+        }
+        msg
     };
     result.timestamp = Some(e.ts);
 

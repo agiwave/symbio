@@ -4,7 +4,8 @@
 //!   node e2e/mock-llm.mjs --port 18081 --scenarios ./scenarios.json
 //!
 //! 能力：
-//! - `POST /v1/chat/completions`（stream=true SSE / stream=false JSON）
+//! - `POST /v1/chat/completions`（**只说流式**：SSE。与生产一致——symbio 的三个
+//!   协议实现全部硬编码 `"stream": true`，不存在非流式分支）
 //! - `GET  /v1/models` 上下文探测（context_probe 走这里，返回 max_model_len）
 //! - `GET  /_health`   健康检查
 //! - `GET  /_requests` 读回已记录的请求（测试断言用）
@@ -230,7 +231,7 @@ function chunkOf(id, model, delta, finish = null, usage = null) {
 }
 
 /**
- * 把场景编译成 [delta, finish] 事件序列（不区分 stream/非 stream，最后统一折算）。
+ * 把场景编译成 [delta, finish] 事件序列（SSE 流式唯一形态）。
  *
  * `toolCallId` 对 **`times` 复用型场景**加选中次数后缀：一条场景被连选 N 次就是模型
  * 连发 N 次工具调用，id 相同的话后端按 id 归并 ⇒ 转写里只剩一格、请求视图里只剩一个
@@ -339,30 +340,12 @@ const server = http.createServer(async (req, res) => {
 
     const events = [...buildEvents(scenario, model, requestId, useIndex)];
 
-    // 非 stream：一次性 JSON
-    if (parsed.stream === false) {
-      const text = (scenario.chunks ?? [scenario.content ?? '']).join('');
-      const toolMsgs = (scenario.toolCalls ?? []).map((tc, i) => ({
-        id: buildToolCallId(scenario, tc, i, useIndex),
-        type: 'function',
-        function: { name: tc.name, arguments: typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments ?? {}) },
-      }));
-      res.writeHead(200, { 'content-type': 'application/json' });
-      return res.end(
-        JSON.stringify({
-          id: requestId,
-          object: 'chat.completion',
-          created: Math.floor(Date.now() / 1000),
-          model,
-          choices: [{
-            index: 0,
-            message: { role: 'assistant', content: text || null, ...(toolMsgs.length ? { tool_calls: toolMsgs } : {}) },
-            finish_reason: toolMsgs.length ? 'tool_calls' : 'stop',
-          }],
-          usage: { prompt_tokens: 64, completion_tokens: 32 },
-        }),
-      );
-    }
+    // ⚠️ 本 mock **只说流式**（与生产一致）：symbio 后端的三个协议实现全部硬编码
+    // `"stream": true`，不存在非流式补全请求。曾经有个 `stream === false` 的一次性
+    // JSON 分支，因无任何调用方（纯防御性死代码、误导「存在非流式链路」的读者）
+    // 已删除——见 `openai_chat.rs` / `openai_responses.rs` / `anthropic_messages.rs`
+    // 的请求构造。e2e 的信息收集同样只有两条流式通道：gateway WS 实时帧 +
+    // 生产历史读出口（`readSessionMessages`）。
 
     // stream：SSE
     res.writeHead(200, {

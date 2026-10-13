@@ -1236,6 +1236,7 @@ mod tool_round_tests {
                         name: Some("vdfs_read".into()),
                         arguments: serde_json::json!({ "path": "a.md" }),
                         parse_error: None,
+                        overflow_notice: None,
                     }],
                     cost_ms: 3,
                     usage: None,
@@ -1934,6 +1935,7 @@ mod tool_round_tests {
                             name: Some("vdfs_read".into()),
                             arguments: serde_json::json!({ "path": "a.md", "approved": true }),
                             parse_error: None,
+                            overflow_notice: None,
                         },
                         text: "文件内容：hello（已批准）".into(),
                         // 单测不验节点身份（那条判据在 e2e t27）：留空 ⇒ 走回落合成，

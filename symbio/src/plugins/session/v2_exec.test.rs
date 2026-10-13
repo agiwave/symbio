@@ -404,6 +404,7 @@ impl ModelProvider for FaithfulProvider {
                             name: Some("vdfs_read".into()),
                             arguments: serde_json::json!({ "path": "a.md" }),
                             parse_error: None,
+                            overflow_notice: None,
                         }],
                         response_text_child_id: "n-tool".into(),
                         ..Default::default()
@@ -434,6 +435,7 @@ impl ModelProvider for FaithfulProvider {
                                 "prompt": "让 reviewer 复查这段",
                             }),
                             parse_error: None,
+                            overflow_notice: None,
                         }],
                         response_text_child_id: "n-agent".into(),
                         ..Default::default()

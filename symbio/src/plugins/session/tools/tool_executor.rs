@@ -944,6 +944,50 @@ pub async fn process_tool_calls_async(
 
         let result_msg_id = uuid::Uuid::new_v4().to_string();
 
+        // ── 单响应超限丢弃（megabatch 守卫的**反馈面**）────────────────────
+        //
+        // 上限判在流的源头（model 插件 stream.rs），但处置是反馈而不是失败：
+        // 被丢弃的调用各落一条结果子节点，正文即流层给的提示——模型在下一轮从
+        // 工具结果里读到「超限了、后面的调用被丢了、该分批发起」。整轮 Err 的
+        // 旧方案会让模型对发生了什么一无所知（流程无故中断），已否决。
+        // 放在闸门之前：丢弃的调用不该消耗熔断预算，也不该跑钩子。
+        if let Some(notice) = tc.overflow_notice.as_ref() {
+            plugin_warn!(
+                "session",
+                "[Tool] 单响应工具调用数超限，调用被丢弃（不执行）：{id} / {name}"
+            );
+            let mut tool_msg =
+                llm_build_tool_message(&id, notice, Some(false), Some(result_msg_id.clone()));
+            // 与 `not_executed_result` 同口径：「没跑」不是「跑失败」，以 Completed
+            // 留在上下文；成因由 `failure_kind` 承载。
+            tool_msg.status = Some(MessageStatus::Completed);
+            tool_msg.meta = Some(json!({ "success": false, "failure_kind": "overflow_dropped" }));
+            tool_messages.push(tool_msg);
+            // 结果子节点必须有父节点终态配套（同 S20.1 不变量）：否则前端永远转圈。
+            if let Some(parent_update) = emit_parent_finalized(
+                sink,
+                context_messages,
+                &id,
+                MessageStatus::Completed,
+                json!({ "success": false, "failure_kind": "overflow_dropped" }),
+                None,
+            )
+            .await
+            {
+                parent_updates.push(parent_update);
+            }
+            // 没跑 = 没履约（`agent_run` 的承诺记账见 `note_delegation`）。
+            note_delegation(
+                delegations,
+                &id,
+                &name,
+                &tc.arguments,
+                false,
+                "单响应工具调用数超限，被系统丢弃未执行",
+            );
+            continue;
+        }
+
         // ── 外部执行闸门（S8 第 20 步，[roadmap/S09 §6](../../../../../docs/stage/ST-009-外部执行与熔断.md "ST-009-外部执行与熔断")）──
         //
         // 判定紧贴执行窗口之前、**先于 PreToolUse 钩子**：钩子是给「要执行的调用」

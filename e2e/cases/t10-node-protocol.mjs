@@ -309,6 +309,19 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
       assert(row, `存储里应有实时面上出现过的节点 ${String(m.id).slice(0, 8)}（${m.type}）`);
       assertEq(row.status, m.status, `节点 ${m.type} 存储状态应与实时面终态一致`);
     }
+    // reasoning 落盘**内容**逐字一致（「流式时见过、历史里没了」是最隐蔽的丢失形态：
+    // 历史读出口是前端加载历史的同一条地址，这条断言保证 Reason 节点刷新后仍在）
+    const storedReason = stored.find((x) => x.id === reasonNode.id);
+    assertEq(
+      storedReason?.type ?? storedReason?.msg_type,
+      'reasoning',
+      '落盘节点的类型必须是 reasoning',
+    );
+    assertEq(
+      storedReason?.content,
+      '先分析一下',
+      '落盘 reasoning 内容应与流式拼接逐字一致',
+    );
     // 工具真的执行了（不是只在协议层打转）
     assert(
       readFileSync(join(hd.workdir, 't10.md'), 'utf8').includes('# 写入内容'),

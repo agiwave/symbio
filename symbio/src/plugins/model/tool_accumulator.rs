@@ -198,6 +198,7 @@ impl TurnToolCallAccumulator {
                     name: call.name,
                     arguments,
                     parse_error,
+                    overflow_notice: None,
                 }
             })
             .collect()

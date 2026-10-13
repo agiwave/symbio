@@ -121,6 +121,7 @@ async fn missing_tool_call_id_is_recorded_as_failure() {
         name: Some("vdfs_list".into()),
         arguments: json!({ "path": "." }),
         parse_error: None,
+        overflow_notice: None,
     }];
 
     let (msgs, updates) = process_tool_calls_async(
@@ -173,6 +174,7 @@ async fn empty_tool_call_id_is_recorded_as_failure() {
         name: Some("vdfs_list".into()),
         arguments: json!({}),
         parse_error: None,
+        overflow_notice: None,
     }];
 
     let (msgs, updates) = process_tool_calls_async(
@@ -204,6 +206,7 @@ async fn missing_tool_name_is_recorded_as_failure() {
         name: Some(String::new()),
         arguments: json!({}),
         parse_error: None,
+        overflow_notice: None,
     }];
 
     let (msgs, updates) = process_tool_calls_async(
@@ -239,6 +242,7 @@ async fn unparseable_arguments_are_refused_not_executed() {
         name: Some("cmd".into()),
         arguments: json!({}),
         parse_error: Some(r#"{"command": "cargo test"#.into()),
+        overflow_notice: None,
     }];
 
     let (msgs, updates) = process_tool_calls_async(
@@ -343,6 +347,7 @@ async fn aborted_batch_terminates_every_tool_call() {
             name: Some("vdfs_list".into()),
             arguments: json!({ "path": "." }),
             parse_error: None,
+            overflow_notice: None,
         },
         TurnToolCallInfo {
             id: Some("tc2".into()),
@@ -350,6 +355,7 @@ async fn aborted_batch_terminates_every_tool_call() {
             name: Some("vdfs_list".into()),
             arguments: json!({ "path": "." }),
             parse_error: None,
+            overflow_notice: None,
         },
     ];
 
@@ -405,6 +411,72 @@ async fn aborted_batch_terminates_every_tool_call() {
     assert_eq!(parents, vec!["tc1", "tc2"]);
 }
 
+/// megabatch 守卫的**反馈面**：带 `overflow_notice` 的调用不执行、直接落反馈结果。
+///
+/// `6cf9520d` 守卫语义：上限判在流层（model 插件），处置是**反馈**——被丢弃的
+/// 调用各落一条结果子节点，正文即流层给的提示，模型下一轮从工具结果里读到
+/// 「超限了、后面的调用被丢了、该分批发起」。整轮 Err 的旧方案让模型一无所知
+/// （流程无故中断），已否决。
+#[tokio::test]
+async fn overflow_dropped_call_returns_feedback_without_execution() {
+    let sink = ExecEventSink::silent();
+    let abort = ExecAbortSignal::new(); // 未中止：能否执行只取决于丢弃标记
+    let notice = "本次调用未执行：本条响应内的工具调用数超过上限（32），超出上限的调用已被系统丢弃。".to_string();
+    let tcs = vec![TurnToolCallInfo {
+        id: Some("tc-overflow".into()),
+        wire_id: None,
+        name: Some("vdfs_list".into()),
+        arguments: json!({ "path": "." }),
+        parse_error: None,
+        overflow_notice: Some(notice.clone()),
+    }];
+
+    let (msgs, updates) = process_tool_calls_async(
+        tcs,
+        &None,
+        &sink,
+        &abort,
+        test_ctx(),
+        &tc_context(&["tc-overflow"]),
+        &test_dir(),
+        &mut Vec::new(),
+        &mut Vec::new(),
+        &mut Vec::new(),
+    )
+    .await;
+
+    assert_eq!(msgs.len(), 1, "丢弃调用必须有结果子节点（S20.1 不变量）");
+    assert_eq!(msgs[0].role, Some(MessageRole::Tool));
+    assert_eq!(msgs[0].status, Some(MessageStatus::Completed));
+    let text = msgs[0]
+        .content
+        .as_ref()
+        .map(|c| c.to_text())
+        .unwrap_or_default();
+    assert_eq!(text, notice, "结果正文 = 流层给的反馈（原样落盘）");
+    assert_eq!(
+        msgs[0]
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("failure_kind"))
+            .and_then(|v| v.as_str()),
+        Some("overflow_dropped"),
+        "成因必须可指认（overflow_dropped），不得混进 not_executed"
+    );
+
+    assert_eq!(updates.len(), 1, "父节点必须同步收敛，否则前端永远转圈");
+    assert_eq!(updates[0].id, "tc-overflow");
+    assert_eq!(updates[0].status, Some(MessageStatus::Completed));
+    assert_eq!(
+        updates[0]
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("failure_kind"))
+            .and_then(|v| v.as_str()),
+        Some("overflow_dropped")
+    );
+}
+
 /// 实测事故（本地会话 `3ea6e4d0`）的机制回归：**交互模式下**前一个工具失败 ⇒
 /// 本批剩余被跳过 ⇒ 跳过的那些同样必须留下结果子节点。
 ///
@@ -424,6 +496,7 @@ async fn interactive_break_leaves_result_for_skipped_calls() {
             name: Some("vdfs_read".into()),
             arguments: json!({ "path": "a" }),
             parse_error: None,
+            overflow_notice: None,
         },
         TurnToolCallInfo {
             id: Some("tc2".into()),
@@ -431,6 +504,7 @@ async fn interactive_break_leaves_result_for_skipped_calls() {
             name: Some("vdfs_read".into()),
             arguments: json!({ "path": "b" }),
             parse_error: None,
+            overflow_notice: None,
         },
     ];
 
@@ -881,6 +955,7 @@ async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
         name: Some("vdfs_list".into()),
         arguments: json!({ "path": "." }),
         parse_error: None,
+        overflow_notice: None,
     }];
     let mut breaks: Vec<&'static str> = Vec::new();
     let (msgs, updates) = process_tool_calls_async(
