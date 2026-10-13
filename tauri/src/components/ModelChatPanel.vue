@@ -45,6 +45,15 @@
                发送会看到「什么都没发生」。两者互斥，不会同时出现两条。 -->
           <TurnPending v-if="showTyping" />
 
+          <!-- 排队中的用户消息（「待发送」气泡，T-077 步③）。
+
+               发送方不止前端自己：CLI / telegram / 心跳 / 别的进程都往同一个收件箱
+               写（`<会话地址>/inbox/<消息 id>`）。队列里的消息要等会话空闲才被
+               取出、落库、发权威帧——那之前转写里没有它，界面上应当显示「它在排队」，
+               而不是「什么都没发生」。落库后同一条消息由转写帧接手（同一个 id），
+               本块随之消失，不会出现两份。 -->
+          <InboxPending :entries="inboxEntries" />
+
           <!-- 会话级错误条（兜底：无 Failed Turn 节点、但会话整体因错误中止时展示；
                有 Failed Turn 时错误由根级 Turn 节点承载，不在此重复显示）。
 
@@ -112,6 +121,7 @@ import {
 import MessageNode from './MessageNode.vue'
 import MessageErrorBox from './message/MessageErrorBox.vue'
 import TurnPending from './message/TurnPending.vue'
+import InboxPending from './message/InboxPending.vue'
 import ChatComposer from './chat/ChatComposer.vue'
 import BaseModal from './common/BaseModal.vue'
 
@@ -260,6 +270,15 @@ const optionScope = computed<Record<string, unknown>>(() => ({
       sessionsStore.getSessionMessages(props.sessionId),
     ),
   )
+
+  /**
+   * 排队中的消息（「待发送」气泡的数据源）。
+   *
+   * 自己从 store 取，不靠 props 传：队列是**会话级**状态，而本面板按地址重挂载
+   * （`ChatMainPanel` 的 `:key`），来回切换不该让队列显示与否变得不确定——
+   * 只要 store 里还有，切回来就还在。空数组时组件自行不渲染。
+   */
+  const inboxEntries = computed(() => sessionsStore.getInboxItems(props.sessionId))
 
   /** 会话级错误重试：重新发送用户最后一条消息。
    *

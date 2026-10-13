@@ -188,6 +188,11 @@ watch(
     currentLoadedId.value = null
     loadError.value = null
     if (id) {
+      // 打开会话 ⇒ 补列一次收件箱（排队中的消息）。补的是**冷启动窗口**：应用起来
+      // 之前就排在队里的消息没有入队帧可收（见 `stores/sessionInboxSync` 模块头的
+      // 「已知代价」）。不 await、也不过守卫：它是可选的可视化，失败只少几个气泡，
+      // 转写照旧加载（store 内部已把失败吞成 warn）。
+      void store.refreshInbox(id)
       try {
         await store.loadMessages(id)
         // 检查是否被新的切换打断

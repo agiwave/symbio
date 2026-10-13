@@ -8,7 +8,7 @@ created: 2026-09-25
 
 # 会话输入改走地址：`<会话地址>/inbox` + 三个动作
 
-> **状态：已落 ADR-031，§5.1–5.4 与 §6.1–6.5 已实施**（实施清单与未落地项见 §8）。
+> **状态：已落 ADR-031，§5.1–5.4 与 §6.1–6.6 已实施**（实施清单与未落地项见 §8）。
 >
 > 本文回答「会话的**输入**（发消息 / 停止 / 重试审批）应该落在哪」。
 > 「收件箱怎么消费」见 `symbio/src/plugins/session/transcript/inbox.rs` 与 ADR-026；
@@ -245,10 +245,12 @@ telegram 的 `mode: "auto"` 是通道属性、CLI 原先刻意走 `req` 档做�
 - `createSession` 写**当前**挂载目录，不再恒写全局那一个。
 - `selectSession` 收地址；同名 sid 在不同空间不再撞车。
 
-### 6.3 两个实时消费端：前缀从「一个」改成「一组」
+### 6.3 实时消费端：前缀从「一个」改成「一组」
 
-`sessionTranscriptSync.ts` 与 `sessionNodeSync.ts` 各维护**已登记挂载目录集合**，
-新增 `registerSessionMount(mountDir)`；进入子智能体空间（该空间的 `session` 挂载
+`sessionTranscriptSync.ts` / `sessionNodeSync.ts`（T-077 步③ 起还有
+`sessionInboxSync.ts`，共三个）各维护**已登记挂载目录集合**，新增
+`registerSessionMount(mountDir)` / `registerTranscriptMount(mountDir)` /
+`registerInboxMount(mountDir)`；进入子智能体空间（该空间的 `session` 挂载
 被列出 / 选中）时登记。前缀匹配改成「命中任一已登记前缀」。
 
 ### 6.4 `Session.vue` → `ChatMainPanel` → `ModelChatPanel`：把地址传下去
@@ -271,6 +273,10 @@ resume(p)   → runVdfsAction(<A>/message/<p.targetId>, p.action, {args, reason,
 - `working` 乐观置位保留（等待期的可视反馈）。
 
 ### 6.6 排队态显示（新增消费端，回应「前端不是唯一发送方」）
+
+> **已实施（T-077 步③）**：`tauri/src/stores/sessionInboxSync.ts`（实时面消费端）
+> + `components/message/InboxPending.vue`（气泡）+ `sessions` store 的 inbox 三个收敛
+> 动作与 `refreshInbox`。偏差见 §8.3 第 2 条（`showTyping` **没有**退）。
 
 新增 `stores/sessionInboxSync.ts`：订阅 `<A>/inbox` 段，把队列项渲染成「待发送」
 气泡；条目消失（出队变更，见 §5.4）即移除，落库后由 §6.3 的转写帧接手——**同一个
@@ -323,8 +329,9 @@ id**，所以是「换位置」不是「多一条」。
 前端（§6.1–6.5）：
 
 - [x] `vdfsScheme`：按挂载目录缓存 + `inboxSeg`（按 `kind` 认）
-- [x] 两个实时消费端：**一组**已登记挂载目录 +
-      `registerTranscriptMount` / `registerSessionMount`（`MainLayout` 接线）
+- [x] 实时消费端：**一组**已登记挂载目录 +
+      `registerTranscriptMount` / `registerSessionMount` / `registerInboxMount`
+      （`MainLayout` 接线；第三个是 T-077 步③ 的收件箱消费端）
 - [x] `sessions` store：`sessionSpace` / `sessionMounts` / `activeAddr` /
       `setSessionSpace` / `mountDirOf`；新建写当前空间；叶子操作按空间寻址
 - [x] `services/session.ts`：七个函数各收一个可选 `mountDir`
@@ -341,9 +348,14 @@ id**，所以是「换位置」不是「多一条」。
       `ROUTE_SESSION_CHAT_SEND` 及其一对 one-off 入口函数已删，`session` 的 `route()`
       只剩 `stats`。迁移中修掉两个顺带发现的问题：telegram 侧 poll 循环被 `await`
       串行化（中断检查因此成了死代码）、空输出时回一句「无响应」而不是如实说没有产出。
-- [ ] **§6.6 排队态显示**——「前端不是唯一发送方」的闭合件。它不是本次症状的
+- [x] **§6.6 排队态显示**——「前端不是唯一发送方」的闭合件。它不是本次症状的
       成因（成因是发送落点 + 订阅前缀），但少了它，别的发送方的消息在**被消费前**
-      仍不可见。
+      仍不可见。**已落**（T-077 步③）：`sessionInboxSync` 是第三个实时面消费端
+      （`<sid>` → 节点态、`<sid>/<转写段>/<mid>` → 转写、`<sid>/<收件箱段>/<iid>`
+      → 本模块），段名同样按 `kind` 认；入队帧带节点视图 ⇒ 加一条（文案取
+      `description` 的「待消费 · <预览>」），出队 / 取消 / 清空是无载荷变更 ⇒ 回读
+      `stat` 只分辨删除；resync 与打开会话整份重列（前者按见过的会话，后者闭合
+      冷启动窗口）。气泡**不显示全文**——全文由落库后的转写帧给，同一个 id。
 
 ### 8.3 与 §6 原计划的偏差（有意）
 
@@ -351,3 +363,11 @@ id**，所以是「换位置」不是「多一条」。
    跨空间全局唯一，所以 store 的状态字典仍以 id 为键，另记「它在哪个空间」。
    把键换成地址不会多解决任何问题，只会让每个消费方都要先解析一次地址才能查表。
    理由写在 `stores/sessions.ts` 模块头。
+
+2. **§6.6 说 `showTyping` 可退掉一部分**：实际**没有退**。§6.6 判断「两者互斥」的
+   依据是「有排队气泡时骨架不再传达新信息」，实测**不成立**：刚点完发送的那一瞬
+   两者都为真（消息已入队、Turn 帧还没到），而更多见的是反过来——别的发送方的
+   消息已被取出、落库帧在路上，那时队列已空、气泡不该出现，骨架是界面上唯一的
+   「在跑」信号。拿它换气泡会为「少一行」把 Turn 帧丢失时的兜底也一起丢掉。
+   两条判据因此**各自独立**，理由逐条写在 `stores/sessionLive.ts` 的
+   `needsTypingRow` 注释里。

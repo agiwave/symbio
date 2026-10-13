@@ -26,6 +26,7 @@ import { onMounted, watch } from 'vue'
 import { RouterView } from 'vue-router'
 import { startSessionTranscriptSync, registerTranscriptMount } from '@/stores/sessionTranscriptSync'
 import { startSessionNodeSync, registerSessionMount } from '@/stores/sessionNodeSync'
+import { startSessionInboxSync, registerInboxMount } from '@/stores/sessionInboxSync'
 import { setChimeSettingsSource } from '@/services/completionChime'
 import { getWorkspacePath } from '@/services/home'
 import { useSessionsStore } from '@/stores/sessions'
@@ -38,14 +39,14 @@ import Onboarding from '@/components/common/Onboarding.vue'
 const sessions = useSessionsStore()
 
 /**
- * 当前空间的会话挂载目录一变，就向两个实时消费端各登记一次。
+ * 当前空间的会话挂载目录一变，就向三个实时消费端各登记一次。
  *
  * **为什么必须在这里**：会话挂载目录不止一份——子智能体空间
  * （`<根>/agent/<id>/…`）是一棵完整子树，内部有自己的 `session` 挂载，其下
- * 消息 / 会话节点的地址前缀与根那份**不同**。只订根那一份，子空间里跑起来的
- * 会话在界面上永远不动（后端跑得再对也看不见）。
+ * 消息 / 会话节点 / 收件箱的地址前缀与根那份**不同**。只订根那一份，子空间里
+ * 跑起来的会话在界面上永远不动（后端跑得再对也看不见）。
  *
- * 登记是**幂等**的，且允许在订阅启动**之前**调用（两个模块都把它记进自己的
+ * 登记是**幂等**的，且允许在订阅启动**之前**调用（三个模块都把它记进自己的
  * 登记表，启动时按表逐份订阅），因此这里不必关心与 `onMounted` 的先后。
  */
 watch(
@@ -54,6 +55,7 @@ watch(
     if (!dir) return
     void registerSessionMount(dir)
     void registerTranscriptMount(dir)
+    void registerInboxMount(dir)
   },
   { immediate: true },
 )
@@ -91,6 +93,24 @@ onMounted(async () => {
   // 于是 HMR / 测试不会叠监听器，订阅的启停也看得见。
   // 现在是 async：订阅前缀（会话挂载目录）要按数据认出来，不是常量。
   await startSessionNodeSync(sessions)
+
+  // 启动**收件箱同步**（排队中的用户消息 → 「待发送」气泡；T-077 步③）
+  //
+  // 它补的是转写实时面看不见的那一段：消息已入队、空间还在忙，要等当前轮跑完
+  // 才被消费。落库后的权威帧由转写消费端照实显示（**无论发送方是谁**），而排队
+  // 中这段时间里，「不是我发的消息」（CLI / telegram / 心跳 / 别的进程）连
+  // `working` 乐观置位都没有——本模块把队列里有几条、各是什么显示出来。
+  //
+  // 三个落地动作与转写那一套同构，落点都是 sessions store 的 inbox 部分：
+  // 入队（带节点视图）⇒ 加一条，文案取后端 `description`（`待消费 · <预览>`）；
+  // 出队 / 取消 / 清空（无载荷）⇒ 回读 `stat` 分辨删除后移除；resync ⇒ 整份重列。
+  void startSessionInboxSync({
+    applyInboxItem: (sid, entry) => sessions.applyInboxItem(sid, entry),
+    removeInboxItem: (sid, iid) => sessions.removeInboxItem(sid, iid),
+    reloadInbox: async (sid) => {
+      await sessions.refreshInbox(sid)
+    },
+  })
 
   // 提示音的设置来源同样由外壳注入（service 不认识 store）：
   // 传的是**取值函数**而非快照，用户改了开关/音量下一声就生效。
