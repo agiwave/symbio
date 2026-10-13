@@ -23,9 +23,14 @@ on:
   # 14 个守卫的绿灯**只存在于开发者本机**。这与本文件头部「漏跑的代价远大于多跑」
   # 是同一条教训的第二次出现：第一次漏的是文件类型，这次漏的是分支。
   #
+  # 2026-10-13：**同一条教训第三次出现，形态是改名**。`v2-plan` 更名为 `v2` 后
+  # 名单静默失配——`gh run list --branch v2` 为空（最后一条 run 停在 10-08 的
+  # `v2-plan`），本分支的全部提交零 CI。分支名是会被改的，名单按**形状**写：
+  # `v2*` 同时覆盖 `v2` 与任何 `v2-xxx`，改名不再制造触发空洞。
+  #
   # `workflow_dispatch` 是第三条路（当前没有）：分支不在名单里时，连手动补跑都做不到。
   push:
-    branches: [ main, master, v2-plan ]
+    branches: [ main, master, 'v2*' ]
     paths-ignore:
       # 构建 / 依赖 / 日志等产出目录。它们目前都未被 git 跟踪（见 .gitignore），
       # 列出是防御性的：一旦将来被误纳入版本控制，也不会白白触发全量 CI。
@@ -36,9 +41,9 @@ on:
       - 'tauri/.vbuild*/**'
       - '.workbuddy-ai/**'
   pull_request:
-    # 这里是**目标**分支：`v2-plan → main` 的 PR 命中 `main`，早已会跑；
-    # 列上 `v2-plan` 是为了反向的 `feat/… → v2-plan` 这类评审也照样被验证。
-    branches: [ main, master, v2-plan ]
+    # 这里是**目标**分支：`v2 → main` 的 PR 命中 `main`，早已会跑；
+    # 列上 `v2*` 是为了反向的 `feat/… → v2` 这类评审也照样被验证（形状写法，防改名，同上）。
+    branches: [ main, master, 'v2*' ]
     paths-ignore:
       - '**/node_modules/**'
       - '**/target/**'
