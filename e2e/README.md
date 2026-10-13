@@ -59,7 +59,7 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
 
 异常注入的总体纪律（T-067）：mock 模拟的是**真实 LLM 服务与真实网络环境**，
 用例的判据从**用户视角**取（CLI 成败 / 转写读出口 / 可见错误信息 / 共享转写不变量），
-不读后端内部状态——主体是黑盒（详见 [T-067](../docs/task/T-067-mockLLM体系化机制化.md)）。
+不读后端内部状态——主体是黑盒（详见 [T-067](../docs/task/T-067-mockLLM体系化机制化.md "T-067-mockLLM体系化机制化")）。
 
 ## 新增一个用例
 

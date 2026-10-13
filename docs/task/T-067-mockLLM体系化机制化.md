@@ -8,7 +8,7 @@ track: quality
 deps: []
 prio: now
 exit: mock-llm 的异常形态收成分级机制（场景字段配置驱动，不为单个用例手写特判）：响应流中断 / 429 限流语义 / 响应内容不规范 / 网络延迟与停顿每类可注入；每类配一条 e2e 用例钉「注入会红 / 受影响行为按纪律收敛」；既有用例不返红；正常形态逐字节行为不变
-evidence: e2e/mock-llm.mjs（新增注入字段 latencyMs / chunkJitterMs / stallAfter+stallMs / dropAfter / malformed+malformedAfter，file 头写清注入语义；plan 级 rateLimit: {limit, windowMs} 滑动窗口 429 限流（retry-after + x-ratelimit-*，被拒不占配额）；/_requests 增记响应 status）；e2e/helpers.mjs MockLlm 第三选项 rateLimit 透传；四条黑盒用例各钉一类：t49-stream-drop（断流轮可见失败 + 恢复轮照常）、t50-ratelimit-429（双探针占配额、限流后冷却自动恢复）、t51-malformed-stream（三种脏帧不打破对话）、t52-network-timing（延迟/抖动/停顿下完整回复）；验证：e2e 门禁 49/49（含既有 45 条不返红，2026-10-13）
+evidence: e2e/mock-llm.mjs（新增注入字段 latencyMs / chunkJitterMs / stallAfter+stallMs / dropAfter / malformed+malformedAfter，file 头写清注入语义；plan 级 rateLimit: {limit, windowMs} 滑动窗口 429 限流（retry-after + x-ratelimit-*，被拒不占配额）；/_requests 增记响应 status）；e2e/helpers.mjs MockLlm 第三选项 rateLimit 透传；四条黑盒用例各钉一类：t49-stream-drop（断流轮可见失败 + 恢复轮照常）、t50-ratelimit-429（双探针占配额、限流后冷却自动恢复）、t51-malformed-stream（三种脏帧不打破对话）、t52-network-timing（延迟/抖动/停顿下完整回复）；验证：e2e 门禁 49/49（含既有 45 条不返红， 2026-10-13）；批次提交 `34d11a52`
 ---
 
 ## 内容
