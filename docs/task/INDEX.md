@@ -3,13 +3,11 @@
 > ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/task/*.md` 生成，请勿手改。**
 > 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，原则与流程见 [PL-011 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。
 
-**计数**：☐ todo 18 · 🟡 doing 0 · ☑ done 68 · ❌ wont 0（共 86）
+**计数**：☐ todo 16 · 🟡 doing 0 · ☑ done 71 · ❌ wont 0（共 87）
 
 ## 待处理（按依赖顺序）
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
-| `T-071-core形状变宽的必需性论证` | core 形状棘轮亮红（fn 73>72 / defaults 25>24）：逐格补「必需」论证 ADR 或回退 | now | quality | — |
-| `T-087-名册与正文对账批` | 名册锚点与阶正文对账批——纯文档清偿各阶 §3.1 登记的「文档≠系统」残留（只改锚与措辞，不改数字） | now | plan | — |
 | `T-072-对等主体生产增量` | ST-008 对等侧落地：对等主体窄 grants 行 + `commitment.asserted` 生产写方 + 会话独立的 ActorSpec 构造路径 | next | 多主体 | — |
 | `T-076-e2e面缺失补齐批` | e2e 面缺失六项补齐：Web 外取三工具 / 本地检索组 / 通道自动化（telegram·hook·home）/ 多协议适配 / 存储三实现切换 | next | e2e | — |
 | `T-077-输入面双轨退役批` | ADR-031 残余清偿：运行选项上写入面的协议决定 → `session/chat/send` / `chat/abort` 退役 → 排队态显示 | next | 会话与输入 | — |
@@ -39,6 +37,9 @@
 | `T-068-e2e用例体系化升级` | e2e 用例体系化建设与升级：正常 + 异常场景全覆盖，按真实用户使用过程取形 | quality | 覆盖矩阵落 [RE-005-e2e覆盖矩阵](../ref/RE-005-e2e覆盖矩阵.md)（十条能力域 × 三形态，52 条用例入格；缺口四处逐格记判定与理由：4xx/不可达已清偿 t53、MCP 断连待 ST-009 接线批次、WS 断链明确不做（红点角标 + 自动重同步已承担可见性）、压缩中插话待评估）；第一批缺口清偿 t53-llm-4xx-unreachable（401 不可重试错误态 + 起点不可达两类此前与 5xx 重试同通道的异语义失败，各自可红 + 恢复轮）；验证：e2e 全量绿（含 t53）· registry-audit / gen-doc-refs 零违规；用例形纪律（实时面等待 + 历史等事实出现再断言）在 t50/t53 已体现 |
 | `T-069-前端会话机制分析与优化` | 前端 v2 会话机制分析与优化：多线程会话模型与「一个会话线程一个显示区域」 | frontend | 分析与裁决全量落于 [ADR-063](../adr/ADR-063.md)（"2.1 现有体系是否支持一个会话内多条实际会话线程 / 2.2 多实线对话该放哪 / 2.3 呈现裁决"三节）；现状认定以用户可见形状为证：ModelChatPanel 的 dialog_panel_split 两列（同一批节点两种读法）、t24 形状锚、t34 / t30 / ADR-026 的线与主体事实；实施另立 [T-070-会话呈现合流单窗口](T-070-会话呈现合流单窗口.md)；验证：registry-audit 零违规 + doc-link 全绿；黑盒纪律全程遵守（分析只引用用户可见出口与公开文档事实，未把后端内部实现写成判据） |
 | `T-070-会话呈现合流单窗口` | 前端呈现合流：退役「对话 / 工作」分栏，一个会话线程一个显示区域 | frontend | ModelChatPanel 单列化（分栏模板分支 / 工作列 / 双滚动与 split 样式全撤，恒用 messageTree）；appearance store 无 dialogPanelSplit（持久化里残留的旧键被忽略，appearance.spec 新增对退役键的负向用例）；设置页移除分栏项；前端镜像 schemas/conversation_line.ts 与其 spec 撤除（无消费方即撤，按镜像纪律不写假指针），后端 conversation_view.rs 的 Corresponding Frontend 指针同步撤除；数据层零改动（Rust conversation_view 不动）；验证：tauri vitest 54 文件 838 测试全绿、vue-tsc 0 错误、t24 e2e 不返红、protocol-mirror-audit / test-layout-audit 零违规 |
+| `T-071-core形状变宽的必需性论证` | core 形状棘轮亮红（fn 73>72 / defaults 25>24）：逐格补「必需」论证 ADR 或回退 | quality | 处置取「论证必需」（变宽成员收窄不可行：`EventEnvelope::fallback_timestamp` 由泛型唯一写入口 `WalStore::append` 调用，全仓仅 `Event` 一个实现，下沉即 ADR-062 明确否决的方案）。① 逐格论证落 [ADR-062](../adr/ADR-062.md) 新增「形状论证（core 形状棘轮 CS-002）」节——`methods` +1：写入口对事件类型泛型（`Store::Event: EventEnvelope`），泛型触达信封自身 ts 的唯一通道是 trait 成员（与 `assign_seq` 同纪律）；`defaults` +1：默认 no-op 体是无时刻概念信封的平凡值（README §3 J2），去掉反让每个实现方手写同一空函数、公共面更宽。② `scripts/core-shape-audit.mjs` 基线 `methods 72→73` / `defaults 24→25`，旁挂两条 `core-shape-allow …: ADR-062 <理由>`，文件头冻结值同步 73/25。验证：core-shape-audit 零违规（CS-002 报「放宽 2 格，引用的 ADR 全部能打开」）· `--verbose` 逐 trait 显示 `EventEnvelope 4/1`（与论证的成员一一对上）· core-shape-audit.test.mjs 13/13 · `gate --only=baseline` 5/5（两格报「已登记豁免」非红）· registry-audit 零违规 · doc-link-audit 1408 链接 0 失效 |
+| `T-087-名册与正文对账批` | 名册锚点与阶正文对账批——纯文档清偿各阶 §3.1 登记的「文档≠系统」残留（只改锚与措辞，不改数字） | plan | 纯文档清偿（未动一行代码、未动名册计数与 `capability-assign` 块）。① 名册 §6.1 订正 11 行：情景记忆→`plugins/session/v2_memory.rs::encode`、语义记忆→`symbio_core/actors/recall.rs::recalled_event`（原锚 `plugins/memory/memory.rs` 是文件形态注入段，非事件记忆）、程序记忆→`plugins/session/v2_skills.rs`（原锚 `plugins/skill/mod.rs` 是市场插件）、副作用分级→`plugins/session/tools/tool_executor/breaker.rs`（原锚 `capability/mod.rs` 是分类标签）、独立验证与返工→`plugins/session/v2_tasks.rs`（原锚 `actors/spec.rs` 只是类型）、技能编译→`actors/skill.rs::SkillCompiler`、反自动化回退→`actors/skill.rs::SkillRouter`、多轮对话→`plugins/session/chat_loop.rs`、流式输出→`plugins/model/stream.rs`（三组原为「—」而代码已在生产）、完成度追求→「—」（`control.rs` 无此语义，全仓无承载）、具身实时闭环→「—」（`telegram/mod.rs` 语义错位）——锚定率 30/54 → 32/54。② 正文：ST-007 §2/§3 `task.blocked`→`task.held`（对齐 `EVENT_TASK_HELD` 单点定义）；ST-009 §2/§3/§5/§6 的「`internal.*`/`external.*` 命名前缀 + CI 扫描」→ 单名 `produce.artifact` + 构造期拒绝；ST-011 §3 事件格行 `memory/progressed` → 生产格 `memory/encoded{tag:skill}` + `memory.recalled`；ST-005 §3 参数表改为指 [PL-001 §8](../plan/PL-001-核心架构.md "PL-001-核心架构")（值域唯一 owner）并收敛「回放 L0/L1 不是取值」，§5 删掉无执行方的「回放级别选择」行。③ 各阶 §3.1 的「归 T-087」指认就地清偿（ST-001/002/003/005/006/007/009/011 + T-086 的交叉引用）。验证：`gate --only=docs,facts` 63/63 · `--only=verify` 21/21（`capability_frame` / `scenario_ladder` 绿 ⇒ 名册计数与「0 值域扩展」未变）· doc-symbol-audit 名册锚点 32/54 · doc-link-audit 1408 链接 0 失效 · registry-audit 零违规 |
+| `T-089-ci触发分支守卫失配` | ci.yml 触发分支守卫断言停在枚举 `v2-plan`，与配置的通配形状 `'v2*'` 失配——门禁 docs 阶段恒红 | quality | `scripts/gate.d/_shared.test.mjs` 的用例改名为「承载 v2 工作的分支必须在 push 与 pull_request 的触发分支里」，断言由字面量 `/v2-plan/` 换成通配形状 `/v2\*/`（push 与 pull_request 两行同判）；注释补上这次失配（守卫与配置的对账 = 同一条「没有信号的漏跑」的第三种形态）。反向判据：名单退回枚举 `[ main, master ]` 不含 `v2*` ⇒ 该用例红（`assert.match` 直接判，非恒真）。验证：`node --test scripts/gate.d/_shared.test.mjs` 51/51 绿；`node scripts/gate.mjs --only=docs,facts` 63/63 绿（此前 docs 阶段 62/63） |
 | `T-011` | 五轴的外部效标：每条轴挂一个可复现的读数，而不是形容词 | plan | PL-002 新增 §3.1.1 外部效标表（五轴逐条挂读数口，纪律三条：读数没出来不得改可测量口吻 / 设定值必标 / 给不出就写"本轴目前只能人工判"）；三条轴新落生产读数口——时域跨度 = span 投影（会话首末事件 ts 跨度 + 跨会话 P50 中位数）、主动性 = conation 的 adoption_rate（已升格 / 已表达，未升格算分母）、自主程度 = autonomy 投影（闭环且全程未 task.held / 已闭环，progress 恢复不洗掉干预事实）；自我模型精度沿用 calibration 列既有口径；抽象层级写明只能人工判（跨域迁移要离线评测，不在生产读数口内）。三族各配 core 判据（含 as-of、曾 held 不算自主、未闭环不进分母、空输入有据的零）+ stats 层「删事件 ⇒ 读数跟着动」的手术刀用例；core-export-audit C-003 单消费方 58/58 未增（新导出收窄为 pub(crate)）；cargo test --lib 1526 全绿、clippy 零警告 |
 | `T-012` | 能力名册 ↔ 代码锚点：名册的每一条能力都要指到实现它的地方 | plan | PL-002 §6.1 名册新增「锚点」列（54 行，取值 `文件` / `文件::符号` 反引号形态或 `—` 表示尚未落地），已填 30 行真实锚点；判据落到 doc-symbol-audit 的 D-011（复用 D-005 的同一份 Rust 语料，不新建第二份符号解析）：文件须在仓内存在、`::符号` 查语料存在、列须是反引号形态、名册读不出即红；锚定率进日志「名册锚点 30/54 已锚定」，使「名册在长、锚定率不动」看得见；回归 7 个用例双向钉住（不存在符号 / 不存在文件 / 非反引号形态 ⇒ 红；两种有效形态、`—` 不判红、名册不在范围不适用、名册读不出 ⇒ 红）——doc-symbol-audit.test.mjs 35/35；capability_frame.rs 编译运行全绿（名册多一列未破坏 facts 解析） |
 | `T-015` | 出厂 prompt 在线上是两条 system 消息，部分 provider 直接 400 拒收——full 档在那类 provider 上第一轮就失败 | S | 口径取「前缀并入基础 system」（形状只该有一个产地，不让每家协议各并一次）：openai_chat::prepare_request 新增 merge_leading_system，吃掉数组最前的连续 system 段、按「基础 → 前缀」空行分段拼成一条（空行分段是本仓既有惯例，NativeMessage::to_api_value 拼 prompt 用的就是它）；边界——只合纯文本段，遇 Parts（多模态）停下不再吃（拼错比多一条 system 更糟），吃掉 0 条时行为与改前逐字相同；判据三层接住：① 5 个单元测试（合并顺序 / 0 条不变 / 空基础不留前导空行 / Parts 停下 / 端到端断言请求体里 system 恰好一条且前缀文本未丢）；② 形状基线 PROMPT_SHAPE.md 随形状重生成（req0 消息序列 system → system → user 变 system → user、消息数 3→2），改回两条即红；③ cargo test --lib 1531 全绿 |
@@ -178,7 +179,7 @@
 - [`T-068-e2e用例体系化升级`](T-068-e2e用例体系化升级.md) e2e 用例体系化建设与升级：正常 + 异常场景全覆盖，按真实用户使用过程取形（done）
 - [`T-069-前端会话机制分析与优化`](T-069-前端会话机制分析与优化.md) 前端 v2 会话机制分析与优化：多线程会话模型与「一个会话线程一个显示区域」（done）
 - [`T-070-会话呈现合流单窗口`](T-070-会话呈现合流单窗口.md) 前端呈现合流：退役「对话 / 工作」分栏，一个会话线程一个显示区域（done）
-- [`T-071-core形状变宽的必需性论证`](T-071-core形状变宽的必需性论证.md) core 形状棘轮亮红（fn 73>72 / defaults 25>24）：逐格补「必需」论证 ADR 或回退（todo）
+- [`T-071-core形状变宽的必需性论证`](T-071-core形状变宽的必需性论证.md) core 形状棘轮亮红（fn 73>72 / defaults 25>24）：逐格补「必需」论证 ADR 或回退（done）
 - [`T-072-对等主体生产增量`](T-072-对等主体生产增量.md) ST-008 对等侧落地：对等主体窄 grants 行 + `commitment.asserted` 生产写方 + 会话独立的 ActorSpec 构造路径（todo）
 - [`T-073-多智能体社会数据行`](T-073-多智能体社会数据行.md) ST-013 落地：角色行（市场/仲裁/守门）+ 声誉驱动淘汰的 grants 变更事件 + 投影组合进裁决（todo）
 - [`T-074-压缩中插话判据补齐`](T-074-压缩中插话判据补齐.md) RE-005 唯一「暂不补（待评估）」缺口清偿：压缩进行中用户插话的判据面归属定论（todo）
@@ -194,5 +195,6 @@
 - [`T-084-ST-002产物投影方向对账批`](T-084-ST-002产物投影方向对账批.md) ST-002 `projection = display` 与生产方向相反——产物进不进上下文，裁决一边（todo）
 - [`T-085-记忆召回判据面补齐批`](T-085-记忆召回判据面补齐批.md) 记忆召回判据面补齐：calibrated 格 / 混合打分与 §5 措辞裁决 / recall_eval 切生产投影 / judgment 标签写方 / 保留策略（todo）
 - [`T-086-技能编译落地形态批`](T-086-技能编译落地形态批.md) S11 落地形态批：skill_compile 投影化或修订 / 凸度与密度读数裁决 / skill_compile_enabled 默认翻向的条件（todo）
-- [`T-087-名册与正文对账批`](T-087-名册与正文对账批.md) 名册锚点与阶正文对账批——纯文档清偿各阶 §3.1 登记的「文档≠系统」残留（只改锚与措辞，不改数字）（todo）
+- [`T-087-名册与正文对账批`](T-087-名册与正文对账批.md) 名册锚点与阶正文对账批——纯文档清偿各阶 §3.1 登记的「文档≠系统」残留（只改锚与措辞，不改数字）（done）
 - [`T-088-断流重发形态e2e补齐`](T-088-断流重发形态e2e补齐.md) 断流原样重发的用户可见形态（不重复卡片 / 不产出幽灵调用）补 e2e 锚（todo）
+- [`T-089-ci触发分支守卫失配`](T-089-ci触发分支守卫失配.md) ci.yml 触发分支守卫断言停在枚举 `v2-plan`，与配置的通配形状 `'v2*'` 失配——门禁 docs 阶段恒红（done）
