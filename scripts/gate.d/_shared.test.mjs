@@ -218,11 +218,15 @@ test('ci.yml 里包含 facts 阶段的 gate 调用必须传 --ci', () => {
 // 「白名单漏掉 `*.css` ⇒ 四个 job 都不跑」是同一课的第二次：第一次漏的是文件类型，
 // 这次漏的是分支。
 //
+// 第三次是**守卫与配置的对账**：`64ca8308` 把名单由枚举 `v2-plan` 改成通配形状 `'v2*'`
+// （改名不再失配），守卫却仍按字面量 `v2-plan` 断言 ⇒ docs 阶段恒红、被当噪声。故本断言
+// 钉的是**形状**（覆盖 v2 工作分支的通配），不是某一个分支名——名单退回枚举仍会红。
+//
 // 为什么只能靠断言：分支名单写错不报错、不变慢、本地复现不出来（本地跑 gate 与
 // CI 触发毫无关系）。且 `--ci` 只认这个命令行开关、**不读 `process.env.CI`**
 // （gate.mjs `const CI = hasFlag('--ci')`），所以连「CI 环境里会自动生效」的想当然
 // 都不成立。
-test('ci.yml：v2-plan 必须在 push 与 pull_request 的触发分支里，且保留手动触发', () => {
+test('ci.yml：承载 v2 工作的分支必须在 push 与 pull_request 的触发分支里，且保留手动触发', () => {
   const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
   const branchLines = yml.split('\n').filter((l) => /^\s*branches:\s*\[/.test(l))
   assert.equal(
@@ -233,8 +237,8 @@ test('ci.yml：v2-plan 必须在 push 与 pull_request 的触发分支里，且�
   for (const l of branchLines) {
     assert.match(
       l,
-      /v2-plan/,
-      `触发分支里没有 v2-plan ⇒ 该分支的 push 永远不触发 CI，且**没有任何提示**：${l.trim()}`,
+      /v2\*/,
+      `触发分支里没有通配形状 \`v2*\` ⇒ 承载 v2 工作的分支 push 永远不触发 CI，且**没有任何提示**：${l.trim()}`,
     )
   }
   // 手动触发是第三条路：分支不在名单里时，连补跑都做不到。
