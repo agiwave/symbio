@@ -18,9 +18,20 @@
 # 自动改写并暂存——在推送点替人暂存 = 替人决定哪些改动进本次提交（改动可能还没被审过）。
 # 所以这里只报红，修复交给人：`node scripts/gate.mjs --only=facts`（会生成并暂存）。
 #
-# 耗时实测 0.3s（只重生成 + 比对，不编译、不跑测试）。
+# 2026-10-13 把 `fmt` 也拉进来：**同一类「只在 CI 里才红」的漏网**，这次漏的是格式化。
+#   `c8ed5ee7` 手工恢复 `stream.rs`（编辑器按 GBK 读 UTF-8 致全文乱码）后没跑格式化，
+#   而 pre-commit 按设计**不能**跑 fmt——`cargo fmt --all` 会重排**所有**脏文件，
+#   等于替人暂存别人的改动，与它「只暂存生成器自己改写的文件」的纪律冲突。
+#   于是 26 个未格式化源码推到了 origin/v2，只在 CI 的 rust-checks 里以
+#   「cargo fmt --all 有 27 处差异」呈现——信号有，但迟了一整轮。
+#   这里同样只报红、不代改（`--ci` 语义）；修复交给人：跑整轮门禁（会自动格式化并暂存）。
+#   已知代价：判据看的是**工作区**，所以推送时若手边有未格式化的 `.rs` 脏改动，
+#   也会红一次（此时该跑门禁把它们格式化）——宁可多红一次，不要漏一次。
+#
+# 耗时实测 0.3s（只重生成 + 比对，不编译、不跑测试）；并入 fmt 后仍是秒级
+#   （CI 模式下 `cargo fmt --all` 只判差异，实测 1s）。
 # 想跳过某一次：git push --no-verify
 #
 # ⚠️ 本文件需在 git 里有执行位：git update-index --chmod=+x scripts/git-hooks/pre-push
 
-node scripts/gate.mjs --only=facts --ci
+node scripts/gate.mjs --only=fmt,facts --ci
