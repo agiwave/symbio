@@ -37,7 +37,8 @@ fn readonly_allowlist() {
     assert!(!is_readonly_allowed("vdfs/write", &none));
     assert!(!is_readonly_allowed("vdfs/delete", &none));
     assert!(!is_readonly_allowed("vdfs/action", &none));
-    assert!(!is_readonly_allowed("session/chat/send", &none));
+    // 控制面路由**一律不放行**——只读模式不驱动任何副作用，哪怕它自己只读
+    assert!(!is_readonly_allowed("session/stats", &none));
     assert!(!is_readonly_allowed("bogus/path", &none));
 
     // 拒绝：读**插件配置文件**——配置可能含凭据（网关访问令牌、

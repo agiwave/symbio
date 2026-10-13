@@ -44,8 +44,7 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use symbio::init::create_root_plugin;
-use symbio::symbio_core::chat_message::{ChatMessage, MessageContent, MessageRole, MessageType};
-use symbio::symbio_core::session_chat;
+use symbio::symbio_core::chat_message::ChatMessage;
 use symbio::symbio_core::{
     vdfs_change_of, VdfsChange, VdfsNode, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,
 };
@@ -170,6 +169,12 @@ pub struct SymbioClient {
     pub agent: Option<String>,
     /// VDFS 根地址（启动期经 `vdfs/root` 取回；会话地址从它往下拼）
     root_addr: String,
+    /// 本端运行选项自上次 `ensure_session` 以来变过 —— 置位则**下一次发送前**
+    /// 先补写会话 metadata。见 `switch_provider`。
+    ///
+    /// 只在「改选项」这条路上置位：启动期与 `switch_session` 各自已落库一次，
+    /// 故初值为 `false`。若初值为 `true`，REPL 的第一轮发送就会凭空多出一趟写入。
+    options_dirty: bool,
 }
 
 impl SymbioClient {
@@ -251,19 +256,22 @@ impl SymbioClient {
             mode,
             agent,
             root_addr: String::new(),
+            options_dirty: false,
         };
         // 会话初始化要往 `<根>/session/<id>` 写，因此先把根地址取回来。
         // 根叫什么**归 vdfs 插件**（`fs::VDFS_ADDR_ROOT`），使用方不写死——
         // 与前端同款：启动期问一次，之后一律从父地址往下拼。
         client.root_addr = client.fetch_root_addr().await?;
         client.watch_session_changes().await?;
+        // 选项会话化：provider / mode / risk 落在会话 metadata 上（ADR-066）。
+        // 这里已随会话创建写过一次，故 `options_dirty` 初值为 `false`。
         client.ensure_session().await?;
         Ok(client)
     }
 
     /// 取 VDFS 根地址（`vdfs/root` 是唯一「不给地址」的入口）。
     async fn fetch_root_addr(&self) -> Result<String, String> {
-        let resp = self.route("vdfs/root", json!({}), None).await?;
+        let resp = self.route("vdfs/root", json!({}), None, None).await?;
         resp.get("path")
             .and_then(Value::as_str)
             .filter(|p| !p.is_empty())
@@ -296,21 +304,29 @@ impl SymbioClient {
         // 路由字面量：`VDFS_WATCH` 常量是前端在用的那份，Rust 侧自持字面量
         // （与上面 `ROUTE_EVENT_BUS_SUBSCRIBE` 取常量的理由不同：这里是**插件内的相对臂
         // 消费方**，写错表现为 `vdfs/watch` 路由不存在 → 订阅失败，不会静默）。
-        self.route("vdfs/watch", json!({ "path": addr }), None)
+        self.route("vdfs/watch", json!({ "path": addr }), None, Some(&addr))
             .await?;
         Ok(())
     }
 
     /// 路由一次调用。`payload` 走进程内强类型通道（零拷贝），
     /// 因此无需为这些请求类型实现 Serialize。
+    ///
+    /// `addr` 是本次调用针对的**节点地址**（仅 `vdfs/*` 有）。留痕带上它是为了让
+    /// 「同一个路由上到底做了哪一件事」在 stderr 里可分辨——`vdfs/write` 同时承担
+    /// 「写会话 metadata」与「写收件箱」，只有路由名的痕迹会把两者算成一件。
     async fn route<T: Clone + Send + Sync + 'static>(
         &self,
         path: &str,
         payload: T,
         sid: Option<&str>,
+        addr: Option<&str>,
     ) -> Result<Value, String> {
         if route_log_enabled() {
-            eprintln!("[route] {path}");
+            match addr {
+                Some(a) => eprintln!("[route] {path} {a}"),
+                None => eprintln!("[route] {path}"),
+            }
         }
         let ctx = Arc::new(PluginSimpleRequest::new(None, None));
         ctx.set(PATH, path.to_string());
@@ -363,7 +379,7 @@ impl SymbioClient {
         }
 
         let addr = format!(
-            "{}/session/{}",
+            "{}/{SESSION_SEG}/{}",
             self.root_addr.trim_end_matches('/'),
             self.session_id
         );
@@ -378,6 +394,7 @@ impl SymbioClient {
                     "text": json!({ "metadata": Value::Object(metadata) }).to_string(),
                 }),
                 None,
+                Some(&addr),
             )
             .await?;
         // 失败经数据载荷回传（`{"error": …}`），不表现为传输错误——照实报出来，
@@ -390,18 +407,27 @@ impl SymbioClient {
         Ok(())
     }
 
-    /// 切换会话：更新 id 并重新写入元数据。
+    /// 切会话：更新 id 并重新写入元数据。
     ///
     /// 不需要「换闸门」——订阅是**全会话广播**（归属由信封的 `path` 给出），
     /// 一次订阅覆盖所有会话。切会话因此只剩「改 id + 落元数据」两件事。
     pub async fn switch_session(&mut self, session_id: String) -> Result<(), String> {
         self.session_id = session_id;
-        self.ensure_session().await
+        // 新会话的元数据可能与本端选项不同，落一次并清脏标记
+        self.ensure_session().await?;
+        self.options_dirty = false;
+        Ok(())
     }
 
     /// 切换 Provider（下次发送即生效，无需重建连接）。
+    ///
+    /// 落库推迟到**下一次发送**（`ask` 见 `options_dirty`）：`provider_id` 描述的是
+    /// **会话级事实**（这个会话用哪个 provider，[ADR-066](../../docs/adr/ADR-066.md "ADR-066")），
+    /// 它的落点是会话 metadata，不是某条消息的写体。置脏而不是立刻写，是为了让
+    /// 「开着 REPL 连续切几次」只落最后一次。
     pub fn switch_provider(&mut self, provider: Option<String>) {
         self.provider = provider;
+        self.options_dirty = true;
     }
 
     /// 丢弃本轮开始前残留的事件，避免上一轮的补丁被重复渲染。
@@ -439,31 +465,50 @@ impl SymbioClient {
         self.drain_stale();
         r.begin_turn();
 
-        let req = session_chat::Request {
-            session_id: Some(self.session_id.clone()),
-            agent_id: self.agent.clone(),
-            message: Some(ChatMessage {
-                id: gen_id("u"),
-                role: Some(MessageRole::User),
-                msg_type: Some(MessageType::Text),
-                content: Some(MessageContent::Text(text.to_string())),
-                ..Default::default()
-            }),
-            // 随请求携带 provider/mode：即便会话元数据被外部改写，本次发送依然生效
-            provider_id: self.provider.clone(),
-            include_history: None,
-            mode: Some(self.mode.clone()),
-            risk_level: Some("medium".to_string()),
-            resume: None,
-        };
+        // 本端选项自上次落库以来变过，才先把它们落成会话 metadata。
+        //
+        // `session/chat/send` 已随输入面双轨退役（[ADR-066](../../docs/adr/ADR-066.md "ADR-066") /
+        // T-077 步②），收件箱写入面**不承载运行选项**。从前「随请求携带 provider / mode /
+        // risk」的语义因此改走会话 metadata——而 metadata 本就是这三项的**唯一**写入
+        // 落点（[ADR-066] 理由 1：同一件会话级事实有两个 owner 正是双轨期的病）。
+        // 从前那条注释写的「即便会话元数据被外部改写，本次发送依然生效」是**刻意**的
+        // 调用级覆盖意图；它没有被否决，否决的是把它寄托在消息写体上——覆盖仍在下一次
+        // 发送前生效（本段就是），只是落点是会话而不是消息。
+        //
+        // 于是「改了就落、没改不落」：`ensure_session` 是同一次相对帧下的 **upsert**，
+        // 而每轮都写一遍只会让一轮对话多出一趟与内容无关的写入。
+        //
+        // 启动期与切会话时已各落一次（见 `connect` / `switch_session`），故初值为
+        // `false`；REPL 内改选项（`switch_provider`）把它置脏。
+        if self.options_dirty {
+            self.ensure_session().await?;
+            self.options_dirty = false;
+        }
 
+        let inbox_addr = format!(
+            "{}/{SESSION_SEG}/{}/inbox",
+            self.root_addr.trim_end_matches('/'),
+            self.session_id
+        );
         let resp = self
-            .route("session/chat/send", req, Some(&self.session_id))
+            .route(
+                "vdfs/write",
+                json!({
+                    "path": inbox_addr,
+                    // 正文是**纯文本**：`parse_inbox_message` 的判别式是「不以 `{` 开头」
+                    // ⇒ 整段就是消息正文，身份与缺省由 provider 一侧补齐（ADR-066 决策 1）。
+                    "text": text,
+                }),
+                None,
+                Some(&inbox_addr),
+            )
             .await?;
-        match resp.get("status").and_then(Value::as_str) {
-            Some("accepted") => {}
-            Some(other) => return Err(format!("发送未被接受（{other}）: {resp}")),
-            None => return Err(format!("发送响应异常: {resp}")),
+        // 失败经数据载荷回传（`{"error": …}`），不表现为传输错误——照实报出来，
+        // 否则会退化成「响应解析失败」这种看不出原因的消息。
+        if let Some(err) = resp.get("error").and_then(Value::as_str) {
+            if !err.is_empty() {
+                return Err(format!("消息入队未成功: {err}"));
+            }
         }
 
         // 本轮的业务错误（失败结局的 `error`）。**不预置初值**：循环的每个出口都在
@@ -663,7 +708,7 @@ impl SymbioClient {
     /// 回读一个节点的当前视图（`vdfs/stat`）。
     async fn stat_node(&self, addr: &str) -> Option<VdfsNode> {
         let resp = self
-            .route("vdfs/stat", json!({ "path": addr }), None)
+            .route("vdfs/stat", json!({ "path": addr }), None, Some(addr))
             .await
             .ok()?;
         serde_json::from_value::<VdfsNode>(resp).ok()
@@ -699,7 +744,7 @@ impl SymbioClient {
     /// 路由）本方法零改动，Tauri 侧同样零改动。
     pub async fn print_stats(&self) -> Result<(), String> {
         let resp = self
-            .route("session/stats", json!({}), Some(&self.session_id))
+            .route("session/stats", json!({}), Some(&self.session_id), None)
             .await?;
         let panel: ReadingPanel =
             serde_json::from_value(resp.get("panel").cloned().ok_or_else(|| {

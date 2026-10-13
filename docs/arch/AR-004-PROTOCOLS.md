@@ -90,7 +90,7 @@ let (my_channel, peer_channel) = PluginChannel::pair(64);
 
 | 键 | 类型 | 用途 |
 |----|------|------|
-| `PATH` | String | 目标路径 (如 `session/chat/send`；资源类走 `vdfs/*` + `<根>/…` 地址) |
+| `PATH` | String | 目标路径 (如 `session/stats`；资源类走 `vdfs/*` + `<根>/…` 地址) |
 | `payload` | 任意（调用方定） | 交互载荷数据（桶名见 `symbio_core::PLUGIN_PAYLOAD_KEY`） |
 | `WORKDIR` | String | 当前工作区根路径 |
 | `SESSION_ID` | String | 会话唯一标识 |

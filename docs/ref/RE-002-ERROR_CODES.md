@@ -63,7 +63,7 @@ impl PluginError {
     "message": "路由路径不存在: session/chat/unknown",
     "details": {
       "path": "session/chat/unknown",
-      "available": ["session/chat/send", "session/chat/abort", "session/open"]
+      "available": ["session/stats"]
     }
   }
 }
@@ -158,8 +158,8 @@ VITE_LOG_LEVEL=debug npm run dev
 每个请求的 `metadata` 应包含 `trace_id`，后端会记录在日志中：
 
 ```
-INFO trace_id=abc123 path=session/chat/send Start routing
-DEBUG trace_id=abc123 path=session/chat/send Routing finished
+INFO trace_id=abc123 path=session/stats Start routing
+DEBUG trace_id=abc123 path=session/stats Routing finished
 ```
 
 回读类路由（`vdfs/list` / `stat` / `read`）另有 `origin`——`trace_id` 串链，

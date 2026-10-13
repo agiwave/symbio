@@ -60,23 +60,12 @@
 //!
 //! # 命名：`ROUTE_<插件目录名>_<操作>`
 //!
-//! 标识符去掉 `ROUTE_` 前缀后，必须**逐字等于值的大写形式**（`/` → `_`）：
-//! `ROUTE_SESSION_CHAT_SEND` ↔ `"session/chat/send"`。这条与「值必须是真实分发目标」
-//! 一起由 `scripts/plugin-entry-audit.mjs` 的 **E-012** 检查（后者抓的是登记了一条没人
-//! 能到达的地址——`AGENT_CHAT` 正是这个形态）。命名规则同时也是本模块存在的理由
-//! （防止路径漂移）的守卫。
+//! 标识符去掉 `ROUTE_` 前缀后，必须**逐字等于值的大写形式**（`/` → `_`）。这条与
+//! 「值必须是真实分发目标」一起由 `scripts/plugin-entry-audit.mjs` 的 **E-012** 检查
+//! （后者抓的是登记了一条没人能到达的地址——`AGENT_CHAT` 正是这个形态）。命名规则同时
+//! 也是本模块存在的理由（防止路径漂移）的守卫。
 
-// ============ Session 插件 ============
-/// session/chat/send — 发起一轮对话（**统一编排入口**）
-///
-/// 这是全仓**唯一**的会话发言入口。子智能体派生（`agent/host/subagent.rs`）、
-/// 心跳（`session/heartbeat/mod.rs`，直连）、Telegram 通道都汇到这里。
-///
-/// 注意不是 `session/chat`：那个路径**不存在**（session 的 `route` 只认
-/// `chat/send` 与 `chat/abort` 两条相对臂）。Telegram 曾用它，见下方
-/// [`ROUTE_HOOK_FIRE`] 同类的记录。
-pub const ROUTE_SESSION_CHAT_SEND: &str = "session/chat/send";
-
+// ============ VDFS 插件 ============
 // ============ VDFS 插件 ============
 /// vdfs/root — **进入地址空间**：取根地址，调用方不给地址。
 ///
@@ -121,11 +110,16 @@ pub const ROUTE_EVENT_BUS_SUBSCRIBE: &str = "event_bus/subscribe";
 /// **被本模块删掉的两个常量（2026-09-18）**：`AGENT_CHAT = "agent/chat"` 与
 /// `AGENT_CREATE = "agent/create"`。它们全仓**零调用方**，而且描述的路径**根本不存在**
 /// ——`agent` 插件的 `route` 恒返回 `NotFound`（agent 目录一律经 VDFS 访问），
-/// 子智能体派生走的是 [`ROUTE_SESSION_CHAT_SEND`]。
+/// 子智能体派生走的是收件箱地址面（`vdfs/write <会话地址>/inbox`）。
 ///
 /// 留着它们比没有更糟：`AGENT_CHAT` 的文档曾写着「子智能体会话执行入口
 /// （仅 agent_run 能力内部调用）」，而**没有任何代码那样调用**——这正是本模块
 /// 存在的理由（防止路径漂移）被反过来利用的样子。本模块只收有真实调用方的路径。
+///
+/// 后来删掉的第三个是 `ROUTE_SESSION_CHAT_SEND`（T-077 步②，输入面双轨退役）：
+/// 它的四个调用方全部改走地址面，session 插件上的 `chat/send` / `chat/abort` 两条
+/// 相对臂与 `handle_chat_send_oneoff` / `handle_chat_abort_oneoff` 一并删除——
+/// 「接收消息」与「跑一轮」分开之后，那条路由既无输入可收，也无响应可给。
 pub const ROUTE_HOOK_FIRE: &str = "hook/fire";
 
 // ============ Classify 插件 ============

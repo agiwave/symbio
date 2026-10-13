@@ -41,6 +41,8 @@ import {
   providerConfig,
   PROVIDER_ID,
   readSessionMessages,
+  createSession,
+  sendInbox,
   assertTranscriptInvariants,
   assertSeqAnchorIsNodeAttribute,
 } from '../helpers.mjs';
@@ -90,17 +92,14 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     // ① 订阅实时面（发消息之前，不漏首帧）
     rt = await subscribeSessionRealtime(cli, { sessionId: 'e2e-t10', gatewayPort: GATEWAY_PORT });
 
-    // ② 发起对话
-    const send = await cli.invoke(
-      'session/chat/send',
-      {
-        session_id: 'e2e-t10',
-        message: { id: 'u-t10', role: 'user', type: 'text', content: '全景' },
-        mode: 'auto',
-      },
-      { session_id: 'e2e-t10', workdir: hd.workdir },
-    );
-    assert(send.status === 200, `chat/send 应受理（${send.status}）`);
+    // ② 会话先建出来：收件箱是会话内部的集合，会话不在就没有它可写。
+    //    写入面**不承载**运行选项（[ADR-066] 决策 1）——`mode` 由会话 metadata 提供
+    //    （此处恰为默认值 auto），不需要也不该随消息再带一次。
+    await createSession(cli, 'e2e-t10', { workdir: hd.workdir });
+
+    // ③ 发起对话：收件箱地址面（`session/chat/send` 已随双轨退役）
+    const send = await sendInbox(cli, 'e2e-t10', '全景', { workdir: hd.workdir });
+    assert(send.status === 200, `写收件箱应受理（${send.status}）`);
 
     // ③ 等实时面**静默收敛**：没有任何节点停在非终态，且连续 `QUIET_MS` 没有新变更。
     //

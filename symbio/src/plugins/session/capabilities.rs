@@ -33,8 +33,9 @@
 //! ## 为什么放在 session 插件
 //!
 //! 本管线的唯一驱动方是 session 编排器：子智能体（agent 插件的 `agent_run`）需要
-//! 嵌套会话时，经统一路由 `session/chat/send` 复用本管线，而非由 agent 插件直接
-//! 调用——管线不再是跨插件共享设施，故从 `symbio_core` 下沉到 session 插件内部。
+//! 嵌套会话时，经收件箱地址写入（`vdfs/write <子会话地址>/inbox`）复用本管线，而非由
+//! agent 插件直接调用——管线不再是跨插件共享设施，故从 `symbio_core` 下沉到 session
+//! 插件内部。
 //!
 //! 仍留在 `symbio_core` 的是**收集期错误通道**（`capability_error.rs`：写侧为任意
 //! 参与 traverse 的插件、读侧为 session 编排方，属跨插件契约）；本文件仅消费。

@@ -15,7 +15,7 @@
 //!
 //! 反向规则：只被单一插件消费的设施定义在该插件内部，core 不承载单模块内部定义。
 //! 收集管线本身（`collect_capabilities` / `attach_capabilities`）只有 session 插件
-//! 调用（子智能体的嵌套会话经路由 `session/chat/send` 复用同一管线，
+//! 调用（子智能体的嵌套会话经收件箱地址写入复用同一管线，
 //! 不由 agent 直接驱动），因此定义在 session 插件内。
 
 use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_ERRORS};

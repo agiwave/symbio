@@ -273,8 +273,8 @@ fn nodes_of(e: &Event) -> Vec<ChatMessage> {
 ///
 /// ## 为什么不设 `status`（与"用户发言是完成态"的直觉相反）
 ///
-/// 形状必须**逐字复刻落库那一份**，而落库的用户消息由调用方给（CLI 的
-/// `session/chat/send` 请求体，`..Default::default()`）——它**没有** `status`。
+/// 形状必须**逐字复刻落库那一份**，而落库的用户消息由调用方给（收件箱写入面
+/// 经 `parse_inbox_message` 补的缺省，`..Default::default()`）——它**没有** `status`。
 /// 重建若自作主张补一个 `Completed`，同一条发言在实时面（无 status）与重建面
 /// （`completed`）就是两个身份：前端的节点合并键把 `status` 算在内
 /// （`useChatConnection.ts` 的 `own` 键），合并当场失效、历史里冒出重复节点。

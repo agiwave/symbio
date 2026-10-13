@@ -37,6 +37,8 @@ import {
   providerConfig,
   PROVIDER_ID,
   readSessionMessages,
+  createSession,
+  sendInbox,
   assertTranscriptInvariants,
   assertSeqAnchorIsNodeAttribute,
 } from '../helpers.mjs';
@@ -98,6 +100,9 @@ export default defineCase('T11 压缩节点协议：compression 节点的开始/
     // ① 订阅实时面（发消息之前，不漏首帧）
     rt = await subscribeSessionRealtime(cli, { sessionId: 'e2e-t11', gatewayPort: GATEWAY_PORT });
 
+    // 会话先建出来：收件箱是会话内部的集合，会话不在就没有它可写
+    await createSession(cli, 'e2e-t11', { workdir: hd.workdir });
+
     // 每个 turn 节点**最后一次**状态到达终态的个数（按节点去重，不按帧计数）
     const doneTurns = () => {
       const last = new Map();
@@ -110,16 +115,8 @@ export default defineCase('T11 压缩节点协议：compression 节点的开始/
     // ② 串行发 4 轮：每轮等「本轮新出现的 turn 终态」，避免并发发送把上一轮打成 aborted
     for (const [i, text] of ['第一轮问题', '第二轮问题', '第三轮问题', '第四轮问题'].entries()) {
       const before = doneTurns();
-      const send = await cli.invoke(
-        'session/chat/send',
-        {
-          session_id: 'e2e-t11',
-          message: { id: `u-t11-${i}`, role: 'user', type: 'text', content: text },
-          mode: 'auto',
-        },
-        { session_id: 'e2e-t11', workdir: hd.workdir },
-      );
-      assert(send.status === 200, `第 ${i + 1} 轮 chat/send 应受理（${send.status}）`);
+      const send = await sendInbox(cli, 'e2e-t11', text, { workdir: hd.workdir });
+      assert(send.status === 200, `第 ${i + 1} 轮写收件箱应受理（${send.status}）`);
       await waitFor(() => doneTurns() > before, { what: `第 ${i + 1} 轮 turn 终态`, timeoutMs: 60_000 });
     }
     await waitFor(

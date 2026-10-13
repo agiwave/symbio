@@ -108,8 +108,8 @@ pub async fn route_v2(
         }
         PluginPayload::Session(chan) => {
             // 连接的取消令牌：**只用于订阅表收口**（会话/总线插件的反注册任务在等它），
-            // 不用于中止业务任务——会话中止走 `session/chat/abort` + ExecAbortSignal。
-            // 见 `route_connection::RouteConnection::cancel` 的说明。
+            // 不用于中止业务任务——会话中止走 `vdfs/action(<会话地址>, "abort")`
+            // + ExecAbortSignal。见 `route_connection::RouteConnection::cancel` 的说明。
             let cancel = chan.cancel_token.clone();
             // 注册连接: 优先使用前端指定的 ID (client_id) 避免握手竞态丢失首帧
             let conn_id = if let Some(id) = client_id {

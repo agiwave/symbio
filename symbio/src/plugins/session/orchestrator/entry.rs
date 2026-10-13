@@ -1,14 +1,15 @@
-//! 请求入口：`chat/send` 与 `chat/abort` 两个 one-off 入口。
+//! 请求入口：一轮执行的装配层。
 //!
 //! - `resolve_session_params`：`mode` / `risk_level` / `provider_id` 三者的解析链
 //!   （`req` 字段 > `session.metadata` > 默认值），结果同时 `set` 回 `ctx`；
-//! - `handle_chat_send_oneoff`：装配层（参数解析 + 落库 + 自动命名 + ctx 装配 →
+//! - `start_turn`：**一轮执行的唯一实现**（参数解析 + 落库 + 自动命名 + ctx 装配 →
 //!   交付 chat_ctx 给 `consume.rs` 的消费循环）；
-//! - `handle_chat_abort_oneoff`：中止入口；
 //! - `ensure_auto_title`：首个用户消息落盘后的自动命名（顺带发 VDFS 变更）。
 //!
-//! 可见性：`handle_chat_send_oneoff` / `handle_chat_abort_oneoff` 被 `plugin.rs`
-//! 的路由与 `heartbeat/mod.rs` 跨模块调用（原本即 `pub`）。
+//! 输入面已收为**单轨**（[ADR-066] / T-077 步②）：`chat/send` / `chat/abort` 两个
+//! one-off 入口已退役，全部调用方改走地址面——发消息 = `vdfs/write <会话地址>/inbox`，
+//! 恢复 = `action(<消息地址>, <动作词>)`，中止 = `action(<会话地址>, "abort")`。
+//! `start_turn` 的调用方因此只剩收件箱消费者与恢复动作，二者都不经路由。
 
 use super::super::chat_session::Carrier;
 use super::super::plugin::{append_and_publish, PublishTarget};
@@ -150,70 +151,16 @@ impl SessionPlugin {
         }
     }
 
-    /// **发送入口**：把用户消息**入队**，恢复（`resume`）走直连。
+    /// **执行一轮**：收件箱消费者与恢复动作共用（唯一实现）。
     ///
-    /// ## 为什么入队而不是直接跑
+    /// 调用方有两条，且**都不再经过路由**：
+    /// - 收件箱消费者（`run_inbox_turn`）——用户消息经地址面 `vdfs/write <会话地址>/inbox`
+    ///   入队后由这里开跑；
+    /// - 恢复动作（`action(<消息地址>, <动作词>)`，provider 侧构造 ctx 后调进来）。
     ///
-    /// `chat/send` 曾经把「接收消息」与「跑一轮」写在一起，于是"谁来跑一轮"这件事
-    /// 只能由**调用方**回答——子智能体空间没有调用方，它的消息就没有入口。现在
-    /// 消息统一落在会话的收件箱里，由**空间自己**消费（见 `inbox` 模块与 ADR-026）：
-    /// 本函数因此只是「入队」的一层薄包装，不再持有编排。
-    ///
-    /// ## 为什么 `resume` 不入队
-    ///
-    /// 恢复（重试 / 审批 / 补充）不是一条新消息，而是对**已有轮次**的操作：它必须
-    /// 落在当时那条消息上。入队会让它排在一堆新消息之后——等到它被消费时，候选
-    /// 早已被后续轮次改写，恢复的语义当场失效。
-    ///
-    /// ## 为什么互斥校验在这里
-    ///
-    /// 「`message` 与 `resume` 二选一」是**入口**的规矩（两个分支从这里分流），
-    /// 不是某一分支的内部约束；放在入口，两个分支各自就不必再校验一遍。
-    ///
-    /// 响应立刻返回（`accepted`），流式事件由 VDFS 变更推送。
-    pub async fn handle_chat_send_oneoff(
-        self: Arc<Self>,
-        ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> PluginInvokeResponse<PluginPayload> {
-        let req: session_chat::Request = ctx.payload()?;
-        let session_id = resolve_required_session_id(&ctx, req.session_id.as_deref())?;
-
-        // 历史上只校验"至少有一个"，两者同时提供时并不报错：用户消息被追加进存储，
-        // 却不作为本轮驱动输入（仅因 load_history=true 才间接可见），属静默的语义分裂。
-        // 现显式拒绝，让调用方二选一。
-        if req.resume.is_none() && req.message.is_none() {
-            return Err(PluginError::ValidationError(
-                "必须提供 message 或 resume".into(),
-            ));
-        }
-        if req.resume.is_some() && req.message.is_some() {
-            return Err(PluginError::ValidationError(
-                "message 与 resume 互斥，不能同时提供".into(),
-            ));
-        }
-
-        let Some(message) = req.message.clone() else {
-            // resume 分支：直连（恢复不是"一条用户消息"）
-            return self.clone().start_turn(ctx).await;
-        };
-
-        // 请求级参数随条目带走：`session_id` / `message` / `resume` 已各有归宿
-        // （地址 / 条目自身 / 不走收件箱），剩下的正是本次运行的选项。
-        let params = session_chat::Request {
-            session_id: None,
-            message: None,
-            resume: None,
-            ..req
-        };
-        self.enqueue_inbox(&session_id, None, message, params, ctx.get(WORKDIR))
-            .await;
-        Ok(PluginPayload::new(&json!({
-            "status": "accepted",
-            "session_id": session_id
-        })))
-    }
-
-    /// **执行一轮**：`chat/send` 的 resume 分支与收件箱消费者共用（唯一实现）。
+    /// 曾经的第三条是 `chat/send` 路由（one-off 入口），它只是入队的薄包装；随输入面
+    /// 双轨退役（[ADR-066] / T-077 步②）已删除——「接收消息」与「跑一轮」分开之后，
+    /// 那条路由既无输入可收，也无响应可给（回包恒为 `accepted`）。
     ///
     /// 两种输入互斥，区别只在构造 `model_chat::Request` 时：
     /// - `req.message` 存在 → 追加用户消息，`single_message=Some(msg)`，从 root 会话流开始
@@ -230,8 +177,9 @@ impl SessionPlugin {
     /// 3. 基础提示词不在这里拼——各层指令与记忆由插件在收集期注册
     /// 4. 直接路由 `model/chat`
     ///
-    /// 入口处的互斥校验不在这里重复（见 `handle_chat_send_oneoff`），此处只剩
-    /// 与"真的开跑"有关的准备：参数解析、忙碌守卫、工作目录、能力收集、派发。
+    /// 输入互斥的校验在**构造请求的两处**各自完成（收件箱只产 message、恢复动作只产
+    /// resume），此处只剩与"真的开跑"有关的准备：参数解析、忙碌守卫、工作目录、
+    /// 能力收集、派发。
     pub(crate) async fn start_turn(
         self: Arc<Self>,
         ctx: Arc<dyn PluginInvokeRequest>,
@@ -573,28 +521,6 @@ impl SessionPlugin {
         // 立即返回 success（事件流经 bus 推送）
         Ok(PluginPayload::new(&json!({
             "status": "accepted",
-            "session_id": session_id
-        })))
-    }
-
-    /// one-off 中止
-    pub async fn handle_chat_abort_oneoff(
-        self: Arc<Self>,
-        ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> PluginInvokeResponse<PluginPayload> {
-        // 会话 id：头 → 请求体（此前只看头，`unwrap_or("default")` 使其必然报错，
-        // 令 RPC 直连调用方无法通过 payload 指定会话）
-        let body_id = ctx.payload::<serde_json::Value>().ok().and_then(|v| {
-            v.get("session_id")
-                .and_then(|s| s.as_str())
-                .map(|s| s.to_string())
-        });
-        let session_id = resolve_required_session_id(&ctx, body_id.as_deref())?;
-        // 与 `action(<会话地址>, "abort")` **同一个实现**（`abort_turn`）；本路由是
-        // 它的 address-less 别名，退役前不复制逻辑。
-        let stopped = self.abort_turn(&session_id).await;
-        Ok(PluginPayload::new(&serde_json::json!({
-            "status": if stopped { "aborted" } else { "idle" },
             "session_id": session_id
         })))
     }

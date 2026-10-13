@@ -50,6 +50,8 @@ import {
   providerConfig,
   PROVIDER_ID,
   readSessionMessages,
+  createSession,
+  sendInbox,
   assertTranscriptInvariants,
   textOf,
 } from '../helpers.mjs';
@@ -137,17 +139,11 @@ export default defineCase(
       // ① 订阅实时面（**发消息之前**，不漏首批节点帧）
       rt = await subscribeSessionRealtime(cli, { sessionId: SID, gatewayPort: GATEWAY_PORT });
 
-      // ② 经 HTTP 边界发起对话（会话目标挂在 metadata.session_id）
-      const send = await cli.invoke(
-        'session/chat/send',
-        {
-          session_id: SID,
-          message: { id: 'u-t54', role: 'user', type: 'text', content: '断流重发测试' },
-          mode: 'auto',
-        },
-        { session_id: SID, workdir: hd.workdir },
-      );
-      assert(send.status === 200, `chat/send 应受理（${send.status}: ${JSON.stringify(send.body)?.slice(0, 150)}）`);
+      // ② 会话先建出来（收件箱是会话内部的集合），再经 HTTP 边界发起对话：
+      //    收件箱地址面（会话目标挂在 metadata.session_id）
+      await createSession(cli, SID, { workdir: hd.workdir });
+      const send = await sendInbox(cli, SID, '断流重发测试', { workdir: hd.workdir });
+      assert(send.status === 200, `写收件箱应受理（${send.status}: ${JSON.stringify(send.body)?.slice(0, 150)}）`);
 
       // ③ 等本轮收敛：**收束正文**在实时面上到达终态（断流 + 重发 + 工具轮都在这一轮里）。
       //    判据取「可见的收束正文终态」而不是会话运行态字段——前者是本轮跑完的**用户可见**

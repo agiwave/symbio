@@ -26,7 +26,7 @@
 | `memory` | `memory` | <根>/memory | — | `Plugin` · `VdfsProvider` | ✓ | ✓ |
 | `model` | `model` | <根>/model | （动态）已无自有路由（`execute_turn` 由 session 直连调用） | `ModelProvider` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `plugin_manager` | `plugin_manager` | <根>/plugin_manager | — | `Plugin` · `VdfsProvider` | — | ✓ |
-| `session` | `session` | <根>/session | `session/chat/abort` · `session/chat/send` · `session/stats` | `Capability` · `Plugin` · `VdfsProvider` | ✓ | ✓ |
+| `session` | `session` | <根>/session | `session/stats` | `Capability` · `Plugin` · `VdfsProvider` | ✓ | ✓ |
 | `setting` | `setting` | <根>/setting | — | `Plugin` | ✓ | ✓ |
 | `skill` | `skill` | <根>/skill | `skill/execute` | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `telegram` | `telegram` | <根>/telegram | `telegram/get_updates` · `telegram/send` · `telegram/set_chat_id` · `telegram/start_listener` · `telegram/status` · `telegram/stop_listener` | `Plugin` | ✓ | ✓ |
@@ -78,11 +78,11 @@
 ### 3.1 前端 / 宿主路由
 
 ```
-{container}/{plugin}/{action}     例：worker/session/chat/send（worker 可省略）
+{container}/{plugin}/{action}     例：worker/session/stats（worker 可省略）
 ```
 
 - 完整路由清单见 [ref/RE-003-ROUTES.md](./ref/RE-003-ROUTES.md)。
-- **前端侧常量**：`tauri/src/constants/routes.gen.ts`——22 条静态可提取地址，由后端 `route()` 的 `match` 臂**生成**（`scripts/gen-routes-ts.mjs`），不是手写登记处；前端在别处写死同一条地址由 `mechanism-audit` 的 M-008 判红。
+- **前端侧常量**：`tauri/src/constants/routes.gen.ts`——20 条静态可提取地址，由后端 `route()` 的 `match` 臂**生成**（`scripts/gen-routes-ts.mjs`），不是手写登记处；前端在别处写死同一条地址由 `mechanism-audit` 的 M-008 判红。
 
 ### 3.2 VDFS 操作（`plugins/vdfs/protocol.rs::VDFS_OPS`）
 
@@ -105,10 +105,10 @@
 
 | 范围 | 实现 | 测试 |
 |---|---|---|
-| `symbio/src` | 289 文件 / 78751 行 | 175 文件 / 47769 行 |
-| `cli/src` | 4 文件 / 1670 行 | 1 文件 / 80 行 |
+| `symbio/src` | 289 文件 / 78736 行 | 175 文件 / 47770 行 |
+| `cli/src` | 4 文件 / 1715 行 | 1 文件 / 80 行 |
 | `tauri/src-tauri/src` | 3 文件 / 451 行 | 0 文件 / 0 行 |
-| `tauri/src` | 105 文件 / 22932 行 | 54 文件 / 12621 行 |
+| `tauri/src` | 105 文件 / 22930 行 | 54 文件 / 12621 行 |
 
 ### 5.2 宿主接缝（前端到底有多大）
 
@@ -119,4 +119,4 @@
 
 ---
 
-> 生成时间：2026-10-13 15:18:41 UTC · 源：`git rev-parse HEAD` = `749ff579`
+> 生成时间：2026-10-13 17:11:57 UTC · 源：`git rev-parse HEAD` = `9c33dddd`

@@ -30,8 +30,8 @@ VITE_LOG_LEVEL=debug npm run dev
 每个请求的 `metadata` 应包含 `trace_id`：
 
 ```
-INFO trace_id=abc123 path=session/chat/send Start routing
-DEBUG trace_id=abc123 path=session/chat/send Routing finished
+INFO trace_id=abc123 path=session/stats Start routing
+DEBUG trace_id=abc123 path=session/stats Routing finished
 ```
 
 **`trace_id` 只回答「哪几次请求属于同一条链」，不回答「谁发的、为什么发」**——
@@ -153,15 +153,19 @@ cargo clippy --lib --tests -- -D warnings
 curl -X POST ... -d '{"path": "_root"}'
 ```
 
-### 问题：流式会话无响应
+### 问题：会话跑起来了但界面上没有输出
 
-**症状**：调用 `session/chat/send` 后无数据返回
+**症状**：写入收件箱（`vdfs/write <根>/session/<sid>/inbox`）后被受理，但没有增量正文、
+状态卡在「处理中」
 
 **排查步骤**：
 1. 检查 API Key 是否配置
 2. 检查网络连接
 3. 查看后端日志是否有 LLM API 错误
-4. 确认 `PluginChannel` 是否正确传递
+4. 确认**两步订阅都装上了**：`event_bus/subscribe`（总线广播口）+ `vdfs/watch`（provider
+   侧的 sink）。只装前者的症状与「模型没有产出」逐字相同——一条变更都收不到，且不报错。
+   CLI 上判据是 `SYMBIO_ROUTE_LOG=1`：只有出站请求、没有任何 `[frame]` 行，就是少了一半
+   （帧到了但没认出来也会有 `[frame]` 行）。
 
 ### 问题：前端无法连接后端
 

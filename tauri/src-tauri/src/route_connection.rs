@@ -22,9 +22,9 @@ pub struct RouteConnection {
     /// 那些任务永不执行——订阅表就只能靠「下一次发布时探测 `tx.is_closed()`」兜底，
     /// 而那要求**之后还有发布**；没有发布就一直留着。
     ///
-    /// 会话主循环的中止走**另一条路**（`session/chat/abort` 路由 + `ExecAbortSignal`），
-    /// 与本令牌无关。因此关闭前端连接**不会**中止正在跑的那一轮对话——
-    /// 这正是 `route_v2_close` 想要的语义（后端任务独立于前端连接继续运行）。
+    /// 会话主循环的中止走**另一条路**（节点动作 `vdfs/action(<会话地址>, "abort")`，连同
+    /// `ExecAbortSignal`），与本令牌无关。因此关闭前端连接**不会**中止正在跑的那一轮
+    /// 对话——这正是 `route_v2_close` 想要的语义（后端任务独立于前端连接继续运行）。
     pub cancel: CancellationToken,
 }
 

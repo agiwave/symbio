@@ -29,7 +29,7 @@ Symbio 的设计核心是**分形插件架构 (Fractal Plugin Architecture)**。
 
 ### 3. 能力路由 (Capability Routing)
 
-路径即路由。通过 `/` 分隔的字符串（如 `session/chat/send`、`local/content_search`）定位任何插件或具体能力。`traverse()` 与 `route()` 共享同一路径协议。
+路径即路由。通过 `/` 分隔的字符串（如 `session/stats`、`local/content_search`）定位任何插件或具体能力。`traverse()` 与 `route()` 共享同一路径协议。（资源不走这条语法——统一经 `vdfs/*` + `<根>/…` 地址。）
 
 ### 4. 扁平化实现 (Flattened Implementation)
 

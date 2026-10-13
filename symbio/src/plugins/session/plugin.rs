@@ -537,9 +537,12 @@ impl Plugin for SessionPlugin {
         // 每个分支都**自己返回**（`match` 的值不再被使用）：本表已经没有
         // 「算出一份 Data 载荷再统一包信封」的路径了——会话与消息的数据面
         // 全在 VDFS 上，这里只剩编排 / 控制。
+        //
+        // `chat/send` / `chat/abort` 已于 T-077 步② 退役：输入面双轨（inbox 地址
+        // 写入 vs 两条全局路由）收为单轨，全部消费方改走地址面——
+        // 发消息 = `vdfs/write <会话地址>/inbox`，恢复 = `action(<消息地址>, <动作词>)`，
+        // 中止 = `action(<会话地址>, "abort")`。裁决见 ADR-066。
         match path {
-            "chat/send" => return self.handle_chat_send_oneoff(ctx).await,
-            "chat/abort" => return self.handle_chat_abort_oneoff(ctx).await,
             // 读数：本会话 v2 事实源的四列（时延 / 兜底 / 成本 / 断点）。
             // 纯计算、零副作用——既不落盘也不碰消息。
             "stats" => return self.handle_stats(ctx).await,

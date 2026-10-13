@@ -28,19 +28,20 @@ import {
   defineCase,
   providerConfig,
   PROVIDER_ID,
+  SESSION_SEG,
 } from '../helpers.mjs';
 
-/** 从 stderr 里解出路由留痕序列（`[route] <path>`） */
+/** 从 stderr 里解出路由留痕序列（`[route] <path>[ <addr>]`） */
 function routeTrace(stderr) {
   const out = [];
   for (const line of stderr.split('\n')) {
-    const m = line.match(/\[route\]\s+(\S+)/);
-    if (m) out.push(m[1]);
+    const m = line.match(/\[route\]\s+(\S+)(?:\s+(\S+))?/);
+    if (m) out.push({ path: m[1], addr: m[2] ?? null });
   }
   return out;
 }
 
-const count = (routes, path) => routes.filter((p) => p === path).length;
+const count = (routes, path) => routes.filter((r) => r.path === path).length;
 
 export default defineCase('T14 会话期间零回读（无 stat / read / list）', async () => {
   const llm = await new MockLlm([
@@ -66,7 +67,19 @@ export default defineCase('T14 会话期间零回读（无 stat / read / list）
 
     const routes = routeTrace(r.stderr);
     // 留痕本身要有内容——路由开关失效时不能退化成「零回读」的假绿灯。
-    assert(count(routes, 'session/chat/send') === 1, `应恰好发出一次会话请求（实际留痕: ${routes.join(', ')}）`);
+    assert(routes.length > 0, `路由留痕为空（SYMBIO_ROUTE_LOG 失效？）`);
+    // 「恰好一次会话请求」在输入面双轨退役（T-077 步②）后改判**地址形状**：
+    // 会话的收件箱 `<根>/session/<sid>/inbox` 恰好被写一次。带地址的留痕之所以
+    // 必需——`vdfs/write` 这一条路由上同时跑着两件事（启动期落会话 metadata、
+    // 本轮入队），只看路由名会把它们混为一件、也会把「选项变了多落一次」误判为
+    // 「同一轮发了两次消息」。
+    const inboxWrites = routes.filter(
+      (r) => r.path === 'vdfs/write' && r.addr?.endsWith(`/${SESSION_SEG}/e2e-t14/inbox`),
+    );
+    assert(
+      inboxWrites.length === 1,
+      `应恰好写一次收件箱（实际留痕: ${routes.map((r) => `${r.path} ${r.addr ?? ''}`).join(', ')}）`,
+    );
 
     assertEq(count(routes, 'vdfs/stat'), 0, '会话节点变更必须自带节点视图，不该回读 stat');
     assertEq(count(routes, 'vdfs/read'), 0, '消息变更必须自带正文，不该回读 read');
