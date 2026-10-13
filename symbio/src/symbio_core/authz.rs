@@ -20,9 +20,12 @@
 //!
 //! 1. **构造期**：认不出的能力名 ⇒ 拒绝整体构造（`PolicyError`，core 定义），
 //!    降级为**空矩阵**并告警——不是「跳过那一行」，笔误不能变成一条悄悄生效的拒绝；
-//! 2. **写侧**：运行器落收束格前判 [`can_reply`](PermissionMatrix::can_reply)
-//!    （`turn_runner::closure_granted`），未持有 ⇒ 拒绝入格（该轮留在未收束态，
-//!    `check_all` 会把它报出来）；
+//! 2. **写侧**：运行器落格前判（`turn_runner::closure_granted`，按**种类**分两臂）：
+//!    发言收束（收束格）判 [`can_reply`](PermissionMatrix::can_reply)，产物收束
+//!    （`artifact.added`）判 [`can_produce_artifact`](PermissionMatrix::can_produce_artifact)
+//!    （[ADR-067](../../../docs/adr/ADR-067.md "ADR-067")）。未持有 ⇒ 拒绝入格：发言臂下
+//!    该轮留在未收束态——除非它落过产物格（C4 与产物闸同批认可「产物即收束」，
+//!    见 `invariants::unresolved_turns`）；
 //! 3. **读侧**：`stats` 按读方声明判 [`can_see`](PermissionMatrix::can_see)——属主
 //!    是**内容的属主**（`SESSION_OWNER`，部署事实）而非事件作者，于是今天的判读
 //!    就是「属主放行、其余整体拒绝」；`thread_private` 缺省（C10）。

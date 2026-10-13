@@ -45,7 +45,7 @@ use super::supplements;
 use crate::symbio_core::{chat_message as cm, session_chat, VdfsChange};
 use crate::symbio_core::{
     Event, EventWalStore, LatencyTier, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    Preemption, PreemptionDecider, Store, SESSION_ID, WORKDIR,
+    Preemption, PreemptionDecider, Store, SESSION_ID, SOURCE_PRINCIPAL, WORKDIR,
 };
 use std::sync::Arc;
 
@@ -550,6 +550,16 @@ impl SessionPlugin {
         ctx.set(SESSION_ID, session_id.to_string());
         if let Some(w) = &first.workdir {
             ctx.set(WORKDIR, w.clone());
+        }
+        // 来源主体（ADR-067）：随**第一条**寄存（本轮参数取自它，与 `params` 同一
+        // 口径）。缺省不设 ⇒ 执行侧回落本机用户——心跳等本机路径与接线前逐字一致。
+        if let Some(sp) = first
+            .params
+            .source_principal
+            .as_deref()
+            .filter(|s| !s.is_empty())
+        {
+            ctx.set(SOURCE_PRINCIPAL, sp.to_string());
         }
         let req = session_chat::Request {
             session_id: Some(session_id.to_string()),

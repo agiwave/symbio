@@ -543,9 +543,15 @@ pub struct TurnOutcome {
     /// 能力，恢复后以收束格了结（进展格不占「一轮至多一条收束格」）。
     pub awaits_user: bool,
     /// 本轮收束**被写侧闸拒绝**（主体不持 `reply.first`，见 [`closure_granted`]）：
-    /// 收束格未入格，该轮留在未收束态（`check_all` 的 C4 报得出）。与 `aborted` /
-    /// `awaits_user` 同属「网格少一格」，但**原因在授权**，不是放弃也不是等待——
-    /// 调用方据此**跳过本轮的派生事实**（承诺 / 任务 / 熔断 / 记忆全不写）。
+    /// 收束格未入格、且本轮**没有落过产物格**，该轮留在未收束态（`check_all` 的 C4
+    /// 报得出）。与 `aborted` / `awaits_user` 同属「网格少一格」，但**原因在授权**，
+    /// 不是放弃也不是等待——调用方据此**跳过本轮的派生事实**（承诺 / 任务 / 熔断 /
+    /// 记忆全不写）。
+    ///
+    /// **落过产物格 ⇒ 不算拒**（[ADR-067](../../../../docs/adr/ADR-067.md "ADR-067")）：
+    /// 产物收束是另一条收束路（`ClosureKind::Artifact`），它落过格就说明这一轮有话
+    /// 说过——典型是只持 `produce.artifact` 的对等主体：发言闸拒它，但它产出的
+    /// 工具结果是事实，派生事实照写。
     ///
     /// 平凡值 `false`：生产里主体恒为 `agent:main` 或经 `matrix_for` 派生的
     /// `agent:<id>`，都持 `reply.*` ⇒ 闸是 fail-closed 的**结构**，不是会翻面的开关。
@@ -712,6 +718,11 @@ impl TurnRunner {
         // 身份是入参不是字面量——`actor.principal` 由调用方（生产：会话属于哪个
         // agent）给出；S08 §4 平凡值 `agent:main` 下没有任何事件被滤掉。
         let viewer = Some(actor.principal.as_str());
+        // 本轮**新落**的产物格数（[ADR-067] 的「产物收束」判据）：`> 0` ⇒ 本轮已
+        // 收束，发言闸再拒也不算未收束（`TurnOutcome::closure_denied` 与 C4 都认它）。
+        // 等待轮落过的不算——这里只数**本次执行**新落的；开在函数顶是因为 1b 定稿
+        // 答话分支在续写落产物**之前**就要用它收口。
+        let mut artifacts_landed = 0u64;
         // 1. 用户消息入格（turn × opened），档位随载荷入账。
         //
         // 续写轮（`resume`）**不新开用户格**：用户没再说话，重开会让同一句话在网格里
@@ -798,10 +809,11 @@ impl TurnRunner {
                     "compose returned empty",
                     0,
                     produced,
+                    artifacts_landed,
                 )
                 .await;
             }
-            if !closure_granted(&actor.principal) {
+            if !closure_granted(&actor.principal, ClosureKind::Speech) {
                 crate::plugin_warn!(
                     "actors",
                     "[v2] 定稿答话被授权拒绝（{} 缺 reply.first），本轮不入格（turn={turn}）",
@@ -815,7 +827,8 @@ impl TurnRunner {
                     fell_back: false,
                     aborted: false,
                     awaits_user: false,
-                    closure_denied: true,
+                    // 落过产物格 ⇒ 本轮已收束（产物收束，ADR-067）：不算拒。
+                    closure_denied: artifacts_landed == 0,
                 });
             }
             store.append(
@@ -934,49 +947,61 @@ impl TurnRunner {
         // `base_prompt` 已在上方渲染完毕（快照早于这次 append），故仍就地追加——模型
         // 必须看到「我请求了什么、拿到了什么」，否则会重复调用同一个工具。
         if let Some(r) = &resume {
-            store.append(
-                Event::pending(
-                    format!("a-{turn}-{artifact_no}"),
-                    crate::symbio_core::EVENT_ARTIFACT_ADDED,
-                    Entity::Artifact,
-                    Verb::Asserted,
-                    turn,
-                    &actor.principal,
-                )
-                .with_produced_by(user_seq)
-                .with_payload(serde_json::json!({
-                    "tool": r.call.name.clone().unwrap_or_default(),
-                    "text": r.text,
-                    // 节点结构入格：ToolCall / 结果节点的身份与参数（重建复刻同一批）。
-                    //
-                    // 恢复路的两张卡（调用与结果）在实时面已经由 `resume.rs` 分配了 id
-                    // （`Born{Carrier::Runner}`：节点在、但出生事实由**本格**承载）——
-                    // 载荷复用**同一批 id**，重建才复刻出同一条节点。缺 `tool_call_id`
-                    // 会让重建按事件 id 合成一个新调用 ⇒ 原调用成孤儿（e2e t27）；
-                    // 缺 `result_id` 会让结果节点换个身份（前端按 id 合并 ⇒ 多一条）。
-                    "tool_call_id": r.call_id.clone().or_else(|| r.call.id.clone()),
-                    "wire_id": r.call.wire_id,
-                    "args": super::message_build::tool_call_args_text(&r.call),
-                    "result_id": r.result_id,
-                    "success": true,
-                    // 调用节点落回**原来那一轮**的 Turn 根：续写不新开轮，也不该长出
-                    // 第二个 Turn 根。空缺（老调用点）时回落到本轮的根，与接线前同形。
-                    "turn_id": r.turn_id.clone().unwrap_or_else(|| turn_root_id.to_string()),
-                })),
-            )?;
-            artifact_no += 1;
-            all_tool_calls.push(ToolCallFact {
-                id: r
-                    .call_id
-                    .clone()
-                    .or_else(|| r.call.id.clone())
-                    .unwrap_or_default(),
-                name: r.call.name.clone().unwrap_or_default(),
-                args: super::message_build::tool_call_args_text(&r.call),
-                wire_id: r.call.wire_id.clone().unwrap_or_default(),
-                // 结果子节点身份 = 恢复方分配的那一个（随载荷入格，见上）。
-                result_id: r.result_id.clone(),
-            });
+            // 产物闸（`ClosureKind::Artifact`）：不持 `produce.artifact` ⇒ 这一格不落。
+            // 结果**照进 prompt**（模型看得见）+ 照记 `all_tool_calls`（请求发生过）——
+            // 闸管的是「入格」，不是「发生过」。
+            if closure_granted(&actor.principal, ClosureKind::Artifact) {
+                store.append(
+                    Event::pending(
+                        format!("a-{turn}-{artifact_no}"),
+                        crate::symbio_core::EVENT_ARTIFACT_ADDED,
+                        Entity::Artifact,
+                        Verb::Asserted,
+                        turn,
+                        &actor.principal,
+                    )
+                    .with_produced_by(user_seq)
+                    .with_payload(serde_json::json!({
+                        "tool": r.call.name.clone().unwrap_or_default(),
+                        "text": r.text,
+                        // 节点结构入格：ToolCall / 结果节点的身份与参数（重建复刻同一批）。
+                        //
+                        // 恢复路的两张卡（调用与结果）在实时面已经由 `resume.rs` 分配了 id
+                        // （`Born{Carrier::Runner}`：节点在、但出生事实由**本格**承载）——
+                        // 载荷复用**同一批 id**，重建才复刻出同一条节点。缺 `tool_call_id`
+                        // 会让重建按事件 id 合成一个新调用 ⇒ 原调用成孤儿（e2e t27）；
+                        // 缺 `result_id` 会让结果节点换个身份（前端按 id 合并 ⇒ 多一条）。
+                        "tool_call_id": r.call_id.clone().or_else(|| r.call.id.clone()),
+                        "wire_id": r.call.wire_id,
+                        "args": super::message_build::tool_call_args_text(&r.call),
+                        "result_id": r.result_id,
+                        "success": true,
+                        // 调用节点落回**原来那一轮**的 Turn 根：续写不新开轮，也不该长出
+                        // 第二个 Turn 根。空缺（老调用点）时回落到本轮的根，与接线前同形。
+                        "turn_id": r.turn_id.clone().unwrap_or_else(|| turn_root_id.to_string()),
+                    })),
+                )?;
+                artifact_no += 1;
+                artifacts_landed += 1;
+                all_tool_calls.push(ToolCallFact {
+                    id: r
+                        .call_id
+                        .clone()
+                        .or_else(|| r.call.id.clone())
+                        .unwrap_or_default(),
+                    name: r.call.name.clone().unwrap_or_default(),
+                    args: super::message_build::tool_call_args_text(&r.call),
+                    wire_id: r.call.wire_id.clone().unwrap_or_default(),
+                    // 结果子节点身份 = 恢复方分配的那一个（随载荷入格，见上）。
+                    result_id: r.result_id.clone(),
+                });
+            } else {
+                crate::plugin_warn!(
+                    "actors",
+                    "[v2] 产物被授权拒绝（{} 缺 produce.artifact），本条结果不入格（turn={turn}）",
+                    actor.principal
+                );
+            }
             exchange.extend(exchange_messages(&r.call, &r.text));
         }
 
@@ -1053,13 +1078,17 @@ impl TurnRunner {
                                 "model returned empty text",
                                 cost,
                                 produced,
+                                artifacts_landed,
                             )
                             .await;
                         }
-                        if !closure_granted(&actor.principal) {
+                        if !closure_granted(&actor.principal, ClosureKind::Speech) {
                             // 写侧闸拒：**不落收束格**——该轮留在未收束态，`check_all`
                             // 会把它报出来（C4），与 [`closure_granted`] 同一条纪律、
                             // 同一个谓词。用户的答案照旧可见（`text` 仍回给调用方）。
+                            //
+                            // **例外**：本轮落过产物格 ⇒ 已由产物收束（ADR-067），
+                            // `closure_denied` 为假，派生事实照写。
                             crate::plugin_warn!(
                                 "actors",
                                 "[v2] 收束被授权拒绝（{} 缺 reply.first），本轮不入格（turn={turn}）",
@@ -1073,7 +1102,7 @@ impl TurnRunner {
                                 fell_back: false,
                                 aborted: false,
                                 awaits_user: false,
-                                closure_denied: true,
+                                closure_denied: artifacts_landed == 0,
                             });
                         }
                         let produced = produced_payload(
@@ -1133,6 +1162,7 @@ impl TurnRunner {
                             "模型请求了工具，但本轮没有工具分发通道",
                             cost,
                             produced,
+                            artifacts_landed,
                         )
                         .await;
                     };
@@ -1157,6 +1187,20 @@ impl TurnRunner {
                         .pop()
                         .unwrap_or_else(|| serde_json::json!({}));
                     for (oi, outcome) in outcomes.iter().enumerate() {
+                        // 产物闸（`ClosureKind::Artifact`，ADR-067）：不持
+                        // `produce.artifact` ⇒ 这条结果不入格（warn 一次，不刷屏）。
+                        // 结果**照进 prompt / 照记 `all_tool_calls`**——闸管的是
+                        // 「入格」，不是「发生过」。
+                        if !closure_granted(&actor.principal, ClosureKind::Artifact) {
+                            if oi == 0 {
+                                crate::plugin_warn!(
+                                    "actors",
+                                    "[v2] 产物被授权拒绝（{} 缺 produce.artifact），本轮工具结果不入格（turn={turn}）",
+                                    actor.principal
+                                );
+                            }
+                            continue;
+                        }
                         store.append(
                             Event::pending(
                                 format!("a-{turn}-{artifact_no}"),
@@ -1188,6 +1232,7 @@ impl TurnRunner {
                             })),
                         )?;
                         artifact_no += 1;
+                        artifacts_landed += 1;
                     }
                     // 本轮工具调用的结构进累积（配得上结果的记结果节点 id）。
                     all_tool_calls.extend(
@@ -1275,9 +1320,10 @@ impl TurnRunner {
                     let cost = started.elapsed().as_millis() as u64;
                     let facts = node_facts(&nodes);
                     let partial_text = facts.text.clone().unwrap_or_default();
-                    if !closure_granted(&actor.principal) {
+                    if !closure_granted(&actor.principal, ClosureKind::Speech) {
                         // 中止的收束格同过写侧闸（收束格是同一个事实，不论哪条路径
-                        // 写出）：拒绝 ⇒ 不入格，该轮留在未收束态（C4 报得出）。
+                        // 写出）：拒绝 ⇒ 不入格，该轮留在未收束态（C4 报得出）——
+                        // 除非本轮落过产物格（产物收束，ADR-067）。
                         crate::plugin_warn!(
                             "actors",
                             "[v2] 中止收束被授权拒绝（{} 缺 reply.first），本轮不入格（turn={turn}）",
@@ -1291,7 +1337,7 @@ impl TurnRunner {
                             fell_back: false,
                             aborted: true,
                             awaits_user: false,
-                            closure_denied: true,
+                            closure_denied: artifacts_landed == 0,
                         });
                     }
                     let produced = produced_payload(
@@ -1347,6 +1393,7 @@ impl TurnRunner {
                         &e.to_string(),
                         cost,
                         produced,
+                        artifacts_landed,
                     )
                     .await;
                 }
@@ -1424,7 +1471,7 @@ impl TurnRunner {
             .map(|seq| seq.value())?;
         sink.on_delta(text);
         let cost_ms = started.elapsed().as_millis() as u64;
-        if !closure_granted(&actor.principal) {
+        if !closure_granted(&actor.principal, ClosureKind::Speech) {
             // 与深度档同一条写侧闸（见 [`closure_granted`]）：拒绝 ⇒ 不落收束格。
             crate::plugin_warn!(
                 "actors",
@@ -1485,6 +1532,13 @@ impl TurnRunner {
     /// 载荷 = **产出部分**（`produced`，失败前已产出的半截正文 / 思考 / 工具事实——
     /// 它们是事实，不因失败就不记）+ `why`（失败原因）+ `status: "failed"`（失败是
     /// 状态，不进产出形状本身）。
+    ///
+    /// `artifacts_landed` = 本轮已新落的产物格数（ADR-067 的产物收束判据）：兜底格
+    /// 本身也是发言收束，发言闸拒它时，本轮**落过产物**就不算未收束——
+    /// `closure_denied` 为假，派生事实照写（失败呈现照旧：`fell_back` 不变）。
+    // 参数全是同一轮收束的平铺事实（主体 / 轮次 / 锚 / 原因 / 计时 / 产出 / 产物计数），
+    // 彼此独立、无分组语义——拆结构体反而隔一层（照 model/stream.rs 同款先例）。
+    #[allow(clippy::too_many_arguments)]
     async fn append_fallback<S>(
         store: &S,
         actor: &ActorSpec,
@@ -1493,11 +1547,12 @@ impl TurnRunner {
         why: &str,
         cost_ms: u64,
         produced: serde_json::Value,
+        artifacts_landed: u64,
     ) -> Result<TurnOutcome, crate::symbio_core::AppendError>
     where
         S: Store<Event = Event>,
     {
-        if !closure_granted(&actor.principal) {
+        if !closure_granted(&actor.principal, ClosureKind::Speech) {
             // 兜底格也是**收束格**，同过写侧闸（见 [`closure_granted`]）：拒绝 ⇒ 不落格。
             // `fell_back` 仍为真——模型确实失败了（I3 的「到点必答」由调用方按失败呈现）。
             crate::plugin_warn!(
@@ -1513,7 +1568,7 @@ impl TurnRunner {
                 fell_back: true,
                 aborted: false,
                 awaits_user: false,
-                closure_denied: true,
+                closure_denied: artifacts_landed == 0,
             });
         }
         let mut payload = with_status(produced, "failed");
@@ -1566,7 +1621,7 @@ impl TurnRunner {
     where
         S: Store<Event = Event>,
     {
-        if !closure_granted(&actor.principal) {
+        if !closure_granted(&actor.principal, ClosureKind::Speech) {
             // 中止的收束格同过写侧闸（与 3a 分支同一条纪律）：拒绝 ⇒ 不入格，
             // 该轮留在未收束态（C4 报得出）。
             crate::plugin_warn!(
@@ -1620,27 +1675,60 @@ impl TurnRunner {
     }
 }
 
+/// 收束格的**种类**（[ADR-065] 裁决、[ADR-067] 落地形态）：同一道写侧闸按种类分派。
+///
+/// 一轮的收束有两条路，谓词各问自己那一项能力：
+///
+/// | 种类 | 落什么格 | 谓词 |
+/// |---|---|---|
+/// | [`ClosureKind::Speech`] | `chat.assistant.final` / `.fallback` | `can_reply`（`reply.first`） |
+/// | [`ClosureKind::Artifact`] | `artifact.added` | `can_produce_artifact`（`produce.artifact`） |
+///
+/// 为什么必须分种类：对等主体（`agent:peer-b`，授权表只给它 `produce.artifact`）
+/// 在发言闸下**恒拒**——合并前它连一轮都收束不了，「对等 offer / assert」的写方
+/// （住轮末收束族）因此永远执行不到。分种类后它能收束为**一件产物**，而它的发言
+/// 资格仍然一项都没有（「没有发言权」与「留不下任何事实」是两件事）。
+///
+/// [ADR-065]: ../../../../docs/adr/ADR-065.md "ADR-065"
+/// [ADR-067]: ../../../../docs/adr/ADR-067.md "ADR-067"
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClosureKind {
+    /// 发言收束：答话 / 兜底 / 中止的那一格。
+    Speech,
+    /// 产物收束：工具结果的那一格（`artifact.added`）。
+    Artifact,
+}
+
 /// 写侧授权闸（[plan/01 §7](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构") 写侧，
-/// [04 §3.1 批⑥](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地")）：该主体此刻能否写本轮的
-/// **收束格**。
+/// [04 §3.1 批⑥](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地")）：该主体此刻能否写
+/// `kind` 所指的那一格。
 ///
 /// ## 为什么判在运行器
 ///
-/// 收束格由**本运行器**原生落格，闸就在落格**之前**判。三条落格路径（深度档
-/// final / 反射档 final / 兜底格）都过这里——收束格是**同一个事实**，不论它由
-/// 哪条路径、哪种收束形态写出。
+/// 收束格与产物格都由**本运行器**原生落格，闸就在落格**之前**判。三条发言路径
+/// （深度档 final / 反射档 final / 兜底格）与两条产物路径（续写轮 / 工具结果）
+/// 都过这里——同一种类的格是**同一个事实**，不论它由哪条路径写出。
 ///
 /// ## 谓词与判据
 ///
-/// 谓词是 `PermissionMatrix::can_reply`（写侧闸判什么**只定义一次**）。`first`
-/// 恒为 `true`：运行器一轮只落一格收束（`final_unique_per_turn` 是不变量），
-/// 不存在「同轮追加」那一态。
+/// 谓词是 `PermissionMatrix` 的两种判定（写侧闸判什么**只定义一次**，见
+/// `symbio_core::governance`）：`Speech` 问 `can_reply`，`Artifact` 问
+/// `can_produce_artifact`。`Speech` 的 `first` 恒为 `true`：运行器一轮只落一格
+/// 发言收束（`final_unique_per_turn` 是不变量），不存在「同轮追加」那一态。
 ///
-/// 拒绝 ⇒ **不落格**：该轮留在未收束态，`check_all` 会把它报出来（C4）。平凡值下
-/// （`agent:main`，以及任何经 `matrix_for` 派生的 `agent:<id>`）恒
+/// 拒绝 ⇒ **不落格**：
+/// - 发言臂 ⇒ 该轮留在未收束态，`check_all` 会把它报出来（C4）——**除非本轮落过
+///   产物格**，那同样算收束（`unresolved_turns` 与产物闸同批认可）；
+/// - 产物臂 ⇒ 那一条工具结果不入格（warn 后跳过）。
+///
+/// 平凡值下（`agent:main`，以及任何经 `matrix_for` 派生的 `agent:<id>`）两臂恒
 /// 放行——闸是 fail-closed 的**结构**，不是生产里会翻面的开关。
-fn closure_granted(principal: &str) -> bool {
-    crate::symbio_core::authz::matrix_for(principal).can_reply(principal, true)
+fn closure_granted(principal: &str, kind: ClosureKind) -> bool {
+    let matrix = crate::symbio_core::authz::matrix_for(principal);
+    match kind {
+        ClosureKind::Speech => matrix.can_reply(principal, true),
+        ClosureKind::Artifact => matrix.can_produce_artifact(principal),
+    }
 }
 
 /// 一轮工具交换 → **结构化**消息（ADR-048a）。

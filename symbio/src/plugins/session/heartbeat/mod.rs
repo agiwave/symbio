@@ -285,6 +285,9 @@ impl SessionPlugin {
             // risk_level 留空：由 resolve_session_params 回退到会话 metadata.risk_level
             // （默认 medium）。心跳任务应尊重会话自身的风险等级设置，而非强行覆盖。
             risk_level: None,
+            // source_principal 留空：心跳是**本机**路径，无「来源声明」——轮末承诺的
+            // `to` 由取值点（`request_source_principal`）落本机用户，与接线前一致。
+            source_principal: None,
             resume: None,
         };
 

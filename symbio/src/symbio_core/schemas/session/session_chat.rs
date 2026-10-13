@@ -31,6 +31,20 @@ pub struct Request {
     /// 随每次发送携带；为空时回退会话 metadata.risk_level（默认 medium）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub risk_level: Option<String>,
+    /// 入站请求的**来源主体**（[PL-001 §12.2](../../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")
+    /// 跨体承诺的「向谁宣告」，[ADR-067](../../../../../docs/adr/ADR-067.md "ADR-067")）。
+    ///
+    /// 完整主体名（如 `agent:main`）——**谁把这条消息交进来**。它不是「以谁的身份
+    /// 跑轮」（那是 `agent_id` ⇒ 会话主体），而是「这条入站消息的出处」：轮末
+    /// `record_derived` 把它用作 `commitment.*` 的 `to`（本主体向**它**立约）。
+    /// `None` = 无来源声明（同机直呼 / 心跳等本机路径）⇒ 落 `PRINCIPAL_USER`，
+    /// 与接线前写死的常量逐字一致。
+    ///
+    /// 线上入口 = 请求 `metadata.source_principal`（网关 `build_ctx` 落 ctx）；
+    /// 收件箱入队口（`vdfs/write <会话>/inbox`）把它随条目寄存进 `params`，
+    /// 消费时经 `run_inbox_turn` 挂回执行 ctx。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_principal: Option<String>,
     /// 会话恢复操作（与 `message` 互斥）。
     /// 存在时走 resume 分支：删除旧消息 → 重新执行 → 续写 chat_loop。
     /// 支持场景：

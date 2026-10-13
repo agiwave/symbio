@@ -43,7 +43,7 @@ pub use self::control::{CircuitBreaker, GateDecision, Preemption, PreemptionDeci
 pub use self::reasoner::{render_messages, Reasoner};
 pub use self::recall::recalled_event;
 pub use self::skill::{SkillCompiler, SkillRoute, SkillRouter};
-pub use self::spec::{ActorSpec, Pattern};
+pub use self::spec::{ActorSpec, Pattern, Scope};
 
 // 仅测试面：这些符号在非测试构建里没有跨域消费者（用点就在各自的子模块内），
 // 但 `mod.test.rs` 经 `use super::*` 取用，故只在 `cfg(test)` 出根——与
@@ -54,8 +54,8 @@ pub use self::commitment::CommitmentKeeper;
 pub use self::conation::{GateWarrant, IntentDecision};
 #[cfg(test)]
 pub use self::recall::RecallTranslator;
-#[cfg(test)]
-pub use self::spec::Scope;
+// `Scope` 已随 `ActorSpec` / `Pattern` 常驻出根（上文）：`ActorSpec` 的生产构造点
+// （会话插件的 `request_actor_spec`）要以 `Scope::Root` 立规格，不再只是测试面。
 
 #[cfg(test)]
 #[path = "mod.test.rs"]

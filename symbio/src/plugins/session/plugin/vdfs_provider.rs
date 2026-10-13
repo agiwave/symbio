@@ -617,12 +617,23 @@ impl SessionPlugin {
                 let workdir = vdfs_host_ctx(ctx)
                     .ok()
                     .and_then(|h| h.get(crate::symbio_core::WORKDIR));
+                // 来源主体（ADR-067）：同取**请求上下文**（线上入口 =
+                // `metadata.source_principal`）。随条目寄存进 `params`，消费时经
+                // `run_inbox_turn` 挂回执行 ctx——「这条消息是谁发的」是**数据**，
+                // 轮末 `commitment.*` 的 `to` 据它取值，缺省保持本机用户。
+                let source_principal = vdfs_host_ctx(ctx)
+                    .ok()
+                    .and_then(|h| h.get(crate::symbio_core::SOURCE_PRINCIPAL))
+                    .filter(|s| !s.trim().is_empty());
                 let item = self
                     .enqueue_inbox(
                         id,
                         iid.map(str::to_string),
                         message,
-                        session_chat::Request::default(),
+                        session_chat::Request {
+                            source_principal,
+                            ..Default::default()
+                        },
                         workdir,
                     )
                     .await;

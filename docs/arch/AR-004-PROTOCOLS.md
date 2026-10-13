@@ -96,6 +96,7 @@ let (my_channel, peer_channel) = PluginChannel::pair(64);
 | `SESSION_ID` | String | 会话唯一标识 |
 | `TRACE_ID` | String | 调用链追踪 ID |
 | `AGENT_ID` | String | 当前 Agent 标识 |
+| `SOURCE_PRINCIPAL` | String | 入站请求的**来源主体**（完整主体名，如 `agent:main`；[ADR-067](../adr/ADR-067.md "ADR-067")）——「这条消息是谁发的」，轮末 `commitment.*` 的 `to` 据它取值；缺省 = 本机用户。线上形态 = 请求 `metadata.source_principal` |
 | `CONTENT` | String | 通用内容字段 |
 | `KIND` | String | 通用类型字段 |
 | `ID` | String | 通用 ID 字段 |

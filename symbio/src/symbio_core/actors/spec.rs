@@ -14,6 +14,30 @@ pub enum Pattern {
     Translator,
 }
 
+impl Pattern {
+    /// 会话主体的**模式判据**——`ActorSpec` 生产构造点用的那一支，住在定义域内。
+    ///
+    /// 与授权表同源，不另立清单：持 `reply.*` ⇒ [`Pattern::Reasoner`]（会话主体按
+    /// 模型驱动跑轮）；无发言权而有 `produce.artifact` ⇒ [`Pattern::Translator`]
+    /// （对等主体的权威动作是**产生产物**，复现 ST-008 §3 的 ActorSpec 对等行）；
+    /// 其余 ⇒ [`Pattern::Decider`]。判据问的是矩阵谓词本身（`can_reply` /
+    /// `can_produce_artifact`），调用方不抄能力名清单。
+    ///
+    /// 为什么是**方法**而不是根导出函数：主体类型的派生不该散进插件层
+    /// （no-direct-call-audit 的 NDC-001 同一条纪律——插件层只见谓词结果，不见
+    /// 主体类型名），而方法挂在 [`Pattern`] 这个既有根名下，不再多占一个根出口。
+    pub(crate) fn for_principal(principal: &str) -> Pattern {
+        let matrix = crate::symbio_core::authz::matrix_for(principal);
+        if matrix.can_reply(principal, true) {
+            Pattern::Reasoner
+        } else if matrix.can_produce_artifact(principal) {
+            Pattern::Translator
+        } else {
+            Pattern::Decider
+        }
+    }
+}
+
 /// 作用域（[plan/01 §8](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")）。
 ///
 /// `root` 是**一等输入**，不是"没有子智能体"的特例（03 §2 推论：

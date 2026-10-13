@@ -32,8 +32,15 @@
 //!
 //! | 侧 | 调用点 | 判什么 |
 //! |---|---|---|
-//! | 写侧 | 运行器落收束格前（`turn_runner::closure_granted`） | `can_reply`（首条 → `ReplyFirst`，后续 → `ReplyAppend`） |
-//! | 读侧 | `stats` 按读方声明判（属主 = `SESSION_OWNER`，部署事实） | `can_see`（`thread_private` 缺省，C10）⇒ 非属主读数为空 |
+//! | 写侧（发言） | 运行器落**收束格**前（`turn_runner::closure_granted`，`ClosureKind::Speech`） | [`can_reply`]（首条 → `ReplyFirst`，后续 → `ReplyAppend`） |
+//! | 写侧（产物） | 运行器落 `artifact.added` 前（`turn_runner::closure_granted`，`ClosureKind::Artifact`） | [`can_produce_artifact`]（`ProduceArtifact`） |
+//! | 读侧 | `stats` 按读方声明判（属主 = `SESSION_OWNER`，部署事实） | [`can_see`]（`thread_private` 缺省，C10）⇒ 非属主读数为空 |
+//!
+//! 两道写侧闸判的是**两件事**（[ADR-067](../../../../docs/adr/ADR-067.md "ADR-067")：收束格按种类判）：
+//! 发言收束问 `reply.*`、产物收束问 `produce.artifact`。没有发言权的主体（对等主体
+//! `agent:peer-b` 只持 `produce.artifact`）因此仍能以**产物**收束一轮——「没有说话
+//! 资格就不能留下任何事实」正是那次裁决拆掉的耦合。两道闸的谓词都只定义在**本域**，
+//! 调用点不复述（口径只活在 core）。
 //!
 //! 表为什么与机制同住 core：它是**架构元素**——「谁持有什么能力」与本域的 7 项闭集
 //! 是一张表的两半，分家的代价是「表授予 A、闸门判 B」这种错位**没有任何东西会变红**。
@@ -83,6 +90,22 @@ impl Capability {
             "assign.work" => Capability::AssignWork,
             _ => return None,
         })
+    }
+
+    /// 能力名（授权表的**书写形态**）——[`Self::from_name`] 的逆向。
+    ///
+    /// 读进来与写出去共用同一份映射：两处各写一遍字符串，迟早漂移成「读作 A、
+    /// 写作 B」——而两边都是合法能力名，没有任何东西会为此变红。
+    pub(crate) fn name(&self) -> &'static str {
+        match self {
+            Capability::JudgeIntent => "judge.intent",
+            Capability::ReplyFirst => "reply.first",
+            Capability::ReplyAppend => "reply.append",
+            Capability::DefineWork => "define.work",
+            Capability::ProduceArtifact => "produce.artifact",
+            Capability::AssertVerification => "assert.verification",
+            Capability::AssignWork => "assign.work",
+        }
     }
 }
 
@@ -260,6 +283,21 @@ impl PermissionMatrix {
             .unwrap_or(&[])
     }
 
+    /// 写侧：主体持有的能力**名**（授权表的书写形态）。
+    ///
+    /// 为什么查询面也要名字形式：[`Capability`] 刻意不进 core 根平铺（见模块头
+    /// 「同名辨析」）⇒ **插件侧拿不到那个枚举**，只能拿名字。而 `ActorSpec` 的
+    /// `capabilities` 本来就是**数据**（`Vec<String>`）——它的唯一生产写方从授权表
+    /// 行取数，取出来的必须是同一套拼写。名字的对错由**构造期**兜住
+    /// （[`Self::from_names`] 认不出即拒绝整体构造），读侧照单全收于是不会变成
+    /// 「拼写错误被读成拒绝」的第二处判定。
+    pub fn grant_names_of(&self, principal: &str) -> Vec<String> {
+        self.grants_of(principal)
+            .iter()
+            .map(|c| c.name().to_string())
+            .collect()
+    }
+
     /// 写侧判定：主体是否可以权威地做 `cap`。**fail-closed**。
     pub fn can_write(&self, principal: &str, cap: Capability) -> bool {
         self.grants_of(principal).contains(&cap)
@@ -289,6 +327,21 @@ impl PermissionMatrix {
             Capability::ReplyAppend
         };
         self.can_write(principal, cap)
+    }
+
+    /// 写侧判定（**产物闸**）：主体能否**产生产物**——运行器落 `artifact.added`
+    /// 前的判据（`turn_runner::closure_granted` 的 `ClosureKind::Artifact` 臂）。
+    ///
+    /// 与 [`Self::can_reply`] 并列而**不是**它的一个分支（[ADR-067](../../../../docs/adr/ADR-067.md "ADR-067")）：
+    /// 收束有两条路，谓词各问自己那一项能力。对等主体（`agent:peer-b`）只持
+    /// `produce.artifact`，发言闸对它恒拒而产物闸恒放——它因此能收束为**一件
+    /// 产物**，而不是每一轮都留下一条 C4 未收束。
+    ///
+    /// 「产物收束 ⇒ 该轮已收束」由 C4 不变量同批认可（见该函数文档）：产物格
+    /// 带 `produced_by` 指向本轮开口格，它与 final / fallback 一样是「这一轮
+    /// 有话要说」的完成形态。
+    pub fn can_produce_artifact(&self, principal: &str) -> bool {
+        self.can_write(principal, Capability::ProduceArtifact)
     }
 
     /// 读侧：主体的可见域（未知主体 ⇒ `None` ⇒ [`Self::can_see`] 必拒）。

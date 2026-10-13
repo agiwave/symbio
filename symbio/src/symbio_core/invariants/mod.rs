@@ -256,6 +256,18 @@ fn declared_budget_ms(events: &[Event]) -> Option<u64> {
 /// `chat.assistant.fallback`（`turn × closed`），就是**对话静默中断**——超时后
 /// 什么都没发生，没有任何错误信号的那类失效。兜底必须产生事件（I3）。
 ///
+/// # 产物也算收束（[ADR-067](../../../../docs/adr/ADR-067.md "ADR-067")）
+///
+/// `artifact.added`（`artifact × asserted`）同样关闭一轮：工具结果是**说给用户的
+/// 话**（界面上就是一张卡片），不是内部噪声。没有它，只持 `produce.artifact` 的
+/// 主体（对等主体，没有发言权）每跑一轮都永久留一条违规——「没有说话资格就不能
+/// 留下任何事实」正是那次裁决拆掉的耦合。
+///
+/// 与**等待用户**那一态的关系：等待轮（进展格 `chat.assistant.progress`）的收束格
+/// 刻意留给恢复幕，续写仍由 `v2_exec::last_open_turn` 按 final / fallback 找它
+/// （那里**不**认产物——认了会让恢复幕找不到未收束轮）；本检查认产物只是
+/// 「不再报它静默中断」，两处口径的差异是刻意的，见该函数文档。
+///
 /// # 宽限形参 `allow_trailing_open`
 ///
 /// `false` = 严格：任何未收束的轮都算违规（故障注入用这一档，见
@@ -284,6 +296,15 @@ pub fn unresolved_turns(events: &[Event], allow_trailing_open: bool) -> Vec<Viol
         {
             opened.retain(|(_, turn, _)| *turn != e.turn);
         }
+        // 产物收束（ADR-067）：这一轮落过工具结果 ⇒ 同样算收束。产物格带
+        // `produced_by` 指向本轮开口格（I2），它和 final / fallback 一样是「这一轮
+        // 有话说过」的完成形态。
+        if e.entity == Entity::Artifact
+            && e.verb == Verb::Asserted
+            && e.kind == crate::symbio_core::event::EVENT_ARTIFACT_ADDED
+        {
+            opened.retain(|(_, turn, _)| *turn != e.turn);
+        }
     }
     let mut bad = Vec::new();
     for (pos, turn, open_event) in opened {
@@ -293,7 +314,7 @@ pub fn unresolved_turns(events: &[Event], allow_trailing_open: bool) -> Vec<Viol
         bad.push(Violation::at(
             open_event,
             format!(
-                "turn {turn}（自 {} 开启）始终未收束——无 final 也无 fallback，对话静默中断（I3 到点必答）",
+                "turn {turn}（自 {} 开启）始终未收束——无 final、无 fallback、也无产物格，对话静默中断（I3 到点必答）",
                 open_event.event_id
             ),
         ));
