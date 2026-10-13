@@ -1,0 +1,30 @@
+#!/bin/sh
+#
+# pre-commit — 把「事实文件与代码同批再生成」落进提交点（实测 ~1s）
+#
+# 启用（一次性，本机生效）：
+#   git config core.hooksPath scripts/git-hooks
+#
+# 为什么要在提交点：`CURRENT.md` 与登记 `INDEX.md` 是生成物，漏了重生成**不报错、只变旧**。
+# 原先只有 pre-push 挡（`--ci` 只报红不代改，见其头注释），于是漂移攒到推送点集中爆发，
+# 修复被推成 push 前的独立 chore 提交——**漂移不归属造成它的那次提交**。2026-10-13 实测
+# 事故形态：三个功能提交门禁段全写「本次跳过」，INDEX 投影落后两批收口，push 被连挡。
+#
+# 为什么它不违反「提交与门禁解耦（提交要秒级）」：被撤走的是**全量门禁**（10+ 分钟，含
+# 编译测试）；本钩子只跑 `--only=facts`，全部是生成器 + 登记校验，实测 1s。且本地模式的
+# 暂存纪律在 `_shared.autoWork` 里已经立好：**只暂存生成器自己改写的文件**，
+# 提交者其余的脏改动门禁不碰、不替人决定进不进本次提交。
+#
+# 与 pre-push 的关系：不是重复，是同一判据的两道闸——pre-commit 保证提交诞生时事实即新；
+# pre-push 兜住 `core.hooksPath` 没设的机器（该配置会静默丢失，2026-10-07 实测过），
+# CI 的 `--only=docs,facts --ci` 是第三道。
+#
+# 已知边界：
+#   - registry-audit / gen-doc-refs 的**校验类判据**（RG-xxx / RF-xxx）也会在此拦下提交。
+#     这些判据本来就拦 push，只是提前一段；WIP 想跳过：git commit --no-verify
+#   - `git commit -- <pathspec>` 部分提交：钩子暂存的文件不落入选中的 pathspec，无害，
+#     漂移留给 pre-push 或下一次提交兜住。
+#
+# ⚠️ 本文件需在 git 里有执行位：git update-index --chmod=+x scripts/git-hooks/pre-commit
+
+node scripts/gate.mjs --only=facts
