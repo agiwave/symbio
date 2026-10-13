@@ -90,12 +90,14 @@ async function fetchJson(url, opts = {}) {
 
 // ---------- Mock LLM 进程 ----------
 export class MockLlm {
-  constructor(scenarios, { port = nextPort(), name = 'mock' } = {}) {
+  constructor(scenarios, { port = nextPort(), name = 'mock', rateLimit = null } = {}) {
     this.port = port;
     this.name = name;
     this.base = `http://127.0.0.1:${port}`;
     this.scenarioPath = join(mkdtempSync(join(tmpdir(), 'symbio-e2e-llm-')), 'scenarios.json');
-    this.plan = { scenarios: scenarios ?? [], fallback: null };
+    // `rateLimit` 是 plan 级 429 限流语义（账号级配额，见 mock-llm.mjs 文件头），
+    // 黑盒：只关心「真 provider 会限流」，不关心被测系统怎么改。
+    this.plan = { scenarios: scenarios ?? [], fallback: null, ...(rateLimit ? { rateLimit } : {}) };
     writeFileSync(this.scenarioPath, JSON.stringify(this.plan));
     this.proc = null;
   }

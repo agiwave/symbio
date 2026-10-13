@@ -49,6 +49,25 @@
 //! 注入的错误附带 `retry-after: 0`（服务端明示可立即重试），否则用例要空等整段
 //! 指数退避（3 次逻辑失败 ≈ 22s）。要验退避节奏就用静态 `status`，或显式给
 //! `retryAfterSec`。
+//!
+//! ## 异常注入：网络环境与流级故障（T-067）
+//!
+//! HTTP 层之上，真实 LLM 服务 / 网络还有一整套**流级与级别的异常**，用例据此
+//! 钉「被测系统在真实故障下按纪律收敛」——机制都是场景字段，配在场景上：
+//!
+//! | 字段 | 语义 |
+//! |---|---|
+//! | `latencyMs` | 首字节延迟（写响应头前停顿）；模拟真实 provider 的首 token 延迟 |
+//! | `chunkJitterMs` | 每帧延迟叠加 `0..N` 随机抖动（真网络不是恒定 `chunkDelayMs`） |
+//! | `stallAfter` + `stallMs` | 第 N 个事件后**停顿一次**再接着吐（不关连接）；小于被测系统的流空闲超时才验「容忍停顿」 |
+//! | `dropAfter` | 第 N 个事件后**半途断开连接**：不写终止帧、不写 `[DONE]`；`0` = 只发响应头就断 |
+//! | `malformed` | 第 N 个事件后混入一帧**不规范内容**再继续正常收尾：`badJson`（data 行坏 JSON）/ `truncated`（chunk JSON 半途截断）/ `garbage`（非 SSE 字节） |
+//! | `malformedAfter` | `malformed` 的位次（默认中间）；位次按正常事件计，malformed 帧不占位 |
+//!
+//! plan 级 `rateLimit: { limit, windowMs }` 造 **429 限流语义**（不是别的场景字段，
+//! 因为限流是**整个账号**的，不是单条回答的）：滑动窗口配额，超额请求拿 429 +
+//! `retry-after`（窗口冷却秒数）+ `x-ratelimit-*` 头；被拒请求不占配额（与主流provider 一致），窗口冷却后自动恢复。四个流级字段都**改变不了匹配/名额口径**——
+//! 接入同一套场景选择规则，正常形态逐字节不变。
 
 import http from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -84,6 +103,12 @@ const useCounts = new Map();
 // 定下的结论（fail / ok）。同一请求体的退避重放沿用首次结论（见文件头说明）。
 const failOutcome = new Map();
 const failLogicalHits = new Map(); // 场景 id → 已消耗的逻辑名额
+
+/**
+ * plan 级 `rateLimit`（429 限流语义）的滑动窗口：已获准请求的时间戳队列。
+ * key = 整个 mock 实例（限流是账号级的，不按场景分）；被拒请求不占配额。
+ */
+const granted = [];
 
 /**
  * 本轮是否刚拿到工具结果、还没作答（**按消息序列**判，不看文本）。
@@ -269,6 +294,19 @@ function* buildEvents(scenario, model, requestId, useIndex = 0) {
   yield chunkOf(requestId, model, {}, finish, { prompt_tokens: 64, completion_tokens: 32 });
 }
 
+/**
+ * 不规范 SSE 帧（`malformed` 场景字段）：真实 provider 偶尔吐出的脏帧形态。
+ * 全部以完整行写出（后端按行切分：`'\n'` 即成行），否则只进「未结束行」缓冲。
+ */
+function malformedFrame(kind) {
+  if (kind === 'badJson') return 'data: {not-json,这不是合法的JSON}\n\n';
+  if (kind === 'truncated') {
+    return 'data: {"id":"chatcmpl-truncated","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"con\n\n';
+  }
+  // 'garbage' 与缺省：非 SSE 字节（无 data: 前缀的杂散行）
+  return 'mock-llm keepalive: 这一行不是 SSE 帧\n\n';
+}
+
 // ---------- HTTP 处理 ----------
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
@@ -288,6 +326,7 @@ const server = http.createServer(async (req, res) => {
     useCounts.clear();
     failOutcome.clear();
     failLogicalHits.clear();
+    granted.length = 0;
     res.writeHead(200, noKeepAlive);
     return res.end(JSON.stringify({ ok: true }));
   }
@@ -308,7 +347,38 @@ const server = http.createServer(async (req, res) => {
     const body = Buffer.concat(parts).toString('utf8');
     let parsed = {};
     try { parsed = JSON.parse(body); } catch { /* 容错：空体 */ }
-    requests.push({ at: Date.now(), path: url.pathname, body: parsed, contentType: req.headers['content-type'] ?? null });
+    requests.push({ at: Date.now(), path: url.pathname, body: parsed, contentType: req.headers['content-type'] ?? null, status: null });
+    const rec = requests[requests.length - 1];
+
+    // 429 限流语义（plan 级 `rateLimit: { limit, windowMs }`）：滑动窗口配额，
+    // 超额拿 429 + retry-after（窗口冷却秒）+ x-ratelimit-*；被拒不占配额（与
+    // 主流 provider 一致），窗口冷却后自动恢复。限流先于场景匹配判（限流与回答内容无关）。
+    const quota = plan.rateLimit;
+    if (quota && Number.isFinite(quota.limit) && Number.isFinite(quota.windowMs)) {
+      const now = Date.now();
+      while (granted.length && now - granted[0] >= quota.windowMs) granted.shift();
+      if (granted.length >= quota.limit) {
+        const waitSec = Math.max(1, Math.ceil((granted[0] + quota.windowMs - now) / 1000));
+        rec.status = 429;
+        if (process.env.E2E_DEBUG) console.error(`[mock-llm] 429 限流注入（配额 ${quota.limit}/${quota.windowMs}ms，冷却 ${waitSec}s）`);
+        res.writeHead(429, {
+          'content-type': 'application/json',
+          connection: 'close',
+          'retry-after': String(waitSec),
+          'x-ratelimit-limit': String(quota.limit),
+          'x-ratelimit-remaining': '0',
+          'x-ratelimit-reset': String(waitSec),
+        });
+        return res.end(JSON.stringify({
+          error: {
+            message: `mock 注入的 429 限流（配额 ${quota.limit}/${quota.windowMs}ms 内超额，${waitSec}s 后冷却）`,
+            type: 'rate_limited',
+            code: 'rate_limit_exceeded',
+          },
+        }));
+      }
+      granted.push(now);
+    }
 
     const { scenario, useIndex } = pickScenario(parsed);
     const model = parsed.model ?? 'mock-model';
@@ -316,6 +386,7 @@ const server = http.createServer(async (req, res) => {
 
     // 故障注入：非 2xx（静态）
     if (scenario.status && scenario.status >= 400) {
+      rec.status = scenario.status;
       res.writeHead(scenario.status, errorHeaders(scenario));
       return res.end(JSON.stringify({ error: { message: scenario.error ?? 'mock 注入的错误', type: 'mock_error' } }));
     }
@@ -326,6 +397,7 @@ const server = http.createServer(async (req, res) => {
     if (scenario.failTimes > 0) {
       const verdict = failVerdict(scenario, parsed);
       if (verdict.fail) {
+        rec.status = scenario.errorStatus ?? 500;
         res.writeHead(scenario.errorStatus ?? 500, errorHeaders(scenario));
         return res.end(
           JSON.stringify({
@@ -347,16 +419,44 @@ const server = http.createServer(async (req, res) => {
     // 的请求构造。e2e 的信息收集同样只有两条流式通道：gateway WS 实时帧 +
     // 生产历史读出口（`readSessionMessages`）。
 
+    // 异常注入的位次锚点（对称于 events 的下标；均未写 / [DONE]）——
+    // `dropAfter: 0` = 只发响应头就断；`dropAfter: events.length` = 全部事件已吐完但无 [DONE]；
+    // `stallAfter` 停顿不关连接；`malformed` 帧不占位。语义见文件头「异常注入」。
+    const malformedAt = scenario.malformed != null ? (scenario.malformedAfter ?? Math.floor(events.length / 2)) : -1;
+    const dropAt = scenario.dropAfter != null ? scenario.dropAfter : -1;
+    const stallAt = scenario.stallAfter != null ? scenario.stallAfter : -1;
+
     // stream：SSE
+    if (scenario.latencyMs) await sleep(scenario.latencyMs);
+    rec.status = 200;
     res.writeHead(200, {
       'content-type': 'text/event-stream',
       'cache-control': 'no-cache',
       connection: 'keep-alive',
     });
     const delay = scenario.chunkDelayMs ?? 0;
-    for (const ev of events) {
+    const jitter = scenario.chunkJitterMs ?? 0;
+    for (const [i, ev] of events.entries()) {
+      if (dropAt === i) {
+        // 半途断开：不写终止帧、不写 [DONE]，socket 直接 destroy——
+        // 被测系统视角 = 「流还在但数据表里最后一帧之后突然没了」
+        if (process.env.E2E_DEBUG) console.error(`[mock-llm] 流中断注入（第 ${i} 个事件后 destroy）`);
+        res.socket.destroy();
+        return;
+      }
+      if (stallAt === i) {
+        // 中期停顿：连接离著，数据停 `stallMs`（小于被测系统的流空闲超时才验「容忍停顿」）
+        if (process.env.E2E_DEBUG) console.error(`[mock-llm] 流停顿注入（第 ${i} 个事件后停住 ${scenario.stallMs}ms）`);
+        await sleep(scenario.stallMs ?? 1000);
+      }
+      if (malformedAt === i) res.write(malformedFrame(scenario.malformed));
       res.write(`data: ${JSON.stringify(ev)}\n\n`);
-      if (delay) await sleep(delay);
+      if (delay || jitter) await sleep(delay + (jitter ? Math.random() * jitter : 0));
+    }
+    if (dropAt === events.length) {
+      if (process.env.E2E_DEBUG) console.error('[mock-llm] 流中断注入（全部事件后、[DONE] 前 destroy）');
+      res.socket.destroy();
+      return;
     }
     res.write('data: [DONE]\n\n');
     return res.end();

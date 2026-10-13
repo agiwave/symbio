@@ -57,6 +57,10 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
 每个用例独立临时 homedir + 独立 mock 实例（端口自动分配，18080 起），
 进程结束自动清理；runner 层面每个用例再套一层独立子进程，互不拖垮。
 
+异常注入的总体纪律（T-067）：mock 模拟的是**真实 LLM 服务与真实网络环境**，
+用例的判据从**用户视角**取（CLI 成败 / 转写读出口 / 可见错误信息 / 共享转写不变量），
+不读后端内部状态——主体是黑盒（详见 [T-067](../docs/task/T-067-mockLLM体系化机制化.md)）。
+
 ## 新增一个用例
 
 1. 新建 `cases/t7-<名字>.mjs`（`t<数字>` 前缀保证排序稳定）；
@@ -80,6 +84,12 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
 | `reasoning` | 正文前输出 `reasoning_content` SSE 分片（驱动 reasoning 节点） |
 | `status` ≥ 400 | HTTP 故障注入 |
 | `failTimes` + `errorStatus`/`retryAfterSec` | 前 N 次**逻辑请求**返回错误、之后正常应答（名额按请求体指纹计，退避重发不重复扣；详见 `mock-llm.mjs` 文件头「逻辑请求」） |
+| `latencyMs` | 首字节延迟（真实 provider 的首 token 延迟） |
+| `chunkJitterMs` | 每帧延迟叠加 0..N 随机抖动（真网络不止恒定 `chunkDelayMs`） |
+| `stallAfter` + `stallMs` | 第 N 个事件后停顿一次再接着吐（连接不关；小于被测的流空闲超时才验「容忍停顿」） |
+| `dropAfter` | 第 N 个事件后半途断开连接：无终止帧、无 `[DONE]`；`0` = 只发响应头就断 |
+| `malformed` + `malformedAfter` | 第 N 个事件后混入一帧不规范内容再正常收尾：`badJson` / `truncated` / `garbage` |
+| plan 级 `rateLimit: {limit, windowMs}` | 429 限流语义：滑动窗口配额（账号级），超额 429 + `retry-after` + `x-ratelimit-*`；被拒不占配额，冷却自动恢复。`MockLlm` 构造器第三选项 `rateLimit` 可传 |
 
 ## 用例与不变量
 
