@@ -5,7 +5,7 @@
 > 口径与「什么进基线、什么只作观测」见 [ADR-057](../adr/ADR-057.md)，
 > 提取实现在 `scripts/prompt-shape-audit.mjs`。
 
-场景 `full-主线装配-工具轮-对话面关闭` · 重生成于 2026-10-12 · 请求数 3
+场景 `full-主线装配-工具轮-对话面关闭` · 重生成于 2026-10-13 · 请求数 3
 
 ## 判据列（逐字段比，PS-001）
 
@@ -30,7 +30,7 @@
 
 ```json:prompt-shape
 {
-  "schema": 1,
+  "schema": 2,
   "scenario": "full-主线装配-工具轮-对话面关闭",
   "requests": [
     {
@@ -77,7 +77,7 @@
         "count": 21,
         "names": [
           "agent_run",
-          "cmd",
+          "<shell>",
           "content_search",
           "todo_write",
           "codebase_search",
@@ -166,7 +166,7 @@
         "count": 21,
         "names": [
           "agent_run",
-          "cmd",
+          "<shell>",
           "content_search",
           "todo_write",
           "codebase_search",
@@ -259,7 +259,7 @@
         "count": 21,
         "names": [
           "agent_run",
-          "cmd",
+          "<shell>",
           "content_search",
           "todo_write",
           "codebase_search",

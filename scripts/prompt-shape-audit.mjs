@@ -23,6 +23,11 @@
  * 信封参数、消息序列（`role` + `tool_calls` 条数 + 工具结果是否带 `tool_call_id` +
  * 正文形态）、system 前缀的**小节标签序列**、工具面的**数量与名字顺序**（原序直比）。
  *
+ * 工具面里唯一**不由装配决定**的是 shell 工具的名字——它按 `target_os` 取
+ * （Windows `cmd` / macOS・Linux `sh`），归一成 `<shell>` 后入判据（见 `PLATFORM_VARIANT_TOOL`）。
+ * 不归一的实测后果：**基线在哪台机器上重生成，CI 就在另一台机器上恒红**，
+ * 而报出来的是「形状漂移」，真因是平台。
+ *
  * **字节数不进判据**，只作观测：正文规模同时由**负载**（用例里的固定文本、召回的记忆内容）
  * 决定，把它钉进判据 ⇒ 改一个用例措辞就红，而那与 prompt 装配无关。判据管「结构在不在」，
  * 规模随基线重生成留一份带日期的快照，两次快照之差就是「这次结构化改动花了多少」。
@@ -64,8 +69,36 @@ import { red, yellow, green, dim } from './color.mjs'
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 export const BASELINE_REL = join('docs', 'ref', 'PROMPT_SHAPE.md')
-export const SCHEMA_VERSION = 1
+// 2：工具面开始按「平台变体归一」入判据（见 `PLATFORM_VARIANT_TOOL`）。
+// `diffShapes` 会把 schema 不一致直接判成漂移 ⇒ 旧基线**不会**被拿去做逐字段比，
+// 而是得到一句「重生成」。否则这次过渡会表现为一串看不懂的「新增/移除」。
+export const SCHEMA_VERSION = 2
 const FENCE_RE = /```json:prompt-shape\n([\s\S]*?)\n```/
+
+/**
+ * **平台变体工具名 → 规范记号。**
+ *
+ * 出厂工具面里有一个工具的名字**由宿主平台决定、不由装配决定**：
+ * `symbio/src/plugins/local/shell.rs` 的 `get_os_info()` 按 `target_os` 返回 `tool_name`
+ * （Windows = `cmd`、macOS / Linux = `sh`；路由口径见 `docs/ref/RE-003-ROUTES.md`）。
+ * 把它原样入判据的后果是实测过的：**基线在哪台机器上重生成，CI 就在另一台机器上恒红**，
+ * 而报出来的是「形状漂移」，真因是平台（2026-10-13，见
+ * [T-093](../docs/task/T-093-prompt形状基线平台绑定.md "T-093-prompt形状基线平台绑定")）。
+ *
+ * 归一化是**朝 [ADR-057](../docs/adr/ADR-057.md) 决策 2 的既有原则靠**：那条写的是
+ * 「进判据的只有**由装配代码决定**的结构」，而平台决定的取值与「规模由负载决定」同族
+ * ——都不该进判据。归一化后判据仍记**顺序、数量与其余名字**，只把平台那一个位置收成记号。
+ *
+ * ⚠️ 名单必须与 `shell.rs` 声明的 `tool_name` 一致，由 `prompt-shape-audit.test.mjs`
+ * 的用例**逐字钉住**（漂移即红，不留第二份真相）。
+ *
+ * 记号取 `<shell>` 而不是 `shell`：后者是一个**可能真实存在的工具名**，用它会把
+ * 「真有工具叫 shell」与「平台变体被归一」混成同一件事。
+ */
+export const PLATFORM_VARIANT_TOOL = '<shell>'
+export const PLATFORM_VARIANT_TOOL_NAMES = ['cmd', 'sh']
+const normalizeToolName = (name) =>
+  PLATFORM_VARIANT_TOOL_NAMES.includes(name) ? PLATFORM_VARIANT_TOOL : name
 
 // ---------- 提取 ----------
 
@@ -140,7 +173,11 @@ export function extractShape (requests, meta = {}) {
       // 曾经在这里 `.sort()`——那不是口径，是遮丑：当时 `tools` 表是哈希表，数组顺序
       // **每起一个进程重洗一次**，比原序必然天天红。表改成保序的（`IndexMap`）之后，
       // 这条判据就把「谁先谁后」一起钉住了（ADR-057 的口径随本次一并收紧）。
-      const toolNames = tools.map((t) => t?.function?.name ?? t?.name ?? '?')
+      const toolNames = tools
+        .map((t) => t?.function?.name ?? t?.name ?? '?')
+        // 平台变体归一（`cmd` / `sh` → `<shell>`）：那一个位置的名字由 `target_os` 决定，
+        // 不是装配的产物——详见 `PLATFORM_VARIANT_TOOL` 的注释与 ADR-057 决策 2。
+        .map(normalizeToolName)
       return {
         index: i,
         envelope: envelopeOf(body),
@@ -191,6 +228,14 @@ function stringContent (m) {
 export function diffShapes (baseline, live) {
   const diffs = []
   if (!baseline || !live) return ['基线或现场形状缺失']
+  // schema 不一致 ⇒ **直接判漂移，不进逐字段比**：形状格式的语义变了之后，逐字段比
+  // 只会产出一串看不懂的「新增/移除」，而真信息只有一句「重生成基线」。
+  if (baseline.schema !== live.schema) {
+    return [
+      `schema：基线 ${baseline.schema} ≠ 现场 ${live.schema}` +
+        ' ⇒ 形状格式语义已变，请重生成基线（PROMPT_SHAPE_UPDATE=1）',
+    ]
+  }
   if (baseline.scenario !== live.scenario) diffs.push(`scenario：基线 ${baseline.scenario} ≠ 现场 ${live.scenario}`)
   if (baseline.requests.length !== live.requests.length) {
     diffs.push(`请求数：基线 ${baseline.requests.length} ≠ 现场 ${live.requests.length}`)

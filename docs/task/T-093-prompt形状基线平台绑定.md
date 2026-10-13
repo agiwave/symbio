@@ -2,13 +2,14 @@
 kind: task
 id: T-093-prompt形状基线平台绑定
 title: t46 形状基线把「平台命名的 shell 工具」（Windows `cmd` / Linux `sh`）钉进了判据——基线只能在捕获它的那个平台绿
-status: todo
+status: done
 created: 2026-10-13
 track: e2e
 deps: []
 prio: now
 where: docs/ref/PROMPT_SHAPE.md（基线本体）+ scripts/prompt-shape-audit.mjs（PS-001 工具面判据）+ e2e/cases/t46-prompt-shape-baseline.mjs
 exit: t46 在 Windows 与 Linux 上**同时**可绿（基线不再把平台命名的工具当结构判据，或按平台分别持有基线）；若为此改了 ADR-057 的判据口径，变更写进该 ADR
+evidence: 取候选 1（归一化平台变体）。`scripts/prompt-shape-audit.mjs`：新增 `PLATFORM_VARIANT_TOOL = '<shell>'` 与 `PLATFORM_VARIANT_TOOL_NAMES = ['cmd','sh']`，`extractShape` 对工具名逐位过 `normalizeToolName`（判据仍记**顺序、数量与其余名字**）；`SCHEMA_VERSION` 1→2，`diffShapes` 在 schema 不一致时**直接判漂移并提示重生成**（不再产出一串看不懂的字段差）。`scripts/prompt-shape-audit.test.mjs` 补 3 条用例（合计 23）：① 名单**逐字**钉 `shell.rs` 的 `get_os_info().tool_name`（漂移即红，不留第二份真相）② `extractShape` 把每个平台变体归一成记号、对真名叫 `shell` 的工具不动 ③ `diffShapes` schema 不一致只回一条含「重生成」的差。`docs/ref/PROMPT_SHAPE.md` 重生成：`schema: 1→2`、三处工具名 `cmd→<shell>`，其余逐字段不变（证明归一化后形状平台无关）。`docs/adr/ADR-057.md` 决策 2 的工具面条款与「后果」第 6 条记录本次补全。验证：`node --test scripts/prompt-shape-audit.test.mjs` 23/23 绿；`E2E_CASE_SELF=1 node e2e/cases/t46-prompt-shape-baseline.mjs` 绿（与重生成的基线逐字段一致）。
 ---
 
 ## 内容
@@ -32,9 +33,9 @@ CI run 37721749855 里 `e2e-check` 是**绿**的，与「那份基线此前是�
 **结论**：t46 的基线是**平台绑定**的（它把「平台命名的工具」当成了结构判据），
 因此「哪台机器最后重生成，CI 就在另一台机器上红」——这条守卫在 CI 上目前无法执行其职责。
 
-## 处置方向（待定，属 ADR-057 的口径）
+## 处置方向（登记时待定，现已定：取候选 1）
 
-三条候选，需择一并写明理由：
+三条候选，需择一并写明理由（**结论**：取候选 1，见文末「处理过程」末条）：
 
 1. **归一化平台变体**：`extractShape` 把平台命名的 shell 工具映射到一个规范记号（如 `shell`），
    判据仍记「顺序 + 计数 + 其余名字」。改动最小，且**平台无关性由构造保证**（归一化后的形状
@@ -80,3 +81,12 @@ CI run 37721749855 里 `e2e-check` 是**绿**的，与「那份基线此前是�
   （印证它是抖动，不是稳定红）。
 - 2026-10-13 补分析：三条候选各自的障碍（第二份名单 / 只能在 Linux 生成 / 属生产行为变更）
   已写进「处置方向」，并指出 1 与 2 与 ADR-057 既有原则同向——留给决策者择一，本会话不动口径。
+- 2026-10-13 落定（候选 1）：**归一化平台变体**。择它的理由：① 它是唯一**本机即可验证**的方案
+  （归一化后形状在两平台上逐字段相同，平台无关性**由构造保证**，无需在 Linux 上捕获第二份基线）；
+  ② 它朝 ADR-057 决策 2 的既有原则**收敛**而非改写——判据本就只该记「装配决定的结构」，平台名不属此列；
+  ③ 它的障碍（第二份名单）用**逐字钉源码**消掉：`prompt-shape-audit.test.mjs` 直接读
+  `shell.rs` 的 `get_os_info().tool_name` 与 `PLATFORM_VARIANT_TOOL_NAMES` 对表，名单不是「又一份真相」，
+  而是源码的一处投影，漂移即红。候选 2（多份基线）需在 CI 上生成并提交 Linux 那份，把「平台无关」
+  变成「平台各管各的」，与判据口径的收敛方向相反；候选 3（改生产工具名）是产品决定，不在本任务范围。
+  实现见 `evidence`。归一化记号取 `<shell>` 而非 `shell`：后者是一个**可能真实存在**的工具名，
+  用它会把「真有工具叫 shell」与「平台变体被归一」混成一件事。

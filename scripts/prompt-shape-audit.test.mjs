@@ -15,7 +15,10 @@
  *   4. PS-002 基线缺失 / JSON 块读不出 ⇒ 退出 2（不是 1，也不得静默通过）；
  *   5. PS-003 现场请求数为 0 ⇒ 退出 2 ——「空形状与空基线一致」是本仓最坏的假绿灯；
  *   6. 渲染 ↔ 解析往返：基线文件里的 JSON 块与提取出的形状逐字段相等；
- *   7. 一致 ⇒ 退出 0（三条判据都在结论行里出现，缺一说明有一格没在工作）。
+ *   7. 一致 ⇒ 退出 0（三条判据都在结论行里出现，缺一说明有一格没在工作）；
+ *   8. 平台变体（`cmd` / `sh`）归一成记号 `<shell>`，且名单**逐字钉** `shell.rs` 的
+ *      `tool_name`（第二份名单不许漂移）；真名叫 `shell` 的工具**不得**被误归一；
+ *   9. schema 版本不一致 ⇒ `diffShapes` 直接判漂移（旧基线得到「重生成」而不是一串字段差）。
  *
  * 用法：node --test scripts/prompt-shape-audit.test.mjs
  */
@@ -34,10 +37,14 @@ import {
   sectionsOf,
   renderBaselineDoc,
   parseBaselineDoc,
+  PLATFORM_VARIANT_TOOL,
+  PLATFORM_VARIANT_TOOL_NAMES,
+  SCHEMA_VERSION,
 } from './prompt-shape-audit.mjs'
 import { stripAnsi } from './color.mjs'
 
 const script = fileURLToPath(new URL('./prompt-shape-audit.mjs', import.meta.url))
+const repoRoot = fileURLToPath(new URL('..', import.meta.url))
 
 function tmpDir (tag) {
   return fs.mkdtempSync(path.join(os.tmpdir(), `symbio-ps-${tag}-`))
@@ -285,4 +292,57 @@ test('--write ⇒ 用现场形状重写基线，随后再判即一致', () => {
   const r = runCli([`--from=${writeLive(dir, reqs)}`, `--baseline=${target}`, '--scenario=unit'])
   assert.equal(r.code, 0, r.out)
   fs.rmSync(dir, { recursive: true, force: true })
+})
+
+// ── 平台变体归一（2026-10-13，T-093）──────────────────────────────────────
+//
+// 出厂工具面里 shell 工具的名字**由宿主平台决定**（`shell.rs` 的 `get_os_info()` 按
+// `target_os` 返回 `cmd` / `sh`）。把它原样入判据的后果实测过：基线在 Windows 上重生成 ⇒
+// CI（Linux）恒红，报的是「形状漂移」，真因是平台。归一化是朝 ADR-057 决策 2 的既有原则靠
+// ——「进判据的只有**由装配代码决定**的结构」。
+
+test('平台变体名单 == shell.rs 声明的 tool_name（第二份名单不许漂移）', () => {
+  const src = fs.readFileSync(
+    path.join(repoRoot, 'symbio/src/plugins/local/shell.rs'),
+    'utf8',
+  )
+  const fn = src.match(/fn get_os_info\(\)[\s\S]*?\n\}/)
+  assert.ok(fn, 'shell.rs 里找不到 get_os_info —— 结构变了，跟着改这条钉')
+  // 每个 cfg 分支返回 4 元组 (os_name, shell_name, tool_name, examples)，第 3 个即 tool_name。
+  const names = [...fn[0].matchAll(/\(\s*"[^"]*",\s*"[^"]*",\s*"([^"]+)"/g)].map((m) => m[1])
+  assert.ok(names.length >= 2, `只解析出 ${names.length} 个 tool_name —— 正则没跟上元组形状`)
+  assert.deepEqual(
+    [...new Set(names)].sort(),
+    [...PLATFORM_VARIANT_TOOL_NAMES].sort(),
+    '归一化名单与 shell.rs 的 tool_name 集合不一致：要么漏了平台（该平台会红），要么多收了名字（会误归一）',
+  )
+})
+
+test('extractShape：平台变体名归一成记号，其余名字与顺序原样保留', () => {
+  const reqs = baseRequests()
+  // 同一份工具面，只把 shell 工具的名字换成两个平台各自的写法。
+  for (const n of PLATFORM_VARIANT_TOOL_NAMES) {
+    reqs[0].body.tools = [
+      { function: { name: 'agent_run' } },
+      { function: { name: n } },
+      { function: { name: 'shell' } }, // 反向：真有一个工具就叫 shell，它**不得**被归一
+    ]
+    const names = extractShape(reqs).requests[0].tools.names
+    assert.deepEqual(
+      names,
+      ['agent_run', PLATFORM_VARIANT_TOOL, 'shell'],
+      `平台名 ${n} 未按预期归一`,
+    )
+  }
+})
+
+test('diffShapes：schema 不一致 ⇒ 直接判漂移（不逐字段比，避免一串看不懂的新增/移除）', () => {
+  const reqs = baseRequests()
+  const live = extractShape(reqs, { scenario: 'unit' })
+  const stale = JSON.parse(JSON.stringify(live))
+  stale.schema = SCHEMA_VERSION - 1
+  const diffs = diffShapes(stale, live)
+  assert.equal(diffs.length, 1, `schema 不一致应只报一条，实际 ${diffs.length} 条：${diffs.join('；')}`)
+  assert.match(diffs[0], /schema/, diffs[0])
+  assert.match(diffs[0], /重生成/, diffs[0])
 })
