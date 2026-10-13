@@ -3,11 +3,12 @@
 > ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/task/*.md` 生成，请勿手改。**
 > 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，原则与流程见 [PL-011 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。
 
-**计数**：☐ todo 16 · 🟡 doing 0 · ☑ done 74 · ❌ wont 0（共 90）
+**计数**：☐ todo 17 · 🟡 doing 0 · ☑ done 74 · ❌ wont 0（共 91）
 
 ## 待处理（按依赖顺序）
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
+| `T-093-prompt形状基线平台绑定` | t46 形状基线把「平台命名的 shell 工具」（Windows `cmd` / Linux `sh`）钉进了判据——基线只能在捕获它的那个平台绿 | now | e2e | — |
 | `T-072-对等主体生产增量` | ST-008 对等侧落地：对等主体窄 grants 行 + `commitment.asserted` 生产写方 + 会话独立的 ActorSpec 构造路径 | next | 多主体 | — |
 | `T-076-e2e面缺失补齐批` | e2e 面缺失六项补齐：Web 外取三工具 / 本地检索组 / 通道自动化（telegram·hook·home）/ 多协议适配 / 存储三实现切换 | next | e2e | — |
 | `T-077-输入面双轨退役批` | ADR-031 残余清偿：运行选项上写入面的协议决定 → `session/chat/send` / `chat/abort` 退役 → 排队态显示 | next | 会话与输入 | — |
@@ -204,3 +205,4 @@
 - [`T-090-前端计数基线欠账`](T-090-前端计数基线欠账.md) vitest 文件/用例数基线停在 55/856，而 T-070 退役镜像后实测 54/838——前端阶段恒红（done）
 - [`T-091-verify并发工具链竞态`](T-091-verify并发工具链竞态.md) verify 阶段并发跑裸 rustc 撞上 rustup 按需安装——CI 上 19 个验证项里 18 个假红，C29 判据被误带（done）
 - [`T-092-fmt缺推送点闸门`](T-092-fmt缺推送点闸门.md) fmt 只在整轮门禁与 CI 里判——推送点（pre-push）不判，未格式化源码能推到 origin（done）
+- [`T-093-prompt形状基线平台绑定`](T-093-prompt形状基线平台绑定.md) t46 形状基线把「平台命名的 shell 工具」（Windows `cmd` / Linux `sh`）钉进了判据——基线只能在捕获它的那个平台绿（todo）
