@@ -9,7 +9,13 @@ pub struct Request {
     pub session_id: Option<String>,
     pub agent_id: Option<String>,
     pub message: Option<ChatMessage>,
-    /// 选定的 Model Provider ID；为 None 时使用默认 Provider
+    /// 选定的 Model Provider ID。
+    ///
+    /// 随每次发送携带；为空时回退会话 `metadata.provider_id`（默认 `none` = 用默认 Provider）。
+    /// 与 `mode` / `risk_level` 是**完全对称**的三条链：`req > session.metadata > 默认`
+    /// （`plugins/session/orchestrator/entry.rs::resolve_session_params`）。
+    /// 这条回退是 [ADR-066](../../../../../docs/adr/ADR-066.md "ADR-066") 的前提——
+    /// 「地址写入不承载运行选项」正靠它成立，故它同时是一条不变量。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
     /// 心跳任务专用：本次发送是否携带历史会话信息。

@@ -170,7 +170,7 @@ action(<A>/message/<mid>, <ResumeAction>)   payload: {args?, reason?, answer?, m
 迁移期两条路并存（路由 = 薄别名），全部迁完删 `session/chat/send` / `session/chat/abort`
 两条路由 + 对应常量 + `CURRENT.md` §1 里 session 的自有路由行（重跑生成脚本）。
 
-### 5.6 ⚠️ 退役的**前置条件**：写入面还表达不了「本次运行的选项」
+### 5.6 ✅ 退役的**前置条件**：写入面还表达不了「本次运行的选项」——**已裁决（[ADR-066](../adr/ADR-066.md "ADR-066")）**
 
 实施时发现：`chat/send` 路由**本身已经就是「入队」**——`handle_chat_send_oneoff`
 的 `message` 分支（`orchestrator/entry.rs:194-211`）只做一件事：
@@ -209,6 +209,15 @@ self.enqueue_inbox(&session_id, None, message, params, ctx.get(WORKDIR)).await;
 因此不顺手发明——它该有自己的 ADR。在它定下来之前，路由**保留**：
 前端已不再调用它（本次已迁完），它只剩 CLI / telegram / agent_run / 心跳四个
 后端调用方，且它们的行为与从前逐字节一致。
+
+**裁决（[ADR-066](../adr/ADR-066.md "ADR-066")，2026-10-13）：地址写入**不**承载运行选项，
+前置条件解除。** 三条依据：① `provider_id` / `mode` / `risk_level` 在契约里**已经有会话 metadata 回退**
+（`orchestrator/entry.rs::resolve_session_params` 的三条对称链 `req > metadata > 默认`）；
+② 它们描述的是**会话属性**（这个会话怎么跑），不是消息属性；
+③ 四个调用方逐个核对——`agent_run` 要的三项全是会话属性且它**已经在写子会话 metadata**
+（`register_subsession`）、心跳已经进程内直连（`include_history` 是本次发送属性，留在 `Request`）、
+telegram 的 `mode: "auto"` 是通道属性、CLI 不带选项。
+故 §5.5 的两条路由**不需要协议变宽就能退役**；落地见 [T-077](../task/T-077-输入面双轨退役批.md "T-077-输入面双轨退役批") 步②。
 
 ---
 
@@ -319,8 +328,10 @@ id**，所以是「换位置」不是「多一条」。
 
 ### 8.2 未落地
 
-- [ ] **§5.5 退役两条路由**——前置条件见 §5.6（写入面还表达不了运行选项）。
-      前端已无调用方；后端四个调用方（CLI / telegram / `agent_run` / 心跳）保持原样。
+- [ ] **§5.5 退役两条路由**——**前置条件已解除**（[ADR-066](../adr/ADR-066.md "ADR-066")：地址写入不承载运行选项，
+      `provider_id` / `mode` / `risk_level` 走会话 metadata）。前端已无调用方；后端四个调用方待改：
+      `agent_run` 改走地址写入 + 把三项写进子会话 metadata、心跳改进程内入队、
+      telegram 把 `mode: "auto"` 落会话 metadata、CLI 直接改地址。排期 [T-077](../task/T-077-输入面双轨退役批.md "T-077-输入面双轨退役批") 步②。
 - [ ] **§6.6 排队态显示**——「前端不是唯一发送方」的闭合件。它不是本次症状的
       成因（成因是发送落点 + 订阅前缀），但少了它，别的发送方的消息在**被消费前**
       仍不可见。
