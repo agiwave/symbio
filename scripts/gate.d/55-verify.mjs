@@ -168,6 +168,44 @@ export default {
         }),
     }
 
+    // **工具链串行预热（必须早于并发批）** —— 本阶段是全仓唯一用**裸 `rustc` 并发跑**的
+    // 地方（backend 走 `cargo`，且 `05-fmt` 的 `cargo fmt --all` 会先串行解析一次工具链，
+    // 所以本机与整轮门禁都不暴露）。而 `rust-toolchain.toml` 钉的 1.93.1 在 CI runner 上
+    // **并不预装**：rustup 会在**首次**调用时按需下载安装。
+    //
+    // 2026-10-13 实测（CI run 38372186256 / 38358236876，verify-evidence job）：`--only=verify`
+    // 跳过了 fmt ⇒ 无人预热，`concurrency: 8` 让 8 个 `rustc` 同时撞上那次安装。结果 19 个
+    // 程序里只有 1 个成功（它耗时 11s —— 正是那次安装），其余 18 个以「toolchain 未安装」退出。
+    // 而这条错误**没有 `error[E…]` 编号**，在日志里与「反例档没被类型拒绝」完全同形 ——
+    // C29 的三条反向判据因此一起被带红，报出来的原因是错的。
+    //
+    // 先串行跑一次 `rustc --version`：① 把按需安装做完，此后并发批不再有竞争；
+    // ② 把「工具链解析失败」单独归因成一个红项，而不是 19 个同形的「编译失败 exit=1」。
+    // 不在 `ci.yml` 侧装第二份工具链 —— 那会造出第二个版本真相源，且**新机器（本机首次）**
+    // 跑 `--only=verify` 时竞态依旧存在。判据钉在 `_shared.test.mjs`（预热必须在并发循环之前）。
+    yield {
+      label: 'verify: 工具链预热（rustc --version · 串行，先于并发批）',
+      run: async () => {
+        const r = await ctx.run({
+          label: 'verify: 工具链预热 · rustc --version',
+          cmd: 'rustc',
+          args: ['--version'],
+          cwd: verifyDir,
+          echo: 'none',
+          // 首次解析要按 rust-toolchain.toml 下载 1.93.1，给足（实测 ~8s，余量 30 倍）
+          timeoutMs: 300_000,
+        })
+        if (!r.ok) {
+          return {
+            ok: false,
+            note: `rustc 不可用（exit=${r.code}）—— 按 rust-toolchain.toml 解析/安装失败，后续并发批必全红`,
+            logFile: r.logFile,
+          }
+        }
+        return { ok: true }
+      },
+    }
+
     for (const { file, name, hasNegative } of entries) {
       yield {
         label: `verify: ${name}`,

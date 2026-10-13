@@ -726,3 +726,35 @@ test('ratchetErosion：豁免按格生效（waivers 由调用方按各守卫自�
   assert.equal(hits.find((h) => h.key === 'a').waived, true)
   assert.equal(hits.find((h) => h.key === 'b').waived, false)
 })
+
+// ── verify 阶段的工具链预热（2026-10-13，CI run 38372186256 / 38358236876）──────
+//
+// verify 是全仓唯一用**裸 `rustc` 并发跑**的地方（backend 走 `cargo`，且整轮门禁的
+// `05-fmt` 会先串行解析一次工具链），而 `rust-toolchain.toml` 钉的 1.93.1 在 CI runner
+// 上**不预装** —— rustup 在**首次**调用时按需下载安装。`--only=verify` 跳过了 fmt，
+// 于是并发批（`concurrency: 8`）的 8 个 `rustc` 同时撞上那次安装：19 个程序只有 1 个
+// 活下来（耗时 11s，正是那次安装），其余以「toolchain 未安装」退出 —— 而该错误
+// **没有 `error[E…]` 编号**，在日志里与「反例档没被类型拒绝」完全同形，C29 的三条
+// 反向判据被一起带红，报出来的原因是错的。
+//
+// 这条失效**只在 CI 上出现、且非确定**（谁抢到安装谁活），所以「看日志」不构成判据 ——
+// 必须有机器判据钉住「预热在并发批之前、且它自己不在并发批里」。
+test('55-verify：rustc 必须先**串行预热**再进并发批（否则撞 rustup 按需安装，C29 被误带红）', () => {
+  const src = fs.readFileSync(path.join(repoRoot, 'scripts', 'gate.d', '55-verify.mjs'), 'utf8')
+  const warm = src.indexOf("args: ['--version']")
+  assert.ok(
+    warm >= 0,
+    '55-verify.mjs 里找不到工具链预热（`rustc --version`）—— 并发批会撞 rustup 按需安装',
+  )
+  const loop = src.indexOf('for (const { file, name, hasNegative } of entries) {')
+  assert.ok(loop >= 0, '55-verify.mjs 里找不到逐程序编译循环 —— 结构变了，跟着改这条钉')
+  assert.ok(warm < loop, '预热出现在逐程序编译循环**之后** —— 并发批已先跑过，预热等于没做')
+  // 预热项不得与并发批同批：取它自己那段（上一个 `yield {` 到预热之间）判。
+  const block = src.slice(src.lastIndexOf('yield {', warm), warm)
+  assert.doesNotMatch(
+    block,
+    /parallel:\s*true/,
+    '预热项标了 `parallel: true` ⇒ 它自己也在并发批里，与要修的竞态同形',
+  )
+  assert.match(block, /cmd:\s*'rustc'/, '预热项不是在调 rustc —— 上面几条钉的前提变了')
+})
