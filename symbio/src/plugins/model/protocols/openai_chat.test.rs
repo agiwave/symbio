@@ -122,7 +122,10 @@ fn leading_system_is_merged_into_one_message() {
 /// 吃掉 0 条时行为与改前逐字相同（基础 system 原样，不产生前导空行）。
 #[test]
 fn no_leading_system_leaves_the_baseline_untouched() {
-    let msgs = [NativeMessage { role: MessageRole::User, ..Default::default() }];
+    let msgs = [NativeMessage {
+        role: MessageRole::User,
+        ..Default::default()
+    }];
     let (text, eaten) = merge_leading_system("基础", &msgs);
     assert_eq!(eaten, 0);
     assert_eq!(text, "基础");

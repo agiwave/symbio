@@ -371,10 +371,17 @@ fn conation_column_recomputes_and_moves_with_the_wal() {
         .unwrap();
 
     let got = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
-    let intents = got.conation.get("intents").and_then(|v| v.as_array()).expect("intents 列");
+    let intents = got
+        .conation
+        .get("intents")
+        .and_then(|v| v.as_array())
+        .expect("intents 列");
     assert_eq!(intents.len(), 2, "分母 = 全部已表达");
     assert_eq!(
-        intents.iter().filter(|i| i.get("task_id").is_some_and(|t| !t.is_null())).count(),
+        intents
+            .iter()
+            .filter(|i| i.get("task_id").is_some_and(|t| !t.is_null()))
+            .count(),
         1,
         "分子 = 已升格"
     );
@@ -388,7 +395,9 @@ fn conation_column_recomputes_and_moves_with_the_wal() {
         .and_then(|v| v.as_array())
         .expect("intents 列");
     assert!(
-        intents.iter().all(|i| i.get("task_id").is_none_or(|t| t.is_null())),
+        intents
+            .iter()
+            .all(|i| i.get("task_id").is_none_or(|t| t.is_null())),
         "删掉 task.opened ⇒ 没有任何欲算已升格"
     );
 
@@ -419,21 +428,34 @@ fn span_column_recomputes_and_moves_with_the_wal() {
     for (id, ts) in [("e0", 1_000i64), ("e1", 1_500), ("e2", 4_200)] {
         store
             .append(
-                Event::pending(id, EVENT_USER_MESSAGE, Entity::Turn, Verb::Opened, 0, "user")
-                    .with_ts(ts)
-                    .with_payload(serde_json::json!({ "text": "问" })),
+                Event::pending(
+                    id,
+                    EVENT_USER_MESSAGE,
+                    Entity::Turn,
+                    Verb::Opened,
+                    0,
+                    "user",
+                )
+                .with_ts(ts)
+                .with_payload(serde_json::json!({ "text": "问" })),
             )
             .unwrap();
     }
 
     let got = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
     assert_eq!(got.span.get("events").and_then(|v| v.as_u64()), Some(3));
-    assert_eq!(got.span.get("span_ms").and_then(|v| v.as_u64()), Some(3_200));
+    assert_eq!(
+        got.span.get("span_ms").and_then(|v| v.as_u64()),
+        Some(3_200)
+    );
 
     // 手术刀：删掉末事件 ⇒ 跨度从 3200 缩到 500（读数跟着输入走）
     drop_line(&wal, "e2");
     let after = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
-    assert_eq!(after.span.get("span_ms").and_then(|v| v.as_u64()), Some(500));
+    assert_eq!(
+        after.span.get("span_ms").and_then(|v| v.as_u64()),
+        Some(500)
+    );
 }
 
 /// 实例级 axes 两族：跨会话合并（分子分母可加 / 中位数只收有跨度的会话）。
@@ -445,9 +467,16 @@ fn fleet_axes_aggregate_across_sessions() {
         let store = EventWalStore::open(&wals[1]).unwrap();
         store
             .append(
-                Event::pending("late", EVENT_USER_MESSAGE, Entity::Turn, Verb::Opened, 1, "user")
-                    .with_ts(9_000)
-                    .with_payload(serde_json::json!({ "text": "再问", "tier": "deep" })),
+                Event::pending(
+                    "late",
+                    EVENT_USER_MESSAGE,
+                    Entity::Turn,
+                    Verb::Opened,
+                    1,
+                    "user",
+                )
+                .with_ts(9_000)
+                .with_payload(serde_json::json!({ "text": "再问", "tier": "deep" })),
             )
             .unwrap();
     }
@@ -460,10 +489,25 @@ fn fleet_axes_aggregate_across_sessions() {
     )
     .expect("读数");
     let axes = got.fleet.get("axes").expect("axes 族");
-    assert_eq!(axes["conation"]["expressed"].as_u64(), Some(0), "实例里没有欲 ⇒ 有据的零");
-    assert_eq!(axes["span"]["sessions"].as_u64(), Some(2), "两会话都有 ≥2 事件 ⇒ 都进分母");
-    assert!(axes["span"]["median_ms"].is_u64(), "中位数有数（不是 null）");
-    assert_eq!(axes["autonomy"]["closed"].as_u64(), Some(0), "没有闭环任务 ⇒ 有据的零");
+    assert_eq!(
+        axes["conation"]["expressed"].as_u64(),
+        Some(0),
+        "实例里没有欲 ⇒ 有据的零"
+    );
+    assert_eq!(
+        axes["span"]["sessions"].as_u64(),
+        Some(2),
+        "两会话都有 ≥2 事件 ⇒ 都进分母"
+    );
+    assert!(
+        axes["span"]["median_ms"].is_u64(),
+        "中位数有数（不是 null）"
+    );
+    assert_eq!(
+        axes["autonomy"]["closed"].as_u64(),
+        Some(0),
+        "没有闭环任务 ⇒ 有据的零"
+    );
     assert_eq!(axes["autonomy"]["unattended_rate"].as_f64(), Some(0.0));
 }
 
@@ -519,7 +563,10 @@ fn autonomy_column_recomputes_and_moves_with_the_wal() {
 
     let got = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
     assert_eq!(got.autonomy.get("closed").and_then(|v| v.as_u64()), Some(2));
-    assert_eq!(got.autonomy.get("unattended").and_then(|v| v.as_u64()), Some(1));
+    assert_eq!(
+        got.autonomy.get("unattended").and_then(|v| v.as_u64()),
+        Some(1)
+    );
 
     // 手术刀：删掉挂起事件 ⇒ t2 也算全程自主（率从 0.5 升到 1.0）
     drop_line(&wal, "h-2");

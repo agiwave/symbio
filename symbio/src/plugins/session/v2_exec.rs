@@ -1099,8 +1099,7 @@ pub(crate) async fn execute_final_reply_turn(
                 reasoning_id: Some(reasoning_id),
                 reasoning: Some(reasoning),
             };
-            std::sync::Arc::new(move || facts.clone())
-                as super::turn_runner::NodeFactsFn
+            std::sync::Arc::new(move || facts.clone()) as super::turn_runner::NodeFactsFn
         }),
         // 定稿答话轮不经过工具循环的闸门空隙——它一次请求都不发（`final_reply` 走
         // 1b 分支直接收束）。但信号照传：若用户在答话落格前按下停止，1c 的中止检查

@@ -256,7 +256,12 @@ impl VdfsTreeResponse {
                  本次 {root} 的结果不完整，照编号或名字猜子路径必然出错。"
             )
         };
-        Self { nodes, truncated, pending, message }
+        Self {
+            nodes,
+            truncated,
+            pending,
+            message,
+        }
     }
 }
 

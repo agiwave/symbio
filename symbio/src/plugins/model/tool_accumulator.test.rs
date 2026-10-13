@@ -254,8 +254,7 @@ fn retry_seeds_the_node_ids_of_the_failed_attempt() {
 /// 的幽灵，执行层照它们发请求，provider 侧于是报「tool_call 无对应结果」。
 #[test]
 fn seeded_slots_without_new_deltas_do_not_become_ghost_calls() {
-    let mut acc =
-        TurnToolCallAccumulator::with_node_ids(&["n0".into(), "n1".into(), "n2".into()]);
+    let mut acc = TurnToolCallAccumulator::with_node_ids(&["n0".into(), "n1".into(), "n2".into()]);
 
     // 这一批只产出 1 个调用
     acc.process_delta(0, Some("call_a"), Some("f1"), Some("{}"));

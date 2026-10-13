@@ -10,7 +10,9 @@ use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRo
 use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
 use super::sse::{SseLineParser, SsePartialLineExtractor};
 use super::ModelProtocolEvent;
-use super::{description_for_llm, error_text, sse_data, ModelProtocol, MODEL_PROTOCOL_OPENAI_RESPONSES};
+use super::{
+    description_for_llm, error_text, sse_data, ModelProtocol, MODEL_PROTOCOL_OPENAI_RESPONSES,
+};
 use crate::plugins::model::http::get_http_client;
 use crate::symbio_core::capability_to_wire;
 use crate::symbio_core::{ModelFinishReason, ModelUsage, PluginError, PluginInvokeRequest};

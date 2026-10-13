@@ -56,17 +56,25 @@ fn reasoning_text_of(delta: &Value) -> Option<String> {
 ///
 /// 只合 `content` 是**纯文本**的那些段；遇到 Parts（多模态）就停下不再吃——
 /// 拼错比多一条 system 更糟。吃掉 0 条时行为与改前逐字相同。
-fn merge_leading_system(system: &str, msgs: &[crate::plugins::model::types::NativeMessage]) -> (String, usize) {
+fn merge_leading_system(
+    system: &str,
+    msgs: &[crate::plugins::model::types::NativeMessage],
+) -> (String, usize) {
     let mut merged = system.to_string();
     let mut consumed = 0usize;
     for m in msgs {
         if m.role != crate::plugins::model::types::MessageRole::System {
-            break
+            break;
         }
         // 取 `to_api_value` 算出的最终 content（含 `prompt` 前缀的拼接结果），
         // 而不是自己再拼一遍——拼接口径单点，不在这里开第二份。
-        let Some(text) = m.to_api_value().get("content").and_then(|c| c.as_str()).map(str::to_string) else {
-            break // Parts / 空：不猜它的文本形态，停下
+        let Some(text) = m
+            .to_api_value()
+            .get("content")
+            .and_then(|c| c.as_str())
+            .map(str::to_string)
+        else {
+            break; // Parts / 空：不猜它的文本形态，停下
         };
         if text.trim().is_empty() {
             consumed += 1 // 空段不吃进文本，但仍算已并（它不该再单独发出去）

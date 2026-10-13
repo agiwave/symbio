@@ -275,7 +275,11 @@ impl ModelProvider for BoundProvider {
                             return Err(PluginError::StreamError(m));
                         }
                         PostResult::Aborted => {
-                            plugin_info!("model", "[LLM] 轮次中止 (耗时 {:?})", turn_started.elapsed());
+                            plugin_info!(
+                                "model",
+                                "[LLM] 轮次中止 (耗时 {:?})",
+                                turn_started.elapsed()
+                            );
                             return Err(PluginError::Aborted {
                                 // 半截流的清除不在本层（见 `PostResult::Aborted` 首次分支）。
                                 partial: Vec::new(),

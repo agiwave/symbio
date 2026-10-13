@@ -8,9 +8,16 @@ use crate::symbio_core::projection::span::{SpanSummary, SpanView};
 use crate::symbio_core::{Budget, Entity, Event, EventStore, Seq, Store, Verb, EVENT_USER_MESSAGE};
 
 fn msg(id: &str, ts: i64) -> Event {
-    Event::pending(id, EVENT_USER_MESSAGE, Entity::Turn, Verb::Opened, 0, "user")
-        .with_ts(ts)
-        .with_payload(serde_json::json!({ "text": "问" }))
+    Event::pending(
+        id,
+        EVENT_USER_MESSAGE,
+        Entity::Turn,
+        Verb::Opened,
+        0,
+        "user",
+    )
+    .with_ts(ts)
+    .with_payload(serde_json::json!({ "text": "问" }))
 }
 
 /// 口径：跨度 = 末事件 ts − 首事件 ts；事件条数随 as-of 之后的切片计。
@@ -34,7 +41,9 @@ fn as_of_hides_future_events() {
     store.append(msg("e0", 1_000)).unwrap();
     store.append(msg("e1", 2_000)).unwrap();
     store.append(msg("e2", 9_000)).unwrap();
-    let v = span().apply(&store.range(Seq::new(0)), 2_500, Budget::generous()).value;
+    let v = span()
+        .apply(&store.range(Seq::new(0)), 2_500, Budget::generous())
+        .value;
     assert_eq!(v.events, 2, "as-of = 2500 ⇒ 只见前两条");
     assert_eq!(v.span_ms, 1_000, "跨度也只按可见的首末算");
 }
@@ -73,7 +82,11 @@ fn median_uses_nearest_neighbor() {
         sessions: 4,
         spans: vec![10, 20, 30, 40],
     };
-    assert_eq!(s.median_ms(), Some(20), "4 样本的 P50 = 第 2 个（ceil(2)-1 = 1）");
+    assert_eq!(
+        s.median_ms(),
+        Some(20),
+        "4 样本的 P50 = 第 2 个（ceil(2)-1 = 1）"
+    );
     let s3 = SpanSummary {
         sessions: 3,
         spans: vec![10, 20, 30],

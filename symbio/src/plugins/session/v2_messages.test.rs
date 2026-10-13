@@ -407,10 +407,19 @@ fn a_parked_change_re_resolves_its_anchor_at_drain_time() {
 #[test]
 fn an_assistant_edit_is_attributed_to_the_agent_not_the_user() {
     let (dir, _) = seeded_dir("actor-assistant");
-    edited(&dir, &patched_msg("u-1", "流式累积的一段", MessageRole::Assistant, None, 1_500));
+    edited(
+        &dir,
+        &patched_msg("u-1", "流式累积的一段", MessageRole::Assistant, None, 1_500),
+    );
 
-    let edit = read_facts(&dir).into_iter().find(|e| e.kind == EVENT_MESSAGE_EDITED).expect("编辑事实");
-    assert_eq!(edit.actor, "agent:main", "助手产出署本会话主体——署成 user 是冒用身份");
+    let edit = read_facts(&dir)
+        .into_iter()
+        .find(|e| e.kind == EVENT_MESSAGE_EDITED)
+        .expect("编辑事实");
+    assert_eq!(
+        edit.actor, "agent:main",
+        "助手产出署本会话主体——署成 user 是冒用身份"
+    );
     assert_eq!(edit.ts, 1_500, "时刻取自消息本身，不是一律 0");
 
     std::fs::remove_dir_all(&dir).ok();
@@ -420,9 +429,15 @@ fn an_assistant_edit_is_attributed_to_the_agent_not_the_user() {
 #[test]
 fn a_tool_result_edit_is_attributed_to_the_agent_not_the_user() {
     let (dir, _) = seeded_dir("actor-tool");
-    edited(&dir, &patched_msg("u-1", "找不到文件", MessageRole::Tool, None, 1_700));
+    edited(
+        &dir,
+        &patched_msg("u-1", "找不到文件", MessageRole::Tool, None, 1_700),
+    );
 
-    let edit = read_facts(&dir).into_iter().find(|e| e.kind == EVENT_MESSAGE_EDITED).expect("编辑事实");
+    let edit = read_facts(&dir)
+        .into_iter()
+        .find(|e| e.kind == EVENT_MESSAGE_EDITED)
+        .expect("编辑事实");
     assert_eq!(edit.actor, "agent:main");
     assert_eq!(edit.ts, 1_700);
 
@@ -433,9 +448,15 @@ fn a_tool_result_edit_is_attributed_to_the_agent_not_the_user() {
 #[test]
 fn only_a_user_message_is_attributed_to_the_user() {
     let (dir, _) = seeded_dir("actor-user");
-    edited(&dir, &patched_msg("u-1", "改过的问题", MessageRole::User, None, 1_600));
+    edited(
+        &dir,
+        &patched_msg("u-1", "改过的问题", MessageRole::User, None, 1_600),
+    );
 
-    let edit = read_facts(&dir).into_iter().find(|e| e.kind == EVENT_MESSAGE_EDITED).expect("编辑事实");
+    let edit = read_facts(&dir)
+        .into_iter()
+        .find(|e| e.kind == EVENT_MESSAGE_EDITED)
+        .expect("编辑事实");
     assert_eq!(edit.actor, "user", "用户的话才署用户");
     assert_eq!(edit.ts, 1_600);
 
@@ -449,11 +470,23 @@ fn an_explicit_principal_wins_over_the_role() {
     let (dir, _) = seeded_dir("actor-relayed");
     edited(
         &dir,
-        &patched_msg("u-1", "别人说的话", MessageRole::Assistant, Some("agent:sub-1".into()), 1_800),
+        &patched_msg(
+            "u-1",
+            "别人说的话",
+            MessageRole::Assistant,
+            Some("agent:sub-1".into()),
+            1_800,
+        ),
     );
 
-    let edit = read_facts(&dir).into_iter().find(|e| e.kind == EVENT_MESSAGE_EDITED).expect("编辑事实");
-    assert_eq!(edit.actor, "agent:sub-1", "自带主体优先于按 role 派生——不许串主体");
+    let edit = read_facts(&dir)
+        .into_iter()
+        .find(|e| e.kind == EVENT_MESSAGE_EDITED)
+        .expect("编辑事实");
+    assert_eq!(
+        edit.actor, "agent:sub-1",
+        "自带主体优先于按 role 派生——不许串主体"
+    );
 
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -481,9 +514,15 @@ fn patched_msg(
 #[test]
 fn the_messages_own_timestamp_wins() {
     let (dir, _) = seeded_dir("ts-given");
-    edited(&dir, &patched_msg("u-1", "带时刻", MessageRole::Assistant, None, 1_234_567));
+    edited(
+        &dir,
+        &patched_msg("u-1", "带时刻", MessageRole::Assistant, None, 1_234_567),
+    );
 
-    let edit = read_facts(&dir).into_iter().find(|e| e.kind == EVENT_MESSAGE_EDITED).expect("编辑事实");
+    let edit = read_facts(&dir)
+        .into_iter()
+        .find(|e| e.kind == EVENT_MESSAGE_EDITED)
+        .expect("编辑事实");
     assert_eq!(edit.ts, 1_234_567, "消息自带时刻 ⇒ 原样用作事实的时刻");
 
     std::fs::remove_dir_all(&dir).ok();
@@ -502,9 +541,16 @@ fn a_missing_timestamp_falls_back_to_now_never_to_zero() {
     m.principal = None;
     edited(&dir, &m);
 
-    let edit = read_facts(&dir).into_iter().find(|e| e.kind == EVENT_MESSAGE_EDITED).expect("编辑事实");
+    let edit = read_facts(&dir)
+        .into_iter()
+        .find(|e| e.kind == EVENT_MESSAGE_EDITED)
+        .expect("编辑事实");
     assert_ne!(edit.ts, 0, "没带时刻也不许写 0——那是谎报，不是未知");
-    assert!(edit.ts > 1_700_000_000_000, "退到的是真实时钟读数：{ts}", ts = edit.ts);
+    assert!(
+        edit.ts > 1_700_000_000_000,
+        "退到的是真实时钟读数：{ts}",
+        ts = edit.ts
+    );
 
     std::fs::remove_dir_all(&dir).ok();
 }

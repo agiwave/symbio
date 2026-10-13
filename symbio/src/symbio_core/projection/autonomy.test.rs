@@ -11,15 +11,29 @@ use crate::symbio_core::{
 };
 
 fn held(id: &str, task: &str, ts: i64) -> Event {
-    Event::pending(id, EVENT_TASK_HELD, Entity::Task, Verb::Held, 0, "agent:reflex")
-        .with_ts(ts)
-        .with_payload(serde_json::json!({ "task_id": task }))
+    Event::pending(
+        id,
+        EVENT_TASK_HELD,
+        Entity::Task,
+        Verb::Held,
+        0,
+        "agent:reflex",
+    )
+    .with_ts(ts)
+    .with_payload(serde_json::json!({ "task_id": task }))
 }
 
 fn asserted(id: &str, task: &str, ts: i64) -> Event {
-    Event::pending(id, EVENT_TASK_ASSERTED, Entity::Task, Verb::Asserted, 0, "agent:reflex")
-        .with_ts(ts)
-        .with_payload(serde_json::json!({ "task_id": task }))
+    Event::pending(
+        id,
+        EVENT_TASK_ASSERTED,
+        Entity::Task,
+        Verb::Asserted,
+        0,
+        "agent:reflex",
+    )
+    .with_ts(ts)
+    .with_payload(serde_json::json!({ "task_id": task }))
 }
 
 fn view(store: &EventStore, now: i64) -> AutonomyView {
@@ -48,19 +62,20 @@ fn unattended_rate_is_closed_without_held_over_closed() {
 fn recovery_does_not_wash_out_the_intervention() {
     let store = EventStore::new();
     store.append(held("h1", "t1", 100)).unwrap();
-    store.append(
-        Event::pending(
-            "p1",
-            "task.progress",
-            Entity::Task,
-            Verb::Progressed,
-            0,
-            "agent:reflex",
+    store
+        .append(
+            Event::pending(
+                "p1",
+                "task.progress",
+                Entity::Task,
+                Verb::Progressed,
+                0,
+                "agent:reflex",
+            )
+            .with_ts(150)
+            .with_payload(serde_json::json!({ "task_id": "t1" })),
         )
-        .with_ts(150)
-        .with_payload(serde_json::json!({ "task_id": "t1" })),
-    )
-    .unwrap();
+        .unwrap();
     store.append(asserted("a1", "t1", 200)).unwrap();
     let v = view(&store, i64::MAX);
     assert_eq!(v.closed, 1);
@@ -73,19 +88,20 @@ fn recovery_does_not_wash_out_the_intervention() {
 #[test]
 fn unfinished_tasks_are_excluded_from_both_sides() {
     let store = EventStore::new();
-    store.append(
-        Event::pending(
-            "o1",
-            "task.opened",
-            Entity::Task,
-            Verb::Opened,
-            0,
-            "agent:reflex",
+    store
+        .append(
+            Event::pending(
+                "o1",
+                "task.opened",
+                Entity::Task,
+                Verb::Opened,
+                0,
+                "agent:reflex",
+            )
+            .with_ts(100)
+            .with_payload(serde_json::json!({ "task_id": "running" })),
         )
-        .with_ts(100)
-        .with_payload(serde_json::json!({ "task_id": "running" })),
-    )
-    .unwrap();
+        .unwrap();
     store.append(held("h1", "suspended", 200)).unwrap();
     let v = view(&store, i64::MAX);
     assert_eq!(v.closed, 0, "没有闭环 ⇒ 分母为空");
@@ -140,18 +156,27 @@ fn merge_adds_numerator_and_denominator() {
 #[test]
 fn ignores_non_task_events() {
     let store = EventStore::new();
-    store.append(
-        Event::pending("x1", EVENT_TASK_HELD, Entity::Turn, Verb::Held, 0, "u")
-            .with_ts(100)
-            .with_payload(serde_json::json!({ "task_id": "t1" })),
-    )
-    .unwrap();
-    store.append(
-        Event::pending("x2", EVENT_TASK_ASSERTED, Entity::Task, Verb::Asserted, 0, "u")
+    store
+        .append(
+            Event::pending("x1", EVENT_TASK_HELD, Entity::Turn, Verb::Held, 0, "u")
+                .with_ts(100)
+                .with_payload(serde_json::json!({ "task_id": "t1" })),
+        )
+        .unwrap();
+    store
+        .append(
+            Event::pending(
+                "x2",
+                EVENT_TASK_ASSERTED,
+                Entity::Task,
+                Verb::Asserted,
+                0,
+                "u",
+            )
             .with_ts(150)
             .with_payload(serde_json::json!({ "other": 1 })),
-    )
-    .unwrap();
+        )
+        .unwrap();
     let v = view(&store, i64::MAX);
     assert_eq!(v, AutonomyView::default(), "实体不符 / 缺 task_id ⇒ 不计数");
 }

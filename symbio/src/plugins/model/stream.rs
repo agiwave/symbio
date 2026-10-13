@@ -325,7 +325,10 @@ pub async fn parse_sse_stream(
                     started.elapsed()
                 );
                 plugin_error!("model", "[LLM] {}", msg);
-                failure = Some(StreamFailure { message: msg, transient: true });
+                failure = Some(StreamFailure {
+                    message: msg,
+                    transient: true,
+                });
                 break;
             }
         };
@@ -371,7 +374,9 @@ pub async fn parse_sse_stream(
                 // 请求体里），不靠关键词判定——reqwest 的措辞版本间会变。原始错误
                 // 只进日志（上一行），面向用户的措辞不回显 reqwest 的内部错误串。
                 failure = Some(StreamFailure {
-                    message: "模型连接中断：上游流在完成前终止（连接被对端关闭），请重试或切换模型。".to_string(),
+                    message:
+                        "模型连接中断：上游流在完成前终止（连接被对端关闭），请重试或切换模型。"
+                            .to_string(),
                     transient: true,
                 });
                 break;
@@ -679,17 +684,18 @@ async fn dispatch_protocol_event(
             // 模型下一轮从工具结果里读到发生了什么。上限取 32：本仓健康的单批是
             // 个位数～十几个，32 已是两倍余量；真需要更多调用应该分轮发
             // （每轮拿到结果再继续）。
-            let is_overflow = if snapshot_required && tool_acc.call_count() > MAX_TOOL_CALLS_PER_RESPONSE {
-                overflow_ids.insert(tc_id.clone());
-                plugin_warn!(
-                    "model",
-                    "[LLM] 单响应内工具调用数超过上限（{MAX_TOOL_CALLS_PER_RESPONSE}），\
+            let is_overflow =
+                if snapshot_required && tool_acc.call_count() > MAX_TOOL_CALLS_PER_RESPONSE {
+                    overflow_ids.insert(tc_id.clone());
+                    plugin_warn!(
+                        "model",
+                        "[LLM] 单响应内工具调用数超过上限（{MAX_TOOL_CALLS_PER_RESPONSE}），\
                      自本调用起丢弃（不执行、不显示），执行层将向模型反馈超限原因"
-                );
-                true
-            } else {
-                overflow_ids.contains(&tc_id)
-            };
+                    );
+                    true
+                } else {
+                    overflow_ids.contains(&tc_id)
+                };
             if is_overflow {
                 return Ok(());
             }
@@ -763,4 +769,3 @@ fn safe_substring(s: &str, start: usize) -> String {
 #[cfg(test)]
 #[path = "stream.test.rs"]
 mod tests;
-

@@ -31,9 +31,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::super::event::{
-    Entity, Event, EVENT_TASK_ASSERTED, EVENT_TASK_HELD,
-};
+use super::super::event::{Entity, Event, EVENT_TASK_ASSERTED, EVENT_TASK_HELD};
 use super::super::view::{Budget, View};
 use super::Projection;
 

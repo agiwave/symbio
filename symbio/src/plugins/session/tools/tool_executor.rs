@@ -1272,7 +1272,11 @@ pub async fn process_tool_calls_async(
         // reason 必须分辨中止：`6cf9520d` 号会话的 56 条占位全写成了
         // `not_executed`（批被用户中止，收口却报「同批前序未结束」）——
         // 成因被谎报，事后排查就得靠猜。中止即 `aborted`，其余才是批跳过。
-        let reason = if abort.is_aborted() { "aborted" } else { "not_executed" };
+        let reason = if abort.is_aborted() {
+            "aborted"
+        } else {
+            "not_executed"
+        };
         let result_msg = not_executed_result(id, reason);
         llm_emit_message(sink, result_msg.clone()).await;
         if let Some(parent_update) = emit_parent_finalized(

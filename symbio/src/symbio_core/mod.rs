@@ -276,9 +276,8 @@ pub use schemas::detail::{
 pub use schemas::session::{chat_message, session_chat};
 pub use schemas::{
     ComposeRequest, DecideRequest, HookEvent, HookOutput, RunSnapshot, Verdict, WordingReply,
-    REASON_ACK,
-    REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT, REASON_GREETING, REASON_NEEDS_WORK,
-    REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED,
+    REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT, REASON_GREETING,
+    REASON_NEEDS_WORK, REASON_REFUSE, REASON_THANKS, REASON_UNCLASSIFIED,
 };
 
 // ==================== 事件总线 ====================

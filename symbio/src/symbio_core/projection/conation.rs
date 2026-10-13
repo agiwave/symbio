@@ -123,7 +123,10 @@ impl ConationView {
             expressed += p.intents.len();
             escalated += p.escalated();
         }
-        ConationSummary { expressed, escalated }
+        ConationSummary {
+            expressed,
+            escalated,
+        }
     }
 }
 

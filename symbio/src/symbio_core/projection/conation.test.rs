@@ -218,8 +218,18 @@ fn adoption_rate_counts_unpromoted_intents_in_the_denominator() {
 fn merge_aggregates_numerator_and_denominator() {
     let s1 = ConationView {
         intents: vec![
-            ConationIntent { seq: 1, ts: 10, goal: "A".into(), task_id: Some("t1".into()) },
-            ConationIntent { seq: 2, ts: 20, goal: "B".into(), task_id: None },
+            ConationIntent {
+                seq: 1,
+                ts: 10,
+                goal: "A".into(),
+                task_id: Some("t1".into()),
+            },
+            ConationIntent {
+                seq: 2,
+                ts: 20,
+                goal: "B".into(),
+                task_id: None,
+            },
         ],
     };
     let s2 = ConationView {

@@ -424,11 +424,13 @@ async fn tree_receipt(
         pending.extend(queue.into_iter().map(|(addr, _)| addr));
     }
 
-    Ok(serde_json::to_value(super::super::protocol::VdfsTreeResponse::finish(
-        out,
-        truncated,
-        pending,
-        count_limit,
-        &req.path,
-    ))?)
+    Ok(serde_json::to_value(
+        super::super::protocol::VdfsTreeResponse::finish(
+            out,
+            truncated,
+            pending,
+            count_limit,
+            &req.path,
+        ),
+    )?)
 }

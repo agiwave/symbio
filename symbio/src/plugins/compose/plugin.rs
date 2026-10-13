@@ -102,12 +102,20 @@ impl ComposePlugin {
     ///
     /// 恒有返回：三条产线各自都有兜底（见模块文档）。
     /// 思考事实只有**生成**产线有（模板零模型往返 ⇒ `None`）。
-    async fn compose(&self, ctx: &Arc<dyn PluginInvokeRequest>, req: &ComposeRequest) -> WordingReply {
+    async fn compose(
+        &self,
+        ctx: &Arc<dyn PluginInvokeRequest>,
+        req: &ComposeRequest,
+    ) -> WordingReply {
         // `Report` 走**填表**产线：事实在 `snapshot` 里，措辞是固定的。它与下面的
         // 模板表并列而不混入表——表里每一行都是"与上下文无关的固定措辞"，
         // 而汇报的正文随现状变（见 `templates::progress_text`）。
         if matches!(req.verdict, Verdict::Report) {
-            return WordingReply { text: progress_text(&req.snapshot), reasoning: None, reasoning_id: None };
+            return WordingReply {
+                text: progress_text(&req.snapshot),
+                reasoning: None,
+                reasoning_id: None,
+            };
         }
         if requires_generation(&req.verdict) {
             if let Some(reply) = generate(ctx, req, &self.config).await {

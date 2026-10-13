@@ -194,7 +194,8 @@ fn gateway_error_json_is_not_echoed_verbatim() {
         "网关的空 `responseText` 对用户毫无意义"
     );
     assert!(
-        f.message.contains("Upstream stream terminated unexpectedly before completion"),
+        f.message
+            .contains("Upstream stream terminated unexpectedly before completion"),
         "人读原因（message 字段）必须保留，实际：{}",
         f.message
     );

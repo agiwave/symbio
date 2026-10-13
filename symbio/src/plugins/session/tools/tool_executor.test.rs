@@ -421,7 +421,9 @@ async fn aborted_batch_terminates_every_tool_call() {
 async fn overflow_dropped_call_returns_feedback_without_execution() {
     let sink = ExecEventSink::silent();
     let abort = ExecAbortSignal::new(); // 未中止：能否执行只取决于丢弃标记
-    let notice = "本次调用未执行：本条响应内的工具调用数超过上限（32），超出上限的调用已被系统丢弃。".to_string();
+    let notice =
+        "本次调用未执行：本条响应内的工具调用数超过上限（32），超出上限的调用已被系统丢弃。"
+            .to_string();
     let tcs = vec![TurnToolCallInfo {
         id: Some("tc-overflow".into()),
         wire_id: None,

@@ -425,8 +425,8 @@ fn produced_nodes(e: &Event) -> Vec<ChatMessage> {
         if reasoning.trim().is_empty() {
             return vec![node];
         }
-        let reasoning_id = str_of(e, "reasoning_id")
-            .unwrap_or_else(|| format!("{}-reasoning", node.id));
+        let reasoning_id =
+            str_of(e, "reasoning_id").unwrap_or_else(|| format!("{}-reasoning", node.id));
         let reasoning_node = ChatMessage {
             id: reasoning_id,
             parent_id: Some(node.id.clone()),

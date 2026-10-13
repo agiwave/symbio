@@ -28,11 +28,11 @@ use std::sync::Arc;
 
 use super::config::ComposeConfig;
 use crate::symbio_core::chat_message::{ChatMessage, MessageRole};
-use crate::symbio_core::{ComposeRequest, WordingReply};
 use crate::symbio_core::{
     llm_short_id, CapabilityVisitor, ExecAbortSignal, ExecEnv, ExecEventSink, ModelProvider,
     PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_VISITOR,
 };
+use crate::symbio_core::{ComposeRequest, WordingReply};
 
 /// 生成请求的**指令段**（拼在注册的系统提示词之后；可被
 /// `ComposeConfig::instruction` 覆盖）。

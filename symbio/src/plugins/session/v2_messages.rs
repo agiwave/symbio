@@ -321,7 +321,10 @@ fn actor_and_ts(payload: &Value) -> (String, i64) {
         return (PRINCIPAL_USER.to_string(), 0);
     };
 
-    let principal = msg.get("principal").and_then(Value::as_str).map(str::to_string);
+    let principal = msg
+        .get("principal")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     let actor = principal.unwrap_or_else(|| {
         match msg.get("role").and_then(Value::as_str) {
             Some("user") => PRINCIPAL_USER.to_string(),
@@ -337,7 +340,9 @@ fn actor_and_ts(payload: &Value) -> (String, i64) {
     // Assistant` 的构造点有 9 处，只有 1 处填了 `timestamp`（其余是复制胚胎的各份
     // 手写实现）。逐个去补那 8 处是同一类错误的第三次重演——这里兜底一层，无论谁
     // 写的消息，落到事实上都有真实时刻。
-    let ts = msg.get("timestamp").and_then(Value::as_i64)
+    let ts = msg
+        .get("timestamp")
+        .and_then(Value::as_i64)
         .filter(|t| *t > 0) // 上游把「没填」写成 0，这里一并兜住
         .unwrap_or_else(crate::symbio_core::clock_now_ms);
     (actor, ts)

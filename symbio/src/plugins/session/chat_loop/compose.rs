@@ -118,7 +118,9 @@ pub(crate) async fn apply_verdict(
                 );
                 return (VerdictEffect::Silent, None);
             };
-            context.messages.push(dialog_node(&reply.text, reason, false));
+            context
+                .messages
+                .push(dialog_node(&reply.text, reason, false));
             // 思考事实随答话交给调用方：`Answered` 收束格是**事实层**里这条
             // 模型往回的唯一去处（见 `execute_final_reply_turn` 的入参）。
             (VerdictEffect::Finish, Some(reply))
@@ -127,7 +129,9 @@ pub(crate) async fn apply_verdict(
             // 首响：拿不到就只是少一句开场白，本轮照旧干活。
             match compose_text(orchestrator, ctx, context, &verdict, snapshot).await {
                 Some(reply) => {
-                    context.messages.push(dialog_node(&reply.text, reason, true));
+                    context
+                        .messages
+                        .push(dialog_node(&reply.text, reason, true));
                     (VerdictEffect::Spoke, None)
                 }
                 None => (VerdictEffect::Silent, None),
