@@ -6,9 +6,11 @@
 //! 1. `agent:main` 持 6 项、**不持验证**（C15 不自验），首响与追加发言都放行；
 //! 2. **自主发起者那一行比主智能体窄**（只持 `define.work`、不持 `reply.*`，
 //!    S12 §3/§5「自主行为不得冒充用户对话」）；
-//! 3. `matrix_for` 的两条分支：**登记过的主体走表**（表是权威，派生不覆盖它），
+//! 3. **抢占判定者那一行比主智能体窄**（只持 `judge.intent`、不持 `reply.*`，
+//!    S07 §5「判定者不得直接发言」）；
+//! 4. `matrix_for` 的两条分支：**登记过的主体走表**（表是权威，派生不覆盖它），
 //!    未登记的 `agent:<id>` 才派生主智能体那一行；
-//! 4. 读写两侧的闸按**属主 / 矩阵成员**分：主智能体与属主各得其所，`user` 不入表
+//! 5. 读写两侧的闸按**属主 / 矩阵成员**分：主智能体与属主各得其所，`user` 不入表
 //!    （发言不是能力），矩阵外主体拒绝；表构造失败时的降级面（空矩阵）一概拒绝
 //!    ——fail-closed 不因降级而松开。
 
@@ -55,6 +57,43 @@ fn the_autonomous_row_is_narrower_than_main() {
         Some(VisScope::ThreadPrivate),
         "可见域显式给出（成对性），不是 None"
     );
+}
+
+/// 抢占判定者那一行（S07 §5）：**比主智能体窄**——只持 `judge.intent`，不持任何 `reply.*`。
+///
+/// 与自主行同形的静默面（本批修掉的正是这个）：`agent:reflex` 曾经**不在表里**，
+/// 而 `matrix_for` 对一切未登记 `agent:*` 都派生主智能体的整套能力（含 `reply.*`）——
+/// 于是「判定者不得发言」在生产里被静默推翻。判据落在**生产表**上（`matrix_for`），
+/// 不再是自造矩阵：自造矩阵只证明「我拒我」，表里少一行它照样绿。
+#[test]
+fn the_reflex_row_is_narrower_than_derivation() {
+    let matrix = production_matrix();
+    let caps = matrix.grants_of(PRINCIPAL_REFLEX);
+    assert_eq!(caps.len(), 1, "只持 judge.intent：{caps:?}");
+    assert!(
+        matrix.can_write(PRINCIPAL_REFLEX, Capability::JudgeIntent),
+        "判定者必须能判决意图，否则抢占判定这一步直接失效"
+    );
+    assert!(
+        !matrix.can_reply(PRINCIPAL_REFLEX, true) && !matrix.can_reply(PRINCIPAL_REFLEX, false),
+        "判定者不得直接发言（首响与追加都不放行，S07 §5）"
+    );
+    assert_eq!(
+        matrix.sees_of(PRINCIPAL_REFLEX),
+        Some(VisScope::ThreadPrivate),
+        "可见域显式给出（成对性），不是 None"
+    );
+
+    // 反向判据：**登记过的主体走表**，派生不得覆盖它——`matrix_for` 拿到的必须是
+    // 上面那一行（窄），而不是派生出来的主智能体整套。去掉 ROWS 里那一行，这条断言
+    // 立刻变红（派生分支会把 `reply.first` 塞回来）。
+    let derived = matrix_for(PRINCIPAL_REFLEX);
+    assert_eq!(
+        derived.grants_of(PRINCIPAL_REFLEX).len(),
+        1,
+        "派生不得把主智能体的 reply.* 塞回判定者这一行"
+    );
+    assert!(!derived.can_reply(PRINCIPAL_REFLEX, true));
 }
 
 /// `matrix_for` 两条分支：**登记过的主体走表**（表是权威，派生不覆盖它）；

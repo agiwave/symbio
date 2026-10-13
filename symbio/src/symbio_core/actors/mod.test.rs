@@ -1298,22 +1298,31 @@ fn suspended_task_leaves_readyset_and_restores() {
 }
 
 /// S07 §5：抢占判定者只持 JudgeIntent——无 reply.* 写权（判定者不得直接发言）。
+///
+/// 判据走**生产表**（`matrix_for`），不是自造矩阵：自造一份 `PrincipalPolicy::paired`
+/// 只证明「我拒我」——表里少一行 `agent:reflex`，它照样绿，而生产里 `matrix_for` 的
+/// 派生分支早把主智能体整套（含 `reply.*`）给了判定者（ST-012 §3.1 批评的正是这个形态）。
 #[test]
 fn preemption_decider_cannot_speak() {
-    let matrix = PermissionMatrix::new(vec![PrincipalPolicy::paired(
-        "agent:reflex",
-        vec![Capability::JudgeIntent],
-        VisScope::ThreadPrivate,
-    )])
-    .expect("判定者策略合法");
-    assert!(matrix.can_write("agent:reflex", Capability::JudgeIntent));
+    use crate::symbio_core::authz::{matrix_for, PRINCIPAL_REFLEX};
+
+    let matrix = matrix_for(PRINCIPAL_REFLEX);
+    assert!(matrix.can_write(PRINCIPAL_REFLEX, Capability::JudgeIntent));
     assert!(
-        !matrix.can_write("agent:reflex", Capability::ReplyFirst),
+        !matrix.can_write(PRINCIPAL_REFLEX, Capability::ReplyFirst),
         "无首响写权"
     );
     assert!(
-        !matrix.can_write("agent:reflex", Capability::ReplyAppend),
+        !matrix.can_write(PRINCIPAL_REFLEX, Capability::ReplyAppend),
         "无追加写权"
+    );
+
+    // 反向判据：**未登记**的同前缀主体仍派生主智能体整套——两边的差别正是那一行。
+    // 若哪天有人把这一行删掉（或改宽），上面两条断言与这条对照一起变红。
+    let unregistered = matrix_for("agent:unregistered");
+    assert!(
+        unregistered.can_write("agent:unregistered", Capability::ReplyFirst),
+        "未登记主体派生主智能体那一行（身份分层 ≠ 权限分层，S08 §4）——判定者的窄是**登记**带来的"
     );
 }
 

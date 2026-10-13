@@ -3,7 +3,7 @@
 > ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/task/*.md` 生成，请勿手改。**
 > 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，原则与流程见 [PL-011 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。
 
-**计数**：☐ todo 13 · 🟡 doing 0 · ☑ done 78 · ❌ wont 0（共 91）
+**计数**：☐ todo 13 · 🟡 doing 0 · ☑ done 79 · ❌ wont 0（共 92）
 
 ## 待处理（按依赖顺序）
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
@@ -11,7 +11,6 @@
 | `T-072-对等主体生产增量` | ST-008 对等侧落地：对等主体窄 grants 行 + `commitment.asserted` 生产写方 + 会话独立的 ActorSpec 构造路径 | next | 多主体 | — |
 | `T-076-e2e面缺失补齐批` | e2e 面缺失六项补齐：Web 外取三工具 / 本地检索组 / 通道自动化（telegram·hook·home）/ 多协议适配 / 存储三实现切换 | next | e2e | — |
 | `T-077-输入面双轨退役批` | ADR-031 残余清偿：运行选项上写入面的协议决定 → `session/chat/send` / `chat/abort` 退役 → 排队态显示 | next | 会话与输入 | — |
-| `T-081-授权表缺行登记批` | 授权表缺行登记批：agent:reflex 窄行（S07）+ person:* shared 行（S10）——正文断言不许再被派生分支静默推翻 | next | plan | — |
 | `T-082-角色行生产构造批` | ActorSpec 角色行生产构造批：S02 worker / S03 规划者·验证者（含 Scope::Child）/ S06 检索者·巩固者 / S07 抢占判定者 / S09 闸门 / S11 编译者 | next | plan | T-072-对等主体生产增量 |
 | `T-073-多智能体社会数据行` | ST-013 落地：角色行（市场/仲裁/守门）+ 声誉驱动淘汰的 grants 变更事件 + 投影组合进裁决 | later | 多主体 | T-072-对等主体生产增量 |
 | `T-074-压缩中插话判据补齐` | RE-005 唯一「暂不补（待评估）」缺口清偿：压缩进行中用户插话的判据面归属定论 | later | e2e | — |
@@ -21,6 +20,7 @@
 | `T-084-ST-002产物投影方向对账批` | ST-002 `projection = display` 与生产方向相反——产物进不进上下文，裁决一边 | later | plan | — |
 | `T-085-记忆召回判据面补齐批` | 记忆召回判据面补齐：calibrated 格 / 混合打分与 §5 措辞裁决 / recall_eval 切生产投影 / judgment 标签写方 / 保留策略 | later | plan | — |
 | `T-086-技能编译落地形态批` | S11 落地形态批：skill_compile 投影化或修订 / 凸度与密度读数裁决 / skill_compile_enabled 默认翻向的条件 | later | plan | T-085-记忆召回判据面补齐批 |
+| `T-094-个人认知可见域产地批` | 个人认知可见域产地批：`VisScope::Shared` 要有内容侧产地 + 人的读权归属裁决——`person:*` 行在今天的表形状下表达不出来 | later | plan | — |
 
 ## 进行中
 （无）
@@ -44,6 +44,7 @@
 | `T-012` | 能力名册 ↔ 代码锚点：名册的每一条能力都要指到实现它的地方 | plan | PL-002 §6.1 名册新增「锚点」列（54 行，取值 `文件` / `文件::符号` 反引号形态或 `—` 表示尚未落地），已填 30 行真实锚点；判据落到 doc-symbol-audit 的 D-011（复用 D-005 的同一份 Rust 语料，不新建第二份符号解析）：文件须在仓内存在、`::符号` 查语料存在、列须是反引号形态、名册读不出即红；锚定率进日志「名册锚点 30/54 已锚定」，使「名册在长、锚定率不动」看得见；回归 7 个用例双向钉住（不存在符号 / 不存在文件 / 非反引号形态 ⇒ 红；两种有效形态、`—` 不判红、名册不在范围不适用、名册读不出 ⇒ 红）——doc-symbol-audit.test.mjs 35/35；capability_frame.rs 编译运行全绿（名册多一列未破坏 facts 解析） |
 | `T-015` | 出厂 prompt 在线上是两条 system 消息，部分 provider 直接 400 拒收——full 档在那类 provider 上第一轮就失败 | S | 口径取「前缀并入基础 system」（形状只该有一个产地，不让每家协议各并一次）：openai_chat::prepare_request 新增 merge_leading_system，吃掉数组最前的连续 system 段、按「基础 → 前缀」空行分段拼成一条（空行分段是本仓既有惯例，NativeMessage::to_api_value 拼 prompt 用的就是它）；边界——只合纯文本段，遇 Parts（多模态）停下不再吃（拼错比多一条 system 更糟），吃掉 0 条时行为与改前逐字相同；判据三层接住：① 5 个单元测试（合并顺序 / 0 条不变 / 空基础不留前导空行 / Parts 停下 / 端到端断言请求体里 system 恰好一条且前缀文本未丢）；② 形状基线 PROMPT_SHAPE.md 随形状重生成（req0 消息序列 system → system → user 变 system → user、消息数 3→2），改回两条即红；③ cargo test --lib 1531 全绿 |
 | `T-065` | 修复 e2e t30 既有失败：父会话线程里出现了子会话的用户正文 | quality | t30 回绿；全量 e2e 45/45（2026-10-13） |
+| `T-081-授权表缺行登记批` | 授权表缺行登记批：agent:reflex 窄行（S07）+ person:* shared 行（S10）——正文断言不许再被派生分支静默推翻 | plan | 三批各自成裁决，**两条落地、一条判「表形状表达不出」并登记续接任务**。① **`agent:reflex` 窄行落地**：`symbio/src/symbio_core/authz.rs` 新增 `PRINCIPAL_REFLEX` 常量（与 `PreemptionDecider` 三个事件的 `actor` 同一个常量，消掉 `actors/control.rs` 里四处 `"agent:reflex"` 字面量）与 `ROWS` 第三行（`&["judge.intent"]`、`VisScope::ThreadPrivate`），`matrix_for` 的「登记过的主体」清单与模块头「本表会怎么长」同步；`authz.test.rs` 新增 `the_reflex_row_is_narrower_than_derivation`（持 1 项、无 `reply.*`、`matrix_for` 拿的是登记行而非派生）；`actors/mod.test.rs::preemption_decider_cannot_speak` 由**自造** `PrincipalPolicy::paired` 矩阵切到**生产表** `matrix_for(PRINCIPAL_REFLEX)`，并加反向对照（未登记 `agent:unregistered` 仍派生整套 ⇒ 判定者的窄是**登记**带来的）。**反向判据已实测**：临时删掉 `ROWS` 那一行 ⇒ 该用例红「只持 judge.intent：[]」，还原复绿。② **`person:*` 行判不落地**：三条证据（成对性要求 grants 非空而 7 项闭集无「人」的动作种类；`person:*` 是字面量、`grants_of`/`sees_of` 全等匹配且全仓无 `person:` 前缀产地 ⇒ 那一行永不命中；`VisScope::Shared` 无生产产地——读侧唯一调用点 `plugins/session/stats.rs` 恒传 `VisScope::default()`，`can_see` 的 `scope` 是**内容的**可见域而无载荷承载）。裁决与落地方向落 [ST-010](../stage/ST-010-个人认知体系注入.md "ST-010-个人认知体系注入") §3.1（表行改「不落地（裁决，见下）」+ 裁决块），落地方向登记为 [T-094](../task/T-094-个人认知可见域产地批.md "T-094-个人认知可见域产地批")（须先按 ADR-055 立决策）。③ **「改道」判不落地 + 正文订正**：`Preemption` 无改道分支且不该有（改道要先理解插话 ⇒ 归 `Reasoner` 层；两端都没有的名字不该建分支，同 [T-083](../task/T-083-ST-004调度租约裁决批.md "T-083-ST-004调度租约裁决批") 拒绝 `task.ready`/`task.assigned` 的理由；core 枚举加变体是形状变宽）；裁决落 [ST-007](../stage/ST-007-插话与实时打断.md "ST-007-插话与实时打断") §3.1，§1 与 §7 的「停 / 继续 / 改道」措辞同批订正为「放行 / 挂起 / 排队」，§6 四条验收断言一字未动。验证：`cargo test -p symbio --lib symbio_core::authz` 7/7 绿 · `preemption_decider_cannot_speak` 绿 · 反向判据实测变红 · `gate --only=docs,facts` 绿 |
 | `T-083-ST-004调度租约裁决批` | ST-004 调度器/租约/cap 的落地形态裁决——先分清「目标」与「叙事」，再决定补哪一侧 | plan | 取**修订**路（不落地）。新增 [ADR-064](../adr/ADR-064.md)：ST-004 的「调度器 / 租约 / cap」不是已落地的数据行（§3 四行里三行不存在），裁决 = **收窄本阶承诺**——本阶真实增量 = 单写者 FIFO（`store/mod.rs` 查重→赋 seq→落库原子 + `wal.rs` 的 `NotTheWriter` + `no-direct-call-audit.mjs`）+ `task.held`（借 S07 抢占路）+ `readyset` 候选集投影。不立 `task.ready` / `task.assigned`（无写方、无消费方 ⇒ 撞 C-003 单消费方棘轮）、不给 `readyset` 加 `cap`（无调用方的死参数）。ST-004 改动：§3 表格加「今天」列并标明设计目标 vs 落地状态；§4 的 `cap=1` 行保留加粗（生成器要求每阶恰一行）但标注「参数未落地」；§6 **删除无执行方的断言 1 / 3 / 4**（`cap` 参数不存在），保留断言 2（执行方 = `store/mod.test.rs` + e2e t32 + `helpers.mjs` seq 断言 + `verify/invariants.rs`）；§7 把未落地能力登记为未来能力（须先按 ADR-055 立放宽决策、且写方与消费方同批落地）；§3.1 的裁决记录改为记 ADR-064。`capability-assign` 块形状与取值**原样未动**（`gen-verify-facts.mjs` 全程绿）。**本批不动任何生产代码**。验证：`node scripts/gate.mjs --only=facts` 绿（含 `gen-verify-facts`）；`--only=docs` 绿。 |
 | `T-088-断流重发形态e2e补齐` | 断流原样重发的用户可见形态（不重复卡片 / 不产出幽灵调用）补 e2e 锚 | e2e | 新增 `e2e/cases/t54-resend-slots.mjs`（N=3、M=1；mock-llm `drop-mid` 吐 3 个调用增量后中途 destroy、`resend` 只产 1 个并收尾）。判据分两面：**实时面**（`subscribeSessionRealtime`，与前端同构）钉「工具调用节点恰好 3 个 distinct id ⇒ 重发复用首批 id、不新建」；**生产读出口**（`readSessionMessages`）钉「转写恰好 1 个调用（未触碰的播种槽位不得产出）、该 id == 首批首个到达 id（前缀复用）、`name` 与参数正文均非空（无幽灵）、`assertTranscriptInvariants` 绿」。编排发生性另有断言（同一份请求体 ≥2 次命中 ⇒ 断流确实发生，否则前几条会因「没断流」假绿）。RE-005「工具与产物」异常列并入 t54，缺口行改「已清偿：t54」。**反向判据已实测**：临时把 `tool_accumulator.rs` 的 `finish()` 过滤改成不过滤 `touched` ⇒ t54 红，报「转写应恰好 1 个工具调用节点…实际 3」（正是幽灵调用症状），还原后复绿。**途中发现的坑**：`dropAfter` 单独用不成立——`res.write` 是异步的，无延迟时 8 个事件还在 Node 侧缓冲就 `socket.destroy()`，客户端一个事件都收不到（首批 0 个工具帧、`reuse_node_ids` 为空 ⇒ 重发新建节点，判据被架空）；故 `drop-mid` 必须配 `chunkDelayMs`（本用例 15ms），让每片先落到对端。验证：`E2E_CASE_SELF=1 node e2e/cases/t54-resend-slots.mjs` 绿；e2e 用例集 51/51（棘轮自动上调）。 |
 | `T-092-fmt缺推送点闸门` | fmt 只在整轮门禁与 CI 里判——推送点（pre-push）不判，未格式化源码能推到 origin | quality | `pre-push` 的调用由 `--only=facts --ci` 改为 `--only=fmt,facts --ci`；注释记下这次漏网的形态（`c8ed5ee7` 手工恢复 `stream.rs` 后未跑格式化，26 个文件推到 `origin/v2`，只在 CI 的 rust-checks 里以「cargo fmt --all 有 27 处差异」呈现）与已知代价（判据看工作区，手边有未格式化 `.rs` 脏改动时会多红一次）。验证：`node scripts/gate.mjs --only=fmt,facts --ci` 6/6 绿、4s（并入 fmt 前实测 0.3s，仍是秒级）。 |
@@ -193,7 +194,7 @@
 - [`T-078-shutdown接线批`](T-078-shutdown接线批.md) ADR-033 残余清偿：进程退出与丢弃旧容器的收尾接线（`PluginStopReason::Shutdown` 从纸面能力变生产路径）（todo）
 - [`T-079-插件授权强制与身份残余批`](T-079-插件授权强制与身份残余批.md) ADR-032 残余清偿：`plugin_grants` 从定义解析走向强制校验；`PluginMeta` 身份字段删除随 provider 两级解析落地（todo）
 - [`T-080-adr-impl-档位逐条复核批`](T-080-adr-impl-档位逐条复核批.md) 「无人解释的 partial」清零：ADR-020/022/027/053 档位复核升档或列出残余；ADR-054 守卫退役条款裁定；ADR-027 备注补指认（done）
-- [`T-081-授权表缺行登记批`](T-081-授权表缺行登记批.md) 授权表缺行登记批：agent:reflex 窄行（S07）+ person:* shared 行（S10）——正文断言不许再被派生分支静默推翻（todo）
+- [`T-081-授权表缺行登记批`](T-081-授权表缺行登记批.md) 授权表缺行登记批：agent:reflex 窄行（S07）+ person:* shared 行（S10）——正文断言不许再被派生分支静默推翻（done）
 - [`T-082-角色行生产构造批`](T-082-角色行生产构造批.md) ActorSpec 角色行生产构造批：S02 worker / S03 规划者·验证者（含 Scope::Child）/ S06 检索者·巩固者 / S07 抢占判定者 / S09 闸门 / S11 编译者（todo）
 - [`T-083-ST-004调度租约裁决批`](T-083-ST-004调度租约裁决批.md) ST-004 调度器/租约/cap 的落地形态裁决——先分清「目标」与「叙事」，再决定补哪一侧（done）
 - [`T-084-ST-002产物投影方向对账批`](T-084-ST-002产物投影方向对账批.md) ST-002 `projection = display` 与生产方向相反——产物进不进上下文，裁决一边（todo）
@@ -206,3 +207,4 @@
 - [`T-091-verify并发工具链竞态`](T-091-verify并发工具链竞态.md) verify 阶段并发跑裸 rustc 撞上 rustup 按需安装——CI 上 19 个验证项里 18 个假红，C29 判据被误带（done）
 - [`T-092-fmt缺推送点闸门`](T-092-fmt缺推送点闸门.md) fmt 只在整轮门禁与 CI 里判——推送点（pre-push）不判，未格式化源码能推到 origin（done）
 - [`T-093-prompt形状基线平台绑定`](T-093-prompt形状基线平台绑定.md) t46 形状基线把「平台命名的 shell 工具」（Windows `cmd` / Linux `sh`）钉进了判据——基线只能在捕获它的那个平台绿（done）
+- [`T-094-个人认知可见域产地批`](T-094-个人认知可见域产地批.md) 个人认知可见域产地批：`VisScope::Shared` 要有内容侧产地 + 人的读权归属裁决——`person:*` 行在今天的表形状下表达不出来（todo）

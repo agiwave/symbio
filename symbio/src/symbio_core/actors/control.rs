@@ -1,5 +1,6 @@
 //! 控制面主体：抢占判定（[roadmap/S07](../../../../docs/stage/ST-007-插话与实时打断.md "ST-007-插话与实时打断")）与外部执行闸门（[roadmap/S09](../../../../docs/stage/ST-009-外部执行与熔断.md "ST-009-外部执行与熔断")）。
 
+use crate::symbio_core::authz::PRINCIPAL_REFLEX;
 use crate::symbio_core::Event;
 
 /// 抢占判定结论（反射档三选一 + 超时默认，[plan/04 §2.1](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地")）。
@@ -21,7 +22,12 @@ pub enum Preemption {
 /// `pattern = decider`、`capabilities = [JudgeIntent]`、`budget_ms = 80`——
 /// 系统第一次需要在几十毫秒内对外部信号做决策。**判定者只产控制事件**
 /// （`task.controlled`），无 `reply.*` 写权——它不得直接发言（S07 §5，由
-/// grants 表保证，见 governance 测试）。
+/// grants 表保证：`authz::ROWS` 里 [`PRINCIPAL_REFLEX`] 那一行，判据见
+/// `authz.test.rs::the_reflex_row_is_narrower_than_derivation`）。
+///
+/// 能力那一半**不在这里**：`capabilities = [judge.intent]` 的权威是授权表，
+/// 本类型只负责按 [`PRINCIPAL_REFLEX`] 这个主体名写事件。两处各写一份能力清单
+/// 必然漂移成「表授予 A、闸门判 B」——两边都是合法能力名。
 pub struct PreemptionDecider;
 
 impl PreemptionDecider {
@@ -94,7 +100,7 @@ impl PreemptionDecider {
             crate::symbio_core::event::Entity::Task,
             crate::symbio_core::event::Verb::Held,
             0,
-            "agent:reflex",
+            PRINCIPAL_REFLEX,
         )
         .with_produced_by(source_seq)
         .with_payload(serde_json::json!({ "task_id": task_id, "as_of": as_of_seq }))
@@ -113,7 +119,7 @@ impl PreemptionDecider {
             crate::symbio_core::event::Entity::Task,
             crate::symbio_core::event::Verb::Progressed,
             0,
-            "agent:reflex",
+            PRINCIPAL_REFLEX,
         )
         .with_produced_by(source_seq)
         .with_payload(serde_json::json!({ "task_id": task_id }))
@@ -127,7 +133,7 @@ impl PreemptionDecider {
             crate::symbio_core::event::Entity::Control,
             crate::symbio_core::event::Verb::Opened,
             0,
-            "agent:reflex",
+            PRINCIPAL_REFLEX,
         )
         .with_produced_by(source_seq)
         .with_payload(serde_json::json!({ "reason": reason }))
@@ -191,7 +197,7 @@ impl CircuitBreaker {
             crate::symbio_core::event::Entity::Control,
             crate::symbio_core::event::Verb::Opened,
             0,
-            "agent:reflex",
+            PRINCIPAL_REFLEX,
         )
         .with_produced_by(source_seq)
         .with_payload(serde_json::json!({ "reason": reason }))
