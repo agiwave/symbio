@@ -1,4 +1,3 @@
-// Corresponding Frontend: tauri/src/schemas/conversation_line.ts
 //! 对话线投影 —— 从**一份存储**里切出「用户与助手说过的话」。
 //!
 //! ## 一条存储，两条线，一个分界
