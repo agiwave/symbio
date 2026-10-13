@@ -82,6 +82,20 @@ pub(crate) const PRINCIPAL_AUTONOMOUS: &str = "agent:autonomous";
 /// 而文档与验收断言都还写着它成立。
 pub(crate) const PRINCIPAL_REFLEX: &str = "agent:reflex";
 
+/// **对等主体**的身份（[roadmap/S08 §3](../../../docs/stage/ST-008-多主体与对等承诺.md "ST-008-多主体与对等承诺")）
+/// ——表里那一行的名字与对等体写事件用的 `actor` 是同一个常量。
+///
+/// 它是本表里**第一个对等（图侧）主体**：与主从树的子智能体不同，对等体不依附某个会话，
+/// 它的权威动作是**产生产物**（`produce.artifact`），协作经 `commitment.*` 事件而非
+/// `chat.*`——故这一行**只有一项能力**，比主智能体窄得多。
+///
+/// **为什么必须登记**：未登记的 `agent:<id>` 走 [`matrix_for`] 的派生分支，拿到主智能体
+/// **整套**（含 `reply.*`）。S08 §4 的平凡值「身份分层 ≠ 权限分层」是给**子智能体**的
+/// （它要能写自己的收束格，否则什么都写不了）；对等体拿整套则是**静默超权**——
+/// 与 S12 为自主主体、S07 为判定者修掉的静默面同形。故 S08 §3.1 的纪律是：
+/// **对等主体出现必须自带窄行同批落地，不许靠派生**（同 PL-009「闸不能晚于发起者」）。
+pub(crate) const PRINCIPAL_PEER: &str = "agent:peer-b";
+
 /// 本机会话**内容的属主**：`thread_private`（C10 缺省）下「谁能读到」等同于
 /// 「是不是属主」，所以属主取值就是读侧闸的答案。
 ///
@@ -100,7 +114,7 @@ pub(crate) const CAP_EXTERNAL_EXECUTION: &str = "produce.artifact";
 /// 本机主体清单：`(主体, 能力名, 可见域)`。能力名的闭集与拼写由
 /// [`PermissionMatrix::from_names`] 校验（认不出即拒绝构造）。
 ///
-/// 三行，各自存在的理由不同：
+/// 四行，各自存在的理由不同：
 ///
 /// - `agent:main`（主智能体）持 6 项，**刻意不持 `assert.verification`**：C15 不自验
 ///   ——验证者 ≠ 产出者是构造期约束（`PermissionMatrix::new` 会拒绝双持），本机目前
@@ -109,15 +123,19 @@ pub(crate) const CAP_EXTERNAL_EXECUTION: &str = "produce.artifact";
 ///   用户对话（S12 §3 grants 行 / §5）；
 /// - [`PRINCIPAL_REFLEX`]（抢占判定者）**只持 `judge.intent`**——判定者不得直接发言
 ///   （S07 §5）：它写的是控制事件（`task.held` / `task.progressed` / `control.opened`），
-///   不含任何 `reply.*`。
+///   不含任何 `reply.*`；
+/// - [`PRINCIPAL_PEER`]（对等主体）**只持 `produce.artifact`**——对等体是图侧的协作方，
+///   权威动作是产生产物（S08 §3 的 ActorSpec 行 `capabilities: [ProduceArtifact]`），
+///   协作经 `commitment.*` 而非 `chat.*`。
 ///
-/// 后两行都是本表里**比主智能体窄**的记录，窄的方向相同而理由相反：子智能体怕的是
-/// **写不了**（要能写自己的收束格），它们怕的是**写得太多**——自主行怕冒充用户对话、
-/// 判定行怕抢在编排层之前发言。
+/// 后三行都是本表里**比主智能体窄**的记录。窄的方向相同而理由各异：子智能体怕的是
+/// **写不了**（要能写自己的收束格），自主行怕冒充用户对话，判定行怕抢在编排层之前发言，
+/// 对等行怕的是**以本机主控的身份行事**（图侧协作 ≠ 本机主控）。
 ///
-/// 少了这些行会怎样（两批修掉的正是这个）：未登记的 `agent:<id>` 走 [`matrix_for`]
+/// 少了这些行会怎样（几批修掉的正是这个）：未登记的 `agent:<id>` 走 [`matrix_for`]
 /// 的派生分支，拿到主智能体的**整套**能力集（含 `reply.*`）——于是「自主行为不得冒充
-/// 用户对话」「判定者不得发言」在生产里被静默推翻，而文档与验收断言都还写着它们成立。
+/// 用户对话」「判定者不得发言」「对等体只产生产物」在生产里被静默推翻，
+/// 而文档与验收断言都还写着它们成立。
 const ROWS: &[(&str, &[&str], VisScope)] = &[
     (
         PRINCIPAL_MAIN,
@@ -137,6 +155,11 @@ const ROWS: &[(&str, &[&str], VisScope)] = &[
         VisScope::ThreadPrivate,
     ),
     (PRINCIPAL_REFLEX, &["judge.intent"], VisScope::ThreadPrivate),
+    (
+        PRINCIPAL_PEER,
+        &[CAP_EXTERNAL_EXECUTION],
+        VisScope::ThreadPrivate,
+    ),
 ];
 
 static MATRIX: OnceLock<PermissionMatrix> = OnceLock::new();
@@ -164,7 +187,7 @@ pub(crate) fn principal_of(agent_id: Option<&str>) -> String {
 ///
 /// 两条分支，先表后派生：
 ///
-/// 1. **表里登记过的主体**（主智能体、自主发起者、抢占判定者）与非 `agent:*` 的主体（`user` 及
+/// 1. **表里登记过的主体**（主智能体、自主发起者、抢占判定者、对等主体）与非 `agent:*` 的主体（`user` 及
 ///    一切未登记名）都直接用[生产表](Self::production_matrix)：登记过的拿自己那一行
 ///    ——**表是权威，派生不得覆盖它**（覆盖就成「表授予 A、闸门判 B」）；未登记的
 ///    `user` 在表里没有行 ⇒ `can_reply` 为假 ⇒ fail-closed。少一行是一条**拒绝**，

@@ -8,9 +8,11 @@
 //!    S12 §3/§5「自主行为不得冒充用户对话」）；
 //! 3. **抢占判定者那一行比主智能体窄**（只持 `judge.intent`、不持 `reply.*`，
 //!    S07 §5「判定者不得直接发言」）；
-//! 4. `matrix_for` 的两条分支：**登记过的主体走表**（表是权威，派生不覆盖它），
+//! 4. **对等主体那一行比主智能体窄**（只持 `produce.artifact`，S08 §3——第一个
+//!    对等/图侧主体，窄于「派生整套」）；
+//! 5. `matrix_for` 的两条分支：**登记过的主体走表**（表是权威，派生不覆盖它），
 //!    未登记的 `agent:<id>` 才派生主智能体那一行；
-//! 5. 读写两侧的闸按**属主 / 矩阵成员**分：主智能体与属主各得其所，`user` 不入表
+//! 6. 读写两侧的闸按**属主 / 矩阵成员**分：主智能体与属主各得其所，`user` 不入表
 //!    （发言不是能力），矩阵外主体拒绝；表构造失败时的降级面（空矩阵）一概拒绝
 //!    ——fail-closed 不因降级而松开。
 
@@ -94,6 +96,52 @@ fn the_reflex_row_is_narrower_than_derivation() {
         "派生不得把主智能体的 reply.* 塞回判定者这一行"
     );
     assert!(!derived.can_reply(PRINCIPAL_REFLEX, true));
+}
+
+/// 对等主体那一行（S08 §3）：**第一个对等（图侧）主体的窄行**——只持 `produce.artifact`，
+/// 严格窄于主智能体，也严格窄于 `matrix_for` 的派生整套。
+///
+/// S08 §4 的平凡值「身份分层 ≠ 权限分层」是给**子智能体**的（它要能写自己的收束格，
+/// 否则什么都写不了）；对等体拿主智能体整套（含 `reply.*`）则是**静默超权**——
+/// 与自主行 / 判定行同形的静默面。S08 §3.1 的纪律：对等主体出现必须**自带窄行同批落地**，
+/// 不许靠派生。
+#[test]
+fn the_peer_row_is_narrower_than_the_derived_set() {
+    let matrix = production_matrix();
+    let caps = matrix.grants_of(PRINCIPAL_PEER);
+    assert_eq!(caps.len(), 1, "只持 produce.artifact：{caps:?}");
+    assert!(
+        matrix.can_write(PRINCIPAL_PEER, Capability::ProduceArtifact),
+        "对等体的权威动作是产生产物（S08 §3 的 ActorSpec 行），否则这一行没有理由存在"
+    );
+    assert!(
+        !matrix.can_reply(PRINCIPAL_PEER, true) && !matrix.can_reply(PRINCIPAL_PEER, false),
+        "对等体的协作经 commitment.* 而非 chat.*——不以本机主控的身份发言"
+    );
+    assert_eq!(
+        matrix.sees_of(PRINCIPAL_PEER),
+        Some(VisScope::ThreadPrivate),
+        "可见域显式给出（成对性），不是 None"
+    );
+
+    // 「严格窄于派生整套」：主智能体持 6 项、对等行 1 项；且 `matrix_for` 必须拿**登记行**
+    // 而非派生出来的整套——去掉 ROWS 那一行，派生分支会把 `reply.*` 与其余能力一起塞回来。
+    let main_len = matrix.grants_of(PRINCIPAL_MAIN).len();
+    assert!(
+        caps.len() < main_len,
+        "对等行必须严格窄于主智能体那一行（{main_len} 项）"
+    );
+    let derived = matrix_for(PRINCIPAL_PEER);
+    assert_eq!(
+        derived.grants_of(PRINCIPAL_PEER).len(),
+        1,
+        "派生不得把主智能体整套塞回对等行"
+    );
+    assert!(!derived.can_reply(PRINCIPAL_PEER, true));
+    assert!(
+        derived.can_write(PRINCIPAL_PEER, Capability::ProduceArtifact),
+        "登记行是权威：对等体仍持它那一项能力"
+    );
 }
 
 /// `matrix_for` 两条分支：**登记过的主体走表**（表是权威，派生不覆盖它）；
