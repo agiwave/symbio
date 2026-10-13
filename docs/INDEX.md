@@ -15,4 +15,4 @@
 | [guide · 指南](./guide/INDEX.md) | 编号前缀 `GU-` | 15 | draft 0 · active 15 · retired 0 | — | [guide/INDEX.md](./guide/INDEX.md) |
 | [task · 任务](./task/INDEX.md) | 编号前缀 `T-` | 93 | todo 12 · doing 1 · done 80 · wont 0 | 3 条分解边 | [task/INDEX.md](./task/INDEX.md) |
 | [spec · 规范](./spec/INDEX.md) | 编号前缀 `SP-` | 31 | draft 0 · active 31 · retired 0 | — | [spec/INDEX.md](./spec/INDEX.md) |
-| [adr · 架构决策](./adr/INDEX.md) | 编号前缀 `ADR-` | 65 | active 55 · superseded 7 · withdrawn 3 | — | [adr/INDEX.md](./adr/INDEX.md) |
+| [adr · 架构决策](./adr/INDEX.md) | 编号前缀 `ADR-` | 66 | active 56 · superseded 7 · withdrawn 3 | — | [adr/INDEX.md](./adr/INDEX.md) |
