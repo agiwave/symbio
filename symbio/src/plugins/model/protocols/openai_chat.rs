@@ -17,6 +17,24 @@ use crate::symbio_core::{ModelFinishReason, ModelUsage, PluginError, PluginInvok
 
 pub struct OpenaiChatProtocol;
 
+/// 思考分片的字段兼容提取。
+///
+/// ## 为什么有两个字段名
+///
+/// OpenAI 兼容生态里思考分片没有统一约定：DeepSeek 风格用
+/// `delta.reasoning_content`，而部分兼容端点用 `delta.reasoning`——
+/// AMD Radeon AI 开发者平台的 MiMo-V2.6-Flash 实测（2026-10-13）即属后者，
+/// 且首帧带 `reasoning_content: null`（字段存在但为空，不能当文本）。
+/// 此前只认 `reasoning_content`，该端点的思考内容被**静默丢弃**，
+/// Reason 节点从未出现（用户可感知的功能性缺失，非模型不思考）。
+fn reasoning_text_of(delta: &Value) -> Option<String> {
+    delta
+        .get("reasoning_content")
+        .and_then(|v| v.as_str())
+        .or_else(|| delta.get("reasoning").and_then(|v| v.as_str()))
+        .map(|s| s.to_string())
+}
+
 /// 把消息数组**最前**的连续 `system` 段并进基础 `system`，返回（合并文本，吃掉几条）。
 ///
 /// ## 为什么要并
@@ -200,8 +218,8 @@ impl SseLineParser for OpenaiChatProtocol {
                     if let Some(c) = delta.get("content").and_then(|v| v.as_str()) {
                         evs.push(ModelProtocolEvent::ContentDelta(c.to_string()));
                     }
-                    if let Some(r) = delta.get("reasoning_content").and_then(|v| v.as_str()) {
-                        evs.push(ModelProtocolEvent::ReasoningDelta(r.to_string()));
+                    if let Some(r) = reasoning_text_of(delta) {
+                        evs.push(ModelProtocolEvent::ReasoningDelta(r));
                     }
                     if let Some(tcs) = delta.get("tool_calls").and_then(|v| v.as_array()) {
                         for tc in tcs {
@@ -280,7 +298,10 @@ impl PartialJsonSink for ChatPartial {
     fn begin_string(&mut self, path: &FieldPath<'_>) -> StrAction {
         self.kind = if path.is(&["choices", "delta", "content"]) {
             Some(ChatField::Content)
-        } else if path.is(&["choices", "delta", "reasoning_content"]) {
+        } else if path.is(&["choices", "delta", "reasoning_content"])
+            || path.is(&["choices", "delta", "reasoning"])
+        {
+            // 两个字段名都收：见 reasoning_text_of 的字段兼容说明。
             Some(ChatField::Reasoning)
         } else if path.is(&["choices", "delta", "tool_calls", "function", "arguments"]) {
             // 属于第几个工具调用由「最内层数组下标」给出（`tool_calls[N]`）

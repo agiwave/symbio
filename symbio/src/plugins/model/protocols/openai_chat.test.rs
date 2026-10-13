@@ -44,6 +44,45 @@ fn unrelated_fields_are_not_extracted() {
     assert!(feed_chunked(ext.as_mut(), line, 1).is_empty());
 }
 
+// ── 思考分片的字段兼容（AMD MiMo 实测形状，2026-10-13）──────────────────
+//
+// AMD Radeon AI 开发者平台的 MiMo-V2.6-Flash 用 `delta.reasoning` 吐思考分片，
+// 且首帧带 `reasoning_content: null`。此前只认 `reasoning_content`，
+// 思考内容被静默丢弃，Reason 节点从未出现。
+
+/// 真实端点首帧：`reasoning_content: null` + `content: ""`，不得产出思考增量。
+/// （`ContentDelta("")` 是存量行为，不在此契约内。）
+#[test]
+fn amd_mimo_first_frame_with_null_reasoning_content_is_silent() {
+    let line = r#"data: {"id":"f004","choices":[{"index":0,"delta":{"reasoning_content":null,"role":"assistant","content":""},"finish_reason":null}]}"#;
+    assert!(
+        !OpenaiChatProtocol
+            .parse_line(line)
+            .iter()
+            .any(|e| matches!(e, ModelProtocolEvent::ReasoningDelta(_))),
+        "reasoning_content 为 null 不得产出思考增量"
+    );
+}
+
+/// 思考分片落在 `reasoning` 字段上时必须被提取（流式完整行路径）。
+#[test]
+fn reasoning_field_deltas_are_extracted() {
+    let line = r#"data: {"choices":[{"delta":{"role":"assistant","reasoning":"This is a classic trick question."}}]}"#;
+    let evs = OpenaiChatProtocol.parse_line(line);
+    assert_eq!(evs.len(), 1, "恰好一条事件：{evs:?}");
+    assert!(
+        matches!(&evs[0], ModelProtocolEvent::ReasoningDelta(t) if t == "This is a classic trick question."),
+        "应为 ReasoningDelta（正文=思考分片），实际 {evs:?}"
+    );
+}
+
+/// `reasoning` 字段的增量提取与完整行一致（边收边吐路径，逐字节切块）。
+#[test]
+fn reasoning_field_matches_full_line_at_every_chunk_boundary() {
+    let line = r#"data: {"choices":[{"delta":{"role":"assistant","reasoning":"先想一下\n再答"}}]}"#;
+    assert_partial_matches_full_line(&OpenaiChatProtocol, line);
+}
+
 /// `[DONE]` 与非 data 行没有增量可吐。
 #[test]
 fn non_data_lines_produce_nothing() {

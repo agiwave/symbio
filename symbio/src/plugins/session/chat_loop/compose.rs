@@ -64,7 +64,7 @@ use crate::symbio_core::{
     clock_now_ms, llm_short_id, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PATH,
     ROUTE_COMPOSE_WORDING, SESSION_ID,
 };
-use crate::symbio_core::{ComposeRequest, RunSnapshot, Verdict};
+use crate::symbio_core::{ComposeRequest, RunSnapshot, Verdict, WordingReply};
 
 use super::super::context::{conversation_view, CONVERSATION_VIEW_LIMIT};
 use super::state::{ChatOrchestrator, SessionContext};
@@ -98,50 +98,52 @@ pub(crate) async fn apply_verdict(
     context: &mut SessionContext,
     verdict: Verdict,
     snapshot: &RunSnapshot,
-) -> VerdictEffect {
+) -> (VerdictEffect, Option<WordingReply>) {
     // 调用方关掉了措辞（或压根没挂 `compose`）⇒ 与"未挂载 compose"逐字一致：
     // `Answered` 降级进工具循环，`Escalate` 没有首响，`Report` 什么都没说。
     // 三条都在下面自然成立。
     if !orchestrator.compose_enabled {
         crate::plugin_debug!("session", "[Compose] 措辞未启用，本轮不产出对话面文本");
-        return VerdictEffect::Silent;
+        return (VerdictEffect::Silent, None);
     }
 
     match &verdict {
         Verdict::Answered { reason } => {
-            let Some(text) = compose_text(orchestrator, ctx, context, &verdict, snapshot).await
+            let Some(reply) = compose_text(orchestrator, ctx, context, &verdict, snapshot).await
             else {
                 // 判决说能直接答，但没人能说话 ⇒ **降级进工具循环**（不沉默）。
                 crate::plugin_warn!(
                     "session",
                     "[Compose] 判决为 Answered（reason={reason}）但取不到措辞，本轮降级进工具循环"
                 );
-                return VerdictEffect::Silent;
+                return (VerdictEffect::Silent, None);
             };
-            context.messages.push(dialog_node(&text, reason, false));
-            VerdictEffect::Finish
+            context.messages.push(dialog_node(&reply.text, reason, false));
+            // 思考事实随答话交给调用方：`Answered` 收束格是**事实层**里这条
+            // 模型往回的唯一去处（见 `execute_final_reply_turn` 的入参）。
+            (VerdictEffect::Finish, Some(reply))
         }
         Verdict::Escalate { reason } => {
             // 首响：拿不到就只是少一句开场白，本轮照旧干活。
             match compose_text(orchestrator, ctx, context, &verdict, snapshot).await {
-                Some(text) => {
-                    context.messages.push(dialog_node(&text, reason, true));
-                    VerdictEffect::Spoke
+                Some(reply) => {
+                    context.messages.push(dialog_node(&reply.text, reason, true));
+                    (VerdictEffect::Spoke, None)
                 }
-                None => VerdictEffect::Silent,
+                None => (VerdictEffect::Silent, None),
             }
         }
         // 汇报：措辞从**运行现状**组织（`compose` 的模板产线，零 LLM 往返）。
         // 拿不到就不说——本轮照旧干活，且不消耗配额（调用方按 [`VerdictEffect`] 判）。
         Verdict::Report => {
             match compose_text(orchestrator, ctx, context, &verdict, snapshot).await {
-                Some(text) => {
+                Some(reply) => {
                     context
                         .messages
-                        .push(dialog_node(&text, REASON_PROGRESS, true));
-                    VerdictEffect::Spoke
+                        .push(dialog_node(&reply.text, REASON_PROGRESS, true));
+                    (VerdictEffect::Spoke, None)
                 }
-                None => VerdictEffect::Silent,
+                None => (VerdictEffect::Silent, None),
             }
         }
     }
@@ -172,7 +174,7 @@ async fn compose_text(
     context: &SessionContext,
     verdict: &Verdict,
     snapshot: &RunSnapshot,
-) -> Option<String> {
+) -> Option<WordingReply> {
     compose_text_from(orchestrator, ctx, &context.messages, verdict, snapshot).await
 }
 
@@ -186,7 +188,7 @@ async fn compose_text_from(
     messages: &[ChatMessage],
     verdict: &Verdict,
     snapshot: &RunSnapshot,
-) -> Option<String> {
+) -> Option<WordingReply> {
     let parent = orchestrator.parent.as_ref()?;
     let session_id = ctx.get(SESSION_ID).unwrap_or_default();
 
@@ -204,10 +206,12 @@ async fn compose_text_from(
     .ok()?;
 
     match parent.clone().route(req).await {
-        Ok(payload) => match payload.get::<String>() {
-            Ok(text) if !text.trim().is_empty() => Some(text),
-            // 空串是**平凡值**（"没有对话面文本"），不是错误：调用方据此不写节点。
-            Ok(_) => None,
+        Ok(payload) => match payload.get::<WordingReply>() {
+            Ok(reply) if reply.text.trim().is_empty() => {
+                // 空串是**平凡值**（"没有对话面文本"），不是错误：调用方据此不写节点。
+                None
+            }
+            Ok(reply) => Some(reply),
             Err(e) => {
                 crate::plugin_warn!(
                     "session",
@@ -251,7 +255,10 @@ pub(crate) async fn report_text(
         crate::plugin_debug!("session", "[Compose] 措辞未启用，本轮不汇报");
         return None;
     }
-    compose_text_from(orchestrator, ctx, conversation, &Verdict::Report, snapshot).await
+    // 汇报是**模板**产线（零模型往返），思考事实恒 `None`，这里只取文本。
+    compose_text_from(orchestrator, ctx, conversation, &Verdict::Report, snapshot)
+        .await
+        .map(|r| r.text)
 }
 
 /// 构造对话面文本节点（**纯函数**，可单测）。

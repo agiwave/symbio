@@ -111,8 +111,14 @@ export default defineCase(
     const llm = await new MockLlm([
       // 分类请求（B 线第 1 步）⇒ 判「能凭上下文直接答」⇒ 走生成产线
       { id: 'cls-direct', match: '我们刚才聊了什么', content: 'direct', once: true },
-      // **生成**请求（B 线第 1 步）：`compose` 的措辞产线，同一句话、同一份对话线
-      { id: 'gen-answer', match: '我们刚才聊了什么', content: ANSWER_FROM_CONTEXT },
+      // **生成**请求（B 线第 1 步）：`compose` 的措辞产线，同一句话、同一份对话线。
+      // 带 `reasoning` ⇒ 生成产线的思考事实要随答话一路入格（Reason 节点）。
+      {
+        id: 'gen-answer',
+        match: '我们刚才聊了什么',
+        content: ANSWER_FROM_CONTEXT,
+        reasoning: '想一想：用户在问对话内容，直接从上下文总结即可。',
+      },
       // 分类请求（B 线第 2 步，once）⇒ 判「要干活」⇒ 走模板产线（首响）
       { id: 'cls-work', match: '读一下 README', content: 'work', once: true },
       // 工具循环（B 线第 2 步）：读文件
@@ -239,6 +245,17 @@ export default defineCase(
         !genMsgs.some((m) => m.type === 'turn'),
         'B 线第 1 步不进工具循环 ⇒ 不该有 Turn 组合节点（生成请求也不得泄漏成可见轮次）',
       );
+      // 思考事实入格：生成产线是这条轮次里唯一一次真实模型推理，mock 已带
+      // `reasoning` ⇒ 收束格载荷携带 reasoning/reasoning_id ⇒ 重建复刻 Reason 节点
+      // （挂在答话节点之下）。此前它在措辞插件出口就被丢弃，Reason 节点从未存在。
+      const genReason = genMsgs.find(
+        (m) =>
+          m.type === 'reasoning' &&
+          m.parent_id === genReply[0].id,
+      );
+      assert(genReason, '答话节点下应有 Reason 子节点（思考事实入格）');
+      assertEq(genReason.content, '想一想：用户在问对话内容，直接从上下文总结即可。', 'Reason 节点正文 = 生成时的思考内容');
+      assertEq(genReason.status, 'completed', 'Reason 节点落库即终态');
 
       // ── B 首响剔除：再接一句「读一下 README」⇒ Escalate ⇒ 首响 + 工具循环 ──
       base = await reqCount();

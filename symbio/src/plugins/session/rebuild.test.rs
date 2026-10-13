@@ -296,6 +296,60 @@ fn supplement_mirrors_the_persisted_shape() {
     );
 }
 
+/// 答话轮收束格（带 `dialog` 载荷）+ 思考事实：Reason 节点是答话的**子节点**。
+///
+/// 生成产线（`from_context`）的模型推理经 `WordingReply` 带回、随收束格入格
+/// ——重建必须复刻它，否则普通答话轮的 Reason 节点重启后消失（AMD MiMo
+/// 实测 2026-10-13 的原始缺口）。
+#[test]
+fn final_with_dialog_rebuilds_reasoning_child_from_the_payload() {
+    let ev = final_event(serde_json::json!({
+        "text": "我们刚才在聊 README 的事。",
+        "model": "",
+        "turn_id": "",
+        "text_id": null,
+        "reasoning_id": "ans-reason",
+        "reasoning": "想一想：直接从上下文总结。",
+        "tool_calls": [],
+        "rounds": [],
+        "status": "completed",
+        "dialog": { "id": "ans-node", "reason": "from_context", "exclude_from_context": false },
+    }));
+
+    let msgs = rebuild(std::slice::from_ref(&ev));
+    assert_eq!(shapes(&msgs).len(), 2, "答话节点 + 思考子节点");
+    let reply = shape(&msgs[0]);
+    assert_eq!(reply.id, "ans-node");
+    assert_eq!(reply.ty, Some(MessageType::Text));
+    assert_eq!(reply.parent, None, "答话挂根级（对话线）");
+    let reason = shape(&msgs[1]);
+    assert_eq!(reason.id, "ans-reason", "id 由载荷给（与流式期同源）");
+    assert_eq!(reason.parent.as_deref(), Some("ans-node"));
+    assert_eq!(reason.ty, Some(MessageType::Reasoning));
+    assert_eq!(reason.text, "想一想：直接从上下文总结。");
+    assert_eq!(reason.status, Some(MessageStatus::Completed));
+}
+
+/// 无思考事实（旧事件 / 模板产线 / 生成失败退模板）⇒ 恰一个节点，**不多发**。
+#[test]
+fn final_with_dialog_without_reasoning_stays_single_node() {
+    let ev = final_event(serde_json::json!({
+        "text": "不客气。",
+        "model": "",
+        "turn_id": "",
+        "reasoning_id": null,
+        "reasoning": null,
+        "tool_calls": [],
+        "rounds": [],
+        "status": "completed",
+        "dialog": { "id": "ans-node", "reason": "thanks", "exclude_from_context": false },
+    }));
+
+    let msgs = rebuild(std::slice::from_ref(&ev));
+    assert_eq!(shapes(&msgs).len(), 1, "没有思考事实就只有答话节点");
+    assert_eq!(shape(&msgs[0]).ty, Some(MessageType::Text));
+}
+
 /// 汇报格的形状复用写入侧的 `ReportDraft::to_message`（`dialog_node(text, "progress", true)`）
 /// ——`surface` / `reason` / `exclude_from_context` 三键缺一不可，`exclude_from_context`
 /// 更是轮次窗口「不进模型请求包」的判别位。

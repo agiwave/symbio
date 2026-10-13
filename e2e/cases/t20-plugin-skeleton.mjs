@@ -208,7 +208,7 @@ export default defineCase(
       assertEq(undecided.body?.data?.verdict, 'escalate', '判不出来 ⇒ 兜底 Escalate');
       assertEq(undecided.body?.data?.reason, 'unclassified', '兜底理由码');
 
-      /** 调一次 `compose/wording` 并取出文本（载荷形状见 `schemas::dialog::ComposeRequest`） */
+      /** 调一次 `compose/wording` 并取出答话文本（出参形状见 `schemas::dialog::WordingReply`） */
       const compose = async (verdict, context = [], snapshot = null) => {
         const payload = { session_id: SID, verdict, context };
         if (snapshot) payload.snapshot = snapshot;
@@ -218,7 +218,9 @@ export default defineCase(
           200,
           `compose/wording 应可达（${JSON.stringify(r.body)?.slice(0, 300)}）`,
         );
-        return r.body?.data;
+        // 出参是 `{ text, reasoning?, reasoning_id? }`：模板产线零模型往返，
+        // 后两键恒缺省——这里只取文本。
+        return r.body?.data?.text;
       };
 
       // ① 模板产线：`Escalate` 的首响**立刻**给出，不等任何东西

@@ -185,6 +185,29 @@ pub struct ComposeRequest {
     pub snapshot: RunSnapshot,
 }
 
+/// `compose/wording` 的**出参**。
+///
+/// ## 为什么不再是一个裸 `String`
+///
+/// 答话由一次**静默 LLM 往返**生成（`from_context` 产线），那次往返的思考内容
+/// （`reasoning` / `reasoning_id`）此前在措辞插件内部就被丢弃——收束格只入格了
+/// 答话文本，`Reason` 节点对普通答话轮从未存在过（AMD MiMo 实测 2026-10-13，
+/// 接上字段兼容修复后流层明明收到了推理分片）。模板产线没有模型往返，
+/// 两个字段恒 `None`。
+///
+/// 字段全部 `Option` + `default`：模板路径的反序列化不需要协作。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WordingReply {
+    /// 答话文本（对话面节点正文）。
+    pub text: String,
+    /// 生成这次答话的思考内容（模板路径为 `None`）。
+    #[serde(default)]
+    pub reasoning: Option<String>,
+    /// 思考子节点 id（与 `reasoning` 同源；`None` = 没有思考）。
+    #[serde(default)]
+    pub reasoning_id: Option<String>,
+}
+
 #[cfg(test)]
 #[path = "dialog.test.rs"]
 mod tests;

@@ -48,7 +48,7 @@ use crate::symbio_core::{
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PATH,
     PLUGIN_ID_COMPOSE,
 };
-use crate::symbio_core::{ComposeRequest, Verdict, REASON_FROM_CONTEXT};
+use crate::symbio_core::{ComposeRequest, Verdict, WordingReply, REASON_FROM_CONTEXT};
 use crate::symbio_core::{DetailDefinition, DetailField};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -101,22 +101,27 @@ impl ComposePlugin {
     /// 三条产线的分派：**填表**（`Report`）/ **先生成、生成不了落模板**（其余）。
     ///
     /// 恒有返回：三条产线各自都有兜底（见模块文档）。
-    async fn compose(&self, ctx: &Arc<dyn PluginInvokeRequest>, req: &ComposeRequest) -> String {
+    /// 思考事实只有**生成**产线有（模板零模型往返 ⇒ `None`）。
+    async fn compose(&self, ctx: &Arc<dyn PluginInvokeRequest>, req: &ComposeRequest) -> WordingReply {
         // `Report` 走**填表**产线：事实在 `snapshot` 里，措辞是固定的。它与下面的
         // 模板表并列而不混入表——表里每一行都是"与上下文无关的固定措辞"，
         // 而汇报的正文随现状变（见 `templates::progress_text`）。
         if matches!(req.verdict, Verdict::Report) {
-            return progress_text(&req.snapshot);
+            return WordingReply { text: progress_text(&req.snapshot), reasoning: None, reasoning_id: None };
         }
         if requires_generation(&req.verdict) {
-            if let Some(text) = generate(ctx, req, &self.config).await {
-                return text;
+            if let Some(reply) = generate(ctx, req, &self.config).await {
+                return reply;
             }
             // 生成失败**不返回空串**：继续往下走模板产线。`from_context` 在模板表里
             // 没有行 ⇒ 落到变体兜底（"好的。"）——一句通用话，但**不是空白**。
         }
         // `template_for` 只对 `Report` 返回 `None`，而它在上面已经分派走了。
-        template_for(&req.verdict).unwrap_or_default()
+        WordingReply {
+            text: template_for(&req.verdict).unwrap_or_default(),
+            reasoning: None,
+            reasoning_id: None,
+        }
     }
 }
 
@@ -149,8 +154,8 @@ impl Plugin for ComposePlugin {
             "wording" => {
                 // 请求必须能解析：契约的形状由这一行保证，而不是由注释保证。
                 let req: ComposeRequest = ctx.payload()?;
-                let text = self.compose(&ctx, &req).await;
-                Ok(PluginPayload::new(&text))
+                let reply = self.compose(&ctx, &req).await;
+                Ok(PluginPayload::new(&reply))
             }
             _ => Err(PluginError::NotFound(format!(
                 "[compose] 未知子命令: {path}"

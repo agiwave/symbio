@@ -173,7 +173,11 @@ pub(crate) async fn report_if_due(
         quiet_ms,
     };
 
-    match apply_verdict(orchestrator, ctx, context, Verdict::Report, &snapshot).await {
+    // 汇报是模板产线（零模型往返），无思考事实可带出——第二元恒 `None`。
+    match apply_verdict(orchestrator, ctx, context, Verdict::Report, &snapshot)
+        .await
+        .0
+    {
         VerdictEffect::Spoke => {
             turn.progress_reports += 1;
             // 刚说了一句话 ⇒ 静默时钟归零。不归零的话，下一个轮边界会因为"距上次

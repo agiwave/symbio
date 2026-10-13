@@ -458,7 +458,7 @@ pub async fn run_chat_loop(
                     // 轮首判决不带运行现状：`Answered` / `Escalate` 说的是"这一轮怎么办"，
                     // 而 `RunSnapshot` 说的是"干到哪一步"——只有 `Report` 读它，
                     // 而 `Report` 不在轮首产生（见步骤 2d）。
-                    let effect = apply_verdict(
+                    let (effect, composed) = apply_verdict(
                         orchestrator,
                         &ctx,
                         &mut context,
@@ -534,6 +534,16 @@ pub async fn run_chat_loop(
                             user_meta.clone(),
                             &reply,
                             dialog,
+                            // 生成这次答话的思考事实：措辞产线是这条轮次里唯一一次
+                            // 真实模型推理，不入格则 `Reason` 节点从未存在。
+                            composed.as_ref().and_then(|r| {
+                                let text = r.reasoning.clone()?;
+                                let id = r
+                                    .reasoning_id
+                                    .clone()
+                                    .unwrap_or_else(crate::symbio_core::llm_short_id);
+                                Some((id, text))
+                            }),
                             // 答话轮同样要落「本轮之前那次压缩」这一格——它不进
                             // `execute_turn`，不带上就漏了（见该函数的入参文档）。
                             context.consolidated.take().as_deref(),

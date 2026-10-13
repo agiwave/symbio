@@ -28,7 +28,7 @@ use std::sync::Arc;
 
 use super::config::ComposeConfig;
 use crate::symbio_core::chat_message::{ChatMessage, MessageRole};
-use crate::symbio_core::ComposeRequest;
+use crate::symbio_core::{ComposeRequest, WordingReply};
 use crate::symbio_core::{
     llm_short_id, CapabilityVisitor, ExecAbortSignal, ExecEnv, ExecEventSink, ModelProvider,
     PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_VISITOR,
@@ -50,11 +50,15 @@ pub(crate) const INSTRUCTION: &str = "\
 直接给答案，不要复述用户的问题，不要写「根据我们的对话记录」这类元话语。
 如果对话里确实没有答案，就直说不知道，并建议用户换个说法。";
 
-/// 生成一段答话。
+/// 生成一段答话（含**这次生成自己的思考事实**）。
 ///
 /// 模型与指令段都来自**本插件自己的配置**（`config.rs`）：配置了 `model` 就用它
 /// （答话是用户逐字读的那段文本，值得用比判决更好的模型），取不到落回会话选定的那个；
 /// 配置了 `instruction` 就覆盖内置那段。
+///
+/// 思考内容（`reasoning` / `reasoning_id`）随答话一起带出：这是**一次真实的模型
+/// 往返**，它的思考与正文同源——此前在函数出口被丢弃，`Reason` 节点对普通答话轮
+/// 从未存在过（见 `WordingReply` 的文档）。
 ///
 /// 返回 `None` = 生成不了（没有可用的模型服务 / 请求失败 / 空文本 / 对话线里没有
 /// 用户发言）——调用方据此**退回模板**。
@@ -62,7 +66,7 @@ pub(crate) async fn generate(
     ctx: &Arc<dyn PluginInvokeRequest>,
     req: &ComposeRequest,
     config: &ComposeConfig,
-) -> Option<String> {
+) -> Option<WordingReply> {
     // 先做**不花任何代价**的判据，再去找模型服务：没有"要回答的那句话"时，
     // 生成只会得到一句凭空的话——那时连能力访问器都不必碰。
     let messages = build_messages(&req.context);
@@ -97,7 +101,16 @@ pub(crate) async fn generate(
         .execute_turn(&system_prompt, &messages, &[], &root_id, &env)
         .await
     {
-        Ok(out) => non_empty(&out.text),
+        Ok(out) => {
+            let text = non_empty(&out.text)?;
+            // 思考事实与正文同源：有正文才可能有思考（正文空 = 整轮退模板）。
+            let reasoning = non_empty(&out.reasoning);
+            Some(WordingReply {
+                text,
+                reasoning_id: reasoning.clone().map(|_| out.reasoning_child_id.clone()),
+                reasoning,
+            })
+        }
         Err(e) => {
             // 生成失败**不是**本轮的失败：调用方退回模板，用户照旧收到一句答话。
             // 因此 warn 而不 error——把它报成错误会让一次限流看起来像会话故障。

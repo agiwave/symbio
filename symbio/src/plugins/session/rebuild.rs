@@ -417,7 +417,27 @@ fn produced_nodes(e: &Event) -> Vec<ChatMessage> {
         // 时间戳覆写成事件自身（构造器取「此刻」会破坏纯函数性，见模块头）。
         node.timestamp = Some(e.ts);
         node.status = Some(status_of(e));
-        return vec![node];
+        // 思考事实（答话轮的模型推理，`WordingReply` 带回、收束格入格）：
+        // 有正文 + 有思考 ⇒ Reason 节点是这条答话的**子节点**（与生成路径的
+        // Turn 树形一致：思考挂在它所属的那次产出之下）。载荷没有就是旧事件 /
+        // 模板产线，一个节点都不多发——形状逐字复刻，不自我发明。
+        let reasoning = text_of(e, "reasoning");
+        if reasoning.trim().is_empty() {
+            return vec![node];
+        }
+        let reasoning_id = str_of(e, "reasoning_id")
+            .unwrap_or_else(|| format!("{}-reasoning", node.id));
+        let reasoning_node = ChatMessage {
+            id: reasoning_id,
+            parent_id: Some(node.id.clone()),
+            role: Some(MessageRole::Assistant),
+            msg_type: Some(MessageType::Reasoning),
+            content: Some(MessageContent::Text(reasoning)),
+            status: Some(status_of(e)),
+            timestamp: Some(e.ts),
+            ..Default::default()
+        };
+        return vec![node, reasoning_node];
     }
     let Some(turn_id) = str_of(e, "turn_id") else {
         return Vec::new();

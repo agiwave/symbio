@@ -1028,6 +1028,10 @@ pub(crate) async fn execute_final_reply_turn(
     // 收束格据它复刻那条根级节点（`Answered` 答话 `exclude = false`）；双写期它随
     // `messages.json` 落盘，切源后必须随事实入格（见 `TurnInput::dialog`）。
     dialog: super::turn_runner::DialogFacts,
+    // 生成这次答话的**思考事实**（`(reasoning_id, reasoning)`）：措辞产线的模型
+    // 往回是这条轮次里唯一一次真实推理，不入格则 `Reason` 节点对普通答话轮从未
+    // 存在（AMD MiMo 实测 2026-10-13）。模板产线 / 生成失败退模板 ⇒ `None`。
+    reasoning: Option<(String, String)>,
     // 本轮之前发生过压缩 ⇒ 压缩后的整份消息列表（S2.7-b2，与 [`execute_turn`] 同源）。
     // 答话轮在步骤 2 就短路收尾，**不进** [`execute_turn`]，所以它也得自己落这一格
     // ——否则「上一轮末尾压过一次、这一轮是答话轮」时那次压缩永远不入格。
@@ -1075,8 +1079,8 @@ pub(crate) async fn execute_final_reply_turn(
         inject: None,
         final_reply: Some(reply.to_string()),
         // 答话**对话面节点**的身份与标记：收束格据它复刻那条根级节点。答话轮没有
-        // 流式节点 ⇒ 无半截可记：载荷 `turn_id` 记空串（重建侧按 `dialog.id` 与
-        // 事件 id 复刻），取数口不挂（`nodes: None`）。
+        // 流式过程 ⇒ 无半截可记：载荷 `turn_id` 记空串（重建侧按 `dialog.id` 与
+        // 事件 id 复刻），取数口按有无思考事实决定挂不挂（见下方 `nodes`）。
         dialog: Some(dialog),
         // 答话轮**不收束前的开场白**：`Answered` 在轮首就判定了（`Spoke` 是
         // `Escalate` 的效应），本入口只处理已定稿的答话。
@@ -1085,7 +1089,19 @@ pub(crate) async fn execute_final_reply_turn(
         turn_root_id: String::new(),
         user_node_id,
         user_meta,
-        nodes: None,
+        // 取数口：**恒定快照**——答话轮没有流式过程（措辞插件的模型往返是静默的，
+        // 此刻已结束），思考事实是调用方搬运来的定值。挂上它，1b 收束格的
+        // `produced` 载荷才带 `reasoning` / `reasoning_id`（重建据此复刻 Reason 节点）。
+        nodes: reasoning.map(|(reasoning_id, reasoning)| {
+            let facts = super::turn_runner::StreamNodeFacts {
+                text_id: None,
+                text: None,
+                reasoning_id: Some(reasoning_id),
+                reasoning: Some(reasoning),
+            };
+            std::sync::Arc::new(move || facts.clone())
+                as super::turn_runner::NodeFactsFn
+        }),
         // 定稿答话轮不经过工具循环的闸门空隙——它一次请求都不发（`final_reply` 走
         // 1b 分支直接收束）。但信号照传：若用户在答话落格前按下停止，1c 的中止检查
         // 会在落完用户格后接管，与其它轮同一条路径（终止是状态，不是特例）。

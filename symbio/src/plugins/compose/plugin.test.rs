@@ -59,18 +59,18 @@ fn report(snapshot: RunSnapshot) -> ComposeRequest {
     }
 }
 
-/// 走一次路由，取出参文本
-async fn compose_with(req: ComposeRequest) -> String {
+/// 走一次路由，取出参（`WordingReply`；模板路径思考事实恒 `None`）
+async fn compose_with(req: ComposeRequest) -> WordingReply {
     let p = plugin(ComposeConfig::default())
         .route(ctx("wording", Some(req)))
         .await
         .unwrap_or_else(|e| panic!("compose 必须成功：{e}"));
-    serde_json::from_value(data_of(p)).expect("出参是 String")
+    serde_json::from_value(data_of(p)).expect("出参是 WordingReply")
 }
 
-/// 走一次路由（只给判决，运行现状取平凡值）
+/// 走一次路由（只给判决，运行现状取平凡值），取文本
 async fn compose(verdict: Verdict) -> String {
-    compose_with(request(verdict)).await
+    compose_with(request(verdict)).await.text
 }
 
 fn data_of(p: PluginPayload) -> serde_json::Value {
@@ -156,16 +156,19 @@ async fn unknown_reason_falls_back_by_variant() {
 /// 会把这件事反过来做。
 #[tokio::test]
 async fn report_is_filled_from_the_snapshot_without_any_model_service() {
-    let text = compose_with(report(RunSnapshot {
+    let reply = compose_with(report(RunSnapshot {
         tool_rounds: 3,
         quiet_ms: 125_000,
     }))
     .await;
 
     assert!(
-        text.contains('3') && text.contains("2 分钟"),
-        "汇报必须把运行现状（轮次 / 静默时长）说进句子里，实得：{text}"
+        reply.text.contains('3') && reply.text.contains("2 分钟"),
+        "汇报必须把运行现状（轮次 / 静默时长）说进句子里，实得：{}",
+        reply.text
     );
+    // 填表产线零模型往返 ⇒ 恒无思考事实。
+    assert!(reply.reasoning.is_none() && reply.reasoning_id.is_none());
 }
 
 /// `Report` 恒有话说——包括运行现状是平凡值的情形。
@@ -187,9 +190,9 @@ async fn report_never_yields_empty_text() {
             quiet_ms: -1,
         },
     ] {
-        let text = compose_with(report(snapshot.clone())).await;
+        let reply = compose_with(report(snapshot.clone())).await;
         assert!(
-            !text.trim().is_empty(),
+            !reply.text.trim().is_empty(),
             "`Report` 必须有话可说（snapshot={snapshot:?}）"
         );
     }
