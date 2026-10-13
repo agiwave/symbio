@@ -3,7 +3,7 @@
 > ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/task/*.md` 生成，请勿手改。**
 > 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，原则与流程见 [PL-011 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。
 
-**计数**：☐ todo 14 · 🟡 doing 0 · ☑ done 77 · ❌ wont 0（共 91）
+**计数**：☐ todo 13 · 🟡 doing 0 · ☑ done 78 · ❌ wont 0（共 91）
 
 ## 待处理（按依赖顺序）
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
@@ -18,7 +18,6 @@
 | `T-075-前端形态e2e补位` | 被测形态只有 CLI：tauri 前端形态无浏览器层 e2e（AR-007 记为事实），补最小呈现判据 | later | e2e | — |
 | `T-078-shutdown接线批` | ADR-033 残余清偿：进程退出与丢弃旧容器的收尾接线（`PluginStopReason::Shutdown` 从纸面能力变生产路径） | later | 插件生命周期 | — |
 | `T-079-插件授权强制与身份残余批` | ADR-032 残余清偿：`plugin_grants` 从定义解析走向强制校验；`PluginMeta` 身份字段删除随 provider 两级解析落地 | later | 插件身份与授权 | T-078-shutdown接线批 |
-| `T-080-adr-impl-档位逐条复核批` | 「无人解释的 partial」清零：ADR-020/022/027/053 档位复核升档或列出残余；ADR-054 守卫退役条款裁定；ADR-027 备注补指认 | later | 登记卫生 | — |
 | `T-084-ST-002产物投影方向对账批` | ST-002 `projection = display` 与生产方向相反——产物进不进上下文，裁决一边 | later | plan | — |
 | `T-085-记忆召回判据面补齐批` | 记忆召回判据面补齐：calibrated 格 / 混合打分与 §5 措辞裁决 / recall_eval 切生产投影 / judgment 标签写方 / 保留策略 | later | plan | — |
 | `T-086-技能编译落地形态批` | S11 落地形态批：skill_compile 投影化或修订 / 凸度与密度读数裁决 / skill_compile_enabled 默认翻向的条件 | later | plan | T-085-记忆召回判据面补齐批 |
@@ -50,6 +49,7 @@
 | `T-092-fmt缺推送点闸门` | fmt 只在整轮门禁与 CI 里判——推送点（pre-push）不判，未格式化源码能推到 origin | quality | `pre-push` 的调用由 `--only=facts --ci` 改为 `--only=fmt,facts --ci`；注释记下这次漏网的形态（`c8ed5ee7` 手工恢复 `stream.rs` 后未跑格式化，26 个文件推到 `origin/v2`，只在 CI 的 rust-checks 里以「cargo fmt --all 有 27 处差异」呈现）与已知代价（判据看工作区，手边有未格式化 `.rs` 脏改动时会多红一次）。验证：`node scripts/gate.mjs --only=fmt,facts --ci` 6/6 绿、4s（并入 fmt 前实测 0.3s，仍是秒级）。 |
 | `T-013` | Rust 覆盖率阈值：与 C7 同族的已知盲区，排在会话真源归一之后 | plan | 处置取第二条——理由的 owner 是 [ADR-060](../adr/ADR-060.md)（不做的四条：覆盖率答「有没有被执行」不答「有没有被断言」、只调用不断言的测试照样顶满而它守不住任何东西，与「出口可核对」相悖；「测试被删就红」已有 RATCHETS 用例数 / 断言数 floor 棘轮落点，覆盖率是冗余第二道；成本每次提交都付而收益是低频观察量，且要引入 cargo-llvm-cov + llvm-tools 外部工具链；总量数字会稀释 panic-audit / 形状基线 / 外部效标这些专用判据）。ADR 同时写明**缺口不闭合**（无法机械发现从未被执行的分支）与三条**重开条件**（出现只有覆盖率能发现的缺陷实例 / 工具链成本降到可进门禁 / 仓的风险面变了），重开唯一入口是新 ADR 取代本条。`gate.d/35-baseline.mjs` 的 RATCHETS 未加覆盖率落点，scripts 未引入覆盖率依赖 |
 | `T-014` | 分布式 Store 的 seq 单调与「无溯源不声明」如何共存（G4） | plan | 判断先行——多副本部署不在计划内（G4 / R5 的触发信号「出现多副本部署需求」从未发生），故 [ADR-061](../adr/ADR-061.md) 判 **`store = distributed` 从值域退役**（留一格「将来也许能用」比删掉更脏：它是语义上必然违反 I1 的取值，而 `in_domain` 会判它合法，值域自己在撒谎）。ADR 同时留下**重新引入必须答全的四问**（全局序来源 / 同 event_id 冲突裁决 / 溯源边跨副本指向 / 脑裂与 I3），答不全不得回值域。**判据落点**：PL-001 §8 值域表已去掉该格 ⇒ 生成的 facts::DOMAINS 里没有它 ⇒ `scenario_ladder.rs` 断言「store 值域不含 distributed」且「in_domain("store","distributed") 为假」——谁加回值域表，facts 里就会有它，断言立刻红（编译运行通过）。连带收敛 PL-003 §7.3 G4 与 PL-004 §5 R5 的措辞 |
+| `T-080-adr-impl-档位逐条复核批` | 「无人解释的 partial」清零：ADR-020/022/027/053 档位复核升档或列出残余；ADR-054 守卫退役条款裁定；ADR-027 备注补指认 | 登记卫生 | 五条裁决全部落为 `impl: done` + 正文残余说明（无一条留「partial 却不解释」）：① ADR-020——订正 `symbio/src/plugins/session/docs/AR-015-core-loop.md` §6.4 那句与 §7/§8 相反的「工具经自有 `PluginPayload::Session` 通道回传事件…尚未收敛」（实测 `PluginPayload::Session` 在 `session/**` 只剩注释指认，`execute_tool_async` 明写「不再有流式分支」），ADR-020 加复核补记升 done；② ADR-022——六条决策全落地（`parse_line` / `open_partial_line` / 边界对齐 / 三钩子全在 `plugins/model/protocols/`），残余只在**覆盖面**（e2e 只走 `openai_chat` 一条形状）且已归 T-076，属测试矩阵的债非本条落地缺口 ⇒ 升 done；③ ADR-027——正文补「部分取代」两行表（导入入口/前端选入口 → ADR-029；`path` 归属 → ADR-030，两者 `impl: done`），并说明为何不写 `supersedes`（那个字段只表达整体取代）⇒ 升 done；④ ADR-053——三批落地锚 `e62d8a85`（b1）/`fd844424`（b2）/`941cf88d`+`e4743c11`（b3）与承载任务 T-053…T-056 成表 ⇒ 升 done；⑤ ADR-054——裁定「过渡形态退役、结构守卫**转正**为永久守卫」（守的是决策 4 那条持续不变量「没有任何地方能改列表而不落事实」，类型只管得住 `apply` 一侧），决策 3 末句按修订读、实施补记 4 记录；`scripts/gate.d/30-docs.mjs` 接线注释由 v1（就地登记 + pending 棘轮 + LWF-001…004）改写为 v2（结构判定 + LWF-001–002 + 寄存锚口径）。顺带把复核确立的规则写回 [SP-001](../spec/SP-001.md) 的 `impl` 字段行（「档位必须可解释」）。验证：`node scripts/gen-doc-refs.mjs` 展开 11 处零 RF-003 · `node scripts/registry-audit.mjs` 零违规 · `gate --only=docs,facts` 绿 |
 | `T-001` | 登记机制落地：单文档 + 守卫 + 汇总 + 总纲 | meta | 提交 8252c4a（机制全量落地：4 脚本 + 23 项回归测试 + docs/plan/14 总纲 + 门禁接线，docs+facts 58/58） |
 | `T-003` | 接管 docs/README 纪律地图（每条纪律成为 spec 条目） | doc | 提交 36a9eb3（21 条 spec 条目 + 地图收敛指路；docs+facts 门禁 58/58） |
 | `T-004` | 散落决策清点与登记形态定案（决策类元素的接管边界） | meta | 清点结论：唯一散落处 = `docs/arch/AR-011-third-party-plugin-spec.md §10`（6 条待确认决策）⇒ 处置为「原表自持、不另登 task」；形态定案写回 14 §6；验证：registry-audit 零违规 |
@@ -192,7 +192,7 @@
 - [`T-077-输入面双轨退役批`](T-077-输入面双轨退役批.md) ADR-031 残余清偿：运行选项上写入面的协议决定 → `session/chat/send` / `chat/abort` 退役 → 排队态显示（todo）
 - [`T-078-shutdown接线批`](T-078-shutdown接线批.md) ADR-033 残余清偿：进程退出与丢弃旧容器的收尾接线（`PluginStopReason::Shutdown` 从纸面能力变生产路径）（todo）
 - [`T-079-插件授权强制与身份残余批`](T-079-插件授权强制与身份残余批.md) ADR-032 残余清偿：`plugin_grants` 从定义解析走向强制校验；`PluginMeta` 身份字段删除随 provider 两级解析落地（todo）
-- [`T-080-adr-impl-档位逐条复核批`](T-080-adr-impl-档位逐条复核批.md) 「无人解释的 partial」清零：ADR-020/022/027/053 档位复核升档或列出残余；ADR-054 守卫退役条款裁定；ADR-027 备注补指认（todo）
+- [`T-080-adr-impl-档位逐条复核批`](T-080-adr-impl-档位逐条复核批.md) 「无人解释的 partial」清零：ADR-020/022/027/053 档位复核升档或列出残余；ADR-054 守卫退役条款裁定；ADR-027 备注补指认（done）
 - [`T-081-授权表缺行登记批`](T-081-授权表缺行登记批.md) 授权表缺行登记批：agent:reflex 窄行（S07）+ person:* shared 行（S10）——正文断言不许再被派生分支静默推翻（todo）
 - [`T-082-角色行生产构造批`](T-082-角色行生产构造批.md) ActorSpec 角色行生产构造批：S02 worker / S03 规划者·验证者（含 Scope::Child）/ S06 检索者·巩固者 / S07 抢占判定者 / S09 闸门 / S11 编译者（todo）
 - [`T-083-ST-004调度租约裁决批`](T-083-ST-004调度租约裁决批.md) ST-004 调度器/租约/cap 的落地形态裁决——先分清「目标」与「叙事」，再决定补哪一侧（done）

@@ -453,7 +453,7 @@ parse_sse_stream → sink.apply(message) → TranscriptSink → Transcript::appl
 - 「中止不是失败」：会话结局是 `aborted`（不是 `completed`），在途根 Turn 定稿 `Aborted`
   （重试入口不消失）。
 - `handle_abort` 的 3s 兜底判据（登记变 `None`）与语义保留。
-- 工具经**自有** `PluginPayload::Session` 通道回传事件的能力完整保留（尚未收敛，见 §7）。
+- 工具的事件出口**已收敛到 `EventSink`**（§7 / §8）：`shell` / `agent_run` / `ask_user` / 交互审批都写同一个出口，`execute_tool_async` 不再有流式分支、不再把帧解回来；`PluginPayload::Session` 只剩**跨进程**用途（`event_bus/subscribe`、vdfs 网关、CLI / 前端客户端），与执行期无关。
 
 ---
 
