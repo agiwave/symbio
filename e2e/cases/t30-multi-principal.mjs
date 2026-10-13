@@ -91,8 +91,40 @@ function lastUserText(r) {
 }
 
 /**
- * **跨会话召回段**的正文（置顶注入的那条，`meta.kind = recall_context` /
- * 抬头「【长期记忆】」）。
+ * 跨会话召回**小节**头（`v2_memory::prompt_section` 的固定排版首行）。
+ */
+const RECALL_SECTION_HEAD = '【长期记忆】跨会话召回';
+
+/**
+ * 把一条消息的 content 切成 `{ thread, recall }` 两半；无召回小节 ⇒ `null`。
+ *
+ * ## 为什么按**小节**切，而不是按「整条消息」切
+ *
+ * openai_chat 协议**出厂只发一条 system**（`merge_leading_system`，协议层文档化
+ * 决策）：基础系统提示（工作区 / 会话记忆等注册段）与请求视图置顶的 prefix 消息
+ * （`request_view_prefix` 拍平的召回 / 就绪 / 委派三段）会并成**一条** system 消息。
+ * 于是「召回通道」在线上不是一条独立消息，而是合并消息里的一个**小节**——
+ * 小节头 + 连续的 `- ` 条目行（`prompt_section` 的固定排版）。历史读数里它仍是
+ * 独立消息（`meta.kind = recall_context`），只有线上请求被并——通道语义没变，
+ * 变的是判别粒度。
+ */
+function splitRecall(content) {
+  if (typeof content !== 'string') return null;
+  const at = content.indexOf(RECALL_SECTION_HEAD);
+  if (at < 0) return null;
+  const lines = content.slice(at).split('\n');
+  const recallLines = [lines[0]];
+  for (const line of lines.slice(1)) {
+    if (line.startsWith('- ')) recallLines.push(line);
+    else break;
+  }
+  const recall = recallLines.join('\n');
+  return { thread: content.slice(0, at) + content.slice(at + recall.length), recall };
+}
+
+/**
+ * **跨会话召回段**的正文（`meta.kind = recall_context` 的独立消息，或合并 system
+ * 消息里的召回小节，见 `splitRecall`）。
  *
  * 它是设计内的**另一条通道**：`v2_memory` 把每轮的**用户发言**自动编码成本会话
  * 的情景记忆（tag「经验」），召回时**跨会话**扫描、以「背景事实，不是本轮指令」
@@ -102,22 +134,35 @@ function lastUserText(r) {
 function recallText(r) {
   const msgs = r.body?.messages ?? [];
   return msgs
-    .filter(
-      (m) =>
-        m.meta?.kind === 'recall_context' ||
-        (typeof m.content === 'string' && m.content.startsWith('【长期记忆】')),
-    )
-    .map((m) => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content)))
+    .map((m) => {
+      if (m.meta?.kind === 'recall_context') {
+        return typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+      }
+      const split = splitRecall(m.content);
+      if (split) return split.recall;
+      // 兼容形态：整条消息就是召回段（老格式，抬头【长期记忆】但非小节排版）。
+      if (typeof m.content === 'string' && m.content.startsWith('【长期记忆】')) {
+        return m.content;
+      }
+      return '';
+    })
+    .filter(Boolean)
     .join('\n');
 }
 
-/** 摘掉召回段之后的请求正文 = **这个会话自己的线程** + 系统提示词 + 工具表。 */
+/** 摘掉召回段（独立消息**与**合并消息内的召回小节）之后的请求正文 = **这个会话自己的线程** + 系统提示词 + 工具表。 */
 function threadBody(r) {
-  const msgs = (r.body?.messages ?? []).filter(
-    (m) =>
-      m.meta?.kind !== 'recall_context' &&
-      !(typeof m.content === 'string' && m.content.startsWith('【长期记忆】')),
-  );
+  const msgs = (r.body?.messages ?? [])
+    .filter((m) => m.meta?.kind !== 'recall_context')
+    .map((m) => {
+      if (typeof m.content !== 'string') return m;
+      const split = splitRecall(m.content);
+      // 纯召回消息（独立形态）摘掉后正文为空 ⇒ 整条摘除；其余保留（可能是空串正文，
+      // 但那不是召回通道的事，substring 断言不受影响）。
+      if (split && split.thread.trim() === '') return null;
+      return split ? { ...m, content: split.thread } : m;
+    })
+    .filter(Boolean);
   return JSON.stringify({ ...r.body, messages: msgs });
 }
 

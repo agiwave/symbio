@@ -116,17 +116,6 @@ export default defineCase(
         // ── 断言 ③：丢弃调用的成因与反馈正文 ────────────────────────────
         const dropped = results.filter((m) => String(m.content ?? '').includes('超过上限'));
         assertEq(dropped.length, 1, '恰好 1 个结果携带超限反馈（第 33 个调用）');
-        if (process.env.E2E_DEBUG) {
-          const { writeFileSync } = await import('node:fs');
-          const p = msgs.find((m) => m.id === dropped[0].parent_id);
-          const dump = {
-            dropped: dropped[0],
-            droppedParent: p ?? null,
-            normalParent: msgs.find((m) => (m.type ?? m.msg_type) === 'tool_call' && m.id !== dropped[0].parent_id) ?? null,
-            toolCallCount: msgs.filter((m) => (m.type ?? m.msg_type) === 'tool_call').length,
-          };
-          writeFileSync('C:/Bing/symbio/.workbuddy-ai/t48-debug.json', JSON.stringify(dump, null, 2));
-        }
         assert(
           results.every((m) => m.parent_id != null),
           '丢弃结果同样挂在它的 tool_call 之下（有请求、无响应 = 前端缺口）',
