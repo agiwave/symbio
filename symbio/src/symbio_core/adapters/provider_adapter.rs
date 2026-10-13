@@ -174,8 +174,10 @@ impl LlmAdapter for ProviderLlmAdapter {
     ///（收束语义与流式与否无关）。
     ///
     /// **无工具 = [`Self::generate_turn`] 的入参为空的同一路径**（`&[]`）：不另写
-    /// 一条请求构造。「空文本」在这里是**失败**（调用方拿到 Ok(空串) 会把「模型没答」
+    /// 一条请求构造。「没答」在这里是**失败**（调用方拿到 Ok(空串) 会把「模型没答」
     /// 当「答了空话」落成 final）——判定归这里，因为无工具轮没有别的产出可指望。
+    /// 判的是**正文与推理两样都空**：只有正文空而思考非空时，那段思考就是回答
+    /// （回退取它，v1 的 `effective_text` 同一语义）。
     async fn generate_streaming(
         &self,
         tok: &FullModel,
@@ -183,14 +185,23 @@ impl LlmAdapter for ProviderLlmAdapter {
         sink: Arc<dyn DeltaSink>,
     ) -> Result<(String, u64), AdapterError> {
         let turn = self.generate_turn(tok, messages, &[], sink).await?;
-        if turn.text.trim().is_empty() {
+        // 正文空但推理非空 ⇒ **回退取推理**（v1 同一语义：`TurnOutput::effective_text`）。
+        // reasoning 模型常常想清楚了却不复述，那句思考就是它的全部回答；把它当
+        // 「没答」判失败，调用方拿到的是失败而不是答案。
+        let answer = if turn.text.trim().is_empty() {
+            turn.reasoning
+        } else {
+            turn.text
+        };
+        if answer.trim().is_empty() {
+            // 两样都空才是**真失败**：正文与思考都没有产出，才叫「模型没答」。
             // 空文本不是成功：调用方拿到 Ok(空串) 会把「模型没答」当「答了空话」
             // 落成 final——必须走兜底路径（I3），所以这里按失败返回。
             return Err(AdapterError::GenerationFailed(
                 "model returned empty text".into(),
             ));
         }
-        Ok((turn.text, turn.cost_ms))
+        Ok((answer, turn.cost_ms))
     }
 
     /// 工具通道：工具清单下行 + 工具调用上行。
@@ -469,6 +480,9 @@ impl LlmAdapter for ProviderLlmAdapter {
             })?;
         Ok(LlmTurn {
             text: output.text,
+            // 推理与正文**同属这一次响应**，一起带到端口面上（见 [`LlmTurn::reasoning`]）：
+            // 判「本轮答了没有」的那一侧只看得到返回值，不看流式桥。
+            reasoning: output.reasoning,
             tool_calls: output.tool_calls,
             cost_ms: started.elapsed().as_millis() as u64,
             // provider 实测用量直通：这是校准反馈链的唯一数据源（见 `LlmTurn::usage`）。

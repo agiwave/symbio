@@ -803,18 +803,21 @@ impl ChatOrchestrator {
             //   · 流式期间：思考块 + 一段相同文本先后出现，看起来像"同一段文本被重复写入"；
             //   · 历史刷新后：存储层本就重复（factor≈2），渲染出两份。
             //
-            // 流式期间 ReasoningDelta 已经把 reasoning 累积进 reasoning_child_id 节点，
-            // 此处仅将其与根 Turn 标记 Completed 即可。仅当流式期间因故未建立 Reasoning 节点时，
-            // 才补发一个 Text 节点兜底（此时不存在 Reasoning 节点，不会造成重复）。
+            // 流式期间 ReasoningDelta 已经把 reasoning 逐帧上线进 reasoning_child_id 节点，
+            // 这里只迁**状态与类型**（状态帧不带正文，重发一遍只是二次传输同一段文字）。
+            //
+            // 类型必须是 **Text**：落库侧把这一段承载成 Text 子节点（复用同一个流式 id），
+            // 网格重建同判据 ⇒ 重载会话里它是「回答」。流式层若仍标 Reasoning，
+            // 同一条消息在 live 是折叠的思考块、刷新后是正文——「模型只想不作答」
+            // 就是这一处错位造成的观感，不是模型的行为。
             if !out.reasoning_child_id.is_empty() {
-                // 该节点已由 ReasoningDelta 逐帧上线过正文，这里只迁状态。
                 llm_emit_state(
                     sink,
                     ChatMessage {
                         id: out.reasoning_child_id.clone(),
                         parent_id: Some(root_id.into()),
                         role: Some(MessageRole::Assistant),
-                        msg_type: Some(MessageType::Reasoning),
+                        msg_type: Some(MessageType::Text),
                         content: Some(MessageContent::Text(out.reasoning.clone())),
                         status: Some(MessageStatus::Completed),
                         ..Default::default()
@@ -850,14 +853,26 @@ impl ChatOrchestrator {
         }
 
         // Mark reasoning child as completed
+        //
+        // 「思考就是这一轮的回答」有两种到达形态：`text` 空（v1 的 reasoning-only），
+        // 与 `text` 已被运行器**取作**那段思考（v2 收束格的 `text` 存的是回答，
+        // 回答取自思考时两者逐字相同）。落库侧与网格重建按**内容相同**这条判据
+        // 把它承载成 Text 子节点（`llm_build_assistant_messages` 的 `reasoning_only`），
+        // 这里必须跟着同一个判据——否则 live 标 Reasoning、存储标 Text，同 id 两个类型，
+        // 界面上就是「有思考没正文」。
         if !out.reasoning.is_empty() && !out.reasoning_child_id.is_empty() {
+            let answer_is_reasoning = out.text.trim() == out.reasoning.trim();
             llm_emit_state(
                 sink,
                 ChatMessage {
                     id: out.reasoning_child_id.clone(),
                     parent_id: Some(root_id.into()),
                     role: Some(MessageRole::Assistant),
-                    msg_type: Some(MessageType::Reasoning),
+                    msg_type: Some(if answer_is_reasoning {
+                        MessageType::Text
+                    } else {
+                        MessageType::Reasoning
+                    }),
                     content: Some(MessageContent::Text(out.reasoning.clone())),
                     status: Some(MessageStatus::Completed),
                     ..Default::default()

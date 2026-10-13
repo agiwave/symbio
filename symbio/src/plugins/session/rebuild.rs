@@ -445,6 +445,17 @@ fn produced_nodes(e: &Event) -> Vec<ChatMessage> {
     let status = status_of(e);
     let text = text_of(e, "text");
     let reasoning = text_of(e, "reasoning");
+    // 兜底格的 `why` = 这一轮**为什么失败**（写侧 `append_fallback` 记的原因码文本）。
+    // 它必须折回节点：界面的组级交代条（`TurnGroupNode` → `MessageErrorBox`）读的是
+    // 节点 `error`，取不到就只剩一个 failed 状态 + 一串产出——用户看到的是「模型想了
+    // 很久然后什么也没说」，而事实是「模型没答，原因 X」。失败原因在网格里是事实，
+    // 到界面上却不是，等于把已记的东西丢掉。
+    let why = e
+        .payload
+        .get("why")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_string);
     let mut nodes = Vec::new();
 
     // Turn 是组合节点（仅分组、无正文）：与 `llm_build_assistant_messages` 同形。
@@ -453,6 +464,7 @@ fn produced_nodes(e: &Event) -> Vec<ChatMessage> {
         role: Some(MessageRole::Assistant),
         msg_type: Some(MessageType::Turn),
         status: Some(status.clone()),
+        error: why.clone(),
         timestamp: Some(e.ts),
         ..Default::default()
     });
@@ -541,7 +553,7 @@ fn push_round_nodes(
     }
 }
 
-/// 工具格（`artifact × asserted`）→ `[ToolCall 子, 结果子]`。
+/// 工具格（`artifact × asserted`）→ `[本轮中途产出子（可选）, ToolCall 子, 结果子]`。
 ///
 /// 载荷自带两张卡的全部身份：`tool_call_id`（ToolCall 节点 id）/ `wire_id`
 /// （provider 的调用 id）/ `args`（**已定稿的参数文本**）/ `result_id`（结果节点 id）/
@@ -550,6 +562,18 @@ fn push_round_nodes(
 fn artifact_nodes(e: &Event) -> Vec<ChatMessage> {
     let Some(turn_id) = str_of(e, "turn_id") else {
         return Vec::new();
+    };
+    // 本轮的中途产出（思考 / 正文）**排在工具卡片之前**：它发生在模型请求工具之前，
+    // 而落在这张卡片所属的格里正是为了拿到这个位置（写侧见 `turn_runner` 的 2c）。
+    // 载荷没有 `round`（恢复路、以及把中途产出只记在收束格 `rounds[]` 的老会话）⇒
+    // 一个节点都不多发。
+    let mut nodes = match e.payload.get("round") {
+        Some(round) if round.is_object() => {
+            let mut v = Vec::new();
+            push_round_nodes(&mut v, &turn_id, 0, round, &MessageStatus::Completed, e.ts);
+            v
+        }
+        _ => Vec::new(),
     };
     let call_id = str_of(e, "tool_call_id").unwrap_or_else(|| format!("{turn_id}-call"));
     let success = e
@@ -638,7 +662,9 @@ fn artifact_nodes(e: &Event) -> Vec<ChatMessage> {
     };
     result.timestamp = Some(e.ts);
 
-    vec![call, result]
+    nodes.push(call);
+    nodes.push(result);
+    nodes
 }
 
 // ── 载荷取值（缺失一律静默给默认值：重建必须对**任意**历史事件容错）────────────

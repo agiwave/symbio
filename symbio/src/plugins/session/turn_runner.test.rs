@@ -910,7 +910,9 @@ mod turn_runner_tests {
 mod tool_round_tests {
     use std::sync::{Arc, Mutex};
 
-    use super::super::{RoundInjector, TurnInput, TurnResume, TurnRunner};
+    use super::super::{
+        NodeFactsFn, RoundInjector, StreamNodeFacts, TurnInput, TurnResume, TurnRunner,
+    };
     use crate::symbio_core::{
         check_all, unresolved_turns, AdapterError, CapabilityMeta, DeltaSink, DispatchOutcome,
         DispatchPort, Entity, Event, EventStore, FullModel, LatencyTier, LlmAdapter, LlmTurn,
@@ -1052,6 +1054,7 @@ mod tool_round_tests {
             self.prompts.lock().unwrap().push(messages.to_vec());
             Ok(LlmTurn {
                 text: "批准后已完成。".into(),
+                reasoning: String::new(),
                 tool_calls: Vec::new(),
                 cost_ms: 5,
                 usage: Some(crate::symbio_core::ModelUsage {
@@ -1110,6 +1113,7 @@ mod tool_round_tests {
                 .unwrap_or_else(|| "答".to_string());
             Ok(LlmTurn {
                 text: echo,
+                reasoning: String::new(),
                 tool_calls: Vec::new(),
                 cost_ms: 1,
                 usage: None,
@@ -1230,6 +1234,7 @@ mod tool_round_tests {
             if round == 1 {
                 Ok(LlmTurn {
                     text: "我先查一下。".into(),
+                    reasoning: String::new(),
                     tool_calls: vec![TurnToolCallInfo {
                         id: Some("tc-1".into()),
                         wire_id: Some("w-1".into()),
@@ -1244,6 +1249,7 @@ mod tool_round_tests {
             } else {
                 Ok(LlmTurn {
                     text: "读到了。".into(),
+                    reasoning: String::new(),
                     tool_calls: Vec::new(),
                     cost_ms: 4,
                     usage: None,
@@ -1686,8 +1692,10 @@ mod tool_round_tests {
         assert_eq!(tool, Some("vdfs_read"), "工具名是事实，必须单独成字段");
         assert_eq!(
             call_id,
-            Some("call_vdfs_read_0"),
-            "role=tool 必须关联到那次调用（否则模型无法配对多次并发调用）"
+            Some("w-1"),
+            "role=tool 必须关联到那次调用（否则模型无法配对多次并发调用）。\
+             id 取调用**自带的身份**（wire id 优先，与 v1 的请求构建同一口径），\
+             不是按工具名合成的——合成名跨轮会撞（见 `prompt_call_id`）。"
         );
         // 且调用请求本身是一条 assistant 消息——不是散文里「助手请求工具:」那种
         // 人类不会说的话。
@@ -2039,14 +2047,452 @@ mod tool_round_tests {
                     Some("vdfs_read"),
                     Some("call_vdfs_read_0")
                 ),
-                (
-                    "文件内容：hello（已批准）",
-                    Some("vdfs_read"),
-                    Some("call_vdfs_read_0")
-                ),
+                ("文件内容：hello（已批准）", Some("vdfs_read"), Some("w-1")),
             ],
-            "两次调用的两次结果都在，且都带角色与调用 id：{s:?}"
+            "两次调用的两次结果都在，且各带**自己那次调用**的 id：{s:?}\n\
+             （第二条的 id 是 resumed 调用自带的 wire id，不再是按名字合成的同名 id——\
+             两次调用合成同一个 id 会让 adapter 的「同一次调用只留最终那条结果」把\
+             前一条吃掉。）"
         );
+    }
+
+    // ── 守卫：交换**跨轮累加**（失忆的实测形状）───────────────────────────────
+    //
+    // 存在的理由是一条实测事故：工具轮之间清掉交换（只留最后一轮）时，模型每轮
+    // 都重新开局——同一份文件读四遍、待办在 5 项与 6 项之间反复重置，最后吐一轮
+    // 空正文收进兜底格。单侧的旧断言（`tool_round_lands_artifact_and_feeds_next_prompt`）
+    // 只有**一个**工具轮，那种形状下清空与累加长得一模一样，照不出来。
+    //
+    // 本组判据钉的是「**第三次**请求里还在不在**第一次**的结果」——只有 2+ 个工具轮
+    // 才存在这条边。
+
+    /// 两个工具轮的假适配器：每次请求换一个新调用（id 各不相同），第三次收束。
+    ///
+    /// id 必须互不相同，因为累加后**同一次请求里**会有两次调用的声明与两条结果；
+    /// 撞 id 会被 adapter 当成同一次调用的两条结果而吃掉前一条（见 `prompt_call_id`）。
+    struct TwoRoundToolLlm {
+        prompts: Arc<Mutex<Vec<Vec<PromptMessage>>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmAdapter for TwoRoundToolLlm {
+        fn model_id(&self) -> &str {
+            "two-round-mock"
+        }
+        async fn generate(
+            &self,
+            _tok: &FullModel,
+            _messages: &[PromptMessage],
+        ) -> Result<String, AdapterError> {
+            Err(AdapterError::GenerationFailed("unused".into()))
+        }
+        async fn generate_turn(
+            &self,
+            _tok: &FullModel,
+            messages: &[PromptMessage],
+            _tools: &[CapabilityMeta],
+            _sink: Arc<dyn DeltaSink>,
+        ) -> Result<LlmTurn, AdapterError> {
+            let round = {
+                let mut p = self.prompts.lock().unwrap();
+                p.push(messages.to_vec());
+                p.len()
+            };
+            let call = |id: &str, path: &str| TurnToolCallInfo {
+                id: Some(id.into()),
+                wire_id: Some(format!("w-{}", id)),
+                name: Some("vdfs_read".into()),
+                arguments: serde_json::json!({ "path": path }),
+                parse_error: None,
+                overflow_notice: None,
+            };
+            Ok(match round {
+                1 => LlmTurn {
+                    text: "先读 a。".into(),
+                    reasoning: String::new(),
+                    tool_calls: vec![call("tc-1", "a.md")],
+                    cost_ms: 1,
+                    usage: None,
+                },
+                2 => LlmTurn {
+                    text: "再读 b。".into(),
+                    reasoning: String::new(),
+                    tool_calls: vec![call("tc-2", "b.md")],
+                    cost_ms: 1,
+                    usage: None,
+                },
+                _ => LlmTurn {
+                    text: "两个都读到了。".into(),
+                    reasoning: String::new(),
+                    tool_calls: Vec::new(),
+                    cost_ms: 1,
+                    usage: None,
+                },
+            })
+        }
+    }
+
+    /// 按调用参数回显的假分发方：两次调用给出**两条可区分**的结果。
+    ///
+    /// 常量正文的假分发方（[`FakeDispatch`]）在这里不够用——「第一次的结果还在不在」
+    /// 必须能从正文里认出来。
+    struct PathEchoDispatch;
+
+    #[async_trait::async_trait]
+    impl DispatchPort for PathEchoDispatch {
+        async fn dispatch(&self, turn: &LlmTurn) -> Vec<DispatchOutcome> {
+            turn.tool_calls
+                .iter()
+                .map(|tc| DispatchOutcome {
+                    call_id: tc.id.clone().unwrap_or_default(),
+                    name: tc.name.clone().unwrap_or_default(),
+                    text: format!(
+                        "结果({})",
+                        tc.arguments
+                            .get("path")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?")
+                    ),
+                    ok: true,
+                    needs_user_action: false,
+                    prompt: None,
+                    failure_kind: String::new(),
+                    wire_id: tc.wire_id.clone().unwrap_or_default(),
+                    args: crate::plugins::session::message_build::tool_call_args_text(tc),
+                    result_id: String::new(),
+                })
+                .collect()
+        }
+    }
+
+    #[tokio::test]
+    async fn two_tool_rounds_accumulate_every_earlier_result_in_the_next_request() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = TwoRoundToolLlm {
+            prompts: Arc::new(Mutex::new(Vec::new())),
+        };
+        let prompts = llm.prompts.clone();
+
+        // 节点事实取数口按**取数次数**给不同的 id：真实桥上每轮的两个节点是新建的
+        // （分发时定格并归零），这里要的是「第 i 轮的思考挂在第 i 轮的产物格上」这条
+        // 配对关系，静态同值照不出错位。
+        let round_no = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = round_no.clone();
+        let nodes: NodeFactsFn = Arc::new(move || {
+            let i = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            StreamNodeFacts {
+                text_id: Some(format!("T-r{i}")),
+                text: Some(format!("第 {i} 轮说")),
+                reasoning_id: Some(format!("R-r{i}")),
+                reasoning: Some(format!("第 {i} 轮在想")),
+            }
+        });
+
+        let out = TurnRunner
+            .run_with_tools(
+                &store,
+                &llm,
+                &tok,
+                TurnInput {
+                    nodes: Some(nodes),
+                    ..input()
+                },
+                Arc::new(SilentDeltas),
+                &tools(),
+                Some(&PathEchoDispatch),
+            )
+            .await
+            .expect("两个工具轮后收束");
+
+        assert!(!out.fell_back, "两轮工具交换后正常收束，不该落兜底格");
+        assert_eq!(out.text, "两个都读到了。");
+
+        let seen: Vec<Seen> = prompts
+            .lock()
+            .unwrap()
+            .clone()
+            .into_iter()
+            .map(Seen::from)
+            .collect();
+        assert_eq!(seen.len(), 3, "两次工具轮 + 收尾轮：{seen:?}");
+
+        // 逐轮**只增不减**：请求 n 带得上前 n-1 轮的全部结果。
+        assert!(
+            seen[0].tools().is_empty(),
+            "第一次请求还没有任何结果：{:?}",
+            seen[0]
+        );
+        assert_eq!(
+            seen[1].tools(),
+            vec![("结果(a.md)", Some("vdfs_read"), Some("w-tc-1"))],
+            "第二次请求带第一次的调用与结果：{:?}",
+            seen[1]
+        );
+        assert_eq!(
+            seen[2].tools(),
+            vec![
+                ("结果(a.md)", Some("vdfs_read"), Some("w-tc-1")),
+                ("结果(b.md)", Some("vdfs_read"), Some("w-tc-2")),
+            ],
+            "第三次请求必须**仍然**带着第一次的结果——丢掉它等于让模型重新开局，\
+             它会再读一遍同一个文件：{:?}",
+            seen[2]
+        );
+        // 前一轮模型说过的话也在（不只是工具结果）：中途正文是回合内事实的一部分。
+        assert!(
+            seen[2].texts_of("assistant").contains(&"先读 a。"),
+            "第一轮的中途正文要留在第三次请求里：{:?}",
+            seen[2].texts_of("assistant")
+        );
+        // 每次调用**自己的** id（不是按工具名合成的同名 id）——两次调用两个 id，
+        // 结果各归各的调用。
+        let ids: Vec<String> = seen[2]
+            .msgs
+            .iter()
+            .filter_map(|m| m.tool_calls.clone())
+            .flatten()
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["w-tc-1".to_string(), "w-tc-2".to_string()],
+            "两次调用的声明按各自 id 出现，且不撞名：{ids:?}"
+        );
+
+        // 事实面：三个产物格 + 一个收束格，无兜底。
+        let snapshot = store.range(Seq::new(0));
+        let kinds: Vec<&str> = snapshot.iter().map(|e| e.kind.as_str()).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                EVENT_USER_MESSAGE,
+                EVENT_ARTIFACT_ADDED,
+                EVENT_ARTIFACT_ADDED,
+                EVENT_ASSISTANT_FINAL
+            ],
+            "两轮产物 + 一轮收束：{snapshot:?}"
+        );
+        // 每轮的中途产出挂在**该轮自己的产物格**上（顺序锚）。
+        //
+        // 这些思考本来就记在收束格的 `rounds[]` 里，内容一个字节都不少；挂在产物格上
+        // 争的是**位置**：重建按格的发射顺序发号，只挂收束格就让十几个思考块排到全部
+        // 工具卡片之后（实测症状见 `rebuild.test.rs` 的 `round_output_rides_…`）。
+        let arts: Vec<_> = snapshot
+            .iter()
+            .filter(|e| e.kind == EVENT_ARTIFACT_ADDED)
+            .collect();
+        assert_eq!(
+            arts[0].payload["round"]["reasoning_id"],
+            serde_json::json!("R-r0"),
+            "第一轮的思考挂在第一轮：{:#?}",
+            arts[0].payload
+        );
+        assert_eq!(
+            arts[1].payload["round"]["reasoning_id"],
+            serde_json::json!("R-r1"),
+            "第二轮的思考挂在第二轮（同一份载荷挪到别的轮即错位）"
+        );
+        assert_eq!(
+            arts[0].payload["round"]["text_id"],
+            serde_json::json!("T-r0"),
+            "中途正文与思考同格同轮，id 一起带上——重建照 id 复刻，不发新身份"
+        );
+        assert_eq!(
+            snapshot
+                .iter()
+                .find(|e| e.kind == EVENT_ASSISTANT_FINAL)
+                .expect("收束格在")
+                .payload["rounds"]
+                .as_array()
+                .map(|a| a.len()),
+            Some(2),
+            "收束格仍记全轮的中途产出（老会话只有这一份，删了就丢；同 id 只认首次，不双份）"
+        );
+        assert!(
+            check_all(&snapshot).is_empty(),
+            "{:?}",
+            check_all(&snapshot)
+        );
+    }
+
+    // ── 守卫：末轮**只有思考**不是失败 ──────────────────────────────────────
+    //
+    /// 第一个工具轮说话并请求工具；末轮**只有 reasoning、正文为空**——reasoning
+    /// 模型收束时的真实形状（它想清楚了，但没有把结论复述成 content）。
+    struct ReasoningOnlyFinalLlm {
+        prompts: Arc<Mutex<Vec<Vec<PromptMessage>>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmAdapter for ReasoningOnlyFinalLlm {
+        fn model_id(&self) -> &str {
+            "reasoning-only-mock"
+        }
+        async fn generate(
+            &self,
+            _tok: &FullModel,
+            _messages: &[PromptMessage],
+        ) -> Result<String, AdapterError> {
+            Err(AdapterError::GenerationFailed("unused".into()))
+        }
+        async fn generate_turn(
+            &self,
+            _tok: &FullModel,
+            messages: &[PromptMessage],
+            _tools: &[CapabilityMeta],
+            _sink: Arc<dyn DeltaSink>,
+        ) -> Result<LlmTurn, AdapterError> {
+            let round = {
+                let mut p = self.prompts.lock().unwrap();
+                p.push(messages.to_vec());
+                p.len()
+            };
+            Ok(if round == 1 {
+                LlmTurn {
+                    text: "先读一下。".into(),
+                    reasoning: String::new(),
+                    tool_calls: vec![TurnToolCallInfo {
+                        id: Some("tc-1".into()),
+                        wire_id: Some("w-tc-1".into()),
+                        name: Some("vdfs_read".into()),
+                        arguments: serde_json::json!({ "path": "a.md" }),
+                        parse_error: None,
+                        overflow_notice: None,
+                    }],
+                    cost_ms: 1,
+                    usage: None,
+                }
+            } else {
+                LlmTurn {
+                    text: String::new(),
+                    reasoning: "想清楚了：答案是 42。".into(),
+                    tool_calls: Vec::new(),
+                    cost_ms: 1,
+                    usage: None,
+                }
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn reasoning_only_final_round_closes_as_answer_not_fallback() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = ReasoningOnlyFinalLlm {
+            prompts: Arc::new(Mutex::new(Vec::new())),
+        };
+
+        let out = TurnRunner
+            .run_with_tools(
+                &store,
+                &llm,
+                &tok,
+                input(),
+                Arc::new(SilentDeltas),
+                &tools(),
+                Some(&PathEchoDispatch),
+            )
+            .await
+            .expect("末轮必答");
+
+        // 那句思考**就是回答**（v1 的 `effective_text` 同一语义），不是「没答」。
+        assert!(!out.fell_back, "只有思考的末轮是回答，不该判成失败");
+        assert_eq!(out.text, "想清楚了：答案是 42。");
+
+        let snapshot = store.range(Seq::new(0));
+        let last = snapshot.last().expect("有收束格");
+        assert_eq!(
+            last.kind, EVENT_ASSISTANT_FINAL,
+            "收束格而不是兜底格——落兜底格等于把「答了（以思考的形式）」记成「没答」"
+        );
+        assert_eq!(last.payload["text"], "想清楚了：答案是 42。");
+        assert_eq!(last.payload["status"], "completed");
+    }
+
+    #[tokio::test]
+    async fn final_round_with_neither_text_nor_reasoning_still_falls_back() {
+        /// 末轮两样都空的假适配器：那是**真失败**（模型确实什么也没产出）。
+        struct SilentFinalLlm {
+            prompts: Arc<Mutex<Vec<Vec<PromptMessage>>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmAdapter for SilentFinalLlm {
+            fn model_id(&self) -> &str {
+                "silent-mock"
+            }
+            async fn generate(
+                &self,
+                _tok: &FullModel,
+                _messages: &[PromptMessage],
+            ) -> Result<String, AdapterError> {
+                Err(AdapterError::GenerationFailed("unused".into()))
+            }
+            async fn generate_turn(
+                &self,
+                _tok: &FullModel,
+                messages: &[PromptMessage],
+                _tools: &[CapabilityMeta],
+                _sink: Arc<dyn DeltaSink>,
+            ) -> Result<LlmTurn, AdapterError> {
+                let round = {
+                    let mut p = self.prompts.lock().unwrap();
+                    p.push(messages.to_vec());
+                    p.len()
+                };
+                Ok(if round == 1 {
+                    LlmTurn {
+                        text: "先读一下。".into(),
+                        reasoning: String::new(),
+                        tool_calls: vec![TurnToolCallInfo {
+                            id: Some("tc-1".into()),
+                            wire_id: Some("w-tc-1".into()),
+                            name: Some("vdfs_read".into()),
+                            arguments: serde_json::json!({ "path": "a.md" }),
+                            parse_error: None,
+                            overflow_notice: None,
+                        }],
+                        cost_ms: 1,
+                        usage: None,
+                    }
+                } else {
+                    LlmTurn {
+                        text: String::new(),
+                        reasoning: String::new(),
+                        tool_calls: Vec::new(),
+                        cost_ms: 1,
+                        usage: None,
+                    }
+                })
+            }
+        }
+
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = SilentFinalLlm {
+            prompts: Arc::new(Mutex::new(Vec::new())),
+        };
+
+        let out = TurnRunner
+            .run_with_tools(
+                &store,
+                &llm,
+                &tok,
+                input(),
+                Arc::new(SilentDeltas),
+                &tools(),
+                Some(&PathEchoDispatch),
+            )
+            .await
+            .expect("失败也要有产出");
+
+        assert!(out.fell_back, "正文与思考**都**空才是没答");
+        let snapshot = store.range(Seq::new(0));
+        let last = snapshot.last().expect("有兜底格");
+        assert_eq!(last.kind, crate::symbio_core::EVENT_ASSISTANT_FALLBACK);
+        assert_eq!(last.payload["why"], "model returned empty text");
+        assert_eq!(last.payload["status"], "failed");
     }
 }
 

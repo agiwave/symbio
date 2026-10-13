@@ -911,6 +911,9 @@ impl TurnRunner {
         // 拍成散文会让模型把工具调用当成「自己说的话」、把结果当成无角色文本，且丢掉
         // `tool_call_id`（协议要求它配对）——所以这里是真消息，不是一段文本。
         let mut exchange: Vec<crate::symbio_core::PromptMessage> = Vec::new();
+        // 本回合内已走完的**工具轮数**——只用于给合成 id 编号（见 [`prompt_call_id`]）：
+        // 交换跨轮累加，id 的唯一性域随之从一次请求扩到整个回合。
+        let mut tool_round: usize = 0;
         // 实测耗时：跨轮累加（一次用户轮可能有多次 LLM 请求，ADR-044 的实测口径）。
         let mut cost_ms = 0u64;
         // 产物格的事件 id 需要在本轮内唯一（同一工具可被调用多次）。续写轮从**该轮
@@ -1012,13 +1015,30 @@ impl TurnRunner {
 
                     // 2a. 本轮不再请求工具 ⇒ 收束（落 final）。
                     if rt.tool_calls.is_empty() {
-                        if rt.text.trim().is_empty() {
-                            // 空文本 + 无工具调用 = 模型什么也没答。这是**失败**：
-                            // 落成 final 会把「没答」记成「答了空话」（I3 的到点必答
-                            // 要求有一句话，兜底话术承担它）。
+                        // 本轮的回答 = 正文，正文空则取**思考**（v1 的
+                        // `TurnOutput::effective_text` 同一语义）。
+                        //
+                        // ⚠️ 判据不能只看 `rt.text`：reasoning 模型常常「想清楚了但不
+                        // 复述」——末轮只有 `reasoning_content`、`content` 为空，那是
+                        // **一句回答**（思考即正文）而不是「没答」。此前这里读不到思考
+                        // （思考只经流式桥走另一条路），于是整轮被判失败、真答案连同全部
+                        // 思考落进兜底格，界面上表现为「一串连续思考，没有正文」。
+                        // 桥上那一份是第三选择：端口没带思考的适配器（默认实现只转正文）
+                        // 只能靠它。
+                        let answer = if !rt.text.trim().is_empty() {
+                            rt.text.clone()
+                        } else if !rt.reasoning.trim().is_empty() {
+                            rt.reasoning.clone()
+                        } else {
+                            round_facts.reasoning.clone().unwrap_or_default()
+                        };
+                        if answer.trim().is_empty() {
+                            // 正文与思考**都**空 + 无工具调用 = 模型什么也没答。这是
+                            // **失败**：落成 final 会把「没答」记成「答了空话」（I3 的
+                            // 到点必答要求有一句话，兜底话术承担它）。
                             let cost = started.elapsed().as_millis() as u64;
                             let produced = produced_payload(
-                                &rt.text,
+                                &answer,
                                 llm.model_id(),
                                 &turn_root_id,
                                 &round_facts,
@@ -1047,7 +1067,7 @@ impl TurnRunner {
                             );
                             return Ok(TurnOutcome {
                                 turn,
-                                text: rt.text,
+                                text: answer,
                                 cost_ms,
                                 usage: rt.usage,
                                 fell_back: false,
@@ -1057,7 +1077,7 @@ impl TurnRunner {
                             });
                         }
                         let produced = produced_payload(
-                            &rt.text,
+                            &answer,
                             llm.model_id(),
                             &turn_root_id,
                             &round_facts,
@@ -1079,7 +1099,7 @@ impl TurnRunner {
                         )?;
                         return Ok(TurnOutcome {
                             turn,
-                            text: rt.text,
+                            text: answer,
                             cost_ms,
                             usage: rt.usage,
                             fell_back: false,
@@ -1121,7 +1141,22 @@ impl TurnRunner {
                     // 2c. 产物落格：每条工具结果一格，溯源指向本轮用户格。
                     //     节点结构入格（与恢复路同形）：结果正文归这一格（一个事实一个
                     //     owner），收束 / 进展载荷的 `tool_calls` 只记 `result_id` 引用。
-                    for outcome in &outcomes {
+                    // 本轮的中途产出（思考 / 正文）**随这一轮第一格产物入格**。
+                    //
+                    // ⚠️ 判据是**顺序**，不是「有没有记」：这些节点本来就记在收束格的
+                    // `rounds[]` 里，一个字段都没少。但重建的顺序锚是**格的发射顺序**
+                    // （`seq` 由 `nodes_of` 统一发号），收束格排在全轮末尾 ⇒ 重开一次
+                    // 会话，中途思考就整体挪到全部工具卡片**之后**连成一串（实测会话
+                    // fixverify01：实时面是「思考→卡片→思考→卡片」，历史面是 13 个思考
+                    // 块排在 seq 29…43）。用户看到的「大模型连续的思考过程」是这条挪动，
+                    // 不是模型的行为。
+                    // 挂在产物格上 = 挂在这一轮发生的那个时刻；同一 id 只认首次出现的
+                    // 一份，收束格 `rounds[]` 里的那些重复因此被去重（不删它：老会话的
+                    // 收束格没有配套的产物格，删了就丢）。
+                    let round_nodes = rounds_payload(std::slice::from_ref(&round_facts))
+                        .pop()
+                        .unwrap_or_else(|| serde_json::json!({}));
+                    for (oi, outcome) in outcomes.iter().enumerate() {
                         store.append(
                             Event::pending(
                                 format!("a-{turn}-{artifact_no}"),
@@ -1147,6 +1182,9 @@ impl TurnRunner {
                                 "prompt": outcome.prompt,
                                 "failure_kind": outcome.failure_kind,
                                 "turn_id": turn_root_id,
+                                // 本轮中途产出：只随**第一格**带一次（同一轮多张卡片时
+                                // 思考只有一段，挂两处即两个 owner）。
+                                "round": (oi == 0).then(|| round_nodes.clone()),
                             })),
                         )?;
                         artifact_no += 1;
@@ -1202,12 +1240,20 @@ impl TurnRunner {
                         });
                     }
 
-                    // 2e. 把这一轮交换追加进 prompt，继续下一轮。
+                    // 2e. 把这一轮交换**累加**进 prompt，继续下一轮。
                     //     本轮（工具轮）的中途产出进 `rounds`——它不是末轮，收束载荷的
                     //     顶层字段留给末轮 / 中止 / 兜底那一轮，避免同一段正文记两遍。
+                    //
+                    //     ⚠️ 这里是累加而不是**替换**：本回合此前每一次调用与结果都必须
+                    //     留在下一次请求里（与本函数恢复路同一条不变量，见 932 行那段
+                    //     「模型必须看到『我请求了什么、拿到了什么』，否则会重复调用
+                    //     同一个工具」）。清掉交换等于让模型每轮重新开局——实测表现为
+                    //     同一份文件读四遍、待办在 5 项与 6 项之间反复重置，最后模型
+                    //     吐一轮空正文收进兜底格。
+                    //     唯一性代价由 id 承担（见 [`prompt_call_id`]），不由失忆承担。
                     rounds.push(round_facts);
-                    exchange.clear();
-                    exchange.extend(tool_exchange_messages(&rt, &outcomes));
+                    exchange.extend(tool_exchange_messages(&rt, &outcomes, tool_round));
+                    tool_round += 1;
 
                     // 2f. 轮内注入：调用方可能在这时候有新东西要加进下一次请求
                     // （生产里是「用户中途补充」）。core **只把消息接上**——它不
@@ -1604,16 +1650,18 @@ fn closure_granted(principal: &str) -> bool {
 /// **assistant 说的话**、把结果做成**没有角色的文本**、**丢掉 `tool_call_id`**
 /// （provider 侧协议要求 `tool` 消息关联到具体那次调用，否则多工具并发时无法配对）。
 ///
-/// ## `tool_call_id` 怎么来（**已定的合成，不是缺失**）
+/// ## `round` 参数的存在理由：这一批消息要**跨轮累加**
 ///
-/// 网格里的 `artifact.added` 只记了工具名与正文——**那才是事实**，没有调用 id
-/// （调用 id 是本次运行的句柄，不是跨轮事实）。所以这里按「工具名 + 本轮序号」
-/// 合成一个**稳定 id**（见 [`synthetic_call_id`]），而不是让消息裸奔：
-/// 裸奔会被「拒绝未知 tool_call_id」的 provider 整条拒绝，那**比拍平更糟**
-/// （拍平至少还能答）。
+/// 交换是**累加**进下一次请求的（见运行器 2e：模型必须看见本回合此前每一次调用与
+/// 结果，否则重复调用同一个工具）。于是 id 的唯一性域也从「一次请求」扩到「整个
+/// 回合」——同一工具在两个工具轮各调一次，若两侧的 id 相同，adapter 的 `last_result_of`
+/// 会把它当成**同一次调用的两条结果**而只留最后那条（第一次的结果凭空消失）。
+/// id 因此优先取调用自身带得的身份（wire id / 节点 id，二者天然跨轮唯一），
+/// 两者都缺才合成，且合成式里带上轮次（见 [`prompt_call_id`]）。
 fn tool_exchange_messages(
     turn: &crate::symbio_core::LlmTurn,
     outcomes: &[crate::symbio_core::DispatchOutcome],
+    round: usize,
 ) -> Vec<crate::symbio_core::PromptMessage> {
     let mut out: Vec<crate::symbio_core::PromptMessage> = Vec::new();
     if !turn.text.trim().is_empty() {
@@ -1636,7 +1684,7 @@ fn tool_exchange_messages(
     // 正文那行仍然保留：它是给人读的（诊断 / 日志 / 断言），不是给协议用的。
     for (i, call) in turn.tool_calls.iter().enumerate() {
         let name = call.name.as_deref().unwrap_or("<unnamed>");
-        let id = synthetic_call_id(name, i);
+        let id = prompt_call_id(call, round, i);
         out.push(crate::symbio_core::PromptMessage {
             role: "assistant".into(),
             text: format!("调用工具 {} {}", name, call.arguments),
@@ -1649,24 +1697,29 @@ fn tool_exchange_messages(
             }]),
         });
     }
-    // 结果：逐条 tool 消息，带上**对应那次调用**的合成 id。
+    // 结果：逐条 tool 消息，**按调用配对**取 id（不是按工具名）。
     //
-    // 按工具名配对（`DispatchOutcome` 不带调用 id，见其文档：core 不认识
-    // `ChatMessage` 的图语义）。同名多次调用时退化为「都关联第一条」——
-    // 记在 TODO 里而不是假装能配准：**配不准时多给信息好过给错的关联**，
-    // 而当前的 `artifact.added` 事实里确实没有足以配准的信息。
+    // ⚠️ 为什么不能按名字配：同一次响应里调用同一个工具两次时，按名配对会把**两条结果
+    // 都挂到第一次调用**的 id 上。而 adapter 侧 `last_result_of` 按 id 取「同一次调用的
+    // 最终那条结果」——两条同 id 的结果在模型眼里就是一次调用的两条，第一次的真实
+    // 结果被吃掉，第二次拿到别人的正文。**结果与调用错配比缺一结果更坏**：模型据此
+    // 改道，而它改的是凭据不足的道。
+    //
+    // 配不上调用时（无对照物）退回结果自己的 `call_id`：它在本次请求里没有对应的
+    // 调用声明，adapter 会把它降级成上下文（`declared_here` 为假那条路）。
     for outcome in outcomes {
-        let same_named = turn
+        let at = turn
             .tool_calls
             .iter()
-            .position(|c| c.name.as_deref() == Some(outcome.name.as_str()));
+            .position(|c| outcome_of(outcomes, c).is_some_and(|o| o.call_id == outcome.call_id));
+        let id = match at {
+            Some(i) => prompt_call_id(&turn.tool_calls[i], round, i),
+            None => outcome.call_id.clone(),
+        };
         out.push(crate::symbio_core::PromptMessage {
             role: "tool".into(),
             text: outcome.text.clone(),
-            tool_call_id: Some(synthetic_call_id(
-                &outcome.name,
-                same_named.unwrap_or(usize::MAX),
-            )),
+            tool_call_id: Some(id),
             tool: Some(outcome.name.clone()),
             tool_calls: None,
         });
@@ -1681,7 +1734,9 @@ fn exchange_messages(
     text: &str,
 ) -> Vec<crate::symbio_core::PromptMessage> {
     let name = call.name.as_deref().unwrap_or("<unnamed>");
-    let id = synthetic_call_id(name, 0);
+    // 恢复交换只有这一次调用 ⇒ 轮次记 0（id 仍优先取调用自带的身份，见
+    // [`prompt_call_id`]）：恢复的调用与本轮其它调用共属同一次请求，撞名即错配。
+    let id = prompt_call_id(call, 0, 0);
     vec![
         crate::symbio_core::PromptMessage {
             role: "assistant".into(),
@@ -1704,12 +1759,34 @@ fn exchange_messages(
     ]
 }
 
-/// 合成的 `tool_call_id`：`call_<tool>_<序号>`。
+/// 合成 / 选取 `tool_call_id`（跨轮唯一，见 [`tool_exchange_messages`] 的 `round`）。
+///
+/// 优先级与 v1 的请求构建**同一口径**（`plugins/model/message_builder.rs`：wire id
+/// 优先、历史数据回退节点 id）：
+/// 1. `wire_id`——provider 自己签发的 `tool_call_id`，模型认得它，跨轮天然唯一；
+/// 2. `id`——节点 id（会话内唯一），provider 没给 wire id 时的对照物；
+/// 3. 合成 `call_<tool>_<轮>_<序号>`——两者都缺（桩 / 老数据）时兜底，
+///    **带轮次**是为了跨轮累加后不与任何一次调用撞名。
 ///
 /// 前缀 `call_` 是**故意的**：它让 id 一眼可辨是合成的（provider 侧回填时若
 /// 与真实调用 id 空间混淆，冲突能被看见而不是静默）。
-fn synthetic_call_id(tool: &str, index: usize) -> String {
-    format!("call_{tool}_{index}")
+fn prompt_call_id(
+    call: &crate::symbio_core::TurnToolCallInfo,
+    round: usize,
+    index: usize,
+) -> String {
+    fn present(id: &Option<String>) -> Option<String> {
+        id.clone().filter(|s| !s.trim().is_empty())
+    }
+    present(&call.wire_id)
+        .or_else(|| present(&call.id))
+        .unwrap_or_else(|| {
+            synthetic_call_id(call.name.as_deref().unwrap_or("<unnamed>"), round, index)
+        })
+}
+
+fn synthetic_call_id(tool: &str, round: usize, index: usize) -> String {
+    format!("call_{tool}_{round}_{index}")
 }
 
 #[cfg(test)]

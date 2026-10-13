@@ -12,9 +12,14 @@
 //!
 //! | 帧里有什么 | 渲染动作 |
 //! | --- | --- |
-//! | `delta` | 身份/状态合并进本地快照；正文累加并**直接输出**（流式热路径，O(delta)） |
-//! | `content` | 整条替换本地快照；只把**比已输出更长的尾部**打出来（重写无法回收，留痕） |
+//! | `delta` | 身份/状态合并进本地快照；正文累加，**未打印过的那一段**输出（流式热路径，O(delta)） |
+//! | `content` | 整条替换本地快照；同样只打「未打印过的那一段」——正文被改写时终端已输出的部分收不回来，留痕而不是假装没发生过 |
 //! | `status = removed` | 删掉本地快照（工具恢复会先删旧子节点再重建） |
+//!
+//! 「未打印过的那一段」按**每节点已打印长度**算，不按快照长度算：一段内容可能先以
+//! `Reasoning` 形态到达（思考不进 stdout），收束时被定为正文（同 id 换类型，见
+//! `session/chat_loop/state.rs` 的 `finalize_assistant_turn`）——按快照长度它就不是
+//! 新增，那段回答于是永远打不出来。
 //!
 //! ## 为什么仍然要维护一份本地快照
 //!
@@ -46,6 +51,8 @@ pub struct Renderer {
     verbose: bool,
     /// 本轮已合并的消息快照（id → 完整消息），用于算「还没打印过的那一段」
     msgs: HashMap<String, ChatMessage>,
+    /// 每个节点**已打印到 stdout** 的字符数（正文尾巴的依据，见 [`Self::on_message`]）
+    printed: HashMap<String, usize>,
     /// 已播报过的工具调用 id
     tools_announced: HashSet<String>,
     /// 已播报过失败原因的消息 id
@@ -60,6 +67,7 @@ impl Renderer {
             quiet,
             verbose,
             msgs: HashMap::new(),
+            printed: HashMap::new(),
             tools_announced: HashSet::new(),
             failures_announced: HashSet::new(),
             wrote_text: false,
@@ -69,6 +77,7 @@ impl Renderer {
     /// 开始新一轮：丢弃上一轮的快照（快照只在单轮内做增量合并）。
     pub fn begin_turn(&mut self) {
         self.msgs.clear();
+        self.printed.clear();
         self.tools_announced.clear();
         self.failures_announced.clear();
         self.wrote_text = false;
@@ -167,7 +176,26 @@ impl Renderer {
             )
         };
 
-        self.render(&message.id, mtype, role, delta, name);
+        // 正文回显的依据：**还没打印过的那一段**，而不是「本帧新到达的增量」。
+        // 一段内容可能先以**思考**形态到达（思考不进 stdout），收束时被定为正文
+        // （同一个节点 id 换类型）——按增量算它是「无新增」，于是永远打不出来：
+        // reasoning 模型「只思考不作答」的那一轮，CLI 什么都不输出还以失败退出，
+        // 而模型明明答了（落库与网格重建里那段就是正文）。
+        let tail = if mtype == MessageType::Text {
+            self.msgs
+                .get(&message.id)
+                .and_then(|m| m.content.as_ref())
+                .map(MessageContent::to_text)
+                .unwrap_or_default()
+                .chars()
+                .skip(self.printed.get(&message.id).copied().unwrap_or(0))
+                .collect::<String>()
+        } else {
+            delta.clone()
+        };
+        if self.render(&message.id, mtype, role, &delta, &tail, name) {
+            *self.printed.entry(message.id.clone()).or_insert(0) += tail.chars().count();
+        }
         if let Some(next) = rewritten_to {
             self.warn(&format!(
                 "⚠ 正文被重写（{} 字符），终端已输出的部分无法回收",
@@ -186,9 +214,10 @@ impl Renderer {
         id: &str,
         mtype: MessageType,
         role: Option<MessageRole>,
-        delta: String,
+        delta: &str,
+        tail: &str,
         name: Option<String>,
-    ) {
+    ) -> bool {
         match mtype {
             MessageType::Text => {
                 // 只回显模型正文：用户消息由 CLI 自己输出，工具结果文本不回显
@@ -197,14 +226,22 @@ impl Renderer {
                     role,
                     Some(MessageRole::User) | Some(MessageRole::Tool) | Some(MessageRole::System)
                 );
-                if !suppress && !delta.is_empty() {
-                    write_stdout(&delta);
-                    self.wrote_text = true;
+                if suppress {
+                    return false;
                 }
+                // 打印的是 `tail`（未打印过的正文尾巴），`delta` 在这里用不上：
+                // 增量早已并进快照，尾巴从快照算起——两者对流式正文逐字相同。
+                if !tail.is_empty() {
+                    write_stdout(tail);
+                    self.wrote_text = true;
+                    return true;
+                }
+                false
             }
             MessageType::Reasoning if self.verbose && !delta.is_empty() && !self.quiet => {
                 // 推理内容走 stderr，避免污染 stdout 的正文流
                 write_stderr(&format!("\x1b[2m{delta}\x1b[0m"));
+                false
             }
             MessageType::ToolCall if self.tools_announced.insert(id.to_string()) => {
                 let name = name.unwrap_or_else(|| "tool".to_string());
@@ -215,9 +252,10 @@ impl Renderer {
                     }
                     write_stderr(&format!("⚙ 调用工具: {name} …"));
                 }
+                false
             }
             // Turn（组合节点）/ UserPrompt（需审批的交互卡）：无正文可渲染。
-            _ => {}
+            _ => false,
         }
     }
 

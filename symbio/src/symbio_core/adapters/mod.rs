@@ -196,6 +196,17 @@ impl std::fmt::Display for AdapterError {
 pub struct LlmTurn {
     /// 本轮正文。纯工具调用轮为空——「没说话」与「没答」是两件事（后者是失败）。
     pub text: String,
+    /// 本轮**推理**（`reasoning_content` 累积，与 [`Self::text`] 同属这一次响应）。
+    ///
+    /// 为什么必须带到端口面上：判「本轮是不是答了」的那一处只看得到 `text`，而
+    /// reasoning 模型常常**只有思考没有正文**就把话说完（v1 早为此立了
+    /// `TurnOutput::is_reasoning_only / effective_text`）。思考只经流式桥走另一条路，
+    /// 端口返回体里没有它 ⇒ 判据把「想清楚了但没复述」读成「什么也没答」⇒ 整轮
+    /// 落兜底格，实测表现为界面上只剩一串连续思考、既无正文也无解释。
+    ///
+    /// 缺省空串：provider 不一定给（协议不给 / 最小适配器只转文本）。**空是正常的**，
+    /// 但判据不得把「text 空」直接读成「无产出」——两样都空才是无产出。
+    pub reasoning: String,
     /// 模型**请求**的工具调用（尚未执行）；空 = 本轮收束（落 final）。
     pub tool_calls: Vec<TurnToolCallInfo>,
     /// adapter 边界实测耗时（毫秒）——与 [`LlmAdapter::generate_timed`] 同一口径。
@@ -330,6 +341,9 @@ pub trait LlmAdapter: Send + Sync {
         let (text, cost_ms) = self.generate_streaming(tok, messages, sink).await?;
         Ok(LlmTurn {
             text,
+            // 默认实现经 `generate_streaming`——那条只转正文，推理对它不可见。
+            // 空串是**如实**：这一层没有思考可带，不是把思考弄丢了。
+            reasoning: String::new(),
             tool_calls: Vec::new(),
             cost_ms,
             usage: None,

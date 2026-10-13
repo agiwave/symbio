@@ -14,8 +14,8 @@ use super::rebuild;
 use crate::symbio_core::chat_message::{MessageContent, MessageRole, MessageStatus, MessageType};
 use crate::symbio_core::{Entity, Event, Verb};
 use crate::symbio_core::{
-    EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_REPORTED, EVENT_TURN_SUPPLEMENTED,
-    EVENT_USER_MESSAGE,
+    EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
+    EVENT_ASSISTANT_REPORTED, EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
 
 /// 一条事件的**可断言摘要**——`ChatMessage` 没有 `PartialEq`（它是增量帧的形状，
@@ -155,8 +155,133 @@ fn reasoning_only_does_not_duplicate_the_paragraph() {
     assert_eq!(got[2].ty, Some(MessageType::Text));
 }
 
-// ── ② 工具卡：调用与结果是两张卡，结果挂在调用下 ────────────────────────
+/// 兜底格的 `why`（失败原因）必须折回 Turn 节点的 `error`。
+///
+/// 存在的理由是一条实测事故：一轮跑了 18 个工具轮后模型吐了空正文，整轮落兜底格，
+/// 重建把 `rounds[]` 的 18 段思考摊成子节点，却**没人把「为什么失败」带出来**——
+/// 界面上是「一串连续思考，然后什么都没有」，与「模型什么也没说」无法区分。
+/// 失败原因是网格里的事实（`payload.why`），它就该到界面（组级交代条读节点 `error`）。
+#[test]
+fn fallback_carries_the_failure_reason_onto_the_turn_node() {
+    let events = vec![
+        user_event("u-node", "问"),
+        Event::pending(
+            "fb-1",
+            EVENT_ASSISTANT_FALLBACK,
+            Entity::Turn,
+            Verb::Closed,
+            1,
+            "agent:main",
+        )
+        .with_ts(2_000)
+        .with_payload(serde_json::json!({
+            "text": "",
+            "model": "m",
+            "turn_id": "T1",
+            "text_id": null,
+            "reasoning_id": null,
+            "reasoning": null,
+            "tool_calls": [],
+            "rounds": [
+                { "text_id": null, "text": null, "reasoning_id": "R0", "reasoning": "第一轮在想" },
+                { "text_id": null, "text": null, "reasoning_id": "R1", "reasoning": "第二轮在想" },
+            ],
+            "status": "failed",
+            "why": "model returned empty text",
+        })),
+    ];
 
+    let got = rebuild(&events);
+    let turn = got
+        .iter()
+        .find(|m| m.id == "T1")
+        .expect("Turn 根在重建结果里");
+    assert_eq!(turn.msg_type, Some(MessageType::Turn));
+    assert_eq!(turn.status, Some(MessageStatus::Failed));
+    assert_eq!(
+        turn.error.as_deref(),
+        Some("model returned empty text"),
+        "失败原因进节点 error——否则交代条只有一句话都没有"
+    );
+
+    let shapes = shapes(&got);
+    let reasoning: Vec<&Shape> = shapes
+        .iter()
+        .filter(|s| s.ty == Some(MessageType::Reasoning))
+        .collect();
+    assert_eq!(reasoning.len(), 2, "两轮中途思考各一个节点：{shapes:?}");
+    assert!(
+        !shapes
+            .iter()
+            .any(|s| s.ty == Some(MessageType::Text) && s.id != "u-node"),
+        "空正文不该长出正文节点：{shapes:?}"
+    );
+}
+
+/// 一轮的中途产出**随该轮的产物格入格**，于是重建把它排在自己的工具卡片之前。
+///
+/// 判据是**位置**而不是存在：这些思考本来就记在收束格的 `rounds[]` 里，一个字段都不少。
+/// 但重建的顺序锚是格的发射顺序，收束格排在全轮末尾 ⇒ 历史面上十几个思考块连排在
+/// **所有工具卡片之后**（实测会话 fixverify01：实时面是「思考→卡片→思考→卡片」，
+/// 重开一次就变成用户报的「大模型连续的思考过程」）。同 id 只认首次出现的那一份 ⇒
+/// 产物格先建，收束格 `rounds[]` 里的那份副本不再建第二张卡。
+#[test]
+fn round_output_rides_the_artifact_cell_and_lands_before_its_tool_card() {
+    let round = serde_json::json!({
+        "text_id": null, "text": null, "reasoning_id": "R0", "reasoning": "先读 a.md 再说",
+    });
+    let artifact = |no: u64, call: &str, res: &str, path: &str, body: &str, round: _| {
+        Event::pending(
+            format!("a-1-{no}"),
+            EVENT_ARTIFACT_ADDED,
+            Entity::Artifact,
+            Verb::Asserted,
+            1,
+            "agent:main",
+        )
+        .with_ts(1_500)
+        .with_payload(serde_json::json!({
+            "tool": "read", "text": body, "tool_call_id": call, "wire_id": call,
+            "args": format!("{{\"path\":\"{path}\"}}"), "result_id": res,
+            "success": true, "turn_id": "T1", "round": round,
+        }))
+    };
+    let events = vec![
+        user_event("u-node", "读两个文件"),
+        artifact(0, "c0", "r0", "a.md", "a 的内容", round.clone()),
+        artifact(1, "c1", "r1", "b.md", "b 的内容", serde_json::Value::Null),
+        final_event(serde_json::json!({
+            "text": "都读完了", "model": "m", "turn_id": "T1", "text_id": "T1-text",
+            "reasoning_id": null, "reasoning": null, "tool_calls": [],
+            "rounds": [round], "status": "completed",
+        })),
+    ];
+
+    let got = shapes(&rebuild(&events));
+    let at = |id: &str| got.iter().position(|s| s.id == id);
+    let reasoning = at("R0").expect("中途思考随产物格建出节点");
+    let card = at("c0").expect("工具卡在");
+    assert!(
+        reasoning < card,
+        "思考排在它那一轮的工具卡之前（实测它被收束格挪到全轮末尾）：{got:?}"
+    );
+    assert_eq!(
+        got.iter().filter(|s| s.id == "R0").count(),
+        1,
+        "收束格 `rounds[]` 的同 id 副本不建第二份"
+    );
+    assert_eq!(got[reasoning].parent, Some("T1".into()));
+    assert_eq!(got[reasoning].ty, Some(MessageType::Reasoning));
+    // 第二格没有 `round`（同一轮只挂第一格）⇒ 一个节点都不多发。
+    let c1 = at("c1").expect("第二张卡在");
+    assert_eq!(
+        at("r1").expect("第二条结果在"),
+        c1 + 1,
+        "第二格只建调用与结果两张卡"
+    );
+}
+
+// ── ② 工具卡：调用与结果是两张卡，结果挂在调用下 ────────────────────────
 #[test]
 fn artifact_builds_call_and_result_under_the_call() {
     let events = vec![
