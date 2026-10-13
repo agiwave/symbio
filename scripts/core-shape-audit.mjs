@@ -9,9 +9,12 @@
  * | 编号 | 格 | 判什么 | 它拦的是哪一种膨胀 |
  * |---|---|---|---|
  * | CS-001 | `traits` | `pub trait` 声明数（冻结 20） | **新增接缝**：每多一个抽象，就多一处「所有实现方都得知道」的地方 |
- * | CS-001 | `methods` | 这些 trait 的 `fn` 成员总数（冻结 72） | **契约变宽**：既有接缝上挂新方法，影响面 = 全部实现方 |
- * | CS-001 | `defaults` | 其中**带默认体**的成员数（冻结 24） | **接口上长实现**：行为代码住进架构模块 |
+ * | CS-001 | `methods` | 这些 trait 的 `fn` 成员总数（冻结 73） | **契约变宽**：既有接缝上挂新方法，影响面 = 全部实现方 |
+ * | CS-001 | `defaults` | 其中**带默认体**的成员数（冻结 25） | **接口上长实现**：行为代码住进架构模块 |
  * | CS-002 | —— | 放宽上面任何一个数字，必须写 `core-shape-allow <格>: ADR-NNN <非空理由>`，且那个 ADR 文件在 `docs/adr/` **能打开** | **改一个数字**看起来像维护，而它实际是在改架构 |
+ *
+ * 表里的冻结值是**现值**，owner 是本文件的 `SHAPE_BASELINE`（下面那一行）；放宽一格
+ * 必须按 CS-002 在它旁边留一条 `core-shape-allow`，并有一条能打开的 ADR 论证「必需」。
  *
  * ## 为什么需要它（2026-10-12 的实测缺口）
  *
@@ -107,12 +110,14 @@ const SELF_REL = 'scripts/core-shape-audit.mjs'
  * ⚠️ 键序就是 `CORE_SHAPE_BASELINE` 的位置口径（`35-baseline` 的 env 覆盖判定按它 zip），
  * 也必须是 `35-baseline` 那条提取函数认的键名；任何一边单改都会红。
  */
+// core-shape-allow methods: ADR-062 —— WalStore 唯一写入口对事件类型是泛型的（Store::Event: EventEnvelope），泛型触达信封自身 ts 的唯一通道就是 trait 成员（与 assign_seq 同纪律），下沉回十余处构造点即 ADR-062 明确否决的方案
+// core-shape-allow defaults: ADR-062 —— 无时刻概念的信封须「保持原样」，默认 no-op 体就是它的平凡值（README §3 的 J2）；去掉默认体反而让每个实现方手写同一个空函数，公共面更宽
 const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
   ? (() => {
       const [traits, methods, defaults] = process.env.CORE_SHAPE_BASELINE.split(':').map((n) => Number(n))
       return { traits, methods, defaults }
     })()
-  : { traits: 20, methods: 72, defaults: 24 }
+  : { traits: 20, methods: 73, defaults: 25 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',
