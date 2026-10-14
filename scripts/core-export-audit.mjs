@@ -85,6 +85,7 @@ import { red, yellow, green, dim } from './color.mjs'
 import {
   collectCoreSurface,
   collectConsumers,
+  collectCoreBindings,
   collectCoreDomainConsumers,
   isSelfReference,
   isSinkCandidate,
@@ -162,9 +163,16 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
  *   纪律），`Reasoner` 退出单消费方清单；`SOURCE_PRINCIPAL` 作为线上协议键登记豁免
  *   （跨进程契约，不可下沉，见账本）。
  *
+ * - **同域实现批**（2026-10-14）降一格 57 → 56：`collectCoreBindings` 补上「core 内
+ *   `impl <Trait> for …`」这一类耦合（原先被口径 3 的「声明域自身不算」全部滤掉）。
+ *   `LlmAdapter` / `DeltaSink` 的实现方就在它们自己的声明域 `adapters` 里
+ *   （`ProviderLlmAdapter`、`SilentDeltas`…），于是被判成「单消费方接缝、该下沉」——
+ *   而下沉的前提「B 只被 A 依赖」在这里**不成立**，那会是真·依赖反转。这两条不是被清偿的
+ *   存量，是**判错**；降这一格是因为判据修好后它们本就不该出现在清单里。
+ *
  * 存量的处置判据仍是 README §4 四问（下沉 / 成文契约 / 登记豁免），处置一个就把这里
- * 降一格。**注意**：本格只数「既没跨 core 第二个模块用、又不是自引用」的单消费方；
- * 一个符号在 `--verbose` 的 `[ 1]` 里出现即代表它仍待处置。
+ * 降一格。**注意**：本格只数「既没跨 core 第二个模块用、又不是自引用、core 内也没
+ * 实现它」的单消费方；一个符号在 `--verbose` 的 `[ 1]` 里出现即代表它仍待处置。
  */
 
 const BASELINE = process.env.CORE_EXPORT_BASELINE
@@ -172,7 +180,7 @@ const BASELINE = process.env.CORE_EXPORT_BASELINE
       const [zero, one] = process.env.CORE_EXPORT_BASELINE.split(':').map((n) => Number(n))
       return { zero, one }
     })()
-  : { zero: 0, one: 57 }
+  : { zero: 0, one: 56 }
 
 
 
@@ -267,6 +275,8 @@ const consumersAll = collectConsumers(ROOT, symbols, CORE_REL, { includeTests: t
 // 的 collectCoreDomainConsumers）。一个符号若有第二个 core 生产消费模块，下沉到那唯一的
 // 外部消费方（插件）当场编译不过 ⇒ 它本来就该留根出口，不是「单消费方接缝」。
 const coreConsumers = collectCoreDomainConsumers(ROOT, symbols, CORE_REL)
+// core 内 `impl <Trait> for …` ⇒ trait 被绑在 core 类型上，下沉会依赖反转（见 core-surface.mjs）
+const coreBound = collectCoreBindings(ROOT, symbols, CORE_REL)
 const byName = (a, b) => a.domain.localeCompare(b.domain) || a.name.localeCompare(b.name)
 const rows = [...symbols.keys()]
   .map((name) => ({
@@ -303,7 +313,7 @@ const zero = rows.filter((r) => r.unitsAll.length === 0 && !waivedNow.has(r.name
 // 「只有测试在用」单列一档：它是**合法的根出口**，但也不是架构元素——既不收窄、不下沉。
 const testOnly = rows.filter((r) => r.units.length === 0 && r.unitsAll.length > 0)
 // 「该不该下沉」按**不含测试**的口径：测试依赖的是被测对象，不是长期接口。
-const one = rows.filter((r) => isSinkCandidate(r, coreConsumers) && !waivedNow.has(r.name))
+const one = rows.filter((r) => isSinkCandidate(r, coreConsumers, coreBound) && !waivedNow.has(r.name))
 const many = rows.filter((r) => r.units.length >= 2)
 
 if (zero.length > BASELINE.zero) {

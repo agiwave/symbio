@@ -337,9 +337,15 @@ export function collectCoreDomainConsumers(root, symbols, coreRel = 'symbio/src/
  * 跨 core 的**生产**消费方恰 1 个，**且 core 内没有另一个模块**在用，**且**不是自引用。
  * 三条任一不成立都不算下放候选——见 `collectCoreDomainConsumers` 的口径说明。
  */
-export function isSinkCandidate(row, coreConsumers) {
+export function isSinkCandidate(row, coreConsumers, coreBound) {
   if (row.units.length !== 1) return false
   if ((coreConsumers.get(row.name)?.size ?? 0) > 0) return false
+  // core 内有 `impl <Trait> for …` ⇒ trait 被绑在 core 提供的类型上。下沉会让 core
+  // 反向依赖插件（依赖反转），所以「B 只被 A 依赖」这个**前提不成立**，它不是接缝。
+  //
+  // 单独否决、**绝不进计数**：进计数的话，每个 trait 都能用自己域内的实现凑出恰好
+  // 1 个单位而恒真放行——那不是守卫，是装饰。
+  if (coreBound?.has?.(row.name)) return false
   return !isSelfReference({ name: row.name, units: row.units })
 }
 
@@ -350,6 +356,56 @@ export function isSinkCandidate(row, coreConsumers) {
  */
 export function isTestFile(file) {
   return file.endsWith('.test.rs') || path.basename(file) === 'tests.rs'
+}
+
+/**
+ * 数出**被 core 自己实现**的符号（`impl <Trait> for …`，且 `<Trait>` 在 **trait 位置**）。
+ *
+ * ## 它与 `collectCoreDomainConsumers` 的分工
+ *
+ * 那个函数回答「**另一个** core 模块是否在**用**它」——同域命中按口径 3 滤掉。
+ * 本函数回答另一件事：「core 是否**实现**了它」。trait 的实现方通常就住在它自己
+ * 的声明域里（`LlmAdapter` 声明在 `adapters`，`ProviderLlmAdapter` 的实现也在
+ * `adapters`），所以那一问永远问不到它，C-003 于是把它判成「单消费方接缝」。
+ *
+ * ## 为什么要卡 trait 位置
+ *
+ * `impl<Foo: LlmAdapter> Bar for X` 里 `LlmAdapter` 是**泛型约束**，不是 trait 位置。
+ * 把它算成绑定就是**无意的假依赖**——凭空让一条真接缝免于下沉。所以：取 `impl` 与
+ * `for` 之间的片段，剥掉所有尖括号块（泛型参数与实参都剥），**紧邻 `for` 的那个
+ * 标识符**才是 trait。
+ *
+ * 与两处口径一致：**跳过测试文件**、**先剥注释**（注释里写 `impl LlmAdapter for`
+ * 不构成绑定——而且注释本来就是判据最容易骗过的地方）。
+ *
+ * @returns `Set<符号名>`：被 core 实现过的符号。**不是消费方单位**，只作否决用。
+ */
+export function collectCoreBindings(root, symbols, coreRel = 'symbio/src/symbio_core') {
+  const coreDir = path.join(root, coreRel)
+  const bound = new Set()
+  /** 取 `impl` 与 `for` 之间、剥掉尖括号块后紧邻 `for` 的那个标识符 */
+  const traitOf = (head) => {
+    let depth = 0
+    let kept = ''
+    for (const ch of head) {
+      if (ch === '<') { depth++; continue }
+      if (ch === '>') { if (depth > 0) depth--; continue }
+      if (depth === 0) kept += ch
+    }
+    const parts = kept.trim().split(/\s+/).filter(Boolean)
+    const last = parts[parts.length - 1]
+    return last ? last.split('::').filter(Boolean).pop() : null
+  }
+  for (const file of walk(coreDir)) {
+    if (!file.endsWith('.rs')) continue
+    if (isTestFile(file)) continue
+    const src = stripComments(fs.readFileSync(file, 'utf8'))
+    for (const m of src.matchAll(/\bimpl\b([\s\S]{0,160}?)\bfor\b/g)) {
+      const name = traitOf(m[1])
+      if (name && symbols.has(name)) bound.add(name)
+    }
+  }
+  return bound
 }
 
 /**

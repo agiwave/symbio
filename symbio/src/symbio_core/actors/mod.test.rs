@@ -215,7 +215,7 @@ fn two_finals_are_caught_by_n3() {
 // 这里用 ⑤ adapters 的确定性桩（StubLlmAdapter）代替真实模型——闭环形状与
 // 真实接线完全一致，只换适配器。
 
-use crate::symbio_core::adapters::{LatencyTier, StubLlmAdapter, TokenIssuer};
+use crate::symbio_core::adapters::{LatencyTier, LlmAdapter as _, StubLlmAdapter, TokenIssuer};
 use crate::symbio_core::invariants::{budget_exceeded, unresolved_turns};
 use std::time::Instant;
 
@@ -243,7 +243,7 @@ async fn rehearse_reasoner_turn(
         .expect("用户消息必入库");
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     let started = Instant::now();
-    let outcome = Reasoner.reply(llm, &tok, &snapshot).await;
+    let outcome = llm.generate(&tok, &render_messages(&snapshot)).await;
     let cost_ms = started.elapsed().as_millis() as u64;
     match outcome {
         Ok(reply) => {
@@ -323,8 +323,8 @@ async fn reasoner_reply_reads_the_user_message_from_events() {
         .expect("用户消息必入库");
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     let llm = StubLlmAdapter::succeed("stub-model");
-    let reply = Reasoner
-        .reply(&llm, &TokenIssuer::issue_deep(), &snapshot)
+    let reply = llm
+        .generate(&TokenIssuer::issue_deep(), &render_messages(&snapshot))
         .await
         .expect("成功桩必答");
     assert!(

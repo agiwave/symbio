@@ -111,7 +111,7 @@ pub use view::Budget;
 // （C-002 禁止插件深引域目录）。它只有 1 个生产消费方（`plugins/session`），属 C-003
 // 的「接缝」而非「该下沉」——下沉即等于把 F3 冻结契约搬出 core，故登记进
 // `core-export-audit.mjs` 的 `WAIVERS`（与 `PermissionMatrix` / `VisScope` 同一形态）。
-pub use actors::{ActorSpec, Pattern, Reasoner};
+pub use actors::{ActorSpec, Pattern};
 // 外部执行闸门（S8 第 20 步）、插话抢占判定（S8 第 19 步）、自主发起 + 意图闸门
 // （S9 第 21 步）与技能编译 + 路由（S9 第 22 步）：判定在 core、接线在
 // `plugins/session`（闸门进工具执行闸，判定者进收件箱忙窗，自主侧进心跳 tick，
@@ -198,7 +198,7 @@ pub use adapters::{
 // 锚点，另以根 `pub use` 出，见上。）
 pub(crate) use adapters::{AdapterError, FullModel, RuleOnly};
 // 空增量口 `SilentDeltas` 的**根出口**只剩测试在用：生产侧 `v2_exec` 自带 `SilentDeltaSink`
-// （见其注释），core 内 `Reasoner::reply_timed` 走 `adapters::` 域内路径 ⇒ 同 `StubLlmAdapter`
+// （见其注释），core 内生成路径走 `adapters::` 域内路径 ⇒ 同 `StubLlmAdapter`
 // 一形态，只在 `cfg(test)` 出根（下沉后的 `turn_runner.test.rs` 是唯一根出口消费者）。
 #[cfg(test)]
 pub(crate) use adapters::SilentDeltas;

@@ -21,10 +21,26 @@ use crate::plugins::model::model_providers::ModelProviderConfig;
 use crate::plugins::model::protocols::openai_chat::OpenaiChatProtocol;
 use crate::symbio_core::ProviderLlmAdapter;
 use crate::symbio_core::{
-    check_all, cost_ledger, turnstate, Budget, Entity, Event, EventStore, PromptMessage, Reasoner,
-    Seq, Store, Verb, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
+    check_all, cost_ledger, render_messages, turnstate, Budget, Entity, Event, EventStore,
+    PromptMessage, Seq, Store, Verb, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 use crate::symbio_core::{LlmAdapter as _, TokenIssuer};
+
+/// 走**生产同一条路径**：事件切片 → `render_messages` → `generate_timed`。
+///
+/// 此前这里调 `Reasoner::reply_timed`——那条链已无生产调用方（生成路径下沉进
+/// `TurnRunner`），只被本文件撑着。删掉主体后测试直调端口：**覆盖面不变**，
+/// 断言（真实 SSE 聚合文本 / 实测耗时为正 / final 落事件后不变量全绿）一字未改。
+async fn generate_via_port(
+    adapter: &ProviderLlmAdapter,
+    tok: &crate::symbio_core::FullModel,
+    snapshot: &[Event],
+) -> (String, u64) {
+    adapter
+        .generate_timed(tok, &render_messages(snapshot))
+        .await
+        .expect("真实传输层必答")
+}
 
 /// 一次性 OpenAI-SSE mock：收一个请求、回一段流、把收到的原始请求存档。
 fn spawn_mock(response: &'static str) -> (u16, Arc<Mutex<String>>) {
@@ -367,11 +383,8 @@ async fn provider_adapter_drives_full_chain_over_real_http() {
         )
         .unwrap();
     let snapshot = store.range(Seq::new(0));
-    // 埋点路径：reply_timed 返回 adapter 边界实测耗时（SLO 校准的数据来源）。
-    let (reply, cost_ms) = Reasoner
-        .reply_timed(&adapter, &tok, &snapshot)
-        .await
-        .expect("真实传输层必答");
+    // 埋点路径：generate_timed 返回 adapter 边界实测耗时（SLO 校准的数据来源）。
+    let (reply, cost_ms) = generate_via_port(&adapter, &tok, &snapshot).await;
     assert!(reply.contains("秋天"), "SSE 聚合文本：{reply}");
     assert!(
         cost_ms > 0,
@@ -494,10 +507,7 @@ async fn reflex_tier_system_overhead_is_measured_and_bounded() {
             )
             .unwrap();
         let snapshot = store.range(Seq::new(0));
-        let (_, cost_ms) = Reasoner
-            .reply_timed(&adapter, &tok, &snapshot)
-            .await
-            .expect("校准轮必答");
+        let (_, cost_ms) = generate_via_port(&adapter, &tok, &snapshot).await;
         samples.push(cost_ms);
     }
     samples.sort_unstable();
@@ -581,10 +591,7 @@ async fn real_provider_full_calibration() {
             )
             .unwrap();
         let snapshot = store.range(Seq::new(0));
-        let (text, cost_ms) = Reasoner
-            .reply_timed(&adapter, &tok, &snapshot)
-            .await
-            .unwrap_or_else(|e| panic!("第 {i} 轮失败：{e:?}"));
+        let (text, cost_ms) = generate_via_port(&adapter, &tok, &snapshot).await;
         assert!(!text.trim().is_empty(), "第 {i} 轮空回复");
         assert!(cost_ms <= 60_000, "第 {i} 轮 {cost_ms}ms 超深度档预算");
         samples.push(cost_ms);

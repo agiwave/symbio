@@ -274,7 +274,7 @@ mod turn_runner_tests {
             .run(&store, &llm, &tok, 1, "第二轮问题", LatencyTier::Deep)
             .await
             .unwrap();
-        let last = crate::symbio_core::Reasoner::render_messages(
+        let last = crate::symbio_core::render_messages(
             &store
                 .range(Seq::new(0))
                 .into_iter()

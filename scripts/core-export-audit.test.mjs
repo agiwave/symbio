@@ -280,6 +280,61 @@ test('C-003 口径：声明域自身 / 根导出清单提及，都不算第二�
   assert.match(r.stderr, /单消费方/)
 })
 
+test('C-003 口径：core 内**同域**实现了它 ⇒ 不是下放候选（放行；口径 3 的漏洞）', () => {
+  // `LlmAdapter` / `DeltaSink` 的真实形状：trait 声明与 `impl … for …` 在**同一个域**
+  // （`adapters`）。口径 3「声明域自身不算」把实现整个滤掉 ⇒ coreConsumers 空 ⇒ 误判成
+  // 「单消费方接缝、该下沉」。但下沉的前提是「B 只被 A 依赖」——core 自己实现它，
+  // 前提不成立，下沉会让 core 反向依赖插件。
+  const r = audit(
+    clean({
+      [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, SoloPort};\n',
+      [ACTORS_MOD]: 'pub struct AlphaThing;\npub trait SoloPort {}\n',
+      // 实现与 trait 同域 —— 这正是原先被滤掉的那一类耦合
+      'symbio/src/symbio_core/actors/impl_solo.rs':
+        'use super::SoloPort;\npub struct Real;\nimpl SoloPort for Real {}\n',
+      'symbio/src/plugins/alpha/only.rs':
+        'use crate::symbio_core::SoloPort;\npub fn s(_: &dyn SoloPort) {}\n',
+    }),
+  )
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+})
+
+test('C-003 口径：`coreBound` 只认 trait 位置 ⇒ 泛型约束**不算**实现（仍判红）', () => {
+  // `impl<Foo: SoloPort> Bar for X` 里 `SoloPort` 是约束不是 trait。把约束算成绑定
+  // 就是**无意的假依赖**——凭空让一条真接缝免于下沉。这条钉住判据不越界。
+  const r = audit(
+    clean({
+      [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, SoloPort};\n',
+      [ACTORS_MOD]: 'pub struct AlphaThing;\npub trait SoloPort {}\n',
+      'symbio/src/symbio_core/actors/bounded.rs':
+        'use super::SoloPort;\npub struct Bar;\npub struct X;\nimpl<Foo: SoloPort> Bar for X {}\n',
+      'symbio/src/plugins/alpha/only.rs':
+        'use crate::symbio_core::SoloPort;\npub fn s(_: &dyn SoloPort) {}\n',
+    }),
+  )
+  assert.equal(r.status, 1, '泛型约束不构成绑定——真·单消费方仍须判红')
+  assert.match(r.stderr, /单消费方/)
+})
+
+test('C-003 口径：`coreBound` 不进计数 ⇒ 跨 core 用它的第二消费方仍能救回（防恒真）', () => {
+  // 若把实现当成"再加一个 core 消费方单位"，每个 trait 都会用**自己域内的实现**凑出
+  // 恰好 1 个单位而恒真放行——守卫变装饰。这条钉住：单消费方 + 同域实现之外**没有**
+  // 任何第二消费方时，仍然判红（上面的第二条已覆盖一半，这里补"两个消费方时仍放行"）。
+  const r = audit(
+    clean({
+      [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, SoloPort};\n',
+      [ACTORS_MOD]: 'pub struct AlphaThing;\npub trait SoloPort {}\n',
+      'symbio/src/symbio_core/actors/impl_solo.rs':
+        'use super::SoloPort;\npub struct Real;\nimpl SoloPort for Real {}\n',
+      'symbio/src/plugins/alpha/only.rs':
+        'use crate::symbio_core::SoloPort;\npub fn s(_: &dyn SoloPort) {}\n',
+      'symbio/src/plugins/beta/also.rs':
+        'use crate::symbio_core::SoloPort;\npub fn s2(_: &dyn SoloPort) {}\n',
+    }),
+  )
+  assert.equal(r.status, 0, r.stderr + r.stdout)
+})
+
 test('C-003 口径：仅测试在用 ⇒ 合法根出口（放行，不收窄）', () => {
   // 收窄它会把那个测试编译坏（C-002 又不许它深引）⇒「测试在用」足以让它留在根出口。
   const r = audit(

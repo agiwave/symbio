@@ -210,9 +210,10 @@ impl LlmAdapter for ProviderLlmAdapter {
     /// 判定，判定归「本轮收束」的那一侧（`TurnRunner::run_with_tools`）：只有
     /// 「无工具调用 + 空文本」才是失败。
     ///
-    /// ## 这里**曾经**把整段 prompt 包成一条 user 消息（ADR-048a 判定的退步）
+    /// ## 工具结果**逐条传消息数组**，不得压扁成一条 user 消息（[ADR-048a](../../../../docs/adr/ADR-048a.md)）
     ///
-    /// ```ignore
+    /// ```text
+    /// // 反例——整段 prompt 拍成一条 user 消息：
     /// let message = ChatMessage { role: Some(MessageRole::User), content: …(prompt) };
     /// execute_turn(self.system_prompt(), &[message], tools, …)
     /// ```
