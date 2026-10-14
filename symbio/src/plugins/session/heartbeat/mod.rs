@@ -12,7 +12,7 @@ use crate::symbio_core::clock_now_ms;
 use crate::symbio_core::session_chat;
 use crate::symbio_core::{
     conation, AutonomousInitiator, Budget, ConationCandidate, ConationPolicy, EventWalStore,
-    IntentGate, PluginInvokeRequestExt, PluginSimpleRequest, Seq, Store, SESSION_ID,
+    IntentGate, Seq, Store,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
@@ -231,8 +231,8 @@ impl SessionPlugin {
 
     /// 立即为指定会话触发一次心跳任务。
     ///
-    /// 构造一条用户消息（心跳提示词）并复用统一入口 [`SessionPlugin::handle_chat_send_oneoff`]
-    /// 的发送链路。`include_history=false` 时本次发送不加载历史会话信息。
+    /// 构造一条用户消息（心跳提示词）并复用统一入队口 [`SessionPlugin::enqueue_inbox`]。
+    /// `include_history=false` 时本次发送不加载历史会话信息。
     ///
     /// 返回 `true` = 这次触发的**事实已落格**（调用方据此推进空闲锚点）；
     /// `false` = 这一趟没触发、一格也没写（原因在 [`Self::record_autonomous_trigger`]）。
@@ -268,35 +268,31 @@ impl SessionPlugin {
             ..Default::default()
         };
 
-        let req = session_chat::Request {
+        // 直接进程内入队，**不经路由**：`session/chat/send` 已随输入面双轨退役
+        // （[ADR-066](../../../../../docs/adr/ADR-066.md "ADR-066") / T-077 步②），而心跳本来就是
+        // 进程内直连。`params` 因此仍可携带 `mode` / `include_history`——它们是
+        // [`SessionPlugin::enqueue_inbox`] 的进程内入参，不受「地址写入面不承载运行选项」
+        // 约束（那条约束针对的是 VDFS 的写体形状，见 ADR-066 决策 4）。
+        let params = session_chat::Request {
             session_id: Some(session_id.to_string()),
-            // agent_id 留空：由 handle_chat_send_oneoff 回退到会话 metadata.agent_id
+            // agent_id 留空：由 resolve_session_params 回退到会话 metadata.agent_id
             agent_id: None,
-            message: Some(user_msg),
+            message: None,
             provider_id: None,
             include_history: Some(hb.include_history),
             // 心跳任务默认走 auto 模式（无人值守），避免后台触发遇到需交互工具时产卡阻塞。
             mode: Some("auto".to_string()),
-            // risk_level 留空：由 orchestrator 回退到会话 metadata.risk_level（默认 medium）。
-            // 心跳任务应尊重会话自身的风险等级设置，而非强行覆盖。
+            // risk_level 留空：由 resolve_session_params 回退到会话 metadata.risk_level
+            // （默认 medium）。心跳任务应尊重会话自身的风险等级设置，而非强行覆盖。
             risk_level: None,
+            // source_principal 留空：心跳是**本机**路径，无「来源声明」——轮末承诺的
+            // `to` 由取值点（`request_source_principal`）落本机用户，与接线前一致。
+            source_principal: None,
             resume: None,
         };
 
-        let ctx = PluginSimpleRequest::new(None, None);
-        // 刻意**不设 `PATH`**：下面走的是直连方法调用（`self.handle_chat_send_oneoff`），
-        // 不过路由，`PATH` 没有任何读者。这里曾写 `ctx.set(PATH, "chat/send")`——
-        // 纯死赋值，而且值还是相对臂（相对臂只属于插件自己的 `match`，不该出现在调用侧）。
-        // 编排侧的口径见 `orchestrator/entry.rs`：「chat_ctx 仅承载 payload（不再设置
-        // 跨插件 PATH）」。地址规则见 `symbio_core::plugin::route` 模块文档。
-        ctx.set(SESSION_ID, session_id.to_string());
-        if let Err(e) = ctx.set_payload(req) {
-            crate::plugin_error!("session", "[Heartbeat] 触发失败：无法设置 payload: {}", e);
-            // 触发事实已经落格了：这一趟按"触发过"算（`true`），否则下个 tick 会
-            // 再写一遍——而 `system.triggered` 是**事实**，重复记一次就是两次触发。
-            return true;
-        }
-
+        // 工作目录与旧链路同源：入队时从会话 metadata 回退（`start_turn` 的
+        // `ctx > metadata > 报错` 第一档之前没有更早的来源），故这里不用显式带。
         crate::plugin_info!(
             "session",
             "[Heartbeat] 触发会话 {} 的心跳任务（include_history={}）",
@@ -304,15 +300,8 @@ impl SessionPlugin {
             hb.include_history
         );
 
-        // handle_chat_send_oneoff 内部会自行置 is_working 并路由到模型插件；
-        // 即便没有前端连接，事件也会经由 EventBus 静默丢失，不影响后台执行。
-        if let Err(e) = self.handle_chat_send_oneoff(Arc::new(ctx)).await {
-            crate::plugin_error!(
-                "session",
-                "[Heartbeat] 触发失败：handle_chat_send_oneoff 返回错误: {}",
-                e
-            );
-        }
+        self.enqueue_inbox(session_id, None, user_msg, params, None)
+            .await;
         true
     }
 

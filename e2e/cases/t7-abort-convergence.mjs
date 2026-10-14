@@ -1,4 +1,4 @@
-// T7 中止收敛：长驻 CLI（REPL）+ gateway HTTP 边界中途 chat/abort → 存储终态收敛。
+// T7 中止收敛：长驻 CLI（REPL）+ gateway HTTP 边界 action(会话地址, "abort") → 存储终态收敛。
 import './_selfrun.mjs';
 //
 // 走真实双入口（REPL stdin 发送 + gateway `POST /api/v1/invoke` 中止），与
@@ -13,6 +13,7 @@ import {
   cleanupHomedir,
   startLongLivedCli,
   readSessionMessages,
+  abortSession,
   waitFor,
   assert,
   defineCase,
@@ -22,7 +23,7 @@ import {
   assertTranscriptInvariants,
 } from '../helpers.mjs';
 
-export default defineCase('T7 中止收敛：运行中 chat/abort，节点全部终态 + outcome=aborted', async () => {
+export default defineCase('T7 中止收敛：运行中 action(会话地址, abort)，节点全部终态 + outcome=aborted', async () => {
   // 流式场景：正文分片慢吐（拉长运行窗口），给 abort 留出时序空间
   const llm = await new MockLlm([
     { id: 'slow', match: '慢慢说', chunks: ['很', '长', '很', '长', '的', '回', '答'], chunkDelayMs: 300 },
@@ -59,8 +60,10 @@ export default defineCase('T7 中止收敛：运行中 chat/abort，节点全部
     await waitFor(async () => (await llm.requests()).length >= 1, { what: '首轮 LLM 请求', timeoutMs: 20_000 });
 
     // ③ 中止：走 gateway HTTP 边界（session_id 经 metadata 透传进 ctx）
-    const ab = await cli.invoke('session/chat/abort', { session_id: 'e2e-t7' }, { session_id: 'e2e-t7' });
+    //    入口 = 节点动作 `action(<会话地址>, "abort")`（input-face 双轨退役后唯一路径）
+    const ab = await abortSession(cli, 'e2e-t7');
     assert(ab.status === 200, `abort 调用应成功（${ab.status}: ${JSON.stringify(ab.body)?.slice(0, 200)}）`);
+    assert(ab.body?.data?.ok === true, `abort 应真的停下一轮（ok = false 说明会话没在跑）：${JSON.stringify(ab.body)?.slice(0, 200)}`);
 
     // ④ 收敛判据：轮询**生产读出口**（vdfs/read）直到无节点停在 streaming/pending
     await waitFor(

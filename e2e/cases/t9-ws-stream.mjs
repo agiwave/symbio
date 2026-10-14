@@ -38,6 +38,8 @@ import {
   providerConfig,
   PROVIDER_ID,
   readSessionMessages,
+  createSession,
+  sendInbox,
   assertTranscriptInvariants,
   assertSeqAnchorIsNodeAttribute,
 } from '../helpers.mjs';
@@ -81,17 +83,16 @@ export default defineCase('T9 gateway WS 实时面：vdfs 变更帧序与增量�
     // ① 订阅实时面（**发消息之前**，不漏首帧）
     rt = await subscribeSessionRealtime(cli, { sessionId: 'e2e-t9', gatewayPort: GATEWAY_PORT });
 
-    // ② 经 HTTP 边界发起对话（会话目标挂在 metadata.session_id）
-    const send = await cli.invoke(
-      'session/chat/send',
-      {
-        session_id: 'e2e-t9',
-        message: { id: 'u-t9', role: 'user', type: 'text', content: '流式说' },
-        mode: 'auto',
-      },
-      { session_id: 'e2e-t9', workdir: hd.workdir },
-    );
-    assert(send.status === 200, `chat/send 应受理（${send.status}: ${JSON.stringify(send.body)?.slice(0, 150)}）`);
+    // ② 会话先建出来：收件箱是会话内部的集合，会话不在就没有它可写
+    //    （曾经的 `session/chat/send` 会顺手 `get_or_create`，地址面要求显式创建）
+    await createSession(cli, 'e2e-t9', { workdir: hd.workdir });
+
+    // ③ 经 HTTP 边界发起对话：收件箱地址面 `vdfs/write(<会话地址>/inbox)`
+    //    （输入面双轨退役后唯一入口；`session/chat/send` 已移除）
+    //    `workdir` 仍是**调用级**字段：它是 `start_turn` 回退链的第一档
+    //    （ctx > 会话 metadata > 报错），与「随消息携带的运行选项」不是一回事。
+    const send = await sendInbox(cli, 'e2e-t9', '流式说', { workdir: hd.workdir });
+    assert(send.status === 200, `写收件箱应受理（${send.status}: ${JSON.stringify(send.body)?.slice(0, 150)}）`);
 
     // ③ 等正文收敛（assistant text 到达终态）
     const isDone = () =>

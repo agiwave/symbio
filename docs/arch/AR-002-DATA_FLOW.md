@@ -49,11 +49,11 @@ sequenceDiagram
 
 **排障口诀**：路径不对 → 查 #6/#7 挂载与 [RE-003-ROUTES.md]；载荷不对 → 查 [AR-004-PROTOCOLS.md] 的 Wire 协议；错误码不明 → 查 #9。
 
-## 链路二：LLM 流式对话（`session/chat/send`）
+## 链路二：LLM 流式对话（收件箱地址面入队 → 会话自己消费）
 
 | # | 环节 | 代码位置 | 说明 |
 |---|------|---------|------|
-| 1 | 入口 | `symbio/src/plugins/session/plugin.rs` | 用户消息 = **`vdfs/write(<根>/session/<id>/inbox)`**；`chat/send` 只是它的薄包装（写即入队，空间自己消费，见 `session/transcript/inbox.rs` 与 ADR-026）。**会话编排权归 session**（见 `capabilities.rs` 头注释） |
+| 1 | 入口 | `symbio/src/plugins/session/plugin.rs` | 用户消息 = **`vdfs/write(<根>/session/<id>/inbox)`**（写即入队，空间自己消费，见 `session/transcript/inbox.rs` 与 ADR-026）。**会话编排权归 session**（见 `capabilities.rs` 头注释）。同义的路由形态已不存在（[ADR-066](../adr/ADR-066.md "ADR-066")）；**运行选项不随消息**，归会话 metadata |
 | 2 | 能力收集 | `symbio/src/plugins/session/capabilities.rs` | session 调 `collect_capabilities` → `parent.traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播收工具；**agent 仅当 `ctx[AGENT_ID]` 存在时贡献**（不选 agent 的会话照常运行）；收集期错误通道（`capability_report_error` / `capability_take_errors`）在 `symbio_core/capability/error.rs` |
 | 3 | 默认能力 | `symbio/src/providers/collectors/tool_visitor.rs` | `DefaultToolVisitor`——`CapabilityVisitor` 契约（`symbio_core/capability/mod.rs`）的**内存默认实现**。收集器的写入者是全体插件，故归实现层而非任何宿主 |
 | 4 | 模型调用（单轮） | `symbio/src/plugins/model/bound_provider.rs` | `execute_turn` = **一次** LLM 调用：4 协议适配（OpenAI / Anthropic / Gemini / Ollama）+ SSE 解析 + 事件出口。`model` **不做轮次循环** |

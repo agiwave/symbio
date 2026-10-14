@@ -49,8 +49,6 @@ export const ROUTE_HOOK_REGISTER = 'hook/register'
 
 // ==================== session ====================
 
-export const ROUTE_SESSION_CHAT_ABORT = 'session/chat/abort'
-export const ROUTE_SESSION_CHAT_SEND = 'session/chat/send'
 export const ROUTE_SESSION_STATS = 'session/stats'
 
 // ==================== skill ====================

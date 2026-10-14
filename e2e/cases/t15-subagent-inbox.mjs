@@ -195,6 +195,28 @@ export default defineCase('T15 子智能体空间自驱动：写 inbox → 空�
       '被取消的条目不应仍在队列里',
     );
 
+    // ── ③b 排队条目的**节点视图** = 前端「待发送」气泡的唯一数据源（T-077 步③）
+    //
+    // 气泡不显示全文（全文由落库后的转写帧给，**同一个 id**，见
+    // `tauri/src/stores/sessionInboxSync.ts`）：排队期间它拿得到的只有 `stat` /
+    // `list` 给的节点视图。于是 `kind = inbox`（分清「待发」与「已发生」）与
+    // `description` 的「待消费 · <预览>」是一条**对外契约**——改了它，前端的
+    // 排队气泡只会退化成一串空壳，而后端一切照旧。
+    const secondName = second.body?.data?.name;
+    const queuedStat = await cli.invoke('vdfs/stat', { path: `${inboxAddr()}/${secondName}` });
+    assertEq(
+      queuedStat.body?.data?.kind,
+      'inbox',
+      `排队条目的 kind 是 inbox（${JSON.stringify(queuedStat.body)?.slice(0, 300)}）`,
+    );
+    const queuedDesc = queuedStat.body?.data?.description;
+    assert(
+      typeof queuedDesc === 'string' &&
+        queuedDesc.startsWith('待消费') &&
+        queuedDesc.includes('第二步'),
+      `排队条目的 description 应带「待消费」前缀与正文预览（实际 ${JSON.stringify(queuedDesc)}）`,
+    );
+
     // ── ④ 最终收敛：取消掉的那条**从未**变成消息；其余两条按序被消费
     await waitFor(async () => (await subMessages()).some((m) => textOf(m).includes('收到第二步了')), {
       what: '第二条消息在会话空闲后被消费',

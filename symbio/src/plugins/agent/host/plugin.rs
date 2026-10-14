@@ -74,7 +74,8 @@ pub struct AgentPlugin {
     ///
     /// 在 `build(ctx)` 时捕获：composite 构造子插件时注入的 ctx 已携带
     /// `PARENT` 弱引用（见 composite 的子上下文构造）。agent_run 工具执行期
-    /// 凭它把 `session/chat/send` 等请求路由给兄弟插件——工具 ctx 经 chat
+    /// 凭它把兄弟插件的请求经容器路由出去（`agent_run` 自己起一轮走的是
+    /// `get_vfs_provider()` 的地址写入，不经路由）——工具 ctx 经 chat
     /// loop 一路 fork，自身并不携带路由入口。
     router: Option<std::sync::Weak<dyn Plugin>>,
     /// 本插件目录（agent 目录的**唯一发现根**；由父插件经 `PLUGIN_DIR` 告知）

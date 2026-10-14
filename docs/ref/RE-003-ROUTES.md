@@ -30,7 +30,7 @@ created: 2026-09-07
 - `{plugin}` - 目标插件 (如 `agent`, `session`, `model`)
 - `{action}` - 具体能力 (如 `chat`, `list`, `status`)
 
-> `worker` 前缀可省略也可显式写出：`session/chat/send` 与 `worker/session/chat/send` 等价
+> `worker` 前缀可省略也可显式写出：`session/stats` 与 `worker/session/stats` 等价
 > （前者由 home 兜底转发给 worker）。
 
 > **资源与配置都不走这条语法**：资源统一经 `vdfs/*`（`<根>/…` 寻址），配置就是
@@ -98,13 +98,11 @@ created: 2026-09-07
 
 | 路径 | 用途 | 返回类型 |
 |------|------|----------|
-| `session/chat/send` | 发起 AI 对话（流式；实际入口） | `Session` |
-| `session/chat/abort` | 中止进行中的对话 | `Empty` |
 | `session/stats` | 读本会话 v2 事实源的**八列**读数（时延分位 / 兜底率 / 成本台账 / 校准 `calibration` = `{by_skill: {<skill_id>: {skill_id, uses, fallbacks}}}`：技能的使用与回退计数（`confidence = 1 − 回退率` 由投影算） / 断点 / 声誉 `reputation` = `{own, by_principal}`：按主体分组的立约-守约-违约与打分 / 就绪任务集 `readyset` = `{ready: [{task_id, seq, depends_on}]}` 按 `task_id` 字典序的调度候选集 / 转写 `transcript` = `{entries: [{role, text, tool?}]}`：按事件顺序的对话（`user.message` / `chat.assistant.final` / `chat.assistant.fallback` / `artifact.added` 四格；`role` ∈ `user` / `assistant` / `tool`，工具行另带 `tool` = 工具名））+ 不变量清单 `invariants`（`check_all` 八条，空 = 全绿）——纯读，零副作用。载荷 `{ principal?: string }` 可声明**读方身份** | `SessionStats` |
 
-> 会话与消息的增删改查**全部**经 VDFS 地址完成；`chat/send`、`chat/abort` 是编排 / 控制，
-> `stats` 是读数——三者都不是数据操作。前两者的**实时面**都走 `event_bus` 的 `vdfs` 频道
-> （见 [AR-004-PROTOCOLS.md](../arch/AR-004-PROTOCOLS.md "AR-004-PROTOCOLS") §事件总线频道）。
+> **会话编排不再有私有路由**：发言、恢复、中止全部落在会话自己的地址上（见下表）。
+> `stats` 是唯一剩下的会话路由——它是**读数**，不是数据操作。
+> 实时面都走 `event_bus` 的 `vdfs` 频道（见 [AR-004-PROTOCOLS.md](../arch/AR-004-PROTOCOLS.md "AR-004-PROTOCOLS") §事件总线频道）。
 >
 > `stats` 的读数只能调已有的投影、不得另写一份统计口径（[plan/PL-010 §4](../plan/PL-010-价值验收与基线埋点.md "PL-010-价值验收与基线埋点")
 > 的复算判据）；实现见 [`symbio/src/plugins/session/stats.rs`](../../symbio/src/plugins/session/stats.rs)。
@@ -133,23 +131,30 @@ created: 2026-09-07
 | 列待消费的用户消息（收件箱） | `vdfs/list(<根>/session/<id>/inbox)` |
 | **发一条用户消息 / 取消一条排队中的消息** | `vdfs/write(…/inbox[/<iid>])` / `vdfs/delete(…/inbox/<iid>)` |
 | 清空待消费队列 | `vdfs/action(…/inbox, "clear")` |
+| **中止进行中的一轮** | `vdfs/action(<根>/session/<id>, "abort")` |
+| **恢复（审批 / 回填答案 / 重试）** | `vdfs/action(…/message/<mid>, <动作词>)`，载荷 `{args?, reason?, answer?, mode?, risk_level?}` |
 
-> **一条用户消息只有一个入口**：`chat/send` 就是「往收件箱写一条」（它不再自己起一轮），
+> **一条用户消息只有一个入口**：往收件箱写一条（不再有「发消息」专用路由），
 > 因此子智能体空间这类**没有调用方**的会话也能被驱动——写它的收件箱即可。
 > 新增消息触发一整轮编排（在空间空闲时由空间自己消费）；而**改写与删除**是普通的 VDFS
 > 节点操作——判据是「触发不触发编排」，不是「碰不碰消息」。两者都在
 > [`symbio/src/plugins/session/docs/AR-022-vdfs-session-messages.md`](../../symbio/src/plugins/session/docs/AR-022-vdfs-session-messages.md "AR-022-vdfs-session-messages")。
+>
+> **运转选项（provider / mode / risk）不在写入面上**：它们的唯一 owner 是会话 metadata
+> （`vdfs/write(<根>/session/<id>, { create: true })` upsert），消费链的回退顺序是
+> 「调用级 → 会话 metadata → 默认值」（[ADR-066](../adr/ADR-066.md "ADR-066")）。
+> 恢复的 `mode` / `risk_level` 是这一格的仅有的两个**调用级**字段——恢复本就是
+> 「用当时的选项把当时那一轮做完」，与消息写入不是同一层级。
 
 ### 聊天流程
 
 ```
-1. route("session/chat/send", {messages, agent_id, ...})  → 返回 Session
-2. 从 PluginChannel 接收 PluginFrame
-3. 帧类型:
-   - Data({type: "text_delta", content: "..."})     → 增量文本
-   - Data({type: "tool_use", name: "local/content_search"})  → 工具调用
-   - Data({type: "done"})                           → 完成
-   - Error(msg, details)                            → 错误
+1. vdfs/write(<根>/session/<id>/inbox, 纯文本)   → 入队（受理即返回）
+2. 空间空闲时自行消费该条并发起一整轮编排（spawn）
+3. 下行：event_bus/subscribe + vdfs/watch(<根>/session) 收 vdfs 频道
+   帧类型:
+   - 会话节点 <…>/session/<id>：全量节点视图（status 离开 working = 本轮结束）
+   - 消息节点 <…>/message/<mid>：delta 追加 / content 替换 / status = removed
 ```
 
 ---
@@ -404,11 +409,13 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 |---|---|
 | `{plugin}/config/get` · `{plugin}/config/set` · `{plugin}/config/schema` | `vdfs/read` / `vdfs/write(<根>/<插件>/PLUGIN.yml)` |
 | `{plugin}/entities/*` | 各插件自己的 `impl VdfsProvider`（`<根>/<插件名>/…`） |
-| `model/chat` · `model/status` · `model/chat_sync` | `session/chat/send` · 节点动作 `vdfs/action { action: "test" }` |
+| `model/chat` · `model/status` · `model/chat_sync` | `session/stats` · 节点动作 `vdfs/action { action: "test" }` |
 | `agent/list` · `get` · `upload` · `delete` · `preview` · `export` | `<根>/agent` 上的 `vdfs/*` + 节点动作 `export` |
 | `session/append` · `session/open` | 编排器直连（`orchestrator/entry.rs`） |
 | `session/update` | `vdfs/write(<根>/session/<id>, { create: true })`（具名新建，即 upsert） |
 | `session/clear` | `vdfs/delete(<根>/session/<id>)` |
+| `session/chat/send` | `vdfs/write(<根>/session/<id>/inbox)`；运行选项改归会话 metadata（[ADR-066](../adr/ADR-066.md "ADR-066")） |
+| `session/chat/abort` | `vdfs/action(<根>/session/<id>, "abort")` |
 | `session/chat/update_message` | `vdfs/write(…/message/<mid>)` |
 | `session/chat/delete_message` | `vdfs/action(…/message/<mid>, "truncate")` |
 | `session/chat/clear_messages` | **无替代**：清空与「删除会话」重叠，已整体下线 |

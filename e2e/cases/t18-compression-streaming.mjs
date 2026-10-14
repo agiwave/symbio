@@ -10,7 +10,7 @@ import './_selfrun.mjs';
 // | B | **结构化 meta**：compact_trigger / context_limit / before_tokens / after_tokens / dropped 按字段下发 | 成功节点终态帧的 meta 逐字段核对；失败节点**没有** after_tokens（没有可信的后水位，编 0 是谎报） |
 // | D | **失败分支**：压缩 LLM 500 ⇒ failed 节点 + failure_kind=llm_error + 历史原封不动 | 节点 failed、meta.failure_kind；读出口读回的历史里早期消息仍在 |
 // | E | **触发纪律**：连续失败触发**熔断**——开闸后的轮次直接跳过自动压缩，不再重发注定失败的摘要请求 | 连续 3 次失败后，再跑一轮水位超阈值的对话：摘要请求数不增、无新压缩节点、回复照常 |
-// | F | **重试恢复**：`session/chat/send` + `resume.action = "retry_compaction"` ⇒ 删除旧失败节点（removed 帧）→ 绕过熔断重新压缩 → 成功 → 快照落库 → 后续轮恢复正常 | 旧 mid 收到 removed 帧；新节点 Completed；读出口读回：失败节点消失、快照出现；之后水位低不再压缩 |
+// | F | **重试恢复**：`action(<sid>/message/<失败压缩节点 id>, "retry_compaction")` ⇒ 删除旧失败节点（removed 帧）→ 绕过熔断重新压缩 → 成功 → 快照落库 → 后续轮恢复正常 | 旧 mid 收到 removed 帧；新节点 Completed；读出口读回：失败节点消失、快照出现；之后水位低不再压缩 |
 //
 // 触发参数**刻意不同于** T8/T11（它们只需「压缩发生一次」；本用例要让连续 3 次
 // 摘要请求都落在**同一个可发请求的窗口**里）。窗口宽度由下面三条决定：
@@ -75,6 +75,9 @@ import {
   PROVIDER_ID,
   readSessionMessages,
   assertTranscriptInvariants,
+  createSession,
+  sendInbox,
+  resumeSession,
 } from '../helpers.mjs';
 
 const TERMINAL = new Set(['completed', 'failed', 'aborted', 'waiting_user_action']);
@@ -157,6 +160,9 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
     await cli.waitGatewayReady();
     rt = await subscribeSessionRealtime(cli, { sessionId: 'e2e-t18', gatewayPort: GATEWAY_PORT });
 
+    // 会话先建出来：收件箱是会话内部的集合，会话不在就没有它可写
+    await createSession(cli, 'e2e-t18', { workdir: hd.workdir });
+
     const doneTurns = () => {
       const last = new Map();
       for (const { mid, data } of rt.messages()) {
@@ -166,12 +172,8 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
     };
     const sendRound = async (i, text) => {
       const before = doneTurns();
-      const send = await cli.invoke(
-        'session/chat/send',
-        { session_id: 'e2e-t18', message: { id: `u-t18-${i}`, role: 'user', type: 'text', content: text }, mode: 'auto' },
-        { session_id: 'e2e-t18', workdir: hd.workdir },
-      );
-      assert(send.status === 200, `第 ${i + 1} 轮 chat/send 应受理（${send.status}）`);
+      const send = await sendInbox(cli, 'e2e-t18', text, { workdir: hd.workdir });
+      assert(send.status === 200, `第 ${i + 1} 轮写收件箱应受理（${send.status}）`);
       await waitFor(() => doneTurns() > before, { what: `第 ${i + 1} 轮 turn 终态`, timeoutMs: 60_000 });
     };
 
@@ -245,13 +247,21 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
     );
 
     // ── 阶段 5：重试恢复（F）——绕过熔断、删除-重建、成功 ──
+    //
+    // 恢复入口随输入面双轨退役改走节点动作（T-077 步② / [ADR-066]）：
+    // 曾经的 `session/chat/send` + `resume.action = "retry_compaction"` 等价于
+    // `action(<sid>/message/<失败压缩节点 id>, "retry_compaction")`。
     const retryAnchor = rt.changes.length;
-    const retry = await cli.invoke(
-      'session/chat/send',
-      { session_id: 'e2e-t18', resume: { target_id: failId, action: 'retry_compaction' } },
+    const retry = await resumeSession(
+      cli,
+      'e2e-t18',
+      failId,
+      'retry_compaction',
+      {},
       { session_id: 'e2e-t18', workdir: hd.workdir },
     );
     assert(retry.status === 200, `retry_compaction 应受理（${retry.status}: ${JSON.stringify(retry.body)?.slice(0, 200)}）`);
+    assert(retry.body?.data?.ok === true, `retry_compaction 应真的执行（${JSON.stringify(retry.body)?.slice(0, 200)}）`);
 
     // 旧失败节点被 removed（删除-重建的实时面交代）
     await waitFor(

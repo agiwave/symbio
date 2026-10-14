@@ -90,12 +90,13 @@ let (my_channel, peer_channel) = PluginChannel::pair(64);
 
 | 键 | 类型 | 用途 |
 |----|------|------|
-| `PATH` | String | 目标路径 (如 `session/chat/send`；资源类走 `vdfs/*` + `<根>/…` 地址) |
+| `PATH` | String | 目标路径 (如 `session/stats`；资源类走 `vdfs/*` + `<根>/…` 地址) |
 | `payload` | 任意（调用方定） | 交互载荷数据（桶名见 `symbio_core::PLUGIN_PAYLOAD_KEY`） |
 | `WORKDIR` | String | 当前工作区根路径 |
 | `SESSION_ID` | String | 会话唯一标识 |
 | `TRACE_ID` | String | 调用链追踪 ID |
 | `AGENT_ID` | String | 当前 Agent 标识 |
+| `SOURCE_PRINCIPAL` | String | 入站请求的**来源主体**（完整主体名，如 `agent:main`；[ADR-067](../adr/ADR-067.md "ADR-067")）——「这条消息是谁发的」，轮末 `commitment.*` 的 `to` 据它取值；缺省 = 本机用户。线上形态 = 请求 `metadata.source_principal` |
 | `CONTENT` | String | 通用内容字段 |
 | `KIND` | String | 通用类型字段 |
 | `ID` | String | 通用 ID 字段 |

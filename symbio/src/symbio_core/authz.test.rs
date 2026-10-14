@@ -144,6 +144,44 @@ fn the_peer_row_is_narrower_than_the_derived_set() {
     );
 }
 
+/// 收束格按**种类**判（[ADR-067](../../../docs/adr/ADR-067.md "ADR-067")，T-072 的单测判据）：
+/// 产物收束问 `produce.artifact`、发言收束仍按 `reply.*`——同一张表的两道闸。
+///
+/// 钉的是谓词面的**分派**，不是每个主体自己的窄行（那些在上面各测里）：对等主体
+/// 产物闸放行、发言闸仍拒；主智能体两道都放；判定者 / 自主层产物闸也拒（它们
+/// 持的不是 `produce.artifact`）。没有这道分派，对等主体跑一轮永远收束不了
+/// （ADR-065 的批②③ 合并理由）；反过来若产物闸误用了 `can_reply`，对等主体的
+/// 产物也落不了格——两种错位都被这条钉住。
+#[test]
+fn the_closure_gate_is_dispatched_by_kind() {
+    let matrix = production_matrix();
+
+    // 对等主体：产物收束放行、发言收束仍拒（「没有发言权」≠「留不下任何事实」）。
+    assert!(
+        matrix.can_produce_artifact(PRINCIPAL_PEER),
+        "对等体以产物收束一轮（ADR-065 裁决的落地前提）"
+    );
+    assert!(
+        !matrix.can_reply(PRINCIPAL_PEER, true),
+        "产物闸放行不改变发言闸：对等体仍无发言权"
+    );
+
+    // 主智能体：两道都放（发言与产物都是它的权威动作）。
+    assert!(matrix.can_reply(PRINCIPAL_MAIN, true));
+    assert!(matrix.can_produce_artifact(PRINCIPAL_MAIN));
+
+    // 判定者 / 自主层：两道都拒——它们持的能力与收束无关（fail-closed 的方向不变）。
+    for p in [PRINCIPAL_REFLEX, PRINCIPAL_AUTONOMOUS] {
+        assert!(
+            !matrix.can_produce_artifact(p) && !matrix.can_reply(p, true),
+            "{p} 既不产生产物也不发言（各自的窄行）"
+        );
+    }
+
+    // 未知主体 fail-closed：两道闸同拒。
+    assert!(!matrix.can_produce_artifact("agent:ghost"));
+}
+
 /// `matrix_for` 两条分支：**登记过的主体走表**（表是权威，派生不覆盖它）；
 /// 未登记的 `agent:<id>` 才派生主智能体那一行。
 #[test]

@@ -122,7 +122,7 @@ pub use actors::{ActorSpec, Pattern, Reasoner};
 // C-003（根导出须 ≥2 个消费方）凭空添待办——C-003 只数 `pub use`。
 pub(crate) use actors::{
     AutonomousInitiator, CircuitBreaker, ConationCandidate, ConationPolicy, GateDecision,
-    IntentGate, Preemption, PreemptionDecider, SkillCompiler, SkillRoute, SkillRouter,
+    IntentGate, Preemption, PreemptionDecider, Scope, SkillCompiler, SkillRoute, SkillRouter,
 };
 // 事件名字表（名字是数据，单点定义）。
 // 任务格名字表（S7 步 16–18，批⑨）：core 内的读方（`projection::readyset`、
@@ -310,8 +310,8 @@ pub use plugin::{
     PLUGIN_ID_SKILL, PLUGIN_ID_TELEGRAM, PLUGIN_ID_VDFS, PLUGIN_ID_WEB, PLUGIN_KEY_CAN_DISABLE,
     PLUGIN_KEY_ENABLED, PLUGIN_KEY_NAME, PLUGIN_KEY_PROVIDER, PLUGIN_KEY_REQUIRED,
     PLUGIN_KEY_VERSION, PLUGIN_PAYLOAD_KEY, ROUTE_CLASSIFY_DECIDE, ROUTE_COMPOSE_WORDING,
-    ROUTE_EVENT_BUS_SUBSCRIBE, ROUTE_HOOK_FIRE, ROUTE_SESSION_CHAT_SEND, ROUTE_VDFS_ROOT,
-    ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
+    ROUTE_EVENT_BUS_SUBSCRIBE, ROUTE_HOOK_FIRE, ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH,
+    ROUTE_VDFS_WATCH, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
 // 注意：submit_object_creator! 宏已通过 #[macro_export] 导出到 crate 根目录
 
@@ -327,8 +327,8 @@ pub(crate) use creator::{ObjectConstructor, Submit};
 pub use keys::{
     SymbioKey, ABORT_SIGNAL, AGENT_ID, CAPABILITY_ERRORS, CAPABILITY_VISITOR, CONFIGURABLE_VISITOR,
     CONTENT, EVENT_SINK, ID, MODE, NAME, OPTION_VISITOR, PARENT, PATH, PLUGIN_DIR, PROVIDER_ID,
-    REQUIRED_PLUGINS, RESULT_MSG_ID, RISK_LEVEL, SESSION_ID, TOOL_CALL_ID, TRACE_ID,
-    VDFS_PARENT_ADDR, WORKDIR,
+    REQUIRED_PLUGINS, RESULT_MSG_ID, RISK_LEVEL, SESSION_ID, SOURCE_PRINCIPAL, TOOL_CALL_ID,
+    TRACE_ID, VDFS_PARENT_ADDR, WORKDIR,
 };
 
 // ==================== 装配策略 ====================

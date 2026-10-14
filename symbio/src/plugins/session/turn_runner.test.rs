@@ -1808,10 +1808,13 @@ mod tool_round_tests {
             "{:?}",
             check_all(&snapshot)
         );
-        assert_eq!(
-            unresolved_turns(&snapshot, false).len(),
-            1,
-            "本轮尚未了结——缺口可被判出（恢复续写把它合上）"
+        // C4 口径（ADR-067）：落过产物格的轮**不再**被判静默中断——工具结果是说给
+        // 用户的话，它就是收束。等待轮的**收束格**仍刻意留给恢复幕（进展格不是
+        // 收束格），那是 `last_open_turn` 的口径，不是 C4 的。
+        assert!(
+            unresolved_turns(&snapshot, false).is_empty(),
+            "产物收束 ⇒ 不算静默中断：{:?}",
+            unresolved_turns(&snapshot, false)
         );
     }
 
@@ -1887,15 +1890,18 @@ mod tool_round_tests {
     /// 续写同一轮（审批 / 问答恢复）：**不重开用户格**、收束记在**原轮**上。
     ///
     /// 这是 [plan/11 批 2](../../../../docs/plan/PL-009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")
-    /// 的核心判据，也是 C4 的**反向用例**：等待轮留一个缺口（`unresolved_turns`
-    /// 看得见），续写把它**真正填上**。若续写另开新轮（`u-1` + `f-1`），原轮永远等不到
-    /// 收束事件，C4 会把它当**永久假缺口**——不变量随即失去判据价值。
+    /// 的核心判据：等待轮的**收束格**刻意留给恢复幕（进展格不是收束格），续写把它
+    /// **真正填上**（见收尾的 kinds 断言）。若续写另开新轮（`u-1` + `f-1`），原轮
+    /// 永远等不到收束事件——C4 的产物口径（ADR-067）会掩盖它，但 `last_open_turn`
+    /// 仍按 final / fallback 找轮，恢复链路会先断。
     #[tokio::test]
     async fn resume_continues_same_turn_without_reopening_user_cell() {
         let store = EventStore::new();
         let tok = TokenIssuer::issue_deep();
 
-        // ① 等待轮：工具报 pending ⇒ 停下、落进展格、不落收束格（网格留 1 个可判出的缺口）。
+        // ① 等待轮：工具报 pending ⇒ 停下、落进展格、不落收束格。
+        //    C4 口径（ADR-067）：产物格已落 ⇒ 不算静默中断；但收束格还没落——
+        //    收尾断言钉住「续写把它补在**原轮**上」。
         let pending_llm = ToolCallingLlm::new();
         let pending_dispatch = FakeDispatch {
             pending: true,
@@ -1914,10 +1920,10 @@ mod tool_round_tests {
             .await
             .expect("等待用户不是失败");
         assert!(first.awaits_user, "等待轮必须在结果里可见");
-        assert_eq!(
-            unresolved_turns(&store.range(Seq::new(0)), false).len(),
-            1,
-            "等待轮留一个可判出的缺口"
+        let mid = store.range(Seq::new(0));
+        assert!(
+            !mid.iter().any(|e| e.kind == EVENT_ASSISTANT_FINAL),
+            "等待轮不落收束格（收束格留给恢复幕）：{mid:?}"
         );
 
         // ② 恢复：续写**同一轮**（turn 0），用户格 seq = 0（网格第一格）。

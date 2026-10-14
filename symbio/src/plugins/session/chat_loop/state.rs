@@ -21,6 +21,58 @@ pub(crate) fn request_principal(ctx: &dyn crate::symbio_core::PluginInvokeReques
     crate::symbio_core::authz::principal_of(ctx.get(crate::symbio_core::AGENT_ID).as_deref())
 }
 
+/// 本请求的**来源主体**（[ADR-067]）：入站消息的出处，`commitment.*` 的 `to`。
+///
+/// 取值点 = `metadata.source_principal`（网关 `build_ctx` 落 ctx；收件箱路径由
+/// `run_inbox_turn` 从条目寄存挂回）。**缺省 = 本机用户**——与接线前在
+/// `v2_facts` 调用点写死的常量逐字一致，本机路径（直呼 / 心跳）行为不变。
+///
+/// 注意它与 [`request_principal`] 回答的是两个问题：后者是「以谁的身份跑轮」
+/// （会话主体，写事件的 `actor`），这里是「这条消息是谁发的」（跨体承诺的
+/// 对方）。两个都从 ctx 取但键不同，混用会把「向谁宣告」错写成「谁在宣告」。
+///
+/// [ADR-067]: ../../../../../docs/adr/ADR-067.md "ADR-067"
+pub(crate) fn request_source_principal(
+    ctx: &dyn crate::symbio_core::PluginInvokeRequest,
+) -> String {
+    use crate::symbio_core::PluginInvokeRequestExt;
+    ctx.get(crate::symbio_core::SOURCE_PRINCIPAL)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| crate::symbio_core::authz::PRINCIPAL_USER.to_string())
+}
+
+/// 本请求的**主体规格**（`ActorSpec` 的唯一生产构造点，[ADR-065] 合并批落地）。
+///
+/// 五个字段各自的数据源：
+///
+/// | 字段 | 取法 |
+/// |---|---|
+/// | `principal` | [`request_principal`]（会话选定的 agent ⇒ 主体名） |
+/// | `capabilities` | **授权表行**（`matrix_for` ⇒ `grant_names_of`）——单一真源。此前是空表（`trivial` 的平凡值），能力集与授权表各说各话，没有任何东西对得上 |
+/// | `pattern` | [`Pattern::for_principal`]（判据住在 core 的 actors 定义域，与授权表同源；主体类型名不散出 core——NDC-001 同纪律） |
+/// | `budget_ms` | 档位（与开轮格的 `tier` 同一个事实，调用方传入） |
+/// | `scope` | `Root`（会话驱动的轮次都是根作用域） |
+///
+/// [ADR-065]: ../../../../../docs/adr/ADR-065.md "ADR-065"
+pub(crate) fn request_actor_spec(
+    ctx: &dyn crate::symbio_core::PluginInvokeRequest,
+    tier: crate::symbio_core::LatencyTier,
+) -> crate::symbio_core::ActorSpec {
+    use crate::symbio_core::{ActorSpec, Scope};
+    let principal = request_principal(ctx);
+    let matrix = crate::symbio_core::authz::matrix_for(&principal);
+    ActorSpec {
+        principal: principal.clone(),
+        // 模式判据住在定义域内（[`crate::symbio_core::Pattern::for_principal`]）——
+        // 与授权表同源、与主体类型名一起不散出 core 的 actors 域（NDC-001）。
+        pattern: crate::symbio_core::Pattern::for_principal(&principal),
+        capabilities: matrix.grant_names_of(&principal),
+        budget_ms: tier.budget_ms(),
+        scope: Scope::Root,
+    }
+}
+
 /// MODEL 会话上下文
 ///
 /// 设计说明：

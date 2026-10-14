@@ -369,6 +369,15 @@ export function startLongLivedCli({ homedir, workdir, session = 'e2e-live', mode
 
 // ---------- 会话实时面（与 Tauri 前端同构） ----------
 
+/**
+ * 会话集合在 VDFS 根下的**顶层段名**（后端 `plugins/session` 的 `SESSION_SEG`）。
+ *
+ * 与 `SEG_MESSAGES` 同一理由自持：地址是跨端契约，写错表现为「读了个不存在的
+ * 地址」而不是编译错误，而 e2e 的断言恰恰要靠地址形状判定行为（收件箱写入
+ * 落在 `<根>/<SESSION_SEG>/<sid>/inbox`）。
+ */
+export const SESSION_SEG = 'session';
+
 /** 会话下的**消息集合段名**（后端 `plugins/session` 的 `SEG_MESSAGES`）。 */
 export const SEG_MESSAGES = 'message';
 
@@ -488,8 +497,8 @@ export async function subscribeSessionRealtime(cli, { sessionId, gatewayPort }) 
  *
  * 这是「边跑边等、等到了再断言」的统一入口：等的是**实时面**（用户如何看到就
  * 如何等），转写 / 读数断言随后走 `cli.invoke`（`vdfs/read` 等生产路由）。
- * REPL 与 chat/send 走同一条 `session/chat/send` 路（`cli/src/client.rs`），
- * 因此会话节点的运行态帧对这条入口一样成立。
+ * REPL 与一次性 CLI 走同一条收件箱地址面（`ask` 写 `<根>/session/<sid>/inbox`，
+ * 见 `cli/src/client.rs`），因此会话节点的运行态帧对这条入口一样成立。
  *
  * @param cli `startLongLivedCli` / `startRealtimeSession` 给出的进程句柄
  * @param sub `subscribeSessionRealtime` 给出的实时面句柄
@@ -604,7 +613,125 @@ export async function readSessionMessages(cli, sid) {
     typeof root === 'string' && root.length > 0,
     `vdfs/root 应返回根地址（${JSON.stringify(rootResp.body)?.slice(0, 200)}）`,
   );
-  return readTranscriptAt(cli, `${root.replace(/\/+$/, '')}/session/${sid}`);
+  return readTranscriptAt(cli, `${root.replace(/\/+$/, '')}/${SESSION_SEG}/${sid}`);
+}
+
+/**
+ * 取 VDFS 根地址（`vdfs/root`——**唯一的「不给地址」入口**）。
+ *
+ * 根叫什么**归 vdfs 插件**，使用方不写死：问一次，之后一律从父地址往下拼。与前端
+ * `ensureVdfsRoot`、CLI 的 `fetch_root_addr` 同款。
+ */
+export async function vdfsRoot(cli) {
+  const rootResp = await cli.invoke('vdfs/root', {});
+  const root = rootResp.body?.data?.path;
+  assert(
+    typeof root === 'string' && root.length > 0,
+    `vdfs/root 应返回根地址（${JSON.stringify(rootResp.body)?.slice(0, 200)}）`,
+  );
+  return root.replace(/\/+$/, '');
+}
+
+/** 顶层会话的容器地址 `<根>/session/<sid>`。 */
+export async function sessionAddr(cli, sid) {
+  return `${await vdfsRoot(cli)}/${SESSION_SEG}/${sid}`;
+}
+
+/**
+ * **先建会话**（`vdfs/write(<根>/session/<sid>, { create: true, metadata })`）。
+ *
+ * 收件箱是会话**内部的集合**——会话不在，就没有它可写。曾经这条由
+ * `session/chat/send` 悄悄代劳（它 `get_or_create`），于是「先建后写」这件事在
+ * 调用方看起来可有可无；走地址面后它显式化了：一次写路径一个事实，会话的存在
+ * 由**会话节点的那一次写**负责，消息写入不附带建会话的语义（也不该由它带——
+ * 那正是 ADR-066 清掉的「选项随消息走」的同一处乖违）。
+ *
+ * 与前端 `createSession`、`register_subsession`、CLI `ensure_session` 同一条形状：
+ * 带 `create` 的写是 **upsert**（不存在则就地创建，已存在则浅合并 metadata），
+ * 所以「新建」与「改元数据」是同一次调用。
+ *
+ * @param metadata 写进会话 metadata 的字段（`workdir` / `mode` / `risk_level` / `provider_id`…）
+ */
+export async function createSession(cli, sid, metadata = {}) {
+  const addr = await sessionAddr(cli, sid);
+  const resp = await cli.invoke(
+    'vdfs/write',
+    { path: addr, create: true, text: JSON.stringify({ metadata: { ...metadata } }) },
+    { session_id: sid, ...metadata },
+  );
+  assert(
+    resp.status === 200,
+    `创建会话 ${sid} 应受理（${resp.status}: ${JSON.stringify(resp.body)?.slice(0, 200)}）`,
+  );
+  return resp;
+}
+
+/**
+ * 经 HTTP 边界**发一条用户消息**（收件箱地址面——输入面双轨退役后唯一入口）。
+ *
+ * `session/chat/send` 已于 T-077 步② 移除（[ADR-066]）：那条路由的 `message` 分支
+ * 只是入队的薄包装、回包恒为 `accepted`，而「接收消息」与「跑一轮」本来就在两处。
+ * 现在发消息 = 对空间的一次 `vdfs/write(<根>/session/<sid>/inbox, text)`——
+ * 与 T15 写**子智能体空间**收件箱同一条地址语义，机制统一、没有顶层专用分支。
+ *
+ * 正文写**纯文本**：`parse_inbox_message` 的判别式是「不以 `{` 开头」⇒ 整段就是
+ * 消息正文，身份与缺省（`role = user` / `type = text` / `status = completed`）由
+ * provider 一侧补齐。
+ *
+ * @param metadata 透传进 ctx 的调用级字段（`session_id` / `workdir`）
+ * @returns 原始回执（`{ status, body }`）；`body.data.name` 是生成的条目名
+ */
+export async function sendInbox(cli, sid, text, metadata = {}) {
+  const addr = `${await sessionAddr(cli, sid)}/inbox`;
+  const resp = await cli.invoke(
+    'vdfs/write',
+    { path: addr, text },
+    { session_id: sid, ...metadata },
+  );
+  return resp;
+}
+
+/**
+ * 经 HTTP 边界**中止一轮**（`action(<会话地址>, "abort")`）。
+ *
+ * 曾经的 `session/chat/abort` 是它的 address-less 别名，且本就复用同一个
+ * `abort_turn` 实现；双轨退役后只留节点动作这一条。
+ * 回执的 `ok` 才是判据（http 层恒 200：会话从未跑过同样返回 200 + `ok: false`）。
+ */
+export async function abortSession(cli, sid, metadata = {}) {
+  const addr = await sessionAddr(cli, sid);
+  const resp = await cli.invoke(
+    'vdfs/action',
+    { path: addr, action: 'abort' },
+    { session_id: sid, ...metadata },
+  );
+  return resp;
+}
+
+/**
+ * 经 HTTP 边界**回填一次恢复**（`action(<sid>/message/<mid>, <动作词>)`）。
+ *
+ * 曾经的入口是 `session/chat/send` 的 `resume` 字段（输入面双轨退役，T-077 步②）。
+ * 落点是**目标消息自身**：恢复不产生新用户消息，它就落在当时那条消息上
+ * （删除-重建），而入队会让它排到新消息之后、候选早已被改写。
+ *
+ * 动作词取 `ResumeAction` 的线上词形（snake_case）：`answer` / `approve` /
+ * `reject` / `supply` / `retry` / `retry_turn` / `retry_compaction`。载荷
+ * `args` / `reason` / `answer` 按动作词透传，`mode` / `risk_level` 是**调用级**
+ * 运行选项（不同来源各带各的）。
+ *
+ * 回执的 `ok` 才是判据（http 层恒 200：会话忙碌时同样 200 + `ok: false`）。
+ *
+ * @param targetId 恢复落点的消息 id（提问所在的 tool_call 节点 id 等稳定锚点）
+ */
+export async function resumeSession(cli, sid, targetId, action, payload = {}, metadata = {}) {
+  const addr = `${await sessionAddr(cli, sid)}/${SEG_MESSAGES}/${targetId}`;
+  const resp = await cli.invoke(
+    'vdfs/action',
+    { path: addr, action, payload },
+    { session_id: sid, ...metadata },
+  );
+  return resp;
 }
 
 /**

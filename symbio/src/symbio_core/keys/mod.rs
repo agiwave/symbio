@@ -110,6 +110,13 @@ define_string_key!(PathKey, PATH, "path");
 define_string_key!(WorkdirKey, WORKDIR, "workdir");
 define_string_key!(AgentIdKey, AGENT_ID, "agent_id");
 define_string_key!(SessionIdKey, SESSION_ID, "session_id");
+// 入站请求的**来源主体**（PL-001 §12.2 跨体承诺的「向谁宣告」）：调用方经请求
+// `metadata.source_principal` 声明「这条消息是谁发的」（完整主体名，如
+// `agent:main`）；网关 `build_ctx` 把 metadata 落进 ctx，会话插件的收件箱入队口
+// 取走它随条目寄存，轮末 `record_derived` 用它做 `commitment.*` 的 `to`。
+// 缺省（同机直呼 / 心跳等无来源声明的路径）⇒ 本机用户——与接线前写死的常量
+// 逐字一致（ADR-067：`to` 从调用点常量变成数据）。
+define_string_key!(SourcePrincipalKey, SOURCE_PRINCIPAL, "source_principal");
 // 请求链路 id：同一条链上的多次请求共用它，把跨插件的日志串回一条线。
 // 线上形态 = 请求 `metadata.trace_id`，因此读它的地方就是读 metadata 的地方
 // （壳层 `route_v2`、网关 `dispatch_once`）。

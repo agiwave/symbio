@@ -21,9 +21,9 @@ created: 2026-09-06
 1. **做成插件完全可行，且是更优解**——设置页的配置 UI 是现成机制，前端真的不用动。
 2. **WebSocket 是对的**，它确实是本场景的最优传输。
    但有个必须写进设计的细节：**WebSocket 解决的是"通道"，不解决"信源"**——
-   `session/chat/send` 是 fire-and-forget，AI 增量走的是 VDFS 变更（`kind = "vdfs"`）。
-   连上 WS 后**必须订阅总线 + 对会话地址登记 `vdfs/watch`**（两步缺一不可）才收得到流
-   （前端也是这么做的）。详见 §5.3。
+   往收件箱写消息（`vdfs/write <会话地址>/inbox`）是 fire-and-forget，AI 增量走的是
+   VDFS 变更（`kind = "vdfs"`）。连上 WS 后**必须订阅总线 + 对会话地址登记 `vdfs/watch`**
+   （两步缺一不可）才收得到流（前端也是这么做的）。详见 §5.3。
 3. 全部代码集中在**一个插件目录**（`symbio/src/plugins/gateway/`），其余机制全部复用。
 
 ---
@@ -138,10 +138,11 @@ WS /api/v1/ws?token=<token>
 
 **这是本设计最容易被误解的一点，务必注意。**
 
-- `session/chat/send`（`plugins/session/orchestrator/entry.rs::handle_chat_send_oneoff`）是
-  **fire-and-forget**：它 `spawn` 后台任务后**立即返回** `{"status":"accepted"}`，
-  **不会**返回一个可以读流的 Session 通道。
-- AI 的增量**不在** `chat/send` 那条连接上。会话实时面——消息转写**与会话运行态**——
+- 往收件箱写消息（`vdfs/write <根>/session/<id>/inbox`）是 **fire-and-forget**：
+  后台任务受理后**立即返回**，**不会**返回一个可以读流的 Session 通道。
+  （该写入面上曾有一条同义的 `session/chat/send` 路由，随输入面双轨退役，
+  见 [ADR-066](../adr/ADR-066.md "ADR-066")；`handle_chat_send_oneoff` 也已删除。）
+- AI 的增量**不在**那条写入连接上。会话实时面——消息转写**与会话运行态**——
   是 **VDFS 变更**（`kind = "vdfs"`），落在会话子树 `<根>/session/<id>` 上
   （`<根>` 是对外展示根，运行期取回，不写字面量——见 `docs/ref/RE-003-ROUTES.md`）。
 
@@ -151,7 +152,7 @@ WS /api/v1/ws?token=<token>
 2. `vdfs/watch` —— 开**闸**：后端只向**登记过路径**的订阅者投递变更。
 
 ```jsonc
-// 第二条连接：订阅总线 + 登记会话子树（`session/chat/send` 那条用完即走，不是同一条）
+// 第二条连接：订阅总线 + 登记会话子树（发消息那条用完即走，不是同一条）
 → { "metadata": { "path": "event_bus/subscribe" }, "payload": {} }
 → { "metadata": { "path": "vdfs/watch" }, "payload": { "path": "<根>/session/<id>" } }
 // 此后该连接逐帧下发 PluginFrame::Data：
@@ -256,10 +257,10 @@ wscat -c "ws://127.0.0.1:9231/api/v1/ws?token=$T"
 > {"metadata":{"path":"event_bus/subscribe"},"payload":{}}
 > {"metadata":{"path":"vdfs/watch"},"payload":{"path":"<根>/session/s_xxx"}}
 
-# 4) 另开一条连接发消息（fire-and-forget）
+# 4) 另开一条连接发消息（fire-and-forget；收件箱地址面，`session_id` 由地址末段给）
 curl -H "Authorization: Bearer $T" -X POST http://127.0.0.1:9231/api/v1/invoke \
-     -d '{"metadata":{"path":"session/chat/send","session_id":"s_xxx"},"payload":{"message":"你好"}}'
-# → {"type":"Data","data":{"status":"accepted",...}}
+     -d '{"metadata":{"path":"vdfs/write","session_id":"s_xxx"},"payload":{"path":"<根>/session/s_xxx/inbox","text":"你好"}}'
+# → {"type":"Data","data":{...}}（受理即回；正文走第 3 步那条连接的变更帧）
 
 # 5) 回到订阅那条 wscat 窗口：应持续收到 kind=vdfs 的 bus_event 变更帧
 ```

@@ -30,14 +30,19 @@ import './_selfrun.mjs';
 // `ask_user` 的 auto 分支**不产节点**（返回 `tool_unavailable`，让模型继续）——
 // auto 档下本用例根本到不了"等用户"。故两处请求都显式带 `mode: 'interactive'`。
 //
-// ## 恢复入口为什么是 gateway 直发 `session/chat/send`
+// ## 恢复入口为什么是 gateway 直发节点动作
 //
 // plan/10 §2.4 的前置原文：CLI 把 `resume: None` 写死（`cli/src/client.rs`），
 // **没有恢复入口**。批 2b 要补的正是这个入口。这里取该条明确列出的第二种形态——
-// 「e2e 直发 `session/chat/send` 的 `resume` 字段」：经 gateway HTTP 边界
-// （与 Tauri 前端同构的 `/api/v1/invoke`）发一条带 `resume` 的请求。
-// 好处是不动生产代码，且验的正是**前端恢复走的同一条路**（`handle_chat_send_oneoff`
-// 的 resume 分支 → `start_turn` 直连）。
+// 「e2e 直发」：经 gateway HTTP 边界（与 Tauri 前端同构的 `/api/v1/invoke`）
+// 发一条恢复请求。
+//
+// 入口形状随输入面双轨退役改过一次（T-077 步② / [ADR-066]）：曾经的
+// `session/chat/send` `resume` 字段已删除，恢复改走**节点动作**——
+// `vdfs/action(<sid>/message/<target_id>, "answer", { answer })`。好处依旧是不动
+// 生产代码，且验的正是**前端恢复走的同一条路**（`vdfs_provider` 的 resume 臂 →
+// `start_turn` 直连）；落点是目标消息自身，这一点与旧入口逐字相同（恢复就该
+// 「落在当时那条消息上」，入队会让它排到新消息之后，候选早被改写）。
 //
 // ## 为什么工具调用场景要 `once: true`（与 T26 同因）
 //
@@ -65,6 +70,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  resumeSession,
 } from '../helpers.mjs';
 
 /** 本用例的会话 id */
@@ -135,7 +141,7 @@ export default defineCase(
       });
       assertEq(first.code, 0, `第一轮 CLI 退出码（stderr: ${first.stderr.slice(0, 600)}）`);
 
-      // 读回 CLI：转写与恢复入口都经它（`vdfs/read` / `session/chat/send`，与前端同构）。
+      // 读回 CLI：转写与恢复入口都经它（`vdfs/read` / `vdfs/action`，与前端同构）。
       const api = startLongLivedCli({
         homedir: hd.homedir,
         workdir: hd.workdir,
@@ -166,19 +172,22 @@ export default defineCase(
           )}）`,
         );
 
-        // ── 第二幕：回填答案（恢复入口 = gateway 直发 `session/chat/send` 的 resume）──
-        const inv = await api.invoke(
-          'session/chat/send',
-          {
-            session_id: SID,
-            mode: 'interactive',
-            // 恢复请求：`message` 与 `resume` 互斥（入口显式校验），此处只给 `resume`。
-            // `target_id` = 提问所在 ToolCall 节点 id（稳定锚点）。
-            resume: { target_id: tc.id, action: 'answer', answer: ANSWER },
-          },
+        // ── 第二幕：回填答案（恢复入口 = `action(<sid>/message/<target_id>, "answer")`）──
+        //
+        // 落点是提问所在的 tool_call 节点 id（稳定锚点）；`mode` 是**调用级**运行
+        // 选项，只有会话 metadata 里没有时才由它兜底（ADR-066 决策 2）。
+        const inv = await resumeSession(
+          api,
+          SID,
+          tc.id,
+          'answer',
+          { answer: ANSWER, mode: 'interactive' },
           { session_id: SID },
         );
-        assertEq(inv.status, 200, `恢复请求应被接受（实际: ${JSON.stringify(inv.body)}）`);
+        assert(
+          inv.status === 200 && inv.body?.data?.ok === true,
+          `恢复请求应被受理（实际: ${JSON.stringify(inv.body)}）`,
+        );
 
         // 恢复是 spawn 执行（`start_turn` 立即返回 accepted）⇒ 轮询**请求数**等这一轮
         // 真的打了一次模型（用户可见面：mock 收到的第二个请求体就是恢复收尾轮）。

@@ -128,6 +128,7 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
         0,
         user_seq,
         crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_USER,
         "t0",
         &delegations,
         &[],
@@ -185,6 +186,63 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
     std::fs::remove_dir_all(wal.parent().unwrap()).ok();
 }
 
+/// `to` 是**数据**（[ADR-067](../../../../docs/adr/ADR-067.md "ADR-067")，T-072 的单测判据）：
+/// 来源主体由调用方传入——对等主体向「把消息交进来的那个主体」立约，不再写死
+/// 本机用户。缺省回落 `PRINCIPAL_USER` 的行为由上面的用例钉住（传入的就是它）。
+#[test]
+fn the_commitment_counterparty_is_data_not_a_constant() {
+    use super::super::tools::Delegation;
+
+    let wal = tmp_wal("commit-to-peer");
+    let (store, snapshot, user_seq) = seed_turn(
+        &wal,
+        crate::symbio_core::authz::PRINCIPAL_PEER,
+        0,
+        "对等主体跑一轮",
+        50,
+    );
+    let delegations = [Delegation {
+        id: "call-peer-1".to_string(),
+        promise: "把结果交给主智能体".to_string(),
+        ok: true,
+        why: String::new(),
+    }];
+    record_derived(
+        &wal,
+        &store,
+        &snapshot,
+        0,
+        user_seq,
+        crate::symbio_core::authz::PRINCIPAL_PEER,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        "t0",
+        &delegations,
+        &[],
+        &[],
+    )
+    .expect("派生事实入格");
+
+    let snap = EventWalStore::open(&wal).expect("重开").range(Seq::new(0));
+    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+
+    let opened = snap
+        .iter()
+        .find(|e| e.kind == crate::symbio_core::EVENT_COMMITMENT_OFFERED)
+        .expect("立约格");
+    assert_eq!(
+        opened.payload.get("from").and_then(|v| v.as_str()),
+        Some(crate::symbio_core::authz::PRINCIPAL_PEER),
+        "承诺方 = 跑轮的主体（对等体）"
+    );
+    assert_eq!(
+        opened.payload.get("to").and_then(|v| v.as_str()),
+        Some(crate::symbio_core::authz::PRINCIPAL_MAIN),
+        "承诺对象 = 来源主体（传入的数据，不是写死的常量）"
+    );
+
+    std::fs::remove_dir_all(wal.parent().unwrap()).ok();
+}
+
 /// 违约必须可观测（S08 §5）：`broken` 带 `why`，并**宣告**给承诺对象——
 /// 宣告仍是同一份事实源里的一格，不是新通道（S08 §2「通信 = 没有直连」）。
 #[test]
@@ -212,6 +270,7 @@ fn breached_delegation_is_declared_to_the_counterparty() {
         0,
         user_seq,
         crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_USER,
         "t0",
         &delegations,
         &[],
@@ -280,6 +339,7 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
         0,
         user_seq,
         crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_USER,
         "t0",
         &[],
         &[],
@@ -321,6 +381,7 @@ fn break_reason_lands_as_a_control_event_and_empty_stays_silent() {
         0,
         user_seq,
         crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_USER,
         "t0",
         &[],
         &[],

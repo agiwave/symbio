@@ -208,7 +208,7 @@ pub trait Capability: Send + Sync + 'static {
     /// - `args`：**模型给的参数**（工具调用参数 / 直接调用的 payload）；
     /// - `env`：**执行期环境**（出口 + 中止）——与 `ModelProvider::execute_turn`
     ///   共用同一类型，见 [`ExecEnv`]；
-    /// - `ctx`：**请求信封**——只有需要转发（`agent_run` 路由 `session/chat/send`、
+    /// - `ctx`：**请求信封**——只有需要转发（`agent_run` 起子会话经 VDFS 地址写入、
     ///   MCP 网关、VDFS 挂载解析）或读会话上下文（`WORKDIR` / `RISK_LEVEL`…）的
     ///   工具才碰它。
     ///

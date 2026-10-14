@@ -278,6 +278,50 @@ fn fault_timeout_avoided_by_fallback_event() {
 }
 
 #[test]
+fn fault_timeout_avoided_by_artifact_event() {
+    // 反向（[ADR-067](../../../../docs/adr/ADR-067.md "ADR-067")）：只落了**产物格**的轮
+    // 同样算收束——工具结果是说给用户的话，没有发言权的主体（对等主体）以它收束。
+    // 没有这条，对等主体每跑一轮都永久留一条违规，e2e 的「不变量清单为空」无从谈起。
+    let events = stored(vec![
+        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
+        pending(
+            "a0",
+            crate::symbio_core::EVENT_ARTIFACT_ADDED,
+            Entity::Artifact,
+            Verb::Asserted,
+            0,
+        )
+        .with_produced_by(0),
+    ]);
+    assert!(
+        unresolved_turns(&events, false).is_empty(),
+        "产物收束 ⇒ 放行：{:?}",
+        unresolved_turns(&events, false)
+    );
+    // 边界：**别的轮**的产物不算本轮的收束（按 turn 号配对，与 final 同一纪律）。
+    let events = stored(vec![
+        pending("u0", "user.message", Entity::Turn, Verb::Opened, 0),
+        pending("u1", "user.message", Entity::Turn, Verb::Opened, 1),
+        pending(
+            "a1",
+            crate::symbio_core::EVENT_ARTIFACT_ADDED,
+            Entity::Artifact,
+            Verb::Asserted,
+            1,
+        )
+        .with_produced_by(0),
+    ]);
+    assert_eq!(
+        unresolved_turns(&events, false)
+            .iter()
+            .map(|v| v.event_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["u0"],
+        "turn 0 没有自己的产物，仍要报；turn 1 被自己的产物合上"
+    );
+}
+
+#[test]
 fn fault_out_of_order_seq_regression_is_caught() {
     // 乱序 = seq 回退（3 之后又来 1）——绕过唯一写入口的典型痕迹。
     let mut e3 = pending("e3", "task.progress", Entity::Task, Verb::Progressed, 0);

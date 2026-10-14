@@ -194,17 +194,18 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
 
 **恢复（resume）的驱动入口**：CLI 把 `resume: None` 写死（`cli/src/client.rs`），
 `runCli` / `startLongLivedCli.send` 都**不带** resume。要在 e2e 里驱动恢复（审批 / 回填答案），
-走 **gateway HTTP 边界直发** `session/chat/send` 带 `resume` 字段：
+走 **gateway HTTP 边界直发节点动作** `vdfs/action`，动作词取 `ResumeAction` 的线上词形：
 
 ```js
-await api.invoke('session/chat/send',
-  { session_id: SID, resume: { target_id: tcId, action: 'answer', answer: {...} } },
+await api.invoke('vdfs/action',
+  { path: `${root}/session/${SID}/message/${tcId}`, action: 'answer', payload: { answer: {...} } },
   { session_id: SID });
 ```
 
-`message` 与 `resume` 互斥（入口显式校验）；`target_id` = 提问 / 审批所在的 **ToolCall 节点 id**
-（从 `messages.json` 取）；恢复分支是 `start_turn` **spawn** 执行（立即返回 `accepted`）⇒
-要轮询 WAL / 存储等收束。参考 `t27`。
+（等价的封装是 `helpers.mjs` 的 `resumeSession(cli, sid, targetId, action, payload, metadata)`。）
+落点是恢复目标**消息自身**——恢复不产生新用户消息，入队会让它排到新消息之后、候选早被改写。
+`target_id` = 提问 / 审批所在的 **ToolCall 节点 id**（从读出口取）；恢复分支是 `start_turn`
+**spawn** 执行（立即返回 `accepted`，`ok` 为判据）⇒ 要轮询 WAL / 存储等收束。参考 `t27` / `t18`。
 
 ## 门外：真实模型上的形状对照（`e2e/ab/`）
 

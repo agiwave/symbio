@@ -133,6 +133,8 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
         '同上：与 SloLatencyView 成对（时延 + 兜底一起合并），core 外唯一生产消费方同为 plugins/session 的实例级聚合列，core 内没有第二个生产消费模块',
       mutations_latest_snapshot:
         '快照定位规则（S2.7-b2）：core 内一份实现（transcript 换基 / prompt_fidelity 跳过被取代段），插件经根名调用（C-002 禁深引 projection 域）。core 外唯一生产消费方 = plugins/session（turn_runner 取窗口 / v2_exec 判幂等并取轮次水位 / rebuild 换基）。core 内没有第二个生产消费模块（store 侧只有测试），故显为单消费方。不可下沉——五处读侧各写一份必然漂，而漂的后果是静默的',
+      SOURCE_PRINCIPAL:
+        '线上协议键（AR-004 标准上下文键表）：入站 metadata 的「来源主体」，键名字面 `source_principal` 出现在网关线上协议与 e2e 请求包里，是**跨进程契约**——键名注册表就是 core keys 域（T-072 的 `commitment.*` 的 `to`）。core 外唯一生产消费方 = plugins/session（收件箱条目寄存 / 执行 ctx 挂回 / `request_source_principal` 读取），但不可下沉进该插件：下沉后线上键名脱离 AR-004 键表与 `define_string_key!` 注册行，网关 metadata 与消费方各写一份字面量必然漂移。属 README §4 四问的「成文契约」而非「单消费方该下沉」',
     }
 
 /**
@@ -155,6 +157,10 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
  *   ⚠️ 这**抵消了** 2026-10-09 那次口径修正引入的一格虚高（当时 one 61→77 是测量口径
  *   的一次真实变化；这次把 two 条口径各归其位后回落到 58，不再需要
  *   `core-export-allow one` 那条棘轮格下修豁免）。
+ * - **T-072 合并批**（2026-10-14）降一格 58 → 57：`Pattern::Reasoner` 的派生下沉回
+ *   actors 定义域（`Pattern::for_principal`，插件层不再出现主体类型名——NDC-001 同一
+ *   纪律），`Reasoner` 退出单消费方清单；`SOURCE_PRINCIPAL` 作为线上协议键登记豁免
+ *   （跨进程契约，不可下沉，见账本）。
  *
  * 存量的处置判据仍是 README §4 四问（下沉 / 成文契约 / 登记豁免），处置一个就把这里
  * 降一格。**注意**：本格只数「既没跨 core 第二个模块用、又不是自引用」的单消费方；
@@ -166,7 +172,7 @@ const BASELINE = process.env.CORE_EXPORT_BASELINE
       const [zero, one] = process.env.CORE_EXPORT_BASELINE.split(':').map((n) => Number(n))
       return { zero, one }
     })()
-  : { zero: 0, one: 58 }
+  : { zero: 0, one: 57 }
 
 
 

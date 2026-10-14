@@ -194,9 +194,10 @@ const rel = (abs) => path.relative(repoRoot, abs).split(path.sep).join('/')
 // ── 常量表：`NAME` → 字符串值（Rust `const` / TS `export const`）──────────
 //
 // 需要它是因为「引用一条路由」有两种写法：直接写字面量，或经常量
-// （`ROUTE_SESSION_CHAT_SEND` / `CHAT_ABORT`）。只查字面量会**漏报**，
+// （`ROUTE_VDFS_WATCH` / `ROUTE_EVENT_BUS_SUBSCRIBE`）。只查字面量会**漏报**，
 // 而漏报会让审计给出「这条路由没人用」的错误结论——2026-09-18 第一版
-// 手查就踩过：`session/chat/abort` 字面量计数为 0，实际前端一直在用。
+// 手查就踩过：`session/chat/abort` 字面量计数为 0，实际前端一直在用
+// （那条路由现已随输入面双轨退役，例子本身不再成立，机理照旧）。
 function buildConstTable(files) {
   const table = new Map() // name → value
   for (const abs of files) {
@@ -848,7 +849,7 @@ for (const abs of VOCAB_MD_FILES) {
 // 契约的另一半。`plugin/route.rs` 的模块文档长期**声称**这两条由 `core-naming-audit.mjs`
 // 检查，而那个脚本只有 N-001…N-005 的前缀归属规则——声称有守卫的文档比没有守卫更糟。
 //
-// ① 名 ↔ 值：`ROUTE_SESSION_CHAT_SEND` 的值必须是 `"session/chat/send"`。名字是调用方
+// ① 名 ↔ 值：`ROUTE_VDFS_WATCH` 的值必须是 `"vdfs/watch"`。名字是调用方
 //    唯一读得见的线索：名字说 A、值说 B 时，读代码的人会照着名字拼出一条不存在的地址，
 //    而编译与测试都不会响。
 // ② 值真实存在：值必须落在 `dispatchableRoutes`（`route()` 的静态臂 ∪ `VDFS_OPS`）。

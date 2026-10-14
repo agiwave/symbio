@@ -3,9 +3,8 @@ use super::types::{TelegramConfig, TelegramMessage};
 use super::typing::TypingGuard;
 use crate::symbio_core::PluginInvokeRequestExt;
 use crate::symbio_core::{
-    plugin_dir_from_ctx, session_chat, CapabilityMeta, Plugin, PluginConfigFile, PluginDir,
-    PluginError, PluginInvokeRequest, PluginInvokeResponse, PluginMeta, PluginPayload,
-    PLUGIN_ID_TELEGRAM, ROUTE_SESSION_CHAT_SEND,
+    plugin_dir_from_ctx, CapabilityMeta, Plugin, PluginConfigFile, PluginDir, PluginError,
+    PluginInvokeRequest, PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_ID_TELEGRAM,
 };
 use crate::symbio_core::{DetailDefinition, DetailField, DynVdfsProvider, SuccessResponse};
 use async_trait::async_trait;
@@ -342,10 +341,11 @@ impl TelegramPlugin {
                                 if let Ok(data) = resp.json::<Value>().await {
                                     if let Some(results) = data.get("result").and_then(|v| v.as_array()) {
                                         for update in results {
-                                            // 处理每条消息
+                                            // 处理每条消息。`client` / `api_url` 按值传：
+                                            // 每条更新各起一个后台任务（见 `process_update`）。
                                             if let Err(e) = Self::process_update(
-                                                &client,
-                                                &api_url,
+                                                client.clone(),
+                                                api_url.clone(),
                                                 update,
                                                 &config,
                                                 &update_offset,
@@ -410,10 +410,13 @@ impl TelegramPlugin {
     }
 
     /// 处理单个更新
+    ///
+    /// `client` / `api_url` 按**值**收（而不是借用）：本方法把整轮会话调用交给
+    /// 一个后台任务（见下），任务必须 `'static`。
     #[allow(clippy::too_many_arguments)]
     async fn process_update(
-        client: &reqwest::Client,
-        api_url: &str,
+        client: reqwest::Client,
+        api_url: String,
         update: &Value,
         config: &Arc<RwLock<TelegramConfig>>,
         update_offset: &Arc<AtomicI64>,
@@ -463,98 +466,57 @@ impl TelegramPlugin {
             text.chars().take(50).collect::<String>()
         );
 
-        // 启动 typing 指示器
-        let typing_guard = TypingGuard::new(client.clone(), api_url.to_string(), chat_id.clone());
-
-        // 获取 LLM 响应
+        // ── 一轮会话调用交给后台任务：**不阻塞轮询** ──
         //
-        // 跨插件调用必须**经父容器**：`telegram` 与 `session` 在 worker 下平级，
-        // 只有容器的 `route` 认识绝对地址 `session/chat/send`（容器挂载子插件时把
-        // 自身 Weak 塞进子 ctx，`fork()` 会原样保留它）。直接调兄弟实例的 `route`
-        // 既绕过容器，又会在插件重建后钉住旧实例——这正是此前的写法。
-        let response = match ctx.parent().and_then(|w| w.upgrade()) {
-            Some(router) => {
-                let chat_input = serde_json::to_value(session_chat::Request {
-                    session_id: Some(chat_id.clone()),
-                    agent_id: None,
-                    message: Some(crate::symbio_core::chat_message::ChatMessage {
-                        role: Some(crate::symbio_core::chat_message::MessageRole::User),
-                        content: Some(crate::symbio_core::chat_message::MessageContent::Text(
-                            text.to_string(),
-                        )),
-                        ..Default::default()
-                    }),
-                    provider_id: None,
-                    include_history: None,
-                    // Telegram 接入是无人值守通道，统一走 auto 模式
-                    // （需交互工具返回友好错误，由 LLM 自行决策；不产 user_prompt 阻塞）
-                    mode: Some("auto".to_string()),
-                    // risk_level 留空：由 orchestrator 回退到会话 metadata.risk_level（默认 medium）。
-                    // Telegram 通道应尊重会话自身的风险等级设置。
-                    risk_level: None,
-                    resume: None,
-                })
-                .unwrap_or_default();
+        // 一轮可能跑几分钟（长工具调用 / 子智能体），而 `getUpdates` 就在同一条
+        // 循环里——同步等待会让整个 bot 在那段时间内收不到任何消息。此前之所以
+        // 没有这个问题，只是因为 `session/chat/send` 立刻返回 `accepted`（也正因为
+        // 如此，回复永远是「无响应」）。
+        //
+        // 并发之后，中断语义（`latest_version`）才真正成立：同一 chat 的后来者能
+        // 把版本推高，前一轮据此放弃回复。此前是串行 `await`，那条判定恒不成立。
+        // 同一会话的两轮由收件箱**单写者 FIFO** 串行（ADR-064），因此并发不会让
+        // 两轮交错写同一条转写。
+        let latest = Arc::clone(latest_version);
+        let text = text.to_string();
+        tokio::spawn(async move {
+            // typing 指示器随任务起落：它跨整轮存在，一轮结束即停。
+            let typing_guard = TypingGuard::new(client.clone(), api_url.clone(), chat_id.clone());
 
-                let sub_ctx = ctx.fork();
-                // 路径取常量：此处曾写 `SESSION_CHAT`（`"session/chat"`）——**该路径不存在**，
-                // session 的 `route` 只认 `chat/send` / `chat/abort` 两条相对臂，
-                // 所以这里以前必定落到 `_ => NotFound`。见 `symbio_core::plugin::route` 的地址规则。
-                sub_ctx.set(
-                    crate::symbio_core::PATH,
-                    ROUTE_SESSION_CHAT_SEND.to_string(),
-                );
-                let _ = sub_ctx.set_payload(chat_input);
-                sub_ctx.set(crate::symbio_core::WORKDIR, ".".to_string());
-                sub_ctx.set(crate::symbio_core::SESSION_ID, chat_id.clone());
-
-                match router.route(sub_ctx).await {
-                    Ok(payload) => {
-                        let mut full_text = String::new();
-                        // `session/chat/send` 的返回值**恒为** `PluginPayload::Data`
-                        // （`session_chat::Response`，已含本轮定稿后的完整正文），
-                        // 没有第二个分支可写——因此是 `if let` 而不是单臂 `match`。
-                        //
-                        // ⚠️ 实时增量**不经由本回包下发**——它走 `event_bus` 的
-                        // `vdfs` 频道，协议上没有第二个分支，故这里只能是 `if let`。
-                        if let PluginPayload::Data(_) = payload {
-                            if let Ok(chat_resp) = payload.get::<session_chat::Response>() {
-                                full_text.push_str(
-                                    &chat_resp
-                                        .message
-                                        .content
-                                        .as_ref()
-                                        .map(|c| c.to_text())
-                                        .unwrap_or_default(),
-                                );
-                            }
-                        }
-
-                        if full_text.is_empty() {
-                            "无响应".to_string()
-                        } else {
-                            full_text
-                        }
+            // 跨插件调用必须**经父容器**：`telegram` 与 `session` 在 worker 下平级，
+            // 只有容器的 `route` 认识绝对地址（容器挂载子插件时把自身 Weak 塞进子
+            // ctx，`fork()` 会原样保留它）。直接调兄弟实例的 `route` 既绕过容器，
+            // 又会在插件重建后钉住旧实例——这正是更早的写法。
+            //
+            // 调用形状（地址面入队 + 实时面取答复）见 [`super::turn`] 的模块文档。
+            // 这里曾按 `session_chat::Response` 解析 `session/chat/send` 的回包，
+            // 而它恒为 `{"status":"accepted"}`，于是回复永远是「无响应」。
+            let response = match ctx.parent().and_then(|w| w.upgrade()) {
+                Some(router) => match super::turn::run_turn(router, &ctx, &chat_id, &text).await {
+                    super::turn::TurnOutcome::Replied(t) if t.trim().is_empty() => {
+                        "（本轮没有产生文本输出）".to_string()
                     }
-                    Err(e) => format!("LLM 调用失败: {e}"),
+                    super::turn::TurnOutcome::Replied(t) => t,
+                    super::turn::TurnOutcome::Failed(e) => format!("本轮以错误结束：{e}"),
+                    super::turn::TurnOutcome::Broken(e) => format!("回复失败：{e}"),
+                },
+                None => "未挂载到插件容器，无法调用会话".to_string(),
+            };
+
+            // 检查消息是否被中断
+            {
+                let Ok(versions) = latest.try_read() else {
+                    return;
+                };
+                if versions.get(&chat_id).copied() != Some(version) {
+                    tracing::info!("[telegram] 消息 v{} 被中断", version);
+                    return;
                 }
             }
-            None => "未挂载到插件容器，无法调用 LLM".to_string(),
-        };
 
-        // 检查消息是否被中断
-        {
-            let versions = latest_version.try_read().map_err(|e| e.to_string())?;
-            if versions.get(&chat_id).copied() != Some(version) {
-                tracing::info!("[telegram] 消息 v{} 被中断", version);
-                return Ok(());
-            }
-        }
+            // 发送响应
+            drop(typing_guard); // 停止 typing
 
-        // 发送响应
-        drop(typing_guard); // 停止 typing
-
-        if !response.is_empty() {
             let mut remaining = response.as_str();
             while !remaining.is_empty() {
                 let split_point =
@@ -575,7 +537,7 @@ impl TelegramPlugin {
                     .send()
                     .await;
             }
-        }
+        });
 
         Ok(())
     }

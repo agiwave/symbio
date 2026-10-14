@@ -57,7 +57,7 @@ import {
   type SessionListItem,
   type SessionMetadata
 } from '@/services/session'
-import { writeVdfs, runVdfsAction } from '@/services/vdfs'
+import { writeVdfs, runVdfsAction, listVdfs } from '@/services/vdfs'
 import {
   VDFS_ACTION_ABORT,
   VDFS_STATUS_WORKING,
@@ -65,6 +65,7 @@ import {
   isWorkingStatus,
   parseVdfsSessionAddr,
   sessionRuntimeOf,
+  vdfsInboxAddr,
   vdfsSessionAddr,
   type VdfsNode,
 } from '@/schemas/vdfs'
@@ -73,6 +74,7 @@ import { useSessionUiStateStore } from './sessionUiState'
 import { publishVdfsChangedLocal } from '@/services/eventBus'
 import { ensureSessionMountDir, ensureSessionScheme } from '@/services/vdfsScheme'
 import { playCompletionChime } from '@/services/completionChime'
+import { READBACK_REASON } from '@/services/readback'
 import { logger } from '@/utils/logger'
 import {
   MESSAGE_STATUS_REMOVED,
@@ -104,6 +106,9 @@ import { useSessionLiveState } from './sessionLiveState'
 
 // 对外类型契约保持原路径（消费方一直从 `@/stores/sessions` 取）
 export type { SessionLiveStatus } from './sessionLive'
+// 排队中的用户消息（「待发送」气泡的形状）——契约在 sessionInboxSync，此处 re-export
+export type { InboxEntry } from './sessionInboxSync'
+import type { InboxEntry } from './sessionInboxSync'
 
 /** 单个 session 的实时状态（用于缩略卡展示）—— 定义见 `./sessionLive`，此处仅经上方 re-export 暴露 */
 
@@ -236,6 +241,16 @@ export const useSessionsStore = defineStore('sessions', () => {
   // 用 shallowRef + 手动 triggerRef 保证响应式而不深 watch
   const sessionMessages = shallowRef<Record<string, Record<string, ChatMessage>>>({})
   const sessionSeq = ref<Record<string, number>>({})
+
+  // ── 收件箱（排队中的用户消息） ──
+  //
+  // 与 `sessionMessages` 分开两张表，因为它们是**两个集合**：转写里是已落库的
+  // 消息，这里是还没被消费的待发消息（ADR-026 的 inbox）。同一条用户消息先在这
+  // 里、被消费后换到转写里——**id 不变**，所以是「换位置」不是「多一条」。
+  //
+  // 值就是展示所需的全部（地址末段即身份 + 后端给的预览文案），不做成
+  // `ChatMessage`：帧里本来就没有正文，硬造一个空壳只会诱导下游去读不存在的字段。
+  const inboxItems = shallowRef<Record<string, InboxEntry[]>>({})
 
   // 实时状态的落地层（状态 / 错误 / 告警三张表与唯一变更通道）按职责拆去
   // `./sessionLiveState`；同名解构进来，使调用点零改动。
@@ -466,6 +481,9 @@ export const useSessionsStore = defineStore('sessions', () => {
     const snext = { ...sessionStatuses.value }
     delete snext[sessionId]
     commitStatuses(snext)
+    const inext = { ...inboxItems.value }
+    delete inext[sessionId]
+    inboxItems.value = inext
   }
 
   /**
@@ -1054,6 +1072,79 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   // ---- helpers ----
 
+  // ===== 收件箱（排队中的用户消息）的 VDFS 变更 → 待发送气泡 =====
+  //
+  // 订阅**不在本工厂里**：`stores/sessionInboxSync.ts` 是那条接线，由应用外壳
+  // （`MainLayout`）显式 `startSessionInboxSync(store)` 启动——本 store 只提供
+  // 收敛动作，不自己挂监听器，因此可被独立构造与测试。
+  //
+  // 三个动作分别对应后端发的三种东西：入队（带节点视图的变更）、出队 / 取消 /
+  // 清空（无载荷变更）、整份重列（resync / 打开会话）。
+
+  /** 该会话当前排队中的条目（供聊天面板渲染「待发送」气泡） */
+  function getInboxItems(id: string): InboxEntry[] {
+    return inboxItems.value[id] ?? []
+  }
+
+  /**
+   * 入队（或更新）一条待发送消息。
+   *
+   * 按 `id` upsert 并**保持到达顺序**：队列本身就是 FIFO，气泡的上下顺序就是
+   * 它被消费的先后顺序——打乱顺序会让「第二条先跑」在界面上看起来像 bug。
+   * 已存在的 id 只更新文案（后端重发同一帧时幂等），不挪位置。
+   */
+  function applyInboxItem(sessionId: string, entry: InboxEntry): void {
+    if (!sessionId || !entry?.id) return
+    const cur = inboxItems.value[sessionId] ?? []
+    const idx = cur.findIndex((e) => e.id === entry.id)
+    const next = idx >= 0 ? cur.map((e, i) => (i === idx ? entry : e)) : [...cur, entry]
+    inboxItems.value = { ...inboxItems.value, [sessionId]: next }
+  }
+
+  /** 出队 / 取消 / 清空一条（回读确认已不在队列后才调到这里） */
+  function removeInboxItem(sessionId: string, itemId: string): void {
+    const cur = inboxItems.value[sessionId]
+    if (!cur || cur.length === 0) return
+    const next = cur.filter((e) => e.id !== itemId)
+    if (next.length === cur.length) return
+    inboxItems.value = { ...inboxItems.value, [sessionId]: next }
+  }
+
+  /** 整份替换（权威收敛：resync / 打开会话时的补列） */
+  function setInboxItems(sessionId: string, entries: InboxEntry[]): void {
+    inboxItems.value = { ...inboxItems.value, [sessionId]: entries }
+  }
+
+  /**
+   * 补列某个会话的收件箱（打开会话 / resync 时调用）。
+   *
+   * 补的是**冷启动窗口**：应用起来之前就排在队里的消息没有入队帧可收（见
+   * `sessionInboxSync` 模块头的「已知代价」）。列一次目录即权威清单——
+   * 与实时帧幂等（同样按 id upsert，这里直接替换）。
+   *
+   * 失败**不抛**：队列读不到只是没有气泡，转写照样能加载（调用方在打开会话的
+   * 关键路径上，不该被一条可选的可视化带崩）。
+   */
+  async function refreshInbox(sessionId: string): Promise<void> {
+    const mountDir = mountDirOf(sessionId)
+    try {
+      const scheme = await ensureSessionScheme(mountDir)
+      const resp = await listVdfs(
+        READBACK_REASON.LIST_REFRESH,
+        vdfsInboxAddr(scheme, sessionId),
+      )
+      const entries: InboxEntry[] = (resp.items ?? [])
+        .filter((n) => n.name)
+        .map((n) => ({
+          id: n.name,
+          label: (typeof n.description === 'string' && n.description.trim()) || '待发送',
+        }))
+      setInboxItems(sessionId, entries)
+    } catch (e) {
+      logger.warn('[sessions]', `补列收件箱失败：${sessionId}`, e)
+    }
+  }
+
   // ===== 会话节点的 VDFS 变更 → 侧栏清单同步 =====
   //
   // 订阅**不在本工厂里**：`stores/sessionNodeSync.ts` 是那条接线，由应用外壳
@@ -1130,6 +1221,8 @@ export const useSessionsStore = defineStore('sessions', () => {
     sessionMessages,
     transcriptVersion,
     sessionStatuses,
+    // 排队中（入队未消费）的用户消息——「前端不是唯一发送方」的显示件
+    inboxItems,
     // computed
     activeListItem,
     activeAddr,
@@ -1172,6 +1265,13 @@ export const useSessionsStore = defineStore('sessions', () => {
     getSessionWarning,
     setSessionWarning,
     dropSessionState,
+    // 收件箱（排队中的用户消息）：入队 / 出队 / 整份重列。实时订阅由
+    // `sessionInboxSync` 在 MainLayout 启动，这里只提供收敛动作。
+    getInboxItems,
+    applyInboxItem,
+    removeInboxItem,
+    setInboxItems,
+    refreshInbox,
     hydrateFromHistory,
     removeFrom,
     // 运行模式（auto / interactive）：写入统一走会话选项栏（metadata 补丁），

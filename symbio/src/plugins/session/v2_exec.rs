@@ -1052,18 +1052,14 @@ pub(crate) async fn execute_final_reply_turn(
     // 一套必然在「答话轮之后紧接着一个新轮」时错开一号。
     let turn_no = count_user_messages(&snapshot);
     // 身份与档位取值点同 [`execute_turn`]：主体 = 会话选定的那个 agent；档位 = 深度
-    // （`Answered` 轮没有可跳过的模型调用，不属于反射档）。
-    let principal = super::chat_loop::request_principal(ctx.as_ref());
+    // （`Answered` 轮没有可跳过的模型调用，不属于反射档）。规格从授权表行取
+    // （`request_actor_spec`，能力集 / 模式不再是平凡值）。
+    let actor = super::chat_loop::request_actor_spec(ctx.as_ref(), LatencyTier::Deep);
+    let principal = actor.principal.clone();
     // 压缩入格 + 归档：与 [`execute_turn`] 同序（在 `turn_no` 之后、运行器之前）。
-    // 放在 `actor` 构造**之前**：`ActorSpec::trivial` 按值吃 `principal`（无克隆），
-    // 顺序反了就得为一次借用多克隆一个字符串。
     if let Some(msgs) = consolidation {
         consolidate_into_wal(&store, msgs, &principal);
     }
-    let actor = ActorSpec {
-        budget_ms: LatencyTier::Deep.budget_ms(),
-        ..ActorSpec::trivial(principal)
-    };
     let llm = ProviderLlmAdapter::for_turn(provider, "", abort.clone());
     let tok = TokenIssuer::issue_deep();
     let input = TurnInput {
@@ -1292,28 +1288,28 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     //
     // **诚实缺口**：`ActorSpec.budget_ms` 在生产里**还没有读方**——`invariants` 的
     // `declared_budget_ms` 读的是开轮载荷里的 `tier` **字符串**（再映射回同一个数）。
-    // 于是这里派生出的数是"算了却看不见"：不派生也不改变今天的行为（`trivial()` 的
-    // `60_000` 同样无人读）。仍然派生的理由 = 它是 I3 预算的**正确值**，读方接进来时
-    // 不必回头改这里；而读方该读 `tier` 还是该读这个字段（= 改事件载荷形状），
-    // 是 `invariants` 那一侧的取舍，本模块两个都不替它定。
+    // 于是这里派生出的数是"算了却看不见"：不派生也不改变今天的行为。仍然派生的
+    // 理由 = 它是 I3 预算的**正确值**，读方接进来时不必回头改这里；而读方该读
+    // `tier` 还是该读这个字段（= 改事件载荷形状），是 `invariants` 那一侧的取舍，
+    // 本模块两个都不替它定。
     let tier = if hit.is_some() {
         LatencyTier::Reflex
     } else {
         LatencyTier::Deep
     };
     // 身份进事件（[plan/11 批 1](../../../../docs/plan/PL-009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") ①）：
-    // 本轮以**会话选定的那个 agent** 为主体——`ActorSpec` 首次在生产构造，
-    // `agent:main` 从字面量变成数据。取值点与 chat_loop 同一个（`request_principal`），
-    // 写侧闸判的正是它 ⇒ 判的对象 = 写的对象。未选智能体 ⇒ `agent:main`
+    // 本轮以**会话选定的那个 agent** 为主体，规格从**授权表行**取（`request_actor_spec`）：
+    // 能力集与模式不再是 `trivial` 的空表平凡值——它们与写侧闸判的是同一张表
+    // （判的对象 = 写的对象 = 表授予的对象）。未选智能体 ⇒ `agent:main`
     // （S08 §4 平凡值，与接线前逐字一致）。
     //
     // 另存一份 `principal`：`actor` 随 `input` 被移动进运行器，轮末的记忆与学习
     // 写方（`record_learning`）仍要以它为主体——先取字符串，不依赖 `actor` 的存活。
-    let principal = super::chat_loop::request_principal(ctx.as_ref());
-    let actor = ActorSpec {
-        budget_ms: tier.budget_ms(),
-        ..ActorSpec::trivial(principal.clone())
-    };
+    let actor = super::chat_loop::request_actor_spec(ctx.as_ref(), tier);
+    let principal = actor.principal.clone();
+    // 来源主体（ADR-067）：`commitment.*` 的 `to`。在此刻取而不是轮末——`ctx` 会被
+    // 移进工具分发口（`SessionDispatchPort`），轮末已经拿不到它。
+    let to = super::chat_loop::request_source_principal(ctx.as_ref());
 
     // ── 压缩入格 + 归档（S2.7-b2）─────────────────────────────────────────
     //
@@ -1654,6 +1650,10 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
             // 承诺 / 任务表 / 熔断：写方是 `record_derived`。
             // 承诺失败只记日志不冒泡——轮次已收束，派生事实失败不该把成功的一轮说成
             // 失败（与记忆三段同一条口径）。
+            //
+            // `to` = 来源主体（ADR-067）：本主体向「这条消息的出处」立约。缺省落
+            // 本机用户——本机路径与接线前一致（取值点见 `request_source_principal`，
+            // 在 `ctx` 被移进分发口之前取好）。
             if let Err(why) = super::v2_facts::record_derived(
                 &wal,
                 &store,
@@ -1661,6 +1661,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                 turn_no,
                 user_seq,
                 &principal,
+                &to,
                 &format!("t{turn_no}"),
                 &derived.delegations,
                 &derived.tasks,
@@ -1766,9 +1767,13 @@ fn consolidated_turns(e: &Event) -> u64 {
 
 /// **已开未收束**的轮次（`turn × opened` 无同号收束）：返回 `(turn, 用户格 seq)`。
 ///
-/// 与 core 的 `invariants::unresolved_turns`（C4）同一口径——等待用户动作的那一轮
-/// 就是它（进展格 `chat.assistant.progress` 不是收束格：本轮还没了结，收束格留给
-/// 恢复幕）。取**最后**一个：恢复请求总是续写最近一次停顿。
+/// 与 core 的 `invariants::unresolved_turns`（C4）**刻意不同口径**：这里只认
+/// final / fallback 收束格、**不认产物格**（C4 经 ADR-067 认）。原因：等待用户
+/// 动作的那一轮（进展格不是收束格，但往往已落过产物格）的收束格刻意留给恢复幕
+/// ——若这里也把「落过产物」当成已收束，恢复请求会报「找不到未收束的轮次」，
+/// 审批 / 问答恢复整条链路断掉。C4 只负责「不再报它静默中断」，恢复锚仍按
+/// final / fallback 找——两处口径的差异是 ADR-067 落地时的显式决策，不是漏改。
+/// 取**最后**一个：恢复请求总是续写最近一次停顿。
 fn last_open_turn(events: &[Event]) -> Option<(u64, u64)> {
     let mut open: Vec<(u64, u64)> = Vec::new();
     for e in events {

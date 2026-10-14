@@ -8,7 +8,7 @@ created: 2026-09-25
 
 # 会话输入改走地址：`<会话地址>/inbox` + 三个动作
 
-> **状态：已落 ADR-031，§5.1–5.4 与 §6.1–6.5 已实施**（实施清单与未落地项见 §8）。
+> **状态：已落 ADR-031，§5.1–5.4 与 §6.1–6.6 已实施**（实施清单与未落地项见 §8）。
 >
 > 本文回答「会话的**输入**（发消息 / 停止 / 重试审批）应该落在哪」。
 > 「收件箱怎么消费」见 `symbio/src/plugins/session/transcript/inbox.rs` 与 ADR-026；
@@ -27,10 +27,13 @@ created: 2026-09-25
 
 ### 根因 A：`chat/send` / `chat/abort` 是**全局路由**，落点恒为根 session 插件实例
 
+> 两条路由已随 T-077 步②退役（[ADR-066](../adr/ADR-066.md "ADR-066")）。本节是问题
+> 发生时的记录：**当时的**入口形状。
+
 - `symbio/src/plugins/session/plugin.rs:436-437` 把两条路由交给 `self`——而 `self`
   是**收到这次 `route` 的那个 `SessionPlugin` 实例**。
-- 会话发言只有**一条**绝对地址 `session/chat/send`（`symbio_core::ROUTE_SESSION_CHAT_SEND`），
-  由**根 composite** 分发 ⇒ 恒为根实例。
+- 会话发言只有**一条**绝对地址 `session/chat/send`（`symbio_core::ROUTE_SESSION_CHAT_SEND`，
+  随本步退役，见 §8.2），由**根 composite** 分发 ⇒ 恒为根实例。
 - 子智能体空间有**自己的** `SessionPlugin` 实例（`<根>/agent/<id>/session`），但它
   **没有路由入口**：`symbio/src/plugins/agent/host/plugin.rs:577-584` 明确
   `NotFound` 并指路 VDFS。`agent/<id>` 只在 agent 插件的 VDFS 视图里作为挂载点存在。
@@ -154,23 +157,25 @@ action(<A>/message/<mid>, <ResumeAction>)   payload: {args?, reason?, answer?, m
 与 `cancel_inbox_item` 同款（「载荷缺失 + 回读 NotFound」= 删除，ADR-025）。
 **这是 §6.5 排队态显示能成立的前提。**
 
-### 5.5 `chat/send` / `chat/abort` 退役
+### 5.5 `chat/send` / `chat/abort` 退役（✅ 已落，T-077 步②）
 
 调用方迁移（全部在**根空间**或**本空间**，语义不变，只换入口）：
 
 | 调用方 | 现在 | 改成 |
 |---|---|---|
-| 前端 | `callPlugin(CHAT_SEND / CHAT_ABORT)` | §6 的地址操作 |
+| 前端 | `callPlugin(CHAT_SEND / CHAT_ABORT)` | §6 的地址操作（§6.5，早于本步完成） |
 | `cli/src/client.rs` | `session/chat/send` | `vdfs/write(<根>/session/<sid>/inbox)`（CLI 已会用 `vdfs/write` 建会话） |
-| `plugins/telegram/plugin.rs:471` | `session/chat/send` | 同上；地址经 `vdfs/root` 拼（与 `agent_run::session_vdfs_addr` 同款） |
-| `session/heartbeat/mod.rs:197` | 直连 `handle_chat_send_oneoff` | 直连 `enqueue_inbox` |
-| `agent/host/subagent.rs:338` | `parent.route(SESSION_CHAT_SEND)` | `parent.get_vfs_provider()` 写 `session/<sid>/inbox`（与它自己的 `register_subsession` 同款） |
-| e2e t7 / t9 / t10 / t11 / t14 | 走路由 | 走地址（t15 已是范本） |
+| `plugins/telegram/plugin.rs` | `session/chat/send` | 同上；地址经 `vdfs/root` 拼（与 `agent_run::session_vdfs_addr` 同款） |
+| `session/heartbeat/mod.rs` | 直连 `handle_chat_send_oneoff` | 直连 `enqueue_inbox` |
+| `agent/host/subagent.rs` | `parent.route(SESSION_CHAT_SEND)` | `parent.get_vfs_provider()` 写 `session/<sid>/inbox`（与它自己的 `register_subsession` 同款） |
+| e2e t7 / t9 / t10 / t11 / t14 / t18 / t27 / t54 | 走路由 | 走地址（t15 已是范本） |
 
-迁移期两条路并存（路由 = 薄别名），全部迁完删 `session/chat/send` / `session/chat/abort`
-两条路由 + 对应常量 + `CURRENT.md` §1 里 session 的自有路由行（重跑生成脚本）。
+**已删**：两条路由、`ROUTE_SESSION_CHAT_SEND` 常量、`handle_chat_send_oneoff` /
+`handle_chat_abort_oneoff` 两个入口函数、`CURRENT.md` §1 里 session 的自有路由行
+（重跑生成脚本）。迁移期**没有**并存期——四个后端调用方在同一批里改完，
+`session` 的 `route()` 只剩 `stats` 一条臂。
 
-### 5.6 ⚠️ 退役的**前置条件**：写入面还表达不了「本次运行的选项」
+### 5.6 ✅ 退役的**前置条件**：写入面还表达不了「本次运行的选项」——**已裁决（[ADR-066](../adr/ADR-066.md "ADR-066")）**
 
 实施时发现：`chat/send` 路由**本身已经就是「入队」**——`handle_chat_send_oneoff`
 的 `message` 分支（`orchestrator/entry.rs:194-211`）只做一件事：
@@ -210,6 +215,17 @@ self.enqueue_inbox(&session_id, None, message, params, ctx.get(WORKDIR)).await;
 前端已不再调用它（本次已迁完），它只剩 CLI / telegram / agent_run / 心跳四个
 后端调用方，且它们的行为与从前逐字节一致。
 
+**裁决（[ADR-066](../adr/ADR-066.md "ADR-066")，2026-10-13）：地址写入**不**承载运行选项，
+前置条件解除。** 三条依据：① `provider_id` / `mode` / `risk_level` 在契约里**已经有会话 metadata 回退**
+（`orchestrator/entry.rs::resolve_session_params` 的三条对称链 `req > metadata > 默认`）；
+② 它们描述的是**会话级事实**（这个会话怎么跑），不是消息属性——把「这一次用什么」
+>寄托在消息写体上，等于给同一件事配两个 owner；
+③ 四个调用方逐个核对——`agent_run` 要的三项它**已经在写子会话 metadata**
+（`register_subsession`）、心跳走进程内直连（`include_history` 是本次发送属性，留在 `Request`）、
+telegram 的 `mode: "auto"` 是通道属性、CLI 原先刻意走 `req` 档做调用级覆盖，该意图改由
+「选项变过就先写会话 metadata」表达（`options_dirty` → `ensure_session` upsert）。
+故 §5.5 的两条路由**不需要协议变宽就能退役**；落地见 [T-077](../task/T-077-输入面双轨退役批.md "T-077-输入面双轨退役批") 步②。
+
 ---
 
 ## 6. 前端改动清单
@@ -229,10 +245,12 @@ self.enqueue_inbox(&session_id, None, message, params, ctx.get(WORKDIR)).await;
 - `createSession` 写**当前**挂载目录，不再恒写全局那一个。
 - `selectSession` 收地址；同名 sid 在不同空间不再撞车。
 
-### 6.3 两个实时消费端：前缀从「一个」改成「一组」
+### 6.3 实时消费端：前缀从「一个」改成「一组」
 
-`sessionTranscriptSync.ts` 与 `sessionNodeSync.ts` 各维护**已登记挂载目录集合**，
-新增 `registerSessionMount(mountDir)`；进入子智能体空间（该空间的 `session` 挂载
+`sessionTranscriptSync.ts` / `sessionNodeSync.ts`（T-077 步③ 起还有
+`sessionInboxSync.ts`，共三个）各维护**已登记挂载目录集合**，新增
+`registerSessionMount(mountDir)` / `registerTranscriptMount(mountDir)` /
+`registerInboxMount(mountDir)`；进入子智能体空间（该空间的 `session` 挂载
 被列出 / 选中）时登记。前缀匹配改成「命中任一已登记前缀」。
 
 ### 6.4 `Session.vue` → `ChatMainPanel` → `ModelChatPanel`：把地址传下去
@@ -255,6 +273,10 @@ resume(p)   → runVdfsAction(<A>/message/<p.targetId>, p.action, {args, reason,
 - `working` 乐观置位保留（等待期的可视反馈）。
 
 ### 6.6 排队态显示（新增消费端，回应「前端不是唯一发送方」）
+
+> **已实施（T-077 步③）**：`tauri/src/stores/sessionInboxSync.ts`（实时面消费端）
+> + `components/message/InboxPending.vue`（气泡）+ `sessions` store 的 inbox 三个收敛
+> 动作与 `refreshInbox`。偏差见 §8.3 第 2 条（`showTyping` **没有**退）。
 
 新增 `stores/sessionInboxSync.ts`：订阅 `<A>/inbox` 段，把队列项渲染成「待发送」
 气泡；条目消失（出队变更，见 §5.4）即移除，落库后由 §6.3 的转写帧接手——**同一个
@@ -307,8 +329,9 @@ id**，所以是「换位置」不是「多一条」。
 前端（§6.1–6.5）：
 
 - [x] `vdfsScheme`：按挂载目录缓存 + `inboxSeg`（按 `kind` 认）
-- [x] 两个实时消费端：**一组**已登记挂载目录 +
-      `registerTranscriptMount` / `registerSessionMount`（`MainLayout` 接线）
+- [x] 实时消费端：**一组**已登记挂载目录 +
+      `registerTranscriptMount` / `registerSessionMount` / `registerInboxMount`
+      （`MainLayout` 接线；第三个是 T-077 步③ 的收件箱消费端）
 - [x] `sessions` store：`sessionSpace` / `sessionMounts` / `activeAddr` /
       `setSessionSpace` / `mountDirOf`；新建写当前空间；叶子操作按空间寻址
 - [x] `services/session.ts`：七个函数各收一个可选 `mountDir`
@@ -319,11 +342,20 @@ id**，所以是「换位置」不是「多一条」。
 
 ### 8.2 未落地
 
-- [ ] **§5.5 退役两条路由**——前置条件见 §5.6（写入面还表达不了运行选项）。
-      前端已无调用方；后端四个调用方（CLI / telegram / `agent_run` / 心跳）保持原样。
-- [ ] **§6.6 排队态显示**——「前端不是唯一发送方」的闭合件。它不是本次症状的
+- [x] ~~**§5.5 退役两条路由**~~——**已落**（T-077 步②）。裁决见
+      [ADR-066](../adr/ADR-066.md "ADR-066")（地址写入不承载运行选项，`provider_id` /
+      `mode` / `risk_level` 走会话 metadata）。四个后端调用方全部改完、两条路由与
+      `ROUTE_SESSION_CHAT_SEND` 及其一对 one-off 入口函数已删，`session` 的 `route()`
+      只剩 `stats`。迁移中修掉两个顺带发现的问题：telegram 侧 poll 循环被 `await`
+      串行化（中断检查因此成了死代码）、空输出时回一句「无响应」而不是如实说没有产出。
+- [x] **§6.6 排队态显示**——「前端不是唯一发送方」的闭合件。它不是本次症状的
       成因（成因是发送落点 + 订阅前缀），但少了它，别的发送方的消息在**被消费前**
-      仍不可见。
+      仍不可见。**已落**（T-077 步③）：`sessionInboxSync` 是第三个实时面消费端
+      （`<sid>` → 节点态、`<sid>/<转写段>/<mid>` → 转写、`<sid>/<收件箱段>/<iid>`
+      → 本模块），段名同样按 `kind` 认；入队帧带节点视图 ⇒ 加一条（文案取
+      `description` 的「待消费 · <预览>」），出队 / 取消 / 清空是无载荷变更 ⇒ 回读
+      `stat` 只分辨删除；resync 与打开会话整份重列（前者按见过的会话，后者闭合
+      冷启动窗口）。气泡**不显示全文**——全文由落库后的转写帧给，同一个 id。
 
 ### 8.3 与 §6 原计划的偏差（有意）
 
@@ -331,3 +363,11 @@ id**，所以是「换位置」不是「多一条」。
    跨空间全局唯一，所以 store 的状态字典仍以 id 为键，另记「它在哪个空间」。
    把键换成地址不会多解决任何问题，只会让每个消费方都要先解析一次地址才能查表。
    理由写在 `stores/sessions.ts` 模块头。
+
+2. **§6.6 说 `showTyping` 可退掉一部分**：实际**没有退**。§6.6 判断「两者互斥」的
+   依据是「有排队气泡时骨架不再传达新信息」，实测**不成立**：刚点完发送的那一瞬
+   两者都为真（消息已入队、Turn 帧还没到），而更多见的是反过来——别的发送方的
+   消息已被取出、落库帧在路上，那时队列已空、气泡不该出现，骨架是界面上唯一的
+   「在跑」信号。拿它换气泡会为「少一行」把 Turn 帧丢失时的兜底也一起丢掉。
+   两条判据因此**各自独立**，理由逐条写在 `stores/sessionLive.ts` 的
+   `needsTypingRow` 注释里。

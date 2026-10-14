@@ -18,10 +18,12 @@
 //!
 //! 首次调用（args: `agent_id` / `prompt` / `working_dir?` / `session_id?`）：
 //! 1. 校验目标 agent 目录存在、`working_dir` 合法；
-//! 2. `session/update` 落子会话元数据（`parent_session_id` → 存储归档父会话
-//!    子目录、不进用户会话列表）；
-//! 3. 路由 `session/chat/send`（统一编排入口：collect → traverse 重新装配工具，
-//!    子会话与顶层会话走同一条链路；该路由**立刻返回**，本轮在后台推进）；
+//! 2. `vdfs/write <会话地址>` 落子会话元数据（`parent_session_id` → 存储归档父会话
+//!    子目录、不进用户会话列表；`mode` / `risk_level` / `provider_id` 随本条落成
+//!    会话属性，[ADR-066]）；
+//! 3. `vdfs/write <会话地址>/inbox` 发起本轮（输入面双轨已退役：`session/chat/send`
+//!    不再存在，子会话是**唯一不能进程内入队**的写者，故走地址面；该写入**受理即返回**，
+//!    本轮在后台推进）；
 //! 4. 订阅子会话的实时面（**一条**：`event_bus` + `vdfs/watch <会话地址>`——
 //!    消息流式与会话运行态都在上面，见 ADR-025），把子会话过程经出口转播到
 //!    父视图（节点锚定到本工具调用之下）；
@@ -35,8 +37,9 @@
 //!
 //! 恢复调用（用户在父会话审批后，`session/resume` 按普通工具恢复机制重执行
 //! 本工具，args 追加 `session_id` / `target_id` / `approved`）：
-//! 路由 `session/chat/send` 的 resume 分支到子会话（在子会话内恢复被审批的
-//! 工具），随后同 4-5。父子关系始终由子会话存储元数据承载，无进程内状态。
+//! 对 `<会话地址>/message/<target_id>` 发**动作**（恢复动作的 snake_case 线上词），
+//! 在子会话内恢复被审批的工具；随后同 4-5。恢复不走入队——它不是一条新消息，
+//! 而是对当时那条消息的操作。父子关系始终由子会话存储元数据承载，无进程内状态。
 
 use super::store::AgentDirStore;
 use crate::symbio_core::chat_message::{message_of_node, SEG_MESSAGES};
@@ -44,7 +47,6 @@ use crate::symbio_core::chat_message::{
     ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType, ResumeAction,
     ResumeRequest,
 };
-use crate::symbio_core::session_chat;
 use crate::symbio_core::{event_bus_register_subscriber, event_bus_unregister_subscriber};
 use crate::symbio_core::{
     vdfs_change_of, VdfsContent, VdfsNode, VdfsProvider, VdfsRequest, VDFS_STATUS_WORKING,
@@ -53,8 +55,7 @@ use crate::symbio_core::{vdfs_context, VdfsError};
 use crate::symbio_core::{
     ExecAbortSignal, ExecEnv, ExecEventSink, Plugin, PluginError, PluginFrame, PluginInvokeRequest,
     PluginInvokeRequestExt, MODE, PATH, PLUGIN_ID_SESSION, PROVIDER_ID, RISK_LEVEL,
-    ROUTE_SESSION_CHAT_SEND, ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH, SESSION_ID,
-    TOOL_CALL_ID,
+    ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH, SESSION_ID, TOOL_CALL_ID,
 };
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -67,6 +68,12 @@ use std::sync::Arc;
 const NAME: &str = "agent_run";
 /// 子会话元数据键：父会话 id（session 存储归档依据）
 const KEY_PARENT_SESSION_ID: &str = "parent_session_id";
+/// 收件箱段名（地址契约 `<sid>/inbox` 的一段）。
+///
+/// 与 `SEG_MESSAGES` 不同——那条在 core 里是**公共契约**（消息集合形状跨插件要认），
+/// 这一条是 session 插件的 `pub(crate)` 内部词汇、插件间不可见（`plugin-entry-audit`
+/// E-009），故按地址契约自持一份。拼错表现为「消息进不去队列」，不会静默错乱。
+const SEG_INBOX: &str = "inbox";
 
 /// agent_run 能力：把任务委托给指定 agent 目录（子智能体）。
 pub struct AgentRunCapability {
@@ -289,6 +296,9 @@ impl crate::symbio_core::Capability for AgentRunCapability {
                 // `parent_session_id` 由 session 存储解释为归档位置
                 // （父会话目录的 sessions/ 子目录）与列表过滤依据；
                 // `agent_id` / `workdir` 供 chat 编排回退链与详情展示。
+                // `mode` / `risk_level` / `provider_id` 也随之落成会话属性——
+                // 它们定义「这个子会话怎么跑」，属**会话事实**而非消息属性
+                // （[ADR-066]：地址写入不承载运行选项，三项的归属是会话 metadata）。
                 let sid = uuid::Uuid::new_v4().to_string();
                 if let Err(e) = register_subsession(
                     parent.clone(),
@@ -298,6 +308,9 @@ impl crate::symbio_core::Capability for AgentRunCapability {
                         KEY_PARENT_SESSION_ID: parent_session_id,
                         "agent_id": agent_id,
                         "workdir": effective_workdir,
+                        "mode": ctx.get(MODE),
+                        "risk_level": ctx.get(RISK_LEVEL),
+                        "provider_id": ctx.get(PROVIDER_ID),
                         "title": format!("↳ {}", agent_id.as_deref().unwrap_or("子智能体")),
                     }),
                 )
@@ -309,7 +322,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
             }
         };
 
-        // ── 订阅子会话的实时面（先于 chat/send，避免丢首帧）──
+        // ── 订阅子会话的实时面（先于发起本轮，避免丢首帧）──
         //
         // 与 CLI / 前端**同构**：`event_bus/subscribe` 收件 + `vdfs/watch <会话地址>`
         // 开闸，**两步缺一不可**（只订阅 = 永不响的频道；只 watch = 没有收件人）。
@@ -333,24 +346,85 @@ impl crate::symbio_core::Capability for AgentRunCapability {
         };
         vdfs_watch(&parent, &ctx, &session_addr, true).await;
 
-        // ── 路由 session/chat/send（统一编排入口）──
-        // mode / risk_level / provider_id 随请求显式继承（resolve_session_params
-        // 的回退链是 req > metadata > 默认，ctx 键会被覆盖，必须走 req 字段）。
-        let send_ctx = ctx.fork();
-        send_ctx.set(PATH, ROUTE_SESSION_CHAT_SEND.to_string());
-        send_ctx.set(SESSION_ID, child_session_id.clone());
-        let _ = send_ctx.set_payload(session_chat::Request {
-            session_id: Some(child_session_id.clone()),
-            agent_id: agent_id.clone(),
-            message: first_message,
-            provider_id: ctx.get(PROVIDER_ID),
-            include_history: None,
-            mode: ctx.get(MODE),
-            risk_level: ctx.get(RISK_LEVEL),
-            resume: resume_req,
-        });
+        // ── 进程内 VDFS 视图：本轮经它发起，不绕路由 ──
+        //
+        // 与 `validate_subsession_exists` / `register_subsession` 同款（先例在那里）：
+        // 取的是**本作用域容器**的 VDFS 视图，`session/<sid>` 命中的正是要写的那个
+        // 会话插件实例（容器把子插件按**实例名**列为子目录，而 `route` 分发用的是同一个键）。
+        let provider = parent.clone().get_vfs_provider().ok_or_else(|| {
+            PluginError::InternalError(
+                "agent_run 无法取得本作用域的 VDFS 视图（容器未暴露 provider）".to_string(),
+            )
+        })?;
 
-        if let Err(e) = parent.clone().route(send_ctx).await {
+        // ── 发起这一轮：发消息 = 写收件箱；恢复 = 对目标消息做动作 ──
+        //
+        // `session/chat/send` 已随输入面双轨退役（[ADR-066] / T-077 步②）。子会话是
+        // **唯一不能进程内入队**的写者（不持有子会话的插件实例），故走地址面；而引擎
+        // 会话内的心跳走进程内 `enqueue_inbox`，CLI / telegram 走各自的地址写入。
+        //
+        // `mode` / `risk_level` / `provider_id` 随**会话 metadata** 继承
+        // （见上面 `register_subsession` 的 json）：它们是会话属性，解析链
+        // `req > metadata > 默认` 的第二档已经给了答案，随行携带会让同一事实有两个
+        // owner（[ADR-066] 理由 1）。
+        let vctx = vdfs_context(&ctx);
+        let rel = format!("{PLUGIN_ID_SESSION}/{child_session_id}");
+        let started: Result<(), PluginError> = if let Some(m) = first_message {
+            // 写体是这条消息的 JSON：判别式「以 `{` 开头」⇒ 它是 [`ChatMessage`] 的
+            // 字段子集，`id` 因此仍是**地址之外**的第二个身份来源，由 provider 归一。
+            // 其余缺省由 `parse_inbox_message` 补（`role` / `msg_type` 缺省、
+            // `status` 归一为 `Completed`——与多条消息合并时 `merge_many` 的取值一致）。
+            // 不带 `create`：收件箱的两种形态都是新建队列项，那个位在这里没有区分度
+            // （provider 侧不回执它的真假）。
+            provider
+                .dispatch(
+                    &vctx,
+                    &format!("{rel}/{SEG_INBOX}"),
+                    VdfsRequest::Write {
+                        content: VdfsContent::text(serde_json::to_string(&m).unwrap_or_default()),
+                    },
+                )
+                .await
+                .map(|_| ())
+                .map_err(Into::into)
+        } else if let Some(r) = resume_req {
+            // 恢复不是「一条新消息」，而是对**当时那条消息**的动作（入队会让它排在
+            // 一批新消息之后，等到被消费时候选早已被改写，语义当场失效）。落点 =
+            // 目标消息自身，动作名直接取 `ResumeAction` 的 snake_case 线上词——
+            // **不另造一套**（同一批语义多一套名字就多一处漂移）。
+            let word = serde_json::to_value(&r.action)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_string))
+                .ok_or_else(|| {
+                    PluginError::InternalError(format!("恢复动作词形不可序列化：{:?}", r.action))
+                })?;
+            provider
+                .dispatch(
+                    &vctx,
+                    &format!("{rel}/{SEG_MESSAGES}/{}", r.target_id),
+                    VdfsRequest::Action {
+                        action: word,
+                        payload: Some(json!({
+                            "args": r.args,
+                            "reason": r.reason,
+                            "answer": r.answer,
+                            // 恢复也跑解析链，这一档由动作载荷给（provider 侧读键）
+                            "mode": ctx.get(MODE),
+                            "risk_level": ctx.get(RISK_LEVEL),
+                        })),
+                    },
+                )
+                .await
+                .map(|_| ())
+                .map_err(Into::into)
+        } else {
+            // 三个调用形态已保证二者必有其一；走到这里说明上面漏了一种形态，
+            // 如实报错而不是凭空发起一轮没有输入的执行。
+            Err(PluginError::InternalError(
+                "agent_run 未确定本轮输入（message 与 resume 皆空）".to_string(),
+            ))
+        };
+        if let Err(e) = started {
             // 委托失败：清理订阅，错误直接作为工具结果回传
             vdfs_watch(&parent, &ctx, &session_addr, false).await;
             event_bus_unregister_subscriber(&conn_id);
@@ -465,7 +539,7 @@ fn validate_working_dir(provided: &str) -> Result<String, PluginError> {
 ///
 /// 取的是**本作用域容器**的 VDFS 视图（[`Plugin::get_vfs_provider`]——core 的查询
 /// 接口）：容器把子插件按**实例名**列为子目录，而 `route` 分发用的是同一个键，
-/// 因此 `session/<sid>` 命中的正是 `session/chat/send` 将要写入的那个会话插件实例
+/// 因此 `session/<sid>` 命中的正是本工具要写入收件箱的那个会话插件实例
 /// ——子智能体分形子树里同样成立。用到的 `vdfs_context` / `VdfsProvider` / `VdfsNode`
 /// 全在 `symbio_core`：线路形状（`vdfs/*` 的信封）不进本文件，也不新增插件间依赖。
 async fn validate_subsession_exists(
@@ -524,8 +598,8 @@ async fn validate_subsession_exists(
 /// 绕路由还为一次纯数据写入白搭了一层 invoke 信封。
 ///
 /// 取 provider 的方式与 [`validate_subsession_exists`] 同款（先例在那里）：
-/// 本作用域容器的 VDFS 视图里，`session` 就是 `session/chat/send` 将要写入的
-/// 那个插件实例，子智能体分形子树里同样成立。
+/// 本作用域容器的 VDFS 视图里，`session` 就是本工具要写入收件箱的那个插件实例，
+/// 子智能体分形子树里同样成立。
 async fn register_subsession(
     parent: Arc<dyn Plugin>,
     ctx: &Arc<dyn PluginInvokeRequest>,

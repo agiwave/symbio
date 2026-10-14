@@ -70,6 +70,7 @@ pub(crate) fn record_derived(
     turn: u64,
     user_seq: u64,
     principal: &str,
+    to: &str,
     anchor_id: &str,
     delegations: &[super::tools::Delegation],
     tasks: &[super::tools::TaskDeclaration],
@@ -80,16 +81,13 @@ pub(crate) fn record_derived(
     // 承诺号带 `{anchor_id}` 前缀：tool_call id 只在一次模型响应内唯一，而 WAL 的
     // 幂等键是事件 id——跨轮复用同一个 id 会让第二次立约撞 `Duplicate`、把整轮
     // 收束拖失败。
+    //
+    // `to` = **来源主体**（ADR-067：从调用点常量变成数据）——本主体向「这条消息
+    // 的出处」立约；缺省由取值点（`request_source_principal`）落本机用户。
     for d in delegations {
         let cid = format!("v2c-{anchor_id}-{}", d.id);
         for e in crate::symbio_core::commitment_events(
-            &cid,
-            principal,
-            crate::symbio_core::authz::PRINCIPAL_USER,
-            &d.promise,
-            d.ok,
-            &d.why,
-            user_seq,
+            &cid, principal, to, &d.promise, d.ok, &d.why, user_seq,
         ) {
             store
                 .append(e)

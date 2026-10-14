@@ -420,7 +420,7 @@ function render() {
   L.push("### 3.1 前端 / 宿主路由");
   L.push("");
   L.push("```");
-  L.push("{container}/{plugin}/{action}     例：worker/session/chat/send（worker 可省略）");
+  L.push("{container}/{plugin}/{action}     例：worker/session/stats（worker 可省略）");
   L.push("```");
   L.push("");
   L.push("- 完整路由清单见 [ref/RE-003-ROUTES.md](./ref/RE-003-ROUTES.md)。");
