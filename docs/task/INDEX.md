@@ -3,7 +3,7 @@
 > ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/task/*.md` 生成，请勿手改。**
 > 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，原则与流程见 [PL-011 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。
 
-**计数**：☐ todo 10 · 🟡 doing 0 · ☑ done 87 · ❌ wont 0（共 97）
+**计数**：☐ todo 9 · 🟡 doing 0 · ☑ done 88 · ❌ wont 0（共 97）
 
 ## 待处理（按依赖顺序）
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
@@ -14,7 +14,6 @@
 | `T-075-前端形态e2e补位` | 被测形态只有 CLI：tauri 前端形态无浏览器层 e2e（AR-007 记为事实），补最小呈现判据 | later | e2e | — |
 | `T-078-shutdown接线批` | ADR-033 残余清偿：进程退出与丢弃旧容器的收尾接线（`PluginStopReason::Shutdown` 从纸面能力变生产路径） | later | 插件生命周期 | — |
 | `T-079-插件授权强制与身份残余批` | ADR-032 残余清偿：`plugin_grants` 从定义解析走向强制校验；`PluginMeta` 身份字段删除随 provider 两级解析落地 | later | 插件身份与授权 | T-078-shutdown接线批 |
-| `T-084-ST-002产物投影方向对账批` | ST-002 `projection = display` 与生产方向相反——产物进不进上下文，裁决一边 | later | plan | — |
 | `T-085-记忆召回判据面补齐批` | 记忆召回判据面补齐：calibrated 格 / 混合打分与 §5 措辞裁决 / recall_eval 切生产投影 / judgment 标签写方 / 保留策略 | later | plan | — |
 | `T-086-技能编译落地形态批` | S11 落地形态批：skill_compile 投影化或修订 / 凸度与密度读数裁决 / skill_compile_enabled 默认翻向的条件 | later | plan | T-085-记忆召回判据面补齐批 |
 | `T-094-个人认知可见域产地批` | 个人认知可见域产地批：`VisScope::Shared` 要有内容侧产地 + 人的读权归属裁决——`person:*` 行在今天的表形状下表达不出来 | later | plan | — |
@@ -56,6 +55,7 @@
 | `T-014` | 分布式 Store 的 seq 单调与「无溯源不声明」如何共存（G4） | plan | 判断先行——多副本部署不在计划内（G4 / R5 的触发信号「出现多副本部署需求」从未发生），故 [ADR-061](../adr/ADR-061.md) 判 **`store = distributed` 从值域退役**（留一格「将来也许能用」比删掉更脏：它是语义上必然违反 I1 的取值，而 `in_domain` 会判它合法，值域自己在撒谎）。ADR 同时留下**重新引入必须答全的四问**（全局序来源 / 同 event_id 冲突裁决 / 溯源边跨副本指向 / 脑裂与 I3），答不全不得回值域。**判据落点**：PL-001 §8 值域表已去掉该格 ⇒ 生成的 facts::DOMAINS 里没有它 ⇒ `scenario_ladder.rs` 断言「store 值域不含 distributed」且「in_domain("store","distributed") 为假」——谁加回值域表，facts 里就会有它，断言立刻红（编译运行通过）。连带收敛 PL-003 §7.3 G4 与 PL-004 §5 R5 的措辞 |
 | `T-074-压缩中插话判据补齐` | RE-005 唯一「暂不补（待评估）」缺口清偿：压缩进行中用户插话的判据面归属定论 | e2e | t63 落成（`e2e/cases/t63-compression-interjection.mjs`，判据 = 压缩进行中 inbox 插话不丢、收敛后按序消费）+ RE-005 缺口表该行改判「已清偿」；MockLLM 请求记录确立为该场景的生产出口（提交 sha 见处理过程补记） |
 | `T-080-adr-impl-档位逐条复核批` | 「无人解释的 partial」清零：ADR-020/022/027/053 档位复核升档或列出残余；ADR-054 守卫退役条款裁定；ADR-027 备注补指认 | 登记卫生 | 五条裁决全部落为 `impl: done` + 正文残余说明（无一条留「partial 却不解释」）：① ADR-020——订正 `symbio/src/plugins/session/docs/AR-015-core-loop.md` §6.4 那句与 §7/§8 相反的「工具经自有 `PluginPayload::Session` 通道回传事件…尚未收敛」（实测 `PluginPayload::Session` 在 `session/**` 只剩注释指认，`execute_tool_async` 明写「不再有流式分支」），ADR-020 加复核补记升 done；② ADR-022——六条决策全落地（`parse_line` / `open_partial_line` / 边界对齐 / 三钩子全在 `plugins/model/protocols/`），残余只在**覆盖面**（e2e 只走 `openai_chat` 一条形状）且已归 T-076，属测试矩阵的债非本条落地缺口 ⇒ 升 done；③ ADR-027——正文补「部分取代」两行表（导入入口/前端选入口 → ADR-029；`path` 归属 → ADR-030，两者 `impl: done`），并说明为何不写 `supersedes`（那个字段只表达整体取代）⇒ 升 done；④ ADR-053——三批落地锚 `e62d8a85`（b1）/`fd844424`（b2）/`941cf88d`+`e4743c11`（b3）与承载任务 T-053…T-056 成表 ⇒ 升 done；⑤ ADR-054——裁定「过渡形态退役、结构守卫**转正**为永久守卫」（守的是决策 4 那条持续不变量「没有任何地方能改列表而不落事实」，类型只管得住 `apply` 一侧），决策 3 末句按修订读、实施补记 4 记录；`scripts/gate.d/30-docs.mjs` 接线注释由 v1（就地登记 + pending 棘轮 + LWF-001…004）改写为 v2（结构判定 + LWF-001–002 + 寄存锚口径）。顺带把复核确立的规则写回 [SP-001](../spec/SP-001.md) 的 `impl` 字段行（「档位必须可解释」）。验证：`node scripts/gen-doc-refs.mjs` 展开 11 处零 RF-003 · `node scripts/registry-audit.mjs` 零违规 · `gate --only=docs,facts` 绿 |
+| `T-084-ST-002产物投影方向对账批` | ST-002 `projection = display` 与生产方向相反——产物进不进上下文，裁决一边 | plan | 裁决取**② 修订正文**（生产形态是目标），记于 ST-002 §3.2「方向裁决：产物进不进上下文」。三条代码依据：① `turn_runner.rs:948`「模型必须看到『我请求了什么、拿到了什么』，否则会重复调用同一个工具」；② `exclude_from_context` 机制早已存在并被别处使用（`message.opened` 压缩记录节恒 true、轮边界汇报与开场白带 meta.surface）⇒「不进上下文」是**逐格决定**不是缺机制；③ `turn_runner.rs:951`「闸管的是『入格』，不是『发生过』」——授权面与表达面已分开，与本裁决同向。另核出 `symbio_core/projection/` 17 个投影**无 `display`**，而 `rebuild.rs:261` 是节点重建（`artifact_nodes`）不是投影。改动：ST-002 §3 增量行 / §3.1 判定行 / §4 平凡值行 / §6 新增断言 5（含反向用例：把该格 `exclude_from_context` 翻 true 必须失败，执行方 t27·t55·t59·t46）/ §7 该行由 ❌ 改 ✅；`capability-assign` 块形状未动，`gen-verify-facts` 产出逐字节不变、`verify/mechanism_growth` 绿。`gate --only=verify,docs,facts` 84/84 全绿 |
 | `T-001` | 登记机制落地：单文档 + 守卫 + 汇总 + 总纲 | meta | 提交 8252c4a（机制全量落地：4 脚本 + 23 项回归测试 + docs/plan/14 总纲 + 门禁接线，docs+facts 58/58） |
 | `T-003` | 接管 docs/README 纪律地图（每条纪律成为 spec 条目） | doc | 提交 36a9eb3（21 条 spec 条目 + 地图收敛指路；docs+facts 门禁 58/58） |
 | `T-004` | 散落决策清点与登记形态定案（决策类元素的接管边界） | meta | 清点结论：唯一散落处 = `docs/arch/AR-011-third-party-plugin-spec.md §10`（6 条待确认决策）⇒ 处置为「原表自持、不另登 task」；形态定案写回 14 §6；验证：registry-audit 零违规 |
@@ -202,7 +202,7 @@
 - [`T-081-授权表缺行登记批`](T-081-授权表缺行登记批.md) 授权表缺行登记批：agent:reflex 窄行（S07）+ person:* shared 行（S10）——正文断言不许再被派生分支静默推翻（done）
 - [`T-082-角色行生产构造批`](T-082-角色行生产构造批.md) ActorSpec 角色行生产构造批：S02 worker / S03 规划者·验证者（含 Scope::Child）/ S06 检索者·巩固者 / S07 抢占判定者 / S09 闸门 / S11 编译者（todo）
 - [`T-083-ST-004调度租约裁决批`](T-083-ST-004调度租约裁决批.md) ST-004 调度器/租约/cap 的落地形态裁决——先分清「目标」与「叙事」，再决定补哪一侧（done）
-- [`T-084-ST-002产物投影方向对账批`](T-084-ST-002产物投影方向对账批.md) ST-002 `projection = display` 与生产方向相反——产物进不进上下文，裁决一边（todo）
+- [`T-084-ST-002产物投影方向对账批`](T-084-ST-002产物投影方向对账批.md) ST-002 `projection = display` 与生产方向相反——产物进不进上下文，裁决一边（done）
 - [`T-085-记忆召回判据面补齐批`](T-085-记忆召回判据面补齐批.md) 记忆召回判据面补齐：calibrated 格 / 混合打分与 §5 措辞裁决 / recall_eval 切生产投影 / judgment 标签写方 / 保留策略（todo）
 - [`T-086-技能编译落地形态批`](T-086-技能编译落地形态批.md) S11 落地形态批：skill_compile 投影化或修订 / 凸度与密度读数裁决 / skill_compile_enabled 默认翻向的条件（todo）
 - [`T-087-名册与正文对账批`](T-087-名册与正文对账批.md) 名册锚点与阶正文对账批——纯文档清偿各阶 §3.1 登记的「文档≠系统」残留（只改锚与措辞，不改数字）（done）
