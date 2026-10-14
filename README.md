@@ -1,4 +1,5 @@
 ---
+lists: [repo-layout=owner]
 kind: guide
 id: README
 title: Symbio
@@ -9,6 +10,8 @@ created: 2026-07-20
 # Symbio
 
 > **一个可组合、多协议的 AI Agent 平台**：一条 Rust 核心库 + 三种接入方式（桌面 / 命令行 / 网关），由**分形插件架构**统一编排对话、记忆、工具调用与外部集成。一条规则：每个能力都是一个**路径**。
+
+<!-- list:repo-layout owner -->
 
 | 层 | 目录 / 挂载点 | 职责 |
 | --- | --- | --- |

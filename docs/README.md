@@ -1,5 +1,5 @@
 ---
-lists: [doc-boundaries=owner]
+lists: [doc-boundaries=owner, kinds=owner]
 kind: guide
 id: docs/README
 title: Symbio 文档中心
@@ -38,6 +38,7 @@ created: 2026-07-20
 | `task` 任务 | 要推进的事 | `T-` | `docs/task/` |
 | `spec` 规范 | 必须成立的条文（条文 + 判据） | `SP-` | `docs/spec/` |
 | `adr` 决策 | 为什么这样选（含被否决的方案） | `ADR-` | `docs/adr/` |
+| `index` 总账 | 跨 kind 的登记总账与索引 | `KIND-` | `docs/` 根 |
 
 **编号规范全仓一套**（字段细节见 [SP-001](./spec/SP-001.md)，机读判据 RG-022 / RG-023）：
 编号条目 `id` = 文件名（去 `.md`）= `<前缀>-<三位序号>[-名称]`，**前缀一 kind 一个且与 kind
@@ -154,6 +155,8 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 
 **重复描述 = 双倍维护成本。** 同一事实写两处，改代码时就要改两处，且两处必然漂移。
 因此每类事实只有一个 owner，其余位置一律**引用**，不复述：
+
+<!-- list:kinds owner -->
 
 <!-- list:doc-boundaries owner -->
 
