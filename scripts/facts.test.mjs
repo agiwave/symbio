@@ -643,3 +643,28 @@ test('本仓自身：runner 认得三份事实（本测试不要求此刻无漂�
     assert.deepEqual(errs, [], `本仓事实的描述符必须合契约：${errs.join('；')}`)
   }
 })
+
+test('生成物里不得留下字面 refLink(——${} 没插值的静默形态', async () => {
+  // 病历（9f49d454）：提交消息写着「新增 `refLink(id, label)`」，diff 里却**只有用法没有
+  // 定义**——六处调用写进双引号字符串，`${refLink(...)}` 原样落进 RE-006。两类守卫同时
+  // 失效：链接审计看不见它（那不是 markdown 链接），`--check` 也看不见它（生成器确定性
+  // 地产出同一份坏内容，永远「一致」）。**声称存在而代码里不存在的函数，比没有函数更坏**。
+  //
+  // 口径：扫每份事实的**落盘产物**（`out` 字段）。生成先于静态审计（28-facts-write），
+  // 所以测试看到的产物就是审计将面对的终态。
+  const ids = discover(path.join(REPO, 'scripts', 'facts'))
+  const mods = await Promise.all(ids.map((id) => import(`./facts/${id}.mjs`)))
+  for (const [i, mod] of mods.entries()) {
+    const out = path.join(REPO, mod.default.out)
+    const text = fs.readFileSync(out, 'utf8')
+    assert.ok(
+      !text.includes('refLink('),
+      `${mod.default.out} 里有字面 \`refLink(\`——生成器把 \`\${refLink(...)}\` 写进了非模板字符串` +
+        `（没插值）。处置：改用模板字面量或字符串拼接，并确认 \`createRefLink\` 真的被 import。`,
+    )
+  }
+
+  // 反向：病史原文必命中——连提交前的 RE-006 片段都判不出，这条判据就是恒真的。
+  const preFix = "> 路由权威清单看 ${refLink('RE-003-ROUTES', 'RE-003-ROUTES.md')}（与本表交叉核对）。"
+  assert.ok(preFix.includes('refLink('), '反向用例失效：连病史原文都判不出，真 bug 时它不可能红')
+})
