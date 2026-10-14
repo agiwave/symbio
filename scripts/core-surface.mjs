@@ -298,17 +298,43 @@ export function collectMacroBodies(root, coreRel, symbols) {
  * 一个符号若**另有一个 core 模块**在用，那把它下沉到那唯一的外部消费方（一个插件）
  * 就编译不过（core 不得反向依赖插件），它**本来就**是 ≥2 个模块共享的机制。
  *
- * ## 口径（三条，都影响结果）
+ * ## 口径（两条，都影响结果）
  *
  * 1. **核心模块 = 域目录的第一段**（`projection/transcript.rs` ⇒ `projection`）；
  *    直接住在 core 根下的文件取**文件名词干**（`authz.rs` ⇒ `authz`）——`authz` 是一个
  *    真实的内部消费方，不是「根」；
  * 2. **根 `mod.rs` 不算消费方**：它是**导出清单**（`pub use <域>::{…}` 会把几乎每个
- *    符号都写成命中），把它算进来等于让每个符号自己给自己凑一个消费方；
- * 3. **声明域自身不算**（同名命中是自引用）——要的是「**另一个**模块也在用」。
+ *    符号都写成命中），把它算进来等于让每个符号自己给自己凑一个消费方。
+ *
+ * ## 为什么没有第三条「声明域自身不算」（2026-10-14 删除）
+ *
+ * 曾有口径 3「声明域自身是自引用，不算消费方」，并由一条回归测试钉住
+ * （「声明域自身 / 根导出清单提及，都不算第二个消费模块（仍判红）」）。**那条测试钉的是
+ * 错的答案，已一并改掉。**
+ *
+ * 错在哪：**消费就是依赖，自己依赖自己也是依赖。** `LonelyThing` 声明在 `actors`、
+ * 被 `actors/other.rs` 用着，那就是 `actors` 在消费它——凭什么把它沉到 `plugins/alpha`？
+ * 把 core 内部的依赖从计数里滤掉，等于**假装 core 不用它**，判据于是给出一个在事实上
+ * 不成立的动作建议。
+ *
+ * 代价当场可见：删掉这一条后 C-003 单消费方 **56 → 0**（`--verbose` 前后清单 diff：
+ * **释放 56 条、新增 0 条**——纯释放，没有「换一批人」）。那 56 条每一条 core 自己都在用，
+ * 只是被滤掉了。
+ *
+ * ⚠️ 它已造成过**真实误判**：`LlmAdapter` / `DeltaSink` 的实现方（`ProviderLlmAdapter`、
+ * `SilentDeltas`）就住在它们自己的声明域 `adapters` 里，于是被判成「单消费方接缝、该下沉」，
+ * 而下沉会让 core 去实现插件的 trait ⇒ **依赖反转**。同类问题另有 `collectCoreBindings`
+ * 单独补的「core 内 `impl <Trait> for …`」那一维——两条是同一个病的两副面孔。
  *
  * 与 `collectConsumers` 共享「测试不是消费方」的口径（口径 4），故同样跳过测试文件。
  */
+/** 该符号的**声明行**（`pub struct X` / `pub trait X` / `pub fn X` …）——声明不是使用 */
+const declRe = (name) =>
+  new RegExp(`^[^\\n]*\\bpub(\\([^)]*\\))?\\s+(struct|enum|trait|fn|const|static|type|union)\\s+${name}\\b[^\\n]*$`, 'gm')
+
+/** 该符号所在的 `pub use` **导出清单行**——理由同口径 2：清单会写成命中，但那是清单 */
+const reexportRe = (name) => new RegExp(`^[^\\n]*\\bpub\\s+use\\b[^\\n]*\\b${name}\\b[^\\n]*$`, 'gm')
+
 export function collectCoreDomainConsumers(root, symbols, coreRel = 'symbio/src/symbio_core') {
   const coreDir = path.join(root, coreRel)
   const names = [...symbols.keys()]
@@ -323,8 +349,13 @@ export function collectCoreDomainConsumers(root, symbols, coreRel = 'symbio/src/
     if (domain === '(root)') continue // 口径 2：导出清单不是消费方
     const src = stripComments(fs.readFileSync(file, 'utf8'))
     for (const name of names) {
-      if (domain === symbols.get(name)) continue // 口径 3：声明域自身是自引用
-      if (!new RegExp(`\\b${name}\\b`).test(src)) continue
+      // ⚠️ 排除的是**声明点与导出清单**，不是整个声明域（2026-10-14，见上方口径说明）。
+      // 只滤「声明域」那一行是不够的：域的 `mod.rs` 里 `pub struct X;` 本身就是声明，
+      // 不滤掉的话每个符号都会被自己的声明算成一个 core 消费方 ⇒ 判据恒绿。
+      const body = src
+        .replace(declRe(name), '')
+        .replace(reexportRe(name), '')
+      if (!new RegExp(`\\b${name}\\b`).test(body)) continue
       if (!out.has(name)) out.set(name, new Set())
       out.get(name).add(domain)
     }
@@ -335,17 +366,13 @@ export function collectCoreDomainConsumers(root, symbols, coreRel = 'symbio/src/
 /**
  * 「该不该下沉」的唯一判据（判定型与报告型**共用**，防止两处各演化一条）：
  * 跨 core 的**生产**消费方恰 1 个，**且 core 内没有另一个模块**在用，**且**不是自引用。
- * 三条任一不成立都不算下放候选——见 `collectCoreDomainConsumers` 的口径说明。
+ * 后两条合起来是一句话：**消费就是依赖，自己依赖自己也是依赖**——core 内部在用它，
+ * 它就 ≥2 个单位共享的机制，下沉到那个唯一外部消费方（一个插件）会让 core 反向
+ * 依赖插件。见 `collectCoreDomainConsumers` 的口径说明。
  */
-export function isSinkCandidate(row, coreConsumers, coreBound) {
+export function isSinkCandidate(row, coreConsumers) {
   if (row.units.length !== 1) return false
   if ((coreConsumers.get(row.name)?.size ?? 0) > 0) return false
-  // core 内有 `impl <Trait> for …` ⇒ trait 被绑在 core 提供的类型上。下沉会让 core
-  // 反向依赖插件（依赖反转），所以「B 只被 A 依赖」这个**前提不成立**，它不是接缝。
-  //
-  // 单独否决、**绝不进计数**：进计数的话，每个 trait 都能用自己域内的实现凑出恰好
-  // 1 个单位而恒真放行——那不是守卫，是装饰。
-  if (coreBound?.has?.(row.name)) return false
   return !isSelfReference({ name: row.name, units: row.units })
 }
 
@@ -356,56 +383,6 @@ export function isSinkCandidate(row, coreConsumers, coreBound) {
  */
 export function isTestFile(file) {
   return file.endsWith('.test.rs') || path.basename(file) === 'tests.rs'
-}
-
-/**
- * 数出**被 core 自己实现**的符号（`impl <Trait> for …`，且 `<Trait>` 在 **trait 位置**）。
- *
- * ## 它与 `collectCoreDomainConsumers` 的分工
- *
- * 那个函数回答「**另一个** core 模块是否在**用**它」——同域命中按口径 3 滤掉。
- * 本函数回答另一件事：「core 是否**实现**了它」。trait 的实现方通常就住在它自己
- * 的声明域里（`LlmAdapter` 声明在 `adapters`，`ProviderLlmAdapter` 的实现也在
- * `adapters`），所以那一问永远问不到它，C-003 于是把它判成「单消费方接缝」。
- *
- * ## 为什么要卡 trait 位置
- *
- * `impl<Foo: LlmAdapter> Bar for X` 里 `LlmAdapter` 是**泛型约束**，不是 trait 位置。
- * 把它算成绑定就是**无意的假依赖**——凭空让一条真接缝免于下沉。所以：取 `impl` 与
- * `for` 之间的片段，剥掉所有尖括号块（泛型参数与实参都剥），**紧邻 `for` 的那个
- * 标识符**才是 trait。
- *
- * 与两处口径一致：**跳过测试文件**、**先剥注释**（注释里写 `impl LlmAdapter for`
- * 不构成绑定——而且注释本来就是判据最容易骗过的地方）。
- *
- * @returns `Set<符号名>`：被 core 实现过的符号。**不是消费方单位**，只作否决用。
- */
-export function collectCoreBindings(root, symbols, coreRel = 'symbio/src/symbio_core') {
-  const coreDir = path.join(root, coreRel)
-  const bound = new Set()
-  /** 取 `impl` 与 `for` 之间、剥掉尖括号块后紧邻 `for` 的那个标识符 */
-  const traitOf = (head) => {
-    let depth = 0
-    let kept = ''
-    for (const ch of head) {
-      if (ch === '<') { depth++; continue }
-      if (ch === '>') { if (depth > 0) depth--; continue }
-      if (depth === 0) kept += ch
-    }
-    const parts = kept.trim().split(/\s+/).filter(Boolean)
-    const last = parts[parts.length - 1]
-    return last ? last.split('::').filter(Boolean).pop() : null
-  }
-  for (const file of walk(coreDir)) {
-    if (!file.endsWith('.rs')) continue
-    if (isTestFile(file)) continue
-    const src = stripComments(fs.readFileSync(file, 'utf8'))
-    for (const m of src.matchAll(/\bimpl\b([\s\S]{0,160}?)\bfor\b/g)) {
-      const name = traitOf(m[1])
-      if (name && symbols.has(name)) bound.add(name)
-    }
-  }
-  return bound
 }
 
 /**

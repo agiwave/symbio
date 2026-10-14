@@ -48,7 +48,6 @@ import { red, yellow, green, dim } from './color.mjs'
 import {
   collectCoreSurface,
   collectConsumers,
-  collectCoreBindings,
   collectCoreDomainConsumers,
   isSelfReference,
   isSinkCandidate,
@@ -86,8 +85,6 @@ const symbols = surface.symbols
 const consumers = collectConsumers(ROOT, symbols, CORE_REL)
 const consumersAll = collectConsumers(ROOT, symbols, CORE_REL, { includeTests: true })
 const coreConsumers = collectCoreDomainConsumers(ROOT, symbols, CORE_REL)
-// core 内 `impl <Trait> for …` ⇒ trait 被绑在 core 类型上，下沉会依赖反转（见 core-surface.mjs）
-const coreBound = collectCoreBindings(ROOT, symbols, CORE_REL)
 
 // ==================== 报告 ====================
 
@@ -101,7 +98,7 @@ const rows = allNames.map((name) => ({
 
 const zero = rows.filter((r) => r.unitsAll.length === 0)
 const testOnly = rows.filter((r) => r.units.length === 0 && r.unitsAll.length > 0)
-const one = rows.filter((r) => isSinkCandidate(r, coreConsumers, coreBound))
+const one = rows.filter((r) => isSinkCandidate(r, coreConsumers))
 const selfRef = rows.filter(isSelfReference)
 const many = rows.filter((r) => r.units.length >= 2)
 

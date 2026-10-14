@@ -85,7 +85,6 @@ import { red, yellow, green, dim } from './color.mjs'
 import {
   collectCoreSurface,
   collectConsumers,
-  collectCoreBindings,
   collectCoreDomainConsumers,
   isSelfReference,
   isSinkCandidate,
@@ -170,9 +169,25 @@ const WAIVERS = process.env.CORE_EXPORT_WAIVERS
  *   而下沉的前提「B 只被 A 依赖」在这里**不成立**，那会是真·依赖反转。这两条不是被清偿的
  *   存量，是**判错**；降这一格是因为判据修好后它们本就不该出现在清单里。
  *
+ * - **同域使用也算消费方批**（2026-10-14）降一格 56 → 16：删掉 `collectCoreDomainConsumers`
+ *   的口径 3「声明域自身不算」。**消费就是依赖，自己依赖自己也是依赖**——`LonelyThing`
+ *   声明在 `actors`、被 `actors/other.rs` 用着，那就是 `actors` 在消费它，凭什么沉到
+ *   插件？滤掉 core 内部的依赖等于**假装 core 不用它**，判据于是给出一个在事实上不成立
+ *   的动作建议（真实误判见下）。
+ *   连带删掉 `collectCoreBindings`（core 内 `impl <Trait> for …` 那一层）：口径 3 一去，
+ *   同域的任何非声明引用都会把该域算成消费方，实测关掉它 C-003 逐条不变 ⇒ **冗余**。
+ *   留着它就是多一处会静默腐烂、且今天恒真的判断层。
+ *   ⚠️ 删口径 3 时有个必须一起钉住的副作用：域的 `mod.rs` 里 `pub struct X;` 与
+ *   `pub use …X…` 是**声明 / 导出清单**，不是使用。改判据为「排除声明行与 `pub use` 行」
+ *   才不至于让每个符号都被自己的声明算成消费方（不滤的话实测会得到 0/0，判据恒绿）。
+ *
+ *   存量影响：`--verbose` 前后清单 diff = **释放 40 条、新增 0 条**，56 → 16。
+ *   ⚠️ 这不是一次「清偿 40 条」，是**判据修好后它们本就不算违规**——剩下 16 条
+ *   （`symbio_core/README.md` §4 的宿主接缝 / 跨 crate 契约一类）是真的还没处置的存量。
+ *
  * 存量的处置判据仍是 README §4 四问（下沉 / 成文契约 / 登记豁免），处置一个就把这里
- * 降一格。**注意**：本格只数「既没跨 core 第二个模块用、又不是自引用、core 内也没
- * 实现它」的单消费方；一个符号在 `--verbose` 的 `[ 1]` 里出现即代表它仍待处置。
+ * 降一格。**注意**：本格只数「既没跨 core 第二个模块用、又不是自引用、core 内也没有**
+ * 使用**它」的单消费方；一个符号在 `--verbose` 的 `[ 1]` 里出现即代表它仍待处置。
  */
 
 const BASELINE = process.env.CORE_EXPORT_BASELINE
@@ -180,7 +195,7 @@ const BASELINE = process.env.CORE_EXPORT_BASELINE
       const [zero, one] = process.env.CORE_EXPORT_BASELINE.split(':').map((n) => Number(n))
       return { zero, one }
     })()
-  : { zero: 0, one: 56 }
+  : { zero: 0, one: 16 }
 
 
 
@@ -275,8 +290,6 @@ const consumersAll = collectConsumers(ROOT, symbols, CORE_REL, { includeTests: t
 // 的 collectCoreDomainConsumers）。一个符号若有第二个 core 生产消费模块，下沉到那唯一的
 // 外部消费方（插件）当场编译不过 ⇒ 它本来就该留根出口，不是「单消费方接缝」。
 const coreConsumers = collectCoreDomainConsumers(ROOT, symbols, CORE_REL)
-// core 内 `impl <Trait> for …` ⇒ trait 被绑在 core 类型上，下沉会依赖反转（见 core-surface.mjs）
-const coreBound = collectCoreBindings(ROOT, symbols, CORE_REL)
 const byName = (a, b) => a.domain.localeCompare(b.domain) || a.name.localeCompare(b.name)
 const rows = [...symbols.keys()]
   .map((name) => ({
@@ -313,7 +326,7 @@ const zero = rows.filter((r) => r.unitsAll.length === 0 && !waivedNow.has(r.name
 // 「只有测试在用」单列一档：它是**合法的根出口**，但也不是架构元素——既不收窄、不下沉。
 const testOnly = rows.filter((r) => r.units.length === 0 && r.unitsAll.length > 0)
 // 「该不该下沉」按**不含测试**的口径：测试依赖的是被测对象，不是长期接口。
-const one = rows.filter((r) => isSinkCandidate(r, coreConsumers, coreBound) && !waivedNow.has(r.name))
+const one = rows.filter((r) => isSinkCandidate(r, coreConsumers) && !waivedNow.has(r.name))
 const many = rows.filter((r) => r.units.length >= 2)
 
 if (zero.length > BASELINE.zero) {

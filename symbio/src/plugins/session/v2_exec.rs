@@ -89,7 +89,7 @@ use crate::symbio_core::chat_message::{
 use crate::symbio_core::{
     llm_short_id, ActorSpec, CapabilityMeta, DeltaSink, DispatchPort, Entity, Event, EventWalStore,
     ExecAbortSignal, ExecEventSink, LatencyTier, ModelProvider, Plugin, PluginError,
-    ProviderLlmAdapter, Seq, Store, TokenIssuer, TurnOutput, TurnToolCallInfo, Verb,
+    ProviderLlmAdapter, Seq, SilentDeltas, Store, TokenIssuer, TurnOutput, TurnToolCallInfo, Verb,
     EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_USER_MESSAGE,
 };
 
@@ -815,19 +815,6 @@ fn supplement_into_request(
     }]
 }
 
-/// 静默增量口：定稿答话轮一个模型请求都不发 ⇒ 没有任何增量可送。
-///
-/// **为什么不用 core 的 `SilentDeltas`**：它不在根出口（core 内部自己走域内路径用），
-/// 而 C-002 不许插件深引 `symbio_core::adapters::…`。为一次「什么都不做」去拓宽 core 的
-/// 公开面（并因此多一个单消费方符号、动棘轮）不划算——插件侧 4 行更干净。
-struct SilentDeltaSink;
-
-impl DeltaSink for SilentDeltaSink {
-    fn on_delta(&self, _text: &str) {}
-    fn on_reasoning(&self, _text: &str) {}
-    fn on_tool_frame(&self, _frame: &ChatMessage) {}
-}
-
 /// **压缩入格 + 归档**（S2.7-b2）：把「本轮之前发生过一次压缩」变成一格事实
 /// （`message × progressed` = `session.consolidated`），并把被它取代的前缀移出 live 段。
 ///
@@ -1004,7 +991,7 @@ pub(crate) fn consolidate_outside_turn(
 ///    工具交换、没有模型参与，`finish_turn` 直接收尾，没有派生副作用可记。
 /// 2. **不上线 UI 帧**：答话节点已由 `apply_verdict` 推进 `context.messages`
 ///    （`dialog_node`，`exclude_from_context = false`），由 `finish_turn` 落库 ⇒ 这里用
-///    [`SilentDeltaSink`]；再发一次就是同一条答话重复上屏。
+///    [`SilentDeltas`]；再发一次就是同一条答话重复上屏。
 ///
 /// ## `llm` / `tok` 是 `run_with_tools` 的端口，不是本路的依赖
 ///
@@ -1103,15 +1090,7 @@ pub(crate) async fn execute_final_reply_turn(
         abort: Some(abort),
     };
     TurnRunner
-        .run_with_tools(
-            &store,
-            &llm,
-            &tok,
-            input,
-            Arc::new(SilentDeltaSink),
-            &[],
-            None,
-        )
+        .run_with_tools(&store, &llm, &tok, input, Arc::new(SilentDeltas), &[], None)
         .await
         .map_err(|e| PluginError::InternalError(format!("v2 运行器落格失败：{e:?}")))?;
     Ok(())

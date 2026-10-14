@@ -188,7 +188,7 @@ pub(crate) use view::{visible_to, AGENT_PREFIX};
 // 不认任何具体实现（插件宿主/转写都在实现侧）。
 pub use adapters::{
     DeltaSink, DispatchOutcome, DispatchPort, LatencyTier, LlmAdapter, LlmTurn, ProviderLlmAdapter,
-    TokenIssuer,
+    SilentDeltas, TokenIssuer,
 };
 // 执行引擎（`TurnRunner` 族）2026-10-09 下沉 `plugins/session/turn_runner.rs` 后，仍需要的
 // core 内部面。它们**不能下沉**——core 自己也在用（`TokenIssuer` 铸令牌、`provider_adapter`
@@ -197,11 +197,6 @@ pub use adapters::{
 // `pub use`），与 `visible_to` / `recall` 同一形态。（`ActorSpec` 不在此列——它是 F3 冻结
 // 锚点，另以根 `pub use` 出，见上。）
 pub(crate) use adapters::{AdapterError, FullModel, RuleOnly};
-// 空增量口 `SilentDeltas` 的**根出口**只剩测试在用：生产侧 `v2_exec` 自带 `SilentDeltaSink`
-// （见其注释），core 内生成路径走 `adapters::` 域内路径 ⇒ 同 `StubLlmAdapter`
-// 一形态，只在 `cfg(test)` 出根（下沉后的 `turn_runner.test.rs` 是唯一根出口消费者）。
-#[cfg(test)]
-pub(crate) use adapters::SilentDeltas;
 // 零 LLM 桩只在测试构建里存在（README §1.2 adapters 行）——`cfg(test)` 出根给下沉后的测试用。
 #[cfg(test)]
 pub(crate) use adapters::StubLlmAdapter;

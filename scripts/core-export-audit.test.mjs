@@ -264,75 +264,77 @@ test('C-003 口径：core 内另一生产模块也在用 ⇒ 不算下放候选�
   assert.equal(r.status, 0, r.stderr + r.stdout)
 })
 
-test('C-003 口径：声明域自身 / 根导出清单提及，都不算第二个消费模块（仍判红）', () => {
+test('C-003 口径：**同域使用也是消费方** ⇒ 不是下放候选（放行；2026-10-14 改）', () => {
+  // 这条测试原先断言**相反**的答案（「同域提及不算第二个消费模块，仍判红」），
+  // **钉错了**，已改。错在哪：**消费就是依赖，自己依赖自己也是依赖。**
+  // `LonelyThing` 声明在 `actors`、被 `actors/other.rs` 用着，那就是 `actors` 在消费它——
+  // 凭什么把它沉到 `plugins/alpha`？滤掉 core 内部的依赖等于**假装 core 不用它**。
   const r = audit(
     clean({
       [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, LonelyThing};\n',
       [ACTORS_MOD]: 'pub struct AlphaThing;\npub struct LonelyThing;\n',
       'symbio/src/plugins/alpha/lonely.rs':
         'use crate::symbio_core::LonelyThing;\npub fn l(_: LonelyThing) {}\n',
-      // 同域内再提一次 = 自引用；根 mod.rs 的 `pub use` = 导出清单。两者都不是消费方。
       'symbio/src/symbio_core/actors/other.rs':
         'use crate::symbio_core::LonelyThing;\npub fn o(_: LonelyThing) {}\n',
     }),
   )
-  assert.equal(r.status, 1, '同域提及与导出清单都不能救一个真·单消费方符号')
-  assert.match(r.stderr, /单消费方/)
-})
-
-test('C-003 口径：core 内**同域**实现了它 ⇒ 不是下放候选（放行；口径 3 的漏洞）', () => {
-  // `LlmAdapter` / `DeltaSink` 的真实形状：trait 声明与 `impl … for …` 在**同一个域**
-  // （`adapters`）。口径 3「声明域自身不算」把实现整个滤掉 ⇒ coreConsumers 空 ⇒ 误判成
-  // 「单消费方接缝、该下沉」。但下沉的前提是「B 只被 A 依赖」——core 自己实现它，
-  // 前提不成立，下沉会让 core 反向依赖插件。
-  const r = audit(
-    clean({
-      [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, SoloPort};\n',
-      [ACTORS_MOD]: 'pub struct AlphaThing;\npub trait SoloPort {}\n',
-      // 实现与 trait 同域 —— 这正是原先被滤掉的那一类耦合
-      'symbio/src/symbio_core/actors/impl_solo.rs':
-        'use super::SoloPort;\npub struct Real;\nimpl SoloPort for Real {}\n',
-      'symbio/src/plugins/alpha/only.rs':
-        'use crate::symbio_core::SoloPort;\npub fn s(_: &dyn SoloPort) {}\n',
-    }),
-  )
   assert.equal(r.status, 0, r.stderr + r.stdout)
 })
 
-test('C-003 口径：`coreBound` 只认 trait 位置 ⇒ 泛型约束**不算**实现（仍判红）', () => {
-  // `impl<Foo: SoloPort> Bar for X` 里 `SoloPort` 是约束不是 trait。把约束算成绑定
-  // 就是**无意的假依赖**——凭空让一条真接缝免于下沉。这条钉住判据不越界。
+test('C-003 口径：根 `mod.rs` 的导出清单**不算**消费方（仍判红）', () => {
+  // 导出清单要单独排掉：`pub use <域>::{…}` 会把几乎每个符号都写成命中，
+  // 算进来等于让每个符号自己给自己凑一个消费方。
+  const r = audit(
+    clean({
+      [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, LonelyThing};\n',
+      [ACTORS_MOD]: 'pub struct AlphaThing;\npub struct LonelyThing;\n',
+      'symbio/src/plugins/alpha/lonely.rs':
+        'use crate::symbio_core::LonelyThing;\npub fn l(_: LonelyThing) {}\n',
+    }),
+  )
+  assert.equal(r.status, 1, '导出清单不是消费方——core 内部确实没人用它，该下沉')
+  assert.match(r.stderr, /单消费方/)
+})
+
+test('C-003 口径：core 内部**用它**（含实现、约束）⇒ 不是下放候选（放行）', () => {
+  // `SoloPort` 的真实形状：trait 声明与 `impl … for …` 同在 `adapters`/`actors` 域。
+  // 「自己依赖自己也是依赖」——core 在用它，它就是 ≥2 个单位共享的机制，下沉到那个
+  // 唯一外部消费方会让 core 反向依赖插件。
+  //
+  // ⚠️ 这一版**不再需要**为 trait 实现单开一个探测器（`coreBound` 已删）：同域的
+  // 任何非声明引用都会把那个域算成消费方。判据更宽也更简单，且没有恒真的分支。
   const r = audit(
     clean({
       [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, SoloPort};\n',
       [ACTORS_MOD]: 'pub struct AlphaThing;\npub trait SoloPort {}\n',
+      // 同域的 `use` 与 `impl` 都在——两者都是依赖
+      'symbio/src/symbio_core/actors/impl_solo.rs':
+        'use super::SoloPort;\npub struct Real;\nimpl SoloPort for Real {}\n',
+      // 泛型约束同样算依赖：`impl<Foo: SoloPort>` 要求 `SoloPort` 存在
       'symbio/src/symbio_core/actors/bounded.rs':
-        'use super::SoloPort;\npub struct Bar;\npub struct X;\nimpl<Foo: SoloPort> Bar for X {}\n',
+        'pub struct Bar;\npub struct X;\nimpl<Foo: SoloPort> Bar for X {}\n',
       'symbio/src/plugins/alpha/only.rs':
         'use crate::symbio_core::SoloPort;\npub fn s(_: &dyn SoloPort) {}\n',
-    }),
-  )
-  assert.equal(r.status, 1, '泛型约束不构成绑定——真·单消费方仍须判红')
-  assert.match(r.stderr, /单消费方/)
-})
-
-test('C-003 口径：`coreBound` 不进计数 ⇒ 跨 core 用它的第二消费方仍能救回（防恒真）', () => {
-  // 若把实现当成"再加一个 core 消费方单位"，每个 trait 都会用**自己域内的实现**凑出
-  // 恰好 1 个单位而恒真放行——守卫变装饰。这条钉住：单消费方 + 同域实现之外**没有**
-  // 任何第二消费方时，仍然判红（上面的第二条已覆盖一半，这里补"两个消费方时仍放行"）。
-  const r = audit(
-    clean({
-      [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, SoloPort};\n',
-      [ACTORS_MOD]: 'pub struct AlphaThing;\npub trait SoloPort {}\n',
-      'symbio/src/symbio_core/actors/impl_solo.rs':
-        'use super::SoloPort;\npub struct Real;\nimpl SoloPort for Real {}\n',
-      'symbio/src/plugins/alpha/only.rs':
-        'use crate::symbio_core::SoloPort;\npub fn s(_: &dyn SoloPort) {}\n',
-      'symbio/src/plugins/beta/also.rs':
-        'use crate::symbio_core::SoloPort;\npub fn s2(_: &dyn SoloPort) {}\n',
     }),
   )
   assert.equal(r.status, 0, r.stderr + r.stdout)
+})
+
+test('C-003 口径：同域只有**声明点与导出清单** ⇒ 仍判红（声明不是使用）', () => {
+  // 删掉口径 3 之后有个副作用必须钉住：域的 `mod.rs` 里 `pub struct X;` 与
+  // `pub use …X…` 都是**声明 / 清单**，不是使用。不滤掉它们的话每个符号都会被自己的
+  // 声明算成一个 core 消费方 ⇒ 判据恒绿（实测那样会得到 0/0）。
+  const r = audit(
+    clean({
+      [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, LonelyThing};\n',
+      [ACTORS_MOD]: 'pub struct AlphaThing;\npub struct LonelyThing;\n',
+      'symbio/src/plugins/alpha/lonely.rs':
+        'use crate::symbio_core::LonelyThing;\npub fn l(_: LonelyThing) {}\n',
+    }),
+  )
+  assert.equal(r.status, 1, '只有声明与清单 ⇒ core 内部确实没人用它，该下沉')
+  assert.match(r.stderr, /单消费方/)
 })
 
 test('C-003 口径：仅测试在用 ⇒ 合法根出口（放行，不收窄）', () => {
