@@ -185,10 +185,12 @@ pub(crate) fn record_learning(
         snapshot,
         turn,
         user_seq,
-        user_text,
-        super::v2_memory::MEMORY_TAG,
-        &format!("v2m-{anchor_id}"),
         now,
+        super::v2_memory::EncodeContent::new(
+            user_text,
+            super::v2_memory::MEMORY_TAG,
+            format!("v2m-{anchor_id}"),
+        ),
     ) {
         remember("步 11 编码", why);
     }
@@ -202,10 +204,12 @@ pub(crate) fn record_learning(
             snapshot,
             turn,
             user_seq,
-            response,
-            super::v2_memory::JUDGMENT_TAG,
-            &format!("v2j-{anchor_id}"),
             now,
+            super::v2_memory::EncodeContent::new(
+                response,
+                super::v2_memory::JUDGMENT_TAG,
+                format!("v2j-{anchor_id}"),
+            ),
         ) {
             remember("步 11b 判断编码", why);
         }

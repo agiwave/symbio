@@ -10,8 +10,8 @@
 
 use super::{
     consolidate, encode, merge_with_fidelity, prompt_section, recall_view, record_recalled,
-    split_sentences, CONSOLIDATE_MIN_ENTRIES, ENCODE_MAX_CHARS, JUDGMENT_TAG, MEMORY_TAG,
-    MERGE_MAX_CHARS, RECALL_SECTION_HEAD,
+    split_sentences, EncodeContent, CONSOLIDATE_MIN_ENTRIES, ENCODE_MAX_CHARS, JUDGMENT_TAG,
+    MEMORY_TAG, MERGE_MAX_CHARS, RECALL_SECTION_HEAD,
 };
 use crate::plugins::session::v2_skills::SKILL_TAG;
 use crate::symbio_core::authz::PRINCIPAL_USER;
@@ -113,10 +113,8 @@ fn encode_writes_a_sourced_memory_then_dedupes_same_text() {
         &store.range(Seq::new(0)),
         3,
         41,
-        "你好",
-        MEMORY_TAG,
-        "v2m-u1-a0",
         t,
+        EncodeContent::new("你好", MEMORY_TAG, "v2m-u1-a0"),
     )
     .expect("编码不失败")
     .expect("写了记忆");
@@ -163,10 +161,8 @@ fn encode_writes_a_sourced_memory_then_dedupes_same_text() {
             &store.range(Seq::new(0)),
             3,
             42,
-            "你好",
-            MEMORY_TAG,
-            "v2m-u1-a1",
-            t + 1
+            t + 1,
+            EncodeContent::new("你好", MEMORY_TAG, "v2m-u1-a1"),
         )
         .expect("编码不失败"),
         None,
@@ -178,10 +174,8 @@ fn encode_writes_a_sourced_memory_then_dedupes_same_text() {
             &store.range(Seq::new(0)),
             4,
             43,
-            "   \n",
-            MEMORY_TAG,
-            "v2m-u2-a0",
-            t + 2
+            t + 2,
+            EncodeContent::new("   \n", MEMORY_TAG, "v2m-u2-a0"),
         )
         .expect("编码不失败"),
         None,
@@ -196,10 +190,8 @@ fn encode_writes_a_sourced_memory_then_dedupes_same_text() {
         &store.range(Seq::new(0)),
         5,
         44,
-        &long,
-        MEMORY_TAG,
-        "v2m-u3-a0",
         t + 3,
+        EncodeContent::new(&long, MEMORY_TAG, "v2m-u3-a0"),
     )
     .expect("编码不失败")
     .expect("不同内容要记");
@@ -230,10 +222,8 @@ fn judgment_encode_writes_the_agents_conclusion_under_its_own_tag() {
         &store.range(Seq::new(0)),
         3,
         41,
-        "连接池调到 50 并加了索引",
-        JUDGMENT_TAG,
-        "v2j-u1-a0",
         t,
+        EncodeContent::new("连接池调到 50 并加了索引", JUDGMENT_TAG, "v2j-u1-a0"),
     )
     .expect("编码不失败")
     .expect("写了记忆");
@@ -262,10 +252,8 @@ fn judgment_encode_writes_the_agents_conclusion_under_its_own_tag() {
             &store.range(Seq::new(0)),
             3,
             42,
-            "连接池调到 50 并加了索引",
-            MEMORY_TAG,
-            "v2m-u1-a1",
-            t + 1
+            t + 1,
+            EncodeContent::new("连接池调到 50 并加了索引", MEMORY_TAG, "v2m-u1-a1"),
         )
         .expect("编码不失败"),
         None,
@@ -278,10 +266,8 @@ fn judgment_encode_writes_the_agents_conclusion_under_its_own_tag() {
             &store.range(Seq::new(0)),
             4,
             43,
-            "  ",
-            JUDGMENT_TAG,
-            "v2j-u2-a0",
-            t + 2
+            t + 2,
+            EncodeContent::new("  ", JUDGMENT_TAG, "v2j-u2-a0"),
         )
         .expect("编码不失败"),
         None,

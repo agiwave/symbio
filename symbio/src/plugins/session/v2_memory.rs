@@ -223,6 +223,29 @@ pub(crate) fn prompt_section(view: &RecallView) -> Option<String> {
 
 // ==================== 步 11 · 写方（编码） ====================
 
+/// 编码三元组：**编什么**——正文 + 认知内容标签 + 事件 id。
+///
+/// 三个字段同生同灭（一条 `memory.encoded` 的身份三元组：内容、分类、格名），
+/// 拆成平铺形参时调用点必然按位置传——参数的排错没有任何守卫看得见（把 `tag`
+/// 与 `event_id` 对调，编译照过、行为全错）。收成一组成员也顺带解掉平铺时 8 个
+/// 形参撞 clippy 上限（7）的问题。
+#[derive(Debug, Clone)]
+pub(crate) struct EncodeContent<'a> {
+    pub user_text: &'a str,
+    pub tag: &'a str,
+    pub event_id: String,
+}
+
+impl<'a> EncodeContent<'a> {
+    pub(crate) fn new(user_text: &'a str, tag: &'a str, event_id: impl Into<String>) -> Self {
+        Self {
+            user_text,
+            tag,
+            event_id: event_id.into(),
+        }
+    }
+}
+
 /// 步 11 写方：本轮发言 → 一条 `memory.encoded`（空 / 同文 ⇒ 不写）。
 ///
 /// `tag` 是认知内容标签（七类）：[`MEMORY_TAG`] = 用户发言（经验），
@@ -235,16 +258,14 @@ pub(crate) fn encode(
     snapshot: &[Event],
     turn: u64,
     user_seq: u64,
-    user_text: &str,
-    tag: &str,
-    event_id: &str,
     now: i64,
+    content: EncodeContent<'_>,
 ) -> Result<Option<u64>, String> {
-    let trimmed = user_text.trim();
+    let trimmed = content.user_text.trim();
     if trimmed.is_empty() {
         return Ok(None);
     }
-    let content = truncate_chars(trimmed, ENCODE_MAX_CHARS);
+    let encoded = truncate_chars(trimmed, ENCODE_MAX_CHARS);
 
     // 同文去重：判定方是 core 的 `contains_content`（比的是**已落盘的全部记忆**，
     // as-of 取 i64::MAX——落盘的都已发生，不给时钟回拨留重复口子）。范围是本会话：
@@ -254,14 +275,14 @@ pub(crate) fn encode(
     let view = recall(PRINCIPAL_USER, None, None)
         .apply(snapshot, i64::MAX, Budget::generous())
         .value;
-    if view.contains_content(&content) {
+    if view.contains_content(&encoded) {
         return Ok(None);
     }
 
     let seq = store
         .append(
             Event::pending(
-                event_id.to_string(),
+                content.event_id,
                 EVENT_MEMORY_ENCODED,
                 Entity::Memory,
                 Verb::Opened,
@@ -271,8 +292,8 @@ pub(crate) fn encode(
             .with_produced_by(user_seq)
             .with_ts(now)
             .with_payload(serde_json::json!({
-                "content": content,
-                "tag": tag,
+                "content": encoded,
+                "tag": content.tag,
                 "generation": 0u32,
                 "vec": [],
             })),
