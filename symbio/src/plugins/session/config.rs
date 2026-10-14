@@ -433,9 +433,13 @@ pub fn default_conation_enabled() -> bool {
 }
 
 pub fn default_skill_compile_enabled() -> bool {
-    // S11 §4 平凡值：`projection = recall`（不编译，只检索）。关掉后技能链路
+    // S11 §4 平凡值：编译开关 = false（不编译，只检索）。关掉后技能链路
     // （编译 → 校准 → 回退）整条退到「没有技能」的形态，而召回 / 巩固照常跑；
     // 技能从经验里学来，不是系统的前提。
+    //
+    // 翻向 true 的前置条件（T-086 批③写死，ST-011 §3.1 同步）：① S11 读数落地
+    // （凸度或明确替代刻度——今天只有 reliability）；② PL-010 价值验收埋点出数。
+    // 两条都满足才归届时的开关批翻向；在那之前 false 是安全退路口。
     false
 }
 

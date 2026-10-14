@@ -23,9 +23,28 @@
 //!
 //! 论证纪律：每条断言配反向用例（改输入，结论必须变）。
 //!
+//! ## 两段式：概念链 + 生产内核（T-086 批①）
+//!
+//! 本程序分两段，各答各的问题，**不互相冒充**：
+//!
+//! - **概念链**（本文件原有）：特征向量域上的抽象模型，回答「min_fidelity 这个
+//!   机制在不在算、阈值敏不敏感、拒绝理由可不可区分」——那是**设计论证**；
+//! - **生产内核段**（`main` 末尾，`#[path]` 包含生产
+//!   [`symbio/src/plugins/session/merge_kernel.rs`](../../../symbio/src/plugins/session/merge_kernel.rs)）：
+//!   跑的是生产这条保真度算法本身——**字符域的保留率**，与概念链的向量域读数
+//!   互相印证（同一现象：逐代下降、阈值前停）。没有这一段，本程序论证的机制
+//!   与生产实现的闸门（`v2_memory::consolidate` → `accept`）之间就只剩一句
+//!   修辞——那正是 [T-067] 黑盒纪律点名要防的「测自己 mock 的想象行为」。
+//!
 //! 编译运行：rustc --edition 2021 consolidation_fidelity.rs -o cf && ./cf
 
 use std::collections::HashMap;
+
+// 生产内核（T-086 批①）：`#[path]` 指向仓库里的生产文件——**这一行就是「跑的是
+// 生产」的全部含义**（与 `recall_eval.rs` 同一条纪律）。它是 `v2_memory::consolidate`
+// 调用的同一份源码：分句 / 合并 / 保真度。
+#[path = "../../../symbio/src/plugins/session/merge_kernel.rs"]
+mod merge_kernel;
 
 // ───────────────────────── 领域类型 ─────────────────────────
 
@@ -316,8 +335,59 @@ fn main() {
     }
     println!("  溯源链末端 seq = {} ≤ 起点 = {} ✓", last_seq, chain_item.seq);
 
-    println!("\n✅ 全部断言通过（含 3 条反向用例 + 1 条平凡值用例）");
+    // ── 7. 生产内核段（T-086 批①）：跑的是生产这条保真度算法本身 ──
+    println!("\n── 生产内核（#[path] 包含生产 merge_kernel.rs） ──");
+
+    // 分句防护：裸 `.` 不当界（`1.5` 切开会把数字改坏）；换行是界；标点留在句内。
+    let units = merge_kernel::split_sentences("版本 1.5 发布\n修复了内存泄漏。下一个版本");
+    assert_eq!(units, vec!["版本 1.5 发布", "修复了内存泄漏。", "下一个版本"],
+               "裸点不当界（1.5 不被切开）、换行断句、标点留在句内");
+    // 英文句号只在后随空白或结尾时算界。
+    assert_eq!(merge_kernel::split_sentences("done.Next"), vec!["done.Next"],
+               "英文句点后无空白 ⇒ 不当界（域名 / 版本号同理）");
+
+    // 装得下 ⇒ 1.0；同一件事两份都写 ⇒ 仍 1.0（去重省位置，不省信息）。
+    let (merged, f) = merge_kernel::merge_with_fidelity(
+        &["起床先喝水。", "周三不排会。"], 100);
+    assert_eq!(f, 1.0, "两源都装得下 ⇒ 保真度 1.0");
+    assert_eq!(merged, "起床先喝水。\n周三不排会。", "按句合并，换行分隔");
+    let (_, f_dup) = merge_kernel::merge_with_fidelity(
+        &["同一句话。", "同一句话。"], 100);
+    assert_eq!(f_dup, 1.0, "同文两份 ⇒ 句子都算保留（去重省的是位置不是信息）");
+
+    // 装不下 ⇒ < 1.0，且保留靠前（与 recall 新近在前的口径一致）、丢的是尾部。
+    let (merged2, f2) = merge_kernel::merge_with_fidelity(
+        &["第一句。第二句。第三句。第四句。"], 12);
+    assert!(f2 < 1.0, "装不下必有失真：{f2}");
+    assert_eq!(merged2, "第一句。\n第二句。", "保留靠前的句子，尾部被丢");
+
+    // 空源 ⇒ 1.0（没有信息可丢，不是「丢光了」）。
+    let (empty_merged, f_empty) = merge_kernel::merge_with_fidelity(&[""], 100);
+    assert_eq!(f_empty, 1.0, "空源 ⇒ 1.0");
+    assert_eq!(empty_merged, "", "空源合成为空串");
+
+    // 压缩幂等 + 阈值敏感性（概念链同现象的生产读数）。
+    // 注意生产 fidelity 的坐标：它是**当次 sources 的留存率**——第二代 sources
+    // 少了丙。 ⇒ total 从 12 缩到 10，0.333 会「涨」回 0.4。那不是第二代更保真，
+    // 是换了坐标系：跨代累积由 accept **逐代过门**把关（任一代不过就停），不靠
+    // 单次数字跨代可比。概念链的跨代读数因此只在上半段，本段只钉当次口径。
+    let (g1, f1) = merge_kernel::merge_with_fidelity(&["甲。乙。丙。", "丁。戊。", "己。"], 6);
+    let (g2, _) = merge_kernel::merge_with_fidelity(&[&g1, "丁。戊。", "己。"], 6);
+    assert_eq!(g2, g1, "同一上限下压缩幂等（产物再压不缩水）");
+    let (_, f_tight) = merge_kernel::merge_with_fidelity(&["甲。乙。丙。", "丁。戊。", "己。"], 3);
+    assert!(f_tight < f1, "上限收紧 ⇒ 当次留存率必须下降（阈值真的在算）：{f1} → {f_tight}");
+
+    // 截断按字符数（中文一字一字符），不切 UTF-8 字节。
+    let long = "问".repeat(500);
+    let cut = merge_kernel::truncate_chars(&long, 10);
+    assert_eq!(cut.chars().count(), 10, "按字符截断（不切汉字字节）");
+    assert_eq!(merge_kernel::truncate_chars("短", 10), "短", "短于上限原样返回");
+
+    println!("  生产保真度读数：足量 {f:.1} · 截断 {f2:.4} · 收紧 {f1:.4} → {f_tight:.4}");
+
+    println!("\n✅ 全部断言通过（含 3 条反向用例 + 1 条平凡值用例 + 生产内核段）");
     println!("   结论：`max_gen` 只保证\"不无限跑\"；`min_fidelity` 保证\"跑到还有用为止\"。");
+    println!("   生产闸门 `consolidate → accept` 用的正是本文件生产内核段这条保真度算法。");
     println!("         两者是**不同性质的约束**：前者是形态，后者是质量。只有前者时，");
     println!("         系统会产出\"代数合规但已经失真\"的记忆 —— 这正是 G7 的真实危害。");
 }

@@ -53,6 +53,12 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+#[path = "merge_kernel.rs"]
+mod merge_kernel;
+// 生产与 verify 共有的纯计算内核（T-086 批①：`consolidation_fidelity.rs` 以
+// `#[path]` 包含同一份源码）。三个名字在本模块内继续以原名使用——调用点一行不动。
+pub(crate) use merge_kernel::{merge_with_fidelity, truncate_chars};
+
 use crate::symbio_core::authz::PRINCIPAL_USER;
 use crate::symbio_core::{
     accept, recall, recalled_event, Budget, ConsolidateParams, Entity, Event, EventWalStore,
@@ -445,90 +451,6 @@ pub(crate) fn consolidate(
         merged.push((tag, consolidated_seq.value()));
     }
     Ok(merged)
-}
-
-// ==================== 小工具 ====================
-
-/// 按**字符**截断（不切 UTF-8 字节）。
-///
-/// `pub(crate)` 只为共享给 [`super::v2_skills`]：技能的 trigger / response 走同一个
-/// 上限（技能内容同样要进提示词，两处各写一份上限迟早分叉）。
-pub(crate) fn truncate_chars(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        return text.to_string();
-    }
-    text.chars().take(max_chars).collect()
-}
-
-/// 句子切分：中英文句末标点与换行为界（标点留在句内），空白段丢弃。
-///
-/// 刻意**不**把裸 `.` 当界：`1.5` 会被切成 `1.` / `5`，合并后印成 `1.\n5`——
-/// 不但失真，还把数字改坏了。英文的句号只在其后是空白或结尾时才算界。
-fn split_sentences(text: &str) -> Vec<String> {
-    let chars: Vec<char> = text.chars().collect();
-    let mut out = Vec::new();
-    let mut buf = String::new();
-    for (i, ch) in chars.iter().enumerate() {
-        buf.push(*ch);
-        let next = chars.get(i + 1).copied();
-        let boundary = matches!(ch, '。' | '！' | '？' | '!' | '?' | '\n')
-            || (*ch == '.' && next.is_none_or(char::is_whitespace));
-        if boundary {
-            let unit = buf.trim().to_string();
-            if !unit.is_empty() {
-                out.push(unit);
-            }
-            buf.clear();
-        }
-    }
-    let tail = buf.trim().to_string();
-    if !tail.is_empty() {
-        out.push(tail);
-    }
-    out
-}
-
-/// 合并两条来源：去重后的句子序列装进 `max_chars`，并算保真度。
-///
-/// 保真度 = 各来源中**确实保留在合并结果里**的句字数 / 各来源总字数。
-/// 同一件事两份都写了 ⇒ 两份的句子都算保留（去重省的是位置，不是信息）；
-/// 装不下被丢掉的才算失真——那正是 `accept` 的 0.7 下界要拦的东西。
-fn merge_with_fidelity(sources: &[&str], max_chars: usize) -> (String, f64) {
-    let mut units: Vec<String> = Vec::new();
-    for s in sources {
-        for unit in split_sentences(s) {
-            if !units.contains(&unit) {
-                units.push(unit);
-            }
-        }
-    }
-
-    let mut kept: Vec<String> = Vec::new();
-    let mut used = 0usize;
-    for unit in &units {
-        let add = unit.chars().count() + if kept.is_empty() { 0 } else { 1 }; // '\n' 分隔
-        if used + add > max_chars {
-            break;
-        }
-        used += add;
-        kept.push(unit.clone());
-    }
-
-    let (mut retained, mut total) = (0usize, 0usize);
-    for s in sources {
-        for unit in split_sentences(s) {
-            total += unit.chars().count();
-            if kept.contains(&unit) {
-                retained += unit.chars().count();
-            }
-        }
-    }
-    let fidelity = if total == 0 {
-        1.0
-    } else {
-        retained as f64 / total as f64
-    };
-    (kept.join("\n"), fidelity)
 }
 
 #[cfg(test)]

@@ -10,9 +10,11 @@
 
 use super::{
     consolidate, encode, merge_with_fidelity, prompt_section, recall_view, record_recalled,
-    split_sentences, EncodeContent, CONSOLIDATE_MIN_ENTRIES, ENCODE_MAX_CHARS, JUDGMENT_TAG,
-    MEMORY_TAG, MERGE_MAX_CHARS, RECALL_SECTION_HEAD,
+    EncodeContent, CONSOLIDATE_MIN_ENTRIES, ENCODE_MAX_CHARS, JUDGMENT_TAG, MEMORY_TAG,
+    MERGE_MAX_CHARS, RECALL_SECTION_HEAD,
 };
+// 分句的地基本来就住共享内核（生产与 verify 共有同一份源码，见 `merge_kernel.rs`）。
+use super::merge_kernel::split_sentences;
 use crate::plugins::session::v2_skills::SKILL_TAG;
 use crate::symbio_core::authz::PRINCIPAL_USER;
 use crate::symbio_core::{
