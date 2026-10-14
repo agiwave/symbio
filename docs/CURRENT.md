@@ -61,9 +61,16 @@
 | `content_search` | `local` | 正则内容搜索（ripgrep 库） |
 | `todo_write` | `local` | 任务清单（`LastOnly` 保留策略） |
 | `heartbeat` | `session` | 会话心跳配置 |
-| `read_skill` | `skill` | 读取技能定义 |
-| `vdfs_list` | `vdfs` |  |
-| `vdfs_read` | `vdfs` |  |
+| `read_skill` | `skill` | 读取技能定义（技能清单非空时才注册） |
+| `vdfs_delete` | `vdfs` | 删除 |
+| `vdfs_edit` | `vdfs` | 编辑文件 |
+| `vdfs_list` | `vdfs` | 目录清单 |
+| `vdfs_mkdir` | `vdfs` | 建目录 |
+| `vdfs_read` | `vdfs` | 读文件 |
+| `vdfs_search` | `vdfs` | 内容搜索 |
+| `vdfs_stat` | `vdfs` | 节点元数据 |
+| `vdfs_tree` | `vdfs` | 目录树 |
+| `vdfs_write` | `vdfs` | 写文件 |
 | `http_request` | `web` | HTTP 请求 |
 | `web_fetch` | `web` | 网页抓取 |
 | `web_search` | `web` | 网页搜索 |
@@ -87,7 +94,7 @@
 ### 3.2 VDFS 操作（`plugins/vdfs/protocol.rs::VDFS_OPS`）
 
 - **前端链路**（13 个，计数有测试锁死）：`vdfs/root` · `vdfs/list` · `vdfs/tree` · `vdfs/stat` · `vdfs/read` · `vdfs/edit` · `vdfs/search` · `vdfs/write` · `vdfs/delete` · `vdfs/mkdir` · `vdfs/watch` · `vdfs/unwatch` · `vdfs/action`
-- **LLM 工具链路**（2 个）：`vdfs_list` · `vdfs_read`
+- **LLM 工具链路**（9 个）：`vdfs_delete` · `vdfs_edit` · `vdfs_list` · `vdfs_mkdir` · `vdfs_read` · `vdfs_search` · `vdfs_stat` · `vdfs_tree` · `vdfs_write`
   （`watch` / `unwatch` / `action` 不经工具暴露，故两条链路不是一一对应）
 
 ## 4. 存储层事实（防「多存储后端」误读）
@@ -119,4 +126,4 @@
 
 ---
 
-> 生成时间：2026-10-13 13:42:13 UTC · 源：`git rev-parse HEAD` = `a4c2c902`
+> 生成时间：2026-10-14 01:53:15 UTC · 源：`git rev-parse HEAD` = `166c19e7`

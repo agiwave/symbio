@@ -99,6 +99,13 @@ function extractToolNames(t, consts) {
   for (const mm of t.matchAll(/\btool\(\s*"([a-z][a-z0-9_]*)"/g)) {
     out.add(mm[1]);
   }
+  // `ToolSpec { name: "vdfs_*" }` 表项（`plugins/vdfs/tools/spec.rs` 的同形工具表）——
+  // 九个 vdfs 工具走这张 static 表，不是 `CapabilityMeta` 字面量，漏掉它 §2 会
+  // 少七行（2026-10-14 补：e2e LLM 调用契约钉运行时工具面时发现文档与实测不符）。
+  // `name` 是 `ToolSpec` 的首字段，故贴名匹配不会误伤别处的 `name:`。
+  for (const mm of t.matchAll(/ToolSpec\s*\{\s*name:\s*"([a-z][a-z0-9_]*)"/g)) {
+    out.add(mm[1]);
+  }
   return [...out].sort();
 }
 
@@ -271,17 +278,25 @@ function gatewayEndpoints() {
 // ================= 渲染 =================
 
 const TOOL_NOTES = {
-  agent_identity: "取回当前智能体完整人格文本",
   agent_run: "委托子智能体",
   ask_user: "向用户提问",
   codebase_search: "语义代码搜索",
   content_search: "正则内容搜索（ripgrep 库）",
   todo_write: "任务清单（`LastOnly` 保留策略）",
   heartbeat: "会话心跳配置",
-  read_skill: "读取技能定义",
+  read_skill: "读取技能定义（技能清单非空时才注册）",
   http_request: "HTTP 请求",
   web_fetch: "网页抓取",
   web_search: "网页搜索",
+  vdfs_list: "目录清单",
+  vdfs_tree: "目录树",
+  vdfs_stat: "节点元数据",
+  vdfs_read: "读文件",
+  vdfs_edit: "编辑文件",
+  vdfs_search: "内容搜索",
+  vdfs_write: "写文件",
+  vdfs_delete: "删除",
+  vdfs_mkdir: "建目录",
   context_compact: "主动压缩上下文（开关打开时才暴露给模型）",
 };
 

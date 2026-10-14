@@ -20,6 +20,7 @@ HTTP/SSE（LLM）、stdio/JSON-RPC（MCP）、磁盘（homedir）。
 | `mock-mcp.mjs` | stdio JSON-RPC Mock MCP server：规范握手、可编排工具与错误/断连、调用记录 `--record` |
 | `mock-actions.json` | mock-mcp 行为脚本示例（T6：`add` 返回 JSON-RPC 错误） |
 | `helpers.mjs` | 夹具与断言库：临时 homedir、mock 进程编排、CLI 运行器、`defineCase`、共享不变量断言 |
+| `llm-contract.mjs` | **LLM 调用契约断言库**（模型视角判据，LC-001…007）：从 mock-llm 的 `/_requests` 抽信封 / system 装配 / 历史 / 工具面 / 工具反馈 / user 纯度 / 辅助请求形状，判「用户请求 → 系统实际发给模型的调用」是否正确（配套 `t56`–`t63`，任务 T-096） |
 | `cases/*.mjs` | **测试用例（每用例一文件）** |
 | `cases/_selfrun.mjs` | 用例自执行引导（`_` 前缀 = 共享材料，不当作用例） |
 | `run-tests.mjs` | runner：发现式加载 `cases/`，每用例独立子进程运行；开跑前确保被测二进制对应当前源码 |

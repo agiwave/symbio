@@ -3,7 +3,7 @@
 > ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/task/*.md` 生成，请勿手改。**
 > 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，原则与流程见 [PL-011 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。
 
-**计数**：☐ todo 12 · 🟡 doing 1 · ☑ done 80 · ❌ wont 0（共 93）
+**计数**：☐ todo 11 · 🟡 doing 1 · ☑ done 82 · ❌ wont 0（共 94）
 
 ## 待处理（按依赖顺序）
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
@@ -12,7 +12,6 @@
 | `T-077-输入面双轨退役批` | ADR-031 残余清偿：运行选项上写入面的协议决定 → `session/chat/send` / `chat/abort` 退役 → 排队态显示 | next | 会话与输入 | — |
 | `T-082-角色行生产构造批` | ActorSpec 角色行生产构造批：S02 worker / S03 规划者·验证者（含 Scope::Child）/ S06 检索者·巩固者 / S07 抢占判定者 / S09 闸门 / S11 编译者 | next | plan | T-072-对等主体生产增量 |
 | `T-073-多智能体社会数据行` | ST-013 落地：角色行（市场/仲裁/守门）+ 声誉驱动淘汰的 grants 变更事件 + 投影组合进裁决 | later | 多主体 | T-072-对等主体生产增量 |
-| `T-074-压缩中插话判据补齐` | RE-005 唯一「暂不补（待评估）」缺口清偿：压缩进行中用户插话的判据面归属定论 | later | e2e | — |
 | `T-075-前端形态e2e补位` | 被测形态只有 CLI：tauri 前端形态无浏览器层 e2e（AR-007 记为事实），补最小呈现判据 | later | e2e | — |
 | `T-078-shutdown接线批` | ADR-033 残余清偿：进程退出与丢弃旧容器的收尾接线（`PluginStopReason::Shutdown` 从纸面能力变生产路径） | later | 插件生命周期 | — |
 | `T-079-插件授权强制与身份残余批` | ADR-032 残余清偿：`plugin_grants` 从定义解析走向强制校验；`PluginMeta` 身份字段删除随 provider 两级解析落地 | later | 插件身份与授权 | T-078-shutdown接线批 |
@@ -50,8 +49,10 @@
 | `T-083-ST-004调度租约裁决批` | ST-004 调度器/租约/cap 的落地形态裁决——先分清「目标」与「叙事」，再决定补哪一侧 | plan | 取**修订**路（不落地）。新增 [ADR-064](../adr/ADR-064.md)：ST-004 的「调度器 / 租约 / cap」不是已落地的数据行（§3 四行里三行不存在），裁决 = **收窄本阶承诺**——本阶真实增量 = 单写者 FIFO（`store/mod.rs` 查重→赋 seq→落库原子 + `wal.rs` 的 `NotTheWriter` + `no-direct-call-audit.mjs`）+ `task.held`（借 S07 抢占路）+ `readyset` 候选集投影。不立 `task.ready` / `task.assigned`（无写方、无消费方 ⇒ 撞 C-003 单消费方棘轮）、不给 `readyset` 加 `cap`（无调用方的死参数）。ST-004 改动：§3 表格加「今天」列并标明设计目标 vs 落地状态；§4 的 `cap=1` 行保留加粗（生成器要求每阶恰一行）但标注「参数未落地」；§6 **删除无执行方的断言 1 / 3 / 4**（`cap` 参数不存在），保留断言 2（执行方 = `store/mod.test.rs` + e2e t32 + `helpers.mjs` seq 断言 + `verify/invariants.rs`）；§7 把未落地能力登记为未来能力（须先按 ADR-055 立放宽决策、且写方与消费方同批落地）；§3.1 的裁决记录改为记 ADR-064。`capability-assign` 块形状与取值**原样未动**（`gen-verify-facts.mjs` 全程绿）。**本批不动任何生产代码**。验证：`node scripts/gate.mjs --only=facts` 绿（含 `gen-verify-facts`）；`--only=docs` 绿。 |
 | `T-088-断流重发形态e2e补齐` | 断流原样重发的用户可见形态（不重复卡片 / 不产出幽灵调用）补 e2e 锚 | e2e | 新增 `e2e/cases/t54-resend-slots.mjs`（N=3、M=1；mock-llm `drop-mid` 吐 3 个调用增量后中途 destroy、`resend` 只产 1 个并收尾）。判据分两面：**实时面**（`subscribeSessionRealtime`，与前端同构）钉「工具调用节点恰好 3 个 distinct id ⇒ 重发复用首批 id、不新建」；**生产读出口**（`readSessionMessages`）钉「转写恰好 1 个调用（未触碰的播种槽位不得产出）、该 id == 首批首个到达 id（前缀复用）、`name` 与参数正文均非空（无幽灵）、`assertTranscriptInvariants` 绿」。编排发生性另有断言（同一份请求体 ≥2 次命中 ⇒ 断流确实发生，否则前几条会因「没断流」假绿）。RE-005「工具与产物」异常列并入 t54，缺口行改「已清偿：t54」。**反向判据已实测**：临时把 `tool_accumulator.rs` 的 `finish()` 过滤改成不过滤 `touched` ⇒ t54 红，报「转写应恰好 1 个工具调用节点…实际 3」（正是幽灵调用症状），还原后复绿。**途中发现的坑**：`dropAfter` 单独用不成立——`res.write` 是异步的，无延迟时 8 个事件还在 Node 侧缓冲就 `socket.destroy()`，客户端一个事件都收不到（首批 0 个工具帧、`reuse_node_ids` 为空 ⇒ 重发新建节点，判据被架空）；故 `drop-mid` 必须配 `chunkDelayMs`（本用例 15ms），让每片先落到对端。验证：`E2E_CASE_SELF=1 node e2e/cases/t54-resend-slots.mjs` 绿；e2e 用例集 51/51（棘轮自动上调）。 |
 | `T-092-fmt缺推送点闸门` | fmt 只在整轮门禁与 CI 里判——推送点（pre-push）不判，未格式化源码能推到 origin | quality | `pre-push` 的调用由 `--only=facts --ci` 改为 `--only=fmt,facts --ci`；注释记下这次漏网的形态（`c8ed5ee7` 手工恢复 `stream.rs` 后未跑格式化，26 个文件推到 `origin/v2`，只在 CI 的 rust-checks 里以「cargo fmt --all 有 27 处差异」呈现）与已知代价（判据看工作区，手边有未格式化 `.rs` 脏改动时会多红一次）。验证：`node scripts/gate.mjs --only=fmt,facts --ci` 6/6 绿、4s（并入 fmt 前实测 0.3s，仍是秒级）。 |
+| `T-096-LLM调用正确性e2e面` | LLM 调用正确性 e2e 面（MockLLM 探测）：用户请求 → 系统是否正确调用模型的系统化判据 | e2e | `e2e/llm-contract.mjs`（LC-001…007 契约库）+ 8 条用例 t56–t63（60 例总数）；全量 e2e 60/60 绿、`e2eCases` 棘轮 51→60；`gate --only=docs,facts` 63/63 绿；RE-005 开「LLM 调用正确性」行并入格（t56–t63 入格）、缺口表新条目；GO-005 §2 加「用户请求 → 模型调用的正确性判据」行；e2e/README 组件表补 llm-contract.mjs；CURRENT.md §2 经对账从 12 补到 19 工具（gen-current-facts 修 ToolSpec 抽取缺口）。每条用例的负向自检形态已落进文件头（改坏接线会红） |
 | `T-013` | Rust 覆盖率阈值：与 C7 同族的已知盲区，排在会话真源归一之后 | plan | 处置取第二条——理由的 owner 是 [ADR-060](../adr/ADR-060.md)（不做的四条：覆盖率答「有没有被执行」不答「有没有被断言」、只调用不断言的测试照样顶满而它守不住任何东西，与「出口可核对」相悖；「测试被删就红」已有 RATCHETS 用例数 / 断言数 floor 棘轮落点，覆盖率是冗余第二道；成本每次提交都付而收益是低频观察量，且要引入 cargo-llvm-cov + llvm-tools 外部工具链；总量数字会稀释 panic-audit / 形状基线 / 外部效标这些专用判据）。ADR 同时写明**缺口不闭合**（无法机械发现从未被执行的分支）与三条**重开条件**（出现只有覆盖率能发现的缺陷实例 / 工具链成本降到可进门禁 / 仓的风险面变了），重开唯一入口是新 ADR 取代本条。`gate.d/35-baseline.mjs` 的 RATCHETS 未加覆盖率落点，scripts 未引入覆盖率依赖 |
 | `T-014` | 分布式 Store 的 seq 单调与「无溯源不声明」如何共存（G4） | plan | 判断先行——多副本部署不在计划内（G4 / R5 的触发信号「出现多副本部署需求」从未发生），故 [ADR-061](../adr/ADR-061.md) 判 **`store = distributed` 从值域退役**（留一格「将来也许能用」比删掉更脏：它是语义上必然违反 I1 的取值，而 `in_domain` 会判它合法，值域自己在撒谎）。ADR 同时留下**重新引入必须答全的四问**（全局序来源 / 同 event_id 冲突裁决 / 溯源边跨副本指向 / 脑裂与 I3），答不全不得回值域。**判据落点**：PL-001 §8 值域表已去掉该格 ⇒ 生成的 facts::DOMAINS 里没有它 ⇒ `scenario_ladder.rs` 断言「store 值域不含 distributed」且「in_domain("store","distributed") 为假」——谁加回值域表，facts 里就会有它，断言立刻红（编译运行通过）。连带收敛 PL-003 §7.3 G4 与 PL-004 §5 R5 的措辞 |
+| `T-074-压缩中插话判据补齐` | RE-005 唯一「暂不补（待评估）」缺口清偿：压缩进行中用户插话的判据面归属定论 | e2e | t63 落成（`e2e/cases/t63-compression-interjection.mjs`，判据 = 压缩进行中 inbox 插话不丢、收敛后按序消费）+ RE-005 缺口表该行改判「已清偿」；MockLLM 请求记录确立为该场景的生产出口（提交 sha 见处理过程补记） |
 | `T-080-adr-impl-档位逐条复核批` | 「无人解释的 partial」清零：ADR-020/022/027/053 档位复核升档或列出残余；ADR-054 守卫退役条款裁定；ADR-027 备注补指认 | 登记卫生 | 五条裁决全部落为 `impl: done` + 正文残余说明（无一条留「partial 却不解释」）：① ADR-020——订正 `symbio/src/plugins/session/docs/AR-015-core-loop.md` §6.4 那句与 §7/§8 相反的「工具经自有 `PluginPayload::Session` 通道回传事件…尚未收敛」（实测 `PluginPayload::Session` 在 `session/**` 只剩注释指认，`execute_tool_async` 明写「不再有流式分支」），ADR-020 加复核补记升 done；② ADR-022——六条决策全落地（`parse_line` / `open_partial_line` / 边界对齐 / 三钩子全在 `plugins/model/protocols/`），残余只在**覆盖面**（e2e 只走 `openai_chat` 一条形状）且已归 T-076，属测试矩阵的债非本条落地缺口 ⇒ 升 done；③ ADR-027——正文补「部分取代」两行表（导入入口/前端选入口 → ADR-029；`path` 归属 → ADR-030，两者 `impl: done`），并说明为何不写 `supersedes`（那个字段只表达整体取代）⇒ 升 done；④ ADR-053——三批落地锚 `e62d8a85`（b1）/`fd844424`（b2）/`941cf88d`+`e4743c11`（b3）与承载任务 T-053…T-056 成表 ⇒ 升 done；⑤ ADR-054——裁定「过渡形态退役、结构守卫**转正**为永久守卫」（守的是决策 4 那条持续不变量「没有任何地方能改列表而不落事实」，类型只管得住 `apply` 一侧），决策 3 末句按修订读、实施补记 4 记录；`scripts/gate.d/30-docs.mjs` 接线注释由 v1（就地登记 + pending 棘轮 + LWF-001…004）改写为 v2（结构判定 + LWF-001–002 + 寄存锚口径）。顺带把复核确立的规则写回 [SP-001](../spec/SP-001.md) 的 `impl` 字段行（「档位必须可解释」）。验证：`node scripts/gen-doc-refs.mjs` 展开 11 处零 RF-003 · `node scripts/registry-audit.mjs` 零违规 · `gate --only=docs,facts` 绿 |
 | `T-001` | 登记机制落地：单文档 + 守卫 + 汇总 + 总纲 | meta | 提交 8252c4a（机制全量落地：4 脚本 + 23 项回归测试 + docs/plan/14 总纲 + 门禁接线，docs+facts 58/58） |
 | `T-003` | 接管 docs/README 纪律地图（每条纪律成为 spec 条目） | doc | 提交 36a9eb3（21 条 spec 条目 + 地图收敛指路；docs+facts 门禁 58/58） |
@@ -189,7 +190,7 @@
 - [`T-071-core形状变宽的必需性论证`](T-071-core形状变宽的必需性论证.md) core 形状棘轮亮红（fn 73>72 / defaults 25>24）：逐格补「必需」论证 ADR 或回退（done）
 - [`T-072-对等主体生产增量`](T-072-对等主体生产增量.md) ST-008 对等侧落地：对等主体窄 grants 行 + `commitment.asserted` 生产写方 + 会话独立的 ActorSpec 构造路径（doing）
 - [`T-073-多智能体社会数据行`](T-073-多智能体社会数据行.md) ST-013 落地：角色行（市场/仲裁/守门）+ 声誉驱动淘汰的 grants 变更事件 + 投影组合进裁决（todo）
-- [`T-074-压缩中插话判据补齐`](T-074-压缩中插话判据补齐.md) RE-005 唯一「暂不补（待评估）」缺口清偿：压缩进行中用户插话的判据面归属定论（todo）
+- [`T-074-压缩中插话判据补齐`](T-074-压缩中插话判据补齐.md) RE-005 唯一「暂不补（待评估）」缺口清偿：压缩进行中用户插话的判据面归属定论（done）
 - [`T-075-前端形态e2e补位`](T-075-前端形态e2e补位.md) 被测形态只有 CLI：tauri 前端形态无浏览器层 e2e（AR-007 记为事实），补最小呈现判据（todo）
 - [`T-076-e2e面缺失补齐批`](T-076-e2e面缺失补齐批.md) e2e 面缺失六项补齐：Web 外取三工具 / 本地检索组 / 通道自动化（telegram·hook·home）/ 多协议适配 / 存储三实现切换（todo）
 - [`T-077-输入面双轨退役批`](T-077-输入面双轨退役批.md) ADR-031 残余清偿：运行选项上写入面的协议决定 → `session/chat/send` / `chat/abort` 退役 → 排队态显示（todo）
@@ -211,3 +212,4 @@
 - [`T-093-prompt形状基线平台绑定`](T-093-prompt形状基线平台绑定.md) t46 形状基线把「平台命名的 shell 工具」（Windows `cmd` / Linux `sh`）钉进了判据——基线只能在捕获它的那个平台绿（done）
 - [`T-094-个人认知可见域产地批`](T-094-个人认知可见域产地批.md) 个人认知可见域产地批：`VisScope::Shared` 要有内容侧产地 + 人的读权归属裁决——`person:*` 行在今天的表形状下表达不出来（todo）
 - [`T-095-工具轮交换跨轮累加与思考即正文`](T-095-工具轮交换跨轮累加与思考即正文.md) v2 长轮失忆与末轮思考被误判——交换跨轮累加、思考即正文四处对账（done）
+- [`T-096-LLM调用正确性e2e面`](T-096-LLM调用正确性e2e面.md) LLM 调用正确性 e2e 面（MockLLM 探测）：用户请求 → 系统是否正确调用模型的系统化判据（done）
