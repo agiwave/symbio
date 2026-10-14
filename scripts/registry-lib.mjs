@@ -1350,9 +1350,13 @@ function renderTaskIndex(allEntries) {
     ),
     '',
     '## 已完成',
+    // 证据列**不上面**：汇总页是导航——「这条任务怎么落地的」要去读任务文档本身
+    // （提交 / 守卫锚在它的 `evidence` 字段与 `## 处理过程` 里）。在列表里展开证据，
+    // 只会把每行撑成长段、让人对着第二手摘要判断，而 SP-001 的 `done ⇒ evidence`
+    // 判据管的是**条目**有没有写，不是投影展不展示。
     table(
-      ['编号', '任务', '轨', '证据'],
-      mine.filter((e) => e.meta.status === 'done').map((e) => [`\`${e.meta.id}\``, cell(e.meta.title), cell(e.meta.track), cell(e.meta.evidence)]),
+      ['编号', '任务', '轨'],
+      mine.filter((e) => e.meta.status === 'done').map((e) => [`\`${e.meta.id}\``, cell(e.meta.title), cell(e.meta.track)]),
     ),
     '',
     '## 不做',

@@ -829,7 +829,10 @@ test('--write：生成三个汇总页，再跑一次显示已是最新', () => {
     assert.ok(fs.existsSync(path.join(base, rel)), `${rel} 应被生成`)
   }
   const board = fs.readFileSync(path.join(base, 'docs/task/T-000-任务汇总.md'), 'utf8')
-  assert.match(board, /`T-001`.*abc1234/, '已完成表应带证据列')
+  // 证据列**不上面**（汇总页是导航，细节去读任务文档）；断言改成它的反面——
+  // 「证据文本不出现在汇总页里」，防的是哪天又被加回来。
+  assert.match(board, /`T-001`/)
+  assert.ok(!board.includes('abc1234'), '已完成表不应带证据列：细节去读文档，别在列表里展开')
   assert.match(fs.readFileSync(path.join(base, 'docs/KIND-000-登记总账.md'), 'utf8'), /task · 任务/)
 
   const second = runRegistryAudit([`--root=${base}`, '--write'])
