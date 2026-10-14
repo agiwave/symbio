@@ -2,7 +2,7 @@
 
 ## 结构事实：先查再断
 
-[`docs/CURRENT.md`](docs/CURRENT.md) 由 `scripts/facts/current.mjs` 从代码提取，
+[`docs/ref/RE-006-当前事实表.md`](docs/ref/RE-006-当前事实表.md) 由 `scripts/facts/current.mjs` 从代码提取，
 每次重生成，不会漂移。断言下列内容前读对应小节，不要凭记忆复述：
 
 - 插件 / 挂载点 / 路由 / 配置文件 → §1

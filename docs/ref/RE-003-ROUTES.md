@@ -4,12 +4,13 @@ id: RE-003-ROUTES
 title: Symbio 路由参考
 status: active
 created: 2026-09-07
+lists: [routes=view]
 ---
 
 # Symbio 路由参考
 
 > **文档类型：参考** — **所有可用路径的完整清单**。本文**人工维护**，因此也是唯一会漂移
-> 的一份：`docs/CURRENT.md` §1 的「自有路由」列由代码生成，必然与代码一致——**两者不一致时以它为准**。
+> 的一份：`docs/ref/RE-006-当前事实表.md` 的路由清单（§2.3）由代码生成，必然与代码一致——**两者不一致时以它为准**。
 >
 > - **守卫**：[`scripts/plugin-entry-audit.mjs`](../../scripts/plugin-entry-audit.mjs) 的 **E-006**
 >   （清单里的路径前缀必须是插件目录名）。
@@ -18,15 +19,17 @@ created: 2026-09-07
 > - **退役路由**：不在此处保留叙述——去向见本文 §退役路由索引。
 >
 > ⚠️ **本文只写「现在有哪些路由」**。某条路由**为什么**被删 / 被迁，是决策与变更史，
-> 归 [ADR 索引](../adr/INDEX.md) 与 `git log`（见 [docs/README.md](../README.md#文档职责边界一个事实只有一个-owner "docs/README")）。
+> 归 [ADR 索引](../adr/ADR-000-架构决策汇总.md "ADR-000-架构决策汇总") 与 `git log`（见 [docs/README.md](../README.md#文档职责边界一个事实只有一个-owner "docs/README")）。
 >
 > - **每条路由的一句话职责不在本文**：它写在**注册处**——插件 `route()` 里那条 `match`
->   臂正上方的注释，由 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由) 提取成表。
+>   臂正上方的注释，由 [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表") 提取成表。
 >   本文保留的是**路由契约**：调用方、返回类型、备注、退役索引——那些只有这里有。
 >   （旧版本文有一列手写「用途」，与臂上注释是同一句事实的两份副本；按 PL-011 §6
 >   「原表与迁移不拆批」收敛为指路，owner 归代码。）
 
 ## 路由语法
+
+<!-- list:routes view -->
 
 ```
 {container}/{plugin}/{action}
@@ -47,9 +50,9 @@ created: 2026-09-07
 
 ### 内省
 
-| 路径 | 用途（→ §6.3） | 返回 |
+| 路径 | 用途（→ §2.3） | 返回 |
 |------|------|------|
-| `_root` | [§6.3](../CURRENT.md#23-前端--宿主路由) | 子树结构 |
+| `_root` | [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表") | 子树结构 |
 
 ### 配置管理（**没有配置路由**）
 
@@ -61,7 +64,7 @@ created: 2026-09-07
 ### 资源（VDFS）
 
 资源型插件**不提供任何资源类私有路由**：其资源统一经 VDFS 寻址（`<根>/<插件名>/…`）。
-**操作闭集见 [CURRENT.md](../CURRENT.md) §3.2**（源码 `plugins/vdfs/protocol.rs::VDFS_OPS`，
+**操作闭集见 [CURRENT.md](RE-006-当前事实表.md "RE-006-当前事实表") §2.2**（源码 `plugins/vdfs/protocol.rs::VDFS_OPS`，
 有测试锁计数）——本文不抄那份清单。
 每个 `<根>` 子目录由对应插件自己的 `impl VdfsProvider` 提供，落盘经
 `symbio/src/providers/vdfs_service/`（见 [design/AR-013-vdfs.md](../arch/AR-012-vdfs-frontend.md "AR-012-vdfs-frontend") §11 / §13.4）。
@@ -73,12 +76,12 @@ created: 2026-09-07
 根插件，自身终结以下路径；其余路径按首段剥离后转发给 `worker`（Composite），
 未命中的一律兜底转发给 `worker`（源码：`plugins/home/plugin.rs` 的 `route`）。
 
-| 路径 | 用途（→ §6.3） | 备注 |
+| 路径 | 用途（→ §2.3） | 备注 |
 |------|------|------|
-| `home/get_homedir` | [§6.3](../CURRENT.md#23-前端--宿主路由) | 只读；gateway 只读白名单放行 |
-| `home/reload` | [§6.3](../CURRENT.md#23-前端--宿主路由) | 前端切换系统目录后调用 |
-| `work/set_workspace` | [§6.3](../CURRENT.md#23-前端--宿主路由) | 写操作 |
-| `work/get_workspace` | [§6.3](../CURRENT.md#23-前端--宿主路由) | 只读；gateway 只读白名单放行 |
+| `home/get_homedir` | [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表") | 只读；gateway 只读白名单放行 |
+| `home/reload` | [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表") | 前端切换系统目录后调用 |
+| `work/set_workspace` | [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表") | 写操作 |
+| `work/get_workspace` | [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表") | 只读；gateway 只读白名单放行 |
 
 > **两条 `work/*` 臂在此终结**（`home` 是系统根、不挂前缀）：这是**工作区切换**的
 > 控制面（读写 `home` 自己的 `work.workdir` 配置），与 `memory` 插件的记忆挂载点
@@ -94,7 +97,7 @@ created: 2026-09-07
 
 **能力贡献（不是路由）**：唯一 LLM 工具 `agent_run`（启动 / 续跑子智能体，源码
 `plugins/agent/host/subagent.rs`），由模型经能力调用触达，不经 `route`。
-**LLM 可见工具清单以 [CURRENT.md](../CURRENT.md) §2 为准**，本文件不重复登记。
+**LLM 可见工具清单以 [CURRENT.md](RE-006-当前事实表.md "RE-006-当前事实表") §2 为准**，本文件不重复登记。
 
 ---
 
@@ -102,9 +105,9 @@ created: 2026-09-07
 
 ### 会话管理
 
-| 路径 | 用途（→ §6.3） | 返回类型 |
+| 路径 | 用途（→ §2.3） | 返回类型 |
 |------|------|------|
-| `session/stats` | [§6.3](../CURRENT.md#23-前端--宿主路由) | `SessionStats` |
+| `session/stats` | [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表") | `SessionStats` |
 
 > **会话编排不再有私有路由**：发言、恢复、中止全部落在会话自己的地址上（见下表）。
 > `stats` 是唯一剩下的会话路由——它是**读数**，不是数据操作。
@@ -124,7 +127,7 @@ created: 2026-09-07
 
 ### 会话级操作已并入 VDFS（专用路由不再存在）
 
-> 地址清单与各自职责见 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由)：
+> 地址清单与各自职责见 [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表")：
 >
 > 列会话清单 · 读整份转写 · 新建会话（id 由后端生成） · 新建 / 打开**具名**会话（id 由调用方给） · 删除会话 · 改 metadata / 标题 · 改写某条消息 · 删该条及其后 · 列待消费的用户消息（收件箱） · **发一条用户消息 / 取消一条排队中的消息** · 清空待消费队列 · **中止进行中的一轮** · **恢复（审批 / 回填答案 / 重试）**
 
@@ -157,9 +160,9 @@ created: 2026-09-07
 
 「这一轮该直接回答、还是派给工具循环」——只输出**枚举**，不产出面向用户的文本。
 
-| 路径 | 用途（→ §6.3） | 返回类型 |
+| 路径 | 用途（→ §2.3） | 返回类型 |
 |------|------|------|
-| `classify/decide` | [§6.3](../CURRENT.md#23-前端--宿主路由) | `Verdict` |
+| `classify/decide` | [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表") | `Verdict` |
 
 > 调用方只有 `session`（编排层）：它投影事实、发起调用，并按判决**执行**对应路径。
 > 契约 `DecideRequest` / `Verdict` 见 [`symbio_core::schemas::dialog`](../../symbio/src/symbio_core/schemas/dialog.rs)。
@@ -173,9 +176,9 @@ created: 2026-09-07
 
 「首响 / 答话 / 汇报」的措辞——只输出**文本**，不做判决。
 
-| 路径 | 用途（→ §6.3） | 返回类型 |
+| 路径 | 用途（→ §2.3） | 返回类型 |
 |------|------|------|
-| `compose/wording` | [§6.3](../CURRENT.md#23-前端--宿主路由) | `String` |
+| `compose/wording` | [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表") | `String` |
 
 > 调用方只有 `session`。本插件**不写转写**：文本由 `session` 落库，转写只有一个写入者。
 > 契约 `ComposeRequest` 见 [`symbio_core::schemas::dialog`](../../symbio/src/symbio_core/schemas/dialog.rs)；
@@ -218,13 +221,13 @@ created: 2026-09-07
 > **路由按工具名动态分发**：`local/<工具短名>`，与 LLM 工具是同一份集合
 > （`route()` 里 `tool_impls.iter().find(|t| t.name() == path)`）。
 
-| 路径 | 用途（→ §6.3） | 安全风险 |
+| 路径 | 用途（→ §2.3） | 安全风险 |
 |------|------|------|
-| `local/cmd`（Windows）/ `local/sh`（macOS / Linux） | [§6.3](../CURRENT.md#23-前端--宿主路由) | ⚠️ 高危 |
-| `local/content_search` | [§6.3](../CURRENT.md#23-前端--宿主路由) | 安全 |
-| `local/todo_write` | [§6.3](../CURRENT.md#23-前端--宿主路由) | 安全 |
-| `local/codebase_search` | [§6.3](../CURRENT.md#23-前端--宿主路由) | 安全 |
-| `local/ask_user` | [§6.3](../CURRENT.md#23-前端--宿主路由) | 安全 |
+| `local/cmd`（Windows）/ `local/sh`（macOS / Linux） | [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表") | ⚠️ 高危 |
+| `local/content_search` | [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表") | 安全 |
+| `local/todo_write` | [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表") | 安全 |
+| `local/codebase_search` | [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表") | 安全 |
+| `local/ask_user` | [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表") | 安全 |
 
 > **文件编辑类原生工具已迁入 VDFS 物理层**，由 `vdfs` 插件以
 > `vdfs_read` / `vdfs_write` / `vdfs_edit` / `vdfs_search` 等统一暴露，本插件不再提供。
@@ -239,7 +242,7 @@ created: 2026-09-07
 
 ## Web 插件
 
-> 地址清单与各自职责见 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由)：
+> 地址清单与各自职责见 [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表")：
 >
 > `web/http_request` · `web/web_search` · `web/web_fetch`
 
@@ -247,7 +250,7 @@ created: 2026-09-07
 
 ## Skill 插件
 
-> 地址清单与各自职责见 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由)：
+> 地址清单与各自职责见 [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表")：
 >
 > `skill/execute`
 
@@ -286,7 +289,7 @@ mcp_servers:
 
 ## Telegram 插件
 
-> 地址清单与各自职责见 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由)：
+> 地址清单与各自职责见 [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表")：
 >
 > `telegram/send` · `telegram/get_updates` · `telegram/set_chat_id` · `telegram/start_listener` · `telegram/stop_listener` · `telegram/status`
 
@@ -299,7 +302,7 @@ mcp_servers:
 
 HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端与 route_v2 同构接入插件树：
 
-> 地址清单与各自职责见 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由)：
+> 地址清单与各自职责见 [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表")：
 >
 > `POST /api/v1/invoke` · `WS /api/v1/ws` · `GET /api/v1/health`
 
@@ -307,7 +310,7 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 挂载于 `worker`（Composite）之下，外部入站请求最终由 gateway 转发给父级 composite：
 
-> 地址清单与各自职责见 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由)：
+> 地址清单与各自职责见 [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表")：
 >
 > `gateway/status`
 
@@ -350,13 +353,13 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 > `route` 里按它分发（「目录名 = 实例名」），所以目录名才是真正的路由前缀。
 > 真实的调用点见 `symbio_core::plugin::route::ROUTE_HOOK_FIRE`。
 
-> 地址清单与各自职责见 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由)：
+> 地址清单与各自职责见 [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表")：
 >
 > `hook/register` · `hook/fire` · `hook/list`
 
 ### 系统事件
 
-> 地址清单与各自职责见 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由)：
+> 地址清单与各自职责见 [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表")：
 >
 > `pre_tool_use` · `post_tool_use` · `pre_file_write` · `post_file_write` · `pre_shell_execute` · `post_shell_execute` · `user_prompt_submit` · `session_start` · `session_end`
 
@@ -364,7 +367,7 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 ## Event Bus 插件
 
-> 地址清单与各自职责见 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由)：
+> 地址清单与各自职责见 [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表")：
 >
 > `event_bus/subscribe` · `event_bus/ping`
 
@@ -375,11 +378,11 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 ## 退役路由索引
 
-**只登记「路径 → 现在去哪」，不写过程叙述**（决策与理由见 [ADR 索引](../adr/INDEX.md)、
+**只登记「路径 → 现在去哪」，不写过程叙述**（决策与理由见 [ADR 索引](../adr/ADR-000-架构决策汇总.md "ADR-000-架构决策汇总")、
 变更史见 `git log`，完整迁移审计见
 [`docs/archive/legacy-route-migration.md`](../archive/legacy-route-migration.md)）：
 
-> 地址清单与各自职责见 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由)：
+> 地址清单与各自职责见 [§2.3](RE-006-当前事实表.md#23-前端--宿主路由 "RE-006-当前事实表")：
 >
 > `{plugin}/config/get` · `{plugin}/config/set` · `{plugin}/config/schema` · `{plugin}/entities/*` · `model/chat` · `model/status` · `model/chat_sync` · `agent/list` · `get` · `upload` · `delete` · `preview` · `export` · `session/append` · `session/open` · `session/update` · `session/clear` · `session/chat/send` · `session/chat/abort` · `session/chat/update_message` · `session/chat/delete_message` · `session/chat/clear_messages` · `session/get_messages` · `session/options/list` · `session/stream` · `session/heartbeat/trigger` · `hook/trigger` · `hooks/*` · `event_bus/publish`
 

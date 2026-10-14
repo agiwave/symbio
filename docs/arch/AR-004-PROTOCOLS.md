@@ -165,7 +165,7 @@ pub enum PluginPayloadWire {
 ### Tauri Commands
 
 宿主命令面（3 个：`route_v2` / `route_v2_send` / `route_v2_close`）**以
-[CURRENT.md](../CURRENT.md) §5 为准**（自动生成）——本文不抄一份会漂移的副本。
+[CURRENT.md](../ref/RE-006-当前事实表.md "RE-006-当前事实表") §5 为准**（自动生成）——本文不抄一份会漂移的副本。
 
 ### 流式会话建立
 

@@ -37,7 +37,7 @@ created: 2026-07-20
 
 子树挂**与父 Agent 同构的默认插件集**（见 `symbio_core::ASSEMBLY_SUB_AGENT_PLUGINS`）——与系统侧
 是**同一份清单**：`home` 的 `SYSTEM_PLUGINS` 直接取这个常量，**不是第二份手抄**。清单内容不在此
-复述（复述即重复，改一次要动两处），要看得去常量定义或 `docs/CURRENT.md` §1。`vdfs` 会随子树
+复述（复述即重复，改一次要动两处），要看得去常量定义或 `docs/ref/RE-006-当前事实表.md` §1。`vdfs` 会随子树
 构造出实例，但其注册经 `SubAgentVisitor` 丢弃（VDFS 根单槽归根）。
 
 - `work` 在其中：子树 `WORKDIR` **继承父会话**，所以 `work` 注入的是工作区记忆，

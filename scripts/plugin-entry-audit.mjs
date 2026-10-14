@@ -11,7 +11,7 @@
  * 2026-09-18 的审计抓到三处真实漂移，都是这个形状：
  *
  * - `hook` 插件的 `PluginMeta::new("hooks", …)` 与目录名 `hook` 不一致
- *   → `docs/CURRENT.md` 的生成器与两处文档照抄出 **`hooks/fire` 这类不存在的路由**；
+ *   → `docs/ref/RE-006-当前事实表.md` 的生成器与两处文档照抄出 **`hooks/fire` 这类不存在的路由**；
  * - Telegram 用 `SESSION_CHAT`（`"session/chat"`）路由——**该路径不存在**，
  *   session 只认 `chat/send` / `chat/abort`，所以那处调用以前必定落到 `NotFound`；
  * - `symbio_core::plugin::route` 里的 `AGENT_CHAT` / `AGENT_CREATE` 是**幽灵常量**：
@@ -705,7 +705,7 @@ for (const abs of codeFiles) {
 // ── E-006：路由**权威清单**里的路径前缀必须是插件目录名（文档侧）─────────
 //
 // 为什么只扫这几个文件：`hooks/fire` 这个幽灵路径**不在任何代码里**——它出现在
-// `docs/CURRENT.md`、`docs/ref/RE-003-ROUTES.md` 与 `hook/README.md` 三处文档中。
+// `docs/ref/RE-006-当前事实表.md`、`docs/ref/RE-003-ROUTES.md` 与 `hook/README.md` 三处文档中。
 // 只扫代码的守卫会**完整地漏掉它**。
 //
 // 为什么只判**前缀**、不判整条路径是否存在：权威清单里**必须**能提到已退役的路由

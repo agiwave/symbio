@@ -63,6 +63,18 @@ function render() {
   rows.sort(byPrefix)
 
   const L = []
+  // front-matter 整体由生成器发出（同 RE-006）：一份登记条目该有哪些字段、它拥有哪份
+  // 清单，只有渲染它的人知道。`lists` 让人手写等于让「代码投影」混进人写的内容——
+  // 那是 `TOOL_NOTES` 的病根。
+  L.push('---')
+  L.push('kind: ref')
+  L.push('id: RE-008-判据码登记表')
+  L.push('title: 判据码登记表（自动生成）')
+  L.push('status: active')
+  L.push('created: 2026-09-20')
+  L.push('lists: [gate-codes=owner]')
+  L.push('---')
+  L.push('')
   L.push('# 判据码登记表（自动生成）')
   L.push('')
   L.push('> ⚠️ **本表由 `scripts/facts/gate-codes.mjs` 从各脚本的 `// @ns` / `// @codes` 声明生成，请勿手改。**')
@@ -71,6 +83,8 @@ function render() {
   L.push('> 判据码是每条机械判定的**地址**：豁免注释、门禁日志、文档指认都指向它。')
   L.push('> 每条判据**判什么**归声明它的那个脚本的头注释；撞号与漏登记由')
   L.push('> [`scripts/gate-codes-audit.mjs`](../../scripts/gate-codes-audit.mjs) 判（GC-001–006）。')
+  L.push('')
+  L.push('<!-- list:gate-codes owner -->')
   L.push('')
   L.push('## 1. 命名空间')
   L.push('')

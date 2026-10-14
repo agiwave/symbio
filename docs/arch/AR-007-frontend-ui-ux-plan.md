@@ -9,8 +9,8 @@ created: 2026-09-28
 # 前端 UI/UX 提升规划（提案）
 
 > 本文回答「**还能怎么提升**」，是**提案**，不是既定事实。
-> 「现在是什么」看 [CURRENT.md](../CURRENT.md)（自动生成，唯一权威）；
-> 「为什么这样设计」看 [ADR 索引](../adr/INDEX.md)；
+> 「现在是什么」看 [CURRENT.md](../ref/RE-006-当前事实表.md "RE-006-当前事实表")（自动生成，唯一权威）；
+> 「为什么这样设计」看 [ADR 索引](../adr/ADR-000-架构决策汇总.md "ADR-000-架构决策汇总")；
 > 前端代码结构看 [tauri/docs/AR-023-FRONTEND.md](../../tauri/docs/AR-023-FRONTEND.md "AR-023-FRONTEND")（本文不重复）。
 
 ---

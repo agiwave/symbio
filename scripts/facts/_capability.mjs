@@ -1,5 +1,5 @@
 /**
- * facts/_capability —— 「能力矩阵」的提取实现（`docs/CURRENT.md` 那一节的输入）
+ * facts/_capability —— 「能力矩阵」的提取实现（`docs/ref/RE-006-当前事实表.md` 那一节的输入）
  *
  * ## 它回答什么
  *
@@ -272,7 +272,7 @@ export function routeDocs(root) {
   return routeArmDocs(root)
 }
 
-/** 三族事实的集中入口：`docs/CURRENT.md` 能力矩阵那节只认这一个。 */
+/** 三族事实的集中入口：`docs/ref/RE-006-当前事实表.md` 能力矩阵那节只认这一个。 */
 export function capabilityFacts(root) {
   return {
     tools: toolFacts(root),

@@ -13,7 +13,7 @@
  * - `vdfs/*` 的操作词：它们按 `VDFS_OPS` 动态校验，契约与响应类型同处
  *   `schemas/vdfs.ts`（定义权由 `mechanism-audit` 的 M-007 钉住）。
  * - 动态分发的地址（`local/<工具短名>`、容器挂载名）：静态提取不到，见
- *   `docs/CURRENT.md` §1 标「（动态）」的那些行。
+ *   `docs/ref/RE-006-当前事实表.md` §1 标「（动态）」的那些行。
  *
  * 命名与后端 `symbio_core/plugin/route.rs` 同构：`ROUTE_` + 地址大写（`/` → `_`），
  * 同名同值，跨栈检索只需一个标识符。

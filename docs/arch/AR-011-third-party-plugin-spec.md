@@ -13,7 +13,7 @@ created: 2026-09-25
 > **边界**：本文只回答「怎么设计」。现状不合理之处的清单与优先级见
 > [archive/plugin-system-review-2026-09.md](../archive/plugin-system-review-2026-09.md)
 > （下文简称「**评审**」，条目号 A1–A6 / P1–P8 均指该文）；单条决策定案后写进
-> [ADR 索引](../adr/INDEX.md)。
+> [ADR 索引](../adr/ADR-000-架构决策汇总.md "ADR-000-架构决策汇总")。
 >
 > **参照系**：MCP（Model Context Protocol）。本文与 MCP 的**关键差异**是范围——
 > MCP 的接入点是「工具清单」，本方案的接入点是**完整的 `Plugin` trait**：
@@ -492,5 +492,5 @@ init 响应（插件给） "needs": ["fs.read", "net.http", "proc.spawn"]  ← �
 定案后，每条决策写成一条 ADR（编号接 ADR-031）。
 
 > **本表的归属**：这是一张**设计文档自持的待确认表**，不另登登记条目——「本文倾向」是**判断不是决策**，
-> 决策正文的 owner 始终是 [ADR 索引](../adr/INDEX.md)；真要定案时按上句一条一个 ADR，
+> 决策正文的 owner 始终是 [ADR 索引](../adr/ADR-000-架构决策汇总.md "ADR-000-架构决策汇总")；真要定案时按上句一条一个 ADR，
 > 本表只留指回 ADR 的行（见 [PL-011 §6](../plan/PL-011-登记与汇总机制.md "PL-011-登记与汇总机制") 的决策类登记形态）。

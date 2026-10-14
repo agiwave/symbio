@@ -481,8 +481,11 @@ test('分解投影增强：父行子项状态计数 + 总账分解列 + 渲染�
 
   const root = renderRootIndex(entries)
   assert.match(root, /\| 分解 \|/, '总账表有分解列')
-  assert.match(root, /\[task · 任务\]\([^)]*\)\s*\|[^|]*\|\s*4\s*\|[^|]*\|\s*3 条分解边/, 'task 行报有效 parent 边数（3）')
-  assert.match(root, /\[spec · 规范\]\([^)]*\)\s*\|[^|]*\|[^|]*\|[^|]*\|\s*—/, '无分解的 kind 显示 —')
+  // 汇总页现已**登记**，所以指向它的链接写成**编号引用**（`[[T-000-任务汇总|task · 任务]]`），
+  // 由 `gen-doc-refs` 展开成真实地址——手写地址会被 RF-003 判红。
+  // 断言也跟着改：这里测的是 `--write` 的**原始产出**，不是展开后的形态。
+  assert.match(root, /\[\[T-000-任务汇总\|task · 任务\]\]\s*\|[^|]*\|\s*4\s*\|[^|]*\|\s*3 条分解边/, 'task 行报有效 parent 边数（3）')
+  assert.match(root, /\[\[SP-000-规范汇总\|spec · 规范\]\]\s*\|[^|]*\|[^|]*\|[^|]*\|\s*—/, '无分解的 kind 显示 —')
 })
 
 test('board --children / --parent：分解子树与父链两个查询出口；互斥与不存在有出口', () => {
@@ -779,8 +782,16 @@ test('RG-021：title 必须逐字等于正文首个 H1；缺 H1 或不对账即�
 test('RG-020 豁免：archive / 生成页 / 指令面不进登记范围（反向）', () => {
   const base = caseRoot({
     'docs/archive/old.md': '# 历史快照（无 front-matter）\n',
-    'docs/INDEX.md': '# 总账（生成页）\n',
-    'docs/plan/INDEX.md': '# 计划索引（生成页）\n',
+    // 汇总页现在是**登记条目**，生成器会发 front-matter + `projection: true`
+    // （有身份、没内容）。夹具照新形态写——否则这条用例测的是一个已经不存在的形态。
+    'docs/KIND-000-登记总账.md':
+      '---\nkind: index\nid: KIND-000-登记总账\ntitle: 登记总账（自动生成）\n' +
+      'status: active\nprojection: true\ncreated: 2026-10-14\n---\n\n# 登记总账（自动生成）\n',
+    'docs/plan/PL-000-计划汇总.md':
+      // 汇总页现在是**登记条目**，生成器会发 front-matter + `projection: true`
+      // （有身份、没内容）。夹具照新形态写——否则这条用例测的是一个已经不存在的形态。
+      '---\nkind: plan\nid: PL-000-计划汇总\ntitle: 计划登记索引（自动生成）\n' +
+      'status: active\nprojection: true\ncreated: 2026-10-14\n---\n\n# 计划登记索引（自动生成）\n',
     '/AGENTS.md': '# 指令（无 front-matter）\n',
   })
   assert.deepEqual(errsOf(base), [], '豁免面不得误报')
@@ -799,7 +810,7 @@ test('文档类渲染：按 status 分组、编号列是可点的相对链接（
   assert.match(out, /草案（draft）/)
   assert.match(out, /废止（retired）/)
   assert.match(out, /\[`docs\/plan\/a`\]\(a\.md\)/, '同目录文档应渲染成同目录相对链接（从索引一步到正文）')
-  // 跨目录：从 docs/plan/INDEX.md 到 docs/arch/x.md 必须写成 ../arch/x.md
+  // 跨目录：从 docs/plan/PL-000-计划汇总.md 到 docs/arch/x.md 必须写成 ../arch/x.md
   const cross = caseRoot({ 'docs/arch/x.md': docDoc('docs/arch/x.md', { title: 'X 文档' }) })
   assert.match(
     renderKindIndex('arch', loadEntries(cross).entries),
@@ -814,12 +825,12 @@ test('--write：生成三个汇总页，再跑一次显示已是最新', () => {
   const base = caseRoot({ 'task/T-001.md': taskDoc('T-001', { status: 'done', evidence: 'abc1234' }) })
   const first = runRegistryAudit([`--root=${base}`, '--write'])
   assert.equal(first.code, 0, stripAnsi(first.lines.join('\n')))
-  for (const rel of ['docs/INDEX.md', 'docs/task/INDEX.md', 'docs/spec/INDEX.md']) {
+  for (const rel of ['docs/KIND-000-登记总账.md', 'docs/task/T-000-任务汇总.md', 'docs/spec/SP-000-规范汇总.md']) {
     assert.ok(fs.existsSync(path.join(base, rel)), `${rel} 应被生成`)
   }
-  const board = fs.readFileSync(path.join(base, 'docs/task/INDEX.md'), 'utf8')
+  const board = fs.readFileSync(path.join(base, 'docs/task/T-000-任务汇总.md'), 'utf8')
   assert.match(board, /`T-001`.*abc1234/, '已完成表应带证据列')
-  assert.match(fs.readFileSync(path.join(base, 'docs/INDEX.md'), 'utf8'), /task · 任务/)
+  assert.match(fs.readFileSync(path.join(base, 'docs/KIND-000-登记总账.md'), 'utf8'), /task · 任务/)
 
   const second = runRegistryAudit([`--root=${base}`, '--write'])
   assert.equal(second.code, 0)
@@ -830,7 +841,7 @@ test('registry-audit：违规时拒绝写汇总页（exit 1）；参数不识别
   const base = caseRoot({ 'task/T-001.md': taskDoc('T-001', { status: 'done' }) })
   const r = runRegistryAudit([`--root=${base}`, '--write'])
   assert.equal(r.code, 1)
-  assert.ok(!fs.existsSync(path.join(base, 'docs/task/INDEX.md')), '有违规不得写汇总页')
+  assert.ok(!fs.existsSync(path.join(base, 'docs/task/T-000-任务汇总.md')), '有违规不得写汇总页')
   assert.equal(runRegistryAudit(['--bogus']).code, 2)
 })
 

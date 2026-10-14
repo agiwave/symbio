@@ -34,7 +34,7 @@ created: 2026-09-16
 （`watch` / `unwatch` / `action` 不经 LLM 工具暴露：实时订阅归宿主前端，动作由详情
 `actions` 声明后按需触发）。
 
-**操作与工具清单以 [docs/CURRENT.md](../../../../docs/CURRENT.md) §3 为准**（操作闭集
+**操作与工具清单以 [docs/ref/RE-006-当前事实表.md](../../../../docs/ref/RE-006-当前事实表.md "RE-006-当前事实表") §3 为准**（操作闭集
 `protocol.rs::VDFS_OPS` 有测试锁计数；工具集完整性由 `tools/mod.rs` 的
 `tools_cover_all_ops` 测试锁死）——本 README 不抄那份会漂移的清单。
 

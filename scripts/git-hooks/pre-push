@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# pre-push — 推送前挡住 `docs/CURRENT.md` 漂移（事实文件必须与代码同批再生成）
+# pre-push — 推送前挡住 `docs/ref/RE-006-当前事实表.md` 漂移（事实文件必须与代码同批再生成）
 #
 # 启用（一次性，本机生效）：
 #   git config core.hooksPath scripts/git-hooks

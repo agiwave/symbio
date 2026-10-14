@@ -12,7 +12,7 @@ created: 2026-09-16
 > 范围：`symbio/src/plugins/session/`
 > 判据的「为什么」与被否决的方案见 [ADR-039](../../../../../docs/adr/ADR-039.md)
 > （`session` 按域重组）；文件清单与行数属**结构事实**，由代码生成，
-> 见 [CURRENT.md](../../../../../docs/CURRENT.md)，本文件不抄。
+> 见 [CURRENT.md](../../../../../docs/ref/RE-006-当前事实表.md "RE-006-当前事实表")，本文件不抄。
 > 相关：[`./AR-015-core-loop.md`](AR-015-core-loop.md "AR-015-core-loop")（主循环结构与收口点）、
 > [`../README.md`](../README.md "symbio/src/plugins/session/README")（现行机制与配置面）
 
@@ -165,4 +165,4 @@ X/mod.rs + X/tests.rs      模块文件是 mod.rs 的（如 store/、heartbeat/�
 - **不顺手收窄 / 放宽可见性**：搬移阶段只做归位；可见性调整是独立决策，
   要有跨域共享面或域内分工的判据支撑（§3）。
 - **不抄结构快照**：文件数、行数、代码规模一律以
-  [CURRENT.md](../../../../../docs/CURRENT.md) 为准；本文件若与它冲突，以它为准。
+  [CURRENT.md](../../../../../docs/ref/RE-006-当前事实表.md "RE-006-当前事实表") 为准；本文件若与它冲突，以它为准。

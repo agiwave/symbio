@@ -48,7 +48,7 @@
  */
 // 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns RG 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解）
-// @codes RG-001 RG-002 RG-003 RG-004 RG-005 RG-006 RG-007 RG-008 RG-009 RG-010 RG-011 RG-012 RG-013 RG-014 RG-015 RG-016 RG-017 RG-018 RG-019 RG-020 RG-021 RG-022 RG-023 RG-024 RG-025
+// @codes RG-001 RG-002 RG-003 RG-004 RG-005 RG-006 RG-007 RG-008 RG-009 RG-010 RG-011 RG-012 RG-013 RG-014 RG-015 RG-016 RG-017 RG-018 RG-019 RG-020 RG-021 RG-022 RG-023 RG-024 RG-025 RG-026 RG-027 RG-028 RG-029
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -65,7 +65,18 @@ export const COMMON_REQUIRED = ['kind', 'id', 'title', 'status', 'created']
  *   deps 回答「必须先有什么」，parent 回答「是谁的一部分」。同一对条目之间可以两条都有
  *   （子任务的前置是别的任务，同时它是大任务的一部分），互不替代。
  */
-export const COMMON_OPTIONAL = ['deps', 'parent']
+export const COMMON_OPTIONAL = ['deps', 'parent', 'lists', 'projection']
+
+/**
+ * `lists` 的 role 词表（RG-026 封闭）：
+ * - `owner` —— **我维护这份清单**。同一个 id 只能有一个 owner（RG-027）；
+ * - `view` —— 我只是**呈现 / 引用**它（表以它为键、段里引它）。必须链到 owner（RG-028）。
+ *
+ * 只有两个角色不是拍脑袋：第三个常见选项 `mirror`（镜像副本）被**有意排除**——
+ * 「镜像」正是重复的别名，给它一个合法角色等于给复制发通行证。要呈现就 `view`，
+ * 要维护就 `owner`，没有第三条路。
+ */
+export const LIST_ROLES = ['owner', 'view']
 
 /**
  * 每个 kind 一份配置——**新增一个 kind = 在这里加一项 + 一个渲染器 + 回归测试**，
@@ -119,6 +130,10 @@ const docKind = (label, blurb, retiredStates = ['retired']) => ({
 export const KINDS = {
   goal: docKind('目标', '要达成什么——价值主张与可度量的验收判据'),
   stage: docKind('阶段', '分几步走、现在在哪一步——路线图与能力扩充阶段'),
+  // `index`：跨 kind 的登记总账（`docs/KIND-000-登记总账.md`）。它是**投影页**，
+  // 与各 kind 的 `<前缀>-000-<X>汇总.md` 同形，只是位置在 `docs/` 根而不是某个
+  // kind 目录——目录不参与判定（kind 只来自 front-matter），所以它**不需要**自己的目录。
+  index: { ...docKind('总账', '跨 kind 的登记总账——各 kind 条目数 / 状态分布 / 分解边数'), blurb: '跨 kind 的登记总账' },
   plan: docKind('计划', '要变成什么样——目标架构与实施方案'),
   arch: docKind('架构', '现在是什么样——系统结构 / 设计规范 / 模块机制'),
   ref: docKind('参考', '查数据——路由 / 错误码 / 配置等权威表'),
@@ -193,9 +208,14 @@ export const ID_PREFIX = {
   arch: 'AR',
   ref: 'RE',
   guide: 'GU',
+  // `index` 是**跨 kind 的登记总账**。它需要自己的前缀，而不是硬塞进九个 kind 里的
+  // 任何一个——给它 `PL-` 会在 plan 汇总页里出现一行「计划目录的索引页」，那是撒谎；
+  // 而「不发编号」又会让指向它的地址只能手写（正是各 kind 汇总页改名要消灭的东西）。
+  // `KIND` 这个前缀字面就说清了它横跨所有 kind，且不与任何内容条目相争。
+  index: 'KIND',
 }
 /** 编号条目的 id 形状（名称段可选，允许中文 / 点 / 连字符）。 */
-export const ENTRY_ID_RE = /^(GO|ST|PL|T|ADR|SP|AR|RE|GU)-[0-9]{3}[a-z]?(-[^\s/]+)?$/
+export const ENTRY_ID_RE = /^(GO|ST|PL|T|ADR|SP|AR|RE|GU|KIND)-[0-9]{3}[a-z]?(-[^\s/]+)?$/
 /**
  * `adr` 的**域**闭集（归域规则见 [`docs/spec/SP-002.md`](../docs/spec/SP-002.md "SP-002")）。
  *
@@ -284,17 +304,60 @@ export const SCAN_SKIP_DIRS = new Set([
 export const SCAN_SKIP_PREFIXES = ['docs/archive/']
 /** 单文件豁免：路径 → 理由（与职责表 / plan/14「明确不接管」同口径）。 */
 export const SCAN_SKIP_FILES = new Map([
-  ['docs/CURRENT.md', '代码投影（facts/current 生成，owner 是生成器）'],
+  // ⚠️ `docs/ref/RE-006-当前事实表.md` 已不在此列：它搬进 `docs/ref/RE-006-当前事实表.md` 并**正式登记**。
+  // 原先免登记的理由是「它是代码投影，不是条目」——但那条理由连累了它的**引用**：
+  // 没有编号，别人只能手写 `../CURRENT.md#…`（地址机制搬不动），于是本仓为它专门
+  // 加了一条判据盯着节次漂移。搬进来并给编号后，那些引用改走 `[[RE-006#…]]`，
+  // 地址由 `gen-doc-refs` 重算——那条判据随之退休。
   ['docs/ref/GATE_CODES.md', '代码投影（facts/gate-codes 生成）'],
   ['docs/ref/PROMPT_SHAPE.md', '真实链路生成（e2e t46 生成）'],
   ['docs/ref/PROMPT_AB.md', '门外实验生成（e2e/ab 生成）'],
   ['AGENTS.md', '指令注入面（每会话直接进上下文，不是阅读文档）'],
 ])
+/**
+ * 各 kind 的汇总页文件名：`<前缀>-000-<X>汇总.md`。
+ *
+ * ## 为什么从 `INDEX.md` 改名
+ *
+ * 汇总页原先叫 `docs/<kind>/INDEX.md`，靠**固定名**被引用，于是每个指向它的地方都
+ * 得手写 `./<kind>/INDEX.md` —— 一串不随目标位置变化的**手写地址**。而这些页面由
+ * `isGeneratedIndex` 从 `loadEntries` 里整个排除，所以它们对 `gen-doc-refs` 与 RF-003
+ * **完全隐形**：地址不会被重算、手写也不会被判红。与 RG-027 当初漏过的那个洞同类
+ * （**生成投影对机制隐形**）。
+ *
+ * 改名 + 纳入登记（自己发 front-matter、自己有 id）之后，指向它们可以写编号引用，
+ * 地址交给机制——与全仓其它文档同一条规矩，没有例外。
+ *
+ * 编号取 `000`：本仓各 kind 的编号从 `001` 起（`ENTRY_ID_RE` 允许三位零），
+ * `000` 在该命名空间里**不与任何内容条目相争**，读起来也一眼知道它是「这一类从
+ * 这里开始看」的入口页而不是内容。
+ */
+export function kindIndexFile(kind) {
+  // `index` 的文件名不套 `<label>汇总` 那个模板：`总账汇总` 读着别扭（总账本身就是
+  // 汇总，再加「汇总」），而文件名是**显示选择**，不是身份——身份是 id。
+  if (kind === 'index') return `${ID_PREFIX[kind]}-000-登记总账.md`
+  return `${ID_PREFIX[kind]}-000-${KINDS[kind].label}汇总.md`
+}
+
+/** 该 kind 汇总页的条目 id（= 文件名去 `.md`）。 */
+export function kindIndexId(kind) {
+  return kindIndexFile(kind).replace(/\.md$/, '')
+}
+
 /** 生成的汇总页（投影不是条目）：仓根总账 + 各 kind 的汇总页。 */
 export function isGeneratedIndex(rel) {
-  if (rel === 'docs/INDEX.md') return true
+  // 各 kind 汇总页已改名并**纳入登记**（自己发 front-matter、自己有 id），
+  // 不再走「投影豁免」这条路——豁免正是让它们对机制隐形的那一步。
+  for (const kind of Object.keys(KINDS)) {
+    if (rel === `docs/${kind}/${kindIndexFile(kind)}`) return false
+    if (kind === 'index' && rel === `docs/${kindIndexFile(kind)}`) return false
+  }
+  // 旧路径残留（各 kind 的 `INDEX.md` 与仓根 `KIND-000-登记总账.md`）：**必须判红**。
+  // 它们是改名后没人删掉的过期投影——生成器不再写它们，也没有任何判据覆盖它们
+  // （RG-020 豁免、D-001 只看活跃文档），于是会静默漂移、读者却点得到。
+  if (rel === 'docs/KIND-000-登记总账.md') return false
   const m = rel.match(/^docs\/([^/]+)\/INDEX\.md$/)
-  return !!m && m[1] in KINDS
+  return false
 }
 
 /**
@@ -444,7 +507,19 @@ export function loadEntries(root) {
         continue
       }
       if (!ent.name.endsWith('.md')) continue
-      if (SCAN_SKIP_FILES.has(rel) || isGeneratedIndex(rel)) continue
+      if (SCAN_SKIP_FILES.has(rel) || isGeneratedIndex(rel)) {
+        // 免**登记**（kind / id / title / status 那套）≠ 免**跨文档事实**。
+        // `lists` 声明是全局的：owner 很可能是一份**生成物**（CURRENT.md 的三张表就是），
+        // 它若对分工重叠判据隐形，那「两个 owner」永远只看得见一个——RG-027 直接失效。
+        // （反向验证当场抓到这一条：给 RE-003 注入 `routes=owner` 时判据**漏过**，
+        //  因为 CURRENT.md 那份 owner 声明根本没进 registry 的视野。）
+        const text = fs.readFileSync(abs, 'utf8')
+        const { meta, body, errors: perr } = parseEntryText(text, rel)
+        if (meta && !isEmpty(meta.lists)) {
+          entries.push({ file: abs, rel, kind: meta.kind ?? null, name: ent.name, meta, body, errors: perr, projection: true })
+        }
+        continue
+      }
       scanned += 1
       const text = fs.readFileSync(abs, 'utf8')
       const first = text.replace(/^\uFEFF/, '').split(/\r?\n/, 1)[0]?.trim()
@@ -478,7 +553,17 @@ export function loadEntries(root) {
   for (const [kind, cfg] of Object.entries(KINDS)) {
     if (!entries.some((e) => e.kind === kind)) notes.push(`kind ${kind}（${cfg.label}）：暂无条目`)
   }
-  return { entries, errors, notes, missing: scanned === 0 }
+  // 投影条目（免登记的生成物）只参与**清单归属**那一族判据（RG-026…RG-029）——
+  // 它们没有 kind，不进状态机 / 依赖 / 分解 / 字段完整性任何一条。分开是因为
+  // 「免登记」的理由是「它不是条目」，而清单归属问的是「这份清单有没有主」，
+  // 后者与它是不是条目无关。
+  return {
+    entries: entries.filter((e) => !e.projection),
+    projections: entries.filter((e) => e.projection),
+    errors,
+    notes,
+    missing: scanned === 0,
+  }
 }
 
 // ==================== 校验 ====================
@@ -551,7 +636,7 @@ function cmpPrio(byIdEntry) {
  * 全量校验。返回**纯文本**一行一条的违规（颜色由 CLI 上），
  * 空数组 = 零违规。`root` 用于 RG-012 的存在性判定。
  */
-export function auditEntries(entries, root) {
+export function auditEntries(entries, root, projections = []) {
   const out = []
   const byId = new Map()
 
@@ -567,7 +652,11 @@ export function auditEntries(entries, root) {
       if (!allowed.has(k)) out.push(`${e.rel}：RG-001 未知字段 \`${k}\`（${e.kind} 允许：${[...allowed].sort().join('、')}）`)
     }
     // RG-002 必填非空（kind 即装载时的目录判据已取消：kind 只来自 front-matter，目录不参与判定）
-    for (const k of [...COMMON_REQUIRED, ...cfg.required]) {
+    // `projection: true` 豁免**kind 专属**必填字段（`track` / `scope` / `impl` …）：
+    // 那些字段描述的是「这份内容处在什么位置」，而投影页没有内容。
+    // **公共**五行一条不豁免——那是「它是一份文档」的定义。
+    const isProj = meta.projection === true || meta.projection === 'true'
+    for (const k of [...COMMON_REQUIRED, ...(isProj ? [] : cfg.required)]) {
       if (isEmpty(meta[k])) out.push(`${e.rel}：RG-002 必填字段 \`${k}\` 缺失或为空`)
     }
     // RG-003 编号形状 / 编号 ↔ 文件对账 / 全 registry 唯一
@@ -603,8 +692,15 @@ export function auditEntries(entries, root) {
         byId.set(meta.id, e)
       }
     }
+    // `projection: true` = 这一页**有身份、没内容**（内容由渲染器决定）。它豁免
+    // **内容面**判据，逐条列明而不是笼统放行：kind 专属必填字段（RG-002，如 task 的
+    // `track`）、状态词（RG-004）、状态×字段矩阵（RG-007）、必备小节（RG-009）、
+    // 取代链 / 清除指认（RG-015/016）。
+    // **身份面**一条不豁免：front-matter 可解析、编号形状、id ↔ 文件名、created、
+    // title == H1、清单归属——那几条判的正是「它是不是一份可被引用的文档」。
+    const proj = meta.projection === true || meta.projection === 'true'
     // RG-004 状态词
-    if (!isEmpty(meta.status) && !(meta.status in cfg.statusRules)) {
+    if (!proj && !isEmpty(meta.status) && !(meta.status in cfg.statusRules)) {
       out.push(`${e.rel}：RG-004 status=${JSON.stringify(meta.status)} 不在 ${e.kind} 的状态词（${Object.keys(cfg.statusRules).join(' / ')}）`)
     }
     // RG-005 日期
@@ -671,7 +767,7 @@ export function auditEntries(entries, root) {
     }
     // RG-007 状态 × 字段矩阵
     const rule = typeof meta.status === 'string' ? cfg.statusRules[meta.status] : null
-    if (rule) {
+    if (rule && !proj) {
       for (const k of rule.require) {
         if (isEmpty(meta[k])) out.push(`${e.rel}：RG-007 status=${meta.status} 必须填 \`${k}\``)
       }
@@ -680,9 +776,12 @@ export function auditEntries(entries, root) {
       }
     }
     // RG-009 正文小节（文档类的 sections 为空：正文结构由文档自己定）
-    for (const sec of cfg.sections) {
-      if (!new RegExp(`^##\\s+${sec}\\s*$`, 'm').test(e.body)) {
-        out.push(`${e.rel}：RG-009 正文缺 \`## ${sec}\` 小节`)
+    // 投影页豁免：它的正文由渲染器决定，`## 内容` / `## 处理过程` 那套是人写的结构。
+    if (!proj) {
+      for (const sec of cfg.sections) {
+        if (!new RegExp(`^##\\s+${sec}\\s*$`, 'm').test(e.body)) {
+          out.push(`${e.rel}：RG-009 正文缺 \`## ${sec}\` 小节`)
+        }
       }
     }
     // RG-021：文档类的 title 必须逐字等于正文首个 H1（title 的唯一来源是 H1，两面对账）
@@ -742,12 +841,21 @@ export function auditEntries(entries, root) {
     if (cycle) out.push(`RG-006 依赖成环：${cycle.join(' -> ')}（环上的编号永远等不到前置闭环）`)
   }
 
+  /** `lists` 声明收集处（RG-026/027/028 读它）：{rel, id, role, kind} */
+  const listClaims = []
+  // 清单归属这一族同时看**条目**与**投影**（免登记的生成物）。owner 往往就是投影
+  // （CURRENT.md 的三张表由 facts/current 生成），它若隐形，RG-027 的「两个 owner」
+  // 永远只看得见一个——反向验证当场抓到这条漏过。
+  const listScope = [...entries, ...projections]
+
   // ---- RG-024：parent 的存在性 / 同 kind / 不成环（分解树的边） ----
   // 分解是**同类事物的大小之分**：总目标→子目标、大任务→小任务、产品功能→子功能、
   // 大阶段→子阶段——所以 parent 只许同 kind。跨 kind 的关联（任务服务于某阶段）走 deps
   // （前置）或正文引用（导航），不塞进 parent：一个字段一种语义，塞两种就两种都读不出。
   {
     const parentOf = new Map()
+    /** `lists` 声明收集处（RG-026/027/028 读它）：{rel, id, role, kind} */
+    const listClaims = []
     for (const e of entries) {
       if (!e.meta || isEmpty(e.meta.parent) || typeof e.meta.parent !== 'string') continue
       if (e.meta.parent === e.meta.id) continue // 自指已在单文件段判（不重复进环检测）
@@ -769,6 +877,132 @@ export function auditEntries(entries, root) {
     }
     const cycle = findCycle([...parentOf.keys()], (id) => (parentOf.has(id) ? [parentOf.get(id)] : []))
     if (cycle) out.push(`RG-024 parent 成环：${cycle.join(' -> ')}（分解环上的条目永远说不清谁是父）`)
+  }
+
+  // ---- RG-026 / RG-027 / RG-028：清单归属（一份清单只有一个 owner） ----
+  //
+  // **为什么要有这个字段**：`docs/README.md` 的「一个事实只有一个 owner」此前是一张
+  // **没人执行的承诺**——它写着「不手抄，需要就引用」，而 D-001…D-010 查链、查措辞、
+  // 查形态，没有一条查「同一份清单被两处各自维护」。于是 CURRENT.md 内部并存过两张
+  // 工具表（行集交集 25/25），RE-003 与 CURRENT §2.3 各持一份手写/生成的路由地址，
+  // 两处**保证等级还不一样**（一处「必然与代码一致」、一处「人工维护，唯一会漂移」）。
+  //
+  // `lists` 把那份承诺变成**可机读的声明**：每篇文档在 front-matter 里写它**包含哪些
+  // 清单**、以及每份是 `owner`（我维护它）还是 `view`（我只是呈现/引用它）。
+  // 不写 = 这篇不含任何清单，单内容文档——不需要为「没有」额外声明。
+  //
+  // 判据分**两层**，各自在最小作用域内解决——这是本设计的全部要点：
+  //
+  //   | 层 | 判什么 | 要读多少 | 坏了归谁 |
+  //   |---|---|---|---|
+  //   | 单文档 | 我声明的清单，正文里有没有对应的东西 | **这一篇** | 这一篇自己 |
+  //   | 跨文档 | 两篇是否都声称拥有同一份清单 | **每篇 front-matter**（不碰正文表） | 两篇一起谈 |
+  //
+  // 跨文档层**只比声明**，所以回答「有没有重复」不需要扫描任何正文——那正是它便宜的原因。
+  // 我最初写成「扫全仓每张表、猜它像哪份清单」，那是**错的形状**：成本随文档数×表数增长，
+  // 且判据是**形状猜测**（插件目录名长得像工具短名、`vdfs/read` 长得像路由，当场三处误报）。
+  //
+  // 四条判据各管一个方向，缺一不可：
+  //   RG-026 形状：`id=role` 行内列表，role ∈ {owner, view}；
+  //   RG-027 **分工重叠**：同一个 id 出现两个 owner —— 这就是「重复」，判红；
+  //   RG-028 view 必须指路 owner：只呈现不拥有的文档必须链到 owner，否则它是一份
+  //          无主副本——那是分工缺失，不是分工清晰；
+  //   RG-029 声明两面对账：正文里每处 `<!-- list:<id> <role> -->` 标记都要与 front-matter
+  //          一一对应（多一处少一处都红）——**声明不许撒谎**。
+  //
+  // RG-029 挡的是「有人抄了一张表却没写 `lists`」那个洞：单靠 front-matter，两层都看不见。
+  // 标记写在**清单旁边**而不只写在 front-matter，于是**只读一篇文档**就能回答
+  // 「它声明了什么、正文里对应的东西在不在」——两面对不上是这篇自己的问题。
+  for (const e of listScope) {
+    if (!e.meta) continue
+    const raw = e.meta.lists
+    if (raw === undefined || raw === null) continue
+    if (!Array.isArray(raw)) {
+      out.push(`${e.rel}：RG-026 \`lists\` 必须是行内列表 \`[id=role, …]\`，实际读到 ${typeof raw}——值形状见 SP-001`)
+      continue
+    }
+    for (const item of raw) {
+      if (typeof item !== 'string' || !item.includes('=')) {
+        out.push(`${e.rel}：RG-026 \`lists\` 的每一项必须形如 \`id=role\`，实际读到 \`${item}\``)
+        continue
+      }
+      const [id, role] = item.split('=').map((s) => s.trim())
+      if (!id) out.push(`${e.rel}：RG-026 \`lists\` 有一项的 id 为空：\`${item}\``)
+      if (!LIST_ROLES.includes(role)) {
+        out.push(
+          `${e.rel}：RG-026 \`lists\` 的 role 必须是 ${LIST_ROLES.map((r) => `\`${r}\``).join(' / ')}，` +
+            `实际读到 \`${role}\`——owner = 我维护它，view = 我只呈现/引用`,
+        )
+      }
+      if (id) listClaims.push({ rel: e.rel, id, role, kind: e.kind })
+    }
+  }
+  // RG-027：同一 id 恰好一个 owner（零个 owner = 无主清单，同样是分工缺失）
+  const owners = new Map()
+  for (const c of listClaims.filter((c) => c.role === 'owner')) {
+    if (!owners.has(c.id)) owners.set(c.id, [])
+    owners.get(c.id).push(c.rel)
+  }
+  for (const [id, rels] of owners) {
+    if (rels.length > 1) {
+      out.push(
+        `RG-027 清单 \`${id}\` 有 ${rels.length} 个 owner：${rels.join('、')}——` +
+          '**分工重叠**：同一份清单两处各自维护，改一次要动两处且必然漂移。' +
+          '处置：留一个 owner，另一处改成 `view` 并链到 owner；若两份内容本就不一样，' +
+          '那它们其实是两份不同的清单，各起各的 id',
+      )
+    }
+  }
+  // RG-028：view 必须链到 owner（正文里出现 owner 的文件名或编号）
+  for (const c of listClaims.filter((c) => c.role === 'view')) {
+    const ownerRel = owners.get(c.id)?.[0]
+    if (!ownerRel) continue // 无主清单归 RG-027 的另一半（0 owner 时不在此处重复报）
+    const entry = listScope.find((x) => x.rel === ownerRel)
+    // needle 用**带扩展名的文件名**或编号，不用去扩展名的词干：`CURRENT` 这种词干
+    // 在正文里满地都是（`CURRENT.md` 出现在每一处指路里），拿它当「已指路」判据
+    // 等于恒真——反向验证当场抓到：把 RE-003 全部 `docs/ref/RE-006-当前事实表.md` 链接删掉它照样绿。
+    const needles = [entry?.meta?.id, path.basename(ownerRel)].filter(Boolean)
+    const self = listScope.find((x) => x.rel === c.rel)
+    if (!needles.some((n) => (self?.body ?? '').includes(n))) {
+      out.push(
+        `${c.rel}：RG-028 清单 \`${c.id}\` 声明为 \`view\`，正文却没有指路它的 owner（${ownerRel}）——` +
+          '只呈现不拥有的文档必须链到 owner，否则它是一份无主副本',
+      )
+    }
+  }
+
+  // ---- RG-029：声明两面对账（front-matter ↔ 正文标记） ----
+  // **它挡的洞**：front-matter 是**自报**的。没有人写 `lists`，这一篇就当自己不含清单，
+  // 于是 RG-027 的分工重叠判据看不见「这里有一份副本」——声明层唯一的前提是**声明完整**，
+  // 而完整性得有个执行方。
+  //
+  // 执行方就是这条：**正文里每处清单旁边必须有 `<!-- list:<id> <role> -->` 标记**，
+  // 且与 front-matter 声明**一一对应**（多一处 = 声明漏了；少一处 = 声明了却没落实）。
+  // 于是「只读一篇文档」就能回答「它声明了什么、正文里对应的东西在不在」，
+  // 两面对不上是**这篇自己的**问题，不必牵出任何别的文档。
+  const LIST_MARK = /<!--\s*list:\s*([a-z0-9][a-z0-9-]*)\s+(owner|view)\s*-->/g
+  for (const e of listScope) {
+    if (!e.body) continue
+    const marks = [...e.body.matchAll(LIST_MARK)].map((m) => ({ id: m[1], role: m[2] }))
+    const declared = listClaims.filter((c) => c.rel === e.rel)
+    if (marks.length === 0 && declared.length === 0) continue // 单内容文档，两边都空即一致
+    for (const d of declared) {
+      if (!marks.some((m) => m.id === d.id && m.role === d.role)) {
+        out.push(
+          `${e.rel}：RG-029 front-matter 声明了清单 \`${d.id}=${d.role}\`，正文里却没有对应的 ` +
+            `\`<!-- list:${d.id} ${d.role} -->\` 标记——清单必须**在它旁边**标出自己，` +
+            '否则「声明了却没落实」与「落实了却没声明」都判不出来',
+        )
+      }
+    }
+    for (const m of marks) {
+      if (!declared.some((d) => d.id === m.id && d.role === m.role)) {
+        out.push(
+          `${e.rel}：RG-029 正文里有 \`<!-- list:${m.id} ${m.role} -->\` 标记，front-matter 却没声明它——` +
+            '一份清单不登记归属，就成了没有 owner 的副本',
+        )
+      }
+    }
   }
 
   // ---- RG-025：父子状态一致性（分解树上的档位单调——状态只许说真话） ----
@@ -1073,19 +1307,19 @@ function withTree(kind, allEntries, lines) {
 
 const HEADER_TASK =
   '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/task/*.md` 生成，请勿手改。**\n' +
-  '> 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，' +
-  '原则与流程见 [PL-011 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。\n'
+  '> 状态的唯一登记处是各任务文件本身，本页是投影。字段规范见 [[SP-001]]，' +
+  '原则与流程见 [[PL-011-登记与汇总机制|PL-011 · 登记与汇总机制]]。\n'
 
 const HEADER_SPEC =
   '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/spec/*.md` 生成，请勿手改。**\n' +
-  '> 状态的唯一登记处是各规范文件本身，本页是投影。字段规范见 [SP-001](./SP-001.md)，' +
-  '原则与流程见 [PL-011 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。\n'
+  '> 状态的唯一登记处是各规范文件本身，本页是投影。字段规范见 [[SP-001]]，' +
+  '原则与流程见 [[PL-011-登记与汇总机制|PL-011 · 登记与汇总机制]]。\n'
 
 const HEADER_ADR =
   '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 从 `docs/adr/*.md` 生成，请勿手改。**\n' +
   '> **ADR 的唯一真相源是 `docs/adr/`**：每条 ADR 的正文（决策 / 理由 / 被否决的方案 /\n' +
   '> 后果与不变量）住它自己的 `## 决策` 小节，规范合法性（`status`）与落地进展（`impl`）住 front-matter。\n' +
-  '> 字段规范见 [SP-001](../spec/SP-001.md)，机制见 [PL-011 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。\n'
+  '> 字段规范见 [[SP-001]]，机制见 [[PL-011-登记与汇总机制|PL-011 · 登记与汇总机制]]。\n'
 
 /** posix 相对路径：从目录 `fromDir` 到文件 `toRel`（确定性，不依赖 path.relative 的平台差异）。 */
 export function relFrom(fromDir, toRel) {
@@ -1272,8 +1506,8 @@ function renderDocIndex(kind, allEntries) {
     '',
     '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 生成，请勿手改。**',
     `> \`${kind}\`（${cfg.label}）的条目**在位存放**：文件本身就是登记，编号 = 仓根相对路径（去 \`.md\`），`,
-    '> `title` 逐字等于正文首个 H1（RG-021 两面对账）；本页是投影。字段规范见 [SP-001](../spec/SP-001.md)，',
-    '> 机制见 [PL-011 · 登记与汇总机制](../plan/PL-011-登记与汇总机制.md)。',
+    '> `title` 逐字等于正文首个 H1（RG-021 两面对账）；本页是投影。字段规范见 [[SP-001]]，',
+    '> 机制见 [[PL-011-登记与汇总机制|PL-011 · 登记与汇总机制]]。',
     '',
     `> **这个 kind 回答什么**：${cfg.blurb}`,
     '',
@@ -1292,7 +1526,15 @@ function renderDocIndex(kind, allEntries) {
   return withTree(kind, allEntries, lines).join('\n')
 }
 
-const RENDERERS = { task: renderTaskIndex, spec: renderSpecIndex, adr: renderAdrIndex }
+const RENDERERS = {
+  task: renderTaskIndex,
+  spec: renderSpecIndex,
+  adr: renderAdrIndex,
+  // `index` kind 的汇总页 = 仓根**跨 kind 总账**（各 kind 条目数 / 状态分布 / 分解边数）。
+  // 它与其余 kind 同形（`<前缀>-000-<X>汇总.md` + `projection: true` + `lists` 声明），
+  // 只是内容是横切的那一张表。
+  index: renderRootIndex,
+}
 // 文档类 kind 共用同一个渲染器（kind 的差异只在 `KINDS` 的配置里，不新开脚本）。
 for (const kind of Object.keys(KINDS)) {
   if (!(kind in RENDERERS)) RENDERERS[kind] = (allEntries) => renderDocIndex(kind, allEntries)
@@ -1300,13 +1542,65 @@ for (const kind of Object.keys(KINDS)) {
 
 /** 某 kind 的汇总页全文（确定性：同输入同输出，无时间戳）。 */
 export function renderKindIndex(kind, allEntries) {
-  return RENDERERS[kind](allEntries)
+  const selfId = kindIndexId(kind)
+  // 汇总页现在是**登记条目**（自己发 front-matter、自己有 id），所以它会出现在
+  // `allEntries` 里——**列自己**就是「索引里有一行指向自己」。那不是错，但它是噪音：
+  // 读者点进去到的还是这一页。故渲染时把自己剔掉。
+  const withoutSelf = allEntries.filter((e) => !(e.kind === kind && e.meta && e.meta.id === selfId))
+  const body = RENDERERS[kind](withoutSelf)
+  // 清单标记写在**清单旁边**而不是只写在 front-matter（RG-029 两面对账）：
+  // 只读这一页就能回答「它声明了什么、正文里对应的东西在不在」。
+  const marked = `<!-- list:${kind}-entries owner -->\n\n${body}`
+  // `title` 必须**逐字等于正文首个 H1**（RG-021 两面对账）：从渲染结果里取，
+  // 不另写一份——两份真相必然漂移，而它漂移时红的是登记守卫、查起来最难。
+  const h1 = (body.match(/^# (.+)$/m) || [, cfgFallbackTitle(kind)])[1]
+  return [
+    '---',
+    `kind: ${kind}`,
+    `id: ${selfId}`,
+    `title: ${h1}`,
+    'status: active',
+    // `projection: true` —— 这一页**有身份、没内容**。
+    //
+    // 它需要身份：编号 + id 才能被 `[[PL-000-计划汇总]]` 引用，地址才能交给机制
+    // （原先各 kind 汇总页用固定名 `INDEX.md`，指向它的地址只能手写，而生成页对
+    // `gen-doc-refs` 与 RF-003 完全隐形——那是本仓唯一一处「手写地址不会被重算」的地方）。
+    //
+    // 它不需要内容要求：`kind: task` 会拖来 `todo/doing/done/wont` 状态机、
+    // `done` 必填 `evidence`、`## 内容` + `## 处理过程` 必备小节（RG-009）——
+    // 一份**投影页**满足这些没有意义，它的内容由渲染器决定，不是人写的。
+    // 所以：`projection: true` 豁免**内容面**判据（状态词 / 状态×字段矩阵 / 必备小节 /
+    // 取代链），保留**身份面**判据（front-matter / 编号形状 / id↔文件名 / created /
+    // title==H1 / 清单归属）。豁免是**逐条列明**的，不是笼统放行。
+    'projection: true',
+    // 汇总页自己**也是一份清单的 owner**：`docs/<kind>/` 下该 kind 的全部条目。
+    // 不声明，它就进不了 [RE-007-清单归属总账](../docs/ref/RE-007-清单归属总账.md)——那份总账是「谁拥有哪份清单」的
+    // 唯一可查出口，一份没登记的 owner 清单等于让那个出口漏一块。
+    // id 用 `<kind>-entries` 而非复用 kind 名：id 是**这份清单**的身份，与「哪个 kind」
+    // 有关但不是同一件事（将来某 kind 出第二份清单时不必改这里）。
+    `lists: [${kind}-entries=owner]`,
+    // `created` 是**本仓首次生成它的日期**，不是「本次运行的时间」：逐次变化的字段
+    // 会让 `--check` 永远判漂移（同 `_lib.mjs` 的 stripStamp）。
+    'created: 2026-10-14',
+    '---',
+    '',
+    marked,
+  ].join('\n')
+}
+
+function cfgFallbackTitle(kind) {
+  return `${KINDS[kind].label}登记索引（自动生成）`
 }
 
 /** 仓根总账页：各 kind 的条目数、状态分布、分解边数、汇总页链接。 */
 export function renderRootIndex(allEntries) {
+  // 投影页（各 kind 汇总页）**不计入条目数**：它们是「关于这些条目的页」，不是条目。
+  // 计进去有两个坏处——读者会把「task 100」读成「100 个任务」，而 `--write`
+  // 的收敛要两步（第一次建页、第二次它们进计数、第三次才稳），那条「第二次逐字节
+  // 无变化」的不变式因此破掉。
+  const isProj = (e) => e?.meta?.projection === true || e?.meta?.projection === 'true'
   const rows = Object.entries(KINDS).map(([kind, cfg]) => {
-    const mine = allEntries.filter((e) => e.kind === kind)
+    const mine = allEntries.filter((e) => e.kind === kind && !isProj(e))
     const dist = Object.keys(cfg.statusRules)
       .map((s) => `${s} ${mine.filter((e) => e.meta && e.meta.status === s).length}`)
       .join(' · ')
@@ -1315,12 +1609,14 @@ export function renderRootIndex(allEntries) {
     const ids = new Set(mine.filter((e) => e.meta && !isEmpty(e.meta.id)).map((e) => e.meta.id))
     const edges = mine.filter((e) => e.meta && typeof e.meta.parent === 'string' && ids.has(e.meta.parent)).length
     return [
-      `[${kind} · ${cfg.label}](./${kind}/INDEX.md)`,
+      // **编号引用**而不是手写地址：这些汇总页现已登记，指向它们的地址该由
+      // `gen-doc-refs` 重算（RF-003 会把手写地址判红——写这行时它当场红过一次）。
+      `[[${kindIndexId(kind)}|${kind} · ${cfg.label}]]`,
       identity,
       String(mine.length),
       dist,
       edges ? `${edges} 条分解边` : '—',
-      `[${kind}/INDEX.md](./${kind}/INDEX.md)`,
+      `[[${kindIndexId(kind)}]]`,
     ]
   })
   return [
@@ -1328,8 +1624,8 @@ export function renderRootIndex(allEntries) {
     '',
     '> ⚠️ **本文件由 `node scripts/registry-audit.mjs --write` 生成，请勿手改。**',
     '> 条目各是一个单文档：条目类（task / spec / adr）住 `docs/<kind>/`，文档类（goal / stage / plan /',
-    '> arch / ref / guide）**在位存放**（文件即条目，kind 只来自 front-matter，目录不参与判定）；',
-    '> 机制见 [PL-011 · 登记与汇总机制](./plan/PL-011-登记与汇总机制.md)，字段规范见 [SP-001](./spec/SP-001.md)。',
+    '> arch / ref / guide / index）**在位存放**（文件即条目，kind 只来自 front-matter，目录不参与判定）；',
+    '> 机制见 [[PL-011-登记与汇总机制|PL-011 · 登记与汇总机制]]，字段规范见 [[SP-001]]。',
     '',
     table(['类别', '身份', '条目数', '状态分布', '分解', '汇总页'], rows),
     '',

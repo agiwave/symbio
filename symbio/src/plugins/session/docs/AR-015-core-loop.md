@@ -13,7 +13,7 @@ created: 2026-09-16
 > [`../README.md`](../README.md "symbio/src/plugins/session/README")（六大压缩策略）；节点状态与流的词汇见
 > [`./AR-018-node-state-streaming.md`](AR-018-node-state-streaming.md "AR-018-node-state-streaming")；模块拆分与符号落点见
 > [`./AR-017-module-layout.md`](AR-017-module-layout.md "AR-017-module-layout")；「为什么这样设计」见
-> [`docs/adr/INDEX.md`](../../../../../docs/adr/INDEX.md)。
+> [`ADR-000-架构决策汇总.md`](../../../../../docs/adr/ADR-000-架构决策汇总.md "ADR-000-架构决策汇总")。
 > 代码位置一律按**符号名**检索——模块拆分后行号会漂移。
 
 ---

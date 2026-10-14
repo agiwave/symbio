@@ -21,7 +21,7 @@
 // 不污染 `target/`，`.workbuddy-ai/` 已在 paths-ignore 与 .gitignore 内）。
 //
 // **为什么文件名是 55- 而不是 70-**：门禁按文件名排序执行，`60-facts` 是
-// autoWork（重新生成并暂存 `docs/CURRENT.md`），必须**最后**跑——它要把暂存状态
+// autoWork（重新生成并暂存 `docs/ref/RE-006-当前事实表.md`），必须**最后**跑——它要把暂存状态
 // 定格成"本次改动的终态"。排在它后面会让暂存发生在 verify 之前，`git status`
 // 再也看不出 verify 那一跑有没有碰过东西。同理 msrv 是 50-。
 import path from 'node:path'

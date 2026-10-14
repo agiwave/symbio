@@ -91,7 +91,7 @@ id = 仓根相对路径，且**不进 `deps`**——依赖图只收编号条目�
   （文档搬走后入链自愈）。判据三条：编号不存在判红（RF-001）、
   地址漂移自动重算（RF-002）、**指向已登记文档的手工地址判红**（RF-003——那种地址机制搬不动）。
   编号是身份（稳定），地址是位置（会变）。
-- **汇总页是投影**：全项目文档索引在 [docs/INDEX.md](./INDEX.md)，各 kind 的汇总页在
+- **汇总页是投影**：全项目文档索引在 [docs/KIND-000-登记总账.md](KIND-000-登记总账.md "KIND-000-登记总账")，各 kind 的汇总页在
   `docs/<kind>/INDEX.md`，都由 `node scripts/registry-audit.mjs --write` 生成（门禁自动重跑），
   **不要手改**。查询看 `node scripts/registry-board.mjs`。
 
@@ -156,9 +156,9 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 
 | 事实 | 唯一 owner | 其它文档 |
 |---|---|---|
-| 现在是什么（插件 / 挂载点 / 路由 / 工具 / 规模 / **每条能力的用户可见语义**） | [CURRENT.md](./CURRENT.md)（代码生成，能力矩阵在 §2） | **不手抄**，需要就引用。机械判据见下「这张表有人守吗」 |
+| 现在是什么（插件 / 挂载点 / 路由 / 工具 / 规模 / **每条能力的用户可见语义**） | [CURRENT.md](ref/RE-006-当前事实表.md "RE-006-当前事实表")（代码生成，能力矩阵在 §2） | **不手抄**，需要就引用。机械判据见下「这张表有人守吗」 |
 | 路由**契约**（调用方 / 返回类型 / 备注 / 退役索引） | [ref/RE-003-ROUTES.md](ref/RE-003-ROUTES.md "RE-003-ROUTES") | 模块 `README.md` 不抄路由表 |
-| 路由**一句话职责**（写在注册处：`route()` 臂上的注释） | [CURRENT.md](CURRENT.md) §2.3（代码投影） | RE-003 不再手写「用途」列——同一句事实不存两份 |
+| 路由**一句话职责**（写在注册处：`route()` 臂上的注释） | [CURRENT.md](ref/RE-006-当前事实表.md "RE-006-当前事实表") §2.3（代码投影） | RE-003 不再手写「用途」列——同一句事实不存两份 |
 | 错误码 | [ref/RE-002-ERROR_CODES.md](ref/RE-002-ERROR_CODES.md "RE-002-ERROR_CODES") | PROTOCOLS 不再列错误码表 |
 | 配置项 | [ref/RE-001-CONFIGURATION.md](ref/RE-001-CONFIGURATION.md "RE-001-CONFIGURATION") | 模块 `README.md` 只写机制 + 指向它 |
 | 判据码（各守卫的编号地址） | [ref/GATE_CODES.md](./ref/GATE_CODES.md)（脚本声明生成） | 守卫脚本只写自己判什么，不抄全表 |
@@ -167,7 +167,7 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 | 协议线上形状（帧 / 载荷 / 通道 / 线格式） | [arch/AR-004-PROTOCOLS.md](arch/AR-004-PROTOCOLS.md "AR-004-PROTOCOLS") | — |
 | 系统拓扑（谁挂在谁下面） | [arch/AR-005-SYSTEM_MAP.md](arch/AR-005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP") | 其它图只画自己那一层 |
 | 排障链路（一次请求经过哪些代码） | [arch/AR-002-DATA_FLOW.md](arch/AR-002-DATA_FLOW.md "AR-002-DATA_FLOW") | — |
-| 为什么这样设计（含被否决的方案与理由） | [`docs/adr/`](adr/INDEX.md) 下的单文档（**每条 ADR 正文 + 状态**）；索引与域分组见 [adr/INDEX.md](adr/INDEX.md)（生成） | 其它文档只引用 ADR 编号 |
+| 为什么这样设计（含被否决的方案与理由） | [`docs/adr/`](adr/ADR-000-架构决策汇总.md "ADR-000-架构决策汇总") 下的单文档（**每条 ADR 正文 + 状态**）；索引与域分组见 [adr 索引](adr/ADR-000-架构决策汇总.md "ADR-000-架构决策汇总")（生成） | 其它文档只引用 ADR 编号 |
 | 模块内部机制 | 该模块 `README.md` | 系统级文档不复述 |
 | 模块深度设计与不变量 | 该模块 `docs/` | — |
 | **要达成什么（价值主张与可度量判据）** | [goal/GO-000-价值主张.md](goal/GO-000-价值主张.md "GO-000-价值主张") | 其余文档只引用编号，不抄判据数字 |
@@ -221,11 +221,11 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 「纪律 3」且不同义。**跨篇引用必须带限定名**；同篇内的裸引（「纪律 3」）指**本篇 §0** 的那条。
 不新开编号命名空间。
 
-每条纪律的**登记**（限定名 + 判据对账）在 [docs/spec/](spec/INDEX.md)
+每条纪律的**登记**（限定名 + 判据对账）在 [docs/spec/](spec/SP-000-规范汇总.md "SP-000-规范汇总")
 （机制见 [plan/PL-011](plan/PL-011-登记与汇总机制.md "PL-011-登记与汇总机制")）——「哪条纪律其实没人守」由登记条目的判据节
 回答，判据码全表在 [ref/GATE_CODES.md](./ref/GATE_CODES.md)。条文正文各归定义篇，
 此处不复述：[PL-006 §0](plan/PL-006-分步实施计划.md#0-执行纪律五步每步都不得跳过 "PL-006-分步实施计划") ·
-[SP-010…SP-014](./spec/INDEX.md) ·
+[SP-010…SP-014](spec/SP-000-规范汇总.md "SP-000-规范汇总") ·
 [PL-003 §5.1](plan/PL-003-演进与验证.md#51-五条纪律 "PL-003-演进与验证") ·
 [plan/README §4](plan/README.md#4-硬证据全部实际编译运行通过 "docs/plan/README")。
 
@@ -233,7 +233,7 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 
 | 我想... | 查阅 |
 |---------|------|
-| 核对"现在是什么"（插件 × 挂载点 × 路由 × 工具，自动生成） | [CURRENT.md](./CURRENT.md) |
+| 核对"现在是什么"（插件 × 挂载点 × 路由 × 工具，自动生成） | [CURRENT.md](ref/RE-006-当前事实表.md "RE-006-当前事实表") |
 | 了解系统全貌 | [AR-005-SYSTEM_MAP.md](arch/AR-005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP") |
 | 理解架构设计 | [AR-003-OVERVIEW.md](arch/AR-003-OVERVIEW.md "AR-003-OVERVIEW") |
 | 查看协议规范 | [AR-004-PROTOCOLS.md](arch/AR-004-PROTOCOLS.md "AR-004-PROTOCOLS") |
@@ -247,8 +247,8 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 | 快速上手 | [GU-006-QUICK_START.md](guide/GU-006-QUICK_START.md "GU-006-QUICK_START") |
 | 开发新插件 | [GU-005-PLUGIN_DEVELOPMENT.md](guide/GU-005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT") |
 | 排查问题 | [GU-007-TROUBLESHOOTING.md](guide/GU-007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING") |
-| 看**全项目文档索引**（九类 kind × 标题 × 状态） | [docs/INDEX.md](./INDEX.md) |
-| 了解设计决策 | [adr/INDEX.md](adr/INDEX.md)（按域分组；正文即条目本身） |
+| 看**全项目文档索引**（十类 kind × 标题 × 状态） | [docs/KIND-000-登记总账.md](KIND-000-登记总账.md "KIND-000-登记总账") |
+| 了解设计决策 | [adr 索引](adr/ADR-000-架构决策汇总.md "ADR-000-架构决策汇总")（按域分组；正文即条目本身） |
 | 了解平台**要达成什么**（价值主张与可度量判据） | [goal/GO-000 · 价值主张](goal/GO-000-价值主张.md "GO-000-价值主张") |
 | 了解**目标架构（v2）**与分步迁移计划 | [plan/README.md](plan/README.md "docs/plan/README")（**先读其 §0.1：v2 是本仓的目标架构**） |
 | 查「某条约定写在哪」 | `node scripts/doc-find.mjs <词>`（全仓 md + Rust 文档注释检索） |

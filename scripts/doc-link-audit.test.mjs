@@ -359,8 +359,8 @@ test('D-006：双根解析——相对当前文件命中即通过', () => {
 test('D-006：双根解析——相对仓库根命中即通过（模块 README 引用系统文档的写法）', () => {
   assert.equal(
     audit({
-      'symbio/src/plugins/foo/README.md': '# Foo\n\n见 `docs/adr/INDEX.md`。\n',
-      'docs/adr/INDEX.md': '# 索引\n',
+      'symbio/src/plugins/foo/README.md': '# Foo\n\n见 `ADR-000-架构决策汇总.md`。\n',
+      'docs/adr/ADR-000-架构决策汇总.md': '# 索引\n',
     }).status,
     0,
     '相对仓库根应命中'
@@ -438,7 +438,7 @@ test('D-007：锚点指向真实标题 → 通过', () => {
 })
 
 test('D-007：slug 算法钉住真实形状——加粗 / 反引号 / 全角括号 / —— / + 全被丢，空格逐个转 -', () => {
-  // 标题取自 `docs/adr/INDEX.md` ADR-020 的真实形状：`EventSink`（出）后**无空格**，
+  // 标题取自 `ADR-000-架构决策汇总.md` ADR-020 的真实形状：`EventSink`（出）后**无空格**，
   // 而 `+ ` 那个空格才产生连字符 ⇒ `eventsink出-abortsignal入`。
   const heading =
     '## ADR-020: 执行期与传输层**分离**——`EventSink`（出）+ `AbortSignal`（入）取代 `PluginChannel` 的双职责'

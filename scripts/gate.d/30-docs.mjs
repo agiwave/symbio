@@ -177,6 +177,14 @@ export const TEST_ONLY = [
   'schema-audit',
   'core-surface-audit',
   'commit',
+  // `registry-lists`（RG-026…RG-029，清单归属）的失效形态**全是恒真**：四条判据
+  // 分别判「同一 id 两个 owner」「声明与正文标记两面对账」「view 是否链到 owner」
+  // 「role 是否在闭集内」，任何一条写宽或写漏都表现为「永远通过」——而
+  // 「永远通过的分工守卫」比没有守卫更坏，它让人以为分工已被守住。
+  // 首次接入时 RG-027 当场漏过一次（owner 是免登记的生成物 CURRENT.md，对判据隐形），
+  // RG-028 当场恒真过一次（needle 用了去扩展名的 `CURRENT`，正文里满地都是）。
+  // 所以这个文件只做一件事：注入五种坏形态，断言每一种都判红。
+  'registry-lists',
   // `gate`（`gate.test.mjs`）的失效模式是**代价**不是报错：`--help` 不被识别时，
   // 脚本会照常跑完全量门禁（10+ 分钟）并覆盖 `.workbuddy-ai/gate-logs/*.log`——
   // 查一次用法就丢掉上一次的失败日志。判据 = 退出 0 + 打印用法 + **没进门禁主流程**。
@@ -245,16 +253,18 @@ export const TEST_ONLY = [
  *    `gen-verify-facts` 都吃它），判据是「读不出来必须返回 null」；
  *  - `gate.d/_shared`：门禁原语（`BASELINE` / `ratchetVerdict` / `autoWork` / `color`）；
  *  - `core-surface`：`core-surface-audit` 的公开面统计库（它只被那一个审计引用）；
- *  - `route-facts`：`docs/CURRENT.md` §1 路由列、`routes.gen.ts`、`plugin-entry-audit`
+ *  - `route-facts`：`docs/ref/RE-006-当前事实表.md` §1 路由列、`routes.gen.ts`、`plugin-entry-audit`
  *    三份判定的共读提取实现（M4/M10 立）；
  *  - `gen-facts`：**事实生成机制的执行方**——遍历 `scripts/facts/` 逐个生成，
  *    由本阶段的 `60-facts` spawn；目录即接线，新增一份事实不需要改门禁；
  *  - `facts/_lib`：上述契约校验 + 幂等落盘 + 溯源行剔除的共享实现；
- *  - `facts/_capability`：`docs/CURRENT.md` §6 能力矩阵的提取实现（工具描述 /
+ *  - `facts/_capability`：`docs/ref/RE-006-当前事实表.md` §6 能力矩阵的提取实现（工具描述 /
  *    风险 / 保留策略、VDFS 操作定义、路由职责）。它的失效形态与 `rust-scan` 同族——
  *    **提取写宽或写窄都不报错，只静默少一条**，而「少了哪一条」正是这张表要回答的事；
- *  - `facts/current`：`docs/CURRENT.md` 的生成器，由 `gen-facts` 调用；
+ *  - `facts/current`：`docs/ref/RE-006-当前事实表.md` 的生成器，由 `gen-facts` 调用；
  *  - `facts/gate-codes`：`reference/GATE_CODES.md` 的生成器，由 `gen-facts` 调用；
+ *  - `facts/lists-index`：`ref/RE-007-清单归属总账.md` 的生成器，**渲染时发现分工重叠
+ *    直接抛错**（一份会说谎的总账比没有总账更坏——它是给人查的，人会信它）；
  *  - `facts/routes-ts`：`tauri/src/constants/routes.gen.ts` 的生成器，由 `gen-facts` 调用；
  *  - `line-count`：门禁报告里的行数统计；
  *  - `doc-find`：「某条约定写在哪」的检索入口（`docs/README.md` 导航里对用户承诺的命令）。
@@ -277,6 +287,7 @@ export const LIBS = [
   'facts/_capability',
   'facts/current',
   'facts/gate-codes',
+  'facts/lists-index',
   'facts/routes-ts',
   'gen-doc-refs',
   'line-count',

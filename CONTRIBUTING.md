@@ -57,7 +57,7 @@ symbio/
 └── rustfmt.toml · clippy.toml   # 位于仓库根
 ```
 
-> 代码规模数字（文件数 / 行数）随迭代变化，不在此锁死——见 [docs/CURRENT.md](./docs/CURRENT.md) §5（自动生成）。
+> 代码规模数字（文件数 / 行数）随迭代变化，不在此锁死——见 [RE-006 §5](docs/ref/RE-006-当前事实表.md#5-规模与宿主接缝 "RE-006-当前事实表")（自动生成）。
 
 ---
 
@@ -151,7 +151,7 @@ git config core.hooksPath scripts/git-hooks   # 本机：写提交时即时拦
 |---|---|---|
 | `commit-msg` | 提交信息格式 | 规范判据在 `scripts/check-commit-msg.mjs`，钩子只是入口 |
 | `pre-commit` | 事实文件在提交点变旧 | 跑 `gate.mjs --only=facts`（本地模式 = 重生成并**只暂存生成器自己改写的文件**），实测 <1s，不违反「提交要秒级」；漂移不攒到推送点再补独立 chore 提交 |
-| `pre-push` | `docs/CURRENT.md` 漂移 | 事实表由代码提取，漏了重新生成**不报错、只变旧**；它带 `--ci` ⇒ 只判红不代改（不在推送点替人暂存）。实测 0.3s。`pre-commit` 没装上（`core.hooksPath` 会静默丢失）时它是第二道闸 |
+| `pre-push` | `docs/ref/RE-006-当前事实表.md` 漂移 | 事实表由代码提取，漏了重新生成**不报错、只变旧**；它带 `--ci` ⇒ 只判红不代改（不在推送点替人暂存）。实测 0.3s。`pre-commit` 没装上（`core.hooksPath` 会静默丢失）时它是第二道闸 |
 
 CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐个判一遍
 （判据只有脚本里那一处，两边不重抄）。
@@ -305,7 +305,7 @@ mod tests;
    scope 例：`agent` / `tauri/services` / `docs`。
 3. 推送后通过 PR 提交，CI 必须全绿。
 4. 至少 1 位 maintainer 审阅通过后可合入。
-5. 涉及架构变更的 PR：决策写进 [ADR 索引](docs/adr/INDEX.md)（一条 ADR），
+5. 涉及架构变更的 PR：决策写进 [ADR 索引](docs/adr/ADR-000-架构决策汇总.md "ADR-000-架构决策汇总")（一条 ADR），
    「改了什么 / 为什么」写在提交信息里。
 
 ---

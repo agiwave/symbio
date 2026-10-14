@@ -15,7 +15,7 @@ created: 2026-09-28
 >
 > | 事实 | owner |
 > |---|---|
-> | 现在有什么（路由 / 工具 / 规模） | `docs/CURRENT.md`（自动生成） |
+> | 现在有什么（路由 / 工具 / 规模） | `docs/ref/RE-006-当前事实表.md`（自动生成） |
 > | 路由语义与调用方 | `docs/ref/RE-003-ROUTES.md` |
 > | VDFS 三栏规范（左栏 / 中栏 / 详情 / 浏览内部） | `docs/arch/AR-012-vdfs-frontend.md` |
 > | 「发言是入队、流式渲染」等前端机制约定 | `tauri/docs/AR-023-FRONTEND.md` |

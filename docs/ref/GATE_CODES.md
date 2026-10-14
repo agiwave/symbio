@@ -1,3 +1,12 @@
+---
+kind: ref
+id: RE-008-判据码登记表
+title: 判据码登记表（自动生成）
+status: active
+created: 2026-09-20
+lists: [gate-codes=owner]
+---
+
 # 判据码登记表（自动生成）
 
 > ⚠️ **本表由 `scripts/facts/gate-codes.mjs` 从各脚本的 `// @ns` / `// @codes` 声明生成，请勿手改。**
@@ -6,6 +15,8 @@
 > 判据码是每条机械判定的**地址**：豁免注释、门禁日志、文档指认都指向它。
 > 每条判据**判什么**归声明它的那个脚本的头注释；撞号与漏登记由
 > [`scripts/gate-codes-audit.mjs`](../../scripts/gate-codes-audit.mjs) 判（GC-001–006）。
+
+<!-- list:gate-codes owner -->
 
 ## 1. 命名空间
 
@@ -26,7 +37,7 @@
 | **PS** | prompt 形状基线 | `scripts/prompt-shape-audit.mjs` | PS-001–003 | `PS-004` |
 | **R** | 死代码 | `scripts/dead-code-audit.mjs` | R-001–002 | `R-003` |
 | **RF** | 文档引用（编号 → 地址由机制生成） | `scripts/gen-doc-refs.mjs` | RF-001–004 | `RF-005` |
-| **RG** | 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解） | `scripts/registry-lib.mjs` | RG-001–025 | `RG-026` |
+| **RG** | 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解） | `scripts/registry-lib.mjs` | RG-001–029 | `RG-030` |
 | **S** | 源码 grep 形态 | `scripts/grep-audit.mjs` | S-001–003、S-006–012 | `S-013` |
 | **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
 
@@ -130,6 +141,10 @@
 | **RG-023** | `scripts/registry-lib.mjs` |
 | **RG-024** | `scripts/registry-lib.mjs` |
 | **RG-025** | `scripts/registry-lib.mjs` |
+| **RG-026** | `scripts/registry-lib.mjs` |
+| **RG-027** | `scripts/registry-lib.mjs` |
+| **RG-028** | `scripts/registry-lib.mjs` |
+| **RG-029** | `scripts/registry-lib.mjs` |
 | **S-001** | `scripts/grep-audit.mjs` |
 | **S-002** | `scripts/grep-audit.mjs` |
 | **S-003** | `scripts/grep-audit.mjs` |

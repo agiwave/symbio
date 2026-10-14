@@ -249,7 +249,7 @@ test('端到端：`--check` 对漂移判红、对一致判绿', () => {
  * 它占着判据码，让人以为这一族已被守住。改按**内容**定位。
  */
 const CAPABILITY_SEC = (() => {
-  const doc = fs.readFileSync(path.join(REPO, 'docs', 'CURRENT.md'), 'utf8')
+  const doc = fs.readFileSync(path.join(REPO, 'docs', 'ref', 'RE-006-当前事实表.md'), 'utf8')
   const i = doc.search(/^### \d+\.1 LLM 可见工具$/m)
   assert.notEqual(i, -1, 'CURRENT.md 里找不到「LLM 可见工具」小节——判据自己失效了')
   const rest = doc.slice(i)
@@ -397,7 +397,7 @@ test('一个封闭集只在一张表里成表（同一批事实不许写两遍�
   // 文档引用本表，都不算——那是指路不是复述。
   // 口径：每个集合**覆盖最全**的那处是 owner；其余任何一处若也集中列了 ≥3 个成员判红。
   // 「处」不限于表格——当年那份重复的 §3.2 是一行 ` · ` 串起来的清单，见 `tableKeys`。
-  const doc = fs.readFileSync(path.join(REPO, 'docs', 'CURRENT.md'), 'utf8')
+  const doc = fs.readFileSync(path.join(REPO, 'docs', 'ref', 'RE-006-当前事实表.md'), 'utf8')
   const tables = tableKeys(doc)
   assert.ok(tables.length >= 5, `只认出 ${tables.length} 张表——判据自己失效了`)
 
@@ -470,7 +470,7 @@ test('跨文档：CURRENT.md 的封闭集不得在别处成表复述', () => {
   // 新增一条必须同样写清；判据抓的是「抄一张清单」，抓不到「拿它当索引」。
   const ALLOW = new Map([
     ['docs/ref/RE-003-ROUTES.md', '路由**契约**的 owner：按插件分节重复列地址是它的组织方式'],
-    ['docs/CURRENT.md', '代码投影，本判据的 owner'],
+    ['docs/ref/RE-006-当前事实表.md', '代码投影，本判据的 owner'],
     [
       'symbio/src/plugins/session/README.md',
       '「工具名 → 结果取哪个字段」映射表：工具名是那张表的**键**，讲的是结果形状，' +
@@ -494,7 +494,7 @@ test('跨文档：CURRENT.md 的封闭集不得在别处成表复述', () => {
     const rel = path.relative(REPO, f).replace(/\\/g, '/')
     if (rel.startsWith('docs/archive/') || ALLOW.has(rel)) continue
     // 生成物与门禁自己的日志不是文档
-    if (rel.includes('.workbuddy-ai/') || rel.endsWith('docs/CURRENT.md')) continue
+    if (rel.includes('.workbuddy-ai/') || rel.endsWith('docs/ref/RE-006-当前事实表.md')) continue
     scanned++
     const text = fs.readFileSync(f, 'utf8')
     // `prose: false` —— 跨文档只判「成表」，理由见上。
@@ -510,9 +510,118 @@ test('跨文档：CURRENT.md 的封闭集不得在别处成表复述', () => {
   assert.deepEqual(
     bad,
     [],
-    `这些文档在复述 CURRENT.md 已经投影的事实。处置：留一行指路（\`[CURRENT.md §2.x](../CURRENT.md#…\`），` +
-      `不要复制清单——同一句事实存两份，改一次要动两处，且必然漂移：\n    ${bad.join('\n    ')}`,
+    '这些文档在复述 RE-006 已经投影的事实。处置：留一行**编号指路**（`[[RE-006-当前事实表#…|…]]`，' +
+      '地址由 gen-doc-refs 重算），不要复制清单——同一句事实存两份，改一次要动两处，且必然漂移：\n    ' +
+      bad.join('\n    '),
   )
+})
+
+test('散文里的 RE-006 节次指路：节次必须存在', () => {
+  // ## 它防的是哪种失效
+  //
+  // `CURRENT.md` 的能力矩阵从 §6 提到 §2 那一次，迁移脚本改了三组**锚点**
+  // （`#6-*`/`#61-*`/`#63-*`）与带 `CURRENT.md ` 前缀的散文，漏了两类：
+  //
+  //   1. **链接的显示文字**：`[§6.3](../CURRENT.md#23-…)` 的目标锚点改了，
+  //      文字还是 `§6.3`。D-007 判的是 `#锚点`——它只看见目标，**看不见文字**，
+  //      于是 13 处「点进去是对的、读起来是错的」判绿放行。
+  //   2. **语义指路**：`CURRENT.md §3.2`（指 VDFS 操作闭集）。那一节的内容在同一次
+  //      去重里被改写成了「两条链路不一一对应」——节次**还在**，所以任何按锚点判的
+  //      守卫都看不出它已经指错了东西。
+  //
+  // 后者是这类失效的一般形态：**位置没变，位置上的东西换了**。锚点判据结构上抓不到
+  // 它，只能抓「节次不存在」这一半。
+  //
+  // ## 口径为什么收窄到「指向 CURRENT.md 的指路」
+  //
+  // 第一版按「同一行里出现过 CURRENT.md」一刀切，当场**三处误判**：ADR-039 的 `§0`、
+  // T-077 里同句并列的 `AR-010 §5.5`、T-099 evidence 里的 `§7`（那指 ST 文档的节次，
+  // 与 CURRENT 无关）。守卫一旦开始误报就是被整体豁免，比没有守卫更糟。
+  // 改成只判**明确指向 CURRENT.md 的那两种形态**（链接目标含 CURRENT.md / 散文写全
+  // `CURRENT.md §x`），那之外一律放过。
+  //
+  // ## 刻意漏掉的形态（不是疏忽，是取舍）
+  //
+  // 「CURRENT.md」与「§N.M」之间**隔着一个词**的散文——如 T-098 evidence 里的
+  // 「CURRENT.md 新增 §6 能力矩阵」——**不判**。要判它就得允许中间是任意散文，
+  // 那必然误伤「CURRENT.md 与 §7 顺延为 §8」这类**指向别的文档**的同句并列。
+  // 取舍：宁可漏一种形态，也不要一条会误报的判据。漏掉的这一种靠**位置中立写法**
+  // 消解——登记条目的 evidence 不该用节号指路（节号是位置，会动；「能力矩阵」是
+  // 那件东西，不会动）。T-098 已按此改写。
+  const doc = fs.readFileSync(path.join(REPO, 'docs', 'ref', 'RE-006-当前事实表.md'), 'utf8')
+  const actual = new Set([...doc.matchAll(/^#{2,3}\s+([\d.]+)\.?\s/gm)].map((m) => m[1].replace(/\.$/, '')))
+
+  const bad = []
+  let scanned = 0
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      if (e.name === '.git' || e.name === 'node_modules' || e.name === 'target' || e.name === 'archive') continue
+      const p = path.join(d, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (e.name.endsWith('.md')) {
+        const rel = path.relative(REPO, p).replace(/\\/g, '/')
+        if (rel.endsWith('docs/ref/RE-006-当前事实表.md')) continue
+        scanned++
+        fs.readFileSync(p, 'utf8').split(/\r?\n/).forEach((l0, i) => {
+          // **先剥代码跨**：`[§6.3](…)` 写在反引号里是**举例**（「当年长这样」），
+          // 不是指路。不剥会当场误报本判据自己在注释里写的反例——判据红自己，
+          // 最快的失守方式。加豁免不如加正确性：代码跨里的 `§` 本来就不是引用。
+          const l = l0.replace(/`[^`]*`/g, '``')
+          // 形态 1（**已退休**，2026-10-14）：链接显示文字里的 §N.M。
+          //   RE-006 纳入编号体系后，文档内的链接一律写成 `[[RE-006-当前事实表#…|…]]`，
+          //   由 gen-doc-refs 展开成真实链接——锚点存在性归 **D-007**、地址重算归 **RF-002**，
+          //   两条都已在门禁里。这条形态不再出现在文档里，判它就是判一段不存在的东西。
+          // 形态 2：散文写全 `CURRENT.md §N.M`，含 markdown 链接形态
+          // （`[CURRENT.md](../CURRENT.md) §3.9` —— 中间隔着一个 `)`，
+          //  第一版正则漏了它，注入验证当场报「漏过」）
+          for (const m of l.matchAll(/RE-006[\w\u4e00-\u9fa5-]*`?\)?\s*§(\d+(?:\.\d+)*)/g)) {
+            if (!actual.has(m[1])) {
+              bad.push(`${rel}:${i + 1} 散文指 RE-006 §${m[1]}，但没有这一节`)
+            }
+          }
+        })
+      }
+    }
+  }
+  walk(REPO)
+  assert.ok(scanned > 80, `只扫了 ${scanned} 份文档——判据自己失效了`)
+  assert.deepEqual(bad, [], `散文里的 RE-006 节次指路失效：\n    ${bad.join('\n    ')}`)
+})
+
+test('RE-003 必须提到 CURRENT §2.3 的每一条静态路由（那句「交叉核对」的执行方）', () => {
+  // `scripts/facts/current.mjs` 的文件头写着「本表只列静态可提取的字符串臂，权威清单仍是
+  // RE-003（**两者交叉核对构成漂移门禁**）」。查过执行方：E-006 只查**路径前缀**是否合法，
+  // M-008 只查前端有没有写死地址——**两处都不做行集对账**。那句话当时没有执行方，
+  // 于是「RE-003 漏了一条路由」这件事没有任何东西会红。
+  //
+  // 口径：RE-003 只需**提到**，不需逐字相同。它是**超集**——除 20 条静态路由外还收了
+  // 25 条运行期动态路由（`vdfs/*`、`local/*`、`session/*` 退役臂…），那些没有可静态
+  // 枚举的 `match` 臂，CURRENT §2.3 结构上装不下。所以正确关系是「RE-003 ⊇ §2.3」，
+  // 不是「两者相等」——把相等当判据会把超集判红。
+  //
+  // 只判**缺**不判**多**：多出来的是动态路由，是 RE-003 存在的理由。
+  const cur = fs.readFileSync(path.join(REPO, 'docs', 'ref', 'RE-006-当前事实表.md'), 'utf8')
+  const i = cur.indexOf('### 2.3')
+  assert.notEqual(i, -1, 'CURRENT.md 里找不到 §2.3 —— 判据自己失效了')
+  const sec = cur.slice(i, cur.indexOf('## 3.', i))
+  const routes = [...sec.matchAll(/^\| `([^`]+)` \|/gm)].map((m) => m[1])
+  assert.ok(routes.length >= 15, `只认出 ${routes.length} 条静态路由 —— 判据自己失效了`)
+
+  const re003 = fs.readFileSync(path.join(REPO, 'docs', 'ref', 'RE-003-ROUTES.md'), 'utf8')
+  const mentioned = new Set([...re003.matchAll(/`([a-z_]+\/[a-z_]+)`/g)].map((m) => m[1]))
+  const missing = routes.filter((r) => !mentioned.has(r))
+  assert.deepEqual(
+    missing,
+    [],
+    `RE-003 漏了这些静态路由——它是「现在有哪些路由」的权威清单，漏一条它就不权威：` +
+      `\n    ${missing.join('\n    ')}\n  处置：在 RE-003 对应小节补一行（调用方 / 返回类型 / 备注），` +
+      `**不要**在 CURRENT.md 那侧加一句「见 RE-003」了事——那会让权威清单静默变短。`,
+  )
+
+  // 反向：RE-003 多出来的那部分必须是**动态或退役**路由，不能是凭空写的静态地址。
+  // （只判缺不判多已经够了；这一条是多出来那部分的形状检查，防止它变成垃圾桶。）
+  const extra = [...mentioned].filter((r) => !routes.includes(r))
+  assert.ok(extra.length > 0, 'RE-003 没有任何动态/退役路由 —— 与它作为超集的定位不符')
 })
 
 test('本仓自身：runner 认得三份事实（本测试不要求此刻无漂移）', async () => {

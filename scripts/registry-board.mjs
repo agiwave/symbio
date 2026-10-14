@@ -17,7 +17,7 @@
  *   node scripts/registry-board.mjs --root=<仓库根>    （回归测试夹具用）
  *
  * 退出码：0 = 通过；1 = 条目有违规（不打印看板）；2 = 范围读不出 / 参数不识别。
- * 汇总页的文件形态在 `docs/INDEX.md` 与 `docs/<kind>/INDEX.md`（门禁自动重生成）；
+ * 汇总页的文件形态在 `KIND-000-登记总账.md` 与 `docs/<kind>/INDEX.md`（门禁自动重生成）；
  * 本脚本只服务「现在要干什么」。
  */
 

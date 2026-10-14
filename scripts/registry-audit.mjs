@@ -54,7 +54,7 @@
  * ## 用法
  *
  *   node scripts/registry-audit.mjs            校验全仓登记条目（条目类 + 在位文档类）
- *   node scripts/registry-audit.mjs --write    校验通过后重生成 docs/INDEX.md
+ *   node scripts/registry-audit.mjs --write    校验通过后重生成 docs/KIND-000-登记总账.md
  *                                              与 docs/<kind>/INDEX.md
  *   node scripts/registry-audit.mjs --root=<仓库根>   （回归测试夹具用）
  *
@@ -64,14 +64,14 @@
  *
  * 退出码：0 = 通过；1 = 有违规 / 解析失败；2 = 范围读不出（扫不到任何条目、
  * 参数不识别）。汇总页的「忘更新」**不判红**：那是确定性投影，由门禁
- * `gate.d/60-facts.mjs` 的 `autoWork` 自动重生成并暂存（与 `docs/CURRENT.md` 同一条约定）。
+ * `gate.d/60-facts.mjs` 的 `autoWork` 自动重生成并暂存（与 `docs/ref/RE-006-当前事实表.md` 同一条约定）。
  */
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { green, red, dim } from './color.mjs'
-import { KINDS, loadEntries, auditEntries, renderKindIndex, renderRootIndex, SCOPE_ERROR } from './registry-lib.mjs'
+import { KINDS, loadEntries, auditEntries, renderKindIndex, renderRootIndex, kindIndexFile, SCOPE_ERROR } from './registry-lib.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const defaultRoot = path.resolve(scriptDir, '..')
@@ -96,9 +96,9 @@ export function runRegistryAudit(argv) {
     else return { code: 2, lines: [red(`[ERROR] 参数不识别：${a}`), USAGE] }
   }
 
-  const lines = ['--- registry-audit: 登记条目校验（RG-001…RG-025） ---']
+  const lines = ['--- registry-audit: 登记条目校验（RG-001…RG-029） ---']
   const docsDir = path.join(root, 'docs')
-  const { entries, errors, notes, missing } = loadEntries(root)
+  const { entries, projections, errors, notes, missing } = loadEntries(root)
   if (missing) return { code: 2, lines: lines.concat(red(`[ERROR] ${SCOPE_ERROR}`)) }
 
   // 零条目时只看**装载级**错误（未登记文档 / 未登记 kind）：条目级判据（RG-011 等）在没有任何条目时
@@ -112,7 +112,9 @@ export function runRegistryAudit(argv) {
     return { code: 2, lines: lines.concat(red(`[ERROR] ${SCOPE_ERROR}`)) }
   }
 
-  const errs = [...errors, ...auditEntries(entries, root)]
+  // 投影条目（免登记的生成物，如 CURRENT.md）只参与**清单归属**那一族（RG-026…RG-029）：
+  // 它们是清单的 owner，而分工重叠判据若看不见 owner 就等于没有。
+  const errs = [...errors, ...auditEntries(entries, root, projections)]
   if (errs.length) {
     for (const e of errs) lines.push(red(`[ERROR] ${e}`))
     lines.push(red(`registry-audit 未通过：${errs.length} 处违规 / 解析失败（条目 ${entries.length} 个）`))
@@ -124,14 +126,37 @@ export function runRegistryAudit(argv) {
     .join(' · ')
   if (write) {
     const targets = [
-      ...Object.keys(KINDS).map((kind) => ({
-        file: path.join(docsDir, kind, 'INDEX.md'),
-        content: renderKindIndex(kind, entries),
-      })),
-      { file: path.join(docsDir, 'INDEX.md'), content: renderRootIndex(entries) },
+      ...Object.keys(KINDS)
+        // `index` kind 的汇总页住在 `docs/` 根（它横跨所有 kind，没有自己的目录）；
+        // 其余 kind 的住在 `docs/<kind>/`。
+        .map((kind) => ({
+          file: kind === 'index'
+            ? path.join(docsDir, kindIndexFile(kind))
+            : path.join(docsDir, kind, kindIndexFile(kind)),
+          content: renderKindIndex(kind, entries),
+        })),
     ]
     const updated = []
+    const targetSet = new Set(targets.map((t) => t.file))
     for (const t of targets) {
+      // 改名后旧路径（`docs/<kind>/INDEX.md`）会留一份**过期投影**在原地——生成器只写
+      // 新路径，旧文件永远不会被覆盖，于是变成一份**永远绿的死副本**：它对 D-001 /
+      // D-007 / RG-020 全都隐形（`isGeneratedIndex` 豁免），读者却会点到它。
+      //
+      // 删除必须放在「内容变了」判断**之外**：第一版放在里面，于是内容一稳定就再也没人
+      // 删它——实测 9 个旧 `INDEX.md` 全部留存，与新的 `-000-` 页并存。
+      //
+      // 判据是**文件名本身不是 `INDEX.md`**：根总账 `KIND-000-登记总账.md` 的文件名就是
+      // `INDEX.md`，不能把它当自己的旧路径删掉再写回来。第一版用「拼出来的新路径 !=
+      // 原路径」判，在 Windows 上因分隔符不同而恒真，于是根总账被删了一次——内容
+      // 恰好相同，肉眼看不见，但它证明那个判据是错的。
+      if (path.basename(t.file) !== 'INDEX.md') {
+        const stale = path.join(path.dirname(t.file), 'INDEX.md')
+        if (!targetSet.has(stale) && fs.existsSync(stale)) {
+          fs.rmSync(stale)
+          updated.push(`${path.relative(root, stale).split(path.sep).join('/')}（旧路径，已删）`)
+        }
+      }
       const old = fs.existsSync(t.file) ? fs.readFileSync(t.file, 'utf8') : null
       if (old === t.content) continue
       fs.mkdirSync(path.dirname(t.file), { recursive: true })

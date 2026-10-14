@@ -10,7 +10,7 @@ created: 2026-09-07
 
 > **文档类型：导航** — 一图胜千言，快速定位系统全貌。
 > **本文是「谁挂在谁下面」的唯一 owner**（运行时拓扑）。其它文档画树一律引用本文。
-> 插件 × 挂载点 × 路由 × 工具的权威清单见 [CURRENT.md](../CURRENT.md)；
+> 插件 × 挂载点 × 路由 × 工具的权威清单见 [CURRENT.md](../ref/RE-006-当前事实表.md "RE-006-当前事实表")；
 > 逻辑分层与设计取舍见 [architecture/AR-003-OVERVIEW.md](AR-003-OVERVIEW.md "AR-003-OVERVIEW")；
 > 文档索引见 [docs/README.md](../README.md#快速导航 "docs/README")。
 
@@ -46,7 +46,7 @@ graph TD
     G --> REG
 ```
 
-> 插件清单（16 个）、各插件注册名 / VDFS 挂载点 / 自有路由 / 配置文件，见 [CURRENT.md](../CURRENT.md) §1。
+> 插件清单（16 个）、各插件注册名 / VDFS 挂载点 / 自有路由 / 配置文件，见 [CURRENT.md](../ref/RE-006-当前事实表.md "RE-006-当前事实表") §1。
 
 ## 请求流转与协议栈
 

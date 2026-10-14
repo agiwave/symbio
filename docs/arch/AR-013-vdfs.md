@@ -343,7 +343,7 @@ size  updated_at  children  binary  hidden  schema  new_type  attributes
   由 provider 解释为「用这个包建出 / 覆盖本目录下的一份资源」。
 
 **导入不是「新建类型」的一种**，因此 `VdfsNewType` 里没有它的位置
-（见 [ADR 索引](../adr/INDEX.md) ADR-029）。动作声明 `pack` 表明「载荷是一个
+（见 [ADR 索引](../adr/ADR-000-架构决策汇总.md "ADR-000-架构决策汇总") ADR-029）。动作声明 `pack` 表明「载荷是一个
 本地文件」，使用方据此先取文件再执行；provider 不支持时返回 `NotImplemented`，
 使用方据此不给出入口（详见 [AR-012-vdfs-frontend.md](AR-012-vdfs-frontend.md "AR-012-vdfs-frontend") §5）。
 
@@ -419,7 +419,7 @@ size  updated_at  children  binary  hidden  schema  new_type  attributes
 ## 5. 协议操作
 
 `plugins/vdfs/protocol.rs` 的 `VDFS_OPS` 是唯一操作清单（**线路信封只存在于插件内，
-core 不暴露**）；操作闭集见 [CURRENT.md](../CURRENT.md) §3.2，信封的线上形状以
+core 不暴露**）；操作闭集见 [CURRENT.md](../ref/RE-006-当前事实表.md "RE-006-当前事实表") §3.2，信封的线上形状以
 `protocol.rs` 为准。语义要点：
 
 - `vdfs/root` **不给地址**：回包 `path` 即根地址（消费方当运行期数据持有，§3.1）。
@@ -723,7 +723,7 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
 **零改动面**：访问层、门面（`UnifiedFs`）、物理层、容器（`composite`）、前端
 （导航 / 列表 / 详情）都无需改动——新子目录自动出现在 `<根>` 之下、LLM 侧
 `<根>/<插件名>/…` 自动可寻址；仅当需要一类全新的详情渲染器时才在前端登记一个
-`ext` → 组件映射。工具与操作闭集见 [CURRENT.md](../CURRENT.md) §2 / §3。
+`ext` → 组件映射。工具与操作闭集见 [CURRENT.md](../ref/RE-006-当前事实表.md "RE-006-当前事实表") §2 / §3。
 
 **零改动面**还包括「进入空目录 ⇒ 直接给该类型的新建详情、中栏让位」：判据是
 `new_type` 的**存在性**，与类型名无关（按类型名分支 ⇒ 只有那一种类型有）。
@@ -768,7 +768,7 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
   内部层级由各 provider 的 `list` 表达（§2.5）。
 - **资源存储（`providers/vdfs_service`）**：属**宿主实现层**，**不在** §2.1 / §2.2 的
   纯接口层里；三型 `VdfsProvider` 实现（单文件 / 目录 / 内存）与磁盘布局见
-  [CURRENT.md](../CURRENT.md) §4，选型理由见 [ADR 索引](../adr/INDEX.md)
+  [CURRENT.md](../ref/RE-006-当前事实表.md "RE-006-当前事实表") §4，选型理由见 [ADR 索引](../adr/ADR-000-架构决策汇总.md "ADR-000-架构决策汇总")
   ADR-010 / ADR-011。它与广播机制的**唯一接触点**是 `symbio_core::vdfs::host` 的
   `vdfs_notify_change` / `vdfs_watch_changes` / `vdfs_unwatch_changes`。
 - **详情定义**：`DetailDefinition` 是 symbio 的 `schema` **方言**，VDFS 只透传、不解释。
@@ -802,6 +802,6 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
 | 13.1 | 设置（plugin_manager） | 只读清单：自有分区 + 各插件配置条目 | [plugin_manager/README.md](../../symbio/src/plugins/plugin_manager/README.md "symbio/src/plugins/plugin_manager/README") |
 | 13.2 | 组合容器（composite） | `CompositeVdfs`——恰好包含若干子目录的 provider | [composite/README.md](../../symbio/src/plugins/composite/README.md "symbio/src/plugins/composite/README") |
 | 13.3 | VDFS 插件（vdfs） | 访问层 + 统一文件系统（`UnifiedFs`） | [vdfs/README.md](../../symbio/src/plugins/vdfs/README.md "symbio/src/plugins/vdfs/README") |
-| 13.4 | 资源插件与资源存储 | session / model / skill / mcp / agent 各自 `impl VdfsProvider`；落盘共用 `providers/vdfs_service` 三型（单文件 / 目录 / 内存） | 各模块 README（[agent](../../symbio/src/plugins/agent/README.md "symbio/src/plugins/agent/README") 等）；[ADR 索引](../adr/INDEX.md) ADR-010 / ADR-011 |
+| 13.4 | 资源插件与资源存储 | session / model / skill / mcp / agent 各自 `impl VdfsProvider`；落盘共用 `providers/vdfs_service` 三型（单文件 / 目录 / 内存） | 各模块 README（[agent](../../symbio/src/plugins/agent/README.md "symbio/src/plugins/agent/README") 等）；[ADR 索引](../adr/ADR-000-架构决策汇总.md "ADR-000-架构决策汇总") ADR-010 / ADR-011 |
 
-> 拓扑见 [AR-005-SYSTEM_MAP.md](AR-005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP")；实例 × 挂载点的权威清单见 [CURRENT.md](../CURRENT.md)。
+> 拓扑见 [AR-005-SYSTEM_MAP.md](AR-005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP")；实例 × 挂载点的权威清单见 [CURRENT.md](../ref/RE-006-当前事实表.md "RE-006-当前事实表")。

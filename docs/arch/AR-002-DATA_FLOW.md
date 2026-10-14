@@ -85,7 +85,7 @@ sequenceDiagram
 
 | # | 环节 | 代码位置 | 说明 |
 |---|------|---------|------|
-| 1 | 协议入口 | `plugins/vdfs`（`host.rs` 分发 + `protocol.rs` 载荷） | 操作闭集见 [CURRENT.md](../CURRENT.md) §3.2（`VDFS_OPS`，测试锁计数） |
+| 1 | 协议入口 | `plugins/vdfs`（`host.rs` 分发 + `protocol.rs` 载荷） | 操作闭集见 [CURRENT.md](../ref/RE-006-当前事实表.md "RE-006-当前事实表") §3.2（`VDFS_OPS`，测试锁计数） |
 | 2 | 地址分流 | `plugins/vdfs/fs.rs`（`UnifiedFs`） | `<根>` 独占首段 → 虚拟层（容器组合视图）；其余 → 物理层 `physical.rs`（工作目录 / 绝对路径的真实文件） |
 | 3 | 子目录来源 | `plugins/composite/vdfs.rs` 逐子插件收集，委派给各插件自持的 `impl VdfsProvider` | 子目录名 = 插件名（约定，由注册方选定）；能力只来自访问位 `r` / `w` / `l` / `t` |
 | 4 | **落盘在哪一层** | `providers/vdfs_service`（`DirVdfs` / `SingleFileVdfs` / `MemoryVdfs` + `entry.rs` / `pack.rs`） | 虚拟层再往下的一跳：条目寻址与原子落盘（`<homedir>/<类别>/<id>/<manifest>`）、整包 zip / base64、变更广播。**不在** core 协议层，也**不走** `creator_create_object` 工厂。目录自管的资源（agent 目录走 `AgentDirStore`、session 走自己的 `SessionStore`）不进这一层 |
