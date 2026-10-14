@@ -20,7 +20,7 @@ fn tc(id: &str, status: MessageStatus) -> ChatMessage {
 ///
 /// 回归：`process_tool_resume_action` 在重跑工具**之前**就把父节点广播成
 /// `Streaming`（有意为之——否则用户点「批准执行」后画面毫无变化；那是广播帧，
-/// 持久层拒绝瞬态落盘），而中止路径曾经直接 `return Ok(Done)`。那个节点既不是
+/// 持久层拒绝瞬态落盘），而中止路径不得直接 `return Ok(Done)`。那个节点既不是
 /// 流式节点、也不会再被任何后续流程碰，于是前端**永远**显示"运行中"
 /// （违反 `docs/AR-018-node-state-streaming.md` §8 #11）。
 #[test]

@@ -145,7 +145,7 @@ async fn delete_dir_requires_recursive() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
-// 曾经这里有一例 `move_renames_within_workdir`（物理盘用 `rename` 改名）。移动
+// `move_renames_within_workdir`（物理盘侧 `rename` 改名）已随移动整条下线删除。
 // 整条下线后 `PhysicalFs` 不再实现它——它正是「只有物理盘能真做」的那一个实现，
 // 也就是当初把 `Move` 放进 trait 的唯一理由。删掉它，正是这次收敛的目的。
 

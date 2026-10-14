@@ -162,7 +162,7 @@ async fn workdir_reaches_the_physical_layer() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// 曾经这里有两例 `move` 用例（跨半被拒 / 同半转发）。移动整条下线后
+// 两条 `move` 用例（跨半被拒 / 同半转发）已随移动整条下线删除。
 // `ToolVdfs` 不再有 `move_item`，跨半也不再可能（载荷里没有第二个地址）。
 
 /// `..` 穿越在分流阶段就失败，两条链路共享同一条守卫

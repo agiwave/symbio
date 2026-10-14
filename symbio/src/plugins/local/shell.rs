@@ -20,7 +20,7 @@
 //! - 进程结束后把完整输出作为 `Data` 返回，由 `tool_executor` 定稿为工具结果；
 //! - 中止（`ExecAbortSignal`）/超时（`SHELL_TIMEOUT_SECS`）时 kill 子进程并收尸。
 //!
-//! ## 为什么这里曾经很复杂
+//! ## 为什么这里的出口受限
 //!
 //! 出口曾是「返回值里的 `PluginPayload::Session` 通道」——于是执行体**必须**
 //! `spawn` 到后台：executor 要先拿到 `Session(rx)` 才会开始消费，而 `execute()`

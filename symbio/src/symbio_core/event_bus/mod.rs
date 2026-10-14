@@ -39,7 +39,7 @@ const SLOW_WARN_THROTTLE: Duration = Duration::from_secs(5);
 /// `<!-- vocab:KIND_ -->` 标记，由 `plugin-entry-audit` 的 E-008 与代码**双向**比对；
 /// 「发布点写裸字面量」由 `grep-audit` 的 S-009 拦。
 ///
-/// 曾经的 `KIND_SESSION`（会话域专用事件频道）已随该频道一并废除：会话状态与
+/// `KIND_SESSION`（会话域专用事件频道）**已废除**：会话状态与
 /// 转写都是 VDFS 节点，走 `EVENT_BUS_KIND_VDFS`（见 `session/docs/AR-018-node-state-streaming.md`）。
 /// 常量留在词表里只会让「再发一条会话事件」看起来仍然合法。
 pub const EVENT_BUS_KIND_SYSTEM: &str = "system";
@@ -113,7 +113,7 @@ pub fn event_bus_unregister_subscriber(connection_id: &str) {
 
 /// 全局事件总线门面
 ///
-/// 其他插件（vdfs 等）调用静态方法 `publish` 推送事件。会话域曾经的 `kind = "session"`
+/// 其他插件（vdfs 等）调用静态方法 `publish` 推送事件。会话域的 `kind = "session"`
 /// 频道已废除——会话状态与转写都是 VDFS 节点变更，走 `EVENT_BUS_KIND_VDFS`（见
 /// `session/docs/AR-018-node-state-streaming.md`）。
 pub struct EventBus;

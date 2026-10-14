@@ -158,7 +158,7 @@ impl SessionPlugin {
     ///   入队后由这里开跑；
     /// - 恢复动作（`action(<消息地址>, <动作词>)`，provider 侧构造 ctx 后调进来）。
     ///
-    /// 曾经的第三条是 `chat/send` 路由（one-off 入口），它只是入队的薄包装；随输入面
+    /// 第三条是 `chat/send` 路由（one-off 入口），它只是入队的薄包装；随输入面
     /// 双轨退役（[ADR-066] / T-077 步②）已删除——「接收消息」与「跑一轮」分开之后，
     /// 那条路由既无输入可收，也无响应可给（回包恒为 `accepted`）。
     ///
@@ -340,7 +340,7 @@ impl SessionPlugin {
 
             // 仅 message 分支（非 ping）追加用户消息到存储
             //
-            // **直连会话引擎，不经路由**：这里曾经构造一个 invoke 信封
+            // **直连会话引擎，不经路由**：不构造 `invoke` 信封
             // （`ctx_spawn.set_payload(..)` + 调 `invoke_append`）只为追加一条数据——
             // 而 `invoke_append` 的全部内容就是「解载荷 → `open_chat_session` →
             // `append_messages`」。信封是纯开销，且让一次数据追加看起来像一次跨插件调用。
@@ -442,7 +442,7 @@ impl SessionPlugin {
             // ── 基础提示词：**不在这里拼** ──
             // 各层指令与记忆（智能体自身目录归 `agent`，工作区归 `work`，会话归本插件）
             // 都由插件在能力收集期经 `register_system_prompt` 注册，由
-            // `chat_loop::inputs::resolve_system_prompt` 统一拼接。曾经在这里把
+            // `chat_loop::inputs::resolve_system_prompt` 统一拼接。这里不把
             // `{homedir}/AGENTS.md` 装配成 `req.system_prompt` 传入，后果有二：
             // ① 同一份工作区 AGENTS.md 被 work 插件再注入一次（进两次上下文）；
             // ② 显式 `system_prompt` 会**顶掉**模型插件注册的人格——用户写了一份指令，
@@ -574,7 +574,7 @@ impl SessionPlugin {
     /// ephemeral 会话的配置取当前值的快照（内存会话不随 `session/config` 变更而变）。
     ///
     /// 消费方**只有一处**：下方 [`Self::handle_chat_send_oneoff`] 向 chat_ctx 交付
-    /// 会话句柄（`SESSION_HANDLE`，交付失败时 model 侧兜底内存会话）。曾经还有一个
+    /// 会话句柄（`SESSION_HANDLE`，交付失败时 model 侧兜底内存会话）。没有对外
     /// `session/open` 路由消费它（对外返回进程内句柄），已退役——进程内句柄不该
     /// 有对外路由。
     pub async fn open_session_handle(

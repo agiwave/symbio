@@ -592,8 +592,8 @@ async fn validate_subsession_exists(
 ///
 /// ## 为什么不再 `route` 一条路由
 ///
-/// 这里曾经 `fork` 一个 ctx、把 `PATH` 设成 `session/update` 再 `route` 回去。
-/// 那条专用路由已于 2026-09-23 退役：它只是「写会话 metadata」的第二份实现，
+/// 「写会话 metadata」的第二份实现是 `fork` 一个 ctx、把 `PATH` 设成
+/// `session/update` 再 `route` 回去。那条专用路由已退役（2026-09-23）：
 /// 而 VDFS 的 `write` 本来就覆盖这件事（同一个 provider、同一份浅合并）。
 /// 绕路由还为一次纯数据写入白搭了一层 invoke 信封。
 ///

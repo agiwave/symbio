@@ -4,6 +4,7 @@
 //! 需要看到自己说过什么（否则第二轮起失忆）。转写是**纯函数读视图**——
 //! 历史来自同一份事实源，不另存副本（ADR-044：实测与判据同源的同族纪律）。
 //!
+// doc-link-allow D-004: 「四格 → 三角色」是事件形状到角色的静态映射，非版本改造
 //! 口径（**四格 → 三角色**）：
 //! - `user.message`（`turn × opened`）→ `user` 行（载荷 `text`）；
 //! - `chat.assistant.final`（`turn × closed`）→ `assistant` 行（载荷 `text`）；

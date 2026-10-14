@@ -380,8 +380,8 @@ pub trait CapabilityVisitor: Send + Sync + 'static {
     ///
     /// ## 为什么没有「基座 / 片段」两条通道
     ///
-    /// 曾经有两个方法：`register_system_prompt`（人格基座，按优先级链取一个）与
-    /// `register_system_prompt_segment`（机制级片段，全部追加）。两者做的是**同一件事**
+    /// `register_system_prompt`（人格基座，按优先级链取一个）与
+    /// `register_system_prompt_segment`（机制级片段，全部追加）做的是**同一件事**
     /// ——往一个命名有序集合里塞一段文字——差异只在消费侧「取一个」还是「取全部」。
     ///
     /// 而「取一个」这个需求本身站不住：人格的**选择**发生在**注册期**（model 插件已按

@@ -183,7 +183,7 @@ impl McpManager {
         // 这里只借它读 `isError`：工具**自己**声明失败时转成 Err，
         // 否则模型会把失败当成功结果继续往下推理。
         //
-        // 曾经这里按信封建模，于是 `{content, isError}` 反序列化「成功」
+        // 按 JSON-RPC **信封**（`{result, error, isError}`）建模，会让 `{content, isError}` 反序列化「成功」
         // 却把内容全丢（三个字段都可选），返回 `Value::Null`——工具白跑，
         // 模型收到字符串 `"null"`，且全程无报错。见 `McpToolCallResponse` 文档。
         let call_result: McpToolCallResponse =

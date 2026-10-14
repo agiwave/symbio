@@ -23,7 +23,7 @@
 //! 不存在跨插件使用，故从 `symbio_core` 下沉到本插件——核心架构只保留跨插件
 //! 共享的抽象，不承载单一模块的内部定义。
 //!
-//! 曾经这里还有一个 `ChatSession` trait（唯一实现即本结构体）：单实现多态只会
+//! 不设 `ChatSession` trait（唯一实现即本结构体）：单实现多态只会
 //! 多一层 `dyn` 分发与一份契约文档的两处维护，已去除——方法直接内聚在实现上。
 
 use super::config::{default_context_messages, SessionConfig};

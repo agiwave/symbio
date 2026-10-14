@@ -23,7 +23,7 @@ fn fixture() -> (tempfile::TempDir, SessionPlugin) {
 }
 /// 中止与正常结束必须是**不同**的结局，且都经同一个构造点产出。
 ///
-/// 回归：消费循环的 ABORTED 出口曾经广播 `completed`，而 `handle_abort` 广播
+/// 回归：消费循环的 ABORTED 出口若广播 `completed`、而 `handle_abort` 广播
 /// `aborted`——最终显示哪个取决于「3s 轮询」与「循环收尾」谁先跑到：窗口期内
 /// UI 会短暂显示"已完成"，提示音也可能选错音色。
 #[tokio::test]

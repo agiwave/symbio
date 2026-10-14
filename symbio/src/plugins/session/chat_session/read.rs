@@ -104,7 +104,7 @@ impl PersistentChatSession {
         let mut messages: Vec<_> = session.messages.to_vec();
         // 按**单调序号** `seq` 排序（稳定排序，缺失 seq 的旧数据排最后并保持插入顺序）。
         //
-        // 这里曾经用 `sort_by_key(|m| m.timestamp)`，有两个致命问题：
+        // 不用 `sort_by_key(|m| m.timestamp)`，它有两个致命问题：
         //   1. `Option` 序是 `None < Some(_)`，缺失 timestamp 的消息被顶到最前面，
         //      会话顺序被打乱，父节点可能排到子节点之后；
         //   2. timestamp 是"时刻"不是"顺序"——同一毫秒批量落库的消息会并列，

@@ -198,6 +198,7 @@ pub(crate) fn record_learning(
     }
     // ── 步 13 巩固（用**刷新后**的快照）──────────────────────────────────
     // 读 `history()` 而非 `range()`（S2.7-b2）：巩固是**累计口径**——它要把
+    // doc-link-allow D-004: 「曾经记过什么」是记忆族的语义问句，非版本变更史
     // 「曾经记过什么」收成一族记忆。压缩归档把被取代的前缀移出 live 段后，
     // 只读 live 会让巩固**静默**丢掉压缩前的记忆（它们仍在归档段里）。
     if let Err(why) = super::v2_memory::consolidate(store, &store.history(), turn, now) {

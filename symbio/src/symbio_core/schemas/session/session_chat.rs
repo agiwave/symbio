@@ -57,7 +57,7 @@ pub struct Request {
 
 /// `session/chat` 的响应：本轮定稿后的消息副本。
 ///
-/// ## 这里曾经住着 `NodeOp` / `NodeChange`
+/// ## 消息变更只有一种线协议形状
 ///
 /// 消息变更的线协议一度是独立的一层「显式操作」枚举（`upsert` / `append` /
 /// `remove` / `reset` / `warn`），后来收敛成只剩一个变元的 `Change`。两者都已

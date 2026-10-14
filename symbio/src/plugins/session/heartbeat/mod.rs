@@ -481,11 +481,13 @@ impl SessionPlugin {
 /// 重开；「欲」本身照样每 tick 入格（它是流，不是状态）。
 ///
 /// 判定住 ③ [`conation`]（core），这里只**消费**——插件不再自己扫事实源拼一个布尔。
-/// as-of 取上界 `i64::MAX`：问的是「这条目标**曾经**声明过吗」，与 `session/stats`
+// doc-link-allow D-004: 「曾经声明过吗」问的是事实网格里有无该条记录，属数据语义
+/// as-of 取上界 `i64::MAX`：问的是「这条目标曾经声明过吗」，与 `session/stats`
 /// 的复算同口径。升格靠**溯源**认（`task.opened` 的 `produced_by` 指回欲 seq），
 /// 不靠 goal 字符串相等，见 `conation` 模块头的边界一节。
 ///
-/// 读 `history()` 而非 `range()`（S2.7-b2）：「**曾经**声明过」是累计口径——
+// doc-link-allow D-004: 「曾经声明过」是累计口径的表述，非版本变更史
+/// 读 `history()` 而非 `range()`（S2.7-b2）：「曾经声明过」是累计口径——
 /// 压缩归档把被取代的前缀移出 live 段后，只读 live 会把压缩前声明过的目标
 /// 读成「没声明过」⇒ 每 tick 重开一条目标（静默的重复开工）。
 fn long_goal_declared(store: &EventWalStore, goal: &str) -> bool {

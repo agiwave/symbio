@@ -2,7 +2,7 @@
 //!
 //! ## 为什么在插件里，而不是 `symbio_core/schemas`
 //!
-//! 它曾经住在 `symbio_core/schemas::session::session_config`，与同目录的
+//! 它不住在 `symbio_core/schemas::session::session_config`，与同目录的
 //! `session_chat` / `chat_message` 并列。但两者性质不同：
 //!
 //! - **协议 schema**（那两个）是**跨插件契约**——agent / local / model 都按同一份
@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize};
 ///   留着只会让人误以为可改；
 /// - `session_id`：全仓零消费者、零赋值。配置本身即按会话目录存放（id 由目录名决定），
 ///   再在内容里存一份 id 属自指冗余。
-/// - `store_kind`（及其 `StoreKind` 枚举）：曾经用它在 `file` / `sqlite` / `memory`
+/// - `store_kind`（及 `StoreKind` 枚举）：在 `file` / `sqlite` / `memory`
 ///   三个后端间选型。sqlite 是「可配置但没人能配置」——前端零引用、默认恒为 `file`、
 ///   不支持子会话清单，且仍需一个磁盘目录放压缩存档；memory 表达的不是「另一种存储」
 ///   而是「要不要持久化」。两者都不是同一件事的第二种实现，选型因此下沉到构造点

@@ -586,6 +586,7 @@ pub(crate) fn read(
     .map_err(|e| PluginError::InternalError(format!("就绪集序列化失败：{e}")))?;
 
     // 转写列（对话面读侧，[plan/12 批 2](../../../../docs/plan/PL-010-价值验收与基线埋点.md "PL-010-价值验收与基线埋点")）：
+    // doc-link-allow D-004: 「四格 → 三角色」是事件形状到角色的静态映射，非版本改造
     // 与四列同一份切片、同一个 as-of。口径（四格 → 三角色，含
     // [plan/10 批 3](../../../../docs/plan/PL-008-工具轮v2化实施方案.md "PL-008-工具轮v2化实施方案") 的工具结果）只活在 core
     // 的 `transcript` 投影里，本处只取数 + 排版；`may_read = false` 时切片已空 ⇒

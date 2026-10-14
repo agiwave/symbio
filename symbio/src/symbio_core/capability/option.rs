@@ -44,9 +44,9 @@
 //!
 //! 选项（会话输入区下方的可修改项）**就是会话配置表单的字段**，因此产物直接
 //! 复用 VDFS 详情方言的 [`DetailField`]
-//! ——「候选」「条件显隐/禁用」「子表单」各只有一份实现与一个校验器。这里曾经并列一套
-//! `OptionNode`（自带 `option_type` / `action` / `children` / `display` 的独立节点类型）
-//! 与 `options/list` 端点，已于 2026-09-23 随「会话选项 schema 化」整体下线
+//! ——「候选」「条件显隐/禁用」「子表单」各只有一份实现与一个校验器：产物只有
+//! [`DetailField`] 一种形状（独立的 `OptionNode` 节点类型与 `options/list` 端点已随
+//! 「会话选项 schema 化」下线，2026-09-23）。
 //! （`docs/archive/session-options-unification.md` §9 S4）。
 //!
 //! ## 为什么不复用 CapabilityVisitor

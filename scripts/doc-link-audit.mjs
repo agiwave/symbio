@@ -284,15 +284,37 @@ const HISTORY_MARKERS = [
   // 同类的时序回指标记，与「曾经」同类：它把「现在的样子」指向「最初的样子」。
   /初版/,
 ]
-const WAIVER_D004_RE = /<!--\s*doc-link-allow\s+D-004\s*:\s*(\S.*?)\s*-->/
+// 源码注释里没有 HTML 注释壳（与 D-010 的 `grep-link-allow` 同一形态），所以同一
+// 判据要能吃 `// doc-link-allow D-004: 理由`。两种形态都必须**理由不可为空**。
+const WAIVER_D004_RE = /doc-link-allow\s+D-004\s*:(.*)$/m
+
+/**
+ * 取豁免理由；**取不到非空理由**就返回 `null`（= 没豁免）。
+ *
+ * ## 为什么不能一条正则搞定
+ *
+ * `<!-- doc-link-allow D-004:   -->` 的理由是空的。曾经写成
+ * `/doc-link-allow\s+D-004\s*:\s*(\S.*?)\s*$/m` —— `\s*` 吃掉冒号后的空格后，
+ * `(\S.*?)` 匹配到的是 `-->` **本身**，于是空理由被当成有理由而放行。
+ * 那条正则被 `doc-link-audit.test.mjs` 的「豁免理由为空 → 仍失败」当场抓住。
+ *
+ * ⚠️ 这与本会话另一处同源：**放宽判据时，"新放宽的那一段"最容易被当成豁免凭据**。
+ * 所以这里显式剥掉注释壳再判空，而不是靠"要求至少一个非空白字符"。
+ */
+function d004Reason(text) {
+  const m = WAIVER_D004_RE.exec(text)
+  if (!m) return null
+  const reason = m[1].replace(/-->\s*$/, '').replace(/^<!--\s*/, '').trim()
+  return reason.length > 0 ? reason : null
+}
 
 /**
  * 行内豁免：本行或**前一行**带 `<!-- doc-link-allow D-004: 理由 -->`（理由不可为空）。
  * 与 D-006 的行内档同口径——注释既可写在被豁免行之前（不打断排版），也可写在同行。
  */
 function waivedD004Line(lines, i) {
-  if (WAIVER_D004_RE.test(lines[i])) return true
-  return i > 0 && WAIVER_D004_RE.test(lines[i - 1])
+  if (d004Reason(lines[i])) return true
+  return i > 0 && d004Reason(lines[i - 1])
 }
 
 /**
@@ -303,7 +325,7 @@ function waivedD004Line(lines, i) {
 function waivedD004Whole(text) {
   for (const line of text.split('\n').slice(0, DOCTYPE_HEAD_LINES)) {
     if (line.trim() === '') continue
-    return WAIVER_D004_RE.test(line)
+    return d004Reason(line) !== null
   }
   return false
 }
@@ -448,7 +470,7 @@ function walkDocs(dir, out = []) {
     if (entry.isDirectory()) {
       if (SKIP_DIRS.has(entry.name)) continue
       walkDocs(path.join(dir, entry.name), out)
-    } else if (entry.name.endsWith('.md')) {
+    } else if (entry.name.endsWith('.md') || entry.name.endsWith('.rs')) {
       out.push(path.join(dir, entry.name))
     }
   }
@@ -663,14 +685,45 @@ const historical = []
 const backtickBad = []
 const bareRisk = []
 let docsScanned = 0
+let srcScanned = 0
 let backtickChecked = 0
 
 function scanBody (file) {
   const rel = path.relative(repoRoot, file).split(path.sep).join('/')
   if (EXEMPT_DIRS.some((d) => rel.startsWith(d))) return
   if (BODY_EXEMPT_DIRS.some((d) => rel.startsWith(d))) return
-  docsScanned += 1
   const raw = fs.readFileSync(file, 'utf8')
+  if (file.endsWith('.rs')) {
+    // 源码：只判 D-004，且只判**注释行**（理由见本节头注释）
+    srcScanned += 1
+    const lines = raw.split(/\r?\n/)
+    const comm = []
+    let inBlock = false
+    lines.forEach((l, i) => {
+      const s = l.trim()
+      if (inBlock) {
+        comm.push({ n: i + 1, t: s })
+        if (s.includes('*/')) inBlock = false
+        return
+      }
+      if (s.startsWith('/*')) {
+        comm.push({ n: i + 1, t: s })
+        if (!s.includes('*/')) inBlock = true
+        return
+      }
+      const m = /^\/\/\/?!?\s?(.*)$/.exec(s)
+      if (m) comm.push({ n: i + 1, t: m[1] })
+    })
+    const body = comm.map((c) => c.t).join('\n')
+    if (!waivedD004Whole(body)) {
+      const hits = historyHits(body)
+      // 行号从「注释序号」换回**文件里的真实行号**
+      hits.forEach((h) => { h.line = comm[h.line - 1]?.n ?? 0 })
+      if (hits.length > 0) historical.push({ rel, hits })
+    }
+    return
+  }
+  docsScanned += 1
   const { body, offset } = splitFrontMatter(raw)
 
   const marker = processDocMarker(body)

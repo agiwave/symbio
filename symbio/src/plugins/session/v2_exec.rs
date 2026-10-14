@@ -1636,6 +1636,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
     //
     // 读 `history()` 而非 `range()`（S2.7-b2）：这三个写方（`record_derived` 的
     // 承诺与任务表 / `record_learning` 的记忆三段）都是**累计口径**——它们的幂等
+    // doc-link-allow D-004: 「曾经落过什么」问的是事实网格里有无该条记录，属数据语义
     // 判据与状态推导要看**曾经**落过什么。压缩归档把被取代的前缀移出 live 段后，
     // 只读 live 会让它们看不见压缩前的事实：幂等判据失效 ⇒ 重复落格，或状态
     // 丢失（例如压缩前开的任务在就绪集里消失）。`user_seq` 本身取的是**本轮**

@@ -144,7 +144,7 @@ fn filter_valid_tool_names_edge_cases() {
 //
 // 这组用例钉的是**协议字段名**。漏掉映射不会编译失败、不会 panic，只会让
 // 反序列化在运行期返回 Err——而那个 Err 经 `tracing::warn!` 输出，CLI 看不见。
-// 曾经的全部后果：`initialize` 解析失败 ⇒ `tools/list` 根本不发出 ⇒
+// 那条建模路线的全部后果：`initialize` 解析失败 ⇒ `tools/list` 根本不发 ⇒
 // 配了 MCP server 却一个工具都注册不上。
 //
 // 因此这里的输入**必须逐字取自 MCP 2025-06-18 规范**（camelCase），
@@ -234,7 +234,7 @@ fn tool_call_response_is_error_uses_camel_case() {
 
 // ---- 以下是 `tools/call` 的**载荷**语义 -------------------------------------
 //
-// 曾经这里按 JSON-RPC **信封**（`{result, error, isError}`）建模，却拿
+// 用 JSON-RPC **信封**（`{result, error, isError}`）建模、却拿
 // `CallToolResult` **载荷**（`{content, isError}`）去反序列化：三个字段全可选，
 // 于是"解析成功"、内容是 `Value::Null`、正文永远渲染成字符串 `"null"`，且全程
 // 不报错。下面这组用例把"读的是载荷"这件事钉死。

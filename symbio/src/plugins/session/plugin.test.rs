@@ -404,7 +404,7 @@ async fn migrated_session_routes_stay_retired() {
         test_dir(),
     ));
     for (path, successor) in [
-        // 内部调用已改为直连引擎；「发言」始终只走聊天协议
+        // 「发言」始终只走聊天协同：
         ("append", "open_chat_session + append_messages"),
         // 无消费方，整条链路（路由 + 实现 + schema）已删
         ("open", "（无替代：本就不需要）"),

@@ -78,7 +78,7 @@ fn dialog_node_lands_at_the_root_and_on_the_conversation_line() {
 /// 助手正文（`Turn` 的子 `Text`）**在**对话线上——判据不看位置。
 ///
 /// 与上一条合起来说明「根级」是**语义选择**（首响是一句独立的话），而不是
-/// "投影只认这个形状"。曾经按"根级"切，代价是插件看不到助手上一轮的回答、
+/// "投影只认这个形状"。按"根级"切会让插件看不到助手上一轮的回答——
 /// 前端「对话」面板看不到回答本身（回答在 Turn 组里）。
 #[test]
 fn a_turn_child_text_is_on_the_conversation_line() {

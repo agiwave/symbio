@@ -126,7 +126,7 @@ pub struct ListToolsResult {
 /// ## ⚠ 这**不是** JSON-RPC 信封
 ///
 /// 信封由 [`JsonRpcResponse`] 承载（`{result, error}`）；调用方拿到的
-/// `response.result` **已经**是这一层。曾经这里按信封建模
+/// `response.result` **已经**是这一层。拿 `CallToolResult` 的 `{content, isError}`
 /// （`{result, error, isError}`），于是拿 `{content, isError}` 去反序列化它：
 /// 三个字段全部可选 ⇒ 「解析成功」⇒ 返回
 /// `tool_response.result.unwrap_or(Value::Null)` ⇒ **结果被静默换成 `null`**。

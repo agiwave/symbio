@@ -19,7 +19,7 @@
 //! 本插件仅负责建立订阅连接。
 //!
 //! 订阅方拿到帧后按 `kind` 分派；`session_id` 只是 `system` 握手帧的关联信息，
-//! **业务身份一律在载荷自己的地址里**（VDFS 变更的 `path`）——会话域曾经的
+//! **业务身份一律在载荷自己的地址里**（VDFS 变更的 `path`）——会话域的
 //! `kind = "session"` 频道已废除，见 `docs/arch/AR-004-PROTOCOLS.md` §事件总线频道。
 //!
 //! 历史上的 `pending/snapshot` 路由已随会话事件频道一并废除：它缓冲的是按 `session_id`

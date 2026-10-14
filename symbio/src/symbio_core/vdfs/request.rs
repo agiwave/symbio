@@ -61,7 +61,7 @@ pub struct VdfsActionResult {
 //
 // ## 为什么是枚举而不是一排 trait 方法
 //
-// 曾经是 12 个方法（list / stat / read / write / …）。问题出在**纯转发型
+// 一排方法（list / stat / read / write / …）的问题出在**纯转发型
 // provider**（容器、门面、作用域代理）身上：每新增一种操作，每个转发方都要补一个
 // 「拆路径 → 转发 → 回填路径」的方法，漏一个就是静默能力缺口。收敛成一个
 // `dispatch` 之后，「新增一种操作」落在枚举的一个变体上——所有实现体的 `match`
@@ -92,7 +92,7 @@ pub struct VdfsActionResult {
 //
 // ## 没有 `Move`
 //
-// 曾经有 `Move { to }`，现已删除，且**不应加回来**。理由是模型层面的：
+// **没有 `Move`，且不应加回来**。理由是模型层面的：
 //
 // - 一个 provider = **一棵子树**，它只认自己子树内的相对路径。于是「同一个
 //   provider 内移动」= 同一棵树内的重命名，provider 用原生能力（`rename`）能做得

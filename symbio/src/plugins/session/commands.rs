@@ -216,7 +216,7 @@ impl SessionPlugin {
     // ==================== 消息的两个变更操作（VDFS 入口的实现） ====================
     //
     // 这两个方法是 `write(<id>/message/<mid>)` / `action(truncate)` 的**唯一实现**。
-    // 它们曾经各有一个专用路由（`chat/update_message` / `chat/delete_message`），
+    // 三条 VDFS action 的逻辑是从那三条专用路由（`chat/update_message` / `chat/delete_message` /
     // 逻辑就在那三个 invoke 里——迁到 VDFS 时整体搬过来，不是重写一遍：
     // 「同一个操作两份实现」正是本轮要消灭的东西。
     //
@@ -391,7 +391,7 @@ impl SessionPlugin {
     ///
     /// ## 为什么没有第二条删除路径
     ///
-    /// 曾经的 `session/clear` 路由是它的第二个消费方，已退役——两个入口对同一件事
+    /// `session/clear` 路由已退役（它曾是第二个消费方）——两个入口对同一件事
     /// 就是两条会各自漂移的实现，VDFS 侧本来就已经完整具备这个能力。
     pub(crate) async fn delete_session_internal(
         &self,

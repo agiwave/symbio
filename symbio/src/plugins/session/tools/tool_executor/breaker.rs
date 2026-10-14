@@ -70,7 +70,7 @@ impl BreakerInputs {
 /// ## 路径必须走 `paths::session_dir`，不能只 join 文件名
 ///
 /// `session_dir` 形参是**本插件自己的目录**（见 [`process_tool_calls_async`](super::process_tool_calls_async) 的形参
-/// 文档），而事实源在它下面的 `<safe_id(session_id)>/v2-events.wal`。曾经这里直接
+/// 文档），而事实源在它下面 `<safe_id(session_id)>/v2-events.wal`。不得直接
 /// `session_dir.join(V2_WAL_FILE)` ⇒ 读的是 `<插件目录>/v2-events.wal`——那个文件
 /// **不存在**，`open_readonly` 失败即返回 0 ⇒ `spent_ms` 恒 0 ⇒ 闸门的预算分支
 /// 永远走不到，而**没有任何东西会变红**（熔断格只在判 `Break` 时才落，判不出来就

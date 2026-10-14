@@ -300,7 +300,7 @@ async fn session_list_carries_the_option_definition() {
 //
 // 「**有名字**时 id 来自地址（使用方给），**没名字**时 id 由 provider 生成」是
 // VDFS 的通用规则（`vdfs_service::entry::id_of` 的注释、`VdfsProvider::write`
-// 的「两种目标形态」表）。会话曾经是唯一例外——无论有没有名字都自己生成 id、
+// 的「两种目标形态」表）。会话不按名字生 id——
 // 把名字只当标题。2026-09-23 对齐，下面三例把三条契约钉住。
 
 /// 具名新建：**就地创建**，地址末段即会话 id。
@@ -749,7 +749,7 @@ async fn new_session_ids_are_distinct() {
 
 // ==================== 转写区段（`<根>/session/<id>/message`）的两个入口 ====================
 //
-// 消息的**改写 / 截断**曾经各有专用路由（`chat/update_message` /
+// 消息**改写 / 截断**各有 VDFS action（`update_message` /
 // `chat/delete_message`），2026-09-18 迁到 VDFS：
 //
 // | 操作 | 入口 | 落到 VDFS 变更上的形状 |
@@ -757,7 +757,7 @@ async fn new_session_ids_are_distinct() {
 // | 改写某条 | `write(<id>/message/<mid>)` | 该消息一条变更（**不带**载荷 ⇒ 消费端回读） |
 // | 删该条及其后 | `action(<id>/message/<mid>, "truncate")` | 被删的各一条移除帧 + 回执带被删 id |
 //
-// 「清空历史」（`action(<id>/message, "clear")`）曾经是第三条：它与「删除会话」
+// 「清空历史」（`action(<id>/message, "clear")`）不设第三条：它与「删除会话」
 // 在用户眼里是同一件事的两种做法（都让这一屏变空），留着只会让人在两条重叠的
 // 路径之间犹豫，因此整体下线——转写区段上只剩 `truncate` 这一个集合动词。
 //

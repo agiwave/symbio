@@ -646,7 +646,7 @@ async fn wait_tool_abort_stays_pending_without_signal() {
 
 // ── 工具结果的「等待用户」意图 ────────────────────────────────────────────────
 //
-// 契约：**工具只声明意图与载荷，节点归编排层构造**。工具曾经自建 Session 通道、
+// 契约**工具只声明意图与载荷，节点归编排层构造**。工具不自建 Session 通道、
 // 发一个随机 id 的节点，由消费方解回来改 id 再重播一次——同一个逻辑节点因此有两个
 // id，前端出现重复审批卡，且 resume 只删得掉一个。
 
@@ -1044,7 +1044,7 @@ async fn relaxing_the_budget_turns_the_same_facts_into_a_pass() {
 
 /// 台账读的是**会话目录**的 WAL，不是插件目录下的同名文件。
 ///
-/// 这条钉的是一次真实事故：`session_cost_ms` 曾经只 `session_dir.join(V2_WAL_FILE)`，
+/// 这条钉的是一次真实事故：`session_cost_ms` 若取 `session_dir.join(V2_WAL_FILE)`
 /// 而形参 `session_dir` 是**插件目录**——于是读的是 `<插件目录>/v2-events.wal`
 /// （不存在）⇒ `spent_ms` 恒 0 ⇒ 闸门的预算分支永远走不到，且**没有任何东西会变红**
 /// （熔断格只在判 `Break` 时才落）。判据因此**两侧都钉**：错的路径读不出账，
