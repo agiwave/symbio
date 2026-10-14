@@ -4,11 +4,11 @@
  *
  * ## 它补的是哪个洞
  *
- * `lists` 字段（SP-001）+ RG-026…RG-029 让分工**可机读、可判红**。但那四条判据只
- * 在**出错时**说话：「谁拥有路由清单」这个问题，平时没有出口——要读十份文档的
+ * `lists` 字段（SP-001）+ RG-026 / RG-027 / RG-029 让分工**可机读、可判红**。但那三条
+ * 判据只在**出错时**说话：「谁拥有路由清单」这个问题，平时没有出口——要读十份文档的
  * front-matter 才知道。于是「一份清单一个 owner」仍然只活在守卫里，人用不上。
  *
- * 这份总账把它变成**一页可查的表**：每份清单一行，写明 owner 是谁、谁在 view 它。
+ * 这份总账把它变成**一页可查的表**：每份清单一行，写明 owner 是谁。
  * 它是 front-matter 的**投影**（同 `CURRENT.md` 是代码的投影），所以永远与声明一致。
  *
  * ## 为什么「重复 ⇒ 生成即红」而不是「生成完再判红」
@@ -64,12 +64,11 @@ function collect() {
 function render() {
   const claims = collect();
 
-  // ── 分组：id → { owners: [], viewers: [] } ──
+  // ── 分组：id → owners[] ──
   const byId = new Map();
   for (const c of claims) {
-    if (!byId.has(c.id)) byId.set(c.id, { owners: [], viewers: [] });
-    const slot = c.role === "owner" ? byId.get(c.id).owners : byId.get(c.id).viewers;
-    slot.push(c);
+    if (!byId.has(c.id)) byId.set(c.id, { owners: [] });
+    byId.get(c.id).owners.push(c);
   }
 
   // ── 重复即红：**渲染前**判，不产出任何文本 ──
@@ -83,7 +82,7 @@ function render() {
       .join("\n");
     throw new Error(
       `清单归属有分工重叠，本总账拒绝生成（说谎的表比没有表更坏）：\n${detail}\n` +
-        `  处置：留一个 \`owner\`，其余改成 \`view\` 并在正文链到 owner（RG-027 / RG-028）。`,
+        `  处置：留一个 \`owner\`，另一处去掉 \`lists\` 声明、改为在正文指路它（RG-027）。`,
     );
   }
 
@@ -103,34 +102,30 @@ function render() {
   L.push(
     "> 本表是各文档 front-matter `lists` 字段的**投影**（同 RE-006 是代码的投影）——" +
       "它不新增任何事实，只是把「哪份清单归谁」从「藏在十份文档的 front-matter 里」" +
-      "变成一页可查的表。与它同源的判据是 RG-026…RG-029（字段规范见 " +
+      "变成一页可查的表。与它同源的判据是 RG-026 / RG-027 / RG-029（字段规范见 " +
       "[`SP-001`](../spec/SP-001.md \"SP-001\")）。",
   );
   L.push("");
   L.push("<!-- list:lists-index owner -->");
   L.push("");
   L.push(
-    `共 **${ids.length}** 份清单，每份恰好一个 owner（${claims.filter((c) => c.role === "owner").length} 个 owner 声明 / ` +
-      `${claims.filter((c) => c.role === "view").length} 个 view 声明）。`,
+    `共 **${ids.length}** 份清单，每份恰好一个 owner（${claims.filter((c) => c.role === "owner").length} 个 owner 声明）。`,
   );
   L.push("");
-  L.push("| 清单 id | owner | 谁在 view 它 |");
-  L.push("|---|---|---|");
+  L.push("| 清单 id | owner |");
+  L.push("|---|---|");
   for (const id of ids) {
     const v = byId.get(id);
     const owner = v.owners[0];
     const ownerCell = owner.entryId
       ? `\`${owner.entryId}\`（\`${owner.rel}\`）`
       : `\`${owner.rel}\``;
-    const viewers = v.viewers.length
-      ? v.viewers.map((x) => `\`${x.rel}\``).join(" · ")
-      : "—";
-    L.push(`| \`${id}\` | ${ownerCell} | ${viewers} |`);
+    L.push(`| \`${id}\` | ${ownerCell} |`);
   }
   L.push("");
   L.push(
-    "> **`view` 是有约束的**：它必须在正文链到 owner（RG-028），否则是一份无主副本。" +
-      "本表只列关系，链在不在由 RG-028 判。",
+    "> **想读某份清单，去它的 owner 那里读**：role 词表只有 `owner`（`view` 已取消——" +
+      "投影重渲是把重复换个形态留下，生成的重复也是重复）。别处要用这些数据就指路，不重渲。",
   );
   L.push("");
   L.push(

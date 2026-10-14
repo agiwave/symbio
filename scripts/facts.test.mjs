@@ -469,7 +469,11 @@ test('跨文档：CURRENT.md 的封闭集不得在别处成表复述', () => {
   // 这条边界写在这里而不是靠多堆白名单掩盖：白名单里每一条都写明**它保的是什么**，
   // 新增一条必须同样写清；判据抓的是「抄一张清单」，抓不到「拿它当索引」。
   const ALLOW = new Map([
-    ['docs/ref/RE-003-ROUTES.md', '路由**契约**的 owner：按插件分节重复列地址是它的组织方式'],
+    [
+      'docs/ref/RE-003-ROUTES.md',
+      '契约表以地址为**键**：讲的是调用方 / 返回类型 / 备注（另一件事），不声称拥有地址清单——' +
+        '同 session README 的已知边界；键集合另有判据（「RE-003 契约表的键必须是 §2.3 的静态路由」）',
+    ],
     ['docs/ref/RE-006-当前事实表.md', '代码投影，本判据的 owner'],
     [
       'symbio/src/plugins/session/README.md',
@@ -588,40 +592,58 @@ test('散文里的 RE-006 节次指路：节次必须存在', () => {
   assert.deepEqual(bad, [], `散文里的 RE-006 节次指路失效：\n    ${bad.join('\n    ')}`)
 })
 
-test('RE-003 必须提到 CURRENT §2.3 的每一条静态路由（那句「交叉核对」的执行方）', () => {
-  // `scripts/facts/current.mjs` 的文件头写着「本表只列静态可提取的字符串臂，权威清单仍是
-  // RE-003（**两者交叉核对构成漂移门禁**）」。查过执行方：E-006 只查**路径前缀**是否合法，
-  // M-008 只查前端有没有写死地址——**两处都不做行集对账**。那句话当时没有执行方，
-  // 于是「RE-003 漏了一条路由」这件事没有任何东西会红。
+test('RE-003 契约表的键必须是 §2.3 的静态路由（多一个键判红）', () => {
+  // 分工（T-102 定，view 取消后仍成立）：**地址与一句话职责的唯一表是 RE-006 §2.3**
+  // （代码投影）；RE-003 只放**契约**（调用方 / 返回类型 / 备注）——以地址为**键**，
+  // 与 session README「工具名 → 结果字段」同一种形状（以封闭集成员为键讲另一件事，
+  // 见上面判据的「已知边界」）。**没有第二张地址表**，也就没有「两个渲染器分叉」可判。
   //
-  // 口径：RE-003 只需**提到**，不需逐字相同。它是**超集**——除 20 条静态路由外还收了
-  // 25 条运行期动态路由（`vdfs/*`、`local/*`、`session/*` 退役臂…），那些没有可静态
-  // 枚举的 `match` 臂，CURRENT §2.3 结构上装不下。所以正确关系是「RE-003 ⊇ §2.3」，
-  // 不是「两者相等」——把相等当判据会把超集判红。
+  // 于是这条判据只守一个方向：**键可以缺**（新路由还没人写契约——缺行不判红），
+  // **不能多**（退役路由的残留 / 手写腐化）。`_root` 就曾以这种形态在旧表里：
+  // 它在这仓代码里从未存在（`git log -S '"_root"' -- symbio/` 零命中）。
   //
-  // 只判**缺**不判**多**：多出来的是动态路由，是 RE-003 存在的理由。
+  // 口径：两边都取 `| \`地址\` | …` 形态的表行；表头与分隔行没有反引号地址，天然排除。
   const cur = fs.readFileSync(path.join(REPO, 'docs', 'ref', 'RE-006-当前事实表.md'), 'utf8')
-  const i = cur.indexOf('### 2.3')
-  assert.notEqual(i, -1, 'CURRENT.md 里找不到 §2.3 —— 判据自己失效了')
-  const sec = cur.slice(i, cur.indexOf('## 3.', i))
-  const routes = [...sec.matchAll(/^\| `([^`]+)` \|/gm)].map((m) => m[1])
-  assert.ok(routes.length >= 15, `只认出 ${routes.length} 条静态路由 —— 判据自己失效了`)
-
   const re003 = fs.readFileSync(path.join(REPO, 'docs', 'ref', 'RE-003-ROUTES.md'), 'utf8')
-  const mentioned = new Set([...re003.matchAll(/`([a-z_]+\/[a-z_]+)`/g)].map((m) => m[1]))
-  const missing = routes.filter((r) => !mentioned.has(r))
+
+  const extraKeysOf = (currentText, routesText) => {
+    const i = currentText.indexOf('### 2.3')
+    if (i < 0) throw new Error('CURRENT.md 里找不到 §2.3 —— 判据自己失效了')
+    const sec = currentText.slice(i, currentText.indexOf('## 3.', i))
+    const fromCurrent = new Set([...sec.matchAll(/^\| `([^`]+)` \|/gm)].map((m) => m[1]))
+    const j = routesText.indexOf('## 路由契约表')
+    if (j < 0) throw new Error('RE-003 里找不到「## 路由契约表」节 —— 判据自己失效了')
+    const tbl = routesText.slice(j, routesText.indexOf('\n## ', j + 10))
+    const fromRe003 = new Set([...tbl.matchAll(/^\| `([^`]+)` \|/gm)].map((m) => m[1]))
+    return [...fromRe003].filter((r) => !fromCurrent.has(r))
+  }
+
+  const extra = extraKeysOf(cur, re003)
+  assert.ok(
+    [...cur.matchAll(/^\| `([^`]+)` \|/gm)].length >= 15,
+    '§2.3 静态路由行数异常少 —— 判据自己失效了',
+  )
   assert.deepEqual(
-    missing,
+    extra,
     [],
-    `RE-003 漏了这些静态路由——它是「现在有哪些路由」的权威清单，漏一条它就不权威：` +
-      `\n    ${missing.join('\n    ')}\n  处置：在 RE-003 对应小节补一行（调用方 / 返回类型 / 备注），` +
-      `**不要**在 CURRENT.md 那侧加一句「见 RE-003」了事——那会让权威清单静默变短。`,
+    `RE-003 契约表多出这些键——它们不是 §2.3 里的静态路由（退役残留 / 手写腐化）：` +
+      `\n    ${extra.join('\n    ')}\n  处置：删掉这一行；确属退役地址的只进 §退役路由索引，不进契约表。`,
   )
 
-  // 反向：RE-003 多出来的那部分必须是**动态或退役**路由，不能是凭空写的静态地址。
-  // （只判缺不判多已经够了；这一条是多出来那部分的形状检查，防止它变成垃圾桶。）
-  const extra = [...mentioned].filter((r) => !routes.includes(r))
-  assert.ok(extra.length > 0, 'RE-003 没有任何动态/退役路由 —— 与它作为超集的定位不符')
+  // 反向验证（两条注入都必须被上面同一个 extraKeysOf 抓住）：
+  // ① 插一条假静态地址 —— 手写腐化的形态；
+  const withFake = re003.replace(
+    /(\| 地址 \| 调用方[^\n]*\n\|[-|]+\|\n)/,
+    `$1| \`fake/never_exists\` | 注入的反向用例。 | — | — |\n`,
+  )
+  assert.ok(withFake !== re003, '反向用例失效：假键没插进去（表头正则失配）')
+  assert.equal(extraKeysOf(cur, withFake).length, 1, '反向用例失效：插一条假键抓不到，判据是恒真的')
+  // ② `_root` —— 旧表的真实病史：它在本仓代码里从未存在，却成表过。
+  const withRoot = re003.replace(
+    /(\| 地址 \| 调用方[^\n]*\n\|[-|]+\|\n)/,
+    `$1| \`_root\` | 注入的病史用例。 | — | — |\n`,
+  )
+  assert.equal(extraKeysOf(cur, withRoot).length, 1, '反向用例失效：_root 那条病史抓不到，判据是恒真的')
 })
 
 test('本仓自身：runner 认得三份事实（本测试不要求此刻无漂移）', async () => {
@@ -631,15 +653,14 @@ test('本仓自身：runner 认得三份事实（本测试不要求此刻无漂�
   // 漂移的判定归它的自然位置：重生成之后（`60-facts`）与 CI 的 `--ci` 模式。
   //
   // 本测试只钉「目录被遍历到」这一件与时序无关的事——漏接线时它才红。
+  const REQUIRED = ['current', 'gate-codes', 'routes-ts']
   const ids = discover(path.join(REPO, 'scripts', 'facts'))
-  for (const id of ['current', 'gate-codes', 'routes-ts']) {
+  for (const id of REQUIRED) {
     assert.ok(ids.includes(id), `runner 应当认得事实 \`${id}\`（实际：${ids.join('、')}）`)
   }
-  const mods = await Promise.all(
-    ['current', 'gate-codes', 'routes-ts'].map((id) => import(`./facts/${id}.mjs`)),
-  )
+  const mods = await Promise.all(REQUIRED.map((id) => import(`./facts/${id}.mjs`)))
   for (const [i, mod] of mods.entries()) {
-    const errs = validateFact(mod.default, { id: ['current', 'gate-codes', 'routes-ts'][i] })
+    const errs = validateFact(mod.default, { id: REQUIRED[i] })
     assert.deepEqual(errs, [], `本仓事实的描述符必须合契约：${errs.join('；')}`)
   }
 })

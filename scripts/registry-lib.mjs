@@ -48,7 +48,7 @@
  */
 // 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns RG 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解）
-// @codes RG-001 RG-002 RG-003 RG-004 RG-005 RG-006 RG-007 RG-008 RG-009 RG-010 RG-011 RG-012 RG-013 RG-014 RG-015 RG-016 RG-017 RG-018 RG-019 RG-020 RG-021 RG-022 RG-023 RG-024 RG-025 RG-026 RG-027 RG-028 RG-029
+// @codes RG-001 RG-002 RG-003 RG-004 RG-005 RG-006 RG-007 RG-008 RG-009 RG-010 RG-011 RG-012 RG-013 RG-014 RG-015 RG-016 RG-017 RG-018 RG-019 RG-020 RG-021 RG-022 RG-023 RG-024 RG-025 RG-026 RG-027 RG-029
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -68,15 +68,18 @@ export const COMMON_REQUIRED = ['kind', 'id', 'title', 'status', 'created']
 export const COMMON_OPTIONAL = ['deps', 'parent', 'lists', 'projection']
 
 /**
- * `lists` 的 role 词表（RG-026 封闭）：
- * - `owner` —— **我维护这份清单**。同一个 id 只能有一个 owner（RG-027）；
- * - `view` —— 我只是**呈现 / 引用**它（表以它为键、段里引它）。必须链到 owner（RG-028）。
+ * `lists` 的 role 词表（RG-026 封闭）：**只有 `owner`——我维护这份清单**。
  *
- * 只有两个角色不是拍脑袋：第三个常见选项 `mirror`（镜像副本）被**有意排除**——
- * 「镜像」正是重复的别名，给它一个合法角色等于给复制发通行证。要呈现就 `view`，
- * 要维护就 `owner`，没有第三条路。
+ * 曾有过第二个角色 `view`（我只呈现 / 引用它），已**整体取消**：`lists` 这套机制
+ * （RG-027…RG-029）的初衷就是**消灭重复**——一个事实只在一个文档里出现，那篇文档
+ * 就是它的 owner。而 `view` 给的是一条绕开重复的旁路：A 维护、B 用投影重渲一遍，
+ * 「没有第二个手写 owner」成立，**读者面前的事实仍有两份**（生成的重复也是重复），
+ * 且投影会随 B 的组织需要越铺越大。要读另一份清单就**指路**（正文写 `[[编号]]`），
+ * 不重渲。同理 `mirror`（镜像副本）也永不给合法角色——镜像正是重复的别名。
+ *
+ * 想恢复 view = 改这里 + 改 SP-001 + 复活 RG-028，那道成本就是「迫不得已」的门槛。
  */
-export const LIST_ROLES = ['owner', 'view']
+export const LIST_ROLES = ['owner']
 
 /**
  * 每个 kind 一份配置——**新增一个 kind = 在这里加一项 + 一个渲染器 + 回归测试**，
@@ -841,7 +844,7 @@ export function auditEntries(entries, root, projections = []) {
     if (cycle) out.push(`RG-006 依赖成环：${cycle.join(' -> ')}（环上的编号永远等不到前置闭环）`)
   }
 
-  /** `lists` 声明收集处（RG-026/027/028 读它）：{rel, id, role, kind} */
+  /** `lists` 声明收集处（RG-026/027/029 读它）：{rel, id, role, kind} */
   const listClaims = []
   // 清单归属这一族同时看**条目**与**投影**（免登记的生成物）。owner 往往就是投影
   // （CURRENT.md 的三张表由 facts/current 生成），它若隐形，RG-027 的「两个 owner」
@@ -854,7 +857,7 @@ export function auditEntries(entries, root, projections = []) {
   // （前置）或正文引用（导航），不塞进 parent：一个字段一种语义，塞两种就两种都读不出。
   {
     const parentOf = new Map()
-    /** `lists` 声明收集处（RG-026/027/028 读它）：{rel, id, role, kind} */
+    /** `lists` 声明收集处（RG-026/027/029 读它）：{rel, id, role, kind} */
     const listClaims = []
     for (const e of entries) {
       if (!e.meta || isEmpty(e.meta.parent) || typeof e.meta.parent !== 'string') continue
@@ -879,7 +882,7 @@ export function auditEntries(entries, root, projections = []) {
     if (cycle) out.push(`RG-024 parent 成环：${cycle.join(' -> ')}（分解环上的条目永远说不清谁是父）`)
   }
 
-  // ---- RG-026 / RG-027 / RG-028：清单归属（一份清单只有一个 owner） ----
+  // ---- RG-026 / RG-027 / RG-029：清单归属（一份清单只有一个 owner） ----
   //
   // **为什么要有这个字段**：`docs/README.md` 的「一个事实只有一个 owner」此前是一张
   // **没人执行的承诺**——它写着「不手抄，需要就引用」，而 D-001…D-010 查链、查措辞、
@@ -888,8 +891,12 @@ export function auditEntries(entries, root, projections = []) {
   // 两处**保证等级还不一样**（一处「必然与代码一致」、一处「人工维护，唯一会漂移」）。
   //
   // `lists` 把那份承诺变成**可机读的声明**：每篇文档在 front-matter 里写它**包含哪些
-  // 清单**、以及每份是 `owner`（我维护它）还是 `view`（我只是呈现/引用它）。
-  // 不写 = 这篇不含任何清单，单内容文档——不需要为「没有」额外声明。
+  // 清单**、每份是不是 `owner`（我维护它）。不写 = 这篇不含任何清单，单内容文档——
+  // 不需要为「没有」额外声明。
+  //
+  // **role 词表只有 owner**（`view` 已取消，理由见 LIST_ROLES 的注释）：这套机制的
+  // 初衷是消灭重复，而 view 用「A 维护、B 投影重渲」把重复换个形态留下来——生成的
+  // 重复也是重复，读者面前的事实仍是两份。想读另一份清单就指路（`[[编号]]`），不重渲。
   //
   // 判据分**两层**，各自在最小作用域内解决——这是本设计的全部要点：
   //
@@ -902,13 +909,14 @@ export function auditEntries(entries, root, projections = []) {
   // 我最初写成「扫全仓每张表、猜它像哪份清单」，那是**错的形状**：成本随文档数×表数增长，
   // 且判据是**形状猜测**（插件目录名长得像工具短名、`vdfs/read` 长得像路由，当场三处误报）。
   //
-  // 四条判据各管一个方向，缺一不可：
-  //   RG-026 形状：`id=role` 行内列表，role ∈ {owner, view}；
-  //   RG-027 **分工重叠**：同一个 id 出现两个 owner —— 这就是「重复」，判红；
-  //   RG-028 view 必须指路 owner：只呈现不拥有的文档必须链到 owner，否则它是一份
-  //          无主副本——那是分工缺失，不是分工清晰；
-  //   RG-029 声明两面对账：正文里每处 `<!-- list:<id> <role> -->` 标记都要与 front-matter
-  //          一一对应（多一处少一处都红）——**声明不许撒谎**。
+  // 三条判据各管一个方向，缺一不可：
+  //   RG-026 形状：`id=role` 行内列表，role ∈ {owner}；
+  //   RG-027 **分工重叠**：同一个 id 出现两个 owner（或零个）——这就是「重复」，判红；
+  //   RG-029 声明两面对账：正文里每处 `<!-- list:<id> owner -->` 标记都要与 front-matter
+  //           一一对应（多一处少一处都红）——**声明不许撒谎**。
+  //
+  // （RG-028 原判「view 必须链到 owner」，随 view 角色取消而退役：词表里没有 view，
+  //   声明即被 RG-026 挡下，那条检查已无输入。想复活 view 就连它一起复活。）
   //
   // RG-029 挡的是「有人抄了一张表却没写 `lists`」那个洞：单靠 front-matter，两层都看不见。
   // 标记写在**清单旁边**而不只写在 front-matter，于是**只读一篇文档**就能回答
@@ -930,8 +938,9 @@ export function auditEntries(entries, root, projections = []) {
       if (!id) out.push(`${e.rel}：RG-026 \`lists\` 有一项的 id 为空：\`${item}\``)
       if (!LIST_ROLES.includes(role)) {
         out.push(
-          `${e.rel}：RG-026 \`lists\` 的 role 必须是 ${LIST_ROLES.map((r) => `\`${r}\``).join(' / ')}，` +
-            `实际读到 \`${role}\`——owner = 我维护它，view = 我只呈现/引用`,
+          `${e.rel}：RG-026 \`lists\` 的 role 必须是 \`owner\`，实际读到 \`${role}\`——` +
+            'owner = 我维护它；词表只有这一个角色（`view` 已取消：投影重渲是把重复换个形态留下，' +
+            '见 LIST_ROLES 注释；想读另一份清单就指路，不重渲）',
         )
       }
       if (id) listClaims.push({ rel: e.rel, id, role, kind: e.kind })
@@ -948,28 +957,12 @@ export function auditEntries(entries, root, projections = []) {
       out.push(
         `RG-027 清单 \`${id}\` 有 ${rels.length} 个 owner：${rels.join('、')}——` +
           '**分工重叠**：同一份清单两处各自维护，改一次要动两处且必然漂移。' +
-          '处置：留一个 owner，另一处改成 `view` 并链到 owner；若两份内容本就不一样，' +
+          '处置：留一个 owner，另一处去掉 `lists` 声明、改为在正文指路它；若两份内容本就不一样，' +
           '那它们其实是两份不同的清单，各起各的 id',
       )
     }
   }
-  // RG-028：view 必须链到 owner（正文里出现 owner 的文件名或编号）
-  for (const c of listClaims.filter((c) => c.role === 'view')) {
-    const ownerRel = owners.get(c.id)?.[0]
-    if (!ownerRel) continue // 无主清单归 RG-027 的另一半（0 owner 时不在此处重复报）
-    const entry = listScope.find((x) => x.rel === ownerRel)
-    // needle 用**带扩展名的文件名**或编号，不用去扩展名的词干：`CURRENT` 这种词干
-    // 在正文里满地都是（`CURRENT.md` 出现在每一处指路里），拿它当「已指路」判据
-    // 等于恒真——反向验证当场抓到：把 RE-003 全部 `docs/ref/RE-006-当前事实表.md` 链接删掉它照样绿。
-    const needles = [entry?.meta?.id, path.basename(ownerRel)].filter(Boolean)
-    const self = listScope.find((x) => x.rel === c.rel)
-    if (!needles.some((n) => (self?.body ?? '').includes(n))) {
-      out.push(
-        `${c.rel}：RG-028 清单 \`${c.id}\` 声明为 \`view\`，正文却没有指路它的 owner（${ownerRel}）——` +
-          '只呈现不拥有的文档必须链到 owner，否则它是一份无主副本',
-      )
-    }
-  }
+  // RG-028 已退役：view 角色取消后无输入（见上方注释块）。
 
   // ---- RG-029：声明两面对账（front-matter ↔ 正文标记） ----
   // **它挡的洞**：front-matter 是**自报**的。没有人写 `lists`，这一篇就当自己不含清单，
@@ -980,7 +973,7 @@ export function auditEntries(entries, root, projections = []) {
   // 且与 front-matter 声明**一一对应**（多一处 = 声明漏了；少一处 = 声明了却没落实）。
   // 于是「只读一篇文档」就能回答「它声明了什么、正文里对应的东西在不在」，
   // 两面对不上是**这篇自己的**问题，不必牵出任何别的文档。
-  const LIST_MARK = /<!--\s*list:\s*([a-z0-9][a-z0-9-]*)\s+(owner|view)\s*-->/g
+  const LIST_MARK = /<!--\s*list:\s*([a-z0-9][a-z0-9-]*)\s+(owner)\s*-->/g
   for (const e of listScope) {
     if (!e.body) continue
     const marks = [...e.body.matchAll(LIST_MARK)].map((m) => ({ id: m[1], role: m[2] }))

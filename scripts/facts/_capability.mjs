@@ -26,6 +26,7 @@
 
 import path from 'node:path'
 import fs from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { matchBrace, stripComments, stripTestModules } from '../rust-scan.mjs'
 import { routeArmDocs, vdfsOps } from '../route-facts.mjs'
 import { UNWIRED_MARKER } from '../route-facts.mjs'
@@ -34,6 +35,24 @@ const PLUGINS_DIR_REL = ['symbio', 'src', 'plugins']
 
 /** 抽不到时的占位。**空着比编一句强**——见文件头。 */
 export const UNKNOWN = '—'
+
+/**
+ * VDFS 地址根名（`plugins/vdfs/fs.rs` 的 `VDFS_ADDR_ROOT`）。
+ *
+ * 输出到文档时替换为 `<vdfs_root>` 占位（见 S-010：根名字面量只归 vdfs 插件）——
+ * 「生成器不手写事实」那条纪律的同一条：根名改了，两份投影（RE-006 的能力矩阵与
+ * RE-003 的静态骨架）自动跟着改，且口径只有这一处。
+ *
+ * 读不出来**抛错**而不是回落空串：空串会让 mask 静默变成恒等，占位符从此悄悄消失。
+ */
+export function vdfsAddrRoot() {
+  const here = path.dirname(fileURLToPath(import.meta.url))
+  const file = path.resolve(here, '..', '..', ...PLUGINS_DIR_REL, 'vdfs', 'fs.rs')
+  const src = fs.readFileSync(file, 'utf8')
+  const m = src.match(/pub const VDFS_ADDR_ROOT:\s*&str\s*=\s*"([^"]+)"/)
+  if (!m) throw new Error('cannot extract VDFS_ADDR_ROOT from plugins/vdfs/fs.rs')
+  return m[1]
+}
 
 // ---------- 源文件收集 ----------
 

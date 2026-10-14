@@ -177,13 +177,14 @@ export const TEST_ONLY = [
   'schema-audit',
   'core-surface-audit',
   'commit',
-  // `registry-lists`（RG-026…RG-029，清单归属）的失效形态**全是恒真**：四条判据
-  // 分别判「同一 id 两个 owner」「声明与正文标记两面对账」「view 是否链到 owner」
-  // 「role 是否在闭集内」，任何一条写宽或写漏都表现为「永远通过」——而
-  // 「永远通过的分工守卫」比没有守卫更坏，它让人以为分工已被守住。
-  // 首次接入时 RG-027 当场漏过一次（owner 是免登记的生成物 CURRENT.md，对判据隐形），
-  // RG-028 当场恒真过一次（needle 用了去扩展名的 `CURRENT`，正文里满地都是）。
-  // 所以这个文件只做一件事：注入五种坏形态，断言每一种都判红。
+  // `registry-lists`（RG-026 / RG-027 / RG-029，清单归属）的失效形态**全是恒真**：
+  // 三条判据分别判「同一 id 两个 owner」「声明与正文标记两面对账」「role 是否在闭集内」，
+  // 任何一条写宽或写漏都表现为「永远通过」——而「永远通过的分工守卫」比没有守卫更坏，
+  // 它让人以为分工已被守住。
+  // 首次接入时 RG-027 当场漏过一次（owner 是免登记的生成物 CURRENT.md，对判据隐形）；
+  // 已退役的 RG-028 也当场恒真过一次（needle 用了去扩展名的 `CURRENT`，正文里满地都是）——
+  // 两条教训同源：**判据的输入会悄悄消失，而恒真不会报错**。
+  // 所以这个文件只做一件事：注入坏形态，断言每一种都判红。
   'registry-lists',
   // `gate`（`gate.test.mjs`）的失效模式是**代价**不是报错：`--help` 不被识别时，
   // 脚本会照常跑完全量门禁（10+ 分钟）并覆盖 `.workbuddy-ai/gate-logs/*.log`——
@@ -285,6 +286,10 @@ export const LIBS = [
   'gen-facts',
   'facts/_lib',
   'facts/_capability',
+  // `_ref-link` 是生成物里的编号引用构造器（`createRefLink`）：facts 各模块靠它产出
+  // 与 gen-doc-refs 逐字同形态的链接。登记成 LIBS：判据在它两个消费方的落盘产物里
+  // （`facts.test.mjs` 扫「生成物里不得留下字面 refLink(」），本体不是独立门禁步骤。
+  'facts/_ref-link',
   'facts/current',
   'facts/gate-codes',
   'facts/lists-index',

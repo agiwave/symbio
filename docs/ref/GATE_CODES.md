@@ -37,7 +37,7 @@ lists: [gate-codes=owner]
 | **PS** | prompt 形状基线 | `scripts/prompt-shape-audit.mjs` | PS-001–003 | `PS-004` |
 | **R** | 死代码 | `scripts/dead-code-audit.mjs` | R-001–002 | `R-003` |
 | **RF** | 文档引用（编号 → 地址由机制生成） | `scripts/gen-doc-refs.mjs` | RF-001–004 | `RF-005` |
-| **RG** | 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解） | `scripts/registry-lib.mjs` | RG-001–029 | `RG-030` |
+| **RG** | 登记条目校验（registry 单文档的字段 / 状态 / 依赖 / 判据指认 / 分解） | `scripts/registry-lib.mjs` | RG-001–027、RG-029 | `RG-030` |
 | **S** | 源码 grep 形态 | `scripts/grep-audit.mjs` | S-001–003、S-006–012 | `S-013` |
 | **SX** | SLO 出口表 vs session/stats 读数列（用户可见出口） | `scripts/slo-exit-audit.mjs` | SX-001–003 | `SX-004` |
 
@@ -143,7 +143,6 @@ lists: [gate-codes=owner]
 | **RG-025** | `scripts/registry-lib.mjs` |
 | **RG-026** | `scripts/registry-lib.mjs` |
 | **RG-027** | `scripts/registry-lib.mjs` |
-| **RG-028** | `scripts/registry-lib.mjs` |
 | **RG-029** | `scripts/registry-lib.mjs` |
 | **S-001** | `scripts/grep-audit.mjs` |
 | **S-002** | `scripts/grep-audit.mjs` |

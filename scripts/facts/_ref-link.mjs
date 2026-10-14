@@ -36,12 +36,14 @@ import { fileURLToPath } from 'node:url'
 import { loadEntries, relFrom } from '../registry-lib.mjs'
 
 /**
- * 造一个 `refLink(id, label?)`。
+ * 造一个 `refLink(id, label?, frag?)`。
  *
  * @param root    仓根（登记表的装载点）
  * @param fromDir 产物所在目录（仓根相对）——相对地址从它算起
- * @returns (id, label = id) => `[label](地址 "id")`；编号未登记**抛错**（生成失败
- *          好过产出一条死链：RF-001 在文档侧判同一条，这里是生成侧的同一条）
+ * @returns (id, label = id, frag = '') => `[label](地址#锚点 "id")`；编号未登记**抛错**
+ *          （生成失败好过产出一条死链：RF-001 在文档侧判同一条，这里是生成侧的同一条）
+ *
+ * `frag` 形如 `#23-前端--宿主路由`：与 gen-doc-refs 展开 `[[编号#锚点|文字]]` 的结果同形态。
  */
 export function createRefLink(root, fromDir) {
   const { entries } = loadEntries(root)
@@ -49,7 +51,7 @@ export function createRefLink(root, fromDir) {
   for (const e of entries) {
     if (e.meta && typeof e.meta.id === 'string' && !byId.has(e.meta.id)) byId.set(e.meta.id, e)
   }
-  return function refLink(id, label = id) {
+  return function refLink(id, label = id, frag = '') {
     const target = byId.get(id)
     if (!target) {
       throw new Error(
@@ -57,7 +59,7 @@ export function createRefLink(root, fromDir) {
           `（拼错？还是目标还没登记？）`,
       )
     }
-    return `[${label}](${relFrom(fromDir, target.rel)} "${id}")`
+    return `[${label}](${relFrom(fromDir, target.rel)}${frag} "${id}")`
   }
 }
 
