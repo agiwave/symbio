@@ -238,6 +238,44 @@ test('端到端：`--check` 对漂移判红、对一致判绿', () => {
   assert.equal(check(), 1, '漂移 ⇒ 应判红')
 })
 
+test('能力矩阵（§6）：三张表的列数必须逐行一致', () => {
+  // 这条不是洁癖：`vdfs_list` 的描述里写着 `type（directory|file）`，
+  // 一个**未转义**的竖线会被 Markdown 读成新的一列 ⇒ 那一行其余列整体错位，
+  // 而生成器只管吐文本、**看不见**这件事。语义取自代码 ⇒ 源码里有什么字符都会
+  // 进表格，所以只能在这层判。
+  const doc = fs.readFileSync(path.join(REPO, 'docs', 'CURRENT.md'), 'utf8')
+  const lines = doc.split(/\r?\n/)
+  let inSec = false
+  let want = 0
+  const bad = []
+  lines.forEach((l, i) => {
+    if (/^### 6\./.test(l)) {
+      inSec = true
+      want = 0
+    }
+    if (!inSec) return
+    if (/^\|(?:---\s*\|)+$/.test(l)) {
+      want = l.split('|').length - 2
+      return
+    }
+    if (want && l.startsWith('|')) {
+      const n = l.split(/(?<!\\)\|/).length - 2
+      if (n !== want) bad.push(`第 ${i + 1} 行：${n} 列（表头 ${want} 列）`)
+    }
+  })
+  assert.deepEqual(bad, [], `§6 有行列数不符：\n    ${bad.join('\n    ')}`)
+})
+
+test('能力矩阵（§6）：每条静态路由都有一句职责（缺一条就是「表里没写」）', () => {
+  // 「抽不到就标空」对**描述**是对的（不臆造），但对**路由职责**是错的：
+  // 补一句注释是一次性成本，此后由提取跟随。空着会让这张表永远缺一份清单，
+  // 而那正是它要防的形态（RE-005 的行集缺席同款）。
+  const doc = fs.readFileSync(path.join(REPO, 'docs', 'CURRENT.md'), 'utf8')
+  const sec = doc.slice(doc.indexOf('### 6.3'))
+  const missing = [...sec.matchAll(/^\| `([^`]+)` \| — \|$/gm)].map((m) => m[1])
+  assert.deepEqual(missing, [], `这些路由在代码里还没有一句话职责：${missing.join('、')}`)
+})
+
 test('本仓自身：`--check` 全绿（三份事实与代码一致）', () => {
   try {
     const out = execFileSync(process.execPath, [RUNNER, '--check'], {

@@ -152,6 +152,7 @@ impl Plugin for ClassifyPlugin {
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         match path {
+            // 判决这一轮该直接回答、还是派给工具循环。
             "decide" => {
                 // 请求必须能解析：契约的形状由这一行保证，而不是由注释保证。
                 let req: DecideRequest = ctx.payload()?;

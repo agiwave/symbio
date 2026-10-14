@@ -157,7 +157,8 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 | 事实 | 唯一 owner | 其它文档 |
 |---|---|---|
 | 现在是什么（插件 / 挂载点 / 路由 / 工具 / 规模） | [CURRENT.md](./CURRENT.md)（代码生成） | **不手抄**，需要就引用 |
-| 路由语义与调用方 | [ref/RE-003-ROUTES.md](ref/RE-003-ROUTES.md "RE-003-ROUTES") | 模块 `README.md` 不抄路由表 |
+| 路由**契约**（调用方 / 返回类型 / 备注 / 退役索引） | [ref/RE-003-ROUTES.md](ref/RE-003-ROUTES.md "RE-003-ROUTES") | 模块 `README.md` 不抄路由表 |
+| 路由**一句话职责**（写在注册处：`route()` 臂上的注释） | [CURRENT.md](CURRENT.md) §6.3（代码投影） | RE-003 不再手写「用途」列——同一句事实不存两份 |
 | 错误码 | [ref/RE-002-ERROR_CODES.md](ref/RE-002-ERROR_CODES.md "RE-002-ERROR_CODES") | PROTOCOLS 不再列错误码表 |
 | 配置项 | [ref/RE-001-CONFIGURATION.md](ref/RE-001-CONFIGURATION.md "RE-001-CONFIGURATION") | 模块 `README.md` 只写机制 + 指向它 |
 | 判据码（各守卫的编号地址） | [ref/GATE_CODES.md](./ref/GATE_CODES.md)（脚本声明生成） | 守卫脚本只写自己判什么，不抄全表 |

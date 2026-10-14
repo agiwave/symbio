@@ -159,6 +159,7 @@ impl Plugin for ComposePlugin {
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         match path {
+            // 按上游判决组织一段面向用户的文本。
             "wording" => {
                 // 请求必须能解析：契约的形状由这一行保证，而不是由注释保证。
                 let req: ComposeRequest = ctx.payload()?;

@@ -19,6 +19,12 @@ created: 2026-09-07
 >
 > ⚠️ **本文只写「现在有哪些路由」**。某条路由**为什么**被删 / 被迁，是决策与变更史，
 > 归 [ADR 索引](../adr/INDEX.md) 与 `git log`（见 [docs/README.md](../README.md#文档职责边界一个事实只有一个-owner "docs/README")）。
+>
+> - **每条路由的一句话职责不在本文**：它写在**注册处**——插件 `route()` 里那条 `match`
+>   臂正上方的注释，由 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由) 提取成表。
+>   本文保留的是**路由契约**：调用方、返回类型、备注、退役索引——那些只有这里有。
+>   （旧版本文有一列手写「用途」，与臂上注释是同一句事实的两份副本；按 PL-011 §6
+>   「原表与迁移不拆批」收敛为指路，owner 归代码。）
 
 ## 路由语法
 
@@ -41,9 +47,9 @@ created: 2026-09-07
 
 ### 内省
 
-| 路径 | 用途 | 返回 |
+| 路径 | 用途（→ §6.3） | 返回 |
 |------|------|------|
-| `_root` | 查询当前节点子插件拓扑 | 子树结构 |
+| `_root` | [§6.3](../CURRENT.md#63-前端--宿主路由) | 子树结构 |
 
 ### 配置管理（**没有配置路由**）
 
@@ -67,12 +73,12 @@ created: 2026-09-07
 根插件，自身终结以下路径；其余路径按首段剥离后转发给 `worker`（Composite），
 未命中的一律兜底转发给 `worker`（源码：`plugins/home/plugin.rs` 的 `route`）。
 
-| 路径 | 用途 | 备注 |
+| 路径 | 用途（→ §6.3） | 备注 |
 |------|------|------|
-| `home/get_homedir` | 返回当前系统目录（homedir）与 bootstrap 路径 | 只读；gateway 只读白名单放行 |
-| `home/reload` | 热重载：切换 homedir（可选）+ 重建全部子插件 | 前端切换系统目录后调用 |
-| `work/set_workspace` | 切换工作区，写入 `work.workdir` 与最近使用列表 | 写操作 |
-| `work/get_workspace` | 读取当前工作区、展开路径与最近工作区列表 | 只读；gateway 只读白名单放行 |
+| `home/get_homedir` | [§6.3](../CURRENT.md#63-前端--宿主路由) | 只读；gateway 只读白名单放行 |
+| `home/reload` | [§6.3](../CURRENT.md#63-前端--宿主路由) | 前端切换系统目录后调用 |
+| `work/set_workspace` | [§6.3](../CURRENT.md#63-前端--宿主路由) | 写操作 |
+| `work/get_workspace` | [§6.3](../CURRENT.md#63-前端--宿主路由) | 只读；gateway 只读白名单放行 |
 
 > **两条 `work/*` 臂在此终结**（`home` 是系统根、不挂前缀）：这是**工作区切换**的
 > 控制面（读写 `home` 自己的 `work.workdir` 配置），与 `memory` 插件的记忆挂载点
@@ -96,9 +102,9 @@ created: 2026-09-07
 
 ### 会话管理
 
-| 路径 | 用途 | 返回类型 |
-|------|------|----------|
-| `session/stats` | 读本会话 v2 事实源的**八列**读数（时延分位 / 兜底率 / 成本台账 / 校准 `calibration` = `{by_skill: {<skill_id>: {skill_id, uses, fallbacks}}}`：技能的使用与回退计数（`confidence = 1 − 回退率` 由投影算） / 断点 / 声誉 `reputation` = `{own, by_principal}`：按主体分组的立约-守约-违约与打分 / 就绪任务集 `readyset` = `{ready: [{task_id, seq, depends_on}]}` 按 `task_id` 字典序的调度候选集 / 转写 `transcript` = `{entries: [{role, text, tool?}]}`：按事件顺序的对话（`user.message` / `chat.assistant.final` / `chat.assistant.fallback` / `artifact.added` 四格；`role` ∈ `user` / `assistant` / `tool`，工具行另带 `tool` = 工具名））+ 不变量清单 `invariants`（`check_all` 八条，空 = 全绿）——纯读，零副作用。载荷 `{ principal?: string }` 可声明**读方身份** | `SessionStats` |
+| 路径 | 用途（→ §6.3） | 返回类型 |
+|------|------|------|
+| `session/stats` | [§6.3](../CURRENT.md#63-前端--宿主路由) | `SessionStats` |
 
 > **会话编排不再有私有路由**：发言、恢复、中止全部落在会话自己的地址上（见下表）。
 > `stats` 是唯一剩下的会话路由——它是**读数**，不是数据操作。
@@ -118,21 +124,9 @@ created: 2026-09-07
 
 ### 会话级操作已并入 VDFS（专用路由不再存在）
 
-| 操作 | 入口 |
-|---|---|
-| 列会话清单 | `vdfs/list(<根>/session)` |
-| 读整份转写 | `vdfs/read(<根>/session/<id>)` |
-| 新建会话（id 由后端生成） | `vdfs/write(<根>/session, { create: true })` |
-| 新建 / 打开**具名**会话（id 由调用方给） | `vdfs/write(<根>/session/<id>, { create: true })`——不存在则就地创建，已存在则浅合并 metadata |
-| 删除会话 | `vdfs/delete(<根>/session/<id>)` |
-| 改 metadata / 标题 | `vdfs/write(<根>/session/<id>)` |
-| 改写某条消息 | `vdfs/write(<根>/session/<id>/message/<mid>)` |
-| 删该条及其后 | `vdfs/action(…/message/<mid>, "truncate")` |
-| 列待消费的用户消息（收件箱） | `vdfs/list(<根>/session/<id>/inbox)` |
-| **发一条用户消息 / 取消一条排队中的消息** | `vdfs/write(…/inbox[/<iid>])` / `vdfs/delete(…/inbox/<iid>)` |
-| 清空待消费队列 | `vdfs/action(…/inbox, "clear")` |
-| **中止进行中的一轮** | `vdfs/action(<根>/session/<id>, "abort")` |
-| **恢复（审批 / 回填答案 / 重试）** | `vdfs/action(…/message/<mid>, <动作词>)`，载荷 `{args?, reason?, answer?, mode?, risk_level?}` |
+> 地址清单与各自职责见 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由)：
+>
+> 列会话清单 · 读整份转写 · 新建会话（id 由后端生成） · 新建 / 打开**具名**会话（id 由调用方给） · 删除会话 · 改 metadata / 标题 · 改写某条消息 · 删该条及其后 · 列待消费的用户消息（收件箱） · **发一条用户消息 / 取消一条排队中的消息** · 清空待消费队列 · **中止进行中的一轮** · **恢复（审批 / 回填答案 / 重试）**
 
 > **一条用户消息只有一个入口**：往收件箱写一条（不再有「发消息」专用路由），
 > 因此子智能体空间这类**没有调用方**的会话也能被驱动——写它的收件箱即可。
@@ -163,9 +157,9 @@ created: 2026-09-07
 
 「这一轮该直接回答、还是派给工具循环」——只输出**枚举**，不产出面向用户的文本。
 
-| 路径 | 用途 | 返回类型 |
-|------|------|----------|
-| `classify/decide` | 判决一轮的走向（能直接答 / 需干活 / 该汇报） | `Verdict` |
+| 路径 | 用途（→ §6.3） | 返回类型 |
+|------|------|------|
+| `classify/decide` | [§6.3](../CURRENT.md#63-前端--宿主路由) | `Verdict` |
 
 > 调用方只有 `session`（编排层）：它投影事实、发起调用，并按判决**执行**对应路径。
 > 契约 `DecideRequest` / `Verdict` 见 [`symbio_core::schemas::dialog`](../../symbio/src/symbio_core/schemas/dialog.rs)。
@@ -179,9 +173,9 @@ created: 2026-09-07
 
 「首响 / 答话 / 汇报」的措辞——只输出**文本**，不做判决。
 
-| 路径 | 用途 | 返回类型 |
-|------|------|----------|
-| `compose/wording` | 按上游判决组织一段面向用户的文本 | `String` |
+| 路径 | 用途（→ §6.3） | 返回类型 |
+|------|------|------|
+| `compose/wording` | [§6.3](../CURRENT.md#63-前端--宿主路由) | `String` |
 
 > 调用方只有 `session`。本插件**不写转写**：文本由 `session` 落库，转写只有一个写入者。
 > 契约 `ComposeRequest` 见 [`symbio_core::schemas::dialog`](../../symbio/src/symbio_core/schemas/dialog.rs)；
@@ -208,7 +202,7 @@ created: 2026-09-07
 ### 支持的协议
 
 | protocol_id | 提供商 | API 端点 |
-|-------------|--------|----------|
+|------|------|------|
 | `openai_chat` | OpenAI | `/v1/chat/completions` |
 | `openai_responses` | OpenAI | `/v1/responses` |
 | `anthropic_messages` | Anthropic | `/v1/messages` |
@@ -224,13 +218,13 @@ created: 2026-09-07
 > **路由按工具名动态分发**：`local/<工具短名>`，与 LLM 工具是同一份集合
 > （`route()` 里 `tool_impls.iter().find(|t| t.name() == path)`）。
 
-| 路径 | 用途 | 安全风险 |
-|------|------|----------|
-| `local/cmd`（Windows）/ `local/sh`（macOS / Linux） | 执行 Shell 命令（工具名按操作系统取） | ⚠️ 高危 |
-| `local/content_search` | 内容搜索 (ripgrep) | 安全 |
-| `local/todo_write` | 会话任务清单（`LastOnly` 保留策略） | 安全 |
-| `local/codebase_search` | 语义代码搜索 | 安全 |
-| `local/ask_user` | 向用户提结构化问题（单问题或 1~4 批量，自动补 `Other`） | 安全 |
+| 路径 | 用途（→ §6.3） | 安全风险 |
+|------|------|------|
+| `local/cmd`（Windows）/ `local/sh`（macOS / Linux） | [§6.3](../CURRENT.md#63-前端--宿主路由) | ⚠️ 高危 |
+| `local/content_search` | [§6.3](../CURRENT.md#63-前端--宿主路由) | 安全 |
+| `local/todo_write` | [§6.3](../CURRENT.md#63-前端--宿主路由) | 安全 |
+| `local/codebase_search` | [§6.3](../CURRENT.md#63-前端--宿主路由) | 安全 |
+| `local/ask_user` | [§6.3](../CURRENT.md#63-前端--宿主路由) | 安全 |
 
 > **文件编辑类原生工具已迁入 VDFS 物理层**，由 `vdfs` 插件以
 > `vdfs_read` / `vdfs_write` / `vdfs_edit` / `vdfs_search` 等统一暴露，本插件不再提供。
@@ -245,19 +239,17 @@ created: 2026-09-07
 
 ## Web 插件
 
-| 路径 | 用途 |
-|------|------|
-| `web/http_request` | 发起 HTTP 请求 |
-| `web/web_search` | 网页搜索 |
-| `web/web_fetch` | 抓取网页内容 |
+> 地址清单与各自职责见 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由)：
+>
+> `web/http_request` · `web/web_search` · `web/web_fetch`
 
 ---
 
 ## Skill 插件
 
-| 路径 | 用途 |
-|------|------|
-| `skill/execute` | 按名称执行 Skill（载荷 `{name, args}`） |
+> 地址清单与各自职责见 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由)：
+>
+> `skill/execute`
 
 > 本插件**不设配置文档**。技能清单与内容不设私有路由：已安装技能经 `<根>/skill` 寻址
 > （一个技能 = 一个目录，主文件 `SKILL.md`，条目内部可下钻）。
@@ -294,14 +286,9 @@ mcp_servers:
 
 ## Telegram 插件
 
-| 路径 | 用途 |
-|------|------|
-| `telegram/send` | 发送消息 |
-| `telegram/get_updates` | 拉取更新（长轮询） |
-| `telegram/set_chat_id` | 绑定 chat id |
-| `telegram/start_listener` | 启动后台监听 |
-| `telegram/stop_listener` | 停止后台监听 |
-| `telegram/status` | 运行状态 |
+> 地址清单与各自职责见 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由)：
+>
+> `telegram/send` · `telegram/get_updates` · `telegram/set_chat_id` · `telegram/start_listener` · `telegram/stop_listener` · `telegram/status`
 
 > 本插件挂载 `<根>/telegram`，内容就是一份配置文档 `<根>/telegram/PLUGIN.yml`（`ext = form`），
 > 读写走 `vdfs/read` / `vdfs/write`。
@@ -312,19 +299,17 @@ mcp_servers:
 
 HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端与 route_v2 同构接入插件树：
 
-| HTTP 端点 | 用途 |
-|------|------|
-| `POST /api/v1/invoke` | 同步调用（`PluginMessageWire` → `PluginPayloadWire`） |
-| `WS /api/v1/ws` | 双向流：首帧 `PluginMessageWire`，后续双向 `PluginFrame` |
-| `GET /api/v1/health` | 健康检查（`{"ok":true}`） |
+> 地址清单与各自职责见 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由)：
+>
+> `POST /api/v1/invoke` · `WS /api/v1/ws` · `GET /api/v1/health`
 
 ### 作为插件的路由
 
 挂载于 `worker`（Composite）之下，外部入站请求最终由 gateway 转发给父级 composite：
 
-| 路径 | 用途 |
-|------|------|
-| `gateway/status` | 运行状态（是否启用、协议、监听地址与端口、是否已在监听） |
+> 地址清单与各自职责见 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由)：
+>
+> `gateway/status`
 
 > 配置就是 `<根>/gateway/PLUGIN.yml`（扁平键 `inbound_*`）；写入走 `vdfs/write` →
 > `PluginConfigFile::apply` 落盘后，本插件在自己的 `write` 里做副作用（**内部 stop + start 重建监听**）。
@@ -365,34 +350,23 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 > `route` 里按它分发（「目录名 = 实例名」），所以目录名才是真正的路由前缀。
 > 真实的调用点见 `symbio_core::plugin::route::ROUTE_HOOK_FIRE`。
 
-| 路径 | 用途 |
-|------|------|
-| `hook/register` | 注册钩子 |
-| `hook/fire` | 触发钩子（源码 `route()` 臂为 `fire`，无 `trigger`） |
-| `hook/list` | 列出已注册钩子 |
+> 地址清单与各自职责见 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由)：
+>
+> `hook/register` · `hook/fire` · `hook/list`
 
 ### 系统事件
 
-| 事件 | 触发时机 |
-|------|----------|
-| `pre_tool_use` | 工具调用前 |
-| `post_tool_use` | 工具调用后 |
-| `pre_file_write` | 文件写入前 |
-| `post_file_write` | 文件写入后 |
-| `pre_shell_execute` | Shell 执行前 |
-| `post_shell_execute` | Shell 执行后 |
-| `user_prompt_submit` | 用户提交提示词 |
-| `session_start` | 会话开始 |
-| `session_end` | 会话结束 |
+> 地址清单与各自职责见 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由)：
+>
+> `pre_tool_use` · `post_tool_use` · `pre_file_write` · `post_file_write` · `pre_shell_execute` · `post_shell_execute` · `user_prompt_submit` · `session_start` · `session_end`
 
 ---
 
 ## Event Bus 插件
 
-| 路径 | 用途 |
-|------|------|
-| `event_bus/subscribe` | 订阅事件（连接级 SSE 风格推送） |
-| `event_bus/ping` | 存活探测 |
+> 地址清单与各自职责见 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由)：
+>
+> `event_bus/subscribe` · `event_bus/ping`
 
 > `event_bus/publish` **不存在**：本插件是进程内帧广播（如 VDFS 变更、总线自身握手），
 > 发布方在进程内直接调用，不经路由。
@@ -405,26 +379,9 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 变更史见 `git log`，完整迁移审计见
 [`docs/archive/legacy-route-migration.md`](../archive/legacy-route-migration.md)）：
 
-| 退役路径 | 现在的入口 |
-|---|---|
-| `{plugin}/config/get` · `{plugin}/config/set` · `{plugin}/config/schema` | `vdfs/read` / `vdfs/write(<根>/<插件>/PLUGIN.yml)` |
-| `{plugin}/entities/*` | 各插件自己的 `impl VdfsProvider`（`<根>/<插件名>/…`） |
-| `model/chat` · `model/status` · `model/chat_sync` | `session/stats` · 节点动作 `vdfs/action { action: "test" }` |
-| `agent/list` · `get` · `upload` · `delete` · `preview` · `export` | `<根>/agent` 上的 `vdfs/*` + 节点动作 `export` |
-| `session/append` · `session/open` | 编排器直连（`orchestrator/entry.rs`） |
-| `session/update` | `vdfs/write(<根>/session/<id>, { create: true })`（具名新建，即 upsert） |
-| `session/clear` | `vdfs/delete(<根>/session/<id>)` |
-| `session/chat/send` | `vdfs/write(<根>/session/<id>/inbox)`；运行选项改归会话 metadata（[ADR-066](../adr/ADR-066.md "ADR-066")） |
-| `session/chat/abort` | `vdfs/action(<根>/session/<id>, "abort")` |
-| `session/chat/update_message` | `vdfs/write(…/message/<mid>)` |
-| `session/chat/delete_message` | `vdfs/action(…/message/<mid>, "truncate")` |
-| `session/chat/clear_messages` | **无替代**：清空与「删除会话」重叠，已整体下线 |
-| `session/get_messages` | 进程内 VDFS 纯接口探测（`stat("<挂载名>/<会话id>")`） |
-| `session/options/list` | 会话配置表单字段（`node.schema` / `node.attributes.metadata`） |
-| `session/stream` | `event_bus` 的 `vdfs` 频道 |
-| `session/heartbeat/trigger` | **能力取消**（往会话发一轮提示词即可） |
-| `hook/trigger` · `hooks/*` | `hook/fire`（命名空间是 `hook`） |
-| `event_bus/publish` | 进程内直调（不经路由） |
+> 地址清单与各自职责见 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由)：
+>
+> `{plugin}/config/get` · `{plugin}/config/set` · `{plugin}/config/schema` · `{plugin}/entities/*` · `model/chat` · `model/status` · `model/chat_sync` · `agent/list` · `get` · `upload` · `delete` · `preview` · `export` · `session/append` · `session/open` · `session/update` · `session/clear` · `session/chat/send` · `session/chat/abort` · `session/chat/update_message` · `session/chat/delete_message` · `session/chat/clear_messages` · `session/get_messages` · `session/options/list` · `session/stream` · `session/heartbeat/trigger` · `hook/trigger` · `hooks/*` · `event_bus/publish`
 
 ---
 

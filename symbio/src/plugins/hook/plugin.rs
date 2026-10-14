@@ -128,11 +128,14 @@ impl Plugin for HooksPlugin {
         }
 
         match path {
+            // 触发一次命名 hook（生命周期点调用，插件之间的通用挂钩）。
             "fire" => {
                 let resp = self.handle_fire(ctx).await?;
                 Ok(PluginPayload::new(&resp))
             }
+            // 注册一个 hook。
             "register" => self.handle_register(ctx).await,
+            // 列出已注册的 hook。
             "list" => self.handle_list().await,
             _ => Err(PluginError::NotFound(format!("Unknown path: {path}"))),
         }

@@ -120,10 +120,12 @@ impl Plugin for EventBusPlugin {
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         match path {
+            // 建立进程内帧订阅连接（前端实时面与 CLI 都走它收会话帧）。
             "subscribe" => {
                 let req: EventBusSubscribeRequest = ctx.payload()?;
                 EventBusPlugin::handle_subscribe(ctx, req).await
             }
+            // 存活探测（回一个 pong 与当前订阅数）。
             "ping" => {
                 let resp = SimpleResponse::success_with_message(format!(
                     "pong ({} subscribers)",

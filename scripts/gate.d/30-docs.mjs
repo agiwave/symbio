@@ -250,6 +250,9 @@ export const TEST_ONLY = [
  *  - `gen-facts`：**事实生成机制的执行方**——遍历 `scripts/facts/` 逐个生成，
  *    由本阶段的 `60-facts` spawn；目录即接线，新增一份事实不需要改门禁；
  *  - `facts/_lib`：上述契约校验 + 幂等落盘 + 溯源行剔除的共享实现；
+ *  - `facts/_capability`：`docs/CURRENT.md` §6 能力矩阵的提取实现（工具描述 /
+ *    风险 / 保留策略、VDFS 操作定义、路由职责）。它的失效形态与 `rust-scan` 同族——
+ *    **提取写宽或写窄都不报错，只静默少一条**，而「少了哪一条」正是这张表要回答的事；
  *  - `facts/current`：`docs/CURRENT.md` 的生成器，由 `gen-facts` 调用；
  *  - `facts/gate-codes`：`reference/GATE_CODES.md` 的生成器，由 `gen-facts` 调用；
  *  - `facts/routes-ts`：`tauri/src/constants/routes.gen.ts` 的生成器，由 `gen-facts` 调用；
@@ -271,6 +274,7 @@ export const LIBS = [
   'route-facts',
   'gen-facts',
   'facts/_lib',
+  'facts/_capability',
   'facts/current',
   'facts/gate-codes',
   'facts/routes-ts',

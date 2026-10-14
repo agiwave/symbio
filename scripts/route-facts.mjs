@@ -222,6 +222,79 @@ export function dispatchableRoutes(root) {
 }
 
 /**
+ * 每条路由的**一句话职责**，取自插件 `route()` 里那条 `match` 臂**正上方**的
+ * `///` 文档注释。
+ *
+ * ## 为什么是这个形状、而不是 `ROUTE_*` 常量的注释
+ *
+ * 两种候选里只有这一种覆盖**全部**路由：`symbio_core/plugin/route.rs` 的常量只收
+ * 「有真实 Rust 调用方」的路径（该模块明令不收预留常量），而静态路由里大半是
+ * **前端专用**的（`home/*`、`work/*`、`telegram/*`、`hook/*`、`skill/*`…）——
+ * 它们没有常量，也就不可能有常量上的注释。
+ *
+ * 更根本的理由是**归属**：`match` 臂是这条地址的**注册处**，描述写在注册处旁边，
+ * 改路由的人必然看到它；写在别处（哪怕同仓的 core 常量）就多了一处可能不同步。
+ *
+ * ## 为什么单独一份提取、且读**带注释**的原文
+ *
+ * `pluginSources()` 会剥掉注释（那是「什么算一条臂」需要的形态），而这里要的正是
+ * 被剥掉的那部分。故本函数自己收文件，不复用那条去注释路径。
+ *
+ * 取的是**紧贴臂的连续 `///` 块的第一行**——一句话职责，不要整段论证
+ * 取的是**紧贴臂上方的那一段注释的第一行**——一句话职责，不要整段论证
+ * （论证归 ADR 与模块 README，见 `docs/README.md` 的职责边界）。
+ *
+ * ## 为什么收 `//` 而不只是 `///`
+ *
+ * 臂在**函数体内**，`///` 在那里不是 Rustdoc，插件作者自然写 `//`。
+ * 只认 `///` 的后果是绝大多数臂抽不到——表会整列空着，而那看起来像「没写」。
+ *
+ * ## 为什么要求「连续、紧邻」
+ *
+ * `match` 上方常有一大段**整体**说明（如 session 的「本表只留非 CRUD 路由」），
+ * 它离第一条臂隔着 `match path {`。所以判据是**连续注释行**——任何非注释行
+ * （含 `match` 本身）都把已攒的说明丢掉。少了这条，第一条臂会挂到与它无关的
+ * 段落头上，而那正是「看起来提取成功、其实说的是别的事」的形态。
+ */
+export function routeArmDocs(root) {
+  const out = new Map();
+  const base = path.join(root, 'symbio', 'src', 'plugins');
+  if (!existsSync(base)) return out;
+  const dirNames = readdirSync(base, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort();
+  for (const dirName of dirNames) {
+    for (const file of collectRs(path.join(base, dirName))) {
+      const body = fnBody(readFileSync(file, 'utf8'), 'route');
+      if (!body) continue;
+      /** 当前连续注释块的第一句（还没成块时 null） */
+      let lead = null;
+      for (const line of body.split('\n')) {
+        const doc = line.match(/^\s*\/\/[/!]?\s?(.*)$/);
+        if (doc) {
+          if (lead === null && doc[1].trim()) lead = doc[1].trim();
+          continue;
+        }
+        const eq = line.indexOf('=>');
+        if (eq >= 0 && lead) {
+          for (const m of line.slice(0, eq).matchAll(/"([a-z][a-z0-9_/-]*)"/g)) {
+            if (m[1] === '_') continue;
+            const abs =
+              dirName !== 'home' && !m[1].startsWith(`${dirName}/`)
+                ? `${dirName}/${m[1]}`
+                : m[1];
+            if (!out.has(abs)) out.set(abs, lead);
+          }
+        }
+        lead = null;
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * 地址 → 常量名：`ROUTE_` + 地址大写（`/` → `_`）。
  *
  * 与 `plugin/route.rs` 的命名规则**逐字同构**（「标识符去掉 `ROUTE_` 前缀后必须

@@ -32,6 +32,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { scopeRow as sharedScopeRow } from "../line-count.mjs";
 import { stripComments } from "../rust-scan.mjs";
+import { capabilityFacts, UNKNOWN } from "./_capability.mjs";
 // 路由提取只有一份实现（`route-facts.mjs`），与前端常量生成器共用——
 // 「什么算一条路由」这条判据若有两遍，它们会在没人注意时分叉。
 import { pluginSources, extractRouteArms, vdfsOps } from "../route-facts.mjs";
@@ -517,13 +518,140 @@ function render() {
   );
   L.push("");
 
-  // ── §6 生成信息 ─────────────────────────────────────────────────────
+  // ── §6 能力矩阵 ───────────────────────────────────────────────────
+  L.push(capabilityMatrixSection(ROOT, plugins));
+
+  // ── 生成信息 ──────────────────────────────────────────────────────
   L.push("---");
   L.push("");
   const stamp = new Date().toISOString().slice(0, 19).replace("T", " ");
   L.push(`> 生成时间：${stamp} UTC · 源：\`git rev-parse HEAD\` = \`${headSha()}\``);
   L.push("");
   return L.join("\n");
+}
+
+/**
+ * 表格单元格转义：**`|` 必须转义**。
+ *
+ * 不是洁癖——`vdfs_list` 的描述里就写着 `type（directory|file）`，一个裸竖线会被
+ * Markdown 读成新的一列，于是那一行的其余列整体错位，而生成器**看不见**这件事
+ * （它只管吐出文本）。语义取自代码 ⇒ 代码里有什么字符都会进表格，所以转义得
+ * 在**渲染这一层**做，不能指望源码里没有竖线。
+ */
+const cell = (s) => String(s ?? "").replace(/\|/g, "\\|").replace(/\s*\n\s*/g, " ").trim();
+
+/**
+ * 能力文本里的**根名字面量**替换成 `<vdfs_root>` 占位。
+ *
+ * 为什么必须遮：仓级守卫 S-010 规定 VDFS 挂载根的字面量只归 `plugins/vdfs/fs.rs`
+ * 一处，消费方一律取运行期值。工具描述是**喂给模型的文案**，它在代码里提到那个目录
+ * 是合理的；可本表一旦把它原样吐进文档，就等于给根名造了第二处出现——而 §4 的存储
+ * 布局表早就用 `grep-audit-allow S-010` 的同一套占位处理过这件事。
+ *
+ * 取值来自运行期抽取（`vdfsAddrRoot()` 读 `plugins/vdfs/fs.rs`），因此这里不硬编码
+ * 任何字面量，根名改了这里自动跟着改。
+ */
+function maskRoot(text) {
+  const root = vdfsAddrRoot();
+  if (!root) return String(text ?? "");
+  return String(text ?? "").split(root).join("<vdfs_root>");
+}
+
+/**
+ * §6 能力矩阵：每条能力 + 它的**用户可见语义**，全部取自代码。
+ *
+ * §1/§2 给的是**覆盖面**（「有哪些」），这一节给的是**语义**（「因此看到什么」）。
+ * 两者的差别不是详略：§2 的「类别 / 备注」列是人写的 `TOOL_NOTES`，改代码时它不会
+ * 跟着变——那正是「会漂移的手抄清单」。这一节不手抄任何一句。
+ *
+ * 语义的三处出处（提取实现见 `facts/_capability.mjs`）：
+ * | 面 | 出处 |
+ * |---|---|
+ * | LLM 工具 | `CapabilityMeta.description`（模型与前端看到的原文）＋ `category` / `risk` / 保留策略 |
+ * | VDFS 操作 | `VDFS_*` 常量正上方的文档注释 |
+ * | 路由 | 插件 `route()` 里那条 `match` 臂正上方的注释 |
+ *
+ * **缺的一律写 `—`，绝不替它编一句**（与 §2 的 `TOOL_NOTES` 反面教材同一条纪律）。
+ */
+function capabilityMatrixSection(root, plugins) {
+  const cap = capabilityFacts(root)
+  // 工具 → 贡献插件：复用 §2 已分析好的插件表（同一份提取，两处不各判一次）
+  const owner = new Map()
+  for (const p of plugins) for (const t of p.tools) if (!owner.has(t)) owner.set(t, p.dirName)
+  const L = []
+
+  L.push("## 6. 能力矩阵（每条能力 · 用户可见语义）");
+  L.push("");
+  L.push(
+    "> §1 / §2 给**覆盖面**（有哪些），本节给**语义**（用户因此看到什么）。" +
+      "三列语义全部**从代码提取**，人不在表里维护任何一句：" +
+      "工具取 `CapabilityMeta.description`（模型与前端看到的原文）与同体的" +
+      "`category` / `risk` / 上下文保留策略，VDFS 操作取 `VDFS_*` 常量上方的文档注释，" +
+      "路由取插件 `route()` 里那条 `match` 臂上方的注释。",
+  );
+  L.push(">");
+  L.push("> **读表须知**：");
+  L.push(">");
+  L.push("> - `—` = **代码里没有逐条声明**（不是「没有这一项」）。风险未声明取" +
+    "`CapabilityRiskLevel` 的默认档 `Medium`、保留策略未声明取 `All`——两条默认值都在 core，" +
+    "这里不逐条复述，只说明空格的含义；");
+  L.push("> - 描述尾部的 `…` = 该描述在运行期由 `format!` 拼装，表中给的是它的**静态开头一段**" +
+    "（其余部分只有运行期才知道，如可用智能体清单），不是取全了；");
+  L.push("> - `vdfs_*` 工具的「类别」列整族为空：类别由 `plugins/vdfs/tools/mod.rs::tool()` " +
+    "统一置为 `Resource`，不在每条表项里逐条写；");
+  L.push("> - 本节**不**覆盖路由的调用方与契约——那归 [ref/RE-003-ROUTES.md](./ref/RE-003-ROUTES.md)；" +
+    "也不覆盖「测到了什么」——那归 [ref/RE-005-e2e覆盖矩阵.md](./ref/RE-005-e2e覆盖矩阵.md)。");
+  L.push("");
+
+  // ── 6.1 LLM 可见工具 ──
+  const tools = [...cap.tools].sort(([a], [b]) => (a < b ? -1 : 1))
+  L.push("### 6.1 LLM 可见工具");
+  L.push("");
+  L.push(`共 ${tools.length} 个（短名；模型看到的全名 = \`<挂载点>/<短名>\`）。`);
+  L.push("| 工具（短名） | 贡献插件 | 用户/模型可见语义（`CapabilityMeta.description`） | 类别 | 风险 | 上下文保留 |");
+  L.push("|---|---|---|---|---|---|");
+  for (const [name, v] of tools) {
+    const plugin = owner.get(name);
+    L.push(
+      `| \`${name}\` | ${plugin ? `\`${plugin}\`` : UNKNOWN} | ${cell(maskRoot(v.description ?? UNKNOWN))} | ` +
+        `${v.category ?? UNKNOWN} | ${v.risk ?? UNKNOWN} | ${v.retention ?? UNKNOWN} |`,
+    );
+  }
+  L.push("");
+  L.push(
+    "> 动态项同 §2（`local` 的 shell 族按操作系统取名、`mcp` 桥接工具运行期生成）——" +
+      "运行期才存在的工具不在这一节，也无法从代码抽出。",
+  );
+  L.push("");
+
+  // ── 6.2 VDFS 操作 ──
+  L.push("### 6.2 VDFS 操作");
+  L.push("");
+  L.push(`共 ${cap.vdfsOps.length} 个，取自 \`plugins/vdfs/protocol.rs::VDFS_OPS\`。`);
+  L.push("| 操作 | 一句话定义（常量上的文档注释） |");
+  L.push("|---|---|");
+  for (const op of cap.vdfsOps) {
+    L.push(`| \`${op}\` | ${cell(maskRoot(cap.vdfsOpDocs.get(op) ?? UNKNOWN))} |`);
+  }
+  L.push("");
+
+  // ── 6.3 前端 / 宿主路由 ──
+  const routes = [...new Set(plugins.flatMap((p) => p.routes))].sort()
+  L.push("### 6.3 前端 / 宿主路由");
+  L.push("");
+  L.push(`共 ${routes.length} 条静态可提取（\`docs/CURRENT.md\` §3.1 报条数用的是同一份提取）。`);
+  L.push("| 路由 | 一句话职责（`route()` 臂上的注释） |");
+  L.push("|---|---|");
+  for (const r of routes) {
+    L.push(`| \`${r}\` | ${cell(maskRoot(cap.routeDocs.get(r) ?? UNKNOWN))} |`);
+  }
+  L.push("");
+  L.push(
+    "> 运行期动态分发的地址（`local/<工具短名>`、`vdfs/<操作>`、容器挂载名）不在这一节——" +
+      "它们没有可静态枚举的臂；`vdfs/*` 的逐条定义见 §6.2。",
+  );
+  L.push("");
+  return L.join("\n")
 }
 
 // ================= 事实描述符（由 `scripts/gen-facts.mjs` 遍历调用） =================

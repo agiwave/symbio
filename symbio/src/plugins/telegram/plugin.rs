@@ -599,11 +599,17 @@ impl Plugin for TelegramPlugin {
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         let data = match path {
+            // 经 Telegram 发一条消息。
             "send" => self.invoke_send(ctx.clone()).await?,
+            // 拉取 Telegram 更新（长轮询）。
             "get_updates" => self.invoke_get_updates().await?,
+            // 绑定目标 chat id。
             "set_chat_id" => self.invoke_set_chat_id(ctx.clone()).await?,
+            // 启动后台监听（长轮询入队，走会话地址面）。
             "start_listener" => self.invoke_start_listener(ctx.clone()).await?,
+            // 停止后台监听。
             "stop_listener" => self.invoke_stop_listener().await?,
+            // 通道运行状态。
             "status" => self.invoke_status().await?,
             _ => return Err(PluginError::NotFound(format!("未知路径: {path}"))),
         };

@@ -458,8 +458,11 @@ impl Plugin for HomePlugin {
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         match path {
-            // 资源类别清单由 `vdfs/providers`（`<根>` 虚拟根）下发，
-            // 导航与顺序都在那里。
+            // 热重载：切换 homedir（可选）并重建全部子插件。
+            //
+            // （原先这条臂上方挂的是「资源类别清单由 `vdfs/providers` 下发」——
+            // 那段说的是资源清单的来处，与本臂无关。语义抽取按「紧邻臂的注释」取值，
+            // 挂错在表里会被读成 `home/reload` 的职责，故一并改正。）
             "home/reload" => {
                 let req: home_reload::Request = ctx.payload().unwrap_or_default();
                 let new_homedir = req.homedir.as_ref().map(PathBuf::from);
@@ -491,10 +494,12 @@ impl Plugin for HomePlugin {
 
                 return Ok(PluginPayload::new(&result));
             }
+            // 取回当前系统目录（homedir）与引导路径。
             "home/get_homedir" => {
                 let info = self.get_homedir_info().await;
                 return Ok(PluginPayload::new(&info));
             }
+            // 切换工作区（写入 home 自己的 work.workdir 与最近使用列表）。
             "work/set_workspace" => {
                 #[derive(serde::Deserialize, Clone)]
                 struct SetWorkspaceRequest {
@@ -508,6 +513,7 @@ impl Plugin for HomePlugin {
 
                 return Ok(PluginPayload::new(&result));
             }
+            // 读取当前工作区、展开后的路径与最近工作区列表。
             "work/get_workspace" => {
                 // 统一从 Home 的配置缓存中读取工作区路径，这是最可靠的数据源
                 let cfg = self.config.read().await;

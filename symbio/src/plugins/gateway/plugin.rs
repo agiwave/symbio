@@ -203,6 +203,7 @@ impl Plugin for GatewayPlugin {
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         match path {
+            // 入站网关的运行状态：是否启用、协议、监听地址与端口、是否已在监听。
             "status" => {
                 let cfg = self.config.read().await;
                 let running = self.server.read().await.is_some();

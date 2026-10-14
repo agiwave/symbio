@@ -442,6 +442,7 @@ impl Plugin for SkillPlugin {
         let path = path.strip_prefix('/').unwrap_or(&path);
 
         match path {
+            // 按名称执行一个技能，返回它的定义正文。
             "execute" => {
                 #[derive(serde::Deserialize, Clone)]
                 struct ExecuteRequest {
