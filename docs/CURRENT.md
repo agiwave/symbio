@@ -14,23 +14,23 @@
 | 插件目录 | 注册名 | VDFS 挂载点 | 自有路由（静态可提取） | 实现的核心 trait | 配置文件 | 模块 README |
 |---|---|---|---|---|---|---|
 | `agent` | `agent` | <根>/agent · （运行期动态） | （动态）已无自有路由（一律 `NotFound` 并指引到 `<根>/agent`） | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
-| `classify` | `classify` | — | `classify/decide` | `Plugin` | ✓ | ✓ |
-| `compose` | `compose` | — | `compose/wording` | `Plugin` | ✓ | ✓ |
+| `classify` | `classify` | — | 1 条静态（见 §2.3） | `Plugin` | ✓ | ✓ |
+| `compose` | `compose` | — | 1 条静态（见 §2.3） | `Plugin` | ✓ | ✓ |
 | `composite` | `composite` | — | （动态）容器：按配置挂载的子插件名分发，运行期动态 | `Plugin` · `VdfsProvider` | — | ✓ |
-| `event_bus` | `event_bus` | — | `event_bus/ping` · `event_bus/subscribe` | `Plugin` | — | ✓ |
-| `gateway` | `gateway` | <根>/gateway | `gateway/status` | `Plugin` | ✓ | ✓ |
-| `home` | `home` | — | `home/get_homedir` · `home/reload` · `work/get_workspace` · `work/set_workspace` | `Plugin` | — | ✓ |
-| `hook` | `hook` | — | `hook/fire` · `hook/list` · `hook/register` | `Plugin` | — | ✓ |
-| `local` | `local` | <根>/local | （动态）`local/<工具短名>`——按已注册工具名分发（与 §2 的工具清单同一份集合） | `Capability` · `Plugin` | ✓ | ✓ |
+| `event_bus` | `event_bus` | — | 2 条静态（见 §2.3） | `Plugin` | — | ✓ |
+| `gateway` | `gateway` | <根>/gateway | 1 条静态（见 §2.3） | `Plugin` | ✓ | ✓ |
+| `home` | `home` | — | 4 条静态（见 §2.3） | `Plugin` | — | ✓ |
+| `hook` | `hook` | — | 3 条静态（见 §2.3） | `Plugin` | — | ✓ |
+| `local` | `local` | <根>/local | （动态）`local/<工具短名>`——按已注册工具名分发（与 §2.1 的工具清单同一份集合） | `Capability` · `Plugin` | ✓ | ✓ |
 | `mcp` | `mcp` | <根>/mcp | — | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `memory` | `memory` | <根>/memory | — | `Plugin` · `VdfsProvider` | ✓ | ✓ |
 | `model` | `model` | <根>/model | （动态）已无自有路由（`execute_turn` 由 session 直连调用） | `ModelProvider` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `plugin_manager` | `plugin_manager` | <根>/plugin_manager | — | `Plugin` · `VdfsProvider` | — | ✓ |
-| `session` | `session` | <根>/session | `session/stats` | `Capability` · `Plugin` · `VdfsProvider` | ✓ | ✓ |
+| `session` | `session` | <根>/session | 1 条静态（见 §2.3） | `Capability` · `Plugin` · `VdfsProvider` | ✓ | ✓ |
 | `setting` | `setting` | <根>/setting | — | `Plugin` | ✓ | ✓ |
-| `skill` | `skill` | <根>/skill | `skill/execute` | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
-| `telegram` | `telegram` | <根>/telegram | `telegram/get_updates` · `telegram/send` · `telegram/set_chat_id` · `telegram/start_listener` · `telegram/status` · `telegram/stop_listener` | `Plugin` | ✓ | ✓ |
-| `vdfs` | `vdfs` | — | （动态）`vdfs/<操作>`——按 `VDFS_OPS` 校验后分发（见 §3.2，13 个操作） | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
+| `skill` | `skill` | <根>/skill | 1 条静态（见 §2.3） | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
+| `telegram` | `telegram` | <根>/telegram | 6 条静态（见 §2.3） | `Plugin` | ✓ | ✓ |
+| `vdfs` | `vdfs` | — | （动态）`vdfs/<操作>`——按 `VDFS_OPS` 校验后分发（见 §2.2，13 个操作） | `Capability` · `Plugin` · `VdfsProvider` | — | ✓ |
 | `web` | `web` | <根>/web | — | `Capability` · `Plugin` | ✓ | ✓ |
 
 > 读表须知：
@@ -41,44 +41,106 @@
 >   容器（`composite`）自身即 `<根>` 的服务者，其挂载点是运行期动态。
 >   资源存储的**选型**（`SingleFileVdfs` / `DirVdfs` / `MemoryVdfs`）是实现细节，不在本表出现。
 > - **自有路由** = `async fn route()` 体内 `match` 臂的字符串（臂是**相对路径**，
->   容器已剥掉首段，故此处补回**插件目录名**——容器按目录名建实例表并按它分发，
->   目录名才是真正的路由前缀；`PluginMeta` 首参不参与路由——它只是**出厂 id**，
+>   容器已剥掉首段，故地址前缀是**插件目录名**——容器按目录名建实例表并按它分发；
+>   `PluginMeta` 首参不参与路由——它只是**出厂 id**，
 >   插件**身份**取自 `PLUGIN.yml`（见 [ADR-032](adr/ADR-032.md)）。
->   标「（动态）」的是按运行期规则分发、无法静态枚举的。
->   漏项与歧义以 [RE-003-ROUTES.md](./ref/RE-003-ROUTES.md) 为准。
+>   本格只报**条数**（插件视角）；逐条地址与职责见 §2.3（路由视角）。
+>   标「（动态）」的是按运行期规则分发、无法静态枚举的——它们只在本格出现。
+>   路由契约（调用方 / 返回类型）见 [RE-003-ROUTES.md](./ref/RE-003-ROUTES.md)。
 > - **配置文件** = 该插件调用过 `capability_announce_configurable`（配置就是 `<根>/<挂载点>/PLUGIN.yml`，
 >   读写走 `vdfs/read` / `vdfs/write`，**没有配置专用路由**）。
 
-## 2. LLM 可见工具（`CapabilityMeta.name` 短名 → 贡献插件）
+## 2. 能力矩阵（每条能力 · 用户可见语义）
 
-工具对模型的**全名** = `<挂载点>/<短名>`（`traverse` 注册时拼装），故下表给短名。
+> 本节是**能力面的唯一 owner**：每条能力是什么、用户与模型因此看到什么，一句话只在这里出现一次。语义全部**从代码提取**，人不在表里维护任何一句——工具取 `CapabilityMeta.description`（模型与前端看到的原文）与同体的`category` / `risk` / 上下文保留策略，VDFS 操作取 `VDFS_*` 常量上方的文档注释，路由取插件 `route()` 里那条 `match` 臂上方的注释。覆盖面（有哪些插件、哪些配置面）见 §1。
+>
+> **读表须知**：
+>
+> - `—` = **代码里没有逐条声明**（不是「没有这一项」）。风险未声明取`CapabilityRiskLevel` 的默认档 `Medium`、保留策略未声明取 `All`——两条默认值都在 core，这里不逐条复述，只说明空格的含义；
+> - 描述尾部的 `…` = 该描述在运行期由 `format!` 拼装，表中给的是它的**静态开头一段**（其余部分只有运行期才知道，如可用智能体清单），不是取全了；
+> - `vdfs_*` 工具的「类别」列整族为空：类别由 `plugins/vdfs/tools/mod.rs::tool()` 统一置为 `Resource`，不在每条表项里逐条写；
+> - 本节**不**覆盖路由的调用方与契约——那归 [ref/RE-003-ROUTES.md](./ref/RE-003-ROUTES.md)；也不覆盖「测到了什么」——那归 [ref/RE-005-e2e覆盖矩阵.md](./ref/RE-005-e2e覆盖矩阵.md)。
 
-| 工具（短名） | 贡献插件 | 类别 / 备注 |
-|---|---|---|
-| `agent_run` | `agent` | 委托子智能体 |
-| `ask_user` | `local` | 向用户提问 |
-| `codebase_search` | `local` | 语义代码搜索 |
-| `content_search` | `local` | 正则内容搜索（ripgrep 库） |
-| `todo_write` | `local` | 任务清单（`LastOnly` 保留策略） |
-| `heartbeat` | `session` | 会话心跳配置 |
-| `read_skill` | `skill` | 读取技能定义（技能清单非空时才注册） |
-| `vdfs_delete` | `vdfs` | 删除 |
-| `vdfs_edit` | `vdfs` | 编辑文件 |
-| `vdfs_list` | `vdfs` | 目录清单 |
-| `vdfs_mkdir` | `vdfs` | 建目录 |
-| `vdfs_read` | `vdfs` | 读文件 |
-| `vdfs_search` | `vdfs` | 内容搜索 |
-| `vdfs_stat` | `vdfs` | 节点元数据 |
-| `vdfs_tree` | `vdfs` | 目录树 |
-| `vdfs_write` | `vdfs` | 写文件 |
-| `http_request` | `web` | HTTP 请求 |
-| `web_fetch` | `web` | 网页抓取 |
-| `web_search` | `web` | 网页搜索 |
+### 2.1 LLM 可见工具
+
+共 19 个（短名）。工具对模型的**全名** = `<挂载点>/<短名>`（`traverse` 注册时拼装）。
+
+| 工具（短名） | 贡献插件 | 用户/模型可见语义（`CapabilityMeta.description`） | 类别 | 风险 | 上下文保留 |
+|---|---|---|---|---|---|
+| `agent_run` | `agent` | 将任务委托给一个独立的子智能体会话：在其独立会话中执行任务， 完成后返回其最终答复；子智能体拥有自己的提示词与工具集。… | Chat | — | — |
+| `ask_user` | `local` | 向用户提出结构化问题（含选项），用于在执行关键决策前获取用户输入。支持单问题(question)或批量(questions[], 1~4)，系统自动补充 'Other' 选项；完整交互需编排层阻塞等待用户选择。 | SystemOperation | Low | — |
+| `codebase_search` | `local` | 语义化检索代码库：对查询做向量相似度检索，返回最相关的代码片段（含文件路径与行号）。索引会按文件 mtime 自动增量更新（每次调用都校验，未改动的文件不重嵌），跨进程重启复用磁盘上的索引。嵌入服务不可用时自动降级为正则关键词检索。 | FileOperation | Low | — |
+| `content_search` | `local` | 文件内容搜索（正则表达式）。跨平台，直接调用 ripgrep 库，遵循 .gitignore。 | FileOperation | Low | — |
+| `heartbeat` | `session` | 设置当前会话的心跳任务：会话空闲达到指定间隔后，自动发送提示词触发一轮工作（后台无人值守执行）。action=set 启用并更新参数；action=cancel 停用；action=get 查看当前配置（默认）。 | SystemOperation | — | LastOnly |
+| `http_request` | `web` | 发送 HTTP 请求。支持 GET、POST、PUT、DELETE 等方法。 | SystemOperation | High | — |
+| `read_skill` | `skill` | 获取指定技能的执行指导。… | Skill | — | — |
+| `todo_write` | `local` | 管理结构化任务清单，用于跟踪复杂多步任务进度。todos 整体替换清单；merge=true 时按 id 合并。以会话为作用域。 | SystemOperation | Medium | LastOnly |
+| `vdfs_delete` | `vdfs` | 删除文件或目录。删除目录需 recursive=true。不可逆，删除前务必确认路径。 | — | High | LastOnly |
+| `vdfs_edit` | `vdfs` | 编辑文件（精确字符串替换，与原生 file_edit 一致）。old_string 必须在文件中精确匹配一次；自动保持原换行符风格（CRLF/LF）；拒绝编辑符号链接。匹配 0 次或多次均报错。 | — | Medium | LastOnly |
+| `vdfs_list` | `vdfs` | 列出目录下的直接子项（文件与子目录）。每项返回 name / type（directory\|file）/ size / modified；支持 ignore 按名称 glob 过滤（如 ['*.tmp','node_modules']）。与原生 dir_list 一致。系统资源类别挂接在虚拟目录 '<vdfs_root>' 下——列 '<vdfs_root>' 可枚举当前可访问的全部类别（如 plugin_manager/session 等），列 '<vdfs_root>/<类别>/...' 深入具体资源。 | — | Low | — |
+| `vdfs_mkdir` | `vdfs` | 新建目录（父目录不存在时自动创建）。 | — | Medium | LastOnly |
+| `vdfs_read` | `vdfs` | 读取文件内容（与原生 read_file 一致：带行号、支持分页）。文本文件返回 content 字段（含行号与 [行 X-Y，共 N 行] 摘要）；二进制文件（如图片）返回 base64 的 b64 字段且 binary=true。目录不可读，请用 vdfs_list。 | — | Low | — |
+| `vdfs_search` | `vdfs` | 文件名模式搜索（Glob，与原生 glob_search 一致）。pattern 为文件名 Glob（如 '**/*.rs'、'src/**/*.toml'）；path 为可选搜索基目录（相对工作目录，缺省工作目录根）。仅返回普通文件，目录不返回。 | — | Low | — |
+| `vdfs_stat` | `vdfs` | 读取单个节点的元数据（名称/访问位/大小/更新时间/类型），不返回内容。 | — | Low | — |
+| `vdfs_tree` | `vdfs` | 递归展开一棵子树（只下钻访问位含 t 的目录）。一次拿到层级结构，适合先整体了解工作目录布局。 | — | Low | — |
+| `vdfs_write` | `vdfs` | 写入（创建或覆盖）文件内容。父目录不存在时自动创建。写前应先用 vdfs_read 或 vdfs_stat 确认目标存在性与访问位；失败时返回的错误可能含字段级校验信息，请据其修正后重试。 | — | Medium | LastOnly |
+| `web_fetch` | `web` | 获取网页内容。支持 HTTP/HTTPS 协议。 | Network | Low | — |
+| `web_search` | `web` | 搜索互联网。使用 DuckDuckGo 进行搜索。 | Network | Low | — |
 
 > **动态项（静态抽取拿不到，不要当成「没有」）**：
 > - `local`：`shell` 族工具名按操作系统取（Windows = `cmd`），静态抽取只见占位名 → 以运行时 `traverse("available_tools")` 为准。
 > - `mcp`：桥接工具在运行期按已连接 server 动态生成，无法静态枚举。
+> - `context_compact`：上下文自动压缩**开关打开时**才暴露给模型，静态抽取看不到它；
 > - 运行时权威来源：`traverse("available_tools")` 广播进 `CapabilityVisitor` 的那份集合。
+
+### 2.2 VDFS 操作
+
+共 13 个，取自 `plugins/vdfs/protocol.rs::VDFS_OPS`。两条链路（前端 vs LLM 工具）不是一一对应，见 §3.2。
+
+| 操作 | 一句话定义（常量上的文档注释） |
+|---|---|
+| `vdfs/root` | **进入地址空间**：取根地址，调用方不给地址。 |
+| `vdfs/list` | 列目录（一级） |
+| `vdfs/tree` | 树状遍历（递归；节点的 `t` 位控制可遍历性） |
+| `vdfs/stat` | 读元数据 |
+| `vdfs/read` | 读内容（`r` 位） |
+| `vdfs/edit` | 内容编辑（精确字符串替换） |
+| `vdfs/search` | 文件名模式搜索（glob） |
+| `vdfs/write` | 写内容（`w` 位） |
+| `vdfs/delete` | 删除节点 |
+| `vdfs/mkdir` | 新建目录 |
+| `vdfs/watch` | 订阅一棵地址子树的变更。 |
+| `vdfs/unwatch` | 取消订阅（与 [`ROUTE_VDFS_WATCH`] 严格配对）。 |
+| `vdfs/action` | 执行**节点动作**（provider 自持的动词，如「测试连接」） |
+
+### 2.3 前端 / 宿主路由
+
+共 20 条静态可提取。§1 的「自有路由」格报的是同一份提取的**条数**（插件视角），本表是**路由视角**——两者各答一问，不重复列同一批地址。
+
+| 路由 | 一句话职责（`route()` 臂上的注释） |
+|---|---|
+| `classify/decide` | 判决这一轮该直接回答、还是派给工具循环。 |
+| `compose/wording` | 按上游判决组织一段面向用户的文本。 |
+| `event_bus/ping` | 存活探测（回一个 pong 与当前订阅数）。 |
+| `event_bus/subscribe` | 建立进程内帧订阅连接（前端实时面与 CLI 都走它收会话帧）。 |
+| `gateway/status` | 入站网关的运行状态：是否启用、协议、监听地址与端口、是否已在监听。 |
+| `home/get_homedir` | 取回当前系统目录（homedir）与引导路径。 |
+| `home/reload` | 热重载：切换 homedir（可选）并重建全部子插件。 |
+| `hook/fire` | 触发一次命名 hook（生命周期点调用，插件之间的通用挂钩）。 |
+| `hook/list` | 列出已注册的 hook。 |
+| `hook/register` | 注册一个 hook。 |
+| `session/stats` | 读数：本会话 v2 事实源的四列（时延 / 兜底 / 成本 / 断点）。 |
+| `skill/execute` | 按名称执行一个技能，返回它的定义正文。 |
+| `telegram/get_updates` | 拉取 Telegram 更新（长轮询）。 |
+| `telegram/send` | 经 Telegram 发一条消息。 |
+| `telegram/set_chat_id` | 绑定目标 chat id。 |
+| `telegram/start_listener` | 启动后台监听（长轮询入队，走会话地址面）。 |
+| `telegram/status` | 通道运行状态。 |
+| `telegram/stop_listener` | 停止后台监听。 |
+| `work/get_workspace` | 读取当前工作区、展开后的路径与最近工作区列表。 |
+| `work/set_workspace` | 切换工作区（写入 home 自己的 work.workdir 与最近使用列表）。 |
+
+> 运行期动态分发的地址（`local/<工具短名>`、`vdfs/<操作>`、容器挂载名）不在这一节——它们没有可静态枚举的臂，只在 §1 出现；`vdfs/*` 的逐条定义见 §2.2。
 
 ## 3. 协议速查
 
@@ -88,14 +150,13 @@
 {container}/{plugin}/{action}     例：worker/session/stats（worker 可省略）
 ```
 
-- 完整路由清单见 [ref/RE-003-ROUTES.md](./ref/RE-003-ROUTES.md)。
-- **前端侧常量**：`tauri/src/constants/routes.gen.ts`——20 条静态可提取地址，由后端 `route()` 的 `match` 臂**生成**（`scripts/facts/routes-ts.mjs`），不是手写登记处；前端在别处写死同一条地址由 `mechanism-audit` 的 M-008 判红。
+- 静态可提取地址共 **20** 条，逐条与各自职责见 §2.3；
+- **前端侧常量**：`tauri/src/constants/routes.gen.ts`——同 20 条，由后端 `route()` 的 `match` 臂**生成**（`scripts/facts/routes-ts.mjs`），不是手写登记处；前端在别处写死同一条地址由 `mechanism-audit` 的 M-008 判红。
+- 路由**契约**（调用方 / 返回类型 / 退役索引）不属本表，归 [ref/RE-003-ROUTES.md](./ref/RE-003-ROUTES.md)。
 
-### 3.2 VDFS 操作（`plugins/vdfs/protocol.rs::VDFS_OPS`）
+### 3.2 VDFS 的两条链路不是一一对应
 
-- **前端链路**（13 个，计数有测试锁死）：`vdfs/root` · `vdfs/list` · `vdfs/tree` · `vdfs/stat` · `vdfs/read` · `vdfs/edit` · `vdfs/search` · `vdfs/write` · `vdfs/delete` · `vdfs/mkdir` · `vdfs/watch` · `vdfs/unwatch` · `vdfs/action`
-- **LLM 工具链路**（9 个）：`vdfs_delete` · `vdfs_edit` · `vdfs_list` · `vdfs_mkdir` · `vdfs_read` · `vdfs_search` · `vdfs_stat` · `vdfs_tree` · `vdfs_write`
-  （`watch` / `unwatch` / `action` 不经工具暴露，故两条链路不是一一对应）
+同 `plugins/vdfs/protocol.rs::VDFS_OPS` 的操作，前端链路与 LLM 工具链路**各有各的子集**：逐条操作见 §2.2，工具短名见 §2.1（`vdfs_*` 那九条）。`watch` / `unwatch` / `action` **不经工具暴露**，故工具面是操作面的真子集。
 
 ## 4. 存储层事实（防「多存储后端」误读）
 
@@ -124,91 +185,6 @@
 - **Gateway 端点**：`GET /api/v1/health` · `POST /api/v1/invoke` + WS 升级（任意 path，首帧 = `PluginMessageWire`）（提取自 `gateway/server.rs` 的 `req.path.starts_with`）
 - **CLI 面**：进程选项 13 个长 + 7 个短（`--message` · `--session` · `--provider` · `--mode` · `--workdir` · `--homedir` · `--agent` · `--repl` · `--heartbeat` · `--quiet` · `--verbose` · `--help` · `--version`）；交互模式内置命令 7 个（`/help` · `/new` · `/session` · `/provider` · `/workdir` · `/exit` · `/quit`）。无子命令树、不依赖 clap，权威来源是 `cli/src/args.rs` 的 `HELP`。
 
-## 6. 能力矩阵（每条能力 · 用户可见语义）
-
-> §1 / §2 给**覆盖面**（有哪些），本节给**语义**（用户因此看到什么）。三列语义全部**从代码提取**，人不在表里维护任何一句：工具取 `CapabilityMeta.description`（模型与前端看到的原文）与同体的`category` / `risk` / 上下文保留策略，VDFS 操作取 `VDFS_*` 常量上方的文档注释，路由取插件 `route()` 里那条 `match` 臂上方的注释。
->
-> **读表须知**：
->
-> - `—` = **代码里没有逐条声明**（不是「没有这一项」）。风险未声明取`CapabilityRiskLevel` 的默认档 `Medium`、保留策略未声明取 `All`——两条默认值都在 core，这里不逐条复述，只说明空格的含义；
-> - 描述尾部的 `…` = 该描述在运行期由 `format!` 拼装，表中给的是它的**静态开头一段**（其余部分只有运行期才知道，如可用智能体清单），不是取全了；
-> - `vdfs_*` 工具的「类别」列整族为空：类别由 `plugins/vdfs/tools/mod.rs::tool()` 统一置为 `Resource`，不在每条表项里逐条写；
-> - 本节**不**覆盖路由的调用方与契约——那归 [ref/RE-003-ROUTES.md](./ref/RE-003-ROUTES.md)；也不覆盖「测到了什么」——那归 [ref/RE-005-e2e覆盖矩阵.md](./ref/RE-005-e2e覆盖矩阵.md)。
-
-### 6.1 LLM 可见工具
-
-共 19 个（短名；模型看到的全名 = `<挂载点>/<短名>`）。
-| 工具（短名） | 贡献插件 | 用户/模型可见语义（`CapabilityMeta.description`） | 类别 | 风险 | 上下文保留 |
-|---|---|---|---|---|---|
-| `agent_run` | `agent` | 将任务委托给一个独立的子智能体会话：在其独立会话中执行任务， 完成后返回其最终答复；子智能体拥有自己的提示词与工具集。… | Chat | — | — |
-| `ask_user` | `local` | 向用户提出结构化问题（含选项），用于在执行关键决策前获取用户输入。支持单问题(question)或批量(questions[], 1~4)，系统自动补充 'Other' 选项；完整交互需编排层阻塞等待用户选择。 | SystemOperation | Low | — |
-| `codebase_search` | `local` | 语义化检索代码库：对查询做向量相似度检索，返回最相关的代码片段（含文件路径与行号）。索引会按文件 mtime 自动增量更新（每次调用都校验，未改动的文件不重嵌），跨进程重启复用磁盘上的索引。嵌入服务不可用时自动降级为正则关键词检索。 | FileOperation | Low | — |
-| `content_search` | `local` | 文件内容搜索（正则表达式）。跨平台，直接调用 ripgrep 库，遵循 .gitignore。 | FileOperation | Low | — |
-| `heartbeat` | `session` | 设置当前会话的心跳任务：会话空闲达到指定间隔后，自动发送提示词触发一轮工作（后台无人值守执行）。action=set 启用并更新参数；action=cancel 停用；action=get 查看当前配置（默认）。 | SystemOperation | — | LastOnly |
-| `http_request` | `web` | 发送 HTTP 请求。支持 GET、POST、PUT、DELETE 等方法。 | SystemOperation | High | — |
-| `read_skill` | `skill` | 获取指定技能的执行指导。… | Skill | — | — |
-| `todo_write` | `local` | 管理结构化任务清单，用于跟踪复杂多步任务进度。todos 整体替换清单；merge=true 时按 id 合并。以会话为作用域。 | SystemOperation | Medium | LastOnly |
-| `vdfs_delete` | `vdfs` | 删除文件或目录。删除目录需 recursive=true。不可逆，删除前务必确认路径。 | — | High | LastOnly |
-| `vdfs_edit` | `vdfs` | 编辑文件（精确字符串替换，与原生 file_edit 一致）。old_string 必须在文件中精确匹配一次；自动保持原换行符风格（CRLF/LF）；拒绝编辑符号链接。匹配 0 次或多次均报错。 | — | Medium | LastOnly |
-| `vdfs_list` | `vdfs` | 列出目录下的直接子项（文件与子目录）。每项返回 name / type（directory\|file）/ size / modified；支持 ignore 按名称 glob 过滤（如 ['*.tmp','node_modules']）。与原生 dir_list 一致。系统资源类别挂接在虚拟目录 '<vdfs_root>' 下——列 '<vdfs_root>' 可枚举当前可访问的全部类别（如 plugin_manager/session 等），列 '<vdfs_root>/<类别>/...' 深入具体资源。 | — | Low | — |
-| `vdfs_mkdir` | `vdfs` | 新建目录（父目录不存在时自动创建）。 | — | Medium | LastOnly |
-| `vdfs_read` | `vdfs` | 读取文件内容（与原生 read_file 一致：带行号、支持分页）。文本文件返回 content 字段（含行号与 [行 X-Y，共 N 行] 摘要）；二进制文件（如图片）返回 base64 的 b64 字段且 binary=true。目录不可读，请用 vdfs_list。 | — | Low | — |
-| `vdfs_search` | `vdfs` | 文件名模式搜索（Glob，与原生 glob_search 一致）。pattern 为文件名 Glob（如 '**/*.rs'、'src/**/*.toml'）；path 为可选搜索基目录（相对工作目录，缺省工作目录根）。仅返回普通文件，目录不返回。 | — | Low | — |
-| `vdfs_stat` | `vdfs` | 读取单个节点的元数据（名称/访问位/大小/更新时间/类型），不返回内容。 | — | Low | — |
-| `vdfs_tree` | `vdfs` | 递归展开一棵子树（只下钻访问位含 t 的目录）。一次拿到层级结构，适合先整体了解工作目录布局。 | — | Low | — |
-| `vdfs_write` | `vdfs` | 写入（创建或覆盖）文件内容。父目录不存在时自动创建。写前应先用 vdfs_read 或 vdfs_stat 确认目标存在性与访问位；失败时返回的错误可能含字段级校验信息，请据其修正后重试。 | — | Medium | LastOnly |
-| `web_fetch` | `web` | 获取网页内容。支持 HTTP/HTTPS 协议。 | Network | Low | — |
-| `web_search` | `web` | 搜索互联网。使用 DuckDuckGo 进行搜索。 | Network | Low | — |
-
-> 动态项同 §2（`local` 的 shell 族按操作系统取名、`mcp` 桥接工具运行期生成）——运行期才存在的工具不在这一节，也无法从代码抽出。
-
-### 6.2 VDFS 操作
-
-共 13 个，取自 `plugins/vdfs/protocol.rs::VDFS_OPS`。
-| 操作 | 一句话定义（常量上的文档注释） |
-|---|---|
-| `vdfs/root` | **进入地址空间**：取根地址，调用方不给地址。 |
-| `vdfs/list` | 列目录（一级） |
-| `vdfs/tree` | 树状遍历（递归；节点的 `t` 位控制可遍历性） |
-| `vdfs/stat` | 读元数据 |
-| `vdfs/read` | 读内容（`r` 位） |
-| `vdfs/edit` | 内容编辑（精确字符串替换） |
-| `vdfs/search` | 文件名模式搜索（glob） |
-| `vdfs/write` | 写内容（`w` 位） |
-| `vdfs/delete` | 删除节点 |
-| `vdfs/mkdir` | 新建目录 |
-| `vdfs/watch` | 订阅一棵地址子树的变更。 |
-| `vdfs/unwatch` | 取消订阅（与 [`ROUTE_VDFS_WATCH`] 严格配对）。 |
-| `vdfs/action` | 执行**节点动作**（provider 自持的动词，如「测试连接」） |
-
-### 6.3 前端 / 宿主路由
-
-共 20 条静态可提取（`docs/CURRENT.md` §3.1 报条数用的是同一份提取）。
-| 路由 | 一句话职责（`route()` 臂上的注释） |
-|---|---|
-| `classify/decide` | 判决这一轮该直接回答、还是派给工具循环。 |
-| `compose/wording` | 按上游判决组织一段面向用户的文本。 |
-| `event_bus/ping` | 存活探测（回一个 pong 与当前订阅数）。 |
-| `event_bus/subscribe` | 建立进程内帧订阅连接（前端实时面与 CLI 都走它收会话帧）。 |
-| `gateway/status` | 入站网关的运行状态：是否启用、协议、监听地址与端口、是否已在监听。 |
-| `home/get_homedir` | 取回当前系统目录（homedir）与引导路径。 |
-| `home/reload` | 热重载：切换 homedir（可选）并重建全部子插件。 |
-| `hook/fire` | 触发一次命名 hook（生命周期点调用，插件之间的通用挂钩）。 |
-| `hook/list` | 列出已注册的 hook。 |
-| `hook/register` | 注册一个 hook。 |
-| `session/stats` | 读数：本会话 v2 事实源的四列（时延 / 兜底 / 成本 / 断点）。 |
-| `skill/execute` | 按名称执行一个技能，返回它的定义正文。 |
-| `telegram/get_updates` | 拉取 Telegram 更新（长轮询）。 |
-| `telegram/send` | 经 Telegram 发一条消息。 |
-| `telegram/set_chat_id` | 绑定目标 chat id。 |
-| `telegram/start_listener` | 启动后台监听（长轮询入队，走会话地址面）。 |
-| `telegram/status` | 通道运行状态。 |
-| `telegram/stop_listener` | 停止后台监听。 |
-| `work/get_workspace` | 读取当前工作区、展开后的路径与最近工作区列表。 |
-| `work/set_workspace` | 切换工作区（写入 home 自己的 work.workdir 与最近使用列表）。 |
-
-> 运行期动态分发的地址（`local/<工具短名>`、`vdfs/<操作>`、容器挂载名）不在这一节——它们没有可静态枚举的臂；`vdfs/*` 的逐条定义见 §6.2。
-
 ---
 
-> 生成时间：2026-10-14 06:39:30 UTC · 源：`git rev-parse HEAD` = `b3020e4f`
+> 生成时间：2026-10-14 06:48:14 UTC · 源：`git rev-parse HEAD` = `6bbec31e`

@@ -21,7 +21,7 @@ created: 2026-09-07
 > 归 [ADR 索引](../adr/INDEX.md) 与 `git log`（见 [docs/README.md](../README.md#文档职责边界一个事实只有一个-owner "docs/README")）。
 >
 > - **每条路由的一句话职责不在本文**：它写在**注册处**——插件 `route()` 里那条 `match`
->   臂正上方的注释，由 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由) 提取成表。
+>   臂正上方的注释，由 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由) 提取成表。
 >   本文保留的是**路由契约**：调用方、返回类型、备注、退役索引——那些只有这里有。
 >   （旧版本文有一列手写「用途」，与臂上注释是同一句事实的两份副本；按 PL-011 §6
 >   「原表与迁移不拆批」收敛为指路，owner 归代码。）
@@ -49,7 +49,7 @@ created: 2026-09-07
 
 | 路径 | 用途（→ §6.3） | 返回 |
 |------|------|------|
-| `_root` | [§6.3](../CURRENT.md#63-前端--宿主路由) | 子树结构 |
+| `_root` | [§6.3](../CURRENT.md#23-前端--宿主路由) | 子树结构 |
 
 ### 配置管理（**没有配置路由**）
 
@@ -75,10 +75,10 @@ created: 2026-09-07
 
 | 路径 | 用途（→ §6.3） | 备注 |
 |------|------|------|
-| `home/get_homedir` | [§6.3](../CURRENT.md#63-前端--宿主路由) | 只读；gateway 只读白名单放行 |
-| `home/reload` | [§6.3](../CURRENT.md#63-前端--宿主路由) | 前端切换系统目录后调用 |
-| `work/set_workspace` | [§6.3](../CURRENT.md#63-前端--宿主路由) | 写操作 |
-| `work/get_workspace` | [§6.3](../CURRENT.md#63-前端--宿主路由) | 只读；gateway 只读白名单放行 |
+| `home/get_homedir` | [§6.3](../CURRENT.md#23-前端--宿主路由) | 只读；gateway 只读白名单放行 |
+| `home/reload` | [§6.3](../CURRENT.md#23-前端--宿主路由) | 前端切换系统目录后调用 |
+| `work/set_workspace` | [§6.3](../CURRENT.md#23-前端--宿主路由) | 写操作 |
+| `work/get_workspace` | [§6.3](../CURRENT.md#23-前端--宿主路由) | 只读；gateway 只读白名单放行 |
 
 > **两条 `work/*` 臂在此终结**（`home` 是系统根、不挂前缀）：这是**工作区切换**的
 > 控制面（读写 `home` 自己的 `work.workdir` 配置），与 `memory` 插件的记忆挂载点
@@ -104,7 +104,7 @@ created: 2026-09-07
 
 | 路径 | 用途（→ §6.3） | 返回类型 |
 |------|------|------|
-| `session/stats` | [§6.3](../CURRENT.md#63-前端--宿主路由) | `SessionStats` |
+| `session/stats` | [§6.3](../CURRENT.md#23-前端--宿主路由) | `SessionStats` |
 
 > **会话编排不再有私有路由**：发言、恢复、中止全部落在会话自己的地址上（见下表）。
 > `stats` 是唯一剩下的会话路由——它是**读数**，不是数据操作。
@@ -124,7 +124,7 @@ created: 2026-09-07
 
 ### 会话级操作已并入 VDFS（专用路由不再存在）
 
-> 地址清单与各自职责见 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由)：
+> 地址清单与各自职责见 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由)：
 >
 > 列会话清单 · 读整份转写 · 新建会话（id 由后端生成） · 新建 / 打开**具名**会话（id 由调用方给） · 删除会话 · 改 metadata / 标题 · 改写某条消息 · 删该条及其后 · 列待消费的用户消息（收件箱） · **发一条用户消息 / 取消一条排队中的消息** · 清空待消费队列 · **中止进行中的一轮** · **恢复（审批 / 回填答案 / 重试）**
 
@@ -159,7 +159,7 @@ created: 2026-09-07
 
 | 路径 | 用途（→ §6.3） | 返回类型 |
 |------|------|------|
-| `classify/decide` | [§6.3](../CURRENT.md#63-前端--宿主路由) | `Verdict` |
+| `classify/decide` | [§6.3](../CURRENT.md#23-前端--宿主路由) | `Verdict` |
 
 > 调用方只有 `session`（编排层）：它投影事实、发起调用，并按判决**执行**对应路径。
 > 契约 `DecideRequest` / `Verdict` 见 [`symbio_core::schemas::dialog`](../../symbio/src/symbio_core/schemas/dialog.rs)。
@@ -175,7 +175,7 @@ created: 2026-09-07
 
 | 路径 | 用途（→ §6.3） | 返回类型 |
 |------|------|------|
-| `compose/wording` | [§6.3](../CURRENT.md#63-前端--宿主路由) | `String` |
+| `compose/wording` | [§6.3](../CURRENT.md#23-前端--宿主路由) | `String` |
 
 > 调用方只有 `session`。本插件**不写转写**：文本由 `session` 落库，转写只有一个写入者。
 > 契约 `ComposeRequest` 见 [`symbio_core::schemas::dialog`](../../symbio/src/symbio_core/schemas/dialog.rs)；
@@ -220,11 +220,11 @@ created: 2026-09-07
 
 | 路径 | 用途（→ §6.3） | 安全风险 |
 |------|------|------|
-| `local/cmd`（Windows）/ `local/sh`（macOS / Linux） | [§6.3](../CURRENT.md#63-前端--宿主路由) | ⚠️ 高危 |
-| `local/content_search` | [§6.3](../CURRENT.md#63-前端--宿主路由) | 安全 |
-| `local/todo_write` | [§6.3](../CURRENT.md#63-前端--宿主路由) | 安全 |
-| `local/codebase_search` | [§6.3](../CURRENT.md#63-前端--宿主路由) | 安全 |
-| `local/ask_user` | [§6.3](../CURRENT.md#63-前端--宿主路由) | 安全 |
+| `local/cmd`（Windows）/ `local/sh`（macOS / Linux） | [§6.3](../CURRENT.md#23-前端--宿主路由) | ⚠️ 高危 |
+| `local/content_search` | [§6.3](../CURRENT.md#23-前端--宿主路由) | 安全 |
+| `local/todo_write` | [§6.3](../CURRENT.md#23-前端--宿主路由) | 安全 |
+| `local/codebase_search` | [§6.3](../CURRENT.md#23-前端--宿主路由) | 安全 |
+| `local/ask_user` | [§6.3](../CURRENT.md#23-前端--宿主路由) | 安全 |
 
 > **文件编辑类原生工具已迁入 VDFS 物理层**，由 `vdfs` 插件以
 > `vdfs_read` / `vdfs_write` / `vdfs_edit` / `vdfs_search` 等统一暴露，本插件不再提供。
@@ -239,7 +239,7 @@ created: 2026-09-07
 
 ## Web 插件
 
-> 地址清单与各自职责见 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由)：
+> 地址清单与各自职责见 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由)：
 >
 > `web/http_request` · `web/web_search` · `web/web_fetch`
 
@@ -247,7 +247,7 @@ created: 2026-09-07
 
 ## Skill 插件
 
-> 地址清单与各自职责见 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由)：
+> 地址清单与各自职责见 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由)：
 >
 > `skill/execute`
 
@@ -286,7 +286,7 @@ mcp_servers:
 
 ## Telegram 插件
 
-> 地址清单与各自职责见 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由)：
+> 地址清单与各自职责见 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由)：
 >
 > `telegram/send` · `telegram/get_updates` · `telegram/set_chat_id` · `telegram/start_listener` · `telegram/stop_listener` · `telegram/status`
 
@@ -299,7 +299,7 @@ mcp_servers:
 
 HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端与 route_v2 同构接入插件树：
 
-> 地址清单与各自职责见 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由)：
+> 地址清单与各自职责见 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由)：
 >
 > `POST /api/v1/invoke` · `WS /api/v1/ws` · `GET /api/v1/health`
 
@@ -307,7 +307,7 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 挂载于 `worker`（Composite）之下，外部入站请求最终由 gateway 转发给父级 composite：
 
-> 地址清单与各自职责见 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由)：
+> 地址清单与各自职责见 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由)：
 >
 > `gateway/status`
 
@@ -350,13 +350,13 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 > `route` 里按它分发（「目录名 = 实例名」），所以目录名才是真正的路由前缀。
 > 真实的调用点见 `symbio_core::plugin::route::ROUTE_HOOK_FIRE`。
 
-> 地址清单与各自职责见 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由)：
+> 地址清单与各自职责见 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由)：
 >
 > `hook/register` · `hook/fire` · `hook/list`
 
 ### 系统事件
 
-> 地址清单与各自职责见 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由)：
+> 地址清单与各自职责见 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由)：
 >
 > `pre_tool_use` · `post_tool_use` · `pre_file_write` · `post_file_write` · `pre_shell_execute` · `post_shell_execute` · `user_prompt_submit` · `session_start` · `session_end`
 
@@ -364,7 +364,7 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 
 ## Event Bus 插件
 
-> 地址清单与各自职责见 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由)：
+> 地址清单与各自职责见 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由)：
 >
 > `event_bus/subscribe` · `event_bus/ping`
 
@@ -379,7 +379,7 @@ HTTP/WebSocket 入站网关（`plugins/gateway/server.rs`），外部客户端�
 变更史见 `git log`，完整迁移审计见
 [`docs/archive/legacy-route-migration.md`](../archive/legacy-route-migration.md)）：
 
-> 地址清单与各自职责见 [CURRENT.md §6.3](../CURRENT.md#63-前端--宿主路由)：
+> 地址清单与各自职责见 [CURRENT.md §2.3](../CURRENT.md#23-前端--宿主路由)：
 >
 > `{plugin}/config/get` · `{plugin}/config/set` · `{plugin}/config/schema` · `{plugin}/entities/*` · `model/chat` · `model/status` · `model/chat_sync` · `agent/list` · `get` · `upload` · `delete` · `preview` · `export` · `session/append` · `session/open` · `session/update` · `session/clear` · `session/chat/send` · `session/chat/abort` · `session/chat/update_message` · `session/chat/delete_message` · `session/chat/clear_messages` · `session/get_messages` · `session/options/list` · `session/stream` · `session/heartbeat/trigger` · `hook/trigger` · `hooks/*` · `event_bus/publish`
 

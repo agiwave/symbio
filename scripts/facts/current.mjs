@@ -280,28 +280,16 @@ function gatewayEndpoints() {
 
 // ================= 渲染 =================
 
-const TOOL_NOTES = {
-  agent_run: "委托子智能体",
-  ask_user: "向用户提问",
-  codebase_search: "语义代码搜索",
-  content_search: "正则内容搜索（ripgrep 库）",
-  todo_write: "任务清单（`LastOnly` 保留策略）",
-  heartbeat: "会话心跳配置",
-  read_skill: "读取技能定义（技能清单非空时才注册）",
-  http_request: "HTTP 请求",
-  web_fetch: "网页抓取",
-  web_search: "网页搜索",
-  vdfs_list: "目录清单",
-  vdfs_tree: "目录树",
-  vdfs_stat: "节点元数据",
-  vdfs_read: "读文件",
-  vdfs_edit: "编辑文件",
-  vdfs_search: "内容搜索",
-  vdfs_write: "写文件",
-  vdfs_delete: "删除",
-  vdfs_mkdir: "建目录",
-  context_compact: "主动压缩上下文（开关打开时才暴露给模型）",
-};
+// ⚠️ 本文件**不含任何人写的表格**。
+//
+// 这条纪律是 2026-10-14 补的：这里曾有一张 `TOOL_NOTES`（20 条「工具 → 一句备注」），
+// 它是整份事实表里唯一的手写内容，与 §2.1 的 `CapabilityMeta.description`（代码提取）
+// 逐条讲同一件事——于是它既冗余又**会漂移**：代码改了描述，备注不会跟着改，而它看起来
+// 和别的列一样是「从代码来的」。那份文件的报头写着「从代码提取生成，请勿手改」，一张
+// 手写表与这句话直接矛盾。
+//
+// 今天每一条工具语义只有一个出处（`facts/_capability.mjs` 从 `CapabilityMeta` 读），
+// 没有任何一句话需要人来同步。**新增工具不需要动这个文件**——这正是要买断的东西。
 
 /** 静态抽取拿不到的工具来源：明确标注，绝不臆造 */
 const DYNAMIC_TOOLS = {
@@ -312,9 +300,9 @@ const DYNAMIC_TOOLS = {
 
 /** 路由按运行期规则分发、无法静态枚举的插件：标注而不是留空 */
 const DYNAMIC_ROUTES = {
-  local: "`local/<工具短名>`——按已注册工具名分发（与 §2 的工具清单同一份集合）",
+  local: "`local/<工具短名>`——按已注册工具名分发（与 §2.1 的工具清单同一份集合）",
   // 操作数从协议源码动态推导（VDFS_OPS 增删时不再漂移）
-  vdfs: `\`vdfs/<操作>\`——按 \`VDFS_OPS\` 校验后分发（见 §3.2，${
+  vdfs: `\`vdfs/<操作>\`——按 \`VDFS_OPS\` 校验后分发（见 §2.2，${
     vdfsOps(ROOT).length
   } 个操作）`,
   composite: "容器：按配置挂载的子插件名分发，运行期动态",
@@ -338,7 +326,6 @@ function headSha() {
 
 function render() {
   const ids = parseIds(readFileSync(IDS_FILE, "utf8"));
-  const vdfsOpList = vdfsOps(ROOT);
   const pluginDirs = readdirSync(PLUGINS_DIR, { withFileTypes: true })
     .filter((e) => e.isDirectory())
     .map((e) => e.name)
@@ -368,8 +355,12 @@ function render() {
   );
   L.push("|---|---|---|---|---|---|---|");
   for (const p of plugins) {
+    // 静态路由**不在此逐条列**——同一批字符串在 §2.3 已有完整表，逐条写两遍会让读者
+    // 不知道该信哪一格。本格只答「这个插件对外开了几条」这个**插件视角**的问题，
+    // 逐条职责去 §2.3（路由视角）。两格各答一问，不是同一问的两次回答。
+    // 动态路由必须留在本格：它们没有可静态枚举的臂，§2.3 装不下。
     const routeCell = p.routes.length
-      ? fmtList(p.routes)
+      ? `${p.routes.length} 条静态（见 §2.3）`
       : DYNAMIC_ROUTES[p.dirName]
         ? `（动态）${DYNAMIC_ROUTES[p.dirName]}`
         : "—";
@@ -388,36 +379,25 @@ function render() {
   L.push(">   容器（`composite`）自身即 `<根>` 的服务者，其挂载点是运行期动态。");
   L.push(">   资源存储的**选型**（`SingleFileVdfs` / `DirVdfs` / `MemoryVdfs`）是实现细节，不在本表出现。");
   L.push("> - **自有路由** = `async fn route()` 体内 `match` 臂的字符串（臂是**相对路径**，");
-  L.push(">   容器已剥掉首段，故此处补回**插件目录名**——容器按目录名建实例表并按它分发，");
-  L.push(">   目录名才是真正的路由前缀；`PluginMeta` 首参不参与路由——它只是**出厂 id**，");
+  L.push(">   容器已剥掉首段，故地址前缀是**插件目录名**——容器按目录名建实例表并按它分发；");
+  L.push(">   `PluginMeta` 首参不参与路由——它只是**出厂 id**，");
   L.push(">   插件**身份**取自 `PLUGIN.yml`（见 [ADR-032](adr/ADR-032.md)）。");
-  L.push(">   标「（动态）」的是按运行期规则分发、无法静态枚举的。");
-  L.push(">   漏项与歧义以 [RE-003-ROUTES.md](./ref/RE-003-ROUTES.md) 为准。");
+  L.push(">   本格只报**条数**（插件视角）；逐条地址与职责见 §2.3（路由视角）。");
+  L.push(">   标「（动态）」的是按运行期规则分发、无法静态枚举的——它们只在本格出现。");
+  L.push(">   路由契约（调用方 / 返回类型）见 [RE-003-ROUTES.md](./ref/RE-003-ROUTES.md)。");
   L.push("> - **配置文件** = 该插件调用过 `capability_announce_configurable`（配置就是 `<根>/<挂载点>/PLUGIN.yml`，");
   L.push(">   读写走 `vdfs/read` / `vdfs/write`，**没有配置专用路由**）。");
   L.push("");
 
-  // ── §2 LLM 可见工具 ─────────────────────────────────────────────────
-  L.push("## 2. LLM 可见工具（`CapabilityMeta.name` 短名 → 贡献插件）");
-  L.push("");
-  L.push("工具对模型的**全名** = `<挂载点>/<短名>`（`traverse` 注册时拼装），故下表给短名。");
-  L.push("");
-  L.push("| 工具（短名） | 贡献插件 | 类别 / 备注 |");
-  L.push("|---|---|---|");
-  for (const p of plugins) {
-    for (const t of p.tools) {
-      L.push(`| \`${t}\` | \`${p.dirName}\` | ${TOOL_NOTES[t] ?? ""} |`);
-    }
-  }
-  L.push("");
-  L.push("> **动态项（静态抽取拿不到，不要当成「没有」）**：");
-  for (const [plugin, note] of Object.entries(DYNAMIC_TOOLS)) {
-    L.push(`> - \`${plugin}\`：${note}。`);
-  }
-  L.push("> - 运行时权威来源：`traverse(\"available_tools\")` 广播进 `CapabilityVisitor` 的那份集合。");
-  L.push("");
+  // ── §2 能力矩阵（原来排在 §6；它覆盖了原 §2 的工具清单，故提上来占位）────
+  //
+  // **为什么它在第 2 节而不是末尾**：它是这份表里信息量最大的一节（每条能力 + 它
+  // 的用户可见语义），排在末尾只因为它是后加的。更实际的理由是：它与「覆盖面」两节
+  // 讲的是同一批对象，必须挨着，否则读者会把「§2 的工具清单」和「§6.1 的工具语义」
+  // 当成两张表——那正是本节被合并前的重复形态。
+  L.push(capabilityMatrixSection(ROOT, plugins));
 
-// ── §3 协议速查 ─────────────────────────────────────────────────────
+  // ── §3 协议速查 ─────────────────────────────────────────────────────
   L.push("## 3. 协议速查");
   L.push("");
   L.push("### 3.1 前端 / 宿主路由");
@@ -426,20 +406,26 @@ function render() {
   L.push("{container}/{plugin}/{action}     例：worker/session/stats（worker 可省略）");
   L.push("```");
   L.push("");
-  L.push("- 完整路由清单见 [ref/RE-003-ROUTES.md](./ref/RE-003-ROUTES.md)。");
+  // 条数只在 §2.3 报一次（同一数字写两遍，读的人会以为是两个口径）。
+  L.push(`- 静态可提取地址共 **${staticRoutes.length}** 条，逐条与各自职责见 §2.3；`);
   L.push(
-    `- **前端侧常量**：\`tauri/src/constants/routes.gen.ts\`——${staticRoutes.length} 条静态可提取地址，` +
+    `- **前端侧常量**：\`tauri/src/constants/routes.gen.ts\`——同 ${staticRoutes.length} 条，` +
       "由后端 `route()` 的 `match` 臂**生成**（`scripts/facts/routes-ts.mjs`），不是手写登记处；" +
       "前端在别处写死同一条地址由 `mechanism-audit` 的 M-008 判红。",
   );
+  L.push(
+    "- 路由**契约**（调用方 / 返回类型 / 退役索引）不属本表，归 [ref/RE-003-ROUTES.md](./ref/RE-003-ROUTES.md)。",
+  );
   L.push("");
-  L.push("### 3.2 VDFS 操作（`plugins/vdfs/protocol.rs::VDFS_OPS`）");
+  // ⚠️ 这里**不列** VDFS 操作名与 LLM 工具名：两样都已在 §2.2 / §2.1 逐条列出。
+  // 本节只答一句两条链路**不重合**的话——那是列表本身给不出的信息。
+  L.push("### 3.2 VDFS 的两条链路不是一一对应");
   L.push("");
-  L.push(`- **前端链路**（${vdfsOpList.length} 个，计数有测试锁死）：${fmtList(vdfsOpList)}`);
-  const vdfsPlugin = plugins.find((p) => p.dirName === "vdfs");
-  const llmTools = vdfsPlugin ? vdfsPlugin.tools.filter((t) => t.startsWith("vdfs_")) : [];
-  L.push(`- **LLM 工具链路**（${llmTools.length} 个）：${fmtList(llmTools)}`);
-  L.push("  （`watch` / `unwatch` / `action` 不经工具暴露，故两条链路不是一一对应）");
+  L.push(
+    "同 `plugins/vdfs/protocol.rs::VDFS_OPS` 的操作，前端链路与 LLM 工具链路**各有各的子集**：" +
+      "逐条操作见 §2.2，工具短名见 §2.1（`vdfs_*` 那九条）。" +
+      "`watch` / `unwatch` / `action` **不经工具暴露**，故工具面是操作面的真子集。",
+  );
   L.push("");
 
   // ── §4 存储层事实 ───────────────────────────────────────────────────
@@ -518,9 +504,6 @@ function render() {
   );
   L.push("");
 
-  // ── §6 能力矩阵 ───────────────────────────────────────────────────
-  L.push(capabilityMatrixSection(ROOT, plugins));
-
   // ── 生成信息 ──────────────────────────────────────────────────────
   L.push("---");
   L.push("");
@@ -560,9 +543,7 @@ function maskRoot(text) {
 /**
  * §6 能力矩阵：每条能力 + 它的**用户可见语义**，全部取自代码。
  *
- * §1/§2 给的是**覆盖面**（「有哪些」），这一节给的是**语义**（「因此看到什么」）。
- * 两者的差别不是详略：§2 的「类别 / 备注」列是人写的 `TOOL_NOTES`，改代码时它不会
- * 跟着变——那正是「会漂移的手抄清单」。这一节不手抄任何一句。
+ * 本节（§2）是**能力面的唯一 owner**——覆盖面在 §1，语义在这里，两者讲同一批对象但不重复列。
  *
  * 语义的三处出处（提取实现见 `facts/_capability.mjs`）：
  * | 面 | 出处 |
@@ -571,23 +552,25 @@ function maskRoot(text) {
  * | VDFS 操作 | `VDFS_*` 常量正上方的文档注释 |
  * | 路由 | 插件 `route()` 里那条 `match` 臂正上方的注释 |
  *
- * **缺的一律写 `—`，绝不替它编一句**（与 §2 的 `TOOL_NOTES` 反面教材同一条纪律）。
+ * **缺的一律写 `—`，绝不替它编一句**（同一条纪律的反面教材曾是这个文件里那张手写
+ * `TOOL_NOTES` 表——它与本节的描述列逐条讲同一件事，既冗余又不会跟着代码走）。
  */
 function capabilityMatrixSection(root, plugins) {
   const cap = capabilityFacts(root)
-  // 工具 → 贡献插件：复用 §2 已分析好的插件表（同一份提取，两处不各判一次）
+  // 工具 → 贡献插件：复用插件表（同一份提取，两处不各判一次）
   const owner = new Map()
   for (const p of plugins) for (const t of p.tools) if (!owner.has(t)) owner.set(t, p.dirName)
   const L = []
 
-  L.push("## 6. 能力矩阵（每条能力 · 用户可见语义）");
+  L.push("## 2. 能力矩阵（每条能力 · 用户可见语义）");
   L.push("");
   L.push(
-    "> §1 / §2 给**覆盖面**（有哪些），本节给**语义**（用户因此看到什么）。" +
-      "三列语义全部**从代码提取**，人不在表里维护任何一句：" +
+    "> 本节是**能力面的唯一 owner**：每条能力是什么、用户与模型因此看到什么，一句话只在这里出现一次。" +
+      "语义全部**从代码提取**，人不在表里维护任何一句——" +
       "工具取 `CapabilityMeta.description`（模型与前端看到的原文）与同体的" +
       "`category` / `risk` / 上下文保留策略，VDFS 操作取 `VDFS_*` 常量上方的文档注释，" +
-      "路由取插件 `route()` 里那条 `match` 臂上方的注释。",
+      "路由取插件 `route()` 里那条 `match` 臂上方的注释。" +
+      "覆盖面（有哪些插件、哪些配置面）见 §1。",
   );
   L.push(">");
   L.push("> **读表须知**：");
@@ -603,11 +586,12 @@ function capabilityMatrixSection(root, plugins) {
     "也不覆盖「测到了什么」——那归 [ref/RE-005-e2e覆盖矩阵.md](./ref/RE-005-e2e覆盖矩阵.md)。");
   L.push("");
 
-  // ── 6.1 LLM 可见工具 ──
+  // ── 2.1 LLM 可见工具 ──
   const tools = [...cap.tools].sort(([a], [b]) => (a < b ? -1 : 1))
-  L.push("### 6.1 LLM 可见工具");
+  L.push("### 2.1 LLM 可见工具");
   L.push("");
-  L.push(`共 ${tools.length} 个（短名；模型看到的全名 = \`<挂载点>/<短名>\`）。`);
+  L.push(`共 ${tools.length} 个（短名）。工具对模型的**全名** = \`<挂载点>/<短名>\`（\`traverse\` 注册时拼装）。`);
+  L.push("");
   L.push("| 工具（短名） | 贡献插件 | 用户/模型可见语义（`CapabilityMeta.description`） | 类别 | 风险 | 上下文保留 |");
   L.push("|---|---|---|---|---|---|");
   for (const [name, v] of tools) {
@@ -618,16 +602,22 @@ function capabilityMatrixSection(root, plugins) {
     );
   }
   L.push("");
-  L.push(
-    "> 动态项同 §2（`local` 的 shell 族按操作系统取名、`mcp` 桥接工具运行期生成）——" +
-      "运行期才存在的工具不在这一节，也无法从代码抽出。",
-  );
+  L.push("> **动态项（静态抽取拿不到，不要当成「没有」）**：");
+  for (const [plugin, note] of Object.entries(DYNAMIC_TOOLS)) {
+    L.push(`> - \`${plugin}\`：${note}。`);
+  }
+  L.push("> - `context_compact`：上下文自动压缩**开关打开时**才暴露给模型，静态抽取看不到它；");
+  L.push("> - 运行时权威来源：`traverse(\"available_tools\")` 广播进 `CapabilityVisitor` 的那份集合。");
   L.push("");
 
-  // ── 6.2 VDFS 操作 ──
-  L.push("### 6.2 VDFS 操作");
+  // ── 2.2 VDFS 操作 ──
+  L.push("### 2.2 VDFS 操作");
   L.push("");
-  L.push(`共 ${cap.vdfsOps.length} 个，取自 \`plugins/vdfs/protocol.rs::VDFS_OPS\`。`);
+  L.push(
+    `共 ${cap.vdfsOps.length} 个，取自 \`plugins/vdfs/protocol.rs::VDFS_OPS\`。` +
+      "两条链路（前端 vs LLM 工具）不是一一对应，见 §3.2。",
+  );
+  L.push("");
   L.push("| 操作 | 一句话定义（常量上的文档注释） |");
   L.push("|---|---|");
   for (const op of cap.vdfsOps) {
@@ -635,11 +625,15 @@ function capabilityMatrixSection(root, plugins) {
   }
   L.push("");
 
-  // ── 6.3 前端 / 宿主路由 ──
+  // ── 2.3 前端 / 宿主路由 ──
   const routes = [...new Set(plugins.flatMap((p) => p.routes))].sort()
-  L.push("### 6.3 前端 / 宿主路由");
+  L.push("### 2.3 前端 / 宿主路由");
   L.push("");
-  L.push(`共 ${routes.length} 条静态可提取（\`docs/CURRENT.md\` §3.1 报条数用的是同一份提取）。`);
+  L.push(
+    `共 ${routes.length} 条静态可提取。§1 的「自有路由」格报的是同一份提取的**条数**（插件视角），` +
+      "本表是**路由视角**——两者各答一问，不重复列同一批地址。",
+  );
+  L.push("");
   L.push("| 路由 | 一句话职责（`route()` 臂上的注释） |");
   L.push("|---|---|");
   for (const r of routes) {
@@ -648,7 +642,7 @@ function capabilityMatrixSection(root, plugins) {
   L.push("");
   L.push(
     "> 运行期动态分发的地址（`local/<工具短名>`、`vdfs/<操作>`、容器挂载名）不在这一节——" +
-      "它们没有可静态枚举的臂；`vdfs/*` 的逐条定义见 §6.2。",
+      "它们没有可静态枚举的臂，只在 §1 出现；`vdfs/*` 的逐条定义见 §2.2。",
   );
   L.push("");
   return L.join("\n")
