@@ -337,6 +337,28 @@ test('C-003 口径：同域只有**声明点与导出清单** ⇒ 仍判红（�
   assert.match(r.stderr, /单消费方/)
 })
 
+test('C-003 规则 4：唯一消费方是 **core 自己** ⇒ 不是下放候选（无外部消费方）', () => {
+  // 「消费方 == 1 且那个消费方是 symbio_core」这一档：即便下沉，下沉目标就是 core 自己
+  // ⇒ 无需下沉。它在模型里落不到 `one` 档——`units` 数的是**跨 core** 的生产消费方，
+  // core 内部的依赖由 `coreConsumers` 单独数。所以 core 自用且无外部消费方 ⇒ 既不是
+  // 单消费方接缝，也不会被建议下沉。
+  const r = audit(
+    clean({
+      [CORE_MOD]: 'mod actors;\npub use actors::{AlphaThing, CoreOnly};\n',
+      [ACTORS_MOD]: 'pub struct AlphaThing;\npub struct CoreOnly;\n',
+      'symbio/src/symbio_core/actors/inner.rs':
+        'use crate::symbio_core::CoreOnly;\npub fn f(_: CoreOnly) {}\n',
+      'symbio/src/plugins/alpha/uses_other.rs':
+        'use crate::symbio_core::AlphaThing;\npub fn g(_: AlphaThing) {}\n',
+    }),
+  )
+  // CoreOnly 无外部消费方 ⇒ 落「0 消费方」档（根出口对它没用）而不是「单消费方」档；
+  // 断言点是**它没有被当成下放候选**。
+  const out = r.stdout + r.stderr
+  assert.doesNotMatch(out, /CoreOnly.*单消费方|单消费方[^\n]*CoreOnly/)
+  assert.match(out, /0 消费方/)
+})
+
 test('C-003 口径：仅测试在用 ⇒ 合法根出口（放行，不收窄）', () => {
   // 收窄它会把那个测试编译坏（C-002 又不许它深引）⇒「测试在用」足以让它留在根出口。
   const r = audit(
