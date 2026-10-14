@@ -260,6 +260,19 @@ pub const EVENT_MEMORY_CONSOLIDATED: &str = "memory.consolidated";
 pub const EVENT_MEMORY_FORGOTTEN: &str = "memory.forgotten";
 /// 召回：检索 Translator 的产出（读视图 → 产出事实）。落在 `memory × asserted`。
 pub const EVENT_MEMORY_RECALLED: &str = "memory.recalled";
+/// 校准断言：技能**被用过之后**的一次观测（命中 / 回退），落在 `memory × asserted`。
+///
+/// ## 为什么它不能继续复用 [`EVENT_MEMORY_RECALLED`]
+///
+/// 复用是 S11 §3 的省格决定，但代价落在**读侧**：校准投影于是只能靠**载荷有没有
+/// `skill_id` + `fallback`** 来认自己的输入——同一张格子被两种语义共用，判别退化成
+/// 「谁恰好带了这两个字段」。那不是闭集：**任何将来带这两个字段的事件都会被算进置信度**，
+/// 而唯一的防线是「编译事件恰好不带 `fallback`」（`calibration.rs` 的注释写着
+/// 「编译事件不计」，读起来像判据，其实是巧合）。
+///
+/// 给它一格之后，读侧按 `kind` 过滤，判别回到闭集。写侧不变（仍是轮末 `v2_facts`
+/// 收束族，**不开第二写通道**——I1）。
+pub const EVENT_MEMORY_CALIBRATED: &str = "memory.calibrated";
 
 // ── 承诺格子（S6 第 15 步，[roadmap/S08 §3](../../../../docs/stage/ST-008-多主体与对等承诺.md "ST-008-多主体与对等承诺")）──
 //

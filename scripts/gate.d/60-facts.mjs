@@ -36,6 +36,20 @@ export default {
           }),
       },
       {
+        // 「重生成之后仍然一致」在这里才成立——上面那一步刚把事实文件对齐到代码，
+        // 本步再核对一遍。漂移的判定**必须**落在重生成之后：门禁的 `30-docs` 阶段跑
+        // 事实回归测试时事实文件还是上一版的（那是正常的），所以那条测试刻意不碰漂移。
+        // 本机这一步恒绿（生成器刚写过）；CI 侧它与 autoWork 的差异判定互为两道。
+        label: 'gen-facts --check（重生成后复核：三份事实与代码一致）',
+        run: (c) =>
+          ctx.run({
+            label: 'gen-facts --check',
+            cmd: process.execPath,
+            args: [genFacts, '--check'],
+            cwd: repoRoot,
+          }),
+      },
+      {
         // 登记汇总页是**条目文件的投影**（同事实文件是代码的投影）：确定性输出，
         // 写成 --check 只会因为「人忘了重跑」而红。校验判据在 30-docs 的 registry-audit。
         // 注意它与 gen-facts 是**不同种类**的工作：输入是 front-matter 而非代码，

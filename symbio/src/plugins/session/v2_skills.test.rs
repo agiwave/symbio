@@ -6,7 +6,7 @@ use super::{compile, route, take_match, SkillLlmHit, SKILL_TAG};
 use crate::symbio_core::authz::{PRINCIPAL_MAIN, PRINCIPAL_USER};
 use crate::symbio_core::{
     check_all, recall, Budget, Entity, Event, EventWalStore, Seq, Store, Verb,
-    EVENT_ASSISTANT_FINAL, EVENT_MEMORY_ENCODED, EVENT_MEMORY_RECALLED, EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED, EVENT_USER_MESSAGE,
 };
 use std::path::{Path, PathBuf};
 
@@ -66,13 +66,13 @@ fn seed_turn(store: &EventWalStore) -> u64 {
 }
 
 /// 一条路由观测（生产写方是 `v2_facts::record_learning`，这里直写**同一形状**——
-/// `calibration` 只认载荷里的 `skill_id` + `fallback`，格子叫什么它不管）。
+/// `calibration` 认**自己的格子** `memory.calibrated`，并逐个校载荷字段）。
 fn observe(store: &EventWalStore, n: usize, skill_id: &str, fallback: bool, anchor: u64) {
     store
         .append(
             Event::pending(
                 format!("v2s-test-{n}"),
-                EVENT_MEMORY_RECALLED,
+                EVENT_MEMORY_CALIBRATED,
                 Entity::Memory,
                 Verb::Asserted,
                 0,

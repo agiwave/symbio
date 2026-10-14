@@ -5,8 +5,10 @@
 //! 置信度 = 1 − 回退率。低于阈值 ⇒ [`crate::symbio_core::actors::SkillRouter`]
 //! 不得走技能路径（反自动化回退）。
 //!
-//! 观测面：技能命中/回退事件的载荷携带 `{ skill_id, fallback }`——数据，
-//! 不加新格子。
+//! 观测面：校准断言落**自己的格子** `memory.calibrated`（`payload: { skill_id,
+//! fallback }`）。它曾复用 `memory.recalled`（S11 §3「不加新格子」），代价是读侧
+//! 只能靠载荷字段判别自己的输入——同一张格子两种语义，任何将来带这两个字段的格子
+//! 都会被算进置信度，而当时唯一的防线是「编译事件恰好不带 `fallback`」。
 
 use super::super::event::Event;
 use super::super::view::{Budget, View};
@@ -62,10 +64,16 @@ pub fn calibration() -> Projection<CalibrationView> {
             if e.ts > now {
                 continue;
             }
+            if e.kind != crate::symbio_core::event::EVENT_MEMORY_CALIBRATED {
+                continue;
+            }
             let Some(skill_id) = e.payload.get("skill_id").and_then(|v| v.as_str()) else {
                 continue;
             };
-            // 只统计路由观测（带 fallback 标记的事件），编译事件不计。
+            // 按**格子**认自己的输入，不按载荷字段猜——`memory.calibrated` 是校准观测的专属
+            // 格子。判别回到闭集之后，「别的格子恰好不带这两个字段」不再是读侧的前提。
+            // 格子对了字段仍逐个校：缺字段的事件**不参与统计**，而不是被当成「未回退」
+            // ——后者会让 uses 涨而 fallbacks 不涨，凭空造出高置信度。
             let Some(fallback) = e.payload.get("fallback").and_then(|v| v.as_bool()) else {
                 continue;
             };
@@ -88,3 +96,7 @@ pub fn calibration() -> Projection<CalibrationView> {
         }
     })
 }
+
+#[cfg(test)]
+#[path = "calibration.test.rs"]
+mod tests;

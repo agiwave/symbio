@@ -390,7 +390,7 @@ async fn four_tier_budgets_are_measurable() {
 // 编码（memory.encoded）→ 检索（recall 投影 + RecallTranslator → memory.recalled）
 // → 巩固 / 遗忘（排除式 + 保真度下界）。S06 §6 四条验收逐条落地。
 
-use crate::symbio_core::event::EVENT_MEMORY_RECALLED;
+use crate::symbio_core::event::{EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_RECALLED};
 use crate::symbio_core::projection::consolidate::{accept, ConsolidateParams};
 use crate::symbio_core::projection::recall::recall;
 
@@ -1680,23 +1680,33 @@ fn skill_hit_is_cheaper_and_low_confidence_falls_back() {
     // 命中：反射档快路（cost 40ms，低两个数量级）。
     store
         .append(
-            Event::pending("h1", EVENT_TASK_PROGRESS, Entity::Task, Verb::Progressed, 0, "agent:main")
-                .with_produced_by(0)
-                .with_cost_ms(40)
-                .with_payload(
-                    serde_json::json!({ "task_id": "t1", "skill_id": "weekly-report", "fallback": false }),
-                ),
+            Event::pending(
+                "h1",
+                EVENT_MEMORY_CALIBRATED,
+                Entity::Memory,
+                Verb::Asserted,
+                0,
+                "agent:main",
+            )
+            .with_produced_by(0)
+            .with_cost_ms(40)
+            .with_payload(serde_json::json!({ "skill_id": "weekly-report", "fallback": false })),
         )
         .unwrap();
     // 未命中 / 回退：完整推理（cost 5000ms）。
     store
         .append(
-            Event::pending("h2", EVENT_TASK_PROGRESS, Entity::Task, Verb::Progressed, 0, "agent:main")
-                .with_produced_by(0)
-                .with_cost_ms(5_000)
-                .with_payload(
-                    serde_json::json!({ "task_id": "t2", "skill_id": "weekly-report", "fallback": true }),
-                ),
+            Event::pending(
+                "h2",
+                EVENT_MEMORY_CALIBRATED,
+                Entity::Memory,
+                Verb::Asserted,
+                0,
+                "agent:main",
+            )
+            .with_produced_by(0)
+            .with_cost_ms(5_000)
+            .with_payload(serde_json::json!({ "skill_id": "weekly-report", "fallback": true })),
         )
         .unwrap();
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
@@ -1704,12 +1714,18 @@ fn skill_hit_is_cheaper_and_low_confidence_falls_back() {
     // 验收 2：命中路径 cost 显著低于回退路径（40ms vs 5000ms）。
     let hit_cost = snapshot
         .iter()
-        .find(|e| e.payload.get("fallback") == Some(&serde_json::json!(false)))
+        .find(|e| {
+            e.kind == EVENT_MEMORY_CALIBRATED
+                && e.payload.get("fallback") == Some(&serde_json::json!(false))
+        })
         .map(|e| e.cost_ms)
         .unwrap();
     let fallback_cost = snapshot
         .iter()
-        .find(|e| e.payload.get("fallback") == Some(&serde_json::json!(true)))
+        .find(|e| {
+            e.kind == EVENT_MEMORY_CALIBRATED
+                && e.payload.get("fallback") == Some(&serde_json::json!(true))
+        })
         .map(|e| e.cost_ms)
         .unwrap();
     assert!(

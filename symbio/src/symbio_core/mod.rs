@@ -165,7 +165,8 @@ pub(crate) use event::{
     EVENT_COMMITMENT_RELEASED,
 };
 pub(crate) use event::{
-    EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
+    EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED,
+    EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
 };
 pub(crate) use projection::consolidate::{accept, ConsolidateParams, Rejection};
 // 就绪集出根：生产消费方是 `plugins/session` 的**两处**——读出口 `session/stats`

@@ -894,7 +894,9 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
 /// **反向自检**：注掉 `v2_exec` 里的 `record_learning` 调用，本用例必须红。
 #[tokio::test]
 async fn full_turn_lands_memory_and_learning_facts() {
-    use crate::symbio_core::{EVENT_MEMORY_ENCODED, EVENT_MEMORY_RECALLED};
+    use crate::symbio_core::{
+        EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_RECALLED,
+    };
 
     let (session, dir, _tmp) = setup_full_with(true).await;
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
@@ -941,9 +943,17 @@ async fn full_turn_lands_memory_and_learning_facts() {
 
     let obs_events: Vec<&Event> = events
         .iter()
-        .filter(|e| e.kind == EVENT_MEMORY_RECALLED && e.payload.get("skill_id").is_some())
+        // 按**格子**认自己的输入（T-085 批①：校准观测从 `memory.recalled` 搬进
+        // `memory.calibrated`）。旧写法按载荷字段判别——那正是本判据要证明不再依赖的。
+        .filter(|e| e.kind == EVENT_MEMORY_CALIBRATED)
         .collect();
     assert_eq!(obs_events.len(), 1, "步 22 观测必须逐条入格：{kinds:?}");
+    assert!(
+        !events
+            .iter()
+            .any(|e| { e.kind == EVENT_MEMORY_RECALLED && e.payload.get("skill_id").is_some() }),
+        "校准观测不得再落在 `memory.recalled` 上——那会让一张格子背两种语义"
+    );
     assert_eq!(obs_events[0].payload["skill_id"], "sk-1");
     assert_eq!(obs_events[0].payload["fallback"], false);
     assert_eq!(

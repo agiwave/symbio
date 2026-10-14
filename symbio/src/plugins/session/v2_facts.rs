@@ -32,7 +32,7 @@
 //! 记忆侧另有顺序（编码 → 检索锚 → 巩固 → 技能观测 → 技能编译），见 [`record_learning`]
 //! 的文档——巩固要用**刷新后**的快照，它得看得见编码刚写下的那条。
 
-use crate::symbio_core::{Entity, Event, EventWalStore, Store, Verb, EVENT_MEMORY_RECALLED};
+use crate::symbio_core::{Entity, Event, EventWalStore, Store, Verb, EVENT_MEMORY_CALIBRATED};
 
 /// 收束派生事实中的**承诺 / 任务表 / 熔断**半边（S08 §3 / S7 步 16–18 / S8 第 20 步）。
 ///
@@ -207,13 +207,15 @@ pub(crate) fn record_learning(
     // ── 步 22 · 技能路由观测（S11，04 §3.1 批⑪ 子批 B）───────────────────
     //
     // 观测只带数据 `{ skill_id, fallback }`——`calibration` 投影的契约就是这两个
-    // 字段（S11 §3「不加新格子」：复用 `memory.recalled`，它的 `payload` 由写方
-    // 决定）。**没有这一步，回退永远不会发生**：零使用时置信度按 1.0 算，技能
-    // 再错也一直被用，S11 §5 的「一直用错技能而自己不知道」当场应验。
+    // 字段（S11 §3「不加新格子」曾把它们复用在 `memory.recalled` 上；T-085 批①
+    // 把它们搬进**自己的格子** `memory.calibrated`，读侧改按 `kind` 过滤——
+    // 复用两张格子靠载荷字段判别，读侧就得赌「别的格子恰好不带这两个字段」）。
+    // **没有这一步，回退永远不会发生**：零使用时置信度按 1.0 算，技能再错也一直
+    // 被用，S11 §5 的「一直用错技能而自己不知道」当场应验。
     for (n, (skill_id, fallback)) in skill_obs.iter().enumerate() {
         let ev = Event::pending(
             format!("v2s-{anchor_id}-{n}"),
-            EVENT_MEMORY_RECALLED,
+            EVENT_MEMORY_CALIBRATED,
             Entity::Memory,
             Verb::Asserted,
             turn,

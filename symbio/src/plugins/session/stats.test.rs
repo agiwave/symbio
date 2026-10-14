@@ -11,7 +11,7 @@ use super::read;
 use crate::symbio_core::{
     calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Budget,
     Entity, Event, EventEnvelope as _, EventWalStore, Seq, Store, Verb, EVENT_ARTIFACT_ADDED,
-    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_MEMORY_RECALLED,
+    EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CALIBRATED,
     EVENT_SESSION_CONSOLIDATED, EVENT_TASK_OPENED, EVENT_USER_MESSAGE,
 };
 use std::path::{Path, PathBuf};
@@ -1161,12 +1161,15 @@ fn calibration_column_recomputes_and_moves_with_the_wal() {
     let root = wal.parent().expect("WAL 有父目录").to_path_buf();
     {
         let store = EventWalStore::open(&wal).expect("WAL");
-        for (id, fallback) in [("recalled-1", false), ("recalled-2", true)] {
+        for (id, fallback) in [("calib-1", false), ("calib-2", true)] {
             store
                 .append(
                     Event::pending(
                         id,
-                        EVENT_MEMORY_RECALLED,
+                        // 校准观测走**自己的格子**（T-085 批①）。旧写法把它写在
+                        // `memory.recalled` 上、靠载荷字段认——那正是读侧赌「别的格子
+                        // 恰好不带这两个字段」的那段。
+                        EVENT_MEMORY_CALIBRATED,
                         Entity::Memory,
                         Verb::Asserted,
                         0,
@@ -1174,7 +1177,6 @@ fn calibration_column_recomputes_and_moves_with_the_wal() {
                     )
                     .with_produced_by(0)
                     .with_payload(serde_json::json!({
-                        "found": 1,
                         "skill_id": "sk-a",
                         "fallback": fallback,
                     })),
@@ -1200,7 +1202,7 @@ fn calibration_column_recomputes_and_moves_with_the_wal() {
     assert_eq!(got.calibration["by_skill"]["sk-a"]["fallbacks"], 1);
 
     // 反向：删掉回退那条 ⇒ 回退数 1 → 0（读数跟着事实源动）。
-    drop_line(&wal, "recalled-2");
+    drop_line(&wal, "calib-2");
     let after = read_at(&wal, crate::symbio_core::authz::PRINCIPAL_MAIN);
     assert_eq!(after.calibration["by_skill"]["sk-a"]["uses"], 1);
     assert_eq!(after.calibration["by_skill"]["sk-a"]["fallbacks"], 0);

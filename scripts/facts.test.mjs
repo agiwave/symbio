@@ -276,17 +276,22 @@ test('能力矩阵（§6）：每条静态路由都有一句职责（缺一条�
   assert.deepEqual(missing, [], `这些路由在代码里还没有一句话职责：${missing.join('、')}`)
 })
 
-test('本仓自身：`--check` 全绿（三份事实与代码一致）', () => {
-  try {
-    const out = execFileSync(process.execPath, [RUNNER, '--check'], {
-      cwd: REPO,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    assert.match(out, /docs\/CURRENT\.md/)
-    assert.match(out, /docs\/ref\/GATE_CODES\.md/)
-    assert.match(out, /tauri\/src\/constants\/routes\.gen\.ts/)
-  } catch (e) {
-    assert.fail(`--check 应当全绿，实际：${e.stdout ?? ''}${e.stderr ?? ''}`)
+test('本仓自身：runner 认得三份事实（本测试不要求此刻无漂移）', async () => {
+  // ⚠️ 这里**刻意**不断言 `--check` 全绿：门禁的 `30-docs` 阶段跑本测试，而事实文件由
+  // **更靠后的** `60-facts` 阶段重生成。于是「代码改了、事实还没重生成」是本测试运行时
+  // 的**正常状态**，断言它全绿等于断言一件还没发生的事——首次接入时就因此假红过一次。
+  // 漂移的判定归它的自然位置：重生成之后（`60-facts`）与 CI 的 `--ci` 模式。
+  //
+  // 本测试只钉「目录被遍历到」这一件与时序无关的事——漏接线时它才红。
+  const ids = discover(path.join(REPO, 'scripts', 'facts'))
+  for (const id of ['current', 'gate-codes', 'routes-ts']) {
+    assert.ok(ids.includes(id), `runner 应当认得事实 \`${id}\`（实际：${ids.join('、')}）`)
+  }
+  const mods = await Promise.all(
+    ['current', 'gate-codes', 'routes-ts'].map((id) => import(`./facts/${id}.mjs`)),
+  )
+  for (const [i, mod] of mods.entries()) {
+    const errs = validateFact(mod.default, { id: ['current', 'gate-codes', 'routes-ts'][i] })
+    assert.deepEqual(errs, [], `本仓事实的描述符必须合契约：${errs.join('；')}`)
   }
 })
