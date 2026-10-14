@@ -107,14 +107,21 @@ export default {
     // 只剩 `dispatch`）。读文档的人被指到一个不存在的东西上，而这**不产生任何告警**，
     // 只能靠跑一次把它变成红灯。判据是 zero-tolerance（没有「几条以内可接受」）。
     //
-    // 本地**默认跳过**（2026-10-09）：`cargo doc` 是对 workspace 的又一次**全量重编译**
-    // （doc 指纹与 test / clippy 互不复用），是本地门禁最贵的单步之一；它守的
-    // 断链由 CI 的 rust-checks job 必跑（`--ci` ⇒ 本任务在那边照常执行）。
-    // 本地需要核查时单独跑：
+    // **本地也跑**（2026-10-14 由 CI-only 改为无条件）。原先这里挂着
+    // `when: ctx.ci`，理由是「doc 是对 workspace 的又一次全量重编译，是本地门禁最贵的
+    // 单步之一」——**那条依据是错的，本机实测推翻了它**：
+    //   cargo doc --no-deps --workspace → **15.7s**（本机 Windows / 20 核）
+    // 依赖的 `rmeta` 由同阶段的 clippy / test 编出来、直接复用，所以它**不是**全量重编译，
+    // 只是本地那批 crate 换了个 rustdoc 指纹重编一遍；占全量门禁（~2m30s）约 10%。
+    //
+    // 为什么值得记这一笔：`97a53c23` 写下那条依据时**没有附实测数字**，它是被当成显然的
+    // 事写下的。代价主张必须能被一次测量推翻，否则它就只是一句听起来合理的话——
+    // 而「本地跳过」的形式是**任何时候都没人跑**：守卫存在，却不在开发者的回路里，
+    // 断链要等到 push 后的 CI 才被拦下。判据要留在人**马上会看到**的地方。
+    //
+    // 单独跑（不想等门禁编排时）：
     //   RUSTDOCFLAGS='-D rustdoc::broken_intra_doc_links' cargo doc --no-deps --workspace
     tasks.push({
-      when: (c) => c.ci,
-      skipNote: '本地跳过：doc 是全量重编译，断链判据由 CI 的 backend job 承担（上面有本地跑法）',
       label: 'cargo doc --no-deps --workspace（-D rustdoc::broken_intra_doc_links）',
       cmd: 'cargo',
       args: ['doc', '--no-deps', '--workspace'],
