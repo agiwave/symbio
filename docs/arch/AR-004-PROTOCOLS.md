@@ -1,4 +1,5 @@
 ---
+lists: [protocol-messages=owner]
 kind: arch
 id: AR-004-PROTOCOLS
 title: Symbio 协议规范
@@ -87,6 +88,8 @@ let (my_channel, peer_channel) = PluginChannel::pair(64);
 请求的上下文注入接口（trait 定义在 core，签名以代码为准）。标准键：
 
 ### 标准上下文键
+
+<!-- list:protocol-messages owner -->
 
 | 键 | 类型 | 用途 |
 |----|------|------|

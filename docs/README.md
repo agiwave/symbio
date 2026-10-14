@@ -1,4 +1,5 @@
 ---
+lists: [doc-boundaries=owner]
 kind: guide
 id: docs/README
 title: Symbio 文档中心
@@ -153,6 +154,8 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 
 **重复描述 = 双倍维护成本。** 同一事实写两处，改代码时就要改两处，且两处必然漂移。
 因此每类事实只有一个 owner，其余位置一律**引用**，不复述：
+
+<!-- list:doc-boundaries owner -->
 
 | 事实 | 唯一 owner | 其它文档 |
 |---|---|---|

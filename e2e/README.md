@@ -1,4 +1,5 @@
 ---
+lists: [e2e-cases=owner]
 kind: guide
 id: e2e/README
 title: e2e 测试环境（CLI 模式）
@@ -93,6 +94,8 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
 | plan 级 `rateLimit: {limit, windowMs}` | 429 限流语义：滑动窗口配额（账号级），超额 429 + `retry-after` + `x-ratelimit-*`；被拒不占配额，冷却自动恢复。`MockLlm` 构造器第三选项 `rateLimit` 可传 |
 
 ## 用例与不变量
+
+<!-- list:e2e-cases owner -->
 
 | 用例 | 文件 | 验证 |
 |---|---|---|

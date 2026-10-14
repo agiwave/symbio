@@ -366,7 +366,7 @@ function render() {
   L.push(`title: ${ENTRY_TITLE}`);
   L.push("status: active");
   L.push(`created: ${ENTRY_CREATED}`);
-  L.push("lists: [routes=owner, tools=owner, vdfs-ops=owner]");
+  L.push("lists: [routes=owner, tools=owner, vdfs-ops=owner, cli-options=owner]");
   L.push("---");
   L.push("");
   L.push(`# ${ENTRY_TITLE}`);
@@ -529,12 +529,16 @@ function render() {
       "（提取自 `gateway/server.rs` 的 `req.path.starts_with`）"
   );
   const cli = cliSurface();
+  L.push("<!-- list:cli-options owner -->");
+  L.push("");
   L.push(
     `- **CLI 面**：进程选项 ${cli.longs.length} 个长 + ${cli.shorts.length} 个短（${fmtList(
       cli.longs
     )}）；交互模式内置命令 ${cli.repl.length} 个（${fmtList(
       cli.repl
-    )}）。无子命令树、不依赖 clap，权威来源是 \`cli/src/args.rs\` 的 \`HELP\`。`
+    )}）。无子命令树、不依赖 clap，权威来源是 \`cli/src/args.rs\` 的 \`HELP\`。` +
+      ' 本清单的 owner 是本行：它从 `cli/src/args.rs` 的 `HELP` 提取，改代码即变。' +
+      '`cli/README.md` 与 `cli/docs/GU-004-usage.md` 是它的 `view`（只指路，不抄表）。'
   );
   L.push("");
 

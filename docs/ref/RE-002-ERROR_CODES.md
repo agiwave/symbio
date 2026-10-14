@@ -1,4 +1,5 @@
 ---
+lists: [error-codes=owner]
 kind: ref
 id: RE-002-ERROR_CODES
 title: Symbio 错误码参考
@@ -34,6 +35,8 @@ impl PluginError {
 ---
 
 ## 标准错误码
+
+<!-- list:error-codes owner -->
 
 | 错误码 | HTTP 等价 | 含义 | 常见场景 |
 |--------|-----------|------|----------|

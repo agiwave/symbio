@@ -1,4 +1,5 @@
 ---
+lists: [github-secrets=owner]
 kind: guide
 id: .github/workflows/README
 title: CI/CD 配置说明
@@ -71,6 +72,8 @@ git push origin v0.2.0
 ## 密钥配置（可选）
 
 以下密钥在 GitHub Settings → Secrets and variables → Actions 中配置：
+
+<!-- list:github-secrets owner -->
 
 | 密钥名称 | 说明 | 必需 |
 |---------|------|------|

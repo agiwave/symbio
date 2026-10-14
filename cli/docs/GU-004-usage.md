@@ -1,4 +1,5 @@
 ---
+lists: [cli-options=view]
 kind: guide
 id: GU-004-usage
 title: 用法
@@ -68,20 +69,8 @@ printf '第一轮\n/provider\n/exit\n' | ./../symbio/target/debug/symbio-cli.exe
 
 ## 完整参数
 
-| 参数 | 说明 |
-| --- | --- |
-| `-m, --message <文本>` | 发送单条消息后退出；也可用位置参数 `symbio-cli 你好 世界` |
-| `-s, --session <ID>` | 复用/续接既有会话（默认新建） |
-| `--provider <ID>` | Model Provider，默认 `usrouter-glm5-3-flash`；传 `default` 回退到系统目录配置 |
-| `--mode <MODE>` | `auto`（默认）\| `interactive` |
-| `--workdir <路径>` | 会话工作目录（默认当前目录） |
-| `--homedir <路径>` | **系统目录**（默认 `<当前目录>/.symbio`） |
-| `--heartbeat` | 心跳守护模式：驻留并为本目录所有启用心跳的会话触发空闲心跳（与 `-m`/`--repl` 互斥） |
-| `--agent <ID>` | 绑定 Agent（可选） |
-| `-i, --repl` | 强制进入交互式 REPL，即使 stdin 不是终端 |
-| `-q, --quiet` | 非交互模式下只输出模型文本 |
-| `-v, --verbose` | 额外打印模型推理内容与诊断 |
-| `-h, --help` / `-V, --version` | 帮助 / 版本 |
+<!-- list:cli-options view -->
+> **参数清单不在本页**：权威清单是 [RE-006 §5.2](../../docs/ref/RE-006-当前事实表.md#5-规模与宿主接缝 "RE-006-当前事实表")（从 `cli/src/args.rs` 的 `HELP` 提取，改代码即变）。本页曾抄一份**逐字相同**的表，与那份形成两处并存——同一句事实存两份，改一次要动两处。
 
 ---
 

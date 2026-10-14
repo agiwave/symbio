@@ -1,4 +1,5 @@
 ---
+lists: [plugin-configs=owner]
 kind: ref
 id: RE-001-CONFIGURATION
 title: Symbio 配置参考
@@ -79,6 +80,8 @@ work:
 
 下表是各插件的配置地址与主要键。**默认值以代码为准**：字段定义由配置的拥有者产出，
 默认值从该插件自己的 `Default` 读出，因此面板显示值与实际行为同源。
+
+<!-- list:plugin-configs owner -->
 
 | 插件 | 配置地址 | 主要键 |
 |---|---|---|

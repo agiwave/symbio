@@ -1,4 +1,5 @@
 ---
+lists: [core-domains=owner]
 kind: arch
 id: symbio/src/symbio_core/README
 title: symbio_core —— 内核契约层：命名与结构规范
@@ -109,6 +110,8 @@ created: 2026-09-26
 「裸名」= 不要求前缀（见 §3 的 `keys` 域规则）。
 
 <!-- core-naming:modifiers Dyn,Default -->
+
+<!-- list:core-domains owner -->
 
 | 域 | 类型 / trait | 常量 / 静态量 | 函数 / 自由函数 | 备注 |
 |---|---|---|---|---|
