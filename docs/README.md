@@ -156,9 +156,9 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 
 | 事实 | 唯一 owner | 其它文档 |
 |---|---|---|
-| 现在是什么（插件 / 挂载点 / 路由 / 工具 / 规模） | [CURRENT.md](./CURRENT.md)（代码生成） | **不手抄**，需要就引用 |
+| 现在是什么（插件 / 挂载点 / 路由 / 工具 / 规模 / **每条能力的用户可见语义**） | [CURRENT.md](./CURRENT.md)（代码生成，能力矩阵在 §2） | **不手抄**，需要就引用。机械判据见下「这张表有人守吗」 |
 | 路由**契约**（调用方 / 返回类型 / 备注 / 退役索引） | [ref/RE-003-ROUTES.md](ref/RE-003-ROUTES.md "RE-003-ROUTES") | 模块 `README.md` 不抄路由表 |
-| 路由**一句话职责**（写在注册处：`route()` 臂上的注释） | [CURRENT.md](CURRENT.md) §6.3（代码投影） | RE-003 不再手写「用途」列——同一句事实不存两份 |
+| 路由**一句话职责**（写在注册处：`route()` 臂上的注释） | [CURRENT.md](CURRENT.md) §2.3（代码投影） | RE-003 不再手写「用途」列——同一句事实不存两份 |
 | 错误码 | [ref/RE-002-ERROR_CODES.md](ref/RE-002-ERROR_CODES.md "RE-002-ERROR_CODES") | PROTOCOLS 不再列错误码表 |
 | 配置项 | [ref/RE-001-CONFIGURATION.md](ref/RE-001-CONFIGURATION.md "RE-001-CONFIGURATION") | 模块 `README.md` 只写机制 + 指向它 |
 | 判据码（各守卫的编号地址） | [ref/GATE_CODES.md](./ref/GATE_CODES.md)（脚本声明生成） | 守卫脚本只写自己判什么，不抄全表 |
@@ -176,7 +176,34 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 | 变更历史（改了什么、何时改的） | `git log` | **现行文档不写变更史**（见下） |
 | 一次性评审 / 迁移记录 / 体检报告 | `docs/archive/` | 活文档不保留过程日志 |
 
-**变更时只改 owner 那一处**：结构事实重跑 `node scripts/facts/current.mjs`（CI 有 `--check` 门禁）；跨模块架构改 [AR-003-OVERVIEW.md](arch/AR-003-OVERVIEW.md "AR-003-OVERVIEW") + [AR-005-SYSTEM_MAP.md](arch/AR-005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP") 各自己那一层；常见问题进 [GU-007-TROUBLESHOOTING.md](guide/GU-007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING")。
+**变更时只改 owner 那一处**：结构事实重跑 `node scripts/gen-facts.mjs`（门禁自动重生成并暂存）；跨模块架构改 [AR-003-OVERVIEW.md](arch/AR-003-OVERVIEW.md "AR-003-OVERVIEW") + [AR-005-SYSTEM_MAP.md](arch/AR-005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP") 各自己那一层；常见问题进 [GU-007-TROUBLESHOOTING.md](guide/GU-007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING")。
+
+### 这张表有人守吗
+
+**「一个事实只有一个 owner」此前是一张没有人执行的承诺**——它写在这里，但没有任何判据
+检查它是否被遵守。D-001…D-010 查的是链、措辞、形态，没有一条查「同一事实被写了两遍」。
+于是 [T-098](task/T-101-CURRENTMD内部去重与判据补齐.md "T-101-CURRENTMD内部去重与判据补齐")
+把能力矩阵加进 `CURRENT.md` 时没有撤掉它覆盖掉的旧节，同一批事实在**同一份文件里**
+并存两遍，而其中一列是人写的——它看起来和其它列一样是「从代码来的」，于是漂移不可见。
+
+现在这一层由两条判据守着（`scripts/facts.test.mjs`，随门禁跑）：
+
+| 判据 | 口径 |
+|---|---|
+| **文件内**：一个封闭集只在一处成表 | 同一集合的成员出现在 ≥2 张表里判红；owner = 覆盖最全的那处 |
+| **跨文档**：封闭集不得在别处成表复述 | 非 owner 文档的表里含 ≥3 个成员即判红；散文点名不算 |
+
+两条都**按集合成员身份**判，不按字面形状——按形状判会当场误报（插件目录名长得像工具
+短名、`vdfs/read` 长得像路由）。跨文档只判「成表」：散文里点名 N 个成员是在讲机制，
+机制归那个机制的 owner。白名单每一条都写明**它保的是什么**，不做笼统豁免。
+
+**已知欠账**：判据只覆盖 `CURRENT.md` 投影的三个封闭集（工具 / VDFS 操作 / 路由），
+职责边界表里的其余 owner（错误码 / 配置 / prompt 形状）尚未纳入，见
+[T-100-跨文档复述判据覆盖面补齐](task/T-100-跨文档复述判据覆盖面补齐.md)。
+
+**新增一节的纪律**：能力矩阵之所以要撤掉旧节，是因为「新增」与「接管」是两件事。
+写下新节时先问**它覆盖了谁**——覆盖了就要同时删掉旧 owner 或把它改成一行指路，
+否则新判据会红（那正是它的工作）。
 
 ### 两条硬规则
 
