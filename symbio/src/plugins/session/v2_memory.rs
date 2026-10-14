@@ -12,12 +12,24 @@
 //! | 段 | core 的判定方 | 本模块做什么 |
 //! |---|---|---|
 //! | 步 11 编码 | [`RecallView::contains_content`](crate::symbio_core::RecallView) 同文去重 | 本轮用户发言 → `memory.encoded` |
-//! | 步 12 召回 | `recall` 投影（as-of / 排除式遗忘 / 预算） | 读视图 → 注入请求视图 + `memory.recalled` |
+//! | 步 12 召回 | `recall` 投影（as-of / 排除式遗忘 / 预算 / 混合打分） | 读视图 → 注入请求视图 + `memory.recalled` |
 //! | 步 13 巩固 | `consolidate::accept`（代数上界 + 保真度下界） | 合并最旧两条，**过门才入格** |
 //!
 //! 算法（怎么合并、保真度怎么算、注入段怎么排版）住本模块：core 只提供**读视图**
 //! 与**接受边界**（[plan/01 §9.3](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")：架构只提供
 //! 位置，不提供算法）。
+//!
+//! ## 两种认知内容标签（七类的两个生产写方，T-085 批④）
+//!
+//! | 标签 | 写方 | 溯源 |
+//! |---|---|---|
+//! | [`MEMORY_TAG`]（经验） | 本轮**用户**发言（步 11） | 本轮 `user.message` 格 |
+//! | [`JUDGMENT_TAG`]（判断） | 本轮**智能体**的收束正文（步 11b） | 同一个 `user.message` 格（这条判断因它而起） |
+//!
+//! 「判断」是七类认知内容里 S10 点名要有生产写方的那一类（`recall:tag=judgment`
+//! 此前参数在、值缺写方，ST-010 §3.1）。每轮记一问一答两条，跨会话召回才既
+//! 「记得你问过」也「记得我当时怎么答」。巩固同标签进行（[`CONSOLIDABLE_TAGS`]），
+//! 技能标签**不在其内**（合并会毁掉 `skill_id` 身份，技能有自己的生死周期）。
 //!
 //! ## 四条口径（为什么是这样）
 //!
@@ -57,6 +69,15 @@ use crate::symbio_core::{
 /// 分组，空标签等于没有分组。
 pub(crate) const MEMORY_TAG: &str = "经验";
 
+/// 认知内容标签「**判断**」：智能体自己的收束结论（T-085 批④）。
+///
+/// S10 的 `recall:tag=judgment` 此前**参数在、值缺写方**（ST-010 §3.1）——本
+/// 常量是它的生产写方：轮末把本轮成功收束的正文（`response`）编成一条判断记忆，
+/// 与用户发言那条（[`MEMORY_TAG`]）同文去重、同截断、同溯源（本轮开口格）。
+/// 兜底收束的正文不记（`response = None`）——固化失败套路等于把没走通的路写成
+/// 记忆，与技能编译同一条纪律。
+pub(crate) const JUDGMENT_TAG: &str = "判断";
+
 /// 单条记忆正文的字符上限（截断点）。
 pub(crate) const ENCODE_MAX_CHARS: usize = 400;
 
@@ -68,6 +89,15 @@ pub(crate) const MERGE_MAX_CHARS: usize = 400;
 /// 触发一次巩固所需的**活**记忆条数（同标签）。取 4：每合并一次净减 1 条，
 /// 条数收敛到 3–4 后停在 `accept` 的代数上界（`max_gen = 3`）上。
 pub(crate) const CONSOLIDATE_MIN_ENTRIES: usize = 4;
+
+/// 巩固的**标签域**：同标签活记忆 ≥ [`CONSOLIDATE_MIN_ENTRIES`] ⇒ 合并最旧两条。
+///
+/// 两个生产写方的标签都在内（经验 / 判断，T-085 批④）——写方不加巩固域，记忆
+/// 就无界增长（每轮一条），那是**静默失效**：扫得越来越慢、注入越来越偏，
+/// 没有任何一处报错。技能标签（`SKILL_TAG`）**刻意在外**：合并会丢掉载荷里的
+/// `skill_id` 身份，路由与校准账整条断——技能有自己的生命周期（编译 / 置信度
+/// 闸 / 反自动化回退），不由巩固代管。
+pub(crate) const CONSOLIDABLE_TAGS: [&str; 2] = [MEMORY_TAG, JUDGMENT_TAG];
 
 /// 注入段的字节上限——按**整条**追加，装不下就停（不切半行）。
 pub(crate) const RECALL_MAX_BYTES: usize = 4096;
@@ -90,13 +120,17 @@ pub(crate) const RECALL_SECTION_HEAD: &str = "【长期记忆】";
 /// 步 12 的读方：**跨会话**召回 → [`RecallView`]（一条记忆都没有 ⇒ `None`）。
 ///
 /// 扫 `<会话存储根>/*​/v2-events.wal`（含本会话自己），按 mtime 新近优先、文件数与
-/// 字节双预算封顶，再整体交给 `recall` 投影。合并后按 `ts` 降序——**记忆类事件带
-/// 真实编码时刻**（`RecallEntry::ts` 的契约），跨会话才比得了新近；Turn 类事件仍
-/// `ts = 0`，但它们不进这个视图（投影只认 `entity == memory`）。
+/// 字节双预算封顶，再整体交给 `recall` 投影。合并后排序由投影的 `query` 决定：
+/// 传本轮用户正文 ⇒ 内容重叠分降序（T-085 批②：旧但相关的记忆不再输给新但
+/// 无关的）；传空 ⇒ 纯 ts 降序（平凡值）。
 ///
 /// as-of 取 `i64::MAX`：与 `session/stats` 同一条口径——WAL 是落盘事实源，文件里
 /// 每一条都已发生（见 `stats.rs` 模块文档）。
-pub(crate) fn recall_view(session_dir: &Path) -> Option<RecallView> {
+///
+/// `query` = 本轮用户发言——混合打分的**语义维**由它驱动；跨会话累计口径不变
+/// （记忆类事件带真实编码时刻，`RecallEntry::ts` 的契约，跨会话才比得了新近；
+/// Turn 类事件仍 `ts = 0`，但它们不进这个视图——投影只认 `entity == memory`）。
+pub(crate) fn recall_view(session_dir: &Path, query: &str) -> Option<RecallView> {
     let root = session_dir.parent()?;
 
     // ── 找文件：新近优先，超预算的当场弃权并留痕 ──────────────────────────
@@ -155,7 +189,7 @@ pub(crate) fn recall_view(session_dir: &Path) -> Option<RecallView> {
 
     // 新近在前（`sort_by` 稳定 ⇒ 同毫秒时保持「新会话优先」的输入序）。
     events.sort_by(|a, b| b.ts.cmp(&a.ts));
-    let view = recall(PRINCIPAL_USER, None)
+    let view = recall(PRINCIPAL_USER, None, Some(query.to_string()))
         .apply(&events, i64::MAX, Budget::new(0, RECALL_SCAN_QUOTA))
         .value;
     if view.entries.is_empty() {
@@ -189,9 +223,11 @@ pub(crate) fn prompt_section(view: &RecallView) -> Option<String> {
 
 // ==================== 步 11 · 写方（编码） ====================
 
-/// 步 11 写方：本轮用户发言 → 一条 `memory.encoded`（空 / 同文 ⇒ 不写）。
+/// 步 11 写方：本轮发言 → 一条 `memory.encoded`（空 / 同文 ⇒ 不写）。
 ///
-/// 返回写入的 seq。溯源 `produced_by` 指向本轮 `user.message` 格（I2：记忆溯源覆盖
+/// `tag` 是认知内容标签（七类）：[`MEMORY_TAG`] = 用户发言（经验），
+/// [`JUDGMENT_TAG`] = 智能体收束正文（判断，T-085 批④）。返回写入的 seq。
+/// 溯源 `produced_by` 指向本轮 `user.message` 格（I2：记忆溯源覆盖
 /// 100%，见 `invariants::produced_by_coverage`）；`ts` 是**编码时刻**（`RecallEntry::ts`
 /// 的契约，跨会话新近度排序靠它）。
 pub(crate) fn encode(
@@ -200,6 +236,7 @@ pub(crate) fn encode(
     turn: u64,
     user_seq: u64,
     user_text: &str,
+    tag: &str,
     event_id: &str,
     now: i64,
 ) -> Result<Option<u64>, String> {
@@ -212,7 +249,9 @@ pub(crate) fn encode(
     // 同文去重：判定方是 core 的 `contains_content`（比的是**已落盘的全部记忆**，
     // as-of 取 i64::MAX——落盘的都已发生，不给时钟回拨留重复口子）。范围是本会话：
     // 跨会话的同一句话在两个会话各记一条是两次独立编码，由排版去重（见上）。
-    let view = recall(PRINCIPAL_USER, None)
+    // 跨标签同文也算重复：同一个事实不必按标签记两遍。
+    // `query = None`：去重问「在不在」，不问「排多前」——无查询 = 平凡值（ts 序）。
+    let view = recall(PRINCIPAL_USER, None, None)
         .apply(snapshot, i64::MAX, Budget::generous())
         .value;
     if view.contains_content(&content) {
@@ -233,7 +272,7 @@ pub(crate) fn encode(
             .with_ts(now)
             .with_payload(serde_json::json!({
                 "content": content,
-                "tag": MEMORY_TAG,
+                "tag": tag,
                 "generation": 0u32,
                 "vec": [],
             })),
@@ -270,9 +309,10 @@ pub(crate) fn record_recalled(
 
 // ==================== 步 13 · 巩固 ====================
 
-/// 步 13 写方：同标签活记忆 ≥ [`CONSOLIDATE_MIN_ENTRIES`] ⇒ 合并最旧两条，
-/// **过 `accept` 才入格**。返回 `memory.consolidated` 的 seq（条数不够 / 被拒收 ⇒
-/// `None`——拒收不是错误，源记忆原样留在视图里，下一轮再试）。
+/// 步 13 写方：[`CONSOLIDABLE_TAGS`] 每个标签内，活记忆 ≥
+/// [`CONSOLIDATE_MIN_ENTRIES`] ⇒ 合并该标签最旧两条，**过 `accept` 才入格**。
+/// 返回 `(标签, seq)` 列表（条数不够 / 被拒收 ⇒ 不入列——拒收不是错误，
+/// 源记忆原样留在视图里，下一轮再试）。
 ///
 /// 写入顺序是设计过的：**先写合并产物、后写两条 `memory.forgotten`**——后者失败
 /// ⇒ 视图里多一条重复（无害），前者失败 ⇒ 源记忆还在。反过来会丢记忆。
@@ -281,103 +321,109 @@ pub(crate) fn consolidate(
     snapshot: &[Event],
     turn: u64,
     now: i64,
-) -> Result<Option<u64>, String> {
-    let view = recall(PRINCIPAL_USER, Some(MEMORY_TAG.to_string()))
-        .apply(snapshot, i64::MAX, Budget::generous())
-        .value;
-    if view.entries.len() < CONSOLIDATE_MIN_ENTRIES {
-        return Ok(None);
-    }
-
-    // 召回视图按新近度**降序** ⇒ 倒序取最旧两条（巩固从最旧开始推进代数）。
-    let oldest: Vec<&_> = view.entries.iter().rev().take(2).collect();
-    if oldest.len() < 2 {
-        return Ok(None);
-    }
-    let source_seqs = [oldest[0].seq, oldest[1].seq];
-
-    // 代数从源事件的载荷读（`recall` 视图不带代数——它是读视图，不是写账本）。
-    let generation_of = |seq: u64| -> u32 {
-        snapshot
-            .iter()
-            .find(|e| e.seq.map(|s| s.value()) == Some(seq))
-            .and_then(|e| e.payload.get("generation"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32
-    };
-    let generation = generation_of(source_seqs[0]).max(generation_of(source_seqs[1])) + 1;
-
-    let (content, fidelity) = merge_with_fidelity(
-        &[oldest[0].content.as_str(), oldest[1].content.as_str()],
-        MERGE_MAX_CHARS,
-    );
-
-    // 判定方只有一个：core 的 `accept`。拒收 ⇒ **不入格**（不是降标入库，也不是
-    // 写条日志照写）。两个分支分开说，是因为它们是两件事：代数上界是**预期的终点**，
-    // 保真度不足是**这条策略装不下它**。
-    match accept(&ConsolidateParams::default(), generation, fidelity) {
-        Ok(()) => {}
-        Err(Rejection::RejectedMaxGen { generation, max }) => {
-            crate::plugin_debug!(
-                "session",
-                "[memory] 巩固停在代数上界（gen {generation} > max {max}）：源记忆原样保留"
-            );
-            return Ok(None);
+) -> Result<Vec<(&'static str, u64)>, String> {
+    let mut merged: Vec<(&'static str, u64)> = Vec::new();
+    for &tag in CONSOLIDABLE_TAGS.iter() {
+        // `query = None`：巩固要的是「最旧两条」——纯 ts 降序（平凡值），混合打分
+        // 会把最旧的顶下去，巩固从此推不动代数。
+        let view = recall(PRINCIPAL_USER, Some(tag.to_string()), None)
+            .apply(snapshot, i64::MAX, Budget::generous())
+            .value;
+        if view.entries.len() < CONSOLIDATE_MIN_ENTRIES {
+            continue;
         }
-        Err(Rejection::RejectedLowFidelity { fidelity, min }) => {
-            crate::plugin_debug!(
-                "session",
-                "[memory] 巩固保真度不足（{fidelity:.3} < {min}）：源记忆原样保留"
-            );
-            return Ok(None);
+
+        // 召回视图按新近度**降序** ⇒ 倒序取最旧两条（巩固从最旧开始推进代数）。
+        let oldest: Vec<&_> = view.entries.iter().rev().take(2).collect();
+        if oldest.len() < 2 {
+            continue;
         }
-    }
+        let source_seqs = [oldest[0].seq, oldest[1].seq];
 
-    let consolidated_seq = store
-        .append(
-            Event::pending(
-                format!("v2mc-{turn}-{}-{}", source_seqs[0], source_seqs[1]),
-                EVENT_MEMORY_CONSOLIDATED,
-                Entity::Memory,
-                Verb::Progressed,
-                turn,
-                PRINCIPAL_USER,
-            )
-            .with_produced_by(source_seqs[0])
-            .with_ts(now)
-            .with_payload(serde_json::json!({
-                "content": content,
-                "tag": MEMORY_TAG,
-                "generation": generation,
-                "fidelity": fidelity,
-                "sources": source_seqs,
-                "vec": [],
-            })),
-        )
-        .map_err(|e| format!("memory.consolidated 入格失败：{e:?}"))?;
+        // 代数从源事件的载荷读（`recall` 视图不带代数——它是读视图，不是写账本）。
+        let generation_of = |seq: u64| -> u32 {
+            snapshot
+                .iter()
+                .find(|e| e.seq.map(|s| s.value()) == Some(seq))
+                .and_then(|e| e.payload.get("generation"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32
+        };
+        let generation = generation_of(source_seqs[0]).max(generation_of(source_seqs[1])) + 1;
 
-    // 源记忆 → 排除式遗忘：Log 不删，只是 `recall` 投影不再包含（可撤销、可审计）。
-    for target in source_seqs {
-        store
+        let (content, fidelity) = merge_with_fidelity(
+            &[oldest[0].content.as_str(), oldest[1].content.as_str()],
+            MERGE_MAX_CHARS,
+        );
+
+        // 判定方只有一个：core 的 `accept`。拒收 ⇒ **不入格**（不是降标入库，也不是
+        // 写条日志照写）。两个分支分开说，是因为它们是两件事：代数上界是**预期的终点**，
+        // 保真度不足是**这条策略装不下它**。
+        match accept(&ConsolidateParams::default(), generation, fidelity) {
+            Ok(()) => {}
+            Err(Rejection::RejectedMaxGen { generation, max }) => {
+                crate::plugin_debug!(
+                    "session",
+                    "[memory] 巩固停在代数上界（gen {generation} > max {max}，tag={tag}）：源记忆原样保留"
+                );
+                continue;
+            }
+            Err(Rejection::RejectedLowFidelity { fidelity, min }) => {
+                crate::plugin_debug!(
+                    "session",
+                    "[memory] 巩固保真度不足（{fidelity:.3} < {min}，tag={tag}）：源记忆原样保留"
+                );
+                continue;
+            }
+        }
+
+        let consolidated_seq = store
             .append(
                 Event::pending(
-                    format!("v2mf-{target}"),
-                    EVENT_MEMORY_FORGOTTEN,
+                    format!("v2mc-{turn}-{}-{}", source_seqs[0], source_seqs[1]),
+                    EVENT_MEMORY_CONSOLIDATED,
                     Entity::Memory,
-                    Verb::Closed,
+                    Verb::Progressed,
                     turn,
                     PRINCIPAL_USER,
                 )
-                .with_produced_by(target)
+                .with_produced_by(source_seqs[0])
                 .with_ts(now)
                 .with_payload(serde_json::json!({
-                    "why": "consolidated",
-                    "into": consolidated_seq.value(),
+                    "content": content,
+                    "tag": tag,
+                    "generation": generation,
+                    "fidelity": fidelity,
+                    "sources": source_seqs,
+                    "vec": [],
                 })),
             )
-            .map_err(|e| format!("memory.forgotten 入格失败：{e:?}"))?;
+            .map_err(|e| format!("memory.consolidated 入格失败：{e:?}"))?;
+
+        // 源记忆 → 排除式遗忘：Log 不删，只是 `recall` 投影不再包含（可撤销、可审计）。
+        for target in source_seqs {
+            store
+                .append(
+                    Event::pending(
+                        format!("v2mf-{target}"),
+                        EVENT_MEMORY_FORGOTTEN,
+                        Entity::Memory,
+                        Verb::Closed,
+                        turn,
+                        PRINCIPAL_USER,
+                    )
+                    .with_produced_by(target)
+                    .with_ts(now)
+                    .with_payload(serde_json::json!({
+                        "why": "consolidated",
+                        "into": consolidated_seq.value(),
+                    })),
+                )
+                .map_err(|e| format!("memory.forgotten 入格失败：{e:?}"))?;
+        }
+        merged.push((tag, consolidated_seq.value()));
     }
-    Ok(Some(consolidated_seq.value()))
+    Ok(merged)
 }
 
 // ==================== 小工具 ====================

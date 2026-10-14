@@ -29,8 +29,9 @@
 //! 自己就满足了该条件——抢占在生产里一次都不会发生（只有 fallback 收束例外），判定被
 //! 接入却永远走不到 `Suspend`。
 //!
-//! 记忆侧另有顺序（编码 → 检索锚 → 巩固 → 技能观测 → 技能编译），见 [`record_learning`]
-//! 的文档——巩固要用**刷新后**的快照，它得看得见编码刚写下的那条。
+//! 记忆侧另有顺序（编码[经验 + 判断] → 检索锚 → 巩固 → 技能观测 → 技能编译），
+//! 见 [`record_learning`] 的文档——巩固要用**刷新后**的快照，它得看得见编码
+//! 刚写下的那些。
 
 use crate::symbio_core::{Entity, Event, EventWalStore, Store, Verb, EVENT_MEMORY_CALIBRATED};
 
@@ -149,7 +150,7 @@ pub(crate) fn record_derived(
 ///
 /// ## 顺序是判据
 ///
-/// 1. 编码（步 11）先写——本轮新记忆要能进本轮的巩固；
+/// 1. 编码（步 11 经验 + 步 11b 判断）先写——本轮新记忆要能进本轮的巩固；
 /// 2. 检索事实（步 12）与它平级：溯源锚同为本轮开口；
 /// 3. 巩固（步 13）最后，且用**刷新后的**快照——它要看得见 1 刚写下的那条；
 /// 4. 技能观测在前、编译在后：观测记的是**本轮判没判、判成什么**，编译产出的是
@@ -185,10 +186,29 @@ pub(crate) fn record_learning(
         turn,
         user_seq,
         user_text,
+        super::v2_memory::MEMORY_TAG,
         &format!("v2m-{anchor_id}"),
         now,
     ) {
         remember("步 11 编码", why);
+    }
+    // ── 步 11b 判断编码（T-085 批④，S10 七类认知内容的「判断」写方）────────
+    // 本轮**成功收束**的正文（`response`）→ 一条 tag="判断" 的记忆，与用户发言
+    // 那条同文去重 / 同截断 / 同溯源。兜底收束不记（`response = None`）——固化
+    // 失败套路等于把没走通的路写成记忆（与技能编译同一条纪律）。
+    if let Some(response) = response {
+        if let Err(why) = super::v2_memory::encode(
+            store,
+            snapshot,
+            turn,
+            user_seq,
+            response,
+            super::v2_memory::JUDGMENT_TAG,
+            &format!("v2j-{anchor_id}"),
+            now,
+        ) {
+            remember("步 11b 判断编码", why);
+        }
     }
     // ── 步 12 检索入格：本轮召回视图 → 一条 `memory.recalled` ─────────────
     if let Some(view) = recalled {

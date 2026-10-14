@@ -419,7 +419,7 @@ fn consolidation_does_not_pollute_as_of_view() {
     let store = EventStore::new();
     encode(&store, "m0", 1_000, "用户偏好简洁答复", "semantic", 0);
     encode(&store, "m1", 2_000, "项目用 Rust 2021", "semantic", 0);
-    let p = recall("agent:main", None);
+    let p = recall("agent:main", None, None);
     let before = p.apply(
         &store.range(crate::symbio_core::event::Seq::new(0)),
         2_500,
@@ -499,7 +499,7 @@ fn recall_degrades_with_partial_results_when_budget_exhausted() {
             0,
         );
     }
-    let p = recall("agent:main", None);
+    let p = recall("agent:main", None, None);
     let tight = p.apply(
         &store.range(crate::symbio_core::event::Seq::new(0)),
         9_999,
@@ -539,13 +539,13 @@ fn memory_of_a_never_appears_in_b_recall() {
         )
         .unwrap();
     let events = || store.range(crate::symbio_core::event::Seq::new(0));
-    let b_view = recall("agent:b", None).apply(&events(), 9_999, Budget::generous());
+    let b_view = recall("agent:b", None, None).apply(&events(), 9_999, Budget::generous());
     assert!(
         !b_view.value.contains_content("A 的私有记忆"),
         "跨主体默认不可见（C13）"
     );
     assert!(b_view.value.contains_content("B 的记忆"));
-    let a_view = recall("agent:main", None).apply(&events(), 9_999, Budget::generous());
+    let a_view = recall("agent:main", None, None).apply(&events(), 9_999, Budget::generous());
     assert!(a_view.value.contains_content("A 的私有记忆"));
     assert!(!a_view.value.contains_content("B 的记忆"));
 }
@@ -555,7 +555,7 @@ fn memory_of_a_never_appears_in_b_recall() {
 fn projection_that_ignores_as_of_would_be_caught() {
     let store = EventStore::new();
     encode(&store, "m0", 1_000, "旧记忆", "semantic", 0);
-    let before_view = recall("agent:main", None).apply(
+    let before_view = recall("agent:main", None, None).apply(
         &store.range(crate::symbio_core::event::Seq::new(0)),
         2_000,
         Budget::generous(),
@@ -594,8 +594,8 @@ fn projection_that_ignores_as_of_would_be_caught() {
         .unwrap();
     let events = store.range(crate::symbio_core::event::Seq::new(0));
     // 一个「忽略 as-of」的错误实现：now=MAX ⇒ 未来事件全部涌入。
-    let broken_view = recall("agent:main", None).apply(&events, i64::MAX, Budget::generous());
-    let correct_view = recall("agent:main", None).apply(&events, 2_000, Budget::generous());
+    let broken_view = recall("agent:main", None, None).apply(&events, i64::MAX, Budget::generous());
+    let correct_view = recall("agent:main", None, None).apply(&events, 2_000, Budget::generous());
     assert_ne!(
         before_view.value, broken_view.value,
         "忽略 as-of 的实现必然被巩固改变——断言 1 能抓住它"
@@ -676,7 +676,7 @@ fn recall_translator_produces_provenanced_event_and_invariants_stay_green() {
     let store = EventStore::new();
     encode(&store, "m0", 1_000, "用户偏好简洁答复", "semantic", 0);
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
-    let view = recall("agent:main", None)
+    let view = recall("agent:main", None, None)
         .apply(&snapshot, 2_000, Budget::generous())
         .value;
     let event = RecallTranslator.recalled_event(&view, 0, "agent:main");

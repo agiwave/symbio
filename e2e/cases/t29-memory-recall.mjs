@@ -7,6 +7,9 @@ import './_selfrun.mjs';
 // 记忆入事实源；**下一轮起**请求视图置顶注入记忆段；活记忆到 4 条 ⇒ 巩固；
 // **新会话首轮**也能召回到别的会话的记忆（跨会话）。
 //
+// T-085 批④起每轮还编一条**判断**记忆（智能体收束正文，tag=判断）——注入段从此
+// 一问一答成对出现，判据按标签分开数（见 `A_ANSWERS`）。
+//
 // 为什么必须端到端：单测（`v2_memory.test.rs` / `v2_facts.test.rs`）把三段各自的
 // 出口判据钉死了，但它们证不了三件只有这条链路能看见的事：
 //
@@ -19,7 +22,7 @@ import './_selfrun.mjs';
 // ## 判据分列（一个规则一个判定方）
 //
 // - **编码与同文去重**：同一句话再说一遍 ⇒ 注入段里那句仍只出现一次
-//   （不编码第二条 ⇒ 没有第二条可注入）；
+//   （不编码第二条 ⇒ 没有第二条可注入）；判断那一半同理（轮 3 答话同文 ⇒ 去重）；
 // - **巩固放行**：第 4 条记忆到齐 ⇒ 最早两条合并成一条（注入段里它带着两条原句），
 //   被并掉的两条不再单独成行；
 // - **注入位置**：抬头 `【长期记忆】` 只能出现在**开头**，且请求包末条仍是用户自己
@@ -70,6 +73,15 @@ const T_HELLO = '你好，今天天气如何';
 
 /** B 会话首轮的答话：把跨会话召回得到的四句原话都说出来（对话内容面的召回判据）。 */
 const B_ANSWER = `你好。我都记得：${T_COFFEE}；${T_MEET}；${T_REPORT}；${T_WATER}。`;
+
+/** A 会话各轮的答话（mock 场景的 content）——T-085 批④ 起它们也是记忆：
+ *  智能体收束正文按 tag=判断 编码（与用户发言的经验记忆一文一答成对）。 */
+const A_ANSWERS = [
+  '好的，记住了。',
+  '明白，周三下午不安排会议。',
+  '周报摘要会准时发出。',
+  '好，记得喝温水。',
+];
 
 /** 请求包里一条消息的正文（string / 分片数组两种形态都认）。 */
 function textOf(m) {
@@ -242,16 +254,28 @@ export default defineCase(
       //
       // 判据用 `reqs[4]` 而不是 `reqs[3]`：后者在轮 4 自己还没编码时就去数，
       // 天然差一条。这不是"放宽"，是把"记忆在什么时候可见"这件事摆到正确的位置。
+      //
+      // T-085 批④起每轮还编一条**判断**记忆（智能体收束正文，tag=判断）——
+      // 轮 1–4 的答话互不相同 ⇒ 3 条（轮 3 的答话与轮 1 同文，去重）。
+      // 于是轮 5 的注入段 = 3 条经验 + 3 条判断 = 6 行。两种标签各自的去重 /
+      // 编码口径分开数：混在一起数只能证明"总共 6 行"，分标签数才钉得住
+      // "哪一半是哪一半"。
       const lines4 = memoryLines(reqs[4]);
+      const J_TEXTS = ['好的，记住了。', '明白，周三下午不安排会议。', '周报摘要会准时发出。'];
+      assertEq(
+        lines4.filter((l) => J_TEXTS.some((j) => l.includes(j))).length,
+        3,
+        `轮 1–4 的答话三条进注入段（轮 3 同文去重；实际: ${JSON.stringify(lines4)}）`,
+      );
+      assertEq(
+        lines4.filter((l) => [T_COFFEE, T_MEET, T_REPORT].some((t) => l.includes(t))).length,
+        3,
+        `轮 5 请求应看得到三条经验记忆（咖啡 / 周三 / 周报；实际: ${JSON.stringify(lines4)}）`,
+      );
       assertEq(
         lines4.filter((l) => l.includes(T_COFFEE)).length,
         1,
         `同一句话不重复编码 ⇒ 注入段里它只出现一次（实际: ${JSON.stringify(lines4)}）`,
-      );
-      assertEq(
-        lines4.length,
-        3,
-        `轮 5 请求应看得到三条记忆（咖啡 / 周三 / 周报；实际: ${JSON.stringify(lines4)}）`,
       );
 
       // ── 巩固（第 4 条到齐 ⇒ 合并最早两条）────────────────────────────────
@@ -269,7 +293,30 @@ export default defineCase(
       // （实测 3 条记忆 + 6 行能力目录 = 9）。记忆段照旧三条，只是它不独占一条消息。
       const memSection = recallSectionText(reqs[5]);
       const lines = memSection.split('\n').filter((l) => l.startsWith('- '));
-      assertEq(lines.length, 3, `跨会话召回三行（合并 + 周报 + 温水），实际: ${memSection}`);
+      // 3 行经验（合并 + 周报 + 温水）。判断那一侧：A 五轮的答话去重后 4 条，
+      // 到第 5 轮收束时恰好够巩固门槛 ⇒ 最旧两条（好的记住了 + 明白了）被并成
+      // 一行 ⇒ 4 条判断占 3 行。**合并产物带原句**，所以按「答话在不在」数 4、
+      // 按「行数」数 3——两个数都对，且互相印证巩固确实发生过。
+      assertEq(
+        lines.filter((l) => [T_COFFEE, T_MEET, T_REPORT, T_WATER].some((t) => l.includes(t))).length,
+        3,
+        `跨会话召回三行经验（合并 + 周报 + 温水），实际: ${memSection}`,
+      );
+      const answersKept = A_ANSWERS.filter((a) => memSection.includes(a));
+      assertEq(
+        answersKept.length,
+        4,
+        `A 五轮的判断（答话）去重后四条，合并产物带原句 ⇒ 四条都在，实际: ${memSection}`,
+      );
+      assertEq(
+        lines.filter((l) => A_ANSWERS.some((a) => l.includes(a))).length,
+        3,
+        `四条判断占 3 行：最旧两条已被巩固（T-085 批④ 的 CONSOLIDABLE_TAGS），实际: ${memSection}`,
+      );
+      assert(
+        memSection.includes(`${A_ANSWERS[0]}\n${A_ANSWERS[1]}`),
+        `判断的合并产物同样带两条原句，实际: ${memSection}`,
+      );
       assert(memSection.includes(T_WATER), `活记忆在段内（实际: ${memSection}）`);
       assert(memSection.includes(T_REPORT), `活记忆在段内（实际: ${memSection}）`);
       assert(

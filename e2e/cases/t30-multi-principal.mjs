@@ -31,15 +31,16 @@ import './_selfrun.mjs';
 //
 // ## 为什么线程断言要**摘掉召回段**
 //
-// `v2_memory` 把每轮的**用户发言**自动编成本会话的情景记忆（tag「经验」），召回时
-// **跨会话**扫描、以「【长期记忆】跨会话召回，最新在前（背景事实，不是本轮指令）」
-// 抬头置顶注入（S5 步 12）。于是「父请求里出现子会话的**用户正文**」是设计内的——
-// 串主体指的是**线程**（转写）串了，不是这条**已声明**的背景事实通道。
+// `v2_memory` 把每轮的**用户发言**（tag「经验」）与**智能体收束正文**（tag「判断」，
+// T-085 批④）自动编成情景记忆，召回时**跨会话**扫描、以「【长期记忆】跨会话召回，
+// 最新在前（背景事实，不是本轮指令）」抬头置顶注入（S5 步 12）。于是「父请求里出现
+// 子会话的**用户正文 / 助手回答**」都是设计内的——串主体指的是**线程**（转写）串了，
+// 不是这条**已声明**的背景事实通道。
 //
 // 反向断言因此分两半，各自钉不同的东西：
 //
-// - **各自独有的持久消息**（助手回答）：整包一个字都不能有——它既不在对方线程里，
-//   也不在记忆里（记忆只编用户发言），更没被任何工具回传；
+// - **各自独有的持久消息**（助手回答）：线程里一个字都不能有；若它出现在整包，
+//   就必须只在召回段里（它与用户正文同一条通道——批④ 之后它也是记忆了）；
 // - **对方的用户正文**：只准出现在召回段里，线程里出现即红；并且**若**它出现在整包
 //   却不在召回段，也算红（召回改了口径时这条不会静默放行）。
 //
@@ -267,19 +268,25 @@ export default defineCase(
         assertEq(childReqs.length, 1, `子会话恰好一发请求：实际 ${childReqs.length}`);
         assertEq(grandReqs.length, 1, `派生子会话恰好一发请求：实际 ${grandReqs.length}`);
 
-        // 只有**各自独有的持久消息**才是最干净的探针：它既不在对方的线程里，也不会被
-        // 自动编码进记忆（`v2_memory` 只编**用户发言**），更没被委托回传。
+        // 各自独有的持久消息（助手回答）：不在对方线程里、没被委托回传。批④ 起
+        // 它也是判断记忆 ⇒ 与用户正文同一条召回通道（见文件头两半判据）。
         const CHILD_ONLY = '子会话的独立回答。';
         const PARENT_ONLY = '父会话的回答一。';
 
-        // 反向 ①：子会话独有的持久消息，父的请求包里一个字都不能有（连召回段一起算）。
+        // 反向 ①：子会话独有的持久消息（助手回答）不准进父的**线程**；批④ 起它
+        // 也是判断记忆 ⇒ 与 C1 同一条召回通道（见文件头）。判据：出现了就必须
+        // 在召回段里，线程里出现即红。
         for (const r of parentReqs) {
           const body = JSON.stringify(r.body);
-          const at = body.indexOf(CHILD_ONLY);
+          if (body.includes(CHILD_ONLY)) {
+            assert(
+              recallText(r).includes(CHILD_ONLY),
+              `父会话请求里出现子会话的回答，却不在召回段里（last user = ${lastUserText(r)}）`,
+            );
+          }
           assert(
-            at < 0,
-            `父会话请求带进了子会话独有的持久消息（last user = ${lastUserText(r)}）：` +
-              `…${body.slice(Math.max(0, at - 240), at + 240)}…`,
+            !threadBody(r).includes(CHILD_ONLY),
+            `父会话**线程**带进了子会话的回答（last user = ${lastUserText(r)}）`,
           );
         }
         // 反向 ②：子会话的**用户正文**只准出现在已声明的跨会话召回段里——线程里出现
@@ -296,22 +303,36 @@ export default defineCase(
             assert(recallText(r).includes(C1), '父会话请求里出现子会话正文，却不在召回段里');
           }
         }
-        // 反向 ③：父会话独有的持久消息 + 父的用户正文，子的请求包里同样要分通道。
+        // 反向 ③：父会话独有的持久消息（助手回答，批④ 起也是判断记忆）与父的
+        // 用户正文，子的请求包里同样分通道：召回段里可以有，线程里出现即红。
         for (const r of childReqs) {
+          if (JSON.stringify(r.body).includes(PARENT_ONLY)) {
+            assert(
+              recallText(r).includes(PARENT_ONLY),
+              '子会话请求里出现父会话的回答，却不在召回段里',
+            );
+          }
           assert(
-            !JSON.stringify(r.body).includes(PARENT_ONLY),
-            '子会话请求带进了父会话独有的持久消息（助手回答）',
+            !threadBody(r).includes(PARENT_ONLY),
+            '子会话**线程**带进了父会话的回答',
           );
           assert(!threadBody(r).includes(P1), '子会话**线程**带进了父会话第 1 轮的正文');
         }
-        // 反向 ④：派生子会话只带自己的线程（召回段照旧摘掉）。
+        // 反向 ④：派生子会话只带自己的线程（召回段照旧摘掉）；父的回答是判断
+        // 记忆 ⇒ 与 P1/C1 同一条召回通道，线程里出现即红。
         for (const r of grandReqs) {
           const thread = threadBody(r);
           assert(!thread.includes(P1), '派生子会话线程带进了父会话第 1 轮的正文');
           assert(!thread.includes(C1), '派生子会话线程带进了子会话那一轮的正文');
+          if (JSON.stringify(r.body).includes(PARENT_ONLY)) {
+            assert(
+              recallText(r).includes(PARENT_ONLY),
+              '派生子会话请求里出现父会话的回答，却不在召回段里',
+            );
+          }
           assert(
-            !JSON.stringify(r.body).includes(PARENT_ONLY),
-            '派生子会话请求带进了父会话独有的持久消息',
+            !thread.includes(PARENT_ONLY),
+            '派生子会话**线程**带进了父会话的回答',
           );
         }
         // 正向对照：各自的正文确实在自己的请求包里（不是「谁都没有」那种空过）。

@@ -10,8 +10,8 @@
 
 use super::{
     consolidate, encode, merge_with_fidelity, prompt_section, recall_view, record_recalled,
-    split_sentences, CONSOLIDATE_MIN_ENTRIES, ENCODE_MAX_CHARS, MEMORY_TAG, MERGE_MAX_CHARS,
-    RECALL_SECTION_HEAD,
+    split_sentences, CONSOLIDATE_MIN_ENTRIES, ENCODE_MAX_CHARS, JUDGMENT_TAG, MEMORY_TAG,
+    MERGE_MAX_CHARS, RECALL_SECTION_HEAD,
 };
 use crate::plugins::session::v2_skills::SKILL_TAG;
 use crate::symbio_core::authz::PRINCIPAL_USER;
@@ -114,6 +114,7 @@ fn encode_writes_a_sourced_memory_then_dedupes_same_text() {
         3,
         41,
         "你好",
+        MEMORY_TAG,
         "v2m-u1-a0",
         t,
     )
@@ -163,6 +164,7 @@ fn encode_writes_a_sourced_memory_then_dedupes_same_text() {
             3,
             42,
             "你好",
+            MEMORY_TAG,
             "v2m-u1-a1",
             t + 1
         )
@@ -177,6 +179,7 @@ fn encode_writes_a_sourced_memory_then_dedupes_same_text() {
             4,
             43,
             "   \n",
+            MEMORY_TAG,
             "v2m-u2-a0",
             t + 2
         )
@@ -194,6 +197,7 @@ fn encode_writes_a_sourced_memory_then_dedupes_same_text() {
         5,
         44,
         &long,
+        MEMORY_TAG,
         "v2m-u3-a0",
         t + 3,
     )
@@ -207,6 +211,83 @@ fn encode_writes_a_sourced_memory_then_dedupes_same_text() {
         "截断按字符数（不切 UTF-8 字节）"
     );
     assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+
+    std::fs::remove_dir_all(wal.parent().unwrap()).ok();
+}
+
+/// 步 11b（T-085 批④）：智能体收束正文 → tag=`判断` 的记忆——S10 七类认知内容
+/// 里 `recall:tag=judgment` 的**生产写方**（此前参数在、值缺写方）。
+///
+/// 与经验那条同文去重 / 同截断 / 同溯源（本轮开口格）；空正文不记。
+#[test]
+fn judgment_encode_writes_the_agents_conclusion_under_its_own_tag() {
+    let wal = tmp_wal("judgment");
+    let store = EventWalStore::open(&wal).expect("打开 WAL");
+    let t = 1_700_000_000_000i64;
+
+    let seq = encode(
+        &store,
+        &store.range(Seq::new(0)),
+        3,
+        41,
+        "连接池调到 50 并加了索引",
+        JUDGMENT_TAG,
+        "v2j-u1-a0",
+        t,
+    )
+    .expect("编码不失败")
+    .expect("写了记忆");
+    assert_eq!(seq, 0, "首格 seq 从 0 起");
+
+    let snap = store.range(Seq::new(0));
+    let ev = &snap[0];
+    assert_eq!(ev.kind, EVENT_MEMORY_ENCODED);
+    assert_eq!(
+        payload_str(ev, "tag"),
+        Some(JUDGMENT_TAG),
+        "S10 的 recall:tag=judgment 从此有生产写方"
+    );
+    assert_eq!(
+        payload_str(ev, "content"),
+        Some("连接池调到 50 并加了索引"),
+        "记的是智能体自己的结论"
+    );
+    assert_eq!(ev.produced_by, Some(41), "溯源同指本轮开口格（I2）");
+    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+
+    // 同文去重跨标签：同一句已被任一标签记过 ⇒ 不写第二条。
+    assert_eq!(
+        encode(
+            &store,
+            &store.range(Seq::new(0)),
+            3,
+            42,
+            "连接池调到 50 并加了索引",
+            MEMORY_TAG,
+            "v2m-u1-a1",
+            t + 1
+        )
+        .expect("编码不失败"),
+        None,
+        "跨标签同文也算重复——同一个事实不必按标签记两遍"
+    );
+    // 空正文不记（兜底收束那条路根本不调本函数——response = None）。
+    assert_eq!(
+        encode(
+            &store,
+            &store.range(Seq::new(0)),
+            4,
+            43,
+            "  ",
+            JUDGMENT_TAG,
+            "v2j-u2-a0",
+            t + 2
+        )
+        .expect("编码不失败"),
+        None,
+        "空发言不记"
+    );
+    assert_eq!(store.range(Seq::new(0)).len(), 1, "只写了一格");
 
     std::fs::remove_dir_all(wal.parent().unwrap()).ok();
 }
@@ -230,14 +311,17 @@ fn consolidate_merges_the_two_oldest_and_forgets_the_sources() {
 
     // 只有 3 条时不动（先把第一条拿掉再问一次）。
     let three: Vec<Event> = snap[1..].to_vec();
-    assert_eq!(
-        consolidate(&store, &three, 6, 5000).expect("巩固不失败"),
-        None,
+    assert!(
+        consolidate(&store, &three, 6, 5000)
+            .expect("巩固不失败")
+            .is_empty(),
         "不足 {CONSOLIDATE_MIN_ENTRIES} 条不触发"
     );
 
     let merged_seq = consolidate(&store, &snap, 7, 5000)
         .expect("巩固不失败")
+        .first()
+        .map(|(_, s)| *s)
         .expect("第 4 条到位 ⇒ 触发合并");
     let snap2 = store.range(Seq::new(0));
     assert_eq!(
@@ -295,7 +379,7 @@ fn consolidate_merges_the_two_oldest_and_forgets_the_sources() {
     }
 
     // 投影：活记忆 = 丙、丁 + 合并产物；被遗忘的不再包含（排除式遗忘）。
-    let view = recall(PRINCIPAL_USER, Some(MEMORY_TAG.to_string()))
+    let view = recall(PRINCIPAL_USER, Some(MEMORY_TAG.to_string()), None)
         .apply(&snap2, i64::MAX, Budget::generous())
         .value;
     assert_eq!(view.entries.len(), 3);
@@ -308,7 +392,7 @@ fn consolidate_merges_the_two_oldest_and_forgets_the_sources() {
     std::fs::remove_dir_all(wal.parent().unwrap()).ok();
 }
 
-/// **巩固只合并同标签的记忆**——`recall(.., Some(MEMORY_TAG))` 的标签过滤是**承重**的。
+/// **巩固只合并同标签的记忆**——`recall(.., Some(tag), None)` 的标签过滤是**承重**的。
 ///
 /// 技能（`tag = "skill"`）与经验同住一张网格（S11 §2「技能是事实，不是特殊类型」），
 /// 若这个过滤退化成恒真，`consolidate` 眼里的「最旧两条」会变成**技能**：合并产物成了
@@ -317,6 +401,10 @@ fn consolidate_merges_the_two_oldest_and_forgets_the_sources() {
 /// 两条技能刻意比四条经验**更旧**：这样"选错了"必然可见（选对时它们根本不在候选里）。
 /// 这也是「读侧过滤」这条设计（[roadmap/S10 §5](../../../../docs/stage/ST-010-个人认知体系注入.md "ST-010-个人认知体系注入")）
 /// 在生产链上唯一可观察的后果——过滤本身的纯函数性质在 core 的 `recall.test.rs` 钉。
+///
+/// T-085 批④ 把同一条判据**复用**到「判断」标签：[`CONSOLIDABLE_TAGS`] 里两个
+/// 生产写方的标签各自成组合并，技能仍在外。三条并行：经验 4 条合并、判断 4 条
+/// 合并、技能 2 条不动——过滤器若对任一标签恒真，对应那条线当场红。
 #[test]
 fn consolidation_never_merges_across_tags() {
     let wal = tmp_wal("consolidate-tags");
@@ -329,32 +417,74 @@ fn consolidation_never_merges_across_tags() {
     {
         seed_encoded(&store, &format!("e{i}"), text, 1200 + i as i64);
     }
+    // 判断一组：4 条，晚于经验（各自成组，谁先谁后与判据无关）。
+    for (i, text) in ["调大连接池", "先加索引", "再看慢查询", "最后复盘"]
+        .iter()
+        .enumerate()
+    {
+        seed_encoded_as(
+            &store,
+            &format!("j{i}"),
+            text,
+            JUDGMENT_TAG,
+            1300 + i as i64,
+        );
+    }
     let snap = store.range(Seq::new(0));
-    assert_eq!(snap.len(), 6, "2 条技能 + 4 条经验");
+    assert_eq!(snap.len(), 10, "2 条技能 + 4 条经验 + 4 条判断");
 
-    let merged_seq = consolidate(&store, &snap, 7, 5000)
-        .expect("巩固不失败")
-        .expect("同标签活记忆 4 条 ⇒ 触发");
+    let merged = consolidate(&store, &snap, 7, 5000).expect("巩固不失败");
+    assert_eq!(
+        merged.len(),
+        2,
+        "经验与判断**各自**到 4 条 ⇒ 两组各合并一次（技能 2 条不动）"
+    );
+    assert_eq!(merged[0].0, MEMORY_TAG, "第一组合并的是经验");
+    assert_eq!(merged[1].0, JUDGMENT_TAG, "第二组合并的是判断");
+    let merged_seq = merged[0].1;
     let snap2 = store.range(Seq::new(0));
 
-    let c = snap2
+    let consolidated: Vec<&Event> = snap2
         .iter()
-        .find(|e| e.kind == EVENT_MEMORY_CONSOLIDATED)
-        .expect("写了一条合并产物");
-    assert_eq!(c.seq().map(|s| s.value()), Some(merged_seq));
+        .filter(|e| e.kind == EVENT_MEMORY_CONSOLIDATED)
+        .collect();
+    assert_eq!(consolidated.len(), 2, "恰好两条合并产物");
+    let exp_c = consolidated
+        .iter()
+        .find(|e| payload_str(e, "tag") == Some(MEMORY_TAG))
+        .expect("经验的合并产物");
+    assert_eq!(exp_c.seq().map(|s| s.value()), Some(merged_seq));
     assert_eq!(
-        c.payload
+        exp_c
+            .payload
             .get("sources")
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default(),
         vec![serde_json::json!(2), serde_json::json!(3)],
-        "合并的是最旧的**两条经验**（技能 seq 0 / 1 更旧，但标签不同 ⇒ 不在候选里）"
+        "合并的是最旧的**两条经验**（技能 seq 0 / 1 与判断 seq 6..9 更旧/同代，但标签不同 ⇒ 不在候选里）"
     );
-    let merged = payload_str(c, "content").unwrap_or("");
+    let merged_exp = payload_str(exp_c, "content").unwrap_or("");
     assert!(
-        !merged.contains("先写正向用例") && !merged.contains("先跑一遍再改"),
-        "技能正文不得被并进经验（过滤失效时这里会红）：{merged}"
+        !merged_exp.contains("先写正向用例") && !merged_exp.contains("先跑一遍再改"),
+        "技能正文不得被并进经验（过滤失效时这里会红）：{merged_exp}"
+    );
+    assert!(
+        !merged_exp.contains("调大连接池"),
+        "判断正文不得被并进经验（跨组合并会当场红）：{merged_exp}"
+    );
+    let jud_c = consolidated
+        .iter()
+        .find(|e| payload_str(e, "tag") == Some(JUDGMENT_TAG))
+        .expect("判断的合并产物");
+    let merged_jud = payload_str(jud_c, "content").unwrap_or("");
+    assert!(
+        merged_jud.contains("调大连接池") && merged_jud.contains("先加索引"),
+        "判断组合并的是最旧两条判断（seq 6 / 7）：{merged_jud}"
+    );
+    assert!(
+        !merged_jud.contains("起床先喝水"),
+        "经验正文不得被并进判断：{merged_jud}"
     );
 
     let targets: Vec<u64> = snap2
@@ -362,11 +492,15 @@ fn consolidation_never_merges_across_tags() {
         .filter(|e| e.kind == EVENT_MEMORY_FORGOTTEN)
         .map(|e| e.produced_by.expect("遗忘格带溯源"))
         .collect();
-    assert_eq!(targets, vec![2, 3], "被排除式遗忘的只有那两条经验");
+    assert_eq!(
+        targets,
+        vec![2, 3, 6, 7],
+        "被排除式遗忘的只有各组的源两条（经验 2/3 + 判断 6/7）"
+    );
 
     // 技能原样留在事实源与视图里（`recall_view` 不按标签过滤 ⇒ 它们照常可召回，
-    // 只是不参与**经验**的巩固）。
-    let view = recall(PRINCIPAL_USER, None)
+    // 只是不参与**经验**的巩固；判断的源两条同理被并进组内产物）。
+    let view = recall(PRINCIPAL_USER, None, None)
         .apply(&snap2, i64::MAX, Budget::generous())
         .value;
     assert!(
@@ -392,15 +526,16 @@ fn consolidate_refuses_a_lossy_merge_and_keeps_the_sources() {
     seed_encoded(&store, "short-d", "短的丁", 1300);
 
     let snap = store.range(Seq::new(0));
-    assert_eq!(
-        consolidate(&store, &snap, 2, 5000).expect("巩固不失败"),
-        None,
+    assert!(
+        consolidate(&store, &snap, 2, 5000)
+            .expect("巩固不失败")
+            .is_empty(),
         "保真度不足 ⇒ 拒收"
     );
     let snap2 = store.range(Seq::new(0));
     assert_eq!(snap2.len(), 4, "拒收 = 一条都没写（源记忆原样留在 Log）");
 
-    let view = recall(PRINCIPAL_USER, Some(MEMORY_TAG.to_string()))
+    let view = recall(PRINCIPAL_USER, Some(MEMORY_TAG.to_string()), None)
         .apply(&snap2, i64::MAX, Budget::generous())
         .value;
     assert_eq!(
@@ -425,9 +560,10 @@ fn consolidate_stops_at_the_generation_ceiling() {
     seed_encoded(&store, "e-d", "新来的丁", 1300);
 
     let snap = store.range(Seq::new(0));
-    assert_eq!(
-        consolidate(&store, &snap, 1, 5000).expect("巩固不失败"),
-        None,
+    assert!(
+        consolidate(&store, &snap, 1, 5000)
+            .expect("巩固不失败")
+            .is_empty(),
         "max(3, 2) + 1 = 4 > max_gen(3) ⇒ 拒收"
     );
     assert_eq!(
@@ -451,9 +587,12 @@ fn consolidate_reads_generation_from_the_source_payload() {
     seed_encoded(&store, "e-d", "新来的丁", 1300);
 
     let snap = store.range(Seq::new(0));
-    consolidate(&store, &snap, 1, 5000)
-        .expect("巩固不失败")
-        .expect("代数 1 够低，合并该放行");
+    assert!(
+        !consolidate(&store, &snap, 1, 5000)
+            .expect("巩固不失败")
+            .is_empty(),
+        "代数 1 够低，合并该放行"
+    );
     let snap = store.range(Seq::new(0));
     let c = snap
         .iter()
@@ -502,7 +641,7 @@ fn recall_view_scans_neighbour_sessions_newest_first() {
     let wal_b = EventWalStore::open(b.join(V2_WAL_FILE)).expect("B 的事实源");
     seed_encoded(&wal_b, "b1", "B 的记忆", 2000);
 
-    let view = recall_view(&a).expect("两个会话都有记忆");
+    let view = recall_view(&a, "").expect("两个会话都有记忆");
     let contents: Vec<&str> = view.entries.iter().map(|e| e.content.as_str()).collect();
     assert_eq!(
         contents,
@@ -514,7 +653,54 @@ fn recall_view_scans_neighbour_sessions_newest_first() {
     let empty_root = tempfile::tempdir().expect("空临时根");
     let none_dir = empty_root.path().join("s-none");
     std::fs::create_dir_all(&none_dir).expect("空会话目录");
-    assert!(recall_view(&none_dir).is_none(), "没记忆就不产出视图");
+    assert!(recall_view(&none_dir, "").is_none(), "没记忆就不产出视图");
+}
+
+/// 步 12 读方**消费混合打分**（T-085 批②）：本轮用户正文作 query 时，
+/// 内容相关的旧记忆排到无关的新记忆前面——注入段「最新在前」的排版因此
+/// 把最相关的排在模型眼前。
+///
+/// 这是「签名扩参数 ⇒ 读方真的在用」的生产判据：投影侧的 `query_ranks_…`
+/// 钉排序本身，这里钉**读方把它接上了**（两处都绿才叫落地）。
+#[test]
+fn recall_view_consumes_the_query_so_relevant_old_memories_rank_first() {
+    let root = tempfile::tempdir().expect("临时根");
+    let a = root.path().join("s-q");
+    std::fs::create_dir_all(&a).expect("会话目录");
+    let wal = EventWalStore::open(a.join(V2_WAL_FILE)).expect("事实源");
+    seed_encoded(
+        &wal,
+        "q-old",
+        "部署时数据库连接池打满：调大最大连接数",
+        1000,
+    );
+    seed_encoded(&wal, "q-new-1", "今天改了 README 的一段说明", 9000);
+    seed_encoded(&wal, "q-new-2", "调整了日志级别，减少噪声", 8000);
+
+    let view = recall_view(&a, "数据库连接池打满怎么办").expect("有记忆");
+    assert_eq!(
+        view.entries
+            .first()
+            .map(|e| e.content.as_str())
+            .expect("非空"),
+        "部署时数据库连接池打满：调大最大连接数",
+        "读方传了 query ⇒ 相关内容必须排第一（哪怕它最旧）"
+    );
+
+    // 空 query ⇒ 平凡值：新近度降序，与本批落地前逐字相同。
+    let plain = recall_view(&a, "").expect("有记忆");
+    let plain_contents: Vec<&str> = plain.entries.iter().map(|e| e.content.as_str()).collect();
+    assert_eq!(
+        plain_contents,
+        vec![
+            "今天改了 README 的一段说明",
+            "调整了日志级别，减少噪声",
+            "部署时数据库连接池打满：调大最大连接数"
+        ],
+        "无查询 ⇒ 纯 ts 降序（旧记忆垫底）"
+    );
+
+    std::fs::remove_dir_all(a).ok();
 }
 
 /// 注入段排版：抬头 + 逐条一行、跨会话同文只印一行、空视图不印空壳标题。
@@ -532,7 +718,7 @@ fn prompt_section_prints_one_line_per_memory_and_nothing_when_empty() {
         seed_encoded(&store, &format!("seed-{sid}"), text, ts);
     }
     // `s-a2` 的目录名即会话 id，读它 = 扫全根。
-    let view = recall_view(&root.path().join("s-a2")).expect("有记忆");
+    let view = recall_view(&root.path().join("s-a2"), "").expect("有记忆");
     let section = prompt_section(&view).expect("有条目 ⇒ 有段");
     assert!(
         section.starts_with(RECALL_SECTION_HEAD),
@@ -550,7 +736,7 @@ fn prompt_section_prints_one_line_per_memory_and_nothing_when_empty() {
     );
 
     // 空视图 ⇒ None（不印空壳标题）。
-    let empty = recall(PRINCIPAL_USER, None)
+    let empty = recall(PRINCIPAL_USER, None, None)
         .apply(&[], i64::MAX, Budget::generous())
         .value;
     assert!(prompt_section(&empty).is_none());
@@ -568,7 +754,7 @@ fn record_recalled_anchors_the_retrieval_and_is_idempotent() {
     let store = EventWalStore::open(&wal).expect("打开 WAL");
     let trigger = seed_encoded(&store, "m1", "记住这条", 1000);
 
-    let view = recall(PRINCIPAL_USER, None)
+    let view = recall(PRINCIPAL_USER, None, None)
         .apply(&store.range(Seq::new(0)), i64::MAX, Budget::generous())
         .value;
     assert_eq!(view.entries.len(), 1);

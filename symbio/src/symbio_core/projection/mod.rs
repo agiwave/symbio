@@ -58,6 +58,7 @@ pub mod mutations;
 pub mod prompt_fidelity;
 pub mod readyset;
 pub mod recall;
+mod recall_score;
 pub mod reputation;
 pub mod slo;
 pub mod span;

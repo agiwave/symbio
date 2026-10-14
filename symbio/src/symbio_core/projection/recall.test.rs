@@ -1,4 +1,5 @@
-//! `recall` 单测 —— 投影参数（**读侧过滤**）的三条性质：排除 / 可逆 / 活参数。
+//! `recall` 单测 —— 投影参数（**读侧过滤**）的三条性质：排除 / 可逆 / 活参数，
+//! 外加混合打分（T-085 批②）的语义维判据。
 //!
 //! 对应 [roadmap/S10 §5](../../../../docs/stage/ST-010-个人认知体系注入.md "ST-010-个人认知体系注入") 的结论：
 //! 「通用性过滤」与 `memory.forgotten` 同构 ⇒ 它必须是**读侧投影参数**、不能是写侧过滤，
@@ -11,13 +12,15 @@
 //! ——判据越确定越好。它的**生产后果**（技能不参与经验的巩固）在
 //! `plugins/session/v2_memory.test.rs` 钉：那里才看得见「过滤退化成恒真」会毁掉什么。
 //!
-//! ## 这三条各挡一种静默失效
+//! ## 这几条各挡一种静默失效
 //!
 //! | 用例 | 挡住什么 |
 //! |---|---|
 //! | 排除 | 过滤被改成恒真（技能会漏进只该有经验的地方） |
 //! | 可逆 | 过滤被挪到**写侧**（内容不落盘，放宽阈值也召不回） |
 //! | 活参数 | 参数被无视（形参还在、语义没了——最难发现的一种） |
+//! | 混合打分 | 查询被收下、排序照旧（`query` 成为死参数，旧记忆永远输给新噪声） |
+//! | 平凡值 | 混合打分落地把无查询路径也改窄（老调用点行为漂移） |
 
 use super::*;
 use crate::symbio_core::event::{Entity, Event, Seq, Verb, EVENT_MEMORY_ENCODED};
@@ -56,7 +59,7 @@ fn seeded() -> (EventStore, Vec<Event>) {
 }
 
 fn recall_with(tag: Option<&str>, events: &[Event]) -> RecallView {
-    recall(VIEWER, tag.map(str::to_string))
+    recall(VIEWER, tag.map(str::to_string), None)
         .apply(events, i64::MAX, Budget::generous())
         .value
 }
@@ -137,4 +140,173 @@ fn changing_the_tag_changes_the_view() {
     // 正向对照：`None` 与任一具体标签都不同——「不过滤」本身也是一个取值，
     // 不是「参数缺失」。（把 `None` 写成"忽略参数"的实现会在这里与 `a` 撞上。）
     assert_ne!(contents(&recall_with(None, &snap)), contents(&a));
+}
+
+// ── 判据四：混合打分（T-085 批②，语义维）────────────────────────────────
+
+fn recall_query(query: &str, events: &[Event]) -> RecallView {
+    recall(VIEWER, None, Some(query.to_string()))
+        .apply(events, i64::MAX, Budget::generous())
+        .value
+}
+
+/// 「旧但相关」的池：m0 与查询共享多个二元组但**最旧**；m1/m2 与查询无关
+/// 但更新。纯时间序 ⇒ m0 排最后；内容匹配 ⇒ m0 排第一。
+fn relevance_seeded() -> (EventStore, Vec<Event>) {
+    let store = EventStore::new();
+    encode(
+        &store,
+        "old-hit",
+        "部署时数据库连接池打满：把最大连接数从 20 调到 50",
+        "经验",
+        100,
+    );
+    encode(
+        &store,
+        "new-noise-1",
+        "今天改了 README 的一段说明",
+        "经验",
+        900,
+    );
+    encode(
+        &store,
+        "new-noise-2",
+        "调整了日志级别，减少噪声",
+        "经验",
+        800,
+    );
+    let snapshot = store.range(Seq::new(0));
+    (store, snapshot)
+}
+
+#[test]
+fn query_ranks_content_relevant_first_even_when_oldest() {
+    let (_store, snap) = relevance_seeded();
+
+    let q = recall_query("部署时数据库连接池打满的处理", &snap);
+    assert_eq!(
+        q.entries.first().map(|e| e.content.as_str()),
+        Some("部署时数据库连接池打满：把最大连接数从 20 调到 50"),
+        "内容重叠最高的必须排第一——哪怕它是最旧的那条（纯时间序会把它埋掉）"
+    );
+
+    // 反向对照：同一份事实源，**无查询** ⇒ 纯 ts 降序，最旧的落到最后。
+    let plain = recall_with(None, &snap);
+    assert_eq!(
+        plain.entries.last().map(|e| e.content.as_str()),
+        Some("部署时数据库连接池打满：把最大连接数从 20 调到 50"),
+        "无查询时排序必须与混合打分落地前逐字相同（旧记忆垫底）"
+    );
+    assert_ne!(
+        contents(&q),
+        contents(&plain),
+        "同一事实源，「有查询」与「无查询」的排序必须不同——否则 query 是死参数"
+    );
+}
+
+#[test]
+fn changing_the_query_changes_the_ranking() {
+    let store = EventStore::new();
+    encode(
+        &store,
+        "db",
+        "部署时数据库连接池打满：调大最大连接数",
+        "经验",
+        100,
+    );
+    encode(
+        &store,
+        "mem",
+        "用 heaptrack 定位内存泄漏，看谁的引用没释放",
+        "经验",
+        900,
+    );
+    let snap = store.range(Seq::new(0));
+
+    let by_db = recall_query("数据库连接池", &snap);
+    let by_mem = recall_query("内存泄漏定位", &snap);
+    assert_eq!(
+        by_db.entries[0].content,
+        "部署时数据库连接池打满：调大最大连接数"
+    );
+    assert_eq!(
+        by_mem.entries[0].content,
+        "用 heaptrack 定位内存泄漏，看谁的引用没释放"
+    );
+    assert_ne!(
+        contents(&by_db),
+        contents(&by_mem),
+        "换一个查询必须换一个排序——`query` 是活参数，不是形参装饰"
+    );
+}
+
+#[test]
+fn unrelated_query_falls_back_to_recency_without_dropping_entries() {
+    let (_store, snap) = relevance_seeded();
+
+    // 与全部内容零重叠的查询：重叠分全 0 ⇒ 平手判据（ts 降序）接管——
+    // **必须**退化成纯时间序，且一条都不许丢（I3：不允许静默返回空）。
+    let q = recall_query("量子计算的纠错码", &snap);
+    assert_eq!(q.entries.len(), 3, "零重叠查询一条都不丢");
+    assert_eq!(
+        contents(&q),
+        contents(&recall_with(None, &snap)),
+        "零重叠 ⇒ 排序退化为 ts 降序（与无查询逐字相同）"
+    );
+}
+
+#[test]
+fn ranking_is_deterministic_when_scores_and_ts_tie() {
+    let store = EventStore::new();
+    // 两条同 ts、同查询词命中数（各含一次「连接池」）——平手必须由 seq 收口。
+    encode(&store, "tie-a", "连接池太小", "经验", 500);
+    encode(&store, "tie-b", "连接池太大", "经验", 500);
+    let snap = store.range(Seq::new(0));
+
+    let first = recall_query("连接池", &snap);
+    let second = recall_query("连接池", &snap);
+    assert_eq!(
+        contents(&first),
+        contents(&second),
+        "同分同 ts 必须逐字同序（N1：同一输入 ⇒ 同一输出）"
+    );
+    // 平手按 seq 降序 ⇒ 后写入的 tie-b（seq 更大）在前。
+    assert_eq!(first.entries[0].content, "连接池太大");
+}
+
+// ── 判据六：可降级（S06 §6 验收 2 的执行方——此前无人在 recall 侧盯它）─────
+
+#[test]
+fn exhausted_budget_degrades_with_partial_results_instead_of_silently_empty() {
+    let store = EventStore::new();
+    for i in 0..10i64 {
+        encode(
+            &store,
+            &format!("b{i}"),
+            &format!("记忆 {i}"),
+            "经验",
+            100 + i,
+        );
+    }
+    let snap = store.range(Seq::new(0));
+
+    // 配额 5：扫到第 6 条记忆事件即停 ⇒ 降级 + 部分结果。
+    let starved = recall(VIEWER, None, None).apply(&snap, i64::MAX, Budget::new(0, 5));
+    assert!(
+        starved.degraded,
+        "预算耗尽必须标 degraded（S06 §6 验收 2：检索预算耗尽 → 标降级）"
+    );
+    assert!(
+        !starved.value.entries.is_empty(),
+        "降级必须带部分结果——不允许空且不标降级（I3：静默超时是失败形态）"
+    );
+    assert!(
+        starved.value.entries.len() < snap.len(),
+        "部分结果：配额内的真子集"
+    );
+
+    // 平凡值：充足预算 ⇒ 不降级、一条不漏。
+    let generous = recall(VIEWER, None, None).apply(&snap, i64::MAX, Budget::generous());
+    assert!(!generous.degraded, "配额充足不标降级");
+    assert_eq!(generous.value.entries.len(), snap.len(), "一条不漏");
 }

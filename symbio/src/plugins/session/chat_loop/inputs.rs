@@ -8,6 +8,24 @@ use crate::symbio_core::CapabilityMeta;
 
 use super::*;
 
+/// 本轮用户发言 = 轮首入列的最后一条 user 消息的正文。
+///
+/// **取值点与 `v2_exec` 的 `user_text` 同源**（该处晚于 `prepare_turn_inputs`，
+/// 但用户消息在步骤 3 之前已入列，两次取到的是同一条）。混合打分（T-085 批②）
+/// 的语义维由它驱动；取不到 ⇒ 空串 ⇒ 投影退化为纯 ts 降序（平凡值，J2）。
+fn last_user_text(context: &SessionContext) -> String {
+    context
+        .messages
+        .iter()
+        .rev()
+        .find(|m| m.role == Some(MessageRole::User))
+        .and_then(|m| match &m.content {
+            Some(MessageContent::Text(t)) => Some(t.clone()),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
 /// 系统提示词的唯一真源。
 ///
 /// 结果 = **请求显式段（若有）** + **全部注册段**，按「先显式、后注册顺序」拼接。
@@ -149,9 +167,14 @@ pub(crate) async fn prepare_turn_inputs(
     // `tool_rounds == 0` 是「每轮一次」的既有判据（classify / history 同款）：
     // 同一轮内记忆不漂移，事实源也只扫一遍，后续工具轮复用同一份视图。
     // 临时会话没有落盘目录——没有事实源就没有记忆，不读不写。
+    //
+    // `query` = 本轮用户发言（T-085 批②：混合打分的语义维）——与 `v2_exec`
+    // 取 `user_text` 同一取值点（轮首入列的最后一条 user 消息；该处晚于本步，
+    // 但用户消息在步骤 3 之前已入列，两次取到的是同一条）。
     if turn.tool_rounds == 0 {
+        let recall_query = last_user_text(context);
         turn.recall_view = match context.session.session_dir() {
-            Some(dir) => crate::plugins::session::v2_memory::recall_view(&dir),
+            Some(dir) => crate::plugins::session::v2_memory::recall_view(&dir, &recall_query),
             None => None,
         };
         // 调度段（S7 步 16–17，批⑨）：就绪任务集只读一次、本轮各工具轮复用——与

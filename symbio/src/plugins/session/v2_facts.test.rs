@@ -439,10 +439,19 @@ fn record_learning_wires_all_three_memory_steps() {
     let snap = store.range(Seq::new(0));
     assert_eq!(
         snap.iter()
-            .filter(|e| e.kind == EVENT_MEMORY_ENCODED)
+            .filter(|e| e.kind == EVENT_MEMORY_ENCODED && e.event_id.starts_with("v2m-"))
             .count(),
         4,
-        "步 11：每轮各编码一条"
+        "步 11：每轮各编码一条经验"
+    );
+    // 步 11b（T-085 批④）：判断编码同文去重——四轮收束都是同一句「答」，
+    // 跨标签同文也只记一条（`contains_content` 比的是全部记忆）。
+    assert_eq!(
+        snap.iter()
+            .filter(|e| e.kind == EVENT_MEMORY_ENCODED && e.event_id.starts_with("v2j-"))
+            .count(),
+        1,
+        "步 11b：判断每轮各编一条，同文去重（四轮同一句 ⇒ 只一条）"
     );
     snap.iter()
         .find(|e| e.kind == EVENT_MEMORY_CONSOLIDATED)
@@ -461,7 +470,7 @@ fn record_learning_wires_all_three_memory_steps() {
     );
 
     // 步 12：视图在收束前读出，收束时才落成事实（溯源锚那时才存在）。
-    let view = recall(crate::symbio_core::authz::PRINCIPAL_USER, None)
+    let view = recall(crate::symbio_core::authz::PRINCIPAL_USER, None, None)
         .apply(&snap, i64::MAX, Budget::generous())
         .value;
     assert!(!view.entries.is_empty(), "还有活记忆可召回");

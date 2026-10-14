@@ -7,6 +7,23 @@
 //! （排除式遗忘 / 放宽即召回 / 活参数三条），没有一个数字能回答
 //! 「给定一个查询，前 k 条里有多少是用户当时想找的那条」。
 //!
+//! ## 本程序跑的是**生产排序内核**，不是它的临摹件
+//!
+//! 排序经 `#[path]` **包含生产文件**：[`recall_score`]（`symbio/src/symbio_core/
+//! projection/recall_score.rs`——`recall` 投影的排序实现）。因此这里出的
+//! recall@k 是**生产投影的口径**（T-085 批②③）：查询驱动的内容重叠分降序，
+//! 平手 ts 降序、再平手 seq 降序。
+//!
+//! 在此之前，本程序测的是三个**假想召回器**（`TagThenTime` 临摹当时的现状、
+//! `ContentMatch` / `TagAndContent` 是愿望）——数字很漂亮，但与生产没有因果
+//! 关系：生产换一种排序，这套数字一个都不动。临摹件随生产漂移而**静默失效**，
+//! 这正是 T-067 黑盒纪律点名要防的形态。现在换排序 = 两边同时换。
+//!
+//! 边界（诚实划界）：池成员资格（`tag` 过滤 / as-of / 排除式遗忘 / 预算）由
+//! 投影的外壳负责，**不在本文件**——那些各有口径判据（`recall.test.rs` /
+//! S06 §6 验收）。本程序钉的是**排序**：给定同一个池，生产把用户想找的那条
+//! 排到多前。
+//!
 //! ## 评测集为什么是**数据**而不是断言
 //!
 //! 一个 recall@k 数字要可信，必须满足两条：
@@ -16,21 +33,18 @@
 //!
 //! 所以用例是显式表（见 `CASES`），主体只有三段：建记忆 → 召回 → 算 hit@k。
 //!
-//! ## 本程序刻意不做什么
-//!
-//! 它**不评测仓内召回实现的现状**，而是给定一个**召回器的接口**（`Recall` trait），
-//! 对三个假想实现各跑一遍同一套用例：
-//!   - `TagThenTime`：只按 tag 过滤 + 时间倒序（本仓 `recall` 投影的现状口径）；
-//!   - `ContentMatch`：按查询与内容的词重叠排序（内容匹配的下界）；
-//!   - `TagAndContent`：先按 tag 收窄、再按内容匹配排序。
-//!
-//! 这样这个程序给出的是**一组可比的数字**，而不是一句「现状不行」。
-//! 「现状为何达不到」是产品判断；本程序只保证：**换一个召回器，数字会变**，
-//! 且变的方向可预期。没有这一条，评测集本身会退化成又一份恒绿断言。
-//!
 //! 论证纪律：每条断言配反向用例（改输入，结论必须变）。
 //!
 //! 编译运行：rustc --edition 2021 recall_eval.rs -o re && ./re
+
+// ── 生产排序内核（唯一共有实现，T-085 批③）─────────────────────────────────
+//
+// `#[path]` 指向仓库里的生产文件——**这一行就是「跑的是生产」的全部含义**。
+// 它被 `recall` 投影与召回评测集共同编译：改排序只有一处可改，两边同时变。
+#[path = "../../../symbio/src/symbio_core/projection/recall_score.rs"]
+mod recall_score;
+
+use recall_score::{rank, ScoreEntry};
 
 // ───────────────────────── 领域类型 ─────────────────────────
 
@@ -60,76 +74,45 @@ pub struct Case {
     pub k: usize,
 }
 
-// ───────────────────────── 召回器接口 ─────────────────────────
+// ───────────────────────── 召回主体 ─────────────────────────
 
-/// 召回器：给定池与查询，返回**排好序的下标**（前 k 个）。
-///
-/// 抽成 trait 而不是三个 if-else 分支：新增一种召回口径时只加一个 impl，
-/// 评测主体（建池 → 召回 → 算 hit）不动——否则加第四种口径就要再抄一遍主体，
-/// 而主体的口径（hit@k 怎么算）必须只有一处。
-pub trait Recall {
-    fn name(&self) -> &'static str;
-    fn recall(&self, pool: &[Memory], query: &str, k: usize) -> Vec<usize>;
+/// 把评测池喂给**生产排序内核**：`query` 驱动内容匹配（生产读侧
+/// `v2_memory::recall_view` 的口径），seq 用池下标（全序 ⇒ 确定性）。
+fn production_recall(pool: &[Memory], query: &str, k: usize) -> Vec<usize> {
+    let entries: Vec<ScoreEntry> = pool
+        .iter()
+        .enumerate()
+        .map(|(i, m)| ScoreEntry {
+            content: m.content.clone(),
+            tag: m.tag.to_string(),
+            ts: m.ts as i64,
+            seq: i as u64,
+        })
+        .collect();
+    rank(entries, Some(query))
+        .into_iter()
+        .take(k)
+        .map(|e| e.seq as usize)
+        .collect()
 }
 
-/// 现状口径：tag 过滤 + 时间倒序。**不看内容**。
-pub struct TagThenTime;
-
-impl Recall for TagThenTime {
-    fn name(&self) -> &'static str {
-        "tag+time"
-    }
-    fn recall(&self, pool: &[Memory], _query: &str, k: usize) -> Vec<usize> {
-        let mut idx: Vec<usize> = (0..pool.len()).collect();
-        // 稳定排序 ⇒ 同 ts 时保留下标序（确定性，N1）
-        idx.sort_by(|&a, &b| pool[b].ts.cmp(&pool[a].ts).then(a.cmp(&b)));
-        idx.into_iter().take(k).collect()
-    }
-}
-
-/// 内容匹配的下界：查询与记忆的词重叠数（越多越靠前），平手看时间。
-pub struct ContentMatch;
-
-impl Recall for ContentMatch {
-    fn name(&self) -> &'static str {
-        "content"
-    }
-    fn recall(&self, pool: &[Memory], query: &str, k: usize) -> Vec<usize> {
-        let q = terms(query);
-        let mut idx: Vec<usize> = (0..pool.len()).collect();
-        idx.sort_by(|&a, &b| {
-            let sa = overlap(&q, &pool[a].content);
-            let sb = overlap(&q, &pool[b].content);
-            sb.cmp(&sa)
-                .then(pool[b].ts.cmp(&pool[a].ts))
-                .then(a.cmp(&b))
-        });
-        idx.into_iter().take(k).collect()
-    }
-}
-
-/// 先按 tag 收窄、再按内容匹配排序（产物口径应有的形状）。
-pub struct TagAndContent;
-
-impl Recall for TagAndContent {
-    fn name(&self) -> &'static str {
-        "tag+content"
-    }
-    fn recall(&self, pool: &[Memory], query: &str, k: usize) -> Vec<usize> {
-        // tag 过滤是**读侧**参数（recall 投影的唯一活参数）：本程序的用例
-        // 全用同一 tag，故过滤在这里是恒真的——刻意如此，本程序测的是
-        // 「排序」而不是「过滤」（过滤另有口径判据）。
-        let q = terms(query);
-        let mut idx: Vec<usize> = (0..pool.len()).collect();
-        idx.sort_by(|&a, &b| {
-            let sa = overlap(&q, &pool[a].content);
-            let sb = overlap(&q, &pool[b].content);
-            sb.cmp(&sa)
-                .then(pool[b].ts.cmp(&pool[a].ts))
-                .then(a.cmp(&b))
-        });
-        idx.into_iter().take(k).collect()
-    }
+/// 平凡值路径：同一内核在无查询时 = 纯 ts 降序（T-085 批②的 J2 判据）。
+fn trivial_recall(pool: &[Memory], _query: &str, k: usize) -> Vec<usize> {
+    let entries: Vec<ScoreEntry> = pool
+        .iter()
+        .enumerate()
+        .map(|(i, m)| ScoreEntry {
+            content: m.content.clone(),
+            tag: m.tag.to_string(),
+            ts: m.ts as i64,
+            seq: i as u64,
+        })
+        .collect();
+    rank(entries, None)
+        .into_iter()
+        .take(k)
+        .map(|e| e.seq as usize)
+        .collect()
 }
 
 // ───────────────────────── 评测集 ─────────────────────────
@@ -191,65 +174,8 @@ pub fn cases() -> Vec<Case> {
 
 // ───────────────────────── 评测主体 ─────────────────────────
 
-/// 分词：**拉丁词 + 中文字符二元组**。
-///
-/// ## 为什么不能只按空白切
-///
-/// 第一版按空白切，中文查询「部署时数据库连接池打满的处理」会被整成一个词，
-/// 而它**作为一个整体**出现在任何一条记忆里的概率接近零 ⇒ 每条记忆的重叠数
-/// 都是 1（或 0），内容口径于是**恒等于时间口径**，评测集立刻失去分辨力
-/// （实测 content 与 time 都是 0.333）。这是"中文必须有字级切分"的实测学费。
-///
-/// ## 为什么用二元组而不是单字
-///
-/// 单字太宽：「的」「时」「理」这类功能字会让无关记忆也拿到重叠分。二元组
-/// （bigram）在"不引入分词依赖"前提下给出可用的区分度——这与检索界对 CJK
-/// 的常规做法一致（character n-gram），也是本仓能落的**最小形状**。
-/// 换成真 embedding 时，替换点只有这一个函数（overlap 与三个召回器不动）。
-pub fn terms(s: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    // ① 拉丁/数字词：按非字母数字边界切（CJK 不算——它们走二元组）
-    let mut buf = String::new();
-    for ch in s.chars() {
-        if ch.is_alphanumeric() && !is_cjk(ch) {
-            buf.push(ch);
-        } else if !buf.is_empty() {
-            out.push(std::mem::take(&mut buf).to_lowercase());
-        }
-    }
-    if !buf.is_empty() {
-        out.push(buf.to_lowercase());
-    }
-    // ② CJK 连续段 → 字符二元组（段长为 1 时退化为单字）
-    let run: Vec<char> = s.chars().filter(|c| is_cjk(*c)).collect();
-    if run.len() == 1 {
-        out.push(run[0].to_string());
-    } else {
-        for w in run.windows(2) {
-            out.push(w.iter().collect());
-        }
-    }
-    out
-}
-
-/// CJK 统一表意文字的基本区（含扩展 A 与兼容表）——够覆盖中日常文，
-/// 不追求完整 Unicode 分类（那要引入 unicode 依赖，违背"最小形状"）。
-fn is_cjk(c: char) -> bool {
-    ('\u{4E00}'..='\u{9FFF}').contains(&c)
-        || ('\u{3400}'..='\u{4DBF}').contains(&c)
-        || ('\u{F900}'..='\u{FAFF}').contains(&c)
-}
-
-/// 查询词里有几个出现在内容中（词级包含，不做子串——子串会把「内存」算进
-/// 「内存泄漏」两次，而那是不同的记忆条目）。
-fn overlap(query_terms: &[String], content: &str) -> usize {
-    let c = content.to_lowercase();
-    query_terms.iter().filter(|t| c.contains(t.as_str())).count()
-}
-
-/// 一条用例在一个召回器下的 hit@k（命中 = 期望那条出现在前 k 个里）。
-fn hit_at_k(r: &dyn Recall, c: &Case) -> f64 {
-    let got = r.recall(&c.memories, c.query, c.k);
+/// 一条用例在一个召回口径下的 hit@k（命中 = 期望那条出现在前 k 个里）。
+fn hit_at_k(got: &[usize], c: &Case) -> f64 {
     if got.contains(&c.expect) {
         1.0
     } else {
@@ -257,20 +183,14 @@ fn hit_at_k(r: &dyn Recall, c: &Case) -> f64 {
     }
 }
 
-/// 整个用例集在一个召回器下的 recall@k（平均值）。
-fn recall_at_k(r: &dyn Recall, cs: &[Case]) -> f64 {
-    let sum: f64 = cs.iter().map(|c| hit_at_k(r, c)).sum();
+/// 整个用例集在一个召回口径下的 recall@k（平均值）。
+fn recall_at_k(recall: impl Fn(&[Memory], &str, usize) -> Vec<usize>, cs: &[Case]) -> f64 {
+    let sum: f64 = cs.iter().map(|c| hit_at_k(&recall(&c.memories, c.query, c.k), c)).sum();
     sum / cs.len() as f64
 }
 
 fn main() {
     let cs = cases();
-    let impls: Vec<Box<dyn Recall>> = vec![
-        Box::new(TagThenTime),
-        Box::new(ContentMatch),
-        Box::new(TagAndContent),
-    ];
-
     println!("召回评测集：{} 条用例\n", cs.len());
     for c in &cs {
         println!(
@@ -279,43 +199,34 @@ fn main() {
         );
     }
 
-    println!("\n各召回口径的 recall@k：");
-    let mut scores: Vec<(&'static str, f64)> = Vec::new();
-    for r in &impls {
-        let s = recall_at_k(r.as_ref(), &cs);
-        scores.push((r.name(), s));
-        println!("  {:<14} {:.3}", r.name(), s);
-    }
+    // 两个口径跑的是**同一份生产排序内核**（recall_score）：
+    //   production = `rank(entries, Some(query))` —— 有查询（生产读侧口径）；
+    //   trivial    = `rank(entries, None)`       —— 无查询（J2 平凡值，ts 序）。
+    let prod = recall_at_k(production_recall, &cs);
+    let triv = recall_at_k(trivial_recall, &cs);
+    println!("\n生产投影（recall_score）的 recall@k：");
+    println!("  {:<14} {:.3}  ← 内容匹配（有查询，生产读侧口径）", "production", prod);
+    println!("  {:<14} {:.3}  ← 纯 ts 降序（无查询，J2 平凡值）", "trivial", triv);
 
     // ── 判据 ────────────────────────────────────────────────────────────
     //
-    // 1. **评测集可分**：内容匹配必须严格优于纯时间序。否则这个集合证不了
-    //    「内容匹配有用」，它就只是一组断言。
-    let by_name = |n: &str| scores.iter().find(|(k, _)| *k == n).map(|(_, v)| *v).unwrap_or(-1.0);
-    let time_score = by_name("tag+time");
-    let content_score = by_name("content");
-    let both_score = by_name("tag+content");
-
+    // 1. **语义维必须真的在算**：生产口径（有查询）严格优于平凡值（无查询）。
+    //    否则 recall_score 里的内容分支是死的——「换汤不换药」的静默失效。
     assert!(
-        content_score > time_score,
-        "评测集必须能分辨「看内容」与「不看内容」：content={content_score} time={time_score}"
+        prod > triv,
+        "内容匹配必须严格优于纯时间序：production={prod} trivial={triv}"
     );
 
-    // 2. **两种内容口径同结果**：本批用例的 tag 全部相同，故 tag 过滤是恒真的；
-    //    若两者分数不同，说明「先按 tag 收窄」改变了排序——那不是本程序要测的
-    //    （过滤另有口径判据），故此处同分。
-    assert!(
-        (both_score - content_score).abs() < 1e-9,
-        "tag 全同时两个内容口径应同分：content={content_score} both={both_score}"
-    );
-
-    // 3. **每一条用例至少被一个口径命中**：`expect` 下标若写错（越界 / 指向
+    // 2. **每条用例至少被一个口径命中**：`expect` 下标若写错（越界 / 指向
     //    错的格子），这里会立刻暴露——全套命中数是 0 就意味着集合本身失效。
-    let any_hit = cs.iter().any(|c| impls.iter().any(|r| hit_at_k(r.as_ref(), c) > 0.0));
+    let any_hit = cs.iter().any(|c| {
+        hit_at_k(&production_recall(&c.memories, c.query, c.k), c) > 0.0
+            || hit_at_k(&trivial_recall(&c.memories, c.query, c.k), c) > 0.0
+    });
     assert!(any_hit, "用例集必须可命中：expect 下标全错时此断言红");
 
-    // 4. **反向**：把第一条用例的 expect 改成**一个明确排不进前 k 的下标**，
-    //    content 口径的命中数必须下降。这一条防的是「整套集合恒真」。
+    // 3. **反例**：把第一条用例的 expect 改成**一个明确排不进前 k 的下标**，
+    //    生产口径的命中数必须下降。这一条防的是「整套集合恒真」。
     //
     //    ⚠️ 第一版写的是 expect = 1（指向「今天改了 README」），分数没掉——
     //    因为那条用例的 k=2，而池里只有 3 条，改后的下标照样落在前 2 里
@@ -325,20 +236,56 @@ fn main() {
     let mut cs2 = cs.clone();
     cs2[0].expect = 1; // 「今天改了 README」——与查询零重叠
     cs2[0].k = 1; // 收紧窗口：内容口径此时只会把第 0 条放进来
-    let rev = recall_at_k(&ContentMatch, &cs2);
+    let rev = recall_at_k(production_recall, &cs2);
     assert!(
-        rev < content_score,
-        "改错 expect 必须让分数下降：原 {content_score} → 改后 {rev}"
+        rev < prod,
+        "改错 expect 必须让分数下降：原 {prod} → 改后 {rev}"
     );
     // 且下降的量正好是 1/|用例集|（只动了一条）——多降少降都说明改动不止一处生效
     let one_step = 1.0 / cs.len() as f64;
     assert!(
-        (content_score - rev - one_step).abs() < 1e-9,
+        (prod - rev - one_step).abs() < 1e-9,
         "只改了一条 ⇒ 只该掉一格分数：应掉 {one_step}，实掉 {}",
-        content_score - rev
+        prod - rev
     );
 
-    println!("\n通过：评测集能分辨口径（content {content_score:.3} > time {time_score:.3}），");
-    println!("      且 expect 下标可被反向证伪（改错后 content 掉到 {rev:.3}）。");
-    println!("      recall@k 从此是一个**可复现的数字**，不再是修辞。");
+    // 4. **分词在真的切**：中文查询按字级二元组切分（拉丁词整词）——这是
+    //    内容维度的地基。第一版按空白切，中文查询整成一个词，重叠数恒 0/1，
+    //    内容口径**恒等于时间口径**（实测 0.333 = 0.333）。
+    let t = recall_score::terms("用 heaptrack 定位内存泄漏");
+    assert!(
+        t.contains(&"heaptrack".to_string()) && t.contains(&"定位".to_string()),
+        "拉丁词整词 + CJK 二元组：{t:?}"
+    );
+    assert!(
+        !t.contains(&"用 heaptrack 定位内存泄漏".to_string()),
+        "不许整句当一个词（那正是第一版恒等的死因）"
+    );
+    let t2 = recall_score::terms("内存泄漏怎么定位");
+    assert!(
+        t2.contains(&"内存".to_string()) && t2.contains(&"泄漏".to_string()),
+        "纯中文段全部走二元组：{t2:?}"
+    );
+
+    // 5. **反向**：清空查询词 ⇒ 内核退化为 ts 降序（与平凡值同序）。
+    let empty_terms = recall_score::terms("");
+    assert!(empty_terms.is_empty(), "空查询无词可切");
+    let tied: Vec<ScoreEntry> = (0..3)
+        .map(|i| ScoreEntry {
+            content: format!("同文 {i}"),
+            tag: "经验".to_string(),
+            ts: 100 + i as i64,
+            seq: i,
+        })
+        .collect();
+    let by_empty = rank(tied.clone(), Some(""));
+    assert_eq!(
+        by_empty.iter().map(|e| e.seq).collect::<Vec<_>>(),
+        vec![2, 1, 0],
+        "空查询 ⇒ ts 降序（seq 无同 ts 冲突时即输入序的逆）"
+    );
+
+    println!("\n通过：生产排序内核 recall@k = {prod:.3} > 平凡值 {triv:.3}，");
+    println!("      且 expect 下标可被反向证伪（改错后 production 掉到 {rev:.3}）。");
+    println!("      recall@k 从此是**生产投影的可复现数字**，不再是临摹件的修辞。");
 }

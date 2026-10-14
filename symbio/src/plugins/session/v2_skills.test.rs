@@ -91,7 +91,7 @@ fn observe(store: &EventWalStore, n: usize, skill_id: &str, fallback: bool, anch
 /// `memory × *` 的 actor 是属主、投影按 `actor == viewer` 过滤，两个 viewer
 /// 不一致时单测看得到的东西生产看不到（断链就是这么溜进来的）。
 fn view_of(store: &EventWalStore) -> crate::symbio_core::RecallView {
-    recall(PRINCIPAL_USER, None)
+    recall(PRINCIPAL_USER, None, None)
         .apply(&store.range(Seq::new(0)), i64::MAX, Budget::generous())
         .value
 }
@@ -367,7 +367,7 @@ fn the_production_recall_view_sees_the_compiled_skill() {
     }
 
     let mut view =
-        super::super::v2_memory::recall_view(&session).expect("技能是一条记忆 ⇒ 视图非空");
+        super::super::v2_memory::recall_view(&session, "").expect("技能是一条记忆 ⇒ 视图非空");
     assert!(
         view.entries.iter().any(|e| e.tag == SKILL_TAG),
         "生产读方必须召回技能：{:?}",
