@@ -1,5 +1,5 @@
 ---
-lists: [github-secrets=owner]
+lists: [github-secrets=view]
 kind: guide
 id: .github/workflows/README
 title: CI/CD 配置说明
@@ -73,18 +73,13 @@ git push origin v0.2.0
 
 以下密钥在 GitHub Settings → Secrets and variables → Actions 中配置：
 
-<!-- list:github-secrets owner -->
+<!-- list:github-secrets view -->
 
-| 密钥名称 | 说明 | 必需 |
-|---------|------|------|
-| `GITHUB_TOKEN` | GitHub 自动提供，用于创建 Release | ✅ |
-| `TAURI_SIGNING_PRIVATE_KEY` | Tauri 更新签名私钥 | ❌ |
-| `APPLE_CERTIFICATE` | Apple 开发者证书（Base64） | ❌ |
-| `APPLE_CERTIFICATE_PASSWORD` | 证书密码 | ❌ |
-| `APPLE_SIGNING_IDENTITY` | Apple 签名身份 | ❌ |
-| `APPLE_ID` | Apple ID（用于公证） | ❌ |
-| `APPLE_PASSWORD` | Apple ID 密码（应用专用密码） | ❌ |
-| `APPLE_TEAM_ID` | Apple 团队 ID | ❌ |
+> **密钥清单不在本页**：完整清单（7 条，含「平台」列与逐条配置步骤）见
+> [GU-002 · 密钥配置指引](GU-002-SECRETS_SETUP.md "GU-002-SECRETS_SETUP")。本页曾列一份 5 条的**子集**，
+> 与那份形成两处并存且已经分叉（措辞与条数都不同）。
+
+<!-- list:github-secrets view -->
 
 **注意**: 
 - 不配置密钥也能正常构建，但 macOS 版本会有未签名警告

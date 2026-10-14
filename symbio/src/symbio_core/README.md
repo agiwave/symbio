@@ -1,5 +1,5 @@
 ---
-lists: [core-domains=owner]
+lists: [core-domains=owner, core-modules=owner]
 kind: arch
 id: symbio/src/symbio_core/README
 title: symbio_core —— 内核契约层：命名与结构规范
@@ -166,6 +166,8 @@ created: 2026-09-26
 > 而是可执行的。
 
 ## 2. 域清单
+
+<!-- list:core-modules owner -->
 
 | 域 | 职责 | 关键符号 | 子路径 |
 |---|---|---|---|

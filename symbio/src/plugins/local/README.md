@@ -1,4 +1,5 @@
 ---
+lists: [local-tools=owner]
 kind: arch
 id: symbio/src/plugins/local/README
 title: Local 插件
@@ -13,6 +14,8 @@ created: 2026-09-09
 ## 工具
 
 清单与逐项说明见 `docs/ref/RE-003-ROUTES.md` §Local 插件（**权威**）。共 5 个原生工具：
+
+<!-- list:local-tools owner -->
 
 | 工具 | 说明 |
 |------|------|

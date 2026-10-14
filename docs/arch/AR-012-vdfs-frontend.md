@@ -1,4 +1,5 @@
 ---
+lists: [vdfs-frontend-files=owner]
 kind: arch
 id: AR-012-vdfs-frontend
 title: VDFS 前端页面规范
@@ -67,6 +68,8 @@ created: 2026-09-13
 | 物理 / 虚拟 provider | `plugins/vdfs/physical.rs`、各自持插件 | 物理磁盘（含路径守卫）、设置分区、会话等 |
 
 ### 2.2 前端
+
+<!-- list:vdfs-frontend-files owner -->
 
 | 文件 | 职责 |
 |---|---|

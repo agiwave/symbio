@@ -1,4 +1,5 @@
 ---
+lists: [agent-dir-fields=owner]
 kind: arch
 id: AR-006-agent-directory-spec
 title: Agent 目录规范 v2
@@ -177,6 +178,8 @@ permissions:
 ```
 
 ### 5.1 字段规则
+
+<!-- list:agent-dir-fields owner -->
 
 | 字段 | 要求 |
 |---|---|

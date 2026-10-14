@@ -1,4 +1,5 @@
 ---
+lists: [dev-tools=owner]
 kind: guide
 id: CONTRIBUTING
 title: Contributing to Symbio
@@ -16,6 +17,8 @@ created: 2026-07-20
 ---
 
 ## 1. 开发环境
+
+<!-- list:dev-tools owner -->
 
 | 工具 | 版本 | 说明 |
 |---|---|---|

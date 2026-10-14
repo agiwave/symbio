@@ -1,4 +1,5 @@
 ---
+lists: [github-secrets=owner]
 kind: guide
 id: GU-002-SECRETS_SETUP
 title: GitHub Actions 密钥配置指南
@@ -13,6 +14,8 @@ created: 2026-07-20
 ---
 
 ## 密钥清单
+
+<!-- list:github-secrets owner -->
 
 | 密钥名称 | 用途 | 必需 | 平台 |
 |---------|------|------|------|

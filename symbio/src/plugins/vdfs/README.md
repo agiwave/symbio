@@ -1,4 +1,5 @@
 ---
+lists: [vdfs-files=owner]
 kind: arch
 id: symbio/src/plugins/vdfs/README
 title: VDFS 插件
@@ -39,6 +40,8 @@ created: 2026-09-16
 `tools_cover_all_ops` 测试锁死）——本 README 不抄那份会漂移的清单。
 
 ## 模块分工
+
+<!-- list:vdfs-files owner -->
 
 | 文件 | 职责 |
 |------|------|

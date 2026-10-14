@@ -1,4 +1,5 @@
 ---
+lists: [troubleshooting-index=owner]
 kind: arch
 id: AR-002-DATA_FLOW
 title: 数据流与调用链（DATA_FLOW）
@@ -103,6 +104,8 @@ sequenceDiagram
 - 日志位置与级别见 [RE-001-CONFIGURATION.md](../ref/RE-001-CONFIGURATION.md "RE-001-CONFIGURATION")。
 
 ## 排障锚点速查
+
+<!-- list:troubleshooting-index owner -->
 
 | 症状 | 首查 |
 |------|------|

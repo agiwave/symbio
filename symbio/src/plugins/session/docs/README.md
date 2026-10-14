@@ -1,4 +1,5 @@
 ---
+lists: [session-docs=owner]
 kind: arch
 id: symbio/src/plugins/session/docs/README
 title: Session 插件文档
@@ -19,6 +20,8 @@ created: 2026-09-16
 | 本目录 | **深度设计与专题**：核心循环怎么收口、模块怎么分工、历史审计结论、前端性能、心跳、VDFS 会话消息映射等。要查"为什么这样设计"看这里。 |
 
 ## 文档清单
+
+<!-- list:session-docs owner -->
 
 | 文档 | 状态 | 一句话 |
 |---|---|---|
