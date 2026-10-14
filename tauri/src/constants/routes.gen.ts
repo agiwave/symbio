@@ -1,7 +1,7 @@
 /**
  * 控制面路由常量 —— **由后端生成，请勿手改**。
  *
- * ⚠️ 本文件由 `scripts/gen-routes-ts.mjs` 从后端 `route()` 的 `match` 臂生成，
+ * ⚠️ 本文件由 `scripts/facts/routes-ts.mjs` 从后端 `route()` 的 `match` 臂生成，
  * 门禁会自动重新生成（`scripts/gate.d/60-facts.mjs`）。在这里手改一行，下一次门禁
  * 就会把它覆盖掉——真正要改的地方是后端那条臂。
  *

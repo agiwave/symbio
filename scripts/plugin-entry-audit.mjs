@@ -88,7 +88,7 @@ import { fileURLToPath } from 'node:url'
 import { red, yellow, green, dim } from './color.mjs'
 import { blankComments, blankTestModules } from './rust-scan.mjs'
 // 「什么算一条路由臂」「哪些地址能被分发」由 route-facts 单一持有：本脚本与
-// `gen-current-facts` / `gen-routes-ts` 读的是同一份实现（两份判据各写一遍正则，
+// `facts/current` / `facts/routes-ts` 读的是同一份实现（两份判据各写一遍正则，
 // 就会有一份开始漏掉复合臂而另一份不报）。
 import {
   dispatchableRoutes,

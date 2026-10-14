@@ -280,7 +280,7 @@ export function parseBaselineCells(text) {
  * 解析脚本里的判据码声明（`@ns` 命名空间 / `@codes` 本脚本判的号）。
  *
  * 声明**只认行注释形态**，写在文件头之后——登记表的唯一真源是这些行，
- * `docs/ref/GATE_CODES.md` 由它们生成（`gen-gate-codes.mjs`）。
+ * `docs/ref/GATE_CODES.md` 由它们生成（`facts/gate-codes.mjs`）。
  */
 export function parseGateCodeDecls(text) {
   const ns = new Map()

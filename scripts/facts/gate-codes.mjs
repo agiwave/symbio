@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * gen-gate-codes — 从脚本声明渲染判据码登记表
+ * 事实 · `docs/ref/GATE_CODES.md` —— 判据码登记表
  *
- * 存在理由同 `gen-current-facts.mjs`：**能生成的表不手抄**。判据码的归属只有
+ * 存在理由同 `facts/current.mjs`：**能生成的表不手抄**。判据码的归属只有
  * 脚本自己知道，人在别处抄一份就必然出现「表说有这条、脚本里早删了」；而这张表
  * 唯一的用途（加新判据时挑一个不撞的号）恰好最怕抄错。
  *
@@ -10,19 +10,16 @@
  * 口径与对账见 `gate-codes-audit.mjs`；每条判据**判什么**归该脚本自己的头注释，
  * 本表只给地址地图，不复述。
  *
- * 用法：
- *   node scripts/gen-gate-codes.mjs            # 写 docs/ref/GATE_CODES.md
- *   node scripts/gen-gate-codes.mjs --check    # 只比对，漂移则非零退出（CI 用）
+ * 由 `scripts/gen-facts.mjs` 遍历 `scripts/facts/` 时调用，不要直接跑。
  */
 
-import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { collect } from './gate-codes-audit.mjs'
+import { collect } from "../gate-codes-audit.mjs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 
-const scriptDir = path.dirname(fileURLToPath(import.meta.url))
-const repoRoot = path.resolve(scriptDir, '..')
-const OUT = path.join(repoRoot, 'docs', 'ref', 'GATE_CODES.md')
+// 本文件住 `scripts/facts/`，故仓根要上溯两级（原来在 `scripts/` 下只需一级）。
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+const OUT_REL = "docs/ref/GATE_CODES.md";
 
 const num = (code) => Number(code.slice(code.indexOf('-') + 1))
 
@@ -48,7 +45,7 @@ function formatRanges(prefix, codes) {
 }
 
 function render() {
-  const scripts = collect(repoRoot)
+  const scripts = collect(ROOT)
   const prefixes = new Map() // 前缀 → {desc, files:Set, codes:Set}
   const rows = []
   for (const s of scripts) {
@@ -68,8 +65,8 @@ function render() {
   const L = []
   L.push('# 判据码登记表（自动生成）')
   L.push('')
-  L.push('> ⚠️ **本表由 `scripts/gen-gate-codes.mjs` 从各脚本的 `// @ns` / `// @codes` 声明生成，请勿手改。**')
-  L.push('> 改了声明不用手动重跑——门禁会**自动重新生成并暂存**（见 `scripts/gate.d/60-facts.mjs`）。')
+  L.push('> ⚠️ **本表由 `scripts/facts/gate-codes.mjs` 从各脚本的 `// @ns` / `// @codes` 声明生成，请勿手改。**')
+  L.push('> 改了声明不用手动重跑——门禁会**自动重新生成并暂存**（`scripts/gen-facts.mjs`，见 `scripts/gate.d/60-facts.mjs`）。')
   L.push('>')
   L.push('> 判据码是每条机械判定的**地址**：豁免注释、门禁日志、文档指认都指向它。')
   L.push('> 每条判据**判什么**归声明它的那个脚本的头注释；撞号与漏登记由')
@@ -99,19 +96,14 @@ function render() {
   return L.join('\n')
 }
 
-const content = render()
-if (process.argv.includes('--check')) {
-  if (!fs.existsSync(OUT)) {
-    console.error('✗ docs/ref/GATE_CODES.md 不存在——先运行 `node scripts/gen-gate-codes.mjs`')
-    process.exit(1)
-  }
-  if (fs.readFileSync(OUT, 'utf8') !== content) {
-    console.error('✗ docs/ref/GATE_CODES.md 与脚本声明不一致——重跑 `node scripts/gen-gate-codes.mjs`')
-    process.exit(1)
-  }
-  console.log('✓ docs/ref/GATE_CODES.md 与脚本声明一致')
-  process.exit(0)
+// ================= 事实描述符（由 `scripts/gen-facts.mjs` 遍历调用） =================
+//
+// 本表**不带溯源行**：它的全部输入是各脚本里的 `@ns` / `@codes` 声明，
+// 同输入必然同输出——加一行时间戳只会让门禁每次都报「修复了 1 个文件」。
+export default {
+  id: 'gate-codes',
+  title: '判据码登记表（各脚本 `@ns` / `@codes` 声明的投影）',
+  out: OUT_REL,
+  stamp: false,
+  render,
 }
-fs.mkdirSync(path.dirname(OUT), { recursive: true })
-fs.writeFileSync(OUT, content)
-console.log(`✓ 已生成 ${path.relative(repoRoot, OUT)}（${content.split('\n').length} 行）`)

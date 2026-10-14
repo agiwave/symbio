@@ -1,11 +1,11 @@
 /**
- * gen-routes-ts / route-facts 回归测试
+ * facts/routes-ts + route-facts 回归测试
  *
  * 一个只会亮绿灯的守卫等于没有守卫。这里对**每一个判据方向**都注入一次：
  * 后端加一条臂 ⇒ 生成物必须有它；不是臂的字符串 ⇒ 不能有它；
  * 手改生成物 ⇒ 与代码不一致必须被抓住。
  *
- * 跑法：node --test scripts/gen-routes-ts.test.mjs
+ * 跑法：node --test scripts/facts/routes-ts.test.mjs
  */
 
 import assert from 'node:assert/strict'
@@ -14,15 +14,15 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { controlPlaneRoutes, extractRouteArms, routeConstName } from './route-facts.mjs'
-import { render } from './gen-routes-ts.mjs'
+import { controlPlaneRoutes, extractRouteArms, routeConstName } from '../route-facts.mjs'
+import { render } from './routes-ts.mjs'
 
-const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const GEN_FILE = path.join(REPO, 'tauri', 'src', 'constants', 'routes.gen.ts')
 
 /** 一棵只有 `demo` 插件的临时仓库（route-facts 读 `<root>/symbio/src/plugins`） */
 function fixtureRepo(pluginName, routeSource) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gen-routes-ts-'))
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'routes-ts-fact-'))
   const dir = path.join(root, 'symbio', 'src', 'plugins', pluginName)
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, 'plugin.rs'), routeSource)

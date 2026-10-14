@@ -14,7 +14,7 @@
  *   （生成器说某条路由不存在，其实是抽漏了）。
  *
  * 此前这几件东西在至少四份实现里各写一遍（`line-count.mjs` / `plugin-entry-audit.mjs`
- * / `gen-current-facts.mjs` / `core-surface.mjs`），措辞、边界、返回值都不一致。
+ * / `facts/current.mjs` / `core-surface.mjs`），措辞、边界、返回值都不一致。
  * 本模块把它们收成**一份**，谁是权威一目了然；改行为只改这一处。
  *
  * ## 两种去注释，别拿错

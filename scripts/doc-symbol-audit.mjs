@@ -3,7 +3,7 @@
  * doc-symbol-audit — 文档符号指认审计（D-005 / D-009，全仓级，跨插件）
  *
  * 守的是「现行文档指认的符号确实存在」。这类失效没人看得见：读者按图
- * 索骥找不到定义，而 doc-link-audit 只管链接、gen-current-facts 只从代码生成
+ * 索骥找不到定义，而 doc-link-audit 只管链接、facts/current 只从代码生成
  * 结构表，都不校验散文里的 `module::symbol` 与裸常量名。判据在真实数据上校准过。
  *
  * 判据：

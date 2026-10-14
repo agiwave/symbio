@@ -7,7 +7,7 @@
 
 > **这个 kind 回答什么**：现在是什么样——系统结构 / 设计规范 / 模块机制
 
-**计数**：active 46 · draft 0 · retired 0（共 46）
+**计数**：active 47 · draft 0 · retired 0（共 47）
 
 ## 现行文档（active）
 | 编号 | 标题 |
@@ -36,6 +36,7 @@
 | [`AR-022-vdfs-session-messages`](../../symbio/src/plugins/session/docs/AR-022-vdfs-session-messages.md) | 会话消息的 VDFS 化 —— 转写即列表，流式即追加 |
 | [`AR-023-FRONTEND`](../../tauri/docs/AR-023-FRONTEND.md) | 前端架构 |
 | [`AR-024-INTERACTION`](../../tauri/docs/AR-024-INTERACTION.md) | 前端交互面（用户视角） |
+| [`scripts/facts/README`](../../scripts/facts/README.md) | `scripts/facts/` —— 事实生成器目录 |
 | [`symbio/src/plugins/agent/README`](../../symbio/src/plugins/agent/README.md) | Agent 插件 |
 | [`symbio/src/plugins/classify/README`](../../symbio/src/plugins/classify/README.md) | Classify 插件（对话面：判决） |
 | [`symbio/src/plugins/compose/README`](../../symbio/src/plugins/compose/README.md) | Compose 插件（对话面：措辞） |

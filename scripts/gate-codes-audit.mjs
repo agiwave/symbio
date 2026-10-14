@@ -12,7 +12,7 @@
  *     恰好挑到那条没登记的号上。
  *
  * 所以登记表不手抄：**每个脚本在自己文件里声明**（`@ns` 前缀 + `@codes` 号），
- * `gen-gate-codes.mjs` 从声明渲染 `docs/ref/GATE_CODES.md`，本脚本判声明本身。
+ * `facts/gate-codes.mjs` 从声明渲染 `docs/ref/GATE_CODES.md`，本脚本判声明本身。
  * 抄一份表就有两处真相，而它必然漂移——本仓同类事故已记在 `dead-code-audit` 的 R-002 旁。
  *
  * 判定口径：
@@ -42,10 +42,18 @@ import { parseGateCodeDecls, stringLiteralsOf } from './gate.d/_shared.mjs'
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..')
 
-/** 被扫的脚本范围：`scripts/*.mjs` 与 `scripts/gate.d/*.mjs`（回归测试文件不判） */
+/**
+ * 被扫的脚本范围：`scripts/*.mjs`、`scripts/gate.d/*.mjs`、`scripts/facts/*.mjs`
+ * （回归测试文件不判）。
+ *
+ * ⚠️ 这张目录清单是**手写**的，而「搬走一份声明脚本」这件事没有任何地方会报：
+ * 漏掉它 ⇒ 那些 `@ns` / `@codes` 声明从登记表里静默消失，而「表说有这条、
+ * 脚本里早删了」正是本脚本要治的病——只不过方向反了过来。
+ * 新增一份会声明判据码的目录，必须同批改这里（`facts/` 是搬进来的第二处）。
+ */
 function auditFiles(root) {
   const out = []
-  for (const dir of ['scripts', path.join('scripts', 'gate.d')]) {
+  for (const dir of ['scripts', path.join('scripts', 'gate.d'), path.join('scripts', 'facts')]) {
     if (!fs.existsSync(path.join(root, dir))) continue
     for (const name of fs.readdirSync(path.join(root, dir)).sort()) {
       if (!name.endsWith('.mjs') || name.endsWith('.test.mjs')) continue

@@ -48,7 +48,7 @@ export const GUARDS = [
   // `doc-symbol-audit`（D-005）判「**现行文档指认的 Rust 符号确实存在**」：
   // 反引号内 ≥2 段的 `module::symbol` / `Type::method` 形态，取末段查整词
   // 是否出现在 .rs 语料（359 文件 / 203 条指认）。这类失效读者看得见、守卫
-  // 看不见：doc-link 只管链接、gen-current-facts 只生成结构表，都不校验散文
+  // 看不见：doc-link 只管链接、facts/current 只生成结构表，都不校验散文
   // 里的符号指认——校准日一次就抓出五处改名残留（`KEY_PAYLOAD` →
   // `PLUGIN_PAYLOAD_KEY`、`HOOK_FIRE` → `ROUTE_HOOK_FIRE` 等，先修后建）。
   // 豁免出口只对应「文档说的是历史」：`docs/adr/`（ADR 正文）与 `archive`
@@ -154,7 +154,7 @@ export const GUARDS = [
 //     `PathKey` / `PluginStopReason` 全部消失；② `symbio/src` 直属文件（`lib.rs` /
 //     `plugins/mod.rs`）被跳过 ⇒ 只在注册表里被用到的符号被算成 **0 个消费方**。
 //     「数不到」与「真的没人用」是两件事。
-//   - `rust-scan` 是**共享扫描库**，被 `plugin-entry-audit` 与 `gen-current-facts`
+//   - `rust-scan` 是**共享扫描库**，被 `plugin-entry-audit` 与 `facts/current`
 //     共同引用。它的失效形态是本仓最危险的一类：**写错不报错，只静默漏报**——
 //     朴素实现在字符串里的 `//`、`format!("{{}}")` 的字面量括号、未跨行的引号上
 //     都会翻车，而后果是「生成器说某条路由不存在，其实是抽漏了」。回归测试对每种
@@ -203,12 +203,18 @@ export const TEST_ONLY = [
   // 这里跑的是它的回归测试——防的失效形态与前几个生成器同源：**提取/重写字宽 ⇒
   // 该改的不改（入链静默失效）或不该改的乱改（守卫开始改坏正文）**。
   'gen-doc-refs',
-  // `gen-routes-ts` + `route-facts` 是前端路由契约的**唯一真源链**（后端 `route()` 臂 →
+  // `facts/routes-ts` + `route-facts` 是前端路由契约的**唯一真源链**（后端 `route()` 臂 →
   // `constants/routes.gen.ts`）。它的失效形态是静默少一条：提取口径一旦把某个形态
   // （复合臂 / 根容器 home）读漏，前端就拿到一份「后端没有的地址」，而 M-008 的词表
   // 恰恰来自这份生成物——生成物漏了，守卫也跟着漏。反向用例（不是臂的字符串不算路由、
   // 手改生成物必红）因此必须由门禁跑。
-  'gen-routes-ts',
+  'facts/routes-ts',
+  // `gen-facts` + `facts/_lib` 是「事实生成」这条机制的执行方：目录遍历、描述符契约
+  // 校验、幂等落盘与溯源行剔除。跑它的**回归测试**是因为这类 runner 的坏死方式全是
+  // 静默的——目录读不出 / 描述符破损 / `out` 越界 / render 掺时间戳，四种都会让
+  // 「什么都没生成」被当成「生成成功」。只测好输入的话，一个把所有事都吞掉的 runner
+  // 也能全绿。
+  'facts',
   // 两份 Windows 换壳重启监督器的真实进程测试（`skip` 在非 win32）。它们一直没接线，
   // 于是 prepare 那份红了很久没人知道——接线由 GW-001 保证不会再丢。
   'windows-restart',
@@ -222,7 +228,7 @@ export const TEST_ONLY = [
  * 于是「既没有回归测试、又不在任何名单里」的 `.mjs` 是完全隐形的——写一份
  * `foo-audit.mjs` 忘了登记，它就静默地不存在。实测的现成例子是 `route-facts.mjs`：
  * 它被 M10 立为「什么算一条路由臂」的唯一语法实现、被三个判定共读，却既没有同名
- * `.test.mjs`，也不在任何名单上（只被 `gen-routes-ts.test.mjs` 与
+ * `.test.mjs`，也不在任何名单上（只被 `facts/routes-ts.test.mjs` 与
  * `plugin-entry-audit.test.mjs` 的夹具**间接**碰到）。
  *
  * ⚠️ 它与前两张的区别是**它自己不会被当成一道门禁步骤跑**：前两张每一条都跑
@@ -232,7 +238,7 @@ export const TEST_ONLY = [
  *
  * 逐条理由：
  *  - `color`：ANSI 输出的唯一实现（`scripts/` 下不得手写转义序列）；
- *  - `rust-scan`：Rust 文本扫描库，被 `core-export-audit` / `gen-current-facts` /
+ *  - `rust-scan`：Rust 文本扫描库，被 `core-export-audit` / `facts/current` /
  *    `plugin-entry-audit` / `route-facts` 共读；**写错不报错、只静默漏报**，
  *    后果是「生成器说某条路由不存在，其实是抽漏了」；
  *  - `md-table`：全仓唯一的 Markdown 管道表解析库（`core-naming-audit` 与
@@ -241,9 +247,12 @@ export const TEST_ONLY = [
  *  - `core-surface`：`core-surface-audit` 的公开面统计库（它只被那一个审计引用）；
  *  - `route-facts`：`docs/CURRENT.md` §1 路由列、`routes.gen.ts`、`plugin-entry-audit`
  *    三份判定的共读提取实现（M4/M10 立）；
- *  - `gen-current-facts`：`docs/CURRENT.md` 与本批 D0 计数守卫的共读生成器，
- *    由 `60-facts` 阶段 spawn；
- *  - `gen-gate-codes`：`reference/GATE_CODES.md` 的生成器，由本阶段 spawn；
+ *  - `gen-facts`：**事实生成机制的执行方**——遍历 `scripts/facts/` 逐个生成，
+ *    由本阶段的 `60-facts` spawn；目录即接线，新增一份事实不需要改门禁；
+ *  - `facts/_lib`：上述契约校验 + 幂等落盘 + 溯源行剔除的共享实现；
+ *  - `facts/current`：`docs/CURRENT.md` 的生成器，由 `gen-facts` 调用；
+ *  - `facts/gate-codes`：`reference/GATE_CODES.md` 的生成器，由 `gen-facts` 调用；
+ *  - `facts/routes-ts`：`tauri/src/constants/routes.gen.ts` 的生成器，由 `gen-facts` 调用；
  *  - `line-count`：门禁报告里的行数统计；
  *  - `doc-find`：「某条约定写在哪」的检索入口（`docs/README.md` 导航里对用户承诺的命令）。
  *  - `registry-lib`：登记机制（plan/14）的共享实现——front-matter 解析、schema 校验
@@ -260,8 +269,11 @@ export const LIBS = [
   'gate.d/_shared',
   'core-surface',
   'route-facts',
-  'gen-current-facts',
-  'gen-gate-codes',
+  'gen-facts',
+  'facts/_lib',
+  'facts/current',
+  'facts/gate-codes',
+  'facts/routes-ts',
   'gen-doc-refs',
   'line-count',
   'doc-find',

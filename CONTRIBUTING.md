@@ -53,7 +53,7 @@ symbio/
 │   └── src-tauri/       # 仅 3 个 Tauri command 的薄适配层
 ├── cli/                 # 纯 Rust CLI 前端（进程内直连插件树）
 ├── docs/                # 系统级文档（历史归档在 docs/archive/）
-├── scripts/             # 门禁与生成脚本（gate.mjs / gen-current-facts.mjs …）
+├── scripts/             # 门禁与生成脚本（gate.mjs / facts/current.mjs …）
 └── rustfmt.toml · clippy.toml   # 位于仓库根
 ```
 
@@ -76,7 +76,7 @@ node scripts/gate.mjs --ci            # 对齐 CI（cargo test --workspace）
 **MSRV 实编译校验**、事实文件生成。完整输出落 `.workbuddy-ai/gate-logs/`；通过数低于基线
 会报错、高于基线提示更新 `BASELINE`。
 
-**格式化与事实文件由门禁自己做完，不用你动手。** `cargo fmt` 与 `gen-current-facts` 是
+**格式化与事实文件由门禁自己做完，不用你动手。** `cargo fmt` 与 `facts/current` 是
 确定性的机械变换（函数，不是判断），所以门禁**直接执行**它们：命令跑成功即通过，命令本身
 报错才不通过；本地还会把改写的文件**当场暂存**，使修复与本次提交是同一份内容。在 CI 里
 （`--ci`）门禁不能提交，因此「执行后仍有差异」只能报红——那是唯一能保住不变量的信号，
@@ -283,7 +283,7 @@ mod tests;
    `SETTING_SECTIONS` 加 `(id, 中文名)`、并在该插件自己的 `detail_definition()` 加返回 `config_definition(...)` 的分支。
 5. 若插件要出现在前端：**无需手写路由常量**——在插件 `route()` 里加一条 `match` 臂，门禁即把它生成进
    `tauri/src/constants/routes.gen.ts`；再到 `tauri/src/services/` 下加对应 TS 客户端、导入那个常量。
-6. 文档按**唯一来源**更新：**新增路由只在 [RE-003-ROUTES.md](docs/ref/RE-003-ROUTES.md "RE-003-ROUTES") 登记**（模块 `README.md` 不抄路由表，只写机制并指向它）；配置项进 RE-001-CONFIGURATION.md、错误码进 RE-002-ERROR_CODES.md；插件 / 挂载点 / 工具变更后重跑 `node scripts/gen-current-facts.mjs`。
+6. 文档按**唯一来源**更新：**新增路由只在 [RE-003-ROUTES.md](docs/ref/RE-003-ROUTES.md "RE-003-ROUTES") 登记**（模块 `README.md` 不抄路由表，只写机制并指向它）；配置项进 RE-001-CONFIGURATION.md、错误码进 RE-002-ERROR_CODES.md；插件 / 挂载点 / 工具变更后重跑 `node scripts/facts/current.mjs`。
 
 > **变更历史就是 `git log`，本仓库不维护 `CHANGELOG.md`**——git 记录比手抄更准确、不会漂移，
 > 且提交信息**与代码同一次提交**。要查「某次改动为什么」：`git log --grep=<词>` / `git log -S<符号>`；

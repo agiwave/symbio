@@ -175,7 +175,7 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 | 变更历史（改了什么、何时改的） | `git log` | **现行文档不写变更史**（见下） |
 | 一次性评审 / 迁移记录 / 体检报告 | `docs/archive/` | 活文档不保留过程日志 |
 
-**变更时只改 owner 那一处**：结构事实重跑 `node scripts/gen-current-facts.mjs`（CI 有 `--check` 门禁）；跨模块架构改 [AR-003-OVERVIEW.md](arch/AR-003-OVERVIEW.md "AR-003-OVERVIEW") + [AR-005-SYSTEM_MAP.md](arch/AR-005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP") 各自己那一层；常见问题进 [GU-007-TROUBLESHOOTING.md](guide/GU-007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING")。
+**变更时只改 owner 那一处**：结构事实重跑 `node scripts/facts/current.mjs`（CI 有 `--check` 门禁）；跨模块架构改 [AR-003-OVERVIEW.md](arch/AR-003-OVERVIEW.md "AR-003-OVERVIEW") + [AR-005-SYSTEM_MAP.md](arch/AR-005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP") 各自己那一层；常见问题进 [GU-007-TROUBLESHOOTING.md](guide/GU-007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING")。
 
 ### 两条硬规则
 
@@ -270,5 +270,6 @@ D-008 判**形态**而不判**解析**：本仓的风险编号出过一次**撞�
 | event_bus | [plugins/event_bus/README.md](../symbio/src/plugins/event_bus/README.md "symbio/src/plugins/event_bus/README") | 进程内事件总线 |
 | telegram | [plugins/telegram/README.md](../symbio/src/plugins/telegram/README.md "symbio/src/plugins/telegram/README") | Telegram 通道接入 |
 | tauri 前端 | [tauri/README.md](../tauri/README.md "tauri/README") → [docs/AR-023-FRONTEND.md](../tauri/docs/AR-023-FRONTEND.md "AR-023-FRONTEND") | Vue3 + Tauri2 桌面前端 |
+| 门禁与脚本 | [scripts/facts/README.md](../scripts/facts/README.md "scripts/facts/README") | **事实生成机制**：目录下每份 `.mjs` 投影出一份代码事实（结构事实表 / 判据码登记表 / 前端路由常量…），runner 遍历生成；目录即接线 |
 
 > **维护原则**：本文是文档体系的入口；结构性变更（新增/删除目录、职责改属）先改此文件。单条事实的增改只动它的 owner，不必回头改本文。

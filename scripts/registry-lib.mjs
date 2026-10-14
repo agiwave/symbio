@@ -284,8 +284,8 @@ export const SCAN_SKIP_DIRS = new Set([
 export const SCAN_SKIP_PREFIXES = ['docs/archive/']
 /** 单文件豁免：路径 → 理由（与职责表 / plan/14「明确不接管」同口径）。 */
 export const SCAN_SKIP_FILES = new Map([
-  ['docs/CURRENT.md', '代码投影（gen-current-facts 生成，owner 是生成器）'],
-  ['docs/ref/GATE_CODES.md', '代码投影（gen-gate-codes 生成）'],
+  ['docs/CURRENT.md', '代码投影（facts/current 生成，owner 是生成器）'],
+  ['docs/ref/GATE_CODES.md', '代码投影（facts/gate-codes 生成）'],
   ['docs/ref/PROMPT_SHAPE.md', '真实链路生成（e2e t46 生成）'],
   ['docs/ref/PROMPT_AB.md', '门外实验生成（e2e/ab 生成）'],
   ['AGENTS.md', '指令注入面（每会话直接进上下文，不是阅读文档）'],

@@ -50,7 +50,7 @@
 //! 脚本报告，由人决定去留，而不是先给它们一个体面的常量名。
 //!
 //! **前端要用的地址不在这里登记**：前端常量是各插件 `route()` 臂的**生成物**
-//! （`tauri/src/constants/routes.gen.ts`，见 `scripts/gen-routes-ts.mjs`），本模块只服务
+//! （`tauri/src/constants/routes.gen.ts`，见 `scripts/facts/routes-ts.mjs`），本模块只服务
 //! **Rust 侧调用方**。只被前端调用的路径（`home/*` / `work/*`）在这里没有常量——
 //! 给它加一个就是零 Rust 消费方的预留常量，上面那条规则同样拦它。
 //!
