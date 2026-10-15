@@ -190,6 +190,11 @@ impl ContentSearchTool {
             .git_ignore(true)
             .git_global(true)
             .git_exclude(true);
+        // 遍历序必须钉成名字序：默认的文件系统返回序在 NTFS 上恰是名字序、在 ext4 上是
+        // 哈希序，于是同一查询在两平台上行序不同——`apply_line_pagination` 的
+        // `offset`/`head_limit` 窗口和 `MAX_RESULTS` 的截断点都跟着变（用户可见的缺陷，
+        // 不只是测试不稳）。
+        walk_builder.sort_by_file_name(|a, b| a.cmp(b));
         if !globs.is_empty() {
             let mut builder = globset::GlobSetBuilder::new();
             for g in &globs {

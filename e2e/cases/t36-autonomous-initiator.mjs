@@ -194,6 +194,36 @@ export default defineCase(
         .map((m) => (typeof m.content === 'string' ? m.content : ''));
     };
 
+    const statsOf = async (sid) =>
+      (await cli.invoke('session/stats', {}, { session_id: sid })).body?.data;
+
+    /**
+     * 超时时的现场快照。
+     *
+     * 「心跳没到点」在这条用例里有三种长得一样的失败：调度器没扫到（LLM 请求数停在
+     * 4）、扫到但闸门/事实源把触发挡下（请求数停在 4，stderr 里有 `[Heartbeat]` 的
+     * 拒发理由）、跑了轮但提示词没落进转写（请求数在涨）。只带 stderr 尾部区分不了
+     * 它们——而 CI（Linux）与本机（Windows）的分歧正落在这三种之一上。
+     */
+    const diagnose = async () => {
+      const rows = [];
+      for (const sid of [SID_OK, SID_BROAD]) {
+        const texts = await userTexts(sid).catch((e) => `读取失败: ${e?.message ?? e}`);
+        const ready = await statsOf(sid)
+          .then((d) => d?.readyset ?? null)
+          .catch((e) => `读取失败: ${e?.message ?? e}`);
+        rows.push(`  ${sid}｜转写用户发言=${JSON.stringify(texts)}｜就绪集=${JSON.stringify(ready)}`);
+      }
+      const reqCount = await llm.requests().then((r) => r.length).catch(() => -1);
+      return [
+        '',
+        `--- 读出口现状（LLM 请求数=${reqCount}，装心跳两轮共用 4 次）---`,
+        ...rows,
+        '--- 长驻 CLI stderr 尾部 ---',
+        cli.out.stderr.slice(-8000) || '（空）',
+      ].join('\n');
+    };
+
     try {
       await cli.waitGatewayReady(20_000, 'T36 长驻进程');
 
@@ -231,8 +261,8 @@ export default defineCase(
           },
         );
       } catch (e) {
-        // 超时必带诊断：调度器没触发的线索在 CLI stderr。
-        throw new Error(`${e.message}\n--- 长驻 CLI stderr 尾部 ---\n${cli.out.stderr.slice(-1200) || '（空）'}`);
+        // 超时必带现场快照（三种「没到点」的长相一样，见 `diagnose`）。
+        throw new Error(`${e.message}${await diagnose()}`);
       }
 
       // ── 证据：闸门的两侧判决——同一条链路，只有闸门在分岔 ───────────────
@@ -249,8 +279,6 @@ export default defineCase(
       // 闸门判决在用户可见面上的唯一形态是**就绪集**：过闸 ⇒ `task.opened` 落格
       // ⇒ 该任务进 `readyset.ready`；拒收 ⇒ 没有 `task.opened` ⇒ 就绪集里没有它。
       // 读口是生产路由 `session/stats`（与 T31 同一出口、同一列），不碰内部存储。
-      const statsOf = async (sid) =>
-        (await cli.invoke('session/stats', {}, { session_id: sid })).body?.data;
 
       // 放行侧：等到就绪集里长出那条心跳任务（调度器 15s 一 tick + 抖动）。
       try {
@@ -262,8 +290,8 @@ export default defineCase(
           },
         );
       } catch (e) {
-        // 超时必带诊断：调度器没触发的线索在 CLI stderr。
-        throw new Error(`${e.message}\n--- 长驻 CLI stderr 尾部 ---\n${cli.out.stderr.slice(-1200) || '（空）'}`);
+        // 超时必带现场快照（三种「没到点」的长相一样，见 `diagnose`）。
+        throw new Error(`${e.message}${await diagnose()}`);
       }
 
       const okReady = (await statsOf(SID_OK))?.readyset?.ready ?? [];
@@ -280,13 +308,17 @@ export default defineCase(
       );
 
       // 拒收侧：同样等到心跳轮跑过一轮（它照样开轮），但就绪集必须**始终为空**。
-      await waitFor(
-        async () => (await userTexts(SID_BROAD)).some((t) => t.includes(PROMPT_BROAD)),
-        {
-          what: 'SID_BROAD 的心跳轮落进转写（拒绝的是升格，不是开轮——轮照样开）',
-          timeoutMs: 100_000,
-        },
-      );
+      try {
+        await waitFor(
+          async () => (await userTexts(SID_BROAD)).some((t) => t.includes(PROMPT_BROAD)),
+          {
+            what: 'SID_BROAD 的心跳轮落进转写（拒绝的是升格，不是开轮——轮照样开）',
+            timeoutMs: 100_000,
+          },
+        );
+      } catch (e) {
+        throw new Error(`${e.message}${await diagnose()}`);
+      }
       const broadReady = (await statsOf(SID_BROAD))?.readyset?.ready ?? [];
       assertEq(
         broadReady.length,

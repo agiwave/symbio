@@ -779,6 +779,9 @@ async fn keyword_search(workdir: &Path, query: &str, limit: usize) -> Vec<Value>
         }
         true
     });
+    // 降级路径按 `limit` 截断，截的是**遍历序的前 N 条**——不钉名字序就等于让「哪些片段
+    // 被返回」随文件系统实现变（索引侧已有 `out.sort_by(rel)`，这里是对称的必需）。
+    builder.sort_by_file_name(|a, b| a.cmp(b));
 
     let mut out: Vec<Value> = Vec::new();
     'outer: for entry in builder.build() {

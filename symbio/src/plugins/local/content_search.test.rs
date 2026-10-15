@@ -132,6 +132,34 @@ async fn count_mode_reports_per_file_match_counts() {
 
 // ==================== 分页与匹配行对齐 ====================
 
+/// 输出序是**确定的**：文件按名有序、文件内按行号升序。
+/// 遍历序不钉住时，NTFS 给名字序而 ext4 给哈希序 ⇒ 同一查询行序不同，
+/// 下面两条分页用例（`offset` / `head_limit` 的窗口）在另一平台上就变成另一份答案。
+#[tokio::test]
+async fn output_order_is_name_then_line_not_fs_walk_order() {
+    let dir = fixture().await;
+    let lines: Vec<String> = search_all(dir.path(), "content")
+        .await
+        .lines()
+        .map(str::to_string)
+        .collect();
+
+    let at = |needle: &str| {
+        lines
+            .iter()
+            .position(|l| l.contains(needle))
+            .unwrap_or_else(|| panic!("缺 {needle}（{lines:?}）"))
+    };
+    assert!(
+        at("a.rs:1:") < at("a.rs:2:") && at("a.rs:2:") < at("a.rs:3:"),
+        "同一文件内按行号升序（{lines:?}）"
+    );
+    assert!(
+        at("a.rs:3:") < at("b.rs:1:") && at("b.rs:1:") < at("b.rs:2:"),
+        "a.rs 的 3 行整体先于 b.rs，且 b.rs 内升序（{lines:?}）"
+    );
+}
+
 /// 分页判据的核心反向用例：`head_limit=2` ⇒ 恰好 **2 个匹配行**。
 /// 修复前输出含空行，`apply_line_pagination` 按**输出行**切 ⇒ 只剩 1 个匹配行。
 #[tokio::test]
