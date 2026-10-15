@@ -69,6 +69,12 @@ impl Default for GatewayConfig {
 /// 这是一条**保守取舍，不是遗漏**：若将来确需只读客户端看实时输出，应把它作为
 /// 显式配置项加入，而不是顺手塞进白名单。详见
 /// `symbio/src/plugins/session/docs/AR-018-node-state-streaming.md` §11。
+///
+/// **白名单与可达面必须一致（无死条目）**：gateway 挂在 worker composite 之下、
+/// `Composite::route` 不向上转发 ⇒ `home/get_homedir` / `work/get_workspace`（home
+/// 的臂）经入站**走不到**（e2e t69 ⑦ 实测回 400），放进白名单只是永不生效的死条目。
+/// t69 ⑦ 钉住的就是这条边界事实。撤销条件：若将来把 gateway 抬到根 composite、
+/// home 的臂经入站真的可达，先在白名单显式加回并补 e2e，再动这里。
 pub fn is_readonly_allowed(path: &str, payload: &serde_json::Value) -> bool {
     let p = path.trim_start_matches('/');
     if p == "vdfs/read" && reads_config_document(payload) {
@@ -82,8 +88,6 @@ pub fn is_readonly_allowed(path: &str, payload: &serde_json::Value) -> bool {
             | "vdfs/stat"
             | "vdfs/read"
             | "vdfs/search"
-            | "home/get_homedir"
-            | "work/get_workspace"
     )
 }
 
