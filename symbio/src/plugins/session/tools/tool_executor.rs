@@ -30,10 +30,12 @@ use super::tool_result_guard::{guard_tool_result, DEFAULT_TOOL_RESULT_TOKEN_CAP}
 
 mod breaker;
 mod delegation;
+mod elimination;
 mod task_decl;
 
 pub use self::breaker::BreakerInputs;
 pub use self::delegation::{note_delegation, Delegation};
+pub use self::elimination::EliminationInputs;
 pub use self::task_decl::{note_tasks, TaskDeclaration, TaskItem, TaskStatus};
 
 // 工具结果提取
@@ -765,6 +767,9 @@ pub(super) fn not_executed_result(tool_call_id: &str, reason: &str) -> ChatMessa
 /// 3. **外部执行闸门在每个调用点各判一次**（S8 第 20 步）：判据批首读一次
 ///    （[`BreakerInputs`]），结论按调用点出——`Refuse` 零事件、`Break` 走出参
 ///    随收束入格、`Allow` 照旧开窗。
+/// 4. **淘汰闸只拦 `agent_run`**（S13 §3，T-073）：判据同批首读一次
+///    （[`EliminationInputs`]，部署级覆盖层）——被收回 `assign.work` 的主体
+///    派不活；拒因进工具结果，违约随收束如实记账。
 #[allow(clippy::too_many_arguments)]
 pub async fn process_tool_calls_async(
     tool_calls: Vec<TurnToolCallInfo>,
@@ -811,6 +816,10 @@ pub async fn process_tool_calls_async(
     // 熔断闸门的判据批首读一次（见 `BreakerInputs`）：授权表与成本台账都是只读的，
     // 读一次给整批复用——每个调用点各重放一次事实源，闸门自己就变成时延源了。
     let breaker = BreakerInputs::of(session_dir, &ctx);
+    // 淘汰闸门的判据同批首读一次（见 `EliminationInputs`，S13 §3）：部署级覆盖层
+    // 扫全部会话 WAL——「本主体还被不被授予 assign.work」是关于主体的事实，
+    // 不取决于裁决落在哪个会话（换个会话绕不开淘汰）。
+    let elimination = EliminationInputs::of(session_dir, &ctx);
 
     // 本批留底 `(id, name, args)`：循环按值消费 `tool_calls`，而「哪些没被执行」
     // 要在循环**之后**才知道（break 出口）——末尾收口既要补节点，也要把
@@ -1055,6 +1064,48 @@ pub async fn process_tool_calls_async(
                 parent_updates.push(parent_update);
             }
             // 没跑 = 没履约（`agent_run` 的承诺记账见 `note_delegation`）。
+            note_delegation(delegations, &id, &name, &tc.arguments, false, &reason);
+            continue;
+        }
+
+        // ── 淘汰闸（S13 §3，T-073）──────────────────────────────────────────
+        //
+        // **只拦 `agent_run`**：被收回的是 `assign.work`（派活）这一项能力，别的
+        // 工具与本主体的这项撤销无关。位置与外部执行闸同一条理由——紧贴执行窗口
+        // 之前、先于钩子：对一通马上要被拒的调用先跑一遍钩子，等于让拒绝白白付
+        // 一次钩子往返。
+        //
+        // 出口判据与熔断闸**不对称**（同一形态）：淘汰是**可审计的拒绝**——
+        // `verdict.asserted` 已经在事实源里（闸门只是它的读侧），本层不再产事件；
+        // 工具结果上的 `Refused: …` 与随收束入格的那条**违约承诺**（note_delegation
+        // ok=false）就是它的两面——「约了却没派成」诚实记账，声誉投影据此再降。
+        if name.trim() == "agent_run" && elimination.delegation_revoked {
+            let reason = format!(
+                "主体 {} 的 assign.work 已被淘汰回路收回（verdict.asserted，声誉低于阈值），本次委派未执行",
+                elimination.principal
+            );
+            plugin_warn!("session", "[Tool] 淘汰拒止：{id} / {name}——{reason}");
+            let tool_msg = llm_build_tool_message(
+                &id,
+                &format!("Refused: {reason}"),
+                Some(false),
+                Some(result_msg_id.clone()),
+            );
+            tool_messages.push(tool_msg);
+            // 拒掉的调用同样必须收敛父节点（同外部执行闸）。
+            if let Some(parent_update) = emit_parent_finalized(
+                sink,
+                context_messages,
+                &id,
+                MessageStatus::Completed,
+                json!({ "success": false, "failure_kind": failure_kind::PERMISSION_DENIED }),
+                None,
+            )
+            .await
+            {
+                parent_updates.push(parent_update);
+            }
+            // 没派 = 没履约（`agent_run` 的承诺记账见 `note_delegation`）。
             note_delegation(delegations, &id, &name, &tc.arguments, false, &reason);
             continue;
         }

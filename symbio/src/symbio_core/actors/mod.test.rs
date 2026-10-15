@@ -999,6 +999,244 @@ fn reputation_double_run_is_identical_and_as_of_safe() {
     assert_eq!(now.of("agent:b").score, 0, "违约计入后声誉下降");
 }
 
+// ── S13 淘汰回路（[roadmap/S13 §6](../../../../docs/003-stage/013-多智能体社会.md "ST-013-多智能体社会") 断言 2/3/4，T-073）──
+
+use crate::symbio_core::actors::EliminationDecider;
+use crate::symbio_core::authz::PRINCIPAL_ARBITER;
+use crate::symbio_core::event::{Entity as VEntity, EVENT_VERDICT_ASSERTED};
+use crate::symbio_core::governance::{GrantsChange, GrantsOverlay};
+use crate::symbio_core::projection::reputation::{plain_score, ReputationEntry};
+
+/// S13 §6 断言 2 + 4（反向用例）：主体**自报**的声誉事件进不了投影。
+///
+/// 投影只认 `commitment` 实体的事件派生（`from` = 立约方），一条自称
+/// 「我声誉 99」的事件（无论落在哪个格子上）对 `reputation()` 的输出毫无影响——
+/// 「自己报个好分数免于淘汰」在构造上不成立，不是靠纪律拦住。
+#[test]
+fn self_reported_reputation_never_enters_the_projection() {
+    let store = EventStore::new();
+    // 真实事实：一次违约 ⇒ 净分 −1。
+    store
+        .append(
+            Event::pending(
+                "k1",
+                crate::symbio_core::event::EVENT_COMMITMENT_OFFERED,
+                Entity::Commitment,
+                Verb::Opened,
+                0,
+                "agent:b",
+            )
+            .with_payload(serde_json::json!({ "id": "k1", "from": "agent:b", "to": "agent:a", "promise": "x" })),
+        )
+        .unwrap();
+    store
+        .append(
+            Event::pending(
+                "k1c",
+                crate::symbio_core::event::EVENT_COMMITMENT_BROKEN,
+                Entity::Commitment,
+                Verb::Closed,
+                0,
+                "agent:b",
+            )
+            .with_payload(serde_json::json!({ "id": "k1", "why": "没交" })),
+        )
+        .unwrap();
+    // 自报：换个格子、换个实体都没用——投影的输入闭集是 commitment 事件。
+    store
+        .append(
+            Event::pending(
+                "self1",
+                "reputation.reported",
+                Entity::Verdict,
+                Verb::Asserted,
+                0,
+                "agent:b",
+            )
+            .with_payload(serde_json::json!({ "principal": "agent:b", "score": 99 })),
+        )
+        .unwrap();
+    store
+        .append(
+            Event::pending(
+                "self2",
+                crate::symbio_core::event::EVENT_MEMORY_ENCODED,
+                Entity::Memory,
+                Verb::Opened,
+                0,
+                "agent:b",
+            )
+            .with_payload(serde_json::json!({ "content": "我声誉 99", "tag": "声誉" })),
+        )
+        .unwrap();
+
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    let view = reputation()
+        .apply(&snapshot, 9_999, Budget::generous())
+        .value;
+    assert_eq!(
+        view.of("agent:b").score,
+        -1,
+        "只认派生：自报的 99 分一丝不进投影（断言 2/4）"
+    );
+}
+
+/// 仲裁者行（T-073 exit ① 的表半边）：`spec()` 五字段全部**取实**——
+/// principal / capabilities 同源于授权表窄行，pattern 按 `for_principal` 派生。
+///
+/// 三新角色（市场 / 仲裁 / 守门）都派生 `Decider`：模式闭集**不变宽**
+/// （exit ① 的另一半——加角色行不许顺手加模式）。
+#[test]
+fn the_arbiter_row_is_the_documented_five_fields() {
+    let spec = EliminationDecider.spec();
+    assert_eq!(spec.principal, PRINCIPAL_ARBITER);
+    assert_eq!(
+        spec.pattern,
+        crate::symbio_core::actors::Pattern::Decider,
+        "仲裁者无 reply.* 也无 produce.artifact ⇒ Decider（闭集不变宽）"
+    );
+    assert_eq!(
+        spec.capabilities,
+        vec!["assert.verification".to_string()],
+        "能力从授权表那一行取数，不在这里硬写"
+    );
+    assert_eq!(
+        spec.budget_ms,
+        crate::symbio_core::adapters::LatencyTier::Reflex.budget_ms(),
+        "淘汰判定是规则折叠：反射档"
+    );
+    assert_eq!(spec.scope, crate::symbio_core::actors::Scope::Root);
+}
+
+/// 判定半边：低于阈值才淘汰；**恰好等于阈值不淘汰**（边界值）。
+///
+/// 平凡打分 = 守约 − 违约、阈值 0 ⇒ 任何未配平的违约即淘汰；从没立约的主体
+/// （空条目 score 0）**不**被淘汰——没承诺过就没有可违约的东西。
+#[test]
+fn should_eliminate_flips_only_below_the_threshold() {
+    let entry = |score: i64| ReputationEntry {
+        principal: "agent:b".to_string(),
+        offered: 3,
+        kept: 1,
+        broken: 2,
+        score,
+    };
+    let d = EliminationDecider;
+    assert!(d.should_eliminate(&entry(-1)), "净违约 ⇒ 淘汰");
+    assert!(!d.should_eliminate(&entry(0)), "恰好抵平 ⇒ 不淘汰（边界）");
+    assert!(!d.should_eliminate(&entry(1)), "净守约 ⇒ 不淘汰");
+    let fresh = ReputationEntry {
+        principal: "agent:ghost".to_string(),
+        offered: 0,
+        kept: 0,
+        broken: 0,
+        score: plain_score(0, 0, 0),
+    };
+    assert!(
+        !d.should_eliminate(&fresh),
+        "从没立约的主体（空条目）不被淘汰"
+    );
+}
+
+/// S13 §6 断言 3：淘汰 = 一条**可审计、可撤销**的 grants 变更事件。
+///
+/// 三条判据各钉一边：① 事件落在 `verdict × asserted` 格、actor 是仲裁者
+/// （不是被淘汰主体——「谁做的裁决」在事实源里说得出来）；② 载荷六字段齐全
+/// （score / threshold 让审计方能复算）；③ `verdict_grants_changes` 把事件流水
+/// 折成覆盖层后，`is_revoked` 翻真、恢复事件再翻假——回路闭合。
+#[test]
+fn elimination_is_an_auditable_revocable_grants_change() {
+    let d = EliminationDecider;
+    let ev = d.elimination_event("agent:b", -1, 42);
+    // ① 格子与作者。
+    assert_eq!(ev.kind, EVENT_VERDICT_ASSERTED);
+    assert_eq!(ev.entity, VEntity::Verdict);
+    assert_eq!(ev.verb, Verb::Asserted);
+    assert_eq!(
+        ev.actor, PRINCIPAL_ARBITER,
+        "裁决者是仲裁者，不是被淘汰主体"
+    );
+    assert_eq!(ev.produced_by, Some(42), "I2：断言类事件必须带溯源");
+    // ② 载荷六字段。
+    let p = &ev.payload;
+    assert_eq!(p["subject"], "agent:b");
+    assert_eq!(p["capability"], "assign.work");
+    assert_eq!(p["change"], "revoke");
+    assert_eq!(p["score"], -1);
+    assert_eq!(p["threshold"], EliminationDecider::THRESHOLD);
+    assert!(p["why"].as_str().is_some_and(|w| !w.is_empty()), "人话理由");
+
+    // ③ 流水 → 覆盖层：撤销生效、恢复可逆、再收回又生效（last-wins）。
+    let restored = d.restoration_event("agent:b", "申诉受理：上游数据延迟有凭证", 77);
+    assert_eq!(restored.kind, EVENT_VERDICT_ASSERTED);
+    assert_eq!(restored.payload["change"], "restore");
+    let changes = EliminationDecider::verdict_grants_changes(&[ev.clone(), restored.clone()]);
+    assert_eq!(
+        changes,
+        vec![
+            GrantsChange::Revoke {
+                principal: "agent:b".to_string(),
+                capability: "assign.work".to_string()
+            },
+            GrantsChange::Restore {
+                principal: "agent:b".to_string(),
+                capability: "assign.work".to_string()
+            },
+        ]
+    );
+    assert!(
+        !GrantsOverlay::fold(changes).is_revoked("agent:b", "assign.work"),
+        "申诉成立 ⇒ 恢复（可撤销）"
+    );
+    assert!(
+        GrantsOverlay::fold(EliminationDecider::verdict_grants_changes(&[
+            ev.clone(),
+            restored,
+            ev,
+        ]))
+        .is_revoked("agent:b", "assign.work"),
+        "恢复之后再违约 ⇒ 再淘汰（last-wins）"
+    );
+
+    // 非 verdict 事件与认不出的 change 值：跳过，不猜。
+    let other = Event::pending(
+        "x",
+        "task.progress",
+        Entity::Task,
+        Verb::Progressed,
+        0,
+        "agent:b",
+    );
+    let bogus = Event::pending(
+        "y",
+        EVENT_VERDICT_ASSERTED,
+        VEntity::Verdict,
+        Verb::Asserted,
+        0,
+        PRINCIPAL_ARBITER,
+    )
+    .with_payload(serde_json::json!({ "subject": "agent:b", "change": "revokee" }));
+    assert!(
+        EliminationDecider::verdict_grants_changes(&[other, bogus]).is_empty(),
+        "别的格子 / 笔误的 change ⇒ 一条都不译（不把笔误读成改判）"
+    );
+}
+
+/// 淘汰事件也是普通事件：入格后全链路不变量照旧绿（逃不出审计）。
+#[test]
+fn elimination_event_keeps_invariants_green() {
+    let store = EventStore::new();
+    store
+        .append(EliminationDecider.elimination_event("agent:b", -1, 0))
+        .unwrap();
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+    assert!(
+        check_all(&snapshot).is_empty(),
+        "{:?}",
+        check_all(&snapshot)
+    );
+}
+
 // ── S7 彩排（[plan/04 §3](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") 第 16–18 步）：任务树与返工 ──
 //
 // 16 DAG 调度 + readyset（C14 无环）；17 独立验证者（C15 不自验，构造期拒绝）；

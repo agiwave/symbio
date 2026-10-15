@@ -419,6 +419,110 @@ impl PermissionMatrix {
     }
 }
 
+/// 授权变更（淘汰回路的一格，[roadmap/S13 §3](../../../../docs/003-stage/013-多智能体社会.md "ST-013-多智能体社会")）：
+/// 对某主体某项能力的一次**收回**或**恢复**。
+///
+/// ## 为什么是数据而不是状态
+///
+/// S13 §5 的强制项「淘汰必须可申诉」与 §6 断言 3「淘汰 = 一条 grants 变更事件，可被
+/// 审计、可被撤销」要求的正是这个形状：「谁被收回了什么」若只活在内存布尔里，
+/// 审计无从谈起（没有流水），撤销也无从谈起（没有逆操作）。变更经事件通道落盘，
+/// 撤销就是往同一条通道里再写一条 `Restore`——last-wins 折叠出当前状态，
+/// 全量流水就是审计面（[`GrantsOverlay::changes`]）。
+///
+/// 能力用**名**（授权表的书写形态）不用枚举：变更的生产方在 `actors`（裁决侧），
+/// 消费方在插件侧（闸门）——`Capability` 刻意不进根平铺（见模块头「同名辨析」），
+/// 两边都只够得着名字。名字的对错由**构造期**兜住（[`PermissionMatrix::from_names`]
+/// 认不出即拒绝），故这里照单全收不会变成第二处判定。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GrantsChange {
+    /// 收回：`verdict.asserted`（`change = "revoke"`）折叠出的那一格。
+    Revoke {
+        principal: String,
+        capability: String,
+    },
+    /// 恢复：申诉成立 / 人工复位的逆操作（`change = "restore"`）。
+    Restore {
+        principal: String,
+        capability: String,
+    },
+}
+
+impl GrantsChange {
+    /// 变更指向的主体。
+    pub fn principal(&self) -> &str {
+        match self {
+            GrantsChange::Revoke { principal, .. } => principal,
+            GrantsChange::Restore { principal, .. } => principal,
+        }
+    }
+
+    /// 变更指向的能力名（书写形态）。
+    pub fn capability(&self) -> &str {
+        match self {
+            GrantsChange::Revoke { capability, .. } => capability,
+            GrantsChange::Restore { capability, .. } => capability,
+        }
+    }
+
+    /// 是否收回（`is_revoked` 的判定半边）。
+    pub fn is_revoke(&self) -> bool {
+        matches!(self, GrantsChange::Revoke { .. })
+    }
+}
+
+/// 部署级授权覆盖层：把事件流里历次 [`GrantsChange`] 折叠成「现在谁被收回了什么」。
+///
+/// ## 为什么需要它（而不是直接改表）
+///
+/// 授权表（`authz::ROWS`）是**常量**——宿主装配期定稿，运行期不改。淘汰却是运行期
+/// 事实：声誉掉到阈值以下的主体要被收回 `assign.work`（S13 §2「淘汰」行）。两条路
+/// 都不通：把表改成可变的 ⇒ 「表授予 A、闸门判 B」的漂移面回来了（表不再是单一
+/// 权威）；不收回 ⇒ 淘汰这条断言在生产里没有对应物（§6 断言 3 未点亮）。
+///
+/// 覆盖层于是住在表**旁边**而不是表**里面**：表回答「这个主体登记过什么」，
+/// 覆盖层回答「其中有什么现在被收回了」。闸门的判定 = 表谓词 **且非** 覆盖层撤销
+/// ——两个问题各有一个答案，合成才是「现在准不准」。
+///
+/// ## 折叠口径：last-wins
+///
+/// 同一 `(principal, capability)` 的多次变更，**最后一次**生效——恢复之后再收回
+/// 就又是收回，反之亦然。判据从流水尾部往前找，找到的第一条就是当前状态。
+///
+/// ## 审计面在事件流里，不在本类型上
+///
+/// 「可审计」（S13 §6 断言 3）的全部含义是**流水可查**：`verdict.asserted` 事件
+/// 就在 Log 里（经 `EliminationDecider::verdict_grants_changes` 读），本类型只做
+/// 折叠与判定。曾设想过 `changes()` / `revoked()` 两个便利读数，但它们**没有生产
+/// 消费方**——按本项目纪律（「接线了却永不生效」正是要拦的静默失效）下线：
+/// 需要审计时读事件流，那是不可变的那一份。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GrantsOverlay {
+    changes: Vec<GrantsChange>,
+}
+
+impl GrantsOverlay {
+    /// 由变更流水构造（顺序即时间序：fold 判据从尾部往前找）。
+    pub fn fold(changes: impl IntoIterator<Item = GrantsChange>) -> Self {
+        GrantsOverlay {
+            changes: changes.into_iter().collect(),
+        }
+    }
+
+    /// 该主体的该能力**现在是否被收回**（last-wins）。
+    ///
+    /// fail-closed 的反面：认不出的能力名 ⇒ 未收回——不把载荷的拼写错误读成
+    /// 一次静默撤销（那等于把笔误变成一次越权拒绝），「现在准不准」由调用方的
+    /// 表谓词与本判定合成。
+    pub fn is_revoked(&self, principal: &str, capability: &str) -> bool {
+        self.changes
+            .iter()
+            .rev()
+            .find(|c| c.principal() == principal && c.capability() == capability)
+            .is_some_and(|c| c.is_revoke())
+    }
+}
+
 #[cfg(test)]
 #[path = "mod.test.rs"]
 mod tests;

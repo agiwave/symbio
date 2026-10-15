@@ -341,6 +341,25 @@ pub const EVENT_SYSTEM_HEALTH: &str = "system.health";
 /// 落在 `conation × opened`。
 pub const EVENT_CONATION_EXPRESSED: &str = "conation.expressed";
 
+// ── 裁决格子（S13 §3，[roadmap/S13](../../../../docs/003-stage/013-多智能体社会.md "ST-013-多智能体社会")）──
+//
+// 集体决策 = 「多个主体对同一 verdict 的竞争 + 仲裁者」：`verdict` 实体（F5 闭集
+// 里一直有这一行）在 S13 取的第一个值就是**淘汰裁决**——声誉投影低于阈值的主体
+// 被收回 `assign.work`（§2「淘汰」行）。**不加新格子**：`verdict × asserted`
+// 正是「对一次判定盖章」，与承诺族的 `commitment.asserted` 同形。
+
+/// 淘汰裁决：仲裁者对「某主体不再被授予 `assign.work`」的盖章
+/// （载荷 `{ subject, capability, change, score, threshold, why }`，
+/// 见 `actors::EliminationDecider`）。落在 `verdict × asserted`。
+///
+/// ## 为什么它是事件而不是表改动
+///
+/// 授权表（`authz::ROWS`）是装配期常量——运行期改表就把「表授予 A、闸门判 B」
+/// 的漂移面请回来了。淘汰于是走**事件通道**：一条 `verdict.asserted` 落盘，
+/// 读侧（闸门）折叠成 `governance::GrantsOverlay` 的撤销，`Restore` 是同格的
+/// 逆操作。可审计（流水在 Log 里）、可撤销（再写一条恢复）——S13 §6 断言 3。
+pub const EVENT_VERDICT_ASSERTED: &str = "verdict.asserted";
+
 /// 事件实体 —— 语法网格的**行**，闭集（F5，11 个）。
 ///
 /// 新增实体是 L-schema 变化（[plan/03 §2](../../../../docs/004-plan/003-演进与验证.md "PL-003-演进与验证")）：

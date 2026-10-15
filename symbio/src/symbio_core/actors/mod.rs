@@ -39,7 +39,9 @@ mod spec;
 pub use self::autonomic::AutonomousInitiator;
 pub use self::commitment::commitment_events;
 pub use self::conation::{ConationCandidate, ConationPolicy, IntentGate};
-pub use self::control::{CircuitBreaker, GateDecision, Preemption, PreemptionDecider};
+pub use self::control::{
+    CircuitBreaker, EliminationDecider, GateDecision, Preemption, PreemptionDecider,
+};
 pub use self::reasoner::render_messages;
 pub use self::recall::recalled_event;
 pub use self::skill::{SkillCompiler, SkillRoute, SkillRouter};

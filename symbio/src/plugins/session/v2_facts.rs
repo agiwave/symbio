@@ -33,7 +33,9 @@
 //! 见 [`record_learning`] 的文档——巩固要用**刷新后**的快照，它得看得见编码
 //! 刚写下的那些。
 
-use crate::symbio_core::{Entity, Event, EventWalStore, Store, Verb, EVENT_MEMORY_CALIBRATED};
+use crate::symbio_core::{
+    Budget, Entity, Event, EventWalStore, Store, Verb, EVENT_MEMORY_CALIBRATED,
+};
 
 /// 收束派生事实中的**承诺 / 任务表 / 熔断**半边（S08 §3 / S7 步 16–18 / S8 第 20 步）。
 ///
@@ -127,6 +129,95 @@ pub(crate) fn record_derived(
     }
 
     Ok(())
+}
+
+/// 收束派生事实中的**淘汰回路**半边（S13 §3，T-073）：轮末按**刷新后**的声誉投影
+/// 裁决「谁不再被授予 `assign.work`」，落成一条 `verdict.asserted`（可审计、可撤销
+/// 的 grants 变更事件，`governance::GrantsOverlay` 的读侧半边）。
+///
+/// ## 为什么在轮末、为什么用刷新后的快照
+///
+/// 承诺（违约 ⇒ 声誉降）由 [`record_derived`] **同轮**落格——淘汰必须看得见本轮
+/// 刚写下的那条违约，否则「委托失败 ⇒ 声誉 −1 ⇒ 收回派活权」要等到下一轮才发生，
+/// 而那一轮里主体已经又派出去一轮了（判据滞后一个轮次 = 静默失效）。
+/// 与巩固同一条纪律：读 `history()` 而不是调用方传进来的快照。
+///
+/// ## 判据的三个条件（缺一不淘汰）
+///
+/// 1. **有声誉条目**（立过约）——从没承诺过的主体没有可违约的东西，空条目
+///    （score 0）不触发；
+/// 2. **持 `assign.work`**（按**生产表**判，即登记行）——S13 §2 的字面机制只收回
+///    这一项能力；仅持 `produce.artifact` 的对等主体（`agent:peer-b` 类）不在机制内
+///    （它没有「派活」这个权威动作可收回）；
+/// 3. **低于阈值且无既有淘汰 verdict**（后者经覆盖层判，last-wins）——同一条 verdict
+///    不重复落格：事件号带溯源锚，重复写只会撞幂等键被静默丢掉，而那正是
+///    「审计面少一条」的静默失效。
+///
+/// ## 结构性的诚实缺口：恢复不可能自动发生
+///
+/// 淘汰后唯一能涨声誉的路径是**成功委派**（`agent_run` 守约），而委派恰是被收回的
+/// `assign.work` 那个动作——闸门（`tools/tool_executor` 的撤销闸）会拒掉它。于是
+/// 恢复必须走**申诉 / 人工复位**（写一条 `change = "restore"` 的同格事件，机制半边
+/// 在 `EliminationDecider::restoration_event` 与撤销回路单测里证过）。本步不造一个
+/// 「假装能自动恢复」的回路；生产申诉触发器是 [T-073](../../../../docs/009-task/073-多智能体社会数据行.md "T-073-多智能体社会数据行")
+/// 之后的事，缺口记在任务文档里。
+///
+/// ## 失败只记日志不冒泡
+///
+/// 淘汰是附加事实：写不进去不该把成功的一轮说成失败（与记忆三段同一条口径）。
+pub(crate) fn record_elimination(store: &EventWalStore, turn: u64, user_seq: u64) {
+    // 刷新后的快照：看得见 `record_derived` 同轮写下的承诺（见函数文档）。
+    let snapshot = store.history();
+    let view = crate::symbio_core::reputation()
+        .apply(&snapshot, i64::MAX, Budget::generous())
+        .value;
+    // 覆盖层：判「有没有既有淘汰」——不复述载荷 ↔ 变更的映射（它在 core 的
+    // `EliminationDecider::verdict_grants_changes`，单点定义）。
+    let overlay = crate::symbio_core::GrantsOverlay::fold(
+        crate::symbio_core::EliminationDecider::verdict_grants_changes(&snapshot),
+    );
+    let decider = crate::symbio_core::EliminationDecider;
+    // 写侧闸（与 `inbox::commit_preemption` 的 `judge.intent` 检查同一条纪律）：
+    // 落裁决事实需要仲裁者那一行持 `assert.verification`——缺能力 ⇒ 一条都不写
+    // （fail-closed：没有资格的判定不该留下事实）。
+    let spec = decider.spec();
+    if !spec.can_assert_verification() {
+        crate::plugin_warn!(
+            "session",
+            "[v2] 仲裁者缺 assert.verification，本轮淘汰判定不落格（turn={turn}）"
+        );
+        return;
+    }
+    let matrix = crate::symbio_core::authz::production_matrix();
+    for (principal, entry) in &view.by_principal {
+        // 条件 2：持 assign.work 的**登记**主体（生产表是权威；派生的 `agent:<id>`
+        // 不在表里 ⇒ 不淘汰——它们不是部署事实，边界同函数文档）。
+        if !matrix.can_write_name(principal, crate::symbio_core::authz::CAP_ASSIGN_WORK) {
+            continue;
+        }
+        if !decider.should_eliminate(entry) {
+            continue;
+        }
+        // 条件 3：已有生效撤销 ⇒ 不重复落格（审计面不缺、幂等键不撞）。
+        if overlay.is_revoked(principal, crate::symbio_core::authz::CAP_ASSIGN_WORK) {
+            continue;
+        }
+        let ev = decider.elimination_event(principal, entry.score, user_seq);
+        if let Err(e) = store.append(ev) {
+            crate::plugin_warn!(
+                "session",
+                "[v2] 淘汰裁决入格失败（turn={turn}，subject={principal}）：{e:?}"
+            );
+        } else {
+            crate::plugin_info!(
+                "session",
+                "[v2] 落格 {}：主体 {principal} 收回 assign.work（声誉分 {} 低于阈值 {}）",
+                crate::symbio_core::EVENT_VERDICT_ASSERTED,
+                entry.score,
+                crate::symbio_core::EliminationDecider::THRESHOLD,
+            );
+        }
+    }
 }
 
 /// 收束派生事实中的**记忆与学习**半边（步 11–13 + 步 22）。

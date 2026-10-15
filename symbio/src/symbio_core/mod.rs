@@ -120,9 +120,13 @@ pub use actors::{ActorSpec, Pattern};
 // `skill_id`、路由不落观测就没有 `fallback`，置信度恒 1.0，S11 §5 静默失效）。
 // `pub(crate) use` 而非 `pub use`：消费方全在本 crate 内，进根公开面只会给
 // C-003（根导出须 ≥2 个消费方）凭空添待办——C-003 只数 `pub use`。
+// `EliminationDecider`（S13 淘汰回路的裁决侧，T-073）：判定在 core、轮末驱动与
+// 闸门接线都在 `plugins/session`（v2_facts 的轮末步 + 工具执行层的撤销闸），
+// 与 PreemptionDecider / CircuitBreaker 同一形态——pub(crate) 出根，不进公开面。
 pub(crate) use actors::{
-    AutonomousInitiator, CircuitBreaker, ConationCandidate, ConationPolicy, GateDecision,
-    IntentGate, Preemption, PreemptionDecider, Scope, SkillCompiler, SkillRoute, SkillRouter,
+    AutonomousInitiator, CircuitBreaker, ConationCandidate, ConationPolicy, EliminationDecider,
+    GateDecision, IntentGate, Preemption, PreemptionDecider, Scope, SkillCompiler, SkillRoute,
+    SkillRouter,
 };
 // 事件名字表（名字是数据，单点定义）。
 // 任务格名字表（S7 步 16–18，批⑨）：core 内的读方（`projection::readyset`、
@@ -168,6 +172,10 @@ pub(crate) use event::{
     EVENT_MEMORY_CALIBRATED, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED,
     EVENT_MEMORY_FORGOTTEN, EVENT_MEMORY_RECALLED,
 };
+// 淘汰裁决事件名（S13 §3，T-073）：生产写方是 `v2_facts` 的轮末淘汰步，读方是
+// 工具执行层的撤销闸（经 `EliminationDecider::verdict_grants_changes` 翻译）——
+// **两个生产消费方**，故走非测试的 `pub(crate)` 出根（与记忆事件名表同一形态）。
+pub(crate) use event::EVENT_VERDICT_ASSERTED;
 pub(crate) use projection::consolidate::{accept, ConsolidateParams, Rejection};
 // 就绪集出根：生产消费方是 `plugins/session` 的**两处**——读出口 `session/stats`
 // 的 `readyset` 列与请求装配的调度段（04 §3.1 批⑨）。与 `reputation` 同一形态：
@@ -229,6 +237,14 @@ pub(crate) use store::AppendError;
 // `authz::production_matrix()` 拿表（返回类型走类型推导，不点名），插件侧再没有
 // 一处指称这个类型 ⇒ 按 C-003「名字没跨出 core 的符号不许占根出口」收回 core 内
 // （core 内走 `governance::PermissionMatrix` 深引，C-002 只管插件侧）。
+//
+// `GrantsOverlay`（S13 淘汰回路的机制半边，T-073）：授权表是装配期常量，淘汰是
+// 运行期事实 ⇒ 覆盖层住表旁边（表答「登记过什么」，它答「其中什么被收回了」）。
+// 两个插件侧消费方——`v2_facts` 轮末步（判「有没有既有淘汰」）与工具执行层的
+// 撤销闸（判「现在准不准委派」）⇒ 与 `VisScope` 同形态 `pub(crate)` 出根。
+// 只出 `GrantsOverlay` 不出 `GrantsChange`：插件侧拿它经 `fold` 收
+// `verdict_grants_changes` 的返回值（类型推导，不点名），没有第二处指称。
+pub(crate) use governance::GrantsOverlay;
 pub use governance::VisScope;
 
 // ==================== LLM 契约 ====================

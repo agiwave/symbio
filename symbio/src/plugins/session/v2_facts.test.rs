@@ -17,11 +17,11 @@
 //!   只钉 `record_learning` 自己的口径，尤其是**巩固要用刷新后的快照**（编码刚写下
 //!   的那条必须对巩固可见）——那一层端到端看不见。
 
-use super::{record_derived, record_learning};
+use super::{record_derived, record_elimination, record_learning};
 use crate::symbio_core::{
     check_all, recall, Budget, Entity, Event, EventEnvelope as _, EventWalStore, Seq, Store, Verb,
     EVENT_ASSISTANT_FINAL, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,
-    EVENT_MEMORY_RECALLED, EVENT_USER_MESSAGE,
+    EVENT_MEMORY_RECALLED, EVENT_USER_MESSAGE, EVENT_VERDICT_ASSERTED,
 };
 use std::path::{Path, PathBuf};
 
@@ -515,5 +515,214 @@ fn record_learning_wires_all_three_memory_steps() {
     );
     assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
 
+    std::fs::remove_dir_all(wal.parent().unwrap()).ok();
+}
+
+// ── 淘汰回路（S13 §3，T-073）：轮末声誉裁决 ──────────────────────────────
+
+/// 一轮**违约**的委托 ⇒ 声誉 −1 ⇒ 轮末写一条 `verdict.asserted` 收回 `assign.work`。
+///
+/// 钉三件事：① 判据读的是**同轮刚落格**的违约（顺序判据——`record_elimination`
+/// 必须排在 `record_derived` 之后，否则判据滞后一个轮次）；② 事件的作者是仲裁者
+/// 而不是被淘汰主体；③ 载荷带 score / threshold，审计方看得见当时值。
+#[test]
+fn a_broken_delegation_this_turn_triggers_the_elimination_verdict() {
+    use super::super::tools::Delegation;
+
+    let wal = tmp_wal("elim-broken");
+    let (store, snapshot, user_seq) = seed_turn(
+        &wal,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        0,
+        "交给子智能体",
+        50,
+    );
+    let delegations = [Delegation {
+        id: "call-1".to_string(),
+        promise: "让 reviewer 复查这段".to_string(),
+        ok: false,
+        why: "子智能体没接手".to_string(),
+    }];
+    record_derived(
+        &wal,
+        &store,
+        &snapshot,
+        0,
+        user_seq,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_USER,
+        "t0",
+        &delegations,
+        &[],
+        &[],
+    )
+    .expect("派生事实入格");
+
+    // 轮末淘汰步（顺序即判据：排在承诺落格之后）。
+    record_elimination(&store, 0, user_seq);
+
+    let snap = EventWalStore::open(&wal).expect("重开").range(Seq::new(0));
+    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+    let verdict = snap
+        .iter()
+        .find(|e| e.kind == EVENT_VERDICT_ASSERTED)
+        .expect("低于阈值必须落淘汰裁决");
+    assert_eq!(verdict.entity, Entity::Verdict);
+    assert_eq!(verdict.verb, Verb::Asserted);
+    assert_eq!(
+        verdict.actor,
+        crate::symbio_core::authz::PRINCIPAL_ARBITER,
+        "裁决者是仲裁者，不是被淘汰主体"
+    );
+    assert_eq!(
+        verdict.produced_by,
+        Some(user_seq),
+        "裁决同锚在本轮开口（I2）"
+    );
+    let p = &verdict.payload;
+    assert_eq!(p["subject"], crate::symbio_core::authz::PRINCIPAL_MAIN);
+    assert_eq!(p["capability"], "assign.work");
+    assert_eq!(p["change"], "revoke");
+    assert_eq!(p["score"], -1, "判据值随事件落盘，审计方看得见");
+    assert!(p["why"].as_str().is_some_and(|w| !w.is_empty()));
+
+    std::fs::remove_dir_all(wal.parent().unwrap()).ok();
+}
+
+/// 反向：**守约**的委托 ⇒ 声誉 +1 ⇒ 不淘汰（阈值判据不是恒真）。
+#[test]
+fn a_kept_delegation_never_eliminates() {
+    use super::super::tools::Delegation;
+
+    let wal = tmp_wal("elim-kept");
+    let (store, snapshot, user_seq) = seed_turn(
+        &wal,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        0,
+        "交给子智能体",
+        50,
+    );
+    let delegations = [Delegation {
+        id: "call-1".to_string(),
+        promise: "让 reviewer 复查这段".to_string(),
+        ok: true,
+        why: String::new(),
+    }];
+    record_derived(
+        &wal,
+        &store,
+        &snapshot,
+        0,
+        user_seq,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_USER,
+        "t0",
+        &delegations,
+        &[],
+        &[],
+    )
+    .expect("派生事实入格");
+    record_elimination(&store, 0, user_seq);
+
+    let snap = EventWalStore::open(&wal).expect("重开").range(Seq::new(0));
+    assert!(
+        !snap.iter().any(|e| e.kind == EVENT_VERDICT_ASSERTED),
+        "守约 ⇒ 声誉 +1 ⇒ 一条裁决都不该有"
+    );
+    std::fs::remove_dir_all(wal.parent().unwrap()).ok();
+}
+
+/// 幂等：同一条撤销不重复落格（无既有 verdict 的主体才写）。
+///
+/// 事件号带溯源锚、重复写只会撞幂等键被存储**静默**丢掉——「审计面少一条」
+/// 正是要禁的静默失效，故判据必须在写之前就问覆盖层。
+#[test]
+fn elimination_does_not_write_a_second_verdict() {
+    use super::super::tools::Delegation;
+
+    let wal = tmp_wal("elim-idem");
+    let (store, snapshot, user_seq) = seed_turn(
+        &wal,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        0,
+        "交给子智能体",
+        50,
+    );
+    let delegations = [Delegation {
+        id: "call-1".to_string(),
+        promise: "让 reviewer 复查这段".to_string(),
+        ok: false,
+        why: "子智能体没接手".to_string(),
+    }];
+    record_derived(
+        &wal,
+        &store,
+        &snapshot,
+        0,
+        user_seq,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        crate::symbio_core::authz::PRINCIPAL_USER,
+        "t0",
+        &delegations,
+        &[],
+        &[],
+    )
+    .expect("派生事实入格");
+    record_elimination(&store, 0, user_seq);
+    // 第二轮再判一次（覆盖层里已经有那条撤销了）。
+    record_elimination(&store, 1, user_seq);
+
+    let snap = EventWalStore::open(&wal).expect("重开").range(Seq::new(0));
+    assert_eq!(
+        snap.iter()
+            .filter(|e| e.kind == EVENT_VERDICT_ASSERTED)
+            .count(),
+        1,
+        "同一条撤销只落一次格（审计面不缺、幂等键不撞）"
+    );
+    std::fs::remove_dir_all(wal.parent().unwrap()).ok();
+}
+
+/// 范围边界：只淘汰**持 `assign.work` 的登记主体**——仅持 `produce.artifact` 的
+/// 对等主体（`agent:peer-b` 类）不在机制内（它没有「派活」这个权威动作可收回）。
+#[test]
+fn a_principal_without_assign_work_is_never_eliminated() {
+    use super::super::tools::Delegation;
+
+    let wal = tmp_wal("elim-peer");
+    let (store, snapshot, user_seq) = seed_turn(
+        &wal,
+        crate::symbio_core::authz::PRINCIPAL_PEER,
+        0,
+        "对等主体跑一轮",
+        50,
+    );
+    let delegations = [Delegation {
+        id: "call-peer-1".to_string(),
+        promise: "把结果交给主智能体".to_string(),
+        ok: false,
+        why: "上游没给数据".to_string(),
+    }];
+    record_derived(
+        &wal,
+        &store,
+        &snapshot,
+        0,
+        user_seq,
+        crate::symbio_core::authz::PRINCIPAL_PEER,
+        crate::symbio_core::authz::PRINCIPAL_MAIN,
+        "t0",
+        &delegations,
+        &[],
+        &[],
+    )
+    .expect("派生事实入格");
+    record_elimination(&store, 0, user_seq);
+
+    let snap = EventWalStore::open(&wal).expect("重开").range(Seq::new(0));
+    assert!(
+        !snap.iter().any(|e| e.kind == EVENT_VERDICT_ASSERTED),
+        "对等主体不持 assign.work ⇒ 淘汰机制不覆盖它（stage 字面边界）"
+    );
     std::fs::remove_dir_all(wal.parent().unwrap()).ok();
 }

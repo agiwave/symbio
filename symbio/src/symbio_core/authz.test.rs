@@ -144,6 +144,88 @@ fn the_peer_row_is_narrower_than_the_derived_set() {
     );
 }
 
+/// 组织形态三角色（S13 §3，T-073）：市场 / 仲裁 / 守门三行**各自单能力独持**，
+/// 且都严格窄于 `matrix_for` 的派生整套。
+///
+/// 与自主 / 判定 / 对等三行同一条纪律：主体出现必须自带窄行同批落地，不许靠派生
+/// ——未登记的 `agent:market` 会拿主智能体整套（含 `reply.*`），「市场不得冒充
+/// 主控发言」「仲裁者不自证」「守门者先判后发声」于是在生产里被静默推翻。
+/// 另钉 exit ① 的表半边：arbiter 持 `assert.verification` **不碰** C15（不持
+/// `define.work` / `produce.artifact`，构造期双持检查见 `governance`）。
+#[test]
+fn the_three_society_rows_are_narrower_than_derivation() {
+    let matrix = production_matrix();
+    let main_len = matrix.grants_of(PRINCIPAL_MAIN).len();
+
+    // 市场：只派活（assign.work），公告是公共域事实（vis_scope = public）。
+    let market = matrix.grants_of(PRINCIPAL_MARKET);
+    assert_eq!(market.len(), 1, "只持 assign.work：{market:?}");
+    assert!(matrix.can_write(PRINCIPAL_MARKET, Capability::AssignWork));
+    assert!(
+        !matrix.can_reply(PRINCIPAL_MARKET, true) && !matrix.can_reply(PRINCIPAL_MARKET, false),
+        "市场只派活、不冒充主控发言"
+    );
+    assert_eq!(
+        matrix.sees_of(PRINCIPAL_MARKET),
+        Some(VisScope::Public),
+        "S13 §3：市场公告 vis_scope = public——取这个值的第一行"
+    );
+
+    // 仲裁者：只盖章（assert.verification），本表验证能力的唯一持有者。
+    let arbiter = matrix.grants_of(PRINCIPAL_ARBITER);
+    assert_eq!(arbiter.len(), 1, "只持 assert.verification：{arbiter:?}");
+    assert!(matrix.can_write(PRINCIPAL_ARBITER, Capability::AssertVerification));
+    assert!(
+        !matrix.can_write(PRINCIPAL_ARBITER, Capability::DefineWork)
+            && !matrix.can_write(PRINCIPAL_ARBITER, Capability::ProduceArtifact),
+        "C15：仲裁者不持产出/定义 ⇒ 不成对自验（构造期同款检查）"
+    );
+    assert!(!matrix.can_reply(PRINCIPAL_ARBITER, true));
+    assert_eq!(
+        matrix.sees_of(PRINCIPAL_ARBITER),
+        Some(VisScope::Public),
+        "裁决是集体决策的产物：public"
+    );
+
+    // 守门者：只判来者意图（judge.intent），判定是私有工作记录。
+    let keeper = matrix.grants_of(PRINCIPAL_GATEKEEPER);
+    assert_eq!(keeper.len(), 1, "只持 judge.intent：{keeper:?}");
+    assert!(matrix.can_write(PRINCIPAL_GATEKEEPER, Capability::JudgeIntent));
+    assert!(
+        !matrix.can_reply(PRINCIPAL_GATEKEEPER, true)
+            && !matrix.can_reply(PRINCIPAL_GATEKEEPER, false),
+        "判定者不得直接发言（与 reflex 行同款独持先例）"
+    );
+    assert_eq!(
+        matrix.sees_of(PRINCIPAL_GATEKEEPER),
+        Some(VisScope::ThreadPrivate),
+        "守门判定是判定者自己的工作记录，不是公共域公告"
+    );
+
+    // 三行都严格窄于主智能体那一行，且 `matrix_for` 拿的是**登记行**不是派生整套。
+    for (p, cap) in [
+        (PRINCIPAL_MARKET, Capability::AssignWork),
+        (PRINCIPAL_ARBITER, Capability::AssertVerification),
+        (PRINCIPAL_GATEKEEPER, Capability::JudgeIntent),
+    ] {
+        assert!(
+            matrix.grants_of(p).len() < main_len,
+            "{p} 必须严格窄于主智能体那一行（{main_len} 项）"
+        );
+        let derived = matrix_for(p);
+        assert_eq!(
+            derived.grants_of(p).len(),
+            1,
+            "派生不得把主智能体整套塞回 {p}"
+        );
+        assert!(
+            derived.can_write(p, cap),
+            "登记行是权威：{p} 仍持它那一项能力"
+        );
+        assert!(!derived.can_reply(p, true));
+    }
+}
+
 /// 收束格按**种类**判（[ADR-067](../../../docs/010-adr/067.md "ADR-067")，T-072 的单测判据）：
 /// 产物收束问 `produce.artifact`、发言收束仍按 `reply.*`——同一张表的两道闸。
 ///

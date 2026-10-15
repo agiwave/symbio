@@ -288,3 +288,77 @@ fn widen_is_commutative_idempotent_and_monotone() {
     assert_eq!(ThreadPrivate.widen(Shared), Shared);
     assert_eq!(Shared.widen(Public), Public);
 }
+
+// ── T-073：授权覆盖层（淘汰回路的机制半边）─────────────────────────────
+
+/// 撤销回路（S13 §6 断言 3「淘汰 = 一条可审计、可撤销的 grants 变更事件」）：
+/// 收回 ⇒ `is_revoked` 翻真 ⇒ 恢复 ⇒ 翻假 ⇒ **再收回** ⇒ 又翻真。
+///
+/// last-wins 是这条回路的全部语义：恢复之后再违约必须还能再淘汰
+/// （否则第一次申诉之后主体永久免死），反之恢复必须真的生效
+/// （否则「可申诉」只是一句文档话）。
+#[test]
+fn grants_overlay_supports_the_revoke_restore_revoke_loop() {
+    let revoke = |subject: &str| GrantsChange::Revoke {
+        principal: subject.to_string(),
+        capability: "assign.work".to_string(),
+    };
+    let restore = |subject: &str| GrantsChange::Restore {
+        principal: subject.to_string(),
+        capability: "assign.work".to_string(),
+    };
+
+    let overlay = GrantsOverlay::fold([]);
+    assert!(
+        !overlay.is_revoked("agent:main", "assign.work"),
+        "空覆盖层 = 什么都没收回（表本身是权威，覆盖层只答减法）"
+    );
+
+    let overlay = GrantsOverlay::fold([revoke("agent:main")]);
+    assert!(overlay.is_revoked("agent:main", "assign.work"));
+    assert!(
+        !overlay.is_revoked("agent:market", "assign.work"),
+        "撤销按 (主体, 能力) 精确命中，不波及别的主体"
+    );
+    assert!(
+        !overlay.is_revoked("agent:main", "reply.first"),
+        "也不波及同一主体的别的能力——淘汰只收回 assign.work"
+    );
+
+    let overlay = GrantsOverlay::fold([revoke("agent:main"), restore("agent:main")]);
+    assert!(
+        !overlay.is_revoked("agent:main", "assign.work"),
+        "恢复是撤销的逆操作（申诉成立 ⇒ 重新可委派）"
+    );
+
+    let overlay = GrantsOverlay::fold([
+        revoke("agent:main"),
+        restore("agent:main"),
+        revoke("agent:main"),
+    ]);
+    assert!(
+        overlay.is_revoked("agent:main", "assign.work"),
+        "恢复之后再违约 ⇒ 再淘汰（last-wins，不是一次性事件）"
+    );
+}
+
+/// 覆盖层的 fail-closed 方向：认不出的能力名 ⇒ 未收回。
+///
+/// 与 `from_name` 相反的方向感——能力名笔误在这里**不**变成一次静默撤销
+/// （那等于把载荷的拼写错误变成一次越权拒绝），而是「这条撤销不存在」，
+/// 由调用方的表谓词继续把关。两个 fail-closed 各自守自己那一侧。
+#[test]
+fn overlay_never_guesses_a_capability_name() {
+    let overlay = GrantsOverlay::fold([GrantsChange::Revoke {
+        principal: "agent:main".to_string(),
+        capability: "assign.wrok".to_string(),
+    }]);
+    assert!(
+        !overlay.is_revoked("agent:main", "assign.work"),
+        "拼错的撤销不命中正确的能力名"
+    );
+    assert!(
+        overlay.is_revoked("agent:main", "assign.wrok"),
+        "但它自己那一格照旧生效（审计面不能丢）"
+    );
+}

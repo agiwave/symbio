@@ -1652,6 +1652,10 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
             ) {
                 crate::plugin_warn!("session", "[v2-exec] 承诺入格失败（turn={turn_no}）：{why}");
             }
+            // 淘汰回路（S13 §3，T-073）：**必须排在承诺落格之后**——它读的声誉投影
+            // 要看得见本轮刚写下的那条违约（委托失败 ⇒ 声誉 −1 ⇒ 收回 assign.work）。
+            // 顺序反了会让判据滞后一个轮次：那一轮里主体已经又派出去一轮。
+            super::v2_facts::record_elimination(store.as_ref(), turn_no, user_seq);
             // 记忆与学习：同一函数（`record_learning`）。
             super::v2_facts::record_learning(
                 &wal,

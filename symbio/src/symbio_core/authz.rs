@@ -100,6 +100,37 @@ pub(crate) const PRINCIPAL_REFLEX: &str = "agent:reflex";
 /// **对等主体出现必须自带窄行同批落地，不许靠派生**（同 PL-009「闸不能晚于发起者」）。
 pub(crate) const PRINCIPAL_PEER: &str = "agent:peer-b";
 
+/// **市场**的身份（[roadmap/S13 §3](../../../docs/003-stage/013-多智能体社会.md "ST-013-多智能体社会")）——
+/// 组织形态三角色的第一行，[T-073](../../../docs/009-task/073-多智能体社会数据行.md "T-073-多智能体社会数据行") 落地。
+///
+/// 只持 `assign.work`：市场的权威动作是**派活**（`agent_run` 的委托面），不是自己干活。
+/// 可见域 `public`——市场公告（派给谁、什么活）是**公共域**的事实，ST-013 §3 的
+/// `vis_scope = public` 取值就钉在这一行上。
+///
+/// 与前三条窄行同形：主体出现必须自带窄行同批落地，未登记的 `agent:market` 会走派生
+/// 拿主智能体整套（含 `reply.*`）——「市场不得冒充主控发言」于是被静默推翻。
+pub(crate) const PRINCIPAL_MARKET: &str = "agent:market";
+
+/// **仲裁者**的身份（[roadmap/S13 §3](../../../docs/003-stage/013-多智能体社会.md "ST-013-多智能体社会")）——
+/// 组织形态三角色的第二行，[T-073](../../../docs/009-task/073-多智能体社会数据行.md "T-073-多智能体社会数据行") 落地。
+///
+/// 只持 `assert.verification`：仲裁的权威动作是**对判定盖章**（`verdict.asserted`，
+/// 淘汰回路的那一格）。C15「验证者 ≠ 产出者」是构造期约束——本行不持
+/// `define.work` / `produce.artifact`，自成对安全；生产里唯一持验证能力的一行
+/// （主智能体刻意不持，见本表 `agent:main` 行注释）。
+///
+/// 可见域 `public`：仲裁裁决是**集体决策**的产物（S13 §1「集体决策 = 多个主体对同一
+/// verdict 的竞争 + 仲裁者」），藏起来的裁决没有仲裁。
+pub(crate) const PRINCIPAL_ARBITER: &str = "agent:arbiter";
+
+/// **守门者**的身份（[roadmap/S13 §3](../../../docs/003-stage/013-多智能体社会.md "ST-013-多智能体社会")）——
+/// 组织形态三角色的第三行，[T-073](../../../docs/009-task/073-多智能体社会数据行.md "T-073-多智能体社会数据行") 落地。
+///
+/// 只持 `judge.intent`：准入门槛的权威动作是**判来者意图**，与 [`PRINCIPAL_REFLEX`]
+/// 同款独持先例（判定者不得直接发言）。可见域 `thread_private`：守门判定是判定者自己的
+/// 工作记录（S13 §3「public 与 thread_private 并存」的另一半），不是公共域公告。
+pub(crate) const PRINCIPAL_GATEKEEPER: &str = "agent:gatekeeper";
+
 /// 本机会话**内容的属主**：`thread_private`（C10 缺省）下「谁能读到」等同于
 /// 「是不是属主」，所以属主取值就是读侧闸的答案。
 ///
@@ -115,10 +146,20 @@ pub(crate) const SESSION_OWNER: &str = PRINCIPAL_USER;
 /// 「表授予 A、闸门判 B」，而这种错位**没有任何东西会变红**（两边都是合法能力名）。
 pub(crate) const CAP_EXTERNAL_EXECUTION: &str = "produce.artifact";
 
+/// **指派工作**能力名（`AssignWork` 的书写形态）——淘汰回路收回的那一项
+/// （[roadmap/S13 §2](../../../docs/003-stage/013-多智能体社会.md "ST-013-多智能体社会")
+/// 「淘汰 = 声誉投影低于阈值 → 不再被授予 `assign.work`」）。
+///
+/// 与 [`CAP_EXTERNAL_EXECUTION`] 同一条理由提成常量：这个名字出现在三个地方——
+/// 授权表行（`agent:market` / `agent:main`）、淘汰裁决的载荷（`verdict.asserted`
+/// 的 `capability` 字段）与闸门的撤销判据（`agent_run` 前问覆盖层）——三处各写
+/// 一遍字面量，迟早漂移成「裁决收回 A、闸门判 B」。
+pub(crate) const CAP_ASSIGN_WORK: &str = "assign.work";
+
 /// 本机主体清单：`(主体, 能力名, 可见域)`。能力名的闭集与拼写由
 /// [`PermissionMatrix::from_names`] 校验（认不出即拒绝构造）。
 ///
-/// 四行，各自存在的理由不同：
+/// 七行，各自存在的理由不同：
 ///
 /// - `agent:main`（主智能体）持 6 项，**刻意不持 `assert.verification`**：C15 不自验
 ///   ——验证者 ≠ 产出者是构造期约束（`PermissionMatrix::new` 会拒绝双持），本机目前
@@ -130,15 +171,22 @@ pub(crate) const CAP_EXTERNAL_EXECUTION: &str = "produce.artifact";
 ///   不含任何 `reply.*`；
 /// - [`PRINCIPAL_PEER`]（对等主体）**只持 `produce.artifact`**——对等体是图侧的协作方，
 ///   权威动作是产生产物（S08 §3 的 ActorSpec 行 `capabilities: [ProduceArtifact]`），
-///   协作经 `commitment.*` 而非 `chat.*`。
+///   协作经 `commitment.*` 而非 `chat.*`；
+/// - [`PRINCIPAL_MARKET`]（市场）**只持 `assign.work`**，可见域 `public`——派活是市场的
+///   权威动作，公告是公共域事实（S13 §3，T-073）；
+/// - [`PRINCIPAL_ARBITER`]（仲裁者）**只持 `assert.verification`**，可见域 `public`——
+///   验证能力在本表的唯一持有者；裁决是集体决策的产物（S13 §1/§3，T-073）；
+/// - [`PRINCIPAL_GATEKEEPER`]（守门者）**只持 `judge.intent`**，可见域 `thread_private`——
+///   准入门槛判来者意图，与判定行同款独持（S13 §3，T-073）。
 ///
-/// 后三行都是本表里**比主智能体窄**的记录。窄的方向相同而理由各异：子智能体怕的是
+/// 后六行都是本表里**比主智能体窄**的记录。窄的方向相同而理由各异：子智能体怕的是
 /// **写不了**（要能写自己的收束格），自主行怕冒充用户对话，判定行怕抢在编排层之前发言，
-/// 对等行怕的是**以本机主控的身份行事**（图侧协作 ≠ 本机主控）。
+/// 对等行怕的是**以本机主控的身份行事**（图侧协作 ≠ 本机主控），市场行怕的是**自己下场干活**
+/// （派活 ≠ 干活），仲裁行怕的是**自证**（C15），守门行怕的是**先发声后判**。
 ///
 /// 少了这些行会怎样（几批修掉的正是这个）：未登记的 `agent:<id>` 走 [`matrix_for`]
 /// 的派生分支，拿到主智能体的**整套**能力集（含 `reply.*`）——于是「自主行为不得冒充
-/// 用户对话」「判定者不得发言」「对等体只产生产物」在生产里被静默推翻，
+/// 用户对话」「判定者不得发言」「对等体只产生产物」「市场只派活」在生产里被静默推翻，
 /// 而文档与验收断言都还写着它们成立。
 const ROWS: &[(&str, &[&str], VisScope)] = &[
     (
@@ -162,6 +210,21 @@ const ROWS: &[(&str, &[&str], VisScope)] = &[
     (
         PRINCIPAL_PEER,
         &[CAP_EXTERNAL_EXECUTION],
+        VisScope::ThreadPrivate,
+    ),
+    // 组织形态三角色（S13 §3，T-073）：市场派活（公共域）/ 仲裁盖章（公共域）/ 守门判意图（私有）。
+    // 三行都是**单能力独持**——与自主 / 判定 / 对等三行同一条纪律：角色出现必须自带窄行，
+    // 不许靠派生拿主智能体整套。arbiter 持 `assert.verification` 不碰 C15（不持
+    // `define.work` / `produce.artifact`，构造期双持检查见 `governance`）。
+    (PRINCIPAL_MARKET, &["assign.work"], VisScope::Public),
+    (
+        PRINCIPAL_ARBITER,
+        &["assert.verification"],
+        VisScope::Public,
+    ),
+    (
+        PRINCIPAL_GATEKEEPER,
+        &["judge.intent"],
         VisScope::ThreadPrivate,
     ),
 ];
@@ -191,7 +254,7 @@ pub(crate) fn principal_of(agent_id: Option<&str>) -> String {
 ///
 /// 两条分支，先表后派生：
 ///
-/// 1. **表里登记过的主体**（主智能体、自主发起者、抢占判定者、对等主体）与非 `agent:*` 的主体（`user` 及
+/// 1. **表里登记过的主体**（主智能体、自主发起者、抢占判定者、对等主体、市场 / 仲裁 / 守门）与非 `agent:*` 的主体（`user` 及
 ///    一切未登记名）都直接用[生产表](Self::production_matrix)：登记过的拿自己那一行
 ///    ——**表是权威，派生不得覆盖它**（覆盖就成「表授予 A、闸门判 B」）；未登记的
 ///    `user` 在表里没有行 ⇒ `can_reply` 为假 ⇒ fail-closed。少一行是一条**拒绝**，
