@@ -30,8 +30,7 @@ import { execFileSync } from 'node:child_process'
 
 import { discover } from './gen-facts.mjs'
 import { validateFact, stripStamp, emit, driftOf } from './facts/_lib.mjs'
-import { capabilityFacts } from './facts/_capability.mjs'
-import { pluginSources, extractRouteArms, vdfsOps } from './route-facts.mjs'
+import { closedSets, NO_MEMBER_SET } from './facts/_sets.mjs'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const RUNNER = path.join(REPO, 'scripts', 'gen-facts.mjs')
@@ -306,7 +305,11 @@ test('能力矩阵：每条静态路由都有一句职责（缺一条就是「�
 })
 
 /**
- * 三个**封闭集**（成员直接从代码提取，与 `CURRENT.md` §2 用的是同一份来源）。
+ * 封闭集 —— 「同一批事实只许在一处成表」的**成员集合 + owner** 声明。
+ *
+ * 声明住在 `scripts/facts/_sets.mjs`（与 `RE-007-清单归属总账` 同源地读各文档
+ * front-matter 的 `lists: [<id>=owner]`），本文件只**读**它：判据的住所与被判的
+ * 东西分开，新增一类 owner 投影不用再改测试。
  *
  * ⚠️ 判据必须按**集合成员身份**判，不能按**字面形状**判。
  * 第一版用正则形状（`` | `x_y` | `` 算工具、`` | `a/b` | `` 算路由），
@@ -316,24 +319,13 @@ test('能力矩阵：每条静态路由都有一句职责（缺一条就是「�
  *   - 代码规模表的 `symbio/src`、`tauri/src` 也是 `词/词`。
  * 守卫一旦开始误报，下场是被整体豁免——比没有守卫更糟。
  * 按成员身份判则天然分开：`vdfs/read` 不在路由集里，`symbio/src` 哪儿都不在。
+ *
+ * 覆盖面对账：职责边界表里每个**可能有成员集合**的 owner 投影，要么在上面这份声明里，
+ * 要么在 `_sets.mjs` 的 `NO_MEMBER_SET` 里带一条「为什么没有集合可判」的理由
+ * （PROMPT_SHAPE 是运行时形状、AR-013 操作族与 VDFS 操作同源）。不写理由的那一栏
+ * 留空，就等于把「都覆盖了吗」推给人读一遍表——正是判据要省掉的那件事。
  */
-const CLOSED_SETS = (() => {
-  const cap = capabilityFacts(REPO)
-  // 插件目录**扫出来**而不是写死一份名单：写死的名单会与新增插件分叉，而分叉的
-  // 方向是「静默漏判」——新插件的路由不进集合，于是它在别处被复述时这条判据看不见。
-  const base = path.join(REPO, 'symbio', 'src', 'plugins')
-  const routes = new Set()
-  for (const p of fs.readdirSync(base, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)) {
-    for (const src of pluginSources(path.join(base, p))) {
-      for (const a of extractRouteArms(src, p)) routes.add(a)
-    }
-  }
-  return {
-    'LLM 可见工具': new Set([...cap.tools.keys()]),
-    'VDFS 操作': new Set(cap.vdfsOps),
-    '前端 / 宿主路由': routes,
-  }
-})()
+const SETS = closedSets(REPO)
 
 /**
  * 把一份 Markdown 切成若干「集中列举处」，返回每处的成员列表。
@@ -402,7 +394,14 @@ test('一个封闭集只在一张表里成表（同一批事实不许写两遍�
   assert.ok(tables.length >= 5, `只认出 ${tables.length} 张表——判据自己失效了`)
 
   const bad = []
-  for (const [setName, members] of Object.entries(CLOSED_SETS)) {
+  // 只查 CURRENT.md 自己拥有的三个集合（owner = RE-006 的那几个）。
+  // **刻意不推广到手写 owner**：文件内判据连散文块一起判（生成物里写成散文块也是多余的），
+  // 而手写 owner 的散文点名多个成员是在讲机制——RE-001 的 gateway 只读白名单一次点 7 个
+  // VDFS 操作，正是跨文档判据首版误报的同一处。同一文档内的重复归这条，但它只对
+  // 「我控制生成器」的文档成立。
+  for (const [setName, set] of SETS) {
+    if (set.ownerRel !== 'docs/ref/RE-006-当前事实表.md') continue
+    const members = set.members
     // 每张表命中了哪些成员
     const hits = tables.map((keys, i) => ({ i, n: keys.filter((k) => members.has(k)).length }))
     const hit = hits.filter((h) => h.n > 0)
@@ -433,13 +432,23 @@ test('一个封闭集只在一张表里成表（同一批事实不许写两遍�
   )
 })
 
-test('跨文档：CURRENT.md 的封闭集不得在别处成表复述', () => {
+test('跨文档：封闭集不得在别处成表复述（覆盖职责边界表的每一个 owner 投影）', () => {
   // `docs/README.md` 的「文档职责边界」是一张**承诺表**——它写着「不手抄，需要就引用」。
   // 承诺本身此前无人守：D-001…D-010 全是查链 / 查措辞 / 查形态，没有一条查
   // 「同一事实被写了两遍」。RE-003 当年就有过两张路由表并存的形态（各自漂移）。
   //
   // 这条把上条判据**推广到全仓**。口径按**成员身份**判，不按字面形状（理由见
-  // `CLOSED_SETS` 上面那段）。
+  // `SETS` 上面那段）。
+  //
+  // ## 覆盖面（T-100）
+  //
+  // 首版只查 CURRENT.md 投影的三个封闭集；职责边界表里其余的 owner 投影
+  // （错误码 / 配置项 / 判据码）各有一张表而无人守。现在集合声明住在
+  // `scripts/facts/_sets.mjs`，判据遍历**全部**集合：每个集合的 owner 从各文档
+  // front-matter 的 `lists: [<id>=owner]` 声明里读（与 RE-007 同源），成员从
+  // 代码 / Rust 枚举 / 脚本声明 / owner 自己的被标记清单里提。没有成员集合可判的
+  // 两个投影（PROMPT_SHAPE、AR-013 操作族）在 `_sets.mjs` 的 `NO_MEMBER_SET` 里
+  // 各带一条理由——「覆盖了吗」因此是一句可查的话，不是一篇散文。
   //
   // ## 为什么跨文档只判「成表」，不判散文
   //
@@ -455,10 +464,8 @@ test('跨文档：CURRENT.md 的封闭集不得在别处成表复述', () => {
   //
   // 另外**放行 owner 自己**与**明确指路**：RE-003 是路由**契约**的 owner，它按插件
   // 分节重复列地址是那本书的组织方式，删掉就毁掉它的可查性——按**白名单**放行，
-  // 白名单写明它保的是什么，不做笼统豁免。
-  //
-  // ⚠️ 判据只覆盖 CURRENT.md 投影出来的三个封闭集。别的 owner（错误码 / 配置 /
-  // prompt 形状）各有一张表，**尚未**纳入这条判据——那是欠账，见 T-100。
+  // 白名单写明它保的是什么，不做笼统豁免。owner 自己按集合逐个放行（一份文档可以是
+  // 某个集合的 owner 同时抄了另一个集合的清单——那正是要判的）。
   //
   // ## 已知边界：**成表不足以判定复述**
   //
@@ -471,53 +478,172 @@ test('跨文档：CURRENT.md 的封闭集不得在别处成表复述', () => {
   const ALLOW = new Map([
     [
       'docs/ref/RE-003-ROUTES.md',
-      '契约表以地址为**键**：讲的是调用方 / 返回类型 / 备注（另一件事），不声称拥有地址清单——' +
-        '同 session README 的已知边界；键集合另有判据（「RE-003 契约表的键必须是 §2.3 的静态路由」）',
+      new Map([
+        [
+          '前端 / 宿主路由',
+          '契约表以地址为**键**：讲的是调用方 / 返回类型 / 备注（另一件事），不声称拥有地址清单——' +
+            '同 session README 的已知边界；键集合另有判据（「RE-003 契约表的键必须是 §2.3 的静态路由」）',
+        ],
+      ]),
     ],
-    ['docs/ref/RE-006-当前事实表.md', '代码投影，本判据的 owner'],
     [
       'symbio/src/plugins/session/README.md',
-      '「工具名 → 结果取哪个字段」映射表：工具名是那张表的**键**，讲的是结果形状，' +
-        '不是工具清单（见下面「已知边界」）',
+      new Map([
+        [
+          'LLM 可见工具',
+          '「工具名 → 结果取哪个字段」映射表：工具名是那张表的**键**，讲的是结果形状，' +
+            '不是工具清单（见上面「已知边界」）',
+        ],
+      ]),
+    ],
+    [
+      'docs/plan/PL-007-对话面插件拆分实施方案.md',
+      new Map([
+        [
+          '配置项',
+          '§7.1「配置平凡值」表以键为**键**：答的是完整值 / 平凡值 / 平凡值下的行为，不是键清单。' +
+            '默认值的 owner 是各插件自己的 `Default` 实现（RE-001 明写「默认值以代码为准」），' +
+            '与 classify/README 同一形状（见上面「已知边界」）',
+        ],
+      ]),
+    ],
+    [
+      'symbio/src/plugins/classify/README.md',
+      new Map([
+        [
+          '配置项',
+          '「键 / 默认 / 平凡值 / 平凡值下」表：答的是本插件三个键的**默认值**，不是键清单' +
+            '（同 PL-007 §7.1，见上面「已知边界」）',
+        ],
+      ]),
     ],
   ])
-  const files = []
-  const walk = (d) => {
-    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      if (e.name === '.git' || e.name === 'node_modules' || e.name === 'target') continue
-      const p = path.join(d, e.name)
-      if (e.isDirectory()) walk(p)
-      else if (e.name.endsWith('.md')) files.push(p)
-    }
-  }
-  walk(REPO)
 
-  const bad = []
-  let scanned = 0
-  for (const f of files) {
-    const rel = path.relative(REPO, f).replace(/\\/g, '/')
-    if (rel.startsWith('docs/archive/') || ALLOW.has(rel)) continue
-    // 生成物与门禁自己的日志不是文档
-    if (rel.includes('.workbuddy-ai/') || rel.endsWith('docs/ref/RE-006-当前事实表.md')) continue
-    scanned++
-    const text = fs.readFileSync(f, 'utf8')
-    // `prose: false` —— 跨文档只判「成表」，理由见上。
-    for (const [setName, members] of Object.entries(CLOSED_SETS)) {
-      for (const [i, keys] of tableKeys(text, { prose: false }).entries()) {
-        const hit = keys.filter((k) => members.has(k))
-        if (hit.length < 3) continue
-        bad.push(`${rel} 第 ${i + 1} 张表：列了 ${hit.length} 个「${setName}」成员（${hit.slice(0, 3).join('、')}…）`)
+  /** 收全仓 `.md`（生成物与门禁日志除外）⇒ `[{ rel, text }]`。 */
+  const repoDocs = () => {
+    const docs = []
+    const walk = (d) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        if (e.name === '.git' || e.name === 'node_modules' || e.name === 'target') continue
+        const p = path.join(d, e.name)
+        if (e.isDirectory()) walk(p)
+        else if (e.name.endsWith('.md')) docs.push(p)
       }
     }
+    walk(REPO)
+    return docs.map((f) => ({ file: f, rel: path.relative(REPO, f).replace(/\\/g, '/') }))
   }
+
+  /**
+   * 对给定的文档集跑跨文档判据，返回违规列表。
+   *
+   * 抽成函数是为了**反向验证**：把 owner 的表复制一份塞进一个合成文档，
+   * 判据必须红。不抽的话，反向用例只能在真仓里落盘再删——反向验证做不到「必然红」。
+   */
+  const scanDocs = (docs) => {
+    const bad = []
+    let scanned = 0
+    for (const { rel, file } of docs) {
+      if (rel.startsWith('docs/archive/') || rel.includes('.workbuddy-ai/')) continue
+      scanned++
+      const text = fs.readFileSync(file, 'utf8')
+      // `prose: false` —— 跨文档只判「成表」，理由见上。
+      for (const [setName, set] of SETS) {
+        if (rel === set.ownerRel) continue // owner 自己放行（按集合逐个放行）
+        if (ALLOW.get(rel)?.has(setName)) continue // 白名单逐条写明它保什么
+        for (const [i, keys] of tableKeys(text, { prose: false }).entries()) {
+          const hit = keys.filter((k) => set.members.has(k))
+          if (hit.length < 3) continue
+          bad.push(`${rel} 第 ${i + 1} 张表：列了 ${hit.length} 个「${setName}」成员（${hit.slice(0, 3).join('、')}…）`)
+        }
+      }
+    }
+    return { bad, scanned }
+  }
+
+  // ── ① owner 必须逐字收留每个成员（「owner 不见了」的另一半：成员被真源加了而表没收）──
+  //
+  // 弱口径（字面出现，不要求成表）：错误码与判据码的 owner 表按自己的列形状渲染
+  // （判据码是 `**C-001**` 加粗列，不是反引号列），逐字比不误报也不漏；成表口径的
+  // 严格版归文件内判据（CURRENT.md 那份）。
+  const ownerMiss = []
+  for (const [setName, set] of SETS) {
+    const ownerText = fs.readFileSync(path.join(REPO, set.ownerRel), 'utf8')
+    const missing = [...set.members].filter((m) => !ownerText.includes(m))
+    if (missing.length) {
+      ownerMiss.push(`${setName}：owner（${set.ownerRel}）没收这些成员：${missing.slice(0, 5).join('、')}${missing.length > 5 ? '…' : ''}`)
+    }
+  }
+  assert.deepEqual(
+    ownerMiss,
+    [],
+    'owner 文档漏收成员——真源（代码 / 声明）加了东西而表没跟上，读表的人会漏掉它：\n    ' +
+      ownerMiss.join('\n    '),
+  )
+
+  // ── ①b 没有成员集合可判的投影，理由必须写实 ──
+  //
+  // 「覆盖职责边界表的每一个 owner 投影」这句话要能查，就得让**不设集合**也成为一种
+  // 显式声明：每条带一个为什么（且指向的文档真在），不留空话。
+  for (const { owner, why } of NO_MEMBER_SET) {
+    assert.ok(why && why.length > 10, `${owner} 声明了「无成员集合」，但没写为什么`)
+    assert.ok(fs.existsSync(path.join(REPO, owner)), `${owner} 不在仓里——「无成员集合」声明指向了一份不存在的文档`)
+    assert.ok(
+      ![...SETS.values()].some((s) => s.ownerRel === owner),
+      `${owner} 既在 NO_MEMBER_SET 里又拥有一个集合——两边声明互相矛盾`,
+    )
+  }
+
+  // ── ② 全仓扫描：非 owner 的表里 ≥3 个成员即复述 ──
+  const docs = repoDocs()
+  const { bad, scanned } = scanDocs(docs)
   assert.ok(scanned > 80, `只扫了 ${scanned} 份文档——判据自己失效了`)
   assert.deepEqual(
     bad,
     [],
-    '这些文档在复述 RE-006 已经投影的事实。处置：留一行**编号指路**（`[[RE-006-当前事实表#…|…]]`，' +
-      '地址由 gen-doc-refs 重算），不要复制清单——同一句事实存两份，改一次要动两处，且必然漂移：\n    ' +
+    '这些文档在复述别人的 owner 已经投影的事实。处置：留一行**编号指路**（`[[编号|…]]`，' +
+      '地址由 gen-doc-refs 重算），不要复制清单——同一句事实存两份，改一次要动两处，且必然漂移。' +
+      '若它「以成员为键讲另一件事」（默认值 / 契约 / 结果形状），按 ALLOW 登记并写明**它保的是什么**：\n    ' +
       bad.join('\n    '),
   )
+
+  // ── ③ 反向验证：每个集合都必须能被「复制 owner 的表到别处」触发 ──
+  //
+  // 「全绿」只说明判据没被触发，不说明它能触发。三个首版集合当年注入过三种重复形态；
+  // T-100 新接的三个集合（错误码 / 配置项 / 判据码）各注入一次，缺一次就是恒真。
+  //
+  // 注入的是**合成文档**（不进真仓），与真仓其余文档一起过同一个 `scanDocs`：
+  // 豁免名单、集归属、阈值全走真实路径，只有这一份是假的。
+  const reverse = [
+    { setName: '错误码', why: '错误码字面量表' },
+    { setName: '配置项', why: '配置键清单表' },
+    { setName: '判据码', why: '判据码表' },
+  ]
+  for (const { setName, why } of reverse) {
+    const set = SETS.get(setName)
+    const members = [...set.members].slice(0, 6)
+    assert.ok(members.length >= 3, `集合「${setName}」成员不足 3 个，反向用例无从注入`)
+    const injected = [
+      `# 注入的反向用例（${why}）`,
+      '',
+      '| 成员 | 说明 |',
+      '|---|---|',
+      ...members.map((m) => `| \`${m}\` | 复制自 owner 的清单。 |`),
+      '',
+    ].join('\n')
+    const dir = tmp()
+    const injectedPath = path.join(dir, 'injected.md')
+    fs.writeFileSync(injectedPath, injected, 'utf8')
+    const withInject = scanDocs([{ rel: 'docs/ref/RE-999-injected.md', file: injectedPath }, ...docs])
+    assert.ok(
+      withInject.bad.length > bad.length,
+      `反向用例失效：把 owner 的${why}复制到别处，判据不红——集合「${setName}」是恒真的`,
+    )
+    assert.ok(
+      withInject.bad.some((l) => l.includes(`「${setName}」`)),
+      `反向用例失效：红了但不是「${setName}」那一条——判据认错了集合`,
+    )
+  }
 })
 
 test('散文里的 RE-006 节次指路：节次必须存在', () => {

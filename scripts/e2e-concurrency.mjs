@@ -3,8 +3,16 @@
 // ## 它回答什么
 //
 // 「e2e 该跑几路并发」。不是「机器有几核」——**核数不是约束，慢例才是**。
-// 逐例耗时取自上一轮门禁的 `.workbuddy-ai/gate-logs/e2e-*.log`，于是判据随代码
-// 一起变：慢用例被优化掉，它自己会给出更小的建议值。
+// 逐例耗时取自最近一轮跑过 e2e 的门禁日志，于是判据随代码一起变：慢用例被优化掉，
+// 它自己会给出更小的建议值。
+//
+// ## 日志在哪（2026-10-15 起每轮一个目录）
+//
+// 门禁的日志原先是平铺的 `.workbuddy-ai/gate-logs/e2e-*.log`，每轮覆盖同名文件；
+// 现在改成每轮一个目录（`.workbuddy-ai/gate-logs/<runId>/`）。取数因此不能只看
+// 「最新一轮」——`--only=backend` 跑一轮之后最新目录里没有 e2e 日志，读到空集
+// 就只会说「没有数据」。正确的是**按用例名跨轮次取最新的那一份**（`_logs.mjs`
+// 的 `latestE2ELogs`，与门内 58-e2e 的同一条判据共用实现）。
 //
 // ## 为什么要做成脚本而不是注释
 //
@@ -13,12 +21,14 @@
 // 跨用例比预算，算出 −5.5s 这种没有意义的负数。写成注释没人能验；写成脚本
 // 下一个人跑一遍就知道对错。
 //
-// 用法：node scripts/e2e-concurrency.mjs            读上一轮日志出建议
+// 用法：node scripts/e2e-concurrency.mjs            读最近一轮日志出建议
 //      node scripts/e2e-concurrency.mjs --ci       有 CI 时要求不低于默认值
-import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { latestE2ELogs } from './gate.d/_logs.mjs'
 
-const LOGS = '.workbuddy-ai/gate-logs'
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const LOG_ROOT = path.join(REPO, '.workbuddy-ai', 'gate-logs')
 
 /** 必须与 `gate.d/58-e2e.mjs` 的 `cpuCap` 上界一致。故意各写一份而不是共用导出：
  *  `gate.d/` 不 import 外部脚本（阶段模块彼此独立），共用一个常量会把两个本该
@@ -26,27 +36,12 @@ const LOGS = '.workbuddy-ai/gate-logs'
  *  **不一致时本脚本会一直说「建议上调/下调」**——那就是它该响的时候。 */
 const CURRENT_DEFAULT = 6
 
-function perCaseMs() {
-  if (!fs.existsSync(LOGS)) return []
-  return fs
-    .readdirSync(LOGS)
-    .filter((f) => /^e2e-t.*\.log$/.test(f))
-    .map((f) => {
-      const t = fs.readFileSync(path.join(LOGS, f), 'utf8')
-      const ms = [...t.matchAll(/\((\d+)ms\)/g)].map((m) => +m[1])
-      return {
-        name: f.replace(/^e2e-/, '').replace(/\.log$/, ''),
-        ms: ms.length ? ms[ms.length - 1] : 0,
-        ok: t.slice(0, 300).includes('✓'),
-      }
-    })
-    .filter((c) => c.ms > 0)
-    .sort((a, b) => b.ms - a.ms)
-}
+const cases = latestE2ELogs(LOG_ROOT)
+  .filter((c) => c.ms > 0)
+  .sort((a, b) => b.ms - a.ms)
 
-const cases = perCaseMs()
 if (cases.length === 0) {
-  console.error(`没有可读的逐例耗时（${LOGS}/e2e-*.log）。先跑一次 node scripts/gate.mjs --only=e2e。`)
+  console.error(`没有可读的逐例耗时（${path.relative(REPO, LOG_ROOT)}/<轮次>/e2e-*.log）。先跑一次 node scripts/gate.mjs --only=e2e。`)
   process.exit(2)
 }
 

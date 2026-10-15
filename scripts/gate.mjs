@@ -41,10 +41,14 @@
  *   - e2e 不与任何重负载并发：用例对 CPU 竞争时序敏感（58-e2e.mjs）。
  *
  * 并发批内**不往 stdout 刷逐行输出**（会交错成乱码），详情落各自日志文件，
- * 控制台只留一行结论。
+ * 控制台只留一行结论。**但失败不放过**：汇总的「失败详情」段把每个失败项日志的
+ * 末 N 行印在失败处（`GATE_FAIL_TAIL` 调行数），路径一并给出——失败处的信息量与
+ * 文件里的信息量之间，不该隔一次七分钟的重跑。
  *
  * ctx：{ repoRoot, scriptDir, logDir, ci, profile, run(o), log(name, text) }
  *   run(o) 执行命令：实时逐行转发（echo: filtered|all|none）+ 全文落日志 + 只信退出码。
+ *   logDir = **本轮**的日志目录（`.workbuddy-ai/gate-logs/<runId>/`；每轮一个，
+ *     保留最近 KEEP_RUNS 轮，见 gate.d/_logs.mjs）。
  *
  * 参数：
  *   node scripts/gate.mjs                       全量
@@ -58,12 +62,11 @@
  *
  * 参数是**白名单**：未识别的参数、`--only=` 的空清单、`--only` / `--skip` 里不存在的
  * 阶段 id 一律**拒绝**（退出码 2，用法见 `--help`）。理由：本脚本的默认动作是全量门禁
- * （10+ 分钟）且会覆盖 `.workbuddy-ai/gate-logs/`——「未知参数不报错、照常跑默认动作」
- * 会让人以为只跑了一个阶段，却把上一轮的失败日志冲掉；而拼错的阶段 id 更糟：它让
- * **0 个阶段**「全部通过」退出 0（静默假绿）。
+ * （10+ 分钟）——「未知参数不报错、照常跑默认动作」会让人以为只跑了一个阶段，白等七
+ * 分钟；而拼错的阶段 id 更糟：它让 **0 个阶段**「全部通过」退出 0（静默假绿）。
  *
  * 从**别的仓库**调用会被**拒绝**（退出码 2）：门禁的每个阶段都以脚本所在的仓库为准，
- * 从别处调用会静默地门禁另一个仓库（写它的 target/、覆盖它的日志、替它 git add）。
+ * 从别处调用会静默地门禁另一个仓库（写它的 target/、在它的日志目录里落一轮、替它 git add）。
  * 判据见下方「仓库身份」一节。
  *
  * ## 判定 vs 执行：门禁会**做掉**确定性的机械工作
@@ -84,6 +87,16 @@ import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { red, green, yellow, dim, bold, stripAnsi } from './color.mjs'
+import {
+  LOGS_DIR_NAME,
+  KEEP_RUNS,
+  FAIL_TAIL_LINES,
+  makeRunId,
+  pruneOldRuns,
+  writeRunPointer,
+  logFileName,
+  failureDetail,
+} from './gate.d/_logs.mjs'
 
 /**
  * 默认并发度（阶段可用 `concurrency` 覆盖）。
@@ -105,7 +118,54 @@ const CONCURRENCY = Math.max(2, Math.min((os.availableParallelism?.() ?? os.cpus
 // 副本，worker 单例失效，全部 spec 报「failed to find the runner」——2026-09-28 实测。
 const scriptDir = fs.realpathSync.native(path.dirname(fileURLToPath(import.meta.url)))
 const repoRoot = path.resolve(scriptDir, '..')
-const logDir = path.join(repoRoot, '.workbuddy-ai', 'gate-logs')
+
+// ── 日志落点：**每轮一个目录** ────────────────────────────────────────────
+//
+// 早先一律写 `.workbuddy-ai/gate-logs/<任务名>.log`，每轮以 `w` 覆盖。后果不是
+// 「旧日志没了」这么轻：失败之后**再跑一次门禁就会把失败证据冲掉**，而门禁一轮
+// 7 分钟——「再跑一遍才能看到底哪错了」于是成了这里最贵的动作，且常常白跑
+// （下一次跑的时候那个错误已经不出现 / 已经被覆盖）。
+//
+// 现在每轮一个 `<runId>` 目录，根下只留一份 `latest-run.txt` 指针（门外读者
+// 定位用）。只保留最近 `KEEP_RUNS` 轮：失败可以活到下一轮，但不无限堆积。
+//
+// ## 为什么目录**懒建**（第一次真要写日志时才建）
+//
+// 早先这四行在模块作用域就跑，于是 `gate.mjs --help`、被拒绝的未知参数、
+// 跨仓库拒绝——**每一次启动都留下一个空目录**。空目录不只是脏：门内的回归测试
+// 会 spawn 门禁（`--help` / `--list` / 拼错 id），于是一次测试跑出一串空目录，
+// 而「哪个目录有日志」从此不能靠列目录回答。懒建之后：没有落笔就没有目录。
+//
+// ## 为什么 mkdir 要带 EEXIST 重试
+//
+// `makeRunId` 的查重与建目录不是原子的：同一秒内两个门禁进程（门内测试 spawn 的
+// 那个与正在跑的门禁本身）会拿到同一个 id。`fs.mkdirSync` 不带 recursive 时
+// EEXIST 是**原子**信号，据此换后缀即可；若用 `recursive: true` 则永远不报错，
+// 两个进程会写进同一个目录、日志互相覆盖——正是本轮改掉的那个病，换了个形态回来。
+const logRoot = path.join(repoRoot, '.workbuddy-ai', LOGS_DIR_NAME)
+const runId = makeRunId(new Date())
+let logDir = path.join(logRoot, runId)
+let ensured = false
+/** 确保本轮日志目录存在并写下指针；返回该目录（同一轮内是稳定的）。 */
+function ensureLogDir() {
+  if (ensured) return logDir
+  fs.mkdirSync(logRoot, { recursive: true })
+  let id = runId
+  for (let n = 2; ; n++) {
+    try {
+      fs.mkdirSync(path.join(logRoot, id))
+      break
+    } catch (e) {
+      if (e?.code !== 'EEXIST') throw e
+      id = `${runId}-${n}`
+    }
+  }
+  logDir = path.join(logRoot, id)
+  writeRunPointer(logRoot, id)
+  pruneOldRuns(logRoot)
+  ensured = true
+  return logDir
+}
 
 const argv = process.argv.slice(2)
 const hasFlag = (n) => argv.includes(n)
@@ -135,10 +195,10 @@ const USAGE = `用法：node scripts/gate.mjs [选项]
   --list                只列出阶段与任务，不执行
   --help, -h            打印本用法并退出（**不跑任何阶段**）
 
-  查用法一律用 --help。本脚本的默认动作是**全量门禁**（10+ 分钟）且会覆盖
-  .workbuddy-ai/gate-logs/，所以**未识别的参数一律拒绝**（退出码 2）：在默认动作
-  昂贵的脚本上「未知参数不报错、照常跑默认动作」是最坏的组合——--only backend
-  （漏了 =）会静默变成一次全量门禁，把上一轮的失败日志冲掉。
+  查用法一律用 --help。本脚本的默认动作是**全量门禁**（10+ 分钟），所以
+  **未识别的参数一律拒绝**（退出码 2）：在默认动作昂贵的脚本上「未知参数不报错、
+  照常跑默认动作」是最坏的组合——--only backend（漏了 =）会静默变成一次全量门禁，
+  白等七分钟还以为只跑了一个阶段。
 
   从**别的仓库**调用会被拒绝（退出码 2）：门禁的每个阶段都以本脚本所在的仓库为准，
   从别处调用会静默门禁另一个仓库。要门禁本仓库就 cd 到它下面。`
@@ -146,8 +206,7 @@ const USAGE = `用法：node scripts/gate.mjs [选项]
 // `--help` / `-h`：**在任何副作用之前**退出。
 //
 // 补它的理由：脚本原先不认 `--help`，于是 `node scripts/gate.mjs --help` 会**真的跑一遍
-// 全量门禁**（10+ 分钟）并把 `.workbuddy-ai/gate-logs/*.log` 覆盖掉——想查用法，代价是
-// 丢掉上一次的失败日志（最需要它的那一刻它没了，只能重跑）。与 `commit.mjs` 的 `--help`
+// 全量门禁**（10+ 分钟）——想查用法，代价是七分钟。与 `commit.mjs` 的 `--help`
 // 同类陷阱（那里更贵：会真的提交一次）。判据 = `gate.test.mjs`：退出 0、打印用法、**不跑任何阶段**。
 if (hasFlag('--help') || hasFlag('-h')) {
   console.log(USAGE)
@@ -156,10 +215,10 @@ if (hasFlag('--help') || hasFlag('-h')) {
 
 // ── 参数白名单：**未识别的参数一律拒绝** ────────────────────────────────────
 //
-// 这个脚本的默认动作是**全量门禁**（10+ 分钟）且会覆盖 `.workbuddy-ai/gate-logs/`。
-// 在这样一个脚本上「未知参数不报错、照常跑默认动作」是最坏的组合：`--only backend`
-// （漏了 `=`）或 `--fix`（早已删除的开关）都会静默变成一次全量门禁，把上一轮的失败
-// 日志冲掉——而人以为自己只跑了一个阶段。所以未知参数在这里就停住，不进入任何阶段。
+// 这个脚本的默认动作是**全量门禁**（10+ 分钟）。在这样一个脚本上「未知参数不报错、
+// 照常跑默认动作」是最坏的组合：`--only backend`（漏了 `=`）或 `--fix`（早已删除的
+// 开关）都会静默变成一次全量门禁——而人以为自己只跑了一个阶段，白等七分钟。
+// 所以未知参数在这里就停住，不进入任何阶段。
 //
 // `--base=<ref>` 由 `35-baseline.mjs` 直接读 `process.argv`（棘轮基准的显式覆盖口，
 // 见该文件），它不经过本文件的解析，但**是**合法参数，故一并放行并登记进用法。
@@ -185,8 +244,8 @@ if (onlyRaw !== null && only.length === 0) {
 // 门禁的每个阶段都以**脚本所在的仓库**为准：各阶段模块自己解析 `repoRoot`
 // （`path.resolve(scriptDir, '..', '..')`），docs 的守卫也各自锚定自己所在的位置。
 // 所以从另一个仓库调用它，跑的是**另一个仓库**的门禁——而且会真的写它的
-// `target/`、覆盖它的 `.workbuddy-ai/gate-logs/`（**把上一轮的失败日志冲掉**，
-// 恰恰是最需要它的那一刻），本地模式还会替它 `git add`。
+// `target/`、在它的 `.workbuddy-ai/gate-logs/` 里留下本轮日志，本地模式还会替它
+// `git add`。
 //
 // 这不是「参数用错了」，是**静默作用在错误的仓库上**，所以这里拒绝而不是照跑。
 // 实测形态（2026-10-09）：`commit.test.mjs` 的 `--gate` 用例在一个临时 git 仓库里
@@ -226,8 +285,8 @@ if (callerRoot && !samePath(callerRoot, repoRoot)) {
   console.error('')
   console.error('  门禁的每个阶段都以**脚本所在的仓库**为准（阶段模块自己解析仓库根，')
   console.error('  docs 的守卫也各自锚定自己所在的位置），所以从这里跑它，跑的是上面')
-  console.error('  那个仓库的门禁——会真的写它的 target/、覆盖它的 .workbuddy-ai/')
-  console.error('  gate-logs/（冲掉上一轮的失败日志），本地模式还会替它 git add。')
+  console.error('  那个仓库的门禁——会真的写它的 target/、在它的 .workbuddy-ai/')
+  console.error('  gate-logs/ 里留下本轮日志，本地模式还会替它 git add。')
   console.error('')
   console.error('  要门禁本仓库：cd 到它下面再跑；要门禁别的仓库：那个仓库得有自己的')
   console.error('  scripts/gate.mjs。')
@@ -236,8 +295,6 @@ if (callerRoot && !samePath(callerRoot, repoRoot)) {
 
 const NOISE =
   /^(?:\s*$|.*\r$|\s*(Compiling|Checking|Downloading|Downloaded|Updating|Locking|Adding|Removing|Finished|Blocking|Waiting|Fresh|Documenting|Building)\b)/
-
-const slug = (s) => s.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'step'
 
 const fmtDuration = (ms) => {
   const s = Math.round(ms / 1000)
@@ -259,8 +316,8 @@ function run(o) {
     // **流式落盘**：边跑边写，进程被 kill / 超时 / Ctrl+C 时该任务的日志也已完整。
     // 早先只在 close 时一次性写，于是「跑挂了」恰恰等于「没有日志」——最需要它的
     // 那一刻它不存在（只能重跑一遍）。
-    const logFile = path.join(logDir, `${slug(label)}.log`)
-    fs.mkdirSync(logDir, { recursive: true })
+    const dir = ensureLogDir()
+    const logFile = path.join(dir, `${logFileName(label)}.log`)
     const sink = fs.createWriteStream(logFile, { flags: 'w' })
 
     const child = spawn(cmd, args, { cwd, shell: false, env: { ...process.env, ...env } })
@@ -333,8 +390,8 @@ const ctx = {
   run,
   /** 手写日志（自定义任务自己产出的文本）。返回落盘路径，便于结果里带回去。 */
   log(name, text) {
-    fs.mkdirSync(logDir, { recursive: true })
-    const file = path.join(logDir, `${slug(name)}.log`)
+    const dir = ensureLogDir()
+    const file = path.join(dir, `${logFileName(name)}.log`)
     fs.writeFileSync(file, text, 'utf8')
     return file
   },
@@ -461,8 +518,10 @@ console.log(
   ),
 )
 console.log(dim(`  阶段：${stages.filter((s) => enabled(s.id)).map((s) => s.id).join(' → ')}`))
-const relLog = (path.relative(repoRoot, logDir) || '.').replace(/\\/g, '/')
-console.log(dim(`  完整日志：${relLog}/（每次运行都写；失败项下方会直接列出文件名）`))
+// 到这里参数已全部校验通过、阶段即将开跑 ⇒ 这一轮**真的会发生**，此时建目录、
+// 写指针都名实相符（`--help` 与被拒绝的调用走不到这里，所以不会留空目录）。
+const relLog = (path.relative(repoRoot, ensureLogDir()) || '.').replace(/\\/g, '/')
+console.log(dim(`  本轮日志：${relLog}/（每轮一个目录，留最近 ${KEEP_RUNS} 轮；失败项的末 ${FAIL_TAIL_LINES} 行会直接印在汇总里）`))
 
 /**
  * 并发跑一批任务（连续标记 `parallel: true` 的那些），并发度 `limit`。
@@ -570,10 +629,15 @@ function report(interrupted = false) {
 
   // 运行清单落盘：终端的滚动缓冲会丢，文件不会。**中断路径也写**——正是那条
   // 路径最可能只剩这一个物证。逐项带日志文件名，供事后核对。
+  //
+  // 失败项**连末 N 行一起落盘**：清单是给人事后读的，只给路径等于让人再跑一次
+  // （这正是 `_logs.mjs` 要治的病②）。清单与终端的失败详情同源同文。
+  const failTailLines = Number(process.env.GATE_FAIL_TAIL) || FAIL_TAIL_LINES
   try {
     const lines = [
       `# 门禁运行清单${interrupted ? '（中断，未跑完）' : ''}`,
       `时间：${new Date().toISOString()}`,
+      `轮次目录：${relLog}/`,
       `结论：通过 ${passed} / ${results.length}${skipped.length ? `（另有 ${skipped.length} 项未判定）` : ''}`,
       `总耗时：${fmtDuration(Date.now() - gateStarted)}`,
       '',
@@ -586,6 +650,16 @@ function report(interrupted = false) {
         return `${mark} [${r.stage}] ${r.label}${took}${r.note ? ` — ${r.note}` : ''}${logs ? `\n    日志：${logs}` : ''}`
       }),
       '',
+      ...(failed.length
+        ? [
+            '## 失败详情（各失败项日志的末 ' + failTailLines + ' 行）',
+            '',
+            ...failed.flatMap((r) => {
+              const { header, body } = failureDetail(r, { repoRoot, lines: failTailLines })
+              return [header, ...body, '']
+            }),
+          ]
+        : []),
       ...(stageRows.length
         ? [
             '## 阶段耗时（墙钟，降序）',
@@ -599,7 +673,7 @@ function report(interrupted = false) {
           ]
         : []),
     ]
-    fs.writeFileSync(path.join(logDir, '_summary.md'), lines.join('\n'), 'utf8')
+    fs.writeFileSync(path.join(ensureLogDir(), '_summary.md'), lines.join('\n'), 'utf8')
   } catch {
     /* 清单只是副产品：写不进去也不该改变门禁结论 */
   }
@@ -625,20 +699,27 @@ function report(interrupted = false) {
     )
   }
 
-  // 失败逐项直接给**文件**（早先只给目录，68 个日志里得自己猜）；聚合任务可以
-  // 一次带回多个子日志（数组），没跑上命令的项（自己的断言失败、非子进程）如实说明。
-  for (const r of failed) {
-    const list = Array.isArray(r.logFile) ? r.logFile : r.logFile ? [r.logFile] : []
-    if (list.length === 0) {
-      console.log(red(`  · ${r.label} → （无子进程日志，见上方输出）`))
-      continue
-    }
-    for (const f of list) {
-      console.log(red(`  · ${r.label} → ${path.relative(repoRoot, f).replace(/\\/g, '/')}`))
+  // 失败逐项：**日志末 N 行直接印在这里**，路径一并给出。
+  //
+  // 早先这里只列一行「· 任务 → 路径」，正文要自己去那个文件里翻——而门禁一轮
+  // 7 分钟，人的下一个动作往往是「再跑一遍看看」（最坏：日志已被下一轮覆盖，
+  // 白跑）。失败处的信息量与文件里的信息量之间不该隔一次重跑。
+  //
+  // 截断额度的三个旋钮都在 `gate.d/_logs.mjs`，`GATE_FAIL_TAIL` 覆盖行数。
+  if (failed.length) {
+    const lines = Number(process.env.GATE_FAIL_TAIL) || FAIL_TAIL_LINES
+    console.log()
+    console.log(bold('══ 失败详情 ══'))
+    console.log(dim(`  以下取各失败项日志的末 ${lines} 行（GATE_FAIL_TAIL=<行数> 可调；完整输出在路径指向的文件里）`))
+    for (const r of failed) {
+      const { header, body } = failureDetail(r, { repoRoot, lines })
+      console.log()
+      console.log(red(`  ${header}`))
+      for (const l of body) console.log(dim(l))
     }
   }
 
-  console.log(dim(`  本次运行日志目录：${path.relative(repoRoot, logDir).replace(/\\/g, '/') || '.'}/`))
+  console.log(dim(`  本轮日志目录：${path.relative(repoRoot, logDir).replace(/\\/g, '/') || '.'}/`))
   if (interrupted) {
     console.log(yellow('  已中断——以上为已跑完部分；本次运行日志已落盘，无需重跑即可查看。'))
     process.exit(130)

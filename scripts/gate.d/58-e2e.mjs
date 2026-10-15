@@ -20,6 +20,9 @@ import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import { dim, yellow, red, green } from '../color.mjs'
 import { BASELINE, ratchetOrBump } from './_shared.mjs'
+// 逐例耗时的取数实现与门外复核（`scripts/e2e-concurrency.mjs`）共用一份：
+// 同一段逻辑曾在这里与那里各写一份，而日志目录一改就两边同时失明。
+import { latestE2ELogs } from './_logs.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
@@ -91,21 +94,17 @@ export default {
       label: 'e2e: 并发度判据（理论最优 = 总工作量 / 最慢单例）',
       run: async () => {
         const cases = discoverCases()
-        const logsDir = path.join(repoRoot, '.workbuddy-ai', 'gate-logs')
-        if (!fs.existsSync(logsDir)) {
-          console.log(dim('      ↳ 尚无上一轮日志（首次运行跳过）'))
+        // 读**本轮**的日志（`ctx.logDir` 就是本轮目录）：门禁的日志改成每轮一个
+        // 目录后，平铺的 `.workbuddy-ai/gate-logs/` 下只剩指针文件，读它会得到
+        // 空集——而空集与「没有数据」在这条判据里都返回 ok，于是它会**静默**
+        // 从「每次跑完都印一行」退化成「永远不印」。取数口径与门外复核用的
+        // `e2e-concurrency.mjs` 共用（`_logs.mjs::latestE2ELogs`），不分叉。
+        const logs = latestE2ELogs(path.join(repoRoot, '.workbuddy-ai', 'gate-logs'), { runDir: ctx.logDir })
+        const times = logs.map((l) => l.ms).filter((ms) => ms > 0)
+        if (times.length === 0) {
+          console.log(dim('      ↳ 本轮没有 e2e 逐例耗时（用例未跑或日志缺失，跳过）'))
           return { ok: true }
         }
-        const times = fs
-          .readdirSync(logsDir)
-          .filter((f) => /^e2e-t.*\.log$/.test(f))
-          .map((f) => {
-            const t = fs.readFileSync(path.join(logsDir, f), 'utf8')
-            const ms = [...t.matchAll(/\((\d+)ms\)/g)].map((m) => +m[1])
-            return ms.length ? ms[ms.length - 1] : 0
-          })
-          .filter((ms) => ms > 0)
-        if (times.length === 0) return { ok: true }
         const total = times.reduce((a, b) => a + b, 0)
         const slowest = Math.max(...times)
         const optimal = (total / slowest).toFixed(1)

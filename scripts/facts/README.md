@@ -29,6 +29,20 @@ export default {
 
 契约由 runner 逐条机检（`facts/_lib.mjs` 的 `validateFact`），违约即红。
 
+## `_` 前缀是共享材料
+
+`_` 前缀的文件**不是事实**（runner 跳过它们），是事实模块与判据共用的提取器：
+
+| 模块 | 提供什么 | 谁在用 |
+|---|---|---|
+| `_lib.mjs` | 描述符校验 / 溯源行 / 落盘与漂移判定 | runner 与 `facts.test.mjs` |
+| `_capability.mjs` | 能力矩阵三张表的提取（工具 / 操作 / 路由 / 插件总表） | `current.mjs`、`_sets.mjs` |
+| `_sets.mjs` | 「成员集合 + owner」声明（封闭集判据读的同一份） | `facts.test.mjs` 的跨文档判据 |
+
+`_sets.mjs` 的 owner **不写死路径**：从各文档 front-matter 的 `lists: [<id>=owner]`
+读（同 `RE-007-清单归属总账` 的输入）。写死路径的失效形态是静默漏判——文档一改名，
+集合空转而判据全绿。
+
 ## 两条硬约定
 
 1. **`render` 必须是纯函数**。门禁把生成当确定性的机械工作（`autoWork`）：

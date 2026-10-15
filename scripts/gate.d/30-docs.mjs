@@ -172,6 +172,12 @@ export const TEST_ONLY = [
   'color',
   'rust-scan',
   'gate.d/_shared',
+  // `gate.d/_logs`：门禁日志落点（每轮一个目录）与失败详情（末 N 行印在失败处）。
+  // 失效形态**全是静默的**：写错一级目录 / 指针没写 / `failureDetail` 少读一段
+  // （`note`、`logFile` 数组形态），门禁照样全绿，只是下一轮读者拿不到数据、
+  // 失败处少一块信息。所以逐条注入坏形态（同名占用、指针悬空、聚合任务的多个
+  // 子日志、日志已被删）断言预期表现。
+  'gate.d/_logs',
   'cli-binary',
   'tauri-binary',
   'schema-audit',
@@ -281,11 +287,22 @@ export const LIBS = [
   'rust-scan',
   'md-table',
   'gate.d/_shared',
+  // `gate.d/_logs`：门禁日志的**落点**（每轮一个目录 + 保留最近 N 轮）与**失败详情**
+  // 的呈现（末 N 行 + 路径）。被 `gate.mjs` 与两个 e2e 读者共用，本体不是独立
+  // 门禁步骤。它治的两个病都关于「看不到」：上一轮的失败证据被下一轮冲掉；
+  // 失败只给一行文件名、正文要自己去文件里翻（于是人再跑一遍 7 分钟的门禁）。
+  'gate.d/_logs',
   'core-surface',
   'route-facts',
   'gen-facts',
   'facts/_lib',
   'facts/_capability',
+  // `_sets` 是「封闭集判据」的**成员集合 + owner 声明**（读 front-matter 的
+  // `lists: [<id>=owner]`，与 RE-007 同源）。登记成 LIBS：判据在它唯一的消费方
+  // `facts.test.mjs` 的跨文档判据里，本体不是独立门禁步骤——跑两遍就是同一件事。
+  // ⚠️ 它**不许**进 GUARDS：判据的住所是被判东西的对面，合并会让「改判据」与
+  // 「改被判物」在同一次提交里互相掩护。
+  'facts/_sets',
   // `_ref-link` 是生成物里的编号引用构造器（`createRefLink`）：facts 各模块靠它产出
   // 与 gen-doc-refs 逐字同形态的链接。登记成 LIBS：判据在它两个消费方的落盘产物里
   // （`facts.test.mjs` 扫「生成物里不得留下字面 refLink(」），本体不是独立门禁步骤。
