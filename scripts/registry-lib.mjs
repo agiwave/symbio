@@ -815,12 +815,19 @@ export function auditEntries(entries, root, projections = [], kinds = {}) {
         )
       } else {
         // 编号 ↔ 文件对账（新规）：**id 保留类型前缀，文件名去掉**——
-        // `id: ST-001-最小闭环` ↔ `001-最小闭环.md`。对账规则：id 去掉 `<前缀>-`
-        // 后的「序号[-名称]」必须与文件名主干**逐字相等**。身份（id）与位置
-        // （文件名）分离：改名只动一处，`[[ST-001]]` 引用永不搬家。
+        // `id: ST-001-最小闭环` ↔ `001-最小闭环.md`。落点形态**两种等价**（分形：
+        // 与 kind 登记处 `NNN-kind/README.md` 同构），按文件系统事实自判，不设模式声明：
+        // - 平铺：`<stem>.md`；
+        // - 目录：`<stem>/README.md`（父目录名 = stem，README 即条目）。
+        // 对账规则：id 去掉 `<前缀>-` 后的「序号[-名称]」必须与文件名主干**逐字相等**。
+        // 身份（id）与位置（文件名 / 目录名）分离：改名只动一处，`[[ST-001]]` 引用永不搬家。
         const stem = meta.id.slice(kinds[e.kind].prefix.length + 1)
-        if (e.name !== `${stem}.md`) {
-          out.push(`${e.rel}：RG-003 文件名编号对账（id=${meta.id} 应对应 \`${stem}.md\`）——id 去前缀后必须与文件名主干一致`)
+        const parentDir = e.rel.split('/').at(-2)
+        const ok = e.name === `${stem}.md` || (e.name === 'README.md' && parentDir === stem)
+        if (!ok) {
+          out.push(
+            `${e.rel}：RG-003 文件名编号对账（id=${meta.id} 应对应 \`${stem}.md\` 或 \`${stem}/README.md\`）——id 去前缀后必须与文件名（或目录名）主干一致`,
+          )
         }
       }
       if (byId.has(meta.id)) {

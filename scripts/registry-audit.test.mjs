@@ -241,7 +241,14 @@ test('RG-003：id 形状 / 文件名对账 / 跨 kind 重复 各自变红', () =
   assert.deepEqual(errsOf(circle), [], '名称段含 Unicode（圈号）必须合法')
 
   const renamed = caseRoot({ 'task/wrong.md': taskDoc('T-040') })
-  expectOnly(errsOf(renamed), /RG-003 文件名编号对账（id=T-040 应对应 `040\.md`）/)
+  expectOnly(errsOf(renamed), /RG-003 文件名编号对账（id=T-040 应对应 `040\.md` 或 `040\/README\.md`）/)
+
+  // 落点形态两种等价（分形）：平铺 `<stem>.md` 或目录 `<stem>/README.md`——
+  // 与 kind 登记处 `NNN-kind/README.md` 同构，按文件系统事实自判，不设模式声明。
+  const tree = caseRoot({ 'task/040/README.md': taskDoc('T-040') })
+  assert.deepEqual(errsOf(tree), [], '目录形态（父目录名 = id 去前缀）必须放行')
+  const treeWrong = caseRoot({ 'task/other/README.md': taskDoc('T-040') })
+  expectOnly(errsOf(treeWrong), /RG-003 文件名编号对账/)
 
   // 跨 kind 撞号：新规范下同前缀只属于一个 kind，所以撞号必然伴随「前缀与 kind 不符」
   // ——两条判据都在工作（前缀对账 + 编号重复）

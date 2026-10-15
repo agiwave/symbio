@@ -50,7 +50,7 @@ board.columns: [scope]
 
 | 编号 | 规范 | 适用范围 | 判据 | 清除 | 取代 |
 |---|---|---|---|---|---|
-| `SP-001` | 登记条目 front-matter 与状态规范 | 仓内全部活跃 `.md` 文档（十类 kind；豁免名单见 plan/14 §0） | 人工 | — | — |
+| `SP-001` | 登记条目 front-matter 与状态规范 | 仓内全部活跃 `.md` 文档（kind 闭集由各目录 README meta 自注册；豁免名单见 plan/14 §0） | 人工 | — | — |
 | `SP-002` | ADR 的域分配——按「这条决策约束谁」归域，域是条目的可筛字段 | docs/010-adr/ 下全部决策条目的 domain 字段 | `scripts/registry-audit.mjs` | — | — |
 | `SP-003` | PL-006 §0 纪律 1——先实现 → 单测 → e2e（含 LLM mock）→ 全门禁，绿才提交 | docs/004-plan/006-分步实施计划.md §0 纪律 1（条文 owner 所在） | `scripts/gate.mjs` | — | — |
 | `SP-004` | PL-006 §0 纪律 1b——跨批行为变更的中间态提交 | docs/004-plan/006-分步实施计划.md §0.3（条文 owner 所在） | 人工 | — | — |
