@@ -198,6 +198,16 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
     `contents[].parts[].functionResponse`（gemini_api）。只认 openai_chat 一家的形状会让
     其余三协议的 `afterTool` **恒不命中** ⇒ 工具结果轮落到普通池 ⇒ 无限工具循环（症状同
     第 14 条：撞超时不是断言红）。参考 `t66`（负向自检：破坏 anthropic 判定即红）。
+16. **`MockHttp.requests()` 的留痕里含**控制面请求（`/_health` 是 `start()` 的就绪探针、
+    `/_requests` 是**读留痕这个动作本身**）⇒ 拿「留痕条数」当判据时必须**按路径过滤**，
+    否则每读一次计数就涨一次，涨的还是自己的读动作。症状：第一条「未发生任何请求」的
+    断言直接失败（实得 1 或 2），而用例看着完全合理。参考 `t69` 的 `hookHits()`。
+17. **`HookType::Command` 的钩子在 Windows 上跑不动含空格的命令**：
+    `cmd /C <command> <event_path>` 里命令串被 Rust 转义成 `"echo X"`，`cmd` 对 `/C "…"`
+    的引号解析把事件路径并进命令名 ⇒ 回包
+    `Command error: 文件名、目录名或卷标语法不正确。 (os error 123)`。要验**钩子机制**
+    就用 `Http` 类型指向本地靶子（跨平台，且能一并钉住「事件 JSON 透传」）；要验
+    `Command` 类型本身则用**单 token** 命令。参考 `t69`。
 
 **新增「接线判据」用例时另加一条纪律**：机制已经接进生产、只是缺判据时，用例必须证
 **「接线前后行为可见地不同」**——把开关翻掉（如 `skill_compile_enabled` /
