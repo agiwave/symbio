@@ -38,8 +38,8 @@ use serde::Serialize;
 
 use crate::symbio_core::{
     calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Budget,
-    EventWalStore, PermissionMatrix, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginPayload, ReadingPanel, VisScope, SESSION_ID,
+    EventWalStore, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginPayload, ReadingPanel, VisScope, SESSION_ID,
 };
 
 use super::plugin::SessionPlugin;
@@ -195,6 +195,32 @@ pub(crate) struct SessionStats {
     /// 一列（其余各列只读一个文件）。今天没有生产调用方（P4 登记），接进前端时应
     /// 连同这一条成本一起考虑——要么按需取（单独一条路），要么增量缓存。
     pub fleet: serde_json::Value,
+}
+
+/// 本会话事实源的**内容侧可见域**（T-094 ②）：记忆载荷 `vis_scope` 的最宽取值。
+///
+/// 为什么取最宽而不是逐条判：读侧闸是**整列**判据（四列 / 声誉 / 就绪 / 转写
+/// 共用同一个答案，见 `read` 的注释），而这份事实源里只要有共享内容，它就不是
+/// 纯私有的——「不给你看」必须因为**每一条都私有**，不是因为其中一条私有。
+/// 反过来取最窄会让共享内容被私有内容拖着一起锁死，那是把产地的宽度读丢了。
+///
+/// 缺省（没有任何记忆事件 / 存量事件没有这个字段）= `thread_private`（C10）——
+/// 与 T-094 之前的接线逐字一致，存量事实源不因这次接线改变读数。
+fn content_scope_of(snapshot: &[crate::symbio_core::Event]) -> VisScope {
+    let mut widest = VisScope::ThreadPrivate;
+    for e in snapshot {
+        if e.entity != crate::symbio_core::Entity::Memory {
+            continue;
+        }
+        let scope = e
+            .payload
+            .get("vis_scope")
+            .and_then(|v| v.as_str())
+            .map(VisScope::from_name)
+            .unwrap_or_default();
+        widest = widest.widen(scope);
+    }
+    widest
 }
 
 /// 实例级聚合列（P2）：把 `storage_root` 下**所有**会话的 WAL 合并成一份读数。
@@ -488,21 +514,36 @@ pub(crate) fn read(
     // 什么决定**——各列与不变量列都只从「你看得见的事实」算，不先算完再裁结果。
     //
     // 属主 = 本机会话的属主（`SESSION_OWNER`，部署事实；`[会话] ≈ [线程]`，S4 的
-    // thread 实体落地前用会话属主），可见域取 C10 缺省 `thread_private`。于是：
-    // 属主本人 = 全量读数（与不声明时逐字一致）；非属主 / 矩阵外主体 = **空切片**
+    // thread 实体落地前用会话属主）。于是：
+    // 属主本人 = 全量读数（与不声明时逐字一致）；矩阵外主体 = **空切片**
     // ⇒ 四列全零、就绪集为空、不变量清单为空，与 `has_wal: true` 并排即可分辨「有源但不给你
     // 看」，而不是被读成「这里没有数」。
     // 可见域只判**一次**：四列、声誉列、就绪集列与转写列共用同一个答案——两个判定点 = 两套判据，
     // 必然漂移成「四列能看、声誉不能看」这种没有理由的半开半掩。
+    //
+    // **scope 取内容侧的事实**（[T-094](../../../../docs/009-task/094-个人认知可见域产地批.md "T-094-个人认知可见域产地批") ②）：
+    // 本会话记忆载荷里记的 `vis_scope`（`v2_memory::encode` 的产地，T-094 ①），
+    // 取**最宽**的那个——这份事实源里只要有共享内容，它就不是纯私有的。缺省
+    // （没有任何记忆 / 存量事件没这个字段）= `thread_private`（C10），与接线前
+    // 逐字一致。判据不再是恒传缺省值：「人的认知可供他人借用」（SC-010 判据 3）
+    // 由此有生产读方——矩阵内主体读得到他人共享内容，矩阵外主体照旧空切片。
+    //
+    // **属主恒放行**（owner 相等，C10 的读侧口径）：`user` 在矩阵里没有行
+    // （能力表按「智能体的权威动作种类」划分，两张表里的人不靠成员身份），
+    // 于是 `shared` 的「矩阵内主体可见」若不叠这一条，属主本人会被自己的
+    // 共享内容挡在门外——那是把「本人写、智能体读」读成了「本人也不能读」。
+    // 两条是同一次判定的两个分支，不是两个判定点：私有内容属主与矩阵成员的
+    // 答案本来就由 `can_see` 的一个 match 给出。
+    let content_scope = content_scope_of(&snapshot);
     let may_read = match viewer {
         None => true,
         Some(principal) => {
-            let matrix: &PermissionMatrix = crate::symbio_core::authz::production_matrix();
-            matrix.can_see(
-                principal,
-                crate::symbio_core::authz::SESSION_OWNER,
-                VisScope::default(),
-            )
+            principal == crate::symbio_core::authz::SESSION_OWNER
+                || crate::symbio_core::authz::production_matrix().can_see(
+                    principal,
+                    crate::symbio_core::authz::SESSION_OWNER,
+                    content_scope,
+                )
         }
     };
     let snapshot = if may_read { snapshot } else { Vec::new() };

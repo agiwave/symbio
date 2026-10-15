@@ -126,6 +126,14 @@ impl Capability {
 ///
 /// **C10**（[plan/04 §4](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：默认
 /// `thread_private`——默认隔离是**缺省值**，不是需要每个主体记得配置的东西。
+///
+/// ## 字符串形态：内容侧可见域的载荷书写（[T-094](../../../../docs/009-task/094-个人认知可见域产地批.md "T-094-个人认知可见域产地批")）
+///
+/// [`Self::name`] / [`Self::from_name`] 是**载荷里的书写形态**（`memory.encoded`
+/// 的 `vis_scope` 字段）：判定走枚举，落盘走字符串，两套形态共用同一份映射——
+/// 各写一遍字符串迟早漂移成「写的是 shared、读的是 public」，而两边都是合法值，
+/// 没有任何东西会为此变红。缺省（载荷缺这一字段）恒为 [`VisScope::ThreadPrivate`]：
+/// 存量事件没有这个字段，把缺席读成别的值等于给历史事实改判。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum VisScope {
     /// 仅本线程可见（默认）。
@@ -135,6 +143,42 @@ pub enum VisScope {
     Shared,
     /// 完全公开。
     Public,
+}
+
+impl VisScope {
+    /// 书写形态（`from_name` 的逆向）——判据只在这里出现一次。
+    pub fn name(&self) -> &'static str {
+        match self {
+            VisScope::ThreadPrivate => "thread_private",
+            VisScope::Shared => "shared",
+            VisScope::Public => "public",
+        }
+    }
+
+    /// 书写形态 → 枚举。认不出的值 = [`VisScope::ThreadPrivate`]（缺省口径，
+    /// 与载荷缺这一字段同义）——**不**把拼写错误静默读成更宽的可见域，
+    /// 那等于把笔误变成一次越权读取。
+    pub fn from_name(name: &str) -> VisScope {
+        match name {
+            "shared" => VisScope::Shared,
+            "public" => VisScope::Public,
+            _ => VisScope::ThreadPrivate,
+        }
+    }
+
+    /// 两个可见域里**更宽**的那个（`thread_private` < `shared` < `public`）。
+    ///
+    /// 唯一的合并判据：读侧要就一批内容回答「这份整体给不给人看」时用它
+    /// （T-094 ② 的整列闸）——各调用点自己排大小就会漂移成「这边 public 赢、
+    /// 那边 shared 赢」，而两种答案都是合法取值，没有任何东西会变红。
+    pub fn widen(self, other: VisScope) -> VisScope {
+        use VisScope::{Public, Shared, ThreadPrivate};
+        match (self, other) {
+            (Public, _) | (_, Public) => Public,
+            (Shared, _) | (_, Shared) => Shared,
+            _ => ThreadPrivate,
+        }
+    }
 }
 
 /// 一个主体的完整策略：写侧（能力集合）+ 读侧（可见域）——**缺一不可**。

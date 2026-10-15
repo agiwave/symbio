@@ -966,6 +966,10 @@ fn declaring_the_owner_reads_everything() {
 ///
 /// `has_wal` 仍为真 ⇒ 「有源但不给你看」与 `missing_wal` 那条「没有源」可分辨；
 /// 不变量列同为空——没看见事实，就没有属于你的缺口可报。
+///
+/// 前提（T-094 ② 之后要说清的一句）：本事实源**没有共享内容**——`seed` 只种
+/// 对话格不种记忆，内容侧可见域因此是 C10 缺省 `thread_private`，闸的答案
+/// 与接线前逐字相同。共享内容的读方见下一条。
 #[test]
 fn a_non_owner_reads_nothing_at_all() {
     let wal = seed("gate-nonowner");
@@ -1009,6 +1013,122 @@ fn a_non_owner_reads_nothing_at_all() {
             "{viewer}: 没有可见事实 ⇒ 转写为空表"
         );
     }
+}
+
+/// T-094 ② 的判据：读侧闸传的是**内容侧**的可见域——本会话记忆载荷里记了
+/// `shared`（人的认知可供借用，SC-010 判据 3）⇒ 矩阵内主体（`agent:main`）
+/// 读得到他人共享内容；矩阵外主体（`agent:ghost`）照旧空切片。
+///
+/// 三条并排证的是同一件事的三个面：闸读的是**产地的事实**（载荷 `vis_scope`），
+/// 不是恒传的缺省值、也不是调用方声明——请求方自己声明「我能看到什么」
+/// 等于给自己授权，那条捷径 `governance` 模块头点名禁止。
+///
+/// 反向对照（同一次播种里自带）：把那条唯一共享记忆换成私有的 ⇒ `agent:main`
+/// 回到空切片——证明翻面的是**内容的可见域**这一个变量，不是别的。
+#[test]
+fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
+    let dir = std::env::temp_dir().join(format!("symbio-stats-{}-gate-shared", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("临时目录");
+    let wal = dir.join(super::super::paths::V2_WAL_FILE);
+    let store = EventWalStore::open(&wal).unwrap();
+    let t = 1_700_000_000_000i64;
+    // 一轮对话（与 `seed` 同形的最小事实源）+ 一条 **shared** 的经验记忆
+    // （`v2_facts::record_learning` 步 11 的生产形态）。
+    let u0 = Event::pending(
+        "u0",
+        EVENT_USER_MESSAGE,
+        Entity::Turn,
+        Verb::Opened,
+        0,
+        "user",
+    )
+    .with_payload(serde_json::json!({ "text": "你好", "tier": "deep", "turn_ref": "u-0" }));
+    let s0 = store.append(u0).unwrap().value();
+    store
+        .append(
+            Event::pending(
+                "f0",
+                EVENT_ASSISTANT_FINAL,
+                Entity::Turn,
+                Verb::Closed,
+                0,
+                "agent:main",
+            )
+            .with_produced_by(s0)
+            .with_cost_ms(1200)
+            .with_ts(t)
+            .with_payload(serde_json::json!({ "text": "你好！", "tier": "deep" })),
+        )
+        .unwrap();
+    store
+        .append(
+            Event::pending(
+                "v2m-shared",
+                crate::symbio_core::EVENT_MEMORY_ENCODED,
+                Entity::Memory,
+                Verb::Opened,
+                0,
+                "user",
+            )
+            .with_produced_by(s0)
+            .with_ts(t)
+            .with_payload(serde_json::json!({
+                "content": "我喜欢喝不加糖的咖啡",
+                "tag": "经验",
+                "generation": 0u32,
+                "vec": [],
+                "vis_scope": "shared",
+            })),
+        )
+        .unwrap();
+
+    let root = wal.parent().expect("WAL 有父目录").to_path_buf();
+    let session_principal = crate::symbio_core::authz::PRINCIPAL_MAIN;
+
+    // ① 矩阵内主体（非属主）：读得到——共享内容让这份事实源不再纯私有。
+    let as_member =
+        read("s1", &wal, Some("agent:main"), session_principal, &root).expect("矩阵内主体读数");
+    assert!(as_member.has_wal);
+    assert_eq!(
+        as_member.checkpoint["event_count"], 3,
+        "矩阵内主体读得到他人共享内容（三格全见）"
+    );
+    assert_eq!(as_member.cost["total_ms"], 1200, "成本列同见");
+
+    // ② 矩阵外主体：照旧空切片（fail-closed 不因共享内容松动）。
+    let as_outsider =
+        read("s1", &wal, Some("agent:ghost"), session_principal, &root).expect("矩阵外主体读数");
+    assert!(as_outsider.has_wal, "有源但不给你看");
+    assert_eq!(
+        as_outsider.checkpoint["event_count"], 0,
+        "矩阵外主体断点列为空"
+    );
+    assert_eq!(as_outsider.cost["total_ms"], 0);
+
+    // ③ 属主本人：与不声明时逐字一致（闸不是为了把属主挡在外面）。
+    let plain = read("s1", &wal, None, session_principal, &root).expect("本机默认读数");
+    let as_owner = read("s1", &wal, Some("user"), session_principal, &root).expect("属主读数");
+    assert_eq!(as_owner, plain);
+
+    // 反向对照：唯一那条共享记忆改成私有 ⇒ agent:main 回到空切片。
+    // （同一次播种、同一份代码，只翻内容的可见域这一个变量。）
+    let mut events = store.history();
+    let last = events.len() - 1;
+    events[last].payload["vis_scope"] = serde_json::json!("thread_private");
+    drop(store);
+    std::fs::remove_file(&wal).unwrap();
+    let store2 = EventWalStore::open(&wal).unwrap();
+    for e in events {
+        store2.append(e).unwrap();
+    }
+    let denied = read("s1", &wal, Some("agent:main"), session_principal, &root).expect("读数");
+    assert!(
+        denied.tiers.is_empty() && denied.checkpoint["event_count"] == 0,
+        "内容全私有 ⇒ 矩阵内非属主回到空切片（翻面的是可见域，不是别的）"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// 声誉列（[plan/12 批 2](../../../../docs/004-plan/010-价值验收与基线埋点.md "PL-010-价值验收与基线埋点")，S6 第 15 步的读侧）：

@@ -241,3 +241,50 @@ fn foreign_principal_reads_nothing_from_a_private_thread() {
     assert_eq!(own.len(), 1, "main 可见自己的 final；user 消息归 user");
     assert_eq!(own[0].kind, EVENT_ASSISTANT_FINAL);
 }
+
+// ── T-094：可见域的字符串形态（内容侧产地的书写面）─────────────────────
+
+/// 书写形态 round-trip：三个取值各自 `name → from_name` 逐字回来。
+/// 判据不是「能转回来」而是「**只有**这三个能转回来」——载荷里出现第四个值
+/// （拼写错误 / 将来的新取值没有同批登记）必须落回缺省，不能静默变成更宽。
+#[test]
+fn vis_scope_name_round_trips_and_unknown_falls_back_to_private() {
+    for scope in [VisScope::ThreadPrivate, VisScope::Shared, VisScope::Public] {
+        assert_eq!(
+            VisScope::from_name(scope.name()),
+            scope,
+            "{} 必须逐字转回",
+            scope.name()
+        );
+    }
+    assert_eq!(VisScope::from_name("shared"), VisScope::Shared);
+    assert_eq!(VisScope::from_name("public"), VisScope::Public);
+    // 认不出的值 = 缺省 thread_private（不是放宽、不是报错后放行）——
+    // 把笔误读成 shared/public 等于把载荷的拼写错误变成一次越权读取。
+    for bad in ["Shared", "SHARED", "shard", "", "thread-private"] {
+        assert_eq!(
+            VisScope::from_name(bad),
+            VisScope::ThreadPrivate,
+            "`{bad}` 必须落回缺省（fail-closed 的方向是更窄）"
+        );
+    }
+}
+
+/// `widen` 是全序的「取宽」：满足交换律、幂等、单调——
+/// 读侧整列闸（T-094 ②）拿它合并一批内容的可见域，性质不成立就会
+/// 「同两份事实源因为顺序不同读出不同的闸答案」，而两种答案都合法。
+#[test]
+fn widen_is_commutative_idempotent_and_monotone() {
+    use VisScope::{Public, Shared, ThreadPrivate};
+    let all = [ThreadPrivate, Shared, Public];
+    for a in all {
+        for b in all {
+            assert_eq!(a.widen(b), b.widen(a), "交换律：{a:?} × {b:?}");
+        }
+        assert_eq!(a.widen(a), a, "幂等：{a:?}");
+        assert_eq!(a.widen(ThreadPrivate), a, "私有是底：{a:?}");
+        assert_eq!(Public.widen(a), Public, "公开是顶：{a:?}");
+    }
+    assert_eq!(ThreadPrivate.widen(Shared), Shared);
+    assert_eq!(Shared.widen(Public), Public);
+}

@@ -259,6 +259,13 @@ pub(crate) struct EncodeContent<'a> {
     pub user_text: &'a str,
     pub tag: &'a str,
     pub event_id: String,
+    /// **内容侧可见域**（[T-094](../../../../docs/009-task/094-个人认知可见域产地批.md "T-094-个人认知可见域产地批")）：
+    /// 这条记忆对谁可见——判定依赖的输入若没有事实来源，判定就只能是平凡值
+    /// （同 ADR-053 / ADR-054 把「变更」升为事实的同一条纪律）。落盘形态 =
+    /// [`VisScope::name`](crate::symbio_core::VisScope) 的字符串；生产取值只有两个：
+    /// 经验（用户发言，人的认知可供借用）取 `shared`，判断（智能体收束，本部署
+    /// 私有的工作记忆）取 `thread_private`。
+    pub vis_scope: crate::symbio_core::VisScope,
 }
 
 impl<'a> EncodeContent<'a> {
@@ -267,7 +274,14 @@ impl<'a> EncodeContent<'a> {
             user_text,
             tag,
             event_id: event_id.into(),
+            vis_scope: crate::symbio_core::VisScope::ThreadPrivate,
         }
+    }
+
+    /// 内容侧可见域（建造者式一票，避免第五个位置参数被按位传错）。
+    pub(crate) fn with_vis_scope(mut self, vis_scope: crate::symbio_core::VisScope) -> Self {
+        self.vis_scope = vis_scope;
+        self
     }
 }
 
@@ -278,6 +292,9 @@ impl<'a> EncodeContent<'a> {
 /// 溯源 `produced_by` 指向本轮 `user.message` 格（I2：记忆溯源覆盖
 /// 100%，见 `invariants::produced_by_coverage`）；`ts` 是**编码时刻**（`RecallEntry::ts`
 /// 的契约，跨会话新近度排序靠它）。
+///
+/// 载荷的 `vis_scope` = [`EncodeContent::vis_scope`]（T-094：内容侧可见域产地）——
+/// 读侧判定（`stats` 的可见域闸、跨主体召回）读的是这个字段，写侧不判。
 pub(crate) fn encode(
     store: &EventWalStore,
     snapshot: &[Event],
@@ -321,6 +338,7 @@ pub(crate) fn encode(
                 "tag": content.tag,
                 "generation": 0u32,
                 "vec": [],
+                "vis_scope": content.vis_scope.name(),
             })),
         )
         .map_err(|e| format!("memory.encoded 入格失败：{e:?}"))?;
@@ -395,7 +413,20 @@ pub(crate) fn consolidate(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as u32
         };
+        // 可见域同样从源事件载荷读（T-094：合并产物继承源记忆的内容侧可见域）——
+        // 同标签的源可见域相同（写方按标签定，见 `record_learning`），取不到
+        // （源不在快照里）时落 thread_private：合并放大可见域比丢一次合并更坏。
+        let scope_of = |seq: u64| -> crate::symbio_core::VisScope {
+            snapshot
+                .iter()
+                .find(|e| e.seq.map(|s| s.value()) == Some(seq))
+                .and_then(|e| e.payload.get("vis_scope"))
+                .and_then(|v| v.as_str())
+                .map(crate::symbio_core::VisScope::from_name)
+                .unwrap_or_default()
+        };
         let generation = generation_of(source_seqs[0]).max(generation_of(source_seqs[1])) + 1;
+        let vis_scope = scope_of(source_seqs[0]);
 
         let (content, fidelity) = merge_with_fidelity(
             &[oldest[0].content.as_str(), oldest[1].content.as_str()],
@@ -442,6 +473,7 @@ pub(crate) fn consolidate(
                     "fidelity": fidelity,
                     "sources": source_seqs,
                     "vec": [],
+                    "vis_scope": vis_scope.name(),
                 })),
             )
             .map_err(|e| format!("memory.consolidated 入格失败：{e:?}"))?;

@@ -280,7 +280,125 @@ fn judgment_encode_writes_the_agents_conclusion_under_its_own_tag() {
     std::fs::remove_dir_all(wal.parent().unwrap()).ok();
 }
 
+/// T-094 ① 的**生产用例**：`memory.encoded` 载荷带内容侧可见域——判据不落在
+/// `governance/mod.test.rs`（那边测的是枚举与字符串映射的机制），落在写方本身：
+/// 默认 `thread_private`（C10 缺省，存量行为逐字不变），`with_vis_scope` 显式
+/// 给宽（生产调用点 = 经验记忆的 `shared`，见 `v2_facts::record_learning`）。
+/// 空 / 同文两条早退路径同样不写格——没有产地就没有假事实。
+#[test]
+fn encode_payload_carries_the_content_side_vis_scope() {
+    let wal = tmp_wal("vis-scope");
+    let store = EventWalStore::open(&wal).expect("打开 WAL");
+    let t = 1_700_000_000_000i64;
+
+    // 默认（不给 with_vis_scope）= thread_private——与 T-094 之前的载荷只差一个字段。
+    encode(
+        &store,
+        &store.range(Seq::new(0)),
+        3,
+        41,
+        t,
+        EncodeContent::new("默认可见域的一句话", MEMORY_TAG, "v2m-vs-a0"),
+    )
+    .expect("编码不失败")
+    .expect("写了记忆");
+    // 显式 shared（人的认知可借用的书写形态）。
+    encode(
+        &store,
+        &store.range(Seq::new(0)),
+        3,
+        42,
+        t + 1,
+        EncodeContent::new("可被借用的一句话", MEMORY_TAG, "v2m-vs-a1")
+            .with_vis_scope(crate::symbio_core::VisScope::Shared),
+    )
+    .expect("编码不失败")
+    .expect("写了记忆");
+
+    let snap = store.range(Seq::new(0));
+    assert_eq!(snap.len(), 2);
+    assert_eq!(
+        payload_str(&snap[0], "vis_scope"),
+        Some("thread_private"),
+        "缺省 = C10 的 thread_private（存量行为不变）"
+    );
+    assert_eq!(
+        payload_str(&snap[1], "vis_scope"),
+        Some("shared"),
+        "显式给定 shared —— 内容侧产地由此可写"
+    );
+    assert!(check_all(&snap).is_empty(), "{:?}", check_all(&snap));
+
+    // 空正文不写格：可见域不制造空事实。
+    assert_eq!(
+        encode(
+            &store,
+            &store.range(Seq::new(0)),
+            4,
+            43,
+            t + 2,
+            EncodeContent::new("  ", MEMORY_TAG, "v2m-vs-a2")
+                .with_vis_scope(crate::symbio_core::VisScope::Shared),
+        )
+        .expect("编码不失败"),
+        None,
+    );
+
+    std::fs::remove_dir_all(wal.parent().unwrap()).ok();
+}
+
 // ==================== 步 13 · 巩固 ====================
+
+/// T-094 ① 的巩固侧判据：合并产物**继承源记忆的内容侧可见域**——合并不放大
+/// 可见域（源是 shared ⇒ 产物 shared；源读不到 ⇒ 落 thread_private）。
+/// 写方与读方同批（T-094 纪律）：产地（encode）→ 继承（consolidate）→ 读方
+/// （stats 的闸，见该处测试）三点一批，不留「有产地无人读」的半边。
+#[test]
+fn consolidated_memory_inherits_the_source_vis_scope() {
+    let wal = tmp_wal("consolidate-scope");
+    let store = EventWalStore::open(&wal).expect("打开 WAL");
+    // 四条 shared 的经验记忆（合并门槛 = 4）。
+    for (i, text) in ["甲一说", "甲二说", "甲三说", "甲四说"].iter().enumerate() {
+        store
+            .append(
+                Event::pending(
+                    format!("sc-{i}"),
+                    EVENT_MEMORY_ENCODED,
+                    Entity::Memory,
+                    Verb::Opened,
+                    0,
+                    PRINCIPAL_USER,
+                )
+                .with_produced_by(0)
+                .with_ts(1000 + i as i64)
+                .with_payload(serde_json::json!({
+                    "content": text,
+                    "tag": MEMORY_TAG,
+                    "generation": 0u32,
+                    "vec": [],
+                    "vis_scope": "shared",
+                })),
+            )
+            .expect("种记忆");
+    }
+    let snap = store.range(Seq::new(0));
+
+    let merged = consolidate(&store, &snap, 7, 5000).expect("巩固不失败");
+    assert_eq!(merged.len(), 1, "到门槛 ⇒ 合并一次");
+
+    let snap2 = store.range(Seq::new(0));
+    let c = snap2
+        .iter()
+        .find(|e| e.kind == EVENT_MEMORY_CONSOLIDATED)
+        .expect("写了一条合并产物");
+    assert_eq!(
+        payload_str(c, "vis_scope"),
+        Some("shared"),
+        "合并继承源的可见域——不放大也不丢掉"
+    );
+
+    std::fs::remove_dir_all(wal.parent().unwrap()).ok();
+}
 
 /// 步 13 · 门槛：不到 4 条不触发；到 4 条合并**最旧两条**，保真度 1，源记忆被
 /// 排除式遗忘（Log 不删），投影里不再包含它们。

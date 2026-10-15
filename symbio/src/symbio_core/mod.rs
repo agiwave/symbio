@@ -214,16 +214,22 @@ pub(crate) use projection::transcript::PromptToolCall;
 pub(crate) use store::AppendError;
 
 // ==================== 权限与可见性（v2 阶段 S3，⑥ governance） ====================
-// 读写成对、fail-closed（plan/01 §7）。根出口只出**矩阵与可见域**两个类型：
-// 构造面（本根 `authz` 的主体清单）与判定面（`plugins/session` 两道闸）都要指称它们。
-// core 外消费方只有 `plugins/session` 一个，但它们**不能**下沉——core 内 `authz` /
+// 读写成对、fail-closed（plan/01 §7）。根出口只出**可见域**一个类型：
+// 判定面（`plugins/session` 的读侧闸）要指称它，构造面（本根 `authz`）的表行也带它。
+// core 外消费方只有 `plugins/session` 一个，但它**不能**下沉——core 内 `authz` /
 // `governance` 自己也在用（core 不依赖插件），插件又够不着 `governance` 域目录的深引
 // （C-002）⇒ 必须留根出口。故按 C-003 的接缝口径登记进 `core-export-audit` 的 WAIVERS。
 // governance::Capability（权限能力，7 个封顶）与 capability::Capability（LLM 工具
 // 描述符）是两个概念，**刻意不进根平铺**：授权表走能力名字符串（由
 // `PermissionMatrix::from_names` 按闭集校验），轮次→能力的映射收在 `can_reply` 里，
 // core 外的调用点既不深引也不与 `Capability` 撞名，见 governance/mod.rs 同名辨析。
-pub use governance::{PermissionMatrix, VisScope};
+//
+// `PermissionMatrix` **不在根出口**（T-094 收窄）：它最后一个 core 外消费方是
+// `stats.rs` 的读侧闸——T-094 把那一格改成按内容侧可见域判之后，闸只经
+// `authz::production_matrix()` 拿表（返回类型走类型推导，不点名），插件侧再没有
+// 一处指称这个类型 ⇒ 按 C-003「名字没跨出 core 的符号不许占根出口」收回 core 内
+// （core 内走 `governance::PermissionMatrix` 深引，C-002 只管插件侧）。
+pub use governance::VisScope;
 
 // ==================== LLM 契约 ====================
 // 模型接入（`model_provider`）与单轮产物 / 帧原语（`turn`）。

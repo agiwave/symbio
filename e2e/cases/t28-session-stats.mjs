@@ -199,10 +199,31 @@ export default defineCase(
           '读方 = 属主 ⇒ 档位行逐字相同',
         );
 
-        // 矩阵内但**不是属主**的主体、以及矩阵外的未知主体 ⇒ 读数全空（fail-closed）。
+        // 矩阵内主体（`agent:main`）⇒ **读得到**本会话的共享内容（T-094 ②：
+        // 内容侧可见域产地——两轮的用户发言都编成了 `vis_scope = shared` 的经验
+        // 记忆，读侧闸按内容侧最宽可见域判，不再恒传缺省值）。读数与属主逐字
+        // 相同：闸是整列判定，放行即放行整个快照。负面对照（无共享内容的会话
+        // ⇒ 同一读方照旧空切片）在 t73。
+        const asMain = (
+          await api.invoke('session/stats', { principal: 'agent:main' }, { session_id: SID })
+        ).body.data;
+        assertEq(asMain.has_wal, true, 'agent:main: 事实源存在，只是今天给你看');
+        assertEq(
+          asMain.checkpoint.event_count,
+          stats.checkpoint.event_count,
+          'agent:main: 矩阵成员读得到他人共享内容 ⇒ 与属主读到同样多的事实',
+        );
+        assertEq(
+          asMain.cost.total_ms,
+          stats.cost.total_ms,
+          'agent:main: 成本列逐字相同',
+        );
+        assertEq(asMain.tiers, stats.tiers, 'agent:main: 档位行逐字相同');
+
+        // 矩阵外的未知主体 ⇒ 读数全空（fail-closed，不因 T-094 放宽）。
         // `has_wal` 仍为真，于是「有源但不给你看」与「没有源」可分辨——不是被读成
         // 「这一格没有数」。
-        for (const outsider of ['agent:main', 'agent:ghost']) {
+        for (const outsider of ['agent:ghost']) {
           const denied = (
             await api.invoke('session/stats', { principal: outsider }, { session_id: SID })
           ).body.data;

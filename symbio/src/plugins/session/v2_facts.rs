@@ -180,6 +180,9 @@ pub(crate) fn record_learning(
     };
 
     // ── 步 11 编码（S5，04 §3.1 批⑦）────────────────────────────────────
+    // 经验（用户发言）= **人的认知**，可见域 `shared`——智能体读、本人写
+    // （ST-010 §3 的 grants 行语义，T-094 ①：内容侧产地）。单归属主部署下
+    // 「这个人」= 本机用户，认知可供本部署的矩阵内主体借用（SC-010 判据 3）。
     if let Err(why) = super::v2_memory::encode(
         store,
         snapshot,
@@ -190,7 +193,8 @@ pub(crate) fn record_learning(
             user_text,
             super::v2_memory::MEMORY_TAG,
             format!("v2m-{anchor_id}"),
-        ),
+        )
+        .with_vis_scope(crate::symbio_core::VisScope::Shared),
     ) {
         remember("步 11 编码", why);
     }
@@ -198,6 +202,8 @@ pub(crate) fn record_learning(
     // 本轮**成功收束**的正文（`response`）→ 一条 tag="判断" 的记忆，与用户发言
     // 那条同文去重 / 同截断 / 同溯源。兜底收束不记（`response = None`）——固化
     // 失败套路等于把没走通的路写成记忆（与技能编译同一条纪律）。
+    // 判断 = 智能体自己的收束记录，可见域 `thread_private`（C10 缺省）——
+    // 它是会话私有的工作记忆，不是可跨主体借用的认知（T-094 ①）。
     if let Some(response) = response {
         if let Err(why) = super::v2_memory::encode(
             store,

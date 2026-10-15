@@ -52,14 +52,14 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 3 · 🟡 doing 0 · ☑ done 111 · ❌ wont 0（共 114）
+**计数**：☐ todo 3 · 🟡 doing 0 · ☑ done 112 · ❌ wont 0（共 115）
 
 ## 待处理（按依赖顺序）
 
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
 | `T-073-多智能体社会数据行` | ST-013 落地：角色行（市场/仲裁/守门）+ 声誉驱动淘汰的 grants 变更事件 + 投影组合进裁决 | later | 多主体 | T-072-对等主体生产增量 |
-| `T-094-个人认知可见域产地批` | 个人认知可见域产地批：`VisScope::Shared` 要有内容侧产地 + 人的读权归属裁决——`person:*` 行在今天的表形状下表达不出来 | later | plan | — |
+| `T-117-召回跨主体读侧预过滤批` | 召回跨主体读侧预过滤批：`recall` 路径消费 `vis_scope` 产地——`thread_private` 判断记忆今天跨会话可见 | next | plan | T-094-个人认知可见域产地批 |
 | `T-107-角色主体执行路径批` | 角色主体执行路径批：agent:worker / agent:planner / agent:verifier 的窄行 + 驱动路径（行与路径同批） | later | plan | — |
 
 ## 进行中
@@ -115,6 +115,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-084-ST-002产物投影方向对账批` | ST-002 `projection = display` 与生产方向相反——产物进不进上下文，裁决一边 | plan |
 | `T-085-记忆召回判据面补齐批` | 记忆召回判据面补齐：calibrated 格 / 混合打分与 §5 措辞裁决 / recall_eval 切生产投影 / judgment 标签写方 / 保留策略 | plan |
 | `T-086-技能编译落地形态批` | S11 落地形态批：skill_compile 投影化或修订 / 凸度与密度读数裁决 / skill_compile_enabled 默认翻向的条件 | plan |
+| `T-094-个人认知可见域产地批` | 个人认知可见域产地批：`VisScope::Shared` 要有内容侧产地 + 人的读权归属裁决——`person:*` 行在今天的表形状下表达不出来 | plan |
 | `T-100-跨文档复述判据覆盖面补齐` | 把「同一事实被写两遍」的判据从三个封闭集推广到全部 owner 投影 | plan |
 | `T-104-检索降级可见性批` | 检索降级可见性：`degraded` 从投影口径走到用户眼前（注入段标降级 + 判据） | plan |
 | `T-105-Scope-Child首产点批` | `Scope::Child` 全仓第一个生产构造点：派生子会话挂父作用域 + 读方 | plan |
@@ -282,7 +283,7 @@ board.columns: [rank, deps, evidence, reason]
 - [`T-091-verify并发工具链竞态`](091-verify并发工具链竞态.md) verify 阶段并发跑裸 rustc 撞上 rustup 按需安装——CI 上 19 个验证项里 18 个假红，C29 判据被误带（done）
 - [`T-092-fmt缺推送点闸门`](092-fmt缺推送点闸门.md) fmt 只在整轮门禁与 CI 里判——推送点（pre-push）不判，未格式化源码能推到 origin（done）
 - [`T-093-prompt形状基线平台绑定`](093-prompt形状基线平台绑定.md) t46 形状基线把「平台命名的 shell 工具」（Windows `cmd` / Linux `sh`）钉进了判据——基线只能在捕获它的那个平台绿（done）
-- [`T-094-个人认知可见域产地批`](094-个人认知可见域产地批.md) 个人认知可见域产地批：`VisScope::Shared` 要有内容侧产地 + 人的读权归属裁决——`person:*` 行在今天的表形状下表达不出来（todo）
+- [`T-094-个人认知可见域产地批`](094-个人认知可见域产地批.md) 个人认知可见域产地批：`VisScope::Shared` 要有内容侧产地 + 人的读权归属裁决——`person:*` 行在今天的表形状下表达不出来（done）
 - [`T-095-工具轮交换跨轮累加与思考即正文`](095-工具轮交换跨轮累加与思考即正文.md) v2 长轮失忆与末轮思考被误判——交换跨轮累加、思考即正文四处对账（done）
 - [`T-096-LLM调用正确性e2e面`](096-LLM调用正确性e2e面.md) LLM 调用正确性 e2e 面（MockLLM 探测）：用户请求 → 系统是否正确调用模型的系统化判据（done）
 - [`T-097`](097.md) 事实生成机制化：`scripts/facts/` 目录 + 遍历式 runner（done）
@@ -305,6 +306,7 @@ board.columns: [rank, deps, evidence, reason]
 - [`T-114-telegram上游端点可配批`](114-telegram上游端点可配批.md) telegram 上游端点可配批：`api_url()` 把 `api.telegram.org` 写死 ⇒ `send` / `get_updates` / `start_listener` 三条路由无靶子可打（done）
 - [`T-115-入站边界可达面与白名单一致批`](115-入站边界可达面与白名单一致批.md) gateway 入站边界的可达面与 `is_readonly_allowed` 白名单不一致：缺 home/work 四条臂 · 白名单两条死条目（done）
 - [`T-116-CI红清偿批`](116-CI红清偿批.md) v2 分支 CI 连续红（rust-checks · e2e-check · security-check）——三处红各自的根因与清偿批次（done）
+- [`T-117-召回跨主体读侧预过滤批`](117-召回跨主体读侧预过滤批.md) 召回跨主体读侧预过滤批：`recall` 路径消费 `vis_scope` 产地——`thread_private` 判断记忆今天跨会话可见（todo）
 
 <!-- registry:summary end -->
 

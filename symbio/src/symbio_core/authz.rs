@@ -55,7 +55,8 @@
 use std::borrow::Cow;
 use std::sync::OnceLock;
 
-use crate::symbio_core::{PermissionMatrix, VisScope, AGENT_PREFIX};
+use crate::symbio_core::governance::PermissionMatrix;
+use crate::symbio_core::{VisScope, AGENT_PREFIX};
 
 /// 本机主智能体的身份——**表里那一行的名字**与收束事件的 `actor`
 /// 是同一个常量：授权判定的对象若与实际写入的主体各写一份字符串，两边迟早漂移
