@@ -163,6 +163,10 @@ export default defineCase(
         TOTAL_MATCH_LINES,
         'content 模式每个匹配行一条 ⇒ 共 5 行',
       );
+      assert(
+        !contentOut.includes('\n\n'),
+        `content 模式行间应单换行、无空行（T-113，实际片段: ${JSON.stringify(contentOut.slice(0, 200))}）`,
+      );
 
       // ── ② `output_mode: files_with_matches`：每文件一条**纯路径**（无行号）──
       const filesOut = toolResultText(reqs[2]);
@@ -192,20 +196,28 @@ export default defineCase(
 
       // ── ④ 分页：`offset` 跳过前面的行、`head_limit` 截短输出 ──
       //
-      // ⚠️ 判据**不按「匹配行数」**写：`content` 模式的输出每匹配行后带一个空行
-      // （`UTF8Sink` 给的 `text` 含行终止符 ⇒ `out.push("{path}:{ln}:{text}")` 再
-      // `join("\n")` 得到 `行\n\n行`），`apply_line_pagination` 因此按**输出行**
-      // （含空行）切，`head_limit=2` 只覆盖 1 个匹配行。这是**生产侧缺口**（分页与
-      // 匹配行不对齐 + 输出脏），已登记 [T-113](../../docs/task/T-113-本地检索输出残余批.md "T-113-本地检索输出残余批")。
-      // 本用例只判 `offset` 的「跳过」与 `head_limit` 的「截短」两件**不受空行影响**的事实。
+      // `content` 模式每匹配行一条、行间单换行（T-113 已修：`UTF8Sink` 的 `text`
+      // 原本含行终止符 ⇒ 输出 `行\n\n行`，`apply_line_pagination` 按**输出行**切，
+      // `head_limit=2` 只覆盖 1 个匹配行）。分页判据因此收紧为**匹配行**口径：
+      // `offset=1, head_limit=2` ⇒ 恰好第 2、3 个匹配行（a.ts:2 / a.ts:3）。
       const pagedOut = toolResultText(reqs[4]);
+      const pagedMatches = pagedOut.split('\n').filter((l) => l.includes(MARK_A));
+      assertEq(
+        pagedMatches.length,
+        2,
+        `offset=1 + head_limit=2 ⇒ 恰 2 个匹配行（实际: ${JSON.stringify(pagedOut)}）`,
+      );
       assert(
         !pagedOut.includes('a.ts:1:'),
         `offset=1 应跳过第 1 个匹配行（实际: ${pagedOut.slice(0, 300)}）`,
       );
       assert(
-        pagedOut.includes('a.ts:2:'),
-        `offset=1 后应含第 2 个匹配行（实际: ${pagedOut.slice(0, 300)}）`,
+        pagedMatches[0].includes('a.ts:2:') && pagedMatches[1].includes('a.ts:3:'),
+        `应恰为第 2、3 个匹配行（实际: ${JSON.stringify(pagedMatches)}）`,
+      );
+      assert(
+        !pagedOut.includes('b.ts'),
+        `head_limit 截在 a.ts 内 ⇒ b.ts 不该出现（实际: ${pagedOut.slice(0, 300)}）`,
       );
       assert(
         pagedOut.length < contentOut.length,

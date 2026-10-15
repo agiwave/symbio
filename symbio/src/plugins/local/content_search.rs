@@ -276,7 +276,11 @@ impl ContentSearchTool {
                 // 逐行搜索：收集匹配行号与文本
                 let mut file_matches: Vec<(u64, String)> = Vec::new();
                 let sink = UTF8Sink(|ln: u64, text: &str| {
-                    file_matches.push((ln, text.to_string()));
+                    // `UTF8Sink` 交给闭包的 `text` **含行终止符**（`SinkMatch` 语义）：
+                    // 原样入列会让 `join("\n")` 后每个匹配行间多一个空行，且
+                    // `apply_line_pagination` 按**输出行**切分页 ⇒ 与匹配行错位
+                    // （`head_limit=2` 只覆盖 1 个匹配）。在入口剥掉终止符。
+                    file_matches.push((ln, text.trim_end_matches(['\n', '\r']).to_string()));
                     Ok(true)
                 });
                 if searcher.search_path(&matcher, fp, sink).is_err() {
@@ -479,3 +483,7 @@ impl Capability for ContentSearchTool {
         Ok(serde_json::to_value(&data)?)
     }
 }
+
+#[cfg(test)]
+#[path = "content_search.test.rs"]
+mod tests;
