@@ -67,13 +67,54 @@ pub struct ActorSpec {
 impl ActorSpec {
     /// S01 的平凡值主体（[roadmap/S01 §4](../../../../docs/stage/ST-001-最小闭环.md "ST-001-最小闭环")）：
     /// 全规则驱动、预算放宽、单主体——平凡值下系统完整运行。
+    ///
+    /// ## `capabilities` 取该主体**自己的授权行**（[T-082](../../../../docs/task/T-082-角色行生产构造批.md "T-082-角色行生产构造批") 批①订正）
+    ///
+    /// 此前这里恒为空表，与「平凡值下系统**完整运行**」自相矛盾：收束闸判读规格
+    /// 身上的能力集之后，空表意味着平凡值连一轮对话都收束不了。没早暴露是因为闸
+    /// 当时绕道直接查授权表——字段空着也没人问，正是本批要消灭的「算了却看不见」。
+    ///
+    /// 订正后的平凡值 = **权限取实（该主体的登记行）、模式与预算取平凡**（规则驱动、
+    /// 放宽预算、根作用域）。`agent:main` 因此持 `reply.*` 能收束，而
+    /// `agent:autonomous`（只持 `define.work`）照旧无发言权——「自主行为不得冒充
+    /// 用户对话」这条不因平凡值而失效。
     pub fn trivial(principal: impl Into<String>) -> Self {
+        let principal = principal.into();
         ActorSpec {
-            principal: principal.into(),
+            capabilities: crate::symbio_core::authz::matrix_for(&principal)
+                .grant_names_of(&principal),
             pattern: Pattern::Decider,
-            capabilities: Vec::new(),
             budget_ms: 60_000,
             scope: Scope::Root,
+            principal,
         }
+    }
+
+    /// 写侧判定（收束 · **发言臂**）：本规格能否落收束格。
+    ///
+    /// 读的是**自己身上**的 `capabilities`（构造时从授权表行取数，`grant_names_of`），
+    /// 不再回头查表——[T-082](../../../../docs/task/T-082-角色行生产构造批.md "T-082-角色行生产构造批") 批①：
+    /// 规格字段此前"算了却看不见"，写侧闸判一律直接问 `matrix`，两者是同一数据的
+    /// 两个入口。判定收归规格后，**判的对象（规格）与构造的来源（表行）有了单一链条**。
+    ///
+    /// 「轮次位置 → 能力」的映射不在这里复述：借用
+    /// [`crate::symbio_core::governance`] 里那一个（`reply_capability`）——口径只有一份。
+    pub fn can_land_speech(&self, first: bool) -> bool {
+        let cap = crate::symbio_core::governance::Capability::reply_capability(first);
+        self.holds(cap.name())
+    }
+
+    /// 写侧判定（收束 · **产物臂**）：本规格能否落 `artifact.added`。
+    ///
+    /// 与 [`Self::can_land_speech`] 并列而**不是**它的分支（ADR-067）：对等主体只持
+    /// `produce.artifact` ⇒ 发言臂拒、产物臂放，它因此能收束为一件产物。
+    pub fn can_land_artifact(&self) -> bool {
+        self.holds(crate::symbio_core::governance::Capability::ProduceArtifact.name())
+    }
+
+    /// 能力集是否含该名。名字对错由**构造期**兜住（`from_names` 认不出即拒绝整体
+    /// 构造）——读侧照单全收，不把拼写问题变成第二处判定。
+    fn holds(&self, name: &str) -> bool {
+        self.capabilities.iter().any(|c| c == name)
     }
 }

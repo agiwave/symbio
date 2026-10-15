@@ -76,6 +76,19 @@ pub enum Capability {
 }
 
 impl Capability {
+    /// **轮次位置 → 收束能力**的唯一映射（首条 → `ReplyFirst`，后续 → `ReplyAppend`）。
+    ///
+    /// 两处读者共用它、各自不抄清单：授权表谓词 [`PermissionMatrix::can_reply`]
+    /// 与规格谓词 [`crate::symbio_core::ActorSpec::can_land_speech`]（T-082 批①：
+    /// 写侧闸判改问规格身上那份能力集）。映射若分两份，改一处即静默错位。
+    pub(crate) fn reply_capability(first: bool) -> Capability {
+        if first {
+            Capability::ReplyFirst
+        } else {
+            Capability::ReplyAppend
+        }
+    }
+
     /// 能力名（授权表的书写形态）→ 枚举。**认不出的名 = `None`**，由
     /// [`PermissionMatrix::from_names`] 拒绝构造——不把拼写错误静默读成
     /// 「没有这个能力」，那等于把授权表的笔误变成一条悄悄生效的拒绝。
@@ -318,15 +331,11 @@ impl PermissionMatrix {
     /// 写侧判定（收束闸）：主体能否**收束一轮发言**——运行器落收束格前的判据。
     ///
     /// `first` = 该轮尚无收束格：首条 → [`Capability::ReplyFirst`]，后续（重试 /
-    /// 追加）→ [`Capability::ReplyAppend`]。「轮次位置 → 能力」的映射只在这一处
-    /// 定义，调用点不复述（口径只活在 core）。未持有 ⇒ 拒绝入格（fail-closed）。
+    /// 追加）→ [`Capability::ReplyAppend`]。「轮次位置 → 能力」的映射只在
+    /// [`Capability::reply_capability`] 一处定义，调用点不复述（口径只活在 core）。
+    /// 未持有 ⇒ 拒绝入格（fail-closed）。
     pub fn can_reply(&self, principal: &str, first: bool) -> bool {
-        let cap = if first {
-            Capability::ReplyFirst
-        } else {
-            Capability::ReplyAppend
-        };
-        self.can_write(principal, cap)
+        self.can_write(principal, Capability::reply_capability(first))
     }
 
     /// 写侧判定（**产物闸**）：主体能否**产生产物**——运行器落 `artifact.added`

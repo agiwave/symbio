@@ -32,8 +32,109 @@ fn trivial_spec_is_the_s01_baseline() {
     );
 }
 
-// ── S01 闭环彩排 ────────────────────────────────────────────────────────
+// ── T-082 批①：收束闸判读**规格自己身上**的能力集 ─────────────────────
 
+/// 三种主体形态一次钉住：会话主体（`reply.*` ⇒ 发言放 / 产物拒）、对等主体
+/// （`produce.artifact` ⇒ 发言拒 / 产物放）、空表（平凡值 ⇒ 两臂皆拒）。
+///
+/// 这条的**反向用例**在末尾：清空能力集后产物臂必须拒——判定若悄悄绕回授权表
+/// （不读规格），那条会绿，本判据即失效。
+#[test]
+fn spec_closure_judgments_read_the_specs_own_capability_set() {
+    use crate::symbio_core::authz::{matrix_for, PRINCIPAL_MAIN, PRINCIPAL_PEER};
+
+    let session = ActorSpec {
+        capabilities: matrix_for(PRINCIPAL_MAIN).grant_names_of(PRINCIPAL_MAIN),
+        ..ActorSpec::trivial(PRINCIPAL_MAIN)
+    };
+    assert!(
+        session.can_land_speech(true),
+        "持 reply.first ⇒ 首条收束放行"
+    );
+    assert!(
+        session.can_land_speech(false),
+        "持 reply.append ⇒ 追加收束放行"
+    );
+    assert!(
+        session.can_land_artifact(),
+        "主智能体行含 produce.artifact ⇒ 产物臂同样放行（两臂都持）"
+    );
+
+    let peer = ActorSpec {
+        capabilities: matrix_for(PRINCIPAL_PEER).grant_names_of(PRINCIPAL_PEER),
+        ..ActorSpec::trivial(PRINCIPAL_PEER)
+    };
+    assert!(
+        !peer.can_land_speech(true) && !peer.can_land_speech(false),
+        "对等主体无发言权（ADR-067：两条收束路各问自己那一项）"
+    );
+    assert!(peer.can_land_artifact(), "对等主体的权威动作 = 产生产物");
+
+    // 反向用例：清空能力集 ⇒ 产物臂必拒。判定读的是**这个**集合，
+    // 不是绕回授权表——绕回去的话这条必绿。
+    let stripped = ActorSpec {
+        capabilities: Vec::new(),
+        ..peer.clone()
+    };
+    assert!(
+        !stripped.can_land_artifact(),
+        "清空能力集后产物臂必须拒（证明判定读的是规格自己）"
+    );
+
+    // 平凡值 `trivial`：权限取实（该主体自己的授权行）——`agent:main` 能收束。
+    // 这正是订正 trivial 空表的理由：空表下平凡值连一轮对话都收束不了
+    // （而 S01 §4 要求「平凡值下系统完整运行」）。
+    let baseline = ActorSpec::trivial("agent:main");
+    assert!(
+        baseline.can_land_speech(true) && baseline.can_land_artifact(),
+        "平凡值权限取实：agent:main 两臂都放"
+    );
+    // 而只持 define.work 的自主主体照旧无发言权——窄行不因「平凡值」豁免。
+    let autonomous = ActorSpec::trivial("agent:autonomous");
+    assert!(
+        !autonomous.can_land_speech(true),
+        "自主主体无发言权（平凡值不豁免窄行：自主行为不得冒充用户对话）"
+    );
+}
+
+/// 规格判定与表谓词**必须一致**：同一主体的两个入口，一份口径。
+///
+/// 挡的是「映射分叉」：`Capability::reply_capability` 若被复制成两份（core 一份、
+/// 插件一份），改一处即静默错位，而错位方向是**放行**（fail-open）。四个主体覆盖
+/// 登记行（会话 / 对等 / 抢占判定者）与派生分支（未登记 `agent:<id>`）。
+#[test]
+fn spec_judgment_agrees_with_matrix_predicate_for_every_principal_shape() {
+    use crate::symbio_core::authz::{matrix_for, PRINCIPAL_MAIN, PRINCIPAL_PEER, PRINCIPAL_REFLEX};
+    for p in [
+        PRINCIPAL_MAIN,
+        PRINCIPAL_PEER,
+        PRINCIPAL_REFLEX,
+        "agent:unregistered",
+    ] {
+        let matrix = matrix_for(p);
+        let spec = ActorSpec {
+            capabilities: matrix.grant_names_of(p),
+            ..ActorSpec::trivial(p)
+        };
+        assert_eq!(
+            spec.can_land_speech(true),
+            matrix.can_reply(p, true),
+            "{p}: 首条收束两入口必须一致"
+        );
+        assert_eq!(
+            spec.can_land_speech(false),
+            matrix.can_reply(p, false),
+            "{p}: 追加收束两入口必须一致"
+        );
+        assert_eq!(
+            spec.can_land_artifact(),
+            matrix.can_produce_artifact(p),
+            "{p}: 产物臂两入口必须一致"
+        );
+    }
+}
+
+// ── S01 闭环彩排 ────────────────────────────────────────────────────────
 /// 一轮完整对话：用户消息入库 → 应答 → final/fallback 入库 → 三查。
 ///
 /// 返回 (store, 收束事件 seq)；`reply = None` 模拟**无应答**（走兜底那一支）。

@@ -813,7 +813,7 @@ impl TurnRunner {
                 )
                 .await;
             }
-            if !closure_granted(&actor.principal, ClosureKind::Speech) {
+            if !closure_granted(&actor, ClosureKind::Speech) {
                 crate::plugin_warn!(
                     "actors",
                     "[v2] 定稿答话被授权拒绝（{} 缺 reply.first），本轮不入格（turn={turn}）",
@@ -950,7 +950,7 @@ impl TurnRunner {
             // 产物闸（`ClosureKind::Artifact`）：不持 `produce.artifact` ⇒ 这一格不落。
             // 结果**照进 prompt**（模型看得见）+ 照记 `all_tool_calls`（请求发生过）——
             // 闸管的是「入格」，不是「发生过」。
-            if closure_granted(&actor.principal, ClosureKind::Artifact) {
+            if closure_granted(&actor, ClosureKind::Artifact) {
                 store.append(
                     Event::pending(
                         format!("a-{turn}-{artifact_no}"),
@@ -1082,7 +1082,7 @@ impl TurnRunner {
                             )
                             .await;
                         }
-                        if !closure_granted(&actor.principal, ClosureKind::Speech) {
+                        if !closure_granted(&actor, ClosureKind::Speech) {
                             // 写侧闸拒：**不落收束格**——该轮留在未收束态，`check_all`
                             // 会把它报出来（C4），与 [`closure_granted`] 同一条纪律、
                             // 同一个谓词。用户的答案照旧可见（`text` 仍回给调用方）。
@@ -1191,7 +1191,7 @@ impl TurnRunner {
                         // `produce.artifact` ⇒ 这条结果不入格（warn 一次，不刷屏）。
                         // 结果**照进 prompt / 照记 `all_tool_calls`**——闸管的是
                         // 「入格」，不是「发生过」。
-                        if !closure_granted(&actor.principal, ClosureKind::Artifact) {
+                        if !closure_granted(&actor, ClosureKind::Artifact) {
                             if oi == 0 {
                                 crate::plugin_warn!(
                                     "actors",
@@ -1320,7 +1320,7 @@ impl TurnRunner {
                     let cost = started.elapsed().as_millis() as u64;
                     let facts = node_facts(&nodes);
                     let partial_text = facts.text.clone().unwrap_or_default();
-                    if !closure_granted(&actor.principal, ClosureKind::Speech) {
+                    if !closure_granted(&actor, ClosureKind::Speech) {
                         // 中止的收束格同过写侧闸（收束格是同一个事实，不论哪条路径
                         // 写出）：拒绝 ⇒ 不入格，该轮留在未收束态（C4 报得出）——
                         // 除非本轮落过产物格（产物收束，ADR-067）。
@@ -1471,7 +1471,7 @@ impl TurnRunner {
             .map(|seq| seq.value())?;
         sink.on_delta(text);
         let cost_ms = started.elapsed().as_millis() as u64;
-        if !closure_granted(&actor.principal, ClosureKind::Speech) {
+        if !closure_granted(actor, ClosureKind::Speech) {
             // 与深度档同一条写侧闸（见 [`closure_granted`]）：拒绝 ⇒ 不落收束格。
             crate::plugin_warn!(
                 "actors",
@@ -1552,7 +1552,7 @@ impl TurnRunner {
     where
         S: Store<Event = Event>,
     {
-        if !closure_granted(&actor.principal, ClosureKind::Speech) {
+        if !closure_granted(actor, ClosureKind::Speech) {
             // 兜底格也是**收束格**，同过写侧闸（见 [`closure_granted`]）：拒绝 ⇒ 不落格。
             // `fell_back` 仍为真——模型确实失败了（I3 的「到点必答」由调用方按失败呈现）。
             crate::plugin_warn!(
@@ -1621,7 +1621,7 @@ impl TurnRunner {
     where
         S: Store<Event = Event>,
     {
-        if !closure_granted(&actor.principal, ClosureKind::Speech) {
+        if !closure_granted(actor, ClosureKind::Speech) {
             // 中止的收束格同过写侧闸（与 3a 分支同一条纪律）：拒绝 ⇒ 不入格，
             // 该轮留在未收束态（C4 报得出）。
             crate::plugin_warn!(
@@ -1723,11 +1723,12 @@ enum ClosureKind {
 ///
 /// 平凡值下（`agent:main`，以及任何经 `matrix_for` 派生的 `agent:<id>`）两臂恒
 /// 放行——闸是 fail-closed 的**结构**，不是生产里会翻面的开关。
-fn closure_granted(principal: &str, kind: ClosureKind) -> bool {
-    let matrix = crate::symbio_core::authz::matrix_for(principal);
+fn closure_granted(actor: &ActorSpec, kind: ClosureKind) -> bool {
     match kind {
-        ClosureKind::Speech => matrix.can_reply(principal, true),
-        ClosureKind::Artifact => matrix.can_produce_artifact(principal),
+        // `true` = 该轮尚无收束格（八个调用点全是首条收束）。「轮次位置 → 能力」的
+        // 映射住 core（`Capability::reply_capability`），规格方法与表谓词共用它。
+        ClosureKind::Speech => actor.can_land_speech(true),
+        ClosureKind::Artifact => actor.can_land_artifact(),
     }
 }
 
