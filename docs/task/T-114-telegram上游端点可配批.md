@@ -2,11 +2,12 @@
 kind: task
 id: T-114-telegram上游端点可配批
 title: telegram 上游端点可配批：`api_url()` 把 `api.telegram.org` 写死 ⇒ `send` / `get_updates` / `start_listener` 三条路由无靶子可打
-status: todo
+status: done
 created: 2026-10-15
 track: e2e
 deps: []
 prio: later
+evidence: `symbio/src/plugins/telegram/schemas.test.rs`（`api_base` 缺省 = 官方端点 + roundtrip 含新字段）+ `e2e/cases/t70-telegram-upstream.mjs`（三条上游路由各一：`send` 靶子收到 `POST /bot<token>/sendMessage` 含 chat_id/text；`get_updates` 回包 `update_id` 推进成 `status` 的 `update_offset`；`start_listener` 轮询起来 + stop 后 2.5s 靶子计数不再增长）；t69 回归绿；配置面三处同步（RE-001 · 出厂 `PLUGIN.yml` · 插件 README）；clippy 零告警
 exit: `TelegramConfig` 有地址位（`api_base`，缺省即官方 `https://api.telegram.org`）；`api_url()` 读它而不是拼字面量；配置面三处同步（[RE-001](../ref/RE-001-CONFIGURATION.md "RE-001-CONFIGURATION") 登记 + `scripts/facts/_sets.mjs` 的 `plugin-configs` 封闭集 + 出厂 `.symbio/telegram/PLUGIN.yml`）；三条依赖上游的路由（`telegram/send` · `telegram/get_updates` · `telegram/start_listener`）各自有一条经 gateway 直发的判据——上游请求打到**本地靶子**且回包形状正确（[RE-005](../ref/RE-005-e2e覆盖矩阵.md "RE-005-e2e覆盖矩阵") 的「通道与自动化面」行 `telegram` 格随之补齐六条）；若裁决「不做」，须写明「telegram 只对官方端点说话」的理由与**撤销条件**，并把 RE-005 那一格从「缺口」改成「明确不做」
 ---
 
@@ -80,3 +81,15 @@ Some(format!("https://api.telegram.org/bot{}", config.bot_token))
   逐条核对 `api_url()` 的引用点，确认「三条本地 / 三条上游」的两半结构；
   本地三条已由 `e2e/cases/t69-channel-routes.mjs` 驱动（T-110 闭批），
   上游三条因地址写死转交本任务。
+- 2026-10-15 闭批：`TelegramConfig` 加 `api_base`（`Default` = `OFFICIAL_API_BASE`
+  常量，**缺省即官方端点 ⇒ 对现有部署零行为变化**）；`api_url()` 改读配置并
+  `trim_end_matches('/')` 剥尾随斜杠；配置面板补 `api_base` 文本字段。
+  配置面同步：RE-001 telegram 键表 + 出厂 `.symbio/telegram/PLUGIN.yml` +
+  插件 README（`_sets.mjs` 的 `plugin-configs` 封闭集不涉及——telegram 行在
+  RE-001 主表写「见下」，其键表是文档内部的详细节，不在跨文档判据的集合内，
+  这是 `_sets.mjs` 自己写明的已知边界）。`e2e/mock-http.mjs` 加两个
+  telegram 形状端点（`/bot<token>/sendMessage` / `getUpdates`，按前缀模式认——
+  路径里带 token，不能按字面量匹配）；`e2e/cases/t70-telegram-upstream.mjs`
+  三条路由各一判据，`start_listener` 把「停」一并钉住（t36 同款纪律）。
+  RE-005「通道与自动化面」行 telegram 六格补齐；顺带把「本地检索组」行的
+  T-113 缺口格改判为已清偿。单测 26/26 绿 · t70 绿 · t69 回归绿 · clippy 零告警。

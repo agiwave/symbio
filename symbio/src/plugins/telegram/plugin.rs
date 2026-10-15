@@ -33,6 +33,11 @@ fn config_definition() -> DetailDefinition {
                 "123456:ABC-DEF...",
             ),
             DetailField::text("chat_id", "默认 Chat ID", "未指定时按会话推送"),
+            DetailField::text(
+                "api_base",
+                "API 基址",
+                "Bot API 上游地址；留空即官方端点（自建 / 代理端点填这里）",
+            ),
             DetailField::toggle(
                 "streaming_enabled",
                 "流式回复",
@@ -119,7 +124,13 @@ impl TelegramPlugin {
         if config.bot_token.is_empty() {
             None
         } else {
-            Some(format!("https://api.telegram.org/bot{}", config.bot_token))
+            // 基址可配（缺省官方端点）：网络受限环境走自建 / 代理端点，e2e 也能打
+            // 本地靶子。剥尾随 `/`——调用方拼 `{api_url}/sendMessage`，双斜杠会 404。
+            Some(format!(
+                "{}/bot{}",
+                config.api_base.trim_end_matches('/'),
+                config.bot_token
+            ))
         }
     }
 

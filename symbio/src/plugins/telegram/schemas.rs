@@ -14,6 +14,9 @@ use serde::{Deserialize, Serialize};
 pub struct TelegramConfig {
     pub bot_token: String,
     pub chat_id: Option<String>,
+    /// Bot API 上游基址；缺省即官方端点（对现有部署零行为变化）。
+    /// 指向自建 / 代理端点是网络受限环境的常见需求，也是 e2e 能打本地靶子的前提（T-114）。
+    pub api_base: String,
     #[serde(default = "default_true")]
     pub streaming_enabled: bool,
     #[serde(default = "default_true")]
@@ -25,6 +28,9 @@ pub struct TelegramConfig {
 fn default_true() -> bool {
     true
 }
+
+/// 官方 Bot API 端点（`api_url()` 的缺省基址）。
+pub const OFFICIAL_API_BASE: &str = "https://api.telegram.org";
 
 /// `allowed_users` 的宽松反序列化：同时接受数字数组与数字字符串数组。
 ///
@@ -57,6 +63,7 @@ impl Default for TelegramConfig {
         Self {
             bot_token: "".to_string(),
             chat_id: None,
+            api_base: OFFICIAL_API_BASE.to_string(),
             streaming_enabled: true,
             poll_enabled: true,
             allowed_users: Vec::new(),

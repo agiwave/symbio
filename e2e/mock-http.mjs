@@ -26,6 +26,8 @@
 // | `GET /slow` | 延迟 `--slow-ms`（默认 3000）后 200 —— 配合 `web_timeout` 逼出超时 |
 // | `GET /missing` | 404 `text/plain`，正文含标记 |
 // | `ANY /echo` | 200，回 `{method, path, contentType, body, headers}`（验请求真的带上去了） |
+// | `ANY /bot<token>/sendMessage` | 200，回 Telegram Bot API 形状 `{ok:true,result:{message_id:4210}}` |
+// | `ANY /bot<token>/getUpdates` | 200，回 `{ok:true,result:[{update_id:100100}]}` |
 // | `GET /_requests` | 控制面：本进程收到过的请求留痕 |
 // | `GET /_health` | 控制面：就绪探针 |
 //
@@ -120,6 +122,22 @@ const server = http.createServer(async (req, res) => {
         marker: MARKER,
       }),
     );
+  }
+
+  // ---------- Telegram Bot API 形状（T-114 的本地靶子） ----------
+  //
+  // 真实端点是 `POST {api_base}/bot<token>/sendMessage|getUpdates`，路径里带
+  // token ⇒ 不能按字面量匹配，按前缀模式认。回包形状对齐 Bot API：
+  // `sendMessage` → `{ok:true,result:{message_id:…}}`；`getUpdates` →
+  // `{ok:true,result:[{update_id:…}]}`（update_id 固定，好让 offset 推进可断言；
+  // 不带 message ⇒ 监听器侧「无消息」即忽略，不会触发任何会话轮）。
+  const tg = url.pathname.match(/^\/bot([^/]+)\/(sendMessage|getUpdates)$/);
+  if (tg) {
+    res.writeHead(200, { 'content-type': 'application/json', ...noKeepAlive });
+    if (tg[2] === 'sendMessage') {
+      return res.end(JSON.stringify({ ok: true, result: { message_id: 4210 } }));
+    }
+    return res.end(JSON.stringify({ ok: true, result: [{ update_id: 100100 }] }));
   }
 
   res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', ...noKeepAlive });

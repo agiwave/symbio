@@ -53,6 +53,7 @@ fn config_roundtrips_through_json() {
     let c = TelegramConfig {
         bot_token: "tok".into(),
         chat_id: Some("-100".into()),
+        api_base: "http://127.0.0.1:18090".into(),
         streaming_enabled: false,
         poll_enabled: true,
         allowed_users: vec![7],
@@ -60,8 +61,16 @@ fn config_roundtrips_through_json() {
     let back: TelegramConfig = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
     assert_eq!(back.bot_token, "tok");
     assert_eq!(back.chat_id.as_deref(), Some("-100"));
+    assert_eq!(back.api_base, "http://127.0.0.1:18090");
     assert!(!back.streaming_enabled);
     assert_eq!(back.allowed_users, vec![7]);
+}
+
+/// `api_base` 缺省即官方端点——**对现有部署零行为变化**是加这一位的前提（T-114）。
+#[test]
+fn api_base_defaults_to_official_endpoint() {
+    let c: TelegramConfig = serde_json::from_str(r#"{"bot_token":"t"}"#).unwrap();
+    assert_eq!(c.api_base, OFFICIAL_API_BASE);
 }
 
 /// 容器会为「必需插件」补建一份只含**身份键**的 `PLUGIN.yml`

@@ -179,6 +179,7 @@ default_provider_id: openai_main
 plugin_provider: telegram
 bot_token: "123456:ABC-DEF..."
 chat_id: ""
+api_base: "https://api.telegram.org"
 streaming_enabled: true
 poll_enabled: true
 allowed_users: [123456789]
@@ -188,6 +189,7 @@ allowed_users: [123456789]
 |----|------|--------|------|
 | `bot_token` | String | 空 | BotFather 下发的令牌 |
 | `chat_id` | String | 空 | 默认会话（留空 = 由用户消息决定） |
+| `api_base` | String | `https://api.telegram.org` | Bot API 上游基址（自建 / 代理端点填这里；尾随 `/` 会被剥掉） |
 | `streaming_enabled` | Bool | `true` | 是否流式回包 |
 | `poll_enabled` | Bool | `true` | 是否轮询接收更新 |
 | `allowed_users` | List[Int] | `[]` | 允许使用的 Telegram 用户 ID（空 = 不限制） |
