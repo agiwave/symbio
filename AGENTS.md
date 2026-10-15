@@ -33,9 +33,10 @@
 
 顶层机制（总纲：[`docs/004-plan/011-登记与汇总机制.md`](docs/004-plan/011-登记与汇总机制.md)）：
 **仓内每一篇活跃 `.md` 都是一条登记**——开头是五行 front-matter（`kind` / `id` / `title` /
-`status` / `created`），**文件本身就是条目**，没有第二处登记表。十类 kind（另有 `index` 总账），
+`status` / `created`），**文件本身就是条目**，没有第二处登记表。十类 kind，
 目录按 kind 归一（`docs/<NNN-kind>/` + 模块文档就地），但**目录不参与判定**——`kind` 只来自 front-matter。
-各 kind 目录 `README.md` 里的汇总标记区由脚本生成，**标记区之外手写、标记区之内不手改**。
+各 kind 目录 `README.md` 里的汇总标记区与 `docs/README.md` 的跨 kind 总账块由脚本生成，
+**标记区之外手写、标记区之内不手改**。
 
 - 查待办 / 已完成 / 某一条：`node scripts/registry-board.mjs`（`--kind=` / `--status=` / `--id=`）
 - 登记新文档、改状态 = 写/改文档自己的 front-matter（字段规范：`docs/008-spec/001.md`）；

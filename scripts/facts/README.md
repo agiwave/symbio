@@ -56,7 +56,7 @@ export default {
 
 ## 不放什么
 
-- **登记汇总页**（`KIND-000-登记总账.md` / 各 kind 的 `INDEX.md`）——它们的输入是
+- **登记汇总页**（`docs/README.md` 的总账块 / 各 kind `README.md` 的汇总块）——它们的输入是
   条目 front-matter，不是代码，生成方是 `registry-audit.mjs --write`。
 - **文档引用地址**（`[[编号]]` 展开）——那是改写而不是生成，生成方是
   `gen-doc-refs.mjs`。两者都留在 `60-facts` 阶段里各占一格，

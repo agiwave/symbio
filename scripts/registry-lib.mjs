@@ -102,25 +102,7 @@ const DOC_STATUS_RULES = {
 /**
  * 文档类 kind 的通用形状：**在位存放、正文即条目**——所以没有必有小节
  * （正文结构由文档自己定，按 kind 强切只会逼出空壳小节），编号 = 文件名。
- * `blurb` 是这个 kind 回答的问题（写进汇总页，兼作新文档选 kind 的指路）。
  * `titleEqualsH1`：文档类的 `title` 必须逐字等于正文首个 H1（RG-021，两面对账）；
- * 条目类（task / adr / spec）的 title 带编号前缀惯例，不判。
- *
- * `requiresDepsDone: ['active']` 与 `spec` 同款：**依赖是义务，不是注释**——
- * `deps` 对全部 kind 同一套强制性机制（RG-006 存在性 / 不自指 / 不重复 / 不成环
- * + RG-023 值域：只收编号条目 + RG-008 状态门槛），文档类不搞特殊化：
- * `active` 断言「这篇文档现行」，其前置就必须已闭环（闭环态按目标 kind 取：
- * task = `done`，其余 = `active`）。`draft` / `retired` 不在门槛里——草案可以引草案，
- * 废止不因前置废止而红。
- *
- * `retiredStates` 是**退场档**（RG-025 读它）：父条目进入退场档 ⇒ 不得有子条目停在生效档
- * （「大任务已经 done/wont，还有小任务 doing」是状态谎报）。与 `requiresDepsDone`
- * （生效档）成对：子生效 ⇒ 父生效；父退场 ⇒ 子退场——父子状态档位单调。
- */
-/**
- * kind 形状的**代码侧默认**（= 文档类通用形状）：**在位存放、正文即条目**——
- * 所以没有必有小节（正文结构由文档自己定，按 kind 强切只会逼出空壳小节）。
- * `titleEqualsH1: true`：`title` 必须逐字等于正文首个 H1（RG-021，两面对账）；
  * 条目类在 README meta 里写 `titleEqualsH1: false` 关掉。
  *
  * `requiresDepsDone: ['active']`：**依赖是义务，不是注释**——`deps` 对全部 kind
@@ -136,6 +118,20 @@ const DOC_STATUS_RULES = {
  * **这份默认就是全部的「机制内建类型知识」**：一个 kind 声明形状 = 覆盖其中若干键
  * （见 `foldShape`），什么都不写就是文档类形状。
  */
+/**
+ * 文档类 kind 的**缺省汇总版式**：现行 / 草案 / 废止三组、列 = 编号链接 + 标题
+ * （废止加理由）。文档类 kind 不写 `summary.*` 就落到这份默认——「版式是策略，
+ * 策略住 meta；meta 不声明时机制给文档类兜底」，条目类必须自己声明（foldShape 校验）。
+ */
+const DOC_SUMMARY = () => ({
+  order: ['active', 'draft', 'retired'],
+  groups: {
+    active: { title: '现行文档（active）', columns: [{ name: 'idLink' }, { name: 'title' }] },
+    draft: { title: '草案（draft）', columns: [{ name: 'idLink' }, { name: 'title' }] },
+    retired: { title: '废止（retired）', columns: [{ name: 'idLink' }, { name: 'title' }, { name: 'reason' }] },
+  },
+})
+
 const docShape = () => ({
   titleEqualsH1: true,
   required: [],
@@ -147,20 +143,24 @@ const docShape = () => ({
   closedStatus: 'active',
   requiresDepsDone: ['active'],
   retiredStates: ['retired'],
+  summary: DOC_SUMMARY(),
 })
 
 /**
  * kind README meta 的**形状键**（自描述形状；只有 kind README 声明合法）。
- * 固定键 + 三个命名空间前缀（`status.*` / `domain.*` / `impl.*`）——
- * 前缀键折叠回嵌套结构（`status.done.require: [evidence]` → `statusRules.done.require`），
+ * 固定键 + 命名空间前缀（`status.*` / `domain.*` / `impl.*` / `summary.*` / `board.*`）——
+ * 前缀键折叠回嵌套结构（`status.done.require: [evidence]` → `statusRules.done.require`、
+ * `summary.active.columns: [id, title:决策]` → `summary.groups.active.columns`），
  * 受限 YAML 的「键: 值」行就装得下，不引入嵌套语法。
+ * `summary.*` 是**汇总版式**（分组标题 / 列取舍 / 排序 / 特有小节），`board.*` 是
+ * 看板行附加字段——两者是投影策略，归属各 kind 自描述，机制只认列名闭集。
  */
 export const SHAPE_KEYS = [
   'titleEqualsH1', 'required', 'optional', 'sections', 'refFields', 'refSections',
   'closedStatus', 'requiresDepsDone', 'retiredStates', 'clearsTarget', 'serial',
 ]
 const SHAPE_LIST_KEYS = ['required', 'optional', 'sections', 'refFields', 'refSections', 'requiresDepsDone', 'retiredStates']
-const SHAPE_NS = ['status.', 'domain.', 'impl.']
+const SHAPE_NS = ['status.', 'domain.', 'impl.', 'summary.', 'board.']
 
 /**
  * 把 kind README meta 里的形状声明折叠成 kind 配置：**默认形状 ← meta 覆盖**。
@@ -172,6 +172,24 @@ function foldShape(meta, rel, errors) {
   const statusRules = {}
   const domains = {}
   const implWords = {}
+  const groups = {}
+  let summaryOrder
+  let groupBy
+  let groupByHeading
+  let groupByColumns
+  let boardCols
+  // 列声明（`summary.<状态>.columns: [id, title:决策]`）：`名:表头` 可就地改名，
+  // 裸名用 CELLS 缺省表头；列名必须在单元格闭集内（写错装载期就红）。
+  const colSpec = (v, k) =>
+    wantList(v, k).map((raw) => {
+      const s = String(raw)
+      const i = s.indexOf(':')
+      const name = i === -1 ? s : s.slice(0, i)
+      if (!CELLS[name]) {
+        errors.push(`${rel}：RG-013 \`${k}\` 的列 \`${s}\` 不在单元格闭集（${Object.keys(CELLS).join(' / ')}）`)
+      }
+      return { name, label: i === -1 ? undefined : s.slice(i + 1) }
+    })
   const wantList = (v, k) => {
     if (isEmpty(v)) return []
     if (!Array.isArray(v)) {
@@ -209,13 +227,81 @@ function foldShape(meta, rel, errors) {
       else implWords[w] = typeof v === 'string' ? v : JSON.stringify(v)
       continue
     }
+    // ---- 汇总版式（summary.*）与看板附加字段（board.*）：投影策略，kind 自描述 ----
+    if (k === 'summary.order') {
+      summaryOrder = v === 'topo' ? 'topo' : wantList(v, k).map(String)
+      continue
+    }
+    if (k === 'summary.groupBy') {
+      if (typeof v !== 'string' || !v.trim()) errors.push(`${rel}：RG-013 形状键 \`${k}\` 必须是非空字段名`)
+      else groupBy = v
+      continue
+    }
+    if (k === 'summary.groupByHeading') {
+      if (typeof v !== 'string' || !v.trim()) errors.push(`${rel}：RG-013 形状键 \`${k}\` 必须是非空字符串`)
+      else groupByHeading = v
+      continue
+    }
+    if (k === 'summary.groupBy.columns') {
+      groupByColumns = colSpec(v, k)
+      continue
+    }
+    const gm = k.match(/^summary\.([A-Za-z][A-Za-z0-9_-]*)\.(title|columns|glyph|boardTitle)$/)
+    if (gm) {
+      const g = (groups[gm[1]] ??= {})
+      if (gm[2] === 'columns') g.columns = colSpec(v, k)
+      else if (gm[2] === 'glyph') g.glyph = String(v)
+      else g[gm[2]] = String(v)
+      continue
+    }
+    const bm = k.match(/^board\.columns$/)
+    if (bm) {
+      const cols = wantList(v, k).map(String)
+      for (const c of cols) {
+        if (!BOARD_CELLS[c]) errors.push(`${rel}：RG-013 \`board.columns\` 的看板格 \`${c}\` 不在闭集（${Object.keys(BOARD_CELLS).join(' / ')}）`)
+      }
+      boardCols = cols
+      continue
+    }
   }
   const cfg = { ...docShape(), ...shape }
   if (Object.keys(statusRules).length) cfg.statusRules = statusRules
   if (Object.keys(domains).length) cfg.domains = domains
   if (Object.keys(implWords).length) cfg.implWords = implWords
-  // 闭集自洽：档位声明引用的每个状态词都必须在状态机里（否则 RG-008/025 静默失明）
   const words = Object.keys(cfg.statusRules)
+  // 汇总版式装配：声明了 summary.* 就用声明（order 缺省 = 状态机键序）；**自定义
+  // 状态机却不声明版式**直接红——条目类的分组/列是策略，机制不替它猜。
+  const groupWords = Object.keys(groups)
+  if (groupWords.length) {
+    const order = summaryOrder === undefined ? words : summaryOrder
+    if (order !== 'topo') {
+      for (const w of order) {
+        if (!words.includes(w)) errors.push(`${rel}：RG-013 \`summary.order\` 的状态词 \`${w}\` 不在状态机（${words.join(' / ')}）`)
+      }
+      for (const w of groupWords) {
+        if (!order.includes(w)) errors.push(`${rel}：RG-013 状态分组 \`${w}\` 未列入 \`summary.order\``)
+      }
+    }
+    for (const w of groupWords) {
+      if (!words.includes(w)) {
+        errors.push(`${rel}：RG-013 \`summary.${w}.*\` 的状态词不在状态机（${words.join(' / ')}）`)
+        continue
+      }
+      if (!groups[w].title || !groups[w].title.trim()) errors.push(`${rel}：RG-013 \`summary.${w}.title\` 必须是非空字符串`)
+      if (!Array.isArray(groups[w].columns) || groups[w].columns.length === 0) errors.push(`${rel}：RG-013 \`summary.${w}.columns\` 必须是非空列清单`)
+    }
+    cfg.summary = { groups, order }
+  } else if (Object.keys(statusRules).length) {
+    errors.push(`${rel}：RG-013 自定义状态机（status.*）必须配套声明汇总版式（summary.<状态>.title / .columns）——版式由各 kind 自描述，机制不内建`)
+  }
+  if (groupBy !== undefined) {
+    cfg.summary ??= { groups: {}, order: words }
+    cfg.summary.groupBy = groupBy
+    if (groupByHeading !== undefined) cfg.summary.groupByHeading = groupByHeading
+    if (groupByColumns !== undefined) cfg.summary.groupByColumns = groupByColumns
+  }
+  if (boardCols !== undefined) cfg.board = boardCols
+  // 闭集自洽：档位声明引用的每个状态词都必须在状态机里（否则 RG-008/025 静默失明）
   const tiers = [['closedStatus', [cfg.closedStatus]], ['requiresDepsDone', cfg.requiresDepsDone], ['retiredStates', cfg.retiredStates]]
   for (const [label, list] of tiers) {
     for (const w of list ?? []) {
@@ -349,6 +435,8 @@ export const SCAN_SKIP_DIRS = new Set([
   '.workbuddy',
   // 临时区（`.gitignore` 的 `tmp/`）：迁移备份 / 报告草稿的落点，不进登记
   'tmp',
+  // IDE 会话工作区（对话产物 / 规划草稿）：与 `.workbuddy` 同性质，不进本仓登记
+  '.trae',
   '.symbio',
   '.agents',
   'examples',
@@ -1219,6 +1307,20 @@ export function auditEntries(entries, root, projections = [], kinds = {}) {
     }
   }
 
+  // 总账宿主页（文档中心门户）同样要有标记对——跨 kind 总账块住在这里，缺标记
+  // 则 `--write` 无处落笔（与 kind README 同一类失效，同一堵法）。
+  const rootPage = entries.find((e) => e.rel === ROOT_INDEX_FILE)
+  if (rootPage) {
+    const count = (m) => (rootPage.body.match(new RegExp(m.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) ?? []).length
+    const beginAt = rootPage.body.indexOf(SUMMARY_BEGIN)
+    const endAt = rootPage.body.indexOf(SUMMARY_END)
+    if (count(SUMMARY_BEGIN) !== 1 || count(SUMMARY_END) !== 1 || beginAt === -1 || endAt === -1) {
+      out.push(`${rootPage.rel}：RG-030 文档中心门户必须恰有一对 \`${SUMMARY_BEGIN}\` / \`${SUMMARY_END}\` 标记（跨 kind 总账块的边界）`)
+    } else if (beginAt > endAt) {
+      out.push(`${rootPage.rel}：RG-030 标记乱序：\`${SUMMARY_BEGIN}\` 必须在 \`${SUMMARY_END}\` 之前`)
+    }
+  }
+
   return out
 }
 
@@ -1386,46 +1488,6 @@ function table(header, rows) {
   return [`| ${header.join(' | ')} |`, `|${header.map(() => '---').join('|')}|`, ...rows.map((r) => `| ${r.join(' | ')} |`)].join('\n')
 }
 
-function renderTaskIndex(allEntries, { dir, kind, kinds }) {
-  const cfg = kinds?.[kind] ?? {}
-  const mine = topoOrder(allEntries.filter((e) => e.kind === kind))
-  const count = (s) => mine.filter((e) => e.meta.status === s).length
-  const lines = [
-    HEADER_NOTE,
-    `**计数**：☐ todo ${count('todo')} · 🟡 doing ${count('doing')} · ☑ done ${count('done')} · ❌ wont ${count('wont')}（共 ${mine.length}）`,
-    '',
-    '## 待处理（按依赖顺序）',
-    table(
-      ['编号', '任务', '优先', '轨', '依赖'],
-      mine.filter((e) => e.meta.status === 'todo').map((e) => [`\`${e.meta.id}\``, cell(e.meta.title), cell(e.meta.prio), cell(e.meta.track), depsCell(e)]),
-    ),
-    '',
-    '## 进行中',
-    table(
-      ['编号', '任务', '优先', '轨', '依赖'],
-      mine.filter((e) => e.meta.status === 'doing').map((e) => [`\`${e.meta.id}\``, cell(e.meta.title), cell(e.meta.prio), cell(e.meta.track), depsCell(e)]),
-    ),
-    '',
-    '## 已完成',
-    // 证据列**不上面**：汇总页是导航——「这条任务怎么落地的」要去读任务文档本身
-    // （提交 / 守卫锚在它的 `evidence` 字段与 `## 处理过程` 里）。在列表里展开证据，
-    // 只会把每行撑成长段、让人对着第二手摘要判断，而 SP-001 的 `done ⇒ evidence`
-    // 判据管的是**条目**有没有写，不是投影展不展示。
-    table(
-      ['编号', '任务', '轨'],
-      mine.filter((e) => e.meta.status === 'done').map((e) => [`\`${e.meta.id}\``, cell(e.meta.title), cell(e.meta.track)]),
-    ),
-    '',
-    '## 不做',
-    table(
-      ['编号', '任务', '轨', '理由'],
-      mine.filter((e) => e.meta.status === 'wont').map((e) => [`\`${e.meta.id}\``, cell(e.meta.title), cell(e.meta.track), cell(e.meta.reason)]),
-    ),
-    '',
-  ]
-  return withTree('task', allEntries, lines, dir, cfg.statusRules).join('\n')
-}
-
 /** spec 的判据列：`## 判据` 里第一个 `scripts/*.mjs` 指认；没有则是人工判据。 */
 function guardCell(e) {
   const ref = refsIn(sectionOf(e.body, '判据')).find((r) => r.startsWith('scripts/'))
@@ -1438,36 +1500,6 @@ const supCell = (e) => (Array.isArray(e.meta.supersedes) && e.meta.supersedes.le
 /** clears 列：豁免类规范的清除任务指认（存在性由 RG-016 保证）。 */
 const clearsCell = (e) => (Array.isArray(e.meta.clears) && e.meta.clears.length ? e.meta.clears.join('、') : '—')
 
-function renderSpecIndex(allEntries, { dir, kind, kinds }) {
-  const cfg = kinds?.[kind] ?? {}
-  const mine = allEntries.filter((e) => e.kind === kind).slice().sort((a, b) => (a.meta.id < b.meta.id ? -1 : 1))
-  const count = (s) => mine.filter((e) => e.meta.status === s).length
-  const lines = [
-    HEADER_NOTE,
-    `**计数**：active ${count('active')} · draft ${count('draft')} · retired ${count('retired')}（共 ${mine.length}）`,
-    '',
-    '## 现行规范（active）',
-    table(
-      ['编号', '规范', '适用范围', '判据', '清除', '取代'],
-      mine.filter((e) => e.meta.status === 'active').map((e) => [`\`${e.meta.id}\``, cell(e.meta.title), cell(e.meta.scope), guardCell(e), clearsCell(e), supCell(e)]),
-    ),
-    '',
-    '## 草案（draft）',
-    table(
-      ['编号', '规范', '适用范围', '取代'],
-      mine.filter((e) => e.meta.status === 'draft').map((e) => [`\`${e.meta.id}\``, cell(e.meta.title), cell(e.meta.scope), supCell(e)]),
-    ),
-    '',
-    '## 废止（retired）',
-    table(
-      ['编号', '规范', '理由', '取代'],
-      mine.filter((e) => e.meta.status === 'retired').map((e) => [`\`${e.meta.id}\``, cell(e.meta.title), cell(e.meta.reason), supCell(e)]),
-    ),
-    '',
-  ]
-  return withTree('spec', allEntries, lines, dir, cfg.statusRules).join('\n')
-}
-
 /** 落地进展列：`impl` 的中文标签（词表由 kind README meta 自描述：`impl.<词>: 标签`）。 */
 function implCell(e, implWords) {
   const v = e.meta.impl
@@ -1476,112 +1508,112 @@ function implCell(e, implWords) {
 }
 
 /**
- * `adr` 汇总页。
- *
- * 与前两个 kind 不同的一点：**状态分两组**——`status` 是规范合法性（决定分组），
- * `impl` 是落地进展（决定组内列）。这正是「一条现行决策只落地了一半」能在机读面
- * 表达出来的原因；把它压回单列就会退化成自由文本。
- *
- * 每条另带 `domain`（域）——五册合流后，域从「翻到哪一册」退化为可筛字段。
+ * 汇总**单元格闭集**：列的**读取方式**住这里（读字段，不读 kind），列的**取舍与
+ * 顺序**住各 kind README meta（`summary.<状态>.columns`）——「哪个 kind 用哪几列」
+ * 是投影策略，归属 kind 自描述；机制只认列名闭集，写错列名在装载期就红（RG-013）。
+ * `label` 是表头缺省名（meta 里可用 `title:决策` 形态就地改名）。
  */
-function renderAdrIndex(allEntries, { dir, kind, kinds }) {
-  const cfg = kinds?.[kind] ?? {}
-  const implWords = cfg.implWords ?? {}
-  const mine = allEntries
-    .filter((e) => e.kind === kind)
-    .slice()
-    .sort((a, b) => (a.meta.id < b.meta.id ? -1 : 1))
-  const count = (s) => mine.filter((e) => e.meta.status === s).length
-  const domainOf = (e) => cell(e.meta.domain)
-  const lines = [
-    HEADER_NOTE,
-    `**计数**：active ${count('active')} · superseded ${count('superseded')} · withdrawn ${count('withdrawn')}（共 ${mine.length}）`,
-    '',
-    '## 现行决策（active）',
-    table(
-      ['编号', '决策', '域', '落地', '取代'],
-      mine
-        .filter((e) => e.meta.status === 'active')
-        .map((e) => [`\`${e.meta.id}\``, cell(e.meta.title), domainOf(e), implCell(e, implWords), supCell(e)]),
-    ),
-    '',
-    '## 已被取代（superseded）',
-    table(
-      ['编号', '决策', '域', '理由', '取代'],
-      mine
-        .filter((e) => e.meta.status === 'superseded')
-        .map((e) => [`\`${e.meta.id}\``, cell(e.meta.title), domainOf(e), cell(e.meta.reason), supCell(e)]),
-    ),
-    '',
-    '## 已回退 / 未落地（withdrawn）',
-    table(
-      ['编号', '决策', '理由'],
-      mine.filter((e) => e.meta.status === 'withdrawn').map((e) => [`\`${e.meta.id}\``, cell(e.meta.title), cell(e.meta.reason)]),
-    ),
-    '',
-    '## 按域分组',
-    '',
-    ...Object.keys(cfg.domains ?? {}).flatMap((dom) => {
-      const rows = mine.filter((e) => e.meta.domain === dom)
-      if (rows.length === 0) return []
-      return [
-        `### ${dom}（${rows.length}）`,
-        '',
-        `> ${cfg.domains[dom]}`,
-        '',
-        table(
-          ['编号', '决策', '状态', '落地'],
-          rows.map((e) => [`\`${e.meta.id}\``, cell(e.meta.title), cell(e.meta.status), implCell(e, implWords)]),
-        ),
-        '',
-      ]
-    }),
-  ]
-  return withTree('adr', allEntries, lines, dir, cfg.statusRules).join('\n')
+const CELLS = {
+  id: { label: '编号', readme: (e) => `\`${e.meta.id}\`` },
+  idLink: { label: '编号', readme: (e, ctx) => `[\`${e.meta.id}\`](${relFrom(ctx.dir, e.rel)})` },
+  title: { label: '标题', readme: (e) => cell(e.meta.title) },
+  prio: { label: '优先', readme: (e) => cell(e.meta.prio) },
+  track: { label: '轨', readme: (e) => cell(e.meta.track) },
+  deps: { label: '依赖', readme: depsCell },
+  scope: { label: '适用范围', readme: (e) => cell(e.meta.scope) },
+  guard: { label: '判据', readme: guardCell },
+  clears: { label: '清除', readme: clearsCell },
+  supersedes: { label: '取代', readme: supCell },
+  reason: { label: '理由', readme: (e) => cell(e.meta.reason) },
+  domain: { label: '域', readme: (e) => cell(e.meta.domain) },
+  impl: { label: '落地', readme: (e, ctx) => implCell(e, ctx.cfg.implWords) },
+  status: { label: '状态', readme: (e) => cell(e.meta.status) },
+  evidence: { label: '证据', readme: (e) => cell(e.meta.evidence) },
 }
 
 /**
- * 文档类汇总页（标记区块内容）。
- *
- * 文档**在位存放**——本块的每行都是一个真实文件，「编号」列同时是链接（从本页到
- * 文档的相对路径），读者从索引一步到正文。
- * 分组按 `status`（文档只有一条状态轴：这篇文档还算不算数）。
+ * 看板**附加字段闭集**（各 kind README meta 的 `board.columns` 声明行内追加哪些格，
+ * 缺省 = `impl`（该 kind 声明了落地词表才加）+ `reason`）。返回空串 = 该行不显示；
+ * 证据 / 理由是状态机 require 判据的义务字段（RG-007），这里只管展示不重复判定。
+ * `rank` 是 track/prio 的一体两面（任务坐标），拆开两个格反而不可读。
  */
-function renderDocIndex(allEntries, { kind, dir, kinds }) {
-  const cfg = kinds[kind] ?? {}
-  const mine = allEntries.filter((e) => e.kind === kind).slice().sort((a, b) => (a.meta.id < b.meta.id ? -1 : 1))
-  const count = (s) => mine.filter((e) => e.meta.status === s).length
-  // 从 kind 汇总页（README.md）到文档的相对路径（posix，确定性；能一步点到正文）
-  const href = (e) => relFrom(cfg.dir ?? `docs/${kind}`, e.rel)
-  const idCell = (e) => `[\`${e.meta.id}\`](${href(e)})`
-  const lines = [
-    HEADER_NOTE,
-    `\`${kind}\`（${cfg.label ?? kind}）的条目**在位存放**：文件本身就是登记，\`title\` 逐字等于正文首个 H1（RG-021 两面对账）。`,
-    '',
-    `**计数**：active ${count('active')} · draft ${count('draft')} · retired ${count('retired')}（共 ${mine.length}）`,
-    '',
-    '## 现行文档（active）',
-    table(['编号', '标题'], mine.filter((e) => e.meta.status === 'active').map((e) => [idCell(e), cell(e.meta.title)])),
-    '',
-    '## 草案（draft）',
-    table(['编号', '标题'], mine.filter((e) => e.meta.status === 'draft').map((e) => [idCell(e), cell(e.meta.title)])),
-    '',
-    '## 废止（retired）',
-    table(['编号', '标题', '理由'], mine.filter((e) => e.meta.status === 'retired').map((e) => [idCell(e), cell(e.meta.title), cell(e.meta.reason)])),
-    '',
-  ]
-  return withTree(kind, allEntries, lines, kinds[kind]?.dir ?? `docs/${kind}`).join('\n')
+export const BOARD_CELLS = {
+  rank: (e) => (e.meta.track || e.meta.prio ? `[${e.meta.track ?? ''}${e.meta.prio ? `·${e.meta.prio}` : ''}]` : ''),
+  deps: (e) => (Array.isArray(e.meta.deps) && e.meta.deps.length ? `  依赖 ${e.meta.deps.join('、')}` : ''),
+  evidence: (e) => (e.meta.evidence ? `  证据 ${e.meta.evidence}` : ''),
+  reason: (e) => (e.meta.reason ? `  理由 ${e.meta.reason}` : ''),
+  scope: (e) => (e.meta.scope ? `  ${e.meta.scope}` : ''),
+  impl: (e) => (e.meta.impl ? ` 落地 ${e.meta.impl}` : ''),
 }
 
-/** 各 kind 汇总区块的版式特化（键 = kind 名）。**版式是机制不是身份**——
- * 特化只决定「表怎么分栏」，一切数据（字段 / 状态机 / 词表）都从 kinds 配置读；
- * 没有特化的 kind 一律用通用文档版式（renderDocIndex）。 */
-const RENDERERS = {
-  task: renderTaskIndex,
-  spec: renderSpecIndex,
-  adr: renderAdrIndex,
-  // `index` 的汇总区块 = **跨 kind 总账**（各 kind 条目数 / 状态分布 / 分解边数）。
-  index: renderRootIndex,
+/**
+ * 通用 kind 汇总渲染：**版式是策略，策略住 meta**。分组（按状态）、每组列、分组
+ * 顺序、排序方式、按词表分组的小节——全部读 kind README meta 的 `summary.*` 形状
+ * 键；机制里没有「哪个 kind 长什么样」的知识。文档类的版式缺省由 `docShape().summary`
+ * 兜底（现行 / 草案 / 废止，列 = 编号链接 + 标题）。
+ */
+function renderKindSummary(allEntries, { dir, kind, kinds }) {
+  const cfg = kinds[kind] ?? {}
+  const sum = cfg.summary ?? docShape().summary
+  const isTopo = sum.order === 'topo'
+  const mine = isTopo
+    ? topoOrder(allEntries.filter((e) => e.kind === kind))
+    : allEntries.filter((e) => e.kind === kind).slice().sort(byIdCmp)
+  const groupOrder = isTopo ? Object.keys(cfg.statusRules) : sum.order
+  const ctx = { dir, cfg, kinds }
+  const count = (s) => mine.filter((e) => e.meta.status === s).length
+  const lines = [HEADER_NOTE]
+  if (cfg.titleEqualsH1) {
+    lines.push(
+      `\`${kind}\`（${cfg.label ?? kind}）的条目**在位存放**：文件本身就是登记，\`title\` 逐字等于正文首个 H1（RG-021 两面对账）。`,
+      '',
+    )
+  }
+  lines.push(
+    `**计数**：${groupOrder
+      .map((s) => {
+        const g = sum.groups[s]
+        return `${g?.glyph ? `${g.glyph} ` : ''}${s} ${count(s)}`
+      })
+      .join(' · ')}（共 ${mine.length}）`,
+    '',
+  )
+  for (const s of groupOrder) {
+    const g = sum.groups[s]
+    if (!g) continue
+    lines.push(
+      `## ${g.title}`,
+      '',
+      table(
+        g.columns.map((c) => c.label ?? CELLS[c.name].label),
+        mine.filter((e) => e.meta.status === s).map((e) => g.columns.map((c) => CELLS[c.name].readme(e, ctx))),
+      ),
+      '',
+    )
+  }
+  if (sum.groupBy) {
+    // 按词表分组的小节（如 ADR 的「按域分组」）：分组字段与小节标题由 meta 声明，
+    // 组描述读同名字段的词表（`domain.*`）；词表外的值不进本小节（与原版同口径）。
+    lines.push(`## ${sum.groupByHeading ?? `按 ${sum.groupBy} 分组`}`, '')
+    const cols = sum.groupByColumns ?? [{ name: 'id' }, { name: 'title' }, { name: 'status' }, { name: 'impl' }]
+    const vocab = sum.groupBy === 'domain' ? (cfg.domains ?? {}) : {}
+    for (const [val, desc] of Object.entries(vocab)) {
+      const rows = mine.filter((e) => e.meta[sum.groupBy] === val)
+      if (rows.length === 0) continue
+      lines.push(
+        `### ${val}（${rows.length}）`,
+        '',
+        `> ${desc}`,
+        '',
+        table(
+          cols.map((c) => c.label ?? CELLS[c.name].label),
+          rows.map((e) => cols.map((c) => CELLS[c.name].readme(e, ctx))),
+        ),
+        '',
+      )
+    }
+  }
+  return withTree(kind, allEntries, lines, dir, cfg.statusRules).join('\n')
 }
 
 /**
@@ -1595,17 +1627,31 @@ export function renderKindIndex(kind, allEntries, kinds) {
   // 汇总页是**登记条目**（自己有 id），会出现在 `allEntries` 里——列自己是噪音，
   // 渲染时剔掉。
   const withoutSelf = allEntries.filter((e) => !(e.kind === kind && e.meta && e.meta.id === selfId))
-  const body = (RENDERERS[kind] ?? renderDocIndex)(withoutSelf, { kind, dir: kinds[kind]?.dir, kinds })
+  const body = renderKindSummary(withoutSelf, { kind, dir: kinds[kind]?.dir, kinds })
   return `<!-- list:${kind}-entries owner -->\n\n${body}`
 }
 
-/** 跨 kind 总账区块：各 kind 的条目数、状态分布、分解边数、汇总页链接。 */
+/**
+ * 跨 kind 总账的**宿主页**：文档中心门户（docs/README.md）的汇总标记区。总账
+ * 不是一类文档（它没有自己的条目形态），是门户页的一个自动块——与各 kind README
+ * 标记区同一机制（`--write` 只写标记之间）。
+ */
+export const ROOT_INDEX_FILE = 'docs/README.md'
+
+/**
+ * 跨 kind 总账区块：各 kind 回答什么（`desc`）、编号前缀、条目数、状态分布、分解边数。
+ * 类别列即指向该 kind 汇总页的编号引用——「汇总页」不再单列一列（同一目标两列是重复）。
+ */
 export function renderRootIndex(allEntries, { kinds }) {
   // 投影页（各 kind 汇总页）**不计入条目数**：它们是「关于这些条目的页」，不是条目。
   // 计进去有两个坏处——读者会把「task 100」读成「100 个任务」，而 `--write`
   // 的收敛要两步（第一次建页、第二次它们进计数、第三次才稳），那条「第二次逐字节
   // 无变化」的不变式因此破掉。
-  const isProj = (e) => e?.meta?.projection === true || e?.meta?.projection === 'true'
+  // 总账宿主页（门户自己）同理排除——它不属于任何一个 kind 的内容面。
+  const isProj = (e) =>
+    e?.meta?.projection === true ||
+    e?.meta?.projection === 'true' ||
+    e?.rel === ROOT_INDEX_FILE
   const rows = Object.entries(kinds).map(([kind, cfg]) => {
     const mine = allEntries.filter((e) => e.kind === kind && !isProj(e))
     const dist = Object.keys(cfg.statusRules)
@@ -1620,18 +1666,18 @@ export function renderRootIndex(allEntries, { kinds }) {
       // `gen-doc-refs` 重算（RF-003 会把手写地址判红）。
       `[[${kindIndexId(kind, kinds)}|${kind} · ${cfg.label}]]`,
       identity,
+      cfg.desc ?? '—',
       String(mine.length),
       dist,
       edges ? `${edges} 条分解边` : '—',
-      `[[${kindIndexId(kind, kinds)}]]`,
     ]
   })
   return [
     '> ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**',
     '> 条目各是一个单文档：条目类**在位存放**（文件即条目，kind 只来自 front-matter，目录不参与判定）；',
-    '> 各 kind 的形状由其 README meta 自描述；机制见 [[PL-011-登记与汇总机制|PL-011 · 登记与汇总机制]]，字段规范见 [[SP-001]]。',
+    '> 各 kind 的形状与汇总版式由其 README meta 自描述；机制见 [[PL-011-登记与汇总机制|PL-011 · 登记与汇总机制]]，字段规范见 [[SP-001]]。',
     '',
-    table(['类别', '身份', '条目数', '状态分布', '分解', '汇总页'], rows),
+    table(['类别', '身份', '回答什么', '条目数', '状态分布', '分解'], rows),
     '',
   ].join('\n')
 }

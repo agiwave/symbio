@@ -26,6 +26,7 @@ desc: 现在是什么样——系统结构 / 设计规范 / 模块机制
 **计数**：active 47 · draft 0 · retired 0（共 47）
 
 ## 现行文档（active）
+
 | 编号 | 标题 |
 |---|---|
 | [`AR-001-architecture`](../../cli/docs/001-architecture.md) | 架构 |
@@ -77,9 +78,11 @@ desc: 现在是什么样——系统结构 / 设计规范 / 模块机制
 | [`tauri/README`](../../tauri/README.md) | Tauri 前端 |
 
 ## 草案（draft）
+
 （无）
 
 ## 废止（retired）
+
 （无）
 
 <!-- registry:summary end -->

@@ -31,6 +31,16 @@ domain.会话与执行: 编排 / 上下文 / 转写节点与实时面 / 输入 /
 domain.资源与地址: VdfsProvider / 读侧成本 / 变更信封 / 新建与导入 / 地址归属
 domain.模型与协议: 多协议适配 / TLS / 本地嵌入 / SSE 解析
 domain.智能体与记忆: agent 目录宿主 / 记忆的两个作用域
+summary.order: [active, superseded, withdrawn]
+summary.active.title: 现行决策（active）
+summary.active.columns: [id, title:决策, domain, impl, supersedes]
+summary.superseded.title: 已被取代（superseded）
+summary.superseded.columns: [id, title:决策, domain, reason, supersedes]
+summary.withdrawn.title: 已回退 / 未落地（withdrawn）
+summary.withdrawn.columns: [id, title:决策, reason]
+summary.groupBy: domain
+summary.groupByHeading: 按域分组
+summary.groupBy.columns: [id, title:决策, status, impl]
 ---
 
 # 架构决策总览
@@ -46,6 +56,7 @@ ADR 回答「为什么这样设计」：每条单文档，正文讲决策与被�
 **计数**：active 58 · superseded 7 · withdrawn 3（共 68）
 
 ## 现行决策（active）
+
 | 编号 | 决策 | 域 | 落地 | 取代 |
 |---|---|---|---|---|
 | `ADR-001` | 分形插件架构：容器与叶子同接口 | 平台基座 | 已落地 | — |
@@ -108,6 +119,7 @@ ADR 回答「为什么这样设计」：每条单文档，正文讲决策与被�
 | `ADR-067` | 产物收束的不变量面：C4 认产物格、`closure_denied` 数产物、恢复锚刻意不认——三处口径一次说清 | 智能体与记忆 | 已落地 | — |
 
 ## 已被取代（superseded）
+
 | 编号 | 决策 | 域 | 理由 | 取代 |
 |---|---|---|---|---|
 | `ADR-010` | 统一实体管理：entities/* 契约 + EntityCapabilities | 资源与地址 | entities/*、能力开关、EntityProvider trait + VdfsAdapter、StorageService 已逐层删除；资源访问统一经 VDFS（ADR-011） | — |
@@ -119,6 +131,7 @@ ADR 回答「为什么这样设计」：每条单文档，正文讲决策与被�
 | `ADR-045` | v2 事实桥：生产流量经转写进事实源，不等整体切换 | 平台基座 | 转写纪律并入 ADR-044；桥退役见 ADR-048；机制见 symbio/src/plugins/session/docs/017-module-layout.md；取代者：ADR-044 | — |
 
 ## 已回退 / 未落地（withdrawn）
+
 | 编号 | 决策 | 理由 |
 |---|---|---|
 | `ADR-008` | 多存储后端：会话存储可选 file / sqlite / memory | 三后端与 store_kind 已删除，会话存储收为单一 SessionStore（持久 = 磁盘布局 / 临时 = 进程内驻留）。与本条无关的资源存储见 ADR-011 |

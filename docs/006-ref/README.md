@@ -26,6 +26,7 @@ desc: 查数据——路由 / 错误码 / 配置等权威表
 **计数**：active 7 · draft 0 · retired 0（共 7）
 
 ## 现行文档（active）
+
 | 编号 | 标题 |
 |---|---|
 | [`RE-001-CONFIGURATION`](001-CONFIGURATION.md) | Symbio 配置参考 |
@@ -37,9 +38,11 @@ desc: 查数据——路由 / 错误码 / 配置等权威表
 | [`RE-007-清单归属总账`](007-清单归属总账.md) | Symbio 清单归属总账（自动生成） |
 
 ## 草案（draft）
+
 （无）
 
 ## 废止（retired）
+
 （无）
 
 <!-- registry:summary end -->

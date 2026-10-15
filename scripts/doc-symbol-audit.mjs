@@ -96,8 +96,10 @@ const TOOL_ROOTS = ['scripts', 'e2e']
 /** 裸常量名的形态：全大写、至少一段下划线——单段大写词与普通词无法区分，不查 */
 const CONST_SHAPE = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/
 /** walk 时整树跳过的目录。`.symbio` 是运行时产物：每起一个会话就复制一份
- *  `AGENTS.md` / `SKILL.md`，把它们算进「活跃文档」会让命中数无上界。 */
-const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'tmp', '.workbuddy-ai', '.symbio'])
+ *  `AGENTS.md` / `SKILL.md`，把它们算进「活跃文档」会让命中数无上界。
+ *  `.trae` 是 IDE 会话工作区（对话产物 / 规划草稿）：与 `.workbuddy-ai` 同性质，
+ *  不进本仓文档语料（与 registry 的 `SCAN_SKIP_DIRS` 同口径）。 */
+const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'tmp', '.workbuddy-ai', '.symbio', '.trae'])
 /** 整目录排除：ADR 记的是**当时**的设计，其中被指认的符号可能早已改名 / 删除，
  *  按现行代码判它会永久误报；归档同理。两者都是「文档说的不是现状」。 */
 const EXCLUDE_MD_DIRS = ['docs/archive', 'docs/010-adr']

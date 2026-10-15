@@ -22,8 +22,11 @@
  *   - **RG-011** SP-001 字段表与代码 schema 恰好相等（文档侧与代码侧互为对账）；
  *   - **RG-012** 出口判据 / 判据小节指认的 `docs/` `scripts/` `e2e/` 文件必须存在
  *     （出口不许依赖尚不存在的东西，13 §0 纪律 4）；
- *   - **RG-013** kind 命名空间闭合：front-matter 的 kind 不在 `KINDS` 闭集即红
- *     （新增 kind 只能走 `KINDS` 配置，GW-004 同族）。
+ *   - **RG-013** kind 形状 / 汇总版式的 meta 校验：`prefix` / `label` 必填、状态词
+ *     词表封闭、`summary.*` 列名与状态词必须在闭集内；**自定义状态机必须配套声明
+ *     汇总版式**（版式由各 kind README meta 自描述，机制不内建条目类版式）。
+ *   - **RG-030** kind README 与总账宿主页（docs/README.md）必须恰有一对
+ *     `registry:summary` 标记（自动汇总区块的边界）。
  *   - **RG-014** `prio` 在词表内（`now / next / later`）——排序提示不是义务，
  *     只影响同层排序，**不参与冲突裁决**；
  *   - **RG-015** spec 的 `supersedes`（显式取代链）：目标存在且为 spec、不自指、不重复、
@@ -54,8 +57,8 @@
  * ## 用法
  *
  *   node scripts/registry-audit.mjs            校验全仓登记条目（条目类 + 在位文档类）
- *   node scripts/registry-audit.mjs --write    校验通过后重生成 docs/000-index/README.md
- *                                              与 docs/<kind>/INDEX.md
+ *   node scripts/registry-audit.mjs --write    校验通过后重生成 docs/README.md 的总账块
+ *                                              与 docs/<kind>/README.md 的汇总块
  *   node scripts/registry-audit.mjs --root=<仓库根>   （回归测试夹具用）
  *
  * **扫描范围**：整个仓（`SCAN_SKIP_*` 豁免外的每个活跃 `.md` 都必须登记）——
@@ -71,7 +74,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { green, red, dim } from './color.mjs'
-import { SUMMARY_BEGIN, SUMMARY_END, loadEntries, auditEntries, renderKindIndex, SCOPE_ERROR } from './registry-lib.mjs'
+import { SUMMARY_BEGIN, SUMMARY_END, ROOT_INDEX_FILE, loadEntries, auditEntries, renderKindIndex, renderRootIndex, SCOPE_ERROR } from './registry-lib.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const defaultRoot = path.resolve(scriptDir, '..')
@@ -148,6 +151,22 @@ export function runRegistryAudit(argv) {
         fs.writeFileSync(file, next)
         updated.push(path.relative(root, file).split(path.sep).join('/'))
       }
+    }
+    // 跨 kind 总账块：宿主是文档中心门户（docs/README.md）——总账不是一类文档，
+    // 是门户页的一个自动块，与各 kind README 标记区同一套写法。
+    const rootFile = path.join(root, ROOT_INDEX_FILE)
+    const rootOld = fs.readFileSync(rootFile, 'utf8')
+    const rb = rootOld.indexOf(SUMMARY_BEGIN)
+    const re = rootOld.indexOf(SUMMARY_END)
+    if (rb === -1 || re === -1 || rb > re) {
+      lines.push(red(`[ERROR] ${ROOT_INDEX_FILE} 缺 \`registry:summary\` 标记对——总账块无处落笔，拒绝写盘（RG-030）`))
+      return { code: 1, lines }
+    }
+    const rootNext =
+      rootOld.slice(0, rb + SUMMARY_BEGIN.length) + '\n' + `<!-- list:kinds owner -->\n\n${renderRootIndex(entries, { kinds })}` + '\n' + rootOld.slice(re)
+    if (rootNext !== rootOld) {
+      fs.writeFileSync(rootFile, rootNext)
+      updated.push(ROOT_INDEX_FILE)
     }
     lines.push(
       updated.length

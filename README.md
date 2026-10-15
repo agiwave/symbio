@@ -102,7 +102,7 @@ symbio/
 | **入门** | [快速上手](docs/007-guide/006-QUICK_START.md "GU-006-QUICK_START") · [系统地图](docs/005-arch/005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP") |
 | **架构** | [总览](docs/005-arch/003-OVERVIEW.md "AR-003-OVERVIEW") · [数据流](docs/005-arch/002-DATA_FLOW.md "AR-002-DATA_FLOW") · [协议](docs/005-arch/004-PROTOCOLS.md "AR-004-PROTOCOLS") · [决策记录](docs/010-adr/README.md "ADR-000-架构决策汇总") |
 | **参考** | [事实表](docs/006-ref/006-当前事实表.md "RE-006-当前事实表") · [路由](docs/006-ref/003-ROUTES.md "RE-003-ROUTES") · [错误码](docs/006-ref/002-ERROR_CODES.md "RE-002-ERROR_CODES") · [配置](docs/006-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION") |
-| **开发** | [插件开发](docs/007-guide/005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT") · [排障](docs/007-guide/007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING") · [任务 / 规范登记](docs/000-index/README.md "KIND-000-登记总账") · [贡献指南](CONTRIBUTING.md "CONTRIBUTING") |
+| **开发** | [插件开发](docs/007-guide/005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT") · [排障](docs/007-guide/007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING") · [任务 / 规范登记](docs/README.md "docs/README") · [贡献指南](CONTRIBUTING.md "CONTRIBUTING") |
 | **设计** | [VDFS 规范](docs/005-arch/012-vdfs-frontend.md "AR-012-vdfs-frontend") · [上下文压缩分层](symbio/src/plugins/session/docs/014-context-compression-design.md "AR-014-context-compression-design") · [Agent 目录规范 v2](docs/005-arch/006-agent-directory-spec.md "AR-006-agent-directory-spec") |
 | **CLI** | [cli/README.md](cli/README.md "cli/README") · [架构](cli/docs/001-architecture.md "AR-001-architecture") · [构建](cli/docs/003-building.md "GU-003-building") · [用法](cli/docs/004-usage.md "GU-004-usage") |
 | **变更** | 变更历史 = `git log`（本仓库不另维护变更日志，理由见 [贡献指南](CONTRIBUTING.md "CONTRIBUTING")）· [历史归档](docs/archive/) |

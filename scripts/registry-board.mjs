@@ -17,14 +17,14 @@
  *   node scripts/registry-board.mjs --root=<仓库根>    （回归测试夹具用）
  *
  * 退出码：0 = 通过；1 = 条目有违规（不打印看板）；2 = 范围读不出 / 参数不识别。
- * 汇总页的文件形态在 `KIND-000-登记总账.md` 与 `docs/<kind>/INDEX.md`（门禁自动重生成）；
+ * 汇总页的文件形态在 `docs/README.md`（总账块）与各 kind 的 `README.md`（门禁自动重生成）；
  * 本脚本只服务「现在要干什么」。
  */
 
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, dim } from './color.mjs'
-import { loadEntries, auditEntries, topoOrder, sectionOf, isEmpty, parentDepth } from './registry-lib.mjs'
+import { loadEntries, auditEntries, topoOrder, sectionOf, isEmpty, parentDepth, BOARD_CELLS } from './registry-lib.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const defaultRoot = path.resolve(scriptDir, '..')
@@ -33,66 +33,32 @@ const USAGE =
   '用法：node scripts/registry-board.mjs [--kind=<kind>] [--status=<状态>] [--id=<编号>] [--children=<编号>] [--parent=<编号>] [--root=<仓库根>]\n' +
   '退出码：0 = 通过；1 = 条目有违规；2 = 范围读不出 / 参数不识别'
 
-const TASK_GLYPH = { todo: '☐', doing: '🟡', done: '☑', wont: '❌' }
+/**
+ * 状态词 → 图标的**缺省表**（看板与分解树的行首）。图标的取向是看板自己的呈现
+ * 策略：kind 可用 `summary.<状态>.glyph` 覆盖（如 task 的 ☐🟡☑❌），未声明的
+ * 状态词落回这份缺省——按状态词查表，不按 kind 分叉。
+ */
+const BOARD_GLYPH = { active: '✅', draft: '📝', retired: '❌', superseded: '↩️', withdrawn: '🚫' }
 
-/** task：状态 → 分组标题（按依赖序）；spec：状态 → 分组标题。 */
-const TASK_GROUPS = [
-  ['todo', '任务 · 待处理（按依赖顺序）'],
-  ['doing', '任务 · 进行中'],
-  ['done', '任务 · 已完成'],
-  ['wont', '任务 · 不做'],
-]
-const SPEC_GROUPS = [
-  ['active', '规范 · 现行'],
-  ['draft', '规范 · 草案'],
-  ['retired', '规范 · 废止'],
-]
+/** 行首图标：kind meta 的 glyph 优先，缺省按状态词表。 */
+const glyphOf = (e, cfg) => cfg?.summary?.groups?.[e.meta.status]?.glyph ?? BOARD_GLYPH[e.meta.status] ?? '·'
 
-/** 其余 kind（adr + 文档类）的状态图标与理由列——按各自的状态词表分组。 */
-const GENERIC_GLYPH = { active: '✅', draft: '📝', retired: '❌', superseded: '↩️', withdrawn: '🚫' }
-
-function printGenericGroup(lines, entries, status, title, depth) {
-  const mine = entries.filter((e) => e.meta.status === status)
-  lines.push(`—— ${title} ${mine.length ? '' : '——（无）'}`)
-  if (!mine.length) return
-  const pad = Math.max(...mine.map((e) => e.meta.id.length))
-  for (const e of mine) {
-    const impl = e.kind === 'adr' && e.meta.impl ? ` 落地 ${e.meta.impl}` : ''
-    const why = e.meta.reason ? `  理由 ${e.meta.reason}` : ''
-    lines.push(`  ${GENERIC_GLYPH[status] ?? '·'} ${'  '.repeat(depth?.get(e.meta.id) ?? 0)}${e.meta.id.padEnd(pad)}  ${e.meta.title}${impl}${why}`)
-  }
-}
-
-function printTaskGroup(lines, entries, status, title, depth) {
-  const mine = entries.filter((e) => e.meta.status === status)
-  lines.push(`—— ${title} ${mine.length ? '' : '——（无）'}`)
-  if (!mine.length) return
-  const pad = Math.max(...mine.map((e) => e.meta.id.length))
-  for (const e of mine) {
-    const deps = Array.isArray(e.meta.deps) && e.meta.deps.length ? `  依赖 ${e.meta.deps.join('、')}` : ''
-    const prio = e.meta.prio ? `·${e.meta.prio}` : ''
-    const extra = status === 'done' && e.meta.evidence ? `  证据 ${e.meta.evidence}` : ''
-    const why = status === 'wont' && e.meta.reason ? `  理由 ${e.meta.reason}` : ''
-    lines.push(
-      `  ${TASK_GLYPH[status]} ${'  '.repeat(depth?.get(e.meta.id) ?? 0)}${e.meta.id.padEnd(pad)}  ${e.meta.title}  [${e.meta.track}${prio}]${deps}${extra}${why}`,
-    )
-  }
-}
-
-function printSpecGroup(lines, entries, status, title, depth) {
-  const mine = entries.filter((e) => e.meta.status === status)
-  lines.push(`—— ${title} ${mine.length ? '' : '——（无）'}`)
-  if (!mine.length) return
-  const pad = Math.max(...mine.map((e) => e.meta.id.length))
-  for (const e of mine) {
-    lines.push(
-      `  ${status === 'retired' ? '❌' : status === 'draft' ? '📝' : '✅'} ${'  '.repeat(depth?.get(e.meta.id) ?? 0)}${e.meta.id.padEnd(pad)}  ${e.meta.title}  ${e.meta.scope}`,
-    )
-  }
-}
-
-const glyphOf = (e) => TASK_GLYPH[e.meta.status] ?? GENERIC_GLYPH[e.meta.status] ?? '·'
 const idCmp = (a, b) => (a.meta.id < b.meta.id ? -1 : 1)
+
+/** 看板行内附加格的**缺省**：落地（该 kind 声明了 impl 词表才加）+ 理由。 */
+const defaultBoardCols = (cfg) => [...(cfg.implWords ? ['impl'] : []), 'reason']
+
+/** 分组打印（通用）：分组标题 / 顺序、行内附加格全部读 kind meta——零 kind 名。 */
+function printGroup(lines, mine, status, title, depth, cols, glyph) {
+  const group = mine.filter((e) => e.meta.status === status)
+  lines.push(`—— ${title} ${group.length ? '' : '——（无）'}`)
+  if (!group.length) return
+  const pad = Math.max(...group.map((e) => e.meta.id.length))
+  for (const e of group) {
+    const extras = cols.map((c) => BOARD_CELLS[c]?.(e) ?? '').join('')
+    lines.push(`  ${glyph} ${'  '.repeat(depth?.get(e.meta.id) ?? 0)}${e.meta.id.padEnd(pad)}  ${e.meta.title}${extras}`)
+  }
+}
 
 /**
  * 编号找不到时的友好提示：文档类编号带名称段（`GO-001-前端去业务化`），
@@ -138,7 +104,7 @@ function printChildren(lines, entries, rootId, kinds) {
   const walk = (e, d) => {
     if (seen.has(e.meta.id)) return
     seen.add(e.meta.id)
-    lines.push(`${'  '.repeat(d)}${glyphOf(e)} ${e.meta.id}  ${e.meta.title}（${e.meta.status}）`)
+    lines.push(`${'  '.repeat(d)}${glyphOf(e, kinds[root.kind])} ${e.meta.id}  ${e.meta.title}（${e.meta.status}）`)
     for (const c of kids(e.meta.id)) walk(c, d + 1)
   }
   walk(root, 0)
@@ -147,7 +113,7 @@ function printChildren(lines, entries, rootId, kinds) {
 }
 
 /** `--parent=<编号>`：该条目的**父链**（从顶层祖先到当前条目，一级一缩进）。 */
-function printParentChain(lines, entries, id) {
+function printParentChain(lines, entries, id, kinds) {
   const byId = new Map(entries.filter((e) => e.meta).map((e) => [e.meta.id, e]))
   const cur = byId.get(id)
   if (!cur) return notFound(lines, entries, id, '条目')
@@ -162,7 +128,7 @@ function printParentChain(lines, entries, id) {
   lines.push(`=== ${id} 的父链（parent 字段，深度 ${chain.length - 1}）===`)
   chain.forEach((x, i) => {
     const mark = i === chain.length - 1 ? '  ← 当前' : ''
-    lines.push(`${'  '.repeat(i)}${glyphOf(x)} ${x.meta.id}  ${x.meta.title}（${x.meta.status}）${mark}`)
+    lines.push(`${'  '.repeat(i)}${glyphOf(x, kinds[x.kind])} ${x.meta.id}  ${x.meta.title}（${x.meta.status}）${mark}`)
   })
   if (chain.length === 1) lines.push(dim('（无 parent——顶层条目）'))
   return { code: 0, lines }
@@ -230,7 +196,7 @@ export function runRegistryBoard(argv) {
     return { code: 0, lines }
   }
   if (childrenFilter) return printChildren(lines, entries, childrenFilter, kinds)
-  if (parentFilter) return printParentChain(lines, entries, parentFilter)
+  if (parentFilter) return printParentChain(lines, entries, parentFilter, kinds)
 
   const shown = entries.filter((e) => !kindFilter || e.kind === kindFilter)
   const depth = parentDepth(shown)
@@ -247,26 +213,21 @@ export function runRegistryBoard(argv) {
   lines.push(`=== 登记看板（全仓登记条目）===`)
   lines.push(`共 ${shown.length} 个条目：${dist}`)
 
-  const byKind = (kind, groups, printer) => {
-    if (kindFilter && kindFilter !== kind) return
-    const mine = topoOrder(shown.filter((e) => e.kind === kind))
-    if (kind === 'task') {
-      const ordered = topoOrder(shown.filter((e) => e.kind === 'task'))
-      const order = new Map(ordered.map((e, i) => [e, i]))
-      mine.sort((a, b) => order.get(a) - order.get(b))
-    }
-    for (const [status, title] of groups) {
-      if (statusFilter && statusFilter !== status) continue
-      // 组内按 parent 深度缩进（顶层 = 0，无 parent 数据时全部为 0——输出与加机制前一致）
-      printer(lines, mine, status, title, depth)
-    }
-  }
-  byKind('task', TASK_GROUPS, printTaskGroup)
-  byKind('spec', SPEC_GROUPS, printSpecGroup)
+  // 分组结构全部读 kind meta：分组顺序 = summary.order（`topo` = 状态机键序），
+  // 标题 = `${label} · ${summary.<状态>.boardTitle ?? 状态词}`，行内附加格 =
+  // board.columns（缺省 impl? + reason）。机制里没有「哪个 kind 怎么分组」的知识。
   for (const [kind, cfg] of Object.entries(kinds)) {
-    if (kind === 'task' || kind === 'spec') continue
-    const groups = Object.keys(cfg.statusRules).map((s) => [s, `${cfg.label} · ${s}`])
-    byKind(kind, groups, printGenericGroup)
+    if (kindFilter && kindFilter !== kind) continue
+    const mine = topoOrder(shown.filter((e) => e.kind === kind))
+    const sum = cfg.summary ?? {}
+    const groupOrder = sum.order === 'topo' ? Object.keys(cfg.statusRules) : (sum.order ?? Object.keys(cfg.statusRules))
+    const cols = cfg.board ?? defaultBoardCols(cfg)
+    for (const status of groupOrder) {
+      if (statusFilter && statusFilter !== status) continue
+      const g = sum.groups?.[status]
+      // 组内按 parent 深度缩进（顶层 = 0，无 parent 数据时全部为 0——输出与加机制前一致）
+      printGroup(lines, mine, status, `${cfg.label} · ${g?.boardTitle ?? status}`, depth, cols, g?.glyph ?? BOARD_GLYPH[status] ?? '·')
+    }
   }
   if (lines.length === 2) lines.push(dim('（没有匹配的分组）'))
   return { code: 0, lines }

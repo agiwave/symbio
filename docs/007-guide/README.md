@@ -26,6 +26,7 @@ desc: 怎么用——上手 / 贡献 / 排障
 **计数**：active 15 · draft 0 · retired 0（共 15）
 
 ## 现行文档（active）
+
 | 编号 | 标题 |
 |---|---|
 | [`.github/workflows/README`](../../.github/workflows/README.md) | CI/CD 配置说明 |
@@ -45,9 +46,11 @@ desc: 怎么用——上手 / 贡献 / 排障
 | [`e2e/README`](../../e2e/README.md) | e2e 测试环境（CLI 模式） |
 
 ## 草案（draft）
+
 （无）
 
 ## 废止（retired）
+
 （无）
 
 <!-- registry:summary end -->

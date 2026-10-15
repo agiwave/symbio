@@ -24,6 +24,14 @@ status.active:
 status.draft.forbid: [reason]
 status.active.forbid: [reason]
 status.retired.require: [reason]
+summary.order: [active, draft, retired]
+summary.active.title: 现行规范（active）
+summary.active.columns: [id, title:规范, scope, guard, clears, supersedes]
+summary.draft.title: 草案（draft）
+summary.draft.columns: [id, title:规范, scope, supersedes]
+summary.retired.title: 废止（retired）
+summary.retired.columns: [id, title:规范, reason, supersedes]
+board.columns: [scope]
 ---
 
 # 规范总览
@@ -39,6 +47,7 @@ status.retired.require: [reason]
 **计数**：active 31 · draft 0 · retired 0（共 31）
 
 ## 现行规范（active）
+
 | 编号 | 规范 | 适用范围 | 判据 | 清除 | 取代 |
 |---|---|---|---|---|---|
 | `SP-001` | 登记条目 front-matter 与状态规范 | 仓内全部活跃 `.md` 文档（十类 kind；豁免名单见 plan/14 §0） | 人工 | — | — |
@@ -74,9 +83,11 @@ status.retired.require: [reason]
 | `SP-031` | color 守卫自指豁免（测试与实现提到禁用模式） | scripts/color.test.mjs（守卫回归与实现里的禁用模式字样） | `scripts/color.test.mjs` | T-060 | — |
 
 ## 草案（draft）
+
 （无）
 
 ## 废止（retired）
+
 （无）
 
 <!-- registry:summary end -->

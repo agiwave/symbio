@@ -26,6 +26,20 @@ status.done.require: [evidence]
 status.done.forbid: [signal, reason]
 status.wont.require: [reason]
 status.wont.forbid: [evidence]
+summary.order: topo
+summary.todo.title: 待处理（按依赖顺序）
+summary.todo.columns: [id, title:任务, prio, track, deps]
+summary.todo.glyph: ☐
+summary.doing.title: 进行中
+summary.doing.columns: [id, title:任务, prio, track, deps]
+summary.doing.glyph: 🟡
+summary.done.title: 已完成
+summary.done.columns: [id, title:任务, track]
+summary.done.glyph: ☑
+summary.wont.title: 不做
+summary.wont.columns: [id, title:任务, track, reason]
+summary.wont.glyph: ❌
+board.columns: [rank, deps, evidence, reason]
 ---
 
 # 任务总览
@@ -41,6 +55,7 @@ status.wont.forbid: [evidence]
 **计数**：☐ todo 5 · 🟡 doing 0 · ☑ done 108 · ❌ wont 0（共 113）
 
 ## 待处理（按依赖顺序）
+
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
 | `T-073-多智能体社会数据行` | ST-013 落地：角色行（市场/仲裁/守门）+ 声誉驱动淘汰的 grants 变更事件 + 投影组合进裁决 | later | 多主体 | T-072-对等主体生产增量 |
@@ -50,9 +65,11 @@ status.wont.forbid: [evidence]
 | `T-107-角色主体执行路径批` | 角色主体执行路径批：agent:worker / agent:planner / agent:verifier 的窄行 + 驱动路径（行与路径同批） | later | plan | — |
 
 ## 进行中
+
 （无）
 
 ## 已完成
+
 | 编号 | 任务 | 轨 |
 |---|---|---|
 | `T-061` | 登记机制支持条目分解：parent 字段（父子机制） | meta |
@@ -165,6 +182,7 @@ status.wont.forbid: [evidence]
 | `T-064` | parent 回归测试与数据示范：注入用例 + GO/T 两棵分解树 | meta |
 
 ## 不做
+
 （无）
 
 ## 分解树

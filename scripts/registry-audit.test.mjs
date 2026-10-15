@@ -107,6 +107,24 @@ function docDoc(relWithDocs, over = {}) {
 }
 
 /**
+ * 根账宿主页夹具（docs/README.md）：它是普通登记条目（kind: guide，id = 路径），
+ * 但 RG-030 要求它带 `registry:summary` 标记对（跨 kind 总账块的落笔处）——
+ * 夹具照这个形态写，否则任何碰到它的用例都会多出一条 RG-030。
+ */
+function rootDoc(over = {}) {
+  return docDoc('docs/README.md', {
+    kind: 'guide',
+    id: 'docs/README',
+    title: '文档中心',
+    // `lists: [kinds=owner]` + 块内引导标记：与真仓 docs/README.md 同一形态——
+    // 总账块由 --write 重写，`list:kinds` 标记是块内容的一部分（RG-029 两面对账）。
+    lists: ['kinds=owner'],
+    body: '# 文档中心\n\n<!-- registry:summary begin -->\n<!-- list:kinds owner -->\n<!-- registry:summary end -->\n',
+    ...over,
+  })
+}
+
+/**
  * 注入全部 kind README（**先注入、后写用例文件**——用例自带的 README 覆盖注入件）。
  * kind 形状靠这些 meta 自描述，没有它们连 `task` 这种 kind 都不认识；形状与清单
  * 声明（`lists`，与正文 list 标记成对）都读真仓的 README——与线上一致。
@@ -118,6 +136,8 @@ function injectKindReadmes(base) {
     fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(path.join(dir, 'README.md'), text)
   }
+  // 根账宿主页（docs/README.md）**不在此注入**：它是普通登记条目（kind: guide），
+  // 多数用例不关心它（RG-030 只在它存在时检查）；需要它的用例（--write）自带夹具。
 }
 
 /**
@@ -354,22 +374,18 @@ test('RG-022：全仓一套编号规范——编号条目 <前缀>-<三位序号
   expectOnly(errsOf(mismatch), /RG-003 文件名编号对账/)
 
   // 导航文档：id 含 / 但不是仓根相对路径 ⇒ 红
-  const badNav = caseRoot({
-    'docs/README.md': docDoc('docs/README.md', { kind: 'guide', id: 'docs/007-guide/README' }),
-  })
+  const badNav = caseRoot({ 'docs/README.md': rootDoc({ id: 'docs/007-guide/README' }) })
   expectOnly(errsOf(badNav), /RG-003 导航文档 id 必须等于仓根相对路径/)
 
   // 导航文档：README / INDEX 的 id = 路径 ⇒ 放行（不进 deps，见 RG-023）
-  const okNav = caseRoot({
-    'docs/README.md': docDoc('docs/README.md', { kind: 'guide', id: 'docs/README' }),
-  })
+  const okNav = caseRoot({ 'docs/README.md': rootDoc() })
   assert.deepEqual(errsOf(okNav), [], '导航 README 放行')
 })
 
 test('RG-023：deps 是依赖图的边，只收编号条目——导航文档（id 含 /）判红', () => {
   const bad = caseRoot({
     'docs/004-plan/001-a.md': docDoc('docs/004-plan/001-a.md', { kind: 'plan', id: 'PL-001-a', deps: ['docs/README'] }),
-    'docs/README.md': docDoc('docs/README.md', { kind: 'guide', id: 'docs/README' }),
+    'docs/README.md': rootDoc(),
   })
   expectOnly(errsOf(bad), /RG-023 deps 目标必须是编号条目/)
 
@@ -503,8 +519,8 @@ test('分解投影增强：父行子项状态计数 + 总账分解列 + 渲染�
   // 汇总页现已**登记**，所以指向它的链接写成**编号引用**（`[[T-000-任务汇总|task · 任务]]`），
   // 由 `gen-doc-refs` 展开成真实地址——手写地址会被 RF-003 判红。
   // 断言也跟着改：这里测的是 `--write` 的**原始产出**，不是展开后的形态。
-  assert.match(root, /\[\[T-000-任务汇总\|task · 任务\]\]\s*\|[^|]*\|\s*4\s*\|[^|]*\|\s*3 条分解边/, 'task 行报有效 parent 边数（3）')
-  assert.match(root, /\[\[SP-000-规范汇总\|spec · 规范\]\]\s*\|[^|]*\|[^|]*\|[^|]*\|\s*—/, '无分解的 kind 显示 —')
+  assert.match(root, /\[\[T-000-任务汇总\|task · 任务\]\]\s*\|[^|]*\|[^|]*\|\s*4\s*\|[^|]*\|\s*3 条分解边/, 'task 行报有效 parent 边数（3）')
+  assert.match(root, /\[\[SP-000-规范汇总\|spec · 规范\]\]\s*\|[^|]*\|[^|]*\|[^|]*\|[^|]*\|\s*—/, '无分解的 kind 显示 —')
 })
 
 test('board --children / --parent：分解子树与父链两个查询出口；互斥与不存在有出口', () => {
@@ -779,10 +795,10 @@ test('RG-020：未登记文档（无 front-matter / 缺 kind）变红', () => {
 })
 
 test('RG-003（导航文档）：id 含 / 必须等于仓根相对路径；写错即红（反向：写对放行）', () => {
-  const wrong = caseRoot({ 'docs/README.md': docDoc('docs/README.md', { kind: 'guide', id: 'docs/007-guide/README' }) })
+  const wrong = caseRoot({ 'docs/README.md': rootDoc({ id: 'docs/007-guide/README' }) })
   expectOnly(errsOf(wrong), /RG-003 导航文档 id 必须等于仓根相对路径（去 `\.md`）（应为 `docs\/README`）/)
 
-  const ok = caseRoot({ 'docs/README.md': docDoc('docs/README.md', { kind: 'guide', id: 'docs/README' }) })
+  const ok = caseRoot({ 'docs/README.md': rootDoc() })
   assert.deepEqual(errsOf(ok), [], '导航文档 id = 路径 ⇒ 放行（反向）')
 })
 
@@ -803,9 +819,6 @@ test('RG-020 豁免：archive / 生成页 / 指令面不进登记范围（反向
     'docs/archive/old.md': '# 历史快照（无 front-matter）\n',
     // 汇总页现在是**登记条目**，生成器会发 front-matter + `projection: true`
     // （有身份、没内容）。夹具照新形态写——否则这条用例测的是一个已经不存在的形态。
-    'docs/000-index/README.md':
-      '---\nkind: index\nid: KIND-000-登记总账\ntitle: 登记总账（自动生成）\n' +
-      'status: active\nprojection: true\ncreated: 2026-10-14\nprefix: KIND\nlabel: 总账\ndesc: 跨 kind 的登记总账\n---\n\n# 登记总账（自动生成）\n',
     'docs/004-plan/README.md':
       // 汇总页现在是**登记条目**，生成器会发 front-matter + `projection: true`
       // （有身份、没内容）。夹具照新形态写——否则这条用例测的是一个已经不存在的形态。
@@ -841,10 +854,13 @@ test('文档类渲染：按 status 分组、编号列是可点的相对链接（
 })
 
 test('--write：生成三个汇总页，再跑一次显示已是最新', () => {
-  const base = caseRoot({ 'task/001.md': taskDoc('T-001', { status: 'done', evidence: 'abc1234' }) })
+  const base = caseRoot({
+    'task/001.md': taskDoc('T-001', { status: 'done', evidence: 'abc1234' }),
+    'docs/README.md': rootDoc(),
+  })
   const first = runRegistryAudit([`--root=${base}`, '--write'])
   assert.equal(first.code, 0, stripAnsi(first.lines.join('\n')))
-  for (const rel of ['docs/000-index/README.md', 'docs/009-task/README.md', 'docs/008-spec/README.md']) {
+  for (const rel of ['docs/README.md', 'docs/009-task/README.md', 'docs/008-spec/README.md']) {
     assert.ok(fs.existsSync(path.join(base, rel)), `${rel} 应被生成`)
   }
   const board = fs.readFileSync(path.join(base, 'docs/009-task/README.md'), 'utf8')
@@ -852,7 +868,7 @@ test('--write：生成三个汇总页，再跑一次显示已是最新', () => {
   // 「证据文本不出现在汇总页里」，防的是哪天又被加回来。
   assert.match(board, /`T-001`/)
   assert.ok(!board.includes('abc1234'), '已完成表不应带证据列：细节去读文档，别在列表里展开')
-  assert.match(fs.readFileSync(path.join(base, 'docs/000-index/README.md'), 'utf8'), /task · 任务/)
+  assert.match(fs.readFileSync(path.join(base, 'docs/README.md'), 'utf8'), /task · 任务/)
 
   const second = runRegistryAudit([`--root=${base}`, '--write'])
   assert.equal(second.code, 0)
