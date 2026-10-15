@@ -260,8 +260,8 @@ export function runGenDocRefs(argv) {
     return { code: 2, lines: lines.concat(msg.map((e) => red(`[ERROR] ${e}`)), red('[ERROR] 无条目可解析引用——不退化成「什么都没检查」')), changed: [] }
   }
   // 编号 → 条目、文件 → 条目（两张表都从**同一次装载**来：登记的真相只有一处）。
-  // 编号有两种合法写法：**全 id**（`ST-001-最小闭环`）与**裸编号**（`ST-001`，前缀+序号，
-  // 名称段可省）——引用规范不变（`[[ST-001|...]]` 依旧合法），所以裸编号也要能解析。
+  // 编号有两种合法写法：**全 id**（`T-121-最小闭环`）与**裸编号**（`T-121`，前缀+序号，
+  // 名称段可省）——引用规范不变（`[[T-121|...]]` 依旧合法），所以裸编号也要能解析。
   const byId = new Map()
   const byRel = new Map()
   for (const e of entries) {

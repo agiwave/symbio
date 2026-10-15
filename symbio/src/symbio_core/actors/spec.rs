@@ -19,7 +19,7 @@ impl Pattern {
     ///
     /// 与授权表同源，不另立清单：持 `reply.*` ⇒ [`Pattern::Reasoner`]（会话主体按
     /// 模型驱动跑轮）；无发言权而有 `produce.artifact` ⇒ [`Pattern::Translator`]
-    /// （对等主体的权威动作是**产生产物**，复现 ST-008 §3 的 ActorSpec 对等行）；
+    /// （对等主体的权威动作是**产生产物**，复现 T-128 §3 的 ActorSpec 对等行）；
     /// 其余 ⇒ [`Pattern::Decider`]。判据问的是矩阵谓词本身（`can_reply` /
     /// `can_produce_artifact`），调用方不抄能力名清单。
     ///
@@ -65,7 +65,7 @@ pub struct ActorSpec {
 }
 
 impl ActorSpec {
-    /// S01 的平凡值主体（[roadmap/S01 §4](../../../../docs/003-stage/001-最小闭环.md "ST-001-最小闭环")）：
+    /// S01 的平凡值主体（[roadmap/S01 §4](../../../../docs/009-task/121-最小闭环.md "T-121-最小闭环")）：
     /// 全规则驱动、预算放宽、单主体——平凡值下系统完整运行。
     ///
     /// ## `capabilities` 取该主体**自己的授权行**（[T-082](../../../../docs/009-task/082-角色行生产构造批.md "T-082-角色行生产构造批") 批①订正）
@@ -116,7 +116,7 @@ impl ActorSpec {
     /// `control`）。
     ///
     /// 与收束两臂并列的第三个能力读方：`judge.intent` 是判定者的**全部**权威
-    /// （[S07 §5](../../../../docs/003-stage/007-插话与实时打断.md "ST-007-插话与实时打断")
+    /// （[S07 §5](../../../../docs/009-task/127-插话与实时打断.md "T-127-插话与实时打断")
     /// 「判定者不得直接发言」——它没有 `reply.*`，只有 `judge.intent`，由
     /// `authz::ROWS` 那一行保证）。此前该字段在生产里"算了却看不见"：`inbox`
     /// 直驱判定者时从不读规格，写控制事实也不查 `judge.intent`

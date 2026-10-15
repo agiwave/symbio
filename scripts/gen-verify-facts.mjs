@@ -22,9 +22,9 @@
  * | `CAPABILITIES` / `KINDS` | 02 §6.1 能力名册（七列）与类型闭集表 |
  * | `DECLARED_*` | 02 §2「条数」列、§6.2 生长位表、§7 社交能力表——**是被验的声明** |
  * | `PSEUDO` | 02 §5 伪高阶表的「说法」列 |
- * | `STAGE_CLAIMS` | [路线图总览 §1 阶梯总表](../docs/003-stage/000-路线图总览.md "ST-000-路线图总览") |
- * | `STAGE_DOCS` | 每阶 `S0N-*.md` §3 的 ```capability-assign``` 块 + §4 的加粗平凡值行 |
- * | `COGNITIVE_DEMANDS` | [S10 §2 需求映射表](../docs/003-stage/010-个人认知体系注入.md "ST-010-个人认知体系注入")——全仓唯一一份认知体系需求清单 |
+ * | `STAGE_CLAIMS` | [路线图总览 §1 阶梯总表](../docs/009-task/120-路线图总览.md "T-120-路线图总览") |
+ * | `STAGE_DOCS` | 每阶 `1(2N)N-*.md`（T-121–133）§3 的 ```capability-assign``` 块 + §4 的加粗平凡值行 |
+ * | `COGNITIVE_DEMANDS` | [S10 §2 需求映射表](../docs/009-task/130-个人认知体系注入.md "T-130-个人认知体系注入")——全仓唯一一份认知体系需求清单 |
  *
  * **顶层键 vs 子键**：`projection.param` 在 §8 里与顶层键同列一张表，但 01 §8 自己写明
  * 「它不是第 11 个机制键，是 `projection` 的子键」。判据因此是形状而非名单：
@@ -64,8 +64,8 @@ const OUT_REL = path.join('docs', '004-plan', 'verify', 'facts', 'mod.rs')
 
 const ARCH_REL = path.join('docs', '004-plan', '001-核心架构.md')
 const FRAME_REL = path.join('docs', '004-plan', '002-能力坐标系.md')
-const LADDER_REL = path.join('docs', '003-stage', '000-路线图总览.md')
-const STAGE_DIR_REL = path.join('docs', '003-stage')
+const LADDER_REL = path.join('docs', '009-task', '120-路线图总览.md')
+const STAGE_DIR_REL = path.join('docs', '009-task')
 
 const read = (rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8')
 
@@ -501,15 +501,15 @@ export function claimsOf(ladderMd) {
 }
 
 /**
- * roadmap/ 目录里真正存在的阶文件（`0NN-xxx.md`），**不含**总览。
+ * 阶文件真正在位的（`1(2N)N-xxx.md`，T-121–133；任务目录里另有 119 份非阶任务），**不含**总览（120）。
  * `id` 是**对账键**：与阶梯总表 / §6.1 落点列同款（`S01` 两位形态）——
  * 文件名按编号规范带前缀与三位序号，内部 id 保持总表口径，两边由本函数桥接。
  */
 export function stageFilesOf(dirEntries) {
   return dirEntries
-    .filter((f) => /^\d{3}-.+\.md$/.test(f) && !f.startsWith('000-')) // 000 是总览，不是阶
+    .filter((f) => /^1(2[1-9]|3[0-3])-.+\.md$/.test(f)) // 121–133 是阶；120 是总览，其余是普通任务
     .sort()
-    .map((f) => ({ id: `S${String(parseInt(f.slice(0, 3), 10)).padStart(2, '0')}`, file: f }))
+    .map((f) => ({ id: `S${String(parseInt(f.slice(0, 3), 10) - 120).padStart(2, '0')}`, file: f }))
 }
 
 /** 汇总成一份 facts 文本（导出给测试用：同一份代码，测试喂假文档） */
@@ -525,7 +525,7 @@ export function buildFacts({ archMd, frameMd, ladderMd, stageMds, dirEntries }) 
   const absent = claims.filter((c) => !files.some((f) => f.id === c.id)).map((c) => c.id)
   if (missing.length || absent.length) {
     throw new Error(
-      `阶梯总表与 roadmap 的阶文件不是一对一同名：只在总表里 ${absent.join(', ') || '无'}；` +
+      `阶梯总表与阶任务文件（T-121–133）不是一对一同名：只在总表里 ${absent.join(', ') || '无'}；` +
         `只在目录里 ${missing.join(', ') || '无'}`,
     )
   }
@@ -710,7 +710,7 @@ pub fn in_domain(key: &str, value: &str) -> bool {
     pub level: usize,
     /// 认知 / 工程 / 治理（闭集见 \`KINDS\`）
     pub kind: &'static str,
-    /// 由哪几阶点亮（roadmap 阶梯的阶号）——坐标系与实施阶梯的咬合处
+    /// 由哪几阶点亮（阶梯的阶号，见 T-120 §1 总表）——坐标系与实施阶梯的咬合处
     pub stages: &'static [&'static str],
 }`)
   out.push('')
@@ -762,7 +762,7 @@ pub fn in_domain(key: &str, value: &str) -> bool {
   out.push('/// 一阶的 §3 赋值块 + §4 退路口——阶梯审计的**输入**')
   out.push(`pub struct StageDoc {
     pub id: &'static str,
-    /// roadmap 目录里的那篇（文件名即 owner 声明）
+    /// 任务目录里的那篇阶文件（文件名即 owner 声明）
     pub file: &'static str,
     pub assigns: &'static [(&'static str, &'static str)],
     /// §4 里平凡值加粗的那一行：\`(机制键, 平凡值)\`
@@ -779,7 +779,7 @@ pub fn in_domain(key: &str, value: &str) -> bool {
     .join('')
   out.push(`pub const STAGE_DOCS: &[StageDoc] = &[${docLiterals}\n];`)
   out.push('')
-  out.push('/// 认知体系的一条需求（S10 §2 的映射表，roadmap/010-个人认知体系注入.md）')
+  out.push('/// 认知体系的一条需求（S10 §2 的映射表，130-个人认知体系注入.md）')
   out.push(`#[derive(Clone, Copy)]
 pub struct CognitiveDemand {
     pub id: &'static str,

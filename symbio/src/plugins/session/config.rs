@@ -260,7 +260,7 @@ pub struct SessionConfig {
     /// 短于这个上界。
     #[serde(default = "default_conation_enabled")]
     pub conation_enabled: bool,
-    /// 技能编译的总开关（**S11 §4 平凡值：`false`**，[roadmap/S11 §4](../../../../docs/003-stage/011-技能编译与自我改进.md "ST-011-技能编译与自我改进")）。
+    /// 技能编译的总开关（**S11 §4 平凡值：`false`**，[roadmap/S11 §4](../../../../docs/009-task/131-技能编译与自我改进.md "T-131-技能编译与自我改进")）。
     ///
     /// ## 它控制什么
     ///
@@ -280,7 +280,7 @@ pub struct SessionConfig {
     /// 未命中快 ≥ 3×」是执行档位与埋点那半边的事，不在本开关的管辖内。
     #[serde(default = "default_skill_compile_enabled")]
     pub skill_compile_enabled: bool,
-    /// 技能快路的**执行半边**（[roadmap/S11 §4](../../../../docs/003-stage/011-技能编译与自我改进.md "ST-011-技能编译与自我改进")
+    /// 技能快路的**执行半边**（[roadmap/S11 §4](../../../../docs/009-task/131-技能编译与自我改进.md "T-131-技能编译与自我改进")
     /// 的 `actor.pattern`：完整值 `decider`、**平凡值 `reasoner`**，默认 `false`）。
     ///
     /// ## 它控制什么
@@ -437,7 +437,7 @@ pub fn default_skill_compile_enabled() -> bool {
     // （编译 → 校准 → 回退）整条退到「没有技能」的形态，而召回 / 巩固照常跑；
     // 技能从经验里学来，不是系统的前提。
     //
-    // 翻向 true 的前置条件（T-086 批③写死，ST-011 §3.1 同步）：① S11 读数落地
+    // 翻向 true 的前置条件（T-086 批③写死，T-131 §3.1 同步）：① S11 读数落地
     // （凸度或明确替代刻度——今天只有 reliability）；② PL-010 价值验收埋点出数。
     // 两条都满足才归届时的开关批翻向；在那之前 false 是安全退路口。
     false

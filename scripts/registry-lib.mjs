@@ -11,11 +11,11 @@
  *
  *   1. **条目 = 数据**：每条任务 / 规范 / 决策 / **文档**都是一个带 front-matter 的单文档，
  *      编号、状态、依赖、证据全在机读字段里。**全仓一套编号规范**（RG-022 判形状）：
- *        · **编号条目**（十类 kind 都是）：`id` = 文件名（去 `.md`）=
- *          `<前缀>-<三位序号>[-名称]`，前缀闭集 `GO/SC/ST/PL/T/ADR/SP/AR/RE/GU` 一 kind 一个；
+ *        · **编号条目**（九类 kind 都是）：`id` = 文件名（去 `.md`）=
+ *          `<前缀>-<三位序号>[-名称]`，前缀闭集 `GO/SC/PL/T/ADR/SP/AR/RE/GU` 一 kind 一个；
  *        · **导航文档**（`README` / `INDEX`）：不发编号——通用名没有编号段、不构成命名空间，
  *          `id` = 仓根相对路径（去 `.md`），**禁止进 `deps`**（RG-023：依赖图只收编号条目）。
- *      文档类（goal/scene/stage/plan/arch/ref/guide）仍**在位存放**（就近放置优先于按类归堆），
+ *      文档类（goal/scene/plan/arch/ref/guide）仍**在位存放**（就近放置优先于按类归堆），
  *      `title` = 正文首个 H1（两面对账，RG-021）。
  *      **编号平铺不体现层级**：分解关系（总目标→子目标、大任务→小任务）走 `parent` 字段
  *      （RG-024 结构 / RG-025 父子状态一致性），层级只是投影（INDEX 分解树小节、board
@@ -319,10 +319,10 @@ function foldShape(meta, rel, errors) {
  * README meta 扫描获得（`loadKinds`），目录序号决定 kind 的展示顺序。
  *
  * README meta 规范（在公共五行之外，kind README 必须声明）：
- *   - `prefix`：编号前缀（如 `ST`）——条目 id 的前缀闭集就是全体 README 的 prefix；
+ *   - `prefix`：编号前缀（如 `T`）——条目 id 的前缀闭集就是全体 README 的 prefix；
  *   - `label`：显示名（如 `阶段`）；
  *   - `desc`：这个 kind 回答什么问题（写进汇总页，兼作新文档选 kind 的指路）。
- * `kind` 字段值必须等于目录名去编号（`003-stage` → `stage`）；`id` 是本汇总页自己的
+ * `kind` 字段值必须等于目录名去编号（`009-task` → `task`）；`id` 是本汇总页自己的
  * 登记编号（沿用 `<前缀>-000-<X>汇总` 形态），供 `[[...]]` 引用。
  */
 export function loadKinds(root) {
@@ -815,12 +815,12 @@ export function auditEntries(entries, root, projections = [], kinds = {}) {
         )
       } else {
         // 编号 ↔ 文件对账（新规）：**id 保留类型前缀，文件名去掉**——
-        // `id: ST-001-最小闭环` ↔ `001-最小闭环.md`。落点形态**两种等价**（分形：
+        // `id: T-121-最小闭环` ↔ `001-最小闭环.md`。落点形态**两种等价**（分形：
         // 与 kind 登记处 `NNN-kind/README.md` 同构），按文件系统事实自判，不设模式声明：
         // - 平铺：`<stem>.md`；
         // - 目录：`<stem>/README.md`（父目录名 = stem，README 即条目）。
         // 对账规则：id 去掉 `<前缀>-` 后的「序号[-名称]」必须与文件名主干**逐字相等**。
-        // 身份（id）与位置（文件名 / 目录名）分离：改名只动一处，`[[ST-001]]` 引用永不搬家。
+        // 身份（id）与位置（文件名 / 目录名）分离：改名只动一处，`[[T-121]]` 引用永不搬家。
         const stem = meta.id.slice(kinds[e.kind].prefix.length + 1)
         const parentDir = e.rel.split('/').at(-2)
         const ok = e.name === `${stem}.md` || (e.name === 'README.md' && parentDir === stem)

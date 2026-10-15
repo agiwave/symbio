@@ -39,7 +39,7 @@ impl Seq {
 /// 事件时间戳：Unix 毫秒（UTC），口径同 [`crate::symbio_core::clock_now_ms`]。
 pub type Timestamp = i64;
 
-// ── 事件名字表（S01：turn/* 全部，[roadmap/S01 §3](../../../../docs/003-stage/001-最小闭环.md "ST-001-最小闭环")）────
+// ── 事件名字表（S01：turn/* 全部，[roadmap/S01 §3](../../../../docs/009-task/121-最小闭环.md "T-121-最小闭环")）────
 //
 // 名字是**数据**（加名字不加枚举，01 §6）；但名字必须**单点定义**——散在调用点的
 // 字符串字面量必然漂移（同 merge_supplements 的单点判据）。常量只钉名字，
@@ -138,7 +138,7 @@ pub const EVENT_ASSISTANT_FALLBACK: &str = "chat.assistant.fallback";
 /// 进不进请求包相反，混在一处必然让其中一半被静默滤掉。
 pub const EVENT_ASSISTANT_PROGRESS: &str = "chat.assistant.progress";
 
-// ── 产物格子（S02 §3，[roadmap/002-工具调用与产物.md](../../../../docs/003-stage/002-工具调用与产物.md "ST-002-工具调用与产物")）──
+// ── 产物格子（S02 §3，[roadmap/002-工具调用与产物.md](../../../../docs/009-task/122-工具调用与产物.md "T-122-工具调用与产物")）──
 //
 // 工具**结果**是产物事实：模型请求了工具、工具产出了这段东西。工具调用**本身**
 // 不单独占格（同一件事两格必然漂移）；`produced_by` 指向**本轮用户格**，即
@@ -246,7 +246,7 @@ pub const EVENT_MESSAGE_REMOVED: &str = "message.removed";
 /// 一次压缩 = 多一条快照事件 + 把被取代的前缀移入归档段。
 pub const EVENT_SESSION_CONSOLIDATED: &str = "session.consolidated";
 
-// ── 记忆格子（S5，[roadmap/S06 §3](../../../../docs/003-stage/006-长期记忆与语义检索.md "ST-006-长期记忆与语义检索")）────
+// ── 记忆格子（S5，[roadmap/S06 §3](../../../../docs/009-task/126-长期记忆与语义检索.md "T-126-长期记忆与语义检索")）────
 
 /// 编码：学到的语义内容 + embedding（`payload: { content, tag, generation, vec }`）。
 /// 落在 `memory × opened`。**记忆必带溯源**（I2 扩展：溯源覆盖 100%）。
@@ -274,7 +274,7 @@ pub const EVENT_MEMORY_RECALLED: &str = "memory.recalled";
 /// 收束族，**不开第二写通道**——I1）。
 pub const EVENT_MEMORY_CALIBRATED: &str = "memory.calibrated";
 
-// ── 承诺格子（S6 第 15 步，[roadmap/S08 §3](../../../../docs/003-stage/008-多主体与对等承诺.md "ST-008-多主体与对等承诺")）──
+// ── 承诺格子（S6 第 15 步，[roadmap/S08 §3](../../../../docs/009-task/128-多主体与对等承诺.md "T-128-多主体与对等承诺")）──
 //
 // 立约 = `commitment` 实体的一格事件（**加格子，不加机制**——对等协作是图，
 // 子智能体递归的树表达不了，才需要这组格子）。声誉是它的投影（`projection = reputation`）。
@@ -290,7 +290,7 @@ pub const EVENT_COMMITMENT_BROKEN: &str = "commitment.broken";
 /// 落在 `commitment × asserted`。
 pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
 
-// ── 任务格子（S7 第 16–18 步，[roadmap/S03 §3](../../../../docs/003-stage/003-多步任务与返工.md "ST-003-多步任务与返工")）──
+// ── 任务格子（S7 第 16–18 步，[roadmap/S03 §3](../../../../docs/009-task/123-多步任务与返工.md "T-123-多步任务与返工")）──
 //
 // 任务图（DAG）= 事件的 `depends_on` 载荷字段——**数据，不是机制**；
 // 返工 = 新增一条事件（`task.rework_created`），不是修改历史（append-only
@@ -303,7 +303,7 @@ pub const EVENT_COMMITMENT_ASSERTED: &str = "commitment.asserted";
 pub const EVENT_TASK_OPENED: &str = "task.opened";
 /// 推进：执行中的普通事实。落在 `task × progressed`。
 pub const EVENT_TASK_PROGRESS: &str = "task.progress";
-/// 暂挂（插话抢占 / 等外部资源；[roadmap/S07](../../../../docs/003-stage/007-插话与实时打断.md "ST-007-插话与实时打断")
+/// 暂挂（插话抢占 / 等外部资源；[roadmap/S07](../../../../docs/009-task/127-插话与实时打断.md "T-127-插话与实时打断")
 /// 里这一格的事件名叫 `task.blocked`，本仓库以 `task.held` 单点定义）。
 /// 落在 `task × held`。
 pub const EVENT_TASK_HELD: &str = "task.held";
@@ -313,8 +313,8 @@ pub const EVENT_TASK_ASSERTED: &str = "task.asserted";
 /// 落在 `task × asserted`（返工本身是一次质量判定的事实）。
 pub const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
 
-// ── 控制格子（S8 第 19–20 步，[roadmap/S07 §3](../../../../docs/003-stage/007-插话与实时打断.md "ST-007-插话与实时打断")、
-//    [roadmap/S09 §3](../../../../docs/003-stage/009-外部执行与熔断.md "ST-009-外部执行与熔断")）────
+// ── 控制格子（S8 第 19–20 步，[roadmap/S07 §3](../../../../docs/009-task/127-插话与实时打断.md "T-127-插话与实时打断")、
+//    [roadmap/S09 §3](../../../../docs/009-task/129-外部执行与熔断.md "T-129-外部执行与熔断")）────
 //
 // 打断信号与熔断**共用一格**：`control/opened`（kinds 都是 `task.controlled`，
 // 以载荷 `reason` 区分）——插话的"停/继续/改道"与外部的"熔断"是同一类事实：
@@ -325,7 +325,7 @@ pub const EVENT_TASK_REWORK_CREATED: &str = "task.rework_created";
 /// 判定者不得直接发言（S07 §5）。
 pub const EVENT_CONTROL_OPENED: &str = "task.controlled";
 
-// ── 系统与「欲」格子（S9 第 21 步，[roadmap/S12 §3](../../../../docs/003-stage/012-自主层与长期目标.md "ST-012-自主层与长期目标")）──
+// ── 系统与「欲」格子（S9 第 21 步，[roadmap/S12 §3](../../../../docs/009-task/132-自主层与长期目标.md "T-132-自主层与长期目标")）──
 //
 // 自主层**不是新架构层**：定时触发 = 触发器产出事件（不是旁路）；长目标 = 一条
 // `task.opened`，`budget_ms = 86400000`（四层时延的第四个取值，同一参数）；
@@ -341,7 +341,7 @@ pub const EVENT_SYSTEM_HEALTH: &str = "system.health";
 /// 落在 `conation × opened`。
 pub const EVENT_CONATION_EXPRESSED: &str = "conation.expressed";
 
-// ── 裁决格子（S13 §3，[roadmap/S13](../../../../docs/003-stage/013-多智能体社会.md "ST-013-多智能体社会")）──
+// ── 裁决格子（S13 §3，[roadmap/S13](../../../../docs/009-task/133-多智能体社会.md "T-133-多智能体社会")）──
 //
 // 集体决策 = 「多个主体对同一 verdict 的竞争 + 仲裁者」：`verdict` 实体（F5 闭集
 // 里一直有这一行）在 S13 取的第一个值就是**淘汰裁决**——声誉投影低于阈值的主体

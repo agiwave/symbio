@@ -3,7 +3,7 @@
 //!
 //! 彩排把 S0 的地基（store / projection / invariants）与 S1 的 ② `actors`
 //! 拧成一条完整链路，验收断言逐条对应
-//! [roadmap/S01 §6](../../../../docs/003-stage/001-最小闭环.md "ST-001-最小闭环")。
+//! [roadmap/S01 §6](../../../../docs/009-task/121-最小闭环.md "T-121-最小闭环")。
 
 use super::*;
 use crate::symbio_core::event::{
@@ -999,7 +999,7 @@ fn reputation_double_run_is_identical_and_as_of_safe() {
     assert_eq!(now.of("agent:b").score, 0, "违约计入后声誉下降");
 }
 
-// ── S13 淘汰回路（[roadmap/S13 §6](../../../../docs/003-stage/013-多智能体社会.md "ST-013-多智能体社会") 断言 2/3/4，T-073）──
+// ── S13 淘汰回路（[roadmap/S13 §6](../../../../docs/009-task/133-多智能体社会.md "T-133-多智能体社会") 断言 2/3/4，T-073）──
 
 use crate::symbio_core::actors::EliminationDecider;
 use crate::symbio_core::authz::PRINCIPAL_ARBITER;
@@ -1682,7 +1682,7 @@ fn suspended_task_leaves_readyset_and_restores() {
 ///
 /// 判据走**生产表**（`matrix_for`），不是自造矩阵：自造一份 `PrincipalPolicy::paired`
 /// 只证明「我拒我」——表里少一行 `agent:reflex`，它照样绿，而生产里 `matrix_for` 的
-/// 派生分支早把主智能体整套（含 `reply.*`）给了判定者（ST-012 §3.1 批评的正是这个形态）。
+/// 派生分支早把主智能体整套（含 `reply.*`）给了判定者（T-132 §3.1 批评的正是这个形态）。
 #[test]
 fn preemption_decider_cannot_speak() {
     use crate::symbio_core::authz::{matrix_for, PRINCIPAL_REFLEX};

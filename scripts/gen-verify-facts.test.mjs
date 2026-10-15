@@ -205,7 +205,7 @@ const fixture = (over = {}) => ({
   frameMd: FRAME,
   ladderMd: LADDER,
   stageMds: { S01, S02, S10 },
-  dirEntries: ['000-路线图总览.md', '001-a.md', '002-b.md', '010-c.md'],
+  dirEntries: ['120-路线图总览.md', '121-a.md', '122-b.md', '130-c.md'],
   ...over,
 })
 
@@ -300,7 +300,7 @@ test('反向：删掉总表的一行而阶文件还在 ⇒ 名册与目录不配
 
 test('反向：删掉一篇阶文档而总表还声明着它 ⇒ 同一条不配对', () => {
   assert.throws(
-    () => buildFacts(fixture({ dirEntries: ['000-路线图总览.md', '001-a.md'] })),
+    () => buildFacts(fixture({ dirEntries: ['120-路线图总览.md', '121-a.md'] })),
     /不是一对一同名/,
   )
 })
@@ -557,7 +557,7 @@ test('反向：S10 那篇读不到 ⇒ 抛错，而不是产出一份没有需�
         fixture({
           ladderMd: LADDER.replace(/^.*S10.*$/m, ''),
           stageMds: { S01, S02 },
-          dirEntries: ['000-路线图总览.md', '001-a.md', '002-b.md'],
+          dirEntries: ['120-路线图总览.md', '121-a.md', '122-b.md'],
         }),
       ),
     /没有 S10 阶文档/,
@@ -593,7 +593,7 @@ test('真实 02 读得出坐标系：名册、定义表与三处声明吃的是�
 })
 
 test('真实 S10 读得出 16 条认知需求，其中恰有一条不占参数面', () => {
-  const s10 = fs.readFileSync(path.join(REPO, 'docs', '003-stage', '010-个人认知体系注入.md'), 'utf8')
+  const s10 = fs.readFileSync(path.join(REPO, 'docs', '009-task', '130-个人认知体系注入.md'), 'utf8')
   const ds = demandsOf(s10, 'S10')
   assert.equal(ds.length, 16, 'S10 §2 与 03 §7.1 都说 16 条——数一下，别信')
   assert.equal(ds.filter((d) => !d.assignments.length).length, 1, '只有 C06（索引）不占参数面')

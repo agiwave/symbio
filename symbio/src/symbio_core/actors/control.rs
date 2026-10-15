@@ -1,4 +1,4 @@
-//! 控制面主体：抢占判定（[roadmap/S07](../../../../docs/003-stage/007-插话与实时打断.md "ST-007-插话与实时打断")）、外部执行闸门（[roadmap/S09](../../../../docs/003-stage/009-外部执行与熔断.md "ST-009-外部执行与熔断")）与淘汰回路（[roadmap/S13](../../../../docs/003-stage/013-多智能体社会.md "ST-013-多智能体社会")）。
+//! 控制面主体：抢占判定（[roadmap/S07](../../../../docs/009-task/127-插话与实时打断.md "T-127-插话与实时打断")）、外部执行闸门（[roadmap/S09](../../../../docs/009-task/129-外部执行与熔断.md "T-129-外部执行与熔断")）与淘汰回路（[roadmap/S13](../../../../docs/009-task/133-多智能体社会.md "T-133-多智能体社会")）。
 
 use crate::symbio_core::authz::{PRINCIPAL_ARBITER, PRINCIPAL_REFLEX};
 use crate::symbio_core::governance::GrantsChange;
@@ -19,7 +19,7 @@ pub enum Preemption {
     TimeoutDefaultContinue,
 }
 
-/// 抢占判定者（S8 第 19 步，[roadmap/S07 §3](../../../../docs/003-stage/007-插话与实时打断.md "ST-007-插话与实时打断")）。
+/// 抢占判定者（S8 第 19 步，[roadmap/S07 §3](../../../../docs/009-task/127-插话与实时打断.md "T-127-插话与实时打断")）。
 ///
 /// `pattern = decider`、`capabilities = [JudgeIntent]`、`budget_ms = 80`——
 /// 系统第一次需要在几十毫秒内对外部信号做决策。**判定者只产控制事件**
@@ -175,7 +175,7 @@ impl PreemptionDecider {
     }
 }
 
-/// 闸门结论（S8 第 20 步，[roadmap/S09 §6](../../../../docs/003-stage/009-外部执行与熔断.md "ST-009-外部执行与熔断")）。
+/// 闸门结论（S8 第 20 步，[roadmap/S09 §6](../../../../docs/009-task/129-外部执行与熔断.md "T-129-外部执行与熔断")）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GateDecision {
     /// 未授权——调用方**不得产生任何事件**（验收 1：拒绝且无事件）。
@@ -187,7 +187,7 @@ pub enum GateDecision {
     Allow,
 }
 
-/// 熔断闸门（S8 第 20 步，[roadmap/S09](../../../../docs/003-stage/009-外部执行与熔断.md "ST-009-外部执行与熔断")）。
+/// 熔断闸门（S8 第 20 步，[roadmap/S09](../../../../docs/009-task/129-外部执行与熔断.md "T-129-外部执行与熔断")）。
 ///
 /// `budget_ms = 80` 的反射档判定：超预算 / 超时**熔断**而不是"先做了再说"。
 /// 授权判定留在调用方（读路径持矩阵）——本体的输入是判据数据，不是 ⑥ 的句柄。
@@ -239,7 +239,7 @@ impl CircuitBreaker {
     }
 }
 
-/// 淘汰判定者（S13 §3，[roadmap/S13 §2/§3](../../../../docs/003-stage/013-多智能体社会.md "ST-013-多智能体社会")）：
+/// 淘汰判定者（S13 §3，[roadmap/S13 §2/§3](../../../../docs/009-task/133-多智能体社会.md "T-133-多智能体社会")）：
 /// 声誉投影低于阈值 ⇒ 收回 `assign.work` 的**裁决侧**。
 ///
 /// 与 [`PreemptionDecider`] 同形而同用：判定是**纯函数**（读视图出结论），落格是

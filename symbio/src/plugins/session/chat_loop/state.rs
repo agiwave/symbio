@@ -78,11 +78,11 @@ pub(crate) fn request_actor_spec(
 /// 本请求会话的**作用域**（[T-105] 的第一个生产构造点）：`agent_run` 派生的子会话
 /// 挂在**父主体**的作用域下（`Scope::Child(parent)`），顶层会话 ⇒ `Scope::Root`。
 ///
-/// ## 语义（[ST-008 §3.2](../../../../../docs/003-stage/008-多主体与对等承诺.md "ST-008-多主体与对等承诺")）
+/// ## 语义（[T-128 §3.2](../../../../../docs/009-task/128-多主体与对等承诺.md "T-128-多主体与对等承诺")）
 ///
 /// `scope` 是**权威的上限**，不是许可本身：子主体的每一格收束除按自己那一行判，
 /// 还要父主体也持同一项能力（**委派不放大权威**，读方 = `turn_runner::closure_granted`）。
-/// 这正是 ST-008 §2 的分界——递归是树（`Child`），协作是图（对等主体 `Root`）。
+/// 这正是 T-128 §2 的分界——递归是树（`Child`），协作是图（对等主体 `Root`）。
 ///
 /// ## 为什么取值点在这里（而不是在 `agent_run` 里）
 ///
@@ -222,7 +222,7 @@ pub(crate) struct TurnState {
     /// → `v2_tasks::write`），中间隔着同一段本轮收尾，所以要有个请求作用域的量存它。
     pub(crate) task_decls: Vec<crate::plugins::session::tools::TaskDeclaration>,
     /// 本轮**外部执行闸门判熔断**的理由（[04 §3.1 批⑩](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")，
-    /// S8 步 20，[roadmap/S09 §6](../../../../../docs/003-stage/009-外部执行与熔断.md "ST-009-外部执行与熔断") 验收 2）。
+    /// S8 步 20，[roadmap/S09 §6](../../../../../docs/009-task/129-外部执行与熔断.md "T-129-外部执行与熔断") 验收 2）。
     ///
     /// 形态与 [`TurnState::task_decls`] 对称：工具执行层填（`process_tool_calls_async`
     /// 的出参），轮末收束入格（`v2_facts::record_derived` → `CircuitBreaker::break_event`）。

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::symbio_core::PluginInvokeRequest;
 use crate::symbio_core::{authz, PluginInvokeRequestExt};
 
-/// 任务表写侧闸的**判据**（[roadmap/S03 §3](../../../../../../docs/003-stage/003-多步任务与返工.md "ST-003-多步任务与返工")）：
+/// 任务表写侧闸的**判据**（[roadmap/S03 §3](../../../../../../docs/009-task/123-多步任务与返工.md "T-123-多步任务与返工")）：
 /// 本会话主体能否写任务表（`todo_write`）。
 ///
 /// ## 为什么是**两项能力 或**
