@@ -731,6 +731,22 @@ impl SymbioClient {
             .unwrap_or_else(|| "default（系统目录配置）".to_string())
     }
 
+    /// 全局收尾（T-078）：对整棵插件树发一次 `stop(PluginStopReason::Shutdown)`。
+    ///
+    /// 调用点 = `main` 的**唯一出口**——四种使用方式（心跳守护 / 单条消息 /
+    /// 管道 / REPL）跑完各自返回，`main` 统一在本方法里收尾，任何一种用法的
+    /// 退出路径都不会漏。插件借此做最后落盘（心跳任务、会话状态等）。
+    pub async fn shutdown(&self) {
+        if let Err(e) = self
+            .root
+            .clone()
+            .stop(symbio::symbio_core::PluginStopReason::Shutdown)
+            .await
+        {
+            eprintln!("收尾插件树失败: {e}");
+        }
+    }
+
     /// 读当前会话的读数并打到 stderr（REPL 的 `/stats`，P4）。
     ///
     /// ## 本方法是**渲染器**，不是统计器

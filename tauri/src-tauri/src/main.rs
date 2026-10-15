@@ -107,6 +107,27 @@ fn main() {
             commands::route_v2_send,
             commands::route_v2_close,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // 全局收尾（T-078）：事件循环结束时对整棵插件树发一次
+            // `stop(PluginStopReason::Shutdown)`，让插件做最后落盘（心跳任务、
+            // 会话状态等）。遍历 owner 是 `PluginRegistry::shutdown_all`，
+            // CLI 的退出路径走的是同一条——两个前端一种语义。
+            if let tauri::RunEvent::Exit = event {
+                if let Some(state) = app_handle.try_state::<AppState>() {
+                    let root = state.root.clone();
+                    tauri::async_runtime::block_on(async move {
+                        if let Err(e) = root
+                            .stop(symbio::symbio_core::PluginStopReason::Shutdown)
+                            .await
+                        {
+                            tracing::warn!(error = %e, "root plugin stop(Shutdown) failed");
+                        } else {
+                            info!("root plugin stopped (Shutdown)");
+                        }
+                    });
+                }
+            }
+        });
 }

@@ -80,7 +80,7 @@ async fn main() -> ExitCode {
         eprintln!("      如需指定其它系统目录，用 --homedir <路径>。");
     }
 
-    let client = match SymbioClient::start(
+    let mut client = match SymbioClient::start(
         &args.homedir,
         &args.workdir,
         args.session.clone(),
@@ -97,20 +97,25 @@ async fn main() -> ExitCode {
         }
     };
 
-    // 判定使用方式：心跳守护 > 显式消息 > 强制 REPL > 管道输入（非终端）> 交互 REPL
-    if args.heartbeat {
-        return run_heartbeat_daemon(client, &args).await;
-    }
-    if args.message.is_some() {
-        return run_once(client, args.message.clone(), &args).await;
-    }
-    if args.repl {
-        return run_repl(client, &args).await;
-    }
-    if !std::io::stdin().is_terminal() {
-        return run_once(client, None, &args).await;
-    }
-    run_repl(client, &args).await
+    // 判定使用方式：心跳守护 > 显式消息 > 强制 REPL > 管道输入（非终端）> 交互 REPL。
+    //
+    // 各分支只产出**退出码**，`client` 以可变借用进入——进程退出前的全局收尾
+    // （整树 `stop(Shutdown)`，T-078）收在下面的唯一出口，四种用法的退出路径
+    // 都不会漏（收尾散进各分支，第三种用法出现时最容易漏掉）。
+    let exit = if args.heartbeat {
+        run_heartbeat_daemon(&mut client, &args).await
+    } else if args.message.is_some() {
+        run_once(&mut client, args.message.clone(), &args).await
+    } else if args.repl {
+        run_repl(&mut client, &args).await
+    } else if !std::io::stdin().is_terminal() {
+        run_once(&mut client, None, &args).await
+    } else {
+        run_repl(&mut client, &args).await
+    };
+
+    client.shutdown().await;
+    exit
 }
 
 /// 心跳守护模式：常驻宿主 session 插件的后台心跳调度器。
@@ -128,7 +133,7 @@ async fn main() -> ExitCode {
 ///
 /// 判据仍然是会话节点的运行态：`status` 离开 `working` 即为本轮结束，
 /// 结局从 `attributes` 读（`error` = 失败，`outcome == aborted` = 中止）。
-async fn run_heartbeat_daemon(mut client: SymbioClient, args: &args::Args) -> ExitCode {
+async fn run_heartbeat_daemon(client: &mut SymbioClient, args: &args::Args) -> ExitCode {
     if !args.quiet {
         eprintln!("Symbio CLI（心跳守护模式）");
         eprintln!(
@@ -197,7 +202,7 @@ async fn run_heartbeat_daemon(mut client: SymbioClient, args: &args::Args) -> Ex
 }
 
 /// 非交互：发送一条消息，成功则退出码 0。
-async fn run_once(mut client: SymbioClient, inline: Option<String>, args: &args::Args) -> ExitCode {
+async fn run_once(client: &mut SymbioClient, inline: Option<String>, args: &args::Args) -> ExitCode {
     let mut renderer = Renderer::new(args.quiet, args.verbose);
 
     let message = match inline {
@@ -238,7 +243,7 @@ async fn run_once(mut client: SymbioClient, inline: Option<String>, args: &args:
 }
 
 /// 交互式 REPL：多轮对话，内置少量会话级命令。
-async fn run_repl(mut client: SymbioClient, args: &args::Args) -> ExitCode {
+async fn run_repl(client: &mut SymbioClient, args: &args::Args) -> ExitCode {
     let mut renderer = Renderer::new(args.quiet, args.verbose);
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
 
@@ -277,7 +282,7 @@ async fn run_repl(mut client: SymbioClient, args: &args::Args) -> ExitCode {
         }
 
         if let Some(rest) = input.strip_prefix('/') {
-            match handle_command(&mut client, rest).await {
+            match handle_command(&mut *client, rest).await {
                 Ok(true) => continue,
                 Ok(false) => break,
                 Err(e) => eprintln!("✖ {e}"),

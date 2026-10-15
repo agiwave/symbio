@@ -35,8 +35,8 @@ use super::vdfs::CompositeVdfs;
 use crate::symbio_core::descend_addr;
 use crate::symbio_core::{
     lock_read, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, VdfsProvider, CAPABILITY_VISITOR, PATH,
-    PLUGIN_ID_COMPOSITE, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
+    PluginInvokeResponse, PluginMeta, PluginPayload, PluginStopReason, VdfsProvider,
+    CAPABILITY_VISITOR, PATH, PLUGIN_ID_COMPOSITE, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
 };
 
 use std::sync::{Arc, Weak};
@@ -215,6 +215,20 @@ impl Plugin for Composite {
     fn get_vfs_provider(self: Arc<Self>) -> Option<Arc<dyn VdfsProvider>> {
         let root: Arc<dyn VdfsProvider> = self.vdfs.clone();
         Some(root)
+    }
+
+    /// 全局收尾（T-078）：`Shutdown` ⇒ 整树广播 `stop(Shutdown)`
+    /// （遍历 owner = [`PluginRegistry::shutdown_all`]）。
+    ///
+    /// 只有 `Shutdown` 走这条路：`Disabled` / `Uninstalled` 是对**单个插件**的处置
+    /// （插件管理插件直接对目标实例调 `stop`），容器收到那两个理由时无事可做——
+    /// 容器自身没有要清理的东西。整树停机由此**只需一个调用点**：前端进程在退出
+    /// 路径上对本根调一次 `stop(Shutdown)`，全部已装配插件各收恰一次。
+    async fn stop(self: Arc<Self>, reason: PluginStopReason) -> Result<(), PluginError> {
+        if reason == PluginStopReason::Shutdown {
+            self.registry.shutdown_all().await;
+        }
+        Ok(())
     }
 }
 

@@ -148,6 +148,21 @@ impl PluginRegistry {
             .collect()
     }
 
+    /// 全局收尾（T-078）：整树停机——对**每一个已挂载插件**发恰一次
+    /// `stop(PluginStopReason::Shutdown)`，单家失败只留痕、不拦其余。
+    ///
+    /// 与停用/卸载是**两条路**：那些是对单个插件的处置（走插件管理插件的注册表
+    /// 动词、理由是 `Disabled` / `Uninstalled`）；这里是对全表的广播，语义是
+    /// 「进程要走了，各插件做最后落盘」。调用点 = 生产退出路径：CLI `main` 的
+    /// 唯一出口（`cli/src/main.rs`）与 Tauri 的 `RunEvent::Exit`。
+    pub async fn shutdown_all(&self) {
+        for (name, plugin) in self.snapshot() {
+            if let Err(e) = plugin.stop(PluginStopReason::Shutdown).await {
+                crate::plugin_warn!("composite", "收尾 {name} 失败：{e}");
+            }
+        }
+    }
+
     /// 构造者是否把 `name` 声明为必需（= 不可删除）
     pub fn is_required(&self, name: &str) -> bool {
         self.required.iter().any(|n| n == name)

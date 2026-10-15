@@ -96,6 +96,115 @@ fn host() -> Arc<dyn PluginInvokeRequest> {
     ctx
 }
 
+// ==================== 全局收尾：整树 stop(Shutdown)（T-078） ====================
+//
+// CLI / Tauri 的退出路径对本根调一次 `stop(Shutdown)`（ADR-033 的第三态收尾）。
+// 遍历 owner 是 `PluginRegistry::shutdown_all`；这里的探针钉三件事：
+// **每个子插件恰一次**、**理由可读**（`Shutdown`，不是 Disabled/Uninstalled）、
+// **单家失败不拦其余**（收尾是对全表的广播，一家报错不等于其余不用落盘）。
+
+/// 记录自己被 stop 的理由与次数；可配置为「stop 时报错」
+struct StopProbe {
+    stops: Mutex<Vec<&'static str>>,
+    fail_on_stop: bool,
+}
+
+impl StopProbe {
+    fn new(fail_on_stop: bool) -> Arc<Self> {
+        Arc::new(Self {
+            stops: Mutex::new(Vec::new()),
+            fail_on_stop,
+        })
+    }
+
+    fn reasons(&self) -> Vec<String> {
+        self.stops.lock().unwrap().iter().map(|s| s.to_string()).collect()
+    }
+}
+
+#[async_trait::async_trait]
+impl Plugin for StopProbe {
+    fn meta(&self) -> PluginMeta {
+        PluginMeta::new("stop-probe", "stop-probe")
+    }
+
+    async fn route(self: Arc<Self>, _ctx: Arc<dyn PluginInvokeRequest>) -> PluginInvokeResponse {
+        Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
+    }
+
+    async fn traverse(
+        self: Arc<Self>,
+        _path: String,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> PluginInvokeResponse {
+        Ok(PluginPayload::new(&Vec::<serde_json::Value>::new()))
+    }
+
+    async fn stop(self: Arc<Self>, reason: PluginStopReason) -> Result<(), PluginError> {
+        self.stops
+            .lock()
+            .unwrap()
+            .push(match reason {
+                PluginStopReason::Disabled => "Disabled",
+                PluginStopReason::Uninstalled => "Uninstalled",
+                PluginStopReason::Shutdown => "Shutdown",
+            });
+        if self.fail_on_stop {
+            Err(PluginError::InternalError("探针故意失败".into()))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// 整树收尾：`stop(Shutdown)` 广播到**每个**子插件、各恰一次、理由是 `Shutdown`
+#[tokio::test]
+async fn shutdown_broadcasts_to_every_child_exactly_once() {
+    let a = StopProbe::new(false);
+    let b = StopProbe::new(false);
+    let composite = composite_of(vec![
+        ("a", Arc::clone(&a) as Arc<dyn Plugin>),
+        ("b", Arc::clone(&b) as Arc<dyn Plugin>),
+    ]);
+
+    composite.clone().stop(PluginStopReason::Shutdown).await.unwrap();
+
+    assert_eq!(a.reasons(), vec!["Shutdown"], "a 应恰收一次 Shutdown");
+    assert_eq!(b.reasons(), vec!["Shutdown"], "b 应恰收一次 Shutdown");
+}
+
+/// 单家收尾失败**不拦其余**：广播继续，容器自身仍返回 Ok
+#[tokio::test]
+async fn shutdown_continues_past_a_failing_child() {
+    let bad = StopProbe::new(true);
+    let good = StopProbe::new(false);
+    let composite = composite_of(vec![
+        ("bad", Arc::clone(&bad) as Arc<dyn Plugin>),
+        ("good", Arc::clone(&good) as Arc<dyn Plugin>),
+    ]);
+
+    composite.clone().stop(PluginStopReason::Shutdown).await.unwrap();
+
+    assert_eq!(bad.reasons().len(), 1, "失败的那家也收到了 stop");
+    assert_eq!(good.reasons(), vec!["Shutdown"], "后面的插件照常收尾");
+}
+
+/// `Disabled` / `Uninstalled` 是对**单个插件**的处置，容器不把它们广播成整树停机
+#[tokio::test]
+async fn non_shutdown_reasons_do_not_broadcast() {
+    let a = StopProbe::new(false);
+    let composite = composite_of(vec![("a", Arc::clone(&a) as Arc<dyn Plugin>)]);
+
+    composite.clone().stop(PluginStopReason::Disabled).await.unwrap();
+    composite.clone().stop(PluginStopReason::Uninstalled).await.unwrap();
+
+    assert!(
+        a.reasons().is_empty(),
+        "容器收到非 Shutdown 理由时不应向子插件广播（实际: {:?}）",
+        a.reasons()
+    );
+}
+
 /// route 转发链：外层容器 → 内层容器 → 探针，父地址逐级续接成完整挂载点
 #[tokio::test]
 async fn route_chain_extends_parent_addr_per_level() {
