@@ -33,7 +33,7 @@
 
 顶层机制（总纲：[`docs/plan/PL-011-登记与汇总机制.md`](docs/plan/PL-011-登记与汇总机制.md)）：
 **仓内每一篇活跃 `.md` 都是一条登记**——开头是五行 front-matter（`kind` / `id` / `title` /
-`status` / `created`），**文件本身就是条目**，没有第二处登记表。九类 kind，
+`status` / `created`），**文件本身就是条目**，没有第二处登记表。十类 kind，
 目录按 kind 归一（`docs/<kind>/` + 模块文档就地），但**目录不参与判定**——`kind` 只来自 front-matter。
 `docs/` 下各级 `INDEX.md` 由脚本生成，**不手改**。
 

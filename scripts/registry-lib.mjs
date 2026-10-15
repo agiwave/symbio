@@ -11,11 +11,11 @@
  *
  *   1. **条目 = 数据**：每条任务 / 规范 / 决策 / **文档**都是一个带 front-matter 的单文档，
  *      编号、状态、依赖、证据全在机读字段里。**全仓一套编号规范**（RG-022 判形状）：
- *        · **编号条目**（九类 kind 都是）：`id` = 文件名（去 `.md`）=
- *          `<前缀>-<三位序号>[-名称]`，前缀闭集 `GO/ST/PL/T/ADR/SP/AR/RE/GU` 一 kind 一个；
+ *        · **编号条目**（十类 kind 都是）：`id` = 文件名（去 `.md`）=
+ *          `<前缀>-<三位序号>[-名称]`，前缀闭集 `GO/SC/ST/PL/T/ADR/SP/AR/RE/GU` 一 kind 一个；
  *        · **导航文档**（`README` / `INDEX`）：不发编号——通用名没有编号段、不构成命名空间，
  *          `id` = 仓根相对路径（去 `.md`），**禁止进 `deps`**（RG-023：依赖图只收编号条目）。
- *      文档类（goal/stage/plan/arch/ref/guide）仍**在位存放**（就近放置优先于按类归堆），
+ *      文档类（goal/scene/stage/plan/arch/ref/guide）仍**在位存放**（就近放置优先于按类归堆），
  *      `title` = 正文首个 H1（两面对账，RG-021）。
  *      **编号平铺不体现层级**：分解关系（总目标→子目标、大任务→小任务）走 `parent` 字段
  *      （RG-024 结构 / RG-025 父子状态一致性），层级只是投影（INDEX 分解树小节、board
@@ -132,6 +132,10 @@ const docKind = (label, blurb, retiredStates = ['retired']) => ({
 
 export const KINDS = {
   goal: docKind('目标', '要达成什么——价值主张与可度量的验收判据'),
+  // `scene` 是产品层的 kind：**用户拿它做什么**（角色 · 情境 · 用户判据）。
+  // 它与 `goal`（判据达成）、`stage`（迁移推进）不同轴——场景的状态回答
+  // 「这个场景的定义还算不算数」，与其它文档类同构。机制上与文档类零差异。
+  scene: docKind('场景', '用户拿它做什么——角色、情境与用户判据'),
   stage: docKind('阶段', '分几步走、现在在哪一步——路线图与能力扩充阶段'),
   // `index`：跨 kind 的登记总账（`docs/KIND-000-登记总账.md`）。它是**投影页**，
   // 与各 kind 的 `<前缀>-000-<X>汇总.md` 同形，只是位置在 `docs/` 根而不是某个
@@ -203,6 +207,7 @@ export const KINDS = {
  */
 export const ID_PREFIX = {
   goal: 'GO',
+  scene: 'SC',
   stage: 'ST',
   plan: 'PL',
   task: 'T',
@@ -218,7 +223,7 @@ export const ID_PREFIX = {
   index: 'KIND',
 }
 /** 编号条目的 id 形状（名称段可选，允许中文 / 点 / 连字符）。 */
-export const ENTRY_ID_RE = /^(GO|ST|PL|T|ADR|SP|AR|RE|GU|KIND)-[0-9]{3}[a-z]?(-[^\s/]+)?$/
+export const ENTRY_ID_RE = /^(GO|SC|ST|PL|T|ADR|SP|AR|RE|GU|KIND)-[0-9]{3}[a-z]?(-[^\s/]+)?$/
 /**
  * `adr` 的**域**闭集（归域规则见 [`docs/spec/SP-002.md`](../docs/spec/SP-002.md "SP-002")）。
  *
