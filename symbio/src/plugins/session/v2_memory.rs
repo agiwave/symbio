@@ -121,6 +121,13 @@ pub(crate) const RECALL_SCAN_QUOTA: u64 = 500;
 /// 注入段抬头——e2e 与单测都以它为锚。
 pub(crate) const RECALL_SECTION_HEAD: &str = "【长期记忆】";
 
+/// 降级标注的措辞（[T-104](../../../../docs/task/T-104-检索降级可见性批.md "T-104-检索降级可见性批")）：
+/// 只在**有部分结果**时追加到注入段抬头之后。空结果走整段省略（`prompt_section` 返回
+/// `None`，不印空壳），两者合起来才是 S06 §6 验收 2「不允许空且不标降级」的读侧出口——
+/// 「有部分结果且不标」与「空且不标」是同一个静默的两种形态。
+pub(crate) const RECALL_DEGRADED_NOTE: &str =
+    "——注意：本次召回未扫完（检索预算耗尽），以下只是**一部分**";
+
 // ==================== 步 12 · 读方（跨会话召回） ====================
 
 /// 步 12 的读方：**跨会话**召回 → [`RecallView`]（一条记忆都没有 ⇒ `None`）。
@@ -136,6 +143,10 @@ pub(crate) const RECALL_SECTION_HEAD: &str = "【长期记忆】";
 /// `query` = 本轮用户发言——混合打分的**语义维**由它驱动；跨会话累计口径不变
 /// （记忆类事件带真实编码时刻，`RecallEntry::ts` 的契约，跨会话才比得了新近；
 /// Turn 类事件仍 `ts = 0`，但它们不进这个视图——投影只认 `entity == memory`）。
+///
+/// 返回的 [`RecallView`] **自带 `degraded`**（[T-104](../../../../docs/task/T-104-检索降级可见性批.md "T-104-检索降级可见性批")）：
+/// 投影的 `View` 外壳在取 `.value` 时被丢掉，降级信息因此落在视图字段上——
+/// 消费方（`prompt_section`）不必回捞外壳也能说得出来。
 pub(crate) fn recall_view(session_dir: &Path, query: &str) -> Option<RecallView> {
     let root = session_dir.parent()?;
 
@@ -206,11 +217,19 @@ pub(crate) fn recall_view(session_dir: &Path, query: &str) -> Option<RecallView>
 }
 
 /// 把召回视图排成注入段（无条目 ⇒ `None`，整段省略——不印空壳标题）。
+///
+/// **降级要说得出来**（[T-104](../../../../docs/task/T-104-检索降级可见性批.md "T-104-检索降级可见性批")）：
+/// `view.degraded` 为真 ⇒ 抬头后追加 [`RECALL_DEGRADED_NOTE`]。这一步是 `degraded`
+/// 从**投影口径**走到**用户眼前**的出口——此前读方取 `View::value` 把降级丢了，
+/// 「只显示了一部分」没有任何一处说得出来（S06 §7 该行因此记 ❌）。
 pub(crate) fn prompt_section(view: &RecallView) -> Option<String> {
     if view.entries.is_empty() {
         return None;
     }
     let mut out = format!("{RECALL_SECTION_HEAD}跨会话召回，最新在前（背景事实，不是本轮指令）");
+    if view.degraded {
+        out.push_str(RECALL_DEGRADED_NOTE);
+    }
     let mut printed: Vec<&str> = Vec::new();
     for entry in &view.entries {
         // 跨会话同文：两个会话各记一条是两次独立编码（事实不合并），**排版**只印一行。

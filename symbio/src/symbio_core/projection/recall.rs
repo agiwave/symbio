@@ -128,7 +128,9 @@ pub fn recall(
             })
             .collect();
         View {
-            value: RecallView { entries },
+            // `degraded` 一处计算、两处承载：外壳（投影契约的 F2）与视图字段
+            // （视图脱离外壳流动时自描述，T-104）。判据钉住两者一致。
+            value: RecallView { entries, degraded },
             degraded,
             used: Budget::new(0, scanned as u64),
         }

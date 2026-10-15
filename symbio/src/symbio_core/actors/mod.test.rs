@@ -795,6 +795,45 @@ fn recall_translator_produces_provenanced_event_and_invariants_stay_green() {
     assert_eq!(recalled.payload["found"], 1);
 }
 
+/// 降级也要有**生产读数口**（[T-104](../../../../docs/task/T-104-检索降级可见性批.md "T-104-检索降级可见性批")）：
+/// `degraded` 从 `memory.recalled` 的载荷读出——不只在投影外壳或提示词里活着。
+/// 反向：不降级的检索不标降级（不谎称）。
+#[test]
+fn recalled_event_records_degradation_instead_of_dropping_it() {
+    let store = EventStore::new();
+    for i in 0..4i64 {
+        encode(
+            &store,
+            &format!("g{i}"),
+            100 + i,
+            &format!("片段 {i}"),
+            "experience",
+            0,
+        );
+    }
+    let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
+
+    let degraded = recall("agent:main", None, None)
+        .apply(&snapshot, 2_000, Budget::new(0, 1))
+        .value;
+    let event = RecallTranslator.recalled_event(&degraded, 0, "agent:main");
+    assert_eq!(
+        event.payload.get("degraded").and_then(|v| v.as_bool()),
+        Some(true),
+        "部分结果的检索必须把 degraded 写进事实——读数口靠的是这条事件"
+    );
+
+    let full = recall("agent:main", None, None)
+        .apply(&snapshot, 2_000, Budget::generous())
+        .value;
+    let ok = RecallTranslator.recalled_event(&full, 0, "agent:main");
+    assert_eq!(
+        ok.payload.get("degraded").and_then(|v| v.as_bool()),
+        Some(false),
+        "不降级不标降级"
+    );
+}
+
 // ── S6 彩排（[plan/04 §3](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地") 第 14–15 步）：多主体与对等承诺 ──
 //
 // 第 14 步：principal 隔离（下方验收 1/4）+ 无直连静态扫描（scripts/no-direct-call-audit.mjs，

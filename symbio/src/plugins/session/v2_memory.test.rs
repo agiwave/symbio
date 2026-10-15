@@ -11,7 +11,7 @@
 use super::{
     consolidate, encode, merge_with_fidelity, prompt_section, recall_view, record_recalled,
     EncodeContent, CONSOLIDATE_MIN_ENTRIES, ENCODE_MAX_CHARS, JUDGMENT_TAG, MEMORY_TAG,
-    MERGE_MAX_CHARS, RECALL_SECTION_HEAD,
+    MERGE_MAX_CHARS, RECALL_DEGRADED_NOTE, RECALL_SECTION_HEAD,
 };
 // 分句的地基本来就住共享内核（生产与 verify 共有同一份源码，见 `merge_kernel.rs`）。
 use super::merge_kernel::split_sentences;
@@ -730,6 +730,63 @@ fn prompt_section_prints_one_line_per_memory_and_nothing_when_empty() {
     assert!(prompt_section(&empty).is_none());
 
     std::fs::remove_dir_all(root.path()).ok();
+}
+
+/// 降级标注（[T-104](../../../../docs/task/T-104-检索降级可见性批.md "T-104-检索降级可见性批")）：
+/// 「只显示了一部分」必须**说得出来**——抬头的措辞先于正文；不降级时不加（不谎称降级）；
+/// 降级但零条目仍整段省略（不印「降级的空壳」）。
+///
+/// 这是 `degraded` 从**投影口径**走到**用户眼前**的出口判据：此前读方取 `View::value`
+/// 把降级丢了，静默的形态从「空且不标」变成「有部分结果且不标」——两者都是同一个静默。
+#[test]
+fn prompt_section_says_degraded_instead_of_pretending_completeness() {
+    let store = EventWalStore::open(tmp_wal("degraded")).expect("事实源");
+    for i in 0..5i64 {
+        seed_encoded(&store, &format!("deg-{i}"), &format!("片段 {i}"), 100 + i);
+    }
+    let snap = store.range(Seq::new(0));
+
+    // 降级视图：配额 1 ⇒ 扫到第二条即停（部分结果 + degraded）。
+    let degraded_view = recall(PRINCIPAL_USER, None, None)
+        .apply(&snap, i64::MAX, Budget::new(0, 1))
+        .value;
+    assert!(degraded_view.degraded, "判据前提：视图带降级标记");
+    assert!(!degraded_view.entries.is_empty(), "降级必须带部分结果");
+
+    let section = prompt_section(&degraded_view).expect("有条目 ⇒ 有段");
+    assert!(
+        section.contains(RECALL_DEGRADED_NOTE),
+        "降级时如实标注（不谎称完整）：{section}"
+    );
+    assert!(
+        section.find(RECALL_DEGRADED_NOTE).unwrap() < section.find("片段").unwrap(),
+        "标注在正文之前——读的人先看到「只是一部分」"
+    );
+
+    // 反向：充足预算 ⇒ 不加标注（不谎称降级）。
+    let full = recall(PRINCIPAL_USER, None, None)
+        .apply(&snap, i64::MAX, Budget::generous())
+        .value;
+    assert!(!full.degraded, "反转前提：本视图不降级");
+    let full_section = prompt_section(&full).expect("有条目 ⇒ 有段");
+    assert!(
+        !full_section.contains(RECALL_DEGRADED_NOTE),
+        "不降级不标注：{full_section}"
+    );
+    assert!(
+        full_section.contains("片段 4"),
+        "充足预算一条不漏（标注不是常驻抬头）"
+    );
+
+    // 反向：降级但**零条目** ⇒ 仍整段省略。生产不可达（配额 ≥ 1 时先扫到一条才降级），
+    // 但出口必须钉住：空却贴着「只是一部分」比空壳更糟。
+    let mut empty_degraded = degraded_view;
+    empty_degraded.entries.clear();
+    assert!(empty_degraded.degraded, "判据前提：仍然标着降级");
+    assert!(
+        prompt_section(&empty_degraded).is_none(),
+        "空视图不印「降级的空壳」"
+    );
 }
 
 // ==================== 步 12 · 写方（检索事实） ====================

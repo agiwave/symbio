@@ -304,9 +304,23 @@ fn exhausted_budget_degrades_with_partial_results_instead_of_silently_empty() {
         starved.value.entries.len() < snap.len(),
         "部分结果：配额内的真子集"
     );
+    // T-104：视图字段与投影外壳**必须一致**——外壳在 `recall_view` 取 `.value` 时被丢，
+    // 视图字段是消费方唯一能读到的降级信号；两者若漂移，出口说的与实际做的不符。
+    assert!(
+        starved.value.degraded,
+        "降级必须同时落进视图字段（T-104：视图脱离外壳流动时自描述）"
+    );
+    assert_eq!(
+        starved.value.degraded, starved.degraded,
+        "视图字段与外壳字段同源同值（一处计算、两处承载）"
+    );
 
     // 平凡值：充足预算 ⇒ 不降级、一条不漏。
     let generous = recall(VIEWER, None, None).apply(&snap, i64::MAX, Budget::generous());
     assert!(!generous.degraded, "配额充足不标降级");
     assert_eq!(generous.value.entries.len(), snap.len(), "一条不漏");
+    assert!(
+        !generous.value.degraded,
+        "不降级时视图字段也为假——不谎称降级（serde default 的同一口径）"
+    );
 }
