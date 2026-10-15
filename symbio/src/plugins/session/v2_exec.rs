@@ -23,11 +23,11 @@
 //!   就是新开一轮 ⇒ 走它会撞幂等键（`Duplicate`），既完不成收束也把本轮变成错误；
 //! - **开关默认关**：关着时候选集恒空，本轮照常走 `run_with_tools`。
 //!
-//! 一处**诚实缺口**：反射档把 `actor.budget_ms` 按档位派生
-//! （`LatencyTier::Reflex.budget_ms()`），但该字段在生产里仍**没有读方**
-//! （`invariants::declared_budget_ms` 读的是开轮载荷的 `tier` 字符串）。派生出的值
-//! 今天是"算了却看不见"——读方归 `invariants` 那一侧（它读 `tier` 还是读这个字段，
-//! 是那边的决定），见 `execute_turn` 里派生点旁的注记。
+//! 反射档把 `actor.budget_ms` 按档位派生（`LatencyTier::Reflex.budget_ms()`），
+//! 该值随主体走、并由 `execute_turn` 以**数值**写入开轮格载荷的 `budget_ms`
+//! （T-082 批①）——`invariants::declared_budget_ms` 优先读它，`ActorSpec.budget_ms`
+//! 于是有了真读方（此前是"算了却看不见"）。缺该数值的历史事件回退读 `tier`
+//! 字符串再映射，两条路径读的是**同一条事实的两种形态**，见 `declared_budget_ms` 文档。
 //!
 //! ## 收束派生事实（本模块已覆盖）
 //!
@@ -1265,12 +1265,10 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     // `tier` 与 `actor.budget_ms` 是**同一个事实**（一个入格、一个随主体走），
     // 故由前者派生后者——两处各写一遍迟早对不上（S11 §3 的 ActorSpec 行）。
     //
-    // **诚实缺口**：`ActorSpec.budget_ms` 在生产里**还没有读方**——`invariants` 的
-    // `declared_budget_ms` 读的是开轮载荷里的 `tier` **字符串**（再映射回同一个数）。
-    // 于是这里派生出的数是"算了却看不见"：不派生也不改变今天的行为。仍然派生的
-    // 理由 = 它是 I3 预算的**正确值**，读方接进来时不必回头改这里；而读方该读
-    // `tier` 还是该读这个字段（= 改事件载荷形状），是 `invariants` 那一侧的取舍，
-    // 本模块两个都不替它定。
+    // 读方（T-082 批①）：派生出的数值随主体走，`turn_runner` 开轮时以**数值**写入
+    // 载荷 `budget_ms`，`invariants::declared_budget_ms` 优先读它 ⇒ 该字段不再是
+    // "算了却看不见"。`tier` 仍入格（兜底率按层统计的口径锚），且作为缺 `budget_ms`
+    // 时的回退路径保留——两条路径读的是同一条事实的两种形态。
     let tier = if hit.is_some() {
         LatencyTier::Reflex
     } else {

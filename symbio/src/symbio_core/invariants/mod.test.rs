@@ -467,3 +467,91 @@ fn read_side_budget_follows_declared_tiers_and_skips_when_none_declared() {
         check_all(&undeclared)
     );
 }
+
+#[test]
+fn declared_budget_prefers_spec_numeric_and_falls_back_to_tier() {
+    // 两种形态同一条事实、同一来源（开轮载荷）。判据：**数值优先、档位回退**，
+    // 且回退只在缺数值时生效——两处形态至多一处被读（不是「取更宽的那个」）。
+
+    // ① 数值优先：档位 reflex(80) 会判超，但载荷声明了规格派生的 5000ms，
+    //    2000ms 的事件必须**不被**报——若读的是档位就会误红。
+    let numeric_wins = stored(vec![
+        Event::pending("u0", "user.message", Entity::Turn, Verb::Opened, 0, "user").with_payload(
+            serde_json::json!({ "text": "问", "tier": "reflex", "budget_ms": 5_000 }),
+        ),
+        Event::pending(
+            "s0",
+            "task.progress",
+            Entity::Task,
+            Verb::Progressed,
+            0,
+            "agent:autonomous",
+        )
+        .with_produced_by(0)
+        .with_cost_ms(2_000),
+    ]);
+    assert_eq!(
+        declared_budget_ms(&numeric_wins),
+        Some(5_000),
+        "载荷带 budget_ms 数值 ⇒ 取数值，不取档位映射"
+    );
+    assert!(
+        !check_all(&numeric_wins)
+            .iter()
+            .any(|v| v.why.contains("超")),
+        "数值优先：2000ms 未超 5000ms，不得报：{:?}",
+        check_all(&numeric_wins)
+    );
+
+    // ② 数值更严时照样红（证明它不是「只取更宽」，而是「数值说了算」）。
+    let numeric_strict = stored(vec![
+        Event::pending("u0", "user.message", Entity::Turn, Verb::Opened, 0, "user")
+            .with_payload(serde_json::json!({ "text": "问", "tier": "deep", "budget_ms": 50 })),
+        Event::pending(
+            "s0",
+            "task.progress",
+            Entity::Task,
+            Verb::Progressed,
+            0,
+            "agent:autonomous",
+        )
+        .with_produced_by(0)
+        .with_cost_ms(2_000),
+    ]);
+    assert_eq!(declared_budget_ms(&numeric_strict), Some(50));
+    assert!(
+        check_all(&numeric_strict)
+            .iter()
+            .any(|v| v.why.contains("超")),
+        "数值严于档位时也必须看见超预算：{:?}",
+        check_all(&numeric_strict)
+    );
+
+    // ③ 缺数值回退档位（向后兼容：接线前落的历史事件 / 旧 WAL）。
+    let tier_fallback = stored(vec![Event::pending(
+        "u0",
+        "user.message",
+        Entity::Turn,
+        Verb::Opened,
+        0,
+        "user",
+    )
+    .with_payload(serde_json::json!({ "text": "问", "tier": "reflex" }))]);
+    assert_eq!(
+        declared_budget_ms(&tier_fallback),
+        Some(80),
+        "无 budget_ms ⇒ 回退档位映射"
+    );
+
+    // ④ 两种形态都缺 ⇒ `None`（不判）。
+    let neither = stored(vec![Event::pending(
+        "u0",
+        "user.message",
+        Entity::Turn,
+        Verb::Opened,
+        0,
+        "user",
+    )
+    .with_payload(serde_json::json!({ "text": "问" }))]);
+    assert_eq!(declared_budget_ms(&neither), None);
+}

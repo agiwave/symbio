@@ -51,7 +51,7 @@ pub(crate) fn request_source_principal(
 /// | `principal` | [`request_principal`]（会话选定的 agent ⇒ 主体名） |
 /// | `capabilities` | **授权表行**（`matrix_for` ⇒ `grant_names_of`）——单一真源。此前是空表（`trivial` 的平凡值），能力集与授权表各说各话，没有任何东西对得上。T-082 批①起它有**真读方**：写侧收束闸 `turn_runner::closure_granted` 读规格自己的这份集合（`ActorSpec::can_land_speech` / `can_land_artifact`），不再回头查表 |
 /// | `pattern` | [`Pattern::for_principal`]（判据住在 core 的 actors 定义域，与授权表同源；主体类型名不散出 core——NDC-001 同纪律） |
-/// | `budget_ms` | 档位（与开轮格的 `tier` 同一个事实，调用方传入） |
+/// | `budget_ms` | 档位（与开轮格的 `tier` 同一个事实，调用方传入）。T-082 批①起它有**真读方**：`turn_runner` 开轮时把它以**数值**写入载荷 `budget_ms`，`invariants::declared_budget_ms` 优先读它（缺则回退 `tier` 映射）——「这一轮的预算声明」由此是一等数据，将来不同角色行不同预算也不必由档位反推 |
 /// | `scope` | `Root`（会话驱动的轮次都是根作用域） |
 ///
 /// [ADR-065]: ../../../../../docs/adr/ADR-065.md "ADR-065"

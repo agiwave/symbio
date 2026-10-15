@@ -736,6 +736,12 @@ impl TurnRunner {
                 let mut payload = serde_json::json!({
                     "text": text,
                     "tier": tier.name(),
+                    // 主体规格的时延预算（I3），T-082 批①：与 `tier` 同源
+                    // （`request_actor_spec` 由档位派生），但以**数值**入格——
+                    // `invariants::declared_budget_ms` 优先读它。于是「这一轮的预算
+                    // 声明」是一等数据（将来不同角色行不同预算，不必由档位反推），
+                    // `ActorSpec.budget_ms` 也由此有了真读方（此前"算了却看不见"）。
+                    "budget_ms": actor.budget_ms,
                     // 用户消息节点 id 入格：重建按它复刻节点身份（前端按 id 合并）。
                     "id": user_node_id,
                 });
@@ -1466,6 +1472,9 @@ impl TurnRunner {
                 .with_payload(serde_json::json!({
                     "text": utterance,
                     "tier": LatencyTier::Reflex.name(),
+                    // 规格派生的预算数值（T-082 批①），与深度档开轮格同一形状：
+                    // 读方 `invariants::declared_budget_ms` 优先读它。
+                    "budget_ms": actor.budget_ms,
                 })),
             )
             .map(|seq| seq.value())?;

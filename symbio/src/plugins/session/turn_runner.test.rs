@@ -2579,6 +2579,11 @@ mod reflex_turn_tests {
             open.payload["tier"], "reflex",
             "档位由令牌类型给出（RuleOnly ⇒ reflex），不是调用方填的字符串"
         );
+        assert_eq!(
+            open.payload["budget_ms"], actor.budget_ms,
+            "开轮格带**规格派生的预算数值**（T-082 批①）：读方 invariants 优先读它，\
+             ActorSpec.budget_ms 由此有真读方——此断言即写侧的存在证明"
+        );
         let close = &snapshot[1];
         assert_eq!(close.verb, Verb::Closed);
         assert_eq!(close.turn, 0);

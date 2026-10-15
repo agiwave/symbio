@@ -229,12 +229,18 @@ pub fn check_all(events: &[Event]) -> Vec<Violation> {
     all
 }
 
-/// 本切片**声明过**的档位里最宽的一档预算；一档都没声明 ⇒ `None`（C5 跳过）。
+/// 本切片**声明过**的预算里最宽的一档；一条都没声明 ⇒ `None`（C5 跳过）。
 ///
-/// 档位只从开轮事件（`user.message`）的载荷读——与 `projection::fallback` 的
-/// `declared_tier` 同一个字段、同一个 `LatencyTier::from_name`，只是问的问题
-/// 不同：那边是「这一轮归哪一档」（按轮归位），这边是「这份切片最宽的预算
-/// 是多少」（一个全局上界，因此不会误伤任何一档）。
+/// 预算声明有**两种形态**，同一条事实、同一个来源（开轮事件 `user.message` 的载荷）：
+/// - 一等形态：`budget_ms`（**数值**，写方 `turn_runner` 从 `ActorSpec.budget_ms` 取，
+///   即「这一轮的角色行声明了多少预算」）——优先读它。
+/// - 兼容形态：`tier`（档位名），经 `LatencyTier::from_name` 映射成预算——只在
+///   缺 `budget_ms` 时回退（接线前落的历史事件 / 旧 WAL）。回退是**向后兼容**，
+///   不是第二处判定：两种形态都不会同时被读，`or_else` 保证至多一处生效。
+///
+/// 与 `projection::fallback` 的 `declared_tier` 同一个字段族，只是问的问题不同：
+/// 那边是「这一轮归哪一档」（按轮归位），这边是「这份切片最宽的预算是多少」
+/// （一个全局上界，因此不会误伤任何一档）。
 fn declared_budget_ms(events: &[Event]) -> Option<u64> {
     events
         .iter()
@@ -243,9 +249,20 @@ fn declared_budget_ms(events: &[Event]) -> Option<u64> {
                 && e.verb == Verb::Opened
                 && e.kind == crate::symbio_core::event::EVENT_USER_MESSAGE
         })
-        .filter_map(|e| e.payload.get("tier").and_then(|v| v.as_str()))
-        .filter_map(crate::symbio_core::adapters::LatencyTier::from_name)
-        .map(|t| t.budget_ms())
+        .filter_map(|e| {
+            // 一等形态优先：规格派生的数值（见上方文档）。
+            e.payload
+                .get("budget_ms")
+                .and_then(|v| v.as_u64())
+                .or_else(|| {
+                    // 兼容形态：档位名映射（缺数值时的回退）。
+                    e.payload
+                        .get("tier")
+                        .and_then(|v| v.as_str())
+                        .and_then(crate::symbio_core::adapters::LatencyTier::from_name)
+                        .map(|t| t.budget_ms())
+                })
+        })
         .max()
 }
 
@@ -331,7 +348,8 @@ pub fn unresolved_turns(events: &[Event], allow_trailing_open: bool) -> Vec<Viol
 ///
 /// `None` = **本次判定没有预算** ⇒ 不判（返回空）。没有预算就没有「超」——
 /// 硬塞一个默认数会把正常流量整片报成违规，那才是首日假红。读侧由
-/// [`declared_budget_ms`] 供数：切片声明过档位才 `Some`。
+/// [`declared_budget_ms`] 供数：开轮载荷带规格派生的 `budget_ms` 数值优先，
+/// 缺失回退档位映射——两者都取不到才 `None`。
 pub fn budget_exceeded(events: &[Event], budget_ms: Option<u64>) -> Vec<Violation> {
     let Some(budget_ms) = budget_ms else {
         return Vec::new();
