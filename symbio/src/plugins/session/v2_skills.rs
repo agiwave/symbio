@@ -118,6 +118,12 @@ pub(crate) fn compile(
     ev.actor = PRINCIPAL_USER.to_string();
     ev.turn = turn;
     ev.ts = now;
+    // **内容侧可见域 = `shared`**（[T-117](../../../../docs/009-task/117-召回跨主体读侧预过滤批.md "T-117-召回跨主体读侧预过滤批")）：
+    // 技能是**固化的可复用经验**（成功轨迹的套路），与「经验」同属
+    // 「人的认知可供借用」（SC-010）——跨会话命中是它的设计意图（t35 证据②：
+    // B 会话命中 A 会话编译的技能，跨进程稳定判据）。缺席 = 缺省
+    // `thread_private` ⇒ 召回预过滤把它挡在编译会话之外，那条判据就断了。
+    ev.payload["vis_scope"] = serde_json::json!(crate::symbio_core::VisScope::Shared.name());
     let seq = store
         .append(ev)
         .map_err(|e| format!("memory.encoded{{tag:\"skill\"}} 入格失败：{e:?}"))?;

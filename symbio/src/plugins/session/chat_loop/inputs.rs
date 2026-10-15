@@ -173,8 +173,14 @@ pub(crate) async fn prepare_turn_inputs(
     // 但用户消息在步骤 3 之前已入列，两次取到的是同一条）。
     if turn.tool_rounds == 0 {
         let recall_query = last_user_text(context);
+        // 读方 = **本轮主体**（`request_principal`，与写事件的 actor 同一取值点）：
+        // 召回的可见切片按它收放（T-117）——判断记忆只给自己会话看，共享记忆只
+        // 给矩阵内的主体看。取值点不另立：判的是 A、看的是 B 就没有隔离可言。
+        let recall_viewer = request_principal(ctx.as_ref());
         turn.recall_view = match context.session.session_dir() {
-            Some(dir) => crate::plugins::session::v2_memory::recall_view(&dir, &recall_query),
+            Some(dir) => {
+                crate::plugins::session::v2_memory::recall_view(&dir, &recall_query, &recall_viewer)
+            }
             None => None,
         };
         // 调度段（S7 步 16–17，批⑨）：就绪任务集只读一次、本轮各工具轮复用——与

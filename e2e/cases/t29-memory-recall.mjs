@@ -34,6 +34,9 @@ import './_selfrun.mjs';
 // B 会话首轮的两面各自独立取证：**请求包**的注入段里带着 A 写下的那些记忆原句
 // （读的是真实请求体，不是用例写死的字符串），**B 的首轮回答**里也含那些原句
 // （转写经读出口读回）。两面合起来 = 「B 看得见 A 的记忆，且说出来了」。
+// [T-117](../../docs/009-task/117-召回跨主体读侧预过滤批.md "T-117-召回跨主体读侧预过滤批")
+// 起召回按内容侧可见域收放：可见的只有 A 的**经验**（shared）；A 的**判断**
+// （thread_private）不再跨会话可见——判断侧的巩固事实改从 A 的事实源直接核。
 //
 // ## 为什么 A 会话要跑 5 轮
 //
@@ -47,6 +50,7 @@ import {
   runCli,
   startReadbackCli,
   readSessionMessages,
+  readFileSyncSafe,
   nextPort,
   waitFor,
   assert,
@@ -56,6 +60,7 @@ import {
   PROVIDER_ID,
   assertTranscriptInvariants,
 } from '../helpers.mjs';
+import { join } from 'node:path';
 
 /** A / B 两个会话共用一个 homedir ⇒ 共用一个会话存储根，跨会话扫才扫得到。 */
 const SID_A = 'e2e-t29-a';
@@ -293,35 +298,56 @@ export default defineCase(
       // （实测 3 条记忆 + 6 行能力目录 = 9）。记忆段照旧三条，只是它不独占一条消息。
       const memSection = recallSectionText(reqs[5]);
       const lines = memSection.split('\n').filter((l) => l.startsWith('- '));
-      // 3 行经验（合并 + 周报 + 温水）。判断那一侧：A 五轮的答话去重后 4 条，
-      // 到第 5 轮收束时恰好够巩固门槛 ⇒ 最旧两条（好的记住了 + 明白了）被并成
-      // 一行 ⇒ 4 条判断占 3 行。**合并产物带原句**，所以按「答话在不在」数 4、
-      // 按「行数」数 3——两个数都对，且互相印证巩固确实发生过。
+      // 3 行经验（合并 + 周报 + 温水）——shared 的跨会话召回（T-094 写方取值，
+      // `agent:main` 是矩阵内主体）。
       assertEq(
         lines.filter((l) => [T_COFFEE, T_MEET, T_REPORT, T_WATER].some((t) => l.includes(t))).length,
         3,
         `跨会话召回三行经验（合并 + 周报 + 温水），实际: ${memSection}`,
       );
-      const answersKept = A_ANSWERS.filter((a) => memSection.includes(a));
+      // **判断记忆不出会话**（[T-117](../../docs/009-task/117-召回跨主体读侧预过滤批.md "T-117-召回跨主体读侧预过滤批")）：
+      // A 的答话是 thread_private（判断的生产写方取值），B 的召回段一条都不该有——
+      // 巩固产物随源记忆的可见域走（T-094：合并产物继承源）。判断侧的巩固事实
+      // 改从 A 的事实源直接核（见下），注入段这个通道已按可见域收窄。
+      const answersLeaked = A_ANSWERS.filter((a) => memSection.includes(a));
       assertEq(
-        answersKept.length,
-        4,
-        `A 五轮的判断（答话）去重后四条，合并产物带原句 ⇒ 四条都在，实际: ${memSection}`,
-      );
-      assertEq(
-        lines.filter((l) => A_ANSWERS.some((a) => l.includes(a))).length,
-        3,
-        `四条判断占 3 行：最旧两条已被巩固（T-085 批④ 的 CONSOLIDABLE_TAGS），实际: ${memSection}`,
-      );
-      assert(
-        memSection.includes(`${A_ANSWERS[0]}\n${A_ANSWERS[1]}`),
-        `判断的合并产物同样带两条原句，实际: ${memSection}`,
+        answersLeaked.length,
+        0,
+        `判断记忆不得跨会话可见（T-117 要消灭的泄漏；泄漏了: ${JSON.stringify(answersLeaked)}，实际: ${memSection}）`,
       );
       assert(memSection.includes(T_WATER), `活记忆在段内（实际: ${memSection}）`);
       assert(memSection.includes(T_REPORT), `活记忆在段内（实际: ${memSection}）`);
       assert(
         section.includes(`${T_COFFEE}\n${T_MEET}`),
-        `合并产物带两条源的原句（保真度 1 的落点，实际: ${section}）`,
+        `经验的合并产物带两条源的原句（保真度 1 的落点，实际: ${section}）`,
+      );
+
+      // ── 判断侧的巩固：从 A 的事实源直接核（注入段面已收窄，见上）──────────
+      // A 五轮的答话去重后 4 条判断，到第 5 轮收束时恰好够巩固门槛 ⇒ 最旧两条
+      // 被并成一条 `memory.consolidated{tag:判断}`：产物带两条原句、可见域继承
+      // thread_private。此前这条事实只有经 B 的注入段才看得见——那个通道被
+      // T-117 收窄后，事实源就是它的读面（巩固**发生了**与**给谁看**是两件事）。
+      const walA = join(hd.homedir, 'session', SID_A, 'v2-events.wal');
+      const aEvents = readFileSyncSafe(walA)
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l));
+      const jCons = aEvents.find(
+        (e) => e.kind === 'memory.consolidated' && e.payload?.tag === '判断',
+      );
+      assert(
+        jCons,
+        `判断侧应发生过巩固（最旧两条被并；实际 kinds: ${JSON.stringify(aEvents.map((e) => e.kind))}）`,
+      );
+      assert(
+        String(jCons.payload?.content ?? '').includes(A_ANSWERS[0]) &&
+          String(jCons.payload?.content ?? '').includes(A_ANSWERS[1]),
+        `判断的合并产物同样带两条原句，实际: ${JSON.stringify(jCons?.payload)}`,
+      );
+      assertEq(
+        jCons.payload?.vis_scope,
+        'thread_private',
+        '合并产物继承源记忆的可见域（T-094）——B 看不见它是预过滤的正确收放，不是巩固缺席',
       );
 
       // ── 跨会话召回的**对话内容面**：B 的首轮回答里含 A 写下的四句原话 ──────

@@ -64,6 +64,35 @@ fn seed_encoded(store: &EventWalStore, id: &str, content: &str, ts: i64) -> u64 
     seed_encoded_as(store, id, content, MEMORY_TAG, ts)
 }
 
+/// 种入一条 **`vis_scope = shared`** 的记忆（[T-117](../../../../docs/009-task/117-召回跨主体读侧预过滤批.md "T-117-召回跨主体读侧预过滤批")
+/// 的跨会话用例用）：经验类记忆的生产写方取值（`encode` 落 `shared`）。
+/// 与 [`seed_encoded`] 的差别只有载荷多一个字段——缺省（不带它）=
+/// `thread_private` ⇒ 跨会话不可见，跨会话判据想看见内容必须显式种成 shared。
+fn seed_shared(store: &EventWalStore, id: &str, content: &str, ts: i64) -> u64 {
+    store
+        .append(
+            Event::pending(
+                id.to_string(),
+                EVENT_MEMORY_ENCODED,
+                Entity::Memory,
+                Verb::Opened,
+                0,
+                PRINCIPAL_USER,
+            )
+            .with_produced_by(0)
+            .with_ts(ts)
+            .with_payload(serde_json::json!({
+                "content": content,
+                "tag": MEMORY_TAG,
+                "generation": 0u32,
+                "vec": [],
+                "vis_scope": "shared",
+            })),
+        )
+        .expect("种子入格")
+        .value()
+}
+
 /// 种入一条 `memory.consolidated`——代数由形参给，代数上界的拒收分支非它不可达。
 fn seed_consolidated(
     store: &EventWalStore,
@@ -745,9 +774,9 @@ fn recall_view_scans_neighbour_sessions_newest_first() {
         .expect("遗忘格入格");
 
     let wal_b = EventWalStore::open(b.join(V2_WAL_FILE)).expect("B 的事实源");
-    seed_encoded(&wal_b, "b1", "B 的记忆", 2000);
+    seed_shared(&wal_b, "b1", "B 的记忆", 2000);
 
-    let view = recall_view(&a, "").expect("两个会话都有记忆");
+    let view = recall_view(&a, "", "agent:main").expect("两个会话都有记忆");
     let contents: Vec<&str> = view.entries.iter().map(|e| e.content.as_str()).collect();
     assert_eq!(
         contents,
@@ -759,7 +788,10 @@ fn recall_view_scans_neighbour_sessions_newest_first() {
     let empty_root = tempfile::tempdir().expect("空临时根");
     let none_dir = empty_root.path().join("s-none");
     std::fs::create_dir_all(&none_dir).expect("空会话目录");
-    assert!(recall_view(&none_dir, "").is_none(), "没记忆就不产出视图");
+    assert!(
+        recall_view(&none_dir, "", "agent:main").is_none(),
+        "没记忆就不产出视图"
+    );
 }
 
 /// 步 12 读方**消费混合打分**（T-085 批②）：本轮用户正文作 query 时，
@@ -783,7 +815,7 @@ fn recall_view_consumes_the_query_so_relevant_old_memories_rank_first() {
     seed_encoded(&wal, "q-new-1", "今天改了 README 的一段说明", 9000);
     seed_encoded(&wal, "q-new-2", "调整了日志级别，减少噪声", 8000);
 
-    let view = recall_view(&a, "数据库连接池打满怎么办").expect("有记忆");
+    let view = recall_view(&a, "数据库连接池打满怎么办", "agent:main").expect("有记忆");
     assert_eq!(
         view.entries
             .first()
@@ -794,7 +826,7 @@ fn recall_view_consumes_the_query_so_relevant_old_memories_rank_first() {
     );
 
     // 空 query ⇒ 平凡值：新近度降序，与本批落地前逐字相同。
-    let plain = recall_view(&a, "").expect("有记忆");
+    let plain = recall_view(&a, "", "agent:main").expect("有记忆");
     let plain_contents: Vec<&str> = plain.entries.iter().map(|e| e.content.as_str()).collect();
     assert_eq!(
         plain_contents,
@@ -809,6 +841,150 @@ fn recall_view_consumes_the_query_so_relevant_old_memories_rank_first() {
     std::fs::remove_dir_all(a).ok();
 }
 
+// ==================== 步 12 · 读侧预过滤（[T-117](../../../../docs/009-task/117-召回跨主体读侧预过滤批.md "T-117-召回跨主体读侧预过滤批")） ====================
+
+/// **判断记忆不出会话**（T-094 产地的第二个消费方落地）：`thread_private` 的记忆
+/// 只给**记录它的那个会话**看——别的会话的召回视图里没有它，本会话照常看得见。
+/// 判断记忆用生产写方的缺省形态（载荷不带 `vis_scope` 字段 ⇒ 缺省私有），
+/// 顺带钉住「存量事件按 C10 缺省收窄」。
+#[test]
+fn a_thread_private_memory_stays_in_its_own_session() {
+    let root = tempfile::tempdir().expect("临时根");
+    let (a, b) = (root.path().join("s-a"), root.path().join("s-b"));
+    std::fs::create_dir_all(&a).expect("A 目录");
+    std::fs::create_dir_all(&b).expect("B 目录");
+
+    let wal_a = EventWalStore::open(a.join(V2_WAL_FILE)).expect("A 的事实源");
+    seed_encoded_as(
+        &wal_a,
+        "j1",
+        "A 的判断：先看依赖版本再升级",
+        JUDGMENT_TAG,
+        1000,
+    );
+    let wal_b = EventWalStore::open(b.join(V2_WAL_FILE)).expect("B 的事实源");
+    seed_shared(&wal_b, "b1", "B 的经验", 2000);
+
+    // 从 B 读（B 自己种了记忆 ⇒ 视图非空，「看不见」只能是预过滤的功劳）：
+    // B 的经验在，A 的判断不在。
+    let view = recall_view(&b, "", "agent:main").expect("B 有自己的记忆");
+    let contents: Vec<&str> = view.entries.iter().map(|e| e.content.as_str()).collect();
+    assert!(
+        contents.contains(&"B 的经验"),
+        "对照组：同扫一遍，shared 的跨会话记忆照常进视图（实际: {contents:?}）"
+    );
+    assert!(
+        !contents.iter().any(|c| c.contains("A 的判断")),
+        "判断记忆不得跨会话可见（T-117 要消灭的泄漏；实际: {contents:?}）"
+    );
+
+    // 从 A 读：自己的判断照常在——「私有」是按线程，不是不存在。
+    let own = recall_view(&a, "", "agent:main").expect("A 有自己的记忆");
+    assert!(
+        own.entries.iter().any(|e| e.content.contains("A 的判断")),
+        "本会话自己的判断记忆照常可见"
+    );
+
+    std::fs::remove_dir_all(root.path()).ok();
+}
+
+/// **shared 的记忆对矩阵内主体跨会话可见**（正判据）：「人的认知可供他人借用」
+/// （SC-010）在召回路径上的落地——B 会话的轮次主体 `agent:main` 读得到 A 记下的
+/// 用户发言。
+#[test]
+fn a_shared_memory_is_recalled_across_sessions_by_matrix_members() {
+    let root = tempfile::tempdir().expect("临时根");
+    let (a, b) = (root.path().join("s-a"), root.path().join("s-b"));
+    std::fs::create_dir_all(&a).expect("A 目录");
+    std::fs::create_dir_all(&b).expect("B 目录");
+
+    let wal_a = EventWalStore::open(a.join(V2_WAL_FILE)).expect("A 的事实源");
+    seed_shared(&wal_a, "s1", "A 记下的共享经验", 1000);
+
+    let view = recall_view(&b, "共享", "agent:main").expect("矩阵成员读得到");
+    assert!(
+        view.entries
+            .iter()
+            .any(|e| e.content.contains("A 记下的共享经验")),
+        "矩阵内主体的跨会话召回应含他人 shared 记忆"
+    );
+
+    std::fs::remove_dir_all(root.path()).ok();
+}
+
+/// **矩阵外主体看不见 shared**（负判据，与 stats 读闸同一分支）：
+/// 未登记主体（派生整套能力 ≠ 矩阵成员——`sees_of` 只认登记行）⇒ 视图里没有；
+/// 属主（`user` = `SESSION_OWNER`）恒放行——两条是同一次判定的两个分支
+/// （`memory_visible`），不是两个判定点。
+#[test]
+fn an_out_of_matrix_viewer_is_shown_no_shared_memory() {
+    let root = tempfile::tempdir().expect("临时根");
+    let (a, b) = (root.path().join("s-a"), root.path().join("s-b"));
+    std::fs::create_dir_all(&a).expect("A 目录");
+    std::fs::create_dir_all(&b).expect("B 目录");
+
+    let wal_a = EventWalStore::open(a.join(V2_WAL_FILE)).expect("A 的事实源");
+    seed_shared(&wal_a, "s1", "A 记下的共享经验", 1000);
+
+    let ghost = recall_view(&b, "共享", "agent:ghost");
+    assert!(
+        ghost.is_none()
+            || !ghost
+                .unwrap()
+                .entries
+                .iter()
+                .any(|e| e.content.contains("A 记下的共享经验")),
+        "矩阵外主体不得经召回读到他人 shared 记忆"
+    );
+
+    // 属主恒放行：与 `stats` 读闸的「owner 相等」分支同一次判定。
+    let owner =
+        recall_view(&b, "共享", crate::symbio_core::authz::SESSION_OWNER).expect("属主读得到");
+    assert!(
+        owner
+            .entries
+            .iter()
+            .any(|e| e.content.contains("A 记下的共享经验")),
+        "属主（SESSION_OWNER）恒放行"
+    );
+
+    std::fs::remove_dir_all(root.path()).ok();
+}
+
+/// **扫描范围 = 平级会话**（[T-118](../../../../docs/009-task/118-召回嵌套子会话遍历裁决批.md "T-118-召回嵌套子会话遍历裁决批")
+/// 裁决的判据）：嵌套子会话（`<根>/<父>/sessions/<子>/`）的记忆**不进**顶层召回。
+/// 理由见 `recall_view` 的「扫描范围」节——这是刻意范围，不是漏扫；改范围先改裁决。
+#[test]
+fn recall_view_scan_is_one_level_deliberately() {
+    let root = tempfile::tempdir().expect("临时根");
+    let (a, b) = (root.path().join("s-a"), root.path().join("s-b"));
+    std::fs::create_dir_all(&a).expect("A 目录");
+    std::fs::create_dir_all(&b).expect("B 目录");
+    // 委派子会话：WAL 住在父会话目录的 sessions/ 里（分形嵌套的存储布局）。
+    let sub = root.path().join("s-p").join("sessions").join("s-c");
+    std::fs::create_dir_all(&sub).expect("子会话目录");
+
+    let wal_a = EventWalStore::open(a.join(V2_WAL_FILE)).expect("A 的事实源");
+    seed_encoded(&wal_a, "a1", "A 自己的记忆", 3000);
+    let wal_b = EventWalStore::open(b.join(V2_WAL_FILE)).expect("B 的事实源");
+    seed_shared(&wal_b, "b1", "B 的共享经验", 2000);
+    let wal_c = EventWalStore::open(sub.join(V2_WAL_FILE)).expect("子会话的事实源");
+    seed_shared(&wal_c, "c1", "子会话在委派里记下的", 9000);
+
+    let view = recall_view(&a, "", "agent:main").expect("有记忆");
+    let contents: Vec<&str> = view.entries.iter().map(|e| e.content.as_str()).collect();
+    assert!(
+        contents.contains(&"B 的共享经验"),
+        "平级会话照常进扫描（对照；实际: {contents:?}）"
+    );
+    assert!(
+        !contents.iter().any(|c| c.contains("子会话")),
+        "嵌套子会话不进顶层召回（刻意范围，T-118；实际: {contents:?}）"
+    );
+
+    std::fs::remove_dir_all(root.path()).ok();
+}
+
 /// 注入段排版：抬头 + 逐条一行、跨会话同文只印一行、空视图不印空壳标题。
 #[test]
 fn prompt_section_prints_one_line_per_memory_and_nothing_when_empty() {
@@ -821,10 +997,15 @@ fn prompt_section_prints_one_line_per_memory_and_nothing_when_empty() {
         let dir = root.path().join(sid);
         std::fs::create_dir_all(&dir).expect("会话目录");
         let store = EventWalStore::open(dir.join(V2_WAL_FILE)).expect("事实源");
-        seed_encoded(&store, &format!("seed-{sid}"), text, ts);
+        // 跨会话的两条种成 shared（预过滤后才谈排版去重）；本会话那条用缺省。
+        if sid == "s-a2" {
+            seed_encoded(&store, &format!("seed-{sid}"), text, ts);
+        } else {
+            seed_shared(&store, &format!("seed-{sid}"), text, ts);
+        }
     }
     // `s-a2` 的目录名即会话 id，读它 = 扫全根。
-    let view = recall_view(&root.path().join("s-a2"), "").expect("有记忆");
+    let view = recall_view(&root.path().join("s-a2"), "", "agent:main").expect("有记忆");
     let section = prompt_section(&view).expect("有条目 ⇒ 有段");
     assert!(
         section.starts_with(RECALL_SECTION_HEAD),

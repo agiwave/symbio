@@ -161,6 +161,12 @@ fn compile_writes_a_sourced_skill_exactly_once_per_trigger() {
         Some("帮我写测试")
     );
     assert_eq!(
+        skill.payload.get("vis_scope").and_then(|v| v.as_str()),
+        Some("shared"),
+        "技能 = 固化的可复用经验 ⇒ shared（T-117：缺席 = 缺省私有，\
+         跨会话命中——t35 证据②——就被召回预过滤挡死）"
+    );
+    assert_eq!(
         skill.produced_by,
         Some(anchor),
         "溯源指向源轨迹（I2：技能溯源 100%）"
@@ -366,8 +372,8 @@ fn the_production_recall_view_sees_the_compiled_skill() {
         .expect("首次必须产出技能");
     }
 
-    let mut view =
-        super::super::v2_memory::recall_view(&session, "").expect("技能是一条记忆 ⇒ 视图非空");
+    let mut view = super::super::v2_memory::recall_view(&session, "", "agent:main")
+        .expect("技能是一条记忆 ⇒ 视图非空");
     assert!(
         view.entries.iter().any(|e| e.tag == SKILL_TAG),
         "生产读方必须召回技能：{:?}",

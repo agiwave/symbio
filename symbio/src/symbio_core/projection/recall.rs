@@ -18,7 +18,10 @@
 //! 本投影按 `actor == viewer` 过滤（记忆默认 `thread_private`，C10）——这是
 //! **最小必需**的隔离；`shared` / `public` 的跨主体召回由**读侧**先用
 //! [`crate::symbio_core::governance::PermissionMatrix`] 预过滤可见切片，
-//! 再调本投影。③ 不 import ⑥——可见性判定是读路径的职责，投影只管纯函数。
+//! 再调本投影（读侧实现 = `v2_memory::recall_view` 的预过滤，
+//! [T-117](../../../../docs/009-task/117-召回跨主体读侧预过滤批.md "T-117-召回跨主体读侧预过滤批")；
+//! 调用方传的 viewer 是**认知归属人**，不是跑轮主体）。③ 不 import ⑥——可见性
+//! 判定是读路径的职责，投影只管纯函数。
 
 use super::super::event::{
     Entity, Event, EVENT_MEMORY_CONSOLIDATED, EVENT_MEMORY_ENCODED, EVENT_MEMORY_FORGOTTEN,

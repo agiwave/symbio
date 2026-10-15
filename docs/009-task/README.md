@@ -52,15 +52,11 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 3 · 🟡 doing 0 · ☑ done 114 · ❌ wont 0（共 117）
+**计数**：☐ todo 0 · 🟡 doing 0 · ☑ done 117 · ❌ wont 0（共 117）
 
 ## 待处理（按依赖顺序）
 
-| 编号 | 任务 | 优先 | 轨 | 依赖 |
-|---|---|---|---|---|
-| `T-117-召回跨主体读侧预过滤批` | 召回跨主体读侧预过滤批：`recall` 路径消费 `vis_scope` 产地——`thread_private` 判断记忆今天跨会话可见 | next | plan | T-094-个人认知可见域产地批 |
-| `T-118-召回嵌套子会话遍历裁决批` | 记忆召回的嵌套子会话遍历裁决：recall_view 的一层 glob 是「刻意范围」还是「同形缺口」 | later | plan | — |
-| `T-119-规划与验证会话驱动路径批` | 规划者/验证者的会话驱动路径：收束闸两臂不覆盖 define.work / assert.verification 独持行的结构性阻断 | later | plan | — |
+（无）
 
 ## 进行中
 
@@ -117,6 +113,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-085-记忆召回判据面补齐批` | 记忆召回判据面补齐：calibrated 格 / 混合打分与 §5 措辞裁决 / recall_eval 切生产投影 / judgment 标签写方 / 保留策略 | plan |
 | `T-086-技能编译落地形态批` | S11 落地形态批：skill_compile 投影化或修订 / 凸度与密度读数裁决 / skill_compile_enabled 默认翻向的条件 | plan |
 | `T-094-个人认知可见域产地批` | 个人认知可见域产地批：`VisScope::Shared` 要有内容侧产地 + 人的读权归属裁决——`person:*` 行在今天的表形状下表达不出来 | plan |
+| `T-117-召回跨主体读侧预过滤批` | 召回跨主体读侧预过滤批：`recall` 路径消费 `vis_scope` 产地——`thread_private` 判断记忆今天跨会话可见 | plan |
 | `T-100-跨文档复述判据覆盖面补齐` | 把「同一事实被写两遍」的判据从三个封闭集推广到全部 owner 投影 | plan |
 | `T-104-检索降级可见性批` | 检索降级可见性：`degraded` 从投影口径走到用户眼前（注入段标降级 + 判据） | plan |
 | `T-105-Scope-Child首产点批` | `Scope::Child` 全仓第一个生产构造点：派生子会话挂父作用域 + 读方 | plan |
@@ -128,6 +125,8 @@ board.columns: [rank, deps, evidence, reason]
 | `T-113-本地检索输出残余批` | 本地检索输出残余批：`content_search` 的 content 模式输出含多余空行（分页与匹配行不对齐）· 该文件无单测 | local |
 | `T-114-telegram上游端点可配批` | telegram 上游端点可配批：`api_url()` 把 `api.telegram.org` 写死 ⇒ `send` / `get_updates` / `start_listener` 三条路由无靶子可打 | e2e |
 | `T-115-入站边界可达面与白名单一致批` | gateway 入站边界的可达面与 `is_readonly_allowed` 白名单不一致：缺 home/work 四条臂 · 白名单两条死条目 | gateway |
+| `T-118-召回嵌套子会话遍历裁决批` | 记忆召回的嵌套子会话遍历裁决：recall_view 的一层 glob 是「刻意范围」还是「同形缺口」 | plan |
+| `T-119-规划与验证会话驱动路径批` | 规划者/验证者的会话驱动路径：收束闸两臂不覆盖 define.work / assert.verification 独持行的结构性阻断 | plan |
 | `T-001` | 登记机制落地：单文档 + 守卫 + 汇总 + 总纲 | meta |
 | `T-003` | 接管 docs/README 纪律地图（每条纪律成为 spec 条目） | doc |
 | `T-004` | 散落决策清点与登记形态定案（决策类元素的接管边界） | meta |
@@ -308,9 +307,9 @@ board.columns: [rank, deps, evidence, reason]
 - [`T-114-telegram上游端点可配批`](114-telegram上游端点可配批.md) telegram 上游端点可配批：`api_url()` 把 `api.telegram.org` 写死 ⇒ `send` / `get_updates` / `start_listener` 三条路由无靶子可打（done）
 - [`T-115-入站边界可达面与白名单一致批`](115-入站边界可达面与白名单一致批.md) gateway 入站边界的可达面与 `is_readonly_allowed` 白名单不一致：缺 home/work 四条臂 · 白名单两条死条目（done）
 - [`T-116-CI红清偿批`](116-CI红清偿批.md) v2 分支 CI 连续红（rust-checks · e2e-check · security-check）——三处红各自的根因与清偿批次（done）
-- [`T-117-召回跨主体读侧预过滤批`](117-召回跨主体读侧预过滤批.md) 召回跨主体读侧预过滤批：`recall` 路径消费 `vis_scope` 产地——`thread_private` 判断记忆今天跨会话可见（todo）
-- [`T-118-召回嵌套子会话遍历裁决批`](118-召回嵌套子会话遍历裁决批.md) 记忆召回的嵌套子会话遍历裁决：recall_view 的一层 glob 是「刻意范围」还是「同形缺口」（todo）
-- [`T-119-规划与验证会话驱动路径批`](119-规划与验证会话驱动路径批.md) 规划者/验证者的会话驱动路径：收束闸两臂不覆盖 define.work / assert.verification 独持行的结构性阻断（todo）
+- [`T-117-召回跨主体读侧预过滤批`](117-召回跨主体读侧预过滤批.md) 召回跨主体读侧预过滤批：`recall` 路径消费 `vis_scope` 产地——`thread_private` 判断记忆今天跨会话可见（done）
+- [`T-118-召回嵌套子会话遍历裁决批`](118-召回嵌套子会话遍历裁决批.md) 记忆召回的嵌套子会话遍历裁决：recall_view 的一层 glob 是「刻意范围」还是「同形缺口」（done）
+- [`T-119-规划与验证会话驱动路径批`](119-规划与验证会话驱动路径批.md) 规划者/验证者的会话驱动路径：收束闸两臂不覆盖 define.work / assert.verification 独持行的结构性阻断（done）
 
 <!-- registry:summary end -->
 

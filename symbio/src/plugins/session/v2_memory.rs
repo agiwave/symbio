@@ -133,12 +133,47 @@ pub(crate) const RECALL_DEGRADED_NOTE: &str =
 /// 步 12 的读方：**跨会话**召回 → [`RecallView`]（一条记忆都没有 ⇒ `None`）。
 ///
 /// 扫 `<会话存储根>/*​/v2-events.wal`（含本会话自己），按 mtime 新近优先、文件数与
-/// 字节双预算封顶，再整体交给 `recall` 投影。合并后排序由投影的 `query` 决定：
-/// 传本轮用户正文 ⇒ 内容重叠分降序（T-085 批②：旧但相关的记忆不再输给新但
-/// 无关的）；传空 ⇒ 纯 ts 降序（平凡值）。
+/// 字节双预算封顶，**先按内容侧可见域预过滤出可见切片**（见下），再整体交给
+/// `recall` 投影。合并后排序由投影的 `query` 决定：传本轮用户正文 ⇒ 内容重叠分降序
+/// （T-085 批②：旧但相关的记忆不再输给新但无关的）；传空 ⇒ 纯 ts 降序（平凡值）。
+///
+/// ## 扫描范围 = 平级会话（刻意不含嵌套子会话，[T-118](../../../../docs/009-task/118-召回嵌套子会话遍历裁决批.md "T-118-召回嵌套子会话遍历裁决批") 裁决）
+///
+/// 只扫一层不是没看见 [`session_wals_deep`](super::paths::session_wals_deep) 那棵树，
+/// 是**范围跟着信息增量走**（与淘汰闸 / stats 的「部署级事实必须完整」不同性质）：
+///
+/// 1. **子会话的事实经工具结果回流**（S08 代际承诺：`agent_run` 的收束答复进父
+///    会话上下文）——子会话的 shared 记忆内容（被委派的 prompt）父会话本来就有
+///    （是它发的），判断记忆 thread_private 本就不出会话（T-117）：深遍的边际
+///    信息量 ≈ 0；
+/// 2. **召回是有预算的检索**（[`RECALL_MAX_FILES`] 名额 + 字节双上限）：分形委派
+///    树的 WAL 恒最新（mtime 序），深遍会让一棵树占满名额、把平级会话挤出
+///    扫描窗——那才是真丢失；
+/// 3. 判据 `recall_view_scan_is_one_level_deliberately` 钉住这个范围（嵌套
+///    子会话的记忆不进顶层召回），改范围先改裁决。
 ///
 /// as-of 取 `i64::MAX`：与 `session/stats` 同一条口径——WAL 是落盘事实源，文件里
 /// 每一条都已发生（见 `stats.rs` 模块文档）。
+///
+/// ## `viewer` = 本轮主体（[T-117](../../../../docs/009-task/117-召回跨主体读侧预过滤批.md "T-117-召回跨主体读侧预过滤批")）
+///
+/// **读侧预过滤**（`projection/recall.rs` 模块文档指派给读侧的那一半）：记忆事件
+/// 的载荷带着内容侧可见域（`v2_memory::encode` 的产地，T-094 ①），本读方按它
+/// 逐条收放——
+///
+/// - `thread_private`（判断记忆的写方取值）：只对**记录它的那个会话**的轮次可见
+///   （`own` = 这份 WAL 就是调用方的会话目录）——判断是本部署私有的工作记忆，
+///   跨会话可见正是 T-117 要消灭的泄漏；存量事件没这个字段 ⇒ 缺省也是它
+///   （C10 缺省隔离，`VisScope::from_name` 同一口径，不把笔误读宽）；
+/// - `shared` / `public`：本会话恒可见（可见域只管**跨会话**收放，见
+///   [`memory_visible`]），跨会话时矩阵内主体可见、矩阵外不可见——与 `stats` 读闸
+///   （T-094 ②）**同一份判据**（`can_see` + 属主 `SESSION_OWNER` 恒放行）：
+///   「人的认知可供他人借用」（SC-010），但只借给部署矩阵里的人。
+///
+/// 预过滤**先于**投影：投影拿到的是可见切片，预算与降级口径也只对可见事实计。
+/// 投影自身的 `actor == viewer` 过滤保持原样（传 [`PRINCIPAL_USER`]——记忆事件的
+/// actor 是认知归属人，不是跑轮主体；那层是「最小必需隔离」，本读方这层才是
+/// 跨主体的收放）。
 ///
 /// `query` = 本轮用户发言——混合打分的**语义维**由它驱动；跨会话累计口径不变
 /// （记忆类事件带真实编码时刻，`RecallEntry::ts` 的契约，跨会话才比得了新近；
@@ -147,7 +182,7 @@ pub(crate) const RECALL_DEGRADED_NOTE: &str =
 /// 返回的 [`RecallView`] **自带 `degraded`**（[T-104](../../../../docs/009-task/104-检索降级可见性批.md "T-104-检索降级可见性批")）：
 /// 投影的 `View` 外壳在取 `.value` 时被丢掉，降级信息因此落在视图字段上——
 /// 消费方（`prompt_section`）不必回捞外壳也能说得出来。
-pub(crate) fn recall_view(session_dir: &Path, query: &str) -> Option<RecallView> {
+pub(crate) fn recall_view(session_dir: &Path, query: &str, viewer: &str) -> Option<RecallView> {
     let root = session_dir.parent()?;
 
     // ── 找文件：新近优先，超预算的当场弃权并留痕 ──────────────────────────
@@ -181,6 +216,9 @@ pub(crate) fn recall_view(session_dir: &Path, query: &str) -> Option<RecallView>
     files.sort_by(|a, b| b.0.cmp(&a.0));
 
     // ── 读文件：只读打开（读方不截尾，见 `wal.rs::open_readonly`）───────────
+    // 本会话的判定按**目录名**比（同一个根下的两层派生，绝对前缀可能不同形）：
+    // 这份 WAL 是不是调用方自己的会话目录——`thread_private` 的收放就靠它。
+    let own_name = session_dir.file_name().map(|n| n.to_os_string());
     let mut events: Vec<Event> = Vec::new();
     let mut bytes = 0u64;
     for (i, (_, path, len)) in files.into_iter().enumerate() {
@@ -190,11 +228,22 @@ pub(crate) fn recall_view(session_dir: &Path, query: &str) -> Option<RecallView>
         if bytes > 0 && bytes + len > RECALL_MAX_TOTAL_BYTES {
             break;
         }
+        let own = path
+            .parent()
+            .and_then(|d| d.file_name())
+            .zip(own_name.as_ref())
+            .is_some_and(|(n, own)| n == own);
         match EventWalStore::open_readonly(&path) {
             // `history()` 而非 `range()`（S2.7-b2）：召回是**跨会话累计**口径——
             // 压缩归档把被取代的前缀移出 live 段后，只读 live 会**静默**丢掉
             // 压缩前记下的记忆（那些 `memory.*` 事实仍在归档段里）。
-            Ok(store) => events.extend(store.history()),
+            // 预过滤在入列前逐条收放（见上 [`recall_view`] 文档）：非记忆事件
+            // 照常进切片（投影只认记忆，多进无害），记忆事件按可见域判。
+            Ok(store) => events.extend(store.history().into_iter().filter(|e| {
+                let is_memory = e.entity == Entity::Memory
+                    && (e.kind == EVENT_MEMORY_ENCODED || e.kind == EVENT_MEMORY_CONSOLIDATED);
+                !is_memory || memory_visible(e, own, viewer)
+            })),
             Err(e) => crate::plugin_warn!(
                 "session",
                 "[memory] 召回读取失败（{}）：{e}",
@@ -213,6 +262,41 @@ pub(crate) fn recall_view(session_dir: &Path, query: &str) -> Option<RecallView>
         None
     } else {
         Some(view)
+    }
+}
+
+/// 一条记忆事件对 `viewer`（本轮主体）可见吗——召回读侧预过滤的**唯一判定点**。
+///
+/// 可见域管的是**跨会话**的收放：本会话自己的内容（`own`）无论什么域都可见
+/// ——「private < shared < public」是放宽序，shared 比缺省更宽，若不含 own
+/// 就成了「共享的反而比私有的看得少」（t76 抓到的语义颠倒）。
+///
+/// 两支各有一个 owner：
+/// - 本会话的内容 ⇒ 恒可见（判断记忆的 `thread_private` 走到这一支为止）；
+/// - 别的会话的 `shared` / `public` ⇒ `stats` 读闸（T-094 ②）同一份判据：属主
+///   `SESSION_OWNER` 恒放行（否则「本人写、本人下一轮召回」会被挡），其余走
+///   `PermissionMatrix::can_see`（矩阵内主体放行，矩阵外必拒）。缺省
+///   （存量事件没有 `vis_scope` 字段）= `thread_private` ⇒ 只剩 own 一条路。
+///
+/// 可见域从**载荷**读（`from_name` 的口径：认不出 = 私有，不把笔误读宽）——
+/// 产地在 `encode`，判定只消费不重算。
+fn memory_visible(e: &Event, own: bool, viewer: &str) -> bool {
+    let scope = e
+        .payload
+        .get("vis_scope")
+        .and_then(|v| v.as_str())
+        .map(crate::symbio_core::VisScope::from_name)
+        .unwrap_or_default();
+    match scope {
+        crate::symbio_core::VisScope::ThreadPrivate => own,
+        s => {
+            own || viewer == crate::symbio_core::authz::SESSION_OWNER
+                || crate::symbio_core::authz::production_matrix().can_see(
+                    viewer,
+                    crate::symbio_core::authz::SESSION_OWNER,
+                    s,
+                )
+        }
     }
 }
 
