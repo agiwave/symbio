@@ -20,6 +20,8 @@
  *   - S-011:        补充抽干点必须夹在 `gate_turn` 与 `prepare_turn_inputs` 之间
  *                   （`session/chat_loop.rs`；位置错了不会有任何测试变红）
  *   - S-012:        代码注释不得写只有实施排期含义的话（待办标记 / 无出处的批次号）
+ *   - S-013:        `WalkBuilder` 构造点必须钉遍历序（默认序是文件系统返回序 ⇒
+ *                   分页窗口与截断点随平台变；NTFS 名字序 / ext4 哈希序）
  *
  * 用法：
  *   node scripts/grep-audit.mjs            # 审计 symbio/src/plugins（全部插件）
@@ -37,7 +39,7 @@
 
 // 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns S 源码 grep 形态
-// @codes S-001 S-002 S-003 S-006 S-007 S-008 S-009 S-010 S-011 S-012
+// @codes S-001 S-002 S-003 S-006 S-007 S-008 S-009 S-010 S-011 S-012 S-013
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -558,6 +560,77 @@ const WAIVER_S012_RE = /\/\/\s*grep-audit-allow S-012:[^\n]*[A-Za-z0-9\u4e00-\u9
     })
   }
   if (s012 === 0) ok('S-012 通过：注释里没有待办标记与无出处的批次号')
+}
+console.log()
+
+// ── S-013: `WalkBuilder` 构造点必须钉遍历序 ────────────────────────────
+//
+// `ignore::WalkBuilder` 不配排序时按**文件系统返回的目录项序**遍历：NTFS 上恰是名字序、
+// ext4 上是哈希序。于是同一份代码、同一个查询在两个平台给出行序不同的结果，而下游三处
+// 判定都切在这个序上——`content_search` 的 `offset` / `head_limit` 分页窗口、
+// `MAX_RESULTS` 截断点、`codebase_search` 降级路径的 `limit` 截断。
+// 病灶实例（T-116 ①）：两条分页单测 Windows 绿、Linux 红，红的是症状，缺陷在实现侧
+// （用户看到的是「换台机器同一查询少几行 / 换一批行」）。这类「判据依赖平台」的病
+// 在本仓已有两次实例（T-093 是 shell 工具名，这次是路径序），所以钉在门内而不是靠人记得。
+//
+// 判据：`WalkBuilder::new(` 之后，**同一函数体内**（往后扫到下一个 `fn` 起头为止）
+// 必须出现一次 `.sort_by(` / `.sort_by_file_name(`。
+// **已知边界（刻意）**：只认「构造点之后、同一函数体内」——把 builder 传出去在别处配排序
+// 不判，同函数里两个 builder 共用一次 `sort_by` 也判绿。取这个粒度是因为三处既有代码
+// 都是「构造 + 链式配置同作用域」的形状，而一条天天误报的守卫最后只会被人用豁免喂死
+// （本文件反复写的那条）。跨函数传 builder 真出现时，人会看见这条注释。
+// 范围：`.rs` 源码根（同 S-012：`symbio/src`、`cli/src`、`tauri/src-tauri/src`、
+// `docs/004-plan/verify`），测试文件同样参与。
+// 豁免：`// grep-audit-allow S-013: 理由`（写在构造行或其紧邻上一行，理由不可为空，同 S-010）。
+console.log('--- S-013: WalkBuilder 构造点的遍历序 ---')
+
+const S013_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/004-plan/verify']
+const S013_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
+const S013_WALK_RE = /WalkBuilder::new\s*\(/
+const S013_SORT_RE = /\.sort_by(?:_file_name)?\s*\(/
+/** 下一个函数起头：扫到它就把上一个 builder 的作用域关掉 */
+const S013_NEXT_FN_RE = /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s/
+const WAIVER_S013_RE = /\/\/\s*grep-audit-allow S-013:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
+
+{
+  const s013Files = S013_ROOTS.flatMap((r) => walk(path.join(S013_BASE, r)))
+  let s013 = 0
+  let s013Sites = 0
+  for (const file of s013Files) {
+    let lines
+    try {
+      lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
+    } catch {
+      continue
+    }
+    lines.forEach((l, i) => {
+      if (!S013_WALK_RE.test(l)) return
+      s013Sites++
+      if (WAIVER_S013_RE.test(l) || (i > 0 && WAIVER_S013_RE.test(lines[i - 1]))) return
+      let pinned = false
+      for (let j = i; j < lines.length; j++) {
+        if (j > i && S013_NEXT_FN_RE.test(lines[j])) break
+        if (S013_SORT_RE.test(lines[j])) {
+          pinned = true
+          break
+        }
+      }
+      if (pinned) return
+      err(
+        `${disp(file)}:${i + 1}  S-013 未钉遍历序：默认遍历序是文件系统返回序` +
+          `（NTFS 名字序 / ext4 哈希序），下游的分页窗口与截断点都切在它上面 ⇒ ` +
+          '补 `.sort_by_file_name(|a, b| a.cmp(b))`，或在构造行写 `grep-audit-allow S-013: 理由`' +
+          '（理由要能指认序在哪里被钉住）',
+      )
+      s013++
+    })
+  }
+  if (s013 === 0)
+    ok(
+      s013Sites === 0
+        ? 'S-013 通过：scope 内没有 WalkBuilder 构造点'
+        : `S-013 通过：${s013Sites} 处 WalkBuilder 构造点都钉了遍历序（或已写豁免理由）`,
+    )
 }
 console.log()
 

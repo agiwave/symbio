@@ -476,3 +476,72 @@ test('S-012 finds no batch-relative narration in this repository', () => {
   })
   assert.match(r.stdout, /S-012 通过/)
 })
+
+// ── S-013: `WalkBuilder` 构造点必须钉遍历序 ────────────────────────────
+// 默认遍历序 = 文件系统返回序（NTFS 名字序 / ext4 哈希序）。下游的 `offset` /
+// `head_limit` 分页窗口、`MAX_RESULTS` 与降级路径的 `limit` 截断都切在这个序上，
+// 于是同一查询换平台就换一批行。病灶见 T-116 ①（两条分页单测 Linux 红）。
+const S013_FILE = 'symbio/src/plugins/local/walker.rs'
+const S013_UNPINNED = `fn collect(workdir: &Path) -> Vec<PathBuf> {
+    let mut builder = WalkBuilder::new(workdir);
+    builder.standard_filters(true).require_git(false);
+    builder.build().filter_map(Result::ok).map(|e| e.path().to_path_buf()).collect()
+}
+`
+
+test('S-013 fires on a WalkBuilder construction with no sort in scope', () => {
+  const r = s010Audit({ [S013_FILE]: S013_UNPINNED })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /S-013 未钉遍历序/)
+})
+
+test('S-013 accepts sort_by_file_name and the generic sort_by', () => {
+  for (const sorter of [
+    '    builder.sort_by_file_name(|a, b| a.cmp(b));\n',
+    '    builder.sort_by(|a, b| a.cmp(b));\n',
+  ]) {
+    const src = S013_UNPINNED.replace(
+      '    builder.build()',
+      sorter + '    builder.build()',
+    )
+    assert.equal(s010Audit({ [S013_FILE]: src }).status, 0, sorter)
+  }
+})
+
+test('S-013 does not let the next function\'s sort excuse this one', () => {
+  // 作用域边界：往后扫到下一个 `fn` 起头为止——别的函数里钉了序，不替这里说话。
+  const src = S013_UNPINNED + 'fn other() { let v = x.sort_by_file_name(|a, b| a.cmp(b)); }\n'
+  const r = s010Audit({ [S013_FILE]: src })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /S-013 未钉遍历序/)
+})
+
+test('S-013 waiver requires a reason (same line or the line above)', () => {
+  const hit = '    let mut builder = WalkBuilder::new(workdir);\n'
+  for (const waived of [
+    hit.replace('\n', '  // grep-audit-allow S-013: 取用方末尾按 rel 整体排序\n'),
+    `// grep-audit-allow S-013: 取用方末尾按 rel 整体排序\n${hit}`,
+  ]) {
+    const r = s010Audit({ [S013_FILE]: S013_UNPINNED.replace(hit, waived) })
+    assert.equal(r.status, 0, r.stdout)
+  }
+  const empty = s010Audit({
+    [S013_FILE]: S013_UNPINNED.replace(hit, hit.replace('\n', '  // grep-audit-allow S-013:   \n')),
+  })
+  assert.equal(empty.status, 1, empty.stdout)
+})
+
+test('S-013 is silent when the scope has no WalkBuilder at all', () => {
+  const r = s010Audit({ [S013_FILE]: 'fn f() { let a = 1; }\n' })
+  assert.match(r.stdout, /S-013 通过：scope 内没有 WalkBuilder 构造点/)
+})
+
+test('S-013 finds every WalkBuilder construction pinned in this repository', () => {
+  const r = spawnSync(process.execPath, [script], {
+    cwd: path.resolve(path.dirname(script), '..'),
+    env: { ...process.env, NO_COLOR: '1' },
+    encoding: 'utf8',
+    timeout: 30000,
+  })
+  assert.match(r.stdout, /S-013 通过：3 处 WalkBuilder 构造点都钉了遍历序/)
+})

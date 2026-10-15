@@ -303,6 +303,7 @@ fn is_source_file(p: &Path) -> bool {
 /// 不依赖 `rg` 等外部可执行文件，跨平台行为一致。
 fn walk_source_files(workdir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
+    // grep-audit-allow S-013: 遍历序不参与输出——唯一取用方 `scan_files` 末尾 `out.sort_by(rel)` 已钉住
     let mut builder = WalkBuilder::new(workdir);
     builder
         .standard_filters(true) // 尊重 .gitignore / 隐藏文件 / 全局 ignore
