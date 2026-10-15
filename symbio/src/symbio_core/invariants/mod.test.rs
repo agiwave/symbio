@@ -235,7 +235,7 @@ fn check_all_on_clean_sequence_is_empty() {
 
 // ── 故障注入用例集（S1 步骤 4：超时 / 乱序 / 重复 final / 无溯源，4 类违规全被捕获）────
 //
-// [plan/04 §3](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地") 第 4 步的产物：每类故障注入
+// [plan/04 §3](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") 第 4 步的产物：每类故障注入
 // 事件序列，断言**对应的检查必须红**。反向用例（合规序列不报警）在上方各检查区。
 
 #[test]
@@ -279,7 +279,7 @@ fn fault_timeout_avoided_by_fallback_event() {
 
 #[test]
 fn fault_timeout_avoided_by_artifact_event() {
-    // 反向（[ADR-067](../../../../docs/adr/ADR-067.md "ADR-067")）：只落了**产物格**的轮
+    // 反向（[ADR-067](../../../../docs/010-adr/067.md "ADR-067")）：只落了**产物格**的轮
     // 同样算收束——工具结果是说给用户的话，没有发言权的主体（对等主体）以它收束。
     // 没有这条，对等主体每跑一轮都永久留一条违规，e2e 的「不变量清单为空」无从谈起。
     let events = stored(vec![

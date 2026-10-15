@@ -37,7 +37,7 @@ created: 2026-07-20
 
 子树挂**与父 Agent 同构的默认插件集**（见 `symbio_core::ASSEMBLY_SUB_AGENT_PLUGINS`）——与系统侧
 是**同一份清单**：`home` 的 `SYSTEM_PLUGINS` 直接取这个常量，**不是第二份手抄**。清单内容不在此
-复述（复述即重复，改一次要动两处），要看得去常量定义或 `docs/ref/RE-006-当前事实表.md` §1。`vdfs` 会随子树
+复述（复述即重复，改一次要动两处），要看得去常量定义或 `docs/006-ref/006-当前事实表.md` §1。`vdfs` 会随子树
 构造出实例，但其注册经 `SubAgentVisitor` 丢弃（VDFS 根单槽归根）。
 
 - `work` 在其中：子树 `WORKDIR` **继承父会话**，所以 `work` 注入的是工作区记忆，
@@ -84,7 +84,7 @@ created: 2026-07-20
 
 **不可删除**：要清空就写入空内容（两个作用域同一约定）。
 
-## 寻址（无自有路由，权威登记见 [RE-003-ROUTES.md](../../../../docs/ref/RE-003-ROUTES.md "RE-003-ROUTES") §Agent 插件）
+## 寻址（无自有路由，权威登记见 [003-ROUTES.md](../../../../docs/006-ref/003-ROUTES.md "RE-003-ROUTES") §Agent 插件）
 
 agent 目录的寻址是**挂载点语义**而非平铺三段（`route()` 直接返回 `NotFound` 并指引到 VDFS）：
 
@@ -103,5 +103,5 @@ agent 目录的寻址是**挂载点语义**而非平铺三段（`route()` 直接
 - 另外几层记忆：`../work/README.md`（工作区）、`../session/README.md`（会话）、
   `../plugin_manager/README.md`（设置入口，**不拥有任何记忆文件**）
 - 记忆的共享实现（各层共用）：`providers/memory`
-- Agent 目录规范：`docs/arch/AR-006-agent-directory-spec.md`
-- VDFS 机制（`<根>/agent` 挂载点由本插件自持 `impl VdfsProvider`）：`docs/arch/AR-013-vdfs.md` §13.4
+- Agent 目录规范：`docs/005-arch/006-agent-directory-spec.md`
+- VDFS 机制（`<根>/agent` 挂载点由本插件自持 `impl VdfsProvider`）：`docs/005-arch/013-vdfs.md` §13.4

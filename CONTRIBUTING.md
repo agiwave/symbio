@@ -26,14 +26,14 @@ created: 2026-07-20
 | Node.js | ≥ 18 | 前端构建 |
 | Tauri CLI | 2.x | `cargo install tauri-cli --version "^2.0"` |
 | 平台 | Windows / macOS / Linux | Tauri 三平台均已配置 CI |
-| **系统库（仅 Linux）** | OpenSSL 开发包 + `pkg-config` | HTTP 出口的 TLS 走**平台原生栈**（[ADR-013](docs/adr/ADR-013.md)）：Windows = SChannel、macOS = Security.framework、**Linux = 系统 OpenSSL** ⇒ Debian/Ubuntu 装 `libssl-dev pkg-config`，RHEL/Fedora 装 `openssl-devel` |
+| **系统库（仅 Linux）** | OpenSSL 开发包 + `pkg-config` | HTTP 出口的 TLS 走**平台原生栈**（[ADR-013](docs/010-adr/013.md)）：Windows = SChannel、macOS = Security.framework、**Linux = 系统 OpenSSL** ⇒ Debian/Ubuntu 装 `libssl-dev pkg-config`，RHEL/Fedora 装 `openssl-devel` |
 
 可选：使用 [rustup](https://rustup.rs/) 安装 Rust — `rust-toolchain.toml` 会自动激活对应的 channel 与组件。
 
 > **为什么只有 Linux 需要额外系统库**：TLS 后端是平台原生栈——Windows 用 SChannel、macOS 用
 > Security.framework，两者都是**纯 Rust FFI 绑定**（无 C 源、无需额外系统包）；只有 Linux 落到
 > 系统 OpenSSL，因此需要上面的开发包。Windows/macOS **无需 C/C++ 编译器**：最后一条 C 编译链
-> `onig_sys` 已随 `fastembed` 废弃、嵌入推理切到 `ort`（预编译二进制，[ADR-016](docs/adr/ADR-016.md)）
+> `onig_sys` 已随 `fastembed` 废弃、嵌入推理切到 `ort`（预编译二进制，[ADR-016](docs/010-adr/016.md)）
 > 退出依赖树；Linux 侧同理只剩编译 Rust 本身。
 
 ---
@@ -60,7 +60,7 @@ symbio/
 └── rustfmt.toml · clippy.toml   # 位于仓库根
 ```
 
-> 代码规模数字（文件数 / 行数）随迭代变化，不在此锁死——见 [RE-006 §5](docs/ref/RE-006-当前事实表.md#5-规模与宿主接缝 "RE-006-当前事实表")（自动生成）。
+> 代码规模数字（文件数 / 行数）随迭代变化，不在此锁死——见 [RE-006 §5](docs/006-ref/006-当前事实表.md#5-规模与宿主接缝 "RE-006-当前事实表")（自动生成）。
 
 ---
 
@@ -134,7 +134,7 @@ MSRV 阶段会换编译器（`RUSTUP_TOOLCHAIN` 覆盖 `rust-toolchain.toml`）�
 ⚠️ **检查项的权威清单只在 `scripts/gate.mjs`**——本文档、CI、记忆里都不另抄一份，
 抄了必然漂移。要加检查就改 `gate.mjs`。
 
-同理，**判据码的全表只在 [docs/ref/GATE_CODES.md](./docs/ref/GATE_CODES.md)**
+同理，**判据码的全表只在 [docs/006-ref/GATE_CODES.md](./docs/006-ref/GATE_CODES.md)**
 （由各脚本的 `@codes` 声明生成）：文档指认判据码时只写**具体那一条**（如 D-004），
 **不数条数、不写号段**（「四条规矩」「E-001–E-011」这类）——条数会增、号段会跳，
 抄了必然漂移。
@@ -160,7 +160,7 @@ git config core.hooksPath scripts/git-hooks   # 本机：写提交时即时拦
 |---|---|---|
 | `commit-msg` | 提交信息格式 | 规范判据在 `scripts/check-commit-msg.mjs`，钩子只是入口 |
 | `pre-commit` | 事实文件在提交点变旧 | 跑 `gate.mjs --only=facts`（本地模式 = 重生成并**只暂存生成器自己改写的文件**），实测 <1s，不违反「提交要秒级」；漂移不攒到推送点再补独立 chore 提交 |
-| `pre-push` | `docs/ref/RE-006-当前事实表.md` 漂移 | 事实表由代码提取，漏了重新生成**不报错、只变旧**；它带 `--ci` ⇒ 只判红不代改（不在推送点替人暂存）。实测 0.3s。`pre-commit` 没装上（`core.hooksPath` 会静默丢失）时它是第二道闸 |
+| `pre-push` | `docs/006-ref/006-当前事实表.md` 漂移 | 事实表由代码提取，漏了重新生成**不报错、只变旧**；它带 `--ci` ⇒ 只判红不代改（不在推送点替人暂存）。实测 0.3s。`pre-commit` 没装上（`core.hooksPath` 会静默丢失）时它是第二道闸 |
 
 CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐个判一遍
 （判据只有脚本里那一处，两边不重抄）。
@@ -234,8 +234,8 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
   - 项目在 `tauri/src-tauri/src/main.rs` 已初始化 `tracing-subscriber`。
 - 错误：实现 `thiserror` 派生 `PluginError` 变体，不要用 `String` 当错误类型。
 - 新增能力：优先在合适的 `Plugin` 下添加子路径（`worker/xxx/yyy`），
-  路由规则见 [docs/arch/AR-003-OVERVIEW.md](docs/arch/AR-003-OVERVIEW.md "AR-003-OVERVIEW")，
-  请求全链路见 [docs/arch/AR-002-DATA_FLOW.md](docs/arch/AR-002-DATA_FLOW.md "AR-002-DATA_FLOW")。
+  路由规则见 [docs/005-arch/003-OVERVIEW.md](docs/005-arch/003-OVERVIEW.md "AR-003-OVERVIEW")，
+  请求全链路见 [docs/005-arch/002-DATA_FLOW.md](docs/005-arch/002-DATA_FLOW.md "AR-002-DATA_FLOW")。
 
 #### 测试文件布局（约定）
 
@@ -285,20 +285,20 @@ mod tests;
 
 1. 在 `symbio/src/plugins/<name>/` 下创建 `mod.rs` + `plugin.rs`。
 2. 在 `symbio/src/plugins/mod.rs` 加一行**私有** `mod <name>;`（`mod` 刻意私有——插件之间互不可见）。
-3. 实现 [`Plugin`](docs/arch/AR-004-PROTOCOLS.md "AR-004-PROTOCOLS") trait 的 `route()` 与 `traverse()`；在文件末尾用
+3. 实现 [`Plugin`](docs/005-arch/004-PROTOCOLS.md "AR-004-PROTOCOLS") trait 的 `route()` 与 `traverse()`；在文件末尾用
    `submit_object_creator!(PLUGIN_<NAME>, <Name>Plugin::build, dyn Plugin)` 自注册。
    **无需改 `init.rs`**：`home` 构造 `worker`(Composite) 时按目录扫描子插件——这正是"零配置"。
 4. 若插件**可配置**（要出现在设置页）：在 `home` 的 `ensure_defaults` 加插件名、在 `setting` 的
    `SETTING_SECTIONS` 加 `(id, 中文名)`、并在该插件自己的 `detail_definition()` 加返回 `config_definition(...)` 的分支。
 5. 若插件要出现在前端：**无需手写路由常量**——在插件 `route()` 里加一条 `match` 臂，门禁即把它生成进
    `tauri/src/constants/routes.gen.ts`；再到 `tauri/src/services/` 下加对应 TS 客户端、导入那个常量。
-6. 文档按**唯一来源**更新：**新增路由只在 [RE-003-ROUTES.md](docs/ref/RE-003-ROUTES.md "RE-003-ROUTES") 登记**（模块 `README.md` 不抄路由表，只写机制并指向它）；配置项进 RE-001-CONFIGURATION.md、错误码进 RE-002-ERROR_CODES.md；插件 / 挂载点 / 工具变更后重跑 `node scripts/facts/current.mjs`。
+6. 文档按**唯一来源**更新：**新增路由只在 [003-ROUTES.md](docs/006-ref/003-ROUTES.md "RE-003-ROUTES") 登记**（模块 `README.md` 不抄路由表，只写机制并指向它）；配置项进 001-CONFIGURATION.md、错误码进 002-ERROR_CODES.md；插件 / 挂载点 / 工具变更后重跑 `node scripts/facts/current.mjs`。
 
 > **变更历史就是 `git log`，本仓库不维护 `CHANGELOG.md`**——git 记录比手抄更准确、不会漂移，
 > 且提交信息**与代码同一次提交**。要查「某次改动为什么」：`git log --grep=<词>` / `git log -S<符号>`；
 > 要查「某条机制写在哪」：`node scripts/doc-find.mjs <词>`。
 
-完整教程见 [docs/guide/GU-005-PLUGIN_DEVELOPMENT.md](docs/guide/GU-005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT")。
+完整教程见 [docs/007-guide/005-PLUGIN_DEVELOPMENT.md](docs/007-guide/005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT")。
 
 ---
 
@@ -314,7 +314,7 @@ mod tests;
    scope 例：`agent` / `tauri/services` / `docs`。
 3. 推送后通过 PR 提交，CI 必须全绿。
 4. 至少 1 位 maintainer 审阅通过后可合入。
-5. 涉及架构变更的 PR：决策写进 [ADR 索引](docs/adr/ADR-000-架构决策汇总.md "ADR-000-架构决策汇总")（一条 ADR），
+5. 涉及架构变更的 PR：决策写进 [ADR 索引](docs/010-adr/README.md "ADR-000-架构决策汇总")（一条 ADR），
    「改了什么 / 为什么」写在提交信息里。
 
 ---

@@ -1,7 +1,7 @@
 //! 巩固合并的**纯计算内核**：截断 / 分句 / 合并 + 保真度。
 //!
 //! 与 [`super::super::symbio_core::projection::recall_score`] 同一条纪律：**生产与
-//! verify 共有同一份源码**。`docs/plan/verify/consolidation_fidelity.rs` 以
+//! verify 共有同一份源码**。`docs/004-plan/verify/consolidation_fidelity.rs` 以
 //! `#[path]` 包含本文件——它论证「质量约束（min_fidelity）必须先于形态约束
 //! （max_gen）生效」时，跑的是生产这条保真度算法本身，不是另写一份临摹件。
 //! 临摹件会随生产漂移而静默失效：论证仍在绿，闸门已经换了算法。

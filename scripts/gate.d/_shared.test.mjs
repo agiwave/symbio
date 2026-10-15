@@ -245,7 +245,7 @@ test('ci.yml：承载 v2 工作的分支必须在 push 与 pull_request 的触�
   assert.match(yml, /^ {2}workflow_dispatch:/m, '没有 workflow_dispatch ⇒ 分支名写错时连手动补跑都不可能')
 })
 
-// verify 阶段是 `docs/plan/verify/` 那 14 个「架构证据」的自动化 runner（C29 兑现）。
+// verify 阶段是 `docs/004-plan/verify/` 那 14 个「架构证据」的自动化 runner（C29 兑现）。
 // 在此之前它们只能手敲 rustc 跑、结果抄进 OUTPUT.md 提交——**快照不是守卫**。
 // 少了这个 job，证据是否仍然成立取决于有没有人记得去手跑一遍。
 test('ci.yml：verify 阶段必须上 CI', () => {

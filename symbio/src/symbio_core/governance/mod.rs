@@ -1,9 +1,9 @@
-//! `governance` —— 权限与可见性（v2 ⑥，[plan/01 §7](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")）。
+//! `governance` —— 权限与可见性（v2 ⑥，[plan/01 §7](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）。
 //!
 //! ## 为什么第零天就位
 //!
 //! 权限是**静默失效**的——违反时没有测试会失败（J3）。事后补，代价是重写所有
-//! 历史事件（[plan/01 §7](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")）。所以 S3 一阶
+//! 历史事件（[plan/01 §7](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）。所以 S3 一阶
 //! 只做两件事：授权矩阵（第 7 步）与默认隔离（第 8 步），其余一切等它。
 //!
 //! ## 授权必须成对（01 §7 的核心设计）
@@ -14,7 +14,7 @@
 //! | 读侧 | [`PermissionMatrix::can_see`] | 只有写侧 = 看得到一切 |
 //!
 //! 因此矩阵**构造时**就拒绝不成对的主体策略：只有写侧 → 拒绝（出口判据，
-//! [plan/04 §3](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地") 第 7 步）；查询对未知主体
+//! [plan/04 §3](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") 第 7 步）；查询对未知主体
 //! 一律 fail-closed——「没说允许」就是拒绝，不是放行。
 //!
 //! ## 与 `capability` 域的同名辨析
@@ -25,7 +25,7 @@
 //! 本枚举只经 `governance::Capability` 引用，**不进根平铺**——两个 `Capability`
 //! 同时出现在调用点，正是命名纪律要阻止的错位。
 //!
-//! ## 生产接线（[04 §3.1 批⑥](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地")）
+//! ## 生产接线（[04 §3.1 批⑥](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）
 //!
 //! 矩阵**构造**在 [`crate::symbio_core::authz`]（本机主体清单，与本域同住一棵模块树），
 //! **判定**在 `plugins/session` 两处：
@@ -36,7 +36,7 @@
 //! | 写侧（产物） | 运行器落 `artifact.added` 前（`turn_runner::closure_granted`，`ClosureKind::Artifact`） | [`can_produce_artifact`]（`ProduceArtifact`） |
 //! | 读侧 | `stats` 按读方声明判（属主 = `SESSION_OWNER`，部署事实） | [`can_see`]（`thread_private` 缺省，C10）⇒ 非属主读数为空 |
 //!
-//! 两道写侧闸判的是**两件事**（[ADR-067](../../../../docs/adr/ADR-067.md "ADR-067")：收束格按种类判）：
+//! 两道写侧闸判的是**两件事**（[ADR-067](../../../../docs/010-adr/067.md "ADR-067")：收束格按种类判）：
 //! 发言收束问 `reply.*`、产物收束问 `produce.artifact`。没有发言权的主体（对等主体
 //! `agent:peer-b` 只持 `produce.artifact`）因此仍能以**产物**收束一轮——「没有说话
 //! 资格就不能留下任何事实」正是那次裁决拆掉的耦合。两道闸的谓词都只定义在**本域**，
@@ -48,12 +48,12 @@
 //! 引用），也**不进对外公开面**（`pub(crate)` 开给全 crate）——表里写的是部署事实，
 //! 不是契约。
 //!
-//! ## 依赖纪律（[plan/05 §3.1](../../../../docs/plan/PL-005-模块架构.md "PL-005-模块架构") ⑥ 行）
+//! ## 依赖纪律（[plan/05 §3.1](../../../../docs/004-plan/005-模块架构.md "PL-005-模块架构") ⑥ 行）
 //!
 //! 只依赖类型定义 + ④ store 的**读面**（事件切片），只读写事件——不持有
 //! ①②③⑤ 的任何句柄。
 
-/// 权限能力（[plan/01 §7](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")：**7 个封顶**）。
+/// 权限能力（[plan/01 §7](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")：**7 个封顶**）。
 ///
 /// 按「权威动作的种类」划分，不按「有多少个智能体」划分——新主体不新增能力，
 /// 新动作种类才走 ADR（03 §3）。
@@ -122,9 +122,9 @@ impl Capability {
     }
 }
 
-/// 可见域（[plan/01 §8](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构") 参数表：3 个取值）。
+/// 可见域（[plan/01 §8](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 参数表：3 个取值）。
 ///
-/// **C10**（[plan/04 §4](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地")）：默认
+/// **C10**（[plan/04 §4](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：默认
 /// `thread_private`——默认隔离是**缺省值**，不是需要每个主体记得配置的东西。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum VisScope {
@@ -176,7 +176,7 @@ pub enum PairingViolation {
     ReadOnly { principal: String },
     /// 同一主体同时持有 `DefineWork` 与 `AssertVerification`（C15：不自验）——拒绝。
     /// 验证者 ≠ 产出者不是纪律是构造期约束：双持的主体给自己的产物盖章，
-    /// 质量闸门等于没有（S7 第 17 步，[roadmap/S03 §5](../../../../docs/stage/ST-003-多步任务与返工.md "ST-003-多步任务与返工")）。
+    /// 质量闸门等于没有（S7 第 17 步，[roadmap/S03 §5](../../../../docs/003-stage/003-多步任务与返工.md "ST-003-多步任务与返工")）。
     SelfVerifier { principal: String },
 }
 
@@ -227,7 +227,7 @@ pub struct PermissionMatrix {
 
 impl PermissionMatrix {
     /// 由主体策略集构造。**任何一侧缺失即整体拒绝**（出口判据「只有写侧 → 拒绝」，
-    /// [plan/04 §3](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地") 第 7 步）。
+    /// [plan/04 §3](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") 第 7 步）。
     pub fn new(policies: Vec<PrincipalPolicy>) -> Result<Self, PairingViolation> {
         for p in &policies {
             if p.grants.is_empty() {
@@ -241,7 +241,7 @@ impl PermissionMatrix {
                 });
             }
             // C15（不自验）：DefineWork + AssertVerification 不得同持（S7 第 17 步）；
-            // 高风险组合（S9，[roadmap/S09 §5](../../../../docs/stage/ST-009-外部执行与熔断.md "ST-009-外部执行与熔断")
+            // 高风险组合（S9，[roadmap/S09 §5](../../../../docs/003-stage/009-外部执行与熔断.md "ST-009-外部执行与熔断")
             // 验收 3）：外部执行（ProduceArtifact）+ AssertVerification 同样不得同持——
             // 给自己的外部动作盖章 = 质量闸门等于没有。
             let verifies = p.grants.contains(&Capability::AssertVerification);
@@ -341,7 +341,7 @@ impl PermissionMatrix {
     /// 写侧判定（**产物闸**）：主体能否**产生产物**——运行器落 `artifact.added`
     /// 前的判据（`turn_runner::closure_granted` 的 `ClosureKind::Artifact` 臂）。
     ///
-    /// 与 [`Self::can_reply`] 并列而**不是**它的一个分支（[ADR-067](../../../../docs/adr/ADR-067.md "ADR-067")）：
+    /// 与 [`Self::can_reply`] 并列而**不是**它的一个分支（[ADR-067](../../../../docs/010-adr/067.md "ADR-067")）：
     /// 收束有两条路，谓词各问自己那一项能力。对等主体（`agent:peer-b`）只持
     /// `produce.artifact`，发言闸对它恒拒而产物闸恒放——它因此能收束为**一件
     /// 产物**，而不是每一轮都留下一条 C4 未收束。

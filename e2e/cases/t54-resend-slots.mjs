@@ -10,7 +10,7 @@ import './_selfrun.mjs';
 // 第三件——**断流后原样重发的槽位处置**（`tool_accumulator` 的 `touched` 过滤 +
 // `reuse_node_ids` 播种复用，见 `symbio/src/plugins/model/tool_accumulator.rs` 与
 // `bound_provider.rs` 的 `MAX_STREAM_RETRIES`）今天只有 `tool_accumulator.test.rs` /
-// `stream.test.rs` 的白盒判据（登记 [T-088](../../docs/task/T-088-断流重发形态e2e补齐.md "T-088-断流重发形态e2e补齐")）。
+// `stream.test.rs` 的白盒判据（登记 [T-088](../../docs/009-task/088-断流重发形态e2e补齐.md "T-088-断流重发形态e2e补齐")）。
 //
 // 它是**用户可见**的，两条症状都能在黑盒上看见：
 // - 播种槽位若被当成「有 entry 就有调用」收口 ⇒ 重发批吐出名字 / 参数全空的**幽灵调用**，

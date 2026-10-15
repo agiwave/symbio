@@ -1,9 +1,9 @@
-//! 自主发起者（[roadmap/S12](../../../../docs/stage/ST-012-自主层与长期目标.md "ST-012-自主层与长期目标")）：定时触发、表达欲、开长目标任务、健康自检。
+//! 自主发起者（[roadmap/S12](../../../../docs/003-stage/012-自主层与长期目标.md "ST-012-自主层与长期目标")）：定时触发、表达欲、开长目标任务、健康自检。
 
 use crate::symbio_core::authz::PRINCIPAL_AUTONOMOUS;
 use crate::symbio_core::Event;
 
-/// 自主发起者（S9 第 21 步，[roadmap/S12](../../../../docs/stage/ST-012-自主层与长期目标.md "ST-012-自主层与长期目标")）。
+/// 自主发起者（S9 第 21 步，[roadmap/S12](../../../../docs/003-stage/012-自主层与长期目标.md "ST-012-自主层与长期目标")）。
 ///
 /// 形状 = `pattern: decider`（规则驱动，零 LLM）、能力只 `define.work`、
 /// `budget_ms` = 自主档 [`LatencyTier::Autonomic`]（四层时延的第四个取值——自主层不是
@@ -71,7 +71,7 @@ impl AutonomousInitiator {
     /// 健康自检：触发时刻测得的状态入格（`system × progressed`）。
     ///
     /// [`Self::trigger`] 说"触发了"，本条说"触发时测得什么"——`system` 实体的两个
-    /// 格子一个开一个进（S12 §2 / [plan/01 §6](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")
+    /// 格子一个开一个进（S12 §2 / [plan/01 §6](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")
     /// 的 `system` 行）。缺了它，健康自检永远没有事实，而"名字是数据、单点定义"
     /// （ADR-043）又不允许插件自己拼 `"system.health"` 字面量——写入口只能在这里。
     ///

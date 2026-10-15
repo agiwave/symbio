@@ -35,7 +35,7 @@ import { loadEntries } from "../registry-lib.mjs";
 
 // 本文件住 `scripts/facts/`，仓根上溯两级。
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const OUT_REL = "docs/ref/RE-007-清单归属总账.md";
+const OUT_REL = "docs/006-ref/007-清单归属总账.md";
 const ENTRY_ID = "RE-007-清单归属总账";
 const ENTRY_TITLE = "Symbio 清单归属总账（自动生成）";
 const ENTRY_CREATED = "2026-10-14";
@@ -103,7 +103,7 @@ function render() {
     "> 本表是各文档 front-matter `lists` 字段的**投影**（同 RE-006 是代码的投影）——" +
       "它不新增任何事实，只是把「哪份清单归谁」从「藏在十份文档的 front-matter 里」" +
       "变成一页可查的表。与它同源的判据是 RG-026 / RG-027 / RG-029（字段规范见 " +
-      "[`SP-001`](../spec/SP-001.md \"SP-001\")）。",
+      "[`SP-001`](../008-spec/001.md \"SP-001\")）。",
   );
   L.push("");
   L.push("<!-- list:lists-index owner -->");

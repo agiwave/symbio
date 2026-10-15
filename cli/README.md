@@ -38,9 +38,9 @@ created: 2026-09-11
 
 详细的架构、构建、用法文档在 [`cli/docs/`](docs/README.md "cli/docs/README")：
 
-- [架构](docs/AR-001-architecture.md "AR-001-architecture") — 进程内客户端、`event_bus` 通道选择、渲染器、模式选择、消息增量合并
-- [构建](docs/GU-003-building.md "GU-003-building") — 为什么不能裸 `cargo build`、C 工具链注入三要素、target 缓存修复
-- [用法](docs/GU-004-usage.md "GU-004-usage") — 四种模式示例、完整参数、REPL 命令、输出通道、已知边界
+- [架构](docs/001-architecture.md "AR-001-architecture") — 进程内客户端、`event_bus` 通道选择、渲染器、模式选择、消息增量合并
+- [构建](docs/003-building.md "GU-003-building") — 为什么不能裸 `cargo build`、C 工具链注入三要素、target 缓存修复
+- [用法](docs/004-usage.md "GU-004-usage") — 四种模式示例、完整参数、REPL 命令、输出通道、已知边界
 
 ## 快速开始
 
@@ -68,7 +68,7 @@ printf '第一轮\n/provider\n/exit\n' | ./../symbio/target/debug/symbio-cli.exe
 
 ## 参数
 
-> **参数清单不在本页**：权威清单是 [RE-006 §5.2](../docs/ref/RE-006-当前事实表.md#5-规模与宿主接缝 "RE-006-当前事实表")（从 `cli/src/args.rs` 的 `HELP` 提取，改代码即变）。本页曾抄一份**逐字相同**的表，与那份形成两处并存——同一句事实存两份，改一次要动两处。
+> **参数清单不在本页**：权威清单是 [RE-006 §5.2](../docs/006-ref/006-当前事实表.md#5-规模与宿主接缝 "RE-006-当前事实表")（从 `cli/src/args.rs` 的 `HELP` 提取，改代码即变）。本页曾抄一份**逐字相同**的表，与那份形成两处并存——同一句事实存两份，改一次要动两处。
 
 模式判定顺序：`--heartbeat` → `-m`/位置参数 → `--repl` → stdin 非终端则走管道非交互 → 否则 REPL。
 
@@ -99,7 +99,7 @@ subscriber（默认过滤级别 `info,symbio=debug`），把插件日志混进�
 ## 构建（要点）
 
 **统一走 `node scripts/build-cli.mjs`**（它负责把 C 工具链喂给 cc-rs，并保证环境字节级一致）。
-关键环节与坑见 [cli/docs/GU-003-building.md](docs/GU-003-building.md "GU-003-building")，三句话概括：
+关键环节与坑见 [cli/docs/003-building.md](docs/003-building.md "GU-003-building")，三句话概括：
 
 1. **C 编译器必须显式注入**（`CC`/`CXX`/`INCLUDE`/`LIB`，不碰 `PATH`）；`aws-lc-sys` 0.44 自带
    prebuilt NASM 对象，**既不需要 cmake 也不需要 nasm**。

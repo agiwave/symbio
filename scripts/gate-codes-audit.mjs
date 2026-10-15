@@ -12,7 +12,7 @@
  *     恰好挑到那条没登记的号上。
  *
  * 所以登记表不手抄：**每个脚本在自己文件里声明**（`@ns` 前缀 + `@codes` 号），
- * `facts/gate-codes.mjs` 从声明渲染 `docs/ref/GATE_CODES.md`，本脚本判声明本身。
+ * `facts/gate-codes.mjs` 从声明渲染 `docs/006-ref/GATE_CODES.md`，本脚本判声明本身。
  * 抄一份表就有两处真相，而它必然漂移——本仓同类事故已记在 `dead-code-audit` 的 R-002 旁。
  *
  * 判定口径：
@@ -29,7 +29,7 @@
  * 退出码：1 = 有违规；2 = 审计范围读不出（0 个脚本）。
  */
 
-// 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns GC 判据码命名空间本身
 // @codes GC-001 GC-002 GC-003 GC-004 GC-005 GC-006
 

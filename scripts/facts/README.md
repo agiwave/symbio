@@ -21,7 +21,7 @@ CI 侧跑 `node scripts/gen-facts.mjs --check`，任一份漂移即红。
 export default {
   id: 'current',                                   // 必须等于文件名
   title: '读侧结构事实表',                          // 人读的一句话，进横幅与日志
-  out: 'docs/ref/RE-006-当前事实表.md',                          // 仓根相对；不含 `..`
+  out: 'docs/006-ref/006-当前事实表.md',                          // 仓根相对；不含 `..`
   stamp: true,                                     // 可选：是否带溯源行
   render: (ctx) => string,                         // 纯函数：同一份代码 ⇒ 同一份输出
 }
@@ -50,8 +50,8 @@ export default {
    「每次内容都不同」而永远报红，而红的原因不是漂移。溯源行是唯一例外，
    已由 `stamp` 单列处理（比对时剔除）。
 2. **只放离线可重生成的代码投影**，不放「跑起来才产出」的事实——
-   `docs/ref/PROMPT_SHAPE.md` 的生成点是 e2e `t46`（真实链路抓包），
-   `docs/ref/PROMPT_AB.md` 是门外实验。搬进来会让 runner 在没有运行时的
+   `docs/006-ref/PROMPT_SHAPE.md` 的生成点是 e2e `t46`（真实链路抓包），
+   `docs/006-ref/PROMPT_AB.md` 是门外实验。搬进来会让 runner 在没有运行时的
    场合（CI 的 facts 阶段）静默产出一份错的。
 
 ## 不放什么

@@ -13,7 +13,7 @@ created: 2026-09-16
 本插件不含任何资源语义、不持有拓扑：不认识会话/模型/设置，不认识挂载点，
 只认识「根 provider + 全路径」。虚拟根归组合容器所有（见 `../composite/README.md`）。
 
-机制规范（权威、跨模块）在 [`docs/arch/AR-013-vdfs.md`](../../../../docs/arch/AR-012-vdfs-frontend.md "AR-012-vdfs-frontend")；
+机制规范（权威、跨模块）在 [`docs/005-arch/013-vdfs.md`](../../../../docs/005-arch/012-vdfs-frontend.md "AR-012-vdfs-frontend")；
 本文件只写插件自身的落位。
 
 ## 一棵树的两半
@@ -35,7 +35,7 @@ created: 2026-09-16
 （`watch` / `unwatch` / `action` 不经 LLM 工具暴露：实时订阅归宿主前端，动作由详情
 `actions` 声明后按需触发）。
 
-**操作与工具清单以 [docs/ref/RE-006-当前事实表.md](../../../../docs/ref/RE-006-当前事实表.md "RE-006-当前事实表") §3 为准**（操作闭集
+**操作与工具清单以 [docs/006-ref/006-当前事实表.md](../../../../docs/006-ref/006-当前事实表.md "RE-006-当前事实表") §3 为准**（操作闭集
 `protocol.rs::VDFS_OPS` 有测试锁计数；工具集完整性由 `tools/mod.rs` 的
 `tools_cover_all_ops` 测试锁死）——本 README 不抄那份会漂移的清单。
 
@@ -73,8 +73,8 @@ created: 2026-09-16
 
 ## 关联
 
-- 机制规范：[`docs/arch/AR-013-vdfs.md`](../../../../docs/arch/AR-012-vdfs-frontend.md "AR-012-vdfs-frontend")
-- 前端页面规范：[`docs/arch/AR-012-vdfs-frontend.md`](../../../../docs/arch/AR-012-vdfs-frontend.md "AR-012-vdfs-frontend")
+- 机制规范：[`docs/005-arch/013-vdfs.md`](../../../../docs/005-arch/012-vdfs-frontend.md "AR-012-vdfs-frontend")
+- 前端页面规范：[`docs/005-arch/012-vdfs-frontend.md`](../../../../docs/005-arch/012-vdfs-frontend.md "AR-012-vdfs-frontend")
 - 纯接口（trait + 域类型）：`symbio_core::vdfs`
 - symbio 桥（上下文注入 / 错误翻译）：`symbio_core::vdfs::host`
 - 虚拟层拓扑（容器聚合 + 注册为根）：`../composite/README.md`

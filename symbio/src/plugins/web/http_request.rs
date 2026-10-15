@@ -96,23 +96,20 @@ impl HttpRequestTool {
         // 发送请求。**错误要分流**（T-109 ②，与 `web_fetch` 同一形状）：
         // reqwest 的 Display 把超时与连接失败收成同一句 `error sending request…`
         // ⇒ 用户看不出该重试还是该改地址。
-        let response = request
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    PluginError::InternalError(format!(
-                        "请求超时：{}s 内未完成（可调大 web_timeout 后重试）",
-                        self.timeout_secs
-                    ))
-                } else if e.is_connect() {
-                    PluginError::InternalError(format!(
-                        "连接失败：无法连到 {validated_url}（请检查地址与网络后重试）"
-                    ))
-                } else {
-                    PluginError::InternalError(format!("请求失败: {e}"))
-                }
-            })?;
+        let response = request.send().await.map_err(|e| {
+            if e.is_timeout() {
+                PluginError::InternalError(format!(
+                    "请求超时：{}s 内未完成（可调大 web_timeout 后重试）",
+                    self.timeout_secs
+                ))
+            } else if e.is_connect() {
+                PluginError::InternalError(format!(
+                    "连接失败：无法连到 {validated_url}（请检查地址与网络后重试）"
+                ))
+            } else {
+                PluginError::InternalError(format!("请求失败: {e}"))
+            }
+        })?;
 
         let status = response.status();
         let headers_out: Vec<(String, String)> = response

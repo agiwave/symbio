@@ -213,9 +213,9 @@ jobs:
       - name: MSRV gate
         run: node scripts/gate.mjs --only=msrv
 
-  # 架构证据验证：`docs/plan/verify/` 的 14 个程序**自己证明自己**。
+  # 架构证据验证：`docs/004-plan/verify/` 的 14 个程序**自己证明自己**。
   #
-  # 这批程序是 v2 方案对外声称的"硬证据"（`docs/plan/README.md §4`），此前只能
+  # 这批程序是 v2 方案对外声称的"硬证据"（`docs/004-plan/README.md §4`），此前只能
   # 手敲 rustc 跑一遍、结果抄进 `OUTPUT.md` 提交——**快照不是守卫**，没有任何东西
   # 保证它明天还绿。更关键的是 C29：3 个程序带 `should_not_compile`，声称"投影纯度 /
   # 时延闸门 / 欲的最小形态是编译期强制"。**强制本身必须有反向用例**（验证纪律第 4 条），
@@ -355,7 +355,7 @@ jobs:
         # 与本地同一条命令。检查项清单只在 scripts/gate.mjs 里（此处不重抄，抄了会漂移）：
         # 静态审计阶段含 grep-audit（S-002 异步锁等）、style-audit（使用的类必须有定义）、
         # doc-link-audit（已豁免 docs/archive/）、test-layout-audit、dead-code-audit，
-        # 外加报告型 schema-audit；facts 阶段是 docs/ref/RE-006-当前事实表.md 漂移门禁——事实表由代码
+        # 外加报告型 schema-audit；facts 阶段是 docs/006-ref/006-当前事实表.md 漂移门禁——事实表由代码
         # 提取生成，改了插件 / 挂载点 / 工具 / 路由就必须重新生成并提交。
         #
         # ⚠️ `--ci` 是必需的，不是装饰：facts（以及 backend 的 fmt）已改为**门禁自己执行**

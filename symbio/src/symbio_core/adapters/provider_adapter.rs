@@ -210,7 +210,7 @@ impl LlmAdapter for ProviderLlmAdapter {
     /// 判定，判定归「本轮收束」的那一侧（`TurnRunner::run_with_tools`）：只有
     /// 「无工具调用 + 空文本」才是失败。
     ///
-    /// ## 工具结果**逐条传消息数组**，不得压扁成一条 user 消息（[ADR-048a](../../../../docs/adr/ADR-048a.md)）
+    /// ## 工具结果**逐条传消息数组**，不得压扁成一条 user 消息（[ADR-048a](../../../../docs/010-adr/048a.md)）
     ///
     /// ```text
     /// // 反例——整段 prompt 拍成一条 user 消息：

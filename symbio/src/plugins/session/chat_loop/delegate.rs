@@ -25,7 +25,7 @@
 //! / `worker_keywords` / `worker_min_chars`；出厂值的**单一真源在配置面**
 //! （`mod chat_loop` / `mod delegate` 皆私有，判定侧能 import 配置面、反过来不行），
 //! 本模块**不持第二份字面量**，出厂参数由判定侧的测试显式 import 同一批常量。
-//! 字段表同步 [CONFIGURATION](../../../../../docs/ref/RE-001-CONFIGURATION.md "RE-001-CONFIGURATION")。
+//! 字段表同步 [CONFIGURATION](../../../../../docs/006-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION")。
 //!
 //! ## Q3 现读磁盘，不记进程内账
 //!
@@ -34,7 +34,7 @@
 //!   （枚举 `<父>/sessions/`，**按路径天然只含本父之子**）+
 //!   [`PersistentChatSession::load_sub_session`]（取 `messages.json`），
 //!   投影是纯函数 [`progress_of`]。三处口径见
-//!   [04 §3.2](../../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地")。
+//!   [04 §3.2](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")。
 
 use crate::symbio_core::chat_message as cm;
 use crate::symbio_core::{CapabilityMeta, PluginError};

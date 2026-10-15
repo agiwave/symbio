@@ -3,7 +3,7 @@
 
 use serde_json::Value;
 
-/// 任务表声明（S7 步 16–18，[04 §3.1 批⑨](../../../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地")）：
+/// 任务表声明（S7 步 16–18，[04 §3.1 批⑨](../../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
 /// 一次**成功**的 `todo_write` 调用所声明的清单状态。
 ///
 /// 与 [`Delegation`](super::Delegation) 同一个观察点（[`process_tool_calls_async`](super::process_tool_calls_async)）——任务表的写方

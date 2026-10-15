@@ -15,9 +15,9 @@ created: 2026-09-11
 
 | 文档 | 内容 |
 | --- | --- |
-| [架构 (AR-001-architecture.md)](AR-001-architecture.md "AR-001-architecture") | 进程内客户端设计、`event_bus` 下行通道选择、终端渲染器、模式选择逻辑、消息增量合并模型 |
-| [构建 (GU-003-building.md)](GU-003-building.md "GU-003-building") | 为什么不能裸 `cargo build`、C 工具链注入三要素、共享 target 的绝对路径陷阱、target 缓存修复 |
-| [用法 (GU-004-usage.md)](GU-004-usage.md "GU-004-usage") | 三种运行模式示例、完整参数表、REPL 内置命令、输出通道约定、系统目录与 Provider 语义、已知边界 |
+| [架构 (001-architecture.md)](001-architecture.md "AR-001-architecture") | 进程内客户端设计、`event_bus` 下行通道选择、终端渲染器、模式选择逻辑、消息增量合并模型 |
+| [构建 (003-building.md)](003-building.md "GU-003-building") | 为什么不能裸 `cargo build`、C 工具链注入三要素、共享 target 的绝对路径陷阱、target 缓存修复 |
+| [用法 (004-usage.md)](004-usage.md "GU-004-usage") | 三种运行模式示例、完整参数表、REPL 内置命令、输出通道约定、系统目录与 Provider 语义、已知边界 |
 
 ## 速览
 

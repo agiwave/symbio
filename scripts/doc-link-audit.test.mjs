@@ -53,10 +53,10 @@ test('失效链接 → 失败（默认即失败，不再需要 --strict）', () 
 test('docs/ 条目里的失效链接照判（迁入 docs/ 后不再单列扫描根，D-001 不适用豁免）', () => {
   const r = audit({
     'docs/a.md': '# A\n',
-    'docs/adr/ADR-001.md': '# ADR-001\n\n见 [兄弟](./ADR-999.md)。\n',
+    'docs/010-adr/001.md': '# ADR-001\n\n见 [兄弟](./ADR-999.md)。\n',
   })
   assert.equal(r.status, 1, r.stdout)
-  assert.match(r.stdout, /docs\/adr\/ADR-001\.md/)
+  assert.match(r.stdout, /docs\/010-adr\/001\.md/)
   assert.match(r.stdout, /ADR-999\.md/)
 })
 
@@ -65,7 +65,7 @@ test('散文体检不碰 docs/：条目的处理过程天生记历史、引用�
   // 但登记条目是台账不是现行文档——把这两条判据套上去，等于判台账漏记历史。
   const r = audit({
     'docs/a.md': '# A\n',
-    'docs/task/T-001.md':
+    'docs/009-task/001.md':
       '---\nkind: task\nid: T-001\n---\n\n## 内容\n\n原本写 `docs/GONE.md`，已改为 `docs/live.md`。\n',
   })
   assert.equal(r.status, 0, r.stdout)
@@ -145,10 +145,10 @@ test('docs/archive/ 整体豁免 → 其中的失效链接不判（改写归档�
 const REVIEW_DOC = '# 某系统评审\n\n> **文档类型：评审（一次性结论，不是规范）**\n\n正文。\n'
 const IMPLEMENTED_DOC = '# 某改动实施方案\n\n状态：**已实施**（S1–S6 全部落地）\n\n正文。\n'
 
-test('D-002：评审类文档留在 docs/arch/ → 失败', () => {
-  const r = audit({ 'docs/arch/review.md': REVIEW_DOC })
+test('D-002：评审类文档留在 docs/005-arch/ → 失败', () => {
+  const r = audit({ 'docs/005-arch/review.md': REVIEW_DOC })
   assert.equal(r.status, 1)
-  assert.match(r.stdout, /docs\/arch\/review\.md/)
+  assert.match(r.stdout, /docs\/005-arch\/review\.md/)
 })
 
 test('D-002：过程文档留在**模块目录**同样失败（只扫 docs/ 会漏掉这一整类）', () => {
@@ -163,7 +163,7 @@ test('D-002：examples/ 不扫（是示例包内容，不是项目文档）', ()
 })
 
 test('D-002：已落地的实施方案留在活跃目录 → 失败', () => {
-  const r = audit({ 'docs/arch/plan.md': IMPLEMENTED_DOC })
+  const r = audit({ 'docs/005-arch/plan.md': IMPLEMENTED_DOC })
   assert.equal(r.status, 1)
 })
 
@@ -178,22 +178,22 @@ test('D-002：同样的内容放进 docs/archive/ → 通过', () => {
 
 test('D-002：现行规范不误报（「状态：现行规范」不是过程文档）', () => {
   const r = audit({
-    'docs/arch/AR-013-vdfs.md': '# VDFS 规范\n\n状态：现行规范（纯接口 + 统一文件系统 + 容器拓扑）\n',
+    'docs/005-arch/013-vdfs.md': '# VDFS 规范\n\n状态：现行规范（纯接口 + 统一文件系统 + 容器拓扑）\n',
   })
   assert.equal(r.status, 0)
 })
 
 test('D-002：豁免必须带理由，空理由视为未豁免', () => {
   const withReason = `<!-- doc-link-allow D-002: 本文是现行规范，「评审」指代码评审流程 -->\n${REVIEW_DOC}`
-  assert.equal(audit({ 'docs/arch/kept.md': withReason }).status, 0)
+  assert.equal(audit({ 'docs/005-arch/kept.md': withReason }).status, 0)
 
   const emptyReason = `<!-- doc-link-allow D-002:    -->\n${REVIEW_DOC}`
-  assert.equal(audit({ 'docs/arch/kept.md': emptyReason }).status, 1, '空理由不算豁免')
+  assert.equal(audit({ 'docs/005-arch/kept.md': emptyReason }).status, 1, '空理由不算豁免')
 })
 
 test('D-002：豁免写在第 15 行之后无效（只看头部自述）', () => {
   const late = `${REVIEW_DOC}\n${'填充行\n'.repeat(20)}<!-- doc-link-allow D-002: 理由 -->\n`
-  assert.equal(audit({ 'docs/arch/late.md': late }).status, 1)
+  assert.equal(audit({ 'docs/005-arch/late.md': late }).status, 1)
 })
 
 // ── D-003：行数预算（活跃文档 ≤ 800 行）────────────────────────────────
@@ -339,7 +339,7 @@ test('D-004：正文后的豁免注释不整篇豁免（全文档只认首行非
 
 // ── D-006：反引号里的文件路径（D-001 的盲区补丁）─────────────────────────
 // D-001 只认 `[文字](目标)`，而本仓正文**更常**用行内反引号指路。实测
-// `tauri/docs/AR-023-FRONTEND.md` 首段引用的两个文件都不存在，D-001 却报「失效 0 条」
+// `tauri/docs/023-FRONTEND.md` 首段引用的两个文件都不存在，D-001 却报「失效 0 条」
 // 很久了——**守卫报 0 不等于没有坏链，只等于它看不见**。这组用例钉住它会红。
 test('D-006：反引号指向不存在的路径 → 失败（D-001 看不见这类）', () => {
   const r = audit({ 'docs/a.md': '# A\n\n详见 `docs/nope.md`。\n' })
@@ -360,7 +360,7 @@ test('D-006：双根解析——相对仓库根命中即通过（模块 README �
   assert.equal(
     audit({
       'symbio/src/plugins/foo/README.md': '# Foo\n\n见 `ADR-000-架构决策汇总.md`。\n',
-      'docs/adr/ADR-000-架构决策汇总.md': '# 索引\n',
+      'docs/010-adr/README.md': '# 索引\n',
     }).status,
     0,
     '相对仓库根应命中'

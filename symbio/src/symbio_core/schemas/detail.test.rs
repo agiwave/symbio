@@ -58,7 +58,9 @@ fn null_for_optional_field_is_treated_as_unfilled() {
 
     // 缺失与显式 null 同罪：都放行
     assert!(def.validate(&json!({})).is_ok());
-    assert!(def.validate(&json!({ "api_key": null, "note": null })).is_ok());
+    assert!(def
+        .validate(&json!({ "api_key": null, "note": null }))
+        .is_ok());
 
     // 但**类型不对的非空值**照旧拦（null 豁免不是类型豁免）
     assert_eq!(
@@ -71,7 +73,11 @@ fn null_for_optional_field_is_treated_as_unfilled() {
     req.required = true;
     let def_req = def_of(vec![req]);
     assert_eq!(
-        def_req.validate(&json!({ "must": null })).unwrap_err().fields[0].message,
+        def_req
+            .validate(&json!({ "must": null }))
+            .unwrap_err()
+            .fields[0]
+            .message,
         "必填项不能为空"
     );
 }

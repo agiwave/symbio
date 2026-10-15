@@ -4,7 +4,7 @@
  *
  * ## 它治的病
  *
- * `docs/plan/verify/*.rs` 是 v2 方案的硬证据（`docs/plan/README.md` §4）。但在本批之前，
+ * `docs/004-plan/verify/*.rs` 是 v2 方案的硬证据（`docs/004-plan/README.md` §4）。但在本批之前，
  * 那些证据的**输入**全是程序里手填的常量：机制表 10 键、13 阶的赋值向量、能力条目数 54。
  * 于是程序验的是「计划自洽」，不是「计划 == 权威文档」——文档改了，程序照绿。
  * 而「改了文档要有人记得同步改程序」恰恰是这类体系里最先断的那环（`_shared.mjs` 的
@@ -14,17 +14,17 @@
  *
  * | 生成物 | 真源 |
  * |---|---|
- * | `MECHANISMS` | [01 §8 权威参数表](../docs/plan/PL-001-核心架构.md "PL-001-核心架构") 的「参数键」列 |
+ * | `MECHANISMS` | [01 §8 权威参数表](../docs/004-plan/001-核心架构.md "PL-001-核心架构") 的「参数键」列 |
  * | `DOMAINS` | 01 §8 的「取值域」列——读法写在那张表下面，`↳ §N` 的集合去那一节读 |
- * | `DIMENSIONS` / `AXES` / `AXIS_POLARITIES` | [02 §2 五维表 / §3 五轴表（末两列是极性）](../docs/plan/PL-002-能力坐标系.md "PL-002-能力坐标系") |
+ * | `DIMENSIONS` / `AXES` / `AXIS_POLARITIES` | [02 §2 五维表 / §3 五轴表（末两列是极性）](../docs/004-plan/002-能力坐标系.md "PL-002-能力坐标系") |
  * | `LEVEL_MAX` / `TIER_MAX` / `TIER_CORES` | 02 §3.1 刻度表（**列数** = 等级格数）/ §3.2 天梯表 |
  * | `OVERLAP_LIMIT` / `DECLARED_OVERLAP` | 02 §3.3 共线上限与登记表 |
  * | `CAPABILITIES` / `KINDS` | 02 §6.1 能力名册（七列）与类型闭集表 |
  * | `DECLARED_*` | 02 §2「条数」列、§6.2 生长位表、§7 社交能力表——**是被验的声明** |
  * | `PSEUDO` | 02 §5 伪高阶表的「说法」列 |
- * | `STAGE_CLAIMS` | [路线图总览 §1 阶梯总表](../docs/stage/ST-000-路线图总览.md "ST-000-路线图总览") |
+ * | `STAGE_CLAIMS` | [路线图总览 §1 阶梯总表](../docs/003-stage/000-路线图总览.md "ST-000-路线图总览") |
  * | `STAGE_DOCS` | 每阶 `S0N-*.md` §3 的 ```capability-assign``` 块 + §4 的加粗平凡值行 |
- * | `COGNITIVE_DEMANDS` | [S10 §2 需求映射表](../docs/stage/ST-010-个人认知体系注入.md "ST-010-个人认知体系注入")——全仓唯一一份认知体系需求清单 |
+ * | `COGNITIVE_DEMANDS` | [S10 §2 需求映射表](../docs/003-stage/010-个人认知体系注入.md "ST-010-个人认知体系注入")——全仓唯一一份认知体系需求清单 |
  *
  * **顶层键 vs 子键**：`projection.param` 在 §8 里与顶层键同列一张表，但 01 §8 自己写明
  * 「它不是第 11 个机制键，是 `projection` 的子键」。判据因此是形状而非名单：
@@ -48,7 +48,7 @@
  *
  * ## 用法
  *
- *   node scripts/gen-verify-facts.mjs            # 写 docs/plan/verify/facts/mod.rs
+ *   node scripts/gen-verify-facts.mjs            # 写 docs/004-plan/verify/facts/mod.rs
  *   node scripts/gen-verify-facts.mjs --check    # 只比对，不一致 exit 1（门禁档）
  *   node scripts/gen-verify-facts.mjs --stdout   # 打到标准输出（测试用，不落盘）
  */
@@ -60,12 +60,12 @@ import { tableWithHeader, plain, fencedBlock, cellsOf, isSeparator } from './md-
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..')
-const OUT_REL = path.join('docs', 'plan', 'verify', 'facts', 'mod.rs')
+const OUT_REL = path.join('docs', '004-plan', 'verify', 'facts', 'mod.rs')
 
-const ARCH_REL = path.join('docs', 'plan', 'PL-001-核心架构.md')
-const FRAME_REL = path.join('docs', 'plan', 'PL-002-能力坐标系.md')
-const LADDER_REL = path.join('docs', 'stage', 'ST-000-路线图总览.md')
-const STAGE_DIR_REL = path.join('docs', 'stage')
+const ARCH_REL = path.join('docs', '004-plan', '001-核心架构.md')
+const FRAME_REL = path.join('docs', '004-plan', '002-能力坐标系.md')
+const LADDER_REL = path.join('docs', '003-stage', '000-路线图总览.md')
+const STAGE_DIR_REL = path.join('docs', '003-stage')
 
 const read = (rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8')
 
@@ -501,15 +501,15 @@ export function claimsOf(ladderMd) {
 }
 
 /**
- * roadmap/ 目录里真正存在的阶文件（`ST-0NN-xxx.md`），**不含**总览。
+ * roadmap/ 目录里真正存在的阶文件（`0NN-xxx.md`），**不含**总览。
  * `id` 是**对账键**：与阶梯总表 / §6.1 落点列同款（`S01` 两位形态）——
  * 文件名按编号规范带前缀与三位序号，内部 id 保持总表口径，两边由本函数桥接。
  */
 export function stageFilesOf(dirEntries) {
   return dirEntries
-    .filter((f) => /^ST-\d{3}-.+\.md$/.test(f) && !f.startsWith('ST-000-')) // ST-000 是总览，不是阶
+    .filter((f) => /^\d{3}-.+\.md$/.test(f) && !f.startsWith('000-')) // 000 是总览，不是阶
     .sort()
-    .map((f) => ({ id: `S${String(parseInt(f.slice(3, 6), 10)).padStart(2, '0')}`, file: f }))
+    .map((f) => ({ id: `S${String(parseInt(f.slice(0, 3), 10)).padStart(2, '0')}`, file: f }))
 }
 
 /** 汇总成一份 facts 文本（导出给测试用：同一份代码，测试喂假文档） */
@@ -572,7 +572,7 @@ export function buildFacts({ archMd, frameMd, ladderMd, stageMds, dirEntries }) 
 
   const rs = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
   const out = []
-  out.push('// 生成物：由 `scripts/gen-verify-facts.mjs` 从 docs/plan 抽取，**不要手改**。')
+  out.push('// 生成物：由 `scripts/gen-verify-facts.mjs` 从 docs/004-plan 抽取，**不要手改**。')
   out.push('// 要改这些数据就改文档（01 §8 / 02 坐标系 / 路线图总表 / 各阶 §3·§4 / S10 §2），再重跑生成脚本。')
   out.push('//')
   out.push('// 每个 verify 程序都是一个**独立的 crate**，各自只 `use` 下面的一部分；')
@@ -779,7 +779,7 @@ pub fn in_domain(key: &str, value: &str) -> bool {
     .join('')
   out.push(`pub const STAGE_DOCS: &[StageDoc] = &[${docLiterals}\n];`)
   out.push('')
-  out.push('/// 认知体系的一条需求（S10 §2 的映射表，roadmap/ST-010-个人认知体系注入.md）')
+  out.push('/// 认知体系的一条需求（S10 §2 的映射表，roadmap/010-个人认知体系注入.md）')
   out.push(`#[derive(Clone, Copy)]
 pub struct CognitiveDemand {
     pub id: &'static str,

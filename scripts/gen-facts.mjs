@@ -32,8 +32,8 @@
  *
  * ## 只收「离线可重生成」的代码投影
  *
- * 需要**跑起来**才产出的事实不进本目录——`docs/ref/PROMPT_SHAPE.md` 由 e2e `t46`
- * 从真实链路抓，`docs/ref/PROMPT_AB.md` 由门外实验生成。它们的生成点在 e2e 而非
+ * 需要**跑起来**才产出的事实不进本目录——`docs/006-ref/PROMPT_SHAPE.md` 由 e2e `t46`
+ * 从真实链路抓，`docs/006-ref/PROMPT_AB.md` 由门外实验生成。它们的生成点在 e2e 而非
  * 门内脚本，搬进来会让 runner 在没有运行时的场合（CI 的 facts 阶段）静默产出
  * 一份错的，或报一个与真相无关的红。这条边界写在 `facts/README.md`。
  */

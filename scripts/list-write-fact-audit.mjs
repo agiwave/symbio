@@ -44,7 +44,7 @@
  * 平台无关（纯 Node，不依赖 bash / ripgrep），带回归测试（list-write-fact-audit.test.mjs）。
  */
 
-// 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns LWF 列表写入口事实
 // @codes LWF-001 LWF-002
 

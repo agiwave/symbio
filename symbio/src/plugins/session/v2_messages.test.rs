@@ -9,7 +9,7 @@
 //! 生产路径是 `commands::patch_message` / `truncate_messages` → 本模块（见那两个
 //! 方法的文档）。两条 `append` 调用点各一行、没有分支，而 VDFS 边界的回执 / 变更帧
 //! 已由 `vdfs_provider.test.rs` 覆盖——同一段语义不在两处各钉一遍
-//! （`docs/AR-017-module-layout.md` §2）。本文件只钉「事实本身」。
+//! （`docs/017-module-layout.md` §2）。本文件只钉「事实本身」。
 
 use super::{drain_parked, edited, removed};
 use crate::symbio_core::chat_message::{ChatMessage, MessageContent, MessageRole, MessageType};

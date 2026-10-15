@@ -19,9 +19,9 @@
  * | 码 | 名字 | 来源 | 判什么 |
  * |---|---|---|---|
  * | DC-001 | `check_all` 条数 | `symbio_core/invariants/mod.rs` 的函数体 | 活跃文档陈述它有 N 条时，N 必须相等 |
- * | DC-002 | 机制表顶层键数 | `docs/plan/verify/facts/mod.rs` 的 `MECHANISMS`（M1 的生成物） | 同上 |
+ * | DC-002 | 机制表顶层键数 | `docs/004-plan/verify/facts/mod.rs` 的 `MECHANISMS`（M1 的生成物） | 同上 |
  * | DC-003 | §8 登记的键数（含子键） | 同上文件的 `PARAM_KEYS` | 同上 |
- * | DC-004 | 验证程序数 | `docs/plan/verify/*.rs` 的文件数（门禁 55 阶段逐个编译运行的那批） | 同上 |
+ * | DC-004 | 验证程序数 | `docs/004-plan/verify/*.rs` 的文件数（门禁 55 阶段逐个编译运行的那批） | 同上 |
  *
  * **DC-004 治的是哪一类漂移**：文档与门禁**读同一批文件**、却各数各的。
  * 一个新程序落进 `verify/` 之后，门禁当天就会跑它，而文档里「N 个验证程序」那句话
@@ -42,7 +42,7 @@
  * 退出码：0 = 通过；1 = 有对不上；2 = 审计范围读不出（来源读不出来即 exit 2，
  *      **不退化成「什么都没检查」**——那正是这类守卫最安静的死法）。
  */
-// 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns DC 文档计数对账（文档里的少数几个数 vs 代码）
 // @codes DC-001 DC-002 DC-003 DC-004
 
@@ -57,7 +57,7 @@ const REPO_ROOT = rootArg ? path.resolve(rootArg.slice(7)) : path.resolve(script
 
 const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'tmp', '.workbuddy-ai', '.symbio', 'archive'])
 const INVARIANTS_REL = path.join('symbio', 'src', 'symbio_core', 'invariants', 'mod.rs')
-const FACTS_REL = path.join('docs', 'plan', 'verify', 'facts', 'mod.rs')
+const FACTS_REL = path.join('docs', '004-plan', 'verify', 'facts', 'mod.rs')
 
 /** 中文数字 → 数值（本仓文档里的计数一律用汉字，量词是 条 / 项 / 个 / 处 / 格）。 */
 const CN_DIGITS = { 零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
@@ -112,11 +112,11 @@ const m = txt.match(new RegExp(`(?:const|pub const)\\s+${name}\\b[^=]*=\\s*&?\\s
   return { mechanisms, paramKeys }
 }
 
-/** `docs/plan/verify/` 下的验证程序数——**门禁 55 阶段会逐个编译运行的那一批**。
+/** `docs/004-plan/verify/` 下的验证程序数——**门禁 55 阶段会逐个编译运行的那一批**。
  *  口径取顶层 `.rs` 文件：`facts/` 是被它们 `mod facts;` 进来的共享数据，
  *  `recursion` 子目录不参与（它们不是独立程序）。 */
 function verifyProgramCount(root) {
-  const dir = path.join(root, 'docs', 'plan', 'verify')
+  const dir = path.join(root, 'docs', '004-plan', 'verify')
   if (!fs.existsSync(dir)) return null
   const n = fs.readdirSync(dir).filter((f) => f.endsWith('.rs') && fs.statSync(path.join(dir, f)).isFile()).length
   return n > 0 ? n : null

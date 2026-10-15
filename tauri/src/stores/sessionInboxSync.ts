@@ -4,7 +4,7 @@
  * ## 它补的是哪一个窗口
  *
  * 用户消息一旦被消费，后端就发权威帧（落库回包，见
- * `symbio/src/plugins/session/docs/AR-022-vdfs-session-messages.md` §3.4），
+ * `symbio/src/plugins/session/docs/022-vdfs-session-messages.md` §3.4），
  * 转写消费端（`sessionTranscriptSync`）照实显示——**无论发送方是谁**
  * （前端自己 / CLI / telegram / 心跳 / 别的进程）。
  *

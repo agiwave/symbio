@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 事实 · `docs/ref/GATE_CODES.md` —— 判据码登记表
+ * 事实 · `docs/006-ref/GATE_CODES.md` —— 判据码登记表
  *
  * 存在理由同 `facts/current.mjs`：**能生成的表不手抄**。判据码的归属只有
  * 脚本自己知道，人在别处抄一份就必然出现「表说有这条、脚本里早删了」；而这张表
@@ -19,7 +19,7 @@ import path from "node:path";
 
 // 本文件住 `scripts/facts/`，故仓根要上溯两级（原来在 `scripts/` 下只需一级）。
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const OUT_REL = "docs/ref/GATE_CODES.md";
+const OUT_REL = "docs/006-ref/GATE_CODES.md";
 
 const num = (code) => Number(code.slice(code.indexOf('-') + 1))
 

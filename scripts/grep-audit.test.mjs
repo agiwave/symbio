@@ -200,7 +200,7 @@ const S010_SUSPECT_MD = '# 指南\n\n会话在 `.vdfs/session` 之下。\n'
 test('S-010 fires outside the vdfs plugin (ts / md / rust)', () => {
   for (const [rel, content] of [
     ['tauri/src/schemas/x.ts', S010_SUSPECT_TS],
-    ['docs/guide/x.md', S010_SUSPECT_MD],
+    ['docs/007-guide/x.md', S010_SUSPECT_MD],
     ['symbio/src/plugins/session/memory.rs', 'pub const A: &str = ".vdfs/session";\n'],
   ]) {
     const r = s010Audit({ [rel]: content })
@@ -262,7 +262,7 @@ test('S-010 still fires inside the repo tree when runtime dirs are present', () 
   const r = s010Audit({
     'symbio/src/plugins/vdfs/fs.rs': '', // 标记：这是一个仓库树
     '.symbio/session/09d74431/MEMORY.md': '会话落在 `.vdfs/session/<id>` 之下。\n',
-    'docs/guide/x.md': S010_SUSPECT_MD,
+    'docs/007-guide/x.md': S010_SUSPECT_MD,
   })
   assert.equal(r.status, 1)
   assert.match(r.stdout, /S-010/)
@@ -423,7 +423,7 @@ test('S-012 fires on a batch number with no plan anchor', () => {
 
 test('S-012 accepts the same batch number with its plan anchor', () => {
   const src =
-    '/// 恢复前提见 [plan/11 批 2](../../../../docs/plan/PL-009-多执行器与多主体加固实施方案.md)。\n'
+    '/// 恢复前提见 [plan/11 批 2](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md)。\n'
   assert.equal(s010Audit({ [S012_FILE]: src }).status, 0)
 })
 
@@ -446,7 +446,7 @@ test('S-012 does not touch runtime prose about a batch of tool calls', () => {
 })
 
 test('S-012 covers cli and the verify programs, not just symbio', () => {
-  for (const file of ['cli/src/client.rs', 'docs/plan/verify/scenario_ladder.rs']) {
+  for (const file of ['cli/src/client.rs', 'docs/004-plan/verify/scenario_ladder.rs']) {
     const r = s010Audit({ [file]: '/// 这一格随批 3 补。\n' })
     assert.equal(r.status, 1, `${file} ⇒ ${r.stdout}`)
   }

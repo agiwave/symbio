@@ -218,7 +218,7 @@ export async function connectEventBus(): Promise<Connection> {
  * 那段机制存在的唯一理由，就是「事件是有顺序的」这个前提。会话显示现在不再
  * 消费任何事件：运行态是**会话节点的属性**，变更携带全量节点视图，因此幂等、
  * 可交换、丢一次也不影响正确性（见
- * `symbio/src/plugins/session/docs/AR-018-node-state-streaming.md` §4）。
+ * `symbio/src/plugins/session/docs/018-node-state-streaming.md` §4）。
  * 前提没了，补丁也就不需要了。
  *
  * @returns 取消订阅函数

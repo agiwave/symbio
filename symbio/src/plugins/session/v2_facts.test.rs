@@ -101,7 +101,7 @@ fn reopen_recovers_events_with_seq() {
     std::fs::remove_dir_all(wal.parent().unwrap()).ok();
 }
 
-/// 代际立约（[04 §3.1 批⑧](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地")，S08 §3「加格子，不加机制」）：
+/// 代际立约（[04 §3.1 批⑧](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")，S08 §3「加格子，不加机制」）：
 /// 本轮的 `agent_run` 委托落成 `commitment.opened` → `released`，**同锚在本轮开口**。
 #[test]
 fn settled_delegation_becomes_commitment_opened_then_released() {
@@ -186,7 +186,7 @@ fn settled_delegation_becomes_commitment_opened_then_released() {
     std::fs::remove_dir_all(wal.parent().unwrap()).ok();
 }
 
-/// `to` 是**数据**（[ADR-067](../../../../docs/adr/ADR-067.md "ADR-067")，T-072 的单测判据）：
+/// `to` 是**数据**（[ADR-067](../../../../docs/010-adr/067.md "ADR-067")，T-072 的单测判据）：
 /// 来源主体由调用方传入——对等主体向「把消息交进来的那个主体」立约，不再写死
 /// 本机用户。缺省回落 `PRINCIPAL_USER` 的行为由上面的用例钉住（传入的就是它）。
 #[test]
@@ -317,7 +317,7 @@ fn breached_delegation_is_declared_to_the_counterparty() {
 
 /// `Break` 的理由落成 `control × opened`，溯源锚是本轮开口；`breaks` 为空 ⇒ 一格都不落。
 ///
-/// 这是 [roadmap/S09 §6](../../../../docs/stage/ST-009-外部执行与熔断.md "ST-009-外部执行与熔断") 的两条
+/// 这是 [roadmap/S09 §6](../../../../docs/003-stage/009-外部执行与熔断.md "ST-009-外部执行与熔断") 的两条
 /// **相反**验收：验收 1（未授权 ⇒ 拒绝且不产生事件）与验收 2（预算耗尽 ⇒ 必须产出
 /// 熔断事件）。两条必须由**同一个出参**分别触发——有理由就落、没理由就不落；
 /// 「反正都落一条」违反 1，「反正都不落」违反 2。

@@ -73,7 +73,7 @@ git push origin v0.2.0
 以下密钥在 GitHub Settings → Secrets and variables → Actions 中配置：
 
 > **密钥清单不在本页**：完整清单（7 条，含「平台」列与逐条配置步骤）见
-> [GU-002 · 密钥配置指引](GU-002-SECRETS_SETUP.md "GU-002-SECRETS_SETUP")。本页曾列一份 5 条的**子集**，
+> [GU-002 · 密钥配置指引](002-SECRETS_SETUP.md "GU-002-SECRETS_SETUP")。本页曾列一份 5 条的**子集**，
 > 与那份形成两处并存且已经分叉（措辞与条数都不同）。
 
 **注意**: 

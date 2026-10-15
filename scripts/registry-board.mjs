@@ -24,7 +24,7 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, dim } from './color.mjs'
-import { KINDS, loadEntries, auditEntries, topoOrder, sectionOf, isEmpty, parentDepth } from './registry-lib.mjs'
+import { loadEntries, auditEntries, topoOrder, sectionOf, isEmpty, parentDepth } from './registry-lib.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const defaultRoot = path.resolve(scriptDir, '..')
@@ -108,7 +108,7 @@ function notFound(lines, entries, id, what) {
  * `--children=<编号>`：以该条目为根的**分解子树**（parent 字段的投影）。
  * 跨状态全景（子条目 wont / done 也显示）——与 INDEX 的分解树小节同一数据两个出口。
  */
-function printChildren(lines, entries, rootId) {
+function printChildren(lines, entries, rootId, kinds) {
   const root = entries.find((e) => e.meta && e.meta.id === rootId)
   if (!root) return notFound(lines, entries, rootId, '条目')
   const kids = (id) => entries.filter((e) => e.meta && e.meta.parent === id).sort(idCmp)
@@ -126,7 +126,7 @@ function printChildren(lines, entries, rootId) {
   }
   countAll(root.meta.id)
   // 直接子项的状态分布（「大任务完成多少了」的最短答案，按该 kind 状态机顺序）
-  const statusOrder = Object.keys(KINDS[root.kind].statusRules ?? {})
+  const statusOrder = Object.keys(kinds[root.kind].statusRules ?? {})
   const sc = new Map()
   for (const k of direct) sc.set(k.meta.status, (sc.get(k.meta.status) ?? 0) + 1)
   const parts = statusOrder.filter((s) => sc.has(s)).map((s) => `${s} ${sc.get(s)}`)
@@ -199,14 +199,7 @@ export function runRegistryBoard(argv) {
     else if (a.startsWith('--parent=')) parentFilter = a.slice(9)
     else return { code: 2, lines: [red(`[ERROR] 参数不识别：${a}`), USAGE] }
   }
-  if (kindFilter && !(kindFilter in KINDS)) {
-    return { code: 2, lines: [red(`[ERROR] 未知 kind：${kindFilter}（可选：${Object.keys(KINDS).join(' / ')}）`), USAGE] }
-  }
-  if ((idFilter && (childrenFilter || parentFilter)) || (childrenFilter && parentFilter)) {
-    return { code: 2, lines: [red('[ERROR] --id / --children / --parent 三选一（单条视图与分解视图不混用）'), USAGE] }
-  }
-
-  const { entries, errors, missing } = loadEntries(root)
+  const { entries, errors, missing, kinds } = loadEntries(root)
   if (missing) return { code: 2, lines: [red(`[ERROR] RG-010 登记范围读不出（${root}）——仓内扫不到任何已登记条目`)] }
   if (entries.length === 0) {
     if (errors.length) {
@@ -216,7 +209,13 @@ export function runRegistryBoard(argv) {
     }
     return { code: 2, lines: [red('[ERROR] RG-010 仓内扫不到任何已登记条目——登记范围读不出')] }
   }
-  const errs = [...errors, ...auditEntries(entries, root)]
+  if (kindFilter && !(kindFilter in kinds)) {
+    return { code: 2, lines: [red(`[ERROR] 未知 kind：${kindFilter}（可选：${Object.keys(kinds).join(' / ')}）`), USAGE] }
+  }
+  if ((idFilter && (childrenFilter || parentFilter)) || (childrenFilter && parentFilter)) {
+    return { code: 2, lines: [red('[ERROR] --id / --children / --parent 三选一（单条视图与分解视图不混用）'), USAGE] }
+  }
+  const errs = [...errors, ...auditEntries(entries, root, [], kinds)]
   if (errs.length) {
     const lines = [red('registry-board：条目有违规，拒绝打印（报告说假话比没有更坏）')]
     for (const e of errs) lines.push(red(`[ERROR] ${e}`))
@@ -230,12 +229,12 @@ export function runRegistryBoard(argv) {
     printRecord(lines, e)
     return { code: 0, lines }
   }
-  if (childrenFilter) return printChildren(lines, entries, childrenFilter)
+  if (childrenFilter) return printChildren(lines, entries, childrenFilter, kinds)
   if (parentFilter) return printParentChain(lines, entries, parentFilter)
 
   const shown = entries.filter((e) => !kindFilter || e.kind === kindFilter)
   const depth = parentDepth(shown)
-  const dist = Object.entries(KINDS)
+  const dist = Object.entries(kinds)
     .filter(([kind]) => !kindFilter || kind === kindFilter)
     .map(([kind, cfg]) => {
       const mine = shown.filter((e) => e.kind === kind)
@@ -264,7 +263,7 @@ export function runRegistryBoard(argv) {
   }
   byKind('task', TASK_GROUPS, printTaskGroup)
   byKind('spec', SPEC_GROUPS, printSpecGroup)
-  for (const [kind, cfg] of Object.entries(KINDS)) {
+  for (const [kind, cfg] of Object.entries(kinds)) {
     if (kind === 'task' || kind === 'spec') continue
     const groups = Object.keys(cfg.statusRules).map((s) => [s, `${cfg.label} · ${s}`])
     byKind(kind, groups, printGenericGroup)

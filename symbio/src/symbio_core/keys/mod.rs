@@ -140,14 +140,14 @@ define_string_key!(RiskLevelKey, RISK_LEVEL, "risk_level");
 // 常用业务属性 Key
 define_string_key!(IdKey, ID, "id");
 define_string_key!(NameKey, NAME, "name");
-// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（AR-004-PROTOCOLS.md 字段表）（04 §3.1 C 类：消费方=AR-004-PROTOCOLS.md 字段表 + 三方规范键清单）
+// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（004-PROTOCOLS.md 字段表）（04 §3.1 C 类：消费方=004-PROTOCOLS.md 字段表 + 三方规范键清单）
 define_string_key!(
     #[allow(dead_code)]
     KindKey,
     KIND,
     "kind"
 );
-// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（AR-004-PROTOCOLS.md 字段表）（04 §3.1 C 类：消费方=AR-004-PROTOCOLS.md 字段表 + 三方规范键清单）
+// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（004-PROTOCOLS.md 字段表）（04 §3.1 C 类：消费方=004-PROTOCOLS.md 字段表 + 三方规范键清单）
 define_string_key!(
     #[allow(dead_code)]
     ScopeKey,
@@ -155,7 +155,7 @@ define_string_key!(
     "scope"
 );
 define_string_key!(ContentKey, CONTENT, "content");
-// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（AR-004-PROTOCOLS.md 字段表）（04 §3.1 C 类：消费方=AR-004-PROTOCOLS.md 字段表 + 三方规范键清单）
+// dead-code-allow R-002: 键常量表（N-001 裸名规则）·协议契约键先于接线（004-PROTOCOLS.md 字段表）（04 §3.1 C 类：消费方=004-PROTOCOLS.md 字段表 + 三方规范键清单）
 define_string_key!(
     #[allow(dead_code)]
     DescriptionKey,

@@ -107,7 +107,10 @@ fn default_allowlist_is_unrestricted_and_config_value_reaches_validate() {
 
     let t = HttpRequestTool::new(c.web_timeout, vec!["example.com".to_string()]);
     assert!(t.validate_url("https://example.com/x").is_ok());
-    let err = t.validate_url("https://other.example.net/x").unwrap_err().to_string();
+    let err = t
+        .validate_url("https://other.example.net/x")
+        .unwrap_err()
+        .to_string();
     assert!(
         err.contains("不在 allowed_domains 中"),
         "拒绝文案应指明白名单（实际: {err}）"

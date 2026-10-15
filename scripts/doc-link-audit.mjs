@@ -20,10 +20,10 @@
  *     审计判的行必须与自动改写的行是同一批，两边各数一遍必然漂移。
  *
  * D-006 存在的理由（它是 D-001 的**盲区补丁**）：D-001 只认 Markdown 链接语法
- *   `[文字](目标)`，而本仓正文里指路**更常**写成行内反引号（"详见 `docs/arch/AR-013-vdfs.md`"）。
- *   这种写法 D-001 一个字都看不到——实测 `tauri/docs/AR-023-FRONTEND.md` 首段引用的
+ *   `[文字](目标)`，而本仓正文里指路**更常**写成行内反引号（"详见 `docs/005-arch/013-vdfs.md`"）。
+ *   这种写法 D-001 一个字都看不到——实测 `tauri/docs/023-FRONTEND.md` 首段引用的
  *   doc-link-allow D-010: 下行是讲述 D-006 缺陷的史实指认（文件确已不存在），非入链
- *   `docs/arch/frontend-ui-ux-prd.md` 与 `-design.md` **两个文件均不存在**，
+ *   `docs/005-arch/frontend-ui-ux-prd.md` 与 `-design.md` **两个文件均不存在**，
  *   而 D-001 报「失效 0 条」已经很久了。**守卫报 0 不等于没有坏链，只等于它看不见。**
  *
  * D-006 的两条防误报设计（缺任一条都会让规则被豁免喂到失效）：
@@ -37,7 +37,7 @@
  *      判定它们会让守卫满屏误报。
  *
  * **给豁免**（与 D-001 / D-003 的「不给豁免」不同）：本规则是**启发式**——
- *   缩写式引用（`` `session/docs/core-loop.md` `` 指 `symbio/src/plugins/session/docs/AR-015-core-loop.md`）
+ *   缩写式引用（`` `session/docs/core-loop.md` `` 指 `symbio/src/plugins/session/docs/015-core-loop.md`）
  *   与「示意性路径」（`` `.vite/license.md` ``）在文本上与真断链无法区分。
  *   硬判会让作者被迫改写正确的简写，故提供豁免
  *   `<!-- doc-link-allow D-006: 理由 -->`（理由不可为空，同 D-002 / D-004）。
@@ -53,9 +53,9 @@
  *     故只在确需时用；行内豁免覆盖绝大多数真实场景。
  *
  * D-008 存在的理由（**编号引用**这一类的首条规则）：2026-10-08 复核时发现
- *   `PL-004-工程落地` §3.2 与 [`ADR-047`](../docs/adr/ADR-047.md) 都写着「R1」，
+ *   `PL-004-工程落地` §3.2 与 [`ADR-047`](../docs/010-adr/047.md) 都写着「R1」，
  *   而本仓的 `R1` 有**两个**含义——`04` 风险登记表的 R1（从未写过可运行系统代码）
- *   与从 `feat` 分支并入的 `docs/plan/06` §10.2 的 R1（「主会话不持有工具」的架构定案）。
+ *   与从 `feat` 分支并入的 `docs/004-plan/06` §10.2 的 R1（「主会话不持有工具」的架构定案）。
  *   后者那篇文档**不在本仓**：引用悬空，却撞进了前者的编号空间。
  *
  *   关键在于**解析型规则抓不到它**——`R1` 能解析到风险表那一条，只是解析到了**错误的
@@ -68,8 +68,8 @@
  *
  * D-010 存在的理由（**源码注释**是本审计此前的整片盲区）：D-001 / D-006 只读 `.md`，
  *   而源码注释里的入链同样是手写地址——实测 306 条（注释行、代码段外、含 `/` 的目标），
- *   其中 **78 条已因文档搬家而静默失效**（`../../../docs/plan/…` 的层数错、
- *   `docs/plan/12-…` 搬去 `docs/goal/`）。守卫报 0 不等于没有坏链，只等于它看不见；
+ *   其中 **78 条已因文档搬家而静默失效**（`../../../docs/004-plan/…` 的层数错、
+ *   `docs/004-plan/12-…` 搬去 `docs/001-goal/`）。守卫报 0 不等于没有坏链，只等于它看不见；
  *   这批坏链在 IDE 里点开就是 404，而没有任何门禁看它们。
  *
  *   **两档判定**（与 D-001/D-006 的分工同构）：
@@ -88,7 +88,7 @@
  *   不给链接档豁免（精确判定），反引号档给——理由同 D-006：缩写与示意在字面上不可分。
  *
  * D-003 存在的理由（为什么是「行数」这个粗指标）：文档臃肿不是美学问题，而是**职责失守的
- *   可观测代理**。实测 `docs/arch/AR-013-vdfs.md` 涨到 1045 行时，超出的部分是 §13「范例」——
+ *   可观测代理**。实测 `docs/005-arch/013-vdfs.md` 涨到 1045 行时，超出的部分是 §13「范例」——
  *   它自述「非机制组成部分」，内容却与四个模块 README 逐段重复；`DECISIONS.md` 涨到 1782 行时，
  *   超出的部分是变更史与实施过程记录。两处的病灶不同，但都表现为「比它该有的大」。
  *   行数因此是一个**代价极低、不会误报**（不设"疑似"档）的触发器：超了就必须拆分，
@@ -132,7 +132,7 @@
  *   node scripts/doc-link-audit.mjs --root=<dir> # 换仓库根（回归测试用）
  *
  * 退出码：
- *   0 = 各条判据全过（全表见 docs/ref/GATE_CODES.md）
+ *   0 = 各条判据全过（全表见 docs/006-ref/GATE_CODES.md）
  *   1 = 有命中（**默认即失败**，不需要 `--strict`
  *       ——2026-09-20 前失效链接只在 `--strict` 下失败，而门禁从不带该参数 ⇒ 从未真的红过）
  *
@@ -153,7 +153,7 @@
  * 与仓库约定一致：纯 Node 实现，不依赖 bash / ripgrep，Windows / macOS / Linux 通用。
  */
 
-// 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns D 文档正文与链接
 // @codes D-001 D-002 D-003 D-004 D-006 D-007 D-008 D-010
 
@@ -193,7 +193,7 @@ const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'dist', 'build', '.
  * 归档是**动作**，能保持住的才是机制。
  *
  * `docs/README.md` 早写明「历史实施记录一律进 `archive/`，现行文档只描述当前行为」，
- * 但它只是一句话，没有任何东西检查——于是 2026-09-23 前的 `docs/arch/` 里躺着
+ * 但它只是一句话，没有任何东西检查——于是 2026-09-23 前的 `docs/005-arch/` 里躺着
  * 8 篇自述「一次性复核报告」「文档类型：评审」「实施前的方案（已全部落地）」的过程文档，
  * 活跃文档 9,662 行里有约 2,200 行是**第 N 轮的评审与整改记录**。
  *
@@ -242,7 +242,7 @@ function processDocMarker(text) {
  * 而这两个动作都不需要一个理由字段来正当化。
  *
  * 数值取 800 而非更小，是为了不逼人把**必须在一起**的规范切碎——实测本仓库最长的
- * 两篇（`docs/arch/AR-013-vdfs.md` 1045、`session/docs/AR-015-core-loop.md` 881）都不是"差一点点"，
+ * 两篇（`docs/005-arch/013-vdfs.md` 1045、`session/docs/015-core-loop.md` 881）都不是"差一点点"，
  * 而是各自含着一整类可归给他处的内容。
  */
 const MAX_DOC_LINES = 800
@@ -373,7 +373,7 @@ function isJudgeableBacktickPath(t) {
  * 为什么必须双根：本仓两种写法都合法且在用——
  * doc-link-allow D-010: 下行 `./vdfs.md` 是「相对写法」的形态示例
  *   · `docs/` 内部互相引用走相对（`./vdfs.md`）
- *   · 模块 README 引用系统文档走仓库根（`docs/ref/RE-006-当前事实表.md`）
+ *   · 模块 README 引用系统文档走仓库根（`docs/006-ref/006-当前事实表.md`）
  * 只认一种会把另一种全部误报（实测：单根时 34 条失败，双根后 9 条）。
  */
 function backtickPathExists(fromFile, t) {
@@ -648,14 +648,14 @@ for (const rel of ROOT_FILES) {
 // 三条规矩**共用同一次读盘**：分三遍读等于让守卫的代价翻三倍，而它们的扫描范围完全一致。
 const BODY_ROOTS = ['docs', 'symbio/src', 'tauri', 'cli', 'e2e', '.github']
 /**
- * 散文体检不适用于 `docs/task/` `docs/spec/` `docs/adr/`：那里的 `.md` 是**登记条目**
+ * 散文体检不适用于 `docs/009-task/` `docs/008-spec/` `docs/010-adr/`：那里的 `.md` 是**登记条目**
  * （不是现行阅读文档）——`## 处理过程` 的职责就是记「初版怎么想、后来为什么改」，
  * 按 D-004 判它写历史等于判台账漏记；D-006 同理（闭环条目引用当时存在、
  * 后来删掉的路径是事实）。条目自己由 registry-audit 的 RG 判据管
  * （`exit:` 里指认的路径由 RG-012 验存在）。
  * **D-001 / D-007 仍然适用**——链接与锚点要么存在要么不存在，没有中间态。
  */
-const BODY_EXEMPT_DIRS = ['docs/task/', 'docs/spec/', 'docs/adr/']
+const BODY_EXEMPT_DIRS = ['docs/009-task/', 'docs/008-spec/', 'docs/010-adr/']
 
 /**
  * front-matter（首行 `---` … `---`）剥离。
@@ -873,8 +873,8 @@ for (const { rel, lines } of oversized) {
 }
 if (oversized.length > 0) {
   console.log('\n提示：超限即「内容不属于这里」或「该拆篇」的信号，按 docs/README.md 的 owner 表处置：')
-  console.log('      · 模块内部机制 → 该模块 README.md；· 论证与被否决的方案 → docs/adr/（只留 ADR 引用）')
-  console.log('      · 协议线上形状 → arch/AR-004-PROTOCOLS.md；· 列表类事实 → CURRENT.md（自动生成，不手抄）')
+  console.log('      · 模块内部机制 → 该模块 README.md；· 论证与被否决的方案 → docs/010-adr/（只留 ADR 引用）')
+  console.log('      · 协议线上形状 → arch/004-PROTOCOLS.md；· 列表类事实 → CURRENT.md（自动生成，不手抄）')
   console.log('      · 实例 / 范例 → 由被举例的那个模块的 README 持有')
   console.log('      本条**不给豁免**：拆分方向由 owner 表给出，不需要逐篇解释。')
 }

@@ -76,7 +76,7 @@
  * 退出码：0 = 通过；1 = 有违规或规则源不可解析。
  */
 
-// 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns N core 命名
 // @codes N-001 N-002 N-003 N-004 N-005
 

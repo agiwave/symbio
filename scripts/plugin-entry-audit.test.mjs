@@ -95,7 +95,7 @@ impl Plugin for SessionPlugin {
 const CLEAN = {
   ...CORE,
   'symbio/src/plugins/session/plugin.rs': PLUGIN,
-  'docs/ref/RE-003-ROUTES.md': '| `session/chat/send` | 发言 |\n',
+  'docs/006-ref/003-ROUTES.md': '| `session/chat/send` | 发言 |\n',
 }
 
 test('干净树通过（exit 0）', () => {
@@ -242,7 +242,7 @@ test('E-005 不误报：常量定义行（它是真相源本身，不是引用�
 // 「错名已经扩散到哪」才是要修的范围——E-002 查代码，E-006 查文档。
 // 所以这两个用例断言的是**输出行**而不是退出码（退出码由 E-001 决定）。
 // 真实案例：`hook` 的 `"hooks"` 只被 E-001 抓到时，你还不知道三处文档已经照抄了它。
-test('E-006 命中：RE-003-ROUTES.md 里写了 `sessions/update`', () => {
+test('E-006 命中：003-ROUTES.md 里写了 `sessions/update`', () => {
   const r = audit(
     {
       ...CLEAN,
@@ -250,18 +250,18 @@ test('E-006 命中：RE-003-ROUTES.md 里写了 `sessions/update`', () => {
         'PluginMeta::new(PLUGIN_ID_SESSION',
         'PluginMeta::new("sessions"',
       ),
-      'docs/ref/RE-003-ROUTES.md': '| `sessions/update` | 合并写入 |\n',
+      'docs/006-ref/003-ROUTES.md': '| `sessions/update` | 合并写入 |\n',
     },
     { strict: true },
   )
-  assert.match(r.stdout, /\[WARN\]\s+E-006 docs\/ref\/RE-003-ROUTES\.md:1/)
+  assert.match(r.stdout, /\[WARN\]\s+E-006 docs\/006-ref\/003-ROUTES\.md:1/)
 })
 
 test('E-006 不误报：退役路由的**前缀**仍然合法（`session/append`）', () => {
   const r = audit(
     {
       ...CLEAN,
-      'docs/ref/RE-003-ROUTES.md':
+      'docs/006-ref/003-ROUTES.md':
         '> `session/append` **已退役**（与 `vdfs/delete` 共用实现）。\n',
     },
     { strict: true },
@@ -497,14 +497,14 @@ test('提取正确性：`*.test.rs` 里的假 route 不参与臂提取', () => {
 
 // ── E-008：文档词表必须与代码常量逐字一致 ──────────────────────────────
 //
-// 真实事故的形状：`docs/arch/AR-013-vdfs.md` §3.2 的 status 行一直写 `error`，而代码
+// 真实事故的形状：`docs/005-arch/013-vdfs.md` §3.2 的 status 行一直写 `error`，而代码
 // 已把该词改名为 `failed`（理由见 `vdfs/words.rs::VDFS_STATUS_FAILED`）——两边
 // 各说各话，没有任何测试因此变红；而人读文档写的代码会照 `error` 写。
 const VOCAB_CORE = {
   'symbio/src/symbio_core/vdfs/words.rs':
     `pub const FOO_ONE: &str = "one";\npub const FOO_TWO: &str = "two";\n`,
 }
-const vocabDoc = (line) => ({ ...CLEAN, ...VOCAB_CORE, 'docs/arch/AR-013-vdfs.md': `${line}\n` })
+const vocabDoc = (line) => ({ ...CLEAN, ...VOCAB_CORE, 'docs/005-arch/013-vdfs.md': `${line}\n` })
 
 test('E-008 命中：文档写着代码里已不存在的词', () => {
   const r = audit(vocabDoc('| `status` | `one` / `legacy` <!-- vocab:FOO_ --> |'))

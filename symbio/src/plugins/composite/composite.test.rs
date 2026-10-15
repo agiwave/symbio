@@ -118,7 +118,12 @@ impl StopProbe {
     }
 
     fn reasons(&self) -> Vec<String> {
-        self.stops.lock().unwrap().iter().map(|s| s.to_string()).collect()
+        self.stops
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
     }
 }
 
@@ -141,14 +146,11 @@ impl Plugin for StopProbe {
     }
 
     async fn stop(self: Arc<Self>, reason: PluginStopReason) -> Result<(), PluginError> {
-        self.stops
-            .lock()
-            .unwrap()
-            .push(match reason {
-                PluginStopReason::Disabled => "Disabled",
-                PluginStopReason::Uninstalled => "Uninstalled",
-                PluginStopReason::Shutdown => "Shutdown",
-            });
+        self.stops.lock().unwrap().push(match reason {
+            PluginStopReason::Disabled => "Disabled",
+            PluginStopReason::Uninstalled => "Uninstalled",
+            PluginStopReason::Shutdown => "Shutdown",
+        });
         if self.fail_on_stop {
             Err(PluginError::InternalError("探针故意失败".into()))
         } else {
@@ -167,7 +169,11 @@ async fn shutdown_broadcasts_to_every_child_exactly_once() {
         ("b", Arc::clone(&b) as Arc<dyn Plugin>),
     ]);
 
-    composite.clone().stop(PluginStopReason::Shutdown).await.unwrap();
+    composite
+        .clone()
+        .stop(PluginStopReason::Shutdown)
+        .await
+        .unwrap();
 
     assert_eq!(a.reasons(), vec!["Shutdown"], "a 应恰收一次 Shutdown");
     assert_eq!(b.reasons(), vec!["Shutdown"], "b 应恰收一次 Shutdown");
@@ -183,7 +189,11 @@ async fn shutdown_continues_past_a_failing_child() {
         ("good", Arc::clone(&good) as Arc<dyn Plugin>),
     ]);
 
-    composite.clone().stop(PluginStopReason::Shutdown).await.unwrap();
+    composite
+        .clone()
+        .stop(PluginStopReason::Shutdown)
+        .await
+        .unwrap();
 
     assert_eq!(bad.reasons().len(), 1, "失败的那家也收到了 stop");
     assert_eq!(good.reasons(), vec!["Shutdown"], "后面的插件照常收尾");
@@ -195,8 +205,16 @@ async fn non_shutdown_reasons_do_not_broadcast() {
     let a = StopProbe::new(false);
     let composite = composite_of(vec![("a", Arc::clone(&a) as Arc<dyn Plugin>)]);
 
-    composite.clone().stop(PluginStopReason::Disabled).await.unwrap();
-    composite.clone().stop(PluginStopReason::Uninstalled).await.unwrap();
+    composite
+        .clone()
+        .stop(PluginStopReason::Disabled)
+        .await
+        .unwrap();
+    composite
+        .clone()
+        .stop(PluginStopReason::Uninstalled)
+        .await
+        .unwrap();
 
     assert!(
         a.reasons().is_empty(),

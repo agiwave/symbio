@@ -45,14 +45,14 @@ function audit ({ doc = 'docs/a.md', body = '# A\n', checkAll = 8, facts = { mec
       ].join('\n'),
     )
     write(
-      'docs/plan/verify/facts/mod.rs',
+      'docs/004-plan/verify/facts/mod.rs',
       [
         `pub const MECHANISMS: &[&str] = &[${Array.from({ length: facts.mechanisms }, (_, i) => `"k${i}"`).join(', ')}];`,
         `pub const PARAM_KEYS: &[&str] = &[${Array.from({ length: facts.paramKeys }, (_, i) => `"k${i}"`).join(', ')}];`,
       ].join('\n'),
     )
-    // DC-004 的来源：`docs/plan/verify/` 顶层那几个 `.rs`（门禁 55 阶段逐个编译运行的那批）
-    for (let i = 0; i < verify; i++) write(`docs/plan/verify/p${i + 1}.rs`, 'fn main() {}')
+    // DC-004 的来源：`docs/004-plan/verify/` 顶层那几个 `.rs`（门禁 55 阶段逐个编译运行的那批）
+    for (let i = 0; i < verify; i++) write(`docs/004-plan/verify/p${i + 1}.rs`, 'fn main() {}')
     const r = spawnSync(process.execPath, [script, `--root=${root}`], {
       env: { ...process.env, NO_COLOR: '1' },
       encoding: 'utf8',
@@ -111,7 +111,7 @@ test('DC-004 数对得上 ⇒ 绿（数的是目录里那几个会被编译的�
 
 // ── ② 不误报（本仓真有的三种邻近形态） ───────────────────────────────
 
-test('不误报：数后面紧跟逗号（本仓 RE-003-ROUTES.md 的真形：`check_all` 八条，空 = 全绿）', () => {
+test('不误报：数后面紧跟逗号（本仓 003-ROUTES.md 的真形：`check_all` 八条，空 = 全绿）', () => {
   const r = audit({ body: '# A\n\n不变量清单 `invariants`（`check_all` 八条，空 = 全绿）——纯读。\n' })
   assert.equal(r.status, 0, r.stdout)
 })

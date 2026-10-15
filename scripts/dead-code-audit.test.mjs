@@ -29,15 +29,15 @@ function audit(rustFiles, { waiver = null, env: extraEnv = {}, plan = null, spec
       const text = waiver === null ? src : src.replace('WAIVER', waiver)
       fs.writeFileSync(path.join(root, 'symbio/src', name), text)
     }
-    // 规则源（T-006 后）：批号闭集的 owner 是 `docs/spec/SP-015.md`；
+    // 规则源（T-006 后）：批号闭集的 owner 是 `docs/008-spec/015.md`；
     // 04 §3.1 退为迁移期兼容来源。R-002 ③「承认必须挂到计划步」只在规则源存在时判。
     if (spec) {
-      fs.mkdirSync(path.join(root, 'docs/spec'), { recursive: true })
-      fs.writeFileSync(path.join(root, 'docs/spec/SP-015.md'), spec)
+      fs.mkdirSync(path.join(root, 'docs/008-spec'), { recursive: true })
+      fs.writeFileSync(path.join(root, 'docs/008-spec/015.md'), spec)
     }
     if (plan) {
-      fs.mkdirSync(path.join(root, 'docs/plan'), { recursive: true })
-      fs.writeFileSync(path.join(root, 'docs/plan/PL-004-工程落地.md'), plan)
+      fs.mkdirSync(path.join(root, 'docs/004-plan'), { recursive: true })
+      fs.writeFileSync(path.join(root, 'docs/004-plan/004-工程落地.md'), plan)
     }
     const env = { ...process.env, NO_COLOR: '1', ...extraEnv }
     const result = spawnSync(process.execPath, [script, `--root=${root}`], {
@@ -158,7 +158,7 @@ test('R-002 counts the module-level marker too', () => {
   assert.match(r.stdout, /a\.rs:1/)
 })
 
-// R-002 ③：**承认 ↔ 计划步**。批号闭集的 owner 是 `docs/spec/SP-015.md`
+// R-002 ③：**承认 ↔ 计划步**。批号闭集的 owner 是 `docs/008-spec/015.md`
 // （T-006 起；04 §3.1 退为迁移期兼容来源）。每处 `allow` 的理由必须指向真实的批号——
 // 否则「计划完成」只是一句自述，门禁查不出「步已标完成、标记还挂着」这种漂移。
 const SPEC_FIXTURE = [

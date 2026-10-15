@@ -25,7 +25,7 @@
 //! 共用的只是**寻址**：根由调用方传入，id→段名取
 //! [`crate::providers::vdfs_safe_segment`]
 //! （经 [`super::paths::safe_id`]），与资源条目同一份规则。判据见
-//! `docs/arch/AR-013-vdfs.md` §13.4（agent 目录是先例）。
+//! `docs/005-arch/013-vdfs.md` §13.4（agent 目录是先例）。
 //!
 //! ## 磁盘布局
 //!
@@ -40,13 +40,13 @@
 //! 清单只读 `session.json`，其大小与会话聊了多久**无关**；`messages.json` 只有真的
 //! 要取转写时才读。代价是清单字段（标题 / 条数 / 摘要 / 标签）不能现算，必须在 `save`
 //! 时算好落盘——它们是**投影**（[`super::types::SessionSummary`]），可重算，不是第二份
-//! 真相。性能取舍见 `symbio/src/plugins/session/docs/AR-019-perf.md`。
+//! 真相。性能取舍见 `symbio/src/plugins/session/docs/019-perf.md`。
 //!
 //! 旧布局（消息内联在 `session.json`）仍**可读**：`messages.json` 缺失时回落到内联
 //! `messages` 字段；投影缺失时用内联消息**就地补算**（[`SessionMetaFile::into_summary`]）
 //! ——缺了这条兜底，清单会静默退化成显示 id。
 //!
-//! ### 子会话嵌套存储（机制约定，见 docs/arch/AR-013-vdfs.md）
+//! ### 子会话嵌套存储（机制约定，见 docs/005-arch/013-vdfs.md）
 //!
 //! 会话可派生子会话：子会话不是顶层平级条目，而是存放在父会话目录内的
 //! `sessions/` 子目录——`<根>/<safe(父)>/sessions/<safe(子)>/`。
@@ -265,7 +265,7 @@ impl SessionStore {
     ///
     /// 排序与截断都在内存里做：窗口约束的是**响应大小**（少传多少节点给前端），
     /// 而 IO 成本已经由「清单只读 `session.json`」压平了——再引入一份索引文件
-    /// 换来的收益不值一个新文件（见 docs/AR-019-perf.md §3）。
+    /// 换来的收益不值一个新文件（见 docs/019-perf.md §3）。
     pub async fn list_sessions_window(
         &self,
         limit: Option<u32>,
@@ -331,7 +331,7 @@ impl SessionStore {
     ///
     /// 幂等：新布局且投影齐全的目录直接跳过（`get_store` 每次构造只跑一次）。
     /// 为什么要补投影：投影字段是后来加的 `#[serde(default)]`，存量文件里没有，
-    /// 少了它清单会静默退化成显示 id（见 docs/AR-019-perf.md §11.3）。
+    /// 少了它清单会静默退化成显示 id（见 docs/019-perf.md §11.3）。
     pub(crate) async fn migrate_split_messages(&self) -> Result<(), PluginError> {
         let Some(base) = self.disk() else {
             return Ok(());

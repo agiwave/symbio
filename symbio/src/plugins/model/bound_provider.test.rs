@@ -475,7 +475,7 @@ async fn unreachable_endpoint_maps_to_generation_failed() {
     assert!(result.is_err(), "不可达端点必须失败");
 }
 
-/// SLO 校准实测（G2，[plan/04 §1](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地") §1.2）：
+/// SLO 校准实测（G2，[plan/04 §1](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") §1.2）：
 /// **系统自身开销**（不含模型推理——mock 即答）在 N 轮真实 HTTP/SSE 全链路上的
 /// 分布。这个数字回答 G2 的缺口「只有预算断言，没有实测」：
 ///
@@ -484,7 +484,7 @@ async fn unreachable_endpoint_maps_to_generation_failed() {
 ///   给模型留出主导份额）、**max ≤ 300ms**（快速档——最坏情况不得溢出快速档；
 ///   溢出说明链路自身失控，与模型无关）。
 ///
-/// 实测值记录在 [docs/ref/RE-004-slo-calibration.md](../../../../docs/ref/RE-004-slo-calibration.md "RE-004-slo-calibration")。
+/// 实测值记录在 [docs/006-ref/004-slo-calibration.md](../../../../docs/006-ref/004-slo-calibration.md "RE-004-slo-calibration")。
 #[tokio::test]
 async fn reflex_tier_system_overhead_is_measured_and_bounded() {
     let mut samples: Vec<u64> = Vec::new();
@@ -538,7 +538,7 @@ async fn reflex_tier_system_overhead_is_measured_and_bounded() {
 /// 链路与 CI 侧校准（[`reflex_tier_system_overhead_is_measured_and_bounded`]）
 /// **完全同形**：事件网格（`EventStore`）→ `Reasoner`（持 `FullModel` 令牌）→
 /// `ProviderLlmAdapter` → 真实端点。差异只在端点——mock 即答量的是**系统自身开销**，
-/// 真实模型量的是**主导项延迟**。产出可抄进 `docs/ref/RE-004-slo-calibration.md` 的报告行。
+/// 真实模型量的是**主导项延迟**。产出可抄进 `docs/006-ref/004-slo-calibration.md` 的报告行。
 ///
 /// 守卫：每轮落在**深度档**（60s）内——真实模型延迟的主导项必须被四层预算接住。
 ///
@@ -606,5 +606,5 @@ async fn real_provider_full_calibration() {
     println!("═══ 真实端点校准（{rounds} 轮，{model}，适配器边界实测）═══");
     println!("样本：{samples:?}");
     println!("P50 = {p50}ms · P95 = {p95}ms · max = {max}ms · 总耗 = {total}ms");
-    println!("（系统自身开销基线：P50 = 1ms / max = 3ms，见 docs/ref/RE-004-slo-calibration.md）");
+    println!("（系统自身开销基线：P50 = 1ms / max = 3ms，见 docs/006-ref/004-slo-calibration.md）");
 }

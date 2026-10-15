@@ -130,9 +130,9 @@ const LADDER = `
 
 | 阶 | 场景 | 新能力 | **新增机制键** | 参数变化 | 文件 |
 |---|:-:|:-:|:-:|:-:|---|
-| S01 | 最小闭环 | 能对话 | **2** | 2 | [→](./ST-001-a.md) |
-| S02 | 工具与产物 | 能动手 | **2** | 2 | [→](./ST-002-b.md) |
-| S10 | 认知注入 | 像谁那样想 | **0** | 2 | [→](./ST-010-c.md) |
+| S01 | 最小闭环 | 能对话 | **2** | 2 | [→](./001-a.md) |
+| S02 | 工具与产物 | 能动手 | **2** | 2 | [→](./002-b.md) |
+| S10 | 认知注入 | 像谁那样想 | **0** | 2 | [→](./010-c.md) |
 
 **机制键累计**：2 → 4
 `
@@ -205,7 +205,7 @@ const fixture = (over = {}) => ({
   frameMd: FRAME,
   ladderMd: LADDER,
   stageMds: { S01, S02, S10 },
-  dirEntries: ['ST-000-路线图总览.md', 'ST-001-a.md', 'ST-002-b.md', 'ST-010-c.md'],
+  dirEntries: ['000-路线图总览.md', '001-a.md', '002-b.md', '010-c.md'],
   ...over,
 })
 
@@ -300,7 +300,7 @@ test('反向：删掉总表的一行而阶文件还在 ⇒ 名册与目录不配
 
 test('反向：删掉一篇阶文档而总表还声明着它 ⇒ 同一条不配对', () => {
   assert.throws(
-    () => buildFacts(fixture({ dirEntries: ['ST-000-路线图总览.md', 'ST-001-a.md'] })),
+    () => buildFacts(fixture({ dirEntries: ['000-路线图总览.md', '001-a.md'] })),
     /不是一对一同名/,
   )
 })
@@ -557,7 +557,7 @@ test('反向：S10 那篇读不到 ⇒ 抛错，而不是产出一份没有需�
         fixture({
           ladderMd: LADDER.replace(/^.*S10.*$/m, ''),
           stageMds: { S01, S02 },
-          dirEntries: ['ST-000-路线图总览.md', 'ST-001-a.md', 'ST-002-b.md'],
+          dirEntries: ['000-路线图总览.md', '001-a.md', '002-b.md'],
         }),
       ),
     /没有 S10 阶文档/,
@@ -576,7 +576,7 @@ test('真实 docs/plan 读得出 10 个顶层键与 13 阶名册', () => {
 })
 
 test('真实 02 读得出坐标系：名册、定义表与三处声明吃的是同一个集合', () => {
-  const f = frameOf(fs.readFileSync(path.join(REPO, 'docs', 'plan', 'PL-002-能力坐标系.md'), 'utf8'))
+  const f = frameOf(fs.readFileSync(path.join(REPO, 'docs', '004-plan', '002-能力坐标系.md'), 'utf8'))
   assert.equal(f.dimensions.length, f.dimCounts.length)
   assert.equal(
     f.dimCounts.reduce((s, [, n]) => s + n, 0),
@@ -593,15 +593,15 @@ test('真实 02 读得出坐标系：名册、定义表与三处声明吃的是�
 })
 
 test('真实 S10 读得出 16 条认知需求，其中恰有一条不占参数面', () => {
-  const s10 = fs.readFileSync(path.join(REPO, 'docs', 'stage', 'ST-010-个人认知体系注入.md'), 'utf8')
+  const s10 = fs.readFileSync(path.join(REPO, 'docs', '003-stage', '010-个人认知体系注入.md'), 'utf8')
   const ds = demandsOf(s10, 'S10')
   assert.equal(ds.length, 16, 'S10 §2 与 03 §7.1 都说 16 条——数一下，别信')
   assert.equal(ds.filter((d) => !d.assignments.length).length, 1, '只有 C06（索引）不占参数面')
   assert.equal(new Set(ds.map((d) => d.stage)).size >= 5, true, '落点跨阶：认知体系不是单独一阶')
 })
 
-test('生成物与 docs/plan/verify/facts/mod.rs 逐字一致（漂移由门禁自动修复，单测钉住判据）', () => {
-  const onDisk = fs.readFileSync(path.join(REPO, 'docs', 'plan', 'verify', 'facts', 'mod.rs'), 'utf8')
+test('生成物与 docs/004-plan/verify/facts/mod.rs 逐字一致（漂移由门禁自动修复，单测钉住判据）', () => {
+  const onDisk = fs.readFileSync(path.join(REPO, 'docs', '004-plan', 'verify', 'facts', 'mod.rs'), 'utf8')
   assert.equal(onDisk, generate(REPO))
 })
 

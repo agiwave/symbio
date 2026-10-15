@@ -237,7 +237,7 @@ async fn nonconforming_agent_is_rejected_with_both_versions() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// v2：子 Agent 是一棵 composite 插件树（规范 `docs/arch/AR-006-agent-directory-spec.md`）
+// v2：子 Agent 是一棵 composite 插件树（规范 `docs/005-arch/006-agent-directory-spec.md`）
 // ---------------------------------------------------------------------
 // 验证三件事：manifest 声明 `agent-dir/v2` 的目录会被挂成插件树；它的注册经
 // 代理层带上来源前缀（与系统树不冲突）；它自己的 `AGENTS.md` 由子树里的 `memory`

@@ -51,7 +51,7 @@ export const GUARDS = [
   // 看不见：doc-link 只管链接、facts/current 只生成结构表，都不校验散文
   // 里的符号指认——校准日一次就抓出五处改名残留（`KEY_PAYLOAD` →
   // `PLUGIN_PAYLOAD_KEY`、`HOOK_FIRE` → `ROUTE_HOOK_FIRE` 等，先修后建）。
-  // 豁免出口只对应「文档说的是历史」：`docs/adr/`（ADR 正文）与 `archive`
+  // 豁免出口只对应「文档说的是历史」：`docs/010-adr/`（ADR 正文）与 `archive`
   // 行内历史词、`<!-- doc-symbol-allow: 理由 -->` 承认通道（空理由不算）。
   // 回归测试双向钉住：违规必须变红，注释/单段词/ADR 不得误报，范围读不出必须 exit 1。
   'doc-symbol-audit',
@@ -86,7 +86,7 @@ export const GUARDS = [
   // 退出 0。回归测试因此拿真实仓库的登记项 / 命中数做非零对照。
   'panic-audit',
   // `no-direct-call-audit`（S6 第 14 步，出口判据「直连调用 0」）判「**任意两主体
-  // 无直连——一切经事实源**」（[roadmap/S08 §5](../../docs/stage/ST-008-多主体与对等承诺.md "ST-008-多主体与对等承诺")）：
+  // 无直连——一切经事实源**」（[roadmap/S08 §5](../../docs/003-stage/008-多主体与对等承诺.md "ST-008-多主体与对等承诺")）：
   // 直接调用的前提是持有对方句柄，故禁两类形态——NDC-001 主体类型名出现在
   // 定义域/根重导出/测试文件之外的运行时代码（注释不算，文档 ≠ 对象图边）；
   // NDC-002 任何文件里的主体句柄（`Arc<P>` / `Rc<P>` / `Arc::new(P)` /
@@ -260,17 +260,17 @@ export const TEST_ONLY = [
  *    `gen-verify-facts` 都吃它），判据是「读不出来必须返回 null」；
  *  - `gate.d/_shared`：门禁原语（`BASELINE` / `ratchetVerdict` / `autoWork` / `color`）；
  *  - `core-surface`：`core-surface-audit` 的公开面统计库（它只被那一个审计引用）；
- *  - `route-facts`：`docs/ref/RE-006-当前事实表.md` §1 路由列、`routes.gen.ts`、`plugin-entry-audit`
+ *  - `route-facts`：`docs/006-ref/006-当前事实表.md` §1 路由列、`routes.gen.ts`、`plugin-entry-audit`
  *    三份判定的共读提取实现（M4/M10 立）；
  *  - `gen-facts`：**事实生成机制的执行方**——遍历 `scripts/facts/` 逐个生成，
  *    由本阶段的 `60-facts` spawn；目录即接线，新增一份事实不需要改门禁；
  *  - `facts/_lib`：上述契约校验 + 幂等落盘 + 溯源行剔除的共享实现；
- *  - `facts/_capability`：`docs/ref/RE-006-当前事实表.md` §6 能力矩阵的提取实现（工具描述 /
+ *  - `facts/_capability`：`docs/006-ref/006-当前事实表.md` §6 能力矩阵的提取实现（工具描述 /
  *    风险 / 保留策略、VDFS 操作定义、路由职责）。它的失效形态与 `rust-scan` 同族——
  *    **提取写宽或写窄都不报错，只静默少一条**，而「少了哪一条」正是这张表要回答的事；
- *  - `facts/current`：`docs/ref/RE-006-当前事实表.md` 的生成器，由 `gen-facts` 调用；
+ *  - `facts/current`：`docs/006-ref/006-当前事实表.md` 的生成器，由 `gen-facts` 调用；
  *  - `facts/gate-codes`：`reference/GATE_CODES.md` 的生成器，由 `gen-facts` 调用；
- *  - `facts/lists-index`：`ref/RE-007-清单归属总账.md` 的生成器，**渲染时发现分工重叠
+ *  - `facts/lists-index`：`ref/007-清单归属总账.md` 的生成器，**渲染时发现分工重叠
  *    直接抛错**（一份会说谎的总账比没有总账更坏——它是给人查的，人会信它）；
  *  - `facts/routes-ts`：`tauri/src/constants/routes.gen.ts` 的生成器，由 `gen-facts` 调用；
  *  - `line-count`：门禁报告里的行数统计；

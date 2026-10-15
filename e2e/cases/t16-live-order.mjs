@@ -5,7 +5,7 @@ import './_selfrun.mjs';
 //
 // `ChatMessage.seq` 是**唯一权威顺序锚点**（ADR-025：顺序是节点属性，不是投递属性），
 // 而它**只由存储在写入时分配**。因此有一条硬约束（见
-// `symbio/src/plugins/session/docs/AR-022-vdfs-session-messages.md` §3.4）：
+// `symbio/src/plugins/session/docs/022-vdfs-session-messages.md` §3.4）：
 //
 // > 每一条被落库的消息都必须发一次变更（带存储分配的 `seq`）。
 //

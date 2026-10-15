@@ -44,7 +44,7 @@
 //!
 //! ## 写侧授权闸（判在运行器）
 //!
-//! **写侧授权闸**（[plan/01 §7](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")）判的是「主体此刻
+//! **写侧授权闸**（[plan/01 §7](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）判的是「主体此刻
 //! 能否写本轮的收束格」（`reply.first` / `reply.append`），由运行器在落收束格**之前**
 //! 判（`turn_runner::closure_granted`，谓词 `can_reply` 只定义一次）。拒绝 ⇒ 收束格
 //! 不落、该轮留在未收束态（`check_all` 的 C4 报得出），本模块据 `closure_denied`
@@ -1274,7 +1274,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     } else {
         LatencyTier::Deep
     };
-    // 身份进事件（[plan/11 批 1](../../../../docs/plan/PL-009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") ①）：
+    // 身份进事件（[plan/11 批 1](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") ①）：
     // 本轮以**会话选定的那个 agent** 为主体，规格从**授权表行**取（`request_actor_spec`）：
     // 能力集与模式不再是 `trivial` 的空表平凡值——它们与写侧闸判的是同一张表
     // （判的对象 = 写的对象 = 表授予的对象）。未选智能体 ⇒ `agent:main`
@@ -1309,7 +1309,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     let outcome = match &hit {
         // ── 反射档（S11 §2）：**没有 `llm` 形参**的那条路 ────────────────────
         // "反射档调模型"在类型上写不出来（`run_reflex` 只收 `RuleOnly`）——
-        // 这正是 `docs/plan/verify/latency_gate.rs::assemble(Reflex)` 的落地形态
+        // 这正是 `docs/004-plan/verify/latency_gate.rs::assemble(Reflex)` 的落地形态
         // （反射档装不进 LLM 字段），而不是"装配了模型但约定不调它"。
         Some(h) => {
             crate::plugin_info!(

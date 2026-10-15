@@ -697,7 +697,7 @@ async fn append_messages_replaces_inflight_placeholder_seq() {
     assert!(s3 > s2, "后续追加必须继续递增：compact1={s2} → u2={s3}");
 }
 
-/// 落库回包契约（`docs/AR-022-vdfs-session-messages.md` §3.4）：`append_messages` 必须
+/// 落库回包契约（`docs/022-vdfs-session-messages.md` §3.4）：`append_messages` 必须
 /// **把存储里的权威副本交回调用方**——带存储分配的 `seq` / `timestamp`，在途号已换掉。
 ///
 /// 这条契约是正确性而非便利：`seq` 只在存储写入时分配，前端又只认存储号

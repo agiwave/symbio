@@ -27,7 +27,7 @@
 //! `truncate_*` / `clear_*` / `named_create_*` / `write_merges_*` 等用例）：
 //! 这些操作在线上本来就是**按地址寻址**的，把它们放到 provider 那一侧观察
 //! （地址 → 回执 + 变更帧）比直接调本域方法更接近真实调用面。故本域不另立
-//! 测试文件，避免同一段语义被两处用例各自钉一遍（见 `docs/AR-017-module-layout.md` §2）。
+//! 测试文件，避免同一段语义被两处用例各自钉一遍（见 `docs/017-module-layout.md` §2）。
 
 use super::chat_session::MessageChange;
 use super::paths::session_id_from_new_path;

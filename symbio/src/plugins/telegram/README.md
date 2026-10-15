@@ -27,7 +27,7 @@ Telegram Bot 集成插件：长轮询收发与"继续会话"交互。
 | `stop_listener` | 停止消息监听 |
 | `status` | 查询 Bot 状态 |
 
-> 清单以 `docs/ref/RE-003-ROUTES.md` §Telegram 插件为准（**权威**）。
+> 清单以 `docs/006-ref/003-ROUTES.md` §Telegram 插件为准（**权威**）。
 
 ## 怎么被调用
 
@@ -36,7 +36,7 @@ Telegram Bot 集成插件：长轮询收发与"继续会话"交互。
 接口**，不是死代码。（审计报告里的 `refs=0` 只统计仓内调用方。）
 
 监听器收到消息后要调会话，走的是 **`ctx.parent()` → `parent.route(ctx)`**（绝对地址由容器分发）。
-**不要**按值持有 session 实例——`docs/arch/AR-009-plugin-route-address.md` 规则五，守卫 E-007 会拦。
+**不要**按值持有 session 实例——`docs/005-arch/009-plugin-route-address.md` 规则五，守卫 E-007 会拦。
 
 调用的**形状**是「地址面入队 + 实时面取答复」，唯一实现在
 `symbio/src/plugins/telegram/turn.rs`：

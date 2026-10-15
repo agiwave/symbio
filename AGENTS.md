@@ -2,7 +2,7 @@
 
 ## 结构事实：先查再断
 
-[`docs/ref/RE-006-当前事实表.md`](docs/ref/RE-006-当前事实表.md) 由 `scripts/facts/current.mjs` 从代码提取，
+[`docs/006-ref/006-当前事实表.md`](docs/006-ref/006-当前事实表.md) 由 `scripts/facts/current.mjs` 从代码提取，
 每次重生成，不会漂移。断言下列内容前读对应小节，不要凭记忆复述：
 
 - 插件 / 挂载点 / 路由 / 配置文件 → §1
@@ -11,38 +11,38 @@
 - 代码规模、Tauri 命令面、CLI 选项与命令 → §5
 
 改完代码重跑生成脚本（CI 用 `--check` 防漂移）。「为什么这样设计」看
-[`docs/adr/`](docs/adr/) 的单文档（每条 ADR 的正文 + 状态），不要塞进 CURRENT.md。
+[`docs/010-adr/`](docs/010-adr/) 的单文档（每条 ADR 的正文 + 状态），不要塞进 CURRENT.md。
 
 ## 目标架构（v2）：是目标，不是"别人的设计"
 
-[`docs/plan/`](docs/plan/README.md) 是本仓的**目标架构与迁移计划**——**分步实施的目标就是它本身**。
+[`docs/004-plan/012-高阶智能体平台v2.md`](docs/004-plan/012-高阶智能体平台v2.md) 是本仓的**目标架构与迁移计划**——**分步实施的目标就是它本身**。
 凡把某处差距说成"这是 v2 的目标、不是本场景所需"的，都是把目标当成了别人的事：
 判断一件事要不要做只问两件事——**它属哪个迁移步**、**本步混进去还能不能独立回退**。
-标尺（哪一层可妥协）见 [`docs/plan/README.md`](docs/plan/README.md) §0.1。
+标尺（哪一层可妥协）见 [`docs/004-plan/012-高阶智能体平台v2.md`](docs/004-plan/012-高阶智能体平台v2.md) §0.1。
 
 ## 核心形状：改宽之前先立决策
 
 `symbio_core` 是**影响面最大**的模块，它的质量高于任何单个插件的质量——不要拿机制面去付实现面的账。
-这条纪律（`08 §0 纪律 3`，登记条目 `docs/spec/SP-007.md`）现在有执行方：
+这条纪律（`08 §0 纪律 3`，登记条目 `docs/008-spec/007.md`）现在有执行方：
 `node scripts/core-shape-audit.mjs`（CS-001）把 core 的三格形状冻结成**只许降**——
 `pub trait` 数 / `fn` 成员总数 / 带默认体的成员数。变宽就红，而把它推下去只有一条路：
 改基线数字，那需要一条挂在旁边的 `core-shape-allow <格>: ADR-NNN <理由>`，且那个 ADR 必须存在（CS-002）。
-**收窄不需要批准，变宽需要论证**（机制的决策见 [`docs/adr/ADR-055.md`](docs/adr/ADR-055.md)）。
+**收窄不需要批准，变宽需要论证**（机制的决策见 [`docs/010-adr/055.md`](docs/010-adr/055.md)）。
 
 ## 文档即登记：状态只写在文档自己的 front-matter
 
-顶层机制（总纲：[`docs/plan/PL-011-登记与汇总机制.md`](docs/plan/PL-011-登记与汇总机制.md)）：
+顶层机制（总纲：[`docs/004-plan/011-登记与汇总机制.md`](docs/004-plan/011-登记与汇总机制.md)）：
 **仓内每一篇活跃 `.md` 都是一条登记**——开头是五行 front-matter（`kind` / `id` / `title` /
-`status` / `created`），**文件本身就是条目**，没有第二处登记表。十类 kind，
-目录按 kind 归一（`docs/<kind>/` + 模块文档就地），但**目录不参与判定**——`kind` 只来自 front-matter。
-`docs/` 下各级 `INDEX.md` 由脚本生成，**不手改**。
+`status` / `created`），**文件本身就是条目**，没有第二处登记表。十类 kind（另有 `index` 总账），
+目录按 kind 归一（`docs/<NNN-kind>/` + 模块文档就地），但**目录不参与判定**——`kind` 只来自 front-matter。
+各 kind 目录 `README.md` 里的汇总标记区由脚本生成，**标记区之外手写、标记区之内不手改**。
 
 - 查待办 / 已完成 / 某一条：`node scripts/registry-board.mjs`（`--kind=` / `--status=` / `--id=`）
-- 登记新文档、改状态 = 写/改文档自己的 front-matter（字段规范：`docs/spec/SP-001.md`）；
+- 登记新文档、改状态 = 写/改文档自己的 front-matter（字段规范：`docs/008-spec/001.md`）；
   漏了 front-matter 的 `.md` 由 RG-020 判红
 - 文档间引用**只写编号**（`[[T-008]]`），地址由 `node scripts/gen-doc-refs.mjs` 生成并重算，
   **不手写站内地址**（机制见总纲 §1.1）
-- 改完跑 `node scripts/registry-audit.mjs`；门禁自动重生成汇总页与引用地址并暂存（`gate.d/60-facts.mjs`）
+- 改完跑 `node scripts/registry-audit.mjs`；门禁自动重生成汇总标记区与引用地址并暂存（`gate.d/60-facts.mjs`）
 - `prio`（now / next / later）只排同层顺序，**不裁决冲突**；冲突按总纲 §4 分层消解
 - 接管既有文档里的条目性元素（任务 / 规范 / 机制 / 散落决策）= 登记一个 task，
   按总纲 §6 协议走「新定义 → 验证 → 删除老定义」；**别再新建手写汇总表**
@@ -56,13 +56,13 @@
 ## 文档：一个事实只有一个 owner
 
 改代码时**不要**顺手改一堆文档——先确认那条事实属于谁（职责边界表见
-[`docs/README.md`](docs/README.md#文档职责边界一个事实只有一个-owner)）：
+[`docs/README.md`](docs/README.md)）：
 
 - 结构事实 → `CURRENT.md`（自动生成，不手改）
-- 「为什么这样设计」→ [`docs/adr/`](docs/adr/)（**每条 ADR 单文档**，
-  归域规则见 [`docs/spec/SP-002.md`](docs/spec/SP-002.md)）；新增一条 ADR = 新增一个
+- 「为什么这样设计」→ [`docs/010-adr/`](docs/010-adr/)（**每条 ADR 单文档**，
+  归域规则见 [`docs/008-spec/002.md`](docs/008-spec/002.md)）；新增一条 ADR = 新增一个
   单文档，索引与域分组由 `registry-audit --write` 生成，不在别处复述
-- 路由 / 错误码 / 配置 → 各自的 `RE-003-ROUTES.md` / `RE-002-ERROR_CODES.md` / `RE-001-CONFIGURATION.md`
+- 路由 / 错误码 / 配置 → 各自的 `003-ROUTES.md` / `002-ERROR_CODES.md` / `001-CONFIGURATION.md`
 - 模块机制 → 该模块 `README.md`
 - **现行文档不写变更史**（「曾经…已改为…」）——那是 `git log` 与 ADR 的事<!-- doc-link-allow D-004: 本行引用的就是「变更史措辞」这个判据对象本身 -->
 

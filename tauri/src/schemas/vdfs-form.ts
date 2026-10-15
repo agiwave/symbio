@@ -2,7 +2,7 @@
  * VDFS `ext = form` 的**宿主方言**（前端侧类型契约）
  *
  * 与后端对齐：详情定义由 provider 的 `detail_definition` 产出，随 `VdfsNode.schema`
- * **原样透传**到前端（VDFS 不解释其内容）。规范：docs/arch/AR-013-vdfs.md。
+ * **原样透传**到前端（VDFS 不解释其内容）。规范：docs/005-arch/013-vdfs.md。
  *
  * **本文件是数据契约层：零组件知识**（不得导入任何 Vue 组件）。
  * 渲染它的是 `components/vdfs/DetailForm.vue`。

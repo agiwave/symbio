@@ -114,7 +114,7 @@ export function lastUserOf(req) {
  * 出厂内置工具的 **wire 名**集合（默认 homedir：无技能、无 MCP、无子智能体）。
  *
  * 来源：2026-10-14 真实链路探针（CLI × mock-llm 跑一轮，读 `/_requests` 的
- * `tools[].function.name`），与 `docs/ref/RE-006-当前事实表.md` §2 逐条对账（ToolSpec 表模式
+ * `tools[].function.name`），与 `docs/006-ref/006-当前事实表.md` §2 逐条对账（ToolSpec 表模式
  * 补抽取后一致——那次修复正是本契约与文档对账发现的，见 T-096 处理过程）。
  *
  * `cmd`/`sh` 归一成 `<shell>`：shell 族工具名按 target_os 取，与

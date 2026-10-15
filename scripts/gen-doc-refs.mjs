@@ -4,7 +4,7 @@
  *
  * ## 它治的病
  *
- * 文档间的站内链接此前是**手写地址**：`[T-008](../task/T-008.md)`。地址里编着两件事——
+ * 文档间的站内链接此前是**手写地址**：`[T-008](../009-task/008.md)`。地址里编着两件事——
  * **编号**（身份，稳定）与**相对路径**（位置，随目录调整而变）。手写它意味着每次搬家都要
  * 把全仓的入链改一遍，而不改的那几条会静默失效（`doc-link` D-001 能报出来，但那已经是
  * 事后追账）。本仓的真实教训就在眼前：docs 目录规范化（按 kind 分目录、消灭中间层）动了
@@ -13,11 +13,11 @@
  * 解法与 `facts/current` 同一条约定：**能生成的地址不手写**。
  *
  *   - 人只写编号：`[[T-008]]`（可带显示文字 `[[T-008|接管协议那一条]]`、可带锚点
- *     `[[docs/adr/ADR-047#决策]]`、三者可组合）；
+ *     `[[docs/010-adr/ADR-047#决策]]`、三者可组合）；
  *   - 地址由本脚本从**登记**（同一条 `loadEntries` 装载口径）解析出目标文件并写成
- *     `[T-008](../task/T-008.md)`——已展开的形式也由本脚本**每次重算**：
+ *     `[T-008](../009-task/008.md)`——已展开的形式也由本脚本**每次重算**：
  *     编号不变则地址永远正确，文档搬家后自愈，不需要任何人改入链；
- *   - 带显示文字的引用把**编号写进链接标题**：`[接管协议那一条](../plan/PL-011-登记与汇总机制.md "docs/plan/PL-011-登记与汇总机制")`
+ *   - 带显示文字的引用把**编号写进链接标题**：`[接管协议那一条](../004-plan/011-登记与汇总机制.md "docs/004-plan/PL-011-登记与汇总机制")`
  *     ——标题是 Markdown 标准语法（渲染成悬停提示），所以「给人看的文字」与「喂机制的编号」
  *     各占一个位置，可读性不牺牲，地址照样可重算。
  *   - 解析不出的编号（`[[不存在]]` / 编号拼错）⇒ **RF-001 判红**，不写盘——
@@ -64,7 +64,7 @@
  *   node scripts/gen-doc-refs.mjs --root=<仓库根>   （回归测试夹具用）
  * 退出码：0 = 一致 / 已改写；1 = RF-001 / RF-003 有违规（不写盘）；2 = 参数不识别。
  */
-// 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns RF 文档引用（编号 → 地址由机制生成）
 // @codes RF-001 RF-002 RF-003 RF-004
 
@@ -101,7 +101,7 @@ const LINK_RE = /\[(`?)([^\]]+?)\1\]\(\s*([^)\s]+)(?:\s+"([^"]*)")?\s*\)/g
  *
  * 段内是**字面量**：机制文档自己必须能写 `[[编号]]` 与展开后的样子去讲规则，
  * 否则每写一次例子就被当成一次真引用（要么 RF-001 误红，要么例子被改得看不出原本写法）。
- * 判据用「匹配起点是否落在代码段内」：`` [`T-002`](../task/T-002.md) `` 的链接起点在段外
+ * 判据用「匹配起点是否落在代码段内」：`` [`T-002`](../009-task/002.md) `` 的链接起点在段外
  * （段只包住标签），仍按真引用重算地址；`` `[T-002](…)` `` 整条在段内，不动。
  */
 export function codeRanges(line) {
@@ -253,19 +253,40 @@ export function runGenDocRefs(argv) {
     else return { code: 2, lines: [red(`[ERROR] 参数不识别：${a}`), USAGE], changed: [] }
   }
 
-  const { entries, errors, missing } = loadEntries(root)
+  const { entries, kinds, errors, missing } = loadEntries(root)
   const lines = ['--- gen-doc-refs: 引用只写编号（RF-001 / RF-002 / RF-003 / RF-004） ---']
   if (missing || entries.length === 0) {
     const msg = errors.length ? errors : ['登记范围读不出：扫不到任何已登记条目']
     return { code: 2, lines: lines.concat(msg.map((e) => red(`[ERROR] ${e}`)), red('[ERROR] 无条目可解析引用——不退化成「什么都没检查」')), changed: [] }
   }
-  // 编号 → 条目、文件 → 条目（两张表都从**同一次装载**来：登记的真相只有一处）
+  // 编号 → 条目、文件 → 条目（两张表都从**同一次装载**来：登记的真相只有一处）。
+  // 编号有两种合法写法：**全 id**（`ST-001-最小闭环`）与**裸编号**（`ST-001`，前缀+序号，
+  // 名称段可省）——引用规范不变（`[[ST-001|...]]` 依旧合法），所以裸编号也要能解析。
   const byId = new Map()
   const byRel = new Map()
   for (const e of entries) {
     if (!e.meta) continue
     if (typeof e.meta.id === 'string' && !byId.has(e.meta.id)) byId.set(e.meta.id, e)
     if (!byRel.has(e.rel)) byRel.set(e.rel, e)
+  }
+  // 裸编号索引：`<前缀>-<三位序号>` → 条目。冲突（同前缀同序号两条）⇒ 该键不可用，
+  // 引用必须写全 id——装 two 条目进同一键会让后写者赢，宁可解析不出（RF-001 报错）
+  // 也不静默指错。
+  const byShort = new Map()
+  for (const e of entries) {
+    const m = typeof e.meta?.id === 'string' ? e.meta.id.match(/^(.+)-\d{3}[a-z]?/) : null
+    if (m && !byShort.has(m[1])) byShort.set(m[1], e)
+    else if (m && byShort.get(m[1]) !== e) byShort.set(m[1], undefined)
+  }
+  for (const [k, v] of [...byShort]) if (v === undefined) byShort.delete(k)
+  /** 引用解析：全 id 优先，裸编号兜底（歧义键已剔除）。 */
+  const resolveRef = (id) => byId.get(id) ?? byShort.get(id)
+  /** 源码 / 手工地址按登记表识别：四级路径解析 + 文件主干 = 全 id 的一级（旧路径迁移期自愈）。 */
+  const resolvePath = (rel, target) => {
+    const hit = matchSourceEntry(rel, target, byRel)
+    if (hit) return hit
+    const base = path.posix.basename(target.split('#')[0]).replace(/\.md$/, '')
+    return base ? byId.get(base) : undefined
   }
 
   const bad = []
@@ -284,7 +305,7 @@ export function runGenDocRefs(argv) {
       let out = line.replace(TOKEN_RE, (m, id, frag, label, off) => {
         if (inCode(code1, off)) return m
         const ref = `${id}${frag ?? ''}`
-        const target = byId.get(id)
+        const target = resolveRef(id)
         if (!target) {
           bad.push(`${e.rel}：RF-001 引用了未登记的编号 \`[[${ref}${label ? `|${label}` : ''}]]\`（拼错？还是目标还没登记？）`)
           return m
@@ -300,13 +321,14 @@ export function runGenDocRefs(argv) {
         if (inCode(code2, off)) return m
         if (!isManagedTarget(target)) return m
         const key = label.replace(/`/g, '').trim()
-        const byLabel = byId.get(key)
-        const byTitle = title ? byId.get(title) : undefined
+        const byLabel = resolveRef(key)
+        const byTitle = title ? resolveRef(title) : undefined
         const entry = byTitle ?? byLabel
         if (!entry) {
           // 指向一篇已登记文档，却没有编号（标签与标题都不是编号）⇒ RF-003。
           // 例外：**自指**（目标就是本文）——它随文件一起搬，地址不会失效。
-          const hit = byRel.get(resolveFrom(e.rel, target))
+          // 目标识别走两级：路径直达，或文件主干 = 某条目全 id（改名迁移期）。
+          const hit = byRel.get(resolveFrom(e.rel, target)) ?? resolvePath(e.rel, target)
           if (hit && hit.meta.id !== e.meta.id) {
             bad.push(
               `${e.rel}：RF-003 手工地址 \`[${key}](${target})\` 指向已登记文档 \`${hit.meta.id}\`——` +
@@ -345,11 +367,8 @@ export function runGenDocRefs(argv) {
   const srcTakeoverRels = new Set()
   // 已知编号前缀（`T` / `ADR` / `SP` …）：源码里**形如编号却解析不出** ⇒ 拼错，RF-001 判红；
   // 没有前缀的字面量（`[[bin]]` / `[[false]]`）不判——源码注释天然充满方括号语法。
-  const knownIdPrefixes = new Set(
-    [...byId.keys()]
-      .filter((id) => id.includes('-'))
-      .map((id) => id.slice(0, id.lastIndexOf('-'))),
-  )
+  // 前缀闭集从 kind 装载来（各 README meta 的 `prefix`），不写死。
+  const knownIdPrefixes = new Set(Object.values(kinds).map((k) => k.prefix))
   for (const { file, rel, ext } of listSourceFiles(root)) {
     const before = fs.readFileSync(file, 'utf8')
     const after = before
@@ -360,7 +379,7 @@ export function runGenDocRefs(argv) {
         const code1 = codeRanges(line)
         let out = line.replace(TOKEN_RE, (m, id, frag, label, off) => {
           if (inCode(code1, off)) return m
-          const target = byId.get(id)
+          const target = resolveRef(id)
           if (!target) {
             const prefix = id.includes('-') ? id.slice(0, id.lastIndexOf('-')) : ''
             if (prefix && knownIdPrefixes.has(prefix)) {
@@ -380,11 +399,11 @@ export function runGenDocRefs(argv) {
           if (inCode(code2, off)) return m
           if (!isManagedTarget(target)) return m
           const key = label.replace(/`/g, '').trim()
-          const byTitle = title ? byId.get(title) : undefined
-          let entry = byTitle ?? byId.get(key)
+          const byTitle = title ? resolveRef(title) : undefined
+          let entry = byTitle ?? resolveRef(key)
           let takeover = false
           if (!entry) {
-            entry = matchSourceEntry(rel, target, byRel)
+            entry = resolvePath(rel, target)
             if (!entry) return m // 非登记目标 / 歧义：不动，存在性交给 D-010
             if (title) return m // 已有非编号标题：不猜人的意图，留给人工
             takeover = true

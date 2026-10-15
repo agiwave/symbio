@@ -59,7 +59,7 @@ use crate::symbio_core::{VdfsAccess, VdfsProvider};
 use async_trait::async_trait;
 use std::sync::Arc;
 
-/// 规范标识（见 `docs/arch/AR-006-agent-directory-spec.md`）
+/// 规范标识（见 `docs/005-arch/006-agent-directory-spec.md`）
 ///
 /// 子 Agent 目录只有在 `manifest.yaml` 声明了这个 `spec`、且通过 §10 版本门槛时
 /// 才按 v2 装配（挂 composite 插件树）。**这是唯一的接入判据**——不是它的目录既

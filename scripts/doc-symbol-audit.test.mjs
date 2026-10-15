@@ -171,7 +171,7 @@ test('D-009 单段全大写但没有下划线 ⇒ 与普通词无法区分，不
 test('D-009 承认通道：目标态指认写明落在哪一批即放行（exit 0）', () => {
   const r = audit({
     ...RS,
-    'PL-007-对话面插件拆分实施方案.md': '新增 `ROUTE_TRIAGE_DECIDE`<!-- doc-symbol-allow: 目标态，09 的 S2 才落这个常量 -->\n',
+    '007-对话面插件拆分实施方案.md': '新增 `ROUTE_TRIAGE_DECIDE`<!-- doc-symbol-allow: 目标态，09 的 S2 才落这个常量 -->\n',
   })
   assert.equal(r.status, 0, r.stdout)
 })
@@ -195,15 +195,15 @@ test('历史行豁免：行内含「已删除」（exit 0）', () => {
 test('历史行豁免：台账的「判为删除」说的就是这名字不在了（exit 0）', () => {
   const r = audit({
     ...RS,
-    'PL-004-工程落地.md': '| ⑫ | `ROUTE_GONE_ARM` 判为删除（只删 Rust 常量，路由保留） |\n',
+    '004-工程落地.md': '| ⑫ | `ROUTE_GONE_ARM` 判为删除（只删 Rust 常量，路由保留） |\n',
   })
   assert.equal(r.status, 0, r.stdout)
 })
 
-test('docs/adr/ 整目录排除：ADR 正文迁入 registry 后仍是历史快照（exit 0）', () => {
+test('docs/010-adr/ 整目录排除：ADR 正文迁入 registry 后仍是历史快照（exit 0）', () => {
   const r = audit({
     ...RS,
-    'docs/adr/ADR-001.md': '当年引入 `symbio_core::GONE_FN` 又删掉了。\n',
+    'docs/010-adr/001.md': '当年引入 `symbio_core::GONE_FN` 又删掉了。\n',
     'README.md': '正常文档。\n',
   })
   assert.equal(r.status, 0, r.stdout)
@@ -264,7 +264,7 @@ test('审计范围读不出：没有 .rs 语料 ⇒ 失败而非绿灯（exit 1�
 
 /** 最小名册：一行「工作记忆」，锚点列由用例填 */
 const roster = (anchor) => ({
-  'docs/plan/PL-002-能力坐标系.md': [
+  'docs/004-plan/002-能力坐标系.md': [
     '| 能力 | 维 | 轴 | 天梯 | 等级 | 类型 | 落点 | 锚点 |',
     '|---|---|---|:-:|:-:|:-:|:-:|---|',
     `| 工作记忆 | 知 | 抽象层级 | T1 | L1 | 认知 | S01 | ${anchor} |`,
@@ -297,7 +297,7 @@ test('D-011 有效锚点通过：`文件` 与 `文件::符号` 两种形态都�
   const r = audit({
     ...RS,
     ...ROSTER_RS,
-    'docs/plan/PL-002-能力坐标系.md': [
+    'docs/004-plan/002-能力坐标系.md': [
       '| 能力 | 维 | 轴 | 天梯 | 等级 | 类型 | 落点 | 锚点 |',
       '|---|---|---|:-:|:-:|:-:|:-:|---|',
       '| 工作记忆 | 知 | 抽象层级 | T1 | L1 | 认知 | S01 | `symbio/src/plugins/session/context.rs` |',
@@ -324,7 +324,7 @@ test('D-011 名册不在扫描范围 ⇒ 本条不适用，不为「没有名册
 test('D-011 名册一行都读不出 ⇒ 红（表格结构变了还是维的闭集写错了？）', () => {
   const r = audit({
     ...RS,
-    'docs/plan/PL-002-能力坐标系.md': [
+    'docs/004-plan/002-能力坐标系.md': [
       '| 能力 | 维 | 轴 | 天梯 | 等级 | 类型 | 落点 | 锚点 |',
       '|---|---|---|:-:|:-:|:-:|:-:|---|',
       '| 工作记忆 | 未知维 | 抽象层级 | T1 | L1 | 认知 | S01 | — |',

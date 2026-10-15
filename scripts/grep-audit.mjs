@@ -35,7 +35,7 @@
  * Windows / macOS / Linux 通用（仓库约定：脚本一律平台无关）。
  */
 
-// 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns S 源码 grep 形态
 // @codes S-001 S-002 S-003 S-006 S-007 S-008 S-009 S-010 S-011 S-012
 
@@ -236,7 +236,7 @@ console.log()
 
 // ── S-008: VdfsNode.status 不得用裸字面量 ──────────────────────────────
 //
-// 词表只有一套：`symbio_core::vdfs::VDFS_STATUS_*`（`docs/arch/AR-013-vdfs.md`
+// 词表只有一套：`symbio_core::vdfs::VDFS_STATUS_*`（`docs/005-arch/013-vdfs.md`
 // §3.2）。裸字面量的危险不是拼错（那会立刻看见），而是**改名时不会编译失败**——
 // `status` 是跨进程边界的字符串，改了常量而漏掉字面量，前端只会静默认不出状态。
 //
@@ -283,7 +283,7 @@ console.log()
 // ── S-009: 事件总线 kind 不得用裸字面量 ────────────────────────────────
 //
 // 词表只有一套：`symbio_core::event_bus::KIND_*`（文档见
-// `docs/arch/AR-004-PROTOCOLS.md` §事件总线频道）。与 S-008 同源：`kind` 是
+// `docs/005-arch/004-PROTOCOLS.md` §事件总线频道）。与 S-008 同源：`kind` 是
 // **跨进程**字符串，改名不会编译失败，只会让消费方的「按 kind 分派」静默失效。
 //
 // 为什么单独立一条：真实事故就是「发布点写裸字面量 → 常量声明出来却无人引用」，
@@ -426,7 +426,7 @@ console.log()
 //   · 移进工具批次中间（`assistant(tool_calls)` 与 `tool` 结果之间）⇒ 部分协议直接
 //     400——这是三种里**唯一会响**的那种。
 // 正是 J3 的形态：**违反时不产生错误信号的约束，必须外置为断言**。
-// 文档侧的定义见 `docs/plan/PL-007-对话面插件拆分实施方案.md` §5 S0 的 C-D2b。
+// 文档侧的定义见 `docs/004-plan/007-对话面插件拆分实施方案.md` §5 S0 的 C-D2b。
 //
 // 判据（只认 `plugins/session/chat_loop.rs` 一个文件，且**只认代码行**）：
 //   line(`gate_turn(` 调用) < line(`orchestrator.supplements`) < line(`prepare_turn_inputs(` 调用)
@@ -510,7 +510,7 @@ console.log()
 //
 // 判据只取**两种无歧义形态**（同 D-004「只收结构标记」的取舍）：
 //   ① 待办标记：注释行以 `TODO` / `FIXME` / `XXX` / `HACK` 起头——待办有自己的
-//      登记处（`docs/task/` 下登记条目：引入新待办就登记成条目，
+//      登记处（`docs/009-task/` 下登记条目：引入新待办就登记成条目，
 //      **不是代码注释**），写在注释里就等于「谁也不会再看见」的那一类；
 //   ② 无出处的批次号：`批 N` / `批次 N` 且**同一行没有 `plan/NN`**。批次号属实施
 //      计划，单独一个数字不知道是哪份计划的哪一批；带出处就是合法指认
@@ -521,12 +521,12 @@ console.log()
 // 收口不变量），as-of 投影里「这条目标曾经声明过吗」是查询语义。实测把它们列进词表：
 // `本批|待接|尚未接` 在 `symbio/src` 命中 50 处、绝大多数是运行期 prose，`曾经` 命中
 // 59 处含真误报——**一条天天误报的守卫最后只会被人用豁免喂死**（本文件反复写的那条）。
-// 范围：`.rs` 的注释行（`symbio/src`、`cli/src`、`tauri/src-tauri/src`、`docs/plan/verify`），
+// 范围：`.rs` 的注释行（`symbio/src`、`cli/src`、`tauri/src-tauri/src`、`docs/004-plan/verify`），
 // 测试文件同样参与检查（与 S-002 一致）。
 // 豁免：`// grep-audit-allow S-012: 理由`（写在命中行或其紧邻上一行，理由不可为空，同 S-010）。
 console.log('--- S-012: 代码注释里的实施排期指认 ---')
 
-const S012_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/plan/verify']
+const S012_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/004-plan/verify']
 /** 与 resolveScope 同策略：cwd 是仓库树就用 cwd（回归测试注入临时树），否则退回仓库根 */
 const S012_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
 const S012_TODO_RE = /^\s*(?:\/\/[/!]*)\s*(?:TODO|FIXME|XXX|HACK)\b/

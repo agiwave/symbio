@@ -62,7 +62,7 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
 
 异常注入的总体纪律（T-067）：mock 模拟的是**真实 LLM 服务与真实网络环境**，
 用例的判据从**用户视角**取（CLI 成败 / 转写读出口 / 可见错误信息 / 共享转写不变量），
-不读后端内部状态——主体是黑盒（详见 [T-067](../docs/task/T-067-mockLLM体系化机制化.md "T-067-mockLLM体系化机制化")）。
+不读后端内部状态——主体是黑盒（详见 [T-067](../docs/009-task/067-mockLLM体系化机制化.md "T-067-mockLLM体系化机制化")）。
 
 ## 新增一个用例
 
@@ -238,9 +238,9 @@ await api.invoke('vdfs/action',
 
 `node e2e/ab/run.mjs` 跑的是**真 provider**（本机 `.symbio/model/` 里配好的那一个），CI 上没有
 LMStudio / 付费端点 ⇒ 它**天然不进 58-e2e，也不进任何门禁阶段**（`e2e/ab/` 不在用例发现范围内）。
-它把出厂形状与被 [ADR-048a](../docs/adr/ADR-048a.md) 否决的拍平形状，在同一份真实链路
+它把出厂形状与被 [ADR-048a](../docs/010-adr/048a.md) 否决的拍平形状，在同一份真实链路
 捕获的请求体上各发一遍，比模型侧读数。判据口径归 `e2e/ab/tasks.mjs` 的文件头，
-形状变换归 `e2e/ab/flatten.mjs`，读数落 `docs/ref/PROMPT_AB.md`（生成物）——
+形状变换归 `e2e/ab/flatten.mjs`，读数落 `docs/006-ref/PROMPT_AB.md`（生成物）——
 本处只留指路，不复述。
 
 ## 门控接入

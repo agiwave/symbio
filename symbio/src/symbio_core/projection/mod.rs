@@ -1,4 +1,4 @@
-//! `Projection` —— 纯函数视图（v2 ③，[plan/01 §3](../../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")）。
+//! `Projection` —— 纯函数视图（v2 ③，[plan/01 §3](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）。
 //!
 //! ## 冻结锚点 F2（构造形状，不是签名约定）
 //!
@@ -13,7 +13,7 @@
 //! 那由二级（CI 双跑比对，N1）与静态扫描兜底。分级是诚实划界，不是含糊。
 //!
 //! 可执行论证（含**编译不过**的反向用例）见
-//! [`docs/plan/verify/projection_purity.rs`](../../../../docs/plan/verify/projection_purity.rs)。
+//! [`docs/004-plan/verify/projection_purity.rs`](../../../../docs/004-plan/verify/projection_purity.rs)。
 
 use std::marker::PhantomData;
 

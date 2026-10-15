@@ -136,7 +136,10 @@ impl WebSearchTool {
             .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
 
         let response = client
-            .post(format!("{}/search", upstream_base(base, TAVILY_OFFICIAL_BASE)))
+            .post(format!(
+                "{}/search",
+                upstream_base(base, TAVILY_OFFICIAL_BASE)
+            ))
             .json(&json!({
                 "api_key": api_key,
                 "query": query,
@@ -195,7 +198,10 @@ impl WebSearchTool {
         }
 
         let response = client
-            .post(format!("{}/search", upstream_base(base, SERPER_OFFICIAL_BASE)))
+            .post(format!(
+                "{}/search",
+                upstream_base(base, SERPER_OFFICIAL_BASE)
+            ))
             .header("X-API-KEY", api_key)
             .json(&payload)
             .send()

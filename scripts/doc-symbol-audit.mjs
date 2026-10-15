@@ -14,7 +14,7 @@
  *     `^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$`）必须在 Rust ∪ 前端（tauri/src）∪ 门禁脚本
  *     （scripts）语料里逐字存在——
  *     但**仅当它的同族**（首段 + `_`，如 `ROUTE_`）在代码里另有成员时才判红。
- *   **D-011**（名册锚点列）：[02 §6.1 能力名册](../docs/plan/PL-002-能力坐标系.md "PL-002-能力坐标系")
+ *   **D-011**（名册锚点列）：[02 §6.1 能力名册](../docs/004-plan/002-能力坐标系.md "PL-002-能力坐标系")
  *     的「锚点」列——名册 54 行能力若没有任何一行能回答"它在代码里是哪几行"，
  *     "坐标系已归位"与"这条能力真的存在"在日志里长得一模一样。
  *     取值 `文件` / `文件::符号`（反引号形态）或 `—`：**非 `—` 的必须指得到**
@@ -44,8 +44,8 @@
  *   `register_option_field`。
  *
  * 豁免（都对应「文档说的不是现状」）：
- * doc-link-allow D-010: 下一行的 `ADR-NNN.md` 是占位编号示例（真正的 ADR 文件名是 ADR-001…）
- *   1. `docs/archive/`、`docs/adr/` 整体排除——ADR 正文（`docs/adr/ADR-NNN.md`）
+ * doc-link-allow D-010: 下一行的 `001.md` 是占位编号示例（真正的 ADR 文件名是去前缀编号）
+ *   1. `docs/archive/`、`docs/010-adr/` 整体排除——ADR 正文（`docs/010-adr/001.md`）
  *      与归档都是历史快照，当时的符号指认不随代码改名回改（回改反而篡改历史）；
  *   2. 行内含历史词（已删除 / 已退役 / 已废弃 / deprecated / 取代 / 判为删除）⇒ 跳过，
  *      如迁移表里「已删除」的行、台账里「`X` 判为删除」的行；
@@ -67,7 +67,7 @@
  * D-009 只在同族存在时才判，一个**整族都不存在**的杜撰名（`ROUTE_` 全没了还写 `ROUTE_X`）
  * 落在闸外——那是结构事实，归 CURRENT.md 的生成表管。
  */
-// 判据码命名空间（登记表 docs/ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
+// 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns D 文档正文与链接
 // @codes D-005 D-009 D-011
 
@@ -83,9 +83,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const rootArg = process.argv.find((a) => a.startsWith('--root='))
 const REPO_ROOT = rootArg ? resolve(rootArg.slice(7)) : resolve(__dirname, '..')
 
-/** Rust 语料根：任一缺失可容忍，全缺即「范围读不出」。`docs/plan/verify` 是硬证据程序
+/** Rust 语料根：任一缺失可容忍，全缺即「范围读不出」。`docs/004-plan/verify` 是硬证据程序
  *  的 Rust 源（`rustc` 直接编译的那批文件），它们声明的常量同样是文档指认的对象。 */
-const RS_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/plan/verify']
+const RS_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/004-plan/verify']
 /** D-009 的第二份语料：裸常量名是跨栈事实，前端声明的常量同样被文档指认 */
 const FE_ROOTS = ['tauri/src']
 /** D-009 的第三份语料：只回答存在性，不开族（原因见文件头）。
@@ -100,7 +100,7 @@ const CONST_SHAPE = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/
 const SKIP_DIRS = new Set(['node_modules', 'target', '.git', 'tmp', '.workbuddy-ai', '.symbio'])
 /** 整目录排除：ADR 记的是**当时**的设计，其中被指认的符号可能早已改名 / 删除，
  *  按现行代码判它会永久误报；归档同理。两者都是「文档说的不是现状」。 */
-const EXCLUDE_MD_DIRS = ['docs/archive', 'docs/adr']
+const EXCLUDE_MD_DIRS = ['docs/archive', 'docs/010-adr']
 /** 行内历史词：这行说的是过去，符号现在不存在是正常的。
  *  「判为删除 / 已判：删除」是台账（04 §3.1）对被删符号的固定说法——它和「已删除」
  *  是同一类叙述：这行明说那个名字已经不在了，按现行代码判它必然是误红。 */
@@ -206,7 +206,7 @@ for (const f of feFiles) indexCrossStack(readFileSync(f, 'utf8'))
 for (const f of toolFiles) indexExistence(readFileSync(f, 'utf8'))
 
 /** D-011 的名册表所在文件（02 §6.1，全仓唯一一份能力名册）。 */
-const ROSTER_MD = 'docs/plan/PL-002-能力坐标系.md'
+const ROSTER_MD = 'docs/004-plan/002-能力坐标系.md'
 /** 名册行的判别：第 2 列是「维」闭集（知 / 行 / 言 / 省 / 欲）——只看列数会撞上
  *  02 里其它同样 8 列的表，靠维的闭集把它钉住。 */
 const DIMS = new Set(['知', '行', '言', '省', '欲'])

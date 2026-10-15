@@ -3,7 +3,7 @@
  *
  * 域类型与常量对齐后端纯接口：symbio/src/symbio_core/vdfs/
  * 操作路径/信封对齐后端线路层：symbio/src/plugins/vdfs/protocol.rs
- * 规范：docs/arch/AR-013-vdfs.md
+ * 规范：docs/005-arch/013-vdfs.md
  *
  * 前端只消费协议形状；**资源类型、能力、标签、路径模板一律来自后端**，
  * 前端仅持有 ext → 渲染器、资源类别 → 图标这类纯 UI 映射（见 registry/vdfsTypes.ts）。
@@ -70,7 +70,7 @@ export const VDFS_STATUS_ACTIVE = 'active'
  *
  * 会话用它取代「`active` + `last_failed` 布尔」这种「状态 + 平行标志位」写法：
  * 「上一轮失败了吗」= `status == VDFS_STATUS_FAILED`，一处判定，不会漏读。
- * 见 `symbio/src/plugins/session/docs/AR-018-node-state-streaming.md` §2.3.1。 */
+ * 见 `symbio/src/plugins/session/docs/018-node-state-streaming.md` §2.3.1。 */
 export const VDFS_STATUS_FAILED = MESSAGE_STATUS_FAILED
 /** 节点状态：未开始（消息；会话没有这个态——它是长驻容器） */
 export const VDFS_STATUS_PENDING = MESSAGE_STATUS_PENDING
@@ -692,7 +692,7 @@ export function parseVdfsSessionAddr(addr: string): { mountDir: string; id: stri
 //
 // 于是前端不需要「知道上一条事件是什么」就能渲染正确——这正是
 // `eventBus.replayBuffer`（切会话防乱序缓冲）可以被删掉的原因。
-// 见 `symbio/src/plugins/session/docs/AR-018-node-state-streaming.md` §3.3。
+// 见 `symbio/src/plugins/session/docs/018-node-state-streaming.md` §3.3。
 
 /** 结局：正常结束 */
 export const OUTCOME_COMPLETED = 'completed'

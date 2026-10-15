@@ -40,7 +40,7 @@ fn reasoning_text_of(delta: &Value) -> Option<String> {
 /// ## 为什么要并
 ///
 /// 出厂形状原本是**两条** system：这里 prepend 一条，而消息数组的第一元素按
-/// [ADR-048a](../../../../../docs/adr/ADR-048a.md) 后果节本身就是一条 system（记忆段 /
+/// [ADR-048a](../../../../../docs/010-adr/048a.md) 后果节本身就是一条 system（记忆段 /
 /// 就绪段 / 委派者段）。两条都排在最前、位置合法，但**部分 OpenAI 兼容网关只认一条**
 /// ——它们直接回 `HTTP 400 {"message":"System message must be at the beginning."}`
 /// （T-015 的门外对照：同一份请求体，MiMo 收、qwen3-8-flash-next 拒）。

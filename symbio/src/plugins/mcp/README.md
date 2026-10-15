@@ -22,7 +22,7 @@ Model Context Protocol 工具扩展插件。
 > **本插件已无自有路由，也不设配置文档**：`mcp/config/*` 已下线，配置就是它的资源树。
 > Server 的注册 / 列举 / 启停 / 连通性自检一律经 `<根>/mcp`（一个 server = 一个目录，
 > 主文件 `server.json`），「测试连接」是节点动作 `vdfs/action { action: "test" }`。
-> 见 `docs/ref/RE-003-ROUTES.md` §MCP 插件（**权威**）。
+> 见 `docs/006-ref/003-ROUTES.md` §MCP 插件（**权威**）。
 
 ## 配置示例
 

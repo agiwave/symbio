@@ -15,7 +15,7 @@ created: 2026-09-29
 
 ## 路由
 
-清单见 [`docs/ref/RE-003-ROUTES.md`](../../../../docs/ref/RE-003-ROUTES.md "RE-003-ROUTES") §Classify 插件（**权威**）：
+清单见 [`docs/006-ref/003-ROUTES.md`](../../../../docs/006-ref/003-ROUTES.md "RE-003-ROUTES") §Classify 插件（**权威**）：
 `classify/decide`。
 
 ## 契约
@@ -86,5 +86,5 @@ decide(utterance)
 ## 关联
 
 - 措辞：`../compose/README.md`
-- 切分依据（为什么是两个插件）：`docs/plan/PL-007-对话面插件拆分实施方案.md`
-- 地址规则：`docs/arch/AR-009-plugin-route-address.md`
+- 切分依据（为什么是两个插件）：`docs/004-plan/007-对话面插件拆分实施方案.md`
+- 地址规则：`docs/005-arch/009-plugin-route-address.md`

@@ -68,7 +68,7 @@ impl Default for GatewayConfig {
 /// 这条，但会把「可读范围」从「你点名要的那份」扩大到「当前全部在途内容」。
 /// 这是一条**保守取舍，不是遗漏**：若将来确需只读客户端看实时输出，应把它作为
 /// 显式配置项加入，而不是顺手塞进白名单。详见
-/// `symbio/src/plugins/session/docs/AR-018-node-state-streaming.md` §11。
+/// `symbio/src/plugins/session/docs/018-node-state-streaming.md` §11。
 ///
 /// **白名单与可达面必须一致（无死条目）**：gateway 挂在 worker composite 之下、
 /// `Composite::route` 不向上转发 ⇒ `home/get_homedir` / `work/get_workspace`（home
@@ -82,12 +82,7 @@ pub fn is_readonly_allowed(path: &str, payload: &serde_json::Value) -> bool {
     }
     matches!(
         p,
-        "vdfs/root"
-            | "vdfs/list"
-            | "vdfs/tree"
-            | "vdfs/stat"
-            | "vdfs/read"
-            | "vdfs/search"
+        "vdfs/root" | "vdfs/list" | "vdfs/tree" | "vdfs/stat" | "vdfs/read" | "vdfs/search"
     )
 }
 

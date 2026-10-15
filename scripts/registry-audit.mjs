@@ -5,7 +5,7 @@
  * ## 它守什么
  *
  * 「单文档 + 元信息 + 自动汇总」这套顶层机制的**全部强制力**都在这里（判据码
- * RG-001…RG-025，逐条语义与消息住 `registry-lib`，登记表见 `docs/ref/GATE_CODES.md`）：
+ * RG-001…RG-025，逐条语义与消息住 `registry-lib`，登记表见 `docs/006-ref/GATE_CODES.md`）：
  *
  *   - **RG-001** front-matter 可解析（受限 YAML 子集），未知 / 重复字段按 kind 判；
  *   - **RG-002** 必填字段非空（kind 只来自 front-matter，目录不参与判定）；
@@ -54,7 +54,7 @@
  * ## 用法
  *
  *   node scripts/registry-audit.mjs            校验全仓登记条目（条目类 + 在位文档类）
- *   node scripts/registry-audit.mjs --write    校验通过后重生成 docs/KIND-000-登记总账.md
+ *   node scripts/registry-audit.mjs --write    校验通过后重生成 docs/000-index/README.md
  *                                              与 docs/<kind>/INDEX.md
  *   node scripts/registry-audit.mjs --root=<仓库根>   （回归测试夹具用）
  *
@@ -64,14 +64,14 @@
  *
  * 退出码：0 = 通过；1 = 有违规 / 解析失败；2 = 范围读不出（扫不到任何条目、
  * 参数不识别）。汇总页的「忘更新」**不判红**：那是确定性投影，由门禁
- * `gate.d/60-facts.mjs` 的 `autoWork` 自动重生成并暂存（与 `docs/ref/RE-006-当前事实表.md` 同一条约定）。
+ * `gate.d/60-facts.mjs` 的 `autoWork` 自动重生成并暂存（与 `docs/006-ref/006-当前事实表.md` 同一条约定）。
  */
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { green, red, dim } from './color.mjs'
-import { KINDS, loadEntries, auditEntries, renderKindIndex, renderRootIndex, kindIndexFile, SCOPE_ERROR } from './registry-lib.mjs'
+import { SUMMARY_BEGIN, SUMMARY_END, loadEntries, auditEntries, renderKindIndex, SCOPE_ERROR } from './registry-lib.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const defaultRoot = path.resolve(scriptDir, '..')
@@ -96,9 +96,9 @@ export function runRegistryAudit(argv) {
     else return { code: 2, lines: [red(`[ERROR] 参数不识别：${a}`), USAGE] }
   }
 
-  const lines = ['--- registry-audit: 登记条目校验（RG-001…RG-029） ---']
+  const lines = ['--- registry-audit: 登记条目校验（RG-001…RG-030） ---']
   const docsDir = path.join(root, 'docs')
-  const { entries, projections, errors, notes, missing } = loadEntries(root)
+  const { entries, projections, kinds, errors, notes, missing } = loadEntries(root)
   if (missing) return { code: 2, lines: lines.concat(red(`[ERROR] ${SCOPE_ERROR}`)) }
 
   // 零条目时只看**装载级**错误（未登记文档 / 未登记 kind）：条目级判据（RG-011 等）在没有任何条目时
@@ -114,59 +114,45 @@ export function runRegistryAudit(argv) {
 
   // 投影条目（免登记的生成物，如 CURRENT.md）只参与**清单归属**那一族（RG-026…RG-029）：
   // 它们是清单的 owner，而分工重叠判据若看不见 owner 就等于没有。
-  const errs = [...errors, ...auditEntries(entries, root, projections)]
+  const errs = [...errors, ...auditEntries(entries, root, projections, kinds)]
   if (errs.length) {
     for (const e of errs) lines.push(red(`[ERROR] ${e}`))
     lines.push(red(`registry-audit 未通过：${errs.length} 处违规 / 解析失败（条目 ${entries.length} 个）`))
     return { code: 1, lines }
   }
 
-  const counts = Object.entries(KINDS)
+  const counts = Object.entries(kinds)
     .map(([kind, cfg]) => `${kind} ${entries.filter((e) => e.kind === kind).length}（${cfg.label}）`)
     .join(' · ')
   if (write) {
-    const targets = [
-      ...Object.keys(KINDS)
-        // `index` kind 的汇总页住在 `docs/` 根（它横跨所有 kind，没有自己的目录）；
-        // 其余 kind 的住在 `docs/<kind>/`。
-        .map((kind) => ({
-          file: kind === 'index'
-            ? path.join(docsDir, kindIndexFile(kind))
-            : path.join(docsDir, kind, kindIndexFile(kind)),
-          content: renderKindIndex(kind, entries),
-        })),
-    ]
+    // 汇总页 = 各 kind 目录的 README.md（meta 声明 kind/prefix/label，手写区 + 标记区块）。
+    // 生成器只重写**标记之间**——手写引言与 front-matter 是 README 的手写面，一概不碰。
     const updated = []
-    const targetSet = new Set(targets.map((t) => t.file))
-    for (const t of targets) {
-      // 改名后旧路径（`docs/<kind>/INDEX.md`）会留一份**过期投影**在原地——生成器只写
-      // 新路径，旧文件永远不会被覆盖，于是变成一份**永远绿的死副本**：它对 D-001 /
-      // D-007 / RG-020 全都隐形（`isGeneratedIndex` 豁免），读者却会点到它。
-      //
-      // 删除必须放在「内容变了」判断**之外**：第一版放在里面，于是内容一稳定就再也没人
-      // 删它——实测 9 个旧 `INDEX.md` 全部留存，与新的 `-000-` 页并存。
-      //
-      // 判据是**文件名本身不是 `INDEX.md`**：根总账 `KIND-000-登记总账.md` 的文件名就是
-      // `INDEX.md`，不能把它当自己的旧路径删掉再写回来。第一版用「拼出来的新路径 !=
-      // 原路径」判，在 Windows 上因分隔符不同而恒真，于是根总账被删了一次——内容
-      // 恰好相同，肉眼看不见，但它证明那个判据是错的。
-      if (path.basename(t.file) !== 'INDEX.md') {
-        const stale = path.join(path.dirname(t.file), 'INDEX.md')
-        if (!targetSet.has(stale) && fs.existsSync(stale)) {
-          fs.rmSync(stale)
-          updated.push(`${path.relative(root, stale).split(path.sep).join('/')}（旧路径，已删）`)
-        }
+    for (const kind of Object.keys(kinds)) {
+      const file = path.join(root, kinds[kind].file)
+      const content = renderKindIndex(kind, entries, kinds)
+      const old = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null
+      if (old === null) {
+        lines.push(red(`[ERROR] ${kinds[kind].file} 不存在——kind README 是登记处，不能由生成器凭空创建`))
+        return { code: 1, lines }
       }
-      const old = fs.existsSync(t.file) ? fs.readFileSync(t.file, 'utf8') : null
-      if (old === t.content) continue
-      fs.mkdirSync(path.dirname(t.file), { recursive: true })
-      fs.writeFileSync(t.file, t.content)
-      updated.push(path.relative(root, t.file).split(path.sep).join('/'))
+      const b = old.indexOf(SUMMARY_BEGIN)
+      const e = old.indexOf(SUMMARY_END)
+      if (b === -1 || e === -1 || b > e) {
+        // RG-030 会把缺标记判红；这里直接拒绝写，避免把标记区外的内容冲掉
+        lines.push(red(`[ERROR] ${kinds[kind].file} 缺 \`registry:summary\` 标记对——手写区与自动区边界不明，拒绝写盘（RG-030）`))
+        return { code: 1, lines }
+      }
+      const next = old.slice(0, b + SUMMARY_BEGIN.length) + '\n' + content + '\n' + old.slice(e)
+      if (next !== old) {
+        fs.writeFileSync(file, next)
+        updated.push(path.relative(root, file).split(path.sep).join('/'))
+      }
     }
     lines.push(
       updated.length
-        ? green(`registry-audit 通过：${entries.length} 个条目零违规；汇总页已更新：${updated.join('、')}`)
-        : green(`registry-audit 通过：${entries.length} 个条目零违规；汇总页已是最新`),
+        ? green(`registry-audit 通过：${entries.length} 个条目零违规；汇总区块已更新：${updated.join('、')}`)
+        : green(`registry-audit 通过：${entries.length} 个条目零违规；汇总区块已是最新`),
     )
   } else {
     lines.push(green(`registry-audit 通过：${counts}——字段 / 状态 / 依赖 / 判据指认全部自洽`))

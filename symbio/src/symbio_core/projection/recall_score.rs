@@ -5,7 +5,7 @@
 //! 它是**生产读侧与召回评测集的唯一共有实现**：
 //!
 //! - 生产：`super::recall`（`recall` 投影）调 [`rank`] 排 `RecallEntry`；
-//! - 评测：`docs/plan/verify/recall_eval.rs` 用 `#[path]` **包含本文件**，对
+//! - 评测：`docs/004-plan/verify/recall_eval.rs` 用 `#[path]` **包含本文件**，对
 //!   召回评测集跑同一份排序，出「生产投影的 recall@k」。
 //!
 //! 两边共用一份源码，而不是各写一份同构逻辑——临摹件会随生产漂移而**静默**失效

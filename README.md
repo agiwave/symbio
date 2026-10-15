@@ -32,8 +32,8 @@ created: 2026-07-20
 - **VDFS** — 文件、模型、Agent、技能、MCP、设置……统统是有地址的资源，一个心智模型。
 - **Agent = 一个目录** — 技能 / MCP 复用宿主的子树，没有独立二进制。
 
-> 展开的架构说明见 [架构总览](docs/arch/AR-003-OVERVIEW.md "AR-003-OVERVIEW")；运行时拓扑（谁挂在谁下面）见
-> [系统地图](docs/arch/AR-005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP")——本文不复述这两者。
+> 展开的架构说明见 [架构总览](docs/005-arch/003-OVERVIEW.md "AR-003-OVERVIEW")；运行时拓扑（谁挂在谁下面）见
+> [系统地图](docs/005-arch/005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP")——本文不复述这两者。
 
 ---
 
@@ -66,7 +66,7 @@ cd symbio && cargo build --lib && cargo test --lib
 cargo clippy --lib --tests -- -D warnings
 ```
 
-> 完整教程见 [快速上手](docs/guide/GU-006-QUICK_START.md "GU-006-QUICK_START")。
+> 完整教程见 [快速上手](docs/007-guide/006-QUICK_START.md "GU-006-QUICK_START")。
 
 ---
 
@@ -74,7 +74,7 @@ cargo clippy --lib --tests -- -D warnings
 
 | 项目 | 现状 |
 | --- | --- |
-| 核心插件 | 16（权威清单见 [CURRENT.md](docs/ref/RE-006-当前事实表.md "RE-006-当前事实表") §1；由代码生成，CI `--check` 防漂移） |
+| 核心插件 | 16（权威清单见 [CURRENT.md](docs/006-ref/006-当前事实表.md "RE-006-当前事实表") §1；由代码生成，CI `--check` 防漂移） |
 | LLM 协议 | 4 种：OpenAI Chat / OpenAI Responses / Anthropic / Gemini |
 | 质量门禁 | Clippy 0 警告 · `cargo fmt` 0 diff · vue-tsc 0 错误 · vitest 通过 · 循环依赖 0（测试用例数随迭代增长，本文不锁死具体数字） |
 
@@ -99,12 +99,12 @@ symbio/
 
 | | |
 | --- | --- |
-| **入门** | [快速上手](docs/guide/GU-006-QUICK_START.md "GU-006-QUICK_START") · [系统地图](docs/arch/AR-005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP") |
-| **架构** | [总览](docs/arch/AR-003-OVERVIEW.md "AR-003-OVERVIEW") · [数据流](docs/arch/AR-002-DATA_FLOW.md "AR-002-DATA_FLOW") · [协议](docs/arch/AR-004-PROTOCOLS.md "AR-004-PROTOCOLS") · [决策记录](docs/adr/ADR-000-架构决策汇总.md "ADR-000-架构决策汇总") |
-| **参考** | [事实表](docs/ref/RE-006-当前事实表.md "RE-006-当前事实表") · [路由](docs/ref/RE-003-ROUTES.md "RE-003-ROUTES") · [错误码](docs/ref/RE-002-ERROR_CODES.md "RE-002-ERROR_CODES") · [配置](docs/ref/RE-001-CONFIGURATION.md "RE-001-CONFIGURATION") |
-| **开发** | [插件开发](docs/guide/GU-005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT") · [排障](docs/guide/GU-007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING") · [任务 / 规范登记](docs/KIND-000-登记总账.md "KIND-000-登记总账") · [贡献指南](CONTRIBUTING.md "CONTRIBUTING") |
-| **设计** | [VDFS 规范](docs/arch/AR-012-vdfs-frontend.md "AR-012-vdfs-frontend") · [上下文压缩分层](symbio/src/plugins/session/docs/AR-014-context-compression-design.md "AR-014-context-compression-design") · [Agent 目录规范 v2](docs/arch/AR-006-agent-directory-spec.md "AR-006-agent-directory-spec") |
-| **CLI** | [cli/README.md](cli/README.md "cli/README") · [架构](cli/docs/AR-001-architecture.md "AR-001-architecture") · [构建](cli/docs/GU-003-building.md "GU-003-building") · [用法](cli/docs/GU-004-usage.md "GU-004-usage") |
+| **入门** | [快速上手](docs/007-guide/006-QUICK_START.md "GU-006-QUICK_START") · [系统地图](docs/005-arch/005-SYSTEM_MAP.md "AR-005-SYSTEM_MAP") |
+| **架构** | [总览](docs/005-arch/003-OVERVIEW.md "AR-003-OVERVIEW") · [数据流](docs/005-arch/002-DATA_FLOW.md "AR-002-DATA_FLOW") · [协议](docs/005-arch/004-PROTOCOLS.md "AR-004-PROTOCOLS") · [决策记录](docs/010-adr/README.md "ADR-000-架构决策汇总") |
+| **参考** | [事实表](docs/006-ref/006-当前事实表.md "RE-006-当前事实表") · [路由](docs/006-ref/003-ROUTES.md "RE-003-ROUTES") · [错误码](docs/006-ref/002-ERROR_CODES.md "RE-002-ERROR_CODES") · [配置](docs/006-ref/001-CONFIGURATION.md "RE-001-CONFIGURATION") |
+| **开发** | [插件开发](docs/007-guide/005-PLUGIN_DEVELOPMENT.md "GU-005-PLUGIN_DEVELOPMENT") · [排障](docs/007-guide/007-TROUBLESHOOTING.md "GU-007-TROUBLESHOOTING") · [任务 / 规范登记](docs/000-index/README.md "KIND-000-登记总账") · [贡献指南](CONTRIBUTING.md "CONTRIBUTING") |
+| **设计** | [VDFS 规范](docs/005-arch/012-vdfs-frontend.md "AR-012-vdfs-frontend") · [上下文压缩分层](symbio/src/plugins/session/docs/014-context-compression-design.md "AR-014-context-compression-design") · [Agent 目录规范 v2](docs/005-arch/006-agent-directory-spec.md "AR-006-agent-directory-spec") |
+| **CLI** | [cli/README.md](cli/README.md "cli/README") · [架构](cli/docs/001-architecture.md "AR-001-architecture") · [构建](cli/docs/003-building.md "GU-003-building") · [用法](cli/docs/004-usage.md "GU-004-usage") |
 | **变更** | 变更历史 = `git log`（本仓库不另维护变更日志，理由见 [贡献指南](CONTRIBUTING.md "CONTRIBUTING")）· [历史归档](docs/archive/) |
 
 > 每个插件与前端都维护自己的 `README.md`，详见 [文档中心 · 模块文档地图](docs/README.md#模块文档地图 "docs/README")。

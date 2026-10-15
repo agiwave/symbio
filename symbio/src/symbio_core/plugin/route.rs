@@ -3,7 +3,7 @@
 //! # 地址规则
 //!
 //! > 本模块文档是地址规则的**权威表述**；展开版（含审计结果与守卫边界）见
-//! > [`docs/arch/AR-009-plugin-route-address.md`](../../../../docs/arch/AR-009-plugin-route-address.md "AR-009-plugin-route-address")。
+//! > [`docs/005-arch/009-plugin-route-address.md`](../../../../docs/005-arch/009-plugin-route-address.md "AR-009-plugin-route-address")。
 //!
 //! ## 一、地址只有两种形态
 //!
@@ -23,7 +23,7 @@
 //! 才是真正的路由前缀。`PluginMeta::new` 的首参（`id`）**不参与路由**——路由按目录名
 //! 分发，`PluginMeta` 唯一运行期消费方是 `composite/vdfs.rs`（读 `order`/`root_access`/
 //! `name`/`description`/`hidden` 聚合组合视图），拿 id 当前缀会产出**不存在的路由**——
-//! `hook` 插件写成 `"hooks"` 就曾让 `docs/ref/RE-006-当前事实表.md` 与两处文档照抄出 `hooks/fire`。
+//! `hook` 插件写成 `"hooks"` 就曾让 `docs/006-ref/006-当前事实表.md` 与两处文档照抄出 `hooks/fire`。
 //! 该不一致由 `scripts/plugin-entry-audit.mjs` 的 E-001 守住。
 //!
 //! ## 三、过路由才设 `PATH`；直连方法**不设**

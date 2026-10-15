@@ -24,13 +24,21 @@ fn tool() -> ContentSearchTool {
 /// 两个文件共 5 个匹配行：a.rs（3 行）/ b.rs（2 行）/ c.rs 不含标记
 async fn fixture() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
-    tokio::fs::write(dir.path().join("a.rs"), "const x1 = 'MARK';\nconst x2 = 'MARK';\nconst x3 = 'MARK';\n")
+    tokio::fs::write(
+        dir.path().join("a.rs"),
+        "const x1 = 'MARK';\nconst x2 = 'MARK';\nconst x3 = 'MARK';\n",
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(
+        dir.path().join("b.rs"),
+        "const y1 = 'MARK';\nconst y2 = 'MARK';\n",
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(dir.path().join("c.rs"), "const z = 1;\n")
         .await
         .unwrap();
-    tokio::fs::write(dir.path().join("b.rs"), "const y1 = 'MARK';\nconst y2 = 'MARK';\n")
-        .await
-        .unwrap();
-    tokio::fs::write(dir.path().join("c.rs"), "const z = 1;\n").await.unwrap();
     dir
 }
 
@@ -51,19 +59,12 @@ async fn content_mode_has_one_line_per_match_without_blank_lines() {
     let out = search_all(dir.path(), "content").await;
 
     let lines: Vec<&str> = out.lines().collect();
-    assert_eq!(
-        lines.len(),
-        5,
-        "5 个匹配行 ⇒ 恰 5 条输出（实际 {lines:?}）"
-    );
+    assert_eq!(lines.len(), 5, "5 个匹配行 ⇒ 恰 5 条输出（实际 {lines:?}）");
     assert!(
         lines.iter().all(|l| !l.trim().is_empty()),
         "输出里不许有空行（实际 {out:?}）"
     );
-    assert!(
-        !out.contains("\n\n"),
-        "行间必须是单换行（实际 {out:?}）"
-    );
+    assert!(!out.contains("\n\n"), "行间必须是单换行（实际 {out:?}）");
     // 形状：<路径>:<行号>:<内容>；匹配行正文里不带终止符残留
     for l in &lines {
         let rest = l.split_once("MARK").expect("每条输出应含匹配正文").0;
@@ -73,10 +74,22 @@ async fn content_mode_has_one_line_per_match_without_blank_lines() {
         );
     }
     // 行号逐文件递增：a.rs 1..=3，b.rs 1..=2
-    assert!(lines.iter().any(|l| l.contains("a.rs:1:")), "缺 a.rs:1（{out:?}）");
-    assert!(lines.iter().any(|l| l.contains("a.rs:3:")), "缺 a.rs:3（{out:?}）");
-    assert!(lines.iter().any(|l| l.contains("b.rs:2:")), "缺 b.rs:2（{out:?}）");
-    assert!(!out.contains("c.rs"), "不含标记的 c.rs 不该进结果（{out:?}）");
+    assert!(
+        lines.iter().any(|l| l.contains("a.rs:1:")),
+        "缺 a.rs:1（{out:?}）"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("a.rs:3:")),
+        "缺 a.rs:3（{out:?}）"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("b.rs:2:")),
+        "缺 b.rs:2（{out:?}）"
+    );
+    assert!(
+        !out.contains("c.rs"),
+        "不含标记的 c.rs 不该进结果（{out:?}）"
+    );
 }
 
 /// `files_with_matches` 模式：每命中文件一条**纯路径**，不带行号与正文
@@ -92,7 +105,9 @@ async fn files_mode_lists_pure_paths_one_per_file() {
         "纯路径模式不该带正文（实际 {out:?}）"
     );
     assert!(
-        lines.iter().all(|l| l.ends_with("a.rs") || l.ends_with("b.rs")),
+        lines
+            .iter()
+            .all(|l| l.ends_with("a.rs") || l.ends_with("b.rs")),
         "每条应是文件路径（实际 {out:?}）"
     );
 }
@@ -166,8 +181,14 @@ async fn offset_and_head_limit_combine_on_match_lines() {
 
     let matches: Vec<&str> = paged.lines().filter(|l| l.contains("MARK")).collect();
     assert_eq!(matches.len(), 2, "（实际 {paged:?}）");
-    assert!(matches[0].contains("a.rs:2:"), "第一个应是 a.rs:2（{paged:?}）");
-    assert!(matches[1].contains("a.rs:3:"), "第二个应是 a.rs:3（{paged:?}）");
+    assert!(
+        matches[0].contains("a.rs:2:"),
+        "第一个应是 a.rs:2（{paged:?}）"
+    );
+    assert!(
+        matches[1].contains("a.rs:3:"),
+        "第二个应是 a.rs:3（{paged:?}）"
+    );
     assert!(
         !paged.contains("b.rs"),
         "head_limit 截在 a.rs 内 ⇒ b.rs 不该出现（{paged:?}）"
@@ -188,7 +209,17 @@ fn zero_pagination_returns_input_verbatim() {
 async fn no_match_reports_single_line() {
     let dir = fixture().await;
     let out = tool()
-        .search("NOMATCHHERE", dir.path(), "content", None, None, true, 0, 0, false)
+        .search(
+            "NOMATCHHERE",
+            dir.path(),
+            "content",
+            None,
+            None,
+            true,
+            0,
+            0,
+            false,
+        )
         .await
         .expect("搜索应成功");
     assert_eq!(out, "未找到匹配。");

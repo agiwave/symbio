@@ -14,7 +14,7 @@
 //
 // 「facts 必须最后」那条规矩的原话是「前面任何自动修复都可能改代码」。逐个看：
 // `05-fmt`（cargo fmt）在它之前；`10-backend` / `20-frontend-static` 只写 `target/`；
-// `55-verify` 重写 `docs/plan/verify/facts/mod.rs`（verify 程序的事实，不是本链的）。
+// `55-verify` 重写 `docs/004-plan/verify/facts/mod.rs`（verify 程序的事实，不是本链的）。
 // 没有一个阶段在本阶段之后改**源码**。所以生成提前是安全的。
 //
 // 而 `gen-facts --check`（重生成后复核）**留在 `60-facts`**：它问的是「这一整轮跑完，

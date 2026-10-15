@@ -202,7 +202,11 @@ async fn run_heartbeat_daemon(client: &mut SymbioClient, args: &args::Args) -> E
 }
 
 /// 非交互：发送一条消息，成功则退出码 0。
-async fn run_once(client: &mut SymbioClient, inline: Option<String>, args: &args::Args) -> ExitCode {
+async fn run_once(
+    client: &mut SymbioClient,
+    inline: Option<String>,
+    args: &args::Args,
+) -> ExitCode {
     let mut renderer = Renderer::new(args.quiet, args.verbose);
 
     let message = match inline {

@@ -182,13 +182,13 @@ const DECLARATIONS = [
  */
 const NO_MEMBER_SET = [
   {
-    owner: 'docs/ref/PROMPT_SHAPE.md',
+    owner: 'docs/006-ref/PROMPT_SHAPE.md',
     why:
       '投影物是运行时形状而非名单；判据是 PS-001 逐字段比（口径见 ADR-057）。' +
       '其中唯一像名单的工具面与「LLM 可见工具」同源（代码），再立一份成员表即为复述',
   },
   {
-    owner: 'docs/arch/AR-013-vdfs.md',
+    owner: 'docs/005-arch/013-vdfs.md',
     why:
       '§5 自己声明 `plugins/vdfs/protocol.rs` 的 `VDFS_OPS` 是唯一操作清单——' +
       '操作族与「VDFS 操作」集合同源同成员，不新增第二份',

@@ -1,9 +1,9 @@
-//! `actors` 单测 —— 含 **S01 闭环彩排**（[plan/04 §3](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地")
+//! `actors` 单测 —— 含 **S01 闭环彩排**（[plan/04 §3](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")
 //! 第 3 步：零 LLM 跑通完整闭环——应答由彩排内的定值给出，链路一条不少）。
 //!
 //! 彩排把 S0 的地基（store / projection / invariants）与 S1 的 ② `actors`
 //! 拧成一条完整链路，验收断言逐条对应
-//! [roadmap/S01 §6](../../../../docs/stage/ST-001-最小闭环.md "ST-001-最小闭环")。
+//! [roadmap/S01 §6](../../../../docs/003-stage/001-最小闭环.md "ST-001-最小闭环")。
 
 use super::*;
 use crate::symbio_core::event::{
@@ -309,7 +309,7 @@ fn two_finals_are_caught_by_n3() {
     );
 }
 
-// ── S2 彩排（[plan/04 §3](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地") 第 5–6 步）：真实执行形状 ──
+// ── S2 彩排（[plan/04 §3](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") 第 5–6 步）：真实执行形状 ──
 //
 // 步骤 5：接入真实模型（pattern = reasoner）→ 真实对话 → N1/N3/N5 仍全绿；
 // 步骤 6：兜底埋点 + 四层 budget_ms 就位 → 时延埋点可测。
@@ -486,7 +486,7 @@ async fn four_tier_budgets_are_measurable() {
     assert_eq!(LatencyTier::Reflex.budget_ms(), 80);
 }
 
-// ── S5 彩排（[plan/04 §3](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地") 第 11–13 步）：记忆链路 ──
+// ── S5 彩排（[plan/04 §3](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") 第 11–13 步）：记忆链路 ──
 //
 // 编码（memory.encoded）→ 检索（recall 投影 + RecallTranslator → memory.recalled）
 // → 巩固 / 遗忘（排除式 + 保真度下界）。S06 §6 四条验收逐条落地。
@@ -795,7 +795,7 @@ fn recall_translator_produces_provenanced_event_and_invariants_stay_green() {
     assert_eq!(recalled.payload["found"], 1);
 }
 
-/// 降级也要有**生产读数口**（[T-104](../../../../docs/task/T-104-检索降级可见性批.md "T-104-检索降级可见性批")）：
+/// 降级也要有**生产读数口**（[T-104](../../../../docs/009-task/104-检索降级可见性批.md "T-104-检索降级可见性批")）：
 /// `degraded` 从 `memory.recalled` 的载荷读出——不只在投影外壳或提示词里活着。
 /// 反向：不降级的检索不标降级（不谎称）。
 #[test]
@@ -834,7 +834,7 @@ fn recalled_event_records_degradation_instead_of_dropping_it() {
     );
 }
 
-// ── S6 彩排（[plan/04 §3](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地") 第 14–15 步）：多主体与对等承诺 ──
+// ── S6 彩排（[plan/04 §3](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") 第 14–15 步）：多主体与对等承诺 ──
 //
 // 第 14 步：principal 隔离（下方验收 1/4）+ 无直连静态扫描（scripts/no-direct-call-audit.mjs，
 // 出口判据「直连调用 0」；成对性拒绝 = S08 §6 验收 3，已在 governance 测试区覆盖）。
@@ -999,7 +999,7 @@ fn reputation_double_run_is_identical_and_as_of_safe() {
     assert_eq!(now.of("agent:b").score, 0, "违约计入后声誉下降");
 }
 
-// ── S7 彩排（[plan/04 §3](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地") 第 16–18 步）：任务树与返工 ──
+// ── S7 彩排（[plan/04 §3](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") 第 16–18 步）：任务树与返工 ──
 //
 // 16 DAG 调度 + readyset（C14 无环）；17 独立验证者（C15 不自验，构造期拒绝）；
 // 18 返工闭环（rework_created，返工次数有界 = 终止性前提 2）。
@@ -1293,7 +1293,7 @@ fn n_step_chain_terminates_within_rework_bound() {
     );
 }
 
-// ── S8 彩排（[plan/04 §3](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地") 第 19–20 步）：时延与插话 ──
+// ── S8 彩排（[plan/04 §3](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") 第 19–20 步）：时延与插话 ──
 //
 // 19 抢占判定者（80ms 反射档）+ 挂起/恢复（出口判据「二次调度 0」，roadmap/S07）；
 // 20 熔断（外部执行闸门，出口判据「熔断后仍执行 0」，roadmap/S09）。
@@ -1656,7 +1656,7 @@ fn cost_ledger_accumulates_per_principal() {
     assert_eq!(ledger.value.of("agent:ghost"), Default::default());
 }
 
-// ── S9 彩排（[plan/04 §3](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地") 第 21–22 步）：自治与学习 ──
+// ── S9 彩排（[plan/04 §3](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") 第 21–22 步）：自治与学习 ──
 //
 // 21 定时触发 + 自主层 budget_ms（出口判据「自主写入对话 0」，roadmap/S12）；
 // 22 技能编译 + 校准 + 反自动化回退（出口判据「技能溯源 100%」，roadmap/S11）。

@@ -3,7 +3,7 @@ import './_selfrun.mjs';
 //
 // ## 本用例钉的是什么
 //
-// [plan/11 §2-F](../../docs/plan/PL-009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") 的缺口条目：
+// [plan/11 §2-F](../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") 的缺口条目：
 // 「`register_vdfs_root` / `register_model_providers` 单槽 ⇒ 子智能体的注册会覆盖父的」。
 // 核实后这条**在现仓不成立**（每次 `collect_capabilities` 各建一个 visitor +
 // `SubAgentVisitor` 在父会话收集期**丢弃**这两项）。所以本用例证的不是"新机制能工作"，

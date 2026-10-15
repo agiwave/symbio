@@ -109,7 +109,7 @@ pub(crate) fn is_inflight_seq(seq: i64) -> bool {
 ///
 /// 挂在 [`crate::plugins::session::active::ActiveSessionState`] 上（每会话一个），
 /// 消费循环是它唯一的常规写入者；落库回包（用户消息 / 助手侧增量 / 压缩节点，
-/// 见 `docs/AR-022-vdfs-session-messages.md` §3.4）与压缩发射器经同一入口写入。
+/// 见 `docs/022-vdfs-session-messages.md` §3.4）与压缩发射器经同一入口写入。
 pub struct Transcript {
     session_id: String,
     /// 下一个要分配的**在途位置序号**（见 [`INFLIGHT_SEQ_BASE`]）。

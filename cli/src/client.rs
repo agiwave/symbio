@@ -33,7 +33,7 @@
 //!
 //! 旧的 `kind = "session"` 事件频道（`Status` / `Update` / `Abort` 帧）已废除
 //! ——会话运行态由**会话节点**（`status` + `attributes.outcome` / `.error`）承载
-//! （见 `session/docs/AR-018-node-state-streaming.md`）。
+//! （见 `session/docs/018-node-state-streaming.md`）。
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -422,7 +422,7 @@ impl SymbioClient {
     /// 切换 Provider（下次发送即生效，无需重建连接）。
     ///
     /// 落库推迟到**下一次发送**（`ask` 见 `options_dirty`）：`provider_id` 描述的是
-    /// **会话级事实**（这个会话用哪个 provider，[ADR-066](../../docs/adr/ADR-066.md "ADR-066")），
+    /// **会话级事实**（这个会话用哪个 provider，[ADR-066](../../docs/010-adr/066.md "ADR-066")），
     /// 它的落点是会话 metadata，不是某条消息的写体。置脏而不是立刻写，是为了让
     /// 「开着 REPL 连续切几次」只落最后一次。
     pub fn switch_provider(&mut self, provider: Option<String>) {
@@ -467,7 +467,7 @@ impl SymbioClient {
 
         // 本端选项自上次落库以来变过，才先把它们落成会话 metadata。
         //
-        // `session/chat/send` 已随输入面双轨退役（[ADR-066](../../docs/adr/ADR-066.md "ADR-066") /
+        // `session/chat/send` 已随输入面双轨退役（[ADR-066](../../docs/010-adr/066.md "ADR-066") /
         // T-077 步②），收件箱写入面**不承载运行选项**。从前「随请求携带 provider / mode /
         // risk」的语义因此改走会话 metadata——而 metadata 本就是这三项的**唯一**写入
         // 落点（[ADR-066] 理由 1：同一件会话级事实有两个 owner 正是双轨期的病）。

@@ -27,7 +27,7 @@ created: 2026-09-25
 
 ## 路由
 
-**无**（权威登记见 [RE-003-ROUTES.md](../../../../docs/ref/RE-003-ROUTES.md "RE-003-ROUTES") §Plugin_manager 插件）。
+**无**（权威登记见 [003-ROUTES.md](../../../../docs/006-ref/003-ROUTES.md "RE-003-ROUTES") §Plugin_manager 插件）。
 本插件是无状态 provider，`route` 恒 `NotFound`。
 
 ## 清单 = 各插件的条目 + 自有分区
@@ -94,5 +94,5 @@ created: 2026-09-25
   `symbio/src/plugins/composite/vdfs.rs`
 - 插件目录与配置：`symbio_core::plugin::dir`（`PLUGIN.yml` 的保留键）
 - 可配置声明通道：`symbio_core::capability::configurable`（`ConfigurableVisitor` / `CONFIG_VISITOR`）
-- VDFS 机制：`docs/arch/AR-013-vdfs.md`（`DetailDefinition` 是 `ext = form` 节点的
+- VDFS 机制：`docs/005-arch/013-vdfs.md`（`DetailDefinition` 是 `ext = form` 节点的
   `schema` 方言；配置文件地址 = `<插件目录>/PLUGIN.yml`，见 §3.4 / §13.1）

@@ -26,7 +26,7 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const script = fileURLToPath(new URL('./slo-exit-audit.mjs', import.meta.url))
-const PLAN04 = path.join('docs', 'plan', 'PL-004-工程落地.md')
+const PLAN04 = path.join('docs', '004-plan', '004-工程落地.md')
 const STATS = path.join('symbio', 'src', 'plugins', 'session', 'stats.rs')
 
 /** `stats.rs` 的最小夹具：`SessionStats` 顶层列 + `TierRow` 子列 */

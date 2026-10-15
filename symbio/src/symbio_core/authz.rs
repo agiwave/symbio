@@ -1,4 +1,4 @@
-//! 本机部署的**授权策略表**（写侧 grants + 读侧可见域，[plan/01 §7](../../../docs/plan/PL-001-核心架构.md "PL-001-核心架构")）。
+//! 本机部署的**授权策略表**（写侧 grants + 读侧可见域，[plan/01 §7](../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")）。
 //!
 //! ## 为什么这张表住 `symbio_core`
 //!
@@ -23,7 +23,7 @@
 //! 2. **写侧**：运行器落格前判（`turn_runner::closure_granted`，按**种类**分两臂）：
 //!    发言收束（收束格）判 [`can_reply`](PermissionMatrix::can_reply)，产物收束
 //!    （`artifact.added`）判 [`can_produce_artifact`](PermissionMatrix::can_produce_artifact)
-//!    （[ADR-067](../../../docs/adr/ADR-067.md "ADR-067")）。未持有 ⇒ 拒绝入格：发言臂下
+//!    （[ADR-067](../../../docs/010-adr/067.md "ADR-067")）。未持有 ⇒ 拒绝入格：发言臂下
 //!    该轮留在未收束态——除非它落过产物格（C4 与产物闸同批认可「产物即收束」，
 //!    见 `invariants::unresolved_turns`）；
 //! 3. **读侧**：`stats` 按读方声明判 [`can_see`](PermissionMatrix::can_see)——属主
@@ -33,22 +33,22 @@
 //! ## 两张表里的「人」
 //!
 //! `user.message` **不入能力表**：能力按「智能体的权威动作种类」划分，人的发言
-//! 不是动作种类（落不进去就走 [03 §3](../../../docs/plan/PL-003-演进与验证.md "PL-003-演进与验证") 的 ADR）。
+//! 不是动作种类（落不进去就走 [03 §3](../../../docs/004-plan/003-演进与验证.md "PL-003-演进与验证") 的 ADR）。
 //! 读侧因此也不靠矩阵成员身份，而靠 **owner 相等**：`thread_private` 下属主是
 //! 本机会话的属主，语义见 `governance::can_see`。
 //!
 //! ## 本表会怎么长
 //!
-//! 多主体加固（[plan/11 批 2](../../../docs/plan/PL-009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") /
+//! 多主体加固（[plan/11 批 2](../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") /
 //! 04 §3.1 批⑧）落地时，子智能体各成一行——行的形状不变，仍是
 //! `(主体, 能力名, 可见域)`。
 //!
-//! 自主发起者那一行已按 [S12 §3](../../../docs/stage/ST-012-自主层与长期目标.md "ST-012-自主层与长期目标")
+//! 自主发起者那一行已按 [S12 §3](../../../docs/003-stage/012-自主层与长期目标.md "ST-012-自主层与长期目标")
 //! 先落地：它是本表里**第一行「比主智能体窄」**的记录（只持 `define.work`）。这行同时
 //! 说明一件事——**「同角色」是平凡值而不是规则**：派生只服务**未登记**的主体，
 //! 一旦某个主体被显式登记，那一行就是它的权威能力集。
 //!
-//! 抢占判定者那一行（`agent:reflex`，只持 `judge.intent`）按 [S07 §5](../../../docs/stage/ST-007-插话与实时打断.md "ST-007-插话与实时打断")
+//! 抢占判定者那一行（`agent:reflex`，只持 `judge.intent`）按 [S07 §5](../../../docs/003-stage/007-插话与实时打断.md "ST-007-插话与实时打断")
 //! 随后落地，与自主行同形：**正文写着「不得直接发言」而表里没有行**时，`matrix_for`
 //! 的派生分支会把主智能体整套（含 `reply.*`）给它——断言于是被静默推翻。
 
@@ -65,7 +65,7 @@ pub(crate) const PRINCIPAL_MAIN: &str = "agent:main";
 /// 本机用户的身份——用户发言事件的 `actor`。
 pub(crate) const PRINCIPAL_USER: &str = "user";
 
-/// 自主发起者的身份（[roadmap/S12 §3](../../../docs/stage/ST-012-自主层与长期目标.md "ST-012-自主层与长期目标")）
+/// 自主发起者的身份（[roadmap/S12 §3](../../../docs/003-stage/012-自主层与长期目标.md "ST-012-自主层与长期目标")）
 /// ——表里那一行的名字与 `AutonomousInitiator` 四个事件的 `actor` 是同一个常量。
 ///
 /// 与 [`PRINCIPAL_MAIN`] 同理：判定用的主体名与实际写入的主体名各写一份字符串，两边
@@ -74,7 +74,7 @@ pub(crate) const PRINCIPAL_USER: &str = "user";
 /// 死记录，而自主行为照旧能冒充用户对话。
 pub(crate) const PRINCIPAL_AUTONOMOUS: &str = "agent:autonomous";
 
-/// 抢占判定者的身份（[roadmap/S07 §3](../../../docs/stage/ST-007-插话与实时打断.md "ST-007-插话与实时打断")）
+/// 抢占判定者的身份（[roadmap/S07 §3](../../../docs/003-stage/007-插话与实时打断.md "ST-007-插话与实时打断")）
 /// ——表里那一行的名字与 `PreemptionDecider` 三个事件（`task.held` /
 /// `task.progressed` / `control.opened`）的 `actor` 是同一个常量。
 ///
@@ -85,7 +85,7 @@ pub(crate) const PRINCIPAL_AUTONOMOUS: &str = "agent:autonomous";
 /// 而文档与验收断言都还写着它成立。
 pub(crate) const PRINCIPAL_REFLEX: &str = "agent:reflex";
 
-/// **对等主体**的身份（[roadmap/S08 §3](../../../docs/stage/ST-008-多主体与对等承诺.md "ST-008-多主体与对等承诺")）
+/// **对等主体**的身份（[roadmap/S08 §3](../../../docs/003-stage/008-多主体与对等承诺.md "ST-008-多主体与对等承诺")）
 /// ——表里那一行的名字与对等体写事件用的 `actor` 是同一个常量。
 ///
 /// 它是本表里**第一个对等（图侧）主体**：与主从树的子智能体不同，对等体不依附某个会话，
@@ -108,7 +108,7 @@ pub(crate) const PRINCIPAL_PEER: &str = "agent:peer-b";
 pub(crate) const SESSION_OWNER: &str = PRINCIPAL_USER;
 
 /// **外部执行**能力名（`ProduceArtifact` 的书写形态）——熔断闸门的授权判据
-/// （[roadmap/S09 §6](../../../docs/stage/ST-009-外部执行与熔断.md "ST-009-外部执行与熔断") 验收 1）。
+/// （[roadmap/S09 §6](../../../docs/003-stage/009-外部执行与熔断.md "ST-009-外部执行与熔断") 验收 1）。
 ///
 /// 提成常量而不是在闸门那里再写一遍字面量：能力名只有一个拼法，写两处迟早漂移成
 /// 「表授予 A、闸门判 B」，而这种错位**没有任何东西会变红**（两边都是合法能力名）。

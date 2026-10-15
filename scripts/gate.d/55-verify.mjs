@@ -1,6 +1,6 @@
-// verify 阶段：`docs/plan/verify/` 的验证程序**自己证明自己**。
+// verify 阶段：`docs/004-plan/verify/` 的验证程序**自己证明自己**。
 //
-// 这批程序是 v2 方案的"硬证据"（`docs/plan/README.md §4`、`04 §4` 的 C29），
+// 这批程序是 v2 方案的"硬证据"（`docs/004-plan/README.md §4`、`04 §4` 的 C29），
 // 在此之前它们只能手敲 `rustc --edition 2021 <f>.rs -o <out> && <out>` 跑一遍，
 // 输出一份**手工提交的快照**——零断言的守卫等于没有守卫，
 // 而"人手跑过一次"同样不是守卫：没有任何东西保证它明天还绿。
@@ -21,7 +21,7 @@
 // 不污染 `target/`，`.workbuddy-ai/` 已在 paths-ignore 与 .gitignore 内）。
 //
 // **为什么文件名是 55- 而不是 70-**：门禁按文件名排序执行，`60-facts` 是
-// autoWork（重新生成并暂存 `docs/ref/RE-006-当前事实表.md`），必须**最后**跑——它要把暂存状态
+// autoWork（重新生成并暂存 `docs/006-ref/006-当前事实表.md`），必须**最后**跑——它要把暂存状态
 // 定格成"本次改动的终态"。排在它后面会让暂存发生在 verify 之前，`git status`
 // 再也看不出 verify 那一跑有没有碰过东西。同理 msrv 是 50-。
 import path from 'node:path'
@@ -32,7 +32,7 @@ import { BASELINE, ratchetOrBump, autoWork } from './_shared.mjs'
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
-const verifyDir = path.join(repoRoot, 'docs', 'plan', 'verify')
+const verifyDir = path.join(repoRoot, 'docs', '004-plan', 'verify')
 const outDir = path.join(repoRoot, '.workbuddy-ai', 'verify-target')
 const genFacts = path.join(repoRoot, 'scripts', 'gen-verify-facts.mjs')
 
@@ -52,7 +52,7 @@ const matchErrorCodes = (output) => {
 
 export default {
   id: 'verify',
-  title: '验证程序（docs/plan/verify · 含编译期反例 C29）',
+  title: '验证程序（docs/004-plan/verify · 含编译期反例 C29）',
   // 每个验证程序是**独立的 rustc 调用**（各自一个源文件、各自的输出 exe），
   // 彼此无共享状态 ⇒ 并发跑。批的边界在 `facts 生成` 那一步：它必须**先**跑完
   // （程序吃的就是它生成的数据），所以那一步不标 `parallel`，天然把批次切开。
@@ -67,7 +67,7 @@ export default {
       yield {
         label: 'verify',
         run: async () => 'skipped',
-        skipNote: `docs/plan/verify/ 不存在（${path.relative(repoRoot, verifyDir)}）`,
+        skipNote: `docs/004-plan/verify/ 不存在（${path.relative(repoRoot, verifyDir)}）`,
       }
       return
     }

@@ -68,5 +68,5 @@ const MAIN =
   process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))
 if (MAIN) {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-  console.log(createRefLink(root, 'docs/ref')('RE-003-ROUTES', 'RE-003-ROUTES.md'))
+  console.log(createRefLink(root, 'docs/ref')('RE-003-ROUTES', '003-ROUTES.md'))
 }

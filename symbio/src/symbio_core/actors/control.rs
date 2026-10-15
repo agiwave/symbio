@@ -1,9 +1,9 @@
-//! 控制面主体：抢占判定（[roadmap/S07](../../../../docs/stage/ST-007-插话与实时打断.md "ST-007-插话与实时打断")）与外部执行闸门（[roadmap/S09](../../../../docs/stage/ST-009-外部执行与熔断.md "ST-009-外部执行与熔断")）。
+//! 控制面主体：抢占判定（[roadmap/S07](../../../../docs/003-stage/007-插话与实时打断.md "ST-007-插话与实时打断")）与外部执行闸门（[roadmap/S09](../../../../docs/003-stage/009-外部执行与熔断.md "ST-009-外部执行与熔断")）。
 
 use crate::symbio_core::authz::PRINCIPAL_REFLEX;
 use crate::symbio_core::{ActorSpec, Event, Pattern, Scope};
 
-/// 抢占判定结论（反射档三选一 + 超时默认，[plan/04 §2.1](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地")）。
+/// 抢占判定结论（反射档三选一 + 超时默认，[plan/04 §2.1](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Preemption {
     /// 当前无在跑任务——插话放行，直接开始新 turn。
@@ -17,7 +17,7 @@ pub enum Preemption {
     TimeoutDefaultContinue,
 }
 
-/// 抢占判定者（S8 第 19 步，[roadmap/S07 §3](../../../../docs/stage/ST-007-插话与实时打断.md "ST-007-插话与实时打断")）。
+/// 抢占判定者（S8 第 19 步，[roadmap/S07 §3](../../../../docs/003-stage/007-插话与实时打断.md "ST-007-插话与实时打断")）。
 ///
 /// `pattern = decider`、`capabilities = [JudgeIntent]`、`budget_ms = 80`——
 /// 系统第一次需要在几十毫秒内对外部信号做决策。**判定者只产控制事件**
@@ -43,7 +43,7 @@ impl PreemptionDecider {
     /// [`Self::decide`]（预算）与 `plugins::session::transcript::inbox` 的写侧闸
     /// （能力，[`ActorSpec::can_judge_intent`]）。
     ///
-    /// [T-081]: ../../../../docs/task/T-081-授权表缺行登记批.md "T-081-授权表缺行登记批"
+    /// [T-081]: ../../../../docs/009-task/081-授权表缺行登记批.md "T-081-授权表缺行登记批"
     pub fn spec(&self) -> ActorSpec {
         let principal = PRINCIPAL_REFLEX.to_string();
         ActorSpec {
@@ -173,7 +173,7 @@ impl PreemptionDecider {
     }
 }
 
-/// 闸门结论（S8 第 20 步，[roadmap/S09 §6](../../../../docs/stage/ST-009-外部执行与熔断.md "ST-009-外部执行与熔断")）。
+/// 闸门结论（S8 第 20 步，[roadmap/S09 §6](../../../../docs/003-stage/009-外部执行与熔断.md "ST-009-外部执行与熔断")）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GateDecision {
     /// 未授权——调用方**不得产生任何事件**（验收 1：拒绝且无事件）。
@@ -185,7 +185,7 @@ pub enum GateDecision {
     Allow,
 }
 
-/// 熔断闸门（S8 第 20 步，[roadmap/S09](../../../../docs/stage/ST-009-外部执行与熔断.md "ST-009-外部执行与熔断")）。
+/// 熔断闸门（S8 第 20 步，[roadmap/S09](../../../../docs/003-stage/009-外部执行与熔断.md "ST-009-外部执行与熔断")）。
 ///
 /// `budget_ms = 80` 的反射档判定：超预算 / 超时**熔断**而不是"先做了再说"。
 /// 授权判定留在调用方（读路径持矩阵）——本体的输入是判据数据，不是 ⑥ 的句柄。

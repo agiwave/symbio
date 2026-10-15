@@ -423,7 +423,7 @@ fn test_build_request_view_nudge_comes_after_skeletonization() {
     assert_eq!(view_text(&view[view.len() - 2]), "new content");
 }
 
-/// 记忆请求级注入（S5 步 12，[04 §3.1 批⑦](../../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地")）：
+/// 记忆请求级注入（S5 步 12，[04 §3.1 批⑦](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")）：
 /// **置顶**一条 `meta.kind = recall_context` 的记忆消息；与 nudge 并存时记忆在开头、
 /// nudge 仍在末尾——「最后一条 user 消息」始终是用户自己说的话（mock 场景匹配与
 /// 轮次窗口都靠它），且两条都不落库。
@@ -475,7 +475,7 @@ fn test_build_request_view_prepends_memory_section() {
     assert_eq!(plain.len(), msgs.len());
 }
 
-/// 可见域入口（[plan/11 批 1](../../../../../docs/plan/PL-009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") ③）：
+/// 可见域入口（[plan/11 批 1](../../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") ③）：
 /// **同一会话两个主体，各自的视图只含可见发言**。
 ///
 /// 为什么断言「两侧各 3 条」而不是只断一侧：只测一边的话，「把谁的都放进来」

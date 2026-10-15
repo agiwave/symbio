@@ -239,7 +239,7 @@ const optionScope = computed<Record<string, unknown>>(() => ({
   // 这个判定放在**渲染时**（从节点表算出）而不是事件到达时：事件时判定隐含
   // "错误事件到达的那一刻恰好能看到失败节点"，而两条通道的先后无法保证。
   // 从节点表派生则没有这个问题——同一份节点表必然得到同一个结论
-  // （`AR-018-node-state-streaming.md` §5.2「派生是纯函数」）。
+  // （`018-node-state-streaming.md` §5.2「派生是纯函数」）。
   const sessionError = computed(() => {
     const err = sessionsStore.getSessionError(props.sessionId)
     if (!err) return null

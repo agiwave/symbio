@@ -289,7 +289,7 @@ test('端到端：`--check` 对漂移判红、对一致判绿', () => {
  * 它占着判据码，让人以为这一族已被守住。改按**内容**定位。
  */
 const CAPABILITY_SEC = (() => {
-  const doc = fs.readFileSync(path.join(REPO, 'docs', 'ref', 'RE-006-当前事实表.md'), 'utf8')
+  const doc = fs.readFileSync(path.join(REPO, 'docs', '006-ref', '006-当前事实表.md'), 'utf8')
   const i = doc.search(/^### \d+\.1 LLM 可见工具$/m)
   assert.notEqual(i, -1, 'CURRENT.md 里找不到「LLM 可见工具」小节——判据自己失效了')
   const rest = doc.slice(i)
@@ -430,7 +430,7 @@ test('一个封闭集只在一张表里成表（同一批事实不许写两遍�
   // 文档引用本表，都不算——那是指路不是复述。
   // 口径：每个集合**覆盖最全**的那处是 owner；其余任何一处若也集中列了 ≥3 个成员判红。
   // 「处」不限于表格——当年那份重复的 §3.2 是一行 ` · ` 串起来的清单，见 `tableKeys`。
-  const doc = fs.readFileSync(path.join(REPO, 'docs', 'ref', 'RE-006-当前事实表.md'), 'utf8')
+  const doc = fs.readFileSync(path.join(REPO, 'docs', '006-ref', '006-当前事实表.md'), 'utf8')
   const tables = tableKeys(doc)
   assert.ok(tables.length >= 5, `只认出 ${tables.length} 张表——判据自己失效了`)
 
@@ -441,7 +441,7 @@ test('一个封闭集只在一张表里成表（同一批事实不许写两遍�
   // VDFS 操作，正是跨文档判据首版误报的同一处。同一文档内的重复归这条，但它只对
   // 「我控制生成器」的文档成立。
   for (const [setName, set] of SETS) {
-    if (set.ownerRel !== 'docs/ref/RE-006-当前事实表.md') continue
+    if (set.ownerRel !== 'docs/006-ref/006-当前事实表.md') continue
     const members = set.members
     // 每张表命中了哪些成员
     const hits = tables.map((keys, i) => ({ i, n: keys.filter((k) => members.has(k)).length }))
@@ -494,11 +494,11 @@ test('跨文档：封闭集不得在别处成表复述（覆盖职责边界表�
   // ## 为什么跨文档只判「成表」，不判散文
   //
   // 首版跨文档也判散文块，当场**三处误报**，而三处理由各不相同：
-  //   - `AR-013-vdfs.md` 在讲每个操作的**机制**（`t` 位递归、访问层组合）——那是规范
+  //   - `013-vdfs.md` 在讲每个操作的**机制**（`t` 位递归、访问层组合）——那是规范
   //     正文的活，它点 7 个操作名是在**解释**，不是在列清单；
-  //   - `RE-001-CONFIGURATION.md` 那处是 gateway **只读白名单**——一个配置值碰巧用
+  //   - `001-CONFIGURATION.md` 那处是 gateway **只读白名单**——一个配置值碰巧用
   //     操作名拼成；
-  //   - `T-056.md` 在描述要删哪些 e2e 用例。
+  //   - `056.md` 在描述要删哪些 e2e 用例。
   // 三处的共同点：**散文里点名 N 个成员是在讲机制**，而机制归它们各自的 owner。
   // 真正的复述形态历来都是**表**——把一张表抄成第二张才会漂移。
   // 而本文件内（生成物）散文块照样判：我控制生成器，写成散文块一样是多余的。
@@ -518,7 +518,7 @@ test('跨文档：封闭集不得在别处成表复述（覆盖职责边界表�
   // 新增一条必须同样写清；判据抓的是「抄一张清单」，抓不到「拿它当索引」。
   const ALLOW = new Map([
     [
-      'docs/ref/RE-003-ROUTES.md',
+      'docs/006-ref/003-ROUTES.md',
       new Map([
         [
           '前端 / 宿主路由',
@@ -538,7 +538,7 @@ test('跨文档：封闭集不得在别处成表复述（覆盖职责边界表�
       ]),
     ],
     [
-      'docs/plan/PL-007-对话面插件拆分实施方案.md',
+      'docs/004-plan/007-对话面插件拆分实施方案.md',
       new Map([
         [
           '配置项',
@@ -675,7 +675,7 @@ test('跨文档：封闭集不得在别处成表复述（覆盖职责边界表�
     const dir = tmp()
     const injectedPath = path.join(dir, 'injected.md')
     fs.writeFileSync(injectedPath, injected, 'utf8')
-    const withInject = scanDocs([{ rel: 'docs/ref/RE-999-injected.md', file: injectedPath }, ...docs])
+    const withInject = scanDocs([{ rel: 'docs/006-ref/999-injected.md', file: injectedPath }, ...docs])
     assert.ok(
       withInject.bad.length > bad.length,
       `反向用例失效：把 owner 的${why}复制到别处，判据不红——集合「${setName}」是恒真的`,
@@ -719,13 +719,13 @@ test('散文里的 RE-006 节次指路：节次必须存在', () => {
   // 取舍：宁可漏一种形态，也不要一条会误报的判据。漏掉的这一种靠**位置中立写法**
   // 消解——登记条目的 evidence 不该用节号指路（节号是位置，会动；「能力矩阵」是
   // 那件东西，不会动）。T-098 已按此改写。
-  const doc = fs.readFileSync(path.join(REPO, 'docs', 'ref', 'RE-006-当前事实表.md'), 'utf8')
+  const doc = fs.readFileSync(path.join(REPO, 'docs', '006-ref', '006-当前事实表.md'), 'utf8')
   const actual = new Set([...doc.matchAll(/^#{2,3}\s+([\d.]+)\.?\s/gm)].map((m) => m[1].replace(/\.$/, '')))
 
   const bad = []
   let scanned = 0
   for (const f of proseDocs(REPO)) {
-    if (f.rel.endsWith('docs/ref/RE-006-当前事实表.md')) continue
+    if (f.rel.endsWith('docs/006-ref/006-当前事实表.md')) continue
     scanned++
     f.text.split(/\r?\n/).forEach((l0, i) => {
       // **先剥代码跨**：`[§6.3](…)` 写在反引号里是**举例**（「当年长这样」），
@@ -755,10 +755,10 @@ test('散文判据的扫描面：文档目录全进语料，工具产物目录�
   //   · 只判「`.workbuddy-ai/` 不进」⇒ 把整个语料砍空也照样绿（判据退化成装饰）；
   //   · 只判「`docs/` 进」⇒ 门禁失败详情（引用被扫文档的原文）会把判据喂成永久红。
   const root = tmp()
-  fs.mkdirSync(path.join(root, 'docs', 'ref'), { recursive: true })
+  fs.mkdirSync(path.join(root, 'docs', '006-ref'), { recursive: true })
   fs.mkdirSync(path.join(root, '.workbuddy-ai', 'gate-logs', '20261015-120438'), { recursive: true })
   fs.mkdirSync(path.join(root, 'node_modules', 'x'), { recursive: true })
-  fs.writeFileSync(path.join(root, 'docs', 'ref', 'a.md'), '见 RE-006 §99 那一节\n')
+  fs.writeFileSync(path.join(root, 'docs', '006-ref', 'a.md'), '见 RE-006 §99 那一节\n')
   fs.writeFileSync(
     path.join(root, '.workbuddy-ai', 'gate-logs', '20261015-120438', '_summary.md'),
     '失败详情里引用了「见 RE-006 §99 那一节」这句原文\n',
@@ -767,7 +767,7 @@ test('散文判据的扫描面：文档目录全进语料，工具产物目录�
   const rels = proseDocs(root).map((f) => f.rel).sort()
   assert.deepEqual(
     rels,
-    ['docs/ref/a.md'],
+    ['docs/006-ref/a.md'],
     `扫描面应恰好是文档目录（实得 ${JSON.stringify(rels)}）——多一个就是把引用当指路，少一个就是把判据砍空`,
   )
 })
@@ -783,8 +783,8 @@ test('RE-003 契约表的键必须是 §2.3 的静态路由（多一个键判红
   // 它在这仓代码里从未存在（`git log -S '"_root"' -- symbio/` 零命中）。
   //
   // 口径：两边都取 `| \`地址\` | …` 形态的表行；表头与分隔行没有反引号地址，天然排除。
-  const cur = fs.readFileSync(path.join(REPO, 'docs', 'ref', 'RE-006-当前事实表.md'), 'utf8')
-  const re003 = fs.readFileSync(path.join(REPO, 'docs', 'ref', 'RE-003-ROUTES.md'), 'utf8')
+  const cur = fs.readFileSync(path.join(REPO, 'docs', '006-ref', '006-当前事实表.md'), 'utf8')
+  const re003 = fs.readFileSync(path.join(REPO, 'docs', '006-ref', '003-ROUTES.md'), 'utf8')
 
   const extraKeysOf = (currentText, routesText) => {
     const i = currentText.indexOf('### 2.3')
@@ -866,6 +866,6 @@ test('生成物里不得留下字面 refLink(——${} 没插值的静默形态'
   }
 
   // 反向：病史原文必命中——连提交前的 RE-006 片段都判不出，这条判据就是恒真的。
-  const preFix = "> 路由权威清单看 ${refLink('RE-003-ROUTES', 'RE-003-ROUTES.md')}（与本表交叉核对）。"
+  const preFix = "> 路由权威清单看 ${refLink('RE-003-ROUTES', '003-ROUTES.md')}（与本表交叉核对）。"
   assert.ok(preFix.includes('refLink('), '反向用例失效：连病史原文都判不出，真 bug 时它不可能红')
 })

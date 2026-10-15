@@ -55,7 +55,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 // 变更事件的 `kind` 不自持：取自词表的家 `symbio_core::event_bus::EVENT_BUS_KIND_VDFS`
-// （前端 `subscribe({ kind: 'vdfs' })`，见 AR-004-PROTOCOLS.md §事件总线频道）。
+// （前端 `subscribe({ kind: 'vdfs' })`，见 004-PROTOCOLS.md §事件总线频道）。
 
 // ==================== 统一文件系统 ====================
 
@@ -309,7 +309,7 @@ async fn root(
 ///
 /// 为什么需要它（而不是「有内容就给搜索框」）：一屏能摆下的卡片就十来张，
 /// 少于这个量时用户一眼看完，搜索框不但帮不上忙，还会被读成「可以搜库」——
-/// 而它实际只筛当前这页已加载的条目（见 `tauri/docs/AR-024-INTERACTION.md` 的
+/// 而它实际只筛当前这页已加载的条目（见 `tauri/docs/024-INTERACTION.md` 的
 /// 「刻意不做」）。
 ///
 /// 阀值住在服务端（而不是各前端），因此网页端 / 桌面端 / CLI 看到的是同一个答案；

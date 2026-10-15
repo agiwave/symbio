@@ -46,24 +46,20 @@ impl WebFetchTool {
         // 发送请求。**错误要分流**（T-109 ②）：reqwest 对超时与连接失败的
         // `Display` 同形（都是 `error sending request…`），直接回灌则「对方慢」
         // 与「地址不通」对模型与用户同形——而两者的下一步（重试 vs 改地址）相反。
-        let response = client
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    PluginError::InternalError(format!(
-                        "请求超时：{}s 内未收到 {} 的响应（可调大 web_timeout 后重试）",
-                        self.timeout_secs, url
-                    ))
-                } else if e.is_connect() {
-                    PluginError::InternalError(format!(
-                        "连接失败：无法连到 {url}（请检查地址与网络后重试）"
-                    ))
-                } else {
-                    PluginError::InternalError(format!("请求失败: {e}"))
-                }
-            })?;
+        let response = client.get(url).send().await.map_err(|e| {
+            if e.is_timeout() {
+                PluginError::InternalError(format!(
+                    "请求超时：{}s 内未收到 {} 的响应（可调大 web_timeout 后重试）",
+                    self.timeout_secs, url
+                ))
+            } else if e.is_connect() {
+                PluginError::InternalError(format!(
+                    "连接失败：无法连到 {url}（请检查地址与网络后重试）"
+                ))
+            } else {
+                PluginError::InternalError(format!("请求失败: {e}"))
+            }
+        })?;
 
         let status = response.status();
         let content_type = response

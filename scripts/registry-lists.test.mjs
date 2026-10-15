@@ -7,7 +7,7 @@
 //
 // 所以这里注入五种坏形态，断言每一种都判红。判据自己红自己，是它唯一的自证。
 //
-// 落点是 RE-003-ROUTES.md（手写，`lists: [route-contracts=owner]` + 正文标记
+// 落点是 003-ROUTES.md（手写，`lists: [route-contracts=owner]` + 正文标记
 // `<!-- list:route-contracts owner -->`）。⚠️ 注入按**字段与标记的字面形态**匹配，
 // 不按路径——RE-003 重写（T-102 取消 view 后它从生成物变回手写）时这些锚点集体
 // 失效过一次，症状是「红了但不是预期那条」。改 RE-003 的 front-matter 或标记时，
@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const TARGET = path.join(REPO, 'docs', 'ref', 'RE-003-ROUTES.md')
+const TARGET = path.join(REPO, 'docs', '006-ref', '003-ROUTES.md')
 const AUDIT = path.join(REPO, 'scripts', 'registry-audit.mjs')
 
 function runAudit() {

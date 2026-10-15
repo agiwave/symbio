@@ -56,21 +56,36 @@ fn duckduckgo_parser_returns_empty_on_unrecognized_html() {
 /// `search_api_base` 为空（缺省）⇒ 官方端点——**对现有部署零行为变化**是加这一位的前提
 #[test]
 fn upstream_base_defaults_to_official_endpoints() {
-    assert_eq!(upstream_base("", TAVILY_OFFICIAL_BASE), "https://api.tavily.com");
-    assert_eq!(upstream_base("", SERPER_OFFICIAL_BASE), "https://google.serper.dev");
+    assert_eq!(
+        upstream_base("", TAVILY_OFFICIAL_BASE),
+        "https://api.tavily.com"
+    );
+    assert_eq!(
+        upstream_base("", SERPER_OFFICIAL_BASE),
+        "https://google.serper.dev"
+    );
     assert_eq!(
         upstream_base("", DUCKDUCKGO_OFFICIAL_BASE),
         "https://html.duckduckgo.com"
     );
     // 纯空白同理按缺省处理
-    assert_eq!(upstream_base("  ", TAVILY_OFFICIAL_BASE), "https://api.tavily.com");
+    assert_eq!(
+        upstream_base("  ", TAVILY_OFFICIAL_BASE),
+        "https://api.tavily.com"
+    );
 }
 
 /// 配置了基址 ⇒ 三家统一替换，且**尾随 `/` 被剥**（路径由调用方拼，双斜杠会 404）
 #[test]
 fn upstream_base_override_replaces_host_and_trims_slash() {
-    assert_eq!(upstream_base("http://127.0.0.1:18090", TAVILY_OFFICIAL_BASE), "http://127.0.0.1:18090");
-    assert_eq!(upstream_base("http://127.0.0.1:18090/", SERPER_OFFICIAL_BASE), "http://127.0.0.1:18090");
+    assert_eq!(
+        upstream_base("http://127.0.0.1:18090", TAVILY_OFFICIAL_BASE),
+        "http://127.0.0.1:18090"
+    );
+    assert_eq!(
+        upstream_base("http://127.0.0.1:18090/", SERPER_OFFICIAL_BASE),
+        "http://127.0.0.1:18090"
+    );
     assert_eq!(
         upstream_base("http://127.0.0.1:18090///", DUCKDUCKGO_OFFICIAL_BASE),
         "http://127.0.0.1:18090"
