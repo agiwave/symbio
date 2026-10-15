@@ -52,7 +52,7 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 3 · 🟡 doing 1 · ☑ done 110 · ❌ wont 0（共 114）
+**计数**：☐ todo 3 · 🟡 doing 0 · ☑ done 111 · ❌ wont 0（共 114）
 
 ## 待处理（按依赖顺序）
 
@@ -64,9 +64,7 @@ board.columns: [rank, deps, evidence, reason]
 
 ## 进行中
 
-| 编号 | 任务 | 优先 | 轨 | 依赖 |
-|---|---|---|---|---|
-| `T-116-CI红清偿批` | v2 分支 CI 连续红（rust-checks · e2e-check · security-check）——三处红各自的根因与清偿批次 | now | 门禁与CI | — |
+（无）
 
 ## 已完成
 
@@ -89,6 +87,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-098` | 能力矩阵进 CURRENT.md：每条工具 / VDFS 操作 / 前端路由配它的用户可见语义 | meta |
 | `T-101-CURRENTMD内部去重与判据补齐` | CURRENT.md 自身去重 + 「同一事实被写两遍」的判据落地 | plan |
 | `T-103-清单归属字段与汇总页登记` | `lists` / `projection` 两个字段落地 + 汇总页纳入编号体系 + 清单归属总账 | doc |
+| `T-116-CI红清偿批` | v2 分支 CI 连续红（rust-checks · e2e-check · security-check）——三处红各自的根因与清偿批次 | 门禁与CI |
 | `T-011` | 五轴的外部效标：每条轴挂一个可复现的读数，而不是形容词 | plan |
 | `T-012` | 能力名册 ↔ 代码锚点：名册的每一条能力都要指到实现它的地方 | plan |
 | `T-015` | 出厂 prompt 在线上是两条 system 消息，部分 provider 直接 400 拒收——full 档在那类 provider 上第一轮就失败 | S |
@@ -305,7 +304,7 @@ board.columns: [rank, deps, evidence, reason]
 - [`T-113-本地检索输出残余批`](113-本地检索输出残余批.md) 本地检索输出残余批：`content_search` 的 content 模式输出含多余空行（分页与匹配行不对齐）· 该文件无单测（done）
 - [`T-114-telegram上游端点可配批`](114-telegram上游端点可配批.md) telegram 上游端点可配批：`api_url()` 把 `api.telegram.org` 写死 ⇒ `send` / `get_updates` / `start_listener` 三条路由无靶子可打（done）
 - [`T-115-入站边界可达面与白名单一致批`](115-入站边界可达面与白名单一致批.md) gateway 入站边界的可达面与 `is_readonly_allowed` 白名单不一致：缺 home/work 四条臂 · 白名单两条死条目（done）
-- [`T-116-CI红清偿批`](116-CI红清偿批.md) v2 分支 CI 连续红（rust-checks · e2e-check · security-check）——三处红各自的根因与清偿批次（doing）
+- [`T-116-CI红清偿批`](116-CI红清偿批.md) v2 分支 CI 连续红（rust-checks · e2e-check · security-check）——三处红各自的根因与清偿批次（done）
 
 <!-- registry:summary end -->
 
