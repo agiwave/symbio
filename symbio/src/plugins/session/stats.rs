@@ -234,30 +234,26 @@ fn content_scope_of(snapshot: &[crate::symbio_core::Event]) -> VisScope {
 ///
 /// ## 遍历的形状
 ///
-/// **只走一层**：会话目录是存储根的直接子目录（`session_dir` = `root.join(safe_id)`），
-/// 再往下是 `tool_archives` / `transcripts` 等与会话事实源无关的子树。递归扫会把
-/// archive 里的东西也当事实源读——那不是「更彻底」，是**读错范围**。
+/// **全会话**（`paths::session_wals_deep`）：顶层目录各一份 WAL，外加嵌套子会话
+/// （`<根>/<safe(父)>/sessions/<safe(子)>/`，可继续嵌套）。子会话不是「别的实例」，
+/// 文档上一行说着「**所有**会话」——只扫一层会让那句话说假话，且分形委派
+/// （agent_run 派生的子会话再派生子会话）整棵子树都从实例读数里消失。
+/// 判据是**存在性**（有 `v2-events.wal` 就是事实源）：`tool_archives` /
+/// `transcripts` 等子树里没有它，天然被过滤，不需要维护排除名单。
 ///
 /// 单个 WAL 打不开 ⇒ 跳过并出声（撕裂尾行正在被写方修复是正常状态），不因此让
 /// 整列失败：一列读数是**诊断**，为一个坏会话让整个实例的读数消失是本末倒置。
 fn fleet_reading(storage_root: &std::path::Path) -> serde_json::Value {
-    let mut wals: Vec<std::path::PathBuf> = Vec::new();
-    let mut sessions = 0usize;
-    if let Ok(entries) = std::fs::read_dir(storage_root) {
-        for entry in entries.flatten() {
-            if !entry.path().is_dir() {
-                continue;
-            }
-            let wal = entry.path().join(super::paths::V2_WAL_FILE);
-            if !wal.exists() {
-                continue;
-            }
-            sessions += 1;
-            // 本会话那一份也**算进聚合**：实例 = 全部会话，少一个就不是全量口径。
-            // `session_dir` 一对一，不存在同一会话两个目录，故不去重。
-            wals.push(wal);
-        }
-    }
+    let wals = super::paths::session_wals_deep(storage_root);
+    fleet_from_wals(&wals)
+}
+
+/// fleet 列的**读取半程**：拿一份 WAL 路径清单，逐个开档（不可开者跳过并出声）、
+/// 套投影、交 core 合并。与枚举半程（[`fn@fleet_reading`]，存在性判据）拆开的原因：
+/// 存在性枚举会把「路径不是文件」的假 WAL 提前滤掉，跨平台构造不出「是文件却
+/// 读不开」的夹具（权限位在 Windows 管理员下不生效）——跳过韧性只能直接喂路径钉。
+fn fleet_from_wals(wals: &[std::path::PathBuf]) -> serde_json::Value {
+    let sessions = wals.len();
 
     let mut lat_parts = Vec::new();
     let mut fb_parts = Vec::new();
@@ -266,7 +262,7 @@ fn fleet_reading(storage_root: &std::path::Path) -> serde_json::Value {
     let mut con_parts = Vec::new();
     let mut span_parts = Vec::new();
     let mut aut_parts = Vec::new();
-    for wal in &wals {
+    for wal in wals {
         let Ok(store) = EventWalStore::open_readonly(wal) else {
             crate::plugin_warn!(
                 "session",
@@ -318,7 +314,8 @@ fn fleet_reading(storage_root: &std::path::Path) -> serde_json::Value {
     serde_json::json!({
         // 实际读进来的 WAL 数（打不开的不计——见上面出声处）
         "wals": lat_parts.len(),
-        // 目录里有 WAL 的会话数（含打不开的），与 `wals` 的差就是被跳过的
+        // 清单里的 WAL 路径数（含打不开的），与 `wals` 的差就是被跳过的；
+        // 枚举判据是「是文件」（存在性），「路径存在但是目录」连清单都进不了
         "sessions": sessions,
         "turns": turns,
         "fallbacks": fallbacks,
@@ -744,13 +741,27 @@ impl SessionPlugin {
                     .principal
             }
         };
+        // 会话主体 = **目标会话自己的**（`metadata.agent_id` → `principal_of`，
+        // 与 `delegating_principal` / 心跳回退链同一份词汇），不是请求方的：
+        // 本端点支持跨会话查数（委派监督、e2e 都传别人的 `session_id`），而
+        // [`read`] 文档写明 `own` 列的语义是「这份事实源里的承诺是谁立的」——
+        // 接到请求方就会把「别人看我的声誉」读成「别人的声誉」（t75 抓到的错标）。
+        // 元数据没记 `agent_id`（未选智能体的会话 / 旧会话）⇒ 回落请求方取值点：
+        // 自查场景两者恒同，行为与接线前逐字一致。
+        let session_principal = match self.get_or_create_session(&sid).await.ok().and_then(|s| {
+            s.metadata
+                .get("agent_id")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        }) {
+            Some(agent) => crate::symbio_core::authz::principal_of(Some(&agent)),
+            None => super::chat_loop::request_principal(ctx.as_ref()),
+        };
         let stats = read(
             &sid,
             &wal,
             viewer.as_deref(),
-            // 本会话主体与转写侧同一个取值点（`request_principal`）：会话主体错一点，
-            // `own` 就会把别人的承诺记到这个会话头上。
-            &super::chat_loop::request_principal(ctx.as_ref()),
+            &session_principal,
             // 实例根（聚合列 P2 的扫描范围）：本插件自己的目录，即 `session_dir` 的
             // 上一层。与 WAL 路径同源，不另立一个根。
             self.storage_dir().as_path(),

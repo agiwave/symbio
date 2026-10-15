@@ -14,7 +14,10 @@
 //!    未登记的 `agent:<id>` 才派生主智能体那一行；
 //! 6. 读写两侧的闸按**属主 / 矩阵成员**分：主智能体与属主各得其所，`user` 不入表
 //!    （发言不是能力），矩阵外主体拒绝；表构造失败时的降级面（空矩阵）一概拒绝
-//!    ——fail-closed 不因降级而松开。
+//!    ——fail-closed 不因降级而松开；
+//! 7. **工人 / 规划者 / 验证者三行比主智能体窄**（S02/S03 三角色，T-107 行与路径
+//!    同批）：各自单能力独持，`matrix_for` 拿登记行，C15 两面（规划者不认证、
+//!    验证者不产出）在表这一层可见。
 
 use super::*;
 use crate::symbio_core::governance::Capability;
@@ -171,7 +174,7 @@ fn the_three_society_rows_are_narrower_than_derivation() {
         "S13 §3：市场公告 vis_scope = public——取这个值的第一行"
     );
 
-    // 仲裁者：只盖章（assert.verification），本表验证能力的唯一持有者。
+    // 仲裁者：只盖章（assert.verification），本表验证能力的持有者之一（另一行 = verifier，T-107）。
     let arbiter = matrix.grants_of(PRINCIPAL_ARBITER);
     assert_eq!(arbiter.len(), 1, "只持 assert.verification：{arbiter:?}");
     assert!(matrix.can_write(PRINCIPAL_ARBITER, Capability::AssertVerification));
@@ -207,6 +210,96 @@ fn the_three_society_rows_are_narrower_than_derivation() {
         (PRINCIPAL_MARKET, Capability::AssignWork),
         (PRINCIPAL_ARBITER, Capability::AssertVerification),
         (PRINCIPAL_GATEKEEPER, Capability::JudgeIntent),
+    ] {
+        assert!(
+            matrix.grants_of(p).len() < main_len,
+            "{p} 必须严格窄于主智能体那一行（{main_len} 项）"
+        );
+        let derived = matrix_for(p);
+        assert_eq!(
+            derived.grants_of(p).len(),
+            1,
+            "派生不得把主智能体整套塞回 {p}"
+        );
+        assert!(
+            derived.can_write(p, cap),
+            "登记行是权威：{p} 仍持它那一项能力"
+        );
+        assert!(!derived.can_reply(p, true));
+    }
+}
+
+/// S02/S03 三角色行（T-107，行与执行路径同批）：工人 / 规划者 / 验证者三行
+/// **各自单能力独持**，严格窄于主智能体，也严格窄于 `matrix_for` 的派生整套。
+///
+/// 与自主 / 判定 / 对等 / 市场 / 仲裁 / 守门六行同一条纪律：主体出现必须自带窄行
+/// 同批落地——未登记的 `agent:worker` 会走派生拿主智能体整套（含 `reply.*`），
+/// 「工人不以主控身份发言」「规划者不自我认证」「产出者不得既产出又认证」于是在
+/// 生产里被静默推翻，而文档与验收断言都还写着它们成立。
+///
+/// 另钉两条 C15 的结构面：planner 持 `define.work` 而不持 `assert.verification`
+/// （不自我认证），verifier 持 `assert.verification` 而不持 `define.work` /
+/// `produce.artifact` （不既产出又认证）——「二者互不可写」在**表**这一层可见，
+/// 构造期的双持拒绝在 `governance` 那一侧。
+#[test]
+fn the_three_role_rows_are_narrower_than_derivation() {
+    let matrix = production_matrix();
+    let main_len = matrix.grants_of(PRINCIPAL_MAIN).len();
+
+    // 工人：只产生产物（S02 worker 行），树侧委派链上以产物收束的子主体。
+    let worker = matrix.grants_of(PRINCIPAL_WORKER);
+    assert_eq!(worker.len(), 1, "只持 produce.artifact：{worker:?}");
+    assert!(matrix.can_write(PRINCIPAL_WORKER, Capability::ProduceArtifact));
+    assert!(
+        !matrix.can_reply(PRINCIPAL_WORKER, true) && !matrix.can_reply(PRINCIPAL_WORKER, false),
+        "工人以产物收束（收束闸的产物臂，ADR-067），不以主控身份发言"
+    );
+    assert!(
+        !matrix.can_write(PRINCIPAL_WORKER, Capability::DefineWork)
+            && !matrix.can_write(PRINCIPAL_WORKER, Capability::AssertVerification),
+        "工人不立任务也不认证——立与验归工作权威（C15 的精神在任务表层）"
+    );
+    assert_eq!(
+        matrix.sees_of(PRINCIPAL_WORKER),
+        Some(VisScope::ThreadPrivate),
+        "工人的产物是会话自己的工作记录，不是公共域公告"
+    );
+
+    // 规划者：只立任务（S03 规划者行），与自主行同款独持先例。
+    let planner = matrix.grants_of(PRINCIPAL_PLANNER);
+    assert_eq!(planner.len(), 1, "只持 define.work：{planner:?}");
+    assert!(matrix.can_write(PRINCIPAL_PLANNER, Capability::DefineWork));
+    assert!(
+        !matrix.can_write(PRINCIPAL_PLANNER, Capability::AssertVerification),
+        "C15：规划者不持验证能力 ⇒ 不自我认证"
+    );
+    assert!(!matrix.can_reply(PRINCIPAL_PLANNER, true));
+    assert_eq!(
+        matrix.sees_of(PRINCIPAL_PLANNER),
+        Some(VisScope::ThreadPrivate)
+    );
+
+    // 验证者：只独立判定（S03 验证者行），与仲裁行同持验证能力而不同角色。
+    let verifier = matrix.grants_of(PRINCIPAL_VERIFIER);
+    assert_eq!(verifier.len(), 1, "只持 assert.verification：{verifier:?}");
+    assert!(matrix.can_write(PRINCIPAL_VERIFIER, Capability::AssertVerification));
+    assert!(
+        !matrix.can_write(PRINCIPAL_VERIFIER, Capability::DefineWork)
+            && !matrix.can_write(PRINCIPAL_VERIFIER, Capability::ProduceArtifact),
+        "C15：验证者不持产出/定义 ⇒ 不成对自验（构造期同款检查）"
+    );
+    assert!(!matrix.can_reply(PRINCIPAL_VERIFIER, true));
+    assert_eq!(
+        matrix.sees_of(PRINCIPAL_VERIFIER),
+        Some(VisScope::ThreadPrivate),
+        "验证判定是判定者自己的工作记录（与守门行同一条理由），不是公共域公告"
+    );
+
+    // 三行都严格窄于主智能体那一行，且 `matrix_for` 拿的是**登记行**不是派生整套。
+    for (p, cap) in [
+        (PRINCIPAL_WORKER, Capability::ProduceArtifact),
+        (PRINCIPAL_PLANNER, Capability::DefineWork),
+        (PRINCIPAL_VERIFIER, Capability::AssertVerification),
     ] {
         assert!(
             matrix.grants_of(p).len() < main_len,

@@ -131,6 +131,46 @@ pub(crate) const PRINCIPAL_ARBITER: &str = "agent:arbiter";
 /// 工作记录（S13 §3「public 与 thread_private 并存」的另一半），不是公共域公告。
 pub(crate) const PRINCIPAL_GATEKEEPER: &str = "agent:gatekeeper";
 
+/// **工人**的身份（[roadmap/S02 §3](../../../docs/003-stage/002-工具调用与产物.md "ST-002-工具调用与产物")）——
+/// S02 worker 行，[T-107](../../../docs/009-task/107-角色主体执行路径批.md "T-107-角色主体执行路径批") 与执行路径同批落地。
+///
+/// 只持 `produce.artifact`：工人的权威动作是**产生产物**（`agent_run` 委派链上以产物
+/// 收束的子主体，与对等行同形）。它**没有发言权**（不持 `reply.*`）——「以产物收束」
+/// 的字面含义：这一轮的答话不入格，工具结果入格（收束闸的产物臂，[ADR-067](../../../docs/010-adr/067.md "ADR-067")）。
+///
+/// 与 [`PRINCIPAL_PEER`] 的两点不同，正是它必须**另立一行**的理由：对等体是**图侧**的
+/// 协作方（`scope: root`，与主智能体平级），工人是**树侧**的委派落点（`agent_run` 派生的
+/// 子会话，`scope: child`，受委派上限约束）；对等体经入站消息协作，工人经委派链驱动。
+/// 窄的方向相同（只持产物能力）而角色不同——合并成一行会让「树侧委派」与「图侧协作」
+/// 共享同一个主体名，而两者的驱动路径与上限判据都不同。
+pub(crate) const PRINCIPAL_WORKER: &str = "agent:worker";
+
+/// **规划者**的身份（[roadmap/S03 §3](../../../docs/003-stage/003-多步任务与返工.md "ST-003-多步任务与返工")）——
+/// S03 规划者行，[T-107](../../../docs/009-task/107-角色主体执行路径批.md "T-107-角色主体执行路径批") 落地（行本批落，驱动路径的裁决见该任务文档）。
+///
+/// 只持 `define.work`：规划的权威动作是**立任务**（任务图的开格与推进），与
+/// [`PRINCIPAL_AUTONOMOUS`] 同款独持先例（自主发起者也只持它——「欲」升格为任务的那道
+/// 闸后面写 `task.opened` 的就是这一项能力）。不持 `reply.*`：规划者不冒充用户对话。
+///
+/// 模式派生为 [`Pattern::Decider`](crate::symbio_core::Pattern)（无发言权而无产物能力
+/// ⇒ 判据见 `Pattern::for_principal`）——与 S03 §3 的 ActorSpec 行 `pattern: decider`
+/// 一致：规划步在该阶的规格里是**规则驱动**的（同 `AutonomousInitiator` 先例），
+/// 不是又一个会说话的会话主体。
+pub(crate) const PRINCIPAL_PLANNER: &str = "agent:planner";
+
+/// **验证者**的身份（[roadmap/S03 §3](../../../docs/003-stage/003-多步任务与返工.md "ST-003-多步任务与返工")）——
+/// S03 验证者行，[T-107](../../../docs/009-task/107-角色主体执行路径批.md "T-107-角色主体执行路径批") 落地（行本批落，驱动路径的裁决见该任务文档）。
+///
+/// 只持 `assert.verification`：独立验证的权威动作是**对判定盖章**（S03 §2「独立验证者 =
+/// 一行 ActorSpec，`capabilities: [AssertVerification]`」）。C15「验证者 ≠ 产出者」由
+/// 构造期保证：本行不持 `define.work` / `produce.artifact`——**产出者不得自我认证**，
+/// 与 [`PRINCIPAL_ARBITER`] 同一条纪律（那一行的裁决是声誉驱动的，这一行的判定是
+/// 任务质量驱动的；两者同持验证能力而不同角色，故分行）。
+///
+/// 与仲裁行的可见域差异：裁决是**集体决策**的产物（public），验证判定是判定者自己的
+/// 工作记录（thread_private）——与守门行同一条理由。
+pub(crate) const PRINCIPAL_VERIFIER: &str = "agent:verifier";
+
 /// 本机会话**内容的属主**：`thread_private`（C10 缺省）下「谁能读到」等同于
 /// 「是不是属主」，所以属主取值就是读侧闸的答案。
 ///
@@ -156,10 +196,28 @@ pub(crate) const CAP_EXTERNAL_EXECUTION: &str = "produce.artifact";
 /// 一遍字面量，迟早漂移成「裁决收回 A、闸门判 B」。
 pub(crate) const CAP_ASSIGN_WORK: &str = "assign.work";
 
+/// **立任务**能力名（`DefineWork` 的书写形态）——任务表写侧闸的授权判据
+/// （[roadmap/S03 §3](../../../docs/003-stage/003-多步任务与返工.md "ST-003-多步任务与返工")
+/// 「规划者 ▸ `define.work`」，[T-107](../../../docs/009-task/107-角色主体执行路径批.md "T-107-角色主体执行路径批") 落地其读方）。
+///
+/// 与 [`CAP_ASSIGN_WORK`] 同一条理由提成常量：这个名字今天出现在四个地方——授权表行
+/// （`agent:main` / `agent:autonomous` / `agent:planner`）、`AutonomousInitiator` 写
+/// `task.opened` 的那项能力、任务表写侧闸的放行判据、与 `assert.verification` 配对时
+/// C15 的构造期检查。四处各写一遍字面量，迟早漂移成「表授予 A、闸门判 B」。
+pub(crate) const CAP_DEFINE_WORK: &str = "define.work";
+
+/// **独立验证**能力名（`AssertVerification` 的书写形态）——任务表写侧闸的另一半放行
+/// 判据（[T-107](../../../docs/009-task/107-角色主体执行路径批.md "T-107-角色主体执行路径批")）。
+///
+/// 提成常量的理由同 [`CAP_DEFINE_WORK`]：它出现在授权表行（`agent:arbiter` /
+/// `agent:verifier`）、淘汰裁决的写侧闸（`EliminationDecider`，T-073）、任务表写侧闸
+/// 的放行判据与 C15 构造期检查共四处。
+pub(crate) const CAP_ASSERT_VERIFICATION: &str = "assert.verification";
+
 /// 本机主体清单：`(主体, 能力名, 可见域)`。能力名的闭集与拼写由
 /// [`PermissionMatrix::from_names`] 校验（认不出即拒绝构造）。
 ///
-/// 七行，各自存在的理由不同：
+/// 十行，各自存在的理由不同：
 ///
 /// - `agent:main`（主智能体）持 6 项，**刻意不持 `assert.verification`**：C15 不自验
 ///   ——验证者 ≠ 产出者是构造期约束（`PermissionMatrix::new` 会拒绝双持），本机目前
@@ -175,14 +233,26 @@ pub(crate) const CAP_ASSIGN_WORK: &str = "assign.work";
 /// - [`PRINCIPAL_MARKET`]（市场）**只持 `assign.work`**，可见域 `public`——派活是市场的
 ///   权威动作，公告是公共域事实（S13 §3，T-073）；
 /// - [`PRINCIPAL_ARBITER`]（仲裁者）**只持 `assert.verification`**，可见域 `public`——
-///   验证能力在本表的唯一持有者；裁决是集体决策的产物（S13 §1/§3，T-073）；
+///   验证能力在本表的持有者之一；裁决是集体决策的产物（S13 §1/§3，T-073）；
 /// - [`PRINCIPAL_GATEKEEPER`]（守门者）**只持 `judge.intent`**，可见域 `thread_private`——
-///   准入门槛判来者意图，与判定行同款独持（S13 §3，T-073）。
+///   准入门槛判来者意图，与判定行同款独持（S13 §3，T-073）；
+/// - [`PRINCIPAL_WORKER`]（工人）**只持 `produce.artifact`**——树侧委派链上以产物收束的
+///   子主体（S02 worker 行，T-107）：与对等行窄的方向相同而角色不同（树侧委派 vs 图侧协作），
+///   故另立一行；它的驱动路径 = `agent_run` 委派（子会话绑 `worker` ⇒ 主体 `agent:worker`
+///   ⇒ 工具结果落 `artifact.added`，作者是它自己）；
+/// - [`PRINCIPAL_PLANNER`]（规划者）**只持 `define.work`**——立任务是规划者的权威动作
+///   （S03 §3，T-107）：与自主行同款独持（`AutonomousInitiator` 的先例），模式派生为
+///   `Decider`（规则驱动的规划步，不是会说话的会话主体）；
+/// - [`PRINCIPAL_VERIFIER`]（验证者）**只持 `assert.verification`**——独立验证的权威动作
+///   是对判定盖章（S03 §3，T-107）：与仲裁行同持验证能力而不同角色（任务质量判定 vs
+///   声誉裁决），C15 由构造期保证（本行不持 `define.work` / `produce.artifact`）。
 ///
-/// 后六行都是本表里**比主智能体窄**的记录。窄的方向相同而理由各异：子智能体怕的是
+/// 后九行都是本表里**比主智能体窄**的记录。窄的方向相同而理由各异：子智能体怕的是
 /// **写不了**（要能写自己的收束格），自主行怕冒充用户对话，判定行怕抢在编排层之前发言，
 /// 对等行怕的是**以本机主控的身份行事**（图侧协作 ≠ 本机主控），市场行怕的是**自己下场干活**
-/// （派活 ≠ 干活），仲裁行怕的是**自证**（C15），守门行怕的是**先发声后判**。
+/// （派活 ≠ 干活），仲裁行怕的是**自证**（C15），守门行怕的是**先发声后判**，工人行怕的是
+/// **以主控身份发言**（产物收束 ≠ 发言），规划行怕的是**自验**（C15：不持验证能力），
+/// 验证行怕的是**既产出又认证**（C15：不持产出能力）。
 ///
 /// 少了这些行会怎样（几批修掉的正是这个）：未登记的 `agent:<id>` 走 [`matrix_for`]
 /// 的派生分支，拿到主智能体的**整套**能力集（含 `reply.*`）——于是「自主行为不得冒充
@@ -227,6 +297,27 @@ const ROWS: &[(&str, &[&str], VisScope)] = &[
         &["judge.intent"],
         VisScope::ThreadPrivate,
     ),
+    // S02/S03 三角色行（T-107，行与执行路径同批）：工人产生产物（树侧委派收束）、
+    // 规划者立任务、验证者独立判定。三行都是**单能力独持**——与自主 / 判定 / 对等 /
+    // 市场 / 仲裁 / 守门六行同一条纪律：角色出现必须自带窄行，不许靠派生拿主智能体
+    // 整套。planner 持 `define.work` 不碰 C15（不持 `assert.verification`）；verifier
+    // 持 `assert.verification` 亦不碰 C15（不持 `define.work` / `produce.artifact`，
+    // 构造期双持检查见 `governance`）——「产出者不得自我认证」两边都成立。
+    (
+        PRINCIPAL_WORKER,
+        &[CAP_EXTERNAL_EXECUTION],
+        VisScope::ThreadPrivate,
+    ),
+    (
+        PRINCIPAL_PLANNER,
+        &[CAP_DEFINE_WORK],
+        VisScope::ThreadPrivate,
+    ),
+    (
+        PRINCIPAL_VERIFIER,
+        &[CAP_ASSERT_VERIFICATION],
+        VisScope::ThreadPrivate,
+    ),
 ];
 
 static MATRIX: OnceLock<PermissionMatrix> = OnceLock::new();
@@ -254,7 +345,7 @@ pub(crate) fn principal_of(agent_id: Option<&str>) -> String {
 ///
 /// 两条分支，先表后派生：
 ///
-/// 1. **表里登记过的主体**（主智能体、自主发起者、抢占判定者、对等主体、市场 / 仲裁 / 守门）与非 `agent:*` 的主体（`user` 及
+/// 1. **表里登记过的主体**（主智能体、自主发起者、抢占判定者、对等主体、市场 / 仲裁 / 守门、工人 / 规划者 / 验证者）与非 `agent:*` 的主体（`user` 及
 ///    一切未登记名）都直接用[生产表](Self::production_matrix)：登记过的拿自己那一行
 ///    ——**表是权威，派生不得覆盖它**（覆盖就成「表授予 A、闸门判 B」）；未登记的
 ///    `user` 在表里没有行 ⇒ `can_reply` 为假 ⇒ fail-closed。少一行是一条**拒绝**，

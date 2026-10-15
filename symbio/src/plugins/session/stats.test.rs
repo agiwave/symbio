@@ -7,7 +7,7 @@
 //! 3. **纯读**——没有事实源时是「有据的零」，且**不得**为了读而创建文件。
 //! 4. **读侧闸**——声明读方身份才判可见域：属主全量、非属主全零（批⑥）。
 
-use super::read;
+use super::{fleet_from_wals, read};
 use crate::symbio_core::{
     calibration, check_all, checkpoint, cost_ledger, fallback_rate, slo_report, transcript, Budget,
     Entity, Event, EventEnvelope as _, EventWalStore, Seq, Store, Verb, EVENT_ARTIFACT_ADDED,
@@ -231,15 +231,16 @@ fn fleet_scan_does_not_descend_into_session_subdirectories() {
     );
 }
 
-/// **反向（韧性）**：一个**根本不是 WAL** 的会话不拖垮整列。
+/// **反向（韧性）**：一个**根本不是 WAL** 的路径不进清单、不拖垮整列。
 ///
 /// 撕裂尾行被写方修复是正常状态，`open_readonly` 对「读得出一部分」是会成功的
-/// （实测写坏内容仍开得出、只是 0 条事件）。真正打不开的是**路径不是文件**
-/// 一类（例如目录被替换、权限不通）——那才是这条判据要钉的：其余会话的读数照出。
+/// （实测写坏内容仍开得出、只是 0 条事件）。枚举的判据是**存在性**（是文件）：
+/// 把 WAL 换成**目录**，连清单都进不了——「清单里有却开不开」的跳过韧性由
+/// 下一条直接喂路径的判据钉住（跨平台构造不出那种夹具，见 `fleet_from_wals` 文档）。
 #[test]
 fn fleet_survives_a_session_whose_wal_cannot_be_opened() {
     let (root, wals) = seed_instance("torn", 2);
-    // 把第二个会话的 WAL 换成一个**目录**：路径存在但不是文件 ⇒ 开不了。
+    // 把第二个会话的 WAL 换成一个**目录**：路径存在但不是文件 ⇒ 不算事实源。
     let _ = std::fs::remove_file(&wals[1]);
     std::fs::create_dir_all(&wals[1]).expect("把 WAL 换成目录");
 
@@ -251,12 +252,32 @@ fn fleet_survives_a_session_whose_wal_cannot_be_opened() {
         &root,
     )
     .expect("读数");
-    assert_eq!(got.fleet["wals"], 1, "打不开的那个不计入");
+    assert_eq!(got.fleet["wals"], 1, "目录不是事实源：存在性枚举根本不认它");
     assert_eq!(
-        got.fleet["sessions"], 2,
-        "但目录层面仍承认有两个会话（差就是被跳过的）"
+        got.fleet["sessions"], 1,
+        "sessions = 清单数（是文件的路径），不是「路径存在」数"
     );
     assert_eq!(got.fleet["by_tier"]["latency"][0]["samples"], 1);
+}
+
+/// **反向（韧性）续**：路径在清单里却**开不开** ⇒ 跳过并出声，不拖垮整列。
+///
+/// `sessions` 与 `wals` 的差就是被跳过的——这一半语义在存在性枚举之后仍然成立
+/// （Unix 权限位、文件锁等「是文件却读不开」的场景），但跨平台造不出夹具，
+/// 故绕过枚举直接喂路径。
+#[test]
+fn fleet_reading_skips_a_wal_path_that_cannot_be_opened() {
+    let (_root, wals) = seed_instance("skip", 2);
+    let _ = std::fs::remove_file(&wals[1]);
+    std::fs::create_dir_all(&wals[1]).expect("把第二个路径换成目录（对 open_readonly 必败）");
+
+    let got = fleet_from_wals(&wals);
+    assert_eq!(got["wals"], 1, "开不开的跳过，不出数");
+    assert_eq!(got["sessions"], 2, "清单里有两个：差就是被跳过的那个");
+    assert_eq!(
+        got["by_tier"]["latency"][0]["samples"], 1,
+        "好会话照常进聚合"
+    );
 }
 
 /// **读侧闸**：不给读的人 ⇒ 聚合列是空形状，且**不扫**。

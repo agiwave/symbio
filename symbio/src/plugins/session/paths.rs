@@ -31,6 +31,15 @@ pub const TOOL_ARCHIVES_SUBDIR: &str = "tool_archives";
 /// 会话内固定子目录名：L3 压缩前完整历史 transcript 转存。
 pub const TRANSCRIPTS_SUBDIR: &str = "transcripts";
 
+/// 父会话目录内安放**子会话**的固定子目录名（机制约定，见
+/// [`store`](crate::plugins::session::store) 模块头「子会话嵌套存储」）：
+/// `<根>/<safe(父)>/sessions/<safe(子)>/`。
+///
+/// 与另两个子目录常量同处一地：路径词汇只定义一次。此前它住在 `store` 里，
+/// 而**部署级读侧**（淘汰闸的覆盖层扫描 / stats 的实例聚合）也要按同一个名字
+/// 下探一层——两处各写一个字面量，扫描范围就会与存储布局悄悄分叉。
+pub const SUB_SESSIONS_SUBDIR: &str = "sessions";
+
 /// 压缩占位符共用的统一取回指引（P1-2 协议）。
 ///
 /// L0（工具结果守卫）、L3（transcript 转存）的占位符都必须附带同一格式的
@@ -66,6 +75,55 @@ pub(crate) fn session_subdir(
     subdir: &str,
 ) -> std::path::PathBuf {
     session_dir(root, session_id).join(subdir)
+}
+
+/// **全会话事实源**的路径枚举（含嵌套子会话，任意深度）——部署级读侧的遍历入口。
+///
+/// ## 为什么需要它（三个读方同一个坑）
+///
+/// 子会话不是顶层平级目录，而是住在父目录的 [`SUB_SESSIONS_SUBDIR`] 里
+/// （`<根>/<safe(父)>/sessions/<safe(子)>/`，可继续嵌套）。只扫一层
+/// （`<根>/<sid>/v2-events.wal`）的读方会**整棵子树都看不见**：
+///
+/// - 淘汰闸的覆盖层（`tool_executor/elimination.rs`）：裁决落在子会话的 WAL 里
+///   ⇒ 「换个**子会话**就能绕开淘汰」——与它要消灭的「换个会话」同形；
+/// - stats 的实例聚合（`stats.rs::fleet_reading`）：文档写着「**所有**会话」，
+///   实现只数顶层 ⇒ 文档在说假话；
+/// - （记忆召回是第三个同形扫描，但其「一层 glob」与文档一致、语义问题开放，
+///   不在本函数首批消费方里——裁决登记
+///   [T-118](../../../../docs/009-task/118-召回嵌套子会话遍历裁决批.md "T-118-召回嵌套子会话遍历裁决批")。）
+///
+/// ## 为什么是深遍而不是「多层」
+///
+/// 子会话可以再派生子会话（分形），「下探一层」修不了第二层。判据是
+/// **存在性**（有没有 WAL 文件）而不是目录名清单——`tool_archives` /
+/// `transcripts` 这些非事实源子树里没有 `v2-events.wal`，天然被过滤，
+/// 不需要为它们维护一份排除名单。
+///
+/// 读不开 / 不存在的目录跳过（只枚举路径，不开档）：打不开是读方的事，
+/// 遍历只负责「范围」这一半。
+pub(crate) fn session_wals_deep(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let wal = path.join(V2_WAL_FILE);
+            if wal.is_file() {
+                out.push(wal);
+            }
+            // 无论本层有没有 WAL 都继续下探：会话目录与子会话容器是两件事
+            // （顶层目录带 WAL，它的 `sessions/` 里还有带 WAL 的子目录）。
+            walk(&path.join(SUB_SESSIONS_SUBDIR), out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, &mut out);
+    out
 }
 
 /// 具名新建时，**地址末段即会话 id**；写在挂载根（无名目标）返回 `None`。

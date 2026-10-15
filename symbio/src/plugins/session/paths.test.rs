@@ -96,3 +96,48 @@ fn session_id_from_new_path_uses_the_address_as_identity() {
     assert_eq!(session_id_from_new_path("dir/"), None);
     assert_eq!(session_id_from_new_path("   "), None);
 }
+
+/// 全会话事实源枚举（部署级读侧的遍历入口）：顶层 + **嵌套子会话**（任意深度），
+/// 非事实源子树（`tool_archives` 等）天然被过滤——判据是存在性，不是排除名单。
+///
+/// 只扫一层的读方会整棵子树都看不见：淘汰闸的覆盖层 ⇒「换个**子会话**绕开淘汰」、
+/// stats 实例聚合 ⇒ 文档说着「所有会话」而实现少数一层。本测试钉住范围这一半。
+#[test]
+fn session_wals_deep_covers_nested_sub_sessions() {
+    let root = std::env::temp_dir().join(format!("symbio-paths-deep-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("建存储根");
+
+    // 布局：两个顶层会话，其中一个带子会话，子会话再带子会话（分形）；
+    // 另加 `tool_archives` 子目录（非事实源）。
+    let mk = |rel: &str| {
+        let dir = root.join(rel);
+        std::fs::create_dir_all(&dir).expect("建目录");
+        std::fs::write(dir.join(V2_WAL_FILE), b"").expect("建 WAL 占位");
+        dir
+    };
+    let top_a = mk("sess-a");
+    let top_b = mk("sess-b");
+    let child = mk("sess-a/sessions/child-1");
+    let grandchild = mk("sess-a/sessions/child-1/sessions/grand-1");
+    std::fs::create_dir_all(top_a.join(TOOL_ARCHIVES_SUBDIR)).ok();
+
+    let mut wals = session_wals_deep(&root);
+    wals.sort();
+    let mut expected = vec![
+        top_a.join(V2_WAL_FILE),
+        top_b.join(V2_WAL_FILE),
+        child.join(V2_WAL_FILE),
+        grandchild.join(V2_WAL_FILE),
+    ];
+    expected.sort();
+    assert_eq!(
+        wals, expected,
+        "全会话事实源 = 顶层 + 嵌套子会话（任意深度）；tool_archives 无 WAL ⇒ 不计"
+    );
+
+    // 不存在的根 ⇒ 空（读方自己决定这是「没有会话」还是「目录错了」）。
+    assert!(session_wals_deep(&root.join("nope")).is_empty());
+
+    std::fs::remove_dir_all(&root).ok();
+}

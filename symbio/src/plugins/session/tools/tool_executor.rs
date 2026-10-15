@@ -32,11 +32,13 @@ mod breaker;
 mod delegation;
 mod elimination;
 mod task_decl;
+mod task_table;
 
 pub use self::breaker::BreakerInputs;
 pub use self::delegation::{note_delegation, Delegation};
 pub use self::elimination::EliminationInputs;
 pub use self::task_decl::{note_tasks, TaskDeclaration, TaskItem, TaskStatus};
+pub use self::task_table::{is_task_table_tool, TaskTableInputs};
 
 // 工具结果提取
 
@@ -770,6 +772,9 @@ pub(super) fn not_executed_result(tool_call_id: &str, reason: &str) -> ChatMessa
 /// 4. **淘汰闸只拦 `agent_run`**（S13 §3，T-073）：判据同批首读一次
 ///    （[`EliminationInputs`]，部署级覆盖层）——被收回 `assign.work` 的主体
 ///    派不活；拒因进工具结果，违约随收束如实记账。
+/// 5. **任务表写侧闸只拦 `todo_write`**（S03 §3，T-107）：判据同批首读一次
+///    （[`TaskTableInputs`]）——不持 `define.work` / `assert.verification` 的主体
+///    （纯产出 / 纯派活）写不了任务表；拒因进工具结果，**不产事件、不记任务声明**。
 #[allow(clippy::too_many_arguments)]
 pub async fn process_tool_calls_async(
     tool_calls: Vec<TurnToolCallInfo>,
@@ -820,6 +825,9 @@ pub async fn process_tool_calls_async(
     // 扫全部会话 WAL——「本主体还被不被授予 assign.work」是关于主体的事实，
     // 不取决于裁决落在哪个会话（换个会话绕不开淘汰）。
     let elimination = EliminationInputs::of(session_dir, &ctx);
+    // 任务表写侧闸的判据同批首读一次（见 `TaskTableInputs`，S03 §3 / T-107）：
+    // 只问本会话主体那一行——任务表是会话自己的工作跟踪，写它的资格随主体走。
+    let task_table = TaskTableInputs::of(&ctx);
 
     // 本批留底 `(id, name, args)`：循环按值消费 `tool_calls`，而「哪些没被执行」
     // 要在循环**之后**才知道（break 出口）——末尾收口既要补节点，也要把
@@ -1107,6 +1115,46 @@ pub async fn process_tool_calls_async(
             }
             // 没派 = 没履约（`agent_run` 的承诺记账见 `note_delegation`）。
             note_delegation(delegations, &id, &name, &tc.arguments, false, &reason);
+            continue;
+        }
+
+        // ── 任务表写侧闸（S03 §3，T-107）──────────────────────────────────────
+        //
+        // **只拦 `todo_write`**：判的是「本主体有没有资格写任务表」——立任务
+        // （`define.work`）或独立判定（`assert.verification`）二居其一（C15 两者
+        // 互不可写 ⇒ 没有任何主体能同时自己立自己验）。纯产出主体（工人 / 对等体）
+        // 与纯派活主体（市场）被拒：工人的交付物是产物格，立与验归工作权威。
+        //
+        // 位置与外部执行闸 / 淘汰闸同一条理由——紧贴执行窗口之前、先于钩子。
+        // 出口判据是**可审计的拒绝**（`Refused: …` 回灌模型 + 父节点收敛 +
+        // `PERMISSION_DENIED`），且**不产事件、不记任务声明**：工具没跑，
+        // 「声明过什么」就无从说起（`note_tasks` 只在跑完后记成功调用）。
+        if is_task_table_tool(&name) && !task_table.may_write {
+            let reason = format!(
+                "主体 {} 不持 define.work / assert.verification，不得写任务表（todo_write）",
+                task_table.principal
+            );
+            plugin_warn!("session", "[Tool] 任务表写侧拒止：{id} / {name}——{reason}");
+            let tool_msg = llm_build_tool_message(
+                &id,
+                &format!("Refused: {reason}"),
+                Some(false),
+                Some(result_msg_id.clone()),
+            );
+            tool_messages.push(tool_msg);
+            // 拒掉的调用同样必须收敛父节点（同外部执行闸 / 淘汰闸）。
+            if let Some(parent_update) = emit_parent_finalized(
+                sink,
+                context_messages,
+                &id,
+                MessageStatus::Completed,
+                json!({ "success": false, "failure_kind": failure_kind::PERMISSION_DENIED }),
+                None,
+            )
+            .await
+            {
+                parent_updates.push(parent_update);
+            }
             continue;
         }
 

@@ -72,8 +72,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
 
-/// 父会话目录内存放子会话的固定子目录名
-const SUB_SESSIONS_DIR: &str = "sessions";
+/// 父会话目录内存放子会话的固定子目录名——**唯一定义在 `paths`**（路径词汇
+/// 单点，部署级读侧的下探遍历按同一个名字走，见 `paths::session_wals_deep`）。
+const SUB_SESSIONS_DIR: &str = paths::SUB_SESSIONS_SUBDIR;
 
 /// 消息文件名 —— **与元数据分开存放**（见模块头「元数据与消息分文件」）。
 /// 清单只读 `session.json`，**不读**本文件；只有真的要取转写时才读。

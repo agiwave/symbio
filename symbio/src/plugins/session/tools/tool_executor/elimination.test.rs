@@ -115,3 +115,50 @@ fn a_missing_storage_root_is_an_empty_overlay() {
     let inputs = EliminationInputs::of(&root, &agent_ctx("main"));
     assert!(!inputs.delegation_revoked);
 }
+
+/// 在 `<root>/<safe(父)>/sessions/<safe(子)>` 里落一条事件（嵌套子会话布局：
+/// 子会话住在父目录的 `sessions/` 里，见 `store` 模块头）。
+fn append_to_sub_session(
+    root: &std::path::Path,
+    parent_sid: &str,
+    child_sid: &str,
+    event: crate::symbio_core::Event,
+) {
+    let dir = root
+        .join(parent_sid)
+        .join(crate::plugins::session::paths::SUB_SESSIONS_SUBDIR)
+        .join(child_sid);
+    std::fs::create_dir_all(&dir).expect("建子会话目录");
+    let store = EventWalStore::open(dir.join(crate::plugins::session::paths::V2_WAL_FILE))
+        .expect("打开子会话 WAL");
+    store.append(event).expect("入格");
+}
+
+/// **嵌套子会话**里的裁决在本会话生效（T-107 批发现并修的静默面）。
+///
+/// 子会话不是顶层平级目录，只扫一层的覆盖层整棵子树都看不见：一个**未绑智能体**
+/// 的子会话（`agent_run` 省略 `agent_id` ⇒ 主体 = `agent:main`，持 `assign.work`）
+/// 违约 ⇒ 裁决落在那棵子树的 WAL 里 ⇒ 父会话的闸扫不到它 ⇒「换个**子会话**就能
+/// 绕开淘汰」——与这道闸要消灭的「换个会话」同形。本用例把这条路钉死。
+#[test]
+fn a_verdict_in_a_nested_sub_session_revokes_delegation_here() {
+    let root = tmp_root("nested");
+    append_to_sub_session(
+        &root,
+        "sess-parent",
+        "sess-child",
+        crate::symbio_core::EliminationDecider.elimination_event(
+            crate::symbio_core::authz::PRINCIPAL_MAIN,
+            -1,
+            7,
+        ),
+    );
+
+    let inputs = EliminationInputs::of(&root, &agent_ctx("main"));
+    assert!(
+        inputs.delegation_revoked,
+        "子会话 WAL 里的裁决必须在本会话生效（部署级 = 全会话，含嵌套）"
+    );
+
+    std::fs::remove_dir_all(&root).ok();
+}

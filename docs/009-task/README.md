@@ -52,14 +52,15 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 2 · 🟡 doing 0 · ☑ done 113 · ❌ wont 0（共 115）
+**计数**：☐ todo 3 · 🟡 doing 0 · ☑ done 114 · ❌ wont 0（共 117）
 
 ## 待处理（按依赖顺序）
 
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
 | `T-117-召回跨主体读侧预过滤批` | 召回跨主体读侧预过滤批：`recall` 路径消费 `vis_scope` 产地——`thread_private` 判断记忆今天跨会话可见 | next | plan | T-094-个人认知可见域产地批 |
-| `T-107-角色主体执行路径批` | 角色主体执行路径批：agent:worker / agent:planner / agent:verifier 的窄行 + 驱动路径（行与路径同批） | later | plan | — |
+| `T-118-召回嵌套子会话遍历裁决批` | 记忆召回的嵌套子会话遍历裁决：recall_view 的一层 glob 是「刻意范围」还是「同形缺口」 | later | plan | — |
+| `T-119-规划与验证会话驱动路径批` | 规划者/验证者的会话驱动路径：收束闸两臂不覆盖 define.work / assert.verification 独持行的结构性阻断 | later | plan | — |
 
 ## 进行中
 
@@ -119,6 +120,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-100-跨文档复述判据覆盖面补齐` | 把「同一事实被写两遍」的判据从三个封闭集推广到全部 owner 投影 | plan |
 | `T-104-检索降级可见性批` | 检索降级可见性：`degraded` 从投影口径走到用户眼前（注入段标降级 + 判据） | plan |
 | `T-105-Scope-Child首产点批` | `Scope::Child` 全仓第一个生产构造点：派生子会话挂父作用域 + 读方 | plan |
+| `T-107-角色主体执行路径批` | 角色主体执行路径批：agent:worker / agent:planner / agent:verifier 的窄行 + 驱动路径（行与路径同批） | plan |
 | `T-108-门禁失败可见性与日志分轮留存` | 门禁失败详情直接印在汇总里；日志改成每轮一个目录（失败后不必重跑） | plan |
 | `T-109-web面读数与配置残余批` | web 面残余批：结果读数回灌（状态码 / 截断 / 超时语义）· `web_enabled` 无读方 · `allowed_domains` 死参数 · `web_search` 上游地址写死 | web |
 | `T-110-通道与自动化面e2e补位` | 通道与自动化面 e2e 补位：`hook` 三路由 + `telegram` 本地三路由（经 gateway 直发）· `home`/`work` 经 gateway 不可达 | e2e |
@@ -296,7 +298,7 @@ board.columns: [rank, deps, evidence, reason]
 - [`T-104-检索降级可见性批`](104-检索降级可见性批.md) 检索降级可见性：`degraded` 从投影口径走到用户眼前（注入段标降级 + 判据）（done）
 - [`T-105-Scope-Child首产点批`](105-Scope-Child首产点批.md) `Scope::Child` 全仓第一个生产构造点：派生子会话挂父作用域 + 读方（done）
 - [`T-106-角色行主体名与能力源裁决批`](106-角色行主体名与能力源裁决批.md) 角色行的主体名与能力源裁决：per-step 规格 vs per-principal 规格（S02/S03/S06/S11 六行）（done）
-- [`T-107-角色主体执行路径批`](107-角色主体执行路径批.md) 角色主体执行路径批：agent:worker / agent:planner / agent:verifier 的窄行 + 驱动路径（行与路径同批）（todo）
+- [`T-107-角色主体执行路径批`](107-角色主体执行路径批.md) 角色主体执行路径批：agent:worker / agent:planner / agent:verifier 的窄行 + 驱动路径（行与路径同批）（done）
 - [`T-108-门禁失败可见性与日志分轮留存`](108-门禁失败可见性与日志分轮留存.md) 门禁失败详情直接印在汇总里；日志改成每轮一个目录（失败后不必重跑）（done）
 - [`T-109-web面读数与配置残余批`](109-web面读数与配置残余批.md) web 面残余批：结果读数回灌（状态码 / 截断 / 超时语义）· `web_enabled` 无读方 · `allowed_domains` 死参数 · `web_search` 上游地址写死（done）
 - [`T-110-通道与自动化面e2e补位`](110-通道与自动化面e2e补位.md) 通道与自动化面 e2e 补位：`hook` 三路由 + `telegram` 本地三路由（经 gateway 直发）· `home`/`work` 经 gateway 不可达（done）
@@ -307,6 +309,8 @@ board.columns: [rank, deps, evidence, reason]
 - [`T-115-入站边界可达面与白名单一致批`](115-入站边界可达面与白名单一致批.md) gateway 入站边界的可达面与 `is_readonly_allowed` 白名单不一致：缺 home/work 四条臂 · 白名单两条死条目（done）
 - [`T-116-CI红清偿批`](116-CI红清偿批.md) v2 分支 CI 连续红（rust-checks · e2e-check · security-check）——三处红各自的根因与清偿批次（done）
 - [`T-117-召回跨主体读侧预过滤批`](117-召回跨主体读侧预过滤批.md) 召回跨主体读侧预过滤批：`recall` 路径消费 `vis_scope` 产地——`thread_private` 判断记忆今天跨会话可见（todo）
+- [`T-118-召回嵌套子会话遍历裁决批`](118-召回嵌套子会话遍历裁决批.md) 记忆召回的嵌套子会话遍历裁决：recall_view 的一层 glob 是「刻意范围」还是「同形缺口」（todo）
+- [`T-119-规划与验证会话驱动路径批`](119-规划与验证会话驱动路径批.md) 规划者/验证者的会话驱动路径：收束闸两臂不覆盖 define.work / assert.verification 独持行的结构性阻断（todo）
 
 <!-- registry:summary end -->
 
