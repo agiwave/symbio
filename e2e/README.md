@@ -17,7 +17,7 @@ HTTP/SSE（LLM）、stdio/JSON-RPC（MCP）、磁盘（homedir）。
 
 | 文件 | 作用 |
 |---|---|
-| `mock-llm.mjs` | OpenAI Chat 兼容 Mock LLM：SSE 流式、场景编排（`match`/`afterTool`/`once`/`chunks`/故障注入）、请求记录 `GET /_requests` |
+| `mock-llm.mjs` | Mock LLM（**四协议线格式**：`openai_chat` / `openai_responses` / `anthropic_messages` / `gemini_api`，按请求路径分派——`resolveFormat`）：流式、场景编排（`match`/`afterTool`/`once`/`chunks`/故障注入，四格式共用一套）、请求记录 `GET /_requests`（含 `format` 字段） |
 | `mock-mcp.mjs` | stdio JSON-RPC Mock MCP server：规范握手、可编排工具与错误/断连、调用记录 `--record` |
 | `mock-http.mjs` | **本地 HTTP 靶子**（`web_fetch` / `http_request` 的对面那一端）：确定性端点 `/page` `/json` `/big` `/slow` `/missing` `/echo`，正文含每次启动随机生成的标记，请求留痕 `GET /_requests`。存在的理由是**真外网在 CI 上不存在、内容会变、对方会限流**——那三类失败都不在被测系统里，却会被记成产品缺陷。T65 起 |
 | `mock-actions.json` | mock-mcp 行为脚本示例（T6：`add` 返回 JSON-RPC 错误） |
@@ -192,6 +192,12 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
     （`pickScenario`：池里选不出才退回全池），池里**不限名额**的那一条会一直赢。
     收尾场景（`content`）与中间的每个工具场景**都要各写一条**，且除最后一条外都带
     `once: true`（或 `times: N`）。参考 `t64`（第一版漏了 `once`，跑了 8600 轮）。
+15. **`mock-llm` 的工具结果轮判定必须按协议形状**（`readTurn`）：四协议的请求体不同，
+    工具结果分别在 `messages[].role:"tool"`（openai_chat）/ `input[].function_call_output`
+    （openai_responses）/ `messages[].content[].tool_result`（anthropic_messages）/
+    `contents[].parts[].functionResponse`（gemini_api）。只认 openai_chat 一家的形状会让
+    其余三协议的 `afterTool` **恒不命中** ⇒ 工具结果轮落到普通池 ⇒ 无限工具循环（症状同
+    第 14 条：撞超时不是断言红）。参考 `t66`（负向自检：破坏 anthropic 判定即红）。
 
 **新增「接线判据」用例时另加一条纪律**：机制已经接进生产、只是缺判据时，用例必须证
 **「接线前后行为可见地不同」**——把开关翻掉（如 `skill_compile_enabled` /

@@ -26,6 +26,6 @@ created: 2026-10-14
 | [arch · 架构](arch/AR-000-架构汇总.md "AR-000-架构汇总") | 编号前缀 `AR-` | 47 | draft 0 · active 47 · retired 0 | — | [AR-000-架构汇总](arch/AR-000-架构汇总.md) |
 | [ref · 参考](ref/RE-000-参考汇总.md "RE-000-参考汇总") | 编号前缀 `RE-` | 7 | draft 0 · active 7 · retired 0 | — | [RE-000-参考汇总](ref/RE-000-参考汇总.md) |
 | [guide · 指南](guide/GU-000-指南汇总.md "GU-000-指南汇总") | 编号前缀 `GU-` | 15 | draft 0 · active 15 · retired 0 | — | [GU-000-指南汇总](guide/GU-000-指南汇总.md) |
-| [task · 任务](task/T-000-任务汇总.md "T-000-任务汇总") | 编号前缀 `T-` | 110 | todo 12 · doing 0 · done 98 · wont 0 | 3 条分解边 | [T-000-任务汇总](task/T-000-任务汇总.md) |
+| [task · 任务](task/T-000-任务汇总.md "T-000-任务汇总") | 编号前缀 `T-` | 110 | todo 11 · doing 0 · done 99 · wont 0 | 3 条分解边 | [T-000-任务汇总](task/T-000-任务汇总.md) |
 | [spec · 规范](spec/SP-000-规范汇总.md "SP-000-规范汇总") | 编号前缀 `SP-` | 31 | draft 0 · active 31 · retired 0 | — | [SP-000-规范汇总](spec/SP-000-规范汇总.md) |
 | [adr · 架构决策](adr/ADR-000-架构决策汇总.md "ADR-000-架构决策汇总") | 编号前缀 `ADR-` | 68 | active 58 · superseded 7 · withdrawn 3 | — | [ADR-000-架构决策汇总](adr/ADR-000-架构决策汇总.md) |

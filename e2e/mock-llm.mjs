@@ -1,15 +1,37 @@
-//! Mock LLM 服务（OpenAI Chat Completions 兼容，SSE 流式）。
+//! Mock LLM 服务（**四协议线格式**：openai_chat / openai_responses /
+//! anthropic_messages / gemini_api）。
 //!
 //! 用法：
 //!   node e2e/mock-llm.mjs --port 18081 --scenarios ./scenarios.json
 //!
 //! 能力：
-//! - `POST /v1/chat/completions`（**只说流式**：SSE。与生产一致——symbio 的三个
-//!   协议实现全部硬编码 `"stream": true`，不存在非流式分支）
+//! - `POST /v1/chat/completions` → openai_chat 线格式（SSE）
+//! - `POST /v1/responses`        → openai_responses 线格式（SSE，`response.*` 事件）
+//! - `POST /v1/messages`         → anthropic_messages 线格式（`event:` 行 + `data:` 行）
+//! - `POST /v1/models/{m}:streamGenerateContent` → gemini_api 线格式（**裸 JSON 数组流**）
 //! - `GET  /v1/models` 上下文探测（context_probe 走这里，返回 max_model_len）
 //! - `GET  /_health`   健康检查
 //! - `GET  /_requests` 读回已记录的请求（测试断言用）
 //! - `POST /_reset`    清空请求记录与场景游标
+//!
+//! ## 四协议的分派与「同一份场景」
+//!
+//! 路径决定线格式（[`resolveFormat`]），**场景定义（`toolCalls` / `chunks` /
+//! `content`）只有一份**——由各格式的 frames 构造器翻译成各自的线上形状。
+//! 于是「同一句用户发言 + 同一次工具调用，换协议后链路还通不通」可以用**一条
+//! 用例按参数展开**来问（`t66-multi-protocol`），而不是复制四份场景表。
+//!
+//! 四格式的**请求体形状也各不相同**（工具结果轮的判定尤其如此）：openai_chat 末条
+//! `role: "tool"`、openai_responses `input[]` 里末项 `function_call_output`、
+//! anthropic 末条 user 的 content 含 `tool_result`、gemini `contents[]` 末项 parts
+//! 含 `functionResponse`。[`readTurn`] 把这件事收成一个**格式无关**的判定——否则
+//! 某个协议下 `afterTool` 永不命中，症状是**无限工具循环**（撞用例超时，不是断言红）。
+//!
+//! 故障注入与流控制（`dropAfter` / `stallAfter` / `malformed`）**四格式共用一套**：
+//! 它们是「网络层」的事，与线格式无关；各写一份必然漂移。
+//!
+//! **只说不流式**：四个协议实现全部硬编码 `"stream": true`，不存在非流式分支
+//! （gemini 的 `streamGenerateContent` 本身就是流式端点）。
 //!
 //! 场景编排：`--scenarios` 指向一个 JSON 文件，形如
 //! ```json
@@ -111,17 +133,83 @@ const failLogicalHits = new Map(); // 场景 id → 已消耗的逻辑名额
 const granted = [];
 
 /**
- * 本轮是否刚拿到工具结果、还没作答（**按消息序列**判，不看文本）。
+ * 路径 → 线格式 id（与 model 插件的 `MODEL_PROTOCOL_*` 同词）。
  *
- * 送进模型的是消息数组，工具结果就是 `role: "tool"` 的消息 ⇒ 「末条是不是 tool 消息」
- * 在数组上**直接可读**。文本形态只能靠「切标签 / 找前缀行」，那两版判据都栽过（误判症状
- * 分别是「无限工具循环」与「新一轮根本不请求工具」）。
- *
- * @param {Array<{role?: string}>} msgs 本轮请求的消息数组
- * @returns {boolean} 末条是工具结果消息
+ * 四条路径各由对应协议的 `get_api_url` 拼出，互不重叠：
+ * - openai_chat → `{api_base}/chat/completions`
+ * - openai_responses → `{api_base}/responses`
+ * - anthropic_messages → `{api_base}/messages`
+ * - gemini_api → `{api_base}/models/{model}:streamGenerateContent`（**无 query**，
+ *   key 走 `x-goog-api-key` 头——`gemini_api.rs::get_api_url` 只拼到动作名）
  */
-function endsWithToolResult(msgs) {
-  return msgs[msgs.length - 1]?.role === 'tool';
+function resolveFormat(pathname) {
+  if (pathname.endsWith('/chat/completions')) return 'openai_chat';
+  if (pathname.endsWith('/responses')) return 'openai_responses';
+  if (pathname.endsWith('/messages')) return 'anthropic_messages';
+  if (pathname.includes(':streamGenerateContent')) return 'gemini_api';
+  return null;
+}
+
+/**
+ * 从请求体读出**格式无关**的两件事：本轮用户文本、是否工具结果轮。
+ *
+ * ## 为什么必须按格式判
+ *
+ * 四协议的请求体形状各不相同，工具结果的承载位置尤其如此：
+ *
+ * | 协议 | 用户文本 | 工具结果轮 |
+ * |---|---|---|
+ * | `openai_chat` | `messages[]` 末条 role=user 的 content | 末条 `role: "tool"` |
+ * | `openai_responses` | `input[]` 末个 `type:"message",role:"user"` 的 `content[].text` | 末项 `type: "function_call_output"` |
+ * | `anthropic_messages` | `messages[]` 末条 role=user 的 `content[].text` | 末条 role=user 的 `content[]` 含 `type: "tool_result"` |
+ * | `gemini_api` | `contents[]` 末条 role=user 的 `parts[].text` | 末项 `parts[]` 含 `functionResponse` |
+ *
+ * 只认 `messages[].role === 'tool'` 的老写法（openai_chat 一家的形状）在其余三个
+ * 协议下**恒判 false** ⇒ `afterTool` 场景永不命中 ⇒ 工具结果轮落到普通池 ⇒ 无限
+ * 工具循环。症状是用例撞超时而不是断言红，离真因隔很远。
+ *
+ * @returns {{ userText: string, isToolResultTurn: boolean }}
+ */
+function readTurn(format, body) {
+  const arr = (x) => (Array.isArray(x) ? x : []);
+  if (format === 'openai_responses') {
+    const items = arr(body.input);
+    const lastUser = [...items].reverse().find((it) => it.type === 'message' && it.role === 'user');
+    const userText = arr(lastUser?.content)
+      .filter((c) => c.type === 'input_text')
+      .map((c) => c.text ?? '')
+      .join('');
+    return { userText, isToolResultTurn: items[items.length - 1]?.type === 'function_call_output' };
+  }
+  if (format === 'gemini_api') {
+    const contents = arr(body.contents);
+    const lastUser = [...contents].reverse().find((c) => c.role === 'user');
+    const userText = arr(lastUser?.parts)
+      .filter((p) => typeof p.text === 'string')
+      .map((p) => p.text)
+      .join('');
+    const last = contents[contents.length - 1];
+    return { userText, isToolResultTurn: arr(last?.parts).some((p) => p.functionResponse != null) };
+  }
+  const msgs = arr(body.messages);
+  const last = msgs[msgs.length - 1];
+  if (format === 'anthropic_messages') {
+    const lastUser = [...msgs].reverse().find((m) => m.role === 'user');
+    const userText = arr(lastUser?.content)
+      .filter((c) => c.type === 'text')
+      .map((c) => c.text ?? '')
+      .join('');
+    const isToolResultTurn =
+      last?.role === 'user' && arr(last.content).some((c) => c.type === 'tool_result');
+    return { userText, isToolResultTurn };
+  }
+  // openai_chat（也是缺省）：末条 role=user 的 content；工具结果轮 = 末条 role=tool。
+  const lastUser = [...msgs].reverse().find((m) => m.role === 'user');
+  const userText =
+    typeof lastUser?.content === 'string'
+      ? lastUser.content
+      : arr(lastUser?.content).map((p) => p.text ?? '').join('');
+  return { userText, isToolResultTurn: last?.role === 'tool' };
 }
 
 /** 逻辑请求指纹：场景 id + 请求体（重发复用同一份字节 ⇒ 指纹相同）。 */
@@ -139,22 +227,11 @@ function usageCap(scenario) {
   return scenario.once ? 1 : Infinity;
 }
 
-function pickScenario(body) {
-  const msgs = body.messages ?? [];
-  // 本轮用户文本：**最后一条 role=user 的内容**。历史里的用户发言是**独立**的 user
-  // 消息，不会混进这一条。
-  const lastUser = [...msgs].reverse().find((m) => m.role === 'user');
-  const userText =
-    typeof lastUser?.content === 'string'
-      ? lastUser.content
-      : Array.isArray(lastUser?.content)
-        ? lastUser.content.map((p) => p.text ?? '').join('')
-        : '';
-
-  // 工具结果轮：末条是不是 `role: tool` 消息（消息数组上直接可读）。误判的两端都栽过：
-  // 只认 v1 ⇒ `afterTool` 永不命中 ⇒ 无限工具循环（撞超时，不是断言红）；判宽了 ⇒
-  // 新一轮的第一次请求被误认成工具结果轮 ⇒ 根本不请求工具。
-  const isToolResultTurn = endsWithToolResult(msgs);
+function pickScenario(format, body) {
+  // 用户文本与「是否工具结果轮」都**按格式**读（四协议承载形状不同，见 `readTurn`）。
+  // 误判的两端都栽过：判窄 ⇒ `afterTool` 永不命中 ⇒ 无限工具循环（撞超时，不是
+  // 断言红）；判宽 ⇒ 新一轮的第一次请求被误认成工具结果轮 ⇒ 根本不请求工具。
+  const { userText, isToolResultTurn } = readTurn(format, body);
 
   // ⚠️ `afterTool` 是**优先**而不是**硬过滤**。
   //
@@ -307,6 +384,167 @@ function malformedFrame(kind) {
   return 'mock-llm keepalive: 这一行不是 SSE 帧\n\n';
 }
 
+// ---------- 四协议 frames：把同一份场景翻译成各自的线上字节 ----------
+//
+// frames 的每一项是「一段要写出的原始字节」（可含多行）；流循环逐项写出，故障注入
+// 的位次锚点即 frame 下标。`terminator` 是流末尾单独写的收尾字节（openai 系的
+// `data: [DONE]`），`dropAfter === frames.length` 的语义因此仍是「全部数据帧之后、
+// 收尾帧之前断开」——与改造前 openai_chat 的 `events` / `[DONE]` 口径逐字一致。
+
+/** SSE 数据帧：`data: <json>\n\n`（openai 系两协议共用）。 */
+const SSE = (obj) => `data: ${JSON.stringify(obj)}\n\n`;
+
+/** 场景的正文分片（`chunks` 优先，退 `content` 单片）。 */
+function contentChunks(scenario) {
+  return scenario.chunks ?? (scenario.content != null ? [scenario.content] : []);
+}
+
+/** 工具参数序列化（对象 → JSON 串；已是字符串则原样）。 */
+function argsString(tc) {
+  return typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments ?? {});
+}
+
+/** openai_chat：复用 `buildEvents` 的 chunk 形状，序列化为 SSE 数据帧。 */
+function openaiChatFrames(scenario, model, requestId, useIndex) {
+  return [...buildEvents(scenario, model, requestId, useIndex)].map(SSE);
+}
+
+/**
+ * openai_responses：`response.*` 事件。
+ *
+ * 工具名 / call_id 由 `response.output_item.added` 给出（后端读 `item.name` /
+ * `item.call_id`），参数由 `response.function_call_arguments.delta` 分两片流式吐；
+ * 结束原因与用量在 `response.completed` 的 `response` 对象里（`parse_line` 从那里读）。
+ */
+function openaiResponsesFrames(scenario, model, requestId, useIndex) {
+  const frames = [];
+  for (const [i, tc] of (scenario.toolCalls ?? []).entries()) {
+    const callId = buildToolCallId(scenario, tc, i, useIndex);
+    frames.push(
+      SSE({
+        type: 'response.output_item.added',
+        output_index: i,
+        item: { type: 'function_call', call_id: callId, name: tc.name, arguments: '' },
+      }),
+    );
+    const a = argsString(tc);
+    const mid = Math.max(1, Math.floor(a.length / 2));
+    frames.push(SSE({ type: 'response.function_call_arguments.delta', output_index: i, call_id: callId, delta: a.slice(0, mid) }));
+    frames.push(SSE({ type: 'response.function_call_arguments.delta', output_index: i, call_id: callId, delta: a.slice(mid) }));
+  }
+  for (const piece of contentChunks(scenario)) {
+    frames.push(SSE({ type: 'response.output_text.delta', delta: piece }));
+  }
+  const finish = (scenario.toolCalls ?? []).length > 0 ? 'tool_calls' : 'stop';
+  frames.push(
+    SSE({
+      type: 'response.completed',
+      response: {
+        id: `resp_${requestId}`,
+        finish_reason: finish,
+        usage: { input_tokens: 64, output_tokens: 32 },
+      },
+    }),
+  );
+  return { frames, terminator: 'data: [DONE]\n\n' };
+}
+
+/**
+ * anthropic_messages：`event:` 行 + `data:` 行。
+ *
+ * 工具名 / id 由 `content_block_start`（`content_block.type == "tool_use"`）给出，
+ * 参数由 `content_block_delta`（`delta.type == "input_json_delta"`）的 `partial_json`
+ * 分两片流式吐；正文是 `text_delta`。结束原因是 `message_delta.delta.stop_reason`，
+ * `input_tokens` 在 `message_start`、`output_tokens` 在 `message_delta`（两处合并）。
+ */
+function anthropicFrames(scenario, model, requestId, useIndex) {
+  const frames = [];
+  const ev = (type, obj) => `event: ${type}\ndata: ${JSON.stringify(obj)}\n\n`;
+  frames.push(
+    ev('message_start', {
+      type: 'message_start',
+      message: { id: `msg_${requestId}`, usage: { input_tokens: 64 } },
+    }),
+  );
+  const toolCount = (scenario.toolCalls ?? []).length;
+  for (const [i, tc] of (scenario.toolCalls ?? []).entries()) {
+    const callId = buildToolCallId(scenario, tc, i, useIndex);
+    frames.push(
+      ev('content_block_start', {
+        type: 'content_block_start',
+        index: i,
+        content_block: { type: 'tool_use', id: callId, name: tc.name },
+      }),
+    );
+    const a = argsString(tc);
+    const mid = Math.max(1, Math.floor(a.length / 2));
+    frames.push(ev('content_block_delta', { type: 'content_block_delta', index: i, delta: { type: 'input_json_delta', partial_json: a.slice(0, mid) } }));
+    frames.push(ev('content_block_delta', { type: 'content_block_delta', index: i, delta: { type: 'input_json_delta', partial_json: a.slice(mid) } }));
+  }
+  // 正文块用工具块之后的 index（Anthropic 的块下标连续）。
+  const textIndex = toolCount;
+  for (const piece of contentChunks(scenario)) {
+    frames.push(ev('content_block_delta', { type: 'content_block_delta', index: textIndex, delta: { type: 'text_delta', text: piece } }));
+  }
+  const stop = toolCount > 0 ? 'tool_use' : 'end_turn';
+  frames.push(
+    ev('message_delta', {
+      type: 'message_delta',
+      delta: { stop_reason: stop },
+      usage: { output_tokens: 32 },
+    }),
+  );
+  return { frames, terminator: 'event: message_stop\ndata: {"type":"message_stop"}\n\n' };
+}
+
+/**
+ * gemini_api：**裸 JSON 数组流**（`[\n{chunk}\n{chunk}\n]\n`），不是 SSE。
+ *
+ * `gemini_api.rs::parse_line` 直接对整行（trim 后）做 JSON 解析、并显式跳过 `[` /
+ * `]` / `,` 行——它消费的是 `streamGenerateContent` 的数组包裹格式，**没有**
+ * `data:` 前缀。每帧独占一行（完整 JSON，无尾随逗号），流循环按 `\n` 切行后逐行解析。
+ *
+ * `functionCall.args` 每次给**完整对象**（Gemini 无「参数在增长」这回事），一帧一个。
+ */
+function geminiFrames(scenario, model, requestId, useIndex) {
+  const frames = ['[\n'];
+  for (const tc of scenario.toolCalls ?? []) {
+    const args = typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : (tc.arguments ?? {});
+    frames.push(
+      JSON.stringify({
+        candidates: [{ content: { role: 'model', parts: [{ functionCall: { name: tc.name, args } }] } }],
+      }) + '\n',
+    );
+  }
+  for (const piece of contentChunks(scenario)) {
+    frames.push(
+      JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: piece }] } }] }) + '\n',
+    );
+  }
+  frames.push(
+    JSON.stringify({
+      candidates: [{ content: { role: 'model', parts: [] }, finishReason: 'STOP' }],
+      usageMetadata: { promptTokenCount: 64, candidatesTokenCount: 32 },
+    }) + '\n',
+  );
+  frames.push(']\n');
+  return { frames, terminator: null };
+}
+
+/** 按线格式分派：返回 `{ frames, terminator }`。 */
+function buildFrames(format, scenario, model, requestId, useIndex) {
+  switch (format) {
+    case 'openai_responses':
+      return openaiResponsesFrames(scenario, model, requestId, useIndex);
+    case 'anthropic_messages':
+      return anthropicFrames(scenario, model, requestId, useIndex);
+    case 'gemini_api':
+      return geminiFrames(scenario, model, requestId, useIndex);
+    default:
+      return { frames: openaiChatFrames(scenario, model, requestId, useIndex), terminator: 'data: [DONE]\n\n' };
+  }
+}
+
 // ---------- HTTP 处理 ----------
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
@@ -337,7 +575,9 @@ const server = http.createServer(async (req, res) => {
     return res.end(JSON.stringify({ data: [{ id: 'mock-model', max_model_len: 262144 }] }));
   }
 
-  if (url.pathname.endsWith('/chat/completions')) {
+  // 四协议各占一条路径（见 `resolveFormat`）；命中即按该线格式应答。
+  const format = resolveFormat(url.pathname);
+  if (format) {
     // 请求体必须**先攒 Buffer 再整体解码**（`body += part` 是逐块解码：一个 3 字节
     // 中文字符被 socket 分块切在中间时，两半各解出一个 U+FFFD —— 同一份字节的重发
     // 会因分块边界不同而解出**差 1 个字符**的请求体 ⇒ 指纹分裂 ⇒ failTimes 名额与
@@ -347,7 +587,7 @@ const server = http.createServer(async (req, res) => {
     const body = Buffer.concat(parts).toString('utf8');
     let parsed = {};
     try { parsed = JSON.parse(body); } catch { /* 容错：空体 */ }
-    requests.push({ at: Date.now(), path: url.pathname, body: parsed, contentType: req.headers['content-type'] ?? null, status: null });
+    requests.push({ at: Date.now(), path: url.pathname, format, body: parsed, contentType: req.headers['content-type'] ?? null, status: null });
     const rec = requests[requests.length - 1];
 
     // 429 限流语义（plan 级 `rateLimit: { limit, windowMs }`）：滑动窗口配额，
@@ -380,7 +620,7 @@ const server = http.createServer(async (req, res) => {
       granted.push(now);
     }
 
-    const { scenario, useIndex } = pickScenario(parsed);
+    const { scenario, useIndex } = pickScenario(format, parsed);
     const model = parsed.model ?? 'mock-model';
     const requestId = `chatcmpl-${Date.now().toString(16)}-${requests.length}`;
 
@@ -410,35 +650,35 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    const events = [...buildEvents(scenario, model, requestId, useIndex)];
+    const { frames, terminator } = buildFrames(format, scenario, model, requestId, useIndex);
 
-    // ⚠️ 本 mock **只说流式**（与生产一致）：symbio 后端的三个协议实现全部硬编码
-    // `"stream": true`，不存在非流式补全请求。曾经有个 `stream === false` 的一次性
-    // JSON 分支，因无任何调用方（纯防御性死代码、误导「存在非流式链路」的读者）
-    // 已删除——见 `openai_chat.rs` / `openai_responses.rs` / `anthropic_messages.rs`
-    // 的请求构造。e2e 的信息收集同样只有两条流式通道：gateway WS 实时帧 +
-    // 生产历史读出口（`readSessionMessages`）。
+    // ⚠️ 本 mock **只说流式**（与生产一致）：四个协议实现全部硬编码 `"stream": true`
+    // （gemini 的 `streamGenerateContent` 本身就是流式端点），不存在非流式补全请求。
+    // 曾经有个 `stream === false` 的一次性 JSON 分支，因无任何调用方（纯防御性死代码、
+    // 误导「存在非流式链路」的读者）已删除。e2e 的信息收集同样只有两条流式通道：
+    // gateway WS 实时帧 + 生产历史读出口（`readSessionMessages`）。
 
-    // 异常注入的位次锚点（对称于 events 的下标；均未写 / [DONE]）——
-    // `dropAfter: 0` = 只发响应头就断；`dropAfter: events.length` = 全部事件已吐完但无 [DONE]；
-    // `stallAfter` 停顿不关连接；`malformed` 帧不占位。语义见文件头「异常注入」。
-    const malformedAt = scenario.malformed != null ? (scenario.malformedAfter ?? Math.floor(events.length / 2)) : -1;
+    // 异常注入的位次锚点（对称于 frames 的下标；收尾帧不占位）——
+    // `dropAfter: 0` = 只发响应头就断；`dropAfter: frames.length` = 全部数据帧已吐完
+    // 但收尾帧未写；`stallAfter` 停顿不关连接；`malformed` 帧不占位。语义见文件头。
+    const malformedAt = scenario.malformed != null ? (scenario.malformedAfter ?? Math.floor(frames.length / 2)) : -1;
     const dropAt = scenario.dropAfter != null ? scenario.dropAfter : -1;
     const stallAt = scenario.stallAfter != null ? scenario.stallAfter : -1;
 
-    // stream：SSE
     if (scenario.latencyMs) await sleep(scenario.latencyMs);
     rec.status = 200;
     res.writeHead(200, {
-      'content-type': 'text/event-stream',
+      // gemini 的 `streamGenerateContent` 回的是裸 JSON 数组流（非 SSE）；其余三协议是
+      // text/event-stream。
+      'content-type': format === 'gemini_api' ? 'application/json' : 'text/event-stream',
       'cache-control': 'no-cache',
       connection: 'keep-alive',
     });
     const delay = scenario.chunkDelayMs ?? 0;
     const jitter = scenario.chunkJitterMs ?? 0;
-    for (const [i, ev] of events.entries()) {
+    for (const [i, frame] of frames.entries()) {
       if (dropAt === i) {
-        // 半途断开：不写终止帧、不写 [DONE]，socket 直接 destroy——
+        // 半途断开：不写收尾帧，socket 直接 destroy——
         // 被测系统视角 = 「流还在但数据表里最后一帧之后突然没了」
         if (process.env.E2E_DEBUG) console.error(`[mock-llm] 流中断注入（第 ${i} 个事件后 destroy）`);
         res.socket.destroy();
@@ -450,15 +690,15 @@ const server = http.createServer(async (req, res) => {
         await sleep(scenario.stallMs ?? 1000);
       }
       if (malformedAt === i) res.write(malformedFrame(scenario.malformed));
-      res.write(`data: ${JSON.stringify(ev)}\n\n`);
+      res.write(frame);
       if (delay || jitter) await sleep(delay + (jitter ? Math.random() * jitter : 0));
     }
-    if (dropAt === events.length) {
-      if (process.env.E2E_DEBUG) console.error('[mock-llm] 流中断注入（全部事件后、[DONE] 前 destroy）');
+    if (dropAt === frames.length) {
+      if (process.env.E2E_DEBUG) console.error('[mock-llm] 流中断注入（全部事件后、收尾帧前 destroy）');
       res.socket.destroy();
       return;
     }
-    res.write('data: [DONE]\n\n');
+    if (terminator) res.write(terminator);
     return res.end();
   }
 
