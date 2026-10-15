@@ -565,6 +565,13 @@ impl DetailDefinition {
                     });
                     continue;
                 }
+                // 可选字段的 `null` = 「没填」：serde `Option` 的序列化形态，表单
+                // 「打开面板 → 直接保存」交回的就是它。空槽位（如还没配 Serper key）
+                // 读出来就是 null ⇒ 按类型校验会拦下这次**无任何修改**的保存。
+                // null 跳过类型校验、原样交给 serde（`Option` 收下 null）。
+                if current.is_null() && !f.required {
+                    continue;
+                }
                 if let Some(message) = f.check(current) {
                     err.fields.push(VdfsFieldError {
                         field: f.key.clone(),

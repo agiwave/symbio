@@ -15,6 +15,24 @@ const DEFAULT_TIMEOUT_SECS: u64 = 15;
 const DEFAULT_MAX_RESULTS: usize = 5;
 const MAX_RESULTS_LIMIT: usize = 10;
 
+/// 三家供应商的官方上游基址与路径。**路径是供应商契约的一部分**（Tavily/Serper
+/// 是 `POST /search`、DuckDuckGo HTML 是 `GET /html/?q=…`），配置只允许替换
+/// 基址（T-109 ⑤：此前连基址都写死 ⇒ e2e 无本地靶子可打、CI 无网即零覆盖），
+/// 不允许改路径形状——那等于换了另一家服务。
+const TAVILY_OFFICIAL_BASE: &str = "https://api.tavily.com";
+const SERPER_OFFICIAL_BASE: &str = "https://google.serper.dev";
+const DUCKDUCKGO_OFFICIAL_BASE: &str = "https://html.duckduckgo.com";
+
+/// 取本轮回实际使用的上游基址：`search_api_base` 为空（缺省）⇒ 各家官方端点；
+/// 非空 ⇒ 统一替换成该基址（剥尾随 `/`，路径由调用方拼）。
+fn upstream_base(configured: &str, official: &str) -> String {
+    let configured = configured.trim();
+    if configured.is_empty() {
+        return official.to_string();
+    }
+    configured.trim_end_matches('/').to_string()
+}
+
 /// Web 搜索工具
 #[derive(Clone)]
 pub struct WebSearchTool {
@@ -54,12 +72,13 @@ impl WebSearchTool {
         }
 
         let cfg = self.config.read().await;
+        let base = cfg.search_api_base.clone();
 
         // 优先使用 Tavily
         if let Some(ref api_key) = cfg.tavily_api_key {
             if !api_key.trim().is_empty() {
                 return match self
-                    .search_tavily(query, api_key, max_results, lr.as_deref())
+                    .search_tavily(&base, query, api_key, max_results, lr.as_deref())
                     .await
                 {
                     Ok(results) => Ok(json!({
@@ -76,7 +95,7 @@ impl WebSearchTool {
         if let Some(ref api_key) = cfg.serper_api_key {
             if !api_key.trim().is_empty() {
                 return match self
-                    .search_serper(query, api_key, max_results, lr.as_deref())
+                    .search_serper(&base, query, api_key, max_results, lr.as_deref())
                     .await
                 {
                     Ok(results) => Ok(json!({
@@ -91,7 +110,7 @@ impl WebSearchTool {
 
         // 最后回退到 DuckDuckGo (HTML 抓取)
         match self
-            .search_duckduckgo(query, max_results, lr.as_deref())
+            .search_duckduckgo(&base, query, max_results, lr.as_deref())
             .await
         {
             Ok(results) => Ok(json!({
@@ -105,6 +124,7 @@ impl WebSearchTool {
 
     async fn search_tavily(
         &self,
+        base: &str,
         query: &str,
         api_key: &str,
         max_results: usize,
@@ -116,7 +136,7 @@ impl WebSearchTool {
             .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
 
         let response = client
-            .post("https://api.tavily.com/search")
+            .post(format!("{}/search", upstream_base(base, TAVILY_OFFICIAL_BASE)))
             .json(&json!({
                 "api_key": api_key,
                 "query": query,
@@ -155,6 +175,7 @@ impl WebSearchTool {
 
     async fn search_serper(
         &self,
+        base: &str,
         query: &str,
         api_key: &str,
         max_results: usize,
@@ -174,7 +195,7 @@ impl WebSearchTool {
         }
 
         let response = client
-            .post("https://google.serper.dev/search")
+            .post(format!("{}/search", upstream_base(base, SERPER_OFFICIAL_BASE)))
             .header("X-API-KEY", api_key)
             .json(&payload)
             .send()
@@ -209,12 +230,16 @@ impl WebSearchTool {
 
     async fn search_duckduckgo(
         &self,
+        base: &str,
         query: &str,
         max_results: usize,
         lr: Option<&str>,
     ) -> Result<Vec<Value>, String> {
         let encoded_query = urlencoding::encode(query);
-        let mut search_url = format!("https://html.duckduckgo.com/html/?q={encoded_query}");
+        let mut search_url = format!(
+            "{}/html/?q={encoded_query}",
+            upstream_base(base, DUCKDUCKGO_OFFICIAL_BASE)
+        );
         if let Some(l) = lr {
             search_url.push_str(&format!("&kl={}", urlencoding::encode(l)));
         }

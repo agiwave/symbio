@@ -28,6 +28,8 @@
 // | `ANY /echo` | 200，回 `{method, path, contentType, body, headers}`（验请求真的带上去了） |
 // | `ANY /bot<token>/sendMessage` | 200，回 Telegram Bot API 形状 `{ok:true,result:{message_id:4210}}` |
 // | `ANY /bot<token>/getUpdates` | 200，回 `{ok:true,result:[{update_id:100100}]}` |
+// | `POST /search` | 200，回 Tavily 形状（正文带请求里的 query/api_key） |
+// | `GET /html/` | 200，回 DuckDuckGo 结果页 HTML 形状（`result__a` / `result__snippet`） |
 // | `GET /_requests` | 控制面：本进程收到过的请求留痕 |
 // | `GET /_health` | 控制面：就绪探针 |
 //
@@ -138,6 +140,36 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify({ ok: true, result: { message_id: 4210 } }));
     }
     return res.end(JSON.stringify({ ok: true, result: [{ update_id: 100100 }] }));
+  }
+
+  // ---------- 搜索服务形状（T-109 ⑤ 的本地靶子） ----------
+  //
+  // `web_search` 的三家上游路径是供应商契约（Tavily/Serper `POST /search`、
+  // DuckDuckGo HTML `GET /html/?q=…`），配置只替换基址 ⇒ mock 按路径认：
+  // `POST /search` 回 Tavily 形状（`results[].{title,url,content}`），正文里带
+  // 请求里的 query 与 api_key，好让「载荷真的上去了」可断言；`GET /html/` 回
+  // DuckDuckGo 结果页 HTML 形状（`result__a` / `result__snippet` 两类锚点）。
+  if (url.pathname === '/search') {
+    const body = JSON.parse(rawBody || '{}');
+    res.writeHead(200, { 'content-type': 'application/json', ...noKeepAlive });
+    return res.end(
+      JSON.stringify({
+        results: [
+          { title: `tavily 首条:${body.query}`, url: 'https://mock.example/first', content: `key=${body.api_key}` },
+          { title: 'tavily 次条', url: 'https://mock.example/second', content: '第二条摘要' },
+        ],
+      }),
+    );
+  }
+  if (url.pathname === '/html/') {
+    const q = url.searchParams.get('q') ?? '';
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', ...noKeepAlive });
+    return res.end(`<!doctype html><html><body>
+      <a class="result__a" href="https://mock.example/ddg1">ddg 首条:${q}</a>
+      <a class="result__snippet">ddg 首条摘要</a>
+      <a class="result__a" href="https://mock.example/ddg2">ddg 次条</a>
+      <a class="result__snippet">ddg 次条摘要</a>
+    </body></html>`);
   }
 
   res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', ...noKeepAlive });

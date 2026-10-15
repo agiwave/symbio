@@ -28,13 +28,13 @@ import './_selfrun.mjs';
 // 前者是「用户看得见的结果」在模型侧的唯一投影，后者是「外部世界发生了什么」。
 // 不读被测系统的任何内部存储。
 //
-// ## 一条**没有**被钉住的读数（已登记，不在此处假装覆盖）
+// ## 元数据头与错误分流（T-109 已闭，本用例钉的是收口后的形状）
 //
-// `web_fetch` 的返回体是 `{success, status, content_type, content, truncated, url}`，
-// 而 `tool_executor::extract_result` 先取 `content` ⇒ **模型只看到正文**，
-// `status` 与 `truncated` 一律丢失。于是 404 页面的正文会被当成正常内容交给模型。
-// 本用例**如实钉住**这个可见形态（「404 的正文照回」），但**不把它当正确**——
-// 缺口登记在 [T-109](../../docs/task/T-109-web面读数与配置残余批.md "T-109-web面读数与配置残余批")。
+// 登记过的两条缺口已清偿：①`extract_result` 的 `content` 分支只取正文 ⇒ 404 页与
+// 200 页对模型同形——现在 `web_fetch` 把状态并进 `content` 首行元数据头
+// （`[web_fetch] status=… · …`）；②超时与连不上在 reqwest 的 Display 里同形——
+// 现在按 `is_timeout` / `is_connect` 分流成「请求超时」/「连接失败」。
+// 本用例把两处都按**收口后**的形状断言（404 必须带 `status=404`、超时必须报「超时」）。
 import {
   MockLlm,
   MockHttp,
@@ -186,7 +186,7 @@ export default defineCase(
         );
       }
 
-      // ── 证据②：web_fetch 正常面——本地靶子的正文原样回灌
+      // ── 证据②：web_fetch 正常面——本地靶子的正文原样回灌 + 元数据头（T-109 ①）
       const pageText = toolResultText(reqs[1]);
       assert(
         pageText.includes(http.marker),
@@ -196,6 +196,10 @@ export default defineCase(
         pageText.includes('mock 页面'),
         `web_fetch 交回的是**原始正文**（不剥 HTML 标签）（实际: ${pageText.slice(0, 400)}）`,
       );
+      assert(
+        pageText.includes('[web_fetch] status=200'),
+        `回灌首行应带元数据头且 status=200（T-109 ①，实际: ${pageText.slice(0, 200)}）`,
+      );
 
       // ── 证据③：非法 scheme 被拒（只允许 http/https）
       const schemeText = toolResultText(reqs[2]);
@@ -204,29 +208,31 @@ export default defineCase(
         `file:// 应被拒并说明只支持 HTTP/HTTPS（实际: ${schemeText.slice(0, 400)}）`,
       );
 
-      // ── 证据④：超时——`web_timeout` 真的被读到（2s < 靶子的 3s）
+      // ── 证据④：超时——`web_timeout` 真的被读到（2s < 靶子的 3s）+ 错误分流（T-109 ②）
       //
-      // ⚠️ 判据**不能**写成「报出『超时』字样」：`web_fetch` 把 reqwest 的错误直接
-      // `format!("请求失败: {e}")`，而超时与连不上在 reqwest 的 Display 里**同形**
-      // （都是 `error sending request for url (…)`）。这条缺口登记在 T-109。
-      // 所以这里钉两件**确实可判**的事：①请求真的发到了靶子（不是参数校验就退了）；
-      // ②这一轮**没有**拿到靶子的正文——若 `web_timeout` 没被读（仍是默认 30s），
-      // 3 秒的靶子会正常回包，正文就会出现在回灌里，断言当场红。
+      // 判据要求回灌**报出「超时」**：reqwest 的 Display 把超时与连接失败收成同一句
+      // `error sending request…`，那条同形缺口已闭——`web_fetch` 现按 `is_timeout`
+      // 分流成「请求超时：…（可调大 web_timeout 后重试）」。若哪天又退回直接
+      // `format!("请求失败: {e}")`，这条当场红。
       const slowText = toolResultText(reqs[3]);
       assert(
         !slowText.includes('slow 端点终于回了'),
         `web_timeout 未生效：3s 的靶子本该被 2s 的超时掐掉，却拿到了正文（实际: ${slowText.slice(0, 400)}）`,
       );
       assert(
-        /请求失败|error sending request/i.test(slowText),
-        `超时应收敛为一次请求级错误（实际: ${slowText.slice(0, 400)}）`,
+        slowText.includes('请求超时') && slowText.includes('web_timeout'),
+        `超时应报「请求超时」并指路 web_timeout（T-109 ②，实际: ${slowText.slice(0, 400)}）`,
       );
 
-      // ── 证据⑤：404 的正文照回（**如实钉住当前可见形态**，见文件头「没有被钉住的读数」）
+      // ── 证据⑤：404 的正文照回，且**带 status=404 元数据头**（T-109 ①）
       const missingText = toolResultText(reqs[4]);
       assert(
         missingText.includes('没有这个页面') && missingText.includes(http.marker),
         `404 页面的正文应回灌（实际: ${missingText.slice(0, 400)}）`,
+      );
+      assert(
+        missingText.includes('[web_fetch] status=404'),
+        `404 页面必须向模型声明 status=404（T-109 ①，实际: ${missingText.slice(0, 200)}）`,
       );
 
       // ── 证据⑥：http_request 对本地主机被 SSRF 防护拒绝

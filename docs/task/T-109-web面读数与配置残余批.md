@@ -2,11 +2,12 @@
 kind: task
 id: T-109-web面读数与配置残余批
 title: web 面残余批：结果读数回灌（状态码 / 截断 / 超时语义）· `web_enabled` 无读方 · `allowed_domains` 死参数 · `web_search` 上游地址写死
-status: todo
+status: done
 created: 2026-10-15
 track: web
 deps: []
 prio: later
+evidence: `e2e/cases/t65-web-fetch.mjs`（404 回灌带 `status=404` 元数据头 · 超时报「请求超时」并指路 `web_timeout`——两处按收口后形状收紧）+ `e2e/cases/t72-web-search-upstream.mjs`（Tavily 路径载荷到靶子 · 配置热切清空 key ⇒ 同进程落 DDG 回退）+ `web_search.test.rs`（`upstream_base` 缺省官方端点 / 覆盖剥尾斜杠）+ `http_request.test.rs`（白名单接配置 · 空白名单 = 不限制）+ `schemas/detail.test.rs`（可选字段 null 豁免）；web 单测 15/15 绿 · detail 20/20 绿 · t65/t72 绿 · clippy 零告警
 exit: 五处各自要么接上**用户可见出口**（模型或界面看得见）、要么能被本地靶子打到，要么改判「明确不做」并写明理由与撤销条件；每一处的判据都必须**能红**（改前改后行为可见地不同），并把 [RE-005](../ref/RE-005-e2e覆盖矩阵.md "RE-005-e2e覆盖矩阵") 的「Web 外取」行补到三格全有归宿：①`web_fetch` 的 `status` / `content_type` / `truncated` / `url` 被 [extract_result](../../symbio/src/plugins/session/tools/tool_executor.rs "tool_executor.rs") 的 `content` 分支整段吃掉 ⇒ 404 页面与正常页面对模型**同形**；②超时与「连不上」在回灌文案里同形（都是 `请求失败: error sending request for url (…)`）⇒ 用户看不出该重试还是该改地址；③`web_enabled` 在 [RE-001](../ref/RE-001-CONFIGURATION.md "RE-001-CONFIGURATION") 有登记、在出厂 `PLUGIN.yml` 里存在，但**全仓无读方**（通用启用键是 `plugin_enabled`）；④`http_request` 的 `allowed_domains` 是 `HttpRequestTool::new` 里写死的 `vec!["*"]`，无任何路径能写进配置 ⇒ `host_matches_allowlist` 恒真、那条「不在 allowed_domains 中」的错误分支**永不触发**；⑤`web_search` 的三个上游地址（Tavily / Serper / DuckDuckGo HTML）**全部写死在代码里** ⇒ 只能打真外网，而 CI 无网。
 ---
 
@@ -98,3 +99,28 @@ $ grep -rn "web_enabled" --include="*.rs" symbio/src
 
 - 2026-10-15 登记：T-076 的 Web 外取行补 e2e 时逐条查出（`e2e/cases/t65-web-fetch.mjs`
   的证据①③④⑤⑥与文件头「一条没有被钉住的读数」段即本任务的取证现场）。
+- 2026-10-15 闭批：五处逐条裁决，①②④⑤落码、③改判不做——
+  ① **元数据头随正文回灌**：`web_fetch` 把状态并进 `content` 首行
+  （`[web_fetch] status=… · content_type=… · truncated=… · url=…`）。不选
+  「改 `extract_result`」——那是 core 为单个工具开特例；也不选「另立 output 字段」
+  ——`extract_result` 的 `content` 优先，模型照旧看不见。首行拼进 `content` 后，
+  回灌文本与 JSON 字段两条路径都拿得到，t65 把 404 判据收紧到「必须带 `status=404`」。
+  ② **错误分流**：`web_fetch` / `http_request` 的 `send()` 按 reqwest 的
+  `is_timeout` / `is_connect` 分成「请求超时（指路 `web_timeout`）」/「连接失败」/
+  「请求失败」三档；t65 超时判据从「不拿正文」收紧到「报出超时并指路配置键」。
+  ③ **`web_enabled` 改判不做**：它是**有登记、无读者**的死键（全仓无一处读它），
+  开关语义由通用 `plugin_enabled` 承担；接线等于再造一个二选一的启用入口。
+  从 RE-001 与出厂文件除名，撤销条件写进 RE-001 行内（出现 web 特有开关需求时重开）。
+  ④ **白名单接配置**：`WebConfig.http_allowed_domains`（缺省 `["*"]`）经
+  `HttpRequestTool::new(timeout, domains)` 进工具；面板加 list 字段；空白名单
+  按缺省 `*` 处理（列表编辑器清空保存不该静默全拒）。
+  ⑤ **`search_api_base` 接配置**：三上游的**路径形状是供应商契约**（Tavily/Serper
+  `POST /search`、DDG `GET /html/`），配置只替换基址——空 = 官方端点（对现有
+  部署零行为变化）。t72 打本地靶子钉 Tavily 路径与 DDG 回退，Serper 与 Tavily
+  无交互、单测覆盖基址替换即够。
+  **顺带捞到一条机制层真 bug**：写 `PLUGIN.yml` 把没配过的可选字段校验成
+  「必须是字符串」（槽位里 `serper_api_key` 是 `null`）——「打开面板 → 直接保存」
+  必失败。修在 `schemas/detail.rs`（机制层一处）：非必填字段的 `null` = 「没填」，
+  跳过类型校验、原样交 serde；必填字段的 null 照旧拦。t72 的配置热切正是这条
+  修复的第一个消费者。
+  单测：web 15/15 · detail 20/20；e2e t65（判据收紧）/ t72（新增）绿；t69/t70 未受影响。

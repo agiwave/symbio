@@ -49,6 +49,33 @@ fn non_object_payload_is_rejected() {
     assert!(def_of(vec![]).validate(&json!("nope")).is_err());
 }
 
+/// 可选字段的 `null` = 「没填」（serde `Option` 的序列化形态）：
+/// 类型校验必须放行——否则「打开面板 → 什么都没改 → 保存」会把空槽位
+/// （还没配 key 的字段读出来就是 null）拦在门外，表单永远保存不了。
+#[test]
+fn null_for_optional_field_is_treated_as_unfilled() {
+    let def = def_of(vec![field("api_key", "password"), field("note", "text")]);
+
+    // 缺失与显式 null 同罪：都放行
+    assert!(def.validate(&json!({})).is_ok());
+    assert!(def.validate(&json!({ "api_key": null, "note": null })).is_ok());
+
+    // 但**类型不对的非空值**照旧拦（null 豁免不是类型豁免）
+    assert_eq!(
+        def.validate(&json!({ "api_key": 42 })).unwrap_err().fields[0].field,
+        "api_key"
+    );
+
+    // 必填字段的 null 仍是「必填项不能为空」，不豁免
+    let mut req = field("must", "text");
+    req.required = true;
+    let def_req = def_of(vec![req]);
+    assert_eq!(
+        def_req.validate(&json!({ "must": null })).unwrap_err().fields[0].message,
+        "必填项不能为空"
+    );
+}
+
 /// 隐藏字段（`visible_when` 不成立）与只读展示字段都不参与校验：
 /// 没显示的字段不该拦住提交。
 #[test]

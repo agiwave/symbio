@@ -42,6 +42,16 @@ fn config_definition() -> DetailDefinition {
                 "用于 Google 网页搜索（备用）",
                 "输入 Serper API Key",
             ),
+            DetailField::text(
+                "search_api_base",
+                "搜索上游基址",
+                "留空 = 各供应商官方端点；e2e / 自建代理填基址（路径形状按供应商契约保留）",
+            ),
+            DetailField::list(
+                "http_allowed_domains",
+                "HTTP 出站域名白名单",
+                "http_request 允许访问的域名（`*` = 不限制；`*.example.com` = 裸域名或子域）",
+            ),
         ],
     )
 }
@@ -75,11 +85,14 @@ impl WebPlugin {
 
     pub fn new(parent: Option<Weak<dyn Plugin>>, config: WebConfig, dir: PluginDir) -> Self {
         let web_timeout = config.web_timeout;
+        // 白名单在构造时**拷走一份**：改 `http_allowed_domains` 后需重载才生效
+        // （与 web_timeout 同款约定——面板上改的是配置文档，工具持有的快照不动）。
+        let http_allowed_domains = config.http_allowed_domains.clone();
         let config_lock = Arc::new(RwLock::new(config));
 
         let web_fetch = Arc::new(WebFetchTool::new(web_timeout));
         let web_search = Arc::new(WebSearchTool::new(Arc::clone(&config_lock)));
-        let http_request = Arc::new(HttpRequestTool::new(web_timeout));
+        let http_request = Arc::new(HttpRequestTool::new(web_timeout, http_allowed_domains));
 
         let tool_impls: Vec<Arc<dyn Capability>> = vec![web_fetch, web_search, http_request];
 

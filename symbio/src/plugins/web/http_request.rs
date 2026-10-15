@@ -19,11 +19,15 @@ pub struct HttpRequestTool {
 }
 
 impl HttpRequestTool {
-    /// 超时来自 `WebConfig.web_timeout`——与 `web_fetch` 同一真源，
-    /// 不在这里另留一份默认值（那正是「面板能改、代码不读」的来源）。
-    pub fn new(timeout_secs: u64) -> Self {
+    /// 超时来自 `WebConfig.web_timeout`、域名白名单来自 `WebConfig.http_allowed_domains`
+    /// ——与 `web_fetch` 同一真源，不在这里另留默认值（那正是「面板能改、代码不读」的来源）。
+    ///
+    /// 白名单**必须能从配置进来**（T-109 ④）：早先在构造里写死 `vec!["*"]`，
+    /// 没有任何路径能写进别的值 ⇒ `host_matches_allowlist` 恒真、「不在
+    /// allowed_domains 中」的错误分支永不触发——看上去在守域名，实际什么都不守。
+    pub fn new(timeout_secs: u64, allowed_domains: Vec<String>) -> Self {
         Self {
-            allowed_domains: vec!["*".to_string()],
+            allowed_domains,
             max_response_size: DEFAULT_MAX_RESPONSE_SIZE,
             timeout_secs,
         }
@@ -89,11 +93,26 @@ impl HttpRequestTool {
             }
         }
 
-        // 发送请求
+        // 发送请求。**错误要分流**（T-109 ②，与 `web_fetch` 同一形状）：
+        // reqwest 的 Display 把超时与连接失败收成同一句 `error sending request…`
+        // ⇒ 用户看不出该重试还是该改地址。
         let response = request
             .send()
             .await
-            .map_err(|e| PluginError::InternalError(format!("请求失败: {e}")))?;
+            .map_err(|e| {
+                if e.is_timeout() {
+                    PluginError::InternalError(format!(
+                        "请求超时：{}s 内未完成（可调大 web_timeout 后重试）",
+                        self.timeout_secs
+                    ))
+                } else if e.is_connect() {
+                    PluginError::InternalError(format!(
+                        "连接失败：无法连到 {validated_url}（请检查地址与网络后重试）"
+                    ))
+                } else {
+                    PluginError::InternalError(format!("请求失败: {e}"))
+                }
+            })?;
 
         let status = response.status();
         let headers_out: Vec<(String, String)> = response
@@ -234,10 +253,11 @@ impl Capability for HttpRequestTool {
 }
 
 impl Default for HttpRequestTool {
-    /// 默认档取 [`WebConfig`](super::WebConfig) 的默认超时——**唯一真源**，
-    /// 不在此处另写一个字面量30（那正是「配置不生效」的成因）。
+    /// 默认档取 [`WebConfig`](super::WebConfig) 的默认超时与默认白名单（`*`）——
+    /// **唯一真源**，不在此处另写字面量（那正是「配置不生效」的成因）。
     fn default() -> Self {
-        Self::new(crate::plugins::web::web_config::WebConfig::default().web_timeout)
+        let c = crate::plugins::web::web_config::WebConfig::default();
+        Self::new(c.web_timeout, c.http_allowed_domains)
     }
 }
 
@@ -293,6 +313,12 @@ fn is_private_or_local_host(host: &str) -> bool {
 /// 原实现另有一处笔误 `host == &suffix[1..]`：`"example.com"[1..]` 是 `"xample.com"`，
 /// 本意应是「裸域名自身」，而这一点已由 `ends_with(".suffix")` 的反面覆盖，故删掉。
 fn host_matches_allowlist(host: &str, allowlist: &[String]) -> bool {
+    // 空白名单按缺省 `*` 处理（T-109 ④）：白名单是 `Vec<String>`，前端列表编辑器
+    // 很容易把条目删光保存——那应当回到「不限制」，而不是静默变成「全拒」
+    // （全拒等于废掉 http_request 这一整个工具，且没有任何错误指向白名单）。
+    if allowlist.is_empty() {
+        return true;
+    }
     let host = host
         .trim_start_matches('[')
         .trim_end_matches(']')

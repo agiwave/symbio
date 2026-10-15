@@ -97,6 +97,30 @@ fn validate_url_enforces_allowlist() {
     assert!(t.validate_url("https://example.org/x").is_err());
 }
 
+/// 白名单**有生产路径能拿到非 `*` 的值**（T-109 ④）：缺省是 `*`，
+/// 配置里写了别的 ⇒ 拒绝文案指名「不在 allowed_domains 中」。
+/// 早先 `new` 里写死 `vec!["*"]`，这条分支恒不触发——守卫恒真。
+#[test]
+fn default_allowlist_is_unrestricted_and_config_value_reaches_validate() {
+    let c = crate::plugins::web::web_config::WebConfig::default();
+    assert_eq!(c.http_allowed_domains, vec!["*".to_string()]);
+
+    let t = HttpRequestTool::new(c.web_timeout, vec!["example.com".to_string()]);
+    assert!(t.validate_url("https://example.com/x").is_ok());
+    let err = t.validate_url("https://other.example.net/x").unwrap_err().to_string();
+    assert!(
+        err.contains("不在 allowed_domains 中"),
+        "拒绝文案应指明白名单（实际: {err}）"
+    );
+}
+
+/// 空白名单 = 回到「不限制」：列表编辑器清空保存不该静默变成「全拒」
+#[test]
+fn empty_allowlist_is_unrestricted() {
+    let t = HttpRequestTool::new(30, vec![]);
+    assert!(t.validate_url("https://example.com/x").is_ok());
+}
+
 #[test]
 fn validate_method_accepts_known_and_rejects_unknown() {
     let t = HttpRequestTool::default();

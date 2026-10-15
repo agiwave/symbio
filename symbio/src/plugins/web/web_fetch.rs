@@ -43,12 +43,27 @@ impl WebFetchTool {
             .build()
             .map_err(|e| PluginError::InternalError(format!("创建 HTTP 客户端失败: {e}")))?;
 
-        // 发送请求
+        // 发送请求。**错误要分流**（T-109 ②）：reqwest 对超时与连接失败的
+        // `Display` 同形（都是 `error sending request…`），直接回灌则「对方慢」
+        // 与「地址不通」对模型与用户同形——而两者的下一步（重试 vs 改地址）相反。
         let response = client
             .get(url)
             .send()
             .await
-            .map_err(|e| PluginError::InternalError(format!("请求失败: {e}")))?;
+            .map_err(|e| {
+                if e.is_timeout() {
+                    PluginError::InternalError(format!(
+                        "请求超时：{}s 内未收到 {} 的响应（可调大 web_timeout 后重试）",
+                        self.timeout_secs, url
+                    ))
+                } else if e.is_connect() {
+                    PluginError::InternalError(format!(
+                        "连接失败：无法连到 {url}（请检查地址与网络后重试）"
+                    ))
+                } else {
+                    PluginError::InternalError(format!("请求失败: {e}"))
+                }
+            })?;
 
         let status = response.status();
         let content_type = response
@@ -74,11 +89,24 @@ impl WebFetchTool {
             (body, false)
         };
 
+        // **元数据头随正文回灌**（T-109 ①）：`extract_result` 的 `content` 分支
+        // 只取正文 ⇒ 404 页与 200 页对模型同形、截断后半截不知情。把状态并进
+        // `content` 首行——回灌文本（结果节点 `content` = 它）与 JSON 字段两条
+        // 路径都拿得到，不必在 tool_executor 里为单个工具开特例。
+        let content_with_meta = format!(
+            "[web_fetch] status={} · content_type={} · truncated={} · url={}\n\n{}",
+            status.as_u16(),
+            content_type,
+            truncated,
+            url,
+            content
+        );
+
         Ok(json!({
             "success": true,
             "status": status.as_u16(),
             "content_type": content_type,
-            "content": content,
+            "content": content_with_meta,
             "truncated": truncated,
             "url": url
         }))
