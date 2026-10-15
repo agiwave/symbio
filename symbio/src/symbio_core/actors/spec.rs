@@ -112,6 +112,19 @@ impl ActorSpec {
         self.holds(crate::symbio_core::governance::Capability::ProduceArtifact.name())
     }
 
+    /// 写侧判定（S07 **抢占判定者**）：本规格能否落控制事实（`task.held` /
+    /// `control`）。
+    ///
+    /// 与收束两臂并列的第三个能力读方：`judge.intent` 是判定者的**全部**权威
+    /// （[S07 §5](../../../../docs/stage/ST-007-插话与实时打断.md "ST-007-插话与实时打断")
+    /// 「判定者不得直接发言」——它没有 `reply.*`，只有 `judge.intent`，由
+    /// `authz::ROWS` 那一行保证）。此前该字段在生产里"算了却看不见"：`inbox`
+    /// 直驱判定者时从不读规格，写控制事实也不查 `judge.intent`
+    /// （[T-082](../../../../docs/task/T-082-角色行生产构造批.md "T-082-角色行生产构造批") 批②）。
+    pub fn can_judge_intent(&self) -> bool {
+        self.holds(crate::symbio_core::governance::Capability::JudgeIntent.name())
+    }
+
     /// 能力集是否含该名。名字对错由**构造期**兜住（`from_names` 认不出即拒绝整体
     /// 构造）——读侧照单全收，不把拼写问题变成第二处判定。
     fn holds(&self, name: &str) -> bool {

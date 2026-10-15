@@ -1,7 +1,7 @@
 //! 控制面主体：抢占判定（[roadmap/S07](../../../../docs/stage/ST-007-插话与实时打断.md "ST-007-插话与实时打断")）与外部执行闸门（[roadmap/S09](../../../../docs/stage/ST-009-外部执行与熔断.md "ST-009-外部执行与熔断")）。
 
 use crate::symbio_core::authz::PRINCIPAL_REFLEX;
-use crate::symbio_core::Event;
+use crate::symbio_core::{ActorSpec, Event, Pattern, Scope};
 
 /// 抢占判定结论（反射档三选一 + 超时默认，[plan/04 §2.1](../../../../docs/plan/PL-004-工程落地.md "PL-004-工程落地")）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,19 +25,52 @@ pub enum Preemption {
 /// grants 表保证：`authz::ROWS` 里 [`PRINCIPAL_REFLEX`] 那一行，判据见
 /// `authz.test.rs::the_reflex_row_is_narrower_than_derivation`）。
 ///
-/// 能力那一半**不在这里**：`capabilities = [judge.intent]` 的权威是授权表，
-/// 本类型只负责按 [`PRINCIPAL_REFLEX`] 这个主体名写事件。两处各写一份能力清单
+/// 能力那一半**不在这里硬写**：`capabilities = [judge.intent]` 的权威是授权表，
+/// [`Self::spec`] 从表行取（`matrix_for` ⇒ `grant_names_of`）。两处各写一份能力清单
 /// 必然漂移成「表授予 A、闸门判 B」——两边都是合法能力名。
 pub struct PreemptionDecider;
 
 impl PreemptionDecider {
+    /// S07 抢占判定者**行**（`ActorSpec` 生产构造点，[T-082] 批②）。
+    ///
+    /// `{ principal: agent:reflex, pattern: decider, capabilities: [judge.intent],
+    /// budget_ms: 80, scope: root }`——五个字段全部**取实**，与 S07 §3 表逐字相符：
+    /// principal/pattern/capabilities 同源于授权表那一行（[T-081] 落地的
+    /// `PRINCIPAL_REFLEX` 窄行），budget = 反射档，scope = root。
+    ///
+    /// 此前判定者**只有行为没有行**：`decide` 被直驱、预算由调用方现算，规格从不构造
+    /// ——「判定真、行假」。本构造点让预算与能力有了随主体走的载体，读方见
+    /// [`Self::decide`]（预算）与 `plugins::session::transcript::inbox` 的写侧闸
+    /// （能力，[`ActorSpec::can_judge_intent`]）。
+    ///
+    /// [T-081]: ../../../../docs/task/T-081-授权表缺行登记批.md "T-081-授权表缺行登记批"
+    pub fn spec(&self) -> ActorSpec {
+        let principal = PRINCIPAL_REFLEX.to_string();
+        ActorSpec {
+            pattern: Pattern::for_principal(&principal),
+            capabilities: crate::symbio_core::authz::matrix_for(&principal)
+                .grant_names_of(&principal),
+            budget_ms: crate::symbio_core::adapters::LatencyTier::Reflex.budget_ms(),
+            scope: Scope::Root,
+            principal,
+        }
+    }
+
     /// 对当前在跑任务的处置判定。
+    ///
+    /// `spec`：判定者**自己的行**（[`Self::spec`]）。预算从它身上读
+    /// （`spec.budget_ms`，T-082 批②）——不再是调用方现算一个裸 `u64` 塞进来，
+    /// 「判定者行声明了多少预算」因此是一等数据、有真读方。
     ///
     /// `elapsed_ms`：判定者自身耗时（调用方 `Instant` 计时后传入——判定是纯函数，
     /// 计时留在边界上）。预算内（≤ `budget_ms`）才做实质判定，超时走默认分支。
     /// 判定顺序（04 §2.1）：无在跑任务 → 放行；final 已发出 → 排队；否则 → 挂起。
-    pub fn decide(&self, events: &[Event], elapsed_ms: u64, budget_ms: u64) -> Preemption {
-        if elapsed_ms > budget_ms {
+    ///
+    /// 能力（`judge.intent`）**不在本函数判**：它是**写权**，拦在落格那一侧
+    /// （`inbox::commit_preemption` 的写侧闸），与 `decide` 是纯函数判定分开——
+    /// 判定可以算，写控制事实才需要资格。
+    pub fn decide(&self, spec: &ActorSpec, events: &[Event], elapsed_ms: u64) -> Preemption {
+        if elapsed_ms > spec.budget_ms {
             return Preemption::TimeoutDefaultContinue;
         }
         // 在跑任务 = 最新一个 opened 且未终态、未挂起的任务。

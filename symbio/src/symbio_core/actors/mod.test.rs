@@ -1273,7 +1273,7 @@ fn interruption_within_reflex_budget_produces_control_event() {
     let store = EventStore::new();
     running_task(&store, "t1");
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
-    let d = PreemptionDecider.decide(&snapshot, 10, 80);
+    let d = PreemptionDecider.decide(&PreemptionDecider.spec(), &snapshot, 10);
     match d {
         Preemption::Suspend { task_id, as_of_seq } => {
             assert_eq!(task_id, "t1");
@@ -1305,14 +1305,17 @@ fn widening_budget_changes_preemption_outcome() {
     let store = EventStore::new();
     running_task(&store, "t1");
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
-    // 判定耗时 100ms：反射档（80ms）超时 → 默认继续（不挂起）。
+    // 判定耗时 100ms：判定者行（反射档，`spec().budget_ms` = 80）超时 → 默认继续（不挂起）。
     assert_eq!(
-        PreemptionDecider.decide(&snapshot, 100, 80),
+        PreemptionDecider.decide(&PreemptionDecider.spec(), &snapshot, 100),
         Preemption::TimeoutDefaultContinue
     );
-    // 同样的耗时，预算放宽到 60000 → 实质判定成立（挂起）。
+    // 同一份判据数据，只把**行上的预算**放宽到 60000 → 实质判定成立（挂起）。
+    // 断言「`decide` 读的是规格自己的 budget_ms」——不是某个调用方现算的数值。
+    let mut generous = PreemptionDecider.spec();
+    generous.budget_ms = 60_000;
     assert_eq!(
-        PreemptionDecider.decide(&snapshot, 100, 60_000),
+        PreemptionDecider.decide(&generous, &snapshot, 100),
         Preemption::Suspend {
             task_id: "t1".into(),
             as_of_seq: 0
@@ -1340,7 +1343,7 @@ fn interruption_after_final_is_queued_not_preempted() {
         .unwrap();
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     assert_eq!(
-        PreemptionDecider.decide(&snapshot, 10, 80),
+        PreemptionDecider.decide(&PreemptionDecider.spec(), &snapshot, 10),
         Preemption::Queue
     );
 }
@@ -1424,6 +1427,50 @@ fn preemption_decider_cannot_speak() {
     assert!(
         unregistered.can_write("agent:unregistered", Capability::ReplyFirst),
         "未登记主体派生主智能体那一行（身份分层 ≠ 权限分层，S08 §4）——判定者的窄是**登记**带来的"
+    );
+}
+
+/// T-082 批②：S07 判定者**行**（`PreemptionDecider::spec`）——五字段取实 + 能力读方。
+///
+/// 判据分两半：① 行的形状与 S07 §3 表逐字相符（五字段全部取实、非平凡值）；
+/// ② **能力读方**——`can_judge_intent` 读规格**自己身上**的能力集，含反向用例
+/// （清空能力集 ⇒ 写权拒；判定若绕回授权表则这条绿）。
+#[test]
+fn preemption_decider_spec_carries_its_row_and_gates_on_judge_intent() {
+    use crate::symbio_core::authz::PRINCIPAL_REFLEX;
+
+    let spec = PreemptionDecider.spec();
+    assert_eq!(
+        spec.principal, PRINCIPAL_REFLEX,
+        "主体名 = 授权表那一行的键"
+    );
+    assert_eq!(spec.pattern, Pattern::Decider, "规则判定，非模型（S07 §3）");
+    assert_eq!(
+        spec.capabilities,
+        vec!["judge.intent".to_string()],
+        "能力取授权表**窄行**（T-081），不是主智能体派生整套"
+    );
+    assert_eq!(
+        spec.budget_ms,
+        crate::symbio_core::adapters::LatencyTier::Reflex.budget_ms(),
+        "预算 = 反射档 80ms"
+    );
+    assert!(
+        matches!(spec.scope, Scope::Root),
+        "会话驱动的判定都是根作用域"
+    );
+
+    // 能力读方：判定者持 judge.intent ⇒ 可落控制事实（`task.held` / `control`）。
+    assert!(
+        spec.can_judge_intent(),
+        "判定者持 judge.intent ⇒ 写侧闸放行"
+    );
+    // 反向用例：清空能力集 ⇒ 写权拒。判定若绕回授权表，这条会绿（假绿）——它必须红。
+    let mut stripped = PreemptionDecider.spec();
+    stripped.capabilities.clear();
+    assert!(
+        !stripped.can_judge_intent(),
+        "无 judge.intent ⇒ 不得落控制事实（读的是规格自己的集合）"
     );
 }
 

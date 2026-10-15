@@ -44,8 +44,8 @@ use super::super::plugin::{inbox_item_node, inbox_item_path, SessionPlugin};
 use super::supplements;
 use crate::symbio_core::{chat_message as cm, session_chat, VdfsChange};
 use crate::symbio_core::{
-    Event, EventWalStore, LatencyTier, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    Preemption, PreemptionDecider, Store, SESSION_ID, SOURCE_PRINCIPAL, WORKDIR,
+    Event, EventWalStore, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, Preemption,
+    PreemptionDecider, Store, SESSION_ID, SOURCE_PRINCIPAL, WORKDIR,
 };
 use std::sync::Arc;
 
@@ -307,8 +307,11 @@ impl SessionPlugin {
 
         let mut inner = state.inner.write().await;
         inner.preempt_judged = true;
+        // 判定者行（`ActorSpec`）由 `spec()` 现构造——预算从行上读（T-082 批②），
+        // 不再是调用方现算一个裸数值塞进来。
+        let spec = PreemptionDecider.spec();
         if let Preemption::Suspend { task_id, as_of_seq } =
-            PreemptionDecider.decide(&snapshot, elapsed_ms, LatencyTier::Reflex.budget_ms())
+            PreemptionDecider.decide(&spec, &snapshot, elapsed_ms)
         {
             inner.preempt = PreemptPending::Hold { task_id, as_of_seq };
         }
@@ -330,6 +333,20 @@ impl SessionPlugin {
         let Some((task_id, as_of_seq)) = hold else {
             return;
         };
+        // 写侧闸（T-082 批②，与 `turn_runner::closure_granted` 同一形态）：落控制事实
+        // 需要 `judge.intent`——判定者只产控制事件、无 `reply.*`（S07 §5），那条界限
+        // 由授权表的窄行给，读的是判定者规格**自己身上**的能力集（不再回头查表）。
+        // 拒绝 ⇒ 不落任何控制事实，且清 `Hold`：留着会让消费者为一个写不出的挂起空转。
+        let spec = PreemptionDecider.spec();
+        if !spec.can_judge_intent() {
+            crate::plugin_warn!(
+                "actors",
+                "[preempt] 判定者缺 judge.intent，拒绝落控制事实（principal={}，task={task_id}）",
+                spec.principal
+            );
+            state.inner.write().await.preempt = PreemptPending::None;
+            return;
+        }
         let written = self.append_preemption(&state.session_id, |anchor| {
             let decider = PreemptionDecider;
             vec![
