@@ -72,8 +72,22 @@ import {
 const SID_OK = 'e2e-t36-ok';
 const SID_BROAD = 'e2e-t36-broad';
 
-/** 装心跳那一轮的用户发言（两个会话同文，靠 `once` + 数组顺序各自消耗各自那条场景）。 */
-const MSG = '开始工作';
+/**
+ * 装心跳那一轮的用户发言：**两会话各一条、互不为子串**。
+ *
+ * 曾经的写法是两条同文（`MSG`），靠 `once` + 场景数组顺序「各自消耗各自那条」——
+ * 那把判据绑在了 **mock 场景的消耗顺序**上，而消耗顺序由「哪个会话的轮先到 LLM」决定，
+ * 后者取自会话目录的 `read_dir` 顺序（`plugins/session/store/mod.rs::session_dirs_under`
+ * 未钉排序）：NTFS 上恰是名字序、ext4 上是哈希序。于是同一份用例在 CI（Linux）上
+ * 让 `e2e-t36-broad` 拿到短提示词场景、`e2e-t36-ok` 拿到长提示词场景，两条判据双双
+ * 落空（2026-10-15 CI 实测）。**判据不能住在平台顺序里**：这里改成按内容配对，
+ * 与到达顺序无关。
+ *
+ * 「只有心跳提示词长度不同」这条不变：分岔发生在**心跳提示词**上（闸门读的是它），
+ * 装心跳那条发言只是入口，两条文本走完全相同的代码。
+ */
+const MSG_OK = '开始工作（目标一）';
+const MSG_BROAD = '开始工作（目标二）';
 
 /** 闸门**放行**的提示词：短（远低于 200 字节上界）⇒ 应开出心跳轮。 */
 const PROMPT_OK = '推进待办';
@@ -105,11 +119,11 @@ export default defineCase(
     );
 
     const llm = await new MockLlm([
-      // 装心跳：两个会话各一次（数组顺序即消耗顺序——SID_OK 先跑，拿第一条）。
-      // `once` 保证同文输入在两会话上各自落到各自那条场景上。
+      // 装心跳：两条场景各由**自己会话那条发言**命中（`match` 按内容配对），
+      // 与两个会话谁先跑轮无关——顺序进判据就是平台相关（见 `MSG_OK` 的注记）。
       {
         id: 'hb-ok',
-        match: MSG,
+        match: MSG_OK,
         once: true,
         content: '我先把心跳设置好。',
         toolCalls: [
@@ -122,7 +136,7 @@ export default defineCase(
       },
       {
         id: 'hb-broad',
-        match: MSG,
+        match: MSG_BROAD,
         once: true,
         content: '我先把心跳设置好。',
         toolCalls: [
@@ -198,12 +212,37 @@ export default defineCase(
       (await cli.invoke('session/stats', {}, { session_id: sid })).body?.data;
 
     /**
+     * 某个会话「装心跳那一轮」发出去的 `heartbeat` 调用参数。
+     *
+     * 筛法是「最后一条 user 消息含该会话的发言」——与 mock 的 `match` 同口径，读的是
+     * **这条会话自己的**调用。原先只在全量请求上 `.some(includes(PROMPT_OK))`：两条
+     * 判据在配对错位时**同时满足**（2026-10-15 CI 现场：`ok` 拿到长提示词、`broad`
+     * 拿到短的，这两句照样绿，红的只是后面的心跳轮与就绪集——症状离真因隔了两层）。
+     * 工具结果轮的历史里带着上一轮的 `tool_calls`，同属这一会话，重复计入无碍
+     * （判据是「含 / 不含」，不是次数）。
+     */
+    const hbCallsOf = async (marker) =>
+      (await llm.requests())
+        .filter((r) => {
+          const users = (r.body.messages ?? []).filter((m) => m.role === 'user');
+          return String(users.at(-1)?.content ?? '').includes(marker);
+        })
+        .flatMap((r) => (r.body.messages ?? []).flatMap((m) => m.tool_calls ?? []))
+        .filter((c) => c.function?.name === 'heartbeat')
+        .map((c) => c.function?.arguments ?? '');
+
+    /**
      * 超时时的现场快照。
      *
      * 「心跳没到点」在这条用例里有三种长得一样的失败：调度器没扫到（LLM 请求数停在
      * 4）、扫到但闸门/事实源把触发挡下（请求数停在 4，stderr 里有 `[Heartbeat]` 的
      * 拒发理由）、跑了轮但提示词没落进转写（请求数在涨）。只带 stderr 尾部区分不了
      * 它们——而 CI（Linux）与本机（Windows）的分歧正落在这三种之一上。
+     *
+     * 这份快照确实取到了东西：2026-10-15 CI 上读到的是「两个会话的心跳轮都跑了，但
+     * 提示词互换了」——分歧不在这三类里，而在**装心跳那一轮的配对**（同文发言 +
+     * `once` 场景 = 按到达顺序配对，到达顺序取自未钉排序的会话目录遍历）。见 `MSG_OK`
+     * 的注记。
      *
      * **快照里的顺序就是它的可见性**：门禁只印失败日志的**末 40 行**，而 CLI stderr
      * 一轮就几十行。判据读数必须排在 stderr 之后，否则被推出窗口——2026-10-15 CI
@@ -236,27 +275,24 @@ export default defineCase(
     try {
       await cli.waitGatewayReady(20_000, 'T36 长驻进程');
 
-      // ── 装心跳：SID_OK 先跑（拿 hb-ok 场景），SID_BROAD 后跑（拿 hb-broad）──
-      // once + 数组顺序 = 两条同文输入各自消耗各自那条场景（见 mock-llm 的匹配规则）。
-      await send(SID_OK, MSG);
-      await send(SID_BROAD, MSG);
+      // ── 装心跳：发言内容即配对键，先跑哪个都一样 ─────────────────────────
+      await send(SID_OK, MSG_OK);
+      await send(SID_BROAD, MSG_BROAD);
 
       // 两个装心跳的轮次都真的跑了（工具调用各一次，参数各带各的提示词）。
       await waitFor(async () => (await llm.requests()).length >= 4, {
         what: '两个装心跳轮次跑完（各一次工具调用 + 一次结果回灌）',
         timeoutMs: 60_000,
       });
-      const calls = (await llm.requests())
-        .flatMap((r) => (r.body.messages ?? []).flatMap((m) => m.tool_calls ?? []))
-        .filter((c) => c.function?.name === 'heartbeat')
-        .map((c) => c.function?.arguments ?? '');
+      const okCalls = await hbCallsOf(MSG_OK);
+      const broadCalls = await hbCallsOf(MSG_BROAD);
       assert(
-        calls.some((a) => a.includes(PROMPT_OK)),
-        `SID_OK 应装上短提示词的心跳（实际: ${JSON.stringify(calls)}）`,
+        okCalls.length >= 1 && okCalls.every((a) => a.includes(PROMPT_OK)),
+        `SID_OK 的装心跳轮必须带短提示词（闸门放行侧；实际: ${JSON.stringify(okCalls)}）`,
       );
       assert(
-        calls.some((a) => a.includes(PROMPT_BROAD)),
-        `SID_BROAD 应装上长提示词的心跳（实际: ${JSON.stringify(calls)}）`,
+        broadCalls.length >= 1 && broadCalls.every((a) => a.includes(PROMPT_BROAD)),
+        `SID_BROAD 的装心跳轮必须带长提示词（闸门拒收侧；实际: ${JSON.stringify(broadCalls)}）`,
       );
 
       // ── 等一个 tick：真进程里的调度器到点触发 ───────────────────────────
