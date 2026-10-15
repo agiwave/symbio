@@ -37,6 +37,47 @@ const RUNNER = path.join(REPO, 'scripts', 'gen-facts.mjs')
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'gen-facts-'))
 
+/**
+ * 收集一棵树里的 `.md` 语料——「散文指路」类判据的扫描面。
+ *
+ * ## 为什么必须跳过 `.workbuddy-ai/`（T-108 之后）
+ *
+ * 门禁的失败详情会把**失败项日志的末 N 行**写进
+ * `.workbuddy-ai/gate-logs/<runId>/_summary.md`，而那段正文就是**被扫文档的原文引用**。
+ * 把引用当「指路」判，结果是：一条早已修好的错误引用会被**它自己那次失败的记录**
+ * 永久喂红——而且红在一个日志文件上、与源码无关（症状：改完文档重跑仍红，
+ * 指出的行号落在一个 `_summary.md` 里，读者以为判据坏了）。
+ *
+ * 这不是假设：本轮修 `T-110` 的 `RE-006 §6` 时正是如此——源文档改对了，
+ * 上一轮的失败详情仍在语料里，判据继续红。
+ *
+ * ## 范围收窄到哪里为止
+ *
+ * 跳过的只有**工具产物目录**（`node_modules` / `target` / `.git` / `archive` /
+ * `.workbuddy-ai`），**一个文档目录都没跳**——收窄的方向是「把不是文档的东西排除」，
+ * 不是「把判据够不着的地方缩小」。回归测试双向钉住这一点（见文件末尾那条）。
+ */
+export function proseDocs(root) {
+  const SKIP_DIRS = new Set(['.git', 'node_modules', 'target', 'archive', '.workbuddy-ai'])
+  const out = []
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      if (SKIP_DIRS.has(e.name)) continue
+      const p = path.join(d, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (e.name.endsWith('.md')) {
+        out.push({
+          path: p,
+          rel: path.relative(root, p).replace(/\\/g, '/'),
+          text: fs.readFileSync(p, 'utf8'),
+        })
+      }
+    }
+  }
+  walk(root)
+  return out
+}
+
 /** 一份最简、合法的事实模块源码（`id` 与文件名对齐）。 */
 const goodSource = (name = 'good') =>
   [
@@ -683,39 +724,52 @@ test('散文里的 RE-006 节次指路：节次必须存在', () => {
 
   const bad = []
   let scanned = 0
-  const walk = (d) => {
-    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      if (e.name === '.git' || e.name === 'node_modules' || e.name === 'target' || e.name === 'archive') continue
-      const p = path.join(d, e.name)
-      if (e.isDirectory()) walk(p)
-      else if (e.name.endsWith('.md')) {
-        const rel = path.relative(REPO, p).replace(/\\/g, '/')
-        if (rel.endsWith('docs/ref/RE-006-当前事实表.md')) continue
-        scanned++
-        fs.readFileSync(p, 'utf8').split(/\r?\n/).forEach((l0, i) => {
-          // **先剥代码跨**：`[§6.3](…)` 写在反引号里是**举例**（「当年长这样」），
-          // 不是指路。不剥会当场误报本判据自己在注释里写的反例——判据红自己，
-          // 最快的失守方式。加豁免不如加正确性：代码跨里的 `§` 本来就不是引用。
-          const l = l0.replace(/`[^`]*`/g, '``')
-          // 形态 1（**已退休**，2026-10-14）：链接显示文字里的 §N.M。
-          //   RE-006 纳入编号体系后，文档内的链接一律写成 `[[RE-006-当前事实表#…|…]]`，
-          //   由 gen-doc-refs 展开成真实链接——锚点存在性归 **D-007**、地址重算归 **RF-002**，
-          //   两条都已在门禁里。这条形态不再出现在文档里，判它就是判一段不存在的东西。
-          // 形态 2：散文写全 `CURRENT.md §N.M`，含 markdown 链接形态
-          // （`[CURRENT.md](../CURRENT.md) §3.9` —— 中间隔着一个 `)`，
-          //  第一版正则漏了它，注入验证当场报「漏过」）
-          for (const m of l.matchAll(/RE-006[\w\u4e00-\u9fa5-]*`?\)?\s*§(\d+(?:\.\d+)*)/g)) {
-            if (!actual.has(m[1])) {
-              bad.push(`${rel}:${i + 1} 散文指 RE-006 §${m[1]}，但没有这一节`)
-            }
-          }
-        })
+  for (const f of proseDocs(REPO)) {
+    if (f.rel.endsWith('docs/ref/RE-006-当前事实表.md')) continue
+    scanned++
+    f.text.split(/\r?\n/).forEach((l0, i) => {
+      // **先剥代码跨**：`[§6.3](…)` 写在反引号里是**举例**（「当年长这样」），
+      // 不是指路。不剥会当场误报本判据自己在注释里写的反例——判据红自己，
+      // 最快的失守方式。加豁免不如加正确性：代码跨里的 `§` 本来就不是引用。
+      const l = l0.replace(/`[^`]*`/g, '``')
+      // 形态 1（**已退休**，2026-10-14）：链接显示文字里的 §N.M。
+      //   RE-006 纳入编号体系后，文档内的链接一律写成 `[[RE-006-当前事实表#…|…]]`，
+      //   由 gen-doc-refs 展开成真实链接——锚点存在性归 **D-007**、地址重算归 **RF-002**，
+      //   两条都已在门禁里。这条形态不再出现在文档里，判它就是判一段不存在的东西。
+      // 形态 2：散文写全 `CURRENT.md §N.M`，含 markdown 链接形态
+      // （`[CURRENT.md](../CURRENT.md) §3.9` —— 中间隔着一个 `)`，
+      //  第一版正则漏了它，注入验证当场报「漏过」）
+      for (const m of l.matchAll(/RE-006[\w\u4e00-\u9fa5-]*`?\)?\s*§(\d+(?:\.\d+)*)/g)) {
+        if (!actual.has(m[1])) {
+          bad.push(`${f.rel}:${i + 1} 散文指 RE-006 §${m[1]}，但没有这一节`)
+        }
       }
-    }
+    })
   }
-  walk(REPO)
   assert.ok(scanned > 80, `只扫了 ${scanned} 份文档——判据自己失效了`)
   assert.deepEqual(bad, [], `散文里的 RE-006 节次指路失效：\n    ${bad.join('\n    ')}`)
+})
+
+test('散文判据的扫描面：文档目录全进语料，工具产物目录一律不进', () => {
+  // 反向钉住 `proseDocs` 的范围。两个方向都要判，缺一个都不算钉住：
+  //   · 只判「`.workbuddy-ai/` 不进」⇒ 把整个语料砍空也照样绿（判据退化成装饰）；
+  //   · 只判「`docs/` 进」⇒ 门禁失败详情（引用被扫文档的原文）会把判据喂成永久红。
+  const root = tmp()
+  fs.mkdirSync(path.join(root, 'docs', 'ref'), { recursive: true })
+  fs.mkdirSync(path.join(root, '.workbuddy-ai', 'gate-logs', '20261015-120438'), { recursive: true })
+  fs.mkdirSync(path.join(root, 'node_modules', 'x'), { recursive: true })
+  fs.writeFileSync(path.join(root, 'docs', 'ref', 'a.md'), '见 RE-006 §99 那一节\n')
+  fs.writeFileSync(
+    path.join(root, '.workbuddy-ai', 'gate-logs', '20261015-120438', '_summary.md'),
+    '失败详情里引用了「见 RE-006 §99 那一节」这句原文\n',
+  )
+  fs.writeFileSync(path.join(root, 'node_modules', 'x', 'readme.md'), '见 RE-006 §99\n')
+  const rels = proseDocs(root).map((f) => f.rel).sort()
+  assert.deepEqual(
+    rels,
+    ['docs/ref/a.md'],
+    `扫描面应恰好是文档目录（实得 ${JSON.stringify(rels)}）——多一个就是把引用当指路，少一个就是把判据砍空`,
+  )
 })
 
 test('RE-003 契约表的键必须是 §2.3 的静态路由（多一个键判红）', () => {

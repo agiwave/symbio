@@ -19,8 +19,9 @@ HTTP/SSE（LLM）、stdio/JSON-RPC（MCP）、磁盘（homedir）。
 |---|---|
 | `mock-llm.mjs` | OpenAI Chat 兼容 Mock LLM：SSE 流式、场景编排（`match`/`afterTool`/`once`/`chunks`/故障注入）、请求记录 `GET /_requests` |
 | `mock-mcp.mjs` | stdio JSON-RPC Mock MCP server：规范握手、可编排工具与错误/断连、调用记录 `--record` |
+| `mock-http.mjs` | **本地 HTTP 靶子**（`web_fetch` / `http_request` 的对面那一端）：确定性端点 `/page` `/json` `/big` `/slow` `/missing` `/echo`，正文含每次启动随机生成的标记，请求留痕 `GET /_requests`。存在的理由是**真外网在 CI 上不存在、内容会变、对方会限流**——那三类失败都不在被测系统里，却会被记成产品缺陷。T65 起 |
 | `mock-actions.json` | mock-mcp 行为脚本示例（T6：`add` 返回 JSON-RPC 错误） |
-| `helpers.mjs` | 夹具与断言库：临时 homedir、mock 进程编排、CLI 运行器、`defineCase`、共享不变量断言 |
+| `helpers.mjs` | 夹具与断言库：临时 homedir、mock 进程编排（`MockLlm` / `MockHttp`）、CLI 运行器、`defineCase`、共享不变量断言 |
 | `llm-contract.mjs` | **LLM 调用契约断言库**（模型视角判据，LC-001…007）：从 mock-llm 的 `/_requests` 抽信封 / system 装配 / 历史 / 工具面 / 工具反馈 / user 纯度 / 辅助请求形状，判「用户请求 → 系统实际发给模型的调用」是否正确（配套 `t56`–`t63`，任务 T-096） |
 | `cases/*.mjs` | **测试用例（每用例一文件）** |
 | `cases/_selfrun.mjs` | 用例自执行引导（`_` 前缀 = 共享材料，不当作用例） |
@@ -184,6 +185,13 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
     还活着，全局探针永远非空 ⇒ 恒超时；那是等待写错了对象。挂在句柄的事件上：
     `cli.proc.once('exit', …)`（Windows 的 `kill()` 走信号路径，`exitCode` 恒 `null`，
     只盯 `exitCode` 同样会等到超时）。全局那条只用在 `finally`（第 6 条）。
+14. **`afterTool` 场景不写 `once` / `times` ⇒ 它吃掉每一个工具结果轮**（含它自己那一次
+    的结果轮），于是模型反复发同一个工具调用：**无限工具循环**。症状是 CLI 撞满
+    `runCli` 的 120s 超时（**不是断言红**），日志里刷成百上千行 `⚙ 调用工具: <同一个>`，
+    而「哪条场景失控」要翻到最前面才看得出。`afterTool` 只是「工具结果轮的**优先池**」
+    （`pickScenario`：池里选不出才退回全池），池里**不限名额**的那一条会一直赢。
+    收尾场景（`content`）与中间的每个工具场景**都要各写一条**，且除最后一条外都带
+    `once: true`（或 `times: N`）。参考 `t64`（第一版漏了 `once`，跑了 8600 轮）。
 
 **新增「接线判据」用例时另加一条纪律**：机制已经接进生产、只是缺判据时，用例必须证
 **「接线前后行为可见地不同」**——把开关翻掉（如 `skill_compile_enabled` /

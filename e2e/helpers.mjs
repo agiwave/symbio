@@ -46,6 +46,7 @@ export function cliExe() {
 
 export const MOCK_LLM = join(HERE, 'mock-llm.mjs');
 export const MOCK_MCP = join(HERE, 'mock-mcp.mjs');
+export const MOCK_HTTP = join(HERE, 'mock-http.mjs');
 
 // ---------- 端口分配 ----------
 /**
@@ -121,6 +122,64 @@ export class MockLlm {
 
   async reset() {
     await fetchJson(`${this.base}/_reset`, { method: 'POST' });
+  }
+
+  stop() {
+    this.proc?.kill();
+  }
+}
+
+// ---------- Mock HTTP 端点（web 外取工具的本地靶子） ----------
+/**
+ * 起一个本地 HTTP 服务当 `web_fetch` / `http_request` 的靶子。
+ *
+ * ## 为什么需要它（而不是打真外网）
+ *
+ * 真外网在 CI 上不存在，且内容会变、对方会限流——那三类失败都**不在被测系统里**，
+ * 却会被记成产品缺陷。本地靶子把「网络」换成确定性读数：状态码、`content-type`、
+ * 正文，以及 `requests()` 里的**请求留痕**（回答「请求真的发出去了没有」）。
+ *
+ * ## `marker` 每次随机
+ *
+ * 与 `t64` 同一条思路：标记只在靶子上，模型侧无从得知 ⇒ 「结果里出现它」就是
+ * 「真的取到了」。用例断言里的标记就是这里生成的那一个（构造时可显式指定）。
+ *
+ * @param port   监听端口（默认从 `nextPort()` 取，与 mock-llm 同一套分段）
+ * @param slowMs `/slow` 的延迟毫秒数（配 `web_timeout` 逼超时）
+ * @param marker 正文里的随机标记；不传则本进程生成
+ */
+export class MockHttp {
+  constructor({ port = nextPort(), slowMs = 3000, marker = null } = {}) {
+    this.port = port;
+    this.base = `http://127.0.0.1:${port}`;
+    this.marker = marker ?? `MOCKHTTP_${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+    this.slowMs = slowMs;
+    this.proc = null;
+  }
+
+  /** 靶子上的绝对 URL（用例里拼 `mock.url('/page')`）。 */
+  url(path) {
+    return `${this.base}${path}`;
+  }
+
+  async start() {
+    this.proc = spawn(
+      process.execPath,
+      [MOCK_HTTP, '--port', String(this.port), '--slow-ms', String(this.slowMs), '--marker', this.marker],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    this.proc.stderr.on('data', (d) => process.env.E2E_DEBUG && process.stderr.write(`[mock-http] ${d}`));
+    await waitFor(async () => {
+      const r = await fetch(`${this.base}/_health`);
+      return r.ok;
+    }, { what: 'mock-http 启动' });
+    return this;
+  }
+
+  /** 靶子收到过的请求（方法 / 路径 / 正文）。判「请求有没有真的发出去」用。 */
+  async requests() {
+    const { body } = await fetchJson(`${this.base}/_requests`);
+    return body?.requests ?? [];
   }
 
   stop() {
