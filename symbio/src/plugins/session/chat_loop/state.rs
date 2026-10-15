@@ -52,14 +52,16 @@ pub(crate) fn request_source_principal(
 /// | `capabilities` | **授权表行**（`matrix_for` ⇒ `grant_names_of`）——单一真源。此前是空表（`trivial` 的平凡值），能力集与授权表各说各话，没有任何东西对得上。T-082 批①起它有**真读方**：写侧收束闸 `turn_runner::closure_granted` 读规格自己的这份集合（`ActorSpec::can_land_speech` / `can_land_artifact`），不再回头查表 |
 /// | `pattern` | [`Pattern::for_principal`]（判据住在 core 的 actors 定义域，与授权表同源；主体类型名不散出 core——NDC-001 同纪律） |
 /// | `budget_ms` | 档位（与开轮格的 `tier` 同一个事实，调用方传入）。T-082 批①起它有**真读方**：`turn_runner` 开轮时把它以**数值**写入载荷 `budget_ms`，`invariants::declared_budget_ms` 优先读它（缺则回退 `tier` 映射）——「这一轮的预算声明」由此是一等数据，将来不同角色行不同预算也不必由档位反推 |
-/// | `scope` | `Root`（会话驱动的轮次都是根作用域） |
+/// | `scope` | [`request_scope`]（子会话 ⇒ `Child(父主体)`、顶层会话 ⇒ `Root`；[T-105]） |
 ///
 /// [ADR-065]: ../../../../../docs/010-adr/065.md "ADR-065"
+/// [T-105]: ../../../../../docs/009-task/105-Scope-Child首产点批.md "T-105-Scope-Child首产点批"
 pub(crate) fn request_actor_spec(
     ctx: &dyn crate::symbio_core::PluginInvokeRequest,
     tier: crate::symbio_core::LatencyTier,
+    scope: crate::symbio_core::Scope,
 ) -> crate::symbio_core::ActorSpec {
-    use crate::symbio_core::{ActorSpec, Scope};
+    use crate::symbio_core::ActorSpec;
     let principal = request_principal(ctx);
     let matrix = crate::symbio_core::authz::matrix_for(&principal);
     ActorSpec {
@@ -69,7 +71,31 @@ pub(crate) fn request_actor_spec(
         pattern: crate::symbio_core::Pattern::for_principal(&principal),
         capabilities: matrix.grant_names_of(&principal),
         budget_ms: tier.budget_ms(),
-        scope: Scope::Root,
+        scope,
+    }
+}
+
+/// 本请求会话的**作用域**（[T-105] 的第一个生产构造点）：`agent_run` 派生的子会话
+/// 挂在**父主体**的作用域下（`Scope::Child(parent)`），顶层会话 ⇒ `Scope::Root`。
+///
+/// ## 语义（[ST-008 §3.2](../../../../../docs/003-stage/008-多主体与对等承诺.md "ST-008-多主体与对等承诺")）
+///
+/// `scope` 是**权威的上限**，不是许可本身：子主体的每一格收束除按自己那一行判，
+/// 还要父主体也持同一项能力（**委派不放大权威**，读方 = `turn_runner::closure_granted`）。
+/// 这正是 ST-008 §2 的分界——递归是树（`Child`），协作是图（对等主体 `Root`）。
+///
+/// ## 为什么取值点在这里（而不是在 `agent_run` 里）
+///
+/// 规格由**子会话自己的轮次**构造（`agent_run` 只是把它登记好并投递第一轮），
+/// 故「谁是我的父主体」是会话元数据的事（[`PersistentChatSession::delegating_principal`]），
+/// 不是调用栈的事——进程重启后调用栈没了，元数据还在。
+///
+/// [T-105]: ../../../../../docs/009-task/105-Scope-Child首产点批.md "T-105-Scope-Child首产点批"
+pub(crate) async fn request_scope(session: &PersistentChatSession) -> crate::symbio_core::Scope {
+    use crate::symbio_core::Scope;
+    match session.delegating_principal().await {
+        Some(parent) if !parent.trim().is_empty() => Scope::Child(parent),
+        _ => Scope::Root,
     }
 }
 

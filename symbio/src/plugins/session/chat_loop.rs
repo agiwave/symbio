@@ -62,8 +62,8 @@ pub(crate) use self::io::{
 };
 pub(crate) use self::progress::report_if_due;
 pub(crate) use self::state::{
-    request_actor_spec, request_principal, request_source_principal, Gate, SessionContext,
-    TurnExit, TurnRequest, TurnResult, TurnState,
+    request_actor_spec, request_principal, request_scope, request_source_principal, Gate,
+    SessionContext, TurnExit, TurnRequest, TurnResult, TurnState,
 };
 pub(crate) use self::turn::{close_turn, settle_reasoning};
 

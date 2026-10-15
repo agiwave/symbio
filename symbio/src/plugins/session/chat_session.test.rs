@@ -1084,3 +1084,69 @@ async fn apply_removed_lands_a_fact_and_drops_nodes() {
         .collect();
     assert_eq!(removed.len(), 1, "一次删除落**一条**事实（ids 表达区间）");
 }
+
+// ── 作用域的第一个生产构造点（[T-105]）──────────────────────────────────────
+//
+// `chat_loop::state::request_scope` 按会话元数据的**委派链**取值：子会话挂父主体，
+// 顶层会话恒 `Root`。本段钉的是「取值链读得出真值」——语义（委派不放大权威）的
+// 判据在 `turn_runner.test.rs::scope_ceiling_tests`。
+//
+// [T-105]: ../../../../docs/009-task/105-Scope-Child首产点批.md "T-105-Scope-Child首产点批"
+
+/// 顶层会话 ⇒ `Root`；`agent_run` 登记形态的子会话 ⇒ `Child(父主体)`。
+///
+/// 父会话的主体取 `metadata.agent_id` + `principal_of`（与写事件的主体同一个派生点），
+/// 故本用例同时钉住「子会话的作用域不是凭空一个字符串」——它跟着父会话的身份走。
+#[tokio::test]
+async fn scope_follows_the_delegation_chain_and_defaults_to_root() {
+    use crate::symbio_core::Scope;
+
+    let tmp = tempfile::tempdir().expect("临时目录创建失败");
+    let store = Arc::new(SessionStore::new(tmp.path().to_path_buf()));
+
+    // 父会话：`--agent peer-b` 的会话形态（主体 = 对等体）
+    let mut parent = Session::new("parent-sess");
+    parent.metadata["agent_id"] = serde_json::json!("peer-b");
+    store.save_session(&parent).await.expect("父会话落盘失败");
+
+    let top = PersistentChatSession::new(
+        "parent-sess".to_string(),
+        Arc::new(RwLock::new(SessionConfig::default())),
+        store.clone(),
+    );
+    assert_eq!(
+        super::super::chat_loop::request_scope(&top).await,
+        Scope::Root,
+        "没有归属声明的会话 = 顶层会话 ⇒ 根作用域"
+    );
+
+    // 子会话：`agent_run` 的登记形态（`parent_session_id` 指回父会话；自身未选智能体）
+    let mut child = Session::new("child-sess");
+    child.metadata["parent_session_id"] = serde_json::json!("parent-sess");
+    store.save_session(&child).await.expect("子会话落盘失败");
+
+    let sub = PersistentChatSession::new(
+        "child-sess".to_string(),
+        Arc::new(RwLock::new(SessionConfig::default())),
+        store.clone(),
+    );
+    assert_eq!(
+        super::super::chat_loop::request_scope(&sub).await,
+        Scope::Child("agent:peer-b".to_string()),
+        "子会话挂**父会话主体**（不是父会话 id，也不是子会话自己的主体）"
+    );
+
+    // 反向：归属声明抹掉 ⇒ 同一实例必须回到 `Root`（取值链真的在算）
+    let mut orphan = Session::new("orphan-sess");
+    orphan.metadata = serde_json::json!({});
+    store.save_session(&orphan).await.expect("孤儿会话落盘失败");
+    let plain = PersistentChatSession::new(
+        "orphan-sess".to_string(),
+        Arc::new(RwLock::new(SessionConfig::default())),
+        store.clone(),
+    );
+    assert_eq!(
+        super::super::chat_loop::request_scope(&plain).await,
+        Scope::Root
+    );
+}

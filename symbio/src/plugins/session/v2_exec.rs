@@ -1041,7 +1041,9 @@ pub(crate) async fn execute_final_reply_turn(
     // 身份与档位取值点同 [`execute_turn`]：主体 = 会话选定的那个 agent；档位 = 深度
     // （`Answered` 轮没有可跳过的模型调用，不属于反射档）。规格从授权表行取
     // （`request_actor_spec`，能力集 / 模式不再是平凡值）。
-    let actor = super::chat_loop::request_actor_spec(ctx.as_ref(), LatencyTier::Deep);
+    // 作用域与身份同批取（[T-105]）：子会话挂父主体，顶层会话恒 `Root`。
+    let scope = super::chat_loop::request_scope(session).await;
+    let actor = super::chat_loop::request_actor_spec(ctx.as_ref(), LatencyTier::Deep, scope);
     let principal = actor.principal.clone();
     // 压缩入格 + 归档：与 [`execute_turn`] 同序（在 `turn_no` 之后、运行器之前）。
     if let Some(msgs) = consolidation {
@@ -1282,7 +1284,10 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     //
     // 另存一份 `principal`：`actor` 随 `input` 被移动进运行器，轮末的记忆与学习
     // 写方（`record_learning`）仍要以它为主体——先取字符串，不依赖 `actor` 的存活。
-    let actor = super::chat_loop::request_actor_spec(ctx.as_ref(), tier);
+    // 作用域（[T-105]）：`agent_run` 派生的子会话挂父主体，顶层会话恒 `Root`。
+    // 与身份同批取——两者都经 `ctx` / 元数据解析，分开取会让「主体是 A、作用域按 B 算」。
+    let scope = super::chat_loop::request_scope(session).await;
+    let actor = super::chat_loop::request_actor_spec(ctx.as_ref(), tier, scope);
     let principal = actor.principal.clone();
     // 来源主体（ADR-067）：`commitment.*` 的 `to`。在此刻取而不是轮末——`ctx` 会被
     // 移进工具分发口（`SessionDispatchPort`），轮末已经拿不到它。

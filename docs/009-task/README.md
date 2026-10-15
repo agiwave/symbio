@@ -52,7 +52,7 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 5 · 🟡 doing 0 · ☑ done 108 · ❌ wont 0（共 113）
+**计数**：☐ todo 4 · 🟡 doing 0 · ☑ done 109 · ❌ wont 0（共 113）
 
 ## 待处理（按依赖顺序）
 
@@ -61,7 +61,6 @@ board.columns: [rank, deps, evidence, reason]
 | `T-073-多智能体社会数据行` | ST-013 落地：角色行（市场/仲裁/守门）+ 声誉驱动淘汰的 grants 变更事件 + 投影组合进裁决 | later | 多主体 | T-072-对等主体生产增量 |
 | `T-075-前端形态e2e补位` | 被测形态只有 CLI：tauri 前端形态无浏览器层 e2e（AR-007 记为事实），补最小呈现判据 | later | e2e | — |
 | `T-094-个人认知可见域产地批` | 个人认知可见域产地批：`VisScope::Shared` 要有内容侧产地 + 人的读权归属裁决——`person:*` 行在今天的表形状下表达不出来 | later | plan | — |
-| `T-105-Scope-Child首产点批` | `Scope::Child` 全仓第一个生产构造点：派生子会话挂父作用域 + 读方 | later | plan | — |
 | `T-107-角色主体执行路径批` | 角色主体执行路径批：agent:worker / agent:planner / agent:verifier 的窄行 + 驱动路径（行与路径同批） | later | plan | — |
 
 ## 进行中
@@ -117,6 +116,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-086-技能编译落地形态批` | S11 落地形态批：skill_compile 投影化或修订 / 凸度与密度读数裁决 / skill_compile_enabled 默认翻向的条件 | plan |
 | `T-100-跨文档复述判据覆盖面补齐` | 把「同一事实被写两遍」的判据从三个封闭集推广到全部 owner 投影 | plan |
 | `T-104-检索降级可见性批` | 检索降级可见性：`degraded` 从投影口径走到用户眼前（注入段标降级 + 判据） | plan |
+| `T-105-Scope-Child首产点批` | `Scope::Child` 全仓第一个生产构造点：派生子会话挂父作用域 + 读方 | plan |
 | `T-108-门禁失败可见性与日志分轮留存` | 门禁失败详情直接印在汇总里；日志改成每轮一个目录（失败后不必重跑） | plan |
 | `T-109-web面读数与配置残余批` | web 面残余批：结果读数回灌（状态码 / 截断 / 超时语义）· `web_enabled` 无读方 · `allowed_domains` 死参数 · `web_search` 上游地址写死 | web |
 | `T-110-通道与自动化面e2e补位` | 通道与自动化面 e2e 补位：`hook` 三路由 + `telegram` 本地三路由（经 gateway 直发）· `home`/`work` 经 gateway 不可达 | e2e |
@@ -292,7 +292,7 @@ board.columns: [rank, deps, evidence, reason]
 - [`T-102-路由地址owner归一`](102-路由地址owner归一.md) 路由地址消除双 owner——地址唯一表归 RE-006 §2.3，RE-003 只留机制叙述 + 契约表（done）
 - [`T-103-清单归属字段与汇总页登记`](103-清单归属字段与汇总页登记.md) `lists` / `projection` 两个字段落地 + 汇总页纳入编号体系 + 清单归属总账（done）
 - [`T-104-检索降级可见性批`](104-检索降级可见性批.md) 检索降级可见性：`degraded` 从投影口径走到用户眼前（注入段标降级 + 判据）（done）
-- [`T-105-Scope-Child首产点批`](105-Scope-Child首产点批.md) `Scope::Child` 全仓第一个生产构造点：派生子会话挂父作用域 + 读方（todo）
+- [`T-105-Scope-Child首产点批`](105-Scope-Child首产点批.md) `Scope::Child` 全仓第一个生产构造点：派生子会话挂父作用域 + 读方（done）
 - [`T-106-角色行主体名与能力源裁决批`](106-角色行主体名与能力源裁决批.md) 角色行的主体名与能力源裁决：per-step 规格 vs per-principal 规格（S02/S03/S06/S11 六行）（done）
 - [`T-107-角色主体执行路径批`](107-角色主体执行路径批.md) 角色主体执行路径批：agent:worker / agent:planner / agent:verifier 的窄行 + 驱动路径（行与路径同批）（todo）
 - [`T-108-门禁失败可见性与日志分轮留存`](108-门禁失败可见性与日志分轮留存.md) 门禁失败详情直接印在汇总里；日志改成每轮一个目录（失败后不必重跑）（done）

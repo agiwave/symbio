@@ -144,6 +144,37 @@ impl PersistentChatSession {
         self.store.load_session(&self.session_id).await
     }
 
+    /// 本会话的**父会话 id**（`metadata.parent_session_id`；顶层会话 ⇒ `None`）。
+    ///
+    /// 归属声明的读侧入口（写入方 = `agent` 插件的 `agent_run`）：子会话凭它被
+    /// 归档进父会节目录，本方法把同一份声明交给作用域判定（见
+    /// [`Self::delegating_principal`]）。
+    pub(crate) async fn parent_session_id(&self) -> Option<String> {
+        self.load_session()
+            .await
+            .ok()?
+            .parent_session_id()
+            .map(str::to_string)
+    }
+
+    /// 本会话所属**父会话的主体**——委派链上的父主体（[T-105]）。
+    ///
+    /// 口径三段，每一段都只有一个 owner：子会话 `metadata.parent_session_id`
+    /// → 父会话 `metadata.agent_id` → `authz::principal_of`（部署事实的唯一派生点）。
+    ///
+    /// 任一环落空 ⇒ `None`：顶层会话的正常形态，或父会话已删 / 读失败。调用方
+    /// 按 `Scope::Root` 处置（[`super::chat_loop::state::request_scope`]）——与接线前
+    /// 逐字一致。**这不是 fail-open**：作用域是**权威的上限**，不是许可本身；
+    /// 上限取不到时每一格仍按子主体自己那一行判（`turn_runner::closure_granted`）。
+    ///
+    /// [T-105]: ../../../../docs/009-task/105-Scope-Child首产点批.md "T-105-Scope-Child首产点批"
+    pub(crate) async fn delegating_principal(&self) -> Option<String> {
+        let parent_id = self.parent_session_id().await?;
+        let parent = self.store.load_session(&parent_id).await.ok()?;
+        let agent = parent.metadata.get("agent_id").and_then(|v| v.as_str());
+        Some(crate::symbio_core::authz::principal_of(agent))
+    }
+
     /// 子会话清单（Q3 worker 进展的读侧入口）：委托 store 枚举
     /// `<根>/<safe(本会话)>/sessions/*/session.json`——**按路径天然只含本父之子**，
     /// 归属复核另走 [`Session::parent_session_id`](super::types::Session::parent_session_id)。

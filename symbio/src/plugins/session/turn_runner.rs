@@ -1730,14 +1730,40 @@ enum ClosureKind {
 ///   产物格**，那同样算收束（`unresolved_turns` 与产物闸同批认可）；
 /// - 产物臂 ⇒ 那一条工具结果不入格（warn 后跳过）。
 ///
-/// 平凡值下（`agent:main`，以及任何经 `matrix_for` 派生的 `agent:<id>`）两臂恒
-/// 放行——闸是 fail-closed 的**结构**，不是生产里会翻面的开关。
+/// ## 第二道：作用域上限（[T-105]）
+///
+/// 主体自己那一行之外还有一道——**委派不放大权威**：`scope = child <parent>` 的
+/// 主体（`agent_run` 派生的子会话）能落的格，其**父主体也必须能落**。
+/// `root` = 独立主体，无上限。语义与取值点见
+/// [ST-008 §3.2](../../../../docs/003-stage/008-多主体与对等承诺.md "ST-008-多主体与对等承诺")
+/// 与 `chat_loop::state::request_scope`。
+///
+/// 平凡值下（顶层会话 = `root`，以及任何 `agent:main` 派生的子会话）两道都是
+/// 恒真——闸是 fail-closed 的**结构**，不是生产里会翻面的开关。
+///
+/// [T-105]: ../../../../docs/009-task/105-Scope-Child首产点批.md "T-105-Scope-Child首产点批"
 fn closure_granted(actor: &ActorSpec, kind: ClosureKind) -> bool {
-    match kind {
+    let own = match kind {
         // `true` = 该轮尚无收束格（八个调用点全是首条收束）。「轮次位置 → 能力」的
         // 映射住 core（`Capability::reply_capability`），规格方法与表谓词共用它。
         ClosureKind::Speech => actor.can_land_speech(true),
         ClosureKind::Artifact => actor.can_land_artifact(),
+    };
+    own && within_delegation_ceiling(actor, kind)
+}
+
+/// 作用域上限（[T-105]）：`scope = child <parent>` ⇒ 父主体也必须能落这一类格。
+///
+/// 谓词与 [`closure_granted`] 的**同一份**（`can_reply` / `can_produce_artifact`）
+/// ——两处各写一套「这一类格要什么能力」就会让上限与许可分叉。
+fn within_delegation_ceiling(actor: &ActorSpec, kind: ClosureKind) -> bool {
+    let crate::symbio_core::Scope::Child(parent) = &actor.scope else {
+        return true;
+    };
+    let matrix = crate::symbio_core::authz::matrix_for(parent);
+    match kind {
+        ClosureKind::Speech => matrix.can_reply(parent, true),
+        ClosureKind::Artifact => matrix.can_produce_artifact(parent),
     }
 }
 

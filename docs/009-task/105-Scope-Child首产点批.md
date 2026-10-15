@@ -2,11 +2,12 @@
 kind: task
 id: T-105-Scope-Child首产点批
 title: `Scope::Child` 全仓第一个生产构造点：派生子会话挂父作用域 + 读方
-status: todo
+status: done
 created: 2026-10-15
 track: plan
 deps: []
 prio: later
+evidence: ① **语义先划清**：意图 = 「权威的上限」落 [ST-008 §3.2](../003-stage/008-多主体与对等承诺.md "ST-008-多主体与对等承诺")（`Root` = 独立主体无上限；`Child(parent)` = 子主体的收束还须父主体也持同一能力；读方唯一 = 写侧收束闸）。② **生产构造点**：`chat_loop::state::request_scope`（新增）+ `PersistentChatSession::delegating_principal`（新增，`chat_session.rs`）——子会话经 `metadata.parent_session_id` → 父会话 `metadata.agent_id` → `principal_of` 拿父主体，顶层会话恒 `Root`；两处轮次入口（`v2_exec::execute_turn` / `execute_final_reply_turn`）同批把 `scope` 传入 `request_actor_spec`（新增第三形参）。③ **真读方**：`turn_runner::closure_granted` 加第二道 `within_delegation_ceiling`——`scope = child <parent>` 时父主体也须持同一项能力（谓词复用 `can_reply` / `can_produce_artifact`，与许可同源）。④ **判据**：`turn_runner.test.rs::scope_ceiling_tests` 三条（**反向用例**——父主体不持该能力 ⇒ 收束被拒、`scope` 改回 `Root` ⇒ 放行；窄父派生宽子不得发言而产物照常；等强父无影响）+ `chat_session.test.rs::scope_follows_the_delegation_chain_and_defaults_to_root`（委派链取值：子会话 ⇒ `Child(父主体)`、顶层/无归属 ⇒ `Root`）。⑤ **形状**：`Scope` / `ActorSpec` 成员未增减（只加读方与构造点），`gate.mjs` 全绿
 
 exit: ① `Scope::Child` 出现生产构造点（委托 / 派生子会话链上，规格从 `Scope::Root` 收窄为 `Scope::Child(parent_principal)`）；② `scope` 字段有真读方（子会话轮次的某个判定问它——可见域 / 溯源 / 收束三者之一，语义先在 [ST-008](../003-stage/008-多主体与对等承诺.md "ST-008-多主体与对等承诺") §3 划清再落）；③ 至少一条判据（单测或 e2e 反向用例：把 `Child` 改回 `Root` 必红）；④ `node scripts/core-shape-audit.mjs` 零违规。**推不开才按 [ADR-055](../010-adr/055.md) 立决策**
 ---
@@ -36,3 +37,8 @@ T-082 exit 要求「`Scope::Child` 出现全仓第一个生产构造点」，但
 
 - 2026-10-15 T-082 开批调研时登记（横切缺口拆解：scope 首产点牵连委托链与可见域语义，
   按用户指示「任务有困难时创建前置依赖任务」拆出，避免把未裁决的语义塞进角色行批次）
+- 2026-10-15 落地（提交见 `git log`）：读方取「收束闸」支（三选一里改动面最小且与
+  [ADR-065](../010-adr/065.md "ADR-065") 的按种类收束同址）；语义落 [ST-008 §3.2](../003-stage/008-多主体与对等承诺.md "ST-008-多主体与对等承诺")。
+  [ST-003 §3.1](../003-stage/003-多步任务与返工.md "ST-003-多步任务与返工") 的「机制键 `scope`」行同批由「仅类型，零生产构造」订正为「已在生产」。
+  **不动** `authz::ROWS`（不给子会话建窄行——约束的正确位置是上游父主体，见 ST-008 §3.2）、
+  不动事件 schema（`scope` 是规格侧上限，不是逐事件数据）。

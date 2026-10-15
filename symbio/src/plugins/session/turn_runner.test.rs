@@ -2619,3 +2619,73 @@ mod reflex_turn_tests {
         );
     }
 }
+
+/// 作用域上限：**委派不放大权威**（[T-105]）。
+///
+/// `closure_granted` 的两道——主体自己那一行、以及 `scope = child <parent>` 时的父主体那道。
+/// 本模块钉的是**第二道**：同一份能力集，换 `scope` 必须换结果（反向用例），
+/// 且父主体持同一能力时不受影响（正向对照）。
+///
+/// [T-105]: ../../../../docs/009-task/105-Scope-Child首产点批.md "T-105-Scope-Child首产点批"
+mod scope_ceiling_tests {
+    use super::super::{closure_granted, ClosureKind};
+    use crate::symbio_core::{ActorSpec, Scope};
+
+    /// 反向用例：父主体**不持**该能力 ⇒ 收束被拒；把 `scope` 改回 `Root`（接线前的形状）
+    /// ⇒ 同一份能力集必须重新放行。改了不变，说明作用域上限没在算。
+    #[test]
+    fn a_child_cannot_close_what_its_parent_cannot_close() {
+        // `user` 在授权表里没有行（能力按「智能体的权威动作种类」划分）⇒ 什么都不持。
+        let mut spec = ActorSpec::trivial("agent:main");
+        assert!(
+            spec.can_land_speech(true),
+            "前提：主智能体自己那一行持 `reply.first`"
+        );
+
+        spec.scope = Scope::Child("user".to_string());
+        assert!(
+            !closure_granted(&spec, ClosureKind::Speech),
+            "父主体不持 `reply.first` ⇒ 子主体的发言收束必须被拒"
+        );
+
+        spec.scope = Scope::Root;
+        assert!(
+            closure_granted(&spec, ClosureKind::Speech),
+            "改回 `Root`（无上限的独立主体）⇒ 同一份能力集必须放行"
+        );
+    }
+
+    /// 真实的越权形态：**窄父主体派生出宽子主体**。
+    ///
+    /// 对等主体只持 `produce.artifact`（`authz::ROWS` 第四行）。它派生出的子会话若
+    /// 未选智能体，主体派生是 `agent:main`（`matrix_for` 的平凡值分支给**未登记**
+    /// `agent:<id>` 主智能体整套）——子会话因此比父主体宽。上限那道闸把它收回来：
+    /// 发言收束被拒，产物收束照常（父主体也持）。
+    #[test]
+    fn a_narrow_parent_cannot_spawn_a_wider_child() {
+        let mut spec = ActorSpec::trivial("agent:main");
+        spec.scope = Scope::Child(crate::symbio_core::authz::PRINCIPAL_PEER.to_string());
+
+        assert!(
+            spec.can_land_speech(true),
+            "前提：子主体自己那一行放行（这正是「放大」的来源）"
+        );
+        assert!(
+            !closure_granted(&spec, ClosureKind::Speech),
+            "父主体（对等体）不持 `reply.*` ⇒ 子主体不得发言"
+        );
+        assert!(
+            closure_granted(&spec, ClosureKind::Artifact),
+            "父主体持 `produce.artifact` ⇒ 产物收束不受上限影响"
+        );
+    }
+
+    /// 正向对照：父主体持同一能力 ⇒ 与 `Root` 逐字同判（平凡值下两臂恒放行）。
+    #[test]
+    fn a_child_of_an_equally_strong_parent_is_unaffected() {
+        let mut spec = ActorSpec::trivial("agent:main");
+        spec.scope = Scope::Child("agent:main".to_string());
+        assert!(closure_granted(&spec, ClosureKind::Speech));
+        assert!(closure_granted(&spec, ClosureKind::Artifact));
+    }
+}
