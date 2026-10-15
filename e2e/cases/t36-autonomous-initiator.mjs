@@ -204,6 +204,11 @@ export default defineCase(
      * 4）、扫到但闸门/事实源把触发挡下（请求数停在 4，stderr 里有 `[Heartbeat]` 的
      * 拒发理由）、跑了轮但提示词没落进转写（请求数在涨）。只带 stderr 尾部区分不了
      * 它们——而 CI（Linux）与本机（Windows）的分歧正落在这三种之一上。
+     *
+     * **快照里的顺序就是它的可见性**：门禁只印失败日志的**末 40 行**，而 CLI stderr
+     * 一轮就几十行。判据读数必须排在 stderr 之后，否则被推出窗口——2026-10-15 CI
+     * 实测踩过：先前把「读出口现状」放在 8000 字符 stderr 之前，日志里只剩「轮确实
+     * 跑了」那一半信息，三种病因还是分不开。
      */
     const diagnose = async () => {
       const rows = [];
@@ -215,12 +220,16 @@ export default defineCase(
         rows.push(`  ${sid}｜转写用户发言=${JSON.stringify(texts)}｜就绪集=${JSON.stringify(ready)}`);
       }
       const reqCount = await llm.requests().then((r) => r.length).catch(() => -1);
+      const stderrLines = cli.out.stderr.split(/\r?\n/);
+      const hb = stderrLines.filter((l) => /Heartbeat/i.test(l)).slice(-6).join('\n') || '（无 Heartbeat 行）';
       return [
         '',
+        '--- 长驻 CLI stderr：含 Heartbeat 的行（末 6 条）---',
+        hb,
+        '--- 长驻 CLI stderr：末 14 行 ---',
+        stderrLines.slice(-14).join('\n') || '（空）',
         `--- 读出口现状（LLM 请求数=${reqCount}，装心跳两轮共用 4 次）---`,
         ...rows,
-        '--- 长驻 CLI stderr 尾部 ---',
-        cli.out.stderr.slice(-8000) || '（空）',
       ].join('\n');
     };
 
