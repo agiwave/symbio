@@ -60,7 +60,7 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [[SP-001]]，机制见 [[PL-011-登记与汇总机制|PL-011 · 登记与汇总机制]]。
 
-**计数**：☐ todo 2 · 🟡 doing 1 · ☑ done 145 · ❌ wont 3（共 151）
+**计数**：☐ todo 2 · 🟡 doing 0 · ☑ done 146 · ❌ wont 3（共 151）
 
 ## 待处理（按依赖顺序）
 
@@ -71,9 +71,7 @@ board.columns: [rank, deps, evidence, reason]
 
 ## 进行中
 
-| 编号 | 任务 | 优先 | 轨 | 依赖 |
-|---|---|---|---|---|
-| `T-145-前端机制化批` | 前端机制化——ChatNode 协议 / 主体平级 / 建树策略 / 惰性重取（SPRINT） | now | 会话与输入 | PL-013-前端机制化 |
+（无）
 
 ## 已完成
 
@@ -99,6 +97,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-138-审批闸只覆盖local插件的能力` | 风险声明与执行闸门分家——vdfs 的 High 风险工具不经确认直接执行 | 插件身份与授权 |
 | `T-142-长度截断时草稿被当答话交付` | finish=Length 且正文 0 字符时，整段思考被提升成答话原样交付——stdout 变成 13KB 草稿 | 会话与输入 |
 | `T-143-跨会话记忆以指令形态劫持当前轮` | 召回段把旧会话的经验原文当指令送进 prompt——小模型照着执行上一个任务 | 记忆与检索 |
+| `T-145-前端机制化批` | 前端机制化——ChatNode 协议 / 主体平级 / 建树策略 / 惰性重取（SPRINT） | 会话与输入 |
 | `T-146-主体可路由地址` | 主体 id 迁到可路由地址形态——授权表扩 person/tool/system 三族行 | 会话与输入 |
 | `T-147-ChatNode协议改名与字段瘦身` | ChatMessage → ChatNode 一次原子改——Turn 退役、role 删除、tool_call_id 沉 meta、principal 升级为结构体 | 会话与输入 |
 | `T-148-前端注册表按kind与style_tag分派` | 呈现分派从 MessageType 枚举换成 (kind, style_tag, principal) 三元组 | frontend |
@@ -380,7 +379,7 @@ board.columns: [rank, deps, evidence, reason]
 - [`T-140-大结果检索的聚合口径`](140-大结果检索的聚合口径.md) 检索结果截断只说「限制了」不说「一共多少」——聚合型问题逼出重复调用（todo）
 - [`T-141-开机噪声与文档漂移`](141-开机噪声与文档漂移.md) 每次开机一条假异常 WARN（`.symbio/projection` 孤儿目录）+ 文档里几处与运行事实不符的指路（todo）
 - [`T-144-长度截断的自动续写在v2执行路径不可达`](144-长度截断的自动续写在v2执行路径不可达.md) v2 执行路径重建 TurnOutput 时丢掉 finish——长度戳与自动续写读到的恒是缺省 Stop（done）
-- [`T-145-前端机制化批`](145-前端机制化批.md) 前端机制化——ChatNode 协议 / 主体平级 / 建树策略 / 惰性重取（SPRINT）（doing） · 子项 done 8
+- [`T-145-前端机制化批`](145-前端机制化批.md) 前端机制化——ChatNode 协议 / 主体平级 / 建树策略 / 惰性重取（SPRINT）（done） · 子项 done 8
   - [`T-146-主体可路由地址`](146-主体可路由地址.md) 主体 id 迁到可路由地址形态——授权表扩 person/tool/system 三族行（done）
   - [`T-147-ChatNode协议改名与字段瘦身`](147-ChatNode协议改名与字段瘦身.md) ChatMessage → ChatNode 一次原子改——Turn 退役、role 删除、tool_call_id 沉 meta、principal 升级为结构体（done）
   - [`T-148-前端注册表按kind与style_tag分派`](148-前端注册表按kind与style_tag分派.md) 呈现分派从 MessageType 枚举换成 (kind, style_tag, principal) 三元组（done）

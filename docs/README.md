@@ -45,7 +45,7 @@ created: 2026-07-20
 | [[RE-000-参考汇总|ref · 参考]] | 编号前缀 `RE-` | 查数据——路由 / 错误码 / 配置等权威表 | 7 | draft 0 · active 7 · retired 0 | — |
 | [[GU-000-指南汇总|guide · 指南]] | 编号前缀 `GU-` | 怎么用——上手 / 贡献 / 排障 | 14 | draft 0 · active 14 · retired 0 | — |
 | [[SP-000-规范汇总|spec · 规范]] | 编号前缀 `SP-` | 必须成立的条文——机制与判据的规范面 | 31 | draft 0 · active 31 · retired 0 | — |
-| [[T-000-任务汇总|task · 任务]] | 编号前缀 `T-` | 要做什么、做到哪一步——阶段任务 / SPRINT 任务分解子任务，可勾销的最小工作单元 | 151 | todo 2 · doing 1 · done 145 · wont 3 | 50 条分解边 |
+| [[T-000-任务汇总|task · 任务]] | 编号前缀 `T-` | 要做什么、做到哪一步——阶段任务 / SPRINT 任务分解子任务，可勾销的最小工作单元 | 151 | todo 2 · doing 0 · done 146 · wont 3 | 50 条分解边 |
 | [[ADR-000-架构决策汇总|adr · 架构决策]] | 编号前缀 `ADR-` | 为什么这样设计——决策、理由与被否决的方案 | 71 | active 61 · superseded 7 · withdrawn 3 | — |
 
 <!-- registry:summary end -->
