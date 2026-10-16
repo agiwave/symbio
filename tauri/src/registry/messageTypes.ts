@@ -354,6 +354,35 @@ export function facetsOf(node: ChatNode, parentType?: string): MessageFacets {
   }
 }
 
+// ==================== 组件侧判据谓词（[T-148]） ====================
+//
+// 「这条是不是用户消息 / 一轮骨架 / 思考」这类判据原先在各渲染组件里就地比较协议
+// 枚举字面量（`facets.role === 'user'`、`c.type === NODE_KIND_TURN`）——每个组件都
+// 得 `import` 一份枚举值，「什么算 user/turn」的口径散在视图层。收进注册表后：
+// **组件只问谓词，不再持有枚举字面量**，判据改了只动这里（与 exit 判据 3、
+// 「加 style_tag 不改组件」同一纪律）。facets 版读折叠后的判定入参，node 版读
+// 原始节点（经 `messageRoleOf` / `messageTypeOf` 同一折叠，供父扫子节点用）。
+
+/** 该 facet 是用户发言（`role = user`）。 */
+export const isUserFacet = (f: Pick<MessageFacets, 'role'>): boolean =>
+  f.role === CHAT_ROLE_USER
+
+/** 该 facet 是一轮骨架（呈现键 `turn`）。 */
+export const isTurnFacet = (f: Pick<MessageFacets, 'type'>): boolean =>
+  f.type === NODE_KIND_TURN
+
+/** 该 facet 是思考过程（呈现键 `reasoning`）。 */
+export const isReasoningFacet = (f: Pick<MessageFacets, 'type'>): boolean =>
+  f.type === NODE_KIND_REASONING
+
+/** 原始节点是否用户发言（role 格先、principal.kind 兜底同一折叠）。 */
+export const isUserNode = (n: Pick<ChatNode, 'role' | 'principal'>): boolean =>
+  messageRoleOf(n) === CHAT_ROLE_USER
+
+/** 原始节点折叠后是否一轮骨架。 */
+export const isTurnNode = (n: Pick<ChatNode, 'type' | 'meta'>): boolean =>
+  messageTypeOf(n) === NODE_KIND_TURN
+
 // ==================== 后端 `meta` 字段 → UI 语义 ====================
 //
 // `meta` 是后端 flatten 出来的**场景字段袋**，字段名与含义只有后端契约知道。

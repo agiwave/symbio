@@ -48,7 +48,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import {
-  NODE_KIND_TURN,
   isUnsettledNodeStatus,
   type ChatNode,
 } from '@/schemas/chat_node'
@@ -57,6 +56,7 @@ import {
   agentNameOf,
   isAbortedStatus,
   isStreamingStatus,
+  isTurnFacet,
   type MessageFacets,
 } from '@/registry/messageTypes'
 import MessageChildren from './MessageChildren.vue'
@@ -80,9 +80,7 @@ const statusClass = computed(() => `status-${props.facets.status}`)
 const agentName = computed(() => agentNameOf(props.node, props.facets.subSession))
 
 /** 根级助手 Turn：唯一承载组级操作（悬停删除 / 组级重试）的 Turn */
-const isRootTurn = computed(
-  () => props.facets.type === NODE_KIND_TURN && !props.facets.subSession,
-)
+const isRootTurn = computed(() => isTurnFacet(props.facets) && !props.facets.subSession)
 /** 等待态：Turn 已广播但尚无任何子节点且仍在运行 → 显示「正在思考…」骨架 */
 const isPending = computed(
   () => isStreamingStatus(props.facets.status) && children.value.length === 0,

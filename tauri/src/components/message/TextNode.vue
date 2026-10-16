@@ -50,13 +50,14 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import {
-  CHAT_ROLE_USER,
-  NODE_KIND_REASONING,
-  type ChatNode,
-} from '@/schemas/chat_node'
+import { type ChatNode } from '@/schemas/chat_node'
 import { useMessageContent } from '@/composables/useMessageContent'
-import { isFailedStatus, type MessageFacets } from '@/registry/messageTypes'
+import {
+  isFailedStatus,
+  isReasoningFacet,
+  isUserFacet,
+  type MessageFacets,
+} from '@/registry/messageTypes'
 import NodeShell from './NodeShell.vue'
 import MessageErrorBox from './MessageErrorBox.vue'
 
@@ -74,8 +75,8 @@ const emit = defineEmits<{
   edit: [messageId: string]
 }>()
 
-const isUser = computed(() => props.facets.role === CHAT_ROLE_USER)
-const isReasoning = computed(() => props.facets.type === NODE_KIND_REASONING)
+const isUser = computed(() => isUserFacet(props.facets))
+const isReasoning = computed(() => isReasoningFacet(props.facets))
 
 /** 工具返回自身的失败：父 ToolCall 已失败时交由父级呈现，避免同一错误报两遍 */
 const showsOwnError = computed(

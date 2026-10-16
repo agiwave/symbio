@@ -116,14 +116,11 @@
 import { computed, inject, ref } from 'vue'
 import {
   CHAT_ROLE_ASSISTANT,
-  CHAT_ROLE_USER,
   NODE_STATUS_COMPLETED,
   NODE_STATUS_STREAMING,
   NODE_KIND_TEXT,
-  NODE_KIND_TURN,
   RESUME_ACTION_SUPPLY,
   isInflightNodeStatus,
-  messageRoleOf,
   messageTextOf,
   type ChatNode,
 } from '@/schemas/chat_node'
@@ -133,6 +130,8 @@ import {
   canRetryTool,
   canSupplyToolArgs,
   isFailedStatus,
+  isTurnNode,
+  isUserNode,
   messageParentSessionId,
   missingResultNoteOf,
   type MessageFacets,
@@ -197,11 +196,9 @@ const requestNodes = computed<ChatNode[]>(() =>
   toolRequestNode.value ? [toolRequestNode.value] : [],
 )
 /** 过程 = 子会话 Turn；结果 = 其余（工具返回 / user_prompt） */
-const processTurns = computed<ChatNode[]>(() =>
-  children.value.filter((c) => c.type === NODE_KIND_TURN),
-)
+const processTurns = computed<ChatNode[]>(() => children.value.filter(isTurnNode))
 const resultChildren = computed<ChatNode[]>(() =>
-  children.value.filter((c) => c.type !== NODE_KIND_TURN),
+  children.value.filter((c) => !isTurnNode(c)),
 )
 
 // ── B2：过程段收起成一行状态（三字段与后端 `WorkerProgress` 逐字同名） ──
@@ -228,7 +225,7 @@ function collectSteps(turns: ChatNode[]): string[] {
   const walk = (nodes: ChatNode[]) => {
     for (const n of nodes) {
       // user 是输入不是进展（与后端投影同一口径；判据走唯一折叠点 [T-147d-iii]）
-      if (messageRoleOf(n) !== CHAT_ROLE_USER) {
+      if (!isUserNode(n)) {
         const text = messageTextOf(n.content).trim()
         // 「无内容节点不产出步骤」：组合节点（turn / tool_call）没有 content ⇒ 空串跳过
         if (text) {

@@ -71,13 +71,14 @@
 
 <script setup lang="ts">
 import { computed, onScopeDispose, ref, watch } from 'vue'
-import { CHAT_ROLE_USER, type ChatNode } from '@/schemas/chat_node'
+import { type ChatNode } from '@/schemas/chat_node'
 import { useMessageContent } from '@/composables/useMessageContent'
 import { useRunningClock } from '@/composables/useRunningClock'
 import {
   agentNameOf,
   canRetryTool,
   effectiveOpenOf,
+  isUserFacet,
   messageHeadModifier,
   messageIcon,
   messageIsHeartbeat,
@@ -108,9 +109,7 @@ const emit = defineEmits<{
 // 压缩后的历史记忆虽是 `user` 角色（后端为了让对话以 user 开头），但它是**系统产出的
 // 记忆**：不能按用户消息对待——右对齐的气泡、头像「你」、悬停可编辑/删除都会把
 // 「系统替你说了一句话」坐实。这里排掉它，`memory` 渲染器只是同一份判定的消费方。
-const isUser = computed(
-  () => props.facets.role === CHAT_ROLE_USER && !props.facets.compacted,
-)
+const isUser = computed(() => isUserFacet(props.facets) && !props.facets.compacted)
 /** 分形层级：仅 depth ≥ 2 施加缩进 + 左侧引导竖线（depth=1 与主回合左缘齐平） */
 const nested = computed(() => (props.depth ?? 0) > 1)
 const typeClass = computed(() => `type-${props.facets.type}`)
