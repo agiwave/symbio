@@ -40,6 +40,13 @@ import {
   NODE_KIND_TOOL_CALL,
   NODE_KIND_TURN,
   NODE_KIND_USER_PROMPT,
+  NODE_KIND_BODY,
+  NODE_KIND_NOTICE,
+  NODE_KIND_SKELETON,
+  NODE_KIND_INTERACTION,
+  NODE_KIND_TYPING,
+  CHAT_STYLE_TAG_REASONING,
+  CHAT_STYLE_TAG_TOOL,
   RESUME_ACTION_RETRY,
   RESUME_ACTION_RETRY_COMPACTION,
   RESUME_ACTION_RETRY_SUBTREE,
@@ -58,9 +65,38 @@ export function messageRoleOf(node: Pick<ChatNode, 'role'>): ChatRole {
   return (node.role as ChatRole) ?? CHAT_ROLE_ASSISTANT
 }
 
-/** 节点的类型（缺省 = 正文文本） */
-export function messageTypeOf(node: Pick<ChatNode, 'type'>): NodeKind {
-  return (node.type as NodeKind) ?? NODE_KIND_TEXT
+/**
+ * 节点的**生效类型**（缺省 = 正文文本）。
+ *
+ * [T-147c-ii] 双形态共存档：目标五值形态（`body` / `notice` / `skeleton` /
+ * `interaction`，靠 `meta.style_tag` 分辨呈现变体）在这里折叠回旧 wire 词，
+ * 下游（facets / 呈现表 / 文案表）继续按旧词分派——折叠点只有这一处，
+ * 与后端 `ChatNode::is_*` 谓词同一判据。裸 `skeleton`（漏 tag 的畸形写方）
+ * 按「一整轮」折叠：骨架的多数形态。`typing` 不在折叠表内（原样透出，
+ * 呈现走兜底渲染器）。
+ */
+export function foldNodeKind(type: NodeKind, styleTag?: string): NodeKind {
+  switch (type) {
+    case NODE_KIND_SKELETON:
+      return styleTag === CHAT_STYLE_TAG_TOOL ? NODE_KIND_TOOL_CALL : NODE_KIND_TURN
+    case NODE_KIND_BODY:
+      return styleTag === CHAT_STYLE_TAG_REASONING ? NODE_KIND_REASONING : NODE_KIND_TEXT
+    case NODE_KIND_NOTICE:
+      return NODE_KIND_COMPRESSION
+    case NODE_KIND_INTERACTION:
+      return NODE_KIND_USER_PROMPT
+    default:
+      return type
+  }
+}
+
+export function messageTypeOf(node: Pick<ChatNode, 'type' | 'meta'>): NodeKind {
+  const type = node.type as NodeKind | undefined
+  if (!type) return NODE_KIND_TEXT
+  return foldNodeKind(
+    type,
+    (node.meta as { style_tag?: string } | undefined)?.style_tag,
+  )
 }
 
 /** 节点的状态（缺省 = 已结束） */
@@ -536,6 +572,12 @@ export const NODE_KIND_LABELS: Record<string, string> = {
   [NODE_KIND_TOOL_CALL]: '工具调用',
   [NODE_KIND_USER_PROMPT]: '待响应',
   [NODE_KIND_COMPRESSION]: '上下文压缩',
+  // 目标五值形态（[T-147c-ii] 双形态共存；文案与对应旧词同义）
+  [NODE_KIND_BODY]: '正文',
+  [NODE_KIND_NOTICE]: '系统提示',
+  [NODE_KIND_SKELETON]: '组合',
+  [NODE_KIND_INTERACTION]: '待响应',
+  [NODE_KIND_TYPING]: '生成中',
 }
 
 /**
@@ -711,6 +753,58 @@ const TYPE_PRESENTATION: Record<NodeKind, TypePresentation> = {
       return ''
     },
     defaultOpen: () => true,
+  },
+
+  // ---- 目标五值形态（[T-147c-ii] 双形态共存档）----
+  //
+  // `messageTypeOf` 已把新形态折叠回旧词，正常链路走不到这些条目；登记是为
+  // `Record<NodeKind, …>` 的**穷尽性**——漏一个取值是编译错误，未登记取值
+  // 在运行期走 `FALLBACK_PRESENTATION`（不渲染成空白）。写方全量迁完后，
+  // 旧六值条目随变体一起退役，这张表只剩五格。
+  [NODE_KIND_BODY]: {
+    icon: '💬',
+    title: (f) => (f.role === CHAT_ROLE_ASSISTANT ? '助手' : '消息'),
+    renderer: 'text',
+    defaultOpen: (f) => f.role !== CHAT_ROLE_TOOL,
+  },
+
+  [NODE_KIND_NOTICE]: {
+    icon: '🗜',
+    title: '上下文压缩',
+    renderer: 'compression',
+    runningAction: true,
+    ownRunningSignal: true,
+    statusTag: (f) => {
+      if (isFailedStatus(f.status)) return '未完成'
+      if (isAbortedStatus(f.status)) return '已中止'
+      if (isStreamingStatus(f.status)) return '压缩中'
+      return ''
+    },
+    defaultOpen: () => true,
+  },
+
+  [NODE_KIND_SKELETON]: {
+    icon: (f) => (f.subSession ? '↳' : 'AI'),
+    title: (_f, agentName) => agentName,
+    renderer: 'turn',
+    defaultOpen: () => true,
+  },
+
+  [NODE_KIND_INTERACTION]: {
+    icon: '❓',
+    title: (f) => (f.promptKind === 'confirm' ? '工具确认' : '提问'),
+    renderer: 'user_prompt',
+    defaultOpen: () => true,
+  },
+
+  // 进行中占位（[T-151] 前端合成）：折叠单行、只挂「生成中」信号，无正文。
+  [NODE_KIND_TYPING]: {
+    icon: '⋯',
+    title: '生成中',
+    renderer: 'fallback',
+    ownRunningSignal: true,
+    statusTag: () => '生成中',
+    defaultOpen: () => false,
   },
 }
 

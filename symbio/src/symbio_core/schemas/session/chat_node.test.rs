@@ -75,21 +75,25 @@ fn resume_action_wire_words_are_snake_case() {
 #[test]
 fn legacy_wire_words_fold_to_shape_and_style_tag() {
     for (word, shape, tag) in [
-        ("text", NodeShape::Body, None),
-        ("reasoning", NodeShape::Body, Some(CHAT_STYLE_TAG_REASONING)),
-        ("turn", NodeShape::Skeleton, Some(CHAT_STYLE_TAG_RUN)),
-        ("tool_call", NodeShape::Skeleton, Some(CHAT_STYLE_TAG_TOOL)),
-        ("user_prompt", NodeShape::Interaction, None),
-        ("compression", NodeShape::Notice, Some(CHAT_STYLE_TAG_COMPRESSION)),
+        ("text", NodeKind::Body, None),
+        ("reasoning", NodeKind::Body, Some(CHAT_STYLE_TAG_REASONING)),
+        ("turn", NodeKind::Skeleton, Some(CHAT_STYLE_TAG_RUN)),
+        ("tool_call", NodeKind::Skeleton, Some(CHAT_STYLE_TAG_TOOL)),
+        ("user_prompt", NodeKind::Interaction, None),
+        (
+            "compression",
+            NodeKind::Notice,
+            Some(CHAT_STYLE_TAG_COMPRESSION),
+        ),
         // 新词也认（未来 wire 上的读侧）
-        ("body", NodeShape::Body, None),
-        ("skeleton", NodeShape::Skeleton, None),
-        ("notice", NodeShape::Notice, None),
-        ("interaction", NodeShape::Interaction, None),
-        ("typing", NodeShape::Typing, None),
+        ("body", NodeKind::Body, None),
+        ("skeleton", NodeKind::Skeleton, None),
+        ("notice", NodeKind::Notice, None),
+        ("interaction", NodeKind::Interaction, None),
+        ("typing", NodeKind::Typing, None),
     ] {
-        let (got_shape, got_tag) = legacy_shape_to_style_tag(word)
-            .unwrap_or_else(|| panic!("{word} 未登记进映射"));
+        let (got_shape, got_tag) =
+            legacy_shape_to_style_tag(word).unwrap_or_else(|| panic!("{word} 未登记进映射"));
         assert_eq!(got_shape, shape, "{word} 折错形状");
         assert_eq!(got_tag, tag, "{word} 折错 style_tag");
     }
@@ -118,7 +122,10 @@ fn predicates_are_exclusive_per_kind() {
 
     let reasoning = n(NodeKind::Reasoning);
     assert!(reasoning.is_reasoning());
-    assert!(!reasoning.is_text(), "推理与正文互斥（曾同时命中 Body 是 bug）");
+    assert!(
+        !reasoning.is_text(),
+        "推理与正文互斥（曾同时命中 Body 是 bug）"
+    );
 
     let text = n(NodeKind::Text);
     assert!(text.is_text());
@@ -146,12 +153,12 @@ fn shape_helper_maps_six_variants_to_five() {
         msg_type: Some(kind),
         ..Default::default()
     };
-    assert_eq!(n(NodeKind::Text).shape(), Some(NodeShape::Body));
-    assert_eq!(n(NodeKind::Reasoning).shape(), Some(NodeShape::Body));
-    assert_eq!(n(NodeKind::Turn).shape(), Some(NodeShape::Skeleton));
-    assert_eq!(n(NodeKind::ToolCall).shape(), Some(NodeShape::Skeleton));
-    assert_eq!(n(NodeKind::UserPrompt).shape(), Some(NodeShape::Interaction));
-    assert_eq!(n(NodeKind::Compression).shape(), Some(NodeShape::Notice));
+    assert_eq!(n(NodeKind::Text).shape(), Some(NodeKind::Body));
+    assert_eq!(n(NodeKind::Reasoning).shape(), Some(NodeKind::Body));
+    assert_eq!(n(NodeKind::Turn).shape(), Some(NodeKind::Skeleton));
+    assert_eq!(n(NodeKind::ToolCall).shape(), Some(NodeKind::Skeleton));
+    assert_eq!(n(NodeKind::UserPrompt).shape(), Some(NodeKind::Interaction));
+    assert_eq!(n(NodeKind::Compression).shape(), Some(NodeKind::Notice));
     assert_eq!(ChatNode::default().shape(), None);
 }
 
@@ -163,4 +170,78 @@ fn style_tag_reads_from_meta() {
     assert_eq!(n.style_tag(), None);
     n.meta = Some(serde_json::json!({ "style_tag": CHAT_STYLE_TAG_RUN }));
     assert_eq!(n.style_tag(), Some(CHAT_STYLE_TAG_RUN));
+}
+
+/// [T-147c-ii] 双形态共存档：同一谓词**同时认**旧变体名与新形态（目标变体 +
+/// `meta.style_tag`）——构造侧逐文件迁移期间，两种写的节点判据一致。
+#[test]
+fn predicates_accept_both_legacy_and_target_forms() {
+    // Skeleton + run == 曾经的 Turn
+    let run = ChatNode {
+        msg_type: Some(NodeKind::Skeleton),
+        ..Default::default()
+    }
+    .with_style_tag(CHAT_STYLE_TAG_RUN);
+    assert!(run.is_run());
+    assert!(!run.is_tool_call(), "Skeleton 的变体判别全靠 tag");
+
+    // Skeleton + tool == 曾经的 ToolCall
+    let tc = ChatNode {
+        msg_type: Some(NodeKind::Skeleton),
+        ..Default::default()
+    }
+    .with_style_tag(CHAT_STYLE_TAG_TOOL);
+    assert!(tc.is_tool_call());
+    assert!(!tc.is_run());
+
+    // Body 无 tag == 曾经的 Text；Body + reasoning tag == 曾经的 Reasoning（互斥）
+    let body = ChatNode {
+        msg_type: Some(NodeKind::Body),
+        ..Default::default()
+    };
+    assert!(body.is_text());
+    assert!(!body.is_reasoning());
+    let reasoning = ChatNode {
+        msg_type: Some(NodeKind::Body),
+        ..Default::default()
+    }
+    .with_style_tag(CHAT_STYLE_TAG_REASONING);
+    assert!(reasoning.is_reasoning());
+    assert!(!reasoning.is_text());
+
+    // Interaction / Notice / Typing 目标变体直接命中
+    let prompt = ChatNode {
+        msg_type: Some(NodeKind::Interaction),
+        ..Default::default()
+    };
+    assert!(prompt.is_interaction());
+    let comp = ChatNode {
+        msg_type: Some(NodeKind::Notice),
+        ..Default::default()
+    };
+    assert!(comp.is_compression());
+
+    // 裸 Skeleton（无 tag）：两个骨架谓词都不真——写方漏 tag 不会被静默归队
+    let bare_skel = ChatNode {
+        msg_type: Some(NodeKind::Skeleton),
+        ..Default::default()
+    };
+    assert!(!bare_skel.is_run() && !bare_skel.is_tool_call());
+
+    // shape() 对两种形态给出同一答案（折叠无损）
+    assert_eq!(run.shape(), bare_skel.shape());
+    assert_eq!(reasoning.shape(), body.shape());
+    assert_eq!(run.shape(), Some(NodeKind::Skeleton));
+    assert_eq!(body.shape(), Some(NodeKind::Body));
+
+    // with_style_tag 对已有 meta 对象是**并入**而不是整颗替换
+    let with_meta = ChatNode {
+        msg_type: Some(NodeKind::Skeleton),
+        meta: Some(serde_json::json!({ "prompt": { "tool_name": "x" } })),
+        ..Default::default()
+    }
+    .with_style_tag(CHAT_STYLE_TAG_TOOL);
+    let meta = with_meta.meta.clone().unwrap();
+    assert_eq!(with_meta.style_tag(), Some(CHAT_STYLE_TAG_TOOL));
+    assert!(meta.get("prompt").is_some(), "既有 meta 键不得被挤掉");
 }

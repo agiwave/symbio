@@ -141,6 +141,19 @@ export const NODE_KIND_USER_PROMPT = 'user_prompt'
 /** 上下文压缩（系统对历史的一次整理动作，不是对话内容） */
 export const NODE_KIND_COMPRESSION = 'compression'
 
+// ---- 目标五值形态（[T-147c-ii] 双形态共存档；上面六个旧词保留到写方迁完）----
+
+/** 正文（新形态）：无 `style_tag` = 普通文本；`reasoning` = 思考 */
+export const NODE_KIND_BODY = 'body'
+/** 系统提示（新形态）：当前词表 `compression` */
+export const NODE_KIND_NOTICE = 'notice'
+/** 组合骨架（新形态）：`run` = 一整轮 / `tool` = 一次工具调用 */
+export const NODE_KIND_SKELETON = 'skeleton'
+/** 等待用户回应（新形态，曾经的 `user_prompt`） */
+export const NODE_KIND_INTERACTION = 'interaction'
+/** 进行中占位（新形态；前端合成，见 [T-151]） */
+export const NODE_KIND_TYPING = 'typing'
+
 export const NODE_KINDS = [
   NODE_KIND_TEXT,
   NODE_KIND_REASONING,
@@ -148,9 +161,28 @@ export const NODE_KINDS = [
   NODE_KIND_TURN,
   NODE_KIND_USER_PROMPT,
   NODE_KIND_COMPRESSION,
+  NODE_KIND_BODY,
+  NODE_KIND_NOTICE,
+  NODE_KIND_SKELETON,
+  NODE_KIND_INTERACTION,
+  NODE_KIND_TYPING,
 ] as const
 
 export type NodeKind = (typeof NODE_KINDS)[number]
+
+/**
+ * `style_tag` wire 词表（同一 shape 下的呈现变体，[ADR-070 §决策 3]）。
+ *
+ * 唯一定义处在 Rust `chat_node.rs::CHAT_STYLE_TAG_*`；这里是前端镜像，
+ * 消费点 `messageTypes.ts::messageTypeOf` 的折叠判据。
+ */
+export const CHAT_STYLE_TAG_REASONING = 'reasoning'
+/** `skeleton` 的一种：一整轮助手响应（曾经的 `turn`） */
+export const CHAT_STYLE_TAG_RUN = 'run'
+/** `skeleton` 的一种：一次工具调用（曾经的 `tool_call`） */
+export const CHAT_STYLE_TAG_TOOL = 'tool'
+/** `notice` 的一种：上下文压缩记录（曾经的 `compression`） */
+export const CHAT_STYLE_TAG_COMPRESSION = 'compression'
 
 // ==================== 消息状态 ====================
 

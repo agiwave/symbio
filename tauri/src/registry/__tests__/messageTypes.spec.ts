@@ -30,6 +30,7 @@ import {
   NODE_KIND_TOOL_CALL,
   NODE_KIND_TURN,
   NODE_KIND_USER_PROMPT,
+  NODE_KIND_TYPING,
   CHAT_ROLE_ASSISTANT,
   CHAT_ROLE_TOOL,
   CHAT_ROLE_USER,
@@ -58,6 +59,7 @@ import {
   messageIsRunningAction,
   messagePreviewFollowsLiveEdge,
   messageRendererKey,
+  foldNodeKind,
   missingResultNoteOf,
   messageRetryTargetOf,
   messageRoleLabel,
@@ -631,9 +633,18 @@ describe('messageRendererKey：渲染形态分派', () => {
 
   it('每个已登记的消息类型都分派到非 fallback 的渲染器（防漏登记）', () => {
     for (const t of NODE_KINDS) {
-      expect(messageRendererKey(facets({ type: t })), `类型 ${t} 未分派到专属渲染器`).not.toBe(
-        'fallback',
-      )
+      // [T-147c-ii] 双形态共存档：新形态经 `foldNodeKind` 折叠回旧词后分派
+      //（生产链路在 `messageTypeOf` 同一处折叠）。`typing` 是唯一例外——
+      // 占位形态，专属渲染器随 [T-151] 落地，当前走 fallback 是有意的。
+      if (t === NODE_KIND_TYPING) {
+        expect(messageRendererKey(facets({ type: t }))).toBe('fallback')
+        continue
+      }
+      const folded = foldNodeKind(t)
+      expect(
+        messageRendererKey(facets({ type: folded })),
+        `类型 ${t}（折叠为 ${folded}）未分派到专属渲染器`,
+      ).not.toBe('fallback')
     }
   })
 
