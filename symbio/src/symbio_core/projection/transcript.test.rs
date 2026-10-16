@@ -230,9 +230,9 @@ fn a_snapshot_replaces_the_superseded_prefix() {
         snapshot(
             "a",
             vec![
-                msg("snap-root", "user", Some("text"), "[CONTEXT SNAPSHOT] 摘要"),
-                msg("u-1", "user", Some("text"), "保留的近轮问题"),
-                msg("f-1", "assistant", Some("text"), "保留的近轮答复"),
+                msg("snap-root", "user", Some("body"), "[CONTEXT SNAPSHOT] 摘要"),
+                msg("u-1", "user", Some("body"), "保留的近轮问题"),
+                msg("f-1", "assistant", Some("body"), "保留的近轮答复"),
             ],
         ),
         user(2, "u-2", "压缩之后的问题"),
@@ -262,11 +262,11 @@ fn the_user_turn_a_snapshot_carries_is_not_emitted_twice() {
         snapshot(
             "a",
             vec![
-                msg("snap-root", "user", Some("text"), "摘要"),
+                msg("snap-root", "user", Some("body"), "摘要"),
                 msg(
                     "u-1",
                     "user",
-                    Some("text"),
+                    Some("body"),
                     "本轮的发言（快照尾部留着原文）",
                 ),
             ],
@@ -311,13 +311,13 @@ fn two_live_events_sharing_a_node_id_are_both_projected() {
 fn only_the_latest_snapshot_counts() {
     let events = vec![
         user(0, "u-0", "更早的问题"),
-        snapshot("a", vec![msg("s-a", "user", Some("text"), "第一份摘要")]),
+        snapshot("a", vec![msg("s-a", "user", Some("body"), "第一份摘要")]),
         user(1, "u-1", "中间的问题"),
         snapshot(
             "b",
             vec![
-                msg("s-b", "user", Some("text"), "第二份摘要"),
-                msg("u-2", "user", Some("text"), "保留的近轮"),
+                msg("s-b", "user", Some("body"), "第二份摘要"),
+                msg("u-2", "user", Some("body"), "保留的近轮"),
             ],
         ),
     ];
@@ -362,9 +362,9 @@ fn mutations_after_the_snapshot_still_fold() {
         snapshot(
             "a",
             vec![
-                msg("snap-root", "user", Some("text"), "摘要"),
-                msg("u-keep", "user", Some("text"), "保留的"),
-                msg("u-drop", "user", Some("text"), "保留但被删"),
+                msg("snap-root", "user", Some("body"), "摘要"),
+                msg("u-keep", "user", Some("body"), "保留的"),
+                msg("u-drop", "user", Some("body"), "保留但被删"),
             ],
         ),
         edited("u-keep", "user", "保留的（改过）"),
@@ -384,9 +384,10 @@ fn mutations_after_the_snapshot_still_fold() {
 /// 两条路径取的是同一件事）。
 #[test]
 fn a_snapshot_tool_result_keeps_the_name_from_its_parent_call() {
-    let mut call = msg("T-call", "assistant", Some("tool_call"), "{\"path\":\"a\"}");
+    let mut call = msg("T-call", "assistant", Some("skeleton"), "{\"path\":\"a\"}");
+    call["meta"] = serde_json::json!({ "style_tag": "tool" });
     call["name"] = serde_json::json!("vdfs_read");
-    let mut result = msg("T-res", "tool", Some("text"), "文件正文");
+    let mut result = msg("T-res", "tool", Some("body"), "文件正文");
     result["parent_id"] = serde_json::json!("T-call");
     let events = vec![snapshot("a", vec![call, result])];
     let got = full(&events);
@@ -403,11 +404,11 @@ fn a_snapshot_tool_result_keeps_the_name_from_its_parent_call() {
 /// 快照里的**界面文本**（`meta.exclude_from_context`）进转写但**不进请求包**。
 #[test]
 fn a_snapshot_report_node_stays_out_of_the_request_package() {
-    let mut report = msg("r-0", "assistant", Some("text"), "已经完成 1 轮工具调用");
+    let mut report = msg("r-0", "assistant", Some("body"), "已经完成 1 轮工具调用");
     report["meta"] = serde_json::json!({ "exclude_from_context": true });
     let events = vec![
         user(0, "u-0", "问"),
-        snapshot("a", vec![msg("s", "user", Some("text"), "摘要"), report]),
+        snapshot("a", vec![msg("s", "user", Some("body"), "摘要"), report]),
         user(2, "u-2", "压缩之后的问"),
     ];
     let view = transcript()

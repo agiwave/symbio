@@ -32,7 +32,8 @@ fn view_tc(id: &str, name: &str, args: &str) -> ChatNode {
     ChatNode {
         id: id.to_string(),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::ToolCall),
+        msg_type: Some(NodeKind::Skeleton),
+        meta: Some(serde_json::json!({"style_tag": "tool"})),
         name: Some(name.to_string()),
         content: Some(MessageContent::Text(args.to_string())),
         status: Some(NodeStatus::Completed),
@@ -84,8 +85,8 @@ fn test_build_request_view_passthrough() {
         assert_eq!(v.role, m.role);
         assert_eq!(view_text(v), view_text(m));
     }
-    // 存储侧不受请求视图污染
-    assert!(msgs.iter().all(|m| m.meta.is_none()));
+    // 存储侧不受请求视图污染（骨架夹具自带 style_tag meta，判据是「视图与输入一致」）
+    assert!(view.iter().zip(&msgs).all(|(v, m)| v.meta == m.meta));
 }
 
 /// nudge 请求级注入：追加到视图末尾，不落库（原输入不变），meta 可识别。
@@ -293,15 +294,19 @@ fn test_fade_aged_content_nodes_idempotent() {
     assert_eq!(msgs[0].meta, once_meta);
 }
 
-/// ToolCall 豁免：工具调用参数不属于内容节点（msg_type=ToolCall），
+/// ToolCall 豁免：工具调用参数不属于内容节点（run/tool 骨架），
 /// 即便超长也不淡化——调用参数是骨架化层的辖区。
 #[test]
 fn test_fade_aged_content_nodes_skips_tool_call() {
     let big_args = "x".repeat(20_000);
     let mut msgs = vec![view_tc("t1", "vdfs_read", &big_args), user_msg("tail")];
+    let before_meta = msgs[0].meta.clone();
     fade_aged_content_nodes(&mut msgs, 1, 200);
     assert_eq!(view_text(&msgs[0]), big_args, "ToolCall 参数不淡化");
-    assert!(msgs[0].meta.is_none());
+    assert_eq!(
+        msgs[0].meta, before_meta,
+        "骨架不淡化，也不往 meta 里写淡化痕迹"
+    );
 }
 
 /// 骨架化：window + 保留策略声明时，过期调用的参数与结果被占位文案替换，

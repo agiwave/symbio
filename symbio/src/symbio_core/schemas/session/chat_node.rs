@@ -19,45 +19,31 @@ pub enum NodeRole {
     System,
 }
 
-/// 节点**形状**——[T-147c-ii] 双形态共存档：旧六值（wire 词 `text` / `reasoning` /
-/// `turn` / `tool_call` / `user_prompt` / `compression`）与目标五值（`body` / `notice` /
-/// `skeleton` / `interaction` / `typing`，[ADR-070 §决策 1]）同住在一张枚举里。
+/// 节点**形状**——五值闭集（`body` / `notice` / `skeleton` / `interaction` / `typing`，
+/// [ADR-070 §决策 1]）。同一 shape 内的呈现变体**不在枚举里**，走 `meta.style_tag`
+/// （词表见 [`CHAT_STYLE_TAG_REASONING`] 等，[ADR-070 §决策 3]）。
 ///
-/// 为什么共存而不是直接删旧值：`msg_type` 是**三处同源**的 wire 词——存量 VDFS 属性、
-/// 在途实时帧、前端 `NODE_KINDS` 词表。删旧变体的那一档必须等**写方全部迁到新形态**
-/// 之后（旧词经 [`legacy_shape_to_style_tag`] 只活在读侧兼容里），且前端词表先扩后收。
+/// 消费方按 [`ChatNode`] 上的**谓词**（`is_run` / `is_tool_call` / `is_reasoning` /
+/// `is_text` / `is_compression` / `is_interaction`）判节点，而不是按变体名 match——
+/// 变体名 + tag 两维合起来才是语义。
 ///
-/// 现在起，消费方按 [`ChatNode`] 上的**谓词**（`is_run` / `is_tool_call` / `is_reasoning` /
-/// `is_text` / `is_compression` / `is_interaction`）判节点，而不是按枚举变体名——谓词
-/// **同时认两种形态**（旧变体名，或新形态 + `meta.style_tag`），构造侧逐文件将旧形态
-/// 换成新形态（`Skeleton` + `CHAT_STYLE_TAG_RUN` 等），换完即可删旧六值。
+/// 旧六词（`text` / `reasoning` / `turn` / `tool_call` / `user_prompt` / `compression`）
+/// **不在本枚举**：它们只存在于存量 VDFS 属性里，经 [`legacy_shape_to_style_tag`]
+/// 在 [`message_of_node`] 读边界一次性折叠成新形态 + `style_tag` 注入。
 ///
 /// 决策依据：[ADR-070 §决策 1 / 3]·父批：[T-147c-ii]。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
 pub enum NodeKind {
-    // ---- 旧六值：写方迁完后删除（读侧兼容由 legacy_shape_to_style_tag 长期承载）----
+    /// 正文：无 tag = 普通文本；`style_tag="reasoning"` = 思考正文
     #[default]
-    Text,
-    Reasoning,
-    /// 组合节点：一轮响应（顶层为 `Assistant`，工具响应为 `Tool`），仅分组子节点
-    Turn,
-    /// 组合节点：一次工具调用（请求），携带 `name`，其子节点含请求 `Text` 与响应 `Text/Turn`
-    ToolCall,
-    /// 待用户响应节点：承载 `ask_user` 提问或工具执行前确认（confirm）。
-    UserPrompt,
-    /// 上下文压缩节点：**不是对话内容**，是系统对历史的一次整理动作。
-    Compression,
-    // ---- 目标五值：新形态（同 shape 内的呈现变体走 meta.style_tag）----
-    /// 正文：无 tag = 普通文本（曾经的 `Text`）；`style_tag="reasoning"` = 思考正文
     Body,
-    /// 系统提示：当前词表 `style_tag="compression"`（曾经的 `Compression`）
+    /// 系统提示：当前词表 `style_tag="compression"`
     Notice,
     /// 组合骨架：`style_tag="run"` 一整轮响应 / `"tool"` 一次工具调用
-    /// （曾经的 `Turn` / `ToolCall`）
     Skeleton,
-    /// 等待用户回应（曾经的 `UserPrompt`）
+    /// 等待用户回应（`ask_user` 提问或工具执行前确认）
     Interaction,
     /// 进行中的占位（前端合成，见 [T-151]）
     Typing,
@@ -70,8 +56,8 @@ pub enum NodeKind {
 /// 六种旧值；本函数把它们折成新形态并**返回**应写入 `meta.style_tag` 的值（`None` = 不写）。
 /// 新词（`"body"` / `"notice"` / `"skeleton"` / `"interaction"` / `"typing"`）也认。
 ///
-/// 双形态共存档返回的是 `NodeKind` 的目标五值子集；删旧六值后本函数继续存在——
-/// 存量数据的旧词**永久**需要它来折叠。
+/// 旧六值已从 `NodeKind` 删除，但存量数据的旧词**永久**需要本函数折叠——
+/// 删的是枚举变体，不是已落盘的 wire 词。
 pub fn legacy_shape_to_style_tag(word: &str) -> Option<(NodeKind, Option<&'static str>)> {
     Some(match word {
         // 新词——原样，无 style_tag 需要注入。
@@ -483,10 +469,37 @@ pub fn message_of_node(node: &crate::symbio_core::VdfsNode, text: String) -> Opt
     ) -> Option<T> {
         serde_json::from_value(m.get(k).cloned()?).ok()
     }
+    // `attributes.type` 按**词**读再走 [`legacy_shape_to_style_tag`] 折叠，而不是
+    // serde 直进 `NodeKind`：存量数据里存的是当时的 wire 词（旧六值已不在枚举里，
+    // serde 会静默失败成 `None`）。折叠产出的 style_tag 只在 meta **还没有**该键时
+    // 注入——新写方带着完整形态进来时不覆盖。
+    let (msg_type, legacy_tag) = attr::<String>(&node.attributes, "type")
+        .as_deref()
+        .and_then(legacy_shape_to_style_tag)
+        .map(|(kind, tag)| (Some(kind), tag))
+        .unwrap_or((None, None));
+    let mut meta = node
+        .attributes
+        .get("meta")
+        .cloned()
+        .filter(|v| !v.is_null());
+    if let Some(tag) = legacy_tag {
+        if !meta
+            .as_ref()
+            .and_then(|m| m.get("style_tag"))
+            .and_then(Value::as_str)
+            .is_some()
+        {
+            let slot = meta.get_or_insert_with(|| Value::Object(serde_json::Map::new()));
+            if let Some(obj) = slot.as_object_mut() {
+                obj.insert("style_tag".to_string(), Value::String(tag.to_string()));
+            }
+        }
+    }
     Some(ChatNode {
         id: node.name.clone(),
         role: attr(&node.attributes, "role"),
-        msg_type: attr(&node.attributes, "type"),
+        msg_type,
         name: attr(&node.attributes, "tool_name"),
         parent_id: attr(&node.attributes, "parent_id"),
         tool_call_id: attr(&node.attributes, "tool_call_id"),
@@ -494,11 +507,7 @@ pub fn message_of_node(node: &crate::symbio_core::VdfsNode, text: String) -> Opt
         error: attr(&node.attributes, "error"),
         principal: attr(&node.attributes, "principal"),
         // `message_node` 把「没有 meta」写成 `null`；这里还原成"没有"
-        meta: node
-            .attributes
-            .get("meta")
-            .cloned()
-            .filter(|v| !v.is_null()),
+        meta,
         status: Some(NodeStatus::of(&node.status)?),
         content: Some(MessageContent::Text(text)),
         ..Default::default()
@@ -507,10 +516,6 @@ pub fn message_of_node(node: &crate::symbio_core::VdfsNode, text: String) -> Opt
 
 impl ChatNode {
     /// 读 `meta.style_tag`（wire 层的呈现变体词，[ADR-070 §决策 3]）。
-    ///
-    /// [T-147c-ii] 落地前 `style_tag` 只有**未来写方**会用（本批不产生新写点），
-    /// 谓词 `is_run` / `is_tool_call` / `is_reasoning` 等**同时兼容**旧六值变体名
-    /// 与新形态 + tag 两种形态——五值收敛那一档消费方读谓词不变，改点收在构造侧。
     pub fn style_tag(&self) -> Option<&str> {
         self.meta
             .as_ref()
@@ -518,24 +523,8 @@ impl ChatNode {
             .and_then(Value::as_str)
     }
 
-    /// 目标形状判据（[ADR-070 §决策 1]）：把 `msg_type` 折成**目标五值**——
-    /// 旧六值折叠到新形态，目标五值原样返回（`msg_type` 本身已是形状时无损）。
-    pub fn shape(&self) -> Option<NodeKind> {
-        let kind = self.msg_type?;
-        Some(match kind {
-            NodeKind::Text | NodeKind::Reasoning | NodeKind::Body => NodeKind::Body,
-            NodeKind::Turn | NodeKind::ToolCall | NodeKind::Skeleton => NodeKind::Skeleton,
-            NodeKind::UserPrompt | NodeKind::Interaction => NodeKind::Interaction,
-            NodeKind::Compression | NodeKind::Notice => NodeKind::Notice,
-            NodeKind::Typing => NodeKind::Typing,
-        })
-    }
-
     /// 写入 `meta.style_tag`（链式构造 helper，[T-147c-ii] 构造侧）。
     ///
-    /// 构造点把旧变体换成目标形态时用它补 tag：
-    /// `ChatNode { msg_type: Some(NodeKind::Skeleton), ..Default::default() }
-    ///  .with_style_tag(CHAT_STYLE_TAG_RUN)`。
     /// `meta` 已有对象则并入该对象；`meta` 是非对象 JSON（不该发生）时原样保留、不注入。
     pub fn with_style_tag(mut self, tag: &'static str) -> Self {
         let meta = self
@@ -547,57 +536,35 @@ impl ChatNode {
         self
     }
 
-    /// 本节点是不是「一整轮助手响应的骨架」（曾经的 `Turn` = `Skeleton` + tag `run`）。
+    /// 本节点是不是「一整轮助手响应的骨架」（`Skeleton` + tag `run`）。
     pub fn is_run(&self) -> bool {
-        match self.msg_type {
-            Some(NodeKind::Turn) => true,
-            Some(NodeKind::Skeleton) => self.style_tag() == Some(CHAT_STYLE_TAG_RUN),
-            _ => false,
-        }
+        self.msg_type == Some(NodeKind::Skeleton) && self.style_tag() == Some(CHAT_STYLE_TAG_RUN)
     }
 
-    /// 本节点是不是「一次工具调用骨架」（曾经的 `ToolCall` = `Skeleton` + tag `tool`）。
+    /// 本节点是不是「一次工具调用骨架」（`Skeleton` + tag `tool`）。
     pub fn is_tool_call(&self) -> bool {
-        match self.msg_type {
-            Some(NodeKind::ToolCall) => true,
-            Some(NodeKind::Skeleton) => self.style_tag() == Some(CHAT_STYLE_TAG_TOOL),
-            _ => false,
-        }
+        self.msg_type == Some(NodeKind::Skeleton) && self.style_tag() == Some(CHAT_STYLE_TAG_TOOL)
     }
 
-    /// 本节点是不是「推理正文」（曾经的 `Reasoning` = `Body` + tag `reasoning`）。
+    /// 本节点是不是「推理正文」（`Body` + tag `reasoning`）。
     pub fn is_reasoning(&self) -> bool {
-        match self.msg_type {
-            Some(NodeKind::Reasoning) => true,
-            Some(NodeKind::Body) => self.style_tag() == Some(CHAT_STYLE_TAG_REASONING),
-            _ => false,
-        }
+        self.msg_type == Some(NodeKind::Body) && self.style_tag() == Some(CHAT_STYLE_TAG_REASONING)
     }
 
-    /// 本节点是不是「普通正文」（曾经的 `Text` = `Body` 无 `reasoning` tag）。
+    /// 本节点是不是「普通正文」（`Body` 且不带 `reasoning` tag）。
     pub fn is_text(&self) -> bool {
-        match self.msg_type {
-            Some(NodeKind::Text) => true,
-            Some(NodeKind::Body) => self.style_tag() != Some(CHAT_STYLE_TAG_REASONING),
-            _ => false,
-        }
+        self.msg_type == Some(NodeKind::Body) && self.style_tag() != Some(CHAT_STYLE_TAG_REASONING)
     }
 
-    /// 本节点是不是「压缩记录」（曾经的 `Compression` = `Notice`；
-    /// `Notice` 当前词表只有 compression 一个变体，裸 `Notice` 也算）。
+    /// 本节点是不是「压缩记录」（`Notice`；当前词表只有 compression 一个变体，
+    /// 裸 `Notice` 也算）。
     pub fn is_compression(&self) -> bool {
-        matches!(
-            self.msg_type,
-            Some(NodeKind::Compression) | Some(NodeKind::Notice)
-        )
+        self.msg_type == Some(NodeKind::Notice)
     }
 
-    /// 本节点是不是「等待用户回应的交互」（曾经的 `UserPrompt` = `Interaction`）。
+    /// 本节点是不是「等待用户回应的交互」（`Interaction`）。
     pub fn is_interaction(&self) -> bool {
-        matches!(
-            self.msg_type,
-            Some(NodeKind::UserPrompt) | Some(NodeKind::Interaction)
-        )
+        self.msg_type == Some(NodeKind::Interaction)
     }
 }
 

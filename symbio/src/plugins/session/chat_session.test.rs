@@ -18,9 +18,9 @@ fn tool_msg_with_archive(id: &str, archive_path: &str) -> ChatNode {
     ChatNode {
         id: id.to_string(),
         role: Some(NodeRole::Tool),
-        msg_type: Some(NodeKind::Turn),
+        msg_type: Some(NodeKind::Skeleton),
         content: Some(MessageContent::Text("已存档".to_string())),
-        meta: Some(serde_json::json!({ "archive_path": archive_path })),
+        meta: Some(serde_json::json!({"style_tag": "run", "archive_path": archive_path})),
         ..Default::default()
     }
 }
@@ -215,15 +215,16 @@ fn tool_round(user_id: &str, tc_id: &str, tool_id: &str) -> Vec<ChatNode> {
         ChatNode {
             id: tc_id.to_string(),
             role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::ToolCall),
+            msg_type: Some(NodeKind::Skeleton),
             parent_id: Some(user_id.to_string()),
-            meta: Some(serde_json::json!({ "tool_name": "local/sh" })),
+            meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "local/sh"})),
             ..Default::default()
         },
         ChatNode {
             id: tool_id.to_string(),
             role: Some(NodeRole::Tool),
-            msg_type: Some(NodeKind::Turn),
+            msg_type: Some(NodeKind::Skeleton),
+            meta: Some(serde_json::json!({"style_tag": "run"})),
             parent_id: Some(tc_id.to_string()),
             content: Some(MessageContent::Text(format!("result-{}", tool_id))),
             ..Default::default()

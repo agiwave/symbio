@@ -173,7 +173,8 @@ fn reasoning_and_user_messages_never_enter_the_reply() {
     acc.apply(ChatNode {
         id: "r1".into(),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Reasoning),
+        msg_type: Some(NodeKind::Body),
+        meta: Some(serde_json::json!({"style_tag": "reasoning"})),
         content: Some(MessageContent::Text("思考过程".into())),
         status: Some(NodeStatus::Completed),
         ..Default::default()

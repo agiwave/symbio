@@ -124,7 +124,8 @@ fn turn_skeleton_frame(root_id: &str) -> ChatNode {
     ChatNode {
         id: root_id.into(),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Turn),
+        msg_type: Some(NodeKind::Skeleton),
+        meta: Some(serde_json::json!({"style_tag": "run"})),
         status: Some(NodeStatus::Streaming),
         ..Default::default()
     }

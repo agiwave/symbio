@@ -59,8 +59,8 @@
 import { computed } from 'vue'
 import DetailShell from './DetailShell.vue'
 import type { VdfsRendererProps } from './rendererContract'
-import { NODE_KIND_TEXT } from '@/schemas/chat_node'
-import { messageRoleLabel, messageStatusLabel, messageTypeLabel } from '@/registry/messageTypes'
+import { NODE_KIND_TEXT, type ChatNode } from '@/schemas/chat_node'
+import { messageRoleLabel, messageStatusLabel, messageTypeLabel, messageTypeOf } from '@/registry/messageTypes'
 
 const props = defineProps<VdfsRendererProps>()
 
@@ -79,11 +79,13 @@ const roleKey = computed(() => String(props.node.role ?? 'unknown'))
 // 本组件不再自带 ROLE_TEXT / TYPE_TEXT / STATUS_TEXT 副本（曾经是三份实现之一）。
 const roleText = computed(() => messageRoleLabel(roleKey.value))
 
-/** 类型缺省不显示（文本是常态，标出来只是噪音） */
+/** 类型缺省不显示（文本是常态，标出来只是噪音）；形态词经 `messageTypeOf` 折叠再查文案 */
 const typeText = computed(() => {
   const t = props.node.type
-  if (!t || t === NODE_KIND_TEXT) return ''
-  return messageTypeLabel(String(t))
+  if (!t) return ''
+  const kind = messageTypeOf({ type: t as ChatNode['type'], meta: props.node.meta as ChatNode['meta'] })
+  if (kind === NODE_KIND_TEXT) return ''
+  return messageTypeLabel(kind)
 })
 
 const statusText = computed(() =>

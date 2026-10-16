@@ -82,6 +82,8 @@ import {
   NODE_KIND_TURN,
   type ChatNode,
 } from '@/schemas/chat_node'
+// [T-147c-ii] wire 形态 → 呈现键的唯一折叠点（读侧判容器、判 Turn 都走它）
+import { messageTypeOf } from '@/registry/messageTypes'
 import { logger } from '@/utils/logger'
 
 /**
@@ -235,10 +237,13 @@ function messageOfNode(node: VdfsNode, text: string): ChatNode | null {
     'completed', 'aborted', 'failed', 'removed',
   ]
   if (!known.includes(status)) return null
-  const msgType = typeof v.type === 'string' ? v.type : undefined
+  // [T-147c-ii] `attributes.type` 可能是五值形态的新词（写方迁移后）或旧词（存量），
+  // 一律先折成呈现键再判容器——折叠幂等，落地口再折一次不会漂移。
+  const metaObj = v.meta != null && typeof v.meta === 'object' ? (v.meta as ChatNode['meta']) : undefined
+  const folded = typeof v.type === 'string' ? messageTypeOf({ type: v.type as ChatNode['type'], meta: metaObj }) : undefined
 
   // 容器节点的正文是整条消息 JSON：结构字段以它为准（比 attributes 全）。
-  if (msgType === NODE_KIND_TURN || msgType === NODE_KIND_TOOL_CALL) {
+  if (folded === NODE_KIND_TURN || folded === NODE_KIND_TOOL_CALL) {
     try {
       const parsed = JSON.parse(text) as ChatNode
       if (parsed && typeof parsed === 'object' && parsed.id) {
@@ -251,7 +256,7 @@ function messageOfNode(node: VdfsNode, text: string): ChatNode | null {
 
   const out: ChatNode = { id: node.name }
   if (typeof v.role === 'string') out.role = v.role as ChatNode['role']
-  if (msgType) out.type = msgType as ChatNode['type']
+  if (folded) out.type = folded
   if (typeof v.tool_name === 'string') out.name = v.tool_name
   if (typeof v.parent_id === 'string') out.parent_id = v.parent_id
   // [T-147d-i] `tool_call_id` 不再上 wire，VDFS attrs 里的同名键是后端到后端的存储形状。
@@ -423,7 +428,7 @@ export function handleVdfsChange(change: VdfsChange): void {
   // 判据是**节点类型**，不是帧的形状——同一形状的状态帧落在 Text 节点上时，
   // 回读确实能补回本端漏掉的正文，那一次是必要的。这也正是每轮会话都会多出
   // 一对 `vdfs/stat` + `vdfs/read` 的成因（Turn 根节点的首帧就是「无正文」）。
-  if (msg.type === NODE_KIND_TURN) {
+  if (messageTypeOf(msg) === NODE_KIND_TURN) {
     sink.applyTranscriptMessages(sid, [msg])
     return
   }

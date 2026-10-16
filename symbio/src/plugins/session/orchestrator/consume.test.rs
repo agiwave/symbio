@@ -65,7 +65,8 @@ fn node(id: &str, parent: Option<&str>, status: cm::NodeStatus) -> cm::ChatNode 
 /// 拿 `node()` 顶替会让断言测了个空（`msg_type` 是 `Text`）。
 fn turn_node(id: &str, status: cm::NodeStatus) -> cm::ChatNode {
     cm::ChatNode {
-        msg_type: Some(cm::NodeKind::Turn),
+        msg_type: Some(cm::NodeKind::Skeleton),
+        meta: Some(serde_json::json!({"style_tag": "run"})),
         ..node(id, None, status)
     }
 }

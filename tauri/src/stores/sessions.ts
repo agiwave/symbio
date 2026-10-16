@@ -89,6 +89,9 @@ import {
   sortTranscript,
   truncateIdsFrom,
 } from './sessionTranscript'
+// [T-147c-ii] wire 五值形态在**唯一落地口**折叠成呈现键：store 里的 `type`
+// 从此只可能是呈现词表，下游（渲染 / 判定）不再接触 wire 词。
+import { messageTypeOf } from '@/registry/messageTypes'
 // 会话实时状态的派生规则（纯逻辑）：清单条目 / 运行态 / 选项回填
 import {
   ACTIVITY_WORKING,
@@ -395,7 +398,7 @@ export const useSessionsStore = defineStore('sessions', () => {
         // 身份字段：有则合并（首帧建立身份；重复携带以最后到达为准）。
         if (message.parent_id != null) node.parent_id = message.parent_id
         if (message.role != null) node.role = message.role
-        if (message.type != null) node.type = message.type
+        if (message.type != null) node.type = messageTypeOf(message)
         if (message.name != null) node.name = message.name
         // [T-147d-i] `tool_call_id` 不再上 wire——后端 `#[serde(skip)]`，前端无消费点。
         if (message.meta != null) node.meta = message.meta

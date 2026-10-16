@@ -35,6 +35,7 @@ import {
   NODE_KIND_SKELETON,
   NODE_KIND_NOTICE,
   NODE_KIND_INTERACTION,
+  PRESENTATION_KINDS,
   CHAT_STYLE_TAG_REASONING,
   CHAT_STYLE_TAG_RUN,
   CHAT_STYLE_TAG_TOOL,
@@ -102,7 +103,8 @@ function facets(partial: Partial<MessageFacets> = {}): MessageFacets {
 
 describe('词表覆盖率（防机制词泄漏给用户）', () => {
   it('每个消息类型都有面向用户的文案', () => {
-    for (const t of NODE_KINDS) {
+    // [T-147c-ii] 两域并集：wire 五值 + 呈现键（文案表的实际取值域）
+    for (const t of [...new Set([...NODE_KINDS, ...PRESENTATION_KINDS])]) {
       expect(NODE_KIND_LABELS[t], `类型 ${t} 缺文案映射`).toBeTruthy()
     }
   })
@@ -641,10 +643,11 @@ describe('messageRendererKey：渲染形态分派', () => {
   })
 
   it('每个已登记的消息类型都分派到非 fallback 的渲染器（防漏登记）', () => {
-    for (const t of NODE_KINDS) {
-      // [T-147c-ii] 双形态共存档：新形态经 `foldNodeKind` 折叠回旧词后分派
-      //（生产链路在 `messageTypeOf` 同一处折叠）。`typing` 是唯一例外——
-      // 占位形态，专属渲染器随 [T-151] 落地，当前走 fallback 是有意的。
+    // [T-147c-ii] wire 五值 + 呈现键两域并集都要钉
+    for (const t of [...new Set([...NODE_KINDS, ...PRESENTATION_KINDS])]) {
+      // 新形态经 `foldNodeKind` 折叠到呈现键后分派（生产链路在 `messageTypeOf`
+      // 同一处折叠）。`typing` 是唯一例外——占位形态，专属渲染器随 [T-151]
+      // 落地，当前走 fallback 是有意的。
       if (t === NODE_KIND_TYPING) {
         expect(messageRendererKey(facets({ type: t }))).toBe('fallback')
         continue

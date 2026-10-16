@@ -372,7 +372,7 @@ fn snapshot(msgs: &[(&str, &str, &str)]) -> Event {
     let messages: Vec<serde_json::Value> = msgs
         .iter()
         .map(|(id, role, text)| {
-            serde_json::json!({ "id": id, "role": role, "type": "text", "content": text })
+            serde_json::json!({ "id": id, "role": role, "type": "body", "content": text })
         })
         .collect();
     Event::pending(

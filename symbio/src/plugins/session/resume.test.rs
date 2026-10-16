@@ -9,9 +9,9 @@ fn tc(id: &str, status: NodeStatus) -> ChatNode {
     ChatNode {
         id: id.into(),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::ToolCall),
+        msg_type: Some(NodeKind::Skeleton),
         status: Some(status),
-        meta: Some(json!({ "started_at": 1_700_000_000_000i64 })),
+        meta: Some(json!({ "style_tag": "tool", "started_at": 1_700_000_000_000i64 })),
         ..Default::default()
     }
 }
@@ -133,7 +133,8 @@ async fn setup_with_failed_turn() -> (
     let failed_turn = ChatNode {
         id: "t-failed".into(),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Turn),
+        msg_type: Some(NodeKind::Skeleton),
+        meta: Some(serde_json::json!({"style_tag": "run"})),
         status: Some(NodeStatus::Failed),
         seq: Some(2),
         ..Default::default()

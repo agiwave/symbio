@@ -13,7 +13,10 @@
 //! 缺任一条都会让分界悄悄偏向一侧。
 
 use super::*;
-use crate::symbio_core::chat_node::{MessageContent, NodeKind, NodeStatus};
+use crate::symbio_core::chat_node::{
+    MessageContent, NodeKind, NodeStatus, CHAT_STYLE_TAG_COMPRESSION, CHAT_STYLE_TAG_REASONING,
+    CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL,
+};
 
 fn msg(
     id: &str,
@@ -33,18 +36,26 @@ fn msg(
     }
 }
 
-/// 一份真实形状的转写：用户 → Turn（含 Reasoning / Text / ToolCall→tool 结果）→ 首响
+/// 一份真实形状的转写：用户 → run 骨架（含推理 / 正文 / tool 骨架→工具结果）→ 首响
 fn transcript() -> Vec<ChatNode> {
     vec![
         msg("u1", NodeRole::User, None, None, "读一下 README"),
-        msg("turn1", NodeRole::Assistant, Some(NodeKind::Turn), None, ""),
+        msg(
+            "turn1",
+            NodeRole::Assistant,
+            Some(NodeKind::Skeleton),
+            None,
+            "",
+        )
+        .with_style_tag(CHAT_STYLE_TAG_RUN),
         msg(
             "r1",
             NodeRole::Assistant,
-            Some(NodeKind::Reasoning),
+            Some(NodeKind::Body),
             Some("turn1"),
             "先看文件",
-        ),
+        )
+        .with_style_tag(CHAT_STYLE_TAG_REASONING),
         msg(
             "t1",
             NodeRole::Assistant,
@@ -55,10 +66,11 @@ fn transcript() -> Vec<ChatNode> {
         msg(
             "tc1",
             NodeRole::Assistant,
-            Some(NodeKind::ToolCall),
+            Some(NodeKind::Skeleton),
             Some("turn1"),
             "{\"path\":\"README.md\"}",
-        ),
+        )
+        .with_style_tag(CHAT_STYLE_TAG_TOOL),
         msg(
             "tr1",
             NodeRole::Tool,
@@ -76,10 +88,11 @@ fn transcript() -> Vec<ChatNode> {
         msg(
             "c1",
             NodeRole::Assistant,
-            Some(NodeKind::Compression),
+            Some(NodeKind::Notice),
             None,
             "正在压缩上下文…",
-        ),
+        )
+        .with_style_tag(CHAT_STYLE_TAG_COMPRESSION),
         msg(
             "s1",
             NodeRole::System,
@@ -129,17 +142,9 @@ fn turn_child_answer_text_is_on_the_conversation_line() {
 fn tool_and_turn_and_reasoning_are_excluded() {
     let view = conversation_view(&transcript(), 0);
     for m in &view {
-        assert_ne!(
-            m.msg_type,
-            Some(NodeKind::ToolCall),
-            "ToolCall 不得进对话线"
-        );
-        assert_ne!(m.msg_type, Some(NodeKind::Turn), "Turn 容器不得进对话线");
-        assert_ne!(
-            m.msg_type,
-            Some(NodeKind::Reasoning),
-            "推理节点不得进对话线"
-        );
+        assert!(!m.is_tool_call(), "工具骨架不得进对话线");
+        assert!(!m.is_run(), "run 骨架不得进对话线");
+        assert!(!m.is_reasoning(), "推理节点不得进对话线");
         assert_ne!(m.role, Some(NodeRole::Tool), "role=tool 不得进对话线");
     }
 }
@@ -178,14 +183,22 @@ fn empty_input_yields_empty_view() {
 #[test]
 fn transcript_without_conversation_nodes_yields_empty_view() {
     let only_tools = vec![
-        msg("turn1", NodeRole::Assistant, Some(NodeKind::Turn), None, ""),
+        msg(
+            "turn1",
+            NodeRole::Assistant,
+            Some(NodeKind::Skeleton),
+            None,
+            "",
+        )
+        .with_style_tag(CHAT_STYLE_TAG_RUN),
         msg(
             "tc1",
             NodeRole::Assistant,
-            Some(NodeKind::ToolCall),
+            Some(NodeKind::Skeleton),
             Some("turn1"),
             "{}",
-        ),
+        )
+        .with_style_tag(CHAT_STYLE_TAG_TOOL),
     ];
     assert!(conversation_view(&only_tools, 0).is_empty());
 }

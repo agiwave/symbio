@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { NODE_KINDS, NODE_KIND_TEXT } from '@/schemas/chat_node'
+import { NODE_KINDS, NODE_KIND_TEXT, PRESENTATION_KINDS } from '@/schemas/chat_node'
 import {
   facetsOf,
   getMessageRenderer,
@@ -44,7 +44,8 @@ describe('渲染器装配：每个标识都有组件', () => {
 })
 
 describe('渲染器装配：词表里的每个消息类型都能渲染出来', () => {
-  it.each(NODE_KINDS)('类型 %s 能解析到组件', (type) => {
+  // [T-147c-ii] 两域都要钉：wire 五值（折叠后进表）+ 呈现键（store/facets 的实际取值域）
+  it.each([...new Set([...NODE_KINDS, ...PRESENTATION_KINDS])])('类型 %s 能解析到组件', (type) => {
     const renderer = resolveMessageRenderer(facetsOf({ id: 'x', type }))
     expect(renderer, `类型 ${type} 解析不到渲染器组件`).toBeDefined()
   })

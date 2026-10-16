@@ -1674,9 +1674,9 @@ mod tool_round_tests {
                 )
                 .with_payload(serde_json::json!({
                     "messages": [
-                        { "id": "snap-root", "role": "user", "type": "text",
+                        { "id": "snap-root", "role": "user", "type": "body",
                           "content": "[CONTEXT SNAPSHOT] 被压掉的历史摘要" },
-                        { "id": "u-keep", "role": "user", "type": "text",
+                        { "id": "u-keep", "role": "user", "type": "body",
                           "content": "保留的近轮问题" },
                     ]
                 })),

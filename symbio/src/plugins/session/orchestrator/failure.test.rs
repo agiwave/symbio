@@ -89,7 +89,8 @@ fn node(id: &str, parent: Option<&str>, status: cm::NodeStatus) -> cm::ChatNode 
 /// 拿 `node()` 顶替会让断言测了个空（`msg_type` 是 `Text`）。
 fn turn_node(id: &str, status: cm::NodeStatus) -> cm::ChatNode {
     cm::ChatNode {
-        msg_type: Some(cm::NodeKind::Turn),
+        msg_type: Some(cm::NodeKind::Skeleton),
+        meta: Some(serde_json::json!({"style_tag": "run"})),
         ..node(id, None, status)
     }
 }
@@ -138,7 +139,8 @@ fn abort_terminal_of_marks_only_root_turn_aborted() {
     // 有父的 Turn 是子会话节点，重试归父会话的根 Turn
     assert_eq!(
         abort_terminal_of(&cm::ChatNode {
-            msg_type: Some(cm::NodeKind::Turn),
+            msg_type: Some(cm::NodeKind::Skeleton),
+            meta: Some(serde_json::json!({"style_tag": "run"})),
             ..node("sub", Some("t"), cm::NodeStatus::Streaming)
         }),
         cm::NodeStatus::Completed
@@ -298,8 +300,9 @@ async fn persist_failure_merges_partial_output() {
         "说到一半提到一个名词，然后被中断".into(),
     ));
     let mut reason = node("reason-p", Some("turn-p"), cm::NodeStatus::Completed);
-    reason.msg_type = Some(cm::NodeKind::Reasoning);
+    reason.msg_type = Some(cm::NodeKind::Body);
     reason.content = Some(cm::MessageContent::Text("半截思考".into()));
+    let reason = reason.with_style_tag(cm::CHAT_STYLE_TAG_REASONING);
     let orphan = node("orphan-p", Some("ghost-parent"), cm::NodeStatus::Completed);
 
     p.persist_failure(

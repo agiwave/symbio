@@ -31,7 +31,8 @@ fn tool_call_msg() -> ChatNode {
     ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::ToolCall),
+        msg_type: Some(NodeKind::Skeleton),
+        meta: Some(serde_json::json!({"style_tag": "tool"})),
         name: Some("vdfs_read".to_string()),
         content: Some(MessageContent::Text(r#"{"path":"a.rs"}"#.to_string())),
         ..Default::default()
@@ -114,7 +115,8 @@ fn turn_root_msg(id: &str) -> ChatNode {
         id: id.to_string(),
         parent_id: None,
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Turn),
+        msg_type: Some(NodeKind::Skeleton),
+        meta: Some(serde_json::json!({"style_tag": "run"})),
         content: Some(MessageContent::Text("turn".to_string())),
         ..Default::default()
     }

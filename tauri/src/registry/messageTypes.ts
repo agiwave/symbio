@@ -51,7 +51,8 @@ import {
   RESUME_ACTION_RETRY_COMPACTION,
   RESUME_ACTION_RETRY_SUBTREE,
   type ChatNode,
-  type NodeKind,
+  type MessageKind,
+  type PresentationKind,
   type ChatRole,
   type NodeStatus,
   type ResumeAction,
@@ -66,16 +67,18 @@ export function messageRoleOf(node: Pick<ChatNode, 'role'>): ChatRole {
 }
 
 /**
- * 节点的**生效类型**（缺省 = 正文文本）。
+ * 形态 + `meta.style_tag` → **呈现键**（折叠的唯一实现）。
  *
- * [T-147c-ii] 双形态共存档：目标五值形态（`body` / `notice` / `skeleton` /
- * `interaction`，靠 `meta.style_tag` 分辨呈现变体）在这里折叠回旧 wire 词，
- * 下游（facets / 呈现表 / 文案表）继续按旧词分派——折叠点只有这一处，
- * 与后端 `ChatNode::is_*` 谓词同一判据。裸 `skeleton`（漏 tag 的畸形写方）
- * 按「一整轮」折叠：骨架的多数形态。`typing` 不在折叠表内（原样透出，
- * 呈现走兜底渲染器）。
+ * [T-147c-ii]：wire 闭集是五值形态（`body` / `notice` / `skeleton` / `interaction` /
+ * `typing`）；目标形态靠 `meta.style_tag` 分辨呈现变体，在这里折叠成注册表的
+ * **内部键**（`text` / `reasoning` / `turn` / `tool_call` / `user_prompt` /
+ * `compression` / `typing`），下游（facets / 呈现表 / 文案表）按折叠结果分派。
+ * 折叠点唯一（`messageTypeOf`），与后端 `ChatNode::is_*` 谓词同一判据。
+ * 裸 `skeleton`（漏 tag 的畸形写方）按「一整轮」折叠：骨架的多数形态。
+ * `typing` 原样透出（专属渲染器随 [T-151] 落地，当前走兜底）。
+ * **折叠是幂等的**：呈现键再折叠仍是自身——落地口与 facets 各折一次不会漂移。
  */
-export function foldNodeKind(type: NodeKind, styleTag?: string): NodeKind {
+export function foldNodeKind(type: MessageKind, styleTag?: string): PresentationKind {
   switch (type) {
     case NODE_KIND_SKELETON:
       return styleTag === CHAT_STYLE_TAG_TOOL ? NODE_KIND_TOOL_CALL : NODE_KIND_TURN
@@ -86,12 +89,14 @@ export function foldNodeKind(type: NodeKind, styleTag?: string): NodeKind {
     case NODE_KIND_INTERACTION:
       return NODE_KIND_USER_PROMPT
     default:
-      return type
+      // 呈现键（含 `typing`）直通；未登记词也在此透出——渲染器按 fallback 分派
+      return type as PresentationKind
   }
 }
 
-export function messageTypeOf(node: Pick<ChatNode, 'type' | 'meta'>): NodeKind {
-  const type = node.type as NodeKind | undefined
+/** 节点的**生效呈现键**（缺省 = `text`：未标形态的帧按正文处理） */
+export function messageTypeOf(node: Pick<ChatNode, 'type' | 'meta'>): PresentationKind {
+  const type = node.type as MessageKind | undefined
   if (!type) return NODE_KIND_TEXT
   return foldNodeKind(
     type,
@@ -133,7 +138,7 @@ export function agentNameOf(
  */
 export interface MessageFacets {
   role: ChatRole
-  type: NodeKind
+  type: PresentationKind
   status: NodeStatus
   /** 节点名（工具名 / 智能体名） */
   name?: string
@@ -561,9 +566,9 @@ export const MESSAGE_ROLE_LABELS: Record<string, string> = {
 /**
  * 类型 → 文案。
  *
- * **必须覆盖 `NODE_KINDS` 的每一个取值**——漏一个就会把机制词
- * （如 `compression`）原样摆给用户看，与「不要把后端枚举漏出去」相悖。
- * 由单测锁死覆盖率。
+ * **必须覆盖 wire 五值与呈现键的全部取值**（`NODE_KINDS ∪ PRESENTATION_KINDS`）——
+ * 漏一个就会把机制词（如 `compression`）原样摆给用户看，与「不要把后端枚举
+ * 漏出去」相悖。由单测锁死覆盖率。
  */
 export const NODE_KIND_LABELS: Record<string, string> = {
   [NODE_KIND_TEXT]: '文本',
@@ -675,11 +680,11 @@ interface TypePresentation {
 /**
  * 类型 → 呈现。
  *
- * 用 `Record<NodeKind, …>` 而非 `Record<string, …>`：**漏登记一个类型是
+ * 用 `Record<PresentationKind, …>` 而非 `Record<string, …>`：**漏登记一个类型是
  * 编译错误，不是运行期兜底**。运行期未知取值（后端先行上线了新 `type`）走
  * `FALLBACK_PRESENTATION`。
  */
-const TYPE_PRESENTATION: Record<NodeKind, TypePresentation> = {
+const TYPE_PRESENTATION: Record<PresentationKind, TypePresentation> = {
   [NODE_KIND_TEXT]: {
     icon: '💬',
     title: (f) => (f.role === CHAT_ROLE_ASSISTANT ? '助手' : '消息'),
@@ -755,47 +760,12 @@ const TYPE_PRESENTATION: Record<NodeKind, TypePresentation> = {
     defaultOpen: () => true,
   },
 
-  // ---- 目标五值形态（[T-147c-ii] 双形态共存档）----
+  // ---- 呈现键的最后一格：占位形态 ----
   //
-  // `messageTypeOf` 已把新形态折叠回旧词，正常链路走不到这些条目；登记是为
-  // `Record<NodeKind, …>` 的**穷尽性**——漏一个取值是编译错误，未登记取值
-  // 在运行期走 `FALLBACK_PRESENTATION`（不渲染成空白）。写方全量迁完后，
-  // 旧六值条目随变体一起退役，这张表只剩五格。
-  [NODE_KIND_BODY]: {
-    icon: '💬',
-    title: (f) => (f.role === CHAT_ROLE_ASSISTANT ? '助手' : '消息'),
-    renderer: 'text',
-    defaultOpen: (f) => f.role !== CHAT_ROLE_TOOL,
-  },
-
-  [NODE_KIND_NOTICE]: {
-    icon: '🗜',
-    title: '上下文压缩',
-    renderer: 'compression',
-    runningAction: true,
-    ownRunningSignal: true,
-    statusTag: (f) => {
-      if (isFailedStatus(f.status)) return '未完成'
-      if (isAbortedStatus(f.status)) return '已中止'
-      if (isStreamingStatus(f.status)) return '压缩中'
-      return ''
-    },
-    defaultOpen: () => true,
-  },
-
-  [NODE_KIND_SKELETON]: {
-    icon: (f) => (f.subSession ? '↳' : 'AI'),
-    title: (_f, agentName) => agentName,
-    renderer: 'turn',
-    defaultOpen: () => true,
-  },
-
-  [NODE_KIND_INTERACTION]: {
-    icon: '❓',
-    title: (f) => (f.promptKind === 'confirm' ? '工具确认' : '提问'),
-    renderer: 'user_prompt',
-    defaultOpen: () => true,
-  },
+  // [T-147c-ii] 起 `TYPE_PRESENTATION` 的取值域就是折叠后的**呈现键**
+  // （`Record<PresentationKind, …>` 穷尽性：漏一个键是编译错误）；wire 五值
+  // 经 `messageTypeOf` 折叠后进表，未登记取值在运行期走 `FALLBACK_PRESENTATION`
+  // （不渲染成空白）。
 
   // 进行中占位（[T-151] 前端合成）：折叠单行、只挂「生成中」信号，无正文。
   [NODE_KIND_TYPING]: {
@@ -1032,11 +1002,13 @@ export function nextOpenOf(
 //   registry/messageRenderers.ts  **唯一 import 组件的地方**（把标识绑到具体组件）
 //
 // 于是「新增一种消息类型」的完整代价是：
-//   1. `NODE_KINDS` 加一个取值（类型与常量同时到位）
-//   2. 本文件 `TYPE_PRESENTATION` 加一行（呈现面全在那一行里）、文案表加一行
-//   3. `messageRenderers.ts` 加一行注册
+//   1. wire 侧：后端枚举 + 前端 `NODE_KINDS` 各加一值（闭集跨栈批次）；
+//      若只是既有形态的呈现变体，只需 `CHAT_STYLE_TAG_*` 词表加一行常量
+//   2. `foldNodeKind` 加一等式（形态 + tag → 呈现键）
+//   3. 本文件 `TYPE_PRESENTATION` 加一行（呈现面全在那一行里）、文案表加一行
+//   4. `messageRenderers.ts` 加一行注册
 // **不再需要改渲染组件里的 if 链，也不必去 7 个取值函数里各补一处**——
-// 这正是本次改造要买到的性质。漏掉第 2 步会**编译报错**（`Record<NodeKind, …>`
+// 这正是本次改造要买到的性质。漏掉第 3 步会**编译报错**（`Record<PresentationKind, …>`
 // 要求穷尽），而不是运行期静默退化成兜底。
 
 /**

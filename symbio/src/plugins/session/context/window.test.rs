@@ -10,7 +10,8 @@ fn tc_msg(id: &str, name: &str, args: &str) -> ChatNode {
     ChatNode {
         id: id.to_string(),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::ToolCall),
+        msg_type: Some(NodeKind::Skeleton),
+        meta: Some(serde_json::json!({"style_tag": "tool"})),
         name: Some(name.to_string()),
         content: Some(MessageContent::Text(args.to_string())),
         status: Some(NodeStatus::Completed),

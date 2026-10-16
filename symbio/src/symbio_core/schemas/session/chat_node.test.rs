@@ -67,11 +67,11 @@ fn resume_action_wire_words_are_snake_case() {
     }
 }
 
-// ==================== [T-147c-ii-prep] 目标形状与 style_tag ====================
+// ==================== [T-147c-ii] 目标形状与 style_tag ====================
 
-/// 六值 wire 词都能被 [`legacy_shape_to_style_tag`] 折成目标五值 + 对应 style_tag。
-/// 这张映射表是 [T-147c-ii] 落地的**判据基线**：`NodeKind` 收五值那一档，读侧兼容代码
-/// 就靠这条；测试**先立住映射**，五值改完之后再回读一次。
+/// 六词旧 wire 词 + 五词新 wire 词都能被 [`legacy_shape_to_style_tag`] 折成
+/// 目标五值 + 对应 style_tag。这张映射表是 [`message_of_node`] 读边界折叠存量
+/// VDFS 属性的**判据基线**：旧六值已删出 `NodeKind`，旧词只活在这条读侧路径里。
 #[test]
 fn legacy_wire_words_fold_to_shape_and_style_tag() {
     for (word, shape, tag) in [
@@ -85,7 +85,7 @@ fn legacy_wire_words_fold_to_shape_and_style_tag() {
             NodeKind::Notice,
             Some(CHAT_STYLE_TAG_COMPRESSION),
         ),
-        // 新词也认（未来 wire 上的读侧）
+        // 新词——原样，无 tag 注入
         ("body", NodeKind::Body, None),
         ("skeleton", NodeKind::Skeleton, None),
         ("notice", NodeKind::Notice, None),
@@ -101,140 +101,59 @@ fn legacy_wire_words_fold_to_shape_and_style_tag() {
     assert!(legacy_shape_to_style_tag("nonsense").is_none());
 }
 
-/// 谓词按**当前六值形态**判，且**互斥**——`is_reasoning` 与 `is_text` 不能同真（曾经的
-/// bug 是 Text 与 Reasoning 都判成 Body）。[T-147c-ii] 五值收敛那一档 `is_*` 谓词**签名不变**，
-/// 实现切到 `shape() + style_tag()`；这一档的断言是"迁移后消费方不用改"的护栏。
+/// 谓词按「目标变体 + `meta.style_tag`」判，且**互斥**——`is_reasoning` 与
+/// `is_text` 不能同真；Skeleton 的变体判别全靠 tag，漏 tag 不会被静默归队。
 #[test]
-fn predicates_are_exclusive_per_kind() {
+fn predicates_are_exclusive_per_form() {
     let n = |kind: NodeKind| ChatNode {
         msg_type: Some(kind),
         ..Default::default()
     };
-    let run = n(NodeKind::Turn);
+
+    let run = n(NodeKind::Skeleton).with_style_tag(CHAT_STYLE_TAG_RUN);
     assert!(run.is_run());
     assert!(!run.is_tool_call());
     assert!(!run.is_reasoning());
     assert!(!run.is_text());
 
-    let tc = n(NodeKind::ToolCall);
+    let tc = n(NodeKind::Skeleton).with_style_tag(CHAT_STYLE_TAG_TOOL);
     assert!(tc.is_tool_call());
     assert!(!tc.is_run());
 
-    let reasoning = n(NodeKind::Reasoning);
+    let reasoning = n(NodeKind::Body).with_style_tag(CHAT_STYLE_TAG_REASONING);
     assert!(reasoning.is_reasoning());
     assert!(
         !reasoning.is_text(),
-        "推理与正文互斥（曾同时命中 Body 是 bug）"
+        "推理与正文互斥（同落 Body 后靠 tag 区分）"
     );
 
-    let text = n(NodeKind::Text);
+    let text = n(NodeKind::Body);
     assert!(text.is_text());
     assert!(!text.is_reasoning());
 
-    let comp = n(NodeKind::Compression);
-    assert!(comp.is_compression());
-    assert!(!comp.is_interaction());
+    assert!(n(NodeKind::Notice).is_compression());
+    assert!(n(NodeKind::Interaction).is_interaction());
 
-    let prompt = n(NodeKind::UserPrompt);
-    assert!(prompt.is_interaction());
+    // 裸 Skeleton（无 tag）：两个骨架谓词都不真——写方漏 tag 不会被静默归队
+    let bare_skel = n(NodeKind::Skeleton);
+    assert!(!bare_skel.is_run() && !bare_skel.is_tool_call());
 
     let bare = ChatNode::default();
     assert!(
         !bare.is_text() && !bare.is_run() && !bare.is_tool_call() && !bare.is_reasoning(),
-        "未标 msg_type ⇒ 全谓词都假（不是默认落到 Text）"
+        "未标 msg_type ⇒ 全谓词都假（不是默认落到 Body）"
     );
 }
 
-/// `shape()` 与 `style_tag()` 是 [T-147c-ii] 落地后消费方的**判据入口**——本批先把
-/// 六值映射立住，五值收敛那一档 `msg_type` 变成五值，`shape()` 直接返回 `msg_type` 对应。
+/// `style_tag()` 从 `meta.style_tag` 读；`with_style_tag` 对已有 meta 对象是**并入**
+/// 而不是整颗替换。
 #[test]
-fn shape_helper_maps_six_variants_to_five() {
-    let n = |kind: NodeKind| ChatNode {
-        msg_type: Some(kind),
-        ..Default::default()
-    };
-    assert_eq!(n(NodeKind::Text).shape(), Some(NodeKind::Body));
-    assert_eq!(n(NodeKind::Reasoning).shape(), Some(NodeKind::Body));
-    assert_eq!(n(NodeKind::Turn).shape(), Some(NodeKind::Skeleton));
-    assert_eq!(n(NodeKind::ToolCall).shape(), Some(NodeKind::Skeleton));
-    assert_eq!(n(NodeKind::UserPrompt).shape(), Some(NodeKind::Interaction));
-    assert_eq!(n(NodeKind::Compression).shape(), Some(NodeKind::Notice));
-    assert_eq!(ChatNode::default().shape(), None);
-}
-
-/// `style_tag()` 从 `meta.style_tag` 读——**新形态**的写方（[T-147c-ii] 之后）用它带出
-/// 同 shape 下的呈现变体。本批读侧兼容代码已就位，五值那一档只补构造侧。
-#[test]
-fn style_tag_reads_from_meta() {
+fn style_tag_reads_and_merges_meta() {
     let mut n = ChatNode::default();
     assert_eq!(n.style_tag(), None);
     n.meta = Some(serde_json::json!({ "style_tag": CHAT_STYLE_TAG_RUN }));
     assert_eq!(n.style_tag(), Some(CHAT_STYLE_TAG_RUN));
-}
 
-/// [T-147c-ii] 双形态共存档：同一谓词**同时认**旧变体名与新形态（目标变体 +
-/// `meta.style_tag`）——构造侧逐文件迁移期间，两种写的节点判据一致。
-#[test]
-fn predicates_accept_both_legacy_and_target_forms() {
-    // Skeleton + run == 曾经的 Turn
-    let run = ChatNode {
-        msg_type: Some(NodeKind::Skeleton),
-        ..Default::default()
-    }
-    .with_style_tag(CHAT_STYLE_TAG_RUN);
-    assert!(run.is_run());
-    assert!(!run.is_tool_call(), "Skeleton 的变体判别全靠 tag");
-
-    // Skeleton + tool == 曾经的 ToolCall
-    let tc = ChatNode {
-        msg_type: Some(NodeKind::Skeleton),
-        ..Default::default()
-    }
-    .with_style_tag(CHAT_STYLE_TAG_TOOL);
-    assert!(tc.is_tool_call());
-    assert!(!tc.is_run());
-
-    // Body 无 tag == 曾经的 Text；Body + reasoning tag == 曾经的 Reasoning（互斥）
-    let body = ChatNode {
-        msg_type: Some(NodeKind::Body),
-        ..Default::default()
-    };
-    assert!(body.is_text());
-    assert!(!body.is_reasoning());
-    let reasoning = ChatNode {
-        msg_type: Some(NodeKind::Body),
-        ..Default::default()
-    }
-    .with_style_tag(CHAT_STYLE_TAG_REASONING);
-    assert!(reasoning.is_reasoning());
-    assert!(!reasoning.is_text());
-
-    // Interaction / Notice / Typing 目标变体直接命中
-    let prompt = ChatNode {
-        msg_type: Some(NodeKind::Interaction),
-        ..Default::default()
-    };
-    assert!(prompt.is_interaction());
-    let comp = ChatNode {
-        msg_type: Some(NodeKind::Notice),
-        ..Default::default()
-    };
-    assert!(comp.is_compression());
-
-    // 裸 Skeleton（无 tag）：两个骨架谓词都不真——写方漏 tag 不会被静默归队
-    let bare_skel = ChatNode {
-        msg_type: Some(NodeKind::Skeleton),
-        ..Default::default()
-    };
-    assert!(!bare_skel.is_run() && !bare_skel.is_tool_call());
-
-    // shape() 对两种形态给出同一答案（折叠无损）
-    assert_eq!(run.shape(), bare_skel.shape());
-    assert_eq!(reasoning.shape(), body.shape());
-    assert_eq!(run.shape(), Some(NodeKind::Skeleton));
-    assert_eq!(body.shape(), Some(NodeKind::Body));
-
-    // with_style_tag 对已有 meta 对象是**并入**而不是整颗替换
     let with_meta = ChatNode {
         msg_type: Some(NodeKind::Skeleton),
         meta: Some(serde_json::json!({ "prompt": { "tool_name": "x" } })),
@@ -244,4 +163,92 @@ fn predicates_accept_both_legacy_and_target_forms() {
     let meta = with_meta.meta.clone().unwrap();
     assert_eq!(with_meta.style_tag(), Some(CHAT_STYLE_TAG_TOOL));
     assert!(meta.get("prompt").is_some(), "既有 meta 键不得被挤掉");
+}
+
+// ==================== [T-147c-ii-s4] message_of_node 读边界折叠存量旧词 ====================
+
+/// 用 `attributes` JSON 造一个 VDFS 节点（`message_of_node` 的输入形状）。
+fn vdfs_with_attrs(name: &str, attrs: serde_json::Value) -> crate::symbio_core::VdfsNode {
+    crate::symbio_core::VdfsNode {
+        name: name.to_string(),
+        status: "completed".to_string(),
+        attributes: attrs.as_object().cloned().unwrap_or_default(),
+        ..Default::default()
+    }
+}
+
+/// 旧六词的历史数据（VDFS `attributes.type`）经 `message_of_node` 折成新形态 +
+/// 注入 `style_tag`——谓词在折叠结果上必须命中，且既有 meta 键不丢。
+#[test]
+fn message_of_node_folds_legacy_words() {
+    let m = message_of_node(
+        &vdfs_with_attrs("a", serde_json::json!({"type": "turn"})),
+        String::new(),
+    )
+    .unwrap();
+    assert!(m.is_run(), "旧词 turn 必须折成 run 骨架");
+
+    let m = message_of_node(
+        &vdfs_with_attrs(
+            "b",
+            serde_json::json!({"type": "compression", "meta": {"tokens_before": 100}}),
+        ),
+        String::new(),
+    )
+    .unwrap();
+    assert!(m.is_compression());
+    assert_eq!(
+        m.style_tag(),
+        Some(CHAT_STYLE_TAG_COMPRESSION),
+        "旧词 compression 折出 Notice 后必须带 tag"
+    );
+    assert_eq!(
+        m.meta.as_ref().unwrap().get("tokens_before").unwrap(),
+        &serde_json::json!(100),
+        "注入 style_tag 不得挤掉既有 meta 键"
+    );
+
+    // meta 为 null（`message_node` 的「没有 meta」写法）时注入要造出对象
+    let m = message_of_node(
+        &vdfs_with_attrs("c", serde_json::json!({"type": "reasoning", "meta": null})),
+        "思考".to_string(),
+    )
+    .unwrap();
+    assert!(m.is_reasoning());
+}
+
+/// 新词的读侧：serde 词经 `legacy_shape_to_style_tag` 原样通过；meta 里已有的
+/// `style_tag` 不被旧折叠覆盖；未登记词与缺词都是 `msg_type = None`。
+#[test]
+fn message_of_node_keeps_target_words_and_existing_tags() {
+    let m = message_of_node(
+        &vdfs_with_attrs(
+            "d",
+            serde_json::json!({"type": "skeleton", "meta": {"style_tag": "tool"}}),
+        ),
+        String::new(),
+    )
+    .unwrap();
+    assert!(m.is_tool_call());
+
+    // 异常共存（不该发生，钉住「不覆盖」规则本身）：tag 已存在 ⇒ 保留 meta 里的值
+    let m = message_of_node(
+        &vdfs_with_attrs(
+            "e",
+            serde_json::json!({"type": "body", "meta": {"style_tag": "reasoning"}}),
+        ),
+        String::new(),
+    )
+    .unwrap();
+    assert!(m.is_reasoning());
+
+    let m = message_of_node(
+        &vdfs_with_attrs("f", serde_json::json!({"type": "nonsense"})),
+        String::new(),
+    )
+    .unwrap();
+    assert_eq!(m.msg_type, None, "未登记词不假装知道");
+
+    let m = message_of_node(&vdfs_with_attrs("g", serde_json::json!({})), String::new()).unwrap();
+    assert_eq!(m.msg_type, None);
 }

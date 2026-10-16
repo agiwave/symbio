@@ -414,7 +414,8 @@ fn steps_skip_empty_nodes_and_user_prompts() {
     // 判据 3：无内容节点不产出步骤；user 提示是**输入**不是进展。
     let grouping = cm::ChatNode {
         id: "2".to_string(),
-        msg_type: Some(cm::NodeKind::Turn),
+        msg_type: Some(cm::NodeKind::Skeleton),
+        meta: Some(serde_json::json!({"style_tag": "run"})),
         ..Default::default()
     };
     let empty = cm::ChatNode {

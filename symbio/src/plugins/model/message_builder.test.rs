@@ -27,7 +27,8 @@ fn turn_tree(children: Vec<ChatNode>) -> Vec<ChatNode> {
         id: TURN_ID.to_string(),
         parent_id: None,
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Turn),
+        msg_type: Some(NodeKind::Skeleton),
+        meta: Some(serde_json::json!({"style_tag": "run"})),
         content: None,
         status: Some(NodeStatus::Completed),
         timestamp: Some(1),
@@ -62,7 +63,8 @@ fn tool_call_args_passthrough_as_string_without_reserialize() {
         id: TURN_ID.to_string(),
         parent_id: None,
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Turn),
+        msg_type: Some(NodeKind::Skeleton),
+        meta: Some(serde_json::json!({"style_tag": "run"})),
         status: Some(NodeStatus::Completed),
         ..Default::default()
     };
@@ -71,7 +73,8 @@ fn tool_call_args_passthrough_as_string_without_reserialize() {
         id: "tc-1".to_string(),
         parent_id: Some(TURN_ID.to_string()),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::ToolCall),
+        msg_type: Some(NodeKind::Skeleton),
+        meta: Some(serde_json::json!({"style_tag": "tool"})),
         name: Some("echo".to_string()),
         content: Some(MessageContent::Text(
             r#"{"text":"mock 回显内容"}"#.to_string(),
@@ -101,8 +104,8 @@ fn tool_call_args_passthrough_as_string_without_reserialize() {
 /// 用例 E：reasoning-only 落库结果扁平化后，LLM 请求里内容只出现一次
 /// （防止重复内容顺着 request 包再放大一次）
 ///
-/// 输入是本地 fixture：reasoning-only 的落库形状 = Turn + 单个 Text 子节点。
-/// 「构造器不生成 Reasoning 子节点」这半边锁在
+/// 输入是本地 fixture：reasoning-only 的落库形状 = run 骨架 + 单个正文 `Body` 子节点。
+/// 「构造器不生成带 reasoning tag 的子节点」这半边锁在
 /// `plugins/session/message_build.test.rs` 的用例 A（见文件头说明）。
 #[test]
 fn reasoning_only_flattens_to_single_assistant_message() {
@@ -124,12 +127,13 @@ fn reasoning_only_flattens_to_single_assistant_message() {
 
 /// 用例 F：普通 reasoning + 文本 扁平化后 content 与 reasoning_content 各归其位
 ///
-/// 输入是本地 fixture（Turn + Reasoning + Text 三节点）；三节点的产出形状锁在
+/// 输入是本地 fixture（run 骨架 + 推理 Body + 正文 Body 三节点）；三节点的产出形状锁在
 /// `plugins/session/message_build.test.rs` 的用例 B（见文件头说明）。
 #[test]
 fn reasoning_with_reply_flattens_into_content_and_reasoning_content() {
     let msgs = turn_tree(vec![
-        child("turn-0001-reason", NodeKind::Reasoning, "思考过程"),
+        child("turn-0001-reason", NodeKind::Body, "思考过程")
+            .with_style_tag(crate::symbio_core::chat_node::CHAT_STYLE_TAG_REASONING),
         child("turn-0001-text", NodeKind::Body, "正常回复"),
     ]);
 
@@ -155,7 +159,8 @@ fn flatten_keeps_only_recent_reasoning_in_request_view() {
                 id: turn_id.into(),
                 parent_id: None,
                 role: Some(NodeRole::Assistant),
-                msg_type: Some(NodeKind::Turn),
+                msg_type: Some(NodeKind::Skeleton),
+                meta: Some(serde_json::json!({"style_tag": "run"})),
                 content: None,
                 status: Some(NodeStatus::Completed),
                 timestamp: Some(1),
@@ -165,7 +170,8 @@ fn flatten_keeps_only_recent_reasoning_in_request_view() {
                 id: format!("{turn_id}-reason"),
                 parent_id: Some(turn_id.into()),
                 role: Some(NodeRole::Assistant),
-                msg_type: Some(NodeKind::Reasoning),
+                msg_type: Some(NodeKind::Body),
+                meta: Some(serde_json::json!({"style_tag": "reasoning"})),
                 content: Some(MessageContent::Text(reasoning.into())),
                 status: Some(NodeStatus::Completed),
                 timestamp: Some(1),
@@ -252,7 +258,8 @@ fn orphan_tool_result_is_dropped() {
             id: turn_id.into(),
             parent_id: None,
             role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::Turn),
+            msg_type: Some(NodeKind::Skeleton),
+            meta: Some(serde_json::json!({"style_tag": "run"})),
             content: None,
             status: Some(NodeStatus::Completed),
             timestamp: Some(2),
@@ -310,7 +317,8 @@ fn linked_tool_result_is_retained() {
             id: turn_id.into(),
             parent_id: None,
             role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::Turn),
+            msg_type: Some(NodeKind::Skeleton),
+            meta: Some(serde_json::json!({"style_tag": "run"})),
             content: None,
             status: Some(NodeStatus::Completed),
             timestamp: Some(2),
@@ -330,7 +338,8 @@ fn linked_tool_result_is_retained() {
             id: tc_id.into(),
             parent_id: Some(turn_id.into()),
             role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::ToolCall),
+            msg_type: Some(NodeKind::Skeleton),
+            meta: Some(serde_json::json!({"style_tag": "tool"})),
             name: Some("read_file".into()),
             content: Some(MessageContent::Text("{}".into())),
             status: Some(NodeStatus::Completed),
@@ -374,7 +383,8 @@ fn empty_assistant_turn_is_dropped() {
             id: "turn-empty".into(),
             parent_id: None,
             role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::Turn),
+            msg_type: Some(NodeKind::Skeleton),
+            meta: Some(serde_json::json!({"style_tag": "run"})),
             content: None,
             status: Some(NodeStatus::Completed),
             timestamp: Some(2),
@@ -461,7 +471,8 @@ fn failed_turn_visible_with_interrupt_note() {
             id: "turn-x".into(),
             parent_id: None,
             role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::Turn),
+            msg_type: Some(NodeKind::Skeleton),
+            meta: Some(serde_json::json!({"style_tag": "run"})),
             content: None,
             status: Some(NodeStatus::Failed),
             error: Some("用户中止".into()),
@@ -524,7 +535,8 @@ fn failed_turn_without_children_survives_with_note() {
             id: "turn-empty".into(),
             parent_id: None,
             role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::Turn),
+            msg_type: Some(NodeKind::Skeleton),
+            meta: Some(serde_json::json!({"style_tag": "run"})),
             content: None,
             status: Some(NodeStatus::Failed),
             timestamp: Some(2),
@@ -558,7 +570,8 @@ fn interrupted_tool_call_gets_placeholder_result() {
             id: "turn-tc".into(),
             parent_id: None,
             role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::Turn),
+            msg_type: Some(NodeKind::Skeleton),
+            meta: Some(serde_json::json!({"style_tag": "run"})),
             content: None,
             status: Some(NodeStatus::Failed),
             error: Some("用户中止".into()),
@@ -569,7 +582,8 @@ fn interrupted_tool_call_gets_placeholder_result() {
             id: "tc-x".into(),
             parent_id: Some("turn-tc".into()),
             role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::ToolCall),
+            msg_type: Some(NodeKind::Skeleton),
+            meta: Some(serde_json::json!({"style_tag": "tool"})),
             name: Some("run_tests".into()),
             content: Some(MessageContent::Text("{}".into())),
             status: Some(NodeStatus::Completed),
@@ -609,7 +623,8 @@ fn failed_tool_result_sets_success_false() {
                 id: turn_id.into(),
                 parent_id: None,
                 role: Some(NodeRole::Assistant),
-                msg_type: Some(NodeKind::Turn),
+                msg_type: Some(NodeKind::Skeleton),
+                meta: Some(serde_json::json!({"style_tag": "run"})),
                 content: None,
                 status: Some(NodeStatus::Completed),
                 timestamp: Some(1),
@@ -619,7 +634,8 @@ fn failed_tool_result_sets_success_false() {
                 id: tc_id.into(),
                 parent_id: Some(turn_id.into()),
                 role: Some(NodeRole::Assistant),
-                msg_type: Some(NodeKind::ToolCall),
+                msg_type: Some(NodeKind::Skeleton),
+                meta: Some(serde_json::json!({"style_tag": "tool"})),
                 name: Some("read_file".into()),
                 content: Some(MessageContent::Text("{}".into())),
                 status: Some(NodeStatus::Completed),
@@ -682,7 +698,8 @@ fn compression_nodes_are_excluded_from_request_view() {
         ChatNode {
             id: "c1".into(),
             role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::Compression),
+            msg_type: Some(NodeKind::Notice),
+            meta: Some(serde_json::json!({"style_tag": "compression"})),
             content: Some(MessageContent::Text("已压缩上下文（12 → 4 条）".into())),
             status: Some(NodeStatus::Completed),
             ..Default::default()

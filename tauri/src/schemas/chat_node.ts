@@ -126,41 +126,22 @@ export const CHAT_ROLES = [
 
 export type ChatRole = (typeof CHAT_ROLES)[number]
 
-// ==================== 消息类型 ====================
+// ==================== 消息形态 ====================
 
-/** 正文文本 */
-export const NODE_KIND_TEXT = 'text'
-/** 思考过程（reasoning） */
-export const NODE_KIND_REASONING = 'reasoning'
-/** 工具调用（组合节点：请求 / 过程 / 结果） */
-export const NODE_KIND_TOOL_CALL = 'tool_call'
-/** 轮次分组（一轮响应的容器，根级助手回合与子会话回合共用） */
-export const NODE_KIND_TURN = 'turn'
-/** 待用户响应（ask_user 提问 / 工具确认） */
-export const NODE_KIND_USER_PROMPT = 'user_prompt'
-/** 上下文压缩（系统对历史的一次整理动作，不是对话内容） */
-export const NODE_KIND_COMPRESSION = 'compression'
+// ---- wire 闭集五值（[T-147c-ii]，与后端 `NodeKind` 由 protocol-mirror-audit C 组锁相等）----
 
-// ---- 目标五值形态（[T-147c-ii] 双形态共存档；上面六个旧词保留到写方迁完）----
-
-/** 正文（新形态）：无 `style_tag` = 普通文本；`reasoning` = 思考 */
+/** 正文：无 `style_tag` = 普通文本；`reasoning` = 思考 */
 export const NODE_KIND_BODY = 'body'
-/** 系统提示（新形态）：当前词表 `compression` */
+/** 系统提示：当前词表 `compression` */
 export const NODE_KIND_NOTICE = 'notice'
-/** 组合骨架（新形态）：`run` = 一整轮 / `tool` = 一次工具调用 */
+/** 组合骨架：`run` = 一整轮 / `tool` = 一次工具调用 */
 export const NODE_KIND_SKELETON = 'skeleton'
-/** 等待用户回应（新形态，曾经的 `user_prompt`） */
+/** 等待用户回应（ask_user 提问 / 工具确认） */
 export const NODE_KIND_INTERACTION = 'interaction'
-/** 进行中占位（新形态；前端合成，见 [T-151]） */
+/** 进行中占位（前端合成，见 [T-151]） */
 export const NODE_KIND_TYPING = 'typing'
 
 export const NODE_KINDS = [
-  NODE_KIND_TEXT,
-  NODE_KIND_REASONING,
-  NODE_KIND_TOOL_CALL,
-  NODE_KIND_TURN,
-  NODE_KIND_USER_PROMPT,
-  NODE_KIND_COMPRESSION,
   NODE_KIND_BODY,
   NODE_KIND_NOTICE,
   NODE_KIND_SKELETON,
@@ -168,7 +149,43 @@ export const NODE_KINDS = [
   NODE_KIND_TYPING,
 ] as const
 
+/** wire 闭集：`ChatNode.type` 在**后端来源**上只可能是这五个词 */
 export type NodeKind = (typeof NODE_KINDS)[number]
+
+// ---- 呈现域词（[T-147c-ii]）----
+//
+// `foldNodeKind` 把「形态 + `meta.style_tag`」折叠成这些**内部键**：注册表按它们
+// 分派文案、图标与渲染器（`TYPE_PRESENTATION` 的键）。它们**不是 wire 词**——
+// 后端从不发出，存量旧数据里曾作为 `attributes.type` 出现，读边界折叠后不再可见。
+
+/** 普通正文（= `body` 无 reasoning tag） */
+export const NODE_KIND_TEXT = 'text'
+/** 思考过程（= `body` + tag `reasoning`） */
+export const NODE_KIND_REASONING = 'reasoning'
+/** 一次工具调用（= `skeleton` + tag `tool`） */
+export const NODE_KIND_TOOL_CALL = 'tool_call'
+/** 轮次分组（= `skeleton` + tag `run`） */
+export const NODE_KIND_TURN = 'turn'
+/** 待用户响应（= `interaction`） */
+export const NODE_KIND_USER_PROMPT = 'user_prompt'
+/** 上下文压缩（= `notice`） */
+export const NODE_KIND_COMPRESSION = 'compression'
+
+export const PRESENTATION_KINDS = [
+  NODE_KIND_TEXT,
+  NODE_KIND_REASONING,
+  NODE_KIND_TOOL_CALL,
+  NODE_KIND_TURN,
+  NODE_KIND_USER_PROMPT,
+  NODE_KIND_COMPRESSION,
+  NODE_KIND_TYPING,
+] as const
+
+/** 折叠后的呈现键——注册表（文案 / 图标 / 渲染器）的取值域 */
+export type PresentationKind = (typeof PRESENTATION_KINDS)[number]
+
+/** 跨域取值：wire 词与呈现词的同名并集（`ChatNode.type` 在落地前后都可能是它） */
+export type MessageKind = NodeKind | PresentationKind
 
 /**
  * `style_tag` wire 词表（同一 shape 下的呈现变体，[ADR-070 §决策 3]）。
@@ -177,11 +194,11 @@ export type NodeKind = (typeof NODE_KINDS)[number]
  * 消费点 `messageTypes.ts::messageTypeOf` 的折叠判据。
  */
 export const CHAT_STYLE_TAG_REASONING = 'reasoning'
-/** `skeleton` 的一种：一整轮助手响应（曾经的 `turn`） */
+/** `skeleton` 的一种：一整轮助手响应 */
 export const CHAT_STYLE_TAG_RUN = 'run'
-/** `skeleton` 的一种：一次工具调用（曾经的 `tool_call`） */
+/** `skeleton` 的一种：一次工具调用 */
 export const CHAT_STYLE_TAG_TOOL = 'tool'
-/** `notice` 的一种：上下文压缩记录（曾经的 `compression`） */
+/** `notice` 的一种：上下文压缩记录 */
 export const CHAT_STYLE_TAG_COMPRESSION = 'compression'
 
 // ==================== 消息状态 ====================
@@ -392,7 +409,11 @@ export interface ChatNode {
    * 缺身份是「还没接线」，不是「不让人看」。
    */
   principal?: Principal | string;
-  type?: NodeKind;
+  /**
+   * 形态词：帧在 wire 上是闭集五值 `NodeKind`；落入 transcript store（落地口折叠）
+   * 后是呈现键 `PresentationKind`。跨域取值 `MessageKind`，判据走 `messageTypeOf`。
+   */
+  type?: MessageKind;
   name?: string;
   // [T-147d-i] `tool_call_id` 从 wire 移除——后端 `#[serde(skip)]` 只保结构体字段（供
   // LLM 请求构造侧使用），前端从不消费它（过去只是 copy-through 到 store）。

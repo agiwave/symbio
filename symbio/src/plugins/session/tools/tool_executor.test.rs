@@ -317,7 +317,8 @@ fn tc_context(ids: &[&str]) -> Vec<ChatNode> {
         .map(|id| ChatNode {
             id: (*id).into(),
             role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::ToolCall),
+            msg_type: Some(NodeKind::Skeleton),
+            meta: Some(serde_json::json!({"style_tag": "tool"})),
             name: Some("vdfs_list".into()),
             status: Some(NodeStatus::Streaming),
             ..Default::default()
@@ -394,7 +395,7 @@ async fn aborted_batch_terminates_every_tool_call() {
         // 完整快照语义：id / role / type 保留，终态字段如实应用
         assert_eq!(u.id, id, "快照必须对应它自己的调用");
         assert_eq!(u.role, Some(NodeRole::Assistant), "完整快照保留节点身份");
-        assert_eq!(u.msg_type, Some(NodeKind::ToolCall));
+        assert!(u.is_tool_call(), "快照必须保持工具骨架形态");
         assert_eq!(u.status, Some(NodeStatus::Completed));
         assert_eq!(
             u.meta
@@ -556,7 +557,8 @@ fn not_executed_patch_is_completed_not_failed() {
     let mut p = ChatNode {
         id: "tc1".into(),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::ToolCall),
+        msg_type: Some(NodeKind::Skeleton),
+        meta: Some(serde_json::json!({"style_tag": "tool"})),
         ..Default::default()
     };
     apply_not_executed(&mut p, "not_executed");
@@ -946,7 +948,8 @@ async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
     let parent = ChatNode {
         id: "tc-gate".into(),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::ToolCall),
+        msg_type: Some(NodeKind::Skeleton),
+        meta: Some(serde_json::json!({"style_tag": "tool"})),
         status: Some(NodeStatus::Streaming),
         name: Some("vdfs_list".into()),
         ..Default::default()
@@ -1128,7 +1131,8 @@ async fn a_producer_only_principal_is_refused_the_task_table() {
     let parent = ChatNode {
         id: "tc-task".into(),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::ToolCall),
+        msg_type: Some(NodeKind::Skeleton),
+        meta: Some(serde_json::json!({"style_tag": "tool"})),
         status: Some(NodeStatus::Streaming),
         name: Some("local/todo_write".into()),
         ..Default::default()
@@ -1198,7 +1202,8 @@ async fn the_trivial_session_is_not_refused_the_task_table() {
     let parent = ChatNode {
         id: "tc-task2".into(),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::ToolCall),
+        msg_type: Some(NodeKind::Skeleton),
+        meta: Some(serde_json::json!({"style_tag": "tool"})),
         status: Some(NodeStatus::Streaming),
         name: Some("local/todo_write".into()),
         ..Default::default()
