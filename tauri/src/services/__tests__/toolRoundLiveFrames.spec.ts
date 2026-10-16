@@ -47,7 +47,12 @@ import { describe, expect, it, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 import { useSessionsStore } from '@/stores/sessions'
-import type { ChatNode } from '@/schemas/chat_node'
+import {
+  NODE_KIND_BODY,
+  NODE_KIND_NOTICE,
+  NODE_KIND_SKELETON,
+  type ChatNode,
+} from '@/schemas/chat_node'
 
 const SID = 'sess1'
 const TURN = 'turn1'
@@ -67,13 +72,13 @@ beforeEach(() => {
 describe('工具轮实时帧序列 → store 终态', () => {
   it('结果子节点落 store、ToolCall 父节点终态 completed', () => {
     // ── 1. Turn root（emit_streaming_start：streaming + meta.turn）──
-    feed({ id: TURN, role: 'assistant', type: 'turn', status: 'streaming', meta: { turn: 0 } })
+    feed({ id: TURN, role: 'assistant', type: NODE_KIND_SKELETON, status: 'streaming', meta: { turn: 0 } })
 
     // ── 2. Reasoning 首帧（身份 + 首段正文）──
     feed({
       id: REASON,
       role: 'assistant',
-      type: 'reasoning',
+      type: NODE_KIND_NOTICE,
       parent_id: TURN,
       status: 'streaming',
       content: '第一段思考',
@@ -87,7 +92,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
     feed({
       id: TC,
       role: 'assistant',
-      type: 'tool_call',
+      type: NODE_KIND_SKELETON,
       parent_id: TURN,
       meta: { tool_name: 'local/read' },
       status: 'streaming',
@@ -101,7 +106,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
     feed({
       id: REASON,
       role: 'assistant',
-      type: 'reasoning',
+      type: NODE_KIND_NOTICE,
       parent_id: TURN,
       status: 'completed',
     })
@@ -110,7 +115,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
     feed({
       id: TC,
       role: 'assistant',
-      type: 'tool_call',
+      type: NODE_KIND_SKELETON,
       parent_id: TURN,
       status: 'streaming',
       meta: { started_at: 1726900000000, tool_name: 'local/read' },
@@ -120,7 +125,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
     feed({
       id: RESULT,
       role: 'tool',
-      type: 'text',
+      type: NODE_KIND_BODY,
       parent_id: TC,
       status: 'completed',
       content: '文件内容……',
@@ -130,7 +135,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
     feed({
       id: TC,
       role: 'assistant',
-      type: 'tool_call',
+      type: NODE_KIND_SKELETON,
       parent_id: TURN,
       status: 'completed',
       meta: { started_at: 1726900000000, success: true, tool_name: 'local/read' },
@@ -141,7 +146,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
     // 一个执行窗口——容器"已完成"而其中的工具调用仍在运行。现在移到 `close_turn`
     // 归来之后；发出的即 `llm_build_assistant_messages` 构建的那条（pending 落库的
     // 同一份），因此不带流式占位期的 `meta.turn`。
-    feed({ id: TURN, role: 'assistant', type: 'turn', status: 'completed' })
+    feed({ id: TURN, role: 'assistant', type: NODE_KIND_SKELETON, status: 'completed' })
 
     const store = useSessionsStore()
     const msgs = store.getSessionMessages(SID)
@@ -165,7 +170,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
     feed({
       id: TC,
       role: 'assistant',
-      type: 'tool_call',
+      type: NODE_KIND_SKELETON,
       parent_id: TURN,
       meta: { tool_name: 'agent/run' },
       status: 'streaming',
@@ -173,7 +178,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
     })
 
     // 子会话顶层节点：`tool_executor` 把 parent 锚定到 ToolCall、role 归 Tool 后转发
-    feed({ id: RESULT, role: 'tool', type: 'turn', parent_id: TC, status: 'streaming' })
+    feed({ id: RESULT, role: 'tool', type: NODE_KIND_SKELETON, parent_id: TC, status: 'streaming' })
 
     // 响应逐片到达（后端透传子会话的 `delta`，不是全量重发）
     feed({ id: RESULT, delta: '分析中' })
@@ -199,7 +204,7 @@ describe('合帧落到 store：一批只推一次版本号', () => {
     const v0 = store.transcriptVersion
 
     store.applyTranscriptMessages(SID, [
-      { id: 'm1', role: 'assistant', type: 'text', content: 'a' },
+      { id: 'm1', role: 'assistant', type: NODE_KIND_BODY, content: 'a' },
       { id: 'm1', delta: 'b' },
       { id: 'm1', delta: 'c' },
     ])
@@ -212,7 +217,7 @@ describe('合帧落到 store：一批只推一次版本号', () => {
     const store = useSessionsStore()
     const v0 = store.transcriptVersion
 
-    store.applyTranscriptMessage(SID, { id: 'x1', role: 'assistant', type: 'text', content: 'hi' })
+    store.applyTranscriptMessage(SID, { id: 'x1', role: 'assistant', type: NODE_KIND_BODY, content: 'hi' })
     expect(store.transcriptVersion).toBe(v0 + 1)
     expect(store.getSessionMessages(SID).find((m) => m.id === 'x1')?.content).toBe('hi')
   })

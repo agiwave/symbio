@@ -12,8 +12,10 @@
  *    或让已删除的陈旧副本复活成幽灵节点；
  * 3. **「目标 + 其后全部」的截断区间**——必须与后端 `drain(i..)` 判据同源，
  *    否则列表尾部会残留一个后端已不存在的节点，且**没有任何机制会纠正它**；
- * 4. **看门狗的定稿口径**——只有根级 Turn 允许挂 `error`（否则同一条错误会刷到
- *    每条半截消息上，正是原始 429 刷屏的根因）。
+ * 4. **看门狗的定稿口径**——错误是**状态**、由造成中止的那个节点承载（后端把它挂在
+ *    本轮根节点上），半截子节点不再各刷一份同样的错误（否则一条错误刷屏到每条半截
+ *    消息，正是原始 429 刷屏的根因）。前端只按**节点自身状态**渲染错误，不假设根节点
+ *    是哪种形态——一轮响应的根既可能是骨架容器，也可能直接就是一个正文节点。
  *
  * 这些规则原先只能通过「造一个 Pinia store + 喂一串 patch」间接验证。抽成纯函数后
  * 每条规则都能直接断言（见 `__tests__/sessionTranscript.spec.ts`），
@@ -24,9 +26,9 @@ import {
   CHAT_ROLE_ASSISTANT,
   NODE_STATUS_STREAMING,
   NODE_STATUS_WAITING_USER_ACTION,
-  NODE_KIND_REASONING,
-  NODE_KIND_TEXT,
-  NODE_KIND_TURN,
+  NODE_KIND_BODY,
+  NODE_KIND_NOTICE,
+  nodeKindOf,
   messageRoleOf,
   messageTextOf,
   type ChatNode,
@@ -150,17 +152,6 @@ export function truncateIdsFrom(ordered: ChatNode[], anchorId: string): string[]
   return ordered.slice(anchorIdx).map((m) => m.id)
 }
 
-/**
- * 根级 Turn：`type = turn` 且无父节点。
- *
- * 后端 `persist_failure` 只把错误挂在**根级 Turn** 上（「错误是状态、且只由造成中止的
- * 根 Turn 承载」）；其余仍在进行中的子节点定稿为 `completed`、绝不挂 `error`。
- * TurnGroupNode 的重试按钮判定也据此识别"整轮失败"这一状态。
- */
-export function isRootTurn(msg: Pick<ChatNode, 'type' | 'parent_id'>): boolean {
-  return msg.type === NODE_KIND_TURN && !msg.parent_id
-}
-
 /** 仍在进行中的消息（send/resume 的乐观置位判定据此识别"已有在途节点"） */
 export function isInProgressMessage(msg: Pick<ChatNode, 'status'>): boolean {
   return (
@@ -185,13 +176,13 @@ export function isInProgressMessage(msg: Pick<ChatNode, 'status'>): boolean {
  * 两处分头写一份，就会出现「一处过滤、另一处却把它算作内容」的静默分叉：
  * 不报错、不被测试拦住，只是偶尔转一下圈。
  *
- * 只对 `text` / `reasoning` 判定——`tool_call` 的 `content` 是参数 JSON，即便为空
- * 也有一张工具卡片要显示（工具名在 `name` 上）；容器类节点（Turn / ToolCall）
+ * 只对 `body` / `notice` 判定——`skeleton` 的 `content` 是参数 JSON，即便为空
+ * 也有一张容器要显示（工具名在 title 上）；容器类节点（整轮 / 工具调用）
  * 靠子节点呈现，不适用本条。
  */
 export function isBlankContentNode(msg: Pick<ChatNode, 'type' | 'content'>): boolean {
-  const t = msg.type || NODE_KIND_TEXT
-  if (t !== NODE_KIND_TEXT && t !== NODE_KIND_REASONING) return false
+  const t = nodeKindOf(msg.type)
+  if (t !== NODE_KIND_BODY && t !== NODE_KIND_NOTICE) return false
   // 取值走契约层的唯一实现（多模态内容 → 纯文本）
   return messageTextOf(msg.content).trim().length === 0
 }

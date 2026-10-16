@@ -22,6 +22,7 @@ import {
   messageSummaryPreviewOf,
 } from '../useMessageContent'
 import { MESSAGE_PREVIEW_MAX } from '@/registry/messageTypes'
+import { NODE_KIND_BODY, NODE_KIND_NOTICE, type ChatNode } from '@/schemas/chat_node'
 
 /**
  * `messageTextOf`（多模态内容 → 纯文本）**不在本文件测**——它在契约层
@@ -86,30 +87,30 @@ describe('JSON 判定与高亮', () => {
 })
 
 describe('收起态单行摘要', () => {
-  it('分组节点取首个文本 / 思考子节点的内容（容器自身没有正文）', () => {
-    const node = {
+  it('分组节点取首个正文 / 折叠叶子节点的内容（容器自身没有正文）', () => {
+    const node: ChatNode = {
       id: 'tc',
       content: '{"args":1}',
       children: [
-        { id: 'r', type: 'reasoning' as const, content: '想了什么' },
-        { id: 'x', type: 'text' as const, content: '正文' },
+        { id: 'r', type: NODE_KIND_NOTICE, content: '想了什么' },
+        { id: 'x', type: NODE_KIND_BODY, content: '正文' },
       ],
     }
     expect(messageSummaryPreviewOf(node, true, false).text).toBe('想了什么')
     expect(messageSummaryPreviewOf(node, false, false).text).toBe('{"args":1}')
   })
 
-  it('分组节点**尚无 text/reasoning 子节点**时回落到自身正文（运行中工具的请求参数）', () => {
-    // ToolCall 的参数就存在自身 content 里，且结果子节点到达之前它没有任何
-    // text/reasoning 子节点。此处分组分支若只看子节点，运行中的工具行会一片空白
+  it('分组节点**尚无正文 / 折叠叶子节点**时回落到自身正文（运行中工具的请求参数）', () => {
+    // 工具的参数就存在自身 content 里，且结果子节点到达之前它没有任何
+    // 正文/折叠叶子节点。此处分组分支若只看子节点，运行中的工具行会一片空白
     // ——参数已逐帧流到本地，界面却要等结果到达才第一次显示文字。
-    const running = { id: 'tc', content: '{"path":"a.rs"}', children: [] }
+    const running: ChatNode = { id: 'tc', content: '{"path":"a.rs"}', children: [] }
     expect(messageSummaryPreviewOf(running, true, true).text).toBe('{"path":"a.rs"}')
     // 子节点到达后仍以子节点为准（结果预览优先）
-    const settled = {
+    const settled: ChatNode = {
       id: 'tc',
       content: '{"path":"a.rs"}',
-      children: [{ id: 'res', type: 'text' as const, content: '文件内容' }],
+      children: [{ id: 'res', type: NODE_KIND_BODY, content: '文件内容' }],
     }
     expect(messageSummaryPreviewOf(settled, true, false).text).toBe('文件内容')
   })

@@ -405,6 +405,12 @@ export const useSessionsStore = defineStore('sessions', () => {
         // [T-147d-i] `tool_call_id` 不再上 wire——后端 `#[serde(skip)]`，前端无消费点。
         // [T-147d-ii] 顶层 `name` 已退役——工具名随下面的 meta 合并（meta.tool_name）到位。
         if (message.meta != null) node.meta = message.meta
+        // 呈现数据（[T-155] 交互面下发）：后端把「这条长什么样」折进顶层 `title`/`icon`/
+        // `actions`，渲染期 `facetsOf` 从节点顶层直读。合并必须与身份字段同口径「有则覆盖」——
+        // 否则首帧带来的工具名/图标/可用动作被后续窄帧丢光，界面退回按形态兜底（工具名消失）。
+        if (message.title != null) node.title = message.title
+        if (message.icon != null) node.icon = message.icon
+        if (message.actions != null) node.actions = message.actions
         // 存储侧权威值（落库后回发的对齐帧）：原样覆盖。
         if (message.seq != null) node.seq = message.seq
         if (message.timestamp != null) node.timestamp = message.timestamp
@@ -511,7 +517,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     // 只还原"等待审批"（它由转写派生，是**消息**节点的属性）。
     // 「上一轮失败」不在此还原：它是**会话节点**的状态（`status == 'failed'`），
     // 由 `list` 快照 / 节点变更落定——从消息历史反推会造出第二份真相，
-    // 且与节点状态可能不一致（历史里有失败 Turn ≠ 会话当前处于失败态）。
+    // 且与节点状态可能不一致（历史里有失败骨架 ≠ 会话当前处于失败态）。
     // 缺省状态由通道给（`last_event_at` = 当前时刻）——历史里没有状态条目时，
     // 若写成 0 会被 `getSessionStaleReason` 立刻判成「状态已过期」。
     updateStatus(sessionId, (cur) => ({ ...cur, is_waiting_approval: waitingApproval }))

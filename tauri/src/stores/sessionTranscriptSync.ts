@@ -78,12 +78,10 @@ import { ensureSessionScheme } from '@/services/vdfsScheme'
 import { type VdfsChange, type VdfsNode } from '@/schemas/vdfs'
 import {
   NODE_STATUS_REMOVED,
-  NODE_KIND_TOOL_CALL,
-  NODE_KIND_TURN,
+  NODE_KIND_SKELETON,
+  nodeKindOf,
   type ChatNode,
 } from '@/schemas/chat_node'
-// [T-147c-ii] wire 形态 → 呈现键的唯一折叠点（读侧判容器、判 Turn 都走它）
-import { messageTypeOf } from '@/registry/messageTypes'
 import { logger } from '@/utils/logger'
 
 /**
@@ -224,7 +222,7 @@ function enqueueDelta(sid: string, mid: string, delta: string): void {
  * 属性经 `#[serde(flatten)]` 平铺在节点顶层（role / type / parent_id / seq /
  * error / meta / tool_name）；`status` 是节点字段；`updated_at`
  * 即消息 timestamp。正文有两种上线形态（后端 `message_text`）：
- * Turn / ToolCall 的正文是**整条消息的 JSON**（容器节点靠子节点呈现，正文承载
+ * 骨架（容器节点）的正文是**整条消息的 JSON**（靠子节点呈现，正文承载
  * 结构），其余是纯文本。
  *
  * 返回 `null` = 状态词不在词表里（两侧已分叉，宁可丢这条也不造出状态错误的消息）。
@@ -237,13 +235,12 @@ function messageOfNode(node: VdfsNode, text: string): ChatNode | null {
     'completed', 'aborted', 'failed', 'removed',
   ]
   if (!known.includes(status)) return null
-  // [T-147c-ii] `attributes.type` 可能是五值形态的新词（写方迁移后）或旧词（存量），
-  // 一律先折成呈现键再判容器——折叠幂等，落地口再折一次不会漂移。
-  const metaObj = v.meta != null && typeof v.meta === 'object' ? (v.meta as ChatNode['meta']) : undefined
-  const folded = typeof v.type === 'string' ? messageTypeOf({ type: v.type as ChatNode['type'], meta: metaObj }) : undefined
+  // [T-147c-ii] `attributes.type` 可能是五值形态的新词（写方迁移后）或旧业务词（存量），
+  // 一律经 `nodeKindOf` 在读边界一次性归一成五值——折叠幂等，落地口再折一次不会漂移。
+  const folded = typeof v.type === 'string' ? nodeKindOf(v.type) : undefined
 
-  // 容器节点的正文是整条消息 JSON：结构字段以它为准（比 attributes 全）。
-  if (folded === NODE_KIND_TURN || folded === NODE_KIND_TOOL_CALL) {
+  // 容器节点（骨架：整轮或工具调用）的正文是整条消息 JSON：结构字段以它为准（比 attributes 全）。
+  if (folded === NODE_KIND_SKELETON) {
     try {
       const parsed = JSON.parse(text) as ChatNode
       if (parsed && typeof parsed === 'object' && parsed.id) {
@@ -432,17 +429,17 @@ export function handleVdfsChange(change: VdfsChange): void {
 
   // ⑤ 本端缺基线（状态帧 + 身份未知）：回读补齐身份与正文。
   //
-  // **例外：Turn 是组合节点，从来没有正文。** 后端两处都写死了这一点
+  // **例外：骨架是组合节点，从来没有正文。** 后端两处都写死了这一点
   // （`emit_streaming_start`：「Turn 组合节点无正文」；`message_text`：Turn /
   // ToolCall「组合节点，本身无正文」，`vdfs/read` 给它的是**整条消息的 JSON
   // 视图**——而这一帧本身就是同一条消息的序列化，字段一个不少）。于是「回读
   // 补正文」在这类节点上**取不到任何新信息**：`stat` + `read` 两次 IPC 换来一份
   // 帧里已有的东西。
   //
-  // 判据是**节点类型**，不是帧的形状——同一形状的状态帧落在 Text 节点上时，
+  // 判据是**节点形态**，不是帧的形状——同一形状的状态帧落在正文叶上时，
   // 回读确实能补回本端漏掉的正文，那一次是必要的。这也正是每轮会话都会多出
-  // 一对 `vdfs/stat` + `vdfs/read` 的成因（Turn 根节点的首帧就是「无正文」）。
-  if (messageTypeOf(msg) === NODE_KIND_TURN) {
+  // 一对 `vdfs/stat` + `vdfs/read` 的成因（骨架根节点的首帧就是「无正文」）。
+  if (nodeKindOf(msg.type) === NODE_KIND_SKELETON) {
     sink.applyTranscriptMessages(sid, [msg])
     return
   }

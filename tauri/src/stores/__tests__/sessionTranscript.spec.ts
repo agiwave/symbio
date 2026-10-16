@@ -13,15 +13,18 @@ import {
   appendContent,
   hydrateTranscript,
   isInProgressMessage,
-  isRootTurn,
   previewOf,
   sortTranscript,
   truncateIdsFrom,
 } from '../sessionTranscript'
-import type { ChatNode } from '@/schemas/chat_node'
+import {
+  NODE_KIND_BODY,
+  NODE_KIND_SKELETON,
+  type ChatNode,
+} from '@/schemas/chat_node'
 
 function msg(p: Partial<ChatNode> & { id: string }): ChatNode {
-  return { role: 'assistant', type: 'text', status: 'completed', ...p }
+  return { role: 'assistant', type: NODE_KIND_BODY, status: 'completed', ...p }
 }
 
 describe('sortTranscript：seq 是唯一权威顺序锚点', () => {
@@ -83,7 +86,7 @@ describe('appendContent：帧携带 `delta` 时的唯一内容落点', () => {
   })
 
   it('工具**参数**帧同样追加（参数是窄增量，不是全量重发）', () => {
-    const out = appendContent(msg({ id: 'tc', type: 'tool_call', content: '{"a' }), '":1}')
+    const out = appendContent(msg({ id: 'tc', type: NODE_KIND_SKELETON, content: '{"a' }), '":1}')
     expect(out.content).toBe('{"a":1}')
   })
 
@@ -182,12 +185,6 @@ describe('truncateIdsFrom：「目标 + 其后全部」', () => {
 })
 
 describe('在途节点判据', () => {
-  it('根级 Turn = type=turn 且无父节点（唯一允许挂 error 的节点）', () => {
-    expect(isRootTurn({ type: 'turn' })).toBe(true)
-    expect(isRootTurn({ type: 'turn', parent_id: 'p' })).toBe(false)
-    expect(isRootTurn({ type: 'text' })).toBe(false)
-  })
-
   it('进行中 = streaming / waiting_user_action（其余已是终态）', () => {
     expect(isInProgressMessage({ status: 'streaming' })).toBe(true)
     expect(isInProgressMessage({ status: 'waiting_user_action' })).toBe(true)

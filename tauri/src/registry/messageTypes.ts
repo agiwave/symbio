@@ -13,7 +13,7 @@
  * ## 为什么入参是 `MessageFacets` 而不是 `ChatNode`
  *
  * 判定要用到的不只是节点自身字段，还有「父节点是什么」「子节点里有没有待审批」
- * 这类**上下文**（如 `toolResult` 要求 `parentType === 'tool_call'`）。把这些上下文
+ * 这类**上下文**（如 `toolResult` 要求 `parentType === 'skeleton'`）。把这些上下文
  * 显式列进 facets，而不是让本模块去读 props，好处是：
  * 每个判定都是**纯函数**，可直接单测，且不需要为了测试去搭一棵组件树。
  *
@@ -35,21 +35,12 @@ import {
   NODE_STATUS_REMOVED,
   NODE_STATUS_STREAMING,
   NODE_STATUS_WAITING_USER_ACTION,
-  NODE_KIND_COMPRESSION,
-  NODE_KIND_REASONING,
-  NODE_KIND_TEXT,
-  NODE_KIND_TOOL_CALL,
-  NODE_KIND_TURN,
-  NODE_KIND_USER_PROMPT,
   NODE_KIND_BODY,
   NODE_KIND_NOTICE,
   NODE_KIND_SKELETON,
   NODE_KIND_INTERACTION,
   NODE_KIND_TYPING,
-  CHAT_STYLE_TAG_REASONING,
-  CHAT_STYLE_TAG_RUN,
-  CHAT_STYLE_TAG_TOOL,
-  CHAT_STYLE_TAG_COMPRESSION,
+  nodeKindOf,
   RESUME_ACTION_RETRY,
   RESUME_ACTION_RETRY_COMPACTION,
   RESUME_ACTION_RETRY_SUBTREE,
@@ -61,9 +52,7 @@ import {
   PRINCIPAL_KIND_SYSTEM,
   PRINCIPAL_KIND_TOOL,
   type ChatNode,
-  type MessageKind,
   type NodeKind,
-  type PresentationKind,
   type Principal,
   type PrincipalKind,
   type ChatRole,
@@ -83,77 +72,16 @@ import type { MessagePrompt, MessagePromptKind } from '@/schemas/message_prompt'
 export { messageRoleOf }
 
 /**
- * (kind, `style_tag`) → 呈现键的**分派表**——[T-148] 把「二元组怎么折成注册表内部键」
- * 从 `switch` 控制流降为**数据**。
+ * 节点的**生效形态**（[T-155 B2a]，[ADR-070 §决策 3]）：wire 五值 `NodeKind`。
  *
- * - 外层按 `kind` 建：`Record<NodeKind, …>` 让「漏登记一个 wire 五值」是**编译错误**；
- * - 内层 `byStyleTag`：只列该形态下**确有专属呈现变体**的 tag，键是 wire 词值（`meta.style_tag`）；
- * - `default`：该形态未命中任何 `byStyleTag`（含 `style_tag` 缺席、畸形的裸骨架、
- *   以及**未登记的新 tag**）时落到的呈现键——**不判红**，退到该形态的多数形态。
- *
- * **新增一个 style_tag 变体的全部代价 = 在对应 `byStyleTag` 里加一行**（若它复用已有
- * 呈现键，连 `TYPE_PRESENTATION` 都不用动）；不改任何渲染组件。这条性质由单测钉死
- * （`messageTypes.spec.ts`「新增 style_tag 只加表」）。
+ * 这是分派轴的**唯一读入口**。它只做一件事——把 `node.type` 归一到闭集五值（历史
+ * 业务旧词经 `nodeKindOf` 一次性折叠，`run`/`tool`→`skeleton`、`reasoning`/`compression`→
+ * `notice`），**不读 `meta.style_tag`**：同格业务差异靠后端下发的 `title`/`icon`/`actions`
+ * 数据分呈现，不靠前端 `switch`。折叠即合流——思考与压缩进同一格、工具与整轮进同一格，
+ * 前端从此不认 `Reasoning` / `ToolCall` / `Compression` 这些业务名。
  */
-const NODE_KIND_PRESENTATION: Record<
-  NodeKind,
-  { readonly default: PresentationKind; readonly byStyleTag: Readonly<Record<string, PresentationKind>> }
-> = {
-  [NODE_KIND_BODY]: {
-    default: NODE_KIND_TEXT,
-    byStyleTag: { [CHAT_STYLE_TAG_REASONING]: NODE_KIND_REASONING },
-  },
-  [NODE_KIND_NOTICE]: {
-    default: NODE_KIND_COMPRESSION,
-    byStyleTag: { [CHAT_STYLE_TAG_COMPRESSION]: NODE_KIND_COMPRESSION },
-  },
-  [NODE_KIND_SKELETON]: {
-    // 漏 tag 的畸形骨架按「一整轮」折叠（骨架的多数形态）
-    default: NODE_KIND_TURN,
-    byStyleTag: { [CHAT_STYLE_TAG_RUN]: NODE_KIND_TURN, [CHAT_STYLE_TAG_TOOL]: NODE_KIND_TOOL_CALL },
-  },
-  [NODE_KIND_INTERACTION]: {
-    default: NODE_KIND_USER_PROMPT,
-    byStyleTag: {},
-  },
-  // 进行中占位（[T-151] 前端合成）：原样透出，专属渲染器落地前走兜底。
-  [NODE_KIND_TYPING]: {
-    default: NODE_KIND_TYPING,
-    byStyleTag: {},
-  },
-}
-
-/**
- * 形态 + `meta.style_tag` → **呈现键**（折叠的唯一实现，查 [`NODE_KIND_PRESENTATION`]）。
- *
- * [T-147c-ii]：wire 闭集是五值形态（`body` / `notice` / `skeleton` / `interaction` /
- * `typing`）；目标形态靠 `meta.style_tag` 分辨呈现变体，折叠成注册表的**内部键**
- * （`text` / `reasoning` / `turn` / `tool_call` / `user_prompt` / `compression` /
- * `typing`），下游（facets / 呈现表 / 文案表）按折叠结果分派。折叠点唯一，与后端
- * `ChatNode::is_*` 谓词同一判据。
- * **幂等**：入参已是呈现键（存量旧数据、或落地后的节点）时不在表内 → 原样透出，
- * 再折叠仍是自身；未登记 tag / 缺 tag 落到该形态 `default`，绝不判红。
- */
-export function foldNodeKind(type: MessageKind, styleTag?: string): PresentationKind {
-  const entry = (NODE_KIND_PRESENTATION as Partial<Record<MessageKind, (typeof NODE_KIND_PRESENTATION)[NodeKind]>>)[
-    type as NodeKind
-  ]
-  if (!entry) return type as PresentationKind
-  if (styleTag != null) {
-    const hit = entry.byStyleTag[styleTag]
-    if (hit != null) return hit
-  }
-  return entry.default
-}
-
-/** 节点的**生效呈现键**（缺省 = `text`：未标形态的帧按正文处理） */
-export function messageTypeOf(node: Pick<ChatNode, 'type' | 'meta'>): PresentationKind {
-  const type = node.type as MessageKind | undefined
-  if (!type) return NODE_KIND_TEXT
-  return foldNodeKind(
-    type,
-    (node.meta as { style_tag?: string } | undefined)?.style_tag,
-  )
+export function messageTypeOf(node: Pick<ChatNode, 'type'>): NodeKind {
+  return nodeKindOf(node.type)
 }
 
 /** 节点的状态（缺省 = 已结束） */
@@ -172,7 +100,7 @@ export function toolNameOf(node: Pick<ChatNode, 'meta'>): string | undefined {
 }
 
 /**
- * 消息节点的显示名（Turn 用）。
+ * 消息节点的显示名（骨架容器用）。
  *
  * 优先级：`meta.agent_name` > `meta.agent_id` > 按是否子会话取兜底名。
  * `meta` 是后端 flatten 的场景字段，这里只做取值，不解释语义。
@@ -280,7 +208,7 @@ export function nodePrincipal(node: Pick<ChatNode, 'principal'>): Principal | un
  */
 export interface MessageFacets {
   role: ChatRole
-  type: PresentationKind
+  type: NodeKind
   status: NodeStatus
   /** 工具名（`meta.tool_name`，[T-147d-ii]） */
   name?: string
@@ -298,13 +226,13 @@ export interface MessageFacets {
   actions?: ResumeAction[]
   /** principal 身份呈现（[T-148] 独立表：命名空间优先、kind 兜底，无主体 → `undefined`） */
   principal?: PrincipalPresentation
-  /** 子会话 Turn（`role = tool` 的 turn）：某工具「过程」段 */
+  /** 子会话骨架（`role = tool` 的骨架）：某工具「过程」段 */
   subSession: boolean
-  /** `user_prompt` 的子类（`meta.prompt.kind`） */
+  /** `interaction` 的子类（`meta.prompt.kind`） */
   promptKind?: MessagePromptKind
   /** 合成「请求」子节点（`meta.__toolRequest`，前端渲染期提升，不落存储） */
   toolRequest: boolean
-  /** 工具返回（`role = tool` + `type = text` + 父节点是 `tool_call`） */
+  /** 工具返回（`role = tool` + `type = body` + 父节点是骨架 `skeleton`） */
   toolResult: boolean
   /** 子节点中存在待审批（工具卡默认展开的例外之一） */
   hasWaitingChild: boolean
@@ -320,7 +248,7 @@ export interface MessageFacets {
    * 右对齐的用户气泡，正文是 `[CONTEXT SNAPSHOT …]` 这类内部标记。
    */
   compacted: boolean
-  /** Turn 的**直接正文子节点**：内联直排，不重复渲染折叠头部 */
+  /** 骨架的**直接正文子节点**：内联直排，不重复渲染折叠头部 */
   responseText: boolean
 }
 
@@ -332,7 +260,7 @@ export interface MessageFacets {
  * 渲染器认为不是」这种分叉。
  *
  * @param node       消息节点
- * @param parentType 父节点的消息类型（`tool_call` / `turn`；根级为 undefined）
+ * @param parentType 父节点的生效形态（`skeleton`；根级为 undefined）
  */
 export function facetsOf(node: ChatNode, parentType?: string): MessageFacets {
   const role = messageRoleOf(node)
@@ -348,57 +276,54 @@ export function facetsOf(node: ChatNode, parentType?: string): MessageFacets {
     actions: node.actions,
     // principal 身份呈现（[T-148] 独立表；组件据此画徽标，缺主体则不画）
     principal: principalPresentationOf(node.principal),
-    // 子会话 Turn = 工具「过程」段（role=tool 的 turn），与根级助手 Turn 同构但无组级操作
-    subSession: type === NODE_KIND_TURN && role === CHAT_ROLE_TOOL,
+    // 子会话过程段 = `role=tool` 的骨架：与根级骨架同构（都走容器递归），但无组级操作
+    subSession: type === NODE_KIND_SKELETON && role === CHAT_ROLE_TOOL,
     promptKind: promptKindOf(node),
-    // 合成「请求」子节点：渲染期把 ToolCall 自身 content 提升为独立子节点时打的标
+    // 合成「请求」子节点：渲染期把骨架自身 content 提升为独立子节点时打的标
     toolRequest: messageIsToolRequest(node),
-    // 工具返回必须限定父节点是 tool_call：子会话 Turn 内部的文本子节点 role 也是 tool，
-    // 误判会把它渲染成独立「响应」块（见 isResponseText）
+    // 工具返回必须限定父节点是骨架：子会话过程段内部的文本子节点 role 也是 tool，
+    // 只有「tool 角色 + body 形态 + 父是骨架」才是一次工具调用的返回体
     toolResult:
       role === CHAT_ROLE_TOOL &&
-      type === NODE_KIND_TEXT &&
-      parentType === NODE_KIND_TOOL_CALL,
+      type === NODE_KIND_BODY &&
+      parentType === NODE_KIND_SKELETON,
     hasWaitingChild: (node.children || []).some(
       (c) => c.status === NODE_STATUS_WAITING_USER_ACTION,
     ),
     recoverable: messageIsRecoverable(node),
     failureKind: messageFailureKind(node),
     compacted: messageIsCompacted(node),
-    // Turn 的直接正文子节点：内联直排（无折叠头部）。仅限 text——思考必须保留单行行头，
-    // 否则流式思考会以裸 Markdown 块呈现，破坏「思考中…」动效与折叠交互。
-    responseText: parentType === NODE_KIND_TURN && type === NODE_KIND_TEXT,
+    // 骨架的**助手正文**子节点：内联直排（无折叠头部）。排除 tool 角色——那是工具返回
+    // （有「↩ 响应」头部），不是本轮正文；两者形态都是 body 挂在骨架下，靠 role 分辨。
+    responseText:
+      parentType === NODE_KIND_SKELETON && type === NODE_KIND_BODY && role !== CHAT_ROLE_TOOL,
   }
 }
 
 // ==================== 组件侧判据谓词（[T-148]） ====================
 //
-// 「这条是不是用户消息 / 一轮骨架 / 思考」这类判据原先在各渲染组件里就地比较协议
-// 枚举字面量（`facets.role === 'user'`、`c.type === NODE_KIND_TURN`）——每个组件都
-// 得 `import` 一份枚举值，「什么算 user/turn」的口径散在视图层。收进注册表后：
+// 「这条是不是用户消息 / 容器骨架」这类判据原先在各渲染组件里就地比较协议
+// 枚举字面量（`facets.role === 'user'`、`c.type === 'skeleton'`）——每个组件都
+// 得 `import` 一份枚举值，「什么算 user/骨架」的口径散在视图层。收进注册表后：
 // **组件只问谓词，不再持有枚举字面量**，判据改了只动这里（与 exit 判据 3、
-// 「加 style_tag 不改组件」同一纪律）。facets 版读折叠后的判定入参，node 版读
-// 原始节点（经 `messageRoleOf` / `messageTypeOf` 同一折叠，供父扫子节点用）。
+// 「加呈现变体不改组件」同一纪律）。facets 版读判定入参，node 版读原始节点
+// （经 `messageRoleOf` / `messageTypeOf` 同一归一，供父扫子节点用）。
 
 /** 该 facet 是用户发言（`role = user`）。 */
 export const isUserFacet = (f: Pick<MessageFacets, 'role'>): boolean =>
   f.role === CHAT_ROLE_USER
 
-/** 该 facet 是一轮骨架（呈现键 `turn`）。 */
-export const isTurnFacet = (f: Pick<MessageFacets, 'type'>): boolean =>
-  f.type === NODE_KIND_TURN
-
-/** 该 facet 是思考过程（呈现键 `reasoning`）。 */
-export const isReasoningFacet = (f: Pick<MessageFacets, 'type'>): boolean =>
-  f.type === NODE_KIND_REASONING
+/** 该 facet 是容器骨架（`type = skeleton`，一整轮或一次工具调用同构）。 */
+export const isSkeletonFacet = (f: Pick<MessageFacets, 'type'>): boolean =>
+  f.type === NODE_KIND_SKELETON
 
 /** 原始节点是否用户发言（role 格先、principal.kind 兜底同一折叠）。 */
 export const isUserNode = (n: Pick<ChatNode, 'role' | 'principal'>): boolean =>
   messageRoleOf(n) === CHAT_ROLE_USER
 
-/** 原始节点折叠后是否一轮骨架。 */
-export const isTurnNode = (n: Pick<ChatNode, 'type' | 'meta'>): boolean =>
-  messageTypeOf(n) === NODE_KIND_TURN
+/** 原始节点折叠后是否容器骨架（父扫子节点、区分「过程段」用）。 */
+export const isSkeletonNode = (n: Pick<ChatNode, 'type'>): boolean =>
+  messageTypeOf(n) === NODE_KIND_SKELETON
 
 // ==================== 后端 `meta` 字段 → UI 语义 ====================
 //
@@ -595,7 +520,7 @@ export function canSupplyToolArgs(f: MessageFacets): boolean {
  * 尤其如此：换一个上下文更大的模型后，同一次压缩就能成功。所以**只要失败就给入口**，
  * 不按 `failure_kind` 分档（分档会让"换模型后重试"这条唯一出路消失）。
  *
- * 与 Turn 级重试的区别：Turn 失败删的是响应子树（对话内容），压缩失败删的是
+ * 与骨架级重试的区别：骨架失败删的是响应子树（对话内容），压缩失败删的是
  * **压缩节点本身**（系统动作），两者不能共用 `retry_subtree`。
  */
 export function canRetryCompaction(f: MessageFacets): boolean {
@@ -668,7 +593,7 @@ export const MESSAGE_FAILURE_KIND_ABORTED = 'aborted'
  *
  * ## 为什么需要它
  *
- * 「工具的结果」在树里是一条**子节点**，`ToolCallNode` 的响应段就按子节点渲染。
+ * 「工具的结果」在树里是一条**子节点**，`SkeletonNode` 的响应段就按子节点渲染。
  * 后端原先有一条分支只给父节点补终态、不写结果子节点（本批剩余被跳过的调用），
  * 于是卡片有请求、无响应，而会话照常往下走——用户看到一次调用凭空消失。
  * 机制侧已修（后端 `not_executed_result`：有调用必有结果），本函数是**显示层的
@@ -749,16 +674,22 @@ export function isStreamingStatus(status?: NodeStatus | null): boolean {
 //
 // **只认回合（run），不认 tool**：工具行有它自己的在途信号（「运行中 / 秒数」），
 // 给它挂「生成中」占位是错位的呈现；回合才是「等 LLM 吐出第一个节点」这个语义的宿主——
-// 与 `TurnGroupNode` 既有的等待态判据同一 scope。
+// 与 `SkeletonNode` 既有的等待态判据同一 scope。
 
 /** typing 占位的稳定合成 id——以宿主为键，跨帧不变（缓存/键控都靠它）。 */
 export function typingIdOf(hostId: string): string {
   return `__typing__${hostId}`
 }
 
-/** 该节点是否是 typing 的宿主——正在 streaming 的助手回合骨架（run）。 */
+/** 该节点是否是 typing 的宿主——根级、正在 streaming 的骨架（一整轮）。 */
 export function isTypingHost(node: ChatNode): boolean {
-  return isStreamingStatus(node.status) && messageTypeOf(node) === NODE_KIND_TURN
+  // 骨架格同时容纳「整轮」与「工具」：工具挂在父节点下、有自己的「运行中/秒数」信号，
+  // 不该再挂「生成中」占位。用「无父 = 根级整轮」把两者分开——纯形状判据，不读 style_tag。
+  return (
+    isStreamingStatus(node.status) &&
+    messageTypeOf(node) === NODE_KIND_SKELETON &&
+    !node.parent_id
+  )
 }
 
 /** 从可见节点扁平表合成 typing 占位子节点（宿主 = streaming 且无真实子的回合）。 */
@@ -817,18 +748,11 @@ export const MESSAGE_ROLE_LABELS: Record<string, string> = {
 /**
  * 类型 → 文案。
  *
- * **必须覆盖 wire 五值与呈现键的全部取值**（`NODE_KINDS ∪ PRESENTATION_KINDS`）——
- * 漏一个就会把机制词（如 `compression`）原样摆给用户看，与「不要把后端枚举
- * 漏出去」相悖。由单测锁死覆盖率。
+ * 覆盖 wire 闭集五值（`NODE_KINDS`）——[T-155 B2a] 起前端只认这五格，业务旧词在
+ * 读边界经 `nodeKindOf` 归一后不再进入取值域。漏一格会把机制词原样摆给用户看，
+ * 由单测锁死覆盖率。
  */
 export const NODE_KIND_LABELS: Record<string, string> = {
-  [NODE_KIND_TEXT]: '文本',
-  [NODE_KIND_REASONING]: '思考',
-  [NODE_KIND_TURN]: '轮次',
-  [NODE_KIND_TOOL_CALL]: '工具调用',
-  [NODE_KIND_USER_PROMPT]: '待响应',
-  [NODE_KIND_COMPRESSION]: '上下文压缩',
-  // 目标五值形态（[T-147c-ii] 双形态共存；文案与对应旧词同义）
   [NODE_KIND_BODY]: '正文',
   [NODE_KIND_NOTICE]: '系统提示',
   [NODE_KIND_SKELETON]: '组合',
@@ -869,30 +793,33 @@ export function messageStatusLabel(status: string): string {
   return NODE_STATUS_LABELS[status] ?? status
 }
 
-// ==================== 类型 → 呈现（**类型知识的唯一来源**） ====================
+// ==================== 形态 → 呈现（**类型知识的唯一来源**） ====================
 //
-// 这张表回答「这个类型长什么样」，取代原先散在 7 个函数里的 if 链。
+// 这张表回答「这个形态长什么样」，取代原先散在多个取值函数里的 if 链。
 //
 // ## 它修掉的是什么
 //
-// 改造前 `NODE_KIND_TOOL_CALL` 在 `messageIcon` / `messageTitle` /
-// `messageStatusTag` / `messageHeadModifier` / `messageIsRunningAction` /
-// `messageDefaultOpen` / `messageRendererKey` 里**各出现一次**——新增一个消息类型
-// 要改 7 处，而且没有任何东西保证这 7 处彼此一致（漏一处就是「新类型有图标没标题」）。
-// 现在每个类型只在这里出现一次。
+// 改造前每个业务类型在 `messageIcon` / `messageTitle` / `messageStatusTag` /
+// `messageHeadModifier` / `messageIsRunningAction` / `messageDefaultOpen` /
+// `messageRendererKey` 里**各出现一次**——新增一种呈现要改 7 处，且没有任何东西
+// 保证这 7 处彼此一致（漏一处就是「新类型有图标没标题」）。现在每个形态只在这里出现一次。
 //
-// ## 表**不表达优先级**——优先级是跨类型的规则
+// ## [T-155 B2a]：取值域收到 wire 五值 `NodeKind`
 //
-// 三条跨类型的优先级规则各写在下面取值函数里（各一行，注释说明理由）：
+// 分派轴只有五格（`body` / `notice` / `skeleton` / `interaction` / `typing`）。同格内
+// 的业务差异（思考 vs 压缩、整轮 vs 工具）**不进这张表**——后端在交互面把它折成
+// `title` / `icon` / `actions` **数据**，取值函数优先读数据、缺省才退到本行多数形态。
+// 前端因此不再 `switch(style_tag)`，也不认任何业务名。
+//
+// ## 表**不表达优先级**——优先级是跨形态的规则
+//
+// 三条跨形态的优先级规则各写在下面取值函数里（各一行，注释说明理由）：
 // 1. `role = user` 覆盖类型（用户消息一律走气泡）；
-// 2. `turn` 覆盖 `role = user`（Turn 永远走分组形态，见 `messageRendererKey`）；
-// 3. 合成请求 / 工具返回是**上下文标记**而非类型（二者只出现在 `type = text` 上，
+// 2. `skeleton` 覆盖 `role = user`（容器永远走分组形态，见 `messageRendererKey`）；
+// 3. 合成请求 / 工具返回是**上下文标记**而非形态（二者只出现在 `type = body` 上，
 //    由 `facetsOf` 保证），因此在查表前先行判定。
-//
-// 规则 1 与 2 的顺序**确实不同**（图标是「角色优先」，渲染器是「Turn 最先」）——
-// 这是既有行为，本次重构原样保留，不合并成单一顺序。
 
-/** 呈现面取值：字面量，或按 facets 现算（如 Turn 的图标分根级 / 子会话） */
+/** 呈现面取值：字面量，或按 facets 现算（如骨架的图标分根级 / 子会话） */
 type Facet<T> = T | ((f: MessageFacets, agentName: string) => T)
 
 /**
@@ -904,15 +831,10 @@ type Facet<T> = T | ((f: MessageFacets, agentName: string) => T)
 interface TypePresentation {
   /** 头部图标 */
   icon: Facet<string>
-  /** 头部标题；Turn 的标题是智能体名（由调用方传入） */
+  /** 头部标题；骨架的标题是智能体名（由调用方传入） */
   title: Facet<string>
   /** 渲染器标识（详情形态） */
   renderer: MessageRenderer
-  /**
-   * 头部修饰类：该类型在 CSS 上的专属钩子。
-   * `user` / `sub` 由 role 与 subSession 派生（跨类型），不在此列。
-   */
-  head?: 'tool' | 'reasoning'
   /** 运行中时驱动标题呼吸动效（「正在进行、内容尚未成形」的行） */
   thinkingWhenRunning?: boolean
   /** 动作型节点：默认折叠成单行，运行中靠脉动 + 已用秒数给出信号 */
@@ -929,44 +851,45 @@ interface TypePresentation {
 }
 
 /**
- * 类型 → 呈现。
+ * 形态 → 呈现（[T-155 B2a]：取值域就是 wire 闭集五值 `NodeKind`）。
  *
- * 用 `Record<PresentationKind, …>` 而非 `Record<string, …>`：**漏登记一个类型是
- * 编译错误，不是运行期兜底**。运行期未知取值（后端先行上线了新 `type`）走
- * `FALLBACK_PRESENTATION`。
+ * 用 `Record<NodeKind, …>`：**漏登记一格是编译错误，不是运行期兜底**。同格内的业务
+ * 差异（思考 vs 压缩、整轮 vs 工具）**不在此表**——由后端在交互面折成 `title`/`icon`/
+ * `actions` 数据，`messageIcon` / `messageTitle` 优先取数据、缺省才退到本行的多数形态。
  */
-const TYPE_PRESENTATION: Record<PresentationKind, TypePresentation> = {
-  [NODE_KIND_TEXT]: {
+const TYPE_PRESENTATION: Record<NodeKind, TypePresentation> = {
+  // 正文叶：用户气泡 / 助手正文 / 工具请求·返回（都靠 role + 上下文标记区分，不另立格）
+  [NODE_KIND_BODY]: {
     icon: '💬',
     title: (f) => (f.role === CHAT_ROLE_ASSISTANT ? '助手' : '消息'),
-    renderer: 'text',
+    renderer: 'body',
     // 正文：助手展开；工具结果 / 子智能体内部文本收起
     defaultOpen: (f) => f.role !== CHAT_ROLE_TOOL,
   },
 
-  [NODE_KIND_REASONING]: {
+  // 折叠叶：思考 / 压缩 / 历史记忆同在这一格——专属图标·标题由后端 title/icon 给出，
+  // 本行只定义「多数形态」（默认收起、单行呼吸动效）。
+  [NODE_KIND_NOTICE]: {
     icon: '💭',
-    // 流式中「思考中…」+ 头部动效；完成后「思考」单行
-    title: (f) => (isStreamingStatus(f.status) ? '思考中…' : '思考'),
-    renderer: 'text',
-    head: 'reasoning',
+    title: (f) => (isStreamingStatus(f.status) ? '处理中…' : '提示'),
+    renderer: 'notice',
     thinkingWhenRunning: true,
-    // 有专属标题动效，不挂「回复中…」
     ownRunningSignal: true,
-    // 思考始终单行
+    // 折叠叶默认单行（记忆/思考收起；压缩的收起态由标题交待）
     defaultOpen: () => false,
   },
 
-  [NODE_KIND_TOOL_CALL]: {
-    icon: '🔧',
-    title: (f) => f.name || '工具',
-    renderer: 'tool_call',
-    head: 'tool',
+  // 容器：一整轮与一次工具调用结构同构——一个可折叠头部 + 一条子流。
+  // 工具名 / 图标由后端 title/icon 给出；参数住骨架自身 content（SkeletonNode 当首条正文渲染）。
+  [NODE_KIND_SKELETON]: {
+    // 根级整轮用 AI，子会话过程段用 ↳
+    icon: (f) => (f.subSession ? '↳' : 'AI'),
+    title: (_f, agentName) => agentName,
+    renderer: 'skeleton',
     thinkingWhenRunning: true,
     runningAction: true,
     ownRunningSignal: true,
-    // 折叠态下唯一的运行中信号，必须覆盖**全部非终态**；终态 completed 刻意留空
-    // （绝大多数调用都会成功结束，给每个成功的调用挂「已完成」会把真正需要注意的淹掉）
+    // 折叠态下唯一的运行中信号，覆盖全部非终态；completed 刻意留空
     statusTag: (f) => {
       if (isFailedStatus(f.status)) return '失败'
       if (isAbortedStatus(f.status)) return '已中止'
@@ -974,49 +897,18 @@ const TYPE_PRESENTATION: Record<PresentationKind, TypePresentation> = {
       if (isStreamingStatus(f.status)) return '运行中'
       return ''
     },
-    // 工具卡默认单行；例外：内含待审批（否则审批入口被折叠隐藏）、
-    // 或可恢复失败（会话因该失败暂停，需要操作入口）
-    defaultOpen: (f) => f.hasWaitingChild || f.recoverable,
-  },
-
-  [NODE_KIND_TURN]: {
-    // 根级助手回合用 AI，子会话（工具「过程」段）用 ↳
-    icon: (f) => (f.subSession ? '↳' : 'AI'),
-    title: (_f, agentName) => agentName,
-    renderer: 'turn',
+    // 骨架默认展开（整轮 = 对话主体；工具与整轮同构）。待审批 / 用户消息等跨类型
+    // 例外由 `messageDefaultOpen` 先行处理，深层级收起由 `effectiveOpenOf` 兜底。
     defaultOpen: () => true,
   },
 
-  [NODE_KIND_USER_PROMPT]: {
+  // 待用户回应：提问 / 工具确认（子形态由 meta.prompt.kind 判别，标题据此）
+  [NODE_KIND_INTERACTION]: {
     icon: '❓',
     title: (f) => (f.promptKind === 'confirm' ? '工具确认' : '提问'),
-    renderer: 'user_prompt',
+    renderer: 'interaction',
     defaultOpen: () => true,
   },
-
-  [NODE_KIND_COMPRESSION]: {
-    icon: '🗜',
-    title: '上下文压缩',
-    renderer: 'compression',
-    // 默认**展开**：正文只有一行系统说明，展开也不与对话正文争视觉重量；
-    // 折叠态下的唯一信号是状态标签（`statusTag`，见下方）。
-    runningAction: true,
-    ownRunningSignal: true,
-    statusTag: (f) => {
-      if (isFailedStatus(f.status)) return '未完成'
-      if (isAbortedStatus(f.status)) return '已中止'
-      if (isStreamingStatus(f.status)) return '压缩中'
-      return ''
-    },
-    defaultOpen: () => true,
-  },
-
-  // ---- 呈现键的最后一格：占位形态 ----
-  //
-  // [T-147c-ii] 起 `TYPE_PRESENTATION` 的取值域就是折叠后的**呈现键**
-  // （`Record<PresentationKind, …>` 穷尽性：漏一个键是编译错误）；wire 五值
-  // 经 `messageTypeOf` 折叠后进表，未登记取值在运行期走 `FALLBACK_PRESENTATION`
-  // （不渲染成空白）。
 
   // 进行中占位（[T-151] 前端合成）：折叠单行、只挂「生成中」信号，无正文。
   [NODE_KIND_TYPING]: {
@@ -1035,7 +927,7 @@ const TYPE_PRESENTATION: Record<PresentationKind, TypePresentation> = {
  * 不会把会话流渲染成空白。
  */
 const FALLBACK_PRESENTATION: TypePresentation = {
-  ...TYPE_PRESENTATION[NODE_KIND_TEXT],
+  ...TYPE_PRESENTATION[NODE_KIND_BODY],
   renderer: 'fallback',
 }
 
@@ -1074,7 +966,7 @@ export function messageIcon(f: MessageFacets): string {
  * 头部标题。
  *
  * [T-155] 呈现数据优先：后端填了 `node.title` 就直接用。
- * `agentName` 由调用方传入（Turn 的标题是「该智能体的名称」，取值逻辑见 `agentNameOf`）。
+ * `agentName` 由调用方传入（骨架容器的标题是「该智能体的名称」，取值逻辑见 `agentNameOf`）。
  * 缺省才落 legacy 优先级与同源（用户 > 请求 > 返回 > 类型表）。
  */
 export function messageTitle(f: MessageFacets, agentName: string): string {
@@ -1131,10 +1023,12 @@ export function messageHeadModifier(f: MessageFacets): MessageHeadModifier {
   return {
     user: f.role === CHAT_ROLE_USER,
     sub: f.subSession,
-    tool: p.head === 'tool',
-    reasoning: p.head === 'reasoning',
-    // 标题呼吸动效：思考中**与工具执行中**共用——两者都是「正在进行、内容尚未成形」的行
-    thinking: Boolean(p.thinkingWhenRunning) && isStreamingStatus(f.status),
+    // 头部色调钩子按形态给：骨架像「动作」、折叠叶像「思考」——纯形状，不认业务名
+    tool: f.type === NODE_KIND_SKELETON,
+    reasoning: f.type === NODE_KIND_NOTICE,
+    // 标题呼吸动效：凡是「正在进行、内容尚未成形」的行（折叠叶思考 / 容器运行中）
+    thinking:
+      Boolean(p.thinkingWhenRunning || p.runningAction) && isStreamingStatus(f.status),
   }
 }
 
@@ -1256,54 +1150,49 @@ export function nextOpenOf(
 //   本文件                    **纯映射**：facets → 渲染器标识；标识 → 组件（由装配点登记）
 //   registry/messageRenderers.ts  **唯一 import 组件的地方**（把标识绑到具体组件）
 //
-// 于是「新增一种消息类型」的完整代价是：
+// 于是「新增一种呈现形态」的完整代价是：
 //   1. wire 侧：后端枚举 + 前端 `NODE_KINDS` 各加一值（闭集跨栈批次）；
-//      若只是既有形态的呈现变体，只需 `CHAT_STYLE_TAG_*` 词表加一行常量
-//   2. `foldNodeKind` 加一等式（形态 + tag → 呈现键）
-//   3. 本文件 `TYPE_PRESENTATION` 加一行（呈现面全在那一行里）、文案表加一行
-//   4. `messageRenderers.ts` 加一行注册
-// **不再需要改渲染组件里的 if 链，也不必去 7 个取值函数里各补一处**——
-// 这正是本次改造要买到的性质。漏掉第 3 步会**编译报错**（`Record<PresentationKind, …>`
-// 要求穷尽），而不是运行期静默退化成兜底。
+//      若只是既有五值的呈现变体（思考 vs 压缩、整轮 vs 工具），**前端零改动**——
+//      后端在交互面把它折成 `title` / `icon` / `actions` 数据即可
+//   2. 本文件 `TYPE_PRESENTATION` 加一行（仅当新增的是第六个五值形态）、文案表加一行
+//   3. `messageRenderers.ts` 加一行注册
+// **不再需要改渲染组件里的 if 链**——这正是本次改造要买到的性质。漏掉第 2 步会
+// **编译报错**（`Record<NodeKind, …>` 要求穷尽），而不是运行期静默退化成兜底。
 
 /**
  * 渲染器标识（机制级的呈现形态，不含场景语义）。
  *
- * - `turn`         轮次响应分组（根级助手回合与子会话回合共用）
- * - `text`         折叠式内容节点：用户气泡 / 思考 / 正文 / 工具请求 / 工具返回
- * - `tool_call`    工具调用三段式卡片（请求 / 过程 / 结果）
- * - `user_prompt`  待用户响应（提问 / 工具确认）
- * - `compression`  上下文压缩（系统动作，非对话内容）
- * - `memory`       压缩后的**历史记忆**（系统产出的记忆，不是用户说的话）
- * - `fallback`     未登记类型的只读兜底（会话流永不空白）
+ * [T-155 B2a]：与 wire 五值 `NodeKind` 一一对应（`typing` 占位走 `fallback`）——
+ * 前端分派轴**只有** NodeKind，不再有业务形态标识。
+ *
+ * - `body`        正文叶：用户气泡 / 助手正文 / 工具请求·返回
+ * - `notice`      折叠叶：思考 / 上下文压缩 / 历史记忆
+ * - `skeleton`    容器：一整轮助手响应 与 一次工具调用（结构同构，都递归子流）
+ * - `interaction` 待用户响应（提问 / 工具确认）
+ * - `fallback`    未登记形态（后端先行上线的新 type）与 typing 占位的只读兜底
  */
 export type MessageRenderer =
-  | 'turn'
-  | 'text'
-  | 'tool_call'
-  | 'user_prompt'
-  | 'compression'
-  | 'memory'
+  | 'body'
+  | 'notice'
+  | 'skeleton'
+  | 'interaction'
   | 'fallback'
 
 /**
  * 判定节点该由哪个渲染器接管（**前端选择渲染形态的唯一入口**）。
  *
- * 判定顺序有语义，与改造前的模板 `v-if` 链逐条对齐：
- * 1. `turn` 最先——任何 Turn 都走分组形态（用户消息若是 Turn 亦如此）；
- * 2. **压缩记忆先于角色**——它是 `role = user` 的系统记忆，走路 `memory` 形态
+ * 判定顺序有语义：
+ * 1. `skeleton` 最先——任何容器都走分组形态（用户消息若是容器亦如此）；
+ * 2. **压缩记忆先于角色**——它是 `role = user` 的系统记忆，走 `notice` 折叠叶形态
  *    （正是这一步阻止它渲染成「你说的那句话」）；
- * 3. 角色优先于类型——用户消息一律走气泡（`text`），即便它的 `type` 是别的；
- * 4. 其余按类型分派（`TYPE_PRESENTATION.renderer`）；
+ * 3. 角色优先于类型——用户消息一律走气泡（`body`），即便它的 `type` 是别的；
+ * 4. 其余按形态分派（`TYPE_PRESENTATION.renderer`）；
  * 5. 未登记取值 → `fallback`（新类型上线时旧前端仍能显示内容）。
- *
- * 第 1 条**必须先于**第 3 条，因此 `turn` 在这里显式判一次，不能只靠类型表——
- * 图标 / 标题那边的顺序恰好相反（角色优先），两处顺序不同是既有行为。
  */
 export function messageRendererKey(f: MessageFacets): MessageRenderer {
-  if (f.type === NODE_KIND_TURN) return 'turn'
-  if (f.compacted) return 'memory'
-  if (f.role === CHAT_ROLE_USER) return 'text'
+  if (f.type === NODE_KIND_SKELETON) return 'skeleton'
+  if (f.compacted) return 'notice'
+  if (f.role === CHAT_ROLE_USER) return 'body'
   return presentationOf(f.type).renderer
 }
 

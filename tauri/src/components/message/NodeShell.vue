@@ -9,7 +9,7 @@
   - 折叠体：**不关心内容**，由调用方经默认插槽填入（气泡 / Markdown / 工具卡 / 表单…）。
 
   这样「哪种节点长什么样」只有一份实现，个体渲染器只负责「折叠体里放什么」。
-  头部是否渲染由 `facets.responseText` 决定：Turn 的直接正文子节点内联直排，
+  头部是否渲染由 `facets.responseText` 决定：骨架的直接正文子节点内联直排，
   重复一个「助手」行头属于冗余。
 
   判定（图标 / 标题 / 标签 / 色调 / 折叠策略）**全部**来自 `registry/messageTypes`，
@@ -196,7 +196,7 @@ const runningDuration = computed(() => {
    不再叠加任何外框，彻底避免「竖线 + 外框」的视觉冲突。
    注意：缩进只作用于 depth>=2 的层级（见 nested 判定）。depth=1 的子步骤（思考过程 /
    工具调用）保持与主回合头部（AI 头像）左边缘齐平 —— 这是「头像与思考过程左对齐」的关键：
-   顶层 Turn 头部 icon 位于 msg 容器左缘（x=0），depth=1 子节点不再缩进，故内容左缘同样为 x=0，
+   顶层骨架头部 icon 位于 msg 容器左缘（x=0），depth=1 子节点不再缩进，故内容左缘同样为 x=0，
    二者天然对齐；更深层级才施加统一缩进并绘制引导竖线。 */
 .msg.nested {
   margin-left: var(--nest-indent, 0.7rem);
@@ -362,7 +362,7 @@ const runningDuration = computed(() => {
   color: var(--color-tag-sub-fg);
 }
 /* 工具调用「运行中」：主色 + 三点脉动 + 已运行时长。
-   三点与 `.turn-pending-dots` 同一手法（同节奏、同三点，仅尺寸缩到标签内），
+   三点与 `.skeleton-pending-dots` 同一手法（同节奏、同三点，仅尺寸缩到标签内），
    使"正在跑"在会话流里无论出现在等待骨架还是工具行，观感都是同一件事。
    时长是**判据**而非装饰：用户靠它区分"还在跑"与"卡住了"。 */
 .node-tag.run {
@@ -381,7 +381,7 @@ const runningDuration = computed(() => {
   height: 0.25rem;
   border-radius: 50%;
   background: currentColor;
-  animation: turn-pulse 1.2s infinite ease-in-out;
+  animation: skeleton-pulse 1.2s infinite ease-in-out;
 }
 .tag-dots span:nth-child(2) {
   animation-delay: 0.2s;
@@ -389,7 +389,7 @@ const runningDuration = computed(() => {
 .tag-dots span:nth-child(3) {
   animation-delay: 0.4s;
 }
-@keyframes turn-pulse {
+@keyframes skeleton-pulse {
   0%,
   80%,
   100% {
@@ -439,14 +439,14 @@ const runningDuration = computed(() => {
 }
 
 /* ── 响应流排版（现代扁平 agent 风格）──
-   非用户响应节点（正文 / 思考过程 / 工具调用）统一无框扁平：
+   非用户响应节点（正文 / 折叠叶 / 容器骨架）统一无框扁平：
    直接落在聊天背景上，仅由「节点头（图标 + 名称 + 折叠箭头）」分组，
    去掉背景卡片与外描边，消除「卡片内边距 + 条目间距」双层空白叠加造成的稀疏感。
    代码块（.json / markdown pre）属于内容块，保留底色以保证可读性；
-   交互类卡片（user_prompt 提问 / supply 补充参数）保留淡表面以维持操作可辨识性。 */
-.msg.type-text:not(.user),
-.msg.type-reasoning,
-.msg.type-tool_call {
+   交互类卡片（待响应提问 / 补充参数）保留淡表面以维持操作可辨识性。 */
+.msg.type-body:not(.user),
+.msg.type-notice,
+.msg.type-skeleton {
   padding: 0.12rem var(--card-pad-x, 0.5rem);
 }
 </style>

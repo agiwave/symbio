@@ -41,7 +41,7 @@ import {
 } from '../sessionTranscriptSync'
 import { subscribeVdfsChanged } from '@/services/eventBus'
 import type { VdfsChange, VdfsNode } from '@/schemas/vdfs'
-import { NODE_KIND_TURN } from '@/schemas/chat_node'
+import { NODE_KIND_SKELETON } from '@/schemas/chat_node'
 // 回读理由是**词表**（独立模块，未被替身），断言按它取值——替身里不抄第二份
 import { READBACK_REASON } from '@/services/readback'
 
@@ -184,12 +184,12 @@ describe('消息帧：语义全在 data 的字段上（信封没有操作枚举�
     expect(mocks.readVdfs.mock.calls[0]).toEqual([READBACK_REASON.MISSING_BASELINE, `${MSG}/m1`])
   })
 
-  it('Turn 组合节点（本身无正文）⇒ 零回读：回读取不到任何新信息', async () => {
+  it('骨架组合节点（本身无正文）⇒ 零回读：回读取不到任何新信息', async () => {
     vi.useFakeTimers()
     const spy = spySink()
     await startSessionTranscriptSync(spy.sink)
 
-    // Turn 根节点的首帧：后端 `emit_streaming_start` 写死「Turn 组合节点无正文」
+    // 骨架根节点的首帧：后端写死「组合节点无正文」
     // ⇒ 帧里没有 `content`，形状与「状态帧」逐字相同。但它**不是**「本端缺基线」：
     // 身份（role / type / meta）已在载荷里，而正文从来不存在——回读只会拿到一份
     // 帧里已有的 JSON 视图。这一对 `stat` + `read` 曾**每轮会话**白跑一次。
@@ -197,7 +197,7 @@ describe('消息帧：语义全在 data 的字段上（信封没有操作枚举�
       frame('s1', 'T1', {
         id: 'T1',
         role: 'assistant',
-        type: NODE_KIND_TURN,
+        type: NODE_KIND_SKELETON,
         status: 'streaming',
         meta: { turn: 0 },
       })
@@ -205,7 +205,7 @@ describe('消息帧：语义全在 data 的字段上（信封没有操作枚举�
     await vi.advanceTimersByTimeAsync(48)
 
     expect(spy.calls, '身份就地落地（载荷自给自足）').toEqual(['message:s1:T1:streaming'])
-    expect(mocks.statVdfs, 'Turn 无正文可补 ⇒ 不回读').not.toHaveBeenCalled()
+    expect(mocks.statVdfs, '骨架无正文可补 ⇒ 不回读').not.toHaveBeenCalled()
     expect(mocks.readVdfs).not.toHaveBeenCalled()
   })
 

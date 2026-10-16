@@ -42,14 +42,15 @@ describe('VdfsMessageDetail（转写列表项的只读视图）', () => {
     expect(w.find('.status').text()).toBe('生成中')
   })
 
-  it('类型缺省（text）不显示标签，其余类型显示中文名', () => {
+  it('类型缺省（text→body）不显示标签，其余折叠形态显示中文名', () => {
     const plain = mount(VdfsMessageDetail, { props: { node: messageNode(), data: 'x' } })
     expect(plain.find('.type').exists()).toBe(false)
 
+    // 旧业务词 `tool_call` 经 `nodeKindOf` 折叠到 `skeleton`，视图按折叠后的形态显示中文标签
     const tool = mount(VdfsMessageDetail, {
       props: { node: messageNode({ type: 'tool_call', role: 'assistant' }), data: '' },
     })
-    expect(tool.find('.type').text()).toBe('工具调用')
+    expect(tool.find('.type').text()).toBe('组合')
   })
 
   it('失败消息把错误原因显示出来（错误是状态，也是这条消息的终态）', () => {

@@ -114,7 +114,7 @@ export function principalKind(value: Principal | string | undefined | null): Pri
 export const CHAT_ROLE_USER = 'user'
 /** 助手（模型）发言 */
 export const CHAT_ROLE_ASSISTANT = 'assistant'
-/** 工具返回（含子智能体响应的 Turn） */
+/** 工具返回（含子智能体响应的骨架） */
 export const CHAT_ROLE_TOOL = 'tool'
 /** 系统发言（心跳等） */
 export const CHAT_ROLE_SYSTEM = 'system'
@@ -164,13 +164,29 @@ export function messageRoleOf(node: Pick<ChatNode, 'role' | 'principal'>): ChatR
 
 // ==================== 消息形态 ====================
 
-// ---- wire 闭集五值（[T-147c-ii]，与后端 `NodeKind` 由 protocol-mirror-audit C 组锁相等）----
+// ---- wire 闭集五值 = 前端唯一分派轴（[T-155 B2a]，[ADR-070 §决策 3]）----
+//
+// 这五值是**纯 UI 形状**，不含任何业务：同格内的业务差异（思考 vs 压缩、run vs tool）
+// 一律由后端在交互面折成 `title` / `icon` / `actions` **数据**（[ADR-070 §决策 2]），
+// 前端照数据显示，绝不读 `meta.style_tag` 反推。`style_tag` 就此从前端 wire 退役——
+// 它仍是后端业务判据（沉 `meta`），但不是前端消费的顶层字段。
 
-/** 正文：无 `style_tag` = 普通文本；`reasoning` = 思考 */
+/** 展开的正文叶子（普通文本 / 用户气泡 / 工具请求·返回） */
 export const NODE_KIND_BODY = 'body'
-/** 系统提示：当前词表 `compression` */
+/**
+ * 折叠的叶子（一个可折叠行 + `title` + `icon`，展开是正文）。
+ *
+ * 思考 / 压缩 / 历史记忆 / 未来的 step_summary 全在这一格——前端对它们渲染完全一样，
+ * 不认「这坨叫思考还是压缩」。
+ */
 export const NODE_KIND_NOTICE = 'notice'
-/** 组合骨架：`run` = 一整轮 / `tool` = 一次工具调用 */
+/**
+ * 容器（一个骨架挂一条子流）。
+ *
+ * `run`（一整轮）与 `tool`（一次工具调用）与 `sub_agent` 全在这一格——结构同构，
+ * 前端一律递归 `children`，不认 tool/turn。工具参数就住在骨架自身的 `content` 里，
+ * 容器把它当作首条正文渲染（数据驱动，不为「工具」写特例）。
+ */
 export const NODE_KIND_SKELETON = 'skeleton'
 /** 等待用户回应（ask_user 提问 / 工具确认） */
 export const NODE_KIND_INTERACTION = 'interaction'
@@ -185,57 +201,34 @@ export const NODE_KINDS = [
   NODE_KIND_TYPING,
 ] as const
 
-/** wire 闭集：`ChatNode.type` 在**后端来源**上只可能是这五个词 */
+/** wire 闭集：`ChatNode.type` 的取值域（后端来源与前端内部表示同一个五值） */
 export type NodeKind = (typeof NODE_KINDS)[number]
 
-// ---- 呈现域词（[T-147c-ii]）----
-//
-// `foldNodeKind` 把「形态 + `meta.style_tag`」折叠成这些**内部键**：注册表按它们
-// 分派文案、图标与渲染器（`TYPE_PRESENTATION` 的键）。它们**不是 wire 词**——
-// 后端从不发出，存量旧数据里曾作为 `attributes.type` 出现，读边界折叠后不再可见。
-
-/** 普通正文（= `body` 无 reasoning tag） */
-export const NODE_KIND_TEXT = 'text'
-/** 思考过程（= `body` + tag `reasoning`） */
-export const NODE_KIND_REASONING = 'reasoning'
-/** 一次工具调用（= `skeleton` + tag `tool`） */
-export const NODE_KIND_TOOL_CALL = 'tool_call'
-/** 轮次分组（= `skeleton` + tag `run`） */
-export const NODE_KIND_TURN = 'turn'
-/** 待用户响应（= `interaction`） */
-export const NODE_KIND_USER_PROMPT = 'user_prompt'
-/** 上下文压缩（= `notice`） */
-export const NODE_KIND_COMPRESSION = 'compression'
-
-export const PRESENTATION_KINDS = [
-  NODE_KIND_TEXT,
-  NODE_KIND_REASONING,
-  NODE_KIND_TOOL_CALL,
-  NODE_KIND_TURN,
-  NODE_KIND_USER_PROMPT,
-  NODE_KIND_COMPRESSION,
-  NODE_KIND_TYPING,
-] as const
-
-/** 折叠后的呈现键——注册表（文案 / 图标 / 渲染器）的取值域 */
-export type PresentationKind = (typeof PRESENTATION_KINDS)[number]
-
-/** 跨域取值：wire 词与呈现词的同名并集（`ChatNode.type` 在落地前后都可能是它） */
-export type MessageKind = NodeKind | PresentationKind
-
 /**
- * `style_tag` wire 词表（同一 shape 下的呈现变体，[ADR-070 §决策 3]）。
+ * 历史业务词 → wire 五值的一次性折叠（[T-155 B2a]，读边界唯一实现）。
  *
- * 唯一定义处在 Rust `chat_node.rs::CHAT_STYLE_TAG_*`；这里是前端镜像，
- * 消费点 `messageTypes.ts::messageTypeOf` 的折叠判据。
+ * 存量快照与后端旧转写把形态写成业务词（`turn` / `tool_call` / `text` / `reasoning` /
+ * `compression` / `user_prompt`）；新协议一律发五值。本函数在**读取那一刻**把旧词归到
+ * 五值，此后前端内部只有五值——业务词不再进入任何判定。`reasoning` 与 `compression`
+ * 都归 `notice`（同格），`turn` 与 `tool_call` 都归 `skeleton`（同格），折叠即合流。
+ * 已是五值 / 未知取值原样返回（交给渲染兜底，不判红）。
  */
-export const CHAT_STYLE_TAG_REASONING = 'reasoning'
-/** `skeleton` 的一种：一整轮助手响应 */
-export const CHAT_STYLE_TAG_RUN = 'run'
-/** `skeleton` 的一种：一次工具调用 */
-export const CHAT_STYLE_TAG_TOOL = 'tool'
-/** `notice` 的一种：上下文压缩记录 */
-export const CHAT_STYLE_TAG_COMPRESSION = 'compression'
+const LEGACY_TYPE_TO_NODE_KIND: Record<string, NodeKind> = {
+  text: NODE_KIND_BODY,
+  reasoning: NODE_KIND_NOTICE,
+  compression: NODE_KIND_NOTICE,
+  turn: NODE_KIND_SKELETON,
+  tool_call: NODE_KIND_SKELETON,
+  sub_agent: NODE_KIND_SKELETON,
+  user_prompt: NODE_KIND_INTERACTION,
+}
+
+/** 把任意来源的 `type` 归一成 wire 五值（缺省 `body`：未标形态的帧按正文处理）。 */
+export function nodeKindOf(rawType?: string | null): NodeKind {
+  if (!rawType) return NODE_KIND_BODY
+  if ((NODE_KINDS as readonly string[]).includes(rawType)) return rawType as NodeKind
+  return LEGACY_TYPE_TO_NODE_KIND[rawType] ?? NODE_KIND_BODY
+}
 
 // ==================== 消息状态 ====================
 
@@ -278,7 +271,7 @@ export type NodeStatus = (typeof NODE_STATUSES)[number]
  * 存在的理由：消费方要「把后端下发的状态词原样透传、只拦未知值」，而逐个
  * `case` 枚举等于又抄一份词表——**词表加了取值而 `case` 忘了加**，那条变更就
  * 会被当成"未知状态"丢掉。实测代价见消息节点的状态透传链路（当时叫
- * `vdfsTranscriptSync`）：`aborted` 曾因此让中止后的 Turn 显示为已完成，
+ * `vdfsTranscriptSync`）：`aborted` 曾因此让中止后的根级骨架显示为已完成，
  * 重试入口不出现。
  *
  * 判定与词表同源，故**新增一个状态词不需要改这里**。
@@ -446,10 +439,12 @@ export interface ChatNode {
    */
   principal?: Principal | string;
   /**
-   * 形态词：帧在 wire 上是闭集五值 `NodeKind`；落入 transcript store（落地口折叠）
-   * 后是呈现键 `PresentationKind`。跨域取值 `MessageKind`，判据走 `messageTypeOf`。
+   * 形态词：**闭集五值 `NodeKind`**（[T-155 B2a]，[ADR-070 §决策 3]）——前端唯一分派轴。
+   *
+   * wire 与前端内部表示同一个五值；存量快照的业务旧词在**读边界**由 `nodeKindOf` 一次性
+   * 归一，业务词不进入任何判定。同格业务差异走 `title`/`icon`/`actions` 数据，不读 `meta`。
    */
-  type?: MessageKind;
+  type?: NodeKind;
   // [T-147d-ii] 顶层 `name` 从 wire 退役——工具名住 `meta.tool_name`（读写唯一入口
   // `registry/messageTypes.toolNameOf`），存量 attrs `tool_name` 在读边界折进 meta。
   content?: MessageContent;
@@ -501,7 +496,7 @@ export interface ChatNode {
   children?: ChatNode[];
   /**
    * 会话内消息的**唯一权威顺序锚点**：后端写入时分配单调自增序号，
-   * 父节点序号 < 子节点，按 turn 追加顺序递增；前端对实时流式/乐观消息
+   * 父节点序号 < 子节点，按根级骨架（一轮）追加顺序递增；前端对实时流式/乐观消息
    * 也用同一字段的单调计数器续接。前端排序只用 `seq`，不再依赖 timestamp
    * （timestamp 是"业务时刻"而非"顺序"，旧数据还可能缺失，用作排序键会错乱）。
    */

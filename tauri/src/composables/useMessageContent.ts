@@ -12,10 +12,10 @@
 import { computed, type ComputedRef } from 'vue'
 import { renderMarkdownCached } from '@/composables/useMarkdown'
 import {
-  NODE_KIND_REASONING,
-  NODE_KIND_TEXT,
-  NODE_KIND_TOOL_CALL,
-  NODE_KIND_TURN,
+  NODE_KIND_BODY,
+  NODE_KIND_NOTICE,
+  NODE_KIND_SKELETON,
+  nodeKindOf,
   messageTextOf,
   type ChatNode,
   type MessageContent,
@@ -137,9 +137,9 @@ export interface MessageSummaryPreview {
  *
  * 分组节点（工具调用）优先取**首个文本或思考子节点**的内容——容器自身通常没有正文。
  *
- * 但取不到这样的子节点时**回落节点自身正文**，不能直接留白：`ToolCall` 的
+ * 但取不到这样的子节点时**回落节点自身正文**，不能直接留白：工具骨架的
  * **请求参数就存在它自己的 `content` 里**（参数不分独立子节点，见
- * `ToolCallNode.vue` 文件头），而它在收到工具结果之前**没有任何 text/reasoning
+ * `SkeletonNode.vue` 文件头），而它在收到工具结果之前**没有任何 text/reasoning
  * 子节点**。若分组分支只看子节点，"运行中的工具行"就会是一片空白——参数明明
  * 已经逐帧流到本地，界面上却要等到结果子节点到达才第一次显示文字，看起来就像
  * 「工具调用要等跑完才显示」。
@@ -155,8 +155,10 @@ export function messageSummaryPreviewOf(
 ): MessageSummaryPreview {
   let source = ''
   if (grouped) {
+    // 容器骨架优先取首个「正文叶」子节点的内容——容器自身通常没有正文。
+    // 正文叶 = body / notice（思考与正文同格取内容，不认业务名）。
     const first = (node.children || []).find(
-      (c) => c.type === NODE_KIND_TEXT || c.type === NODE_KIND_REASONING,
+      (c) => nodeKindOf(c.type) === NODE_KIND_BODY || nodeKindOf(c.type) === NODE_KIND_NOTICE,
     )
     source = messageTextOf(first?.content) || messageTextOf(node.content)
   } else {
@@ -202,7 +204,7 @@ export function useMessageContent(
     const f = getFacets()
     return messageSummaryPreviewOf(
       getNode(),
-      f.type === NODE_KIND_TURN || f.type === NODE_KIND_TOOL_CALL,
+      f.type === NODE_KIND_SKELETON,
       messagePreviewFollowsLiveEdge(f),
     )
   })

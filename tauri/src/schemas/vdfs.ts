@@ -84,7 +84,7 @@ export const VDFS_STATUS_WAITING_USER_ACTION = NODE_STATUS_WAITING_USER_ACTION
  * 是「终态」，二者曾被后端映射成同一个字符串，导致消费端必须把 `active`
  * **猜回** `completed`（一次信息丢失 + 一次猜测还原）。现在状态原样透传。 */
 export const VDFS_STATUS_COMPLETED = NODE_STATUS_COMPLETED
-/** 节点状态：**用户主动终止**（消息的终态，根级 Turn 用）。
+/** 节点状态：**用户主动终止**（消息的终态，根级骨架用）。
  *
  * 与 `VDFS_STATUS_COMPLETED` / `VDFS_STATUS_FAILED` 并列的**第三个终态**：
  * 没有跑完（不是 `completed`），也没有出错（不是 `failed`）。它的语义是

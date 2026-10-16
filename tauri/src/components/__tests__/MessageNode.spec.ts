@@ -1,12 +1,17 @@
 // @vitest-environment happy-dom
 /**
- * MessageNode 组件级测试 —— 会话流响应体验重设计（Turn 响应分组 + 两级重试分派）
+ * MessageNode 组件级测试 —— 机制化后按 wire `NodeKind` 五值分派（[ADR-070 §后果 2]）
  *
- * 覆盖设计要点（见 MessageNode.vue 文件头注释）：
- * 1. 根级 Turn 三形态：等待骨架 / 透明分组（子节点直排）/ 组级错误条
- * 2. 思考/工具默认单行（流式中不展开），例外：工具内含待审批子节点
- * 3. 工具三段式：请求 / 过程（子会话流，无则隐藏）/ 结果
- * 4. 重试两级分派的发射语义：Turn 失败 → retry(turn id)；工具失败 → retry(tool id)
+ * 分派轴只剩五格（body / notice / skeleton / interaction / typing），业务名
+ * （turn / tool_call / reasoning / compression / user_prompt）经 `nodeKindOf` 折叠：
+ * - `turn` / `tool_call` → `skeleton`（同一个可折叠容器：一整轮与一次工具调用同构）
+ * - `reasoning` / `compression` → `notice`（同一个折叠叶）
+ * - `text` → `body`
+ *
+ * 因此本文件断言的是**折叠后各格的可见行为**，不再是旧的「Turn 分组 / 工具三段式 /
+ * WorkerProgress 状态行」——那些是塌缩前每格自带业务逻辑时的产物，现已不存在。
+ * 类名钩子来自 `NodeShell` 的 `type-${facets.type}`（故只会出现 `type-skeleton` 等
+ * 五值，绝不会出现 `type-tool_call`）。
  */
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -14,9 +19,15 @@ import MessageNode from '../MessageNode.vue'
 import { useRunningClock } from '@/composables/useRunningClock'
 import type { ChatNode } from '@/schemas/chat_node'
 
-/** 构造合法 ChatNode（缺省：assistant/text/completed） */
-function msg(p: Partial<ChatNode> & { id: string }): ChatNode {
-  return { role: 'assistant', type: 'text', content: '', status: 'completed', ...p }
+/**
+ * 构造合法 ChatNode（缺省：assistant/text/completed）。
+ *
+ * `type` 放宽成 `string`：分派轴是折叠后的五值 `NodeKind`，本文件各用例**故意**喂业务旧词
+ * （`turn` / `tool_call` / `reasoning` / `compression` / `user_prompt`）来钉「旧词经
+ * `nodeKindOf` 折到对应格、渲染仍正确」这条性质，故入参容忍旧词、出口按 `ChatNode` 交付。
+ */
+function msg(p: Partial<Omit<ChatNode, 'type'>> & { id: string; type?: string }): ChatNode {
+  return { role: 'assistant', type: 'text', content: '', status: 'completed', ...p } as unknown as ChatNode
 }
 
 function mountNode(node: ChatNode, extraProps: Record<string, unknown> = {}) {
@@ -26,15 +37,15 @@ function mountNode(node: ChatNode, extraProps: Record<string, unknown> = {}) {
   })
 }
 
-describe('MessageNode：根级 Turn 响应分组（三形态）', () => {
-  it('形态①：Turn 无子节点且流式中 → 等待骨架，无节点头部', () => {
+describe('MessageNode：根级骨架（wire turn → skeleton）容器三形态', () => {
+  it('形态①：无子节点且流式中 → 等待骨架 +「运行中」标签', () => {
     const w = mountNode(msg({ id: 't1', type: 'turn', status: 'streaming', children: [] }))
-    expect(w.find('.turn-pending').exists()).toBe(true)
+    expect(w.find('.skeleton-pending').exists()).toBe(true)
     expect(w.text()).toContain('正在思考')
-    expect(w.find('.node-head').exists()).toBe(false)
+    expect(w.find('.node-tag.run').text()).toContain('运行中')
   })
 
-  it('形态②：子节点出现 → 容器隐藏，思考带行头，正文直出展开', () => {
+  it('形态②：子节点出现 → 等待骨架消失，思考与正文作为子流直排', () => {
     const w = mountNode(
       msg({
         id: 't1',
@@ -46,18 +57,14 @@ describe('MessageNode：根级 Turn 响应分组（三形态）', () => {
         ],
       }),
     )
-    expect(w.find('.turn-pending').exists()).toBe(false)
-    // Turn 自身无头部：唯一的头部是思考行（正文内联，无头部）
-    const heads = w.findAll('.node-head')
-    expect(heads.length).toBe(1)
-    expect(heads[0].text()).toContain('思考')
-    expect(heads[0].classes()).not.toContain('thinking') // 已完成不再脉动
-    // 正文 markdown 直出且可见（首个 markdown 体是思考的，正文在其中之一）
-    const bodies = w.findAll('.markdown-body')
-    expect(bodies.some((b) => b.text().includes('你好世界'))).toBe(true)
+    expect(w.find('.skeleton-pending').exists()).toBe(false)
+    // 思考折叠叶与正文各是一格（分派钩子按折叠后的 NodeKind）
+    expect(w.findAll('.type-notice').length).toBe(1)
+    expect(w.findAll('.type-body').length).toBe(1)
+    expect(w.text()).toContain('你好世界')
   })
 
-  it('形态③：Turn 失败 → 组级错误条 + 重试（发射 Turn id，供 retry_subtree）', async () => {
+  it('形态③：失败 → 交代条 + 重试（发射骨架 id，供 retry_subtree）', async () => {
     const w = mountNode(
       msg({
         id: 't1',
@@ -67,7 +74,7 @@ describe('MessageNode：根级 Turn 响应分组（三形态）', () => {
         children: [msg({ id: 'x1', type: 'text', status: 'failed', content: '', error: '请求失败', parent_id: 't1' })],
       }),
     )
-    // 组级错误条存在且携带错误文本；叶子级错误框被抑制（不重复报错）
+    // 骨架级错误条存在且携带错误文本；叶子级错误由父失败抑制（不重复报错）
     const boxes = w.findAll('.error-box')
     expect(boxes.length).toBe(1)
     expect(boxes[0].text()).toContain('请求失败')
@@ -75,369 +82,13 @@ describe('MessageNode：根级 Turn 响应分组（三形态）', () => {
     expect(w.emitted('retry')?.[0]).toEqual(['t1'])
   })
 
-  it('形态③变体：Turn 失败且无子节点 → 错误条而非等待骨架（请求即败场景）', () => {
+  it('形态③变体：失败且无子节点 → 交代条而非等待骨架（请求即败场景）', () => {
     const w = mountNode(msg({ id: 't1', type: 'turn', status: 'failed', error: 'bad', children: [] }))
-    expect(w.find('.turn-pending').exists()).toBe(false)
+    expect(w.find('.skeleton-pending').exists()).toBe(false)
     expect(w.find('.error-box').exists()).toBe(true)
   })
-})
 
-describe('MessageNode：思考节点始终单行', () => {
-  it('流式中：行头带 thinking 动效类 + 「思考中…」，内容折叠', () => {
-    const w = mountNode(msg({ id: 'r1', type: 'reasoning', status: 'streaming', content: '生成中的思考' }), {
-      parentType: 'turn',
-    })
-    const head = w.find('.node-head')
-    expect(head.exists()).toBe(true)
-    expect(head.classes()).toContain('thinking')
-    expect(head.text()).toContain('思考中')
-    // 收起 = 不渲染（`v-if`，不是 `v-show`）：折叠内容不该占用 DOM 与渲染成本
-    expect(w.find('.node-body').exists()).toBe(false)
-  })
-
-  it('完成后：标题「思考」，仍保持折叠', () => {
-    const w = mountNode(msg({ id: 'r1', type: 'reasoning', status: 'completed', content: '已完成的思考' }))
-    const head = w.find('.node-head')
-    expect(head.text()).toContain('思考')
-    expect(head.classes()).not.toContain('thinking')
-    expect(w.find('.node-body').exists()).toBe(false)
-  })
-})
-
-describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', () => {
-  it('默认单行折叠：运行中显示「运行中」标签 + 动效点，卡片体隐藏', async () => {
-    const w = mountNode(
-      msg({ id: 'tc1', type: 'tool_call', status: 'streaming', meta: { tool_name: 'shell' }, content: '{"cmd":"ls"}', children: [] }),
-    )
-    expect(w.find('.node-head').exists()).toBe(true)
-    expect(w.text()).toContain('运行中')
-    // 折叠态下头部是用户能看到的全部：标签必须带「会动」的标记，
-    // 否则"正在跑"只是一个静态文字，与"已完成"在观感上无从区分。
-    const tag = w.find('.node-tag')
-    expect(tag.classes()).toContain('run')
-    expect(tag.find('.tag-dots').exists()).toBe(true)
-    // 标题呼吸动效（与思考中同一手法）
-    expect(w.find('.node-head').classes()).toContain('thinking')
-    // 默认收起 ⇒ 卡片体不在 DOM 里；展开后才渲染（点头部）
-    expect(w.find('.node-body').exists()).toBe(false)
-    await w.find('.node-head').trigger('click')
-    expect(w.find('.node-body').exists()).toBe(true)
-  })
-
-  it('运行中：显示已运行时长（「还在跑」与「卡住了」的判据）', () => {
-    // 锚点以共享时钟的当前值为基准取值 ⇒ 断言精确且不受 1s 粒度影响
-    const { nowMs } = useRunningClock()
-    const w = mountNode(
-      msg({
-        id: 'tc1',
-        type: 'tool_call',
-        status: 'streaming',
-        meta: { tool_name: 'codebase_search', started_at: nowMs.value - 47_000 },
-        children: [],
-      }),
-    )
-    expect(w.find('.tag-elapsed').text()).toBe('47s')
-  })
-
-  it('运行中：超过 60s 用「分m秒s」，避免长任务读数退化成三位数秒', () => {
-    const { nowMs } = useRunningClock()
-    const w = mountNode(
-      msg({
-        id: 'tc1',
-        type: 'tool_call',
-        status: 'streaming',
-        meta: { tool_name: 'codebase_search', started_at: nowMs.value - 125_000 },
-        children: [],
-      }),
-    )
-    expect(w.find('.tag-elapsed').text()).toBe('2m05s')
-  })
-
-  it('无 started_at（旧数据）→ 不显示时长，也不编一个数', () => {
-    const w = mountNode(
-      msg({ id: 'tc1', type: 'tool_call', status: 'streaming', meta: { tool_name: 'shell' }, content: '{}', children: [] }),
-    )
-    expect(w.find('.node-tag.run').exists()).toBe(true)
-    expect(w.find('.tag-elapsed').exists()).toBe(false)
-  })
-
-  it('待用户确认 → 「待确认」标签（warn 变体）；终态不给标签', () => {
-    const waiting = mountNode(
-      msg({ id: 'tc1', type: 'tool_call', status: 'waiting_user_action', meta: { tool_name: 'shell' }, content: '{}', children: [] }),
-    )
-    expect(waiting.find('.node-tag').text()).toContain('待确认')
-    expect(waiting.find('.node-tag').classes()).toContain('warn')
-
-    // 终态刻意不给标签：绝大多数调用都会成功结束，给每个成功的调用挂「已完成」
-    // 只会把真正需要注意的状态淹掉。
-    const done = mountNode(
-      msg({ id: 'tc2', type: 'tool_call', status: 'completed', meta: { tool_name: 'shell' }, content: '{}', children: [] }),
-    )
-    expect(done.find('.node-tag').exists()).toBe(false)
-  })
-
-  it('例外：内含待审批 user_prompt → 自动展开（审批入口可见）', () => {
-    const w = mountNode(
-      msg({
-        id: 'tc1',
-        type: 'tool_call',
-        status: 'streaming',
-        meta: { tool_name: 'shell' },
-        content: '{}',
-        children: [
-          msg({
-            id: 'up1',
-            type: 'user_prompt',
-            status: 'waiting_user_action',
-            meta: { prompt: { kind: 'confirm', tool_name: 'shell', risk_level: 'high', description: '删除文件' } },
-            parent_id: 'tc1',
-          }),
-        ],
-      }),
-    )
-    expect(w.find('.node-body').exists()).toBe(true)
-    expect(w.text()).toContain('批准执行')
-  })
-
-  it('三段式：请求 / 过程（子会话 Turn）/ 结果', async () => {
-    const w = mountNode(
-      msg({
-        id: 'tc1',
-        type: 'tool_call',
-        status: 'completed',
-        meta: { tool_name: 'agent' },
-        content: '{}',
-        children: [
-          msg({
-            id: 'sub1',
-            type: 'turn',
-            role: 'tool',
-            status: 'completed',
-            meta: { agent_name: 'sub-agent' },
-            parent_id: 'tc1',
-            children: [msg({ id: 'st1', type: 'text', status: 'completed', content: '子流正文', parent_id: 'sub1' })],
-          }),
-          msg({ id: 'res1', type: 'text', role: 'tool', status: 'completed', content: '"ok"', parent_id: 'tc1' }),
-        ],
-      }),
-    )
-    // 三段式在折叠体里：先展开（收起态不渲染，DOM 里没有）
-    await w.find('.node-head').trigger('click')
-    // 请求/结果不设外层标签（内层节点头部「请求/响应」已承载语义），仅「过程」保留
-    const labels = w.findAll('.ts-label').map((l) => l.text())
-    expect(labels).toEqual(['过程'])
-    // B2：过程段**默认收起成一行状态**——全文不进 DOM（`子流正文` 仍会出现在
-    // `steps=[...]` 那是步骤预览，本就该有），结构信号是 TurnGroup 尚未渲染
-    expect(w.find('.process-status').exists()).toBe(true)
-    expect(w.findAll('.turn-group').length).toBe(0)
-    await w.find('.process-status').trigger('click')
-    // 子会话 Turn 与主会话 Turn 同一响应分组形态（分形复用）：
-    // 无折叠头部，其子节点（思考/正文）以缩进节点直排呈现
-    expect(w.text()).toContain('子流正文')
-    expect(w.findAll('.turn-group').length).toBe(1)
-  })
-
-  // ── B2：状态行三字段（与后端 `WorkerProgress` 逐字同名） ──────────────
-
-  it('判据1：在途 = 父工具没结束，或过程段里仍有在途节点（两半都要）', async () => {
-    // ① 父已 completed，但子会话流仍在 streaming ——**只看父状态会漏报**的那一种
-    const partial = mountNode(
-      msg({
-        id: 'tcA',
-        type: 'tool_call',
-        status: 'completed',
-        content: '{}',
-        children: [
-          msg({
-            id: 'subA',
-            type: 'turn',
-            role: 'tool',
-            status: 'streaming',
-            parent_id: 'tcA',
-            children: [msg({ id: 'stA', type: 'text', status: 'streaming', content: '正在写', parent_id: 'subA' })],
-          }),
-        ],
-      }),
-    )
-    await partial.find('.node-head').trigger('click')
-    expect(partial.find('.process-status').text()).toContain('in_flight=true（在途）')
-
-    // ② 父还在跑、过程段已全部终态 —— OR 的另一半
-    const running = mountNode(
-      msg({
-        id: 'tcB',
-        type: 'tool_call',
-        status: 'streaming',
-        content: '{}',
-        children: [
-          msg({
-            id: 'subB',
-            type: 'turn',
-            role: 'tool',
-            status: 'completed',
-            parent_id: 'tcB',
-            children: [msg({ id: 'stB', type: 'text', status: 'completed', content: '做完了', parent_id: 'subB' })],
-          }),
-        ],
-      }),
-    )
-    await running.find('.node-head').trigger('click')
-    expect(running.find('.process-status').text()).toContain('in_flight=true（在途）')
-  })
-
-  it('判据1反例：父与过程段都到终态 ⇒ in_flight=false（不谎报在途）', async () => {
-    const done = mountNode(
-      msg({
-        id: 'tcC',
-        type: 'tool_call',
-        status: 'completed',
-        content: '{}',
-        children: [
-          msg({
-            id: 'subC',
-            type: 'turn',
-            role: 'tool',
-            status: 'completed',
-            parent_id: 'tcC',
-            children: [msg({ id: 'stC', type: 'text', status: 'completed', content: '全部完成', parent_id: 'subC' })],
-          }),
-        ],
-      }),
-    )
-    await done.find('.node-head').trigger('click')
-    expect(done.find('.process-status').text()).toContain('in_flight=false（已结束）')
-  })
-
-  it('判据2：rounds = 过程段的 Turn 条数（结果段不计入，与后端数值同源）', async () => {
-    const w = mountNode(
-      msg({
-        id: 'tcD',
-        type: 'tool_call',
-        status: 'completed',
-        content: '{}',
-        children: [
-          msg({ id: 't1', type: 'turn', role: 'tool', status: 'completed', parent_id: 'tcD' }),
-          msg({ id: 't2', type: 'turn', role: 'tool', status: 'completed', parent_id: 'tcD' }),
-          msg({ id: 'res', type: 'text', role: 'tool', status: 'completed', content: '"ok"', parent_id: 'tcD' }),
-        ],
-      }),
-    )
-    await w.find('.node-head').trigger('click')
-    expect(w.find('.process-status').text()).toContain('rounds=2')
-    expect(w.find('.process-status').text()).not.toContain('rounds=3')
-  })
-
-  it('判据3：无内容节点不产出步骤（状态行宁可少说也不编）', async () => {
-    const w = mountNode(
-      msg({
-        id: 'tcE',
-        type: 'tool_call',
-        status: 'completed',
-        content: '{}',
-        children: [
-          msg({
-            id: 'subE',
-            type: 'turn',
-            role: 'tool',
-            status: 'completed',
-            parent_id: 'tcE',
-            children: [
-              // 空内容排在前面：一旦它被算进步骤，join 会留下前导分隔符，下一条断言立刻红
-              msg({ id: 'empty', type: 'text', status: 'completed', content: '', parent_id: 'subE' }),
-              msg({ id: 'has', type: 'text', status: 'completed', content: '有内容', parent_id: 'subE' }),
-            ],
-          }),
-        ],
-      }),
-    )
-    await w.find('.node-head').trigger('click')
-    const status = w.find('.process-status').text()
-    expect(status).toContain('steps=[有内容]')
-    expect(status).not.toContain('steps=[；')
-    // 字段名逐字可见 —— 与后端投影同名，改一个字这里就红
-    expect(status).toContain('in_flight=')
-    expect(status).toContain('rounds=')
-    expect(status).toContain('steps=')
-  })
-
-  it('无子会话的工具：「过程」段整段隐藏（仅 请求 + 结果）', async () => {
-    const w = mountNode(
-      msg({
-        id: 'tc2',
-        type: 'tool_call',
-        status: 'completed',
-        content: '{}',
-        children: [msg({ id: 'res2', type: 'text', role: 'tool', status: 'completed', content: '"ok"', parent_id: 'tc2' })],
-      }),
-    )
-    await w.find('.node-head').trigger('click')
-    expect(w.findAll('.tool-section').length).toBe(2)
-    expect(w.text()).not.toContain('过程')
-  })
-
-  it('运行中失败（无 recoverable 标记）→ 纯信息呈现：不自动展开、无重试按钮', () => {
-    const w = mountNode(
-      msg({
-        id: 'tc1',
-        type: 'tool_call',
-        status: 'failed',
-        error: '工具执行失败',
-        meta: { tool_name: 'shell' },
-        content: '{}',
-        children: [],
-      }),
-    )
-    // auto 模式：错误结果已喂给 LLM 继续处理，会话仍在运行 → 重试无意义
-    expect(w.text()).not.toContain('重试')
-    expect(w.find('.node-body').exists()).toBe(false)
-  })
-
-  it('可恢复失败（后端下发 retry）→ 就地重试（发射 ToolCall id，供单工具 retry）', async () => {
-    const w = mountNode(
-      msg({
-        id: 'tc1',
-        type: 'tool_call',
-        status: 'failed',
-        error: '工具执行失败',
-        meta: { failure_kind: 'error', recoverable: true, tool_name: 'shell' },
-        actions: ['retry'],
-        content: '{}',
-        children: [msg({ id: 'res1', type: 'text', role: 'tool', status: 'failed', content: '', error: 'boom', parent_id: 'tc1' })],
-      }),
-    )
-    const btn = w.find('.error-box button.retry')
-    expect(btn.exists()).toBe(true)
-    await btn.trigger('click')
-    expect(w.emitted('retry')?.[0]).toEqual(['tc1'])
-  })
-
-  it('可补充参数的可恢复失败（后端下发 supply）→ 自动展开出补充参数表单', () => {
-    const w = mountNode(
-      msg({
-        id: 'tc1',
-        type: 'tool_call',
-        status: 'failed',
-        error: '参数缺失',
-        meta: { failure_kind: 'error', recoverable: true },
-        actions: ['retry', 'supply'],
-        content: '{}',
-        children: [],
-      }),
-    )
-    expect(w.find('.supply').exists()).toBe(true)
-  })
-})
-
-describe('MessageNode：用户中止的 Turn 同样可重试', () => {
-  /**
-   * 中止与失败是**两个终态**，但都要能重试：这一轮只跑了一半，用户按停止后
-   * 通常就想重跑它。
-   *
-   * 回归：`aborted` 曾是 `completed`（中止收口把它一律定稿为"已完成"），
-   * 组级交代条与重试入口都不渲染——用户看到的是"这一轮正常结束了"，
-   * 而内容明明是半截的。
-   */
-  it('Turn 中止 → 组级交代条 + 重试（发射 Turn id）', async () => {
+  it('中止的骨架同样给交代条 + 重试（中止不是故障）', async () => {
     const w = mountNode(
       msg({
         id: 't1',
@@ -448,11 +99,9 @@ describe('MessageNode：用户中止的 Turn 同样可重试', () => {
     )
     const boxes = w.findAll('.error-box')
     expect(boxes.length, '中止必须有交代，否则这一轮看起来像正常结束').toBe(1)
-    // 中止不是故障：文案与图标都与失败区分开
     expect(boxes[0].text()).toContain('已中止')
     expect(boxes[0].text()).not.toContain('⚠')
     expect(boxes[0].classes(), '不渲染成故障红').toContain('aborted')
-
     await boxes[0].find('button.retry').trigger('click')
     expect(w.emitted('retry')?.[0]).toEqual(['t1'])
   })
@@ -471,85 +120,72 @@ describe('MessageNode：用户中止的 Turn 同样可重试', () => {
   })
 })
 
-/**
- * 分派器路由与内容形态 —— 分派器只做「路由」，渲染形态由各渲染器负责。
- *
- * 这一组同时是两处**真实缺陷**的回归锚：
- * 1. 压缩节点曾因模板里 `v-else-if="isTextLike"` 排在 `v-else-if="isCompression"` 之前，
- *    使压缩分支**永不执行**（压缩类型也满足 isTextLike），`.compress-note` 是死代码；
- * 2. 工具请求 / 返回的 JSON 着色类名由 `useMessageContent` 在 TS 里拼出，
- *    样式却写在组件 scoped 块里 —— scoped 会补 `[data-v-*]`，v-html 注入的元素拿不到，
- *    于是着色静默失效。样式已移入全局 `styles/markdown.css`。
- */
-describe('MessageNode：分派器路由与内容形态', () => {
-  it('压缩节点渲染为「系统动作」样式（compress-note），不是普通 Markdown 正文', () => {
-    const w = mountNode(
-      msg({ id: 'cp1', type: 'compression', status: 'streaming', content: '正在压缩上下文…' }),
-    )
-    expect(w.find('.compress-note').exists()).toBe(true)
-    expect(w.find('.compress-note').text()).toContain('正在压缩上下文')
-    // 回归：曾落到 isTextLike 分支被当成 markdown-body 渲染
-    expect(w.find('.markdown-body').exists()).toBe(false)
-    // 压缩是默认折叠的单行动作：头部标签是唯一的运行中信号
-    expect(w.find('.node-tag').text()).toContain('压缩中')
+describe('MessageNode：折叠叶（wire reasoning → notice）始终单行', () => {
+  it('流式中：行头呼吸动效 +「处理中…」，收起态不渲染正文', () => {
+    const w = mountNode(msg({ id: 'r1', type: 'reasoning', status: 'streaming', content: '生成中的思考' }))
+    const head = w.find('.node-head')
+    expect(head.exists()).toBe(true)
+    expect(head.classes()).toContain('thinking')
+    expect(head.text()).toContain('处理中')
+    // 折叠叶默认收起（`v-if`）：折叠内容不占 DOM
+    expect(w.find('.node-body').exists()).toBe(false)
   })
 
-  /**
-   * 压缩**失败**是另一形态：错误条 + 重试入口。
-   *
-   * 回归动机：后端失败路径**一条历史都没动**（三种失败出口的正文都明示"已保留
-   * 完整历史"），失败原因就写在节点正文里。若沿用成功态的弱化样式（`.compress-note`，
-   * opacity 0.75），等于把一个需要用户决策的状态伪装成一行灰字，而且没有重试入口——
-   * 用户唯一的出路（换更大上下文的模型后重试）就断了。
-   */
-  it('压缩失败 → 错误条 + 重试入口，且不再用弱化样式', async () => {
+  it('完成后：标题「提示」，仍保持折叠', () => {
+    const w = mountNode(msg({ id: 'r1', type: 'reasoning', status: 'completed', content: '已完成的思考' }))
+    const head = w.find('.node-head')
+    expect(head.text()).toContain('提示')
+    expect(head.classes()).not.toContain('thinking')
+    expect(w.find('.node-body').exists()).toBe(false)
+  })
+})
+
+describe('MessageNode：工具调用塌缩为骨架容器（不再有三段式）', () => {
+  it('运行中：单行「运行中」标签 + 动效点；有 started_at 才给时长', () => {
+    const { nowMs } = useRunningClock()
     const w = mountNode(
       msg({
-        id: 'cp1',
-        type: 'compression',
-        status: 'failed',
-        actions: ['retry_compaction'],
-        content: '压缩未完成（模型请求失败：429 Too Many Requests），已保留完整历史',
-        meta: { failure_kind: 'llm_error' },
+        id: 'tc1',
+        type: 'tool_call',
+        status: 'streaming',
+        meta: { tool_name: 'shell', started_at: nowMs.value - 47_000 },
+        content: '{"cmd":"ls"}',
+        children: [],
       }),
     )
-    // 失败原因原样呈现（后端给出的可读文本，前端不加工）
-    expect(w.find('.error-box').exists()).toBe(true)
-    expect(w.find('.error-box').text()).toContain('429 Too Many Requests')
-    // 弱化样式不得出现——失败与成功必须一眼可分
-    expect(w.find('.compress-note').exists()).toBe(false)
-    // 重试入口存在，且发射的是**压缩节点自己的 id**（供 resume retry_compaction）
-    const retry = w.find('.error-box button.retry')
-    expect(retry.exists()).toBe(true)
-    await retry.trigger('click')
-    expect(w.emitted('retry')?.[0]).toEqual(['cp1'])
+    const tag = w.find('.node-tag')
+    expect(tag.classes()).toContain('run')
+    expect(tag.find('.tag-dots').exists()).toBe(true)
+    expect(tag.text()).toContain('运行中')
+    expect(w.find('.tag-elapsed').text()).toBe('47s')
+    // 已有参数正文 → 不作空壳等待脉动：参数作首条正文（`pre.json.req`）直显，
+    // 「等待骨架」只属于「什么都没到」的骨架（否则运行中参数被脉动盖掉，观感=跑完才显示）。
+    expect(w.find('.skeleton-pending').exists()).toBe(false)
+    expect(w.find('pre.json.req').text()).toContain('"cmd":"ls"')
   })
 
-  it('压缩进行中 / 已完成 → 仍是弱化的系统动作样式，无错误条无重试', () => {
-    for (const status of ['streaming', 'completed'] as const) {
-      const w = mountNode(msg({ id: 'cp1', type: 'compression', status, content: '压缩上下文' }))
-      expect(w.find('.compress-note').exists()).toBe(true)
-      expect(w.find('.error-box').exists()).toBe(false)
-      expect(w.find('button.retry').exists()).toBe(false)
-    }
-  })
-
-  it('用户消息走右对齐气泡，头部是「你」', () => {
-    const w = mountNode(msg({ id: 'u1', role: 'user', type: 'text', content: '你好' }))
-    expect(w.find('.user-bubble').exists()).toBe(true)
-    expect(w.find('.node-head').text()).toContain('你')
-    expect(w.find('.user-bubble').text()).toContain('你好')
-  })
-
-  it('未登记的消息类型落到 fallback：内容照常显示，会话流不空白', () => {
+  it('无 started_at（旧数据）→ 不显示时长，也不编一个数', () => {
     const w = mountNode(
-      msg({ id: 'new1', type: 'brand_new_type' as ChatNode['type'], content: '未来类型的内容' }),
+      msg({ id: 'tc1', type: 'tool_call', status: 'streaming', meta: { tool_name: 'shell' }, content: '{}', children: [] }),
     )
-    expect(w.text()).toContain('未来类型的内容')
-    expect(w.find('.node-head').exists()).toBe(true)
+    expect(w.find('.node-tag.run').exists()).toBe(true)
+    expect(w.find('.tag-elapsed').exists()).toBe(false)
   })
 
-  it('工具请求参数走 JSON 代码块并带请求强调边（着色类名已由全局样式表承接）', async () => {
+  it('待用户确认 → 「待确认」标签（warn 变体）；终态不给标签', () => {
+    const waiting = mountNode(
+      msg({ id: 'tc1', type: 'tool_call', status: 'waiting_user_action', meta: { tool_name: 'shell' }, content: '{}', children: [] }),
+    )
+    expect(waiting.find('.node-tag').text()).toContain('待确认')
+    expect(waiting.find('.node-tag').classes()).toContain('warn')
+
+    const done = mountNode(
+      msg({ id: 'tc2', type: 'tool_call', status: 'completed', meta: { tool_name: 'shell' }, content: '{}', children: [] }),
+    )
+    expect(done.find('.node-tag').exists()).toBe(false)
+  })
+
+  it('工具参数住在骨架自身 content → 收起首条正文渲染成 JSON 代码块（带请求强调边）', () => {
     const w = mountNode(
       msg({
         id: 'tc1',
@@ -560,77 +196,190 @@ describe('MessageNode：分派器路由与内容形态', () => {
         children: [],
       }),
     )
-    await w.find('.node-head').trigger('click')
     const pre = w.find('pre.json')
     expect(pre.exists()).toBe(true)
     expect(pre.classes()).toContain('req')
-    expect(pre.html()).toContain('json-key')
+    expect(pre.text()).toContain('"cmd":"ls"')
+  })
+
+  it('工具结果是 role=tool 的正文子节点，随子流递归渲染', () => {
+    const w = mountNode(
+      msg({
+        id: 'tc1',
+        type: 'tool_call',
+        status: 'completed',
+        meta: { tool_name: 'shell' },
+        content: '{"cmd":"ls"}',
+        children: [msg({ id: 'res1', type: 'text', role: 'tool', status: 'completed', content: '"ok"', parent_id: 'tc1' })],
+      }),
+    )
+    expect(w.find('.skeleton-pending').exists()).toBe(false)
+    // 结果子节点是 `role=tool` 的 body：分派钩子只会出现五值
+    expect(w.findAll('.type-body').length).toBeGreaterThan(0)
+    expect(w.text()).toContain('"ok"')
+  })
+
+  it('内含待审批提问子节点 → 提问格出现审批入口（批准执行）', () => {
+    const w = mountNode(
+      msg({
+        id: 'tc1',
+        type: 'tool_call',
+        status: 'streaming',
+        meta: { tool_name: 'shell' },
+        content: '{}',
+        children: [
+          msg({
+            id: 'up1',
+            type: 'user_prompt',
+            status: 'waiting_user_action',
+            meta: { prompt: { kind: 'confirm', tool_name: 'shell', risk_level: 'high', description: '删除文件' } },
+            parent_id: 'tc1',
+          }),
+        ],
+      }),
+    )
+    expect(w.find('.type-interaction').exists()).toBe(true)
+    expect(w.text()).toContain('批准执行')
+  })
+
+  it('可补充参数的可恢复失败（后端下发 supply）→ 出现补充参数入口', () => {
+    const w = mountNode(
+      msg({
+        id: 'tc1',
+        type: 'tool_call',
+        status: 'failed',
+        error: '参数缺失',
+        meta: { failure_kind: 'error', recoverable: true },
+        actions: ['retry', 'supply'],
+        content: '{}',
+        children: [],
+      }),
+    )
+    expect(w.find('.skeleton-supply').exists()).toBe(true)
+  })
+
+  it('可恢复失败（后端下发 retry）→ 交代条重试发射骨架 id', async () => {
+    const w = mountNode(
+      msg({
+        id: 'tc1',
+        type: 'tool_call',
+        status: 'failed',
+        error: '工具执行失败',
+        meta: { failure_kind: 'error', recoverable: true, tool_name: 'shell' },
+        actions: ['retry'],
+        content: '{}',
+        children: [],
+      }),
+    )
+    const btn = w.find('.error-box button.retry')
+    expect(btn.exists()).toBe(true)
+    await btn.trigger('click')
+    expect(w.emitted('retry')?.[0]).toEqual(['tc1'])
   })
 })
 
 /**
- * 节点头的键盘可达性。
+ * 分派器路由与内容形态 —— 分派器只做「按 NodeKind 路由」，渲染形态由各渲染器负责。
  *
- * 此前节点头是裸 `div` + `@click`：Tab 键永远走不到它，键盘用户无法展开
- * 任何工具调用或思考过程——折叠控件不可达等于内容不可达。
- *
- * 这里锁住三件事：可聚焦（tabindex）、有开关语义（role / aria-expanded）、
- * 键盘能真的触发折叠。三条都是「不测就悄悄退化」的类型：视觉上看不出差别。
+ * 这一组同时是压缩形态的回归锚：压缩与思考同在 `notice` 一格，靠**是否携带压缩统计
+ * 字段**（而非业务名）分道——有统计走「压缩动作」样式，无统计走 Markdown。
  */
-describe('MessageNode：节点头键盘可达性', () => {
-  const toolMsg = () =>
-    msg({ id: 'tc1', type: 'tool_call', status: 'completed', meta: { tool_name: 'shell' }, content: '{}', children: [] })
-
-  it('节点头可聚焦且带开关语义（role / tabindex / aria-expanded）', () => {
-    const w = mountNode(toolMsg())
-    const head = w.find('.node-head')
-
-    expect(head.attributes('role')).toBe('button')
-    expect(head.attributes('tabindex')).toBe('0')
-    // 默认收起 ⇒ aria-expanded=false，且标签文案说明按下会发生什么
-    expect(head.attributes('aria-expanded')).toBe('false')
-    expect(head.attributes('aria-label')).toContain('展开')
+describe('MessageNode：折叠叶内的压缩动作（notice + 统计字段）', () => {
+  it('带统计字段的压缩 → 「系统动作」样式（notice-note），不是普通 Markdown 正文', async () => {
+    const w = mountNode(
+      msg({
+        id: 'cp1',
+        type: 'compression',
+        status: 'streaming',
+        content: '正在压缩上下文…',
+        meta: { before_tokens: 150000 },
+      }),
+    )
+    // 折叠叶默认收起，展开后看正文分道
+    await w.find('.node-head').trigger('click')
+    expect(w.find('.notice-note').exists()).toBe(true)
+    expect(w.find('.notice-note').text()).toContain('正在压缩上下文')
+    expect(w.find('.markdown-body').exists()).toBe(false)
   })
 
-  it('Enter 与 Space 都能切换折叠，且 aria-expanded 随之更新', async () => {
-    const w = mountNode(toolMsg())
-    const head = w.find('.node-head')
-    expect(w.find('.node-body').exists()).toBe(false)
-
-    await head.trigger('keydown', { key: 'Enter' })
-    expect(w.find('.node-body').exists()).toBe(true)
-    expect(w.find('.node-head').attributes('aria-expanded')).toBe('true')
-
-    await w.find('.node-head').trigger('keydown', { key: ' ' })
-    expect(w.find('.node-body').exists()).toBe(false)
-    expect(w.find('.node-head').attributes('aria-expanded')).toBe('false')
+  it('压缩失败 → 错误条 + 重试入口（发射压缩节点自己的 id，供 retry_compaction）', async () => {
+    const w = mountNode(
+      msg({
+        id: 'cp1',
+        type: 'compression',
+        status: 'failed',
+        actions: ['retry_compaction'],
+        content: '压缩未完成（模型请求失败：429 Too Many Requests），已保留完整历史',
+        meta: { failure_kind: 'llm_error', before_tokens: 150000 },
+      }),
+    )
+    await w.find('.node-head').trigger('click')
+    expect(w.find('.error-box').exists()).toBe(true)
+    expect(w.find('.error-box').text()).toContain('429 Too Many Requests')
+    expect(w.find('.notice-note').exists()).toBe(false)
+    const retry = w.find('.error-box button.retry')
+    expect(retry.exists()).toBe(true)
+    await retry.trigger('click')
+    expect(w.emitted('retry')?.[0]).toEqual(['cp1'])
   })
 
-  it('悬停操作按钮带可读名称（键盘与读屏都能识别）', async () => {
-    const w = mountNode(toolMsg())
-    const acts = w.findAll('.node-act')
-    expect(acts.length).toBeGreaterThan(0)
-    for (const b of acts) {
-      expect(b.attributes('aria-label'), '图标按钮必须有无障碍名称').toBeTruthy()
-    }
+  it('字段齐全 ⇒ 事实行给水位 / 上限 / 触发来源 / 丢了几条', async () => {
+    const w = mountNode(
+      msg({
+        id: 'cp1',
+        type: 'compression',
+        status: 'completed',
+        content: '已压缩上下文（12 → 3 条）',
+        meta: {
+          compact_trigger: 'threshold',
+          context_limit: 200000,
+          before_tokens: 150000,
+          after_tokens: 30000,
+          dropped: 9,
+        },
+      }),
+    )
+    await w.find('.node-head').trigger('click')
+    const facts = w.find('.notice-facts').text()
+    expect(facts).toContain('压缩后水位 30k')
+    expect(facts).toContain('上限 200k')
+    expect(facts).toContain('自动整理')
+    expect(facts).toContain('压掉 9 条')
+    expect(w.find('.notice-note').text()).toContain('12 → 3 条')
   })
 
-  it('操作按钮的点击不冒泡成折叠切换（否则点删除会顺手展开卡片）', async () => {
-    const w = mountNode(msg({ id: 'm1', type: 'text', status: 'completed', content: 'hi' }))
-    const before = w.find('.node-body').exists()
-    await w.find('.node-act').trigger('click')
-    expect(w.find('.node-body').exists()).toBe(before)
+  it('旧后端（无统计字段）⇒ 不算压缩动作，落 Markdown；不编事实行', async () => {
+    const w = mountNode(msg({ id: 'cp1', type: 'compression', status: 'completed', content: '压缩上下文' }))
+    await w.find('.node-head').trigger('click')
+    expect(w.find('.notice-compaction').exists()).toBe(false)
+    expect(w.find('.notice-facts').exists()).toBe(false)
+    expect(w.find('.markdown-body').exists()).toBe(true)
+  })
+})
+
+describe('MessageNode：正文格（wire text → body）与兜底', () => {
+  it('用户消息走右对齐气泡，头部是「你」', () => {
+    const w = mountNode(msg({ id: 'u1', role: 'user', type: 'text', content: '你好' }))
+    expect(w.find('.user-bubble').exists()).toBe(true)
+    expect(w.find('.node-head').text()).toContain('你')
+    expect(w.find('.user-bubble').text()).toContain('你好')
+  })
+
+  it('未登记的 wire 类型折叠到 body：内容照常显示，会话流不空白', () => {
+    const w = mountNode(
+      msg({ id: 'new1', type: 'brand_new_type', content: '未来类型的内容' }),
+    )
+    expect(w.text()).toContain('未来类型的内容')
+    expect(w.find('.node-head').exists()).toBe(true)
   })
 })
 
 /**
- * 压缩后的**历史记忆**（`meta.compacted`）。
- *
- * 回归动机：它是 `role = user` 的消息（后端为让对话以 user 开头），曾按「角色优先」
- * 渲染成右对齐的用户气泡、头像是「你」——一段系统写的记忆被读成用户自己的话。
- * 这里钉住四个可见后果：标题 / 对齐 / 默认收起 / 不给悬停操作。
+ * 压缩后的**历史记忆**（`meta.compacted`）：它是 `role = user` 的消息（后端为让对话以
+ * user 开头），但它是系统产出的记忆，不是用户说的话——分派器把它路由到折叠叶（notice），
+ * 而非右对齐的用户气泡。这里钉住四个可见后果：标题 / 对齐 / 默认收起 / 不给悬停操作。
  */
-describe('MessageNode：压缩后的历史记忆（不是「你说的那句话」）', () => {
+describe('MessageNode：压缩后的历史记忆（折叠叶，不是「你说的那句话」）', () => {
   const memory = (extra: Partial<ChatNode> = {}) =>
     msg({
       id: 'mem1',
@@ -647,79 +396,76 @@ describe('MessageNode：压缩后的历史记忆（不是「你说的那句话�
     expect(w.find('.msg').classes()).not.toContain('user')
   })
 
-  it('默认收起（摘要很长，不得盖过对话本体）', () => {
+  it('默认收起（记忆体很长，不得盖过对话本体）', () => {
     const w = mountNode(memory())
     expect(w.find('.node-head').attributes('aria-expanded')).toBe('false')
-    expect(w.find('.memory-body').exists()).toBe(false)
+    expect(w.find('.notice-memory').exists()).toBe(false)
   })
 
   it('展开后：记忆原文原样可读 + 事实行（水位 / 已转存）', async () => {
     const w = mountNode(memory())
     await w.find('.node-head').trigger('click')
-
-    // 原文原样：内部标记也不剥掉——这一页的意义是「可审计」
-    expect(w.find('.memory-text').text()).toContain('CONTEXT SNAPSHOT')
-    const facts = w.find('.memory-facts').text()
+    expect(w.find('.notice-pre').text()).toContain('CONTEXT SNAPSHOT')
+    const facts = w.find('.notice-facts').text()
     expect(facts).toContain('压缩后水位 9k')
     expect(facts).toContain('完整历史已转存')
   })
 
   it('不给悬停操作（系统记忆的编辑 / 删除不走悬停）', () => {
-    const w = mountNode(memory({ parent_id: undefined }))
+    const w = mountNode(memory())
     expect(w.findAll('.node-act')).toHaveLength(0)
   })
 
   it('旧会话（无这些字段）⇒ 事实行不出现，不编数字', () => {
     const w = mountNode(memory({ meta: { compacted: true } }))
-    expect(w.find('.memory-facts').exists()).toBe(false)
+    expect(w.find('.notice-facts').exists()).toBe(false)
   })
 })
 
 /**
- * 压缩节点的**结构化交代**：正文只说得了一条「N → M 条」，而「离上限还有多少」
- * 「这次是谁触发的」是字段（后端随 `meta` 下发）。缺字段就退回只有正文的旧观感。
+ * 节点头的键盘可达性。此前节点头是裸 `div` + `@click`：Tab 键永远走不到它。
+ * 这里锁住三件事：可聚焦（tabindex）、开关语义（role / aria-expanded）、键盘能真的触发折叠。
  */
-describe('MessageNode：压缩节点的事实行', () => {
-  const compressed = (meta: Record<string, unknown> | undefined) =>
-    msg({
-      id: 'cp1',
-      type: 'compression',
-      status: 'completed',
-      content: '已压缩上下文（12 → 3 条）',
-      ...(meta ? { meta } : {}),
-    })
+describe('MessageNode：节点头键盘可达性', () => {
+  // 折叠叶（notice）默认收起，是验证折叠开关语义最干净的载体
+  const foldMsg = () => msg({ id: 'r1', type: 'reasoning', status: 'completed', content: '一段思考' })
 
-  it('字段齐全 ⇒ 水位 / 上限 / 触发来源 / 丢了几条', () => {
-    const w = mountNode(
-      compressed({
-        compact_trigger: 'threshold',
-        context_limit: 200000,
-        before_tokens: 150000,
-        after_tokens: 30000,
-        dropped: 9,
-      }),
-    )
-    const facts = w.find('.compress-facts').text()
-    expect(facts).toContain('压缩后水位 30k')
-    expect(facts).toContain('上限 200k')
-    expect(facts).toContain('自动整理')
-    expect(facts).toContain('压掉 9 条')
-    // 正文没被改写：事实行是补充，不是替换
-    expect(w.find('.compress-note').text()).toContain('12 → 3 条')
+  it('节点头可聚焦且带开关语义（role / tabindex / aria-expanded）', () => {
+    const w = mountNode(foldMsg())
+    const head = w.find('.node-head')
+    expect(head.attributes('role')).toBe('button')
+    expect(head.attributes('tabindex')).toBe('0')
+    expect(head.attributes('aria-expanded')).toBe('false')
+    expect(head.attributes('aria-label')).toContain('展开')
   })
 
-  it('未触发 / 失败（无 after_tokens）⇒ 报当前水位，不报「压缩后」', () => {
-    const w = mountNode(
-      compressed({ compact_trigger: 'retry', context_limit: 200000, before_tokens: 150000 }),
-    )
-    const facts = w.find('.compress-facts').text()
-    expect(facts).toContain('当前水位 150k')
-    expect(facts).not.toContain('压缩后水位')
-    expect(facts).toContain('手动重试')
+  it('Enter 与 Space 都能切换折叠，且 aria-expanded 随之更新', async () => {
+    const w = mountNode(foldMsg())
+    const head = w.find('.node-head')
+    expect(w.find('.node-body').exists()).toBe(false)
+
+    await head.trigger('keydown', { key: 'Enter' })
+    expect(w.find('.node-body').exists()).toBe(true)
+    expect(w.find('.node-head').attributes('aria-expanded')).toBe('true')
+
+    await w.find('.node-head').trigger('keydown', { key: ' ' })
+    expect(w.find('.node-body').exists()).toBe(false)
+    expect(w.find('.node-head').attributes('aria-expanded')).toBe('false')
   })
 
-  it('旧后端（无字段）⇒ 不出事实行', () => {
-    const w = mountNode(compressed(undefined))
-    expect(w.find('.compress-facts').exists()).toBe(false)
+  it('根级骨架的悬停操作按钮带可读名称（键盘与读屏都能识别）', () => {
+    const w = mountNode(msg({ id: 't1', type: 'turn', status: 'completed', children: [] }))
+    const acts = w.findAll('.node-act')
+    expect(acts.length).toBeGreaterThan(0)
+    for (const b of acts) {
+      expect(b.attributes('aria-label'), '图标按钮必须有无障碍名称').toBeTruthy()
+    }
+  })
+
+  it('操作按钮的点击不冒泡成折叠切换（否则点删除会顺手展开卡片）', async () => {
+    const w = mountNode(msg({ id: 'm1', type: 'text', status: 'completed', content: 'hi' }))
+    const before = w.find('.node-body').exists()
+    await w.find('.node-act').trigger('click')
+    expect(w.find('.node-body').exists()).toBe(before)
   })
 })

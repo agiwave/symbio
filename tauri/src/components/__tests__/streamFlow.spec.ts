@@ -41,14 +41,19 @@ const SID = 's1'
  *
  * 传输层（`stores/sessionTranscriptSync`，VDFS 变更 → 帧）的形状与协调规则由
  * 它自己的测试钉；这里全部用例只关心**落地之后** store 与渲染的结果。
+ *
+ * `type` 放宽成 `string`：本文件端到端钉的正是「存量业务旧词帧（`turn` / `text` /
+ * `reasoning` / `tool_call`）经 store 折叠到 NodeKind 轴后渲染仍正确」，故按旧词构造帧。
  */
-function feed(message: ChatNode): void {
-  useSessionsStore().applyTranscriptMessages(SID, [message])
+function feed(message: Omit<ChatNode, 'type'> & { type?: string }): void {
+  useSessionsStore().applyTranscriptMessages(SID, [message as ChatNode])
 }
 
 /** 与后端 `emit_streaming_start` / 首帧全量 / finalize 一致的**完整消息**构造器 */
 function turn(id: string, status: ChatNode['status'] = 'streaming'): ChatNode {
-  return { id, role: 'assistant', type: 'turn', status }
+  // 故意喂**存量业务旧词**（wire `type` 已收敛为五值 `NodeKind`）：本文件钉的正是
+  // 「旧词帧经 store 落地折叠到 NodeKind 轴、渲染仍正确」这条端到端不变式，故按旧词构造。
+  return { id, role: 'assistant', type: 'turn', status } as unknown as ChatNode
 }
 function reasoning(
   id: string,
@@ -56,7 +61,7 @@ function reasoning(
   content: string,
   status: ChatNode['status'] = 'streaming',
 ): ChatNode {
-  return { id, parent_id: parent, role: 'assistant', type: 'reasoning', status, content }
+  return { id, parent_id: parent, role: 'assistant', type: 'reasoning', status, content } as unknown as ChatNode
 }
 function text(
   id: string,
@@ -64,7 +69,7 @@ function text(
   content: string,
   status: ChatNode['status'] = 'streaming',
 ): ChatNode {
-  return { id, parent_id: parent, role: 'assistant', type: 'text', status, content }
+  return { id, parent_id: parent, role: 'assistant', type: 'text', status, content } as unknown as ChatNode
 }
 function toolCall(
   id: string,
@@ -73,7 +78,8 @@ function toolCall(
   args: string,
   status: ChatNode['status'] = 'streaming',
 ): ChatNode {
-  return { id, parent_id: parent, role: 'assistant', type: 'tool_call', meta: { tool_name: name }, status, content: args }
+  // [T-155] 呈现意图来自后端数据：工具名经 `title` 下发，前端不再从 `meta.tool_name` 现推。
+  return { id, parent_id: parent, role: 'assistant', type: 'tool_call', title: name, status, content: args } as unknown as ChatNode
 }
 /**
  * 状态帧：只带身份 + 状态，**不带正文**（与后端 `llm_state_frame` 同构）。
@@ -96,8 +102,9 @@ function buildTree(all: ChatNode[]): ChatNode[] {
   })
   const parentsWithChildren = new Set(Object.keys(rawChildren).filter((pid) => rawChildren[pid].length > 0))
   const isEmptyContentNode = (msg: ChatNode): boolean => {
-    const t = msg.type || 'text'
-    if (t !== 'text' && t !== 'reasoning') return false
+    // store 落地时已把 `type` 折进 NodeKind 轴，这里按折后的五值判空正文叶子。
+    const t = msg.type
+    if (t !== 'body' && t !== 'notice') return false
     const c = msg.content
     const text = typeof c === 'string' ? c : c && typeof c === 'object' && 'text' in c ? (c as { text: string }).text : ''
     return !text || text.trim().length === 0
@@ -174,28 +181,28 @@ describe('流式端到端：Turn/Reason 在多轮工具场景的可见性', () =
     const tree = buildTree(store.getSessionMessages(SID))
     const w = mountTree(tree)
 
-    // 1) 无任何等待骨架残留（每轮 Turn 均已有子节点）
-    expect(w.findAll('.turn-pending').length).toBe(0)
-    // 2) 两轮 Turn 均以 turn-group 呈现（透明容器）
-    expect(w.findAll('.turn-group').length).toBe(2)
+    // 1) 无任何等待骨架残留（每轮根级骨架均已有子节点）
+    expect(w.findAll('.skeleton-pending').length).toBe(0)
+    // 2) 两轮整轮 + 一次工具调用都以骨架容器呈现（`.type-skeleton`）
+    expect(w.findAll('.type-skeleton').length).toBe(3)
     // 3) 正文可见
     expect(w.text()).toContain('正文')
     expect(w.text()).toContain('结论')
   })
 
-  it('流式中途（Reasoning streaming）：骨架消失、思考单行显示「思考中…」', () => {
+  it('流式中途（Reasoning streaming）：骨架消失、思考折叠叶单行显示「处理中…」', () => {
     feed(turn('T1'))
     feed(reasoning('r1', 'T1', '部分思考'))
 
     const store = useSessionsStore()
     const tree = buildTree(store.getSessionMessages(SID))
     const w = mountTree(tree)
-    // Turn 已有子节点 → 不显示等待骨架
-    expect(w.findAll('.turn-pending').length).toBe(0)
-    // 思考行头存在且是"思考中…"态
-    const head = w.find('.node-head')
+    // 根级骨架已有子节点 → 不显示等待骨架
+    expect(w.findAll('.skeleton-pending').length).toBe(0)
+    // 思考折叠叶头部存在且是"处理中…"态
+    const head = w.find('.type-notice .node-head')
     expect(head.exists()).toBe(true)
-    expect(head.text()).toContain('思考中')
+    expect(head.text()).toContain('处理中')
   })
 
   it('增量帧（delta）拼进正文——流式热路径', () => {
@@ -217,12 +224,14 @@ describe('流式端到端：Turn/Reason 在多轮工具场景的可见性', () =
     const store = useSessionsStore()
     const msg = store.getSessionMessages(SID).find((m) => m.id === 'x1')
     expect(msg?.status).toBe('completed')
-    expect(msg?.type, '状态帧不得抹掉节点类型').toBe('text')
+    // 落地时 `type` 已折进 NodeKind 轴（`text` → `body`）；本用例钉的是「状态帧不抹掉类型」，
+    // 而非保留原始 wire 词——最小状态帧不带 type，合并后仍是首帧折出的 `body`。
+    expect(msg?.type, '状态帧不得抹掉节点类型').toBe('body')
     expect(msg?.parent_id, '状态帧不得抹掉归属').toBe('T1')
     expect(msg?.content, '状态帧不得抹掉正文').toBe('正文')
   })
 
-  it('空 Turn 未收帧（等待 LLM 首 token）：骨架存在且属于当前轮', () => {
+  it('空根级骨架未收子节点（等待 LLM 首 token）：等待骨架存在且属于当前轮', () => {
     // 上一轮已完成
     const t0 = turn('T0')
     const x0 = text('x0', 'T0', '上轮')
@@ -230,13 +239,13 @@ describe('流式端到端：Turn/Reason 在多轮工具场景的可见性', () =
     feed(x0)
     feed(settled(x0))
     feed(settled(t0))
-    // 新一轮 Turn 已广播、尚无子节点
+    // 新一轮整轮骨架已广播、尚无子节点
     feed(turn('T1'))
 
     const store = useSessionsStore()
     const tree = buildTree(store.getSessionMessages(SID))
     const w = mountTree(tree)
-    expect(w.findAll('.turn-pending').length).toBe(1)
+    expect(w.findAll('.skeleton-pending').length).toBe(1)
   })
 })
 
@@ -312,8 +321,8 @@ describe('渲染层回归：增量必须进 DOM（不只进 store）', () => {
     await nextTick()
     feed({ id: 'R1', delta: '，第二段思考' })
     await nextTick()
-    // 分派类名由 registry 给出 ⇒ 钉住「思考是独立节点，没有被并进正文」
-    expect(w.find('.type-reasoning').exists(), '思考必须是独立节点').toBe(true)
+    // 分派类名由 registry 给出 ⇒ 钉住「思考是独立折叠叶，没有被并进正文」
+    expect(w.find('.type-notice').exists(), '思考必须是独立节点').toBe(true)
     // 折叠态的一行摘要由节点 content 渲染，它必须同步增长
     expect(w.text(), '思考的增量必须进 DOM').toContain('第二段思考')
   })
@@ -330,11 +339,11 @@ describe('渲染层回归：增量必须进 DOM（不只进 store）', () => {
         content: '思考内容',
       })
     await nextTick()
-    expect(w.text()).toContain('思考中')
+    expect(w.text()).toContain('处理中')
     // 最小状态帧（后端 `llm_state_frame` 同构）：不带正文，落地是合并
     feed({ id: 'R1', status: 'completed' })
     await nextTick()
-    expect(w.text(), '定稿后不再显示「思考中」').not.toContain('思考中')
+    expect(w.text(), '定稿后不再显示「处理中」').not.toContain('处理中')
     expect(w.text(), '状态帧不得把思考正文抹掉').toContain('思考内容')
   })
 })
@@ -380,27 +389,30 @@ describe('渲染层回归：工具调用按帧即时可见（对照 e2e 实测�
     setActivePinia(createPinia())
   })
 
-  it('工具行在首帧即出现，参数增量在收起态可见（不等执行完）', async () => {
+  it('工具骨架在首帧即出现，参数增量进展开态正文（不等执行完）', async () => {
     const w = mount(Panel, { props: { sessionId: SID } })
     feed({ id: 'U1', role: 'user', type: 'text', content: '调用工具' })
     feed(turn('T1'))
     await nextTick()
-    expect(w.findAll('.turn-pending').length, '尚无子节点 → 等待骨架').toBe(1)
+    expect(w.findAll('.skeleton-pending').length, '尚无子节点 → 等待骨架').toBe(1)
 
-    // 首帧：名字已知、参数为空
+    // 首帧：工具骨架到达（title 给出名字），参数为空
     feed(toolCall('TC1', 'T1', 'mcp__mockserv__echo', ''))
     await nextTick()
-    expect(w.findAll('.type-tool_call').length, '工具行必须在首帧就出现').toBe(1)
+    // 根级整轮 + 工具子骨架 = 2 个骨架容器
+    expect(w.findAll('.type-skeleton').length, '工具骨架必须在首帧就出现').toBe(2)
     expect(w.text()).toContain('mcp__mockserv__echo')
-    expect(w.findAll('.turn-pending').length, '有子节点后骨架消失').toBe(0)
+    // 整轮的等待骨架已消失（它有了子节点），但工具骨架自身仍在等结果子节点——
+    // 骨架格一视同仁：streaming 且无真实子就脉冲。全树仍只有 1 个等待态。
+    expect(w.findAll('.skeleton-pending').length, '等待态由整轮接棒到工具骨架').toBe(1)
 
-    // 参数窄增量：收起态的单行摘要必须跟着长
+    // 参数窄增量：骨架默认展开，参数作首条正文（`pre.json.req`）必须跟着长
     feed({ id: 'TC1', delta: '{"text":"m' })
     await nextTick()
     feed({ id: 'TC1', delta: 'ock 回显内容"}' })
     await nextTick()
     expect(
-      w.find('.type-tool_call .node-preview').text(),
+      w.find('.json.req').text(),
       '运行中参数必须可见（否则看起来像"跑完才显示"）',
     ).toContain('mock 回显内容')
   })
@@ -420,7 +432,7 @@ describe('渲染层回归：工具调用按帧即时可见（对照 e2e 实测�
         type: 'tool_call',
         status: 'streaming',
         meta: { started_at: Date.now() - 5000, tool_name: 'read_file' },
-      } as ChatNode)
+      })
     await nextTick()
     expect(
       w.find('.tag-elapsed').exists(),
@@ -465,7 +477,7 @@ describe('渲染层回归：收起态摘要在流式中显示最新内容', () =
     setActivePinia(createPinia())
   })
 
-  it('思考（始终单行）流式中跟着末端走，定稿后回到开头', async () => {
+  it('思考折叠叶（始终单行）流式中跟着末端走，定稿后回到开头', async () => {
     const w = mount(Panel, { props: { sessionId: SID } })
     feed(turn('T1'))
     feed(reasoning('R1', 'T1', OPEN + '甲'.repeat(80)))
@@ -474,7 +486,7 @@ describe('渲染层回归：收起态摘要在流式中显示最新内容', () =
     // 流式增量：摘要必须跟着长，且显示的是**新到的那一段**
     feed({ id: 'R1', delta: CLOSE })
     await nextTick()
-    const live = w.find('.type-reasoning .node-preview')
+    const live = w.find('.type-notice .node-preview')
     expect(live.exists(), '思考默认单行，摘要必须存在').toBe(true)
     expect(live.classes(), '流式中必须在左端裁剪（最新内容才留在可见区）').toContain('live')
     expect(live.text(), '流式中必须能看到最新内容').toContain(CLOSE)
@@ -483,28 +495,35 @@ describe('渲染层回归：收起态摘要在流式中显示最新内容', () =
     // 定稿：内容不再变，摘要回到开头（概述），裁剪方向也随之回到右端
     feed({ id: 'R1', status: 'completed' })
     await nextTick()
-    const settled = w.find('.type-reasoning .node-preview')
+    const settled = w.find('.type-notice .node-preview')
     expect(settled.classes(), '定稿后不再左端裁剪').not.toContain('live')
     expect(settled.text(), '定稿后的摘要是概述（开头）').toContain(OPEN)
     expect(settled.text()).not.toContain(CLOSE)
   })
 
-  it('工具行（默认单行）运行中的参数摘要同样跟末端走', async () => {
+  it('工具骨架收起后，运行中的参数摘要同样跟末端走', async () => {
     const w = mount(Panel, { props: { sessionId: SID } })
     feed(turn('T1'))
     feed(toolCall('TC1', 'T1', 'write_file', '{"path":"/a/b.rs","body":"'))
     await nextTick()
+
+    // 骨架默认展开——收起它才谈得上「收起态摘要」（内层 `.type-skeleton` 即工具骨架）
+    const tool = w.findAll('.type-skeleton')[1]
+    await tool.find('.node-head').trigger('click')
+    await nextTick()
+
     feed({ id: 'TC1', delta: '甲'.repeat(80) + '"}' })
     await nextTick()
 
-    const preview = w.find('.type-tool_call .node-preview')
-    expect(preview.classes(), '运行中的工具行同样在左端裁剪').toContain('live')
+    // 根级骨架仍展开（无摘要），此刻唯一的 `.node-preview` 就是收起的工具骨架
+    const preview = w.find('.node-preview')
+    expect(preview.classes(), '收起后运行中的骨架摘要在左端裁剪').toContain('live')
     expect(preview.text(), '参数已流到本地 ⇒ 收起态就该看到最新一段').toContain('"}')
 
     // 工具执行结束：内容定稿 → 回到开头（`{"path":...` 才是这次调用的身份）
     feed({ id: 'TC1', status: 'completed' })
     await nextTick()
-    const settled = w.find('.type-tool_call .node-preview')
+    const settled = w.find('.node-preview')
     expect(settled.classes()).not.toContain('live')
     expect(settled.text()).toContain('"path"')
   })

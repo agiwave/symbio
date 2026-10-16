@@ -36,9 +36,9 @@ import type { ChatNode } from '@/schemas/chat_node'
 import {
   NODE_STATUS_STREAMING,
   NODE_STATUS_WAITING_USER_ACTION,
+  NODE_KIND_BODY,
   NODE_KIND_SKELETON,
   NODE_KIND_TYPING,
-  CHAT_STYLE_TAG_RUN,
 } from '@/schemas/chat_node'
 import { typingIdOf } from '@/registry/messageTypes'
 import { VDFS_STATUS_ACTIVE, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING } from '@/schemas/vdfs'
@@ -107,7 +107,7 @@ function conn(over: Partial<UseChatConnectionOptions> = {}) {
 }
 
 function msg(over: Partial<ChatNode> = {}): ChatNode {
-  return { id: 'm1', type: 'text', content: 'hi', seq: 1, ...over }
+  return { id: 'm1', type: NODE_KIND_BODY, content: 'hi', seq: 1, ...over }
 }
 
 beforeEach(() => {
@@ -162,7 +162,7 @@ describe('messageTree — 从 store 派生', () => {
   it('空内容叶子被过滤（流式的占位空节点）', () => {
     hoisted.store = makeStore({
       getSessionMessages: vi.fn(() => [
-        msg({ id: 'blank', type: 'text', content: '\n\n', seq: 1 }),
+        msg({ id: 'blank', type: NODE_KIND_BODY, content: '\n\n', seq: 1 }),
         msg({ id: 'real', seq: 2 }),
       ]),
     })
@@ -173,7 +173,7 @@ describe('messageTree — 从 store 派生', () => {
   it('带子节点的空内容容器**保留**（它是容器不是占位）', () => {
     hoisted.store = makeStore({
       getSessionMessages: vi.fn(() => [
-        msg({ id: 'turn', type: 'text', content: '', seq: 1 }),
+        msg({ id: 'turn', type: NODE_KIND_SKELETON, content: '', seq: 1 }),
         msg({ id: 'child', parent_id: 'turn', content: 'x', seq: 2 }),
       ]),
     })
@@ -181,9 +181,9 @@ describe('messageTree — 从 store 派生', () => {
     expect(c.messageTree.value.map((m) => m.id)).toEqual(['turn'])
   })
 
-  it('非 text / reasoning 的空内容节点不过滤（如空 tool_call 有意义）', () => {
+  it('非正文 / 折叠叶的空内容节点不过滤（如空骨架有意义）', () => {
     hoisted.store = makeStore({
-      getSessionMessages: vi.fn(() => [msg({ id: 'tool', type: 'tool_call', content: '', seq: 1 })]),
+      getSessionMessages: vi.fn(() => [msg({ id: 'tool', type: NODE_KIND_SKELETON, content: '', seq: 1 })]),
     })
     const c = conn()
     expect(c.messageTree.value.map((m) => m.id)).toEqual(['tool'])
@@ -213,10 +213,10 @@ describe('messageTree — 从 store 派生', () => {
 })
 
 describe('typing 占位合成（[T-151] 端到端：合成挂进 messageTree）', () => {
+  // 根级、正在 streaming 的骨架就是一整轮——typing 的宿主（形状判据：无父 + skeleton）
   const runHost = (status: ChatNode['status']): ChatNode => ({
     id: 'run1',
     type: NODE_KIND_SKELETON,
-    meta: { style_tag: CHAT_STYLE_TAG_RUN },
     status,
     seq: 1,
   })

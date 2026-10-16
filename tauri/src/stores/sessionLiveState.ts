@@ -18,8 +18,8 @@ export function useSessionLiveState() {
   // 会话级错误状态（"错误是状态，不是节点"原则的前端落地）：
   // 仅用于"没有任何失败消息节点、但会话整体因错误中止"的兜底场景（如 transport 级失败、
   // send 在首帧到达前就失败），此时没有"造成中止的节点"可挂错误，错误只能作为会话级状态存在。
-  // 与消息树中的 Failed Turn（后端权威失败终态，前端只在根级 Turn 渲染重试）互斥：
-  // 只要存在 Failed Turn，错误就由该节点承载，sessionErrors 保持 null。
+  // 与消息树中的失败根级骨架（后端权威失败终态，前端只在根级骨架渲染重试）互斥：
+  // 只要存在失败根级骨架，错误就由该节点承载，sessionErrors 保持 null。
   const sessionErrors = shallowRef<Record<string, string | null>>({})
 
   // 会话级告警状态（"告警是状态，不是事件"原则的前端落地）：
@@ -139,7 +139,7 @@ export function useSessionLiveState() {
     updateStatus(sessionId, (cur) => ({ ...cur, ...rest, last_event_at: Date.now() }))
   }
 
-  /** 读取会话级错误状态（无 Failed Turn 时的兜底错误；null = 无会话级错误） */
+  /** 读取会话级错误状态（无失败根级骨架时的兜底错误；null = 无会话级错误） */
   function getSessionError(sessionId: string): string | null {
     return sessionErrors.value[sessionId] ?? null
   }

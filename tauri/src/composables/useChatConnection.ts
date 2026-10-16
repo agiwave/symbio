@@ -45,7 +45,7 @@ export interface UseChatConnectionOptions {
  * 后，键名本身是类型的一部分，提供 / 注入两侧的签名由编译器对齐。
  *
  * 跨层传递仍用 provide/inject 而非逐层 props：恢复入口在**消息树的任意深度**
- * （子智能体里的 user_prompt、失败 ToolCall 的重试按钮），逐层透传要把一个
+ * （子智能体里的 user_prompt、失败工具骨架的重试按钮），逐层透传要把一个
  * 回调穿过多层与本组件无关的容器。要收敛的是**契约的类型**，不是传递方式。
  */
 export const RESUME_KEY: InjectionKey<(payload: ResumePayload) => void> = Symbol('chat-resume')
@@ -53,9 +53,10 @@ export const RESUME_KEY: InjectionKey<(payload: ResumePayload) => void> = Symbol
 /** 会话恢复载荷（retry_subtree/retry_compaction/retry/approve/reject/supply/answer 统一接口） */
 export interface ResumePayload {
   /** 目标消息 ID（恢复锚点）
-   *  - retry_subtree：指向 Failed 运行骨架（呈现 `turn`，wire `type=skeleton` + `style_tag=run`）
-   *  - retry_compaction：指向 Failed 压缩节点（呈现 `compression`，wire `type=notice`）
-   *  - 其他 action：指向工具调用骨架（呈现 `tool_call`，wire `type=skeleton` + `style_tag=tool`） */
+   *  - retry_subtree：指向 Failed 运行骨架（`type=skeleton`，无父节点）
+   *  - retry_compaction：指向 Failed 压缩节点（`type=notice`）
+   *  - 其他 action：指向工具调用骨架（`type=skeleton`，有父节点）
+   *  「运行 / 工具」的区分住在后端 `meta.style_tag`，前端不读它、只按形状定位锚点。 */
   targetId: string
   /** 恢复动作——词表在 `schemas/chat_node.ts`（后端 `ResumeAction` 的镜像，
    *  由 `scripts/protocol-mirror-audit.mjs` 的 C 组守着）。此处**不**再抄一份
@@ -205,7 +206,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
   // 复用节点对象的唯一目的，是让下一次 v-for 的 `:node` 保持**同一个引用**：
   // 引用不变 ⇒ Vue 判定 props 未变 ⇒ 整个组件子树跳过更新
   // （`hasPropsChanged`）。这条优化成立的**前提**是「引用不变 ⇒ 渲染结果不变」，
-  // 而渲染结果取决于**整棵子树**——容器节点（Turn / ToolCall）自身无正文，
+  // 而渲染结果取决于**整棵子树**——容器节点（`skeleton`）自身无正文，
   // 它画出来的每一块内容都在子节点里。
   //
   // 旧签名只覆盖自身字段与直接子 id（`childIds.join(',')`），于是「**已有**子节点的
@@ -283,7 +284,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     // 识别「空内容叶子节点」：流模式下后端会先发一个 content 为空（如 "\n\n"）的
     // Text / Reasoning 节点（例如 reasoning 与 tool_call 之间的占位空节点），
     // 该节点并不持久化，但前端会短暂收到；渲染时直接过滤掉，避免对话流出现空白块。
-    // 仅过滤"无子节点"的节点——带子节点的节点是容器（Turn/ToolCall），须保留。
+    // 仅过滤"无子节点"的节点——带子节点的节点是容器（skeleton），须保留。
     // 「空内容」判据走 `sessionTranscript.isBlankContentNode`（唯一实现）：
     // 等待骨架的兜底判定也要用它，两处不能各写一份。
     const rawChildren: Record<string, ChatNode[]> = {}
@@ -446,7 +447,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
       store.setSessionStatus(sid, VDFS_STATUS_FAILED)
 
       // 仅当没有任何 streaming/等待消息承载错误时，才落"会话级错误状态"（而非注入错误节点）：
-      // 否则助手根级 Turn 会在 bus Error 事件中带上错误，避免"根级节点 + 会话级"重复报错。
+      // 否则助手根级骨架会在 bus Error 事件中带上错误，避免"根级节点 + 会话级"重复报错。
       // 错误作为状态（不是消息树里的节点）展示在会话级错误条，许可重试（重新发送最后一条用户消息）。
       const hasStreaming = store.getSessionMessages(sid).some(isInProgressMessage)
       if (!hasStreaming) {
@@ -461,7 +462,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
   /**
    * 停止：**两个动作**，作用在两个不同的对象上。
    *
-   * 1. `action(<A>, "abort")`——中止**正在跑的那一轮**（收敛在途 Turn）；
+   * 1. `action(<A>, "abort")`——中止**正在跑的那一轮**（收敛在途骨架）；
    * 2. `action(<A>/inbox, "clear")`——清掉**还没被消费**的排队消息。
    *
    * 为什么必须成对：只 `abort` 不清队，消费者下一趟立刻取下一条继续跑，
@@ -507,7 +508,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
    * 而队列项的 id 是新的；入队会丢掉锚点。见 ADR-026。
    *
    * 后端语义（删除-重建模式）：
-   * - retry_subtree：删除 Failed Turn 及其所有子孙节点 → 重新走 LLM 请求
+   * - retry_subtree：删除 Failed 骨架及其所有子孙节点 → 重新走 LLM 请求
    * - retry_compaction：删除 Failed 压缩节点 → 重新执行一次上下文压缩
    *   （**不动历史**：压缩失败从不丢消息，重试只是再试一次 LLM 摘要）
    * - retry/approve/reject/supply/answer：删除旧子节点 → 重新执行工具或生成结果 → 创建新子节点

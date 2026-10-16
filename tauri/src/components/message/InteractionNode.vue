@@ -1,5 +1,5 @@
 <!--
-  待用户响应渲染器 —— ask_user 提问 / 工具执行确认
+  待用户响应渲染器 —— `type = interaction` 的唯一形态（ask_user 提问 / 工具执行确认）
 
   两种子形态由数据契约判别键 `kind` 分派（`schemas/message_prompt.ts`）：
   · `question`：一个或多个问题，可单选 / 多选，含约定选项 `Other`（勾选后自由输入）；
@@ -8,9 +8,9 @@
   **已回答态**（`status` 不再是 `waiting_user_action`）不再隐藏表单，而是整体降透明度
   并禁用控件：用户事后回看会话时，仍能看到自己当初选了什么。
 
-  提交都经 `inject('resume')` 打到**父 ToolCall**（`parent_id`）——提问与确认都是
-  某个工具调用的一部分，锚点必须是 ToolCall 而不是本节点自身。
-  子会话里的提问还要带上 `parent_session_id`，否则恢复会打到父会话。
+  提交都经 `inject('resume')` 打到**父骨架**（`parent_id`）——提问与确认都是某个工具
+  调用的一部分，锚点必须是父容器骨架而不是本节点自身。子会话里的提问还要带上
+  `parent_session_id`，否则恢复会打到父会话。
 -->
 <template>
   <NodeShell
@@ -173,16 +173,16 @@ function onToggleOption(questionId: string, multiSelect: boolean, label: string)
   }
 }
 
-/** 恢复锚点 = 父 ToolCall（提问/确认都是某个工具调用的一部分） */
-function parentToolCallId(): string | undefined {
+/** 恢复锚点 = 父骨架（提问/确认都是某个工具调用的一部分） */
+function parentSkeletonId(): string | undefined {
   return props.node.parent_id || undefined
 }
 
 function submitConfirm(approved: boolean) {
-  const tcId = parentToolCallId()
-  if (!tcId || !resume) return
+  const anchorId = parentSkeletonId()
+  if (!anchorId || !resume) return
   resume({
-    targetId: tcId,
+    targetId: anchorId,
     action: approved ? RESUME_ACTION_APPROVE : RESUME_ACTION_REJECT,
     reason: approved ? undefined : MESSAGE_REJECT_REASON,
     targetSessionId: messageParentSessionId(props.node),
@@ -190,15 +190,15 @@ function submitConfirm(approved: boolean) {
 }
 
 function submitQuestions() {
-  const tcId = parentToolCallId()
-  if (!tcId || !resume) return
+  const anchorId = parentSkeletonId()
+  if (!anchorId || !resume) return
   const answers: MessagePromptAnswer[] = (questionPrompt.value?.questions || []).map((q) => ({
     question_id: q.id,
     selected: selected.value[q.id] || [],
     custom_input: isChosen(q.id, MESSAGE_PROMPT_OTHER) ? customInput.value[q.id] || '' : null,
   }))
   resume({
-    targetId: tcId,
+    targetId: anchorId,
     action: RESUME_ACTION_ANSWER,
     answer: { answers },
     targetSessionId: messageParentSessionId(props.node),

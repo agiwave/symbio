@@ -40,10 +40,10 @@
           />
 
           <!-- 等待提示的**第二个来源**：会话在跑，而流里没有任何在途节点。
-               常规情形下 Turn 节点已到，骨架由 TurnGroupNode 挂在 Turn 组里；
-               这条只在「Turn 节点的变更还没到 / 丢了一次」时兜底——否则用户点完
+               常规情形下根级骨架节点已到，等待态由 SkeletonNode 挂在骨架容器里；
+               这条只在「骨架节点的变更还没到 / 丢了一次」时兜底——否则用户点完
                发送会看到「什么都没发生」。两者互斥，不会同时出现两条。 -->
-          <TurnPending v-if="showTyping" />
+          <SkeletonPending v-if="showTyping" />
 
           <!-- 排队中的用户消息（「待发送」气泡，T-077 步③）。
 
@@ -54,8 +54,8 @@
                本块随之消失，不会出现两份。 -->
           <InboxPending :entries="inboxEntries" />
 
-          <!-- 会话级错误条（兜底：无 Failed Turn 节点、但会话整体因错误中止时展示；
-               有 Failed Turn 时错误由根级 Turn 节点承载，不在此重复显示）。
+          <!-- 会话级错误条（兜底：无失败根级骨架、但会话整体因错误中止时展示；
+               有失败骨架时错误由根级骨架节点承载，不在此重复显示）。
 
                位置在**流内末尾**而不是页面顶部：错误是这一轮的结果，它属于会话流的
                时间轴——挂在流的尾部，用户的视线本来就在那里，重试按钮也就在手边。
@@ -66,7 +66,7 @@
             :text="sessionError"
             retryable
             dismissible
-            variant="turn"
+            variant="skeleton"
             @retry="handleSessionRetry"
             @dismiss="sessionsStore.setSessionError(props.sessionId, null)"
           />
@@ -120,7 +120,7 @@ import {
 
 import MessageNode from './MessageNode.vue'
 import MessageErrorBox from './message/MessageErrorBox.vue'
-import TurnPending from './message/TurnPending.vue'
+import SkeletonPending from './message/SkeletonPending.vue'
 import InboxPending from './message/InboxPending.vue'
 import ChatComposer from './chat/ChatComposer.vue'
 import BaseModal from './common/BaseModal.vue'
@@ -186,9 +186,9 @@ const chat = useChatConnection({
   onSendComplete: props.onSendComplete,
 })
 
-// 向下级组件（MessageNode 内联 user_prompt 表单 / 失败 ToolCall 重试/补充）提供
+// 向下级组件（MessageNode 内联 user_prompt 表单 / 失败工具骨架重试/补充）提供
 // 会话恢复接口（retry_subtree/retry/approve/reject/supply/answer 统一入口）。
-// 内部走统一 chat/send 接口的 resume 分支：target_id 为稳定锚点（Failed Turn 或 ToolCall），
+// 内部走统一 chat/send 接口的 resume 分支：target_id 为稳定锚点（失败根级骨架或工具骨架），
 // targetSessionId 用于子会话工具调用的恢复路由（子智能体的 user_prompt 通过
 // parent_session_id 指回子会话）。
 // 智能体 / 模型 / 运行模式 / 风险等级等会话参数由后端按 session.metadata 解析
@@ -230,7 +230,7 @@ const optionScope = computed<Record<string, unknown>>(() => ({
   // 会话级错误条（"错误是状态、不是节点"的兜底展示）。
   //
   // 两个来源：会话节点的 `attributes.error`（服务端权威）与 send / resume 的本地乐观
-  // 错误。但**有失败节点时一律不显示**——那时错误由根级 Turn 承载（⚠ + 重试），
+  // 错误。但**有失败节点时一律不显示**——那时错误由根级骨架承载（⚠ + 重试），
   // 再显示一条会话级错误就是同一条错误报两遍。
   //
   // 呈现位置是**流尾**（模板里紧跟消息列表，与「等待骨架」同排），不是页面顶部：
@@ -255,13 +255,13 @@ const optionScope = computed<Record<string, unknown>>(() => ({
    * 末尾等待提示（判定在 `stores/sessionLive.needsTypingRow`）。
    *
    * 会话节点说「在跑」（含 send 后的乐观置位）而流里没有任何在途节点
-   * ⇒ Turn 节点的变更还没到，此处补一条骨架。
+   * ⇒ 骨架节点的变更还没到，此处补一条骨架。
    *
    * ## 它在**发出后那一瞬**是常态，不是兜底
    *
    * 发言只是往会话收件箱写一条（见 `useChatConnection.send`），消息要等后端空闲时
    * 取出、落库、才发权威帧。因此"已置 working 而流里还没有自己的消息"是**预期**
-   * 状态——用户看到的是"已发出，等待处理"。随后 Turn 骨架（或用户消息帧本身）
+   * 状态——用户看到的是"已发出，等待处理"。随后骨架节点（或用户消息帧本身）
    * 到达，本行自然消失。
    */
   const showTyping = computed(() =>
@@ -284,7 +284,7 @@ const optionScope = computed<Record<string, unknown>>(() => ({
    *
    *  复用原 user 消息 id：这是"同一条消息重发"而不是新增一条，后端落库回包也
    *  带这个 id（前端按 id 合并，不会出现两份）。
-   *  仅用于"无 Failed Turn 节点"的兜底错误；有 Failed Turn 时错误由其节点承载、走 handleRetry。 */
+   *  仅用于"无失败根级骨架"的兜底错误；有失败根级骨架时错误由其节点承载、走 handleRetry。 */
   function handleSessionRetry() {
     const msgs = sessionsStore.getSessionMessages(props.sessionId)
     const lastUser = [...msgs].reverse().find((m) => messageRoleOf(m) === CHAT_ROLE_USER)
@@ -391,7 +391,7 @@ function handleSend() {
 
 /**
  * 重试入口：分派规则在 `registry/messageTypes.messageRetryTargetOf`——
- * 「工具调用失败 → 单工具重试」「其余失败 → 整轮重试（叶子回溯到父 Turn）」
+ * 「工具调用失败 → 单工具重试」「其余失败 → 整轮重试（叶子回溯到父骨架）」
  * 是**消息级业务规则**，不属于面板。本面板只负责取节点 + 发恢复请求。
  */
 function handleRetry(messageId: string) {
@@ -515,7 +515,7 @@ watch(sessionError, (now) => {
   /* ── 统一纵向节奏（机制化保障一致性）──
      所有响应元素之间的纵向间隔都引用同一变量，下游 MessageNode 经 CSS 继承复用，
      杜绝散落的 0.75/0.5/0.4rem 多重间距导致的「忽大忽小」。 */
-  --msg-gap: 0.4rem;         /* 统一纵向间隔：顶层节点 / Turn 子元素 / 工具子元素 全部共用（紧凑） */
+  --msg-gap: 0.4rem;         /* 统一纵向间隔：顶层节点 / 骨架子元素 / 工具子元素 全部共用（紧凑） */
   --nest-indent: 0.7rem;      /* 嵌套缩进步长（仅 depth>=2 的层级使用，见 MessageNode） */
   --card-pad-x: 0.5rem;       /* 卡片型节点统一左右内边距 */
   gap: var(--msg-gap);
@@ -546,7 +546,7 @@ watch(sessionError, (now) => {
   flex-shrink: 0;
 }
 
-/* 注：会话级错误条不再在此处持有样式——它现在与 Turn 组级错误条、工具级错误条
+/* 注：会话级错误条不再在此处持有样式——它现在与容器级错误条、工具级错误条
    共用同一个组件（`message/MessageErrorBox.vue`）。三处各自维护一份 `.error-box`
    的写法正是它被抽出来要消除的东西（改一处不改另一处不会报错，只会观感不一致）。 */
 

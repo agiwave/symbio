@@ -1,7 +1,7 @@
 <!--
   失败 / 中止交代条 —— 「这一轮（或这个工具）没跑完」的统一呈现
 
-  四处消费：Turn 组级错误条、工具级错误条、工具结果的失败体、**会话级错误条**
+  四处消费：容器级错误条、工具级错误条、工具结果的失败体、**会话级错误条**
   （`ModelChatPanel` 的流尾兜底）。同一套观感与「重试」入口，因此只有一份实现——
   原先这几处各写了一遍 `.error-box` 结构。
 
@@ -14,7 +14,7 @@
   但**重试入口照给**——这一轮只跑了一半，用户中止后通常就想重跑它。
 -->
 <template>
-  <div class="error-box" :class="{ aborted, 'turn-error': variant === 'turn' }">
+  <div class="error-box" :class="{ aborted, 'skeleton-error': variant === 'skeleton' }">
     <span class="err-icon">{{ aborted ? '⏹' : '⚠' }}</span>
     <span class="err-text">{{ aborted ? MESSAGE_ABORTED_NOTE : text }}</span>
     <button v-if="retryable" class="retry" @click="emit('retry')">重试</button>
@@ -33,8 +33,8 @@ withDefaults(
     aborted?: boolean
     /** 是否给出「重试」入口 */
     retryable?: boolean
-    /** 组级错误条（Turn）：需要额外的上下间距 */
-    variant?: 'plain' | 'turn'
+    /** 容器级错误条（骨架）：需要额外的上下间距 */
+    variant?: 'plain' | 'skeleton'
     /** 是否给出「关闭」入口（仅会话级兜底错误需要，见文件头注） */
     dismissible?: boolean
   }>(),
@@ -63,8 +63,8 @@ const emit = defineEmits<{ retry: []; dismiss: [] }>()
   flex: 1;
   word-break: break-word;
 }
-/* 失败 Turn 的错误条（error-box + turn-error 组合）：与上下文留出间距 */
-.turn-error {
+/* 容器级错误条（error-box + skeleton-error 组合）：与上下文留出间距 */
+.skeleton-error {
   margin: 0.25rem 0 0.375rem;
 }
 /* 中止不是失败：中性配色，只交代"这一轮没跑完"，不渲染成故障红。 */
