@@ -69,7 +69,9 @@ export function normalizePrincipal(value: Principal | string | undefined | null)
         ? PRINCIPAL_KIND_PERSON
         : ns === 'system'
           ? PRINCIPAL_KIND_SYSTEM
-          : ns === 'vdfs' || ns === 'web' || ns === 'local'
+          : // 工具命名空间：vdfs/web/local 是插件归属，mcp/agent/legacy 是后端
+            // `Principal::tool_principal` 合成的地址段——与 Rust `from_legacy` 同一张表。
+            ns === 'vdfs' || ns === 'web' || ns === 'local' || ns === 'mcp' || ns === 'agent' || ns === 'legacy'
             ? PRINCIPAL_KIND_TOOL
             : PRINCIPAL_KIND_AGENT
     return { kind, id: s }
@@ -125,6 +127,40 @@ export const CHAT_ROLES = [
 ] as const
 
 export type ChatRole = (typeof CHAT_ROLES)[number]
+
+/**
+ * 主体族 → 角色词的**一次性折叠**（[T-147d-iii]，镜像后端 `ChatNode::node_role()`
+ * 的 kind 兜底分支）：Person↔User / Agent↔Assistant / Tool↔Tool / System↔System。
+ * 无主体 ⇒ `undefined`——缺省语义（当助手）留在调用侧折叠点，不在这里替它做主。
+ */
+export function roleOfPrincipal(
+  value: Principal | string | undefined | null,
+): ChatRole | undefined {
+  switch (principalKind(value)) {
+    case PRINCIPAL_KIND_PERSON:
+      return CHAT_ROLE_USER
+    case PRINCIPAL_KIND_AGENT:
+      return CHAT_ROLE_ASSISTANT
+    case PRINCIPAL_KIND_TOOL:
+      return CHAT_ROLE_TOOL
+    case PRINCIPAL_KIND_SYSTEM:
+      return CHAT_ROLE_SYSTEM
+    default:
+      return undefined
+  }
+}
+
+/**
+ * 节点角色的**唯一折叠点**（[T-147d-iii]，镜像后端 `ChatNode::node_role()`）。
+ *
+ * 共存阶段优先级「残留 `role` 格在先、`principal.kind` 兜底」；`role` 字段退役
+ * （末档）后删首行即收敛成纯 kind 折叠。缺省仍是助手——未标身份的写方按模型
+ * 产出一族呈现（今天的流式帧形状，语义不变）。住在契约层（而非 registry）：
+ * 纯逻辑层（`sessionTranscript`）也要用它，判据不许有第二份。
+ */
+export function messageRoleOf(node: Pick<ChatNode, 'role' | 'principal'>): ChatRole {
+  return (node.role as ChatRole) ?? roleOfPrincipal(node.principal) ?? CHAT_ROLE_ASSISTANT
+}
 
 // ==================== 消息形态 ====================
 

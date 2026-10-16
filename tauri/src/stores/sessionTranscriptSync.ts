@@ -263,6 +263,9 @@ function messageOfNode(node: VdfsNode, text: string): ChatNode | null {
 
   const out: ChatNode = { id: node.name }
   if (typeof v.role === 'string') out.role = v.role as ChatNode['role']
+  // [T-147d-iii] attrs.principal 是后端 `message_node` 一直写的那格——照折进来，
+  // role 退役后它就是 `messageRoleOf` 的兜底来源（对象/历史字符串都由 normalize 吃下）。
+  if (v.principal != null) out.principal = v.principal as ChatNode['principal']
   if (folded) out.type = folded
   if (typeof v.parent_id === 'string') out.parent_id = v.parent_id
   // [T-147d-i] `tool_call_id` 不再上 wire，VDFS attrs 里的同名键是后端到后端的存储形状。

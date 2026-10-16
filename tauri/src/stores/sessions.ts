@@ -398,6 +398,9 @@ export const useSessionsStore = defineStore('sessions', () => {
         // 身份字段：有则合并（首帧建立身份；重复携带以最后到达为准）。
         if (message.parent_id != null) node.parent_id = message.parent_id
         if (message.role != null) node.role = message.role
+        // [T-147d-iii] 主体同「有则覆盖」：role 格退役后 `principal.kind` 是
+        // 分派的唯一承载点，流式窄帧不带、终态权威帧带——合并规则两边通用。
+        if (message.principal != null) node.principal = message.principal
         if (message.type != null) node.type = messageTypeOf(message)
         // [T-147d-i] `tool_call_id` 不再上 wire——后端 `#[serde(skip)]`，前端无消费点。
         // [T-147d-ii] 顶层 `name` 已退役——工具名随下面的 meta 合并（meta.tool_name）到位。

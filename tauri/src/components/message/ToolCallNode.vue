@@ -123,6 +123,7 @@ import {
   NODE_KIND_TURN,
   RESUME_ACTION_SUPPLY,
   isInflightNodeStatus,
+  messageRoleOf,
   messageTextOf,
   type ChatNode,
 } from '@/schemas/chat_node'
@@ -226,8 +227,8 @@ function collectSteps(turns: ChatNode[]): string[] {
   const out: string[] = []
   const walk = (nodes: ChatNode[]) => {
     for (const n of nodes) {
-      // user 是输入不是进展（与后端投影同一口径）
-      if (n.role !== CHAT_ROLE_USER) {
+      // user 是输入不是进展（与后端投影同一口径；判据走唯一折叠点 [T-147d-iii]）
+      if (messageRoleOf(n) !== CHAT_ROLE_USER) {
         const text = messageTextOf(n.content).trim()
         // 「无内容节点不产出步骤」：组合节点（turn / tool_call）没有 content ⇒ 空串跳过
         if (text) {

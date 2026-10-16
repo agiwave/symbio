@@ -27,6 +27,7 @@ import {
   CHAT_ROLE_SYSTEM,
   CHAT_ROLE_TOOL,
   CHAT_ROLE_USER,
+  messageRoleOf,
   NODE_STATUS_ABORTED,
   NODE_STATUS_COMPLETED,
   NODE_STATUS_FAILED,
@@ -61,10 +62,13 @@ import type { MessagePrompt, MessagePromptKind } from '@/schemas/message_prompt'
 
 // ==================== 节点 → 词表取值（缺省规则） ====================
 
-/** 节点的角色（缺省 = 助手） */
-export function messageRoleOf(node: Pick<ChatNode, 'role'>): ChatRole {
-  return (node.role as ChatRole) ?? CHAT_ROLE_ASSISTANT
-}
+/**
+ * 节点的角色——**唯一读入口**（[T-147d-iii]，镜像后端 `ChatNode::node_role()`）。
+ *
+ * 折叠实现住在契约层（`schemas/chat_node.messageRoleOf`，纯逻辑层同源共用）；
+ * 这里只转出，registry 的消费面保持稳定。
+ */
+export { messageRoleOf }
 
 /**
  * 形态 + `meta.style_tag` → **呈现键**（折叠的唯一实现）。
