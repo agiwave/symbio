@@ -41,6 +41,7 @@ import {
   sendInbox,
   assertTranscriptInvariants,
   assertSeqAnchorIsNodeAttribute,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 const TERMINAL = new Set(['completed', 'failed', 'aborted', 'waiting_user_action']);
@@ -107,7 +108,7 @@ export default defineCase('T11 压缩节点协议：compression 节点的开始/
     const doneTurns = () => {
       const last = new Map();
       for (const { mid, data } of rt.messages()) {
-        if (data?.type === 'turn') last.set(mid, data.status);
+        if (msgTypeOf(data) === 'turn') last.set(mid, data.status);
       }
       return [...last.values()].filter((s) => TERMINAL.has(s)).length;
     };
@@ -120,7 +121,7 @@ export default defineCase('T11 压缩节点协议：compression 节点的开始/
       await waitFor(() => doneTurns() > before, { what: `第 ${i + 1} 轮 turn 终态`, timeoutMs: 60_000 });
     }
     await waitFor(
-      () => rt.messages().some(({ data }) => data?.type === 'compression'),
+      () => rt.messages().some(({ data }) => msgTypeOf(data) === 'compression'),
       { what: '压缩节点出现在实时面上', timeoutMs: 10_000 },
     );
 
@@ -139,7 +140,7 @@ export default defineCase('T11 压缩节点协议：compression 节点的开始/
     );
 
     // ④ 压缩是一个**消息节点**：每一次压缩（可能多轮各一次）在实时面上是一组同 id 的帧
-    const compFrames = ops.filter(({ data }) => data?.type === 'compression');
+    const compFrames = ops.filter(({ data }) => msgTypeOf(data) === 'compression');
     assert(
       compFrames.length >= 2,
       `实时面上应有 compression 节点的帧（实际 ${compFrames.length}）\n时间线:\n${timeline.join('\n')}`,
@@ -196,7 +197,7 @@ export default defineCase('T11 压缩节点协议：compression 节点的开始/
       const beginArrival = frames[0].arrival;
       const endArrival = frames[frames.length - 1].arrival;
       // 它之后的第一个 Turn（在实时面上首次出现的）必须晚于压缩开始
-      const turnMids = [...new Set(ops.filter(({ data }) => data?.type === 'turn').map(({ mid }) => mid))];
+      const turnMids = [...new Set(ops.filter(({ data }) => msgTypeOf(data) === 'turn').map(({ mid }) => mid))];
       const nextTurnMid = turnMids
         .map((mid) => ({ mid, at: firstArrivalOfTurn(mid) }))
         .filter((t) => t.at > endArrival)

@@ -17,6 +17,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 export default defineCase('T3 工具回路（内置 vdfs_write）：文件真实写入工作目录', async () => {
@@ -60,9 +61,9 @@ export default defineCase('T3 工具回路（内置 vdfs_write）：文件真实
     });
     const msgs = await readSessionMessages(api, 'e2e-t3');
     assertTranscriptInvariants(msgs, 'T3');
-    const tc = msgs.find((m) => m.type === 'tool_call');
+    const tc = msgs.find((m) => msgTypeOf(m) === 'tool_call');
     assert(tc, '应有 tool_call 节点');
-    assertEq(tc.name, 'vdfs_write', '工具名应为解析后的能力名');
+    assertEq(tc.meta?.tool_name, 'vdfs_write', '工具名应为解析后的能力名');
   } finally {
     api?.stop();
     llm.stop();

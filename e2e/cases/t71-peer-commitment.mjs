@@ -13,7 +13,7 @@ import './_selfrun.mjs';
 //
 // | 要证的事 | 唯一能看见它的地方 |
 // |---|---|
-// | 对等主体真的跑了一轮（主体 = 登记窄行 `agent:peer-b`） | 事实源 `actor` / 声誉列逐字段 |
+// | 对等主体真的跑了一轮（主体 = 登记窄行 `session/peer-b`） | 事实源 `actor` / 声誉列逐字段 |
 // | 产物收束成立：发言格被拒、轮照样了结 | WAL 无 `chat.assistant.final` 而有 `artifact.added`；`invariants` 为空 |
 // | 来源主体是**数据**：`to` = 请求 metadata 声明的那个主体 | `commitment.opened` 的 `from` / `to` |
 // | 派生事实照写（`closure_denied` 数产物） | 同上——收束族被跳过就一格都不会有 |
@@ -21,12 +21,12 @@ import './_selfrun.mjs';
 //
 // ## 场景
 //
-// 主会话（`agent:main`）正常聊一轮；对等会话（metadata 绑 `peer-b` ⇒ 主体
-// `agent:peer-b`）经**地址面**收到一条带 `metadata.source_principal = 'agent:main'`
+// 主会话（`session/main`）正常聊一轮；对等会话（metadata 绑 `peer-b` ⇒ 主体
+// `session/peer-b`）经**地址面**收到一条带 `metadata.source_principal = 'session/main'`
 // 的收件箱消息。对等体的模型调 `agent_run` 委托一个**不存在**的智能体（工具失败
 // ⇒ 立约 + 违约，不需要真的派生子会话），结果回灌后模型给出汇总——发言闸拒它
 // （窄行无 `reply.*`），但产物格已落 ⇒ 轮以**产物**收束，轮末承诺族入格：
-// `from = agent:peer-b`（跑轮的主体）、`to = agent:main`（消息的来源主体）。
+// `from = session/peer-b`（跑轮的主体）、`to = session/main`（消息的来源主体）。
 import {
   MockLlm,
   makeHomedir,
@@ -51,9 +51,9 @@ import {
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 
-/** 主会话（无 `--agent` ⇒ 主体 `agent:main`）——来源主体的**出处**。 */
+/** 主会话（无 `--agent` ⇒ 主体 `session/main`）——来源主体的**出处**。 */
 const MAIN_SID = 'e2e-t71-main';
-/** 对等会话（metadata 绑 `peer-b` ⇒ 主体 `agent:peer-b`，授权表登记窄行）。 */
+/** 对等会话（metadata 绑 `peer-b` ⇒ 主体 `session/peer-b`，授权表登记窄行）。 */
 const PEER_SID = 'e2e-t71-peer';
 
 /** 对等智能体的人格——它只出现在**对等会话**的请求包里，是「不串」的正向探针。 */
@@ -194,7 +194,7 @@ export default defineCase(
           risk_level: 'medium',
         });
         const sent = await sendInbox(api, PEER_SID, PEER_Q, {
-          source_principal: 'agent:main',
+          source_principal: 'session/main',
         });
         assertEq(
           sent.status,
@@ -223,7 +223,7 @@ export default defineCase(
         // 产物收束（ADR-065 / ADR-067）：产物格在、actor = 对等主体、溯源指回开轮格。
         const artifact = peerEvents.find((e) => e.kind === 'artifact.added');
         assert(artifact, `产物格必须存在（实际 kinds: ${JSON.stringify(kinds)}）`);
-        assertEq(artifact.actor, 'agent:peer-b', '产物格的作者 = 对等主体');
+        assertEq(artifact.actor, 'session/peer-b', '产物格的作者 = 对等主体');
         assertEq(artifact.turn, 0, '产物格记在本轮');
         assertEq(
           artifact.produced_by,
@@ -240,15 +240,15 @@ export default defineCase(
         // 承诺族：from = 跑轮主体，to = **来源主体**（请求 metadata 声明的数据）。
         const offered = peerEvents.find((e) => e.kind === 'commitment.opened');
         assert(offered, '违约路径也要先立约（opened → broken → asserted）');
-        assertEq(offered.actor, 'agent:peer-b', '承诺格的作者 = 对等主体');
+        assertEq(offered.actor, 'session/peer-b', '承诺格的作者 = 对等主体');
         assertEq(
           offered.payload?.from,
-          'agent:peer-b',
+          'session/peer-b',
           '承诺方 = 跑轮的主体（声誉记在它头上）',
         );
         assertEq(
           offered.payload?.to,
-          'agent:main',
+          'session/main',
           '承诺对象 = 来源主体（metadata.source_principal 声明的数据，不是写死的常量）',
         );
         assertEq(offered.produced_by, userCell.seq, '立约锚在本轮开口格（I2）');
@@ -257,7 +257,7 @@ export default defineCase(
         const declared = peerEvents.find((e) => e.kind === 'commitment.asserted');
         assert(declared, '违约宣告必须成格');
         assert(
-          JSON.stringify(declared.payload).includes('agent:main'),
+          JSON.stringify(declared.payload).includes('session/main'),
           `宣告文案「已告知 <to>」带上来源主体（实际: ${JSON.stringify(declared.payload)?.slice(0, 200)}）`,
         );
 
@@ -271,20 +271,20 @@ export default defineCase(
           0,
           `产物收束 ⇒ 不变量清单为空（C4 认产物格，ADR-067；实际: ${JSON.stringify(stats.invariants)}）`,
         );
-        const peerRep = stats.reputation.by_principal['agent:peer-b'];
+        const peerRep = stats.reputation.by_principal['session/peer-b'];
         assert(peerRep, `声誉列应有对等主体的条目（实际: ${JSON.stringify(stats.reputation)}）`);
-        assertEq(peerRep.principal, 'agent:peer-b');
+        assertEq(peerRep.principal, 'session/peer-b');
         assertEq(peerRep.offered, 1, '立约 1 次（真实委托算出来的）');
         assertEq(peerRep.kept, 0, '违约 ⇒ kept 0');
         assertEq(peerRep.broken, 1, '违约 1 次');
         assertEq(peerRep.score, -1, '平凡打分 = 守约 − 违约');
 
-        // ── ⑥ 对照：主会话照常以发言收束（actor = agent:main 的 final 格在）──
+        // ── ⑥ 对照：主会话照常以发言收束（actor = session/main 的 final 格在）──
         assert(existsSync(mainWalPath), `主会话事实源应在：${mainWalPath}`);
         const mainEvents = walLines(mainWalPath);
         const mainFinal = mainEvents.find((e) => e.kind === 'chat.assistant.final');
         assert(mainFinal, '主会话（发言主体）照常落 final 格');
-        assertEq(mainFinal.actor, 'agent:main', '主会话的作者 = 主智能体');
+        assertEq(mainFinal.actor, 'session/main', '主会话的作者 = 主智能体');
 
         // ── ⑦ 请求包不串主体（t30 纪律：线程与召回分通道）────────────────────
         const reqs = await llm.requests();

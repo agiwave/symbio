@@ -46,6 +46,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 /** A 线的草稿（模型「打算怎么写」，被掐断时它全部就在 `reasoning_content` 里） */
@@ -132,7 +133,7 @@ export default defineCase(
       const msgs = await readSessionMessages(api, SID_TRUNCATED);
       assertTranscriptInvariants(msgs, 'T77-A');
       assert(
-        !msgs.some((m) => m.type === 'text' && (m.content ?? '').includes(DRAFT)),
+        !msgs.some((m) => msgTypeOf(m) === 'text' && (m.content ?? '').includes(DRAFT)),
         '草稿不得以正文节点入格（那是「答了」的形状）',
       );
       // 草稿**仍然是事实**：它在实时面上流过，收束格把它作为思考记下来。判据要的是
@@ -141,7 +142,7 @@ export default defineCase(
         async () => {
           const fresh = await readSessionMessages(api, SID_TRUNCATED);
           return (fresh ?? []).some(
-            (m) => m.type === 'reasoning' && (m.content ?? '').includes(DRAFT),
+            (m) => msgTypeOf(m) === 'reasoning' && (m.content ?? '').includes(DRAFT),
           );
         },
         { what: '被截断的思考仍作为思考事实入格', timeoutMs: 20_000 },
@@ -150,7 +151,7 @@ export default defineCase(
       const done = await readSessionMessages(api, SID_COMPLETE);
       assertTranscriptInvariants(done, 'T77-B');
       assert(
-        done.some((m) => m.type === 'text' && (m.content ?? '').includes(ANSWER)),
+        done.some((m) => msgTypeOf(m) === 'text' && (m.content ?? '').includes(ANSWER)),
         '未截断那一轮的答话以正文节点入格',
       );
     } finally {

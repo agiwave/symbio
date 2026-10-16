@@ -18,6 +18,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 export default defineCase('T6 MCP 工具报错：错误结果回灌 LLM，会话照常收敛（auto 模式）', async () => {
@@ -69,7 +70,7 @@ export default defineCase('T6 MCP 工具报错：错误结果回灌 LLM，会话
     });
     const msgs = await readSessionMessages(api, 'e2e-t6');
     assertTranscriptInvariants(msgs, 'T6');
-    const tc = msgs.find((m) => m.type === 'tool_call');
+    const tc = msgs.find((m) => msgTypeOf(m) === 'tool_call');
     assert(tc, '应有 tool_call 节点');
     // auto 模式：错误结果传回 LLM 继续生成，tool_call 本身仍应收敛到终态
     assert(['completed', 'failed'].includes(tc.status), `tool_call 应为终态（实际: ${tc.status}）`);

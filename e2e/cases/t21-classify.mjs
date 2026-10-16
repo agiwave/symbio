@@ -56,6 +56,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 /** 本用例的会话 id（一条断言线一个：五条线各自从零开始，断言互不污染） */
@@ -182,7 +183,7 @@ export default defineCase(
       const ruleMsgs = await readSessionMessages(cli, SIDS.rule);
       assertTranscriptInvariants(ruleMsgs, 'T21-A');
       assert(
-        !ruleMsgs.some((m) => m.type === 'tool_call'),
+        !ruleMsgs.some((m) => msgTypeOf(m) === 'tool_call'),
         'A 线不该出现工具调用节点（判决说不用干活）',
       );
 
@@ -197,11 +198,11 @@ export default defineCase(
       const clsMsgs = await readSessionMessages(cli, SIDS.classify);
       assertTranscriptInvariants(clsMsgs, 'T21-B');
       assert(
-        !clsMsgs.some((m) => m.type === 'tool_call'),
+        !clsMsgs.some((m) => msgTypeOf(m) === 'tool_call'),
         'B 线判决是"能直接答" ⇒ 不该有工具调用节点',
       );
       assert(
-        !clsMsgs.some((m) => m.type === 'turn'),
+        !clsMsgs.some((m) => msgTypeOf(m) === 'turn'),
         'B 线不进工具循环 ⇒ 不该有 Turn 组合节点',
       );
 
@@ -230,7 +231,7 @@ export default defineCase(
       // ── C 需要干活：「读一下 README」⇒ Escalate ⇒ 工具真的跑 ──
       base = await reqCount();
       await send(SIDS.work, '读一下 README');
-      await waitFor(async () => ((await readSessionMessages(cli, SIDS.work)) ?? []).some((m) => m.type === 'tool_call'), {
+      await waitFor(async () => ((await readSessionMessages(cli, SIDS.work)) ?? []).some((m) => msgTypeOf(m) === 'tool_call'), {
         what: 'C 线出现工具调用节点',
         timeoutMs: 40_000,
       });
@@ -245,7 +246,7 @@ export default defineCase(
         'C 线应有分类请求 + 工具循环请求（至少两次）',
       );
       assert(
-        workMsgs.some((m) => m.role === 'assistant' && m.type === 'text' && (m.content ?? '').includes('README')),
+        workMsgs.some((m) => m.role === 'assistant' && msgTypeOf(m) === 'text' && (m.content ?? '').includes('README')),
         'C 线应有模型给出的正文（判决放行后工具循环照旧跑完）',
       );
       // 分类请求是**内部请求**，必须静默。但 C 线不能照抄 B 线那条"零助手节点"的
@@ -258,7 +259,7 @@ export default defineCase(
       // 会把正确的行为判成红的；真正该拦的是**分类请求泄漏成可见轮次**，
       // 而那在「恰一个 Turn 根」下同样会被照出来（泄漏 ⇒ 读到 2）。
       const cReqs = (await reqCount()) - base;
-      const turnCount = workMsgs.filter((m) => m.type === 'turn').length;
+      const turnCount = workMsgs.filter((m) => msgTypeOf(m) === 'turn').length;
       assertEq(
         turnCount,
         1,

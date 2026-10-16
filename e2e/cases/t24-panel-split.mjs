@@ -56,6 +56,7 @@ import {
   PROVIDER_ID,
   assertTranscriptInvariants,
   textOf,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 const SID = 'e2e-t24-split';
@@ -160,8 +161,8 @@ export default defineCase(
       const msgs = await readSessionMessages(cli, SID);
       assertTranscriptInvariants(msgs, 'T24');
 
-      /** 落库的节点类型词（后端可能写 `type` 或 `msg_type`，两处都认） */
-      const typeOf = (m) => m.type ?? m.msg_type;
+      /** 落库的节点类型词——wire 五值形态经 msgTypeOf 折叠回旧词再比 */
+      const typeOf = (m) => msgTypeOf(m);
       /** 根级 = 没有父节点 */
       const roots = msgs.filter((m) => m.parent_id == null);
       const byId = new Map(msgs.map((m) => [m.id, m]));
@@ -262,7 +263,7 @@ export default defineCase(
       const frames = realtime.messages();
       assert(frames.length >= 3, `实时面应收到消息帧（实得 ${frames.length} 条）`);
       const frameTypes = new Set(
-        frames.map((f) => (f.data ? (f.data.type ?? f.data.msg_type) : null)).filter(Boolean),
+        frames.map((f) => (f.data ? msgTypeOf(f.data) : null)).filter(Boolean),
       );
       assert(
         frameTypes.has('tool_call'),

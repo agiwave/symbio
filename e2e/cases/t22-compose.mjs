@@ -78,6 +78,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 /** 本用例的会话 id（一条断言线一个：四条线各自从零开始，断言互不污染） */
@@ -224,7 +225,7 @@ export default defineCase(
       const tplReply = tplMsgs.filter((m) => m.meta?.surface === 'reply');
       assertEq(tplReply.length, 1, 'A 线应恰有一条对话面节点');
       assertEq(tplReply[0].role, 'assistant', '对话面节点是助手说的话');
-      assertEq(tplReply[0].type, 'text', '对话面节点是文本节点');
+      assertEq(msgTypeOf(tplReply[0]), 'text', '对话面节点是文本节点');
       assertEq(tplReply[0].content, TEMPLATE_THANKS, 'A 线应拿到致谢模板的原文');
       assert(
         tplReply[0].parent_id == null,
@@ -236,11 +237,11 @@ export default defineCase(
         'Answered 的答话就是这一轮的答复 ⇒ 必须进请求包（不得带剔除标记）',
       );
       assert(
-        !tplMsgs.some((m) => m.type === 'tool_call'),
+        !tplMsgs.some((m) => msgTypeOf(m) === 'tool_call'),
         'A 线判决是"能直接答" ⇒ 不该有工具调用节点',
       );
       assert(
-        !tplMsgs.some((m) => m.type === 'turn'),
+        !tplMsgs.some((m) => msgTypeOf(m) === 'turn'),
         'A 线不进工具循环 ⇒ 不该有 Turn 组合节点',
       );
 
@@ -263,7 +264,7 @@ export default defineCase(
         '答话必须挂在根级（对话线），不是某个 Turn 的子节点',
       );
       assert(
-        !genMsgs.some((m) => m.type === 'turn'),
+        !genMsgs.some((m) => msgTypeOf(m) === 'turn'),
         'B 线第 1 步不进工具循环 ⇒ 不该有 Turn 组合节点（生成请求也不得泄漏成可见轮次）',
       );
       // 思考事实入格：生成产线是这条轮次里唯一一次真实模型推理，mock 已带
@@ -271,7 +272,7 @@ export default defineCase(
       // （挂在答话节点之下）。此前它在措辞插件出口就被丢弃，Reason 节点从未存在。
       const genReason = genMsgs.find(
         (m) =>
-          m.type === 'reasoning' &&
+          msgTypeOf(m) === 'reasoning' &&
           m.parent_id === genReply[0].id,
       );
       assert(genReason, '答话节点下应有 Reason 子节点（思考事实入格）');
@@ -400,7 +401,7 @@ export default defineCase(
         await waitFor(
           async () =>
             (await reqCount()) - unmBase >= 1 &&
-            ((await readSessionMessages(cli2, SIDS.unmounted)) ?? []).some((m) => m.type === 'turn'),
+            ((await readSessionMessages(cli2, SIDS.unmounted)) ?? []).some((m) => msgTypeOf(m) === 'turn'),
           { what: 'C 线降级进工具循环（worker 请求 + Turn 节点）', timeoutMs: 40_000 },
         );
         const unmMsgs = await readSessionMessages(cli2, SIDS.unmounted);
@@ -441,7 +442,7 @@ export default defineCase(
         await waitFor(
           async () =>
             (await reqCount()) - offBase >= 1 &&
-            ((await readSessionMessages(cli3, SIDS.off)) ?? []).some((m) => m.type === 'turn'),
+            ((await readSessionMessages(cli3, SIDS.off)) ?? []).some((m) => msgTypeOf(m) === 'turn'),
           { what: 'D 线降级进工具循环（worker 请求 + Turn 节点）', timeoutMs: 40_000 },
         );
         const offMsgs = await readSessionMessages(cli3, SIDS.off);

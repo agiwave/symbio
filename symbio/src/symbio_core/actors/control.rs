@@ -35,7 +35,7 @@ pub struct PreemptionDecider;
 impl PreemptionDecider {
     /// S07 抢占判定者**行**（`ActorSpec` 生产构造点，[T-082] 批②）。
     ///
-    /// `{ principal: agent:reflex, pattern: decider, capabilities: [judge.intent],
+    /// `{ principal: session/reflex, pattern: decider, capabilities: [judge.intent],
     /// budget_ms: 80, scope: root }`——五个字段全部**取实**，与 S07 §3 表逐字相符：
     /// principal/pattern/capabilities 同源于授权表那一行（[T-081] 落地的
     /// `PRINCIPAL_REFLEX` 窄行），budget = 反射档，scope = root。
@@ -254,7 +254,7 @@ impl CircuitBreaker {
 /// ## 为什么 actor 是仲裁者而不是被淘汰主体
 ///
 /// 与 [`PreemptionDecider`] 的先例同一条理由：事件的 `actor` 是**判定者**——
-/// `agent:arbiter`（授权表里唯一持 `assert.verification` 的一行，C15 构造期保证
+/// `session/arbiter`（授权表里唯一持 `assert.verification` 的一行，C15 构造期保证
 /// 它不持 `define.work` / `produce.artifact`，自成对安全）。被淘汰的主体是载荷里的
 /// `subject`（数据），不是作者。把两者混同会让「谁做的裁决」在事实源里说不出来。
 ///
@@ -284,7 +284,7 @@ impl EliminationDecider {
 
     /// S13 仲裁者**行**（`ActorSpec` 生产构造点，与 [`PreemptionDecider::spec`] 同批同形）。
     ///
-    /// `{ principal: agent:arbiter, pattern: decider, capabilities: [assert.verification],
+    /// `{ principal: session/arbiter, pattern: decider, capabilities: [assert.verification],
     /// budget_ms: 80, scope: root }`——五个字段全部**取实**：principal / capabilities
     /// 同源于授权表那一行（T-073 落地的 `PRINCIPAL_ARBITER` 窄行），pattern 按
     /// [`Pattern::for_principal`] 派生（仲裁者无 `reply.*` 也无 `produce.artifact`

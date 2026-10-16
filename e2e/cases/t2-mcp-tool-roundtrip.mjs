@@ -21,6 +21,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 export default defineCase('T2 工具回路（MCP stdio）：tool_calls → 执行 → 结果回灌 → 收尾', async () => {
@@ -107,7 +108,7 @@ export default defineCase('T2 工具回路（MCP stdio）：tool_calls → 执�
     });
     const msgs = await readSessionMessages(api, 'e2e-t2');
     assertTranscriptInvariants(msgs, 'T2');
-    const tc = msgs.find((m) => m.type === 'tool_call');
+    const tc = msgs.find((m) => msgTypeOf(m) === 'tool_call');
     assert(tc, '应有 tool_call 节点');
     assertEq(tc.status, 'completed', 'tool_call 终态应为 completed');
   } finally {

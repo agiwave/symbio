@@ -1,6 +1,6 @@
 import './_selfrun.mjs';
 // T75 角色主体执行路径（[T-107](../../docs/009-task/107-角色主体执行路径批.md "T-107-角色主体执行路径批")，S02/S03）：
-// `agent:worker` 经**委派链真跑一轮**——产物格的作者是工人自己；同一轮里它调
+// `session/worker` 经**委派链真跑一轮**——产物格的作者是工人自己；同一轮里它调
 // `todo_write` 被**任务表写侧闸**诚实拒止（纯产出主体不立任务，C15 的精神）。
 //
 // ## 本用例钉的是什么
@@ -11,14 +11,14 @@ import './_selfrun.mjs';
 // | 格 | 单测钉在哪 | 这里钉什么 |
 // |---|---|---|
 // | 委派 ⇒ 子会话拿登记窄行 | `chat_loop/state.test.rs`（五字段真值） | 子会话真跑一轮，`ActorSpec` 的后果落在格子上 |
-// | 产物收束（作者 = 工人） | `turn_runner.test.rs`（收束闸分种类） | 真实轮次的 `artifact.added` actor = `agent:worker`、无发言格 |
+// | 产物收束（作者 = 工人） | `turn_runner.test.rs`（收束闸分种类） | 真实轮次的 `artifact.added` actor = `session/worker`、无发言格 |
 // | 收窄生效（vs 派生整套） | `authz.test.rs`（行窄于派生） | 未登记的 `worker` 会落 final 格；登记的**不落** |
 // | 任务表闸拒纯产出主体 | `tool_executor.test.rs`（闸的接线） | 拒因回灌进模型下一发请求，且**没有任务格**落盘 |
 //
 // ## 场景（两个轮次）
 //
-// - **轮 1**（正对照）：`agent:main` 调 `todo_write` ⇒ 照常执行（持 `define.work`），
-//   任务格作者 = `agent:main`。缺了这一格，「闸恒拒」也能全绿。
+// - **轮 1**（正对照）：`session/main` 调 `todo_write` ⇒ 照常执行（持 `define.work`），
+//   任务格作者 = `session/main`。缺了这一格，「闸恒拒」也能全绿。
 // - **轮 2**：`agent_run` 委派 `worker` ⇒ 子会话三发请求：真调 `vdfs_read`（产物格）、
 //   调 `todo_write`（被拒）、收尾正文（发言闸拒 ⇒ 不落 final 格，产物收束已足）。
 //
@@ -86,7 +86,7 @@ function lastUserText(r) {
 }
 
 export default defineCase(
-  'T75 角色主体执行路径：worker 委派真跑一轮（产物格作者 = agent:worker）+ 任务表闸拒纯产出主体',
+  'T75 角色主体执行路径：worker 委派真跑一轮（产物格作者 = session/worker）+ 任务表闸拒纯产出主体',
   async () => {
     const llm = await new MockLlm([
       // ── 主会话轮 1：声明任务图（工具真的执行——正对照）────────────────────
@@ -177,7 +177,7 @@ export default defineCase(
       assert(taskOpened, `轮 1 应落任务格（实际 kinds: ${JSON.stringify(r1Events.map((e) => e.kind))}）`);
       assertEq(
         taskOpened.actor,
-        'agent:main',
+        'session/main',
         '主智能体持 define.work ⇒ 任务格照常落（作者 = 会话主体）',
       );
 
@@ -222,7 +222,7 @@ export default defineCase(
       // 产物收束（ADR-067）：工具结果入格，**作者 = 工人自己**。
       const artifact = childEvents.find((e) => e.kind === 'artifact.added');
       assert(artifact, `工人子会话必须落产物格（实际 kinds: ${JSON.stringify(kinds)}）`);
-      assertEq(artifact.actor, 'agent:worker', '产物格的作者 = 工人（委派链上的登记窄行主体）');
+      assertEq(artifact.actor, 'session/worker', '产物格的作者 = 工人（委派链上的登记窄行主体）');
       assertEq(artifact.payload?.tool, 'vdfs_read', '产物来自工人真调的那个工具');
       assertEq(artifact.turn, userCell.turn, '产物格记在本轮');
       assertEq(artifact.produced_by, userCell.seq, '产物格溯源指向本轮开口格（I2）');
@@ -283,12 +283,12 @@ export default defineCase(
 
         // 声誉列（两个事实各断一面）：
         // ① own 列的主体 = **目标会话自己的**主体（子会话 metadata.agent_id=worker
-        //    → agent:worker），不是请求方（长驻 CLI 绑主会话）的主体——跨会话查数
+        //    → session/worker），不是请求方（长驻 CLI 绑主会话）的主体——跨会话查数
         //    时两者不同，接错就会把「别人看我的声誉」读成「别人的声誉」。
         // ② 工人这一轮的权威动作是**产物**不是承诺（todo_write 已被闸拒）⇒
         //    它没立任何约 ⇒ by_principal 为空是正确事实，不是读数缺失。
         const rep = childStats.body?.data?.reputation;
-        assertEq(rep?.own?.principal, 'agent:worker', 'own 列的主体 = 目标会话自己的主体（工人）');
+        assertEq(rep?.own?.principal, 'session/worker', 'own 列的主体 = 目标会话自己的主体（工人）');
         assertEq(
           Object.keys(rep?.by_principal ?? {}).length,
           0,
@@ -300,7 +300,7 @@ export default defineCase(
         const released = r2Events.find((e) => e.kind === 'commitment.released');
         assert(offered, '委派先立约（代际立约，S08）');
         assert(released, '工人真跑完 ⇒ 守约了结（不是违约）');
-        assertEq(offered.actor, 'agent:main', '承诺方 = 父会话主体');
+        assertEq(offered.actor, 'session/main', '承诺方 = 父会话主体');
 
         const msgs = await readSessionMessages(api, SID);
         assertTranscriptInvariants(msgs, 'T75 主会话');

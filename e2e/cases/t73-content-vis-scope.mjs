@@ -1,7 +1,7 @@
 import './_selfrun.mjs';
 // T73 内容侧可见域（[T-094](../../docs/009-task/094-个人认知可见域产地批.md "T-094-个人认知可见域产地批") ②）：
 // 矩阵内主体读得到**他人**的共享内容，矩阵外主体读不到；且判据随**内容**走——
-// 同一个读方（`agent:main`）在「无共享内容」的会话上照旧空切片。
+// 同一个读方（`session/main`）在「无共享内容」的会话上照旧空切片。
 //
 // ## 本用例钉的是什么
 //
@@ -19,12 +19,12 @@ import './_selfrun.mjs';
 // 只有「共享会话」一半的话，闸退化成「矩阵成员恒放行」也能全绿——那正是 T-094 之前
 // 恒传 `VisScope::default()`（thread_private）的镜像错误。负面对照会话 B 把这件事钉住：
 // 它**有过轮次**（WAL 在、属主读得到）但**没有共享内容**（发言臂收束被授权拒绝 ⇒
-// 派生事实不落格，`v2_exec` 的 `closure_denied` 早退）⇒ `agent:main` 照旧空切片。
+// 派生事实不落格，`v2_exec` 的 `closure_denied` 早退）⇒ `session/main` 照旧空切片。
 // 同一读方、两个会话、两种答案——差异只来自内容的可见域，不来自读方的身份。
 //
 // ## 会话 B 怎么造
 //
-// `--agent reflex` 把轮次主体绑到 `agent:reflex`——授权表里登记的窄行（只持
+// `--agent reflex` 把轮次主体绑到 `session/reflex`——授权表里登记的窄行（只持
 // `judge.intent`，无 `reply.*`）。运行器落收束格前判 `closure_granted`（发言臂），
 // 未持有 ⇒ 拒绝入格：无 final 格 ⇒ 本轮派生事实（承诺 / 任务 / 记忆）全不写。
 // 用户的答案照旧经 `produced` 回给调用方——收束格是**记录**，不是呈现。
@@ -48,7 +48,7 @@ import {
 } from '../helpers.mjs';
 import { join } from 'node:path';
 
-/** 会话 A：正常一轮（无 `--agent` ⇒ 主体 `agent:main`）⇒ 用户发言编成 shared 记忆。 */
+/** 会话 A：正常一轮（无 `--agent` ⇒ 主体 `session/main`）⇒ 用户发言编成 shared 记忆。 */
 const SHARED_SID = 'e2e-t73-shared';
 /** 会话 B：绑 `reflex`（登记窄行，无发言权）⇒ 有轮次无记忆。 */
 const NOSHARED_SID = 'e2e-t73-noshared';
@@ -89,7 +89,7 @@ export default defineCase(
       },
     });
     // reflex 智能体目录：会话绑定 `reflex` 时能力收集要求它存在（与 t30 / t71 同一硬约束）。
-    // 目录只是准入；能力集以授权表的登记行为权威（`agent:reflex` = 只持 `judge.intent`）。
+    // 目录只是准入；能力集以授权表的登记行为权威（`session/reflex` = 只持 `judge.intent`）。
     makeAgentDir(hd.homedir, {
       id: 'reflex',
       name: '抢占判定者',
@@ -156,7 +156,7 @@ export default defineCase(
           api.invoke('session/stats', { principal }, { session_id: sid });
 
         // ── 会话 A：同一条事实源、三种读法，差异只来自闸 ─────────────────────
-        const ownerA = (await readAs('user', SHARED_SID)).body.data;
+        const ownerA = (await readAs('person/local', SHARED_SID)).body.data;
         assertEq(ownerA.session_id, SHARED_SID, '读的是会话 A');
         assert(ownerA.has_wal, '会话 A 事实源应在');
         assert(
@@ -164,17 +164,17 @@ export default defineCase(
           `属主看得到会话 A 的事实（实际: ${ownerA.checkpoint.event_count}）`,
         );
 
-        // 矩阵内主体（`agent:main`）⇒ **读得到**他人的共享内容——T-094 ② 的正判据。
+        // 矩阵内主体（`session/main`）⇒ **读得到**他人的共享内容——T-094 ② 的正判据。
         // 读数与属主逐字相同：闸是整列判定，放行即放行整个快照。
-        const mainA = (await readAs('agent:main', SHARED_SID)).body.data;
-        assertEq(mainA.has_wal, true, 'agent:main: 事实源存在，只是今天给你看');
+        const mainA = (await readAs('session/main', SHARED_SID)).body.data;
+        assertEq(mainA.has_wal, true, 'session/main: 事实源存在，只是今天给你看');
         assertEq(
           mainA.checkpoint.event_count,
           ownerA.checkpoint.event_count,
-          'agent:main: 矩阵成员读得到他人共享内容 ⇒ 与属主读到同样多的事实',
+          'session/main: 矩阵成员读得到他人共享内容 ⇒ 与属主读到同样多的事实',
         );
-        assertEq(mainA.cost.total_ms, ownerA.cost.total_ms, 'agent:main: 成本列逐字相同');
-        assertEq(mainA.tiers, ownerA.tiers, 'agent:main: 档位行逐字相同');
+        assertEq(mainA.cost.total_ms, ownerA.cost.total_ms, 'session/main: 成本列逐字相同');
+        assertEq(mainA.tiers, ownerA.tiers, 'session/main: 档位行逐字相同');
 
         // 矩阵外的未知主体 ⇒ 空切片（fail-closed 不因这次接线放宽）。
         // `has_wal` 仍为真 ⇒ 「有源但不给你看」与「没有源」可分辨。
@@ -185,7 +185,7 @@ export default defineCase(
         assertEq(ghostA.tiers.length, 0, 'agent:ghost: 四列为空 ⇒ 无档位行');
 
         // ── 会话 B：同一读方、无共享内容 ⇒ 照旧空切片（判据随内容走的反判据）───
-        const ownerB = (await readAs('user', NOSHARED_SID)).body.data;
+        const ownerB = (await readAs('person/local', NOSHARED_SID)).body.data;
         assertEq(ownerB.session_id, NOSHARED_SID, '读的是会话 B');
         assert(ownerB.has_wal, '会话 B 事实源应在（有过轮次）');
         assert(
@@ -193,14 +193,14 @@ export default defineCase(
           `属主看得到会话 B 的轮次事实（实际: ${ownerB.checkpoint.event_count}）——下面的拒绝不是「没东西可读」`,
         );
 
-        const mainB = (await readAs('agent:main', NOSHARED_SID)).body.data;
-        assertEq(mainB.has_wal, true, 'agent:main: 会话 B 事实源存在');
+        const mainB = (await readAs('session/main', NOSHARED_SID)).body.data;
+        assertEq(mainB.has_wal, true, 'session/main: 会话 B 事实源存在');
         assertEq(
           mainB.checkpoint.event_count,
           0,
-          'agent:main: 会话 B 无共享内容 ⇒ 空切片（闸按内容侧可见域判，不是按读方恒放行）',
+          'session/main: 会话 B 无共享内容 ⇒ 空切片（闸按内容侧可见域判，不是按读方恒放行）',
         );
-        assertEq(mainB.tiers.length, 0, 'agent:main: 会话 B 无可见事实 ⇒ 无档位行');
+        assertEq(mainB.tiers.length, 0, 'session/main: 会话 B 无可见事实 ⇒ 无档位行');
 
         const ghostB = (await readAs('agent:ghost', NOSHARED_SID)).body.data;
         assertEq(ghostB.checkpoint.event_count, 0, 'agent:ghost: 会话 B 同样空切片');

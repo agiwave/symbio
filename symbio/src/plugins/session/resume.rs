@@ -388,16 +388,27 @@ async fn process_tool_resume_action(
     };
     let tc = &mut messages[tc_idx_adjusted];
     tc.status = Some(final_parent_status);
-    tc.meta = Some(if final_success {
-        json!({"success": true})
-    } else {
-        json!({
-            "success": false,
-            "failure_kind": "error",
-            "tool_name": tool_name,
-            "args": base_args
-        })
-    });
+    // **并入**而非整格替换：`meta.style_tag` / `meta.tool_name` 是骨架节点的身份
+    // （[T-147c-ii-s3] 后只活在 meta 里），整格覆盖会把恢复轮的工具卡片退化成 `turn`
+    // （与执行器 `emit_parent_finalized` 的合并口径同构）。
+    {
+        let mut meta = tc
+            .meta
+            .take()
+            .filter(|m| m.is_object())
+            .unwrap_or_else(|| json!({}));
+        if let Some(obj) = meta.as_object_mut() {
+            if final_success {
+                obj.insert("success".into(), json!(true));
+            } else {
+                obj.insert("success".into(), json!(false));
+                obj.insert("failure_kind".into(), json!("error"));
+                obj.insert("tool_name".into(), json!(tool_name));
+                obj.insert("args".into(), base_args.clone());
+            }
+        }
+        tc.meta = Some(meta);
+    }
     // 失败时不把 error 文本挂到父 ToolCall —— 子 Text 节点的 content 已包含错误详情，
     // 若父节点也挂 error，前端 MessageNode 会在父和子两处都渲染同一份错误文本，造成重复。
     // 父节点仅靠 status=Failed + meta.failure_kind 表达失败状态（供 resume 定位）。

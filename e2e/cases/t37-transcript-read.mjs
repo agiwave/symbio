@@ -126,7 +126,7 @@ export default defineCase(
         // ── 证据 ②′：读侧闸——别人的对话不从你的读数里漏出去 ──────────────────
         // 不声明 `principal` = 本机默认（上面 ②）；声明属主 = 逐字相同；矩阵外主体 ⇒ 空表。
         const asOwner = (
-          await api.invoke('session/stats', { principal: 'user' }, { session_id: SID })
+          await api.invoke('session/stats', { principal: 'person/local' }, { session_id: SID })
         ).body.data;
         assertEq(
           transcriptRows(asOwner).join('\n'),

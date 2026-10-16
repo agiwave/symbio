@@ -25,6 +25,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 /** 构造者声明的必需插件（`home::SYSTEM_PLUGINS`）中的一组代表 */
@@ -101,7 +102,7 @@ export default defineCase(
 
         const msgs = await readSessionMessages(cli, SID_ON);
         assertTranscriptInvariants(msgs, 'T17');
-        const tc = msgs.find((m) => m.type === 'tool_call');
+        const tc = msgs.find((m) => msgTypeOf(m) === 'tool_call');
         assert(tc, '应有 tool_call 节点');
         assertEq(tc.status, 'completed', 'tool_call 终态应为 completed');
 

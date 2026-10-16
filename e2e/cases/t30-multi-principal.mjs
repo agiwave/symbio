@@ -47,8 +47,8 @@ import './_selfrun.mjs';
 // ## 为什么子会话必须是**另一个主体**
 //
 // `--agent reviewer` 把会话 `metadata.agent_id` 落成 `reviewer`（CLI 的
-// `ensure_session`），chat 编排据此回填 `ctx[AGENT_ID]` ⇒ 主体名 `agent:reviewer`
-// （`chat_loop::request_principal`）。父会话不带 `--agent` ⇒ `agent:main`。
+// `ensure_session`），chat 编排据此回填 `ctx[AGENT_ID]` ⇒ 主体名 `session/reviewer`
+// （`chat_loop::request_principal`）。父会话不带 `--agent` ⇒ `session/main`。
 // 两个会话因此在同一套机制下**自己走到两个主体上**，没有用例侧的旁路。
 import {
   MockLlm,
@@ -69,9 +69,9 @@ import {
   assertTranscriptInvariants,
 } from '../helpers.mjs';
 
-/** 父会话（无 `--agent` ⇒ 主体 `agent:main`） */
+/** 父会话（无 `--agent` ⇒ 主体 `session/main`） */
 const PARENT_SID = 'e2e-t30-parent';
-/** 子会话（`--agent reviewer` ⇒ 主体 `agent:reviewer`） */
+/** 子会话（`--agent reviewer` ⇒ 主体 `session/reviewer`） */
 const CHILD_SID = 'e2e-t30-child';
 
 /** 子智能体的人格——它只出现在**子会话**的请求包里，是「不串」的正向探针。 */
@@ -379,13 +379,13 @@ export default defineCase(
         // 逐字段比（不比 JSON 串）：`serde_json` 的对象键序是 BTreeMap 的字典序，
         // 拿它当判据等于把「库的内部实现」写进用例。
         const own = stats.reputation.own;
-        assertEq(own.principal, 'agent:main', '声誉列 own 的主体 = 本会话主体');
+        assertEq(own.principal, 'session/main', '声誉列 own 的主体 = 本会话主体');
         assertEq(own.offered, 1, '立约 1 次（真实委托算出来的，不是常数）');
         assertEq(own.kept, 1, '了结为守约 ⇒ kept 1');
         assertEq(own.broken, 0, '没有违约 ⇒ broken 0');
         assertEq(own.score, 1, '平凡打分 = 守约 − 违约');
         assertEq(
-          stats.reputation.by_principal['agent:main'],
+          stats.reputation.by_principal['session/main'],
           stats.reputation.own,
           'own 就在 by_principal 里——同一张表的两个视角',
         );

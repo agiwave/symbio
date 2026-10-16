@@ -78,6 +78,7 @@ import {
   createSession,
   sendInbox,
   resumeSession,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 const TERMINAL = new Set(['completed', 'failed', 'aborted', 'waiting_user_action']);
@@ -166,7 +167,7 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
     const doneTurns = () => {
       const last = new Map();
       for (const { mid, data } of rt.messages()) {
-        if (data?.type === 'turn') last.set(mid, data.status);
+        if (msgTypeOf(data) === 'turn') last.set(mid, data.status);
       }
       return [...last.values()].filter((s) => TERMINAL.has(s)).length;
     };
@@ -199,7 +200,7 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
     assert(rounds >= 3, `阈值触发应发生在第 3 轮或之后（实际第 ${rounds} 轮前已达）`);
 
     // ── 阶段 2：失败分支（D）+ 结构化 meta 的失败形态（B）────────────────
-    const compFrames = rt.messages().filter(({ data }) => data?.type === 'compression');
+    const compFrames = rt.messages().filter(({ data }) => msgTypeOf(data) === 'compression');
     /** @type {Map<string, Array<{mid:string, data:any, arrival:number}>>} */
     const episodes = new Map();
     for (const f of compFrames) {
@@ -299,7 +300,7 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
     // A（反面）：没有任何**旁路节点**收到过摘要增量
     const bypass = rt
       .messages()
-      .filter(({ mid, data }) => mid !== okId && String(data?.content ?? '').includes('state_snapshot') && data?.type !== 'compression');
+      .filter(({ mid, data }) => mid !== okId && String(data?.content ?? '').includes('state_snapshot') && msgTypeOf(data) !== 'compression');
     // 快照 head 消息（meta.compacted）合法持有渲染后的快照正文；其余任何节点不得出现原始 XML
     assert(
       bypass.every(({ data }) => data?.meta?.compacted === true),
@@ -329,13 +330,13 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
     // （读出口 = 前端 loadMessages 同一出口，不碰任何内部存储文件）
     await waitFor(async () => {
       const msgs = (await readSessionMessages(cli, 'e2e-t18')) ?? [];
-      return msgs.some((m) => (m.type ?? m.msg_type) === 'compression' && m.meta?.compact_trigger === 'retry');
+      return msgs.some((m) => msgTypeOf(m) === 'compression' && m.meta?.compact_trigger === 'retry');
     }, { what: '重试的压缩节点落库', timeoutMs: 30_000 });
     const msgs = await readSessionMessages(cli, 'e2e-t18');
     assertTranscriptInvariants(msgs, 'T18 终态');
     // 重试只删除**被点击的那一个**失败节点（failId）；更早的两个失败节点原样
     // 留在存储里（它们各自都有交代，删除它们不是重试的职责）。
-    const compNodes = msgs.filter((m) => (m.type ?? m.msg_type) === 'compression');
+    const compNodes = msgs.filter((m) => msgTypeOf(m) === 'compression');
     const completedComp = compNodes.filter((m) => m.status === 'completed');
     assertEq(completedComp.length, 1, `存储里应恰有一个 completed 压缩节点（实际 ${completedComp.length}）`);
     assertEq(completedComp[0].id, okId, '存储里的 completed 压缩节点应是实时面上的那个新节点');
@@ -371,7 +372,7 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
   function episodesSnapshot() {
     const map = new Map();
     for (const f of rt.messages()) {
-      if (f.data?.type === 'compression' || (f.data?.delta != null && rt.framesOf(f.mid).some((x) => x.data?.type === 'compression'))) {
+      if (msgTypeOf(f.data) === 'compression' || (f.data?.delta != null && rt.framesOf(f.mid).some((x) => msgTypeOf(x.data) === 'compression'))) {
         const list = map.get(f.mid) ?? [];
         list.push(f);
         map.set(f.mid, list);

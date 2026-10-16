@@ -81,13 +81,13 @@ fn spec_closure_judgments_read_the_specs_own_capability_set() {
         "清空能力集后产物臂必须拒（证明判定读的是规格自己）"
     );
 
-    // 平凡值 `trivial`：权限取实（该主体自己的授权行）——`agent:main` 能收束。
+    // 平凡值 `trivial`：权限取实（该主体自己的授权行）——`session/main` 能收束。
     // 这正是订正 trivial 空表的理由：空表下平凡值连一轮对话都收束不了
     // （而 S01 §4 要求「平凡值下系统完整运行」）。
     let baseline = ActorSpec::trivial("session/main");
     assert!(
         baseline.can_land_speech(true) && baseline.can_land_artifact(),
-        "平凡值权限取实：agent:main 两臂都放"
+        "平凡值权限取实：session/main 两臂都放"
     );
     // 而只持 define.work 的自主主体照旧无发言权——窄行不因「平凡值」豁免。
     let autonomous = ActorSpec::trivial("session/autonomous");
@@ -101,7 +101,7 @@ fn spec_closure_judgments_read_the_specs_own_capability_set() {
 ///
 /// 挡的是「映射分叉」：`Capability::reply_capability` 若被复制成两份（core 一份、
 /// 插件一份），改一处即静默错位，而错位方向是**放行**（fail-open）。四个主体覆盖
-/// 登记行（会话 / 对等 / 抢占判定者）与派生分支（未登记 `agent:<id>`）。
+/// 登记行（会话 / 对等 / 抢占判定者）与派生分支（未登记 `session/<id>`）。
 #[test]
 fn spec_judgment_agrees_with_matrix_predicate_for_every_principal_shape() {
     use crate::symbio_core::authz::{matrix_for, PRINCIPAL_MAIN, PRINCIPAL_PEER, PRINCIPAL_REFLEX};
@@ -1681,7 +1681,7 @@ fn suspended_task_leaves_readyset_and_restores() {
 /// S07 §5：抢占判定者只持 JudgeIntent——无 reply.* 写权（判定者不得直接发言）。
 ///
 /// 判据走**生产表**（`matrix_for`），不是自造矩阵：自造一份 `PrincipalPolicy::paired`
-/// 只证明「我拒我」——表里少一行 `agent:reflex`，它照样绿，而生产里 `matrix_for` 的
+/// 只证明「我拒我」——表里少一行 `session/reflex`，它照样绿，而生产里 `matrix_for` 的
 /// 派生分支早把主智能体整套（含 `reply.*`）给了判定者（T-132 §3.1 批评的正是这个形态）。
 #[test]
 fn preemption_decider_cannot_speak() {

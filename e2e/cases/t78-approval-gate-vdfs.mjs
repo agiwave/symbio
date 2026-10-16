@@ -60,6 +60,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 const SID_INTERACTIVE = 'e2e-t78-interactive';
@@ -171,7 +172,7 @@ export default defineCase(
 
       const msgs0 = await readSessionMessages(api, SID_INTERACTIVE);
       assertTranscriptInvariants(msgs0, 'T78-A 等待轮');
-      const tc = msgs0.find((m) => (m.type ?? m.msg_type) === 'tool_call');
+      const tc = msgs0.find((m) => msgTypeOf(m) === 'tool_call');
       assert(
         tc && String(tc.content ?? tc.meta?.name ?? '').includes('vdfs_delete') || tc,
         `应有 vdfs_delete 的 tool_call 节点（实得: ${msgs0.map((m) => m.type).join(',')}）`,
@@ -179,7 +180,7 @@ export default defineCase(
       const promptNode = msgs0.find(
         (m) =>
           m.parent_id === tc.id &&
-          (m.type ?? m.msg_type) === 'user_prompt' &&
+          msgTypeOf(m) === 'user_prompt' &&
           m.status === 'waiting_user_action',
       );
       assert(
@@ -217,7 +218,7 @@ export default defineCase(
       );
 
       const msgs1 = await readSessionMessages(api, SID_INTERACTIVE);
-      const tc1 = msgs1.find((m) => (m.type ?? m.msg_type) === 'tool_call');
+      const tc1 = msgs1.find((m) => msgTypeOf(m) === 'tool_call');
       assert(
         msgs1.some((m) => m.role === 'tool' && m.parent_id === tc1.id),
         '恢复后 tool_call 须有结果子节点',
@@ -277,7 +278,7 @@ export default defineCase(
       );
       assert(
         !msgsB.some(
-          (m) => (m.type ?? m.msg_type) === 'user_prompt' && m.status === 'waiting_user_action',
+          (m) => msgTypeOf(m) === 'user_prompt' && m.status === 'waiting_user_action',
         ),
         'auto 模式不得产卡（无人可批 ⇒ 产卡等于把会话钉死在等待态）',
       );

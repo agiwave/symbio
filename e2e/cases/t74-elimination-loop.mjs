@@ -16,7 +16,7 @@ import './_selfrun.mjs';
 //
 // ## 场景（三个轮次）
 //
-// - **A 轮 1**（正对照）：`agent:main` 委托一个**不存在**的智能体 ⇒ 工具失败 ⇒
+// - **A 轮 1**（正对照）：`session/main` 委托一个**不存在**的智能体 ⇒ 工具失败 ⇒
 //   立约 + 违约 ⇒ 声誉 −1 ⇒ 轮末落裁决。这一轮的 `agent_run` **放行**（闸只在
 //   裁决之后才可能拒）——正对照与淘汰同批，缺了它「闸恒拒」也能全绿。
 // - **A 轮 2**：再委托 ⇒ 闸拒（同会话，覆盖层里已有那条撤销）；轮末**不落第二条
@@ -157,7 +157,7 @@ export default defineCase(
       const a1Kinds = a1Events.map((e) => e.kind);
       const offered = a1Events.find((e) => e.kind === 'commitment.opened');
       assert(offered, `轮 1 应先立约（实际 kinds: ${JSON.stringify(a1Kinds)}）`);
-      assertEq(offered.payload?.from, 'agent:main', '承诺方 = 会话主体（声誉记在它头上）');
+      assertEq(offered.payload?.from, 'session/main', '承诺方 = 会话主体（声誉记在它头上）');
       assert(
         a1Kinds.includes('commitment.broken'),
         `委托失败 ⇒ 违约成格（实际 kinds: ${JSON.stringify(a1Kinds)}）`,
@@ -167,8 +167,8 @@ export default defineCase(
       const verdicts = a1Events.filter((e) => e.kind === 'verdict.asserted');
       assertEq(verdicts.length, 1, `轮 1 应恰好落一条裁决（实际 ${verdicts.length}）`);
       const v = verdicts[0];
-      assertEq(v.actor, 'agent:arbiter', '裁决者是仲裁者，不是被淘汰主体');
-      assertEq(v.payload?.subject, 'agent:main');
+      assertEq(v.actor, 'session/arbiter', '裁决者是仲裁者，不是被淘汰主体');
+      assertEq(v.payload?.subject, 'session/main');
       assertEq(v.payload?.capability, 'assign.work', '收回的是派活能力（S13 §2 字面机制）');
       assertEq(v.payload?.change, 'revoke');
       assertEq(v.payload?.score, -1, '判据值随事件落盘（守约 − 违约）');
@@ -203,7 +203,7 @@ export default defineCase(
         1,
         'B 的事实源各自完整：本地违约 + 本地无既有裁决 ⇒ 本地也落一条（last-wins 折叠同一答案）',
       );
-      assertEq(bVerdicts[0].payload?.subject, 'agent:main');
+      assertEq(bVerdicts[0].payload?.subject, 'session/main');
 
       // ── ④ 请求留痕：拒因真的回灌进了模型（用户与模型都看得见）────────────
       const reqs = await llm.requests();
@@ -259,12 +259,12 @@ export default defineCase(
         const data = stats.body?.data;
         assert(data, `响应应带 data 载荷（实际: ${JSON.stringify(stats.body)}）`);
         assertEq(
-          data.reputation.by_principal['agent:main']?.score,
+          data.reputation.by_principal['session/main']?.score,
           -2,
           '两轮各一笔违约 ⇒ 声誉 −2（闸拒的那笔也如实记账）',
         );
         assertEq(
-          data.reputation.by_principal['agent:main']?.broken,
+          data.reputation.by_principal['session/main']?.broken,
           2,
           '违约两笔',
         );

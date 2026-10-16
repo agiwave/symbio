@@ -42,6 +42,7 @@ import {
   sendInbox,
   assertTranscriptInvariants,
   assertSeqAnchorIsNodeAttribute,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 const TERMINAL = new Set(['completed', 'failed', 'aborted', 'waiting_user_action']);
@@ -106,7 +107,7 @@ export default defineCase('T9 gateway WS 实时面：vdfs 变更帧序与增量�
     const isDone = () =>
       rt.messages().some(
         (m) =>
-          m.data?.type === 'text' &&
+          msgTypeOf(m.data) === 'text' &&
           m.data?.role === 'assistant' &&
           TERMINAL.has(m.data?.status) &&
           !isInterfaceText(m.data),
@@ -151,7 +152,7 @@ export default defineCase('T9 gateway WS 实时面：vdfs 变更帧序与增量�
     // ⑦ 帧形态：同一正文节点的「首帧全量（身份 + 正文）→ 窄增量*」
     const firstText = msgs.find(
       (m) =>
-        m.data?.type === 'text' &&
+        msgTypeOf(m.data) === 'text' &&
         m.data?.role === 'assistant' &&
         !isInterfaceText(m.data),
     );
@@ -159,7 +160,7 @@ export default defineCase('T9 gateway WS 实时面：vdfs 变更帧序与增量�
     const frames = rt.framesOf(firstText.mid);
     const head = frames[0].data;
     assertEq(head.status, 'streaming', '首帧状态应为 streaming');
-    assertEq(head.type, 'text', '首帧应带节点身份（type）——增量不得落在没有身份的节点上');
+    assertEq(msgTypeOf(head), 'text', '首帧应带节点身份（type）——增量不得落在没有身份的节点上');
     assert(head.content != null, '首帧应带正文（content，全量）');
     const deltas = frames.filter((f) => f.data?.delta != null);
     assert(deltas.length >= 3, `应有流式 delta 增量（实际 ${deltas.length}）`);

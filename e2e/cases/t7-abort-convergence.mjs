@@ -21,6 +21,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 export default defineCase('T7 中止收敛：运行中 action(会话地址, abort)，节点全部终态 + outcome=aborted', async () => {
@@ -80,7 +81,7 @@ export default defineCase('T7 中止收敛：运行中 action(会话地址, abor
     assertTranscriptInvariants(msgs, 'T7');
 
     // Turn 根 → Aborted；Turn 子节点（本用例无工具）→ 正文不悬空
-    const turnRoots = msgs.filter((m) => m.type === 'turn' && !m.parent_id);
+    const turnRoots = msgs.filter((m) => msgTypeOf(m) === 'turn' && !m.parent_id);
     assert(turnRoots.length >= 1, '至少应有一个 Turn 根节点');
     for (const t of turnRoots) {
       assert(t.status === 'aborted', `Turn 根应为 aborted（实际 ${t.status}）`);

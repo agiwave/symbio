@@ -35,6 +35,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 const SID = 'e2e-t48';
@@ -104,7 +105,7 @@ export default defineCase(
       try {
         const msgs = await readSessionMessages(api, SID);
         assertTranscriptInvariants(msgs, 'T48');
-        const toolCalls = msgs.filter((m) => (m.type ?? m.msg_type) === 'tool_call');
+        const toolCalls = msgs.filter((m) => msgTypeOf(m) === 'tool_call');
         assertEq(toolCalls.length, TOTAL, `转写应有 ${TOTAL} 个 tool_call 节点`);
         assert(
           toolCalls.every((m) => m.status === 'completed'),

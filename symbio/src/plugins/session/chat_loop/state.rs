@@ -903,6 +903,11 @@ impl ChatOrchestrator {
                         parent_id: Some(root_id.into()),
                         role: Some(NodeRole::Assistant),
                         msg_type: Some(NodeKind::Body),
+                        // **换形态要带清除格**：s3 起思考节点的呈现身份住在 `meta.style_tag`，
+                        // 帧的合入是「有则覆盖」——不带 meta = 旧 tag 留在消费方快照里，
+                        // `is_text` 永远折叠不出正文（CLI 不回显、以失败退出；e2e t55/t77 抓到）。
+                        // 空对象 = 整格覆盖且无 tag，把「同 id 换类型」说完整。
+                        meta: Some(serde_json::json!({})),
                         content: Some(MessageContent::Text(out.reasoning.clone())),
                         status: Some(NodeStatus::Completed),
                         ..Default::default()
@@ -952,6 +957,10 @@ impl ChatOrchestrator {
                 parent_id: Some(root_id.into()),
                 role: Some(NodeRole::Assistant),
                 msg_type: Some(NodeKind::Body),
+                // 与上面 reasoning-only 分支同一纪律：答案取自思考时要把 tag 清除格
+                // 说完整（`with_style_tag` 在未覆盖形态下重新打回 reasoning，两分支
+                // 各自的最终 meta 都由这一格决定）。
+                meta: Some(serde_json::json!({})),
                 content: Some(MessageContent::Text(out.reasoning.clone())),
                 status: Some(NodeStatus::Completed),
                 ..Default::default()

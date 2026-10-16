@@ -75,8 +75,8 @@ impl ActorSpec {
     /// 当时绕道直接查授权表——字段空着也没人问，正是本批要消灭的「算了却看不见」。
     ///
     /// 订正后的平凡值 = **权限取实（该主体的登记行）、模式与预算取平凡**（规则驱动、
-    /// 放宽预算、根作用域）。`agent:main` 因此持 `reply.*` 能收束，而
-    /// `agent:autonomous`（只持 `define.work`）照旧无发言权——「自主行为不得冒充
+    /// 放宽预算、根作用域）。`session/main` 因此持 `reply.*` 能收束，而
+    /// `session/autonomous`（只持 `define.work`）照旧无发言权——「自主行为不得冒充
     /// 用户对话」这条不因平凡值而失效。
     pub fn trivial(principal: impl Into<String>) -> Self {
         let principal = principal.into();

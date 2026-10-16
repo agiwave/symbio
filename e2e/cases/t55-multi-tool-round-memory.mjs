@@ -55,6 +55,7 @@ import {
   PROVIDER_ID,
   assertTranscriptInvariants,
   waitFor,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 /** 会话 id 固定（与 t46 同一理由：它出现在 prompt 的记忆地址里） */
@@ -195,7 +196,7 @@ export default defineCase(
         const msgs = await readSessionMessages(api, SID);
         assertTranscriptInvariants(msgs, 'T55');
         const answer = msgs.find(
-          (m) => m.role === 'assistant' && (m.type ?? m.msg_type) === 'text' && (m.content ?? '') === REASONING_ANSWER,
+          (m) => m.role === 'assistant' && msgTypeOf(m) === 'text' && (m.content ?? '') === REASONING_ANSWER,
         );
         assert(
           answer,
@@ -206,7 +207,7 @@ export default defineCase(
           !msgs.some((m) => m.status === 'failed'),
           '本轮不该有任何失败格（末轮只有思考被判成 empty text 时整轮落兜底）',
         );
-        const toolCalls = msgs.filter((m) => (m.type ?? m.msg_type) === 'tool_call');
+        const toolCalls = msgs.filter((m) => msgTypeOf(m) === 'tool_call');
         assertEq(toolCalls.length, 2, '两次调用应有两张工具卡（同 id 被归并 ⇒ 只剩一张）');
       } finally {
         api.stop();

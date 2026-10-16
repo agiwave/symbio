@@ -41,6 +41,7 @@ import {
   readSessionMessages,
   assertTranscriptInvariants,
   textOf,
+  msgTypeOf,
 } from '../helpers.mjs';
 import { assertCompressionRequestShape } from '../llm-contract.mjs';
 
@@ -126,7 +127,7 @@ export default defineCase(
       const doneTurns = () => {
         const last = new Map();
         for (const { mid, data } of rt.messages()) {
-          if (data?.type === 'turn') last.set(mid, data.status);
+          if (msgTypeOf(data) === 'turn') last.set(mid, data.status);
         }
         return [...last.values()].filter((s) =>
           ['completed', 'failed', 'aborted', 'waiting_user_action'].includes(s),

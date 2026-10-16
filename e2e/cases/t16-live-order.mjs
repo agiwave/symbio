@@ -39,6 +39,7 @@ import {
   PROVIDER_ID,
   readSessionMessages,
   assertTranscriptInvariants,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 const SID = 'e2e-t16';
@@ -111,7 +112,7 @@ export default defineCase('T16 实时面顺序 = 存储顺序（多轮：每条�
         const ids = new Set();
         for (const m of rt.messages()) {
           if (
-            m.data?.type === 'text' &&
+            msgTypeOf(m.data) === 'text' &&
             m.data?.role === 'assistant' &&
             TERMINAL.has(m.data?.status)
           ) {

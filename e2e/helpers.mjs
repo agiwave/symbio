@@ -906,6 +906,27 @@ export function turnFacts(events) {
 }
 
 /**
+ * wire 形态词 → 旧类型词的折叠（镜像前端 `messageTypes.messageTypeOf` 的判据）。
+ *
+ * [T-147c-ii-s3/s4] 之后 ChatNode 的 `type` 只有五值
+ * （body/notice/skeleton/interaction/typing），呈现变体住 `meta.style_tag`。
+ * e2e 若继续拿 `m.type === 'tool_call'` 这类**旧词**比较，条件永远不成立——
+ * 断言不报错、只是不再命中靶子（静默跳过），这比失败更危险。
+ * 所有对消息节点 / 实时帧 `type` 的判据一律经本函数折叠回旧词再比。
+ *
+ * 旧词与未知值原样透传（存量 fixture 与未来新词都不会被误判成别的）。
+ */
+export function msgTypeOf(m) {
+  const t = m?.type ?? m?.msg_type ?? undefined;
+  const tag = m?.meta?.style_tag;
+  if (t === 'skeleton') return tag === 'tool' ? 'tool_call' : 'turn';
+  if (t === 'body') return tag === 'reasoning' ? 'reasoning' : 'text';
+  if (t === 'notice') return 'compression';
+  if (t === 'interaction') return 'user_prompt';
+  return t;
+}
+
+/**
  * 转写不变量（所有用例共享的落盘断言）：
  * - `seq` 严格递增、消息 id 唯一；
  * - 每个 tool_call 必有 role=tool 的结果子节点（「有请求必有响应」）。
@@ -923,7 +944,7 @@ export function assertTranscriptInvariants(messages, label) {
     ids.add(m.id);
   }
   for (const m of messages) {
-    if ((m.type ?? m.msg_type) === 'tool_call') {
+    if (msgTypeOf(m) === 'tool_call') {
       const result = messages.find((x) => x.parent_id === m.id && x.role === 'tool');
       assert(result, `${label}: tool_call ${(m.meta?.tool_name ?? m.id)} 没有结果子节点（有请求无响应）`);
     }

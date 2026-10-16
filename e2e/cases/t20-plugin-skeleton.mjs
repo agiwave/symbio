@@ -67,6 +67,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 const SID = 'e2e-t20';
@@ -259,7 +260,7 @@ export default defineCase(
       //    没有文本 ⇒ 分类解析不出词 ⇒ 兜底 `Escalate`），因此期望恰好一条首响节点。
       const msgs = await runTurn(cli, SID, '帮我写文件');
       assertTranscriptInvariants(msgs, 'T20');
-      const tc = msgs.find((m) => m.type === 'tool_call');
+      const tc = msgs.find((m) => msgTypeOf(m) === 'tool_call');
       assert(tc, '应有 tool_call 节点');
       assertEq(tc.status, 'completed', 'tool_call 终态应为 completed');
       assert(
@@ -303,7 +304,7 @@ export default defineCase(
 
       const offMsgs = await runTurn(cli, SID_OFF, '帮我写文件');
       assertTranscriptInvariants(offMsgs, 'T20-off');
-      const offTc = offMsgs.find((m) => m.type === 'tool_call');
+      const offTc = offMsgs.find((m) => msgTypeOf(m) === 'tool_call');
       assert(offTc, '停用两个插件后仍应有 tool_call 节点');
       assertEq(offTc.status, 'completed', '停用两个插件后 tool_call 终态仍应为 completed');
     } finally {

@@ -77,6 +77,7 @@ import {
   readSessionMessages,
   assertTranscriptInvariants,
   E2E_ROOT,
+  msgTypeOf,
 } from '../helpers.mjs';
 import { extractObservations } from '../../scripts/prompt-shape-audit.mjs';
 
@@ -326,7 +327,7 @@ export default defineCase(
       // ── 证据 ③：压缩真的被这副负载触发了多次，且每次都收在终态 ────────────
       const episodes = new Map();
       for (const f of sub.messages()) {
-        if (f.data?.type !== 'compression') continue;
+        if (msgTypeOf(f.data) !== 'compression') continue;
         const list = episodes.get(f.mid) ?? [];
         list.push(f);
         episodes.set(f.mid, list);

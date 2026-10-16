@@ -49,6 +49,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 /** 随机标记词：只存在于工作区文件里，模型侧无从得知 ⇒ 「出现」即「真读了盘」。 */
@@ -210,7 +211,7 @@ export default defineCase(
         });
         const msgs = await readSessionMessages(api, 'e2e-t68');
         assertTranscriptInvariants(msgs, 'T68a');
-        const calls = msgs.filter((m) => m.type === 'tool_call');
+        const calls = msgs.filter((m) => msgTypeOf(m) === 'tool_call');
         assertEq(calls.length, 3, '应有三次工具调用节点');
         for (const c of calls) assertEq(c.status, 'completed', `tool_call 终态应为 completed（${c.name}）`);
       } finally {

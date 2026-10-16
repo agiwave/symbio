@@ -176,7 +176,7 @@ export default defineCase(
 
         // ── ④ 承诺：委托成功 ⇒ 立约一次、了结一次（声誉列）──────────────────
         const own = stats.reputation.own;
-        assertEq(own.principal, 'agent:main', '声誉列 own 的主体 = 本会话主体');
+        assertEq(own.principal, 'session/main', '声誉列 own 的主体 = 本会话主体');
         assertEq(own.offered, 1, '真实委托算出的立约 1 次（不是常数）');
         assertEq(own.kept, 1, '委托成功 ⇒ 了结为守约 kept 1');
         assertEq(own.broken, 0, '没有违约 ⇒ broken 0');

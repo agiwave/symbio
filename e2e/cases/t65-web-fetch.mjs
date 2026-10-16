@@ -52,6 +52,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 const SID = 'e2e-t65';
@@ -259,14 +260,14 @@ export default defineCase(
       // ── 证据⑧：转写落格，五个 tool_call 都终态化
       const msgs = await readSessionMessages(cli, SID);
       assertTranscriptInvariants(msgs, 'T65');
-      const calls = msgs.filter((m) => (m.type ?? m.msg_type) === 'tool_call');
+      const calls = msgs.filter((m) => msgTypeOf(m) === 'tool_call');
       assertEq(
-        calls.map((c) => c.name).join(','),
+        calls.map((c) => c.meta?.tool_name).join(','),
         'web_fetch,web_fetch,web_fetch,web_fetch,http_request',
         '工具名与顺序应保持',
       );
       for (const c of calls) {
-        assertEq(c.status, 'completed', `tool_call(${c.name}) 终态应为 completed`);
+        assertEq(c.status, 'completed', `tool_call(${c.meta?.tool_name}) 终态应为 completed`);
       }
     } finally {
       rt?.close();

@@ -45,6 +45,7 @@ import {
   sendInbox,
   assertTranscriptInvariants,
   assertSeqAnchorIsNodeAttribute,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 /** 终态词（与后端 `is_terminal` 同口径） */
@@ -200,7 +201,7 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     };
 
     // ⑦ Reasoning 节点
-    const reasonNode = [...nodes.values()].find((m) => m.type === 'reasoning');
+    const reasonNode = [...nodes.values()].find((m) => msgTypeOf(m) === 'reasoning');
     assert(reasonNode, `实时面应有 reasoning 节点\n时间线:\n${timeline.join('\n')}`);
     const rb = rebuild(reasonNode.id);
     assertEq(rb.start.data.status, 'streaming', `reasoning 首帧应为 streaming（节点 ${reasonNode.id}）`);
@@ -218,7 +219,7 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     // 判据取 `meta.exclude_from_context`（与 `cli/src/render.rs` 的 `is_progress_surface`
     // 同一条），不按 `surface` 判——答话节点也带 `surface=reply`。
     const textNode = [...nodes.values()].find(
-      (m) => m.type === 'text' && m.role === 'assistant' && m.meta?.exclude_from_context !== true,
+      (m) => msgTypeOf(m) === 'text' && m.role === 'assistant' && m.meta?.exclude_from_context !== true,
     );
     assert(textNode, `实时面应有 assistant text 节点\n时间线:\n${timeline.join('\n')}`);
     const tb = rebuild(textNode.id);
@@ -234,7 +235,7 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     assertEq(tb.text, '正文甲正文乙正文丙', 'text 增量拼接应等于完整正文');
 
     // ⑨ ToolCall 节点：参数流式 → 执行窗口（started_at）→ 终态
-    const tcNode = [...nodes.values()].find((m) => m.type === 'tool_call');
+    const tcNode = [...nodes.values()].find((m) => msgTypeOf(m) === 'tool_call');
     assert(tcNode, `实时面应有 tool_call 节点\n时间线:\n${timeline.join('\n')}`);
     const cb = rebuild(tcNode.id);
     assertEq(cb.start.data.status, 'streaming', 'tool_call 首帧应为 streaming');
@@ -263,7 +264,7 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
 
     // ⑩ 组合节点终态跟随子树：Turn 终态不得早于任一子节点终态。
     //    顺序用**到达序**（单一 FIFO）——`seq` 是节点位置，不承担投递顺序。
-    const turnNode = [...nodes.values()].find((m) => m.type === 'turn');
+    const turnNode = [...nodes.values()].find((m) => msgTypeOf(m) === 'turn');
     assert(turnNode, '实时面应有 turn 组合节点');
     const terminalArrival = (mid) =>
       Math.max(
@@ -319,7 +320,7 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     // 历史读出口是前端加载历史的同一条地址，这条断言保证 Reason 节点刷新后仍在）
     const storedReason = stored.find((x) => x.id === reasonNode.id);
     assertEq(
-      storedReason?.type ?? storedReason?.msg_type,
+      msgTypeOf(storedReason),
       'reasoning',
       '落盘节点的类型必须是 reasoning',
     );

@@ -65,6 +65,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 /** 三条线各自的会话 id（各自从零开始，断言互不污染） */
@@ -215,7 +216,7 @@ export default defineCase(
       assertEq(aReports.length, 2, `A 线两个轮边界应各汇报一次（实得 ${aReports.length} 条）`);
       for (const r of aReports) {
         assertEq(r.role, 'assistant', '汇报是助手说的话');
-        assertEq(r.type, 'text', '汇报是文本节点');
+        assertEq(msgTypeOf(r), 'text', '汇报是文本节点');
         assert(r.parent_id == null, '汇报必须挂根级——挂在 Turn 之下会让前端「对话」面板看不到它');
         assertEq(
           r.meta?.exclude_from_context,
@@ -306,7 +307,7 @@ export default defineCase(
       );
       // 护栏只封顶，不改变工具回路本身：两轮工具照旧跑完
       assertEq(
-        bMsgs.filter((m) => m.type === 'tool_call').length,
+        bMsgs.filter((m) => msgTypeOf(m) === 'tool_call').length,
         2,
         '配额不影响工具回路（两轮工具调用照旧）',
       );
@@ -331,7 +332,7 @@ export default defineCase(
       );
       // 平凡值线必须**仍然完整可用**：工具照跑、正文照出，只是没有汇报
       assertEq(
-        cMsgs.filter((m) => m.type === 'tool_call').length,
+        cMsgs.filter((m) => msgTypeOf(m) === 'tool_call').length,
         2,
         'C 线工具回路照旧（关掉汇报不影响干活）',
       );

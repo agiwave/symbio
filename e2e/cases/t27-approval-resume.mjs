@@ -71,6 +71,7 @@ import {
   PROVIDER_ID,
   assertTranscriptInvariants,
   resumeSession,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 /** 本用例的会话 id */
@@ -157,12 +158,12 @@ export default defineCase(
         // 恢复入口要的 `target_id` 就是这里的 tool_call 节点 id。
         const msgs0 = await readSessionMessages(api, SID);
         assertTranscriptInvariants(msgs0, 'T27 等待轮');
-        const tc = msgs0.find((m) => (m.type ?? m.msg_type) === 'tool_call');
-        assert(tc, `应有 tool_call 节点（实得类型: ${msgs0.map((m) => m.type).join(',')}）`);
+        const tc = msgs0.find((m) => msgTypeOf(m) === 'tool_call');
+        assert(tc, `应有 tool_call 节点（实得类型: ${msgs0.map((m) => msgTypeOf(m)).join(',')}）`);
         const promptNode = msgs0.find(
           (m) =>
             m.parent_id === tc.id &&
-            (m.type ?? m.msg_type) === 'user_prompt' &&
+            msgTypeOf(m) === 'user_prompt' &&
             m.status === 'waiting_user_action',
         );
         assert(
@@ -249,7 +250,7 @@ export default defineCase(
 
         // ── 转写不变量：恢复后节点仍成对、seq 严格递增 ───────────────────────
         assertTranscriptInvariants(msgs1, 'T27 恢复后');
-        const tc1 = msgs1.find((m) => (m.type ?? m.msg_type) === 'tool_call');
+        const tc1 = msgs1.find((m) => msgTypeOf(m) === 'tool_call');
         assert(
           msgs1.some((m) => m.role === 'tool' && m.parent_id === tc1.id),
           '恢复后 tool_call 仍须有结果子节点',

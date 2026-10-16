@@ -615,10 +615,15 @@ fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
         .unwrap_or_default()
         .to_string();
     if !failure_kind.is_empty() {
-        call.meta = Some(serde_json::json!({
-            "success": success,
-            "failure_kind": failure_kind,
-        }));
+        // **并入**而非整格替换：构造侧的 `meta.style_tag` / `meta.tool_name` 是
+        // 节点身份的一部分（[T-147c-ii-s3] 后骨架与工具名只活在 meta 里），
+        // 整格覆盖 = 重建一次丢一次形态词，前端折叠退回 `turn`（e2e t27 抓到）。
+        let mut meta = call.meta.clone().unwrap_or_else(|| serde_json::json!({}));
+        if let Some(obj) = meta.as_object_mut() {
+            obj.insert("success".into(), serde_json::json!(success));
+            obj.insert("failure_kind".into(), serde_json::json!(failure_kind));
+        }
+        call.meta = Some(meta);
     }
 
     // 结果节点 id 由 core 的 [`event_tool_result_node_id`] 给（载荷有就用；恢复路记 `null`

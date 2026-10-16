@@ -54,6 +54,7 @@ import {
   sendInbox,
   assertTranscriptInvariants,
   textOf,
+  msgTypeOf,
 } from '../helpers.mjs';
 
 const SID = 'e2e-t54';
@@ -152,7 +153,7 @@ export default defineCase(
         () =>
           rt.messages().some(
             (m) =>
-              m.data?.type === 'text' &&
+              msgTypeOf(m.data) === 'text' &&
               m.data?.role === 'assistant' &&
               m.data?.status === 'completed' &&
               String(m.data?.content ?? '').includes(SETTLE_TEXT),
@@ -160,7 +161,7 @@ export default defineCase(
         { what: '本轮跑完（收束正文到达终态）', timeoutMs: 60_000 },
       );
 
-      const toolFrames = rt.messages().filter(({ data }) => data?.type === 'tool_call');
+      const toolFrames = rt.messages().filter(({ data }) => msgTypeOf(data) === 'tool_call');
 
       // ── 断言 ①：首批建了 N 个调用节点，重发**没有新建**（id 复用 ⇒ 不重复卡片）──
       // 重发若换 id，这里会多出一个（distinct 变 N+1）——正是「同批两套卡片」的黑盒指纹。
@@ -175,7 +176,7 @@ export default defineCase(
       // ── 断言 ②③：转写里恰好 M 个调用，且复用首批的节点 id（前缀复用）──
       const msgs = await readSessionMessages(cli, SID);
       assertTranscriptInvariants(msgs, 'T54');
-      const toolCalls = (msgs ?? []).filter((m) => (m.type ?? m.msg_type) === 'tool_call');
+      const toolCalls = (msgs ?? []).filter((m) => msgTypeOf(m) === 'tool_call');
       assertEq(
         toolCalls.length,
         RESEND_CALLS,
@@ -192,7 +193,7 @@ export default defineCase(
       // ── 断言 ④：不留名字 / 参数全空的幽灵调用 ──────────────────────────
       for (const m of toolCalls) {
         assert(
-          typeof m.name === 'string' && m.name.trim() !== '',
+          typeof m.meta?.tool_name === 'string' && m.meta.tool_name.trim() !== '',
           `工具调用节点不得名字全空（幽灵调用；节点 ${m.id}）`,
         );
         const args = textOf(m).trim();
