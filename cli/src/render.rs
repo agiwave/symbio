@@ -144,9 +144,6 @@ impl Renderer {
             if message.msg_type.is_some() {
                 merged.msg_type = message.msg_type.clone();
             }
-            if message.name.is_some() {
-                merged.name = message.name.clone();
-            }
             if message.tool_call_id.is_some() {
                 merged.tool_call_id = message.tool_call_id.clone();
             }
@@ -205,7 +202,7 @@ impl Renderer {
                 merged.role.clone(),
                 merged.status == Some(NodeStatus::Failed),
                 merged.error.clone(),
-                merged.name.clone(),
+                merged.tool_name().map(str::to_string),
                 progress,
             )
         };

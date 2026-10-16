@@ -579,14 +579,7 @@ fn extract_tool_context(
     }
 
     // 回退：从 ToolCall 父节点的 meta（失败重试场景）提取
-    let tool_name = tc.name.clone().unwrap_or_else(|| {
-        tc.meta
-            .as_ref()
-            .and_then(|m| m.get("tool_name"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string()
-    });
+    let tool_name = tc.tool_name().unwrap_or_default().to_string();
     let args = tc
         .meta
         .as_ref()

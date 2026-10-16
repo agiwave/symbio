@@ -56,17 +56,7 @@ fn error_digest(msg: &ChatNode, preview: &str) -> String {
         .and_then(|m| m.get("failure_kind"))
         .and_then(|v| v.as_str())
         .unwrap_or("error");
-    let tool_name = msg
-        .name
-        .clone()
-        .or_else(|| {
-            msg.meta
-                .as_ref()
-                .and_then(|m| m.get("tool_name"))
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
-        })
-        .unwrap_or_default();
+    let tool_name = msg.tool_name().unwrap_or_default().to_string();
     // 错误正文里最像"原因"的一行：优先取含 Error/error 的首行，否则取首个非空行
     let cause = preview
         .lines()
@@ -353,7 +343,7 @@ pub fn apply_layered_sliding_window(
     for msg in messages {
         if msg.is_tool_call() {
             let idx = info.len();
-            let full_name = msg.name.clone().unwrap_or_default();
+            let full_name = msg.tool_name().unwrap_or_default().to_string();
             // "local/todo_write" → "todo_write"（与 CapabilityMeta.name 对齐）
             let name = full_name
                 .rsplit('/')
@@ -452,7 +442,7 @@ pub fn apply_layered_sliding_window(
                 // 把"要不要赌一把摘要"变成一次可预期的工具调用——
                 // 核对成本过高时，模型会转而用自信语气包装未验证结论（真实会话实证）。
                 let retry_hint = parent
-                    .and_then(|tc| tc.name.as_deref())
+                    .and_then(|tc| tc.tool_name())
                     .map(|n| format!(" Re-run {n} to get the full output."))
                     .unwrap_or_default();
                 let label = if msg.role == Some(NodeRole::Tool) {

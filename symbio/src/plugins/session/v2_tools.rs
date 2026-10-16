@@ -222,8 +222,8 @@ impl DispatchPort for SessionDispatchPort {
             .map(|m| {
                 let call_id = m.parent_id.clone().unwrap_or_default();
                 let name = m
-                    .name
-                    .clone()
+                    .tool_name()
+                    .map(str::to_string)
                     .or_else(|| {
                         turn.tool_calls
                             .iter()

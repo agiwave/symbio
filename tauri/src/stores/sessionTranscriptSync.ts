@@ -247,6 +247,13 @@ function messageOfNode(node: VdfsNode, text: string): ChatNode | null {
     try {
       const parsed = JSON.parse(text) as ChatNode
       if (parsed && typeof parsed === 'object' && parsed.id) {
+        // [T-147d-ii] 历史正文 JSON 还带顶层 `name`：折进 meta.tool_name（非覆盖），
+        // 与后端 message_of_node 的属性折叠同一纪律。
+        const legacy = (parsed as { name?: string }).name
+        const pm = parsed.meta as Record<string, unknown> | undefined
+        if (legacy && pm?.tool_name == null) {
+          parsed.meta = { ...(pm ?? {}), tool_name: legacy } as ChatNode['meta']
+        }
         return { ...parsed, id: node.name }
       }
     } catch {
@@ -257,12 +264,16 @@ function messageOfNode(node: VdfsNode, text: string): ChatNode | null {
   const out: ChatNode = { id: node.name }
   if (typeof v.role === 'string') out.role = v.role as ChatNode['role']
   if (folded) out.type = folded
-  if (typeof v.tool_name === 'string') out.name = v.tool_name
   if (typeof v.parent_id === 'string') out.parent_id = v.parent_id
   // [T-147d-i] `tool_call_id` 不再上 wire，VDFS attrs 里的同名键是后端到后端的存储形状。
   if (typeof v.seq === 'number') out.seq = v.seq
   if (typeof v.error === 'string') out.error = v.error
   if (v.meta != null && typeof v.meta === 'object') out.meta = v.meta as ChatNode['meta']
+  // [T-147d-ii] 存量 attrs.tool_name 折进 meta.tool_name（非覆盖）——顶层 name 已退役
+  if (typeof v.tool_name === 'string') {
+    const m = (out.meta ??= {}) as Record<string, unknown>
+    if (m.tool_name == null) m.tool_name = v.tool_name
+  }
   if (typeof node.updated_at === 'number') out.timestamp = node.updated_at
   if (status) out.status = status as ChatNode['status']
   if (text) out.content = text

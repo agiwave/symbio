@@ -414,9 +414,8 @@ export interface ChatNode {
    * 后是呈现键 `PresentationKind`。跨域取值 `MessageKind`，判据走 `messageTypeOf`。
    */
   type?: MessageKind;
-  name?: string;
-  // [T-147d-i] `tool_call_id` 从 wire 移除——后端 `#[serde(skip)]` 只保结构体字段（供
-  // LLM 请求构造侧使用），前端从不消费它（过去只是 copy-through 到 store）。
+  // [T-147d-ii] 顶层 `name` 从 wire 退役——工具名住 `meta.tool_name`（读写唯一入口
+  // `registry/messageTypes.toolNameOf`），存量 attrs `tool_name` 在读边界折进 meta。
   content?: MessageContent;
   /**
    * 流式**增量**：本帧新到达的那一段正文，追加到本地该节点正文尾部。

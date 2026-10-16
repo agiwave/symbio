@@ -220,7 +220,7 @@ pub(crate) fn snapshot_entries(msgs: &[ChatNode]) -> Vec<(String, TranscriptEntr
     let tool_names: HashMap<&str, &str> = msgs
         .iter()
         .filter(|m| m.is_tool_call())
-        .filter_map(|m| m.name.as_deref().map(|n| (m.id.as_str(), n)))
+        .filter_map(|m| m.tool_name().map(|n| (m.id.as_str(), n)))
         .collect();
     msgs.iter()
         .filter_map(|m| {

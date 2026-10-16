@@ -258,8 +258,11 @@ pub struct ChatNode {
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub msg_type: Option<NodeKind>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
+    /// [T-147d-ii]：顶层 `name` 字段**已退役**——工具名是结构细节，住
+    /// `meta.tool_name`（读写唯一入口 [`ChatNode::tool_name`] /
+    /// [`ChatNode::with_tool_name`]）。存量两条路径都在读边界折进来：
+    /// VDFS 属性 `tool_name`（[`message_of_node`]）与容器节点正文 JSON 的
+    /// `name` 键（serde 忽略未知键，靠属性那条兜住）。
 
     #[serde(skip_serializing)]
     pub prompt: Option<String>,
@@ -483,24 +486,34 @@ pub fn message_of_node(node: &crate::symbio_core::VdfsNode, text: String) -> Opt
         .get("meta")
         .cloned()
         .filter(|v| !v.is_null());
-    if let Some(tag) = legacy_tag {
-        if !meta
+    // 存量属性里的旧结构键**非覆盖**折进 meta（与 style_tag 同一条纪律：新写方
+    // 带着完整 meta 进来时不覆盖）。[T-147d-ii]：顶层 `name` 退役后，属性
+    // `tool_name` 的唯一归宿是 `meta.tool_name`。
+    for (key, value) in [
+        ("style_tag", legacy_tag.map(Value::from)),
+        (
+            "tool_name",
+            attr::<String>(&node.attributes, "tool_name").map(Value::from),
+        ),
+    ] {
+        let Some(v) = value else { continue };
+        if meta
             .as_ref()
-            .and_then(|m| m.get("style_tag"))
+            .and_then(|m| m.get(key))
             .and_then(Value::as_str)
             .is_some()
         {
-            let slot = meta.get_or_insert_with(|| Value::Object(serde_json::Map::new()));
-            if let Some(obj) = slot.as_object_mut() {
-                obj.insert("style_tag".to_string(), Value::String(tag.to_string()));
-            }
+            continue;
+        }
+        let slot = meta.get_or_insert_with(|| Value::Object(serde_json::Map::new()));
+        if let Some(obj) = slot.as_object_mut() {
+            obj.insert(key.to_string(), v);
         }
     }
     Some(ChatNode {
         id: node.name.clone(),
         role: attr(&node.attributes, "role"),
         msg_type,
-        name: attr(&node.attributes, "tool_name"),
         parent_id: attr(&node.attributes, "parent_id"),
         tool_call_id: attr(&node.attributes, "tool_call_id"),
         seq: attr(&node.attributes, "seq"),
@@ -515,6 +528,29 @@ pub fn message_of_node(node: &crate::symbio_core::VdfsNode, text: String) -> Opt
 }
 
 impl ChatNode {
+    /// 读 `meta.tool_name`——工具名的**唯一**读写入口（[T-147d-ii]，替代已退役的
+    /// 顶层 `name` 字段）。值是 LLM 可见工具名（可能是限定形态 `local/todo_write`，
+    /// 也可能裸名，取决于产地）。
+    pub fn tool_name(&self) -> Option<&str> {
+        self.meta
+            .as_ref()
+            .and_then(|m| m.get("tool_name"))
+            .and_then(Value::as_str)
+    }
+
+    /// 写 `meta.tool_name`（链式构造 helper，[T-147d-ii] 构造侧）。`None` 不写
+    /// （缺席=没有，不往 meta 里塞 null）。
+    pub fn with_tool_name(mut self, name: Option<String>) -> Self {
+        let Some(name) = name else { return self };
+        let meta = self
+            .meta
+            .get_or_insert_with(|| Value::Object(serde_json::Map::new()));
+        if let Some(obj) = meta.as_object_mut() {
+            obj.insert("tool_name".to_string(), Value::String(name));
+        }
+        self
+    }
+
     /// 读 `meta.style_tag`（wire 层的呈现变体词，[ADR-070 §决策 3]）。
     pub fn style_tag(&self) -> Option<&str> {
         self.meta

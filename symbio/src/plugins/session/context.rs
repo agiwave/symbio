@@ -198,7 +198,7 @@ pub fn estimate_message_tokens(m: &ChatNode) -> usize {
             total += tok.count(&text);
         }
     }
-    if let Some(name) = &m.name {
+    if let Some(name) = m.tool_name() {
         if !name.is_empty() {
             total += tok.count(name);
         }

@@ -89,7 +89,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
       role: 'assistant',
       type: 'tool_call',
       parent_id: TURN,
-      name: 'local/read',
+      meta: { tool_name: 'local/read' },
       status: 'streaming',
       content: '{"path":"',
     })
@@ -112,9 +112,8 @@ describe('工具轮实时帧序列 → store 终态', () => {
       role: 'assistant',
       type: 'tool_call',
       parent_id: TURN,
-      name: 'local/read',
       status: 'streaming',
-      meta: { started_at: 1726900000000 },
+      meta: { started_at: 1726900000000, tool_name: 'local/read' },
     })
 
     // ── 8. 结果子节点（process_tool_calls_async；非流式工具一次给全）──
@@ -133,9 +132,8 @@ describe('工具轮实时帧序列 → store 终态', () => {
       role: 'assistant',
       type: 'tool_call',
       parent_id: TURN,
-      name: 'local/read',
       status: 'completed',
-      meta: { started_at: 1726900000000, success: true },
+      meta: { started_at: 1726900000000, success: true, tool_name: 'local/read' },
     })
 
     // ── 10. Turn root 终态（finalize_turn_root：**子树收敛之后**才发出）──
@@ -169,7 +167,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
       role: 'assistant',
       type: 'tool_call',
       parent_id: TURN,
-      name: 'agent/run',
+      meta: { tool_name: 'agent/run' },
       status: 'streaming',
       content: '{}',
     })

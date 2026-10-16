@@ -140,7 +140,7 @@ fn into_messages_carries_tool_calls_from_the_result_field() {
     assert_eq!(calls[0].style_tag(), Some(CHAT_STYLE_TAG_TOOL));
     assert_eq!(calls[0].id, "tc-1", "落库 id 必须等于产物里的节点 id");
     assert_eq!(calls[0].parent_id.as_deref(), Some("turn-z"));
-    assert_eq!(calls[0].name.as_deref(), Some("vdfs_list"));
+    assert_eq!(calls[0].tool_name(), Some("vdfs_list"));
     assert_eq!(
         calls[0].content.as_ref().map(|c| c.to_text()).as_deref(),
         Some(r#"{"path":"."}"#)

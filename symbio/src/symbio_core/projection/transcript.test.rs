@@ -379,14 +379,13 @@ fn mutations_after_the_snapshot_still_fold() {
     );
 }
 
-/// 快照里的工具结果：`tool` 名取**父 ToolCall 节点**的 `name`
+/// 快照里的工具结果：`tool` 名取**父 ToolCall 节点**的 `meta.tool_name`
 /// （结果子节点只记 `parent_id`——事件投影里工具名来自 `artifact.added` 载荷，
 /// 两条路径取的是同一件事）。
 #[test]
 fn a_snapshot_tool_result_keeps_the_name_from_its_parent_call() {
     let mut call = msg("T-call", "assistant", Some("skeleton"), "{\"path\":\"a\"}");
-    call["meta"] = serde_json::json!({ "style_tag": "tool" });
-    call["name"] = serde_json::json!("vdfs_read");
+    call["meta"] = serde_json::json!({ "style_tag": "tool", "tool_name": "vdfs_read" });
     let mut result = msg("T-res", "tool", Some("body"), "文件正文");
     result["parent_id"] = serde_json::json!("T-call");
     let events = vec![snapshot("a", vec![call, result])];

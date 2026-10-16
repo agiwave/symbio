@@ -252,3 +252,34 @@ fn message_of_node_keeps_target_words_and_existing_tags() {
     let m = message_of_node(&vdfs_with_attrs("g", serde_json::json!({})), String::new()).unwrap();
     assert_eq!(m.msg_type, None);
 }
+
+/// [T-147d-ii]：存量属性 `tool_name` 折进 `meta.tool_name`——顶层 `name` 已退出
+/// wire，读边界注入是历史数据工具名的唯一落点；非覆盖纪律与 `style_tag` 同一条。
+#[test]
+fn message_of_node_folds_attr_tool_name_into_meta() {
+    let m = message_of_node(
+        &vdfs_with_attrs(
+            "h",
+            serde_json::json!({"type": "tool_call", "tool_name": "vdfs_list"}),
+        ),
+        String::new(),
+    )
+    .unwrap();
+    assert!(m.is_tool_call());
+    assert_eq!(m.tool_name(), Some("vdfs_list"));
+
+    // meta 已带 tool_name ⇒ 不覆盖（新形态写方与旧属性并存时以 meta 为准）
+    let m = message_of_node(
+        &vdfs_with_attrs(
+            "i",
+            serde_json::json!({
+                "type": "tool_call",
+                "tool_name": "old",
+                "meta": {"tool_name": "new"}
+            }),
+        ),
+        String::new(),
+    )
+    .unwrap();
+    assert_eq!(m.tool_name(), Some("new"));
+}

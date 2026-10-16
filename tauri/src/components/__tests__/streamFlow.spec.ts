@@ -73,7 +73,7 @@ function toolCall(
   args: string,
   status: ChatNode['status'] = 'streaming',
 ): ChatNode {
-  return { id, parent_id: parent, role: 'assistant', type: 'tool_call', name, status, content: args }
+  return { id, parent_id: parent, role: 'assistant', type: 'tool_call', meta: { tool_name: name }, status, content: args }
 }
 /**
  * 状态帧：只带身份 + 状态，**不带正文**（与后端 `llm_state_frame` 同构）。
@@ -418,9 +418,8 @@ describe('渲染层回归：工具调用按帧即时可见（对照 e2e 实测�
         parent_id: 'T1',
         role: 'assistant',
         type: 'tool_call',
-        name: 'read_file',
         status: 'streaming',
-        meta: { started_at: Date.now() - 5000 },
+        meta: { started_at: Date.now() - 5000, tool_name: 'read_file' },
       } as ChatNode)
     await nextTick()
     expect(

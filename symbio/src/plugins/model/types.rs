@@ -65,7 +65,6 @@ impl From<NativeMessage> for ChatNode {
             principal: None,
             msg_type: None,
 
-            name: None,
             content: msg.content,
             // 增量是帧的形态（只在出方向的转写帧上），不是消息的形态。
             delta: None,

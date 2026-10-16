@@ -68,7 +68,8 @@ function shapeOf(msgs) {
       m.role ?? '',
       m.type ?? m.msg_type ?? '',
       m.status ?? '',
-      m.name ?? '',
+      // [T-147d-ii] 顶层 name 已退役——工具名住 meta.tool_name
+      m.meta?.tool_name ?? '',
       m.tool_call_id ?? '',
       contentText(m),
     ].join('\u0001'),

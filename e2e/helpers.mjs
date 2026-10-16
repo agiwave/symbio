@@ -925,7 +925,7 @@ export function assertTranscriptInvariants(messages, label) {
   for (const m of messages) {
     if ((m.type ?? m.msg_type) === 'tool_call') {
       const result = messages.find((x) => x.parent_id === m.id && x.role === 'tool');
-      assert(result, `${label}: tool_call ${m.name ?? m.id} 没有结果子节点（有请求无响应）`);
+      assert(result, `${label}: tool_call ${(m.meta?.tool_name ?? m.id)} 没有结果子节点（有请求无响应）`);
     }
   }
 }

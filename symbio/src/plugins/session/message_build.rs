@@ -234,7 +234,6 @@ pub fn llm_build_tool_call_node(
         parent_id: Some(parent_id.to_string()),
         role: Some(NodeRole::Assistant),
         msg_type: Some(NodeKind::Skeleton),
-        name,
         content: Some(MessageContent::Text(args_text)),
         status: Some(NodeStatus::Completed),
         timestamp: Some(crate::symbio_core::clock_now_ms()),
@@ -242,6 +241,7 @@ pub fn llm_build_tool_call_node(
         ..Default::default()
     }
     .with_style_tag(CHAT_STYLE_TAG_TOOL)
+    .with_tool_name(name)
 }
 
 /// 构造工具执行结果消息（role: Tool，`msg_type = Body`，parent_id 指向 tool_call）。

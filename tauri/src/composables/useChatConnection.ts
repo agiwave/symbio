@@ -241,7 +241,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     // - `error`：失败原因文本。
     // meta 是后端 flatten 出来的浅 JSON，序列化成本远低于一次错误的全量重渲染。
     const meta = msg.meta === undefined ? '' : JSON.stringify(msg.meta)
-    const own = `${msg.id}|${msg.type ?? ''}|${msg.name ?? ''}|${msg.status ?? ''}|${parentId ?? ''}|${messageTextOf(msg.content)}|${msg.error ?? ''}|${meta}`
+    const own = `${msg.id}|${msg.type ?? ''}|${msg.status ?? ''}|${parentId ?? ''}|${messageTextOf(msg.content)}|${msg.error ?? ''}|${meta}`
     const sub = children
       ? children.map((child) => (child as { __sig?: string }).__sig ?? '').join(',')
       : ''

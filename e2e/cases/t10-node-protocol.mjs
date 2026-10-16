@@ -239,8 +239,8 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     const cb = rebuild(tcNode.id);
     assertEq(cb.start.data.status, 'streaming', 'tool_call 首帧应为 streaming');
     assert(
-      cb.start.data.name === 'vdfs_write',
-      `tool_call 应带工具名（实际 ${cb.start.data.name}）`,
+      cb.start.data.meta?.tool_name === 'vdfs_write',
+      `tool_call 应带工具名（实际 ${cb.start.data.meta?.tool_name}）`,
     );
     // 参数增量：首帧之后应有 delta（参数分片）
     assert(

@@ -552,7 +552,7 @@ fn message_label(m: &cm::ChatNode) -> String {
         None => "消息",
     };
     if m.is_tool_call() {
-        match m.name.as_deref() {
+        match m.tool_name() {
             Some(name) if !name.is_empty() => return format!("{role} · {name}"),
             _ => return format!("{role} · 工具调用"),
         }
@@ -609,7 +609,7 @@ pub(crate) fn message_node(m: &cm::ChatNode) -> VdfsNode {
         // 序列化到顶层——同名键会让 attributes 的值覆盖结构体的 id
         // （文本 / Turn / Reasoning 节点的工具名是 `null`，序列化后节点 id
         // 变成 null，前端按 `node.name` 寻址的整条实时链路随之瘫痪）。
-        ("tool_name", json!(m.name)),
+        ("tool_name", json!(m.tool_name())),
         ("parent_id", json!(m.parent_id)),
         // ToolCall 的 wire id（provider 原始 tool_call_id；节点 id 才是本节点的地址）
         ("tool_call_id", json!(m.tool_call_id)),

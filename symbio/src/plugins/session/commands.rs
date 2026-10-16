@@ -271,9 +271,6 @@ impl SessionPlugin {
         if let Some(t) = &patch.msg_type {
             existing.msg_type = Some(t.clone());
         }
-        if let Some(n) = &patch.name {
-            existing.name = Some(n.clone());
-        }
         if let Some(p) = &patch.parent_id {
             existing.parent_id = Some(p.clone());
         }

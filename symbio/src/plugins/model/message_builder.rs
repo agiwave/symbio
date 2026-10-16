@@ -229,7 +229,7 @@ pub fn flatten_chat_messages(messages: &[ChatNode]) -> Vec<NativeMessage> {
                                     .unwrap_or_else(|| child.id.clone()),
                             ),
                             kind: Some("function".to_string()),
-                            name: child.name.clone().unwrap_or_default(),
+                            name: child.tool_name().unwrap_or_default().to_string(),
                             arguments: args,
                         };
                         match &mut native.tool_calls {
@@ -257,7 +257,7 @@ pub fn flatten_chat_messages(messages: &[ChatNode]) -> Vec<NativeMessage> {
                                 // 无 tool_result"触发 provider 400。必须在此处
                                 // 进入 tool_results（先于尾部孤儿剔除），否则会被
                                 // 当作孤儿 tool 结果误删。
-                                let tool_name = child.name.clone().unwrap_or_default();
+                                let tool_name = child.tool_name().unwrap_or_default();
                                 tool_results.push(NativeMessage {
                                     role: NodeRole::Tool,
                                     tool_call_id: wire_ids.get(child.id.as_str()).cloned(),

@@ -110,19 +110,30 @@ export function messageStatusOf(node: Pick<ChatNode, 'status'>): NodeStatus {
 }
 
 /**
+ * 工具名（[T-147d-ii]：顶层 `name` 已退役，工具名唯一住 `meta.tool_name`）。
+ *
+ * 与后端 `ChatNode::tool_name()` 同一条读法；历史数据的 attrs `tool_name`
+ * 已在 `sessionTranscriptSync.messageOfNode` 折进 meta，这里不必再兜旧形态。
+ */
+export function toolNameOf(node: Pick<ChatNode, 'meta'>): string | undefined {
+  return (node.meta as { tool_name?: string } | undefined)?.tool_name
+}
+
+/**
  * 消息节点的显示名（Turn 用）。
  *
- * 优先级：节点名 > `meta.agent_name` > `meta.agent_id` > 按是否子会话取兜底名。
+ * 优先级：`meta.agent_name` > `meta.agent_id` > 按是否子会话取兜底名。
  * `meta` 是后端 flatten 的场景字段，这里只做取值，不解释语义。
+ * （曾经的 `node.name` 首选项已随顶层字段退役删除——后端从未把智能体名写进
+ * name，那条只是一条空通道，[T-147d-ii]。）
  */
 export function agentNameOf(
-  node: Pick<ChatNode, 'name' | 'meta'>,
+  node: Pick<ChatNode, 'meta'>,
   subSession: boolean,
 ): string {
   const meta = node.meta as Record<string, unknown> | undefined
   const fromMeta = meta?.agent_name || meta?.agent_id
   return (
-    node.name ||
     (typeof fromMeta === 'string' ? fromMeta : '') ||
     (subSession ? '子智能体' : '助手')
   )
@@ -140,7 +151,7 @@ export interface MessageFacets {
   role: ChatRole
   type: PresentationKind
   status: NodeStatus
-  /** 节点名（工具名 / 智能体名） */
+  /** 工具名（`meta.tool_name`，[T-147d-ii]） */
   name?: string
   /** 子会话 Turn（`role = tool` 的 turn）：某工具「过程」段 */
   subSession: boolean
@@ -185,7 +196,7 @@ export function facetsOf(node: ChatNode, parentType?: string): MessageFacets {
     role,
     type,
     status: messageStatusOf(node),
-    name: node.name,
+    name: toolNameOf(node),
     // 子会话 Turn = 工具「过程」段（role=tool 的 turn），与根级助手 Turn 同构但无组级操作
     subSession: type === NODE_KIND_TURN && role === CHAT_ROLE_TOOL,
     promptKind: promptKindOf(node),

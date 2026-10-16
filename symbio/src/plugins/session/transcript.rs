@@ -189,7 +189,11 @@ impl Transcript {
             let detail = self
                 .nodes
                 .shift_remove(&message_id)
-                .map(|n| n.name.unwrap_or_else(|| n.id.clone()))
+                .map(|n| {
+                    n.tool_name()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| n.id.clone())
+                })
                 .unwrap_or_else(|| "（不在途）".into());
             self.emit(
                 msg,
@@ -231,9 +235,6 @@ impl Transcript {
         }
         if msg.msg_type.is_some() {
             node.msg_type = msg.msg_type.clone();
-        }
-        if msg.name.is_some() {
-            node.name = msg.name.clone();
         }
         if msg.tool_call_id.is_some() {
             node.tool_call_id = msg.tool_call_id.clone();

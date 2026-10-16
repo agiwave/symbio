@@ -715,13 +715,13 @@ async fn dispatch_protocol_event(
                         parent_id: Some(root_id.into()),
                         role: Some(NodeRole::Assistant),
                         msg_type: Some(NodeKind::Skeleton),
-                        name: full_name,
                         content: Some(MessageContent::Text(full_args)),
                         status: Some(NodeStatus::Streaming),
                         tool_call_id: Some(wire_id),
                         ..Default::default()
                     }
-                    .with_style_tag(CHAT_STYLE_TAG_TOOL),
+                    .with_style_tag(CHAT_STYLE_TAG_TOOL)
+                    .with_tool_name(full_name),
                 )
                 .await;
             } else if let Some(delta) = args.as_deref().filter(|d| !d.is_empty()) {

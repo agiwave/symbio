@@ -345,14 +345,14 @@ impl LlmAdapter for ProviderLlmAdapter {
                                 parent_id: Some(root_id.clone()),
                                 role: Some(NodeRole::Assistant),
                                 msg_type: Some(NodeKind::Skeleton),
-                                name: Some(c.name.clone()),
                                 // 参数走 content（展平时从这里 re-parse）——规范化
                                 // 口径是 `tc.arguments.to_string()`。
                                 content: Some(MessageContent::Text(c.arguments.to_string())),
                                 tool_call_id: Some(c.id.clone()),
                                 ..Default::default()
                             }
-                            .with_style_tag(CHAT_STYLE_TAG_TOOL),
+                            .with_style_tag(CHAT_STYLE_TAG_TOOL)
+                            .with_tool_name(Some(c.name.clone())),
                         );
                     }
                     // 结果挂到**对应的 ToolCall 节点**下（按 id 配对）。

@@ -32,8 +32,7 @@ fn tool_call_msg() -> ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
         role: Some(NodeRole::Assistant),
         msg_type: Some(NodeKind::Skeleton),
-        meta: Some(serde_json::json!({"style_tag": "tool"})),
-        name: Some("vdfs_read".to_string()),
+        meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "vdfs_read".to_string()})),
         content: Some(MessageContent::Text(r#"{"path":"a.rs"}"#.to_string())),
         ..Default::default()
     }

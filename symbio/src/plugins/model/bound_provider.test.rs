@@ -225,21 +225,21 @@ impl crate::symbio_core::DeltaSink for Collecting {
             ToolFrameRec {
                 snapshot: false,
                 id: frame.id.clone(),
-                name: frame.name.clone(),
+                name: frame.tool_name().map(str::to_string),
                 text: d.clone(),
             }
         } else if frame.is_tool_call() {
             ToolFrameRec {
                 snapshot: true,
                 id: frame.id.clone(),
-                name: frame.name.clone(),
+                name: frame.tool_name().map(str::to_string),
                 text,
             }
         } else {
             ToolFrameRec {
                 snapshot: false,
                 id: frame.id.clone(),
-                name: frame.name.clone(),
+                name: frame.tool_name().map(str::to_string),
                 text,
             }
         };

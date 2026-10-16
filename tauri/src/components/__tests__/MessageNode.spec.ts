@@ -107,7 +107,7 @@ describe('MessageNode：思考节点始终单行', () => {
 describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', () => {
   it('默认单行折叠：运行中显示「运行中」标签 + 动效点，卡片体隐藏', async () => {
     const w = mountNode(
-      msg({ id: 'tc1', type: 'tool_call', status: 'streaming', name: 'shell', content: '{"cmd":"ls"}', children: [] }),
+      msg({ id: 'tc1', type: 'tool_call', status: 'streaming', meta: { tool_name: 'shell' }, content: '{"cmd":"ls"}', children: [] }),
     )
     expect(w.find('.node-head').exists()).toBe(true)
     expect(w.text()).toContain('运行中')
@@ -132,9 +132,7 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
         id: 'tc1',
         type: 'tool_call',
         status: 'streaming',
-        name: 'codebase_search',
-        content: '{}',
-        meta: { started_at: nowMs.value - 47_000 },
+        meta: { tool_name: 'codebase_search', started_at: nowMs.value - 47_000 },
         children: [],
       }),
     )
@@ -148,9 +146,7 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
         id: 'tc1',
         type: 'tool_call',
         status: 'streaming',
-        name: 'codebase_search',
-        content: '{}',
-        meta: { started_at: nowMs.value - 125_000 },
+        meta: { tool_name: 'codebase_search', started_at: nowMs.value - 125_000 },
         children: [],
       }),
     )
@@ -159,7 +155,7 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
 
   it('无 started_at（旧数据）→ 不显示时长，也不编一个数', () => {
     const w = mountNode(
-      msg({ id: 'tc1', type: 'tool_call', status: 'streaming', name: 'shell', content: '{}', children: [] }),
+      msg({ id: 'tc1', type: 'tool_call', status: 'streaming', meta: { tool_name: 'shell' }, content: '{}', children: [] }),
     )
     expect(w.find('.node-tag.run').exists()).toBe(true)
     expect(w.find('.tag-elapsed').exists()).toBe(false)
@@ -167,7 +163,7 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
 
   it('待用户确认 → 「待确认」标签（warn 变体）；终态不给标签', () => {
     const waiting = mountNode(
-      msg({ id: 'tc1', type: 'tool_call', status: 'waiting_user_action', name: 'shell', content: '{}', children: [] }),
+      msg({ id: 'tc1', type: 'tool_call', status: 'waiting_user_action', meta: { tool_name: 'shell' }, content: '{}', children: [] }),
     )
     expect(waiting.find('.node-tag').text()).toContain('待确认')
     expect(waiting.find('.node-tag').classes()).toContain('warn')
@@ -175,7 +171,7 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
     // 终态刻意不给标签：绝大多数调用都会成功结束，给每个成功的调用挂「已完成」
     // 只会把真正需要注意的状态淹掉。
     const done = mountNode(
-      msg({ id: 'tc2', type: 'tool_call', status: 'completed', name: 'shell', content: '{}', children: [] }),
+      msg({ id: 'tc2', type: 'tool_call', status: 'completed', meta: { tool_name: 'shell' }, content: '{}', children: [] }),
     )
     expect(done.find('.node-tag').exists()).toBe(false)
   })
@@ -186,7 +182,7 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
         id: 'tc1',
         type: 'tool_call',
         status: 'streaming',
-        name: 'shell',
+        meta: { tool_name: 'shell' },
         content: '{}',
         children: [
           msg({
@@ -209,7 +205,7 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
         id: 'tc1',
         type: 'tool_call',
         status: 'completed',
-        name: 'agent',
+        meta: { tool_name: 'agent' },
         content: '{}',
         children: [
           msg({
@@ -217,7 +213,7 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
             type: 'turn',
             role: 'tool',
             status: 'completed',
-            name: 'sub-agent',
+            meta: { agent_name: 'sub-agent' },
             parent_id: 'tc1',
             children: [msg({ id: 'st1', type: 'text', status: 'completed', content: '子流正文', parent_id: 'sub1' })],
           }),
@@ -386,7 +382,7 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
         type: 'tool_call',
         status: 'failed',
         error: '工具执行失败',
-        name: 'shell',
+        meta: { tool_name: 'shell' },
         content: '{}',
         children: [],
       }),
@@ -403,8 +399,7 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
         type: 'tool_call',
         status: 'failed',
         error: '工具执行失败',
-        meta: { failure_kind: 'error', recoverable: true },
-        name: 'shell',
+        meta: { failure_kind: 'error', recoverable: true, tool_name: 'shell' },
         content: '{}',
         children: [msg({ id: 'res1', type: 'text', role: 'tool', status: 'failed', content: '', error: 'boom', parent_id: 'tc1' })],
       }),
@@ -557,7 +552,7 @@ describe('MessageNode：分派器路由与内容形态', () => {
         id: 'tc1',
         type: 'tool_call',
         status: 'completed',
-        name: 'shell',
+        meta: { tool_name: 'shell' },
         content: '{"cmd":"ls"}',
         children: [],
       }),
@@ -581,7 +576,7 @@ describe('MessageNode：分派器路由与内容形态', () => {
  */
 describe('MessageNode：节点头键盘可达性', () => {
   const toolMsg = () =>
-    msg({ id: 'tc1', type: 'tool_call', status: 'completed', name: 'shell', content: '{}', children: [] })
+    msg({ id: 'tc1', type: 'tool_call', status: 'completed', meta: { tool_name: 'shell' }, content: '{}', children: [] })
 
   it('节点头可聚焦且带开关语义（role / tabindex / aria-expanded）', () => {
     const w = mountNode(toolMsg())

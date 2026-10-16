@@ -33,8 +33,7 @@ fn view_tc(id: &str, name: &str, args: &str) -> ChatNode {
         id: id.to_string(),
         role: Some(NodeRole::Assistant),
         msg_type: Some(NodeKind::Skeleton),
-        meta: Some(serde_json::json!({"style_tag": "tool"})),
-        name: Some(name.to_string()),
+        meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": name.to_string()})),
         content: Some(MessageContent::Text(args.to_string())),
         status: Some(NodeStatus::Completed),
         ..Default::default()

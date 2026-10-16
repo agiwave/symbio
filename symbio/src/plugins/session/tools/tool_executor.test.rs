@@ -318,8 +318,7 @@ fn tc_context(ids: &[&str]) -> Vec<ChatNode> {
             id: (*id).into(),
             role: Some(NodeRole::Assistant),
             msg_type: Some(NodeKind::Skeleton),
-            meta: Some(serde_json::json!({"style_tag": "tool"})),
-            name: Some("vdfs_list".into()),
+            meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "vdfs_list"})),
             status: Some(NodeStatus::Streaming),
             ..Default::default()
         })
@@ -949,9 +948,8 @@ async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
         id: "tc-gate".into(),
         role: Some(NodeRole::Assistant),
         msg_type: Some(NodeKind::Skeleton),
-        meta: Some(serde_json::json!({"style_tag": "tool"})),
+        meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "vdfs_list"})),
         status: Some(NodeStatus::Streaming),
-        name: Some("vdfs_list".into()),
         ..Default::default()
     };
     let tcs = vec![TurnToolCallInfo {
@@ -1132,9 +1130,8 @@ async fn a_producer_only_principal_is_refused_the_task_table() {
         id: "tc-task".into(),
         role: Some(NodeRole::Assistant),
         msg_type: Some(NodeKind::Skeleton),
-        meta: Some(serde_json::json!({"style_tag": "tool"})),
+        meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "local/todo_write"})),
         status: Some(NodeStatus::Streaming),
-        name: Some("local/todo_write".into()),
         ..Default::default()
     };
     let tcs = vec![TurnToolCallInfo {
@@ -1203,9 +1200,8 @@ async fn the_trivial_session_is_not_refused_the_task_table() {
         id: "tc-task2".into(),
         role: Some(NodeRole::Assistant),
         msg_type: Some(NodeKind::Skeleton),
-        meta: Some(serde_json::json!({"style_tag": "tool"})),
+        meta: Some(serde_json::json!({"style_tag": "tool", "tool_name": "local/todo_write"})),
         status: Some(NodeStatus::Streaming),
-        name: Some("local/todo_write".into()),
         ..Default::default()
     };
     let tcs = vec![TurnToolCallInfo {

@@ -44,8 +44,9 @@ fn message_node_serialized_name_is_node_id_not_tool_name() {
     let tc = cm::ChatNode {
         id: "tc456".into(),
         msg_type: Some(cm::NodeKind::Skeleton),
-        meta: Some(serde_json::json!({ "style_tag": cm::CHAT_STYLE_TAG_TOOL })),
-        name: Some("local/ls".into()),
+        meta: Some(
+            serde_json::json!({ "style_tag": cm::CHAT_STYLE_TAG_TOOL, "tool_name": "local/ls" }),
+        ),
         ..Default::default()
     };
     let v = serde_json::to_value(message_node(&tc)).unwrap();
@@ -357,7 +358,7 @@ fn vdfs_message_node_splits_text_and_structure() {
     // 工具调用骨架（`Skeleton` + tag `tool`）：标题补工具名、状态词直通、正文退化为 JSON 视图
     m.msg_type = Some(cm::NodeKind::Skeleton);
     m.meta = Some(serde_json::json!({ "style_tag": cm::CHAT_STYLE_TAG_TOOL }));
-    m.name = Some("vdfs_list".into());
+    m = m.with_tool_name(Some("vdfs_list".into()));
     m.status = Some(cm::NodeStatus::Streaming);
     assert_eq!(message_node(&m).title, "助手 · vdfs_list");
     assert_eq!(message_node(&m).status, "streaming");

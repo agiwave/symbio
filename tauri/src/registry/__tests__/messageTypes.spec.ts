@@ -185,7 +185,7 @@ describe('messageTitle', () => {
     ).toBe('思考')
   })
 
-  it('工具调用用节点名，缺省回退「工具」', () => {
+  it('工具调用用节点名（facets.name ← meta.tool_name），缺省回退「工具」', () => {
     expect(messageTitle(facets({ type: NODE_KIND_TOOL_CALL, name: 'cmd' }), '助手')).toBe('cmd')
     expect(messageTitle(facets({ type: NODE_KIND_TOOL_CALL }), '助手')).toBe('工具')
   })
@@ -356,8 +356,7 @@ describe('messagePreviewFollowsLiveEdge：收起态摘要取哪一端', () => {
 })
 
 describe('agentNameOf', () => {
-  it('优先级：节点名 > meta.agent_name > meta.agent_id > 按子会话兜底', () => {
-    expect(agentNameOf({ name: 'n', meta: { agent_name: 'm' } }, false)).toBe('n')
+  it('优先级：meta.agent_name > meta.agent_id > 按子会话兜底', () => {
     expect(agentNameOf({ meta: { agent_name: 'm' } }, false)).toBe('m')
     expect(agentNameOf({ meta: { agent_id: 'id1' } }, false)).toBe('id1')
     expect(agentNameOf({}, false)).toBe('助手')
@@ -390,6 +389,16 @@ describe('facetsOf：props → facets 的唯一实现', () => {
     expect(facetsOf({ id: 'x', type: NODE_KIND_TEXT }, NODE_KIND_TURN).responseText).toBe(true)
     expect(facetsOf({ id: 'r', type: NODE_KIND_REASONING }, NODE_KIND_TURN).responseText).toBe(false)
     expect(facetsOf({ id: 'x', type: NODE_KIND_TEXT }, NODE_KIND_TOOL_CALL).responseText).toBe(false)
+  })
+
+  it('工具名取自 meta.tool_name（[T-147d-ii]：顶层 name 已退役）', () => {
+    const f = facetsOf({
+      id: 'tc',
+      type: NODE_KIND_SKELETON,
+      meta: { style_tag: 'tool', tool_name: 'vdfs_list' },
+    })
+    expect(f.name).toBe('vdfs_list')
+    expect(facetsOf({ id: 'tc', type: NODE_KIND_SKELETON }).name).toBeUndefined()
   })
 
   it('后端 meta 字段只在这一点被解释：recoverable / failure_kind / __toolRequest / heartbeat', () => {

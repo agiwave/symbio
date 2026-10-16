@@ -399,8 +399,8 @@ export const useSessionsStore = defineStore('sessions', () => {
         if (message.parent_id != null) node.parent_id = message.parent_id
         if (message.role != null) node.role = message.role
         if (message.type != null) node.type = messageTypeOf(message)
-        if (message.name != null) node.name = message.name
         // [T-147d-i] `tool_call_id` 不再上 wire——后端 `#[serde(skip)]`，前端无消费点。
+        // [T-147d-ii] 顶层 `name` 已退役——工具名随下面的 meta 合并（meta.tool_name）到位。
         if (message.meta != null) node.meta = message.meta
         // 存储侧权威值（落库后回发的对齐帧）：原样覆盖。
         if (message.seq != null) node.seq = message.seq
