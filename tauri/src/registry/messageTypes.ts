@@ -560,28 +560,31 @@ export function messageParentSessionId(node: Pick<ChatNode, 'meta'>): string | u
 // 且**规则变了只改一处**。
 
 /**
+ * 节点是否携带某个可用恢复动作（[T-155 B2a] 纯数据判据的唯一读法）。
+ *
+ * `actions` 由后端在交互面派生（[ADR-070 §决策 3]），前端不再按业务类型 / `recoverable`
+ * 反推「能不能重试」——「有对应动词即有入口，没有即不画」。`actions` 缺席（历史数据、
+ * 前端合成节点）一律 `false`：合成节点本就无可重试语义。
+ */
+function hasAction(actions: ResumeAction[] | undefined, action: ResumeAction): boolean {
+  return actions?.includes(action) ?? false
+}
+
+/**
  * 工具失败能否**就地重试**（resume action=`retry`）。
  *
- * 仅「会话因该失败而暂停」的可恢复失败才可就地重试（后端 `meta.recoverable`）：
- * 会话忙碌时 resume 会被拒绝；auto 模式下运行中的工具失败是**信息性**的
- * （错误结果已喂给 LLM 继续处理），给个重试按钮只会误导。
- * 思考 / 正文 / 工具请求的失败归 **Turn 级**重试（组级错误条），不在此列。
+ * [T-155 B2a] 判据已是**纯数据**：后端在交互面（[ADR-070 §决策 3]）把「这条节点能发
+ * 哪种恢复动词」折成 `actions` 列表随节点下发，前端只读「有 `retry` 就画重试」。
+ * 不再从业务类型（工具 / 可恢复标记）反推——那是本模块最后一处业务耦合。
  */
 export function canRetryTool(f: MessageFacets): boolean {
-  // [T-155] 呈现数据优先：后端声明了可用动作就按动作判，不再从业务类型反推。
-  if (f.actions) return isFailedStatus(f.status) && f.actions.includes(RESUME_ACTION_RETRY)
-  return f.type === NODE_KIND_TOOL_CALL && isFailedStatus(f.status) && f.recoverable
+  return isFailedStatus(f.status) && hasAction(f.actions, RESUME_ACTION_RETRY)
 }
 
 /** 工具失败能否**补充参数**后重跑（resume action=`supply`） */
 export function canSupplyToolArgs(f: MessageFacets): boolean {
-  if (f.actions)
-    return (
-      isFailedStatus(f.status) &&
-      f.actions.includes(RESUME_ACTION_SUPPLY) &&
-      f.failureKind === MESSAGE_FAILURE_KIND_ERROR
-    )
-  return canRetryTool(f) && f.failureKind === MESSAGE_FAILURE_KIND_ERROR
+  // `actions` 里出现 `supply` 已由后端保证「失败 + failure_kind=error」——前端不再复查档位。
+  return isFailedStatus(f.status) && hasAction(f.actions, RESUME_ACTION_SUPPLY)
 }
 
 /**
@@ -596,9 +599,7 @@ export function canSupplyToolArgs(f: MessageFacets): boolean {
  * **压缩节点本身**（系统动作），两者不能共用 `retry_subtree`。
  */
 export function canRetryCompaction(f: MessageFacets): boolean {
-  if (f.actions)
-    return isFailedStatus(f.status) && f.actions.includes(RESUME_ACTION_RETRY_COMPACTION)
-  return f.type === NODE_KIND_COMPRESSION && isFailedStatus(f.status)
+  return isFailedStatus(f.status) && hasAction(f.actions, RESUME_ACTION_RETRY_COMPACTION)
 }
 
 /**
@@ -619,7 +620,7 @@ export type MessageRetryAction = Extract<
 /**
  * 失败重试的分派结果（resume 的 `action` + `targetId`）。
  *
- * 三个粒度，**粒度由节点类型决定**：
+ * 三个粒度，**粒度由后端下发的 `actions` 决定**（[T-155 B2a]，[ADR-070 §决策 3]）：
  * - `retry`            —— 只重跑**这一个工具**（删除该工具的失败结果 → 原参数重新执行）；
  * - `retry_subtree`       —— 重跑**整轮**（删除响应子树 → 重新走 LLM 请求）；
  * - `retry_compaction` —— 重跑**这一次压缩**（删除失败压缩节点 → 重新压缩）。
@@ -632,33 +633,27 @@ export interface MessageRetryTarget {
 /**
  * 由失败节点推出该发哪种重试（**重试分派的唯一实现**）。
  *
- * 原先这段路由写在 `ModelChatPanel.handleRetry` 里，与面板的其它职责混在一起。
- * 抽成纯函数后可直接单测「哪种节点发哪种 action」，也避免「叶子节点要回溯到父 Turn」
- * 这条后端约束被漏掉——后端 `process_retry_subtree` 要求 `target_id` 指向 **运行骨架**
- * （`is_run()`：wire `type=skeleton` + `style_tag=run`，前端折后呈现为 `turn`），
- * 因此 Text / Reasoning 叶子失败时必须回溯到父 Turn，否则恢复会被拒绝。
- *
- * 压缩节点是**根级**节点（无 `parent_id`），若落到"回溯到父 Turn"的兜底分支，
- * `target_id` 会是它自己而它并非运行骨架（wire `type=notice`）——后端会以 NotFound 拒绝。
- * 因此它必须在工具分支之前单独分派。
+ * [T-155 B2a]：动作种类**优先读后端下发的 `actions`**——工具节点带 `retry`、压缩节点带
+ * `retry_compaction`、运行骨架带 `retry_subtree`，粒度与靶子都由数据给出，前端不再 `switch(type)`。
+ * `actions` 缺席（历史数据、合成节点、或尚未走到交互面的本地视图）时退回一条**不认业务类型**
+ * 的兜底：失败 / 中止一律整轮重试，叶子回溯到父骨架（后端 `process_retry_subtree` 要求
+ * `target_id` 指向运行骨架，叶子自身作靶会被拒绝）——这条兜底只吃 `status` + `parent_id`。
  */
 export function messageRetryTargetOf(
-  node: Pick<ChatNode, 'id' | 'type' | 'status' | 'parent_id'>,
+  node: Pick<ChatNode, 'id' | 'status' | 'parent_id' | 'actions'>,
 ): MessageRetryTarget {
-  const type = messageTypeOf(node)
-  // 压缩失败 → 压缩粒度（删压缩节点重跑，不动历史）
-  if (type === NODE_KIND_COMPRESSION && isFailedStatus(messageStatusOf(node))) {
-    return { action: RESUME_ACTION_RETRY_COMPACTION, targetId: node.id }
-  }
-  // 工具调用失败 → 单工具粒度（不动整轮）
-  if (type === NODE_KIND_TOOL_CALL && isFailedStatus(messageStatusOf(node))) {
+  const actions = node.actions
+  if (hasAction(actions, RESUME_ACTION_RETRY)) {
     return { action: RESUME_ACTION_RETRY, targetId: node.id }
   }
-  // 其余（Turn 本身，或 Turn 下的 Text/Reasoning 叶子）→ 整轮粒度，回溯到父 Turn
-  return {
-    action: RESUME_ACTION_RETRY_SUBTREE,
-    targetId: type === NODE_KIND_TURN ? node.id : node.parent_id || node.id,
+  if (hasAction(actions, RESUME_ACTION_RETRY_COMPACTION)) {
+    return { action: RESUME_ACTION_RETRY_COMPACTION, targetId: node.id }
   }
+  if (hasAction(actions, RESUME_ACTION_RETRY_SUBTREE)) {
+    return { action: RESUME_ACTION_RETRY_SUBTREE, targetId: node.id }
+  }
+  // 兜底（无 `actions`）：整轮粒度，叶子回溯到父骨架，无父退回自身。
+  return { action: RESUME_ACTION_RETRY_SUBTREE, targetId: node.parent_id || node.id }
 }
 
 /** 后端失败类别：可补充参数（其余类别只能原样重试） */

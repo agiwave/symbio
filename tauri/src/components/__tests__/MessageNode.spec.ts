@@ -392,7 +392,7 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
     expect(w.find('.node-body').exists()).toBe(false)
   })
 
-  it('可恢复失败（meta.recoverable）→ 就地重试（发射 ToolCall id，供单工具 retry）', async () => {
+  it('可恢复失败（后端下发 retry）→ 就地重试（发射 ToolCall id，供单工具 retry）', async () => {
     const w = mountNode(
       msg({
         id: 'tc1',
@@ -400,6 +400,7 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
         status: 'failed',
         error: '工具执行失败',
         meta: { failure_kind: 'error', recoverable: true, tool_name: 'shell' },
+        actions: ['retry'],
         content: '{}',
         children: [msg({ id: 'res1', type: 'text', role: 'tool', status: 'failed', content: '', error: 'boom', parent_id: 'tc1' })],
       }),
@@ -410,7 +411,7 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
     expect(w.emitted('retry')?.[0]).toEqual(['tc1'])
   })
 
-  it('可补充参数的可恢复失败（failure_kind=error + recoverable）→ 自动展开出补充参数表单', () => {
+  it('可补充参数的可恢复失败（后端下发 supply）→ 自动展开出补充参数表单', () => {
     const w = mountNode(
       msg({
         id: 'tc1',
@@ -418,6 +419,7 @@ describe('MessageNode：工具调用（单行 + 三段式 + 就地重试）', ()
         status: 'failed',
         error: '参数缺失',
         meta: { failure_kind: 'error', recoverable: true },
+        actions: ['retry', 'supply'],
         content: '{}',
         children: [],
       }),
@@ -506,6 +508,7 @@ describe('MessageNode：分派器路由与内容形态', () => {
         id: 'cp1',
         type: 'compression',
         status: 'failed',
+        actions: ['retry_compaction'],
         content: '压缩未完成（模型请求失败：429 Too Many Requests），已保留完整历史',
         meta: { failure_kind: 'llm_error' },
       }),

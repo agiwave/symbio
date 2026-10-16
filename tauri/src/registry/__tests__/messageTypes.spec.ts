@@ -442,24 +442,29 @@ describe('messageStartedAt：锚点只取后端值', () => {
   })
 })
 
-describe('消息级业务规则（纯函数，原先散在渲染组件里）', () => {
+describe('消息级业务规则（纯函数，[T-155 B2a] 只读后端下发的 actions）', () => {
   const tool = (p: Partial<MessageFacets>) =>
     facets({ type: NODE_KIND_TOOL_CALL, status: NODE_STATUS_FAILED, ...p })
 
-  it('只有「工具调用 + 失败 + 后端标记可恢复」才可就地重试', () => {
-    expect(canRetryTool(tool({ recoverable: true }))).toBe(true)
-    // 运行中的工具失败是信息性的（错误结果已喂给 LLM），给重试按钮只会误导
-    expect(canRetryTool(tool({ recoverable: false }))).toBe(false)
-    // 非工具调用不在此列：思考/正文/请求的失败归 Turn 级重试
-    expect(canRetryTool(facets({ status: NODE_STATUS_FAILED, recoverable: true }))).toBe(false)
-    // 非失败态没有重试语义
-    expect(canRetryTool(tool({ status: NODE_STATUS_COMPLETED, recoverable: true }))).toBe(false)
+  it('工具失败能否重试 = 后端是否下发 retry（不再看业务类型 / recoverable）', () => {
+    expect(canRetryTool(tool({ actions: ['retry'] as MessageFacets['actions'] }))).toBe(true)
+    // 后端未声明 retry → 不画（会话忙碌 / auto 模式信息性失败都由后端收敛掉）
+    expect(canRetryTool(tool({ actions: [] as MessageFacets['actions'] }))).toBe(false)
+    expect(canRetryTool(tool({}))).toBe(false)
+    // 非失败态即便带 retry 也不给入口（后端不会给，但判据本身把住状态）
+    expect(
+      canRetryTool(
+        tool({ status: NODE_STATUS_COMPLETED, actions: ['retry'] as MessageFacets['actions'] }),
+      ),
+    ).toBe(false)
   })
 
-  it('补充参数只在 failure_kind=error 时可恢复失败上提供', () => {
-    expect(canSupplyToolArgs(tool({ recoverable: true, failureKind: 'error' }))).toBe(true)
-    expect(canSupplyToolArgs(tool({ recoverable: true, failureKind: 'timeout' }))).toBe(false)
-    expect(canSupplyToolArgs(tool({ recoverable: true }))).toBe(false)
+  it('补充参数 = 后端是否下发 supply（supply 的出现已由后端保证 failure_kind=error）', () => {
+    expect(canSupplyToolArgs(tool({ actions: ['supply'] as MessageFacets['actions'] }))).toBe(true)
+    expect(
+      canSupplyToolArgs(tool({ actions: ['retry'] as MessageFacets['actions'] })),
+    ).toBe(false)
+    expect(canSupplyToolArgs(tool({}))).toBe(false)
   })
 })
 
@@ -489,146 +494,84 @@ describe('messageShowsLiveBadge：「回复中…」只在正文流式时显示'
   })
 })
 
-describe('messageRetryTargetOf：重试分派（粒度由节点类型决定）', () => {
-  it('工具调用失败 → 单工具重试，锚点是它自己', () => {
+describe('messageRetryTargetOf：重试分派（[T-155 B2a] 动作由后端 actions 决定，无 actions 走状态兜底）', () => {
+  it('后端下发 retry → 单工具重试，锚点是它自己', () => {
     expect(
-      messageRetryTargetOf({ id: 'tc1', type: NODE_KIND_TOOL_CALL, status: NODE_STATUS_FAILED }),
+      messageRetryTargetOf({ id: 'tc1', status: NODE_STATUS_FAILED, actions: ['retry'] as ChatNode['actions'] }),
     ).toEqual({ action: 'retry', targetId: 'tc1' })
   })
 
-  it('Turn 失败 → 整轮重试，锚点是 Turn 自己', () => {
+  it('后端下发 retry_subtree → 整轮重试，锚点是骨架自己', () => {
     expect(
-      messageRetryTargetOf({ id: 't1', type: NODE_KIND_TURN, status: NODE_STATUS_FAILED }),
+      messageRetryTargetOf({ id: 't1', status: NODE_STATUS_FAILED, actions: ['retry_subtree'] as ChatNode['actions'] }),
     ).toEqual({ action: 'retry_subtree', targetId: 't1' })
   })
 
-  it('Turn 下的叶子失败 → 回溯到父 Turn（后端要求 target_id 指向 Failed Turn）', () => {
+  it('后端下发 retry_compaction → 压缩粒度，锚点是压缩节点自己', () => {
     expect(
-      messageRetryTargetOf({
-        id: 'x1',
-        type: NODE_KIND_TEXT,
-        status: NODE_STATUS_FAILED,
-        parent_id: 't1',
-      }),
-    ).toEqual({ action: 'retry_subtree', targetId: 't1' })
-    expect(
-      messageRetryTargetOf({
-        id: 'r1',
-        type: NODE_KIND_REASONING,
-        status: NODE_STATUS_FAILED,
-        parent_id: 't1',
-      }),
-    ).toEqual({ action: 'retry_subtree', targetId: 't1' })
-  })
-
-  it('无父节点可回溯时退回自身（不发出空 targetId）', () => {
-    expect(
-      messageRetryTargetOf({ id: 'x1', type: NODE_KIND_TEXT, status: NODE_STATUS_FAILED }),
-    ).toEqual({ action: 'retry_subtree', targetId: 'x1' })
-  })
-
-  it('中止的 Turn 同样走整轮重试（这一轮只跑了一半）', () => {
-    expect(
-      messageRetryTargetOf({ id: 't1', type: NODE_KIND_TURN, status: NODE_STATUS_ABORTED }),
-    ).toEqual({ action: 'retry_subtree', targetId: 't1' })
-  })
-
-  it('中止的工具调用不按「单工具」处理（与改造前的行为一致）', () => {
-    expect(
-      messageRetryTargetOf({
-        id: 'tc1',
-        type: NODE_KIND_TOOL_CALL,
-        status: NODE_STATUS_ABORTED,
-        parent_id: 't1',
-      }),
-    ).toEqual({ action: 'retry_subtree', targetId: 't1' })
-  })
-
-  it('缺省 type 按正文处理 → 整轮重试', () => {
-    expect(messageRetryTargetOf({ id: 'x1', status: NODE_STATUS_FAILED, parent_id: 't1' })).toEqual(
-      { action: 'retry_subtree', targetId: 't1' },
-    )
-  })
-
-  /**
-   * 压缩失败是**第三种粒度**：删的是压缩节点本身（系统动作），不是响应子树。
-   *
-   * 回归动机：压缩节点是根级节点（无 `parent_id`），若落到"回溯到父 Turn"的兜底
-   * 分支，`target_id` 会是它自己而类型是 `Compression` —— 后端 `process_retry_subtree`
-   * 要求 Failed **Turn**，会直接 NotFound 拒绝。所以必须在工具分支之前单独分派。
-   */
-  it('压缩失败 → 压缩粒度（锚点是压缩节点自己，不回退到父 Turn）', () => {
-    expect(
-      messageRetryTargetOf({
-        id: 'cp1',
-        type: NODE_KIND_COMPRESSION,
-        status: NODE_STATUS_FAILED,
-      }),
+      messageRetryTargetOf({ id: 'cp1', status: NODE_STATUS_FAILED, actions: ['retry_compaction'] as ChatNode['actions'] }),
     ).toEqual({ action: 'retry_compaction', targetId: 'cp1' })
   })
 
-  it('压缩失败即便带了 parent_id 也不回溯（它不是对话轮次的一部分）', () => {
+  it('兜底：无 actions 的失败叶子 → 整轮重试并回溯到父骨架', () => {
     expect(
-      messageRetryTargetOf({
-        id: 'cp1',
-        type: NODE_KIND_COMPRESSION,
-        status: NODE_STATUS_FAILED,
-        parent_id: 't1',
-      }),
-    ).toEqual({ action: 'retry_compaction', targetId: 'cp1' })
+      messageRetryTargetOf({ id: 'x1', status: NODE_STATUS_FAILED, parent_id: 't1' }),
+    ).toEqual({ action: 'retry_subtree', targetId: 't1' })
+    expect(
+      messageRetryTargetOf({ id: 'r1', status: NODE_STATUS_FAILED, parent_id: 't1' }),
+    ).toEqual({ action: 'retry_subtree', targetId: 't1' })
   })
 
-  it('未失败的压缩节点不发重试（成功 / 压缩中都没有入口）', () => {
-    // `as const` 不可省：数组字面量里的字面量类型会被拓宽成 `string`，
-    // 于是 `status` 无法赋给 `NodeStatus`（与下面几处同理）
-    for (const status of [NODE_STATUS_COMPLETED, NODE_STATUS_STREAMING] as const) {
-      expect(
-        messageRetryTargetOf({ id: 'cp1', type: NODE_KIND_COMPRESSION, status }),
-      ).toEqual({ action: 'retry_subtree', targetId: 'cp1' })
-    }
+  it('兜底：无父可回溯时退回自身（不发出空 targetId）', () => {
+    expect(messageRetryTargetOf({ id: 'x1', status: NODE_STATUS_FAILED })).toEqual({
+      action: 'retry_subtree',
+      targetId: 'x1',
+    })
+  })
+
+  it('兜底：中止态同样回溯到父骨架', () => {
+    expect(
+      messageRetryTargetOf({ id: 'tc1', status: NODE_STATUS_ABORTED, parent_id: 't1' }),
+    ).toEqual({ action: 'retry_subtree', targetId: 't1' })
   })
 })
 
 /**
- * 压缩失败能否重试 —— 「只要失败就给入口」，不按 `failure_kind` 分档。
+ * 压缩失败能否重试 —— 纯数据判据：后端下发 `retry_compaction` 才给入口。
  *
- * 分档看起来更"聪明"（`input_over_limit` 重试必然再失败），但会掐掉唯一的出路：
- * 用户换一个上下文更大的模型后，同一次压缩就能成功。失败原因已写在节点正文里，
- * 由用户判断，不由前端替他决定"别试了"。
+ * 「只要失败就给入口、不按 `failure_kind` 分档」这条业务决定已上移到后端 `derive_actions`
+ * （[ADR-070 §决策 3]），前端只认动词是否存在。
  */
-describe('canRetryCompaction：压缩失败的重试入口', () => {
-  it('压缩 + 失败 → 给入口', () => {
+describe('canRetryCompaction：压缩失败的重试入口（读后端 actions）', () => {
+  it('后端下发 retry_compaction + 失败 → 给入口', () => {
     expect(
       canRetryCompaction(
-        facets({ type: NODE_KIND_COMPRESSION, status: NODE_STATUS_FAILED }),
+        facets({ status: NODE_STATUS_FAILED, actions: ['retry_compaction'] as MessageFacets['actions'] }),
       ),
     ).toBe(true)
   })
 
-  it('不按 failure_kind 分档：任何原因码都给入口', () => {
-    for (const failureKind of ['llm_error', 'invalid_snapshot', 'input_over_limit']) {
-      expect(
-        canRetryCompaction(
-          facets({ type: NODE_KIND_COMPRESSION, status: NODE_STATUS_FAILED, failureKind }),
-        ),
-      ).toBe(true)
-    }
-  })
-
-  it('非失败态（压缩中 / 已完成 / 已中止）不给入口', () => {
+  it('非失败态即便带 retry_compaction 也不给入口（判据把住状态）', () => {
     for (const status of [
       NODE_STATUS_STREAMING,
       NODE_STATUS_COMPLETED,
       NODE_STATUS_ABORTED,
       NODE_STATUS_WAITING_USER_ACTION,
     ] as const) {
-      expect(canRetryCompaction(facets({ type: NODE_KIND_COMPRESSION, status }))).toBe(false)
+      expect(
+        canRetryCompaction(
+          facets({ status, actions: ['retry_compaction'] as MessageFacets['actions'] }),
+        ),
+      ).toBe(false)
     }
   })
 
-  it('非压缩类型不给入口（工具 / Turn 各有自己的重试语义）', () => {
-    for (const type of [NODE_KIND_TURN, NODE_KIND_TOOL_CALL, NODE_KIND_TEXT] as const) {
-      expect(canRetryCompaction(facets({ type, status: NODE_STATUS_FAILED }))).toBe(false)
+  it('无 retry_compaction 动词 → 不给入口（不再按业务类型反推）', () => {
+    for (const actions of [
+      [] as MessageFacets['actions'],
+      ['retry'] as MessageFacets['actions'],
+    ]) {
+      expect(canRetryCompaction(facets({ status: NODE_STATUS_FAILED, actions }))).toBe(false)
     }
   })
 })
