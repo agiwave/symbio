@@ -108,7 +108,7 @@ export default defineCase(
     const GATEWAY_PORT = nextPort();
     const hd = makeHomedir({
       providers: [
-        { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 12000 }) },
+        { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 16000 }) },
       ],
       pluginConfigs: {
         gateway: {

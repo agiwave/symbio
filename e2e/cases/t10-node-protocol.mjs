@@ -212,7 +212,14 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     assertEq(rb.text, '先分析一下', 'reasoning 增量拼接应等于完整内容');
 
     // ⑧ Text 节点（正文，role=assistant）
-    const textNode = [...nodes.values()].find((m) => m.type === 'text' && m.role === 'assistant');
+    //
+    // 筛掉对话面的**界面文本**（开场白 / 轮边界汇报）：它们也是 `text` + `assistant`，
+    // 但产生即定格（一帧 `completed`、没有增量序列），不是本用例要重建的流式正文。
+    // 判据取 `meta.exclude_from_context`（与 `cli/src/render.rs` 的 `is_progress_surface`
+    // 同一条），不按 `surface` 判——答话节点也带 `surface=reply`。
+    const textNode = [...nodes.values()].find(
+      (m) => m.type === 'text' && m.role === 'assistant' && m.meta?.exclude_from_context !== true,
+    );
     assert(textNode, `实时面应有 assistant text 节点\n时间线:\n${timeline.join('\n')}`);
     const tb = rebuild(textNode.id);
     assertEq(tb.start.data.status, 'streaming', `text 首帧应为 streaming（节点 ${textNode.id}）`);

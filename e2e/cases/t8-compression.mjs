@@ -5,10 +5,16 @@ import './_selfrun.mjs';
 // 回复超大文本把水位顶过阈值；压缩请求以「Distill the conversation above…」
 // 指令收尾（compression.rs::compression_instruction），mock 据此用 <state_snapshot>
 // XML 应答。参数口径实测校准过（dbg 阶段）：
-// - 请求级 overhead ≈ 4.5k tokens（system prompt + 20 个工具 schema）；
+// - 请求级 overhead ≈ 5.9k tokens（system prompt + 20 个工具 schema）；
 // - 每轮回复 ≈ 9.6k 字符 ≈ 9.6k tokens（CJK ≈ 1 token/字）；
-// - 12000 上限：70% = 8400，第 3 轮开始时水位 ≈ 19k 稳过线，且压缩请求
-//   （历史 ≈ 7.4k + overhead ≈ 4.5k < 12000）能通过「摘要请求自身不超限」预检。
+// - 16000 上限：70% = 11200，第 3 轮开始时水位 ≈ 19k 稳过线，且压缩请求
+//   （历史 ≈ 7.4k + overhead ≈ 5.9k < 16000）能通过「摘要请求自身不超限」预检。
+//
+// 上限为什么留 ≈2.7k 余量而不贴边：预检的分子含**全部工具 schema**，而 schema 的措辞
+// 会被任务改动——2026-10-16 的 T-134 给 `vdfs/tools/mod.rs::PATH_DESC` 补了一格「绝对
+// POSIX 地址会变影子树」的警示，8 份 schema 各长 179 字符 ⇒ overhead +≈1.4k，原本只留
+// 100 tokens 余量的 12000 上限当场让压缩**预判注定超限**、静默跳过（本用例那时红在
+// 「mock-llm 应收到压缩请求」）。本用例钉的是压缩链路，不是 schema 有多长。
 // 钉的不变量：
 // - 压缩 LLM 调用真实发生（mock 收到压缩请求）；
 // - 快照消息落库：meta.compacted=true、protocol_version=v2、user 角色、
@@ -60,7 +66,7 @@ export default defineCase('T8 上下文压缩：水位触发自动压缩，快�
   const GATEWAY_PORT = nextPort();
   const hd = makeHomedir({
     providers: [
-      { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 12000 }) },
+      { id: PROVIDER_ID, config: providerConfig(llm.port, { max_context_tokens: 16000 }) },
     ],
     // context_messages: 0 = 上下文窗口不按轮次截断（压缩判定的原料是完整历史）
     pluginConfigs: {

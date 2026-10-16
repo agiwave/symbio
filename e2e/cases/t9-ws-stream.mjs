@@ -95,8 +95,22 @@ export default defineCase('T9 gateway WS 实时面：vdfs 变更帧序与增量�
     assert(send.status === 200, `写收件箱应受理（${send.status}: ${JSON.stringify(send.body)?.slice(0, 150)}）`);
 
     // ③ 等正文收敛（assistant text 到达终态）
+    //
+    // 排除**对话面的界面文本**（开场白 / 轮边界汇报）：它们也是 `text` + `assistant`，
+    // 但产生即定格（一帧 `completed`、无增量），且天生不参与流式契约。判据取
+    // `meta.exclude_from_context`——与 `cli/src/render.rs` 的 `is_progress_surface` 同一条，
+    // 不按 `surface` 判（答话节点同样带 `surface=reply`，按它判会把答案筛掉）。
+    // 不筛的后果不是"多等一会儿"：开场白那一帧先到，`isDone` 会在答案还没开始流时
+    // 就返回，于是 ⑦ 取到的"正文首帧"是那句开场白（`completed`，没有 streaming）。
+    const isInterfaceText = (d) => d?.meta?.exclude_from_context === true;
     const isDone = () =>
-      rt.messages().some((m) => m.data?.type === 'text' && m.data?.role === 'assistant' && TERMINAL.has(m.data?.status));
+      rt.messages().some(
+        (m) =>
+          m.data?.type === 'text' &&
+          m.data?.role === 'assistant' &&
+          TERMINAL.has(m.data?.status) &&
+          !isInterfaceText(m.data),
+      );
     await waitFor(isDone, { what: '实时面收敛（assistant text 终态）', timeoutMs: 20_000 });
 
     // ④ 再等**会话收尾那一帧**（离开 working）。它是本轮实时面的最后一帧，
@@ -135,7 +149,12 @@ export default defineCase('T9 gateway WS 实时面：vdfs 变更帧序与增量�
     );
 
     // ⑦ 帧形态：同一正文节点的「首帧全量（身份 + 正文）→ 窄增量*」
-    const firstText = msgs.find((m) => m.data?.type === 'text' && m.data?.role === 'assistant');
+    const firstText = msgs.find(
+      (m) =>
+        m.data?.type === 'text' &&
+        m.data?.role === 'assistant' &&
+        !isInterfaceText(m.data),
+    );
     assert(!!firstText, `应含正文节点的首帧（身份 + 首段正文）\n时间线:\n${timeline.join('\n')}`);
     const frames = rt.framesOf(firstText.mid);
     const head = frames[0].data;
