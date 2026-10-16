@@ -19,13 +19,17 @@ pub enum NodeRole {
     System,
 }
 
-/// 消息类型
+/// 节点**形状**——[T-147c-ii] 目标五值闭集（`Body` / `Notice` / `Skeleton` / `Interaction` / `Typing`），
+/// 本批**保留旧六值**（`Text` / `Reasoning` / `Turn` / `ToolCall` / `UserPrompt` / `Compression`）
+/// 直到 [T-147c-ii] 落地——300+ Rust 站点 + 250+ TS 站点的机械收敛一次做完，中间态两侧一致。
 ///
-/// `Turn` 与 `ToolCall` 是组合节点（不含实际内容，仅分组子节点）；
-/// `Text` / `Reasoning` 是内容节点（携带可显示内容）。
-/// 工具调用是分型结构：`ToolCall`(请求) 的子节点包含一个 `Turn`(`Tool`，响应)，
-/// 该响应 `Turn` 与顶层助手响应 `Turn` 结构完全一致（可再嵌套 `ToolCall`）。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// 现在起，消费方按 [`ChatNode`] 上的**谓词**（`is_run` / `is_tool_call` / `is_reasoning` /
+/// `is_text` / `is_compression` / `is_interaction`）判节点，而不是按枚举变体名——谓词的
+/// 语义与 [ADR-070 §决策 1] 的五值 + style_tag 一一对齐，五值收敛时谓词逐字不变，改点
+/// 收在**构造侧**（把 `NodeKind::Turn` 构造改成 `NodeKind::Skeleton` + `meta.style_tag="run"`）。
+///
+/// 决策依据：[ADR-070 §决策 1 / 3]·父批：[T-147c-ii]。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
 pub enum NodeKind {
@@ -37,18 +41,63 @@ pub enum NodeKind {
     /// 组合节点：一次工具调用（请求），携带 `name`，其子节点含请求 `Text` 与响应 `Text/Turn`
     ToolCall,
     /// 待用户响应节点：承载 `ask_user` 提问或工具执行前确认（confirm）。
-    /// 状态为 `WaitingUserAction` 时表示等待用户输入，答案以一条普通 `user`
-    /// 消息（`meta.responds_to` 指向本节点 id）回填，回填后本节点标记 `Completed`。
-    /// 结构化载荷存放于 `meta.prompt`，详见会话激活/恢复状态机设计文档。
     UserPrompt,
     /// 上下文压缩节点：**不是对话内容**，是系统对历史的一次整理动作。
-    ///
-    /// 以消息节点而非「会话级横幅」呈现，是因为压缩本就是会话里发生的一步：
-    /// 它有自己的位置（当前时刻）、自己的状态（进行中 / 已完成），被压掉的历史
-    /// 就发生在它之前。横幅没有位置概念——用户滚到消息流中间时看不见它，
-    /// 事后也无法回溯「上次压缩发生在哪里、压掉了多少」。
     Compression,
 }
+
+/// **目标五值形状**（[ADR-070 §决策 1]）——[T-147c-ii] 落地时 `NodeKind` 与本类型合一；
+/// 本批先立住 wire 层的**读取形态**：`legacy_shape_to_style_tag` 返回本类型、`ChatNode::shape_hint`
+/// 谓词返回本类型。这样消费方**从现在开始按 shape + style_tag 判**而不是按旧变体名判，
+/// 五值收敛那一档只改构造侧。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NodeShape {
+    Body,
+    Notice,
+    Skeleton,
+    Interaction,
+    Typing,
+}
+
+/// **旧 wire 词 → 目标形状 + style_tag**（[ADR-070 §决策 3 / 6]）。
+///
+/// 消费点是 `message_of_node`：VDFS `attributes.type` 存的是**当时的 wire 词**——历史数据里
+/// 有 `"text"` / `"reasoning"` / `"turn"` / `"tool_call"` / `"user_prompt"` / `"compression"`
+/// 六种旧值；本函数把它们折成新形态并**返回**应写入 `meta.style_tag` 的值（`None` = 不写）。
+/// 新词（`"body"` / `"notice"` / `"skeleton"` / `"interaction"` / `"typing"`）也认。
+///
+/// 本批枚举**未**收五值——`NodeShape` 只做**判据侧**表达（谓词），不参与序列化。
+/// [T-147c-ii] 之后本函数返回的 shape 与 `NodeKind` 一一对应，读侧映射代码归零。
+pub fn legacy_shape_to_style_tag(word: &str) -> Option<(NodeShape, Option<&'static str>)> {
+    Some(match word {
+        // 新词——原样，无 style_tag 需要注入。
+        "body" => (NodeShape::Body, None),
+        "notice" => (NodeShape::Notice, None),
+        "skeleton" => (NodeShape::Skeleton, None),
+        "interaction" => (NodeShape::Interaction, None),
+        "typing" => (NodeShape::Typing, None),
+        // 旧词——折成新形态 + 对应 style_tag。
+        "text" => (NodeShape::Body, None),
+        "reasoning" => (NodeShape::Body, Some(CHAT_STYLE_TAG_REASONING)),
+        "turn" => (NodeShape::Skeleton, Some(CHAT_STYLE_TAG_RUN)),
+        "tool_call" => (NodeShape::Skeleton, Some(CHAT_STYLE_TAG_TOOL)),
+        "user_prompt" => (NodeShape::Interaction, None),
+        "compression" => (NodeShape::Notice, Some(CHAT_STYLE_TAG_COMPRESSION)),
+        _ => return None,
+    })
+}
+
+/// **style_tag 词表**（[ADR-070 §决策 3]）——同一 shape 下的呈现变体。
+///
+/// 与 `NodeKind` 一样是 wire 词：住在协议 schema 一侧，渲染分派（[T-148]）读它，
+/// 业务规则判据（`is_run` / `is_tool_call` …）也读它。加一个变体 = 加一行常量。
+pub const CHAT_STYLE_TAG_REASONING: &str = "reasoning";
+/// `Skeleton` 的一种：一整轮助手响应（曾经的 `Turn`）。
+pub const CHAT_STYLE_TAG_RUN: &str = "run";
+/// `Skeleton` 的一种：一次工具调用（曾经的 `ToolCall`）。
+pub const CHAT_STYLE_TAG_TOOL: &str = "tool";
+/// `Notice` 的一种：上下文压缩记录（曾经的 `Compression`）。
+pub const CHAT_STYLE_TAG_COMPRESSION: &str = "compression";
 
 /// 消息状态
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -437,6 +486,67 @@ pub fn message_of_node(node: &crate::symbio_core::VdfsNode, text: String) -> Opt
         content: Some(MessageContent::Text(text)),
         ..Default::default()
     })
+}
+
+impl ChatNode {
+    /// 读 `meta.style_tag`（wire 层的呈现变体词，[ADR-070 §决策 3]）。
+    ///
+    /// [T-147c-ii] 落地前 `style_tag` 只有**未来写方**会用（本批不产生新写点），
+    /// 谓词 `is_run` / `is_tool_call` / `is_reasoning` 等**同时兼容**旧六值变体名
+    /// 与新形态 + tag 两种形态——五值收敛那一档消费方读谓词不变，改点收在构造侧。
+    pub fn style_tag(&self) -> Option<&str> {
+        self.meta
+            .as_ref()
+            .and_then(|m| m.get("style_tag"))
+            .and_then(Value::as_str)
+    }
+
+    /// 目标形状判据（[ADR-070 §决策 1]）：把当前 `msg_type` + `style_tag` 折成**目标五值**——
+    /// 消费方按此判而不是按旧变体名判，[T-147c-ii] 落地后 `msg_type` 本身就是 `NodeShape`。
+    pub fn shape(&self) -> Option<NodeShape> {
+        let kind = self.msg_type?;
+        Some(match kind {
+            NodeKind::Text => NodeShape::Body,
+            NodeKind::Reasoning => NodeShape::Body,
+            NodeKind::Turn => NodeShape::Skeleton,
+            NodeKind::ToolCall => NodeShape::Skeleton,
+            NodeKind::UserPrompt => NodeShape::Interaction,
+            NodeKind::Compression => NodeShape::Notice,
+        })
+    }
+
+    /// 本节点是不是「一整轮助手响应的骨架」（曾经的 `Turn`）。
+    ///
+    /// **本批**（[T-147c-ii-prep]）枚举未收五值，谓词按旧变体名判；[T-147c-ii] 落地那一档
+    /// 谓词**签名不变、实现切到** `shape() + style_tag()`——消费方代码不动，改点收在构造侧。
+    pub fn is_run(&self) -> bool {
+        matches!(self.msg_type, Some(NodeKind::Turn))
+    }
+
+    /// 本节点是不是「一次工具调用骨架」（曾经的 `ToolCall`）。
+    pub fn is_tool_call(&self) -> bool {
+        matches!(self.msg_type, Some(NodeKind::ToolCall))
+    }
+
+    /// 本节点是不是「推理正文」（曾经的 `Reasoning`）。
+    pub fn is_reasoning(&self) -> bool {
+        matches!(self.msg_type, Some(NodeKind::Reasoning))
+    }
+
+    /// 本节点是不是「普通正文」——`Text` 变体（未来 = Body 无 tag）。
+    pub fn is_text(&self) -> bool {
+        matches!(self.msg_type, Some(NodeKind::Text))
+    }
+
+    /// 本节点是不是「压缩记录」（曾经的 `Compression`）。
+    pub fn is_compression(&self) -> bool {
+        matches!(self.msg_type, Some(NodeKind::Compression))
+    }
+
+    /// 本节点是不是「等待用户回应的交互」（曾经的 `UserPrompt`）。
+    pub fn is_interaction(&self) -> bool {
+        matches!(self.msg_type, Some(NodeKind::UserPrompt))
+    }
 }
 
 #[cfg(test)]

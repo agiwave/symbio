@@ -32,7 +32,9 @@ principal 从字符串升到结构体一并做：[T-146] 已把值域迁到可�
 
 - **147a**（additive）：`Principal` 结构体 + `PrincipalKind` 枚举 + `from_legacy` 读侧别名 helper；未接消费方。→ commit `910c4214`
 - **147b**（wire 翻转）：`ChatMessage.principal: Option<String>` → `Option<Principal>`；`Principal` 自定义 `Deserialize` 同吃字符串与对象两种 wire 形态；写侧 `attributed` 构造 `Principal`；读侧 `visible_for` / `actor_and_ts` 通过 `.id` 消费；TS 加 `Principal` 接口 + `normalizePrincipal` / `principalId` / `principalKind` 三个 helper 与后端 `from_legacy` 逐字一致。
-- **147c**（改名 + 五值）：`chat_message.rs` → `chat_node.rs`；`ChatMessage` → `ChatNode`；`MessageType` → `NodeKind`（五值 Body/Notice/Skeleton/Interaction/Typing）；按 ADR-070 §决策 2 合并旧变体。
+- **147c-i**（机械改名）：`chat_message.rs` → `chat_node.rs`；`ChatMessage` → `ChatNode`；`MessageType` → `NodeKind`；`MessageStatus` → `NodeStatus`；`MessageRole` → `NodeRole`；前端 `chat_message.ts` → `chat_node.ts` 同步。枚举**未**收五值——六值变体名与 wire 词都保留。
+- **147c-ii-prep**（判据 helper，本批）：`NodeShape` 目标五值 + `legacy_shape_to_style_tag` 六→五映射 + `CHAT_STYLE_TAG_*` 词表 + `ChatNode::shape()` / `style_tag()` 判据入口 + 谓词 `is_run` / `is_tool_call` / `is_reasoning` / `is_text` / `is_compression` / `is_interaction`——谓词**签名**即未来形态判据入口，五值收敛那一档消费方代码不动、改点收在构造侧。四条单测（映射表、谓词互斥、shape 折叠、style_tag 从 meta 读）钉住基线。
+- **147c-ii**（六→五收敛，延后）：`NodeKind` 变体收 Body/Notice/Skeleton/Interaction/Typing；写侧把 `NodeKind::Turn` 构造改成 `Skeleton + meta.style_tag="run"`，其余五档同理；前端 TS 同步。**规模**：~300 Rust 站点 + 250+ TS 站点，一次原子改。
 - **147d**（字段瘦身）：`role` 从协议删除（`kind` 已承载归属）；`tool_call_id` 沉 meta；`name` 迁到 `principal.title`。
 - **147e**（动词改名）：`ResumeAction::RetryTurn` → `RetrySubtree`；前后端常量与分派同步。
 

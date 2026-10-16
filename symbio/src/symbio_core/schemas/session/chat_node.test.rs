@@ -66,3 +66,101 @@ fn resume_action_wire_words_are_snake_case() {
         assert_eq!(format!("{back:?}"), format!("{action:?}"));
     }
 }
+
+// ==================== [T-147c-ii-prep] 目标形状与 style_tag ====================
+
+/// 六值 wire 词都能被 [`legacy_shape_to_style_tag`] 折成目标五值 + 对应 style_tag。
+/// 这张映射表是 [T-147c-ii] 落地的**判据基线**：`NodeKind` 收五值那一档，读侧兼容代码
+/// 就靠这条；测试**先立住映射**，五值改完之后再回读一次。
+#[test]
+fn legacy_wire_words_fold_to_shape_and_style_tag() {
+    for (word, shape, tag) in [
+        ("text", NodeShape::Body, None),
+        ("reasoning", NodeShape::Body, Some(CHAT_STYLE_TAG_REASONING)),
+        ("turn", NodeShape::Skeleton, Some(CHAT_STYLE_TAG_RUN)),
+        ("tool_call", NodeShape::Skeleton, Some(CHAT_STYLE_TAG_TOOL)),
+        ("user_prompt", NodeShape::Interaction, None),
+        ("compression", NodeShape::Notice, Some(CHAT_STYLE_TAG_COMPRESSION)),
+        // 新词也认（未来 wire 上的读侧）
+        ("body", NodeShape::Body, None),
+        ("skeleton", NodeShape::Skeleton, None),
+        ("notice", NodeShape::Notice, None),
+        ("interaction", NodeShape::Interaction, None),
+        ("typing", NodeShape::Typing, None),
+    ] {
+        let (got_shape, got_tag) = legacy_shape_to_style_tag(word)
+            .unwrap_or_else(|| panic!("{word} 未登记进映射"));
+        assert_eq!(got_shape, shape, "{word} 折错形状");
+        assert_eq!(got_tag, tag, "{word} 折错 style_tag");
+    }
+    // 未登记词 ⇒ None（不假装知道）。
+    assert!(legacy_shape_to_style_tag("nonsense").is_none());
+}
+
+/// 谓词按**当前六值形态**判，且**互斥**——`is_reasoning` 与 `is_text` 不能同真（曾经的
+/// bug 是 Text 与 Reasoning 都判成 Body）。[T-147c-ii] 五值收敛那一档 `is_*` 谓词**签名不变**，
+/// 实现切到 `shape() + style_tag()`；这一档的断言是"迁移后消费方不用改"的护栏。
+#[test]
+fn predicates_are_exclusive_per_kind() {
+    let n = |kind: NodeKind| ChatNode {
+        msg_type: Some(kind),
+        ..Default::default()
+    };
+    let run = n(NodeKind::Turn);
+    assert!(run.is_run());
+    assert!(!run.is_tool_call());
+    assert!(!run.is_reasoning());
+    assert!(!run.is_text());
+
+    let tc = n(NodeKind::ToolCall);
+    assert!(tc.is_tool_call());
+    assert!(!tc.is_run());
+
+    let reasoning = n(NodeKind::Reasoning);
+    assert!(reasoning.is_reasoning());
+    assert!(!reasoning.is_text(), "推理与正文互斥（曾同时命中 Body 是 bug）");
+
+    let text = n(NodeKind::Text);
+    assert!(text.is_text());
+    assert!(!text.is_reasoning());
+
+    let comp = n(NodeKind::Compression);
+    assert!(comp.is_compression());
+    assert!(!comp.is_interaction());
+
+    let prompt = n(NodeKind::UserPrompt);
+    assert!(prompt.is_interaction());
+
+    let bare = ChatNode::default();
+    assert!(
+        !bare.is_text() && !bare.is_run() && !bare.is_tool_call() && !bare.is_reasoning(),
+        "未标 msg_type ⇒ 全谓词都假（不是默认落到 Text）"
+    );
+}
+
+/// `shape()` 与 `style_tag()` 是 [T-147c-ii] 落地后消费方的**判据入口**——本批先把
+/// 六值映射立住，五值收敛那一档 `msg_type` 变成五值，`shape()` 直接返回 `msg_type` 对应。
+#[test]
+fn shape_helper_maps_six_variants_to_five() {
+    let n = |kind: NodeKind| ChatNode {
+        msg_type: Some(kind),
+        ..Default::default()
+    };
+    assert_eq!(n(NodeKind::Text).shape(), Some(NodeShape::Body));
+    assert_eq!(n(NodeKind::Reasoning).shape(), Some(NodeShape::Body));
+    assert_eq!(n(NodeKind::Turn).shape(), Some(NodeShape::Skeleton));
+    assert_eq!(n(NodeKind::ToolCall).shape(), Some(NodeShape::Skeleton));
+    assert_eq!(n(NodeKind::UserPrompt).shape(), Some(NodeShape::Interaction));
+    assert_eq!(n(NodeKind::Compression).shape(), Some(NodeShape::Notice));
+    assert_eq!(ChatNode::default().shape(), None);
+}
+
+/// `style_tag()` 从 `meta.style_tag` 读——**新形态**的写方（[T-147c-ii] 之后）用它带出
+/// 同 shape 下的呈现变体。本批读侧兼容代码已就位，五值那一档只补构造侧。
+#[test]
+fn style_tag_reads_from_meta() {
+    let mut n = ChatNode::default();
+    assert_eq!(n.style_tag(), None);
+    n.meta = Some(serde_json::json!({ "style_tag": CHAT_STYLE_TAG_RUN }));
+    assert_eq!(n.style_tag(), Some(CHAT_STYLE_TAG_RUN));
+}
