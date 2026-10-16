@@ -128,10 +128,22 @@ async fn process_retry_subtree(
         )));
     }
 
-    // 3. BFS 收集所有子孙节点 id（含 target_id 自身）
+    // 3. BFS 收集所有子孙节点 id（含 target_id 自身）。
+    //    `flat` 档下本轮响应骨架的直接子节点（思考 / 正文 / ToolCall）已升根
+    //    （`parent_id: None`），靠 `meta.turn_root` 记号认回——否则它们够不着、
+    //    retry 删不干净、残留下一次重建（与 `failure::subtree_of` 同一条并集）。
     let mut to_delete: HashSet<String> = HashSet::new();
     to_delete.insert(req.target_id.clone());
     let mut queue: Vec<String> = vec![req.target_id.clone()];
+    // turn_root==target 的脱父子节点：并入种子队列（ToolCall 升根后它的结果子节点
+    // 仍按 parent_id 挂在它下面，push 进队列才连得下去）。
+    for m in &messages {
+        if super::message_build::turn_root_of(m) == Some(req.target_id.as_str())
+            && to_delete.insert(m.id.clone())
+        {
+            queue.push(m.id.clone());
+        }
+    }
     while let Some(parent_id) = queue.pop() {
         for m in &messages {
             if m.parent_id.as_deref() == Some(&parent_id) && to_delete.insert(m.id.clone()) {

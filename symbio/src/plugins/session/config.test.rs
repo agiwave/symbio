@@ -147,6 +147,50 @@ fn the_progress_switch_is_independent_of_the_other_two() {
     assert!(c.classify_enabled && c.compose_enabled && !c.progress_enabled);
 }
 
+/// 建树策略出厂 = `grouped`（保持今天行为）：`flat` 才改组树，故默认档必须与
+/// 「本开关引入之前」逐字一致。这条默认值一旦翻转，每个存量会话的节点树都从
+/// 「本轮挂响应骨架下」变成「铺平到会话根」，属必须钉住的出厂决定。
+#[test]
+fn presentation_tree_defaults_to_grouped_and_parses_known_values() {
+    let c = SessionConfig::default();
+    assert_eq!(c.presentation_tree(), PresentationTree::Grouped);
+    assert_eq!(default_presentation_tree(), "grouped");
+
+    let flat = SessionConfig {
+        presentation_tree: "flat".into(),
+        ..SessionConfig::default()
+    };
+    assert_eq!(flat.presentation_tree(), PresentationTree::Flat);
+}
+
+/// 认不出的写法按出厂默认处理（与 `SettingConfig::verbosity` 同一条读侧容错纪律）：
+/// 手写 `PLUGIN.yml` 拼错、或写了尚未接线的 `deep`，都不该改变组树。`deep` 在
+/// 149-ii 接线前一并落到 `grouped`。
+#[test]
+fn unknown_presentation_tree_falls_back_to_grouped() {
+    for raw in ["", "  flat  ", "GROUPED", "deep", "nonsense"] {
+        let c = SessionConfig {
+            presentation_tree: raw.into(),
+            ..SessionConfig::default()
+        };
+        // 带空白的 "flat" 仍解析为 Flat（trim 生效）；其余落到 Grouped。
+        let want = if raw.trim() == "flat" {
+            PresentationTree::Flat
+        } else {
+            PresentationTree::Grouped
+        };
+        assert_eq!(c.presentation_tree(), want, "取值 {:?} 的折叠不对", raw);
+    }
+}
+
+/// 存量 `PLUGIN.yml` 没有本键时按缺省补齐（`#[serde(default = ...)]` 的意义）。
+#[test]
+fn missing_presentation_tree_key_falls_back_to_default() {
+    let c: SessionConfig = serde_json::from_str(r#"{"max_messages": 42}"#).unwrap();
+    assert_eq!(c.presentation_tree, default_presentation_tree());
+    assert_eq!(c.presentation_tree(), PresentationTree::Grouped);
+}
+
 /// 「欲」升格开关出厂关着（E3 平凡值，02 §2.3）：关掉后心跳照常触发、「欲」照常
 /// 入格，只是**一条自主任务都不产生**——退化为纯响应式且仍完整运行。
 ///

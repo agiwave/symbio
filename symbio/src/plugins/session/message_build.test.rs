@@ -368,3 +368,114 @@ fn temporal_context_ignores_empty_workdir() {
     let result = temporal_context(Some("   "));
     assert!(!result.contains("工作区"), "空白 workdir 应被忽略");
 }
+
+// ── 建树策略 flat 折叠（[T-149]）────────────────────────────────────────
+
+use crate::plugins::session::config::PresentationTree;
+
+fn node(id: &str, parent: Option<&str>) -> ChatNode {
+    ChatNode {
+        id: id.to_string(),
+        parent_id: parent.map(str::to_string),
+        ..Default::default()
+    }
+}
+
+fn run_node(id: &str) -> ChatNode {
+    ChatNode {
+        id: id.to_string(),
+        msg_type: Some(NodeKind::Skeleton),
+        ..Default::default()
+    }
+    .with_style_tag(CHAT_STYLE_TAG_RUN)
+}
+
+fn tool_node(id: &str, parent: &str) -> ChatNode {
+    ChatNode {
+        id: id.to_string(),
+        parent_id: Some(parent.to_string()),
+        msg_type: Some(NodeKind::Skeleton),
+        ..Default::default()
+    }
+    .with_style_tag(CHAT_STYLE_TAG_TOOL)
+}
+
+#[test]
+fn detach_if_flat_raises_direct_child_and_stamps_turn_root() {
+    let mut n = node("body-1", Some("run-1"));
+    detach_if_flat(&mut n, "run-1", PresentationTree::Flat);
+    assert_eq!(n.parent_id, None, "flat：本轮直接子节点升根");
+    assert_eq!(
+        turn_root_of(&n),
+        Some("run-1"),
+        "升根后靠 turn_root 记号认回本轮骨架"
+    );
+}
+
+#[test]
+fn detach_if_flat_grouped_is_byte_for_byte_noop() {
+    let mut n = node("body-1", Some("run-1"));
+    n.meta = Some(serde_json::json!({ "style_tag": "reasoning" }));
+    let before = serde_json::to_value(&n).unwrap();
+    detach_if_flat(&mut n, "run-1", PresentationTree::Grouped);
+    assert_eq!(
+        serde_json::to_value(&n).unwrap(),
+        before,
+        "grouped 是今天行为：零改动"
+    );
+}
+
+#[test]
+fn detach_if_flat_ignores_child_not_under_this_root() {
+    // 工具结果节点的父是 tool_call，不是本轮响应骨架——flat 也不该动它。
+    let mut n = node("result-1", Some("tool-1"));
+    detach_if_flat(&mut n, "run-1", PresentationTree::Flat);
+    assert_eq!(n.parent_id.as_deref(), Some("tool-1"));
+    assert_eq!(turn_root_of(&n), None);
+}
+
+#[test]
+fn flatten_whole_tree_detaches_run_children_keeps_tool_results() {
+    let mut tree = vec![
+        run_node("run-1"),
+        node("reasoning-1", Some("run-1")),
+        node("text-1", Some("run-1")),
+        tool_node("tool-1", "run-1"),
+        node("result-1", Some("tool-1")),
+    ];
+    flatten_whole_tree(&mut tree, PresentationTree::Flat);
+    // 骨架自身留在根；它的直接子节点（含工具调用骨架）升根 + 打记号。
+    assert_eq!(tree[0].parent_id, None);
+    for i in 1..=3 {
+        assert_eq!(tree[i].parent_id, None, "本轮直接子节点升根");
+        assert_eq!(turn_root_of(&tree[i]), Some("run-1"));
+    }
+    // 工具结果挂在工具调用骨架下——与建树策略正交，flat 不碰。
+    assert_eq!(tree[4].parent_id.as_deref(), Some("tool-1"));
+    assert_eq!(turn_root_of(&tree[4]), None);
+}
+
+#[test]
+fn flatten_whole_tree_grouped_is_noop() {
+    let mut tree = vec![run_node("run-1"), node("text-1", Some("run-1"))];
+    flatten_whole_tree(&mut tree, PresentationTree::Grouped);
+    assert_eq!(
+        tree[1].parent_id.as_deref(),
+        Some("run-1"),
+        "grouped 保持今天形状"
+    );
+    assert_eq!(turn_root_of(&tree[1]), None);
+}
+
+#[test]
+fn flatten_whole_tree_is_idempotent() {
+    let mut once = vec![run_node("run-1"), node("text-1", Some("run-1"))];
+    flatten_whole_tree(&mut once, PresentationTree::Flat);
+    let mut twice = once.clone();
+    flatten_whole_tree(&mut twice, PresentationTree::Flat);
+    assert_eq!(
+        serde_json::to_value(&once).unwrap(),
+        serde_json::to_value(&twice).unwrap(),
+        "投影叠在已升根的树上不二次变形"
+    );
+}

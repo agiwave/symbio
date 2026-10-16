@@ -38,7 +38,8 @@ use crate::symbio_core::{
     Plugin, PluginInvokeRequest,
 };
 
-use super::message_build::{llm_build_text_node, llm_build_tool_call_nodes};
+use super::config::PresentationTree;
+use super::message_build::{detach_if_flat, llm_build_text_node, llm_build_tool_call_nodes};
 use super::tools::process_tool_calls_async;
 use super::transcript::llm_emit_state;
 use super::v2_exec::UiBridge;
@@ -82,6 +83,8 @@ pub(crate) struct SessionDispatchPort {
     produced: Mutex<Vec<ChatNode>>,
     /// 本轮工具执行层交回的收束派生事实（承诺 / 任务表 / 熔断）。
     derived: Mutex<DerivedFacts>,
+    /// 本轮建树策略（`V2Turn` 的请求级快照，与流式发射同一个取值）。
+    presentation_tree: PresentationTree,
 }
 
 impl SessionDispatchPort {
@@ -94,6 +97,7 @@ impl SessionDispatchPort {
         abort: ExecAbortSignal,
         root_id: String,
         bridge: Arc<UiBridge>,
+        presentation_tree: PresentationTree,
     ) -> Self {
         Self {
             parent,
@@ -105,6 +109,7 @@ impl SessionDispatchPort {
             bridge,
             produced: Mutex::new(Vec::new()),
             derived: Mutex::new(DerivedFacts::default()),
+            presentation_tree,
         }
     }
 
@@ -140,13 +145,14 @@ impl DispatchPort for SessionDispatchPort {
         // 工具卡片会跑到正文之前。
         self.bridge.flush().await;
         if let Some(node_id) = text_node {
-            let msg = llm_build_text_node(&self.root_id, &turn.text, None, node_id);
+            let mut msg = llm_build_text_node(&self.root_id, &turn.text, None, node_id);
+            detach_if_flat(&mut msg, &self.root_id, self.presentation_tree);
             // 状态帧：正文已由增量帧传过，重发正文会与队列里的增量打架。
             llm_emit_state(&self.sink, msg.clone()).await;
             produced.push(msg);
         }
         if let Some((node_id, text)) = reason_node {
-            let msg = ChatNode {
+            let mut msg = ChatNode {
                 id: node_id,
                 parent_id: Some(self.root_id.clone()),
                 role: Some(NodeRole::Assistant),
@@ -156,6 +162,7 @@ impl DispatchPort for SessionDispatchPort {
                 ..Default::default()
             }
             .with_style_tag(CHAT_STYLE_TAG_REASONING);
+            detach_if_flat(&mut msg, &self.root_id, self.presentation_tree);
             // 状态帧：推理正文已由增量帧传过，同上——重发会与队列里的增量打架。
             llm_emit_state(&self.sink, msg.clone()).await;
             produced.push(msg);
@@ -163,7 +170,13 @@ impl DispatchPort for SessionDispatchPort {
 
         // ② 工具调用节点：这条路径没有流式工具帧，由本处补建。
         //    先以 `Streaming` 广播（工具还没跑，卡片应显示运行中），落库副本用终态。
-        let call_nodes = llm_build_tool_call_nodes(&self.root_id, &turn.tool_calls);
+        let mut call_nodes = llm_build_tool_call_nodes(&self.root_id, &turn.tool_calls);
+        // 就地 detach：下面三处用同一份 `call_nodes`——广播帧、传给执行器作父查询源
+        // （`process_tool_calls_async` 从它 clone 出运行态/终态帧，继承 detach 后的
+        // parent_id），以及落库副本。一处收口，live↔存储自动锁步。
+        for n in call_nodes.iter_mut() {
+            detach_if_flat(n, &self.root_id, self.presentation_tree);
+        }
         for node in &call_nodes {
             let mut frame = node.clone();
             frame.status = Some(NodeStatus::Streaming);

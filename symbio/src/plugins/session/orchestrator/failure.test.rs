@@ -361,3 +361,41 @@ async fn converge_inflight_is_idempotent() {
         "第二次必须是空操作：否则每次中止都会对同一批节点重复广播"
     );
 }
+
+// ==================== flat 档子树并集（[T-149]）====================
+
+/// `subtree_of`：`flat` 档下本轮直接子节点升了根（`parent_id: None`），靠
+/// `meta.turn_root` 记号认回——并集必须把「骨架 ∪ {turn_root==骨架}」收全，
+/// 工具结果仍按 `parent_id` 挂在 tool_call 下连得下去。
+#[test]
+fn subtree_of_flats_reaches_detached_children_via_turn_root() {
+    let stamped = |id: &str, root: &str| cm::ChatNode {
+        id: id.to_string(),
+        parent_id: None,
+        meta: Some(serde_json::json!({ "turn_root": root })),
+        ..Default::default()
+    };
+    let messages = vec![
+        cm::ChatNode {
+            id: "run-1".into(),
+            ..Default::default()
+        },
+        stamped("reasoning-1", "run-1"),
+        stamped("text-1", "run-1"),
+        // 工具调用骨架也升了根（turn_root==run-1）
+        stamped("tool-1", "run-1"),
+        // 结果节点未升根，挂在 tool_call 下
+        cm::ChatNode {
+            id: "result-1".into(),
+            parent_id: Some("tool-1".into()),
+            ..Default::default()
+        },
+        // 别的轮，不该被收进来
+        stamped("other-1", "run-2"),
+    ];
+    let ids = subtree_of(&messages, "run-1");
+    for expect in ["run-1", "reasoning-1", "text-1", "tool-1", "result-1"] {
+        assert!(ids.contains(expect), "flat 子树应含 {expect}");
+    }
+    assert!(!ids.contains("other-1"), "turn_root 指向别的骨架不收");
+}

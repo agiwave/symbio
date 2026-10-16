@@ -233,7 +233,7 @@ use std::sync::Arc;
 
 use super::config::SessionConfig;
 use super::context;
-use super::message_build::llm_build_tool_message;
+use super::message_build::{detach_if_flat, llm_build_tool_message};
 use super::tools::{fire_hook, process_tool_calls_async};
 use super::transcript::llm_emit_state;
 
@@ -802,6 +802,7 @@ pub async fn run_chat_loop(
             // （唯一持写者令牌处），本函数只递「说了什么 / 节点身份」。
             opening_text: turn.opening_text.as_deref(),
             opening_dialog: turn.opening_dialog.take(),
+            presentation_tree: orchestrator.presentation_tree,
         })
         .await
         {

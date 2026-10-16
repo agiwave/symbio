@@ -35,6 +35,71 @@ use crate::symbio_core::chat_node::{
 };
 use crate::symbio_core::{llm_short_id, TurnOutput, TurnToolCallInfo};
 
+use super::config::PresentationTree;
+
+// 建树策略的 flat 折叠（[T-149]）
+//
+// `grouped` 是今天行为：本轮 reasoning/text/tool_call 挂 `Skeleton{run}` 根下。
+// `flat` 把本轮**响应骨架的直接子节点**升到会话根（`parent_id: None`），工具结果
+// 仍挂自己的 tool_call 骨架下（那是「工具调用内部有自己的骨架」，与建树策略正交）。
+// 前端只看 `parent_id`、**不知道这个开关**——切档零代码改动是本任务的判据核心。
+//
+// 脱父子节点带 `meta.turn_root = <骨架 id>`：后端两个「本轮工作」子树遍历器
+// （`resume::process_retry_subtree` 的 BFS、`failure::subtree_of`）按 `parent_id`
+// 收集后代，脱父子节点够不着。记号让「本轮工作 = 骨架 ∪ {turn_root==骨架}」与
+// grouped 的「骨架子树」逐字等价，遍历器多一条并集即可。`grouped` 从不写这个键，
+// 存量数据零字节改动，两档各自可独立回退。
+
+/// 单个「本轮响应骨架直接子节点」在 flat 档下升根（并打 turn_root 记号）。
+///
+/// `run_root_id` 是本轮响应骨架的 id：只有 `parent_id` 恰指它的节点才脱——这样
+/// 工具结果（parent = tool_call）天然不受影响。站 B 逐帧落点用它（那一帧的父就是
+/// 本轮 root_id），站 A 落库 Vec 里逐节点用它（root_id 同为骨架 id）。
+pub(crate) fn detach_if_flat(node: &mut ChatNode, run_root_id: &str, mode: PresentationTree) {
+    if mode == PresentationTree::Flat && node.parent_id.as_deref() == Some(run_root_id) {
+        node.parent_id = None;
+        node.meta = merge_turn_root(node.meta.take(), run_root_id);
+    }
+}
+
+/// 对刚落库 / 重建的一整棵树套用 flat 折叠（rebuild 读层用：rebuild 核心 config-free、
+/// 自行重derive了 grouped 父，这里据 `is_run()` 认出各轮骨架再把它们的孩子升根）。
+pub(crate) fn flatten_whole_tree(nodes: &mut [ChatNode], mode: PresentationTree) {
+    if mode != PresentationTree::Flat {
+        return;
+    }
+    let run_roots: std::collections::HashSet<String> = nodes
+        .iter()
+        .filter(|n| n.is_run())
+        .map(|n| n.id.clone())
+        .collect();
+    for n in nodes.iter_mut() {
+        let p = match n.parent_id.as_deref() {
+            Some(p) if run_roots.contains(p) => p.to_string(),
+            _ => continue,
+        };
+        n.parent_id = None;
+        n.meta = merge_turn_root(n.meta.take(), &p);
+    }
+}
+
+/// 读 `meta.turn_root`（遍历器并集用）。
+pub(crate) fn turn_root_of(node: &ChatNode) -> Option<&str> {
+    node.meta
+        .as_ref()
+        .and_then(|m| m.get("turn_root"))
+        .and_then(|v| v.as_str())
+}
+
+/// 把 `turn_root` 合并进已有 meta（不覆盖其它键）。
+fn merge_turn_root(meta: Option<serde_json::Value>, root_id: &str) -> Option<serde_json::Value> {
+    let mut m = meta.unwrap_or_else(|| serde_json::json!({}));
+    if let Some(obj) = m.as_object_mut() {
+        obj.insert("turn_root".to_string(), serde_json::json!(root_id));
+    }
+    Some(m)
+}
+
 // 流式子节点 id 的复用
 
 /// 流式期间已经广播给前端的子节点 id。

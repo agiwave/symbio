@@ -175,7 +175,10 @@ impl SessionPlugin {
                 // `loadMessages`（读叶子）会在流式期间看不到正在跑的那一轮。
                 // 详见 `session_content` 的文档。
                 let live = self.live_messages_of(id).await;
-                Ok(VdfsResponse::Read(session_content(&session, live, id)?))
+                let mode = self.presentation_mode().await;
+                Ok(VdfsResponse::Read(session_content(
+                    &session, live, id, mode,
+                )?))
             }
             // 会话本身（`path` 即会话 id —— 具名新建时它就是**身份**，见
             // `session_upsert` 的 `create` 分支；`id` 由地址末段给出，不再由
@@ -763,7 +766,10 @@ impl SessionPlugin {
                 // 子会话是**独立会话**（有自己的 id 与活跃状态），因此叠加的是它
                 // 自己的在途缓冲，而不是父会话的——父会话的在途消息不属于它。
                 let live = self.live_messages_of(&session.id).await;
-                Ok(VdfsResponse::Read(session_content(&session, live, id)?))
+                let mode = self.presentation_mode().await;
+                Ok(VdfsResponse::Read(session_content(
+                    &session, live, id, mode,
+                )?))
             }
             VdfsRequest::Write { .. } => Err(VdfsError::invalid(format!("该路径不可写入：{path}"))),
             VdfsRequest::Delete { .. } => {
@@ -930,7 +936,13 @@ impl SessionPlugin {
     async fn transcript_of(&self, id: &str) -> VdfsResult<Vec<cm::ChatNode>> {
         let session = self.session_of(id).await?;
         let live = self.live_messages_of(id).await;
-        Ok(ordered(overlay_live(session.messages, live)))
+        let mut messages = ordered(overlay_live(session.messages, live));
+        // 呈现投影（[T-149]）：转写列表与会话叶子是同一份数据的两个地址，必须给
+        // 同一棵树——`session_content` 用同一个 `flatten_whole_tree`、同一个档位，
+        // 这里跟着投一次，否则流式期间两条路径分叉（`grouped` 档下即时返回、零改动）。
+        let mode = self.presentation_mode().await;
+        super::super::message_build::flatten_whole_tree(&mut messages, mode);
+        Ok(messages)
     }
 
     /// 该会话本轮的在途消息（无活跃状态 ⇒ 无在途消息）

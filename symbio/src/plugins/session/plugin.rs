@@ -20,7 +20,7 @@
 //! 能力注册（`impl Plugin`）、配置定义，以及各子模块的**共享面重导出**。
 
 use super::chat_session::{Carrier, MessageChange, PersistentChatSession};
-pub use super::config::SessionConfig;
+pub use super::config::{PresentationTree, SessionConfig};
 use super::types::{Session, SessionSummary};
 use crate::providers::MemoryFile;
 use crate::symbio_core::{chat_node as cm, session_chat};
@@ -30,8 +30,8 @@ use crate::symbio_core::{
     PLUGIN_FILE, PLUGIN_ID_SESSION, SESSION_ID,
 };
 use crate::symbio_core::{
-    DetailDefinition, DetailField, DetailSection, DynVdfsProvider, VdfsAccess, VdfsChange,
-    VdfsChangeSubscriptions,
+    DetailDefinition, DetailField, DetailOption, DetailSection, DynVdfsProvider, VdfsAccess,
+    VdfsChange, VdfsChangeSubscriptions,
 };
 use crate::symbio_core::{VDFS_PARAM_BEFORE, VDFS_PARAM_LIMIT};
 use async_trait::async_trait;
@@ -495,6 +495,16 @@ impl SessionPlugin {
         Self::store_with(&root, Some(session_id), &cfg)
     }
 
+    /// 本插件当前的**建树策略**（`SessionConfig::presentation_tree`）。
+    ///
+    /// 呈现读侧的投影取值点（`session_content` 的两个 Read 分支经它）。与写侧
+    /// 请求级快照（`ChatOrchestrator::presentation_tree`）同一个 `SessionConfig`
+    /// 来源、同一个解析（`presentation_tree()` 未知值回落 `grouped`）——锁不跨
+    /// 呈现序列化，取一次值即放。
+    pub(crate) async fn presentation_mode(&self) -> PresentationTree {
+        self.config.read().await.presentation_tree()
+    }
+
     /// 参与能力收集：交出**会话记忆**（系统提示词片段）。
     ///
     /// 无会话 id 时静默跳过——没有会话就没有「本会话的记忆」，这不是故障，
@@ -831,6 +841,19 @@ fn config_definition() -> DetailDefinition {
                         "单次抽干上限",
                         "一次最多合并几条消息，超出者留队等下一个抽干点",
                         json!(d.supplements_max_per_drain),
+                    ),
+                    DetailField::select(
+                        "presentation_tree",
+                        "建树策略",
+                        PresentationTree::OPTIONS
+                            .iter()
+                            .map(|(value, label)| DetailOption {
+                                value: (*value).to_string(),
+                                label: (*label).to_string(),
+                                description: None,
+                            })
+                            .collect(),
+                        &d.presentation_tree,
                     ),
                 ],
             },

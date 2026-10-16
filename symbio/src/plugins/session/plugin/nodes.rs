@@ -707,10 +707,19 @@ pub(crate) fn session_content(
     // （`vdfs_provider` 的两个 Read 分支）在同一个作用域里做过对账后传入，
     // 仅为让"两处是同一份数据的两个地址、对账口径只有一份"这件事在签名上可见。
     _reconcile_with: &str,
+    // 建树策略（[T-149]）：呈现读侧的投影档位。调用方（`vdfs_provider` 的两个
+    // Read 分支）从本插件 `SessionConfig` 取值传入——`grouped` 档下投影即时返回、
+    // 形状与今天逐字相同，`flat` 档把本轮响应骨架的直接子节点升根。
+    mode: super::super::config::PresentationTree,
 ) -> VdfsResult<VdfsContent> {
     // 与 `transcript_of` 同一组合（`ordered(overlay_live(..))`），不另立口径：
     // 同 id 在途版本胜出（它更新），顺序锚点仍由存储分配的 `seq` 决定。
-    let messages = ordered(overlay_live(session.messages.clone(), live));
+    let mut messages = ordered(overlay_live(session.messages.clone(), live));
+    // 呈现投影（与 `get_messages` 同一函数、同一档位）：重建 core config-free、
+    // 从事件 `turn_id` 一律重derive 成 grouped，`flat` 档在这里升根 + 打 `turn_root`
+    // 记号，令 live↔reload↔呈现三格锁步。`overlay_live`/`ordered` 只按 id 重排/
+    // 整条替换、从不改写 `parent_id`，投影叠在其上仍正确。
+    super::super::message_build::flatten_whole_tree(&mut messages, mode);
     let payload = json!({
         "id": session.id,
         "title": session.display_title(),

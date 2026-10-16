@@ -711,6 +711,13 @@ pub(crate) struct V2Turn<'a> {
     pub opening_text: Option<&'a str>,
     /// 开场白节点身份与标记（仅 [`Self::opening_text`] 有值时消费）。
     pub opening_dialog: Option<crate::plugins::session::turn_runner::DialogFacts>,
+    /// **本轮建树策略**（`SessionConfig::presentation_tree` 的请求级快照）。
+    ///
+    /// 与 v1 流式（`ChatOrchestrator::presentation_tree`）**同一个取值快照**——一次
+    /// 请求里 v1、v2 必须按同一档建树，否则 live↔存储↔重建三格错位（树形状锁步）。
+    /// 由 `chat_loop` 从编排器带入，本函数不读配置（配置在请求生命周期内不变，
+    /// 取一次即够）。
+    pub presentation_tree: super::config::PresentationTree,
 }
 
 /// 一轮 v2 原生产物的**全部出口**。
@@ -1131,6 +1138,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         consolidation,
         opening_text,
         opening_dialog,
+        presentation_tree,
     } = req;
     // 事实源：per-session v2 WAL（与运行器落格同一个文件——一份网格）。
     let dir = session.session_dir().ok_or_else(|| {
@@ -1207,6 +1215,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
         reasoning: Arc::new(Mutex::new(None)),
     });
     let emit_sink = sink.clone();
+    let root_id_owned = root_id.to_string();
     let emitter = tokio::spawn(async move {
         while let Some(frame) = tx.pop().await {
             let message = match frame {
@@ -1215,15 +1224,23 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
                     parent,
                     text,
                     kind,
-                } => kind.shape(ChatNode {
-                    id,
-                    parent_id: Some(parent),
-                    role: Some(NodeRole::Assistant),
-                    msg_type: Some(NodeKind::Body),
-                    content: Some(MessageContent::Text(text)),
-                    status: Some(NodeStatus::Streaming),
-                    ..Default::default()
-                }),
+                } => {
+                    let mut node = kind.shape(ChatNode {
+                        id,
+                        parent_id: Some(parent),
+                        role: Some(NodeRole::Assistant),
+                        msg_type: Some(NodeKind::Body),
+                        content: Some(MessageContent::Text(text)),
+                        status: Some(NodeStatus::Streaming),
+                        ..Default::default()
+                    });
+                    super::message_build::detach_if_flat(
+                        &mut node,
+                        &root_id_owned,
+                        presentation_tree,
+                    );
+                    node
+                }
                 UiFrame::Delta { id, text } => ChatNode {
                     id,
                     delta: Some(text),
@@ -1234,15 +1251,23 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
                     parent,
                     text,
                     kind,
-                } => kind.shape(ChatNode {
-                    id,
-                    parent_id: Some(parent),
-                    role: Some(NodeRole::Assistant),
-                    msg_type: Some(NodeKind::Body),
-                    content: Some(MessageContent::Text(text)),
-                    status: Some(NodeStatus::Completed),
-                    ..Default::default()
-                }),
+                } => {
+                    let mut node = kind.shape(ChatNode {
+                        id,
+                        parent_id: Some(parent),
+                        role: Some(NodeRole::Assistant),
+                        msg_type: Some(NodeKind::Body),
+                        content: Some(MessageContent::Text(text)),
+                        status: Some(NodeStatus::Completed),
+                        ..Default::default()
+                    });
+                    super::message_build::detach_if_flat(
+                        &mut node,
+                        &root_id_owned,
+                        presentation_tree,
+                    );
+                    node
+                }
                 UiFrame::Barrier(done) => {
                     let _ = done.send(());
                     continue;
@@ -1528,6 +1553,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                 abort.clone(),
                 root_id.to_string(),
                 bridge.clone(),
+                presentation_tree,
             );
             let dispatch_ref: &dyn DispatchPort = &dispatcher;
             let r = TurnRunner
@@ -1578,27 +1604,25 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
     if outcome.aborted {
         let mut partial = produced;
         if !child_text.is_empty() {
-            partial.push(super::message_build::llm_build_text_node(
-                root_id,
-                &child_text,
-                None,
-                child_id,
-            ));
+            let mut n =
+                super::message_build::llm_build_text_node(root_id, &child_text, None, child_id);
+            super::message_build::detach_if_flat(&mut n, root_id, presentation_tree);
+            partial.push(n);
         }
         if !reasoning_text.trim().is_empty() {
-            partial.push(
-                ChatNode {
-                    id: reasoning_child_id,
-                    parent_id: Some(root_id.to_string()),
-                    role: Some(NodeRole::Assistant),
-                    msg_type: Some(NodeKind::Body),
-                    content: Some(MessageContent::Text(reasoning_text.clone())),
-                    status: Some(NodeStatus::Completed),
-                    timestamp: Some(crate::symbio_core::clock_now_ms()),
-                    ..Default::default()
-                }
-                .with_style_tag(CHAT_STYLE_TAG_REASONING),
-            );
+            let mut n = ChatNode {
+                id: reasoning_child_id,
+                parent_id: Some(root_id.to_string()),
+                role: Some(NodeRole::Assistant),
+                msg_type: Some(NodeKind::Body),
+                content: Some(MessageContent::Text(reasoning_text.clone())),
+                status: Some(NodeStatus::Completed),
+                timestamp: Some(crate::symbio_core::clock_now_ms()),
+                ..Default::default()
+            }
+            .with_style_tag(CHAT_STYLE_TAG_REASONING);
+            super::message_build::detach_if_flat(&mut n, root_id, presentation_tree);
+            partial.push(n);
         }
         return Err(PluginError::Aborted { partial });
     }

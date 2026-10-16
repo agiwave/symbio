@@ -81,6 +81,7 @@ fn tool_free_req<'a>(
         // 开场白（T-056）：本夹具不产生（`Escalate` 首响由 chat_loop 递入）。
         opening_text: None,
         opening_dialog: None,
+        presentation_tree: super::super::config::PresentationTree::Grouped,
     }
 }
 
@@ -180,6 +181,7 @@ async fn supplements_become_facts_visible_next_turn() {
         // 开场白（T-056）：本夹具不产生。
         opening_text: None,
         opening_dialog: None,
+        presentation_tree: super::super::config::PresentationTree::Grouped,
     })
     .await
     .expect("工具轮执行成功");
@@ -748,6 +750,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         // 开场白（T-056）：本夹具不产生。
         opening_text: None,
         opening_dialog: None,
+        presentation_tree: super::super::config::PresentationTree::Grouped,
     })
     .await
     .expect("工具轮执行成功");
@@ -963,6 +966,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
         on_round: Some(on_round),
         opening_text: None,
         opening_dialog: None,
+        presentation_tree: super::super::config::PresentationTree::Grouped,
     })
     .await
     .expect("带汇报的工具轮执行成功");
@@ -1191,6 +1195,7 @@ async fn full_turn_lands_derived_commitment_facts() {
         // 开场白（T-056）：本夹具不产生。
         opening_text: None,
         opening_dialog: None,
+        presentation_tree: super::super::config::PresentationTree::Grouped,
     })
     .await
     .expect("工具轮执行成功");

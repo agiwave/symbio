@@ -254,13 +254,15 @@ impl crate::symbio_core::Capability for AgentRunCapability {
         // ── 子会话 id + 续跑请求 + 首条消息（三者按调用形态确定）──
         // 三种调用形态：审批恢复（session_id + target_id）/ 续会话（仅
         // session_id，LLM 携带上次结果的子会话 id 继续对话）/ 新建（都省略）。
-        let user_message = || ChatNode {
-            id: uuid::Uuid::new_v4().as_simple().to_string(),
-            msg_type: Some(NodeKind::Body),
-            content: Some(MessageContent::Text(req.prompt.clone())),
-            ..Default::default()
-        }
-        .with_role(NodeRole::User);
+        let user_message = || {
+            ChatNode {
+                id: uuid::Uuid::new_v4().as_simple().to_string(),
+                msg_type: Some(NodeKind::Body),
+                content: Some(MessageContent::Text(req.prompt.clone())),
+                ..Default::default()
+            }
+            .with_role(NodeRole::User)
+        };
         let (child_session_id, resume_req, first_message): (
             String,
             Option<ResumeRequest>,

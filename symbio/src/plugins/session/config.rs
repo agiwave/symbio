@@ -22,6 +22,40 @@
 
 use serde::{Deserialize, Serialize};
 
+/// 建树策略 —— 后端组树时新节点 `parent_id` 的挂法（[T-149]）。
+///
+/// 这是一个**纯后端旋钮**：前端只按 `parent_id` 插树，不知道本开关存在，切档
+/// 前端零代码改动（这是本任务判据的核心）。档间差异只在「本轮节点挂会话根，
+/// 还是挂本轮的 `Skeleton{run}` 根」这一件事上——工具结果始终挂在自己的
+/// `tool_call` 骨架下（那是「工具调用内部有自己的骨架」，与建树策略正交）。
+///
+/// `deep`（子智能体递归嵌套）随子会话转播桥改造在 149-ii 加入——本枚举此刻
+/// 只列**已接线**的两档，刻意不预留 `deep`：留一个能选、选了没反应的档位，
+/// 正是 [`SessionConfig`] 文档里 `store_kind` 被删掉的那个假开关形状。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PresentationTree {
+    /// 本轮所有节点挂会话根（与用户发言互为兄弟）；只有工具调用内部保留自己的骨架。
+    Flat,
+    /// 每条用户消息开一个 `Skeleton{run}` 根，本轮其余节点挂它下（**出厂默认 = 今天行为**）。
+    Grouped,
+}
+
+impl PresentationTree {
+    /// `PLUGIN.yml` / wire 里的字符串值。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Flat => "flat",
+            Self::Grouped => "grouped",
+        }
+    }
+
+    /// 建树策略候选（表单与说明同源，不写第二份字面量）。
+    pub(crate) const OPTIONS: [(&'static str, &'static str); 2] = [
+        ("grouped", "本轮归到响应骨架下（默认）"),
+        ("flat", "本轮全部铺平到会话根"),
+    ];
+}
+
 /// 会话配置 —— 本插件的旋钮（字段真源）。
 ///
 /// ## 存储目录
@@ -331,6 +365,15 @@ pub struct SessionConfig {
     /// 主题长度阈值（字符数）。**0 = 本层关闭**。
     #[serde(default = "default_worker_min_chars")]
     pub worker_min_chars: usize,
+    /// 建树策略（`grouped` / `flat`，出厂默认 `grouped` = 今天行为；见 [`PresentationTree`]）。
+    ///
+    /// 后端组树时决定本轮节点的 `parent_id` 挂哪，前端只按 `parent_id` 插树、
+    /// **不知道这个开关存在**——这是 [T-149] 判据的核心：切档前端零代码改动。
+    /// 认不出的写法按出厂默认处理（手写 `PLUGIN.yml` 写错不该改变组树），与
+    /// `SettingConfig::verbosity` 同一条读侧容错纪律。`deep` 档随子会话转播桥
+    /// 改造在 149-ii 接线。
+    #[serde(default = "default_presentation_tree")]
+    pub presentation_tree: String,
 }
 
 // ── Q1 判据的出厂值：单一真源 ─────────────────────────────────────────
@@ -353,6 +396,10 @@ pub fn default_worker_keywords() -> String {
 }
 pub fn default_worker_min_chars() -> usize {
     MIN_CHARS
+}
+
+pub fn default_presentation_tree() -> String {
+    PresentationTree::Grouped.as_str().to_string()
 }
 
 pub fn default_max_messages() -> usize {
@@ -469,6 +516,17 @@ impl SessionConfig {
     pub fn effective_memory_inject_bytes(&self) -> usize {
         self.memory_inject_max_bytes.max(1)
     }
+
+    /// 生效的建树策略：认不出的写法按出厂默认 [`PresentationTree::Grouped`] 处理。
+    ///
+    /// `deep` 在 149-ii 接线前一并落到 `Grouped`（读侧容错，与 `verbosity` 同纪律：
+    /// 手写 `PLUGIN.yml` 写错、或写了尚未生效的档，都不该改变组树行为）。
+    pub fn presentation_tree(&self) -> PresentationTree {
+        match self.presentation_tree.trim() {
+            "flat" => PresentationTree::Flat,
+            _ => PresentationTree::Grouped,
+        }
+    }
 }
 
 impl Default for SessionConfig {
@@ -501,6 +559,7 @@ impl Default for SessionConfig {
             worker_force_prefix: default_worker_force_prefix(),
             worker_keywords: default_worker_keywords(),
             worker_min_chars: default_worker_min_chars(),
+            presentation_tree: default_presentation_tree(),
         }
     }
 }

@@ -467,6 +467,13 @@ fn subtree_of(messages: &[cm::ChatNode], root: &str) -> std::collections::HashSe
     let mut ids = std::collections::HashSet::new();
     ids.insert(root.to_string());
     let mut queue = vec![root.to_string()];
+    // `flat` 档下本轮响应骨架的直接子节点升了根（`parent_id: None`），靠
+    // `meta.turn_root` 记号认回（与 `resume::process_retry_subtree` 同一条并集）。
+    for m in messages {
+        if super::super::message_build::turn_root_of(m) == Some(root) && ids.insert(m.id.clone()) {
+            queue.push(m.id.clone());
+        }
+    }
     while let Some(pid) = queue.pop() {
         for m in messages {
             if m.parent_id.as_deref() == Some(pid.as_str()) && ids.insert(m.id.clone()) {

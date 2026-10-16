@@ -863,6 +863,12 @@ pub struct ChatOrchestrator {
     /// 四个参数各自能取到的值见 `SessionConfig`；构造点唯一
     /// （`orchestrator/consume.rs`）。
     pub progress: ProgressPolicy,
+    /// 建树策略的**请求级快照**（`SessionConfig::presentation_tree`，[T-149]）。
+    ///
+    /// 与 `classify_enabled` / `compose_enabled` 同一条取值纪律：组树档在一次请求生命周期
+    /// 内不变，取一次快照即可。`flat` 下本轮响应骨架的直接子节点升根（见
+    /// `message_build::detach_if_flat`）；前端只按 `parent_id` 插树、不看本字段。
+    pub presentation_tree: super::super::config::PresentationTree,
     /// **本插件自己的目录**（装配期由父插件经 `PLUGIN_DIR` 告知）。
     ///
     /// 会话存储 / 转写存档 / 工具结果存档都在这个目录下——它是「本实例的作用域」，
@@ -896,24 +902,22 @@ impl ChatOrchestrator {
             // 同一条消息在 live 是折叠的思考块、刷新后是正文——「模型只想不作答」
             // 就是这一处错位造成的观感，不是模型的行为。
             if !out.reasoning_child_id.is_empty() {
-                llm_emit_state(
-                    sink,
-                    ChatNode {
-                        id: out.reasoning_child_id.clone(),
-                        parent_id: Some(root_id.into()),
-                        role: Some(NodeRole::Assistant),
-                        msg_type: Some(NodeKind::Body),
-                        // **换形态要带清除格**：s3 起思考节点的呈现身份住在 `meta.style_tag`，
-                        // 帧的合入是「有则覆盖」——不带 meta = 旧 tag 留在消费方快照里，
-                        // `is_text` 永远折叠不出正文（CLI 不回显、以失败退出；e2e t55/t77 抓到）。
-                        // 空对象 = 整格覆盖且无 tag，把「同 id 换类型」说完整。
-                        meta: Some(serde_json::json!({})),
-                        content: Some(MessageContent::Text(out.reasoning.clone())),
-                        status: Some(NodeStatus::Completed),
-                        ..Default::default()
-                    },
-                )
-                .await;
+                let mut node = ChatNode {
+                    id: out.reasoning_child_id.clone(),
+                    parent_id: Some(root_id.into()),
+                    role: Some(NodeRole::Assistant),
+                    msg_type: Some(NodeKind::Body),
+                    // **换形态要带清除格**：s3 起思考节点的呈现身份住在 `meta.style_tag`，
+                    // 帧的合入是「有则覆盖」——不带 meta = 旧 tag 留在消费方快照里，
+                    // `is_text` 永远折叠不出正文（CLI 不回显、以失败退出；e2e t55/t77 抓到）。
+                    // 空对象 = 整格覆盖且无 tag，把「同 id 换类型」说完整。
+                    meta: Some(serde_json::json!({})),
+                    content: Some(MessageContent::Text(out.reasoning.clone())),
+                    status: Some(NodeStatus::Completed),
+                    ..Default::default()
+                };
+                detach_if_flat(&mut node, root_id, self.presentation_tree);
+                llm_emit_state(sink, node).await;
             } else {
                 let resp_id = if out.response_text_child_id.is_empty() {
                     llm_short_id()
@@ -922,19 +926,17 @@ impl ChatOrchestrator {
                 };
                 // 兜底路径：这个 Text 节点是**新建**的（reasoning-only 时没有正文
                 // 子节点），正文必须随帧上线 ⇒ 完整消息帧。
-                llm_emit_message(
-                    sink,
-                    ChatNode {
-                        id: resp_id,
-                        parent_id: Some(root_id.into()),
-                        role: Some(NodeRole::Assistant),
-                        msg_type: Some(NodeKind::Body),
-                        content: Some(MessageContent::Text(out.reasoning.clone())),
-                        status: Some(NodeStatus::Completed),
-                        ..Default::default()
-                    },
-                )
-                .await;
+                let mut node = ChatNode {
+                    id: resp_id,
+                    parent_id: Some(root_id.into()),
+                    role: Some(NodeRole::Assistant),
+                    msg_type: Some(NodeKind::Body),
+                    content: Some(MessageContent::Text(out.reasoning.clone())),
+                    status: Some(NodeStatus::Completed),
+                    ..Default::default()
+                };
+                detach_if_flat(&mut node, root_id, self.presentation_tree);
+                llm_emit_message(sink, node).await;
             }
             // 根 Turn 的终态**不在此发出**：Turn 是组合节点（仅分组，无正文），
             // 终态必须晚于子树——而本轮的 ToolCall 要到 `close_turn` 里才执行完。
@@ -952,7 +954,7 @@ impl ChatOrchestrator {
         // 界面上就是「有思考没正文」。
         if !out.reasoning.is_empty() && !out.reasoning_child_id.is_empty() {
             let answer_is_reasoning = out.text.trim() == out.reasoning.trim();
-            let finalized = ChatNode {
+            let mut finalized = ChatNode {
                 id: out.reasoning_child_id.clone(),
                 parent_id: Some(root_id.into()),
                 role: Some(NodeRole::Assistant),
@@ -965,6 +967,7 @@ impl ChatOrchestrator {
                 status: Some(NodeStatus::Completed),
                 ..Default::default()
             };
+            detach_if_flat(&mut finalized, root_id, self.presentation_tree);
             llm_emit_state(
                 sink,
                 if answer_is_reasoning {
@@ -978,19 +981,17 @@ impl ChatOrchestrator {
 
         // Mark response text child as completed (exists if there was text content)
         if !out.text.is_empty() && !out.response_text_child_id.is_empty() {
-            llm_emit_state(
-                sink,
-                ChatNode {
-                    id: out.response_text_child_id.clone(),
-                    parent_id: Some(root_id.into()),
-                    role: Some(NodeRole::Assistant),
-                    msg_type: Some(NodeKind::Body),
-                    content: Some(MessageContent::Text(out.text.clone())),
-                    status: Some(NodeStatus::Completed),
-                    ..Default::default()
-                },
-            )
-            .await;
+            let mut node = ChatNode {
+                id: out.response_text_child_id.clone(),
+                parent_id: Some(root_id.into()),
+                role: Some(NodeRole::Assistant),
+                msg_type: Some(NodeKind::Body),
+                content: Some(MessageContent::Text(out.text.clone())),
+                status: Some(NodeStatus::Completed),
+                ..Default::default()
+            };
+            detach_if_flat(&mut node, root_id, self.presentation_tree);
+            llm_emit_state(sink, node).await;
         }
 
         // ToolCall 子节点**不在这里定格**。

@@ -269,6 +269,11 @@ impl SessionPlugin {
             }
         };
 
+        // 建树策略快照（`SessionConfig::presentation_tree`），同一条取值纪律：一次锁、
+        // 认不出的写法落到 `grouped`（见 `SessionConfig::presentation_tree` 读侧容错）。
+        // 请求级快照而非持有者：一次请求生命周期内组树档不变。
+        let presentation_tree = self.config.read().await.presentation_tree();
+
         // 结构体字面量而不是 `new()`：字段全是 `pub`、构造点唯一，而字面量把"谁是谁"
         // 写在字段名上（八参的位置参数要靠数数），且字段增删由编译器在这里报错。
         // 理由见 `ChatOrchestrator` 的"为什么没有 `new()`"。
@@ -282,6 +287,7 @@ impl SessionPlugin {
             classify_enabled,
             compose_enabled,
             progress,
+            presentation_tree,
             // 会话目录 = **本插件自己的目录**（装配期由父插件经 `PLUGIN_DIR` 告知），
             // 不是任何全局系统根——子智能体下它指向子树，这正是作用域正确性的来源。
             session_dir: self.config_file.dir().clone(),
