@@ -47,12 +47,15 @@ import {
   NODE_KIND_INTERACTION,
   NODE_KIND_TYPING,
   CHAT_STYLE_TAG_REASONING,
+  CHAT_STYLE_TAG_RUN,
   CHAT_STYLE_TAG_TOOL,
+  CHAT_STYLE_TAG_COMPRESSION,
   RESUME_ACTION_RETRY,
   RESUME_ACTION_RETRY_COMPACTION,
   RESUME_ACTION_RETRY_SUBTREE,
   type ChatNode,
   type MessageKind,
+  type NodeKind,
   type PresentationKind,
   type ChatRole,
   type NodeStatus,
@@ -71,31 +74,67 @@ import type { MessagePrompt, MessagePromptKind } from '@/schemas/message_prompt'
 export { messageRoleOf }
 
 /**
- * 形态 + `meta.style_tag` → **呈现键**（折叠的唯一实现）。
+ * (kind, `style_tag`) → 呈现键的**分派表**——[T-148] 把「二元组怎么折成注册表内部键」
+ * 从 `switch` 控制流降为**数据**。
+ *
+ * - 外层按 `kind` 建：`Record<NodeKind, …>` 让「漏登记一个 wire 五值」是**编译错误**；
+ * - 内层 `byStyleTag`：只列该形态下**确有专属呈现变体**的 tag，键是 wire 词值（`meta.style_tag`）；
+ * - `default`：该形态未命中任何 `byStyleTag`（含 `style_tag` 缺席、畸形的裸骨架、
+ *   以及**未登记的新 tag**）时落到的呈现键——**不判红**，退到该形态的多数形态。
+ *
+ * **新增一个 style_tag 变体的全部代价 = 在对应 `byStyleTag` 里加一行**（若它复用已有
+ * 呈现键，连 `TYPE_PRESENTATION` 都不用动）；不改任何渲染组件。这条性质由单测钉死
+ * （`messageTypes.spec.ts`「新增 style_tag 只加表」）。
+ */
+const NODE_KIND_PRESENTATION: Record<
+  NodeKind,
+  { readonly default: PresentationKind; readonly byStyleTag: Readonly<Record<string, PresentationKind>> }
+> = {
+  [NODE_KIND_BODY]: {
+    default: NODE_KIND_TEXT,
+    byStyleTag: { [CHAT_STYLE_TAG_REASONING]: NODE_KIND_REASONING },
+  },
+  [NODE_KIND_NOTICE]: {
+    default: NODE_KIND_COMPRESSION,
+    byStyleTag: { [CHAT_STYLE_TAG_COMPRESSION]: NODE_KIND_COMPRESSION },
+  },
+  [NODE_KIND_SKELETON]: {
+    // 漏 tag 的畸形骨架按「一整轮」折叠（骨架的多数形态）
+    default: NODE_KIND_TURN,
+    byStyleTag: { [CHAT_STYLE_TAG_RUN]: NODE_KIND_TURN, [CHAT_STYLE_TAG_TOOL]: NODE_KIND_TOOL_CALL },
+  },
+  [NODE_KIND_INTERACTION]: {
+    default: NODE_KIND_USER_PROMPT,
+    byStyleTag: {},
+  },
+  // 进行中占位（[T-151] 前端合成）：原样透出，专属渲染器落地前走兜底。
+  [NODE_KIND_TYPING]: {
+    default: NODE_KIND_TYPING,
+    byStyleTag: {},
+  },
+}
+
+/**
+ * 形态 + `meta.style_tag` → **呈现键**（折叠的唯一实现，查 [`NODE_KIND_PRESENTATION`]）。
  *
  * [T-147c-ii]：wire 闭集是五值形态（`body` / `notice` / `skeleton` / `interaction` /
- * `typing`）；目标形态靠 `meta.style_tag` 分辨呈现变体，在这里折叠成注册表的
- * **内部键**（`text` / `reasoning` / `turn` / `tool_call` / `user_prompt` /
- * `compression` / `typing`），下游（facets / 呈现表 / 文案表）按折叠结果分派。
- * 折叠点唯一（`messageTypeOf`），与后端 `ChatNode::is_*` 谓词同一判据。
- * 裸 `skeleton`（漏 tag 的畸形写方）按「一整轮」折叠：骨架的多数形态。
- * `typing` 原样透出（专属渲染器随 [T-151] 落地，当前走兜底）。
- * **折叠是幂等的**：呈现键再折叠仍是自身——落地口与 facets 各折一次不会漂移。
+ * `typing`）；目标形态靠 `meta.style_tag` 分辨呈现变体，折叠成注册表的**内部键**
+ * （`text` / `reasoning` / `turn` / `tool_call` / `user_prompt` / `compression` /
+ * `typing`），下游（facets / 呈现表 / 文案表）按折叠结果分派。折叠点唯一，与后端
+ * `ChatNode::is_*` 谓词同一判据。
+ * **幂等**：入参已是呈现键（存量旧数据、或落地后的节点）时不在表内 → 原样透出，
+ * 再折叠仍是自身；未登记 tag / 缺 tag 落到该形态 `default`，绝不判红。
  */
 export function foldNodeKind(type: MessageKind, styleTag?: string): PresentationKind {
-  switch (type) {
-    case NODE_KIND_SKELETON:
-      return styleTag === CHAT_STYLE_TAG_TOOL ? NODE_KIND_TOOL_CALL : NODE_KIND_TURN
-    case NODE_KIND_BODY:
-      return styleTag === CHAT_STYLE_TAG_REASONING ? NODE_KIND_REASONING : NODE_KIND_TEXT
-    case NODE_KIND_NOTICE:
-      return NODE_KIND_COMPRESSION
-    case NODE_KIND_INTERACTION:
-      return NODE_KIND_USER_PROMPT
-    default:
-      // 呈现键（含 `typing`）直通；未登记词也在此透出——渲染器按 fallback 分派
-      return type as PresentationKind
+  const entry = (NODE_KIND_PRESENTATION as Partial<Record<MessageKind, (typeof NODE_KIND_PRESENTATION)[NodeKind]>>)[
+    type as NodeKind
+  ]
+  if (!entry) return type as PresentationKind
+  if (styleTag != null) {
+    const hit = entry.byStyleTag[styleTag]
+    if (hit != null) return hit
   }
+  return entry.default
 }
 
 /** 节点的**生效呈现键**（缺省 = `text`：未标形态的帧按正文处理） */

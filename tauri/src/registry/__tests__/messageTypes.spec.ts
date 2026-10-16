@@ -719,6 +719,45 @@ describe('messageTypeOf：生产链路的唯一折叠点', () => {
 })
 
 /**
+ * [T-148] 判据：`(kind, style_tag)` 分派是**表驱动**（`NODE_KIND_PRESENTATION`），
+ * 不是藏在 `foldNodeKind` 里的 `switch`。钉死两件事：
+ *
+ * 1. **已登记的 tag** → 该形态的专属呈现键（往 `byStyleTag` 加一行即点亮一个新变体，
+ *    这就是"新增一个 style_tag 只加注册表条目"的机制）；
+ * 2. **未登记的 tag**（含畸形缺 tag）→ 落该形态 `default`，且折叠结果仍能命中
+ *    **已登记的渲染器**（不是 fallback、更不是空白）——即"不改组件也能安全渲染"，
+ *    未识别不判红。
+ */
+describe('foldNodeKind 表驱动分派（[T-148]：加 style_tag 只加表、不改组件）', () => {
+  it('已登记 tag 折到专属呈现键，与「该形态默认臂」区分开', () => {
+    // body：reasoning 是登记的变体 → reasoning；无 tag → text（默认臂）
+    expect(foldNodeKind(NODE_KIND_BODY, CHAT_STYLE_TAG_REASONING)).toBe(NODE_KIND_REASONING)
+    expect(foldNodeKind(NODE_KIND_BODY)).toBe(NODE_KIND_TEXT)
+    // skeleton：tool 是登记的变体 → tool_call；run 与无 tag → turn（默认臂）
+    expect(foldNodeKind(NODE_KIND_SKELETON, CHAT_STYLE_TAG_TOOL)).toBe(NODE_KIND_TOOL_CALL)
+    expect(foldNodeKind(NODE_KIND_SKELETON, CHAT_STYLE_TAG_RUN)).toBe(NODE_KIND_TURN)
+    expect(foldNodeKind(NODE_KIND_SKELETON)).toBe(NODE_KIND_TURN)
+  })
+
+  it('每个 wire 五值遇未登记 tag：永不为空，且等价于该形态默认臂（未识别不判红）', () => {
+    for (const kind of NODE_KINDS) {
+      const foldedUnknown = foldNodeKind(kind, '__brand_new_style_tag__')
+      expect(foldedUnknown, `形态 ${kind} 折叠出空值`).toBeTruthy()
+      // 未登记 tag 与缺 tag 走同一条默认臂——证明分派只看表命中与否，无隐藏分支
+      expect(foldedUnknown).toBe(foldNodeKind(kind))
+    }
+  })
+
+  it('未登记 tag 折叠后仍命中已登记渲染器（加一个新变体不需要改组件）', () => {
+    // 假设后端先发一个 body + style_tag='code_block'：前端表里还没这行，
+    // 它折到默认臂 text → 落到 TextNode（专属渲染器，非 fallback、非空白）。
+    const folded = foldNodeKind(NODE_KIND_BODY, 'code_block')
+    expect(folded).toBe(NODE_KIND_TEXT)
+    expect(messageRendererKey(facets({ type: folded }))).toBe('text')
+  })
+})
+
+/**
  * 压缩后的**历史记忆**（`meta.compacted`）。
  *
  * 它是一条 `role = user` 的消息——后端为了让对话以 user 开头而这么写。因此这段的

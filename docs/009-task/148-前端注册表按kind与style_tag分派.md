@@ -25,4 +25,4 @@ Claude Code UI 的 `ToolDisplayConfig` 表是这条形状的近邻参考（配�
 
 ## 处理过程
 
-（未开始）
+- **148-i**（`(kind, style_tag)` 表驱动折叠，本批）：`foldNodeKind` 的 `switch` 控制流降为数据——新增 `NODE_KIND_PRESENTATION: Record<NodeKind, {default, byStyleTag}>` 分派表，外层按 wire 五值建（`Record<NodeKind,…>` 让漏登记一个形态是编译错误），内层 `byStyleTag` 只列该形态确有专属变体的 tag，未命中（含缺 tag / 畸形裸骨架 / **未登记的新 tag**）一律落 `default` **不判红**。折叠语义逐条对齐旧 `switch`（body±reasoning、skeleton±{run,tool}、notice、interaction、typing 原样透出、呈现键幂等直通）。判据单测三条钉死「加一个 style_tag 只加表条目不改组件」：已登记 tag→专属键、未登记 tag→默认臂且等价于缺 tag、未登记 tag 折叠后仍命中已登记渲染器（非 fallback 非空白）。前端 typecheck + vitest 884（+3）、`protocol-mirror-audit` 0 错全绿（纯 registry 重构，wire 与后端未动）。
