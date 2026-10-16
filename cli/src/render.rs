@@ -46,6 +46,16 @@ fn write_stderr(s: &str) {
     let _ = writeln!(err, "{s}");
 }
 
+/// 节点是不是**对话面汇报节点**（开场白 / 进度播报）——它给用户看，不进模型对话内容。
+///
+/// 判据取 `meta.exclude_from_context` 而不是 `meta.surface`：答话节点同样带
+/// `surface = "reply"`（见 `chat_loop/compose.rs`），两者只有这个标记不同。
+fn is_progress_surface(meta: Option<&serde_json::Value>) -> bool {
+    meta.and_then(|v| v.get("exclude_from_context"))
+        .and_then(|v| v.as_bool())
+        == Some(true)
+}
+
 pub struct Renderer {
     quiet: bool,
     verbose: bool,
@@ -110,7 +120,7 @@ impl Renderer {
         }
 
         let mut rewritten_to = None;
-        let (delta, mtype, role, failed, error, name) = {
+        let (delta, mtype, role, failed, error, name, progress) = {
             let merged = self.msgs.entry(message.id.clone()).or_default();
             // 身份字段：有则覆盖（首帧建立身份；重复携带以最后到达为准）。
             if message.parent_id.is_some() {
@@ -166,6 +176,8 @@ impl Renderer {
                 }
                 merged.content = Some(content.clone());
             }
+            // 开场白 / 进度播报的判定见 [`is_progress_surface`]，回显去向见 [`Self::render`]。
+            let progress = is_progress_surface(merged.meta.as_ref());
             (
                 delta,
                 merged.msg_type.clone().unwrap_or_default(),
@@ -173,6 +185,7 @@ impl Renderer {
                 merged.status == Some(MessageStatus::Failed),
                 merged.error.clone(),
                 merged.name.clone(),
+                progress,
             )
         };
 
@@ -193,7 +206,7 @@ impl Renderer {
         } else {
             delta.clone()
         };
-        if self.render(&message.id, mtype, role, &delta, &tail, name) {
+        if self.render(&message.id, mtype, role, &delta, &tail, name, progress) {
             *self.printed.entry(message.id.clone()).or_insert(0) += tail.chars().count();
         }
         if let Some(next) = rewritten_to {
@@ -217,6 +230,7 @@ impl Renderer {
         delta: &str,
         tail: &str,
         name: Option<String>,
+        progress: bool,
     ) -> bool {
         match mtype {
             MessageType::Text => {
@@ -228,6 +242,16 @@ impl Renderer {
                 );
                 if suppress {
                     return false;
+                }
+                // 开场白 / 进度播报（`meta.exclude_from_context`）走 stderr：它是
+                // 「我在干活」的一句，不是本轮答案——非交互模式的 stdout 要交给下游
+                // 程序，那句进去就是噪声（每条回答末尾粘一句「我先看一下。」）。
+                // 仍按已打印长度记账，避免它分段到达时重复播报。
+                if progress {
+                    if !tail.is_empty() && !self.quiet {
+                        write_stderr(&format!("\x1b[2m… {tail}\x1b[0m"));
+                    }
+                    return !tail.is_empty();
                 }
                 // 打印的是 `tail`（未打印过的正文尾巴），`delta` 在这里用不上：
                 // 增量早已并进快照，尾巴从快照算起——两者对流式正文逐字相同。
@@ -318,3 +342,7 @@ impl Renderer {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "render.test.rs"]
+mod tests;
