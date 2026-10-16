@@ -526,6 +526,8 @@ impl CompressionEmitter {
                 id: node_id.to_string(),
                 role: Some(NodeRole::Assistant),
                 msg_type: Some(NodeKind::Notice),
+                title: Some("上下文压缩".to_string()),
+                icon: Some("🗜".to_string()),
                 status: Some(NodeStatus::Streaming),
                 content: Some(MessageContent::Text("正在压缩上下文…".to_string())),
                 ..Default::default()
@@ -560,6 +562,8 @@ impl CompressionEmitter {
                     id: node_id.to_string(),
                     role: Some(NodeRole::Assistant),
                     msg_type: Some(NodeKind::Notice),
+                    title: Some("上下文压缩".to_string()),
+                    icon: Some("🗜".to_string()),
                     ..Default::default()
                 }
                 .with_style_tag(CHAT_STYLE_TAG_COMPRESSION)
@@ -979,6 +983,7 @@ impl ChatOrchestrator {
                     let mut n = finalized;
                     n.msg_type = Some(NodeKind::Notice);
                     n.title = Some("思考过程".to_string());
+                    n.icon = Some("💭".to_string());
                     n.with_style_tag(CHAT_STYLE_TAG_REASONING)
                 },
             )

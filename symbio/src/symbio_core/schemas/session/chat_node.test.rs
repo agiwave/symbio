@@ -76,7 +76,11 @@ fn resume_action_wire_words_are_snake_case() {
 fn legacy_wire_words_fold_to_shape_and_style_tag() {
     for (word, shape, tag) in [
         ("text", NodeKind::Body, None),
-        ("reasoning", NodeKind::Notice, Some(CHAT_STYLE_TAG_REASONING)),
+        (
+            "reasoning",
+            NodeKind::Notice,
+            Some(CHAT_STYLE_TAG_REASONING),
+        ),
         ("turn", NodeKind::Skeleton, Some(CHAT_STYLE_TAG_RUN)),
         ("tool_call", NodeKind::Skeleton, Some(CHAT_STYLE_TAG_TOOL)),
         ("user_prompt", NodeKind::Interaction, None),
@@ -122,10 +126,7 @@ fn predicates_are_exclusive_per_form() {
 
     let reasoning = n(NodeKind::Notice).with_style_tag(CHAT_STYLE_TAG_REASONING);
     assert!(reasoning.is_reasoning());
-    assert!(
-        !reasoning.is_text(),
-        "推理是 Notice 折叠叶，不是 Body 正文"
-    );
+    assert!(!reasoning.is_text(), "推理是 Notice 折叠叶，不是 Body 正文");
     assert!(
         !reasoning.is_compression(),
         "同落 Notice 后靠 tag 区分：reasoning 不得被判成压缩"

@@ -654,6 +654,17 @@ impl ChatNode {
         self
     }
 
+    /// 落呈现意图（[T-155]，[ADR-070 §决策 2]）：后端把「这一格该显示什么」写成**数据**
+    /// （`title` 头部标题、`icon` 头部图标），前端据此渲染折叠叶 / 容器，**不再 `switch(style_tag)`**。
+    ///
+    /// `title` 传 `None` 表示「标题是动态的，由呈现层按上下文现算」（如 `Skeleton` run 的标题
+    /// 是智能体名，不在这里钉死）。链式用，缺省两参都可不给（只填其一）。
+    pub fn with_presentation(mut self, title: Option<&str>, icon: Option<&str>) -> Self {
+        self.title = title.map(str::to_string);
+        self.icon = icon.map(str::to_string);
+        self
+    }
+
     /// 本节点是不是「一整轮助手响应的骨架」（`Skeleton` + tag `run`）。
     pub fn is_run(&self) -> bool {
         self.msg_type == Some(NodeKind::Skeleton) && self.style_tag() == Some(CHAT_STYLE_TAG_RUN)
@@ -669,7 +680,8 @@ impl ChatNode {
     /// [T-155]：reasoning 从 `Body + tag` 归位到 `Notice`（折叠叶，[PL-013 §3]）——
     /// 与 compression 同格，靠 `style_tag` 在后端区分。
     pub fn is_reasoning(&self) -> bool {
-        self.msg_type == Some(NodeKind::Notice) && self.style_tag() == Some(CHAT_STYLE_TAG_REASONING)
+        self.msg_type == Some(NodeKind::Notice)
+            && self.style_tag() == Some(CHAT_STYLE_TAG_REASONING)
     }
 
     /// 本节点是不是「普通正文」（`Body`）。
@@ -685,7 +697,8 @@ impl ChatNode {
     /// 会把思考也算成压缩——压缩判据必须显式排除 reasoning。存量无 tag 的裸 `Notice`
     /// 仍按压缩兜底（历史上 compression 是唯一 Notice 变体）。
     pub fn is_compression(&self) -> bool {
-        self.msg_type == Some(NodeKind::Notice) && self.style_tag() != Some(CHAT_STYLE_TAG_REASONING)
+        self.msg_type == Some(NodeKind::Notice)
+            && self.style_tag() != Some(CHAT_STYLE_TAG_REASONING)
     }
 
     /// 本节点是不是「等待用户回应的交互」（`Interaction`）。

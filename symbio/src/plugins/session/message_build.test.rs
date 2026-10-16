@@ -236,6 +236,9 @@ fn reasoning_with_distinct_reply_keeps_both_children() {
     let reasoning_child = msgs.iter().find(|m| m.is_reasoning()).unwrap();
     assert_eq!(reasoning_child.msg_type, Some(NodeKind::Notice));
     assert_eq!(reasoning_child.style_tag(), Some(CHAT_STYLE_TAG_REASONING));
+    // 呈现意图是后端填的**数据**（[T-155]/[ADR-070 §决策 2]）：前端据 title/icon 渲染，不再 switch(style_tag)。
+    assert_eq!(reasoning_child.title.as_deref(), Some("思考过程"));
+    assert_eq!(reasoning_child.icon.as_deref(), Some("💭"));
     assert_eq!(texts.len(), 1);
 
     // response_id 只挂在正文响应节点上

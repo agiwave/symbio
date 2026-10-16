@@ -150,6 +150,7 @@ impl UiNodeKind {
                 let mut n = node;
                 n.msg_type = Some(NodeKind::Notice);
                 n.title = Some("思考过程".to_string());
+                n.icon = Some("💭".to_string());
                 n.with_style_tag(CHAT_STYLE_TAG_REASONING)
             }
         }
@@ -1621,6 +1622,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                 role: Some(NodeRole::Assistant),
                 msg_type: Some(NodeKind::Notice),
                 title: Some("思考过程".to_string()),
+                icon: Some("💭".to_string()),
                 content: Some(MessageContent::Text(reasoning_text.clone())),
                 status: Some(NodeStatus::Completed),
                 timestamp: Some(crate::symbio_core::clock_now_ms()),
