@@ -12,6 +12,7 @@ import './_selfrun.mjs';
 // | A 模板路径 | 「谢谢」 | `Answered{thanks}` | 模板 | **零** LLM 请求；一条根级 `surface=reply` 节点 |
 // | B 生成路径 | 「我们刚才聊了什么」 | `Answered{from_context}` | 生成 | 分类 1 次 + 生成 1 次静默请求；答话**进**后续请求包 |
 // | B 首响剔除 | 再接「读一下 README」 | `Escalate{needs_work}` | 模板 | 首响节点**不进**请求包（同一批 worker 请求里查无此句） |
+// | B 首响到达时序 | 同上（同一次投递） | 同上 | 同上 | 首响帧在实时面上**早于**第一条工具结果帧，且只占一个节点 id |
 // | C 卸载平凡值 | 「谢谢」+ 不挂载 `compose` | `Answered{thanks}` | 无 | **降级进工具循环**；转写里没有对话面文本 |
 // | D 开关平凡值 | 「谢谢」+ `compose_enabled=false` | `Answered{thanks}` | 无 | 同上（验的是"分支写对了"，C 验的是"插件边界真的存在"） |
 //
@@ -30,6 +31,22 @@ import './_selfrun.mjs';
 // - 首响（`Escalate`，**设** `exclude_from_context`）必须**不在**包里。
 //
 // 两者若一起在或一起不在，说明两个标记被合并成了一个——那是本用例要拦的错。
+//
+// ## 为什么 B 线第 2 步还要看**到达时序**
+//
+// 上面那些断言数的都是「转写里有什么」——**落格**那一半。下发是另一件事，两者可以
+// 各自成立：`chat.assistant.opening` 一直按时序在 WAL 里，实时面却可以等轮末才见到它
+// （这段断言补进本用例之前正是如此），而用户看到的就是「一个跑了几分钟的轮次里
+// 助手一个字都没有」。所以第 2 步在投递**之前**订阅会话实时面，断言首响帧早于**第一条
+// 工具结果帧**——工具帧一直是当场下发的（`tools/tool_executor.rs`），它因此是一条不靠
+// sleep、不靠墙钟的时序基准；方向反了即红。
+//
+// 为什么基准不取末轮正文（`t23` 那一半取的是它）：首响若攒到轮末，它会与末轮正文
+// **同批**到达，两者谁先谁后取决于落库镜像的遍历顺序，不是这条缺陷的判据；工具结果
+// 帧在第 1 个工具轮就到达，间隔是整个轮次，判别力更强。
+//
+// 反向自检实跑过：把写侧 `turn_runner.rs` 步骤 1a 那行 `sink.on_tool_frame` 注掉、
+// 重建被测二进制复跑 ⇒ 本用例红在「首响帧的到达时刻要早于第一条工具结果帧」。
 //
 // ## 为什么平凡值线要另起 homedir 与进程
 //
@@ -51,6 +68,7 @@ import {
   makeHomedir,
   cleanupHomedir,
   startLongLivedCli,
+  subscribeSessionRealtime,
   readSessionMessages,
   nextPort,
   waitFor,
@@ -184,6 +202,9 @@ export default defineCase(
         { what: `${sid} 出现对话面节点（reason=${reason}）`, timeoutMs: 40_000 },
       );
 
+    /** B 线第 2 步的实时面订阅（在投递之前建立，见 §为什么还要看到达时序） */
+    let subB2 = null;
+
     try {
       // ── A 模板路径：「谢谢」⇒ 规则短路 ⇒ 模板 ⇒ **零** LLM 请求 ──
       let base = await reqCount();
@@ -259,6 +280,12 @@ export default defineCase(
 
       // ── B 首响剔除：再接一句「读一下 README」⇒ Escalate ⇒ 首响 + 工具循环 ──
       base = await reqCount();
+      // 实时面在**投递之前**订阅：本步的时序判据看的是到达序，晚一步订阅等于把要验的
+      // 那一段截掉（与 Tauri 前端同构：订阅一次覆盖整个会话目录）。
+      subB2 = await subscribeSessionRealtime(cli, {
+        sessionId: SIDS.generate,
+        gatewayPort: GATEWAY_PORT,
+      });
       await send(cli, SIDS.generate, '读一下 README', hd.workdir);
       await waitReplyNode(cli, SIDS.generate, 'needs_work');
       await waitFor(
@@ -290,6 +317,41 @@ export default defineCase(
         escOpening.meta?.exclude_from_context,
         true,
         'Escalate 的首响必须带剔除标记（界面开场白 ≠ 模型的对话内容）',
+      );
+
+      // ── 到达时序：首响帧早于第一条工具结果帧（T-136 开场白那一半的常驻判据）──
+      //
+      // 上面那段验的是**转写里有什么**（落格），这一段验的是**实时面什么时候给的**
+      // （下发）。基准取第一条工具结果帧：工具帧一直是当场下发的，而首响若只随轮末的
+      // 落库镜像下发，就会排在整个工具循环之后。
+      const liveB2 = subB2.messages();
+      const arrivedAt = (pred) => {
+        const hit = liveB2.find((m) => pred(m.data));
+        return hit ? hit.arrival : -1;
+      };
+      const openingAt = arrivedAt((d) => d?.meta?.reason === 'needs_work');
+      const toolResultAt = arrivedAt((d) => d?.role === 'tool');
+      assert(
+        openingAt >= 0,
+        `首响必须出现在实时面上（只在转写里看得见 = 只落格不下发）：帧数 ${liveB2.length}`,
+      );
+      assert(
+        toolResultAt >= 0,
+        `第一条工具结果帧也在实时面上（时序基准）：帧数 ${liveB2.length}`,
+      );
+      assert(
+        openingAt < toolResultAt,
+        `首响帧的到达时刻要早于第一条工具结果帧（实得 opening=${openingAt} tool=${toolResultAt}）：` +
+          `那句「我来处理」是说给正在等的用户听的，压到轮末等于抵消它的设计目的`,
+      );
+      // 身份只有一份：轮首那一句在实时面上就是一个节点。落格载荷与下发若用两个 id，
+      // 轮末镜像会再多出一张卡。
+      assertEq(
+        new Set(
+          liveB2.filter((m) => m.data?.meta?.reason === 'needs_work').map((m) => m.mid),
+        ).size,
+        1,
+        '一个轮首在实时面上就是一个节点（不多成两张卡）',
       );
 
       // ── C 卸载平凡值：不挂载 `compose` ⇒ 判决说能直接答却没人能说话 ⇒ 降级进工具循环 ──
@@ -393,6 +455,7 @@ export default defineCase(
         cleanupHomedir(hdOff);
       }
     } finally {
+      if (subB2) subB2.close();
       cli.stop();
       llm.stop();
       cleanupHomedir(hd);

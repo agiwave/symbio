@@ -19,6 +19,19 @@ import './_selfrun.mjs';
 // 就是"汇报没花任何往返"：一次 3 轮工具的任务本来发 3 次请求，若汇报去问模型，
 // 就会变成 5 次。若哪天有人给汇报加一次"润色"，A 线会红——这正是它存在的意义。
 //
+// ## 为什么 A 线还要看**到达时序**
+//
+// 表里那三条数的都是「转写里多出了什么」——落格那一半。下发那一半是另一件事，
+// 而且两者可以各自成立：WAL 一直按时序记着这句汇报，实时面却可以等轮末才见到它
+// （本用例补上这段之前正是如此），用户看到的就是「一个跑了几分钟的任务里助手
+// 一个字都没有」。所以 A 线在投递**之前**订阅会话实时面（与 Tauri 前端同构的
+// WS 边界），断言汇报帧早于末轮正文帧——末轮正文是流式的（生成那一刻就上实时面），
+// 它因此是一条不靠 sleep、不靠墙钟的时序基准。
+//
+// 反向自检实跑过：把写侧那行 `live.on_tool_frame(&node)` 注掉、重建被测二进制
+// 复跑 ⇒ 本用例红在「汇报帧的到达时刻要早于末轮正文（实得 report=22 answer=18）」，
+// 正是「落格照旧、下发攒到轮末」那一面。
+//
 // ## 为什么判决关掉（`classify_enabled=false`）
 //
 // 本用例的主题是**汇报**，不是判决（判决见 `t21`）。关掉判决有两个好处：
@@ -42,6 +55,7 @@ import {
   makeHomedir,
   cleanupHomedir,
   startLongLivedCli,
+  subscribeSessionRealtime,
   readSessionMessages,
   nextPort,
   waitFor,
@@ -143,7 +157,7 @@ export default defineCase(
         gatewayPort: port,
       });
       await cli.waitGatewayReady(20_000, label);
-      return { cli, hd, sid };
+      return { cli, hd, sid, port };
     };
 
     /** 建会话 + 投一条消息（**唯一输入入口**：写收件箱） */
@@ -179,10 +193,19 @@ export default defineCase(
       );
 
     const lines = [];
+    /** 实时面订阅（与 `lines` 一一对应，收尾时逐个关连接） */
+    const subs = [];
     try {
       // ── A 长任务：两个轮边界 ⇒ 两句汇报，且**不付任何 LLM 往返** ──
       const a = await startLine(SIDS.report, longTaskSession(), 'A 线进程');
       lines.push(a);
+      // 实时面在**投递之前**订阅：本用例的时序判据看的是到达序，晚一步订阅
+      // 就等于把要验的那一段截掉（与 Tauri 前端同构：订阅一次覆盖整个会话目录）。
+      const subA = await subscribeSessionRealtime(a.cli, {
+        sessionId: SIDS.report,
+        gatewayPort: a.port,
+      });
+      subs.push(subA);
       await send(a);
       await waitDone(a);
 
@@ -217,6 +240,45 @@ export default defineCase(
         aReqs.length,
         3,
         `3 轮工具应恰好发 3 次请求（汇报若付一次往返就会是 5 次）`,
+      );
+
+      // ── 到达时序：汇报帧早于末轮正文帧（T-136 的判据）──
+      //
+      // 上面那组断言看的是**转写里有什么**（落格那一半），这一段看的是**实时面
+      // 什么时候给的**（下发那一半）——两件事可以各自成立：WAL 一直按时序有这句
+      // 汇报，而帧攒到轮末才发，用户看到的就是「八分钟里助手一个字都没有」。
+      //
+      // 基准取末轮正文：它是**流式**的（生成那一刻就到实时面），而汇报若只随轮末
+      // 的落库镜像下发，就会排在这条之后。方向反了即红，不靠时长、不靠 sleep。
+      const liveA = subA.messages();
+      const arrivedAt = (pred) => {
+        const hit = liveA.find((m) => pred(m.data));
+        return hit ? hit.arrival : -1;
+      };
+      const reportAt = arrivedAt((d) => d?.meta?.reason === 'progress');
+      const answerAt = arrivedAt((d) => d?.content === '两轮工具都跑完了。');
+      assert(
+        reportAt >= 0,
+        `汇报节点必须出现在实时面上（只在转写里看得见 = 只落格不下发）：帧数 ${liveA.length}`,
+      );
+      assert(
+        answerAt >= 0,
+        `末轮正文也在实时面上（时序基准）：帧数 ${liveA.length}`,
+      );
+      assert(
+        reportAt < answerAt,
+        `汇报帧的到达时刻要早于末轮正文（实得 report=${reportAt} answer=${answerAt}）：` +
+          `那句「还在继续」是说给正在等的用户听的，压到轮末等于抵消它的设计目的`,
+      );
+      // 身份只有一份：实时面上两个轮边界各一个节点 id。若落格载荷与下发用的
+      // 是两个 id，轮末镜像会再多出两条——上面 `aReports.length === 2` 与本段的
+      // `new Set(...).size === 2` 两头夹住这件事。
+      assertEq(
+        new Set(
+          liveA.filter((m) => m.data?.meta?.reason === 'progress').map((m) => m.mid),
+        ).size,
+        2,
+        '两个轮边界在实时面上就是两个节点（不多成四张卡）',
       );
 
       // ── B 配额护栏：同一份编排，`progress_max_per_turn = 1` ⇒ 只说一次 ──
@@ -282,6 +344,7 @@ export default defineCase(
         'C 线不该有任何对话面文本（判决与汇报都关掉了）',
       );
     } finally {
+      for (const s of subs) s.close();
       for (const l of lines) {
         l.cli.stop();
         cleanupHomedir(l.hd);

@@ -177,6 +177,11 @@ enum UiFrame {
     Barrier(tokio::sync::oneshot::Sender<()>),
     /// 工具调用快照（身份帧）：**原样透传**的 `ChatMessage`。
     ///
+    /// 载体不止工具节点：对话面的**根级**节点（开场白）产生即上线时也借这一格——
+    /// [`UiFrame::Snapshot`] 要求 `parent`，而开场白与用户发言互为兄弟，没有父。
+    /// `DeltaSink::on_tool_frame` 的契约本就是「消费端不做类型推断、不改写身份」，
+    /// 所以这里原样透传就是它的义务边界，不新增形状。
+    ///
     /// 为什么不拆进 [`UiFrame::Snapshot`]：工具节点的 `name` / `tool_call_id` /
     /// 参数至今都是 model 插件转写面给出的事实，拆开再拼只会引入第二份形状；
     /// 分发方稍后以**同一 id** 定格与落库（`llm_build_tool_call_nodes` 的节点 id
@@ -1358,6 +1363,13 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                     let actor = actor.clone();
                     // 折进的消息往收集器 push（末尾随 `V2TurnResult` 回灌进落库镜像）。
                     let sink_msgs = collected.clone();
+                    // 汇报「产生即上线」借本轮那条流式桥送帧（`UiBridge::on_tool_frame`）。
+                    // 克隆而非搬走：`bridge` 之后还要交给运行器，而函数末尾的 `drop(bridge)`
+                    // 是发射端退出**唯一**的信号——多养一份它，等于把那个信号推迟到闭包死。
+                    // 闭包随 `TurnInput` / `drop(dispatcher)` 在本轮内死去，因此那个信号
+                    // 不会被推过收束点；这条时序是 hang 级别的（每个 v2 工具轮都要过它），
+                    // 由 `round_report_reaches_the_live_surface_before_turn_end` 钉住。
+                    let live = bridge.clone();
                     std::sync::Arc::new(
                         move |anchor: Option<u64>|
                             -> std::pin::Pin<
@@ -1375,6 +1387,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                             let actor = actor.clone();
                             let sink_msgs = sink_msgs.clone();
                             let supplemental_no = supplemental_no.clone();
+                            let live = live.clone();
                             Box::pin(async move {
                             // 同步取件：队列与配置都在 tokio RwLock 里，用 `blocking_read`
                             // 桥过来。
@@ -1408,6 +1421,13 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                             // 轮边界汇报（缺口 4）：判定与措辞在 chat_loop 那边（它有编排器），
                             // **落格在这里**（本函数开着 store）。所以回调交回来的是一份
                             // **草稿**，不是已落的事实——落格这一半不外包出去。
+                            //
+                            // **落格即上线**（T-136 的另一半）：这句话的设计目的就是「本轮还要
+                            // 跑很久，先报一句」，只落格不下发就等于把它压到轮末、把目的抵消。
+                            // 节点由 `to_message()` **现造一次**，id 同写进落格载荷——重建侧
+                            // （`rebuild::reported_node` 走 `event_payload_node_id`）读的就是它，
+                            // 于是实时面与重建面是同一个身份，轮末落库镜像再送一次时按 id 合并，
+                            // 不多一张卡（与 `op-*` 那条开场白同纪律）。
                             if let Some(report) = report {
                                 if let Some(draft) = report(anchor).await {
                                     match anchor {
@@ -1416,6 +1436,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                                                 1,
                                                 std::sync::atomic::Ordering::Relaxed,
                                             );
+                                            let node = draft.to_message();
                                             if let Err(e) = store.append(
                                                 crate::symbio_core::Event::pending(
                                                     format!("rp-{turn_no}-{no}"),
@@ -1430,6 +1451,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                                                     "text": draft.text,
                                                     "tool_rounds": draft.tool_rounds,
                                                     "quiet_ms": draft.quiet_ms,
+                                                    "id": node.id.clone(),
                                                 })),
                                             ) {
                                                 crate::plugin_warn!(
@@ -1438,8 +1460,9 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                                                 );
                                             }
                                             if let Ok(mut sink) = sink_msgs.lock() {
-                                                sink.push(draft.to_message());
+                                                sink.push(node.clone());
                                             }
+                                            live.on_tool_frame(&node);
                                         }
                                         None => crate::plugin_warn!(
                                             "session",

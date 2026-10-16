@@ -874,6 +874,170 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
     assert_eq!(snap[2].kind, EVENT_ASSISTANT_FINAL);
 }
 
+/// 轮边界汇报「产生即上线」（[T-136-轮中对话面节点不入实时面](../../../../docs/009-task/136-轮中对话面节点不入实时面.md) 的另一半）：
+/// `chat.assistant.reported` 落格的那一刻，同一个节点就经流式桥到实时面，
+/// 而不是等轮末的落库镜像一起到。
+///
+/// ## 三段各证明什么
+///
+/// - **时序**：汇报帧在收尾正文帧**之前**到达——轮末才到就是这条缺陷本体
+///   （一次几分钟的工具轮全程无反馈）。
+/// - **身份一致**：WAL 载荷的 `id`、实时面那一格、落库镜像那一格的 id **是同一个**。
+///   重建侧 `reported_node` 读的就是载荷里那个 `id`；id 一变，同一句汇报在
+///   实时面与重建面就是两张卡。
+/// - **不挂死**：汇报闭包里多一份 `Arc<UiBridge>`，而函数末尾那次 `drop(bridge)`
+///   是发射端退出**唯一**的信号。那份克隆若活得比重构的收束点还久，本用例不是
+///   断言红而是整个挂住——所以这条时序必须由用例钉住，不能靠读码推理。
+///
+/// ## 反向自检（两条都实跑过）
+///
+/// 去掉 `live.on_tool_frame(&node)` ⇒ ① 红（帧根本没到，②随之无从谈起）；
+/// 把载荷里那个 `id` 字段去掉 ⇒ 「载荷要带节点 id」那条红（重建侧只能退回事件 id，
+/// 与实时面就是两个身份）。
+#[tokio::test]
+async fn round_report_reaches_the_live_surface_before_turn_end() {
+    let (session, dir, _tmp) = setup_full().await;
+    let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
+    let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
+    let (provider, _prompts) = FaithfulProvider::new(Behavior::ToolThenAnswer);
+
+    // 只报一次：`RoundHookFn` 每跑完一轮工具都会被问一次，第二轮起返回 `None`。
+    let fired = Arc::new(Mutex::new(false));
+    let on_round = {
+        let fired = fired.clone();
+        Arc::new(move |_anchor: Option<u64>| {
+            let fired = fired.clone();
+            Box::pin(async move {
+                let mut once = fired.lock().unwrap();
+                if *once {
+                    return None;
+                }
+                *once = true;
+                Some(super::super::round_hook::ReportDraft {
+                    text: "已经完成 1 轮工具调用，还在继续。".into(),
+                    tool_rounds: 1,
+                    quiet_ms: 45_000,
+                })
+            })
+                as std::pin::Pin<
+                    Box<
+                        dyn std::future::Future<
+                                Output = Option<super::super::round_hook::ReportDraft>,
+                            > + Send,
+                    >,
+                >
+        }) as super::RoundHookFn
+    };
+
+    let res = execute_turn(V2Turn {
+        session: &session,
+        provider: Arc::new(provider),
+        parent: None,
+        session_dir: super::super::test_dir(),
+        ctx: test_ctx(),
+        system_prompt: "system",
+        abort: crate::symbio_core::ExecAbortSignal::new(),
+        root_id: "r-1",
+        sink: &sink,
+        user_text: "读一下 a.md",
+        user_node_id: None,
+        window_turns: 6,
+        tools: &[CapabilityMeta {
+            name: "vdfs_read".into(),
+            description: "读文件".into(),
+            input_schema: serde_json::json!({ "type": "object" }),
+            keywords: vec![],
+            category: None,
+            examples: None,
+            context_retention: None,
+            ..Default::default()
+        }],
+        resume: None,
+        recalled: None,
+        skill_obs: &[],
+        skill_hits: &[],
+        prefix: None,
+        consolidation: None,
+        supplements: None,
+        supplemental_no: Default::default(),
+        user_meta: None,
+        on_round: Some(on_round),
+        opening_text: None,
+        opening_dialog: None,
+    })
+    .await
+    .expect("带汇报的工具轮执行成功");
+
+    let said = |m: &cm::ChatMessage, needle: &str| matches!(&m.content, Some(cm::MessageContent::Text(t)) if t.contains(needle));
+
+    // ── ① 时序：汇报在收尾正文之前就到实时面 ─────────────────────────────
+    let got = frames.0.lock().unwrap();
+    let report_at = got.iter().position(|m| said(m, "还在继续")).expect(
+        "汇报必须在产生的那一刻就进实时面：等轮末落库镜像才到，就是「长轮次全程无反馈」本体",
+    );
+    // 收尾正文在实时面上是「快照 + 窄增量」两段（先「秋」再「天好」），所以
+    // 「这句说到第几帧才算说全」得沿帧序累积着看——只比快照会把答案整个漏掉。
+    let answer_at = {
+        let mut acc = String::new();
+        got.iter().enumerate().find_map(|(i, m)| {
+            let piece = match &m.content {
+                Some(cm::MessageContent::Text(s)) => s.as_str(),
+                _ => m.delta.as_deref().unwrap_or_default(),
+            };
+            acc.push_str(piece);
+            acc.contains("秋天好").then_some(i)
+        })
+    }
+    .expect("收尾正文也在实时面上");
+    assert!(
+        report_at < answer_at,
+        "汇报要比收尾轮的答案先到（它是**轮中**说的一句话）：report={report_at} answer={answer_at}"
+    );
+
+    // ── ② 身份：载荷 / 实时面 / 落库镜像三处同一个 id ────────────────────
+    let store = EventWalStore::open(dir.join("v2-events.wal")).expect("重开 WAL");
+    let all = store.range(Seq::new(0));
+    let reported = all
+        .iter()
+        .find(|e| e.kind == crate::symbio_core::EVENT_ASSISTANT_REPORTED)
+        .unwrap_or_else(|| panic!("汇报照常落格：{all:?}"));
+    let payload_id = reported.payload["id"].as_str().unwrap_or_default();
+    assert!(
+        !payload_id.is_empty(),
+        "载荷要带节点 id，重建侧 `event_payload_node_id` 才读得到：{:?}",
+        reported.payload
+    );
+    assert_eq!(
+        reported.produced_by,
+        Some(0),
+        "断言类事件带溯源（I2），指向本轮用户格"
+    );
+    let frame = got
+        .iter()
+        .find(|m| said(m, "还在继续"))
+        .expect("① 已经证明它在");
+    assert_eq!(
+        frame.id, payload_id,
+        "实时面那一格与事实载荷同一个 id——否则轮末重建会多出一张卡"
+    );
+    let mirrored = res
+        .messages
+        .iter()
+        .find(|m| said(m, "还在继续"))
+        .expect("汇报同样进落库镜像（前端读它）");
+    assert_eq!(
+        mirrored.id, payload_id,
+        "落库镜像与实时面同一个身份：{mirrored:?} vs {frame:?}"
+    );
+    assert_eq!(
+        all.iter()
+            .filter(|e| e.kind == crate::symbio_core::EVENT_ASSISTANT_REPORTED)
+            .count(),
+        1,
+        "只报一次（游标从 0 起 ⇒ 事件 id `rp-{{turn}}-0`）：{all:?}"
+    );
+}
+
 // ==================== 收束派生事实：记忆与学习（步 11–13 + 步 22）====================
 
 /// **收束派生事实**：记忆三段（步 11–13）与技能观测 / 编译（步 22）必须入格。

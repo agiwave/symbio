@@ -89,7 +89,7 @@ impl TurnRunner {
 // ── v2 会话运行时：TurnRunner 验收（不变量靠构造成立 + WAL 持久 + 兜底联动）──
 
 mod turn_runner_tests {
-    use super::super::{NodeFactsFn, StreamNodeFacts, TurnInput, TurnRunner};
+    use super::super::{DialogFacts, NodeFactsFn, StreamNodeFacts, TurnInput, TurnRunner};
     use crate::symbio_core::{
         check_all, cost_ledger, fallback_rate, transcript, Budget, Event, EventStore, LatencyTier,
         Seq, SilentDeltas, Store, StubLlmAdapter, TokenIssuer, WalStore, EVENT_ASSISTANT_FALLBACK,
@@ -568,6 +568,96 @@ mod turn_runner_tests {
         let frames = got2.0.lock().unwrap();
         assert_eq!(frames.len(), 1, "非流式适配器 = 一帧全文");
         assert!(frames[0].contains("问"));
+    }
+
+    /// 开场白**落格的同一时刻**上线到实时面（T-136 的一半），且节点 id 就是落格载荷里
+    /// 那个 `dialog.id`。
+    ///
+    /// ## 为什么要钉「它就是第一帧」
+    ///
+    /// 开场白的作用就是「本轮要跑一阵子，先说一声」。它若只进事实源、等轮末的落库
+    /// 镜像才到界面 ⇒ 一次八分钟的工具轮里终端一个字都没有，用户读到的是「卡死」。
+    /// 顺序就是这条缺陷的判据，所以钉到达次序而不是只钉「到达过」。
+    ///
+    /// ## 为什么要钉 id 与落格一致
+    ///
+    /// 轮末同一格还会经落库镜像再来一次；消费端按 id 合并成同一格，id 对不上就是两张卡。
+    ///
+    /// **反向自检**：删掉 `turn_runner` 步骤 1a 末尾那次 `sink.on_tool_frame` 本用例必红
+    /// （开场白只剩 deltas，`got.first()` 是正文增量而不是它）。
+    #[tokio::test]
+    async fn opening_node_reaches_the_live_surface_at_production_time() {
+        use crate::symbio_core::{chat_message::MessageContent, DeltaSink};
+        use std::sync::{Arc, Mutex};
+
+        /// 按序记「实时面上到过的帧」：`(节点 id, 正文)`，增量记为空 id。
+        #[derive(Default)]
+        struct Frames(Mutex<Vec<(String, String)>>);
+
+        impl DeltaSink for Frames {
+            fn on_delta(&self, text: &str) {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push((String::new(), text.to_string()));
+            }
+            fn on_reasoning(&self, _text: &str) {}
+            fn on_tool_frame(&self, frame: &crate::symbio_core::chat_message::ChatMessage) {
+                self.0.lock().unwrap().push((
+                    frame.id.clone(),
+                    frame
+                        .content
+                        .as_ref()
+                        .map(MessageContent::to_text)
+                        .unwrap_or_default(),
+                ));
+            }
+        }
+
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = StubLlmAdapter::succeed_streaming("stub-model", &["答", "话"]);
+        let got = Arc::new(Frames::default());
+
+        TurnRunner
+            .run_streaming(
+                &store,
+                &llm,
+                &tok,
+                TurnInput {
+                    turn: 0,
+                    text: "问".into(),
+                    tier: LatencyTier::Deep,
+                    window_turns: None,
+                    inject: None,
+                    resume: None,
+                    actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
+                    prefix: None,
+                    final_reply: None,
+                    turn_root_id: String::new(),
+                    user_node_id: None,
+                    user_meta: None,
+                    dialog: None,
+                    opening_text: Some("我先看一下。".into()),
+                    opening_dialog: Some(DialogFacts {
+                        id: "op-node-1".into(),
+                        reason: "escalate".into(),
+                        exclude_from_context: true,
+                    }),
+                    nodes: None,
+                    abort: None,
+                },
+                got.clone() as Arc<dyn DeltaSink>,
+            )
+            .await
+            .unwrap();
+
+        let got = got.0.lock().unwrap();
+        assert_eq!(
+            got.first(),
+            Some(&("op-node-1".to_string(), "我先看一下。".to_string())),
+            "开场白要在落格的同一时刻、带落格那个节点 id 上线（否则它只是轮末的旧闻）：{got:?}"
+        );
     }
 
     /// 中止轮的入参包：半截产出事实经 `nodes` 闭包随收束入格（生产里这个闭包读

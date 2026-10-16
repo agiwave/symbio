@@ -770,6 +770,12 @@ impl TurnRunner {
         // 放在用户格之后：断言类事件必须带溯源锚点（I2），而那只有落完用户格才有。
         // 空正文不落格（与汇报 / 收束同一条纪律）：把空串记成「说了句开场白」会让
         // 前端多出一条空节点。
+        //
+        // **落格即上线**（T-136 的一半）：这一句的作用是「本轮要跑一阵子，先说一声」，
+        // 那它产生的那一刻就该到界面——只落格不下发，一次八分钟的工具轮里终端一个字
+        // 都没有，看起来就是卡死。节点 id 用落格载荷里那个（`dialog.id`，重建路径
+        // `rebuild::opening_node` 读的也是它），于是轮末同 id 再送一次时消费端按 id
+        // 合并成同一格，不会多出一张卡。
         if let (Some(opening), Some(dialog)) = (opening_text.as_deref(), opening_dialog.as_ref()) {
             if !opening.trim().is_empty() {
                 store.append(
@@ -789,6 +795,13 @@ impl TurnRunner {
                         "exclude_from_context": dialog.exclude_from_context,
                     })),
                 )?;
+                let mut node = super::chat_loop::dialog_node(
+                    opening,
+                    &dialog.reason,
+                    dialog.exclude_from_context,
+                );
+                node.id = dialog.id.clone();
+                sink.on_tool_frame(&node);
             }
         }
         // 1b. 定稿答话（缺口 5）：用户格照常开，答话照常收束，**模型不参与**。
