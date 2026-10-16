@@ -129,6 +129,16 @@ pub const VDFS_ACTION_CLEAR: &str = "clear";
 /// 不合并成一个带开关的动词——合并之后「停了没有」取决于开关，机制就没法
 /// 用地址回答「你停的是哪一个」。
 pub const VDFS_ACTION_ABORT: &str = "abort";
+/// 节点动作标识：**惰性重取骨架子树**（读操作，落在单条消息 `<sid>/message/<mid>` 上）。
+///
+/// 前端把一棵已完成的骨架折叠并**本地释放**其子节点后（`unloaded` 是纯前端标记，
+/// 绝不写后端），需要展开时按 `mid` 向后端按需拉回那棵子树——本动作就是这条读出口。
+/// 入参 `{ depth?: "1"|"all", since_seq?: i64 }`（缺省 `all`、不带 seq 过滤），
+/// 出参是子树节点的窄帧序列（随 [`VdfsActionResult::data`](super::VdfsActionResult::data)）。
+///
+/// 与 `truncate`/恢复同族：落点是**那条骨架消息自身**（「对这条消息做点什么」的
+/// 地址就是它自己），只是它**只读**——不改存储，只回一段子树。
+pub const VDFS_ACTION_EXPAND_SKELETON: &str = "expand_skeleton";
 
 // ==================== 插件容器的注册表动词 ====================
 //

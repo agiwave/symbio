@@ -649,3 +649,108 @@ fn vdfs_session_content_overlays_live_messages() {
     assert_eq!(only["content"], "新");
     assert_eq!(only["seq"], 7, "顺序锚点只由存储分配，在途副本必须继承");
 }
+
+// ==================== subtree_nodes（expand_skeleton 读侧） ====================
+
+/// `depth` 缺省 / `all` ⇒ 整棵后代子树（**不含 root 本身**——它已在本地）。
+#[test]
+fn subtree_nodes_all_returns_full_descendant_subtree() {
+    let msgs = vec![
+        msg("s", Some(1)),
+        child("a", Some(2), "s"),
+        child("b", Some(3), "s"),
+        child("c", Some(4), "b"), // 孙：b 之下
+    ];
+    // BFS 逐层：先 s 的直接子（a,b），再下一层（c）
+    assert_eq!(
+        ids(&subtree_nodes(&msgs, "s", None, None)),
+        vec!["a", "b", "c"]
+    );
+    assert_eq!(
+        ids(&subtree_nodes(&msgs, "s", Some("all"), None)),
+        vec!["a", "b", "c"],
+        "\"all\" 与缺省同义"
+    );
+}
+
+/// `depth = "1"` ⇒ 只给直接子节点，不下探。
+#[test]
+fn subtree_nodes_depth_one_returns_only_direct_children() {
+    let msgs = vec![
+        msg("s", Some(1)),
+        child("a", Some(2), "s"),
+        child("b", Some(3), "s"),
+        child("c", Some(4), "b"),
+    ];
+    assert_eq!(
+        ids(&subtree_nodes(&msgs, "s", Some("1"), None)),
+        vec!["a", "b"],
+        "深度 1：孙节点 c 不返回"
+    );
+}
+
+/// `since_seq` ⇒ 只回 seq 更大的后代（增量补齐）；seq 缺失一律给。
+#[test]
+fn subtree_nodes_since_seq_filters_lower_seqs() {
+    let msgs = vec![
+        msg("s", Some(1)),
+        child("a", Some(2), "s"),
+        child("b", Some(5), "s"),
+        child("c", Some(6), "b"),
+    ];
+    assert_eq!(
+        ids(&subtree_nodes(&msgs, "s", Some("all"), Some(3))),
+        vec!["b", "c"],
+        "a(seq2) 被过滤；b/c 在其之后"
+    );
+    // 无 seq 的后代 ⇒ 视为「未知 ⇒ 一律给」
+    let noseq = vec![msg("s", Some(1)), child("a", None, "s")];
+    assert_eq!(
+        ids(&subtree_nodes(&noseq, "s", Some("all"), Some(9))),
+        vec!["a"]
+    );
+}
+
+/// root 不在列表里 ⇒ 空（无从定位子树）。
+#[test]
+fn subtree_nodes_missing_root_is_empty() {
+    let msgs = vec![msg("s", Some(1)), child("a", Some(2), "s")];
+    assert!(subtree_nodes(&msgs, "ghost", None, None).is_empty());
+}
+
+/// 往返判据「释放 → 重取 → 树一致」：把骨架的整棵后代本地释放（只留骨架），
+/// 再经 `subtree_nodes(all)` 拉回——重取集 ∪ {骨架} 必须与原树的该子树**逐 id 相等**。
+#[test]
+fn subtree_nodes_refetch_reproduces_released_subtree() {
+    let tree = vec![
+        msg("s", Some(1)),
+        child("a", Some(2), "s"),
+        child("b", Some(3), "s"),
+        child("c", Some(4), "b"),
+        msg("other", Some(5)), // 兄弟轮，不该被牵进来
+    ];
+    // 释放：丢弃 s 的全部后代，只留 s 与无关节点
+    let descendants = subtree_nodes(&tree, "s", None, None);
+    let released: Vec<&str> = descendants.iter().map(|m| m.id.as_str()).collect();
+    let kept: Vec<&str> = tree
+        .iter()
+        .map(|m| m.id.as_str())
+        .filter(|id| !released.contains(id))
+        .collect();
+    assert_eq!(kept, vec!["s", "other"], "释放只摘掉 s 的后代");
+    // 重取：拉回的子树应与释放掉的完全一致（顺序同为 BFS）
+    let refetched = subtree_nodes(&tree, "s", None, None);
+    assert_eq!(
+        ids(&refetched),
+        released,
+        "重取的子树与释放前逐节点一致（树形状不回改）"
+    );
+    // 且重取的每个后代父闭合：父要么在结果里、要么就是 s
+    let mut have: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    have.insert("s");
+    for m in &refetched {
+        let p = m.parent_id.as_deref().unwrap();
+        assert!(have.contains(p), "重取帧父闭合：{p} 应已在本地或已先取");
+        have.insert(m.id.as_str());
+    }
+}

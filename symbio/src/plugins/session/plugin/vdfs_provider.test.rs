@@ -776,9 +776,6 @@ async fn new_session_ids_are_distinct() {
 /// 不落格），再落诞生事实。开场事件**不带节点 id**：它只当锚，不该在投影里
 /// 多出一条虚构发言（转写列表 = `m0..mN`）。
 async fn seed_messages(p: &SessionPlugin, id: &str, texts: &[&str]) {
-    let s = Session::new(id);
-    p.save_session(&s).await.unwrap();
-
     let nodes: Vec<cm::ChatNode> = texts
         .iter()
         .enumerate()
@@ -791,12 +788,18 @@ async fn seed_messages(p: &SessionPlugin, id: &str, texts: &[&str]) {
             ..Default::default()
         })
         .collect();
+    seed_nodes(p, id, nodes).await;
+}
+
+/// 直接落一棵给定的节点树（可带 `parent_id`）——`expand_skeleton` 之类
+/// 需要父子结构的用例用它；`seed_messages` 是它的扁平特例。
+async fn seed_nodes(p: &SessionPlugin, id: &str, nodes: Vec<cm::ChatNode>) {
+    let s = Session::new(id);
+    p.save_session(&s).await.unwrap();
     let store = p.get_store().await.unwrap();
     let Some(dir) = store.session_dir(id) else {
         panic!("会话目录未建出（save_session 应已创建）");
     };
-    // 直落一条诞生事实：形状与 `v2_messages::added` 产出的一致（同一载荷键），
-    // 省掉它为立溯源锚而多要的那跳开场（投影只认载荷，锚是写侧的要求）。
     {
         use crate::symbio_core::Store as _;
         let payload = match serde_json::to_value(&nodes) {
@@ -969,6 +972,116 @@ async fn unknown_or_misplaced_action_is_not_implemented() {
         transcript_ids(&p, &id).await,
         vec!["m0"],
         "未实现的动作不得改动列表"
+    );
+}
+
+/// `expand_skeleton`：按骨架 id 惰性重取其子树（**只读**，不改存储）。
+///
+/// 覆盖 exit 判据「窄帧序列」与「释放 → 重取 → 树一致」的后端那一半：
+/// depth 缺省=all / depth="1" 只直接子 / since_seq 增量 / root 不存在回空 /
+/// 转写列表一条不少（只读动作）。
+/// 展开骨架 `target` 的子树（`expand_skeleton` 动作），回执转成节点 id 列表。
+async fn expand_skeleton(
+    p: &SessionPlugin,
+    id: &str,
+    target: &str,
+    payload: Option<Value>,
+) -> Vec<String> {
+    let r = p
+        .dispatch(
+            &vctx(),
+            &message_path(id, target),
+            VdfsRequest::Action {
+                action: VDFS_ACTION_EXPAND_SKELETON.to_string(),
+                payload,
+            },
+        )
+        .await
+        .unwrap()
+        .into_action()
+        .unwrap();
+    r.data.as_ref().unwrap()["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn expand_skeleton_returns_the_subtree_on_demand() {
+    let (_dir, p) = fixture();
+    let id = unique_id("msg-expand");
+    seed_nodes(
+        &p,
+        &id,
+        vec![
+            cm::ChatNode {
+                id: "s".into(),
+                msg_type: Some(cm::NodeKind::Skeleton),
+                seq: Some(1),
+                ..Default::default()
+            },
+            cm::ChatNode {
+                id: "a".into(),
+                parent_id: Some("s".into()),
+                seq: Some(2),
+                ..Default::default()
+            },
+            cm::ChatNode {
+                id: "b".into(),
+                parent_id: Some("s".into()),
+                seq: Some(3),
+                ..Default::default()
+            },
+            cm::ChatNode {
+                id: "c".into(),
+                parent_id: Some("b".into()),
+                seq: Some(4),
+                ..Default::default()
+            },
+            cm::ChatNode {
+                id: "other".into(),
+                seq: Some(5),
+                ..Default::default()
+            },
+        ],
+    )
+    .await;
+
+    // depth 缺省 = all：整棵后代（a,b,c），不含骨架 s、不含无关的 other
+    assert_eq!(
+        expand_skeleton(&p, &id, "s", None).await,
+        ["a", "b", "c"],
+        "all：整棵后代子树"
+    );
+
+    // depth = "1"：只直接子节点
+    assert_eq!(
+        expand_skeleton(&p, &id, "s", Some(json!({ "depth": "1" }))).await,
+        ["a", "b"],
+        "depth 1：不下探孙节点"
+    );
+
+    // since_seq = 3：只回 seq>3 的后代（c）；b(seq3) 被过滤，但仍下探它以触及 c
+    assert_eq!(
+        expand_skeleton(&p, &id, "s", Some(json!({ "since_seq": 3 }))).await,
+        ["c"],
+        "since_seq 增量：只回更新的节点"
+    );
+
+    // 不存在的 root ⇒ 空子树（只读动作，「没有」就是空，不报错）
+    assert_eq!(
+        expand_skeleton(&p, &id, "ghost", None).await,
+        Vec::<String>::new(),
+        "root 不存在 ⇒ 空子树"
+    );
+
+    // **只读**：转写列表一条不少（按 seq 升序）
+    assert_eq!(
+        transcript_ids(&p, &id).await,
+        vec!["s", "a", "b", "c", "other"],
+        "expand_skeleton 不改存储"
     );
 }
 

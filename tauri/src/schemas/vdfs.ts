@@ -355,6 +355,13 @@ export const VDFS_ACTION_CLEAR = 'clear'
  */
 export const VDFS_ACTION_ABORT = 'abort'
 /**
+ * 已知动作标识：**惰性重取骨架子树**（后端 `VDFS_ACTION_EXPAND_SKELETON`）——
+ * 折叠并本地释放了子节点的骨架，展开时按 `mid` 向后端按需拉回那棵子树。
+ * 落点在**那条骨架消息自身**（`<sid>/message/<mid>`），与 `truncate`/恢复同族，
+ * 但**只读**：不改存储，只回一段窄帧序列（`data.nodes`）。
+ */
+export const VDFS_ACTION_EXPAND_SKELETON = 'expand_skeleton'
+/**
  * 已知动作标识：**列出插件注册表**（后端 `VDFS_ACTION_PLUGINS`）——容器根的
  * 自持动词，回包 `data.plugins` 是全部插件的条目（含没有 VDFS 的与已停用的）。
  *

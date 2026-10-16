@@ -15,7 +15,7 @@ use crate::symbio_core::{
     vdfs_from_plugin_error, vdfs_host_ctx, VdfsAccess, VdfsActionResult, VdfsChange,
     VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode, VdfsProvider,
     VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse, VDFS_ACTION_ABORT, VDFS_ACTION_CLEAR,
-    VDFS_ACTION_TRUNCATE,
+    VDFS_ACTION_EXPAND_SKELETON, VDFS_ACTION_TRUNCATE,
 };
 
 #[async_trait]
@@ -437,6 +437,40 @@ impl SessionPlugin {
                             ok: true,
                             message,
                             data: Some(data),
+                        }))
+                    }
+                    // ── 惰性重取子树（`expand_skeleton`，只读）──
+                    //
+                    // 落点与 `truncate`/恢复同一个位置：`<sid>/message/<mid>`，`mid` 就是
+                    // 被折叠的**骨架自身**。前端本地释放了它的子节点、展开时按需拉回——
+                    // 这条读出口只回那棵子树的窄帧，**不改存储**（与恢复不同，它不触发起
+                    // 新一轮）。必须排在下面的恢复 catch-all **之前**：那一臂拿 `word` 去
+                    // `ResumeAction` 反序列化，`"expand_skeleton"` 不在词表里会掉进
+                    // `NotImplemented`。
+                    (Some(mid), VDFS_ACTION_EXPAND_SKELETON, payload) => {
+                        let msgs = self.transcript_of(id).await?;
+                        let p = payload.cloned().unwrap_or(Value::Null);
+                        let obj = p.as_object();
+                        let depth = obj
+                            .and_then(|o| o.get("depth"))
+                            .and_then(Value::as_str)
+                            .map(str::to_string);
+                        let since_seq =
+                            obj.and_then(|o| o.get("since_seq")).and_then(Value::as_i64);
+                        // 骨架不存在 ⇒ 空子树（只读动作，「没有」就是空，不是错误）。
+                        let subtree = subtree_nodes(&msgs, mid, depth.as_deref(), since_seq);
+                        Ok(VdfsResponse::Action(VdfsActionResult {
+                            action: action.clone(),
+                            ok: true,
+                            message: format!("已重取 {mid} 的子树（{} 个节点）", subtree.len()),
+                            data: Some(json!({
+                                "session_id": id,
+                                "root": mid,
+                                "nodes": serde_json::to_value(&subtree)
+                                    .map_err(|e| VdfsError::internal(format!(
+                                        "子树帧序列化失败：{e}"
+                                    )))?,
+                            })),
                         }))
                     }
                     // ── 恢复（retry_subtree / retry / approve / reject / supply /

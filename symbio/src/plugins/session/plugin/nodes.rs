@@ -262,6 +262,67 @@ pub(crate) fn transcript_window(
         .collect()
 }
 
+/// 骨架的**惰性重取子树**（`expand_skeleton` 动作的读侧）。
+///
+/// 从 `root` 出发按 `parent_id` 向下遍历其**后代**（**不含 `root` 本身**——它已在本地），
+/// 返回窄帧序列：
+/// - `depth`：`Some("1")` 只给直接子节点；其余（含 `None` / `"all"`）给整棵子树。
+/// - `since_seq`：只回 `seq > since_seq` 的后代（骨架未释放、只想增量补齐的情况）；
+///   `seq` 缺失的节点一律给（宁可多给不可漏）。**父闭合由调用方保证**——本函数只按
+///   seq 过滤，不保证「回了的节点其父也在结果里」。
+///
+/// `root` 不在 `msgs` 里 ⇒ 返回空（无从定位子树）。按 `parent_id` BFS，遍历序确定；
+/// 环防御用「后代数不超过总节点数」兜底（合法转写是树，不会触顶）。
+pub(crate) fn subtree_nodes(
+    msgs: &[cm::ChatNode],
+    root: &str,
+    depth: Option<&str>,
+    since_seq: Option<i64>,
+) -> Vec<cm::ChatNode> {
+    let mut children: HashMap<&str, Vec<usize>> = HashMap::new();
+    let mut has_root = false;
+    for (i, m) in msgs.iter().enumerate() {
+        if m.id == root {
+            has_root = true;
+        }
+        if let Some(p) = m.parent_id.as_deref() {
+            children.entry(p).or_default().push(i);
+        }
+    }
+    if !has_root {
+        return Vec::new();
+    }
+
+    let direct_only = depth == Some("1");
+    let mut out: Vec<cm::ChatNode> = Vec::new();
+    let mut frontier: Vec<usize> = children.get(root).cloned().unwrap_or_default();
+    let mut guard = msgs.len() + 1;
+    while !frontier.is_empty() && guard > 0 {
+        guard -= 1;
+        let mut next: Vec<usize> = Vec::new();
+        for &i in &frontier {
+            let n = &msgs[i];
+            let pass = match (n.seq, since_seq) {
+                (Some(s), Some(since)) => s > since,
+                _ => true,
+            };
+            if pass {
+                out.push(n.clone());
+            }
+            if !direct_only {
+                if let Some(kids) = children.get(n.id.as_str()) {
+                    next.extend(kids.iter().copied());
+                }
+            }
+        }
+        if direct_only {
+            break;
+        }
+        frontier = next;
+    }
+    out
+}
+
 /// 游标 → 消息 id：游标可以是裸 id，也可以是 `<…>/<id>` 的地址形式
 fn cursor_id(before: &str) -> Option<&str> {
     let b = before.trim_end_matches('/');
