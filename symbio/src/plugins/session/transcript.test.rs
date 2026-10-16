@@ -11,7 +11,7 @@
 //! 把窗口顶出去；断言「正文」的用例则与窗口无关（合帧逐字等价）。
 
 use super::*;
-use crate::symbio_core::chat_node::{MessageContent, NodeRole, NodeStatus, NodeKind};
+use crate::symbio_core::chat_node::{MessageContent, NodeKind, NodeRole, NodeStatus};
 use std::sync::Mutex;
 
 /// 一条带正文的完整消息（`content` = 整条替换）。
@@ -19,7 +19,7 @@ fn text_msg(id: &str, status: NodeStatus, text: &str) -> cm::ChatNode {
     cm::ChatNode {
         id: id.to_string(),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         status: Some(status),
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()

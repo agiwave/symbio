@@ -15,7 +15,7 @@ use super::super::transcript::llm_emit_state;
 use crate::symbio_core::{llm_emit_message, llm_short_id, TurnToolCallInfo};
 
 use crate::symbio_core::{
-    chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus},
+    chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_TOOL},
     failure_kind, HookEvent, HookOutput, PluginInvokeRequestExt,
 };
 use crate::symbio_core::{
@@ -237,7 +237,7 @@ fn build_user_prompt_message(
         id: result_msg_id.to_string(),
         parent_id: Some(tool_call_id.to_string()),
         role: Some(NodeRole::Tool),
-        msg_type: Some(NodeKind::UserPrompt),
+        msg_type: Some(NodeKind::Interaction),
         content: Some(MessageContent::Text(pending.text.clone())),
         status: Some(NodeStatus::WaitingUserAction),
         meta: Some(json!({
@@ -560,12 +560,13 @@ async fn record_protocol_failure(
         None => ChatNode {
             id: tool_call_id.to_string(),
             role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::ToolCall),
+            msg_type: Some(NodeKind::Skeleton),
             status: Some(NodeStatus::Completed),
             error: Some(error_text.to_string()),
             meta: Some(json!({
                 "success": false,
                 "failure_kind": "error",
+                "style_tag": CHAT_STYLE_TAG_TOOL,
             })),
             ..Default::default()
         },

@@ -84,7 +84,7 @@
 use std::sync::{Arc, Mutex};
 
 use crate::symbio_core::chat_node::{
-    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind,
+    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_REASONING,
 };
 use crate::symbio_core::{
     llm_short_id, ActorSpec, CapabilityMeta, DeltaSink, DispatchPort, Entity, Event, EventWalStore,
@@ -141,11 +141,12 @@ enum UiNodeKind {
 }
 
 impl UiNodeKind {
-    /// 该流在事实网格 / 界面上的节点类型。
-    fn msg_type(self) -> NodeKind {
+    /// 给这一帧的节点定形状：正文与推理同属 `Body`，两者的差别是呈现变体，
+    /// 落在 `meta.style_tag` 上（[ADR-070 §决策 3]）。
+    fn shape(self, node: ChatNode) -> ChatNode {
         match self {
-            UiNodeKind::Text => NodeKind::Text,
-            UiNodeKind::Reasoning => NodeKind::Reasoning,
+            UiNodeKind::Text => node,
+            UiNodeKind::Reasoning => node.with_style_tag(CHAT_STYLE_TAG_REASONING),
         }
     }
 }
@@ -1214,15 +1215,15 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
                     parent,
                     text,
                     kind,
-                } => ChatNode {
+                } => kind.shape(ChatNode {
                     id,
                     parent_id: Some(parent),
                     role: Some(NodeRole::Assistant),
-                    msg_type: Some(kind.msg_type()),
+                    msg_type: Some(NodeKind::Body),
                     content: Some(MessageContent::Text(text)),
                     status: Some(NodeStatus::Streaming),
                     ..Default::default()
-                },
+                }),
                 UiFrame::Delta { id, text } => ChatNode {
                     id,
                     delta: Some(text),
@@ -1233,15 +1234,15 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
                     parent,
                     text,
                     kind,
-                } => ChatNode {
+                } => kind.shape(ChatNode {
                     id,
                     parent_id: Some(parent),
                     role: Some(NodeRole::Assistant),
-                    msg_type: Some(kind.msg_type()),
+                    msg_type: Some(NodeKind::Body),
                     content: Some(MessageContent::Text(text)),
                     status: Some(NodeStatus::Completed),
                     ..Default::default()
-                },
+                }),
                 UiFrame::Barrier(done) => {
                     let _ = done.send(());
                     continue;
@@ -1585,16 +1586,19 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
             ));
         }
         if !reasoning_text.trim().is_empty() {
-            partial.push(ChatNode {
-                id: reasoning_child_id,
-                parent_id: Some(root_id.to_string()),
-                role: Some(NodeRole::Assistant),
-                msg_type: Some(NodeKind::Reasoning),
-                content: Some(MessageContent::Text(reasoning_text.clone())),
-                status: Some(NodeStatus::Completed),
-                timestamp: Some(crate::symbio_core::clock_now_ms()),
-                ..Default::default()
-            });
+            partial.push(
+                ChatNode {
+                    id: reasoning_child_id,
+                    parent_id: Some(root_id.to_string()),
+                    role: Some(NodeRole::Assistant),
+                    msg_type: Some(NodeKind::Body),
+                    content: Some(MessageContent::Text(reasoning_text.clone())),
+                    status: Some(NodeStatus::Completed),
+                    timestamp: Some(crate::symbio_core::clock_now_ms()),
+                    ..Default::default()
+                }
+                .with_style_tag(CHAT_STYLE_TAG_REASONING),
+            );
         }
         return Err(PluginError::Aborted { partial });
     }

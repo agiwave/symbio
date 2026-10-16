@@ -27,18 +27,27 @@ fn out(text: &str, reasoning: &str) -> TurnOutput {
     }
 }
 
-/// 统计某类型子节点（parent_id == TURN_ID）数量
-fn count_children(msgs: &[ChatNode], ty: NodeKind) -> usize {
+/// 按**谓词**统计本轮骨架下的子节点数量（正文 / 推理 / 工具调用骨架）。
+///
+/// 判据走 [`ChatNode`] 谓词而不是 `msg_type` 变体名：本文件锁的是落库**形状**，
+/// 而形状由「形态 + `meta.style_tag`」共同决定，写哪个变体名是协议细节。
+fn count_children(msgs: &[ChatNode], pred: impl Fn(&ChatNode) -> bool) -> usize {
     msgs.iter()
-        .filter(|m| m.parent_id.as_deref() == Some(TURN_ID) && m.msg_type == Some(ty.clone()))
+        .filter(|m| m.parent_id.as_deref() == Some(TURN_ID) && pred(m))
         .count()
 }
 
-fn child_texts(msgs: &[ChatNode], ty: NodeKind) -> Vec<String> {
+fn child_texts(msgs: &[ChatNode], pred: impl Fn(&ChatNode) -> bool) -> Vec<String> {
     msgs.iter()
-        .filter(|m| m.parent_id.as_deref() == Some(TURN_ID) && m.msg_type == Some(ty.clone()))
+        .filter(|m| m.parent_id.as_deref() == Some(TURN_ID) && pred(m))
         .map(|m| m.content.as_ref().map(|c| c.to_text()).unwrap_or_default())
         .collect()
+}
+
+/// 根骨架的 wire 形状断言：`Skeleton` + tag `run`（本文件锁形状，故写满两半）。
+fn assert_run_skeleton(node: &ChatNode) {
+    assert_eq!(node.msg_type, Some(NodeKind::Skeleton));
+    assert_eq!(node.style_tag(), Some(CHAT_STYLE_TAG_RUN));
 }
 
 fn tool_call(name: &str) -> TurnToolCallInfo {
@@ -88,11 +97,9 @@ fn into_messages_reasoning_only_has_no_duplicate_content() {
     let msgs = out("", reasoning).into_messages("turn-x");
 
     assert_eq!(msgs.len(), 2, "应为 Turn + 单个 Text 子节点");
-    assert_eq!(msgs[0].msg_type, Some(NodeKind::Turn));
+    assert_run_skeleton(&msgs[0]);
     assert!(
-        !msgs
-            .iter()
-            .any(|m| m.msg_type == Some(NodeKind::Reasoning)),
+        !msgs.iter().any(|m| m.is_reasoning()),
         "reasoning-only 不得产生 Reasoning 子节点"
     );
 
@@ -112,18 +119,8 @@ fn into_messages_reasoning_only_has_no_duplicate_content() {
 fn into_messages_reasoning_with_reply_keeps_two_children() {
     let msgs = out("这是回复", "这是思考").into_messages("turn-y");
     assert_eq!(msgs.len(), 3);
-    assert_eq!(
-        msgs.iter()
-            .filter(|m| m.msg_type == Some(NodeKind::Reasoning))
-            .count(),
-        1
-    );
-    assert_eq!(
-        msgs.iter()
-            .filter(|m| m.msg_type == Some(NodeKind::Text))
-            .count(),
-        1
-    );
+    assert_eq!(msgs.iter().filter(|m| m.is_reasoning()).count(), 1);
+    assert_eq!(msgs.iter().filter(|m| m.is_text()).count(), 1);
 }
 
 /// 形状不变式：`tool_calls` 是**结果形态**的唯一来源——`into_messages` 必须把字段里
@@ -137,11 +134,10 @@ fn into_messages_carries_tool_calls_from_the_result_field() {
     o.tool_calls.push(tool_call("vdfs_list"));
     let msgs = o.into_messages("turn-z");
 
-    let calls: Vec<_> = msgs
-        .iter()
-        .filter(|m| m.msg_type == Some(NodeKind::ToolCall))
-        .collect();
+    let calls: Vec<_> = msgs.iter().filter(|m| m.is_tool_call()).collect();
     assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].msg_type, Some(NodeKind::Skeleton));
+    assert_eq!(calls[0].style_tag(), Some(CHAT_STYLE_TAG_TOOL));
     assert_eq!(calls[0].id, "tc-1", "落库 id 必须等于产物里的节点 id");
     assert_eq!(calls[0].parent_id.as_deref(), Some("turn-z"));
     assert_eq!(calls[0].name.as_deref(), Some("vdfs_list"));
@@ -176,19 +172,19 @@ fn reasoning_only_writes_single_text_child_without_reasoning_node() {
 
     // 根节点
     assert_eq!(msgs[0].id, TURN_ID);
-    assert_eq!(msgs[0].msg_type, Some(NodeKind::Turn));
+    assert_run_skeleton(&msgs[0]);
     assert_eq!(msgs[0].parent_id, None);
     assert!(msgs[0].content.is_none(), "Turn 为组合节点，不携带内容");
 
     // 关键防复发断言：不存在任何 Reasoning 子节点
     assert_eq!(
-        count_children(&msgs, NodeKind::Reasoning),
+        count_children(&msgs, ChatNode::is_reasoning),
         0,
         "reasoning-only 不得生成 Reasoning 子节点（否则与 Text 子节点内容重复）"
     );
 
     // 唯一的 Text 子节点承载 reasoning 内容，且只出现一次
-    let texts = child_texts(&msgs, NodeKind::Text);
+    let texts = child_texts(&msgs, ChatNode::is_text);
     assert_eq!(texts.len(), 1, "Text 子节点应恰好一个");
     assert_eq!(texts[0], reasoning);
 }
@@ -209,11 +205,11 @@ fn reasoning_only_ignores_surrounding_whitespace() {
     );
 
     assert_eq!(msgs.len(), 2);
-    assert_eq!(count_children(&msgs, NodeKind::Reasoning), 0);
-    assert_eq!(count_children(&msgs, NodeKind::Text), 1);
+    assert_eq!(count_children(&msgs, ChatNode::is_reasoning), 0);
+    assert_eq!(count_children(&msgs, ChatNode::is_text), 1);
 }
 
-/// 用例 B：普通场景（reasoning + 独立文本回复）→ Reasoning 与 Text 各一份，内容不同
+/// 用例 B：普通场景（reasoning + 独立文本回复）→ 推理与正文各一份，内容不同
 #[test]
 fn reasoning_with_distinct_reply_keeps_both_children() {
     let msgs = llm_build_assistant_messages(
@@ -225,21 +221,27 @@ fn reasoning_with_distinct_reply_keeps_both_children() {
         TurnStreamChildIds::default(),
     );
 
-    // Turn + Reasoning + Text
+    // 骨架 + 推理 + 正文
     assert_eq!(msgs.len(), 3);
-    assert_eq!(msgs[0].msg_type, Some(NodeKind::Turn));
+    assert_run_skeleton(&msgs[0]);
 
-    let reasonings = child_texts(&msgs, NodeKind::Reasoning);
-    let texts = child_texts(&msgs, NodeKind::Text);
+    let reasonings = child_texts(&msgs, ChatNode::is_reasoning);
+    let texts = child_texts(&msgs, ChatNode::is_text);
     assert_eq!(reasonings, vec!["思考过程".to_string()]);
     assert_eq!(texts, vec!["正常回复".to_string()]);
     assert_ne!(reasonings[0], texts[0], "两个子节点内容必须不同");
 
-    // response_id 只挂在 Text 响应节点上
-    let text_child = msgs
-        .iter()
-        .find(|m| m.msg_type == Some(NodeKind::Text))
-        .unwrap();
+    // 两条流同属 `Body`，**只有** `style_tag` 把它们分开——这是形状契约的另一半：
+    // 少写 tag 就是「思考被当正文落库」。
+    let reasoning_child = msgs.iter().find(|m| m.is_reasoning()).unwrap();
+    assert_eq!(reasoning_child.msg_type, Some(NodeKind::Body));
+    assert_eq!(reasoning_child.style_tag(), Some(CHAT_STYLE_TAG_REASONING));
+    assert_eq!(texts.len(), 1);
+
+    // response_id 只挂在正文响应节点上
+    let text_child = msgs.iter().find(|m| m.is_text()).unwrap();
+    assert_eq!(text_child.msg_type, Some(NodeKind::Body));
+    assert_eq!(text_child.style_tag(), None, "正文不带呈现变体");
     assert_eq!(text_child.response_id.as_deref(), Some("resp-1"));
     assert_eq!(text_child.role, Some(NodeRole::Assistant));
     assert_eq!(text_child.status, Some(NodeStatus::Completed));
@@ -257,8 +259,8 @@ fn plain_text_reply_has_no_reasoning_child() {
         TurnStreamChildIds::default(),
     );
     assert_eq!(msgs.len(), 2);
-    assert_eq!(count_children(&msgs, NodeKind::Reasoning), 0);
-    assert_eq!(child_texts(&msgs, NodeKind::Text), vec!["你好"]);
+    assert_eq!(count_children(&msgs, ChatNode::is_reasoning), 0);
+    assert_eq!(child_texts(&msgs, ChatNode::is_text), vec!["你好"]);
 }
 
 /// 用例 D：有 reasoning + 无文本 + 有工具调用（非 reasoning-only）
@@ -277,13 +279,13 @@ fn reasoning_with_tool_calls_keeps_reasoning_and_skips_empty_text() {
 
     // Turn + Reasoning + ToolCall
     assert_eq!(msgs.len(), 3);
-    assert_eq!(count_children(&msgs, NodeKind::Reasoning), 1);
+    assert_eq!(count_children(&msgs, ChatNode::is_reasoning), 1);
     assert_eq!(
-        count_children(&msgs, NodeKind::Text),
+        count_children(&msgs, ChatNode::is_text),
         0,
         "空白正文不得生成 Text 节点"
     );
-    assert_eq!(count_children(&msgs, NodeKind::ToolCall), 1);
+    assert_eq!(count_children(&msgs, ChatNode::is_tool_call), 1);
 }
 
 // ── 流式 id 复用回归（锁「流式层 ⇄ 存储层同一身份」）───────────────────
@@ -309,11 +311,11 @@ fn persisted_children_reuse_streaming_child_ids() {
 
     let text_child = msgs
         .iter()
-        .find(|m| m.msg_type == Some(NodeKind::Text))
+        .find(|m| m.is_text())
         .expect("应生成 Text 子节点");
     let reasoning_child = msgs
         .iter()
-        .find(|m| m.msg_type == Some(NodeKind::Reasoning))
+        .find(|m| m.is_reasoning())
         .expect("应生成 Reasoning 子节点");
 
     assert_eq!(text_child.id, "stream-text-id");
@@ -339,7 +341,7 @@ fn reasoning_only_reuses_reasoning_stream_id() {
 
     let text_child = msgs
         .iter()
-        .find(|m| m.msg_type == Some(NodeKind::Text))
+        .find(|m| m.is_text())
         .expect("reasoning-only 应生成唯一 Text 子节点");
     assert_eq!(text_child.id, "stream-reason-id");
 }

@@ -53,7 +53,7 @@ fn node(id: &str, parent: Option<&str>, status: cm::NodeStatus) -> cm::ChatNode 
         id: id.into(),
         parent_id: parent.map(|p| p.into()),
         role: Some(cm::NodeRole::Assistant),
-        msg_type: Some(cm::NodeKind::Text),
+        msg_type: Some(cm::NodeKind::Body),
         status: Some(status),
         ..Default::default()
     }

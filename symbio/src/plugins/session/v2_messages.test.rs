@@ -12,7 +12,7 @@
 //! （`docs/017-module-layout.md` §2）。本文件只钉「事实本身」。
 
 use super::{drain_parked, edited, removed};
-use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole, NodeKind};
+use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole};
 use crate::symbio_core::{
     Entity, EventWalStore, Seq, Store, Verb, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED,
     EVENT_USER_MESSAGE,
@@ -62,7 +62,7 @@ fn patched_user(id: &str, text: &str) -> ChatNode {
     ChatNode {
         id: id.into(),
         role: Some(NodeRole::User),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.into())),
         timestamp: Some(1_500),
         ..Default::default()
@@ -504,10 +504,8 @@ fn patched_msg(
     ChatNode {
         id: id.into(),
         role: Some(role),
-        principal: principal.map(
-            |s| crate::symbio_core::principal::Principal::from_legacy(&s),
-        ),
-        msg_type: Some(NodeKind::Text),
+        principal: principal.map(|s| crate::symbio_core::principal::Principal::from_legacy(&s)),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.into())),
         timestamp: Some(ts),
         ..Default::default()

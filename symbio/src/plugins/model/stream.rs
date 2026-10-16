@@ -10,7 +10,8 @@ use crate::plugin_info;
 use crate::plugin_warn;
 use crate::plugins::model::http::STREAM_IDLE_TIMEOUT;
 use crate::symbio_core::chat_node::{
-    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind,
+    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_REASONING,
+    CHAT_STYLE_TAG_TOOL,
 };
 use crate::symbio_core::ModelUsage;
 use crate::symbio_core::{llm_emit_message, llm_short_id, TurnOutput, TurnToolCallInfo};
@@ -631,7 +632,7 @@ async fn dispatch_protocol_event(
                         id: out.response_text_child_id.clone(),
                         parent_id: Some(root_id.into()),
                         role: Some(NodeRole::Assistant),
-                        msg_type: Some(NodeKind::Text),
+                        msg_type: Some(NodeKind::Body),
                         content: Some(MessageContent::Text(out.text.clone())),
                         status: Some(NodeStatus::Streaming),
                         ..Default::default()
@@ -656,11 +657,12 @@ async fn dispatch_protocol_event(
                         id: out.reasoning_child_id.clone(),
                         parent_id: Some(root_id.into()),
                         role: Some(NodeRole::Assistant),
-                        msg_type: Some(NodeKind::Reasoning),
+                        msg_type: Some(NodeKind::Body),
                         content: Some(MessageContent::Text(out.reasoning.clone())),
                         status: Some(NodeStatus::Streaming),
                         ..Default::default()
-                    },
+                    }
+                    .with_style_tag(CHAT_STYLE_TAG_REASONING),
                 )
                 .await;
             } else {
@@ -700,8 +702,8 @@ async fn dispatch_protocol_event(
                 return Ok(());
             }
 
-            // ToolCall 组合节点：自身 content 即**请求参数**（不设独立的请求子节点，
-            // 见 `symbio/src/plugins/session/docs/018-node-state-streaming.md` §2.2）。两条路径与 Text / Reasoning
+            // 工具调用骨架节点（`Skeleton` + tag `tool`）：自身 content 即**请求参数**（不设独立的请求子节点，
+            // 见 `symbio/src/plugins/session/docs/018-node-state-streaming.md` §2.2）。两条路径与正文 / 推理
             // **同构**——帧面只有两种语义，由覆盖方式决定，接收端不做类型推断：
             // - 身份字段变化（新建节点 / 首次定名）→ 完整快照（`Upsert`）；
             // - 纯参数增量 → 窄追加（`Append`，O(delta)），接收端尾部拼接。
@@ -712,13 +714,14 @@ async fn dispatch_protocol_event(
                         id: tc_id.clone(),
                         parent_id: Some(root_id.into()),
                         role: Some(NodeRole::Assistant),
-                        msg_type: Some(NodeKind::ToolCall),
+                        msg_type: Some(NodeKind::Skeleton),
                         name: full_name,
                         content: Some(MessageContent::Text(full_args)),
                         status: Some(NodeStatus::Streaming),
                         tool_call_id: Some(wire_id),
                         ..Default::default()
-                    },
+                    }
+                    .with_style_tag(CHAT_STYLE_TAG_TOOL),
                 )
                 .await;
             } else if let Some(delta) = args.as_deref().filter(|d| !d.is_empty()) {

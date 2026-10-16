@@ -259,7 +259,7 @@ impl SessionPlugin {
         let user_msg = cm::ChatNode {
             id: format!("hb_{}_{}", session_id, now),
             role: Some(cm::NodeRole::User),
-            msg_type: Some(cm::NodeKind::Text),
+            msg_type: Some(cm::NodeKind::Body),
             content: Some(cm::MessageContent::Text(hb.prompt.clone())),
             status: Some(cm::NodeStatus::Completed),
             timestamp: Some(now),

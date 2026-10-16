@@ -251,7 +251,7 @@ pub fn build_request_view(
         view.push(ChatNode {
             id: uuid::Uuid::new_v4().to_string(),
             role: Some(NodeRole::User),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text(CONTEXT_NUDGE_TEXT.to_string())),
             status: Some(NodeStatus::Completed),
             meta: Some(serde_json::json!({ "kind": "context_nudge" })),
@@ -267,7 +267,7 @@ pub fn build_request_view(
             ChatNode {
                 id: uuid::Uuid::new_v4().to_string(),
                 role: Some(NodeRole::User),
-                msg_type: Some(NodeKind::Text),
+                msg_type: Some(NodeKind::Body),
                 content: Some(MessageContent::Text(section.to_string())),
                 status: Some(NodeStatus::Completed),
                 meta: Some(serde_json::json!({ "kind": "delegate_context" })),
@@ -284,7 +284,7 @@ pub fn build_request_view(
             ChatNode {
                 id: uuid::Uuid::new_v4().to_string(),
                 role: Some(NodeRole::User),
-                msg_type: Some(NodeKind::Text),
+                msg_type: Some(NodeKind::Body),
                 content: Some(MessageContent::Text(section.to_string())),
                 status: Some(NodeStatus::Completed),
                 meta: Some(serde_json::json!({ "kind": "readyset" })),
@@ -300,7 +300,7 @@ pub fn build_request_view(
             ChatNode {
                 id: uuid::Uuid::new_v4().to_string(),
                 role: Some(NodeRole::User),
-                msg_type: Some(NodeKind::Text),
+                msg_type: Some(NodeKind::Body),
                 content: Some(MessageContent::Text(section.to_string())),
                 status: Some(NodeStatus::Completed),
                 meta: Some(serde_json::json!({ "kind": "recall_context" })),

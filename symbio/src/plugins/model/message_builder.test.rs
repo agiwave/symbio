@@ -107,7 +107,7 @@ fn tool_call_args_passthrough_as_string_without_reserialize() {
 #[test]
 fn reasoning_only_flattens_to_single_assistant_message() {
     let reasoning = "只有思考";
-    let msgs = turn_tree(vec![child("turn-0001-reason", NodeKind::Text, reasoning)]);
+    let msgs = turn_tree(vec![child("turn-0001-reason", NodeKind::Body, reasoning)]);
 
     let natives = flatten_chat_messages(&msgs);
     assert_eq!(natives.len(), 1, "应只产生一条 assistant native message");
@@ -130,7 +130,7 @@ fn reasoning_only_flattens_to_single_assistant_message() {
 fn reasoning_with_reply_flattens_into_content_and_reasoning_content() {
     let msgs = turn_tree(vec![
         child("turn-0001-reason", NodeKind::Reasoning, "思考过程"),
-        child("turn-0001-text", NodeKind::Text, "正常回复"),
+        child("turn-0001-text", NodeKind::Body, "正常回复"),
     ]);
 
     let natives = flatten_chat_messages(&msgs);
@@ -175,7 +175,7 @@ fn flatten_keeps_only_recent_reasoning_in_request_view() {
                 id: format!("{turn_id}-text"),
                 parent_id: Some(turn_id.into()),
                 role: Some(NodeRole::Assistant),
-                msg_type: Some(NodeKind::Text),
+                msg_type: Some(NodeKind::Body),
                 content: Some(MessageContent::Text(reply.into())),
                 status: Some(NodeStatus::Completed),
                 timestamp: Some(1),
@@ -188,7 +188,7 @@ fn flatten_keeps_only_recent_reasoning_in_request_view() {
         id: "u1".into(),
         parent_id: None,
         role: Some(NodeRole::User),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text("开始".into())),
         status: Some(NodeStatus::Completed),
         timestamp: Some(0),
@@ -242,7 +242,7 @@ fn orphan_tool_result_is_dropped() {
             id: "u1".into(),
             parent_id: None,
             role: Some(NodeRole::User),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("hello".into())),
             status: Some(NodeStatus::Completed),
             timestamp: Some(1),
@@ -262,7 +262,7 @@ fn orphan_tool_result_is_dropped() {
             id: "r1".into(),
             parent_id: Some(turn_id.into()),
             role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("ok".into())),
             status: Some(NodeStatus::Completed),
             timestamp: Some(2),
@@ -273,7 +273,7 @@ fn orphan_tool_result_is_dropped() {
             id: "orphan-tool".into(),
             parent_id: Some(dead_tc_id.into()),
             role: Some(NodeRole::Tool),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("stale result".into())),
             status: Some(NodeStatus::Completed),
             timestamp: Some(3),
@@ -300,7 +300,7 @@ fn linked_tool_result_is_retained() {
             id: "u1".into(),
             parent_id: None,
             role: Some(NodeRole::User),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("read?".into())),
             status: Some(NodeStatus::Completed),
             timestamp: Some(1),
@@ -320,7 +320,7 @@ fn linked_tool_result_is_retained() {
             id: "r1".into(),
             parent_id: Some(turn_id.into()),
             role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("let me read".into())),
             status: Some(NodeStatus::Completed),
             timestamp: Some(2),
@@ -341,7 +341,7 @@ fn linked_tool_result_is_retained() {
             id: "res1".into(),
             parent_id: Some(tc_id.into()),
             role: Some(NodeRole::Tool),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("file content".into())),
             status: Some(NodeStatus::Completed),
             timestamp: Some(3),
@@ -364,7 +364,7 @@ fn empty_assistant_turn_is_dropped() {
             id: "u1".into(),
             parent_id: None,
             role: Some(NodeRole::User),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("hi".into())),
             status: Some(NodeStatus::Completed),
             timestamp: Some(1),
@@ -451,7 +451,7 @@ fn failed_turn_visible_with_interrupt_note() {
             id: "u1".into(),
             parent_id: None,
             role: Some(NodeRole::User),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("讲讲并发".into())),
             status: Some(NodeStatus::Completed),
             timestamp: Some(1),
@@ -472,7 +472,7 @@ fn failed_turn_visible_with_interrupt_note() {
             id: "turn-x-text".into(),
             parent_id: Some("turn-x".into()),
             role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("Go 的 channel 是…".into())),
             status: Some(NodeStatus::Completed),
             timestamp: Some(2),
@@ -482,7 +482,7 @@ fn failed_turn_visible_with_interrupt_note() {
             id: "u2".into(),
             parent_id: None,
             role: Some(NodeRole::User),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("换个思路".into())),
             status: Some(NodeStatus::Completed),
             timestamp: Some(3),
@@ -514,7 +514,7 @@ fn failed_turn_without_children_survives_with_note() {
             id: "u1".into(),
             parent_id: None,
             role: Some(NodeRole::User),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("hi".into())),
             status: Some(NodeStatus::Completed),
             timestamp: Some(1),
@@ -548,7 +548,7 @@ fn interrupted_tool_call_gets_placeholder_result() {
             id: "u1".into(),
             parent_id: None,
             role: Some(NodeRole::User),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("跑下测试".into())),
             status: Some(NodeStatus::Completed),
             timestamp: Some(1),
@@ -630,7 +630,7 @@ fn failed_tool_result_sets_success_false() {
                 id: res_id.into(),
                 parent_id: Some(tc_id.into()),
                 role: Some(NodeRole::Tool),
-                msg_type: Some(NodeKind::Text),
+                msg_type: Some(NodeKind::Body),
                 content: Some(MessageContent::Text("result".into())),
                 status: Some(if failed {
                     NodeStatus::Failed
@@ -675,7 +675,7 @@ fn compression_nodes_are_excluded_from_request_view() {
         ChatNode {
             id: "u1".into(),
             role: Some(NodeRole::User),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("问题".into())),
             ..Default::default()
         },
@@ -708,14 +708,14 @@ fn nodes_marked_exclude_from_context_are_dropped() {
         ChatNode {
             id: "u1".into(),
             role: Some(NodeRole::User),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("读一下 README".into())),
             ..Default::default()
         },
         ChatNode {
             id: "f1".into(),
             role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("好的，我去看看。".into())),
             status: Some(NodeStatus::Completed),
             meta: Some(serde_json::json!({ "surface": "reply", "exclude_from_context": true })),
@@ -736,14 +736,14 @@ fn unmarked_meta_nodes_still_enter_the_request_view() {
         ChatNode {
             id: "u1".into(),
             role: Some(NodeRole::User),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("读一下 README".into())),
             ..Default::default()
         },
         ChatNode {
             id: "f1".into(),
             role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("好的，我去看看。".into())),
             status: Some(NodeStatus::Completed),
             meta: Some(serde_json::json!({ "surface": "reply" })),
@@ -752,7 +752,7 @@ fn unmarked_meta_nodes_still_enter_the_request_view() {
         ChatNode {
             id: "f2".into(),
             role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("显式 false 也不剔除".into())),
             status: Some(NodeStatus::Completed),
             meta: Some(serde_json::json!({ "exclude_from_context": false })),

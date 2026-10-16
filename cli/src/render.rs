@@ -30,10 +30,22 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 
-use symbio::symbio_core::chat_node::{
-    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind,
-};
+use symbio::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole, NodeStatus};
 use symbio::symbio_core::VDFS_STATUS_WORKING;
+
+/// 本终端认识的**呈现面**——由 [`ChatNode`] 谓词折出来，而不是直接读 `msg_type` 变体名。
+///
+/// 为什么要这一层：`NodeKind` 正处于双形态共存档期（旧六值 ↔ 新形态 + `meta.style_tag`，
+/// [T-147c-ii]），变体名会随写方迁移而删；谓词两形态都认，折一次就与协议形状解耦了。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Surface {
+    /// 正文（`msg_type` 缺省也按正文处理——早期增量还没带类型）
+    Text,
+    Reasoning,
+    ToolCall,
+    /// 组合骨架 / 交互卡 / 系统提示：本终端无正文可渲染
+    Silent,
+}
 
 fn write_stdout(s: &str) {
     let mut out = io::stdout().lock();
@@ -120,7 +132,7 @@ impl Renderer {
         }
 
         let mut rewritten_to = None;
-        let (delta, mtype, role, failed, error, name, progress) = {
+        let (delta, surface, role, failed, error, name, progress) = {
             let merged = self.msgs.entry(message.id.clone()).or_default();
             // 身份字段：有则覆盖（首帧建立身份；重复携带以最后到达为准）。
             if message.parent_id.is_some() {
@@ -178,9 +190,18 @@ impl Renderer {
             }
             // 开场白 / 进度播报的判定见 [`is_progress_surface`]，回显去向见 [`Self::render`]。
             let progress = is_progress_surface(merged.meta.as_ref());
+            let surface = if merged.msg_type.is_none() || merged.is_text() {
+                Surface::Text
+            } else if merged.is_reasoning() {
+                Surface::Reasoning
+            } else if merged.is_tool_call() {
+                Surface::ToolCall
+            } else {
+                Surface::Silent
+            };
             (
                 delta,
-                merged.msg_type.clone().unwrap_or_default(),
+                surface,
                 merged.role.clone(),
                 merged.status == Some(NodeStatus::Failed),
                 merged.error.clone(),
@@ -194,7 +215,7 @@ impl Renderer {
         // （同一个节点 id 换类型）——按增量算它是「无新增」，于是永远打不出来：
         // reasoning 模型「只思考不作答」的那一轮，CLI 什么都不输出还以失败退出，
         // 而模型明明答了（落库与网格重建里那段就是正文）。
-        let tail = if mtype == NodeKind::Text {
+        let tail = if surface == Surface::Text {
             self.msgs
                 .get(&message.id)
                 .and_then(|m| m.content.as_ref())
@@ -206,7 +227,7 @@ impl Renderer {
         } else {
             delta.clone()
         };
-        if self.render(&message.id, mtype, role, &delta, &tail, name, progress) {
+        if self.render(&message.id, surface, role, &delta, &tail, name, progress) {
             *self.printed.entry(message.id.clone()).or_insert(0) += tail.chars().count();
         }
         if let Some(next) = rewritten_to {
@@ -218,22 +239,22 @@ impl Renderer {
         self.announce_failure(&message.id, failed, error);
     }
 
-    /// 正文与工具播报的统一呈现：按 `msg_type` / `role` 决定回显什么。
+    /// 正文与工具播报的统一呈现：按 [`Surface`] / `role` 决定回显什么。
     ///
     /// 失败提示不在这一层——那是消息级终态的一部分，与"正文是否该回显"没有
     /// 共同依据，见 [`Self::announce_failure`]。
     fn render(
         &mut self,
         id: &str,
-        mtype: NodeKind,
+        surface: Surface,
         role: Option<NodeRole>,
         delta: &str,
         tail: &str,
         name: Option<String>,
         progress: bool,
     ) -> bool {
-        match mtype {
-            NodeKind::Text => {
+        match surface {
+            Surface::Text => {
                 // 只回显模型正文：用户消息由 CLI 自己输出，工具结果文本不回显
                 // （role 尚未到达的早期增量按"助手"处理，避免漏字）。
                 let suppress = matches!(
@@ -262,12 +283,12 @@ impl Renderer {
                 }
                 false
             }
-            NodeKind::Reasoning if self.verbose && !delta.is_empty() && !self.quiet => {
+            Surface::Reasoning if self.verbose && !delta.is_empty() && !self.quiet => {
                 // 推理内容走 stderr，避免污染 stdout 的正文流
                 write_stderr(&format!("\x1b[2m{delta}\x1b[0m"));
                 false
             }
-            NodeKind::ToolCall if self.tools_announced.insert(id.to_string()) => {
+            Surface::ToolCall if self.tools_announced.insert(id.to_string()) => {
                 let name = name.unwrap_or_else(|| "tool".to_string());
                 if !self.quiet {
                     if self.wrote_text {
@@ -278,7 +299,7 @@ impl Renderer {
                 }
                 false
             }
-            // Turn（组合节点）/ UserPrompt（需审批的交互卡）：无正文可渲染。
+            // 骨架（一整轮 / 一次工具调用）、交互卡、系统提示：无正文可渲染。
             _ => false,
         }
     }

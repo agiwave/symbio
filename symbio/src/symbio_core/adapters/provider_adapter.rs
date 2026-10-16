@@ -19,7 +19,8 @@ use async_trait::async_trait;
 
 use super::{AdapterError, DeltaSink, FullModel, LlmAdapter, LlmTurn, SilentDeltas};
 use crate::symbio_core::schemas::session::chat_node::{
-    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus,
+    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_RUN,
+    CHAT_STYLE_TAG_TOOL,
 };
 use crate::symbio_core::CapabilityMeta;
 use crate::symbio_core::ExecAbortSignal;
@@ -30,7 +31,7 @@ use crate::symbio_core::{llm_short_id, ExecTranscriptWriter, ModelProvider, Plug
 
 /// 流式帧桥：把 `execute_turn` 的转写帧**择要**转成增量——三条出口各管一类：
 /// - **正文 / 推理**（[`DeltaSink::on_delta`] / [`DeltaSink::on_reasoning`]）：
-///   快照帧（`msg_type = Text | Reasoning` 且 `status = Streaming`）登记节点 id
+///   快照帧（[`ChatNode::is_text`] / [`ChatNode::is_reasoning`] 且 `status = Streaming`）登记节点 id
 ///   并全文转发（首片即完整快照）；窄帧（`delta`）只有**已登记的**节点才转发，
 ///   按 id 落到它所属的那条流。
 /// - **工具调用**（[`DeltaSink::on_tool_frame`]）：**消息形状原样转发**，不登记、
@@ -54,9 +55,9 @@ struct DeltaBridge {
     nodes: std::sync::Mutex<std::collections::HashMap<String, TextStream>>,
 }
 
-/// 窄帧归属只有两种流（正文 / 推理）。[T-147c-ii] 起 `NodeKind::Text` 与
-/// `NodeKind::Reasoning` 收敛成同一个 `Body` 形态（靠 `meta.style_tag` 区分），
-/// 表里存 `NodeKind` 将表达不了这个判别——私有二值枚举把判据与 wire 词脱钩。
+/// 窄帧归属只有两种流（正文 / 推理）。正文与推理同属 `Body` 形态、靠
+/// `meta.style_tag` 区分，表里存 `NodeKind` 表达不了这个判别——私有二值枚举把
+/// 判据与 wire 词脱钩。
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TextStream {
     Body,
@@ -250,8 +251,8 @@ impl LlmAdapter for ProviderLlmAdapter {
         // ## 工具轮为什么不是「一条 assistant + 一条 tool」就够
         //
         // `ModelProvider` 侧把消息按**树**展平（`message_builder::flatten_chat_messages`）：
-        // 工具调用是 `ToolCall` **子节点**（参数在它自己的 `content` 里、工具名在
-        // `name`），工具结果是它的 `Text(Tool)` **子节点**。展平末尾还有一道清洗：
+        // 工具调用是**骨架（`Skeleton` + tag `tool`）子节点**（参数在它自己的 `content` 里、
+        // 工具名在 `name`），工具结果是它的 `Body(Tool)` **子节点**。展平末尾还有一道清洗：
         // **丢弃「无对应 tool_call 的 tool 结果」**——provider 要求 `role: tool` 的
         // `tool_call_id` 必须匹配前文某条 assistant 的 `tool_calls`。
         //
@@ -273,7 +274,7 @@ impl LlmAdapter for ProviderLlmAdapter {
         //
         // ## 为什么要在 adapter 收口，而不是改协议
         //
-        // 协议展平时对每个 ToolCall 节点只找**一条**结果（
+        // 协议展平时对每个工具调用骨架只找**一条**结果（
         // `message_builder::find_tool_result` 返回 `Option`），于是同一次调用的多条结果里
         // 只有第一条会到模型：等待轮落「等用户」的契约说明、恢复轮落回填后的答案，
         // 模型只看到前者 —— t27 报「恢复轮请求应带上恢复结果」。
@@ -325,30 +326,34 @@ impl LlmAdapter for ProviderLlmAdapter {
                 continue;
             }
             match (&m.role[..], &m.tool_calls) {
-                // ── assistant 且带调用声明 → 造「Turn 根 + ToolCall 子节点」────
+                // ── assistant 且带调用声明 → 造「骨架（run）根 + 骨架（tool）子节点」──
                 ("assistant", Some(calls)) if !calls.is_empty() => {
                     let root_id = llm_short_id();
-                    let mut root = ChatNode {
+                    let root = ChatNode {
                         id: root_id.clone(),
                         role: Some(NodeRole::Assistant),
+                        msg_type: Some(NodeKind::Skeleton),
                         content: Some(MessageContent::Text(m.text.clone())),
                         ..Default::default()
-                    };
-                    root.msg_type = Some(NodeKind::Turn);
+                    }
+                    .with_style_tag(CHAT_STYLE_TAG_RUN);
                     let mut nodes: Vec<ChatNode> = vec![root];
                     for c in calls {
-                        nodes.push(ChatNode {
-                            id: llm_short_id(),
-                            parent_id: Some(root_id.clone()),
-                            role: Some(NodeRole::Assistant),
-                            msg_type: Some(NodeKind::ToolCall),
-                            name: Some(c.name.clone()),
-                            // 参数走 content（展平时从这里 re-parse）——规范化
-                            // 口径是 `tc.arguments.to_string()`。
-                            content: Some(MessageContent::Text(c.arguments.to_string())),
-                            tool_call_id: Some(c.id.clone()),
-                            ..Default::default()
-                        });
+                        nodes.push(
+                            ChatNode {
+                                id: llm_short_id(),
+                                parent_id: Some(root_id.clone()),
+                                role: Some(NodeRole::Assistant),
+                                msg_type: Some(NodeKind::Skeleton),
+                                name: Some(c.name.clone()),
+                                // 参数走 content（展平时从这里 re-parse）——规范化
+                                // 口径是 `tc.arguments.to_string()`。
+                                content: Some(MessageContent::Text(c.arguments.to_string())),
+                                tool_call_id: Some(c.id.clone()),
+                                ..Default::default()
+                            }
+                            .with_style_tag(CHAT_STYLE_TAG_TOOL),
+                        );
                     }
                     // 结果挂到**对应的 ToolCall 节点**下（按 id 配对）。
                     //
@@ -381,7 +386,7 @@ impl LlmAdapter for ProviderLlmAdapter {
                                 .find(|n| n.tool_call_id == r.tool_call_id)
                                 .map(|n| n.id.clone()),
                             role: Some(NodeRole::Tool),
-                            msg_type: Some(NodeKind::Text),
+                            msg_type: Some(NodeKind::Body),
                             content: Some(MessageContent::Text(r.text.clone())),
                             tool_call_id: r.tool_call_id.clone(),
                             ..Default::default()

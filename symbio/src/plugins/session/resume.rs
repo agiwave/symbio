@@ -362,7 +362,7 @@ async fn process_tool_resume_action(
         id: new_child_id.clone(),
         parent_id: Some(req.target_id.clone()),
         role: Some(NodeRole::Tool),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(final_result_text.clone())),
         status: Some(if final_success {
             NodeStatus::Completed

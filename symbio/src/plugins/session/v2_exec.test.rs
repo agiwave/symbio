@@ -355,22 +355,25 @@ impl ModelProvider for FaithfulProvider {
                 // 真实链路的半截形态：推理快照帧 + 正文快照帧先行（首片即快照），
                 // 生成被中止在半句话上——帧进桥的累积，收束与出口按累积取半截。
                 env.sink()
-                    .emit(cm::ChatNode {
-                        id: "n-rea".into(),
-                        parent_id: Some("r-1".into()),
-                        role: Some(cm::NodeRole::Assistant),
-                        msg_type: Some(cm::NodeKind::Reasoning),
-                        content: Some(cm::MessageContent::Text("这个名词需要先定义。".into())),
-                        status: Some(cm::NodeStatus::Streaming),
-                        ..Default::default()
-                    })
+                    .emit(
+                        cm::ChatNode {
+                            id: "n-rea".into(),
+                            parent_id: Some("r-1".into()),
+                            role: Some(cm::NodeRole::Assistant),
+                            msg_type: Some(cm::NodeKind::Body),
+                            content: Some(cm::MessageContent::Text("这个名词需要先定义。".into())),
+                            status: Some(cm::NodeStatus::Streaming),
+                            ..Default::default()
+                        }
+                        .with_style_tag(cm::CHAT_STYLE_TAG_REASONING),
+                    )
                     .await;
                 env.sink()
                     .emit(cm::ChatNode {
                         id: "n-half".into(),
                         parent_id: Some("r-1".into()),
                         role: Some(cm::NodeRole::Assistant),
-                        msg_type: Some(cm::NodeKind::Text),
+                        msg_type: Some(cm::NodeKind::Body),
                         content: Some(cm::MessageContent::Text("让我想想这个名词".into())),
                         status: Some(cm::NodeStatus::Streaming),
                         ..Default::default()
@@ -390,7 +393,7 @@ impl ModelProvider for FaithfulProvider {
                             id: "n-tool".into(),
                             parent_id: Some("r-1".into()),
                             role: Some(cm::NodeRole::Assistant),
-                            msg_type: Some(cm::NodeKind::Text),
+                            msg_type: Some(cm::NodeKind::Body),
                             content: Some(cm::MessageContent::Text("我先查一下。".into())),
                             status: Some(cm::NodeStatus::Streaming),
                             ..Default::default()
@@ -418,7 +421,7 @@ impl ModelProvider for FaithfulProvider {
                             id: "n-agent".into(),
                             parent_id: Some("r-1".into()),
                             role: Some(cm::NodeRole::Assistant),
-                            msg_type: Some(cm::NodeKind::Text),
+                            msg_type: Some(cm::NodeKind::Body),
                             content: Some(cm::MessageContent::Text("我来委托。".into())),
                             status: Some(cm::NodeStatus::Streaming),
                             ..Default::default()
@@ -449,7 +452,7 @@ impl ModelProvider for FaithfulProvider {
                 id: "n-1".into(),
                 parent_id: Some("r-1".into()),
                 role: Some(cm::NodeRole::Assistant),
-                msg_type: Some(cm::NodeKind::Text),
+                msg_type: Some(cm::NodeKind::Body),
                 content: Some(cm::MessageContent::Text("秋".into())),
                 status: Some(cm::NodeStatus::Streaming),
                 ..Default::default()
@@ -669,9 +672,7 @@ async fn aborted_half_sentence_survives_in_partial_and_grid() {
         "半截正文与半截思考都要在（正文节点在前）：{partial:?}"
     );
     assert!(
-        partial
-            .iter()
-            .any(|m| m.msg_type == Some(cm::NodeKind::Reasoning)),
+        partial.iter().any(|m| m.is_reasoning()),
         "推理单独成节点（不是拼进正文）：{partial:?}"
     );
 
@@ -806,11 +807,12 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         "正文 + 工具调用 + 工具结果：{:?}",
         res.messages
     );
-    assert_eq!(res.messages[0].msg_type, Some(cm::NodeKind::Text));
+    assert_eq!(res.messages[0].msg_type, Some(cm::NodeKind::Body));
     assert_eq!(res.messages[0].status, Some(cm::NodeStatus::Completed));
     assert_eq!(res.messages[0].parent_id.as_deref(), Some("r-1"));
     let call = &res.messages[1];
-    assert_eq!(call.msg_type, Some(cm::NodeKind::ToolCall));
+    assert_eq!(call.msg_type, Some(cm::NodeKind::Skeleton));
+    assert_eq!(call.style_tag(), Some(cm::CHAT_STYLE_TAG_TOOL));
     assert_eq!(call.id, "tc-1", "工具节点 id 取 provider 给的节点 id");
     assert_eq!(
         call.tool_call_id.as_deref(),
@@ -825,9 +827,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
     let got = frames.0.lock().unwrap();
     let text_frames: Vec<_> = got
         .iter()
-        .filter(|m| {
-            m.msg_type == Some(cm::NodeKind::Text) && m.role == Some(cm::NodeRole::Assistant)
-        })
+        .filter(|m| m.is_text() && m.role == Some(cm::NodeRole::Assistant))
         .collect();
     assert!(
         text_frames
@@ -836,8 +836,7 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         "中途正文必须被定格：{got:?}"
     );
     assert!(
-        got.iter()
-            .any(|m| m.msg_type == Some(cm::NodeKind::ToolCall) && m.id == "tc-1"),
+        got.iter().any(|m| m.is_tool_call() && m.id == "tc-1"),
         "工具调用节点必须广播给前端：{got:?}"
     );
     assert!(
@@ -1678,7 +1677,7 @@ fn consolidated(ids: &[&str]) -> Vec<cm::ChatNode> {
         .map(|id| cm::ChatNode {
             id: (*id).to_string(),
             role: Some(cm::NodeRole::User),
-            msg_type: Some(cm::NodeKind::Text),
+            msg_type: Some(cm::NodeKind::Body),
             content: Some(cm::MessageContent::Text(format!(
                 "[CONTEXT SNAPSHOT]\n{id}"
             ))),

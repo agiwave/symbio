@@ -48,7 +48,7 @@ fn transcript() -> Vec<ChatNode> {
         msg(
             "t1",
             NodeRole::Assistant,
-            Some(NodeKind::Text),
+            Some(NodeKind::Body),
             Some("turn1"),
             "文件已读完",
         ),
@@ -62,14 +62,14 @@ fn transcript() -> Vec<ChatNode> {
         msg(
             "tr1",
             NodeRole::Tool,
-            Some(NodeKind::Text),
+            Some(NodeKind::Body),
             Some("tc1"),
             "# Symbio\n很长的文件正文……",
         ),
         msg(
             "f1",
             NodeRole::Assistant,
-            Some(NodeKind::Text),
+            Some(NodeKind::Body),
             None,
             "好的，我去看一下。",
         ),
@@ -83,7 +83,7 @@ fn transcript() -> Vec<ChatNode> {
         msg(
             "s1",
             NodeRole::System,
-            Some(NodeKind::Text),
+            Some(NodeKind::Body),
             None,
             "系统注入的框架文本",
         ),

@@ -337,7 +337,7 @@ async fn compress_snapshot_inner(
         let retry_msg = ChatNode {
             id: llm_short_id(),
             role: Some(NodeRole::User),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text(
                 "Your previous compose did not contain a valid <state_snapshot> XML block. \
                  Compose again with ONLY the <state_snapshot> block, following the requested structure."
@@ -423,7 +423,7 @@ async fn compress_snapshot_inner(
         id: root_id.to_string(),
         // 快照作为压缩后的首条消息，必须是 user 角色（多数 provider 要求对话以 user 开头）
         role: Some(NodeRole::User),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(format!(
             "[CONTEXT SNAPSHOT — 压缩的历史记忆，基于它继续任务]\n{snapshot_display}"
         ))),
@@ -1075,7 +1075,7 @@ async fn run_compression_llm(
     Ok(ChatNode {
         id: root_id.to_string(),
         role: Some(crate::symbio_core::chat_node::NodeRole::Assistant),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(effective)),
         status: Some(NodeStatus::Completed),
         ..Default::default()

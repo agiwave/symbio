@@ -51,11 +51,7 @@ fn make_ctx(
 }
 
 /// 断言一组帧全是「按编排层 id 写的流式帧」。
-fn assert_all_snapshots_use_orchestrator_ids(
-    ops: &[ChatNode],
-    msg_id: &str,
-    tool_call_id: &str,
-) {
+fn assert_all_snapshots_use_orchestrator_ids(ops: &[ChatNode], msg_id: &str, tool_call_id: &str) {
     for message in ops {
         assert_eq!(message.id, msg_id, "帧 id 必须是编排层预留的结果节点 id");
         assert_eq!(message.parent_id.as_deref(), Some(tool_call_id));

@@ -74,7 +74,7 @@ fn merge_many(items: &[InboxItem]) -> cm::ChatNode {
         id: items[0].id.clone(),
         parent_id: None,
         role: Some(cm::NodeRole::User),
-        msg_type: Some(cm::NodeKind::Text),
+        msg_type: Some(cm::NodeKind::Body),
         content: Some(merge_content(items)),
         status: Some(cm::NodeStatus::Completed),
         meta: Some(serde_json::json!({

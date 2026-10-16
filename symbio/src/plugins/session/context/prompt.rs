@@ -179,7 +179,7 @@ fn compression_instruction(hints: Option<&str>) -> ChatNode {
     ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
         role: Some(NodeRole::User),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         // 措辞刻意**不提** `<state_snapshot>` 标签名：结构定义只在 system 侧出现
         // 一次。在对话里重复格式指令会诱导模型模仿模板而非按 system 输出。
         content: Some(MessageContent::Text(format!(

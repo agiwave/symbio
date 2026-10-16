@@ -11,7 +11,7 @@ fn user_msg(text: &str) -> ChatNode {
     ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
         role: Some(NodeRole::User),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()
     }
@@ -21,7 +21,7 @@ fn assistant_msg(text: &str) -> ChatNode {
     ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()
     }
@@ -42,7 +42,7 @@ fn tool_result_msg() -> ChatNode {
     ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
         role: Some(NodeRole::Tool),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text("file content".to_string())),
         ..Default::default()
     }

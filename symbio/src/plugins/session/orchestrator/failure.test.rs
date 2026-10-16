@@ -77,7 +77,7 @@ fn node(id: &str, parent: Option<&str>, status: cm::NodeStatus) -> cm::ChatNode 
         id: id.into(),
         parent_id: parent.map(|p| p.into()),
         role: Some(cm::NodeRole::Assistant),
-        msg_type: Some(cm::NodeKind::Text),
+        msg_type: Some(cm::NodeKind::Body),
         status: Some(status),
         ..Default::default()
     }
@@ -300,11 +300,7 @@ async fn persist_failure_merges_partial_output() {
     let mut reason = node("reason-p", Some("turn-p"), cm::NodeStatus::Completed);
     reason.msg_type = Some(cm::NodeKind::Reasoning);
     reason.content = Some(cm::MessageContent::Text("半截思考".into()));
-    let orphan = node(
-        "orphan-p",
-        Some("ghost-parent"),
-        cm::NodeStatus::Completed,
-    );
+    let orphan = node("orphan-p", Some("ghost-parent"), cm::NodeStatus::Completed);
 
     p.persist_failure(
         sid,

@@ -11,7 +11,7 @@
 //! 4. 载荷没记身份的格子**合成 id 必须稳定**（否则每次重开都多一批新节点）。
 
 use super::rebuild;
-use crate::symbio_core::chat_node::{MessageContent, NodeRole, NodeStatus, NodeKind};
+use crate::symbio_core::chat_node::{MessageContent, NodeKind, NodeRole, NodeStatus};
 use crate::symbio_core::{Entity, Event, Verb};
 use crate::symbio_core::{
     EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
@@ -20,21 +20,62 @@ use crate::symbio_core::{
 
 /// 一条事件的**可断言摘要**——`ChatNode` 没有 `PartialEq`（它是增量帧的形状，
 /// 逐字段比较才有意义），所以判据比的是这四件套 + 正文 + 状态。
+///
+/// 类型这一格比的是**语义形状**（[`NodeForm`]），不是 `msg_type` 变体名：形状由
+/// 「形态 + `meta.style_tag`」两半共同决定，只比变体名会把「骨架没带 tag」这种
+/// 半截迁移判成通过。
 #[derive(Debug, PartialEq)]
 struct Shape {
     id: String,
     parent: Option<String>,
-    ty: Option<NodeKind>,
+    ty: NodeForm,
     role: Option<NodeRole>,
     text: String,
     status: Option<NodeStatus>,
+}
+
+/// 节点形状的可断言标签：判据全部走 [`ChatNode`] 谓词（两种 wire 形态都认）。
+#[derive(Debug, PartialEq, Eq)]
+enum NodeForm {
+    /// 正文
+    Body,
+    /// 推理正文
+    Reasoning,
+    /// 骨架：一整轮响应
+    Run,
+    /// 骨架：一次工具调用
+    Tool,
+    /// 等待用户回应
+    Interaction,
+    /// 系统提示（压缩记录）
+    Notice,
+    /// 谓词都不命中（含未标类型）
+    Other,
+}
+
+fn form_of(m: &crate::symbio_core::chat_node::ChatNode) -> NodeForm {
+    if m.is_reasoning() {
+        NodeForm::Reasoning
+    } else if m.is_text() {
+        NodeForm::Body
+    } else if m.is_run() {
+        NodeForm::Run
+    } else if m.is_tool_call() {
+        NodeForm::Tool
+    } else if m.is_interaction() {
+        NodeForm::Interaction
+    } else if m.is_compression() {
+        NodeForm::Notice
+    } else {
+        NodeForm::Other
+    }
 }
 
 fn shape(m: &crate::symbio_core::chat_node::ChatNode) -> Shape {
     Shape {
         id: m.id.clone(),
         parent: m.parent_id.clone(),
-        ty: m.msg_type.clone(),
+        ty: form_of(m),
         role: m.role.clone(),
         text: m.content.as_ref().map(|c| c.to_text()).unwrap_or_default(),
         status: m.status.clone(),
@@ -99,7 +140,7 @@ fn final_builds_turn_root_with_reasoning_and_text_children() {
             Shape {
                 id: "u-node".into(),
                 parent: None,
-                ty: Some(NodeKind::Text),
+                ty: NodeForm::Body,
                 role: Some(NodeRole::User),
                 text: "问 A".into(),
                 // 落库的用户消息**没有** status（调用方 `..Default::default()`）——
@@ -109,7 +150,7 @@ fn final_builds_turn_root_with_reasoning_and_text_children() {
             Shape {
                 id: "T1".into(),
                 parent: None,
-                ty: Some(NodeKind::Turn),
+                ty: NodeForm::Run,
                 role: Some(NodeRole::Assistant),
                 text: String::new(),
                 status: Some(NodeStatus::Completed),
@@ -117,7 +158,7 @@ fn final_builds_turn_root_with_reasoning_and_text_children() {
             Shape {
                 id: "T1-reason".into(),
                 parent: Some("T1".into()),
-                ty: Some(NodeKind::Reasoning),
+                ty: NodeForm::Reasoning,
                 role: Some(NodeRole::Assistant),
                 text: "想了一下".into(),
                 status: Some(NodeStatus::Completed),
@@ -125,7 +166,7 @@ fn final_builds_turn_root_with_reasoning_and_text_children() {
             Shape {
                 id: "T1-text".into(),
                 parent: Some("T1".into()),
-                ty: Some(NodeKind::Text),
+                ty: NodeForm::Body,
                 role: Some(NodeRole::Assistant),
                 text: "答 A".into(),
                 status: Some(NodeStatus::Completed),
@@ -152,7 +193,7 @@ fn reasoning_only_does_not_duplicate_the_paragraph() {
     let got = shapes(&rebuild(&events));
     assert_eq!(got.len(), 3, "user + Turn + 一条 Text，实得 {got:?}");
     assert_eq!(got[2].id, "T1-reason", "reasoning-only 时复用推理子节点 id");
-    assert_eq!(got[2].ty, Some(NodeKind::Text));
+    assert_eq!(got[2].ty, NodeForm::Body);
 }
 
 /// 兜底格的 `why`（失败原因）必须折回 Turn 节点的 `error`。
@@ -196,7 +237,7 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
         .iter()
         .find(|m| m.id == "T1")
         .expect("Turn 根在重建结果里");
-    assert_eq!(turn.msg_type, Some(NodeKind::Turn));
+    assert_eq!(form_of(turn), NodeForm::Run);
     assert_eq!(turn.status, Some(NodeStatus::Failed));
     assert_eq!(
         turn.error.as_deref(),
@@ -207,13 +248,13 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
     let shapes = shapes(&got);
     let reasoning: Vec<&Shape> = shapes
         .iter()
-        .filter(|s| s.ty == Some(NodeKind::Reasoning))
+        .filter(|s| s.ty == NodeForm::Reasoning)
         .collect();
     assert_eq!(reasoning.len(), 2, "两轮中途思考各一个节点：{shapes:?}");
     assert!(
         !shapes
             .iter()
-            .any(|s| s.ty == Some(NodeKind::Text) && s.id != "u-node"),
+            .any(|s| s.ty == NodeForm::Body && s.id != "u-node"),
         "空正文不该长出正文节点：{shapes:?}"
     );
 }
@@ -271,7 +312,7 @@ fn round_output_rides_the_artifact_cell_and_lands_before_its_tool_card() {
         "收束格 `rounds[]` 的同 id 副本不建第二份"
     );
     assert_eq!(got[reasoning].parent, Some("T1".into()));
-    assert_eq!(got[reasoning].ty, Some(NodeKind::Reasoning));
+    assert_eq!(got[reasoning].ty, NodeForm::Reasoning);
     // 第二格没有 `round`（同一轮只挂第一格）⇒ 一个节点都不多发。
     let c1 = at("c1").expect("第二张卡在");
     assert_eq!(
@@ -312,7 +353,7 @@ fn artifact_builds_call_and_result_under_the_call() {
     // 调用卡：ToolCall，挂在 Turn 根下，正文是**已定稿的参数文本**
     assert_eq!(got[1].id, "T-016");
     assert_eq!(got[1].parent, Some("T1".into()));
-    assert_eq!(got[1].ty, Some(NodeKind::ToolCall));
+    assert_eq!(got[1].ty, NodeForm::Tool);
     assert_eq!(got[1].role, Some(NodeRole::Assistant));
     assert_eq!(got[1].text, "{\"path\":\"a.md\"}");
     // 结果卡：role=Tool，挂在**调用**下（不是 Turn 根）
@@ -445,12 +486,12 @@ fn final_with_dialog_rebuilds_reasoning_child_from_the_payload() {
     assert_eq!(shapes(&msgs).len(), 2, "答话节点 + 思考子节点");
     let reply = shape(&msgs[0]);
     assert_eq!(reply.id, "ans-node");
-    assert_eq!(reply.ty, Some(NodeKind::Text));
+    assert_eq!(reply.ty, NodeForm::Body);
     assert_eq!(reply.parent, None, "答话挂根级（对话线）");
     let reason = shape(&msgs[1]);
     assert_eq!(reason.id, "ans-reason", "id 由载荷给（与流式期同源）");
     assert_eq!(reason.parent.as_deref(), Some("ans-node"));
-    assert_eq!(reason.ty, Some(NodeKind::Reasoning));
+    assert_eq!(reason.ty, NodeForm::Reasoning);
     assert_eq!(reason.text, "想一想：直接从上下文总结。");
     assert_eq!(reason.status, Some(NodeStatus::Completed));
 }
@@ -472,7 +513,7 @@ fn final_with_dialog_without_reasoning_stays_single_node() {
 
     let msgs = rebuild(std::slice::from_ref(&ev));
     assert_eq!(shapes(&msgs).len(), 1, "没有思考事实就只有答话节点");
-    assert_eq!(shape(&msgs[0]).ty, Some(NodeKind::Text));
+    assert_eq!(shape(&msgs[0]).ty, NodeForm::Body);
 }
 
 /// 汇报格的形状复用写入侧的 `ReportDraft::to_message`（`dialog_node(text, "progress", true)`）
@@ -497,7 +538,7 @@ fn reported_mirrors_the_persisted_shape() {
     let m = &msgs[0];
     assert_eq!(m.id, "rp-1-0", "载荷缺 id ⇒ 合成 id 取事件 id");
     assert_eq!(m.role, Some(NodeRole::Assistant));
-    assert_eq!(m.msg_type, Some(NodeKind::Text));
+    assert_eq!(form_of(m), NodeForm::Body);
     assert_eq!(m.status, Some(NodeStatus::Completed));
     assert_eq!(m.timestamp, Some(3_000), "时间戳覆写为事件自身的 ts");
     let meta = m.meta.as_ref().expect("汇报必须带 meta");
@@ -578,7 +619,7 @@ fn an_edit_replaces_the_node_in_place() {
         edited_event(crate::symbio_core::chat_node::ChatNode {
             id: "u-node".into(),
             role: Some(NodeRole::User),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("改过的问题".into())),
             timestamp: Some(1_500),
             ..Default::default()
@@ -723,15 +764,11 @@ fn snapshot_event(msgs: Vec<crate::symbio_core::chat_node::ChatNode>) -> Event {
 }
 
 /// 快照列表里的一条普通文本节点。
-fn text_msg(
-    id: &str,
-    role: NodeRole,
-    text: &str,
-) -> crate::symbio_core::chat_node::ChatNode {
+fn text_msg(id: &str, role: NodeRole, text: &str) -> crate::symbio_core::chat_node::ChatNode {
     crate::symbio_core::chat_node::ChatNode {
         id: id.into(),
         role: Some(role),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.into())),
         ..Default::default()
     }
@@ -853,10 +890,7 @@ fn seq_is_renumbered_monotonically_across_the_snapshot_boundary() {
     snap_msg.seq = Some(9_999); // 存储层的号：重建必须无视它
     let events = vec![
         user_event("u-old", "被压掉的问题"),
-        snapshot_event(vec![
-            snap_msg,
-            text_msg("u-keep", NodeRole::User, "保留"),
-        ]),
+        snapshot_event(vec![snap_msg, text_msg("u-keep", NodeRole::User, "保留")]),
         user_event("u-new", "压缩之后"),
     ];
     let got = rebuild(&events);
@@ -893,7 +927,7 @@ fn an_added_event_births_the_payload_nodes_verbatim() {
     let record = crate::symbio_core::chat_node::ChatNode {
         id: "compact-record".into(),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text("〔本轮已压缩〕".into())),
         // 故意**不带** status：重建不得替它补（补了就是两个身份）。
         ..Default::default()
@@ -916,7 +950,7 @@ fn a_second_birth_for_a_known_id_does_not_duplicate() {
     let record = crate::symbio_core::chat_node::ChatNode {
         id: "u-node".into(),
         role: Some(NodeRole::User),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text("重复出生".into())),
         ..Default::default()
     };

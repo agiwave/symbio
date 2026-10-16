@@ -30,7 +30,8 @@
 //! 由本文件的测试锁定（见 `message_build.test.rs` 里的用例 A / A2 / B / C / D）。
 
 use crate::symbio_core::chat_node::{
-    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind,
+    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_REASONING,
+    CHAT_STYLE_TAG_RUN, CHAT_STYLE_TAG_TOOL,
 };
 use crate::symbio_core::{llm_short_id, TurnOutput, TurnToolCallInfo};
 
@@ -83,22 +84,25 @@ pub fn llm_build_assistant_messages(
     let mut msgs = Vec::new();
     let timestamp = crate::symbio_core::clock_now_ms();
 
-    // ── Turn 消息（根级，与 User 互为兄弟）───────────────────────────────
-    msgs.push(ChatNode {
-        id: id.to_string(),
-        parent_id: None,
-        role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Turn),
-        content: None,
-        status: Some(NodeStatus::Completed),
-        timestamp: Some(timestamp),
-        ..Default::default()
-    });
+    // ── 骨架（一整轮响应）消息（根级，与 User 互为兄弟）───────────────────
+    msgs.push(
+        ChatNode {
+            id: id.to_string(),
+            parent_id: None,
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::Skeleton),
+            content: None,
+            status: Some(NodeStatus::Completed),
+            timestamp: Some(timestamp),
+            ..Default::default()
+        }
+        .with_style_tag(CHAT_STYLE_TAG_RUN),
+    );
 
-    // ── Reasoning 消息（parent_id=turn_id）──────────────────────────────
+    // ── 推理正文消息（parent_id=turn_id）──────────────────────────────
     // 仅当 reasoning 与回复正文为「不同内容」（即存在独立的文本回复）时才单独生成思考子节点。
     // reasoning-only 场景下 `reasoning` 已通过 `content`（effective_text 对「无文本回复」的回退）
-    // 承载于下方的 Text 子节点；若此处再生成 Reasoning 子节点，同一段内容会在存储层出现两份
+    // 承载于下方的正文子节点；若此处再生成推理子节点，同一段内容会在存储层出现两份
     // （factor=2：表现为历史会话里重复两份、流式期间"层层叠加"）。
     let reasoning_only = reasoning
         .as_ref()
@@ -106,23 +110,26 @@ pub fn llm_build_assistant_messages(
         .unwrap_or(false);
     if let Some(r) = reasoning {
         if !r.trim().is_empty() && !reasoning_only {
-            msgs.push(ChatNode {
-                id: child_ids.reasoning.clone().unwrap_or_else(llm_short_id),
-                parent_id: Some(id.to_string()),
-                role: Some(NodeRole::Assistant),
-                msg_type: Some(NodeKind::Reasoning),
-                content: Some(MessageContent::Text(r)),
-                status: Some(NodeStatus::Completed),
-                timestamp: Some(timestamp),
-                ..Default::default()
-            });
+            msgs.push(
+                ChatNode {
+                    id: child_ids.reasoning.clone().unwrap_or_else(llm_short_id),
+                    parent_id: Some(id.to_string()),
+                    role: Some(NodeRole::Assistant),
+                    msg_type: Some(NodeKind::Body),
+                    content: Some(MessageContent::Text(r)),
+                    status: Some(NodeStatus::Completed),
+                    timestamp: Some(timestamp),
+                    ..Default::default()
+                }
+                .with_style_tag(CHAT_STYLE_TAG_REASONING),
+            );
         }
     }
 
-    // ── Response 文本消息（parent_id=turn_id）───────────────────────────
+    // ── 回复正文消息（parent_id=turn_id）───────────────────────────────
     // 仅在存在非空白文本内容时添加，避免产生仅含 \n\n 的空节点
     if !content.trim().is_empty() {
-        // reasoning-only 场景下这块内容在流式层是以 Reasoning 子节点的形式存在的
+        // reasoning-only 场景下这块内容在流式层是以推理子节点的形式存在的
         // （`finalize_assistant_turn` 会把 `reasoning_child_id` 定稿），因此优先复用
         // reasoning 的流式 id，保证存储层与流式层的节点身份一致。
         let text_child_id = if reasoning_only {
@@ -147,7 +154,7 @@ pub fn llm_build_assistant_messages(
     msgs
 }
 
-/// 助手**正文**子节点（`msg_type = Text`，`parent_id = Turn 根`）。
+/// 助手**正文**子节点（`msg_type = Body`，`parent_id` 指向本轮骨架）。
 ///
 /// `id` 由调用方给定：流式期已广播的节点 id **必须复用**（见 [`TurnStreamChildIds`]），
 /// 否则同一段正文在存储层与流式层是两个身份。工具轮的中途正文也走本函数——分发方
@@ -162,7 +169,7 @@ pub fn llm_build_text_node(
         id,
         parent_id: Some(parent_id.to_string()),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(content.into())),
         status: Some(NodeStatus::Completed),
         timestamp: Some(crate::symbio_core::clock_now_ms()),
@@ -171,9 +178,9 @@ pub fn llm_build_text_node(
     }
 }
 
-/// 助手**工具调用**子节点组（`msg_type = ToolCall`，`parent_id = Turn 根`）。
+/// 助手**工具调用**子节点组（骨架 `Skeleton` + tag `tool`，`parent_id` 指向本轮骨架）。
 ///
-/// ToolCall 组合节点自身携带请求参数（`content` = JSON 文本），不设独立的请求子节点。
+/// 工具调用骨架（`Skeleton` + tag `tool`）自身携带请求参数（`content` = JSON 文本），不设独立的请求子节点。
 /// `id` 是节点 id（与流式帧一致），provider 的 wire id 存 `tool_call_id`。
 ///
 /// 单点定义：落库视图（[`llm_build_assistant_messages`]）与工具分发方
@@ -210,7 +217,7 @@ pub fn tool_call_args_text(tc: &TurnToolCallInfo) -> String {
     }
 }
 
-/// 助手**单个工具调用**子节点（`msg_type = ToolCall`，`parent_id = Turn 根`）。
+/// 助手**单个工具调用**子节点（骨架 `Skeleton` + tag `tool`，`parent_id` 指向本轮骨架）。
 ///
 /// `args_text` 是**已定稿的参数文本**（JSON 文本，或解析失败时的残破原文）——
 /// 重建引擎从事件载荷直接回放这段文本，不再经 `Value` 重序列化（键序一变，
@@ -226,7 +233,7 @@ pub fn llm_build_tool_call_node(
         id,
         parent_id: Some(parent_id.to_string()),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::ToolCall),
+        msg_type: Some(NodeKind::Skeleton),
         name,
         content: Some(MessageContent::Text(args_text)),
         status: Some(NodeStatus::Completed),
@@ -234,10 +241,11 @@ pub fn llm_build_tool_call_node(
         tool_call_id: wire_id,
         ..Default::default()
     }
+    .with_style_tag(CHAT_STYLE_TAG_TOOL)
 }
 
-/// 构造工具执行结果消息（role: Tool，msg_type: Text，parent_id 指向 tool_call）。
-/// 响应结果作为 `ToolCall` 的直接 `Text`(`Tool`) 子节点（组合节点可选，故不包 Turn）。
+/// 构造工具执行结果消息（role: Tool，`msg_type = Body`，parent_id 指向 tool_call）。
+/// 响应结果作为工具调用骨架的直接正文(`Tool`) 子节点（组合节点可选，故不包骨架）。
 ///
 /// **重要**：结果子节点的 `status` 必须与实际执行结果一致——
 /// 成功 `Completed`、失败 `Failed`。若失败结果被标成 `Completed`，
@@ -256,7 +264,7 @@ pub fn llm_build_tool_message(
         id: msg_id.unwrap_or_else(llm_short_id),
         parent_id: Some(tool_call_id.into()),
         role: Some(NodeRole::Tool),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(content.into())),
         status: Some(if success {
             NodeStatus::Completed

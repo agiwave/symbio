@@ -37,7 +37,7 @@ fn dialog_node_is_a_completed_assistant_text_node() {
     let node = dialog_node("你好，我在。", "greeting", false);
 
     assert_eq!(node.role, Some(NodeRole::Assistant));
-    assert_eq!(node.msg_type, Some(NodeKind::Text));
+    assert_eq!(node.msg_type, Some(NodeKind::Body));
     assert_eq!(node.status, Some(NodeStatus::Completed));
     assert_eq!(
         node.content.as_ref().map(|c| c.to_text()).as_deref(),
@@ -85,7 +85,7 @@ fn a_turn_child_text_is_on_the_conversation_line() {
     let child = ChatNode {
         parent_id: Some("turn-1".to_string()),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text("回复正文".to_string())),
         ..Default::default()
     };

@@ -6,9 +6,7 @@
 //! 这里不重复造一个假容器。
 
 use super::*;
-use crate::symbio_core::chat_node::{
-    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind,
-};
+use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus};
 use crate::symbio_core::EVENT_BUS_KIND_SYSTEM;
 
 const SID: &str = "chat-1";
@@ -24,7 +22,7 @@ fn assistant(id: &str, status: NodeStatus, content: &str) -> ChatNode {
     ChatNode {
         id: id.to_string(),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(content.to_string())),
         status: Some(status),
         ..Default::default()
@@ -113,7 +111,7 @@ fn full_frame_replaces_and_delta_appends() {
     acc.apply(ChatNode {
         id: "m1".into(),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         delta: Some("，世界".into()),
         status: Some(NodeStatus::Streaming),
         ..Default::default()
@@ -130,7 +128,7 @@ fn status_only_frame_does_not_clobber_text() {
     acc.apply(ChatNode {
         id: "m1".into(),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         status: Some(NodeStatus::Completed),
         ..Default::default()
     });
@@ -183,7 +181,7 @@ fn reasoning_and_user_messages_never_enter_the_reply() {
     acc.apply(ChatNode {
         id: "u1".into(),
         role: Some(NodeRole::User),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text("用户说的话".into())),
         status: Some(NodeStatus::Completed),
         ..Default::default()
@@ -199,7 +197,7 @@ fn delta_for_an_unknown_identity_still_accumulates() {
     acc.apply(ChatNode {
         id: "m1".into(),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         delta: Some("半截".into()),
         status: Some(NodeStatus::Streaming),
         ..Default::default()

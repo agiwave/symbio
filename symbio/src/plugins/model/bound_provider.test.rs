@@ -213,30 +213,35 @@ impl crate::symbio_core::DeltaSink for Collecting {
         self.reasoning.lock().unwrap().push(text.to_string());
     }
     fn on_tool_frame(&self, frame: &crate::symbio_core::chat_node::ChatNode) {
-        use crate::symbio_core::chat_node::{MessageContent, NodeKind};
+        use crate::symbio_core::chat_node::MessageContent;
         let text = match &frame.content {
             Some(MessageContent::Text(t)) => t.clone(),
             _ => String::new(),
         };
-        let rec = match (&frame.delta, &frame.msg_type) {
-            (Some(d), _) => ToolFrameRec {
+        // 身份帧的判据用谓词（`is_tool_call`），不写 `msg_type` 变体名——工具骨架的
+        // wire 形状（旧 `ToolCall` / 新 `Skeleton` + tag `tool`）两种都该认，
+        // 而这里要验的是「桥只递帧不改写身份」，不是某一种写法。
+        let rec = if let Some(d) = &frame.delta {
+            ToolFrameRec {
                 snapshot: false,
                 id: frame.id.clone(),
                 name: frame.name.clone(),
                 text: d.clone(),
-            },
-            (None, Some(NodeKind::ToolCall)) => ToolFrameRec {
+            }
+        } else if frame.is_tool_call() {
+            ToolFrameRec {
                 snapshot: true,
                 id: frame.id.clone(),
                 name: frame.name.clone(),
                 text,
-            },
-            _ => ToolFrameRec {
+            }
+        } else {
+            ToolFrameRec {
                 snapshot: false,
                 id: frame.id.clone(),
                 name: frame.name.clone(),
                 text,
-            },
+            }
         };
         self.tools.lock().unwrap().push(rec);
     }

@@ -16,7 +16,7 @@ fn item(id: &str, text: &str) -> InboxItem {
         message: cm::ChatNode {
             id: id.to_string(),
             role: Some(cm::NodeRole::User),
-            msg_type: Some(cm::NodeKind::Text),
+            msg_type: Some(cm::NodeKind::Body),
             content: Some(cm::MessageContent::Text(text.to_string())),
             status: Some(cm::NodeStatus::Completed),
             ..Default::default()
@@ -70,7 +70,7 @@ fn many_are_joined_in_order_with_blank_line() {
         "第一句\n\n第二句\n\n第三句"
     );
     assert_eq!(merged.role, Some(cm::NodeRole::User));
-    assert_eq!(merged.msg_type, Some(cm::NodeKind::Text));
+    assert_eq!(merged.msg_type, Some(cm::NodeKind::Body));
     assert_eq!(merged.status, Some(cm::NodeStatus::Completed));
     assert_eq!(
         merged.parent_id, None,

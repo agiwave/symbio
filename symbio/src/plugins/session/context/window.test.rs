@@ -23,7 +23,7 @@ fn tool_result(parent: &str, text: &str) -> ChatNode {
         id: format!("{parent}-result"),
         parent_id: Some(parent.to_string()),
         role: Some(NodeRole::Tool),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.to_string())),
         status: Some(NodeStatus::Completed),
         ..Default::default()
@@ -34,7 +34,7 @@ fn text(content: &str) -> ChatNode {
     ChatNode {
         id: format!("t-{}", content),
         role: Some(NodeRole::User),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(content.to_string())),
         status: Some(NodeStatus::Completed),
         ..Default::default()
@@ -539,7 +539,7 @@ fn result_without_parent_call_is_left_untouched() {
             id: "orphan".to_string(),
             parent_id: Some("n1".to_string()),
             role: Some(NodeRole::Tool),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("body".to_string())),
             status: Some(NodeStatus::Completed),
             ..Default::default()
@@ -558,7 +558,7 @@ fn result_without_parent_call_is_left_untouched() {
         id: "orphan2".to_string(),
         parent_id: Some("missing".to_string()),
         role: Some(NodeRole::Tool),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text("body2".to_string())),
         status: Some(NodeStatus::Completed),
         ..Default::default()

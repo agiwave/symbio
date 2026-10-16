@@ -35,7 +35,7 @@ use super::policy::SecurityPolicy;
 use super::system::{decode_output, validate_params};
 use crate::symbio_core::CapabilityRiskLevel;
 use crate::symbio_core::{
-    chat_node::{ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind},
+    chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus},
     Capability, CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt,
 };
@@ -436,7 +436,7 @@ where
                                 id: target.msg_id.clone(),
                                 parent_id: Some(target.tool_call_id.clone()),
                                 role: Some(NodeRole::Tool),
-                                msg_type: Some(NodeKind::Text),
+                                msg_type: Some(NodeKind::Body),
                                 status: Some(NodeStatus::Streaming),
                                 content: Some(MessageContent::Text(snapshot.clone())),
                                 ..Default::default()
@@ -453,7 +453,7 @@ where
                             id: target.msg_id.clone(),
                             parent_id: Some(target.tool_call_id.clone()),
                             role: Some(NodeRole::Tool),
-                            msg_type: Some(NodeKind::Text),
+                            msg_type: Some(NodeKind::Body),
                             status: Some(NodeStatus::Streaming),
                             delta: Some(delta),
                             ..Default::default()

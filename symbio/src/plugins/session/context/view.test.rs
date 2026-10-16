@@ -9,7 +9,7 @@ fn user_msg(text: &str) -> ChatNode {
     ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
         role: Some(NodeRole::User),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()
     }
@@ -19,7 +19,7 @@ fn assistant_msg(text: &str) -> ChatNode {
     ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()
     }
@@ -46,7 +46,7 @@ fn view_result(parent: &str, text: &str) -> ChatNode {
         id: format!("{parent}-result"),
         parent_id: Some(parent.to_string()),
         role: Some(NodeRole::Tool),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.to_string())),
         status: Some(NodeStatus::Completed),
         ..Default::default()
@@ -484,19 +484,19 @@ fn test_build_request_view_prepends_memory_section() {
 #[test]
 fn test_build_request_view_scopes_by_viewer_principal() {
     let mut from_user = user_msg("用户的问题");
-    from_user.principal = Some(
-        crate::symbio_core::principal::Principal::from_legacy("user"),
-    );
+    from_user.principal = Some(crate::symbio_core::principal::Principal::from_legacy(
+        "user",
+    ));
 
     let mut from_peer = assistant_msg("子会话 agent:reviewer 的答复");
-    from_peer.principal = Some(
-        crate::symbio_core::principal::Principal::from_legacy("session/reviewer"),
-    );
+    from_peer.principal = Some(crate::symbio_core::principal::Principal::from_legacy(
+        "session/reviewer",
+    ));
 
     let mut from_self = assistant_msg("本会话 agent:main 的答复");
-    from_self.principal = Some(
-        crate::symbio_core::principal::Principal::from_legacy("session/main"),
-    );
+    from_self.principal = Some(crate::symbio_core::principal::Principal::from_legacy(
+        "session/main",
+    ));
 
     let mut legacy = assistant_msg("接线前留下的、没有标身份的历史发言");
     legacy.principal = None;

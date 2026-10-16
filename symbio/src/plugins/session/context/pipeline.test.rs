@@ -135,7 +135,7 @@ fn snapshot_frame(child: &str, text: &str) -> ChatNode {
     ChatNode {
         id: child.into(),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.into())),
         status: Some(NodeStatus::Streaming),
         ..Default::default()

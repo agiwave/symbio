@@ -700,7 +700,7 @@ fn build_user_prompt_message_uses_the_orchestrator_owned_ids() {
         Some("tc-1"),
         "必须锚在发起它的 ToolCall 下"
     );
-    assert_eq!(msg.msg_type, Some(NodeKind::UserPrompt));
+    assert_eq!(msg.msg_type, Some(NodeKind::Interaction));
     assert_eq!(msg.status, Some(NodeStatus::WaitingUserAction));
     assert_eq!(msg.role, Some(NodeRole::Tool));
 

@@ -57,9 +57,7 @@
 
 use std::sync::Arc;
 
-use crate::symbio_core::chat_node::{
-    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind,
-};
+use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus};
 use crate::symbio_core::{
     clock_now_ms, llm_short_id, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PATH,
     ROUTE_COMPOSE_WORDING, SESSION_ID,
@@ -282,7 +280,7 @@ pub(crate) fn dialog_node(text: &str, reason: &str, exclude_from_context: bool) 
         // 根级：与用户消息互为兄弟（对话线），不是某个 Turn 的子节点
         parent_id: None,
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text.to_string())),
         status: Some(NodeStatus::Completed),
         timestamp: Some(clock_now_ms()),

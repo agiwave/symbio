@@ -30,7 +30,9 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
-use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus};
+use crate::symbio_core::chat_node::{
+    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_REASONING,
+};
 use crate::symbio_core::{
     llm_emit_message, DispatchOutcome, DispatchPort, ExecAbortSignal, ExecEventSink, LlmTurn,
     Plugin, PluginInvokeRequest,
@@ -148,11 +150,12 @@ impl DispatchPort for SessionDispatchPort {
                 id: node_id,
                 parent_id: Some(self.root_id.clone()),
                 role: Some(NodeRole::Assistant),
-                msg_type: Some(NodeKind::Reasoning),
+                msg_type: Some(NodeKind::Body),
                 content: Some(MessageContent::Text(text)),
                 status: Some(NodeStatus::Completed),
                 ..Default::default()
-            };
+            }
+            .with_style_tag(CHAT_STYLE_TAG_REASONING);
             // 状态帧：推理正文已由增量帧传过，同上——重发会与队列里的增量打架。
             llm_emit_state(&self.sink, msg.clone()).await;
             produced.push(msg);

@@ -16,7 +16,7 @@ use super::{
 };
 use crate::plugins::model::protocols::ModelProtocolEvent;
 use crate::plugins::model::tool_accumulator::TurnToolCallAccumulator;
-use crate::symbio_core::chat_node::{ChatNode, NodeKind};
+use crate::symbio_core::chat_node::ChatNode;
 use crate::symbio_core::{ExecEventSink, ExecTranscriptWriter, TurnOutput};
 use std::sync::Mutex;
 
@@ -123,7 +123,7 @@ async fn ui_nodes_are_not_created_for_calls_beyond_the_cap() {
 
     let mut tool_call_node_ids = std::collections::HashSet::new();
     for m in writer.0.lock().expect("测试锁").iter() {
-        if m.msg_type == Some(NodeKind::ToolCall) {
+        if m.is_tool_call() {
             tool_call_node_ids.insert(m.id.clone());
         }
     }

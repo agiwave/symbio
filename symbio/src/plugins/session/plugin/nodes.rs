@@ -364,7 +364,7 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
     if !body.starts_with('{') {
         return Ok(cm::ChatNode {
             role: Some(cm::NodeRole::User),
-            msg_type: Some(cm::NodeKind::Text),
+            msg_type: Some(cm::NodeKind::Body),
             content: Some(cm::MessageContent::Text(raw.to_string())),
             status: Some(cm::NodeStatus::Completed),
             timestamp: Some(crate::symbio_core::clock_now_ms()),
@@ -390,7 +390,7 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
     })?;
     // 缺省补齐（见上：只补"不补就不可用"的那三个，不覆盖来者指定的值）
     message.role.get_or_insert(cm::NodeRole::User);
-    message.msg_type.get_or_insert(cm::NodeKind::Text);
+    message.msg_type.get_or_insert(cm::NodeKind::Body);
     message.status = Some(cm::NodeStatus::Completed);
     Ok(message)
 }

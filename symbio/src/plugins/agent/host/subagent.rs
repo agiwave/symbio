@@ -257,7 +257,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
         let user_message = || ChatNode {
             id: uuid::Uuid::new_v4().as_simple().to_string(),
             role: Some(NodeRole::User),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text(req.prompt.clone())),
             ..Default::default()
         };

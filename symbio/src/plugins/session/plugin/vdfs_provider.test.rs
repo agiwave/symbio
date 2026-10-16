@@ -785,7 +785,7 @@ async fn seed_messages(p: &SessionPlugin, id: &str, texts: &[&str]) {
         .map(|(i, t)| cm::ChatNode {
             id: format!("m{i}"),
             role: Some(cm::NodeRole::User),
-            msg_type: Some(cm::NodeKind::Text),
+            msg_type: Some(cm::NodeKind::Body),
             content: Some(cm::MessageContent::Text((*t).to_string())),
             seq: Some(i as i64),
             ..Default::default()

@@ -142,7 +142,7 @@ async fn setup_with_failed_turn() -> (
         id: "n-1".into(),
         parent_id: Some("t-failed".into()),
         role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text("半截".into())),
         status: Some(NodeStatus::Completed),
         seq: Some(3),
@@ -152,7 +152,7 @@ async fn setup_with_failed_turn() -> (
         ChatNode {
             id: "u-1".into(),
             role: Some(NodeRole::User),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text("第一问".into())),
             status: Some(NodeStatus::Completed),
             seq: Some(1),

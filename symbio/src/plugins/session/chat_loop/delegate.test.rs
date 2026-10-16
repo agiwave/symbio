@@ -335,16 +335,11 @@ fn section_survives_empty_capability_list_when_verdict_exists() {
 // ── Q3 · worker 进展（三个字段与 B2 逐字同名） ─────────────────────────
 
 /// 夹具：一条 worker 消息。
-fn wmsg(
-    id: &str,
-    role: cm::NodeRole,
-    status: Option<cm::NodeStatus>,
-    text: &str,
-) -> cm::ChatNode {
+fn wmsg(id: &str, role: cm::NodeRole, status: Option<cm::NodeStatus>, text: &str) -> cm::ChatNode {
     cm::ChatNode {
         id: id.to_string(),
         role: Some(role),
-        msg_type: Some(cm::NodeKind::Text),
+        msg_type: Some(cm::NodeKind::Body),
         status,
         content: Some(cm::MessageContent::Text(text.to_string())),
         ..Default::default()
@@ -425,7 +420,7 @@ fn steps_skip_empty_nodes_and_user_prompts() {
     let empty = cm::ChatNode {
         id: "3".to_string(),
         role: Some(cm::NodeRole::Assistant),
-        msg_type: Some(cm::NodeKind::Text),
+        msg_type: Some(cm::NodeKind::Body),
         content: Some(cm::MessageContent::Text(String::new())),
         ..Default::default()
     };

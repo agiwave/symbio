@@ -10,6 +10,7 @@
 use super::super::plugin::PublishTarget;
 use super::progress::ProgressPolicy;
 use super::*;
+use crate::symbio_core::chat_node::{CHAT_STYLE_TAG_COMPRESSION, CHAT_STYLE_TAG_REASONING};
 
 /// 本请求所属会话的主体身份——**唯一**读 `ctx[AGENT_ID]` 并派生主体名的取值点。
 ///
@@ -520,14 +521,17 @@ impl CompressionEmitter {
     /// 都没有」，又变回最初那个"卡死"观感。
     pub async fn begin(&self, node_id: &str) {
         // 一条完整消息：身份 + 状态 + 占位正文一帧到位。
-        self.state.transcript.lock().await.apply(ChatNode {
-            id: node_id.to_string(),
-            role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::Compression),
-            status: Some(NodeStatus::Streaming),
-            content: Some(MessageContent::Text("正在压缩上下文…".to_string())),
-            ..Default::default()
-        });
+        self.state.transcript.lock().await.apply(
+            ChatNode {
+                id: node_id.to_string(),
+                role: Some(NodeRole::Assistant),
+                msg_type: Some(NodeKind::Notice),
+                status: Some(NodeStatus::Streaming),
+                content: Some(MessageContent::Text("正在压缩上下文…".to_string())),
+                ..Default::default()
+            }
+            .with_style_tag(CHAT_STYLE_TAG_COMPRESSION),
+        );
     }
 
     /// 定稿节点并使其离开在途图，返回终态副本供调用方落库。
@@ -551,11 +555,14 @@ impl CompressionEmitter {
     ) -> ChatNode {
         let node = {
             let mut tr = self.state.transcript.lock().await;
-            let mut node = tr.get(node_id).unwrap_or_else(|| ChatNode {
-                id: node_id.to_string(),
-                role: Some(NodeRole::Assistant),
-                msg_type: Some(NodeKind::Compression),
-                ..Default::default()
+            let mut node = tr.get(node_id).unwrap_or_else(|| {
+                ChatNode {
+                    id: node_id.to_string(),
+                    role: Some(NodeRole::Assistant),
+                    msg_type: Some(NodeKind::Notice),
+                    ..Default::default()
+                }
+                .with_style_tag(CHAT_STYLE_TAG_COMPRESSION)
             });
             node.status = Some(status.clone());
             node.content = Some(MessageContent::Text(text.to_string()));
@@ -895,7 +902,7 @@ impl ChatOrchestrator {
                         id: out.reasoning_child_id.clone(),
                         parent_id: Some(root_id.into()),
                         role: Some(NodeRole::Assistant),
-                        msg_type: Some(NodeKind::Text),
+                        msg_type: Some(NodeKind::Body),
                         content: Some(MessageContent::Text(out.reasoning.clone())),
                         status: Some(NodeStatus::Completed),
                         ..Default::default()
@@ -916,7 +923,7 @@ impl ChatOrchestrator {
                         id: resp_id,
                         parent_id: Some(root_id.into()),
                         role: Some(NodeRole::Assistant),
-                        msg_type: Some(NodeKind::Text),
+                        msg_type: Some(NodeKind::Body),
                         content: Some(MessageContent::Text(out.reasoning.clone())),
                         status: Some(NodeStatus::Completed),
                         ..Default::default()
@@ -935,25 +942,26 @@ impl ChatOrchestrator {
         // 「思考就是这一轮的回答」有两种到达形态：`text` 空（v1 的 reasoning-only），
         // 与 `text` 已被运行器**取作**那段思考（v2 收束格的 `text` 存的是回答，
         // 回答取自思考时两者逐字相同）。落库侧与网格重建按**内容相同**这条判据
-        // 把它承载成 Text 子节点（`llm_build_assistant_messages` 的 `reasoning_only`），
-        // 这里必须跟着同一个判据——否则 live 标 Reasoning、存储标 Text，同 id 两个类型，
+        // 把它承载成正文子节点（`llm_build_assistant_messages` 的 `reasoning_only`），
+        // 这里必须跟着同一个判据——否则 live 标推理、存储标正文，同 id 两个类型，
         // 界面上就是「有思考没正文」。
         if !out.reasoning.is_empty() && !out.reasoning_child_id.is_empty() {
             let answer_is_reasoning = out.text.trim() == out.reasoning.trim();
+            let finalized = ChatNode {
+                id: out.reasoning_child_id.clone(),
+                parent_id: Some(root_id.into()),
+                role: Some(NodeRole::Assistant),
+                msg_type: Some(NodeKind::Body),
+                content: Some(MessageContent::Text(out.reasoning.clone())),
+                status: Some(NodeStatus::Completed),
+                ..Default::default()
+            };
             llm_emit_state(
                 sink,
-                ChatNode {
-                    id: out.reasoning_child_id.clone(),
-                    parent_id: Some(root_id.into()),
-                    role: Some(NodeRole::Assistant),
-                    msg_type: Some(if answer_is_reasoning {
-                        NodeKind::Text
-                    } else {
-                        NodeKind::Reasoning
-                    }),
-                    content: Some(MessageContent::Text(out.reasoning.clone())),
-                    status: Some(NodeStatus::Completed),
-                    ..Default::default()
+                if answer_is_reasoning {
+                    finalized
+                } else {
+                    finalized.with_style_tag(CHAT_STYLE_TAG_REASONING)
                 },
             )
             .await;
@@ -967,7 +975,7 @@ impl ChatOrchestrator {
                     id: out.response_text_child_id.clone(),
                     parent_id: Some(root_id.into()),
                     role: Some(NodeRole::Assistant),
-                    msg_type: Some(NodeKind::Text),
+                    msg_type: Some(NodeKind::Body),
                     content: Some(MessageContent::Text(out.text.clone())),
                     status: Some(NodeStatus::Completed),
                     ..Default::default()

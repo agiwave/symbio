@@ -27,7 +27,7 @@ fn plugin() -> Arc<SessionPlugin> {
 fn user_message(text: &str) -> cm::ChatNode {
     cm::ChatNode {
         role: Some(cm::NodeRole::User),
-        msg_type: Some(cm::NodeKind::Text),
+        msg_type: Some(cm::NodeKind::Body),
         content: Some(cm::MessageContent::Text(text.to_string())),
         ..Default::default()
     }

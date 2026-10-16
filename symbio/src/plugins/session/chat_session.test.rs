@@ -8,7 +8,7 @@ use super::super::store::SessionStore;
 use super::super::types::Session;
 use super::write::{assign_seq, ensure_durable_states, max_seq, prune_historical_tool_calls};
 use super::PersistentChatSession;
-use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole, NodeKind};
+use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -30,7 +30,7 @@ fn plain_msg(id: &str) -> ChatNode {
     ChatNode {
         id: id.to_string(),
         role: Some(NodeRole::User),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text("hello".to_string())),
         ..Default::default()
     }
@@ -208,7 +208,7 @@ fn tool_round(user_id: &str, tc_id: &str, tool_id: &str) -> Vec<ChatNode> {
         ChatNode {
             id: user_id.to_string(),
             role: Some(NodeRole::User),
-            msg_type: Some(NodeKind::Text),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text(format!("q-{}", user_id))),
             ..Default::default()
         },

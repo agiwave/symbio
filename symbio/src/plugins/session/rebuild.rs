@@ -73,7 +73,8 @@
 use std::collections::HashSet;
 
 use crate::symbio_core::chat_node::{
-    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind,
+    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, CHAT_STYLE_TAG_REASONING,
+    CHAT_STYLE_TAG_RUN,
 };
 use crate::symbio_core::{
     event_payload_node_id, event_produced_text_node_id, event_tool_result_node_id, Entity, Event,
@@ -284,7 +285,7 @@ fn user_node(e: &Event) -> ChatNode {
     ChatNode {
         id: event_payload_node_id(e, "id"),
         role: Some(NodeRole::User),
-        msg_type: Some(NodeKind::Text),
+        msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text_of(e, "text"))),
         // `meta` 随载荷复刻（折进的合并补充带 `meta.supplement*`）：双写期它随整份
         // `messages.json` 落盘，切源后必须随用户格事实入格，否则同一条发言在实时面与
@@ -418,8 +419,8 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
         node.timestamp = Some(e.ts);
         node.status = Some(status_of(e));
         // 思考事实（答话轮的模型推理，`WordingReply` 带回、收束格入格）：
-        // 有正文 + 有思考 ⇒ Reason 节点是这条答话的**子节点**（与生成路径的
-        // Turn 树形一致：思考挂在它所属的那次产出之下）。载荷没有就是旧事件 /
+        // 有正文 + 有思考 ⇒ 推理节点是这条答话的**子节点**（与生成路径的
+        // 骨架树形一致：思考挂在它所属的那次产出之下）。载荷没有就是旧事件 /
         // 模板产线，一个节点都不多发——形状逐字复刻，不自我发明。
         let reasoning = text_of(e, "reasoning");
         if reasoning.trim().is_empty() {
@@ -431,12 +432,13 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
             id: reasoning_id,
             parent_id: Some(node.id.clone()),
             role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::Reasoning),
+            msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text(reasoning)),
             status: Some(status_of(e)),
             timestamp: Some(e.ts),
             ..Default::default()
-        };
+        }
+        .with_style_tag(CHAT_STYLE_TAG_REASONING);
         return vec![node, reasoning_node];
     }
     let Some(turn_id) = str_of(e, "turn_id") else {
@@ -458,32 +460,38 @@ fn produced_nodes(e: &Event) -> Vec<ChatNode> {
         .map(str::to_string);
     let mut nodes = Vec::new();
 
-    // Turn 是组合节点（仅分组、无正文）：与 `llm_build_assistant_messages` 同形。
-    nodes.push(ChatNode {
-        id: turn_id.clone(),
-        role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Turn),
-        status: Some(status.clone()),
-        error: why.clone(),
-        timestamp: Some(e.ts),
-        ..Default::default()
-    });
+    // 骨架（一整轮响应）节点仅分组、无正文：与 `llm_build_assistant_messages` 同形。
+    nodes.push(
+        ChatNode {
+            id: turn_id.clone(),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::Skeleton),
+            status: Some(status.clone()),
+            error: why.clone(),
+            timestamp: Some(e.ts),
+            ..Default::default()
+        }
+        .with_style_tag(CHAT_STYLE_TAG_RUN),
+    );
 
     // reasoning-only 的判据与落库侧**逐字相同**（`message_build::llm_build_assistant_messages`）：
-    // 思考与正文是同一段内容且无独立文本回复时，内容归 Text 子节点。
+    // 思考与正文是同一段内容且无独立文本回复时，内容归正文子节点。
     let reasoning_only = !reasoning.trim().is_empty() && reasoning.trim() == text.trim();
 
     if !reasoning.trim().is_empty() && !reasoning_only {
-        nodes.push(ChatNode {
-            id: str_of(e, "reasoning_id").unwrap_or_else(|| format!("{turn_id}-reasoning")),
-            parent_id: Some(turn_id.clone()),
-            role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::Reasoning),
-            content: Some(MessageContent::Text(reasoning)),
-            status: Some(status.clone()),
-            timestamp: Some(e.ts),
-            ..Default::default()
-        });
+        nodes.push(
+            ChatNode {
+                id: str_of(e, "reasoning_id").unwrap_or_else(|| format!("{turn_id}-reasoning")),
+                parent_id: Some(turn_id.clone()),
+                role: Some(NodeRole::Assistant),
+                msg_type: Some(NodeKind::Body),
+                content: Some(MessageContent::Text(reasoning)),
+                status: Some(status.clone()),
+                timestamp: Some(e.ts),
+                ..Default::default()
+            }
+            .with_style_tag(CHAT_STYLE_TAG_REASONING),
+        );
     }
 
     if !text.trim().is_empty() {
@@ -528,16 +536,19 @@ fn push_round_nodes(
     let reasoning_only = !reasoning.trim().is_empty() && reasoning.trim() == text.trim();
 
     if !reasoning.trim().is_empty() && !reasoning_only {
-        nodes.push(ChatNode {
-            id: get("reasoning_id").unwrap_or_else(|| format!("{turn_id}-r{i}")),
-            parent_id: Some(turn_id.to_string()),
-            role: Some(NodeRole::Assistant),
-            msg_type: Some(NodeKind::Reasoning),
-            content: Some(MessageContent::Text(reasoning)),
-            status: Some(status.clone()),
-            timestamp: Some(ts),
-            ..Default::default()
-        });
+        nodes.push(
+            ChatNode {
+                id: get("reasoning_id").unwrap_or_else(|| format!("{turn_id}-r{i}")),
+                parent_id: Some(turn_id.to_string()),
+                role: Some(NodeRole::Assistant),
+                msg_type: Some(NodeKind::Body),
+                content: Some(MessageContent::Text(reasoning)),
+                status: Some(status.clone()),
+                timestamp: Some(ts),
+                ..Default::default()
+            }
+            .with_style_tag(CHAT_STYLE_TAG_REASONING),
+        );
     }
     if !text.trim().is_empty() {
         let id = if reasoning_only {
@@ -628,7 +639,7 @@ fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
             id: result_id,
             parent_id: Some(call_id.clone()),
             role: Some(NodeRole::Tool),
-            msg_type: Some(NodeKind::UserPrompt),
+            msg_type: Some(NodeKind::Interaction),
             content: Some(MessageContent::Text(text_of(e, "text"))),
             status: Some(NodeStatus::WaitingUserAction),
             meta: Some(serde_json::json!({

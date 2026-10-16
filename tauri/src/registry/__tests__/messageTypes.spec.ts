@@ -31,6 +31,14 @@ import {
   NODE_KIND_TURN,
   NODE_KIND_USER_PROMPT,
   NODE_KIND_TYPING,
+  NODE_KIND_BODY,
+  NODE_KIND_SKELETON,
+  NODE_KIND_NOTICE,
+  NODE_KIND_INTERACTION,
+  CHAT_STYLE_TAG_REASONING,
+  CHAT_STYLE_TAG_RUN,
+  CHAT_STYLE_TAG_TOOL,
+  CHAT_STYLE_TAG_COMPRESSION,
   CHAT_ROLE_ASSISTANT,
   CHAT_ROLE_TOOL,
   CHAT_ROLE_USER,
@@ -60,6 +68,7 @@ import {
   messagePreviewFollowsLiveEdge,
   messageRendererKey,
   foldNodeKind,
+  messageTypeOf,
   missingResultNoteOf,
   messageRetryTargetOf,
   messageRoleLabel,
@@ -658,6 +667,42 @@ describe('messageRendererKey：渲染形态分派', () => {
     expect(messageIcon(f)).toBe('👤')
     expect(messageTitle(f, '助手')).toBe('你')
     expect(messageRendererKey(f)).toBe('turn')
+  })
+})
+
+describe('messageTypeOf：生产链路的唯一折叠点', () => {
+  // [T-147c-ii-s3] 起后端 wire 实际写出的就是新形态——这里钉住 s3 之后的真实载荷，
+  // 而不是只测 foldNodeKind 的纯映射。
+  it('新形态按 style_tag 折叠回渲染词表', () => {
+    expect(messageTypeOf({ type: NODE_KIND_BODY, meta: undefined })).toBe(NODE_KIND_TEXT)
+    expect(messageTypeOf({ type: NODE_KIND_BODY, meta: { style_tag: CHAT_STYLE_TAG_REASONING } })).toBe(
+      NODE_KIND_REASONING,
+    )
+    expect(messageTypeOf({ type: NODE_KIND_SKELETON, meta: { style_tag: CHAT_STYLE_TAG_RUN } })).toBe(
+      NODE_KIND_TURN,
+    )
+    expect(messageTypeOf({ type: NODE_KIND_SKELETON, meta: { style_tag: CHAT_STYLE_TAG_TOOL } })).toBe(
+      NODE_KIND_TOOL_CALL,
+    )
+    expect(messageTypeOf({ type: NODE_KIND_NOTICE, meta: { style_tag: CHAT_STYLE_TAG_COMPRESSION } })).toBe(
+      NODE_KIND_COMPRESSION,
+    )
+    expect(messageTypeOf({ type: NODE_KIND_INTERACTION, meta: undefined })).toBe(NODE_KIND_USER_PROMPT)
+  })
+
+  it('旧形态与缺省直通（双形态共存：读侧兼容到 s4 前不劣化）', () => {
+    expect(messageTypeOf({ type: NODE_KIND_TEXT, meta: undefined })).toBe(NODE_KIND_TEXT)
+    expect(messageTypeOf({ type: NODE_KIND_TURN, meta: undefined })).toBe(NODE_KIND_TURN)
+    expect(messageTypeOf({ type: undefined, meta: undefined })).toBe(NODE_KIND_TEXT)
+  })
+
+  it('折叠结果可直接进渲染分派', () => {
+    expect(messageRendererKey(facets({ type: messageTypeOf({ type: NODE_KIND_SKELETON, meta: { style_tag: CHAT_STYLE_TAG_RUN } }) }))).toBe(
+      'turn',
+    )
+    expect(messageRendererKey(facets({ type: messageTypeOf({ type: NODE_KIND_BODY, meta: { style_tag: CHAT_STYLE_TAG_REASONING } }) }))).toBe(
+      'text',
+    )
   })
 })
 

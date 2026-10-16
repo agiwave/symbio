@@ -20,7 +20,7 @@ fn message_node_serialized_name_is_node_id_not_tool_name() {
     let m = cm::ChatNode {
         id: "nodeid123".into(),
         role: Some(cm::NodeRole::Assistant),
-        msg_type: Some(cm::NodeKind::Text),
+        msg_type: Some(cm::NodeKind::Body),
         status: Some(cm::NodeStatus::Streaming),
         content: Some(cm::MessageContent::Text("你好".into())),
         parent_id: Some("turn1".into()),
@@ -40,10 +40,11 @@ fn message_node_serialized_name_is_node_id_not_tool_name() {
     // 工具名单独走 `tool_name` 键：None 序列化为 null，不碰 `name`
     assert_eq!(v["tool_name"], serde_json::Value::Null);
 
-    // 带 工具名 的节点（ToolCall）：tool_name 就位，id 仍是节点 id
+    // 带 工具名 的节点（工具调用骨架）：tool_name 就位，id 仍是节点 id
     let tc = cm::ChatNode {
         id: "tc456".into(),
-        msg_type: Some(cm::NodeKind::ToolCall),
+        msg_type: Some(cm::NodeKind::Skeleton),
+        meta: Some(serde_json::json!({ "style_tag": cm::CHAT_STYLE_TAG_TOOL })),
         name: Some("local/ls".into()),
         ..Default::default()
     };
@@ -195,13 +196,13 @@ fn parse_inbox_message_distinguishes_shape_by_first_char() {
     let m = parse_inbox_message("帮我看一下这个 bug").unwrap();
     assert_eq!(m.content.unwrap().to_text(), "帮我看一下这个 bug");
     assert_eq!(m.role, Some(cm::NodeRole::User));
-    assert_eq!(m.msg_type, Some(cm::NodeKind::Text));
+    assert_eq!(m.msg_type, Some(cm::NodeKind::Body));
     assert_eq!(m.status, Some(cm::NodeStatus::Completed));
 
     // 结构化：字段子集直接用，缺省项照补
     let m = parse_inbox_message(r#"{"content":"结构化正文","role":"user"}"#).unwrap();
     assert_eq!(m.content.unwrap().to_text(), "结构化正文");
-    assert_eq!(m.msg_type, Some(cm::NodeKind::Text), "未给的字段走缺省");
+    assert_eq!(m.msg_type, Some(cm::NodeKind::Body), "未给的字段走缺省");
     assert_eq!(m.id, "", "`id` 缺省是空串占位——身份由地址 / 入队统一落定");
     // 写体给了 id 就先用它（地址若也给，则以地址为准——见 `enqueue_inbox`）
     let m = parse_inbox_message(r#"{"id":"from-body","content":"x"}"#).unwrap();
@@ -220,7 +221,7 @@ fn inbox_item_node_reuses_message_shape() {
         message: cm::ChatNode {
             id: "i1".into(),
             role: Some(cm::NodeRole::User),
-            msg_type: Some(cm::NodeKind::Text),
+            msg_type: Some(cm::NodeKind::Body),
             content: Some(cm::MessageContent::Text("待发的这句话".into())),
             status: Some(cm::NodeStatus::Completed),
             timestamp: Some(1_700_000_000_000),
@@ -322,7 +323,7 @@ fn vdfs_message_node_splits_text_and_structure() {
     let mut m = cm::ChatNode {
         id: "m1".into(),
         role: Some(cm::NodeRole::Assistant),
-        msg_type: Some(cm::NodeKind::Text),
+        msg_type: Some(cm::NodeKind::Body),
         content: Some(cm::MessageContent::Text("你好，世界".into())),
         status: Some(cm::NodeStatus::Completed),
         seq: Some(7),
@@ -348,13 +349,14 @@ fn vdfs_message_node_splits_text_and_structure() {
     // 结构字段全在 attributes 里（VDFS 只透传）
     assert_eq!(n.attributes.get("seq"), Some(&json!(7)));
     assert_eq!(n.attributes.get("role"), Some(&json!("assistant")));
-    assert_eq!(n.attributes.get("type"), Some(&json!("text")));
+    assert_eq!(n.attributes.get("type"), Some(&json!("body")));
 
     // 正文即内容；流式追加的正是它
     assert_eq!(message_text(&m), "你好，世界");
 
-    // 工具调用：标题补工具名、状态词直通、正文退化为 JSON 视图
-    m.msg_type = Some(cm::NodeKind::ToolCall);
+    // 工具调用骨架（`Skeleton` + tag `tool`）：标题补工具名、状态词直通、正文退化为 JSON 视图
+    m.msg_type = Some(cm::NodeKind::Skeleton);
+    m.meta = Some(serde_json::json!({ "style_tag": cm::CHAT_STYLE_TAG_TOOL }));
     m.name = Some("vdfs_list".into());
     m.status = Some(cm::NodeStatus::Streaming);
     assert_eq!(message_node(&m).title, "助手 · vdfs_list");

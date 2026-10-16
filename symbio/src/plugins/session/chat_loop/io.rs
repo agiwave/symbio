@@ -5,6 +5,7 @@
 use super::super::chat_session::Carrier;
 use super::super::plugin::{append_and_publish, PublishTarget};
 use super::*;
+use crate::symbio_core::chat_node::CHAT_STYLE_TAG_RUN;
 
 /// 封根 Turn：广播本轮组合节点的终态（**唯一**发射点）。
 ///
@@ -132,17 +133,20 @@ pub(crate) async fn fire_user_prompt_submit_hook(
 
 pub(crate) async fn emit_streaming_start(sink: &ExecEventSink, root_id: &str, turn: Option<usize>) {
     let meta = turn.map(|t| serde_json::json!({"turn": t}));
-    // Turn 组合节点无正文：身份 + 状态一帧到位。
-    sink.emit(ChatNode {
-        id: root_id.to_string(),
-        // Turn 是根级节点，与 User 互为兄弟（请求/响应由 NodeRole 区分）
-        parent_id: None,
-        role: Some(NodeRole::Assistant),
-        msg_type: Some(NodeKind::Turn),
-        status: Some(NodeStatus::Streaming),
-        meta,
-        ..Default::default()
-    })
+    // 骨架（一整轮响应）节点无正文：身份 + 状态一帧到位。
+    sink.emit(
+        ChatNode {
+            id: root_id.to_string(),
+            // 骨架是根级节点，与 User 互为兄弟（请求/响应由 NodeRole 区分）
+            parent_id: None,
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::Skeleton),
+            status: Some(NodeStatus::Streaming),
+            meta,
+            ..Default::default()
+        }
+        .with_style_tag(CHAT_STYLE_TAG_RUN),
+    )
     .await;
 }
 
