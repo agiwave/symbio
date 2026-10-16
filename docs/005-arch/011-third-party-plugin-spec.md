@@ -455,7 +455,7 @@ init 响应（插件给） "needs": ["fs.read", "net.http", "proc.spawn"]  ← �
 |---|---|
 | **P1** 删除 `PluginPayload::Native` 死变体 | `transport.rs` 的枚举收成 3 态，gateway 两处「拒绝」分支消失 |
 | **P2** 收口载荷转换 | `gateway/server.rs::classify_payload` —— 唯一分类点，两入口共用 |
-| **A3** 消除跨插件引用 | `SEG_MESSAGES` / `message_of_node` 上移 `symbio_core::schemas::session::chat_message`；全仓跨插件 `use` 归零 |
+| **A3** 消除跨插件引用 | `SEG_MESSAGES` / `message_of_node` 上移 `symbio_core::schemas::session::chat_node`；全仓跨插件 `use` 归零 |
 | **P6** `payload` 键收口 | `KEY_PAYLOAD` 取代 deprecated 的 `PayloadKey`/`PAYLOAD`，裸字符串 `"payload"` 消除 |
 | **P3** 线上可表达标记 | `SymbioKey::WIRE`（6 个进程内键标 `false`） |
 | **P5** gateway 术语统一 | 「native」→「进程内（in-process）」，与协议层一词两义消除 |

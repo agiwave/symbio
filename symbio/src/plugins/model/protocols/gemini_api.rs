@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 use super::super::model_providers::ModelProviderConfig;
-use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole};
+use super::super::types::{CapabilityMeta, ContentPart, MessageContent, NodeRole};
 use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
 use super::sse::{SseLineParser, SsePartialLineExtractor};
 use super::ModelProtocolEvent;
@@ -45,14 +45,14 @@ impl ModelProtocol for GeminiProtocol {
         &self,
         cfg: &ModelProviderConfig,
         system: &str,
-        messages: &[crate::symbio_core::chat_message::ChatMessage],
+        messages: &[crate::symbio_core::chat_node::ChatNode],
         tools: &[CapabilityMeta],
     ) -> Value {
         let flattened_messages =
             crate::plugins::model::message_builder::flatten_chat_messages(messages);
         let mut contents: Vec<Value> = Vec::new();
         for m in &flattened_messages {
-            if m.role == MessageRole::System {
+            if m.role == NodeRole::System {
                 continue;
             }
             let mut parts = Vec::new();
@@ -118,14 +118,14 @@ impl ModelProtocol for GeminiProtocol {
                     }));
                 }
             }
-            if m.role == MessageRole::Tool {
+            if m.role == NodeRole::Tool {
                 let text = match m.content {
                     Some(MessageContent::Text(ref t)) => t.clone(),
                     _ => "{}".into(),
                 };
                 // ⚠ 已知缺陷：`functionResponse.name` 按 Gemini 规范应当
                 // 是**函数名**，这里填的是 `tool_call_id`。两者不等，严格实现会报错。
-                // 修它需要把工具名带到 role=Tool 的消息上（`ChatMessage.name` 目前
+                // 修它需要把工具名带到 role=Tool 的消息上（`ChatNode.name` 目前
                 // 由 `llm_build_tool_message` 留空），是一次独立的协议改动。
                 // 此处的 `replace` 也不再保留——工具调用 id 不是
                 // 能力名，对它做线上形态换算没有意义。
@@ -140,7 +140,7 @@ impl ModelProtocol for GeminiProtocol {
                 continue;
             }
             contents.push(json!({
-                "role": if m.role == MessageRole::Assistant { "model" } else { "user" },
+                "role": if m.role == NodeRole::Assistant { "model" } else { "user" },
                 "parts": parts
             }));
         }

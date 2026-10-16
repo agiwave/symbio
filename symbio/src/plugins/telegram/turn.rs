@@ -38,8 +38,8 @@
 //! 三者共有的只是上面那段协议舞步；帧语义各不相同，抽成一份反而要把三种行为
 //! 参数化。因此这里只保留「收 → 攒 → 取最后一条已完成的助手正文」。
 
-use crate::symbio_core::chat_message::{
-    message_of_node, ChatMessage, MessageRole, MessageStatus, MessageType, SEG_MESSAGES,
+use crate::symbio_core::chat_node::{
+    message_of_node, ChatNode, NodeRole, NodeStatus, NodeKind, SEG_MESSAGES,
 };
 use crate::symbio_core::{
     event_bus_register_subscriber, event_bus_unregister_subscriber, vdfs_change_of, Plugin,
@@ -164,7 +164,7 @@ pub(super) async fn run_turn(
 
     // ── ④ 入队 ──
     // 正文直接是用户消息文本（`parse_inbox_message` 的判别式：不以 `{` 起头即整段
-    // 正文），因此不构造 `ChatMessage`——身份与缺省由 provider 一侧补齐。
+    // 正文），因此不构造 `ChatNode`——身份与缺省由 provider 一侧补齐。
     let queued = route_json(
         &router,
         ctx,
@@ -263,7 +263,7 @@ fn finish(node: &VdfsNode, acc: Accumulator) -> TurnOutcome {
 /// 助手正文的累积器：按消息 id 攒，最终取**最后一条已完成的助手正文**。
 ///
 /// 取「已完成」而不是「最后处理到的文本」：流式片段与推理独白都不该被当成最终
-/// 答复（与 `agent_run` 的转播桥同一判据）。`MessageType::Reasoning` 因此不进累积器
+/// 答复（与 `agent_run` 的转播桥同一判据）。`NodeKind::Reasoning` 因此不进累积器
 /// ——它进的是同一个地址空间，但它是思考过程，不是答复。
 #[derive(Default)]
 struct Accumulator {
@@ -280,20 +280,20 @@ impl Accumulator {
         self.text_by_id.contains_key(mid)
     }
 
-    fn apply(&mut self, m: ChatMessage) {
+    fn apply(&mut self, m: ChatNode) {
         let mid = m.id.clone();
 
         // 删除优先：`status = removed` 是消息词汇里的删除语义，本地索引与父视图
         // 同步移除——身份改写、正文累积对已删节点没有意义。
-        if m.status == Some(MessageStatus::Removed) {
+        if m.status == Some(NodeStatus::Removed) {
             self.text_by_id.remove(&mid);
             self.order.retain(|x| x != &mid);
             self.completed.remove(&mid);
             return;
         }
 
-        if m.role == Some(MessageRole::Assistant)
-            && matches!(m.msg_type, Some(MessageType::Text) | None)
+        if m.role == Some(NodeRole::Assistant)
+            && matches!(m.msg_type, Some(NodeKind::Text) | None)
         {
             if let Some(delta) = m.delta.as_deref() {
                 // 纯增量：追加。身份未知时也照收——回读兜底在帧循环里，
@@ -317,9 +317,9 @@ impl Accumulator {
 
         if matches!(
             m.status,
-            Some(MessageStatus::Completed)
-                | Some(MessageStatus::Failed)
-                | Some(MessageStatus::Aborted)
+            Some(NodeStatus::Completed)
+                | Some(NodeStatus::Failed)
+                | Some(NodeStatus::Aborted)
         ) {
             self.completed.insert(mid);
         }
@@ -343,13 +343,13 @@ impl Accumulator {
 /// `<会话>/<集合段>/<项 id>`，本函数只认「消息」那一段的**项**——集合目录本身、
 /// 更深的层级、别的集合段（收件箱 / 记忆 / 工作目录）都不认（与 `agent_run` 的
 /// 转播桥同一判据，理由见那里：按地址形状认人才能推广到第二类集合）。
-fn message_at(session_addr: &str, change: &VdfsChange) -> Option<ChatMessage> {
+fn message_at(session_addr: &str, change: &VdfsChange) -> Option<ChatNode> {
     let prefix = format!("{session_addr}/{SEG_MESSAGES}/");
     let mid = change.path.strip_prefix(&prefix)?;
     if mid.is_empty() || mid.contains('/') {
         return None;
     }
-    let mut m = serde_json::from_value::<ChatMessage>(change.data.clone()?).ok()?;
+    let mut m = serde_json::from_value::<ChatNode>(change.data.clone()?).ok()?;
     // 地址即身份（载荷里的 `id` 只是同一事实的复述，以地址为准）。
     m.id = mid.to_string();
     Some(m)
@@ -359,13 +359,13 @@ fn message_at(session_addr: &str, change: &VdfsChange) -> Option<ChatMessage> {
 ///
 /// 两者都是幂等的当前值，因此这次回读与帧到达顺序无关——这正是它敢做兜底的原因。
 /// 逆投影走 `message_of_node`（与 session 侧拼节点成对演进的那一份），不自己拼
-/// `ChatMessage`：拼错了不会报错，只会让某条消息悄悄少一截。
+/// `ChatNode`：拼错了不会报错，只会让某条消息悄悄少一截。
 async fn readback(
     router: &Arc<dyn Plugin>,
     ctx: &Arc<dyn PluginInvokeRequest>,
     session_id: &str,
     rel: &str,
-) -> Option<ChatMessage> {
+) -> Option<ChatNode> {
     let node: VdfsNode = serde_json::from_value(
         route_json(router, ctx, "vdfs/stat", session_id, json!({ "path": rel }))
             .await

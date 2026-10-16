@@ -12,14 +12,14 @@ import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import MessageNode from '../MessageNode.vue'
 import { useRunningClock } from '@/composables/useRunningClock'
-import type { ChatMessage } from '@/schemas/chat_message'
+import type { ChatNode } from '@/schemas/chat_node'
 
-/** 构造合法 ChatMessage（缺省：assistant/text/completed） */
-function msg(p: Partial<ChatMessage> & { id: string }): ChatMessage {
+/** 构造合法 ChatNode（缺省：assistant/text/completed） */
+function msg(p: Partial<ChatNode> & { id: string }): ChatNode {
   return { role: 'assistant', type: 'text', content: '', status: 'completed', ...p }
 }
 
-function mountNode(node: ChatMessage, extraProps: Record<string, unknown> = {}) {
+function mountNode(node: ChatNode, extraProps: Record<string, unknown> = {}) {
   return mount(MessageNode, {
     props: { node, ...extraProps },
     global: { provide: { resume: vi.fn() } },
@@ -545,7 +545,7 @@ describe('MessageNode：分派器路由与内容形态', () => {
 
   it('未登记的消息类型落到 fallback：内容照常显示，会话流不空白', () => {
     const w = mountNode(
-      msg({ id: 'new1', type: 'brand_new_type' as ChatMessage['type'], content: '未来类型的内容' }),
+      msg({ id: 'new1', type: 'brand_new_type' as ChatNode['type'], content: '未来类型的内容' }),
     )
     expect(w.text()).toContain('未来类型的内容')
     expect(w.find('.node-head').exists()).toBe(true)
@@ -633,7 +633,7 @@ describe('MessageNode：节点头键盘可达性', () => {
  * 这里钉住四个可见后果：标题 / 对齐 / 默认收起 / 不给悬停操作。
  */
 describe('MessageNode：压缩后的历史记忆（不是「你说的那句话」）', () => {
-  const memory = (extra: Partial<ChatMessage> = {}) =>
+  const memory = (extra: Partial<ChatNode> = {}) =>
     msg({
       id: 'mem1',
       role: 'user',

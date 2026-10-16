@@ -12,7 +12,7 @@
 //! （`docs/017-module-layout.md` §2）。本文件只钉「事实本身」。
 
 use super::{drain_parked, edited, removed};
-use crate::symbio_core::chat_message::{ChatMessage, MessageContent, MessageRole, MessageType};
+use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole, NodeKind};
 use crate::symbio_core::{
     Entity, EventWalStore, Seq, Store, Verb, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED,
     EVENT_USER_MESSAGE,
@@ -58,11 +58,11 @@ fn read_facts(dir: &std::path::Path) -> Vec<crate::symbio_core::Event> {
 }
 
 /// 一条被改过的用户消息（形状与 `patch_message` 给出的那份同源）。
-fn patched_user(id: &str, text: &str) -> ChatMessage {
-    ChatMessage {
+fn patched_user(id: &str, text: &str) -> ChatNode {
+    ChatNode {
         id: id.into(),
-        role: Some(MessageRole::User),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::User),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text(text.into())),
         timestamp: Some(1_500),
         ..Default::default()
@@ -88,7 +88,7 @@ fn an_edit_lands_one_fact_with_the_patched_message() {
         "溯源 = **被改的那条事实**，不是「此刻」的号"
     );
     // 载荷是**补丁应用后**的整条（写侧与读侧共用同一条序列化路径）。
-    let msg: ChatMessage =
+    let msg: ChatNode =
         serde_json::from_value(e.payload["message"].clone()).expect("载荷里是整条消息");
     assert_eq!(msg.id, "u-1");
     assert_eq!(
@@ -267,7 +267,7 @@ fn an_edit_while_the_token_is_held_is_parked_not_dropped() {
     let facts = read_facts(&dir);
     assert_eq!(facts.len(), 1, "补落后这条编辑必须真的进网格，而不是消失");
     assert_eq!(facts[0].kind, EVENT_MESSAGE_EDITED);
-    let msg: ChatMessage =
+    let msg: ChatNode =
         serde_json::from_value(facts[0].payload["message"].clone()).expect("载荷里是整条消息");
     assert_eq!(
         msg.content.as_ref().map(MessageContent::to_text).as_deref(),
@@ -409,7 +409,7 @@ fn an_assistant_edit_is_attributed_to_the_agent_not_the_user() {
     let (dir, _) = seeded_dir("actor-assistant");
     edited(
         &dir,
-        &patched_msg("u-1", "流式累积的一段", MessageRole::Assistant, None, 1_500),
+        &patched_msg("u-1", "流式累积的一段", NodeRole::Assistant, None, 1_500),
     );
 
     let edit = read_facts(&dir)
@@ -431,7 +431,7 @@ fn a_tool_result_edit_is_attributed_to_the_agent_not_the_user() {
     let (dir, _) = seeded_dir("actor-tool");
     edited(
         &dir,
-        &patched_msg("u-1", "找不到文件", MessageRole::Tool, None, 1_700),
+        &patched_msg("u-1", "找不到文件", NodeRole::Tool, None, 1_700),
     );
 
     let edit = read_facts(&dir)
@@ -450,7 +450,7 @@ fn only_a_user_message_is_attributed_to_the_user() {
     let (dir, _) = seeded_dir("actor-user");
     edited(
         &dir,
-        &patched_msg("u-1", "改过的问题", MessageRole::User, None, 1_600),
+        &patched_msg("u-1", "改过的问题", NodeRole::User, None, 1_600),
     );
 
     let edit = read_facts(&dir)
@@ -473,7 +473,7 @@ fn an_explicit_principal_wins_over_the_role() {
         &patched_msg(
             "u-1",
             "别人说的话",
-            MessageRole::Assistant,
+            NodeRole::Assistant,
             Some("session/sub-1".into()),
             1_800,
         ),
@@ -497,17 +497,17 @@ fn an_explicit_principal_wins_over_the_role() {
 fn patched_msg(
     id: &str,
     text: &str,
-    role: MessageRole,
+    role: NodeRole,
     principal: Option<String>,
     ts: i64,
-) -> ChatMessage {
-    ChatMessage {
+) -> ChatNode {
+    ChatNode {
         id: id.into(),
         role: Some(role),
         principal: principal.map(
             |s| crate::symbio_core::principal::Principal::from_legacy(&s),
         ),
-        msg_type: Some(MessageType::Text),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text(text.into())),
         timestamp: Some(ts),
         ..Default::default()
@@ -520,7 +520,7 @@ fn the_messages_own_timestamp_wins() {
     let (dir, _) = seeded_dir("ts-given");
     edited(
         &dir,
-        &patched_msg("u-1", "带时刻", MessageRole::Assistant, None, 1_234_567),
+        &patched_msg("u-1", "带时刻", NodeRole::Assistant, None, 1_234_567),
     );
 
     let edit = read_facts(&dir)
@@ -540,7 +540,7 @@ fn the_messages_own_timestamp_wins() {
 #[test]
 fn a_missing_timestamp_falls_back_to_now_never_to_zero() {
     let (dir, _) = seeded_dir("ts-missing");
-    let mut m = patched_msg("u-1", "没填时刻", MessageRole::Assistant, None, 0);
+    let mut m = patched_msg("u-1", "没填时刻", NodeRole::Assistant, None, 0);
     m.timestamp = Some(0); // 上游把「没填」写成 0，一并兜住
     m.principal = None;
     edited(&dir, &m);

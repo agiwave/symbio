@@ -13,7 +13,7 @@
 
 import { isWorkingStatus, type SessionOutcome } from '@/schemas/vdfs'
 import { isBlankContentNode, isInProgressMessage } from './sessionTranscript'
-import type { ChatMessage } from '@/schemas/chat_message'
+import type { ChatNode } from '@/schemas/chat_node'
 import type { SessionListItem } from '@/services/session'
 
 /** 单个 session 的实时状态（用于缩略卡展示） */
@@ -238,7 +238,7 @@ export function workdirOf(it: SessionListItem): string | undefined {
  */
 export function needsTypingRow(
   working: boolean,
-  messages: Array<Pick<ChatMessage, 'status' | 'type' | 'content'>>,
+  messages: Array<Pick<ChatNode, 'status' | 'type' | 'content'>>,
 ): boolean {
   if (!working) return false
   // 「有东西可看」= 有节点在跑**且它能渲染出内容**（空壳不算，见上）

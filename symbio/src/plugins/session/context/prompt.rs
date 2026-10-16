@@ -4,7 +4,7 @@
 //! `context_compact` 工具元也在本模块——它只是给模型看的入口说明。
 
 use super::*;
-use crate::symbio_core::chat_message::{MessageContent, MessageStatus};
+use crate::symbio_core::chat_node::{MessageContent, NodeStatus};
 
 /// 压缩协议版本（P2-3）：快照 meta 记录此版本，用于从产物侧验证协议演进是否生效。
 /// 语义：v2 = L0 会话目录存档 + 三层统一取回协议 + JSON 语义摘要 + 快照指纹。
@@ -147,7 +147,7 @@ pub fn render_snapshot_for_history(snapshot_text: &str) -> String {
 /// # 为什么不再把历史序列化成 JSON
 ///
 /// 旧写法是 `serde_json::to_string(history)` 塞进单条 user 消息的 content。
-/// 每条 [`ChatMessage`] 都带着 `id` / `parent_id` / `seq` / `status` / `timestamp` /
+/// 每条 [`ChatNode`] 都带着 `id` / `parent_id` / `seq` / `status` / `timestamp` /
 /// `meta`（token 统计、工具名、转存路径……）——这些是**存储与前端**需要的，
 /// 模型一个都不关心，却要为它们的 JSON 语法原样付费：字段名、引号、转义、
 /// 嵌套括号全是纯开销，且随历史长度与消息条数线性放大。
@@ -158,7 +158,7 @@ pub fn render_snapshot_for_history(snapshot_text: &str) -> String {
 ///
 /// 附带好处：快照校验失败时的纠正重试（`context.messages.push(retry_msg)`）天然
 /// 变成一段正常的多轮对话（历史 → 指令 → 纠正），而不是「JSON 之后追加一句话」。
-pub fn build_compression_request(history: &[ChatMessage], hints: Option<&str>) -> Vec<ChatMessage> {
+pub fn build_compression_request(history: &[ChatNode], hints: Option<&str>) -> Vec<ChatNode> {
     let mut out = history.to_vec();
     out.push(compression_instruction(hints));
     out
@@ -167,7 +167,7 @@ pub fn build_compression_request(history: &[ChatMessage], hints: Option<&str>) -
 /// 压缩指令：历史以对话形态排在它**之前**，因此这里只需说"把上面这段蒸馏成快照"。
 ///
 /// 输出结构的全部约束在 system 提示词里，此处不重复——重复会诱导模型模仿格式。
-fn compression_instruction(hints: Option<&str>) -> ChatMessage {
+fn compression_instruction(hints: Option<&str>) -> ChatNode {
     let hints_section = match hints {
         Some(h) if !h.trim().is_empty() => {
             format!(
@@ -176,17 +176,17 @@ fn compression_instruction(hints: Option<&str>) -> ChatMessage {
         }
         _ => String::new(),
     };
-    ChatMessage {
+    ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
-        role: Some(MessageRole::User),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::User),
+        msg_type: Some(NodeKind::Text),
         // 措辞刻意**不提** `<state_snapshot>` 标签名：结构定义只在 system 侧出现
         // 一次。在对话里重复格式指令会诱导模型模仿模板而非按 system 输出。
         content: Some(MessageContent::Text(format!(
             "Distill the conversation above into the structured snapshot that your \
              instructions define. Output the snapshot only.{hints_section}"
         ))),
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         ..Default::default()
     }
 }

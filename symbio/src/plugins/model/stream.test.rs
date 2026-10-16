@@ -16,16 +16,16 @@ use super::{
 };
 use crate::plugins::model::protocols::ModelProtocolEvent;
 use crate::plugins::model::tool_accumulator::TurnToolCallAccumulator;
-use crate::symbio_core::chat_message::{ChatMessage, MessageType};
+use crate::symbio_core::chat_node::{ChatNode, NodeKind};
 use crate::symbio_core::{ExecEventSink, ExecTranscriptWriter, TurnOutput};
 use std::sync::Mutex;
 
 /// 录制帧的转写写入器：数「ToolCall 节点」的快照帧用了几个不同 id。
-struct RecordingWriter(pub Mutex<Vec<ChatMessage>>);
+struct RecordingWriter(pub Mutex<Vec<ChatNode>>);
 
 #[async_trait::async_trait]
 impl ExecTranscriptWriter for RecordingWriter {
-    async fn apply(&self, message: ChatMessage) {
+    async fn apply(&self, message: ChatNode) {
         self.0.lock().expect("测试锁").push(message);
     }
 }
@@ -123,7 +123,7 @@ async fn ui_nodes_are_not_created_for_calls_beyond_the_cap() {
 
     let mut tool_call_node_ids = std::collections::HashSet::new();
     for m in writer.0.lock().expect("测试锁").iter() {
-        if m.msg_type == Some(MessageType::ToolCall) {
+        if m.msg_type == Some(NodeKind::ToolCall) {
             tool_call_node_ids.insert(m.id.clone());
         }
     }

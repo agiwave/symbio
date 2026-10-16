@@ -180,7 +180,7 @@ async fn route(
 > （前端实时面 / CLI / gateway）。**执行期**（`Capability::execute` 被会话编排层调用）
 > 不要用它回传事件：出口与中止由**执行期环境** `ExecEnv` 承载，作为 `execute` 的
 > 显式参数给出（`env.sink()` / `env.abort()`），事件直接 `sink.apply(message)`（一条
-> `ChatMessage`；会话级告警走 `sink.warn(...)` 独立通道）。
+> `ChatNode`；会话级告警走 `sink.warn(...)` 独立通道）。
 > 工具侧不再自己读信封里的键——`ExecEnv` 由分发点 `symbio_core::capability_invoke`
 > 从 `ctx` 装配（缺席 ⇒ 静默 / 永不中止，故 `route()` 直连调用照常可用）。
 > 理由与代价见 [ADR-020](../010-adr/020.md)、[ADR-021](../010-adr/021.md) 与

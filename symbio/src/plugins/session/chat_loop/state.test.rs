@@ -81,8 +81,8 @@ impl Plugin for HookRecorder {
     }
 }
 
-fn text_msg(id: &str, text: &str) -> ChatMessage {
-    ChatMessage {
+fn text_msg(id: &str, text: &str) -> ChatNode {
+    ChatNode {
         id: id.to_string(),
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()

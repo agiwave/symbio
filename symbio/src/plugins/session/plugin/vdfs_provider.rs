@@ -362,7 +362,7 @@ impl SessionPlugin {
                     // 因此「不给 id」（`{"content":"..."}`）是合法用法，而「给了别的
                     // id」是错误（由 `patch_message` 报出）。
                     //
-                    // 必须在这里补而不是靠 `ChatMessage` 的 serde 默认值：`id` 在
+                    // 必须在这里补而不是靠 `ChatNode` 的 serde 默认值：`id` 在
                     // 该结构里是必填字段（它也是存储层的主键），反序列化会**先一步**
                     // 拒绝掉不带 id 的补丁——那样「补丁是字段子集、未提供的保持不变」
                     // 这条承诺在 `id` 上就是假的，调用方被迫把地址里已有的信息
@@ -370,18 +370,18 @@ impl SessionPlugin {
                     let raw = content.text.as_deref().unwrap_or("").trim();
                     let mut value: Value = serde_json::from_str(raw).map_err(|e| {
                         VdfsError::invalid(format!(
-                            "消息补丁需要合法 JSON（ChatMessage 字段子集）：{e}"
+                            "消息补丁需要合法 JSON（ChatNode 字段子集）：{e}"
                         ))
                     })?;
                     let obj = value.as_object_mut().ok_or_else(|| {
-                        VdfsError::invalid("消息补丁需要 JSON 对象（ChatMessage 字段子集）")
+                        VdfsError::invalid("消息补丁需要 JSON 对象（ChatNode 字段子集）")
                     })?;
                     if !obj.contains_key("id") {
                         obj.insert("id".to_string(), Value::String(mid.to_string()));
                     }
-                    let patch: cm::ChatMessage = serde_json::from_value(value).map_err(|e| {
+                    let patch: cm::ChatNode = serde_json::from_value(value).map_err(|e| {
                         VdfsError::invalid(format!(
-                            "消息补丁需要合法 JSON（ChatMessage 字段子集）：{e}"
+                            "消息补丁需要合法 JSON（ChatNode 字段子集）：{e}"
                         ))
                     })?;
                     self.patch_message(id, mid, &patch)
@@ -603,7 +603,7 @@ impl SessionPlugin {
                 // 要求也不拒绝——回执统一 `created: true`（它确实是一条新条目）。
                 if content.binary {
                     return Err(VdfsError::invalid(
-                        "收件箱条目是文本（ChatMessage 字段子集或纯文本），不接受二进制内容",
+                        "收件箱条目是文本（ChatNode 字段子集或纯文本），不接受二进制内容",
                     ));
                 }
                 // 存在性校验：会话不在，就没有"它的收件箱"可写
@@ -927,14 +927,14 @@ impl SessionPlugin {
     /// 因此这里取 `session.messages` 拿到的就是真源那一份——本函数不再自己判断
     /// 「缓存在不在、要不要重建」：那是**存储层的职责**，在插件层再判一次就是同一条
     /// 规矩的第二份口径（T-056 早期「缓存不在才重建」的过渡形态，T-053 收敛掉）。
-    async fn transcript_of(&self, id: &str) -> VdfsResult<Vec<cm::ChatMessage>> {
+    async fn transcript_of(&self, id: &str) -> VdfsResult<Vec<cm::ChatNode>> {
         let session = self.session_of(id).await?;
         let live = self.live_messages_of(id).await;
         Ok(ordered(overlay_live(session.messages, live)))
     }
 
     /// 该会话本轮的在途消息（无活跃状态 ⇒ 无在途消息）
-    async fn live_messages_of(&self, id: &str) -> Vec<cm::ChatMessage> {
+    async fn live_messages_of(&self, id: &str) -> Vec<cm::ChatNode> {
         let active = self.active_mgr.sessions.read().await;
         match active.get(id) {
             Some(st) => st.transcript.lock().await.snapshot(),

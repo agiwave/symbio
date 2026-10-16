@@ -9,7 +9,7 @@
  * 性质：**决策支持报告，不是判定**。它只输出候选清单，退出码恒为 0（除非自身崩溃）——
  *   因为「未被使用」的判定有天然盲区，必须人工 grep 复核后才可动手：
  *     · 后端：仅统计 `schemas::` 路径引用与标识符出现；`pub use` 再导出的顶层名
- *       （`crate::symbio_core::ChatMessage`）靠标识符出现兜底。
+ *       （`crate::symbio_core::ChatNode`）靠标识符出现兜底。
  *     · 前端：模块级引用识别 `from '...'`（含 `export * from`）与相对路径，
  *       故 schemas 内部的再导出链（`vdfs.ts` → `./vdfs-form`）不再误报死文件。
  *   本脚本已接入 `gate.mjs`（docs 阶段）：**崩溃会让门禁失败**，报告内容不判失败。
@@ -261,7 +261,7 @@ for (const f of backendSchemaFiles) {
   if (cons) for (const cf of cons.keys()) if (!cf.startsWith(schemasRoot)) topConsumers.get(top).add(cf);
 }
 // schemas/mod.rs 的 pub use re-export 也算作「经由顶层模块出口」的消费途径：
-// 消费方 import 的是顶层名（crate::symbio_core::ChatMessage），归属到被 re-export 的模块
+// 消费方 import 的是顶层名（crate::symbio_core::ChatNode），归属到被 re-export 的模块
 const modRs = readFileSync(join(schemasRoot, 'mod.rs'), 'utf8');
 const reExportRe = /pub\s+use\s+([A-Za-z0-9_]+(?:::[A-Za-z0-9_]+)*)\s*\{/g;
 let rm;

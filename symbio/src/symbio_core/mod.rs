@@ -82,7 +82,7 @@ pub(crate) use projection::span::{span, SpanView};
 pub use projection::transcript::transcript;
 pub use schemas::reading::{ReadingPanel, ReadingRow, ReadingSection, ReadingTone};
 // 结构化 prompt 消息（ADR-048a）：core 的**最小结构化出口**——角色、正文、
-// `tool_call_id`、`tool_calls`。线格式（`ChatMessage`）由 adapter 边界翻译，
+// `tool_call_id`、`tool_calls`。线格式（`ChatNode`）由 adapter 边界翻译，
 // core 内部不认识 provider 的图语义。
 //
 // **为什么它占根出口而 `PromptToolCall` 不占**：C-003 的准则是「只有一个模块消费
@@ -283,15 +283,15 @@ pub use vdfs::{
 pub(crate) use vdfs::{absolute_addr, descend_addr, join_addr, AddrRootDecl};
 
 // ==================== 跨插件契约（schemas，ADR-023） ====================
-// `schemas/` 目录同样不开模块门：schema 契约在根显式再导出——`chat_message` /
+// `schemas/` 目录同样不开模块门：schema 契约在根显式再导出——`chat_node` /
 // `session_chat` 保**叶子模块**形态（`as cm` 别名依赖它），其余按符号扁平导出。
-// 外部一律 `symbio_core::ChatMessage` / `symbio_core::chat_message::…`。
+// 外部一律 `symbio_core::ChatNode` / `symbio_core::chat_node::…`。
 pub use schemas::common::{SimpleResponse, SuccessResponse};
 pub use schemas::detail::{
     DetailAction, DetailBadge, DetailCondition, DetailDefinition, DetailField, DetailOption,
     DetailPreset, DetailPresetSpec, DetailSection, DETAIL_PICK_DIRECTORY,
 };
-pub use schemas::session::{chat_message, principal, session_chat};
+pub use schemas::session::{chat_node, principal, session_chat};
 pub use schemas::{
     ComposeRequest, DecideRequest, HookEvent, HookOutput, RunSnapshot, Verdict, WordingReply,
     REASON_ACK, REASON_CLARIFY, REASON_EMPTY, REASON_FROM_CONTEXT, REASON_GREETING,

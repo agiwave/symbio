@@ -119,7 +119,7 @@ session:
     let max_turns = cfg.max_messages; // 0 = 不限制
     let mut user_indices = Vec::new();
     for (idx, msg) in session.messages.iter().enumerate() {
-        if msg.role == Some(MessageRole::User) {
+        if msg.role == Some(NodeRole::User) {
             user_indices.push(idx);
         }
     }
@@ -211,7 +211,7 @@ session:
     // 从后往前定位第 context_limit 个 User 消息，以其作为起点裁剪历史
     let mut user_indices = Vec::new();
     for (idx, msg) in messages.iter().enumerate() {
-        if msg.role == Some(MessageRole::User) {
+        if msg.role == Some(NodeRole::User) {
             user_indices.push(idx);
         }
     }
@@ -280,7 +280,7 @@ session:
 
     ```rust
     pub fn build_request_view(
-        messages: &[ChatMessage],
+        messages: &[ChatNode],
         window: usize,
         retention: &std::collections::HashMap<String, crate::symbio_core::CapabilityToolContextRetention>,
         fade_active: bool,
@@ -291,9 +291,9 @@ session:
         recall_section: Option<&str>,
         ready_section: Option<&str>,
         viewer: Option<&str>,
-    ) -> Vec<ChatMessage> {
+    ) -> Vec<ChatNode> {
         // ⓪ 可见域（`viewer`）：先筛消息再裁剪——`None` = 不过滤
-        let mut view: Vec<ChatMessage> = messages
+        let mut view: Vec<ChatNode> = messages
             .iter()
             .filter(|m| visible_for(m, viewer))
             .cloned()
@@ -313,12 +313,12 @@ session:
             );
         }
         if inject_nudge {
-            view.push(ChatMessage {
+            view.push(ChatNode {
                 id: uuid::Uuid::new_v4().to_string(),
-                role: Some(MessageRole::User),
-                msg_type: Some(MessageType::Text),
+                role: Some(NodeRole::User),
+                msg_type: Some(NodeKind::Text),
                 content: Some(MessageContent::Text(CONTEXT_NUDGE_TEXT.to_string())),
-                status: Some(MessageStatus::Completed),
+                status: Some(NodeStatus::Completed),
                 meta: Some(serde_json::json!({ "kind": "context_nudge" })),
                 ..Default::default()
             });
@@ -326,24 +326,24 @@ session:
         // ⑥ 任务调度段：**先插本段**（随后 ⑤ 再插一次 0，本段最终落在 index 1
         //    ——两段并存时记忆 0 / 调度 1；位置与理由见第六步）
         if let Some(section) = ready_section {
-            view.insert(0, ChatMessage {
+            view.insert(0, ChatNode {
                 id: uuid::Uuid::new_v4().to_string(),
-                role: Some(MessageRole::User),
-                msg_type: Some(MessageType::Text),
+                role: Some(NodeRole::User),
+                msg_type: Some(NodeKind::Text),
                 content: Some(MessageContent::Text(section.to_string())),
-                status: Some(MessageStatus::Completed),
+                status: Some(NodeStatus::Completed),
                 meta: Some(serde_json::json!({ "kind": "readyset" })),
                 ..Default::default()
             });
         }
         // ⑤ 长期记忆：**置顶**（位置与理由见上面第五步；与 nudge 同一形状）
         if let Some(section) = recall_section {
-            view.insert(0, ChatMessage {
+            view.insert(0, ChatNode {
                 id: uuid::Uuid::new_v4().to_string(),
-                role: Some(MessageRole::User),
-                msg_type: Some(MessageType::Text),
+                role: Some(NodeRole::User),
+                msg_type: Some(NodeKind::Text),
                 content: Some(MessageContent::Text(section.to_string())),
-                status: Some(MessageStatus::Completed),
+                status: Some(NodeStatus::Completed),
                 meta: Some(serde_json::json!({ "kind": "recall_context" })),
                 ..Default::default()
             });

@@ -91,7 +91,7 @@ fn unparsable_text_yields_none_not_answered() {
 fn empty_context_falls_back_to_the_utterance_itself() {
     let msgs = build_messages("读一下 README", &[]);
     assert_eq!(msgs.len(), 1);
-    assert_eq!(msgs[0].role, Some(MessageRole::User));
+    assert_eq!(msgs[0].role, Some(NodeRole::User));
     assert_eq!(text_of(&msgs[0]), "读一下 README");
 }
 
@@ -101,8 +101,8 @@ fn empty_context_falls_back_to_the_utterance_itself() {
 fn tail_utterance_is_not_appended_twice() {
     let ctx = vec![
         user_message("你好"),
-        ChatMessage {
-            role: Some(MessageRole::Assistant),
+        ChatNode {
+            role: Some(NodeRole::Assistant),
             content: Some(MessageContent::Text("你好，有什么可以帮你？".to_string())),
             ..Default::default()
         },

@@ -117,15 +117,15 @@ import { computed, inject, ref } from 'vue'
 import {
   CHAT_ROLE_ASSISTANT,
   CHAT_ROLE_USER,
-  MESSAGE_STATUS_COMPLETED,
-  MESSAGE_STATUS_STREAMING,
-  MESSAGE_TYPE_TEXT,
-  MESSAGE_TYPE_TURN,
+  NODE_STATUS_COMPLETED,
+  NODE_STATUS_STREAMING,
+  NODE_KIND_TEXT,
+  NODE_KIND_TURN,
   RESUME_ACTION_SUPPLY,
-  isInflightMessageStatus,
+  isInflightNodeStatus,
   messageTextOf,
-  type ChatMessage,
-} from '@/schemas/chat_message'
+  type ChatNode,
+} from '@/schemas/chat_node'
 import { RESUME_KEY } from '@/composables/useChatConnection'
 import { useMessageContent } from '@/composables/useMessageContent'
 import {
@@ -141,7 +141,7 @@ import MessageChildren from './MessageChildren.vue'
 import MessageErrorBox from './MessageErrorBox.vue'
 
 const props = defineProps<{
-  node: ChatMessage
+  node: ChatNode
   facets: MessageFacets
   depth?: number
 }>()
@@ -174,33 +174,33 @@ const hasRequestArgs = computed(() => !!props.node.content && text.value.trim().
  * 状态只跟随「流式 / 已结束」两态，**不跟随 ToolCall 的 failed**：
  * 失败信息由 ToolCall 自身的交代条承担，否则请求 JSON 会被误判成错误体。
  */
-const toolRequestNode = computed<ChatMessage | null>(() => {
+const toolRequestNode = computed<ChatNode | null>(() => {
   if (!hasRequestArgs.value) return null
   const base = props.node
   return {
     id: `${base.id}__request`,
-    type: MESSAGE_TYPE_TEXT,
+    type: NODE_KIND_TEXT,
     role: CHAT_ROLE_ASSISTANT,
     name: 'request',
     content: base.content,
     status:
-      base.status === MESSAGE_STATUS_STREAMING
-        ? MESSAGE_STATUS_STREAMING
-        : MESSAGE_STATUS_COMPLETED,
+      base.status === NODE_STATUS_STREAMING
+        ? NODE_STATUS_STREAMING
+        : NODE_STATUS_COMPLETED,
     meta: { ...(base.meta || {}), __toolRequest: true },
     timestamp: base.timestamp,
     seq: -1, // 始终排在响应子节点之前
   }
 })
-const requestNodes = computed<ChatMessage[]>(() =>
+const requestNodes = computed<ChatNode[]>(() =>
   toolRequestNode.value ? [toolRequestNode.value] : [],
 )
 /** 过程 = 子会话 Turn；结果 = 其余（工具返回 / user_prompt） */
-const processTurns = computed<ChatMessage[]>(() =>
-  children.value.filter((c) => c.type === MESSAGE_TYPE_TURN),
+const processTurns = computed<ChatNode[]>(() =>
+  children.value.filter((c) => c.type === NODE_KIND_TURN),
 )
-const resultChildren = computed<ChatMessage[]>(() =>
-  children.value.filter((c) => c.type !== MESSAGE_TYPE_TURN),
+const resultChildren = computed<ChatNode[]>(() =>
+  children.value.filter((c) => c.type !== NODE_KIND_TURN),
 )
 
 // ── B2：过程段收起成一行状态（三字段与后端 `WorkerProgress` 逐字同名） ──
@@ -215,16 +215,16 @@ const STEPS_MAX = 8
 const STEP_MAX_CHARS = 60
 
 /** 判据 1 第二半：过程段子树里是否仍有在途节点（递归，Turn 自身也算）。 */
-function subtreeInFlight(nodes: ChatMessage[]): boolean {
+function subtreeInFlight(nodes: ChatNode[]): boolean {
   return nodes.some(
-    (n) => isInflightMessageStatus(n.status) || subtreeInFlight(n.children ?? []),
+    (n) => isInflightNodeStatus(n.status) || subtreeInFlight(n.children ?? []),
   )
 }
 
 /** 判据 3：非空内容才产出步骤；取最近 `STEPS_MAX` 条、单步截 `STEP_MAX_CHARS`。 */
-function collectSteps(turns: ChatMessage[]): string[] {
+function collectSteps(turns: ChatNode[]): string[] {
   const out: string[] = []
-  const walk = (nodes: ChatMessage[]) => {
+  const walk = (nodes: ChatNode[]) => {
     for (const n of nodes) {
       // user 是输入不是进展（与后端投影同一口径）
       if (n.role !== CHAT_ROLE_USER) {
@@ -247,7 +247,7 @@ const workerStatus = computed(() => {
   return {
     // 判据 1：父工具没结束，**或**过程段里仍有在途节点——只看父状态会漏报
     // （父工具常先拿到部分结果）。
-    in_flight: isInflightMessageStatus(props.node.status) || subtreeInFlight(turns),
+    in_flight: isInflightNodeStatus(props.node.status) || subtreeInFlight(turns),
     // 判据 2：过程段的 Turn 条数 = 后端按 user 消息计数，语义一致、数值同源。
     rounds: turns.length,
     // 判据 3：无内容节点不产出步骤——状态行宁可少说也不编。

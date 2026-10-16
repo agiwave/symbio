@@ -5,22 +5,22 @@
 
 use super::*;
 
-use crate::symbio_core::schemas::session::chat_message::ChatMessage;
+use crate::symbio_core::schemas::session::chat_node::ChatNode;
 
 struct RecordingWriter {
-    ops: Arc<std::sync::Mutex<Vec<ChatMessage>>>,
+    ops: Arc<std::sync::Mutex<Vec<ChatNode>>>,
 }
 
 #[async_trait]
 impl ExecTranscriptWriter for RecordingWriter {
-    async fn apply(&self, message: ChatMessage) {
+    async fn apply(&self, message: ChatNode) {
         self.ops.lock().unwrap().push(message);
     }
 }
 
 /// 一帧增量（出口测试不关心正文语义，只关心"发了什么"）。
-fn delta(id: &str, text: &str) -> ChatMessage {
-    ChatMessage {
+fn delta(id: &str, text: &str) -> ChatNode {
+    ChatNode {
         id: id.into(),
         delta: Some(text.into()),
         ..Default::default()
@@ -68,8 +68,8 @@ async fn sink_direct_forwards_and_null_drops() {
 async fn sink_filtered_rewrites_and_drops_per_frame() {
     let ops = Arc::new(std::sync::Mutex::new(Vec::new()));
     // 白名单：只放行落向 "keep" 的纯增量帧，落点改写为 "node"
-    let allow: Arc<dyn Fn(&mut ChatMessage) -> bool + Send + Sync> =
-        Arc::new(|f: &mut ChatMessage| {
+    let allow: Arc<dyn Fn(&mut ChatNode) -> bool + Send + Sync> =
+        Arc::new(|f: &mut ChatNode| {
             if f.id == "keep" && f.delta.is_some() && f.status.is_none() {
                 f.id = "node".into();
                 return true;
@@ -83,7 +83,7 @@ async fn sink_filtered_rewrites_and_drops_per_frame() {
     sink.emit(delta("drop", "b")).await; // 吞
     let mut mixed = delta("keep", "c");
     mixed.status =
-        Some(crate::symbio_core::schemas::session::chat_message::MessageStatus::Completed);
+        Some(crate::symbio_core::schemas::session::chat_node::NodeStatus::Completed);
     sink.emit(mixed).await; // 带状态 ⇒ 吞
 
     let got = ops.lock().unwrap();

@@ -52,16 +52,16 @@
 import { computed } from 'vue'
 import {
   CHAT_ROLE_USER,
-  MESSAGE_TYPE_REASONING,
-  type ChatMessage,
-} from '@/schemas/chat_message'
+  NODE_KIND_REASONING,
+  type ChatNode,
+} from '@/schemas/chat_node'
 import { useMessageContent } from '@/composables/useMessageContent'
 import { isFailedStatus, type MessageFacets } from '@/registry/messageTypes'
 import NodeShell from './NodeShell.vue'
 import MessageErrorBox from './MessageErrorBox.vue'
 
 const props = defineProps<{
-  node: ChatMessage
+  node: ChatNode
   facets: MessageFacets
   depth?: number
   /** 父节点（ToolCall）是否已失败：失败只由"造成中止的节点"呈现一次 */
@@ -75,7 +75,7 @@ const emit = defineEmits<{
 }>()
 
 const isUser = computed(() => props.facets.role === CHAT_ROLE_USER)
-const isReasoning = computed(() => props.facets.type === MESSAGE_TYPE_REASONING)
+const isReasoning = computed(() => props.facets.type === NODE_KIND_REASONING)
 
 /** 工具返回自身的失败：父 ToolCall 已失败时交由父级呈现，避免同一错误报两遍 */
 const showsOwnError = computed(

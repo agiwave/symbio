@@ -136,8 +136,8 @@ pub(crate) async fn close_turn(
         (Vec::new(), tools_done)
     };
 
-    let mut tool_results: Vec<ChatMessage> = Vec::new();
-    let mut parent_updates: Vec<ChatMessage> = Vec::new();
+    let mut tool_results: Vec<ChatNode> = Vec::new();
+    let mut parent_updates: Vec<ChatNode> = Vec::new();
 
     if !compact_calls.is_empty() {
         // 切分点前移到当前用户指令：保留区 = [用户指令, Turn 及其子节点...]，
@@ -200,12 +200,12 @@ pub(crate) async fn close_turn(
             if !ok {
                 // 失败属信息性：结果以 Completed 定格（父节点同为 Completed），
                 // 与普通工具结果的处理保持一致，避免孤儿 Failed 节点
-                tool_msg.status = Some(MessageStatus::Completed);
+                tool_msg.status = Some(NodeStatus::Completed);
             }
             llm_emit_message(sink, tool_msg.clone()).await;
             // 父节点终态：从权威转写取完整副本应用终态（找不到 = 协议违例，跳过）。
             if let Some(mut parent) = context.messages.iter().find(|m| m.id == call_id).cloned() {
-                parent.status = Some(MessageStatus::Completed);
+                parent.status = Some(NodeStatus::Completed);
                 let mut meta = parent.meta.clone().unwrap_or_else(|| serde_json::json!({}));
                 if let Some(obj) = meta.as_object_mut() {
                     obj.insert("success".into(), serde_json::json!(ok));
@@ -237,10 +237,10 @@ pub(crate) async fn close_turn(
                     Some(false),
                     None,
                 );
-                tool_msg.status = Some(MessageStatus::Completed);
+                tool_msg.status = Some(NodeStatus::Completed);
                 llm_emit_message(sink, tool_msg.clone()).await;
                 if let Some(mut parent) = context.messages.iter().find(|m| m.id == *cid).cloned() {
-                    parent.status = Some(MessageStatus::Completed);
+                    parent.status = Some(NodeStatus::Completed);
                     let mut meta = parent.meta.clone().unwrap_or_else(|| serde_json::json!({}));
                     if let Some(obj) = meta.as_object_mut() {
                         obj.insert("success".into(), serde_json::json!(false));
@@ -310,11 +310,11 @@ pub(crate) async fn close_turn(
     // tool 结果留在上下文喂回 LLM 继续处理，用户也可随时直接发新消息继续。
     let mode = ctx.get(crate::symbio_core::MODE).unwrap_or_default();
     let needs_user_action = tool_results.iter().any(|m| {
-        m.msg_type == Some(MessageType::UserPrompt)
-            && m.status == Some(MessageStatus::WaitingUserAction)
+        m.msg_type == Some(NodeKind::UserPrompt)
+            && m.status == Some(NodeStatus::WaitingUserAction)
     }) || parent_updates
         .iter()
-        .any(|p| p.status == Some(MessageStatus::WaitingUserAction));
+        .any(|p| p.status == Some(NodeStatus::WaitingUserAction));
 
     if needs_user_action {
         // 注：信息性策略下工具失败的父 ToolCall 已标 Completed（错误结果作为

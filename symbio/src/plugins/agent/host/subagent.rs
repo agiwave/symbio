@@ -42,9 +42,9 @@
 //! 而是对当时那条消息的操作。父子关系始终由子会话存储元数据承载，无进程内状态。
 
 use super::store::AgentDirStore;
-use crate::symbio_core::chat_message::{message_of_node, SEG_MESSAGES};
-use crate::symbio_core::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType, ResumeAction,
+use crate::symbio_core::chat_node::{message_of_node, SEG_MESSAGES};
+use crate::symbio_core::chat_node::{
+    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind, ResumeAction,
     ResumeRequest,
 };
 use crate::symbio_core::{event_bus_register_subscriber, event_bus_unregister_subscriber};
@@ -255,17 +255,17 @@ impl crate::symbio_core::Capability for AgentRunCapability {
         // ── 子会话 id + 续跑请求 + 首条消息（三者按调用形态确定）──
         // 三种调用形态：审批恢复（session_id + target_id）/ 续会话（仅
         // session_id，LLM 携带上次结果的子会话 id 继续对话）/ 新建（都省略）。
-        let user_message = || ChatMessage {
+        let user_message = || ChatNode {
             id: uuid::Uuid::new_v4().as_simple().to_string(),
-            role: Some(MessageRole::User),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::User),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text(req.prompt.clone())),
             ..Default::default()
         };
         let (child_session_id, resume_req, first_message): (
             String,
             Option<ResumeRequest>,
-            Option<ChatMessage>,
+            Option<ChatNode>,
         ) = match (req.session_id.as_deref(), req.target_id.as_deref()) {
             (Some(sid), Some(tid)) if !sid.is_empty() && !tid.is_empty() => {
                 // 恢复调用：在子会话内恢复被审批的工具（普通 resume 语义透传）。
@@ -370,7 +370,7 @@ impl crate::symbio_core::Capability for AgentRunCapability {
         let vctx = vdfs_context(&ctx);
         let rel = format!("{PLUGIN_ID_SESSION}/{child_session_id}");
         let started: Result<(), PluginError> = if let Some(m) = first_message {
-            // 写体是这条消息的 JSON：判别式「以 `{` 开头」⇒ 它是 [`ChatMessage`] 的
+            // 写体是这条消息的 JSON：判别式「以 `{` 开头」⇒ 它是 [`ChatNode`] 的
             // 字段子集，`id` 因此仍是**地址之外**的第二个身份来源，由 provider 归一。
             // 其余缺省由 `parse_inbox_message` 补（`role` / `msg_type` 缺省、
             // `status` 归一为 `Completed`——与多条消息合并时 `merge_many` 的取值一致）。
@@ -675,7 +675,7 @@ struct RelayBridge {
 ///   多次定格，只有会话节点离开 `working` 才是整轮结束）。变更随 `data` 带全量节点
 ///   视图（与 `stat` 同源构造）⇒ 零回读；无载荷 ⇒ 回读兜底。
 /// - `<sid>/<集合段>/<项 id>` = **集合项**，对消息即 `<sid>/message/<mid>`——`data`
-///   就是那条 `ChatMessage`，语义在字段上：`delta` 追加 / `content` 替换 /
+///   就是那条 `ChatNode`，语义在字段上：`delta` 追加 / `content` 替换 /
 ///   `status = removed` 移除。全量帧自给自足；窄增量帧撞上未知身份 ⇒ 回读基线。
 ///
 /// 于是本桥的读策略是**按字段省**：`delta` 且该 id 已知 ⇒ 一次 I/O 都不做
@@ -686,7 +686,7 @@ struct RelayBridge {
 ///
 /// 两类变更**不靠到达顺序**协作。旧版靠「同一条流 + 同一个 `seq` 计数器」推出
 /// 「读到不忙 ⇒ 本轮消息帧都已处理」；那条推理的前提（顺序是**传输**属性）已被
-/// ADR-025 纠正为「顺序是**节点**属性」（`ChatMessage.seq` 决定显示顺序）。现在
+/// ADR-025 纠正为「顺序是**节点**属性」（`ChatNode.seq` 决定显示顺序）。现在
 /// 的收尾判据是会话节点的 `status` 本身——回读即得，与谁先到无关。
 ///
 /// ## 本桥是「子会话 → 父视图」的**唯一翻译点**
@@ -728,7 +728,7 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
     // 已回读过身份的消息 id —— 带 `delta` 的帧据此走**零回读**路径
     let mut known: HashSet<String> = HashSet::new();
     // 最近一次回读到的完整记录（锚定判定要用它的 `parent_id`）
-    let mut records: HashMap<String, ChatMessage> = HashMap::new();
+    let mut records: HashMap<String, ChatNode> = HashMap::new();
     let mut relay_error: Option<String> = None;
     // 子会话内的待用户动作：只**捕获载荷**，不落出口——节点由 `tool_executor`
     // 以统一 id（`result_msg_id`）构造。若此处也落一个（子会话自己的 id），前端
@@ -778,13 +778,13 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                     continue;
                 }
                 let Some(data) = change.data else { continue };
-                let Ok(message) = serde_json::from_value::<ChatMessage>(data) else { continue };
+                let Ok(message) = serde_json::from_value::<ChatNode>(data) else { continue };
                 let mid = message.id.clone();
 
                 // 删除优先：本地索引与父视图同步移除——身份改写、正文累积对已删
                 // 节点没有意义。`status = removed` 是消息词汇里的**删除语义**
                 // （信封上没有 deleted 取值）。
-                if message.status == Some(MessageStatus::Removed) {
+                if message.status == Some(NodeStatus::Removed) {
                     text_by_id.remove(&mid);
                     text_order.retain(|x| x != &mid);
                     completed_ids.remove(&mid);
@@ -801,7 +801,7 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                         if let Some(buf) = text_by_id.get_mut(&mid) {
                             buf.push_str(&delta);
                         }
-                        let mut out = ChatMessage {
+                        let mut out = ChatNode {
                             id: mid.clone(),
                             delta: Some(delta),
                             ..Default::default()
@@ -836,8 +836,8 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
 
                 // 助手正文：**在锚定之前**累积——锚定会把顶层节点的角色改写成
                 // Tool，而"最终答复"的判据是助手正文。
-                if message.role == Some(MessageRole::Assistant)
-                    && matches!(message.msg_type, Some(MessageType::Text) | None)
+                if message.role == Some(NodeRole::Assistant)
+                    && matches!(message.msg_type, Some(NodeKind::Text) | None)
                 {
                     if !text_by_id.contains_key(&mid) {
                         text_order.push(mid.clone());
@@ -849,9 +849,9 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                 }
                 if matches!(
                     message.status,
-                    Some(MessageStatus::Completed)
-                        | Some(MessageStatus::Failed)
-                        | Some(MessageStatus::Aborted)
+                    Some(NodeStatus::Completed)
+                        | Some(NodeStatus::Failed)
+                        | Some(NodeStatus::Aborted)
                 ) {
                     completed_ids.insert(mid.clone());
                 }
@@ -860,8 +860,8 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                 // `prompt.args` 是本工具的续跑参数（`session/resume`
                 // 重执行 agent_run 时据此续跑子会话）；`failure_kind`
                 // 原样带上（驱动前端审批 UI）。
-                if message.msg_type == Some(MessageType::UserPrompt)
-                    && message.status == Some(MessageStatus::WaitingUserAction)
+                if message.msg_type == Some(NodeKind::UserPrompt)
+                    && message.status == Some(NodeStatus::WaitingUserAction)
                 {
                     pending = Some(RelayOutcome::Pending {
                         text: text_by_id.get(&mid).cloned().unwrap_or_default(),
@@ -888,7 +888,7 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                 // ToolCall 的请求参数（args.prompt），且 role=user 的临时
                 // 节点会在前端获得"编辑"入口（该 id 不在父会话存储中，
                 // 操作必然失败）。
-                if message.role == Some(MessageRole::User) {
+                if message.role == Some(NodeRole::User) {
                     continue;
                 }
 
@@ -899,8 +899,8 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                 // 并能被 flatten 的 find_tool_result 正确识别。
                 if message.parent_id.is_none() {
                     message.parent_id = Some(tool_call_id.clone());
-                    if message.role == Some(MessageRole::Assistant) {
-                        message.role = Some(MessageRole::Tool);
+                    if message.role == Some(NodeRole::Assistant) {
+                        message.role = Some(NodeRole::Tool);
                     }
                 }
                 sink.emit(message).await;

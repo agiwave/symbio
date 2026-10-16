@@ -14,7 +14,7 @@
 //!
 //! 只有一条执行路径（不再有「流式 / 非流式」两条）：
 //! - `spawn` 子进程，stdout/stderr 各由一个 pump 任务按行读取；
-//! - 每行到达后向**执行期出口** `sink` 发一条**消息帧**（`ChatMessage`）：
+//! - 每行到达后向**执行期出口** `sink` 发一条**消息帧**（`ChatNode`）：
 //!   `role=tool` + `status=Streaming`，正文以 `delta`（尾部追加）承载；
 //!   非后缀增长（stdout/stderr 交替、转义序列回退）时改用 `content`（整条替换）；
 //! - 进程结束后把完整输出作为 `Data` 返回，由 `tool_executor` 定稿为工具结果；
@@ -35,7 +35,7 @@ use super::policy::SecurityPolicy;
 use super::system::{decode_output, validate_params};
 use crate::symbio_core::CapabilityRiskLevel;
 use crate::symbio_core::{
-    chat_message::{ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType},
+    chat_node::{ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind},
     Capability, CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt,
 };
@@ -432,12 +432,12 @@ where
                             // `content`（整条替换）帧对齐：`delta` 只表达"追加"，
                             // 表达不了"这一段被换掉了"，而节点本身还在（不该用
                             // 删除帧宣告它没了）。
-                            sink.emit(ChatMessage {
+                            sink.emit(ChatNode {
                                 id: target.msg_id.clone(),
                                 parent_id: Some(target.tool_call_id.clone()),
-                                role: Some(MessageRole::Tool),
-                                msg_type: Some(MessageType::Text),
-                                status: Some(MessageStatus::Streaming),
+                                role: Some(NodeRole::Tool),
+                                msg_type: Some(NodeKind::Text),
+                                status: Some(NodeStatus::Streaming),
                                 content: Some(MessageContent::Text(snapshot.clone())),
                                 ..Default::default()
                             })
@@ -449,12 +449,12 @@ where
                         if delta.is_empty() {
                             continue;
                         }
-                        sink.emit(ChatMessage {
+                        sink.emit(ChatNode {
                             id: target.msg_id.clone(),
                             parent_id: Some(target.tool_call_id.clone()),
-                            role: Some(MessageRole::Tool),
-                            msg_type: Some(MessageType::Text),
-                            status: Some(MessageStatus::Streaming),
+                            role: Some(NodeRole::Tool),
+                            msg_type: Some(NodeKind::Text),
+                            status: Some(NodeStatus::Streaming),
                             delta: Some(delta),
                             ..Default::default()
                         })

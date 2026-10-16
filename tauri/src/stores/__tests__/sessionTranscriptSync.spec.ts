@@ -41,7 +41,7 @@ import {
 } from '../sessionTranscriptSync'
 import { subscribeVdfsChanged } from '@/services/eventBus'
 import type { VdfsChange, VdfsNode } from '@/schemas/vdfs'
-import { MESSAGE_TYPE_TURN } from '@/schemas/chat_message'
+import { NODE_KIND_TURN } from '@/schemas/chat_node'
 // 回读理由是**词表**（独立模块，未被替身），断言按它取值——替身里不抄第二份
 import { READBACK_REASON } from '@/services/readback'
 
@@ -54,7 +54,7 @@ const MSG = `${MOUNT}/s1/message`
 
 /**
  * 一条消息帧：信封的 `path` 是那条消息**节点自身**的地址
- * （`<根>/session/<sid>/message/<mid>`），载荷 `data` 就是那条 ChatMessage。
+ * （`<根>/session/<sid>/message/<mid>`），载荷 `data` 就是那条 ChatNode。
  *
  * `mid` 独立成参，正是为了钉住「**身份在地址上**」——载荷里有没有 `id` 不影响分派。
  */
@@ -197,7 +197,7 @@ describe('消息帧：语义全在 data 的字段上（信封没有操作枚举�
       frame('s1', 'T1', {
         id: 'T1',
         role: 'assistant',
-        type: MESSAGE_TYPE_TURN,
+        type: NODE_KIND_TURN,
         status: 'streaming',
         meta: { turn: 0 },
       })

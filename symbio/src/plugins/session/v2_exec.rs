@@ -83,8 +83,8 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::symbio_core::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
+use crate::symbio_core::chat_node::{
+    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind,
 };
 use crate::symbio_core::{
     llm_short_id, ActorSpec, CapabilityMeta, DeltaSink, DispatchPort, Entity, Event, EventWalStore,
@@ -142,10 +142,10 @@ enum UiNodeKind {
 
 impl UiNodeKind {
     /// 该流在事实网格 / 界面上的节点类型。
-    fn msg_type(self) -> MessageType {
+    fn msg_type(self) -> NodeKind {
         match self {
-            UiNodeKind::Text => MessageType::Text,
-            UiNodeKind::Reasoning => MessageType::Reasoning,
+            UiNodeKind::Text => NodeKind::Text,
+            UiNodeKind::Reasoning => NodeKind::Reasoning,
         }
     }
 }
@@ -175,7 +175,7 @@ enum UiFrame {
     /// 又直接写出口（工具节点，`process_tool_calls_async` 只认 `ExecEventSink`），
     /// 两条路不排序就会让工具卡片跑到正文之前。
     Barrier(tokio::sync::oneshot::Sender<()>),
-    /// 工具调用快照（身份帧）：**原样透传**的 `ChatMessage`。
+    /// 工具调用快照（身份帧）：**原样透传**的 `ChatNode`。
     ///
     /// 载体不止工具节点：对话面的**根级**节点（开场白）产生即上线时也借这一格——
     /// [`UiFrame::Snapshot`] 要求 `parent`，而开场白与用户发言互为兄弟，没有父。
@@ -187,7 +187,7 @@ enum UiFrame {
     /// 分发方稍后以**同一 id** 定格与落库（`llm_build_tool_call_nodes` 的节点 id
     /// 就是转写面的节点 id），节点永远只有一张卡。参数窄增量**不走**本变体——
     /// 它走 [`UiFrame::Delta`]（按 id 合并的语义与正文增量共用一条）。
-    Tool(Box<ChatMessage>),
+    Tool(Box<ChatNode>),
 }
 
 /// UI 帧队列的**容量上限**。
@@ -558,7 +558,7 @@ impl DeltaSink for UiBridge {
     /// 与 [`Self::on_delta`] 的差别：节点 id **不由本桥铸造**——快照帧的 id /
     /// name / tool_call_id / 参数是 model 插件转写面的事实，分发方稍后以同一 id
     /// 定格与落库；本桥只负责把帧送进**同一条**队列（与正文共用容量与屏障语义）。
-    fn on_tool_frame(&self, m: &ChatMessage) {
+    fn on_tool_frame(&self, m: &ChatNode) {
         match &m.delta {
             // 参数窄增量：并进与正文同款的 Delta 帧——队列满时按 id 合并的
             // 无损语义因此对工具参数同样成立（不会因换了通道就退化成丢帧）。
@@ -700,7 +700,7 @@ pub(crate) struct V2Turn<'a> {
     /// `None` = 本轮没压过（常态）。
     ///
     /// [`SessionContext::consolidated`]: super::chat_loop::SessionContext::consolidated
-    pub consolidation: Option<&'a [ChatMessage]>,
+    pub consolidation: Option<&'a [ChatNode]>,
     /// **对话面开场白正文**（T-056）：`Escalate` 首响，本轮随后照进工具循环。
     ///
     /// 由 `chat_loop::apply_verdict` 产出（`VerdictEffect::Spoke` 且理由码非
@@ -719,7 +719,7 @@ pub(crate) struct V2TurnResult {
     /// 本轮 v2 原生**额外产生**的消息（工具轮：助手中途正文 + ToolCall + 工具结果），
     /// 按产生顺序。chat_loop 把它们并入 `context.messages`——落库权威是那份
     /// 内存镜像（`persist_messages` 只写它的尾部增量），不并入就只看得见不落库。
-    pub messages: Vec<ChatMessage>,
+    pub messages: Vec<ChatNode>,
 }
 
 /// 一轮的执行：事实原生入格 + 生成（含工具循环）+ 流式回 UI。
@@ -738,7 +738,7 @@ fn supplement_into_request(
     store: &crate::symbio_core::EventWalStore,
     actor: &ActorSpec,
     turn_no: u64,
-    sink_msgs: &Arc<std::sync::Mutex<Vec<ChatMessage>>>,
+    sink_msgs: &Arc<std::sync::Mutex<Vec<ChatNode>>>,
     no_counter: &std::sync::atomic::AtomicU64,
 ) -> Vec<crate::symbio_core::PromptMessage> {
     let Some(drained) = batch else {
@@ -794,10 +794,10 @@ fn supplement_into_request(
             "[Turn] 补充落格失败（仍注入本轮，下一轮起不可见）: {e:?}"
         );
     }
-    let msg = ChatMessage {
+    let msg = ChatNode {
         // 沿用第一条补充的 id（见 `DrainedSupplement::id` 的说明）
         id: drained.id.clone(),
-        role: Some(MessageRole::User),
+        role: Some(NodeRole::User),
         content: Some(MessageContent::Text(text.clone())),
         meta: Some(serde_json::json!({
             super::transcript::supplements::META_SUPPLEMENT: true,
@@ -866,7 +866,7 @@ fn supplement_into_request(
 /// （有 `ActorSpec`）、一个在轮外（只有名字）——收窄到真正用到的那一项。
 pub(crate) fn consolidate_into_wal(
     store: &EventWalStore,
-    messages: &[ChatMessage],
+    messages: &[ChatNode],
     principal: &str,
 ) -> Option<Seq> {
     let existing = store.range(Seq::new(0));
@@ -933,7 +933,7 @@ pub(crate) fn consolidate_into_wal(
 /// **只比 id、不比正文**：快照的语义是「这份列表**取代**了它之前的一切」——判据是
 /// **身份**，不是内容。正文在快照落格之后仍可被 `message.edited` 改（那是另一条事实），
 /// 把它也算进判据会让「同一份快照」在编辑之后不再相等。
-fn same_message_ids(a: &[ChatMessage], b: &[ChatMessage]) -> bool {
+fn same_message_ids(a: &[ChatNode], b: &[ChatNode]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.id == y.id)
 }
 
@@ -953,7 +953,7 @@ fn same_message_ids(a: &[ChatMessage], b: &[ChatMessage]) -> bool {
 /// 换「答不出来」。
 pub(crate) fn consolidate_outside_turn(
     session: &PersistentChatSession,
-    messages: &[ChatMessage],
+    messages: &[ChatNode],
     principal: &str,
 ) {
     let Some(dir) = session.session_dir() else {
@@ -1027,7 +1027,7 @@ pub(crate) async fn execute_final_reply_turn(
     // 本轮之前发生过压缩 ⇒ 压缩后的整份消息列表（S2.7-b2，与 [`execute_turn`] 同源）。
     // 答话轮在步骤 2 就短路收尾，**不进** [`execute_turn`]，所以它也得自己落这一格
     // ——否则「上一轮末尾压过一次、这一轮是答话轮」时那次压缩永远不入格。
-    consolidation: Option<&[ChatMessage]>,
+    consolidation: Option<&[ChatNode]>,
 ) -> Result<(), PluginError> {
     let dir = session.session_dir().ok_or_else(|| {
         PluginError::InternalError("v2 执行需要持久会话（临时会话无事实源）".into())
@@ -1193,7 +1193,7 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     // 执行完随 `V2TurnResult` 回灌进 `context.messages`（落库动作就是
     // `context.messages.push(merged)`）。不回灌就只活在这一次请求里，
     // 重启即丢，而 t19 等的正是落库那条。
-    let collected: Arc<std::sync::Mutex<Vec<ChatMessage>>> =
+    let collected: Arc<std::sync::Mutex<Vec<ChatNode>>> =
         Arc::new(std::sync::Mutex::new(Vec::new()));
 
     // 流式桥：分帧侧（同步回调）与发射侧（异步任务）经 unbounded 通道解耦。
@@ -1214,16 +1214,16 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
                     parent,
                     text,
                     kind,
-                } => ChatMessage {
+                } => ChatNode {
                     id,
                     parent_id: Some(parent),
-                    role: Some(MessageRole::Assistant),
+                    role: Some(NodeRole::Assistant),
                     msg_type: Some(kind.msg_type()),
                     content: Some(MessageContent::Text(text)),
-                    status: Some(MessageStatus::Streaming),
+                    status: Some(NodeStatus::Streaming),
                     ..Default::default()
                 },
-                UiFrame::Delta { id, text } => ChatMessage {
+                UiFrame::Delta { id, text } => ChatNode {
                     id,
                     delta: Some(text),
                     ..Default::default()
@@ -1233,13 +1233,13 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
                     parent,
                     text,
                     kind,
-                } => ChatMessage {
+                } => ChatNode {
                     id,
                     parent_id: Some(parent),
-                    role: Some(MessageRole::Assistant),
+                    role: Some(NodeRole::Assistant),
                     msg_type: Some(kind.msg_type()),
                     content: Some(MessageContent::Text(text)),
-                    status: Some(MessageStatus::Completed),
+                    status: Some(NodeStatus::Completed),
                     ..Default::default()
                 },
                 UiFrame::Barrier(done) => {
@@ -1566,7 +1566,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
         .map_err(|e| PluginError::InternalError(format!("流式发射任务失败：{e}")))?;
 
     // 中止：收束格已由运行器落格（`f-{turn}`，载荷 `status: "aborted"` + `terminated`），
-    // 出口走 Aborted——由 chat_loop/消费循环落库为 `MessageStatus::Aborted`
+    // 出口走 Aborted——由 chat_loop/消费循环落库为 `NodeStatus::Aborted`
     // + 会话结局 `aborted`（**不是** `failed`）。
     // 记忆与学习也**不写**——中止的轮次没有定稿产出，没有可固化的东西。
     //
@@ -1585,13 +1585,13 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
             ));
         }
         if !reasoning_text.trim().is_empty() {
-            partial.push(ChatMessage {
+            partial.push(ChatNode {
                 id: reasoning_child_id,
                 parent_id: Some(root_id.to_string()),
-                role: Some(MessageRole::Assistant),
-                msg_type: Some(MessageType::Reasoning),
+                role: Some(NodeRole::Assistant),
+                msg_type: Some(NodeKind::Reasoning),
                 content: Some(MessageContent::Text(reasoning_text.clone())),
-                status: Some(MessageStatus::Completed),
+                status: Some(NodeStatus::Completed),
                 timestamp: Some(crate::symbio_core::clock_now_ms()),
                 ..Default::default()
             });
@@ -1726,7 +1726,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
     // 用户先插话、工具结果后到，这是时间序（`persist_messages` 只写尾部增量，
     // 顺序错了落库就乱了）。
     // 同上：锁拿不到就用空的（落库镜像少这批补充，其余不受影响）。
-    let mut all_messages: Vec<ChatMessage> = collected
+    let mut all_messages: Vec<ChatNode> = collected
         .lock()
         .map(|mut v| std::mem::take(&mut *v))
         .unwrap_or_default();

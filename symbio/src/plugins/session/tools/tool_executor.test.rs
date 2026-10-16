@@ -139,8 +139,8 @@ async fn missing_tool_call_id_is_recorded_as_failure() {
     .await;
 
     assert_eq!(msgs.len(), 1, "必须生成失败结果子节点（而非跳过）");
-    assert_eq!(msgs[0].role, Some(MessageRole::Tool));
-    assert_eq!(msgs[0].status, Some(MessageStatus::Completed));
+    assert_eq!(msgs[0].role, Some(NodeRole::Tool));
+    assert_eq!(msgs[0].status, Some(NodeStatus::Completed));
     assert!(
         msgs[0]
             .content
@@ -152,7 +152,7 @@ async fn missing_tool_call_id_is_recorded_as_failure() {
     assert!(!msgs[0].parent_id.as_deref().unwrap_or("").is_empty());
 
     assert_eq!(updates.len(), 1, "必须生成父节点失败补丁");
-    assert_eq!(updates[0].status, Some(MessageStatus::Completed));
+    assert_eq!(updates[0].status, Some(NodeStatus::Completed));
     assert_eq!(
         updates[0]
             .meta
@@ -260,8 +260,8 @@ async fn unparseable_arguments_are_refused_not_executed() {
     .await;
 
     assert_eq!(msgs.len(), 1, "必须生成失败结果子节点（而非跳过）");
-    assert_eq!(msgs[0].role, Some(MessageRole::Tool));
-    assert_eq!(msgs[0].status, Some(MessageStatus::Completed));
+    assert_eq!(msgs[0].role, Some(NodeRole::Tool));
+    assert_eq!(msgs[0].status, Some(NodeStatus::Completed));
     assert_eq!(msgs[0].parent_id.as_deref(), Some("tc-broken"));
     let text = msgs[0]
         .content
@@ -275,7 +275,7 @@ async fn unparseable_arguments_are_refused_not_executed() {
 
     assert_eq!(updates.len(), 1, "必须生成父节点失败补丁");
     assert_eq!(updates[0].id, "tc-broken");
-    assert_eq!(updates[0].status, Some(MessageStatus::Completed));
+    assert_eq!(updates[0].status, Some(NodeStatus::Completed));
 }
 
 /// 回归（真实事故）：中文参数摘要不得在字节边界上 panic。
@@ -312,14 +312,14 @@ fn args_summary_handles_multibyte_args() {
 
 /// 造两个已广播的 ToolCall 父节点（模拟 settle_reasoning 之后的权威转写形态——
 /// ToolCallDelta 必然先广播过完整节点，`context.messages` 里一定有它们）。
-fn tc_context(ids: &[&str]) -> Vec<ChatMessage> {
+fn tc_context(ids: &[&str]) -> Vec<ChatNode> {
     ids.iter()
-        .map(|id| ChatMessage {
+        .map(|id| ChatNode {
             id: (*id).into(),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::ToolCall),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::ToolCall),
             name: Some("vdfs_list".into()),
-            status: Some(MessageStatus::Streaming),
+            status: Some(NodeStatus::Streaming),
             ..Default::default()
         })
         .collect()
@@ -379,8 +379,8 @@ async fn aborted_batch_terminates_every_tool_call() {
         "未执行的调用同样必须有结果子节点，否则前端卡片有请求、无响应"
     );
     for m in &msgs {
-        assert_eq!(m.role, Some(MessageRole::Tool));
-        assert_eq!(m.status, Some(MessageStatus::Completed));
+        assert_eq!(m.role, Some(NodeRole::Tool));
+        assert_eq!(m.status, Some(NodeStatus::Completed));
         assert!(
             m.content
                 .as_ref()
@@ -393,9 +393,9 @@ async fn aborted_batch_terminates_every_tool_call() {
     for (u, id) in updates.iter().zip(["tc1", "tc2"]) {
         // 完整快照语义：id / role / type 保留，终态字段如实应用
         assert_eq!(u.id, id, "快照必须对应它自己的调用");
-        assert_eq!(u.role, Some(MessageRole::Assistant), "完整快照保留节点身份");
-        assert_eq!(u.msg_type, Some(MessageType::ToolCall));
-        assert_eq!(u.status, Some(MessageStatus::Completed));
+        assert_eq!(u.role, Some(NodeRole::Assistant), "完整快照保留节点身份");
+        assert_eq!(u.msg_type, Some(NodeKind::ToolCall));
+        assert_eq!(u.status, Some(NodeStatus::Completed));
         assert_eq!(
             u.meta
                 .as_ref()
@@ -448,8 +448,8 @@ async fn overflow_dropped_call_returns_feedback_without_execution() {
     .await;
 
     assert_eq!(msgs.len(), 1, "丢弃调用必须有结果子节点（S20.1 不变量）");
-    assert_eq!(msgs[0].role, Some(MessageRole::Tool));
-    assert_eq!(msgs[0].status, Some(MessageStatus::Completed));
+    assert_eq!(msgs[0].role, Some(NodeRole::Tool));
+    assert_eq!(msgs[0].status, Some(NodeStatus::Completed));
     let text = msgs[0]
         .content
         .as_ref()
@@ -468,7 +468,7 @@ async fn overflow_dropped_call_returns_feedback_without_execution() {
 
     assert_eq!(updates.len(), 1, "父节点必须同步收敛，否则前端永远转圈");
     assert_eq!(updates[0].id, "tc-overflow");
-    assert_eq!(updates[0].status, Some(MessageStatus::Completed));
+    assert_eq!(updates[0].status, Some(NodeStatus::Completed));
     assert_eq!(
         updates[0]
             .meta
@@ -533,7 +533,7 @@ async fn interactive_break_leaves_result_for_skipped_calls() {
         .iter()
         .find(|m| m.parent_id.as_deref() == Some("tc2"))
         .expect("tc2 的结果子节点缺失");
-    assert_eq!(skipped.status, Some(MessageStatus::Completed));
+    assert_eq!(skipped.status, Some(NodeStatus::Completed));
     assert_eq!(
         skipped
             .meta
@@ -553,15 +553,15 @@ async fn interactive_break_leaves_result_for_skipped_calls() {
 #[test]
 fn not_executed_patch_is_completed_not_failed() {
     // 完整副本 + 就地应用终态（发射端从权威转写取副本后调用）
-    let mut p = ChatMessage {
+    let mut p = ChatNode {
         id: "tc1".into(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::ToolCall),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::ToolCall),
         ..Default::default()
     };
     apply_not_executed(&mut p, "not_executed");
     assert_eq!(p.id, "tc1", "整条替换语义下 id 必须保持");
-    assert_eq!(p.status, Some(MessageStatus::Completed));
+    assert_eq!(p.status, Some(NodeStatus::Completed));
     assert!(p.error.is_none());
     assert_eq!(
         p.meta.as_ref().and_then(|m| m.get("success")),
@@ -573,7 +573,7 @@ fn not_executed_patch_is_completed_not_failed() {
     );
     // 成因可区分：「被钩子拦下」与「批次没轮到」不是同一件事，
     // 共用一个标记会让事后排查只能靠猜。
-    let mut blocked = ChatMessage {
+    let mut blocked = ChatNode {
         id: "tc1".into(),
         ..Default::default()
     };
@@ -700,9 +700,9 @@ fn build_user_prompt_message_uses_the_orchestrator_owned_ids() {
         Some("tc-1"),
         "必须锚在发起它的 ToolCall 下"
     );
-    assert_eq!(msg.msg_type, Some(MessageType::UserPrompt));
-    assert_eq!(msg.status, Some(MessageStatus::WaitingUserAction));
-    assert_eq!(msg.role, Some(MessageRole::Tool));
+    assert_eq!(msg.msg_type, Some(NodeKind::UserPrompt));
+    assert_eq!(msg.status, Some(NodeStatus::WaitingUserAction));
+    assert_eq!(msg.role, Some(NodeRole::Tool));
 
     let meta = msg.meta.expect("user_prompt 必须带 meta");
     assert_eq!(meta["failure_kind"], json!("needs_interaction"));
@@ -943,11 +943,11 @@ async fn budget_exhausted_refuses_the_tool_and_reports_a_break() {
     let abort = ExecAbortSignal::new();
     // 父 ToolCall 节点：参数流式阶段已广播过（生产里它就在 `context.messages`），
     // 终态定稿要从这份权威转写取副本——不给它，`emit_parent_finalized` 会判协议违例。
-    let parent = ChatMessage {
+    let parent = ChatNode {
         id: "tc-gate".into(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::ToolCall),
-        status: Some(MessageStatus::Streaming),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::ToolCall),
+        status: Some(NodeStatus::Streaming),
         name: Some("vdfs_list".into()),
         ..Default::default()
     };
@@ -1125,11 +1125,11 @@ async fn a_producer_only_principal_is_refused_the_task_table() {
 
     let sink = ExecEventSink::silent();
     let abort = ExecAbortSignal::new();
-    let parent = ChatMessage {
+    let parent = ChatNode {
         id: "tc-task".into(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::ToolCall),
-        status: Some(MessageStatus::Streaming),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::ToolCall),
+        status: Some(NodeStatus::Streaming),
         name: Some("local/todo_write".into()),
         ..Default::default()
     };
@@ -1195,11 +1195,11 @@ async fn the_trivial_session_is_not_refused_the_task_table() {
 
     let sink = ExecEventSink::silent();
     let abort = ExecAbortSignal::new();
-    let parent = ChatMessage {
+    let parent = ChatNode {
         id: "tc-task2".into(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::ToolCall),
-        status: Some(MessageStatus::Streaming),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::ToolCall),
+        status: Some(NodeStatus::Streaming),
         name: Some("local/todo_write".into()),
         ..Default::default()
     };

@@ -7,7 +7,7 @@
 //!
 //! ## 输入是**消息载荷**
 //!
-//! 渲染器直接消费 VDFS 变更里的 [`ChatMessage`] 载荷（`vdfs` 频道、落点 =
+//! 渲染器直接消费 VDFS 变更里的 [`ChatNode`] 载荷（`vdfs` 频道、落点 =
 //! 消息目录 `<sid>/message`，见 `client.rs`）。一帧就是一条消息，语义全在字段上：
 //!
 //! | 帧里有什么 | 渲染动作 |
@@ -30,8 +30,8 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 
-use symbio::symbio_core::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
+use symbio::symbio_core::chat_node::{
+    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind,
 };
 use symbio::symbio_core::VDFS_STATUS_WORKING;
 
@@ -60,7 +60,7 @@ pub struct Renderer {
     quiet: bool,
     verbose: bool,
     /// 本轮已合并的消息快照（id → 完整消息），用于算「还没打印过的那一段」
-    msgs: HashMap<String, ChatMessage>,
+    msgs: HashMap<String, ChatNode>,
     /// 每个节点**已打印到 stdout** 的字符数（正文尾巴的依据，见 [`Self::on_message`]）
     printed: HashMap<String, usize>,
     /// 已播报过的工具调用 id
@@ -109,12 +109,12 @@ impl Renderer {
     ///
     /// 是否回显由 [`Self::render`] 按 `msg_type` / `role` 判定（工具结果与参数
     /// 都不回显）。目标未知时就地建占位快照（帧自给自足）。
-    pub fn on_message(&mut self, message: &ChatMessage) {
+    pub fn on_message(&mut self, message: &ChatNode) {
         if message.id.is_empty() {
             return;
         }
         // 删除帧：本 CLI 不做消息树持久渲染，丢快照即可。
-        if message.status == Some(MessageStatus::Removed) {
+        if message.status == Some(NodeStatus::Removed) {
             self.msgs.remove(&message.id);
             return;
         }
@@ -182,7 +182,7 @@ impl Renderer {
                 delta,
                 merged.msg_type.clone().unwrap_or_default(),
                 merged.role.clone(),
-                merged.status == Some(MessageStatus::Failed),
+                merged.status == Some(NodeStatus::Failed),
                 merged.error.clone(),
                 merged.name.clone(),
                 progress,
@@ -194,7 +194,7 @@ impl Renderer {
         // （同一个节点 id 换类型）——按增量算它是「无新增」，于是永远打不出来：
         // reasoning 模型「只思考不作答」的那一轮，CLI 什么都不输出还以失败退出，
         // 而模型明明答了（落库与网格重建里那段就是正文）。
-        let tail = if mtype == MessageType::Text {
+        let tail = if mtype == NodeKind::Text {
             self.msgs
                 .get(&message.id)
                 .and_then(|m| m.content.as_ref())
@@ -225,20 +225,20 @@ impl Renderer {
     fn render(
         &mut self,
         id: &str,
-        mtype: MessageType,
-        role: Option<MessageRole>,
+        mtype: NodeKind,
+        role: Option<NodeRole>,
         delta: &str,
         tail: &str,
         name: Option<String>,
         progress: bool,
     ) -> bool {
         match mtype {
-            MessageType::Text => {
+            NodeKind::Text => {
                 // 只回显模型正文：用户消息由 CLI 自己输出，工具结果文本不回显
                 // （role 尚未到达的早期增量按"助手"处理，避免漏字）。
                 let suppress = matches!(
                     role,
-                    Some(MessageRole::User) | Some(MessageRole::Tool) | Some(MessageRole::System)
+                    Some(NodeRole::User) | Some(NodeRole::Tool) | Some(NodeRole::System)
                 );
                 if suppress {
                     return false;
@@ -262,12 +262,12 @@ impl Renderer {
                 }
                 false
             }
-            MessageType::Reasoning if self.verbose && !delta.is_empty() && !self.quiet => {
+            NodeKind::Reasoning if self.verbose && !delta.is_empty() && !self.quiet => {
                 // 推理内容走 stderr，避免污染 stdout 的正文流
                 write_stderr(&format!("\x1b[2m{delta}\x1b[0m"));
                 false
             }
-            MessageType::ToolCall if self.tools_announced.insert(id.to_string()) => {
+            NodeKind::ToolCall if self.tools_announced.insert(id.to_string()) => {
                 let name = name.unwrap_or_else(|| "tool".to_string());
                 if !self.quiet {
                     if self.wrote_text {

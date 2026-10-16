@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::symbio_core::capability_to_wire;
-pub use crate::symbio_core::chat_message::{ChatMessage, ContentPart, MessageContent, MessageRole};
+pub use crate::symbio_core::chat_node::{ChatNode, ContentPart, MessageContent, NodeRole};
 pub use crate::symbio_core::CapabilityMeta;
 
 /// 工具调用定义
@@ -25,7 +25,7 @@ pub struct ToolCall {
 pub struct NativeMessage {
     #[serde(default)]
     pub id: String,
-    pub role: MessageRole,
+    pub role: NodeRole,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<MessageContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -40,7 +40,7 @@ pub struct NativeMessage {
     pub prompt: Option<String>,
     #[serde(default)]
     pub timestamp: i64,
-    /// 源自 `ChatMessage::seq` 的单调序号，仅用于保序；不参与 API 请求体序列化。
+    /// 源自 `ChatNode::seq` 的单调序号，仅用于保序；不参与 API 请求体序列化。
     #[serde(skip)]
     pub seq: Option<i64>,
     /// tool 调用的成功标志：None 视为成功；Some(false) 触发 Anthropic tool_result 的 `is_error=true`
@@ -50,7 +50,7 @@ pub struct NativeMessage {
     pub success: Option<bool>,
 }
 
-impl From<NativeMessage> for ChatMessage {
+impl From<NativeMessage> for ChatNode {
     fn from(msg: NativeMessage) -> Self {
         Self {
             id: if msg.id.is_empty() {
@@ -69,7 +69,7 @@ impl From<NativeMessage> for ChatMessage {
             content: msg.content,
             // 增量是帧的形态（只在出方向的转写帧上），不是消息的形态。
             delta: None,
-            status: Some(crate::symbio_core::chat_message::MessageStatus::Completed),
+            status: Some(crate::symbio_core::chat_node::NodeStatus::Completed),
             meta: None,
             timestamp: Some(msg.timestamp),
             seq: msg.seq,
@@ -81,11 +81,11 @@ impl From<NativeMessage> for ChatMessage {
     }
 }
 
-impl From<ChatMessage> for NativeMessage {
-    fn from(msg: ChatMessage) -> Self {
-        let role = msg.role.clone().unwrap_or(MessageRole::User);
+impl From<ChatNode> for NativeMessage {
+    fn from(msg: ChatNode) -> Self {
+        let role = msg.role.clone().unwrap_or(NodeRole::User);
         // For tool result (Tool) messages, parent_id is the tool_call_id
-        let tool_call_id = if role == MessageRole::Tool {
+        let tool_call_id = if role == NodeRole::Tool {
             msg.parent_id.clone()
         } else {
             None
@@ -111,10 +111,10 @@ impl NativeMessage {
     pub fn to_api_value(&self) -> serde_json::Value {
         let mut obj = serde_json::Map::new();
         let role_str = match self.role {
-            MessageRole::Tool => "tool",
-            MessageRole::User => "user",
-            MessageRole::Assistant => "assistant",
-            MessageRole::System => "system",
+            NodeRole::Tool => "tool",
+            NodeRole::User => "user",
+            NodeRole::Assistant => "assistant",
+            NodeRole::System => "system",
         };
         obj.insert("role".to_string(), serde_json::json!(role_str));
 
@@ -160,7 +160,7 @@ impl NativeMessage {
                         "type": "text",
                         "text": prompt
                     }])
-                } else if self.role == MessageRole::Assistant && self.tool_calls.is_some() {
+                } else if self.role == NodeRole::Assistant && self.tool_calls.is_some() {
                     // 带工具调用的 assistant 消息：content 允许为 null（OpenAI 约定），
                     // 其余情况一律兜底为空串，避免把 `null` 发到 provider 触发
                     // "messages[N]: data did not match any variant" 反序列化失败。
@@ -214,7 +214,7 @@ impl NativeMessage {
     /// 转换为 Responses API 格式
     pub fn to_responses_api_value(&self) -> serde_json::Value {
         // 如果是工具输出
-        if self.role == MessageRole::Tool {
+        if self.role == NodeRole::Tool {
             let mut item = serde_json::Map::new();
             item.insert(
                 "type".to_string(),
@@ -284,7 +284,7 @@ impl NativeMessage {
                     if let Some(ref p) = self.prompt {
                         final_text = format!("{}\n\n{}", p, final_text);
                     }
-                    let content_part = if self.role == MessageRole::User {
+                    let content_part = if self.role == NodeRole::User {
                         serde_json::json!([{"type": "input_text", "text": final_text}])
                     } else {
                         serde_json::json!([{"type": "text", "text": final_text}])
@@ -296,7 +296,7 @@ impl NativeMessage {
                         .iter()
                         .map(|part| match part {
                             ContentPart::Text { text } => {
-                                if self.role == MessageRole::User {
+                                if self.role == NodeRole::User {
                                     serde_json::json!({"type": "input_text", "text": text})
                                 } else {
                                     serde_json::json!({"type": "text", "text": text})
@@ -309,7 +309,7 @@ impl NativeMessage {
                         .collect();
 
                     if let Some(ref p) = self.prompt {
-                        if self.role == MessageRole::User {
+                        if self.role == NodeRole::User {
                             converted_parts
                                 .insert(0, serde_json::json!({"type": "input_text", "text": p}));
                         } else {

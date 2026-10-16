@@ -1,4 +1,4 @@
-use crate::symbio_core::chat_message::{ChatMessage, ResumeRequest};
+use crate::symbio_core::chat_node::{ChatNode, ResumeRequest};
 use serde::{Deserialize, Serialize};
 
 /// Model 推理请求 (由 Session 插件或 Agent 发起)
@@ -25,7 +25,7 @@ pub struct Request {
     /// 系统提示词
     pub system_prompt: Option<String>,
     /// 当前需要发送的单条消息
-    pub single_message: Option<ChatMessage>,
+    pub single_message: Option<ChatNode>,
     /// 是否使用流式输出
     pub stream: Option<bool>,
 

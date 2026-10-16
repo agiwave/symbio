@@ -51,7 +51,7 @@
 //! 把两者混成一个开关，会让「用户看得到但模型看不到」与「模型看得到但用户看不到」
 //! 这两种**都错**的状态变成同一件事。
 
-use crate::symbio_core::chat_message::{ChatMessage, MessageRole, MessageType};
+use crate::symbio_core::chat_node::{ChatNode, NodeRole, NodeKind};
 
 /// 投影窗口（条数）——**默认值**，两个调用方（`classify` / `compose`）共用。
 ///
@@ -76,8 +76,8 @@ pub const CONVERSATION_VIEW_LIMIT: usize = 12;
 /// 投影出对话线：按存储顺序保留最后 `limit` 条（`limit = 0` 表示不限制）。
 ///
 /// 返回的是**新 `Vec`**（克隆节点），调用方可以自由改写而不影响存储。
-pub fn conversation_view(messages: &[ChatMessage], limit: usize) -> Vec<ChatMessage> {
-    let mut out: Vec<ChatMessage> = messages
+pub fn conversation_view(messages: &[ChatNode], limit: usize) -> Vec<ChatNode> {
+    let mut out: Vec<ChatNode> = messages
         .iter()
         .filter(|m| is_conversation_node(m))
         .cloned()
@@ -92,12 +92,12 @@ pub fn conversation_view(messages: &[ChatMessage], limit: usize) -> Vec<ChatMess
 ///
 /// **位置（`parent_id`）不参与判定**：`Turn` 的子 `Text` 是回复正文，它和根级的
 /// 首响一样是"助手说过的话"。
-fn is_conversation_node(m: &ChatMessage) -> bool {
-    let is_text = matches!(m.msg_type, None | Some(MessageType::Text));
+fn is_conversation_node(m: &ChatNode) -> bool {
+    let is_text = matches!(m.msg_type, None | Some(NodeKind::Text));
     is_text
         && matches!(
             m.role,
-            Some(MessageRole::User) | Some(MessageRole::Assistant)
+            Some(NodeRole::User) | Some(NodeRole::Assistant)
         )
 }
 

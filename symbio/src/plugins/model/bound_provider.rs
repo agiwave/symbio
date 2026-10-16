@@ -23,7 +23,7 @@
 use crate::plugin_error;
 use crate::plugin_info;
 use crate::plugin_warn;
-use crate::symbio_core::chat_message::ChatMessage;
+use crate::symbio_core::chat_node::ChatNode;
 use crate::symbio_core::TurnOutput;
 use crate::symbio_core::{CapabilityMeta, ExecEnv, ModelProvider, PluginError};
 use async_trait::async_trait;
@@ -83,7 +83,7 @@ impl ModelProvider for BoundProvider {
     async fn execute_turn(
         &self,
         system_prompt: &str,
-        messages: &[ChatMessage],
+        messages: &[ChatNode],
         tools: &[CapabilityMeta],
         root_id: &str,
         env: &ExecEnv,

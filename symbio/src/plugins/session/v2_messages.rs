@@ -49,7 +49,7 @@ use std::sync::{LazyLock, Mutex};
 
 use serde_json::Value;
 
-use crate::symbio_core::chat_message::ChatMessage;
+use crate::symbio_core::chat_node::ChatNode;
 use crate::symbio_core::{
     AppendError, Entity, Event, EventWalStore, Seq, Store, Verb, EVENT_MESSAGE_ADDED,
     EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED,
@@ -187,7 +187,7 @@ const NODE_ID_KEYS: &[&str] = &["id", "text_id", "reasoning_id", "tool_call_id",
 ///
 /// `msg` 是**补丁应用后**的整条消息（不是补丁本身）——重建与转写都按 id 整条替换，
 /// 拿到整条就不必再猜「这次改的是哪几个字段」（理由见 `EVENT_MESSAGE_EDITED`）。
-pub(crate) fn edited(session_dir: &Path, msg: &ChatMessage) {
+pub(crate) fn edited(session_dir: &Path, msg: &ChatNode) {
     let payload = match serde_json::to_value(msg) {
         Ok(v) => v,
         Err(e) => {
@@ -212,7 +212,7 @@ pub(crate) fn edited(session_dir: &Path, msg: &ChatMessage) {
 /// 否则同一条节点有两个 owner（ADR-049 理由 1）。
 ///
 /// 空列表不落格：「没有节点诞生」不该在事实源上留下痕迹，与 [`removed`] 同一条判据。
-pub(crate) fn added(session_dir: &Path, msgs: &[ChatMessage]) {
+pub(crate) fn added(session_dir: &Path, msgs: &[ChatNode]) {
     if msgs.is_empty() {
         return;
     }
@@ -342,7 +342,7 @@ fn actor_and_ts(payload: &Value) -> (String, i64) {
     // ——那是此刻，也是事实。
     //
     // 一律写 0，于是 548 个事件的时间戳全是一坨相同的 0，时序无从谈起——不是
-    // 「未知」，是**一句假话**（假装都发生在纪元起点）。根因在上游：`MessageRole::
+    // 「未知」，是**一句假话**（假装都发生在纪元起点）。根因在上游：`NodeRole::
     // Assistant` 的构造点有 9 处，只有 1 处填了 `timestamp`（其余是复制胚胎的各份
     // 手写实现）。逐个去补那 8 处是同一类错误的第三次重演——这里兜底一层，无论谁
     // 写的消息，落到事实上都有真实时刻。

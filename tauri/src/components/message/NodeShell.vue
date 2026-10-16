@@ -71,7 +71,7 @@
 
 <script setup lang="ts">
 import { computed, onScopeDispose, ref, watch } from 'vue'
-import { CHAT_ROLE_USER, type ChatMessage } from '@/schemas/chat_message'
+import { CHAT_ROLE_USER, type ChatNode } from '@/schemas/chat_node'
 import { useMessageContent } from '@/composables/useMessageContent'
 import { useRunningClock } from '@/composables/useRunningClock'
 import {
@@ -92,7 +92,7 @@ import {
 } from '@/registry/messageTypes'
 
 const props = defineProps<{
-  node: ChatMessage
+  node: ChatNode
   /** 呈现判定入参（由分派器算好传入，避免同一节点被算两遍） */
   facets: MessageFacets
   /** 嵌套深度：0 = 主会话根级；>0 = 工具 / 子 agent 内部的子会话流层级 */

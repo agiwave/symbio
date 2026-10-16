@@ -4,7 +4,7 @@
 //! `model_chat.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
-use crate::symbio_core::chat_message::ResumeAction;
+use crate::symbio_core::chat_node::ResumeAction;
 
 /// 全字段显式赋值（`Some`）的样本，供键集合契约使用。
 ///
@@ -14,7 +14,7 @@ use crate::symbio_core::chat_message::ResumeAction;
 fn fully_populated() -> Request {
     Request {
         system_prompt: Some("p".into()),
-        single_message: Some(ChatMessage::default()),
+        single_message: Some(ChatNode::default()),
         stream: Some(false),
         max_tool_rounds: Some(3),
         tool_context_window: Some(4),

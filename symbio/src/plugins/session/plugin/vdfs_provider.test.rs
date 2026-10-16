@@ -779,13 +779,13 @@ async fn seed_messages(p: &SessionPlugin, id: &str, texts: &[&str]) {
     let s = Session::new(id);
     p.save_session(&s).await.unwrap();
 
-    let nodes: Vec<cm::ChatMessage> = texts
+    let nodes: Vec<cm::ChatNode> = texts
         .iter()
         .enumerate()
-        .map(|(i, t)| cm::ChatMessage {
+        .map(|(i, t)| cm::ChatNode {
             id: format!("m{i}"),
-            role: Some(cm::MessageRole::User),
-            msg_type: Some(cm::MessageType::Text),
+            role: Some(cm::NodeRole::User),
+            msg_type: Some(cm::NodeKind::Text),
             content: Some(cm::MessageContent::Text((*t).to_string())),
             seq: Some(i as i64),
             ..Default::default()

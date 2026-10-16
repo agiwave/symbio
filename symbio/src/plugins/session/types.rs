@@ -1,12 +1,12 @@
 //! Session 数据类型：`Session` 实体 + 标题推导 + 清单投影。
 //!
-//! 注意与 `core/schemas/session/chat_message.rs`（消息级类型）区分：本文件
+//! 注意与 `core/schemas/session/chat_node.rs`（消息级类型）区分：本文件
 //! 描述"会话"粒度的持久化实体。`derive_session_title` 供会话创建时兜底命名，
 //! 心跳调度参数（`HeartbeatConfig`）归心跳域，见 `heartbeat/mod.rs`。
 
 use serde::{Deserialize, Serialize};
 
-pub use crate::symbio_core::chat_message::ChatMessage;
+pub use crate::symbio_core::chat_node::ChatNode;
 
 /// 会话列表一行摘要：**最新一条助手回复**的首行（压缩空白、限长 60 字符）。
 ///
@@ -17,7 +17,7 @@ pub use crate::symbio_core::chat_message::ChatMessage;
 ///
 /// 只认**助手**消息：用户刚发的那句已经在标题里了。纯工具调用 / 推理消息没有
 /// 正文（`to_text()` 为空），`find` 会继续往前找最近一条**有文本**的回复。
-pub fn derive_session_summary(messages: &[ChatMessage]) -> Option<String> {
+pub fn derive_session_summary(messages: &[ChatNode]) -> Option<String> {
     const SUMMARY_MAX_CHARS: usize = 60;
     let text = messages
         .iter()
@@ -25,7 +25,7 @@ pub fn derive_session_summary(messages: &[ChatMessage]) -> Option<String> {
         .filter(|m| {
             matches!(
                 m.role,
-                Some(crate::symbio_core::chat_message::MessageRole::Assistant)
+                Some(crate::symbio_core::chat_node::NodeRole::Assistant)
             )
         })
         .filter_map(|m| m.content.as_ref().map(|c| c.to_text()))
@@ -117,7 +117,7 @@ impl SessionSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
     pub id: String,
-    pub messages: Vec<ChatMessage>,
+    pub messages: Vec<ChatNode>,
     pub created_at: i64,
     pub updated_at: i64,
     pub metadata: serde_json::Value,
@@ -212,21 +212,21 @@ impl Session {
 /// 取**最后一条**而非第一条：列表里的会话名该反映「最近在聊什么」，不该被
 /// 第一句话永久钉住。显式命名（`metadata.title`）仍然优先——用户自己起的名字
 /// 不该被自动派生顶掉（见 [`Session::display_title`]）。
-pub(crate) fn derive_session_title(messages: &[ChatMessage]) -> Option<String> {
+pub(crate) fn derive_session_title(messages: &[ChatNode]) -> Option<String> {
     const SESSION_TITLE_MAX_CHARS: usize = 24;
     for m in messages.iter().rev() {
         if !matches!(
             m.role,
-            Some(crate::symbio_core::chat_message::MessageRole::User)
+            Some(crate::symbio_core::chat_node::NodeRole::User)
         ) {
             continue;
         }
         let text = match &m.content {
-            Some(crate::symbio_core::chat_message::MessageContent::Text(s)) => s.clone(),
-            Some(crate::symbio_core::chat_message::MessageContent::Parts(parts)) => parts
+            Some(crate::symbio_core::chat_node::MessageContent::Text(s)) => s.clone(),
+            Some(crate::symbio_core::chat_node::MessageContent::Parts(parts)) => parts
                 .iter()
                 .filter_map(|p| match p {
-                    crate::symbio_core::chat_message::ContentPart::Text { text } => {
+                    crate::symbio_core::chat_node::ContentPart::Text { text } => {
                         Some(text.clone())
                     }
                     _ => None,

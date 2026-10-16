@@ -36,8 +36,8 @@ use super::super::event::{
     EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED,
     EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
-use super::super::schemas::session::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageType,
+use super::super::schemas::session::chat_node::{
+    ChatNode, MessageContent, NodeRole, NodeKind,
 };
 use super::super::view::{Budget, View};
 use super::Projection;
@@ -66,7 +66,7 @@ pub struct TranscriptEntry {
     /// （模型会以为那是它自己刚说的）。
     ///
     /// 线上格式保持不变（`skip_serializing_if`）：这个标记是**投影内部的判别位**，
-    /// 不是线格式的一部分——落库那份 `ChatMessage` 上有它自己的 `meta` 字段
+    /// 不是线格式的一部分——落库那份 `ChatNode` 上有它自己的 `meta` 字段
     /// （`exclude_from_context`），那份才是前端与轮次窗口读的东西。
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub exclude_from_context: bool,
@@ -80,11 +80,11 @@ pub struct TranscriptView {
 
 /// 一条**结构化**的 prompt 消息：角色与正文分开，工具关联单独成字段。
 ///
-/// ## 为什么 core 自己定义这个类型，而不是直接用 provider 的 `ChatMessage`
+/// ## 为什么 core 自己定义这个类型，而不是直接用 provider 的 `ChatNode`
 ///
-/// `ChatMessage` 是**图语义**（有 `id` / `tool_calls` / `status` / 帧类型），
+/// `ChatNode` 是**图语义**（有 `id` / `tool_calls` / `status` / 帧类型），
 /// 住在 `plugins/session`；core 不认识那套（见 `DispatchOutcome` 的文档：core 只
-/// 认识「拿什么回填给模型」这段文本）。若 core 的出口就是 `ChatMessage`，core 就
+/// 认识「拿什么回填给模型」这段文本）。若 core 的出口就是 `ChatNode`，core 就
 /// 被某个 provider 的线格式绑住了。
 ///
 /// 所以 core 出**最小结构化形态**，由 adapter 边界翻译成 provider 的消息
@@ -94,7 +94,7 @@ pub struct TranscriptView {
 /// ## 为什么必须有它（ADR-048a）
 ///
 /// `ModelProvider::execute_turn` 的签名本身就是
-/// `(system_prompt, messages: &[ChatMessage], …)`——`role` + `tool_call_id` 是**跨栈契约**
+/// `(system_prompt, messages: &[ChatNode], …)`——`role` + `tool_call_id` 是**跨栈契约**
 /// 不是排版。把消息拍平成一段文本会把 `role: tool` 降级成 user 消息里的纯文本，模型就
 /// 看不到「这是工具结果」、也拿不到 `tool_call_id`——那是已判定的退步。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -199,7 +199,7 @@ impl TranscriptView {
 ///
 /// ## 为什么必须有且只有这一处翻译
 ///
-/// 快照载荷是**图语义**（[`ChatMessage`]：`parent_id` / `type` / 工具调用的父子），
+/// 快照载荷是**图语义**（[`ChatNode`]：`parent_id` / `type` / 工具调用的父子），
 /// 而转写是**扁平三角色**。两者之间必须翻译一次。若 [`transcript`] 与
 /// `prompt_fidelity` 各译一遍，两份迟早对同一条给出两种读法——而那种分叉是
 /// **静默**的（一份折了、一份没折，没有任何东西会红），正是本仓反复栽的那个坑。
@@ -216,12 +216,12 @@ impl TranscriptView {
 /// 跳过 `Turn` / `ToolCall` / `Reasoning` **不是丢事实**：事件投影里它们同样不产行
 /// ——收束格产的那条 `assistant` 行**就是**它的 Text 子节点，工具格产的那条 `tool`
 /// 行**就是**结果子节点。组合节点只是承载结构。
-pub(crate) fn snapshot_entries(msgs: &[ChatMessage]) -> Vec<(String, TranscriptEntry)> {
+pub(crate) fn snapshot_entries(msgs: &[ChatNode]) -> Vec<(String, TranscriptEntry)> {
     // 工具名在**父 ToolCall 节点**上：结果子节点只记 `parent_id`（事件投影里工具名
     // 来自 `artifact.added` 的载荷，两条路径取的是同一件事）。
     let tool_names: HashMap<&str, &str> = msgs
         .iter()
-        .filter(|m| m.msg_type == Some(MessageType::ToolCall))
+        .filter(|m| m.msg_type == Some(NodeKind::ToolCall))
         .filter_map(|m| m.name.as_deref().map(|n| (m.id.as_str(), n)))
         .collect();
     msgs.iter()
@@ -233,19 +233,19 @@ pub(crate) fn snapshot_entries(msgs: &[ChatMessage]) -> Vec<(String, TranscriptE
                 .map(MessageContent::to_text)
                 .unwrap_or_default();
             let entry = match (role, &m.msg_type) {
-                (MessageRole::User, None | Some(MessageType::Text)) => TranscriptEntry {
+                (NodeRole::User, None | Some(NodeKind::Text)) => TranscriptEntry {
                     role: "user".into(),
                     text,
                     tool: None,
                     exclude_from_context: false,
                 },
-                (MessageRole::Assistant, Some(MessageType::Text)) => TranscriptEntry {
+                (NodeRole::Assistant, Some(NodeKind::Text)) => TranscriptEntry {
                     role: "assistant".into(),
                     text,
                     tool: None,
                     exclude_from_context: meta_flag(m, "exclude_from_context"),
                 },
-                (MessageRole::Tool, None | Some(MessageType::Text)) => TranscriptEntry {
+                (NodeRole::Tool, None | Some(NodeKind::Text)) => TranscriptEntry {
                     role: "tool".into(),
                     text,
                     tool: m
@@ -267,13 +267,13 @@ pub(crate) fn snapshot_entries(msgs: &[ChatMessage]) -> Vec<(String, TranscriptE
 /// 与 `snapshot_messages` 同一条容错口径：**一条坏条目不吃掉整批**——逐条解，
 /// 解不出就跳过。空列表不是一次诞生：落一条空事实等于在事实源上留下「什么都没发生」
 /// 的痕迹。
-fn added_messages(e: &Event) -> Vec<ChatMessage> {
+fn added_messages(e: &Event) -> Vec<ChatNode> {
     e.payload
         .get("messages")
         .and_then(|v| v.as_array())
         .map(|a| {
             a.iter()
-                .filter_map(|v| serde_json::from_value::<ChatMessage>(v.clone()).ok())
+                .filter_map(|v| serde_json::from_value::<ChatNode>(v.clone()).ok())
                 .collect()
         })
         .unwrap_or_default()
@@ -281,7 +281,7 @@ fn added_messages(e: &Event) -> Vec<ChatMessage> {
 
 /// `meta` 里的布尔标记（缺失 / 非布尔一律 `false`——容错方向是「少标记」而不是
 /// 「多标记」：多标一个 `exclude_from_context` 会让界面文本**静默**漏出请求包）。
-fn meta_flag(m: &ChatMessage, key: &str) -> bool {
+fn meta_flag(m: &ChatNode, key: &str) -> bool {
     m.meta
         .as_ref()
         .and_then(|v| v.get(key))

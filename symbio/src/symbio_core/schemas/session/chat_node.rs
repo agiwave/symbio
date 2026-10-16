@@ -11,7 +11,7 @@ use super::Principal;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
-pub enum MessageRole {
+pub enum NodeRole {
     #[default]
     User,
     Assistant,
@@ -28,7 +28,7 @@ pub enum MessageRole {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
-pub enum MessageType {
+pub enum NodeKind {
     #[default]
     Text,
     Reasoning,
@@ -54,7 +54,7 @@ pub enum MessageType {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
-pub enum MessageStatus {
+pub enum NodeStatus {
     #[default]
     Pending,
     Streaming,
@@ -78,7 +78,7 @@ pub enum MessageStatus {
     Removed,
 }
 
-impl MessageStatus {
+impl NodeStatus {
     /// 状态词——**与 `serde` 的序列化名逐字一致**（由单测锁死）。
     ///
     /// ## 为什么需要它
@@ -91,13 +91,13 @@ impl MessageStatus {
     /// 于是状态词只有一份定义（本函数），投影与序列化都从它派生。
     pub fn as_str(&self) -> &'static str {
         match self {
-            MessageStatus::Pending => "pending",
-            MessageStatus::Streaming => "streaming",
-            MessageStatus::WaitingUserAction => "waiting_user_action",
-            MessageStatus::Completed => "completed",
-            MessageStatus::Aborted => "aborted",
-            MessageStatus::Failed => "failed",
-            MessageStatus::Removed => "removed",
+            NodeStatus::Pending => "pending",
+            NodeStatus::Streaming => "streaming",
+            NodeStatus::WaitingUserAction => "waiting_user_action",
+            NodeStatus::Completed => "completed",
+            NodeStatus::Aborted => "aborted",
+            NodeStatus::Failed => "failed",
+            NodeStatus::Removed => "removed",
         }
     }
 
@@ -109,13 +109,13 @@ impl MessageStatus {
     /// 各手写一次 match，词表就又有了第二份定义。
     pub fn of(word: &str) -> Option<Self> {
         match word {
-            "pending" => Some(MessageStatus::Pending),
-            "streaming" => Some(MessageStatus::Streaming),
-            "waiting_user_action" => Some(MessageStatus::WaitingUserAction),
-            "completed" => Some(MessageStatus::Completed),
-            "aborted" => Some(MessageStatus::Aborted),
-            "failed" => Some(MessageStatus::Failed),
-            "removed" => Some(MessageStatus::Removed),
+            "pending" => Some(NodeStatus::Pending),
+            "streaming" => Some(NodeStatus::Streaming),
+            "waiting_user_action" => Some(NodeStatus::WaitingUserAction),
+            "completed" => Some(NodeStatus::Completed),
+            "aborted" => Some(NodeStatus::Aborted),
+            "failed" => Some(NodeStatus::Failed),
+            "removed" => Some(NodeStatus::Removed),
             _ => None,
         }
     }
@@ -194,14 +194,14 @@ impl Default for MessageContent {
 
 /// 聊天消息定义 (所有字段增量可选，通过 id 归并)
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ChatMessage {
+pub struct ChatNode {
     pub id: String,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub role: Option<MessageRole>,
+    pub role: Option<NodeRole>,
 
     /// **这条发言是谁说的**（[plan/11 批 1](../../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")
     /// ② 的跨栈身份字段）：主体地址（`{kind, id, title?}`，[ADR-069 §决策 1]）。
@@ -217,7 +217,7 @@ pub struct ChatMessage {
     pub principal: Option<Principal>,
 
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
-    pub msg_type: Option<MessageType>,
+    pub msg_type: Option<NodeKind>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -254,7 +254,7 @@ pub struct ChatMessage {
     pub delta: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<MessageStatus>,
+    pub status: Option<NodeStatus>,
 
     /// 失败原因（面向用户的可读短消息）。仅当 `status == Failed` 时存在。
     /// 用于把"会话异常中断/失败"的终态持久化到历史，使切换会话后仍能看到上次错误。
@@ -393,11 +393,11 @@ pub struct ResumeRequest {
 /// ADR-025 追记。
 pub const SEG_MESSAGES: &str = "message";
 
-/// [`ChatMessage`] 的**逆投影**：VDFS 节点 + 正文 ⇒ 一条消息。
+/// [`ChatNode`] 的**逆投影**：VDFS 节点 + 正文 ⇒ 一条消息。
 ///
 /// ## 为什么需要它
 ///
-/// VDFS 变更**只在热路径上带载荷**：消息帧的 `data` 就是那条 `ChatMessage`
+/// VDFS 变更**只在热路径上带载荷**：消息帧的 `data` 就是那条 `ChatNode`
 /// （`delta` / `content` / `status`），而资源信号是**无载荷**的。因此「拿到一条
 /// 无载荷变更、要还原成消息」的消费端（如 agent 转播桥）只能 `stat` + `read`。
 ///
@@ -407,9 +407,9 @@ pub const SEG_MESSAGES: &str = "message";
 /// `attributes` 增字段时不可能只改一边。而消费方（agent 的转播桥）不是 session
 /// 插件——契约住 core，两侧都依赖它，就不会有一侧从对方内部「借」实现。
 ///
-/// `None` = 节点状态词不在 [`MessageStatus`] 的词表里（正常不该发生；
+/// `None` = 节点状态词不在 [`NodeStatus`] 的词表里（正常不该发生；
 /// 发生即两侧已分叉，宁可丢这一条也不要造出一个状态错误的消息）。
-pub fn message_of_node(node: &crate::symbio_core::VdfsNode, text: String) -> Option<ChatMessage> {
+pub fn message_of_node(node: &crate::symbio_core::VdfsNode, text: String) -> Option<ChatNode> {
     /// attributes 里的值都是 `json!(..)` 塞进去的，原样反序列化即可回读类型。
     fn attr<T: serde::de::DeserializeOwned>(
         m: &serde_json::Map<String, Value>,
@@ -417,7 +417,7 @@ pub fn message_of_node(node: &crate::symbio_core::VdfsNode, text: String) -> Opt
     ) -> Option<T> {
         serde_json::from_value(m.get(k).cloned()?).ok()
     }
-    Some(ChatMessage {
+    Some(ChatNode {
         id: node.name.clone(),
         role: attr(&node.attributes, "role"),
         msg_type: attr(&node.attributes, "type"),
@@ -433,12 +433,12 @@ pub fn message_of_node(node: &crate::symbio_core::VdfsNode, text: String) -> Opt
             .get("meta")
             .cloned()
             .filter(|v| !v.is_null()),
-        status: Some(MessageStatus::of(&node.status)?),
+        status: Some(NodeStatus::of(&node.status)?),
         content: Some(MessageContent::Text(text)),
         ..Default::default()
     })
 }
 
 #[cfg(test)]
-#[path = "chat_message.test.rs"]
+#[path = "chat_node.test.rs"]
 mod tests;

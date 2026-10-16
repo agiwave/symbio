@@ -45,9 +45,9 @@ const REPO_ROOT = path.resolve(SHARED_DIR, '..', '..')
  *      用例（2）。闸门：无 subscriber 路径默认 INFO，debug 静默（`--verbose` / `SYMBIO_LOG`
  *      放开）；telegram 结构级 `#[serde(default)]` 使「只有身份键的 PLUGIN.yml」解析为默认值
  *      而非 Err（此前每次启动一条假 WARN）。
- * 894：S24 收口——转写流帧收成一条 `ChatMessage`：删除 `NodeOp` / `NodeChange`，
+ * 894：S24 收口——转写流帧收成一条 `ChatNode`：删除 `NodeOp` / `NodeChange`，
  *      `delta`（增量，与 `content` 互斥）与 `status = removed`（删除状态迁移）落到
- *      `ChatMessage` 上，告警下沉为 `TranscriptWriter::warn`；转写核心日志的「纯增量」
+ *      `ChatNode` 上，告警下沉为 `TranscriptWriter::warn`；转写核心日志的「纯增量」
  *      折行（`DeltaLogCoalescer`）与请求级会话快照的回退判据一并落地。相应新增/重排了
  *      消息合并、删除帧、压缩终态、转写往返、折行边界（`seq`/图不受影响）、快照回退
  *      判据等用例（含一处 `llm_state_frame` → `llm_message_frame` 回归修复的锁定用例）。

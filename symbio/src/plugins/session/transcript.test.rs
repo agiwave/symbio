@@ -4,22 +4,22 @@
 //!
 //! 投递的观测方式：给 `Transcript` 一张带 sink 的 `VdfsChangeSubscriptions`，sink 把
 //! 每条变更收进数组。断言的是**投递出去的形状**（`path` = 那条消息节点自身的地址、
-//! `data` = 那条 `ChatMessage`），而不是内部字段——形状才是线上契约。
+//! `data` = 那条 `ChatNode`），而不是内部字段——形状才是线上契约。
 //!
 //! ⚠️ 投递有**合帧窗口**（[`DELIVER_WINDOW_MS`]）：相邻的同节点纯增量会并成一帧。
 //! 因此断言「条数」的用例要么显式 `flush_pending`，要么让边界帧（终态 / 删除）
 //! 把窗口顶出去；断言「正文」的用例则与窗口无关（合帧逐字等价）。
 
 use super::*;
-use crate::symbio_core::chat_message::{MessageContent, MessageRole, MessageStatus, MessageType};
+use crate::symbio_core::chat_node::{MessageContent, NodeRole, NodeStatus, NodeKind};
 use std::sync::Mutex;
 
 /// 一条带正文的完整消息（`content` = 整条替换）。
-fn text_msg(id: &str, status: MessageStatus, text: &str) -> cm::ChatMessage {
-    cm::ChatMessage {
+fn text_msg(id: &str, status: NodeStatus, text: &str) -> cm::ChatNode {
+    cm::ChatNode {
         id: id.to_string(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Text),
         status: Some(status),
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()
@@ -27,8 +27,8 @@ fn text_msg(id: &str, status: MessageStatus, text: &str) -> cm::ChatMessage {
 }
 
 /// 一帧增量（`delta` = 追加）。
-fn delta_msg(id: &str, delta: &str) -> cm::ChatMessage {
-    cm::ChatMessage {
+fn delta_msg(id: &str, delta: &str) -> cm::ChatNode {
+    cm::ChatNode {
         id: id.to_string(),
         delta: Some(delta.to_string()),
         ..Default::default()
@@ -36,10 +36,10 @@ fn delta_msg(id: &str, delta: &str) -> cm::ChatMessage {
 }
 
 /// 删除帧。
-fn removed_msg(id: &str) -> cm::ChatMessage {
-    cm::ChatMessage {
+fn removed_msg(id: &str) -> cm::ChatNode {
+    cm::ChatNode {
         id: id.to_string(),
-        status: Some(MessageStatus::Removed),
+        status: Some(NodeStatus::Removed),
         ..Default::default()
     }
 }
@@ -73,16 +73,16 @@ fn seen_of(seen: &Arc<Mutex<Vec<VdfsChange>>>) -> Vec<VdfsChange> {
 #[test]
 fn frame_counter_is_monotonic_and_violations_consume_no_frame() {
     let (mut tr, seen) = transcript();
-    tr.apply(text_msg("a", MessageStatus::Streaming, "你"));
+    tr.apply(text_msg("a", NodeStatus::Streaming, "你"));
     tr.apply(delta_msg("a", "好"));
     // 违例：同帧既带 delta 又带 content —— 该拼接还是该替换？语义不可判定
-    tr.apply(cm::ChatMessage {
+    tr.apply(cm::ChatNode {
         id: "a".into(),
         delta: Some("!".into()),
         content: Some(MessageContent::Text("你好!".into())),
         ..Default::default()
     });
-    tr.apply(text_msg("a", MessageStatus::Completed, "你好"));
+    tr.apply(text_msg("a", NodeStatus::Completed, "你好"));
     assert_eq!(tr.frame_no, 3, "违例帧不得消耗帧号（3 个合法帧）");
     assert_eq!(seen_of(&seen).len(), 3, "违例帧不得投递");
     match tr.get("a").unwrap().content {
@@ -95,7 +95,7 @@ fn frame_counter_is_monotonic_and_violations_consume_no_frame() {
 #[test]
 fn delta_appends_and_content_replaces() {
     let (mut tr, _seen) = transcript();
-    tr.apply(text_msg("a", MessageStatus::Streaming, ""));
+    tr.apply(text_msg("a", NodeStatus::Streaming, ""));
     tr.apply(delta_msg("a", "ab"));
     tr.apply(delta_msg("a", "cd"));
     match tr.get("a").unwrap().content {
@@ -103,7 +103,7 @@ fn delta_appends_and_content_replaces() {
         _ => panic!("应为 Text"),
     }
     // 替换：把累积结果整条换掉（工具输出被改写 / 编辑消息 / 权威副本对齐都走这里）
-    tr.apply(text_msg("a", MessageStatus::Completed, "XYZ"));
+    tr.apply(text_msg("a", NodeStatus::Completed, "XYZ"));
     match tr.get("a").unwrap().content {
         Some(MessageContent::Text(t)) => assert_eq!(t, "XYZ", "content 是整条替换"),
         _ => panic!("应为 Text"),
@@ -144,8 +144,8 @@ fn delta_for_unknown_id_creates_placeholder() {
 #[test]
 fn removed_and_persisted_evict() {
     let (mut tr, seen) = transcript();
-    tr.apply(text_msg("a", MessageStatus::Streaming, "1"));
-    tr.apply(text_msg("b", MessageStatus::Streaming, "2"));
+    tr.apply(text_msg("a", NodeStatus::Streaming, "1"));
+    tr.apply(text_msg("b", NodeStatus::Streaming, "2"));
     tr.persisted(&["a".to_string()]);
     assert!(tr.get("a").is_none(), "persisted 后节点离开在途图");
     tr.apply(removed_msg("b"));
@@ -174,7 +174,7 @@ fn removed_and_persisted_evict() {
 #[test]
 fn delta_is_never_retained_on_graph_nodes() {
     let (mut tr, _seen) = transcript();
-    tr.apply(text_msg("a", MessageStatus::Streaming, ""));
+    tr.apply(text_msg("a", NodeStatus::Streaming, ""));
     tr.apply(delta_msg("a", "abc"));
     assert!(
         tr.get("a").unwrap().delta.is_none(),
@@ -190,8 +190,8 @@ fn delta_is_never_retained_on_graph_nodes() {
 #[test]
 fn inflight_messages_get_their_position_seq_at_creation() {
     let (mut tr, _seen) = transcript();
-    tr.apply(text_msg("t1", MessageStatus::Streaming, ""));
-    tr.apply(text_msg("t2", MessageStatus::Streaming, ""));
+    tr.apply(text_msg("t1", NodeStatus::Streaming, ""));
+    tr.apply(text_msg("t2", NodeStatus::Streaming, ""));
     // 顺序与到达顺序一致，且都落在 `INFLIGHT_SEQ_BASE` 起的段内
     assert_eq!(tr.get("t1").unwrap().seq, Some(INFLIGHT_SEQ_BASE));
     assert_eq!(tr.get("t2").unwrap().seq, Some(INFLIGHT_SEQ_BASE + 1));
@@ -200,7 +200,7 @@ fn inflight_messages_get_their_position_seq_at_creation() {
     assert_eq!(tr.get("t1").unwrap().seq, Some(INFLIGHT_SEQ_BASE));
 
     // 存储分配的权威值（落库后回发的对齐帧）覆盖在途号
-    tr.apply(cm::ChatMessage {
+    tr.apply(cm::ChatNode {
         id: "t1".into(),
         seq: Some(7),
         ..Default::default()
@@ -214,8 +214,8 @@ fn inflight_messages_get_their_position_seq_at_creation() {
 #[test]
 fn inflight_seq_sorts_after_all_stored_messages() {
     let (mut tr, _seen) = transcript();
-    tr.apply(text_msg("old", MessageStatus::Completed, "历史"));
-    tr.apply(text_msg("new", MessageStatus::Streaming, "在途"));
+    tr.apply(text_msg("old", NodeStatus::Completed, "历史"));
+    tr.apply(text_msg("new", NodeStatus::Streaming, "在途"));
     let mut msgs = tr.snapshot();
     // `ordered` 的镜像（`nodes.rs::ordered`）：按 `seq` 升序
     msgs.sort_by_key(|m| m.seq.unwrap_or(i64::MAX));
@@ -223,7 +223,7 @@ fn inflight_seq_sorts_after_all_stored_messages() {
     assert_eq!(ids, vec!["old", "new"], "在途消息排在历史之后");
 }
 
-/// 线上格式：`path`（**被变更节点自身**的地址）+ `data`（那条 `ChatMessage`）。
+/// 线上格式：`path`（**被变更节点自身**的地址）+ `data`（那条 `ChatNode`）。
 ///
 /// 语义全在 `data` 的字段上：`delta` 追加 / `content` 替换 / `status = removed`
 /// 移除——不从类型反推，信封没有操作枚举。首帧发图里合并后的**全量**副本，
@@ -232,11 +232,11 @@ fn inflight_seq_sorts_after_all_stored_messages() {
 fn message_change_wire_shape_is_node_address_and_message_payload() {
     let (mut tr, seen) = transcript();
     // ① 首见：全量帧（正文基线）
-    tr.apply(text_msg("a", MessageStatus::Streaming, ""));
+    tr.apply(text_msg("a", NodeStatus::Streaming, ""));
     // ② 增量：窄载荷 delta（**唯一**的零回读追加形态）
     tr.apply(delta_msg("a", "你"));
     // ③ 整条替换：全量载荷（content 整条给出，无需回读）
-    tr.apply(text_msg("a", MessageStatus::Completed, "你好"));
+    tr.apply(text_msg("a", NodeStatus::Completed, "你好"));
     // ④ 删除
     tr.apply(removed_msg("a"));
 
@@ -329,7 +329,7 @@ fn a_non_delta_frame_flushes_the_run() {
     assert_eq!(c.feed(&delta_msg("a", "34"), 2, true), (None, true));
     // 终态帧（content、带 status）：冲刷统计行，自身不并入。
     // 它的 `foldable` 传什么都不影响结论——非纯增量帧本就不可能被并入。
-    let (flushed, absorbed) = c.feed(&text_msg("a", MessageStatus::Completed, "1234"), 3, true);
+    let (flushed, absorbed) = c.feed(&text_msg("a", NodeStatus::Completed, "1234"), 3, true);
     assert_eq!(flushed.as_deref(), Some("[T#1..2] a - Update 2 帧 / +4c"));
     assert!(!absorbed, "带状态的帧要打自己的行");
     assert_eq!(c.flush(), None, "非纯增量帧不留待合并状态");
@@ -350,7 +350,7 @@ fn a_skeleton_frame_is_never_folded() {
 
     // 折行段中途插进一帧骨架（终态）：统计行先冲刷，骨架帧自己留行。
     assert_eq!(c.feed(&delta_msg("a", "de"), 2, true), (None, true));
-    let (flushed, absorbed) = c.feed(&text_msg("a", MessageStatus::Completed, "abcde"), 3, false);
+    let (flushed, absorbed) = c.feed(&text_msg("a", NodeStatus::Completed, "abcde"), 3, false);
     assert_eq!(flushed.as_deref(), Some("[T#2] a - Update +2c"));
     assert!(!absorbed);
 }
@@ -379,19 +379,19 @@ fn frame_log_splits_skeleton_from_detail() {
     // 出现：不论带不带状态，首帧都是骨架（"某节点何时出现"必须在默认输出里）
     assert_eq!(frame_log_of(false, None), ("Start", Skeleton));
     assert_eq!(
-        frame_log_of(false, some(&MessageStatus::Streaming)),
+        frame_log_of(false, some(&NodeStatus::Streaming)),
         ("Start", Skeleton)
     );
     // 等待用户：节点还在，但**要人做事**——必须可见
     assert_eq!(
-        frame_log_of(true, some(&MessageStatus::WaitingUserAction)),
+        frame_log_of(true, some(&NodeStatus::WaitingUserAction)),
         ("Wait", Skeleton)
     );
     // 终态：增长停止
     for st in [
-        MessageStatus::Completed,
-        MessageStatus::Failed,
-        MessageStatus::Aborted,
+        NodeStatus::Completed,
+        NodeStatus::Failed,
+        NodeStatus::Aborted,
     ] {
         assert_eq!(
             frame_log_of(true, Some(&st)),
@@ -401,11 +401,11 @@ fn frame_log_splits_skeleton_from_detail() {
     }
     // 其余（`pending → streaming` 的迁移、正文替换、仅 `meta` / 身份变更）都是细节
     assert_eq!(
-        frame_log_of(true, some(&MessageStatus::Pending)),
+        frame_log_of(true, some(&NodeStatus::Pending)),
         ("Update", Detail)
     );
     assert_eq!(
-        frame_log_of(true, some(&MessageStatus::Streaming)),
+        frame_log_of(true, some(&NodeStatus::Streaming)),
         ("Update", Detail)
     );
     assert_eq!(frame_log_of(true, None), ("Update", Detail));
@@ -431,13 +431,13 @@ fn render_frame_line_is_trimmed() {
 /// 而变短，那正是「一次回复有几百帧」这个事实要留下的地方。
 #[test]
 fn coalescing_keeps_the_graph_and_loses_no_text() {
-    let frames: Vec<cm::ChatMessage> = vec![
-        text_msg("a", MessageStatus::Streaming, ""),
+    let frames: Vec<cm::ChatNode> = vec![
+        text_msg("a", NodeStatus::Streaming, ""),
         delta_msg("a", "你"),
         delta_msg("a", "好"),
         delta_msg("a", "世界"),
-        text_msg("a", MessageStatus::Completed, "你好世界"),
-        text_msg("b", MessageStatus::Streaming, ""),
+        text_msg("a", NodeStatus::Completed, "你好世界"),
+        text_msg("b", NodeStatus::Streaming, ""),
         delta_msg("b", "!"),
         removed_msg("b"),
     ];
@@ -487,7 +487,7 @@ fn coalescing_keeps_the_graph_and_loses_no_text() {
 fn consecutive_pure_deltas_on_one_node_are_merged_into_a_single_frame() {
     let (mut tr, seen) = transcript();
     // 首帧是全量副本（带 content），不进窗口
-    tr.apply(text_msg("a", MessageStatus::Streaming, ""));
+    tr.apply(text_msg("a", NodeStatus::Streaming, ""));
     tr.apply(delta_msg("a", "你"));
     tr.apply(delta_msg("a", "好"));
     tr.apply(delta_msg("a", "世界"));
@@ -496,7 +496,7 @@ fn consecutive_pure_deltas_on_one_node_are_merged_into_a_single_frame() {
     assert_eq!(seen_of(&seen).len(), 1, "只有首帧出去了");
 
     // 终态帧（非纯增量）冲刷窗口：增量先出，终态后出
-    tr.apply(text_msg("a", MessageStatus::Completed, "你好世界"));
+    tr.apply(text_msg("a", NodeStatus::Completed, "你好世界"));
     let d = seen_of(&seen);
     assert_eq!(d.len(), 3, "首帧 + 合并后的增量帧 + 终态帧");
     assert_eq!(d[1].path, message_path("s1", "a"));
@@ -515,8 +515,8 @@ fn consecutive_pure_deltas_on_one_node_are_merged_into_a_single_frame() {
 #[test]
 fn switching_node_starts_a_new_window() {
     let (mut tr, seen) = transcript();
-    tr.apply(text_msg("a", MessageStatus::Streaming, ""));
-    tr.apply(text_msg("b", MessageStatus::Streaming, ""));
+    tr.apply(text_msg("a", NodeStatus::Streaming, ""));
+    tr.apply(text_msg("b", NodeStatus::Streaming, ""));
     tr.apply(delta_msg("a", "A1"));
     // 换 id ⇒ 冲刷 a 的窗口，b 自己开一个
     tr.apply(delta_msg("b", "B1"));
@@ -547,7 +547,7 @@ fn switching_node_starts_a_new_window() {
 #[test]
 fn session_state_flushes_pending_delta_first() {
     let (mut tr, seen) = transcript();
-    tr.apply(text_msg("a", MessageStatus::Streaming, ""));
+    tr.apply(text_msg("a", NodeStatus::Streaming, ""));
     tr.apply(delta_msg("a", "尾段"));
     tr.emit_session_state(None);
 
@@ -566,7 +566,7 @@ fn session_state_flushes_pending_delta_first() {
 #[test]
 fn clear_and_persisted_flush_the_trailing_run() {
     let (mut tr, _seen) = transcript();
-    tr.apply(text_msg("a", MessageStatus::Streaming, ""));
+    tr.apply(text_msg("a", NodeStatus::Streaming, ""));
     tr.apply(delta_msg("a", "abc"));
     tr.apply(delta_msg("a", "de"));
     // clear 之后不得残留（轮次边界）
@@ -574,7 +574,7 @@ fn clear_and_persisted_flush_the_trailing_run() {
     assert_eq!(tr.delta_log.flush(), None, "clear 应冲刷最后一段");
     assert!(tr.pending.is_none(), "clear 应冲刷待投递窗口");
 
-    tr.apply(text_msg("a", MessageStatus::Streaming, ""));
+    tr.apply(text_msg("a", NodeStatus::Streaming, ""));
     tr.apply(delta_msg("a", "xy"));
     tr.persisted(&["a".to_string()]);
     assert_eq!(
@@ -593,7 +593,7 @@ fn clear_and_persisted_flush_the_trailing_run() {
 #[test]
 fn session_state_change_lands_on_the_session_leaf() {
     let (mut tr, seen) = transcript();
-    tr.apply(text_msg("a", MessageStatus::Completed, "你好"));
+    tr.apply(text_msg("a", NodeStatus::Completed, "你好"));
     let node = crate::symbio_core::VdfsNode::file(
         "s1",
         "会话",
@@ -625,7 +625,7 @@ fn session_state_without_view_is_a_bare_change() {
 #[test]
 fn session_state_frame_does_not_touch_the_message_graph() {
     let (mut tr, _seen) = transcript();
-    tr.apply(text_msg("a", MessageStatus::Completed, "你好"));
+    tr.apply(text_msg("a", NodeStatus::Completed, "你好"));
     let before = tr.snapshot().len();
 
     tr.emit_session_state(None);
@@ -633,7 +633,7 @@ fn session_state_frame_does_not_touch_the_message_graph() {
     assert_eq!(tr.snapshot().len(), before, "运行态帧不得往消息图里加节点");
     assert_eq!(
         tr.get("a").and_then(|m| m.status),
-        Some(MessageStatus::Completed),
+        Some(NodeStatus::Completed),
         "既有节点的状态也不得被运行态改写（状态只有一个来源）"
     );
 }

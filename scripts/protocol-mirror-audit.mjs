@@ -103,8 +103,8 @@ const VDFS_CHANGE_RS = 'symbio/src/symbio_core/vdfs/change.rs'
 const VDFS_PROTOCOL_RS = 'symbio/src/plugins/vdfs/protocol.rs'
 const VDFS_TS = 'tauri/src/schemas/vdfs.ts'
 
-const CHAT_MESSAGE_RS = 'symbio/src/symbio_core/schemas/session/chat_message.rs'
-const CHAT_MESSAGE_TS = 'tauri/src/schemas/chat_message.ts'
+const CHAT_NODE_RS = 'symbio/src/symbio_core/schemas/session/chat_node.rs'
+const CHAT_NODE_TS = 'tauri/src/schemas/chat_node.ts'
 const DETAIL_RS = 'symbio/src/symbio_core/schemas/detail.rs'
 const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
 const RISK_LEVEL_RS = 'symbio/src/symbio_core/capability/mod.rs'
@@ -223,7 +223,7 @@ const ABSENT = [
 /**
  * 后端**闭集的取值集合** ↔ 前端**词表数组**。
  *
- * 对应关系无法自动推断（`MessageRole` ↔ `CHAT_ROLES` 名字不同），故显式登记；
+ * 对应关系无法自动推断（`NodeRole` ↔ `CHAT_ROLES` 名字不同），故显式登记；
  * 但登记后**取值**是自动提取比对的——枚举加变体、词表加取值，两边立刻对上账。
  *
  * 后端表达闭集有**两种**手段，两种都收：
@@ -239,23 +239,23 @@ const ABSENT = [
 const ENUM_SETS = [
   {
     what: '消息角色',
-    rust: { file: CHAT_MESSAGE_RS, enum: 'MessageRole' },
-    ts: { file: CHAT_MESSAGE_TS, array: 'CHAT_ROLES' },
+    rust: { file: CHAT_NODE_RS, enum: 'NodeRole' },
+    ts: { file: CHAT_NODE_TS, array: 'CHAT_ROLES' },
   },
   {
     what: '消息类型',
-    rust: { file: CHAT_MESSAGE_RS, enum: 'MessageType' },
-    ts: { file: CHAT_MESSAGE_TS, array: 'MESSAGE_TYPES' },
+    rust: { file: CHAT_NODE_RS, enum: 'NodeKind' },
+    ts: { file: CHAT_NODE_TS, array: 'NODE_KINDS' },
   },
   {
     what: '消息状态',
-    rust: { file: CHAT_MESSAGE_RS, enum: 'MessageStatus' },
-    ts: { file: CHAT_MESSAGE_TS, array: 'MESSAGE_STATUSES' },
+    rust: { file: CHAT_NODE_RS, enum: 'NodeStatus' },
+    ts: { file: CHAT_NODE_TS, array: 'NODE_STATUSES' },
   },
   {
     what: '会话恢复动作',
-    rust: { file: CHAT_MESSAGE_RS, enum: 'ResumeAction' },
-    ts: { file: CHAT_MESSAGE_TS, array: 'RESUME_ACTIONS' },
+    rust: { file: CHAT_NODE_RS, enum: 'ResumeAction' },
+    ts: { file: CHAT_NODE_TS, array: 'RESUME_ACTIONS' },
   },
   {
     what: '工具风险等级',
@@ -309,8 +309,8 @@ const ENUM_SETS = [
 const STRUCT_SETS = [
   {
     what: '会话消息',
-    rust: { file: CHAT_MESSAGE_RS, struct: 'ChatMessage' },
-    ts: { file: CHAT_MESSAGE_TS, interface: 'ChatMessage' },
+    rust: { file: CHAT_NODE_RS, struct: 'ChatNode' },
+    ts: { file: CHAT_NODE_TS, interface: 'ChatNode' },
     tsLocal: {
       parent: '树形展开：前端按 parent_id 组装的父引用（后端只给扁平列表）',
       children: '树形展开：前端按 parent_id 组装的子列表（后端只给扁平列表）',
@@ -440,10 +440,10 @@ function rustConstGroup(src, prefix) {
 /**
  * 前端：全部 `export const NAME = 'v'`。
  *
- * 右侧**必须**是字面量：`export const VDFS_STATUS_FAILED = MESSAGE_STATUS_FAILED`
+ * 右侧**必须**是字面量：`export const VDFS_STATUS_FAILED = NODE_STATUS_FAILED`
  * 这类别名不算镜像——它没有第二份真相，值随被别名者走。别名正是**消除**镜像的
  * 手段，不该被当成镜像来守（也因此 `VDFS_STATUS_*` 里只有字面量的两条进 A 组，
- * 其余六条由 C 组经 `MessageStatus` 覆盖）。
+ * 其余六条由 C 组经 `NodeStatus` 覆盖）。
  */
 function tsConsts(src) {
   const out = new Map()

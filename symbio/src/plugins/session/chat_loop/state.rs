@@ -106,7 +106,7 @@ pub(crate) async fn request_scope(session: &PersistentChatSession) -> crate::sym
 /// - system_prompt、tools、轮次上限等配置应从 model_chat::Request 获取
 /// - session 用于管理会话历史（滑动窗口/自动截断/持久化）
 pub(crate) struct SessionContext {
-    pub messages: Vec<ChatMessage>,
+    pub messages: Vec<ChatNode>,
     pub session: Arc<PersistentChatSession>,
     /// **本会话的主体身份**（[plan/11 批 1](../../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")
     /// ② 的取值点）：会话选定的 agent ⇒ 主体名，未选 ⇒ `agent:main`。
@@ -133,7 +133,7 @@ pub(crate) struct SessionContext {
     ///
     /// 幂等由落格那一侧保证（与 WAL 里最近一份快照逐 id 比对）：同一轮里
     /// `execute_turn` 可能被调多次，而压缩只发生一次。
-    pub consolidated: Option<Vec<ChatMessage>>,
+    pub consolidated: Option<Vec<ChatNode>>,
 }
 
 /// 请求级不可变配置（`model_chat::Request` 的取值快照，全程只读）。
@@ -330,10 +330,10 @@ pub(crate) enum TurnExit {
     /// 显式软上限：先广播明确提示再退出，绝不静默。
     MaxToolRounds { max: usize },
     /// 用户中止且**在途 Turn 尚未定稿**：冒泡 `Err(Aborted)`，由消费循环落库为
-    /// `MessageStatus::Aborted` + 会话结局 `aborted`（**不是** `failed`），
+    /// `NodeStatus::Aborted` + 会话结局 `aborted`（**不是** `failed`），
     /// 前端渲染错误条与重试入口。携带**半截产出**（正文 / 思考 / 工具节点）——
     /// 它们是事实，随收尾双写进 `messages.json`（`persist_failure` 的 `partial`）。
-    Aborted(Vec<ChatMessage>),
+    Aborted(Vec<ChatNode>),
     /// LLM / 编排失败：冒泡原始错误。
     Failed(PluginError),
     /// resume 已完成，无需进入主循环。
@@ -397,7 +397,7 @@ impl StopSignal {
     }
     /// 触发 Stop；返回 `true` 表示本次调用是真正生效的那一次。
     /// `messages` 为当前请求视图消息（取末条作为 `last_message`）。
-    pub async fn fire(&self, messages: &[ChatMessage]) -> bool {
+    pub async fn fire(&self, messages: &[ChatNode]) -> bool {
         if self.fired.swap(true, Ordering::SeqCst) {
             return false;
         }
@@ -520,11 +520,11 @@ impl CompressionEmitter {
     /// 都没有」，又变回最初那个"卡死"观感。
     pub async fn begin(&self, node_id: &str) {
         // 一条完整消息：身份 + 状态 + 占位正文一帧到位。
-        self.state.transcript.lock().await.apply(ChatMessage {
+        self.state.transcript.lock().await.apply(ChatNode {
             id: node_id.to_string(),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Compression),
-            status: Some(MessageStatus::Streaming),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::Compression),
+            status: Some(NodeStatus::Streaming),
             content: Some(MessageContent::Text("正在压缩上下文…".to_string())),
             ..Default::default()
         });
@@ -544,17 +544,17 @@ impl CompressionEmitter {
     pub async fn finish(
         &self,
         node_id: &str,
-        status: MessageStatus,
+        status: NodeStatus,
         text: &str,
         failure_kind: Option<&str>,
         stats: Option<serde_json::Value>,
-    ) -> ChatMessage {
+    ) -> ChatNode {
         let node = {
             let mut tr = self.state.transcript.lock().await;
-            let mut node = tr.get(node_id).unwrap_or_else(|| ChatMessage {
+            let mut node = tr.get(node_id).unwrap_or_else(|| ChatNode {
                 id: node_id.to_string(),
-                role: Some(MessageRole::Assistant),
-                msg_type: Some(MessageType::Compression),
+                role: Some(NodeRole::Assistant),
+                msg_type: Some(NodeKind::Compression),
                 ..Default::default()
             });
             node.status = Some(status.clone());
@@ -585,7 +585,7 @@ impl CompressionEmitter {
     /// 与上面两个方法的区别：它们发布的是"压缩这一动作本身"的节点，这条发的是
     /// **转写列表被重写**这件事——被压掉的消息逐条 Remove，新的首条（快照）
     /// Upsert。没有它，前端会一直显示压缩前的历史。
-    pub async fn emit_rewrite(&self, session_id: &str, dropped: &[String], head: &ChatMessage) {
+    pub async fn emit_rewrite(&self, session_id: &str, dropped: &[String], head: &ChatNode) {
         self.plugin
             .emit_transcript_rewritten(session_id, dropped, head)
             .await;
@@ -651,8 +651,8 @@ pub struct SupplementDrain {
 /// `InboxItem` 是 `transcript::inbox` 的私有类型，所以同步孪生不返回它——
 /// 跨模块暴露内部类型会让「谁都能构造一个假的抽干结果」成为可能。
 ///
-/// ⚠️ **不带原始 `ChatMessage`**：落库那条路走的是另一个方法（[`SupplementDrain::drain`]，
-/// 返回 `ChatMessage` 本身）。这里只服务工具循环里的 prompt 注入，而注入只要
+/// ⚠️ **不带原始 `ChatNode`**：落库那条路走的是另一个方法（[`SupplementDrain::drain`]，
+/// 返回 `ChatNode` 本身）。这里只服务工具循环里的 prompt 注入，而注入只要
 /// 正文——多带一个字段就是给下一个人留一个不必有的理由。
 #[derive(Debug, Clone)]
 pub(crate) struct DrainedSupplement {
@@ -691,7 +691,7 @@ impl SupplementDrain {
     /// 开关与上界的判定在 [`SessionPlugin::take_inbox_batch`] 内（那里是唯一真源）：
     /// `supplements_enabled = false` 时它退化为"取一条"，与本函数的合并叠加后
     /// 恰好等于"一条消息 = 一轮"的今天行为。
-    pub async fn drain(&self) -> Option<ChatMessage> {
+    pub async fn drain(&self) -> Option<ChatNode> {
         let batch = self.plugin.take_inbox_batch(&self.state).await;
         crate::plugins::session::transcript::supplements::merge_supplements(&batch)
     }
@@ -757,14 +757,14 @@ struct TranscriptWriterBridge {
 
 #[async_trait::async_trait]
 impl crate::symbio_core::ExecTranscriptWriter for TranscriptWriterBridge {
-    async fn apply(&self, message: ChatMessage) {
+    async fn apply(&self, message: ChatNode) {
         self.transcript.lock().await.apply(message);
     }
 }
 
 /// 把一个字段补丁（对象）**合并**进节点 `meta`，不覆盖已有键——
 /// `failure_kind` 与统计字段因此可以各写各的，谁都不会把对方抹掉。
-fn merge_meta(node: &mut ChatMessage, patch: serde_json::Value) {
+fn merge_meta(node: &mut ChatNode, patch: serde_json::Value) {
     let serde_json::Value::Object(patch) = patch else {
         return;
     };
@@ -891,13 +891,13 @@ impl ChatOrchestrator {
             if !out.reasoning_child_id.is_empty() {
                 llm_emit_state(
                     sink,
-                    ChatMessage {
+                    ChatNode {
                         id: out.reasoning_child_id.clone(),
                         parent_id: Some(root_id.into()),
-                        role: Some(MessageRole::Assistant),
-                        msg_type: Some(MessageType::Text),
+                        role: Some(NodeRole::Assistant),
+                        msg_type: Some(NodeKind::Text),
                         content: Some(MessageContent::Text(out.reasoning.clone())),
-                        status: Some(MessageStatus::Completed),
+                        status: Some(NodeStatus::Completed),
                         ..Default::default()
                     },
                 )
@@ -912,13 +912,13 @@ impl ChatOrchestrator {
                 // 子节点），正文必须随帧上线 ⇒ 完整消息帧。
                 llm_emit_message(
                     sink,
-                    ChatMessage {
+                    ChatNode {
                         id: resp_id,
                         parent_id: Some(root_id.into()),
-                        role: Some(MessageRole::Assistant),
-                        msg_type: Some(MessageType::Text),
+                        role: Some(NodeRole::Assistant),
+                        msg_type: Some(NodeKind::Text),
                         content: Some(MessageContent::Text(out.reasoning.clone())),
-                        status: Some(MessageStatus::Completed),
+                        status: Some(NodeStatus::Completed),
                         ..Default::default()
                     },
                 )
@@ -942,17 +942,17 @@ impl ChatOrchestrator {
             let answer_is_reasoning = out.text.trim() == out.reasoning.trim();
             llm_emit_state(
                 sink,
-                ChatMessage {
+                ChatNode {
                     id: out.reasoning_child_id.clone(),
                     parent_id: Some(root_id.into()),
-                    role: Some(MessageRole::Assistant),
+                    role: Some(NodeRole::Assistant),
                     msg_type: Some(if answer_is_reasoning {
-                        MessageType::Text
+                        NodeKind::Text
                     } else {
-                        MessageType::Reasoning
+                        NodeKind::Reasoning
                     }),
                     content: Some(MessageContent::Text(out.reasoning.clone())),
-                    status: Some(MessageStatus::Completed),
+                    status: Some(NodeStatus::Completed),
                     ..Default::default()
                 },
             )
@@ -963,13 +963,13 @@ impl ChatOrchestrator {
         if !out.text.is_empty() && !out.response_text_child_id.is_empty() {
             llm_emit_state(
                 sink,
-                ChatMessage {
+                ChatNode {
                     id: out.response_text_child_id.clone(),
                     parent_id: Some(root_id.into()),
-                    role: Some(MessageRole::Assistant),
-                    msg_type: Some(MessageType::Text),
+                    role: Some(NodeRole::Assistant),
+                    msg_type: Some(NodeKind::Text),
                     content: Some(MessageContent::Text(out.text.clone())),
-                    status: Some(MessageStatus::Completed),
+                    status: Some(NodeStatus::Completed),
                     ..Default::default()
                 },
             )

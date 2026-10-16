@@ -18,7 +18,7 @@
 
 use std::sync::Arc;
 
-use crate::symbio_core::chat_message::{ChatMessage, MessageRole, MessageType};
+use crate::symbio_core::chat_node::{ChatNode, NodeRole, NodeKind};
 use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt};
 
 mod conversation_view;
@@ -75,7 +75,7 @@ pub fn has_compaction_payoff(history_tokens: usize) -> bool {
 ///
 /// 回退链：保留区首条无 `seq`（存量数据）→ 被压缩区末条的 `seq` → `None`
 /// （两者都没有时交给 `assign_seq` 补号）。
-pub fn snapshot_slot_seq(compressed: &[ChatMessage], keep: &[ChatMessage]) -> Option<i64> {
+pub fn snapshot_slot_seq(compressed: &[ChatNode], keep: &[ChatNode]) -> Option<i64> {
     keep.first()
         .and_then(|m| m.seq)
         .map(|s| s - 1)
@@ -93,7 +93,7 @@ pub fn snapshot_slot_seq(compressed: &[ChatMessage], keep: &[ChatMessage]) -> Op
 ///    30% 保留语义，且会把进行中的 tool_calls 压成孤儿（结果子节点失去父节点）。
 /// 2. 尾部若存在未配对的 ToolCall（结果子节点尚未落库，典型于 continuation 场景），
 ///    任何切分都可能拆散配对，返回 0 放弃本轮压缩。
-fn find_compress_split_point(messages: &[ChatMessage], fraction: f64) -> usize {
+fn find_compress_split_point(messages: &[ChatNode], fraction: f64) -> usize {
     if fraction <= 0.0 || fraction >= 1.0 || messages.is_empty() {
         return 0;
     }
@@ -103,15 +103,15 @@ fn find_compress_split_point(messages: &[ChatMessage], fraction: f64) -> usize {
     let mut pending_tool_call = false;
     for m in messages.iter().rev() {
         match m.role {
-            Some(MessageRole::Tool) => {
+            Some(NodeRole::Tool) => {
                 pending_tool_call = false;
                 break;
             }
-            Some(MessageRole::Assistant) if m.msg_type == Some(MessageType::ToolCall) => {
+            Some(NodeRole::Assistant) if m.msg_type == Some(NodeKind::ToolCall) => {
                 pending_tool_call = true;
                 break;
             }
-            Some(MessageRole::Assistant) => {
+            Some(NodeRole::Assistant) => {
                 // 纯文本/推理结尾：无悬空调用
                 break;
             }
@@ -133,7 +133,7 @@ fn find_compress_split_point(messages: &[ChatMessage], fraction: f64) -> usize {
     let mut cumulative_char_count = 0;
 
     for (i, msg) in messages.iter().enumerate() {
-        if msg.role == Some(MessageRole::User) {
+        if msg.role == Some(NodeRole::User) {
             let has_content = msg
                 .content
                 .as_ref()
@@ -165,14 +165,14 @@ fn find_compress_split_point(messages: &[ChatMessage], fraction: f64) -> usize {
 /// 回退：Turn 之前无根级 User 时切在 Turn 根下标（子树仍完整）；Turn 不存在
 /// 返回 0（run_context_compact 以 split==0 视为中止）。水位提醒 nudge 为请求级
 /// 注入不落库，向前回扫不会误命中（见 chat_loop nudge 注释）。
-pub fn find_turn_user_split_idx(messages: &[ChatMessage], root_id: &str) -> usize {
+pub fn find_turn_user_split_idx(messages: &[ChatNode], root_id: &str) -> usize {
     let turn_idx = match messages.iter().position(|m| m.id == root_id) {
         Some(i) => i,
         None => return 0,
     };
     messages[..turn_idx]
         .iter()
-        .rposition(|m| m.role == Some(MessageRole::User) && m.parent_id.is_none())
+        .rposition(|m| m.role == Some(NodeRole::User) && m.parent_id.is_none())
         .unwrap_or(turn_idx)
 }
 
@@ -185,7 +185,7 @@ pub fn find_turn_user_split_idx(messages: &[ChatMessage], root_id: &str) -> usiz
 /// 计入：正文内容 + LLM prompt 前缀（时间/工作区上下文，`to_api_value` 会拼进
 /// 实际请求文本并由 provider 计费）+ ToolCall 节点参数（content 即 JSON 文本）
 /// + 每消息固定结构开销。
-pub fn estimate_message_tokens(m: &ChatMessage) -> usize {
+pub fn estimate_message_tokens(m: &ChatNode) -> usize {
     use super::tokenizer::{default_tokenizer, Tokenizer};
 
     const PER_MESSAGE_OVERHEAD: usize = 8; // role / 框架 / 分隔符等固定开销
@@ -216,7 +216,7 @@ pub fn estimate_message_tokens(m: &ChatMessage) -> usize {
 ///
 /// `overhead_tokens` 为请求级固定开销（system prompt + 工具定义），由调用方传入；
 /// 压缩触发判断必须计入这部分，否则阈值虚高、触发过晚。
-pub fn estimate_context_tokens(messages: &[ChatMessage], overhead_tokens: usize) -> usize {
+pub fn estimate_context_tokens(messages: &[ChatNode], overhead_tokens: usize) -> usize {
     messages.iter().map(estimate_message_tokens).sum::<usize>() + overhead_tokens
 }
 
@@ -264,7 +264,7 @@ pub async fn estimate_request_overhead(
 /// `overhead_tokens`：system prompt + 工具定义等请求级固定开销，必须计入。
 /// `force`：跳过阈值判断（用户 /compact 或主动压缩工具）。
 pub fn should_start_compression(
-    messages: &[ChatMessage],
+    messages: &[ChatNode],
     context_limit: usize,
     force: bool,
     overhead_tokens: usize,
@@ -314,7 +314,7 @@ pub fn should_start_compression(
 /// 水位提醒判断：估算用量是否达到提醒阈值（55%）。
 /// 主动压缩工具（context_compact）配合此机制，让模型在安全时机自行压缩。
 pub fn should_emit_context_nudge(
-    messages: &[ChatMessage],
+    messages: &[ChatNode],
     context_limit: usize,
     overhead_tokens: usize,
 ) -> bool {
@@ -328,8 +328,8 @@ pub fn should_emit_context_nudge(
 /// 准备压缩：将要压缩的历史提取出来，生成压缩请求
 /// 返回 (压缩请求, 要压缩的历史, 要保留的历史)
 pub fn prepare_compression(
-    messages: &[ChatMessage],
-) -> Option<(Vec<ChatMessage>, Vec<ChatMessage>, Vec<ChatMessage>)> {
+    messages: &[ChatNode],
+) -> Option<(Vec<ChatNode>, Vec<ChatNode>, Vec<ChatNode>)> {
     let split_point = find_compress_split_point(messages, 1.0 - COMPRESSION_PRESERVE_THRESHOLD);
     if split_point == 0 {
         return None;

@@ -74,7 +74,7 @@ impl SessionPlugin {
             session_id,
             collected,
             &err,
-            cm::MessageStatus::Failed,
+            cm::NodeStatus::Failed,
             Vec::new(),
         )
         .await;
@@ -110,7 +110,7 @@ impl SessionPlugin {
             session_id,
             collected,
             &error,
-            cm::MessageStatus::Failed,
+            cm::NodeStatus::Failed,
             Vec::new(),
         )
         .await;
@@ -355,7 +355,7 @@ impl SessionPlugin {
                             &session_id,
                             &transcript,
                             "用户手动中止了本次回复",
-                            cm::MessageStatus::Aborted,
+                            cm::NodeStatus::Aborted,
                             partial,
                         )
                         .await;

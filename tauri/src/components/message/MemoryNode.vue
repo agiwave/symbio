@@ -40,7 +40,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { ChatMessage } from '@/schemas/chat_message'
+import type { ChatNode } from '@/schemas/chat_node'
 import { useMessageContent } from '@/composables/useMessageContent'
 import {
   formatTokens,
@@ -50,7 +50,7 @@ import {
 import NodeShell from './NodeShell.vue'
 
 const props = defineProps<{
-  node: ChatMessage
+  node: ChatNode
   facets: MessageFacets
   depth?: number
 }>()

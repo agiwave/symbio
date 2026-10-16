@@ -198,10 +198,10 @@ const MAX_PARENT_STEPS: usize = 64;
 /// 根，从那个根**往前**再取 `limit` 个根。找不到游标（已删 / 已到末尾）返回空页，
 /// 让调用方自然收敛，不报错。
 pub(crate) fn transcript_window(
-    msgs: &[cm::ChatMessage],
+    msgs: &[cm::ChatNode],
     limit: Option<u32>,
     before: Option<&str>,
-) -> Vec<cm::ChatMessage> {
+) -> Vec<cm::ChatNode> {
     // 没给窗口参数 = 全量（前端流式期间要的就是完整列表）
     if limit.is_none() && before.is_none() {
         return msgs.to_vec();
@@ -291,9 +291,9 @@ fn cursor_id(before: &str) -> Option<&str> {
 // 并行的「容器页」路由。
 
 // 转写路径段 [`SEG_MESSAGES`] 与节点逆投影 [`message_of_node`] 已上移到
-// `symbio_core::chat_message`——它们描述的是**跨插件契约**
+// `symbio_core::chat_node`——它们描述的是**跨插件契约**
 // （agent 的子会话转播桥也要用），不是本插件的私事。本模块继续按原名使用。
-use crate::symbio_core::chat_message::SEG_MESSAGES;
+use crate::symbio_core::chat_node::SEG_MESSAGES;
 
 /// 转写列表的**展示名**（`title`）。**只影响 UI**，不参与寻址。
 pub(crate) const TITLE_MESSAGES: &str = "消息";
@@ -348,7 +348,7 @@ pub(crate) fn inbox_item_path(session_id: &str, iid: &str) -> String {
 ///
 /// ## 两种形状，判别式只有一条
 ///
-/// - **以 `{` 起头** ⇒ 它声明自己是 JSON 对象 —— 必须解析成 [`cm::ChatMessage`]
+/// - **以 `{` 起头** ⇒ 它声明自己是 JSON 对象 —— 必须解析成 [`cm::ChatNode`]
 ///   的**字段子集**，解析失败即报错（不静默降级成"把这串 JSON 当正文"）；
 /// - **其余** ⇒ 整段正文就是消息文本（发一条消息的自然写法）。
 ///
@@ -359,43 +359,43 @@ pub(crate) fn inbox_item_path(session_id: &str, iid: &str) -> String {
 /// `completed`（它是一条**待发**消息，不是流式中的消息）。`id` 缺失时补**空串
 /// 占位**，由 [`SessionPlugin::enqueue_inbox`] 落到真正的条目 id 上——身份有三个
 /// 来源（地址末段 > 写体里的 `id` > provider 生成），判别收在一处，不在这里各判一次。
-pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatMessage> {
+pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
     let body = raw.trim();
     if !body.starts_with('{') {
-        return Ok(cm::ChatMessage {
-            role: Some(cm::MessageRole::User),
-            msg_type: Some(cm::MessageType::Text),
+        return Ok(cm::ChatNode {
+            role: Some(cm::NodeRole::User),
+            msg_type: Some(cm::NodeKind::Text),
             content: Some(cm::MessageContent::Text(raw.to_string())),
-            status: Some(cm::MessageStatus::Completed),
+            status: Some(cm::NodeStatus::Completed),
             timestamp: Some(crate::symbio_core::clock_now_ms()),
             ..Default::default()
         });
     }
     let mut value: Value = serde_json::from_str(body).map_err(|e| {
         VdfsError::invalid(format!(
-            "收件箱条目需要合法 JSON（ChatMessage 字段子集）：{e}"
+            "收件箱条目需要合法 JSON（ChatNode 字段子集）：{e}"
         ))
     })?;
     let Some(obj) = value.as_object_mut() else {
         return Err(VdfsError::invalid(
-            "收件箱条目需要 JSON 对象（ChatMessage 字段子集）",
+            "收件箱条目需要 JSON 对象（ChatNode 字段子集）",
         ));
     };
-    // `id` 在 `ChatMessage` 里是必填字段，但**身份由地址给**：缺它时补一个空串
+    // `id` 在 `ChatNode` 里是必填字段，但**身份由地址给**：缺它时补一个空串
     // 占位，由 `enqueue_inbox` 统一落到条目 id 上——不这样做，最自然的那份
     // 写体（`{"content":"..."}`）会先一步被 serde 拒掉，而调用方被迫把地址里
     // 已有的信息再抄一遍（与消息补丁的处理同源，见 `vdfs_provider` 的 `write`）。
     obj.entry("id".to_string())
         .or_insert_with(|| Value::String(String::new()));
-    let mut message: cm::ChatMessage = serde_json::from_value(value).map_err(|e| {
+    let mut message: cm::ChatNode = serde_json::from_value(value).map_err(|e| {
         VdfsError::invalid(format!(
-            "收件箱条目需要合法 JSON（ChatMessage 字段子集）：{e}"
+            "收件箱条目需要合法 JSON（ChatNode 字段子集）：{e}"
         ))
     })?;
     // 缺省补齐（见上：只补"不补就不可用"的那三个，不覆盖来者指定的值）
-    message.role.get_or_insert(cm::MessageRole::User);
-    message.msg_type.get_or_insert(cm::MessageType::Text);
-    message.status = Some(cm::MessageStatus::Completed);
+    message.role.get_or_insert(cm::NodeRole::User);
+    message.msg_type.get_or_insert(cm::NodeKind::Text);
+    message.status = Some(cm::NodeStatus::Completed);
     Ok(message)
 }
 
@@ -547,24 +547,24 @@ pub(crate) fn internal_dirs(has_workdir: bool, memory: VdfsNode) -> Vec<VdfsNode
 // 不是一次文件写入），VDFS 只做「读同一份数据」，因此不存在两条写路径。
 
 /// 消息节点的标题：角色（工具调用补上工具名，否则一屏全是「助手」）
-fn message_label(m: &cm::ChatMessage) -> String {
+fn message_label(m: &cm::ChatNode) -> String {
     let role = match m.role {
-        Some(cm::MessageRole::User) => "用户",
-        Some(cm::MessageRole::Assistant) => "助手",
-        Some(cm::MessageRole::Tool) => "工具",
-        Some(cm::MessageRole::System) => "系统",
+        Some(cm::NodeRole::User) => "用户",
+        Some(cm::NodeRole::Assistant) => "助手",
+        Some(cm::NodeRole::Tool) => "工具",
+        Some(cm::NodeRole::System) => "系统",
         None => "消息",
     };
     match (m.msg_type.as_ref(), m.name.as_deref()) {
-        (Some(cm::MessageType::ToolCall), Some(name)) if !name.is_empty() => {
+        (Some(cm::NodeKind::ToolCall), Some(name)) if !name.is_empty() => {
             format!("{role} · {name}")
         }
-        (Some(cm::MessageType::ToolCall), _) => format!("{role} · 工具调用"),
+        (Some(cm::NodeKind::ToolCall), _) => format!("{role} · 工具调用"),
         _ => role.to_string(),
     }
 }
 
-/// 消息状态词——**就是 `MessageStatus` 自己的状态词**（[`cm::MessageStatus::as_str`]）。
+/// 消息状态词——**就是 `NodeStatus` 自己的状态词**（[`cm::NodeStatus::as_str`]）。
 ///
 /// ## 为什么是原样透传
 ///
@@ -573,16 +573,16 @@ fn message_label(m: &cm::ChatMessage) -> String {
 /// `active` **猜回** `completed`——一次信息丢失加一次还原，任何一端改口径都会静默错。
 /// 原样透传后，会话节点的 `active`（空闲）与消息的 `completed`（已结束）不再撞名，
 /// 它们本来就是两件事。
-fn message_status(m: &cm::ChatMessage) -> &'static str {
+fn message_status(m: &cm::ChatNode) -> &'static str {
     match m.status.as_ref() {
         Some(s) => s.as_str(),
         // 未标注 = 已结束（流式中的节点一定带 `Streaming`，故 `None` 不可能是"进行中"）
-        None => cm::MessageStatus::Completed.as_str(),
+        None => cm::NodeStatus::Completed.as_str(),
     }
 }
 
 /// 消息摘要（首行、压空白、限长）——列表里的一行预览
-fn message_preview(m: &cm::ChatMessage) -> Option<String> {
+fn message_preview(m: &cm::ChatNode) -> Option<String> {
     let text = m.content.as_ref().map(|c| c.to_text()).unwrap_or_default();
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if flat.is_empty() {
@@ -596,7 +596,7 @@ fn message_preview(m: &cm::ChatMessage) -> Option<String> {
 }
 
 /// 单条消息 → VDFS 节点（**列表项**）
-pub(crate) fn message_node(m: &cm::ChatMessage) -> VdfsNode {
+pub(crate) fn message_node(m: &cm::ChatNode) -> VdfsNode {
     let mut n = VdfsNode::file(&m.id, message_label(m), VdfsAccess::READ);
     n.ext = Some(EXT_MESSAGE.to_string());
     n.status = message_status(m).to_string();
@@ -636,9 +636,9 @@ pub(crate) fn message_node(m: &cm::ChatMessage) -> VdfsNode {
 /// - `Text` / `Reasoning` / `UserPrompt`：纯文本正文；
 /// - `Turn` / `ToolCall`（组合节点，本身无正文）：给一份稳定的 JSON 视图，
 ///   使前端与 LLM 在同一个地址上都能取到完整结构。
-pub(crate) fn message_text(m: &cm::ChatMessage) -> String {
+pub(crate) fn message_text(m: &cm::ChatNode) -> String {
     match m.msg_type {
-        Some(cm::MessageType::Turn) | Some(cm::MessageType::ToolCall) => {
+        Some(cm::NodeKind::Turn) | Some(cm::NodeKind::ToolCall) => {
             serde_json::to_string_pretty(m).unwrap_or_default()
         }
         _ => m.content.as_ref().map(|c| c.to_text()).unwrap_or_default(),
@@ -653,8 +653,8 @@ pub(crate) fn message_text(m: &cm::ChatMessage) -> String {
 /// 快路径：存储本就按 `seq` 追加写入，`overlay_live` 也不改动既有顺序，因此
 /// **已有序是常态**——此时排序是纯开销（`O(n log n)` 次比较 + 一次可能的整体重排），
 /// 而转写的每次读取（`list` / `read` / `stat` 单条）都要过这里。
-pub(crate) fn ordered(mut msgs: Vec<cm::ChatMessage>) -> Vec<cm::ChatMessage> {
-    let key = |m: &cm::ChatMessage| m.seq.unwrap_or(i64::MAX);
+pub(crate) fn ordered(mut msgs: Vec<cm::ChatNode>) -> Vec<cm::ChatNode> {
+    let key = |m: &cm::ChatNode| m.seq.unwrap_or(i64::MAX);
     if !msgs.is_sorted_by_key(key) {
         msgs.sort_by_key(key);
     }
@@ -667,9 +667,9 @@ pub(crate) fn ordered(mut msgs: Vec<cm::ChatMessage>) -> Vec<cm::ChatMessage> {
 /// 在写入时分配，在途副本没有，必须从落库版本继承。否则同一条消息会以
 /// 「有 seq / 无 seq」两种形态被排到列表的两个位置。
 pub(crate) fn overlay_live(
-    stored: Vec<cm::ChatMessage>,
-    live: Vec<cm::ChatMessage>,
-) -> Vec<cm::ChatMessage> {
+    stored: Vec<cm::ChatNode>,
+    live: Vec<cm::ChatNode>,
+) -> Vec<cm::ChatNode> {
     let mut out = stored;
     for l in live {
         match out.iter_mut().find(|m| m.id == l.id) {
@@ -686,9 +686,9 @@ pub(crate) fn overlay_live(
 
 /// 按 id 取单条消息
 pub(crate) fn message_of<'a>(
-    msgs: &'a [cm::ChatMessage],
+    msgs: &'a [cm::ChatNode],
     mid: &str,
-) -> VdfsResult<&'a cm::ChatMessage> {
+) -> VdfsResult<&'a cm::ChatNode> {
     msgs.iter()
         .find(|m| m.id == mid)
         .ok_or_else(|| VdfsError::not_found(format!("消息不存在：{mid}")))
@@ -708,7 +708,7 @@ pub(crate) fn message_of<'a>(
 /// 「正在跑的消息凭空消失」，直到 `persist_messages` 在每轮结束时落库为止。
 pub(crate) fn session_content(
     session: &super::super::types::Session,
-    live: Vec<cm::ChatMessage>,
+    live: Vec<cm::ChatNode>,
     // 对账用（轨 S 第一步）：会话 id。**与本函数的呈现逻辑无关**——它由调用方
     // （`vdfs_provider` 的两个 Read 分支）在同一个作用域里做过对账后传入，
     // 仅为让"两处是同一份数据的两个地址、对账口径只有一份"这件事在签名上可见。

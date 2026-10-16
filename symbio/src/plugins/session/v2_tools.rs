@@ -30,8 +30,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
-use crate::symbio_core::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
+use crate::symbio_core::chat_node::{
+    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind,
 };
 use crate::symbio_core::{
     llm_emit_message, DispatchOutcome, DispatchPort, ExecAbortSignal, ExecEventSink, LlmTurn,
@@ -79,7 +79,7 @@ pub(crate) struct SessionDispatchPort {
     /// 流式桥：交出本轮正文节点并切下一轮。
     bridge: Arc<UiBridge>,
     /// 本轮产生的全部消息（供 chat_loop 并入落库权威镜像）。
-    produced: Mutex<Vec<ChatMessage>>,
+    produced: Mutex<Vec<ChatNode>>,
     /// 本轮工具执行层交回的收束派生事实（承诺 / 任务表 / 熔断）。
     derived: Mutex<DerivedFacts>,
 }
@@ -109,7 +109,7 @@ impl SessionDispatchPort {
     }
 
     /// 取走本轮产生的消息（调用方在桥释放前取）。
-    pub(crate) fn take_produced(&self) -> Vec<ChatMessage> {
+    pub(crate) fn take_produced(&self) -> Vec<ChatNode> {
         std::mem::take(&mut self.produced.lock().unwrap())
     }
 
@@ -122,7 +122,7 @@ impl SessionDispatchPort {
 #[async_trait]
 impl DispatchPort for SessionDispatchPort {
     async fn dispatch(&self, turn: &LlmTurn) -> Vec<DispatchOutcome> {
-        let mut produced: Vec<ChatMessage> = Vec::new();
+        let mut produced: Vec<ChatNode> = Vec::new();
 
         // ① 定格本轮正文与推理（若有）：节点已由 UI 桥逐片广播，这里只迁状态并切节点。
         //    没有正文（纯工具调用轮）就不建节点——空节点是噪声。
@@ -146,13 +146,13 @@ impl DispatchPort for SessionDispatchPort {
             produced.push(msg);
         }
         if let Some((node_id, text)) = reason_node {
-            let msg = ChatMessage {
+            let msg = ChatNode {
                 id: node_id,
                 parent_id: Some(self.root_id.clone()),
-                role: Some(MessageRole::Assistant),
-                msg_type: Some(MessageType::Reasoning),
+                role: Some(NodeRole::Assistant),
+                msg_type: Some(NodeKind::Reasoning),
                 content: Some(MessageContent::Text(text)),
-                status: Some(MessageStatus::Completed),
+                status: Some(NodeStatus::Completed),
                 ..Default::default()
             };
             // 状态帧：推理正文已由增量帧传过，同上——重发会与队列里的增量打架。
@@ -165,7 +165,7 @@ impl DispatchPort for SessionDispatchPort {
         let call_nodes = llm_build_tool_call_nodes(&self.root_id, &turn.tool_calls);
         for node in &call_nodes {
             let mut frame = node.clone();
-            frame.status = Some(MessageStatus::Streaming);
+            frame.status = Some(NodeStatus::Streaming);
             llm_emit_message(&self.sink, frame).await;
         }
 
@@ -237,7 +237,7 @@ impl DispatchPort for SessionDispatchPort {
                 let call_node = call_nodes
                     .iter()
                     .chain(parent_updates.iter())
-                    .find(|n| n.id == call_id && n.msg_type == Some(MessageType::ToolCall));
+                    .find(|n| n.id == call_id && n.msg_type == Some(NodeKind::ToolCall));
                 DispatchOutcome {
                     call_id,
                     name,
@@ -248,8 +248,8 @@ impl DispatchPort for SessionDispatchPort {
                         .and_then(|meta| meta.get("success"))
                         .and_then(|v| v.as_bool())
                         .unwrap_or(true),
-                    needs_user_action: m.msg_type == Some(MessageType::UserPrompt)
-                        && m.status == Some(MessageStatus::WaitingUserAction),
+                    needs_user_action: m.msg_type == Some(NodeKind::UserPrompt)
+                        && m.status == Some(NodeStatus::WaitingUserAction),
                     // 卡片载荷与原因码：随事实入格，恢复（`resume`）据它复现那张卡。
                     // 只有等待用户的结果节点才带（其余为 `None` / 空串）。
                     prompt: m.meta.as_ref().and_then(|meta| meta.get("prompt")).cloned(),

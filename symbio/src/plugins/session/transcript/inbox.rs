@@ -42,7 +42,7 @@
 use super::super::active::{ActiveSessionState, InboxItem, PreemptPending};
 use super::super::plugin::{inbox_item_node, inbox_item_path, SessionPlugin};
 use super::supplements;
-use crate::symbio_core::{chat_message as cm, session_chat, VdfsChange};
+use crate::symbio_core::{chat_node as cm, session_chat, VdfsChange};
 use crate::symbio_core::{
     Event, EventWalStore, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, Preemption,
     PreemptionDecider, Store, SESSION_ID, SOURCE_PRINCIPAL, WORKDIR,
@@ -89,7 +89,7 @@ impl SessionPlugin {
         &self,
         session_id: &str,
         id: Option<String>,
-        message: cm::ChatMessage,
+        message: cm::ChatNode,
         params: session_chat::Request,
         workdir: Option<String>,
     ) -> InboxItem {

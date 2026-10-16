@@ -10,7 +10,7 @@
 //!
 
 use super::model_provider::{ModelFinishReason, ModelUsage};
-use crate::symbio_core::schemas::session::chat_message::{ChatMessage, MessageStatus};
+use crate::symbio_core::schemas::session::chat_node::{ChatNode, NodeStatus};
 use crate::symbio_core::ExecEventSink;
 use serde_json::Value;
 
@@ -22,7 +22,7 @@ use serde_json::Value;
 /// 回填）的单帧完成、存储回执、压缩快照。流式节点的正文已由 `llm_emit_delta`
 /// （`plugins/model/stream.rs`）逐帧传过，它的终态走 `llm_emit_state`
 /// （`plugins/session/transcript/frames.rs`），不在这里重发。
-pub async fn llm_emit_message(sink: &ExecEventSink, msg: ChatMessage) {
+pub async fn llm_emit_message(sink: &ExecEventSink, msg: ChatNode) {
     sink.emit(llm_message_frame(&msg)).await;
 }
 
@@ -30,19 +30,19 @@ pub async fn llm_emit_message(sink: &ExecEventSink, msg: ChatMessage) {
 ///
 /// 直接写转写（`Transcript::apply`，不经出口）的发布路径也用它——「完整消息必然
 /// 带状态」这条约定只在这里实现一次。
-pub fn llm_message_frame(m: &ChatMessage) -> ChatMessage {
+pub fn llm_message_frame(m: &ChatNode) -> ChatNode {
     let mut frame = m.clone();
     if frame.status.is_none() {
-        frame.status = Some(MessageStatus::Completed);
+        frame.status = Some(NodeStatus::Completed);
     }
     frame
 }
 
 /// 删除帧：`status = removed`（发射方与收口路径的唯一构造点，避免各写一份）。
-pub fn llm_removed_frame(message_id: &str) -> ChatMessage {
-    ChatMessage {
+pub fn llm_removed_frame(message_id: &str) -> ChatNode {
+    ChatNode {
         id: message_id.to_string(),
-        status: Some(MessageStatus::Removed),
+        status: Some(NodeStatus::Removed),
         ..Default::default()
     }
 }

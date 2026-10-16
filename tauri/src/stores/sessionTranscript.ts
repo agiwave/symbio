@@ -22,14 +22,14 @@
 
 import {
   CHAT_ROLE_ASSISTANT,
-  MESSAGE_STATUS_STREAMING,
-  MESSAGE_STATUS_WAITING_USER_ACTION,
-  MESSAGE_TYPE_REASONING,
-  MESSAGE_TYPE_TEXT,
-  MESSAGE_TYPE_TURN,
+  NODE_STATUS_STREAMING,
+  NODE_STATUS_WAITING_USER_ACTION,
+  NODE_KIND_REASONING,
+  NODE_KIND_TEXT,
+  NODE_KIND_TURN,
   messageTextOf,
-  type ChatMessage,
-} from '@/schemas/chat_message'
+  type ChatNode,
+} from '@/schemas/chat_node'
 
 /** 缩略卡预览的最大字符数（超出截断并加省略号） */
 export const PREVIEW_MAX = 60
@@ -40,7 +40,7 @@ export const PREVIEW_MAX = 60
  * `seq` 是**唯一的权威顺序锚点**：`timestamp` 是"业务时刻"而非"顺序"，
  * 旧数据还可能缺失，只作兜底。返回新数组，不改动入参。
  */
-export function sortTranscript(messages: ChatMessage[]): ChatMessage[] {
+export function sortTranscript(messages: ChatNode[]): ChatNode[] {
   return [...messages].sort((a, b) => (a.seq ?? a.timestamp ?? 0) - (b.seq ?? b.timestamp ?? 0))
 }
 
@@ -50,7 +50,7 @@ export function sortTranscript(messages: ChatMessage[]): ChatMessage[] {
  * 非 assistant、或取不到任何文本时返回 `null`——调用方据此**不改动**预览
  * （而不是把预览清空：一条工具调用不该把上一句正文的预览抹掉）。
  */
-export function previewOf(msg: Pick<ChatMessage, 'role' | 'content'>): string | null {
+export function previewOf(msg: Pick<ChatNode, 'role' | 'content'>): string | null {
   if (msg.role !== CHAT_ROLE_ASSISTANT) return null
   // 取值走契约层的唯一实现（`messageTextOf`）：本模块是纯逻辑层，
   // 不在这里再写一份多模态形状的判定。
@@ -74,13 +74,13 @@ export function previewOf(msg: Pick<ChatMessage, 'role' | 'content'>): string | 
  * 取值走契约层的唯一实现（`messageTextOf`）：增量帧的目标是文本正文，多模态形状
  * 不该被静默丢成空串。
  */
-export function appendContent(msg: ChatMessage, delta: string): ChatMessage {
+export function appendContent(msg: ChatNode, delta: string): ChatNode {
   return { ...msg, content: messageTextOf(msg.content) + delta }
 }
 
 /** 合并结果：消息字典 + 审批角标 + 续接游标 */
 export interface HydratedTranscript {
-  map: Record<string, ChatMessage>
+  map: Record<string, ChatNode>
   /** 快照里是否存在待审批消息（缩略卡角标） */
   waitingApproval: boolean
   /** 续接游标：已分配 `seq` 的最大值，保证下一轮 `nextSeq` 严格递增 */
@@ -98,11 +98,11 @@ export interface HydratedTranscript {
  * （不抢到前面），保证排序判据对新旧数据都成立。
  */
 export function hydrateTranscript(
-  snapshot: ChatMessage[],
-  _local?: Record<string, ChatMessage>,
+  snapshot: ChatNode[],
+  _local?: Record<string, ChatNode>,
 ): HydratedTranscript {
   void _local
-  const map: Record<string, ChatMessage> = {}
+  const map: Record<string, ChatNode> = {}
   const maxSeq = snapshot.reduce(
     (mx, m) => Math.max(mx, typeof m.seq === 'number' ? m.seq : 0),
     0,
@@ -115,7 +115,7 @@ export function hydrateTranscript(
     const seq = typeof m.seq === 'number' ? m.seq : cursor++
     map[m.id] = { ...m, seq }
     // 还原「等待审批」状态，使会话卡片角标在重开会话时正确显示
-    if (m.status === MESSAGE_STATUS_WAITING_USER_ACTION) waitingApproval = true
+    if (m.status === NODE_STATUS_WAITING_USER_ACTION) waitingApproval = true
   }
 
   const lastSeq = Object.values(map).reduce((mx, m) => Math.max(mx, m.seq ?? 0), 0)
@@ -141,7 +141,7 @@ export function hydrateTranscript(
  *
  * @param ordered 已按 `sortTranscript` 排好序的消息
  */
-export function truncateIdsFrom(ordered: ChatMessage[], anchorId: string): string[] {
+export function truncateIdsFrom(ordered: ChatNode[], anchorId: string): string[] {
   if (!anchorId) return []
   const anchorIdx = ordered.findIndex((m) => m.id === anchorId)
   if (anchorIdx < 0) return []
@@ -155,15 +155,15 @@ export function truncateIdsFrom(ordered: ChatMessage[], anchorId: string): strin
  * 根 Turn 承载」）；其余仍在进行中的子节点定稿为 `completed`、绝不挂 `error`。
  * TurnGroupNode 的重试按钮判定也据此识别"整轮失败"这一状态。
  */
-export function isRootTurn(msg: Pick<ChatMessage, 'type' | 'parent_id'>): boolean {
-  return msg.type === MESSAGE_TYPE_TURN && !msg.parent_id
+export function isRootTurn(msg: Pick<ChatNode, 'type' | 'parent_id'>): boolean {
+  return msg.type === NODE_KIND_TURN && !msg.parent_id
 }
 
 /** 仍在进行中的消息（send/resume 的乐观置位判定据此识别"已有在途节点"） */
-export function isInProgressMessage(msg: Pick<ChatMessage, 'status'>): boolean {
+export function isInProgressMessage(msg: Pick<ChatNode, 'status'>): boolean {
   return (
-    msg.status === MESSAGE_STATUS_STREAMING ||
-    msg.status === MESSAGE_STATUS_WAITING_USER_ACTION
+    msg.status === NODE_STATUS_STREAMING ||
+    msg.status === NODE_STATUS_WAITING_USER_ACTION
   )
 }
 
@@ -187,9 +187,9 @@ export function isInProgressMessage(msg: Pick<ChatMessage, 'status'>): boolean {
  * 也有一张工具卡片要显示（工具名在 `name` 上）；容器类节点（Turn / ToolCall）
  * 靠子节点呈现，不适用本条。
  */
-export function isBlankContentNode(msg: Pick<ChatMessage, 'type' | 'content'>): boolean {
-  const t = msg.type || MESSAGE_TYPE_TEXT
-  if (t !== MESSAGE_TYPE_TEXT && t !== MESSAGE_TYPE_REASONING) return false
+export function isBlankContentNode(msg: Pick<ChatNode, 'type' | 'content'>): boolean {
+  const t = msg.type || NODE_KIND_TEXT
+  if (t !== NODE_KIND_TEXT && t !== NODE_KIND_REASONING) return false
   // 取值走契约层的唯一实现（多模态内容 → 纯文本）
   return messageTextOf(msg.content).trim().length === 0
 }

@@ -368,7 +368,7 @@ const CODE_ROOTS = ['symbio/src', 'cli/src', 'tauri/src', 'tauri/src-tauri/src']
 const codeFiles = CODE_ROOTS.flatMap((r) => walk(path.join(repoRoot, r), isCode))
 const consts = buildConstTable(codeFiles)
 // 同名前缀在**两侧可能不是同一套词表**：前端 `@/schemas/vdfs` 另有自己的
-// `VDFS_STATUS_*` 镜像，且它把会话节点透传的 `MessageStatus` 词（`pending` /
+// `VDFS_STATUS_*` 镜像，且它把会话节点透传的 `NodeStatus` 词（`pending` /
 // `streaming` / `waiting_user_action` / `completed`）也算进去，取值集合比 Rust 侧大。
 // E-008 判的是**设计文档与 Rust 契约**是否一致，故只用 Rust 侧的常量：
 const rustConsts = buildConstTable(codeFiles.filter((f) => f.endsWith('.rs')))

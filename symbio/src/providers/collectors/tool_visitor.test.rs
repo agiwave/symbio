@@ -5,7 +5,7 @@
 
 use super::*;
 
-use crate::symbio_core::chat_message::ChatMessage;
+use crate::symbio_core::chat_node::ChatNode;
 use crate::symbio_core::TurnOutput;
 use crate::symbio_core::{CapabilityMeta, ExecEnv, PluginError};
 use async_trait::async_trait;
@@ -40,7 +40,7 @@ impl ModelProvider for MockProvider {
     async fn execute_turn(
         &self,
         _system_prompt: &str,
-        _messages: &[ChatMessage],
+        _messages: &[ChatNode],
         _tools: &[CapabilityMeta],
         _root_id: &str,
         _env: &ExecEnv,

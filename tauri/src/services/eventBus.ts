@@ -261,14 +261,14 @@ export function subscribe(
 // 子会话 / 记忆 / 工作目录，后续还会有任务列表、请求队列……），集合项的形状统一为
 // `<sid>/<集合段>/<项 id>`——消息的落点是 `<sid>/message/<mid>` 这个节点，**身份
 // 就是地址末段**（与 `data.id` 同一事实，以地址为准）。`data` 是业务载荷：消息帧上
-// 是 `ChatMessage`（`delta` 追加 / `content` 替换 / `status = removed` 移除）、
+// 是 `ChatNode`（`delta` 追加 / `content` 替换 / `status = removed` 移除）、
 // 会话节点上是 `VdfsNode` 全量视图；缺失 = 无载荷，回读收敛（资源删除回读
 // `NotFound` 即删除）。这里曾有过 `created` / `updated` / `deleted` 操作枚举与
 // 一张「按变更频率分配载荷宽度」的表，全部**没有生产性生产者**（或与载荷语义
 // 重复），S27 整体退役——判据见 `schemas/vdfs.VdfsChange`。
 //
 // 顺序敏感的实时面（会话运行态 / 消息正文）**也在这条通道上**（ADR-025）：
-// 顺序是**节点属性**（`ChatMessage.seq` 决定显示顺序），不靠到达顺序——消费端
+// 顺序是**节点属性**（`ChatNode.seq` 决定显示顺序），不靠到达顺序——消费端
 // 的协调规则见 `stores/sessionTranscriptSync.ts`。
 
 /** 订阅作用域：按展示地址前缀分流（哪一类资源、哪个会话） */

@@ -5,7 +5,7 @@
 //! "跨插件共享"的前提（model 构建 request view）已随 Phase E-② 循环族下沉消失，
 //! 属单一模块私有设施，不再置于 core 共享层。
 
-use crate::symbio_core::chat_message::{ChatMessage, MessageContent, MessageRole, MessageType};
+use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole, NodeKind};
 use crate::symbio_core::CapabilityToolContextRetention;
 use std::collections::{HashMap, HashSet};
 
@@ -30,7 +30,7 @@ const ENTRY_NAME_TOKEN_CAP: usize = 24;
 /// 结构化优先：`meta.success == false` 或 `meta.failure_kind` 存在即为失败
 /// （tool_executor 对失败结果统一打 `success:false` + `failure_kind` 标记）；
 /// 文本启发式（"Error"/"failed"）仅作无 meta 时的兜底。
-fn is_failed_result(msg: &ChatMessage, preview: &str) -> bool {
+fn is_failed_result(msg: &ChatNode, preview: &str) -> bool {
     if let Some(meta) = msg.meta.as_ref().and_then(|m| m.as_object()) {
         // 结构化标记存在即直接采信、短路返回，不再回落文本启发式：
         // 否则正文里偶然出现的 "failed"/"Error" 字样（如测试统计
@@ -49,7 +49,7 @@ fn is_failed_result(msg: &ChatMessage, preview: &str) -> bool {
 ///
 /// 失败是信息性的：错误类型与一句话原因是模型决定"换路径重试还是放弃"的
 /// 关键输入，骨架化时必须保留，否则模型只能对同批文件反复盲试。
-fn error_digest(msg: &ChatMessage, preview: &str) -> String {
+fn error_digest(msg: &ChatNode, preview: &str) -> String {
     let kind = msg
         .meta
         .as_ref()
@@ -340,10 +340,10 @@ fn anchor_of_args(args: &str) -> Option<String> {
 /// ToolCall 节点的 name 是 LLM 可见全名（如 "local/todo_write"），此处匹配时
 /// 取最后一个 '/' 后的短名。
 pub fn apply_layered_sliding_window(
-    messages: &[ChatMessage],
+    messages: &[ChatNode],
     max_active_tool_calls: usize,
     retention: &HashMap<String, CapabilityToolContextRetention>,
-) -> Vec<ChatMessage> {
+) -> Vec<ChatNode> {
     // ── 收集全部 ToolCall（保序），计算两级"失效"判定 ──────────────────────
     // info:         ToolCall id → (全局序号, 工具短名, 自声明保留策略)
     // per_tool_seq: 工具短名 → 该工具的调用 id 序列（工具级保留策略用）
@@ -351,7 +351,7 @@ pub fn apply_layered_sliding_window(
         HashMap::new();
     let mut per_tool_seq: HashMap<String, Vec<String>> = HashMap::new();
     for msg in messages {
-        if msg.msg_type == Some(MessageType::ToolCall) {
+        if msg.msg_type == Some(NodeKind::ToolCall) {
             let idx = info.len();
             let full_name = msg.name.clone().unwrap_or_default();
             // "local/todo_write" → "todo_write"（与 CapabilityMeta.name 对齐）
@@ -397,7 +397,7 @@ pub fn apply_layered_sliding_window(
     for msg in messages {
         let mut new_msg = msg.clone();
 
-        if msg.msg_type == Some(MessageType::ToolCall) {
+        if msg.msg_type == Some(NodeKind::ToolCall) {
             if is_stale(&msg.id) {
                 // ToolCall 组合节点自身 content = 请求参数 JSON → 骨架化。
                 // 保留定位锚点（path/command/url 等），让历史调用可与结果对号：
@@ -455,7 +455,7 @@ pub fn apply_layered_sliding_window(
                     .and_then(|tc| tc.name.as_deref())
                     .map(|n| format!(" Re-run {n} to get the full output."))
                     .unwrap_or_default();
-                let label = if msg.role == Some(MessageRole::Tool) {
+                let label = if msg.role == Some(NodeRole::Tool) {
                     // 失败结果保留错误摘要、成功结果保留语义摘要：
                     // 失败是信息性的（错误详情决定下一步动作），成功摘要避免
                     // "隔轮即忘"迫使模型整文件重读。摘要远短于原文，仍净省 token。

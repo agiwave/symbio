@@ -1,14 +1,14 @@
 //
 // 注意：工作区路径 (workdir) 由 PluginMessage.workdir 路由层统一传递，
 // 不在此业务结构体中重复定义。
-use super::chat_message::{ChatMessage, ResumeRequest};
+use super::chat_node::{ChatNode, ResumeRequest};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct Request {
     pub session_id: Option<String>,
     pub agent_id: Option<String>,
-    pub message: Option<ChatMessage>,
+    pub message: Option<ChatNode>,
     /// 选定的 Model Provider ID。
     ///
     /// 随每次发送携带；为空时回退会话 `metadata.provider_id`（默认 `none` = 用默认 Provider）。
@@ -61,17 +61,17 @@ pub struct Request {
 ///
 /// 消息变更的线协议一度是独立的一层「显式操作」枚举（`upsert` / `append` /
 /// `remove` / `reset` / `warn`），后来收敛成只剩一个变元的 `Change`。两者都已
-/// 删除：**帧就是一条 [`ChatMessage`]**（线协议上曾叫 `NodeEvent` =
+/// 删除：**帧就是一条 [`ChatNode`]**（线协议上曾叫 `NodeEvent` =
 /// `{ session_id, seq, message }`，那层包装与承载它的转写流已于 2026-09-23
 /// 随 ADR-025 一并退役——消息变更改走 `VdfsChange`）。
 ///
-/// 原来那层枚举只是在重复 `ChatMessage` 已经有的字段：
+/// 原来那层枚举只是在重复 `ChatNode` 已经有的字段：
 ///
 /// | 原枚举里的字段 | 现在的落点 |
 /// |---|---|
-/// | `Change.message_id` | `ChatMessage.id` |
-/// | `Change.delta` | `ChatMessage.delta`（增量；与 `content` 互斥） |
-/// | `Change.status` / `error` / `meta` / 身份字段 | `ChatMessage` 的同名字段 |
+/// | `Change.message_id` | `ChatNode.id` |
+/// | `Change.delta` | `ChatNode.delta`（增量；与 `content` 互斥） |
+/// | `Change.status` / `error` / `meta` / 身份字段 | `ChatNode` 的同名字段 |
 /// | `Remove { message_id }` | `status = removed`（一次状态迁移） |
 /// | `Reset` | 不存在——协议里没有「清空重读」的消息形态，删除逐条下发 |
 /// | `Warn { warning }` | 会话节点状态（`TranscriptWriter::warn`），不是消息帧 |
@@ -80,5 +80,5 @@ pub struct Request {
 /// 「这条消息现在是什么样」与「这帧说了什么」也不再是两份需要对齐的数据。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Response {
-    pub message: ChatMessage,
+    pub message: ChatNode,
 }

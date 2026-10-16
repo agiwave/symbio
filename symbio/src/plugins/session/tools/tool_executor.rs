@@ -15,7 +15,7 @@ use super::super::transcript::llm_emit_state;
 use crate::symbio_core::{llm_emit_message, llm_short_id, TurnToolCallInfo};
 
 use crate::symbio_core::{
-    chat_message::{ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType},
+    chat_node::{ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind},
     failure_kind, HookEvent, HookOutput, PluginInvokeRequestExt,
 };
 use crate::symbio_core::{
@@ -232,14 +232,14 @@ fn build_user_prompt_message(
     result_msg_id: &str,
     tool_call_id: &str,
     pending: &PendingPrompt,
-) -> ChatMessage {
-    ChatMessage {
+) -> ChatNode {
+    ChatNode {
         id: result_msg_id.to_string(),
         parent_id: Some(tool_call_id.to_string()),
-        role: Some(MessageRole::Tool),
-        msg_type: Some(MessageType::UserPrompt),
+        role: Some(NodeRole::Tool),
+        msg_type: Some(NodeKind::UserPrompt),
         content: Some(MessageContent::Text(pending.text.clone())),
-        status: Some(MessageStatus::WaitingUserAction),
+        status: Some(NodeStatus::WaitingUserAction),
         meta: Some(json!({
             "prompt": pending.prompt,
             "failure_kind": pending.failure_kind,
@@ -521,9 +521,9 @@ async fn record_protocol_failure(
     sink: &ExecEventSink,
     tool_call_id: &str,
     error_text: &str,
-    tool_messages: &mut Vec<ChatMessage>,
-    parent_updates: &mut Vec<ChatMessage>,
-    context_messages: &[ChatMessage],
+    tool_messages: &mut Vec<ChatNode>,
+    parent_updates: &mut Vec<ChatNode>,
+    context_messages: &[ChatNode],
 ) {
     let result_msg_id = uuid::Uuid::new_v4().to_string();
     let mut tool_msg = llm_build_tool_message(
@@ -534,7 +534,7 @@ async fn record_protocol_failure(
     );
     // 失败属信息性：结果以 Completed 留在上下文（Failed 会被 get_context_messages
     // 过滤，导致"孤儿 tool 结果"使下一轮 LLM 请求非法）。
-    tool_msg.status = Some(MessageStatus::Completed);
+    tool_msg.status = Some(NodeStatus::Completed);
 
     llm_emit_message(sink, tool_msg.clone()).await;
 
@@ -547,7 +547,7 @@ async fn record_protocol_failure(
     let parent_update = match context_messages.iter().find(|m| m.id == tool_call_id) {
         Some(p) => {
             let mut full = p.clone();
-            full.status = Some(MessageStatus::Completed);
+            full.status = Some(NodeStatus::Completed);
             let mut meta = full.meta.clone().unwrap_or_else(|| json!({}));
             if let Some(obj) = meta.as_object_mut() {
                 obj.insert("success".into(), json!(false));
@@ -557,11 +557,11 @@ async fn record_protocol_failure(
             full.error = Some(error_text.to_string());
             full
         }
-        None => ChatMessage {
+        None => ChatNode {
             id: tool_call_id.to_string(),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::ToolCall),
-            status: Some(MessageStatus::Completed),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::ToolCall),
+            status: Some(NodeStatus::Completed),
             error: Some(error_text.to_string()),
             meta: Some(json!({
                 "success": false,
@@ -601,7 +601,7 @@ async fn record_protocol_failure(
 /// 自己计时，切会话/重连后时长仍然连续（前端计时会从零重来）。
 async fn emit_tool_running(
     sink: &ExecEventSink,
-    context_messages: &[ChatMessage],
+    context_messages: &[ChatNode],
     tool_call_id: &str,
 ) {
     // 完整快照：从权威转写取父 ToolCall 副本（id / 父子关系 / name / 参数都在），
@@ -616,7 +616,7 @@ async fn emit_tool_running(
         return;
     };
     let mut running = parent.clone();
-    running.status = Some(MessageStatus::Streaming);
+    running.status = Some(NodeStatus::Streaming);
     let mut meta = running.meta.clone().unwrap_or_else(|| json!({}));
     if let Some(obj) = meta.as_object_mut() {
         obj.insert(
@@ -637,12 +637,12 @@ async fn emit_tool_running(
 /// 收进 `parent_updates` 供内存镜像同步与落库（整条替换，非补丁合并）。
 async fn emit_parent_finalized(
     sink: &ExecEventSink,
-    context_messages: &[ChatMessage],
+    context_messages: &[ChatNode],
     tool_call_id: &str,
-    status: MessageStatus,
+    status: NodeStatus,
     meta_extra: Value,
     error: Option<String>,
-) -> Option<ChatMessage> {
+) -> Option<ChatNode> {
     let Some(parent) = context_messages.iter().find(|m| m.id == tool_call_id) else {
         plugin_error!(
             "session",
@@ -693,8 +693,8 @@ async fn emit_parent_finalized(
 /// 否则同一语义会长出第二个写法。
 /// 就地应用于**完整消息副本**（发射端自己组装好终态快照再广播），不再返回
 /// 「只有 id + status 的补丁」——那需要接收端猜意图，正是已删除的补丁语义。
-pub fn apply_not_executed(parent: &mut ChatMessage, reason: &str) {
-    parent.status = Some(MessageStatus::Completed);
+pub fn apply_not_executed(parent: &mut ChatNode, reason: &str) {
+    parent.status = Some(NodeStatus::Completed);
     let mut meta = parent.meta.clone().unwrap_or_else(|| json!({}));
     if let Some(obj) = meta.as_object_mut() {
         obj.insert("success".into(), json!(false));
@@ -726,7 +726,7 @@ pub fn apply_not_executed(parent: &mut ChatMessage, reason: &str) {
 /// 与其它工具结果同口径：「没跑」不是「跑失败」。`Failed` 结果会被
 /// `get_context_messages` 当失败处理，且前端会在结果节点上再渲染一条 ⚠ 错误条，
 /// 而父节点的交代由 `meta.failure_kind` 承载。
-pub(super) fn not_executed_result(tool_call_id: &str, reason: &str) -> ChatMessage {
+pub(super) fn not_executed_result(tool_call_id: &str, reason: &str) -> ChatNode {
     let text = match reason {
         "aborted" => "本次调用已中止（用户终止），未执行，未产生结果。".to_string(),
         _ => "本次调用未执行：同一批中排在它之前的工具未正常结束（失败或需要用户处理），\
@@ -736,7 +736,7 @@ pub(super) fn not_executed_result(tool_call_id: &str, reason: &str) -> ChatMessa
     let mut msg = llm_build_tool_message(tool_call_id, &text, Some(false), None);
     // 与 `record_protocol_failure` 同口径：失败属**信息性**，结果以 Completed
     // 留在上下文（标 Failed 会被上下文过滤，并让前端多渲染一条 ⚠）。
-    msg.status = Some(MessageStatus::Completed);
+    msg.status = Some(NodeStatus::Completed);
     msg.meta = Some(json!({
         "success": false,
         "failure_kind": reason,
@@ -782,7 +782,7 @@ pub async fn process_tool_calls_async(
     sink: &ExecEventSink,
     abort: &ExecAbortSignal,
     ctx: Arc<dyn PluginInvokeRequest>,
-    context_messages: &[ChatMessage],
+    context_messages: &[ChatNode],
     // `session_dir` = **本插件自己的目录**（来自 orchestrator）：工具结果存档落在
     // 它下面的 `<会话 id>/tool_archives`，闸门的成本台账读它下面的
     // `<会话 id>/v2-events.wal`（会话 id 取自请求上下文，派生统一走
@@ -800,11 +800,11 @@ pub async fn process_tool_calls_async(
     // 调用方随收束入格。**只记 `Break`**——`Refuse`（未授权）按 S09 §6 验收 1
     // 不得产生任何事件，两种拒绝在事件面上必须分得开。
     breaks: &mut Vec<&'static str>,
-) -> (Vec<ChatMessage>, Vec<ChatMessage>) {
+) -> (Vec<ChatNode>, Vec<ChatNode>) {
     let mut tool_messages = Vec::new();
     // 父 ToolCall 终态——**完整消息**（发射端从权威转写取副本应用终态）。
     // 返回给调用方做内存镜像整条替换 + 随 persist_messages 落库。
-    let mut parent_updates: Vec<ChatMessage> = Vec::new();
+    let mut parent_updates: Vec<ChatNode> = Vec::new();
     if tool_calls.is_empty() {
         return (tool_messages, parent_updates);
     }
@@ -854,7 +854,7 @@ pub async fn process_tool_calls_async(
             let last_blocked = parent_updates
                 .last()
                 .map(|p| {
-                    p.status == Some(MessageStatus::WaitingUserAction)
+                    p.status == Some(NodeStatus::WaitingUserAction)
                         || p.meta
                             .as_ref()
                             .and_then(|m| m.get("failure_kind"))
@@ -977,7 +977,7 @@ pub async fn process_tool_calls_async(
                 llm_build_tool_message(&id, notice, Some(false), Some(result_msg_id.clone()));
             // 与 `not_executed_result` 同口径：「没跑」不是「跑失败」，以 Completed
             // 留在上下文；成因由 `failure_kind` 承载。
-            tool_msg.status = Some(MessageStatus::Completed);
+            tool_msg.status = Some(NodeStatus::Completed);
             tool_msg.meta = Some(json!({ "success": false, "failure_kind": "overflow_dropped" }));
             tool_messages.push(tool_msg);
             // 结果子节点必须有父节点终态配套（同 S20.1 不变量）：否则前端永远转圈。
@@ -985,7 +985,7 @@ pub async fn process_tool_calls_async(
                 sink,
                 context_messages,
                 &id,
-                MessageStatus::Completed,
+                NodeStatus::Completed,
                 json!({ "success": false, "failure_kind": "overflow_dropped" }),
                 None,
             )
@@ -1063,7 +1063,7 @@ pub async fn process_tool_calls_async(
                 sink,
                 context_messages,
                 &id,
-                MessageStatus::Completed,
+                NodeStatus::Completed,
                 json!({ "success": false, "failure_kind": kind }),
                 None,
             )
@@ -1105,7 +1105,7 @@ pub async fn process_tool_calls_async(
                 sink,
                 context_messages,
                 &id,
-                MessageStatus::Completed,
+                NodeStatus::Completed,
                 json!({ "success": false, "failure_kind": failure_kind::PERMISSION_DENIED }),
                 None,
             )
@@ -1147,7 +1147,7 @@ pub async fn process_tool_calls_async(
                 sink,
                 context_messages,
                 &id,
-                MessageStatus::Completed,
+                NodeStatus::Completed,
                 json!({ "success": false, "failure_kind": failure_kind::PERMISSION_DENIED }),
                 None,
             )
@@ -1189,7 +1189,7 @@ pub async fn process_tool_calls_async(
                 sink,
                 context_messages,
                 &id,
-                MessageStatus::Completed,
+                NodeStatus::Completed,
                 json!({ "success": false, "failure_kind": "blocked" }),
                 None,
             )
@@ -1288,11 +1288,11 @@ pub async fn process_tool_calls_async(
         // 若此处仍标 Failed，则会被 get_context_messages 过滤，导致"孤儿 tool 结果"
         // （父 tool_call 被过滤、结果残留）使下一轮 LLM 请求非法（Bug 2 同类问题）。
         // 仅对普通工具结果生效（user_prompt 走 WaitingUserAction 分支，不受此覆盖）。
-        if !success && tool_msg.msg_type != Some(MessageType::UserPrompt) {
-            tool_msg.status = Some(MessageStatus::Completed);
+        if !success && tool_msg.msg_type != Some(NodeKind::UserPrompt) {
+            tool_msg.status = Some(NodeStatus::Completed);
         }
 
-        if tool_msg.msg_type == Some(MessageType::UserPrompt) {
+        if tool_msg.msg_type == Some(NodeKind::UserPrompt) {
             // user_prompt 节点本身即是工具"结果"（待用户审批/回答）：
             // 广播该节点（WaitingUserAction），并把父节点 ToolCall 标为
             // WaitingUserAction（持久化 failure_kind 供 resume 提取）。
@@ -1311,7 +1311,7 @@ pub async fn process_tool_calls_async(
                 sink,
                 context_messages,
                 &id,
-                MessageStatus::WaitingUserAction,
+                NodeStatus::WaitingUserAction,
                 json!({
                     "success": false,
                     "failure_kind": failure_kind,
@@ -1333,10 +1333,10 @@ pub async fn process_tool_calls_async(
             //   上下文，父节点不再标 Failed，不暂停会话、不触发重试/补参渲染）。
             //   仅真正需要用户输入的 UserPrompt 场景在上方以 WaitingUserAction 处理。
             let (status, meta_extra, error) = if success {
-                (MessageStatus::Completed, json!({ "success": true }), None)
+                (NodeStatus::Completed, json!({ "success": true }), None)
             } else {
                 (
-                    MessageStatus::Completed,
+                    NodeStatus::Completed,
                     json!({
                         "success": false,
                         "failure_kind": "error",
@@ -1382,7 +1382,7 @@ pub async fn process_tool_calls_async(
             sink,
             context_messages,
             id,
-            MessageStatus::Completed,
+            NodeStatus::Completed,
             json!({ "success": false, "failure_kind": reason }),
             None,
         )

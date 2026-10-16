@@ -96,19 +96,19 @@ import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount, provide } f
 import { useChatConnection, RESUME_KEY, type ResumePayload } from '@/composables/useChatConnection'
 import { useChatScroll } from '@/composables/useChatScroll'
 import {
-  type ChatMessage,
+  type ChatNode,
   type MessageContent,
   type ContentPart,
   type ChatRole,
   messageTextOf,
-} from '@/schemas/chat_message'
+} from '@/schemas/chat_node'
 import type { ImageAttachment } from '@/types'
 import type { DetailDefinition } from '@/schemas/vdfs'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
 import { useSessionUiStateStore } from '@/stores/sessionUiState'
 import { needsTypingRow } from '@/stores/sessionLive'
-import { CHAT_ROLE_USER } from '@/schemas/chat_message'
+import { CHAT_ROLE_USER } from '@/schemas/chat_node'
 // 消息级判定与业务规则全部来自 registry（本组件不解释消息词表，也不读后端 meta 字段）
 import {
   isFailedStatus,
@@ -290,7 +290,7 @@ const optionScope = computed<Record<string, unknown>>(() => ({
     const lastUser = [...msgs].reverse().find((m) => messageRoleOf(m) === CHAT_ROLE_USER)
     sessionsStore.setSessionError(props.sessionId, null)
     if (!lastUser) return
-    const retryMsg: ChatMessage = {
+    const retryMsg: ChatNode = {
       id: lastUser.id, // 复用原 user 消息 id：重发而非新建节点
       role: CHAT_ROLE_USER,
       content: lastUser.content,
@@ -378,7 +378,7 @@ function handleSend() {
 
   nextTick(() => scrollToBottom())
 
-  const chatMessage: ChatMessage = {
+  const chatMessage: ChatNode = {
     id: userMessage.id,
     role: userMessage.role as ChatRole,
     content: userMessage.content,
@@ -445,7 +445,7 @@ async function saveEdit() {
   await sessionsStore.updateMessage(props.sessionId, {
     ...msg,
     content: newContent,
-  } as ChatMessage)
+  } as ChatNode)
   editing.value = null
   nextTick(() => scrollToBottom())
 }

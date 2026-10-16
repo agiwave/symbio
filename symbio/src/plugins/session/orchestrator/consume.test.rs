@@ -12,7 +12,7 @@ use crate::plugins::session::types::Session;
 use crate::symbio_core::PluginDir;
 use crate::symbio_core::VdfsChangeSubscriptions;
 /// 向在途转写图注入一条消息（测试辅助：等价于旧的 live_messages.push）。
-async fn push_inflight(state: &Arc<ActiveSessionState>, message: cm::ChatMessage) {
+async fn push_inflight(state: &Arc<ActiveSessionState>, message: cm::ChatNode) {
     state.transcript.lock().await.apply(message);
 }
 /// 每例独占存储根。
@@ -48,12 +48,12 @@ fn seed_user_message(dir: &std::path::Path) {
     .expect("种子事实落格失败");
 }
 
-fn node(id: &str, parent: Option<&str>, status: cm::MessageStatus) -> cm::ChatMessage {
-    cm::ChatMessage {
+fn node(id: &str, parent: Option<&str>, status: cm::NodeStatus) -> cm::ChatNode {
+    cm::ChatNode {
         id: id.into(),
         parent_id: parent.map(|p| p.into()),
-        role: Some(cm::MessageRole::Assistant),
-        msg_type: Some(cm::MessageType::Text),
+        role: Some(cm::NodeRole::Assistant),
+        msg_type: Some(cm::NodeKind::Text),
         status: Some(status),
         ..Default::default()
     }
@@ -63,9 +63,9 @@ fn node(id: &str, parent: Option<&str>, status: cm::MessageStatus) -> cm::ChatMe
 ///
 /// 中止的终态按「是不是根级 Turn」二分，所以测试里必须有**真的** Turn 节点——
 /// 拿 `node()` 顶替会让断言测了个空（`msg_type` 是 `Text`）。
-fn turn_node(id: &str, status: cm::MessageStatus) -> cm::ChatMessage {
-    cm::ChatMessage {
-        msg_type: Some(cm::MessageType::Turn),
+fn turn_node(id: &str, status: cm::NodeStatus) -> cm::ChatNode {
+    cm::ChatNode {
+        msg_type: Some(cm::NodeKind::Turn),
         ..node(id, None, status)
     }
 }
@@ -94,7 +94,7 @@ async fn handle_abort_signals_registered_turn_and_converges() {
         inner.abort_signal = Some(signal.clone());
         inner.is_working = true;
     }
-    push_inflight(&state, turn_node("turn-live", cm::MessageStatus::Streaming)).await;
+    push_inflight(&state, turn_node("turn-live", cm::NodeStatus::Streaming)).await;
 
     // 模拟执行方（chat_loop）收敛后由 AbortGuard 注销登记——否则 handle_abort
     // 会走满 3s 兜底（那也是合法路径，只是慢）。
@@ -130,7 +130,7 @@ async fn handle_abort_signals_registered_turn_and_converges() {
         msgs.iter()
             .find(|m| m.id == "turn-live")
             .and_then(|m| m.status.clone()),
-        Some(cm::MessageStatus::Aborted),
+        Some(cm::NodeStatus::Aborted),
         "在途根 Turn 必须定稿为 Aborted——前端的重试入口挂在它上面"
     );
 }

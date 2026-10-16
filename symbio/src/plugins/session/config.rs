@@ -3,7 +3,7 @@
 //! ## 为什么在插件里，而不是 `symbio_core/schemas`
 //!
 //! 它不住在 `symbio_core/schemas::session::session_config`，与同目录的
-//! `session_chat` / `chat_message` 并列。但两者性质不同：
+//! `session_chat` / `chat_node` 并列。但两者性质不同：
 //!
 //! - **协议 schema**（那两个）是**跨插件契约**——agent / local / model 都按同一份
 //!   定义拼 WS 帧与 payload，改了会同时影响多方，因此归核心；

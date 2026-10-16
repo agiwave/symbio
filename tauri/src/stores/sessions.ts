@@ -31,7 +31,7 @@
  * - `sessionMounts`  : 会话 id → 它所在的挂载目录（按 id 反查空间，供叶子操作用）
  * - `activeId`       : 当前"详细窗口"展示的会话（**地址末段**；地址见 `activeAddr`）
  * - `activeAddr`     : 当前会话的完整地址 = `<挂载目录>/<id>`（输入 / 读取的落点）
- * - `sessionMessages`: 实时 messages map，key 是 sessionId，value 是 `{msgId: ChatMessage}`
+ * - `sessionMessages`: 实时 messages map，key 是 sessionId，value 是 `{msgId: ChatNode}`
  *                      写入：`sessionTranscriptSync`（VDFS 变更消费端）与 loadMessages
  *                      读取：ModelChatPanel（详细）
  * - `sessionStatuses`: 实时状态，key 是 sessionId
@@ -77,9 +77,9 @@ import { playCompletionChime } from '@/services/completionChime'
 import { READBACK_REASON } from '@/services/readback'
 import { logger } from '@/utils/logger'
 import {
-  MESSAGE_STATUS_REMOVED,
-  type ChatMessage,
-} from '@/schemas/chat_message'
+  NODE_STATUS_REMOVED,
+  type ChatNode,
+} from '@/schemas/chat_node'
 import type { ImageAttachment } from '@/types'
 // 消息转写规则（纯逻辑）：增量追加 / 水合 / 预览 / 排序 / 截断
 import {
@@ -237,9 +237,9 @@ export const useSessionsStore = defineStore('sessions', () => {
   const sessionRiskLevels = ref<Record<string, SessionRiskLevel>>({})
 
   // ── 多会话实时状态 ──
-  // 每个 session 一份独立的 messages 字典（key: msgId, value: ChatMessage）
+  // 每个 session 一份独立的 messages 字典（key: msgId, value: ChatNode）
   // 用 shallowRef + 手动 triggerRef 保证响应式而不深 watch
-  const sessionMessages = shallowRef<Record<string, Record<string, ChatMessage>>>({})
+  const sessionMessages = shallowRef<Record<string, Record<string, ChatNode>>>({})
   const sessionSeq = ref<Record<string, number>>({})
 
   // ── 收件箱（排队中的用户消息） ──
@@ -249,7 +249,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   // 里、被消费后换到转写里——**id 不变**，所以是「换位置」不是「多一条」。
   //
   // 值就是展示所需的全部（地址末段即身份 + 后端给的预览文案），不做成
-  // `ChatMessage`：帧里本来就没有正文，硬造一个空壳只会诱导下游去读不存在的字段。
+  // `ChatNode`：帧里本来就没有正文，硬造一个空壳只会诱导下游去读不存在的字段。
   const inboxItems = shallowRef<Record<string, InboxEntry[]>>({})
 
   // 实时状态的落地层（状态 / 错误 / 告警三张表与唯一变更通道）按职责拆去
@@ -281,7 +281,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    *
    * 收口的意义：版本号不会漏加，也不会有第二个地方绕过它直接写。
    */
-  function commitMessages(next: Record<string, Record<string, ChatMessage>>): void {
+  function commitMessages(next: Record<string, Record<string, ChatNode>>): void {
     sessionMessages.value = next
     transcriptVersion.value += 1
   }
@@ -299,7 +299,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    */
   function updateMessages(
     sessionId: string,
-    mutate: (cur: Record<string, ChatMessage>) => Record<string, ChatMessage> | void,
+    mutate: (cur: Record<string, ChatNode>) => Record<string, ChatNode> | void,
   ): void {
     if (!sessionId) return
     const next = { ...sessionMessages.value }
@@ -310,7 +310,7 @@ export const useSessionsStore = defineStore('sessions', () => {
 
 
   // 兼容旧 API：返回 messages 数组形式（按 seq 排序；缺失 seq 时回退 timestamp）
-  function getSessionMessages(id: string): ChatMessage[] {
+  function getSessionMessages(id: string): ChatNode[] {
     return sortTranscript(Object.values(sessionMessages.value[id] || {}))
   }
 
@@ -350,12 +350,12 @@ export const useSessionsStore = defineStore('sessions', () => {
    *    **已存在的节点保留原序号**——否则任何一次"不带 seq 的更新"（状态迁移 /
    *    压缩后重发）都会把消息顶到列表末尾。
    */
-  function applyTranscriptMessages(sessionId: string, messages: ChatMessage[]): void {
+  function applyTranscriptMessages(sessionId: string, messages: ChatNode[]): void {
     if (!sessionId || messages.length === 0) return
 
     // 先剔除必然无副作用的帧（协议违例）；全被剔除时不提交，
     // 免得为一批错误帧白拷贝整份字典、白推一次版本号。
-    const effective: ChatMessage[] = []
+    const effective: ChatNode[] = []
     for (const message of messages) {
       if (!message.id) continue
       if (message.delta != null && message.content != null) {
@@ -374,23 +374,23 @@ export const useSessionsStore = defineStore('sessions', () => {
     // 发出一串这样的帧）。判据逐帧独立，故 [新建 X, 删除 X] 这种同批组合仍会提交。
     const cur0 = sessionMessages.value[sessionId]
     const actionable = effective.some(
-      (m) => m.status !== MESSAGE_STATUS_REMOVED || Boolean(cur0?.[m.id]),
+      (m) => m.status !== NODE_STATUS_REMOVED || Boolean(cur0?.[m.id]),
     )
     if (!actionable) return
 
-    let lastMerged: ChatMessage | null = null
+    let lastMerged: ChatNode | null = null
     updateMessages(sessionId, (cur) => {
       for (const message of effective) {
         // 删除：`status = removed` ⇒ 就地移除该节点（协议里没有 remove 操作）。
         // 不存在时静默跳过——幂等收口的常见路径，不值得为它推一次版本号。
-        if (message.status === MESSAGE_STATUS_REMOVED) {
+        if (message.status === NODE_STATUS_REMOVED) {
           delete cur[message.id]
           continue
         }
 
         // 帧自给自足：未知 id 用帧内信息建占位。`existing` 只读、不就地改
         // （浅 ref 原地改不触发更新），所有变更都写进这份新副本。
-        let node: ChatMessage = { ...(cur[message.id] ?? { id: message.id }) }
+        let node: ChatNode = { ...(cur[message.id] ?? { id: message.id }) }
 
         // 身份字段：有则合并（首帧建立身份；重复携带以最后到达为准）。
         if (message.parent_id != null) node.parent_id = message.parent_id
@@ -435,7 +435,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    * 保留它是因为相当多调用点是单帧语义（乐观回显、编辑回写），
    * 让它们不必自己包数组。落地实现只有 `applyTranscriptMessages` 一处。
    */
-  function applyTranscriptMessage(sessionId: string, message: ChatMessage): void {
+  function applyTranscriptMessage(sessionId: string, message: ChatNode): void {
     applyTranscriptMessages(sessionId, [message])
   }
 
@@ -492,7 +492,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    * 合并规则（保留谁 / 丢弃谁 / `seq` 怎么分配）全部在
    * `sessionTranscript.hydrateTranscript` —— 那是「快照 vs 在途节点」的唯一判据实现。
    */
-  function hydrateFromHistory(sessionId: string, messages: ChatMessage[]) {
+  function hydrateFromHistory(sessionId: string, messages: ChatNode[]) {
     const { map, waitingApproval, lastSeq } = hydrateTranscript(
       messages,
       sessionMessages.value[sessionId] || {},
@@ -952,7 +952,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    * 修复（CHAT_FLOW_ANALYSIS E-13）：失败时**抛出错误**而不是 swallow，
    * 让 ChatMainPanel 能显示错误状态 + 提供重试按钮。
    */
-  async function loadMessages(id: string): Promise<ChatMessage[]> {
+  async function loadMessages(id: string): Promise<ChatNode[]> {
     // 读入口是会话域的 VDFS 门面：文档形状的解析不在 store 里
     const msgs = await readSessionTranscript(id, mountDirOf(id))
     hydrateFromHistory(id, msgs)
@@ -985,7 +985,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    *
    * @returns 实际被移除的消息（调用方据此回滚 / 记日志）
    */
-  function removeFrom(sessionId: string, messageId: string): ChatMessage[] {
+  function removeFrom(sessionId: string, messageId: string): ChatNode[] {
     if (!sessionId || !messageId) return []
     const cur = sessionMessages.value[sessionId]
     if (!cur || !cur[messageId]) return []
@@ -993,7 +993,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     const ids = truncateIdsFrom(getSessionMessages(sessionId), messageId)
     if (ids.length === 0) return []
 
-    const removed: ChatMessage[] = []
+    const removed: ChatNode[] = []
     updateMessages(sessionId, (rest) => {
       for (const id of ids) {
         const m = rest[id]
@@ -1007,7 +1007,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   }
 
   /** 把一批消息放回局部状态（`removeFrom` 的回滚口，仅在写后端失败时使用） */
-  function restoreMessages(sessionId: string, msgs: ChatMessage[]) {
+  function restoreMessages(sessionId: string, msgs: ChatNode[]) {
     if (msgs.length === 0) return
     updateMessages(sessionId, (cur) => {
       for (const m of msgs) cur[m.id] = m
@@ -1048,7 +1048,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    */
   async function updateMessage(
     sessionId: string,
-    message: ChatMessage
+    message: ChatNode
   ): Promise<void> {
     if (!message.id) return
     applyTranscriptMessage(sessionId, message)
@@ -1167,7 +1167,7 @@ export const useSessionsStore = defineStore('sessions', () => {
    *
    * ## 为什么可以断言「这一帧到达时本轮转写已完整」
    *
-   * 顺序是**节点属性**（ADR-025）：显示顺序由 `ChatMessage.seq` 决定，与到达
+   * 顺序是**节点属性**（ADR-025）：显示顺序由 `ChatNode.seq` 决定，与到达
    * 顺序无关；「会话离开 `working`」不再被用来推出「本轮消息帧都已到达」——
    * 增量是否到齐由变更通道本身保证（满通道 → resync → 整份重读）。
    *

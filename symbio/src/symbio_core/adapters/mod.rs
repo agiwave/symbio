@@ -21,7 +21,7 @@
 
 use async_trait::async_trait;
 
-use crate::symbio_core::chat_message::ChatMessage;
+use crate::symbio_core::chat_node::ChatNode;
 use crate::symbio_core::ModelUsage;
 use crate::symbio_core::PromptMessage;
 use crate::symbio_core::{CapabilityMeta, ModelFinishReason, TurnToolCallInfo};
@@ -270,7 +270,7 @@ pub trait DeltaSink: Send + Sync + 'static {
     /// `tool_accumulator`），分发方稍后以同一 id 定格与落库。桥若在这里自建节点、
     /// 或把帧拆成裸参数再让消费端重组，就会出现第二张卡。所以消费端的义务只是
     /// **把帧原样送进自己的帧序**——不做类型推断，不改写身份。
-    fn on_tool_frame(&self, frame: &ChatMessage);
+    fn on_tool_frame(&self, frame: &ChatNode);
 }
 
 /// 静默接收口：会话侧执行器（`TurnRunner`，非流式形态）的委托目标——同一条
@@ -280,7 +280,7 @@ pub struct SilentDeltas;
 impl DeltaSink for SilentDeltas {
     fn on_delta(&self, _text: &str) {}
     fn on_reasoning(&self, _text: &str) {}
-    fn on_tool_frame(&self, _frame: &ChatMessage) {}
+    fn on_tool_frame(&self, _frame: &ChatNode) {}
 }
 
 /// LLM 端口（⑤ 的抽象面）。**generate 只接受 `FullModel`**——反射/快速档
@@ -296,7 +296,7 @@ pub trait LlmAdapter: Send + Sync {
     ///
     /// **入参是消息数组而不是一段文本**（ADR-048a）：
     /// 角色与正文分开，工具结果保持 `role: "tool"`——`ModelProvider::execute_turn` 的签名
-    /// `(system_prompt, messages: &[ChatMessage], …)` 本来就是消息数组；拍成一段文本会让
+    /// `(system_prompt, messages: &[ChatNode], …)` 本来就是消息数组；拍成一段文本会让
     /// `role` 在 adapter 边界被拍平，模型收到的是散文而不是消息序列。
     async fn generate(
         &self,
@@ -372,7 +372,7 @@ pub trait LlmAdapter: Send + Sync {
 ///
 /// 刻意只装**结果**：调用方（运行器）要的是「拿什么回填给模型」与「要不要停」，
 /// 不是插件侧的节点形状。节点怎么建、往哪发，是分发方自己的事——core 不认识
-/// `ChatMessage` 的图语义（那在 `plugins/session`），只认识这段文本。
+/// `ChatNode` 的图语义（那在 `plugins/session`），只认识这段文本。
 #[derive(Debug, Clone, Default)]
 pub struct DispatchOutcome {
     /// 对应的工具调用 id（回填给模型时锚定 ToolCall；取 `TurnToolCallInfo::id`）。

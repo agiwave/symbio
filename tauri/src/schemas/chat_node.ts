@@ -3,7 +3,7 @@
  *
  * ## 为什么词表要有**运行时常量**，而不只是类型联合
  *
- * 类型联合（`type MessageStatus = 'pending' | ...`）只在编译期存在，运行时拿不到
+ * 类型联合（`type NodeStatus = 'pending' | ...`）只在编译期存在，运行时拿不到
  * 名字。于是消费方只能各写各的字面量——`'tool_call'` / `'turn'` / `'failed'`
  * 散落在组件、store、服务层，改一处漏一处。
  *
@@ -129,66 +129,66 @@ export type ChatRole = (typeof CHAT_ROLES)[number]
 // ==================== 消息类型 ====================
 
 /** 正文文本 */
-export const MESSAGE_TYPE_TEXT = 'text'
+export const NODE_KIND_TEXT = 'text'
 /** 思考过程（reasoning） */
-export const MESSAGE_TYPE_REASONING = 'reasoning'
+export const NODE_KIND_REASONING = 'reasoning'
 /** 工具调用（组合节点：请求 / 过程 / 结果） */
-export const MESSAGE_TYPE_TOOL_CALL = 'tool_call'
+export const NODE_KIND_TOOL_CALL = 'tool_call'
 /** 轮次分组（一轮响应的容器，根级助手回合与子会话回合共用） */
-export const MESSAGE_TYPE_TURN = 'turn'
+export const NODE_KIND_TURN = 'turn'
 /** 待用户响应（ask_user 提问 / 工具确认） */
-export const MESSAGE_TYPE_USER_PROMPT = 'user_prompt'
+export const NODE_KIND_USER_PROMPT = 'user_prompt'
 /** 上下文压缩（系统对历史的一次整理动作，不是对话内容） */
-export const MESSAGE_TYPE_COMPRESSION = 'compression'
+export const NODE_KIND_COMPRESSION = 'compression'
 
-export const MESSAGE_TYPES = [
-  MESSAGE_TYPE_TEXT,
-  MESSAGE_TYPE_REASONING,
-  MESSAGE_TYPE_TOOL_CALL,
-  MESSAGE_TYPE_TURN,
-  MESSAGE_TYPE_USER_PROMPT,
-  MESSAGE_TYPE_COMPRESSION,
+export const NODE_KINDS = [
+  NODE_KIND_TEXT,
+  NODE_KIND_REASONING,
+  NODE_KIND_TOOL_CALL,
+  NODE_KIND_TURN,
+  NODE_KIND_USER_PROMPT,
+  NODE_KIND_COMPRESSION,
 ] as const
 
-export type ChatMessageType = (typeof MESSAGE_TYPES)[number]
+export type NodeKind = (typeof NODE_KINDS)[number]
 
 // ==================== 消息状态 ====================
 
 /** 未开始 */
-export const MESSAGE_STATUS_PENDING = 'pending'
+export const NODE_STATUS_PENDING = 'pending'
 /** 正在产生内容 */
-export const MESSAGE_STATUS_STREAMING = 'streaming'
+export const NODE_STATUS_STREAMING = 'streaming'
 /** 等待用户响应（审批 / 提问） */
-export const MESSAGE_STATUS_WAITING_USER_ACTION = 'waiting_user_action'
+export const NODE_STATUS_WAITING_USER_ACTION = 'waiting_user_action'
 /** 终态：正常结束 */
-export const MESSAGE_STATUS_COMPLETED = 'completed'
+export const NODE_STATUS_COMPLETED = 'completed'
 /** 终态：用户主动终止（没出错，但也没跑完——与 `failed` 一样可重试） */
-export const MESSAGE_STATUS_ABORTED = 'aborted'
+export const NODE_STATUS_ABORTED = 'aborted'
 /** 终态：以错误结束 */
-export const MESSAGE_STATUS_FAILED = 'failed'
+export const NODE_STATUS_FAILED = 'failed'
 /**
  * 终态：节点已被删除（**就地移除，不可重试**）。
  *
  * 协议里没有 `remove` 操作——删除就是一次状态迁移，与出现、增长、完成同走一条
  * 消息帧。落到本状态的帧在接收端**就地移除**该节点（从本地视图消失），不产生
- * 任何「清空重读」。根因见后端 `symbio_core::schemas::session::chat_message::MessageStatus::Removed`。
+ * 任何「清空重读」。根因见后端 `symbio_core::schemas::session::chat_node::NodeStatus::Removed`。
  */
-export const MESSAGE_STATUS_REMOVED = 'removed'
+export const NODE_STATUS_REMOVED = 'removed'
 
-export const MESSAGE_STATUSES = [
-  MESSAGE_STATUS_PENDING,
-  MESSAGE_STATUS_STREAMING,
-  MESSAGE_STATUS_WAITING_USER_ACTION,
-  MESSAGE_STATUS_COMPLETED,
-  MESSAGE_STATUS_ABORTED,
-  MESSAGE_STATUS_FAILED,
-  MESSAGE_STATUS_REMOVED,
+export const NODE_STATUSES = [
+  NODE_STATUS_PENDING,
+  NODE_STATUS_STREAMING,
+  NODE_STATUS_WAITING_USER_ACTION,
+  NODE_STATUS_COMPLETED,
+  NODE_STATUS_ABORTED,
+  NODE_STATUS_FAILED,
+  NODE_STATUS_REMOVED,
 ] as const
 
-export type MessageStatus = (typeof MESSAGE_STATUSES)[number]
+export type NodeStatus = (typeof NODE_STATUSES)[number]
 
 /**
- * 是否是**已知的消息状态词**（集合判定，由 `MESSAGE_STATUSES` 派生）。
+ * 是否是**已知的消息状态词**（集合判定，由 `NODE_STATUSES` 派生）。
  *
  * 存在的理由：消费方要「把后端下发的状态词原样透传、只拦未知值」，而逐个
  * `case` 枚举等于又抄一份词表——**词表加了取值而 `case` 忘了加**，那条变更就
@@ -198,8 +198,8 @@ export type MessageStatus = (typeof MESSAGE_STATUSES)[number]
  *
  * 判定与词表同源，故**新增一个状态词不需要改这里**。
  */
-export function isMessageStatus(value: unknown): value is MessageStatus {
-  return typeof value === 'string' && (MESSAGE_STATUSES as readonly string[]).includes(value)
+export function isNodeStatus(value: unknown): value is NodeStatus {
+  return typeof value === 'string' && (NODE_STATUSES as readonly string[]).includes(value)
 }
 
 /**
@@ -213,12 +213,12 @@ export function isMessageStatus(value: unknown): value is MessageStatus {
  *
  * 消费方：`hydrateFromHistory` 用它决定「快照里没有的本地节点是否该保留」。
  */
-export function isInflightMessageStatus(status?: MessageStatus | null): boolean {
+export function isInflightNodeStatus(status?: NodeStatus | null): boolean {
   return (
     status === undefined ||
     status === null ||
-    status === MESSAGE_STATUS_PENDING ||
-    status === MESSAGE_STATUS_STREAMING
+    status === NODE_STATUS_PENDING ||
+    status === NODE_STATUS_STREAMING
   )
 }
 
@@ -228,8 +228,8 @@ export function isInflightMessageStatus(status?: MessageStatus | null): boolean 
  * 两者都要渲染交代条并给重试入口——中止不是故障，但这一轮只跑了一半，
  * 用户通常就想重跑它。放在契约层是因为它同时被「渲染」与「业务规则」消费。
  */
-export function isUnsettledMessageStatus(status?: MessageStatus | null): boolean {
-  return status === MESSAGE_STATUS_FAILED || status === MESSAGE_STATUS_ABORTED
+export function isUnsettledNodeStatus(status?: NodeStatus | null): boolean {
+  return status === NODE_STATUS_FAILED || status === NODE_STATUS_ABORTED
 }
 
 // ==================== 恢复动作 ====================
@@ -239,7 +239,7 @@ export function isUnsettledMessageStatus(status?: MessageStatus | null): boolean
  *
  * ## 为什么它也需要一张词表
  *
- * 后端 `chat_message.rs` 的单测 `resume_action_wire_words_are_snake_case` 注释里
+ * 后端 `chat_node.rs` 的单测 `resume_action_wire_words_are_snake_case` 注释里
  * 已经点名：「前端 `ResumePayload.action` 的字面量必须与它逐字相等」。契约写明了，
  * 前端这边却只有两处**手写的联合类型**——`useChatConnection` 的载荷定义与
  * `messageTypes` 的重试分派——谁也不与后端对齐，改一个词就得靠人记得改两处。
@@ -330,22 +330,22 @@ export function messageTextOf(content: MessageContent | undefined | null): strin
 }
 
 /**
- * 会话消息（后端 `symbio_core::schemas::session::chat_message::ChatMessage` 的镜像）。
+ * 会话消息（后端 `symbio_core::schemas::session::chat_node::ChatNode` 的镜像）。
  *
  * **本接口没有 `agent_id` / `prompt` 两个顶层字段**——它们曾在此声明，但后端
- * `ChatMessage` 从不下发：`agent_id` 在 `meta` 里（见 `registry/messageTypes.agentNameOf`），
+ * `ChatNode` 从不下发：`agent_id` 在 `meta` 里（见 `registry/messageTypes.agentNameOf`），
  * `prompt` 在后端是 `#[serde(skip_serializing)]`（内容在 `meta.prompt`）。
  * 留着它们只会让人以为能从顶层读到。字段与后端的对应由
  * `scripts/protocol-mirror-audit.mjs` 的 D 组守着。
  */
-export interface ChatMessage {
+export interface ChatNode {
   id: string;
   parent_id?: string;
   /** 树形展开：前端按 `parent_id` 组装的父引用（后端只给扁平列表） */
-  parent?: ChatMessage;
+  parent?: ChatNode;
   role?: ChatRole;
   /**
-   * **这条发言是谁说的**（跨栈身份字段，后端 `ChatMessage.principal` 的镜像）。
+   * **这条发言是谁说的**（跨栈身份字段，后端 `ChatNode.principal` 的镜像）。
    *
    * [T-147b] / [ADR-069 §决策 1]：wire 上是**主体地址结构体** `{kind, id, title?}`——
    * `kind` 是一族（`person` / `agent` / `tool` / `system`）、`id` 是 `<ns>/<name>` 可路由地址、
@@ -360,7 +360,7 @@ export interface ChatMessage {
    * 缺身份是「还没接线」，不是「不让人看」。
    */
   principal?: Principal | string;
-  type?: ChatMessageType;
+  type?: NodeKind;
   name?: string;
   /**
    * ToolCall 节点的 **wire id**（LLM provider 返回的 `tool_call_id`）。
@@ -391,13 +391,13 @@ export interface ChatMessage {
    * 直接拒绝携带 `delta` 的消息——「delta 永不落盘」是持久层的不变量，不是发射方的自律。
    */
   delta?: string;
-  status?: MessageStatus;
+  status?: NodeStatus;
   /** 失败原因（面向用户的可读短消息），仅当 status === 'failed' 时存在 */
   error?: string;
   meta?: Record<string, any>;
   timestamp?: number;
   /** 树形展开：前端按 `parent_id` 组装的子列表（后端只给扁平列表） */
-  children?: ChatMessage[];
+  children?: ChatNode[];
   /**
    * 会话内消息的**唯一权威顺序锚点**：后端写入时分配单调自增序号，
    * 父节点序号 < 子节点，按 turn 追加顺序递增；前端对实时流式/乐观消息

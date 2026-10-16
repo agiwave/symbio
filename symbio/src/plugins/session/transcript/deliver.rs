@@ -38,7 +38,7 @@ pub(crate) const DELIVER_WINDOW_MS: u64 = 50;
 /// `frame` 的线上形状与单帧**逐字一致**（`id` + `delta`），消费端无从、也无需
 /// 知道它被合过——合帧是投递层的优化，不是协议的一部分。
 pub(super) struct PendingDelta {
-    pub(super) frame: cm::ChatMessage,
+    pub(super) frame: cm::ChatNode,
     /// 窗口起点（本窗口第一帧到达的时刻）。窗口过期由**每一帧到达时**检查，
     /// 因此不需要后台定时器。
     pub(super) started: Instant,
@@ -103,7 +103,7 @@ impl DeltaLogCoalescer {
     ///   它自己的日志行由调用方照常打印。
     pub(crate) fn feed(
         &mut self,
-        msg: &cm::ChatMessage,
+        msg: &cm::ChatNode,
         frame_no: u64,
         foldable: bool,
     ) -> (Option<String>, bool) {
@@ -191,18 +191,18 @@ pub(super) struct FrameLog {
 /// 是为了让"终态词"这个集合在本函数内**完整**——漏掉一个终态词就会把它错判成过程量。
 pub(super) fn frame_log_of(
     existed: bool,
-    status: Option<&cm::MessageStatus>,
+    status: Option<&cm::NodeStatus>,
 ) -> (&'static str, FrameLogLevel) {
     if !existed {
         return ("Start", FrameLogLevel::Skeleton);
     }
     match status {
-        Some(cm::MessageStatus::WaitingUserAction) => ("Wait", FrameLogLevel::Skeleton),
+        Some(cm::NodeStatus::WaitingUserAction) => ("Wait", FrameLogLevel::Skeleton),
         Some(
-            cm::MessageStatus::Completed
-            | cm::MessageStatus::Failed
-            | cm::MessageStatus::Aborted
-            | cm::MessageStatus::Removed,
+            cm::NodeStatus::Completed
+            | cm::NodeStatus::Failed
+            | cm::NodeStatus::Aborted
+            | cm::NodeStatus::Removed,
         ) => ("End", FrameLogLevel::Skeleton),
         _ => ("Update", FrameLogLevel::Detail),
     }

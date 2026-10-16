@@ -161,7 +161,7 @@ struct TurnInputs {
     root_id: String,                    // Turn 根节点 id（本步内创建）
     system_prompt: String,              // resolve_system_prompt 唯一真源
     tools: Vec<CapabilityMeta>,         // 含条件注入的 context_compact
-    request_view: Vec<ChatMessage>,     // build_request_view 产物（不落库）
+    request_view: Vec<ChatNode>,     // build_request_view 产物（不落库）
 }
 
 async fn prepare_turn_inputs(
@@ -519,7 +519,7 @@ resume 只删得掉一个）；`PendingPrompt` **没有 id 字段**，那类 bug
 |---|---|
 | 分流 | **一条路径**：`env.sink()` / `env.abort()` / `SnapshotTarget::from_ctx` 三个读取，缺席即降级 |
 | 执行体 | 直接 `await`（出口没有背压） |
-| 增量 | `sink.apply(message)`（一条 `ChatMessage`）；**没有**「消费端还在吗」这种判断——没有可关闭的通道 |
+| 增量 | `sink.apply(message)`（一条 `ChatNode`）；**没有**「消费端还在吗」这种判断——没有可关闭的通道 |
 | 返回值 | `Ok(Response{exit_code, output, risk_level})`——返回值就是结果 |
 
 `SnapshotTarget`（`msg_id` + `tool_call_id` **同行**）承载「增量快照的节点身份」，

@@ -32,7 +32,7 @@ const SLOW_WARN_THROTTLE: Duration = Duration::from_secs(5);
 /// 为什么要有它：`kind` 是**跨进程边界的字符串**，改名不会编译失败，只会让消费方
 /// 的分发静默失效（与 `symbio_core::plugin::route` 同一类风险）。发布点曾直接写
 /// `"session"` / `"system"`，于是这两个常量声明出来后无人引用——正是
-/// `chat_message.rs` 那段「枚举改名时就会出现不一致」警告的形状。
+/// `chat_node.rs` 那段「枚举改名时就会出现不一致」警告的形状。
 ///
 /// **闭集只有一个家**：词表住在这里，哪怕发布方在别的插件（`EVENT_BUS_KIND_VDFS` 由 vdfs 发）。
 /// 文档见 `docs/005-arch/004-PROTOCOLS.md` §事件总线频道——那一行带

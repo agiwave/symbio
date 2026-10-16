@@ -31,7 +31,7 @@ use crate::symbio_core::{
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload, MODE,
     PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
 };
-use crate::symbio_core::{chat_message as cm, session_chat};
+use crate::symbio_core::{chat_node as cm, session_chat};
 use broadcast::SessionStateChange;
 use serde_json::json;
 use std::sync::atomic::Ordering;
@@ -201,7 +201,7 @@ impl Drop for WorkingGuard {
                         &session_id,
                         &collected,
                         &crash_msg,
-                        cm::MessageStatus::Failed,
+                        cm::NodeStatus::Failed,
                         // 崩溃路径没有半截产出通道（panic 载荷只进日志）——
                         // 在途半截由镜像子树合并承担。
                         Vec::new(),

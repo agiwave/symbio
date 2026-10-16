@@ -18,7 +18,7 @@ fn last_user_text(context: &SessionContext) -> String {
         .messages
         .iter()
         .rev()
-        .find(|m| m.role == Some(MessageRole::User))
+        .find(|m| m.role == Some(NodeRole::User))
         .and_then(|m| match &m.content {
             Some(MessageContent::Text(t)) => Some(t.clone()),
             _ => None,
@@ -98,7 +98,7 @@ pub(crate) struct TurnInputs {
     /// 本轮到模型的完整工具清单（含条件注入的 `context_compact`）
     pub(crate) tools: Vec<CapabilityMeta>,
     /// 请求视图（`build_request_view` 唯一入口的产物，**不落库**）
-    pub(crate) request_view: Vec<ChatMessage>,
+    pub(crate) request_view: Vec<ChatNode>,
 }
 
 /// 收口 ②：本轮 LLM 请求输入的**唯一准备点**。

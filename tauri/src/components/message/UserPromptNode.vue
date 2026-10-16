@@ -110,8 +110,8 @@ import {
   RESUME_ACTION_ANSWER,
   RESUME_ACTION_APPROVE,
   RESUME_ACTION_REJECT,
-  type ChatMessage,
-} from '@/schemas/chat_message'
+  type ChatNode,
+} from '@/schemas/chat_node'
 import {
   MESSAGE_PROMPT_OTHER,
   MESSAGE_REJECT_REASON,
@@ -128,7 +128,7 @@ import {
 import NodeShell from './NodeShell.vue'
 
 const props = defineProps<{
-  node: ChatMessage
+  node: ChatNode
   facets: MessageFacets
   depth?: number
 }>()

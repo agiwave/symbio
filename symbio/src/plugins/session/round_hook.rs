@@ -10,7 +10,7 @@
 //! 「说出来就等于记下了」——而这两件事不是同一件事（汇报节点
 //! 落进 `context.messages`，由 `persist_messages` 落库，**不进事实网格**）。
 //!
-//! ## `into_message`：为什么汇报也要一条 `ChatMessage`
+//! ## `into_message`：为什么汇报也要一条 `ChatNode`
 //!
 //! 用户得看得见自己被汇报了，而前端读的是 `messages.json`。事实网格那一格是给
 //! 模型与 `session/stats` 用的；**呈现那一格还得照旧给**。两条路各写一份不是
@@ -22,7 +22,7 @@
 
 use std::sync::Arc;
 
-use crate::symbio_core::chat_message::ChatMessage;
+use crate::symbio_core::chat_node::ChatNode;
 
 /// 轮边界回调：core 每跑完一轮工具问一次，返回「这一轮要不要说点什么」。
 ///
@@ -57,7 +57,7 @@ impl ReportDraft {
     /// ——节点落库了却不成形状，e2e 才照得出来。构造只有一份，漂移才
     /// 不可能；`SURFACE_REPLY` / `REASON_PROGRESS` 两个常量留在判定点
     /// 那侧，由函数签名（`reason: &str`）承担跨模块契约。
-    pub(crate) fn to_message(&self) -> ChatMessage {
+    pub(crate) fn to_message(&self) -> ChatNode {
         super::chat_loop::dialog_node(&self.text, "progress", true)
     }
 }

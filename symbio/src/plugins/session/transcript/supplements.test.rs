@@ -6,19 +6,19 @@
 //! `inbox.test.rs` 与 e2e（`e2e/cases/t19-supplements-merge.mjs`）负责。
 
 use super::*;
-use crate::symbio_core::chat_message as cm;
+use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::session_chat;
 
 /// 造一条收件箱条目（params 与本模块无关，取默认）。
 fn item(id: &str, text: &str) -> InboxItem {
     InboxItem {
         id: id.to_string(),
-        message: cm::ChatMessage {
+        message: cm::ChatNode {
             id: id.to_string(),
-            role: Some(cm::MessageRole::User),
-            msg_type: Some(cm::MessageType::Text),
+            role: Some(cm::NodeRole::User),
+            msg_type: Some(cm::NodeKind::Text),
             content: Some(cm::MessageContent::Text(text.to_string())),
-            status: Some(cm::MessageStatus::Completed),
+            status: Some(cm::NodeStatus::Completed),
             ..Default::default()
         },
         params: session_chat::Request::default(),
@@ -69,9 +69,9 @@ fn many_are_joined_in_order_with_blank_line() {
         merged.content.as_ref().map(|c| c.to_text()).unwrap(),
         "第一句\n\n第二句\n\n第三句"
     );
-    assert_eq!(merged.role, Some(cm::MessageRole::User));
-    assert_eq!(merged.msg_type, Some(cm::MessageType::Text));
-    assert_eq!(merged.status, Some(cm::MessageStatus::Completed));
+    assert_eq!(merged.role, Some(cm::NodeRole::User));
+    assert_eq!(merged.msg_type, Some(cm::NodeKind::Text));
+    assert_eq!(merged.status, Some(cm::NodeStatus::Completed));
     assert_eq!(
         merged.parent_id, None,
         "顶层：find_turn_user_split_idx 只认根级 User"

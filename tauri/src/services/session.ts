@@ -45,7 +45,7 @@ import {
   vdfsMessageAddr,
   vdfsSessionAddr,
 } from '@/schemas/vdfs'
-import { ChatMessage as SessionMessage } from '../schemas/chat_message'
+import { ChatNode as SessionMessage } from '../schemas/chat_node'
 import * as SessionList from '../schemas/session_list'
 import type { SessionMetadata } from '../schemas/session_meta'
 
@@ -130,7 +130,7 @@ export async function deleteSession(sessionId: string, mountDir?: string): Promi
  * 这里只取 `messages`，其余字段由会话清单节点（`<根>/session/<id>`）承载。
  *
  * 放在本文件的理由：**文档形状的知识属于会话域**，不该出现在 store 里——
- * store 只需要 `ChatMessage[]`。读失败（空内容 / 非 JSON）在此就地转成错误，
+ * store 只需要 `ChatNode[]`。读失败（空内容 / 非 JSON）在此就地转成错误，
  * 调用方不必各自写一遍 `JSON.parse` 的 try/catch。
  */
 export async function readSessionTranscript(

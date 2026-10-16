@@ -48,10 +48,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import {
-  MESSAGE_TYPE_TURN,
-  isUnsettledMessageStatus,
-  type ChatMessage,
-} from '@/schemas/chat_message'
+  NODE_KIND_TURN,
+  isUnsettledNodeStatus,
+  type ChatNode,
+} from '@/schemas/chat_node'
 import { useMessageContent } from '@/composables/useMessageContent'
 import {
   agentNameOf,
@@ -64,7 +64,7 @@ import MessageErrorBox from './MessageErrorBox.vue'
 import TurnPending from './TurnPending.vue'
 
 const props = defineProps<{
-  node: ChatMessage
+  node: ChatNode
   facets: MessageFacets
   depth?: number
 }>()
@@ -81,14 +81,14 @@ const agentName = computed(() => agentNameOf(props.node, props.facets.subSession
 
 /** 根级助手 Turn：唯一承载组级操作（悬停删除 / 组级重试）的 Turn */
 const isRootTurn = computed(
-  () => props.facets.type === MESSAGE_TYPE_TURN && !props.facets.subSession,
+  () => props.facets.type === NODE_KIND_TURN && !props.facets.subSession,
 )
 /** 等待态：Turn 已广播但尚无任何子节点且仍在运行 → 显示「正在思考…」骨架 */
 const isPending = computed(
   () => isStreamingStatus(props.facets.status) && children.value.length === 0,
 )
 /** 需要向用户交代的非正常终态（失败 / 中止） */
-const isUnsettled = computed(() => isUnsettledMessageStatus(props.facets.status))
+const isUnsettled = computed(() => isUnsettledNodeStatus(props.facets.status))
 const isAborted = computed(() => isAbortedStatus(props.facets.status))
 
 const { errorText } = useMessageContent(

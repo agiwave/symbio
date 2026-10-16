@@ -485,7 +485,7 @@ impl SessionPlugin {
                 // 普通发送：时间 / 工作区上下文挂在用户消息的 LLM prompt 上
                 // （`prompt` 不持久化，每轮发送重新生成，模型始终知道"现在几点、在哪个工作区"）。
                 let single = user_msg_spawn.map(|mut m| {
-                    if m.role == Some(cm::MessageRole::User) {
+                    if m.role == Some(cm::NodeRole::User) {
                         m.prompt = Some(super::super::message_build::temporal_context(Some(
                             w_clone.as_str(),
                         )));

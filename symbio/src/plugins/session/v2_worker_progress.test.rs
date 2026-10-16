@@ -11,7 +11,7 @@
 //! 「没有 WAL 的会话」这条回落路上，但它已是另一条路径，不再拿来对照。
 
 use super::progress_from_wal;
-use crate::symbio_core::chat_message::{ChatMessage, MessageContent, MessageRole, MessageStatus};
+use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole, NodeStatus};
 use crate::symbio_core::{
     Entity, Event, EventWalStore, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
     EVENT_USER_MESSAGE,
@@ -21,14 +21,14 @@ use crate::symbio_core::{
 ///
 /// 每轮 = 开轮格 + 收束格（`final` 或 `fallback`）。返回 `(dir, 该会话的落库镜像)`；
 /// 镜像按**同一批事实**构造（user + assistant 含 status），供落库侧口径的用例使用。
-fn seed(tag: &str, turns: &[(&str, Option<&str>)]) -> (std::path::PathBuf, Vec<ChatMessage>) {
+fn seed(tag: &str, turns: &[(&str, Option<&str>)]) -> (std::path::PathBuf, Vec<ChatNode>) {
     let dir = std::env::temp_dir().join(format!("symbio-wprog-{}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("临时目录");
     let wal = dir.join(super::super::paths::V2_WAL_FILE);
     let store = EventWalStore::open(&wal).expect("open wal");
 
-    let mut msgs: Vec<ChatMessage> = Vec::new();
+    let mut msgs: Vec<ChatNode> = Vec::new();
     for (i, (u, a)) in turns.iter().enumerate() {
         let t = i as u64;
         let s = store
@@ -80,18 +80,18 @@ fn seed(tag: &str, turns: &[(&str, Option<&str>)]) -> (std::path::PathBuf, Vec<C
             }
         }
         // 落库镜像：user + assistant（Completed）——与上面两格同一批事实
-        msgs.push(ChatMessage {
+        msgs.push(ChatNode {
             id: format!("m-u-{tag}-{t}"),
-            role: Some(MessageRole::User),
+            role: Some(NodeRole::User),
             content: Some(MessageContent::Text((*u).to_string())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             ..Default::default()
         });
-        msgs.push(ChatMessage {
+        msgs.push(ChatNode {
             id: format!("m-a-{tag}-{t}"),
-            role: Some(MessageRole::Assistant),
+            role: Some(NodeRole::Assistant),
             content: Some(MessageContent::Text(a.unwrap_or("impl 失败").to_string())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             ..Default::default()
         });
     }

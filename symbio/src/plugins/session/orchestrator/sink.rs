@@ -14,7 +14,7 @@
 //! ```
 //!
 //! 分派规则（告警归会话节点、消息归转写）现在由**出口类型本身**表达：
-//! `apply` 只收消息（一条 [`ChatMessage`]），`warn` 是 trait 上的独立通道——
+//! `apply` 只收消息（一条 [`ChatNode`]），`warn` 是 trait 上的独立通道——
 //! 两个域在类型层面分离，分派规则无需再被每个调用方记住。
 //!
 //! ## 与收口前的三点差别
@@ -26,7 +26,7 @@
 //!    消费循环因此可以退化为纯生命周期管理（见 [`super::consume`]）。
 
 use super::*;
-use crate::symbio_core::chat_message::ChatMessage;
+use crate::symbio_core::chat_node::ChatNode;
 use crate::symbio_core::ExecTranscriptWriter;
 use async_trait::async_trait;
 
@@ -44,7 +44,7 @@ impl TranscriptSink {
 
 #[async_trait]
 impl ExecTranscriptWriter for TranscriptSink {
-    async fn apply(&self, message: ChatMessage) {
+    async fn apply(&self, message: ChatNode) {
         // 消息帧：进唯一写入点（内存图 → seq → 一行核心日志 → 发布）。
         self.state.transcript.lock().await.apply(message);
     }

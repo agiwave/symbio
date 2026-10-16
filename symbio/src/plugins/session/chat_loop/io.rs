@@ -26,7 +26,7 @@ pub(crate) async fn finalize_turn_root(
     let Some(mut node) = context.messages.iter().find(|m| m.id == root_id).cloned() else {
         return;
     };
-    node.status = Some(MessageStatus::Completed);
+    node.status = Some(NodeStatus::Completed);
     // Turn 是组合节点（仅分组、无正文）⇒ 状态帧。
     llm_emit_state(sink, node).await;
 }
@@ -133,13 +133,13 @@ pub(crate) async fn fire_user_prompt_submit_hook(
 pub(crate) async fn emit_streaming_start(sink: &ExecEventSink, root_id: &str, turn: Option<usize>) {
     let meta = turn.map(|t| serde_json::json!({"turn": t}));
     // Turn 组合节点无正文：身份 + 状态一帧到位。
-    sink.emit(ChatMessage {
+    sink.emit(ChatNode {
         id: root_id.to_string(),
-        // Turn 是根级节点，与 User 互为兄弟（请求/响应由 MessageRole 区分）
+        // Turn 是根级节点，与 User 互为兄弟（请求/响应由 NodeRole 区分）
         parent_id: None,
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Turn),
-        status: Some(MessageStatus::Streaming),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Turn),
+        status: Some(NodeStatus::Streaming),
         meta,
         ..Default::default()
     })
@@ -152,6 +152,6 @@ pub(crate) async fn emit_streaming_start(sink: &ExecEventSink, root_id: &str, tu
 /// `context.messages`，其余用入参 `messages`），以携带准确的 `last_message`。
 /// 即便全部出口都漏调，`StopSignal::drop` 也会兜底补发一次——不变式
 /// 「一个请求生命周期内 Stop 恰好一次」因此由生命周期保证，而非依赖人工记忆。
-pub(crate) async fn fire_stop_hook(orchestrator: &ChatOrchestrator, messages: &[ChatMessage]) {
+pub(crate) async fn fire_stop_hook(orchestrator: &ChatOrchestrator, messages: &[ChatNode]) {
     orchestrator.stop.fire(messages).await;
 }

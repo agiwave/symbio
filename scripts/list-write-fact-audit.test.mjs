@@ -59,7 +59,7 @@ function audit(files) {
 
 /** 唯一写入口本体的干净写法：原语实现 + apply 汇聚，全在 write.rs 里。 */
 const WRITER = [
-  'pub(crate) async fn apply(&self, change: MessageChange) -> Result<Vec<ChatMessage>, PluginError> {',
+  'pub(crate) async fn apply(&self, change: MessageChange) -> Result<Vec<ChatNode>, PluginError> {',
   '    match change {',
   '        MessageChange::Born { nodes, .. } => self.append_messages(nodes).await,',
   '        MessageChange::Edited(msgs) => { self.replace_all(list).await?; Ok(msgs) }',
@@ -128,7 +128,7 @@ test('寄存锚在窗口边界之外（>20 行）→ LWF-002 变红', () => {
 
 test('v2_messages::edited 出了 write.rs → LWF-001 变红（第二个写入口）', () => {
   const r = audit({
-    'plugins/session/commands.rs': 'fn land(dir: &Path, m: &ChatMessage) {\n    v2_messages::edited(dir, m);\n}\n',
+    'plugins/session/commands.rs': 'fn land(dir: &Path, m: &ChatNode) {\n    v2_messages::edited(dir, m);\n}\n',
   })
   assert.equal(r.status, 1, '事实落格函数不得有第二个调用方')
   assert.match(r.stderr, /LWF-001/)

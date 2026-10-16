@@ -6,11 +6,11 @@
 use super::*;
 use serde_json::json;
 
-fn user_msg(text: &str) -> ChatMessage {
-    use crate::symbio_core::chat_message as cm;
-    ChatMessage {
+fn user_msg(text: &str) -> ChatNode {
+    use crate::symbio_core::chat_node as cm;
+    ChatNode {
         id: "m1".into(),
-        role: Some(cm::MessageRole::User),
+        role: Some(cm::NodeRole::User),
         content: Some(cm::MessageContent::Text(text.into())),
         ..Default::default()
     }
@@ -36,10 +36,10 @@ fn derive_title_truncates_long_text() {
 
 #[test]
 fn derive_title_skips_empty_and_non_user() {
-    use crate::symbio_core::chat_message as cm;
-    let empty = ChatMessage {
+    use crate::symbio_core::chat_node as cm;
+    let empty = ChatNode {
         id: "m0".into(),
-        role: Some(cm::MessageRole::User),
+        role: Some(cm::NodeRole::User),
         content: Some(cm::MessageContent::Text("   \n  ".into())),
         ..Default::default()
     };
@@ -56,11 +56,11 @@ fn display_title_prefers_metadata_then_content_then_default() {
     assert_eq!(s.display_title(), "自定义名");
 }
 
-fn assistant_msg(text: &str) -> ChatMessage {
-    use crate::symbio_core::chat_message as cm;
-    ChatMessage {
+fn assistant_msg(text: &str) -> ChatNode {
+    use crate::symbio_core::chat_node as cm;
+    ChatNode {
         id: "a1".into(),
-        role: Some(cm::MessageRole::Assistant),
+        role: Some(cm::NodeRole::Assistant),
         content: Some(cm::MessageContent::Text(text.into())),
         ..Default::default()
     }
@@ -85,11 +85,11 @@ fn summary_ignores_user_messages() {
 
 #[test]
 fn summary_skips_textless_assistant_messages() {
-    use crate::symbio_core::chat_message as cm;
+    use crate::symbio_core::chat_node as cm;
     // 纯工具调用 / 推理消息没有正文：继续往前找最近一条**有文本**的回复
-    let tool_only = ChatMessage {
+    let tool_only = ChatNode {
         id: "t1".into(),
-        role: Some(cm::MessageRole::Assistant),
+        role: Some(cm::NodeRole::Assistant),
         content: None,
         ..Default::default()
     };

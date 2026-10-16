@@ -120,24 +120,24 @@ fn stats_omit_after_tokens_when_there_is_no_such_number() {
 // 线上事故，缺一半都会复发。
 
 /// 帧工厂：Turn 组合节点骨架（model 流循环对每次 execute_turn 发出的第一帧）。
-fn turn_skeleton_frame(root_id: &str) -> ChatMessage {
-    ChatMessage {
+fn turn_skeleton_frame(root_id: &str) -> ChatNode {
+    ChatNode {
         id: root_id.into(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Turn),
-        status: Some(MessageStatus::Streaming),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Turn),
+        status: Some(NodeStatus::Streaming),
         ..Default::default()
     }
 }
 
 /// 帧工厂：摘要正文子节点的**首帧**（全量快照：id + content + streaming）。
-fn snapshot_frame(child: &str, text: &str) -> ChatMessage {
-    ChatMessage {
+fn snapshot_frame(child: &str, text: &str) -> ChatNode {
+    ChatNode {
         id: child.into(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text(text.into())),
-        status: Some(MessageStatus::Streaming),
+        status: Some(NodeStatus::Streaming),
         ..Default::default()
     }
 }
@@ -169,16 +169,16 @@ fn gate_passes_only_pure_delta_frames() {
         "全量首帧携带节点身份，必须吞掉"
     );
     assert!(
-        !gate(&mut ChatMessage {
+        !gate(&mut ChatNode {
             id: "compress-node".into(),
             delta: Some("x".into()),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             ..Default::default()
         }),
         "带状态的增量帧是身份帧，必须吞掉"
     );
     assert!(
-        !gate(&mut ChatMessage {
+        !gate(&mut ChatNode {
             id: "compress-node".into(),
             content: Some(MessageContent::Text("全量".into())),
             ..Default::default()
@@ -192,7 +192,7 @@ fn gate_keeps_delta_only_and_strips_meta() {
     // 上游哪天给增量帧塞 meta，白名单也不得把混合载荷送进转写：
     // 增量/全量语义互斥，转写对违例帧整帧拒收（见 transcript.rs）。
     let gate = compression_delta_gate("c1");
-    let mut f = ChatMessage {
+    let mut f = ChatNode {
         id: "child".into(),
         delta: Some("增".into()),
         meta: Some(serde_json::json!({ "usage": 1 })),
@@ -208,8 +208,8 @@ fn gate_keeps_delta_only_and_strips_meta() {
 }
 
 /// 测试用的增量帧工厂（白名单用例与出口用例共用形状）。
-fn delta(id: &str, text: &str) -> ChatMessage {
-    ChatMessage {
+fn delta(id: &str, text: &str) -> ChatNode {
+    ChatNode {
         id: id.into(),
         delta: Some(text.into()),
         ..Default::default()

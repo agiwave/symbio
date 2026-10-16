@@ -12,7 +12,7 @@ use crate::plugins::session::types::Session;
 use crate::symbio_core::PluginDir;
 use crate::symbio_core::VdfsChangeSubscriptions;
 /// 向在途转写图注入一条消息（测试辅助：等价于旧的 live_messages.push）。
-async fn push_inflight(state: &Arc<ActiveSessionState>, message: cm::ChatMessage) {
+async fn push_inflight(state: &Arc<ActiveSessionState>, message: cm::ChatNode) {
     state.transcript.lock().await.apply(message);
 }
 // ==================== 中止收口（converge_inflight） ====================
@@ -32,7 +32,7 @@ fn fixture() -> (tempfile::TempDir, SessionPlugin) {
 /// 切主后（ADR-049）存储里的正文 = **事实投影**：夹具里「上一轮的世界」也必须
 /// 以事实在场。空切片上，生产收口路径要落的变更事实（`v2_messages::append`）
 /// 连溯源锚都解不出、会按口径被丢弃——测的就不再是收口本身。
-fn seed_added(dir: &std::path::Path, nodes: Vec<cm::ChatMessage>) {
+fn seed_added(dir: &std::path::Path, nodes: Vec<cm::ChatNode>) {
     use crate::symbio_core::Store as _;
     let payload = serde_json::to_value(nodes).expect("序列化种子消息失败");
     let wal = dir.join(crate::plugins::session::paths::V2_WAL_FILE);
@@ -72,12 +72,12 @@ fn seed_user_message(dir: &std::path::Path) {
     .expect("种子事实落格失败");
 }
 
-fn node(id: &str, parent: Option<&str>, status: cm::MessageStatus) -> cm::ChatMessage {
-    cm::ChatMessage {
+fn node(id: &str, parent: Option<&str>, status: cm::NodeStatus) -> cm::ChatNode {
+    cm::ChatNode {
         id: id.into(),
         parent_id: parent.map(|p| p.into()),
-        role: Some(cm::MessageRole::Assistant),
-        msg_type: Some(cm::MessageType::Text),
+        role: Some(cm::NodeRole::Assistant),
+        msg_type: Some(cm::NodeKind::Text),
         status: Some(status),
         ..Default::default()
     }
@@ -87,9 +87,9 @@ fn node(id: &str, parent: Option<&str>, status: cm::MessageStatus) -> cm::ChatMe
 ///
 /// 中止的终态按「是不是根级 Turn」二分，所以测试里必须有**真的** Turn 节点——
 /// 拿 `node()` 顶替会让断言测了个空（`msg_type` 是 `Text`）。
-fn turn_node(id: &str, status: cm::MessageStatus) -> cm::ChatMessage {
-    cm::ChatMessage {
-        msg_type: Some(cm::MessageType::Turn),
+fn turn_node(id: &str, status: cm::NodeStatus) -> cm::ChatNode {
+    cm::ChatNode {
+        msg_type: Some(cm::NodeKind::Turn),
         ..node(id, None, status)
     }
 }
@@ -105,16 +105,16 @@ fn inflight_set_covers_pending_and_streaming_but_not_waiting_user_action() {
         is_inflight(&None),
         "未标注状态视为在途（防御：在途缓冲不应有无状态节点）"
     );
-    assert!(is_inflight(&Some(cm::MessageStatus::Pending)));
-    assert!(is_inflight(&Some(cm::MessageStatus::Streaming)));
+    assert!(is_inflight(&Some(cm::NodeStatus::Pending)));
+    assert!(is_inflight(&Some(cm::NodeStatus::Streaming)));
     assert!(
-        !is_inflight(&Some(cm::MessageStatus::WaitingUserAction)),
+        !is_inflight(&Some(cm::NodeStatus::WaitingUserAction)),
         "等待用户回答不是「正在跑」：中止不该把审批入口一并抹掉"
     );
-    assert!(!is_inflight(&Some(cm::MessageStatus::Completed)));
-    assert!(!is_inflight(&Some(cm::MessageStatus::Failed)));
+    assert!(!is_inflight(&Some(cm::NodeStatus::Completed)));
+    assert!(!is_inflight(&Some(cm::NodeStatus::Failed)));
     assert!(
-        !is_inflight(&Some(cm::MessageStatus::Aborted)),
+        !is_inflight(&Some(cm::NodeStatus::Aborted)),
         "已中止是终态：否则中止收口会把它又当在途节点收敛一遍"
     );
 }
@@ -127,21 +127,21 @@ fn inflight_set_covers_pending_and_streaming_but_not_waiting_user_action() {
 fn abort_terminal_of_marks_only_root_turn_aborted() {
     use super::abort_terminal_of;
     assert_eq!(
-        abort_terminal_of(&turn_node("t", cm::MessageStatus::Streaming)),
-        cm::MessageStatus::Aborted
+        abort_terminal_of(&turn_node("t", cm::NodeStatus::Streaming)),
+        cm::NodeStatus::Aborted
     );
     // 子节点：正文 / 思考 / 工具调用都没有独立的重试语义，定稿结束动画即可
     assert_eq!(
-        abort_terminal_of(&node("c", Some("t"), cm::MessageStatus::Streaming)),
-        cm::MessageStatus::Completed
+        abort_terminal_of(&node("c", Some("t"), cm::NodeStatus::Streaming)),
+        cm::NodeStatus::Completed
     );
     // 有父的 Turn 是子会话节点，重试归父会话的根 Turn
     assert_eq!(
-        abort_terminal_of(&cm::ChatMessage {
-            msg_type: Some(cm::MessageType::Turn),
-            ..node("sub", Some("t"), cm::MessageStatus::Streaming)
+        abort_terminal_of(&cm::ChatNode {
+            msg_type: Some(cm::NodeKind::Turn),
+            ..node("sub", Some("t"), cm::NodeStatus::Streaming)
         }),
-        cm::MessageStatus::Completed
+        cm::NodeStatus::Completed
     );
 }
 
@@ -161,7 +161,7 @@ async fn converge_inflight_finalizes_live_buffer_nodes() {
     // 上一轮的节点也要以 `message.added` 事实在场（缓存只留元数据）。
     let chat = p.open_chat_session(sid).await.unwrap();
     let dir = store.session_dir(sid).expect("会话目录未建出");
-    seed_added(&dir, vec![node("turn", None, cm::MessageStatus::Completed)]);
+    seed_added(&dir, vec![node("turn", None, cm::NodeStatus::Completed)]);
 
     // 在途侧：Turn 下未落库的 reasoning(Streaming) 与一个父不存在的孤儿
     let state = Arc::new(ActiveSessionState::with_session_id(
@@ -170,12 +170,12 @@ async fn converge_inflight_finalizes_live_buffer_nodes() {
     ));
     push_inflight(
         &state,
-        node("reason", Some("turn"), cm::MessageStatus::Streaming),
+        node("reason", Some("turn"), cm::NodeStatus::Streaming),
     )
     .await;
     push_inflight(
         &state,
-        node("orphan", Some("ghost-parent"), cm::MessageStatus::Streaming),
+        node("orphan", Some("ghost-parent"), cm::NodeStatus::Streaming),
     )
     .await;
 
@@ -192,12 +192,12 @@ async fn converge_inflight_finalizes_live_buffer_nodes() {
     };
     assert_eq!(
         status_of("turn"),
-        Some(cm::MessageStatus::Completed),
+        Some(cm::NodeStatus::Completed),
         "存储里的终态消息不得被收口改写"
     );
     assert_eq!(
         status_of("reason"),
-        Some(cm::MessageStatus::Completed),
+        Some(cm::NodeStatus::Completed),
         "在途缓冲里的节点必须被补写为终态"
     );
     assert_eq!(status_of("orphan"), None, "父节点不存在的孤儿不得写入存储");
@@ -230,10 +230,10 @@ async fn converge_inflight_marks_root_turn_aborted_and_children_completed() {
         sid.into(),
         VdfsChangeSubscriptions::default(),
     ));
-    push_inflight(&state, turn_node("turn-live", cm::MessageStatus::Streaming)).await;
+    push_inflight(&state, turn_node("turn-live", cm::NodeStatus::Streaming)).await;
     push_inflight(
         &state,
-        node("reason", Some("turn-live"), cm::MessageStatus::Streaming),
+        node("reason", Some("turn-live"), cm::NodeStatus::Streaming),
     )
     .await;
 
@@ -250,10 +250,10 @@ async fn converge_inflight_marks_root_turn_aborted_and_children_completed() {
     };
     assert_eq!(
         status_of("turn-live"),
-        Some(cm::MessageStatus::Aborted),
+        Some(cm::NodeStatus::Aborted),
         "被中止的这一轮是半截的，不得宣布它正常结束"
     );
-    assert_eq!(status_of("reason"), Some(cm::MessageStatus::Completed));
+    assert_eq!(status_of("reason"), Some(cm::NodeStatus::Completed));
     assert_eq!(
         after
             .iter()
@@ -287,30 +287,30 @@ async fn persist_failure_merges_partial_output() {
     transcript
         .lock()
         .await
-        .apply(turn_node("turn-p", cm::MessageStatus::Streaming));
-    let mut snap_half = node("text-p", Some("turn-p"), cm::MessageStatus::Streaming);
+        .apply(turn_node("turn-p", cm::NodeStatus::Streaming));
+    let mut snap_half = node("text-p", Some("turn-p"), cm::NodeStatus::Streaming);
     snap_half.content = Some(cm::MessageContent::Text("说到一半提到一个名词".into()));
     transcript.lock().await.apply(snap_half);
 
     // partial：同 id 正文（定稿到中断处）+ 新增思考节点 + 一个孤儿
-    let mut full_half = node("text-p", Some("turn-p"), cm::MessageStatus::Completed);
+    let mut full_half = node("text-p", Some("turn-p"), cm::NodeStatus::Completed);
     full_half.content = Some(cm::MessageContent::Text(
         "说到一半提到一个名词，然后被中断".into(),
     ));
-    let mut reason = node("reason-p", Some("turn-p"), cm::MessageStatus::Completed);
-    reason.msg_type = Some(cm::MessageType::Reasoning);
+    let mut reason = node("reason-p", Some("turn-p"), cm::NodeStatus::Completed);
+    reason.msg_type = Some(cm::NodeKind::Reasoning);
     reason.content = Some(cm::MessageContent::Text("半截思考".into()));
     let orphan = node(
         "orphan-p",
         Some("ghost-parent"),
-        cm::MessageStatus::Completed,
+        cm::NodeStatus::Completed,
     );
 
     p.persist_failure(
         sid,
         &transcript,
         "用户手动中止了本次回复",
-        cm::MessageStatus::Aborted,
+        cm::NodeStatus::Aborted,
         vec![full_half, reason, orphan],
     )
     .await;
@@ -336,7 +336,7 @@ async fn persist_failure_merges_partial_output() {
     assert!(get("orphan-p").is_none(), "孤儿不得写入存储");
     assert_eq!(
         get("turn-p").and_then(|m| m.status),
-        Some(cm::MessageStatus::Aborted),
+        Some(cm::NodeStatus::Aborted),
         "根 Turn 落中止终态（可重试），不挂 error"
     );
 }
@@ -354,7 +354,7 @@ async fn converge_inflight_is_idempotent() {
         sid.into(),
         VdfsChangeSubscriptions::default(),
     ));
-    push_inflight(&state, node("turn", None, cm::MessageStatus::Streaming)).await;
+    push_inflight(&state, node("turn", None, cm::NodeStatus::Streaming)).await;
     assert_eq!(p.converge_inflight(&state, sid, "用户中止").await, 1);
     assert_eq!(
         p.converge_inflight(&state, sid, "用户中止").await,

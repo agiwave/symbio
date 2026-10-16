@@ -5,21 +5,21 @@
 
 use super::*;
 
-fn user_msg(text: &str) -> ChatMessage {
-    ChatMessage {
+fn user_msg(text: &str) -> ChatNode {
+    ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
-        role: Some(MessageRole::User),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::User),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()
     }
 }
 
-fn assistant_msg(text: &str) -> ChatMessage {
-    ChatMessage {
+fn assistant_msg(text: &str) -> ChatNode {
+    ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()
     }
@@ -175,7 +175,7 @@ fn test_compression_prompt_delegates_regenerable_facts_generically() {
 #[test]
 fn compression_request_carries_history_as_conversation_not_json() {
     let text_of =
-        |m: &ChatMessage| -> String { m.content.as_ref().map(|c| c.to_text()).unwrap_or_default() };
+        |m: &ChatNode| -> String { m.content.as_ref().map(|c| c.to_text()).unwrap_or_default() };
     // 数据必须带 `parent_id`：否则序列化时被 `skip_serializing_if` 跳过，
     // "改回 JSON 转储"这条回归就**抓不到**（字段名根本不出现在输出里）。
     let m1 = user_msg("第一条");

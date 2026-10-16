@@ -19,7 +19,7 @@
 //! [`llm_emit_removed`] 就是这样调 [`llm_removed_frame`] 的）。
 //! 插件之间同样禁止互引（`plugin-entry-audit` E-009）——本插件之外没人能引用本文件。
 
-use crate::symbio_core::chat_message::{ChatMessage, MessageStatus};
+use crate::symbio_core::chat_node::{ChatNode, NodeStatus};
 use crate::symbio_core::{llm_removed_frame, ExecEventSink};
 
 /// 发送一帧**状态**：身份 + 状态 + 元数据 + 错误，**不带正文**。
@@ -28,7 +28,7 @@ use crate::symbio_core::{llm_removed_frame, ExecEventSink};
 /// `plugins/model/stream.rs`）逐帧上线，这里再带一次只是把同一段文字二次传输
 /// （且会把权威副本的完整正文重新发一遍）。`content` / `delta` 一律剥掉，
 /// 免得调用方传了一条「内容齐全的副本」就顺手把它送上热路径。
-pub async fn llm_emit_state(sink: &ExecEventSink, msg: ChatMessage) {
+pub async fn llm_emit_state(sink: &ExecEventSink, msg: ChatNode) {
     sink.emit(llm_state_frame(&msg)).await;
 }
 
@@ -36,12 +36,12 @@ pub async fn llm_emit_state(sink: &ExecEventSink, msg: ChatMessage) {
 ///
 /// 直接写转写（`Transcript::apply`，不经出口）的收口路径也用它——那些节点的
 /// 正文早已由 `delta` 逐帧上线，重发一遍只是把同一段文字二次传输。
-pub fn llm_state_frame(m: &ChatMessage) -> ChatMessage {
+pub fn llm_state_frame(m: &ChatNode) -> ChatNode {
     let mut frame = m.clone();
     frame.content = None;
     frame.delta = None;
     if frame.status.is_none() {
-        frame.status = Some(MessageStatus::Completed);
+        frame.status = Some(NodeStatus::Completed);
     }
     frame
 }

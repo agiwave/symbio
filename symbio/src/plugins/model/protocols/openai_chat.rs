@@ -63,7 +63,7 @@ fn merge_leading_system(
     let mut merged = system.to_string();
     let mut consumed = 0usize;
     for m in msgs {
-        if m.role != crate::plugins::model::types::MessageRole::System {
+        if m.role != crate::plugins::model::types::NodeRole::System {
             break;
         }
         // 取 `to_api_value` 算出的最终 content（含 `prompt` 前缀的拼接结果），
@@ -114,7 +114,7 @@ impl ModelProtocol for OpenaiChatProtocol {
         &self,
         cfg: &ModelProviderConfig,
         system: &str,
-        messages: &[crate::symbio_core::chat_message::ChatMessage],
+        messages: &[crate::symbio_core::chat_node::ChatNode],
         tools: &[CapabilityMeta],
     ) -> Value {
         let flattened_messages =

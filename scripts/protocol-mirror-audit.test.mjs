@@ -33,8 +33,8 @@ import { fileURLToPath } from 'node:url'
 
 const script = fileURLToPath(new URL('./protocol-mirror-audit.mjs', import.meta.url))
 
-const CHAT_RS = 'symbio/src/symbio_core/schemas/session/chat_message.rs'
-const CHAT_TS = 'tauri/src/schemas/chat_message.ts'
+const CHAT_RS = 'symbio/src/symbio_core/schemas/session/chat_node.rs'
+const CHAT_TS = 'tauri/src/schemas/chat_node.ts'
 const DETAIL_RS = 'symbio/src/symbio_core/schemas/detail.rs'
 const FORM_TS = 'tauri/src/schemas/vdfs-form.ts'
 const RISK_LEVEL_RS = 'symbio/src/symbio_core/capability/mod.rs'
@@ -66,7 +66,7 @@ const CHAT_RS_SRC = [
   '#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]',
   '#[serde(rename_all = "snake_case")]',
   '#[derive(Default)]',
-  'pub enum MessageRole {',
+  'pub enum NodeRole {',
   '    #[default]',
   '    User,',
   '    Assistant,',
@@ -74,7 +74,7 @@ const CHAT_RS_SRC = [
   '',
   '#[derive(Debug)]',
   '#[serde(rename_all = "snake_case")]',
-  'pub enum MessageType {',
+  'pub enum NodeKind {',
   '    Text,',
   '    ToolCall,',
   '    UserPrompt,',
@@ -82,7 +82,7 @@ const CHAT_RS_SRC = [
   '',
   '#[derive(Debug)]',
   '#[serde(rename_all = "snake_case")]',
-  'pub enum MessageStatus {',
+  'pub enum NodeStatus {',
   '    Pending,',
   '    WaitingUserAction,',
   '    Failed,',
@@ -96,7 +96,7 @@ const CHAT_RS_SRC = [
   '    Approve,',
   '}',
   '',
-  rsStruct('ChatMessage', 'id', 'parent_id'),
+  rsStruct('ChatNode', 'id', 'parent_id'),
 ].join('\n')
 
 /** 前端：四张词表（常量 + 由常量数组派生的类型） */
@@ -105,22 +105,22 @@ const CHAT_TS_SRC = [
   "export const CHAT_ROLE_ASSISTANT = 'assistant'",
   'export const CHAT_ROLES = [CHAT_ROLE_USER, CHAT_ROLE_ASSISTANT] as const',
   '',
-  "export const MESSAGE_TYPE_TEXT = 'text'",
-  "export const MESSAGE_TYPE_TOOL_CALL = 'tool_call'",
-  "export const MESSAGE_TYPE_USER_PROMPT = 'user_prompt'",
-  'export const MESSAGE_TYPES = [',
-  '  MESSAGE_TYPE_TEXT,',
-  '  MESSAGE_TYPE_TOOL_CALL,',
-  '  MESSAGE_TYPE_USER_PROMPT,',
+  "export const NODE_KIND_TEXT = 'text'",
+  "export const NODE_KIND_TOOL_CALL = 'tool_call'",
+  "export const NODE_KIND_USER_PROMPT = 'user_prompt'",
+  'export const NODE_KINDS = [',
+  '  NODE_KIND_TEXT,',
+  '  NODE_KIND_TOOL_CALL,',
+  '  NODE_KIND_USER_PROMPT,',
   '] as const',
   '',
-  "export const MESSAGE_STATUS_PENDING = 'pending'",
-  "export const MESSAGE_STATUS_WAITING_USER_ACTION = 'waiting_user_action'",
-  "export const MESSAGE_STATUS_FAILED = 'failed'",
-  'export const MESSAGE_STATUSES = [',
-  '  MESSAGE_STATUS_PENDING,',
-  '  MESSAGE_STATUS_WAITING_USER_ACTION,',
-  '  MESSAGE_STATUS_FAILED,',
+  "export const NODE_STATUS_PENDING = 'pending'",
+  "export const NODE_STATUS_WAITING_USER_ACTION = 'waiting_user_action'",
+  "export const NODE_STATUS_FAILED = 'failed'",
+  'export const NODE_STATUSES = [',
+  '  NODE_STATUS_PENDING,',
+  '  NODE_STATUS_WAITING_USER_ACTION,',
+  '  NODE_STATUS_FAILED,',
   '] as const',
   '',
   "export const RESUME_ACTION_RETRY_TURN = 'retry_turn'",
@@ -132,7 +132,7 @@ const CHAT_TS_SRC = [
   '  RESUME_ACTION_APPROVE,',
   '] as const',
   '',
-  tsIface('ChatMessage', 'id', 'parent_id'),
+  tsIface('ChatNode', 'id', 'parent_id'),
 ].join('\n')
 
 /** 后端 vdfs 插件私有常量源（A 组的自动发现范围） */
@@ -509,24 +509,24 @@ test('后端枚举加了变体、前端词表没跟 → 变红', () => {
     [CHAT_RS]: CHAT_RS_SRC.replace('    Failed,\n}', '    Failed,\n    Paused,\n}'),
   })
   assert.equal(r.status, 1)
-  assert.match(r.stdout, /MessageStatus/)
+  assert.match(r.stdout, /NodeStatus/)
   assert.match(r.stdout, /前端词表缺少：paused/)
 })
 
 test('前端词表多出一个取值 → 变红', () => {
   const r = mirror({
-    [CHAT_TS]: `${CHAT_TS_SRC}\nexport const MESSAGE_STATUS_PAUSED = 'paused'\n`,
+    [CHAT_TS]: `${CHAT_TS_SRC}\nexport const NODE_STATUS_PAUSED = 'paused'\n`,
   })
   // 只加常量不改数组 ⇒ 不红；把常量加进数组才红
   assert.equal(r.status, 0, r.stdout)
 
   const r2 = mirror({
     [CHAT_TS]: CHAT_TS_SRC.replace(
-      '  MESSAGE_STATUS_FAILED,',
-      '  MESSAGE_STATUS_FAILED,\n  MESSAGE_STATUS_PAUSED,',
+      '  NODE_STATUS_FAILED,',
+      '  NODE_STATUS_FAILED,\n  NODE_STATUS_PAUSED,',
     ).replace(
-      "export const MESSAGE_STATUS_FAILED = 'failed'",
-      "export const MESSAGE_STATUS_FAILED = 'failed'\nexport const MESSAGE_STATUS_PAUSED = 'paused'",
+      "export const NODE_STATUS_FAILED = 'failed'",
+      "export const NODE_STATUS_FAILED = 'failed'\nexport const NODE_STATUS_PAUSED = 'paused'",
     ),
   })
   assert.equal(r2.status, 1)
@@ -536,12 +536,12 @@ test('前端词表多出一个取值 → 变红', () => {
 test('后端枚举丢了 rename_all = "snake_case" → 变红（否则转换会「看起来正确」）', () => {
   const r = mirror({
     [CHAT_RS]: CHAT_RS_SRC.replace(
-      '#[serde(rename_all = "snake_case")]\n#[derive(Default)]\npub enum MessageRole',
-      '#[derive(Default)]\npub enum MessageRole',
+      '#[serde(rename_all = "snake_case")]\n#[derive(Default)]\npub enum NodeRole',
+      '#[derive(Default)]\npub enum NodeRole',
     ),
   })
   assert.equal(r.status, 1)
-  assert.match(r.stdout, /MessageRole/)
+  assert.match(r.stdout, /NodeRole/)
   assert.match(r.stdout, /rename_all/)
 })
 
@@ -636,7 +636,7 @@ test('前端自持字段（tsLocal 已登记）→ 不红', () => {
   const r = mirror({
     [CHAT_TS]: CHAT_TS_SRC.replace(
       '  id?: string\n  parent_id?: string\n}',
-      '  id?: string\n  parent_id?: string\n  parent?: ChatMessage\n  children?: ChatMessage[]\n}',
+      '  id?: string\n  parent_id?: string\n  parent?: ChatNode\n  children?: ChatNode[]\n}',
     ),
   })
   assert.equal(r.status, 0, r.stdout)
@@ -704,8 +704,8 @@ test('#[serde(rename)] → 比对的是**线格式名**，不是 Rust 字段名'
 test('后端结构体级 rename_all → 报「不支持」而不是默默算错', () => {
   const r = mirror({
     [CHAT_RS]: CHAT_RS_SRC.replace(
-      'pub struct ChatMessage {',
-      '#[serde(rename_all = "camelCase")]\npub struct ChatMessage {',
+      'pub struct ChatNode {',
+      '#[serde(rename_all = "camelCase")]\npub struct ChatNode {',
     ),
   })
   assert.equal(r.status, 1)

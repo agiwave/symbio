@@ -15,8 +15,8 @@ use serde_json::Value;
 
 /// **主体族**（[ADR-069 §决策 1]）——四值闭集。
 ///
-/// 与曾经的 `MessageRole` 是**同一件事**：`role` 从协议顶层退役后，`kind` 是它唯一的承载点。
-/// 因此 [T-147] 里 `MessageRole::User` ↔ `PrincipalKind::Person`，`Assistant` ↔ `Agent`，
+/// 与曾经的 `NodeRole` 是**同一件事**：`role` 从协议顶层退役后，`kind` 是它唯一的承载点。
+/// 因此 [T-147] 里 `NodeRole::User` ↔ `PrincipalKind::Person`，`Assistant` ↔ `Agent`，
 /// `Tool` ↔ `Tool`，`System` ↔ `System`；读侧一次性别名靠这套映射把旧消息里的 role 补进 kind。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
@@ -32,7 +32,7 @@ pub enum PrincipalKind {
 }
 
 impl PrincipalKind {
-    /// 状态词——**与 `serde` 的序列化名逐字一致**（判据在 [`super::chat_message::MessageStatus::as_str`] 同款）。
+    /// 状态词——**与 `serde` 的序列化名逐字一致**（判据在 [`super::chat_node::NodeStatus::as_str`] 同款）。
     pub fn as_str(&self) -> &'static str {
         match self {
             PrincipalKind::Person => "person",

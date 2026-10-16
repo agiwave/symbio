@@ -337,14 +337,14 @@ fn section_survives_empty_capability_list_when_verdict_exists() {
 /// 夹具：一条 worker 消息。
 fn wmsg(
     id: &str,
-    role: cm::MessageRole,
-    status: Option<cm::MessageStatus>,
+    role: cm::NodeRole,
+    status: Option<cm::NodeStatus>,
     text: &str,
-) -> cm::ChatMessage {
-    cm::ChatMessage {
+) -> cm::ChatNode {
+    cm::ChatNode {
         id: id.to_string(),
         role: Some(role),
-        msg_type: Some(cm::MessageType::Text),
+        msg_type: Some(cm::NodeKind::Text),
         status,
         content: Some(cm::MessageContent::Text(text.to_string())),
         ..Default::default()
@@ -367,7 +367,7 @@ fn sub(id: &str, title: &str, message_count: usize) -> SessionSummary {
 }
 
 /// 夹具：worker 的完整转写。
-fn wsession(messages: Vec<cm::ChatMessage>) -> Session {
+fn wsession(messages: Vec<cm::ChatNode>) -> Session {
     Session {
         id: "worker-1".to_string(),
         messages,
@@ -383,26 +383,26 @@ fn rounds_counts_user_messages_not_the_summary_count() {
     let s = wsession(vec![
         wmsg(
             "1",
-            cm::MessageRole::User,
-            Some(cm::MessageStatus::Completed),
+            cm::NodeRole::User,
+            Some(cm::NodeStatus::Completed),
             "第一轮",
         ),
         wmsg(
             "2",
-            cm::MessageRole::Assistant,
-            Some(cm::MessageStatus::Completed),
+            cm::NodeRole::Assistant,
+            Some(cm::NodeStatus::Completed),
             "答复一",
         ),
         wmsg(
             "3",
-            cm::MessageRole::User,
-            Some(cm::MessageStatus::Completed),
+            cm::NodeRole::User,
+            Some(cm::NodeStatus::Completed),
             "第二轮",
         ),
         wmsg(
             "4",
-            cm::MessageRole::Assistant,
-            Some(cm::MessageStatus::Completed),
+            cm::NodeRole::Assistant,
+            Some(cm::NodeStatus::Completed),
             "答复二",
         ),
     ]);
@@ -417,31 +417,31 @@ fn rounds_counts_user_messages_not_the_summary_count() {
 #[test]
 fn steps_skip_empty_nodes_and_user_prompts() {
     // 判据 3：无内容节点不产出步骤；user 提示是**输入**不是进展。
-    let grouping = cm::ChatMessage {
+    let grouping = cm::ChatNode {
         id: "2".to_string(),
-        msg_type: Some(cm::MessageType::Turn),
+        msg_type: Some(cm::NodeKind::Turn),
         ..Default::default()
     };
-    let empty = cm::ChatMessage {
+    let empty = cm::ChatNode {
         id: "3".to_string(),
-        role: Some(cm::MessageRole::Assistant),
-        msg_type: Some(cm::MessageType::Text),
+        role: Some(cm::NodeRole::Assistant),
+        msg_type: Some(cm::NodeKind::Text),
         content: Some(cm::MessageContent::Text(String::new())),
         ..Default::default()
     };
     let s = wsession(vec![
         wmsg(
             "1",
-            cm::MessageRole::User,
-            Some(cm::MessageStatus::Completed),
+            cm::NodeRole::User,
+            Some(cm::NodeStatus::Completed),
             "干活",
         ),
         grouping,
         empty,
         wmsg(
             "4",
-            cm::MessageRole::Assistant,
-            Some(cm::MessageStatus::Completed),
+            cm::NodeRole::Assistant,
+            Some(cm::NodeStatus::Completed),
             "产出",
         ),
     ]);
@@ -457,23 +457,23 @@ fn steps_skip_empty_nodes_and_user_prompts() {
 fn in_flight_is_false_only_once_a_terminal_state_is_seen() {
     let done = wsession(vec![wmsg(
         "1",
-        cm::MessageRole::Assistant,
-        Some(cm::MessageStatus::Completed),
+        cm::NodeRole::Assistant,
+        Some(cm::NodeStatus::Completed),
         "完",
     )]);
     assert!(!progress_of(&sub("worker-1", "t", 0), &done).in_flight);
 
     let running = wsession(vec![wmsg(
         "1",
-        cm::MessageRole::Assistant,
-        Some(cm::MessageStatus::Streaming),
+        cm::NodeRole::Assistant,
+        Some(cm::NodeStatus::Streaming),
         "写",
     )]);
     assert!(progress_of(&sub("worker-1", "t", 0), &running).in_flight);
 
     // `status` 缺失 = 没观测到结束 ⇒ 不得宣称已结束。谎报"已完成"会让模型抢跑，
     // 比多报在途糟得多（同「串台比没进展更糟」的取向）。
-    let no_status = wsession(vec![cm::ChatMessage {
+    let no_status = wsession(vec![cm::ChatNode {
         id: "1".to_string(),
         ..Default::default()
     }]);
@@ -488,12 +488,12 @@ fn steps_keep_the_recent_capped_and_truncated() {
     // 进展关心"到哪了"，不是"都干过什么"：超上限丢最早的、单步超长截断——
     // 否则每轮请求都要背着 worker 的全部历史。
     let long = "段".repeat(STEP_MAX_CHARS + 40);
-    let messages: Vec<cm::ChatMessage> = (0..STEPS_MAX + 3)
+    let messages: Vec<cm::ChatNode> = (0..STEPS_MAX + 3)
         .map(|i| {
             wmsg(
                 &format!("m{i}"),
-                cm::MessageRole::Assistant,
-                Some(cm::MessageStatus::Completed),
+                cm::NodeRole::Assistant,
+                Some(cm::NodeStatus::Completed),
                 &format!("{i}:{long}"),
             )
         })

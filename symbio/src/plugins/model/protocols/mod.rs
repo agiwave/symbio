@@ -30,7 +30,7 @@ pub(crate) use sse::utf8_chunk;
 pub use sse::{SseLineParser, SsePartialLineExtractor};
 
 use crate::plugin_warn;
-use crate::symbio_core::chat_message::ChatMessage;
+use crate::symbio_core::chat_node::ChatNode;
 use crate::symbio_core::{CapabilityMeta, ModelFinishReason, ModelUsage, PluginError};
 use async_trait::async_trait;
 use reqwest::header::HeaderMap;
@@ -182,7 +182,7 @@ pub trait ModelProtocol: SseLineParser + Send + Sync {
         &self,
         cfg: &ModelProviderConfig,
         system_prompt: &str,
-        messages: &[ChatMessage],
+        messages: &[ChatNode],
         tools: &[CapabilityMeta],
     ) -> Value;
 

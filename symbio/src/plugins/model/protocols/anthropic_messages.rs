@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use super::super::model_providers::ModelProviderConfig;
-use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole};
+use super::super::types::{CapabilityMeta, ContentPart, MessageContent, NodeRole};
 use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
 use super::sse::{SseLineParser, SsePartialLineExtractor};
 use super::ModelProtocolEvent;
@@ -71,18 +71,18 @@ impl ModelProtocol for AnthropicProtocol {
         &self,
         cfg: &ModelProviderConfig,
         system: &str,
-        messages: &[crate::symbio_core::chat_message::ChatMessage],
+        messages: &[crate::symbio_core::chat_node::ChatNode],
         tools: &[CapabilityMeta],
     ) -> Value {
         let flattened_messages =
             crate::plugins::model::message_builder::flatten_chat_messages(messages);
         let mut anthropic_msgs: Vec<Value> = Vec::new();
         for m in &flattened_messages {
-            if m.role == MessageRole::System {
+            if m.role == NodeRole::System {
                 continue;
             }
             let mut parts = Vec::new();
-            if m.role != MessageRole::Tool {
+            if m.role != NodeRole::Tool {
                 if let Some(ref content) = m.content {
                     match content {
                         MessageContent::Text(t) => {
@@ -151,7 +151,7 @@ impl ModelProtocol for AnthropicProtocol {
                     }));
                 }
             }
-            if m.role == MessageRole::Tool {
+            if m.role == NodeRole::Tool {
                 let text = match m.content {
                     Some(MessageContent::Text(ref t)) => t.clone(),
                     _ => "{}".into(),
@@ -179,7 +179,7 @@ impl ModelProtocol for AnthropicProtocol {
                 continue;
             }
 
-            let role = if m.role == MessageRole::Assistant {
+            let role = if m.role == NodeRole::Assistant {
                 "assistant"
             } else {
                 "user"

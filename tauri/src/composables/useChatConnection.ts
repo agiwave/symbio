@@ -1,7 +1,7 @@
 import { shallowRef, computed, type ComputedRef, type InjectionKey } from 'vue'
 import { runVdfsAction, writeVdfs } from '@/services/vdfs'
 import { ensureSessionScheme } from '@/services/vdfsScheme'
-import { messageTextOf, type ChatMessage, type ResumeAction } from '@/schemas/chat_message'
+import { messageTextOf, type ChatNode, type ResumeAction } from '@/schemas/chat_node'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
 import { isBlankContentNode, isInProgressMessage } from '@/stores/sessionTranscript'
@@ -55,7 +55,7 @@ export interface ResumePayload {
    *  - retry_compaction：指向 Failed 压缩节点（msg_type=Compression）
    *  - 其他 action：指向 ToolCall 父节点（msg_type=ToolCall） */
   targetId: string
-  /** 恢复动作——词表在 `schemas/chat_message.ts`（后端 `ResumeAction` 的镜像，
+  /** 恢复动作——词表在 `schemas/chat_node.ts`（后端 `ResumeAction` 的镜像，
    *  由 `scripts/protocol-mirror-audit.mjs` 的 C 组守着）。此处**不**再抄一份
    *  字面量联合：抄一份就等于多一份真相，改一个词要记得改两处。 */
   action: ResumeAction
@@ -73,7 +73,7 @@ export interface UseChatConnectionReturn {
   isLoading: ComputedRef<boolean>
   isWaitingApproval: ComputedRef<boolean>
   isConnected: ComputedRef<boolean>
-  messageTree: ComputedRef<ChatMessage[]>
+  messageTree: ComputedRef<ChatNode[]>
   /** 发送一条消息。会话参数（智能体 / 模型 / 模式 / 风险等级）由后端按
    *  `session.metadata` 解析——选择动作统一经会话选项栏落库，故此处不透传。
    *
@@ -81,7 +81,7 @@ export interface UseChatConnectionReturn {
    *  由那个空间自己在空闲时取出才落库。因此调用返回 ≠ 消息已进流——它出现在
    *  消息列表里，是后端消费后发权威帧那一刻（前端不做乐观回显，见 `send` 实现）。
    *  等待期间的反馈是 working 状态（空白流 + working ⇒ 补一条等待骨架）。 */
-  send: (message: ChatMessage) => void
+  send: (message: ChatNode) => void
   abort: () => void
   removeMessage: (messageId: string) => void
   resume: (payload: ResumePayload) => void
@@ -216,11 +216,11 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
   // 子树）。任一后代变化 ⇒ 沿途祖先签名变化 ⇒ 这条路径换新对象 ⇒ 只重渲染这条
   // 路径；其余子树引用不变，照旧跳过（优化不丢）。会话切换时整体失效。
   let nodeCacheSession = ''
-  const nodeCache = new Map<string, ChatMessage>()
+  const nodeCache = new Map<string, ChatNode>()
   function nodeSignature(
-    msg: ChatMessage,
+    msg: ChatNode,
     parentId: string | undefined,
-    children: ChatMessage[] | undefined,
+    children: ChatNode[] | undefined,
   ): string {
     // type / name 必须进签名：同一条消息在流式过程中可能出现 type 迁移
     // （reasoning → text）或工具名补全，漏掉它们会让缓存的旧节点对象
@@ -248,14 +248,14 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     return `${own}#${sub}`
   }
   function reuseNode(
-    msg: ChatMessage,
+    msg: ChatNode,
     parentId: string | undefined,
-    children: ChatMessage[] | undefined,
-  ): ChatMessage {
+    children: ChatNode[] | undefined,
+  ): ChatNode {
     const sig = nodeSignature(msg, parentId, children)
     const cached = nodeCache.get(msg.id)
     if (cached && (cached as { __sig?: string }).__sig === sig) return cached
-    const node: ChatMessage = { ...msg }
+    const node: ChatNode = { ...msg }
     ;(node as { __sig?: string }).__sig = sig
     nodeCache.set(msg.id, node)
     return node
@@ -268,7 +268,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
    * 一个答案：本地删除、空壳叶子两处过滤若各写一份，两个面板迟早会出现
    * 「这一条左边有、右边没有」的错位——而那种错位没有任何错误信号。
    */
-  const visibleMessages = computed<ChatMessage[]>(() => {
+  const visibleMessages = computed<ChatNode[]>(() => {
     const sessionId = options.sessionId
     if (!sessionId) return []
     const all = store.getSessionMessages(sessionId)
@@ -281,7 +281,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     // 仅过滤"无子节点"的节点——带子节点的节点是容器（Turn/ToolCall），须保留。
     // 「空内容」判据走 `sessionTranscript.isBlankContentNode`（唯一实现）：
     // 等待骨架的兜底判定也要用它，两处不能各写一份。
-    const rawChildren: Record<string, ChatMessage[]> = {}
+    const rawChildren: Record<string, ChatNode[]> = {}
     filtered.forEach(msg => {
       if (msg.parent_id) {
         if (!rawChildren[msg.parent_id]) rawChildren[msg.parent_id] = []
@@ -291,13 +291,13 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     const parentsWithChildren = new Set(
       Object.keys(rawChildren).filter(pid => rawChildren[pid].length > 0),
     )
-    const isEmptyLeaf = (msg: ChatMessage) =>
+    const isEmptyLeaf = (msg: ChatNode) =>
       !parentsWithChildren.has(msg.id) && isBlankContentNode(msg)
 
     return filtered.filter(m => !isEmptyLeaf(m))
   })
 
-  const messageTree = computed<ChatMessage[]>(() => {
+  const messageTree = computed<ChatNode[]>(() => {
     const sessionId = options.sessionId
     if (!sessionId) return []
     if (nodeCacheSession !== sessionId) {
@@ -306,7 +306,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     }
     const visible = visibleMessages.value
 
-    const childrenMap: Record<string, ChatMessage[]> = {}
+    const childrenMap: Record<string, ChatNode[]> = {}
     visible.forEach(msg => {
       if (msg.parent_id) {
         if (!childrenMap[msg.parent_id]) childrenMap[msg.parent_id] = []
@@ -338,10 +338,10 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     // **先建子树、再定自身**：自身的签名要覆盖子节点的签名（见 `nodeSignature`），
     // 所以子节点必须先构造出来。
     const buildNode = (
-      msg: ChatMessage,
+      msg: ChatNode,
       parentId?: string,
-      parentNode?: ChatMessage,
-    ): ChatMessage => {
+      parentNode?: ChatNode,
+    ): ChatNode => {
       const kids = childrenMap[msg.id]
       const children = kids ? kids.map((child) => buildNode(child, msg.id)) : undefined
       const node = reuseNode(msg, parentId, children)
@@ -377,8 +377,8 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     return msgs.some(msg => isWaitingStatus(msg.status))
   })
 
-  async function send(msg: ChatMessage) {
-    const outgoing: ChatMessage = { ...msg }
+  async function send(msg: ChatNode) {
+    const outgoing: ChatNode = { ...msg }
     const sid = options.sessionId
     logger.info('useChatConnection', `[${sid}] Sending message`)
 
@@ -415,7 +415,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     try {
       // 写收件箱条目 = 入队。**地址即身份**：条目 id 取自地址末段
       // （`outgoing.id`），正文就是那条消息本身（后端 `parse_inbox_message`
-      // 认 `ChatMessage` 字段子集）。
+      // 认 `ChatNode` 字段子集）。
       //
       // ctx 带上会话自身的 workdir：后端把它作为 `start_turn` 回退链的第一档
       // （`vdfs_host_ctx(ctx).get(WORKDIR)`），会话还没绑过 workdir 时它是唯一的来源。
@@ -509,7 +509,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
    *
    * 会话参数：智能体 / 模型 provider 由后端 `resolve_session_params` 从
    * `session.metadata` 回退解析；`mode` / `risk_level` 随动作载荷携带
-   * （与发言不同——发言的载荷只能是一条 `ChatMessage`，恢复的载荷是自由的）。
+   * （与发言不同——发言的载荷只能是一条 `ChatNode`，恢复的载荷是自由的）。
    */
   async function resume(payload: ResumePayload) {
     const targetSid = payload.targetSessionId || options.sessionId

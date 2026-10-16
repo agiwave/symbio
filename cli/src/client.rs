@@ -13,7 +13,7 @@
 //!
 //! ```text
 //! vdfs 频道   一条订阅、单一 FIFO、按路径归属
-//!             消息（落点 = 节点自身 <sid>/message/<mid>，data = ChatMessage）
+//!             消息（落点 = 节点自身 <sid>/message/<mid>，data = ChatNode）
 //!             会话运行态（落点 = 会话叶子 <sid>，data = VdfsNode 视图）
 //!             资源信号（无载荷：标题 / metadata 等，与本轮渲染无关，丢弃）
 //! ```
@@ -44,7 +44,7 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use symbio::init::create_root_plugin;
-use symbio::symbio_core::chat_message::ChatMessage;
+use symbio::symbio_core::chat_node::ChatNode;
 use symbio::symbio_core::{
     vdfs_change_of, VdfsChange, VdfsNode, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,
 };
@@ -444,7 +444,7 @@ impl SymbioClient {
     /// **身份就是地址末段**：
     ///
     /// - **消息**（落点 = 那条消息节点自身 `<sid>/message/<mid>`）：`data` 就是那条
-    ///   [`ChatMessage`]，正文按**字段语义**交渲染器——`delta` 追加、
+    ///   [`ChatNode`]，正文按**字段语义**交渲染器——`delta` 追加、
     ///   `content` 整条替换、`status = removed` 删除，不需要任何折算。
     /// - **会话运行态**（落点 = 会话节点自身 `<sid>`）：**本轮结束的唯一判据**，见下。
     ///
@@ -585,7 +585,7 @@ impl SymbioClient {
                         business_error = Self::turn_end_of(&node).and_then(Result::err);
                         break;
                     }
-                    // ── 消息：`data` 就是那条 ChatMessage，按字段落地 ──
+                    // ── 消息：`data` 就是那条 ChatNode，按字段落地 ──
                     if let Some((sid, message)) = Self::message_of_change(&change) {
                         if sid == self.session_id {
                             // `delta` 追加 / `content` 整条替换 / `status = removed`
@@ -680,13 +680,13 @@ impl SymbioClient {
             .unwrap_or_else(|| "本轮以错误结束".to_string())))
     }
 
-    /// 从一条变更中解出**消息**：`(sid, ChatMessage)`。
+    /// 从一条变更中解出**消息**：`(sid, ChatNode)`。
     ///
     /// 落点判定：`path` 是那条消息**节点自身** `<根>/session/<sid>/message/<mid>`——
     /// 形状 `<sid>/<集合段>/<项 id>`，**身份在地址末段**。早先落点是消息**目录**
     /// 而身份在 `data.id`：那样 `path` 的含义随帧类型漂移，消费端必须反推地址，
     /// 且无法推广到第二类集合。无载荷 / 解析失败 ⇒ `None`（资源信号不归消息面管）。
-    pub fn message_of_change(change: &VdfsChange) -> Option<(String, ChatMessage)> {
+    pub fn message_of_change(change: &VdfsChange) -> Option<(String, ChatNode)> {
         let marker = format!("/{SESSION_SEG}/");
         let rest = change.path.split_once(marker.as_str())?.1;
         let mut segs = rest.split('/');
@@ -699,7 +699,7 @@ impl SymbioClient {
         if mid.is_empty() || segs.next().is_some() {
             return None;
         }
-        let mut message = serde_json::from_value::<ChatMessage>(change.data.clone()?).ok()?;
+        let mut message = serde_json::from_value::<ChatNode>(change.data.clone()?).ok()?;
         // 地址即身份（载荷里的 `id` 只是同一事实的复述，以地址为准）。
         message.id = mid.to_string();
         Some((sid.to_string(), message))

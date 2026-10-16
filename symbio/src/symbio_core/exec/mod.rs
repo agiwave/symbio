@@ -14,7 +14,7 @@
 //!
 //! ## 拆成两个语义单一的原语
 //!
-//! - [`ExecEventSink`]（出）：生产者只做两件事——`emit(ChatMessage)`（消息图变更，
+//! - [`ExecEventSink`]（出）：生产者只做两件事——`emit(ChatNode)`（消息图变更，
 //!   帧**就是一条消息**：`delta` 追加 / `content` 整条替换 / `status` 状态迁移）
 //!   与 `warn(Option<String>)`（会话级告警，落在会话节点状态，不是消息帧）。
 //!   去哪由实现决定：进程内直连**转写唯一写入点**（零 serde），内部请求走
@@ -35,7 +35,7 @@
 //! - 中止只有一个置位入口 [`ExecAbortSignal::abort`]，读侧只有 [`ExecAbortSignal::is_aborted`]
 //!   与 [`ExecAbortSignal::cancelled`]——不再有第二条「标志位之外的中止来源」。
 
-use crate::symbio_core::schemas::session::chat_message::ChatMessage;
+use crate::symbio_core::schemas::session::chat_node::ChatNode;
 use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt};
 use crate::symbio_core::{ABORT_SIGNAL, EVENT_SINK};
 use async_trait::async_trait;
@@ -51,7 +51,7 @@ use tokio_util::sync::CancellationToken;
 #[async_trait]
 pub trait ExecTranscriptWriter: Send + Sync + 'static {
     /// 消费一条消息帧。实现体必须保证：同一会话内按调用顺序生效。
-    async fn apply(&self, message: ChatMessage);
+    async fn apply(&self, message: ChatNode);
 
     /// 会话级告警（可恢复）：`Some(text)` 设置 / `None` 清除。
     ///
@@ -123,7 +123,7 @@ pub enum ExecEventSink {
     /// 一个窗口里，「静默」与「流式」都不是整段成立的：骨架必须静、增量必须流，
     /// 于是出口必须能表达「逐帧决策」，而不是逐窗口二选一。
     Filtered(
-        Arc<dyn Fn(&mut ChatMessage) -> bool + Send + Sync>,
+        Arc<dyn Fn(&mut ChatNode) -> bool + Send + Sync>,
         Arc<dyn ExecTranscriptWriter>,
         ExecEventSinkProgress,
     ),
@@ -143,7 +143,7 @@ impl ExecEventSink {
     /// 过滤桥出口：帧经 `allow` 白名单（可改写 / 可吞）后进转写唯一写入点。
     /// 用途见 [`Self::Filtered`]。
     pub fn filtered(
-        allow: Arc<dyn Fn(&mut ChatMessage) -> bool + Send + Sync>,
+        allow: Arc<dyn Fn(&mut ChatNode) -> bool + Send + Sync>,
         writer: Arc<dyn ExecTranscriptWriter>,
     ) -> Self {
         Self::Filtered(allow, writer, ExecEventSinkProgress::default())
@@ -174,8 +174,8 @@ impl ExecEventSink {
     ///
     /// 这是执行期**唯一**的出方向动作：节点出现 / 内容增长（`delta`）/
     /// 整条替换（`content`）/ 状态迁移（含 `removed` 即删除）都只是一条
-    /// [`ChatMessage`] 的不同字段，帧面语义由字段本身给出，接收端不做类型推断。
-    pub async fn emit(&self, message: ChatMessage) {
+    /// [`ChatNode`] 的不同字段，帧面语义由字段本身给出，接收端不做类型推断。
+    pub async fn emit(&self, message: ChatNode) {
         match self {
             ExecEventSink::Direct(writer, progress) => {
                 progress.bump();

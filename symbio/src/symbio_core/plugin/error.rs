@@ -28,7 +28,7 @@ pub enum PluginError {
         /// 中止时**已产出的半截消息**（正文 / 思考 / 工具节点）——思考与正文是事实，
         /// 不因没说完就不记：它们随错误一路带到落库镜像（`persist_failure` 的
         /// `partial` 参数），双写进 `messages.json`。
-        partial: Vec<crate::symbio_core::chat_message::ChatMessage>,
+        partial: Vec<crate::symbio_core::chat_node::ChatNode>,
     },
     #[error("上下文丢失，需要重试")]
     RetryWithoutContextId,

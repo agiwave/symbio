@@ -212,8 +212,8 @@ impl crate::symbio_core::DeltaSink for Collecting {
     fn on_reasoning(&self, text: &str) {
         self.reasoning.lock().unwrap().push(text.to_string());
     }
-    fn on_tool_frame(&self, frame: &crate::symbio_core::chat_message::ChatMessage) {
-        use crate::symbio_core::chat_message::{MessageContent, MessageType};
+    fn on_tool_frame(&self, frame: &crate::symbio_core::chat_node::ChatNode) {
+        use crate::symbio_core::chat_node::{MessageContent, NodeKind};
         let text = match &frame.content {
             Some(MessageContent::Text(t)) => t.clone(),
             _ => String::new(),
@@ -225,7 +225,7 @@ impl crate::symbio_core::DeltaSink for Collecting {
                 name: frame.name.clone(),
                 text: d.clone(),
             },
-            (None, Some(MessageType::ToolCall)) => ToolFrameRec {
+            (None, Some(NodeKind::ToolCall)) => ToolFrameRec {
                 snapshot: true,
                 id: frame.id.clone(),
                 name: frame.name.clone(),

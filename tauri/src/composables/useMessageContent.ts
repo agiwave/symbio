@@ -12,14 +12,14 @@
 import { computed, type ComputedRef } from 'vue'
 import { renderMarkdownCached } from '@/composables/useMarkdown'
 import {
-  MESSAGE_TYPE_REASONING,
-  MESSAGE_TYPE_TEXT,
-  MESSAGE_TYPE_TOOL_CALL,
-  MESSAGE_TYPE_TURN,
+  NODE_KIND_REASONING,
+  NODE_KIND_TEXT,
+  NODE_KIND_TOOL_CALL,
+  NODE_KIND_TURN,
   messageTextOf,
-  type ChatMessage,
+  type ChatNode,
   type MessageContent,
-} from '@/schemas/chat_message'
+} from '@/schemas/chat_node'
 import {
   MESSAGE_FAILURE_NOTE,
   MESSAGE_PREVIEW_MAX,
@@ -29,7 +29,7 @@ import {
 } from '@/registry/messageTypes'
 
 /**
- * 「取正文」本身不在这里实现 —— 它在契约层 `schemas/chat_message.ts::messageTextOf`
+ * 「取正文」本身不在这里实现 —— 它在契约层 `schemas/chat_node.ts::messageTextOf`
  * （与 `MessageContent` 同处一处）。store 与组件都要取正文，而本文件是**组合式**
  * （依赖 Vue 与 Markdown 渲染器），放在这里会让 store 为了取一串文本而牵进整张
  * 渲染依赖图。这里只消费它。
@@ -41,7 +41,7 @@ import {
  * 取值优先级：节点 `error` 字段（后端持久化的失败原因）> `meta.error`（旧路径）
  * > 正文 > 兜底文案。**顺序有语义**：节点字段是权威，正文只是最后的兜底。
  */
-export function messageErrorTextOf(node: Pick<ChatMessage, 'error' | 'content' | 'meta'>): string {
+export function messageErrorTextOf(node: Pick<ChatNode, 'error' | 'content' | 'meta'>): string {
   const meta = node.meta as Record<string, unknown> | undefined
   const fromMeta = meta?.error
   return (
@@ -149,14 +149,14 @@ export interface MessageSummaryPreview {
  * 截断时省略号落在**被截掉的那一端**，不伪装成"内容从这里开始/到这里结束"。
  */
 export function messageSummaryPreviewOf(
-  node: ChatMessage,
+  node: ChatNode,
   grouped: boolean,
   liveEdge: boolean,
 ): MessageSummaryPreview {
   let source = ''
   if (grouped) {
     const first = (node.children || []).find(
-      (c) => c.type === MESSAGE_TYPE_TEXT || c.type === MESSAGE_TYPE_REASONING,
+      (c) => c.type === NODE_KIND_TEXT || c.type === NODE_KIND_REASONING,
     )
     source = messageTextOf(first?.content) || messageTextOf(node.content)
   } else {
@@ -184,7 +184,7 @@ export interface MessageContentView {
 }
 
 export function useMessageContent(
-  getNode: () => ChatMessage,
+  getNode: () => ChatNode,
   getFacets: () => MessageFacets,
 ): MessageContentView {
   const text = computed(() => messageTextOf(getNode().content))
@@ -202,7 +202,7 @@ export function useMessageContent(
     const f = getFacets()
     return messageSummaryPreviewOf(
       getNode(),
-      f.type === MESSAGE_TYPE_TURN || f.type === MESSAGE_TYPE_TOOL_CALL,
+      f.type === NODE_KIND_TURN || f.type === NODE_KIND_TOOL_CALL,
       messagePreviewFollowsLiveEdge(f),
     )
   })

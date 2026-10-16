@@ -28,13 +28,13 @@ fn out(text: &str, reasoning: &str) -> TurnOutput {
 }
 
 /// 统计某类型子节点（parent_id == TURN_ID）数量
-fn count_children(msgs: &[ChatMessage], ty: MessageType) -> usize {
+fn count_children(msgs: &[ChatNode], ty: NodeKind) -> usize {
     msgs.iter()
         .filter(|m| m.parent_id.as_deref() == Some(TURN_ID) && m.msg_type == Some(ty.clone()))
         .count()
 }
 
-fn child_texts(msgs: &[ChatMessage], ty: MessageType) -> Vec<String> {
+fn child_texts(msgs: &[ChatNode], ty: NodeKind) -> Vec<String> {
     msgs.iter()
         .filter(|m| m.parent_id.as_deref() == Some(TURN_ID) && m.msg_type == Some(ty.clone()))
         .map(|m| m.content.as_ref().map(|c| c.to_text()).unwrap_or_default())
@@ -88,11 +88,11 @@ fn into_messages_reasoning_only_has_no_duplicate_content() {
     let msgs = out("", reasoning).into_messages("turn-x");
 
     assert_eq!(msgs.len(), 2, "应为 Turn + 单个 Text 子节点");
-    assert_eq!(msgs[0].msg_type, Some(MessageType::Turn));
+    assert_eq!(msgs[0].msg_type, Some(NodeKind::Turn));
     assert!(
         !msgs
             .iter()
-            .any(|m| m.msg_type == Some(MessageType::Reasoning)),
+            .any(|m| m.msg_type == Some(NodeKind::Reasoning)),
         "reasoning-only 不得产生 Reasoning 子节点"
     );
 
@@ -114,13 +114,13 @@ fn into_messages_reasoning_with_reply_keeps_two_children() {
     assert_eq!(msgs.len(), 3);
     assert_eq!(
         msgs.iter()
-            .filter(|m| m.msg_type == Some(MessageType::Reasoning))
+            .filter(|m| m.msg_type == Some(NodeKind::Reasoning))
             .count(),
         1
     );
     assert_eq!(
         msgs.iter()
-            .filter(|m| m.msg_type == Some(MessageType::Text))
+            .filter(|m| m.msg_type == Some(NodeKind::Text))
             .count(),
         1
     );
@@ -139,7 +139,7 @@ fn into_messages_carries_tool_calls_from_the_result_field() {
 
     let calls: Vec<_> = msgs
         .iter()
-        .filter(|m| m.msg_type == Some(MessageType::ToolCall))
+        .filter(|m| m.msg_type == Some(NodeKind::ToolCall))
         .collect();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].id, "tc-1", "落库 id 必须等于产物里的节点 id");
@@ -176,19 +176,19 @@ fn reasoning_only_writes_single_text_child_without_reasoning_node() {
 
     // 根节点
     assert_eq!(msgs[0].id, TURN_ID);
-    assert_eq!(msgs[0].msg_type, Some(MessageType::Turn));
+    assert_eq!(msgs[0].msg_type, Some(NodeKind::Turn));
     assert_eq!(msgs[0].parent_id, None);
     assert!(msgs[0].content.is_none(), "Turn 为组合节点，不携带内容");
 
     // 关键防复发断言：不存在任何 Reasoning 子节点
     assert_eq!(
-        count_children(&msgs, MessageType::Reasoning),
+        count_children(&msgs, NodeKind::Reasoning),
         0,
         "reasoning-only 不得生成 Reasoning 子节点（否则与 Text 子节点内容重复）"
     );
 
     // 唯一的 Text 子节点承载 reasoning 内容，且只出现一次
-    let texts = child_texts(&msgs, MessageType::Text);
+    let texts = child_texts(&msgs, NodeKind::Text);
     assert_eq!(texts.len(), 1, "Text 子节点应恰好一个");
     assert_eq!(texts[0], reasoning);
 }
@@ -209,8 +209,8 @@ fn reasoning_only_ignores_surrounding_whitespace() {
     );
 
     assert_eq!(msgs.len(), 2);
-    assert_eq!(count_children(&msgs, MessageType::Reasoning), 0);
-    assert_eq!(count_children(&msgs, MessageType::Text), 1);
+    assert_eq!(count_children(&msgs, NodeKind::Reasoning), 0);
+    assert_eq!(count_children(&msgs, NodeKind::Text), 1);
 }
 
 /// 用例 B：普通场景（reasoning + 独立文本回复）→ Reasoning 与 Text 各一份，内容不同
@@ -227,10 +227,10 @@ fn reasoning_with_distinct_reply_keeps_both_children() {
 
     // Turn + Reasoning + Text
     assert_eq!(msgs.len(), 3);
-    assert_eq!(msgs[0].msg_type, Some(MessageType::Turn));
+    assert_eq!(msgs[0].msg_type, Some(NodeKind::Turn));
 
-    let reasonings = child_texts(&msgs, MessageType::Reasoning);
-    let texts = child_texts(&msgs, MessageType::Text);
+    let reasonings = child_texts(&msgs, NodeKind::Reasoning);
+    let texts = child_texts(&msgs, NodeKind::Text);
     assert_eq!(reasonings, vec!["思考过程".to_string()]);
     assert_eq!(texts, vec!["正常回复".to_string()]);
     assert_ne!(reasonings[0], texts[0], "两个子节点内容必须不同");
@@ -238,11 +238,11 @@ fn reasoning_with_distinct_reply_keeps_both_children() {
     // response_id 只挂在 Text 响应节点上
     let text_child = msgs
         .iter()
-        .find(|m| m.msg_type == Some(MessageType::Text))
+        .find(|m| m.msg_type == Some(NodeKind::Text))
         .unwrap();
     assert_eq!(text_child.response_id.as_deref(), Some("resp-1"));
-    assert_eq!(text_child.role, Some(MessageRole::Assistant));
-    assert_eq!(text_child.status, Some(MessageStatus::Completed));
+    assert_eq!(text_child.role, Some(NodeRole::Assistant));
+    assert_eq!(text_child.status, Some(NodeStatus::Completed));
 }
 
 /// 用例 C：无 reasoning 的纯文本回复 → Turn + Text
@@ -257,8 +257,8 @@ fn plain_text_reply_has_no_reasoning_child() {
         TurnStreamChildIds::default(),
     );
     assert_eq!(msgs.len(), 2);
-    assert_eq!(count_children(&msgs, MessageType::Reasoning), 0);
-    assert_eq!(child_texts(&msgs, MessageType::Text), vec!["你好"]);
+    assert_eq!(count_children(&msgs, NodeKind::Reasoning), 0);
+    assert_eq!(child_texts(&msgs, NodeKind::Text), vec!["你好"]);
 }
 
 /// 用例 D：有 reasoning + 无文本 + 有工具调用（非 reasoning-only）
@@ -277,13 +277,13 @@ fn reasoning_with_tool_calls_keeps_reasoning_and_skips_empty_text() {
 
     // Turn + Reasoning + ToolCall
     assert_eq!(msgs.len(), 3);
-    assert_eq!(count_children(&msgs, MessageType::Reasoning), 1);
+    assert_eq!(count_children(&msgs, NodeKind::Reasoning), 1);
     assert_eq!(
-        count_children(&msgs, MessageType::Text),
+        count_children(&msgs, NodeKind::Text),
         0,
         "空白正文不得生成 Text 节点"
     );
-    assert_eq!(count_children(&msgs, MessageType::ToolCall), 1);
+    assert_eq!(count_children(&msgs, NodeKind::ToolCall), 1);
 }
 
 // ── 流式 id 复用回归（锁「流式层 ⇄ 存储层同一身份」）───────────────────
@@ -309,11 +309,11 @@ fn persisted_children_reuse_streaming_child_ids() {
 
     let text_child = msgs
         .iter()
-        .find(|m| m.msg_type == Some(MessageType::Text))
+        .find(|m| m.msg_type == Some(NodeKind::Text))
         .expect("应生成 Text 子节点");
     let reasoning_child = msgs
         .iter()
-        .find(|m| m.msg_type == Some(MessageType::Reasoning))
+        .find(|m| m.msg_type == Some(NodeKind::Reasoning))
         .expect("应生成 Reasoning 子节点");
 
     assert_eq!(text_child.id, "stream-text-id");
@@ -339,7 +339,7 @@ fn reasoning_only_reuses_reasoning_stream_id() {
 
     let text_child = msgs
         .iter()
-        .find(|m| m.msg_type == Some(MessageType::Text))
+        .find(|m| m.msg_type == Some(NodeKind::Text))
         .expect("reasoning-only 应生成唯一 Text 子节点");
     assert_eq!(text_child.id, "stream-reason-id");
 }

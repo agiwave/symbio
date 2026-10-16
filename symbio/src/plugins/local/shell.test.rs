@@ -10,17 +10,17 @@ use crate::symbio_core::{ExecTranscriptWriter, PluginSimpleRequest};
 
 /// 记录型写入点：把所有消息帧收进 `Vec`。
 struct RecordingWriter {
-    ops: Arc<std::sync::Mutex<Vec<ChatMessage>>>,
+    ops: Arc<std::sync::Mutex<Vec<ChatNode>>>,
 }
 
 #[async_trait]
 impl ExecTranscriptWriter for RecordingWriter {
-    async fn apply(&self, message: ChatMessage) {
+    async fn apply(&self, message: ChatNode) {
         self.ops.lock().unwrap().push(message);
     }
 }
 
-fn recording_sink() -> (ExecEventSink, Arc<std::sync::Mutex<Vec<ChatMessage>>>) {
+fn recording_sink() -> (ExecEventSink, Arc<std::sync::Mutex<Vec<ChatNode>>>) {
     let ops = Arc::new(std::sync::Mutex::new(Vec::new()));
     (
         ExecEventSink::direct(Arc::new(RecordingWriter { ops: ops.clone() })),
@@ -52,15 +52,15 @@ fn make_ctx(
 
 /// 断言一组帧全是「按编排层 id 写的流式帧」。
 fn assert_all_snapshots_use_orchestrator_ids(
-    ops: &[ChatMessage],
+    ops: &[ChatNode],
     msg_id: &str,
     tool_call_id: &str,
 ) {
     for message in ops {
         assert_eq!(message.id, msg_id, "帧 id 必须是编排层预留的结果节点 id");
         assert_eq!(message.parent_id.as_deref(), Some(tool_call_id));
-        assert_eq!(message.role, Some(MessageRole::Tool));
-        assert_eq!(message.status, Some(MessageStatus::Streaming));
+        assert_eq!(message.role, Some(NodeRole::Tool));
+        assert_eq!(message.status, Some(NodeStatus::Streaming));
         assert!(
             message.delta.is_some() || message.content.is_some(),
             "每一帧都得带上这一段正文（delta 增量 / content 整条替换）"

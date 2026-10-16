@@ -5,11 +5,11 @@
 
 use super::*;
 
-fn tc(id: &str, status: MessageStatus) -> ChatMessage {
-    ChatMessage {
+fn tc(id: &str, status: NodeStatus) -> ChatNode {
+    ChatNode {
         id: id.into(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::ToolCall),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::ToolCall),
         status: Some(status),
         meta: Some(json!({ "started_at": 1_700_000_000_000i64 })),
         ..Default::default()
@@ -26,8 +26,8 @@ fn tc(id: &str, status: MessageStatus) -> ChatMessage {
 #[test]
 fn aborted_resume_finalizes_parent_tool_call() {
     let mut messages = vec![
-        tc("tc1", MessageStatus::Streaming),
-        ChatMessage {
+        tc("tc1", NodeStatus::Streaming),
+        ChatNode {
             id: "child".into(),
             parent_id: Some("tc1".into()),
             ..Default::default()
@@ -39,11 +39,11 @@ fn aborted_resume_finalizes_parent_tool_call() {
 
     assert_eq!(
         messages[0].status,
-        Some(MessageStatus::Completed),
+        Some(NodeStatus::Completed),
         "父节点不得停在 Streaming：它是已落库节点，没有人会再来收口"
     );
     assert_eq!(snapshot.id, "tc1", "完整快照必须保留节点 id");
-    assert_eq!(snapshot.status, Some(MessageStatus::Completed));
+    assert_eq!(snapshot.status, Some(NodeStatus::Completed));
     assert_eq!(
         snapshot.meta.as_ref().and_then(|m| m.get("failure_kind")),
         Some(&json!("aborted")),
@@ -73,7 +73,7 @@ fn aborted_resume_finalizes_parent_tool_call() {
 #[test]
 #[should_panic(expected = "步骤 2 已校验过 tc_idx 有效")]
 fn aborted_resume_panics_on_out_of_range_index() {
-    let mut messages: Vec<ChatMessage> = Vec::new();
+    let mut messages: Vec<ChatNode> = Vec::new();
     let _ = finalize_aborted_parent(&mut messages, 7, "tc-gone");
 }
 
@@ -107,11 +107,11 @@ use super::super::store::SessionStore;
 use super::super::types::Session;
 
 /// 帧收集口（`ExecEventSink::direct` 的出口，与 `v2_exec.test.rs` 同款）。
-struct CollectingFrames(Mutex<Vec<ChatMessage>>);
+struct CollectingFrames(Mutex<Vec<ChatNode>>);
 
 #[async_trait::async_trait]
 impl crate::symbio_core::ExecTranscriptWriter for CollectingFrames {
-    async fn apply(&self, m: ChatMessage) {
+    async fn apply(&self, m: ChatNode) {
         self.0.lock().unwrap().push(m);
     }
 }
@@ -130,31 +130,31 @@ async fn setup_with_failed_turn() -> (
     let session_id = "resume_test".to_string();
 
     let mut seed = Session::new(&session_id);
-    let failed_turn = ChatMessage {
+    let failed_turn = ChatNode {
         id: "t-failed".into(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Turn),
-        status: Some(MessageStatus::Failed),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Turn),
+        status: Some(NodeStatus::Failed),
         seq: Some(2),
         ..Default::default()
     };
-    let partial = ChatMessage {
+    let partial = ChatNode {
         id: "n-1".into(),
         parent_id: Some("t-failed".into()),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text("半截".into())),
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         seq: Some(3),
         ..Default::default()
     };
     seed.messages = vec![
-        ChatMessage {
+        ChatNode {
             id: "u-1".into(),
-            role: Some(MessageRole::User),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::User),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text("第一问".into())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             seq: Some(1),
             ..Default::default()
         },

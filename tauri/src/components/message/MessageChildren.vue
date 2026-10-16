@@ -29,12 +29,12 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { ChatMessage } from '@/schemas/chat_message'
+import type { ChatNode } from '@/schemas/chat_node'
 import MessageNode from '../MessageNode.vue'
 
 const props = defineProps<{
   /** 待渲染的子节点（顺序即渲染顺序，由 store 按 `seq` 排好） */
-  nodes: ChatMessage[]
+  nodes: ChatNode[]
   /** **父节点**的深度；子节点实际深度为 `depth + 1` */
   depth: number
   /** 子节点应看到的父节点类型（`turn` / `tool_call`）——决定「工具返回」「正文直排」等判定 */

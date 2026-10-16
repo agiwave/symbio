@@ -2,7 +2,7 @@
  * 消息渲染器装配 —— 「渲染器标识 → 组件」的唯一装配点（UI 资产，非数据契约）
  *
  * 机制分层（与 `vdfsTypes.ts` / `vdfsRenderers.ts` 同一套）：
- * - `schemas/chat_message.ts`   数据契约（取值词表 + 形状，零呈现知识）
+ * - `schemas/chat_node.ts`   数据契约（取值词表 + 形状，零呈现知识）
  * - `registry/messageTypes.ts`  纯 UI 映射：facets → 渲染器标识；标识 → 组件登记表
  * - 本文件                      把标识绑定到具体 Vue 组件（**唯一 import 组件的地方**）
  *

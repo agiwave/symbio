@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 use super::super::model_providers::ModelProviderConfig;
-use super::super::types::{CapabilityMeta, ContentPart, MessageContent, MessageRole};
+use super::super::types::{CapabilityMeta, ContentPart, MessageContent, NodeRole};
 use super::partial_json::{FieldPath, JsonLineExtractor, PartialJsonSink, StrAction};
 use super::sse::{SseLineParser, SsePartialLineExtractor};
 use super::ModelProtocolEvent;
@@ -48,7 +48,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
         &self,
         cfg: &ModelProviderConfig,
         system: &str,
-        messages: &[crate::symbio_core::chat_message::ChatMessage],
+        messages: &[crate::symbio_core::chat_node::ChatNode],
         tools: &[CapabilityMeta],
     ) -> Value {
         let mut input_items = Vec::new();
@@ -58,7 +58,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
         let (previous_response_id, messages_to_process) = messages
             .iter()
             .enumerate()
-            .rfind(|(_, m)| m.role == Some(MessageRole::Assistant) && m.response_id.is_some())
+            .rfind(|(_, m)| m.role == Some(NodeRole::Assistant) && m.response_id.is_some())
             .map(|(idx, m)| {
                 // 找到了有 response_id 的 Assistant 消息，只发送增量消息
                 (m.response_id.clone(), messages[idx + 1..].to_vec())
@@ -72,12 +72,12 @@ impl ModelProtocol for OpenaiResponsesProtocol {
             crate::plugins::model::message_builder::flatten_chat_messages(&messages_to_process);
 
         for m in flattened_messages {
-            if m.role == MessageRole::System {
+            if m.role == NodeRole::System {
                 continue;
             }
 
             match m.role {
-                MessageRole::User => {
+                NodeRole::User => {
                     let text = match m.content {
                         Some(MessageContent::Text(ref t)) => t.clone(),
                         Some(MessageContent::Parts(ref p)) => p
@@ -101,7 +101,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
                         }));
                     }
                 }
-                MessageRole::Assistant => {
+                NodeRole::Assistant => {
                     // 1. 推送合并后的文本项（只包含实际输出内容，reasoning 是内部过程不回传）
                     let mut full_text = String::new();
                     if let Some(ref content) = m.content {
@@ -141,7 +141,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
                         }
                     }
                 }
-                MessageRole::Tool => {
+                NodeRole::Tool => {
                     // 推送工具结果项
                     if let Some(ref call_id) = m.tool_call_id {
                         if !call_id.is_empty() {

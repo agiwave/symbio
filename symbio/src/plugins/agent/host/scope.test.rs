@@ -108,7 +108,7 @@ impl ModelProvider for LabeledProvider {
     async fn execute_turn(
         &self,
         _system_prompt: &str,
-        _messages: &[crate::symbio_core::chat_message::ChatMessage],
+        _messages: &[crate::symbio_core::chat_node::ChatNode],
         _tools: &[CapabilityMeta],
         _root_id: &str,
         _env: &ExecEnv,

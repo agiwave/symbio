@@ -4,39 +4,39 @@
 //! `context/window.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
-use crate::symbio_core::chat_message::MessageStatus;
+use crate::symbio_core::chat_node::NodeStatus;
 
-fn tc_msg(id: &str, name: &str, args: &str) -> ChatMessage {
-    ChatMessage {
+fn tc_msg(id: &str, name: &str, args: &str) -> ChatNode {
+    ChatNode {
         id: id.to_string(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::ToolCall),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::ToolCall),
         name: Some(name.to_string()),
         content: Some(MessageContent::Text(args.to_string())),
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         ..Default::default()
     }
 }
 
-fn tool_result(parent: &str, text: &str) -> ChatMessage {
-    ChatMessage {
+fn tool_result(parent: &str, text: &str) -> ChatNode {
+    ChatNode {
         id: format!("{parent}-result"),
         parent_id: Some(parent.to_string()),
-        role: Some(MessageRole::Tool),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::Tool),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text(text.to_string())),
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         ..Default::default()
     }
 }
 
-fn text(content: &str) -> ChatMessage {
-    ChatMessage {
+fn text(content: &str) -> ChatNode {
+    ChatNode {
         id: format!("t-{}", content),
-        role: Some(MessageRole::User),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::User),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text(content.to_string())),
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         ..Default::default()
     }
 }
@@ -48,7 +48,7 @@ fn retention_map(
     entries.iter().map(|(n, r)| (n.to_string(), *r)).collect()
 }
 
-fn param_of(msg: &ChatMessage) -> String {
+fn param_of(msg: &ChatNode) -> String {
     msg.content
         .as_ref()
         .map(|c| c.to_text())
@@ -163,7 +163,7 @@ fn global_window_skeletonizes_tool_call_params() {
         .unwrap();
     assert!(param_of(r0).contains("skeletonized"));
     // 状态保持 Completed（不产生 Failed/孤儿，配对合法）
-    assert_eq!(g0.status, Some(MessageStatus::Completed));
+    assert_eq!(g0.status, Some(NodeStatus::Completed));
 }
 
 /// 工具级 LastOnly 优先于全局窗口（即使仍在全局窗口内也骨架化旧调用）
@@ -535,13 +535,13 @@ fn skeletonized_result_carries_retry_hint() {
 fn result_without_parent_call_is_left_untouched() {
     let messages = vec![
         tc_msg("n1", "local/shell", r#"{"command":"dir"}"#),
-        ChatMessage {
+        ChatNode {
             id: "orphan".to_string(),
             parent_id: Some("n1".to_string()),
-            role: Some(MessageRole::Tool),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::Tool),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text("body".to_string())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             ..Default::default()
         },
     ];
@@ -554,13 +554,13 @@ fn result_without_parent_call_is_left_untouched() {
     );
 
     // 孤儿结果（parent 指向不存在的节点）→ 不骨架化，故无指引可言
-    let orphan = ChatMessage {
+    let orphan = ChatNode {
         id: "orphan2".to_string(),
         parent_id: Some("missing".to_string()),
-        role: Some(MessageRole::Tool),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::Tool),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text("body2".to_string())),
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         ..Default::default()
     };
     let out = apply_layered_sliding_window(&[orphan], 0, &ret);

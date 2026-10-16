@@ -18,9 +18,9 @@ import {
   sortTranscript,
   truncateIdsFrom,
 } from '../sessionTranscript'
-import type { ChatMessage } from '@/schemas/chat_message'
+import type { ChatNode } from '@/schemas/chat_node'
 
-function msg(p: Partial<ChatMessage> & { id: string }): ChatMessage {
+function msg(p: Partial<ChatNode> & { id: string }): ChatNode {
   return { role: 'assistant', type: 'text', status: 'completed', ...p }
 }
 

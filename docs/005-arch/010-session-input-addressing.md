@@ -204,8 +204,8 @@ self.enqueue_inbox(&session_id, None, message, params, ctx.get(WORKDIR)).await;
 
 因此退役前必须先定一件事：**写入面怎么表达 `params`**。两个方向：
 
-1. **包裹形状**：`{"message": {…ChatMessage…}, "params": {…}}`，同时兼容裸
-   `ChatMessage`（靠「有没有 `message` 键」分辨）。代价：形状嗅探 + 协议面变宽，
+1. **包裹形状**：`{"message": {…ChatNode…}, "params": {…}}`，同时兼容裸
+   `ChatNode`（靠「有没有 `message` 键」分辨）。代价：形状嗅探 + 协议面变宽，
    要动 `parse_inbox_message`、`protocol-mirror-audit`、`docs/005-arch/013-vdfs.md`。
 2. **另开一个字段**（如 `<A>/inbox/<iid>` 的写入改为「条目对象」，把 `params`
    列为可选平级字段）。与 1 同源，只是判别式不同。

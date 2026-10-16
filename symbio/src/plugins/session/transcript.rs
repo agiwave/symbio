@@ -1,7 +1,7 @@
 //! 会话转写（Transcript）：实时链路的**唯一写入点与发射器**（session 域内）。
 //!
 //! - **唯一写入点**：一切消息级变更（模型流式 / 工具执行 / 恢复重写 / 压缩 /
-//!   用户消息定稿）都以**一条消息帧**（[`cm::ChatMessage`]）进入
+//!   用户消息定稿）都以**一条消息帧**（[`cm::ChatNode`]）进入
 //!   [`Transcript::apply`]——内存图、位置序号、核心日志、**变更投递**四件事在同一个
 //!   函数里完成，没有任何旁路。
 //! - **位置序号**：每条消息在 `<根>/session/<id>/message` 这个**文件夹**里的位置。
@@ -9,9 +9,9 @@
 //!   （见 [`INFLIGHT_SEQ_BASE`]）。它是**节点属性**，不是投递属性——消费端按它排序，
 //!   与变更的到达顺序无关。
 //! - **变更投递**：每个变更投给 `kind = "vdfs"` 的订阅表（[`VdfsChangeSubscriptions`]），
-//!   落点是**那条消息节点自身的地址** `<id>/message/<mid>`，载荷就是这条 `ChatMessage`
+//!   落点是**那条消息节点自身的地址** `<id>/message/<mid>`，载荷就是这条 `ChatNode`
 //!   （正文增长 = `delta`、整条替换 = `content`、删除 = `status = removed`）。
-//!   **语义全在字段上，没有操作枚举**——这与 `ChatMessage` 帧自己的设计同源。
+//!   **语义全在字段上，没有操作枚举**——这与 `ChatNode` 帧自己的设计同源。
 //! - **核心日志**：分**骨架**与**细节**两级（见 [`FrameLogLevel`]）。骨架 = 节点
 //!   出现 / 终态 / 等待用户 / 删除，进 `INFO`——"什么出现了、什么时候结束"一眼看完；
 //!   细节 = `Update` 帧与纯增量的折行统计，进 `DEBUG`（`--verbose` 或
@@ -30,7 +30,7 @@
 //!
 //! 消息的**实时面**与**历史面**是**同一条** `vdfs/watch`：变更的落点是**那条消息
 //! 节点自身的地址** `<id>/message/<mid>`（与 `list` / `read` 的节点地址逐字同源），
-//! 业务载荷 `data` 就是那条 `ChatMessage`——`delta` 有 ⇒ 尾部追加（零回读）、
+//! 业务载荷 `data` 就是那条 `ChatNode`——`delta` 有 ⇒ 尾部追加（零回读）、
 //! `content` 有 ⇒ 整条替换、`status = removed` ⇒ 就地移除。
 //! 会话节点自身的状态（working / error / warning）也是 VDFS 变更（`<id>`，
 //! `data` = 全量节点视图），与侧栏会话清单共用同一份订阅。
@@ -41,7 +41,7 @@
 //! 不需要在信封上加概念。
 
 use super::plugin::message_path;
-use crate::symbio_core::chat_message as cm;
+use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::{VdfsChange, VdfsChangeSubscriptions};
 use crate::{plugin_debug, plugin_error, plugin_info};
 use indexmap::IndexMap;
@@ -119,7 +119,7 @@ pub struct Transcript {
     /// 日志的 `[T#n]` 用它，因此「一次流式回复有几百帧」在时间线上仍然可数
     /// （位置序号对同一节点的每一帧都是同一个值，用它就失去这个信息）。
     frame_no: u64,
-    nodes: IndexMap<String, cm::ChatMessage>,
+    nodes: IndexMap<String, cm::ChatNode>,
     /// 变更投递表——**必须是 session provider 的那一份**（不是全局 `hub_of`）：
     /// `vdfs/watch` 登记的是那张表，投到别处等于没人收到。
     changes: Arc<VdfsChangeSubscriptions>,
@@ -171,7 +171,7 @@ impl Transcript {
     ///
     /// 该拼接还是该替换？语义不可判定，报错丢弃：不发布、不占在途号——不让一个
     /// 语义不可判定的帧进内存图，也不让它上实时面。
-    pub fn apply(&mut self, msg: cm::ChatMessage) {
+    pub fn apply(&mut self, msg: cm::ChatNode) {
         if msg.delta.is_some() && msg.content.is_some() {
             plugin_error!(
                 "session",
@@ -185,7 +185,7 @@ impl Transcript {
 
         // 删除：不落图，就地广播该状态帧（帧照常占日志号，「删了什么」在时间线上可追溯）。
         // 删除的线上表达就是这条带 `removed` 状态的帧本身（消息词汇本就有这个状态）。
-        if msg.status == Some(cm::MessageStatus::Removed) {
+        if msg.status == Some(cm::NodeStatus::Removed) {
             let detail = self
                 .nodes
                 .shift_remove(&message_id)
@@ -216,7 +216,7 @@ impl Transcript {
         };
         let node = self.nodes.entry(message_id.clone()).or_insert_with(|| {
             // 未知 id：用帧内身份建占位（帧自给自足）。
-            cm::ChatMessage {
+            cm::ChatNode {
                 id: message_id.clone(),
                 ..Default::default()
             }
@@ -318,12 +318,12 @@ impl Transcript {
     }
 
     /// 在途图快照（VDFS 转写列表的叠加源）。
-    pub fn snapshot(&self) -> Vec<cm::ChatMessage> {
+    pub fn snapshot(&self) -> Vec<cm::ChatNode> {
         self.nodes.values().cloned().collect()
     }
 
     /// 取单个在途节点。
-    pub fn get(&self, id: &str) -> Option<cm::ChatMessage> {
+    pub fn get(&self, id: &str) -> Option<cm::ChatNode> {
         self.nodes.get(id).cloned()
     }
 
@@ -350,7 +350,7 @@ impl Transcript {
     ///
     /// 被并入日志的纯增量帧其 `detail` 不被读取（调用方传空串即可）。
     ///
-    /// ## 投递的形状：`<sid>/message/<mid>` 上 `data = ChatMessage`
+    /// ## 投递的形状：`<sid>/message/<mid>` 上 `data = ChatNode`
     ///
     /// 信封的 `path` 恒为**被变更节点自身的地址**——消息就是 `<sid>/message/<mid>`
     /// 这个文件（与 `list` / `read` 返回的节点地址、与文档里的地址模型逐字同源）。
@@ -359,13 +359,13 @@ impl Transcript {
     /// `<sid>/<集合段>/<项 id>`——机制不认识任何一类集合，新增一类集合不需要
     /// 在信封上新增概念，也不需要消费端学一条新的「身份在哪」的规则。
     ///
-    /// `data` 就是**帧本身**（与内存图收到的同一条 `ChatMessage`，其 `id` 与路径
+    /// `data` 就是**帧本身**（与内存图收到的同一条 `ChatNode`，其 `id` 与路径
     /// 末段是同一个身份）：`delta` 有 ⇒ 尾部追加、`content` 有 ⇒ 整条替换、
     /// `status = removed` ⇒ 就地移除——消费端按字段落地，零翻译。增量帧只带
     /// `delta`（窄载荷），全量帧带身份 + 正文；首帧（无论上游发的是窄增量还是全量）
     /// 发图里合并后的**全量副本**，让消费端零回读即得基线。同帧 `delta` + `content`
     /// 已在 [`Self::apply`] 入口拒绝。
-    fn emit(&mut self, message: cm::ChatMessage, log: FrameLog) {
+    fn emit(&mut self, message: cm::ChatNode, log: FrameLog) {
         self.frame_no += 1;
         let frame_no = self.frame_no;
 
@@ -398,7 +398,7 @@ impl Transcript {
     /// 信封没有操作枚举：一帧增量的语义就是「这条节点的正文尾部追加了这些字符」，
     /// 消费端按字段落地。两帧相邻同节点的纯增量（`delta` 有、`content` 与 `status`
     /// 都无）合并成一帧后**语义逐字等价**——正文一个字符不多不少。顺序也不是风险：
-    /// `ChatMessage.seq` 是**节点属性**（不是投递属性），到达顺序本来就不参与排序。
+    /// `ChatNode.seq` 是**节点属性**（不是投递属性），到达顺序本来就不参与排序。
     ///
     /// ## 为什么要合
     ///
@@ -423,7 +423,7 @@ impl Transcript {
     ///
     /// 待投递的增量是**更早**的正文。若先发终态帧、后发增量，消费端会看到
     /// 「这条消息已结束」之后正文又长了一截（前端据此判定的运行态已经收敛）。
-    fn deliver(&mut self, mut message: cm::ChatMessage) {
+    fn deliver(&mut self, mut message: cm::ChatNode) {
         if self
             .pending
             .as_ref()
@@ -473,7 +473,7 @@ impl Transcript {
     }
 
     /// 变更投递的**唯一出口**（`changes.notify` 只在这里被调用）。
-    fn publish(&self, message: cm::ChatMessage) {
+    fn publish(&self, message: cm::ChatNode) {
         self.changes.notify(&VdfsChange::with_data(
             message_path(&self.session_id, &message.id),
             &message,

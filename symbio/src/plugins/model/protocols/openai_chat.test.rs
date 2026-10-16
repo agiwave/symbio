@@ -101,11 +101,11 @@ fn non_data_lines_produce_nothing() {
 // 直接 400（`System message must be at the beginning.`）——那类 provider 上 `full`
 // 档第一轮就走不出去。故前缀段并进基础 system，空行分段。
 
-use crate::plugins::model::types::{MessageContent, MessageRole, NativeMessage};
+use crate::plugins::model::types::{MessageContent, NodeRole, NativeMessage};
 
 fn sys(text: &str) -> NativeMessage {
     NativeMessage {
-        role: MessageRole::System,
+        role: NodeRole::System,
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()
     }
@@ -123,7 +123,7 @@ fn leading_system_is_merged_into_one_message() {
 #[test]
 fn no_leading_system_leaves_the_baseline_untouched() {
     let msgs = [NativeMessage {
-        role: MessageRole::User,
+        role: NodeRole::User,
         ..Default::default()
     }];
     let (text, eaten) = merge_leading_system("基础", &msgs);
@@ -143,7 +143,7 @@ fn empty_baseline_does_not_leave_a_leading_blank_line() {
 #[test]
 fn non_text_system_segment_stops_the_merge() {
     let parts = NativeMessage {
-        role: MessageRole::System,
+        role: NodeRole::System,
         content: Some(MessageContent::Parts(vec![])),
         ..Default::default()
     };
@@ -161,15 +161,15 @@ fn prepared_request_carries_exactly_one_system_message() {
         ..Default::default()
     };
     let msgs = vec![
-        crate::symbio_core::chat_message::ChatMessage {
+        crate::symbio_core::chat_node::ChatNode {
             id: "s1".to_string(),
-            role: Some(MessageRole::System),
+            role: Some(NodeRole::System),
             content: Some(MessageContent::Text("记忆段".to_string())),
             ..Default::default()
         },
-        crate::symbio_core::chat_message::ChatMessage {
+        crate::symbio_core::chat_node::ChatNode {
             id: "u1".to_string(),
-            role: Some(MessageRole::User),
+            role: Some(NodeRole::User),
             content: Some(MessageContent::Text("问".to_string())),
             ..Default::default()
         },

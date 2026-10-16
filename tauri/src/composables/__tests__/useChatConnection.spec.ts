@@ -32,11 +32,11 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ChatMessage } from '@/schemas/chat_message'
+import type { ChatNode } from '@/schemas/chat_node'
 import {
-  MESSAGE_STATUS_STREAMING,
-  MESSAGE_STATUS_WAITING_USER_ACTION,
-} from '@/schemas/chat_message'
+  NODE_STATUS_STREAMING,
+  NODE_STATUS_WAITING_USER_ACTION,
+} from '@/schemas/chat_node'
 import { VDFS_STATUS_ACTIVE, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING } from '@/schemas/vdfs'
 
 /** 地址方案（运行期数据；测试里给一份固定的） */
@@ -78,7 +78,7 @@ import { useChatConnection, type UseChatConnectionOptions } from '../useChatConn
 
 function makeStore(over: Record<string, unknown> = {}) {
   return {
-    getSessionMessages: vi.fn(() => [] as ChatMessage[]),
+    getSessionMessages: vi.fn(() => [] as ChatNode[]),
     isSessionWorking: vi.fn(() => false),
     applyTranscriptMessage: vi.fn(),
     putStatus: vi.fn(),
@@ -98,7 +98,7 @@ function conn(over: Partial<UseChatConnectionOptions> = {}) {
   return useChatConnection({ sessionId: 's1', sessionAddr: ADDR, ...over })
 }
 
-function msg(over: Partial<ChatMessage> = {}): ChatMessage {
+function msg(over: Partial<ChatNode> = {}): ChatNode {
   return { id: 'm1', type: 'text', content: 'hi', seq: 1, ...over }
 }
 
@@ -217,7 +217,7 @@ describe('派生状态 — isLoading / isWaitingApproval', () => {
 
   it('有等待许可的消息 → isWaitingApproval', () => {
     hoisted.store = makeStore({
-      getSessionMessages: vi.fn(() => [msg({ status: MESSAGE_STATUS_WAITING_USER_ACTION })]),
+      getSessionMessages: vi.fn(() => [msg({ status: NODE_STATUS_WAITING_USER_ACTION })]),
     })
     expect(conn().isWaitingApproval.value).toBe(true)
   })
@@ -295,7 +295,7 @@ describe('send — 写收件箱条目 + 乐观置位', () => {
   it('失败但有在途消息 → 不落会话级错误（避免根级节点与会话级重复报错）', async () => {
     hoisted.writeVdfs.mockRejectedValueOnce(new Error('IPC 断了'))
     hoisted.store = makeStore({
-      getSessionMessages: vi.fn(() => [msg({ id: 'streaming', status: MESSAGE_STATUS_STREAMING })]),
+      getSessionMessages: vi.fn(() => [msg({ id: 'streaming', status: NODE_STATUS_STREAMING })]),
     })
     const c = conn()
     await c.send(msg({ id: 'u1' }))

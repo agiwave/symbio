@@ -143,7 +143,7 @@ pub struct TurnInput {
     /// 循环搬到外面。
     ///
     /// 但 core **不该**知道那是「收件箱补充」——那是插件侧的概念（收件箱、
-    /// `merge_supplements`、`ChatMessage` 合并都在 `plugins/session`）。于是这个口
+    /// `merge_supplements`、`ChatNode` 合并都在 `plugins/session`）。于是这个口
     /// 收的是**已经折好的消息**（`PromptMessage` 本来就存在），落格也在插件侧做
     /// （`v2_exec` 自己开着 `EventWalStore`）。
     ///

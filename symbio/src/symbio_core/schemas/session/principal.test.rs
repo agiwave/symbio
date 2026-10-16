@@ -20,7 +20,7 @@ fn principal_wire_shape_is_three_fields() {
     assert!(v.get("title").is_none(), "title=None 时不上 wire");
 }
 
-/// `PrincipalKind::as_str` 与 serde 序列化**逐字一致**（[chat_message::MessageStatus::as_str] 同款纪律）。
+/// `PrincipalKind::as_str` 与 serde 序列化**逐字一致**（[chat_node::NodeStatus::as_str] 同款纪律）。
 #[test]
 fn kind_words_match_serde_names() {
     for (kind, word) in [

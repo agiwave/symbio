@@ -17,11 +17,11 @@ use crate::plugins::session::workdir;
 /// 这条测试保证「id 不被覆盖 + 工具名仍在」两个事实同时成立。
 #[test]
 fn message_node_serialized_name_is_node_id_not_tool_name() {
-    let m = cm::ChatMessage {
+    let m = cm::ChatNode {
         id: "nodeid123".into(),
-        role: Some(cm::MessageRole::Assistant),
-        msg_type: Some(cm::MessageType::Text),
-        status: Some(cm::MessageStatus::Streaming),
+        role: Some(cm::NodeRole::Assistant),
+        msg_type: Some(cm::NodeKind::Text),
+        status: Some(cm::NodeStatus::Streaming),
         content: Some(cm::MessageContent::Text("你好".into())),
         parent_id: Some("turn1".into()),
         // 文本节点没有工具名 → `m.name = None`（正是事故现场的节点形状）
@@ -41,9 +41,9 @@ fn message_node_serialized_name_is_node_id_not_tool_name() {
     assert_eq!(v["tool_name"], serde_json::Value::Null);
 
     // 带 工具名 的节点（ToolCall）：tool_name 就位，id 仍是节点 id
-    let tc = cm::ChatMessage {
+    let tc = cm::ChatNode {
         id: "tc456".into(),
-        msg_type: Some(cm::MessageType::ToolCall),
+        msg_type: Some(cm::NodeKind::ToolCall),
         name: Some("local/ls".into()),
         ..Default::default()
     };
@@ -194,14 +194,14 @@ fn parse_inbox_message_distinguishes_shape_by_first_char() {
     // 纯文本：整段就是正文，角色 / 类型 / 状态都是"待发用户消息"
     let m = parse_inbox_message("帮我看一下这个 bug").unwrap();
     assert_eq!(m.content.unwrap().to_text(), "帮我看一下这个 bug");
-    assert_eq!(m.role, Some(cm::MessageRole::User));
-    assert_eq!(m.msg_type, Some(cm::MessageType::Text));
-    assert_eq!(m.status, Some(cm::MessageStatus::Completed));
+    assert_eq!(m.role, Some(cm::NodeRole::User));
+    assert_eq!(m.msg_type, Some(cm::NodeKind::Text));
+    assert_eq!(m.status, Some(cm::NodeStatus::Completed));
 
     // 结构化：字段子集直接用，缺省项照补
     let m = parse_inbox_message(r#"{"content":"结构化正文","role":"user"}"#).unwrap();
     assert_eq!(m.content.unwrap().to_text(), "结构化正文");
-    assert_eq!(m.msg_type, Some(cm::MessageType::Text), "未给的字段走缺省");
+    assert_eq!(m.msg_type, Some(cm::NodeKind::Text), "未给的字段走缺省");
     assert_eq!(m.id, "", "`id` 缺省是空串占位——身份由地址 / 入队统一落定");
     // 写体给了 id 就先用它（地址若也给，则以地址为准——见 `enqueue_inbox`）
     let m = parse_inbox_message(r#"{"id":"from-body","content":"x"}"#).unwrap();
@@ -217,12 +217,12 @@ fn parse_inbox_message_distinguishes_shape_by_first_char() {
 fn inbox_item_node_reuses_message_shape() {
     let item = crate::plugins::session::active::InboxItem {
         id: "i1".into(),
-        message: cm::ChatMessage {
+        message: cm::ChatNode {
             id: "i1".into(),
-            role: Some(cm::MessageRole::User),
-            msg_type: Some(cm::MessageType::Text),
+            role: Some(cm::NodeRole::User),
+            msg_type: Some(cm::NodeKind::Text),
             content: Some(cm::MessageContent::Text("待发的这句话".into())),
-            status: Some(cm::MessageStatus::Completed),
+            status: Some(cm::NodeStatus::Completed),
             timestamp: Some(1_700_000_000_000),
             ..Default::default()
         },
@@ -319,12 +319,12 @@ fn vdfs_internal_dirs_conditional() {
 /// 转写列表项：`ext = message`、只读、正文进内容、结构进 `attributes`
 #[test]
 fn vdfs_message_node_splits_text_and_structure() {
-    let mut m = cm::ChatMessage {
+    let mut m = cm::ChatNode {
         id: "m1".into(),
-        role: Some(cm::MessageRole::Assistant),
-        msg_type: Some(cm::MessageType::Text),
+        role: Some(cm::NodeRole::Assistant),
+        msg_type: Some(cm::NodeKind::Text),
         content: Some(cm::MessageContent::Text("你好，世界".into())),
-        status: Some(cm::MessageStatus::Completed),
+        status: Some(cm::NodeStatus::Completed),
         seq: Some(7),
         timestamp: Some(1_700_000_000_000),
         ..Default::default()
@@ -344,7 +344,7 @@ fn vdfs_message_node_splits_text_and_structure() {
     // 没写 status 的历史消息（老数据）默认已结束：缺省不等于「未开始」
     m.status = None;
     assert_eq!(message_node(&m).status, "completed");
-    m.status = Some(cm::MessageStatus::Completed);
+    m.status = Some(cm::NodeStatus::Completed);
     // 结构字段全在 attributes 里（VDFS 只透传）
     assert_eq!(n.attributes.get("seq"), Some(&json!(7)));
     assert_eq!(n.attributes.get("role"), Some(&json!("assistant")));
@@ -354,15 +354,15 @@ fn vdfs_message_node_splits_text_and_structure() {
     assert_eq!(message_text(&m), "你好，世界");
 
     // 工具调用：标题补工具名、状态词直通、正文退化为 JSON 视图
-    m.msg_type = Some(cm::MessageType::ToolCall);
+    m.msg_type = Some(cm::NodeKind::ToolCall);
     m.name = Some("vdfs_list".into());
-    m.status = Some(cm::MessageStatus::Streaming);
+    m.status = Some(cm::NodeStatus::Streaming);
     assert_eq!(message_node(&m).title, "助手 · vdfs_list");
     assert_eq!(message_node(&m).status, "streaming");
     assert!(message_text(&m).contains("vdfs_list"));
 
     // 失败态：错误原因也在 attributes 里（前端按 ext 自行取用）
-    m.status = Some(cm::MessageStatus::Failed);
+    m.status = Some(cm::NodeStatus::Failed);
     m.error = Some("模型超时".into());
     assert_eq!(message_node(&m).status, "failed");
     assert_eq!(
@@ -371,8 +371,8 @@ fn vdfs_message_node_splits_text_and_structure() {
     );
 }
 
-fn msg(id: &str, seq: Option<i64>) -> cm::ChatMessage {
-    cm::ChatMessage {
+fn msg(id: &str, seq: Option<i64>) -> cm::ChatNode {
+    cm::ChatNode {
         id: id.into(),
         seq,
         ..Default::default()
@@ -380,8 +380,8 @@ fn msg(id: &str, seq: Option<i64>) -> cm::ChatMessage {
 }
 
 /// 带父指针的消息（一个 Turn = 根 + 它的全部后代）
-fn child(id: &str, seq: Option<i64>, parent: &str) -> cm::ChatMessage {
-    cm::ChatMessage {
+fn child(id: &str, seq: Option<i64>, parent: &str) -> cm::ChatNode {
+    cm::ChatNode {
         id: id.into(),
         seq,
         parent_id: Some(parent.into()),
@@ -389,7 +389,7 @@ fn child(id: &str, seq: Option<i64>, parent: &str) -> cm::ChatMessage {
     }
 }
 
-fn ids(v: &[cm::ChatMessage]) -> Vec<&str> {
+fn ids(v: &[cm::ChatNode]) -> Vec<&str> {
     v.iter().map(|m| m.id.as_str()).collect()
 }
 
@@ -490,10 +490,10 @@ fn vdfs_messages_are_ordered_by_seq() {
 fn overlay_live_keeps_seq_from_stored() {
     let mut stored = msg("m1", Some(5));
     stored.content = Some(cm::MessageContent::Text("落库正文".into()));
-    stored.status = Some(cm::MessageStatus::Completed);
+    stored.status = Some(cm::NodeStatus::Completed);
     let mut live = msg("m1", None);
     live.content = Some(cm::MessageContent::Text("落库正文 + 流式追加".into()));
-    live.status = Some(cm::MessageStatus::Streaming);
+    live.status = Some(cm::NodeStatus::Streaming);
 
     let merged = overlay_live(vec![stored], vec![live, msg("m2", None)]);
     let ids: Vec<String> = ordered(merged).into_iter().map(|m| m.id).collect();

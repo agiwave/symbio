@@ -13,83 +13,83 @@
 //! 缺任一条都会让分界悄悄偏向一侧。
 
 use super::*;
-use crate::symbio_core::chat_message::{MessageContent, MessageStatus};
+use crate::symbio_core::chat_node::{MessageContent, NodeStatus};
 
 fn msg(
     id: &str,
-    role: MessageRole,
-    ty: Option<MessageType>,
+    role: NodeRole,
+    ty: Option<NodeKind>,
     parent: Option<&str>,
     text: &str,
-) -> ChatMessage {
-    ChatMessage {
+) -> ChatNode {
+    ChatNode {
         id: id.to_string(),
         parent_id: parent.map(str::to_string),
         role: Some(role),
         msg_type: ty,
         content: Some(MessageContent::Text(text.to_string())),
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         ..Default::default()
     }
 }
 
 /// 一份真实形状的转写：用户 → Turn（含 Reasoning / Text / ToolCall→tool 结果）→ 首响
-fn transcript() -> Vec<ChatMessage> {
+fn transcript() -> Vec<ChatNode> {
     vec![
-        msg("u1", MessageRole::User, None, None, "读一下 README"),
+        msg("u1", NodeRole::User, None, None, "读一下 README"),
         msg(
             "turn1",
-            MessageRole::Assistant,
-            Some(MessageType::Turn),
+            NodeRole::Assistant,
+            Some(NodeKind::Turn),
             None,
             "",
         ),
         msg(
             "r1",
-            MessageRole::Assistant,
-            Some(MessageType::Reasoning),
+            NodeRole::Assistant,
+            Some(NodeKind::Reasoning),
             Some("turn1"),
             "先看文件",
         ),
         msg(
             "t1",
-            MessageRole::Assistant,
-            Some(MessageType::Text),
+            NodeRole::Assistant,
+            Some(NodeKind::Text),
             Some("turn1"),
             "文件已读完",
         ),
         msg(
             "tc1",
-            MessageRole::Assistant,
-            Some(MessageType::ToolCall),
+            NodeRole::Assistant,
+            Some(NodeKind::ToolCall),
             Some("turn1"),
             "{\"path\":\"README.md\"}",
         ),
         msg(
             "tr1",
-            MessageRole::Tool,
-            Some(MessageType::Text),
+            NodeRole::Tool,
+            Some(NodeKind::Text),
             Some("tc1"),
             "# Symbio\n很长的文件正文……",
         ),
         msg(
             "f1",
-            MessageRole::Assistant,
-            Some(MessageType::Text),
+            NodeRole::Assistant,
+            Some(NodeKind::Text),
             None,
             "好的，我去看一下。",
         ),
         msg(
             "c1",
-            MessageRole::Assistant,
-            Some(MessageType::Compression),
+            NodeRole::Assistant,
+            Some(NodeKind::Compression),
             None,
             "正在压缩上下文…",
         ),
         msg(
             "s1",
-            MessageRole::System,
-            Some(MessageType::Text),
+            NodeRole::System,
+            Some(NodeKind::Text),
             None,
             "系统注入的框架文本",
         ),
@@ -137,16 +137,16 @@ fn tool_and_turn_and_reasoning_are_excluded() {
     for m in &view {
         assert_ne!(
             m.msg_type,
-            Some(MessageType::ToolCall),
+            Some(NodeKind::ToolCall),
             "ToolCall 不得进对话线"
         );
-        assert_ne!(m.msg_type, Some(MessageType::Turn), "Turn 容器不得进对话线");
+        assert_ne!(m.msg_type, Some(NodeKind::Turn), "Turn 容器不得进对话线");
         assert_ne!(
             m.msg_type,
-            Some(MessageType::Reasoning),
+            Some(NodeKind::Reasoning),
             "推理节点不得进对话线"
         );
-        assert_ne!(m.role, Some(MessageRole::Tool), "role=tool 不得进对话线");
+        assert_ne!(m.role, Some(NodeRole::Tool), "role=tool 不得进对话线");
     }
 }
 
@@ -186,15 +186,15 @@ fn transcript_without_conversation_nodes_yields_empty_view() {
     let only_tools = vec![
         msg(
             "turn1",
-            MessageRole::Assistant,
-            Some(MessageType::Turn),
+            NodeRole::Assistant,
+            Some(NodeKind::Turn),
             None,
             "",
         ),
         msg(
             "tc1",
-            MessageRole::Assistant,
-            Some(MessageType::ToolCall),
+            NodeRole::Assistant,
+            Some(NodeKind::ToolCall),
             Some("turn1"),
             "{}",
         ),

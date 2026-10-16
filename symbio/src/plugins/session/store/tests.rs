@@ -270,14 +270,14 @@ async fn save_leaves_no_temp_file_behind() {
 // `session.json`，`messages.json` 只有真的要取转写时才读。
 
 /// 造一条用户文本消息（标题 / 摘要推导的输入）
-fn text_msg(role_is_user: bool, text: &str) -> ChatMessage {
-    use crate::symbio_core::chat_message::{MessageContent, MessageRole};
-    ChatMessage {
+fn text_msg(role_is_user: bool, text: &str) -> ChatNode {
+    use crate::symbio_core::chat_node::{MessageContent, NodeRole};
+    ChatNode {
         id: format!("m{}", text.len()),
         role: Some(if role_is_user {
-            MessageRole::User
+            NodeRole::User
         } else {
-            MessageRole::Assistant
+            NodeRole::Assistant
         }),
         content: Some(MessageContent::Text(text.into())),
         ..Default::default()

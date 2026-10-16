@@ -13,7 +13,7 @@
 use super::*;
 
 /// 为缺失 `timestamp` 的消息回填 `now`，保持数组内的相对顺序不被排序打乱。
-fn backfill_timestamps(messages: Vec<ChatMessage>, now: i64) -> Vec<ChatMessage> {
+fn backfill_timestamps(messages: Vec<ChatNode>, now: i64) -> Vec<ChatNode> {
     messages
         .into_iter()
         .map(|mut m| {
@@ -26,13 +26,13 @@ fn backfill_timestamps(messages: Vec<ChatMessage>, now: i64) -> Vec<ChatMessage>
 }
 
 /// 取一批消息中已有的最大 `seq`，作为后续分配的起点（Lamport 计数器的当前水位）。
-pub(super) fn max_seq(messages: &[ChatMessage]) -> i64 {
+pub(super) fn max_seq(messages: &[ChatNode]) -> i64 {
     messages.iter().filter_map(|m| m.seq).max().unwrap_or(0)
 }
 
 /// 按切片顺序为消息补发 `seq`（**只补缺号**），返回分配后的新水位。
 ///
-/// 自 `symbio_core::chat_message` 迁入。`seq` **字段**是跨栈 schema
+/// 自 `symbio_core::chat_node` 迁入。`seq` **字段**是跨栈 schema
 /// （前端逐字段镜像，必须留 core，见该字段文档）；而「怎么补号」是会话存储的实现策略
 /// ——调用点只有本文件的 `replace_all` 一处，故与它的兄弟 `append_messages`
 /// （另一条分配路径）同处一文件，两条路径可以直接对照着读。
@@ -79,7 +79,7 @@ pub(super) fn max_seq(messages: &[ChatMessage]) -> i64 {
 /// 「无号项夹在两个既有序号之间」时触发——那正是上面的前置条件所排除的输入（该分支
 /// 自带的文档也写着「该输入在真实路径上不可达」）。且它的「修法」是**整表改号**，
 /// 本身就破坏第 2 条不变式：为一个不可达输入保留一条有害分支，不如把前置条件写成断言。
-pub(super) fn assign_seq(messages: &mut [ChatMessage], base: i64) -> i64 {
+pub(super) fn assign_seq(messages: &mut [ChatNode], base: i64) -> i64 {
     // 全列表无号（整批新节点 / 清空后重建）：接在调用方水位之后——`base` 的唯一用途
     let Some(first) = messages.iter().filter_map(|m| m.seq).min() else {
         let mut cursor = base;
@@ -137,12 +137,12 @@ pub(super) fn assign_seq(messages: &mut [ChatMessage], base: i64) -> i64 {
 pub(crate) enum MessageChange {
     /// **诞生**：一个此前不存在的节点出现。
     Born {
-        nodes: Vec<ChatMessage>,
+        nodes: Vec<ChatNode>,
         /// 它的**承载事实**由谁落——一个事实只能有一个 owner（[ADR-049] 理由 1）。
         carrier: Carrier,
     },
     /// **断言**：一个已存在的节点现在读作 Y ⇒ 落 `message.edited`。
-    Edited(Vec<ChatMessage>),
+    Edited(Vec<ChatNode>),
     /// **关闭**：这些节点没了 ⇒ 落 `message.removed`。
     Removed(Vec<String>),
 }
@@ -188,7 +188,7 @@ impl PersistentChatSession {
     pub(crate) async fn apply(
         &self,
         change: MessageChange,
-    ) -> Result<Vec<ChatMessage>, PluginError> {
+    ) -> Result<Vec<ChatNode>, PluginError> {
         // ① 落事实（**先于**写缓存）。
         if let Some(dir) = self.store.session_dir(&self.session_id) {
             match &change {
@@ -272,8 +272,8 @@ impl PersistentChatSession {
     /// 顺序与入参一致（不含被淘汰项）；落库失败则整体失败，不返回部分结果。
     pub(super) async fn append_messages(
         &self,
-        messages: Vec<ChatMessage>,
-    ) -> Result<(Vec<ChatMessage>, Vec<String>), PluginError> {
+        messages: Vec<ChatNode>,
+    ) -> Result<(Vec<ChatNode>, Vec<String>), PluginError> {
         // 持久层写入不变量（见 `ensure_durable_states`）：瞬态状态不得落盘
         ensure_durable_states(&messages, "append_messages")?;
         // 临界区：整段「读 → 改 → 整份写回」必须串行。会话写入是整份覆盖，
@@ -354,7 +354,7 @@ impl PersistentChatSession {
 
         let mut user_indices = Vec::new();
         for (idx, msg) in session.messages.iter().enumerate() {
-            if msg.role == Some(MessageRole::User) {
+            if msg.role == Some(NodeRole::User) {
                 user_indices.push(idx);
             }
         }
@@ -397,7 +397,7 @@ impl PersistentChatSession {
         Ok((persisted, removed_ids))
     }
 
-    pub(crate) async fn replace_all(&self, messages: Vec<ChatMessage>) -> Result<(), PluginError> {
+    pub(crate) async fn replace_all(&self, messages: Vec<ChatNode>) -> Result<(), PluginError> {
         // 持久层写入不变量（见 `ensure_durable_states`）：瞬态状态不得落盘
         ensure_durable_states(&messages, "replace_all")?;
         // 临界区：与 append / update 共用同一把 per-session 写锁（整份覆盖语义）
@@ -473,11 +473,11 @@ impl PersistentChatSession {
 /// 让错误指向真实肇事者；而不是落盘之后靠启动期清理器静默改写（修复器存在的
 /// 每一天，都在给新的违例写入点发通行证）。
 pub(super) fn ensure_durable_states(
-    messages: &[cm::ChatMessage],
+    messages: &[cm::ChatNode],
     op: &str,
 ) -> Result<(), PluginError> {
     for m in messages {
-        if m.status == Some(cm::MessageStatus::Streaming) {
+        if m.status == Some(cm::NodeStatus::Streaming) {
             return Err(PluginError::InternalError(format!(
                 "{op}: 消息 {} 携带瞬态状态 `streaming`，持久层只接受终态；\
                  瞬态状态应经在途缓冲与广播通道下发，不得写入存储",
@@ -517,7 +517,7 @@ pub(super) fn ensure_durable_states(
 /// 决策 1 的「关闭」原语）。裁剪改了列表却不落事实 ⇒ 切主读后**被裁节点复活**
 /// ——WAL 里它们还在，只是缓存里少了（而缓存已经不再是真源）。
 pub fn prune_historical_tool_calls(
-    messages: &mut Vec<ChatMessage>,
+    messages: &mut Vec<ChatNode>,
     keep_turns: usize,
 ) -> Vec<String> {
     // keep_turns == 0 语义为「不限制」（与 `SessionConfig::context_messages` 的 0 值语义、
@@ -528,7 +528,7 @@ pub fn prune_historical_tool_calls(
     }
     let mut user_indices = Vec::new();
     for (idx, msg) in messages.iter().enumerate() {
-        if msg.role == Some(MessageRole::User) {
+        if msg.role == Some(NodeRole::User) {
             user_indices.push(idx);
         }
     }
@@ -541,9 +541,9 @@ pub fn prune_historical_tool_calls(
     let mut to_remove = HashSet::new();
 
     for msg in &messages[..limit_idx] {
-        if msg.role == Some(MessageRole::Tool)
-            || msg.msg_type == Some(MessageType::ToolCall)
-            || msg.msg_type == Some(MessageType::Reasoning)
+        if msg.role == Some(NodeRole::Tool)
+            || msg.msg_type == Some(NodeKind::ToolCall)
+            || msg.msg_type == Some(NodeKind::Reasoning)
         {
             to_remove.insert(msg.id.clone());
         }
@@ -563,7 +563,7 @@ pub fn prune_historical_tool_calls(
     to_remove.extend(extra);
 
     for msg in &messages[..limit_idx] {
-        if msg.role == Some(MessageRole::Assistant) {
+        if msg.role == Some(NodeRole::Assistant) {
             let content_text = msg
                 .content
                 .as_ref()

@@ -47,7 +47,7 @@ import { describe, expect, it, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 import { useSessionsStore } from '@/stores/sessions'
-import type { ChatMessage } from '@/schemas/chat_message'
+import type { ChatNode } from '@/schemas/chat_node'
 
 const SID = 'sess1'
 const TURN = 'turn1'
@@ -56,7 +56,7 @@ const TC = 'tc1' // ToolCall 节点 id（accumulator 的 node_id，8 字符 llm_
 const RESULT = 'r1' // 结果子节点 id（uuid）
 
 /** 驱动一条落地帧：与 `sessionTranscriptSync` 消费端交给 store 的形状一致 */
-function feed(message: ChatMessage): void {
+function feed(message: ChatNode): void {
   useSessionsStore().applyTranscriptMessages(SID, [message])
 }
 

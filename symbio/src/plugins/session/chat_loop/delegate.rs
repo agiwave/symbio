@@ -36,7 +36,7 @@
 //!   投影是纯函数 [`progress_of`]。三处口径见
 //!   [04 §3.2](../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")。
 
-use crate::symbio_core::chat_message as cm;
+use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::{CapabilityMeta, PluginError};
 use std::collections::BTreeMap;
 
@@ -211,14 +211,14 @@ pub(crate) fn progress_of(summary: &SessionSummary, session: &Session) -> Worker
     let rounds = session
         .messages
         .iter()
-        .filter(|m| matches!(m.role, Some(cm::MessageRole::User)))
+        .filter(|m| matches!(m.role, Some(cm::NodeRole::User)))
         .count();
 
     // steps：非 user 节点的非空正文，**保留最近 STEPS_MAX 条**（drain 掉最早的）。
     let mut steps: Vec<String> = session
         .messages
         .iter()
-        .filter(|m| !matches!(m.role, Some(cm::MessageRole::User)))
+        .filter(|m| !matches!(m.role, Some(cm::NodeRole::User)))
         .filter_map(step_text)
         .collect();
     if steps.len() > STEPS_MAX {
@@ -246,7 +246,7 @@ pub(crate) fn progress_of(summary: &SessionSummary, session: &Session) -> Worker
 ///
 /// 判据 3「无内容节点不产出步骤」在此自然成立：组合节点（`Turn` / `ToolCall`）
 /// 本就不带 content，`as_ref()?` 直接返回 `None`；空字符串也被 `is_empty` 挡下。
-fn step_text(m: &cm::ChatMessage) -> Option<String> {
+fn step_text(m: &cm::ChatNode) -> Option<String> {
     let content = m.content.as_ref()?;
     if content.is_empty() {
         return None;
@@ -264,14 +264,14 @@ fn step_text(m: &cm::ChatMessage) -> Option<String> {
     })
 }
 
-/// 终态集合（`MessageStatus` 的后四个变体）。
-pub(crate) fn is_terminal(status: Option<&cm::MessageStatus>) -> bool {
+/// 终态集合（`NodeStatus` 的后四个变体）。
+pub(crate) fn is_terminal(status: Option<&cm::NodeStatus>) -> bool {
     matches!(
         status,
-        Some(cm::MessageStatus::Completed)
-            | Some(cm::MessageStatus::Aborted)
-            | Some(cm::MessageStatus::Failed)
-            | Some(cm::MessageStatus::Removed)
+        Some(cm::NodeStatus::Completed)
+            | Some(cm::NodeStatus::Aborted)
+            | Some(cm::NodeStatus::Failed)
+            | Some(cm::NodeStatus::Removed)
     )
 }
 

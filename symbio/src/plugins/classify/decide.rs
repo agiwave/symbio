@@ -24,7 +24,7 @@
 
 use std::sync::Arc;
 
-use crate::symbio_core::chat_message::{ChatMessage, MessageContent, MessageRole};
+use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole};
 use crate::symbio_core::Verdict;
 use crate::symbio_core::{
     llm_short_id, CapabilityVisitor, ExecAbortSignal, ExecEnv, ExecEventSink, ModelProvider,
@@ -116,7 +116,7 @@ fn normalize_word(raw: &str) -> String {
 pub(crate) async fn decide(
     ctx: &Arc<dyn PluginInvokeRequest>,
     utterance: &str,
-    context: &[ChatMessage],
+    context: &[ChatNode],
     config: &ClassifyConfig,
 ) -> Option<Verdict> {
     // 模型服务从**调用方带来的能力访问器**里取。优先本插件配置的那个 provider id
@@ -164,8 +164,8 @@ pub(crate) async fn decide(
 /// 直接用对话线投影：它就是一组 `role = user | assistant` 的文本节点，与模型的
 /// 消息形态同构——不需要在这里重新拼一段「以下是历史」的散文（那会把同一份事实
 /// 变成两种形状，且让「谁说了什么」在提示词里再错一次的机会）。
-fn build_messages(utterance: &str, context: &[ChatMessage]) -> Vec<ChatMessage> {
-    let mut messages: Vec<ChatMessage> = context
+fn build_messages(utterance: &str, context: &[ChatNode]) -> Vec<ChatNode> {
+    let mut messages: Vec<ChatNode> = context
         .iter()
         .filter(|m| !text_of(m).trim().is_empty())
         .cloned()
@@ -174,7 +174,7 @@ fn build_messages(utterance: &str, context: &[ChatMessage]) -> Vec<ChatMessage> 
     // 投影已含本轮这句话时不再追加（正常路径：`session` 先把用户消息折进上下文再判）。
     let tail_matches = messages
         .last()
-        .map(|m| m.role == Some(MessageRole::User) && text_of(m) == utterance)
+        .map(|m| m.role == Some(NodeRole::User) && text_of(m) == utterance)
         .unwrap_or(false);
     if !tail_matches {
         messages.push(user_message(utterance));
@@ -182,16 +182,16 @@ fn build_messages(utterance: &str, context: &[ChatMessage]) -> Vec<ChatMessage> 
     messages
 }
 
-fn user_message(text: &str) -> ChatMessage {
-    ChatMessage {
+fn user_message(text: &str) -> ChatNode {
+    ChatNode {
         id: llm_short_id(),
-        role: Some(MessageRole::User),
+        role: Some(NodeRole::User),
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()
     }
 }
 
-fn text_of(m: &ChatMessage) -> String {
+fn text_of(m: &ChatNode) -> String {
     m.content.as_ref().map(|c| c.to_text()).unwrap_or_default()
 }
 

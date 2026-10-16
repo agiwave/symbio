@@ -471,7 +471,7 @@ mod turn_runner_tests {
         // 本组用例的桩不产推理增量；推理通道由
         // `plugins/model/bound_provider.test.rs` 的桥接用例覆盖（那里有 SSE 级 fixture）。
         fn on_reasoning(&self, _text: &str) {}
-        fn on_tool_frame(&self, _frame: &crate::symbio_core::chat_message::ChatMessage) {}
+        fn on_tool_frame(&self, _frame: &crate::symbio_core::chat_node::ChatNode) {}
     }
 
     /// 流式运行：分片按序进 sink；落格语义与 run() 同一条路径（final 照常、
@@ -587,7 +587,7 @@ mod turn_runner_tests {
     /// （开场白只剩 deltas，`got.first()` 是正文增量而不是它）。
     #[tokio::test]
     async fn opening_node_reaches_the_live_surface_at_production_time() {
-        use crate::symbio_core::{chat_message::MessageContent, DeltaSink};
+        use crate::symbio_core::{chat_node::MessageContent, DeltaSink};
         use std::sync::{Arc, Mutex};
 
         /// 按序记「实时面上到过的帧」：`(节点 id, 正文)`，增量记为空 id。
@@ -602,7 +602,7 @@ mod turn_runner_tests {
                     .push((String::new(), text.to_string()));
             }
             fn on_reasoning(&self, _text: &str) {}
-            fn on_tool_frame(&self, frame: &crate::symbio_core::chat_message::ChatMessage) {
+            fn on_tool_frame(&self, frame: &crate::symbio_core::chat_node::ChatNode) {
                 self.0.lock().unwrap().push((
                     frame.id.clone(),
                     frame
@@ -2823,7 +2823,7 @@ mod reflex_turn_tests {
         }
         // 反射档不调模型 ⇒ 没有推理增量；通道由 `bound_provider.test.rs` 覆盖。
         fn on_reasoning(&self, _text: &str) {}
-        fn on_tool_frame(&self, _frame: &crate::symbio_core::chat_message::ChatMessage) {}
+        fn on_tool_frame(&self, _frame: &crate::symbio_core::chat_node::ChatNode) {}
     }
 
     /// 正向：反射档一轮**只落两格**（开轮 + 收束），收束溯源指向开轮格、

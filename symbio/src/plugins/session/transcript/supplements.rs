@@ -40,7 +40,7 @@
 //! 非文本片段（如图片），就按顺序把所有片段拼成 `Parts`，不把图片丢掉。
 
 use super::super::active::InboxItem;
-use crate::symbio_core::chat_message as cm;
+use crate::symbio_core::chat_node as cm;
 
 /// 合并标记的三个键名（唯一真源：写入方与消费方都从这里取）。
 ///
@@ -58,7 +58,7 @@ const JOINER: &str = "\n\n";
 /// 把一批收件箱条目合并成一条用户消息；空批次返回 `None`。
 ///
 /// `n == 1` 原样返回该条目的消息（**与今天的行为逐字一致**，见模块头）。
-pub fn merge_supplements(items: &[InboxItem]) -> Option<cm::ChatMessage> {
+pub fn merge_supplements(items: &[InboxItem]) -> Option<cm::ChatNode> {
     match items {
         [] => None,
         // 一条不算"补充整合"：原样返回，不多加任何字段。
@@ -67,16 +67,16 @@ pub fn merge_supplements(items: &[InboxItem]) -> Option<cm::ChatMessage> {
     }
 }
 
-fn merge_many(items: &[InboxItem]) -> cm::ChatMessage {
-    cm::ChatMessage {
+fn merge_many(items: &[InboxItem]) -> cm::ChatNode {
+    cm::ChatNode {
         // 地址末段即身份：沿用第一条的 id，前端的权威帧合并因此天然对齐
         // （`useChatConnection.ts`：后端沿用调用方给的 id，前端按 id 合并）。
         id: items[0].id.clone(),
         parent_id: None,
-        role: Some(cm::MessageRole::User),
-        msg_type: Some(cm::MessageType::Text),
+        role: Some(cm::NodeRole::User),
+        msg_type: Some(cm::NodeKind::Text),
         content: Some(merge_content(items)),
-        status: Some(cm::MessageStatus::Completed),
+        status: Some(cm::NodeStatus::Completed),
         meta: Some(serde_json::json!({
             META_SUPPLEMENT: true,
             META_SUPPLEMENT_IDS: items.iter().map(|i| i.id.clone()).collect::<Vec<_>>(),

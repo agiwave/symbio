@@ -6,14 +6,14 @@
 
 use super::*;
 
-fn sliding_window(messages: &[ChatMessage], max_turns: usize) -> Vec<ChatMessage> {
+fn sliding_window(messages: &[ChatNode], max_turns: usize) -> Vec<ChatNode> {
     if max_turns == 0 {
         return messages.to_vec();
     }
 
     let mut user_indices = Vec::new();
     for (idx, msg) in messages.iter().enumerate() {
-        if msg.role == Some(MessageRole::User) {
+        if msg.role == Some(NodeRole::User) {
             user_indices.push(idx);
         }
     }
@@ -40,7 +40,7 @@ fn sliding_window(messages: &[ChatMessage], max_turns: usize) -> Vec<ChatMessage
 /// 一条脏消息就能让整个会话彻底卡死在 400，且用户无法自行恢复。
 ///
 /// 仅作用于返回的构造结果，不修改存储。
-fn normalize_message_content(msg: ChatMessage) -> Option<ChatMessage> {
+fn normalize_message_content(msg: ChatNode) -> Option<ChatNode> {
     // 占位消息（无角色）直接丢弃；as_ref 避免部分移动（后续 ..msg 复用其余字段）
     msg.role.as_ref()?;
     let content_ok = matches!(
@@ -61,7 +61,7 @@ fn normalize_message_content(msg: ChatMessage) -> Option<ChatMessage> {
     } else {
         raw
     };
-    Some(ChatMessage {
+    Some(ChatNode {
         content: Some(MessageContent::Text(text)),
         ..msg
     })
@@ -80,7 +80,7 @@ fn normalize_message_content(msg: ChatMessage) -> Option<ChatMessage> {
 ///
 /// 采用**不动点迭代**：一次截断可能同时打断多层父子链（Turn → ToolCall → Tool），
 /// 单趟过滤只解一层，剩下的会以"父在集合内"的假象漏出。
-pub(crate) fn drop_orphan_messages(mut messages: Vec<ChatMessage>) -> Vec<ChatMessage> {
+pub(crate) fn drop_orphan_messages(mut messages: Vec<ChatNode>) -> Vec<ChatNode> {
     // 不动点迭代：父节点被剔除后，其子节点也随之成为孤儿（截断/清理场景下
     // 可能出现多层链，如 Turn → ToolCall → Tool）。单趟过滤只解一层。
     loop {
@@ -99,7 +99,7 @@ pub(crate) fn drop_orphan_messages(mut messages: Vec<ChatMessage>) -> Vec<ChatMe
 
 impl PersistentChatSession {
     /// 全量消息（按单调 `seq` 排序后的存储视图）。
-    pub(crate) async fn get_messages(&self) -> Result<Vec<ChatMessage>, PluginError> {
+    pub(crate) async fn get_messages(&self) -> Result<Vec<ChatNode>, PluginError> {
         let session = self.load_session().await?;
         let mut messages: Vec<_> = session.messages.to_vec();
         // 按**单调序号** `seq` 排序（稳定排序，缺失 seq 的旧数据排最后并保持插入顺序）。
@@ -119,7 +119,7 @@ impl PersistentChatSession {
     pub(crate) async fn get_context_messages(
         &self,
         max_turns: Option<usize>,
-    ) -> Result<Vec<ChatMessage>, PluginError> {
+    ) -> Result<Vec<ChatNode>, PluginError> {
         let messages = self.get_messages().await?;
         // **不过滤 Failed 消息**（"继续会话"中断可见性，docs/021-turn-tool-mechanisms.md 2.6）：
         // 用户选择不重试、直接继续对话时，模型必须看到上一轮的中断现场——
@@ -129,10 +129,10 @@ impl PersistentChatSession {
         // （flatten_chat_messages / build_request_view）按 status 动态补齐。
         // 下方孤儿过滤退化为安全网（正常路径失败 Turn 整树保留，无孤儿产生）。
         // 剔除父节点缺失的孤儿节点（否则会带着不存在的 tool_call_id 进请求包）
-        let messages: Vec<ChatMessage> = drop_orphan_messages(messages);
+        let messages: Vec<ChatNode> = drop_orphan_messages(messages);
         // 对各消息做 content 归一兜底（并跳过 role 为 None 的占位消息），
         // 防止历史坏消息导致 provider 反序列化 MessageContent 失败。
-        let messages: Vec<ChatMessage> = messages
+        let messages: Vec<ChatNode> = messages
             .into_iter()
             .filter_map(normalize_message_content)
             .collect();

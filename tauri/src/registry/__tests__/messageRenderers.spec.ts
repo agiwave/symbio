@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { MESSAGE_TYPES, MESSAGE_TYPE_TEXT } from '@/schemas/chat_message'
+import { NODE_KINDS, NODE_KIND_TEXT } from '@/schemas/chat_node'
 import {
   facetsOf,
   getMessageRenderer,
@@ -44,13 +44,13 @@ describe('渲染器装配：每个标识都有组件', () => {
 })
 
 describe('渲染器装配：词表里的每个消息类型都能渲染出来', () => {
-  it.each(MESSAGE_TYPES)('类型 %s 能解析到组件', (type) => {
+  it.each(NODE_KINDS)('类型 %s 能解析到组件', (type) => {
     const renderer = resolveMessageRenderer(facetsOf({ id: 'x', type }))
     expect(renderer, `类型 ${type} 解析不到渲染器组件`).toBeDefined()
   })
 
   it('未登记类型回落到 fallback，而不是渲染成空白', () => {
-    const f = facetsOf({ id: 'x', type: 'brand_new_type' as typeof MESSAGE_TYPE_TEXT })
+    const f = facetsOf({ id: 'x', type: 'brand_new_type' as typeof NODE_KIND_TEXT })
     expect(messageRendererKey(f)).toBe('fallback')
     expect(resolveMessageRenderer(f)).toBeDefined()
     expect(resolveMessageRenderer(f)).toBe(getMessageRenderer('fallback'))

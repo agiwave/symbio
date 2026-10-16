@@ -22,7 +22,7 @@ import { defineComponent, h, nextTick } from 'vue'
 import MessageNode from '../MessageNode.vue'
 import { useSessionsStore } from '@/stores/sessions'
 import { useChatConnection } from '@/composables/useChatConnection'
-import type { ChatMessage } from '@/schemas/chat_message'
+import type { ChatNode } from '@/schemas/chat_node'
 
 vi.mock('@/services/plugin', () => ({
   connectPlugin: vi.fn(async () => ({ connectionId: 'c1', close: vi.fn(async () => {}) })),
@@ -42,28 +42,28 @@ const SID = 's1'
  * 传输层（`stores/sessionTranscriptSync`，VDFS 变更 → 帧）的形状与协调规则由
  * 它自己的测试钉；这里全部用例只关心**落地之后** store 与渲染的结果。
  */
-function feed(message: ChatMessage): void {
+function feed(message: ChatNode): void {
   useSessionsStore().applyTranscriptMessages(SID, [message])
 }
 
 /** 与后端 `emit_streaming_start` / 首帧全量 / finalize 一致的**完整消息**构造器 */
-function turn(id: string, status: ChatMessage['status'] = 'streaming'): ChatMessage {
+function turn(id: string, status: ChatNode['status'] = 'streaming'): ChatNode {
   return { id, role: 'assistant', type: 'turn', status }
 }
 function reasoning(
   id: string,
   parent: string,
   content: string,
-  status: ChatMessage['status'] = 'streaming',
-): ChatMessage {
+  status: ChatNode['status'] = 'streaming',
+): ChatNode {
   return { id, parent_id: parent, role: 'assistant', type: 'reasoning', status, content }
 }
 function text(
   id: string,
   parent: string,
   content: string,
-  status: ChatMessage['status'] = 'streaming',
-): ChatMessage {
+  status: ChatNode['status'] = 'streaming',
+): ChatNode {
   return { id, parent_id: parent, role: 'assistant', type: 'text', status, content }
 }
 function toolCall(
@@ -71,8 +71,8 @@ function toolCall(
   parent: string,
   name: string,
   args: string,
-  status: ChatMessage['status'] = 'streaming',
-): ChatMessage {
+  status: ChatNode['status'] = 'streaming',
+): ChatNode {
   return { id, parent_id: parent, role: 'assistant', type: 'tool_call', name, status, content: args }
 }
 /**
@@ -81,13 +81,13 @@ function toolCall(
  * 旧协议下这种部分帧会把 `type` / `parent_id` / `content` 一并抹掉；新协议下是
  * **合并**——这里刻意用最小帧，正是要钉住「状态迁移不吞身份与正文」这条不变式。
  */
-function settled(m: ChatMessage, status: ChatMessage['status'] = 'completed'): ChatMessage {
+function settled(m: ChatNode, status: ChatNode['status'] = 'completed'): ChatNode {
   return { id: m.id, status }
 }
 
 /** 复刻 useChatConnection.messageTree（同源逻辑，锚定其行为） */
-function buildTree(all: ChatMessage[]): ChatMessage[] {
-  const rawChildren: Record<string, ChatMessage[]> = {}
+function buildTree(all: ChatNode[]): ChatNode[] {
+  const rawChildren: Record<string, ChatNode[]> = {}
   all.forEach((msg) => {
     if (msg.parent_id) {
       if (!rawChildren[msg.parent_id]) rawChildren[msg.parent_id] = []
@@ -95,16 +95,16 @@ function buildTree(all: ChatMessage[]): ChatMessage[] {
     }
   })
   const parentsWithChildren = new Set(Object.keys(rawChildren).filter((pid) => rawChildren[pid].length > 0))
-  const isEmptyContentNode = (msg: ChatMessage): boolean => {
+  const isEmptyContentNode = (msg: ChatNode): boolean => {
     const t = msg.type || 'text'
     if (t !== 'text' && t !== 'reasoning') return false
     const c = msg.content
     const text = typeof c === 'string' ? c : c && typeof c === 'object' && 'text' in c ? (c as { text: string }).text : ''
     return !text || text.trim().length === 0
   }
-  const isEmptyLeaf = (msg: ChatMessage) => !parentsWithChildren.has(msg.id) && isEmptyContentNode(msg)
+  const isEmptyLeaf = (msg: ChatNode) => !parentsWithChildren.has(msg.id) && isEmptyContentNode(msg)
   const visible = all.filter((m) => !isEmptyLeaf(m))
-  const childrenMap: Record<string, ChatMessage[]> = {}
+  const childrenMap: Record<string, ChatNode[]> = {}
   visible.forEach((msg) => {
     if (msg.parent_id) {
       if (!childrenMap[msg.parent_id]) childrenMap[msg.parent_id] = []
@@ -112,11 +112,11 @@ function buildTree(all: ChatMessage[]): ChatMessage[] {
     }
   })
   const rootMessages = visible.filter((msg) => !msg.parent_id || !visible.find((m) => m.id === msg.parent_id))
-  const sortFn = (a: ChatMessage, b: ChatMessage) => (a.seq ?? a.timestamp ?? 0) - (b.seq ?? b.timestamp ?? 0)
+  const sortFn = (a: ChatNode, b: ChatNode) => (a.seq ?? a.timestamp ?? 0) - (b.seq ?? b.timestamp ?? 0)
   rootMessages.sort(sortFn)
   Object.values(childrenMap).forEach((children) => children.sort(sortFn))
-  const buildNode = (msg: ChatMessage, parent?: ChatMessage): ChatMessage => {
-    const node: ChatMessage = { ...msg }
+  const buildNode = (msg: ChatNode, parent?: ChatNode): ChatNode => {
+    const node: ChatNode = { ...msg }
     if (parent) node.parent = parent
     if (childrenMap[node.id]) node.children = childrenMap[node.id].map((c) => buildNode(c, node))
     return node
@@ -124,7 +124,7 @@ function buildTree(all: ChatMessage[]): ChatMessage[] {
   return rootMessages.map((m) => buildNode(m))
 }
 
-function mountTree(tree: ChatMessage[]) {
+function mountTree(tree: ChatNode[]) {
   return mount(
     {
       setup() {
@@ -421,7 +421,7 @@ describe('渲染层回归：工具调用按帧即时可见（对照 e2e 实测�
         name: 'read_file',
         status: 'streaming',
         meta: { started_at: Date.now() - 5000 },
-      } as ChatMessage)
+      } as ChatNode)
     await nextTick()
     expect(
       w.find('.tag-elapsed').exists(),

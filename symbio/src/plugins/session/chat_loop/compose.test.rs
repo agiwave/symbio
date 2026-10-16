@@ -23,7 +23,7 @@
 use super::*;
 
 /// 取 `meta` 里某个键（`meta` 缺席时算没有这个键）。
-fn meta_key(node: &ChatMessage, key: &str) -> Option<serde_json::Value> {
+fn meta_key(node: &ChatNode, key: &str) -> Option<serde_json::Value> {
     node.meta.as_ref()?.get(key).cloned()
 }
 
@@ -36,9 +36,9 @@ fn meta_key(node: &ChatMessage, key: &str) -> Option<serde_json::Value> {
 fn dialog_node_is_a_completed_assistant_text_node() {
     let node = dialog_node("你好，我在。", "greeting", false);
 
-    assert_eq!(node.role, Some(MessageRole::Assistant));
-    assert_eq!(node.msg_type, Some(MessageType::Text));
-    assert_eq!(node.status, Some(MessageStatus::Completed));
+    assert_eq!(node.role, Some(NodeRole::Assistant));
+    assert_eq!(node.msg_type, Some(NodeKind::Text));
+    assert_eq!(node.status, Some(NodeStatus::Completed));
     assert_eq!(
         node.content.as_ref().map(|c| c.to_text()).as_deref(),
         Some("你好，我在。")
@@ -82,10 +82,10 @@ fn dialog_node_lands_at_the_root_and_on_the_conversation_line() {
 /// 前端「对话」面板看不到回答本身（回答在 Turn 组里）。
 #[test]
 fn a_turn_child_text_is_on_the_conversation_line() {
-    let child = ChatMessage {
+    let child = ChatNode {
         parent_id: Some("turn-1".to_string()),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text("回复正文".to_string())),
         ..Default::default()
     };

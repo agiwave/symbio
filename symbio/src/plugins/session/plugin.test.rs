@@ -457,7 +457,7 @@ async fn migrated_session_routes_stay_retired() {
 #[test]
 fn attributed_fills_by_role_and_never_overwrites() {
     use crate::symbio_core::principal::Principal;
-    let base = |role| cm::ChatMessage {
+    let base = |role| cm::ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
         role,
         ..Default::default()
@@ -465,22 +465,22 @@ fn attributed_fills_by_role_and_never_overwrites() {
     let main = crate::symbio_core::authz::PRINCIPAL_MAIN;
     // 判据看的是 **id 层**（`<ns>/<name>` 可路由地址）——kind 由 `from_legacy` 依 namespace
     // 派生，测试不重复这条规则。
-    let of = |m: cm::ChatMessage| attributed(m, main).principal.map(|p| p.id);
+    let of = |m: cm::ChatNode| attributed(m, main).principal.map(|p| p.id);
 
     // 人说的话不随会话变。
     assert_eq!(
-        of(base(Some(cm::MessageRole::User))),
+        of(base(Some(cm::NodeRole::User))),
         Some(crate::symbio_core::authz::PRINCIPAL_USER.to_string())
     );
     // 助手正文、工具结果、压缩记录、系统说明都是本会话主体说的。
     assert_eq!(
-        of(base(Some(cm::MessageRole::Assistant))),
+        of(base(Some(cm::NodeRole::Assistant))),
         Some(main.to_string())
     );
     assert_eq!(of(base(None)), Some(main.to_string()));
 
     // 已带主体 ⇒ 原样交还（转播的身份优先，这是「不串主体」的写侧那一半）。
-    let mut relayed = base(Some(cm::MessageRole::Assistant));
+    let mut relayed = base(Some(cm::NodeRole::Assistant));
     relayed.principal = Some(Principal::from_legacy("session/reviewer"));
     assert_eq!(
         of(relayed),
@@ -489,7 +489,7 @@ fn attributed_fills_by_role_and_never_overwrites() {
     );
 
     // 换个会话主体，人的话仍是 `user`——它是会话外的那一方。
-    let mut user = base(Some(cm::MessageRole::User));
+    let mut user = base(Some(cm::NodeRole::User));
     user.principal = None;
     assert_eq!(
         attributed(user, "session/reviewer")

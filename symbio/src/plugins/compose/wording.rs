@@ -27,7 +27,7 @@
 use std::sync::Arc;
 
 use super::config::ComposeConfig;
-use crate::symbio_core::chat_message::{ChatMessage, MessageRole};
+use crate::symbio_core::chat_node::{ChatNode, NodeRole};
 use crate::symbio_core::{
     llm_short_id, CapabilityVisitor, ExecAbortSignal, ExecEnv, ExecEventSink, ModelProvider,
     PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_VISITOR,
@@ -70,7 +70,7 @@ pub(crate) async fn generate(
     // 先做**不花任何代价**的判据，再去找模型服务：没有"要回答的那句话"时，
     // 生成只会得到一句凭空的话——那时连能力访问器都不必碰。
     let messages = build_messages(&req.context);
-    if !messages.iter().any(|m| m.role == Some(MessageRole::User)) {
+    if !messages.iter().any(|m| m.role == Some(NodeRole::User)) {
         crate::plugin_debug!("compose", "[Compose] 对话线里没有用户发言，生成路径跳过");
         return None;
     }
@@ -154,7 +154,7 @@ async fn build_system_prompt(
 /// 形状，且给"谁说了什么"再错一次的机会）。
 ///
 /// 空节点剔除：投影只保证"是文本节点"，不保证"有正文"。
-fn build_messages(context: &[ChatMessage]) -> Vec<ChatMessage> {
+fn build_messages(context: &[ChatNode]) -> Vec<ChatNode> {
     context
         .iter()
         .filter(|m| !text_of(m).trim().is_empty())
@@ -172,7 +172,7 @@ fn non_empty(raw: &str) -> Option<String> {
     Some(text.to_string())
 }
 
-fn text_of(m: &ChatMessage) -> String {
+fn text_of(m: &ChatNode) -> String {
     m.content.as_ref().map(|c| c.to_text()).unwrap_or_default()
 }
 

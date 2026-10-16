@@ -3,14 +3,14 @@
  *
  * ## 分层（与 `registry/vdfsTypes.ts` 同一套）
  *
- * - `schemas/chat_message.ts`  数据契约：取值词表（常量 + 派生类型）+ 形状，零呈现知识
+ * - `schemas/chat_node.ts`  数据契约：取值词表（常量 + 派生类型）+ 形状，零呈现知识
  * - 本文件                     **纯 UI 映射**：图标 / 标题 / 状态标签 / 折叠策略，零组件导入
  * - `components/MessageNode.vue` 等  消费方：只做「把节点摊成 facets → 查表 → 渲染」
  *
- * 这样做的直接收益：新增一种消息类型只需在 `MESSAGE_TYPES` 加一个取值、
+ * 这样做的直接收益：新增一种消息类型只需在 `NODE_KINDS` 加一个取值、
  * 在本文件的表里加一行；**不需要再去改渲染组件里的 if 链**。
  *
- * ## 为什么入参是 `MessageFacets` 而不是 `ChatMessage`
+ * ## 为什么入参是 `MessageFacets` 而不是 `ChatNode`
  *
  * 判定要用到的不只是节点自身字段，还有「父节点是什么」「子节点里有没有待审批」
  * 这类**上下文**（如 `toolResult` 要求 `parentType === 'tool_call'`）。把这些上下文
@@ -27,45 +27,45 @@ import {
   CHAT_ROLE_SYSTEM,
   CHAT_ROLE_TOOL,
   CHAT_ROLE_USER,
-  MESSAGE_STATUS_ABORTED,
-  MESSAGE_STATUS_COMPLETED,
-  MESSAGE_STATUS_FAILED,
-  MESSAGE_STATUS_PENDING,
-  MESSAGE_STATUS_REMOVED,
-  MESSAGE_STATUS_STREAMING,
-  MESSAGE_STATUS_WAITING_USER_ACTION,
-  MESSAGE_TYPE_COMPRESSION,
-  MESSAGE_TYPE_REASONING,
-  MESSAGE_TYPE_TEXT,
-  MESSAGE_TYPE_TOOL_CALL,
-  MESSAGE_TYPE_TURN,
-  MESSAGE_TYPE_USER_PROMPT,
+  NODE_STATUS_ABORTED,
+  NODE_STATUS_COMPLETED,
+  NODE_STATUS_FAILED,
+  NODE_STATUS_PENDING,
+  NODE_STATUS_REMOVED,
+  NODE_STATUS_STREAMING,
+  NODE_STATUS_WAITING_USER_ACTION,
+  NODE_KIND_COMPRESSION,
+  NODE_KIND_REASONING,
+  NODE_KIND_TEXT,
+  NODE_KIND_TOOL_CALL,
+  NODE_KIND_TURN,
+  NODE_KIND_USER_PROMPT,
   RESUME_ACTION_RETRY,
   RESUME_ACTION_RETRY_COMPACTION,
   RESUME_ACTION_RETRY_TURN,
-  type ChatMessage,
-  type ChatMessageType,
+  type ChatNode,
+  type NodeKind,
   type ChatRole,
-  type MessageStatus,
+  type NodeStatus,
   type ResumeAction,
-} from '@/schemas/chat_message'
+} from '@/schemas/chat_node'
 import type { MessagePrompt, MessagePromptKind } from '@/schemas/message_prompt'
 
 // ==================== 节点 → 词表取值（缺省规则） ====================
 
 /** 节点的角色（缺省 = 助手） */
-export function messageRoleOf(node: Pick<ChatMessage, 'role'>): ChatRole {
+export function messageRoleOf(node: Pick<ChatNode, 'role'>): ChatRole {
   return (node.role as ChatRole) ?? CHAT_ROLE_ASSISTANT
 }
 
 /** 节点的类型（缺省 = 正文文本） */
-export function messageTypeOf(node: Pick<ChatMessage, 'type'>): ChatMessageType {
-  return (node.type as ChatMessageType) ?? MESSAGE_TYPE_TEXT
+export function messageTypeOf(node: Pick<ChatNode, 'type'>): NodeKind {
+  return (node.type as NodeKind) ?? NODE_KIND_TEXT
 }
 
 /** 节点的状态（缺省 = 已结束） */
-export function messageStatusOf(node: Pick<ChatMessage, 'status'>): MessageStatus {
-  return (node.status as MessageStatus) ?? MESSAGE_STATUS_COMPLETED
+export function messageStatusOf(node: Pick<ChatNode, 'status'>): NodeStatus {
+  return (node.status as NodeStatus) ?? NODE_STATUS_COMPLETED
 }
 
 /**
@@ -75,7 +75,7 @@ export function messageStatusOf(node: Pick<ChatMessage, 'status'>): MessageStatu
  * `meta` 是后端 flatten 的场景字段，这里只做取值，不解释语义。
  */
 export function agentNameOf(
-  node: Pick<ChatMessage, 'name' | 'meta'>,
+  node: Pick<ChatNode, 'name' | 'meta'>,
   subSession: boolean,
 ): string {
   const meta = node.meta as Record<string, unknown> | undefined
@@ -97,8 +97,8 @@ export function agentNameOf(
  */
 export interface MessageFacets {
   role: ChatRole
-  type: ChatMessageType
-  status: MessageStatus
+  type: NodeKind
+  status: NodeStatus
   /** 节点名（工具名 / 智能体名） */
   name?: string
   /** 子会话 Turn（`role = tool` 的 turn）：某工具「过程」段 */
@@ -137,7 +137,7 @@ export interface MessageFacets {
  * @param node       消息节点
  * @param parentType 父节点的消息类型（`tool_call` / `turn`；根级为 undefined）
  */
-export function facetsOf(node: ChatMessage, parentType?: string): MessageFacets {
+export function facetsOf(node: ChatNode, parentType?: string): MessageFacets {
   const role = messageRoleOf(node)
   const type = messageTypeOf(node)
   return {
@@ -146,7 +146,7 @@ export function facetsOf(node: ChatMessage, parentType?: string): MessageFacets 
     status: messageStatusOf(node),
     name: node.name,
     // 子会话 Turn = 工具「过程」段（role=tool 的 turn），与根级助手 Turn 同构但无组级操作
-    subSession: type === MESSAGE_TYPE_TURN && role === CHAT_ROLE_TOOL,
+    subSession: type === NODE_KIND_TURN && role === CHAT_ROLE_TOOL,
     promptKind: promptKindOf(node),
     // 合成「请求」子节点：渲染期把 ToolCall 自身 content 提升为独立子节点时打的标
     toolRequest: messageIsToolRequest(node),
@@ -154,17 +154,17 @@ export function facetsOf(node: ChatMessage, parentType?: string): MessageFacets 
     // 误判会把它渲染成独立「响应」块（见 isResponseText）
     toolResult:
       role === CHAT_ROLE_TOOL &&
-      type === MESSAGE_TYPE_TEXT &&
-      parentType === MESSAGE_TYPE_TOOL_CALL,
+      type === NODE_KIND_TEXT &&
+      parentType === NODE_KIND_TOOL_CALL,
     hasWaitingChild: (node.children || []).some(
-      (c) => c.status === MESSAGE_STATUS_WAITING_USER_ACTION,
+      (c) => c.status === NODE_STATUS_WAITING_USER_ACTION,
     ),
     recoverable: messageIsRecoverable(node),
     failureKind: messageFailureKind(node),
     compacted: messageIsCompacted(node),
     // Turn 的直接正文子节点：内联直排（无折叠头部）。仅限 text——思考必须保留单行行头，
     // 否则流式思考会以裸 Markdown 块呈现，破坏「思考中…」动效与折叠交互。
-    responseText: parentType === MESSAGE_TYPE_TURN && type === MESSAGE_TYPE_TEXT,
+    responseText: parentType === NODE_KIND_TURN && type === NODE_KIND_TEXT,
   }
 }
 
@@ -179,12 +179,12 @@ export function facetsOf(node: ChatMessage, parentType?: string): MessageFacets 
 // `components/` 下不允许出现对后端 meta 字段的直接读取。
 
 /** 合成「请求」子节点标记（渲染期提升，不落存储） */
-export function messageIsToolRequest(node: Pick<ChatMessage, 'meta'>): boolean {
+export function messageIsToolRequest(node: Pick<ChatNode, 'meta'>): boolean {
   return Boolean((node.meta as Record<string, unknown> | undefined)?.__toolRequest)
 }
 
 /** 压缩后的历史记忆（后端标记 `meta.compacted`） */
-export function messageIsCompacted(node: Pick<ChatMessage, 'meta'>): boolean {
+export function messageIsCompacted(node: Pick<ChatNode, 'meta'>): boolean {
   return (node.meta as Record<string, unknown> | undefined)?.compacted === true
 }
 
@@ -213,7 +213,7 @@ export interface MessageCompactionStats {
 
 /** 一次性读出压缩节点的统计字段（读取后端 `meta` 字段名的**唯一处**） */
 export function messageCompactionStats(
-  node: Pick<ChatMessage, 'meta'>,
+  node: Pick<ChatNode, 'meta'>,
 ): MessageCompactionStats {
   const meta = (node.meta ?? {}) as Record<string, unknown>
   const num = (k: string): number | undefined => {
@@ -244,7 +244,7 @@ export interface MessageMemoryStats {
   archived: boolean
 }
 
-export function messageMemoryStats(node: Pick<ChatMessage, 'meta'>): MessageMemoryStats {
+export function messageMemoryStats(node: Pick<ChatNode, 'meta'>): MessageMemoryStats {
   const meta = (node.meta ?? {}) as Record<string, unknown>
   const post = meta.post_tokens
   const path = meta.transcript_path
@@ -278,7 +278,7 @@ export function formatTokens(n: number): string {
 }
 
 /** 系统心跳任务自动发送的消息（后端 `trigger_heartbeat` 打标） */
-export function messageIsHeartbeat(node: Pick<ChatMessage, 'meta'>): boolean {
+export function messageIsHeartbeat(node: Pick<ChatNode, 'meta'>): boolean {
   return Boolean((node.meta as Record<string, unknown> | undefined)?.heartbeat)
 }
 
@@ -288,17 +288,17 @@ export function messageIsHeartbeat(node: Pick<ChatMessage, 'meta'>): boolean {
  * 这类节点是渲染期的临时广播（不落存储），把它们的失败算成"会话失败"会让
  * 错误横幅在一个已经恢复的会话上继续挂着。
  */
-export function messageIsEphemeral(node: Pick<ChatMessage, 'meta'>): boolean {
+export function messageIsEphemeral(node: Pick<ChatNode, 'meta'>): boolean {
   return Boolean((node.meta as Record<string, unknown> | undefined)?.ephemeral)
 }
 
 /** 后端标记该失败**可恢复**（会话因它暂停，用户可就地重试）。只保证「存在即真」。 */
-export function messageIsRecoverable(node: Pick<ChatMessage, 'meta'>): boolean {
+export function messageIsRecoverable(node: Pick<ChatNode, 'meta'>): boolean {
   return Boolean((node.meta as Record<string, unknown> | undefined)?.recoverable)
 }
 
 /** 后端标记的失败类别（`error` = 可补充参数重跑；其余类别不提供补充入口） */
-export function messageFailureKind(node: Pick<ChatMessage, 'meta'>): string | undefined {
+export function messageFailureKind(node: Pick<ChatNode, 'meta'>): string | undefined {
   const raw = (node.meta as Record<string, unknown> | undefined)?.failure_kind
   return typeof raw === 'string' ? raw : undefined
 }
@@ -310,13 +310,13 @@ export function messageFailureKind(node: Pick<ChatMessage, 'meta'>): string | un
  * 「已经跑了 3 分钟」显示成「刚刚开始」，恰好丢掉用户最需要的那条信息。
  * 缺失（旧数据）返回 `null`——宁可不说，也不给一个看起来合理但没有依据的数。
  */
-export function messageStartedAt(node: Pick<ChatMessage, 'meta'>): number | null {
+export function messageStartedAt(node: Pick<ChatNode, 'meta'>): number | null {
   const raw = (node.meta as Record<string, unknown> | undefined)?.started_at
   return typeof raw === 'number' && raw > 0 ? raw : null
 }
 
 /** 子会话锚点（子会话工具调用的恢复需路由回子会话） */
-export function messageParentSessionId(node: Pick<ChatMessage, 'meta'>): string | undefined {
+export function messageParentSessionId(node: Pick<ChatNode, 'meta'>): string | undefined {
   const raw = (node.meta as Record<string, unknown> | undefined)?.parent_session_id
   return typeof raw === 'string' ? raw : undefined
 }
@@ -336,7 +336,7 @@ export function messageParentSessionId(node: Pick<ChatMessage, 'meta'>): string 
  * 思考 / 正文 / 工具请求的失败归 **Turn 级**重试（组级错误条），不在此列。
  */
 export function canRetryTool(f: MessageFacets): boolean {
-  return f.type === MESSAGE_TYPE_TOOL_CALL && isFailedStatus(f.status) && f.recoverable
+  return f.type === NODE_KIND_TOOL_CALL && isFailedStatus(f.status) && f.recoverable
 }
 
 /** 工具失败能否**补充参数**后重跑（resume action=`supply`） */
@@ -356,7 +356,7 @@ export function canSupplyToolArgs(f: MessageFacets): boolean {
  * **压缩节点本身**（系统动作），两者不能共用 `retry_turn`。
  */
 export function canRetryCompaction(f: MessageFacets): boolean {
-  return f.type === MESSAGE_TYPE_COMPRESSION && isFailedStatus(f.status)
+  return f.type === NODE_KIND_COMPRESSION && isFailedStatus(f.status)
 }
 
 /**
@@ -400,21 +400,21 @@ export interface MessageRetryTarget {
  * 因此它必须在工具分支之前单独分派。
  */
 export function messageRetryTargetOf(
-  node: Pick<ChatMessage, 'id' | 'type' | 'status' | 'parent_id'>,
+  node: Pick<ChatNode, 'id' | 'type' | 'status' | 'parent_id'>,
 ): MessageRetryTarget {
   const type = messageTypeOf(node)
   // 压缩失败 → 压缩粒度（删压缩节点重跑，不动历史）
-  if (type === MESSAGE_TYPE_COMPRESSION && isFailedStatus(messageStatusOf(node))) {
+  if (type === NODE_KIND_COMPRESSION && isFailedStatus(messageStatusOf(node))) {
     return { action: RESUME_ACTION_RETRY_COMPACTION, targetId: node.id }
   }
   // 工具调用失败 → 单工具粒度（不动整轮）
-  if (type === MESSAGE_TYPE_TOOL_CALL && isFailedStatus(messageStatusOf(node))) {
+  if (type === NODE_KIND_TOOL_CALL && isFailedStatus(messageStatusOf(node))) {
     return { action: RESUME_ACTION_RETRY, targetId: node.id }
   }
   // 其余（Turn 本身，或 Turn 下的 Text/Reasoning 叶子）→ 整轮粒度，回溯到父 Turn
   return {
     action: RESUME_ACTION_RETRY_TURN,
-    targetId: type === MESSAGE_TYPE_TURN ? node.id : node.parent_id || node.id,
+    targetId: type === NODE_KIND_TURN ? node.id : node.parent_id || node.id,
   }
 }
 
@@ -445,7 +445,7 @@ export const MESSAGE_FAILURE_KIND_ABORTED = 'aborted'
  * 口径与 `flatten_chat_messages` 的占位同源（那边是给 **LLM** 的兜底，
  * 两边同一个事实：这次调用没跑）。
  */
-export function missingResultNoteOf(node: Pick<ChatMessage, 'meta'>): string | null {
+export function missingResultNoteOf(node: Pick<ChatNode, 'meta'>): string | null {
   switch (messageFailureKind(node)) {
     case MESSAGE_FAILURE_KIND_NOT_EXECUTED:
       return '本次调用未执行：同一批中排在它之前的工具未正常结束，同批剩余调用被一并跳过。'
@@ -470,7 +470,7 @@ export const MESSAGE_FAILURE_NOTE = '执行失败'
  * 只做形状判定：不是本协议形状（缺 `kind`）一律返回 `null`，
  * 调用方据此走「无载荷」分支，而不是拿到半个对象去渲染。
  */
-export function promptOf(node: Pick<ChatMessage, 'meta'>): MessagePrompt | null {
+export function promptOf(node: Pick<ChatNode, 'meta'>): MessagePrompt | null {
   const meta = node.meta as Record<string, unknown> | undefined
   const p = meta?.prompt as MessagePrompt | undefined
   if (!p || typeof p !== 'object') return null
@@ -479,34 +479,34 @@ export function promptOf(node: Pick<ChatMessage, 'meta'>): MessagePrompt | null 
 }
 
 /** 待响应载荷的子形态（供 `messageTitle` 区分「提问」与「工具确认」） */
-export function promptKindOf(node: Pick<ChatMessage, 'meta'>): MessagePromptKind | undefined {
+export function promptKindOf(node: Pick<ChatNode, 'meta'>): MessagePromptKind | undefined {
   return promptOf(node)?.kind
 }
 
 // ==================== 状态判定（纯函数，供组件与业务规则共用） ====================
 //
-// 入参放宽到 `null | undefined`（与契约层 `isInflightMessageStatus` /
-// `isUnsettledMessageStatus` 同口径）：`ChatMessage.status` 本身是可选的，
+// 入参放宽到 `null | undefined`（与契约层 `isInflightNodeStatus` /
+// `isUnsettledNodeStatus` 同口径）：`ChatNode.status` 本身是可选的，
 // 要求调用方先做一次存在性判断，只会把「还没标注状态」当成另一个分支去写。
 
 /** 是否正在产生内容 */
-export function isStreamingStatus(status?: MessageStatus | null): boolean {
-  return status === MESSAGE_STATUS_STREAMING
+export function isStreamingStatus(status?: NodeStatus | null): boolean {
+  return status === NODE_STATUS_STREAMING
 }
 
 /** 是否等待用户响应（审批 / 提问） */
-export function isWaitingStatus(status?: MessageStatus | null): boolean {
-  return status === MESSAGE_STATUS_WAITING_USER_ACTION
+export function isWaitingStatus(status?: NodeStatus | null): boolean {
+  return status === NODE_STATUS_WAITING_USER_ACTION
 }
 
 /** 是否以错误结束 */
-export function isFailedStatus(status?: MessageStatus | null): boolean {
-  return status === MESSAGE_STATUS_FAILED
+export function isFailedStatus(status?: NodeStatus | null): boolean {
+  return status === NODE_STATUS_FAILED
 }
 
 /** 是否用户主动终止 */
-export function isAbortedStatus(status?: MessageStatus | null): boolean {
-  return status === MESSAGE_STATUS_ABORTED
+export function isAbortedStatus(status?: NodeStatus | null): boolean {
+  return status === NODE_STATUS_ABORTED
 }
 
 // ==================== 文案表（角色 / 类型 / 状态 → 面向用户的词） ====================
@@ -525,17 +525,17 @@ export const MESSAGE_ROLE_LABELS: Record<string, string> = {
 /**
  * 类型 → 文案。
  *
- * **必须覆盖 `MESSAGE_TYPES` 的每一个取值**——漏一个就会把机制词
+ * **必须覆盖 `NODE_KINDS` 的每一个取值**——漏一个就会把机制词
  * （如 `compression`）原样摆给用户看，与「不要把后端枚举漏出去」相悖。
  * 由单测锁死覆盖率。
  */
-export const MESSAGE_TYPE_LABELS: Record<string, string> = {
-  [MESSAGE_TYPE_TEXT]: '文本',
-  [MESSAGE_TYPE_REASONING]: '思考',
-  [MESSAGE_TYPE_TURN]: '轮次',
-  [MESSAGE_TYPE_TOOL_CALL]: '工具调用',
-  [MESSAGE_TYPE_USER_PROMPT]: '待响应',
-  [MESSAGE_TYPE_COMPRESSION]: '上下文压缩',
+export const NODE_KIND_LABELS: Record<string, string> = {
+  [NODE_KIND_TEXT]: '文本',
+  [NODE_KIND_REASONING]: '思考',
+  [NODE_KIND_TURN]: '轮次',
+  [NODE_KIND_TOOL_CALL]: '工具调用',
+  [NODE_KIND_USER_PROMPT]: '待响应',
+  [NODE_KIND_COMPRESSION]: '上下文压缩',
 }
 
 /**
@@ -544,14 +544,14 @@ export const MESSAGE_TYPE_LABELS: Record<string, string> = {
  * `active` 是**旧数据别名**（历史上「已结束」与「未标注」都被映射成它），
  * 保留映射仅为兼容已落库的历史节点，新节点不会再出现该取值。
  */
-export const MESSAGE_STATUS_LABELS: Record<string, string> = {
-  [MESSAGE_STATUS_PENDING]: '排队中',
-  [MESSAGE_STATUS_STREAMING]: '生成中',
-  [MESSAGE_STATUS_WAITING_USER_ACTION]: '等待响应',
-  [MESSAGE_STATUS_COMPLETED]: '已完成',
-  [MESSAGE_STATUS_ABORTED]: '已中止',
-  [MESSAGE_STATUS_FAILED]: '失败',
-  [MESSAGE_STATUS_REMOVED]: '已删除',
+export const NODE_STATUS_LABELS: Record<string, string> = {
+  [NODE_STATUS_PENDING]: '排队中',
+  [NODE_STATUS_STREAMING]: '生成中',
+  [NODE_STATUS_WAITING_USER_ACTION]: '等待响应',
+  [NODE_STATUS_COMPLETED]: '已完成',
+  [NODE_STATUS_ABORTED]: '已中止',
+  [NODE_STATUS_FAILED]: '失败',
+  [NODE_STATUS_REMOVED]: '已删除',
   /** 旧数据别名，见上方说明 */
   active: '正常',
 }
@@ -563,12 +563,12 @@ export function messageRoleLabel(role: string): string {
 
 /** 类型文案（未登记 → 原样返回） */
 export function messageTypeLabel(type: string): string {
-  return MESSAGE_TYPE_LABELS[type] ?? type
+  return NODE_KIND_LABELS[type] ?? type
 }
 
 /** 状态文案（未登记 → 原样返回） */
 export function messageStatusLabel(status: string): string {
-  return MESSAGE_STATUS_LABELS[status] ?? status
+  return NODE_STATUS_LABELS[status] ?? status
 }
 
 // ==================== 类型 → 呈现（**类型知识的唯一来源**） ====================
@@ -577,7 +577,7 @@ export function messageStatusLabel(status: string): string {
 //
 // ## 它修掉的是什么
 //
-// 改造前 `MESSAGE_TYPE_TOOL_CALL` 在 `messageIcon` / `messageTitle` /
+// 改造前 `NODE_KIND_TOOL_CALL` 在 `messageIcon` / `messageTitle` /
 // `messageStatusTag` / `messageHeadModifier` / `messageIsRunningAction` /
 // `messageDefaultOpen` / `messageRendererKey` 里**各出现一次**——新增一个消息类型
 // 要改 7 处，而且没有任何东西保证这 7 处彼此一致（漏一处就是「新类型有图标没标题」）。
@@ -633,12 +633,12 @@ interface TypePresentation {
 /**
  * 类型 → 呈现。
  *
- * 用 `Record<ChatMessageType, …>` 而非 `Record<string, …>`：**漏登记一个类型是
+ * 用 `Record<NodeKind, …>` 而非 `Record<string, …>`：**漏登记一个类型是
  * 编译错误，不是运行期兜底**。运行期未知取值（后端先行上线了新 `type`）走
  * `FALLBACK_PRESENTATION`。
  */
-const TYPE_PRESENTATION: Record<ChatMessageType, TypePresentation> = {
-  [MESSAGE_TYPE_TEXT]: {
+const TYPE_PRESENTATION: Record<NodeKind, TypePresentation> = {
+  [NODE_KIND_TEXT]: {
     icon: '💬',
     title: (f) => (f.role === CHAT_ROLE_ASSISTANT ? '助手' : '消息'),
     renderer: 'text',
@@ -646,7 +646,7 @@ const TYPE_PRESENTATION: Record<ChatMessageType, TypePresentation> = {
     defaultOpen: (f) => f.role !== CHAT_ROLE_TOOL,
   },
 
-  [MESSAGE_TYPE_REASONING]: {
+  [NODE_KIND_REASONING]: {
     icon: '💭',
     // 流式中「思考中…」+ 头部动效；完成后「思考」单行
     title: (f) => (isStreamingStatus(f.status) ? '思考中…' : '思考'),
@@ -659,7 +659,7 @@ const TYPE_PRESENTATION: Record<ChatMessageType, TypePresentation> = {
     defaultOpen: () => false,
   },
 
-  [MESSAGE_TYPE_TOOL_CALL]: {
+  [NODE_KIND_TOOL_CALL]: {
     icon: '🔧',
     title: (f) => f.name || '工具',
     renderer: 'tool_call',
@@ -681,7 +681,7 @@ const TYPE_PRESENTATION: Record<ChatMessageType, TypePresentation> = {
     defaultOpen: (f) => f.hasWaitingChild || f.recoverable,
   },
 
-  [MESSAGE_TYPE_TURN]: {
+  [NODE_KIND_TURN]: {
     // 根级助手回合用 AI，子会话（工具「过程」段）用 ↳
     icon: (f) => (f.subSession ? '↳' : 'AI'),
     title: (_f, agentName) => agentName,
@@ -689,14 +689,14 @@ const TYPE_PRESENTATION: Record<ChatMessageType, TypePresentation> = {
     defaultOpen: () => true,
   },
 
-  [MESSAGE_TYPE_USER_PROMPT]: {
+  [NODE_KIND_USER_PROMPT]: {
     icon: '❓',
     title: (f) => (f.promptKind === 'confirm' ? '工具确认' : '提问'),
     renderer: 'user_prompt',
     defaultOpen: () => true,
   },
 
-  [MESSAGE_TYPE_COMPRESSION]: {
+  [NODE_KIND_COMPRESSION]: {
     icon: '🗜',
     title: '上下文压缩',
     renderer: 'compression',
@@ -720,7 +720,7 @@ const TYPE_PRESENTATION: Record<ChatMessageType, TypePresentation> = {
  * 不会把会话流渲染成空白。
  */
 const FALLBACK_PRESENTATION: TypePresentation = {
-  ...TYPE_PRESENTATION[MESSAGE_TYPE_TEXT],
+  ...TYPE_PRESENTATION[NODE_KIND_TEXT],
   renderer: 'fallback',
 }
 
@@ -933,16 +933,16 @@ export function nextOpenOf(
 //
 // 分两层，和 `vdfsTypes` / `vdfsRenderers` 完全同构：
 //
-//   schemas/chat_message.ts   数据契约：取值词表 + 形状
+//   schemas/chat_node.ts   数据契约：取值词表 + 形状
 //   本文件                    **纯映射**：facets → 渲染器标识；标识 → 组件（由装配点登记）
 //   registry/messageRenderers.ts  **唯一 import 组件的地方**（把标识绑到具体组件）
 //
 // 于是「新增一种消息类型」的完整代价是：
-//   1. `MESSAGE_TYPES` 加一个取值（类型与常量同时到位）
+//   1. `NODE_KINDS` 加一个取值（类型与常量同时到位）
 //   2. 本文件 `TYPE_PRESENTATION` 加一行（呈现面全在那一行里）、文案表加一行
 //   3. `messageRenderers.ts` 加一行注册
 // **不再需要改渲染组件里的 if 链，也不必去 7 个取值函数里各补一处**——
-// 这正是本次改造要买到的性质。漏掉第 2 步会**编译报错**（`Record<ChatMessageType, …>`
+// 这正是本次改造要买到的性质。漏掉第 2 步会**编译报错**（`Record<NodeKind, …>`
 // 要求穷尽），而不是运行期静默退化成兜底。
 
 /**
@@ -980,7 +980,7 @@ export type MessageRenderer =
  * 图标 / 标题那边的顺序恰好相反（角色优先），两处顺序不同是既有行为。
  */
 export function messageRendererKey(f: MessageFacets): MessageRenderer {
-  if (f.type === MESSAGE_TYPE_TURN) return 'turn'
+  if (f.type === NODE_KIND_TURN) return 'turn'
   if (f.compacted) return 'memory'
   if (f.role === CHAT_ROLE_USER) return 'text'
   return presentationOf(f.type).renderer

@@ -5,44 +5,44 @@
 //! 请求视图层与提示词/快照协议的测试分别在 `view.test.rs` / `prompt.test.rs`。
 
 use super::*;
-use crate::symbio_core::chat_message::MessageContent;
+use crate::symbio_core::chat_node::MessageContent;
 
-fn user_msg(text: &str) -> ChatMessage {
-    ChatMessage {
+fn user_msg(text: &str) -> ChatNode {
+    ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
-        role: Some(MessageRole::User),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::User),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()
     }
 }
 
-fn assistant_msg(text: &str) -> ChatMessage {
-    ChatMessage {
+fn assistant_msg(text: &str) -> ChatNode {
+    ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()
     }
 }
 
-fn tool_call_msg() -> ChatMessage {
-    ChatMessage {
+fn tool_call_msg() -> ChatNode {
+    ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::ToolCall),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::ToolCall),
         name: Some("vdfs_read".to_string()),
         content: Some(MessageContent::Text(r#"{"path":"a.rs"}"#.to_string())),
         ..Default::default()
     }
 }
 
-fn tool_result_msg() -> ChatMessage {
-    ChatMessage {
+fn tool_result_msg() -> ChatNode {
+    ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
-        role: Some(MessageRole::Tool),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::Tool),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text("file content".to_string())),
         ..Default::default()
     }
@@ -81,7 +81,7 @@ fn test_split_point_never_full_compress_on_assistant_tail() {
         split > 0 && split < msgs.len(),
         "不得全量压缩, split={split}"
     );
-    assert_eq!(msgs[split].role, Some(MessageRole::User));
+    assert_eq!(msgs[split].role, Some(NodeRole::User));
 }
 
 #[test]
@@ -109,12 +109,12 @@ fn test_split_point_ok_when_tool_call_paired() {
     assert!(split > 0, "配对完整时不应放弃压缩");
 }
 
-fn turn_root_msg(id: &str) -> ChatMessage {
-    ChatMessage {
+fn turn_root_msg(id: &str) -> ChatNode {
+    ChatNode {
         id: id.to_string(),
         parent_id: None,
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Turn),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Turn),
         content: Some(MessageContent::Text("turn".to_string())),
         ..Default::default()
     }
@@ -125,11 +125,11 @@ fn turn_root_msg(id: &str) -> ChatMessage {
 /// 只剩 parent 悬空的 ToolCall 子树 → provider 400。
 #[test]
 fn test_turn_split_idx_starts_at_user_instruction() {
-    let cur_call = ChatMessage {
+    let cur_call = ChatNode {
         parent_id: Some("cur-root".to_string()),
         ..tool_call_msg()
     };
-    let old_call = ChatMessage {
+    let old_call = ChatNode {
         parent_id: Some("old-root".to_string()),
         ..tool_call_msg()
     };
@@ -240,7 +240,7 @@ fn test_should_start_compression_hysteresis() {
 #[test]
 fn test_compression_request_user_message_carries_data_only() {
     let text_of =
-        |m: &ChatMessage| -> String { m.content.as_ref().map(|c| c.to_text()).unwrap_or_default() };
+        |m: &ChatNode| -> String { m.content.as_ref().map(|c| c.to_text()).unwrap_or_default() };
     let msgs = vec![
         user_msg(&"x".repeat(1000)),
         assistant_msg(&"y".repeat(1000)),
@@ -276,7 +276,7 @@ fn test_prepare_compression_rejects_when_no_split() {
 // "压缩失败不得裁剪历史"一并删除（见本文件末节与 ADR-018）。
 
 /// 长度可预测的中文消息（CJK ≈ 1 token/字 + 8 框架开销）。
-fn cn_msg(text: &str) -> ChatMessage {
+fn cn_msg(text: &str) -> ChatNode {
     user_msg(text)
 }
 

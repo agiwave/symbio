@@ -59,7 +59,7 @@
 import { computed } from 'vue'
 import DetailShell from './DetailShell.vue'
 import type { VdfsRendererProps } from './rendererContract'
-import { MESSAGE_TYPE_TEXT } from '@/schemas/chat_message'
+import { NODE_KIND_TEXT } from '@/schemas/chat_node'
 import { messageRoleLabel, messageStatusLabel, messageTypeLabel } from '@/registry/messageTypes'
 
 const props = defineProps<VdfsRendererProps>()
@@ -82,7 +82,7 @@ const roleText = computed(() => messageRoleLabel(roleKey.value))
 /** 类型缺省不显示（文本是常态，标出来只是噪音） */
 const typeText = computed(() => {
   const t = props.node.type
-  if (!t || t === MESSAGE_TYPE_TEXT) return ''
+  if (!t || t === NODE_KIND_TEXT) return ''
   return messageTypeLabel(String(t))
 })
 

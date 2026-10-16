@@ -1,10 +1,10 @@
-//! `symbio/src/symbio_core/schemas/session/chat_message.rs` 的单元测试 —— 拆自源码末尾的测试模块。
+//! `symbio/src/symbio_core/schemas/session/chat_node.rs` 的单元测试 —— 拆自源码末尾的测试模块。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 
 use super::*;
 
-/// `MessageStatus::as_str()` 必须与 `serde` 的序列化名逐字一致。
+/// `NodeStatus::as_str()` 必须与 `serde` 的序列化名逐字一致。
 ///
 /// 这条断言是**唯一**能拦住「VDFS 节点状态词与存储状态词分叉」的地方：
 /// 两者一旦不同，前端就会按节点状态渲染出与存储不一致的角标，
@@ -12,12 +12,12 @@ use super::*;
 #[test]
 fn message_status_word_matches_serde() {
     for st in [
-        MessageStatus::Pending,
-        MessageStatus::Streaming,
-        MessageStatus::WaitingUserAction,
-        MessageStatus::Completed,
-        MessageStatus::Aborted,
-        MessageStatus::Failed,
+        NodeStatus::Pending,
+        NodeStatus::Streaming,
+        NodeStatus::WaitingUserAction,
+        NodeStatus::Completed,
+        NodeStatus::Aborted,
+        NodeStatus::Failed,
     ] {
         let wire = serde_json::to_value(&st).unwrap();
         assert_eq!(
@@ -34,8 +34,8 @@ fn message_status_word_matches_serde() {
 /// 这条断言把"两者可区分"钉住。
 #[test]
 fn completed_is_distinct_from_unset_sentinel() {
-    assert_eq!(MessageStatus::Completed.as_str(), "completed");
-    assert_ne!(MessageStatus::Completed.as_str(), "active");
+    assert_eq!(NodeStatus::Completed.as_str(), "completed");
+    assert_ne!(NodeStatus::Completed.as_str(), "active");
 }
 
 /// `ResumeAction` 的**线格式词**是跨栈契约：前端 `ResumePayload.action` 的

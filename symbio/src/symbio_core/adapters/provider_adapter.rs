@@ -18,8 +18,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use super::{AdapterError, DeltaSink, FullModel, LlmAdapter, LlmTurn, SilentDeltas};
-use crate::symbio_core::schemas::session::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
+use crate::symbio_core::schemas::session::chat_node::{
+    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind,
 };
 use crate::symbio_core::CapabilityMeta;
 use crate::symbio_core::ExecAbortSignal;
@@ -51,18 +51,18 @@ struct DeltaBridge {
     /// 而不是两张集合：节点 id 唯一 ⇒「一个节点恰好属于一条流」是结构事实，
     /// 两张集合只能靠人工保证不重叠；而且窄帧是**每个 token 一次**的热路径，
     /// 两张集合要连开两次锁（一次判正文、一次判推理）。
-    nodes: std::sync::Mutex<std::collections::HashMap<String, MessageType>>,
+    nodes: std::sync::Mutex<std::collections::HashMap<String, NodeKind>>,
 }
 
 #[async_trait]
 impl ExecTranscriptWriter for DeltaBridge {
-    async fn apply(&self, m: ChatMessage) {
+    async fn apply(&self, m: ChatNode) {
         if let Some(d) = &m.delta {
             if !d.is_empty() {
                 // 窄帧不带 `msg_type` ⇒ 归属只能查登记表。
                 match self.nodes.lock().unwrap().get(&m.id) {
-                    Some(MessageType::Text) => self.sink.on_delta(d),
-                    Some(MessageType::Reasoning) => self.sink.on_reasoning(d),
+                    Some(NodeKind::Text) => self.sink.on_delta(d),
+                    Some(NodeKind::Reasoning) => self.sink.on_reasoning(d),
                     // 没登记的窄帧 = **工具参数增量**：快照帧不走登记表（它自带
                     // 全量身份），消息形状原样递给消费端——工具节点的构造权在
                     // 分发方，这里只递帧不建节点（见 [`DeltaSink::on_tool_frame`]）。
@@ -72,13 +72,13 @@ impl ExecTranscriptWriter for DeltaBridge {
             }
             return;
         }
-        if m.status != Some(MessageStatus::Streaming) {
+        if m.status != Some(NodeStatus::Streaming) {
             return;
         }
         // 工具调用快照帧：**先于**「正文为空即返回」放行——首个增量常带
         // `arguments: ""`，此时快照的参数正文为空但**身份是全的**（id / name /
         // tool_call_id），把它丢掉，参数窄增量就没有身份帧可挂。
-        if m.msg_type == Some(MessageType::ToolCall) {
+        if m.msg_type == Some(NodeKind::ToolCall) {
             self.sink.on_tool_frame(&m);
             return;
         }
@@ -90,8 +90,8 @@ impl ExecTranscriptWriter for DeltaBridge {
         }
         // 两条文本流登记进映射（窄帧归属靠它查）。
         let kind = match m.msg_type {
-            Some(MessageType::Text) => MessageType::Text,
-            Some(MessageType::Reasoning) => MessageType::Reasoning,
+            Some(NodeKind::Text) => NodeKind::Text,
+            Some(NodeKind::Reasoning) => NodeKind::Reasoning,
             _ => return,
         };
         self.nodes
@@ -99,8 +99,8 @@ impl ExecTranscriptWriter for DeltaBridge {
             .unwrap()
             .insert(m.id.clone(), kind.clone());
         match kind {
-            MessageType::Text => self.sink.on_delta(t),
-            MessageType::Reasoning => self.sink.on_reasoning(t),
+            NodeKind::Text => self.sink.on_delta(t),
+            NodeKind::Reasoning => self.sink.on_reasoning(t),
             _ => {}
         }
     }
@@ -222,14 +222,14 @@ impl LlmAdapter for ProviderLlmAdapter {
     ///
     /// ```text
     /// // 反例——整段 prompt 拍成一条 user 消息：
-    /// let message = ChatMessage { role: Some(MessageRole::User), content: …(prompt) };
+    /// let message = ChatNode { role: Some(NodeRole::User), content: …(prompt) };
     /// execute_turn(self.system_prompt(), &[message], tools, …)
     /// ```
     ///
     /// 后果不是「排版难看」：`role: tool` 在**到达 provider 之前**就被拍成了
     /// user 消息里的纯文本，于是模型（a）看不到哪些正文是工具结果、`(b)` 拿不到
     /// `tool_call_id`、`(c)` 会把工具输出当成用户说过的话。而
-    /// `execute_turn` 的签名本来就是 `(system_prompt, messages: &[ChatMessage], …)`
+    /// `execute_turn` 的签名本来就是 `(system_prompt, messages: &[ChatNode], …)`
     /// ——它要的就是消息数组，是我们自己压扁了再传。
     async fn generate_turn(
         &self,
@@ -303,7 +303,7 @@ impl LlmAdapter for ProviderLlmAdapter {
             .flat_map(|cs| cs.iter().map(|c| c.id.clone()))
             .collect();
 
-        let mut wire: Vec<ChatMessage> = Vec::with_capacity(messages.len() * 2);
+        let mut wire: Vec<ChatNode> = Vec::with_capacity(messages.len() * 2);
         for (idx, m) in messages.iter().enumerate() {
             // 同一次调用只留**最终**那条结果（见上面 `last_result_of` 的理由）。
             // 在主循环里跳过，于是树形路径与降级路径都自动只看到终态 ——
@@ -322,20 +322,20 @@ impl LlmAdapter for ProviderLlmAdapter {
                 // ── assistant 且带调用声明 → 造「Turn 根 + ToolCall 子节点」────
                 ("assistant", Some(calls)) if !calls.is_empty() => {
                     let root_id = llm_short_id();
-                    let mut root = ChatMessage {
+                    let mut root = ChatNode {
                         id: root_id.clone(),
-                        role: Some(MessageRole::Assistant),
+                        role: Some(NodeRole::Assistant),
                         content: Some(MessageContent::Text(m.text.clone())),
                         ..Default::default()
                     };
-                    root.msg_type = Some(MessageType::Turn);
-                    let mut nodes: Vec<ChatMessage> = vec![root];
+                    root.msg_type = Some(NodeKind::Turn);
+                    let mut nodes: Vec<ChatNode> = vec![root];
                     for c in calls {
-                        nodes.push(ChatMessage {
+                        nodes.push(ChatNode {
                             id: llm_short_id(),
                             parent_id: Some(root_id.clone()),
-                            role: Some(MessageRole::Assistant),
-                            msg_type: Some(MessageType::ToolCall),
+                            role: Some(NodeRole::Assistant),
+                            msg_type: Some(NodeKind::ToolCall),
                             name: Some(c.name.clone()),
                             // 参数走 content（展平时从这里 re-parse）——规范化
                             // 口径是 `tc.arguments.to_string()`。
@@ -368,14 +368,14 @@ impl LlmAdapter for ProviderLlmAdapter {
                         })
                         .map(|(_, r)| r)
                     {
-                        nodes.push(ChatMessage {
+                        nodes.push(ChatNode {
                             id: llm_short_id(),
                             parent_id: nodes
                                 .iter()
                                 .find(|n| n.tool_call_id == r.tool_call_id)
                                 .map(|n| n.id.clone()),
-                            role: Some(MessageRole::Tool),
-                            msg_type: Some(MessageType::Text),
+                            role: Some(NodeRole::Tool),
+                            msg_type: Some(NodeKind::Text),
                             content: Some(MessageContent::Text(r.text.clone())),
                             tool_call_id: r.tool_call_id.clone(),
                             ..Default::default()
@@ -422,9 +422,9 @@ impl LlmAdapter for ProviderLlmAdapter {
                     // ⚠️ 这也意味着**树形路径里同样只能挂一条**（它按 id 找父节点、
                     // 逐条 push，所以多条都挂得下）——那一侧没问题，问题只在这去重。
                     let already_nested = wire.iter().any(|n| {
-                        n.msg_type == Some(MessageType::Text)
+                        n.msg_type == Some(NodeKind::Text)
                             && n.tool_call_id == m.tool_call_id
-                            && n.role == Some(MessageRole::Tool)
+                            && n.role == Some(NodeRole::Tool)
                             && n.content.as_ref().map(|c| c.to_text()) == Some(m.text.clone())
                     });
                     // 本次请求里**有**它的调用声明 ⇒ 它已经在上面的树形路径里挂好了，
@@ -434,9 +434,9 @@ impl LlmAdapter for ProviderLlmAdapter {
                         .as_ref()
                         .is_some_and(|id| declared_call_ids.contains(id));
                     if !already_nested && !declared_here {
-                        wire.push(ChatMessage {
+                        wire.push(ChatNode {
                             id: llm_short_id(),
-                            role: Some(MessageRole::Assistant),
+                            role: Some(NodeRole::Assistant),
                             content: Some(MessageContent::Text(format!(
                                 "（此前调用工具 {} 的结果）{}",
                                 m.tool.as_deref().unwrap_or("<unnamed>"),
@@ -448,17 +448,17 @@ impl LlmAdapter for ProviderLlmAdapter {
                 }
                 // ── 其余（user / 无调用的 assistant / 投影出的 tool）─────────
                 _ => {
-                    wire.push(ChatMessage {
+                    wire.push(ChatNode {
                         id: llm_short_id(),
                         role: Some(match m.role.as_str() {
-                            "assistant" => MessageRole::Assistant,
-                            "tool" => MessageRole::Tool,
-                            "system" => MessageRole::System,
+                            "assistant" => NodeRole::Assistant,
+                            "tool" => NodeRole::Tool,
+                            "system" => NodeRole::System,
                             // 未知角色**不**默认为 user：那会把「我不知道这是什么」
                             // 伪装成「这是用户说的话」。落到 `User` 是本仓的兜底约定
                             // （投影只产出三种角色 + 一条请求级 system），写明它是为了让改动的人看见这条
                             // 边界。
-                            _ => MessageRole::User,
+                            _ => NodeRole::User,
                         }),
                         content: Some(MessageContent::Text(m.text.clone())),
                         tool_call_id: m.tool_call_id.clone(),

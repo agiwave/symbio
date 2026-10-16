@@ -5,21 +5,21 @@
 
 use super::*;
 
-fn user_msg(text: &str) -> ChatMessage {
-    ChatMessage {
+fn user_msg(text: &str) -> ChatNode {
+    ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
-        role: Some(MessageRole::User),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::User),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()
     }
 }
 
-fn assistant_msg(text: &str) -> ChatMessage {
-    ChatMessage {
+fn assistant_msg(text: &str) -> ChatNode {
+    ChatNode {
         id: uuid::Uuid::new_v4().to_string(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()
     }
@@ -28,27 +28,27 @@ fn assistant_msg(text: &str) -> ChatMessage {
 // ==================== build_request_view（请求视图层） ====================
 
 /// 带显式 id 的 Assistant/ToolCall 消息（与 session/context.rs 骨架化测试同构）
-fn view_tc(id: &str, name: &str, args: &str) -> ChatMessage {
-    ChatMessage {
+fn view_tc(id: &str, name: &str, args: &str) -> ChatNode {
+    ChatNode {
         id: id.to_string(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::ToolCall),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::ToolCall),
         name: Some(name.to_string()),
         content: Some(MessageContent::Text(args.to_string())),
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         ..Default::default()
     }
 }
 
 /// 工具结果消息，parent_id 指向所属 ToolCall（id 形如 "{parent}-result"）
-fn view_result(parent: &str, text: &str) -> ChatMessage {
-    ChatMessage {
+fn view_result(parent: &str, text: &str) -> ChatNode {
+    ChatNode {
         id: format!("{parent}-result"),
         parent_id: Some(parent.to_string()),
-        role: Some(MessageRole::Tool),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::Tool),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text(text.to_string())),
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         ..Default::default()
     }
 }
@@ -60,7 +60,7 @@ fn view_retention(
     entries.iter().map(|(n, r)| (n.to_string(), *r)).collect()
 }
 
-fn view_text(m: &ChatMessage) -> String {
+fn view_text(m: &ChatNode) -> String {
     m.content.as_ref().map(|c| c.to_text()).unwrap_or_default()
 }
 
@@ -99,7 +99,7 @@ fn test_build_request_view_injects_nudge_at_tail() {
     );
     assert_eq!(view.len(), msgs.len() + 1);
     let nudge = view.last().unwrap();
-    assert_eq!(nudge.role, Some(MessageRole::User));
+    assert_eq!(nudge.role, Some(NodeRole::User));
     assert_eq!(
         nudge
             .meta
@@ -449,7 +449,7 @@ fn test_build_request_view_prepends_memory_section() {
     assert_eq!(view.len(), msgs.len() + 2, "记忆置顶 + nudge 置尾");
 
     let head = &view[0];
-    assert_eq!(head.role, Some(MessageRole::User));
+    assert_eq!(head.role, Some(NodeRole::User));
     assert_eq!(
         head.meta
             .as_ref()
@@ -508,7 +508,7 @@ fn test_build_request_view_scopes_by_viewer_principal() {
             &msgs, 15, &retention, false, 12, 3, 200, false, None, None, None, viewer,
         )
     };
-    let texts = |v: &[ChatMessage]| v.iter().map(view_text).collect::<Vec<_>>();
+    let texts = |v: &[ChatNode]| v.iter().map(view_text).collect::<Vec<_>>();
 
     // 本会话主体看：转播进来的另一个智能体的发言不进 prompt。
     let as_self = build(Some("session/main"));
@@ -535,7 +535,7 @@ fn test_build_request_view_scopes_by_viewer_principal() {
 fn test_build_request_view_prepends_readyset_section() {
     let msgs = vec![user_msg("u1"), assistant_msg("a1"), user_msg("u2")];
     let retention = std::collections::HashMap::new();
-    let kind = |m: &ChatMessage| {
+    let kind = |m: &ChatNode| {
         m.meta
             .as_ref()
             .and_then(|m| m.get("kind"))
@@ -606,7 +606,7 @@ fn test_build_request_view_prepends_readyset_section() {
 fn test_build_request_view_puts_delegate_section_at_index_two() {
     let msgs = vec![user_msg("u1"), assistant_msg("a1"), user_msg("u2")];
     let retention = std::collections::HashMap::new();
-    let kind = |m: &ChatMessage| {
+    let kind = |m: &ChatNode| {
         m.meta
             .as_ref()
             .and_then(|x| x.get("kind"))

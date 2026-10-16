@@ -18,7 +18,7 @@
  * `<根>/agent/<id>/session`。转写变更按**已登记的挂载目录**取最长前缀匹配来归属，
  * 只认根那一份会让子空间的消息变更整片收不到（`registerSessionMount` 见下）。
  *
- * 载荷是**帧本身**（与后端内存图收到的同一条 `ChatMessage`），语义全在字段上，
+ * 载荷是**帧本身**（与后端内存图收到的同一条 `ChatNode`），语义全在字段上，
  * **没有操作枚举**：
  *
  * | `status` | `delta` | `content` | 动作 |
@@ -77,11 +77,11 @@ import { READBACK_REASON, type ReadbackReason } from '@/services/readback'
 import { ensureSessionScheme } from '@/services/vdfsScheme'
 import { type VdfsChange, type VdfsNode } from '@/schemas/vdfs'
 import {
-  MESSAGE_STATUS_REMOVED,
-  MESSAGE_TYPE_TOOL_CALL,
-  MESSAGE_TYPE_TURN,
-  type ChatMessage,
-} from '@/schemas/chat_message'
+  NODE_STATUS_REMOVED,
+  NODE_KIND_TOOL_CALL,
+  NODE_KIND_TURN,
+  type ChatNode,
+} from '@/schemas/chat_node'
 import { logger } from '@/utils/logger'
 
 /**
@@ -93,7 +93,7 @@ export interface TranscriptSyncSink {
   /** 该会话的本地转写图里是否已有这条消息（决定要不要回读补基线） */
   hasMessage(sessionId: string, messageId: string): boolean
   /** 应用一批消息帧（语义与后端 `Transcript::apply` 的前端镜像一致） */
-  applyTranscriptMessages(sessionId: string, messages: ChatMessage[]): void
+  applyTranscriptMessages(sessionId: string, messages: ChatNode[]): void
   /** resync：按会话整份重读（权威快照替换本地转写） */
   reload(sessionId: string): void | Promise<void>
 }
@@ -115,7 +115,7 @@ interface SyncState {
    */
   mounts: Map<string, string>
   /** 会话 → 待落地的增量帧（保持到达顺序；flush 时按会话一次提交） */
-  pending: Map<string, ChatMessage[]>
+  pending: Map<string, ChatNode[]>
   flushTimer: ReturnType<typeof setTimeout> | null
 /**
  * 消息路径 → 本地**正文写入代际**（`appendGuard` 的记法）。
@@ -208,7 +208,7 @@ function dropPending(sessionId?: string): void {
 /** 入队一条增量帧，并在需要时启动合帧定时器 */
 function enqueueDelta(sid: string, mid: string, delta: string): void {
   const q = S.pending.get(sid)
-  const frame: ChatMessage = { id: mid, delta }
+  const frame: ChatNode = { id: mid, delta }
   if (q) q.push(frame)
   else S.pending.set(sid, [frame])
   if (!S.flushTimer) {
@@ -227,7 +227,7 @@ function enqueueDelta(sid: string, mid: string, delta: string): void {
  *
  * 返回 `null` = 状态词不在词表里（两侧已分叉，宁可丢这条也不造出状态错误的消息）。
  */
-function messageOfNode(node: VdfsNode, text: string): ChatMessage | null {
+function messageOfNode(node: VdfsNode, text: string): ChatNode | null {
   const v = node as Record<string, unknown>
   const status = typeof node.status === 'string' ? node.status : ''
   const known = [
@@ -238,9 +238,9 @@ function messageOfNode(node: VdfsNode, text: string): ChatMessage | null {
   const msgType = typeof v.type === 'string' ? v.type : undefined
 
   // 容器节点的正文是整条消息 JSON：结构字段以它为准（比 attributes 全）。
-  if (msgType === MESSAGE_TYPE_TURN || msgType === MESSAGE_TYPE_TOOL_CALL) {
+  if (msgType === NODE_KIND_TURN || msgType === NODE_KIND_TOOL_CALL) {
     try {
-      const parsed = JSON.parse(text) as ChatMessage
+      const parsed = JSON.parse(text) as ChatNode
       if (parsed && typeof parsed === 'object' && parsed.id) {
         return { ...parsed, id: node.name }
       }
@@ -249,17 +249,17 @@ function messageOfNode(node: VdfsNode, text: string): ChatMessage | null {
     }
   }
 
-  const out: ChatMessage = { id: node.name }
-  if (typeof v.role === 'string') out.role = v.role as ChatMessage['role']
-  if (msgType) out.type = msgType as ChatMessage['type']
+  const out: ChatNode = { id: node.name }
+  if (typeof v.role === 'string') out.role = v.role as ChatNode['role']
+  if (msgType) out.type = msgType as ChatNode['type']
   if (typeof v.tool_name === 'string') out.name = v.tool_name
   if (typeof v.parent_id === 'string') out.parent_id = v.parent_id
   if (typeof v.tool_call_id === 'string') out.tool_call_id = v.tool_call_id
   if (typeof v.seq === 'number') out.seq = v.seq
   if (typeof v.error === 'string') out.error = v.error
-  if (v.meta != null && typeof v.meta === 'object') out.meta = v.meta as ChatMessage['meta']
+  if (v.meta != null && typeof v.meta === 'object') out.meta = v.meta as ChatNode['meta']
   if (typeof node.updated_at === 'number') out.timestamp = node.updated_at
-  if (status) out.status = status as ChatMessage['status']
+  if (status) out.status = status as ChatNode['status']
   if (text) out.content = text
   return out
 }
@@ -358,19 +358,19 @@ export function handleVdfsChange(change: VdfsChange): void {
   const mid = segs[2]
   if (!sid || !mid) return
 
-  const payload = change.data as Partial<ChatMessage> | null | undefined
+  const payload = change.data as Partial<ChatNode> | null | undefined
   if (payload == null || typeof payload !== 'object') return
   // **地址即身份**（末段），载荷的 `id` 只是同一个事实的复述。以地址为准落地，
   // 于是「载荷漏了 id」不再丢帧；两者不一致是生产端的 bug，喊出来但不丢帧。
   if (payload.id !== undefined && payload.id !== mid) {
     logger.warn('[transcript-sync]', `帧身份与地址不一致（按地址落地）：${path}`)
   }
-  const msg: ChatMessage = payload.id === mid ? (payload as ChatMessage) : { ...payload, id: mid }
+  const msg: ChatNode = payload.id === mid ? (payload as ChatNode) : { ...payload, id: mid }
   S.seenSessions.add(sid)
 
   // ① 删除：`status = removed`（消息词汇的删除语义——信封上没有 deleted 取值）。
   //    立即落地，不等合帧窗口：删除后本地不该再多出正文。
-  if (msg.status === MESSAGE_STATUS_REMOVED) {
+  if (msg.status === NODE_STATUS_REMOVED) {
     dropQueuedDelta(sid, mid)
     try {
       sink.applyTranscriptMessages(sid, [msg])
@@ -423,7 +423,7 @@ export function handleVdfsChange(change: VdfsChange): void {
   // 判据是**节点类型**，不是帧的形状——同一形状的状态帧落在 Text 节点上时，
   // 回读确实能补回本端漏掉的正文，那一次是必要的。这也正是每轮会话都会多出
   // 一对 `vdfs/stat` + `vdfs/read` 的成因（Turn 根节点的首帧就是「无正文」）。
-  if (msg.type === MESSAGE_TYPE_TURN) {
+  if (msg.type === NODE_KIND_TURN) {
     sink.applyTranscriptMessages(sid, [msg])
     return
   }

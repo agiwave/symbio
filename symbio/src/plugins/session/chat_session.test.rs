@@ -8,17 +8,17 @@ use super::super::store::SessionStore;
 use super::super::types::Session;
 use super::write::{assign_seq, ensure_durable_states, max_seq, prune_historical_tool_calls};
 use super::PersistentChatSession;
-use crate::symbio_core::chat_message::{ChatMessage, MessageContent, MessageRole, MessageType};
+use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole, NodeKind};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// 构造带 `archive_path` meta 的 Tool 消息（模拟 L0 守卫落库后的形态）。
-fn tool_msg_with_archive(id: &str, archive_path: &str) -> ChatMessage {
-    ChatMessage {
+fn tool_msg_with_archive(id: &str, archive_path: &str) -> ChatNode {
+    ChatNode {
         id: id.to_string(),
-        role: Some(MessageRole::Tool),
-        msg_type: Some(MessageType::Turn),
+        role: Some(NodeRole::Tool),
+        msg_type: Some(NodeKind::Turn),
         content: Some(MessageContent::Text("已存档".to_string())),
         meta: Some(serde_json::json!({ "archive_path": archive_path })),
         ..Default::default()
@@ -26,11 +26,11 @@ fn tool_msg_with_archive(id: &str, archive_path: &str) -> ChatMessage {
 }
 
 /// 构造普通文本消息（无存档引用）。
-fn plain_msg(id: &str) -> ChatMessage {
-    ChatMessage {
+fn plain_msg(id: &str) -> ChatNode {
+    ChatNode {
         id: id.to_string(),
-        role: Some(MessageRole::User),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::User),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text("hello".to_string())),
         ..Default::default()
     }
@@ -203,27 +203,27 @@ async fn setup_with_config(
 }
 
 /// 构造一轮完整工具调用链：User → ToolCall → Tool 结果。
-fn tool_round(user_id: &str, tc_id: &str, tool_id: &str) -> Vec<ChatMessage> {
+fn tool_round(user_id: &str, tc_id: &str, tool_id: &str) -> Vec<ChatNode> {
     vec![
-        ChatMessage {
+        ChatNode {
             id: user_id.to_string(),
-            role: Some(MessageRole::User),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::User),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text(format!("q-{}", user_id))),
             ..Default::default()
         },
-        ChatMessage {
+        ChatNode {
             id: tc_id.to_string(),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::ToolCall),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::ToolCall),
             parent_id: Some(user_id.to_string()),
             meta: Some(serde_json::json!({ "tool_name": "local/sh" })),
             ..Default::default()
         },
-        ChatMessage {
+        ChatNode {
             id: tool_id.to_string(),
-            role: Some(MessageRole::Tool),
-            msg_type: Some(MessageType::Turn),
+            role: Some(NodeRole::Tool),
+            msg_type: Some(NodeKind::Turn),
             parent_id: Some(tc_id.to_string()),
             content: Some(MessageContent::Text(format!("result-{}", tool_id))),
             ..Default::default()
@@ -249,7 +249,7 @@ async fn prune_zero_keep_turns_does_not_panic() {
 /// 回归（P0-2）：空列表 + `keep_turns = 0` 同样是空操作。
 #[tokio::test]
 async fn prune_empty_messages_zero_keep_turns_is_noop() {
-    let mut msgs: Vec<ChatMessage> = Vec::new();
+    let mut msgs: Vec<ChatNode> = Vec::new();
     prune_historical_tool_calls(&mut msgs, 0);
     assert!(msgs.is_empty());
 }
@@ -316,7 +316,7 @@ async fn prune_reports_nothing_when_it_removes_nothing() {
     // 0 = 不限制 ⇒ 不动
     assert!(prune_historical_tool_calls(&mut msgs, 0).is_empty());
     // 空列表 ⇒ 不动
-    let mut empty: Vec<ChatMessage> = Vec::new();
+    let mut empty: Vec<ChatNode> = Vec::new();
     assert!(prune_historical_tool_calls(&mut empty, 1).is_empty());
 }
 
@@ -649,11 +649,11 @@ async fn append_messages_replaces_inflight_placeholder_seq() {
     let inflight = super::super::transcript::INFLIGHT_SEQ_BASE;
     seed_fact(&dir);
 
-    let born = |node: ChatMessage| super::MessageChange::Born {
+    let born = |node: ChatNode| super::MessageChange::Born {
         nodes: vec![node],
         carrier: super::Carrier::Here,
     };
-    let seq_of = |landed: Vec<ChatMessage>, id: &str| {
+    let seq_of = |landed: Vec<ChatNode>, id: &str| {
         landed
             .into_iter()
             .find(|m| m.id == id)
@@ -797,14 +797,14 @@ fn durable_layer_rejects_stream_delta() {
 
 // ==================== 序号分配（`max_seq` / `assign_seq`）====================
 //
-// 自 `symbio_core/schemas/session/chat_message.test.rs` 迁入：`seq` **字段**是跨栈
+// 自 `symbio_core/schemas/session/chat_node.test.rs` 迁入：`seq` **字段**是跨栈
 // schema（留 core），而「怎么补号」是会话存储的实现策略（随 `assign_seq` 迁到这里）。
 //
 // 前置条件（见 `assign_seq` 文档）：无号项只出现在**开头**或**末尾**。下面每条用例的
 // 输入都取自某个真实调用点的列表形态，不是随手构造的数组。
 
-fn msg(id: &str, seq: Option<i64>) -> ChatMessage {
-    ChatMessage {
+fn msg(id: &str, seq: Option<i64>) -> ChatNode {
+    ChatNode {
         id: id.to_string(),
         seq,
         ..Default::default()
@@ -860,7 +860,7 @@ fn assign_seq_uses_base_only_for_fresh_lists() {
 /// 会话水位推高一格，下一次追加的号与前端手里的号出现空档。
 #[test]
 fn assign_seq_on_empty_list_returns_base() {
-    let mut msgs: Vec<ChatMessage> = Vec::new();
+    let mut msgs: Vec<ChatNode> = Vec::new();
     assert_eq!(assign_seq(&mut msgs, 868), 868);
 }
 

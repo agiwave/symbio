@@ -35,16 +35,16 @@ import {
 // 多导出一个人家看不见的常量，类型系统不会报错。
 import * as vdfsModule from '../vdfs'
 import {
-  MESSAGE_STATUS_ABORTED,
-  MESSAGE_STATUS_COMPLETED,
-  MESSAGE_STATUS_FAILED,
-  MESSAGE_STATUS_PENDING,
-  MESSAGE_STATUS_REMOVED,
-  MESSAGE_STATUS_STREAMING,
-  MESSAGE_STATUS_WAITING_USER_ACTION,
-  MESSAGE_STATUSES,
-  isMessageStatus,
-} from '../chat_message'
+  NODE_STATUS_ABORTED,
+  NODE_STATUS_COMPLETED,
+  NODE_STATUS_FAILED,
+  NODE_STATUS_PENDING,
+  NODE_STATUS_REMOVED,
+  NODE_STATUS_STREAMING,
+  NODE_STATUS_WAITING_USER_ACTION,
+  NODE_STATUSES,
+  isNodeStatus,
+} from '../chat_node'
 import { resetVdfsRoot, setVdfsRoot, vdfsRoot } from '../vdfsRoot'
 
 // 合成根：**故意不是**后端当前挂载名——本文件全部断言与根名无关，
@@ -236,7 +236,7 @@ describe('vdfsRoot — 根锚点', () => {
 })
 
 /**
- * 消息类节点状态词**只有一份定义**（在 `chat_message`），VDFS 侧是别名。
+ * 消息类节点状态词**只有一份定义**（在 `chat_node`），VDFS 侧是别名。
  *
  * 这条断言锁的是一个具体的失败模式：状态词表曾有两份，`aborted` 只补进了其中
  * 一份，消费端于是把整条状态
@@ -244,15 +244,15 @@ describe('vdfsRoot — 根锚点', () => {
  * "漏改一份"在结构上不再可能；
  * 但"有人又写了一行字面量"仍可能，所以这里把它钉住。
  */
-describe('节点状态词：VDFS 侧是 chat_message 的别名', () => {
+describe('节点状态词：VDFS 侧是 chat_node 的别名', () => {
   it('消息类 VDFS 常量与消息状态常量**同值**（不是各写一份字面量）', () => {
-    expect(VDFS_STATUS_PENDING).toBe(MESSAGE_STATUS_PENDING)
-    expect(VDFS_STATUS_STREAMING).toBe(MESSAGE_STATUS_STREAMING)
-    expect(VDFS_STATUS_WAITING_USER_ACTION).toBe(MESSAGE_STATUS_WAITING_USER_ACTION)
-    expect(VDFS_STATUS_COMPLETED).toBe(MESSAGE_STATUS_COMPLETED)
-    expect(VDFS_STATUS_FAILED).toBe(MESSAGE_STATUS_FAILED)
-    expect(VDFS_STATUS_ABORTED).toBe(MESSAGE_STATUS_ABORTED)
-    expect(VDFS_STATUS_REMOVED).toBe(MESSAGE_STATUS_REMOVED)
+    expect(VDFS_STATUS_PENDING).toBe(NODE_STATUS_PENDING)
+    expect(VDFS_STATUS_STREAMING).toBe(NODE_STATUS_STREAMING)
+    expect(VDFS_STATUS_WAITING_USER_ACTION).toBe(NODE_STATUS_WAITING_USER_ACTION)
+    expect(VDFS_STATUS_COMPLETED).toBe(NODE_STATUS_COMPLETED)
+    expect(VDFS_STATUS_FAILED).toBe(NODE_STATUS_FAILED)
+    expect(VDFS_STATUS_ABORTED).toBe(NODE_STATUS_ABORTED)
+    expect(VDFS_STATUS_REMOVED).toBe(NODE_STATUS_REMOVED)
   })
 
   it('VDFS 侧可达的消息状态词集合与词表**完全相等**（漏一个或凭空多一个都红）', () => {
@@ -265,13 +265,13 @@ describe('节点状态词：VDFS 侧是 chat_message 的别名', () => {
       VDFS_STATUS_ABORTED,
       VDFS_STATUS_REMOVED,
     ]
-    expect([...viaVdfs].sort()).toEqual([...MESSAGE_STATUSES].sort())
+    expect([...viaVdfs].sort()).toEqual([...NODE_STATUSES].sort())
   })
 
-  it('会话类状态与未知词不属于消息词表（isMessageStatus 拦住它们）', () => {
-    expect(isMessageStatus(VDFS_STATUS_WORKING)).toBe(false)
-    expect(isMessageStatus(VDFS_STATUS_ACTIVE)).toBe(false)
-    expect(isMessageStatus('paused')).toBe(false)
+  it('会话类状态与未知词不属于消息词表（isNodeStatus 拦住它们）', () => {
+    expect(isNodeStatus(VDFS_STATUS_WORKING)).toBe(false)
+    expect(isNodeStatus(VDFS_STATUS_ACTIVE)).toBe(false)
+    expect(isNodeStatus('paused')).toBe(false)
   })
 })
 

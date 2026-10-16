@@ -14,14 +14,14 @@
  */
 
 import {
-  MESSAGE_STATUS_ABORTED,
-  MESSAGE_STATUS_COMPLETED,
-  MESSAGE_STATUS_FAILED,
-  MESSAGE_STATUS_PENDING,
-  MESSAGE_STATUS_REMOVED,
-  MESSAGE_STATUS_STREAMING,
-  MESSAGE_STATUS_WAITING_USER_ACTION,
-} from './chat_message'
+  NODE_STATUS_ABORTED,
+  NODE_STATUS_COMPLETED,
+  NODE_STATUS_FAILED,
+  NODE_STATUS_PENDING,
+  NODE_STATUS_REMOVED,
+  NODE_STATUS_STREAMING,
+  NODE_STATUS_WAITING_USER_ACTION,
+} from './chat_node'
 
 export * from './vdfs-form'
 
@@ -52,8 +52,8 @@ export const VDFS_ROOT_OP = 'vdfs/root'
  * 节点状态词。
  *
  * **消息类状态（`pending` / `streaming` / `waiting_user_action` / `completed` /
- * `failed` / `aborted`）的权威定义在 `schemas/chat_message.ts`**——它们本就是消息
- * 状态词，只是经节点 `status` 承载（后端 `message_status()` 直接把 `MessageStatus`
+ * `failed` / `aborted`）的权威定义在 `schemas/chat_node.ts`**——它们本就是消息
+ * 状态词，只是经节点 `status` 承载（后端 `message_status()` 直接把 `NodeStatus`
  * 的序列化名写成节点 `status`）。此处**只做别名导出**，让 VDFS 侧消费方继续用
  * `VDFS_STATUS_*` 命名，同时保证值只有一个来源：改一个词的字面量、或新增一个
  * 消息状态词，**都不需要动本文件**。
@@ -71,38 +71,38 @@ export const VDFS_STATUS_ACTIVE = 'active'
  * 会话用它取代「`active` + `last_failed` 布尔」这种「状态 + 平行标志位」写法：
  * 「上一轮失败了吗」= `status == VDFS_STATUS_FAILED`，一处判定，不会漏读。
  * 见 `symbio/src/plugins/session/docs/018-node-state-streaming.md` §2.3.1。 */
-export const VDFS_STATUS_FAILED = MESSAGE_STATUS_FAILED
+export const VDFS_STATUS_FAILED = NODE_STATUS_FAILED
 /** 节点状态：未开始（消息；会话没有这个态——它是长驻容器） */
-export const VDFS_STATUS_PENDING = MESSAGE_STATUS_PENDING
+export const VDFS_STATUS_PENDING = NODE_STATUS_PENDING
 /** 节点状态：正在产生内容（消息的「运行中」） */
-export const VDFS_STATUS_STREAMING = MESSAGE_STATUS_STREAMING
+export const VDFS_STATUS_STREAMING = NODE_STATUS_STREAMING
 /** 节点状态：等待用户响应（审批 / 提问） */
-export const VDFS_STATUS_WAITING_USER_ACTION = MESSAGE_STATUS_WAITING_USER_ACTION
+export const VDFS_STATUS_WAITING_USER_ACTION = NODE_STATUS_WAITING_USER_ACTION
 /** 节点状态：已结束（消息的终态）。
  *
  * **不与 `VDFS_STATUS_ACTIVE` 合并**：`active` 是「无特殊状态」，`completed`
  * 是「终态」，二者曾被后端映射成同一个字符串，导致消费端必须把 `active`
  * **猜回** `completed`（一次信息丢失 + 一次猜测还原）。现在状态原样透传。 */
-export const VDFS_STATUS_COMPLETED = MESSAGE_STATUS_COMPLETED
+export const VDFS_STATUS_COMPLETED = NODE_STATUS_COMPLETED
 /** 节点状态：**用户主动终止**（消息的终态，根级 Turn 用）。
  *
  * 与 `VDFS_STATUS_COMPLETED` / `VDFS_STATUS_FAILED` 并列的**第三个终态**：
  * 没有跑完（不是 `completed`），也没有出错（不是 `failed`）。它的语义是
  * **可重试**——前端的重试入口正是挂在这个终态上。
  *
- * 后端 `MessageStatus::as_str()` 早已产出这个词；前端曾漏在状态词表里，导致
+ * 后端 `NodeStatus::as_str()` 早已产出这个词；前端曾漏在状态词表里，导致
  * 消费端把整条变更的状态**静默丢弃**（当时消费端的 `messageStatusOf` 未做透传），
- * 中止后重试入口不出现。现在它是 `MESSAGE_STATUS_ABORTED` 的别名——**漏改这件事
+ * 中止后重试入口不出现。现在它是 `NODE_STATUS_ABORTED` 的别名——**漏改这件事
  * 已不可能发生**（词表只有一份），而未知词仍由该映射**显式告警**兜底。 */
-export const VDFS_STATUS_ABORTED = MESSAGE_STATUS_ABORTED
+export const VDFS_STATUS_ABORTED = NODE_STATUS_ABORTED
 /** 节点状态：**已被删除**（消息；会话没有这个态——它是长驻容器）。
  *
  * 删除在协议里是一次状态迁移（没有 `remove` 操作），与出现 / 增长 / 完成同走一帧。
- * 落到这个状态的帧在接收端**就地移除**该节点；VDFS 节点投影是 `MessageStatus`
+ * 落到这个状态的帧在接收端**就地移除**该节点；VDFS 节点投影是 `NodeStatus`
  * 的**全量**映射（`nodes.rs::message_status` 直接取 `as_str()`），故本词同样是
  * 该全集的成员——不给它别名就等于让「消息状态词表」与「VDFS 可达词」分叉，
  * 正是下面 `vdfs.spec.ts` 那条集合相等断言要拦住的。 */
-export const VDFS_STATUS_REMOVED = MESSAGE_STATUS_REMOVED
+export const VDFS_STATUS_REMOVED = NODE_STATUS_REMOVED
 
 /** 「运行中」的唯一判据：节点 `status == working`。
  *
@@ -431,9 +431,9 @@ export const VDFS_BUS_RESYNC = 'resync'
  *
  *  | `data` 形状 | 生产者 | 消费端动作 |
  *  |---|---|---|
- *  | `ChatMessage`（含 `delta`） | 消息域（`Transcript::apply`） | **按字段落地，零回读**：`delta` 追加 / `content` 替换 / `status = removed` 移除 |
- *  | `ChatMessage`（全量） | 同上（首帧发合并后的全量副本） | **零回读**就地替换该消息 |
- *  | `ChatMessage`（只有状态） | 同上（`llm_state_frame` 剥掉了正文） | 本地已有 ⇒ 零回读迁移状态；身份未知 ⇒ 回读补基线 |
+ *  | `ChatNode`（含 `delta`） | 消息域（`Transcript::apply`） | **按字段落地，零回读**：`delta` 追加 / `content` 替换 / `status = removed` 移除 |
+ *  | `ChatNode`（全量） | 同上（首帧发合并后的全量副本） | **零回读**就地替换该消息 |
+ *  | `ChatNode`（只有状态） | 同上（`llm_state_frame` 剥掉了正文） | 本地已有 ⇒ 零回读迁移状态；身份未知 ⇒ 回读补基线 |
  *  | `VdfsNode` | 会话运行态（`emit_session_state`） | 就地收敛节点状态，零回读 |
  *  | 缺失 | 全部资源信号（`vdfs_notify_change`） | 回读 / 重拉（幂等）；对资源删除，回读 `NotFound` 即删除 |
  *
@@ -451,13 +451,13 @@ export const VDFS_BUS_RESYNC = 'resync'
  *
  *  「资源层面发生了什么」与「业务数据变成了什么」是同一件事的两种说法，而消费端
  *  真正消费的只有后者——保留枚举只会让每个消费端都背上一次「枚举 → 分派」的翻译。
- *  消息的删除由 `ChatMessage.status = removed` 承载（消息词汇本就有它），资源删除
+ *  消息的删除由 `ChatNode.status = removed` 承载（消息词汇本就有它），资源删除
  *  由「载荷缺失 + 回读 `NotFound`」表达。
  */
 export interface VdfsChange {
   /** **被变更节点自身**的地址（集合项形状 `<sid>/<集合段>/<项 id>`，身份即末段） */
   path: string
-  /** 业务载荷（`ChatMessage` / `VdfsNode` 的 JSON）；缺失 = 无载荷（回读收敛） */
+  /** 业务载荷（`ChatNode` / `VdfsNode` 的 JSON）；缺失 = 无载荷（回读收敛） */
   data?: unknown
 }
 

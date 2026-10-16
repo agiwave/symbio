@@ -26,7 +26,7 @@
 
 use std::sync::Arc;
 
-use crate::symbio_core::chat_message::ChatMessage;
+use crate::symbio_core::chat_node::ChatNode;
 use crate::symbio_core::{DecideRequest, Verdict};
 use crate::symbio_core::{
     PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PATH, ROUTE_CLASSIFY_DECIDE,
@@ -49,7 +49,7 @@ pub(crate) async fn decide_turn(
     let parent = orchestrator.parent.as_ref()?;
     let session_id = ctx.get(SESSION_ID).unwrap_or_default();
 
-    let conversation: Vec<ChatMessage> =
+    let conversation: Vec<ChatNode> =
         conversation_view(&context.messages, CONVERSATION_VIEW_LIMIT);
 
     let req = ctx.fork();

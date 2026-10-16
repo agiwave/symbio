@@ -30,11 +30,11 @@ use std::collections::{HashMap, HashSet};
 use crate::symbio_core::event::{
     Entity, Event, Verb, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED,
 };
-use crate::symbio_core::schemas::session::chat_message::{ChatMessage, MessageContent};
+use crate::symbio_core::schemas::session::chat_node::{ChatNode, MessageContent};
 
 /// 一条消息被编辑后**在对话里读作什么**。
 ///
-/// 只留 `role` / `text` 两格而不是整条 [`ChatMessage`]：读侧（转写行、prompt 复核）
+/// 只留 `role` / `text` 两格而不是整条 [`ChatNode`]：读侧（转写行、prompt 复核）
 /// 只按这两格读对话。把整条图语义（`parent_id` / `tool_calls` / `seq`）搬进来，
 /// core 就被某个 provider 的线格式绑住了——那条边界写在 `PromptMessage` 的文档里。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,7 +57,7 @@ pub struct MessageMutations {
 impl MessageMutations {
     /// 从事件切片收集（按事件顺序：同一节点被编辑多次 ⇒ **最后一条说了算**）。
     ///
-    /// 载荷不是合法 `ChatMessage`（旧版本写下的 / 手工改过的 WAL）⇒ 跳过那条：
+    /// 载荷不是合法 `ChatNode`（旧版本写下的 / 手工改过的 WAL）⇒ 跳过那条：
     /// 读侧必须对任意历史事件容错，一条坏载荷不该让整次投影失败。
     pub fn collect(events: &[Event]) -> Self {
         let mut edited = HashMap::new();
@@ -90,7 +90,7 @@ impl MessageMutations {
 
 /// `message.edited` 的载荷 → `(节点 id, 读法)`。
 fn parse_edited(e: &Event) -> Option<(String, EditedEntry)> {
-    let m: ChatMessage = serde_json::from_value(e.payload.get("message")?.clone()).ok()?;
+    let m: ChatNode = serde_json::from_value(e.payload.get("message")?.clone()).ok()?;
     if m.id.is_empty() {
         return None;
     }
@@ -99,10 +99,10 @@ fn parse_edited(e: &Event) -> Option<(String, EditedEntry)> {
     Some((m.id, EditedEntry { role, text }))
 }
 
-/// 角色 → 线格式词形（与 `MessageRole` 的 `serde(rename_all = "snake_case")` 逐字
+/// 角色 → 线格式词形（与 `NodeRole` 的 `serde(rename_all = "snake_case")` 逐字
 /// 相等；`transcript` 的条目角色与 `PromptMessage::role` 用的是同一批词）。
-fn role_word(r: &crate::symbio_core::schemas::session::chat_message::MessageRole) -> String {
-    use crate::symbio_core::schemas::session::chat_message::MessageRole as R;
+fn role_word(r: &crate::symbio_core::schemas::session::chat_node::NodeRole) -> String {
+    use crate::symbio_core::schemas::session::chat_node::NodeRole as R;
     match r {
         R::User => "user",
         R::Assistant => "assistant",
@@ -143,7 +143,7 @@ fn ids_of(e: &Event) -> Vec<String> {
 /// 载荷不是合法列表（旧版本 / 手工改过的 WAL）⇒ **跳过那条**继续往前找：读侧必须
 /// 对任意历史事件容错，一条坏载荷不该让整次投影失败——但也不该让一个坏快照
 /// 把此前有效的那一份吃掉。
-pub fn mutations_latest_snapshot(events: &[Event]) -> Option<(usize, Vec<ChatMessage>)> {
+pub fn mutations_latest_snapshot(events: &[Event]) -> Option<(usize, Vec<ChatNode>)> {
     events
         .iter()
         .enumerate()
@@ -152,7 +152,7 @@ pub fn mutations_latest_snapshot(events: &[Event]) -> Option<(usize, Vec<ChatMes
 }
 
 /// `session.consolidated` 的载荷 → 压缩后的整份消息列表。
-fn snapshot_messages(e: &Event) -> Option<Vec<ChatMessage>> {
+fn snapshot_messages(e: &Event) -> Option<Vec<ChatNode>> {
     if !(e.entity == Entity::Message && e.verb == Verb::Progressed) {
         return None;
     }
@@ -161,9 +161,9 @@ fn snapshot_messages(e: &Event) -> Option<Vec<ChatMessage>> {
     }
     let arr = e.payload.get("messages")?.as_array()?;
     // 逐条解：**一条坏条目不该吃掉整份快照**（与 `parse_edited` 同一条容错口径）。
-    let msgs: Vec<ChatMessage> = arr
+    let msgs: Vec<ChatNode> = arr
         .iter()
-        .filter_map(|v| serde_json::from_value::<ChatMessage>(v.clone()).ok())
+        .filter_map(|v| serde_json::from_value::<ChatNode>(v.clone()).ok())
         .collect();
     // 空列表不是一份快照：压缩恒产出「至少那条摘要消息」。空数组若被当成有效快照，
     // 后果是**整段历史被抹掉**——容错的方向必须是「少折」而不是「多抹」。

@@ -57,7 +57,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::session::chat_message::ChatMessage;
+use super::session::chat_node::ChatNode;
 
 /// `classify` 的入参：这一轮发生了什么
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,7 +80,7 @@ pub struct DecideRequest {
     /// S1 时它没有生产者（`conversation_view` 尚未建立），写了就是替未来猜形状。
     /// S2 里投影函数与它的第一个消费方同批落位，字段与生产者同时出现。
     #[serde(default)]
-    pub context: Vec<ChatMessage>,
+    pub context: Vec<ChatNode>,
 }
 
 /// 编排层要**执行**的那个枚举：这一轮该走哪条路。
@@ -175,7 +175,7 @@ pub struct ComposeRequest {
     /// 只能从对话线**组织**出来，模板给不了。其余理由码走模板，用不到这个字段，
     /// 但字段不按分支可选：让 `compose` 的入参形状随判决变，等于把编排细节泄进契约。
     #[serde(default)]
-    pub context: Vec<ChatMessage>,
+    pub context: Vec<ChatNode>,
     /// **运行现状**（[`RunSnapshot`]）。`Report` 的措辞据此组织。
     ///
     /// 与 `context` 同一条纪律：字段不按分支可选。`Answered` / `Escalate` 用不到它

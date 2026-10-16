@@ -20,10 +20,10 @@ use crate::plugins::session::chat_session::{Carrier, MessageChange};
 ///
 /// 可见性 `pub(super)`：`orchestrator.test.rs` 直接锁定这个集合，
 /// 避免它被悄悄改小（少一个状态 = 前端一个永远转下去的「运行中」）。
-pub(super) fn is_inflight(status: &Option<cm::MessageStatus>) -> bool {
+pub(super) fn is_inflight(status: &Option<cm::NodeStatus>) -> bool {
     matches!(
         status,
-        None | Some(cm::MessageStatus::Pending) | Some(cm::MessageStatus::Streaming)
+        None | Some(cm::NodeStatus::Pending) | Some(cm::NodeStatus::Streaming)
     )
 }
 
@@ -37,11 +37,11 @@ pub(super) fn is_inflight(status: &Option<cm::MessageStatus>) -> bool {
 /// 它们的重试归组级 Turn，因此按现状定稿 `Completed` 结束流式动画即可。
 ///
 /// 可见性 `pub(super)`：`orchestrator.test.rs` 直接锁定这个映射。
-pub(super) fn abort_terminal_of(m: &cm::ChatMessage) -> cm::MessageStatus {
-    if m.msg_type == Some(cm::MessageType::Turn) && m.parent_id.is_none() {
-        cm::MessageStatus::Aborted
+pub(super) fn abort_terminal_of(m: &cm::ChatNode) -> cm::NodeStatus {
+    if m.msg_type == Some(cm::NodeKind::Turn) && m.parent_id.is_none() {
+        cm::NodeStatus::Aborted
     } else {
-        cm::MessageStatus::Completed
+        cm::NodeStatus::Completed
     }
 }
 
@@ -92,13 +92,13 @@ impl SessionPlugin {
         session_id: &str,
         transcript: &Arc<tokio::sync::Mutex<crate::plugins::session::transcript::Transcript>>,
         error: &str,
-        terminal: cm::MessageStatus,
+        terminal: cm::NodeStatus,
         // 半截产出（中止时模型已产出、尚未并入镜像的节点）：思考 / 正文 / 工具
         // 节点是**事实**，不因「没说完」就不记——用户中断后重建的历史里那半句话
         // 必须还在。镜像（流式快照）可能只含半截的一部分，`partial` 那份是分发方 /
         // 桥累积的定稿内容，合并时**整条覆盖**同 id 节点。失败路径没有半截可言
         // （模型没有产出），传空。
-        partial: Vec<cm::ChatMessage>,
+        partial: Vec<cm::ChatNode>,
     ) {
         // 1. 定位失败 Turn。
         //    在途图为空表示错误发生在任何 Turn 节点创建之前（例如能力收集失败、
@@ -108,7 +108,7 @@ impl SessionPlugin {
         let failing_turn_id = mirror
             .iter()
             .rev()
-            .find(|m| m.msg_type == Some(cm::MessageType::Turn) && m.parent_id.is_none())
+            .find(|m| m.msg_type == Some(cm::NodeKind::Turn) && m.parent_id.is_none())
             .map(|m| m.id.clone());
         let failing_turn_id = match failing_turn_id {
             Some(id) => id,
@@ -144,12 +144,12 @@ impl SessionPlugin {
                 m.status = Some(terminal.clone());
                 // 中止不挂 error：它是用户自己的操作，不是故障；前端按状态渲染
                 // 「已中止」，不需要一条错误文案来凑。
-                m.error = (terminal == cm::MessageStatus::Failed).then(|| error.to_string());
+                m.error = (terminal == cm::NodeStatus::Failed).then(|| error.to_string());
             } else if matches!(
                 m.status,
-                None | Some(cm::MessageStatus::Streaming) | Some(cm::MessageStatus::Pending)
+                None | Some(cm::NodeStatus::Streaming) | Some(cm::NodeStatus::Pending)
             ) {
-                m.status = Some(cm::MessageStatus::Completed);
+                m.status = Some(cm::NodeStatus::Completed);
                 m.error = None;
             }
         }
@@ -175,7 +175,7 @@ impl SessionPlugin {
 
         // 仅记录本次真正发生状态变化的消息，最后只广播这些，
         // 避免对未变化的消息重复推送（也避免把错误刷屏到每条文本）。
-        let mut changed: Vec<cm::ChatMessage> = Vec::new();
+        let mut changed: Vec<cm::ChatNode> = Vec::new();
 
         // 5. 合并失败 Turn 的子树（作用域外的一律跳过：保持存储中已有的终态）。
         for cm_msg in &mirror {
@@ -192,7 +192,7 @@ impl SessionPlugin {
                     if is_failing_turn {
                         // 仅失败 Turn 承载错误 + 重试入口；中止（`Aborted`）同样可重试，
                         // 但不挂 error 文案——状态本身已经说清了发生了什么。
-                        let want_error = if terminal == cm::MessageStatus::Failed {
+                        let want_error = if terminal == cm::NodeStatus::Failed {
                             Some(error.to_string())
                         } else {
                             None
@@ -208,7 +208,7 @@ impl SessionPlugin {
                         }
                     } else if is_inflight(&existing.status) {
                         // 进行中的子节点定稿为 Completed（结束前端流式动画），不挂 error。
-                        existing.status = Some(cm::MessageStatus::Completed);
+                        existing.status = Some(cm::NodeStatus::Completed);
                         existing.error = None;
                         changed.push(existing.clone());
                     }
@@ -228,7 +228,7 @@ impl SessionPlugin {
                     if is_failing_turn {
                         new.status = Some(terminal.clone());
                         // 同上：只有失败才承载 error 文案，中止不挂。
-                        new.error = if terminal == cm::MessageStatus::Failed {
+                        new.error = if terminal == cm::NodeStatus::Failed {
                             Some(error.to_string())
                         } else {
                             None
@@ -236,7 +236,7 @@ impl SessionPlugin {
                         all.push(new.clone());
                         changed.push(new);
                     } else if parent_exists {
-                        new.status = Some(cm::MessageStatus::Completed);
+                        new.status = Some(cm::NodeStatus::Completed);
                         new.error = None;
                         all.push(new.clone());
                         changed.push(new);
@@ -290,7 +290,7 @@ impl SessionPlugin {
         // `changed` 落会把**中间版本**也写进去。写集合取每个 id 的**最后一次**——
         // 事实源只关心终局，中间版本从没存在过。顺序按首现保持（Born 的追加序
         // 即树内序）。
-        let mut latest: Vec<cm::ChatMessage> = Vec::new();
+        let mut latest: Vec<cm::ChatNode> = Vec::new();
         let mut at: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         for m in changed.clone() {
             match at.get(&m.id) {
@@ -336,7 +336,7 @@ impl SessionPlugin {
     /// 中止收口：把该会话**仍在飞行中的消息节点**定稿，使「用户按下停止」与
     /// 「界面不再显示运行中」之间没有窗口。返回被定稿的节点数。
     ///
-    /// 终态分工：根级 Turn → [`cm::MessageStatus::Aborted`]（可重试），
+    /// 终态分工：根级 Turn → [`cm::NodeStatus::Aborted`]（可重试），
     /// 子节点 → `Completed`（结束流式动画）。判据见 [`abort_terminal_of`]。
     ///
     /// ## 为什么不能只靠 [`Self::persist_failure`]
@@ -386,7 +386,7 @@ impl SessionPlugin {
         // 在途缓冲里**尚未落库**的节点：补写，前提是父节点存在
         //    （与 `persist_failure` 同一孤儿规则——写入无父的悬空节点会污染前端渲染）。
         // 存储侧无需扫描：写入不变量保证存储只有终态（见上 doc）。
-        let mut changed: Vec<cm::ChatMessage> = Vec::new();
+        let mut changed: Vec<cm::ChatNode> = Vec::new();
         for l in &live {
             if !is_inflight(&l.status) || all.iter().any(|m| m.id == l.id) {
                 continue;
@@ -463,7 +463,7 @@ impl SessionPlugin {
 /// `persist_failure` 用它把「错误降级」的作用域收窄到失败 Turn 及其后代：
 /// 历史轮次的消息不参与合并，避免 session 层拿流式快照去"补写"一份
 /// Model 插件已落库的节点（同一 Turn 下出现两份同内容文本节点的根源）。
-fn subtree_of(messages: &[cm::ChatMessage], root: &str) -> std::collections::HashSet<String> {
+fn subtree_of(messages: &[cm::ChatNode], root: &str) -> std::collections::HashSet<String> {
     let mut ids = std::collections::HashSet::new();
     ids.insert(root.to_string());
     let mut queue = vec![root.to_string()];

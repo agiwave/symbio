@@ -6,10 +6,10 @@
 //! 生成路径本身由 e2e `t22-compose.mjs` 在真实边界上验（mock LLM）。
 
 use super::*;
-use crate::symbio_core::chat_message::{ChatMessage, MessageContent, MessageRole};
+use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole};
 
-fn node(role: MessageRole, text: &str) -> ChatMessage {
-    ChatMessage {
+fn node(role: NodeRole, text: &str) -> ChatNode {
+    ChatNode {
         id: llm_short_id(),
         role: Some(role),
         content: Some(MessageContent::Text(text.to_string())),
@@ -17,7 +17,7 @@ fn node(role: MessageRole, text: &str) -> ChatMessage {
     }
 }
 
-fn request(context: Vec<ChatMessage>) -> ComposeRequest {
+fn request(context: Vec<ChatNode>) -> ComposeRequest {
     ComposeRequest {
         session_id: "s1".to_string(),
         verdict: crate::symbio_core::Verdict::Answered {
@@ -35,15 +35,15 @@ fn request(context: Vec<ChatMessage>) -> ComposeRequest {
 #[test]
 fn messages_follow_the_projection_verbatim() {
     let context = vec![
-        node(MessageRole::User, "第一个问题"),
-        node(MessageRole::Assistant, "第一个回答"),
-        node(MessageRole::User, "第二个问题"),
+        node(NodeRole::User, "第一个问题"),
+        node(NodeRole::Assistant, "第一个回答"),
+        node(NodeRole::User, "第二个问题"),
     ];
     let messages = build_messages(&context);
 
     assert_eq!(messages.len(), 3);
-    assert_eq!(messages[0].role, Some(MessageRole::User));
-    assert_eq!(messages[1].role, Some(MessageRole::Assistant));
+    assert_eq!(messages[0].role, Some(NodeRole::User));
+    assert_eq!(messages[1].role, Some(NodeRole::Assistant));
     assert_eq!(text_of(&messages[2]), "第二个问题");
 }
 
@@ -54,9 +54,9 @@ fn messages_follow_the_projection_verbatim() {
 #[test]
 fn blank_text_nodes_are_dropped() {
     let context = vec![
-        node(MessageRole::User, "有内容"),
-        node(MessageRole::Assistant, "   "),
-        node(MessageRole::User, ""),
+        node(NodeRole::User, "有内容"),
+        node(NodeRole::Assistant, "   "),
+        node(NodeRole::User, ""),
     ];
     let messages = build_messages(&context);
 
@@ -84,7 +84,7 @@ async fn generation_without_a_model_service_returns_none() {
 
     let out = generate(
         &ctx,
-        &request(vec![node(MessageRole::User, "我们刚才聊了什么")]),
+        &request(vec![node(NodeRole::User, "我们刚才聊了什么")]),
         &ComposeConfig::default(),
     )
     .await;
@@ -99,11 +99,11 @@ async fn generation_without_a_user_turn_returns_none() {
     let ctx: Arc<dyn PluginInvokeRequest> =
         Arc::new(crate::symbio_core::PluginSimpleRequest::new(None, None));
 
-    let only_assistant = vec![node(MessageRole::Assistant, "我先说一句")];
+    let only_assistant = vec![node(NodeRole::Assistant, "我先说一句")];
     let out = generate(&ctx, &request(only_assistant), &ComposeConfig::default()).await;
     assert!(out.is_none(), "没有用户发言时不该生成");
 
-    let empty: Vec<ChatMessage> = Vec::new();
+    let empty: Vec<ChatNode> = Vec::new();
     let out = generate(&ctx, &request(empty), &ComposeConfig::default()).await;
     assert!(out.is_none(), "空对话线时不该生成");
 }

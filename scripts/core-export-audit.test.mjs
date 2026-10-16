@@ -131,9 +131,9 @@ test('C-002 不再豁免 `schemas::`（根 `mod schemas;` 已私有化，编译�
   const r = audit(
     clean({
       'symbio/src/symbio_core/schemas/mod.rs': 'pub mod session;\n',
-      'symbio/src/symbio_core/schemas/session/mod.rs': 'pub mod chat_message;\n',
+      'symbio/src/symbio_core/schemas/session/mod.rs': 'pub mod chat_node;\n',
       'symbio/src/plugins/gamma/g.rs':
-        'use crate::symbio_core::schemas::session::chat_message::ChatMessage;\npub fn h() {}\n',
+        'use crate::symbio_core::schemas::session::chat_node::ChatNode;\npub fn h() {}\n',
     }),
   )
   assert.equal(r.status, 1, 'schemas 深引过去是 §1.4 豁免，现在必须红')

@@ -9,8 +9,8 @@ use crate::plugin_error;
 use crate::plugin_info;
 use crate::plugin_warn;
 use crate::plugins::model::http::STREAM_IDLE_TIMEOUT;
-use crate::symbio_core::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
+use crate::symbio_core::chat_node::{
+    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind,
 };
 use crate::symbio_core::ModelUsage;
 use crate::symbio_core::{llm_emit_message, llm_short_id, TurnOutput, TurnToolCallInfo};
@@ -186,7 +186,7 @@ fn truncate_for_display(s: &str, max: usize) -> String {
 /// session 的 `llm_emit_state`（`plugins/session/transcript/frames.rs`），完整消息帧走 core 的
 /// `llm_emit_message`——三者同一套帧语义，位置由消费方数量决定。
 async fn llm_emit_delta(sink: &ExecEventSink, message_id: &str, delta: &str) {
-    sink.emit(ChatMessage {
+    sink.emit(ChatNode {
         id: message_id.to_string(),
         delta: Some(delta.to_string()),
         ..Default::default()
@@ -627,13 +627,13 @@ async fn dispatch_protocol_event(
                 out.response_text_child_id = llm_short_id();
                 llm_emit_message(
                     sink,
-                    ChatMessage {
+                    ChatNode {
                         id: out.response_text_child_id.clone(),
                         parent_id: Some(root_id.into()),
-                        role: Some(MessageRole::Assistant),
-                        msg_type: Some(MessageType::Text),
+                        role: Some(NodeRole::Assistant),
+                        msg_type: Some(NodeKind::Text),
                         content: Some(MessageContent::Text(out.text.clone())),
-                        status: Some(MessageStatus::Streaming),
+                        status: Some(NodeStatus::Streaming),
                         ..Default::default()
                     },
                 )
@@ -652,13 +652,13 @@ async fn dispatch_protocol_event(
                 out.reasoning_child_id = llm_short_id();
                 llm_emit_message(
                     sink,
-                    ChatMessage {
+                    ChatNode {
                         id: out.reasoning_child_id.clone(),
                         parent_id: Some(root_id.into()),
-                        role: Some(MessageRole::Assistant),
-                        msg_type: Some(MessageType::Reasoning),
+                        role: Some(NodeRole::Assistant),
+                        msg_type: Some(NodeKind::Reasoning),
                         content: Some(MessageContent::Text(out.reasoning.clone())),
-                        status: Some(MessageStatus::Streaming),
+                        status: Some(NodeStatus::Streaming),
                         ..Default::default()
                     },
                 )
@@ -708,14 +708,14 @@ async fn dispatch_protocol_event(
             if snapshot_required {
                 llm_emit_message(
                     sink,
-                    ChatMessage {
+                    ChatNode {
                         id: tc_id.clone(),
                         parent_id: Some(root_id.into()),
-                        role: Some(MessageRole::Assistant),
-                        msg_type: Some(MessageType::ToolCall),
+                        role: Some(NodeRole::Assistant),
+                        msg_type: Some(NodeKind::ToolCall),
                         name: full_name,
                         content: Some(MessageContent::Text(full_args)),
-                        status: Some(MessageStatus::Streaming),
+                        status: Some(NodeStatus::Streaming),
                         tool_call_id: Some(wire_id),
                         ..Default::default()
                     },

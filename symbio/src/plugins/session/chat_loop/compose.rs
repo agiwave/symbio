@@ -57,8 +57,8 @@
 
 use std::sync::Arc;
 
-use crate::symbio_core::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
+use crate::symbio_core::chat_node::{
+    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind,
 };
 use crate::symbio_core::{
     clock_now_ms, llm_short_id, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PATH,
@@ -189,14 +189,14 @@ async fn compose_text(
 async fn compose_text_from(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn PluginInvokeRequest>,
-    messages: &[ChatMessage],
+    messages: &[ChatNode],
     verdict: &Verdict,
     snapshot: &RunSnapshot,
 ) -> Option<WordingReply> {
     let parent = orchestrator.parent.as_ref()?;
     let session_id = ctx.get(SESSION_ID).unwrap_or_default();
 
-    let conversation: Vec<ChatMessage> = conversation_view(messages, CONVERSATION_VIEW_LIMIT);
+    let conversation: Vec<ChatNode> = conversation_view(messages, CONVERSATION_VIEW_LIMIT);
 
     let req = ctx.fork();
     req.set(PATH, ROUTE_COMPOSE_WORDING.to_string());
@@ -252,7 +252,7 @@ async fn compose_text_from(
 pub(crate) async fn report_text(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn PluginInvokeRequest>,
-    conversation: &[ChatMessage],
+    conversation: &[ChatNode],
     snapshot: &RunSnapshot,
 ) -> Option<String> {
     if !orchestrator.compose_enabled {
@@ -269,7 +269,7 @@ pub(crate) async fn report_text(
 ///
 /// `exclude_from_context`：`Answered` 的答话为 `false`（它进请求包——它就是这一轮的
 /// 答复），`Escalate` 的首响为 `true`（界面开场白，不进请求包）。判据见模块文档。
-pub(crate) fn dialog_node(text: &str, reason: &str, exclude_from_context: bool) -> ChatMessage {
+pub(crate) fn dialog_node(text: &str, reason: &str, exclude_from_context: bool) -> ChatNode {
     let mut meta = serde_json::json!({
         "surface": SURFACE_REPLY,
         "reason": reason,
@@ -277,14 +277,14 @@ pub(crate) fn dialog_node(text: &str, reason: &str, exclude_from_context: bool) 
     if exclude_from_context {
         meta["exclude_from_context"] = serde_json::json!(true);
     }
-    ChatMessage {
+    ChatNode {
         id: llm_short_id(),
         // 根级：与用户消息互为兄弟（对话线），不是某个 Turn 的子节点
         parent_id: None,
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text(text.to_string())),
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         timestamp: Some(clock_now_ms()),
         meta: Some(meta),
         ..Default::default()

@@ -1,4 +1,4 @@
-//! 重建引擎 —— 事件网格 → `ChatMessage` 节点树（ADR-049 的读侧真源）。
+//! 重建引擎 —— 事件网格 → `ChatNode` 节点树（ADR-049 的读侧真源）。
 //!
 //! ## 为什么需要它
 //!
@@ -11,7 +11,7 @@
 //! | 出口 | 形态 | 消费者 |
 //! |---|---|---|
 //! | `transcript()` | 扁平三角色（`role` / `text` / `tool`） | 组 prompt（模型只要对话内容） |
-//! | 本模块 | `ChatMessage` 节点树（`id` / `parent_id` / `type` / `status` / `seq`） | 前端列表、轮次窗口、会话叶子 |
+//! | 本模块 | `ChatNode` 节点树（`id` / `parent_id` / `type` / `status` / `seq`） | 前端列表、轮次窗口、会话叶子 |
 //!
 //! 两个出口**都不加工内容**——它们只是同一批事实的两种投影。任何「为了好看」的
 //! 增删都会让模型或前端看到网格里没有的东西（`prompt_fidelity` 报的就是这个）。
@@ -72,8 +72,8 @@
 
 use std::collections::HashSet;
 
-use crate::symbio_core::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
+use crate::symbio_core::chat_node::{
+    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind,
 };
 use crate::symbio_core::{
     event_payload_node_id, event_produced_text_node_id, event_tool_result_node_id, Entity, Event,
@@ -123,8 +123,8 @@ use super::message_build::{llm_build_text_node, llm_build_tool_call_node, llm_bu
 /// 号按**发射顺序**发，删节点不回收号：`seq` 是**顺序锚**（谁在谁前面），不是
 /// 条数。补号会让「同一段历史在删一条前后的两次重建里拿到不同的号」，而号是
 /// 前端的排序键——补号的收益（连续）小于它带来的不稳定。
-pub fn rebuild(events: &[Event]) -> Vec<ChatMessage> {
-    let mut out: Vec<ChatMessage> = Vec::new();
+pub fn rebuild(events: &[Event]) -> Vec<ChatNode> {
+    let mut out: Vec<ChatNode> = Vec::new();
     // 节点 id → 它在 `out` 里的位置。
     //
     // 与 `out` 的对应关系必须**始终成立**，因此删除**不在循环里做**（`Vec::remove`
@@ -198,12 +198,12 @@ pub fn rebuild(events: &[Event]) -> Vec<ChatMessage> {
 
 /// `message.edited` → **补丁应用后**的整条消息（载荷 `message`）。
 ///
-/// 载荷不是合法 `ChatMessage` ⇒ `None`（静默跳过）。与 `nodes_of` 对缺失字段的
+/// 载荷不是合法 `ChatNode` ⇒ `None`（静默跳过）。与 `nodes_of` 对缺失字段的
 /// 处置同一条口径：**重建必须对任意历史事件容错**（旧版本写下的、手工改过的
 /// WAL 都不该让整次重建失败）。形状的唯一生产者是写侧 `v2_messages::edited`，
 /// 它给出的形状由 `rebuild.test.rs` 的往返用例钉住。
-fn edited_node(e: &Event) -> Option<ChatMessage> {
-    let m: ChatMessage = serde_json::from_value(e.payload.get("message")?.clone()).ok()?;
+fn edited_node(e: &Event) -> Option<ChatNode> {
+    let m: ChatNode = serde_json::from_value(e.payload.get("message")?.clone()).ok()?;
     (!m.id.is_empty()).then_some(m)
 }
 
@@ -227,20 +227,20 @@ fn removed_ids(e: &Event) -> Vec<String> {
 /// 与 `nodes_of` 对其它格的容错同一条口径：**重建必须对任意历史事件容错**。
 /// 与 `message.edited` 不同，这里**照单全收**：诞生格的节点本就带着它自己的
 /// 位置语义（发射顺序），不存在「硬插到错误位置」的问题。
-fn added_nodes(e: &Event) -> Vec<ChatMessage> {
+fn added_nodes(e: &Event) -> Vec<ChatNode> {
     e.payload
         .get("messages")
         .and_then(|v| v.as_array())
         .map(|a| {
             a.iter()
-                .filter_map(|v| serde_json::from_value::<ChatMessage>(v.clone()).ok())
+                .filter_map(|v| serde_json::from_value::<ChatNode>(v.clone()).ok())
                 .collect()
         })
         .unwrap_or_default()
 }
 
 /// 一条事件 → 它承载的节点（顺序即树内顺序）。
-fn nodes_of(e: &Event) -> Vec<ChatMessage> {
+fn nodes_of(e: &Event) -> Vec<ChatNode> {
     match (e.entity, e.verb, e.kind.as_str()) {
         (Entity::Turn, Verb::Opened, EVENT_USER_MESSAGE) => vec![user_node(e)],
         (Entity::Turn, Verb::Asserted, EVENT_TURN_SUPPLEMENTED) => vec![supplement_node(e)],
@@ -280,11 +280,11 @@ fn nodes_of(e: &Event) -> Vec<ChatMessage> {
 /// （`useChatConnection.ts` 的 `own` 键），合并当场失效、历史里冒出重复节点。
 /// 「用户发言算不算完成态」是一个可以单独讨论的形状改进，但它属于**写侧**，
 /// 不归重建——重建只负责把发生过的事原样折回来（ADR-049 的零行为变更）。
-fn user_node(e: &Event) -> ChatMessage {
-    ChatMessage {
+fn user_node(e: &Event) -> ChatNode {
+    ChatNode {
         id: event_payload_node_id(e, "id"),
-        role: Some(MessageRole::User),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::User),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text(text_of(e, "text"))),
         // `meta` 随载荷复刻（折进的合并补充带 `meta.supplement*`）：双写期它随整份
         // `messages.json` 落盘，切源后必须随用户格事实入格，否则同一条发言在实时面与
@@ -297,7 +297,7 @@ fn user_node(e: &Event) -> ChatMessage {
 
 /// 轮边界折进的补充（`turn × asserted`，缺口 3）：载荷 `{ text, count, id, ids }`。
 ///
-/// 形状**逐字复刻落库那一份**（`v2_exec::supplement_into_request` 的 `ChatMessage`）：
+/// 形状**逐字复刻落库那一份**（`v2_exec::supplement_into_request` 的 `ChatNode`）：
 /// 它**没有** `msg_type`、**没有** `status`，但**有** `meta.supplement*` 三键
 /// （用户消息的合并标记，前端据它认出「这是一次折进」）。重建必须三样都对上，
 /// 否则同一条补充在实时面与重建面是两个节点。
@@ -305,7 +305,7 @@ fn user_node(e: &Event) -> ChatMessage {
 /// `id` 与 `ids` 由**载荷**给出（T-052 的原则：节点身份是事实的一部分）。载荷缺 `id`
 /// （旧事件）时按事件 id 稳定合成——合成的后果已判定可接受：重开后这条的 id 与
 /// 实时面那份不同，但**内容与角色一致**（ADR-049 的「呈现细节可能不同」）。
-fn supplement_node(e: &Event) -> ChatMessage {
+fn supplement_node(e: &Event) -> ChatNode {
     use super::transcript::supplements::{
         META_SUPPLEMENT, META_SUPPLEMENT_COUNT, META_SUPPLEMENT_IDS,
     };
@@ -315,9 +315,9 @@ fn supplement_node(e: &Event) -> ChatMessage {
         .get("ids")
         .cloned()
         .unwrap_or_else(|| serde_json::json!([]));
-    ChatMessage {
+    ChatNode {
         id: event_payload_node_id(e, "id"),
-        role: Some(MessageRole::User),
+        role: Some(NodeRole::User),
         content: Some(MessageContent::Text(text_of(e, "text"))),
         meta: Some(serde_json::json!({
             META_SUPPLEMENT: true,
@@ -340,7 +340,7 @@ fn supplement_node(e: &Event) -> ChatMessage {
 ///
 /// `id` 由载荷给（缺则按事件 id 合成，同 [`supplement_node`]）；`timestamp` 覆写成
 /// 事件自身的 `ts`（构造器取「此刻」会破坏纯函数性，见模块头）。
-fn reported_node(e: &Event) -> ChatMessage {
+fn reported_node(e: &Event) -> ChatNode {
     let draft = super::round_hook::ReportDraft {
         text: text_of(e, "text"),
         tool_rounds: e
@@ -369,7 +369,7 @@ fn reported_node(e: &Event) -> ChatMessage {
 ///
 /// `id` 由载荷给（缺则按事件 id 合成，同 [`reported_node`]）；`timestamp` 覆写成
 /// 事件自身的 `ts`（构造器取「此刻」会破坏纯函数性，见模块头）。
-fn opening_node(e: &Event) -> ChatMessage {
+fn opening_node(e: &Event) -> ChatNode {
     let reason = e
         .payload
         .get("reason")
@@ -391,7 +391,7 @@ fn opening_node(e: &Event) -> ChatMessage {
 /// 形状与 [`super::message_build::llm_build_assistant_messages`] 同源（同一判据：
 /// reasoning-only 时那段内容归 Text 子节点，不另立 Reasoning 子，否则同一段内容
 /// 在存储层出现两份）。
-fn produced_nodes(e: &Event) -> Vec<ChatMessage> {
+fn produced_nodes(e: &Event) -> Vec<ChatNode> {
     // 定稿答话（`Answered` / `Escalate` 的对话面节点）：收束格带 `dialog` 载荷 ⇒
     // 它是一条**根级**节点，不是某个 Turn 的子节点（`parent_id = None`，与用户发言
     // 互为兄弟）。形状经 `compose::dialog_node` **同一构造器**复刻——落库侧那一格
@@ -427,11 +427,11 @@ fn produced_nodes(e: &Event) -> Vec<ChatMessage> {
         }
         let reasoning_id =
             str_of(e, "reasoning_id").unwrap_or_else(|| format!("{}-reasoning", node.id));
-        let reasoning_node = ChatMessage {
+        let reasoning_node = ChatNode {
             id: reasoning_id,
             parent_id: Some(node.id.clone()),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Reasoning),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::Reasoning),
             content: Some(MessageContent::Text(reasoning)),
             status: Some(status_of(e)),
             timestamp: Some(e.ts),
@@ -459,10 +459,10 @@ fn produced_nodes(e: &Event) -> Vec<ChatMessage> {
     let mut nodes = Vec::new();
 
     // Turn 是组合节点（仅分组、无正文）：与 `llm_build_assistant_messages` 同形。
-    nodes.push(ChatMessage {
+    nodes.push(ChatNode {
         id: turn_id.clone(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Turn),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Turn),
         status: Some(status.clone()),
         error: why.clone(),
         timestamp: Some(e.ts),
@@ -474,11 +474,11 @@ fn produced_nodes(e: &Event) -> Vec<ChatMessage> {
     let reasoning_only = !reasoning.trim().is_empty() && reasoning.trim() == text.trim();
 
     if !reasoning.trim().is_empty() && !reasoning_only {
-        nodes.push(ChatMessage {
+        nodes.push(ChatNode {
             id: str_of(e, "reasoning_id").unwrap_or_else(|| format!("{turn_id}-reasoning")),
             parent_id: Some(turn_id.clone()),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Reasoning),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::Reasoning),
             content: Some(MessageContent::Text(reasoning)),
             status: Some(status.clone()),
             timestamp: Some(e.ts),
@@ -510,11 +510,11 @@ fn produced_nodes(e: &Event) -> Vec<ChatMessage> {
 
 /// 一轮中途产出（`rounds[i]`）→ 最多两个子节点（Reasoning / Text）。
 fn push_round_nodes(
-    nodes: &mut Vec<ChatMessage>,
+    nodes: &mut Vec<ChatNode>,
     turn_id: &str,
     i: usize,
     r: &serde_json::Value,
-    status: &MessageStatus,
+    status: &NodeStatus,
     ts: i64,
 ) {
     let get = |k: &str| {
@@ -528,11 +528,11 @@ fn push_round_nodes(
     let reasoning_only = !reasoning.trim().is_empty() && reasoning.trim() == text.trim();
 
     if !reasoning.trim().is_empty() && !reasoning_only {
-        nodes.push(ChatMessage {
+        nodes.push(ChatNode {
             id: get("reasoning_id").unwrap_or_else(|| format!("{turn_id}-r{i}")),
             parent_id: Some(turn_id.to_string()),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Reasoning),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::Reasoning),
             content: Some(MessageContent::Text(reasoning)),
             status: Some(status.clone()),
             timestamp: Some(ts),
@@ -559,7 +559,7 @@ fn push_round_nodes(
 /// （provider 的调用 id）/ `args`（**已定稿的参数文本**）/ `result_id`（结果节点 id）/
 /// `success`。参数走 `llm_build_tool_call_node` 的文本入口——**不经 `Value` 重序列化**
 /// （键序一变，同一次调用在重建前后就是两个内容，见该函数的文档）。
-fn artifact_nodes(e: &Event) -> Vec<ChatMessage> {
+fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
     let Some(turn_id) = str_of(e, "turn_id") else {
         return Vec::new();
     };
@@ -570,7 +570,7 @@ fn artifact_nodes(e: &Event) -> Vec<ChatMessage> {
     let mut nodes = match e.payload.get("round") {
         Some(round) if round.is_object() => {
             let mut v = Vec::new();
-            push_round_nodes(&mut v, &turn_id, 0, round, &MessageStatus::Completed, e.ts);
+            push_round_nodes(&mut v, &turn_id, 0, round, &NodeStatus::Completed, e.ts);
             v
         }
         _ => Vec::new(),
@@ -590,7 +590,7 @@ fn artifact_nodes(e: &Event) -> Vec<ChatMessage> {
         str_of(e, "wire_id"),
     );
     call.timestamp = Some(e.ts);
-    call.status = Some(MessageStatus::Completed);
+    call.status = Some(NodeStatus::Completed);
 
     // 「没跑」类结果的**成因机读码**（not_executed / aborted / overflow_dropped…）：
     // 随载荷入格（`v2_tools` 从结果 meta 提取）就必须随重建出格——只在实时面可见、
@@ -624,13 +624,13 @@ fn artifact_nodes(e: &Event) -> Vec<ChatMessage> {
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     let mut result = if needs_user_action {
-        ChatMessage {
+        ChatNode {
             id: result_id,
             parent_id: Some(call_id.clone()),
-            role: Some(MessageRole::Tool),
-            msg_type: Some(MessageType::UserPrompt),
+            role: Some(NodeRole::Tool),
+            msg_type: Some(NodeKind::UserPrompt),
             content: Some(MessageContent::Text(text_of(e, "text"))),
-            status: Some(MessageStatus::WaitingUserAction),
+            status: Some(NodeStatus::WaitingUserAction),
             meta: Some(serde_json::json!({
                 "prompt": e.payload.get("prompt").cloned().unwrap_or(serde_json::Value::Null),
                 "failure_kind": e
@@ -653,7 +653,7 @@ fn artifact_nodes(e: &Event) -> Vec<ChatMessage> {
         // Completed——标 Failed 会被上下文过滤并多渲染一条 ⚠）。成因码随行入
         // meta（机读），正文本身已是人读的提示。
         if !failure_kind.is_empty() {
-            msg.status = Some(MessageStatus::Completed);
+            msg.status = Some(NodeStatus::Completed);
             if let Some(obj) = msg.meta.as_mut().and_then(|m| m.as_object_mut()) {
                 obj.insert("failure_kind".into(), serde_json::json!(failure_kind));
             }
@@ -689,12 +689,12 @@ fn text_of(e: &Event, key: &str) -> String {
 
 /// 载荷 `status` → 消息状态（未知 / 缺失按 `Completed`——网格里能落格的产出，
 /// 默认语义就是「发生过且结束了」）。
-fn status_of(e: &Event) -> MessageStatus {
+fn status_of(e: &Event) -> NodeStatus {
     match e.payload.get("status").and_then(|v| v.as_str()) {
-        Some("aborted") => MessageStatus::Aborted,
-        Some("failed") => MessageStatus::Failed,
-        Some("pending") => MessageStatus::WaitingUserAction,
-        _ => MessageStatus::Completed,
+        Some("aborted") => NodeStatus::Aborted,
+        Some("failed") => NodeStatus::Failed,
+        Some("pending") => NodeStatus::WaitingUserAction,
+        _ => NodeStatus::Completed,
     }
 }
 

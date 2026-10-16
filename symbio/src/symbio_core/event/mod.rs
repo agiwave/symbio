@@ -167,7 +167,7 @@ pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
 // 会把「一轮开始」与「一段历史被删」压进同一格（准入三问「能归入已有实体？」的
 // 否定一侧）。
 
-/// 一条消息**诞生**（载荷 `{ messages: [<ChatMessage JSON>…] }`）。落在 `message × opened`。
+/// 一条消息**诞生**（载荷 `{ messages: [<ChatNode JSON>…] }`）。落在 `message × opened`。
 ///
 /// ## 为什么需要它（`turn` / `artifact` 不是已经承载了节点吗）
 ///
@@ -193,7 +193,7 @@ pub const EVENT_ARTIFACT_ADDED: &str = "artifact.added";
 /// 与 `message.removed` 的 `ids` 同一条判据：**一个动作一条事实**。一次「诞生若干节点」
 /// 的操作（压缩收口时把记录节点连同收口节点一起写回）落一条，而不是 n 条。
 pub const EVENT_MESSAGE_ADDED: &str = "message.added";
-/// 编辑一条消息（载荷 `{ message: <ChatMessage 的 JSON> }`——补丁**应用后**的整条）。
+/// 编辑一条消息（载荷 `{ message: <ChatNode 的 JSON> }`——补丁**应用后**的整条）。
 /// 落在 `message × asserted`。
 ///
 /// ## 为什么载荷是整条而不是字段子集
@@ -221,7 +221,7 @@ pub const EVENT_MESSAGE_EDITED: &str = "message.edited";
 /// 列表顺序，而顺序是呈现细节，不是事实）。
 pub const EVENT_MESSAGE_REMOVED: &str = "message.removed";
 
-/// 会话历史的**压缩快照**（载荷 `{ messages: [<ChatMessage JSON>…] }`——压缩后的整份列表）。
+/// 会话历史的**压缩快照**（载荷 `{ messages: [<ChatNode JSON>…] }`——压缩后的整份列表）。
 /// 落在 `message × progressed`。
 ///
 /// ## 为什么是 `message × progressed` 而不是 `system`

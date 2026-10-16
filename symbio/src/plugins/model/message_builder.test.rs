@@ -16,20 +16,20 @@
 
 use super::*;
 
-use crate::symbio_core::chat_message::MessageStatus;
+use crate::symbio_core::chat_node::NodeStatus;
 
 const TURN_ID: &str = "turn-0001";
 
 /// 本地构造一棵落库树（Turn 根 + 传入的子节点），形状同
 /// `llm_build_assistant_messages` 的产物——形状契约见文件头说明。
-fn turn_tree(children: Vec<ChatMessage>) -> Vec<ChatMessage> {
-    let mut msgs = vec![ChatMessage {
+fn turn_tree(children: Vec<ChatNode>) -> Vec<ChatNode> {
+    let mut msgs = vec![ChatNode {
         id: TURN_ID.to_string(),
         parent_id: None,
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Turn),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Turn),
         content: None,
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         timestamp: Some(1),
         ..Default::default()
     }];
@@ -38,14 +38,14 @@ fn turn_tree(children: Vec<ChatMessage>) -> Vec<ChatMessage> {
 }
 
 /// 落库树的一个子节点（`parent_id` 指向 [`TURN_ID`]）。
-fn child(id: &str, ty: MessageType, text: &str) -> ChatMessage {
-    ChatMessage {
+fn child(id: &str, ty: NodeKind, text: &str) -> ChatNode {
+    ChatNode {
         id: id.to_string(),
         parent_id: Some(TURN_ID.to_string()),
-        role: Some(MessageRole::Assistant),
+        role: Some(NodeRole::Assistant),
         msg_type: Some(ty),
         content: Some(MessageContent::Text(text.into())),
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         timestamp: Some(1),
         ..Default::default()
     }
@@ -58,25 +58,25 @@ fn child(id: &str, ty: MessageType, text: &str) -> ChatMessage {
 #[test]
 fn tool_call_args_passthrough_as_string_without_reserialize() {
     // ToolCall 必须挂在根级 Turn（assistant）之下才会被聚合成 tool_calls。
-    let turn = ChatMessage {
+    let turn = ChatNode {
         id: TURN_ID.to_string(),
         parent_id: None,
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Turn),
-        status: Some(MessageStatus::Completed),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Turn),
+        status: Some(NodeStatus::Completed),
         ..Default::default()
     };
 
-    let tc = ChatMessage {
+    let tc = ChatNode {
         id: "tc-1".to_string(),
         parent_id: Some(TURN_ID.to_string()),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::ToolCall),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::ToolCall),
         name: Some("echo".to_string()),
         content: Some(MessageContent::Text(
             r#"{"text":"mock 回显内容"}"#.to_string(),
         )),
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         ..Default::default()
     };
 
@@ -109,13 +109,13 @@ fn reasoning_only_flattens_to_single_assistant_message() {
     let reasoning = "只有思考";
     let msgs = turn_tree(vec![child(
         "turn-0001-reason",
-        MessageType::Text,
+        NodeKind::Text,
         reasoning,
     )]);
 
     let natives = flatten_chat_messages(&msgs);
     assert_eq!(natives.len(), 1, "应只产生一条 assistant native message");
-    assert_eq!(natives[0].role, MessageRole::Assistant);
+    assert_eq!(natives[0].role, NodeRole::Assistant);
     assert_eq!(
         natives[0].content.as_ref().map(|c| c.to_text()),
         Some(reasoning.to_string())
@@ -133,8 +133,8 @@ fn reasoning_only_flattens_to_single_assistant_message() {
 #[test]
 fn reasoning_with_reply_flattens_into_content_and_reasoning_content() {
     let msgs = turn_tree(vec![
-        child("turn-0001-reason", MessageType::Reasoning, "思考过程"),
-        child("turn-0001-text", MessageType::Text, "正常回复"),
+        child("turn-0001-reason", NodeKind::Reasoning, "思考过程"),
+        child("turn-0001-text", NodeKind::Text, "正常回复"),
     ]);
 
     let natives = flatten_chat_messages(&msgs);
@@ -153,48 +153,48 @@ fn reasoning_with_reply_flattens_into_content_and_reasoning_content() {
 /// 防止上下文完全没有思考时模型重复思考，同时避免全量回传浪费 token。
 #[test]
 fn flatten_keeps_only_recent_reasoning_in_request_view() {
-    let mk_turn = |turn_id: &str, reasoning: &str, reply: &str| -> Vec<ChatMessage> {
+    let mk_turn = |turn_id: &str, reasoning: &str, reply: &str| -> Vec<ChatNode> {
         vec![
-            ChatMessage {
+            ChatNode {
                 id: turn_id.into(),
                 parent_id: None,
-                role: Some(MessageRole::Assistant),
-                msg_type: Some(MessageType::Turn),
+                role: Some(NodeRole::Assistant),
+                msg_type: Some(NodeKind::Turn),
                 content: None,
-                status: Some(MessageStatus::Completed),
+                status: Some(NodeStatus::Completed),
                 timestamp: Some(1),
                 ..Default::default()
             },
-            ChatMessage {
+            ChatNode {
                 id: format!("{turn_id}-reason"),
                 parent_id: Some(turn_id.into()),
-                role: Some(MessageRole::Assistant),
-                msg_type: Some(MessageType::Reasoning),
+                role: Some(NodeRole::Assistant),
+                msg_type: Some(NodeKind::Reasoning),
                 content: Some(MessageContent::Text(reasoning.into())),
-                status: Some(MessageStatus::Completed),
+                status: Some(NodeStatus::Completed),
                 timestamp: Some(1),
                 ..Default::default()
             },
-            ChatMessage {
+            ChatNode {
                 id: format!("{turn_id}-text"),
                 parent_id: Some(turn_id.into()),
-                role: Some(MessageRole::Assistant),
-                msg_type: Some(MessageType::Text),
+                role: Some(NodeRole::Assistant),
+                msg_type: Some(NodeKind::Text),
                 content: Some(MessageContent::Text(reply.into())),
-                status: Some(MessageStatus::Completed),
+                status: Some(NodeStatus::Completed),
                 timestamp: Some(1),
                 ..Default::default()
             },
         ]
     };
 
-    let mut msgs = vec![ChatMessage {
+    let mut msgs = vec![ChatNode {
         id: "u1".into(),
         parent_id: None,
-        role: Some(MessageRole::User),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::User),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text("开始".into())),
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         timestamp: Some(0),
         ..Default::default()
     }];
@@ -206,7 +206,7 @@ fn flatten_keeps_only_recent_reasoning_in_request_view() {
 
     let assistant: Vec<&NativeMessage> = natives
         .iter()
-        .filter(|n| n.role == MessageRole::Assistant)
+        .filter(|n| n.role == NodeRole::Assistant)
         .collect();
     assert_eq!(assistant.len(), 3, "三个 Turn 都应聚合为 assistant 消息");
 
@@ -242,44 +242,44 @@ fn orphan_tool_result_is_dropped() {
     let dead_tc_id = "tc-already-filtered"; // 该 tool_call 已被上下文过滤，列表中不存在
 
     let msgs = vec![
-        ChatMessage {
+        ChatNode {
             id: "u1".into(),
             parent_id: None,
-            role: Some(MessageRole::User),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::User),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text("hello".into())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             timestamp: Some(1),
             ..Default::default()
         },
-        ChatMessage {
+        ChatNode {
             id: turn_id.into(),
             parent_id: None,
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Turn),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::Turn),
             content: None,
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             timestamp: Some(2),
             ..Default::default()
         },
-        ChatMessage {
+        ChatNode {
             id: "r1".into(),
             parent_id: Some(turn_id.into()),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text("ok".into())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             timestamp: Some(2),
             ..Default::default()
         },
         // 孤儿工具结果：parent_id 指向已不存在的 tool_call
-        ChatMessage {
+        ChatNode {
             id: "orphan-tool".into(),
             parent_id: Some(dead_tc_id.into()),
-            role: Some(MessageRole::Tool),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::Tool),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text("stale result".into())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             timestamp: Some(3),
             ..Default::default()
         },
@@ -287,7 +287,7 @@ fn orphan_tool_result_is_dropped() {
 
     let natives = flatten_chat_messages(&msgs);
     assert!(
-        natives.iter().all(|n| n.role != MessageRole::Tool),
+        natives.iter().all(|n| n.role != NodeRole::Tool),
         "孤儿 tool 结果不得进入 LLM 请求包"
     );
 }
@@ -300,61 +300,61 @@ fn linked_tool_result_is_retained() {
     let tc_id = "tc-linked";
 
     let msgs = vec![
-        ChatMessage {
+        ChatNode {
             id: "u1".into(),
             parent_id: None,
-            role: Some(MessageRole::User),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::User),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text("read?".into())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             timestamp: Some(1),
             ..Default::default()
         },
-        ChatMessage {
+        ChatNode {
             id: turn_id.into(),
             parent_id: None,
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Turn),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::Turn),
             content: None,
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             timestamp: Some(2),
             ..Default::default()
         },
-        ChatMessage {
+        ChatNode {
             id: "r1".into(),
             parent_id: Some(turn_id.into()),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text("let me read".into())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             timestamp: Some(2),
             ..Default::default()
         },
-        ChatMessage {
+        ChatNode {
             id: tc_id.into(),
             parent_id: Some(turn_id.into()),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::ToolCall),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::ToolCall),
             name: Some("read_file".into()),
             content: Some(MessageContent::Text("{}".into())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             timestamp: Some(2),
             ..Default::default()
         },
-        ChatMessage {
+        ChatNode {
             id: "res1".into(),
             parent_id: Some(tc_id.into()),
-            role: Some(MessageRole::Tool),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::Tool),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text("file content".into())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             timestamp: Some(3),
             ..Default::default()
         },
     ];
 
     let natives = flatten_chat_messages(&msgs);
-    let tool_native = natives.iter().find(|n| n.role == MessageRole::Tool);
+    let tool_native = natives.iter().find(|n| n.role == NodeRole::Tool);
     assert!(tool_native.is_some(), "合法 tool 结果必须保留");
     assert_eq!(tool_native.unwrap().tool_call_id.as_deref(), Some(tc_id));
 }
@@ -364,23 +364,23 @@ fn linked_tool_result_is_retained() {
 #[test]
 fn empty_assistant_turn_is_dropped() {
     let msgs = vec![
-        ChatMessage {
+        ChatNode {
             id: "u1".into(),
             parent_id: None,
-            role: Some(MessageRole::User),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::User),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text("hi".into())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             timestamp: Some(1),
             ..Default::default()
         },
-        ChatMessage {
+        ChatNode {
             id: "turn-empty".into(),
             parent_id: None,
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Turn),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::Turn),
             content: None,
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             timestamp: Some(2),
             ..Default::default()
         },
@@ -388,7 +388,7 @@ fn empty_assistant_turn_is_dropped() {
 
     let natives = flatten_chat_messages(&msgs);
     assert_eq!(natives.len(), 1, "空 assistant 回合不应进入 LLM 请求");
-    assert_eq!(natives[0].role, MessageRole::User);
+    assert_eq!(natives[0].role, NodeRole::User);
 }
 
 /// `to_api_value` 对缺失 content 的消息兜底为空串而非 null：
@@ -396,7 +396,7 @@ fn empty_assistant_turn_is_dropped() {
 #[test]
 fn to_api_value_uses_empty_string_for_missing_content() {
     let user = NativeMessage {
-        role: MessageRole::User,
+        role: NodeRole::User,
         content: None,
         ..Default::default()
     };
@@ -407,7 +407,7 @@ fn to_api_value_uses_empty_string_for_missing_content() {
     );
 
     let assistant_no_tc = NativeMessage {
-        role: MessageRole::Assistant,
+        role: NodeRole::Assistant,
         content: None,
         ..Default::default()
     };
@@ -429,7 +429,7 @@ fn to_api_value_keeps_null_for_assistant_with_tool_calls() {
         arguments: serde_json::json!({}),
     }];
     let m = NativeMessage {
-        role: MessageRole::Assistant,
+        role: NodeRole::Assistant,
         content: None,
         tool_calls: Some(tool_calls),
         ..Default::default()
@@ -451,44 +451,44 @@ fn to_api_value_keeps_null_for_assistant_with_tool_calls() {
 #[test]
 fn failed_turn_visible_with_interrupt_note() {
     let msgs = vec![
-        ChatMessage {
+        ChatNode {
             id: "u1".into(),
             parent_id: None,
-            role: Some(MessageRole::User),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::User),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text("讲讲并发".into())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             timestamp: Some(1),
             ..Default::default()
         },
-        ChatMessage {
+        ChatNode {
             id: "turn-x".into(),
             parent_id: None,
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Turn),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::Turn),
             content: None,
-            status: Some(MessageStatus::Failed),
+            status: Some(NodeStatus::Failed),
             error: Some("用户中止".into()),
             timestamp: Some(2),
             ..Default::default()
         },
-        ChatMessage {
+        ChatNode {
             id: "turn-x-text".into(),
             parent_id: Some("turn-x".into()),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text("Go 的 channel 是…".into())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             timestamp: Some(2),
             ..Default::default()
         },
-        ChatMessage {
+        ChatNode {
             id: "u2".into(),
             parent_id: None,
-            role: Some(MessageRole::User),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::User),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text("换个思路".into())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             timestamp: Some(3),
             ..Default::default()
         },
@@ -496,9 +496,9 @@ fn failed_turn_visible_with_interrupt_note() {
 
     let natives = flatten_chat_messages(&msgs);
     assert_eq!(natives.len(), 3, "user1 + 失败 assistant + user2");
-    assert_eq!(natives[0].role, MessageRole::User);
-    assert_eq!(natives[1].role, MessageRole::Assistant);
-    assert_eq!(natives[2].role, MessageRole::User);
+    assert_eq!(natives[0].role, NodeRole::User);
+    assert_eq!(natives[1].role, NodeRole::Assistant);
+    assert_eq!(natives[2].role, NodeRole::User);
 
     let text = natives[1].content.as_ref().map(|c| c.to_text()).unwrap();
     assert!(
@@ -514,23 +514,23 @@ fn failed_turn_visible_with_interrupt_note() {
 #[test]
 fn failed_turn_without_children_survives_with_note() {
     let msgs = vec![
-        ChatMessage {
+        ChatNode {
             id: "u1".into(),
             parent_id: None,
-            role: Some(MessageRole::User),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::User),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text("hi".into())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             timestamp: Some(1),
             ..Default::default()
         },
-        ChatMessage {
+        ChatNode {
             id: "turn-empty".into(),
             parent_id: None,
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Turn),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::Turn),
             content: None,
-            status: Some(MessageStatus::Failed),
+            status: Some(NodeStatus::Failed),
             timestamp: Some(2),
             ..Default::default()
         },
@@ -538,7 +538,7 @@ fn failed_turn_without_children_survives_with_note() {
 
     let natives = flatten_chat_messages(&msgs);
     assert_eq!(natives.len(), 2, "失败 Turn 携带中断说明，不得被清洗丢弃");
-    assert_eq!(natives[1].role, MessageRole::Assistant);
+    assert_eq!(natives[1].role, NodeRole::Assistant);
     let text = natives[1].content.as_ref().map(|c| c.to_text()).unwrap();
     assert!(text.contains("本轮回复被中断"));
 }
@@ -548,35 +548,35 @@ fn failed_turn_without_children_survives_with_note() {
 #[test]
 fn interrupted_tool_call_gets_placeholder_result() {
     let msgs = vec![
-        ChatMessage {
+        ChatNode {
             id: "u1".into(),
             parent_id: None,
-            role: Some(MessageRole::User),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::User),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text("跑下测试".into())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             timestamp: Some(1),
             ..Default::default()
         },
-        ChatMessage {
+        ChatNode {
             id: "turn-tc".into(),
             parent_id: None,
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Turn),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::Turn),
             content: None,
-            status: Some(MessageStatus::Failed),
+            status: Some(NodeStatus::Failed),
             error: Some("用户中止".into()),
             timestamp: Some(2),
             ..Default::default()
         },
-        ChatMessage {
+        ChatNode {
             id: "tc-x".into(),
             parent_id: Some("turn-tc".into()),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::ToolCall),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::ToolCall),
             name: Some("run_tests".into()),
             content: Some(MessageContent::Text("{}".into())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             timestamp: Some(2),
             ..Default::default()
         },
@@ -585,7 +585,7 @@ fn interrupted_tool_call_gets_placeholder_result() {
     let natives = flatten_chat_messages(&msgs);
     let tool = natives
         .iter()
-        .find(|n| n.role == MessageRole::Tool)
+        .find(|n| n.role == NodeRole::Tool)
         .expect("无结果的 ToolCall 必须合成占位 tool 结果");
     assert_eq!(tool.tool_call_id.as_deref(), Some("tc-x"));
     let text = tool.content.as_ref().map(|c| c.to_text()).unwrap();
@@ -594,7 +594,7 @@ fn interrupted_tool_call_gets_placeholder_result() {
 
     let assistant = natives
         .iter()
-        .find(|n| n.role == MessageRole::Assistant)
+        .find(|n| n.role == NodeRole::Assistant)
         .expect("失败 Turn 仍应聚合为 assistant");
     assert_eq!(
         assistant.tool_calls.as_ref().map(|c| c.len()),
@@ -609,37 +609,37 @@ fn interrupted_tool_call_gets_placeholder_result() {
 fn failed_tool_result_sets_success_false() {
     let mk_turn_with_tool = |turn_id: &str, tc_id: &str, res_id: &str, failed: bool| {
         vec![
-            ChatMessage {
+            ChatNode {
                 id: turn_id.into(),
                 parent_id: None,
-                role: Some(MessageRole::Assistant),
-                msg_type: Some(MessageType::Turn),
+                role: Some(NodeRole::Assistant),
+                msg_type: Some(NodeKind::Turn),
                 content: None,
-                status: Some(MessageStatus::Completed),
+                status: Some(NodeStatus::Completed),
                 timestamp: Some(1),
                 ..Default::default()
             },
-            ChatMessage {
+            ChatNode {
                 id: tc_id.into(),
                 parent_id: Some(turn_id.into()),
-                role: Some(MessageRole::Assistant),
-                msg_type: Some(MessageType::ToolCall),
+                role: Some(NodeRole::Assistant),
+                msg_type: Some(NodeKind::ToolCall),
                 name: Some("read_file".into()),
                 content: Some(MessageContent::Text("{}".into())),
-                status: Some(MessageStatus::Completed),
+                status: Some(NodeStatus::Completed),
                 timestamp: Some(1),
                 ..Default::default()
             },
-            ChatMessage {
+            ChatNode {
                 id: res_id.into(),
                 parent_id: Some(tc_id.into()),
-                role: Some(MessageRole::Tool),
-                msg_type: Some(MessageType::Text),
+                role: Some(NodeRole::Tool),
+                msg_type: Some(NodeKind::Text),
                 content: Some(MessageContent::Text("result".into())),
                 status: Some(if failed {
-                    MessageStatus::Failed
+                    NodeStatus::Failed
                 } else {
-                    MessageStatus::Completed
+                    NodeStatus::Completed
                 }),
                 timestamp: Some(2),
                 ..Default::default()
@@ -655,7 +655,7 @@ fn failed_tool_result_sets_success_false() {
         .iter()
         .find(|n| n.tool_call_id.as_deref() == Some("tc-f"))
         .expect("失败工具结果应保留");
-    assert_eq!(failed_tool.role, MessageRole::Tool);
+    assert_eq!(failed_tool.role, NodeRole::Tool);
     assert_eq!(
         failed_tool.success,
         Some(false),
@@ -676,25 +676,25 @@ fn failed_tool_result_sets_success_false() {
 #[test]
 fn compression_nodes_are_excluded_from_request_view() {
     let msgs = vec![
-        ChatMessage {
+        ChatNode {
             id: "u1".into(),
-            role: Some(MessageRole::User),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::User),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text("问题".into())),
             ..Default::default()
         },
-        ChatMessage {
+        ChatNode {
             id: "c1".into(),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Compression),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::Compression),
             content: Some(MessageContent::Text("已压缩上下文（12 → 4 条）".into())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             ..Default::default()
         },
     ];
     let natives = flatten_chat_messages(&msgs);
     assert_eq!(natives.len(), 1, "压缩节点必须被剔除出请求包");
-    assert_eq!(natives[0].role, MessageRole::User);
+    assert_eq!(natives[0].role, NodeRole::User);
 }
 
 /// **C-D3**：带 `meta.exclude_from_context` 的节点不进请求包。
@@ -709,26 +709,26 @@ fn compression_nodes_are_excluded_from_request_view() {
 #[test]
 fn nodes_marked_exclude_from_context_are_dropped() {
     let msgs = vec![
-        ChatMessage {
+        ChatNode {
             id: "u1".into(),
-            role: Some(MessageRole::User),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::User),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text("读一下 README".into())),
             ..Default::default()
         },
-        ChatMessage {
+        ChatNode {
             id: "f1".into(),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text("好的，我去看看。".into())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             meta: Some(serde_json::json!({ "surface": "reply", "exclude_from_context": true })),
             ..Default::default()
         },
     ];
     let natives = flatten_chat_messages(&msgs);
     assert_eq!(natives.len(), 1, "标记节点必须被剔除出请求包");
-    assert_eq!(natives[0].role, MessageRole::User);
+    assert_eq!(natives[0].role, NodeRole::User);
 }
 
 /// 标记的**取值**是判据，不是"有没有 `meta`"：
@@ -737,28 +737,28 @@ fn nodes_marked_exclude_from_context_are_dropped() {
 #[test]
 fn unmarked_meta_nodes_still_enter_the_request_view() {
     let msgs = vec![
-        ChatMessage {
+        ChatNode {
             id: "u1".into(),
-            role: Some(MessageRole::User),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::User),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text("读一下 README".into())),
             ..Default::default()
         },
-        ChatMessage {
+        ChatNode {
             id: "f1".into(),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text("好的，我去看看。".into())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             meta: Some(serde_json::json!({ "surface": "reply" })),
             ..Default::default()
         },
-        ChatMessage {
+        ChatNode {
             id: "f2".into(),
-            role: Some(MessageRole::Assistant),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::Assistant),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text("显式 false 也不剔除".into())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             meta: Some(serde_json::json!({ "exclude_from_context": false })),
             ..Default::default()
         },

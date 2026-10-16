@@ -38,8 +38,8 @@ use super::chat_session::{Carrier, MessageChange};
 use super::tools::{apply_not_executed, execute_tool_async};
 use super::transcript::{llm_emit_removed, llm_emit_state};
 use super::v2_exec::ResumedTool;
-use crate::symbio_core::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType, ResumeAction,
+use crate::symbio_core::chat_node::{
+    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind, ResumeAction,
     ResumeRequest,
 };
 use crate::symbio_core::{llm_emit_message, llm_short_id};
@@ -123,7 +123,7 @@ async fn process_retry_turn(
     // 2. 定位 Failed Turn（target_id 指向，msg_type=Turn）
     let turn_exists = messages
         .iter()
-        .any(|m| m.id == req.target_id && m.msg_type == Some(MessageType::Turn));
+        .any(|m| m.id == req.target_id && m.msg_type == Some(NodeKind::Turn));
     if !turn_exists {
         return Err(PluginError::NotFound(format!(
             "未找到 Failed Turn 节点: {}",
@@ -144,7 +144,7 @@ async fn process_retry_turn(
     }
 
     // 4. 从 messages 中删除这些节点（保留删除前副本用于广播）
-    let deleted_messages: Vec<ChatMessage> = messages
+    let deleted_messages: Vec<ChatNode> = messages
         .iter()
         .filter(|m| to_delete.contains(&m.id))
         .cloned()
@@ -195,7 +195,7 @@ async fn process_tool_resume_action(
     // 2. 定位 ToolCall 父节点
     let tc_idx = messages
         .iter()
-        .position(|m| m.id == req.target_id && m.msg_type == Some(MessageType::ToolCall));
+        .position(|m| m.id == req.target_id && m.msg_type == Some(NodeKind::ToolCall));
     let tc_idx = match tc_idx {
         Some(i) => i,
         None => {
@@ -209,9 +209,9 @@ async fn process_tool_resume_action(
     // 3. 定位待恢复子节点（user_prompt 或 Failed/WaitingUserAction Text）
     let child_idx = messages.iter().position(|m| {
         m.parent_id.as_deref() == Some(&req.target_id)
-            && (m.msg_type == Some(MessageType::UserPrompt)
-                || m.status == Some(MessageStatus::Failed)
-                || m.status == Some(MessageStatus::WaitingUserAction))
+            && (m.msg_type == Some(NodeKind::UserPrompt)
+                || m.status == Some(NodeStatus::Failed)
+                || m.status == Some(NodeStatus::WaitingUserAction))
     });
     let child_idx = match child_idx {
         Some(i) => i,
@@ -250,7 +250,7 @@ async fn process_tool_resume_action(
         match messages.iter().find(|m| m.id == req.target_id) {
             Some(tc) => {
                 let mut running = tc.clone();
-                running.status = Some(MessageStatus::Streaming);
+                running.status = Some(NodeStatus::Streaming);
                 let mut meta = running.meta.clone().unwrap_or_else(|| json!({}));
                 if let Some(obj) = meta.as_object_mut() {
                     obj.insert(
@@ -361,16 +361,16 @@ async fn process_tool_resume_action(
     // 7. 创建新子节点（新 id，Text 类型，工具结果）
     let new_child_id = llm_short_id();
     let now_ts = crate::symbio_core::clock_now_ms();
-    let new_child = ChatMessage {
+    let new_child = ChatNode {
         id: new_child_id.clone(),
         parent_id: Some(req.target_id.clone()),
-        role: Some(MessageRole::Tool),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::Tool),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text(final_result_text.clone())),
         status: Some(if final_success {
-            MessageStatus::Completed
+            NodeStatus::Completed
         } else {
-            MessageStatus::Failed
+            NodeStatus::Failed
         }),
         meta: Some(json!({"success": final_success})),
         timestamp: Some(now_ts),
@@ -385,9 +385,9 @@ async fn process_tool_resume_action(
         tc_idx
     };
     let final_parent_status = if final_success {
-        MessageStatus::Completed
+        NodeStatus::Completed
     } else {
-        MessageStatus::Failed
+        NodeStatus::Failed
     };
     let tc = &mut messages[tc_idx_adjusted];
     tc.status = Some(final_parent_status);
@@ -498,10 +498,10 @@ async fn process_tool_resume_action(
 /// 多渲染一份错误文本，而中止本来就不是错误；用独立写法则会让同一语义长出第二
 /// 份定义，日后改一处漏一处。
 fn finalize_aborted_parent(
-    messages: &mut [ChatMessage],
+    messages: &mut [ChatNode],
     tc_idx: usize,
     _tool_call_id: &str,
-) -> ChatMessage {
+) -> ChatNode {
     let tc = messages
         .get_mut(tc_idx)
         .expect("步骤 2 已校验过 tc_idx 有效");
@@ -554,7 +554,7 @@ async fn reexecute_tool(
 /// - **Failed Text 子节点**（工具执行失败重试场景）：从 ToolCall 父节点的 `meta`
 ///   提取 tool_name/args，或从 `content`（args JSON 字符串）解析
 fn extract_tool_context(
-    messages: &[ChatMessage],
+    messages: &[ChatNode],
     tc_idx: usize,
     child_idx: usize,
 ) -> (String, Value, String) {
@@ -562,7 +562,7 @@ fn extract_tool_context(
     let child = &messages[child_idx];
 
     // 优先从子节点（user_prompt）的 meta.prompt 提取（confirm/ask_user 场景）
-    if child.msg_type == Some(MessageType::UserPrompt) {
+    if child.msg_type == Some(NodeKind::UserPrompt) {
         if let Some(prompt) = child.meta.as_ref().and_then(|m| m.get("prompt")) {
             let tool_name = prompt
                 .get("tool_name")

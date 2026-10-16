@@ -9,7 +9,7 @@ use std::sync::Arc;
 // ## 信封**没有操作枚举**：`{path, data?}`，语义全在 `data` 的字段上
 //
 // 信封只回答「**哪条路径、带来了什么**」：`data` 是该路径的**业务载荷**——
-// 路径是消息项（`<id>/message/<mid>`）时它是 `ChatMessage`（`delta` 有 ⇒ 尾部追加、
+// 路径是消息项（`<id>/message/<mid>`）时它是 `ChatNode`（`delta` 有 ⇒ 尾部追加、
 // `content` 有 ⇒ 整条替换、`status = removed` ⇒ 就地移除，语义由字段本身给出，
 // 不从类型反推）；路径是会话叶子且带视图时它是 `VdfsNode`（全量节点视图，幂等）。
 // `data` 缺失 = 「变了，但本变更不携带载荷」——消费端按需回读；对**资源域**的
@@ -20,7 +20,7 @@ use std::sync::Arc;
 // | `data` 形状 | 生产者 |
 // |---|---|
 // | 缺失 | 全部 provider 的资源信号（`grep -rn "VdfsChange::bare("`） |
-// | `ChatMessage`（含 `delta`） | 消息域——`session/transcript.rs` 的 `Transcript::apply` |
+// | `ChatNode`（含 `delta`） | 消息域——`session/transcript.rs` 的 `Transcript::apply` |
 // | `VdfsNode` | 会话运行态——`Transcript::emit_session_state` |
 //
 // ## 为什么没有操作枚举
@@ -28,7 +28,7 @@ use std::sync::Arc;
 // 形状收敛到 `{path, data?}` 的取舍见 ADR-025：「资源层面发生了什么」与 `data`
 // 描述的「业务数据变成了什么」是同一件事的两种说法，而消费端真正消费的只有后者——
 // 保留前者只会让每个消费端都背上一次「枚举 → 分派」的翻译。删除的表达力由此让位给
-// 「载荷缺失 + 回读 `NotFound`」，消息的删除由 `ChatMessage.status = removed` 承载
+// 「载荷缺失 + 回读 `NotFound`」，消息的删除由 `ChatNode.status = removed` 承载
 // （消息词汇本就有它）。
 
 /// 数据变更事件（**provider 视角**）。
@@ -39,7 +39,7 @@ use std::sync::Arc;
 ///
 /// ## 形状：`path` + 可选 `data`
 ///
-/// `data` 是**业务载荷**：消息项上是 `ChatMessage`（字段语义见模块文档的词汇表），
+/// `data` 是**业务载荷**：消息项上是 `ChatNode`（字段语义见模块文档的词汇表），
 /// 会话叶子的运行态上是 `VdfsNode`。**缺失 = 无载荷**——不是一种「类型」，而是
 /// 「本次变更不带业务数据」：消费端按需回读（幂等），回读 `NotFound` 即删除。
 ///
@@ -53,7 +53,7 @@ use std::sync::Arc;
 pub struct VdfsChange {
     /// 变更节点在本 provider 子树内的相对路径
     pub path: String,
-    /// 业务载荷（`ChatMessage` / `VdfsNode` 的 JSON）；缺失 = 无载荷（回读收敛）
+    /// 业务载荷（`ChatNode` / `VdfsNode` 的 JSON）；缺失 = 无载荷（回读收敛）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<Value>,
 }

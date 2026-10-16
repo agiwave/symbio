@@ -33,7 +33,7 @@ use super::chat_session::MessageChange;
 use super::paths::session_id_from_new_path;
 use super::plugin::SessionPlugin;
 use super::types::Session;
-use crate::symbio_core::chat_message as cm;
+use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::clock_now_ms;
 use crate::symbio_core::PluginError;
 use serde_json::{json, Value};
@@ -250,8 +250,8 @@ impl SessionPlugin {
         &self,
         session_id: &str,
         mid: &str,
-        patch: &cm::ChatMessage,
-    ) -> Result<cm::ChatMessage, PluginError> {
+        patch: &cm::ChatNode,
+    ) -> Result<cm::ChatNode, PluginError> {
         if patch.id != mid {
             return Err(PluginError::ValidationError(format!(
                 "消息补丁的 id（{}）与地址不符（{mid}）：地址是消息身份的唯一权威",
@@ -288,7 +288,7 @@ impl SessionPlugin {
         } else if patch
             .status
             .as_ref()
-            .map(|s| *s != cm::MessageStatus::Failed)
+            .map(|s| *s != cm::NodeStatus::Failed)
             .unwrap_or(false)
         {
             // 状态不再是 Failed 时，顺带清掉旧的 error，避免残留误导。
@@ -373,7 +373,7 @@ impl SessionPlugin {
         // 一遍：对"删掉若干条"这个动作，逐条通知恰好是更便宜的形态。回执里的
         // `deleted_ids` 是权威列表：调用方据此幂等对齐本地视图，不依赖推送。
         if !deleted_ids.is_empty() {
-            let frames: Vec<cm::ChatMessage> = deleted_ids
+            let frames: Vec<cm::ChatNode> = deleted_ids
                 .iter()
                 .map(|id| crate::symbio_core::llm_removed_frame(id))
                 .collect();

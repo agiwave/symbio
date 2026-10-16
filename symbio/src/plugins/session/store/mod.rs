@@ -63,7 +63,7 @@
 //! 子会话 id 由系统生成，与顶层 id 同一格式约束。临时会话无目录概念，
 //! 因此不参与嵌套（`list_sub_sessions` 恒空、`session_dir` 恒 `None`）。
 
-use super::types::{ChatMessage, Session, SessionSummary};
+use super::types::{ChatNode, Session, SessionSummary};
 use crate::plugins::session::paths;
 use crate::symbio_core::PluginError;
 use serde::{Deserialize, Serialize};
@@ -415,7 +415,7 @@ struct SessionMetaFile {
     /// 旧布局把消息内联在这里。新布局**不写**该字段；读的时候仍要认，
     /// 否则存量会话会读成空。
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    messages: Option<Vec<ChatMessage>>,
+    messages: Option<Vec<ChatNode>>,
 }
 
 impl SessionMetaFile {
@@ -434,7 +434,7 @@ impl SessionMetaFile {
     }
 
     /// 补上消息，得到完整 `Session`
-    fn into_session(self, messages: Vec<ChatMessage>) -> Session {
+    fn into_session(self, messages: Vec<ChatNode>) -> Session {
         Session {
             id: self.id,
             messages,
@@ -480,7 +480,7 @@ impl SessionMetaFile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct MessagesFile {
     #[serde(default)]
-    messages: Vec<ChatMessage>,
+    messages: Vec<ChatNode>,
 }
 
 /// 原子写：先落 tmp 再 rename。
@@ -505,7 +505,7 @@ fn parse_meta_content(content: &str) -> Option<SessionMetaFile> {
     parse_or_self_heal::<SessionMetaFile>(content)
 }
 
-fn parse_messages_content(content: &str) -> Option<Vec<ChatMessage>> {
+fn parse_messages_content(content: &str) -> Option<Vec<ChatNode>> {
     parse_or_self_heal::<MessagesFile>(content).map(|f| f.messages)
 }
 
@@ -523,7 +523,7 @@ fn parse_or_self_heal<T: serde::de::DeserializeOwned>(content: &str) -> Option<T
 /// 读消息——**真源是 `v2-events.wal`**（ADR-049）：
 /// 有 WAL 就从它重建；WAL 不在才回落 `messages.json` / 元数据内联（v1 时代
 /// 的遗留布局——那批会话的事实从未入格，文件是它们的唯一记录）。
-async fn load_messages(dir: &Path, meta: &SessionMetaFile) -> Vec<ChatMessage> {
+async fn load_messages(dir: &Path, meta: &SessionMetaFile) -> Vec<ChatNode> {
     if let Some(msgs) = rebuild_from_wal_dir(dir) {
         return msgs;
     }
@@ -540,7 +540,7 @@ async fn load_messages(dir: &Path, meta: &SessionMetaFile) -> Vec<ChatMessage> {
 ///
 /// WAL 不在 / 打不开 ⇒ `None`（调用方回落遗留读法——**没有 WAL 不等于没有历史**，
 /// v1 时代落的 `messages.json` 仍是那批会话的唯一记录）。只读打开：读路径无写副作用。
-fn rebuild_from_wal_dir(dir: &Path) -> Option<Vec<ChatMessage>> {
+fn rebuild_from_wal_dir(dir: &Path) -> Option<Vec<ChatNode>> {
     let path = dir.join(crate::plugins::session::paths::V2_WAL_FILE);
     if !path.exists() {
         return None;
@@ -554,7 +554,7 @@ fn rebuild_from_wal_dir(dir: &Path) -> Option<Vec<ChatMessage>> {
 }
 
 /// 同步版读 `messages.json`
-fn read_messages_sync(dir: &Path) -> Option<Vec<ChatMessage>> {
+fn read_messages_sync(dir: &Path) -> Option<Vec<ChatNode>> {
     let content = std::fs::read_to_string(dir.join(MESSAGES_FILE_NAME)).ok()?;
     parse_messages_content(&content)
 }

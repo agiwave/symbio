@@ -60,14 +60,14 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { ChatMessage } from '@/schemas/chat_message'
+import type { ChatNode } from '@/schemas/chat_node'
 // 副作用导入：装配点把「标识 → 组件」登记进 messageTypes 的注册表。
 // 分派器因此**不需要知道任何具体组件**（新增渲染器不必改这里）。
 import '@/registry/messageRenderers'
 import { facetsOf, resolveMessageRenderer, type MessageFacets } from '@/registry/messageTypes'
 
 const props = defineProps<{
-  node: ChatMessage
+  node: ChatNode
   /** 嵌套深度：0 = 主会话根级；>0 = 工具 / 子 agent 内部的子会话流层级 */
   depth?: number
   /** 父节点类型：参与 `facets` 推导（工具返回 / 正文直排），不再往下透传 */

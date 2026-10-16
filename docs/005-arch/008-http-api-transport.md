@@ -167,12 +167,12 @@ WS /api/v1/ws?token=<token>
 - **信封没有操作枚举**（S27）：形状 `{path, data?}`。**`path` 恒为被变更节点自身的
   地址**——会话是容器，其下是若干并列的集合（消息 / 子会话 / 记忆 / 工作目录……），
   集合项的形状统一为 `<sid>/<集合段>/<项 id>`，消息帧的落点就是 `<sid>/message/<mid>`
-  这个节点，**身份在地址末段**（与 `data.id` 同一事实）。`data` 就是那条 `ChatMessage`：
+  这个节点，**身份在地址末段**（与 `data.id` 同一事实）。`data` 就是那条 `ChatNode`：
   `delta` ⇒ **尾部追加**（零回读）、`content` ⇒ 整条替换、`status = removed` ⇒ 就地
   移除；运行态帧落在会话节点 `<sid>` 上，`data` 是全量节点视图，就地落定。
 - **无载荷变更** ⇒ 回读 / 重拉（`vdfs/read` 拿到的是**已含增量**的正文）；
   资源删除回读 `stat` 得 `NotFound` 即删除。
-- **不要按到达顺序拼**：每条变更都带 `path`，节点**自带位置**（`ChatMessage.seq`）。
+- **不要按到达顺序拼**：每条变更都带 `path`，节点**自带位置**（`ChatNode.seq`）。
   两个并行工具的变更会**混着到**、后生成的**先到**，按 `path` 分派、按 `seq` 排序即可。
 - **丢了怎么办**：`event_bus` 通道满时**不摘除订阅**，会补送一条 resync 指令
   （`data.data.type == "resync"`）——收到就按自己的作用域**整份重读**（幂等，安全）。
@@ -187,7 +187,7 @@ WS /api/v1/ws?token=<token>
 > `session/stream`」；
 > ③ 2026-09-23（[ADR-025](../010-adr/025.md)）
 > 判定 ② 的两条理由**把「数据的属性」当成了「传输的属性」**——顺序是**节点属性**
-> （`ChatMessage.seq`），「追加」不是新取值而是 `updated` 上的 `delta` 字段——实时面
+> （`ChatNode.seq`），「追加」不是新取值而是 `updated` 上的 `delta` 字段——实时面
 > **迁回** `vdfs/watch`，本节再次改写。② 那一版（「订阅 `session/stream`」）已随
 > `session/stream` 退役而作废。
 

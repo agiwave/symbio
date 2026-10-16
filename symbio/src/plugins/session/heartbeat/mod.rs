@@ -7,7 +7,7 @@
 
 use super::active::PreemptPending;
 use super::plugin::SessionPlugin;
-use crate::symbio_core::chat_message as cm;
+use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::clock_now_ms;
 use crate::symbio_core::session_chat;
 use crate::symbio_core::{
@@ -256,12 +256,12 @@ impl SessionPlugin {
             return false;
         }
         let now = clock_now_ms();
-        let user_msg = cm::ChatMessage {
+        let user_msg = cm::ChatNode {
             id: format!("hb_{}_{}", session_id, now),
-            role: Some(cm::MessageRole::User),
-            msg_type: Some(cm::MessageType::Text),
+            role: Some(cm::NodeRole::User),
+            msg_type: Some(cm::NodeKind::Text),
             content: Some(cm::MessageContent::Text(hb.prompt.clone())),
-            status: Some(cm::MessageStatus::Completed),
+            status: Some(cm::NodeStatus::Completed),
             timestamp: Some(now),
             // 标记这是系统心跳任务自动发送的消息，便于前端区分展示
             meta: Some(serde_json::json!({ "heartbeat": true })),

@@ -243,7 +243,7 @@ console.log()
 // `status` 是跨进程边界的字符串，改了常量而漏掉字面量，前端只会静默认不出状态。
 //
 // 该词表**曾经**把「以错误结束」从 `error` 改名为 `failed`（理由见
-// `VDFS_STATUS_FAILED` 的文档：与消息层 `MessageStatus::Failed` 同词），而
+// `VDFS_STATUS_FAILED` 的文档：与消息层 `NodeStatus::Failed` 同词），而
 // `symbio_core::schemas::options.rs`（**该文件已于 2026-09-23 随会话选项 schema 化
 // 删除**）里留了一枚 `OPTION_STATUS_ERROR = "error"` 的化石、`mcp` / `skill` /
 // `model` 三个插件各自手写 `"unknown"` / `"active"` / `"disabled"`——共 6 处。

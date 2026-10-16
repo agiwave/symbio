@@ -1,18 +1,18 @@
 //! 消息构造与会话持久化
 //!
 //! 负责：
-//! - 构造 ChatMessage（assistant 消息、tool result 消息）
+//! - 构造 ChatNode（assistant 消息、tool result 消息）
 //! - 将对话轮次产生的新消息保存到 session
 
 use std::collections::{HashMap, HashSet};
 
-use crate::symbio_core::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
+use crate::symbio_core::chat_node::{
+    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind,
 };
 
 use super::types::*;
 
-// Flatten ChatMessage to NativeMessage
+// Flatten ChatNode to NativeMessage
 
 /// LLM 请求包中保留的最近思考条数。
 ///
@@ -24,11 +24,11 @@ const RETAINED_RECENT_REASONING: usize = 2;
 
 /// 请求包**剔除标记**的键名（`meta.exclude_from_context = true`）。
 ///
-/// ## 为什么是一个 `meta` 键而不是一个 `MessageType` 取值
+/// ## 为什么是一个 `meta` 键而不是一个 `NodeKind` 取值
 ///
 /// 「这条节点算不算对话内容」不是**节点类型**的属性，是**消费场景**的属性：
 /// 同一条首响节点，对话面板要显示它（用户真的看到过），模型请求包必须剔除它
-/// （否则连续两条 `assistant`）。把它做成 `MessageType` 取值，等于把"某个消费
+/// （否则连续两条 `assistant`）。把它做成 `NodeKind` 取值，等于把"某个消费
 /// 场景的判断"固化进 schema——下一个场景（审计导出 / 检索索引）还要再加一个类型。
 ///
 /// `meta` 是自由 JSON 且已有先例（`meta.kind = "context_nudge"`），加一个键是
@@ -41,7 +41,7 @@ const RETAINED_RECENT_REASONING: usize = 2;
 pub const META_EXCLUDE_FROM_CONTEXT: &str = "exclude_from_context";
 
 /// 该节点是否被标记为「不进请求包」
-fn excluded_from_context(m: &ChatMessage) -> bool {
+fn excluded_from_context(m: &ChatNode) -> bool {
     m.meta
         .as_ref()
         .and_then(|meta| meta.get(META_EXCLUDE_FROM_CONTEXT))
@@ -49,9 +49,9 @@ fn excluded_from_context(m: &ChatMessage) -> bool {
         .unwrap_or(false)
 }
 
-/// 将存储的细粒度 ChatMessage 树扁平化，转换为 API 所需的 NativeMessage 列表。
+/// 将存储的细粒度 ChatNode 树扁平化，转换为 API 所需的 NativeMessage 列表。
 ///
-/// 分型树结构（请求/响应由 MessageRole 区分，组合节点可选）：
+/// 分型树结构（请求/响应由 NodeRole 区分，组合节点可选）：
 /// - 根级交替：`User`(请求, `Text`) 与 `Turn`(响应, `Assistant` 组合) 互为兄弟
 /// - `Turn` 子节点：`Reasoning` / `Text`(回复) / `ToolCall`(`Assistant` 组合)
 /// - `ToolCall`：`Assistant` 组合节点，自身 `content` 携带请求参数（JSON 文本）；
@@ -66,9 +66,9 @@ fn excluded_from_context(m: &ChatMessage) -> bool {
 /// - 失败 `Turn`（status=Failed）：半截输出照常聚合，并附加中断说明段落；
 ///   无结果的 `ToolCall` 合成占位 tool 结果、失败的工具结果推导 `success=false`
 ///   （"继续会话"中断可见性）
-pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
-    let by_id: HashMap<&str, &ChatMessage> = messages.iter().map(|m| (m.id.as_str(), m)).collect();
-    let mut children: HashMap<&str, Vec<&ChatMessage>> = HashMap::new();
+pub fn flatten_chat_messages(messages: &[ChatNode]) -> Vec<NativeMessage> {
+    let by_id: HashMap<&str, &ChatNode> = messages.iter().map(|m| (m.id.as_str(), m)).collect();
+    let mut children: HashMap<&str, Vec<&ChatNode>> = HashMap::new();
     for m in messages {
         if let Some(pid) = m.parent_id.as_deref() {
             children.entry(pid).or_default().push(m);
@@ -81,7 +81,7 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
     // 网关跨轮复用），请求包必须回传 provider 认识的 wire id——部分协议要求
     // `tool_call_id` 与其签发值逐字一致（如 OpenAI Responses 的 call_id 链）。
     // 历史数据无 `tool_call_id` 字段 → 回退节点 id（旧数据里两者本就是同一个值）。
-    let wire_id_of = |m: &ChatMessage| -> String {
+    let wire_id_of = |m: &ChatNode| -> String {
         m.tool_call_id
             .clone()
             .filter(|s| !s.trim().is_empty())
@@ -89,11 +89,11 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
     };
     let wire_ids: HashMap<&str, String> = messages
         .iter()
-        .filter(|m| m.msg_type == Some(MessageType::ToolCall))
+        .filter(|m| m.msg_type == Some(NodeKind::ToolCall))
         .map(|m| (m.id.as_str(), wire_id_of(m)))
         .collect();
 
-    let is_root = |m: &ChatMessage| -> bool {
+    let is_root = |m: &ChatNode| -> bool {
         m.parent_id
             .as_deref()
             .map(|p| by_id.contains_key(p))
@@ -111,7 +111,7 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
     let mut consumed: HashSet<&str> = HashSet::new();
     /// 递归收集某 Turn 的全部子孙 id（不含 Turn 自身）到 `acc`
     fn collect_descendants<'a>(
-        children: &HashMap<&'a str, Vec<&'a ChatMessage>>,
+        children: &HashMap<&'a str, Vec<&'a ChatNode>>,
         acc: &mut HashSet<&'a str>,
         id: &'a str,
     ) {
@@ -132,7 +132,7 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
         }
     }
     for m in messages {
-        if is_root(m) && m.msg_type == Some(MessageType::Turn) {
+        if is_root(m) && m.msg_type == Some(NodeKind::Turn) {
             collect_descendants(&children, &mut consumed, m.id.as_str());
         }
     }
@@ -146,12 +146,12 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
         .iter()
         .filter(|m| {
             is_root(m)
-                && m.msg_type == Some(MessageType::Turn)
+                && m.msg_type == Some(NodeKind::Turn)
                 && children
                     .get(m.id.as_str())
                     .map(|kids| {
                         kids.iter()
-                            .any(|c| c.msg_type == Some(MessageType::Reasoning))
+                            .any(|c| c.msg_type == Some(NodeKind::Reasoning))
                     })
                     .unwrap_or(false)
         })
@@ -181,17 +181,17 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
         // 2. 就算协议容忍，它也会把"界面上的话"当成"模型说过的话"再喂回去，
         //    同一份信息在两条线上各留一份，越滚越偏。
         //
-        // 与 `Some(MessageType::Compression) => {}` 是同一条处置（压缩节点也不是
+        // 与 `Some(NodeKind::Compression) => {}` 是同一条处置（压缩节点也不是
         // 对话内容），区别只是判据来自 `meta` 而不是节点类型——**`meta` 是自由
-        // JSON，所以加这一条不需要动 `MessageType` 枚举**（数据变化，不是 schema 变化）。
+        // JSON，所以加这一条不需要动 `NodeKind` 枚举**（数据变化，不是 schema 变化）。
         if excluded_from_context(m) {
             continue;
         }
 
         match m.msg_type {
-            Some(MessageType::Turn) => {
+            Some(NodeKind::Turn) => {
                 let mut native: NativeMessage = m.clone().into();
-                native.role = MessageRole::Assistant;
+                native.role = NodeRole::Assistant;
                 native.content = None;
                 native.reasoning_content = None;
                 native.tool_calls = None;
@@ -201,17 +201,17 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                 if let Some(kids) = children.get(m.id.as_str()) {
                     for child in kids {
                         match child.msg_type {
-                            Some(MessageType::Reasoning)
+                            Some(NodeKind::Reasoning)
                                 // 仅最近 N 条思考进入请求视图
                                 if retained_reasoning_turns.contains(m.id.as_str()) =>
                             {
                                 native.reasoning_content =
                                     child.content.as_ref().map(|c| c.to_text());
                             }
-                            Some(MessageType::Text) => {
+                            Some(NodeKind::Text) => {
                                 native.content = child.content.clone();
                             }
-                            Some(MessageType::ToolCall) => {
+                            Some(NodeKind::ToolCall) => {
                                 // 请求参数直接来自 ToolCall 节点自身的 content（JSON 文本）。
                                 // 该文本在落库时（turn.rs:645）已由 `tc.arguments.to_string()`
                                 // 规范化——即 serde_json 输出，故 re-parse 再 re-serialize 幂等。
@@ -249,13 +249,13 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                                 match find_tool_result(&children, child.id.as_str()) {
                                     Some(res) => {
                                         let mut tool_native: NativeMessage = res.clone().into();
-                                        tool_native.role = MessageRole::Tool;
+                                        tool_native.role = NodeRole::Tool;
                                         tool_native.tool_call_id =
                                             wire_ids.get(child.id.as_str()).cloned();
                                         // 失败的工具结果推导 success=false：触发 Anthropic
                                         // tool_result 的 is_error=true，工具失败信息才能被
                                         // 模型感知；跨轮工具失败必须可见，不得被过滤丢失
-                                        if res.status == Some(MessageStatus::Failed) {
+                                        if res.status == Some(NodeStatus::Failed) {
                                             tool_native.success = Some(false);
                                         }
                                         tool_results.push(tool_native);
@@ -268,7 +268,7 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                                         // 当作孤儿 tool 结果误删。
                                         let tool_name = child.name.clone().unwrap_or_default();
                                         tool_results.push(NativeMessage {
-                                            role: MessageRole::Tool,
+                                            role: NodeRole::Tool,
                                             tool_call_id: wire_ids.get(child.id.as_str()).cloned(),
                                             content: Some(MessageContent::Text(format!(
                                                 "[工具 {tool_name} 的执行被中断，未产生结果。]"
@@ -291,7 +291,7 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
                 // 失败 Turn 的半截输出原样聚合后，附加中断说明段落——模型在上下文中
                 // 看到"上次输出 → 中断说明 → 用户新消息"的连贯序列，避免思维链断裂
                 // （等价于用户打断了模型说话，然后继续）。
-                if m.status == Some(MessageStatus::Failed) {
+                if m.status == Some(NodeStatus::Failed) {
                     let note = match m.error.as_deref() {
                         Some(err) if !err.trim().is_empty() => format!(
                             "[本轮回复被中断（原因：{err}）。以上是中断前的部分输出，仅供参考；请结合用户接下来的消息继续。]"
@@ -313,11 +313,11 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
             // 上下文压缩节点**不是对话内容**：它是系统对历史的一次整理动作，
             // 只服务于前端呈现与事后审计。发给模型纯属噪音——既占上下文，
             // 又会把"系统整理过上下文"当成一条事实陈述摆进对话序列。
-            Some(MessageType::Compression) => {}
+            Some(NodeKind::Compression) => {}
             _ => {
                 // User / System 等根级内容节点
                 let mut native: NativeMessage = m.clone().into();
-                if native.role == MessageRole::Tool {
+                if native.role == NodeRole::Tool {
                     // tool_call_id 用父 ToolCall 的 wire id（历史数据回退节点 id）
                     native.tool_call_id = m
                         .parent_id
@@ -346,7 +346,7 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
     for nm in result {
         // 2. 丢弃"无对应 tool_call 的 tool 结果"：provider 要求 tool 角色的
         //    content 必须关联到前文某个 assistant 的 tool_calls，否则直接 400。
-        if nm.role == MessageRole::Tool {
+        if nm.role == NodeRole::Tool {
             if let Some(tid) = &nm.tool_call_id {
                 if !tool_call_ids.contains(tid) {
                     continue;
@@ -357,7 +357,7 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
         }
         // 3. 丢弃"空 assistant 回合"：既无文本/推理内容、也无工具调用，
         //    发到 provider 是无意义且可能触发校验错误的占位消息。
-        if nm.role == MessageRole::Assistant
+        if nm.role == NodeRole::Assistant
             && nm.content.as_ref().map(|c| c.is_empty()).unwrap_or(true)
             && nm.reasoning_content.is_none()
             && nm.tool_calls.is_none()
@@ -376,14 +376,14 @@ pub fn flatten_chat_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
 ///    子 agent 会话即以此种方式返回完整会话）
 /// 3. 兜底：任意直接的 `Text`(role=Tool) 子节点
 fn find_tool_result<'a>(
-    children: &HashMap<&str, Vec<&'a ChatMessage>>,
+    children: &HashMap<&str, Vec<&'a ChatNode>>,
     tool_call_id: &str,
-) -> Option<&'a ChatMessage> {
+) -> Option<&'a ChatNode> {
     let kids = children.get(tool_call_id)?;
     // 1. 优先直接 Text(Tool) 且内容非空
     if let Some(direct) = kids.iter().find(|c| {
-        c.role == Some(MessageRole::Tool)
-            && c.msg_type == Some(MessageType::Text)
+        c.role == Some(NodeRole::Tool)
+            && c.msg_type == Some(NodeKind::Text)
             && c.content.as_ref().map(|x| !x.is_empty()).unwrap_or(false)
     }) {
         return Some(direct);
@@ -391,22 +391,22 @@ fn find_tool_result<'a>(
     // 2. 被 Turn(Tool) 包装（子 agent 会话）
     if let Some(turn) = kids
         .iter()
-        .find(|c| c.msg_type == Some(MessageType::Turn) && c.role == Some(MessageRole::Tool))
+        .find(|c| c.msg_type == Some(NodeKind::Turn) && c.role == Some(NodeRole::Tool))
     {
         if let Some(tkids) = children.get(turn.id.as_str()) {
             return tkids
                 .iter()
-                .find(|c| c.msg_type == Some(MessageType::Text))
+                .find(|c| c.msg_type == Some(NodeKind::Text))
                 .copied();
         }
     }
     // 3. 兜底：任意直接 Text(Tool)
     kids.iter()
-        .find(|c| c.role == Some(MessageRole::Tool) && c.msg_type == Some(MessageType::Text))
+        .find(|c| c.role == Some(NodeRole::Tool) && c.msg_type == Some(NodeKind::Text))
         .copied()
 }
 
-// ChatMessage 的**构造**不在本插件：`llm_build_assistant_messages` /
+// ChatNode 的**构造**不在本插件：`llm_build_assistant_messages` /
 // `llm_build_tool_message` / `TurnStreamChildIds` / `TurnOutput::into_messages`
 // 生产上只有 session 一个消费方，已随 ADR-023 从 `symbio_core::llm::turn` 下沉到
 // `plugins/session/message_build.rs`。本文件是**读侧**（存储树 → 请求包），

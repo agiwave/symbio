@@ -23,7 +23,7 @@ use super::chat_session::{Carrier, MessageChange, PersistentChatSession};
 pub use super::config::SessionConfig;
 use super::types::{Session, SessionSummary};
 use crate::providers::MemoryFile;
-use crate::symbio_core::{chat_message as cm, session_chat};
+use crate::symbio_core::{chat_node as cm, session_chat};
 use crate::symbio_core::{
     plugin_dir_from_ctx, ExecEventSink, Plugin, PluginConfigFile, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
@@ -103,7 +103,7 @@ pub(crate) enum PublishTarget<'a> {
 }
 
 impl PublishTarget<'_> {
-    async fn publish(&self, message: cm::ChatMessage) {
+    async fn publish(&self, message: cm::ChatNode) {
         match self {
             Self::Sink(sink) => sink.emit(message).await,
             Self::Transcript { plugin, session_id } => {
@@ -151,7 +151,7 @@ impl PublishTarget<'_> {
 /// 那是各自的领域判定，不该被这个出口统一掉。
 pub(crate) async fn append_and_publish(
     session: &PersistentChatSession,
-    messages: Vec<cm::ChatMessage>,
+    messages: Vec<cm::ChatNode>,
     carrier: Carrier,
     to: PublishTarget<'_>,
     session_principal: &str,
@@ -180,7 +180,7 @@ pub(crate) async fn append_and_publish(
 /// 人说的话是 `user`（会话外的一方，不随会话变），其余（助手正文、工具结果、
 /// 压缩记录、系统说明）都是本会话主体说的。见 [`append_and_publish`]：为什么补
 /// 在落库这一个点上、而不是各处建消息时。
-fn attributed(m: cm::ChatMessage, session_principal: &str) -> cm::ChatMessage {
+fn attributed(m: cm::ChatNode, session_principal: &str) -> cm::ChatNode {
     if m.principal.is_some() {
         return m;
     }
@@ -189,7 +189,7 @@ fn attributed(m: cm::ChatMessage, session_principal: &str) -> cm::ChatMessage {
     // 归属判据与 [T-146] 的字符串主体一致，这里只把它折成 `Principal` 结构体：
     // `person/local` ⇒ Person 一族，`session/*` ⇒ Agent 一族（`from_legacy` 按 namespace 派生）。
     out.principal = Some(Principal::from_legacy(match out.role {
-        Some(cm::MessageRole::User) => crate::symbio_core::authz::PRINCIPAL_USER,
+        Some(cm::NodeRole::User) => crate::symbio_core::authz::PRINCIPAL_USER,
         _ => session_principal,
     }));
     out
@@ -281,7 +281,7 @@ impl SessionPlugin {
     // 三条落库路径（主循环增量 / 用户发言 / 压缩节点）都经它逐条下发权威副本。
 
     /// 向会话转写发布一条消息帧（唯一出口）。
-    pub(crate) async fn transcript_apply(&self, session_id: &str, message: cm::ChatMessage) {
+    pub(crate) async fn transcript_apply(&self, session_id: &str, message: cm::ChatNode) {
         let state = self.active_mgr.get_or_create(session_id).await;
         state.transcript.lock().await.apply(message);
     }
@@ -290,7 +290,7 @@ impl SessionPlugin {
     pub(crate) async fn transcript_apply_all(
         &self,
         session_id: &str,
-        messages: Vec<cm::ChatMessage>,
+        messages: Vec<cm::ChatNode>,
     ) {
         let state = self.active_mgr.get_or_create(session_id).await;
         let mut tr = state.transcript.lock().await;
@@ -309,9 +309,9 @@ impl SessionPlugin {
         &self,
         session_id: &str,
         dropped: &[String],
-        head: &cm::ChatMessage,
+        head: &cm::ChatNode,
     ) {
-        let mut frames: Vec<cm::ChatMessage> = dropped
+        let mut frames: Vec<cm::ChatNode> = dropped
             .iter()
             .map(|mid| crate::symbio_core::llm_removed_frame(mid))
             .collect();

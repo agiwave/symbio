@@ -29,8 +29,8 @@
 //! 互引被 `plugin-entry-audit` E-009 禁止，故那侧改为本地构造 fixture，形状契约
 //! 由本文件的测试锁定（见 `message_build.test.rs` 里的用例 A / A2 / B / C / D）。
 
-use crate::symbio_core::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
+use crate::symbio_core::chat_node::{
+    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind,
 };
 use crate::symbio_core::{llm_short_id, TurnOutput, TurnToolCallInfo};
 
@@ -61,7 +61,7 @@ impl TurnStreamChildIds {
     }
 }
 
-// 消息构造（ChatMessage 家族）
+// 消息构造（ChatNode 家族）
 
 /// 构造助手消息组（基于 Turn / ToolCall 的分型层级结构）。
 ///
@@ -78,19 +78,19 @@ pub fn llm_build_assistant_messages(
     rid: Option<String>,
     reasoning: Option<String>,
     child_ids: TurnStreamChildIds,
-) -> Vec<ChatMessage> {
+) -> Vec<ChatNode> {
     let child_ids = child_ids.normalized();
     let mut msgs = Vec::new();
     let timestamp = crate::symbio_core::clock_now_ms();
 
     // ── Turn 消息（根级，与 User 互为兄弟）───────────────────────────────
-    msgs.push(ChatMessage {
+    msgs.push(ChatNode {
         id: id.to_string(),
         parent_id: None,
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Turn),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Turn),
         content: None,
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         timestamp: Some(timestamp),
         ..Default::default()
     });
@@ -106,13 +106,13 @@ pub fn llm_build_assistant_messages(
         .unwrap_or(false);
     if let Some(r) = reasoning {
         if !r.trim().is_empty() && !reasoning_only {
-            msgs.push(ChatMessage {
+            msgs.push(ChatNode {
                 id: child_ids.reasoning.clone().unwrap_or_else(llm_short_id),
                 parent_id: Some(id.to_string()),
-                role: Some(MessageRole::Assistant),
-                msg_type: Some(MessageType::Reasoning),
+                role: Some(NodeRole::Assistant),
+                msg_type: Some(NodeKind::Reasoning),
                 content: Some(MessageContent::Text(r)),
-                status: Some(MessageStatus::Completed),
+                status: Some(NodeStatus::Completed),
                 timestamp: Some(timestamp),
                 ..Default::default()
             });
@@ -157,14 +157,14 @@ pub fn llm_build_text_node(
     content: &str,
     rid: Option<String>,
     id: String,
-) -> ChatMessage {
-    ChatMessage {
+) -> ChatNode {
+    ChatNode {
         id,
         parent_id: Some(parent_id.to_string()),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text(content.into())),
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         timestamp: Some(crate::symbio_core::clock_now_ms()),
         response_id: rid,
         ..Default::default()
@@ -182,7 +182,7 @@ pub fn llm_build_text_node(
 pub fn llm_build_tool_call_nodes(
     parent_id: &str,
     tool_calls: &[TurnToolCallInfo],
-) -> Vec<ChatMessage> {
+) -> Vec<ChatNode> {
     tool_calls
         .iter()
         .map(|tc| {
@@ -221,15 +221,15 @@ pub fn llm_build_tool_call_node(
     name: Option<String>,
     args_text: String,
     wire_id: Option<String>,
-) -> ChatMessage {
-    ChatMessage {
+) -> ChatNode {
+    ChatNode {
         id,
         parent_id: Some(parent_id.to_string()),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::ToolCall),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::ToolCall),
         name,
         content: Some(MessageContent::Text(args_text)),
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         timestamp: Some(crate::symbio_core::clock_now_ms()),
         tool_call_id: wire_id,
         ..Default::default()
@@ -250,18 +250,18 @@ pub fn llm_build_tool_message(
     content: &str,
     success: Option<bool>,
     msg_id: Option<String>,
-) -> ChatMessage {
+) -> ChatNode {
     let success = success.unwrap_or(true);
-    ChatMessage {
+    ChatNode {
         id: msg_id.unwrap_or_else(llm_short_id),
         parent_id: Some(tool_call_id.into()),
-        role: Some(MessageRole::Tool),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::Tool),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text(content.into())),
         status: Some(if success {
-            MessageStatus::Completed
+            NodeStatus::Completed
         } else {
-            MessageStatus::Failed
+            NodeStatus::Failed
         }),
         meta: Some(serde_json::json!({ "success": success })),
         timestamp: Some(crate::symbio_core::clock_now_ms()),
@@ -289,7 +289,7 @@ impl TurnOutput {
     }
 
     /// 按值消费本产物，落库为助手消息组（Turn + 子节点）。
-    pub fn into_messages(self, root_id: &str) -> Vec<ChatMessage> {
+    pub fn into_messages(self, root_id: &str) -> Vec<ChatNode> {
         let effective = self.effective_text().to_owned();
         let reasoning = if self.reasoning.is_empty() {
             None

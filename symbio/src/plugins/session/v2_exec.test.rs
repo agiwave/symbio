@@ -14,7 +14,7 @@
 use std::sync::{Arc, Mutex};
 
 use super::*;
-use crate::symbio_core::chat_message as cm;
+use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::{
     check_all, CapabilityMeta, ExecTranscriptWriter, PluginSimpleRequest, EVENT_ASSISTANT_FALLBACK,
     EVENT_ASSISTANT_FINAL,
@@ -85,11 +85,11 @@ fn tool_free_req<'a>(
 }
 
 /// 帧收集口（测试的 ExecEventSink 出口）。
-struct CollectingFrames(Mutex<Vec<cm::ChatMessage>>);
+struct CollectingFrames(Mutex<Vec<cm::ChatNode>>);
 
 #[async_trait::async_trait]
 impl ExecTranscriptWriter for CollectingFrames {
-    async fn apply(&self, m: cm::ChatMessage) {
+    async fn apply(&self, m: cm::ChatNode) {
         self.0.lock().unwrap().push(m);
     }
 }
@@ -279,7 +279,7 @@ struct FaithfulProvider {
     behavior: Behavior,
     /// 每次请求收到的**消息数组**（工具轮的验收要回读**下一次请求**）。
     ///
-    /// 记的是 `execute_turn` 真正收到的 `&[ChatMessage]` —— 即**线格式那一侧**，
+    /// 记的是 `execute_turn` 真正收到的 `&[ChatNode]` —— 即**线格式那一侧**，
     /// **全部消息**（不只 `first()`）：只取首条时「整段被塞进一条 user 消息」测不出来。
     prompts: Arc<Mutex<ReceivedMessages>>,
 }
@@ -317,7 +317,7 @@ impl ModelProvider for FaithfulProvider {
     async fn execute_turn(
         &self,
         _system: &str,
-        messages: &[cm::ChatMessage],
+        messages: &[cm::ChatNode],
         _tools: &[CapabilityMeta],
         _root_id: &str,
         env: &crate::symbio_core::ExecEnv,
@@ -330,7 +330,7 @@ impl ModelProvider for FaithfulProvider {
         let received: Vec<(String, String)> = messages
             .iter()
             .map(|m| {
-                // `role` 是 `Option<MessageRole>`：`Debug` 会打成 `Some(user)`，
+                // `role` 是 `Option<NodeRole>`：`Debug` 会打成 `Some(user)`，
                 // 而断言要的是 `user`。所以 `unwrap_or` 之后再小写——**不要**对
                 // 整个 `Option` 做 `to_lowercase`，那会留下 `some(...)` 包装。
                 let role =
@@ -355,24 +355,24 @@ impl ModelProvider for FaithfulProvider {
                 // 真实链路的半截形态：推理快照帧 + 正文快照帧先行（首片即快照），
                 // 生成被中止在半句话上——帧进桥的累积，收束与出口按累积取半截。
                 env.sink()
-                    .emit(cm::ChatMessage {
+                    .emit(cm::ChatNode {
                         id: "n-rea".into(),
                         parent_id: Some("r-1".into()),
-                        role: Some(cm::MessageRole::Assistant),
-                        msg_type: Some(cm::MessageType::Reasoning),
+                        role: Some(cm::NodeRole::Assistant),
+                        msg_type: Some(cm::NodeKind::Reasoning),
                         content: Some(cm::MessageContent::Text("这个名词需要先定义。".into())),
-                        status: Some(cm::MessageStatus::Streaming),
+                        status: Some(cm::NodeStatus::Streaming),
                         ..Default::default()
                     })
                     .await;
                 env.sink()
-                    .emit(cm::ChatMessage {
+                    .emit(cm::ChatNode {
                         id: "n-half".into(),
                         parent_id: Some("r-1".into()),
-                        role: Some(cm::MessageRole::Assistant),
-                        msg_type: Some(cm::MessageType::Text),
+                        role: Some(cm::NodeRole::Assistant),
+                        msg_type: Some(cm::NodeKind::Text),
                         content: Some(cm::MessageContent::Text("让我想想这个名词".into())),
-                        status: Some(cm::MessageStatus::Streaming),
+                        status: Some(cm::NodeStatus::Streaming),
                         ..Default::default()
                     })
                     .await;
@@ -386,13 +386,13 @@ impl ModelProvider for FaithfulProvider {
                     // 中途正文：真实模型调工具前常先说一句。它必须被定格并切节点，
                     // 否则会与收尾正文粘成一条。
                     env.sink()
-                        .emit(cm::ChatMessage {
+                        .emit(cm::ChatNode {
                             id: "n-tool".into(),
                             parent_id: Some("r-1".into()),
-                            role: Some(cm::MessageRole::Assistant),
-                            msg_type: Some(cm::MessageType::Text),
+                            role: Some(cm::NodeRole::Assistant),
+                            msg_type: Some(cm::NodeKind::Text),
                             content: Some(cm::MessageContent::Text("我先查一下。".into())),
-                            status: Some(cm::MessageStatus::Streaming),
+                            status: Some(cm::NodeStatus::Streaming),
                             ..Default::default()
                         })
                         .await;
@@ -414,13 +414,13 @@ impl ModelProvider for FaithfulProvider {
             Behavior::ToolThenAgentRun => {
                 if round == 1 {
                     env.sink()
-                        .emit(cm::ChatMessage {
+                        .emit(cm::ChatNode {
                             id: "n-agent".into(),
                             parent_id: Some("r-1".into()),
-                            role: Some(cm::MessageRole::Assistant),
-                            msg_type: Some(cm::MessageType::Text),
+                            role: Some(cm::NodeRole::Assistant),
+                            msg_type: Some(cm::NodeKind::Text),
                             content: Some(cm::MessageContent::Text("我来委托。".into())),
-                            status: Some(cm::MessageStatus::Streaming),
+                            status: Some(cm::NodeStatus::Streaming),
                             ..Default::default()
                         })
                         .await;
@@ -445,18 +445,18 @@ impl ModelProvider for FaithfulProvider {
         }
         // 真实链路的帧形态：正文快照（Text × Streaming）先行，窄帧随后。
         env.sink()
-            .emit(cm::ChatMessage {
+            .emit(cm::ChatNode {
                 id: "n-1".into(),
                 parent_id: Some("r-1".into()),
-                role: Some(cm::MessageRole::Assistant),
-                msg_type: Some(cm::MessageType::Text),
+                role: Some(cm::NodeRole::Assistant),
+                msg_type: Some(cm::NodeKind::Text),
                 content: Some(cm::MessageContent::Text("秋".into())),
-                status: Some(cm::MessageStatus::Streaming),
+                status: Some(cm::NodeStatus::Streaming),
                 ..Default::default()
             })
             .await;
         env.sink()
-            .emit(cm::ChatMessage {
+            .emit(cm::ChatNode {
                 id: "n-1".into(),
                 delta: Some("天好".into()),
                 ..Default::default()
@@ -539,7 +539,7 @@ async fn tool_free_turn_writes_grid_and_streams_ui() {
         got[0].id, out.response_text_child_id,
         "收口用的 id 就是首片建的节点"
     );
-    assert_eq!(got[0].status, Some(cm::MessageStatus::Streaming));
+    assert_eq!(got[0].status, Some(cm::NodeStatus::Streaming));
     assert_eq!(got[0].parent_id.as_deref(), Some("r-1"));
     assert!(
         matches!(&got[0].content, Some(cm::MessageContent::Text(t)) if t == "秋"),
@@ -671,7 +671,7 @@ async fn aborted_half_sentence_survives_in_partial_and_grid() {
     assert!(
         partial
             .iter()
-            .any(|m| m.msg_type == Some(cm::MessageType::Reasoning)),
+            .any(|m| m.msg_type == Some(cm::NodeKind::Reasoning)),
         "推理单独成节点（不是拼进正文）：{partial:?}"
     );
 
@@ -806,11 +806,11 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
         "正文 + 工具调用 + 工具结果：{:?}",
         res.messages
     );
-    assert_eq!(res.messages[0].msg_type, Some(cm::MessageType::Text));
-    assert_eq!(res.messages[0].status, Some(cm::MessageStatus::Completed));
+    assert_eq!(res.messages[0].msg_type, Some(cm::NodeKind::Text));
+    assert_eq!(res.messages[0].status, Some(cm::NodeStatus::Completed));
     assert_eq!(res.messages[0].parent_id.as_deref(), Some("r-1"));
     let call = &res.messages[1];
-    assert_eq!(call.msg_type, Some(cm::MessageType::ToolCall));
+    assert_eq!(call.msg_type, Some(cm::NodeKind::ToolCall));
     assert_eq!(call.id, "tc-1", "工具节点 id 取 provider 给的节点 id");
     assert_eq!(
         call.tool_call_id.as_deref(),
@@ -819,30 +819,30 @@ async fn tool_round_lands_artifact_and_feeds_next_request() {
     );
     let tool_result = &res.messages[2];
     assert_eq!(tool_result.parent_id.as_deref(), Some("tc-1"));
-    assert_eq!(tool_result.role, Some(cm::MessageRole::Tool));
+    assert_eq!(tool_result.role, Some(cm::NodeRole::Tool));
 
     // ── UI 帧：中途正文被**定格**（不是永远流式中），工具节点与结果都在 ────
     let got = frames.0.lock().unwrap();
     let text_frames: Vec<_> = got
         .iter()
         .filter(|m| {
-            m.msg_type == Some(cm::MessageType::Text) && m.role == Some(cm::MessageRole::Assistant)
+            m.msg_type == Some(cm::NodeKind::Text) && m.role == Some(cm::NodeRole::Assistant)
         })
         .collect();
     assert!(
         text_frames
             .iter()
-            .any(|m| m.status == Some(cm::MessageStatus::Completed)),
+            .any(|m| m.status == Some(cm::NodeStatus::Completed)),
         "中途正文必须被定格：{got:?}"
     );
     assert!(
         got.iter()
-            .any(|m| m.msg_type == Some(cm::MessageType::ToolCall) && m.id == "tc-1"),
+            .any(|m| m.msg_type == Some(cm::NodeKind::ToolCall) && m.id == "tc-1"),
         "工具调用节点必须广播给前端：{got:?}"
     );
     assert!(
         got.iter()
-            .any(|m| m.role == Some(cm::MessageRole::Tool)
+            .any(|m| m.role == Some(cm::NodeRole::Tool)
                 && matches!(&m.content, Some(cm::MessageContent::Text(t)) if t.contains("No parent plugin"))),
         "工具结果节点必须广播给前端：{got:?}"
     );
@@ -968,7 +968,7 @@ async fn round_report_reaches_the_live_surface_before_turn_end() {
     .await
     .expect("带汇报的工具轮执行成功");
 
-    let said = |m: &cm::ChatMessage, needle: &str| matches!(&m.content, Some(cm::MessageContent::Text(t)) if t.contains(needle));
+    let said = |m: &cm::ChatNode, needle: &str| matches!(&m.content, Some(cm::MessageContent::Text(t)) if t.contains(needle));
 
     // ── ① 时序：汇报在收尾正文之前就到实时面 ─────────────────────────────
     let got = frames.0.lock().unwrap();
@@ -1673,16 +1673,16 @@ fn closed_queue_rejects_sends_and_drains_to_none() {
 
 /// 一份「压缩后的整份消息列表」：摘要一条（真实链路是「摘要 + 保留区」，判据只
 /// 关心 **id 序列**——快照的语义是「这份列表**取代**了它之前的一切」）。
-fn consolidated(ids: &[&str]) -> Vec<cm::ChatMessage> {
+fn consolidated(ids: &[&str]) -> Vec<cm::ChatNode> {
     ids.iter()
-        .map(|id| cm::ChatMessage {
+        .map(|id| cm::ChatNode {
             id: (*id).to_string(),
-            role: Some(cm::MessageRole::User),
-            msg_type: Some(cm::MessageType::Text),
+            role: Some(cm::NodeRole::User),
+            msg_type: Some(cm::NodeKind::Text),
             content: Some(cm::MessageContent::Text(format!(
                 "[CONTEXT SNAPSHOT]\n{id}"
             ))),
-            status: Some(cm::MessageStatus::Completed),
+            status: Some(cm::NodeStatus::Completed),
             ..Default::default()
         })
         .collect()

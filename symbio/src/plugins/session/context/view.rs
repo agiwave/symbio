@@ -4,7 +4,7 @@
 //! 水位提醒，按固定顺序执行。视图每轮从存储重建，四步天然幂等。
 
 use super::*;
-use crate::symbio_core::chat_message::{MessageContent, MessageStatus};
+use crate::symbio_core::chat_node::{MessageContent, NodeStatus};
 
 /// 轮次淡化（请求视图级）：当对话轮次过多时，把较早的工具结果（`role=Tool`、`msg_type=Text`）
 /// 做 head/tail 摘要，保留最近 `keep_recent_turns` 个 user turn 起的原文，以及**全部**
@@ -13,7 +13,7 @@ use crate::symbio_core::chat_message::{MessageContent, MessageStatus};
 /// 只作用于传入的视图副本（由 [`build_request_view`] 每轮从存储重建），存储层保留全文，
 /// 因此**不写存档文件**、天然幂等（无重复存档问题）。被淡化的结果标记 `tool_result_faded`，
 /// 模型如需完整输出可重新运行对应工具。
-pub fn fade_aged_tool_results(messages: &mut [ChatMessage], keep_recent_turns: usize) {
+pub fn fade_aged_tool_results(messages: &mut [ChatNode], keep_recent_turns: usize) {
     use super::super::tokenizer::{default_tokenizer, Tokenizer};
 
     // 以 user 消息为边界，定位"最近 keep_recent_turns 个 user turn"的起始下标；
@@ -21,7 +21,7 @@ pub fn fade_aged_tool_results(messages: &mut [ChatMessage], keep_recent_turns: u
     let user_positions: Vec<usize> = messages
         .iter()
         .enumerate()
-        .filter(|(_, m)| m.role == Some(MessageRole::User))
+        .filter(|(_, m)| m.role == Some(NodeRole::User))
         .map(|(i, _)| i)
         .collect();
     let keep_from = if user_positions.len() > keep_recent_turns {
@@ -33,7 +33,7 @@ pub fn fade_aged_tool_results(messages: &mut [ChatMessage], keep_recent_turns: u
     const FADE_BUDGET: usize = 2048; // 老化工具结果压到约 2k token
     let tok = default_tokenizer();
     for m in messages.iter_mut().take(keep_from) {
-        if m.role == Some(MessageRole::Tool) && m.msg_type == Some(MessageType::Text) {
+        if m.role == Some(NodeRole::Tool) && m.msg_type == Some(NodeKind::Text) {
             if let Some(MessageContent::Text(t)) = &m.content {
                 if tok.count(t) > FADE_BUDGET {
                     m.content = Some(MessageContent::Text(
@@ -65,7 +65,7 @@ pub fn fade_aged_tool_results(messages: &mut [ChatMessage], keep_recent_turns: u
 /// 只作用于传入的视图副本（由 [`build_request_view`] 每轮从存储重建），存储层
 /// 保留完整原文，因此**不写存档文件**、天然幂等。被淡化的节点标记 `content_faded`。
 pub fn fade_aged_content_nodes(
-    messages: &mut [ChatMessage],
+    messages: &mut [ChatNode],
     keep_recent: usize,
     line_threshold: usize,
 ) {
@@ -73,7 +73,7 @@ pub fn fade_aged_content_nodes(
 
     // 内容节点判定：正文与思考（含 msg_type 缺省的历史消息）。
     // L2 快照（meta.compacted）豁免：它已是压缩产物，再切 = 双重压缩。
-    fn is_content_node(m: &ChatMessage) -> bool {
+    fn is_content_node(m: &ChatNode) -> bool {
         if m.meta
             .as_ref()
             .and_then(|meta| meta.get("compacted"))
@@ -82,10 +82,10 @@ pub fn fade_aged_content_nodes(
         {
             return false;
         }
-        !matches!(m.role, Some(MessageRole::Tool) | Some(MessageRole::System))
+        !matches!(m.role, Some(NodeRole::Tool) | Some(NodeRole::System))
             && matches!(
                 m.msg_type,
-                None | Some(MessageType::Text) | Some(MessageType::Reasoning)
+                None | Some(NodeKind::Text) | Some(NodeKind::Reasoning)
             )
     }
 
@@ -158,7 +158,7 @@ fn line_head_tail(text: &str, line_threshold: usize) -> String {
 /// 一条规则一个判定方：这里的 `Some` 分支走 core 的 [`visible_to`]，不再自带
 /// 第二条规则。`principal = None` 单独判为可见——存量消息没有标身份，把它判成
 /// 不可见等于让历史整段从 prompt 里消失，那是拿接线覆盖旧行为。
-pub fn visible_for(m: &ChatMessage, viewer: Option<&str>) -> bool {
+pub fn visible_for(m: &ChatNode, viewer: Option<&str>) -> bool {
     let Some(viewer) = viewer else {
         return true;
     };
@@ -213,7 +213,7 @@ const CONTEXT_NUDGE_TEXT: &str =
 /// 以及第 0 步（在一切裁剪之前）：**可见域**（`viewer`，[plan/11 批 1](../../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")
 /// ③ 的请求侧入口）。`None` = 不过滤，与接线前逐字一致；`Some(会话主体)` = 别的
 /// 智能体的发言不进本主体的 prompt。**未标身份的消息照旧可见**（`principal = None`
-/// 是「还没接线」，不是「不让人看」——见 [`ChatMessage::principal`]）。两条链各滤一次：
+/// 是「还没接线」，不是「不让人看」——见 [`ChatNode::principal`]）。两条链各滤一次：
 /// 请求侧滤消息、运行器侧（`window_by_turn`）滤事件，判据同一条（`visible_to`）。
 ///
 /// 视图每轮从存储重建，八个步骤天然幂等，不存在重复存档 / 重复注入问题。
@@ -222,7 +222,7 @@ const CONTEXT_NUDGE_TEXT: &str =
 // config struct 只会多一层间接而无行为收益，故显式豁免 clippy 参数数上限。
 #[allow(clippy::too_many_arguments)]
 pub fn build_request_view(
-    messages: &[ChatMessage],
+    messages: &[ChatNode],
     window: usize,
     retention: &std::collections::HashMap<
         String,
@@ -237,8 +237,8 @@ pub fn build_request_view(
     ready_section: Option<&str>,
     delegate_section: Option<&str>,
     viewer: Option<&str>,
-) -> Vec<ChatMessage> {
-    let mut view: Vec<ChatMessage> = messages
+) -> Vec<ChatNode> {
+    let mut view: Vec<ChatNode> = messages
         .iter()
         .filter(|m| visible_for(m, viewer))
         .cloned()
@@ -251,12 +251,12 @@ pub fn build_request_view(
         view = super::window::apply_layered_sliding_window(&view, window, retention);
     }
     if inject_nudge {
-        view.push(ChatMessage {
+        view.push(ChatNode {
             id: uuid::Uuid::new_v4().to_string(),
-            role: Some(MessageRole::User),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::User),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text(CONTEXT_NUDGE_TEXT.to_string())),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             meta: Some(serde_json::json!({ "kind": "context_nudge" })),
             ..Default::default()
         });
@@ -267,12 +267,12 @@ pub fn build_request_view(
     if let Some(section) = delegate_section {
         view.insert(
             0,
-            ChatMessage {
+            ChatNode {
                 id: uuid::Uuid::new_v4().to_string(),
-                role: Some(MessageRole::User),
-                msg_type: Some(MessageType::Text),
+                role: Some(NodeRole::User),
+                msg_type: Some(NodeKind::Text),
                 content: Some(MessageContent::Text(section.to_string())),
-                status: Some(MessageStatus::Completed),
+                status: Some(NodeStatus::Completed),
                 meta: Some(serde_json::json!({ "kind": "delegate_context" })),
                 ..Default::default()
             },
@@ -284,12 +284,12 @@ pub fn build_request_view(
     if let Some(section) = ready_section {
         view.insert(
             0,
-            ChatMessage {
+            ChatNode {
                 id: uuid::Uuid::new_v4().to_string(),
-                role: Some(MessageRole::User),
-                msg_type: Some(MessageType::Text),
+                role: Some(NodeRole::User),
+                msg_type: Some(NodeKind::Text),
                 content: Some(MessageContent::Text(section.to_string())),
-                status: Some(MessageStatus::Completed),
+                status: Some(NodeStatus::Completed),
                 meta: Some(serde_json::json!({ "kind": "readyset" })),
                 ..Default::default()
             },
@@ -300,12 +300,12 @@ pub fn build_request_view(
     if let Some(section) = recall_section {
         view.insert(
             0,
-            ChatMessage {
+            ChatNode {
                 id: uuid::Uuid::new_v4().to_string(),
-                role: Some(MessageRole::User),
-                msg_type: Some(MessageType::Text),
+                role: Some(NodeRole::User),
+                msg_type: Some(NodeKind::Text),
                 content: Some(MessageContent::Text(section.to_string())),
-                status: Some(MessageStatus::Completed),
+                status: Some(NodeStatus::Completed),
                 meta: Some(serde_json::json!({ "kind": "recall_context" })),
                 ..Default::default()
             },

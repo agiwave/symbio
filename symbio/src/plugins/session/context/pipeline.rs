@@ -15,7 +15,7 @@ use super::super::plugin::append_and_publish;
 use super::super::tools::fire_hook;
 use super::super::transcript::llm_emit_removed;
 use crate::plugin_warn;
-use crate::symbio_core::chat_message::{MessageContent, MessageStatus};
+use crate::symbio_core::chat_node::{MessageContent, NodeStatus};
 use crate::symbio_core::HookEvent;
 use crate::symbio_core::{llm_short_id, ExecAbortSignal, ExecEnv, ExecEventSink, PluginError};
 
@@ -213,8 +213,8 @@ async fn compress_snapshot_inner(
     context: &mut SessionContext,
     ctx: &Arc<dyn PluginInvokeRequest>,
     abort: &ExecAbortSignal,
-    compression_request: Vec<ChatMessage>,
-    keep_messages: Vec<ChatMessage>,
+    compression_request: Vec<ChatNode>,
+    keep_messages: Vec<ChatNode>,
     extra_hints: Option<&str>,
     log_tag: &str,
     // 与包装层 begin/finish 同一个 id：摘要增量因此落到**同一个**节点上
@@ -334,16 +334,16 @@ async fn compress_snapshot_inner(
     let mut validated = super::extract_snapshot(&summary_text(&summary));
     if validated.is_none() {
         // 重试：附纠正指令，要求严格按 XML 结构输出
-        let retry_msg = ChatMessage {
+        let retry_msg = ChatNode {
             id: llm_short_id(),
-            role: Some(MessageRole::User),
-            msg_type: Some(MessageType::Text),
+            role: Some(NodeRole::User),
+            msg_type: Some(NodeKind::Text),
             content: Some(MessageContent::Text(
                 "Your previous compose did not contain a valid <state_snapshot> XML block. \
                  Compose again with ONLY the <state_snapshot> block, following the requested structure."
                     .to_string(),
             )),
-            status: Some(MessageStatus::Completed),
+            status: Some(NodeStatus::Completed),
             ..Default::default()
         };
         context.messages.push(retry_msg);
@@ -382,7 +382,7 @@ async fn compress_snapshot_inner(
     // post_tokens 口径 = 压缩完成后的内容水位（快照 + 保留区内容，不含请求级
     // overhead），与 should_start_compression 迟滞比较的读取侧对齐。若只算快照、
     // 漏掉保留区，迟滞地板被低估 → 压缩后很快再次越线 → 循环压缩。
-    let post_tokens = super::estimate_message_tokens(&ChatMessage {
+    let post_tokens = super::estimate_message_tokens(&ChatNode {
         content: Some(MessageContent::Text(snapshot_display.clone())),
         ..Default::default()
     }) + keep_messages
@@ -419,15 +419,15 @@ async fn compress_snapshot_inner(
     };
     let snapshot_seq = super::snapshot_slot_seq(compressed, &keep_messages);
 
-    let snapshot_message = ChatMessage {
+    let snapshot_message = ChatNode {
         id: root_id.to_string(),
         // 快照作为压缩后的首条消息，必须是 user 角色（多数 provider 要求对话以 user 开头）
-        role: Some(MessageRole::User),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::User),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text(format!(
             "[CONTEXT SNAPSHOT — 压缩的历史记忆，基于它继续任务]\n{snapshot_display}"
         ))),
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         // 顺序锚点：接替被压缩内容的槽位（**不是**新号，否则历史记忆会被排到末尾）
         seq: snapshot_seq,
         meta: Some(meta),
@@ -492,7 +492,7 @@ async fn emit_transcript_rewrite(
     orchestrator: &ChatOrchestrator,
     context: &SessionContext,
     dropped: &[String],
-    head: &ChatMessage,
+    head: &ChatNode,
 ) {
     let Some(emitter) = &orchestrator.compression else {
         // 无发射器 = 无前端场景（单测 / 无订阅者）：压缩照常完成，只是不广播。
@@ -553,8 +553,8 @@ async fn compress_with_snapshot_core(
     context: &mut SessionContext,
     ctx: &Arc<dyn PluginInvokeRequest>,
     abort: &ExecAbortSignal,
-    compression_request: Vec<ChatMessage>,
-    keep_messages: Vec<ChatMessage>,
+    compression_request: Vec<ChatNode>,
+    keep_messages: Vec<ChatNode>,
     extra_hints: Option<&str>,
     log_tag: &str,
     // 触发来源（**面向用户的原因词**，进节点 `meta.compact_trigger`）：
@@ -589,16 +589,16 @@ async fn compress_with_snapshot_core(
         // 的两条 failed 节点就是只有这句话、`error` 与 `meta` 全空。
         let (status, text, kind) = match &result {
             Ok(Some(_)) => (
-                MessageStatus::Completed,
+                NodeStatus::Completed,
                 format!("已压缩上下文（{before} → {after} 条）"),
                 None,
             ),
             Ok(None) => (
-                MessageStatus::Completed,
+                NodeStatus::Completed,
                 "未触发压缩（内容未达阈值）".to_string(),
                 None,
             ),
-            Err(f) => (MessageStatus::Failed, f.message(), Some(f.kind())),
+            Err(f) => (NodeStatus::Failed, f.message(), Some(f.kind())),
         };
         // 成功才带「压缩后水位」；`dropped` = 这次被压掉的条数（前后条数之差）：
         // 用户关心的"我的历史少了多少"是一个数字，不该让他自己做减法。
@@ -660,7 +660,7 @@ async fn compress_with_snapshot_core(
 }
 
 /// 取消息纯文本（快照校验用）
-fn summary_text(m: &ChatMessage) -> String {
+fn summary_text(m: &ChatNode) -> String {
     m.content.as_ref().map(|c| c.to_text()).unwrap_or_default()
 }
 
@@ -689,14 +689,14 @@ pub(crate) async fn run_context_compact(
     }
 
     // 待压缩历史 = [.., split_user_idx)，当前用户指令起的任务上下文整体留在保留区
-    let history: Vec<ChatMessage> = context.messages[..split_user_idx].to_vec();
+    let history: Vec<ChatNode> = context.messages[..split_user_idx].to_vec();
     let before_tokens: usize = history.iter().map(super::estimate_message_tokens).sum();
     // 压缩收益护栏（门槛的唯一出处：`super::has_compaction_payoff`）
     if !super::has_compaction_payoff(before_tokens) {
         return (false, before_tokens, before_tokens);
     }
 
-    let keep_messages: Vec<ChatMessage> = context.messages[split_user_idx..].to_vec();
+    let keep_messages: Vec<ChatNode> = context.messages[split_user_idx..].to_vec();
     let compression_request = super::build_compression_request(&history, hints);
 
     // 压缩流水线与被动自动压缩共用同一核心（transcript 转存 → LLM 压缩请求 →
@@ -758,7 +758,7 @@ pub(crate) async fn retry_compaction(
     // 不一致——此时按 NotFound 拒绝，比"顺着 target_id 猜一个节点"安全。
     let found = messages
         .iter()
-        .any(|m| m.id == target_id && m.msg_type == Some(MessageType::Compression));
+        .any(|m| m.id == target_id && m.msg_type == Some(NodeKind::Compression));
     if !found {
         return Err(PluginError::NotFound(format!(
             "未找到压缩节点: {target_id}"
@@ -831,7 +831,7 @@ pub(crate) async fn retry_compaction(
                 let node = em
                     .finish(
                         &node_id,
-                        MessageStatus::Completed,
+                        NodeStatus::Completed,
                         "未触发压缩（当前历史无需压缩）",
                         None,
                         Some(stats),
@@ -888,7 +888,7 @@ pub(crate) async fn retry_compaction(
 /// 而非系统临时目录（临时目录无 GC、跨会话堆积、脱离会话管理）。
 /// 路径派生统一走 paths 模块（safe_id / 会话根目录的唯一权威实现）。
 fn save_transcript_archive(
-    messages: &[ChatMessage],
+    messages: &[ChatNode],
     session_id: &str,
     root: &std::path::Path,
 ) -> Option<String> {
@@ -912,14 +912,14 @@ fn save_transcript_archive(
 async fn send_compression_request(
     orchestrator: &ChatOrchestrator,
     system_prompt: &str,
-    messages: &[ChatMessage],
+    messages: &[ChatNode],
     root_id: &str,
     abort: &ExecAbortSignal,
     // 压缩节点的发射器与节点 id：有发射器时，摘要正文的逐帧增量会**改道**到这个
     // 节点上实时可见（[`compression_delta_gate`]）；`None` = 无前端场景，全帧静默。
     emitter: Option<&super::super::chat_loop::CompressionEmitter>,
     node_id: &str,
-) -> Result<ChatMessage, PluginError> {
+) -> Result<ChatNode, PluginError> {
     // 压缩是**内部 LLM 请求**，不是对话轮次：其流式事件（Turn 起始 / 思考 / 正文 delta）
     // 绝不能以**自有身份**进入对话流——否则前端会多出一个永远停在"正在思考…"的
     // 空 Turn（压缩请求从不 finalize，快照也只落库不广播），且随每次自动压缩/主动
@@ -1019,9 +1019,9 @@ async fn send_compression_request(
 /// 返回 `false` = 吞掉（与静默出口完全同义）；`true` = 按（可能已改写的）帧放行。
 fn compression_delta_gate(
     node_id: &str,
-) -> impl Fn(&mut ChatMessage) -> bool + Send + Sync + 'static {
+) -> impl Fn(&mut ChatNode) -> bool + Send + Sync + 'static {
     let node_id = node_id.to_string();
-    move |frame: &mut ChatMessage| {
+    move |frame: &mut ChatNode| {
         // 纯窄增量 ⇒ 摘要内容在增长：落点改到压缩节点（占位正文之后尾追加）。
         // 增量/全量语义互斥：改写后只留 `delta`，剥掉可能存在的 `meta`，
         // 防止上游帧形状演化时静默破坏转写不变量。
@@ -1045,10 +1045,10 @@ fn compression_delta_gate(
 async fn run_compression_llm(
     orchestrator: &ChatOrchestrator,
     system_prompt: &str,
-    messages: &[ChatMessage],
+    messages: &[ChatNode],
     root_id: &str,
     env: &ExecEnv,
-) -> Result<ChatMessage, PluginError> {
+) -> Result<ChatNode, PluginError> {
     let abort = env.abort();
 
     // 压缩路径与对话轮次共用同一模型契约：provider.execute_turn（tools 为空）。
@@ -1074,12 +1074,12 @@ async fn run_compression_llm(
         ));
     }
 
-    Ok(ChatMessage {
+    Ok(ChatNode {
         id: root_id.to_string(),
-        role: Some(crate::symbio_core::chat_message::MessageRole::Assistant),
-        msg_type: Some(MessageType::Text),
+        role: Some(crate::symbio_core::chat_node::NodeRole::Assistant),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text(effective)),
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         ..Default::default()
     })
 }

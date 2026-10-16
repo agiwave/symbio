@@ -6,8 +6,8 @@
 //! 这里不重复造一个假容器。
 
 use super::*;
-use crate::symbio_core::chat_message::{
-    ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType,
+use crate::symbio_core::chat_node::{
+    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind,
 };
 use crate::symbio_core::EVENT_BUS_KIND_SYSTEM;
 
@@ -20,11 +20,11 @@ fn change(path: &str, data: Value) -> VdfsChange {
 }
 
 /// 一条助手正文消息。
-fn assistant(id: &str, status: MessageStatus, content: &str) -> ChatMessage {
-    ChatMessage {
+fn assistant(id: &str, status: NodeStatus, content: &str) -> ChatNode {
+    ChatNode {
         id: id.to_string(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text(content.to_string())),
         status: Some(status),
         ..Default::default()
@@ -107,18 +107,18 @@ fn message_without_payload_is_not_a_message() {
 #[test]
 fn full_frame_replaces_and_delta_appends() {
     let mut acc = Accumulator::default();
-    acc.apply(assistant("m1", MessageStatus::Streaming, "你"));
-    acc.apply(assistant("m1", MessageStatus::Streaming, "你好"));
+    acc.apply(assistant("m1", NodeStatus::Streaming, "你"));
+    acc.apply(assistant("m1", NodeStatus::Streaming, "你好"));
     // 纯增量：追加
-    acc.apply(ChatMessage {
+    acc.apply(ChatNode {
         id: "m1".into(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Text),
         delta: Some("，世界".into()),
-        status: Some(MessageStatus::Streaming),
+        status: Some(NodeStatus::Streaming),
         ..Default::default()
     });
-    acc.apply(assistant("m1", MessageStatus::Completed, "你好，世界"));
+    acc.apply(assistant("m1", NodeStatus::Completed, "你好，世界"));
     assert_eq!(acc.final_text(), "你好，世界");
 }
 
@@ -126,12 +126,12 @@ fn full_frame_replaces_and_delta_appends() {
 fn status_only_frame_does_not_clobber_text() {
     // 状态帧既无 `content` 又无 `delta`——若把它当「全量帧」落，正文会被清空。
     let mut acc = Accumulator::default();
-    acc.apply(assistant("m1", MessageStatus::Streaming, "已经攒好的正文"));
-    acc.apply(ChatMessage {
+    acc.apply(assistant("m1", NodeStatus::Streaming, "已经攒好的正文"));
+    acc.apply(ChatNode {
         id: "m1".into(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Text),
-        status: Some(MessageStatus::Completed),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Text),
+        status: Some(NodeStatus::Completed),
         ..Default::default()
     });
     assert_eq!(acc.final_text(), "已经攒好的正文");
@@ -140,11 +140,11 @@ fn status_only_frame_does_not_clobber_text() {
 #[test]
 fn removed_message_drops_out_of_the_accumulator() {
     let mut acc = Accumulator::default();
-    acc.apply(assistant("m1", MessageStatus::Completed, "会被删掉"));
-    acc.apply(ChatMessage {
+    acc.apply(assistant("m1", NodeStatus::Completed, "会被删掉"));
+    acc.apply(ChatNode {
         id: "m1".into(),
-        role: Some(MessageRole::Assistant),
-        status: Some(MessageStatus::Removed),
+        role: Some(NodeRole::Assistant),
+        status: Some(NodeStatus::Removed),
         ..Default::default()
     });
     assert!(acc.final_text().is_empty());
@@ -156,15 +156,15 @@ fn last_completed_assistant_text_wins_over_a_later_unfinished_one() {
     // 「最后一条**已完成**」而不是「最后处理到的文本」：流式中的半截正文不能被
     // 当成最终答复（与 `agent_run` 的转播桥同一判据）。
     let mut acc = Accumulator::default();
-    acc.apply(assistant("m1", MessageStatus::Completed, "答复一"));
-    acc.apply(assistant("m2", MessageStatus::Streaming, "答复二的半截"));
+    acc.apply(assistant("m1", NodeStatus::Completed, "答复一"));
+    acc.apply(assistant("m2", NodeStatus::Streaming, "答复二的半截"));
     assert_eq!(acc.final_text(), "答复一");
 }
 
 #[test]
 fn falls_back_to_the_last_text_when_nothing_completed() {
     let mut acc = Accumulator::default();
-    acc.apply(assistant("m1", MessageStatus::Streaming, "只有这一条"));
+    acc.apply(assistant("m1", NodeStatus::Streaming, "只有这一条"));
     assert_eq!(acc.final_text(), "只有这一条");
 }
 
@@ -172,20 +172,20 @@ fn falls_back_to_the_last_text_when_nothing_completed() {
 fn reasoning_and_user_messages_never_enter_the_reply() {
     // 推理独白与用户自己的消息都不在同一个地址空间里的「答复」上。
     let mut acc = Accumulator::default();
-    acc.apply(ChatMessage {
+    acc.apply(ChatNode {
         id: "r1".into(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Reasoning),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Reasoning),
         content: Some(MessageContent::Text("思考过程".into())),
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         ..Default::default()
     });
-    acc.apply(ChatMessage {
+    acc.apply(ChatNode {
         id: "u1".into(),
-        role: Some(MessageRole::User),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::User),
+        msg_type: Some(NodeKind::Text),
         content: Some(MessageContent::Text("用户说的话".into())),
-        status: Some(MessageStatus::Completed),
+        status: Some(NodeStatus::Completed),
         ..Default::default()
     });
     assert!(acc.final_text().is_empty());
@@ -196,12 +196,12 @@ fn delta_for_an_unknown_identity_still_accumulates() {
     // 订阅晚于流开始时（回读也拿不到基线）攒下来的部分仍好过丢掉整条。
     let mut acc = Accumulator::default();
     assert!(!acc.known("m1"));
-    acc.apply(ChatMessage {
+    acc.apply(ChatNode {
         id: "m1".into(),
-        role: Some(MessageRole::Assistant),
-        msg_type: Some(MessageType::Text),
+        role: Some(NodeRole::Assistant),
+        msg_type: Some(NodeKind::Text),
         delta: Some("半截".into()),
-        status: Some(MessageStatus::Streaming),
+        status: Some(NodeStatus::Streaming),
         ..Default::default()
     });
     assert!(acc.known("m1"));
@@ -212,7 +212,7 @@ fn delta_for_an_unknown_identity_still_accumulates() {
 fn aborted_turn_still_yields_its_text() {
     // 中止是**终态**（用户按了停止）：正文照给，与 `Failed` 同等对待。
     let mut acc = Accumulator::default();
-    acc.apply(assistant("m1", MessageStatus::Aborted, "被打断的答复"));
+    acc.apply(assistant("m1", NodeStatus::Aborted, "被打断的答复"));
     assert_eq!(acc.final_text(), "被打断的答复");
 }
 

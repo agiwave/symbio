@@ -94,7 +94,7 @@ pub(crate) use self::turn::{close_turn, settle_reasoning};
 pub(crate) fn round_report_hook(
     orchestrator: Arc<super::chat_loop::state::ChatOrchestrator>,
     ctx: Arc<dyn crate::symbio_core::PluginInvokeRequest>,
-    conversation: Vec<ChatMessage>,
+    conversation: Vec<ChatNode>,
     last_spoke_at: i64,
 ) -> super::v2_exec::RoundHookFn {
     let progress = Arc::new(std::sync::Mutex::new(
@@ -170,7 +170,7 @@ pub(crate) fn round_report_hook(
 /// 下次有人调 `build_request_view` 的次序就会连带改掉模型看到的优先级。
 ///
 /// 三段都空 ⇒ `None`（不拼空壳：那会让每轮 prompt 都多一段空白，而三段皆空是常态）。
-fn request_view_prefix(view: &[ChatMessage]) -> Option<String> {
+fn request_view_prefix(view: &[ChatNode]) -> Option<String> {
     const KINDS: [&str; 3] = ["recall_context", "readyset", "delegate_context"];
     // `Vec<String>` 而非 `Vec<&str>`：`to_text()` 按值产出一个 `String`，`trim()`
     // 借的是那个临时值——收 `&str` 会把返回值绑到函数参数上（E0515）。
@@ -219,7 +219,7 @@ use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::ModelFinishReason;
 use crate::symbio_core::{
-    chat_message::{ChatMessage, MessageContent, MessageRole, MessageStatus, MessageType},
+    chat_node::{ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind},
     clock_now_ms, llm_emit_message, llm_short_id, HookEvent, RunSnapshot, TurnOutput,
     TurnToolCallInfo,
 };
@@ -492,7 +492,7 @@ pub async fn run_chat_loop(
                             .messages
                             .iter()
                             .rev()
-                            .find(|m| m.role == Some(MessageRole::Assistant))
+                            .find(|m| m.role == Some(NodeRole::Assistant))
                             .and_then(|m| match &m.content {
                                 Some(MessageContent::Text(t)) => Some(t.clone()),
                                 _ => None,
@@ -507,7 +507,7 @@ pub async fn run_chat_loop(
                             .messages
                             .iter()
                             .rev()
-                            .find(|m| m.role == Some(MessageRole::Assistant))
+                            .find(|m| m.role == Some(NodeRole::Assistant))
                             .map(|m| {
                                 let meta = m.meta.as_ref();
                                 super::turn_runner::DialogFacts {
@@ -742,7 +742,7 @@ pub async fn run_chat_loop(
             .messages
             .iter()
             .rev()
-            .find(|m| m.role == Some(MessageRole::User))
+            .find(|m| m.role == Some(NodeRole::User))
             .map(|m| {
                 let text = match &m.content {
                     Some(MessageContent::Text(t)) => t.clone(),
@@ -814,7 +814,7 @@ pub async fn run_chat_loop(
                 res.output
             }
             Err(PluginError::Aborted { partial }) => {
-                // 中止：在途 Turn 交消费循环落库为 `MessageStatus::Aborted` +
+                // 中止：在途 Turn 交消费循环落库为 `NodeStatus::Aborted` +
                 // 会话结局 `aborted`（**不是** `failed`——中止不是错误）。半截产出
                 // （正文 / 思考 / 工具节点）随 `partial` 一路带到 `persist_failure`，
                 // 双写进 `messages.json`——它们是事实，不因没说完就不记。
@@ -967,7 +967,7 @@ async fn finish_turn(
 
     // Stop 钩子（幂等）：resume 出口发生在主循环之前，此时尚无消息列表
     // （收口前该分支即传空切片），其余出口一律携带当前消息列表。
-    let messages: &[ChatMessage] = match exit {
+    let messages: &[ChatNode] = match exit {
         TurnExit::ResumeDone => &[],
         _ => &context.messages,
     };

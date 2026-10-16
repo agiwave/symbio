@@ -2,7 +2,7 @@
  * 消息呈现注册表 — 前端纯 UI 映射单测（node 环境）
  *
  * 覆盖三类：
- * 1. **词表覆盖率**——`MESSAGE_TYPES` / `MESSAGE_STATUSES` / `CHAT_ROLES` 的每个取值
+ * 1. **词表覆盖率**——`NODE_KINDS` / `NODE_STATUSES` / `CHAT_ROLES` 的每个取值
  *    都必须在文案表里有映射。漏一个就会把机制词（如 `compression`）原样摆给用户看，
  *    这条断言就是防它。
  * 2. 头部呈现（图标 / 标题 / 状态标签 / 色调 / 修饰类）的判定顺序。
@@ -15,31 +15,31 @@
 import { describe, expect, it } from 'vitest'
 import {
   CHAT_ROLES,
-  MESSAGE_STATUSES,
-  MESSAGE_STATUS_ABORTED,
-  MESSAGE_STATUS_COMPLETED,
-  MESSAGE_STATUS_FAILED,
-  MESSAGE_STATUS_PENDING,
-  MESSAGE_STATUS_REMOVED,
-  MESSAGE_STATUS_STREAMING,
-  MESSAGE_STATUS_WAITING_USER_ACTION,
-  MESSAGE_TYPES,
-  MESSAGE_TYPE_COMPRESSION,
-  MESSAGE_TYPE_REASONING,
-  MESSAGE_TYPE_TEXT,
-  MESSAGE_TYPE_TOOL_CALL,
-  MESSAGE_TYPE_TURN,
-  MESSAGE_TYPE_USER_PROMPT,
+  NODE_STATUSES,
+  NODE_STATUS_ABORTED,
+  NODE_STATUS_COMPLETED,
+  NODE_STATUS_FAILED,
+  NODE_STATUS_PENDING,
+  NODE_STATUS_REMOVED,
+  NODE_STATUS_STREAMING,
+  NODE_STATUS_WAITING_USER_ACTION,
+  NODE_KINDS,
+  NODE_KIND_COMPRESSION,
+  NODE_KIND_REASONING,
+  NODE_KIND_TEXT,
+  NODE_KIND_TOOL_CALL,
+  NODE_KIND_TURN,
+  NODE_KIND_USER_PROMPT,
   CHAT_ROLE_ASSISTANT,
   CHAT_ROLE_TOOL,
   CHAT_ROLE_USER,
-  isUnsettledMessageStatus,
-} from '@/schemas/chat_message'
+  isUnsettledNodeStatus,
+} from '@/schemas/chat_node'
 import {
   DEEP_COLLAPSE_LEVEL,
   MESSAGE_ROLE_LABELS,
-  MESSAGE_STATUS_LABELS,
-  MESSAGE_TYPE_LABELS,
+  NODE_STATUS_LABELS,
+  NODE_KIND_LABELS,
   agentNameOf,
   compactionTriggerLabel,
   formatTokens,
@@ -76,8 +76,8 @@ import {
 function facets(partial: Partial<MessageFacets> = {}): MessageFacets {
   return {
     role: CHAT_ROLE_ASSISTANT,
-    type: MESSAGE_TYPE_TEXT,
-    status: MESSAGE_STATUS_COMPLETED,
+    type: NODE_KIND_TEXT,
+    status: NODE_STATUS_COMPLETED,
     subSession: false,
     toolRequest: false,
     toolResult: false,
@@ -91,14 +91,14 @@ function facets(partial: Partial<MessageFacets> = {}): MessageFacets {
 
 describe('词表覆盖率（防机制词泄漏给用户）', () => {
   it('每个消息类型都有面向用户的文案', () => {
-    for (const t of MESSAGE_TYPES) {
-      expect(MESSAGE_TYPE_LABELS[t], `类型 ${t} 缺文案映射`).toBeTruthy()
+    for (const t of NODE_KINDS) {
+      expect(NODE_KIND_LABELS[t], `类型 ${t} 缺文案映射`).toBeTruthy()
     }
   })
 
   it('每个消息状态都有面向用户的文案', () => {
-    for (const s of MESSAGE_STATUSES) {
-      expect(MESSAGE_STATUS_LABELS[s], `状态 ${s} 缺文案映射`).toBeTruthy()
+    for (const s of NODE_STATUSES) {
+      expect(NODE_STATUS_LABELS[s], `状态 ${s} 缺文案映射`).toBeTruthy()
     }
   })
 
@@ -115,14 +115,14 @@ describe('词表覆盖率（防机制词泄漏给用户）', () => {
   })
 
   it('压缩节点有文案，不会把 compression 原样漏给用户', () => {
-    expect(messageTypeLabel(MESSAGE_TYPE_COMPRESSION)).toBe('上下文压缩')
+    expect(messageTypeLabel(NODE_KIND_COMPRESSION)).toBe('上下文压缩')
   })
 
   it('中止是独立状态且有文案（不是 failed 的别名）', () => {
-    expect(messageStatusLabel(MESSAGE_STATUS_ABORTED)).toBe('已中止')
-    expect(isUnsettledMessageStatus(MESSAGE_STATUS_ABORTED)).toBe(true)
-    expect(isUnsettledMessageStatus(MESSAGE_STATUS_FAILED)).toBe(true)
-    expect(isUnsettledMessageStatus(MESSAGE_STATUS_COMPLETED)).toBe(false)
+    expect(messageStatusLabel(NODE_STATUS_ABORTED)).toBe('已中止')
+    expect(isUnsettledNodeStatus(NODE_STATUS_ABORTED)).toBe(true)
+    expect(isUnsettledNodeStatus(NODE_STATUS_FAILED)).toBe(true)
+    expect(isUnsettledNodeStatus(NODE_STATUS_COMPLETED)).toBe(false)
   })
 })
 
@@ -132,19 +132,19 @@ describe('messageIcon：判定顺序', () => {
   })
 
   it('合成请求节点优先于它自身的 type=text', () => {
-    expect(messageIcon(facets({ type: MESSAGE_TYPE_TEXT, toolRequest: true }))).toBe('📤')
+    expect(messageIcon(facets({ type: NODE_KIND_TEXT, toolRequest: true }))).toBe('📤')
   })
 
   it('各类型各自的图标', () => {
-    expect(messageIcon(facets({ type: MESSAGE_TYPE_USER_PROMPT }))).toBe('❓')
-    expect(messageIcon(facets({ type: MESSAGE_TYPE_COMPRESSION }))).toBe('🗜')
-    expect(messageIcon(facets({ type: MESSAGE_TYPE_REASONING }))).toBe('💭')
-    expect(messageIcon(facets({ type: MESSAGE_TYPE_TOOL_CALL }))).toBe('🔧')
+    expect(messageIcon(facets({ type: NODE_KIND_USER_PROMPT }))).toBe('❓')
+    expect(messageIcon(facets({ type: NODE_KIND_COMPRESSION }))).toBe('🗜')
+    expect(messageIcon(facets({ type: NODE_KIND_REASONING }))).toBe('💭')
+    expect(messageIcon(facets({ type: NODE_KIND_TOOL_CALL }))).toBe('🔧')
   })
 
   it('Turn 按是否子会话区分：子会话用 ↳，根级助手用 AI', () => {
-    expect(messageIcon(facets({ type: MESSAGE_TYPE_TURN, subSession: false }))).toBe('AI')
-    expect(messageIcon(facets({ type: MESSAGE_TYPE_TURN, subSession: true }))).toBe('↳')
+    expect(messageIcon(facets({ type: NODE_KIND_TURN, subSession: false }))).toBe('AI')
+    expect(messageIcon(facets({ type: NODE_KIND_TURN, subSession: true }))).toBe('↳')
   })
 
   it('工具返回用 ↩，其余叶子内容用 💬', () => {
@@ -159,26 +159,26 @@ describe('messageTitle', () => {
   })
 
   it('提问按 promptKind 区分提问 / 工具确认', () => {
-    expect(messageTitle(facets({ type: MESSAGE_TYPE_USER_PROMPT, promptKind: 'question' }), '助手')).toBe('提问')
-    expect(messageTitle(facets({ type: MESSAGE_TYPE_USER_PROMPT, promptKind: 'confirm' }), '助手')).toBe('工具确认')
+    expect(messageTitle(facets({ type: NODE_KIND_USER_PROMPT, promptKind: 'question' }), '助手')).toBe('提问')
+    expect(messageTitle(facets({ type: NODE_KIND_USER_PROMPT, promptKind: 'confirm' }), '助手')).toBe('工具确认')
   })
 
   it('思考的标题随流式状态变化', () => {
     expect(
-      messageTitle(facets({ type: MESSAGE_TYPE_REASONING, status: MESSAGE_STATUS_STREAMING }), '助手'),
+      messageTitle(facets({ type: NODE_KIND_REASONING, status: NODE_STATUS_STREAMING }), '助手'),
     ).toBe('思考中…')
     expect(
-      messageTitle(facets({ type: MESSAGE_TYPE_REASONING, status: MESSAGE_STATUS_COMPLETED }), '助手'),
+      messageTitle(facets({ type: NODE_KIND_REASONING, status: NODE_STATUS_COMPLETED }), '助手'),
     ).toBe('思考')
   })
 
   it('工具调用用节点名，缺省回退「工具」', () => {
-    expect(messageTitle(facets({ type: MESSAGE_TYPE_TOOL_CALL, name: 'cmd' }), '助手')).toBe('cmd')
-    expect(messageTitle(facets({ type: MESSAGE_TYPE_TOOL_CALL }), '助手')).toBe('工具')
+    expect(messageTitle(facets({ type: NODE_KIND_TOOL_CALL, name: 'cmd' }), '助手')).toBe('cmd')
+    expect(messageTitle(facets({ type: NODE_KIND_TOOL_CALL }), '助手')).toBe('工具')
   })
 
   it('Turn 的标题是智能体名（由调用方传入）', () => {
-    expect(messageTitle(facets({ type: MESSAGE_TYPE_TURN }), '探索者')).toBe('探索者')
+    expect(messageTitle(facets({ type: NODE_KIND_TURN }), '探索者')).toBe('探索者')
   })
 
   it('合成请求节点是「请求」，工具返回是「响应」', () => {
@@ -190,56 +190,56 @@ describe('messageTitle', () => {
 describe('messageStatusTag / messageStatusTone', () => {
   it('工具调用的非终态都有标签（折叠态下唯一的运行中信号）', () => {
     const t = (s: MessageFacets['status']) =>
-      messageStatusTag(facets({ type: MESSAGE_TYPE_TOOL_CALL, status: s }))
-    expect(t(MESSAGE_STATUS_STREAMING)).toBe('运行中')
-    expect(t(MESSAGE_STATUS_WAITING_USER_ACTION)).toBe('待确认')
-    expect(t(MESSAGE_STATUS_FAILED)).toBe('失败')
-    expect(t(MESSAGE_STATUS_ABORTED)).toBe('已中止')
+      messageStatusTag(facets({ type: NODE_KIND_TOOL_CALL, status: s }))
+    expect(t(NODE_STATUS_STREAMING)).toBe('运行中')
+    expect(t(NODE_STATUS_WAITING_USER_ACTION)).toBe('待确认')
+    expect(t(NODE_STATUS_FAILED)).toBe('失败')
+    expect(t(NODE_STATUS_ABORTED)).toBe('已中止')
   })
 
   it('终态 completed 刻意不给标签（否则把真正需要注意的状态淹掉）', () => {
     expect(
-      messageStatusTag(facets({ type: MESSAGE_TYPE_TOOL_CALL, status: MESSAGE_STATUS_COMPLETED })),
+      messageStatusTag(facets({ type: NODE_KIND_TOOL_CALL, status: NODE_STATUS_COMPLETED })),
     ).toBe('')
   })
 
   it('压缩节点有自己的标签（它同样默认折叠，标签是唯一信号）', () => {
     const c = (s: MessageFacets['status']) =>
-      messageStatusTag(facets({ type: MESSAGE_TYPE_COMPRESSION, status: s }))
-    expect(c(MESSAGE_STATUS_STREAMING)).toBe('压缩中')
-    expect(c(MESSAGE_STATUS_FAILED)).toBe('未完成')
-    expect(c(MESSAGE_STATUS_ABORTED)).toBe('已中止')
-    expect(c(MESSAGE_STATUS_COMPLETED)).toBe('')
+      messageStatusTag(facets({ type: NODE_KIND_COMPRESSION, status: s }))
+    expect(c(NODE_STATUS_STREAMING)).toBe('压缩中')
+    expect(c(NODE_STATUS_FAILED)).toBe('未完成')
+    expect(c(NODE_STATUS_ABORTED)).toBe('已中止')
+    expect(c(NODE_STATUS_COMPLETED)).toBe('')
   })
 
   it('非动作节点没有标签', () => {
-    expect(messageStatusTag(facets({ type: MESSAGE_TYPE_TEXT }))).toBe('')
-    expect(messageStatusTag(facets({ type: MESSAGE_TYPE_TURN }))).toBe('')
+    expect(messageStatusTag(facets({ type: NODE_KIND_TEXT }))).toBe('')
+    expect(messageStatusTag(facets({ type: NODE_KIND_TURN }))).toBe('')
   })
 
   it('中止不给红色角标（按一次停止不该看到一片失败红）', () => {
-    expect(messageStatusTone(facets({ status: MESSAGE_STATUS_ABORTED }))).toBe('sub')
-    expect(messageStatusTone(facets({ status: MESSAGE_STATUS_FAILED }))).toBe('err')
-    expect(messageStatusTone(facets({ status: MESSAGE_STATUS_WAITING_USER_ACTION }))).toBe('warn')
-    expect(messageStatusTone(facets({ status: MESSAGE_STATUS_STREAMING }))).toBe('run')
+    expect(messageStatusTone(facets({ status: NODE_STATUS_ABORTED }))).toBe('sub')
+    expect(messageStatusTone(facets({ status: NODE_STATUS_FAILED }))).toBe('err')
+    expect(messageStatusTone(facets({ status: NODE_STATUS_WAITING_USER_ACTION }))).toBe('warn')
+    expect(messageStatusTone(facets({ status: NODE_STATUS_STREAMING }))).toBe('run')
   })
 })
 
 describe('messageHeadModifier', () => {
   it('思考中与工具执行中共用标题呼吸动效', () => {
     expect(
-      messageHeadModifier(facets({ type: MESSAGE_TYPE_REASONING, status: MESSAGE_STATUS_STREAMING }))
+      messageHeadModifier(facets({ type: NODE_KIND_REASONING, status: NODE_STATUS_STREAMING }))
         .thinking,
     ).toBe(true)
     expect(
-      messageHeadModifier(facets({ type: MESSAGE_TYPE_TOOL_CALL, status: MESSAGE_STATUS_STREAMING }))
+      messageHeadModifier(facets({ type: NODE_KIND_TOOL_CALL, status: NODE_STATUS_STREAMING }))
         .thinking,
     ).toBe(true)
   })
 
   it('终态的工具调用不带动效', () => {
     expect(
-      messageHeadModifier(facets({ type: MESSAGE_TYPE_TOOL_CALL, status: MESSAGE_STATUS_COMPLETED }))
+      messageHeadModifier(facets({ type: NODE_KIND_TOOL_CALL, status: NODE_STATUS_COMPLETED }))
         .thinking,
     ).toBe(false)
   })
@@ -248,48 +248,48 @@ describe('messageHeadModifier', () => {
 describe('messageIsRunningAction', () => {
   it('只有工具执行与上下文压缩算「动作」，且必须仍在运行', () => {
     expect(
-      messageIsRunningAction(facets({ type: MESSAGE_TYPE_TOOL_CALL, status: MESSAGE_STATUS_STREAMING })),
+      messageIsRunningAction(facets({ type: NODE_KIND_TOOL_CALL, status: NODE_STATUS_STREAMING })),
     ).toBe(true)
     expect(
-      messageIsRunningAction(facets({ type: MESSAGE_TYPE_COMPRESSION, status: MESSAGE_STATUS_STREAMING })),
+      messageIsRunningAction(facets({ type: NODE_KIND_COMPRESSION, status: NODE_STATUS_STREAMING })),
     ).toBe(true)
     expect(
-      messageIsRunningAction(facets({ type: MESSAGE_TYPE_TOOL_CALL, status: MESSAGE_STATUS_COMPLETED })),
+      messageIsRunningAction(facets({ type: NODE_KIND_TOOL_CALL, status: NODE_STATUS_COMPLETED })),
     ).toBe(false)
     expect(
-      messageIsRunningAction(facets({ type: MESSAGE_TYPE_TEXT, status: MESSAGE_STATUS_STREAMING })),
+      messageIsRunningAction(facets({ type: NODE_KIND_TEXT, status: NODE_STATUS_STREAMING })),
     ).toBe(false)
   })
 })
 
 describe('折叠策略', () => {
   it('待审批与用户消息始终展开', () => {
-    expect(messageDefaultOpen(facets({ status: MESSAGE_STATUS_WAITING_USER_ACTION }))).toBe(true)
+    expect(messageDefaultOpen(facets({ status: NODE_STATUS_WAITING_USER_ACTION }))).toBe(true)
     expect(messageDefaultOpen(facets({ role: CHAT_ROLE_USER }))).toBe(true)
   })
 
   it('工具调用默认单行；内含待审批或可恢复失败时展开', () => {
-    expect(messageDefaultOpen(facets({ type: MESSAGE_TYPE_TOOL_CALL }))).toBe(false)
-    expect(messageDefaultOpen(facets({ type: MESSAGE_TYPE_TOOL_CALL, hasWaitingChild: true }))).toBe(true)
-    expect(messageDefaultOpen(facets({ type: MESSAGE_TYPE_TOOL_CALL, recoverable: true }))).toBe(true)
+    expect(messageDefaultOpen(facets({ type: NODE_KIND_TOOL_CALL }))).toBe(false)
+    expect(messageDefaultOpen(facets({ type: NODE_KIND_TOOL_CALL, hasWaitingChild: true }))).toBe(true)
+    expect(messageDefaultOpen(facets({ type: NODE_KIND_TOOL_CALL, recoverable: true }))).toBe(true)
   })
 
   it('思考始终单行', () => {
-    expect(messageDefaultOpen(facets({ type: MESSAGE_TYPE_REASONING }))).toBe(false)
+    expect(messageDefaultOpen(facets({ type: NODE_KIND_REASONING }))).toBe(false)
   })
 
   it('正文：助手展开，工具结果收起', () => {
-    expect(messageDefaultOpen(facets({ type: MESSAGE_TYPE_TEXT }))).toBe(true)
-    expect(messageDefaultOpen(facets({ type: MESSAGE_TYPE_TEXT, role: CHAT_ROLE_TOOL }))).toBe(false)
+    expect(messageDefaultOpen(facets({ type: NODE_KIND_TEXT }))).toBe(true)
+    expect(messageDefaultOpen(facets({ type: NODE_KIND_TEXT, role: CHAT_ROLE_TOOL }))).toBe(false)
   })
 
   it('提问与压缩默认展开', () => {
-    expect(messageDefaultOpen(facets({ type: MESSAGE_TYPE_USER_PROMPT }))).toBe(true)
-    expect(messageDefaultOpen(facets({ type: MESSAGE_TYPE_COMPRESSION }))).toBe(true)
+    expect(messageDefaultOpen(facets({ type: NODE_KIND_USER_PROMPT }))).toBe(true)
+    expect(messageDefaultOpen(facets({ type: NODE_KIND_COMPRESSION }))).toBe(true)
   })
 
   it('深层级一律收起，用户手动切换后以其选择为准', () => {
-    const f = facets({ type: MESSAGE_TYPE_TEXT })
+    const f = facets({ type: NODE_KIND_TEXT })
     expect(effectiveOpenOf(f, DEEP_COLLAPSE_LEVEL, false, true)).toBe(false)
     expect(effectiveOpenOf(f, DEEP_COLLAPSE_LEVEL, true, true)).toBe(true)
     expect(effectiveOpenOf(f, DEEP_COLLAPSE_LEVEL, true, false)).toBe(false)
@@ -298,13 +298,13 @@ describe('折叠策略', () => {
   it('首次点击默认收起的节点必须真的展开（防「点了没反应」）', () => {
     // 默认收起 + 未手动切换过：userOpen 初值为 true，若按固定初值取反会得到 false，
     // 展示态不变 → 表现为第一次点击无反应。
-    const f = facets({ type: MESSAGE_TYPE_REASONING })
+    const f = facets({ type: NODE_KIND_REASONING })
     expect(effectiveOpenOf(f, 0, false, true)).toBe(false)
     expect(nextOpenOf(f, 0, false, true)).toBe(true)
   })
 
   it('首次点击默认展开的节点必须真的收起', () => {
-    const f = facets({ type: MESSAGE_TYPE_TEXT })
+    const f = facets({ type: NODE_KIND_TEXT })
     expect(effectiveOpenOf(f, 0, false, true)).toBe(true)
     expect(nextOpenOf(f, 0, false, true)).toBe(false)
   })
@@ -312,15 +312,15 @@ describe('折叠策略', () => {
 
 describe('messagePreviewFollowsLiveEdge：收起态摘要取哪一端', () => {
   it('只有「正在产生内容」才跟随末端；其余状态（含排队 / 等待响应 / 终态）取开头', () => {
-    expect(messagePreviewFollowsLiveEdge(facets({ status: MESSAGE_STATUS_STREAMING }))).toBe(true)
+    expect(messagePreviewFollowsLiveEdge(facets({ status: NODE_STATUS_STREAMING }))).toBe(true)
     // 排队中还没有内容、等待响应时内容不会自己长、终态内容已不变——都不该跟着走
     const nonLive = [
-      MESSAGE_STATUS_PENDING,
-      MESSAGE_STATUS_WAITING_USER_ACTION,
-      MESSAGE_STATUS_COMPLETED,
-      MESSAGE_STATUS_ABORTED,
-      MESSAGE_STATUS_FAILED,
-      MESSAGE_STATUS_REMOVED,
+      NODE_STATUS_PENDING,
+      NODE_STATUS_WAITING_USER_ACTION,
+      NODE_STATUS_COMPLETED,
+      NODE_STATUS_ABORTED,
+      NODE_STATUS_FAILED,
+      NODE_STATUS_REMOVED,
     ] as const
     for (const status of nonLive) {
       expect(messagePreviewFollowsLiveEdge(facets({ status })), `状态 ${status} 不应取末端`).toBe(
@@ -330,12 +330,12 @@ describe('messagePreviewFollowsLiveEdge：收起态摘要取哪一端', () => {
   })
 
   it('判定只看状态，与节点类型无关（思考 / 工具调用同样适用）', () => {
-    const types = [MESSAGE_TYPE_REASONING, MESSAGE_TYPE_TOOL_CALL, MESSAGE_TYPE_TEXT] as const
+    const types = [NODE_KIND_REASONING, NODE_KIND_TOOL_CALL, NODE_KIND_TEXT] as const
     for (const type of types) {
-      expect(messagePreviewFollowsLiveEdge(facets({ type, status: MESSAGE_STATUS_STREAMING }))).toBe(
+      expect(messagePreviewFollowsLiveEdge(facets({ type, status: NODE_STATUS_STREAMING }))).toBe(
         true,
       )
-      expect(messagePreviewFollowsLiveEdge(facets({ type, status: MESSAGE_STATUS_COMPLETED }))).toBe(
+      expect(messagePreviewFollowsLiveEdge(facets({ type, status: NODE_STATUS_COMPLETED }))).toBe(
         false,
       )
     }
@@ -356,34 +356,34 @@ describe('facetsOf：props → facets 的唯一实现', () => {
   it('缺省值：无 role/type/status 的节点按「助手正文、已结束」处理', () => {
     const f = facetsOf({ id: 'm1' })
     expect(f.role).toBe(CHAT_ROLE_ASSISTANT)
-    expect(f.type).toBe(MESSAGE_TYPE_TEXT)
-    expect(f.status).toBe(MESSAGE_STATUS_COMPLETED)
+    expect(f.type).toBe(NODE_KIND_TEXT)
+    expect(f.status).toBe(NODE_STATUS_COMPLETED)
     expect(f.responseText).toBe(false)
   })
 
   it('子会话 Turn = role=tool 的 turn（工具「过程」段）', () => {
-    expect(facetsOf({ id: 't', type: MESSAGE_TYPE_TURN, role: CHAT_ROLE_TOOL }).subSession).toBe(true)
-    expect(facetsOf({ id: 't', type: MESSAGE_TYPE_TURN, role: CHAT_ROLE_ASSISTANT }).subSession).toBe(false)
+    expect(facetsOf({ id: 't', type: NODE_KIND_TURN, role: CHAT_ROLE_TOOL }).subSession).toBe(true)
+    expect(facetsOf({ id: 't', type: NODE_KIND_TURN, role: CHAT_ROLE_ASSISTANT }).subSession).toBe(false)
   })
 
   it('工具返回必须限定父节点是 tool_call（否则子会话内部文本会被误判）', () => {
-    const node = { id: 'r', type: MESSAGE_TYPE_TEXT, role: CHAT_ROLE_TOOL } as const
-    expect(facetsOf(node, MESSAGE_TYPE_TOOL_CALL).toolResult).toBe(true)
-    expect(facetsOf(node, MESSAGE_TYPE_TURN).toolResult).toBe(false)
+    const node = { id: 'r', type: NODE_KIND_TEXT, role: CHAT_ROLE_TOOL } as const
+    expect(facetsOf(node, NODE_KIND_TOOL_CALL).toolResult).toBe(true)
+    expect(facetsOf(node, NODE_KIND_TURN).toolResult).toBe(false)
     expect(facetsOf(node, undefined).toolResult).toBe(false)
   })
 
   it('正文直排必须限定父节点是 turn 且自身是 text（思考要保留单行行头）', () => {
-    expect(facetsOf({ id: 'x', type: MESSAGE_TYPE_TEXT }, MESSAGE_TYPE_TURN).responseText).toBe(true)
-    expect(facetsOf({ id: 'r', type: MESSAGE_TYPE_REASONING }, MESSAGE_TYPE_TURN).responseText).toBe(false)
-    expect(facetsOf({ id: 'x', type: MESSAGE_TYPE_TEXT }, MESSAGE_TYPE_TOOL_CALL).responseText).toBe(false)
+    expect(facetsOf({ id: 'x', type: NODE_KIND_TEXT }, NODE_KIND_TURN).responseText).toBe(true)
+    expect(facetsOf({ id: 'r', type: NODE_KIND_REASONING }, NODE_KIND_TURN).responseText).toBe(false)
+    expect(facetsOf({ id: 'x', type: NODE_KIND_TEXT }, NODE_KIND_TOOL_CALL).responseText).toBe(false)
   })
 
   it('后端 meta 字段只在这一点被解释：recoverable / failure_kind / __toolRequest / heartbeat', () => {
     const f = facetsOf({
       id: 'tc',
-      type: MESSAGE_TYPE_TOOL_CALL,
-      status: MESSAGE_STATUS_FAILED,
+      type: NODE_KIND_TOOL_CALL,
+      status: NODE_STATUS_FAILED,
       meta: { recoverable: true, failure_kind: 'error' },
     })
     expect(f.recoverable).toBe(true)
@@ -396,8 +396,8 @@ describe('facetsOf：props → facets 的唯一实现', () => {
   it('待审批子节点参与折叠判定（工具卡的展开例外之一）', () => {
     const f = facetsOf({
       id: 'tc',
-      type: MESSAGE_TYPE_TOOL_CALL,
-      children: [{ id: 'c', status: MESSAGE_STATUS_WAITING_USER_ACTION }],
+      type: NODE_KIND_TOOL_CALL,
+      children: [{ id: 'c', status: NODE_STATUS_WAITING_USER_ACTION }],
     })
     expect(f.hasWaitingChild).toBe(true)
   })
@@ -415,16 +415,16 @@ describe('messageStartedAt：锚点只取后端值', () => {
 
 describe('消息级业务规则（纯函数，原先散在渲染组件里）', () => {
   const tool = (p: Partial<MessageFacets>) =>
-    facets({ type: MESSAGE_TYPE_TOOL_CALL, status: MESSAGE_STATUS_FAILED, ...p })
+    facets({ type: NODE_KIND_TOOL_CALL, status: NODE_STATUS_FAILED, ...p })
 
   it('只有「工具调用 + 失败 + 后端标记可恢复」才可就地重试', () => {
     expect(canRetryTool(tool({ recoverable: true }))).toBe(true)
     // 运行中的工具失败是信息性的（错误结果已喂给 LLM），给重试按钮只会误导
     expect(canRetryTool(tool({ recoverable: false }))).toBe(false)
     // 非工具调用不在此列：思考/正文/请求的失败归 Turn 级重试
-    expect(canRetryTool(facets({ status: MESSAGE_STATUS_FAILED, recoverable: true }))).toBe(false)
+    expect(canRetryTool(facets({ status: NODE_STATUS_FAILED, recoverable: true }))).toBe(false)
     // 非失败态没有重试语义
-    expect(canRetryTool(tool({ status: MESSAGE_STATUS_COMPLETED, recoverable: true }))).toBe(false)
+    expect(canRetryTool(tool({ status: NODE_STATUS_COMPLETED, recoverable: true }))).toBe(false)
   })
 
   it('补充参数只在 failure_kind=error 时可恢复失败上提供', () => {
@@ -451,25 +451,25 @@ describe('missingResultNoteOf：「有请求、无响应」的兑底', () => {
 describe('messageShowsLiveBadge：「回复中…」只在正文流式时显示', () => {
   it('正文流式显示；思考/工具/压缩各有自己的运行信号，不重复挂', () => {
     const live = (type: MessageFacets['type']) =>
-      messageShowsLiveBadge(facets({ type, status: MESSAGE_STATUS_STREAMING }))
-    expect(live(MESSAGE_TYPE_TEXT)).toBe(true)
-    expect(live(MESSAGE_TYPE_REASONING)).toBe(false)
-    expect(live(MESSAGE_TYPE_TOOL_CALL)).toBe(false)
-    expect(live(MESSAGE_TYPE_COMPRESSION)).toBe(false)
-    expect(messageShowsLiveBadge(facets({ status: MESSAGE_STATUS_COMPLETED }))).toBe(false)
+      messageShowsLiveBadge(facets({ type, status: NODE_STATUS_STREAMING }))
+    expect(live(NODE_KIND_TEXT)).toBe(true)
+    expect(live(NODE_KIND_REASONING)).toBe(false)
+    expect(live(NODE_KIND_TOOL_CALL)).toBe(false)
+    expect(live(NODE_KIND_COMPRESSION)).toBe(false)
+    expect(messageShowsLiveBadge(facets({ status: NODE_STATUS_COMPLETED }))).toBe(false)
   })
 })
 
 describe('messageRetryTargetOf：重试分派（粒度由节点类型决定）', () => {
   it('工具调用失败 → 单工具重试，锚点是它自己', () => {
     expect(
-      messageRetryTargetOf({ id: 'tc1', type: MESSAGE_TYPE_TOOL_CALL, status: MESSAGE_STATUS_FAILED }),
+      messageRetryTargetOf({ id: 'tc1', type: NODE_KIND_TOOL_CALL, status: NODE_STATUS_FAILED }),
     ).toEqual({ action: 'retry', targetId: 'tc1' })
   })
 
   it('Turn 失败 → 整轮重试，锚点是 Turn 自己', () => {
     expect(
-      messageRetryTargetOf({ id: 't1', type: MESSAGE_TYPE_TURN, status: MESSAGE_STATUS_FAILED }),
+      messageRetryTargetOf({ id: 't1', type: NODE_KIND_TURN, status: NODE_STATUS_FAILED }),
     ).toEqual({ action: 'retry_turn', targetId: 't1' })
   })
 
@@ -477,16 +477,16 @@ describe('messageRetryTargetOf：重试分派（粒度由节点类型决定）',
     expect(
       messageRetryTargetOf({
         id: 'x1',
-        type: MESSAGE_TYPE_TEXT,
-        status: MESSAGE_STATUS_FAILED,
+        type: NODE_KIND_TEXT,
+        status: NODE_STATUS_FAILED,
         parent_id: 't1',
       }),
     ).toEqual({ action: 'retry_turn', targetId: 't1' })
     expect(
       messageRetryTargetOf({
         id: 'r1',
-        type: MESSAGE_TYPE_REASONING,
-        status: MESSAGE_STATUS_FAILED,
+        type: NODE_KIND_REASONING,
+        status: NODE_STATUS_FAILED,
         parent_id: 't1',
       }),
     ).toEqual({ action: 'retry_turn', targetId: 't1' })
@@ -494,13 +494,13 @@ describe('messageRetryTargetOf：重试分派（粒度由节点类型决定）',
 
   it('无父节点可回溯时退回自身（不发出空 targetId）', () => {
     expect(
-      messageRetryTargetOf({ id: 'x1', type: MESSAGE_TYPE_TEXT, status: MESSAGE_STATUS_FAILED }),
+      messageRetryTargetOf({ id: 'x1', type: NODE_KIND_TEXT, status: NODE_STATUS_FAILED }),
     ).toEqual({ action: 'retry_turn', targetId: 'x1' })
   })
 
   it('中止的 Turn 同样走整轮重试（这一轮只跑了一半）', () => {
     expect(
-      messageRetryTargetOf({ id: 't1', type: MESSAGE_TYPE_TURN, status: MESSAGE_STATUS_ABORTED }),
+      messageRetryTargetOf({ id: 't1', type: NODE_KIND_TURN, status: NODE_STATUS_ABORTED }),
     ).toEqual({ action: 'retry_turn', targetId: 't1' })
   })
 
@@ -508,15 +508,15 @@ describe('messageRetryTargetOf：重试分派（粒度由节点类型决定）',
     expect(
       messageRetryTargetOf({
         id: 'tc1',
-        type: MESSAGE_TYPE_TOOL_CALL,
-        status: MESSAGE_STATUS_ABORTED,
+        type: NODE_KIND_TOOL_CALL,
+        status: NODE_STATUS_ABORTED,
         parent_id: 't1',
       }),
     ).toEqual({ action: 'retry_turn', targetId: 't1' })
   })
 
   it('缺省 type 按正文处理 → 整轮重试', () => {
-    expect(messageRetryTargetOf({ id: 'x1', status: MESSAGE_STATUS_FAILED, parent_id: 't1' })).toEqual(
+    expect(messageRetryTargetOf({ id: 'x1', status: NODE_STATUS_FAILED, parent_id: 't1' })).toEqual(
       { action: 'retry_turn', targetId: 't1' },
     )
   })
@@ -532,8 +532,8 @@ describe('messageRetryTargetOf：重试分派（粒度由节点类型决定）',
     expect(
       messageRetryTargetOf({
         id: 'cp1',
-        type: MESSAGE_TYPE_COMPRESSION,
-        status: MESSAGE_STATUS_FAILED,
+        type: NODE_KIND_COMPRESSION,
+        status: NODE_STATUS_FAILED,
       }),
     ).toEqual({ action: 'retry_compaction', targetId: 'cp1' })
   })
@@ -542,8 +542,8 @@ describe('messageRetryTargetOf：重试分派（粒度由节点类型决定）',
     expect(
       messageRetryTargetOf({
         id: 'cp1',
-        type: MESSAGE_TYPE_COMPRESSION,
-        status: MESSAGE_STATUS_FAILED,
+        type: NODE_KIND_COMPRESSION,
+        status: NODE_STATUS_FAILED,
         parent_id: 't1',
       }),
     ).toEqual({ action: 'retry_compaction', targetId: 'cp1' })
@@ -551,10 +551,10 @@ describe('messageRetryTargetOf：重试分派（粒度由节点类型决定）',
 
   it('未失败的压缩节点不发重试（成功 / 压缩中都没有入口）', () => {
     // `as const` 不可省：数组字面量里的字面量类型会被拓宽成 `string`，
-    // 于是 `status` 无法赋给 `MessageStatus`（与下面几处同理）
-    for (const status of [MESSAGE_STATUS_COMPLETED, MESSAGE_STATUS_STREAMING] as const) {
+    // 于是 `status` 无法赋给 `NodeStatus`（与下面几处同理）
+    for (const status of [NODE_STATUS_COMPLETED, NODE_STATUS_STREAMING] as const) {
       expect(
-        messageRetryTargetOf({ id: 'cp1', type: MESSAGE_TYPE_COMPRESSION, status }),
+        messageRetryTargetOf({ id: 'cp1', type: NODE_KIND_COMPRESSION, status }),
       ).toEqual({ action: 'retry_turn', targetId: 'cp1' })
     }
   })
@@ -571,7 +571,7 @@ describe('canRetryCompaction：压缩失败的重试入口', () => {
   it('压缩 + 失败 → 给入口', () => {
     expect(
       canRetryCompaction(
-        facets({ type: MESSAGE_TYPE_COMPRESSION, status: MESSAGE_STATUS_FAILED }),
+        facets({ type: NODE_KIND_COMPRESSION, status: NODE_STATUS_FAILED }),
       ),
     ).toBe(true)
   })
@@ -580,7 +580,7 @@ describe('canRetryCompaction：压缩失败的重试入口', () => {
     for (const failureKind of ['llm_error', 'invalid_snapshot', 'input_over_limit']) {
       expect(
         canRetryCompaction(
-          facets({ type: MESSAGE_TYPE_COMPRESSION, status: MESSAGE_STATUS_FAILED, failureKind }),
+          facets({ type: NODE_KIND_COMPRESSION, status: NODE_STATUS_FAILED, failureKind }),
         ),
       ).toBe(true)
     }
@@ -588,18 +588,18 @@ describe('canRetryCompaction：压缩失败的重试入口', () => {
 
   it('非失败态（压缩中 / 已完成 / 已中止）不给入口', () => {
     for (const status of [
-      MESSAGE_STATUS_STREAMING,
-      MESSAGE_STATUS_COMPLETED,
-      MESSAGE_STATUS_ABORTED,
-      MESSAGE_STATUS_WAITING_USER_ACTION,
+      NODE_STATUS_STREAMING,
+      NODE_STATUS_COMPLETED,
+      NODE_STATUS_ABORTED,
+      NODE_STATUS_WAITING_USER_ACTION,
     ] as const) {
-      expect(canRetryCompaction(facets({ type: MESSAGE_TYPE_COMPRESSION, status }))).toBe(false)
+      expect(canRetryCompaction(facets({ type: NODE_KIND_COMPRESSION, status }))).toBe(false)
     }
   })
 
   it('非压缩类型不给入口（工具 / Turn 各有自己的重试语义）', () => {
-    for (const type of [MESSAGE_TYPE_TURN, MESSAGE_TYPE_TOOL_CALL, MESSAGE_TYPE_TEXT] as const) {
-      expect(canRetryCompaction(facets({ type, status: MESSAGE_STATUS_FAILED }))).toBe(false)
+    for (const type of [NODE_KIND_TURN, NODE_KIND_TOOL_CALL, NODE_KIND_TEXT] as const) {
+      expect(canRetryCompaction(facets({ type, status: NODE_STATUS_FAILED }))).toBe(false)
     }
   })
 })
@@ -608,21 +608,21 @@ describe('messageRendererKey：渲染形态分派', () => {
   const key = (p: Partial<MessageFacets>) => messageRendererKey(facets(p))
 
   it('Turn 最先判定：任何 Turn 都走分组形态', () => {
-    expect(key({ type: MESSAGE_TYPE_TURN })).toBe('turn')
-    expect(key({ type: MESSAGE_TYPE_TURN, subSession: true })).toBe('turn')
+    expect(key({ type: NODE_KIND_TURN })).toBe('turn')
+    expect(key({ type: NODE_KIND_TURN, subSession: true })).toBe('turn')
   })
 
   it('角色优先于类型：用户消息一律走气泡', () => {
-    expect(key({ role: CHAT_ROLE_USER, type: MESSAGE_TYPE_TEXT })).toBe('text')
-    expect(key({ role: CHAT_ROLE_USER, type: MESSAGE_TYPE_TOOL_CALL })).toBe('text')
+    expect(key({ role: CHAT_ROLE_USER, type: NODE_KIND_TEXT })).toBe('text')
+    expect(key({ role: CHAT_ROLE_USER, type: NODE_KIND_TOOL_CALL })).toBe('text')
   })
 
   it('其余按类型分派', () => {
-    expect(key({ type: MESSAGE_TYPE_TEXT })).toBe('text')
-    expect(key({ type: MESSAGE_TYPE_REASONING })).toBe('text')
-    expect(key({ type: MESSAGE_TYPE_TOOL_CALL })).toBe('tool_call')
-    expect(key({ type: MESSAGE_TYPE_USER_PROMPT })).toBe('user_prompt')
-    expect(key({ type: MESSAGE_TYPE_COMPRESSION })).toBe('compression')
+    expect(key({ type: NODE_KIND_TEXT })).toBe('text')
+    expect(key({ type: NODE_KIND_REASONING })).toBe('text')
+    expect(key({ type: NODE_KIND_TOOL_CALL })).toBe('tool_call')
+    expect(key({ type: NODE_KIND_USER_PROMPT })).toBe('user_prompt')
+    expect(key({ type: NODE_KIND_COMPRESSION })).toBe('compression')
   })
 
   it('未登记取值 → fallback（后端先行上线新 type 时旧前端仍能显示内容）', () => {
@@ -630,7 +630,7 @@ describe('messageRendererKey：渲染形态分派', () => {
   })
 
   it('每个已登记的消息类型都分派到非 fallback 的渲染器（防漏登记）', () => {
-    for (const t of MESSAGE_TYPES) {
+    for (const t of NODE_KINDS) {
       expect(messageRendererKey(facets({ type: t })), `类型 ${t} 未分派到专属渲染器`).not.toBe(
         'fallback',
       )
@@ -643,7 +643,7 @@ describe('messageRendererKey：渲染形态分派', () => {
   // 会塌成一条用户气泡；而图标侧让「用户」胜出更符合直觉。统一任何一边都会
   // 改掉一处既有语义，故保留分歧并在此显式记录——改动它必须是有意的。
   it('role=user + type=turn：图标按角色、渲染器按 Turn（有意分歧，勿静默统一）', () => {
-    const f = facets({ role: CHAT_ROLE_USER, type: MESSAGE_TYPE_TURN })
+    const f = facets({ role: CHAT_ROLE_USER, type: NODE_KIND_TURN })
     expect(messageIcon(f)).toBe('👤')
     expect(messageTitle(f, '助手')).toBe('你')
     expect(messageRendererKey(f)).toBe('turn')
@@ -662,8 +662,8 @@ describe('压缩后的历史记忆：不是「你说的那句话」', () => {
   const memory = {
     id: 'm1',
     role: CHAT_ROLE_USER,
-    type: MESSAGE_TYPE_TEXT,
-    status: MESSAGE_STATUS_COMPLETED,
+    type: NODE_KIND_TEXT,
+    status: NODE_STATUS_COMPLETED,
     content: '[CONTEXT SNAPSHOT — 压缩的历史记忆]\n…',
     meta: { compacted: true, post_tokens: 9000, transcript_path: '/s/t/a.json' },
   } as const

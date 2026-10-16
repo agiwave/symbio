@@ -18,7 +18,7 @@
  * | M-003 | 不得直接 `invoke`，一律经 `services/`                   | 出站协议切换只改一处          |
  * | M-004 | `registry/` `schemas/` 不得 import 组件                 | 契约与映射必须能被非视图引用  |
  * | M-005 | `schemas/` 不得依赖 `registry/` `components/` `composables/` | 数据契约零呈现依赖（防环） |
- * | M-006 | 各层不得用字面量比较消息词表（components / composables / services / stores / registry） | 词表只有 `schemas/chat_message` |
+ * | M-006 | 各层不得用字面量比较消息词表（components / composables / services / stores / registry） | 词表只有 `schemas/chat_node` |
  * | M-007 | 地址常量只能在 `schemas/vdfs.ts` **定义**                | 段名常量不得有第二份真相      |
  * | M-008 | 控制面路由名只能取自 `constants/routes.gen.ts`           | 它是后端生成的，手写一份就是抄本 |
  *
@@ -295,7 +295,7 @@ const RULES = {
     severity: 'error',
     test: (c) =>
       c.match(new RegExp(`\\.(?:status|role|type)\\s*(?:===|!==)\\s*['"](?:${MESSAGE_VOCAB})['"]`)),
-    message: '不得用字面量比较消息词表 —— 用 schemas/chat_message 的常量或 registry/messageTypes 的判定',
+    message: '不得用字面量比较消息词表 —— 用 schemas/chat_node 的常量或 registry/messageTypes 的判定',
   },
   /**
    * M-007 地址段常量的**定义权**只在 `schemas/vdfs.ts`
@@ -401,7 +401,7 @@ console.log('--- M-006: 组件 / 组合式 / 服务层 / store / registry 不得
 //
 // `stores/` 与 `registry/` 是**后来补上的**：先前只扫前三个目录，于是
 // `stores/sessionTranscript.ts` 的四处字面量比较长期无人看守（其中该文件
-// 明明已经 import 了 `MESSAGE_STATUS_*` 常量——同文件两种写法并存）。
+// 明明已经 import 了 `NODE_STATUS_*` 常量——同文件两种写法并存）。
 // 教训：门禁的**扫描范围**和它的**规则**一样会漏，而漏了不会红。
 auditFiles(
   'tauri/src/components + composables + services + stores + registry',

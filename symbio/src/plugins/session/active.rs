@@ -1,6 +1,6 @@
 use crate::symbio_core::ExecAbortSignal;
 use crate::symbio_core::VdfsChangeSubscriptions;
-use crate::symbio_core::{chat_message as cm, session_chat};
+use crate::symbio_core::{chat_node as cm, session_chat};
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{atomic::AtomicU64, atomic::Ordering, Arc};
@@ -37,10 +37,10 @@ pub static REQUEST_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 /// 信息，且不能从目标会话的 metadata 必然推出）。
 #[derive(Clone)]
 pub struct InboxItem {
-    /// 条目 id = VDFS 地址末段 = 这条用户消息的 `ChatMessage.id`
+    /// 条目 id = VDFS 地址末段 = 这条用户消息的 `ChatNode.id`
     pub id: String,
     /// 待消费的用户消息
-    pub message: cm::ChatMessage,
+    pub message: cm::ChatNode,
     /// 请求级参数（见上：不含 `session_id` / `message` / `resume`）
     pub params: session_chat::Request,
     /// 发起者给出的工作目录（请求级，优先于会话 metadata 的回退值）

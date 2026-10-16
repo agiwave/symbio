@@ -25,9 +25,9 @@ import { MESSAGE_PREVIEW_MAX } from '@/registry/messageTypes'
 
 /**
  * `messageTextOf`（多模态内容 → 纯文本）**不在本文件测**——它在契约层
- * `schemas/chat_message.ts`，与 `MessageContent` 同处一处（store 与组件都要用，
+ * `schemas/chat_node.ts`，与 `MessageContent` 同处一处（store 与组件都要用，
  * 放不进这个依赖 Vue 的组合式里）。它的用例见
- * `schemas/__tests__/chat_message.spec.ts`。
+ * `schemas/__tests__/chat_node.spec.ts`。
  */
 
 describe('messageErrorTextOf：优先级', () => {
