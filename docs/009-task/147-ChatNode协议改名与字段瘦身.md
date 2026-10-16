@@ -2,7 +2,7 @@
 kind: task
 id: T-147-ChatNode协议改名与字段瘦身
 title: ChatMessage → ChatNode 一次原子改——Turn 退役、role 删除、tool_call_id 沉 meta、principal 升级为结构体
-status: todo
+status: doing
 created: 2026-10-16
 track: 会话与输入
 deps: [T-146-主体可路由地址]
@@ -28,5 +28,11 @@ principal 从字符串升到结构体一并做：[T-146] 已把值域迁到可�
 
 ## 处理过程
 
-（未开始）
+按「协议两侧同时改绿」的原子约束分五档推进——每档前后端一起动、审计一起绿、一次原子提交：
+
+- **147a**（additive）：`Principal` 结构体 + `PrincipalKind` 枚举 + `from_legacy` 读侧别名 helper；未接消费方。→ commit `910c4214`
+- **147b**（wire 翻转）：`ChatMessage.principal: Option<String>` → `Option<Principal>`；`Principal` 自定义 `Deserialize` 同吃字符串与对象两种 wire 形态；写侧 `attributed` 构造 `Principal`；读侧 `visible_for` / `actor_and_ts` 通过 `.id` 消费；TS 加 `Principal` 接口 + `normalizePrincipal` / `principalId` / `principalKind` 三个 helper 与后端 `from_legacy` 逐字一致。
+- **147c**（改名 + 五值）：`chat_message.rs` → `chat_node.rs`；`ChatMessage` → `ChatNode`；`MessageType` → `NodeKind`（五值 Body/Notice/Skeleton/Interaction/Typing）；按 ADR-070 §决策 2 合并旧变体。
+- **147d**（字段瘦身）：`role` 从协议删除（`kind` 已承载归属）；`tool_call_id` 沉 meta；`name` 迁到 `principal.title`。
+- **147e**（动词改名）：`ResumeAction::RetryTurn` → `RetrySubtree`；前后端常量与分派同步。
 

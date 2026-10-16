@@ -12,6 +12,100 @@
  * 呈现映射（图标 / 标题 / 标签）在 `registry/messageTypes.ts`；本文件零呈现知识。
  */
 
+// ==================== 主体（Principal） ====================
+
+/**
+ * **主体族**——后端 `PrincipalKind` 的镜像（[ADR-069 §决策 1]，四值闭集）。
+ *
+ * 与曾经的 `role` 是**同一件事**：`role` 从协议顶层退役（[T-147d]）后，`kind` 是
+ * 这条发言归属哪一族的唯一判据。类型由常量数组派生，加一族只加一行。
+ */
+export const PRINCIPAL_KIND_PERSON = 'person'
+export const PRINCIPAL_KIND_AGENT = 'agent'
+export const PRINCIPAL_KIND_TOOL = 'tool'
+export const PRINCIPAL_KIND_SYSTEM = 'system'
+
+export const PRINCIPAL_KINDS = [
+  PRINCIPAL_KIND_PERSON,
+  PRINCIPAL_KIND_AGENT,
+  PRINCIPAL_KIND_TOOL,
+  PRINCIPAL_KIND_SYSTEM,
+] as const
+
+export type PrincipalKind = (typeof PRINCIPAL_KINDS)[number]
+
+/**
+ * **主体地址**——后端 `symbio_core::principal::Principal` 的镜像（[ADR-069 §决策 1]）。
+ *
+ * 三个字段正交：`kind` 是一族、`id` 是可路由地址 `<namespace>/<name>`（找到 / 调用 / 查看
+ * 主体都靠这个地址）、`title` 是显示名。写侧构造即定型，序列化只出对象形态；
+ * 读侧兼容历史裸字符串由 [`normalizePrincipal`] 兜住。
+ */
+export interface Principal {
+  kind: PrincipalKind;
+  id: string;
+  /** 显示名——工具响应节点常带、用户与主智能体常不带。 */
+  title?: string;
+}
+
+/**
+ * **读侧一次性映射**（[ADR-069 §决策 6]，[T-147b]）：历史 `messages.json` 里的
+ * `principal` 是**裸字符串**（`"agent:main"` / `"user"` / `"session/main"`），新协议
+ * 里是 `Principal` 结构体；前端消费方一律通过本函数拿到结构体形态。
+ *
+ * 与后端 Rust 侧 `Principal::from_legacy` **逐字一致**——同一份判据两处实现由
+ * `scripts/protocol-mirror-audit.mjs` 的 C 组（词表）与本文件的 kind 常量数组守住。
+ */
+export function normalizePrincipal(value: Principal | string | undefined | null): Principal | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof value === 'object') return value
+  const s = value
+  // 新形态 `<ns>/<name>`——按 namespace 派生 kind。
+  const slash = s.indexOf('/')
+  if (slash > 0) {
+    const ns = s.slice(0, slash)
+    const kind: PrincipalKind =
+      ns === 'person'
+        ? PRINCIPAL_KIND_PERSON
+        : ns === 'system'
+          ? PRINCIPAL_KIND_SYSTEM
+          : ns === 'vdfs' || ns === 'web' || ns === 'local'
+            ? PRINCIPAL_KIND_TOOL
+            : PRINCIPAL_KIND_AGENT
+    return { kind, id: s }
+  }
+  // 旧形态 `<kind>:<name>`（ADR-069 v1）。
+  const colon = s.indexOf(':')
+  if (colon > 0) {
+    const kindWord = s.slice(0, colon)
+    const name = s.slice(colon + 1)
+    switch (kindWord) {
+      case 'person':
+        return { kind: PRINCIPAL_KIND_PERSON, id: s }
+      case 'tool':
+        return { kind: PRINCIPAL_KIND_TOOL, id: `legacy/${name}` }
+      case 'system':
+        return { kind: PRINCIPAL_KIND_SYSTEM, id: s }
+      default:
+        // agent:xxx → session/xxx（本机部署的 agent 都住 session 命名空间）。
+        return { kind: PRINCIPAL_KIND_AGENT, id: `session/${name}` }
+    }
+  }
+  // 裸 `user` ⇒ Person + `person/local`；其余裸名一律按 agent 挂 session 下。
+  if (s === 'user') return { kind: PRINCIPAL_KIND_PERSON, id: 'person/local' }
+  return { kind: PRINCIPAL_KIND_AGENT, id: `session/${s}` }
+}
+
+/** 取主体**可路由地址**（`<ns>/<name>`），历史字符串形态一并归一。 */
+export function principalId(value: Principal | string | undefined | null): string | undefined {
+  return normalizePrincipal(value)?.id
+}
+
+/** 取主体**族**（渲染 / 分组判据）。 */
+export function principalKind(value: Principal | string | undefined | null): PrincipalKind | undefined {
+  return normalizePrincipal(value)?.kind
+}
+
 // ==================== 角色 ====================
 
 /** 用户发言 */
@@ -253,15 +347,19 @@ export interface ChatMessage {
   /**
    * **这条发言是谁说的**（跨栈身份字段，后端 `ChatMessage.principal` 的镜像）。
    *
-   * 主体名（`user` / `agent:main` / `agent:<id>`），写方只在落库那一刻补
-   * （后端 `append_and_publish::attributed`：人的话是 `user`，其余是本会话主体，
-   * 已带身份的一律不覆盖——覆盖就是串主体）。`undefined` = 尚未标身份（历史消息、
-   * 未接入的写方），可见域判据把它当**可见**：缺身份是「还没接线」，不是「不让人看」。
+   * [T-147b] / [ADR-069 §决策 1]：wire 上是**主体地址结构体** `{kind, id, title?}`——
+   * `kind` 是一族（`person` / `agent` / `tool` / `system`）、`id` 是 `<ns>/<name>` 可路由地址、
+   * `title` 是显示名。写侧构造即定型，序列化只出对象形态。
    *
-   * 前端目前**不消费**该字段：按主体分组 / 过滤的 UI 还没有消费者，进 schema 是为了让
-   * 协议两侧同形（`scripts/protocol-mirror-audit.mjs` D 组守这一条）。
+   * 类型仍与 `string` 联合，是为了**读侧兼容**历史 `messages.json` 里遗留的裸字符串
+   * （`"agent:main"` / `"user"`）——`normalizePrincipal` 是唯一入口，消费方一律通过它拿
+   * 结构体形态；等历史数据一次性迁移完成后可收窄（`scripts/protocol-mirror-audit.mjs` D 组
+   * 只比字段名，不比类型形态）。
+   *
+   * `undefined` = 尚未标身份（历史消息、未接入的写方）——可见域判据把它当**可见**：
+   * 缺身份是「还没接线」，不是「不让人看」。
    */
-  principal?: string;
+  principal?: Principal | string;
   type?: ChatMessageType;
   name?: string;
   /**

@@ -321,10 +321,16 @@ fn actor_and_ts(payload: &Value) -> (String, i64) {
         return (PRINCIPAL_USER.to_string(), 0);
     };
 
+    // `principal` 兼容两种 wire 形态（[T-147b]，[ADR-069 §决策 6]）：新形态是
+    // `{kind, id, title?}` 对象、历史 `messages.json` 里是裸字符串——都通过
+    // `Principal::deserialize` 一次性折到 `.id`，事件层的 actor 键仍是**可路由地址字符串**。
     let principal = msg
         .get("principal")
-        .and_then(Value::as_str)
-        .map(str::to_string);
+        .and_then(|v| serde_json::from_value::<
+            crate::symbio_core::principal::Principal,
+        >(v.clone())
+        .ok())
+        .map(|p| p.id);
     let actor = principal.unwrap_or_else(|| {
         match msg.get("role").and_then(Value::as_str) {
             Some("user") => PRINCIPAL_USER.to_string(),

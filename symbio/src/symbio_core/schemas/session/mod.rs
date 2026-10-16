@@ -2,4 +2,7 @@ pub mod chat_message;
 pub mod principal;
 pub mod session_chat;
 
-pub use principal::{Principal, PrincipalKind};
+// `chat_message` 用 `super::Principal` 引同目录的 `principal`——这里做一次短路径 re-export
+// 让兄弟模块不必写完整链；外部一律走 `symbio_core::principal::Principal`（叶模块形态）。
+#[allow(unused_imports)]
+pub use principal::Principal;

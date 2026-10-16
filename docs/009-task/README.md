@@ -58,15 +58,14 @@ board.columns: [rank, deps, evidence, reason]
 <!-- list:task-entries owner -->
 
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
-> 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
+> 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [[SP-001]]，机制见 [[PL-011-登记与汇总机制|PL-011 · 登记与汇总机制]]。
 
-**计数**：☐ todo 9 · 🟡 doing 2 · ☑ done 137 · ❌ wont 3（共 151）
+**计数**：☐ todo 8 · 🟡 doing 2 · ☑ done 138 · ❌ wont 3（共 151）
 
 ## 待处理（按依赖顺序）
 
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
-| `T-147-ChatNode协议改名与字段瘦身` | ChatMessage → ChatNode 一次原子改——Turn 退役、role 删除、tool_call_id 沉 meta、principal 升级为结构体 | now | 会话与输入 | T-146-主体可路由地址 |
 | `T-148-前端注册表按kind与style_tag分派` | 呈现分派从 MessageType 枚举换成 (kind, style_tag, principal) 三元组 | now | frontend | T-147-ChatNode协议改名与字段瘦身 |
 | `T-140-大结果检索的聚合口径` | 检索结果截断只说「限制了」不说「一共多少」——聚合型问题逼出重复调用 | next | local | — |
 | `T-149-会话建树策略开关` | `presentation_tree: flat \| grouped \| deep` 会话配置——后端组树，前端零结构假设 | next | 会话与输入 | T-147-ChatNode协议改名与字段瘦身 |
@@ -81,7 +80,7 @@ board.columns: [rank, deps, evidence, reason]
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
 | `T-145-前端机制化批` | 前端机制化——ChatNode 协议 / 主体平级 / 建树策略 / 惰性重取（SPRINT） | now | 会话与输入 | PL-013-前端机制化 |
-| `T-146-主体可路由地址` | 主体 id 迁到可路由地址形态——授权表扩 person/tool/system 三族行 | now | 会话与输入 | — |
+| `T-147-ChatNode协议改名与字段瘦身` | ChatMessage → ChatNode 一次原子改——Turn 退役、role 删除、tool_call_id 沉 meta、principal 升级为结构体 | now | 会话与输入 | T-146-主体可路由地址 |
 
 ## 已完成
 
@@ -107,6 +106,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-138-审批闸只覆盖local插件的能力` | 风险声明与执行闸门分家——vdfs 的 High 风险工具不经确认直接执行 | 插件身份与授权 |
 | `T-142-长度截断时草稿被当答话交付` | finish=Length 且正文 0 字符时，整段思考被提升成答话原样交付——stdout 变成 13KB 草稿 | 会话与输入 |
 | `T-143-跨会话记忆以指令形态劫持当前轮` | 召回段把旧会话的经验原文当指令送进 prompt——小模型照着执行上一个任务 | 记忆与检索 |
+| `T-146-主体可路由地址` | 主体 id 迁到可路由地址形态——授权表扩 person/tool/system 三族行 | 会话与输入 |
 | `T-011` | 五轴的外部效标：每条轴挂一个可复现的读数，而不是形容词 | plan |
 | `T-012` | 能力名册 ↔ 代码锚点：名册的每一条能力都要指到实现它的地方 | plan |
 | `T-015` | 出厂 prompt 在线上是两条 system 消息，部分 provider 直接 400 拒收——full 档在那类 provider 上第一轮就失败 | S |
@@ -380,9 +380,9 @@ board.columns: [rank, deps, evidence, reason]
 - [`T-140-大结果检索的聚合口径`](140-大结果检索的聚合口径.md) 检索结果截断只说「限制了」不说「一共多少」——聚合型问题逼出重复调用（todo）
 - [`T-141-开机噪声与文档漂移`](141-开机噪声与文档漂移.md) 每次开机一条假异常 WARN（`.symbio/projection` 孤儿目录）+ 文档里几处与运行事实不符的指路（todo）
 - [`T-144-长度截断的自动续写在v2执行路径不可达`](144-长度截断的自动续写在v2执行路径不可达.md) v2 执行路径重建 TurnOutput 时丢掉 finish——长度戳与自动续写读到的恒是缺省 Stop（done）
-- [`T-145-前端机制化批`](145-前端机制化批.md) 前端机制化——ChatNode 协议 / 主体平级 / 建树策略 / 惰性重取（SPRINT）（doing） · 子项 todo 7 / doing 1
-  - [`T-146-主体可路由地址`](146-主体可路由地址.md) 主体 id 迁到可路由地址形态——授权表扩 person/tool/system 三族行（doing）
-  - [`T-147-ChatNode协议改名与字段瘦身`](147-ChatNode协议改名与字段瘦身.md) ChatMessage → ChatNode 一次原子改——Turn 退役、role 删除、tool_call_id 沉 meta、principal 升级为结构体（todo）
+- [`T-145-前端机制化批`](145-前端机制化批.md) 前端机制化——ChatNode 协议 / 主体平级 / 建树策略 / 惰性重取（SPRINT）（doing） · 子项 todo 6 / doing 1 / done 1
+  - [`T-146-主体可路由地址`](146-主体可路由地址.md) 主体 id 迁到可路由地址形态——授权表扩 person/tool/system 三族行（done）
+  - [`T-147-ChatNode协议改名与字段瘦身`](147-ChatNode协议改名与字段瘦身.md) ChatMessage → ChatNode 一次原子改——Turn 退役、role 删除、tool_call_id 沉 meta、principal 升级为结构体（doing）
   - [`T-148-前端注册表按kind与style_tag分派`](148-前端注册表按kind与style_tag分派.md) 呈现分派从 MessageType 枚举换成 (kind, style_tag, principal) 三元组（todo）
   - [`T-149-会话建树策略开关`](149-会话建树策略开关.md) `presentation_tree: flat \| grouped \| deep` 会话配置——后端组树，前端零结构假设（todo）
   - [`T-150-骨架惰性重取`](150-骨架惰性重取.md) `expand_skeleton` VDFS 动作——折叠骨架可释放子节点，展开时按需拉取（todo）

@@ -184,11 +184,14 @@ fn attributed(m: cm::ChatMessage, session_principal: &str) -> cm::ChatMessage {
     if m.principal.is_some() {
         return m;
     }
+    use crate::symbio_core::principal::Principal;
     let mut out = m;
-    out.principal = Some(match out.role {
-        Some(cm::MessageRole::User) => crate::symbio_core::authz::PRINCIPAL_USER.to_string(),
-        _ => session_principal.to_string(),
-    });
+    // 归属判据与 [T-146] 的字符串主体一致，这里只把它折成 `Principal` 结构体：
+    // `person/local` ⇒ Person 一族，`session/*` ⇒ Agent 一族（`from_legacy` 按 namespace 派生）。
+    out.principal = Some(Principal::from_legacy(match out.role {
+        Some(cm::MessageRole::User) => crate::symbio_core::authz::PRINCIPAL_USER,
+        _ => session_principal,
+    }));
     out
 }
 

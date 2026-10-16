@@ -492,6 +492,8 @@ fn an_explicit_principal_wins_over_the_role() {
 }
 
 /// 造一条待编辑的消息（role / principal / 时刻都由用例指定）。
+/// `principal` 用**遗留字符串**入参，测试内部一次性折成 `Principal` 结构体——
+/// 让用例继续用可读的字面量（`"session/sub-1"`）而不必到处写 `Principal::from_legacy`。
 fn patched_msg(
     id: &str,
     text: &str,
@@ -502,7 +504,9 @@ fn patched_msg(
     ChatMessage {
         id: id.into(),
         role: Some(role),
-        principal,
+        principal: principal.map(
+            |s| crate::symbio_core::principal::Principal::from_legacy(&s),
+        ),
         msg_type: Some(MessageType::Text),
         content: Some(MessageContent::Text(text.into())),
         timestamp: Some(ts),

@@ -10,7 +10,8 @@
 //! 意味着 id 不再可路由（"谁的 main"没人说得出），加一族就要动判据；kind 独立之后
 //! `is_agent_id` 用命名空间登记表分派（`AGENT_NAMESPACES`），加一族只是登记多一条。
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 
 /// **主体族**（[ADR-069 §决策 1]）——四值闭集。
 ///
@@ -60,7 +61,12 @@ impl PrincipalKind {
 /// ```
 /// `title` 缺省不出现（`skip_serializing_if = "Option::is_none"`）；`kind` 与 `id` 都在
 /// 编译期保证有值（`id` 是非空 `String`，`kind` 是枚举）。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+///
+/// **读侧兼容**：wire 上 `principal` 值既接受本结构体对象形态，也接受**裸字符串**
+/// （历史 `messages.json` 里的 `"agent:main"` / `"user"`，以及未升级的调用方）。
+/// 字符串走 [`Principal::from_legacy`]——[ADR-069 §决策 6] 的一次性读侧别名。
+/// 序列化始终出对象形态；写侧构造 `Principal` 后不再有第二份表达。
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Principal {
     /// 一族（Person / Agent / Tool / System），编译期闭集。
     pub kind: PrincipalKind,
@@ -69,6 +75,41 @@ pub struct Principal {
     /// 显示名（渲染层用；与 kind 无关，工具与角色常带，用户与主智能体常不带）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for Principal {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::Error;
+        let value = Value::deserialize(deserializer)?;
+        if let Some(s) = value.as_str() {
+            return Ok(Principal::from_legacy(s));
+        }
+        serde_json::from_value::<PrincipalRep>(value)
+            .map(Principal::from)
+            .map_err(D::Error::custom)
+    }
+}
+
+/// Deserialize 内部用的**结构体形态**中转（避免自递归）。
+#[derive(Deserialize)]
+struct PrincipalRep {
+    kind: PrincipalKind,
+    id: String,
+    #[serde(default)]
+    title: Option<String>,
+}
+
+impl From<PrincipalRep> for Principal {
+    fn from(r: PrincipalRep) -> Self {
+        Principal {
+            kind: r.kind,
+            id: r.id,
+            title: r.title,
+        }
+    }
 }
 
 impl Principal {
@@ -130,6 +171,12 @@ impl Principal {
         Principal::new(PrincipalKind::Agent, format!("session/{s}"))
     }
 }
+
+/// **读侧兼容反序列化**（[ADR-069 §决策 6]，[T-147b]）：`Option<Principal>` 字段上的
+/// 显式标记，语义已由 [`Principal::deserialize`] 的实现给出——`null` / 缺席 ⇒ `None`，
+/// 字符串 ⇒ `Principal::from_legacy`，对象 ⇒ 正常解构。字段用 `#[serde(default)]` 即可。
+///
+/// 序列化只出对象形态（`skip_serializing_if = "Option::is_none"` 由字段自己带）。
 
 #[cfg(test)]
 #[path = "principal.test.rs"]

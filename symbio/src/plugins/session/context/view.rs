@@ -162,9 +162,9 @@ pub fn visible_for(m: &ChatMessage, viewer: Option<&str>) -> bool {
     let Some(viewer) = viewer else {
         return true;
     };
-    match m.principal.as_deref() {
+    match m.principal.as_ref() {
         None => true,
-        Some(p) => crate::symbio_core::visible_to(p, viewer),
+        Some(p) => crate::symbio_core::visible_to(&p.id, viewer),
     }
 }
 

@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::Principal;
+
 /// 消息角色
 ///
 /// 请求 / 响应由角色区分（分型结构）：
@@ -202,13 +204,17 @@ pub struct ChatMessage {
     pub role: Option<MessageRole>,
 
     /// **这条发言是谁说的**（[plan/11 批 1](../../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")
-    /// ② 的跨栈身份字段）：主体名，取值点只有 `chat_loop::request_principal`。
+    /// ② 的跨栈身份字段）：主体地址（`{kind, id, title?}`，[ADR-069 §决策 1]）。
     ///
     /// `None` = 尚未标身份（历史消息、未接入的写方）——可见域判据把它当**可见**：
     /// 缺身份是「还没接线」，不是「不让人看」。反过来把 `None` 判成不可见会让
     /// 所有存量消息从视图里消失，那是拿接线覆盖旧行为（S08 §4 平凡值要求逐字一致）。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub principal: Option<String>,
+    ///
+    /// **读侧兼容**（[T-147b]，[ADR-069 §决策 6]）：wire 上历史 `messages.json` 里的
+    /// 裸字符串（`"agent:main"` / `"user"` / `"session/main"`）由 [`Principal::deserialize`]
+    /// 一次性映射成结构体；写侧一律构造 `Principal`，序列化只出对象形态。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub principal: Option<Principal>,
 
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub msg_type: Option<MessageType>,
