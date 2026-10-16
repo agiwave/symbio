@@ -4,10 +4,12 @@ import { ensureSessionScheme } from '@/services/vdfsScheme'
 import { messageTextOf, type ChatNode, type ResumeAction } from '@/schemas/chat_node'
 import { logger } from '@/utils/logger'
 import { useSessionsStore } from '@/stores/sessions'
+import { useReleasedSkeletonsStore } from '@/stores/skeletonLazy'
 import { isBlankContentNode, isInProgressMessage } from '@/stores/sessionTranscript'
 import {
   VDFS_ACTION_ABORT,
   VDFS_ACTION_CLEAR,
+  VDFS_ACTION_EXPAND_SKELETON,
   VDFS_STATUS_ACTIVE,
   VDFS_STATUS_FAILED,
   VDFS_STATUS_WORKING,
@@ -85,6 +87,8 @@ export interface UseChatConnectionReturn {
   abort: () => void
   removeMessage: (messageId: string) => void
   resume: (payload: ResumePayload) => void
+  /** 按需重取一个已折叠释放骨架的子树（[T-150] 只读动作） */
+  expandSkeleton: (mid: string, depth?: '1' | 'all') => Promise<void>
 }
 
 /**
@@ -125,6 +129,7 @@ export interface UseChatConnectionReturn {
  */
 export function useChatConnection(options: UseChatConnectionOptions): UseChatConnectionReturn {
   const store = useSessionsStore()
+  const released = useReleasedSkeletonsStore()
 
   const { onSendComplete } = options
 
@@ -583,6 +588,38 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     }
   }
 
+  /**
+   * 按需重取一个已折叠释放的骨架的子树（[T-150] 前端读侧）。
+   *
+   * 折叠时本地把骨架的后代从转写里摘掉、只在账本留一个计数；用户重新展开时，向
+   * 后端那条 message 地址发一次 `expand_skeleton` 动作拿回子树窄帧，走**唯一落地口**
+   * `applyTranscriptMessages` 装回转写，再从账本摘掉「已释放」标记。
+   *
+   * 这是只读动作：不碰运行态、不改 seq，与 `resume` 的写侧动作划清界限。
+   */
+  async function expandSkeleton(mid: string, depth: '1' | 'all' = 'all') {
+    const sid = options.sessionId
+    const target = await addressingOf(sid)
+    if (!target) return
+    try {
+      const resp = await runVdfsAction(
+        vdfsMessageAddr(target.scheme, sid, mid),
+        VDFS_ACTION_EXPAND_SKELETON,
+        { depth },
+        { workdir: store.getSessionWorkdir(sid) ?? '', session_id: sid },
+      )
+      const nodes = (resp.data as { nodes?: ChatNode[] } | undefined)?.nodes
+      if (resp.ok && Array.isArray(nodes)) {
+        store.applyTranscriptMessages(sid, nodes)
+        released.markExpanded(sid, mid)
+      } else {
+        logger.warn('useChatConnection', `[${sid}] expand_skeleton 未生效：${resp.message}`)
+      }
+    } catch (err: any) {
+      logger.error('useChatConnection', 'Failed to expand skeleton:', err)
+    }
+  }
+
   return {
     isLoading,
     isWaitingApproval,
@@ -592,5 +629,6 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     abort,
     removeMessage,
     resume,
+    expandSkeleton,
   }
 }

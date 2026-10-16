@@ -53,6 +53,8 @@ const hoisted = vi.hoisted(() => {
     writeVdfs: vi.fn(),
     runVdfsAction: vi.fn(),
     store: {} as Record<string, unknown>,
+    /** useReleasedSkeletonsStore 的桩：本文件只关心 expandSkeleton 会摘除释放标记 */
+    released: {} as Record<string, unknown>,
   }
 })
 
@@ -70,6 +72,7 @@ vi.mock('@/services/vdfsScheme', () => ({
   })),
 }))
 vi.mock('@/stores/sessions', () => ({ useSessionsStore: () => hoisted.store }))
+vi.mock('@/stores/skeletonLazy', () => ({ useReleasedSkeletonsStore: () => hoisted.released }))
 vi.mock('@/utils/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }))
@@ -81,6 +84,7 @@ function makeStore(over: Record<string, unknown> = {}) {
     getSessionMessages: vi.fn(() => [] as ChatNode[]),
     isSessionWorking: vi.fn(() => false),
     applyTranscriptMessage: vi.fn(),
+    applyTranscriptMessages: vi.fn(),
     putStatus: vi.fn(),
     setSessionError: vi.fn(),
     setSessionStatus: vi.fn(),
@@ -118,6 +122,7 @@ beforeEach(() => {
     },
   )
   hoisted.store = makeStore()
+  hoisted.released = { markExpanded: vi.fn(), markReleased: vi.fn(), isReleased: vi.fn(() => false), summaryOf: vi.fn() }
 })
 
 describe('messageTree — 从 store 派生', () => {
@@ -439,5 +444,53 @@ describe('resume — 会话恢复', () => {
       's1',
       expect.objectContaining({ status: VDFS_STATUS_FAILED }),
     )
+  })
+})
+
+describe('expandSkeleton — 折叠骨架按需重取（[T-150] 只读）', () => {
+  it('动作落在 `<A>/message/<mid>`，payload 带 depth，拿回的子树走唯一落地口装回转写', async () => {
+    hoisted.runVdfsAction.mockResolvedValueOnce({
+      action: 'expand_skeleton',
+      ok: true,
+      message: 'ok',
+      data: { session_id: 's1', root: 't1', nodes: [{ id: 'c1', parent_id: 't1' }] },
+    })
+    const c = conn()
+    await c.expandSkeleton('t1', 'all')
+    // mockResolvedValueOnce 会替换掉记录用的基础实现，故从 mock.calls 取调用参数
+    const [path, action, payload] = hoisted.runVdfsAction.mock.calls[0] as [
+      string,
+      string,
+      Record<string, unknown>,
+    ]
+    expect(path).toBe(`${ADDR}/message/t1`)
+    expect(action).toBe('expand_skeleton')
+    expect(payload).toEqual({ depth: 'all' })
+    // 只读：不动运行态
+    expect(hoisted.store.putStatus).not.toHaveBeenCalled()
+    expect(hoisted.store.setSessionStatus).not.toHaveBeenCalled()
+    // 装回转写 + 摘除释放标记
+    expect(hoisted.store.applyTranscriptMessages).toHaveBeenCalledWith('s1', [
+      { id: 'c1', parent_id: 't1' },
+    ])
+    expect(hoisted.released.markExpanded).toHaveBeenCalledWith('s1', 't1')
+  })
+
+  it('未生效（ok:false 或无 nodes）→ 不装回、不摘标记', async () => {
+    hoisted.runVdfsAction.mockResolvedValueOnce({
+      action: 'expand_skeleton',
+      ok: false,
+      message: '骨架已不在',
+    })
+    const c = conn()
+    await c.expandSkeleton('ghost')
+    expect(hoisted.store.applyTranscriptMessages).not.toHaveBeenCalled()
+    expect(hoisted.released.markExpanded).not.toHaveBeenCalled()
+  })
+
+  it('出站异常不抛出（尽力而为）', async () => {
+    hoisted.runVdfsAction.mockRejectedValueOnce(new Error('IPC 断了'))
+    const c = conn()
+    await expect(c.expandSkeleton('t1')).resolves.toBeUndefined()
   })
 })
