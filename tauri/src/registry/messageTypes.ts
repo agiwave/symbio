@@ -53,10 +53,18 @@ import {
   RESUME_ACTION_RETRY,
   RESUME_ACTION_RETRY_COMPACTION,
   RESUME_ACTION_RETRY_SUBTREE,
+  normalizePrincipal,
+  principalId,
+  PRINCIPAL_KIND_AGENT,
+  PRINCIPAL_KIND_PERSON,
+  PRINCIPAL_KIND_SYSTEM,
+  PRINCIPAL_KIND_TOOL,
   type ChatNode,
   type MessageKind,
   type NodeKind,
   type PresentationKind,
+  type Principal,
+  type PrincipalKind,
   type ChatRole,
   type NodeStatus,
   type ResumeAction,
@@ -182,6 +190,85 @@ export function agentNameOf(
   )
 }
 
+// ==================== principal 前缀 → 身份呈现（[T-148] 独立表） ====================
+//
+// 「这条发言是谁说的」的可视化——与「这条是什么形态」（`TYPE_PRESENTATION`）正交：
+// 前者按**可路由地址的命名空间**（`<ns>/<name>`，[ADR-069 §决策 1]）分派，后者按
+// 形态分派。命名空间比 `kind` 更细（`vdfs/write` 与 `web/fetch` 同为 tool，但图标
+// / 标签不同），所以主键是命名空间、`kind` 只是兜底——「kind 不参与主键」。
+//
+// 形状：`icon` / `tone`（色调 CSS 钩子，具体配色由视图层样式表映射）/ `label`
+// （面向用户的族名）。**未登记命名空间退回 `kind` 表，两者都缺 → `undefined`**——
+// 新主体上线不判红（与 `foldNodeKind` 的默认臂同一纪律）。
+
+/** 主体色调语义（视图层据此挂 CSS 类；不含具体色值） */
+export type PrincipalTone = 'person' | 'agent' | 'tool' | 'system' | 'neutral'
+
+/** 一个主体的身份呈现面。 */
+export interface PrincipalPresentation {
+  icon: string
+  tone: PrincipalTone
+  label: string
+}
+
+/**
+ * 命名空间 → 身份呈现。键与后端 `AGENT_NAMESPACES` / `Principal::tool_principal`
+ * 合成的地址段、[ADR-069] 登记的主体行对齐（`vdfs` / `web` / `local` 是插件归属，
+ * `mcp` / `agent` / `legacy` 是后端合成的工具地址段，`person` / `system` 是概念命名空间，
+ * `session` 是本机 agent）。
+ */
+const PRINCIPAL_NS_PRESENTATION: Readonly<Record<string, PrincipalPresentation>> = {
+  person: { icon: '👤', tone: 'person', label: '用户' },
+  session: { icon: '🤖', tone: 'agent', label: '智能体' },
+  system: { icon: '⚙️', tone: 'system', label: '系统' },
+  vdfs: { icon: '🗄️', tone: 'tool', label: '文件工具' },
+  web: { icon: '🌐', tone: 'tool', label: '联网工具' },
+  local: { icon: '🖥️', tone: 'tool', label: '本地工具' },
+  mcp: { icon: '🔌', tone: 'tool', label: 'MCP 工具' },
+  agent: { icon: '🧩', tone: 'tool', label: '外部智能体' },
+  legacy: { icon: '🔧', tone: 'tool', label: '工具' },
+}
+
+/** 族兜底表：命名空间未登记时按 `principal.kind` 取（[ADR-069] 四族）。 */
+const PRINCIPAL_KIND_PRESENTATION: Readonly<Record<PrincipalKind, PrincipalPresentation>> = {
+  [PRINCIPAL_KIND_PERSON]: { icon: '👤', tone: 'person', label: '用户' },
+  [PRINCIPAL_KIND_AGENT]: { icon: '🤖', tone: 'agent', label: '智能体' },
+  [PRINCIPAL_KIND_TOOL]: { icon: '🔧', tone: 'tool', label: '工具' },
+  [PRINCIPAL_KIND_SYSTEM]: { icon: '⚙️', tone: 'system', label: '系统' },
+}
+
+/** 取主体地址的命名空间段（`<ns>/<name>` 的 `ns`）；无斜杠 / 无主体 → `undefined`。 */
+export function principalNamespace(
+  value: Principal | string | undefined | null,
+): string | undefined {
+  const id = principalId(value)
+  if (!id) return undefined
+  const slash = id.indexOf('/')
+  return slash > 0 ? id.slice(0, slash) : undefined
+}
+
+/**
+ * principal → 身份呈现（**唯一读入口**）：命名空间精确命中优先，退回 `kind`，
+ * 都缺（无主体）→ `undefined`。调用方据此决定「不显示身份徽标」，而不是替它编一个。
+ */
+export function principalPresentationOf(
+  value: Principal | string | undefined | null,
+): PrincipalPresentation | undefined {
+  const normalized = normalizePrincipal(value)
+  if (!normalized) return undefined
+  const ns = principalNamespace(normalized)
+  if (ns) {
+    const hit = PRINCIPAL_NS_PRESENTATION[ns]
+    if (hit) return hit
+  }
+  return PRINCIPAL_KIND_PRESENTATION[normalized.kind]
+}
+
+/** 节点的 principal（结构体形态，历史裸字符串一并归一）。 */
+export function nodePrincipal(node: Pick<ChatNode, 'principal'>): Principal | undefined {
+  return normalizePrincipal(node.principal)
+}
+
 // ==================== 判定入参 ====================
 
 /**
@@ -196,6 +283,8 @@ export interface MessageFacets {
   status: NodeStatus
   /** 工具名（`meta.tool_name`，[T-147d-ii]） */
   name?: string
+  /** principal 身份呈现（[T-148] 独立表：命名空间优先、kind 兜底，无主体 → `undefined`） */
+  principal?: PrincipalPresentation
   /** 子会话 Turn（`role = tool` 的 turn）：某工具「过程」段 */
   subSession: boolean
   /** `user_prompt` 的子类（`meta.prompt.kind`） */
@@ -240,6 +329,8 @@ export function facetsOf(node: ChatNode, parentType?: string): MessageFacets {
     type,
     status: messageStatusOf(node),
     name: toolNameOf(node),
+    // principal 身份呈现（[T-148] 独立表；组件据此画徽标，缺主体则不画）
+    principal: principalPresentationOf(node.principal),
     // 子会话 Turn = 工具「过程」段（role=tool 的 turn），与根级助手 Turn 同构但无组级操作
     subSession: type === NODE_KIND_TURN && role === CHAT_ROLE_TOOL,
     promptKind: promptKindOf(node),

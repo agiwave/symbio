@@ -81,6 +81,9 @@ import {
   messageTitle,
   messageTypeLabel,
   nextOpenOf,
+  nodePrincipal,
+  principalNamespace,
+  principalPresentationOf,
   type MessageFacets,
 } from '../messageTypes'
 
@@ -754,6 +757,68 @@ describe('foldNodeKind 表驱动分派（[T-148]：加 style_tag 只加表、不
     const folded = foldNodeKind(NODE_KIND_BODY, 'code_block')
     expect(folded).toBe(NODE_KIND_TEXT)
     expect(messageRendererKey(facets({ type: folded }))).toBe('text')
+  })
+})
+
+/**
+ * [T-148] 判据 2：principal 前缀 → 图标/颜色/标签**一张独立表**。
+ *
+ * 主键是可路由地址的**命名空间**（`<ns>/<name>`），`kind` 只是兜底——比 role 折叠更细
+ * （同为 tool，`vdfs/write` 与 `web/fetch` 各有身份徽标）。钉四件事：
+ * 命名空间精确命中、未登记命名空间退回 kind、缺主体返回 undefined（不替它编徽标）、
+ * 历史裸字符串 principal 一并归一后进表。
+ */
+describe('principal 前缀 → 身份呈现（[T-148] 独立表）', () => {
+  it('各命名空间有自己的图标 / 色调 / 标签', () => {
+    expect(principalPresentationOf('person/local')).toEqual({ icon: '👤', tone: 'person', label: '用户' })
+    expect(principalPresentationOf('session/main')?.tone).toBe('agent')
+    expect(principalPresentationOf('system/compactor')?.label).toBe('系统')
+    // 工具族：三个命名空间标签互不相同（这正是「命名空间比 kind 细」的意义）
+    expect(principalPresentationOf('vdfs/write')?.label).toBe('文件工具')
+    expect(principalPresentationOf('web/fetch')?.label).toBe('联网工具')
+    expect(principalPresentationOf('local/content_search')?.label).toBe('本地工具')
+  })
+
+  it('未登记命名空间退回 kind 表（新主体上线不判红）', () => {
+    // `decider/reflex` 尚未进命名空间表 → 按 kind=agent 兜底
+    expect(
+      principalPresentationOf({ kind: 'agent', id: 'decider/reflex' } as const),
+    ).toEqual({
+      icon: '🤖',
+      tone: 'agent',
+      label: '智能体',
+    })
+    // 无斜杠地址（无命名空间）也退回 kind
+    expect(principalPresentationOf({ kind: 'tool', id: 'bare_tool' } as const)?.tone).toBe('tool')
+  })
+
+  it('缺主体 → undefined（调用方不画徽标，而不是替它编一个）', () => {
+    expect(principalPresentationOf(undefined)).toBeUndefined()
+    expect(principalPresentationOf(null)).toBeUndefined()
+  })
+
+  it('历史裸字符串 principal 归一后进表（"user"→person/local，"agent:main"→session/main）', () => {
+    expect(principalNamespace('user')).toBe('person')
+    expect(principalNamespace('agent:main')).toBe('session')
+    expect(principalPresentationOf('user')?.label).toBe('用户')
+    expect(principalPresentationOf('agent:main')?.tone).toBe('agent')
+  })
+
+  it('facetsOf 带上 principal 呈现（表被消费，非死数据）', () => {
+    const f = facetsOf({
+      id: 'tc',
+      type: NODE_KIND_SKELETON,
+      meta: { style_tag: 'tool' },
+      principal: 'vdfs/write',
+    })
+    expect(f.principal?.label).toBe('文件工具')
+    // 无 principal 的节点（存量 / 未接线）：呈现缺席，不是报错
+    expect(facetsOf({ id: 'x' }).principal).toBeUndefined()
+  })
+
+  it('nodePrincipal 归一历史字符串为结构体', () => {
+    expect(nodePrincipal({ principal: 'agent:main' })).toEqual({ kind: 'agent', id: 'session/main' })
+    expect(nodePrincipal({ principal: undefined })).toBeUndefined()
   })
 })
 
