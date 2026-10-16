@@ -693,7 +693,7 @@ fn build_user_prompt_message_uses_the_orchestrator_owned_ids() {
         prompt: json!({ "kind": "question", "questions": [] }),
         failure_kind: crate::symbio_core::failure_kind::NEEDS_INTERACTION.into(),
     };
-    let msg = build_user_prompt_message("res-1", "tc-1", &pending);
+    let msg = build_user_prompt_message("res-1", "tc-1", &pending, "vdfs_write");
 
     assert_eq!(msg.id, "res-1", "节点 id 必须是结果占位节点 id，不是新造的");
     assert_eq!(
@@ -704,10 +704,16 @@ fn build_user_prompt_message_uses_the_orchestrator_owned_ids() {
     assert_eq!(msg.msg_type, Some(NodeKind::Interaction));
     assert_eq!(msg.status, Some(NodeStatus::WaitingUserAction));
     assert_eq!(msg.role, Some(NodeRole::Tool));
+    // [T-147d-iii] 交互卡也是工具的结果：主体归工具一族，工具名随行入格
+    assert_eq!(
+        msg.principal.as_ref().map(|p| p.id.as_str()),
+        Some("vdfs/write")
+    );
 
     let meta = msg.meta.expect("user_prompt 必须带 meta");
     assert_eq!(meta["failure_kind"], json!("needs_interaction"));
     assert_eq!(meta["prompt"]["kind"], json!("question"));
+    assert_eq!(meta["tool_name"], json!("vdfs_write"));
 }
 
 /// **跨工具契约**：`agent_run` 把子会话审批转成载荷回传时，本层必须认出它。

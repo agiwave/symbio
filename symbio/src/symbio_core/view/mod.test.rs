@@ -38,7 +38,10 @@ fn agent_namespaces_are_a_registry_not_a_prefix() {
     // session 命名空间下无论 name 段是什么形状（含空、含中文、含 `-`），都算 agent。
     for name in ["main", "sub-1", "带空格 的 id", "worker"] {
         let id = format!("session/{name}");
-        assert!(is_agent_id(&id), "`{id}` 在 session 命名空间下 ⇒ agent 一族");
+        assert!(
+            is_agent_id(&id),
+            "`{id}` 在 session 命名空间下 ⇒ agent 一族"
+        );
         assert!(visible_to(&id, &id), "{id} 自己必然可见");
         assert!(
             !visible_to(&id, "session/main") || id == "session/main",

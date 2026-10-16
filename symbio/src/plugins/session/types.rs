@@ -226,9 +226,7 @@ pub(crate) fn derive_session_title(messages: &[ChatNode]) -> Option<String> {
             Some(crate::symbio_core::chat_node::MessageContent::Parts(parts)) => parts
                 .iter()
                 .filter_map(|p| match p {
-                    crate::symbio_core::chat_node::ContentPart::Text { text } => {
-                        Some(text.clone())
-                    }
+                    crate::symbio_core::chat_node::ContentPart::Text { text } => Some(text.clone()),
                     _ => None,
                 })
                 .collect::<Vec<_>>()

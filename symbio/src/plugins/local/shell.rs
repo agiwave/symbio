@@ -436,6 +436,13 @@ where
                                 id: target.msg_id.clone(),
                                 parent_id: Some(target.tool_call_id.clone()),
                                 role: Some(NodeRole::Tool),
+                                // [T-147d-iii] 帧要自给自足：这张卡是**本工具的结果流**，
+                                // 族归工具自己（名字就是本插件注册的能力名，见 `meta()`）。
+                                principal: Some(
+                                    crate::symbio_core::principal::Principal::tool_principal(
+                                        get_os_info().2,
+                                    ),
+                                ),
                                 msg_type: Some(NodeKind::Body),
                                 status: Some(NodeStatus::Streaming),
                                 content: Some(MessageContent::Text(snapshot.clone())),
@@ -453,6 +460,12 @@ where
                             id: target.msg_id.clone(),
                             parent_id: Some(target.tool_call_id.clone()),
                             role: Some(NodeRole::Tool),
+                            // 与上面 `content` 帧同一身份（[T-147d-iii]）
+                            principal: Some(
+                                crate::symbio_core::principal::Principal::tool_principal(
+                                    get_os_info().2,
+                                ),
+                            ),
                             msg_type: Some(NodeKind::Body),
                             status: Some(NodeStatus::Streaming),
                             delta: Some(delta),

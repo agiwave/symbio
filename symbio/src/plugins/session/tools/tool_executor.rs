@@ -232,17 +232,23 @@ fn build_user_prompt_message(
     result_msg_id: &str,
     tool_call_id: &str,
     pending: &PendingPrompt,
+    tool_name: &str,
 ) -> ChatNode {
     ChatNode {
         id: result_msg_id.to_string(),
         parent_id: Some(tool_call_id.to_string()),
         role: Some(NodeRole::Tool),
+        // [T-147d-iii] 等待用户的交互卡同样是**工具的结果**：族归工具自己。
+        principal: Some(crate::symbio_core::principal::Principal::tool_principal(
+            tool_name,
+        )),
         msg_type: Some(NodeKind::Interaction),
         content: Some(MessageContent::Text(pending.text.clone())),
         status: Some(NodeStatus::WaitingUserAction),
         meta: Some(json!({
             "prompt": pending.prompt,
             "failure_kind": pending.failure_kind,
+            "tool_name": tool_name,
         })),
         ..Default::default()
     }
@@ -531,6 +537,9 @@ async fn record_protocol_failure(
         &format!("Error: {error_text}"),
         Some(false),
         Some(result_msg_id),
+        // 协议级失败：调用本身的 id/name 就非法，工具名**无从说起**——主体由
+        // `attributed` 按会话主体兜底（[T-147d-iii]）。
+        None,
     );
     // 失败属信息性：结果以 Completed 留在上下文（Failed 会被 get_context_messages
     // 过滤，导致"孤儿 tool 结果"使下一轮 LLM 请求非法）。
@@ -727,21 +736,22 @@ pub fn apply_not_executed(parent: &mut ChatNode, reason: &str) {
 /// 与其它工具结果同口径：「没跑」不是「跑失败」。`Failed` 结果会被
 /// `get_context_messages` 当失败处理，且前端会在结果节点上再渲染一条 ⚠ 错误条，
 /// 而父节点的交代由 `meta.failure_kind` 承载。
-pub(super) fn not_executed_result(tool_call_id: &str, reason: &str) -> ChatNode {
+pub(super) fn not_executed_result(tool_call_id: &str, reason: &str, tool_name: &str) -> ChatNode {
     let text = match reason {
         "aborted" => "本次调用已中止（用户终止），未执行，未产生结果。".to_string(),
         _ => "本次调用未执行：同一批中排在它之前的工具未正常结束（失败或需要用户处理），\
               同批剩余调用被一并跳过。需要时请重新发起这一次调用。"
             .to_string(),
     };
-    let mut msg = llm_build_tool_message(tool_call_id, &text, Some(false), None);
+    let mut msg = llm_build_tool_message(tool_call_id, &text, Some(false), None, Some(tool_name));
     // 与 `record_protocol_failure` 同口径：失败属**信息性**，结果以 Completed
     // 留在上下文（标 Failed 会被上下文过滤，并让前端多渲染一条 ⚠）。
     msg.status = Some(NodeStatus::Completed);
-    msg.meta = Some(json!({
-        "success": false,
-        "failure_kind": reason,
-    }));
+    // **并入**而非整格替换：`meta.tool_name` 是结果节点身份的一部分（[T-147d-iii]），
+    // 整格覆盖会连它一起丢掉。
+    if let Some(obj) = msg.meta.as_mut().and_then(|m| m.as_object_mut()) {
+        obj.insert("failure_kind".into(), json!(reason));
+    }
     msg
 }
 
@@ -974,12 +984,19 @@ pub async fn process_tool_calls_async(
                 "session",
                 "[Tool] 单响应工具调用数超限，调用被丢弃（不执行）：{id} / {name}"
             );
-            let mut tool_msg =
-                llm_build_tool_message(&id, notice, Some(false), Some(result_msg_id.clone()));
+            let mut tool_msg = llm_build_tool_message(
+                &id,
+                notice,
+                Some(false),
+                Some(result_msg_id.clone()),
+                Some(&name),
+            );
             // 与 `not_executed_result` 同口径：「没跑」不是「跑失败」，以 Completed
-            // 留在上下文；成因由 `failure_kind` 承载。
+            // 留在上下文；成因由 `failure_kind` 承载（**并入**，不盖掉 tool_name）。
             tool_msg.status = Some(NodeStatus::Completed);
-            tool_msg.meta = Some(json!({ "success": false, "failure_kind": "overflow_dropped" }));
+            if let Some(obj) = tool_msg.meta.as_mut().and_then(|m| m.as_object_mut()) {
+                obj.insert("failure_kind".into(), json!("overflow_dropped"));
+            }
             tool_messages.push(tool_msg);
             // 结果子节点必须有父节点终态配套（同 S20.1 不变量）：否则前端永远转圈。
             if let Some(parent_update) = emit_parent_finalized(
@@ -1056,6 +1073,7 @@ pub async fn process_tool_calls_async(
                 &format!("Refused: {reason}"),
                 Some(false),
                 Some(result_msg_id.clone()),
+                Some(&name),
             );
             tool_messages.push(tool_msg);
             // 拒掉的调用同样必须收敛父节点：只推结果子节点，父节点就永远停在
@@ -1099,6 +1117,7 @@ pub async fn process_tool_calls_async(
                 &format!("Refused: {reason}"),
                 Some(false),
                 Some(result_msg_id.clone()),
+                Some(&name),
             );
             tool_messages.push(tool_msg);
             // 拒掉的调用同样必须收敛父节点（同外部执行闸）。
@@ -1141,6 +1160,7 @@ pub async fn process_tool_calls_async(
                 &format!("Refused: {reason}"),
                 Some(false),
                 Some(result_msg_id.clone()),
+                Some(&name),
             );
             tool_messages.push(tool_msg);
             // 拒掉的调用同样必须收敛父节点（同外部执行闸 / 淘汰闸）。
@@ -1182,6 +1202,7 @@ pub async fn process_tool_calls_async(
                 &format!("Blocked: {block_msg}"),
                 Some(false),
                 Some(result_msg_id.clone()),
+                Some(&name),
             );
             tool_messages.push(tool_msg);
             // 被钩子拦下 → 父节点同样必须收敛（此前只推了结果子节点，父节点
@@ -1258,7 +1279,7 @@ pub async fn process_tool_calls_async(
         // 唯一写入者（它持有 `result_msg_id` 与父 ToolCall 的终态）。工具只给载荷
         // （`PendingPrompt`），因此不存在"工具造一个节点、这里再造一个"的双 id 问题。
         let mut tool_msg = if let Some(pending) = pending_user_prompt.take() {
-            build_user_prompt_message(&result_msg_id, &id, &pending)
+            build_user_prompt_message(&result_msg_id, &id, &pending, &name)
         } else {
             // L0 守卫：超长工具结果存档 + head/tail 摘要，避免单条撑爆上下文窗口
             // （对应"单次工具调用内容太长"的压缩诉求；物理字节上限不再是唯一防线）。
@@ -1271,8 +1292,13 @@ pub async fn process_tool_calls_async(
                 Some(&guard_session),
                 session_dir,
             );
-            let mut tool_msg =
-                llm_build_tool_message(&id, &guarded.text, Some(success), Some(result_msg_id));
+            let mut tool_msg = llm_build_tool_message(
+                &id,
+                &guarded.text,
+                Some(success),
+                Some(result_msg_id),
+                Some(&name),
+            );
             if guarded.truncated {
                 let mut meta = tool_msg.meta.clone().unwrap_or_else(|| json!({}));
                 meta["tool_result_truncated"] = json!(true);
@@ -1377,7 +1403,7 @@ pub async fn process_tool_calls_async(
         } else {
             "not_executed"
         };
-        let result_msg = not_executed_result(id, reason);
+        let result_msg = not_executed_result(id, reason, name);
         llm_emit_message(sink, result_msg.clone()).await;
         if let Some(parent_update) = emit_parent_finalized(
             sink,

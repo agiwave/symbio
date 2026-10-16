@@ -31,7 +31,11 @@ fn kind_words_match_serde_names() {
     ] {
         assert_eq!(kind.as_str(), word);
         let v = serde_json::to_value(kind).unwrap();
-        assert_eq!(v, serde_json::json!(word), "{kind:?} 的 wire 词与 as_str 分叉");
+        assert_eq!(
+            v,
+            serde_json::json!(word),
+            "{kind:?} 的 wire 词与 as_str 分叉"
+        );
     }
 }
 
@@ -107,9 +111,56 @@ fn from_legacy_is_idempotent_on_new_shape() {
         "person/local",
         "vdfs/write",
         "system/compactor",
+        // [T-147d-iii] `tool_principal` 合成的三个 namespace 都要读回 Tool 族
+        "legacy/todo_write",
+        "mcp/mockserv/echo",
+        "agent/run",
     ] {
         let p1 = Principal::from_legacy(id);
         let p2 = Principal::from_legacy(&p1.id);
         assert_eq!(p1, p2, "from_legacy({id}) 应幂等");
     }
+}
+
+/// `tool_principal`：LLM 可见工具名（wire 形态）→ 可路由的 Tool 主体（[T-147d-iii]）。
+#[test]
+fn tool_principal_maps_wire_tool_names() {
+    // 首段是归属插件 ⇒ `ns/其余`，与 authz 登记的主体行逐一对齐
+    let p = Principal::tool_principal("vdfs_write");
+    assert_eq!(p.kind, PrincipalKind::Tool);
+    assert_eq!(p.id, "vdfs/write");
+    assert_eq!(Principal::tool_principal("web_fetch").id, "web/fetch");
+    assert_eq!(
+        Principal::tool_principal("local_content_search").id,
+        "local/content_search"
+    );
+    assert_eq!(Principal::tool_principal("agent_run").id, "agent/run");
+
+    // 限定名原样（含 MCP 的斜杠形态）
+    assert_eq!(
+        Principal::tool_principal("local/todo_write").id,
+        "local/todo_write"
+    );
+    assert_eq!(
+        Principal::tool_principal("mcp/github/create_issue").id,
+        "mcp/github/create_issue"
+    );
+
+    // MCP 双下划线拼接名 ⇒ `mcp/server/tool`
+    assert_eq!(
+        Principal::tool_principal("mcp__mockserv__echo").id,
+        "mcp/mockserv/echo"
+    );
+
+    // 只名历史工具 ⇒ legacy 兜底段，族不变
+    assert_eq!(
+        Principal::tool_principal("todo_write").id,
+        "legacy/todo_write"
+    );
+    assert_eq!(
+        Principal::tool_principal("context_compact").id,
+        "legacy/context_compact"
+    );
+    assert_eq!(Principal::tool_principal("").id, "legacy/unknown");
+    assert_eq!(Principal::tool_principal("  ").kind, PrincipalKind::Tool);
 }

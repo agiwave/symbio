@@ -196,7 +196,14 @@ pub(crate) async fn close_turn(
             // 标准工具广播模式（与 process_tool_calls_async 一致）：
             // 前端实时可见 context_compact 的结果子节点与父节点状态——
             // 先广播 Tool 结果子节点，再广播父 ToolCall 的完整终态快照。
-            let mut tool_msg = llm_build_tool_message(&call_id, &result_text, Some(ok), None);
+            let mut tool_msg = llm_build_tool_message(
+                &call_id,
+                &result_text,
+                Some(ok),
+                None,
+                // 拦截路径的调用名就是这条工具（分区判据同上）
+                Some(context::CONTEXT_COMPACT_TOOL_NAME),
+            );
             if !ok {
                 // 失败属信息性：结果以 Completed 定格（父节点同为 Completed），
                 // 与普通工具结果的处理保持一致，避免孤儿 Failed 节点
@@ -236,6 +243,7 @@ pub(crate) async fn close_turn(
                     "Skipped: another context_compact call in this batch was executed.",
                     Some(false),
                     None,
+                    Some(context::CONTEXT_COMPACT_TOOL_NAME),
                 );
                 tool_msg.status = Some(NodeStatus::Completed);
                 llm_emit_message(sink, tool_msg.clone()).await;

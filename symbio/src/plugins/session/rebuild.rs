@@ -593,10 +593,11 @@ fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
+    let tool = text_of(e, "tool");
     let mut call = llm_build_tool_call_node(
         &turn_id,
         call_id.clone(),
-        Some(text_of(e, "tool")),
+        Some(tool.clone()),
         text_of(e, "args"),
         str_of(e, "wire_id"),
     );
@@ -639,11 +640,19 @@ fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
         .get("needs_user_action")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let tool_principal = if tool.is_empty() {
+        None
+    } else {
+        Some(crate::symbio_core::principal::Principal::tool_principal(
+            &tool,
+        ))
+    };
     let mut result = if needs_user_action {
         ChatNode {
             id: result_id,
             parent_id: Some(call_id.clone()),
             role: Some(NodeRole::Tool),
+            principal: tool_principal,
             msg_type: Some(NodeKind::Interaction),
             content: Some(MessageContent::Text(text_of(e, "text"))),
             status: Some(NodeStatus::WaitingUserAction),
@@ -654,6 +663,7 @@ fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
                     .get("failure_kind")
                     .and_then(|v| v.as_str())
                     .unwrap_or_default(),
+                "tool_name": tool,
             })),
             ..Default::default()
         }
@@ -663,6 +673,11 @@ fn artifact_nodes(e: &Event) -> Vec<ChatNode> {
             &text_of(e, "text"),
             Some(success),
             Some(result_id),
+            if tool.is_empty() {
+                None
+            } else {
+                Some(tool.as_str())
+            },
         );
         // 「没跑」不是「跑失败」：带成因码（非 pending）的结果按 Completed 重建，
         // 与执行器落格时的口径一致（`not_executed_result` / 超限丢弃分支都标

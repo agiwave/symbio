@@ -695,7 +695,8 @@ fn projection_that_ignores_as_of_would_be_caught() {
         .unwrap();
     let events = store.range(crate::symbio_core::event::Seq::new(0));
     // 一个「忽略 as-of」的错误实现：now=MAX ⇒ 未来事件全部涌入。
-    let broken_view = recall("session/main", None, None).apply(&events, i64::MAX, Budget::generous());
+    let broken_view =
+        recall("session/main", None, None).apply(&events, i64::MAX, Budget::generous());
     let correct_view = recall("session/main", None, None).apply(&events, 2_000, Budget::generous());
     assert_ne!(
         before_view.value, broken_view.value,

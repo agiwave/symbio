@@ -188,10 +188,20 @@ fn attributed(m: cm::ChatNode, session_principal: &str) -> cm::ChatNode {
     let mut out = m;
     // 归属判据与 [T-146] 的字符串主体一致，这里只把它折成 `Principal` 结构体：
     // `person/local` ⇒ Person 一族，`session/*` ⇒ Agent 一族（`from_legacy` 按 namespace 派生）。
-    out.principal = Some(Principal::from_legacy(match out.role {
-        Some(cm::NodeRole::User) => crate::symbio_core::authz::PRINCIPAL_USER,
-        _ => session_principal,
-    }));
+    //
+    // [T-147d-iii] `role = tool` 的结果节点归**工具自己**（Tool 一族，地址由
+    // `meta.tool_name` 合成）——authz 登记的主体行（`vdfs/write`…）就是这批值。
+    // 没有工具名的（协议级失败调用）退回本会话主体，与字段删除前的今天同格。
+    out.principal = Some(match out.node_role() {
+        Some(cm::NodeRole::User) => {
+            Principal::from_legacy(crate::symbio_core::authz::PRINCIPAL_USER)
+        }
+        Some(cm::NodeRole::Tool) => match out.tool_name() {
+            Some(name) => Principal::tool_principal(name),
+            None => Principal::from_legacy(session_principal),
+        },
+        _ => Principal::from_legacy(session_principal),
+    });
     out
 }
 
@@ -287,11 +297,7 @@ impl SessionPlugin {
     }
 
     /// 向会话转写发布一批消息帧（同一把锁内顺序应用，保持发布顺序）。
-    pub(crate) async fn transcript_apply_all(
-        &self,
-        session_id: &str,
-        messages: Vec<cm::ChatNode>,
-    ) {
+    pub(crate) async fn transcript_apply_all(&self, session_id: &str, messages: Vec<cm::ChatNode>) {
         let state = self.active_mgr.get_or_create(session_id).await;
         let mut tr = state.transcript.lock().await;
         for message in messages {

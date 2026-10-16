@@ -447,7 +447,10 @@ fn all_principals_are_routable_ids() {
         ("PRINCIPAL_VERIFIER", PRINCIPAL_VERIFIER),
         ("PRINCIPAL_TOOL_VDFS_WRITE", PRINCIPAL_TOOL_VDFS_WRITE),
         ("PRINCIPAL_TOOL_WEB_FETCH", PRINCIPAL_TOOL_WEB_FETCH),
-        ("PRINCIPAL_TOOL_CONTENT_SEARCH", PRINCIPAL_TOOL_CONTENT_SEARCH),
+        (
+            "PRINCIPAL_TOOL_CONTENT_SEARCH",
+            PRINCIPAL_TOOL_CONTENT_SEARCH,
+        ),
         ("PRINCIPAL_SYSTEM_COMPACTOR", PRINCIPAL_SYSTEM_COMPACTOR),
     ] {
         let ns = principal_namespace(principal);
@@ -486,10 +489,7 @@ fn tool_principals_have_declared_rows() {
         PRINCIPAL_TOOL_CONTENT_SEARCH,
     ] {
         let grants = matrix.grants_of(tool);
-        assert!(
-            !grants.is_empty(),
-            "`{tool}` 应在授权表里有一行（ADR-069）"
-        );
+        assert!(!grants.is_empty(), "`{tool}` 应在授权表里有一行（ADR-069）");
         assert!(
             grants.contains(&Capability::ProduceArtifact),
             "`{tool}` 的权威动作是产生产物（produce.artifact）"
@@ -519,4 +519,3 @@ fn person_local_is_not_in_the_capability_table() {
     // 归一后 user 也不是 agent 命名空间成员（visible_to 会放行，但 can_reply 仍拒）。
     assert!(!is_agent_id(PRINCIPAL_USER));
 }
-

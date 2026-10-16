@@ -49,8 +49,7 @@ pub(crate) async fn decide_turn(
     let parent = orchestrator.parent.as_ref()?;
     let session_id = ctx.get(SESSION_ID).unwrap_or_default();
 
-    let conversation: Vec<ChatNode> =
-        conversation_view(&context.messages, CONVERSATION_VIEW_LIMIT);
+    let conversation: Vec<ChatNode> = conversation_view(&context.messages, CONVERSATION_VIEW_LIMIT);
 
     let req = ctx.fork();
     req.set(PATH, ROUTE_CLASSIFY_DECIDE.to_string());

@@ -326,10 +326,9 @@ fn actor_and_ts(payload: &Value) -> (String, i64) {
     // `Principal::deserialize` 一次性折到 `.id`，事件层的 actor 键仍是**可路由地址字符串**。
     let principal = msg
         .get("principal")
-        .and_then(|v| serde_json::from_value::<
-            crate::symbio_core::principal::Principal,
-        >(v.clone())
-        .ok())
+        .and_then(|v| {
+            serde_json::from_value::<crate::symbio_core::principal::Principal>(v.clone()).ok()
+        })
         .map(|p| p.id);
     let actor = principal.unwrap_or_else(|| {
         match msg.get("role").and_then(Value::as_str) {

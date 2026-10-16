@@ -1129,7 +1129,14 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
 
     // ③ 属主本人：与不声明时逐字一致（闸不是为了把属主挡在外面）。
     let plain = read("s1", &wal, None, session_principal, &root).expect("本机默认读数");
-    let as_owner = read("s1", &wal, Some(crate::symbio_core::authz::PRINCIPAL_USER), session_principal, &root).expect("属主读数");
+    let as_owner = read(
+        "s1",
+        &wal,
+        Some(crate::symbio_core::authz::PRINCIPAL_USER),
+        session_principal,
+        &root,
+    )
+    .expect("属主读数");
     assert_eq!(as_owner, plain);
 
     // 反向对照：唯一那条共享记忆改成私有 ⇒ agent:main 回到空切片。

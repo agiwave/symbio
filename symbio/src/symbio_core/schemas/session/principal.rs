@@ -126,11 +126,45 @@ impl Principal {
         self
     }
 
+    /// 由 **LLM 可见工具名**（wire 形态）构造工具一族的主体（[T-147d-iii]）。
+    ///
+    /// 工具的结果节点归**工具自己**（[ADR-069 §决策 1]：`Tool` 族「工具的响应节点
+    /// 归属它自己，不是调用它的 agent」）。地址仍按 `<namespace>/<name>` 规范合成：
+    /// - 已带 `/` 段的限定名（`local/todo_write`、`mcp/github/create_issue`）原样；
+    /// - MCP 双下划线拼接名（`mcp__server__tool`）⇒ `mcp/server/tool`；
+    /// - 首段是归属插件（vdfs / web / local / agent）⇒ `ns/其余`
+    ///   （`vdfs_write` → `vdfs/write`，与 [authz] 登记的主体行逐一对齐）；
+    /// - 其余只名工具 ⇒ `legacy/<name>`——地址是合成的，族不变。
+    ///
+    /// 产出对 [`Principal::from_legacy`] **幂等**（这些 namespace 都读回 Tool 族）。
+    pub fn tool_principal(name: &str) -> Principal {
+        let name = name.trim();
+        if name.is_empty() {
+            return Principal::new(PrincipalKind::Tool, "legacy/unknown");
+        }
+        let id = if name.contains('/') {
+            name.to_string()
+        } else if let Some(rest) = name.strip_prefix("mcp__") {
+            format!("mcp/{}", rest.replace("__", "/"))
+        } else if let Some((head, rest)) = name.split_once('_') {
+            match head {
+                "vdfs" | "web" | "local" | "agent" if !rest.is_empty() => {
+                    format!("{head}/{rest}")
+                }
+                _ => format!("legacy/{name}"),
+            }
+        } else {
+            format!("legacy/{name}")
+        };
+        Principal::new(PrincipalKind::Tool, id)
+    }
+
     /// 从历史 `principal: String` 一次性映射——[ADR-069 §决策 6] 读侧别名的实现点。
     ///
     /// 旧形态（`agent:xxx` / `user` 裸字面量）与新形态（`<ns>/<name>`）都吃得下：
     /// - 新形态：第一段是 namespace，`session/*` ⇒ Agent，`person/*` ⇒ Person，
-    ///   `vdfs/*` / `web/*` / `local/*` ⇒ Tool，`system/*` ⇒ System；
+    ///   `vdfs/*` / `web/*` / `local/*` / `mcp/*` / `agent/*` / `legacy/*` ⇒ Tool，
+    ///   `system/*` ⇒ System；
     ///   未识别 namespace 一律按 Agent 处理（授权表 fail-closed 不因此放松）。
     /// - 旧形态（`kind:name`）：冒号前的 kind 决定族，冒号后的 name 挂到 `session/` 下
     ///   （`agent:main` ⇒ `{Agent, session/main}`）。
@@ -144,8 +178,10 @@ impl Principal {
             let kind = match ns {
                 "person" => PrincipalKind::Person,
                 "system" => PrincipalKind::System,
-                // vdfs / web / local / 其他工具命名空间都算 Tool
-                "vdfs" | "web" | "local" => PrincipalKind::Tool,
+                // 工具命名空间：vdfs / web / local 是插件归属，mcp / agent 是
+                // [`Principal::tool_principal`] 合成的地址形态，legacy 是旧 `tool:x`
+                // 的兜底段——都读回 Tool 族，保证构造⇄字符串往返幂等。
+                "vdfs" | "web" | "local" | "mcp" | "agent" | "legacy" => PrincipalKind::Tool,
                 // session 与未识别 namespace 都按 Agent——授权表按 id 精确判，
                 // 未登记 ⇒ fail-closed，kind 猜宽不放大权限面。
                 _ => PrincipalKind::Agent,

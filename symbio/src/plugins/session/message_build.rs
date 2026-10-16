@@ -244,13 +244,18 @@ pub fn llm_build_tool_call_node(
     .with_tool_name(name)
 }
 
-/// 构造工具执行结果消息（role: Tool，`msg_type = Body`，parent_id 指向 tool_call）。
+/// 构造工具执行结果消息（`msg_type = Body`，parent_id 指向 tool_call）。
 /// 响应结果作为工具调用骨架的直接正文(`Tool`) 子节点（组合节点可选，故不包骨架）。
+///
+/// `tool_name` 是 LLM 可见的 wire 工具名（LLM 视角）：同时写进 `meta.tool_name`
+/// 与 `principal`（[T-147d-iii]——结果节点归**工具自己**一族，`role` 删除后
+/// `principal.kind` 是唯一承载点）。名字未知（协议级失败）传 `None`：不往 meta
+/// 里塞 null，主体交给落库收口点 `attributed` 兜底。
 ///
 /// **重要**：结果子节点的 `status` 必须与实际执行结果一致——
 /// 成功 `Completed`、失败 `Failed`。若失败结果被标成 `Completed`，
 /// 当下一轮 `get_context_messages` 过滤掉 `Failed`
-/// 的 `ToolCall` 父节点时，这个"孤儿"`role=Tool` 结果子节点（其 `tool_call_id`
+/// 的 `ToolCall` 父节点时，这个"孤儿"结果子节点（其 `tool_call_id`
 /// 指向已被删除的 tool_call）会被保留下来，使新一轮 LLM 请求携带非法
 /// `tool_call_id` → 请求包出错（"发给大语言模型的数据包会出错"）。
 pub fn llm_build_tool_message(
@@ -258,12 +263,18 @@ pub fn llm_build_tool_message(
     content: &str,
     success: Option<bool>,
     msg_id: Option<String>,
+    tool_name: Option<&str>,
 ) -> ChatNode {
     let success = success.unwrap_or(true);
+    let mut meta = serde_json::json!({ "success": success });
+    if let Some(name) = tool_name {
+        meta["tool_name"] = serde_json::json!(name);
+    }
     ChatNode {
         id: msg_id.unwrap_or_else(llm_short_id),
         parent_id: Some(tool_call_id.into()),
         role: Some(NodeRole::Tool),
+        principal: tool_name.map(crate::symbio_core::principal::Principal::tool_principal),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(content.into())),
         status: Some(if success {
@@ -271,7 +282,7 @@ pub fn llm_build_tool_message(
         } else {
             NodeStatus::Failed
         }),
-        meta: Some(serde_json::json!({ "success": success })),
+        meta: Some(meta),
         timestamp: Some(crate::symbio_core::clock_now_ms()),
         ..Default::default()
     }

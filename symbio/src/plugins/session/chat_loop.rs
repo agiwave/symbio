@@ -219,7 +219,7 @@ use crate::plugin_info;
 use crate::plugin_warn;
 use crate::symbio_core::ModelFinishReason;
 use crate::symbio_core::{
-    chat_node::{ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind},
+    chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus},
     clock_now_ms, llm_emit_message, llm_short_id, HookEvent, RunSnapshot, TurnOutput,
     TurnToolCallInfo,
 };

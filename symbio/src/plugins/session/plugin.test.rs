@@ -492,9 +492,7 @@ fn attributed_fills_by_role_and_never_overwrites() {
     let mut user = base(Some(cm::NodeRole::User));
     user.principal = None;
     assert_eq!(
-        attributed(user, "session/reviewer")
-            .principal
-            .map(|p| p.id),
+        attributed(user, "session/reviewer").principal.map(|p| p.id),
         Some(crate::symbio_core::authz::PRINCIPAL_USER.to_string())
     );
 }

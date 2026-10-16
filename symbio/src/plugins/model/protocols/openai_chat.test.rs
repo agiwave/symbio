@@ -101,7 +101,7 @@ fn non_data_lines_produce_nothing() {
 // 直接 400（`System message must be at the beginning.`）——那类 provider 上 `full`
 // 档第一轮就走不出去。故前缀段并进基础 system，空行分段。
 
-use crate::plugins::model::types::{MessageContent, NodeRole, NativeMessage};
+use crate::plugins::model::types::{MessageContent, NativeMessage, NodeRole};
 
 fn sys(text: &str) -> NativeMessage {
     NativeMessage {

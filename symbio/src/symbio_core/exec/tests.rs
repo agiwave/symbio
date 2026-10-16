@@ -68,22 +68,20 @@ async fn sink_direct_forwards_and_null_drops() {
 async fn sink_filtered_rewrites_and_drops_per_frame() {
     let ops = Arc::new(std::sync::Mutex::new(Vec::new()));
     // 白名单：只放行落向 "keep" 的纯增量帧，落点改写为 "node"
-    let allow: Arc<dyn Fn(&mut ChatNode) -> bool + Send + Sync> =
-        Arc::new(|f: &mut ChatNode| {
-            if f.id == "keep" && f.delta.is_some() && f.status.is_none() {
-                f.id = "node".into();
-                return true;
-            }
-            false
-        });
+    let allow: Arc<dyn Fn(&mut ChatNode) -> bool + Send + Sync> = Arc::new(|f: &mut ChatNode| {
+        if f.id == "keep" && f.delta.is_some() && f.status.is_none() {
+            f.id = "node".into();
+            return true;
+        }
+        false
+    });
     let sink = ExecEventSink::filtered(allow, Arc::new(RecordingWriter { ops: ops.clone() }));
     let progress = sink.progress();
 
     sink.emit(delta("keep", "a")).await; // 放行（改写落点）
     sink.emit(delta("drop", "b")).await; // 吞
     let mut mixed = delta("keep", "c");
-    mixed.status =
-        Some(crate::symbio_core::schemas::session::chat_node::NodeStatus::Completed);
+    mixed.status = Some(crate::symbio_core::schemas::session::chat_node::NodeStatus::Completed);
     sink.emit(mixed).await; // 带状态 ⇒ 吞
 
     let got = ops.lock().unwrap();

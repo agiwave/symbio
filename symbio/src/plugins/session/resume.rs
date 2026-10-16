@@ -358,10 +358,20 @@ async fn process_tool_resume_action(
     // 7. 创建新子节点（新 id，Text 类型，工具结果）
     let new_child_id = llm_short_id();
     let now_ts = crate::symbio_core::clock_now_ms();
+    // [T-147d-iii] 恢复结果也是**工具的结果**：族归工具自己。这里直连
+    // `session.apply`（不经 `attributed` 收口），身份必须就地带全；
+    // 协议级缺名的兜底不往 meta 里塞空串（缺席=没有）。
+    let named = !tool_name.is_empty();
+    let mut new_child_meta = json!({ "success": final_success });
+    if named {
+        new_child_meta["tool_name"] = json!(tool_name);
+    }
     let new_child = ChatNode {
         id: new_child_id.clone(),
         parent_id: Some(req.target_id.clone()),
         role: Some(NodeRole::Tool),
+        principal: named
+            .then(|| crate::symbio_core::principal::Principal::tool_principal(&tool_name)),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(final_result_text.clone())),
         status: Some(if final_success {
@@ -369,7 +379,7 @@ async fn process_tool_resume_action(
         } else {
             NodeStatus::Failed
         }),
-        meta: Some(json!({"success": final_success})),
+        meta: Some(new_child_meta),
         timestamp: Some(now_ts),
         ..Default::default()
     };

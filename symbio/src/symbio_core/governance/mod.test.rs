@@ -56,7 +56,10 @@ fn paired_policy_serves_both_sides() {
         matrix.grants_of("session/main"),
         [Capability::ReplyFirst, Capability::ReplyAppend]
     );
-    assert_eq!(matrix.sees_of("session/main"), Some(VisScope::ThreadPrivate));
+    assert_eq!(
+        matrix.sees_of("session/main"),
+        Some(VisScope::ThreadPrivate)
+    );
     assert!(matrix.can_write("session/main", Capability::ReplyFirst));
     assert!(
         !matrix.can_write("session/main", Capability::AssignWork),
@@ -128,7 +131,10 @@ fn from_names_translates_a_name_table_into_a_paired_matrix() {
         matrix.grants_of("session/main"),
         [Capability::ReplyFirst, Capability::ReplyAppend]
     );
-    assert_eq!(matrix.sees_of("session/main"), Some(VisScope::ThreadPrivate));
+    assert_eq!(
+        matrix.sees_of("session/main"),
+        Some(VisScope::ThreadPrivate)
+    );
     // 闭集之外的行不复存在 ⇒ 未知主体照旧 fail-closed。
     assert!(!matrix.can_write("session/ghost", Capability::ReplyFirst));
 }
@@ -140,9 +146,12 @@ fn from_names_translates_a_name_table_into_a_paired_matrix() {
 /// 「表本身不合法」，于是宿主降级空矩阵 + 告警（`crate::symbio_core::authz::production_matrix`）。
 #[test]
 fn a_name_outside_the_closed_set_refuses_construction() {
-    let err =
-        PermissionMatrix::from_names(&[("session/main", &["reply.fisrt"], VisScope::ThreadPrivate)])
-            .expect_err("拼写错误必须拒绝整体构造");
+    let err = PermissionMatrix::from_names(&[(
+        "session/main",
+        &["reply.fisrt"],
+        VisScope::ThreadPrivate,
+    )])
+    .expect_err("拼写错误必须拒绝整体构造");
     let text = err.to_string();
     assert!(text.contains("reply.fisrt"), "错误要点名那个能力：{text}");
     assert!(text.contains("session/main"), "错误要点名那一行：{text}");
