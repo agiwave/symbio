@@ -467,6 +467,58 @@ fn flatten_whole_tree_grouped_is_noop() {
     assert_eq!(turn_root_of(&tree[1]), None);
 }
 
+/// flat 折叠**不拆子会话**：转播桥把子会话顶层节点无条件挂到父工具卡下，那个
+/// 转发来的 `Skeleton{run}` 仍 `is_run()`，但它的父是一张工具卡——必须跳过，否则
+/// 子会话的孙节点会被错误升到会话根、拆散嵌套树。
+#[test]
+fn flatten_whole_tree_skips_run_skeleton_nested_in_tool_card() {
+    let subrun = ChatNode {
+        id: "subrun-1".to_string(),
+        parent_id: Some("tool-1".to_string()),
+        msg_type: Some(NodeKind::Skeleton),
+        ..Default::default()
+    }
+    .with_style_tag(CHAT_STYLE_TAG_RUN);
+    let mut tree = vec![
+        run_node("run-1"),
+        tool_node("tool-1", "run-1"),
+        subrun,
+        node("subtext-1", Some("subrun-1")),
+    ];
+    flatten_whole_tree(&mut tree, PresentationTree::Flat);
+    // 顶层本轮骨架的直接子节点（工具卡）照常升根。
+    assert_eq!(tree[1].parent_id, None, "工具卡升根");
+    assert_eq!(turn_root_of(&tree[1]), Some("run-1"));
+    // 子会话的 run 骨架仍挂在工具卡下（未被当作折叠根）。
+    assert_eq!(
+        tree[2].parent_id.as_deref(),
+        Some("tool-1"),
+        "夹在工具卡内的子会话骨架不折叠"
+    );
+    // 其孙节点保持嵌套，绝不升根。
+    assert_eq!(
+        tree[3].parent_id.as_deref(),
+        Some("subrun-1"),
+        "子会话孙节点不被错误升根"
+    );
+    assert_eq!(turn_root_of(&tree[3]), None);
+}
+
+/// `deep` 与 `grouped` 逐字相同：读侧投影都不升根，区别只在前端如何展开嵌套树。
+#[test]
+fn flatten_whole_tree_deep_is_noop() {
+    let mut tree = vec![run_node("run-1"), node("text-1", Some("run-1"))];
+    let before = serde_json::to_value(&tree).unwrap();
+    flatten_whole_tree(&mut tree, PresentationTree::Deep);
+    assert_eq!(
+        serde_json::to_value(&tree).unwrap(),
+        before,
+        "deep 不做任何升根折叠"
+    );
+    assert_eq!(tree[1].parent_id.as_deref(), Some("run-1"));
+    assert_eq!(turn_root_of(&tree[1]), None);
+}
+
 #[test]
 fn flatten_whole_tree_is_idempotent() {
     let mut once = vec![run_node("run-1"), node("text-1", Some("run-1"))];

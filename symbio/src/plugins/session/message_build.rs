@@ -68,9 +68,23 @@ pub(crate) fn flatten_whole_tree(nodes: &mut [ChatNode], mode: PresentationTree)
     if mode != PresentationTree::Flat {
         return;
     }
+    // 工具卡 id 集合：夹在工具卡内的 `Skeleton{run}` 是**子会话**转播来的（`relay_bridge`
+    // 无条件把子会话顶层节点挂到父工具卡下），它虽仍 `is_run()`，但绝不能被折叠——
+    // 否则子会话的孙节点会被错误升到会话根，拆散嵌套树。只有**会话根级**的 run 骨架才折叠。
+    let tool_cards: std::collections::HashSet<String> = nodes
+        .iter()
+        .filter(|n| n.is_tool_call())
+        .map(|n| n.id.clone())
+        .collect();
     let run_roots: std::collections::HashSet<String> = nodes
         .iter()
         .filter(|n| n.is_run())
+        .filter(|n| {
+            n.parent_id
+                .as_deref()
+                .map(|p| !tool_cards.contains(p))
+                .unwrap_or(true)
+        })
         .map(|n| n.id.clone())
         .collect();
     for n in nodes.iter_mut() {

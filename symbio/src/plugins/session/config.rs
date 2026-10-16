@@ -29,15 +29,18 @@ use serde::{Deserialize, Serialize};
 /// 还是挂本轮的 `Skeleton{run}` 根」这一件事上——工具结果始终挂在自己的
 /// `tool_call` 骨架下（那是「工具调用内部有自己的骨架」，与建树策略正交）。
 ///
-/// `deep`（子智能体递归嵌套）随子会话转播桥改造在 149-ii 加入——本枚举此刻
-/// 只列**已接线**的两档，刻意不预留 `deep`：留一个能选、选了没反应的档位，
-/// 正是 [`SessionConfig`] 文档里 `store_kind` 被删掉的那个假开关形状。
+/// `deep`（子智能体递归嵌套）随子会话转播桥在 149-ii 接线：子会话的节点早已由
+/// `relay_bridge` 无条件挂到发起它的父工具卡下，本档只是让读侧投影**保留**那棵嵌套树
+/// （与 `grouped` 同样不升根），语义差异全在前端如何展开。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PresentationTree {
     /// 本轮所有节点挂会话根（与用户发言互为兄弟）；只有工具调用内部保留自己的骨架。
     Flat,
     /// 每条用户消息开一个 `Skeleton{run}` 根，本轮其余节点挂它下（**出厂默认 = 今天行为**）。
     Grouped,
+    /// 子会话递归挂到发起它的那张工具卡内（多智能体嵌套）。存储与 `grouped` 逐字相同，
+    /// 区别只在读侧投影：本档**不做**任何升根折叠，保留转播桥已建好的嵌套树。
+    Deep,
 }
 
 impl PresentationTree {
@@ -46,13 +49,15 @@ impl PresentationTree {
         match self {
             Self::Flat => "flat",
             Self::Grouped => "grouped",
+            Self::Deep => "deep",
         }
     }
 
     /// 建树策略候选（表单与说明同源，不写第二份字面量）。
-    pub(crate) const OPTIONS: [(&'static str, &'static str); 2] = [
+    pub(crate) const OPTIONS: [(&'static str, &'static str); 3] = [
         ("grouped", "本轮归到响应骨架下（默认）"),
         ("flat", "本轮全部铺平到会话根"),
+        ("deep", "子会话挂到发起它的工具卡内（递归嵌套）"),
     ];
 }
 
@@ -519,11 +524,12 @@ impl SessionConfig {
 
     /// 生效的建树策略：认不出的写法按出厂默认 [`PresentationTree::Grouped`] 处理。
     ///
-    /// `deep` 在 149-ii 接线前一并落到 `Grouped`（读侧容错，与 `verbosity` 同纪律：
-    /// 手写 `PLUGIN.yml` 写错、或写了尚未生效的档，都不该改变组树行为）。
+    /// 读侧容错与 `verbosity` 同纪律：手写 `PLUGIN.yml` 写错、或写了尚未生效的档，
+    /// 都不该改变组树行为。
     pub fn presentation_tree(&self) -> PresentationTree {
         match self.presentation_tree.trim() {
             "flat" => PresentationTree::Flat,
+            "deep" => PresentationTree::Deep,
             _ => PresentationTree::Grouped,
         }
     }

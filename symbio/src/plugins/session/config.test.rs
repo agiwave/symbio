@@ -161,14 +161,20 @@ fn presentation_tree_defaults_to_grouped_and_parses_known_values() {
         ..SessionConfig::default()
     };
     assert_eq!(flat.presentation_tree(), PresentationTree::Flat);
+
+    let deep = SessionConfig {
+        presentation_tree: "deep".into(),
+        ..SessionConfig::default()
+    };
+    assert_eq!(deep.presentation_tree(), PresentationTree::Deep);
+    assert_eq!(PresentationTree::Deep.as_str(), "deep");
 }
 
 /// 认不出的写法按出厂默认处理（与 `SettingConfig::verbosity` 同一条读侧容错纪律）：
-/// 手写 `PLUGIN.yml` 拼错、或写了尚未接线的 `deep`，都不该改变组树。`deep` 在
-/// 149-ii 接线前一并落到 `grouped`。
+/// 手写 `PLUGIN.yml` 拼错、或写了尚未接线的档，都不该改变组树。
 #[test]
 fn unknown_presentation_tree_falls_back_to_grouped() {
-    for raw in ["", "  flat  ", "GROUPED", "deep", "nonsense"] {
+    for raw in ["", "  flat  ", "GROUPED", "deeply", "nonsense"] {
         let c = SessionConfig {
             presentation_tree: raw.into(),
             ..SessionConfig::default()
