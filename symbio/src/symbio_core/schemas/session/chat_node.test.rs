@@ -47,7 +47,7 @@ fn completed_is_distinct_from_unset_sentinel() {
 #[test]
 fn resume_action_wire_words_are_snake_case() {
     let cases = [
-        (ResumeAction::RetryTurn, "retry_turn"),
+        (ResumeAction::RetrySubtree, "retry_subtree"),
         (ResumeAction::Retry, "retry"),
         (ResumeAction::Approve, "approve"),
         (ResumeAction::Reject, "reject"),

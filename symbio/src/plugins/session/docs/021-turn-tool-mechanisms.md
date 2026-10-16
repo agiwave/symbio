@@ -22,7 +22,7 @@ created: 2026-09-09
 ## 机制二：Turn 只有 Completed / Failed 两种终态
 
 - **persist_failure 精确语义**：仅当"持久化本身失败"才走 Failed 分支，业务失败不污染终态。
-- **RetryTurn 删除-重建**：重试即删除失败 Turn 后重建，不留半截中间态。
+- **RetrySubtree 删除-重建**：重试即删除失败 Turn 后重建，不留半截中间态。
 - **用户手动中止**：走 ABORTED 分支（非 Failed），保留已完成的部分结果。
 - **压缩阶段失败就地降级**：压缩失败不冒泡、不改变 Turn 终态，本轮按未压缩上下文继续。
 

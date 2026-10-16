@@ -42,7 +42,7 @@ import {
   NODE_KIND_USER_PROMPT,
   RESUME_ACTION_RETRY,
   RESUME_ACTION_RETRY_COMPACTION,
-  RESUME_ACTION_RETRY_TURN,
+  RESUME_ACTION_RETRY_SUBTREE,
   type ChatNode,
   type NodeKind,
   type ChatRole,
@@ -353,7 +353,7 @@ export function canSupplyToolArgs(f: MessageFacets): boolean {
  * 不按 `failure_kind` 分档（分档会让"换模型后重试"这条唯一出路消失）。
  *
  * 与 Turn 级重试的区别：Turn 失败删的是响应子树（对话内容），压缩失败删的是
- * **压缩节点本身**（系统动作），两者不能共用 `retry_turn`。
+ * **压缩节点本身**（系统动作），两者不能共用 `retry_subtree`。
  */
 export function canRetryCompaction(f: MessageFacets): boolean {
   return f.type === NODE_KIND_COMPRESSION && isFailedStatus(f.status)
@@ -370,7 +370,7 @@ export function canRetryCompaction(f: MessageFacets): boolean {
 export type MessageRetryAction = Extract<
   ResumeAction,
   | typeof RESUME_ACTION_RETRY
-  | typeof RESUME_ACTION_RETRY_TURN
+  | typeof RESUME_ACTION_RETRY_SUBTREE
   | typeof RESUME_ACTION_RETRY_COMPACTION
 >
 
@@ -379,7 +379,7 @@ export type MessageRetryAction = Extract<
  *
  * 三个粒度，**粒度由节点类型决定**：
  * - `retry`            —— 只重跑**这一个工具**（删除该工具的失败结果 → 原参数重新执行）；
- * - `retry_turn`       —— 重跑**整轮**（删除响应子树 → 重新走 LLM 请求）；
+ * - `retry_subtree`       —— 重跑**整轮**（删除响应子树 → 重新走 LLM 请求）；
  * - `retry_compaction` —— 重跑**这一次压缩**（删除失败压缩节点 → 重新压缩）。
  */
 export interface MessageRetryTarget {
@@ -392,7 +392,7 @@ export interface MessageRetryTarget {
  *
  * 原先这段路由写在 `ModelChatPanel.handleRetry` 里，与面板的其它职责混在一起。
  * 抽成纯函数后可直接单测「哪种节点发哪种 action」，也避免「叶子节点要回溯到父 Turn」
- * 这条后端约束被漏掉——后端 `process_retry_turn` 要求 `target_id` 指向 Failed **Turn**，
+ * 这条后端约束被漏掉——后端 `process_retry_subtree` 要求 `target_id` 指向 Failed **Turn**，
  * 因此 Text / Reasoning 叶子失败时必须回溯到父 Turn，否则恢复会被拒绝。
  *
  * 压缩节点是**根级**节点（无 `parent_id`），若落到"回溯到父 Turn"的兜底分支，
@@ -413,7 +413,7 @@ export function messageRetryTargetOf(
   }
   // 其余（Turn 本身，或 Turn 下的 Text/Reasoning 叶子）→ 整轮粒度，回溯到父 Turn
   return {
-    action: RESUME_ACTION_RETRY_TURN,
+    action: RESUME_ACTION_RETRY_SUBTREE,
     targetId: type === NODE_KIND_TURN ? node.id : node.parent_id || node.id,
   }
 }

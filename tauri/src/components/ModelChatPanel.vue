@@ -187,7 +187,7 @@ const chat = useChatConnection({
 })
 
 // 向下级组件（MessageNode 内联 user_prompt 表单 / 失败 ToolCall 重试/补充）提供
-// 会话恢复接口（retry_turn/retry/approve/reject/supply/answer 统一入口）。
+// 会话恢复接口（retry_subtree/retry/approve/reject/supply/answer 统一入口）。
 // 内部走统一 chat/send 接口的 resume 分支：target_id 为稳定锚点（Failed Turn 或 ToolCall），
 // targetSessionId 用于子会话工具调用的恢复路由（子智能体的 user_prompt 通过
 // parent_session_id 指回子会话）。

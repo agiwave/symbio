@@ -49,7 +49,7 @@ pub struct Request {
     /// 会话恢复操作（与 `single_message` 互斥）。
     ///
     /// 存在时由 session 插件会话循环（`session/chat_loop.rs:run_chat_loop`）在 turn 循环前处理：
-    /// - `RetryTurn`：删除 Failed Turn 及其所有子节点，重新走 LLM 请求
+    /// - `RetrySubtree`：删除 Failed Turn 及其所有子节点，重新走 LLM 请求
     /// - `Retry`/`Approve`/`Reject`/`Supply`/`Answer`：删除旧工具响应子节点 →
     ///   重新执行工具（approve/retry/supply）或直接生成结果（reject/answer）→
     ///   创建新响应子节点 → 成功则继续 turn 循环，失败则退出等下次 resume。

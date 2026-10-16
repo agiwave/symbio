@@ -36,5 +36,5 @@ principal 从字符串升到结构体一并做：[T-146] 已把值域迁到可�
 - **147c-ii-prep**（判据 helper，本批）：`NodeShape` 目标五值 + `legacy_shape_to_style_tag` 六→五映射 + `CHAT_STYLE_TAG_*` 词表 + `ChatNode::shape()` / `style_tag()` 判据入口 + 谓词 `is_run` / `is_tool_call` / `is_reasoning` / `is_text` / `is_compression` / `is_interaction`——谓词**签名**即未来形态判据入口，五值收敛那一档消费方代码不动、改点收在构造侧。四条单测（映射表、谓词互斥、shape 折叠、style_tag 从 meta 读）钉住基线。
 - **147c-ii**（六→五收敛，延后）：`NodeKind` 变体收 Body/Notice/Skeleton/Interaction/Typing；写侧把 `NodeKind::Turn` 构造改成 `Skeleton + meta.style_tag="run"`，其余五档同理；前端 TS 同步。**规模**：~300 Rust 站点 + 250+ TS 站点，一次原子改。
 - **147d**（字段瘦身）：`role` 从协议删除（`kind` 已承载归属）；`tool_call_id` 沉 meta；`name` 迁到 `principal.title`。
-- **147e**（动词改名）：`ResumeAction::RetryTurn` → `RetrySubtree`；前后端常量与分派同步。
+- **147e**（动词改名，本批）：`ResumeAction::RetryTurn` → `RetrySubtree`；wire 词 `retry_turn` → `retry_subtree`；后端函数 `process_retry_turn` → `process_retry_subtree`；前端常量 `RESUME_ACTION_RETRY_TURN` → `RESUME_ACTION_RETRY_SUBTREE`；跨栈 25 站点一次改绿。语义泛化——靶子从「Failed Turn」变成「任一骨架节点」，为 [T-147c-ii] 五值收敛铺路（`Turn` 变体在 wire 上消失时 `RetrySubtree` 不再依赖那个名字）。
 

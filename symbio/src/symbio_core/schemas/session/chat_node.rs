@@ -115,7 +115,7 @@ pub enum NodeStatus {
     /// 内容是半截的）。此前中止只能二选一：冒泡路径标 `Failed`（给一个 ⚠ 错误角标，
     /// 把用户自己的操作渲染成故障），其余路径标 `Completed`（说谎——那一轮根本没跑完）。
     ///
-    /// 语义上它**可重试**：`RetryTurn` 本就不看状态（只校验节点是 Turn），
+    /// 语义上它**可重试**：`RetrySubtree` 本就不看状态（只校验节点是骨架），
     /// 缺的只是前端一个「这个终态可以重试」的判据。
     Aborted,
     Failed,
@@ -363,7 +363,7 @@ pub struct ChatNode {
 /// 会话恢复动作。
 ///
 /// 统一覆盖所有"非普通消息"的用户主动操作（与 `session_chat::Request.message` 互斥）：
-/// - `RetryTurn`：LLM 失败重试（删除 Failed Turn 及其所有子节点，重新走 LLM 请求）
+/// - `RetrySubtree`：LLM 失败重试（删除靶子节点及其所有子孙节点，重新走 LLM 请求）
 /// - `Retry`：工具执行失败后重试（用原 args）
 /// - `Approve` / `Reject`：confirm 审批的批准/拒绝
 /// - `Supply`：工具执行失败后补充参数重试（合并 args）
@@ -379,8 +379,12 @@ pub struct ChatNode {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum ResumeAction {
-    /// LLM 失败重试：删除 Failed Turn 及其所有子节点，重新走 LLM 请求
-    RetryTurn,
+    /// LLM 失败重试：删除靶子节点及其所有子孙节点，重新走 LLM 请求。
+    ///
+    /// [ADR-070 §决策 5]：曾经的 `RetryTurn` 语义绑 `Turn` 变体——靶子只允许是 Turn，
+    /// 五值收敛（[T-147c-ii]）后 `Turn` 消失于 wire，本动词的语义随之泛化为「删除整棵
+    /// 子树并重跑」，靶子是**任一骨架节点**（曾经的 Turn 或未来的 Skeleton+style_tag=run）。
+    RetrySubtree,
     /// 工具失败重试：删除 Failed 工具结果子节点，重新执行工具（用原 args）
     Retry,
     /// 工具审批通过：删除 user_prompt 子节点，重新执行工具（带 approved=true）

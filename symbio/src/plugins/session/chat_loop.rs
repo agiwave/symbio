@@ -314,13 +314,13 @@ pub async fn run_chat_loop(
     // ── 会话恢复（resume）：在 turn 循环前处理 ──────────────────────────────
     //
     // 当 `req.resume` 存在时，本调用是用户的恢复操作：
-    // - `RetryTurn`：LLM 失败重试，删除 Failed Turn 及其所有子节点，重新走 LLM 请求
+    // - `RetrySubtree`：LLM 失败重试，删除 Failed Turn 及其所有子节点，重新走 LLM 请求
     // - `Retry`/`Approve`/`Reject`/`Supply`/`Answer`：工具调用恢复，删除旧子节点、
     //   重新执行工具、创建新结果子节点并持久化。CAPABILITY_VISITOR 已由 agent chat
     //   handler 设置，`execute_tool_async` 直接复用。
     //
     // 成功 → `Continue`：turn 循环从 session 加载含新工具结果的历史，续写 LLM
-    //   （RetryTurn 也走此路径，但因为是删除整个 Failed Turn 后重新请求，等价于普通 send）。
+    //   （RetrySubtree 也走此路径，但因为是删除整个 Failed Turn 后重新请求，等价于普通 send）。
     // 失败/reject/answer → `Done`：退出循环，留 Failed/Completed 等下次 resume。
     // 恢复产生的工具交换（运行器续写同一轮用）。只作用于
     // 恢复后的**第一轮**——`take()` 一次即空，后续工具轮照常走 `DispatchPort`。

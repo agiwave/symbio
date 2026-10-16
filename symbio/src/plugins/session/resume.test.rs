@@ -86,7 +86,7 @@ fn aborted_resume_panics_on_out_of_range_index() {
 //
 // | 写点 | 只改缓存、不进事实源的后果（切源后） |
 // |---|---|
-// | `process_retry_turn` 删 Failed Turn 子树 | 整棵子树**复活**（重建看到的是「它从没被删过」） |
+// | `process_retry_subtree` 删 Failed Turn 子树 | 整棵子树**复活**（重建看到的是「它从没被删过」） |
 // | `process_tool_resume_action` 删旧子节点 | 同一次调用出现**两条结果**（旧的不消失、新的又来了） |
 // | `process_tool_resume_action` 改父 ToolCall | 父节点退回**恢复前**的状态（重建看不到「它被定稿过」） |
 //
@@ -94,7 +94,7 @@ fn aborted_resume_panics_on_out_of_range_index() {
 // 删除复活）。本文件的判据只证「**事实进了事实源**」：缓存此刻仍是读侧真源，
 // 故读侧零行为变更；切源那一步的判据属另一个批次（b3 本体）。
 //
-// 反向自检：把 `process_retry_turn` 里那段 `v2_messages::removed` 去掉 ⇒ 用例红。
+// 反向自检：把 `process_retry_subtree` 里那段 `v2_messages::removed` 去掉 ⇒ 用例红。
 
 use std::sync::{Arc, Mutex};
 
@@ -234,19 +234,19 @@ fn ids_of(e: &Event) -> Vec<String> {
 /// 少了它，切到「从 WAL 重建」之后整棵子树复活——而重试的全部意义就是
 /// 「重来一遍，不留上次失败的痕迹」。
 #[tokio::test]
-async fn retry_turn_lands_a_removed_fact_for_the_whole_subtree() {
+async fn retry_subtree_lands_a_removed_fact_for_the_whole_subtree() {
     let (session, dir, _tmp) = setup_with_failed_turn().await;
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
     let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
     let req = ResumeRequest {
         target_id: "t-failed".into(),
-        action: ResumeAction::RetryTurn,
+        action: ResumeAction::RetrySubtree,
         args: None,
         reason: None,
         answer: None,
     };
 
-    super::process_retry_turn(&session, &sink, &req)
+    super::process_retry_subtree(&session, &sink, &req)
         .await
         .expect("重试失败轮应成功");
 
@@ -269,7 +269,7 @@ async fn retry_turn_lands_a_removed_fact_for_the_whole_subtree() {
     );
     assert!(ids.contains(&"n-1".to_string()), "子节点在列表里：{ids:?}");
     // 用户格**不在**删除列表里：重试重跑的是同一轮，用户那句话还在历史中
-    // （`process_retry_turn` 的注释与 chat_loop 的续写都依赖这一点）。
+    // （`process_retry_subtree` 的注释与 chat_loop 的续写都依赖这一点）。
     assert!(
         !ids.contains(&"u-1".to_string()),
         "用户发言不该被删：{ids:?}"
@@ -281,13 +281,13 @@ async fn retry_turn_lands_a_removed_fact_for_the_whole_subtree() {
 /// 「什么都没删」不该在事实源上留下痕迹——与 `truncate_messages` 空列表不落格、
 /// `v2_messages::removed` 自判空列表同一条判据。
 #[tokio::test]
-async fn retry_turn_on_a_missing_target_lands_nothing() {
+async fn retry_subtree_on_a_missing_target_lands_nothing() {
     let (session, dir, _tmp) = setup_with_failed_turn().await;
     let frames: Arc<CollectingFrames> = Arc::new(CollectingFrames(Mutex::new(Vec::new())));
     let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
     let req = ResumeRequest {
         target_id: "n-1".into(), // 存在，但不是 Turn 节点
-        action: ResumeAction::RetryTurn,
+        action: ResumeAction::RetrySubtree,
         args: None,
         reason: None,
         answer: None,
@@ -295,7 +295,7 @@ async fn retry_turn_on_a_missing_target_lands_nothing() {
 
     // `ResumeOutcome` 不带 `Debug`（它是**结果**不是诊断载体）⇒ 不用 `expect_err`，
     // 直接解 `Result`。
-    let err = match super::process_retry_turn(&session, &sink, &req).await {
+    let err = match super::process_retry_subtree(&session, &sink, &req).await {
         Ok(_) => panic!("目标不是 Turn ⇒ 应报 NotFound，实际却成功了"),
         Err(e) => e,
     };

@@ -48,10 +48,10 @@ export interface UseChatConnectionOptions {
  */
 export const RESUME_KEY: InjectionKey<(payload: ResumePayload) => void> = Symbol('chat-resume')
 
-/** 会话恢复载荷（retry_turn/retry_compaction/retry/approve/reject/supply/answer 统一接口） */
+/** 会话恢复载荷（retry_subtree/retry_compaction/retry/approve/reject/supply/answer 统一接口） */
 export interface ResumePayload {
   /** 目标消息 ID（恢复锚点）
-   *  - retry_turn：指向 Failed Turn（msg_type=Turn）
+   *  - retry_subtree：指向 Failed Turn（msg_type=Turn）
    *  - retry_compaction：指向 Failed 压缩节点（msg_type=Compression）
    *  - 其他 action：指向 ToolCall 父节点（msg_type=ToolCall） */
   targetId: string
@@ -488,7 +488,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
   function removeMessage(messageId: string) { markRemoved(messageId) }
 
   /**
-   * 会话恢复（retry_turn/retry_compaction/retry/approve/reject/supply/answer）。
+   * 会话恢复（retry_subtree/retry_compaction/retry/approve/reject/supply/answer）。
    *
    * 内部走**消息节点上的动作**：`action(<A>/message/<targetId>, <动作>)`——
    * 动作词就是 `ResumeAction` 的线上词形（snake_case），**不另造一套**：
@@ -498,7 +498,7 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
    * 而队列项的 id 是新的；入队会丢掉锚点。见 ADR-026。
    *
    * 后端语义（删除-重建模式）：
-   * - retry_turn：删除 Failed Turn 及其所有子孙节点 → 重新走 LLM 请求
+   * - retry_subtree：删除 Failed Turn 及其所有子孙节点 → 重新走 LLM 请求
    * - retry_compaction：删除 Failed 压缩节点 → 重新执行一次上下文压缩
    *   （**不动历史**：压缩失败从不丢消息，重试只是再试一次 LLM 摘要）
    * - retry/approve/reject/supply/answer：删除旧子节点 → 重新执行工具或生成结果 → 创建新子节点

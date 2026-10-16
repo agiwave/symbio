@@ -48,7 +48,7 @@ pub struct Request {
     /// 会话恢复操作（与 `message` 互斥）。
     /// 存在时走 resume 分支：删除旧消息 → 重新执行 → 续写 chat_loop。
     /// 支持场景：
-    /// - `RetryTurn`：LLM 失败重试（删除 Failed Turn 及子节点，重新走 LLM 请求）
+    /// - `RetrySubtree`：LLM 失败重试（删除靶子节点及其子节点，重新走 LLM 请求）
     /// - `Retry`/`Approve`/`Reject`/`Supply`/`Answer`：工具调用恢复
     ///   为 None 且 `message` 存在时走正常 send 分支。
     #[serde(default, skip_serializing_if = "Option::is_none")]

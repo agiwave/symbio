@@ -404,7 +404,7 @@ describe('resume — 会话恢复', () => {
 
   it('同会话恢复：乐观置 working 并清错误', async () => {
     const c = conn()
-    await c.resume({ targetId: 't1', action: 'retry_turn' })
+    await c.resume({ targetId: 't1', action: 'retry_subtree' })
     expect(hoisted.store.putStatus).toHaveBeenCalledWith(
       's1',
       expect.objectContaining({ status: VDFS_STATUS_WORKING }),

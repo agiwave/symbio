@@ -57,7 +57,7 @@ describe('MessageNode：根级 Turn 响应分组（三形态）', () => {
     expect(bodies.some((b) => b.text().includes('你好世界'))).toBe(true)
   })
 
-  it('形态③：Turn 失败 → 组级错误条 + 重试（发射 Turn id，供 retry_turn）', async () => {
+  it('形态③：Turn 失败 → 组级错误条 + 重试（发射 Turn id，供 retry_subtree）', async () => {
     const w = mountNode(
       msg({
         id: 't1',

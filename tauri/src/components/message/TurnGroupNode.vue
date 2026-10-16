@@ -5,12 +5,12 @@
     ① 等待骨架：Turn 已创建但无任何子节点且运行中 → 三点脉动 +「{智能体} 正在思考…」；
     ② 子节点直排：思考/正文/工具出现后容器完全隐藏（无头部、无外框），子节点直接纵排；
     ③ 组级交代条：Turn 失败或中止 → 交代条 +「重试」入口
-       （resume action=retry_turn：删除响应子树 → 重新走 LLM 请求）。
+       （resume action=retry_subtree：删除响应子树 → 重新走 LLM 请求）。
 
   子会话 Turn（role=tool）走同一形态（分形复用）：工具「过程」段以与主会话一致的
   「思考 / 正文 / 工具」缩进节点直排呈现；**组级操作（删除/重试）仅归属根级助手 Turn**——
   子会话 Turn 的节点是工具过程段的临时广播（不落父会话存储），
-  retry_turn / delete 缺少后端锚点，故不提供。
+  retry_subtree / delete 缺少后端锚点，故不提供。
 -->
 <template>
   <div class="msg turn-group" :class="[statusClass]">

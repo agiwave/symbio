@@ -70,7 +70,7 @@ fn normalize_message_content(msg: ChatNode) -> Option<ChatNode> {
 /// 丢弃"孤儿"消息：`parent_id` 指向本批次里不存在的节点。
 ///
 /// 孤儿来源：
-/// - Failed Turn 被 `resume::process_retry_turn` 删除时若子节点未一并清理；
+/// - Failed Turn 被 `resume::process_retry_subtree` 删除时若子节点未一并清理；
 /// - `persist_failure` 把仅存在于内存的流式子节点直接追加进存储；
 /// - `resume::process_tool_resume_action` 只删子节点、父节点已被其它路径清理。
 ///

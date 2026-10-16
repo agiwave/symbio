@@ -24,7 +24,7 @@ fn fully_populated() -> Request {
         load_history: Some(false),
         resume: Some(ResumeRequest {
             target_id: "t1".into(),
-            action: ResumeAction::RetryTurn,
+            action: ResumeAction::RetrySubtree,
             args: None,
             reason: None,
             answer: None,

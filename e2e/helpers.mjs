@@ -775,7 +775,7 @@ export async function abortSession(cli, sid, metadata = {}) {
  * （删除-重建），而入队会让它排到新消息之后、候选早已被改写。
  *
  * 动作词取 `ResumeAction` 的线上词形（snake_case）：`answer` / `approve` /
- * `reject` / `supply` / `retry` / `retry_turn` / `retry_compaction`。载荷
+ * `reject` / `supply` / `retry` / `retry_subtree` / `retry_compaction`。载荷
  * `args` / `reason` / `answer` 按动作词透传，`mode` / `risk_level` 是**调用级**
  * 运行选项（不同来源各带各的）。
  *

@@ -470,7 +470,7 @@ describe('messageRetryTargetOf：重试分派（粒度由节点类型决定）',
   it('Turn 失败 → 整轮重试，锚点是 Turn 自己', () => {
     expect(
       messageRetryTargetOf({ id: 't1', type: NODE_KIND_TURN, status: NODE_STATUS_FAILED }),
-    ).toEqual({ action: 'retry_turn', targetId: 't1' })
+    ).toEqual({ action: 'retry_subtree', targetId: 't1' })
   })
 
   it('Turn 下的叶子失败 → 回溯到父 Turn（后端要求 target_id 指向 Failed Turn）', () => {
@@ -481,7 +481,7 @@ describe('messageRetryTargetOf：重试分派（粒度由节点类型决定）',
         status: NODE_STATUS_FAILED,
         parent_id: 't1',
       }),
-    ).toEqual({ action: 'retry_turn', targetId: 't1' })
+    ).toEqual({ action: 'retry_subtree', targetId: 't1' })
     expect(
       messageRetryTargetOf({
         id: 'r1',
@@ -489,19 +489,19 @@ describe('messageRetryTargetOf：重试分派（粒度由节点类型决定）',
         status: NODE_STATUS_FAILED,
         parent_id: 't1',
       }),
-    ).toEqual({ action: 'retry_turn', targetId: 't1' })
+    ).toEqual({ action: 'retry_subtree', targetId: 't1' })
   })
 
   it('无父节点可回溯时退回自身（不发出空 targetId）', () => {
     expect(
       messageRetryTargetOf({ id: 'x1', type: NODE_KIND_TEXT, status: NODE_STATUS_FAILED }),
-    ).toEqual({ action: 'retry_turn', targetId: 'x1' })
+    ).toEqual({ action: 'retry_subtree', targetId: 'x1' })
   })
 
   it('中止的 Turn 同样走整轮重试（这一轮只跑了一半）', () => {
     expect(
       messageRetryTargetOf({ id: 't1', type: NODE_KIND_TURN, status: NODE_STATUS_ABORTED }),
-    ).toEqual({ action: 'retry_turn', targetId: 't1' })
+    ).toEqual({ action: 'retry_subtree', targetId: 't1' })
   })
 
   it('中止的工具调用不按「单工具」处理（与改造前的行为一致）', () => {
@@ -512,12 +512,12 @@ describe('messageRetryTargetOf：重试分派（粒度由节点类型决定）',
         status: NODE_STATUS_ABORTED,
         parent_id: 't1',
       }),
-    ).toEqual({ action: 'retry_turn', targetId: 't1' })
+    ).toEqual({ action: 'retry_subtree', targetId: 't1' })
   })
 
   it('缺省 type 按正文处理 → 整轮重试', () => {
     expect(messageRetryTargetOf({ id: 'x1', status: NODE_STATUS_FAILED, parent_id: 't1' })).toEqual(
-      { action: 'retry_turn', targetId: 't1' },
+      { action: 'retry_subtree', targetId: 't1' },
     )
   })
 
@@ -525,7 +525,7 @@ describe('messageRetryTargetOf：重试分派（粒度由节点类型决定）',
    * 压缩失败是**第三种粒度**：删的是压缩节点本身（系统动作），不是响应子树。
    *
    * 回归动机：压缩节点是根级节点（无 `parent_id`），若落到"回溯到父 Turn"的兜底
-   * 分支，`target_id` 会是它自己而类型是 `Compression` —— 后端 `process_retry_turn`
+   * 分支，`target_id` 会是它自己而类型是 `Compression` —— 后端 `process_retry_subtree`
    * 要求 Failed **Turn**，会直接 NotFound 拒绝。所以必须在工具分支之前单独分派。
    */
   it('压缩失败 → 压缩粒度（锚点是压缩节点自己，不回退到父 Turn）', () => {
@@ -555,7 +555,7 @@ describe('messageRetryTargetOf：重试分派（粒度由节点类型决定）',
     for (const status of [NODE_STATUS_COMPLETED, NODE_STATUS_STREAMING] as const) {
       expect(
         messageRetryTargetOf({ id: 'cp1', type: NODE_KIND_COMPRESSION, status }),
-      ).toEqual({ action: 'retry_turn', targetId: 'cp1' })
+      ).toEqual({ action: 'retry_subtree', targetId: 'cp1' })
     }
   })
 })

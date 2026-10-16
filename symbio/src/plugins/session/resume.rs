@@ -1,7 +1,7 @@
 //! 会话恢复（Resume）
 //!
 //! 由 `chat_loop::run_chat_loop` 在 turn 循环前调用，处理用户的恢复操作：
-//! - `RetryTurn`：LLM 失败重试（删除 Failed Turn 及其所有子孙节点，重新走 LLM 请求）
+//! - `RetrySubtree`：LLM 失败重试（删除 Failed Turn 及其所有子孙节点，重新走 LLM 请求）
 //! - `RetryCompaction`：压缩失败重试（删除 Failed 压缩节点，重新执行一次压缩）
 //! - `Retry` / `Approve` / `Reject` / `Supply` / `Answer`：工具调用恢复
 //!   （删除旧子节点 → 重新执行工具或生成结果 → 创建新子节点）
@@ -9,7 +9,7 @@
 //! ## 统一设计：删除-重建模式
 //!
 //! 所有非普通消息场景都遵循"删除旧消息 → 重新执行 → 生成新消息"的统一模式：
-//! - **RetryTurn**：删除 Failed Turn 及其所有子孙节点 → chat_loop 从 session 重新加载 → LLM 请求
+//! - **RetrySubtree**：删除 Failed Turn 及其所有子孙节点 → chat_loop 从 session 重新加载 → LLM 请求
 //! - **RetryCompaction**：删除 Failed 压缩节点 → 重新压缩 → 新压缩节点落库
 //! - **工具调用恢复**：删除旧子节点 → 重新执行工具 → 创建新结果子节点
 //!
@@ -63,7 +63,7 @@ pub enum ResumeOutcome {
 /// 处理会话恢复。
 ///
 /// 由 `run_chat_loop` 在 turn 循环前调用。根据 `req.action` 分发：
-/// - `RetryTurn`：LLM 失败重试，调用 `process_retry_turn`
+/// - `RetrySubtree`：LLM 失败重试，调用 `process_retry_subtree`
 /// - `RetryCompaction`：压缩失败重试，调用 `context::retry_compaction`
 /// - 其他：工具调用恢复，调用 `process_tool_resume_action`
 ///
@@ -79,7 +79,7 @@ pub async fn process_resume(
     req: ResumeRequest,
 ) -> Result<ResumeOutcome, PluginError> {
     match req.action {
-        ResumeAction::RetryTurn => process_retry_turn(session, sink, &req).await,
+        ResumeAction::RetrySubtree => process_retry_subtree(session, sink, &req).await,
         // 压缩失败重试：执行体在压缩流水线所在模块（那里才有 `SessionContext`
         // 与切分/内核的私有面）。完成后一律 `Done`——压缩不是对话轮次，没有
         // "续写"可言；与其它 resume 出口一样，失败节点（若有）留下等下次 resume。
@@ -99,7 +99,7 @@ pub async fn process_resume(
     }
 }
 
-/// 处理 LLM 失败重试（RetryTurn）。
+/// 处理 LLM 失败重试（RetrySubtree）。
 ///
 /// 流程：
 /// 1. 加载会话消息
@@ -112,7 +112,7 @@ pub async fn process_resume(
 ///
 /// 注意：本函数不重新执行 LLM，仅清理 Failed Turn。LLM 请求由 chat_loop 的 turn 循环
 /// 在加载 session 历史后自动发起（用户原消息仍在历史中）。
-async fn process_retry_turn(
+async fn process_retry_subtree(
     session: &Arc<PersistentChatSession>,
     sink: &ExecEventSink,
     req: &ResumeRequest,
@@ -169,7 +169,7 @@ async fn process_retry_turn(
 
     plugin_info!(
         "session",
-        "[Resume] RetryTurn: deleted {} messages (turn {} and descendants), continuing chat_loop",
+        "[Resume] RetrySubtree: deleted {} messages (subtree rooted at {} and descendants), continuing chat_loop",
         deleted_messages.len(),
         req.target_id
     );
@@ -272,7 +272,7 @@ async fn process_tool_resume_action(
     }
 
     let (final_result_text, final_success, new_tc_args) = match req.action {
-        ResumeAction::RetryTurn => unreachable!("RetryTurn 已在顶层分发，此处不可达"),
+        ResumeAction::RetrySubtree => unreachable!("RetrySubtree 已在顶层分发，此处不可达"),
         ResumeAction::RetryCompaction => {
             unreachable!("RetryCompaction 已在顶层分发，此处不可达")
         }

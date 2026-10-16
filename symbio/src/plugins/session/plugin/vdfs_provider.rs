@@ -436,7 +436,7 @@ impl SessionPlugin {
                             data: Some(data),
                         }))
                     }
-                    // ── 恢复（retry_turn / retry / approve / reject / supply /
+                    // ── 恢复（retry_subtree / retry / approve / reject / supply /
                     //    answer / retry_compaction）──
                     //
                     // 落点是**目标消息自身**（`<sid>/message/<mid>`）——与 `truncate`

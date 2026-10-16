@@ -108,7 +108,7 @@ address-less 的，而子智能体空间只有 address 可达。
 
 `<动作>` 的词表 = `ResumeAction` 的线上词形（`snake_case`，跨栈契约已由
 `resume_action_wire_words_are_snake_case` 钉住）：
-`retry_turn` / `retry_compaction` / `retry` / `approve` / `reject` / `supply` / `answer`。
+`retry_subtree` / `retry_compaction` / `retry` / `approve` / `reject` / `supply` / `answer`。
 **不另造一套动作名**：它们是同一批语义，多一套就多一处漂移。
 
 ---

@@ -41,7 +41,7 @@
     在 `registry/messageTypes.messageDefaultOpen`；
   - **失败重试两级分派**（由 ModelChatPanel 按 msg.type 路由）：
     tool_call 失败 → resume `retry`（原参数重执行工具）；
-    其余失败（Turn 及其叶子）→ resume `retry_turn`（删除响应子树 → 重新 LLM 请求）；
+    其余失败（Turn 及其叶子）→ resume `retry_subtree`（删除响应子树 → 重新 LLM 请求）；
   - **失败终态只信服务端**（persist_failure 广播 Failed Update），前端不做启发式标记；
   - 层级只靠「缩进 + 左侧引导竖线」表达，纵向间隔全由单一变量 `--msg-gap` 驱动。
 -->
