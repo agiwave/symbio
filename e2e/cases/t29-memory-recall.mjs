@@ -59,6 +59,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgRoleOf,
 } from '../helpers.mjs';
 import { join } from 'node:path';
 
@@ -365,7 +366,7 @@ export default defineCase(
         assertTranscriptInvariants(msgsB, 'T29(B)');
         // 取**有正文**的助手节点：Turn 根也是 `role = assistant`（组合节点，无正文），
         // `find` 按角色取会先撞上它。答案正文挂在 Turn 之下的 text 子节点上。
-        const bAnswer = msgsB.find((m) => m.role === 'assistant' && textOf(m).trim().length > 0);
+        const bAnswer = msgsB.find((m) => msgRoleOf(m) === 'assistant' && textOf(m).trim().length > 0);
         assert(bAnswer, 'B 会话应有一条带正文的助手回答');
         for (const original of [T_COFFEE, T_MEET, T_REPORT, T_WATER]) {
           assert(

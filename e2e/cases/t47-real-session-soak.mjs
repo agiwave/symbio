@@ -78,6 +78,7 @@ import {
   assertTranscriptInvariants,
   E2E_ROOT,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 import { extractObservations } from '../../scripts/prompt-shape-audit.mjs';
 
@@ -445,7 +446,7 @@ export default defineCase(
       const stored = await readSessionMessages(cli, SID);
       assert(
         !JSON.stringify(stored ?? '').includes(BIG_TAIL),
-        `压缩后 live 读面应换基（工具结果 ${(stored ?? []).filter((m) => m.role === 'tool').length} 条里还留着第 1 轮那条 = 换基没落到读面）`,
+        `压缩后 live 读面应换基（工具结果 ${(stored ?? []).filter((m) => msgRoleOf(m) === 'tool').length} 条里还留着第 1 轮那条 = 换基没落到读面）`,
       );
       // 而**事实**一侧一条没少：产物格数在证据 ② 已钉死，重开后的 `event_count` 在证据 ⑦
       // 钉死。裁掉的是「带着跑的那一份」，不是「记过的那一份」。

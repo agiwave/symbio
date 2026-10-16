@@ -54,6 +54,7 @@ import {
   assertTranscriptInvariants,
   E2E_ROOT,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 /** 本用例的会话 id（两轮共享） */
@@ -207,7 +208,7 @@ export default defineCase(
         const tc = msgs.find((m) => msgTypeOf(m) === 'tool_call');
         assert(tc, `转写里应有 tool_call 节点（实得类型: ${msgs.map((m) => m.type).join(',')}）`);
         assert(
-          msgs.some((m) => m.role === 'tool' && m.parent_id === tc.id),
+          msgs.some((m) => msgRoleOf(m) === 'tool' && m.parent_id === tc.id),
           '工具结果必须挂在 tool_call 节点之下（有请求必有响应）',
         );
       } finally {

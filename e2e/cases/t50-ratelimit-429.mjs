@@ -19,6 +19,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 export default defineCase('T50 限流：429 配额超额被限后冷却自动恢复，两轮均完整收敛', async () => {
@@ -82,7 +83,7 @@ export default defineCase('T50 限流：429 配额超额被限后冷却自动恢
           .then((m) => {
             const t = (m ?? []).map((x) => (typeof x.content === 'string' ? x.content : '')).join('\n');
             const answered = (m ?? []).filter(
-              (x) => x.role === 'assistant' && (typeof x.content === 'string' ? x.content : '').includes('正常回答内容'),
+              (x) => msgRoleOf(x) === 'assistant' && (typeof x.content === 'string' ? x.content : '').includes('正常回答内容'),
             ).length;
             // 等「两问 + 两答」都落历史：turn 2 的 429 重试有冷却延迟（可到数秒），
             // 只等用户发言会在它仍在途时提前放行（夹具陷阱 4 的镜像面）。
@@ -99,7 +100,7 @@ export default defineCase('T50 限流：429 配额超额被限后冷却自动恢
       assert(texts.includes(q), `第 ${q} 的用户发言应在转写里`);
     }
     const assistantCount = (msgs ?? [])
-      .filter((m) => m.role === 'assistant' && (typeof m.content === 'string' ? m.content : '').includes('正常回答内容'))
+      .filter((m) => msgRoleOf(m) === 'assistant' && (typeof m.content === 'string' ? m.content : '').includes('正常回答内容'))
       .length;
     assert(
       assistantCount >= 2,

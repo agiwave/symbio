@@ -22,6 +22,8 @@
  *   - S-012:        代码注释不得写只有实施排期含义的话（待办标记 / 无出处的批次号）
  *   - S-013:        `WalkBuilder` 构造点必须钉遍历序（默认序是文件系统返回序 ⇒
  *                   分页窗口与截断点随平台变；NTFS 名字序 / ext4 哈希序）
+ *   - S-014:        ChatNode 存量 `role` 格的直写只许降（棘轮；身份写 `principal`，
+ *                   读走 `node_role()` / `legacy_role()`，字段已退出 wire）
  *
  * 用法：
  *   node scripts/grep-audit.mjs            # 审计 symbio/src/plugins（全部插件）
@@ -39,7 +41,7 @@
 
 // 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns S 源码 grep 形态
-// @codes S-001 S-002 S-003 S-006 S-007 S-008 S-009 S-010 S-011 S-012 S-013
+// @codes S-001 S-002 S-003 S-006 S-007 S-008 S-009 S-010 S-011 S-012 S-013 S-014
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -631,6 +633,73 @@ const WAIVER_S013_RE = /\/\/\s*grep-audit-allow S-013:[^\n]*[A-Za-z0-9\u4e00-\u9
         ? 'S-013 通过：scope 内没有 WalkBuilder 构造点'
         : `S-013 通过：${s013Sites} 处 WalkBuilder 构造点都钉了遍历序（或已写豁免理由）`,
     )
+}
+console.log()
+
+// ── S-014: ChatNode `role`（存量格）的直写只许降 ───────────────────────
+//
+// [T-147d-iii]：`role` 已退出 wire（`skip_serializing_if`），身份的权威是
+// `principal.kind`——读侧一律经 `node_role()` / `legacy_role()` 折叠（与前端
+// `messageRoleOf` 同一判据），写侧的每一处直写都是待清零的存量债务。
+//
+// 为什么不是字段私有：`ChatNode { .., ..Default::default() }` 的**函数式更新语法
+// 要求每个字段可见**（E0451）——私有化会把全仓数百个不碰 `role` 的构造点一起炸掉。
+// 机制的爆炸半径大于收益，所以约束从「编译期」退到「棘轮」：存量总数钉在基线上，
+// **只许降不许升**；降了要同步下调基线（`35-baseline` 守这个数不被放松）。
+//
+// 命中形状（连过渡入口一起计数——`with_role` 的可搜寻性靠基线兜底，否则新写方
+// 绕开直写去调入口，债务会换个名字继续长）：
+//   · `role: Some(NodeRole::…)` / `role: Some(cm::NodeRole::…)`（字段初始化）
+//   · `.role = Some(…)` / `.role.get_or_insert(…)`（直写）
+//   · `with_role(…)` / `set_legacy_role(…)`（命名过渡入口）
+// 范围：`.rs` 源码根（同 S-012），测试文件同样参与；**不含** `chat_node.rs`
+// （字段定义、折叠与入口的本体在那里）。注释行不判（doc 示例会复述被禁形状）。
+// 豁免：`// grep-audit-allow S-014: 理由`（本行或紧邻上一行，理由不可为空，同 S-010）。
+console.log('--- S-014: ChatNode 存量 role 格直写棘轮 ---')
+
+const S014_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/004-plan/verify']
+const S014_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
+const S014_WRITE_RE =
+  /role:\s*Some\((?:cm::)?NodeRole::|\.role\s*=\s*Some\(|\.role\.get_or_insert\(|\bwith_role\(|\bset_legacy_role\(/
+const WAIVER_S014_RE = /\/\/\s*grep-audit-allow S-014:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
+// 基线三元形状与 `dead-code-audit` 的 R-002 同构——`35-baseline` 的提取函数按这个形状读格。
+const LEGACY_ROLE_WRITE_BASELINE = process.env.LEGACY_ROLE_WRITE_BASELINE
+  ? Number(process.env.LEGACY_ROLE_WRITE_BASELINE)
+  : 166
+{
+  let s014 = 0
+  const s014List = []
+  for (const file of S014_ROOTS.flatMap((r) => walk(path.join(S014_BASE, r)))) {
+    if (path.basename(file) === 'chat_node.rs') continue
+    let lines
+    try {
+      lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
+    } catch {
+      continue
+    }
+    lines.forEach((l, i) => {
+      if (/^\s*(?:\/\/|\/\*|\*)/.test(l)) return
+      if (!S014_WRITE_RE.test(l)) return
+      if (WAIVER_S014_RE.test(l) || (i > 0 && WAIVER_S014_RE.test(lines[i - 1]))) return
+      s014++
+      if (s014List.length < 8) s014List.push(`${disp(file)}:${i + 1}`)
+    })
+  }
+  if (s014 > LEGACY_ROLE_WRITE_BASELINE) {
+    err(
+      `S-014 违例：存量 role 格直写 ${s014} 处 > 基线 ${LEGACY_ROLE_WRITE_BASELINE}——` +
+        `身份写 ` +
+        '`principal`，不写 role（读走 node_role()/legacy_role()）。首批命中：' +
+        s014List.join('、'),
+    )
+  } else if (s014 < LEGACY_ROLE_WRITE_BASELINE) {
+    err(
+      `S-014 基线该收紧：存量 role 格直写 ${s014} 处 < 基线 ${LEGACY_ROLE_WRITE_BASELINE}——` +
+        `把 LEGACY_ROLE_WRITE_BASELINE 下调到 ${s014}（棘轮只许留痕地下调）`,
+    )
+  } else {
+    ok(`S-014 通过：role 格直写存量 ${s014} 处，与基线持平（只许降）`)
+  }
 }
 console.log()
 

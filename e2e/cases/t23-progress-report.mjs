@@ -66,6 +66,7 @@ import {
   PROVIDER_ID,
   assertTranscriptInvariants,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 /** 三条线各自的会话 id（各自从零开始，断言互不污染） */
@@ -215,7 +216,7 @@ export default defineCase(
       const aReports = await reportsOf(a.cli, SIDS.report);
       assertEq(aReports.length, 2, `A 线两个轮边界应各汇报一次（实得 ${aReports.length} 条）`);
       for (const r of aReports) {
-        assertEq(r.role, 'assistant', '汇报是助手说的话');
+        assertEq(msgRoleOf(r), 'assistant', '汇报是助手说的话');
         assertEq(msgTypeOf(r), 'text', '汇报是文本节点');
         assert(r.parent_id == null, '汇报必须挂根级——挂在 Turn 之下会让前端「对话」面板看不到它');
         assertEq(

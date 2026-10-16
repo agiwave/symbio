@@ -82,7 +82,7 @@ impl From<NativeMessage> for ChatNode {
 
 impl From<ChatNode> for NativeMessage {
     fn from(msg: ChatNode) -> Self {
-        let role = msg.role.clone().unwrap_or(NodeRole::User);
+        let role = msg.node_role().unwrap_or(NodeRole::User);
         // For tool result (Tool) messages, parent_id is the tool_call_id
         let tool_call_id = if role == NodeRole::Tool {
             msg.parent_id.clone()

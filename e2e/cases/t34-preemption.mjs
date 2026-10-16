@@ -51,6 +51,7 @@ import {
   nextPort,
   providerConfig,
   PROVIDER_ID,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 /** 本用例的会话 id */
@@ -167,13 +168,13 @@ export default defineCase(
       // ── 证据 ②：插话轮**完整收束**，历史里三格发言齐 ────────────────────
       await waitFor(async () => {
         const msgs = await readSessionMessages(cli, SID);
-        const finals = (msgs ?? []).filter((m) => m.role === 'assistant').map((m) => textOf(m));
+        const finals = (msgs ?? []).filter((m) => msgRoleOf(m) === 'assistant').map((m) => textOf(m));
         return finals.some((t) => t.includes('插话已处理'));
       }, { what: '插话轮收束发言落进历史', timeoutMs: 30_000 });
 
       const msgs = await readSessionMessages(cli, SID);
       assert(msgs, '历史应读得到（生产读出口）');
-      const userTexts = msgs.filter((m) => m.role === 'user').map((m) => textOf(m));
+      const userTexts = msgs.filter((m) => msgRoleOf(m) === 'user').map((m) => textOf(m));
       assertEq(
         userTexts.length,
         3,

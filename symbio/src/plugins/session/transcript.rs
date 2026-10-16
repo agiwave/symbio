@@ -230,8 +230,11 @@ impl Transcript {
         if msg.parent_id.is_some() {
             node.parent_id = msg.parent_id.clone();
         }
-        if msg.role.is_some() {
-            node.role = msg.role.clone();
+        if let Some(r) = msg.legacy_role() {
+            node.set_legacy_role(r);
+        }
+        if msg.principal.is_some() {
+            node.principal = msg.principal.clone();
         }
         if msg.msg_type.is_some() {
             node.msg_type = msg.msg_type.clone();

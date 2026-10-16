@@ -256,11 +256,11 @@ impl crate::symbio_core::Capability for AgentRunCapability {
         // session_id，LLM 携带上次结果的子会话 id 继续对话）/ 新建（都省略）。
         let user_message = || ChatNode {
             id: uuid::Uuid::new_v4().as_simple().to_string(),
-            role: Some(NodeRole::User),
             msg_type: Some(NodeKind::Body),
             content: Some(MessageContent::Text(req.prompt.clone())),
             ..Default::default()
-        };
+        }
+        .with_role(NodeRole::User);
         let (child_session_id, resume_req, first_message): (
             String,
             Option<ResumeRequest>,
@@ -899,7 +899,7 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                 if message.parent_id.is_none() {
                     message.parent_id = Some(tool_call_id.clone());
                     if message.node_role() == Some(NodeRole::Assistant) {
-                        message.role = Some(NodeRole::Tool);
+                        message.set_legacy_role(NodeRole::Tool);
                         // [T-147d-iii] 改写到哪一格就跟到哪一格：这张卡现在是
                         // **agent_run 工具的响应**，族归工具自己——带着子会话
                         // agent 主体的转播节点会被 `visible_to` 当作第三方私有。

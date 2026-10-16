@@ -43,6 +43,7 @@ import {
   assertTranscriptInvariants,
   assertSeqAnchorIsNodeAttribute,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 const TERMINAL = new Set(['completed', 'failed', 'aborted', 'waiting_user_action']);
@@ -108,7 +109,7 @@ export default defineCase('T9 gateway WS 实时面：vdfs 变更帧序与增量�
       rt.messages().some(
         (m) =>
           msgTypeOf(m.data) === 'text' &&
-          m.data?.role === 'assistant' &&
+          msgRoleOf(m.data) === 'assistant' &&
           TERMINAL.has(m.data?.status) &&
           !isInterfaceText(m.data),
       );
@@ -153,7 +154,7 @@ export default defineCase('T9 gateway WS 实时面：vdfs 变更帧序与增量�
     const firstText = msgs.find(
       (m) =>
         msgTypeOf(m.data) === 'text' &&
-        m.data?.role === 'assistant' &&
+        msgRoleOf(m.data) === 'assistant' &&
         !isInterfaceText(m.data),
     );
     assert(!!firstText, `应含正文节点的首帧（身份 + 首段正文）\n时间线:\n${timeline.join('\n')}`);

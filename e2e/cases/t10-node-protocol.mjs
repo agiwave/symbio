@@ -46,6 +46,7 @@ import {
   assertTranscriptInvariants,
   assertSeqAnchorIsNodeAttribute,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 /** 终态词（与后端 `is_terminal` 同口径） */
@@ -219,7 +220,7 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
     // 判据取 `meta.exclude_from_context`（与 `cli/src/render.rs` 的 `is_progress_surface`
     // 同一条），不按 `surface` 判——答话节点也带 `surface=reply`。
     const textNode = [...nodes.values()].find(
-      (m) => msgTypeOf(m) === 'text' && m.role === 'assistant' && m.meta?.exclude_from_context !== true,
+      (m) => msgTypeOf(m) === 'text' && msgRoleOf(m) === 'assistant' && m.meta?.exclude_from_context !== true,
     );
     assert(textNode, `实时面应有 assistant text 节点\n时间线:\n${timeline.join('\n')}`);
     const tb = rebuild(textNode.id);
@@ -284,7 +285,7 @@ export default defineCase('T10 节点协议全景：Turn/Reason/Text/ToolCall �
 
     // ⑪ 有请求必有响应：ToolCall 必须有 role=tool 的结果子节点，且它要在**实时面**上
     const resultNode = [...nodes.values()].find(
-      (m) => m.role === 'tool' && m.parent_id === tcNode.id,
+      (m) => msgRoleOf(m) === 'tool' && m.parent_id === tcNode.id,
     );
     assert(
       resultNode,

@@ -79,6 +79,7 @@ import {
   PROVIDER_ID,
   assertTranscriptInvariants,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 /** 本用例的会话 id（一条断言线一个：四条线各自从零开始，断言互不污染） */
@@ -224,7 +225,7 @@ export default defineCase(
       assertTranscriptInvariants(tplMsgs, 'T22-A');
       const tplReply = tplMsgs.filter((m) => m.meta?.surface === 'reply');
       assertEq(tplReply.length, 1, 'A 线应恰有一条对话面节点');
-      assertEq(tplReply[0].role, 'assistant', '对话面节点是助手说的话');
+      assertEq(msgRoleOf(tplReply[0]), 'assistant', '对话面节点是助手说的话');
       assertEq(msgTypeOf(tplReply[0]), 'text', '对话面节点是文本节点');
       assertEq(tplReply[0].content, TEMPLATE_THANKS, 'A 线应拿到致谢模板的原文');
       assert(
@@ -290,7 +291,7 @@ export default defineCase(
       await send(cli, SIDS.generate, '读一下 README', hd.workdir);
       await waitReplyNode(cli, SIDS.generate, 'needs_work');
       await waitFor(
-        async () => ((await readSessionMessages(cli, SIDS.generate)) ?? []).some((m) => m.role === 'tool'),
+        async () => ((await readSessionMessages(cli, SIDS.generate)) ?? []).some((m) => msgRoleOf(m) === 'tool'),
         { what: 'B 线第 2 步工具结果落库', timeoutMs: 40_000 },
       );
 
@@ -331,7 +332,7 @@ export default defineCase(
         return hit ? hit.arrival : -1;
       };
       const openingAt = arrivedAt((d) => d?.meta?.reason === 'needs_work');
-      const toolResultAt = arrivedAt((d) => d?.role === 'tool');
+      const toolResultAt = arrivedAt((d) => msgRoleOf(d) === 'tool');
       assert(
         openingAt >= 0,
         `首响必须出现在实时面上（只在转写里看得见 = 只落格不下发）：帧数 ${liveB2.length}`,

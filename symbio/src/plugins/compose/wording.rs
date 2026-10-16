@@ -70,7 +70,7 @@ pub(crate) async fn generate(
     // 先做**不花任何代价**的判据，再去找模型服务：没有"要回答的那句话"时，
     // 生成只会得到一句凭空的话——那时连能力访问器都不必碰。
     let messages = build_messages(&req.context);
-    if !messages.iter().any(|m| m.role == Some(NodeRole::User)) {
+    if !messages.iter().any(|m| m.node_role() == Some(NodeRole::User)) {
         crate::plugin_debug!("compose", "[Compose] 对话线里没有用户发言，生成路径跳过");
         return None;
     }

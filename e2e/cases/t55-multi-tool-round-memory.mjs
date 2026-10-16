@@ -56,6 +56,7 @@ import {
   assertTranscriptInvariants,
   waitFor,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 /** 会话 id 固定（与 t46 同一理由：它出现在 prompt 的记忆地址里） */
@@ -149,7 +150,7 @@ export default defineCase(
       assertEq(reqs.length, 3, 'mock-llm 应收到三次请求（工具轮 / 第二个工具轮 / 收束轮）');
 
       const third = (reqs[2].body.messages ?? []);
-      const toolResults = third.filter((m) => m.role === 'tool');
+      const toolResults = third.filter((m) => msgRoleOf(m) === 'tool');
       assertEq(toolResults.length, 2, `第三次请求应带两条 role=tool 的结果（实际 ${toolResults.length} 条：第 1 轮的被清空了）`);
       assertEq(
         toolResults.map((m) => m.content).sort(),
@@ -172,7 +173,7 @@ export default defineCase(
         );
       }
       // 第 1 轮的中途正文也在：清空交换连模型自己的计划一起清掉。
-      const assistantTexts = third.filter((m) => m.role === 'assistant').map((m) => m.content ?? '');
+      const assistantTexts = third.filter((m) => msgRoleOf(m) === 'assistant').map((m) => m.content ?? '');
       assert(
         assistantTexts.some((t) => t.includes(ROUND1_TEXT)),
         `第三次请求应保留第 1 轮的中途正文（实际 assistant 正文: ${JSON.stringify(assistantTexts).slice(0, 400)}）`,
@@ -196,7 +197,7 @@ export default defineCase(
         const msgs = await readSessionMessages(api, SID);
         assertTranscriptInvariants(msgs, 'T55');
         const answer = msgs.find(
-          (m) => m.role === 'assistant' && msgTypeOf(m) === 'text' && (m.content ?? '') === REASONING_ANSWER,
+          (m) => msgRoleOf(m) === 'assistant' && msgTypeOf(m) === 'text' && (m.content ?? '') === REASONING_ANSWER,
         );
         assert(
           answer,

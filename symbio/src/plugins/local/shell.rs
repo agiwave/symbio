@@ -35,7 +35,7 @@ use super::policy::SecurityPolicy;
 use super::system::{decode_output, validate_params};
 use crate::symbio_core::CapabilityRiskLevel;
 use crate::symbio_core::{
-    chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus},
+    chat_node::{ChatNode, MessageContent, NodeKind, NodeStatus},
     Capability, CapabilityMeta, ExecAbortSignal, ExecEnv, ExecEventSink, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt,
 };
@@ -435,9 +435,9 @@ where
                             sink.emit(ChatNode {
                                 id: target.msg_id.clone(),
                                 parent_id: Some(target.tool_call_id.clone()),
-                                role: Some(NodeRole::Tool),
                                 // [T-147d-iii] 帧要自给自足：这张卡是**本工具的结果流**，
                                 // 族归工具自己（名字就是本插件注册的能力名，见 `meta()`）。
+                                // `role` 格不再手写：`principal.kind` 折叠出同一读法。
                                 principal: Some(
                                     crate::symbio_core::principal::Principal::tool_principal(
                                         get_os_info().2,
@@ -459,7 +459,6 @@ where
                         sink.emit(ChatNode {
                             id: target.msg_id.clone(),
                             parent_id: Some(target.tool_call_id.clone()),
-                            role: Some(NodeRole::Tool),
                             // 与上面 `content` 帧同一身份（[T-147d-iii]）
                             principal: Some(
                                 crate::symbio_core::principal::Principal::tool_principal(

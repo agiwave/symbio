@@ -47,6 +47,7 @@ import {
   PROVIDER_ID,
   assertTranscriptInvariants,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 /** 随机标记词：只存在于工作区文件里，模型侧无从得知 ⇒ 「出现」即「真读了盘」。 */
@@ -264,7 +265,7 @@ export default defineCase(
  */
 function toolResultText(req) {
   const msgs = req?.body?.messages ?? [];
-  const tool = [...msgs].reverse().find((m) => m.role === 'tool');
+  const tool = [...msgs].reverse().find((m) => msgRoleOf(m) === 'tool');
   if (tool) return typeof tool.content === 'string' ? tool.content : JSON.stringify(tool.content);
   // 拿不到就返回空串，让上面的断言以「不含标记」的形式红出来——**不得静默兜底**成
   // 「从 user 轮里捞」，那会把「结果没回灌」这个真问题掩盖掉。

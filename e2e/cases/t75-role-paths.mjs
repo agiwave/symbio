@@ -45,6 +45,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgRoleOf,
 } from '../helpers.mjs';
 import { join } from 'node:path';
 
@@ -79,7 +80,7 @@ function walLines(path) {
 /** 请求体里最后一条 user 消息的正文（mock 匹配同口径）。 */
 function lastUserText(r) {
   const msgs = r.body?.messages ?? [];
-  const last = [...msgs].reverse().find((m) => m.role === 'user');
+  const last = [...msgs].reverse().find((m) => msgRoleOf(m) === 'user');
   if (typeof last?.content === 'string') return last.content;
   if (Array.isArray(last?.content)) return last.content.map((p) => p.text ?? '').join('');
   return '';
@@ -304,7 +305,7 @@ export default defineCase(
 
         const msgs = await readSessionMessages(api, SID);
         assertTranscriptInvariants(msgs, 'T75 主会话');
-        const toolNodes = msgs.filter((m) => m.role === 'tool');
+        const toolNodes = msgs.filter((m) => msgRoleOf(m) === 'tool');
         assert(
           toolNodes.length >= 2,
           `主会话至少两个工具结果节点（todo_write + agent_run；实际 ${toolNodes.length}）`,

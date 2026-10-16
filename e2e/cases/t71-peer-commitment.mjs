@@ -47,6 +47,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgRoleOf,
 } from '../helpers.mjs';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
@@ -78,7 +79,7 @@ function walLines(path) {
 /** 请求体里最后一条 user 消息（与 mock-llm 的匹配口径同形）。 */
 function lastUserText(r) {
   const msgs = r.body?.messages ?? [];
-  const last = [...msgs].reverse().find((m) => m.role === 'user');
+  const last = [...msgs].reverse().find((m) => msgRoleOf(m) === 'user');
   if (typeof last?.content === 'string') return last.content;
   if (Array.isArray(last?.content)) return last.content.map((p) => p.text ?? '').join('');
   return '';
@@ -325,15 +326,15 @@ export default defineCase(
         const peerMsgs = await readSessionMessages(api, PEER_SID);
         assertTranscriptInvariants(peerMsgs, 'T71 对等会话');
         assert(
-          peerMsgs.some((m) => m.role === 'user'),
+          peerMsgs.some((m) => msgRoleOf(m) === 'user'),
           '对等会话的转写应有那条收件箱消息',
         );
         assert(
-          peerMsgs.some((m) => m.role === 'tool'),
+          peerMsgs.some((m) => msgRoleOf(m) === 'tool'),
           '对等会话的转写应有工具结果（产物格的投影）',
         );
         assert(
-          !peerMsgs.some((m) => m.role === 'assistant' && JSON.stringify(m).includes(PEER_SUMMARY)),
+          !peerMsgs.some((m) => msgRoleOf(m) === 'assistant' && JSON.stringify(m).includes(PEER_SUMMARY)),
           '发言闸拒 ⇒ 汇总正文不入格、不出现在转写里（fail-closed 的呈现面）',
         );
       } finally {

@@ -57,6 +57,7 @@ import {
   PROVIDER_ID,
   assertTranscriptInvariants,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 /** 本用例的会话 id（一条断言线一个：五条线各自从零开始，断言互不污染） */
@@ -215,7 +216,7 @@ export default defineCase(
       // 判据取"恰一条助手节点，且它是根级的对话面节点"：泄漏的形态是 Turn 骨架
       // （已由上面那条断言拦住）或 Turn 的子文本节点，两者都不是根级、也都不带
       // `meta.surface = "reply"`。
-      const assistants = clsMsgs.filter((m) => m.role === 'assistant');
+      const assistants = clsMsgs.filter((m) => msgRoleOf(m) === 'assistant');
       assertEq(
         assistants.length,
         1,
@@ -235,7 +236,7 @@ export default defineCase(
         what: 'C 线出现工具调用节点',
         timeoutMs: 40_000,
       });
-      await waitFor(async () => ((await readSessionMessages(cli, SIDS.work)) ?? []).some((m) => m.role === 'tool'), {
+      await waitFor(async () => ((await readSessionMessages(cli, SIDS.work)) ?? []).some((m) => msgRoleOf(m) === 'tool'), {
         what: 'C 线工具结果落库',
         timeoutMs: 40_000,
       });
@@ -246,7 +247,7 @@ export default defineCase(
         'C 线应有分类请求 + 工具循环请求（至少两次）',
       );
       assert(
-        workMsgs.some((m) => m.role === 'assistant' && msgTypeOf(m) === 'text' && (m.content ?? '').includes('README')),
+        workMsgs.some((m) => msgRoleOf(m) === 'assistant' && msgTypeOf(m) === 'text' && (m.content ?? '').includes('README')),
         'C 线应有模型给出的正文（判决放行后工具循环照旧跑完）',
       );
       // 分类请求是**内部请求**，必须静默。但 C 线不能照抄 B 线那条"零助手节点"的

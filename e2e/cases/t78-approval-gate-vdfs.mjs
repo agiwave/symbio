@@ -61,6 +61,7 @@ import {
   PROVIDER_ID,
   assertTranscriptInvariants,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 const SID_INTERACTIVE = 'e2e-t78-interactive';
@@ -220,7 +221,7 @@ export default defineCase(
       const msgs1 = await readSessionMessages(api, SID_INTERACTIVE);
       const tc1 = msgs1.find((m) => msgTypeOf(m) === 'tool_call');
       assert(
-        msgs1.some((m) => m.role === 'tool' && m.parent_id === tc1.id),
+        msgs1.some((m) => msgRoleOf(m) === 'tool' && m.parent_id === tc1.id),
         '恢复后 tool_call 须有结果子节点',
       );
       assertTranscriptInvariants(msgs1, 'T78-A 恢复后');
@@ -262,7 +263,7 @@ export default defineCase(
       const msgsB = await readSessionMessages(api, SID_AUTO);
       assertTranscriptInvariants(msgsB, 'T78-B');
       // auto 幕的 tool 结果子节点 meta 里 failure_kind 应为 permission_denied。
-      const toolResult = msgsB.find((m) => m.role === 'tool');
+      const toolResult = msgsB.find((m) => msgRoleOf(m) === 'tool');
       assert(
         toolResult,
         `auto 幕应有 tool 结果节点（实得: ${msgsB.map((m) => m.type ?? m.role).join(',')}）`,

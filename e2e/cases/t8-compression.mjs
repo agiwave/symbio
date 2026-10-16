@@ -36,6 +36,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 const REPLY = `填充：${'上下文填充内容用于推高历史水位。'.repeat(600)}`;
@@ -119,7 +120,7 @@ export default defineCase('T8 上下文压缩：水位触发自动压缩，快�
     const snap = msgs.find((m) => m.meta?.compacted === true);
     assert(snap, `应有 meta.compacted=true 的快照消息（现有 ${msgs.length} 条）`);
     assertEq(snap.meta.protocol_version, 'v2', '快照 meta.protocol_version');
-    assertEq(snap.role, 'user', '快照必须是 user 角色（多数 provider 要求对话以 user 开头）');
+    assertEq(msgRoleOf(snap), 'user', '快照必须是 user 角色（多数 provider 要求对话以 user 开头）');
     assert(
       String(snap.content ?? '').includes('CONTEXT SNAPSHOT'),
       '快照内容应是「[CONTEXT SNAPSHOT …」前缀的历史记忆替身',
@@ -127,7 +128,7 @@ export default defineCase('T8 上下文压缩：水位触发自动压缩，快�
 
     // ③ 历史归并：被压掉的消息消失（第一轮 user 消息不在存储里）
     const firstUserGone = !msgs.some(
-      (m) => m.role === 'user' && String(m.content ?? '').includes('第一轮问题'),
+      (m) => msgRoleOf(m) === 'user' && String(m.content ?? '').includes('第一轮问题'),
     );
     assert(firstUserGone, '第一轮用户消息应已被压缩出存储');
 

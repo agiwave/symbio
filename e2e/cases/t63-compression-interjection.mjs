@@ -42,6 +42,7 @@ import {
   assertTranscriptInvariants,
   textOf,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 import { assertCompressionRequestShape } from '../llm-contract.mjs';
 
@@ -194,14 +195,14 @@ export default defineCase(
       // ── ⑥ 判据：转写顺序——插话 user 消息在前、其回答在后，各一次 ────────
       const msgs = await readSessionMessages(cli, SID);
       assertTranscriptInvariants(msgs, 'T63');
-      const interjectMsgs = msgs.filter((m) => m.role === 'user' && textOf(m).includes(INTERJECT));
+      const interjectMsgs = msgs.filter((m) => msgRoleOf(m) === 'user' && textOf(m).includes(INTERJECT));
       assertEq(interjectMsgs.length, 1, `插话在转写里应恰有一条 user 消息（实际 ${interjectMsgs.length}）`);
       const at = msgs.indexOf(interjectMsgs[0]);
       assert(at > 0, '插话不应是会话第一条消息（前面有填充轮）');
       // 插话之后必须有一条助手回答（插话轮照常收束，与 t34 同形）
       const after = msgs.slice(at + 1);
       assert(
-        after.some((m) => m.role === 'assistant' && textOf(m).trim().length > 0),
+        after.some((m) => msgRoleOf(m) === 'assistant' && textOf(m).trim().length > 0),
         '插话轮应照常收束（插话之后有带正文的助手回答）',
       );
     } finally {

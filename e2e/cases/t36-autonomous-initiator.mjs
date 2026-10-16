@@ -66,6 +66,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   readSessionMessages,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 /** 两个会话：同一份代码、同一条链路，只有心跳提示词长度不同 ⇒ 闸门判决不同。 */
@@ -204,7 +205,7 @@ export default defineCase(
     const userTexts = async (sid) => {
       const msgs = (await readSessionMessages(cli, sid)) ?? [];
       return msgs
-        .filter((m) => m.role === 'user')
+        .filter((m) => msgRoleOf(m) === 'user')
         .map((m) => (typeof m.content === 'string' ? m.content : ''));
     };
 

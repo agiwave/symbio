@@ -265,8 +265,8 @@ impl SessionPlugin {
             return Err(PluginError::NotFound(format!("消息不存在: {mid}")));
         };
 
-        if let Some(role) = &patch.role {
-            existing.role = Some(role.clone());
+        if let Some(role) = patch.legacy_role() {
+            existing.set_legacy_role(role);
         }
         if let Some(t) = &patch.msg_type {
             existing.msg_type = Some(t.clone());

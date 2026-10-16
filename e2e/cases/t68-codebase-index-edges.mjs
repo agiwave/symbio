@@ -50,6 +50,7 @@ import {
   PROVIDER_ID,
   assertTranscriptInvariants,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 /** 随机标记词：只存在于工作区文件里，模型侧无从得知 ⇒ 「出现」即「真读了盘」。 */
@@ -86,7 +87,7 @@ function parseJsonBlock(text) {
 /** 取「本轮工具结果回灌」的那条 `role=tool` 消息正文（取**最后一条**，见 t64）。 */
 function toolResultText(req) {
   const msgs = req?.body?.messages ?? [];
-  const tool = [...msgs].reverse().find((m) => m.role === 'tool');
+  const tool = [...msgs].reverse().find((m) => msgRoleOf(m) === 'tool');
   if (tool) return typeof tool.content === 'string' ? tool.content : JSON.stringify(tool.content);
   return '';
 }

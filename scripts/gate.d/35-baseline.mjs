@@ -75,6 +75,16 @@ function deadCodeCells(text) {
   return cells
 }
 
+/** `scripts/grep-audit.mjs` 的 `LEGACY_ROLE_WRITE_BASELINE`（S-014）：与 R-002 同构的
+ *  三元形状，一格——ChatNode 存量 `role` 格直写的总数上限（只许降）。 */
+function legacyRoleCells(text) {
+  const cells = new Map()
+  const norm = text.replace(/\r\n/g, '\n')
+  const m = /\?\s*Number\(process\.env\.LEGACY_ROLE_WRITE_BASELINE\)\s*\n\s*:\s*(\d+)/.exec(norm)
+  if (m) cells.set('S-014', Number(m[1]))
+  return cells
+}
+
 /** `tauri/vitest.config.ts` 的 `coverage.thresholds`：一个嵌套块，四条全局 + 一条分目录。
  *  **只扫 `thresholds: {` 块**——同一文件里别处也有 `lines:` 这类键。 */
 function coverageCells(text) {
@@ -154,6 +164,18 @@ const RATCHETS = [
     waivers: waiverReader('dead-code-allow'),
     envVar: 'DEAD_CODE_R002_BASELINE',
     label: 'R-002 `#[allow(dead_code)]` 存量（只许降）',
+  },
+  {
+    // [T-147d-iii]：`role` 退出 wire 后每一处直写都是待清零的债务。字段私有化
+    // 会炸掉全部 `..Default::default()` 构造点（函数式更新要求字段可见），
+    // 所以钉数字而不是钉编译。
+    id: 'legacy-role',
+    file: 'scripts/grep-audit.mjs',
+    dir: 'ceiling',
+    cellsOf: legacyRoleCells,
+    waivers: waiverReader('legacy-role-allow'),
+    envVar: 'LEGACY_ROLE_WRITE_BASELINE',
+    label: 'S-014 ChatNode 存量 role 格直写（只许降）',
   },
   {
     id: 'coverage',

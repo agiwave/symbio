@@ -72,6 +72,7 @@ import {
   assertTranscriptInvariants,
   resumeSession,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 /** 本用例的会话 id */
@@ -201,7 +202,7 @@ export default defineCase(
         // （重开用户格 ⇒ 用户会看到自己的问题被复制了一遍）
         const msgs1 = await readSessionMessages(api, SID);
         const askCount = msgs1.filter(
-          (m) => m.role === 'user' && String(m.content ?? '').includes('帮我确认一下'),
+          (m) => msgRoleOf(m) === 'user' && String(m.content ?? '').includes('帮我确认一下'),
         ).length;
         assertEq(
           askCount,
@@ -210,7 +211,7 @@ export default defineCase(
         );
         assert(
           msgs1.some(
-            (m) => m.role === 'assistant' && String(m.content ?? '').includes('已收到你的选择。'),
+            (m) => msgRoleOf(m) === 'assistant' && String(m.content ?? '').includes('已收到你的选择。'),
           ),
           '恢复轮的收束正文应出现在历史里（续写轮真的收束了）',
         );
@@ -252,7 +253,7 @@ export default defineCase(
         assertTranscriptInvariants(msgs1, 'T27 恢复后');
         const tc1 = msgs1.find((m) => msgTypeOf(m) === 'tool_call');
         assert(
-          msgs1.some((m) => m.role === 'tool' && m.parent_id === tc1.id),
+          msgs1.some((m) => msgRoleOf(m) === 'tool' && m.parent_id === tc1.id),
           '恢复后 tool_call 仍须有结果子节点',
         );
       } finally {

@@ -79,6 +79,7 @@ import {
   sendInbox,
   resumeSession,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 const TERMINAL = new Set(['completed', 'failed', 'aborted', 'waiting_user_action']);
@@ -239,7 +240,7 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
     // 之前的 failed 节点原样留在原地（等待用户重试，而不是被静默清理）。
     const afterSkipMsgs = await readSessionMessages(cli, 'e2e-t18');
     assert(
-      afterSkipMsgs.some((m) => m.role === 'user' && String(m.content ?? '').includes(`第${rounds}轮问题`)),
+      afterSkipMsgs.some((m) => msgRoleOf(m) === 'user' && String(m.content ?? '').includes(`第${rounds}轮问题`)),
       '熔断轮的历史必须原样保留（失败/跳过都不改历史）',
     );
     assert(
@@ -347,9 +348,9 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
     );
     const storedSnap = msgs.find((m) => m.meta?.compacted === true);
     assert(storedSnap, '存储里应有压缩快照');
-    assertEq(storedSnap.role, 'user', '快照必须是 user 角色');
+    assertEq(msgRoleOf(storedSnap), 'user', '快照必须是 user 角色');
     assert(
-      !msgs.some((m) => m.role === 'user' && String(m.content ?? '').includes('第1轮问题')),
+      !msgs.some((m) => msgRoleOf(m) === 'user' && String(m.content ?? '').includes('第1轮问题')),
       '第一轮用户消息应已被重试压缩出存储',
     );
 

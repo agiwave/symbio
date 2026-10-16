@@ -55,7 +55,10 @@ fn assert_all_snapshots_use_orchestrator_ids(ops: &[ChatNode], msg_id: &str, too
     for message in ops {
         assert_eq!(message.id, msg_id, "帧 id 必须是编排层预留的结果节点 id");
         assert_eq!(message.parent_id.as_deref(), Some(tool_call_id));
-        assert_eq!(message.role, Some(NodeRole::Tool));
+        // [T-147d-iii] 帧不再手写 `role` 格——分派读法经 `node_role()` 折叠，
+        // shell 流式帧的 Tool 角色由 `principal.kind=tool` 承担。
+        use crate::symbio_core::chat_node::NodeRole;
+        assert_eq!(message.node_role(), Some(NodeRole::Tool));
         assert_eq!(message.status, Some(NodeStatus::Streaming));
         assert!(
             message.delta.is_some() || message.content.is_some(),

@@ -369,7 +369,7 @@ fn find_tool_result<'a>(
     let kids = children.get(tool_call_id)?;
     // 1. 优先直接 Text(Tool) 且内容非空
     if let Some(direct) = kids.iter().find(|c| {
-        c.role == Some(NodeRole::Tool)
+        c.node_role() == Some(NodeRole::Tool)
             && c.is_text()
             && c.content.as_ref().map(|x| !x.is_empty()).unwrap_or(false)
     }) {
@@ -378,7 +378,7 @@ fn find_tool_result<'a>(
     // 2. 被 Turn(Tool) 包装（子 agent 会话）
     if let Some(turn) = kids
         .iter()
-        .find(|c| c.is_run() && c.role == Some(NodeRole::Tool))
+        .find(|c| c.is_run() && c.node_role() == Some(NodeRole::Tool))
     {
         if let Some(tkids) = children.get(turn.id.as_str()) {
             return tkids.iter().find(|c| c.is_text()).copied();
@@ -386,7 +386,7 @@ fn find_tool_result<'a>(
     }
     // 3. 兜底：任意直接 Text(Tool)
     kids.iter()
-        .find(|c| c.role == Some(NodeRole::Tool) && c.is_text())
+        .find(|c| c.node_role() == Some(NodeRole::Tool) && c.is_text())
         .copied()
 }
 

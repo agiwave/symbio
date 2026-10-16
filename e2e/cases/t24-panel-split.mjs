@@ -57,6 +57,7 @@ import {
   assertTranscriptInvariants,
   textOf,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 const SID = 'e2e-t24-split';
@@ -182,7 +183,7 @@ export default defineCase(
         turnOfAnswer.parent_id == null,
         'turn 容器在根级——回答挂在它下面，所以「按根级切」会连容器带回答一起漏掉',
       );
-      assertEq(answer.role, 'assistant', '回答是助手说的话');
+      assertEq(msgRoleOf(answer), 'assistant', '回答是助手说的话');
       assertEq(typeOf(answer), 'text', '回答是文本节点');
 
       // ── 形状锚 ②：助手说的话有两种位置，汇报在**根级** ──
@@ -192,7 +193,7 @@ export default defineCase(
         `应至少有一条对话面文本（汇报）——两种位置的锚点（实得 ${reports.length} 条）`,
       );
       for (const r of reports) {
-        assertEq(r.role, 'assistant', '汇报是助手说的话');
+        assertEq(msgRoleOf(r), 'assistant', '汇报是助手说的话');
         assertEq(typeOf(r), 'text', '汇报是文本节点');
         assert(
           r.parent_id == null,
@@ -201,7 +202,7 @@ export default defineCase(
       }
 
       // ── 形状锚 ③：「看角色」不可省——工具结果就是文本节点 ──
-      const toolResults = msgs.filter((m) => m.role === 'tool');
+      const toolResults = msgs.filter((m) => msgRoleOf(m) === 'tool');
       assert(toolResults.length >= 1, '工具回路应留下 role=tool 的结果节点');
       const toolTexts = toolResults.filter((m) => typeOf(m) === 'text');
       assert(
@@ -209,7 +210,7 @@ export default defineCase(
         '至少一个工具结果是 **text 类型**——只看类型挡不住它，必须看角色',
       );
       assert(
-        !msgs.some((m) => m.role === 'tool' && m.parent_id == null),
+        !msgs.some((m) => msgRoleOf(m) === 'tool' && m.parent_id == null),
         '工具结果挂在 tool_call 之下（不在根级）——位置同样挡不住它',
       );
 
@@ -219,7 +220,7 @@ export default defineCase(
         assert(same.length >= 1, `真实转写里应出现 ${t} 节点`);
         for (const m of same) {
           assert(
-            m.role === 'assistant',
+            msgRoleOf(m) === 'assistant',
             `${t} 节点的 role 也是 assistant（实得 ${m.role}）——只看角色挡不住它，必须看类型`,
           );
         }
@@ -230,7 +231,7 @@ export default defineCase(
       // 若根级全是助手文本，分栏后工作列就是空的（白拆一列）；若根级全是 `turn`，
       // 对话列就只剩用户问句。两个方向都得有东西，这一列才值得存在。
       assert(
-        roots.some((m) => (m.role === 'assistant' || m.role === 'user') && typeOf(m) === 'text'),
+        roots.some((m) => (msgRoleOf(m) === 'assistant' || msgRoleOf(m) === 'user') && typeOf(m) === 'text'),
         '根级应有对话线节点（用户问句 / 根级汇报）',
       );
       assert(
@@ -251,7 +252,7 @@ export default defineCase(
         `工具结果正文太短，不构成哨兵（实得 ${JSON.stringify(sentinel)}）`,
       );
       const dialogTexts = msgs
-        .filter((m) => m.role === 'assistant' || m.role === 'user')
+        .filter((m) => msgRoleOf(m) === 'assistant' || msgRoleOf(m) === 'user')
         .map((m) => textOf(m))
         .join('\n');
       assert(
@@ -274,7 +275,7 @@ export default defineCase(
         frameTypes.has('turn'),
         `实时面应含 turn 帧（实得 ${[...frameTypes].join('/')}）——工作面板按它分组成"一轮"`,
       );
-      const hasUserFrame = frames.some((f) => f.data?.role === 'user');
+      const hasUserFrame = frames.some((f) => msgRoleOf(f.data) === 'user');
       assert(hasUserFrame, '实时面应含用户消息帧（对话面板的另一半）');
       assert(
         realtime.outOfScope.length === 0,

@@ -58,7 +58,7 @@ impl ModelProtocol for OpenaiResponsesProtocol {
         let (previous_response_id, messages_to_process) = messages
             .iter()
             .enumerate()
-            .rfind(|(_, m)| m.role == Some(NodeRole::Assistant) && m.response_id.is_some())
+            .rfind(|(_, m)| m.node_role() == Some(NodeRole::Assistant) && m.response_id.is_some())
             .map(|(idx, m)| {
                 // 找到了有 response_id 的 Assistant 消息，只发送增量消息
                 (m.response_id.clone(), messages[idx + 1..].to_vec())

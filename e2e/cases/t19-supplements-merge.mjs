@@ -46,6 +46,7 @@ import {
   PROVIDER_ID,
   assertTranscriptInvariants,
   textOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 /** gateway 入站配置（与其它用例同款：本机回环、无 token） */
@@ -68,7 +69,7 @@ const META_SUPPLEMENT_COUNT = 'supplement_count';
 /** 补充之间的连接符（镜像 `supplements.rs::JOINER`——不引入用户没写过的字符） */
 const JOINER = '\n\n';
 
-const userTexts = (msgs) => msgs.filter((m) => m.role === 'user').map(textOf);
+const userTexts = (msgs) => msgs.filter((m) => msgRoleOf(m) === 'user').map(textOf);
 
 /**
  * 起一个长驻 CLI + 会话，并给出"往收件箱写一条"的入口。
@@ -213,7 +214,7 @@ export default defineCase(
         'A 线：三条补充在存储里必须是**两条**用户消息（首条 + 合并成的一条），且正文是原文拼接',
       );
 
-      const mergedA = msgsA.find((m) => m.role === 'user' && m.id === a2);
+      const mergedA = msgsA.find((m) => msgRoleOf(m) === 'user' && m.id === a2);
       assert(mergedA, `合并消息应沿用**第一条**补充的 id（${a2}）——前端按 id 合并权威帧`);
       // `parent_id` 为空在落盘里表现为**键缺失**（`None` 不序列化），故与 `null` 等价看待
       assertEq(mergedA.parent_id ?? null, null, '合并消息是顶层用户消息（与普通用户消息同形）');

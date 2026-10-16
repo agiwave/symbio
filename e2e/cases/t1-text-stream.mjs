@@ -18,6 +18,7 @@ import {
   textOf,
   assertTranscriptInvariants,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 export default defineCase('T1 文本流式：SSE 分片输出 + 转写落盘', async () => {
@@ -64,9 +65,9 @@ export default defineCase('T1 文本流式：SSE 分片输出 + 转写落盘', a
     });
     const msgs = await readSessionMessages(api, 'e2e-t1');
     assertTranscriptInvariants(msgs, 'T1');
-    assert(msgs.some((m) => m.role === 'user' && textOf(m).includes('你好')), '应有 user 消息');
+    assert(msgs.some((m) => msgRoleOf(m) === 'user' && textOf(m).includes('你好')), '应有 user 消息');
     assert(msgs.some((m) => msgTypeOf(m) === 'turn'), '应有 turn 组合节点');
-    const text = msgs.find((m) => m.role === 'assistant' && msgTypeOf(m) === 'text');
+    const text = msgs.find((m) => msgRoleOf(m) === 'assistant' && msgTypeOf(m) === 'text');
     assert(text, '应有 assistant text 节点');
     assert(textOf(text).includes('你好，mock世界'), '落盘正文应为完整文本');
     assertEq(text.status, 'completed', 'assistant text 终态应为 completed');

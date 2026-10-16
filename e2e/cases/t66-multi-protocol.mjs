@@ -43,6 +43,7 @@ import {
   textOf,
   assertTranscriptInvariants,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 /**
@@ -194,7 +195,7 @@ export default defineCase('T66 多协议适配：同一用户链路在四协议�
       const tc = msgs.find((m) => msgTypeOf(m) === 'tool_call');
       assert(tc, `${label} 应有 tool_call 节点`);
       assertEq(tc.status, 'completed', `${label} tool_call 终态应为 completed`);
-      const text = msgs.find((m) => m.role === 'assistant' && msgTypeOf(m) === 'text');
+      const text = msgs.find((m) => msgRoleOf(m) === 'assistant' && msgTypeOf(m) === 'text');
       assert(text, `${label} 应有 assistant text 节点`);
       assert(textOf(text).includes(FINAL_TEXT), `${label} 落盘正文应为完整收尾文本`);
     } finally {

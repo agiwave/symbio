@@ -174,7 +174,7 @@ fn build_messages(utterance: &str, context: &[ChatNode]) -> Vec<ChatNode> {
     // 投影已含本轮这句话时不再追加（正常路径：`session` 先把用户消息折进上下文再判）。
     let tail_matches = messages
         .last()
-        .map(|m| m.role == Some(NodeRole::User) && text_of(m) == utterance)
+        .map(|m| m.node_role() == Some(NodeRole::User) && text_of(m) == utterance)
         .unwrap_or(false);
     if !tail_matches {
         messages.push(user_message(utterance));
@@ -185,10 +185,10 @@ fn build_messages(utterance: &str, context: &[ChatNode]) -> Vec<ChatNode> {
 fn user_message(text: &str) -> ChatNode {
     ChatNode {
         id: llm_short_id(),
-        role: Some(NodeRole::User),
         content: Some(MessageContent::Text(text.to_string())),
         ..Default::default()
     }
+    .with_role(NodeRole::User)
 }
 
 fn text_of(m: &ChatNode) -> String {

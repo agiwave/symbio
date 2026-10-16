@@ -224,7 +224,7 @@ pub(crate) fn snapshot_entries(msgs: &[ChatNode]) -> Vec<(String, TranscriptEntr
         .collect();
     msgs.iter()
         .filter_map(|m| {
-            let role = m.role.as_ref()?;
+            let role = m.node_role()?;
             let text = m
                 .content
                 .as_ref()

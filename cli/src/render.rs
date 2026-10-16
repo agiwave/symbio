@@ -138,8 +138,10 @@ impl Renderer {
             if message.parent_id.is_some() {
                 merged.parent_id = message.parent_id.clone();
             }
-            if message.role.is_some() {
-                merged.role = message.role.clone();
+            // [T-147d-iii] `role` 已退出 wire：这里折的是「残留格 + principal.kind」
+            // 两格的读法（`node_role`），工具/用户帧的抑制判据因此照旧成立。
+            if let Some(r) = message.node_role() {
+                merged.role = Some(r);
             }
             if message.msg_type.is_some() {
                 merged.msg_type = message.msg_type.clone();

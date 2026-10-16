@@ -38,6 +38,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 /** 本用例的会话 id */
@@ -65,7 +66,7 @@ function shapeOf(msgs) {
     [
       m.id ?? '',
       m.parent_id ?? '',
-      m.role ?? '',
+      msgRoleOf(m) ?? '',
       m.type ?? m.msg_type ?? '',
       m.status ?? '',
       // [T-147d-ii] 顶层 name 已退役——工具名住 meta.tool_name
@@ -132,10 +133,10 @@ export default defineCase(
 
         const beforeCrud = await readLeaf(cli, sessionAddr, '变更前读会话叶子');
         const q1Node = beforeCrud.messages.find(
-          (m) => m.role === 'user' && contentText(m).includes(Q1),
+          (m) => msgRoleOf(m) === 'user' && contentText(m).includes(Q1),
         );
         const q2Node = beforeCrud.messages.find(
-          (m) => m.role === 'user' && contentText(m).includes(Q2),
+          (m) => msgRoleOf(m) === 'user' && contentText(m).includes(Q2),
         );
         assert(q1Node?.id, `应能找到第一问的节点（实际: ${JSON.stringify(shapeOf(beforeCrud.messages))}）`);
         assert(q2Node?.id, '应能找到第二问的节点');

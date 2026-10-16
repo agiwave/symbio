@@ -53,6 +53,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 /** 本用例的会话 id（两个进程共用同一个） */
@@ -161,7 +162,7 @@ export default defineCase(
         const msgs = await readSessionMessages(api, SID);
         assertTranscriptInvariants(msgs, 'T32');
         const userTexts = msgs
-          .filter((m) => m.role === 'user')
+          .filter((m) => msgRoleOf(m) === 'user')
           .map((m) => (typeof m.content === 'string' ? m.content : ''));
         assertEq(
           userTexts.filter((t) => t.includes(TEXT_A)).length,

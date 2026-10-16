@@ -26,6 +26,7 @@ import {
   assertTranscriptInvariants,
   textOf,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 const AGENT_ID = 'reviewer';
@@ -225,7 +226,7 @@ export default defineCase('T15 子智能体空间自驱动：写 inbox → 空�
     });
     await waitFor(
       async () =>
-        (await subMessages()).filter((m) => msgTypeOf(m) === 'text' && m.role === 'assistant').length >= 2,
+        (await subMessages()).filter((m) => msgTypeOf(m) === 'text' && msgRoleOf(m) === 'assistant').length >= 2,
       {
         what: '两轮回答都落进子智能体自己的会话（经读出口可见）',
         timeoutMs: 30_000,
@@ -234,7 +235,7 @@ export default defineCase('T15 子智能体空间自驱动：写 inbox → 空�
 
     const msgs = await subMessages();
     assertTranscriptInvariants(msgs, 'T15');
-    const userTexts = msgs.filter((m) => m.role === 'user' && msgTypeOf(m) === 'text').map(textOf);
+    const userTexts = msgs.filter((m) => msgRoleOf(m) === 'user' && msgTypeOf(m) === 'text').map(textOf);
     assertEq(
       userTexts,
       ['第一步：报告。', '第二步：总结。'],

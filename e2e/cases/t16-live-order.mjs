@@ -40,6 +40,7 @@ import {
   readSessionMessages,
   assertTranscriptInvariants,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 const SID = 'e2e-t16';
@@ -113,7 +114,7 @@ export default defineCase('T16 实时面顺序 = 存储顺序（多轮：每条�
         for (const m of rt.messages()) {
           if (
             msgTypeOf(m.data) === 'text' &&
-            m.data?.role === 'assistant' &&
+            msgRoleOf(m.data) === 'assistant' &&
             TERMINAL.has(m.data?.status)
           ) {
             ids.add(m.mid);
@@ -157,6 +158,9 @@ export default defineCase('T16 实时面顺序 = 存储顺序（多轮：每条�
       if (d.seq != null) cur.seq = d.seq;
       if (d.timestamp != null) cur.timestamp = d.timestamp;
       if (d.role != null) cur.role = d.role;
+      // [T-147d-iii] `role` 退出 wire 后，身份的实时载体是 `principal`——
+      // 合并通道必须一起带上，否则 `msgRoleOf(cur)` 在实时面永远折出默认值。
+      if (d.principal != null) cur.principal = d.principal;
       if (d.type != null) cur.type = d.type;
       live.set(m.mid, cur);
     }
@@ -164,7 +168,7 @@ export default defineCase('T16 实时面顺序 = 存储顺序（多轮：每条�
     // ④ 存储权威版本（经生产读出口读：`vdfs/read` = 前端加载历史那一出口）
     const stored = await readSessionMessages(cli, SID);
     assertTranscriptInvariants(stored, 'T16');
-    assertEq(stored.filter((m) => m.role === 'user').length, 2, '落盘应有两条 user 消息');
+    assertEq(stored.filter((m) => msgRoleOf(m) === 'user').length, 2, '落盘应有两条 user 消息');
 
     // ⑤ 核心断言：实时面见过的每个节点，顺序锚点必须**等于**存储分配的那个。
     //    不等 ⇒ 那条消息在前端只有本地号 / 在途号，与存储号并存两套序号空间。
@@ -172,12 +176,12 @@ export default defineCase('T16 实时面顺序 = 存储顺序（多轮：每条�
     for (const s of stored) {
       const l = live.get(s.id);
       if (!l) {
-        drift.push(`${s.id}: 实时面从未见过（角色 ${s.role}/${s.type}）`);
+        drift.push(`${s.id}: 实时面从未见过（角色 ${msgRoleOf(s)}/${s.type}）`);
         continue;
       }
       if (l.seq !== s.seq) {
         drift.push(
-          `${s.id}: 实时 seq=${l.seq} ≠ 存储 seq=${s.seq}（角色 ${s.role}/${s.type}）`,
+          `${s.id}: 实时 seq=${l.seq} ≠ 存储 seq=${s.seq}（角色 ${msgRoleOf(s)}/${s.type}）`,
         );
       }
     }

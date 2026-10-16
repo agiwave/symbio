@@ -67,6 +67,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 /** 父会话（无 `--agent` ⇒ 主体 `session/main`） */
@@ -250,10 +251,10 @@ export default defineCase(
         assertTranscriptInvariants(parentMsgs, '父会话');
         assertTranscriptInvariants(childMsgs, '子会话');
 
-        const pUsers = parentMsgs.filter((m) => m.role === 'user');
-        const pAssist = parentMsgs.filter((m) => m.role === 'assistant');
+        const pUsers = parentMsgs.filter((m) => msgRoleOf(m) === 'user');
+        const pAssist = parentMsgs.filter((m) => msgRoleOf(m) === 'assistant');
         assert(pUsers.length >= 2 && pAssist.length >= 2, '父会话应有两问两答');
-        const cAssist = childMsgs.filter((m) => m.role === 'assistant');
+        const cAssist = childMsgs.filter((m) => msgRoleOf(m) === 'assistant');
         assert(cAssist.length >= 1, '子会话应有一条助手发言');
 
       // ── 证据 ②：**请求包不串主体**（plan/11 批 1 的 e2e 判据原文）──────────

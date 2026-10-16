@@ -927,6 +927,30 @@ export function msgTypeOf(m) {
 }
 
 /**
+ * wire 角色的折叠读法（镜像前端 `schemas/chat_node.messageRoleOf` 的判据）。
+ *
+ * [T-147d-iii] 之后 `role` 退出 wire（`skip_serializing_if`）：实时帧与**新落盘**
+ * 的消息都不再带这一格。直接拿 `m.role === 'tool'` 比较的断言会静默失去靶子
+ * （147f 的同一课）——一律经本函数折叠再比。
+ *
+ * 判据与后端 `ChatNode::node_role()` / 前端 `messageRoleOf` 同一条：
+ * 残留 `role` 格在先，`principal.kind` 兜底（person→user、agent→assistant、
+ * tool→tool、system→system），两格皆无按助手（与前端默认一致）。
+ */
+const PRINCIPAL_KIND_TO_ROLE = Object.freeze({
+  person: 'user',
+  agent: 'assistant',
+  tool: 'tool',
+  system: 'system',
+});
+export function msgRoleOf(m) {
+  if (m?.role != null) return m.role;
+  const kind =
+    typeof m?.principal === 'object' && m?.principal !== null ? m.principal.kind : undefined;
+  return PRINCIPAL_KIND_TO_ROLE[kind] ?? 'assistant';
+}
+
+/**
  * 转写不变量（所有用例共享的落盘断言）：
  * - `seq` 严格递增、消息 id 唯一；
  * - 每个 tool_call 必有 role=tool 的结果子节点（「有请求必有响应」）。
@@ -945,7 +969,7 @@ export function assertTranscriptInvariants(messages, label) {
   }
   for (const m of messages) {
     if (msgTypeOf(m) === 'tool_call') {
-      const result = messages.find((x) => x.parent_id === m.id && x.role === 'tool');
+      const result = messages.find((x) => x.parent_id === m.id && msgRoleOf(x) === 'tool');
       assert(result, `${label}: tool_call ${(m.meta?.tool_name ?? m.id)} 没有结果子节点（有请求无响应）`);
     }
   }

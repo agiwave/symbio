@@ -239,6 +239,16 @@ pub struct ChatNode {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
 
+    /// **存量只读格**（[T-147d-iii]）：`role` 已退出 wire（`skip_serializing` ⇒
+    /// 写方不再发、读侧折叠按 `principal.kind` 走），这一格只为**存量数据**保留：
+    /// 历史 `messages.json` / 容器正文里带 `"role"` 的节点反序列化进来后，
+    /// [`Self::node_role`] 仍按「格先 kind 后」折叠——与前端 `messageRoleOf` 同一判据。
+    ///
+    /// 为什么不是私有字段：`ChatNode { .., ..Default::default() }` 的**函数式更新
+    /// 语法要求每个字段可见**（E0451），私有化会把全仓数百个不碰 `role` 的构造点
+    /// 一起炸掉——机制的爆炸半径大于收益。约束改由两条腿承担：读侧一律走
+    /// [`Self::node_role`] / [`Self::legacy_role`]（分派判据只此一处），写侧新增
+    /// 直写由 `scripts/grep-audit.mjs`（S-014）棘轮钉住（只许降）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<NodeRole>,
 
@@ -569,6 +579,30 @@ impl ChatNode {
             PrincipalKind::Tool => NodeRole::Tool,
             PrincipalKind::System => NodeRole::System,
         })
+    }
+
+    /// **过渡入口**（[T-147d-iii]）：写存量只读格 `role`。
+    ///
+    /// 语义上等价于直写字段，存在的理由是**可搜寻性**：写存量格的调用点全部
+    /// 冠以 `with_role` / `set_legacy_role`，下一档清零时一处 grep 就是完整清单
+    /// （直写 `node.role = ...` 与字段初始化会淹没在同名读写里）。只给
+    /// 「身份还没迁到 `principal` 的现存写方」用；每个调用点都是待清零的债务，
+    /// 新增调用需要理由（棘轮：`scripts/grep-audit.mjs` S-014）。
+    pub fn with_role(mut self, role: NodeRole) -> Self {
+        self.role = Some(role);
+        self
+    }
+
+    /// [`Self::with_role`] 的 `&mut` 形态（同批过渡入口）：就地改写存量格，
+    /// 供补丁应用 / 帧合并这类拿不到所有权的调用点用。
+    pub fn set_legacy_role(&mut self, role: NodeRole) {
+        self.role = Some(role);
+    }
+
+    /// 存量只读格的读法（仅 `attributed` 与 attrs 逆投影这类**读边界**用；
+    /// 一般分派一律走 [`Self::node_role`]）。
+    pub fn legacy_role(&self) -> Option<NodeRole> {
+        self.role.clone()
     }
 
     /// 读 `meta.style_tag`（wire 层的呈现变体词，[ADR-070 §决策 3]）。

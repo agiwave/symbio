@@ -17,6 +17,7 @@ import {
   PROVIDER_ID,
   textOf,
   assertTranscriptInvariants,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 export default defineCase('T4 多轮会话：第二轮请求携带第一轮历史', async () => {
@@ -70,7 +71,7 @@ export default defineCase('T4 多轮会话：第二轮请求携带第一轮历�
     });
     const msgs = await readSessionMessages(api, 'e2e-t4');
     assertTranscriptInvariants(msgs, 'T4');
-    assertEq(msgs.filter((m) => m.role === 'user').length, 2, '落盘应有两条 user 消息');
+    assertEq(msgs.filter((m) => msgRoleOf(m) === 'user').length, 2, '落盘应有两条 user 消息');
   } finally {
     api?.stop();
     llm.stop();

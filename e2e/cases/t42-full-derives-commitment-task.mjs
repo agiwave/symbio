@@ -46,6 +46,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 /** 本用例的会话 id */
@@ -145,7 +146,7 @@ export default defineCase(
         // ── ① 轮次事实：两轮都收束（经生产读出口读回的转写）────────────────
         const msgs = await readSessionMessages(api, SID);
         assertTranscriptInvariants(msgs, 'T42');
-        const userTurns = msgs.filter((m) => m.role === 'user');
+        const userTurns = msgs.filter((m) => msgRoleOf(m) === 'user');
         assert(userTurns.length >= 2, `两轮各有一格用户发言（实际 ${userTurns.length}）`);
 
         // ── ② 出口读数：派生事实从同一份事实源算出的列 ──────────────────────

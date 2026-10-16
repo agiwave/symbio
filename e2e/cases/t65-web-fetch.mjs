@@ -53,6 +53,7 @@ import {
   PROVIDER_ID,
   assertTranscriptInvariants,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 const SID = 'e2e-t65';
@@ -290,7 +291,7 @@ export default defineCase(
  */
 function toolResultText(req) {
   const msgs = req?.body?.messages ?? [];
-  const tool = [...msgs].reverse().find((m) => m.role === 'tool');
+  const tool = [...msgs].reverse().find((m) => msgRoleOf(m) === 'tool');
   if (tool) return typeof tool.content === 'string' ? tool.content : JSON.stringify(tool.content);
   return '';
 }

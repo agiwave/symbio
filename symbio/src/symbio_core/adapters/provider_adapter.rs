@@ -435,7 +435,7 @@ impl LlmAdapter for ProviderLlmAdapter {
                     let already_nested = wire.iter().any(|n| {
                         n.is_text()
                             && n.tool_call_id == m.tool_call_id
-                            && n.role == Some(NodeRole::Tool)
+                            && n.node_role() == Some(NodeRole::Tool)
                             && n.content.as_ref().map(|c| c.to_text()) == Some(m.text.clone())
                     });
                     // 本次请求里**有**它的调用声明 ⇒ 它已经在上面的树形路径里挂好了，

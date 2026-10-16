@@ -37,6 +37,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 /** 本用例的会话 id */
@@ -147,7 +148,7 @@ export default defineCase(
         const msgs = await readSessionMessages(api, SID);
         assertTranscriptInvariants(msgs, 'T37');
         assertEq(
-          msgs.filter((m) => m.role === 'user').length,
+          msgs.filter((m) => msgRoleOf(m) === 'user').length,
           2,
           '两轮 ⇒ 读回的历史里两条 user 消息',
         );

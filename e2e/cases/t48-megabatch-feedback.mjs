@@ -36,6 +36,7 @@ import {
   PROVIDER_ID,
   assertTranscriptInvariants,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 const SID = 'e2e-t48';
@@ -111,7 +112,7 @@ export default defineCase(
           toolCalls.every((m) => m.status === 'completed'),
           '所有 tool_call（含被丢弃的）都必须收在终态，不留永远转圈的「运行中」',
         );
-        const results = msgs.filter((m) => m.role === 'tool');
+        const results = msgs.filter((m) => msgRoleOf(m) === 'tool');
         assertEq(results.length, TOTAL, '有调用必有结果：33 个结果子节点');
 
         // ── 断言 ③：丢弃调用的成因与反馈正文 ────────────────────────────
@@ -136,7 +137,7 @@ export default defineCase(
       assert(reqs.length >= 2, `mock-llm 至少收到 2 次请求（实际 ${reqs.length}）`);
       const feedbackReq = reqs.find((req) =>
         (req.body?.messages ?? []).some(
-          (m) => m.role === 'tool' && String(m.content ?? '').includes('超过上限'),
+          (m) => msgRoleOf(m) === 'tool' && String(m.content ?? '').includes('超过上限'),
         ),
       );
       assert(feedbackReq, '下一次请求必须携带带超限提示的 role=tool 结果（模型可见）');

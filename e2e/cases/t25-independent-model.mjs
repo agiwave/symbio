@@ -47,6 +47,7 @@ import {
   defineCase,
   providerConfig,
   assertTranscriptInvariants,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 /** 三个 provider 条目：**只有 `model` 与 `temperature` 不同**，都指向同一个 mock */
@@ -242,7 +243,7 @@ export default defineCase(
       base = (await llm.requests()).length;
       await send(a, '读一下 README');
       await waitFor(
-        async () => ((await readSessionMessages(a.cli, SIDS.independent)) ?? []).some((m) => m.role === 'tool'),
+        async () => ((await readSessionMessages(a.cli, SIDS.independent)) ?? []).some((m) => msgRoleOf(m) === 'tool'),
         { what: 'A 线工具结果落库', timeoutMs: 40_000 },
       );
 

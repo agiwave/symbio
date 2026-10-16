@@ -36,6 +36,7 @@ import {
   PROVIDER_ID,
   assertTranscriptInvariants,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 /** 随机标记词：只存在于工作区文件里，模型侧无从得知 ⇒ 「出现」即「真读了盘」。 */
@@ -270,7 +271,7 @@ export default defineCase(
  */
 function toolResultText(req) {
   const msgs = req?.body?.messages ?? [];
-  const tool = [...msgs].reverse().find((m) => m.role === 'tool');
+  const tool = [...msgs].reverse().find((m) => msgRoleOf(m) === 'tool');
   if (tool) return typeof tool.content === 'string' ? tool.content : JSON.stringify(tool.content);
   return '';
 }

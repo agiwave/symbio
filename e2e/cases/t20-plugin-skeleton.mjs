@@ -68,6 +68,7 @@ import {
   PROVIDER_ID,
   assertTranscriptInvariants,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 const SID = 'e2e-t20';
@@ -271,7 +272,7 @@ export default defineCase(
       assertEq(surfaced.length, 1, `本轮应恰有一条对话面节点（实得 ${surfaced.length} 条）`);
       assertEq(surfaced[0].meta.surface, 'reply', '对话面节点带对话面标记（surface 是数据概念，与产出插件无关）');
       assertEq(surfaced[0].meta.reason, 'unclassified', '理由码来自上游判决（原样透传）');
-      assertEq(surfaced[0].role, 'assistant', '对话面节点是助手说的话');
+      assertEq(msgRoleOf(surfaced[0]), 'assistant', '对话面节点是助手说的话');
       assert(
         surfaced[0].parent_id == null,
         '对话面节点必须挂根级——挂在 Turn 之下会让前端「对话」面板看不到它',

@@ -48,6 +48,7 @@ import {
   providerConfig,
   PROVIDER_ID,
   assertTranscriptInvariants,
+  msgRoleOf,
 } from '../helpers.mjs';
 import { join } from 'node:path';
 
@@ -74,7 +75,7 @@ function walLines(path) {
 /** 请求体里最后一条 user 消息的正文（mock 匹配同口径）。 */
 function lastUserText(r) {
   const msgs = r.body?.messages ?? [];
-  const last = [...msgs].reverse().find((m) => m.role === 'user');
+  const last = [...msgs].reverse().find((m) => msgRoleOf(m) === 'user');
   if (typeof last?.content === 'string') return last.content;
   if (Array.isArray(last?.content)) return last.content.map((p) => p.text ?? '').join('');
   return '';
@@ -239,7 +240,7 @@ export default defineCase(
 
         const aMsgs = await readSessionMessages(api, A_SID);
         assertTranscriptInvariants(aMsgs, 'T74 会话 A');
-        const aToolNodes = aMsgs.filter((m) => m.role === 'tool');
+        const aToolNodes = aMsgs.filter((m) => msgRoleOf(m) === 'tool');
         assertEq(aToolNodes.length, 2, '会话 A 两个工具结果节点（轮 1 真跑 + 轮 2 被拒）');
         assert(
           JSON.stringify(aToolNodes[1]).includes('Refused'),
@@ -249,7 +250,7 @@ export default defineCase(
         const bMsgs = await readSessionMessages(api, B_SID);
         assertTranscriptInvariants(bMsgs, 'T74 会话 B');
         assert(
-          bMsgs.some((m) => m.role === 'tool' && JSON.stringify(m).includes('Refused')),
+          bMsgs.some((m) => msgRoleOf(m) === 'tool' && JSON.stringify(m).includes('Refused')),
           'B 会话转写里应有一条被拒的工具结果',
         );
 

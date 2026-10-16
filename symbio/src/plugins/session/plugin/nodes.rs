@@ -389,7 +389,9 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
         VdfsError::invalid(format!("收件箱条目需要合法 JSON（ChatNode 字段子集）：{e}"))
     })?;
     // 缺省补齐（见上：只补"不补就不可用"的那三个，不覆盖来者指定的值）
-    message.role.get_or_insert(cm::NodeRole::User);
+    if message.legacy_role().is_none() {
+        message.set_legacy_role(cm::NodeRole::User);
+    }
     message.msg_type.get_or_insert(cm::NodeKind::Body);
     message.status = Some(cm::NodeStatus::Completed);
     Ok(message)
@@ -599,7 +601,7 @@ pub(crate) fn message_node(m: &cm::ChatNode) -> VdfsNode {
     n.updated_at = m.timestamp;
     n.description = message_preview(m);
     for (k, v) in [
-        ("role", json!(m.role)),
+        ("role", json!(m.legacy_role())),
         ("type", json!(m.msg_type)),
         // 工具名等**结构字段**：进程内消费者（子会话转播 / CLI）靠它还原消息，
         // 节点标题里虽也带工具名，但那是展示文案，不可当数据读。

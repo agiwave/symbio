@@ -55,6 +55,7 @@ import {
   assertTranscriptInvariants,
   textOf,
   msgTypeOf,
+  msgRoleOf,
 } from '../helpers.mjs';
 
 const SID = 'e2e-t54';
@@ -154,7 +155,7 @@ export default defineCase(
           rt.messages().some(
             (m) =>
               msgTypeOf(m.data) === 'text' &&
-              m.data?.role === 'assistant' &&
+              msgRoleOf(m.data) === 'assistant' &&
               m.data?.status === 'completed' &&
               String(m.data?.content ?? '').includes(SETTLE_TEXT),
           ),
