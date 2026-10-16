@@ -5,7 +5,7 @@
 //! "跨插件共享"的前提（model 构建 request view）已随 Phase E-② 循环族下沉消失，
 //! 属单一模块私有设施，不再置于 core 共享层。
 
-use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole, NodeKind};
+use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole};
 use crate::symbio_core::CapabilityToolContextRetention;
 use std::collections::{HashMap, HashSet};
 
@@ -351,7 +351,7 @@ pub fn apply_layered_sliding_window(
         HashMap::new();
     let mut per_tool_seq: HashMap<String, Vec<String>> = HashMap::new();
     for msg in messages {
-        if msg.msg_type == Some(NodeKind::ToolCall) {
+        if msg.is_tool_call() {
             let idx = info.len();
             let full_name = msg.name.clone().unwrap_or_default();
             // "local/todo_write" → "todo_write"（与 CapabilityMeta.name 对齐）
@@ -397,7 +397,7 @@ pub fn apply_layered_sliding_window(
     for msg in messages {
         let mut new_msg = msg.clone();
 
-        if msg.msg_type == Some(NodeKind::ToolCall) {
+        if msg.is_tool_call() {
             if is_stale(&msg.id) {
                 // ToolCall 组合节点自身 content = 请求参数 JSON → 骨架化。
                 // 保留定位锚点（path/command/url 等），让历史调用可与结果对号：

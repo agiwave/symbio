@@ -15,7 +15,7 @@ use super::super::transcript::llm_emit_state;
 use crate::symbio_core::{llm_emit_message, llm_short_id, TurnToolCallInfo};
 
 use crate::symbio_core::{
-    chat_node::{ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind},
+    chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus},
     failure_kind, HookEvent, HookOutput, PluginInvokeRequestExt,
 };
 use crate::symbio_core::{
@@ -1288,11 +1288,11 @@ pub async fn process_tool_calls_async(
         // 若此处仍标 Failed，则会被 get_context_messages 过滤，导致"孤儿 tool 结果"
         // （父 tool_call 被过滤、结果残留）使下一轮 LLM 请求非法（Bug 2 同类问题）。
         // 仅对普通工具结果生效（user_prompt 走 WaitingUserAction 分支，不受此覆盖）。
-        if !success && tool_msg.msg_type != Some(NodeKind::UserPrompt) {
+        if !success && !tool_msg.is_interaction() {
             tool_msg.status = Some(NodeStatus::Completed);
         }
 
-        if tool_msg.msg_type == Some(NodeKind::UserPrompt) {
+        if tool_msg.is_interaction() {
             // user_prompt 节点本身即是工具"结果"（待用户审批/回答）：
             // 广播该节点（WaitingUserAction），并把父节点 ToolCall 标为
             // WaitingUserAction（持久化 failure_kind 供 resume 提取）。

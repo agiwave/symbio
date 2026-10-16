@@ -38,7 +38,7 @@ pub(super) fn is_inflight(status: &Option<cm::NodeStatus>) -> bool {
 ///
 /// 可见性 `pub(super)`：`orchestrator.test.rs` 直接锁定这个映射。
 pub(super) fn abort_terminal_of(m: &cm::ChatNode) -> cm::NodeStatus {
-    if m.msg_type == Some(cm::NodeKind::Turn) && m.parent_id.is_none() {
+    if m.is_run() && m.parent_id.is_none() {
         cm::NodeStatus::Aborted
     } else {
         cm::NodeStatus::Completed
@@ -108,7 +108,7 @@ impl SessionPlugin {
         let failing_turn_id = mirror
             .iter()
             .rev()
-            .find(|m| m.msg_type == Some(cm::NodeKind::Turn) && m.parent_id.is_none())
+            .find(|m| m.is_run() && m.parent_id.is_none())
             .map(|m| m.id.clone());
         let failing_turn_id = match failing_turn_id {
             Some(id) => id,

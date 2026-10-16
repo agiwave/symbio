@@ -18,7 +18,7 @@
 
 use std::sync::Arc;
 
-use crate::symbio_core::chat_node::{ChatNode, NodeRole, NodeKind};
+use crate::symbio_core::chat_node::{ChatNode, NodeKind, NodeRole};
 use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt};
 
 mod conversation_view;
@@ -107,7 +107,7 @@ fn find_compress_split_point(messages: &[ChatNode], fraction: f64) -> usize {
                 pending_tool_call = false;
                 break;
             }
-            Some(NodeRole::Assistant) if m.msg_type == Some(NodeKind::ToolCall) => {
+            Some(NodeRole::Assistant) if m.is_tool_call() => {
                 pending_tool_call = true;
                 break;
             }

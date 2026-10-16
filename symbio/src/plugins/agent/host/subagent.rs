@@ -44,8 +44,7 @@
 use super::store::AgentDirStore;
 use crate::symbio_core::chat_node::{message_of_node, SEG_MESSAGES};
 use crate::symbio_core::chat_node::{
-    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind, ResumeAction,
-    ResumeRequest,
+    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, ResumeAction, ResumeRequest,
 };
 use crate::symbio_core::{event_bus_register_subscriber, event_bus_unregister_subscriber};
 use crate::symbio_core::{
@@ -837,7 +836,7 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                 // 助手正文：**在锚定之前**累积——锚定会把顶层节点的角色改写成
                 // Tool，而"最终答复"的判据是助手正文。
                 if message.role == Some(NodeRole::Assistant)
-                    && matches!(message.msg_type, Some(NodeKind::Text) | None)
+                    && (message.is_text() || message.msg_type.is_none())
                 {
                     if !text_by_id.contains_key(&mid) {
                         text_order.push(mid.clone());
@@ -860,7 +859,7 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                 // `prompt.args` 是本工具的续跑参数（`session/resume`
                 // 重执行 agent_run 时据此续跑子会话）；`failure_kind`
                 // 原样带上（驱动前端审批 UI）。
-                if message.msg_type == Some(NodeKind::UserPrompt)
+                if message.is_interaction()
                     && message.status == Some(NodeStatus::WaitingUserAction)
                 {
                     pending = Some(RelayOutcome::Pending {

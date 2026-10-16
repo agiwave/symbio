@@ -19,7 +19,7 @@ use async_trait::async_trait;
 
 use super::{AdapterError, DeltaSink, FullModel, LlmAdapter, LlmTurn, SilentDeltas};
 use crate::symbio_core::schemas::session::chat_node::{
-    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind,
+    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus,
 };
 use crate::symbio_core::CapabilityMeta;
 use crate::symbio_core::ExecAbortSignal;
@@ -51,7 +51,16 @@ struct DeltaBridge {
     /// 而不是两张集合：节点 id 唯一 ⇒「一个节点恰好属于一条流」是结构事实，
     /// 两张集合只能靠人工保证不重叠；而且窄帧是**每个 token 一次**的热路径，
     /// 两张集合要连开两次锁（一次判正文、一次判推理）。
-    nodes: std::sync::Mutex<std::collections::HashMap<String, NodeKind>>,
+    nodes: std::sync::Mutex<std::collections::HashMap<String, TextStream>>,
+}
+
+/// 窄帧归属只有两种流（正文 / 推理）。[T-147c-ii] 起 `NodeKind::Text` 与
+/// `NodeKind::Reasoning` 收敛成同一个 `Body` 形态（靠 `meta.style_tag` 区分），
+/// 表里存 `NodeKind` 将表达不了这个判别——私有二值枚举把判据与 wire 词脱钩。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TextStream {
+    Body,
+    Reasoning,
 }
 
 #[async_trait]
@@ -61,13 +70,12 @@ impl ExecTranscriptWriter for DeltaBridge {
             if !d.is_empty() {
                 // 窄帧不带 `msg_type` ⇒ 归属只能查登记表。
                 match self.nodes.lock().unwrap().get(&m.id) {
-                    Some(NodeKind::Text) => self.sink.on_delta(d),
-                    Some(NodeKind::Reasoning) => self.sink.on_reasoning(d),
+                    Some(TextStream::Body) => self.sink.on_delta(d),
+                    Some(TextStream::Reasoning) => self.sink.on_reasoning(d),
                     // 没登记的窄帧 = **工具参数增量**：快照帧不走登记表（它自带
                     // 全量身份），消息形状原样递给消费端——工具节点的构造权在
                     // 分发方，这里只递帧不建节点（见 [`DeltaSink::on_tool_frame`]）。
                     None => self.sink.on_tool_frame(&m),
-                    _ => {}
                 }
             }
             return;
@@ -78,7 +86,7 @@ impl ExecTranscriptWriter for DeltaBridge {
         // 工具调用快照帧：**先于**「正文为空即返回」放行——首个增量常带
         // `arguments: ""`，此时快照的参数正文为空但**身份是全的**（id / name /
         // tool_call_id），把它丢掉，参数窄增量就没有身份帧可挂。
-        if m.msg_type == Some(NodeKind::ToolCall) {
+        if m.is_tool_call() {
             self.sink.on_tool_frame(&m);
             return;
         }
@@ -89,19 +97,17 @@ impl ExecTranscriptWriter for DeltaBridge {
             return;
         }
         // 两条文本流登记进映射（窄帧归属靠它查）。
-        let kind = match m.msg_type {
-            Some(NodeKind::Text) => NodeKind::Text,
-            Some(NodeKind::Reasoning) => NodeKind::Reasoning,
-            _ => return,
+        let stream = if m.is_text() {
+            TextStream::Body
+        } else if m.is_reasoning() {
+            TextStream::Reasoning
+        } else {
+            return;
         };
-        self.nodes
-            .lock()
-            .unwrap()
-            .insert(m.id.clone(), kind.clone());
-        match kind {
-            NodeKind::Text => self.sink.on_delta(t),
-            NodeKind::Reasoning => self.sink.on_reasoning(t),
-            _ => {}
+        self.nodes.lock().unwrap().insert(m.id.clone(), stream);
+        match stream {
+            TextStream::Body => self.sink.on_delta(t),
+            TextStream::Reasoning => self.sink.on_reasoning(t),
         }
     }
 }
@@ -422,7 +428,7 @@ impl LlmAdapter for ProviderLlmAdapter {
                     // ⚠️ 这也意味着**树形路径里同样只能挂一条**（它按 id 找父节点、
                     // 逐条 push，所以多条都挂得下）——那一侧没问题，问题只在这去重。
                     let already_nested = wire.iter().any(|n| {
-                        n.msg_type == Some(NodeKind::Text)
+                        n.is_text()
                             && n.tool_call_id == m.tool_call_id
                             && n.role == Some(NodeRole::Tool)
                             && n.content.as_ref().map(|c| c.to_text()) == Some(m.text.clone())

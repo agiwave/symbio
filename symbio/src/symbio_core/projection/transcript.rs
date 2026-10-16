@@ -36,9 +36,7 @@ use super::super::event::{
     EVENT_MESSAGE_ADDED, EVENT_MESSAGE_EDITED, EVENT_MESSAGE_REMOVED, EVENT_SESSION_CONSOLIDATED,
     EVENT_TURN_SUPPLEMENTED, EVENT_USER_MESSAGE,
 };
-use super::super::schemas::session::chat_node::{
-    ChatNode, MessageContent, NodeRole, NodeKind,
-};
+use super::super::schemas::session::chat_node::{ChatNode, MessageContent, NodeRole};
 use super::super::view::{Budget, View};
 use super::Projection;
 
@@ -221,7 +219,7 @@ pub(crate) fn snapshot_entries(msgs: &[ChatNode]) -> Vec<(String, TranscriptEntr
     // 来自 `artifact.added` 的载荷，两条路径取的是同一件事）。
     let tool_names: HashMap<&str, &str> = msgs
         .iter()
-        .filter(|m| m.msg_type == Some(NodeKind::ToolCall))
+        .filter(|m| m.is_tool_call())
         .filter_map(|m| m.name.as_deref().map(|n| (m.id.as_str(), n)))
         .collect();
     msgs.iter()
@@ -232,20 +230,23 @@ pub(crate) fn snapshot_entries(msgs: &[ChatNode]) -> Vec<(String, TranscriptEntr
                 .as_ref()
                 .map(MessageContent::to_text)
                 .unwrap_or_default();
-            let entry = match (role, &m.msg_type) {
-                (NodeRole::User, None | Some(NodeKind::Text)) => TranscriptEntry {
+            // 「文本型正文」= 显式 `Text` 或未标类型（历史数据）——谓词只看
+            // `msg_type`，None 兼容在此显式表达。
+            let textish = m.msg_type.is_none() || m.is_text();
+            let entry = match role {
+                NodeRole::User if textish => TranscriptEntry {
                     role: "user".into(),
                     text,
                     tool: None,
                     exclude_from_context: false,
                 },
-                (NodeRole::Assistant, Some(NodeKind::Text)) => TranscriptEntry {
+                NodeRole::Assistant if m.is_text() => TranscriptEntry {
                     role: "assistant".into(),
                     text,
                     tool: None,
                     exclude_from_context: meta_flag(m, "exclude_from_context"),
                 },
-                (NodeRole::Tool, None | Some(NodeKind::Text)) => TranscriptEntry {
+                NodeRole::Tool if textish => TranscriptEntry {
                     role: "tool".into(),
                     text,
                     tool: m

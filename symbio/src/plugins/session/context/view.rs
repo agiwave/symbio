@@ -33,7 +33,7 @@ pub fn fade_aged_tool_results(messages: &mut [ChatNode], keep_recent_turns: usiz
     const FADE_BUDGET: usize = 2048; // 老化工具结果压到约 2k token
     let tok = default_tokenizer();
     for m in messages.iter_mut().take(keep_from) {
-        if m.role == Some(NodeRole::Tool) && m.msg_type == Some(NodeKind::Text) {
+        if m.role == Some(NodeRole::Tool) && m.is_text() {
             if let Some(MessageContent::Text(t)) = &m.content {
                 if tok.count(t) > FADE_BUDGET {
                     m.content = Some(MessageContent::Text(
@@ -83,10 +83,7 @@ pub fn fade_aged_content_nodes(
             return false;
         }
         !matches!(m.role, Some(NodeRole::Tool) | Some(NodeRole::System))
-            && matches!(
-                m.msg_type,
-                None | Some(NodeKind::Text) | Some(NodeKind::Reasoning)
-            )
+            && (m.msg_type.is_none() || m.is_text() || m.is_reasoning())
     }
 
     // B1 保护窗口：最后一条消息恒保护 + 最近 keep_recent 个内容节点保持原样

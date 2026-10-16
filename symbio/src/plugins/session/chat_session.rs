@@ -30,7 +30,7 @@ use super::config::{default_context_messages, SessionConfig};
 use super::store::SessionStore;
 use crate::plugin_info;
 use crate::symbio_core::chat_node as cm;
-use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole, NodeKind};
+use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole};
 use crate::symbio_core::clock_now_ms;
 use crate::symbio_core::{PluginError, SymbioKey};
 use std::collections::HashSet;

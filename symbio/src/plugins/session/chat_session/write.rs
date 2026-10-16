@@ -185,10 +185,7 @@ impl PersistentChatSession {
     /// **受这次变更影响、且仍留在存储里的节点的权威副本**：`Born` 回追加进去的那批
     /// （按追加顺序，含存储分配的 `seq`——落库回包靠它），`Edited` 回改写后的那批，
     /// `Removed` 回空（被删的节点不在存储里，交回它们等于让前端对齐幻影）。
-    pub(crate) async fn apply(
-        &self,
-        change: MessageChange,
-    ) -> Result<Vec<ChatNode>, PluginError> {
+    pub(crate) async fn apply(&self, change: MessageChange) -> Result<Vec<ChatNode>, PluginError> {
         // ① 落事实（**先于**写缓存）。
         if let Some(dir) = self.store.session_dir(&self.session_id) {
             match &change {
@@ -516,10 +513,7 @@ pub(super) fn ensure_durable_states(
 /// 而列表变更必须入格（ADR-054
 /// 决策 1 的「关闭」原语）。裁剪改了列表却不落事实 ⇒ 切主读后**被裁节点复活**
 /// ——WAL 里它们还在，只是缓存里少了（而缓存已经不再是真源）。
-pub fn prune_historical_tool_calls(
-    messages: &mut Vec<ChatNode>,
-    keep_turns: usize,
-) -> Vec<String> {
+pub fn prune_historical_tool_calls(messages: &mut Vec<ChatNode>, keep_turns: usize) -> Vec<String> {
     // keep_turns == 0 语义为「不限制」（与 `SessionConfig::context_messages` 的 0 值语义、
     // `sliding_window` 保持一致）。此处缺失守卫时，下面 `user_indices[len - keep_turns]`
     // 会取到下标 `len`（越界）并 panic，导致整次 `append_messages` 失败。
@@ -541,10 +535,7 @@ pub fn prune_historical_tool_calls(
     let mut to_remove = HashSet::new();
 
     for msg in &messages[..limit_idx] {
-        if msg.role == Some(NodeRole::Tool)
-            || msg.msg_type == Some(NodeKind::ToolCall)
-            || msg.msg_type == Some(NodeKind::Reasoning)
-        {
+        if msg.role == Some(NodeRole::Tool) || msg.is_tool_call() || msg.is_reasoning() {
             to_remove.insert(msg.id.clone());
         }
     }

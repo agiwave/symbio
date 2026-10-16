@@ -309,12 +309,12 @@ pub(crate) async fn close_turn(
     // 普通的工具执行失败不使会话停摆：父节点已标 Completed、错误结果作为合法
     // tool 结果留在上下文喂回 LLM 继续处理，用户也可随时直接发新消息继续。
     let mode = ctx.get(crate::symbio_core::MODE).unwrap_or_default();
-    let needs_user_action = tool_results.iter().any(|m| {
-        m.msg_type == Some(NodeKind::UserPrompt)
-            && m.status == Some(NodeStatus::WaitingUserAction)
-    }) || parent_updates
+    let needs_user_action = tool_results
         .iter()
-        .any(|p| p.status == Some(NodeStatus::WaitingUserAction));
+        .any(|m| m.is_interaction() && m.status == Some(NodeStatus::WaitingUserAction))
+        || parent_updates
+            .iter()
+            .any(|p| p.status == Some(NodeStatus::WaitingUserAction));
 
     if needs_user_action {
         // 注：信息性策略下工具失败的父 ToolCall 已标 Completed（错误结果作为

@@ -13,7 +13,7 @@
 //! 缺任一条都会让分界悄悄偏向一侧。
 
 use super::*;
-use crate::symbio_core::chat_node::{MessageContent, NodeStatus};
+use crate::symbio_core::chat_node::{MessageContent, NodeKind, NodeStatus};
 
 fn msg(
     id: &str,
@@ -37,13 +37,7 @@ fn msg(
 fn transcript() -> Vec<ChatNode> {
     vec![
         msg("u1", NodeRole::User, None, None, "读一下 README"),
-        msg(
-            "turn1",
-            NodeRole::Assistant,
-            Some(NodeKind::Turn),
-            None,
-            "",
-        ),
+        msg("turn1", NodeRole::Assistant, Some(NodeKind::Turn), None, ""),
         msg(
             "r1",
             NodeRole::Assistant,
@@ -184,13 +178,7 @@ fn empty_input_yields_empty_view() {
 #[test]
 fn transcript_without_conversation_nodes_yields_empty_view() {
     let only_tools = vec![
-        msg(
-            "turn1",
-            NodeRole::Assistant,
-            Some(NodeKind::Turn),
-            None,
-            "",
-        ),
+        msg("turn1", NodeRole::Assistant, Some(NodeKind::Turn), None, ""),
         msg(
             "tc1",
             NodeRole::Assistant,

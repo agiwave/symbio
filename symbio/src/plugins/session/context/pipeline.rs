@@ -758,7 +758,7 @@ pub(crate) async fn retry_compaction(
     // 不一致——此时按 NotFound 拒绝，比"顺着 target_id 猜一个节点"安全。
     let found = messages
         .iter()
-        .any(|m| m.id == target_id && m.msg_type == Some(NodeKind::Compression));
+        .any(|m| m.id == target_id && m.is_compression());
     if !found {
         return Err(PluginError::NotFound(format!(
             "未找到压缩节点: {target_id}"
@@ -1017,9 +1017,7 @@ async fn send_compression_request(
 /// 无需变更）。
 ///
 /// 返回 `false` = 吞掉（与静默出口完全同义）；`true` = 按（可能已改写的）帧放行。
-fn compression_delta_gate(
-    node_id: &str,
-) -> impl Fn(&mut ChatNode) -> bool + Send + Sync + 'static {
+fn compression_delta_gate(node_id: &str) -> impl Fn(&mut ChatNode) -> bool + Send + Sync + 'static {
     let node_id = node_id.to_string();
     move |frame: &mut ChatNode| {
         // 纯窄增量 ⇒ 摘要内容在增长：落点改到压缩节点（占位正文之后尾追加）。

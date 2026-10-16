@@ -30,9 +30,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
-use crate::symbio_core::chat_node::{
-    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind,
-};
+use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus};
 use crate::symbio_core::{
     llm_emit_message, DispatchOutcome, DispatchPort, ExecAbortSignal, ExecEventSink, LlmTurn,
     Plugin, PluginInvokeRequest,
@@ -237,7 +235,7 @@ impl DispatchPort for SessionDispatchPort {
                 let call_node = call_nodes
                     .iter()
                     .chain(parent_updates.iter())
-                    .find(|n| n.id == call_id && n.msg_type == Some(NodeKind::ToolCall));
+                    .find(|n| n.id == call_id && n.is_tool_call());
                 DispatchOutcome {
                     call_id,
                     name,
@@ -248,7 +246,7 @@ impl DispatchPort for SessionDispatchPort {
                         .and_then(|meta| meta.get("success"))
                         .and_then(|v| v.as_bool())
                         .unwrap_or(true),
-                    needs_user_action: m.msg_type == Some(NodeKind::UserPrompt)
+                    needs_user_action: m.is_interaction()
                         && m.status == Some(NodeStatus::WaitingUserAction),
                     // 卡片载荷与原因码：随事实入格，恢复（`resume`）据它复现那张卡。
                     // 只有等待用户的结果节点才带（其余为 `None` / 空串）。

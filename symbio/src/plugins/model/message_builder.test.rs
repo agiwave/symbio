@@ -16,7 +16,7 @@
 
 use super::*;
 
-use crate::symbio_core::chat_node::NodeStatus;
+use crate::symbio_core::chat_node::{NodeKind, NodeStatus};
 
 const TURN_ID: &str = "turn-0001";
 
@@ -107,11 +107,7 @@ fn tool_call_args_passthrough_as_string_without_reserialize() {
 #[test]
 fn reasoning_only_flattens_to_single_assistant_message() {
     let reasoning = "只有思考";
-    let msgs = turn_tree(vec![child(
-        "turn-0001-reason",
-        NodeKind::Text,
-        reasoning,
-    )]);
+    let msgs = turn_tree(vec![child("turn-0001-reason", NodeKind::Text, reasoning)]);
 
     let natives = flatten_chat_messages(&msgs);
     assert_eq!(natives.len(), 1, "应只产生一条 assistant native message");

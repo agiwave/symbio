@@ -4,7 +4,7 @@
 //! `context/window.rs` 只保留生产代码，测试全部放本文件。
 
 use super::*;
-use crate::symbio_core::chat_node::NodeStatus;
+use crate::symbio_core::chat_node::{NodeKind, NodeStatus};
 
 fn tc_msg(id: &str, name: &str, args: &str) -> ChatNode {
     ChatNode {

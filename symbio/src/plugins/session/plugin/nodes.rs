@@ -372,9 +372,7 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
         });
     }
     let mut value: Value = serde_json::from_str(body).map_err(|e| {
-        VdfsError::invalid(format!(
-            "收件箱条目需要合法 JSON（ChatNode 字段子集）：{e}"
-        ))
+        VdfsError::invalid(format!("收件箱条目需要合法 JSON（ChatNode 字段子集）：{e}"))
     })?;
     let Some(obj) = value.as_object_mut() else {
         return Err(VdfsError::invalid(
@@ -388,9 +386,7 @@ pub(crate) fn parse_inbox_message(raw: &str) -> VdfsResult<cm::ChatNode> {
     obj.entry("id".to_string())
         .or_insert_with(|| Value::String(String::new()));
     let mut message: cm::ChatNode = serde_json::from_value(value).map_err(|e| {
-        VdfsError::invalid(format!(
-            "收件箱条目需要合法 JSON（ChatNode 字段子集）：{e}"
-        ))
+        VdfsError::invalid(format!("收件箱条目需要合法 JSON（ChatNode 字段子集）：{e}"))
     })?;
     // 缺省补齐（见上：只补"不补就不可用"的那三个，不覆盖来者指定的值）
     message.role.get_or_insert(cm::NodeRole::User);
@@ -555,13 +551,13 @@ fn message_label(m: &cm::ChatNode) -> String {
         Some(cm::NodeRole::System) => "系统",
         None => "消息",
     };
-    match (m.msg_type.as_ref(), m.name.as_deref()) {
-        (Some(cm::NodeKind::ToolCall), Some(name)) if !name.is_empty() => {
-            format!("{role} · {name}")
+    if m.is_tool_call() {
+        match m.name.as_deref() {
+            Some(name) if !name.is_empty() => return format!("{role} · {name}"),
+            _ => return format!("{role} · 工具调用"),
         }
-        (Some(cm::NodeKind::ToolCall), _) => format!("{role} · 工具调用"),
-        _ => role.to_string(),
     }
+    role.to_string()
 }
 
 /// 消息状态词——**就是 `NodeStatus` 自己的状态词**（[`cm::NodeStatus::as_str`]）。
@@ -637,11 +633,10 @@ pub(crate) fn message_node(m: &cm::ChatNode) -> VdfsNode {
 /// - `Turn` / `ToolCall`（组合节点，本身无正文）：给一份稳定的 JSON 视图，
 ///   使前端与 LLM 在同一个地址上都能取到完整结构。
 pub(crate) fn message_text(m: &cm::ChatNode) -> String {
-    match m.msg_type {
-        Some(cm::NodeKind::Turn) | Some(cm::NodeKind::ToolCall) => {
-            serde_json::to_string_pretty(m).unwrap_or_default()
-        }
-        _ => m.content.as_ref().map(|c| c.to_text()).unwrap_or_default(),
+    if m.is_run() || m.is_tool_call() {
+        serde_json::to_string_pretty(m).unwrap_or_default()
+    } else {
+        m.content.as_ref().map(|c| c.to_text()).unwrap_or_default()
     }
 }
 
@@ -685,10 +680,7 @@ pub(crate) fn overlay_live(
 }
 
 /// 按 id 取单条消息
-pub(crate) fn message_of<'a>(
-    msgs: &'a [cm::ChatNode],
-    mid: &str,
-) -> VdfsResult<&'a cm::ChatNode> {
+pub(crate) fn message_of<'a>(msgs: &'a [cm::ChatNode], mid: &str) -> VdfsResult<&'a cm::ChatNode> {
     msgs.iter()
         .find(|m| m.id == mid)
         .ok_or_else(|| VdfsError::not_found(format!("消息不存在：{mid}")))

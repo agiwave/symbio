@@ -39,7 +39,7 @@
 //! 参数化。因此这里只保留「收 → 攒 → 取最后一条已完成的助手正文」。
 
 use crate::symbio_core::chat_node::{
-    message_of_node, ChatNode, NodeRole, NodeStatus, NodeKind, SEG_MESSAGES,
+    message_of_node, ChatNode, NodeRole, NodeStatus, SEG_MESSAGES,
 };
 use crate::symbio_core::{
     event_bus_register_subscriber, event_bus_unregister_subscriber, vdfs_change_of, Plugin,
@@ -263,7 +263,7 @@ fn finish(node: &VdfsNode, acc: Accumulator) -> TurnOutcome {
 /// 助手正文的累积器：按消息 id 攒，最终取**最后一条已完成的助手正文**。
 ///
 /// 取「已完成」而不是「最后处理到的文本」：流式片段与推理独白都不该被当成最终
-/// 答复（与 `agent_run` 的转播桥同一判据）。`NodeKind::Reasoning` 因此不进累积器
+/// 答复（与 `agent_run` 的转播桥同一判据）。`is_reasoning()` 因此不进累积器
 /// ——它进的是同一个地址空间，但它是思考过程，不是答复。
 #[derive(Default)]
 struct Accumulator {
@@ -292,9 +292,7 @@ impl Accumulator {
             return;
         }
 
-        if m.role == Some(NodeRole::Assistant)
-            && matches!(m.msg_type, Some(NodeKind::Text) | None)
-        {
+        if m.role == Some(NodeRole::Assistant) && (m.is_text() || m.msg_type.is_none()) {
             if let Some(delta) = m.delta.as_deref() {
                 // 纯增量：追加。身份未知时也照收——回读兜底在帧循环里，
                 // 走到这里说明基线已拿不到，攒下来的部分仍好过丢掉整条。
@@ -317,9 +315,7 @@ impl Accumulator {
 
         if matches!(
             m.status,
-            Some(NodeStatus::Completed)
-                | Some(NodeStatus::Failed)
-                | Some(NodeStatus::Aborted)
+            Some(NodeStatus::Completed) | Some(NodeStatus::Failed) | Some(NodeStatus::Aborted)
         ) {
             self.completed.insert(mid);
         }

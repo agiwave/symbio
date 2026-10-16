@@ -51,7 +51,7 @@
 //! 把两者混成一个开关，会让「用户看得到但模型看不到」与「模型看得到但用户看不到」
 //! 这两种**都错**的状态变成同一件事。
 
-use crate::symbio_core::chat_node::{ChatNode, NodeRole, NodeKind};
+use crate::symbio_core::chat_node::{ChatNode, NodeRole};
 
 /// 投影窗口（条数）——**默认值**，两个调用方（`classify` / `compose`）共用。
 ///
@@ -93,12 +93,8 @@ pub fn conversation_view(messages: &[ChatNode], limit: usize) -> Vec<ChatNode> {
 /// **位置（`parent_id`）不参与判定**：`Turn` 的子 `Text` 是回复正文，它和根级的
 /// 首响一样是"助手说过的话"。
 fn is_conversation_node(m: &ChatNode) -> bool {
-    let is_text = matches!(m.msg_type, None | Some(NodeKind::Text));
-    is_text
-        && matches!(
-            m.role,
-            Some(NodeRole::User) | Some(NodeRole::Assistant)
-        )
+    let is_text = m.msg_type.is_none() || m.is_text();
+    is_text && matches!(m.role, Some(NodeRole::User) | Some(NodeRole::Assistant))
 }
 
 #[cfg(test)]

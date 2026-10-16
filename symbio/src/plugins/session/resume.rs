@@ -39,8 +39,7 @@ use super::tools::{apply_not_executed, execute_tool_async};
 use super::transcript::{llm_emit_removed, llm_emit_state};
 use super::v2_exec::ResumedTool;
 use crate::symbio_core::chat_node::{
-    ChatNode, MessageContent, NodeRole, NodeStatus, NodeKind, ResumeAction,
-    ResumeRequest,
+    ChatNode, MessageContent, NodeKind, NodeRole, NodeStatus, ResumeAction, ResumeRequest,
 };
 use crate::symbio_core::{llm_emit_message, llm_short_id};
 use crate::symbio_core::{ExecAbortSignal, ExecEventSink, PluginError, PluginInvokeRequest};
@@ -121,9 +120,7 @@ async fn process_retry_subtree(
     let messages = session.get_messages().await?;
 
     // 2. 定位 Failed Turn（target_id 指向，msg_type=Turn）
-    let turn_exists = messages
-        .iter()
-        .any(|m| m.id == req.target_id && m.msg_type == Some(NodeKind::Turn));
+    let turn_exists = messages.iter().any(|m| m.id == req.target_id && m.is_run());
     if !turn_exists {
         return Err(PluginError::NotFound(format!(
             "未找到 Failed Turn 节点: {}",
@@ -195,7 +192,7 @@ async fn process_tool_resume_action(
     // 2. 定位 ToolCall 父节点
     let tc_idx = messages
         .iter()
-        .position(|m| m.id == req.target_id && m.msg_type == Some(NodeKind::ToolCall));
+        .position(|m| m.id == req.target_id && m.is_tool_call());
     let tc_idx = match tc_idx {
         Some(i) => i,
         None => {
@@ -209,7 +206,7 @@ async fn process_tool_resume_action(
     // 3. 定位待恢复子节点（user_prompt 或 Failed/WaitingUserAction Text）
     let child_idx = messages.iter().position(|m| {
         m.parent_id.as_deref() == Some(&req.target_id)
-            && (m.msg_type == Some(NodeKind::UserPrompt)
+            && (m.is_interaction()
                 || m.status == Some(NodeStatus::Failed)
                 || m.status == Some(NodeStatus::WaitingUserAction))
     });
@@ -562,7 +559,7 @@ fn extract_tool_context(
     let child = &messages[child_idx];
 
     // 优先从子节点（user_prompt）的 meta.prompt 提取（confirm/ask_user 场景）
-    if child.msg_type == Some(NodeKind::UserPrompt) {
+    if child.is_interaction() {
         if let Some(prompt) = child.meta.as_ref().and_then(|m| m.get("prompt")) {
             let tool_name = prompt
                 .get("tool_name")
