@@ -44,6 +44,7 @@ import {
   CHAT_ROLE_TOOL,
   CHAT_ROLE_USER,
   isUnsettledNodeStatus,
+  type ChatNode,
 } from '@/schemas/chat_node'
 import {
   DEEP_COLLAPSE_LEVEL,
@@ -84,6 +85,9 @@ import {
   nodePrincipal,
   principalNamespace,
   principalPresentationOf,
+  synthesizeTypingChildren,
+  typingIdOf,
+  isTypingHost,
   type MessageFacets,
 } from '../messageTypes'
 
@@ -682,6 +686,75 @@ describe('messageRendererKey：渲染形态分派', () => {
     expect(messageIcon(f)).toBe('👤')
     expect(messageTitle(f, '助手')).toBe('你')
     expect(messageRendererKey(f)).toBe('turn')
+  })
+})
+
+describe('synthesizeTypingChildren：Typing 占位合成（[T-151] 三态）', () => {
+  // 一个 run 骨架（skeleton + tag run → 折叠为 turn）
+  const runHost = (status: ChatNode['status'], id = 'run1'): ChatNode => ({
+    id,
+    type: NODE_KIND_SKELETON,
+    meta: { style_tag: CHAT_STYLE_TAG_RUN },
+    status,
+    seq: 1,
+  })
+
+  it('合成：骨架容器 streaming 且无子 ⇒ 产一条 typing 子', () => {
+    const out = synthesizeTypingChildren([runHost(NODE_STATUS_STREAMING)])
+    expect(out).toHaveLength(1)
+    expect(out[0].id).toBe(typingIdOf('run1'))
+    expect(out[0].parent_id).toBe('run1')
+    expect(out[0].type).toBe(NODE_KIND_TYPING)
+    expect(out[0].status).toBe(NODE_STATUS_STREAMING)
+  })
+
+  it('替换：同父第一个真实子到达 ⇒ 该父不再「无子」，不产 typing', () => {
+    const out = synthesizeTypingChildren([
+      runHost(NODE_STATUS_STREAMING),
+      { id: 'txt', parent_id: 'run1', type: NODE_KIND_BODY, status: NODE_STATUS_STREAMING, seq: 2 },
+    ])
+    expect(out).toEqual([])
+  })
+
+  it('父收束：容器不再 streaming ⇒ 谓词不成立，typing 消失', () => {
+    const out = synthesizeTypingChildren([runHost(NODE_STATUS_COMPLETED)])
+    expect(out).toEqual([])
+  })
+
+  it('非回合容器（正文叶子）不合成——即便 streaming 且无子', () => {
+    const out = synthesizeTypingChildren([
+      { id: 'txt', type: NODE_KIND_BODY, status: NODE_STATUS_STREAMING, seq: 1 },
+    ])
+    expect(out).toEqual([])
+  })
+
+  it('tool 骨架不合成——工具有自己的在途信号（「运行中 / 秒数」），挂「生成中」是错位', () => {
+    const out = synthesizeTypingChildren([
+      {
+        id: 'tool1',
+        type: NODE_KIND_SKELETON,
+        meta: { style_tag: CHAT_STYLE_TAG_TOOL },
+        status: NODE_STATUS_STREAMING,
+        seq: 1,
+      },
+    ])
+    expect(out).toEqual([])
+  })
+
+  it('已有的 typing 派生子不算「真实子」——宿主仍视为空、继续合成', () => {
+    const out = synthesizeTypingChildren([
+      runHost(NODE_STATUS_STREAMING),
+      { id: typingIdOf('run1'), parent_id: 'run1', type: NODE_KIND_TYPING, status: NODE_STATUS_STREAMING },
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0].parent_id).toBe('run1')
+  })
+
+  it('typingIdOf 以宿主为键、跨帧稳定；isTypingHost 只认 streaming 的 run 回合', () => {
+    expect(typingIdOf('run1')).toBe(typingIdOf('run1'))
+    expect(isTypingHost(runHost(NODE_STATUS_STREAMING))).toBe(true)
+    expect(isTypingHost(runHost(NODE_STATUS_COMPLETED))).toBe(false)
+    expect(isTypingHost({ id: 'x', type: NODE_KIND_BODY, status: NODE_STATUS_STREAMING })).toBe(false)
   })
 })
 

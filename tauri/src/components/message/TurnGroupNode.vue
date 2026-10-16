@@ -24,7 +24,7 @@
     <!-- ② 子节点直排 + ③ 组级交代条 -->
     <template v-else>
       <MessageChildren
-        :nodes="children"
+        :nodes="realChildren"
         :depth="depth ?? 0"
         parent-type="turn"
         @retry="emit('retry', $event)"
@@ -49,6 +49,7 @@
 import { computed } from 'vue'
 import {
   isUnsettledNodeStatus,
+  NODE_KIND_TYPING,
   type ChatNode,
 } from '@/schemas/chat_node'
 import { useMessageContent } from '@/composables/useMessageContent'
@@ -57,6 +58,7 @@ import {
   isAbortedStatus,
   isStreamingStatus,
   isTurnFacet,
+  messageTypeOf,
   type MessageFacets,
 } from '@/registry/messageTypes'
 import MessageChildren from './MessageChildren.vue'
@@ -76,14 +78,17 @@ const emit = defineEmits<{
 }>()
 
 const children = computed(() => props.node.children || [])
+// 合成的 typing 占位（[T-151]）是**派生节点**、不是真实内容：判「回合是否还空」时
+// 必须把它剔掉——否则它会让 `isPending` 转假、`TurnPending` 反而不出现。
+const realChildren = computed(() => children.value.filter((c) => messageTypeOf(c) !== NODE_KIND_TYPING))
 const statusClass = computed(() => `status-${props.facets.status}`)
 const agentName = computed(() => agentNameOf(props.node, props.facets.subSession))
 
 /** 根级助手 Turn：唯一承载组级操作（悬停删除 / 组级重试）的 Turn */
 const isRootTurn = computed(() => isTurnFacet(props.facets) && !props.facets.subSession)
-/** 等待态：Turn 已广播但尚无任何子节点且仍在运行 → 显示「正在思考…」骨架 */
+/** 等待态：Turn 已广播但尚无**真实**子节点且仍在运行 → 显示「正在思考…」骨架 */
 const isPending = computed(
-  () => isStreamingStatus(props.facets.status) && children.value.length === 0,
+  () => isStreamingStatus(props.facets.status) && realChildren.value.length === 0,
 )
 /** 需要向用户交代的非正常终态（失败 / 中止） */
 const isUnsettled = computed(() => isUnsettledNodeStatus(props.facets.status))

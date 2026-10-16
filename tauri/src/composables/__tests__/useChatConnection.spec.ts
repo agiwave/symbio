@@ -36,7 +36,11 @@ import type { ChatNode } from '@/schemas/chat_node'
 import {
   NODE_STATUS_STREAMING,
   NODE_STATUS_WAITING_USER_ACTION,
+  NODE_KIND_SKELETON,
+  NODE_KIND_TYPING,
+  CHAT_STYLE_TAG_RUN,
 } from '@/schemas/chat_node'
+import { typingIdOf } from '@/registry/messageTypes'
 import { VDFS_STATUS_ACTIVE, VDFS_STATUS_FAILED, VDFS_STATUS_WORKING } from '@/schemas/vdfs'
 
 /** 地址方案（运行期数据；测试里给一份固定的） */
@@ -205,6 +209,45 @@ describe('messageTree — 从 store 派生', () => {
     c1.removeMessage('a')
     expect(c1.messageTree.value).toHaveLength(0)
     expect(c2.messageTree.value).toHaveLength(1)
+  })
+})
+
+describe('typing 占位合成（[T-151] 端到端：合成挂进 messageTree）', () => {
+  const runHost = (status: ChatNode['status']): ChatNode => ({
+    id: 'run1',
+    type: NODE_KIND_SKELETON,
+    meta: { style_tag: CHAT_STYLE_TAG_RUN },
+    status,
+    seq: 1,
+  })
+
+  it('streaming 空骨架 → 树里出现一条 typing 子', () => {
+    hoisted.store = makeStore({
+      getSessionMessages: vi.fn(() => [runHost(NODE_STATUS_STREAMING)]),
+    })
+    const tree = conn().messageTree.value
+    expect(tree).toHaveLength(1)
+    expect(tree[0].children?.map((c) => c.id)).toEqual([typingIdOf('run1')])
+    expect(tree[0].children?.[0].type).toBe(NODE_KIND_TYPING)
+  })
+
+  it('真实子到达 → typing 让位（替换），不再合成', () => {
+    hoisted.store = makeStore({
+      getSessionMessages: vi.fn(() => [
+        runHost(NODE_STATUS_STREAMING),
+        msg({ id: 'txt', parent_id: 'run1', seq: 2, status: NODE_STATUS_STREAMING }),
+      ]),
+    })
+    const tree = conn().messageTree.value
+    expect(tree[0].children?.map((c) => c.id)).toEqual(['txt'])
+  })
+
+  it('骨架收束 → typing 消失（父收束）', () => {
+    hoisted.store = makeStore({
+      getSessionMessages: vi.fn(() => [runHost('completed')]),
+    })
+    const tree = conn().messageTree.value
+    expect(tree[0].children ?? []).toHaveLength(0)
   })
 })
 

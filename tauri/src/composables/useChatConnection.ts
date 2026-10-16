@@ -20,7 +20,7 @@ import {
   vdfsSessionAddr,
   type VdfsSessionScheme,
 } from '@/schemas/vdfs'
-import { isWaitingStatus } from '@/registry/messageTypes'
+import { isWaitingStatus, synthesizeTypingChildren } from '@/registry/messageTypes'
 
 export interface UseChatConnectionOptions {
   /** 会话 id（地址末段）：store 里所有以会话为键的状态都用它 */
@@ -299,7 +299,11 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     const isEmptyLeaf = (msg: ChatNode) =>
       !parentsWithChildren.has(msg.id) && isBlankContentNode(msg)
 
-    return filtered.filter(m => !isEmptyLeaf(m))
+    const visible = filtered.filter(m => !isEmptyLeaf(m))
+    // Typing 占位（[T-151]）：后端不发，前端按「骨架容器 streaming 且尚无子」合成一条
+    // 派生 typing 子节点。合成挂在可见集之后——它随 messageTree 一起建进树，
+    // 从不写 store（派生态）；宿主一旦有子或收束，谓词转假、下一帧即消失（即「替换 / 移除」）。
+    return [...visible, ...synthesizeTypingChildren(visible)]
   })
 
   const messageTree = computed<ChatNode[]>(() => {

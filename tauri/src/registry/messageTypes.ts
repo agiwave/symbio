@@ -709,6 +709,60 @@ export function isStreamingStatus(status?: NodeStatus | null): boolean {
   return status === NODE_STATUS_STREAMING
 }
 
+// ==================== Typing 占位合成（[T-151]，纯函数） ====================
+//
+// 后端**从不发** typing 帧（见 T-151 exit）；「生成中」的即时反馈由前端按一条规则
+// 合成：一个**助手回合骨架**（`turn` = skeleton+run）正在 streaming、且**还没有任何
+// 真实子节点**时，给它挂一个 typing 占位当第一个孩子。三条状态都由这一个谓词推出：
+//
+// - **合成**：回合 streaming 且无真实子 ⇒ 产一条 typing；
+// - **替换**：该回合第一个真实子到达 ⇒ 不再是「无子」，下一帧起不产 typing
+//   （真实子就是那句里的「非-typing 兄弟」，到达即顶掉占位）；
+// - **父收束**：回合不再 streaming ⇒ 谓词不成立，typing 消失。
+//
+// 之所以能靠「不再合成」实现移除，是因为 typing 是**派生节点**、从不落地——它没有
+// 需要在 store 里就地标 `status=removed` 的持久身；移除 ⟺ 谓词转假。合成节点带稳定
+// 前缀 id（`typingIdOf`），永不与后端 id 相撞。
+//
+// **只认回合（run），不认 tool**：工具行有它自己的在途信号（「运行中 / 秒数」），
+// 给它挂「生成中」占位是错位的呈现；回合才是「等 LLM 吐出第一个节点」这个语义的宿主——
+// 与 `TurnGroupNode` 既有的等待态判据同一 scope。
+
+/** typing 占位的稳定合成 id——以宿主为键，跨帧不变（缓存/键控都靠它）。 */
+export function typingIdOf(hostId: string): string {
+  return `__typing__${hostId}`
+}
+
+/** 该节点是否是 typing 的宿主——正在 streaming 的助手回合骨架（run）。 */
+export function isTypingHost(node: ChatNode): boolean {
+  return isStreamingStatus(node.status) && messageTypeOf(node) === NODE_KIND_TURN
+}
+
+/** 从可见节点扁平表合成 typing 占位子节点（宿主 = streaming 且无真实子的回合）。 */
+export function synthesizeTypingChildren(visible: ChatNode[]): ChatNode[] {
+  // 只数**真实子**：已有的 typing 派生节点不能反过来让宿主显得「有子」。
+  const parentsWithRealChild = new Set<string>()
+  for (const n of visible) {
+    if (n.parent_id && messageTypeOf(n) !== NODE_KIND_TYPING) {
+      parentsWithRealChild.add(n.parent_id)
+    }
+  }
+  const out: ChatNode[] = []
+  for (const host of visible) {
+    if (!isTypingHost(host)) continue
+    if (parentsWithRealChild.has(host.id)) continue
+    out.push({
+      id: typingIdOf(host.id),
+      parent_id: host.id,
+      type: NODE_KIND_TYPING,
+      status: NODE_STATUS_STREAMING,
+      principal: host.principal,
+      seq: host.seq,
+    })
+  }
+  return out
+}
+
 /** 是否等待用户响应（审批 / 提问） */
 export function isWaitingStatus(status?: NodeStatus | null): boolean {
   return status === NODE_STATUS_WAITING_USER_ACTION

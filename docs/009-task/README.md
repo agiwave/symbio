@@ -60,14 +60,13 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [[SP-001]]，机制见 [[PL-011-登记与汇总机制|PL-011 · 登记与汇总机制]]。
 
-**计数**：☐ todo 5 · 🟡 doing 1 · ☑ done 142 · ❌ wont 3（共 151）
+**计数**：☐ todo 4 · 🟡 doing 1 · ☑ done 143 · ❌ wont 3（共 151）
 
 ## 待处理（按依赖顺序）
 
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
 | `T-140-大结果检索的聚合口径` | 检索结果截断只说「限制了」不说「一共多少」——聚合型问题逼出重复调用 | next | local | — |
-| `T-151-Typing占位节点` | Typing 占位——前端本地合成、同父非-typing 兄弟到达即 removed | next | frontend | T-147-ChatNode协议改名与字段瘦身 |
 | `T-152-协议顶层字段消费守卫` | `protocol-mirror-audit.mjs` 加 G 组——ChatNode 顶层每字段须有前端/CLI 不依赖 meta 语义的消费者 | next | 门禁与CI | T-147-ChatNode协议改名与字段瘦身 |
 | `T-141-开机噪声与文档漂移` | 每次开机一条假异常 WARN（`.symbio/projection` 孤儿目录）+ 文档里几处与运行事实不符的指路 | later | 登记卫生 | — |
 | `T-153-旧文档与注释清理` | 扫「一轮 / Turn」措辞——ADR-052/055 作废标注、docs/005-rev 归档、代码注释同步 | later | 登记卫生 | T-147-ChatNode协议改名与字段瘦身、T-148-前端注册表按kind与style_tag分派、T-149-会话建树策略开关、T-150-骨架惰性重取、T-151-Typing占位节点、T-152-协议顶层字段消费守卫 |
@@ -118,6 +117,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-144-长度截断的自动续写在v2执行路径不可达` | v2 执行路径重建 TurnOutput 时丢掉 finish——长度戳与自动续写读到的恒是缺省 Stop | 会话与输入 |
 | `T-149-会话建树策略开关` | `presentation_tree: flat \| grouped \| deep` 会话配置——后端组树，前端零结构假设 | 会话与输入 |
 | `T-150-骨架惰性重取` | `expand_skeleton` VDFS 动作——折叠骨架可释放子节点，展开时按需拉取 | 会话与输入 |
+| `T-151-Typing占位节点` | Typing 占位——前端本地合成、同父非-typing 兄弟到达即 removed | frontend |
 | `T-013` | Rust 覆盖率阈值：与 C7 同族的已知盲区，排在会话真源归一之后 | plan |
 | `T-014` | 分布式 Store 的 seq 单调与「无溯源不声明」如何共存（G4） | plan |
 | `T-075-前端形态e2e补位` | 被测形态只有 CLI：tauri 前端形态无浏览器层 e2e（AR-007 记为事实），补最小呈现判据 | e2e |
@@ -380,13 +380,13 @@ board.columns: [rank, deps, evidence, reason]
 - [`T-140-大结果检索的聚合口径`](140-大结果检索的聚合口径.md) 检索结果截断只说「限制了」不说「一共多少」——聚合型问题逼出重复调用（todo）
 - [`T-141-开机噪声与文档漂移`](141-开机噪声与文档漂移.md) 每次开机一条假异常 WARN（`.symbio/projection` 孤儿目录）+ 文档里几处与运行事实不符的指路（todo）
 - [`T-144-长度截断的自动续写在v2执行路径不可达`](144-长度截断的自动续写在v2执行路径不可达.md) v2 执行路径重建 TurnOutput 时丢掉 finish——长度戳与自动续写读到的恒是缺省 Stop（done）
-- [`T-145-前端机制化批`](145-前端机制化批.md) 前端机制化——ChatNode 协议 / 主体平级 / 建树策略 / 惰性重取（SPRINT）（doing） · 子项 todo 3 / done 5
+- [`T-145-前端机制化批`](145-前端机制化批.md) 前端机制化——ChatNode 协议 / 主体平级 / 建树策略 / 惰性重取（SPRINT）（doing） · 子项 todo 2 / done 6
   - [`T-146-主体可路由地址`](146-主体可路由地址.md) 主体 id 迁到可路由地址形态——授权表扩 person/tool/system 三族行（done）
   - [`T-147-ChatNode协议改名与字段瘦身`](147-ChatNode协议改名与字段瘦身.md) ChatMessage → ChatNode 一次原子改——Turn 退役、role 删除、tool_call_id 沉 meta、principal 升级为结构体（done）
   - [`T-148-前端注册表按kind与style_tag分派`](148-前端注册表按kind与style_tag分派.md) 呈现分派从 MessageType 枚举换成 (kind, style_tag, principal) 三元组（done）
   - [`T-149-会话建树策略开关`](149-会话建树策略开关.md) `presentation_tree: flat \| grouped \| deep` 会话配置——后端组树，前端零结构假设（done）
   - [`T-150-骨架惰性重取`](150-骨架惰性重取.md) `expand_skeleton` VDFS 动作——折叠骨架可释放子节点，展开时按需拉取（done）
-  - [`T-151-Typing占位节点`](151-Typing占位节点.md) Typing 占位——前端本地合成、同父非-typing 兄弟到达即 removed（todo）
+  - [`T-151-Typing占位节点`](151-Typing占位节点.md) Typing 占位——前端本地合成、同父非-typing 兄弟到达即 removed（done）
   - [`T-152-协议顶层字段消费守卫`](152-协议顶层字段消费守卫.md) `protocol-mirror-audit.mjs` 加 G 组——ChatNode 顶层每字段须有前端/CLI 不依赖 meta 语义的消费者（todo）
   - [`T-153-旧文档与注释清理`](153-旧文档与注释清理.md) 扫「一轮 / Turn」措辞——ADR-052/055 作废标注、docs/005-rev 归档、代码注释同步（todo）
 
