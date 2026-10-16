@@ -54,9 +54,9 @@ cd tauri && npm install && npm run tauri dev
 ### 命令行
 
 ```bash
-cd cli && node scripts/build-cli.mjs
-../symbio/target/debug/symbio-cli.exe --homedir ~/.symbio -m "你好"   # 单条
-../symbio/target/debug/symbio-cli.exe --homedir ~/.symbio             # REPL
+node cli/scripts/build-cli.mjs              # 产物在仓库根：target/debug/symbio-cli.exe
+./target/debug/symbio-cli.exe -m "你好"     # 单条：系统目录默认 <当前目录>/.symbio
+./target/debug/symbio-cli.exe               # REPL；系统目录在别处时加 --homedir <路径>
 ```
 
 ### 编译与测试核心库
