@@ -477,7 +477,12 @@ impl Transcript {
     }
 
     /// 变更投递的**唯一出口**（`changes.notify` 只在这里被调用）。
+    ///
+    /// 呈现（`title`/`icon`）在这里从节点**形状**现算（[T-155 B3]）：图里存的、事件里的
+    /// 节点都不含呈现——它是「session 把数据交给前端那一刻」才填的交互面元素，不属于
+    /// 后端业务/存储事实。窄增量帧无 `msg_type`，派生判据全不命中即原样透传（幂等无副作用）。
     fn publish(&self, message: cm::ChatNode) {
+        let message = message.with_derived_presentation();
         self.changes.notify(&VdfsChange::with_data(
             message_path(&self.session_id, &message.id),
             &message,

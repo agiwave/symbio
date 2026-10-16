@@ -477,6 +477,24 @@ export interface ChatNode {
   status?: NodeStatus;
   /** 失败原因（面向用户的可读短消息），仅当 status === 'failed' 时存在 */
   error?: string;
+  /**
+   * 头部**标题**——后端填的呈现数据（[T-155]，[ADR-070 §决策 2]）。
+   *
+   * 机制化目标：前端按 `type`(NodeKind) + `title`/`icon`/`actions` 这些数据渲染，
+   * **不再 `switch(style_tag)`**。`title`/`icon` 有值即优先用（后端是呈现权威）；
+   * 缺省（旧后端 / 历史数据）才退回 `registry/messageTypes` 的 legacy 表。
+   * 住在 `ChatNode` 顶层（非 meta），故由 mirror-audit D 组比字段名、G 组要求直接消费。
+   */
+  title?: string;
+  /** 头部**图标**——后端填的呈现数据（同上，缺省退 legacy 表）。 */
+  icon?: string;
+  /**
+   * 本节点**可用的恢复动作**（后端填的呈现数据，[ADR-070 §决策 2]）。
+   *
+   * 前端据此决定是否给重试 / 补充参数 / 审批入口，而不是按业务类型（tool / compression）
+   * 反推「该给什么按钮」。缺省（后端尚未填）时退回 legacy 的类型驱动判据。
+   */
+  actions?: ResumeAction[];
   meta?: Record<string, any>;
   timestamp?: number;
   /** 树形展开：前端按 `parent_id` 组装的子列表（后端只给扁平列表） */

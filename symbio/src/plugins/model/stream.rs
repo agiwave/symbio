@@ -658,8 +658,6 @@ async fn dispatch_protocol_event(
                         parent_id: Some(root_id.into()),
                         role: Some(NodeRole::Assistant),
                         msg_type: Some(NodeKind::Notice),
-                        title: Some("思考过程".to_string()),
-                        icon: Some("💭".to_string()),
                         content: Some(MessageContent::Text(out.reasoning.clone())),
                         status: Some(NodeStatus::Streaming),
                         ..Default::default()
@@ -717,7 +715,6 @@ async fn dispatch_protocol_event(
                         parent_id: Some(root_id.into()),
                         role: Some(NodeRole::Assistant),
                         msg_type: Some(NodeKind::Skeleton),
-                        icon: Some("🔧".to_string()),
                         content: Some(MessageContent::Text(full_args)),
                         status: Some(NodeStatus::Streaming),
                         tool_call_id: Some(wire_id),

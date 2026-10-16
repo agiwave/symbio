@@ -236,9 +236,10 @@ fn reasoning_with_distinct_reply_keeps_both_children() {
     let reasoning_child = msgs.iter().find(|m| m.is_reasoning()).unwrap();
     assert_eq!(reasoning_child.msg_type, Some(NodeKind::Notice));
     assert_eq!(reasoning_child.style_tag(), Some(CHAT_STYLE_TAG_REASONING));
-    // 呈现意图是后端填的**数据**（[T-155]/[ADR-070 §决策 2]）：前端据 title/icon 渲染，不再 switch(style_tag)。
-    assert_eq!(reasoning_child.title.as_deref(), Some("思考过程"));
-    assert_eq!(reasoning_child.icon.as_deref(), Some("💭"));
+    // 呈现（title/icon）**不属于落库事实**（[T-155 B3]）：into_messages 产的是进存储的
+    // 节点，只带形状（msg_type + style_tag），呈现由前后端交互面统一派生——这里必须为空。
+    assert_eq!(reasoning_child.title, None);
+    assert_eq!(reasoning_child.icon, None);
     assert_eq!(texts.len(), 1);
 
     // response_id 只挂在正文响应节点上

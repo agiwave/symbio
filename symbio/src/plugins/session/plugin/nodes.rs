@@ -781,6 +781,11 @@ pub(crate) fn session_content(
     // 记号，令 live↔reload↔呈现三格锁步。`overlay_live`/`ordered` 只按 id 重排/
     // 整条替换、从不改写 `parent_id`，投影叠在其上仍正确。
     super::super::message_build::flatten_whole_tree(&mut messages, mode);
+    // 呈现派生（[T-155 B3]）：会话叶子读是前端交互出口，交付前按形状算出 title/icon。
+    let messages: Vec<cm::ChatNode> = messages
+        .into_iter()
+        .map(cm::ChatNode::with_derived_presentation)
+        .collect();
     let payload = json!({
         "id": session.id,
         "title": session.display_title(),

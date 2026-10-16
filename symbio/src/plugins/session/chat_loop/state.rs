@@ -526,8 +526,6 @@ impl CompressionEmitter {
                 id: node_id.to_string(),
                 role: Some(NodeRole::Assistant),
                 msg_type: Some(NodeKind::Notice),
-                title: Some("上下文压缩".to_string()),
-                icon: Some("🗜".to_string()),
                 status: Some(NodeStatus::Streaming),
                 content: Some(MessageContent::Text("正在压缩上下文…".to_string())),
                 ..Default::default()
@@ -562,8 +560,6 @@ impl CompressionEmitter {
                     id: node_id.to_string(),
                     role: Some(NodeRole::Assistant),
                     msg_type: Some(NodeKind::Notice),
-                    title: Some("上下文压缩".to_string()),
-                    icon: Some("🗜".to_string()),
                     ..Default::default()
                 }
                 .with_style_tag(CHAT_STYLE_TAG_COMPRESSION)
@@ -978,12 +974,10 @@ impl ChatOrchestrator {
                     // 答案取自思考：这一格就是正文（`Body`），不挂 reasoning tag。
                     finalized
                 } else {
-                    // 独立思考：归位 `Notice`（折叠叶，[T-155]），title 供前端显示，
-                    // tag 只作后端业务注记。
+                    // 独立思考：归位 `Notice`（折叠叶，[T-155]），呈现（title/icon）
+                    // 由前后端交互面统一派生，不在这里写；tag 只作后端业务注记。
                     let mut n = finalized;
                     n.msg_type = Some(NodeKind::Notice);
-                    n.title = Some("思考过程".to_string());
-                    n.icon = Some("💭".to_string());
                     n.with_style_tag(CHAT_STYLE_TAG_REASONING)
                 },
             )

@@ -289,3 +289,65 @@ fn message_of_node_folds_attr_tool_name_into_meta() {
     .unwrap();
     assert_eq!(m.tool_name(), Some("new"));
 }
+
+/// 呈现派生（[T-155 B3]）：title/icon 从**形状**现算，且只在前后端交互面调用。
+///
+/// 钉住三件事——(1) 每类形状算出什么；(2) `run` 骨架标题是智能体名（上下文相关），
+/// 这里绝不钉死；(3) 已有值不覆盖（幂等，重复投递安全）。
+#[test]
+fn derived_presentation_from_shape() {
+    // reasoning：Notice + reasoning tag → 思考过程/💭
+    let r = ChatNode {
+        id: "r".into(),
+        msg_type: Some(NodeKind::Notice),
+        ..Default::default()
+    }
+    .with_style_tag(CHAT_STYLE_TAG_REASONING)
+    .with_derived_presentation();
+    assert_eq!(r.title.as_deref(), Some("思考过程"));
+    assert_eq!(r.icon.as_deref(), Some("💭"));
+
+    // compression：Notice 且非 reasoning tag → 上下文压缩/🗜
+    let c = ChatNode {
+        id: "c".into(),
+        msg_type: Some(NodeKind::Notice),
+        ..Default::default()
+    }
+    .with_derived_presentation();
+    assert_eq!(c.title.as_deref(), Some("上下文压缩"));
+    assert_eq!(c.icon.as_deref(), Some("🗜"));
+
+    // tool：Skeleton + tool tag → icon 🔧 + title = tool_name
+    let t = ChatNode {
+        id: "t".into(),
+        msg_type: Some(NodeKind::Skeleton),
+        ..Default::default()
+    }
+    .with_style_tag(CHAT_STYLE_TAG_TOOL)
+    .with_tool_name(Some("read_file".into()))
+    .with_derived_presentation();
+    assert_eq!(t.icon.as_deref(), Some("🔧"));
+    assert_eq!(t.title.as_deref(), Some("read_file"));
+
+    // run：Skeleton + run tag → 呈现留空（智能体名不在此钉死）
+    let run = ChatNode {
+        id: "run".into(),
+        msg_type: Some(NodeKind::Skeleton),
+        ..Default::default()
+    }
+    .with_style_tag(CHAT_STYLE_TAG_RUN)
+    .with_derived_presentation();
+    assert_eq!(run.title, None);
+    assert_eq!(run.icon, None);
+
+    // 幂等：已有值不被派生覆盖
+    let kept = ChatNode {
+        id: "k".into(),
+        msg_type: Some(NodeKind::Notice),
+        title: Some("自定义".into()),
+        ..Default::default()
+    }
+    .with_style_tag(CHAT_STYLE_TAG_REASONING)
+    .with_derived_presentation();
+    assert_eq!(kept.title.as_deref(), Some("自定义"));
+}

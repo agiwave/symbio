@@ -570,7 +570,6 @@ async fn record_protocol_failure(
             id: tool_call_id.to_string(),
             role: Some(NodeRole::Assistant),
             msg_type: Some(NodeKind::Skeleton),
-            icon: Some("🔧".to_string()),
             status: Some(NodeStatus::Completed),
             error: Some(error_text.to_string()),
             meta: Some(json!({

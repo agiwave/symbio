@@ -654,17 +654,6 @@ impl ChatNode {
         self
     }
 
-    /// 落呈现意图（[T-155]，[ADR-070 §决策 2]）：后端把「这一格该显示什么」写成**数据**
-    /// （`title` 头部标题、`icon` 头部图标），前端据此渲染折叠叶 / 容器，**不再 `switch(style_tag)`**。
-    ///
-    /// `title` 传 `None` 表示「标题是动态的，由呈现层按上下文现算」（如 `Skeleton` run 的标题
-    /// 是智能体名，不在这里钉死）。链式用，缺省两参都可不给（只填其一）。
-    pub fn with_presentation(mut self, title: Option<&str>, icon: Option<&str>) -> Self {
-        self.title = title.map(str::to_string);
-        self.icon = icon.map(str::to_string);
-        self
-    }
-
     /// 本节点是不是「一整轮助手响应的骨架」（`Skeleton` + tag `run`）。
     pub fn is_run(&self) -> bool {
         self.msg_type == Some(NodeKind::Skeleton) && self.style_tag() == Some(CHAT_STYLE_TAG_RUN)
@@ -704,6 +693,29 @@ impl ChatNode {
     /// 本节点是不是「等待用户回应的交互」（`Interaction`）。
     pub fn is_interaction(&self) -> bool {
         self.msg_type == Some(NodeKind::Interaction)
+    }
+
+    /// **呈现派生**（[T-155 B3]，[ADR-070 §决策 2]）：从节点**形状**（`msg_type` +
+    /// `style_tag` + `meta.tool_name`）现算面向用户的 `title` / `icon`，**只在前后端
+    /// 交互面调用**（转写投递出口与消息列表出口），不在业务/落库构造点写入。
+    ///
+    /// 判据即本模块既有的谓词，事实与呈现由此彻底分家：事件/存储里的节点**永不含**
+    /// `title`/`icon`，前端拿到的那一帧才由后端机械算出。`run` 骨架的标题是智能体名
+    /// （上下文相关），这里不钉死——留 `None` 交呈现层。已有值不覆盖（幂等）。
+    pub fn with_derived_presentation(mut self) -> Self {
+        if self.is_reasoning() {
+            self.title.get_or_insert_with(|| "思考过程".to_string());
+            self.icon.get_or_insert_with(|| "💭".to_string());
+        } else if self.is_compression() {
+            self.title.get_or_insert_with(|| "上下文压缩".to_string());
+            self.icon.get_or_insert_with(|| "🗜".to_string());
+        } else if self.is_tool_call() {
+            self.icon.get_or_insert_with(|| "🔧".to_string());
+            if let Some(name) = self.tool_name().map(str::to_string) {
+                self.title.get_or_insert_with(|| name);
+            }
+        }
+        self
     }
 }
 

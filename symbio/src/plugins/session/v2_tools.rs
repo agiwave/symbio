@@ -157,8 +157,6 @@ impl DispatchPort for SessionDispatchPort {
                 parent_id: Some(self.root_id.clone()),
                 role: Some(NodeRole::Assistant),
                 msg_type: Some(NodeKind::Notice),
-                title: Some("思考过程".to_string()),
-                icon: Some("💭".to_string()),
                 content: Some(MessageContent::Text(text)),
                 status: Some(NodeStatus::Completed),
                 ..Default::default()

@@ -345,7 +345,6 @@ impl LlmAdapter for ProviderLlmAdapter {
                                 parent_id: Some(root_id.clone()),
                                 role: Some(NodeRole::Assistant),
                                 msg_type: Some(NodeKind::Skeleton),
-                                icon: Some("🔧".to_string()),
                                 // 参数走 content（展平时从这里 re-parse）——规范化
                                 // 口径是 `tc.arguments.to_string()`。
                                 content: Some(MessageContent::Text(c.arguments.to_string())),

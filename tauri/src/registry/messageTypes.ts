@@ -53,6 +53,7 @@ import {
   RESUME_ACTION_RETRY,
   RESUME_ACTION_RETRY_COMPACTION,
   RESUME_ACTION_RETRY_SUBTREE,
+  RESUME_ACTION_SUPPLY,
   normalizePrincipal,
   principalId,
   PRINCIPAL_KIND_AGENT,
@@ -283,6 +284,18 @@ export interface MessageFacets {
   status: NodeStatus
   /** 工具名（`meta.tool_name`，[T-147d-ii]） */
   name?: string
+  /**
+   * 后端填的头部标题（[T-155] 呈现数据）——有值即优先于 legacy 类型表。
+   * 前端机制化的落点：呈现意图来自节点数据，不靠 `switch(style_tag)` 现推。
+   */
+  title?: string
+  /** 后端填的头部图标（同上，缺省退 legacy 表）。 */
+  icon?: string
+  /**
+   * 后端声明的**可用恢复动作**（[T-155] 呈现数据）——重试 / 补充参数 / 审批入口
+   * 的首选判据；缺省（后端未填）退回按业务类型反推的 legacy 判据。
+   */
+  actions?: ResumeAction[]
   /** principal 身份呈现（[T-148] 独立表：命名空间优先、kind 兜底，无主体 → `undefined`） */
   principal?: PrincipalPresentation
   /** 子会话 Turn（`role = tool` 的 turn）：某工具「过程」段 */
@@ -329,6 +342,10 @@ export function facetsOf(node: ChatNode, parentType?: string): MessageFacets {
     type,
     status: messageStatusOf(node),
     name: toolNameOf(node),
+    // 呈现数据从节点顶层直读（[T-155]）——不经 meta，是后端填的权威呈现意图。
+    title: node.title,
+    icon: node.icon,
+    actions: node.actions,
     // principal 身份呈现（[T-148] 独立表；组件据此画徽标，缺主体则不画）
     principal: principalPresentationOf(node.principal),
     // 子会话 Turn = 工具「过程」段（role=tool 的 turn），与根级助手 Turn 同构但无组级操作
@@ -551,11 +568,19 @@ export function messageParentSessionId(node: Pick<ChatNode, 'meta'>): string | u
  * 思考 / 正文 / 工具请求的失败归 **Turn 级**重试（组级错误条），不在此列。
  */
 export function canRetryTool(f: MessageFacets): boolean {
+  // [T-155] 呈现数据优先：后端声明了可用动作就按动作判，不再从业务类型反推。
+  if (f.actions) return isFailedStatus(f.status) && f.actions.includes(RESUME_ACTION_RETRY)
   return f.type === NODE_KIND_TOOL_CALL && isFailedStatus(f.status) && f.recoverable
 }
 
 /** 工具失败能否**补充参数**后重跑（resume action=`supply`） */
 export function canSupplyToolArgs(f: MessageFacets): boolean {
+  if (f.actions)
+    return (
+      isFailedStatus(f.status) &&
+      f.actions.includes(RESUME_ACTION_SUPPLY) &&
+      f.failureKind === MESSAGE_FAILURE_KIND_ERROR
+    )
   return canRetryTool(f) && f.failureKind === MESSAGE_FAILURE_KIND_ERROR
 }
 
@@ -571,6 +596,8 @@ export function canSupplyToolArgs(f: MessageFacets): boolean {
  * **压缩节点本身**（系统动作），两者不能共用 `retry_subtree`。
  */
 export function canRetryCompaction(f: MessageFacets): boolean {
+  if (f.actions)
+    return isFailedStatus(f.status) && f.actions.includes(RESUME_ACTION_RETRY_COMPACTION)
   return f.type === NODE_KIND_COMPRESSION && isFailedStatus(f.status)
 }
 
@@ -1035,10 +1062,12 @@ function facetValue<T>(v: Facet<T>, f: MessageFacets, agentName = ''): T {
 /**
  * 头部图标。
  *
- * 优先级（跨类型，各一行）：用户消息 > 合成请求 > 工具返回 > 类型表。
+ * [T-155] 呈现数据优先：后端填了 `node.icon` 就直接用（前端不再从业务类型现推）。
+ * 缺省才落 legacy 优先级链：用户消息 > 合成请求 > 工具返回 > 类型表。
  * 请求 / 返回只出现在 `type = text` 上（`facetsOf` 保证），故在查表前判定。
  */
 export function messageIcon(f: MessageFacets): string {
+  if (f.icon) return f.icon
   if (f.compacted) return '🧠'
   if (f.role === CHAT_ROLE_USER) return '👤'
   if (f.toolRequest) return '📤'
@@ -1049,10 +1078,12 @@ export function messageIcon(f: MessageFacets): string {
 /**
  * 头部标题。
  *
+ * [T-155] 呈现数据优先：后端填了 `node.title` 就直接用。
  * `agentName` 由调用方传入（Turn 的标题是「该智能体的名称」，取值逻辑见 `agentNameOf`）。
- * 优先级与 `messageIcon` 同源（用户 > 请求 > 返回 > 类型表）。
+ * 缺省才落 legacy 优先级与同源（用户 > 请求 > 返回 > 类型表）。
  */
 export function messageTitle(f: MessageFacets, agentName: string): string {
+  if (f.title) return f.title
   if (f.compacted) return '历史记忆'
   if (f.role === CHAT_ROLE_USER) return '你'
   if (f.toolRequest) return '请求'
