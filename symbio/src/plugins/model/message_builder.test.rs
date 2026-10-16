@@ -131,7 +131,7 @@ fn reasoning_only_flattens_to_single_assistant_message() {
 #[test]
 fn reasoning_with_reply_flattens_into_content_and_reasoning_content() {
     let msgs = turn_tree(vec![
-        child("turn-0001-reason", NodeKind::Body, "思考过程")
+        child("turn-0001-reason", NodeKind::Notice, "思考过程")
             .with_style_tag(crate::symbio_core::chat_node::CHAT_STYLE_TAG_REASONING),
         child("turn-0001-text", NodeKind::Body, "正常回复"),
     ]);
@@ -169,7 +169,7 @@ fn flatten_keeps_only_recent_reasoning_in_request_view() {
                 id: format!("{turn_id}-reason"),
                 parent_id: Some(turn_id.into()),
                 role: Some(NodeRole::Assistant),
-                msg_type: Some(NodeKind::Body),
+                msg_type: Some(NodeKind::Notice),
                 meta: Some(serde_json::json!({"style_tag": "reasoning"})),
                 content: Some(MessageContent::Text(reasoning.into())),
                 status: Some(NodeStatus::Completed),

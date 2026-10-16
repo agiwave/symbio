@@ -231,10 +231,10 @@ fn reasoning_with_distinct_reply_keeps_both_children() {
     assert_eq!(texts, vec!["正常回复".to_string()]);
     assert_ne!(reasonings[0], texts[0], "两个子节点内容必须不同");
 
-    // 两条流同属 `Body`，**只有** `style_tag` 把它们分开——这是形状契约的另一半：
-    // 少写 tag 就是「思考被当正文落库」。
+    // 推理落 `Notice`（折叠叶，[T-155]），正文落 `Body`——两者形状已分家，
+    // `style_tag` 只是后端把 reasoning 与同格 compression 分开的业务注记。
     let reasoning_child = msgs.iter().find(|m| m.is_reasoning()).unwrap();
-    assert_eq!(reasoning_child.msg_type, Some(NodeKind::Body));
+    assert_eq!(reasoning_child.msg_type, Some(NodeKind::Notice));
     assert_eq!(reasoning_child.style_tag(), Some(CHAT_STYLE_TAG_REASONING));
     assert_eq!(texts.len(), 1);
 

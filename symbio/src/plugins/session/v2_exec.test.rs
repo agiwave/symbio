@@ -362,7 +362,7 @@ impl ModelProvider for FaithfulProvider {
                             id: "n-rea".into(),
                             parent_id: Some("r-1".into()),
                             role: Some(cm::NodeRole::Assistant),
-                            msg_type: Some(cm::NodeKind::Body),
+                            msg_type: Some(cm::NodeKind::Notice),
                             content: Some(cm::MessageContent::Text("这个名词需要先定义。".into())),
                             status: Some(cm::NodeStatus::Streaming),
                             ..Default::default()

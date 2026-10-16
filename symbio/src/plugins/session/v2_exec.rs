@@ -141,12 +141,17 @@ enum UiNodeKind {
 }
 
 impl UiNodeKind {
-    /// 给这一帧的节点定形状：正文与推理同属 `Body`，两者的差别是呈现变体，
-    /// 落在 `meta.style_tag` 上（[ADR-070 §决策 3]）。
+    /// 给这一帧的节点定形状：正文是 `Body`，推理是 `Notice`（折叠叶，[ADR-070 §决策 3]
+    /// [T-155]——reasoning 与 compression 同格，前端渲染二者一样，业务区分只在 `style_tag`）。
     fn shape(self, node: ChatNode) -> ChatNode {
         match self {
             UiNodeKind::Text => node,
-            UiNodeKind::Reasoning => node.with_style_tag(CHAT_STYLE_TAG_REASONING),
+            UiNodeKind::Reasoning => {
+                let mut n = node;
+                n.msg_type = Some(NodeKind::Notice);
+                n.title = Some("思考过程".to_string());
+                n.with_style_tag(CHAT_STYLE_TAG_REASONING)
+            }
         }
     }
 }
@@ -1614,7 +1619,8 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                 id: reasoning_child_id,
                 parent_id: Some(root_id.to_string()),
                 role: Some(NodeRole::Assistant),
-                msg_type: Some(NodeKind::Body),
+                msg_type: Some(NodeKind::Notice),
+                title: Some("思考过程".to_string()),
                 content: Some(MessageContent::Text(reasoning_text.clone())),
                 status: Some(NodeStatus::Completed),
                 timestamp: Some(crate::symbio_core::clock_now_ms()),

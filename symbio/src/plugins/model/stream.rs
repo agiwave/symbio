@@ -657,7 +657,8 @@ async fn dispatch_protocol_event(
                         id: out.reasoning_child_id.clone(),
                         parent_id: Some(root_id.into()),
                         role: Some(NodeRole::Assistant),
-                        msg_type: Some(NodeKind::Body),
+                        msg_type: Some(NodeKind::Notice),
+                        title: Some("思考过程".to_string()),
                         content: Some(MessageContent::Text(out.reasoning.clone())),
                         status: Some(NodeStatus::Streaming),
                         ..Default::default()

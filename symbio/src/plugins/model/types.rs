@@ -75,6 +75,9 @@ impl From<NativeMessage> for ChatNode {
             response_id: msg.response_id,
             prompt: msg.prompt,
             error: None,
+            title: None,
+            icon: None,
+            actions: None,
             tool_call_id: None,
         }
     }

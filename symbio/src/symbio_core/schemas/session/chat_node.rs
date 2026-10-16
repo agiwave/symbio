@@ -19,29 +19,35 @@ pub enum NodeRole {
     System,
 }
 
-/// 节点**形状**——五值闭集（`body` / `notice` / `skeleton` / `interaction` / `typing`，
-/// [ADR-070 §决策 1]）。同一 shape 内的呈现变体**不在枚举里**，走 `meta.style_tag`
-/// （词表见 [`CHAT_STYLE_TAG_REASONING`] 等，[ADR-070 §决策 3]）。
+/// 节点**形状**——五值闭集（`body` / `notice` / `skeleton` / `interaction` / `typing`），
+/// 是前端呈现的**唯一分派轴**（[ADR-070 §决策 3]，[T-155]）。这五值是**纯 UI 形状**概念
+/// （展开叶 / 折叠叶 / 容器 / 交互 / 占位），不含任何业务。同 shape 内的业务变体
+/// （run/tool/reasoning/compression…）走 `meta.style_tag`，**只在后端作业务判据**，
+/// 前端从不读它——业务差异呈现靠 `title`/`icon`/`actions` 数据（[ADR-070 §决策 2]）。
 ///
-/// 消费方按 [`ChatNode`] 上的**谓词**（`is_run` / `is_tool_call` / `is_reasoning` /
+/// 消费方按 [`ChatNode`] 上的**后端谓词**（`is_run` / `is_tool_call` / `is_reasoning` /
 /// `is_text` / `is_compression` / `is_interaction`）判节点，而不是按变体名 match——
-/// 变体名 + tag 两维合起来才是语义。
+/// 变体名 + tag 两维合起来才是业务语义（这二维只活在后端）。
 ///
 /// 旧六词（`text` / `reasoning` / `turn` / `tool_call` / `user_prompt` / `compression`）
 /// **不在本枚举**：它们只存在于存量 VDFS 属性里，经 [`legacy_shape_to_style_tag`]
 /// 在 [`message_of_node`] 读边界一次性折叠成新形态 + `style_tag` 注入。
 ///
-/// 决策依据：[ADR-070 §决策 1 / 3]·父批：[T-147c-ii]。
+/// 决策依据：[ADR-070 §决策 1 / 3]·父批：[T-155]。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
 pub enum NodeKind {
-    /// 正文：无 tag = 普通文本；`style_tag="reasoning"` = 思考正文
+    /// 正文叶子：展开显示。业务呈现变体（思考 / 工具响应文本 …）**不在这一格**，
+    /// 靠 `title` / `icon` 数据区分；前端只认「这是一个展开的正文叶子」。
     #[default]
     Body,
-    /// 系统提示：当前词表 `style_tag="compression"`
+    /// 折叠叶子：**默认收起**的内容。`reasoning`（思考）与 `compression`（压缩）与
+    /// 未来 `step_summary` 全在这一格——前端渲染它们**完全一样**（折叠叶 + `title` + `icon`），
+    /// 不需要知道这坨叫思考还是压缩（业务区分只在后端 `style_tag` 注记 + 数据）。
     Notice,
-    /// 组合骨架：`style_tag="run"` 一整轮响应 / `"tool"` 一次工具调用
+    /// 组合骨架 / 容器：递归渲染 `children`。`run`（一整轮）、`tool`（一次工具调用）、
+    /// `sub_agent` 全在这一格——前端一律当容器，不认 tool/turn（[ADR-070 §决策 1]）。
     Skeleton,
     /// 等待用户回应（`ask_user` 提问或工具执行前确认）
     Interaction,
@@ -68,7 +74,9 @@ pub fn legacy_shape_to_style_tag(word: &str) -> Option<(NodeKind, Option<&'stati
         "typing" => (NodeKind::Typing, None),
         // 旧词——折成新形态 + 对应 style_tag。
         "text" => (NodeKind::Body, None),
-        "reasoning" => (NodeKind::Body, Some(CHAT_STYLE_TAG_REASONING)),
+        // [ADR-070 §决策 3]：reasoning 归 `Notice`（折叠叶），与 compression 同格——
+        // 前端渲染二者完全一样，style_tag 只是后端业务注记。
+        "reasoning" => (NodeKind::Notice, Some(CHAT_STYLE_TAG_REASONING)),
         "turn" => (NodeKind::Skeleton, Some(CHAT_STYLE_TAG_RUN)),
         "tool_call" => (NodeKind::Skeleton, Some(CHAT_STYLE_TAG_TOOL)),
         "user_prompt" => (NodeKind::Interaction, None),
@@ -77,10 +85,12 @@ pub fn legacy_shape_to_style_tag(word: &str) -> Option<(NodeKind, Option<&'stati
     })
 }
 
-/// **style_tag 词表**（[ADR-070 §决策 3]）——同一 shape 下的呈现变体。
+/// **style_tag 词表**（[ADR-070 §决策 3]）——同一 shape 下的**后端业务注记**。
 ///
-/// 与 `NodeKind` 一样是 wire 词：住在协议 schema 一侧，渲染分派（[T-148]）读它，
-/// 业务规则判据（`is_run` / `is_tool_call` …）也读它。加一个变体 = 加一行常量。
+/// [T-155] 起它**不再是前端呈现分派轴**：前端只按 `NodeKind` 五值 + `title`/`icon`/`actions`
+/// 数据渲染，从不 `switch(style_tag)`。本词表住在 `meta` 里，只服务后端业务判据
+/// （`is_run` / `is_tool_call` / `is_reasoning` / `is_compression`）与 LLM 请求重建。
+/// 后端认识业务天经地义；前端不认。加一个业务变体 = 加一行常量 + 后端填 `title`/`icon`，前端零改动。
 pub const CHAT_STYLE_TAG_REASONING: &str = "reasoning";
 /// `Skeleton` 的一种：一整轮助手响应（曾经的 `Turn`）。
 pub const CHAT_STYLE_TAG_RUN: &str = "run";
@@ -312,6 +322,24 @@ pub struct ChatNode {
     /// 用于把"会话异常中断/失败"的终态持久化到历史，使切换会话后仍能看到上次错误。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+
+    /// 呈现标题（[ADR-070 §决策 2 / 3]，[T-155]）：后端在构造节点时填的**面向用户显示文本**
+    /// （思考="思考过程" / 压缩="上下文压缩" / 工具=工具名 / 轮=智能体名）。
+    /// 前端**照数据显示**，不再按业务类型查表生成——这是"前端不懂业务"的落点之一。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+
+    /// 呈现徽标标识（[T-155]）：后端填的**图标词**（不是颜色、不是业务词）；前端把标识
+    /// 映射到 UI 资产表（class→svg 那种映射，不是 `switch(type)`）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+
+    /// 本节点**可发起的恢复动作**（[ADR-070 §决策 3]，[T-155]）：后端算好「这个节点现在
+    /// 能重试 / 审批 / 补参 / 回答 / 重跑压缩」中的哪几种，随节点下发。前端只做
+    /// 「列表里有 `retry` 就画重试按钮」的**数据渲染**，不再按业务类型（tool/compression/run）
+    /// 反推该发哪种动作——那是前端最后一处业务耦合，本字段把它搬回后端。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actions: Option<Vec<ResumeAction>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Value>,
@@ -636,20 +664,28 @@ impl ChatNode {
         self.msg_type == Some(NodeKind::Skeleton) && self.style_tag() == Some(CHAT_STYLE_TAG_TOOL)
     }
 
-    /// 本节点是不是「推理正文」（`Body` + tag `reasoning`）。
+    /// 本节点是不是「推理正文」（`Notice` + tag `reasoning`）。
+    ///
+    /// [T-155]：reasoning 从 `Body + tag` 归位到 `Notice`（折叠叶，[PL-013 §3]）——
+    /// 与 compression 同格，靠 `style_tag` 在后端区分。
     pub fn is_reasoning(&self) -> bool {
-        self.msg_type == Some(NodeKind::Body) && self.style_tag() == Some(CHAT_STYLE_TAG_REASONING)
+        self.msg_type == Some(NodeKind::Notice) && self.style_tag() == Some(CHAT_STYLE_TAG_REASONING)
     }
 
-    /// 本节点是不是「普通正文」（`Body` 且不带 `reasoning` tag）。
+    /// 本节点是不是「普通正文」（`Body`）。
+    ///
+    /// [T-155]：reasoning 已离开 `Body`，故 `Body` 无需再排除 reasoning tag。
     pub fn is_text(&self) -> bool {
-        self.msg_type == Some(NodeKind::Body) && self.style_tag() != Some(CHAT_STYLE_TAG_REASONING)
+        self.msg_type == Some(NodeKind::Body)
     }
 
-    /// 本节点是不是「压缩记录」（`Notice`；当前词表只有 compression 一个变体，
-    /// 裸 `Notice` 也算）。
+    /// 本节点是不是「压缩记录」（`Notice` 且**不是** reasoning）。
+    ///
+    /// [T-155]：`Notice` 现在同时承载 reasoning 与 compression，裸判 `msg_type==Notice`
+    /// 会把思考也算成压缩——压缩判据必须显式排除 reasoning。存量无 tag 的裸 `Notice`
+    /// 仍按压缩兜底（历史上 compression 是唯一 Notice 变体）。
     pub fn is_compression(&self) -> bool {
-        self.msg_type == Some(NodeKind::Notice)
+        self.msg_type == Some(NodeKind::Notice) && self.style_tag() != Some(CHAT_STYLE_TAG_REASONING)
     }
 
     /// 本节点是不是「等待用户回应的交互」（`Interaction`）。

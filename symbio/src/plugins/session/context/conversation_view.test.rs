@@ -51,7 +51,7 @@ fn transcript() -> Vec<ChatNode> {
         msg(
             "r1",
             NodeRole::Assistant,
-            Some(NodeKind::Body),
+            Some(NodeKind::Notice),
             Some("turn1"),
             "先看文件",
         )

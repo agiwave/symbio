@@ -76,7 +76,7 @@ fn resume_action_wire_words_are_snake_case() {
 fn legacy_wire_words_fold_to_shape_and_style_tag() {
     for (word, shape, tag) in [
         ("text", NodeKind::Body, None),
-        ("reasoning", NodeKind::Body, Some(CHAT_STYLE_TAG_REASONING)),
+        ("reasoning", NodeKind::Notice, Some(CHAT_STYLE_TAG_REASONING)),
         ("turn", NodeKind::Skeleton, Some(CHAT_STYLE_TAG_RUN)),
         ("tool_call", NodeKind::Skeleton, Some(CHAT_STYLE_TAG_TOOL)),
         ("user_prompt", NodeKind::Interaction, None),
@@ -120,17 +120,22 @@ fn predicates_are_exclusive_per_form() {
     assert!(tc.is_tool_call());
     assert!(!tc.is_run());
 
-    let reasoning = n(NodeKind::Body).with_style_tag(CHAT_STYLE_TAG_REASONING);
+    let reasoning = n(NodeKind::Notice).with_style_tag(CHAT_STYLE_TAG_REASONING);
     assert!(reasoning.is_reasoning());
     assert!(
         !reasoning.is_text(),
-        "推理与正文互斥（同落 Body 后靠 tag 区分）"
+        "推理是 Notice 折叠叶，不是 Body 正文"
+    );
+    assert!(
+        !reasoning.is_compression(),
+        "同落 Notice 后靠 tag 区分：reasoning 不得被判成压缩"
     );
 
     let text = n(NodeKind::Body);
     assert!(text.is_text());
     assert!(!text.is_reasoning());
 
+    // 裸 Notice（无 tag）兜底按压缩——历史数据里 compression 曾是唯一 Notice 变体
     assert!(n(NodeKind::Notice).is_compression());
     assert!(n(NodeKind::Interaction).is_interaction());
 
@@ -235,7 +240,7 @@ fn message_of_node_keeps_target_words_and_existing_tags() {
     let m = message_of_node(
         &vdfs_with_attrs(
             "e",
-            serde_json::json!({"type": "body", "meta": {"style_tag": "reasoning"}}),
+            serde_json::json!({"type": "notice", "meta": {"style_tag": "reasoning"}}),
         ),
         String::new(),
     )
