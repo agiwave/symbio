@@ -356,7 +356,16 @@ pub struct ChatNode {
     /// 因此 ToolCall 节点 id 在**诞生时**分配（会话内唯一），provider 的原始 id
     /// 存放在本字段，仅在构建 LLM 请求包时使用（部分协议要求回传原值，如
     /// OpenAI Responses 的 `call_id` 链）。历史数据无此字段：请求构建回退节点 id。
-    #[serde(skip_serializing_if = "Option::is_none")]
+    ///
+    /// ## [T-147d-i]：**wire 上不存在，只在后端内存里活着**
+    ///
+    /// `#[serde(skip)]` 让它**不进出** `ChatNode` 的序列化形状——前端从不消费它
+    /// （过去只是 copy-through 到 store），LLM 请求构造侧仍走 Rust 结构体字段读取。
+    /// VDFS 属性投影（`plugins/session/plugin/nodes.rs`）与 WAL 事件载荷
+    /// （`turn_runner.rs::artifact.added`）**独立于本字段的 serde 属性**，仍把
+    /// wire id 写进 `attributes.tool_call_id` / 事件 `tool_call_id` 键——那是后端
+    /// 到后端的存储形状，不是前端 wire。[`message_of_node`] 逆投影照原路读回。
+    #[serde(skip)]
     pub tool_call_id: Option<String>,
 }
 

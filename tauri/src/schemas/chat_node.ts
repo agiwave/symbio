@@ -362,13 +362,8 @@ export interface ChatNode {
   principal?: Principal | string;
   type?: NodeKind;
   name?: string;
-  /**
-   * ToolCall 节点的 **wire id**（LLM provider 返回的 `tool_call_id`）。
-   *
-   * 节点 `id` 在诞生时分配（会话内唯一），provider 的原始 id 存这里，仅在构建
-   * LLM 请求时回传（部分协议要求原值）。历史数据可能无此字段。
-   */
-  tool_call_id?: string;
+  // [T-147d-i] `tool_call_id` 从 wire 移除——后端 `#[serde(skip)]` 只保结构体字段（供
+  // LLM 请求构造侧使用），前端从不消费它（过去只是 copy-through 到 store）。
   content?: MessageContent;
   /**
    * 流式**增量**：本帧新到达的那一段正文，追加到本地该节点正文尾部。

@@ -220,7 +220,7 @@ function enqueueDelta(sid: string, mid: string, delta: string): void {
  * 从节点视图 + 正文还原一条消息（后端 `nodes.rs::message_of_node` 的前端镜像）。
  *
  * 属性经 `#[serde(flatten)]` 平铺在节点顶层（role / type / parent_id / seq /
- * error / meta / tool_name / tool_call_id）；`status` 是节点字段；`updated_at`
+ * error / meta / tool_name）；`status` 是节点字段；`updated_at`
  * 即消息 timestamp。正文有两种上线形态（后端 `message_text`）：
  * Turn / ToolCall 的正文是**整条消息的 JSON**（容器节点靠子节点呈现，正文承载
  * 结构），其余是纯文本。
@@ -254,7 +254,7 @@ function messageOfNode(node: VdfsNode, text: string): ChatNode | null {
   if (msgType) out.type = msgType as ChatNode['type']
   if (typeof v.tool_name === 'string') out.name = v.tool_name
   if (typeof v.parent_id === 'string') out.parent_id = v.parent_id
-  if (typeof v.tool_call_id === 'string') out.tool_call_id = v.tool_call_id
+  // [T-147d-i] `tool_call_id` 不再上 wire，VDFS attrs 里的同名键是后端到后端的存储形状。
   if (typeof v.seq === 'number') out.seq = v.seq
   if (typeof v.error === 'string') out.error = v.error
   if (v.meta != null && typeof v.meta === 'object') out.meta = v.meta as ChatNode['meta']

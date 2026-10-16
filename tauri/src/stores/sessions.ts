@@ -397,7 +397,7 @@ export const useSessionsStore = defineStore('sessions', () => {
         if (message.role != null) node.role = message.role
         if (message.type != null) node.type = message.type
         if (message.name != null) node.name = message.name
-        if (message.tool_call_id != null) node.tool_call_id = message.tool_call_id
+        // [T-147d-i] `tool_call_id` 不再上 wire——后端 `#[serde(skip)]`，前端无消费点。
         if (message.meta != null) node.meta = message.meta
         // 存储侧权威值（落库后回发的对齐帧）：原样覆盖。
         if (message.seq != null) node.seq = message.seq
