@@ -91,6 +91,16 @@ impl Capability for PrefixedCapability {
         meta
     }
 
+    /// 透传给被改名的工具：装饰器只换名字，不重判风险。
+    ///
+    /// 默认实现读 `self.meta().effective_risk()`——那是**静态**档。风险随参数变化
+    /// 的工具（shell 按命令分级）覆写 `risk_for`，改名包装若不显式转发，注册收口点
+    /// 的审批闸就读到默认档而丢掉动态分级（T-138：闸门住在 `DefaultToolVisitor`
+    /// 之后，这条透传路径必须完整）。
+    fn risk_for(&self, args: &serde_json::Value) -> crate::symbio_core::CapabilityRiskLevel {
+        self.inner.risk_for(args)
+    }
+
     async fn execute(
         &self,
         args: Value,

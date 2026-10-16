@@ -206,7 +206,8 @@ fn cache() -> &'static tokio::sync::Mutex<HashMap<String, Arc<CodeIndex>>> {
 /// （见 `execute_inner` 尾部的 `retain`），不参与任何一次读 ⇒ 不存在可校验的
 /// 越界读。按 `content_search` 那样补一次 `is_path_allowed_for_read` 会得到一段
 /// **永不触发**的死校验（结果集里根本没有工作区外的路径），比不写更坏：它会让
-/// 下一个读代码的人以为这里有路径边界。审批闸门照旧在 `SecureToolWrapper`。
+/// 下一个读代码的人以为这里有路径边界。审批闸门照旧在注册收口点
+/// （`providers/collectors/approval.rs::ApprovalGate`）。
 #[derive(Clone)]
 pub struct CodebaseSearchTool;
 

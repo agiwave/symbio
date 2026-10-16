@@ -7,6 +7,7 @@
 //! 其中之一。它不是任何插件的内部物，故按「不存在第二种实现的机制底座直接组合具体类型」
 //! 落在实现层——完整判据见 [`crate::providers::collectors`] 的模块文档。
 
+use super::approval::ApprovalGate;
 use crate::symbio_core::{
     capability_invoke, Capability, CapabilityMeta, CapabilityVisitor, ModelProvider, PluginError,
     PluginInvokeRequest, PluginInvokeResponse, PluginPayload, VdfsProvider,
@@ -68,8 +69,12 @@ impl Default for DefaultToolVisitor {
 impl CapabilityVisitor for DefaultToolVisitor {
     async fn register(&self, tool: Arc<dyn Capability>) {
         let name = tool.name();
+        // 闸门住在收口点：每条进表的能力都裹一层 [`ApprovalGate`]——`meta` / `name` /
+        // `risk_for` 原样透传（见 `approval.rs`），故 `list_capability` 与按名查表
+        // 都不受影响；`invoke` 走 `execute` 那一路时经闸门判定（T-138）。
+        let gated: Arc<dyn Capability> = Arc::new(ApprovalGate::new(tool));
         let mut tools = self.tools.write().await;
-        tools.insert(name, tool);
+        tools.insert(name, gated);
     }
 
     async fn list_capability(&self) -> Vec<CapabilityMeta> {

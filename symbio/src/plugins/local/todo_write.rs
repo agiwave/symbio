@@ -24,9 +24,9 @@ async fn todo_store() -> &'static RwLock<HashMap<String, Vec<Value>>> {
 
 /// 任务清单工具
 ///
-/// **不持策略**：本工具只吃 `todos` / `merge` 两个参数、不碰任何路径，策略这一层
-/// 由 `SecureToolWrapper::execute` 的 `approval_gate` 统一执行（见 [`local::plugin`]
-/// 的分支注释）。构造签名里挂一个不读的 `SecurityPolicy` 只是把「谁执行审批」
+/// **不持策略**：本工具只吃 `todos` / `merge` 两个参数、不碰任何路径，审批闸门
+/// 由能力注册收口点统一执行（见 `providers/collectors/approval.rs`）。
+/// 构造签名里挂一个不读的 `SecurityPolicy` 只是把「谁执行审批」
 /// 这件事在两个地方各说一遍，而两处必然漂移。
 #[derive(Clone)]
 pub struct TodoWriteTool;

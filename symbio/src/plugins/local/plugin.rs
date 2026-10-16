@@ -6,15 +6,17 @@ use super::{
     ask_user::AskUserTool, codebase_search::CodebaseSearchTool, content_search::ContentSearchTool,
     shell::ShellTool, todo_write::TodoWriteTool,
 };
-use crate::symbio_core::CapabilityRiskLevel;
+// 审批闸门的判定住在能力收集器（`DefaultToolVisitor` 那条收口路径的唯一真源）；
+// 本插件的 `route` 兜底也调它——两条路径**判定只有一份**（T-138）。
+use crate::providers::approval_gate;
 use crate::symbio_core::{
-    plugin_dir_from_ctx, Capability, CapabilityMeta, ExecEnv, Plugin, PluginConfigFile, PluginDir,
-    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
-    PluginPayload, PLUGIN_ID_LOCAL,
+    plugin_dir_from_ctx, Capability, Plugin, PluginConfigFile, PluginDir, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
+    PLUGIN_ID_LOCAL,
 };
 use crate::symbio_core::{DetailDefinition, DetailField, DetailOption, DynVdfsProvider};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
 
@@ -109,162 +111,6 @@ fn config_definition() -> DetailDefinition {
     )
 }
 
-/// 从 `ctx[RISK_LEVEL]` 读取 per-session 风险等级阈值。
-///
-/// 与 agent_id/provider_id/mode 同级别：随 chat_send 传输，由 orchestrator 写入 ctx。
-/// ctx 无值时默认 `Medium`（新会话尚未设置时的安全默认值）。
-fn risk_level_from_ctx(ctx: &Arc<dyn PluginInvokeRequest>) -> CapabilityRiskLevel {
-    ctx.get(crate::symbio_core::RISK_LEVEL)
-        .map(|s| match s.as_str() {
-            "low" => CapabilityRiskLevel::Low,
-            "high" => CapabilityRiskLevel::High,
-            _ => CapabilityRiskLevel::Medium,
-        })
-        .unwrap_or(CapabilityRiskLevel::Medium)
-}
-
-/// 构造 confirm 类型 prompt 的**返回值**（不构造节点、不发事件）。
-///
-/// 职责边界：工具只回答「需要用户确认什么」——`prompt` 载荷 + `failure_kind`。
-/// **user_prompt 节点由编排层构造**（`session/tools/tool_executor.rs`）：它才拥有
-/// `result_msg_id`（节点身份）与父 ToolCall 的终态，是「工具结果节点」的唯一写入者。
-///
-/// 历史上这里是「建通道 → 发一个 Upsert 帧 → drop tx → 返回 rx」，由消费方
-/// 解回来、改 id、重新播一遍——于是同一个逻辑节点在前端有两个 id（原 id 与
-/// `result_msg_id`），审批 UI 重复、resume 只删得掉一个。现在这条路径不存在了。
-fn confirm_prompt_payload(
-    tool_name: &str,
-    tool_description: &str,
-    args: &Value,
-    risk_level: &str,
-    mode: &str,
-) -> Result<Value, PluginError> {
-    // 自动模式：无人值守，不产确认卡，直接返回友好错误让 LLM 继续（不阻塞）。
-    // failure_kind=permission_denied 标记，前端可据此渲染（虽然不产节点，仅信息性）。
-    if mode == "auto" {
-        return Ok(json!({
-            "error": format!(
-                "权限不足：工具 {} 需要用户审批（风险等级 {}），但当前为自动模式，无人可授权。请勿反复重试——请改用手动方式完成，或提示用户切换到交互模式以授权后重试。",
-                tool_name, risk_level
-            ),
-            "success": false,
-            "failure_kind": crate::symbio_core::failure_kind::PERMISSION_DENIED,
-        }));
-    }
-    Ok(json!({
-        "content": format!("需要确认：{tool_description}"),
-        "success": false,
-        // 编排层凭此标记把本轮收口为「等待用户动作」并构造 user_prompt 节点。
-        "failure_kind": crate::symbio_core::failure_kind::NEEDS_APPROVAL,
-        "prompt": {
-            "kind": "confirm",
-            "tool_name": tool_name,
-            "args": args.clone(),
-            "risk_level": risk_level,
-            "description": tool_description,
-        },
-    }))
-}
-
-pub struct SecureToolWrapper {
-    inner: Arc<dyn Capability>,
-    security: Arc<SecurityPolicy>,
-}
-
-/// 审批闸门：判定本次工具调用是否需要用户审批，需要则给出**载荷**。
-///
-/// 返回 `Ok(Some(payload))` ⇒ 本次调用不执行，等用户审批；`Ok(None)` ⇒ 放行。
-///
-/// ## 为什么收成一处
-///
-/// 同一套判定曾以两份几乎逐字相同的代码存在：
-/// [`LocalPlugin::route`]（工具经插件路由进来）与
-/// [`SecureToolWrapper::execute`]（工具经能力注册表进来）各写一份。
-///
-/// 两条入口都**真实存在**——`route` 是注册表未命中时的回落路径，`wrapper` 是
-/// 注册表路径——所以闸门确实要在两处把守，但**判定逻辑**只该有一份。
-/// 两份并存的漂移不是假设，已经发生了：`description` 不一致（`route` 传
-/// 字面量 `"工具执行"`，`wrapper` 传工具真实描述），同一个工具走不同入口，
-/// 用户看到的审批卡文案不一样。
-///
-/// 因此：**闸门判两次，判定写一次**。
-fn approval_gate(
-    security: &SecurityPolicy,
-    ctx: &Arc<dyn PluginInvokeRequest>,
-    tool: &dyn Capability,
-    args: &Value,
-) -> Result<Option<Value>, PluginError> {
-    // 风险由**工具自己**回答（`Capability::risk_for`）：静态档来自 `CapabilityMeta.risk`，
-    // 随参数变化档（shell）的工具覆写它。闸门不认工具名——新增/改名工具不必回来改这里。
-    let meta = tool.meta();
-    let tool_risk_level = tool.risk_for(args);
-
-    // 用户已在审批卡上批准 → 参数里带 `approved: true`，本轮直接放行。
-    let is_approved = args
-        .get("approved")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    // per-session 风险等级阈值：从 ctx[RISK_LEVEL] 读出（与 agent_id/provider_id/mode 同级别）
-    let threshold = risk_level_from_ctx(ctx);
-
-    let (suggested_approval, final_risk_level) =
-        security.check_tool_approval_needed(&meta.name, tool_risk_level, threshold);
-
-    // 放行条件：策略没建议审批，或本次调用已带过批准
-    if !suggested_approval || is_approved {
-        return Ok(None);
-    }
-
-    // 产出 confirm 类型 user_prompt 节点（交互模式），或自动模式返回友好错误
-    let mode = ctx.get(crate::symbio_core::MODE).unwrap_or_default();
-    confirm_prompt_payload(
-        &meta.name,
-        &meta.description,
-        args,
-        &format!("{final_risk_level:?}").to_lowercase(),
-        &mode,
-    )
-    .map(Some)
-}
-
-impl SecureToolWrapper {
-    pub fn new(inner: Arc<dyn Capability>, security: Arc<SecurityPolicy>) -> Self {
-        Self { inner, security }
-    }
-}
-
-#[async_trait]
-impl Capability for SecureToolWrapper {
-    fn meta(&self) -> CapabilityMeta {
-        self.inner.meta()
-    }
-
-    fn name(&self) -> String {
-        self.inner.name()
-    }
-
-    /// 透传给被包装的工具：装饰器不重判风险，否则「谁的风险」就成了包装层的事——
-    /// 闸门拿到的是 wrapper 的默认档，真实档（shell 的按命令分级）就丢了。
-    fn risk_for(&self, args: &Value) -> CapabilityRiskLevel {
-        self.inner.risk_for(args)
-    }
-
-    async fn execute(
-        &self,
-        args: Value,
-        env: &ExecEnv,
-        ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> Result<Value, PluginError> {
-        if let Some(payload) = approval_gate(&self.security, &ctx, &*self.inner, &args)? {
-            return Ok(payload);
-        }
-
-        // 装饰器只加一道审批闸门，执行期环境与信封原样透传。
-        self.inner.execute(args, env, ctx).await
-    }
-}
-
 #[derive(Clone)]
 pub struct LocalPlugin {
     config: Arc<RwLock<LocalConfig>>,
@@ -303,8 +149,9 @@ impl LocalPlugin {
         let config_lock = Arc::new(RwLock::new(config));
         let shell = Arc::new(ShellTool::new(Arc::clone(&security), shell_timeout));
         let content_search = Arc::new(ContentSearchTool::new(Arc::clone(&security)));
-        // 下面两个**不持策略**（与 `ask_user` 同类的「没有可判的路径」）：策略统一由
-        // `SecureToolWrapper::execute` 的审批闸门执行，理由见各自结构体文档。
+        // 下面两个**不持策略**（与 `ask_user` 同类的「没有可判的路径」）：审批闸门由
+        // 收口点 `DefaultToolVisitor::register` 统一加壳（见 `providers/collectors/approval.rs`），
+        // 理由见各自结构体文档。
         let todo_write = Arc::new(TodoWriteTool);
         let codebase_search = Arc::new(CodebaseSearchTool);
         // 询问用户：不接触文件系统，故不持 SecurityPolicy；产出 user_prompt 节点
@@ -365,9 +212,11 @@ impl Plugin for LocalPlugin {
 
         let payload = ctx.payload::<serde_json::Value>()?;
         if let Some(tool) = self.tool_impls.iter().find(|t| t.name() == path) {
-            // 审批闸门与 `SecureToolWrapper::execute` 共用同一份判定
-            // （见 [`approval_gate`]）——两条入口都真实存在，但判定只写一次。
-            if let Some(payload) = approval_gate(&self.security, &ctx, tool.as_ref(), &payload)? {
+            // 审批闸门住在能力进表的收口点（`DefaultToolVisitor::register` 的
+            // `ApprovalGate` 装饰器）；`route` 是本插件的注册表未命中回落，
+            // 拿到的是**未包壳**的裸工具，判定只能在这里自己走一遍——
+            // 但判定与装饰器共用同一份真源 [`crate::providers::collectors::approval_gate`]。
+            if let Some(payload) = approval_gate(&ctx, tool.as_ref(), &payload)? {
                 return Ok(PluginPayload::new(&payload));
             }
 
@@ -392,9 +241,11 @@ impl Plugin for LocalPlugin {
         }
 
         if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
+            // 审批闸门由收口点（`DefaultToolVisitor::register`）统一加壳，
+            // 本处只交裸工具——过去在这里手工 `SecureToolWrapper::new` 的做法
+            // 让闸门长在插件的注册循环里，`vdfs` 等别的注册入口就漏了（T-138）。
             for tool in self.tool_impls.iter() {
-                let wrapped = Arc::new(SecureToolWrapper::new(tool.clone(), self.security.clone()));
-                visitor.register(wrapped).await;
+                visitor.register(tool.clone()).await;
             }
             // 与工具共用同一次能力广播：本插件在 VDFS 上的全部内容 = 一个配置文档
             let me: DynVdfsProvider = self.clone();

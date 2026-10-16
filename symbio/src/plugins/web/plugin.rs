@@ -2,6 +2,10 @@
 
 pub use super::web_config::WebConfig;
 use super::{http_request::HttpRequestTool, web_fetch::WebFetchTool, web_search::WebSearchTool};
+// 审批闸门住在能力注册收口点（`providers/collectors/approval.rs`）；`route` 兜底
+// 拿到的是本插件私藏的裸工具，判定与装饰器共用同一份真源（T-138：`http_request`
+// 声明 `High` 却经这条路径直接跑，正是「风险只是宣传语」的第二个洞）。
+use crate::providers::approval_gate;
 use crate::symbio_core::{
     plugin_dir_from_ctx, Capability, Plugin, PluginConfigFile, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
@@ -142,6 +146,12 @@ impl Plugin for WebPlugin {
         }
 
         if let Some(tool) = self.tool_impls.iter().find(|t| t.name() == path) {
+            let args = ctx
+                .payload::<serde_json::Value>()
+                .unwrap_or(serde_json::Value::Null);
+            if let Some(payload) = approval_gate(&ctx, tool.as_ref(), &args)? {
+                return Ok(PluginPayload::new(&payload));
+            }
             return crate::symbio_core::capability_invoke(tool.as_ref(), ctx).await;
         }
         Err(PluginError::NotFound(format!("路径不存在: {path}")))

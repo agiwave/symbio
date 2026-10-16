@@ -364,26 +364,6 @@ impl SecurityPolicy {
         }
         Ok(risk)
     }
-
-    /// 检查工具是否需要审批建议（基于「执行风险等级」阈值）
-    ///
-    /// 返回：(建议是否需要审批, 风险等级)
-    ///
-    /// 规则与前端「执行风险等级」保持一致：
-    /// - 工具风险等级 **>** 执行风险阈值 → 需要用户审批
-    /// - 工具风险等级 **≤** 执行风险阈值 → 直接执行（自动批准）
-    ///
-    /// `threshold` 来自 `ctx[RISK_LEVEL]`（per-session，由 orchestrator 从
-    /// `session.metadata.risk_level` 或 `chat_send.risk_level` 写入，默认 medium）。
-    pub fn check_tool_approval_needed(
-        &self,
-        _tool_name: &str,
-        tool_risk_level: CapabilityRiskLevel,
-        threshold: CapabilityRiskLevel,
-    ) -> (bool, CapabilityRiskLevel) {
-        let needs_approval = tool_risk_level > threshold;
-        (needs_approval, tool_risk_level)
-    }
 }
 
 #[cfg(test)]

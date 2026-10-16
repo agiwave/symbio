@@ -29,10 +29,12 @@
 //! 只有「无策略的内存实现」放这里；排序 / 去重之外的任何策略都归调用方。
 
 // ⭐ 子模块一律私有（与 `providers/embedding` 同一约定）：**本文件是唯一出口**。
+mod approval;
 mod configurable_visitor;
 mod option_visitor;
 mod tool_visitor;
 
+pub(crate) use approval::approval_gate;
 pub(crate) use configurable_visitor::DefaultConfigurableVisitor;
 pub(crate) use option_visitor::DefaultOptionVisitor;
 pub(crate) use tool_visitor::DefaultToolVisitor;

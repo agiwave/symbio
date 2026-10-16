@@ -34,19 +34,19 @@ created: 2026-07-20
 
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 条目各是一个单文档：条目类**在位存放**（文件即条目，kind 只来自 front-matter，目录不参与判定）；
-> 各 kind 的形状与汇总版式由其 README meta 自描述；机制见 [[PL-011-登记与汇总机制|PL-011 · 登记与汇总机制]]，字段规范见 [[SP-001]]。
+> 各 kind 的形状与汇总版式由其 README meta 自描述；机制见 [PL-011 · 登记与汇总机制](004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")，字段规范见 [SP-001](008-spec/001.md)。
 
 | 类别 | 身份 | 回答什么 | 条目数 | 状态分布 | 分解 |
 |---|---|---|---|---|---|
-| [[GO-000-目标汇总|goal · 目标]] | 编号前缀 `GO-` | 要达成什么——价值主张与可度量的验收判据 | 6 | draft 0 · active 6 · retired 0 | 3 条分解边 |
-| [[SC-000-场景汇总|scene · 场景]] | 编号前缀 `SC-` | 用户拿它做什么——角色、情境与用户判据 | 14 | draft 0 · active 14 · retired 0 | — |
-| [[PL-000-计划汇总|plan · 计划]] | 编号前缀 `PL-` | 要变成什么样——目标架构与实施方案 | 12 | draft 0 · active 12 · retired 0 | — |
-| [[AR-000-架构汇总|arch · 架构]] | 编号前缀 `AR-` | 现在是什么样——系统结构 / 设计规范 / 模块机制 | 47 | draft 0 · active 47 · retired 0 | — |
-| [[RE-000-参考汇总|ref · 参考]] | 编号前缀 `RE-` | 查数据——路由 / 错误码 / 配置等权威表 | 7 | draft 0 · active 7 · retired 0 | — |
-| [[GU-000-指南汇总|guide · 指南]] | 编号前缀 `GU-` | 怎么用——上手 / 贡献 / 排障 | 14 | draft 0 · active 14 · retired 0 | — |
-| [[SP-000-规范汇总|spec · 规范]] | 编号前缀 `SP-` | 必须成立的条文——机制与判据的规范面 | 31 | draft 0 · active 31 · retired 0 | — |
-| [[T-000-任务汇总|task · 任务]] | 编号前缀 `T-` | 要做什么、做到哪一步——阶段任务 / SPRINT 任务分解子任务，可勾销的最小工作单元 | 142 | todo 7 · doing 1 · done 134 · wont 0 | 44 条分解边 |
-| [[ADR-000-架构决策汇总|adr · 架构决策]] | 编号前缀 `ADR-` | 为什么这样设计——决策、理由与被否决的方案 | 68 | active 58 · superseded 7 · withdrawn 3 | — |
+| [goal · 目标](001-goal/README.md "GO-000-目标汇总") | 编号前缀 `GO-` | 要达成什么——价值主张与可度量的验收判据 | 6 | draft 0 · active 6 · retired 0 | 3 条分解边 |
+| [scene · 场景](002-scene/README.md "SC-000-场景汇总") | 编号前缀 `SC-` | 用户拿它做什么——角色、情境与用户判据 | 14 | draft 0 · active 14 · retired 0 | — |
+| [plan · 计划](004-plan/README.md "PL-000-计划汇总") | 编号前缀 `PL-` | 要变成什么样——目标架构与实施方案 | 12 | draft 0 · active 12 · retired 0 | — |
+| [arch · 架构](005-arch/README.md "AR-000-架构汇总") | 编号前缀 `AR-` | 现在是什么样——系统结构 / 设计规范 / 模块机制 | 47 | draft 0 · active 47 · retired 0 | — |
+| [ref · 参考](006-ref/README.md "RE-000-参考汇总") | 编号前缀 `RE-` | 查数据——路由 / 错误码 / 配置等权威表 | 7 | draft 0 · active 7 · retired 0 | — |
+| [guide · 指南](007-guide/README.md "GU-000-指南汇总") | 编号前缀 `GU-` | 怎么用——上手 / 贡献 / 排障 | 14 | draft 0 · active 14 · retired 0 | — |
+| [spec · 规范](008-spec/README.md "SP-000-规范汇总") | 编号前缀 `SP-` | 必须成立的条文——机制与判据的规范面 | 31 | draft 0 · active 31 · retired 0 | — |
+| [task · 任务](009-task/README.md "T-000-任务汇总") | 编号前缀 `T-` | 要做什么、做到哪一步——阶段任务 / SPRINT 任务分解子任务，可勾销的最小工作单元 | 142 | todo 6 · doing 1 · done 135 · wont 0 | 44 条分解边 |
+| [adr · 架构决策](010-adr/README.md "ADR-000-架构决策汇总") | 编号前缀 `ADR-` | 为什么这样设计——决策、理由与被否决的方案 | 69 | active 59 · superseded 7 · withdrawn 3 | — |
 
 <!-- registry:summary end -->
 
