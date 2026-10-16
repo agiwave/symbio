@@ -1981,6 +1981,79 @@ mod tool_round_tests {
         );
     }
 
+    /// **T-144 的锚**：`LlmTurn.finish` 必须沿 `TurnOutcome → TurnOutput` 一路带出。
+    ///
+    /// 唯一消费方是 `chat_loop/turn.rs`：`settle_reasoning` 用 `finish.is_length()` 给
+    /// 本轮正文节点打 `meta.finish_reason = "length"`（前端「继续」按钮 + 回溯），
+    /// `close_turn` 在同判据上触发 `MAX_CONTINUE_ROUNDS` 自动续写。此前 `v2_exec.rs`
+    /// 用 `TurnOutput { ..Default::default() }` 重建时把 `finish` 静默填成 Stop，
+    /// 两条判据在 v2 执行路径都读不到 Length ⇒ 被 `max_tokens` 掐断的半截正文既无标记
+    /// 也不续写，界面上表现为「对话突然结束」。
+    ///
+    /// **反向自检**：把 `TurnOutcome.finish` 或 `v2_exec` 的重建里那行 `finish: outcome.finish`
+    /// 拿掉，本用例必红。
+    #[tokio::test]
+    async fn truncated_answer_carries_length_reason_to_the_outcome() {
+        /// 末轮桩：正文非空 + `finish=Length`（被 `max_tokens` 掐断的半截正文）。
+        struct TruncatedLlm;
+        #[async_trait::async_trait]
+        impl LlmAdapter for TruncatedLlm {
+            fn model_id(&self) -> &str {
+                "truncated-mock"
+            }
+            async fn generate(
+                &self,
+                _tok: &FullModel,
+                _messages: &[PromptMessage],
+            ) -> Result<String, AdapterError> {
+                Err(AdapterError::GenerationFailed("unused".into()))
+            }
+            async fn generate_turn(
+                &self,
+                _tok: &FullModel,
+                _messages: &[PromptMessage],
+                _tools: &[CapabilityMeta],
+                _sink: Arc<dyn DeltaSink>,
+            ) -> Result<LlmTurn, AdapterError> {
+                Ok(LlmTurn {
+                    text: "被 max_tokens 掐断的半截正文".into(),
+                    reasoning: String::new(),
+                    tool_calls: Vec::new(),
+                    finish: ModelFinishReason::Length,
+                    cost_ms: 3,
+                    usage: None,
+                })
+            }
+        }
+
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let out = TurnRunner
+            .run_with_tools(
+                &store,
+                &TruncatedLlm,
+                &tok,
+                input(),
+                Arc::new(SilentDeltas),
+                &[],
+                None,
+            )
+            .await
+            .expect("截断轮不是失败");
+        assert_eq!(
+            out.finish,
+            ModelFinishReason::Length,
+            "长度截断的收尾原因必须在 TurnOutcome 上可见（T-144）"
+        );
+        // 收束格照常落（`fell_back=false`，正文照交付）：本判据只钉「带得出真值」，
+        // 「带出之后 chat_loop 干什么」不在运行器职责内。
+        let cells = store.range(Seq::new(0));
+        assert!(
+            cells.iter().any(|e| e.kind == EVENT_ASSISTANT_FINAL),
+            "非空正文应落 final 收束格：{cells:?}"
+        );
+    }
+
     /// 续写同一轮（审批 / 问答恢复）：**不重开用户格**、收束记在**原轮**上。
     ///
     /// 这是 [plan/11 批 2](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")

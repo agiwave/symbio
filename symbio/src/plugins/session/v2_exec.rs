@@ -1630,6 +1630,10 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
                 // 恒为 `None`，校准比冻结在初值 1.0，压缩预检把本可成功的
                 // 摘要请求误判成「注定超限」。
                 usage: outcome.usage,
+                // 末轮原因直通（T-144）：`..Default::default()` 会把 finish 静默填成
+                // Stop，chat_loop 的长度戳与自动续写判据因此读不到真值。反射档 /
+                // 兜底 / 中止没有模型轮 ⇒ Stop 就是诚实值。
+                finish: outcome.finish,
                 ..Default::default()
             },
             messages: produced,
@@ -1736,6 +1740,9 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
             reasoning_child_id,
             // 实测用量直通：校准反馈的唯一数据源（缺口 6），与上面被拒出口同一条。
             usage: outcome.usage,
+            // 末轮原因直通（T-144）：与上面被拒出口同一条纪律。此前 `..Default::default()`
+            // 把这一格静默填成 Stop，长度截断的自动续写在 v2 执行路径不可达。
+            finish: outcome.finish,
             ..Default::default()
         },
         messages: all_messages,

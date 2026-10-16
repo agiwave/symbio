@@ -556,6 +556,17 @@ pub struct TurnOutcome {
     /// 平凡值 `false`：生产里主体恒为 `agent:main` 或经 `matrix_for` 派生的
     /// `agent:<id>`，都持 `reply.*` ⇒ 闸是 fail-closed 的**结构**，不是会翻面的开关。
     pub closure_denied: bool,
+    /// 本轮**最后一次**模型响应的结束原因（provider 归一化，见 [`ModelFinishReason`]）。
+    ///
+    /// 与 [`Self::usage`] 同一条口径：都是**最后一次**响应的事实（多轮工具循环里
+    /// 前面几轮的原因随 `rounds[]` 入格，不进这个字段）。「本轮是不是被 `max_tokens`
+    /// 掐断」只能看末轮。反射档 / 兜底 / 中止没有末轮 ⇒ 恒 `Stop`（缺省）。
+    ///
+    /// 唯一消费方是 [`super::chat_loop::settle_reasoning`]：`is_length()` 打长度戳，
+    /// [`super::chat_loop::close_turn`] 在同判据上触发自动续写（`MAX_CONTINUE_ROUNDS`）。
+    /// 此前 v2 执行路径把这一格丢在 `TurnOutput { ..Default::default() }` 的重建里
+    /// （恒填 Stop），截断续写因此在 v2 不可达（缺口 T-144）。
+    pub finish: crate::symbio_core::ModelFinishReason,
 }
 
 /// 按主体过滤一批事件（**可见域入口**，[plan/11 批 1](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")
@@ -848,6 +859,8 @@ impl TurnRunner {
                     awaits_user: false,
                     // 落过产物格 ⇒ 本轮已收束（产物收束，ADR-067）：不算拒。
                     closure_denied: artifacts_landed == 0,
+                    // 定稿答话路径不发请求 ⇒ 没有「末轮原因」这个事实，Stop 是诚实缺省。
+                    finish: crate::symbio_core::ModelFinishReason::Stop,
                 });
             }
             store.append(
@@ -875,6 +888,7 @@ impl TurnRunner {
                 aborted: false,
                 awaits_user: false,
                 closure_denied: false,
+                finish: crate::symbio_core::ModelFinishReason::Stop,
             });
         }
         let full_snapshot = store.range(Seq::new(0));
@@ -1138,6 +1152,9 @@ impl TurnRunner {
                                 aborted: false,
                                 awaits_user: false,
                                 closure_denied: artifacts_landed == 0,
+                                // 末轮原因随本轮的收束一起带出去（T-144）：chat_loop 的
+                                // 长度戳与自动续写只认这个字段，丢了就是不可达。
+                                finish: rt.finish.clone(),
                             });
                         }
                         let produced = produced_payload(
@@ -1170,6 +1187,8 @@ impl TurnRunner {
                             aborted: false,
                             awaits_user: false,
                             closure_denied: false,
+                            // 与上一分支同一格：末轮原因带出去（T-144）。
+                            finish: rt.finish.clone(),
                         });
                     }
 
@@ -1317,6 +1336,9 @@ impl TurnRunner {
                             aborted: false,
                             awaits_user: true,
                             closure_denied: false,
+                            // 等待轮的收束留给恢复幕，但**本轮已产出的正文**照样带真原因
+                            // （长度截断卡在等待位时，恢复续写侧仍要读得到这一格）。
+                            finish: rt.finish.clone(),
                         });
                     }
 
@@ -1373,6 +1395,8 @@ impl TurnRunner {
                             aborted: true,
                             awaits_user: false,
                             closure_denied: artifacts_landed == 0,
+                            // 中止是「用户按了停止」，不是「模型被截断」：长度戳不得因中止误触发。
+                            finish: crate::symbio_core::ModelFinishReason::Stop,
                         });
                     }
                     let produced = produced_payload(
@@ -1405,6 +1429,8 @@ impl TurnRunner {
                         aborted: true,
                         awaits_user: false,
                         closure_denied: false,
+                        // 中止轮不入续写判据（用户按的停止不是被 max_tokens 掐断）。
+                        finish: crate::symbio_core::ModelFinishReason::Stop,
                     });
                 }
                 Err(e) => {
@@ -1525,6 +1551,7 @@ impl TurnRunner {
                 aborted: false,
                 awaits_user: false,
                 closure_denied: true,
+                finish: crate::symbio_core::ModelFinishReason::Stop,
             });
         }
         store.append(
@@ -1562,6 +1589,8 @@ impl TurnRunner {
             aborted: false,
             awaits_user: false,
             closure_denied: false,
+            // 反射档没有模型轮，长度戳判据对它无意义（技能正文一次写完）。
+            finish: crate::symbio_core::ModelFinishReason::Stop,
         })
     }
 
@@ -1607,6 +1636,7 @@ impl TurnRunner {
                 aborted: false,
                 awaits_user: false,
                 closure_denied: artifacts_landed == 0,
+                finish: crate::symbio_core::ModelFinishReason::Stop,
             });
         }
         let mut payload = with_status(produced, "failed");
@@ -1633,6 +1663,7 @@ impl TurnRunner {
             aborted: false,
             awaits_user: false,
             closure_denied: false,
+            finish: crate::symbio_core::ModelFinishReason::Stop,
         })
     }
 
@@ -1676,6 +1707,7 @@ impl TurnRunner {
                 aborted: true,
                 awaits_user: false,
                 closure_denied: true,
+                finish: crate::symbio_core::ModelFinishReason::Stop,
             });
         }
         // 半截产出为空：请求还没发出，模型没产出任何正文 / 思考 / 工具事实。
@@ -1709,6 +1741,7 @@ impl TurnRunner {
             aborted: true,
             awaits_user: false,
             closure_denied: false,
+            finish: crate::symbio_core::ModelFinishReason::Stop,
         })
     }
 }
