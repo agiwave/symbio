@@ -2,7 +2,8 @@
 kind: task
 id: T-147-ChatNode协议改名与字段瘦身
 title: ChatMessage → ChatNode 一次原子改——Turn 退役、role 删除、tool_call_id 沉 meta、principal 升级为结构体
-status: doing
+status: done
+evidence: 分档原子落地——147a `Principal` 结构体（`910c4214`）· 147b `principal: Option<Principal>` wire 翻转 · 147c-i `ChatMessage`→`ChatNode` 全量改名（`00c155d3`）· 147c-ii-prep `NodeShape` 判据 helper（`df0e3488`）· 147c-ii s1-s4 `NodeKind` 六→五收敛 + 前端双域词表 · 147d-i `tool_call_id` 沉 meta · 147d-ii `name` 退役落 `meta.tool_name` · 147d-iii a-d `role` 退出 wire（skip_serializing）+ 存量只读格 + S-014 棘轮（基线 166 只许降）· 147e `RetryTurn`→`RetrySubtree`（`21617d05`）· 147f e2e `msgTypeOf` 折叠。收尾批 `752b92c6`（62 files, +317/−113）。实测读数：`cargo test --lib` 1696 passed / 0 failed；CLI 11；e2e **75/75**；前端 typecheck + vitest 881 + `protocol-mirror-audit` A/B/C/D/E 全绿；`grep-audit` S-014 持平 166；`registry-audit` 自洽；`gen-facts --check` 无漂移。
 created: 2026-10-16
 track: 会话与输入
 deps: [T-146-主体可路由地址]
@@ -59,4 +60,14 @@ principal 从字符串升到结构体一并做：[T-146] 已把值域迁到可�
   3. t74 裁决者期望 `agent:arbiter`→`session/arbiter`（actor 字段随 T-146 迁移），core `actors` 模块注释里的 `agent:*` 写法同批清。
   Rust 1695+11 测、前端 874 测、e2e **75/75** 全绿。
 - **147e**（动词改名，本批）：`ResumeAction::RetryTurn` → `RetrySubtree`；wire 词 `retry_turn` → `retry_subtree`；后端函数 `process_retry_turn` → `process_retry_subtree`；前端常量 `RESUME_ACTION_RETRY_TURN` → `RESUME_ACTION_RETRY_SUBTREE`；跨栈 25 站点一次改绿。语义泛化——靶子从「Failed Turn」变成「任一骨架节点」，为 [T-147c-ii] 五值收敛铺路（`Turn` 变体在 wire 上消失时 `RetrySubtree` 不再依赖那个名字）。
+
+## 收尾
+
+exit 判据逐条达成，唯 **`MessageRole 从协议删除`** 落成的形态需要点明——它退出的对象是 **wire 协议**（写方不再序列化 `role`，跨栈消费方一律从 `principal.kind` 折身份），而 `role` 字段作为**存量只读格**被刻意保留：
+
+- **为什么不整格删**：`node_role()`（`chat_node.rs`）无「从 role 反推 principal」的补全——删字段后，历史 `messages.json` 里**带 `role` 却早于 `principal` 落库**的节点会在读侧失身份，前端 `messageRoleOf` 把它们误折成 assistant。存量兼容要求这一格继续能被 serde 读回。
+- **私有化也不可行**：`ChatNode { .., ..Default::default() }` 的函数式更新语法要求每个字段可见（E0451），私有 `role` 会炸穿全仓数百个不碰它的构造点。
+- **债务如何封顶**：写侧直写由 `scripts/grep-audit.mjs` **S-014** 棘轮钉住（基线 166，只许降；`gate.d/35-baseline.mjs` 登记 ceiling RATCHET，放宽需挂 ADR）。字段真正物理退役是一个**独立的存量数据迁移**问题（给历史 role-only 节点补 `principal`），不属本批 wire 协议改动，留给后续单列。
+
+wire 面（`type`/`style_tag`/`principal`）与消费侧（Rust 读漏斗 / 前端 `messageRoleOf` / CLI `render` / e2e `msgRoleOf`）已一致；Rust 1696 + CLI 11 + e2e 75/75 + 前端 881 + 镜像审计 0 错全绿。**T-147 关闭。**
 
