@@ -141,6 +141,29 @@ const SSE_REASONING: &str = concat!(
     "data: [DONE]\n\n",
 );
 
+/// 只有推理、**被长度掐断**的流：正文 0 字符 + `finish_reason=length`。
+/// 本机 24B 模型在 `max_tokens: 4096` 那一档的真实现场（T-142）。
+const SSE_REASONING_TRUNCATED: &str = concat!(
+    "HTTP/1.1 200 OK\r\n",
+    "Content-Type: text/event-stream\r\n",
+    "Connection: close\r\n",
+    "\r\n",
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"reasoning_content\":\"打算这样写：先读三处再列数字\"}}]}\n\n",
+    "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n",
+    "data: [DONE]\n\n",
+);
+
+/// 与上一条**只差结束原因**（`stop`）：同样只有推理，但 provider 说它说完了。
+const SSE_REASONING_ONLY: &str = concat!(
+    "HTTP/1.1 200 OK\r\n",
+    "Content-Type: text/event-stream\r\n",
+    "Connection: close\r\n",
+    "\r\n",
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"reasoning_content\":\"答案是 42。\"}}]}\n\n",
+    "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+    "data: [DONE]\n\n",
+);
+
 /// 工具调用流：身份 + 名字先到，参数分两片（逼出「快照 → 窄增量」的帧序）。
 const SSE_TOOL: &str = concat!(
     "HTTP/1.1 200 OK\r\n",
@@ -462,6 +485,41 @@ async fn empty_stream_is_a_failure_not_an_empty_answer() {
         .await
         .expect_err("空流必须按失败返回");
     assert!(format!("{err:?}").contains("empty"), "{err:?}");
+}
+
+/// 「思考即正文」（T-095）的**这一格**：被 `max_tokens` 掐断的半段思考不是答话。
+///
+/// 无工具的请求（摘要 / 措辞这类静默往返）也走同一条回退，因此判据在这一层要单独立一次：
+/// 两条断言是一对**只差结束原因**的流——把「一刀切关掉回退」当成修法时第二条必红，
+/// 把截断当完成交付时第一条必红。会话轮那一侧的对偶判据在
+/// `turn_runner.test.rs` 与 e2e `t77-length-truncation`。
+#[tokio::test]
+async fn truncated_reasoning_only_stream_is_not_returned_as_answer() {
+    use crate::symbio_core::SilentDeltas;
+
+    let ask = one("写一份报告");
+    let tok = TokenIssuer::issue_deep();
+
+    // ① 截断 ⇒ 失败（不是「答了半段草稿」）。
+    let (port, _) = spawn_mock(SSE_REASONING_TRUNCATED);
+    let adapter = ProviderLlmAdapter::new(mock_provider(port));
+    let err = adapter
+        .generate_streaming(&tok, &ask, Arc::new(SilentDeltas))
+        .await
+        .expect_err("被长度截断的思考不是答话");
+    assert!(
+        format!("{err:?}").contains("长度上限"),
+        "失败原因要说得出是长度截断：{err:?}"
+    );
+
+    // ② 未截断 ⇒ 那段思考就是回答（回退照旧生效）。
+    let (port2, _) = spawn_mock(SSE_REASONING_ONLY);
+    let adapter2 = ProviderLlmAdapter::new(mock_provider(port2));
+    let (text, _) = adapter2
+        .generate_streaming(&tok, &ask, Arc::new(SilentDeltas))
+        .await
+        .expect("写完的思考就是回答");
+    assert_eq!(text, "答案是 42。", "正文空但写完的思考必须仍被回退取用");
 }
 
 /// 连不上（真实网络错误）⇒ `GenerationFailed`——兜底路径的演练素材。

@@ -24,7 +24,7 @@ use async_trait::async_trait;
 use crate::symbio_core::chat_message::ChatMessage;
 use crate::symbio_core::ModelUsage;
 use crate::symbio_core::PromptMessage;
-use crate::symbio_core::{CapabilityMeta, TurnToolCallInfo};
+use crate::symbio_core::{CapabilityMeta, ModelFinishReason, TurnToolCallInfo};
 
 // ── 四层时延（[plan/01 §10](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构")，一等契约） ──
 
@@ -209,6 +209,19 @@ pub struct LlmTurn {
     pub reasoning: String,
     /// 模型**请求**的工具调用（尚未执行）；空 = 本轮收束（落 final）。
     pub tool_calls: Vec<TurnToolCallInfo>,
+    /// 这一次响应的**结束原因**（provider 原样归一化，见 [`ModelFinishReason`]）。
+    ///
+    /// 为什么必须带到端口面上：判「这一轮的思考算不算回答」的那一处（运行器末轮收束）
+    /// 只看得到 `text` 与 `reasoning` 两段文本，而**被 `max_tokens` 掐断的半段思考
+    /// 既不是答案、也不是写完的思考**。少了这一格，那条判据只能把「思考即正文」一路
+    /// 成立到底：实测一次 `finish=length`、正文 0 字符的轮次，13045 字的思考草稿被
+    /// 原样当答话交付，退出码还是 0（T-142）。
+    ///
+    /// 缺省 [`ModelFinishReason::Stop`] 的含义是「自然结束」，**不属于**给不出原因的
+    /// 实现——那类实现（本 trait 的默认 `generate_turn`）填 [`ModelFinishReason::Other`]
+    /// 并说明是 unknown，判据据此按「原因未知」处理而不是按「已说完」处理。
+    /// 带得出真实原因的适配器一律填 provider 归一化后的原值。
+    pub finish: ModelFinishReason,
     /// adapter 边界实测耗时（毫秒）——与 [`LlmAdapter::generate_timed`] 同一口径。
     pub cost_ms: u64,
     /// provider **实测用量**（本轮这一次响应的）。与 [`Self::cost_ms`] 同族：
@@ -345,6 +358,10 @@ pub trait LlmAdapter: Send + Sync {
             // 空串是**如实**：这一层没有思考可带，不是把思考弄丢了。
             reasoning: String::new(),
             tool_calls: Vec::new(),
+            // 同一条如实：`generate_streaming` 不带结束原因，这一层**看不见** finish。
+            // 填 `Stop` 是假称「自然结束」——那正是 T-142 被放过的形态；`Other("unknown")`
+            // 说的是「这一层给不出原因」，判据据此按未知处理而不是按完成处理。
+            finish: ModelFinishReason::Other("unknown".to_string()),
             cost_ms,
             usage: None,
         })

@@ -1069,8 +1069,20 @@ impl TurnRunner {
                         // 思考落进兜底格，界面上表现为「一串连续思考，没有正文」。
                         // 桥上那一份是第三选择：端口没带思考的适配器（默认实现只转正文）
                         // 只能靠它。
+                        //
+                        // ⚠️ 但「思考即正文」的前提是那段思考**写完了**。`finish = length`
+                        // 时它是被 `max_tokens` 掐断的半段草稿——既不是答案、也不是写完的
+                        // 思考，提升它就是把草稿原样当答话交付（实测正文 0 字符、思考
+                        // 13045 字那一轮：13KB 草稿进了 stdout，退出码还是 0，T-142）。
+                        // 因此截断时**两条提升路都关**（端口的思考与桥上的思考同判）：
+                        // 空答话自此落既有兜底形状，草稿仍作为思考事实入格可查。
+                        // 正文非空时照旧交付——半截正文被截断是另一条缺口（自动续写
+                        // 在 v2 尚未接上），不在本判据内。
+                        let truncated = rt.finish.is_length();
                         let answer = if !rt.text.trim().is_empty() {
                             rt.text.clone()
+                        } else if truncated {
+                            String::new()
                         } else if !rt.reasoning.trim().is_empty() {
                             rt.reasoning.clone()
                         } else {
@@ -1094,7 +1106,11 @@ impl TurnRunner {
                                 &actor,
                                 turn,
                                 user_seq,
-                                "model returned empty text",
+                                if truncated {
+                                    "模型输出被长度上限截断，本轮未产出答话"
+                                } else {
+                                    "model returned empty text"
+                                },
                                 cost,
                                 produced,
                                 artifacts_landed,

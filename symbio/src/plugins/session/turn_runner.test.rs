@@ -1006,8 +1006,8 @@ mod tool_round_tests {
     use crate::symbio_core::{
         check_all, unresolved_turns, AdapterError, CapabilityMeta, DeltaSink, DispatchOutcome,
         DispatchPort, Entity, Event, EventStore, FullModel, LatencyTier, LlmAdapter, LlmTurn,
-        PromptMessage, Seq, SilentDeltas, Store, TokenIssuer, TurnToolCallInfo, Verb,
-        EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_PROGRESS,
+        ModelFinishReason, PromptMessage, Seq, SilentDeltas, Store, TokenIssuer, TurnToolCallInfo,
+        Verb, EVENT_ARTIFACT_ADDED, EVENT_ASSISTANT_FINAL, EVENT_ASSISTANT_PROGRESS,
         EVENT_SESSION_CONSOLIDATED, EVENT_USER_MESSAGE,
     };
 
@@ -1146,6 +1146,7 @@ mod tool_round_tests {
                 text: "批准后已完成。".into(),
                 reasoning: String::new(),
                 tool_calls: Vec::new(),
+                finish: ModelFinishReason::Stop,
                 cost_ms: 5,
                 usage: Some(crate::symbio_core::ModelUsage {
                     input: Some(11),
@@ -1205,6 +1206,7 @@ mod tool_round_tests {
                 text: echo,
                 reasoning: String::new(),
                 tool_calls: Vec::new(),
+                finish: ModelFinishReason::Stop,
                 cost_ms: 1,
                 usage: None,
             })
@@ -1333,6 +1335,7 @@ mod tool_round_tests {
                         parse_error: None,
                         overflow_notice: None,
                     }],
+                    finish: ModelFinishReason::Stop,
                     cost_ms: 3,
                     usage: None,
                 })
@@ -1341,6 +1344,7 @@ mod tool_round_tests {
                     text: "读到了。".into(),
                     reasoning: String::new(),
                     tool_calls: Vec::new(),
+                    finish: ModelFinishReason::Stop,
                     cost_ms: 4,
                     usage: None,
                 })
@@ -2207,6 +2211,7 @@ mod tool_round_tests {
                     text: "先读 a。".into(),
                     reasoning: String::new(),
                     tool_calls: vec![call("tc-1", "a.md")],
+                    finish: ModelFinishReason::Stop,
                     cost_ms: 1,
                     usage: None,
                 },
@@ -2214,6 +2219,7 @@ mod tool_round_tests {
                     text: "再读 b。".into(),
                     reasoning: String::new(),
                     tool_calls: vec![call("tc-2", "b.md")],
+                    finish: ModelFinishReason::Stop,
                     cost_ms: 1,
                     usage: None,
                 },
@@ -2221,6 +2227,7 @@ mod tool_round_tests {
                     text: "两个都读到了。".into(),
                     reasoning: String::new(),
                     tool_calls: Vec::new(),
+                    finish: ModelFinishReason::Stop,
                     cost_ms: 1,
                     usage: None,
                 },
@@ -2456,6 +2463,7 @@ mod tool_round_tests {
                         parse_error: None,
                         overflow_notice: None,
                     }],
+                    finish: ModelFinishReason::Stop,
                     cost_ms: 1,
                     usage: None,
                 }
@@ -2464,6 +2472,7 @@ mod tool_round_tests {
                     text: String::new(),
                     reasoning: "想清楚了：答案是 42。".into(),
                     tool_calls: Vec::new(),
+                    finish: ModelFinishReason::Stop,
                     cost_ms: 1,
                     usage: None,
                 }
@@ -2549,6 +2558,7 @@ mod tool_round_tests {
                             parse_error: None,
                             overflow_notice: None,
                         }],
+                        finish: ModelFinishReason::Stop,
                         cost_ms: 1,
                         usage: None,
                     }
@@ -2557,6 +2567,7 @@ mod tool_round_tests {
                         text: String::new(),
                         reasoning: String::new(),
                         tool_calls: Vec::new(),
+                        finish: ModelFinishReason::Stop,
                         cost_ms: 1,
                         usage: None,
                     }
@@ -2589,6 +2600,126 @@ mod tool_round_tests {
         assert_eq!(last.kind, crate::symbio_core::EVENT_ASSISTANT_FALLBACK);
         assert_eq!(last.payload["why"], "model returned empty text");
         assert_eq!(last.payload["status"], "failed");
+    }
+
+    // ── 守卫：截断的**半段思考**不是答话 ────────────────────────────────────
+    //
+    /// 与 [`ReasoningOnlyFinalLlm`] **只差一个字段**：末轮同样是「正文空 + 只有思考」，
+    /// 但 provider 说这次响应是被 `max_tokens` 掐断的（`finish = length`）。
+    /// 两个用例并排的意义就在这对差异上——把 `finish` 改成 `Stop` 本用例必红，
+    /// 把 `Stop` 改成 `Length` 上面那条必红（[T-142]：判据只认「思考写完没有」）。
+    struct TruncatedReasoningFinalLlm {
+        prompts: Arc<Mutex<Vec<Vec<PromptMessage>>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmAdapter for TruncatedReasoningFinalLlm {
+        fn model_id(&self) -> &str {
+            "truncated-reasoning-mock"
+        }
+        async fn generate(
+            &self,
+            _tok: &FullModel,
+            _messages: &[PromptMessage],
+        ) -> Result<String, AdapterError> {
+            Err(AdapterError::GenerationFailed("unused".into()))
+        }
+        async fn generate_turn(
+            &self,
+            _tok: &FullModel,
+            messages: &[PromptMessage],
+            _tools: &[CapabilityMeta],
+            _sink: Arc<dyn DeltaSink>,
+        ) -> Result<LlmTurn, AdapterError> {
+            let round = {
+                let mut p = self.prompts.lock().unwrap();
+                p.push(messages.to_vec());
+                p.len()
+            };
+            Ok(if round == 1 {
+                LlmTurn {
+                    text: "先读一下。".into(),
+                    reasoning: String::new(),
+                    tool_calls: vec![TurnToolCallInfo {
+                        id: Some("tc-1".into()),
+                        wire_id: Some("w-tc-1".into()),
+                        name: Some("vdfs_read".into()),
+                        arguments: serde_json::json!({ "path": "a.md" }),
+                        parse_error: None,
+                        overflow_notice: None,
+                    }],
+                    finish: ModelFinishReason::Stop,
+                    cost_ms: 1,
+                    usage: None,
+                }
+            } else {
+                LlmTurn {
+                    text: String::new(),
+                    // 实测形状：正文 0 字符、思考 13045 字的**草稿**（「让我先检查字数…」）。
+                    reasoning: "打算这样写报告：先读三处，再逐段列数字，然后检查字数。".into(),
+                    tool_calls: Vec::new(),
+                    finish: ModelFinishReason::Length,
+                    cost_ms: 1,
+                    usage: None,
+                }
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn length_truncated_reasoning_is_not_delivered_as_answer() {
+        let store = EventStore::new();
+        let tok = TokenIssuer::issue_deep();
+        let llm = TruncatedReasoningFinalLlm {
+            prompts: Arc::new(Mutex::new(Vec::new())),
+        };
+
+        let out = TurnRunner
+            .run_with_tools(
+                &store,
+                &llm,
+                &tok,
+                input(),
+                Arc::new(SilentDeltas),
+                &tools(),
+                Some(&PathEchoDispatch),
+            )
+            .await
+            .expect("失败也要有产出");
+
+        let draft = "打算这样写报告：先读三处，再逐段列数字，然后检查字数。";
+        assert!(
+            out.fell_back,
+            "被长度截断的思考不是答话——交付它就是把草稿当答案（T-142）"
+        );
+        assert_ne!(out.text, draft, "回给调用方的不是草稿");
+
+        let snapshot = store.range(Seq::new(0));
+        let last = snapshot.last().expect("有收束格");
+        assert_eq!(
+            last.kind,
+            crate::symbio_core::EVENT_ASSISTANT_FALLBACK,
+            "落兜底格（失败形状），不是 final——落 final 会把「没写完」记成「答了」"
+        );
+        assert_eq!(last.payload["status"], "failed");
+        assert_eq!(
+            last.payload["text"],
+            serde_json::Value::String(String::new()),
+            "答话载荷是空的：草稿不得冒充正文"
+        );
+        assert!(
+            last.payload["why"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("长度上限"),
+            "兜底原因要说得出是长度截断，不是一句「空文本」（实得 {:?}）",
+            last.payload["why"]
+        );
+        assert!(
+            check_all(&snapshot).is_empty(),
+            "{:?}",
+            check_all(&snapshot)
+        );
     }
 }
 

@@ -188,18 +188,26 @@ impl LlmAdapter for ProviderLlmAdapter {
         // 正文空但推理非空 ⇒ **回退取推理**（v1 同一语义：`TurnOutput::effective_text`）。
         // reasoning 模型常常想清楚了却不复述，那句思考就是它的全部回答；把它当
         // 「没答」判失败，调用方拿到的是失败而不是答案。
-        let answer = if turn.text.trim().is_empty() {
-            turn.reasoning
-        } else {
+        //
+        // ⚠️ 这条回退有一条前提：**那段思考写完了**。`finish = length` 时它是被
+        // `max_tokens` 掐断的半段草稿，既不是答案也不是写完的思考——回退它等于把
+        // 草稿当答话交付（无工具请求的这条路上就是摘要 / 措辞的正文，T-142 同一条判据）。
+        let answer = if !turn.text.trim().is_empty() {
             turn.text
+        } else if turn.finish.is_length() {
+            String::new()
+        } else {
+            turn.reasoning
         };
         if answer.trim().is_empty() {
             // 两样都空才是**真失败**：正文与思考都没有产出，才叫「模型没答」。
             // 空文本不是成功：调用方拿到 Ok(空串) 会把「模型没答」当「答了空话」
             // 落成 final——必须走兜底路径（I3），所以这里按失败返回。
-            return Err(AdapterError::GenerationFailed(
-                "model returned empty text".into(),
-            ));
+            return Err(AdapterError::GenerationFailed(if turn.finish.is_length() {
+                "模型输出被长度上限截断，未产出答话".into()
+            } else {
+                "model returned empty text".into()
+            }));
         }
         Ok((answer, turn.cost_ms))
     }
@@ -485,6 +493,9 @@ impl LlmAdapter for ProviderLlmAdapter {
             // 判「本轮答了没有」的那一侧只看得到返回值，不看流式桥。
             reasoning: output.reasoning,
             tool_calls: output.tool_calls,
+            // 结束原因直通：判「截断的思考算不算答话」的那一处只有在这里才看得见
+            // provider 说它是否说完（`TurnOutput::finish` 由协议层归一化，见 [`LlmTurn::finish`]）。
+            finish: output.finish,
             cost_ms: started.elapsed().as_millis() as u64,
             // provider 实测用量直通：这是校准反馈链的唯一数据源（见 `LlmTurn::usage`）。
             usage: output.usage,

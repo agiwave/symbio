@@ -50,6 +50,11 @@
 //! 匹配规则：按数组顺序，`match` 是对**最后一条 user 消息**的子串匹配；
 //! 不带 `match` 的场景可设 `once: true`（只用一次，适合「第 N 轮调工具」的编排）
 //! 或 `times: N`（**最多被选中 N 次**，`once` 就是 `times: 1` 的别名）。
+//! `finishReason`：**原样覆盖**终止帧里的结束原因（缺省按有没有工具调用推 `stop` /
+//! `tool_calls`）。写的是该协议的**原始值**——`length`（openai 系）/ `max_tokens`
+//! （anthropic）/ `MAX_TOKENS`（gemini），后端协议层归一化成同一个 `ModelFinishReason::Length`。
+//! 存在它是为了能表达「被 `max_tokens` 掐断」这一格：真实模型会说它没说完，而 mock 照例
+//! 只说 stop 就永远复现不了截断（T-142 的判据要的正是这一格）。
 //! `times` 是为**一长串连续工具轮**准备的：`{ afterTool: true, times: 24, toolCalls: [...] }`
 //! 让同一轮里连调 24 次工具，第 25 次选中时它已耗尽，池子里下一条（通常就是收束那条）接上。
 //! 名额按**选中次数**计，与 `failTimes`（按**逻辑请求**计）是两套计数器，别混。
@@ -367,7 +372,7 @@ function* buildEvents(scenario, model, requestId, useIndex = 0) {
   const chunks = scenario.chunks ?? (scenario.content != null ? [scenario.content] : []);
   for (const piece of chunks) yield chunkOf(requestId, model, { content: piece });
   // ③ 终止帧
-  const finish = (scenario.toolCalls ?? []).length > 0 ? 'tool_calls' : 'stop';
+  const finish = finishFor(scenario, ['tool_calls', 'stop']);
   yield chunkOf(requestId, model, {}, finish, { prompt_tokens: 64, completion_tokens: 32 });
 }
 
@@ -397,6 +402,15 @@ const SSE = (obj) => `data: ${JSON.stringify(obj)}\n\n`;
 /** 场景的正文分片（`chunks` 优先，退 `content` 单片）。 */
 function contentChunks(scenario) {
   return scenario.chunks ?? (scenario.content != null ? [scenario.content] : []);
+}
+
+/**
+ * 场景的结束原因：`finishReason` **原样覆盖**，否则按「有没有工具调用」推缺省值。
+ * 参数 `[有工具的缺省, 没工具的缺省]` 是**本协议的原始写法**（四协议各不同），
+ * 覆盖值同样按协议写——后端 `ModelFinishReason::from_provider` 认全部变体。
+ */
+function finishFor(scenario, [withTools, plain]) {
+  return scenario.finishReason ?? ((scenario.toolCalls ?? []).length > 0 ? withTools : plain);
 }
 
 /** 工具参数序列化（对象 → JSON 串；已是字符串则原样）。 */
@@ -435,7 +449,7 @@ function openaiResponsesFrames(scenario, model, requestId, useIndex) {
   for (const piece of contentChunks(scenario)) {
     frames.push(SSE({ type: 'response.output_text.delta', delta: piece }));
   }
-  const finish = (scenario.toolCalls ?? []).length > 0 ? 'tool_calls' : 'stop';
+  const finish = finishFor(scenario, ['tool_calls', 'stop']);
   frames.push(
     SSE({
       type: 'response.completed',
@@ -486,7 +500,7 @@ function anthropicFrames(scenario, model, requestId, useIndex) {
   for (const piece of contentChunks(scenario)) {
     frames.push(ev('content_block_delta', { type: 'content_block_delta', index: textIndex, delta: { type: 'text_delta', text: piece } }));
   }
-  const stop = toolCount > 0 ? 'tool_use' : 'end_turn';
+  const stop = finishFor(scenario, ['tool_use', 'end_turn']);
   frames.push(
     ev('message_delta', {
       type: 'message_delta',
@@ -523,7 +537,7 @@ function geminiFrames(scenario, model, requestId, useIndex) {
   }
   frames.push(
     JSON.stringify({
-      candidates: [{ content: { role: 'model', parts: [] }, finishReason: 'STOP' }],
+      candidates: [{ content: { role: 'model', parts: [] }, finishReason: scenario.finishReason ?? 'STOP' }],
       usageMetadata: { promptTokenCount: 64, candidatesTokenCount: 32 },
     }) + '\n',
   );
