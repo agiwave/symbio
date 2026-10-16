@@ -995,9 +995,9 @@ async fn send_compression_request(
 ///
 /// 模型插件的流循环（`plugins/model/stream.rs`）发出的帧有三类：
 ///
-/// 1. **Turn 组合节点骨架**（`msg_type = Turn`，`id = 请求 root_id`）——压缩请求
+/// 1. **运行骨架根帧**（`is_run()`：`type=skeleton` + `style_tag=run`，`id = 请求 root_id`）——压缩请求
 ///    的 root 是一次性 id，这条帧若进转写，前端会多出一个**永远停在流式的空
-///    Turn 骨架**（压缩不走 Turn 定稿路径），这是静默最初的动机，必须继续吞掉；
+///    运行骨架**（压缩不走运行骨架定稿路径），这是静默最初的动机，必须继续吞掉；
 /// 2. **摘要正文子节点**（model 流循环自选 id 的 `Streaming` 正文）——它才是
 ///    摘要内容：首帧是「全量快照」（id + content + Streaming），后续是**纯窄
 ///    增量**（id + delta）。首帧被吞（它携带节点身份与全量正文），增量改写为

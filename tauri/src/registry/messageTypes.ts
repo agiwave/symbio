@@ -607,11 +607,12 @@ export interface MessageRetryTarget {
  *
  * 原先这段路由写在 `ModelChatPanel.handleRetry` 里，与面板的其它职责混在一起。
  * 抽成纯函数后可直接单测「哪种节点发哪种 action」，也避免「叶子节点要回溯到父 Turn」
- * 这条后端约束被漏掉——后端 `process_retry_subtree` 要求 `target_id` 指向 Failed **Turn**，
+ * 这条后端约束被漏掉——后端 `process_retry_subtree` 要求 `target_id` 指向 **运行骨架**
+ * （`is_run()`：wire `type=skeleton` + `style_tag=run`，前端折后呈现为 `turn`），
  * 因此 Text / Reasoning 叶子失败时必须回溯到父 Turn，否则恢复会被拒绝。
  *
  * 压缩节点是**根级**节点（无 `parent_id`），若落到"回溯到父 Turn"的兜底分支，
- * `target_id` 会是它自己而类型是 `Compression` —— 后端会以 NotFound 拒绝。
+ * `target_id` 会是它自己而它并非运行骨架（wire `type=notice`）——后端会以 NotFound 拒绝。
  * 因此它必须在工具分支之前单独分派。
  */
 export function messageRetryTargetOf(

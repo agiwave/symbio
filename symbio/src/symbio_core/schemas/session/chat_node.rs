@@ -393,7 +393,7 @@ pub struct ChatNode {
 pub enum ResumeAction {
     /// LLM 失败重试：删除靶子节点及其所有子孙节点，重新走 LLM 请求。
     ///
-    /// [ADR-070 §决策 5]：曾经的 `RetryTurn` 语义绑 `Turn` 变体——靶子只允许是 Turn，
+    /// [ADR-070 §决策 1]：曾经的 `RetryTurn` 语义绑 `Turn` 变体——靶子只允许是 Turn，
     /// 五值收敛（[T-147c-ii]）后 `Turn` 消失于 wire，本动词的语义随之泛化为「删除整棵
     /// 子树并重跑」，靶子是**任一骨架节点**（曾经的 Turn 或未来的 Skeleton+style_tag=run）。
     RetrySubtree,
@@ -409,7 +409,7 @@ pub enum ResumeAction {
     Answer,
     /// 压缩失败重试：删除 Failed 压缩节点，重新执行一次上下文压缩。
     ///
-    /// `target_id` 指向**压缩节点**（`msg_type = Compression`、`status = Failed`）。
+    /// `target_id` 指向**压缩节点**（`msg_type = Notice` 且 `is_compression()`、`status = Failed`）。
     /// 语义上属"删除-重建"，与其余恢复动作同款；但**不改动历史**——压缩失败
     /// 本身从不丢消息（见 `CompressionFailure` 的说明），重试只是再试一次
     /// LLM 摘要，成功后由快照接替被压缩的那段。

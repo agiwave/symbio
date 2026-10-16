@@ -102,7 +102,7 @@ pub async fn process_resume(
 ///
 /// 流程：
 /// 1. 加载会话消息
-/// 2. 定位 Failed Turn（`target_id` 指向，msg_type=Turn）
+/// 2. 定位 Failed Turn（`target_id` 指向，`is_run()`：wire `type=skeleton` + `style_tag=run`）
 /// 3. BFS 收集所有子孙节点 id（含 target_id 自身）
 /// 4. 从 messages 中删除这些节点
 /// 5. `replace_messages` 持久化
@@ -119,7 +119,7 @@ async fn process_retry_subtree(
     // 1. 加载会话消息
     let messages = session.get_messages().await?;
 
-    // 2. 定位 Failed Turn（target_id 指向，msg_type=Turn）
+    // 2. 定位 Failed Turn（target_id 指向，is_run()：wire type=skeleton + style_tag=run）
     let turn_exists = messages.iter().any(|m| m.id == req.target_id && m.is_run());
     if !turn_exists {
         return Err(PluginError::NotFound(format!(

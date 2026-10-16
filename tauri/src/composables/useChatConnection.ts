@@ -53,9 +53,9 @@ export const RESUME_KEY: InjectionKey<(payload: ResumePayload) => void> = Symbol
 /** 会话恢复载荷（retry_subtree/retry_compaction/retry/approve/reject/supply/answer 统一接口） */
 export interface ResumePayload {
   /** 目标消息 ID（恢复锚点）
-   *  - retry_subtree：指向 Failed Turn（msg_type=Turn）
-   *  - retry_compaction：指向 Failed 压缩节点（msg_type=Compression）
-   *  - 其他 action：指向 ToolCall 父节点（msg_type=ToolCall） */
+   *  - retry_subtree：指向 Failed 运行骨架（呈现 `turn`，wire `type=skeleton` + `style_tag=run`）
+   *  - retry_compaction：指向 Failed 压缩节点（呈现 `compression`，wire `type=notice`）
+   *  - 其他 action：指向工具调用骨架（呈现 `tool_call`，wire `type=skeleton` + `style_tag=tool`） */
   targetId: string
   /** 恢复动作——词表在 `schemas/chat_node.ts`（后端 `ResumeAction` 的镜像，
    *  由 `scripts/protocol-mirror-audit.mjs` 的 C 组守着）。此处**不**再抄一份
