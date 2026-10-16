@@ -695,13 +695,16 @@ impl ChatNode {
         self.msg_type == Some(NodeKind::Interaction)
     }
 
-    /// **呈现派生**（[T-155 B3]，[ADR-070 §决策 2]）：从节点**形状**（`msg_type` +
-    /// `style_tag` + `meta.tool_name`）现算面向用户的 `title` / `icon`，**只在前后端
-    /// 交互面调用**（转写投递出口与消息列表出口），不在业务/落库构造点写入。
+    /// **呈现派生**（[T-155 B3]，[ADR-070 §决策 2]）：从节点**形状 + 状态 + meta**现算面向
+    /// 前端的呈现数据——`title` / `icon`（头部）与 `actions`（可发起的恢复动作）——**只在
+    /// 前后端交互面调用**（转写投递出口与消息列表出口），不在业务/落库构造点写入。
     ///
-    /// 判据即本模块既有的谓词，事实与呈现由此彻底分家：事件/存储里的节点**永不含**
-    /// `title`/`icon`，前端拿到的那一帧才由后端机械算出。`run` 骨架的标题是智能体名
-    /// （上下文相关），这里不钉死——留 `None` 交呈现层。已有值不覆盖（幂等）。
+    /// 判据即本模块既有谓词 + 节点自身字段（`status` / `meta.recoverable` /
+    /// `meta.failure_kind` / `meta.prompt.kind`）：`actions` 的翻译「哪种节点该给哪个恢复
+    /// 动词」是**业务知识**，正确住在后端；前端拿到的是**数据**，不再按业务类型反推。
+    /// 事件/存储里的节点永不含这些呈现字段。已有值不覆盖（幂等，重复投递安全）。
+    ///
+    /// `run` 骨架标题是智能体名（上下文相关）留 `None` 交呈现层。
     pub fn with_derived_presentation(mut self) -> Self {
         if self.is_reasoning() {
             self.title.get_or_insert_with(|| "思考过程".to_string());
@@ -715,7 +718,84 @@ impl ChatNode {
                 self.title.get_or_insert_with(|| name);
             }
         }
+        // 恢复动作：只在缺失时派生（前端交互面是唯一填充点，事实里永不含 actions）。
+        // 逐条镜像前端 legacy 判据（`messageTypes.ts::canRetry*` / `messageRetryTargetOf`），
+        // 迁移前后行为逐字一致。
+        if self.actions.is_none() {
+            self.actions = Self::derive_actions(&self);
+        }
         self
+    }
+
+    /// 从节点自身（形状 + 状态 + meta）派生可用恢复动作；无可给动作 → `None`。
+    fn derive_actions(node: &ChatNode) -> Option<Vec<ResumeAction>> {
+        use NodeStatus::*;
+        let failed = node.status == Some(Failed);
+        let aborted = node.status == Some(Aborted);
+        let waiting = node.status == Some(WaitingUserAction);
+        let acts: Vec<ResumeAction> = if node.is_interaction() {
+            // 交互卡：确认 → 通过/拒绝；提问 → 回答。仅等待回应时给出。
+            match (waiting, node.prompt_kind().as_deref()) {
+                (true, Some("confirm")) => vec![ResumeAction::Approve, ResumeAction::Reject],
+                (true, Some("question")) => vec![ResumeAction::Answer],
+                _ => vec![],
+            }
+        } else if node.is_tool_call() {
+            // 工具失败：可恢复才给重试；失败类别 error（参数残破）再补「补充参数」入口。
+            let mut v = Vec::new();
+            if failed && node.meta_bool("recoverable") {
+                v.push(ResumeAction::Retry);
+                if node.meta_str("failure_kind").as_deref() == Some("error") {
+                    v.push(ResumeAction::Supply);
+                }
+            }
+            v
+        } else if node.is_compression() {
+            // 压缩失败：只给就地重跑（不改历史）。
+            if failed {
+                vec![ResumeAction::RetryCompaction]
+            } else {
+                vec![]
+            }
+        } else if node.is_run() {
+            // 整轮失败/中止：重跑子树（组级错误条挂在轮骨架自身状态上）。
+            if failed || aborted {
+                vec![ResumeAction::RetrySubtree]
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+        (!acts.is_empty()).then_some(acts)
+    }
+
+    /// 读 `meta` 顶层字符串字段（缺失 / 非串 → `None`）。
+    fn meta_str(&self, key: &str) -> Option<String> {
+        self.meta
+            .as_ref()
+            .and_then(|m| m.get(key))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    }
+
+    /// 读 `meta` 顶层布尔字段（缺失 / 非 bool → `false`）。
+    fn meta_bool(&self, key: &str) -> bool {
+        self.meta
+            .as_ref()
+            .and_then(|m| m.get(key))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
+    /// 读 `meta.prompt.kind`（交互子形态：`confirm` / `question`）。
+    fn prompt_kind(&self) -> Option<String> {
+        self.meta
+            .as_ref()
+            .and_then(|m| m.get("prompt"))
+            .and_then(|p| p.get("kind"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
     }
 }
 

@@ -351,3 +351,82 @@ fn derived_presentation_from_shape() {
     .with_derived_presentation();
     assert_eq!(kept.title.as_deref(), Some("自定义"));
 }
+
+/// 恢复动作派生（[T-155 B3]）：业务→动词的翻译在后端交互面完成，逐条镜像前端 legacy 判据。
+#[test]
+fn derived_actions_from_shape_status_meta() {
+    let has = |n: &ChatNode, a: ResumeAction| {
+        n.actions.as_ref().is_some_and(|v| {
+            v.iter()
+                .any(|x| std::mem::discriminant(x) == std::mem::discriminant(&a))
+        })
+    };
+
+    // 工具失败 + recoverable → Retry；failure_kind=error 再加 Supply
+    let tool_err = ChatNode {
+        id: "t".into(),
+        msg_type: Some(NodeKind::Skeleton),
+        status: Some(NodeStatus::Failed),
+        meta: Some(serde_json::json!({"recoverable": true, "failure_kind": "error"})),
+        ..Default::default()
+    }
+    .with_style_tag(CHAT_STYLE_TAG_TOOL)
+    .with_derived_presentation();
+    assert!(has(&tool_err, ResumeAction::Retry));
+    assert!(has(&tool_err, ResumeAction::Supply));
+
+    // 工具失败但不可恢复 → 无动作（与 legacy `f.recoverable` 门槛一致）
+    let tool_norec = ChatNode {
+        id: "t2".into(),
+        msg_type: Some(NodeKind::Skeleton),
+        status: Some(NodeStatus::Failed),
+        ..Default::default()
+    }
+    .with_style_tag(CHAT_STYLE_TAG_TOOL)
+    .with_derived_presentation();
+    assert!(tool_norec.actions.is_none());
+
+    // 轮骨架失败/中止 → RetrySubtree
+    let run_failed = ChatNode {
+        id: "r".into(),
+        msg_type: Some(NodeKind::Skeleton),
+        status: Some(NodeStatus::Aborted),
+        ..Default::default()
+    }
+    .with_style_tag(CHAT_STYLE_TAG_RUN)
+    .with_derived_presentation();
+    assert!(has(&run_failed, ResumeAction::RetrySubtree));
+
+    // 压缩失败 → RetryCompaction
+    let comp_failed = ChatNode {
+        id: "c".into(),
+        msg_type: Some(NodeKind::Notice),
+        status: Some(NodeStatus::Failed),
+        ..Default::default()
+    }
+    .with_derived_presentation();
+    assert!(has(&comp_failed, ResumeAction::RetryCompaction));
+
+    // 交互确认（waiting + prompt.kind=confirm）→ Approve/Reject
+    let ask_confirm = ChatNode {
+        id: "i".into(),
+        msg_type: Some(NodeKind::Interaction),
+        status: Some(NodeStatus::WaitingUserAction),
+        meta: Some(serde_json::json!({"prompt": {"kind": "confirm"}})),
+        ..Default::default()
+    }
+    .with_derived_presentation();
+    assert!(has(&ask_confirm, ResumeAction::Approve));
+    assert!(has(&ask_confirm, ResumeAction::Reject));
+
+    // 交互提问 → Answer
+    let ask_q = ChatNode {
+        id: "i2".into(),
+        msg_type: Some(NodeKind::Interaction),
+        status: Some(NodeStatus::WaitingUserAction),
+        meta: Some(serde_json::json!({"prompt": {"kind": "question"}})),
+        ..Default::default()
+    }
+    .with_derived_presentation();
+    assert!(has(&ask_q, ResumeAction::Answer));
+}
