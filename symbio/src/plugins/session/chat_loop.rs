@@ -492,7 +492,7 @@ pub async fn run_chat_loop(
                             .messages
                             .iter()
                             .rev()
-                            .find(|m| m.role == Some(NodeRole::Assistant))
+                            .find(|m| m.node_role() == Some(NodeRole::Assistant))
                             .and_then(|m| match &m.content {
                                 Some(MessageContent::Text(t)) => Some(t.clone()),
                                 _ => None,
@@ -507,7 +507,7 @@ pub async fn run_chat_loop(
                             .messages
                             .iter()
                             .rev()
-                            .find(|m| m.role == Some(NodeRole::Assistant))
+                            .find(|m| m.node_role() == Some(NodeRole::Assistant))
                             .map(|m| {
                                 let meta = m.meta.as_ref();
                                 super::turn_runner::DialogFacts {
@@ -742,7 +742,7 @@ pub async fn run_chat_loop(
             .messages
             .iter()
             .rev()
-            .find(|m| m.role == Some(NodeRole::User))
+            .find(|m| m.node_role() == Some(NodeRole::User))
             .map(|m| {
                 let text = match &m.content {
                     Some(MessageContent::Text(t)) => t.clone(),

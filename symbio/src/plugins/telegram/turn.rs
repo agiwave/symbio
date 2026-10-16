@@ -292,7 +292,7 @@ impl Accumulator {
             return;
         }
 
-        if m.role == Some(NodeRole::Assistant) && (m.is_text() || m.msg_type.is_none()) {
+        if m.node_role() == Some(NodeRole::Assistant) && (m.is_text() || m.msg_type.is_none()) {
             if let Some(delta) = m.delta.as_deref() {
                 // 纯增量：追加。身份未知时也照收——回读兜底在帧循环里，
                 // 走到这里说明基线已拿不到，攒下来的部分仍好过丢掉整条。

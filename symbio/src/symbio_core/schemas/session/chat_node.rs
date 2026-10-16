@@ -551,6 +551,26 @@ impl ChatNode {
         self
     }
 
+    /// 归属折叠判据（[T-147d-iii]）：`role` 的**唯一读入口**。
+    ///
+    /// 共存阶段的优先级是「残留格优先、`principal.kind` 兜底」：今天仍有构造点只写
+    /// `role` 不写 `principal`（子会话转播改写 `role=Tool` 这类），kind 折叠一旦
+    /// **优先**就会静默改变它们的读侧分派——所以这里按「写过的不动，没写的从主体折」。
+    /// 字段退役（d-iii 末档）后本函数收敛成纯 `principal.kind` 折叠：
+    /// Person→User、Agent→Assistant、Tool→Tool、System→System（两域一一对应）。
+    pub fn node_role(&self) -> Option<NodeRole> {
+        use crate::symbio_core::principal::PrincipalKind;
+        if self.role.is_some() {
+            return self.role.clone();
+        }
+        Some(match self.principal.as_ref()?.kind {
+            PrincipalKind::Person => NodeRole::User,
+            PrincipalKind::Agent => NodeRole::Assistant,
+            PrincipalKind::Tool => NodeRole::Tool,
+            PrincipalKind::System => NodeRole::System,
+        })
+    }
+
     /// 读 `meta.style_tag`（wire 层的呈现变体词，[ADR-070 §决策 3]）。
     pub fn style_tag(&self) -> Option<&str> {
         self.meta

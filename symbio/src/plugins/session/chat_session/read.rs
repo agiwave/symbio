@@ -13,7 +13,7 @@ fn sliding_window(messages: &[ChatNode], max_turns: usize) -> Vec<ChatNode> {
 
     let mut user_indices = Vec::new();
     for (idx, msg) in messages.iter().enumerate() {
-        if msg.role == Some(NodeRole::User) {
+        if msg.node_role() == Some(NodeRole::User) {
             user_indices.push(idx);
         }
     }
@@ -41,8 +41,8 @@ fn sliding_window(messages: &[ChatNode], max_turns: usize) -> Vec<ChatNode> {
 ///
 /// 仅作用于返回的构造结果，不修改存储。
 fn normalize_message_content(msg: ChatNode) -> Option<ChatNode> {
-    // 占位消息（无角色）直接丢弃；as_ref 避免部分移动（后续 ..msg 复用其余字段）
-    msg.role.as_ref()?;
+    // 占位消息（无角色）直接丢弃（判据走 `node_role()` 折叠，[T-147d-iii]）
+    msg.node_role()?;
     let content_ok = matches!(
         &msg.content,
         Some(MessageContent::Parts(_)) | Some(MessageContent::Text(_))

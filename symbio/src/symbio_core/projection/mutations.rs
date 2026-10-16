@@ -94,7 +94,7 @@ fn parse_edited(e: &Event) -> Option<(String, EditedEntry)> {
     if m.id.is_empty() {
         return None;
     }
-    let role = m.role.as_ref().map(role_word);
+    let role = m.node_role().as_ref().map(role_word);
     let text = m.content.as_ref().map(MessageContent::to_text);
     Some((m.id, EditedEntry { role, text }))
 }

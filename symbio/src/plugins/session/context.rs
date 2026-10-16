@@ -102,7 +102,7 @@ fn find_compress_split_point(messages: &[ChatNode], fraction: f64) -> usize {
     // 若先遇到 Assistant 的 ToolCall 节点（其结果不在其后），说明有悬空调用。
     let mut pending_tool_call = false;
     for m in messages.iter().rev() {
-        match m.role {
+        match m.node_role() {
             Some(NodeRole::Tool) => {
                 pending_tool_call = false;
                 break;
@@ -133,7 +133,7 @@ fn find_compress_split_point(messages: &[ChatNode], fraction: f64) -> usize {
     let mut cumulative_char_count = 0;
 
     for (i, msg) in messages.iter().enumerate() {
-        if msg.role == Some(NodeRole::User) {
+        if msg.node_role() == Some(NodeRole::User) {
             let has_content = msg
                 .content
                 .as_ref()
@@ -172,7 +172,7 @@ pub fn find_turn_user_split_idx(messages: &[ChatNode], root_id: &str) -> usize {
     };
     messages[..turn_idx]
         .iter()
-        .rposition(|m| m.role == Some(NodeRole::User) && m.parent_id.is_none())
+        .rposition(|m| m.node_role() == Some(NodeRole::User) && m.parent_id.is_none())
         .unwrap_or(turn_idx)
 }
 

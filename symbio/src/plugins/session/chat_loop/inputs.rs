@@ -18,7 +18,7 @@ fn last_user_text(context: &SessionContext) -> String {
         .messages
         .iter()
         .rev()
-        .find(|m| m.role == Some(NodeRole::User))
+        .find(|m| m.node_role() == Some(NodeRole::User))
         .and_then(|m| match &m.content {
             Some(MessageContent::Text(t)) => Some(t.clone()),
             _ => None,

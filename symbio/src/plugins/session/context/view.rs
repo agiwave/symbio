@@ -21,7 +21,7 @@ pub fn fade_aged_tool_results(messages: &mut [ChatNode], keep_recent_turns: usiz
     let user_positions: Vec<usize> = messages
         .iter()
         .enumerate()
-        .filter(|(_, m)| m.role == Some(NodeRole::User))
+        .filter(|(_, m)| m.node_role() == Some(NodeRole::User))
         .map(|(i, _)| i)
         .collect();
     let keep_from = if user_positions.len() > keep_recent_turns {
@@ -33,7 +33,7 @@ pub fn fade_aged_tool_results(messages: &mut [ChatNode], keep_recent_turns: usiz
     const FADE_BUDGET: usize = 2048; // 老化工具结果压到约 2k token
     let tok = default_tokenizer();
     for m in messages.iter_mut().take(keep_from) {
-        if m.role == Some(NodeRole::Tool) && m.is_text() {
+        if m.node_role() == Some(NodeRole::Tool) && m.is_text() {
             if let Some(MessageContent::Text(t)) = &m.content {
                 if tok.count(t) > FADE_BUDGET {
                     m.content = Some(MessageContent::Text(
@@ -82,7 +82,7 @@ pub fn fade_aged_content_nodes(
         {
             return false;
         }
-        !matches!(m.role, Some(NodeRole::Tool) | Some(NodeRole::System))
+        !matches!(m.node_role(), Some(NodeRole::Tool) | Some(NodeRole::System))
             && (m.msg_type.is_none() || m.is_text() || m.is_reasoning())
     }
 

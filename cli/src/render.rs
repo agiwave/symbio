@@ -199,7 +199,7 @@ impl Renderer {
             (
                 delta,
                 surface,
-                merged.role.clone(),
+                merged.node_role(),
                 merged.status == Some(NodeStatus::Failed),
                 merged.error.clone(),
                 merged.tool_name().map(str::to_string),

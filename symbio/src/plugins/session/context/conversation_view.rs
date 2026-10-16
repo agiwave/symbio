@@ -94,7 +94,7 @@ pub fn conversation_view(messages: &[ChatNode], limit: usize) -> Vec<ChatNode> {
 /// 首响一样是"助手说过的话"。
 fn is_conversation_node(m: &ChatNode) -> bool {
     let is_text = m.msg_type.is_none() || m.is_text();
-    is_text && matches!(m.role, Some(NodeRole::User) | Some(NodeRole::Assistant))
+    is_text && matches!(m.node_role(), Some(NodeRole::User) | Some(NodeRole::Assistant))
 }
 
 #[cfg(test)]

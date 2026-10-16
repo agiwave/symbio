@@ -544,7 +544,7 @@ pub(crate) fn internal_dirs(has_workdir: bool, memory: VdfsNode) -> Vec<VdfsNode
 
 /// 消息节点的标题：角色（工具调用补上工具名，否则一屏全是「助手」）
 fn message_label(m: &cm::ChatNode) -> String {
-    let role = match m.role {
+    let role = match m.node_role() {
         Some(cm::NodeRole::User) => "用户",
         Some(cm::NodeRole::Assistant) => "助手",
         Some(cm::NodeRole::Tool) => "工具",

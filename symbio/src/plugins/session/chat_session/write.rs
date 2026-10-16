@@ -351,7 +351,7 @@ impl PersistentChatSession {
 
         let mut user_indices = Vec::new();
         for (idx, msg) in session.messages.iter().enumerate() {
-            if msg.role == Some(NodeRole::User) {
+            if msg.node_role() == Some(NodeRole::User) {
                 user_indices.push(idx);
             }
         }
@@ -522,7 +522,7 @@ pub fn prune_historical_tool_calls(messages: &mut Vec<ChatNode>, keep_turns: usi
     }
     let mut user_indices = Vec::new();
     for (idx, msg) in messages.iter().enumerate() {
-        if msg.role == Some(NodeRole::User) {
+        if msg.node_role() == Some(NodeRole::User) {
             user_indices.push(idx);
         }
     }
@@ -535,7 +535,7 @@ pub fn prune_historical_tool_calls(messages: &mut Vec<ChatNode>, keep_turns: usi
     let mut to_remove = HashSet::new();
 
     for msg in &messages[..limit_idx] {
-        if msg.role == Some(NodeRole::Tool) || msg.is_tool_call() || msg.is_reasoning() {
+        if msg.node_role() == Some(NodeRole::Tool) || msg.is_tool_call() || msg.is_reasoning() {
             to_remove.insert(msg.id.clone());
         }
     }
@@ -554,7 +554,7 @@ pub fn prune_historical_tool_calls(messages: &mut Vec<ChatNode>, keep_turns: usi
     to_remove.extend(extra);
 
     for msg in &messages[..limit_idx] {
-        if msg.role == Some(NodeRole::Assistant) {
+        if msg.node_role() == Some(NodeRole::Assistant) {
             let content_text = msg
                 .content
                 .as_ref()

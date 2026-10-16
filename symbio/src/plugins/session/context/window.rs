@@ -445,7 +445,7 @@ pub fn apply_layered_sliding_window(
                     .and_then(|tc| tc.tool_name())
                     .map(|n| format!(" Re-run {n} to get the full output."))
                     .unwrap_or_default();
-                let label = if msg.role == Some(NodeRole::Tool) {
+                let label = if msg.node_role() == Some(NodeRole::Tool) {
                     // 失败结果保留错误摘要、成功结果保留语义摘要：
                     // 失败是信息性的（错误详情决定下一步动作），成功摘要避免
                     // "隔轮即忘"迫使模型整文件重读。摘要远短于原文，仍净省 token。

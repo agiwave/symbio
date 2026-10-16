@@ -24,7 +24,7 @@ pub fn derive_session_summary(messages: &[ChatNode]) -> Option<String> {
         .rev()
         .filter(|m| {
             matches!(
-                m.role,
+                m.node_role(),
                 Some(crate::symbio_core::chat_node::NodeRole::Assistant)
             )
         })
@@ -216,7 +216,7 @@ pub(crate) fn derive_session_title(messages: &[ChatNode]) -> Option<String> {
     const SESSION_TITLE_MAX_CHARS: usize = 24;
     for m in messages.iter().rev() {
         if !matches!(
-            m.role,
+            m.node_role(),
             Some(crate::symbio_core::chat_node::NodeRole::User)
         ) {
             continue;

@@ -835,7 +835,7 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
 
                 // 助手正文：**在锚定之前**累积——锚定会把顶层节点的角色改写成
                 // Tool，而"最终答复"的判据是助手正文。
-                if message.role == Some(NodeRole::Assistant)
+                if message.node_role() == Some(NodeRole::Assistant)
                     && (message.is_text() || message.msg_type.is_none())
                 {
                     if !text_by_id.contains_key(&mid) {
@@ -887,7 +887,7 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                 // ToolCall 的请求参数（args.prompt），且 role=user 的临时
                 // 节点会在前端获得"编辑"入口（该 id 不在父会话存储中，
                 // 操作必然失败）。
-                if message.role == Some(NodeRole::User) {
+                if message.node_role() == Some(NodeRole::User) {
                     continue;
                 }
 
@@ -898,7 +898,7 @@ async fn relay_bridge(b: RelayBridge, sink: ExecEventSink, abort: ExecAbortSigna
                 // 并能被 flatten 的 find_tool_result 正确识别。
                 if message.parent_id.is_none() {
                     message.parent_id = Some(tool_call_id.clone());
-                    if message.role == Some(NodeRole::Assistant) {
+                    if message.node_role() == Some(NodeRole::Assistant) {
                         message.role = Some(NodeRole::Tool);
                     }
                 }

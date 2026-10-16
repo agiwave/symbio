@@ -211,14 +211,14 @@ pub(crate) fn progress_of(summary: &SessionSummary, session: &Session) -> Worker
     let rounds = session
         .messages
         .iter()
-        .filter(|m| matches!(m.role, Some(cm::NodeRole::User)))
+        .filter(|m| matches!(m.node_role(), Some(cm::NodeRole::User)))
         .count();
 
     // steps：非 user 节点的非空正文，**保留最近 STEPS_MAX 条**（drain 掉最早的）。
     let mut steps: Vec<String> = session
         .messages
         .iter()
-        .filter(|m| !matches!(m.role, Some(cm::NodeRole::User)))
+        .filter(|m| !matches!(m.node_role(), Some(cm::NodeRole::User)))
         .filter_map(step_text)
         .collect();
     if steps.len() > STEPS_MAX {
