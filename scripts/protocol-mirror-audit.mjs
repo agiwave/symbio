@@ -957,6 +957,97 @@ console.log('E. 跨栈导航头（Corresponding Frontend）')
   headerBad = bad
 }
 
+// ==================== G. ChatNode 顶层字段消费守卫 ====================
+
+/**
+ * ChatNode 的每一个**顶层字段**都必须有「不通过 `meta` 间接读」的直接消费者。
+ *
+ * 决策依据：[ADR-070 §决策 2]（把「前端机制化 vs 业务化」的分界变成可判红的判据）。
+ * 一次「顺手往顶层加个 `tool_call_id`」的 PR 就能把纪律抹掉——没有这条守卫，纪律只是口号。
+ *
+ * 判据（只钉「被 meta 代理」这一种违规，不误伤别处）：
+ * - 对字段 `F`，扫 `tauri/src`（`.ts`/`.vue`，排除 `__tests__`）与 `cli/src`（`.rs`）里
+ *   的 `\.F\b` 命中点（含 `?.F` 可选链）；
+ * - 命中点若其紧邻前文是 `meta`（`node.meta.F` / `node.meta?.F`）→ 记**间接**，否则记**直接**；
+ * - **`直接命中 === 0` 且 `间接命中 >= 1`** ⇒ 该字段只被 `meta` 代理消费 ⇒ 违规（该字段
+ *   本就该住在 `meta` 里，不该占协议顶层）。
+ *
+ * 为什么「零命中」不算违规：G 组管的是「住在顶层却被当 meta 用」这种错位，不是「死字段」——
+ * 后者是另一回事（D 组 / dead-code 的辖区）。零命中既不直接也不间接 ⇒ 不判。这条也让
+ * 测试基线仓库（ChatNode 只声明 id/parent_id 而无任何消费）保持绿灯。
+ *
+ * 与 D 组的分工：D 组比「前端字段 ⊆ 后端字段」（改名会静默读 undefined）；G 组比
+ * 「顶层字段有没有被当顶层用」。二者正交。
+ */
+{
+  console.log()
+  console.log('--- G. ChatNode 顶层字段消费守卫（顶层字段不得只被 meta 代理消费）---')
+  const tsSrc = readIfExists(CHAT_NODE_TS)
+  if (tsSrc === null) {
+    // G 组的对象文件缺失本身是问题（与 D 组口径一致：不是静默跳过）
+    errors++
+    console.log(`  ${red(BAD)} ChatNode 前端契约源不存在：${CHAT_NODE_TS}`)
+  } else {
+    const got = tsInterfaceFields(tsSrc, 'ChatNode')
+    if (got.problem) {
+      errors++
+      console.log(`  ${red(BAD)} ${got.problem}`)
+    } else {
+      // 消费语料：前端生产码 + CLI。逐文件剥注释后拼成一行行文本，按字段扫命中点。
+      const corpus = []
+      for (const f of frontendFiles) {
+        const src = fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+        for (const line of src.split(/\r?\n/)) {
+          const code = line.replace(/\/\/.*$/, '')
+          if (code.trim()) corpus.push({ f, code })
+        }
+      }
+      for (const f of walkRs(path.join(REPO, 'cli', 'src'))) {
+        const src = fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+        for (const line of src.split(/\r?\n/)) {
+          const code = line.replace(/\/\/.*$/, '')
+          if (code.trim()) corpus.push({ f, code })
+        }
+      }
+
+      const flagged = []
+      const stats = []
+      for (const field of got.fields) {
+        if (field === 'meta') continue // meta 自身是间接读的宿主，不参与本判据
+        let direct = 0
+        let viaMeta = 0
+        const re = new RegExp('\\.\\??\\.' + field + '\\b|\\.' + field + '\\b', 'g')
+        for (const { f, code } of corpus) {
+          let m
+          re.lastIndex = 0
+          while ((m = re.exec(code))) {
+            const before = code.slice(0, m.index)
+            // `before` 不含本次匹配的起始点：`node.meta.fake_field` → before 以 `meta` 结尾，
+            // `node.meta?.x` → 以 `meta?` 结尾。故判据认 `meta` / `meta?` 收尾（不带点）。
+            if (/\bmeta\??$/.test(before)) viaMeta++
+            else direct++
+          }
+        }
+        stats.push({ field, direct, viaMeta })
+        if (direct === 0 && viaMeta >= 1) flagged.push({ field, viaMeta })
+      }
+
+      if (flagged.length === 0) {
+        console.log(
+          `  ${green(OK)} ChatNode 顶层 ${got.fields.length - 1} 个字段（除 meta）都有直接消费者` +
+            `（扫 ${corpus.length} 行生产代码）`,
+        )
+      } else {
+        errors += flagged.length
+        for (const { field, viaMeta } of flagged) {
+          console.log(`  ${red(BAD)} 顶层字段只被 meta 代理消费：${field}（间接 ${viaMeta} 处、直接 0 处）`)
+          console.log(dim('      它实际住在 meta 里——要么把值沉入 meta，要么把它移出协议顶层。'))
+        }
+      }
+    }
+  }
+}
+
 // ---------- 收尾 ----------
 console.log()
 console.log(`Errors: ${errors}`)
@@ -969,7 +1060,8 @@ if (errors > 0) {
         '  B 组：会话地址段不该出现在前端——它们是运行期发现的数据，不是常量。\n' +
         '  C 组：后端闭集（枚举或常量组）的取值集合必须与前端词表相等。\n' +
         '  D 组：前端接口的字段必须能在后端结构体里找到（改名会让前端静默读到 undefined）。\n' +
-        '  E 组：Corresponding Frontend 头必须指向真实存在的文件（悬空就删掉那行）。',
+        '  E 组：Corresponding Frontend 头必须指向真实存在的文件（悬空就删掉那行）。\n' +
+        '  G 组：ChatNode 顶层字段若有消费者，必须有不经由 meta 的直接读法（只被 meta 代理 ⇒ 沉入 meta 或移出顶层）。',
     ),
   )
   process.exit(1)
@@ -979,7 +1071,7 @@ console.log(
   green(
     `  A 组 ${mirrorCount} 条常量镜像 + B 组 ${ABSENT.length} 项缺席检查 + ` +
       `C 组 ${ENUM_SETS.length} 张闭集词表 + D 组 ${STRUCT_SETS.length} 对结构体字段 + ` +
-      `E 组 ${headerCount} 条跨栈导航头，全部一致` +
+      `E 组 ${headerCount} 条跨栈导航头 + G 组 ChatNode 顶层字段消费守卫，全部一致` +
       `（扫描 ${frontendFiles.length} 个前端文件）`,
   ),
 )

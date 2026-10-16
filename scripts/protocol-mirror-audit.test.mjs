@@ -791,3 +791,53 @@ test('没有任何跨栈导航头 → 不红（没写不违规，写了假指针
   assert.equal(r.status, 0, r.stdout)
   assert.match(r.stdout, /E 组 0 条跨栈导航头/)
 })
+
+// ==================== G 组：ChatNode 顶层字段消费守卫 ====================
+
+/** 把 ChatNode 换成带某字段的版本（后端结构体与前端接口同步加，D 组不误报） */
+const chatNodeWith = (extra) => ({
+  [CHAT_RS]: CHAT_RS_SRC.replace(
+    rsStruct('ChatNode', 'id', 'parent_id'),
+    rsStruct('ChatNode', 'id', 'parent_id', extra),
+  ),
+  [CHAT_TS]: CHAT_TS_SRC.replace(
+    tsIface('ChatNode', 'id', 'parent_id'),
+    tsIface('ChatNode', 'id', 'parent_id', extra),
+  ),
+})
+
+test('顶层字段只被 meta 代理消费（fake_field）→ 变红', () => {
+  const r = mirror({
+    ...chatNodeWith('fake_field'),
+    // 唯一消费点走 node.meta.fake_field——没有任何 `node.fake_field` 的直接读法
+    'tauri/src/g/reader.ts': 'export function r(node) {\n  return node.meta.fake_field\n}\n',
+  })
+  assert.equal(r.status, 1)
+  assert.match(r.stdout, /fake_field/)
+  assert.match(r.stdout, /只被 meta 代理消费/)
+})
+
+test('顶层字段被前端直接消费（total）→ 不红', () => {
+  const r = mirror({
+    ...chatNodeWith('total'),
+    // 直接读法（`.total` 不经 meta）⇒ G 判绿；即便同时有 meta 读法也不该红
+    'tauri/src/g/reader.ts':
+      'export function r(node) {\n  return node.stats.total + node.meta.total\n}\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('顶层字段零命中（谁都不读）→ 不红（死字段不归 G 管）', () => {
+  const r = mirror(chatNodeWith('orphaned'))
+  // interface 有 orphaned，但生产码里既无 `.orphaned` 也无 `meta.orphaned`
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('CLI 侧直接消费也算直接（Rust 读法）→ 不红', () => {
+  const r = mirror({
+    ...chatNodeWith('seq_no'),
+    'cli/src/render.rs': 'fn show(node: &ChatNode) -> u64 {\n    node.seq_no\n}\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
