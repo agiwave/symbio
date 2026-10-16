@@ -18,7 +18,7 @@ use crate::symbio_core::view::Budget;
 
 #[test]
 fn trivial_spec_is_the_s01_baseline() {
-    let spec = ActorSpec::trivial("agent:main");
+    let spec = ActorSpec::trivial("session/main");
     assert_eq!(
         spec.pattern,
         Pattern::Decider,
@@ -84,13 +84,13 @@ fn spec_closure_judgments_read_the_specs_own_capability_set() {
     // 平凡值 `trivial`：权限取实（该主体自己的授权行）——`agent:main` 能收束。
     // 这正是订正 trivial 空表的理由：空表下平凡值连一轮对话都收束不了
     // （而 S01 §4 要求「平凡值下系统完整运行」）。
-    let baseline = ActorSpec::trivial("agent:main");
+    let baseline = ActorSpec::trivial("session/main");
     assert!(
         baseline.can_land_speech(true) && baseline.can_land_artifact(),
         "平凡值权限取实：agent:main 两臂都放"
     );
     // 而只持 define.work 的自主主体照旧无发言权——窄行不因「平凡值」豁免。
-    let autonomous = ActorSpec::trivial("agent:autonomous");
+    let autonomous = ActorSpec::trivial("session/autonomous");
     assert!(
         !autonomous.can_land_speech(true),
         "自主主体无发言权（平凡值不豁免窄行：自主行为不得冒充用户对话）"
@@ -109,7 +109,7 @@ fn spec_judgment_agrees_with_matrix_predicate_for_every_principal_shape() {
         PRINCIPAL_MAIN,
         PRINCIPAL_PEER,
         PRINCIPAL_REFLEX,
-        "agent:unregistered",
+        "session/unregistered",
     ] {
         let matrix = matrix_for(p);
         let spec = ActorSpec {
@@ -167,7 +167,7 @@ fn rehearse_turn(utterance: &str, reply: Option<&str>) -> (EventStore, Result<u6
                         Entity::Turn,
                         Verb::Closed,
                         0,
-                        "agent:main",
+                        "session/main",
                     )
                     .with_produced_by(seq.value())
                     .with_payload(serde_json::json!({ "text": reply })),
@@ -185,7 +185,7 @@ fn rehearse_turn(utterance: &str, reply: Option<&str>) -> (EventStore, Result<u6
                         Entity::Turn,
                         Verb::Closed,
                         0,
-                        "agent:main",
+                        "session/main",
                     )
                     .with_produced_by(seq.value())
                     .with_payload(serde_json::json!({ "text": "抱歉，我暂时答不上来。" })),
@@ -276,7 +276,7 @@ fn two_finals_are_caught_by_n3() {
                 Entity::Turn,
                 Verb::Closed,
                 0,
-                "agent:main",
+                "session/main",
             )
             .with_produced_by(0),
         )
@@ -289,7 +289,7 @@ fn two_finals_are_caught_by_n3() {
                 Entity::Turn,
                 Verb::Closed,
                 0,
-                "agent:main",
+                "session/main",
             )
             .with_produced_by(0),
         )
@@ -356,7 +356,7 @@ async fn rehearse_reasoner_turn(
                         Entity::Turn,
                         Verb::Closed,
                         0,
-                        "agent:main",
+                        "session/main",
                     )
                     .with_produced_by(seq.value())
                     .with_cost_ms(cost_ms)
@@ -368,7 +368,7 @@ async fn rehearse_reasoner_turn(
         Err(e) => {
             store
                 .append(
-                    Event::pending("fb0", EVENT_ASSISTANT_FALLBACK, Entity::Turn, Verb::Closed, 0, "agent:main")
+                    Event::pending("fb0", EVENT_ASSISTANT_FALLBACK, Entity::Turn, Verb::Closed, 0, "session/main")
                         .with_produced_by(seq.value())
                         .with_cost_ms(cost_ms)
                         .with_payload(serde_json::json!({ "text": "抱歉，我暂时答不上来。", "error": format!("{e:?}") })),
@@ -505,7 +505,7 @@ fn encode(store: &EventStore, id: &str, ts: i64, content: &str, tag: &str, sourc
                 Entity::Memory,
                 Verb::Opened,
                 0,
-                "agent:main",
+                "session/main",
             )
             .with_produced_by(source)
             .with_ts(ts)
@@ -520,7 +520,7 @@ fn consolidation_does_not_pollute_as_of_view() {
     let store = EventStore::new();
     encode(&store, "m0", 1_000, "用户偏好简洁答复", "semantic", 0);
     encode(&store, "m1", 2_000, "项目用 Rust 2021", "semantic", 0);
-    let p = recall("agent:main", None, None);
+    let p = recall("session/main", None, None);
     let before = p.apply(
         &store.range(crate::symbio_core::event::Seq::new(0)),
         2_500,
@@ -537,7 +537,7 @@ fn consolidation_does_not_pollute_as_of_view() {
                 Entity::Memory,
                 Verb::Progressed,
                 0,
-                "agent:main",
+                "session/main",
             )
             .with_produced_by(0)
             .with_ts(5_000)
@@ -554,7 +554,7 @@ fn consolidation_does_not_pollute_as_of_view() {
                 Entity::Memory,
                 Verb::Closed,
                 0,
-                "agent:main",
+                "session/main",
             )
             .with_produced_by(0) // 遗忘目标 = m0 的 seq
             .with_ts(5_000),
@@ -600,7 +600,7 @@ fn recall_degrades_with_partial_results_when_budget_exhausted() {
             0,
         );
     }
-    let p = recall("agent:main", None, None);
+    let p = recall("session/main", None, None);
     let tight = p.apply(
         &store.range(crate::symbio_core::event::Seq::new(0)),
         9_999,
@@ -630,7 +630,7 @@ fn memory_of_a_never_appears_in_b_recall() {
                 Entity::Memory,
                 Verb::Opened,
                 0,
-                "agent:b",
+                "session/b",
             )
             .with_produced_by(0)
             .with_ts(1_100)
@@ -640,13 +640,13 @@ fn memory_of_a_never_appears_in_b_recall() {
         )
         .unwrap();
     let events = || store.range(crate::symbio_core::event::Seq::new(0));
-    let b_view = recall("agent:b", None, None).apply(&events(), 9_999, Budget::generous());
+    let b_view = recall("session/b", None, None).apply(&events(), 9_999, Budget::generous());
     assert!(
         !b_view.value.contains_content("A 的私有记忆"),
         "跨主体默认不可见（C13）"
     );
     assert!(b_view.value.contains_content("B 的记忆"));
-    let a_view = recall("agent:main", None, None).apply(&events(), 9_999, Budget::generous());
+    let a_view = recall("session/main", None, None).apply(&events(), 9_999, Budget::generous());
     assert!(a_view.value.contains_content("A 的私有记忆"));
     assert!(!a_view.value.contains_content("B 的记忆"));
 }
@@ -656,7 +656,7 @@ fn memory_of_a_never_appears_in_b_recall() {
 fn projection_that_ignores_as_of_would_be_caught() {
     let store = EventStore::new();
     encode(&store, "m0", 1_000, "旧记忆", "semantic", 0);
-    let before_view = recall("agent:main", None, None).apply(
+    let before_view = recall("session/main", None, None).apply(
         &store.range(crate::symbio_core::event::Seq::new(0)),
         2_000,
         Budget::generous(),
@@ -670,7 +670,7 @@ fn projection_that_ignores_as_of_would_be_caught() {
                 Entity::Memory,
                 Verb::Progressed,
                 0,
-                "agent:main",
+                "session/main",
             )
             .with_produced_by(0)
             .with_ts(5_000)
@@ -687,7 +687,7 @@ fn projection_that_ignores_as_of_would_be_caught() {
                 Entity::Memory,
                 Verb::Closed,
                 0,
-                "agent:main",
+                "session/main",
             )
             .with_produced_by(0)
             .with_ts(5_000),
@@ -695,8 +695,8 @@ fn projection_that_ignores_as_of_would_be_caught() {
         .unwrap();
     let events = store.range(crate::symbio_core::event::Seq::new(0));
     // 一个「忽略 as-of」的错误实现：now=MAX ⇒ 未来事件全部涌入。
-    let broken_view = recall("agent:main", None, None).apply(&events, i64::MAX, Budget::generous());
-    let correct_view = recall("agent:main", None, None).apply(&events, 2_000, Budget::generous());
+    let broken_view = recall("session/main", None, None).apply(&events, i64::MAX, Budget::generous());
+    let correct_view = recall("session/main", None, None).apply(&events, 2_000, Budget::generous());
     assert_ne!(
         before_view.value, broken_view.value,
         "忽略 as-of 的实现必然被巩固改变——断言 1 能抓住它"
@@ -722,7 +722,7 @@ fn consolidation_below_fidelity_floor_never_enters_the_log() {
                         Entity::Memory,
                         Verb::Progressed,
                         0,
-                        "agent:main",
+                        "session/main",
                     )
                     .with_produced_by(0)
                     .with_ts(2_000)
@@ -763,7 +763,7 @@ fn memory_event_without_provenance_is_caught() {
             Entity::Memory,
             Verb::Opened,
             0,
-            "agent:main",
+            "session/main",
         )
     };
     let bad = crate::symbio_core::invariants::produced_by_coverage(std::slice::from_ref(&bare));
@@ -777,10 +777,10 @@ fn recall_translator_produces_provenanced_event_and_invariants_stay_green() {
     let store = EventStore::new();
     encode(&store, "m0", 1_000, "用户偏好简洁答复", "semantic", 0);
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
-    let view = recall("agent:main", None, None)
+    let view = recall("session/main", None, None)
         .apply(&snapshot, 2_000, Budget::generous())
         .value;
-    let event = RecallTranslator.recalled_event(&view, 0, "agent:main");
+    let event = RecallTranslator.recalled_event(&view, 0, "session/main");
     store.append(event).unwrap();
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     assert!(
@@ -813,20 +813,20 @@ fn recalled_event_records_degradation_instead_of_dropping_it() {
     }
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
 
-    let degraded = recall("agent:main", None, None)
+    let degraded = recall("session/main", None, None)
         .apply(&snapshot, 2_000, Budget::new(0, 1))
         .value;
-    let event = RecallTranslator.recalled_event(&degraded, 0, "agent:main");
+    let event = RecallTranslator.recalled_event(&degraded, 0, "session/main");
     assert_eq!(
         event.payload.get("degraded").and_then(|v| v.as_bool()),
         Some(true),
         "部分结果的检索必须把 degraded 写进事实——读数口靠的是这条事件"
     );
 
-    let full = recall("agent:main", None, None)
+    let full = recall("session/main", None, None)
         .apply(&snapshot, 2_000, Budget::generous())
         .value;
-    let ok = RecallTranslator.recalled_event(&full, 0, "agent:main");
+    let ok = RecallTranslator.recalled_event(&full, 0, "session/main");
     assert_eq!(
         ok.payload.get("degraded").and_then(|v| v.as_bool()),
         Some(false),
@@ -855,7 +855,7 @@ fn principals_are_isolated_until_scope_widened() {
             Entity::Task,
             Verb::Progressed,
             0,
-            "agent:a",
+            "session/a",
         ))
         .unwrap();
     store
@@ -865,18 +865,18 @@ fn principals_are_isolated_until_scope_widened() {
             Entity::Task,
             Verb::Progressed,
             0,
-            "agent:b",
+            "session/b",
         ))
         .unwrap();
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     let matrix = PermissionMatrix::new(vec![
         PrincipalPolicy::paired(
-            "agent:a",
+            "session/a",
             vec![Capability::ProduceArtifact],
             VisScope::ThreadPrivate,
         ),
         PrincipalPolicy::paired(
-            "agent:b",
+            "session/b",
             vec![Capability::ProduceArtifact],
             VisScope::ThreadPrivate,
         ),
@@ -886,19 +886,19 @@ fn principals_are_isolated_until_scope_widened() {
     // 验收 1：thread_private 下 A 只看见自己写的事件。
     let seen_by_a: Vec<_> = snapshot
         .iter()
-        .filter(|e| matrix.can_see("agent:a", &e.actor, VisScope::ThreadPrivate))
+        .filter(|e| matrix.can_see("session/a", &e.actor, VisScope::ThreadPrivate))
         .collect();
     assert_eq!(
         seen_by_a.len(),
         1,
         "thread_private：A 只见自己（S08 §6 验收 1）"
     );
-    assert_eq!(seen_by_a[0].actor, "agent:a");
+    assert_eq!(seen_by_a[0].actor, "session/a");
 
     // 验收 4（反向）：内容可见域放宽为 public ⇒ 同一 viewer、同一切片全可见。
     let seen_by_a_wide: Vec<_> = snapshot
         .iter()
-        .filter(|e| matrix.can_see("agent:a", &e.actor, VisScope::Public))
+        .filter(|e| matrix.can_see("session/a", &e.actor, VisScope::Public))
         .collect();
     assert_eq!(
         seen_by_a_wide.len(),
@@ -915,34 +915,34 @@ fn commitment_lifecycle_feeds_reputation() {
     let store = EventStore::new();
     // B 立约两条：一条守约、一条违约；A 立约一条守约。
     store
-        .append(keeper.offer("k1", "agent:b", "agent:a", "整理周报", 0))
+        .append(keeper.offer("k1", "session/b", "session/a", "整理周报", 0))
         .unwrap();
-    store.append(keeper.release("k1", "agent:b", 0)).unwrap();
+    store.append(keeper.release("k1", "session/b", 0)).unwrap();
     store
-        .append(keeper.offer("k2", "agent:b", "agent:a", "压测报告", 0))
+        .append(keeper.offer("k2", "session/b", "session/a", "压测报告", 0))
         .unwrap();
     store
-        .append(keeper.breach("k2", "agent:b", "上游数据没到", 0))
+        .append(keeper.breach("k2", "session/b", "上游数据没到", 0))
         .unwrap();
     // 对等宣告：违约状态告知协作方（普通事件，不是新通道）。
     store
-        .append(keeper.declare("k2", "agent:b", "违约已告知 agent:a", 0))
+        .append(keeper.declare("k2", "session/b", "违约已告知 agent:a", 0))
         .unwrap();
     store
-        .append(keeper.offer("k3", "agent:a", "agent:b", "评审", 0))
+        .append(keeper.offer("k3", "session/a", "session/b", "评审", 0))
         .unwrap();
-    store.append(keeper.release("k3", "agent:a", 0)).unwrap();
+    store.append(keeper.release("k3", "session/a", 0)).unwrap();
 
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     let view = reputation()
         .apply(&snapshot, 9_999, Budget::generous())
         .value;
-    let b = view.of("agent:b");
+    let b = view.of("session/b");
     assert_eq!((b.offered, b.kept, b.broken), (2, 1, 1));
     assert_eq!(b.score, 0, "平凡打分：守约 − 违约");
-    assert_eq!(view.of("agent:a").score, 1);
+    assert_eq!(view.of("session/a").score, 1);
     // 未立约的主体：空条目，不是错误。
-    assert_eq!(view.of("agent:ghost").offered, 0);
+    assert_eq!(view.of("session/ghost").offered, 0);
 
     // 全链路不变量仍绿（承诺也是普通事件，永远逃不出审计）。
     assert!(
@@ -959,10 +959,10 @@ fn reputation_double_run_is_identical_and_as_of_safe() {
     let keeper = CommitmentKeeper;
     let store = EventStore::new();
     store
-        .append(keeper.offer("k1", "agent:b", "agent:a", "整理周报", 0))
+        .append(keeper.offer("k1", "session/b", "session/a", "整理周报", 0))
         .unwrap();
     store
-        .append(keeper.release("k1", "agent:b", 0).with_ts(1_000))
+        .append(keeper.release("k1", "session/b", 0).with_ts(1_000))
         .unwrap();
     let before = {
         let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
@@ -970,20 +970,20 @@ fn reputation_double_run_is_identical_and_as_of_safe() {
             .apply(&snapshot, 2_000, Budget::generous())
             .value
     };
-    assert_eq!(before.of("agent:b").score, 1);
+    assert_eq!(before.of("session/b").score, 1);
 
     // 后台追加违约（ts 在 as-of 之后）。
     store
         .append(
             keeper
-                .offer("k2", "agent:b", "agent:a", "压测报告", 0)
+                .offer("k2", "session/b", "session/a", "压测报告", 0)
                 .with_ts(5_000),
         )
         .unwrap();
     store
         .append(
             keeper
-                .breach("k2", "agent:b", "上游数据没到", 0)
+                .breach("k2", "session/b", "上游数据没到", 0)
                 .with_ts(6_000),
         )
         .unwrap();
@@ -996,7 +996,7 @@ fn reputation_double_run_is_identical_and_as_of_safe() {
     let now = reputation()
         .apply(&snapshot, 9_999, Budget::generous())
         .value;
-    assert_eq!(now.of("agent:b").score, 0, "违约计入后声誉下降");
+    assert_eq!(now.of("session/b").score, 0, "违约计入后声誉下降");
 }
 
 // ── S13 淘汰回路（[roadmap/S13 §6](../../../../docs/009-task/133-多智能体社会.md "T-133-多智能体社会") 断言 2/3/4，T-073）──
@@ -1024,9 +1024,9 @@ fn self_reported_reputation_never_enters_the_projection() {
                 Entity::Commitment,
                 Verb::Opened,
                 0,
-                "agent:b",
+                "session/b",
             )
-            .with_payload(serde_json::json!({ "id": "k1", "from": "agent:b", "to": "agent:a", "promise": "x" })),
+            .with_payload(serde_json::json!({ "id": "k1", "from": "session/b", "to": "session/a", "promise": "x" })),
         )
         .unwrap();
     store
@@ -1037,7 +1037,7 @@ fn self_reported_reputation_never_enters_the_projection() {
                 Entity::Commitment,
                 Verb::Closed,
                 0,
-                "agent:b",
+                "session/b",
             )
             .with_payload(serde_json::json!({ "id": "k1", "why": "没交" })),
         )
@@ -1051,9 +1051,9 @@ fn self_reported_reputation_never_enters_the_projection() {
                 Entity::Verdict,
                 Verb::Asserted,
                 0,
-                "agent:b",
+                "session/b",
             )
-            .with_payload(serde_json::json!({ "principal": "agent:b", "score": 99 })),
+            .with_payload(serde_json::json!({ "principal": "session/b", "score": 99 })),
         )
         .unwrap();
     store
@@ -1064,7 +1064,7 @@ fn self_reported_reputation_never_enters_the_projection() {
                 Entity::Memory,
                 Verb::Opened,
                 0,
-                "agent:b",
+                "session/b",
             )
             .with_payload(serde_json::json!({ "content": "我声誉 99", "tag": "声誉" })),
         )
@@ -1075,7 +1075,7 @@ fn self_reported_reputation_never_enters_the_projection() {
         .apply(&snapshot, 9_999, Budget::generous())
         .value;
     assert_eq!(
-        view.of("agent:b").score,
+        view.of("session/b").score,
         -1,
         "只认派生：自报的 99 分一丝不进投影（断言 2/4）"
     );
@@ -1115,7 +1115,7 @@ fn the_arbiter_row_is_the_documented_five_fields() {
 #[test]
 fn should_eliminate_flips_only_below_the_threshold() {
     let entry = |score: i64| ReputationEntry {
-        principal: "agent:b".to_string(),
+        principal: "session/b".to_string(),
         offered: 3,
         kept: 1,
         broken: 2,
@@ -1126,7 +1126,7 @@ fn should_eliminate_flips_only_below_the_threshold() {
     assert!(!d.should_eliminate(&entry(0)), "恰好抵平 ⇒ 不淘汰（边界）");
     assert!(!d.should_eliminate(&entry(1)), "净守约 ⇒ 不淘汰");
     let fresh = ReputationEntry {
-        principal: "agent:ghost".to_string(),
+        principal: "session/ghost".to_string(),
         offered: 0,
         kept: 0,
         broken: 0,
@@ -1147,7 +1147,7 @@ fn should_eliminate_flips_only_below_the_threshold() {
 #[test]
 fn elimination_is_an_auditable_revocable_grants_change() {
     let d = EliminationDecider;
-    let ev = d.elimination_event("agent:b", -1, 42);
+    let ev = d.elimination_event("session/b", -1, 42);
     // ① 格子与作者。
     assert_eq!(ev.kind, EVENT_VERDICT_ASSERTED);
     assert_eq!(ev.entity, VEntity::Verdict);
@@ -1159,7 +1159,7 @@ fn elimination_is_an_auditable_revocable_grants_change() {
     assert_eq!(ev.produced_by, Some(42), "I2：断言类事件必须带溯源");
     // ② 载荷六字段。
     let p = &ev.payload;
-    assert_eq!(p["subject"], "agent:b");
+    assert_eq!(p["subject"], "session/b");
     assert_eq!(p["capability"], "assign.work");
     assert_eq!(p["change"], "revoke");
     assert_eq!(p["score"], -1);
@@ -1167,7 +1167,7 @@ fn elimination_is_an_auditable_revocable_grants_change() {
     assert!(p["why"].as_str().is_some_and(|w| !w.is_empty()), "人话理由");
 
     // ③ 流水 → 覆盖层：撤销生效、恢复可逆、再收回又生效（last-wins）。
-    let restored = d.restoration_event("agent:b", "申诉受理：上游数据延迟有凭证", 77);
+    let restored = d.restoration_event("session/b", "申诉受理：上游数据延迟有凭证", 77);
     assert_eq!(restored.kind, EVENT_VERDICT_ASSERTED);
     assert_eq!(restored.payload["change"], "restore");
     let changes = EliminationDecider::verdict_grants_changes(&[ev.clone(), restored.clone()]);
@@ -1175,17 +1175,17 @@ fn elimination_is_an_auditable_revocable_grants_change() {
         changes,
         vec![
             GrantsChange::Revoke {
-                principal: "agent:b".to_string(),
+                principal: "session/b".to_string(),
                 capability: "assign.work".to_string()
             },
             GrantsChange::Restore {
-                principal: "agent:b".to_string(),
+                principal: "session/b".to_string(),
                 capability: "assign.work".to_string()
             },
         ]
     );
     assert!(
-        !GrantsOverlay::fold(changes).is_revoked("agent:b", "assign.work"),
+        !GrantsOverlay::fold(changes).is_revoked("session/b", "assign.work"),
         "申诉成立 ⇒ 恢复（可撤销）"
     );
     assert!(
@@ -1194,7 +1194,7 @@ fn elimination_is_an_auditable_revocable_grants_change() {
             restored,
             ev,
         ]))
-        .is_revoked("agent:b", "assign.work"),
+        .is_revoked("session/b", "assign.work"),
         "恢复之后再违约 ⇒ 再淘汰（last-wins）"
     );
 
@@ -1205,7 +1205,7 @@ fn elimination_is_an_auditable_revocable_grants_change() {
         Entity::Task,
         Verb::Progressed,
         0,
-        "agent:b",
+        "session/b",
     );
     let bogus = Event::pending(
         "y",
@@ -1215,7 +1215,7 @@ fn elimination_is_an_auditable_revocable_grants_change() {
         0,
         PRINCIPAL_ARBITER,
     )
-    .with_payload(serde_json::json!({ "subject": "agent:b", "change": "revokee" }));
+    .with_payload(serde_json::json!({ "subject": "session/b", "change": "revokee" }));
     assert!(
         EliminationDecider::verdict_grants_changes(&[other, bogus]).is_empty(),
         "别的格子 / 笔误的 change ⇒ 一条都不译（不把笔误读成改判）"
@@ -1227,7 +1227,7 @@ fn elimination_is_an_auditable_revocable_grants_change() {
 fn elimination_event_keeps_invariants_green() {
     let store = EventStore::new();
     store
-        .append(EliminationDecider.elimination_event("agent:b", -1, 0))
+        .append(EliminationDecider.elimination_event("session/b", -1, 0))
         .unwrap();
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     assert!(
@@ -1289,9 +1289,9 @@ fn assert_task(store: &EventStore, id: &str, actor: &str) {
 #[test]
 fn cyclic_dependency_graph_is_rejected() {
     let store = EventStore::new();
-    open_task(&store, "a", &["c"], "agent:main");
-    open_task(&store, "b", &["a"], "agent:main");
-    open_task(&store, "c", &["b"], "agent:main");
+    open_task(&store, "a", &["c"], "session/main");
+    open_task(&store, "b", &["a"], "session/main");
+    open_task(&store, "c", &["b"], "session/main");
     let bad = acyclic_deps(&store.range(crate::symbio_core::event::Seq::new(0)));
     assert_eq!(bad.len(), 3, "环上三个节点都要被点名：{bad:?}");
     assert!(bad[0].why.contains("依赖环"), "{}", bad[0].why);
@@ -1302,9 +1302,9 @@ fn cyclic_dependency_graph_is_rejected() {
 fn breaking_one_edge_makes_graph_pass() {
     let store = EventStore::new();
     // 同一张图，只去掉 c→b 这条边。
-    open_task(&store, "a", &["c"], "agent:main");
-    open_task(&store, "b", &["a"], "agent:main");
-    open_task(&store, "c", &[], "agent:main");
+    open_task(&store, "a", &["c"], "session/main");
+    open_task(&store, "b", &["a"], "session/main");
+    open_task(&store, "c", &[], "session/main");
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     assert!(
         acyclic_deps(&snapshot).is_empty(),
@@ -1317,7 +1317,7 @@ fn breaking_one_edge_makes_graph_pass() {
 #[test]
 fn dangling_dependency_is_rejected() {
     let store = EventStore::new();
-    open_task(&store, "a", &["ghost"], "agent:main");
+    open_task(&store, "a", &["ghost"], "session/main");
     let bad = acyclic_deps(&store.range(crate::symbio_core::event::Seq::new(0)));
     assert_eq!(bad.len(), 1, "{bad:?}");
     assert!(bad[0].why.contains("悬空"), "{}", bad[0].why);
@@ -1327,7 +1327,7 @@ fn dangling_dependency_is_rejected() {
 #[test]
 fn self_verifier_is_rejected_at_construction() {
     let both = PermissionMatrix::new(vec![PrincipalPolicy::paired(
-        "agent:greedy",
+        "session/greedy",
         vec![Capability::DefineWork, Capability::AssertVerification],
         VisScope::ThreadPrivate,
     )]);
@@ -1341,12 +1341,12 @@ fn self_verifier_is_rejected_at_construction() {
     // 反向：拆成两个主体 → 通过（验证者 ≠ 产出者）。
     let split = PermissionMatrix::new(vec![
         PrincipalPolicy::paired(
-            "agent:planner",
+            "session/planner",
             vec![Capability::DefineWork],
             VisScope::ThreadPrivate,
         ),
         PrincipalPolicy::paired(
-            "agent:verifier",
+            "session/verifier",
             vec![Capability::AssertVerification],
             VisScope::ThreadPrivate,
         ),
@@ -1358,9 +1358,9 @@ fn self_verifier_is_rejected_at_construction() {
 #[test]
 fn readyset_contains_only_dependency_closed_tasks() {
     let store = EventStore::new();
-    open_task(&store, "a", &[], "agent:main");
-    open_task(&store, "b", &["a"], "agent:main");
-    open_task(&store, "c", &["b"], "agent:main");
+    open_task(&store, "a", &[], "session/main");
+    open_task(&store, "b", &["a"], "session/main");
+    open_task(&store, "c", &["b"], "session/main");
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
 
     let rs = readyset().apply(&snapshot, 9_999, Budget::generous());
@@ -1368,7 +1368,7 @@ fn readyset_contains_only_dependency_closed_tasks() {
     assert_eq!(rs.value.ready[0].task_id, "a");
 
     // a 终态 → 就绪集挪到 b；链式推进，调度器零内部状态。
-    assert_task(&store, "a", "agent:verifier");
+    assert_task(&store, "a", "session/verifier");
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     let rs = readyset().apply(&snapshot, 9_999, Budget::generous());
     assert_eq!(
@@ -1389,8 +1389,8 @@ fn readyset_contains_only_dependency_closed_tasks() {
 #[test]
 fn rework_creates_new_node_instead_of_rollback() {
     let store = EventStore::new();
-    open_task(&store, "a", &[], "agent:planner");
-    open_task(&store, "b", &["a"], "agent:planner");
+    open_task(&store, "a", &[], "session/planner");
+    open_task(&store, "b", &["a"], "session/planner");
     // 验证者判 a 不合格 → 返工（新增一条事件，append-only）。
     store
         .append(
@@ -1400,13 +1400,13 @@ fn rework_creates_new_node_instead_of_rollback() {
                 Entity::Task,
                 Verb::Asserted,
                 0,
-                "agent:verifier",
+                "session/verifier",
             )
             .with_produced_by(0)
             .with_payload(serde_json::json!({ "task_id": "a-r1", "replaces": "a", "round": 1 })),
         )
         .unwrap();
-    open_task(&store, "a-r1", &[], "agent:planner");
+    open_task(&store, "a-r1", &[], "session/planner");
 
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     let rs = readyset().apply(&snapshot, 9_999, Budget::generous()).value;
@@ -1418,7 +1418,7 @@ fn rework_creates_new_node_instead_of_rollback() {
     );
 
     // 返工节点过验 → b 的依赖由终态的 a-r1 之外仍卡住（a 未终态）→ b 不就绪。
-    assert_task(&store, "a-r1", "agent:verifier");
+    assert_task(&store, "a-r1", "session/verifier");
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     let rs = readyset().apply(&snapshot, 9_999, Budget::generous()).value;
     let ids: Vec<_> = rs.ready.iter().map(|t| t.task_id.as_str()).collect();
@@ -1436,7 +1436,7 @@ fn rework_creates_new_node_instead_of_rollback() {
                 Entity::Task,
                 Verb::Asserted,
                 0,
-                "agent:verifier",
+                "session/verifier",
             )
             .with_produced_by(0)
             .with_payload(serde_json::json!({ "task_id": "a-r2", "replaces": "a", "round": 2 })),
@@ -1450,7 +1450,7 @@ fn rework_creates_new_node_instead_of_rollback() {
                 Entity::Task,
                 Verb::Asserted,
                 0,
-                "agent:verifier",
+                "session/verifier",
             )
             .with_produced_by(0)
             .with_payload(serde_json::json!({ "task_id": "a-r3", "replaces": "a", "round": 3 })),
@@ -1484,7 +1484,7 @@ fn n_step_chain_terminates_within_rework_bound() {
             &store,
             &format!("t{i}"),
             &deps.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
-            "agent:planner",
+            "session/planner",
         );
     }
     // 全链推进：一次就绪一个，终态后下一个就绪（终止性前提 1/3 由 store 与 C14 保证）。
@@ -1506,12 +1506,12 @@ fn n_step_chain_terminates_within_rework_bound() {
                     Entity::Task,
                     Verb::Progressed,
                     0,
-                    "agent:main",
+                    "session/main",
                 )
                 .with_payload(serde_json::json!({ "task_id": format!("t{i}") })),
             )
             .unwrap();
-        assert_task(&store, &format!("t{i}"), "agent:verifier");
+        assert_task(&store, &format!("t{i}"), "session/verifier");
     }
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     assert!(
@@ -1541,7 +1541,7 @@ use crate::symbio_core::projection::cost::cost_ledger;
 
 /// 造一个在跑任务（供插话/熔断场景使用）。
 fn running_task(store: &EventStore, id: &str) {
-    open_task(store, id, &[], "agent:main");
+    open_task(store, id, &[], "session/main");
 }
 
 /// S07 §6 验收 1：注入打断事件 → 80ms 内必须产出处置（Suspend ⇒ task.controlled 落库）。
@@ -1613,7 +1613,7 @@ fn interruption_after_final_is_queued_not_preempted() {
                 Entity::Turn,
                 Verb::Closed,
                 0,
-                "agent:main",
+                "session/main",
             )
             .with_produced_by(0),
         )
@@ -1664,7 +1664,7 @@ fn suspended_task_leaves_readyset_and_restores() {
                 Entity::Task,
                 Verb::Progressed,
                 0,
-                "agent:main",
+                "session/main",
             )
             .with_payload(serde_json::json!({ "task_id": "t1" })),
         )
@@ -1700,9 +1700,9 @@ fn preemption_decider_cannot_speak() {
 
     // 反向判据：**未登记**的同前缀主体仍派生主智能体整套——两边的差别正是那一行。
     // 若哪天有人把这一行删掉（或改宽），上面两条断言与这条对照一起变红。
-    let unregistered = matrix_for("agent:unregistered");
+    let unregistered = matrix_for("session/unregistered");
     assert!(
-        unregistered.can_write("agent:unregistered", Capability::ReplyFirst),
+        unregistered.can_write("session/unregistered", Capability::ReplyFirst),
         "未登记主体派生主智能体那一行（身份分层 ≠ 权限分层，S08 §4）——判定者的窄是**登记**带来的"
     );
 }
@@ -1755,13 +1755,13 @@ fn preemption_decider_spec_carries_its_row_and_gates_on_judge_intent() {
 #[test]
 fn unauthorized_external_write_is_refused_without_event() {
     let matrix = PermissionMatrix::new(vec![PrincipalPolicy::paired(
-        "agent:talker",
+        "session/talker",
         vec![Capability::ReplyAppend],
         VisScope::ThreadPrivate,
     )])
     .unwrap();
     let gate = CircuitBreaker;
-    let authorized = matrix.can_write("agent:talker", Capability::ProduceArtifact);
+    let authorized = matrix.can_write("session/talker", Capability::ProduceArtifact);
     let store = EventStore::new();
     let head_before = store.head().value();
     match gate.gate(authorized, 0, 500, 1_000, 10) {
@@ -1780,12 +1780,12 @@ fn unauthorized_external_write_is_refused_without_event() {
 #[test]
 fn budget_exhaustion_breaks_the_circuit() {
     let matrix = PermissionMatrix::new(vec![PrincipalPolicy::paired(
-        "agent:doer",
+        "session/doer",
         vec![Capability::ProduceArtifact],
         VisScope::ThreadPrivate,
     )])
     .unwrap();
-    let authorized = matrix.can_write("agent:doer", Capability::ProduceArtifact);
+    let authorized = matrix.can_write("session/doer", Capability::ProduceArtifact);
     let gate = CircuitBreaker;
     // 已耗 900 / 预算 1000，申请 500 ⇒ 超支 → 熔断（必须写事件）。
     let d = gate.gate(authorized, 900, 500, 1_000, 10);
@@ -1822,7 +1822,7 @@ fn budget_exhaustion_breaks_the_circuit() {
 #[test]
 fn high_risk_grant_combo_is_rejected() {
     let risky = PermissionMatrix::new(vec![PrincipalPolicy::paired(
-        "agent:risky",
+        "session/risky",
         vec![Capability::ProduceArtifact, Capability::AssertVerification],
         VisScope::ThreadPrivate,
     )]);
@@ -1844,7 +1844,7 @@ fn cost_ledger_accumulates_per_principal() {
                 Entity::Task,
                 Verb::Progressed,
                 0,
-                "agent:a",
+                "session/a",
             )
             .with_cost_ms(300)
             .with_payload(serde_json::json!({ "task_id": "t0" })),
@@ -1858,7 +1858,7 @@ fn cost_ledger_accumulates_per_principal() {
                 Entity::Task,
                 Verb::Progressed,
                 0,
-                "agent:a",
+                "session/a",
             )
             .with_cost_ms(200)
             .with_payload(serde_json::json!({ "task_id": "t0" })),
@@ -1872,7 +1872,7 @@ fn cost_ledger_accumulates_per_principal() {
                 Entity::Task,
                 Verb::Progressed,
                 0,
-                "agent:b",
+                "session/b",
             )
             .with_cost_ms(50)
             .with_payload(serde_json::json!({ "task_id": "t1" })),
@@ -1880,8 +1880,8 @@ fn cost_ledger_accumulates_per_principal() {
         .unwrap();
     let snapshot = store.range(crate::symbio_core::event::Seq::new(0));
     let ledger = cost_ledger().apply(&snapshot, 9_999, Budget::generous());
-    assert_eq!(ledger.value.of("agent:a").spent_ms, 500);
-    assert_eq!(ledger.value.of("agent:a").entries, 2);
+    assert_eq!(ledger.value.of("session/a").spent_ms, 500);
+    assert_eq!(ledger.value.of("session/a").entries, 2);
     assert_eq!(ledger.value.total_ms, 550);
     // N1 双跑一致。
     assert_eq!(
@@ -1891,7 +1891,7 @@ fn cost_ledger_accumulates_per_principal() {
             .value
     );
     // 未记账主体零账。
-    assert_eq!(ledger.value.of("agent:ghost"), Default::default());
+    assert_eq!(ledger.value.of("session/ghost"), Default::default());
 }
 
 // ── S9 彩排（[plan/04 §3](../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地") 第 21–22 步）：自治与学习 ──
@@ -2044,7 +2044,7 @@ fn conation_governance_three_rules() {
             Entity::Conation,
             Verb::Opened,
             0,
-            "agent:x",
+            "session/x",
         )
     };
     assert!(
@@ -2111,7 +2111,7 @@ fn skill_hit_is_cheaper_and_low_confidence_falls_back() {
                 Entity::Memory,
                 Verb::Asserted,
                 0,
-                "agent:main",
+                "session/main",
             )
             .with_produced_by(0)
             .with_cost_ms(40)
@@ -2127,7 +2127,7 @@ fn skill_hit_is_cheaper_and_low_confidence_falls_back() {
                 Entity::Memory,
                 Verb::Asserted,
                 0,
-                "agent:main",
+                "session/main",
             )
             .with_produced_by(0)
             .with_cost_ms(5_000)
@@ -2223,7 +2223,7 @@ fn fallback_rate_counts_per_tier_and_is_deterministic() {
                     Entity::Turn,
                     Verb::Closed,
                     *turn,
-                    "agent:main",
+                    "session/main",
                 )
                 .with_produced_by(i as u64 * 2),
             )
@@ -2253,7 +2253,7 @@ fn fallback_rate_counts_per_tier_and_is_deterministic() {
                     Entity::Turn,
                     Verb::Closed,
                     turn,
-                    "agent:main",
+                    "session/main",
                 )
                 .with_produced_by(turn * 2),
             )
@@ -2281,7 +2281,7 @@ fn fallback_rate_counts_per_tier_and_is_deterministic() {
                 Entity::Turn,
                 Verb::Closed,
                 5,
-                "agent:main",
+                "session/main",
             )
             .with_produced_by(10),
         )

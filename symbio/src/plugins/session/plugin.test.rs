@@ -478,10 +478,10 @@ fn attributed_fills_by_role_and_never_overwrites() {
 
     // 已带主体 ⇒ 原样交还（转播的身份优先，这是「不串主体」的写侧那一半）。
     let mut relayed = base(Some(cm::MessageRole::Assistant));
-    relayed.principal = Some("agent:reviewer".to_string());
+    relayed.principal = Some("session/reviewer".to_string());
     assert_eq!(
         of(relayed).as_deref(),
-        Some("agent:reviewer"),
+        Some("session/reviewer"),
         "不得把子智能体的发言改成本会话主体"
     );
 
@@ -489,7 +489,7 @@ fn attributed_fills_by_role_and_never_overwrites() {
     let mut user = base(Some(cm::MessageRole::User));
     user.principal = None;
     assert_eq!(
-        attributed(user, "agent:reviewer").principal.as_deref(),
+        attributed(user, "session/reviewer").principal.as_deref(),
         Some(crate::symbio_core::authz::PRINCIPAL_USER)
     );
 }

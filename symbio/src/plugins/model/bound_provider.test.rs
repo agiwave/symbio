@@ -423,7 +423,7 @@ async fn provider_adapter_drives_full_chain_over_real_http() {
                 Entity::Turn,
                 Verb::Closed,
                 0,
-                "agent:main",
+                "session/main",
             )
             .with_produced_by(0)
             .with_cost_ms(cost_ms)
@@ -445,7 +445,7 @@ async fn provider_adapter_drives_full_chain_over_real_http() {
     let spent = ledger
         .value
         .by_principal
-        .get("agent:main")
+        .get("session/main")
         .expect("台账里有发言主体");
     assert_eq!(spent.spent_ms, cost_ms, "台账累计 == 实测耗时");
 

@@ -354,7 +354,7 @@ fn the_closure_gate_is_dispatched_by_kind() {
     }
 
     // 未知主体 fail-closed：两道闸同拒。
-    assert!(!matrix.can_produce_artifact("agent:ghost"));
+    assert!(!matrix.can_produce_artifact("session/ghost"));
 }
 
 /// `matrix_for` 两条分支：**登记过的主体走表**（表是权威，派生不覆盖它）；
@@ -371,14 +371,14 @@ fn matrix_for_prefers_the_registered_row_over_derivation() {
     assert!(!autonomous.can_reply(PRINCIPAL_AUTONOMOUS, true));
 
     // 未登记的子智能体：派生主智能体那一行（身份分层 ≠ 权限分层，S08 §4 平凡值）。
-    let sub = matrix_for("agent:sub");
+    let sub = matrix_for("session/sub");
     assert_eq!(
-        sub.grants_of("agent:sub").len(),
+        sub.grants_of("session/sub").len(),
         production_matrix().grants_of(PRINCIPAL_MAIN).len(),
         "未登记主体派生主智能体的整套能力"
     );
     assert!(
-        sub.can_reply("agent:sub", true),
+        sub.can_reply("session/sub", true),
         "子智能体要能写自己的收束格，否则它什么都写不了"
     );
 
@@ -391,11 +391,11 @@ fn matrix_for_prefers_the_registered_row_over_derivation() {
 fn only_the_main_agent_may_close_a_turn() {
     let matrix = production_matrix();
     assert!(
-        matrix.can_reply("agent:main", true) && matrix.can_reply("agent:main", false),
+        matrix.can_reply("session/main", true) && matrix.can_reply("session/main", false),
         "首响与追加都必须放行，否则生产对话直接断"
     );
     assert!(
-        !matrix.can_reply("agent:ghost", true) && !matrix.can_reply("agent:ghost", false),
+        !matrix.can_reply("session/ghost", true) && !matrix.can_reply("session/ghost", false),
         "未知主体 fail-closed"
     );
     assert!(
@@ -408,19 +408,115 @@ fn only_the_main_agent_may_close_a_turn() {
 #[test]
 fn read_side_is_scoped_by_owner_and_membership() {
     let matrix = production_matrix();
-    assert!(matrix.can_see("agent:main", "agent:main", VisScope::ThreadPrivate));
-    assert!(!matrix.can_see("user", "agent:main", VisScope::ThreadPrivate));
-    assert!(!matrix.can_see("agent:ghost", "agent:main", VisScope::Shared));
+    assert!(matrix.can_see("session/main", "session/main", VisScope::ThreadPrivate));
+    assert!(!matrix.can_see("user", "session/main", VisScope::ThreadPrivate));
+    assert!(!matrix.can_see("session/ghost", "session/main", VisScope::Shared));
 }
 
 /// 降级面：空矩阵（表构造失败时的 fail-closed 兜底）一概拒绝。
 #[test]
 fn the_degraded_empty_matrix_denies_everything() {
     let deny_all = PermissionMatrix::from_names(&[]).expect("空表无主体可校验");
-    assert!(!deny_all.can_reply("agent:main", true));
+    assert!(!deny_all.can_reply("session/main", true));
     assert!(
-        !deny_all.can_see("user", "agent:main", VisScope::ThreadPrivate),
+        !deny_all.can_see("user", "session/main", VisScope::ThreadPrivate),
         "非属主读不到（thread_private 比的是属主，空矩阵不给任何人开例外）"
     );
-    assert!(!deny_all.can_see("agent:main", "agent:main", VisScope::Shared));
+    assert!(!deny_all.can_see("session/main", "session/main", VisScope::Shared));
 }
+
+/// **所有 `PRINCIPAL_*` 常量都是可路由地址 `<namespace>/<name>`**
+/// （[ADR-069 §决策 2]）——id 第一段是归属 namespace，可路由到那个插件或概念；
+/// 这条把「授权表与主体地址形态同源」钉在编译期。
+///
+/// 判据**逐条枚举**常量而不是 grep 字符串：加一个常量必须**同时加进本判据的列表**，
+/// 忘了加即本测试红——比「grep 扫字符串」硬，因为 grep 会漏拼写近似的项。
+#[test]
+fn all_principals_are_routable_ids() {
+    for (name, principal) in [
+        ("PRINCIPAL_MAIN", PRINCIPAL_MAIN),
+        ("PRINCIPAL_USER", PRINCIPAL_USER),
+        ("PRINCIPAL_AUTONOMOUS", PRINCIPAL_AUTONOMOUS),
+        ("PRINCIPAL_REFLEX", PRINCIPAL_REFLEX),
+        ("PRINCIPAL_PEER", PRINCIPAL_PEER),
+        ("PRINCIPAL_MARKET", PRINCIPAL_MARKET),
+        ("PRINCIPAL_ARBITER", PRINCIPAL_ARBITER),
+        ("PRINCIPAL_GATEKEEPER", PRINCIPAL_GATEKEEPER),
+        ("PRINCIPAL_WORKER", PRINCIPAL_WORKER),
+        ("PRINCIPAL_PLANNER", PRINCIPAL_PLANNER),
+        ("PRINCIPAL_VERIFIER", PRINCIPAL_VERIFIER),
+        ("PRINCIPAL_TOOL_VDFS_WRITE", PRINCIPAL_TOOL_VDFS_WRITE),
+        ("PRINCIPAL_TOOL_WEB_FETCH", PRINCIPAL_TOOL_WEB_FETCH),
+        ("PRINCIPAL_TOOL_CONTENT_SEARCH", PRINCIPAL_TOOL_CONTENT_SEARCH),
+        ("PRINCIPAL_SYSTEM_COMPACTOR", PRINCIPAL_SYSTEM_COMPACTOR),
+    ] {
+        let ns = principal_namespace(principal);
+        assert!(
+            ns.is_some_and(|s| !s.is_empty()),
+            "`{name} = {principal}` 不是 `<ns>/<name>` 可路由地址（第一段是归属，可解析）"
+        );
+    }
+    // 关键锚点逐字锁死——漂移即红：id 形状就是 ADR-069 §决策 2 那张表里的取值。
+    assert_eq!(PRINCIPAL_MAIN, "session/main");
+    assert_eq!(PRINCIPAL_USER, "person/local");
+    assert_eq!(PRINCIPAL_SYSTEM_COMPACTOR, "system/compactor");
+    assert_eq!(PRINCIPAL_TOOL_VDFS_WRITE, "vdfs/write");
+    // agent 命名空间登记表命中所有 `session/*`；其他三族不命中。
+    for p in [PRINCIPAL_MAIN, PRINCIPAL_AUTONOMOUS, PRINCIPAL_REFLEX] {
+        assert!(is_agent_id(p), "`{p}` 属 agent 命名空间");
+    }
+    for p in [
+        PRINCIPAL_USER,
+        PRINCIPAL_TOOL_VDFS_WRITE,
+        PRINCIPAL_SYSTEM_COMPACTOR,
+    ] {
+        assert!(!is_agent_id(p), "`{p}` 不属 agent 命名空间");
+    }
+}
+
+/// **三行工具主体登记进表**（[ADR-069 §决策 2 工具响应主体]）——今天写侧闸按会话主体判，
+/// 这三行是**声明性**的；但表里没有行就等于「工具不是主体」，[T-147] 之后
+/// `plugin::attributed` 按 kind=Tool 补上的 principal 就没底。
+#[test]
+fn tool_principals_have_declared_rows() {
+    let matrix = production_matrix();
+    for tool in [
+        PRINCIPAL_TOOL_VDFS_WRITE,
+        PRINCIPAL_TOOL_WEB_FETCH,
+        PRINCIPAL_TOOL_CONTENT_SEARCH,
+    ] {
+        let grants = matrix.grants_of(tool);
+        assert!(
+            !grants.is_empty(),
+            "`{tool}` 应在授权表里有一行（ADR-069）"
+        );
+        assert!(
+            grants.contains(&Capability::ProduceArtifact),
+            "`{tool}` 的权威动作是产生产物（produce.artifact）"
+        );
+        // 工具主体的 namespace 不在 agent 登记表里——visible_to 第 2/3 条按此判：
+        // 工具的响应在会话线程里对任何 viewer 都可见。
+        assert!(
+            !is_agent_id(tool),
+            "`{tool}` 的 namespace 不在 agent 登记表里（[ADR-069 §决策 3]）"
+        );
+    }
+}
+
+/// **人不入能力表**（[ADR-069 §后果] 与 [authz.rs 模块文档]「两张表里的人」）——
+/// `PRINCIPAL_USER` 归一为 `person/local` 之后仍**不立行**；判据：
+/// `matrix_for(PRINCIPAL_USER).can_reply(PRINCIPAL_USER, true)` 依旧为假。
+#[test]
+fn person_local_is_not_in_the_capability_table() {
+    assert!(
+        !production_matrix().can_reply(PRINCIPAL_USER, true),
+        "人不入能力表——`person/local` 没有 reply.* 权限（与归一前 `user` 同）"
+    );
+    assert!(
+        production_matrix().grants_of(PRINCIPAL_USER).is_empty(),
+        "`person/local` 在授权表里没有行——归一常量值不改变『人不入表』这条纪律"
+    );
+    // 归一后 user 也不是 agent 命名空间成员（visible_to 会放行，但 can_reply 仍拒）。
+    assert!(!is_agent_id(PRINCIPAL_USER));
+}
+

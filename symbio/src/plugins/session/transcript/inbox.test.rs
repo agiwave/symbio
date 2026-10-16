@@ -383,7 +383,7 @@ fn turn_facts(final_first: bool) -> Vec<crate::symbio_core::Event> {
         Entity::Turn,
         Verb::Closed,
         0,
-        "agent:t",
+        "session/t",
     )
     .with_produced_by(0);
     let task = Event::pending(

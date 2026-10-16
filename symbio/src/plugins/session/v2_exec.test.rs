@@ -1790,11 +1790,11 @@ async fn the_same_consolidation_is_not_landed_twice() {
     let store = EventWalStore::open(wal_path(&dir)).expect("open wal");
     let msgs = consolidated(&["snap-1"]);
     assert!(
-        consolidate_into_wal(&store, &msgs, "agent:main").is_some(),
+        consolidate_into_wal(&store, &msgs, "session/main").is_some(),
         "第一次落格"
     );
     assert!(
-        consolidate_into_wal(&store, &msgs, "agent:main").is_none(),
+        consolidate_into_wal(&store, &msgs, "session/main").is_none(),
         "同一份快照（逐 id 相同）不落第二次"
     );
     let n = store
@@ -1817,9 +1817,9 @@ async fn a_newer_consolidation_lands_again() {
     run_one_turn(&session, &sink).await;
 
     let store = EventWalStore::open(wal_path(&dir)).expect("open wal");
-    assert!(consolidate_into_wal(&store, &consolidated(&["a"]), "agent:main").is_some());
+    assert!(consolidate_into_wal(&store, &consolidated(&["a"]), "session/main").is_some());
     assert!(
-        consolidate_into_wal(&store, &consolidated(&["b"]), "agent:main").is_some(),
+        consolidate_into_wal(&store, &consolidated(&["b"]), "session/main").is_some(),
         "id 序列不同 ⇒ 是新的一份，该落"
     );
     let live = store.range(Seq::new(0));
@@ -1848,7 +1848,7 @@ async fn consolidate_outside_turn_lands_and_archives() {
     let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
     run_one_turn(&session, &sink).await;
 
-    consolidate_outside_turn(&session, &consolidated(&["snap-r"]), "agent:main");
+    consolidate_outside_turn(&session, &consolidated(&["snap-r"]), "session/main");
 
     let store = EventWalStore::open(wal_path(&dir)).expect("open wal");
     let live = store.range(Seq::new(0));
@@ -1881,7 +1881,7 @@ async fn the_turn_number_continues_across_archival() {
     run_one_turn(&session, &sink).await; // 第 1 轮：turn 0
     let store = EventWalStore::open(wal_path(&dir)).expect("open wal");
     assert!(
-        consolidate_into_wal(&store, &consolidated(&["snap-1"]), "agent:main").is_some(),
+        consolidate_into_wal(&store, &consolidated(&["snap-1"]), "session/main").is_some(),
         "压掉第 1 轮"
     );
     let turns = store.range(Seq::new(0))[0].payload["turns"].as_u64();

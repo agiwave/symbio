@@ -81,7 +81,7 @@ fn an_edit_lands_one_fact_with_the_patched_message() {
     assert_eq!(e.kind, EVENT_MESSAGE_EDITED);
     assert_eq!((e.entity, e.verb), (Entity::Message, Verb::Asserted));
     assert_eq!(e.turn, 0, "变更不属于任何一轮（与 memory.* 同约定）");
-    assert_eq!(e.actor, "user", "编辑是用户对列表的操作");
+    assert_eq!(e.actor, "person/local", "编辑是用户对列表的操作");
     assert_eq!(
         e.produced_by,
         Some(user_seq),
@@ -205,7 +205,7 @@ fn a_carrier_without_seq_falls_back_to_the_slice_tail() {
         Entity::Turn,
         Verb::Closed,
         1,
-        "agent:main",
+        "session/main",
     )
     .with_ts(2_000)
     .with_payload(serde_json::json!({
@@ -417,7 +417,7 @@ fn an_assistant_edit_is_attributed_to_the_agent_not_the_user() {
         .find(|e| e.kind == EVENT_MESSAGE_EDITED)
         .expect("编辑事实");
     assert_eq!(
-        edit.actor, "agent:main",
+        edit.actor, "session/main",
         "助手产出署本会话主体——署成 user 是冒用身份"
     );
     assert_eq!(edit.ts, 1_500, "时刻取自消息本身，不是一律 0");
@@ -438,7 +438,7 @@ fn a_tool_result_edit_is_attributed_to_the_agent_not_the_user() {
         .into_iter()
         .find(|e| e.kind == EVENT_MESSAGE_EDITED)
         .expect("编辑事实");
-    assert_eq!(edit.actor, "agent:main");
+    assert_eq!(edit.actor, "session/main");
     assert_eq!(edit.ts, 1_700);
 
     std::fs::remove_dir_all(&dir).ok();
@@ -457,7 +457,7 @@ fn only_a_user_message_is_attributed_to_the_user() {
         .into_iter()
         .find(|e| e.kind == EVENT_MESSAGE_EDITED)
         .expect("编辑事实");
-    assert_eq!(edit.actor, "user", "用户的话才署用户");
+    assert_eq!(edit.actor, "person/local", "用户的话才署用户");
     assert_eq!(edit.ts, 1_600);
 
     std::fs::remove_dir_all(&dir).ok();
@@ -474,7 +474,7 @@ fn an_explicit_principal_wins_over_the_role() {
             "u-1",
             "别人说的话",
             MessageRole::Assistant,
-            Some("agent:sub-1".into()),
+            Some("session/sub-1".into()),
             1_800,
         ),
     );
@@ -484,7 +484,7 @@ fn an_explicit_principal_wins_over_the_role() {
         .find(|e| e.kind == EVENT_MESSAGE_EDITED)
         .expect("编辑事实");
     assert_eq!(
-        edit.actor, "agent:sub-1",
+        edit.actor, "session/sub-1",
         "自带主体优先于按 role 派生——不许串主体"
     );
 

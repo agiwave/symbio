@@ -89,7 +89,7 @@ pub struct TurnInput {
     pub resume: Option<TurnResume>,
     /// **本轮以哪个主体的身份记账**——收束 / 产物事件的 `actor`、窗口可见域的
     /// `viewer` 都取它（[plan/11 批 1](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案")
-    /// ①：`"agent:main"` 从字面量变成**入参**，`ActorSpec` 首次在生产构造）。
+    /// ①：`"session/main"` 从字面量变成**入参**，`ActorSpec` 首次在生产构造）。
     ///
     /// 身份是数据不是常量：同一个会话引擎跑在哪个 agent 上，由**调用方**说了算
     /// （`plugins/session/v2_exec` 从会话元数据派生）。S08 §4 的平凡值是

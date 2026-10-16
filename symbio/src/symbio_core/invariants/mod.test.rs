@@ -435,7 +435,7 @@ fn read_side_budget_follows_declared_tiers_and_skips_when_none_declared() {
             Entity::Task,
             Verb::Progressed,
             0,
-            "agent:autonomous",
+            "session/autonomous",
         )
         .with_produced_by(0)
         .with_cost_ms(2_000),
@@ -485,7 +485,7 @@ fn declared_budget_prefers_spec_numeric_and_falls_back_to_tier() {
             Entity::Task,
             Verb::Progressed,
             0,
-            "agent:autonomous",
+            "session/autonomous",
         )
         .with_produced_by(0)
         .with_cost_ms(2_000),
@@ -513,7 +513,7 @@ fn declared_budget_prefers_spec_numeric_and_falls_back_to_tier() {
             Entity::Task,
             Verb::Progressed,
             0,
-            "agent:autonomous",
+            "session/autonomous",
         )
         .with_produced_by(0)
         .with_cost_ms(2_000),

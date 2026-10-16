@@ -776,7 +776,7 @@ fn recall_view_scans_neighbour_sessions_newest_first() {
     let wal_b = EventWalStore::open(b.join(V2_WAL_FILE)).expect("B 的事实源");
     seed_shared(&wal_b, "b1", "B 的记忆", 2000);
 
-    let view = recall_view(&a, "", "agent:main").expect("两个会话都有记忆");
+    let view = recall_view(&a, "", "session/main").expect("两个会话都有记忆");
     let contents: Vec<&str> = view.entries.iter().map(|e| e.content.as_str()).collect();
     assert_eq!(
         contents,
@@ -789,7 +789,7 @@ fn recall_view_scans_neighbour_sessions_newest_first() {
     let none_dir = empty_root.path().join("s-none");
     std::fs::create_dir_all(&none_dir).expect("空会话目录");
     assert!(
-        recall_view(&none_dir, "", "agent:main").is_none(),
+        recall_view(&none_dir, "", "session/main").is_none(),
         "没记忆就不产出视图"
     );
 }
@@ -815,7 +815,7 @@ fn recall_view_consumes_the_query_so_relevant_old_memories_rank_first() {
     seed_encoded(&wal, "q-new-1", "今天改了 README 的一段说明", 9000);
     seed_encoded(&wal, "q-new-2", "调整了日志级别，减少噪声", 8000);
 
-    let view = recall_view(&a, "数据库连接池打满怎么办", "agent:main").expect("有记忆");
+    let view = recall_view(&a, "数据库连接池打满怎么办", "session/main").expect("有记忆");
     assert_eq!(
         view.entries
             .first()
@@ -826,7 +826,7 @@ fn recall_view_consumes_the_query_so_relevant_old_memories_rank_first() {
     );
 
     // 空 query ⇒ 平凡值：新近度降序，与本批落地前逐字相同。
-    let plain = recall_view(&a, "", "agent:main").expect("有记忆");
+    let plain = recall_view(&a, "", "session/main").expect("有记忆");
     let plain_contents: Vec<&str> = plain.entries.iter().map(|e| e.content.as_str()).collect();
     assert_eq!(
         plain_contents,
@@ -867,7 +867,7 @@ fn a_thread_private_memory_stays_in_its_own_session() {
 
     // 从 B 读（B 自己种了记忆 ⇒ 视图非空，「看不见」只能是预过滤的功劳）：
     // B 的经验在，A 的判断不在。
-    let view = recall_view(&b, "", "agent:main").expect("B 有自己的记忆");
+    let view = recall_view(&b, "", "session/main").expect("B 有自己的记忆");
     let contents: Vec<&str> = view.entries.iter().map(|e| e.content.as_str()).collect();
     assert!(
         contents.contains(&"B 的经验"),
@@ -879,7 +879,7 @@ fn a_thread_private_memory_stays_in_its_own_session() {
     );
 
     // 从 A 读：自己的判断照常在——「私有」是按线程，不是不存在。
-    let own = recall_view(&a, "", "agent:main").expect("A 有自己的记忆");
+    let own = recall_view(&a, "", "session/main").expect("A 有自己的记忆");
     assert!(
         own.entries.iter().any(|e| e.content.contains("A 的判断")),
         "本会话自己的判断记忆照常可见"
@@ -901,7 +901,7 @@ fn a_shared_memory_is_recalled_across_sessions_by_matrix_members() {
     let wal_a = EventWalStore::open(a.join(V2_WAL_FILE)).expect("A 的事实源");
     seed_shared(&wal_a, "s1", "A 记下的共享经验", 1000);
 
-    let view = recall_view(&b, "共享", "agent:main").expect("矩阵成员读得到");
+    let view = recall_view(&b, "共享", "session/main").expect("矩阵成员读得到");
     assert!(
         view.entries
             .iter()
@@ -926,7 +926,7 @@ fn an_out_of_matrix_viewer_is_shown_no_shared_memory() {
     let wal_a = EventWalStore::open(a.join(V2_WAL_FILE)).expect("A 的事实源");
     seed_shared(&wal_a, "s1", "A 记下的共享经验", 1000);
 
-    let ghost = recall_view(&b, "共享", "agent:ghost");
+    let ghost = recall_view(&b, "共享", "session/ghost");
     assert!(
         ghost.is_none()
             || !ghost
@@ -971,7 +971,7 @@ fn recall_view_scan_is_one_level_deliberately() {
     let wal_c = EventWalStore::open(sub.join(V2_WAL_FILE)).expect("子会话的事实源");
     seed_shared(&wal_c, "c1", "子会话在委派里记下的", 9000);
 
-    let view = recall_view(&a, "", "agent:main").expect("有记忆");
+    let view = recall_view(&a, "", "session/main").expect("有记忆");
     let contents: Vec<&str> = view.entries.iter().map(|e| e.content.as_str()).collect();
     assert!(
         contents.contains(&"B 的共享经验"),
@@ -1005,7 +1005,7 @@ fn prompt_section_prints_one_line_per_memory_and_nothing_when_empty() {
         }
     }
     // `s-a2` 的目录名即会话 id，读它 = 扫全根。
-    let view = recall_view(&root.path().join("s-a2"), "", "agent:main").expect("有记忆");
+    let view = recall_view(&root.path().join("s-a2"), "", "session/main").expect("有记忆");
     let section = prompt_section(&view).expect("有条目 ⇒ 有段");
     assert!(
         section.starts_with(RECALL_SECTION_HEAD),
@@ -1123,7 +1123,7 @@ fn record_recalled_anchors_the_retrieval_and_is_idempotent() {
     assert_eq!(ev.entity, Entity::Memory);
     assert_eq!(ev.verb, Verb::Asserted, "落在 memory × asserted");
     assert_eq!(ev.produced_by, Some(trigger), "溯源 = 触发本次检索的事件");
-    assert_eq!(ev.actor, "agent:main");
+    assert_eq!(ev.actor, "session/main");
     assert_eq!(
         ev.actor,
         crate::symbio_core::authz::PRINCIPAL_MAIN,

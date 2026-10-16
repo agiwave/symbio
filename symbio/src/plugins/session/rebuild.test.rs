@@ -67,7 +67,7 @@ fn final_event(payload: serde_json::Value) -> Event {
         Entity::Turn,
         Verb::Closed,
         1,
-        "agent:main",
+        "session/main",
     )
     .with_ts(2_000)
     .with_payload(payload)
@@ -171,7 +171,7 @@ fn fallback_carries_the_failure_reason_onto_the_turn_node() {
             Entity::Turn,
             Verb::Closed,
             1,
-            "agent:main",
+            "session/main",
         )
         .with_ts(2_000)
         .with_payload(serde_json::json!({
@@ -237,7 +237,7 @@ fn round_output_rides_the_artifact_cell_and_lands_before_its_tool_card() {
             Entity::Artifact,
             Verb::Asserted,
             1,
-            "agent:main",
+            "session/main",
         )
         .with_ts(1_500)
         .with_payload(serde_json::json!({
@@ -292,7 +292,7 @@ fn artifact_builds_call_and_result_under_the_call() {
             Entity::Artifact,
             Verb::Asserted,
             1,
-            "agent:main",
+            "session/main",
         )
         .with_ts(1_500)
         .with_payload(serde_json::json!({
@@ -334,7 +334,7 @@ fn tool_calls_reference_does_not_duplicate_the_card() {
             Entity::Artifact,
             Verb::Asserted,
             1,
-            "agent:main",
+            "session/main",
         )
         .with_payload(serde_json::json!({
             "tool": "read", "text": "内容", "tool_call_id": "T-016", "wire_id": "w1",
@@ -486,7 +486,7 @@ fn reported_mirrors_the_persisted_shape() {
         Entity::Turn,
         Verb::Asserted,
         1,
-        "agent:main",
+        "session/main",
     )
     .with_ts(3_000)
     .with_payload(serde_json::json!({
@@ -711,7 +711,7 @@ fn snapshot_event(msgs: Vec<crate::symbio_core::chat_message::ChatMessage>) -> E
         Entity::Message,
         Verb::Progressed,
         0,
-        "agent:main",
+        "session/main",
     )
     .with_ts(3_000)
     .with_payload(serde_json::json!({
@@ -799,7 +799,7 @@ fn a_malformed_snapshot_payload_is_not_a_snapshot() {
         Entity::Message,
         Verb::Progressed,
         0,
-        "agent:main",
+        "session/main",
     )
     .with_payload(serde_json::json!({ "messages": "我不是数组" }));
     let events = vec![user_event("u-node", "问"), broken];

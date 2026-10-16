@@ -28,7 +28,7 @@ fn ev(id: i64, kind: &str, payload: serde_json::Value) -> Event {
         Entity::Memory,
         Verb::Asserted,
         1,
-        "agent:main",
+        "session/main",
     )
     .with_ts(id)
     .with_payload(payload)

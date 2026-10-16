@@ -43,7 +43,7 @@ fn assistant(turn: u64, text_id: &str, text: &str) -> Event {
         Entity::Turn,
         Verb::Closed,
         turn,
-        "agent:main",
+        "session/main",
     )
     .with_payload(serde_json::json!({
         "text": text,
@@ -195,7 +195,7 @@ fn snapshot(tag: &str, msgs: Vec<serde_json::Value>) -> Event {
         Entity::Message,
         Verb::Progressed,
         0,
-        "agent:main",
+        "session/main",
     )
     .with_payload(serde_json::json!({ "messages": msgs }))
 }
@@ -342,7 +342,7 @@ fn an_empty_or_malformed_snapshot_does_not_wipe_the_history() {
         Entity::Message,
         Verb::Progressed,
         0,
-        "agent:main",
+        "session/main",
     )
     .with_payload(serde_json::json!({ "messages": "我不是数组" }));
     let base = vec![user(0, "u-0", "问"), assistant(0, "f-0", "答")];

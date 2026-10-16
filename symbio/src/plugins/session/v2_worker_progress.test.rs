@@ -55,7 +55,7 @@ fn seed(tag: &str, turns: &[(&str, Option<&str>)]) -> (std::path::PathBuf, Vec<C
                             Entity::Turn,
                             Verb::Closed,
                             t,
-                            "agent:main",
+                            "session/main",
                         )
                         .with_produced_by(s)
                         .with_payload(serde_json::json!({ "text": text })),
@@ -71,7 +71,7 @@ fn seed(tag: &str, turns: &[(&str, Option<&str>)]) -> (std::path::PathBuf, Vec<C
                             Entity::Turn,
                             Verb::Closed,
                             t,
-                            "agent:main",
+                            "session/main",
                         )
                         .with_produced_by(s)
                         .with_payload(serde_json::json!({ "why": "impl 失败" })),
@@ -201,7 +201,7 @@ fn empty_placeholder_nodes_produce_no_steps() {
                 Entity::Turn,
                 Verb::Closed,
                 0,
-                "agent:main",
+                "session/main",
             )
             .with_payload(serde_json::json!({ "text": "" })),
         )

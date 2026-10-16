@@ -53,7 +53,7 @@ fn assistant_turn(turn: u64, text: &str) -> Event {
         Entity::Turn,
         Verb::Closed,
         turn,
-        "agent:main",
+        "session/main",
     )
     .with_payload(serde_json::json!({
         "text": text,
@@ -70,7 +70,7 @@ fn artifact(turn: u64, tool: &str, text: &str) -> Event {
         Entity::Artifact,
         Verb::Asserted,
         turn,
-        "agent:main",
+        "session/main",
     )
     .with_payload(serde_json::json!({ "tool": tool, "text": text }))
 }
@@ -180,7 +180,7 @@ fn report(turn: u64, text: &str) -> Event {
         Entity::Turn,
         Verb::Asserted,
         turn,
-        "agent:main",
+        "session/main",
     )
     .with_payload(serde_json::json!({ "text": text, "tool_rounds": 1, "quiet_ms": 0 }))
 }
@@ -381,7 +381,7 @@ fn snapshot(msgs: &[(&str, &str, &str)]) -> Event {
         Entity::Message,
         Verb::Progressed,
         0,
-        "agent:main",
+        "session/main",
     )
     .with_payload(serde_json::json!({ "messages": messages }))
 }

@@ -345,7 +345,7 @@ fn the_hit_judgement_is_literal_after_the_writers_normalisation() {
 /// 随后 `route` 必须真的判出观测。
 ///
 /// 反向即断链：`memory × *` 的 actor 是属主（`PRINCIPAL_USER`），写方归位前是 core
-/// 的占位 `"agent:main"`，召回投影按 `actor == viewer`（viewer = 属主）过滤 ⇒ 技能被
+/// 的占位 `"session/main"`，召回投影按 `actor == viewer`（viewer = 属主）过滤 ⇒ 技能被
 /// 挡在视图外 ⇒ `route` 恒快判返回、观测永不落格、校准账零使用——单测用错了 viewer
 /// （`agent:main`）时这条链**看起来**是通的，只有走生产读方才看得见。
 #[test]
@@ -372,7 +372,7 @@ fn the_production_recall_view_sees_the_compiled_skill() {
         .expect("首次必须产出技能");
     }
 
-    let mut view = super::super::v2_memory::recall_view(&session, "", "agent:main")
+    let mut view = super::super::v2_memory::recall_view(&session, "", "session/main")
         .expect("技能是一条记忆 ⇒ 视图非空");
     assert!(
         view.entries.iter().any(|e| e.tag == SKILL_TAG),

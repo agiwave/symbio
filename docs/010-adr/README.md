@@ -118,7 +118,7 @@ ADR 回答「为什么这样设计」：每条单文档，正文讲决策与被�
 | `ADR-066` | 输入面退役的前置条件解除：地址写入不承载运行选项——三项运行参数已有会话 metadata 回退，协议面不必变宽 | 会话与执行 | 已落地 | — |
 | `ADR-067` | 产物收束的不变量面：C4 认产物格、`closure_denied` 数产物、恢复锚刻意不认——三处口径一次说清 | 智能体与记忆 | 已落地 | — |
 | `ADR-068` | 审批闸门住在能力注册的收口点（`DefaultToolVisitor::register`），判据一份、入口两处 | 会话与执行 | 已落地 | — |
-| `ADR-069` | PRINCIPAL 四前缀词表——person / agent / tool / system 平级 | 平台基座 | 部分实施 | — |
+| `ADR-069` | Principal 三字段——kind 与 id 分家，id 是可路由地址 | 平台基座 | 部分实施 | — |
 | `ADR-070` | Skeleton 取代 Turn——协议退役「轮」概念；顶层字段消费纪律 | 会话与执行 | 部分实施 | — |
 
 ## 已被取代（superseded）
@@ -176,7 +176,7 @@ ADR 回答「为什么这样设计」：每条单文档，正文讲决策与被�
 | `ADR-060` | 覆盖率阈值不进门禁：不做逐 crate 的 `cargo-llvm-cov` floor，理由与重开条件写在这里 | active | 已落地 |
 | `ADR-061` | store = distributed 从值域退役：多副本不在计划内，留一格「将来也许能用」比删掉更脏 | active | 已落地 |
 | `ADR-062` | 事实完整性收口：actor 在写入方按真实来源派生，ts 兜底在 WalStore 唯一写入口（MemoryStore 不兜底） | active | 已落地 |
-| `ADR-069` | PRINCIPAL 四前缀词表——person / agent / tool / system 平级 | active | 部分实施 |
+| `ADR-069` | Principal 三字段——kind 与 id 分家，id 是可路由地址 | active | 部分实施 |
 
 ### 会话与执行（26）
 

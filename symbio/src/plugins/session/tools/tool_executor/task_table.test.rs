@@ -90,7 +90,7 @@ fn producer_only_and_dispatch_only_principals_are_refused() {
 #[test]
 fn an_unregistered_subagent_keeps_the_derived_set() {
     let inputs = TaskTableInputs::of(&agent_ctx("reviewer"));
-    assert_eq!(inputs.principal, "agent:reviewer");
+    assert_eq!(inputs.principal, "session/reviewer");
     assert!(
         inputs.may_write,
         "未登记子智能体派生主智能体整套（含 define.work）⇒ 照常放行"

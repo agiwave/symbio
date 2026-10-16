@@ -487,10 +487,10 @@ fn test_build_request_view_scopes_by_viewer_principal() {
     from_user.principal = Some("user".to_string());
 
     let mut from_peer = assistant_msg("子会话 agent:reviewer 的答复");
-    from_peer.principal = Some("agent:reviewer".to_string());
+    from_peer.principal = Some("session/reviewer".to_string());
 
     let mut from_self = assistant_msg("本会话 agent:main 的答复");
-    from_self.principal = Some("agent:main".to_string());
+    from_self.principal = Some("session/main".to_string());
 
     let mut legacy = assistant_msg("接线前留下的、没有标身份的历史发言");
     legacy.principal = None;
@@ -505,12 +505,12 @@ fn test_build_request_view_scopes_by_viewer_principal() {
     let texts = |v: &[ChatMessage]| v.iter().map(view_text).collect::<Vec<_>>();
 
     // 本会话主体看：转播进来的另一个智能体的发言不进 prompt。
-    let as_self = build(Some("agent:main"));
+    let as_self = build(Some("session/main"));
     assert_eq!(as_self.len(), 3, "四方里只有 agent:reviewer 那条不可见");
     assert!(texts(&as_self).iter().all(|t| !t.contains("reviewer")));
 
     // 子会话主体看：对称地挡掉本会话主体的发言（谁也不是默认的特权主体）。
-    let as_peer = build(Some("agent:reviewer"));
+    let as_peer = build(Some("session/reviewer"));
     assert_eq!(as_peer.len(), 3);
     assert!(texts(&as_peer)
         .iter()

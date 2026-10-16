@@ -28,7 +28,7 @@ fn final_evt(id: &str, turn: u64, produced: u64, cost_ms: u64) -> Event {
         Entity::Turn,
         Verb::Closed,
         turn,
-        "agent:main",
+        "session/main",
     )
     .with_produced_by(produced)
     .with_cost_ms(cost_ms)
@@ -87,7 +87,7 @@ fn latency_samples_group_by_declared_tier_and_exclude_fallback() {
                 Entity::Turn,
                 Verb::Closed,
                 3,
-                "agent:main",
+                "session/main",
             )
             .with_produced_by(s3)
             .with_cost_ms(3000)
@@ -141,7 +141,7 @@ fn three_slo_columns_share_one_event_slice() {
 
     assert_eq!(latency.of("deep").samples, vec![5000]);
     assert_eq!((fr.of("deep").turns, fr.of("deep").fallbacks), (1, 0));
-    assert_eq!(ledger.of("agent:main").spent_ms, 5000);
+    assert_eq!(ledger.of("session/main").spent_ms, 5000);
 }
 
 // ── 跨会话合并（P2：聚合逻辑升为生产代码，[plan/13 批 P2]）──────────────────

@@ -106,7 +106,7 @@ pub(crate) fn compile(
 
     let skill_id = skill_id_of(&trigger);
     let mut ev = SkillCompiler.compile(&skill_id, &trigger, &content, user_seq);
-    // 信封里的 `actor` / `turn` 由 core 造的是占位（`"agent:main"` / `0`）；**`memory × *`
+    // 信封里的 `actor` / `turn` 由 core 造的是占位（`"session/main"` / `0`）；**`memory × *`
     // 格子的 actor 是属主、不是作者**——同域三条写方（`v2_memory::encode` /
     // `consolidated` / `forgotten`）全落 `PRINCIPAL_USER`（巩固与遗忘更不是"用户做的"），
     // 属主 = `SESSION_OWNER`。而召回投影按 `actor == viewer` 过滤、生产读方

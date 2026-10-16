@@ -1132,7 +1132,7 @@ async fn scope_follows_the_delegation_chain_and_defaults_to_root() {
     );
     assert_eq!(
         super::super::chat_loop::request_scope(&sub).await,
-        Scope::Child("agent:peer-b".to_string()),
+        Scope::Child("session/peer-b".to_string()),
         "子会话挂**父会话主体**（不是父会话 id，也不是子会话自己的主体）"
     );
 

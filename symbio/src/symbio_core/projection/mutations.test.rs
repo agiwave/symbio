@@ -143,7 +143,7 @@ fn snapshot(tag: &str, msgs: &[(&str, &str, &str)]) -> Event {
         Entity::Message,
         Verb::Progressed,
         0,
-        "agent:main",
+        "session/main",
     )
     .with_payload(serde_json::json!({ "messages": messages }))
 }
@@ -186,7 +186,7 @@ fn a_malformed_snapshot_does_not_eat_the_valid_one() {
         Entity::Message,
         Verb::Progressed,
         0,
-        "agent:main",
+        "session/main",
     )
     .with_payload(serde_json::json!({ "messages": "我不是数组" }));
     let evs = vec![snapshot("a", &[("s-0", "user", "摘要一")]), broken];
@@ -205,7 +205,7 @@ fn the_cell_must_be_message_progressed() {
         Entity::System,
         Verb::Progressed,
         0,
-        "agent:main",
+        "session/main",
     )
     .with_payload(serde_json::json!({
         "messages": [{ "id": "s", "role": "user", "content": "x" }]

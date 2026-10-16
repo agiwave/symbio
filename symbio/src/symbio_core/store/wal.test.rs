@@ -10,7 +10,7 @@ use crate::symbio_core::view::Budget;
 
 /// 造一条 pending 事件（入库前无 seq；带溯源与正文载荷）。
 fn ev(id: &str, kind: &str, entity: Entity, verb: Verb, turn: u64, text: &str) -> Event {
-    Event::pending(id, kind, entity, verb, turn, "agent:main")
+    Event::pending(id, kind, entity, verb, turn, "session/main")
         .with_produced_by(0)
         .with_payload(serde_json::json!({ "text": text }))
 }
@@ -203,7 +203,7 @@ fn memory_store_trivial_value_still_completes_the_loop() {
     let v = turnstate().apply(&snapshot, 0, Budget::generous());
     assert!(v.value.settled() && v.value.final_text.is_some());
     // 平凡值锚仍是规则模式（零 LLM 也能跑完整闭环）。
-    assert_eq!(ActorSpec::trivial("agent:main").pattern, Pattern::Decider);
+    assert_eq!(ActorSpec::trivial("session/main").pattern, Pattern::Decider);
 }
 
 /// 验收 4（反向）：故意丢掉最后一条已提交事件 → `head()` 必须不同

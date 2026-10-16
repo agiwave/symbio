@@ -59,7 +59,7 @@ fn seed(tag: &str) -> PathBuf {
                 Entity::Turn,
                 Verb::Closed,
                 0,
-                "agent:main",
+                "session/main",
             )
             .with_produced_by(s0)
             .with_cost_ms(1200)
@@ -86,7 +86,7 @@ fn seed(tag: &str) -> PathBuf {
                 Entity::Turn,
                 Verb::Closed,
                 1,
-                "agent:main",
+                "session/main",
             )
             .with_produced_by(s1)
             .with_cost_ms(3000)
@@ -159,7 +159,7 @@ fn seed_instance(tag: &str, n: usize) -> (PathBuf, Vec<PathBuf>) {
                     Entity::Turn,
                     Verb::Closed,
                     0,
-                    "agent:main",
+                    "session/main",
                 )
                 .with_produced_by(u)
                 .with_cost_ms(100 * (i as u64 + 1)),
@@ -906,7 +906,7 @@ fn archival_does_not_shrink_the_readout() {
                 Entity::Message,
                 Verb::Progressed,
                 0,
-                "agent:main",
+                "session/main",
             )
             .with_payload(serde_json::json!({
                 "messages": [{ "id": "snap-1" }],
@@ -971,7 +971,7 @@ fn declaring_the_owner_reads_everything() {
     let as_owner = read(
         "s1",
         &wal,
-        Some("user"),
+        Some(crate::symbio_core::authz::PRINCIPAL_USER),
         crate::symbio_core::authz::PRINCIPAL_MAIN,
         &root,
     )
@@ -995,7 +995,7 @@ fn declaring_the_owner_reads_everything() {
 fn a_non_owner_reads_nothing_at_all() {
     let wal = seed("gate-nonowner");
     let root = wal.parent().expect("WAL 有父目录").to_path_buf();
-    for viewer in ["agent:main", "agent:ghost"] {
+    for viewer in ["session/main", "session/ghost"] {
         let got = read(
             "s1",
             &wal,
@@ -1074,7 +1074,7 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
                 Entity::Turn,
                 Verb::Closed,
                 0,
-                "agent:main",
+                "session/main",
             )
             .with_produced_by(s0)
             .with_cost_ms(1200)
@@ -1109,7 +1109,7 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
 
     // ① 矩阵内主体（非属主）：读得到——共享内容让这份事实源不再纯私有。
     let as_member =
-        read("s1", &wal, Some("agent:main"), session_principal, &root).expect("矩阵内主体读数");
+        read("s1", &wal, Some("session/main"), session_principal, &root).expect("矩阵内主体读数");
     assert!(as_member.has_wal);
     assert_eq!(
         as_member.checkpoint["event_count"], 3,
@@ -1119,7 +1119,7 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
 
     // ② 矩阵外主体：照旧空切片（fail-closed 不因共享内容松动）。
     let as_outsider =
-        read("s1", &wal, Some("agent:ghost"), session_principal, &root).expect("矩阵外主体读数");
+        read("s1", &wal, Some("session/ghost"), session_principal, &root).expect("矩阵外主体读数");
     assert!(as_outsider.has_wal, "有源但不给你看");
     assert_eq!(
         as_outsider.checkpoint["event_count"], 0,
@@ -1129,7 +1129,7 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
 
     // ③ 属主本人：与不声明时逐字一致（闸不是为了把属主挡在外面）。
     let plain = read("s1", &wal, None, session_principal, &root).expect("本机默认读数");
-    let as_owner = read("s1", &wal, Some("user"), session_principal, &root).expect("属主读数");
+    let as_owner = read("s1", &wal, Some(crate::symbio_core::authz::PRINCIPAL_USER), session_principal, &root).expect("属主读数");
     assert_eq!(as_owner, plain);
 
     // 反向对照：唯一那条共享记忆改成私有 ⇒ agent:main 回到空切片。
@@ -1143,7 +1143,7 @@ fn a_matrix_member_reads_shared_content_and_an_outsider_still_cannot() {
     for e in events {
         store2.append(e).unwrap();
     }
-    let denied = read("s1", &wal, Some("agent:main"), session_principal, &root).expect("读数");
+    let denied = read("s1", &wal, Some("session/main"), session_principal, &root).expect("读数");
     assert!(
         denied.tiers.is_empty() && denied.checkpoint["event_count"] == 0,
         "内容全私有 ⇒ 矩阵内非属主回到空切片（翻面的是可见域，不是别的）"
@@ -1314,7 +1314,7 @@ fn calibration_column_recomputes_and_moves_with_the_wal() {
                         Entity::Memory,
                         Verb::Asserted,
                         0,
-                        "agent:main",
+                        "session/main",
                     )
                     .with_produced_by(0)
                     .with_payload(serde_json::json!({
@@ -1439,7 +1439,7 @@ fn transcript_column_surfaces_tool_rows() {
                 Entity::Artifact,
                 Verb::Asserted,
                 0,
-                "agent:main",
+                "session/main",
             )
             .with_produced_by(0)
             .with_payload(serde_json::json!({ "tool": "vdfs_read", "text": "文件内容" })),

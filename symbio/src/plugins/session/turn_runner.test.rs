@@ -46,7 +46,7 @@ impl TurnRunner {
                 inject: None,
                 resume: None,
                 // 平凡值身份（S08 §4：单主体 = 今天的状态）。
-                actor: ActorSpec::trivial("agent:main"),
+                actor: ActorSpec::trivial("session/main"),
                 // 没有请求视图层可拼（三段由调用方的 `build_request_view` 给出）。
                 prefix: None,
                 // 恒走生成：定稿答话轮由 `v2_exec` 自己把答话交进来。
@@ -122,7 +122,7 @@ mod turn_runner_tests {
 
         // 成本台账：实测值入账（agent:main 一笔）。
         let ledger = cost_ledger().apply(&snapshot, i64::MAX, Budget::generous());
-        assert_eq!(ledger.value.of("agent:main").spent_ms, out.cost_ms);
+        assert_eq!(ledger.value.of("session/main").spent_ms, out.cost_ms);
 
         // 兜底率：deep 档 1 turn，0 兜底。
         let fr = fallback_rate().apply(&snapshot, i64::MAX, Budget::generous());
@@ -344,7 +344,7 @@ mod turn_runner_tests {
                     Entity::Turn,
                     Verb::Closed,
                     0,
-                    "agent:main",
+                    "session/main",
                 )
                 .with_produced_by(0)
                 .with_payload(serde_json::json!({ "why": "上游 402" })),
@@ -389,7 +389,7 @@ mod turn_runner_tests {
                     Entity::Artifact,
                     Verb::Asserted,
                     0,
-                    "agent:main",
+                    "session/main",
                 )
                 .with_produced_by(0)
                 .with_payload(
@@ -405,7 +405,7 @@ mod turn_runner_tests {
                     Entity::Turn,
                     Verb::Closed,
                     0,
-                    "agent:main",
+                    "session/main",
                 )
                 .with_produced_by(0)
                 .with_payload(serde_json::json!({ "text": "回显完成" })),
@@ -498,7 +498,7 @@ mod turn_runner_tests {
                     window_turns: None,
                     resume: None,
                     inject: None,
-                    actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
+                    actor: crate::symbio_core::ActorSpec::trivial("session/main"),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
                     final_reply: None,
@@ -548,7 +548,7 @@ mod turn_runner_tests {
                     inject: None,
                     window_turns: None,
                     resume: None,
-                    actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
+                    actor: crate::symbio_core::ActorSpec::trivial("session/main"),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
                     final_reply: None,
@@ -631,7 +631,7 @@ mod turn_runner_tests {
                     window_turns: None,
                     inject: None,
                     resume: None,
-                    actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
+                    actor: crate::symbio_core::ActorSpec::trivial("session/main"),
                     prefix: None,
                     final_reply: None,
                     turn_root_id: String::new(),
@@ -670,7 +670,7 @@ mod turn_runner_tests {
             window_turns: None,
             inject: None,
             resume: None,
-            actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
+            actor: crate::symbio_core::ActorSpec::trivial("session/main"),
             // 请求级前缀：测试不走请求视图层（三段皆空）。
             prefix: None,
             final_reply: None,
@@ -966,7 +966,7 @@ mod turn_runner_tests {
                     inject: None,
                     window_turns: None,
                     resume: None,
-                    actor: ActorSpec::trivial("agent:main"),
+                    actor: ActorSpec::trivial("session/main"),
                     // 请求级前缀：测试不走请求视图层（三段皆空）。
                     prefix: None,
                     final_reply: None,
@@ -1407,7 +1407,7 @@ mod tool_round_tests {
             inject: None,
             window_turns: None,
             resume: None,
-            actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
+            actor: crate::symbio_core::ActorSpec::trivial("session/main"),
             // 请求级前缀：测试不走请求视图层（三段皆空）。
             prefix: None,
             final_reply: None,
@@ -1670,7 +1670,7 @@ mod tool_round_tests {
                     Entity::Message,
                     Verb::Progressed,
                     0,
-                    "agent:main",
+                    "session/main",
                 )
                 .with_payload(serde_json::json!({
                     "messages": [
@@ -2107,7 +2107,7 @@ mod tool_round_tests {
                     tier: LatencyTier::Deep,
                     inject: None,
                     window_turns: None,
-                    actor: crate::symbio_core::ActorSpec::trivial("agent:main"),
+                    actor: crate::symbio_core::ActorSpec::trivial("session/main"),
                     resume: Some(TurnResume {
                         user_seq: 0,
                         call: TurnToolCallInfo {
@@ -2832,7 +2832,7 @@ mod reflex_turn_tests {
     async fn reflex_turn_lands_open_and_close_with_reflex_tier() {
         let store = EventStore::new();
         let tok = TokenIssuer::issue_reflex();
-        let actor = ActorSpec::trivial("agent:main");
+        let actor = ActorSpec::trivial("session/main");
         let got = Arc::new(CollectingDeltas(Mutex::new(Vec::new())));
 
         let out = TurnRunner
@@ -2893,7 +2893,7 @@ mod reflex_turn_tests {
             "收束溯源指向开轮格（I2；开轮格是网格第一格，seq = 0）"
         );
         assert_eq!(
-            close.actor, "agent:main",
+            close.actor, "session/main",
             "收束格的 actor 取本轮主体（与 run_with_tools 同一处取值）"
         );
 
@@ -2930,7 +2930,7 @@ mod scope_ceiling_tests {
     #[test]
     fn a_child_cannot_close_what_its_parent_cannot_close() {
         // `user` 在授权表里没有行（能力按「智能体的权威动作种类」划分）⇒ 什么都不持。
-        let mut spec = ActorSpec::trivial("agent:main");
+        let mut spec = ActorSpec::trivial("session/main");
         assert!(
             spec.can_land_speech(true),
             "前提：主智能体自己那一行持 `reply.first`"
@@ -2957,7 +2957,7 @@ mod scope_ceiling_tests {
     /// 发言收束被拒，产物收束照常（父主体也持）。
     #[test]
     fn a_narrow_parent_cannot_spawn_a_wider_child() {
-        let mut spec = ActorSpec::trivial("agent:main");
+        let mut spec = ActorSpec::trivial("session/main");
         spec.scope = Scope::Child(crate::symbio_core::authz::PRINCIPAL_PEER.to_string());
 
         assert!(
@@ -2977,8 +2977,8 @@ mod scope_ceiling_tests {
     /// 正向对照：父主体持同一能力 ⇒ 与 `Root` 逐字同判（平凡值下两臂恒放行）。
     #[test]
     fn a_child_of_an_equally_strong_parent_is_unaffected() {
-        let mut spec = ActorSpec::trivial("agent:main");
-        spec.scope = Scope::Child("agent:main".to_string());
+        let mut spec = ActorSpec::trivial("session/main");
+        spec.scope = Scope::Child("session/main".to_string());
         assert!(closure_granted(&spec, ClosureKind::Speech));
         assert!(closure_granted(&spec, ClosureKind::Artifact));
     }

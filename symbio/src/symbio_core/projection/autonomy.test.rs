@@ -17,7 +17,7 @@ fn held(id: &str, task: &str, ts: i64) -> Event {
         Entity::Task,
         Verb::Held,
         0,
-        "agent:reflex",
+        "session/reflex",
     )
     .with_ts(ts)
     .with_payload(serde_json::json!({ "task_id": task }))
@@ -30,7 +30,7 @@ fn asserted(id: &str, task: &str, ts: i64) -> Event {
         Entity::Task,
         Verb::Asserted,
         0,
-        "agent:reflex",
+        "session/reflex",
     )
     .with_ts(ts)
     .with_payload(serde_json::json!({ "task_id": task }))
@@ -70,7 +70,7 @@ fn recovery_does_not_wash_out_the_intervention() {
                 Entity::Task,
                 Verb::Progressed,
                 0,
-                "agent:reflex",
+                "session/reflex",
             )
             .with_ts(150)
             .with_payload(serde_json::json!({ "task_id": "t1" })),
@@ -96,7 +96,7 @@ fn unfinished_tasks_are_excluded_from_both_sides() {
                 Entity::Task,
                 Verb::Opened,
                 0,
-                "agent:reflex",
+                "session/reflex",
             )
             .with_ts(100)
             .with_payload(serde_json::json!({ "task_id": "running" })),

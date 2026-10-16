@@ -27,7 +27,7 @@ use crate::symbio_core::event::{Entity, Event, Seq, Verb, EVENT_MEMORY_ENCODED};
 use crate::symbio_core::store::{EventStore, Store};
 
 /// 记忆属主 = 视图主体（`recall` 只召回自己的，与 `tag` 是两个正交的闸）。
-const VIEWER: &str = "agent:main";
+const VIEWER: &str = "session/main";
 
 /// 种一条 `memory.encoded`（`ts` 递增即新近度，投影按 `ts` 降序）。
 fn encode(store: &EventStore, id: &str, content: &str, tag: &str, ts: i64) {

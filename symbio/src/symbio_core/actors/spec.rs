@@ -52,7 +52,7 @@ pub enum Scope {
 /// 主体规格（[plan/01 §4](../../../../docs/004-plan/001-核心架构.md "PL-001-核心架构") 的 `ActorSpec`，五字段）。
 #[derive(Debug, Clone)]
 pub struct ActorSpec {
-    /// 身份（数据，无限增长——如 `"agent:main"`）。
+    /// 身份（数据，无限增长——如 `"session/main"`）。
     pub principal: String,
     /// 三种模式之一（机制，封顶）。
     pub pattern: Pattern,

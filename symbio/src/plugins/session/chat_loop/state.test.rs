@@ -240,7 +240,7 @@ fn agent_ctx(agent_id: &str) -> std::sync::Arc<dyn crate::symbio_core::PluginInv
 fn the_worker_spec_takes_its_registered_row() {
     use crate::symbio_core::{LatencyTier, Pattern, Scope};
     let spec = request_actor_spec(agent_ctx("worker").as_ref(), LatencyTier::Deep, Scope::Root);
-    assert_eq!(spec.principal, "agent:worker");
+    assert_eq!(spec.principal, "session/worker");
     assert_eq!(
         spec.capabilities,
         vec!["produce.artifact".to_string()],
@@ -263,7 +263,7 @@ fn the_planner_and_verifier_specs_take_their_registered_rows() {
         LatencyTier::Deep,
         Scope::Root,
     );
-    assert_eq!(planner.principal, "agent:planner");
+    assert_eq!(planner.principal, "session/planner");
     assert_eq!(
         planner.capabilities,
         vec!["define.work".to_string()],
@@ -280,7 +280,7 @@ fn the_planner_and_verifier_specs_take_their_registered_rows() {
         LatencyTier::Fast,
         Scope::Root,
     );
-    assert_eq!(verifier.principal, "agent:verifier");
+    assert_eq!(verifier.principal, "session/verifier");
     assert_eq!(
         verifier.capabilities,
         vec!["assert.verification".to_string()],
@@ -298,8 +298,8 @@ fn a_delegated_worker_spec_is_scoped_to_its_parent() {
     let spec = request_actor_spec(
         agent_ctx("worker").as_ref(),
         LatencyTier::Deep,
-        Scope::Child("agent:main".to_string()),
+        Scope::Child("session/main".to_string()),
     );
-    assert_eq!(spec.scope, Scope::Child("agent:main".to_string()));
+    assert_eq!(spec.scope, Scope::Child("session/main".to_string()));
     assert_eq!(spec.capabilities, vec!["produce.artifact".to_string()]);
 }

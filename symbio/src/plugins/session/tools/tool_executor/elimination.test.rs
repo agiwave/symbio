@@ -76,11 +76,11 @@ fn no_verdict_means_no_revocation() {
 fn restoration_flips_the_gate_back() {
     let root = tmp_root("restore");
     let d = crate::symbio_core::EliminationDecider;
-    append_to_session(&root, "sess-a", d.elimination_event("agent:main", -1, 7));
+    append_to_session(&root, "sess-a", d.elimination_event("session/main", -1, 7));
     append_to_session(
         &root,
         "sess-a",
-        d.restoration_event("agent:main", "申诉受理：上游延迟有凭证", 9),
+        d.restoration_event("session/main", "申诉受理：上游延迟有凭证", 9),
     );
     let inputs = EliminationInputs::of(&root, &agent_ctx("main"));
     assert!(
@@ -97,7 +97,7 @@ fn another_principals_verdict_does_not_bite() {
     append_to_session(
         &root,
         "sess-a",
-        crate::symbio_core::EliminationDecider.elimination_event("agent:ghost", -1, 7),
+        crate::symbio_core::EliminationDecider.elimination_event("session/ghost", -1, 7),
     );
     let inputs = EliminationInputs::of(&root, &agent_ctx("main"));
     assert!(!inputs.delegation_revoked);
