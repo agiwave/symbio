@@ -254,10 +254,10 @@ describe('messageHeadModifier', () => {
     ).toBe(false)
   })
 
-  it('色调钩子按形状给：容器像 tool、折叠叶像 reasoning', () => {
-    expect(messageHeadModifier(facets({ type: NODE_KIND_SKELETON })).tool).toBe(true)
-    expect(messageHeadModifier(facets({ type: NODE_KIND_NOTICE })).reasoning).toBe(true)
-    expect(messageHeadModifier(facets({ type: NODE_KIND_BODY })).tool).toBe(false)
+  it('色调钩子按形状给：容器格 skeleton、折叠叶 notice', () => {
+    expect(messageHeadModifier(facets({ type: NODE_KIND_SKELETON })).skeleton).toBe(true)
+    expect(messageHeadModifier(facets({ type: NODE_KIND_NOTICE })).notice).toBe(true)
+    expect(messageHeadModifier(facets({ type: NODE_KIND_BODY })).skeleton).toBe(false)
   })
 })
 

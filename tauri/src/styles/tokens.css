@@ -139,8 +139,8 @@
   --color-chip-sub-fg: #0284c7;
   --color-chip-tool-bg: #eef2ff;
   --color-chip-tool-fg: #4f46e5;
-  --color-chip-reasoning-bg: #f3e8ff;
-  --color-chip-reasoning-fg: #7c3aed;
+  --color-chip-notice-bg: #f3e8ff;
+  --color-chip-notice-fg: #7c3aed;
   --color-user-bubble: #2563eb;
   --color-user-bubble-fg: #ffffff;
   --color-code-bg: #0f172a;
@@ -236,8 +236,8 @@
   --color-chip-sub-fg: #38bdf8;
   --color-chip-tool-bg: #232347;
   --color-chip-tool-fg: #a5b4fc;
-  --color-chip-reasoning-bg: #2e2342;
-  --color-chip-reasoning-fg: #c4b5fd;
+  --color-chip-notice-bg: #2e2342;
+  --color-chip-notice-fg: #c4b5fd;
   --color-user-bubble: #3b82f6;
   --color-user-bubble-fg: #ffffff;
   --color-code-bg: #11111b;
