@@ -82,7 +82,7 @@ GitHub Actions 会自动：
 npm install -g @tauri-apps/cli
 
 # 生成密钥
-cd C:\bing\agiwave\symbio
+cd <仓库根>
 tauri signer generate
 ```
 
@@ -200,7 +200,7 @@ xattr -rd com.apple.quarantine /Applications/Symbio.app
 
 ```powershell
 # 进入项目目录
-cd C:\bing\agiwave\symbio\.github\workflows
+cd .github\workflows
 
 # 查看帮助
 .\setup-secrets.ps1 -Help

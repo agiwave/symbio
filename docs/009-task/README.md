@@ -60,13 +60,11 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 1 · 🟡 doing 0 · ☑ done 148 · ❌ wont 3（共 152）
+**计数**：☐ todo 0 · 🟡 doing 0 · ☑ done 149 · ❌ wont 3（共 152）
 
 ## 待处理（按依赖顺序）
 
-| 编号 | 任务 | 优先 | 轨 | 依赖 |
-|---|---|---|---|---|
-| `T-141-开机噪声与文档漂移` | 每次开机一条假异常 WARN（`.symbio/projection` 孤儿目录）+ 文档里几处与运行事实不符的指路 | later | 登记卫生 | — |
+（无）
 
 ## 进行中
 
@@ -132,6 +130,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-113-本地检索输出残余批` | 本地检索输出残余批：`content_search` 的 content 模式输出含多余空行（分页与匹配行不对齐）· 该文件无单测 | local |
 | `T-114-telegram上游端点可配批` | telegram 上游端点可配批：`api_url()` 把 `api.telegram.org` 写死 ⇒ `send` / `get_updates` / `start_listener` 三条路由无靶子可打 | e2e |
 | `T-115-入站边界可达面与白名单一致批` | gateway 入站边界的可达面与 `is_readonly_allowed` 白名单不一致：缺 home/work 四条臂 · 白名单两条死条目 | gateway |
+| `T-141-开机噪声与文档漂移` | 每次开机一条假异常 WARN（`.symbio/projection` 孤儿目录）+ 文档里与运行事实不符的指路、本机绝对路径 | 登记卫生 |
 | `T-153-旧文档与注释清理` | 扫「一轮 / Turn」措辞——ADR-052/055 作废标注、docs/005-rev 归档、代码注释同步 | 登记卫生 |
 | `T-001` | 登记机制落地：单文档 + 守卫 + 汇总 + 总纲 | meta |
 | `T-003` | 接管 docs/README 纪律地图（每条纪律成为 spec 条目） | doc |
@@ -378,7 +377,7 @@ board.columns: [rank, deps, evidence, reason]
   - [`T-142-长度截断时草稿被当答话交付`](142-长度截断时草稿被当答话交付.md) finish=Length 且正文 0 字符时，整段思考被提升成答话原样交付——stdout 变成 13KB 草稿（done）
   - [`T-143-跨会话记忆以指令形态劫持当前轮`](143-跨会话记忆以指令形态劫持当前轮.md) 召回段把旧会话的经验原文当指令送进 prompt——小模型照着执行上一个任务（done）
 - [`T-140-大结果检索的聚合口径`](140-大结果检索的聚合口径.md) 检索结果截断只说「限制了」不说「一共多少」——聚合型问题逼出重复调用（done）
-- [`T-141-开机噪声与文档漂移`](141-开机噪声与文档漂移.md) 每次开机一条假异常 WARN（`.symbio/projection` 孤儿目录）+ 文档里几处与运行事实不符的指路（todo）
+- [`T-141-开机噪声与文档漂移`](141-开机噪声与文档漂移.md) 每次开机一条假异常 WARN（`.symbio/projection` 孤儿目录）+ 文档里与运行事实不符的指路、本机绝对路径（done）
 - [`T-144-长度截断的自动续写在v2执行路径不可达`](144-长度截断的自动续写在v2执行路径不可达.md) v2 执行路径重建 TurnOutput 时丢掉 finish——长度戳与自动续写读到的恒是缺省 Stop（done）
 - [`T-145-前端机制化批`](145-前端机制化批.md) 前端机制化——ChatNode 协议 / 主体平级 / 建树策略 / 惰性重取（SPRINT）（done） · 子项 done 8
   - [`T-146-主体可路由地址`](146-主体可路由地址.md) 主体 id 迁到可路由地址形态——授权表扩 person/tool/system 三族行（done）

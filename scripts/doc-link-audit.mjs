@@ -2,7 +2,7 @@
 /**
  * doc-link-audit — 文档相对链接审计
  *
- * 用途：**活跃文档 + 源码注释的连接体检**——八条机械可判定的规矩，每条都对应一类
+ * 用途：**活跃文档 + 源码注释的连接体检**——九条机械可判定的规矩，每条都对应一类
  * 「没人看着就必然腐烂」的连接病：
  *
  *   D-001 站内相对链接：文档移动 / 归档（`git mv`）最容易留下静默坏链——阅读时才发现，
@@ -18,6 +18,9 @@
  *     Markdown 形式的站内链接必须可达（精确判定），反引号仓库路径必须存在（启发式档，
  *     带行内豁免）。扫描口径（哪些文件、哪些是注释行）**从 `gen-doc-refs` 导入**——
  *     审计判的行必须与自动改写的行是同一批，两边各数一遍必然漂移。
+ *   D-013 本机绝对路径：正文里的**盘符路径**（`X:\…` / `X:/…`）只对写它的那台机器成立。
+ *     仓库会被克隆到任何目录，读者照抄必然落空（或落到自己的同名目录上）——判定形态，
+ *     不给豁免；需要表达 Windows 路径形状时用 `<盘符>` / `<仓库根>` 占位。
  *
  * D-006 存在的理由（它是 D-001 的**盲区补丁**）：D-001 只认 Markdown 链接语法
  *   `[文字](目标)`，而本仓正文里指路**更常**写成行内反引号（"详见 `docs/005-arch/013-vdfs.md`"）。
@@ -149,13 +152,16 @@
  *   D-010 的豁免只有**行内档**（`doc-link-allow D-010: 理由`，本行或前一行），
  *   只对反引号档生效——链接档是精确判定不给豁免；源码文件不设全文档豁免
  *   （一篇几万行的 .rs 挂整篇豁免等于这片源码永久脱检）。
+ *   D-013 **不给豁免**，且扫描范围包含 `docs/` 的登记条目（任务记录引用的是当时撞上的
+ *   路径，同样不该带本机盘符——用 `<仓库根>` / `<盘符>` 占位）；只有 `docs/archive/`
+ *   这类整体排除的历史归档不判（同文件头）。
  *
  * 与仓库约定一致：纯 Node 实现，不依赖 bash / ripgrep，Windows / macOS / Linux 通用。
  */
 
 // 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns D 文档正文与链接
-// @codes D-001 D-002 D-003 D-004 D-006 D-007 D-008 D-010
+// @codes D-001 D-002 D-003 D-004 D-006 D-007 D-008 D-010 D-013
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -654,6 +660,8 @@ const BODY_ROOTS = ['docs', 'symbio/src', 'tauri', 'cli', 'e2e', '.github']
  * 后来删掉的路径是事实）。条目自己由 registry-audit 的 RG 判据管
  * （`exit:` 里指认的路径由 RG-012 验存在）。
  * **D-001 / D-007 仍然适用**——链接与锚点要么存在要么不存在，没有中间态。
+ * **D-013 也仍然适用**——本机盘符路径不是「当时的事实」，是换台机器就失效的写法；
+ * 登记条目里引用当时撞上的路径，同样该用 `<仓库根>` / `<盘符>` 占位。
  */
 const BODY_EXEMPT_DIRS = ['docs/009-task/', 'docs/008-spec/', 'docs/010-adr/']
 
@@ -684,16 +692,35 @@ const oversized = []
 const historical = []
 const backtickBad = []
 const bareRisk = []
+const machinePaths = []
 let docsScanned = 0
 let srcScanned = 0
 let backtickChecked = 0
 
+/**
+ * D-013：盘符绝对路径（`X:\…` / `X:/…`）。
+ *
+ * 边界用「前一个字符不是字母数字」挡掉 URL 的协议段（`http://` 里 `p:/` 不算盘符路径）。
+ * 判的是**形态**：能不能在本机解析出来不参与判定——解析不了的绝对路径恰恰是要禁的那类。
+ */
+const MACHINE_PATH_RE = /(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s`'"<>\[\]{}()，。；、|]*/g
+
+function machinePathHits (text) {
+  const hits = []
+  text.split('\n').forEach((line, i) => {
+    for (const m of line.matchAll(MACHINE_PATH_RE)) {
+      hits.push({ line: i + 1, text: line.trim(), token: m[0].trim() })
+    }
+  })
+  return hits
+}
+
 function scanBody (file) {
   const rel = path.relative(repoRoot, file).split(path.sep).join('/')
   if (EXEMPT_DIRS.some((d) => rel.startsWith(d))) return
-  if (BODY_EXEMPT_DIRS.some((d) => rel.startsWith(d))) return
   const raw = fs.readFileSync(file, 'utf8')
   if (file.endsWith('.rs')) {
+    if (BODY_EXEMPT_DIRS.some((d) => rel.startsWith(d))) return
     // 源码：只判 D-004，且只判**注释行**（理由见本节头注释）
     srcScanned += 1
     const lines = raw.split(/\r?\n/)
@@ -723,8 +750,14 @@ function scanBody (file) {
     }
     return
   }
-  docsScanned += 1
   const { body, offset } = splitFrontMatter(raw)
+
+  // D-013 判整篇（含 front-matter：evidence / where 字段里同样不该出现本机盘符）
+  const localPaths = machinePathHits(raw)
+  if (localPaths.length > 0) machinePaths.push({ rel, hits: localPaths })
+
+  if (BODY_EXEMPT_DIRS.some((d) => rel.startsWith(d))) return
+  docsScanned += 1
 
   const marker = processDocMarker(body)
   if (marker) misplaced.push({ rel, why: marker.source })
@@ -932,6 +965,18 @@ if (bareRisk.length > 0) {
   console.log('      本条**不给豁免**：判定的是编号的形态，不是语义。')
 }
 
+// ---- D-013：本机绝对路径 ----
+console.log(`D-013 本机绝对路径：命中 ${machinePaths.length} 篇`)
+for (const { rel, hits } of machinePaths) {
+  for (const h of hits) console.log(`  ✗ ${rel}:${h.line}  ${h.token}`)
+}
+if (machinePaths.length > 0) {
+  console.log('\n提示：盘符路径（`X:\\…` / `X:/…`）只对写它的那台机器成立——仓库会被克隆到')
+  console.log('      任何目录，读者照抄必然落空，或落到自己的同名目录上。要表达 Windows 路径')
+  console.log('      形状时用占位：`<仓库根>\\target`、`<盘符>:\\Users\\…`。')
+  console.log('      本条**不给豁免**：判的是形态，不是这段文字想说明什么。')
+}
+
 // ---- D-010：源码注释里的站内连接 ----
 console.log(
   `D-010 源码注释连接：链接判定 ${srcLinksChecked} 条，失效 ${srcLinkBad.length} 条 · ` +
@@ -955,6 +1000,7 @@ process.exit(
     backtickBad.length > 0 ||
     badAnchors.length > 0 ||
     bareRisk.length > 0 ||
+    machinePaths.length > 0 ||
     srcLinkBad.length > 0 ||
     srcTickBad.length > 0
     ? 1

@@ -334,3 +334,85 @@ test('D-011 名册一行都读不出 ⇒ 红（表格结构变了还是维的闭
   assert.equal(r.status, 1, r.stdout)
   assert.match(r.stdout, /D-011 .*名册一行都没读出/)
 })
+
+// ── D-012：CLI 产物指路路径 == 构建落点 ────────────────────────────────
+//
+// 这条判据的全部价值在于「读者照抄的那一行是对的」，所以双向都要钉：
+// 旧布局写法必红，而**不同目录下的正确写法**（根 README 无前缀、crate 文档带 `../`）
+// 不能因为归一化规则写错而假红——假红的下场是被人加豁免喂掉，真红随之一起失效。
+
+/** 讲构建的文档（D-012 的对象）：teach 文件在场本条才适用 */
+const teach = (lines) => ({ 'cli/README.md': ['# cli', '', '构建：`node scripts/build-cli.mjs`', ...lines, ''].join('\n') })
+
+test('D-012 旧布局写法变红：带具名目录段（symbio/target/…）', () => {
+  const r = audit({ ...RS, 'cli/Cargo.toml': '[package]\nname = "cli"\n', ...teach(['产物：`../symbio/target/debug/symbio-cli.exe`']) })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-012 cli\/README\.md:4/)
+  assert.match(r.stdout, /具名目录段/)
+})
+
+test('D-012 落点一致即通过：crate 文档用 `../target/…`（执行目录是 cli/）', () => {
+  const r = audit({ ...RS, 'cli/Cargo.toml': '[package]\nname = "cli"\n', ...teach(['产物：`../target/debug/symbio-cli.exe`']) })
+  assert.equal(r.status, 0, r.stdout)
+  assert.match(r.stdout, /CLI 产物指路 1 处与构建落点一致/)
+})
+
+test('D-012 执行目录判错就假红：仓库根的文档不许带 `../`', () => {
+  const r = audit({ ...RS, 'README.md': '构建见 `scripts/build-cli.mjs`，产物：`target/debug/symbio-cli.exe`。\n' })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-012 少一层前缀也是错：cli 的文档写 `target/…` ⇒ 指的是 cli/target', () => {
+  const r = audit({ ...RS, 'cli/Cargo.toml': '[package]\nname = "cli"\n', ...teach(['产物：`target/debug/symbio-cli.exe`']) })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /不是构建落点/)
+})
+
+test('D-012 release 同理：落点跟 profile 走', () => {
+  const ok = audit({ ...RS, 'cli/Cargo.toml': '[package]\nname = "cli"\n', ...teach(['门禁用 `../target/release/symbio-cli.exe`']) })
+  assert.equal(ok.status, 0, ok.stdout)
+  const bad = audit({ ...RS, 'cli/Cargo.toml': '[package]\nname = "cli"\n', ...teach(['门禁用 `cli/target/release/symbio-cli.exe`']) })
+  assert.equal(bad.status, 1, bad.stdout)
+  assert.match(bad.stdout, /target\/release\/symbio-cli/)
+})
+
+test('D-012 平台后缀不参与判定：无 `.exe` 的写法同样合法（Linux 跑门禁不许假红）', () => {
+  const r = audit({ ...RS, 'README.md': '构建见 `scripts/build-cli.mjs`，产物：`target/debug/symbio-cli`。\n' })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-012 历史行豁免：说「这条旧路径已删除」的行不判', () => {
+  const r = audit({
+    ...RS,
+    'cli/Cargo.toml': '[package]\nname = "cli"\n',
+    ...teach([
+      '产物：`../target/debug/symbio-cli.exe`。',
+      '原先写的 `../symbio/target/debug/symbio-cli.exe` 已删除，不再指向旧产物。',
+    ]),
+  })
+  assert.equal(r.status, 0, r.stdout)
+  assert.match(r.stdout, /CLI 产物指路 1 处/)
+})
+
+test('D-012 任务登记册排除：条目引用旧路径是记录本身，不是指路', () => {
+  const r = audit({
+    ...RS,
+    'cli/Cargo.toml': '[package]\nname = "cli"\n',
+    ...teach(['产物：`../target/debug/symbio-cli.exe`']),
+    'docs/009-task/141-x.md': '事故经过：照 `../symbio/target/debug/symbio-cli.exe` 跑，全是旧产物。\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+  assert.match(r.stdout, /CLI 产物指路 1 处/)
+})
+
+test('D-012 讲构建却一处产物路径都没写 ⇒ 红（指路断了 ≠ 判据脱节）', () => {
+  const r = audit({ ...RS, 'cli/Cargo.toml': '[package]\nname = "cli"\n', ...teach(['构建成功即可运行。']) })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-012 .*一处 CLI 产物路径都没写出/)
+})
+
+test('D-012 没有讲构建的文档 ⇒ 不适用（不陪跑，日志说明原因）', () => {
+  const r = audit({ ...RS, 'README.md': '正常文档。\n' })
+  assert.equal(r.status, 0, r.stdout)
+  assert.match(r.stdout, /D-012 不适用/)
+})

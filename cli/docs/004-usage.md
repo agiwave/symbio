@@ -12,10 +12,10 @@ created: 2026-09-11
 
 ```bash
 node scripts/build-cli.mjs
-# 产物：../symbio/target/debug/symbio-cli.exe
+# 产物：../target/debug/symbio-cli.exe（仓库根的 target/，见 003-building）
 ```
 
-详细构建约束（C 工具链注入、路径分隔符归一化、绝对 target-dir、toolchain 锁、缓存修复）见
+详细构建约束（C 工具链注入、路径分隔符归一化、单一 target 目录、工具链唯一来源、缓存修复）见
 [构建 (003-building.md)](003-building.md "GU-003-building")。
 
 ---
@@ -25,8 +25,8 @@ node scripts/build-cli.mjs
 ### ① 非交互：单条消息（`-m` 或位置参数）
 
 ```bash
-./../symbio/target/debug/symbio-cli.exe \
-  --homedir "D:\Bing\symbio\.symbio" \
+./../target/debug/symbio-cli.exe \
+  --homedir ~/.symbio \
   -m "用一句话解释什么是分形插件架构"
 ```
 
@@ -35,27 +35,27 @@ node scripts/build-cli.mjs
 stdin 不是终端时自动进入管道模式；stdout 只含模型文本，可直接喂给下游程序。
 
 ```bash
-echo "你好" | ./../symbio/target/debug/symbio-cli.exe --homedir "D:\Bing\symbio\.symbio"
+echo "你好" | ./../target/debug/symbio-cli.exe --homedir ~/.symbio
 # 或
-printf '用一句话说明什么是插件系统。' | ./../symbio/target/debug/symbio-cli.exe
+printf '用一句话说明什么是插件系统。' | ./../target/debug/symbio-cli.exe
 ```
 
 ### ③ 交互：多轮 REPL
 
 ```bash
-./../symbio/target/debug/symbio-cli.exe --homedir "D:\Bing\symbio\.symbio"
+./../target/debug/symbio-cli.exe --homedir ~/.symbio
 ```
 
 终端不支持 TTY、或想用脚本喂多轮输入来自动化验证会话时，用 `--repl` 强制进入 REPL：
 
 ```bash
-printf '第一轮\n/provider\n/exit\n' | ./../symbio/target/debug/symbio-cli.exe --repl
+printf '第一轮\n/provider\n/exit\n' | ./../target/debug/symbio-cli.exe --repl
 ```
 
 ### ④ 心跳守护模式（`--heartbeat`）
 
 ```bash
-./../symbio/target/debug/symbio-cli.exe --homedir "D:\Bing\symbio\.symbio" --heartbeat
+./../target/debug/symbio-cli.exe --homedir ~/.symbio --heartbeat
 ```
 
 驻留进程，为本 homedir 下**所有启用了心跳的会话**按各自配置触发空闲心跳（空闲 N 秒自动注入

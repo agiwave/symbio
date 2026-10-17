@@ -205,9 +205,15 @@ impl PluginRegistry {
                 }
             };
             if !creator_has(&provider) {
-                crate::plugin_warn!(
+                // 本构建没有这个工厂 ⇒ 它**不是本次装配的插件**：`PLUGIN.yml` 指向的工厂
+                // 在编译期就不存在，最可能是旧构建留下的目录（`.symbio/` 是跨构建存活的
+                // 数据目录）。装配期没有任何东西可以修它，所以与「没有 manifest」同一级别
+                // 只记 debug——WARN 通道留给真异常，一条常态化的 WARN 会把这套分级磨平。
+                // 用户要看见它不必翻日志：[`PluginRegistry::entries`] **不要求**工厂注册，
+                // 这类目录照旧进表（未挂载、可停用可卸载），展示位在插件管理面。
+                crate::plugin_debug!(
                     "composite",
-                    "跳过插件目录（未找到 Provider）{name} -> {provider}"
+                    "跳过插件目录（本构建没有 Provider {provider}）{name}——仍进注册表，可停用或卸载"
                 );
                 continue;
             }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * doc-symbol-audit — 文档符号指认审计（D-005 / D-009，全仓级，跨插件）
+ * doc-symbol-audit — 文档符号指认审计（D-005 / D-009 / D-011 / D-012，全仓级，跨插件）
  *
  * 守的是「现行文档指认的符号确实存在」。这类失效没人看得见：读者按图
  * 索骥找不到定义，而 doc-link-audit 只管链接、facts/current 只从代码生成
@@ -21,6 +21,11 @@
  *     （文件在仓内存在；`::符号` 的最后一段查 D-005 的同一份 Rust 语料）。
  *     `—` 只允许出现在真的没落地的行上——故锚定 / 未锚定**计数进日志**，让
  *     "名册在长、锚定率不动"这件事看得见。复用本文件的语料，**不另起一份符号解析**。
+ *   **D-012**（CLI 产物指路路径）：现行文档里 `target/<profile>/symbio-cli(.exe)` 这类
+ *     会被读者照抄的产物路径，必须等于 `scripts/cli-binary.mjs` 的 `cliArtifactRelPath`
+ *     （构建真正落点，见文件末）。带具名目录段（`symbio/target/…`、`cli/target/…`）一律红；
+ *     只带 `./` / `../` 的按该 md 的命令执行目录归一后比。任务登记册（`docs/009-task`）
+ *     排除——那里引用旧路径是记录本身，不是指路。
  *
  * 为什么 D-009 要「同族」这道闸：全大写 + 下划线不只是常量的形态，也是**环境变量、CI
  * 密钥、线上错误码**的形态（`APPLE_CERTIFICATE`、`GITHUB_TOKEN`）。那些名字的正确出处
@@ -69,13 +74,14 @@
  */
 // 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns D 文档正文与链接
-// @codes D-005 D-009 D-011
+// @codes D-005 D-009 D-011 D-012
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join, dirname, resolve, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { red, green, dim } from './color.mjs'
 import { codeTextOf } from './gate.d/_shared.mjs'
+import { cliArtifactRelPath } from './cli-binary.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // `--root=` 只为回归测试开的口子：测试在临时目录造一棵最小仓库，把判据用
@@ -156,7 +162,7 @@ const isFrontend = (n) => /\.(ts|vue|js)$/.test(n)
 const isTool = (n) => /\.mjs$/.test(n) && !/\.test\.mjs$/.test(n)
 
 // ── 主流程 ──────────────────────────────────────────────────────────────
-console.log('--- doc-symbol-audit: 文档符号指认审计（D-005 / D-009） ---')
+console.log('--- doc-symbol-audit: 文档符号指认审计（D-005 / D-009 / D-011 / D-012） ---')
 
 const mdFiles = existsSync(REPO_ROOT) ? collectMd(REPO_ROOT).sort() : []
 if (mdFiles.length === 0) {
@@ -283,6 +289,98 @@ function auditRosterAnchors () {
 let scanned = 0
 let refs = 0
 let constRefs = 0
+
+// ── D-012：指路文档写的 CLI 产物路径必须就是构建出来的那一条 ──────────────
+//
+// 判据对象是**读者会照抄的路径**。这条指路错过一次真事故（[T-134] 实测）：文档写
+// `../symbio/target/debug/symbio-cli.exe`，而 `cli` 早已是仓库根 workspace 的成员，
+// cargo 把所有成员产物写进**同一个** `<仓库根>/target/`——旧位置躺着几个月前的产物，
+// 于是整批实测跑在旧二进制上，两条已修的缺陷被当成还在的重复观测到。
+//
+// 判据的形状（不看目录树、不做「猜 cwd」的归一化）：
+//  1. 路径里 `target/<profile>/symbio-cli` 之前**不许出现具名目录段**——仓库根本身就叫
+//     `symbio`，`symbio/target/…` 解析之后看着「像对的」，它恰恰是把读者送进旧二进制的那条；
+//     具名段一律红。
+//  2. 只带 `./` / `../` 前缀的，按该 md 的**命令执行目录**（[`docBase`]：最近的 crate 目录，
+//     没有就是仓库根）归一，必须等于 `scripts/cli-binary.mjs` 的 `cliArtifactRelPath` —
+//     「CLI 产物在哪」的唯一来路，这里不另起一份拼接（另起一份就是第二个会漂的真相）。
+//
+// 语料**排除任务登记册**（`docs/009-task`）：那里的条目记的是「当时撞上了什么」，
+// 引用一句旧路径正是那条记录的内容本身，不是给读者的指路。
+const REGISTER_MD_PREFIXES = ['docs/009-task']
+const CLI_ARTIFACT_RE = /(?:[\w.-]+[\\/])*target[\\/](debug|release)[\\/]symbio-cli(?:\.exe)?/g
+const CLI_BUILD_SCRIPT_RE = /build-cli\.mjs/
+
+/** 平台后缀不参与判定：判的是「落在哪个目录、哪个二进制」，不是本机 OS。 */
+function withoutExe (p) {
+  return p.replace(/\\/g, '/').replace(/\.exe$/i, '')
+}
+
+function auditCliArtifactPaths () {
+  const files = mdFiles.filter((rel) => !REGISTER_MD_PREFIXES.some((p) => rel.startsWith(p)))
+  const read = (rel) => readFileSync(join(REPO_ROOT, rel), 'utf8')
+  // 「讲怎么构建 CLI」的文档在场，本条才有对象（夹具仓库里没有 ⇒ 不适用，同 D-011）
+  const teachFile = files.find((rel) => CLI_BUILD_SCRIPT_RE.test(read(rel)))
+  if (!teachFile) {
+    console.log(dim('（D-012 不适用：没有现行文档讲到 build-cli.mjs）'))
+    return null
+  }
+
+  let artifactRefs = 0
+  for (const rel of files) {
+    const lines = read(rel).split(/\r?\n/)
+    lines.forEach((line, i) => {
+      const allow = line.match(ALLOW_RE)
+      if (allow && allow[1].trim()) return
+      if (HISTORY_RE.test(line)) return
+      let m
+      CLI_ARTIFACT_RE.lastIndex = 0
+      while ((m = CLI_ARTIFACT_RE.exec(line)) !== null) {
+        artifactRefs++
+        const token = m[0].replace(/\\/g, '/')
+        const expected = cliArtifactRelPath(m[1])
+        // 前缀里出现**具名目录段**（`symbio/target/…`）＝旧布局的写法，单独说清它错在哪
+        const named = token.split('/').slice(0, -3).filter((seg) => seg !== '.' && seg !== '..')
+        if (named.length) {
+          report(rel, i + 1, 'D-012',
+            `指路的 CLI 产物路径带着具名目录段：\`${token}\`——构建落点是仓库根的 \`${expected}\`` +
+              `（根 workspace 单 target），多出来的 \`${named.join('/')}\` 指向的是旧位置`)
+          continue
+        }
+        if (withoutExe(join(docBase(rel), token)) !== withoutExe(expected)) {
+          report(rel, i + 1, 'D-012',
+            `指路的 CLI 产物路径不是构建落点：\`${token}\`（本文件的命令以 \`${docBase(rel) || '.'}\`` +
+              ` 为执行目录）应写成 \`${expected}\`——照这条抄就用的是旧二进制`)
+        }
+      }
+    })
+  }
+  // 有人在教构建，却没有一处写出产物落在哪 ⇒ 指路断了（读者只能猜，猜错就是拿旧产物跑）。
+  // 这条不是形式主义：读不出路径与「判据脱节」在日志里长得一模一样，必须分开。
+  if (artifactRefs === 0) {
+    report(teachFile, 1, 'D-012',
+      `讲构建的文档（${teachFile}）一处 CLI 产物路径都没写出——指路断了还是这条判据脱节了？`)
+    return null
+  }
+  return { artifactRefs, teachFile }
+}
+
+/**
+ * 该 md 里命令的**执行目录**：最近的 crate 目录（有 `Cargo.toml` 的那层），没有就是仓库根。
+ *
+ * 为什么不是「md 自己所在目录」：`cli/docs/004-usage.md` 里的 `node scripts/build-cli.mjs`
+ * 是在 `cli/` 下执行的（文档从 crate 根链接过来），拿 `cli/docs` 当基准会把正确的
+ * `./../target/…` 算成 `cli/target/…`——判据自己造的假红。
+ */
+function docBase (rel) {
+  let dir = dirname(rel).replace(/\\/g, '/')
+  while (dir && dir !== '.' && dir !== '/') {
+    if (existsSync(join(REPO_ROOT, dir, 'Cargo.toml'))) return dir
+    dir = dirname(dir) === dir ? '' : dirname(dir)
+  }
+  return ''
+}
+
 for (const rel of mdFiles) {
   const lines = readFileSync(join(REPO_ROOT, rel), 'utf8').split(/\r?\n/)
   lines.forEach((line, i) => {
@@ -325,6 +423,8 @@ for (const rel of mdFiles) {
 // 故单列一条判据，但它**不解析符号**——符号存在性查的就是上面那份 `idents`
 // （D-005 的语料），多一份解析就多一处口径漂移。
 const roster = auditRosterAnchors()
+// ── D-012：CLI 产物指路路径 == 构建落点 ─────────────────────────────────
+const cliPaths = auditCliArtifactPaths()
 
 if (errors > 0) {
   console.log(red(`\ndoc-symbol-audit 未通过：${errors} 处失效指认（扫描 ${scanned} 条候选，${mdFiles.length} 篇 md）`))
@@ -333,4 +433,7 @@ if (errors > 0) {
 const rosterLine = roster
   ? dim(` · 名册锚点 ${roster.anchored}/${roster.total} 已锚定`)
   : ''
-console.log(green(`\ndoc-symbol-audit 通过：${mdFiles.length} 篇 md、${rsFiles.length} 个 .rs + ${feFiles.length} 个前端语料，${refs} 条符号指认与 ${constRefs} 个常量名全部存在${dim(`（候选 ${scanned} 条）`)}${rosterLine}`))
+const cliLine = cliPaths
+  ? dim(` · CLI 产物指路 ${cliPaths.artifactRefs} 处与构建落点一致`)
+  : ''
+console.log(green(`\ndoc-symbol-audit 通过：${mdFiles.length} 篇 md、${rsFiles.length} 个 .rs + ${feFiles.length} 个前端语料，${refs} 条符号指认与 ${constRefs} 个常量名全部存在${dim(`（候选 ${scanned} 条）`)}${rosterLine}${cliLine}`))

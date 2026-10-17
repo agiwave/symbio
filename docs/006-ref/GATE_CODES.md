@@ -24,7 +24,7 @@ lists: [gate-codes=owner]
 |---|---|---|---|---|
 | **C** | core 出口 | `scripts/core-export-audit.mjs` | C-001–003 | `C-004` |
 | **CS** | core 形状 | `scripts/core-shape-audit.mjs` | CS-001–002 | `CS-003` |
-| **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–011 | `D-012` |
+| **D** | 文档正文与链接 | `scripts/doc-link-audit.mjs` · `scripts/doc-symbol-audit.mjs` | D-001–013 | `D-014` |
 | **DC** | 文档计数对账（文档里的少数几个数 vs 代码） | `scripts/doc-count-audit.mjs` | DC-001–004 | `DC-005` |
 | **E** | 插件入口与门面 | `scripts/plugin-entry-audit.mjs` | E-001–009、E-011–012 | `E-013` |
 | **GC** | 判据码命名空间本身 | `scripts/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
@@ -61,6 +61,8 @@ lists: [gate-codes=owner]
 | **D-009** | `scripts/doc-symbol-audit.mjs` |
 | **D-010** | `scripts/doc-link-audit.mjs` |
 | **D-011** | `scripts/doc-symbol-audit.mjs` |
+| **D-012** | `scripts/doc-symbol-audit.mjs` |
+| **D-013** | `scripts/doc-link-audit.mjs` |
 | **DC-001** | `scripts/doc-count-audit.mjs` |
 | **DC-002** | `scripts/doc-count-audit.mjs` |
 | **DC-003** | `scripts/doc-count-audit.mjs` |

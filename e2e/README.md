@@ -47,10 +47,11 @@ E2E_DEBUG=1 node e2e/run-tests.mjs    # 失败时输出错误堆栈
 `undefined`），排查方向被引到源码上——而真因只是产物旧。二进制是构建产物的函数，
 产物比输入旧就是不可信的。
 
-构建必须在 `cli/` 下跑（仓库根没有 `Cargo.toml`；`cli/.cargo/config.toml` 会把
-target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/symbio-cli.exe`）。
-机制按「两个候选取最新的那份」解析，所以两种布局都对。手工 `cargo build --release`
-也可以，代价只是下次使用时会多跑一次 cargo（戳没更新）。
+产物只有一个去处：`cli` 是根 workspace（根 `Cargo.toml` 的 `members`）的成员，cargo 把所有
+成员的产物写进同一个 `<仓库根>/target/`，所以二进制就在 `target/release/symbio-cli.exe`。
+机制按「候选位置取最新的那份」解析（`scripts/cli-binary.mjs`），过渡期残留在 `symbio/target/`、
+`cli/target/` 的旧产物因此不会被当成「缺失」——但**指路只指第一候选**。手工
+`cargo build --release` 也可以，代价只是下次使用时会多跑一次 cargo（戳没更新）。
 
 `E2E_CLI_EXE=<path>` 指向外部二进制会**绕过**新鲜度判定——外部产物无法用本仓源码
 指纹衡量，这是知情选择。
