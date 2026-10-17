@@ -78,6 +78,24 @@ impl ProgressPolicy {
             && tool_rounds >= self.min_rounds
             && reports < self.max_per_turn
     }
+
+    /// 「此处不存在汇报」的策略快照（轮首用）。
+    ///
+    /// 与"配置里关掉了汇报"是**同一件事在数据上的两种来源**：`enabled = false`
+    /// 让 [`Self::due`] 恒假，因此 `policy.report` 在轮首自然不命中，不必让
+    /// 环在构造状态时特判"这一格不适用"。
+    ///
+    /// 其余三个旋钮填**不可能通过**的值而不是 0：`min_rounds = 0` 与
+    /// `max_per_turn = 0` 在合法配置里都是"更宽松"，留着它们会让本快照在
+    /// 将来某次误读 `enabled` 时静默变成"每次都该汇报"。
+    pub(crate) fn disabled() -> Self {
+        Self {
+            enabled: false,
+            interval_ms: i64::MAX,
+            min_rounds: usize::MAX,
+            max_per_turn: 0,
+        }
+    }
 }
 
 /// **轮内**的汇报状态（缺口 4）。
@@ -127,10 +145,22 @@ impl RoundProgress {
         }
     }
 
-    /// 该不该说（纯判定，见 [`ProgressPolicy::due`]）。
+    /// 该不该说（纯判定）。
+    ///
+    /// 判据在 [`super::super::loop_registry`] 的 `policy.report` 行——本方法只把
+    /// 自己持有的三格数（轮次 / 静默 / 已汇报次数）连同策略快照折成 `LoopState`
+    /// 交给表。**同一份判据只有一个 owner**：改阈值语义改那一行，不改这里。
     pub(crate) fn due(&self, snapshot: &RunSnapshot) -> bool {
-        self.policy
-            .due(snapshot.quiet_ms, snapshot.tool_rounds, self.reports)
+        let state = super::super::loop_registry::LoopState::round_boundary(
+            snapshot.tool_rounds,
+            snapshot.quiet_ms,
+            self.reports,
+            self.policy.clone(),
+        );
+        super::super::loop_registry::builtin()
+            .decide(&state)
+            .map(|h| h.capsule)
+            == Some(super::super::loop_registry::Capsule::REPORT)
     }
 
     /// 说了：配额 +1、静默时钟归零。
@@ -156,14 +186,18 @@ pub(crate) async fn report_if_due(
     turn: &mut TurnState,
 ) -> bool {
     // 轮首没有"进展"可报：那里的判定对象是用户那句话（归 `decide.rs`）。
-    if turn.tool_rounds == 0 {
-        return false;
-    }
-
+    // 判据在表里（`policy.report` 的 `tool_rounds > 0`），本处只问表。
     let quiet_ms = clock_now_ms() - turn.last_user_facing_at;
-    if !orchestrator
-        .progress
-        .due(quiet_ms, turn.tool_rounds, turn.progress_reports)
+    let state = super::super::loop_registry::LoopState::round_boundary(
+        turn.tool_rounds,
+        quiet_ms,
+        turn.progress_reports,
+        orchestrator.progress.clone(),
+    );
+    if super::super::loop_registry::builtin()
+        .decide(&state)
+        .map(|h| h.capsule)
+        != Some(super::super::loop_registry::Capsule::REPORT)
     {
         return false;
     }

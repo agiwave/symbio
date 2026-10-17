@@ -214,6 +214,7 @@ pub(crate) use super::context::{auto_compress_process, run_context_compact};
 
 use super::chat_session::{PersistentChatSession, SESSION_HANDLE};
 use super::model_chat;
+use crate::plugin_debug;
 use crate::plugin_error;
 use crate::plugin_info;
 use crate::plugin_warn;
@@ -416,6 +417,13 @@ pub async fn run_chat_loop(
         // 「这一轮该直接回答、还是派给工具循环」。`classify` 只输出**枚举**
         // （`Verdict`），本循环负责**执行**它——判决与措辞分开，执行权归编排层。
         //
+        // ## 判据在哪
+        //
+        // 不在下面这个 `if` 里，在 [`super::loop_registry`] 的 `policy.classify` 行：
+        // 「`tool_rounds == 0` ∧ 有发言 ∧ 开关开着」三条写在一个纯函数里，可单测、
+        // 可增删。本处只问表「下一步是什么」，命中 `Capsule::DECIDE` 才走这段。
+        // 加一条新策略 = 一个函数 + 一行注册，**本文件不改**（PL-014 §6 判据 1）。
+        //
         // ## 为什么在 `gate_turn` 之后
         //
         // 闸门管的是「本轮要不要发请求」（软上限 / 中止 / 在途工具）。判决是
@@ -449,7 +457,16 @@ pub async fn run_chat_loop(
         //
         // 卸载 `classify`（或 `classify_enabled = false`）时这段整体不发生，
         // 行为与引入判决之前逐字一致。
-        if turn.tool_rounds == 0 && orchestrator.classify_enabled {
+        let head_state = super::loop_registry::LoopState::turn_head(
+            turn.tool_rounds,
+            first_utterance.is_some(),
+            orchestrator.classify_enabled,
+        );
+        let head_hit = super::loop_registry::builtin().decide(&head_state);
+        if let Some(hit) = head_hit {
+            plugin_debug!("session", "[Loop] 轮首命中策略行 {}", hit.row);
+        }
+        if head_hit.map(|h| h.capsule) == Some(super::loop_registry::Capsule::DECIDE) {
             if let Some(utterance) = first_utterance.as_deref() {
                 // 先落成变量再进 `if let`：`decide_turn` 借的是 `&context`，而
                 // `apply_verdict` 要 `&mut context`——把两次借用放进同一个表达式
