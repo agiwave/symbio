@@ -3,7 +3,7 @@
 //! ## 它做三件事
 //!
 //! 1. 把**对话线**投影出来（与 `decide.rs` 同一个函数、同一个窗口）；
-//! 2. 经容器 `route` 调 `compose/compose`（`ctx.fork()` + `PATH` 常量 + 契约载荷）；
+//! 2. 经容器 `route` 调 `compose/wording`（`ctx.fork()` + `PATH` 常量 + 契约载荷）；
 //! 3. 把返回的文本**写进转写**——唯一写入者仍是 `session`（ADR-020）。
 //!    `compose` 只返回一个 `String`，一个节点都不写。
 //!
@@ -165,7 +165,7 @@ pub(crate) enum VerdictEffect {
     Silent,
 }
 
-/// 调 `compose/compose` 拿一段文本。
+/// 调 `compose/wording` 拿一段文本。
 ///
 /// 返回 `None` = 没有措辞可用（未挂载 `compose` / 路由失败 / 出参为空）。
 /// 与 `decide.rs` 同一条处置原则：**「没有这个插件」是一个正常状态**，

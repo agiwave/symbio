@@ -47,6 +47,20 @@ enum Surface {
     Silent,
 }
 
+/// 一次回显请求：`Renderer::render` 的入参集合。
+///
+/// 七个位置参数在调用点上分不清谁是谁（`&delta, &tail` 尤其容易颠倒），且
+/// clippy 的 `too_many_arguments` 也会红——收成一个具名结构，调用点按字段写。
+struct Echo<'a> {
+    id: &'a str,
+    surface: Surface,
+    role: Option<NodeRole>,
+    delta: &'a str,
+    tail: &'a str,
+    name: Option<String>,
+    progress: bool,
+}
+
 fn write_stdout(s: &str) {
     let mut out = io::stdout().lock();
     let _ = out.write_all(s.as_bytes());
@@ -144,7 +158,7 @@ impl Renderer {
                 merged.role = Some(r);
             }
             if message.msg_type.is_some() {
-                merged.msg_type = message.msg_type.clone();
+                merged.msg_type = message.msg_type;
             }
             if message.tool_call_id.is_some() {
                 merged.tool_call_id = message.tool_call_id.clone();
@@ -226,7 +240,15 @@ impl Renderer {
         } else {
             delta.clone()
         };
-        if self.render(&message.id, surface, role, &delta, &tail, name, progress) {
+        if self.render(Echo {
+            id: &message.id,
+            surface,
+            role,
+            delta: &delta,
+            tail: &tail,
+            name,
+            progress,
+        }) {
             *self.printed.entry(message.id.clone()).or_insert(0) += tail.chars().count();
         }
         if let Some(next) = rewritten_to {
@@ -242,16 +264,16 @@ impl Renderer {
     ///
     /// 失败提示不在这一层——那是消息级终态的一部分，与"正文是否该回显"没有
     /// 共同依据，见 [`Self::announce_failure`]。
-    fn render(
-        &mut self,
-        id: &str,
-        surface: Surface,
-        role: Option<NodeRole>,
-        delta: &str,
-        tail: &str,
-        name: Option<String>,
-        progress: bool,
-    ) -> bool {
+    fn render(&mut self, echo: Echo<'_>) -> bool {
+        let Echo {
+            id,
+            surface,
+            role,
+            delta,
+            tail,
+            name,
+            progress,
+        } = echo;
         match surface {
             Surface::Text => {
                 // 只回显模型正文：用户消息由 CLI 自己输出，工具结果文本不回显

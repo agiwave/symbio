@@ -842,7 +842,7 @@ pub struct ChatOrchestrator {
     ///
     /// ## 它关掉的是什么
     ///
-    /// `false` ⇒ 本循环**不调用** `compose/compose`：`Answered` 拿不到措辞，
+    /// `false` ⇒ 本循环**不调用** `compose/wording`：`Answered` 拿不到措辞，
     /// 于是**降级进工具循环**（不沉默），`Escalate` 没有首响。与未挂载 `compose`
     /// 时的行为一致——两条路径都退化成"没有对话面文本"，但验证的是两件不同的事
     /// （这里是"分支写对了"，卸载是"插件边界真的存在"）。

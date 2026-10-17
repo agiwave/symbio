@@ -95,7 +95,7 @@ pub(crate) struct TurnInputs {
     pub(crate) root_id: String,
     /// 系统提示词（`resolve_system_prompt` 为唯一真源）
     pub(crate) system_prompt: String,
-    /// 本轮到模型的完整工具清单（含条件注入的 `context_compact`）
+    /// 本轮到模型的完整工具清单（v2 路径下**不含** `context_compact`——见本步 ③ 前的说明）
     pub(crate) tools: Vec<CapabilityMeta>,
     /// 请求视图（`build_request_view` 唯一入口的产物，**不落库**）
     pub(crate) request_view: Vec<ChatNode>,
@@ -121,8 +121,8 @@ pub(crate) struct TurnInputs {
 /// ## 本步内的顺序（1–5 与收口前逐条对齐，语义不变；6 为 ADR-047 新增）
 ///
 /// 1. 系统提示词 + 工具（同函数、同一时刻）
-/// 2. 派生请求级开销 `overhead_tokens`（口径：**不含**下面条件注入的
-///    `context_compact`，与历史一致 → 压缩阈值 / 水位提醒的判定行为不变）
+/// 2. 派生请求级开销 `overhead_tokens`（口径：**不含**任何压缩工具——v2 路径不注入
+///    它，见步骤 ③ 前的说明；与历史口径一致 → 压缩阈值 / 水位提醒的判定行为不变）
 /// 3. 压缩（收口 ③：[`apply_compaction`]，自动语义压缩 + 水位提醒的唯一响应点）
 /// 4. Turn 根节点流式占位（**必须在压缩之后**：压缩失败时不留半截 Turn 节点）
 /// 5. 长期记忆召回（S5 步 12：跨会话读视图 → 置顶注入请求视图；只在本轮**第一个**
@@ -237,8 +237,8 @@ pub(crate) async fn prepare_turn_inputs(
     //
     // **位置即约束**：能力目录必须在 ①② 把 `tools` 收集成形**之后**才动笔——收集是
     // 广播，遍历期取集合必然漏掉还没被访问到的兄弟插件（静默、且漏哪几项次次不同）。
-    // 这里取的是本轮**最终**发给模型的同一份 `tools`（含 ② 里 push 的压缩工具）
-    // ⇒ 同源，不构成第二份真相。
+    // 这里取的是本轮**最终**发给模型的同一份 `tools`（即上面 ① 收下的那一份，
+    // 中间没有任何 push）⇒ 同源，不构成第二份真相。
     //
     // Q1 的输入取 `turn.input_utterance`（循环**前**锚定的 `(消息 id, 正文)`）⇒
     // 同一请求内不随工具轮变化，判定不漂移；`None` = resume / 心跳这类没有用户新
@@ -303,9 +303,12 @@ pub(crate) async fn prepare_turn_inputs(
 ///
 /// ## 与 `context_compact`（模型主动调用）的分工
 ///
-/// 那条路径由模型在任务阶段间隙自行发起，判定点在 `close_turn` 的工具拦截处
-/// （`run_context_compact`），**不走本函数**；两条路径共用同一执行内核
-/// `compress_with_snapshot_core`——"何时压"有两个入口，"怎么压"只有一个实现。
+/// 那条路径的**判定点**在 `close_turn` 的工具拦截处（`run_context_compact`），
+/// **不走本函数**；两条路径共用同一执行内核 `compress_with_snapshot_core`——
+/// "何时压"有两个入口，"怎么压"只有一个实现。
+///
+/// ⚠️ 当前 v2 路径**不把该工具注入工具清单**（见步骤 ③ 前的说明），因此那条拦截
+/// 只在模型自行说出这个工具名时才会命中；不要据本节认为模型看得到它。
 ///
 /// 返回：是否需要在请求视图末尾注入一次性水位提醒。
 pub(crate) async fn apply_compaction(
@@ -352,6 +355,10 @@ pub(crate) async fn apply_compaction(
     // "阶段间隙"主动调用 context_compact（比 70% 硬触发更早、时机更优）。
     // 门控：提醒只为引导工具调用，跟随工具开关（enable_compact_tool），
     // 与自动压缩开关解耦（关自动压缩、开工具压缩时仍需提醒）。
+    //
+    // ⚠️ 当前 v2 路径**不注入** `context_compact`（见步骤 ③ 前），所以本提醒所引导的
+    // 那个工具在模型眼里并不存在。出厂默认 `enable_compact_tool = false`，本段因此
+    // 不产出；把它打开之前必须先恢复注入，否则提醒是一条指向空处的指令。
     // 去重：每次用户请求生命周期内最多注入一次（主动压缩成功后重置）；
     // 提醒不落库，无需扫描历史做去重，也不占用轮次窗口的 User 计数。
     if !req.enable_compact_tool || turn.nudged_this_request {

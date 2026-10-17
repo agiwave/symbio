@@ -22,8 +22,8 @@
 //! ⚠️ **事故敏感区**：`StopSignal` 配对语义与「中止不是失败」的结局判定曾出过事故
 //! （189 个 Turn 被误标 Failed），改动前先读 ADR-018 与相关条目。
 //!
-//! 可见性：`run_chat_loop_task` 被 `entry.rs` 的 `handle_chat_send_oneoff` 调用，
-//! 故标 `pub(super)`。
+//! 可见性：`run_chat_loop_task` 被 `entry.rs` 的 `start_turn` 调用（在它 spawn 的
+//! 任务体内），故标 `pub(super)`。
 
 use super::sink::TranscriptSink;
 use super::*;

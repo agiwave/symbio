@@ -21,7 +21,7 @@ created: 2026-09-29
 ## 路由
 
 清单见 [`docs/006-ref/003-ROUTES.md`](../../../../docs/006-ref/003-ROUTES.md "RE-003-ROUTES") §Compose 插件（**权威**）：
-`compose/compose`。
+`compose/wording`。
 
 ## 契约
 

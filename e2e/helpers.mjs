@@ -906,13 +906,17 @@ export function turnFacts(events) {
 }
 
 /**
- * wire 形态词 → 旧类型词的折叠（镜像前端 `messageTypes.messageTypeOf` 的判据）。
+ * wire 形态词 → 旧类型词的折叠（镜像前端 `schemas/chat_node.nodeKindOf` 的五值归一）。
  *
  * [T-147c-ii-s3/s4] 之后 ChatNode 的 `type` 只有五值
  * （body/notice/skeleton/interaction/typing），呈现变体住 `meta.style_tag`。
  * e2e 若继续拿 `m.type === 'tool_call'` 这类**旧词**比较，条件永远不成立——
  * 断言不报错、只是不再命中靶子（静默跳过），这比失败更危险。
  * 所有对消息节点 / 实时帧 `type` 的判据一律经本函数折叠回旧词再比。
+ *
+ * ⚠️ `notice` 一格装了**两种业务**：思考与压缩（[T-155 B1] 把 reasoning 归 Notice）。
+ * 只按 `type` 折叠会把两者都读成 `compression`——于是「思考节点在不在」的断言
+ * 静默失去靶子。`style_tag` 是这两者的唯一区分点，必须读。
  *
  * 旧词与未知值原样透传（存量 fixture 与未来新词都不会被误判成别的）。
  */
@@ -921,7 +925,7 @@ export function msgTypeOf(m) {
   const tag = m?.meta?.style_tag;
   if (t === 'skeleton') return tag === 'tool' ? 'tool_call' : 'turn';
   if (t === 'body') return tag === 'reasoning' ? 'reasoning' : 'text';
-  if (t === 'notice') return 'compression';
+  if (t === 'notice') return tag === 'reasoning' ? 'reasoning' : 'compression';
   if (t === 'interaction') return 'user_prompt';
   return t;
 }

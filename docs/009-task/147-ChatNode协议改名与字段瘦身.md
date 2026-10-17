@@ -10,7 +10,7 @@ deps: [T-146-主体可路由地址]
 prio: now
 parent: T-145-前端机制化批
 where: symbio/src/symbio_core/schemas/session/ · symbio/src/plugins/session/ · symbio/src/plugins/agent/ · cli/src/client.rs · cli/src/render.rs · tauri/src/schemas/ · scripts/protocol-mirror-audit.mjs
-exit: `chat_message.rs` → `chat_node.rs`；`ChatMessage` → `ChatNode`；`MessageType` → `NodeKind`（五值闭集：Body/Notice/Skeleton/Interaction/Typing）；`MessageRole` 从协议删除；`tool_call_id`/`name` 从顶层移除（沉 meta 或用 title）；`ChatMessage.principal: Option<String>` → `Option<Principal>`（`{kind: PrincipalKind, id: String, title: Option<String>}` 三字段）；历史 `messages.json` 一次性读侧别名（`"agent:main"` → `{kind:Agent,id:"session/main"}`，`"user"` → `{kind:Person,id:"person/local"}`）；`ResumeAction::RetryTurn` → `RetrySubtree`；前端 `chat_message.ts` → `chat_node.ts` 同步、`principal?: string` → `principal?: { kind, id, title? }`；100+ 单测一次改绿；`protocol-mirror-audit` 指向新文件名与新 principal 结构；一次 diff 内落地，不分批
+exit: `chat_message.rs` → `chat_node.rs`；`ChatMessage` → `ChatNode`；`MessageType` → `NodeKind`（五值闭集：Body/Notice/Skeleton/Interaction/Typing）；`MessageRole` 从协议删除；`tool_call_id`/`name` 从顶层移除（沉 meta 或用 title）；`ChatMessage.principal: Option<String>` → `Option<Principal>`（`{kind: PrincipalKind, id: String, title: Option<String>}` 三字段）；历史 `messages.json` 一次性读侧别名（`"agent:main"` → `{kind:Agent,id:"session/main"}`，`"user"` → `{kind:Person,id:"person/local"}`）；`ResumeAction` 的 LLM 失败重试动词改名为 `RetrySubtree`；前端 `chat_message.ts` → `chat_node.ts` 同步、`principal?: string` → `principal?: { kind, id, title? }`；100+ 单测一次改绿；`protocol-mirror-audit` 指向新文件名与新 principal 结构；一次 diff 内落地，不分批
 ---
 
 ## 内容
@@ -59,7 +59,7 @@ principal 从字符串升到结构体一并做：[T-146] 已把值域迁到可�
   2. `finalize_assistant_turn` 的「思考即正文」翻转帧只换 `msg_type` 不带 meta——s3 后思考节点的呈现身份住在 `meta.style_tag`，帧合并语义是「有则覆盖」、不带 meta = 旧 tag 留在消费方快照里，`is_text` 永不成立，CLI 对 reasoning-only 轮不回显并以失败退出（t55/t77 抓到）；翻转帧现带**空 meta 对象**作清除格，把「同 id 换类型」说完整；
   3. t74 裁决者期望 `agent:arbiter`→`session/arbiter`（actor 字段随 T-146 迁移），core `actors` 模块注释里的 `agent:*` 写法同批清。
   Rust 1695+11 测、前端 874 测、e2e **75/75** 全绿。
-- **147e**（动词改名，本批）：`ResumeAction::RetryTurn` → `RetrySubtree`；wire 词 `retry_turn` → `retry_subtree`；后端函数 `process_retry_turn` → `process_retry_subtree`；前端常量 `RESUME_ACTION_RETRY_TURN` → `RESUME_ACTION_RETRY_SUBTREE`；跨栈 25 站点一次改绿。语义泛化——靶子从「Failed Turn」变成「任一骨架节点」，为 [T-147c-ii] 五值收敛铺路（`Turn` 变体在 wire 上消失时 `RetrySubtree` 不再依赖那个名字）。
+- **147e**（动词改名，本批）：`ResumeAction` 的 LLM 失败重试动词改名为 `RetrySubtree`；wire 词 `retry_turn` → `retry_subtree`；后端函数 `process_retry_turn` → `process_retry_subtree`；前端常量 `RESUME_ACTION_RETRY_TURN` → `RESUME_ACTION_RETRY_SUBTREE` <!-- doc-symbol-allow: 历史名——本行整段记录 147e 的改名（`retry_turn`→`retry_subtree`、`RESUME_ACTION_RETRY_TURN`→`RESUME_ACTION_RETRY_SUBTREE`），改名前的名字随改名退役 -->；跨栈 25 站点一次改绿。语义泛化——靶子从「Failed Turn」变成「任一骨架节点」，为 [T-147c-ii] 五值收敛铺路（`Turn` 变体在 wire 上消失时 `RetrySubtree` 不再依赖那个名字）。
 
 ## 收尾
 

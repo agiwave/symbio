@@ -211,6 +211,11 @@ async function baseVersions(ctx, ratchet) {
     if (r.ok && r.output && ratchet.cellsOf(r.output).size > 0) {
       out.push({ ref: alias, text: r.output })
     } else if (r.ok && r.output) {
+      // 基准版本里连这处基线的 envVar 名字都没有 ⇒ 这一处棘轮是那一提交**新立的**，
+      // `sha~1` 正落在引入点上：从来没有「更松的基准」可 relax。属判不了，不是判据失效
+      // （判不了按「跳过」处理，见方法注释）。与「文件在、名字在、却一格都解析不出」
+      // ——真形状脱节——区分开，后者照红。
+      if (ratchet.envVar && !r.output.includes(ratchet.envVar)) continue
       // ⚠️ 基准**取到了**却一格都解析不出 ⇒ 提取函数与这处落点的形状脱节了。
       // 这不是「判不了」，是「判据已经失效」——而两种情况在日志里长得**一模一样**
       // （都显示「跳过」）。混为一谈的后果是：一条棘轮悄悄没人守，而门禁全绿。

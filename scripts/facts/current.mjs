@@ -638,7 +638,7 @@ function capabilityMatrixSection(root, plugins) {
   for (const [plugin, note] of Object.entries(DYNAMIC_TOOLS)) {
     L.push(`> - \`${plugin}\`：${note}。`);
   }
-  L.push("> - `context_compact`：上下文自动压缩**开关打开时**才暴露给模型，静态抽取看不到它；");
+  L.push("> - `context_compact`：**不暴露**——v2 执行路径不把它注入工具清单（理由见 `chat_loop/inputs.rs` 步骤 ③ 前）；它既不在静态抽取里，也不在运行期集合里；");
   L.push("> - 运行时权威来源：`traverse(\"available_tools\")` 广播进 `CapabilityVisitor` 的那份集合。");
   L.push("");
 

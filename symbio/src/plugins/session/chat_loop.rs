@@ -23,7 +23,7 @@
 //! 子模块分工：
 //! - [`state`]    会话上下文 / 请求快照 / 单轮状态 / 闸门结果 / 退出原因 / 编排器
 //! - [`decide`]   轮首判决：经容器 `route` 调 `classify/decide`，把判决回读成枚举
-//! - [`compose`]  判决的执行点：经容器 `route` 调 `compose/compose`，把措辞写进转写
+//! - [`compose`]  判决的执行点：经容器 `route` 调 `compose/wording`，把措辞写进转写
 //! - [`progress`] 中途汇报：轮边界的「该不该说一句」判定（触发权归编排层，措辞权归 `compose`）
 //! - [`inputs`]   收口 ②③：提示词与工具的唯一收集点、压缩的唯一响应点
 //! - [`turn`]     单轮收尾：推理并入 → 工具分发 → 落库 → 流向
@@ -630,9 +630,10 @@ pub async fn run_chat_loop(
         //
         // ## 为什么只在非轮首、且只对有历史的轮次
         //
-        // - `tool_rounds > 0`：轮首的输入在**进入循环之前**就定了（空闲路径由
-        //   `drain_inbox_once` 抽干；`chat/send` 路径由入口落库 + `single_message`）。
-        //   轮首再抽一次是多余的，且会与下面 `single_message` 的去重逻辑纠缠。
+        // - `tool_rounds > 0`：轮首的输入在**进入循环之前**就定了（用户消息由收件箱
+        //   消费者 `drain_inbox_once` 取批，再由 `start_turn` 落库并作为
+        //   `single_message` 带进来）。轮首再抽一次是多余的，且会与下面
+        //   `single_message` 的去重逻辑纠缠。
         // - `load_history`：心跳等无上下文场景从**空**上下文开始，把用户补充折进
         //   一个没有历史的轮次会让模型凭空收到一句话，语义不对——那些轮次留给
         //   下一次正常输入去消费。

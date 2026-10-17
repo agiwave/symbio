@@ -34,7 +34,7 @@
     </div>
 
     <!-- 一次压缩动作：失败给错误条 + 重试；成功给系统说明 + 事实行 -->
-    <div v-else-if="isCompaction" class="notice-compaction">
+    <div v-else-if="isCompaction">
       <MessageErrorBox
         v-if="canRetryCompaction(facets)"
         :text="text"
@@ -48,7 +48,7 @@
     </div>
 
     <!-- 其余折叠叶（思考 / 未知）：Markdown 正文 -->
-    <div v-else class="markdown-body notice-reasoning" v-html="rendered" />
+    <div v-else class="markdown-body" v-html="rendered" />
   </NodeShell>
 </template>
 

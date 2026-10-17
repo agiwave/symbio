@@ -191,8 +191,8 @@ pub enum PluginPayloadWire {
 
 ## AI 会话流式规范
 
-**没有会话专用流协议**：发言 = `vdfs/write(<根>/session/<id>/inbox)`（`chat/send` 是它的
-薄包装），输出 = `kind = "vdfs"` 的变更（消息落在 `<id>/message/<mid>`、运行态落在
+**没有会话专用流协议**：发言 = `vdfs/write(<根>/session/<id>/inbox)`，
+输出 = `kind = "vdfs"` 的变更（消息落在 `<id>/message/<mid>`、运行态落在
 `<id>`），两端都只需既有的 VDFS 能力：
 
 1. **发一条消息**：`vdfs/write(<根>/session/<id>/inbox, text)` —— 写即入队，响应立刻返回；

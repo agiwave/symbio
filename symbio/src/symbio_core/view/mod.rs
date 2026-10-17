@@ -99,7 +99,7 @@ pub fn is_agent_id(id: &str) -> bool {
 /// 2. 会话内的另一方（人）与**未标身份**的事件可见——会话是一条双向线程，
 ///    线程里的话彼此都看得见；
 /// 3. **别的智能体**的发言不可见——第三方私有，不进本主体的 prompt。
-///   「是不是智能体」= [`is_agent_id`]；`person/local` / `vdfs/write` / `system/compactor` 都不是智能体，一律放行。
+///    「是不是智能体」= [`is_agent_id`]；`person/local` / `vdfs/write` / `system/compactor` 都不是智能体，一律放行。
 ///
 /// 平凡值保证：今天的会话是单主体的（所有智能体发言同一 id `session/main`）⇒ 这条
 /// 判定对每一条事件都返回 `true`，视图与接线前**逐字一致**。多主体一出现

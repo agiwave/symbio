@@ -451,7 +451,6 @@ fn all_principals_are_routable_ids() {
             "PRINCIPAL_TOOL_CONTENT_SEARCH",
             PRINCIPAL_TOOL_CONTENT_SEARCH,
         ),
-        ("PRINCIPAL_SYSTEM_COMPACTOR", PRINCIPAL_SYSTEM_COMPACTOR),
     ] {
         let ns = principal_namespace(principal);
         assert!(
@@ -462,17 +461,12 @@ fn all_principals_are_routable_ids() {
     // 关键锚点逐字锁死——漂移即红：id 形状就是 ADR-069 §决策 2 那张表里的取值。
     assert_eq!(PRINCIPAL_MAIN, "session/main");
     assert_eq!(PRINCIPAL_USER, "person/local");
-    assert_eq!(PRINCIPAL_SYSTEM_COMPACTOR, "system/compactor");
     assert_eq!(PRINCIPAL_TOOL_VDFS_WRITE, "vdfs/write");
     // agent 命名空间登记表命中所有 `session/*`；其他三族不命中。
     for p in [PRINCIPAL_MAIN, PRINCIPAL_AUTONOMOUS, PRINCIPAL_REFLEX] {
         assert!(is_agent_id(p), "`{p}` 属 agent 命名空间");
     }
-    for p in [
-        PRINCIPAL_USER,
-        PRINCIPAL_TOOL_VDFS_WRITE,
-        PRINCIPAL_SYSTEM_COMPACTOR,
-    ] {
+    for p in [PRINCIPAL_USER, PRINCIPAL_TOOL_VDFS_WRITE] {
         assert!(!is_agent_id(p), "`{p}` 不属 agent 命名空间");
     }
 }

@@ -68,6 +68,13 @@ pub(crate) async fn settle_reasoning(
 /// **不承担终态收尾**：`fire_stop_hook` 与最终 `persist_messages` 由 [`finish_turn`]
 /// 统一执行（本函数返回 `Finish` 前会把 [`TurnState::last_saved`] 推进到最新，
 /// 使 `finish_turn` 的落库成为 no-op）。
+///
+/// ## 工具分发分支在生产路径上不可达
+///
+/// 工具由 v2 运行器在 `v2_exec::execute_turn` 内部经 `DispatchPort` 跑完，交回的
+/// `TurnOutput.tool_calls` 恒空（`v2_exec` 构造它时走 `Default`）⇒ `tools_done.is_empty()`
+/// 恒成立，本函数只会走「无工具」分支。下面的工具分发保留给直接构造 `TurnResult`
+/// 的测试，**不是**工具的真实执行点（真实时序见 `v2_exec` / `turn_runner` 的模块文档）。
 pub(crate) async fn close_turn(
     orchestrator: &ChatOrchestrator,
     ctx: Arc<dyn PluginInvokeRequest>,
@@ -128,8 +135,11 @@ pub(crate) async fn close_turn(
     // context_compact 不走 CapabilityVisitor 分发：它需要编排器内部的
     // 压缩链路（LLM 摘要 + 上下文替换 + 会话持久化）。
     // 在此拆分：压缩调用就地执行并生成合成工具结果；其余工具正常分发。
-    // 门控：仅当工具压缩开关开启时拦截；开关关闭时工具不暴露，模型幻觉
-    // 调用则归入标准工具链，以"未知路径"错误返回（不执行内部压缩链路）。
+    // 门控：仅当工具压缩开关开启时拦截。
+    //
+    // ⚠️ v2 路径**不把该工具注入工具清单**（见 `inputs.rs` 步骤 ③ 前），因此本段
+    // 只在模型自行说出这个工具名时才命中；出厂默认 `enable_compact_tool = false`，
+    // 连拦截都不会发生。恢复注入之前不要把这个开关当成可用功能。
     let (compact_calls, other_calls): (Vec<_>, Vec<_>) = if req.enable_compact_tool {
         tools_done.into_iter().partition(|tc| {
             tc.name
@@ -279,6 +289,10 @@ pub(crate) async fn close_turn(
     // 级别 1 在 `process_tool_calls_async` 返回时同步清空——工具已全部跑完，
     // 回到闸门时集合为空；级别 2 会改为由每个工具的完成回调逐个移除，
     // 全部移除后才唤醒主循环（不完整不唤醒）。
+    //
+    // ⚠️ 本段在生产路径上不可达（见函数文档「工具分发分支在生产路径上不可达」）：
+    // v2 运行器已把工具跑完，`other_calls` 恒空。保留它是为了测试能直接构造
+    // `TurnResult` 验证 v1 语义，**不要**据此认为工具在这里执行。
     turn.in_flight_tools
         .extend(other_calls.iter().filter_map(|tc| tc.id.clone()));
     let (other_results, other_parent_updates) = process_tool_calls_async(

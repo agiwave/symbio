@@ -573,7 +573,7 @@ impl SessionPlugin {
     /// 两类会话共用 [`PersistentChatSession`]，差异只在存储后端（审计 B1）；
     /// ephemeral 会话的配置取当前值的快照（内存会话不随 `session/config` 变更而变）。
     ///
-    /// 消费方**只有一处**：下方 [`Self::handle_chat_send_oneoff`] 向 chat_ctx 交付
+    /// 消费方**只有一处**：[`Self::start_turn`] 向 chat_ctx 交付
     /// 会话句柄（`SESSION_HANDLE`，交付失败时 model 侧兜底内存会话）。没有对外
     /// `session/open` 路由消费它（对外返回进程内句柄），已退役——进程内句柄不该
     /// 有对外路由。

@@ -175,7 +175,7 @@ async fn report_is_filled_from_the_snapshot_without_any_model_service() {
 ///
 /// 与 `answered_never_yields_empty_text` 同一条性质：空串会让这一轮**彻底沉默**，
 /// 而沉默是这里最坏的失败形态。`tool_rounds = 0` 在编排层不可达（汇报判定要求至少
-/// 走完一轮），但契约的第二个调用方是**网关**（外部客户端可直接调 `compose/compose`），
+/// 走完一轮），但契约的第二个调用方是**网关**（外部客户端可直接调 `compose/wording`），
 /// 那句话在这里必须说得通，而不是渲染出"已完成 0 轮工具调用"。
 #[tokio::test]
 async fn report_never_yields_empty_text() {

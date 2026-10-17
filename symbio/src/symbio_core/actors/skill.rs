@@ -23,7 +23,10 @@ impl SkillCompiler {
             crate::symbio_core::event::Entity::Memory,
             crate::symbio_core::event::Verb::Opened,
             0,
-            "session/main",
+            // 占位 actor 一律走常量，不写字面量：`session/xxx` 形态的裸串会被
+            // plugin-entry-audit 的 E-005 当成路由地址查一遍（ADR-043：名字是数据、
+            // 单点定义）。写方落格前归位，见 `v2_skills::compile`。
+            crate::symbio_core::authz::PRINCIPAL_MAIN,
         )
         .with_produced_by(source_seq) // 溯源 100%：指向源轨迹
         .with_payload(serde_json::json!({

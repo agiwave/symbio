@@ -22,6 +22,8 @@ created: 2026-09-16
 
 主循环 = **前步骤**（请求解析 → 开会话 → `TurnState` → resume）+ **loop**（7 步）+
 **唯一收尾点 `finish_turn`**。循环只能由 `return finish_turn(...)` 离开，没有旁路出口。
+第 4 步把整轮交给 v2 运行器（`v2_exec::execute_turn`）——**工具循环在运行器内部**，
+不在 `close_turn` 里（见 §4.1）。
 
 四个收口点 + 一个状态容器（§2）：
 
@@ -37,35 +39,35 @@ created: 2026-09-16
 
 ## 1. 调用链全景
 
-### 1.1 三层结构
+### 1.1 四层结构
 
 ```text
-① 装配层   handle_chat_send_oneoff                orchestrator/entry.rs
-             解析 session_id / mode / risk / provider
-             用户消息落库 + 自动命名 + agent_id 解析
-             chat_ctx 装配（WORKDIR / SESSION_ID / AGENT_ID / SESSION_HANDLE）
-             collect_capabilities(traverse) → CAPABILITY_VISITOR
-             （系统提示词与工具都在这一步收集；本层**不**拼提示词）
+① 装配层   start_turn                           orchestrator/entry.rs
+             收件箱消费者取批后调进来（或恢复动作直接调）
+             解析 session_id / mode / risk / provider（一次会话读取供 workdir / agent_id 共用）
+             用户消息落库（Carrier::Runner）+ 自动命名 + chat_ctx 装配（含 SESSION_HANDLE）
+             collect_capabilities(traverse) → CAPABILITY_VISITOR（本层**不**拼提示词）
              构造 model_chat::Request → run_chat_loop_task
-② 宿主层   run_chat_loop_task                     orchestrator/consume.rs
-             WorkingGuard（panic 兜底）/ StopSignal / AbortGuard
-             provider 解析 + RATE_LIMITER
-             EventSink::direct(TranscriptSink) + AbortSignal::new()
-             spawn → ③（子任务）
+② 宿主层   run_chat_loop_task                   orchestrator/consume.rs
+             WorkingGuard / StopSignal / AbortGuard；provider 解析 + RATE_LIMITER
+             ExecEventSink::direct(TranscriptSink) + ExecAbortSignal::new() → spawn ③
              select! 三臂：任务结束 / 1800s 看门狗 / 状态被接管（见 §6）
-               → 收尾：定稿在途 / persist_failure / 结局字段
-③ 循环层   run_chat_loop                          chat_loop.rs
+③ 循环层   run_chat_loop                        chat_loop.rs
              + gate_turn / finish_turn             chat_loop.rs
-             + close_turn / settle_reasoning       chat_loop/turn.rs
              + prepare_turn_inputs / apply_compaction   chat_loop/inputs.rs
-             + auto_compress_process / compress_with_snapshot_core
-               / run_context_compact               context/pipeline.rs
+             + settle_reasoning / close_turn       chat_loop/turn.rs
+             + auto_compress_process / run_context_compact
+               / compress_with_snapshot_core       context/pipeline.rs
              + persist_messages / open_chat_session / emit_streaming_start
                / fire_*_hook                        chat_loop/io.rs
+④ 单轮执行层 v2_exec::execute_turn              v2_exec.rs
+             + TurnRunner::run_with_tools          turn_runner.rs（工具循环在这里）
+             + SessionDispatchPort::dispatch       v2_tools.rs
              + process_tool_calls_async            tools/tool_executor.rs
 ```
 
-**职责边界**：③ 不持有终态落库职责——终态唯一落库点在 ② 的消费循环。后步骤**不存在**：
+**职责边界**：③ 不持有终态落库职责——终态唯一落库点在 ② 的消费循环。④ 只负责**这一轮**
+的事实与产物，不决定会话接下来跑不跑（那是 ③ 的 `TurnFlow`）。后步骤**不存在**：
 循环只能由 `return` 离开，所有出口都经 `finish_turn`。
 
 ### 1.2 主循环七步
@@ -76,7 +78,7 @@ created: 2026-09-16
 |---|---|
 | P1 | 解析 `model_chat::Request`，构造请求级快照 `TurnRequest::new(&req)`（默认值唯一真源是 `SessionConfig`） |
 | P2 | `open_chat_session`（取 `SESSION_HANDLE`，缺则回退内存会话） |
-| P3 | `TurnState` 初始化（含 `abort: AbortSignal`）+ `SessionContext` 构造 |
+| P3 | `TurnState` 初始化（含 `abort: ExecAbortSignal`）+ `SessionContext` 构造 |
 | P4 | **resume 处理**（`process_resume`）→ `Continue` / `Done` / `Err`，`Done`/`Err` 经 `finish_turn` 提前收尾 |
 
 **循环体**（7 步）
@@ -86,7 +88,7 @@ created: 2026-09-16
 | 1 | 加载本轮上下文 | `get_context_messages` 轮次窗口；首轮追加 `single_message` + `UserPromptSubmit` 钩子；推进 `last_saved` | 加载 |
 | 2 | `gate_turn` | 启动条件 + 退出条件（收口 ①）；`Exit` → `finish_turn` | 判定 |
 | 3 | `prepare_turn_inputs` | 系统提示词 + 工具（同函数、同时刻）+ `overhead_tokens` + `apply_compaction` + `build_request_view`（收口 ②③） | 准备 + 压缩 |
-| 4 | abort 检查 + `execute_turn` | Turn 创建后的中止检查点；`ExecEnv::new(sink, abort)` 一次给全出口与中止；`provider.execute_turn` | 推理 |
+| 4 | `v2_exec::execute_turn` | 整轮交给 v2 运行器：事实原生入格、prompt 从转写出、工具经 `DispatchPort` 分发；中止检查点已下沉到运行器内部（用户格已落、首请求未发也落中止收束格） | 推理 + 工具 |
 | 5 | `settle_reasoning` | 推理产物定稿（子节点状态）→ `feedback_estimate` 校准 → `into_messages` 并入 `context.messages` | 收尾 |
 | 6 | `close_turn` | 截断续写 / 主动压缩拦截 / 工具分发 / 父节点状态落库 / 停等判定（收口 ④ 的判定分支） | 收尾 + 判定 |
 | 7 | `finalize_turn_root` | 封根 Turn——子树收敛之后发出**即将落库的那条节点** | 收尾 |
@@ -96,11 +98,15 @@ created: 2026-09-16
 | 分支 | 动作 | 返回 |
 |---|---|---|
 | 无工具 | `finish == length` 且无工具调用 → `length` 自动续写（≤ `MAX_CONTINUE_ROUNDS`）；续写耗尽 / 工具参数截断 → 会话级告警 | `NextTurn` / `Finish(Completed)` |
-| 有工具 | `context_compact` 拦截分流（主动压缩） | — |
-| 有工具 | `process_tool_calls_async`（**串行阻塞**，见 §4） | — |
+| 无工具 | `context_compact` 拦截分流（工具压缩的内核；v2 路径不注入该工具，见 `inputs.rs` 步骤 ③ 前） | — |
 | 有工具 | 父节点终态快照同步进内存镜像（整条替换，随 persist 落库） | — |
 | 有工具 | `needs_user_action` → 停等 | `Finish(Completed)` |
 | 有工具 | `tool_rounds += 1` | `NextTurn` |
+
+> **「有工具」两行在当前执行路径上不可达**：v2 运行器把工具跑在 `execute_turn` 内部，
+> 交回的 `TurnOutput.tool_calls` 恒空，`close_turn` 收到 `tools_done.is_empty()` 就走
+> 「无工具」分支。该分支保留给直接构造 `TurnResult` 的测试，不代表生产时序——
+> 工具的真实执行模型见 §4.1。
 
 ### 1.3 职责边界（收口依据）
 
@@ -111,6 +117,8 @@ created: 2026-09-16
 - **提示词与工具**必须同机制、同时机收集：两者都经 `CapabilityVisitor` 注册、经 `traverse`
   汇集到同一个 visitor 的「会话输入」，来源与生命周期一致。
 - **启动条件**是显式判据（`TurnState::in_flight_tools`），不是「同步阻塞的隐式结果」。
+- **工具执行**归第 4 步的 v2 运行器（`execute_turn` 内部经 `DispatchPort` 分发）；
+  `close_turn` 只做「本轮结算 + 下一步判定」，不承担工具执行（见 §4.1）。
 
 ---
 
@@ -160,7 +168,7 @@ fn gate_turn(req: &TurnRequest, turn: &TurnState) -> Gate
 struct TurnInputs {
     root_id: String,                    // Turn 根节点 id（本步内创建）
     system_prompt: String,              // resolve_system_prompt 唯一真源
-    tools: Vec<CapabilityMeta>,         // 含条件注入的 context_compact
+    tools: Vec<CapabilityMeta>,         // 本轮到模型的工具清单（v2 路径不含 context_compact）
     request_view: Vec<ChatNode>,     // build_request_view 产物（不落库）
 }
 
@@ -168,7 +176,7 @@ async fn prepare_turn_inputs(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn PluginInvokeRequest>,
     context: &mut SessionContext,
-    sink: &EventSink,
+    sink: &ExecEventSink,
     turn: &mut TurnState,
     req: &TurnRequest,
 ) -> Result<TurnInputs, TurnExit>;
@@ -194,7 +202,6 @@ async fn apply_compaction(
     orchestrator: &ChatOrchestrator,
     ctx: &Arc<dyn PluginInvokeRequest>,
     context: &mut SessionContext,
-    sink: &EventSink,
     turn: &mut TurnState,
     req: &TurnRequest,
     overhead_tokens: usize,
@@ -238,7 +245,7 @@ enum TurnExit {
 async fn finish_turn(
     orch: &ChatOrchestrator,
     context: &SessionContext,
-    sink: &EventSink,
+    sink: &ExecEventSink,
     turn: &TurnState,
     exit: TurnExit,
 ) -> Result<(), PluginError>;
@@ -254,7 +261,7 @@ async fn finish_turn(
 
 ```rust
 struct TurnState {
-    abort: AbortSignal,              // 用户中止信号（推理与工具共享同一份）
+    abort: ExecAbortSignal,              // 用户中止信号（推理与工具共享同一份）
     tool_rounds: usize,              // 已完成的工具轮次（跨轮累加）
     continuation_count: u32,         // 长度截断自动续写次数（跨轮累加）
     nudged_this_request: bool,       // 水位提醒一次性标记
@@ -271,10 +278,10 @@ struct TurnState {
 
 ```rust
 pub async fn run_chat_loop(
-    orchestrator: &ChatOrchestrator,
+    orchestrator: Arc<ChatOrchestrator>,
     ctx: Arc<dyn PluginInvokeRequest>,
-    sink: EventSink,          // 事件唯一出口（见 §6）
-    abort: AbortSignal,       // 中止唯一入口（见 §6）
+    sink: ExecEventSink,        // 事件唯一出口（见 §6）
+    abort: ExecAbortSignal,     // 中止唯一入口（见 §6）
 ) -> Result<(), PluginError> {
     // ── 前步骤 ①：请求解析与请求级配置快照 ──────────────────────────────
     let mut req: model_chat::Request = ctx.payload()?;
@@ -284,9 +291,12 @@ pub async fn run_chat_loop(
     let session = open_chat_session(&ctx).await;
 
     // ── 前步骤 ③：轮次状态 + 上下文容器 ─────────────────────────────────
-    let mut turn = TurnState { abort: abort.clone(), ..Default::default() };
+    //   静默时钟的起点 = 本请求开始；`consolidated` 是本轮压缩的寄存位。
+    let mut turn = TurnState { abort: abort.clone(), last_user_facing_at: clock_now_ms(),
+                               ..Default::default() };
     let mut single_message = req.single_message.take();
-    let mut context = SessionContext { messages: Vec::new(), session };
+    let mut context = SessionContext { messages: Vec::new(), session,
+        principal: request_principal(ctx.as_ref()), consolidated: None };
 
     // ── 前步骤 ④：resume（一次性，可提前收尾）───────────────────────────
     if let Some(tr) = req.resume.take() {
@@ -320,21 +330,17 @@ pub async fn run_chat_loop(
             Err(exit)        => return finish_turn(orch, &context, &sink, &turn, exit).await,
         };
 
-        // 步骤 4 · 推理（Turn 创建后的中止检查点 + 唯一 LLM 发起处）
-        if turn.abort.is_aborted() {
-            return finish_turn(orch, &context, &sink, &turn, TurnExit::Aborted).await;
-        }
-        let env = ExecEnv::new(sink.clone(), turn.abort.clone());
-        let result = orch.provider.execute_turn(&inputs.system_prompt, &inputs.request_view,
-                                                &inputs.tools, &inputs.root_id, &env).await;
-        let out = match result {
-            Err(RetryWithoutContextId) => { /* 清 response_id + 移除半截 Streaming */ continue; }
-            Err(Aborted)               => return finish_turn(…, TurnExit::Aborted).await,
-            Err(e)                     => return finish_turn(…, TurnExit::Failed(e)).await,
-            Ok(out)                    => out,
+        // 步骤 4 · 推理 + 工具（整轮交给 v2 运行器；中止检查点在运行器内部）
+        //   V2Turn 收齐：会话 / provider / 父插件 / 目录 / 提示词 / 中止 / 根 id / 出口 /
+        //   用户文本与节点 id / 窗口 / 工具 / 恢复锚点 / 记忆与技能 / 前缀 / 压缩 / 注入。
+        let out = match super::v2_exec::execute_turn(super::v2_exec::V2Turn { … }).await {
+            Ok(res) => { context.messages.extend(res.messages); res.output }  // 工具轮产物并入镜像
+            Err(PluginError::Aborted { partial }) =>
+                return finish_turn(orch, &context, &sink, &turn, TurnExit::Aborted(partial)).await,
+            Err(e) => return finish_turn(orch, &context, &sink, &turn, TurnExit::Failed(e)).await,
         };
         if turn.abort.is_aborted() {
-            return finish_turn(orch, &context, &sink, &turn, TurnExit::Aborted).await;
+            return finish_turn(orch, &context, &sink, &turn, TurnExit::Aborted(vec![])).await;
         }
 
         // 步骤 5 · 推理收尾（定格子节点 → 校准估算 → 并入上下文）
@@ -361,14 +367,34 @@ pub async fn run_chat_loop(
 
 ## 4. 工具执行与启动条件
 
-### 4.1 当前执行模型：串行、单点
+### 4.1 当前执行模型：运行器内部的串行工具循环
 
-`process_tool_calls_async` 在 `close_turn` 内**顺序 `await`** 每个工具
-（`for tc in tool_calls`）。本批工具全部跑完才回到循环，因此回到 `gate_turn` 时
+工具在 **`execute_turn` 内部**执行，不在 `close_turn` 里：
+
+```text
+execute_turn
+  └─ TurnRunner::run_with_tools(store, llm, tok, input, sink, tools, dispatch)
+       ├─ 落 u-{turn}（opened）
+       ├─ loop:
+       │    ├─ generate_turn（adapter → provider → SSE → 流式帧）
+       │    ├─ 无 tool_calls ⇒ 落 f-{turn}（closed）并返回
+       │    ├─ 有 tool_calls ⇒ dispatch.dispatch(&turn)
+       │    │     └─ process_tool_calls_async：**顺序 await** 每个工具
+       │    │           └─ execute_tool_async → 能力表 invoke / 容器 route
+       │    ├─ 每条结果落 a-{turn}-{n}；待用户则落 p-{turn}-{n} 并返回
+       │    └─ 交换累加进 prompt（结构化 tool 消息）→ 下一轮
+       └─ 返回 TurnOutcome（text / usage / finish / aborted / awaits_user）
+```
+
+本批工具全部跑完才回到 `generate_turn`，因此 `chat_loop` 回到 `gate_turn` 时
 `TurnState::in_flight_tools` 恒为空。
 
 `in_flight_tools` 仍作为**启动条件的权威判据**存在（§2.1）：`WaitForTools` 分支在当前模型下
 恒不命中，语义上却已成立。
+
+`close_turn` 里那段 `process_tool_calls_async` 是**不可达的保留路径**：v2 运行器把工具
+跑在上面那条循环里，交回的 `TurnOutput.tool_calls` 恒空。它由直接构造 `TurnResult`
+的测试覆盖，不代表生产时序——读代码时不要把它当成工具的真实执行点。
 
 ### 4.2 必须保留的语义
 
@@ -376,7 +402,7 @@ pub async fn run_chat_loop(
    （`tools/tool_executor.rs`）——顺序语义；
 2. `record_protocol_failure` 为 id / name 非法的调用合成失败结果，
    保证「没有悬空 ToolCall」这一不变式；
-3. 工具执行的超时判据是**出口的发射计数**（`EventSinkProgress`，挂在出口上——
+3. 工具执行的超时判据是**出口的发射计数**（`ExecEventSinkProgress`，挂在出口上——
    出口是「工具还活着」的唯一证据源，因为工具唯一的出方向动作就是 `emit`）：
 
    ```rust
@@ -418,7 +444,7 @@ pub async fn run_chat_loop(
 
 ## 6. 执行期出口 / 信号双原语
 
-> 本节描述**宿主层与执行层之间的协议**：`EventSink`（出）与 `AbortSignal`（入）
+> 本节描述**宿主层与执行层之间的协议**：`ExecEventSink`（出）与 `ExecAbortSignal`（入）
 > 是两个语义单一的原语；`PluginChannel` 只作**纯跨进程传输**，不承担执行期协议。
 > 决策与理由见 [`docs/010-adr/020.md`](../../../../../docs/010-adr/020.md "ADR-020")。
 
@@ -426,13 +452,13 @@ pub async fn run_chat_loop(
 
 | 原语 | 方向 | 形状 | 位置 |
 |---|---|---|---|
-| `EventSink` | 出 | `Direct(Arc<dyn TranscriptWriter>)` \| `Null` | `symbio_core/exec/mod.rs` |
-| `AbortSignal` | 入 | `Arc<AtomicBool>` + `CancellationToken` 合一 | `symbio_core/exec/mod.rs` |
+| `ExecEventSink` | 出 | `Direct(Arc<dyn TranscriptWriter>)` \| `Null` | `symbio_core/exec/mod.rs` |
+| `ExecAbortSignal` | 入 | `Arc<AtomicBool>` + `CancellationToken` 合一 | `symbio_core/exec/mod.rs` |
 
-- **`EventSink::Direct`** 直连转写唯一写入点（`TranscriptSink` → `Transcript::apply`），
-  进程内**零 serde**；**`EventSink::Null`** 是「本次调用不产生可见事件」的**类型级**表达
+- **`ExecEventSink::Direct`** 直连转写唯一写入点（`TranscriptSink` → `Transcript::apply`），
+  进程内**零 serde**；**`ExecEventSink::Null`** 是「本次调用不产生可见事件」的**类型级**表达
   （上下文压缩、`resume` 重跑工具用它）。
-- **`AbortSignal::abort()`** 是唯一置位入口，置位即唤醒（`CancellationToken`），因此**没有
+- **`ExecAbortSignal::abort()`** 是唯一置位入口，置位即唤醒（`CancellationToken`），因此**没有
   轮询**；`PluginChannel` 退回**纯跨进程传输**（前端实时面用），不承担执行期协议。
 
 ### 6.2 执行期链路
@@ -453,13 +479,13 @@ parse_sse_stream → sink.apply(message) → TranscriptSink → Transcript::appl
 - 「中止不是失败」：会话结局是 `aborted`（不是 `completed`），在途根 Turn 定稿 `Aborted`
   （重试入口不消失）。
 - `handle_abort` 的 3s 兜底判据（登记变 `None`）与语义保留。
-- 工具的事件出口**已收敛到 `EventSink`**（§7 / §8）：`shell` / `agent_run` / `ask_user` / 交互审批都写同一个出口，`execute_tool_async` 不再有流式分支、不再把帧解回来；`PluginPayload::Session` 只剩**跨进程**用途（`event_bus/subscribe`、vdfs 网关、CLI / 前端客户端），与执行期无关。
+- 工具的事件出口**已收敛到 `ExecEventSink`**（§7 / §8）：`shell` / `agent_run` / `ask_user` / 交互审批都写同一个出口，`execute_tool_async` 不再有流式分支、不再把帧解回来；`PluginPayload::Session` 只剩**跨进程**用途（`event_bus/subscribe`、vdfs 网关、CLI / 前端客户端），与执行期无关。
 
 ---
 
 ## 7. 工具侧收敛到同一出口
 
-> `shell` / `agent_run` / `ask_user` / 交互审批都接到同一个出口（`EventSink`）上，而不是各自返回 `PluginPayload::Session` 再由 `execute_tool_async` 把帧解回来。
+> `shell` / `agent_run` / `ask_user` / 交互审批都接到同一个出口（`ExecEventSink`）上，而不是各自返回 `PluginPayload::Session` 再由 `execute_tool_async` 把帧解回来。
 
 ### 7.1 工具怎么拿到出口
 
@@ -508,7 +534,7 @@ resume 只删得掉一个）；`PendingPrompt` **没有 id 字段**，那类 bug
 
 ## 8. 流式工具接上出口
 
-> `shell` 与 `agent_run` 的**流式增量**也走 `EventSink`；`execute_tool_async`
+> `shell` 与 `agent_run` 的**流式增量**也走 `ExecEventSink`；`execute_tool_async`
 > 不转发节点。
 
 ### 8.1 两条流式工具
@@ -567,7 +593,7 @@ capability_invoke(cap, ctx)                 ← 唯一「拆信封」点（§9�
 ```
 
 `PluginPayload::Session` 剩下的用途**只有跨进程**（`event_bus/subscribe`、vdfs 网关、
-CLI / 前端客户端）；执行期走 `EventSink` 进程内直连，与之无关。前端实时面也只有一条通道：
+CLI / 前端客户端）；执行期走 `ExecEventSink` 进程内直连，与之无关。前端实时面也只有一条通道：
 `event_bus` 的 `kind = "vdfs"` 频道（信封 `{path, data?}`）；**不存在** `session/stream`
 这类独立转写流，实时帧因此没有帧序号，也不做缺口检测。
 
@@ -582,12 +608,17 @@ CLI / 前端客户端）；执行期走 `EventSink` 进程内直连，与之无�
 的**出 / 入两个方向**，两处共用：
 
 ```text
-Capability::execute(args, env, ctx)      -> Result<Value, PluginError>
-ModelProvider::execute_turn(inputs, env) -> Result<TurnOutput, PluginError>
+Capability::execute(args, env, ctx)
+    -> Result<Value, PluginError>
+
+ModelProvider::execute_turn(system_prompt, messages, tools, root_id, env)
+    -> Result<TurnOutput, PluginError>
 ```
 
-决策与理由见 [`docs/010-adr/021.md`](../../../../../docs/010-adr/021.md "ADR-021")；
-差别只在 `ctx`——工具**被路由、被注册**故需信封，模型执行不被路由故没有，不强行抹平。
+两者都把「出口 + 中止」收在同一个 `env` 形参里（不是两个平铺参数，因此不会出现
+「给了出口忘了给中止」）；差别只在 `ctx`——工具**被路由、被注册**故需信封，
+模型执行不被路由故没有，不强行抹平。决策与理由见
+[`docs/010-adr/021.md`](../../../../../docs/010-adr/021.md "ADR-021")。
 
 ### 9.2 唯一「拆信封」的地方
 
@@ -608,7 +639,7 @@ payload）⇒ `Value::Null`，仍由工具自己给出「缺少必填参数」�
 - 工具仍然**不构造节点身份**：`failure_kind` + `prompt` 载荷契约不变，节点归
   `tool_executor`（§7.2）。
 - 压缩路径仍然**出口静默**：`run_compression_llm` 收 `env`，调用方给
-  `ExecEnv::new(EventSink::silent(), abort)`——「内部请求不产生可见事件」是类型上的选择。
+  `ExecEnv::new(ExecEventSink::silent(), abort)`——「内部请求不产生可见事件」是类型上的选择。
 
 ---
 
@@ -666,88 +697,77 @@ gemini           ["candidates","content","parts","text"]                -> 内�
 
 - **前缀截断去重机制不动**：`LineProgress` 按字段分别记账，完整行到达时按已发长度截断。
   增量文本「恰好是完整行文本的前缀」这条不变量**由协议层用同一套转义规则**保证。
-- **`PARTIAL_LINE_MIN_BYTES = 256` 不动**：短尾巴等下一块补齐即可。
-- **增量路径不产出** `Finish` / `Usage` / `Error` / `ResponseId`：半截 JSON 里这些
-  字段的值不可信，它们只走完整行（由 `LineProgress::record` 丢弃非增量事件兜底）。
+- **`PARTIAL_LINE_MIN_BYTES = 256` 不动**：短尾巴等下一块补齐即可。**增量路径不产出**
+  `Finish` / `Usage` / `Error` / `ResponseId`：半截 JSON 里这些字段的值不可信，它们只走完整行
+  （由 `LineProgress::record` 丢弃非增量事件兜底）。
 - **`[DONE]`、注释行、非 data 行不吐任何事件**（扫描器找不到 JSON 起点）。
 - **协议判定「宁可漏，不可错」**：全等匹配、下标未知就放弃本次增量。错配的代价是
   前端多出内容且完整行截断会吃正文；不匹配的代价只是失去增量。
 
 ### 10.4 已知取舍
 
-- 扫描器对**非法 JSON 转义**比 `serde_json` 宽松（分歧只在非法输入上，此时完整行
-  路径本就不产出事件）；`output_index` 出现在 `delta` **之后**时本次增量被放弃
-  （真实报文里它在前）；Gemini 的 `[{...},{...}]` 挤在一行非真实形状，增量路径不产出。
+- 扫描器对**非法 JSON 转义**比 `serde_json` 宽松（分歧只在非法输入上，此时完整行路径本就不产出事件）；
+  `output_index` 出现在 `delta` **之后**时本次增量被放弃（真实报文里它在前）；Gemini 的 `[{...},{...}]` 挤在一行非真实形状，增量路径不产出。
 
 ---
 
 ## 11. 工具调用协议封闭
 
-> 工具名怎么发出去、怎么认回来，以及工具结果怎么读。三件事，共同点：它们都是
-> 跨插件 / 跨层的**约定**，需要写成契约。名字归属的准入规则见
+> 工具名怎么发出去、怎么认回来，以及工具结果怎么读。三件事的共同点：它们都是跨插件 / 跨层的
+> **约定**，需要写成契约。名字归属的准入规则见
 > [`docs/010-adr/023.md`](../../../../../docs/010-adr/023.md "ADR-023")。
 
 ### 11.1 名字的线上形态：投影 + 查表，不反演
 
-今天注册的能力名（`vdfs_read` / `shell` / `ask_user` / `todo_write` /
-`codebase_search` / `web_search` / `http_request` / `heartbeat` / `agent_run` /
-`mcp.<server>.<tool>`（带**点**）/ `agent_<safe_id>_<tool>`）里，**没有一个含 `/`**，
-而真正违反协议字符集的是 MCP 的 `.`（OpenAI / Anthropic 只接受 `[A-Za-z0-9_-]`）。
-
-因此**名字的线上形态由一对具名函数定义**（`symbio_core/capability/tool_name.rs`）：
+今天注册的能力名（`vdfs_read` / `shell` / `ask_user` / `todo_write` / `codebase_search` / `web_search` /
+`http_request` / `heartbeat` / `agent_run` / `mcp.<server>.<tool>`（带**点**）/ `agent_<safe_id>_<tool>`）里
+**没有一个含 `/`**，真正违反协议字符集的是 MCP 的 `.`（OpenAI / Anthropic 只接受 `[A-Za-z0-9_-]`）。
+因此名字的线上形态由**一对具名函数**定义（`symbio_core/capability/tool_name.rs`）——`capability_to_wire`
+（`model` 出）与 `resolve`（`session` 入）是同一份契约的两半，两个插件互相不可见，core 是唯一共同可见处：
 
 ```rust
 pub fn capability_to_wire(canonical: &str) -> String            // 字符集之外的字符一律 → "__"
 pub fn resolve<'a>(wire: &str, known: impl IntoIterator<Item = &'a str>) -> Option<&'a str>
 ```
 
-- 出方向：**一个具名函数**，字符集定义只有一份；
-- 入方向：**查注册表**（`visitor.list_capability()` 的名字集合），不反演。**字面名优先**——
-  `mcp__fs__read` 既可能是 `mcp.fs.read` 的线上形态、也可能本身就是这个名字，只有集合能回答；
-- 解析失败 → **不猜**，按原样交给路由，由它给出诚实的 `NotFound`（反演猜错会调起**另一个工具**）；
-- 命中判据是「解析成功」而不是「按线上名查表」——带非法字符的名字按线上名永远查不到，
-  会白走一遍 `route` 回落。
-
-**为什么在 core**：`capability_to_wire`（`model` 出）与 `resolve`（`session` 入）是同一份契约的两半，
-两个插件互相不可见，core 是唯一共同可见处——准入规则见
-[`docs/010-adr/023.md`](../../../../../docs/010-adr/023.md "ADR-023")。
+- 出方向：**一个具名函数**，字符集定义只有一份；入方向：**查注册表**
+  （`visitor.list_capability()` 的名字集合），不反演。**字面名优先**——`mcp__fs__read` 既可能是
+  `mcp.fs.read` 的线上形态、也可能本身就是这个名字，只有集合能回答；
+- 解析失败 → **不猜**，按原样交给路由，由它给出诚实的 `NotFound`（反演猜错会调起**另一个工具**）。
+  命中判据是「解析成功」而不是「按线上名查表」——带非法字符的名字按线上名永远查不到。
 
 ### 11.2 工具结果：顺序即约定
 
-`extract_result` **留在 `session/tools/tool_executor.rs`**（唯一消费方是它自己），
-判定顺序是**契约**（模块文档的表 + 两个字段名常量 + 用例钉住）：
+`extract_result` **留在 `session/tools/tool_executor.rs`**（唯一消费方是它自己），判定顺序是
+**契约**（模块文档的表 + 两个字段名常量 + 用例钉住）：
 
 ```text
 content 是字符串 → output 是字符串 → success 是布尔 → 顶层是字符串 → 整包 JSON
 ```
 
-- 「**先命中者胜**」而不是「取第一个存在的键」：`{"content":[1,2],"output":"x"}`
-  里 `content` 存在但不是字符串 ⇒ 继续走到 `output`；按「存在即取」会把数组原样丢给模型。
+- 「**先命中者胜**」而不是「取第一个存在的键」：`{"content":[1,2],"output":"x"}` 里 `content`
+  存在但不是字符串 ⇒ 继续走到 `output`；按「存在即取」会把数组原样丢给模型。
 - 「结果文本本就没有契约」（工具返回任意 JSON，模型只消费一段文本）——这层适配是**显式**的。
-- **控制流不得建立在这里**：要判「等待用户动作」用 `symbio_core::failure_kind`
-  这个约定字段，不猜形状（§7.3）。
+- **控制流不得建立在这里**：要判「等待用户动作」用 `symbio_core::failure_kind` 这个约定字段，不猜形状（§7.3）。
 
 ### 11.3 审批闸门：判两次，写一次
 
-两条入口都真实存在（`route` 是注册表未命中的回落路径，`wrapper` 是注册表路径），故闸门
-两处把守，但**判定逻辑**收成一个 `approval_gate`（两处传的都是工具真实描述，文案一致）。
+两条入口都真实存在（`route` 是注册表未命中的回落路径，`wrapper` 是注册表路径），故闸门两处把守，
+但**判定逻辑**收成一个 `approval_gate`（两处传的都是工具真实描述，文案一致）。
 
 ### 11.4 MCP 侧的两条协议契约
 
-- **协议字段名大小写**：`mcp/types.rs` 的协议类型带
-  `#[serde(rename_all = "camelCase")]` 映射（MCP 规范用 camelCase）。缺失会让
-  `initialize` 响应解析失败 ⇒ 该 server 的工具一个都不注册。
-- **工具结果按载荷解析**：`McpToolCallResponse` 按规范载荷
-  （`content` / `structuredContent` / `isError`）建模，不对 JSON-RPC 信封建模——
-  否则全字段可选会「解析成功」并返回 `Value::Null`，正文永远渲染成字符串 `null`
-  且不报错。`stdio.rs` / `http.rs` 只借它读 `isError`，其余原样返回；
-  `capability.rs::execute` 把内容块压平成 `{"content": <文本>}` 再交出——
-  **跨插件约定保持最窄**，会话层不需要认识 MCP 的「内容块数组」形状。
+- **协议字段名大小写**：`mcp/types.rs` 的协议类型带 `#[serde(rename_all = "camelCase")]`
+  映射（MCP 规范用 camelCase）。缺失会让 `initialize` 响应解析失败 ⇒ 该 server 的工具一个都不注册。
+- **工具结果按载荷解析**：`McpToolCallResponse` 按规范载荷（`content` / `structuredContent` /
+  `isError`）建模，不对 JSON-RPC 信封建模——否则全字段可选会「解析成功」并返回 `Value::Null`，
+  正文永远渲染成字符串 `null` 且不报错。`stdio.rs` / `http.rs` 只借它读 `isError`，其余原样返回；
+  `capability.rs::execute` 把内容块压平成 `{"content": <文本>}` 再交出——**跨插件约定保持最窄**，
+  会话层不需要认识 MCP 的「内容块数组」形状。
 
 ### 11.5 已知取舍
 
-- **Gemini `functionResponse.name` 填的是 `tool_call_id`**（规范要求函数名；id 不是能力名，
-  做线上形态换算无意义）。
+- **Gemini `functionResponse.name` 填的是 `tool_call_id`**（规范要求函数名；id 不是能力名，做线上形态换算无意义）。
 - **MCP 工具名在前端显示为线上形态 `mcp__server__tool`**；前端不按 `mcp.` 前缀判断，只影响显示。
 - **线上名投影不单射**（`a.b` 与 `a__b` 都得 `a__b`），由 `resolve` 的字面优先消解。
 
@@ -755,53 +775,33 @@ content 是字符串 → output 是字符串 → success 是布尔 → 顶层是
 
 ## 12. 发送方向的会话读取合并
 
-> 本节覆盖 §1.1 的 **① 装配层**（`handle_chat_send_oneoff`）。
+> 本节覆盖 §1.1 的 **① 装配层**（`start_turn`）。
 
-### 12.1 会话读取点
+### 12.1 读取点与请求级快照
 
-一次无工具调用的请求里，`load_session` 被触发的读取点：
+`SessionSnapshot`（`orchestrator/entry.rs`）让 `resolve_session_params` 带上**本请求唯一一次**
+元数据读取，后续所有元数据回退（mode / risk_level / provider_id / workdir / agent_id）都从这一份取：
+分四次读不只是多 I/O，还会取到被并发改动改写过的不同版本（workdir 取自改动前、agent_id 取自改动后）。
 
 | 读取点 | 读什么 | 次数 |
 |---|---|---|
-| `resolve_session_params` | `metadata` 的 mode / risk_level / provider_id | 1 |
-| workdir 解析 | `metadata.workdir` | 1（`ctx[WORKDIR]` 缺失时） |
-| `agent_id` 解析 | `metadata.agent_id` | 1 |
-| `ensure_auto_title` | `metadata.title` + `messages` | 1 |
-| `append_messages`（用户消息落库） | `messages`（读-改-写，必需） | 1 |
+| `resolve_session_params` | `metadata`（mode / risk_level / provider_id / workdir / agent_id） | 1（唯一一次元数据读） |
+| `ensure_auto_title` | 快照已有标题 ⇒ 整趟跳过；否则读 `messages` 派生标题 | 0 / 1 |
+| `append_messages` / `persist_messages` | `messages`（读-改-写，必需） | 各 1 |
 | `get_context_messages`（每轮） | `messages`（必需） | 1 |
-| `persist_messages`（收尾落库） | `messages`（读-改-写，必需） | 1 |
 
-前四个读的是**同一份元数据**，却各触发一次 `get_or_create_session`，而每次都把 **meta 与
-消息两个文件整份读出**——即使调用方只需要 `metadata` 里的一个字符串。
+### 12.2 为什么安全（等价性）
 
-### 12.2 请求级会话快照
+上述字段在本请求内**不会被本请求改写**（`append_messages` 只改 `messages`，`ensure_auto_title`
+只写 `metadata.title`），故派发前读一次与派发内读一次等价。`has_title` 的判据与
+`ensure_auto_title` 内部的提前返回**逐字对齐**（`!s.trim().is_empty()`），由用例
+`has_title_matches_the_ensure_auto_title_criterion` 钉住——判错即「快照说已有标题 → 跳过 →
+实际从未命名」的静默丢命名。
 
-`SessionSnapshot`（`orchestrator/entry.rs`）：`resolve_session_params` 的返回值带上
-**本请求唯一一次**会话读取，后面所有元数据回退都从这一份读。
+### 12.3 读取次数
 
-- `workdir`：只从 `params.meta_str("workdir")` 取，不另读；
-- `agent_id`：**提前到派发前**解析（原在派发任务内），从同一份快照取；
-- `ensure_auto_title`：快照里**已有标题**就整趟跳过（该函数的常见分支就是那次读取）。
-
-### 12.3 为什么安全（等价性）
-
-三个字段在本请求内**不会被本请求改写**（`append_messages` 只改 `messages`，
-`ensure_auto_title` 只写 `metadata.title`），故派发前读一次与派发内读一次等价；共用一份
-快照也比读三次更一致（分三次读可能取到被并发改动改写过的不同版本）。
-`has_title` 的判据与 `ensure_auto_title` 内部的提前返回**逐字对齐**（`!s.trim().is_empty()`），
-由用例 `has_title_matches_the_ensure_auto_title_criterion` 钉住——判错即「快照说已有
-标题 → 跳过 → 实际从未命名」的静默丢命名。
-
-### 12.4 会话读取次数
-
-| | 新建会话 | 已有标题的会话 |
-|---|---|---|
-| `load_session` 次数 | **6** | **5** |
-
-- 已省：`agent_id` 读取（两种场景）、已有标题时的 `ensure_auto_title`、`ctx[WORKDIR]`
-  缺失时的 workdir。
-- **没省**：新建会话上 `ensure_auto_title` 仍要读一次（需用刚落库的用户消息派生标题）。
-- **不该省**：三处 `messages` 读取（两处写路径读-改-写、一处每轮上下文）须各取最新值。
-- **不需要**：落库回包（把权威 `seq` 交回实时面，见
-  [`022-vdfs-session-messages.md`](022-vdfs-session-messages.md "AR-022-vdfs-session-messages") §3.4）不另读——`append_messages`
-  直接把落库后的权威副本交回调用方。
+`load_session` 次数：新建会话 **6**、已有标题的会话 **5**。组成 = 一次元数据读取 + 三处
+`messages` 读取（两处写路径读-改-写、一处每轮上下文）+ 新建会话上 `ensure_auto_title` 的那一次。
+三处 `messages` 读取**不该省**（须各取最新值）；落库回包（把权威 `seq` 交回实时面，见
+[`022-vdfs-session-messages.md`](022-vdfs-session-messages.md "AR-022-vdfs-session-messages") §3.4）
+不另读——`append_messages` 直接把落库后的权威副本交回调用方。

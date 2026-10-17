@@ -237,7 +237,7 @@ impl Transcript {
             node.principal = msg.principal.clone();
         }
         if msg.msg_type.is_some() {
-            node.msg_type = msg.msg_type.clone();
+            node.msg_type = msg.msg_type;
         }
         if msg.tool_call_id.is_some() {
             node.tool_call_id = msg.tool_call_id.clone();

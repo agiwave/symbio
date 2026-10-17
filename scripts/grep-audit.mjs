@@ -659,6 +659,12 @@ console.log('--- S-014: ChatNode 存量 role 格直写棘轮 ---')
 
 const S014_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/004-plan/verify']
 const S014_BASE = isDir(path.resolve(cwd, 'symbio')) ? cwd : repoRoot
+// **只在真实仓库树上跑棘轮**：回归测试注入的临时树（`grep-audit.test.mjs` 的
+// `audit()` / `s010Audit()` 写在 `os.tmpdir()`）即使造出 `symbio/src/...` 的几层目录，
+// 存量也恒 0——与基线 166 的差是「树不对」，不是「该收紧」。据此报错误把每条断言退出码
+// 0 的 fixture 用例判红，守卫的测试自己成了噪音。判据用 `repoRoot`（脚本自身所在仓库）：
+// 临时树在 tmpdir、真实仓库不是；从真实仓库或其子目录跑都相等。
+const S014_IS_REPO = path.resolve(S014_BASE) === path.resolve(repoRoot)
 const S014_WRITE_RE =
   /role:\s*Some\((?:cm::)?NodeRole::|\.role\s*=\s*Some\(|\.role\.get_or_insert\(|\bwith_role\(|\bset_legacy_role\(/
 const WAIVER_S014_RE = /\/\/\s*grep-audit-allow S-014:[^\n]*[A-Za-z0-9\u4e00-\u9fff]/
@@ -692,13 +698,17 @@ const LEGACY_ROLE_WRITE_BASELINE = process.env.LEGACY_ROLE_WRITE_BASELINE
         '`principal`，不写 role（读走 node_role()/legacy_role()）。首批命中：' +
         s014List.join('、'),
     )
-  } else if (s014 < LEGACY_ROLE_WRITE_BASELINE) {
+  } else if (S014_IS_REPO && s014 < LEGACY_ROLE_WRITE_BASELINE) {
     err(
       `S-014 基线该收紧：存量 role 格直写 ${s014} 处 < 基线 ${LEGACY_ROLE_WRITE_BASELINE}——` +
         `把 LEGACY_ROLE_WRITE_BASELINE 下调到 ${s014}（棘轮只许留痕地下调）`,
     )
   } else {
-    ok(`S-014 通过：role 格直写存量 ${s014} 处，与基线持平（只许降）`)
+    ok(
+      S014_IS_REPO
+        ? `S-014 通过：role 格直写存量 ${s014} 处，与基线持平（只许降）`
+        : `S-014 跳过：当前树不是真实仓库（临时 fixture），棘轮不比`,
+    )
   }
 }
 console.log()
