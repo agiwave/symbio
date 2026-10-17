@@ -64,7 +64,9 @@ pub fn note_tasks(out: &mut Vec<TaskDeclaration>, name: &str, args: &Value, succ
     if !success {
         return;
     }
-    if name.trim().rsplit('/').next().unwrap_or_default() != "todo_write" {
+    // 判据与任务表写侧闸同源（[`is_task_table_tool`](super::task_table::is_task_table_tool)）：
+    // 此前这里把「取末段比短名」又写了一遍，与那位助手迟早漂移成两套口径。
+    if !super::task_table::is_task_table_tool(name) {
         return;
     }
     let Some(todos) = args.get("todos").and_then(Value::as_array) else {

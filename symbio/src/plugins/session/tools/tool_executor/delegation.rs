@@ -1,6 +1,15 @@
 //! 代际立约出参（`agent_run` 的承诺记录）：工具执行层把「向上游承诺了什么、
 //! 履行了没有」交出来，由轮末收束的 `v2_facts::record_derived` 落成 `commitment.*` 格。
 
+/// 派活工具名（`agent_run` 的线上短名）——闸门侧字面量的**唯一住址**。
+///
+/// 两个消费点（[`note_delegation`] 与淘汰闸 `tool_executor.rs`）此前各写一遍
+/// 裸字面量；工具侧的自有常量住 `plugins/agent/host/subagent.rs` 的 `NAME`
+/// （`CapabilityMeta.name` 与审批载荷的 `tool_name` 必须同源，那是它的理由）。
+/// 两侧各持一份同值常量，与 `TODO_WRITE_TOOL` / `CONTEXT_COMPACT_TOOL_NAME`
+/// 同形——收敛字面量是这一步的全部，不改任何判据口径。
+pub const AGENT_RUN_TOOL: &str = "agent_run";
+
 /// 本轮的**代际立约记录**（[04 §3.1 批⑧](../../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")，S08 §3）：
 /// 工具执行层把「我向上游承诺了什么、履行了没有」交出来，由轮末收束的
 /// `v2_facts::record_derived` 落成 `commitment.*` 格。
@@ -36,7 +45,7 @@ pub fn note_delegation(
     ok: bool,
     why: &str,
 ) {
-    if name.trim() != "agent_run" {
+    if name.trim() != AGENT_RUN_TOOL {
         return;
     }
     let record = Delegation {

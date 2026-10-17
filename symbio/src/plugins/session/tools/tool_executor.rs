@@ -35,7 +35,7 @@ mod task_decl;
 mod task_table;
 
 pub use self::breaker::BreakerInputs;
-pub use self::delegation::{note_delegation, Delegation};
+pub use self::delegation::{note_delegation, Delegation, AGENT_RUN_TOOL};
 pub use self::elimination::EliminationInputs;
 pub use self::task_decl::{note_tasks, TaskDeclaration, TaskItem, TaskStatus};
 pub use self::task_table::{is_task_table_tool, TaskTableInputs};
@@ -1161,7 +1161,7 @@ pub async fn process_tool_calls_async(
         // `verdict.asserted` 已经在事实源里（闸门只是它的读侧），本层不再产事件；
         // 工具结果上的 `Refused: …` 与随收束入格的那条**违约承诺**（note_delegation
         // ok=false）就是它的两面——「约了却没派成」诚实记账，声誉投影据此再降。
-        if name.trim() == "agent_run" && elimination.delegation_revoked {
+        if name.trim() == AGENT_RUN_TOOL && elimination.delegation_revoked {
             let reason = format!(
                 "主体 {} 的 assign.work 已被淘汰回路收回（verdict.asserted，声誉低于阈值），本次委派未执行",
                 elimination.principal
