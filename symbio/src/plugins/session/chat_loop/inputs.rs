@@ -6,6 +6,7 @@
 
 use crate::symbio_core::CapabilityMeta;
 
+use super::super::loop_registry::{builtin, Capsule, LoopState};
 use super::*;
 
 /// 本轮用户发言 = 轮首入列的最后一条 user 消息的正文。
@@ -171,7 +172,12 @@ pub(crate) async fn prepare_turn_inputs(
     // `query` = 本轮用户发言（T-085 批②：混合打分的语义维）——与 `v2_exec`
     // 取 `user_text` 同一取值点（轮首入列的最后一条 user 消息；该处晚于本步，
     // 但用户消息在步骤 3 之前已入列，两次取到的是同一条）。
-    if turn.tool_rounds == 0 {
+    // 判据在表里（`policy.recall`）：「本轮第一次 ∧ 有落盘目录」两条。
+    // 三件事（记忆 / 技能 / 任务段）共用一个胶囊——它们共前提、共时机，
+    // 且在直线代码里就是同一段 `if`（见 `loop_registry` 模块文档的过渡形态）。
+    let recall_state =
+        LoopState::turn_prepare(turn.tool_rounds, context.session.session_dir().is_some());
+    if builtin().decide(&recall_state).map(|h| h.capsule) == Some(Capsule::RECALL) {
         let recall_query = last_user_text(context);
         // 读方 = **本轮主体**（`request_principal`，与写事件的 actor 同一取值点）：
         // 召回的可见切片按它收放（T-117）——判断记忆只给自己会话看，共享记忆只
@@ -320,7 +326,13 @@ pub(crate) async fn apply_compaction(
     overhead_tokens: usize,
 ) -> Result<bool, TurnExit> {
     // ── ① 自动语义压缩（L1：70% 触发）────────────────────────────────────
-    if req.auto_compress {
+    // 判据在表里（`policy.compress`）：本处只问"这一格要不要进压缩产线"。
+    // 压不压得动（水位 / 熔断 / 失败回滚）是压缩内核自己的事，不在本行。
+    if builtin()
+        .decide(&LoopState::compress(req.auto_compress))
+        .map(|h| h.capsule)
+        == Some(Capsule::COMPRESS)
+    {
         match auto_compress_process(
             orchestrator,
             context,
@@ -361,11 +373,18 @@ pub(crate) async fn apply_compaction(
     // 不产出；把它打开之前必须先恢复注入，否则提醒是一条指向空处的指令。
     // 去重：每次用户请求生命周期内最多注入一次（主动压缩成功后重置）；
     // 提醒不落库，无需扫描历史做去重，也不占用轮次窗口的 User 计数。
-    if !req.enable_compact_tool || turn.nudged_this_request {
-        return Ok(false);
-    }
+    // 判据在表里（`policy.nudge`）：「工具开着 ∧ 本轮没提醒过 ∧ 过了水位」三条
+    // 写在一个纯函数里。`over_watermark` 先算——它是纯函数，无副作用，算早了
+    // 只是多一次内存扫描（相对一次 LLM 请求可忽略）。
     let effective_limit = orchestrator.context_limit as usize;
-    if !context::should_emit_context_nudge(&context.messages, effective_limit, overhead_tokens) {
+    let over_watermark =
+        context::should_emit_context_nudge(&context.messages, effective_limit, overhead_tokens);
+    let nudge_state = LoopState::nudge(
+        req.enable_compact_tool,
+        turn.nudged_this_request,
+        over_watermark,
+    );
+    if builtin().decide(&nudge_state).map(|h| h.capsule) != Some(Capsule::NUDGE) {
         return Ok(false);
     }
     turn.nudged_this_request = true;

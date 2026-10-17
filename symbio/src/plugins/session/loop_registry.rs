@@ -40,15 +40,35 @@
 //! 现在写出来就是四个永不构造的变体。五值的完整映射见
 //! `docs/016-turn-runner-steps.md`（[AR-016-turn-runner-steps](docs/016-turn-runner-steps.md)）。
 //!
-//! ## 两行为什么能共用同一个 `LoopState`
+//! ## 五行为什么能共用同一个 `LoopState`
 //!
-//! 因为它们在**结构上互斥**：`policy.classify` 要求 `tool_rounds == 0`，
-//! `policy.report` 要求 `tool_rounds > 0`。这不是巧合，是两个决策点各自的成立条件
-//! （轮首判"这句话该派活吗"，轮边界判"干了一会儿了该说一句吗"）。
+//! 因为每一行都要求自己那一格**特有的字段**为真，而构造器只填自己那几格：
+//! `policy.classify` 要 `tool_rounds == 0`，`policy.report` 要 `tool_rounds > 0`，
+//! `policy.compress` 要 `auto_compress`，`policy.nudge` 要 `enable_compact_tool`，
+//! `policy.recall` 要 `has_session_dir`。两个决策点的状态因此不会互相误命中。
 //!
-//! 也因此 **`prio` 目前不参与裁决**——没有两行会在同一格同时命中。它仍然必须存在
-//! 并被检查：第三行（步骤 3 的反射 / 压缩 / 记忆 / 技能）一定会带来同点竞争，
-//! 到那时"谁先"必须是数据而不是巧合。现在就把 fail-fast 立起来，比那时再补便宜。
+//! 也因此 **`prio` 目前仍不参与裁决**——没有两行会在同一格同时命中。它仍然必须
+//! 存在并被检查：真正同点竞争的只有 `policy.recall` 内部那三件事（记忆 / 技能 /
+//! 任务段），而它们在直线代码里就是一段 `if`，拆开需要「这一步做完了吗」这个
+//! 簿记量。现在就把 fail-fast 立起来，比那时再补便宜。
+//!
+//! ## 本批的过渡形态（诚实划界）
+//!
+//! 现在每个决策点各有一个构造器、各调一次 `decide`，因为主循环还是**直线代码**：
+//! 它按顺序走七步，不是「迭代 `decide` 至不动点」。表在直线代码上的正确用法就是
+//! 「每一步问一次」，代价是构造器随决策点增长。
+//!
+//! 真正的收敛是 PL-014 §4 的 `drive`：`loop { project → decide → execute }`，
+//! 届时 N 个构造器合并成一个 `project()`，`policy.recall` 也会拆成
+//! `policy.memory` / `policy.skill` 两行（区分它们的量「本轮已召回否」在 drive 里
+//! 自然存在，在直线代码里只能靠代码位置隐含）。那一步属步骤 5。
+//!
+//! ## 反射档为什么不在此表
+//!
+//! `policy.reflex`（命中已编译技能 ⇒ 一次模型调用都不发生）的 Step 必须携带
+//! **命中了哪条技能**，而本批的 [`Capsule`] 只有一个名字。等步骤 4 让 `Capsule`
+//! 长出带类型的载荷再挂——现在挂上来只能返回"要不要走快路"，把"走哪条"留给
+//! 调用方重算一遍，正是「一次判定、两个出口」要避免的漂移。
 
 use std::sync::LazyLock;
 
@@ -70,6 +90,20 @@ impl Capsule {
 
     /// 轮边界汇报：`compose` 的模板产线说一句"干到哪了"。
     pub(crate) const REPORT: Self = Self("report");
+
+    /// 自动语义压缩（L1，70% 触发）：就地改写上下文。
+    pub(crate) const COMPRESS: Self = Self("compress");
+
+    /// 水位提醒（nudge，55% 触发）：请求视图末尾追加一条一次性提示。
+    pub(crate) const NUDGE: Self = Self("nudge");
+
+    /// 轮首准备：长期记忆召回 + 技能路由 + 就绪任务段。
+    ///
+    /// 三件事一个胶囊，因为它们共用**同一个前提**（有落盘目录）与**同一个时机**
+    /// （本轮第一次请求之前），且在直线代码里就是同一段 `if`。拆成三个胶囊需要
+    /// 「这一步做完了吗」这个簿记量，而它只在 drive 循环里才自然存在——见
+    /// 模块文档「本批的过渡形态」。
+    pub(crate) const RECALL: Self = Self("recall");
 }
 
 /// 策略行看到的**全部世界**（PL-014 §3 硬规则 a：只携带引用/值，不带句柄）。
@@ -84,8 +118,14 @@ impl Capsule {
 /// | `quiet_ms` | 时钟差（`clock_now_ms() - last_user_facing_at`） |
 /// | `reports` | 本轮已汇报次数（配额） |
 /// | `progress` | 配置快照（`SessionConfig` 的四个旋钮） |
+/// | `auto_compress` | 请求快照（`TurnRequest::auto_compress`） |
+/// | `enable_compact_tool` | 请求快照（`TurnRequest::enable_compact_tool`） |
+/// | `nudged` | 本轮是否已提醒过（`TurnState::nudged_this_request`） |
+/// | `over_watermark` | `context::should_emit_context_nudge` 的结论 |
+/// | `has_session_dir` | `session.session_dir().is_some()` |
 ///
-/// 两个构造器对应两个决策点，字段组合因此不会出现"半真半假"的中间态。
+/// 构造器按**决策点**分，每个只填自己那几格：一格不会因为另一格的字段恰好
+/// 默认成真而误命中。代价是构造器随决策点增长——这是过渡形态，见模块文档。
 #[derive(Debug, Clone)]
 pub(crate) struct LoopState {
     pub(crate) tool_rounds: usize,
@@ -94,6 +134,11 @@ pub(crate) struct LoopState {
     pub(crate) quiet_ms: i64,
     pub(crate) reports: u32,
     pub(crate) progress: ProgressPolicy,
+    pub(crate) auto_compress: bool,
+    pub(crate) enable_compact_tool: bool,
+    pub(crate) nudged: bool,
+    pub(crate) over_watermark: bool,
+    pub(crate) has_session_dir: bool,
 }
 
 impl LoopState {
@@ -110,9 +155,7 @@ impl LoopState {
             tool_rounds,
             has_utterance,
             classify_enabled,
-            quiet_ms: 0,
-            reports: 0,
-            progress: ProgressPolicy::disabled(),
+            ..Self::blank()
         }
     }
 
@@ -130,11 +173,59 @@ impl LoopState {
     ) -> Self {
         Self {
             tool_rounds,
-            has_utterance: false,
-            classify_enabled: false,
             quiet_ms,
             reports,
             progress,
+            ..Self::blank()
+        }
+    }
+
+    /// 自动压缩格（步骤 3 ①）：只填那个开关。
+    pub(crate) fn compress(auto_compress: bool) -> Self {
+        Self {
+            auto_compress,
+            ..Self::blank()
+        }
+    }
+
+    /// 水位提醒格（步骤 3 ②）：三个条件各占一格。
+    ///
+    /// `over_watermark` 是 `should_emit_context_nudge` 的结论而不是原始 token 数：
+    /// 那个函数要 `&[ChatNode]`，而 `LoopState` 只装值（PL-014 §3 硬规则 a 的
+    /// 「只携带引用」在此体现为"不携带消息列表"）。阈值语义归 `context`，
+    /// 本行只负责把三个条件与起来。
+    pub(crate) fn nudge(enable_compact_tool: bool, nudged: bool, over_watermark: bool) -> Self {
+        Self {
+            enable_compact_tool,
+            nudged,
+            over_watermark,
+            ..Self::blank()
+        }
+    }
+
+    /// 轮首准备格（步骤 3 ③）：记忆召回 / 技能路由 / 任务段共用这一格。
+    pub(crate) fn turn_prepare(tool_rounds: usize, has_session_dir: bool) -> Self {
+        Self {
+            tool_rounds,
+            has_session_dir,
+            ..Self::blank()
+        }
+    }
+
+    /// 全零状态：只给上面几个构造器做基底，不对外。
+    fn blank() -> Self {
+        Self {
+            tool_rounds: 0,
+            has_utterance: false,
+            classify_enabled: false,
+            quiet_ms: 0,
+            reports: 0,
+            progress: ProgressPolicy::disabled(),
+            auto_compress: false,
+            enable_compact_tool: false,
+            nudged: false,
+            over_watermark: false,
+            has_session_dir: false,
         }
     }
 }
@@ -275,6 +366,21 @@ impl Registry {
                 prio: 20,
                 decide: policy_report,
             },
+            Row {
+                name: "policy.compress",
+                prio: 30,
+                decide: policy_compress,
+            },
+            Row {
+                name: "policy.nudge",
+                prio: 40,
+                decide: policy_nudge,
+            },
+            Row {
+                name: "policy.recall",
+                prio: 50,
+                decide: policy_recall,
+            },
         ] {
             if let Err(e) = reg.put(row) {
                 crate::plugin_warn!("session", "[Loop] 内建策略行注册失败（CI 应已拦下）：{e}");
@@ -330,6 +436,36 @@ fn policy_report(state: &LoopState) -> Option<Capsule> {
             .progress
             .due(state.quiet_ms, state.tool_rounds, state.reports))
     .then_some(Capsule::REPORT)
+}
+
+/// 自动语义压缩的判据（步骤 3 ①）。
+///
+/// 只有开关这一条：**压不压得动**（水位、熔断、失败回滚）是压缩内核自己的事，
+/// 本行答的是"这一格要不要进压缩这条产线"。把水位也搬进来会变成两份阈值——
+/// 一份在 `auto_compress_process` 里真正生效，一份在这里只是重复判断。
+fn policy_compress(state: &LoopState) -> Option<Capsule> {
+    state.auto_compress.then_some(Capsule::COMPRESS)
+}
+
+/// 水位提醒的判据（步骤 3 ②）。三个条件缺一不可：
+///
+/// - `enable_compact_tool`：提醒只为引导 `context_compact` 调用，工具关着时
+///   它就是一条指向空处的指令；
+/// - `!nudged`：每次请求生命周期最多一次（主动压缩成功后由别处重置）；
+/// - `over_watermark`：用量过了 55% 有效上限。
+///
+/// 与 `auto_compress` **解耦**：关掉自动压缩、开着工具压缩时仍需提醒。
+fn policy_nudge(state: &LoopState) -> Option<Capsule> {
+    (state.enable_compact_tool && !state.nudged && state.over_watermark).then_some(Capsule::NUDGE)
+}
+
+/// 轮首准备的判据（步骤 3 ③）。
+///
+/// - `tool_rounds == 0`：同一轮内记忆不漂移、事实源只扫一遍，后续工具轮复用
+///   同一份视图（与 classify / history 同一条「每轮一次」口径）；
+/// - `has_session_dir`：临时会话没有落盘目录——没有事实源就没有记忆，不读不写。
+fn policy_recall(state: &LoopState) -> Option<Capsule> {
+    (state.tool_rounds == 0 && state.has_session_dir).then_some(Capsule::RECALL)
 }
 
 #[cfg(test)]

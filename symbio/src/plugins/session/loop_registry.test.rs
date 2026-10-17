@@ -41,7 +41,13 @@ fn builtin_rows_are_listed_in_prio_order() {
     let names: Vec<&str> = builtin().list().iter().map(|r| r.name).collect();
     assert_eq!(
         names,
-        vec!["policy.classify", "policy.report"],
+        vec![
+            "policy.classify",
+            "policy.report",
+            "policy.compress",
+            "policy.nudge",
+            "policy.recall",
+        ],
         "内建行必须按 (prio, name) 升序——顺序是数据，不是插入顺序"
     );
 }
@@ -49,15 +55,15 @@ fn builtin_rows_are_listed_in_prio_order() {
 /// 内建常量表的守门人。
 ///
 /// 生产侧注册失败只告警（见 `Registry::with_builtin_rows` 的文档：一个只可能因
-/// 改错常量而触发的崩溃，不值得占两个 panic 面）。因此"表里到底有没有这两行、
+/// 改错常量而触发的崩溃，不值得占两个 panic 面）。因此"表里到底有没有这几行、
 /// 有没有撞 prio"这件事必须由**本用例**钉住——它是 CI 里红，不是用户机器上炸。
 #[test]
 fn builtin_rows_are_conflict_free_and_ordered() {
     let reg = Registry::with_builtin_rows();
     assert_eq!(
         reg.list().len(),
-        2,
-        "两行都得注册成功（撞名 / 撞 prio 会少一行）"
+        5,
+        "五行都得注册成功（撞名 / 撞 prio 会少一行）"
     );
     let prios: Vec<u32> = reg.list().iter().map(|r| r.prio).collect();
     // 严格升序 = 已排序且无重复，一条断言盖住两件事。
@@ -273,27 +279,85 @@ fn report_interval_threshold_is_inclusive() {
     );
 }
 
-// ── 两行的互斥性（`prio` 目前不参与裁决的前提）───────────────────────────
+// ── policy.compress / policy.nudge / policy.recall：逐条件钉 ──────────────
 
 #[test]
-fn the_two_builtin_rows_never_compete_for_the_same_state() {
-    // 内建两行按 `tool_rounds` 天然互斥——这是它们能共用一个 `LoopState`、
-    // 且 `prio` 目前不参与裁决的原因。步骤 3 的第三行会打破这个前提，
-    // 届时本条用例会提醒作者去补"同点竞争"的用例。
-    for rounds in [0usize, 1, 3, 100] {
-        for utterance in [false, true] {
-            for enabled in [false, true] {
-                let head_state = LoopState::turn_head(rounds, utterance, enabled);
-                let boundary_state = LoopState::round_boundary(rounds, 90_000, 0, progress());
-                let a = builtin().decide(&head_state);
-                let b = builtin().decide(&boundary_state);
-                // 同一个 `tool_rounds` 下，两个构造器不会同时命中。
-                assert!(
-                    !(a.map(|h| h.capsule) == Some(Capsule::DECIDE)
-                        && b.map(|h| h.capsule) == Some(Capsule::REPORT)),
-                    "rounds={rounds} 时两个决策点同时命中，prio 的假设被打破了"
-                );
-            }
-        }
+fn compress_follows_the_request_switch_only() {
+    assert_eq!(
+        builtin()
+            .decide(&LoopState::compress(true))
+            .map(|h| h.capsule),
+        Some(Capsule::COMPRESS)
+    );
+    // 关掉自动压缩 ⇒ 不进产线。压不压得动是内核的事，本行只管进不进。
+    assert_eq!(builtin().decide(&LoopState::compress(false)), None);
+}
+
+#[test]
+fn nudge_requires_all_three_conditions() {
+    // 三条都成立
+    assert_eq!(
+        builtin()
+            .decide(&LoopState::nudge(true, false, true))
+            .map(|h| h.capsule),
+        Some(Capsule::NUDGE)
+    );
+    // 逐个只差一条：工具关着 / 已提醒过 / 没过水位
+    for (tool, nudged, over) in [
+        (false, false, true),
+        (true, true, true),
+        (true, false, false),
+    ] {
+        assert_eq!(
+            builtin().decide(&LoopState::nudge(tool, nudged, over)),
+            None,
+            "tool={tool} nudged={nudged} over_watermark={over} 应当不提醒"
+        );
+    }
+}
+
+#[test]
+fn recall_requires_first_round_and_a_session_dir() {
+    assert_eq!(
+        builtin()
+            .decide(&LoopState::turn_prepare(0, true))
+            .map(|h| h.capsule),
+        Some(Capsule::RECALL)
+    );
+    // 只差 `tool_rounds == 0`：同一轮内记忆不漂移，事实源只扫一遍。
+    assert_eq!(builtin().decide(&LoopState::turn_prepare(1, true)), None);
+    // 只差 `has_session_dir`：临时会话没有事实源，不读不写。
+    assert_eq!(builtin().decide(&LoopState::turn_prepare(0, false)), None);
+}
+
+// ── 各格互不误命中（`prio` 目前不参与裁决的前提）─────────────────────────
+
+#[test]
+fn each_grid_point_hits_only_its_own_row() {
+    // 每个构造器只填自己那几格，因此任何一格都不会命中别人的行。
+    // 这条一旦破了，`decide` 的"先命中者胜"就会把另一格的动作顶掉。
+    let cases: [(&str, LoopState, Capsule); 5] = [
+        ("policy.classify", head(), Capsule::DECIDE),
+        ("policy.report", boundary(), Capsule::REPORT),
+        (
+            "policy.compress",
+            LoopState::compress(true),
+            Capsule::COMPRESS,
+        ),
+        (
+            "policy.nudge",
+            LoopState::nudge(true, false, true),
+            Capsule::NUDGE,
+        ),
+        (
+            "policy.recall",
+            LoopState::turn_prepare(0, true),
+            Capsule::RECALL,
+        ),
+    ];
+    for (row, state, capsule) in cases {
+        let hit = builtin().decide(&state).expect("该格应当命中");
+        assert_eq!(hit.row, row, "命中行不对：{hit:?}");
+        assert_eq!(hit.capsule, capsule);
     }
 }
