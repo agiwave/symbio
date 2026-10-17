@@ -8,7 +8,7 @@ track: 插件身份与授权
 deps: []
 prio: now
 parent: T-134-CLI会话可用性实测批
-evidence: ADR-068 落地：判据搬出 local 插件到 `providers/collectors/approval.rs`（自由函数 `approval_gate` + 装饰器 `ApprovalGate`）；`DefaultToolVisitor::register` 收口点统一加壳 ⇒ vdfs/web/mcp/skill 的注册路径都过闸；`local/plugin.rs::route` 与 `web/plugin.rs::route` 兜底调同一判定；`PrefixedCapability::risk_for` 透传动态档；同批删 `local::SecureToolWrapper` 与 `SecurityPolicy::check_tool_approval_needed`。测试：`approval.test.rs` 10 条（6 判据分支 + 4 wrapper 行为），e2e T78 双幕（交互首轮磁盘上文件仍在 + 批准后消失；auto 不产卡 + 文件仍在）。回归：cargo test --lib 1668 全绿，相邻 e2e t26/t27/t65 全过。
+evidence: ADR-068 落地：判据搬出 local 插件到 `providers/collectors/approval.rs`（自由函数 `approval_gate` + 装饰器 `ApprovalGate`）；`DefaultToolVisitor::register` 收口点统一加壳 ⇒ vdfs/web/mcp/skill 的注册路径都过闸；`local/plugin.rs::route` 与 `web/plugin.rs::route` 兜底调同一判定；`PrefixedCapability::risk_for` 透传动态档；同批已删除 `local::SecureToolWrapper` 与 `SecurityPolicy::check_tool_approval_needed`。测试：`approval.test.rs` 10 条（6 判据分支 + 4 wrapper 行为），e2e T78 双幕（交互首轮磁盘上文件仍在 + 批准后消失；auto 不产卡 + 文件仍在）。回归：cargo test --lib 1668 全绿，相邻 e2e t26/t27/t65 全过。
 where: symbio/src/plugins/local/plugin.rs（`approval_gate` 的两个把守点）· symbio/src/plugins/vdfs/plugin.rs（`traverse` 里 `visitor.register(tool)` 裸注册）· symbio/src/plugins/vdfs/tools/spec.rs（`vdfs_delete` 声明 `risk: High`）
 exit: `CapabilityMeta.risk` 成为**执行期**读到的量，而不是只有目录页读的宣传语：经任一注册入口进 ToolManager 的能力都过同一道 `approval_gate`；判据 = 一条 e2e，交互模式下 `vdfs_delete` 必须先出确认卡、批准后才删除，`auto` 模式下按 `PERMISSION_DENIED` 继续
 ---
@@ -55,7 +55,7 @@ exit: `CapabilityMeta.risk` 成为**执行期**读到的量，而不是只有目
 3. **local 插件的旧写法退役**：`SecureToolWrapper` 结构体 + 内联判定 +
    `risk_level_from_ctx` + `confirm_prompt_payload` 一次删；`local/plugin.rs::route`
    兜底改调 `providers::approval_gate`；`local/plugin.rs::traverse` 交裸工具给 visitor，
-   注册面加壳由收口点负责。同批删 `SecurityPolicy::check_tool_approval_needed`
+   注册面加壳由收口点负责。同批已删除 `SecurityPolicy::check_tool_approval_needed`
    （纯比较 + `_tool_name` 都忽略；留在 local 里就是「判据住在 local」的假象入口）。
 4. **web 兜底加闸** `symbio/src/plugins/web/plugin.rs::route`：注册表未命中路径下
    `http_request`（High）过去直接被 route 走；本批与 local 同形状，route 也调判定。

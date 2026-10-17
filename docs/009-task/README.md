@@ -58,15 +58,14 @@ board.columns: [rank, deps, evidence, reason]
 <!-- list:task-entries owner -->
 
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
-> 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [[SP-001]]，机制见 [[PL-011-登记与汇总机制|PL-011 · 登记与汇总机制]]。
+> 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 2 · 🟡 doing 0 · ☑ done 146 · ❌ wont 3（共 151）
+**计数**：☐ todo 1 · 🟡 doing 0 · ☑ done 148 · ❌ wont 3（共 152）
 
 ## 待处理（按依赖顺序）
 
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
-| `T-140-大结果检索的聚合口径` | 检索结果截断只说「限制了」不说「一共多少」——聚合型问题逼出重复调用 | next | local | — |
 | `T-141-开机噪声与文档漂移` | 每次开机一条假异常 WARN（`.symbio/projection` 孤儿目录）+ 文档里几处与运行事实不符的指路 | later | 登记卫生 | — |
 
 ## 进行中
@@ -101,6 +100,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-146-主体可路由地址` | 主体 id 迁到可路由地址形态——授权表扩 person/tool/system 三族行 | 会话与输入 |
 | `T-147-ChatNode协议改名与字段瘦身` | ChatMessage → ChatNode 一次原子改——Turn 退役、role 删除、tool_call_id 沉 meta、principal 升级为结构体 | 会话与输入 |
 | `T-148-前端注册表按kind与style_tag分派` | 呈现分派从 MessageType 枚举换成 (kind, style_tag, principal) 三元组 | frontend |
+| `T-155-机制化批` | 前端机制化收敛批——NodeKind 唯一分派轴、style_tag 降级、reasoning 归 Notice | 会话与输入 |
 | `T-011` | 五轴的外部效标：每条轴挂一个可复现的读数，而不是形容词 | plan |
 | `T-012` | 能力名册 ↔ 代码锚点：名册的每一条能力都要指到实现它的地方 | plan |
 | `T-015` | 出厂 prompt 在线上是两条 system 消息，部分 provider 直接 400 拒收——full 档在那类 provider 上第一轮就失败 | S |
@@ -111,6 +111,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-092-fmt缺推送点闸门` | fmt 只在整轮门禁与 CI 里判——推送点（pre-push）不判，未格式化源码能推到 origin | quality |
 | `T-102-路由地址owner归一` | 路由地址消除双 owner——地址唯一表归 RE-006 §2.3，RE-003 只留机制叙述 + 契约表 | plan |
 | `T-112-多协议适配e2e批` | 多协议适配 e2e 批：mock-llm 按路径分派四种线格式，四套适配器各跑一遍用户可见链路 | e2e |
+| `T-140-大结果检索的聚合口径` | 检索结果截断只说「限制了」不说「一共多少」——聚合型问题逼出重复调用 | local |
 | `T-144-长度截断的自动续写在v2执行路径不可达` | v2 执行路径重建 TurnOutput 时丢掉 finish——长度戳与自动续写读到的恒是缺省 Stop | 会话与输入 |
 | `T-149-会话建树策略开关` | `presentation_tree: flat \| grouped \| deep` 会话配置——后端组树，前端零结构假设 | 会话与输入 |
 | `T-150-骨架惰性重取` | `expand_skeleton` VDFS 动作——折叠骨架可释放子节点，展开时按需拉取 | 会话与输入 |
@@ -376,7 +377,7 @@ board.columns: [rank, deps, evidence, reason]
   - [`T-139-写类工具不回显解析后的落点`](139-写类工具不回显解析后的落点.md) vdfs 写类结果回显**入参**地址而不是解析后的落点——影子树由此自我验证（wont）
   - [`T-142-长度截断时草稿被当答话交付`](142-长度截断时草稿被当答话交付.md) finish=Length 且正文 0 字符时，整段思考被提升成答话原样交付——stdout 变成 13KB 草稿（done）
   - [`T-143-跨会话记忆以指令形态劫持当前轮`](143-跨会话记忆以指令形态劫持当前轮.md) 召回段把旧会话的经验原文当指令送进 prompt——小模型照着执行上一个任务（done）
-- [`T-140-大结果检索的聚合口径`](140-大结果检索的聚合口径.md) 检索结果截断只说「限制了」不说「一共多少」——聚合型问题逼出重复调用（todo）
+- [`T-140-大结果检索的聚合口径`](140-大结果检索的聚合口径.md) 检索结果截断只说「限制了」不说「一共多少」——聚合型问题逼出重复调用（done）
 - [`T-141-开机噪声与文档漂移`](141-开机噪声与文档漂移.md) 每次开机一条假异常 WARN（`.symbio/projection` 孤儿目录）+ 文档里几处与运行事实不符的指路（todo）
 - [`T-144-长度截断的自动续写在v2执行路径不可达`](144-长度截断的自动续写在v2执行路径不可达.md) v2 执行路径重建 TurnOutput 时丢掉 finish——长度戳与自动续写读到的恒是缺省 Stop（done）
 - [`T-145-前端机制化批`](145-前端机制化批.md) 前端机制化——ChatNode 协议 / 主体平级 / 建树策略 / 惰性重取（SPRINT）（done） · 子项 done 8
@@ -388,6 +389,7 @@ board.columns: [rank, deps, evidence, reason]
   - [`T-151-Typing占位节点`](151-Typing占位节点.md) Typing 占位——前端本地合成、同父非-typing 兄弟到达即 removed（done）
   - [`T-152-协议顶层字段消费守卫`](152-协议顶层字段消费守卫.md) `protocol-mirror-audit.mjs` 加 G 组——ChatNode 顶层每字段须有前端/CLI 不依赖 meta 语义的消费者（done）
   - [`T-153-旧文档与注释清理`](153-旧文档与注释清理.md) 扫「一轮 / Turn」措辞——ADR-052/055 作废标注、docs/005-rev 归档、代码注释同步（done）
+- [`T-155-机制化批`](155-机制化批.md) 前端机制化收敛批——NodeKind 唯一分派轴、style_tag 降级、reasoning 归 Notice（done）
 
 <!-- registry:summary end -->
 
