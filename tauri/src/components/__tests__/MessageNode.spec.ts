@@ -1,16 +1,14 @@
 // @vitest-environment happy-dom
 /**
- * MessageNode 组件级测试 —— 机制化后按 wire `NodeKind` 五值分派（[ADR-070 §后果 2]）
+ * MessageNode 组件级测试 —— 渲染只按 wire `NodeKind` 五值分派（[ADR-070 §后果 2]）。
  *
- * 分派轴只剩五格（body / notice / skeleton / interaction / typing），业务名
- * （turn / tool_call / reasoning / compression / user_prompt）经 `nodeKindOf` 折叠：
- * - `turn` / `tool_call` → `skeleton`（同一个可折叠容器：一整轮与一次工具调用同构）
- * - `reasoning` / `compression` → `notice`（同一个折叠叶）
- * - `text` → `body`
+ * 分派轴只有五格（body / notice / skeleton / interaction / typing）：每格只按**形状 +
+ * 呈现数据**（title / icon / actions）渲染，不含任何业务分支。类名钩子来自 `NodeShell`
+ * 的 `type-${facets.type}`，故 DOM 里只会出现五值（`type-skeleton` 等）。
  *
- * 因此本文件断言的是**折叠后各格的可见行为**：每格只按形状渲染，不含任何业务分支。
- * 类名钩子来自 `NodeShell` 的 `type-${facets.type}`（故只会出现 `type-skeleton` 等
- * 五值，绝不会出现 `type-tool_call`）。
+ * 「存量业务旧词（turn / tool_call / reasoning / compression / user_prompt）经
+ * `nodeKindOf` 折到哪一格」这条读边界由 `messageTypes.spec` / `chat_node.spec` 专钉；
+ * 本文件因此直接用**折后的五值**构造节点，逐格锁定可见渲染结果（含未登记类型兜底到 body）。
  */
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -19,14 +17,13 @@ import { useRunningClock } from '@/composables/useRunningClock'
 import type { ChatNode } from '@/schemas/chat_node'
 
 /**
- * 构造合法 ChatNode（缺省：assistant/text/completed）。
+ * 构造合法 ChatNode（缺省：assistant / body / completed）。
  *
- * `type` 放宽成 `string`：分派轴是折叠后的五值 `NodeKind`，本文件各用例**故意**喂业务旧词
- * （`turn` / `tool_call` / `reasoning` / `compression` / `user_prompt`）来钉「旧词经
- * `nodeKindOf` 折到对应格、渲染仍正确」这条性质，故入参容忍旧词、出口按 `ChatNode` 交付。
+ * 分派轴即 `NodeKind` 五值，故 `type` 直接取折后形态；入参容忍 `string` 只为
+ * 「未登记类型」那一条用例（`brand_new_type`）保留其兜底验证。
  */
 function msg(p: Partial<Omit<ChatNode, 'type'>> & { id: string; type?: string }): ChatNode {
-  return { role: 'assistant', type: 'text', content: '', status: 'completed', ...p } as unknown as ChatNode
+  return { role: 'assistant', type: 'body', content: '', status: 'completed', ...p } as unknown as ChatNode
 }
 
 function mountNode(node: ChatNode, extraProps: Record<string, unknown> = {}) {
@@ -36,28 +33,28 @@ function mountNode(node: ChatNode, extraProps: Record<string, unknown> = {}) {
   })
 }
 
-describe('MessageNode：根级骨架（wire turn → skeleton）容器三形态', () => {
+describe('MessageNode：根级骨架（skeleton）容器三形态', () => {
   it('形态①：无子节点且流式中 → 等待骨架 +「运行中」标签', () => {
-    const w = mountNode(msg({ id: 't1', type: 'turn', status: 'streaming', children: [] }))
+    const w = mountNode(msg({ id: 't1', type: 'skeleton', status: 'streaming', children: [] }))
     expect(w.find('.skeleton-pending').exists()).toBe(true)
     expect(w.text()).toContain('正在思考')
     expect(w.find('.node-tag.run').text()).toContain('运行中')
   })
 
-  it('形态②：子节点出现 → 等待骨架消失，思考与正文作为子流直排', () => {
+  it('形态②：子节点出现 → 等待骨架消失，折叠叶与正文作为子流直排', () => {
     const w = mountNode(
       msg({
         id: 't1',
-        type: 'turn',
+        type: 'skeleton',
         status: 'streaming',
         children: [
-          msg({ id: 'r1', type: 'reasoning', status: 'completed', content: '想了一下', parent_id: 't1' }),
-          msg({ id: 'x1', type: 'text', status: 'streaming', content: '你好世界', parent_id: 't1' }),
+          msg({ id: 'r1', type: 'notice', status: 'completed', content: '想了一下', parent_id: 't1' }),
+          msg({ id: 'x1', type: 'body', status: 'streaming', content: '你好世界', parent_id: 't1' }),
         ],
       }),
     )
     expect(w.find('.skeleton-pending').exists()).toBe(false)
-    // 思考折叠叶与正文各是一格（分派钩子按折叠后的 NodeKind）
+    // 折叠叶与正文各是一格（分派钩子即 NodeKind 五值）
     expect(w.findAll('.type-notice').length).toBe(1)
     expect(w.findAll('.type-body').length).toBe(1)
     expect(w.text()).toContain('你好世界')
@@ -67,10 +64,10 @@ describe('MessageNode：根级骨架（wire turn → skeleton）容器三形态'
     const w = mountNode(
       msg({
         id: 't1',
-        type: 'turn',
+        type: 'skeleton',
         status: 'failed',
         error: '请求失败',
-        children: [msg({ id: 'x1', type: 'text', status: 'failed', content: '', error: '请求失败', parent_id: 't1' })],
+        children: [msg({ id: 'x1', type: 'body', status: 'failed', content: '', error: '请求失败', parent_id: 't1' })],
       }),
     )
     // 骨架级错误条存在且携带错误文本；叶子级错误由父失败抑制（不重复报错）
@@ -82,7 +79,7 @@ describe('MessageNode：根级骨架（wire turn → skeleton）容器三形态'
   })
 
   it('形态③变体：失败且无子节点 → 交代条而非等待骨架（请求即败场景）', () => {
-    const w = mountNode(msg({ id: 't1', type: 'turn', status: 'failed', error: 'bad', children: [] }))
+    const w = mountNode(msg({ id: 't1', type: 'skeleton', status: 'failed', error: 'bad', children: [] }))
     expect(w.find('.skeleton-pending').exists()).toBe(false)
     expect(w.find('.error-box').exists()).toBe(true)
   })
@@ -91,9 +88,9 @@ describe('MessageNode：根级骨架（wire turn → skeleton）容器三形态'
     const w = mountNode(
       msg({
         id: 't1',
-        type: 'turn',
+        type: 'skeleton',
         status: 'aborted',
-        children: [msg({ id: 'x1', type: 'text', content: '半截', parent_id: 't1' })],
+        children: [msg({ id: 'x1', type: 'body', content: '半截', parent_id: 't1' })],
       }),
     )
     const boxes = w.findAll('.error-box')
@@ -109,9 +106,9 @@ describe('MessageNode：根级骨架（wire turn → skeleton）容器三形态'
     const w = mountNode(
       msg({
         id: 't1',
-        type: 'turn',
+        type: 'skeleton',
         status: 'completed',
-        children: [msg({ id: 'x1', type: 'text', content: '完整', parent_id: 't1' })],
+        children: [msg({ id: 'x1', type: 'body', content: '完整', parent_id: 't1' })],
       }),
     )
     expect(w.findAll('.error-box').length).toBe(0)
@@ -119,9 +116,9 @@ describe('MessageNode：根级骨架（wire turn → skeleton）容器三形态'
   })
 })
 
-describe('MessageNode：折叠叶（wire reasoning → notice）始终单行', () => {
+describe('MessageNode：折叠叶（notice）始终单行', () => {
   it('流式中：行头呼吸动效 +「处理中…」，收起态不渲染正文', () => {
-    const w = mountNode(msg({ id: 'r1', type: 'reasoning', status: 'streaming', content: '生成中的思考' }))
+    const w = mountNode(msg({ id: 'r1', type: 'notice', status: 'streaming', content: '生成中的思考' }))
     const head = w.find('.node-head')
     expect(head.exists()).toBe(true)
     expect(head.classes()).toContain('thinking')
@@ -131,7 +128,7 @@ describe('MessageNode：折叠叶（wire reasoning → notice）始终单行', (
   })
 
   it('完成后：标题「提示」，仍保持折叠', () => {
-    const w = mountNode(msg({ id: 'r1', type: 'reasoning', status: 'completed', content: '已完成的思考' }))
+    const w = mountNode(msg({ id: 'r1', type: 'notice', status: 'completed', content: '已完成的思考' }))
     const head = w.find('.node-head')
     expect(head.text()).toContain('提示')
     expect(head.classes()).not.toContain('thinking')
@@ -139,15 +136,16 @@ describe('MessageNode：折叠叶（wire reasoning → notice）始终单行', (
   })
 })
 
-describe('MessageNode：工具调用塌缩为骨架容器（不再有三段式）', () => {
+describe('MessageNode：工具子骨架（skeleton 容器，参数作首条正文）', () => {
   it('运行中：单行「运行中」标签 + 动效点；有 started_at 才给时长', () => {
     const { nowMs } = useRunningClock()
     const w = mountNode(
       msg({
         id: 'tc1',
-        type: 'tool_call',
+        type: 'skeleton',
+        title: 'shell',
         status: 'streaming',
-        meta: { tool_name: 'shell', started_at: nowMs.value - 47_000 },
+        meta: { started_at: nowMs.value - 47_000 },
         content: '{"cmd":"ls"}',
         children: [],
       }),
@@ -165,7 +163,7 @@ describe('MessageNode：工具调用塌缩为骨架容器（不再有三段式�
 
   it('无 started_at（旧数据）→ 不显示时长，也不编一个数', () => {
     const w = mountNode(
-      msg({ id: 'tc1', type: 'tool_call', status: 'streaming', meta: { tool_name: 'shell' }, content: '{}', children: [] }),
+      msg({ id: 'tc1', type: 'skeleton', title: 'shell', status: 'streaming', content: '{}', children: [] }),
     )
     expect(w.find('.node-tag.run').exists()).toBe(true)
     expect(w.find('.tag-elapsed').exists()).toBe(false)
@@ -173,24 +171,24 @@ describe('MessageNode：工具调用塌缩为骨架容器（不再有三段式�
 
   it('待用户确认 → 「待确认」标签（warn 变体）；终态不给标签', () => {
     const waiting = mountNode(
-      msg({ id: 'tc1', type: 'tool_call', status: 'waiting_user_action', meta: { tool_name: 'shell' }, content: '{}', children: [] }),
+      msg({ id: 'tc1', type: 'skeleton', title: 'shell', status: 'waiting_user_action', content: '{}', children: [] }),
     )
     expect(waiting.find('.node-tag').text()).toContain('待确认')
     expect(waiting.find('.node-tag').classes()).toContain('warn')
 
     const done = mountNode(
-      msg({ id: 'tc2', type: 'tool_call', status: 'completed', meta: { tool_name: 'shell' }, content: '{}', children: [] }),
+      msg({ id: 'tc2', type: 'skeleton', title: 'shell', status: 'completed', content: '{}', children: [] }),
     )
     expect(done.find('.node-tag').exists()).toBe(false)
   })
 
-  it('工具参数住在骨架自身 content → 收起首条正文渲染成 JSON 代码块（带请求强调边）', () => {
+  it('参数住在骨架自身 content → 收起首条正文渲染成 JSON 代码块（带请求强调边）', () => {
     const w = mountNode(
       msg({
         id: 'tc1',
-        type: 'tool_call',
+        type: 'skeleton',
+        title: 'shell',
         status: 'completed',
-        meta: { tool_name: 'shell' },
         content: '{"cmd":"ls"}',
         children: [],
       }),
@@ -205,11 +203,11 @@ describe('MessageNode：工具调用塌缩为骨架容器（不再有三段式�
     const w = mountNode(
       msg({
         id: 'tc1',
-        type: 'tool_call',
+        type: 'skeleton',
+        title: 'shell',
         status: 'completed',
-        meta: { tool_name: 'shell' },
         content: '{"cmd":"ls"}',
-        children: [msg({ id: 'res1', type: 'text', role: 'tool', status: 'completed', content: '"ok"', parent_id: 'tc1' })],
+        children: [msg({ id: 'res1', type: 'body', role: 'tool', status: 'completed', content: '"ok"', parent_id: 'tc1' })],
       }),
     )
     expect(w.find('.skeleton-pending').exists()).toBe(false)
@@ -222,14 +220,14 @@ describe('MessageNode：工具调用塌缩为骨架容器（不再有三段式�
     const w = mountNode(
       msg({
         id: 'tc1',
-        type: 'tool_call',
+        type: 'skeleton',
+        title: 'shell',
         status: 'streaming',
-        meta: { tool_name: 'shell' },
         content: '{}',
         children: [
           msg({
             id: 'up1',
-            type: 'user_prompt',
+            type: 'interaction',
             status: 'waiting_user_action',
             meta: { prompt: { kind: 'confirm', tool_name: 'shell', risk_level: 'high', description: '删除文件' } },
             parent_id: 'tc1',
@@ -245,7 +243,8 @@ describe('MessageNode：工具调用塌缩为骨架容器（不再有三段式�
     const w = mountNode(
       msg({
         id: 'tc1',
-        type: 'tool_call',
+        type: 'skeleton',
+        title: 'shell',
         status: 'failed',
         error: '参数缺失',
         meta: { failure_kind: 'error', recoverable: true },
@@ -261,10 +260,11 @@ describe('MessageNode：工具调用塌缩为骨架容器（不再有三段式�
     const w = mountNode(
       msg({
         id: 'tc1',
-        type: 'tool_call',
+        type: 'skeleton',
+        title: 'shell',
         status: 'failed',
         error: '工具执行失败',
-        meta: { failure_kind: 'error', recoverable: true, tool_name: 'shell' },
+        meta: { failure_kind: 'error', recoverable: true },
         actions: ['retry'],
         content: '{}',
         children: [],
@@ -288,7 +288,7 @@ describe('MessageNode：折叠叶内的压缩动作（notice + 统计字段）',
     const w = mountNode(
       msg({
         id: 'cp1',
-        type: 'compression',
+        type: 'notice',
         status: 'streaming',
         content: '正在压缩上下文…',
         meta: { before_tokens: 150000 },
@@ -305,7 +305,7 @@ describe('MessageNode：折叠叶内的压缩动作（notice + 统计字段）',
     const w = mountNode(
       msg({
         id: 'cp1',
-        type: 'compression',
+        type: 'notice',
         status: 'failed',
         actions: ['retry_compaction'],
         content: '压缩未完成（模型请求失败：429 Too Many Requests），已保留完整历史',
@@ -326,7 +326,7 @@ describe('MessageNode：折叠叶内的压缩动作（notice + 统计字段）',
     const w = mountNode(
       msg({
         id: 'cp1',
-        type: 'compression',
+        type: 'notice',
         status: 'completed',
         content: '已压缩上下文（12 → 3 条）',
         meta: {
@@ -348,7 +348,7 @@ describe('MessageNode：折叠叶内的压缩动作（notice + 统计字段）',
   })
 
   it('旧后端（无统计字段）⇒ 不算压缩动作，落 Markdown；不编事实行', async () => {
-    const w = mountNode(msg({ id: 'cp1', type: 'compression', status: 'completed', content: '压缩上下文' }))
+    const w = mountNode(msg({ id: 'cp1', type: 'notice', status: 'completed', content: '压缩上下文' }))
     await w.find('.node-head').trigger('click')
     expect(w.find('.notice-compaction').exists()).toBe(false)
     expect(w.find('.notice-facts').exists()).toBe(false)
@@ -356,9 +356,9 @@ describe('MessageNode：折叠叶内的压缩动作（notice + 统计字段）',
   })
 })
 
-describe('MessageNode：正文格（wire text → body）与兜底', () => {
+describe('MessageNode：正文格（body）与兜底', () => {
   it('用户消息走右对齐气泡，头部是「你」', () => {
-    const w = mountNode(msg({ id: 'u1', role: 'user', type: 'text', content: '你好' }))
+    const w = mountNode(msg({ id: 'u1', role: 'user', type: 'body', content: '你好' }))
     expect(w.find('.user-bubble').exists()).toBe(true)
     expect(w.find('.node-head').text()).toContain('你')
     expect(w.find('.user-bubble').text()).toContain('你好')
@@ -427,7 +427,7 @@ describe('MessageNode：压缩后的历史记忆（折叠叶，不是「你说�
  */
 describe('MessageNode：节点头键盘可达性', () => {
   // 折叠叶（notice）默认收起，是验证折叠开关语义最干净的载体
-  const foldMsg = () => msg({ id: 'r1', type: 'reasoning', status: 'completed', content: '一段思考' })
+  const foldMsg = () => msg({ id: 'r1', type: 'notice', status: 'completed', content: '一段思考' })
 
   it('节点头可聚焦且带开关语义（role / tabindex / aria-expanded）', () => {
     const w = mountNode(foldMsg())
@@ -453,7 +453,7 @@ describe('MessageNode：节点头键盘可达性', () => {
   })
 
   it('根级骨架的悬停操作按钮带可读名称（键盘与读屏都能识别）', () => {
-    const w = mountNode(msg({ id: 't1', type: 'turn', status: 'completed', children: [] }))
+    const w = mountNode(msg({ id: 't1', type: 'skeleton', status: 'completed', children: [] }))
     const acts = w.findAll('.node-act')
     expect(acts.length).toBeGreaterThan(0)
     for (const b of acts) {
@@ -462,7 +462,7 @@ describe('MessageNode：节点头键盘可达性', () => {
   })
 
   it('操作按钮的点击不冒泡成折叠切换（否则点删除会顺手展开卡片）', async () => {
-    const w = mountNode(msg({ id: 'm1', type: 'text', status: 'completed', content: 'hi' }))
+    const w = mountNode(msg({ id: 'm1', type: 'body', status: 'completed', content: 'hi' }))
     const before = w.find('.node-body').exists()
     await w.find('.node-act').trigger('click')
     expect(w.find('.node-body').exists()).toBe(before)
