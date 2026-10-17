@@ -3,9 +3,9 @@
 //
 // ## 为什么需要一个脚本，而不是直接 `cargo build`
 //
-// 1. **共享 target 缓存**：`cli/.cargo/config.toml` 把 target-dir 指到
-//    `../symbio/target`，以复用 symbio 已经预热好的依赖（离线环境下没有第二次
-//    机会去下载 aws-lc-sys / ort / sqlite 这些带 C 构建脚本的 crate）。
+// 1. **共享 target 缓存**：`cli` 是仓库根 workspace 的成员（见根 `Cargo.toml`），
+//    cargo 因此把所有成员的产物写进**同一个** `<仓库根>/target/`——依赖（含离线
+//    环境下带 C 构建脚本的 aws-lc-sys / ort / sqlite）只热一次，没有第二份产物目录。
 //
 // 2. **C 工具链必须显式给到 cc-rs**（2026-09-11 实测）。symbio 的依赖树里有
 //    `aws-lc-sys`（reqwest→rustls 的加密后端）、`ring`、`onig_sys`、
@@ -35,12 +35,16 @@
 //   MSVC_VER      VC/Tools/MSVC 下的版本目录名
 //   SDK_VER       Windows Kits\10\Include 下的版本目录名
 //
-// 产物：`<repo>/symbio/target/debug/symbio-cli.exe`
+// 产物：`<仓库根>/target/<debug|release>/symbio-cli(.exe)`。构建成功后本脚本把这一行
+// 原样打印出来，文档指路（根 README / `cli/docs`）照它抄——一致性由 `doc-symbol-audit`
+// 的 D-012 在门内看着，不靠人复查。路径的唯一来路是 `scripts/cli-binary.mjs`
+// 的 `cliArtifactRelPath`（与门禁取 release 二进制的地方同一份知识）。
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { cliArtifactRelPath } from '../../scripts/cli-binary.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLI_DIR = path.resolve(HERE, '..');
@@ -52,6 +56,8 @@ const passthrough = sepIdx === -1 ? [] : argv.slice(sepIdx + 1);
 
 const MODE = ownArgs.includes('--check') ? 'check' : 'build';
 const extra = ownArgs.filter((a) => a !== '--check');
+// profile 只由命令行决定：`--release` 在自身参数里或 `--` 之后透传都算
+const PROFILE = [...extra, ...passthrough].includes('--release') ? 'release' : 'debug';
 
 function dirs(p) {
   return existsSync(p)
@@ -146,7 +152,11 @@ const r = spawnSync('cargo', [MODE, '--offline', ...extra, ...passthrough], {
   stdio: 'inherit',
   shell: false,
 });
-process.exit(r.status ?? 1);
+const status = r.status ?? 1;
+if (MODE === 'build' && status === 0) {
+  console.log(`产物：${cliArtifactRelPath(PROFILE)}`);
+}
+process.exit(status);
 
 function fail(msg) {
   console.error(`✖ ${msg}`);

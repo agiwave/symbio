@@ -13,6 +13,9 @@
 //! - `GET  /_health`   健康检查
 //! - `GET  /_requests` 读回已记录的请求（测试断言用）
 //! - `POST /_reset`    清空请求记录与场景游标
+//! - `POST /_plan`     **换一份 plan**（场景表 + 游标一起重置）——用例用它表达
+//!   「服务恢复了」：坏的那段时间用静态 `status` 注入，恢复时刻换成正常应答场景。
+//!   有了这个入口，"失败要停在哪一次"就不必再靠请求体指纹的名额去猜（见下「逻辑请求」）。
 //!
 //! ## 四协议的分派与「同一份场景」
 //!
@@ -581,6 +584,31 @@ const server = http.createServer(async (req, res) => {
     granted.length = 0;
     res.writeHead(200, noKeepAlive);
     return res.end(JSON.stringify({ ok: true }));
+  }
+  // 换 plan：场景表整份替换 + 游标清零。用例用它表达「服务恢复了」——
+  // 故障时段用静态 `status` 注入（每次请求都坏），恢复时刻换成正常应答场景。
+  // 计数器必须一起清：残留的 `useCounts` 会让新场景表里的 `times` 一上来就耗尽。
+  if (url.pathname === '/_plan' && req.method === 'POST') {
+    const parts = [];
+    for await (const part of req) parts.push(part);
+    let next = null;
+    try {
+      next = JSON.parse(Buffer.concat(parts).toString('utf8'));
+    } catch {
+      res.writeHead(400, noKeepAlive);
+      return res.end(JSON.stringify({ error: { message: 'mock-llm: /_plan 需要合法 JSON plan' } }));
+    }
+    if (!Array.isArray(next?.scenarios)) {
+      res.writeHead(400, noKeepAlive);
+      return res.end(JSON.stringify({ error: { message: 'mock-llm: /_plan 缺 scenarios 数组' } }));
+    }
+    plan = { scenarios: next.scenarios, fallback: next.fallback ?? null, ...(next.rateLimit ? { rateLimit: next.rateLimit } : {}) };
+    useCounts.clear();
+    failOutcome.clear();
+    failLogicalHits.clear();
+    granted.length = 0;
+    res.writeHead(200, noKeepAlive);
+    return res.end(JSON.stringify({ ok: true, scenarios: plan.scenarios.length }));
   }
 
   // 上下文探测：GET /v1/models → data[].max_model_len

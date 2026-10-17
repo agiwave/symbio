@@ -118,12 +118,12 @@ impl ContentSearchTool {
                 context_before,
                 context_after,
                 multiline,
+                offset,
+                head_limit,
             )
             .await
         {
             Ok(result) => {
-                // 分页：offset / head_limit（按行截断，对齐 Trae Grep 参数）
-                let result = apply_line_pagination(result, offset, head_limit);
                 let truncated = result.len() > MAX_OUTPUT_BYTES;
                 let result = if truncated {
                     // 安全截断：搜索结果正文常含中文，裸 `&[..N]` 会 panic 在字符边界内
@@ -158,6 +158,8 @@ impl ContentSearchTool {
         context_before: usize,
         context_after: usize,
         multiline: bool,
+        offset: usize,
+        head_limit: usize,
     ) -> Result<String, String> {
         // 编译正则：多行模式开启 dot-matches-newline（对齐 rg -U）
         let mut rb = RegexMatcherBuilder::new();
@@ -219,9 +221,28 @@ impl ContentSearchTool {
 
         let mut searcher = SearcherBuilder::new().line_number(true).build();
 
+        // 收集窗口：`offset` 跳过前 N 行输出，`head_limit`（缺省 `MAX_RESULTS`）决定一段给多少行。
+        // 窗口只约束**收集**、不约束**扫描**：走完全程才拿得到真实总数（`match_count` /
+        // `line_index`）。截断处只说「限制了」不说「一共多少」，聚合型问题（「有多少处
+        // `unwrap()`」）就必然逼出一次原样重发。
+        let window = if head_limit > 0 {
+            head_limit
+        } else {
+            MAX_RESULTS
+        };
         let mut out: Vec<String> = Vec::new();
+        let mut line_index: usize = 0;
         let mut match_count: u64 = 0;
-        let mut limited = false;
+
+        macro_rules! emit_line {
+            ($text:expr) => {{
+                let at = line_index;
+                line_index += 1;
+                if at >= offset && out.len() < window {
+                    out.push($text);
+                }
+            }};
+        }
 
         for entry in walk_builder.build() {
             let entry = match entry {
@@ -268,12 +289,14 @@ impl ContentSearchTool {
                 }
                 if !file_matches.is_empty() {
                     if output_mode == "files_with_matches" {
-                        out.push(disp.to_string());
+                        emit_line!(disp.to_string());
                     } else if output_mode == "count" {
-                        out.push(format!("{}:{}", disp, file_matches.len()));
+                        emit_line!(format!("{}:{}", disp, file_matches.len()));
                     } else {
-                        out.push(format!("{}", disp));
-                        out.extend(file_matches.clone());
+                        emit_line!(format!("{}", disp));
+                        for m in &file_matches {
+                            emit_line!(m.clone());
+                        }
                     }
                     match_count += file_matches.len() as u64;
                 }
@@ -297,12 +320,12 @@ impl ContentSearchTool {
                 match_count += file_matches.len() as u64;
 
                 if output_mode == "files_with_matches" {
-                    out.push(disp.to_string());
+                    emit_line!(disp.to_string());
                 } else if output_mode == "count" {
-                    out.push(format!("{}:{}", disp, file_matches.len()));
+                    emit_line!(format!("{}:{}", disp, file_matches.len()));
                 } else if context_before == 0 && context_after == 0 {
                     for (ln, text) in &file_matches {
-                        out.push(format!("{}:{}:{}", disp, ln, text));
+                        emit_line!(format!("{}:{}:{}", disp, ln, text));
                     }
                 } else {
                     // 手动上下文窗口：读文件行，合并匹配 ± 上下文行号
@@ -327,19 +350,25 @@ impl ContentSearchTool {
                             continue;
                         }
                         let text = line_vec[i].to_str_lossy().into_owned();
-                        out.push(format!("{}:{}:{}", disp, i + 1, text));
+                        emit_line!(format!("{}:{}:{}", disp, i + 1, text));
                     }
                 }
             }
-
-            if !limited && match_count as usize >= MAX_RESULTS {
-                limited = true;
-                break;
-            }
         }
 
-        if limited {
-            out.push(format!("[结果已限制为前 {MAX_RESULTS} 条匹配]"));
+        // 尾部读数：说清「一共多少、给了哪一段、剩下的怎么拿」。
+        let given = out.len();
+        let next_offset = offset + given;
+        let withheld = line_index.saturating_sub(next_offset);
+        if given > 0 && withheld > 0 {
+            out.push(format!(
+                "[结果已分页：共 {match_count} 处命中、{line_index} 行输出；本次给出第 {}–{next_offset} 行（{given} 行），其后还有 {withheld} 行。取后续用 offset={next_offset}（head_limit 控每页行数）；只问总数用 output_mode=\"count\"；或按 path/include/type 收窄后重查。整份结果超预算时由系统存档，取回见结果中的存档指引。]",
+                offset + 1
+            ));
+        } else if given == 0 && line_index > 0 {
+            out.push(format!(
+                "[窗口越过末尾：共 {match_count} 处命中、{line_index} 行输出，offset={offset} 已超出最后一行（第 {line_index} 行）；从 offset=0 起取。]"
+            ));
         }
 
         if out.is_empty() {
@@ -384,21 +413,6 @@ fn type_to_globs(ty: &str) -> &'static [&'static str] {
         "csv" => &["*.csv"],
         _ => &[],
     }
-}
-
-/// 对搜索结果按行做分页（对齐 Trae Grep 的 offset / head_limit）
-fn apply_line_pagination(result: String, offset: usize, head_limit: usize) -> String {
-    if offset == 0 && head_limit == 0 {
-        return result;
-    }
-    let lines: Vec<&str> = result.lines().collect();
-    let start = offset.min(lines.len());
-    let end = if head_limit > 0 {
-        (start + head_limit).min(lines.len())
-    } else {
-        lines.len()
-    };
-    lines[start..end].join("\n")
 }
 
 #[async_trait]
@@ -451,11 +465,11 @@ impl Capability for ContentSearchTool {
                     },
                     "head_limit": {
                         "type": "integer",
-                        "description": "返回的最大行数（0 表示不限，对齐 Trae Grep 的 head_limit）"
+                        "description": "本次返回的最大行数（0 表示用默认上限 1000 行；对齐 Trae Grep 的 head_limit）"
                     },
                     "offset": {
                         "type": "integer",
-                        "description": "跳过前 N 行后再返回（对齐 Trae Grep 的 offset）"
+                        "description": "跳过前 N 行再返回（翻页取回被截断段落；结果尾部的分页读数会直接给出下一个 offset 与命中总数）"
                     }
                 },
                 "required": ["pattern"]

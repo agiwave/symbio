@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const script = fileURLToPath(new URL('./grep-audit.mjs', import.meta.url))
+const repoRoot = fileURLToPath(new URL('..', import.meta.url))
 function audit(source, { waiver = '', strict = false, scope = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-'))
   try {
@@ -15,6 +16,8 @@ function audit(source, { waiver = '', strict = false, scope = false } = {}) {
     fs.writeFileSync(path.join(plugins, 'other/sample.rs'), source.replace('WAIVER', waiver))
     const env = { ...process.env, NO_COLOR: '1' }
     delete env.SCOPE
+    // fixture 树里没有全仓的存量债务：S-014 的棘轮基线钉在 0，它不参与这些用例的成败
+    env.LEGACY_ROLE_WRITE_BASELINE = '0'
     if (scope) env.SCOPE = plugins
     const result = spawnSync(process.execPath, [script, ...(strict ? ['--strict'] : [])], {
       cwd: root, env, encoding: 'utf8', timeout: 10000,
@@ -188,6 +191,8 @@ function s010Audit(files) {
     }
     const env = { ...process.env, NO_COLOR: '1' }
     delete env.SCOPE
+    // 同 `audit()`：fixture 里不比全仓存量，S-014 棘轮基线钉 0
+    env.LEGACY_ROLE_WRITE_BASELINE = '0'
     return spawnSync(process.execPath, [script], { cwd: root, env, encoding: 'utf8', timeout: 10000 })
   } finally {
     fs.rmSync(root, { recursive: true, force: true })
@@ -544,4 +549,115 @@ test('S-013 finds every WalkBuilder construction pinned in this repository', () 
     timeout: 30000,
   })
   assert.match(r.stdout, /S-013 通过：3 处 WalkBuilder 构造点都钉了遍历序/)
+})
+
+// ── S-014: ChatNode 存量 `role` 格直写棘轮 ─────────────────────────────
+// 棘轮的三面都要钉住：升即红、降了不挪基线也即红、持平才过——
+// 只钉第一面的话，债务会换个名字继续长（基线永远等于昨天的读数）。
+const S014_FILE = 'symbio/src/plugins/session/sample.rs'
+
+function roleAudit(source, baseline) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grep-audit-s014-'))
+  try {
+    // 仓库树标记：扫描根按「cwd 下有 symbio/」判定，缺了会回落到真实仓库
+    const target = path.join(root, S014_FILE)
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.writeFileSync(target, source)
+    const env = { ...process.env, NO_COLOR: '1', LEGACY_ROLE_WRITE_BASELINE: String(baseline) }
+    delete env.SCOPE
+    return spawnSync(process.execPath, [script], {
+      cwd: root,
+      env,
+      encoding: 'utf8',
+      timeout: 10000,
+    })
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+}
+
+/**
+ * 真实仓库上的 S-014 运行（`LEGACY_ROLE_WRITE_BASELINE` 可覆盖基线）。
+ *
+ * 与 `roleAudit`（临时树）分开：`S014_IS_REPO` 守卫把「持平 / 该收紧」两条分支
+ * 限定在真实仓库上跑，因此这两条分支只能在真实仓库上钉。基线置大 ⇒ 触发
+ * 「该收紧」；不置 ⇒ 触发「持平」——都不动仓库里的存量。
+ */
+function roleAuditRepo(baseline) {
+  const env = {
+    ...process.env,
+    NO_COLOR: '1',
+    LEGACY_ROLE_WRITE_BASELINE: String(baseline),
+  }
+  delete env.SCOPE
+  return spawnSync(process.execPath, [script], {
+    cwd: repoRoot,
+    env,
+    encoding: 'utf8',
+    timeout: 60000,
+  })
+}
+
+test('S-014 fixture 树不比棘轮：扫描根不是真实仓库 ⇒ 跳过', () => {
+  const src = 'fn n() -> ChatNode {\n    ChatNode { role: Some(NodeRole::Assistant), ..Default::default() }\n}\n'
+  const r = roleAudit(src, 1)
+  assert.equal(r.status, 0, r.stdout)
+  // 临时树里 `symbio/src` 只躺着一个 fixture，存量恒 0/1——与 166 的差是「树不对」，
+  // 不是「该收紧」。据此判红会让守卫自己的回归测试变成噪音。
+  assert.match(r.stdout, /S-014 跳过：当前树不是真实仓库（临时 fixture），棘轮不比/)
+})
+
+test('S-014 新增直写即红，并点名命中处与改法', () => {
+  const src = 'fn n() -> ChatNode {\n    ChatNode { role: Some(NodeRole::Assistant), ..Default::default() }\n}\n'
+  const r = roleAudit(src, 0)
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /S-014 违例：存量 role 格直写 1 处 > 基线 0/)
+  assert.match(r.stdout, /sample\.rs:2/)
+  assert.match(r.stdout, /身份写 .*principal.*，不写 role/)
+})
+
+test('S-014 存量降了却不挪基线同样判红（棘轮只许留痕地下调）', () => {
+  // 这条分支被 `S014_IS_REPO` 限定在真实仓库上跑，所以这里直接把基线置到
+  // **超过真实存量**（不动仓里任何存量）：读数 < 基线 ⇒ 该收紧。
+  const r = roleAuditRepo(9999)
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /S-014 基线该收紧：存量 role 格直写 \d+ 处 < 基线 9999/)
+})
+
+test('S-014 数的是直写形状：字段初始化 / 赋值 / get_or_insert / 两个过渡入口', () => {
+  const shapes = [
+    'role: Some(NodeRole::Assistant),',
+    'role: Some(cm::NodeRole::Tool),',
+    'node.role = Some(NodeRole::User);',
+    'node.role.get_or_insert(NodeRole::Assistant);',
+    'let x = node.with_role(role);',
+    'msg.set_legacy_role(role);',
+  ]
+  const src = shapes.map((s) => `fn f() {\n    ${s}\n}\n`).join('')
+  const r = roleAudit(src, shapes.length)
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('S-014 不判注释行，豁免必须写理由（本行或紧邻上一行）', () => {
+  const hit = '    node.role = Some(NodeRole::Tool);\n'
+  const asComment = `/// 例：${hit.trim()}\n`
+  assert.equal(roleAudit(asComment, 0).status, 0, '注释里的形状是反例展示，不是债务')
+  for (const waived of [
+    hit.replace('\n', '  // grep-audit-allow S-014: 读侧兼容出口，随 T-147d 收口清\n'),
+    `// grep-audit-allow S-014: 读侧兼容出口，随 T-147d 收口清\n${hit}`,
+  ]) {
+    assert.equal(roleAudit(waived, 0).status, 0, roleAudit(waived, 0).stdout)
+  }
+  const empty = hit.replace('\n', '  // grep-audit-allow S-014:   \n')
+  assert.equal(roleAudit(empty, 0).status, 1, '空理由不算豁免')
+})
+
+test('S-014 真实仓库的存量与基线持平（读数漂了就红）', () => {
+  const r = spawnSync(process.execPath, [script], {
+    cwd: path.resolve(path.dirname(script), '..'),
+    env: { ...process.env, NO_COLOR: '1' },
+    encoding: 'utf8',
+    timeout: 30000,
+  })
+  assert.match(r.stdout, /S-014 通过：role 格直写存量 \d+ 处，与基线持平/)
 })

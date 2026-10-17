@@ -45,26 +45,27 @@ created: 2026-09-11
 ## 快速开始
 
 ```bash
-# 构建（脚本负责把 C 工具链喂给 cc-rs 并归一化路径分隔符）
+# 以下都在 `cli/` 下执行；产物落在**仓库根**的 target/（`cli` 是根 workspace 的成员，
+# 所有成员共用一个 target/）——构建脚本成功后会打印这一行，别照记忆抄路径
 node scripts/build-cli.mjs
 
 # 非交互：单条消息
-./../symbio/target/debug/symbio-cli.exe --homedir "D:\Bing\symbio\.symbio" -m "用一句话解释什么是分形插件架构"
+./../target/debug/symbio-cli.exe --homedir ~/.symbio -m "用一句话解释什么是分形插件架构"
 
 # 非交互：管道（脚本友好；stdout 只含模型文本）
-echo "你好" | ./../symbio/target/debug/symbio-cli.exe --homedir "D:\Bing\symbio\.symbio"
+echo "你好" | ./../target/debug/symbio-cli.exe --homedir ~/.symbio
 
 # 交互：多轮 REPL
-./../symbio/target/debug/symbio-cli.exe --homedir "D:\Bing\symbio\.symbio"
+./../target/debug/symbio-cli.exe --homedir ~/.symbio
 
 # 交互：stdin 不是终端时用 --repl 强制进入 REPL（也便于脚本化验证会话）
-printf '第一轮\n/provider\n/exit\n' | ./../symbio/target/debug/symbio-cli.exe --repl
+printf '第一轮\n/provider\n/exit\n' | ./../target/debug/symbio-cli.exe --repl
 
 # 心跳守护：驻留并为本目录所有启用心跳的会话触发空闲心跳
-./../symbio/target/debug/symbio-cli.exe --homedir "D:\Bing\symbio\.symbio" --heartbeat
+./../target/debug/symbio-cli.exe --homedir ~/.symbio --heartbeat
 ```
 
-产物：`../symbio/target/debug/symbio-cli.exe`。
+产物：`../target/debug/symbio-cli.exe`（相对 `cli/`；仓库根看就是 `target/debug/…`）。
 
 ## 参数
 

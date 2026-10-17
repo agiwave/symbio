@@ -7,8 +7,9 @@
 //! 1. **输出形状**——`content` 模式每个匹配行一条、行间单换行（不再有空行）。
 //!    修复前 `UTF8Sink` 给的 `text` 含行终止符，`format!` 原样拼进结果再
 //!    `join("\n")` ⇒ 输出成 `行\n\n行`。
-//! 2. **分页与匹配行对齐**——`apply_line_pagination` 按 `result.lines()` 切，
-//!    输出行不再含空行后，`head_limit=2` 必须恰好覆盖 2 个匹配行。
+//! 2. **分页窗口按匹配行对齐，且截断处给出读数**——`offset` / `head_limit` 切在
+//!    **收集**阶段（不是先收满再切），所以窗口越过 `MAX_RESULTS` 也拿得到后续段落；
+//!    没给全时尾部一条读数说清总量、已给区间与下一个 `offset`。
 //!
 //! 三种 `output_mode` 各一条形状判据（对齐 e2e `t67` 的①②③，但这里直接
 //! 打 `search`，不经 LLM/CLI——单测拦形状、e2e 拦出口，两层各管各的）。
@@ -44,9 +45,31 @@ async fn fixture() -> tempfile::TempDir {
 
 async fn search_all(dir: &Path, output_mode: &str) -> String {
     tool()
-        .search("MARK", dir, output_mode, None, None, true, 0, 0, false)
+        .search(
+            "MARK",
+            dir,
+            output_mode,
+            None,
+            None,
+            true,
+            0,
+            0,
+            false,
+            0,
+            0,
+        )
         .await
         .expect("搜索应成功")
+}
+
+/// 带分页窗口的搜索：`offset` / `head_limit` 现在切在收集阶段
+async fn search_window(dir: &Path, offset: usize, head_limit: usize) -> String {
+    tool()
+        .search(
+            "MARK", dir, "content", None, None, true, 0, 0, false, offset, head_limit,
+        )
+        .await
+        .expect("分页搜索应成功")
 }
 
 // ==================== 输出形状（三种 output_mode 各一） ====================
@@ -160,13 +183,12 @@ async fn output_order_is_name_then_line_not_fs_walk_order() {
     );
 }
 
-/// 分页判据的核心反向用例：`head_limit=2` ⇒ 恰好 **2 个匹配行**。
-/// 修复前输出含空行，`apply_line_pagination` 按**输出行**切 ⇒ 只剩 1 个匹配行。
+/// 分页判据的核心反向用例：`head_limit=2` ⇒ 恰好 **2 个匹配行**（外加分页读数一行）。
+/// 修复前输出含空行，分页按**输出行**切 ⇒ 只剩 1 个匹配行。
 #[tokio::test]
 async fn head_limit_counts_match_lines_not_output_lines() {
     let dir = fixture().await;
-    let out = search_all(dir.path(), "content").await;
-    let paged = apply_line_pagination(out, 0, 2);
+    let paged = search_window(dir.path(), 0, 2).await;
 
     let matches: Vec<&str> = paged.lines().filter(|l| l.contains("MARK")).collect();
     assert_eq!(
@@ -174,19 +196,24 @@ async fn head_limit_counts_match_lines_not_output_lines() {
         2,
         "head_limit=2 ⇒ 恰 2 个匹配行（实际 {paged:?}）"
     );
+    let lines: Vec<&str> = paged.lines().collect();
     assert_eq!(
-        paged.lines().count(),
-        2,
-        "输出行数也应为 2（不许夹空行，实际 {paged:?}）"
+        lines.len(),
+        3,
+        "2 个匹配行 + 1 行分页读数（实际 {paged:?}）"
+    );
+    assert!(
+        lines[2].starts_with("[结果已分页"),
+        "末行必须是读数（{lines:?}）"
     );
 }
 
-/// `offset` 跳过前面的**匹配行**：offset=1 ⇒ 第 1 个匹配行（a.rs:1）被跳过
+/// `offset` 跳过前面的**匹配行**：offset=1 ⇒ 第 1 个匹配行（a.rs:1）被跳过。
+/// 跳过第 1 行后 4 行全部给完（窗口未再收紧）⇒ 没有隐藏段落 ⇒ 不带读数。
 #[tokio::test]
 async fn offset_skips_leading_match_lines() {
     let dir = fixture().await;
-    let out = search_all(dir.path(), "content").await;
-    let paged = apply_line_pagination(out, 1, 0);
+    let paged = search_window(dir.path(), 1, 0).await;
 
     let lines: Vec<&str> = paged.lines().collect();
     assert_eq!(lines.len(), 4, "5 个匹配行跳过 1 ⇒ 剩 4（实际 {paged:?}）");
@@ -198,14 +225,17 @@ async fn offset_skips_leading_match_lines() {
         lines.iter().any(|l| l.contains("a.rs:2:")),
         "第 2 个匹配行应在（实际 {paged:?}）"
     );
+    assert!(
+        !paged.contains("[结果已分页"),
+        "全给完了就不该喊截断（实际 {paged:?}）"
+    );
 }
 
 /// 组合：offset=1 + head_limit=2 ⇒ 恰好第 2、3 个匹配行
 #[tokio::test]
 async fn offset_and_head_limit_combine_on_match_lines() {
     let dir = fixture().await;
-    let out = search_all(dir.path(), "content").await;
-    let paged = apply_line_pagination(out, 1, 2);
+    let paged = search_window(dir.path(), 1, 2).await;
 
     let matches: Vec<&str> = paged.lines().filter(|l| l.contains("MARK")).collect();
     assert_eq!(matches.len(), 2, "（实际 {paged:?}）");
@@ -223,11 +253,64 @@ async fn offset_and_head_limit_combine_on_match_lines() {
     );
 }
 
-/// 平凡值：offset=0 且 head_limit=0 ⇒ 原样返回（不做任何切分）
-#[test]
-fn zero_pagination_returns_input_verbatim() {
-    let input = "a.rs:1:MARK\nb.rs:1:MARK".to_string();
-    assert_eq!(apply_line_pagination(input.clone(), 0, 0), input);
+/// 窗口切满但未给全 ⇒ 尾部读数必须同时给出**总量**与**取回方式**
+/// （T-140：只说「限制了」不说「一共多少」，聚合型问题就逼出原样重发）。
+#[tokio::test]
+async fn truncated_tail_reports_total_and_next_offset() {
+    let dir = fixture().await;
+    let out = search_window(dir.path(), 0, 2).await;
+    let note = out
+        .lines()
+        .last()
+        .expect("截断结果应以读数结尾")
+        .to_string();
+
+    assert!(note.contains("共 5 处命中"), "读数缺真实命中总数（{note}）");
+    assert!(note.contains("5 行输出"), "读数缺输出总行数（{note}）");
+    assert!(note.contains("第 1–2 行"), "读数缺已给区间（{note}）");
+    assert!(note.contains("还有 3 行"), "读数缺未给条数（{note}）");
+    assert!(note.contains("offset=2"), "读数缺下一页抓手（{note}）");
+    assert!(
+        note.contains("output_mode=\"count\""),
+        "读数缺「只要总数」的替代口径（{note}）"
+    );
+}
+
+/// 翻页真的能翻到窗口之外的段落：offset=2 拿到第 3、4 个匹配行——
+/// 修复前收集在上限处 `break`，`offset` 越界只会翻回同一份被截断的结果。
+#[tokio::test]
+async fn paging_reaches_lines_beyond_the_first_window() {
+    let dir = fixture().await;
+    let page2 = search_window(dir.path(), 2, 2).await;
+    let matches: Vec<&str> = page2.lines().filter(|l| l.contains("MARK")).collect();
+    assert_eq!(matches.len(), 2, "第二页应有 2 个匹配行（{page2:?}）");
+    assert!(matches[0].contains("a.rs:3:"), "{matches:?}");
+    assert!(matches[1].contains("b.rs:1:"), "{matches:?}");
+    // 读数口径跨页一致：总数不随窗口变化
+    assert!(page2
+        .lines()
+        .last()
+        .expect("仍有未给段落")
+        .contains("共 5 处命中"));
+}
+
+/// 窗口越过末尾：说「越界」而不是「未找到匹配」——后者会把模型推向重发同一条查询。
+#[tokio::test]
+async fn window_past_end_says_so_instead_of_no_match() {
+    let dir = fixture().await;
+    let out = search_window(dir.path(), 99, 0).await;
+    assert!(out.starts_with("[窗口越过末尾"), "实际 {out:?}");
+    assert!(out.contains("共 5 处命中"), "越界读数也要给总数（{out}）");
+    assert!(!out.contains("未找到匹配"), "有命中时不许说未找到（{out}）");
+}
+
+/// 平凡值：offset=0 且 head_limit=0 ⇒ 全量给完、不加读数（结果本身未被限制）
+#[tokio::test]
+async fn no_window_returns_everything_without_note() {
+    let dir = fixture().await;
+    let out = search_all(dir.path(), "content").await;
+    assert_eq!(out.lines().count(), 5, "5 个匹配行全给（实际 {out:?}）");
+    assert!(!out.contains('['), "未截断不加读数（实际 {out:?}）");
 }
 
 // ==================== 无匹配的形状 ====================
@@ -247,6 +330,8 @@ async fn no_match_reports_single_line() {
             0,
             0,
             false,
+            0,
+            0,
         )
         .await
         .expect("搜索应成功");

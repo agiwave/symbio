@@ -45,8 +45,26 @@ import path from 'node:path';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLI_DIR = path.resolve(HERE, '..');
-const TARGET_DIR = path.resolve(CLI_DIR, '..', 'symbio', 'target', 'debug');
+// target 根 = **cargo 实际用的那一个**（根 workspace 合并后是 `<仓库根>/target`，
+// 但本机若有 `.cargo/config.toml` 覆盖 target-dir 就不是——那份文件被 gitignore，
+// 仓里看不到它）。问 cargo 而不是照记忆拼路径：拼错的那份就是 003-building 里
+// 「文档指旧位置 ⇒ 读者拿旧二进制」的同一种事故，工具自己也不能幸免。
+const TARGET_ROOT = cargoTargetDir(CLI_DIR);
+const TARGET_DIR = path.join(TARGET_ROOT, 'debug');
 const FP_DIR = path.join(TARGET_DIR, '.fingerprint');
+
+/** 问 cargo 要 target 根目录（`cargo metadata` 的 `target_directory`） */
+function cargoTargetDir(cwd) {
+  const r = spawnSync('cargo', ['metadata', '--offline', '--format-version', '1', '--no-deps'], {
+    cwd,
+    encoding: 'utf8',
+    shell: false,
+  });
+  if (r.status !== 0) {
+    throw new Error(`cargo metadata 失败，拿不到 target 根：${(r.stderr || r.stdout || '').trim().slice(0, 200)}`);
+  }
+  return JSON.parse(r.stdout).target_directory;
+}
 
 // 构建脚本含 C/汇编编译；在无 cmake/nasm/cl 的环境重跑会挂死 → 绝不清理
 const BLOCKLIST = /^(aws-lc|ring|ort|libsqlite3-sys|zstd|lzma|bzip2|turbojpeg|esaxx|sentencepiece|onig|torch)/;

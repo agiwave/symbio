@@ -277,13 +277,13 @@ const runningDuration = computed(() => {
   background: var(--color-chip-sub-bg);
   color: var(--color-chip-sub-fg);
 }
-.node-head.tool .node-icon {
+.node-head.skeleton .node-icon {
   background: var(--color-chip-tool-bg);
   color: var(--color-chip-tool-fg);
 }
-.node-head.reasoning .node-icon {
-  background: var(--color-chip-reasoning-bg);
-  color: var(--color-chip-reasoning-fg);
+.node-head.notice .node-icon {
+  background: var(--color-chip-notice-bg);
+  color: var(--color-chip-notice-fg);
 }
 .node-title {
   font-weight: 500;

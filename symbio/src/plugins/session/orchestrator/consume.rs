@@ -254,6 +254,10 @@ impl SessionPlugin {
         // 对话面措辞的开关（`SessionConfig::compose_enabled`），同一条取值纪律。
         // 两级开关相互独立：判决决定"要不要干活"，措辞决定"说什么"。
         let compose_enabled = self.config.read().await.compose_enabled;
+        // 对话面开场白的开关（`SessionConfig::opening_enabled`），同一条取值纪律。
+        // 它只闸住 `Escalate` 首响那一句（`apply_verdict`），真实答复（`Answered`）
+        // 仍由 `compose_enabled` 说话——两个开关管两句不同的话，互不牵连。
+        let opening_enabled = self.config.read().await.opening_enabled;
         // 中途汇报的策略（`SessionConfig` 的四个旋钮），同一条取值纪律：一次锁、
         // 一次映射。四个数合成一个结构体，因为它们是**同一个判定**的四个参数
         // （见 `ProgressPolicy::due`）——平铺成四个字段会让"谁和谁是一组"只能靠命名猜。
@@ -286,6 +290,7 @@ impl SessionPlugin {
             supplements: drain,
             classify_enabled,
             compose_enabled,
+            opening_enabled,
             progress,
             presentation_tree,
             // 会话目录 = **本插件自己的目录**（装配期由父插件经 `PLUGIN_DIR` 告知），
@@ -355,7 +360,7 @@ impl SessionPlugin {
                         // 重试入口的出现与否取决于 abort 信号落在哪个检查点）。
                         //
                         // `partial` = 中止时**已产出的半截消息**（正文 / 思考 / 工具节点）：
-                        // 它们是事实，随 `persist_failure` 双写进 `messages.json`——
+                        // 它们是事实，随 `persist_failure` 收尾入格——
                         // 用户中断后重建的历史里那半句话还在。
                         self.persist_failure(
                             &session_id,

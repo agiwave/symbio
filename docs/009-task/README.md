@@ -60,20 +60,26 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 4 · 🟡 doing 0 · ☑ done 146 · ❌ wont 3（共 153）
+**计数**：☐ todo 8 · 🟡 doing 1 · ☑ done 150 · ❌ wont 3（共 162）
 
 ## 待处理（按依赖顺序）
 
 | 编号 | 任务 | 优先 | 轨 | 依赖 |
 |---|---|---|---|---|
-| `T-155-机制化批` | 前端机制化收敛批——NodeKind 唯一分派轴、style_tag 降级、reasoning 归 Notice | now | 会话与输入 | PL-013-前端机制化、ADR-070 |
-| `T-140-大结果检索的聚合口径` | 检索结果截断只说「限制了」不说「一共多少」——聚合型问题逼出重复调用 | next | local | — |
-| `T-141-开机噪声与文档漂移` | 每次开机一条假异常 WARN（`.symbio/projection` 孤儿目录）+ 文档里几处与运行事实不符的指路 | later | 登记卫生 | — |
-| `T-156-控制面收敛` | 控制面收敛——单环驱动器 + 统一注册表（PL-014 落地） | later | 架构收敛 | PL-014-单环一表收敛、PL-012-高阶智能体平台v2 |
+| `T-157-ActorSpec-pattern死字段接线` | ActorSpec.pattern 生产零读取——三模式是数据存在、行为未分叉，Decider 语义长在三处特判里 | now | plan | — |
+| `T-158-工具名硬编码归一为能力元数据` | 工具执行器按名硬编码 agent_run——淘汰闸 / 任务表闸 / 收束拦截三处按字面量判定，改为工具自声明 | now | session | — |
+| `T-160-v2文件前缀退役` | session 内 8 个实现文件 + 7 个测试文件带 v2_ 版本号前缀——终态命名不该带版本号 | next | 登记卫生 | — |
+| `T-161-模型供应商参数档案表化` | 三协议各自硬编码 max_tokens 下限与 reasoning 字段名——供应商差异从 if 特判收成一张数据表 | next | plan | — |
+| `T-162-ClassifyOnly快速档路径裁决` | 令牌闸门的快速档（ClassifyOnly / issue_fast）零生产调用——接线，或显式退役并从 F3 论证划界 | next | plan | — |
+| `T-163-插件层特判审计守卫` | core 有 5 个可执行审计、插件层零个——把「按名硬编码」与「供应商散落」的守卫平移过来防回流 | next | 门禁与CI | — |
+| `T-164-v2_messages落格失败升级裁决` | v2_messages 落格失败仍静默——头部注释承诺「b3 之后升级为错误」而 b3 批漏做，主读切 WAL 后该次编辑重建即丢 | next | 登记卫生 | — |
+| `T-165-控制面收敛` | 控制面收敛——单环驱动器 + 统一注册表（PL-014 落地） | later | 架构收敛 | PL-014-单环一表收敛、PL-012-高阶智能体平台v2 |
 
 ## 进行中
 
-（无）
+| 编号 | 任务 | 优先 | 轨 | 依赖 |
+|---|---|---|---|---|
+| `T-156-架构机制化与旧代码清理批` | 架构机制化与旧代码清理批——把「假机制」接活、把「特殊化」降为数据、清掉过时注释与版本号前缀 | now | plan | — |
 
 ## 已完成
 
@@ -103,6 +109,8 @@ board.columns: [rank, deps, evidence, reason]
 | `T-146-主体可路由地址` | 主体 id 迁到可路由地址形态——授权表扩 person/tool/system 三族行 | 会话与输入 |
 | `T-147-ChatNode协议改名与字段瘦身` | ChatMessage → ChatNode 一次原子改——Turn 退役、role 删除、tool_call_id 沉 meta、principal 升级为结构体 | 会话与输入 |
 | `T-148-前端注册表按kind与style_tag分派` | 呈现分派从 MessageType 枚举换成 (kind, style_tag, principal) 三元组 | frontend |
+| `T-155-机制化批` | 前端机制化收敛批——NodeKind 唯一分派轴、style_tag 降级、reasoning 归 Notice | 会话与输入 |
+| `T-159-messages.json过时双写注释清理` | messages.json 写侧已停（ADR-049）而 10+ 处注释仍声称「双写进 messages.json」——假事实注释清理 | 登记卫生 |
 | `T-011` | 五轴的外部效标：每条轴挂一个可复现的读数，而不是形容词 | plan |
 | `T-012` | 能力名册 ↔ 代码锚点：名册的每一条能力都要指到实现它的地方 | plan |
 | `T-015` | 出厂 prompt 在线上是两条 system 消息，部分 provider 直接 400 拒收——full 档在那类 provider 上第一轮就失败 | S |
@@ -113,6 +121,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-092-fmt缺推送点闸门` | fmt 只在整轮门禁与 CI 里判——推送点（pre-push）不判，未格式化源码能推到 origin | quality |
 | `T-102-路由地址owner归一` | 路由地址消除双 owner——地址唯一表归 RE-006 §2.3，RE-003 只留机制叙述 + 契约表 | plan |
 | `T-112-多协议适配e2e批` | 多协议适配 e2e 批：mock-llm 按路径分派四种线格式，四套适配器各跑一遍用户可见链路 | e2e |
+| `T-140-大结果检索的聚合口径` | 检索结果截断只说「限制了」不说「一共多少」——聚合型问题逼出重复调用 | local |
 | `T-144-长度截断的自动续写在v2执行路径不可达` | v2 执行路径重建 TurnOutput 时丢掉 finish——长度戳与自动续写读到的恒是缺省 Stop | 会话与输入 |
 | `T-149-会话建树策略开关` | `presentation_tree: flat \| grouped \| deep` 会话配置——后端组树，前端零结构假设 | 会话与输入 |
 | `T-150-骨架惰性重取` | `expand_skeleton` VDFS 动作——折叠骨架可释放子节点，展开时按需拉取 | 会话与输入 |
@@ -133,6 +142,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-113-本地检索输出残余批` | 本地检索输出残余批：`content_search` 的 content 模式输出含多余空行（分页与匹配行不对齐）· 该文件无单测 | local |
 | `T-114-telegram上游端点可配批` | telegram 上游端点可配批：`api_url()` 把 `api.telegram.org` 写死 ⇒ `send` / `get_updates` / `start_listener` 三条路由无靶子可打 | e2e |
 | `T-115-入站边界可达面与白名单一致批` | gateway 入站边界的可达面与 `is_readonly_allowed` 白名单不一致：缺 home/work 四条臂 · 白名单两条死条目 | gateway |
+| `T-141-开机噪声与文档漂移` | 每次开机一条假异常 WARN（`.symbio/projection` 孤儿目录）+ 文档里与运行事实不符的指路、本机绝对路径 | 登记卫生 |
 | `T-153-旧文档与注释清理` | 扫「一轮 / Turn」措辞——ADR-052/055 作废标注、docs/005-rev 归档、代码注释同步 | 登记卫生 |
 | `T-001` | 登记机制落地：单文档 + 守卫 + 汇总 + 总纲 | meta |
 | `T-003` | 接管 docs/README 纪律地图（每条纪律成为 spec 条目） | doc |
@@ -378,8 +388,8 @@ board.columns: [rank, deps, evidence, reason]
   - [`T-139-写类工具不回显解析后的落点`](139-写类工具不回显解析后的落点.md) vdfs 写类结果回显**入参**地址而不是解析后的落点——影子树由此自我验证（wont）
   - [`T-142-长度截断时草稿被当答话交付`](142-长度截断时草稿被当答话交付.md) finish=Length 且正文 0 字符时，整段思考被提升成答话原样交付——stdout 变成 13KB 草稿（done）
   - [`T-143-跨会话记忆以指令形态劫持当前轮`](143-跨会话记忆以指令形态劫持当前轮.md) 召回段把旧会话的经验原文当指令送进 prompt——小模型照着执行上一个任务（done）
-- [`T-140-大结果检索的聚合口径`](140-大结果检索的聚合口径.md) 检索结果截断只说「限制了」不说「一共多少」——聚合型问题逼出重复调用（todo）
-- [`T-141-开机噪声与文档漂移`](141-开机噪声与文档漂移.md) 每次开机一条假异常 WARN（`.symbio/projection` 孤儿目录）+ 文档里几处与运行事实不符的指路（todo）
+- [`T-140-大结果检索的聚合口径`](140-大结果检索的聚合口径.md) 检索结果截断只说「限制了」不说「一共多少」——聚合型问题逼出重复调用（done）
+- [`T-141-开机噪声与文档漂移`](141-开机噪声与文档漂移.md) 每次开机一条假异常 WARN（`.symbio/projection` 孤儿目录）+ 文档里与运行事实不符的指路、本机绝对路径（done）
 - [`T-144-长度截断的自动续写在v2执行路径不可达`](144-长度截断的自动续写在v2执行路径不可达.md) v2 执行路径重建 TurnOutput 时丢掉 finish——长度戳与自动续写读到的恒是缺省 Stop（done）
 - [`T-145-前端机制化批`](145-前端机制化批.md) 前端机制化——ChatNode 协议 / 主体平级 / 建树策略 / 惰性重取（SPRINT）（done） · 子项 done 8
   - [`T-146-主体可路由地址`](146-主体可路由地址.md) 主体 id 迁到可路由地址形态——授权表扩 person/tool/system 三族行（done）
@@ -390,8 +400,17 @@ board.columns: [rank, deps, evidence, reason]
   - [`T-151-Typing占位节点`](151-Typing占位节点.md) Typing 占位——前端本地合成、同父非-typing 兄弟到达即 removed（done）
   - [`T-152-协议顶层字段消费守卫`](152-协议顶层字段消费守卫.md) `protocol-mirror-audit.mjs` 加 G 组——ChatNode 顶层每字段须有前端/CLI 不依赖 meta 语义的消费者（done）
   - [`T-153-旧文档与注释清理`](153-旧文档与注释清理.md) 扫「一轮 / Turn」措辞——ADR-052/055 作废标注、docs/005-rev 归档、代码注释同步（done）
-- [`T-155-机制化批`](155-机制化批.md) 前端机制化收敛批——NodeKind 唯一分派轴、style_tag 降级、reasoning 归 Notice（todo）
-- [`T-156-控制面收敛`](156-控制面收敛.md) 控制面收敛——单环驱动器 + 统一注册表（PL-014 落地）（todo）
+- [`T-155-机制化批`](155-机制化批.md) 前端机制化收敛批——NodeKind 唯一分派轴、style_tag 降级、reasoning 归 Notice（done）
+- [`T-156-架构机制化与旧代码清理批`](156-架构机制化与旧代码清理批.md) 架构机制化与旧代码清理批——把「假机制」接活、把「特殊化」降为数据、清掉过时注释与版本号前缀（doing） · 子项 todo 7 / done 1
+  - [`T-157-ActorSpec-pattern死字段接线`](157-ActorSpec-pattern死字段接线.md) ActorSpec.pattern 生产零读取——三模式是数据存在、行为未分叉，Decider 语义长在三处特判里（todo）
+  - [`T-158-工具名硬编码归一为能力元数据`](158-工具名硬编码归一为能力元数据.md) 工具执行器按名硬编码 agent_run——淘汰闸 / 任务表闸 / 收束拦截三处按字面量判定，改为工具自声明（todo）
+  - [`T-159-messages.json过时双写注释清理`](159-messages.json过时双写注释清理.md) messages.json 写侧已停（ADR-049）而 10+ 处注释仍声称「双写进 messages.json」——假事实注释清理（done）
+  - [`T-160-v2文件前缀退役`](160-v2文件前缀退役.md) session 内 8 个实现文件 + 7 个测试文件带 v2_ 版本号前缀——终态命名不该带版本号（todo）
+  - [`T-161-模型供应商参数档案表化`](161-模型供应商参数档案表化.md) 三协议各自硬编码 max_tokens 下限与 reasoning 字段名——供应商差异从 if 特判收成一张数据表（todo）
+  - [`T-162-ClassifyOnly快速档路径裁决`](162-ClassifyOnly快速档路径裁决.md) 令牌闸门的快速档（ClassifyOnly / issue_fast）零生产调用——接线，或显式退役并从 F3 论证划界（todo）
+  - [`T-163-插件层特判审计守卫`](163-插件层特判审计守卫.md) core 有 5 个可执行审计、插件层零个——把「按名硬编码」与「供应商散落」的守卫平移过来防回流（todo）
+  - [`T-164-v2_messages落格失败升级裁决`](164-v2_messages落格失败升级裁决.md) v2_messages 落格失败仍静默——头部注释承诺「b3 之后升级为错误」而 b3 批漏做，主读切 WAL 后该次编辑重建即丢（todo）
+- [`T-165-控制面收敛`](165-控制面收敛.md) 控制面收敛——单环驱动器 + 统一注册表（PL-014 落地）（todo）
 
 <!-- registry:summary end -->
 

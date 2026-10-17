@@ -23,11 +23,14 @@ import './_selfrun.mjs';
 // | C 会话内边界 | 跑一轮真实工具回路：工具真落盘，且对话面节点**只由 `compose` 产出、只挂根级** |
 // | D 卸载 | 停用两个插件 ⇒ 路由消失（`NotFound`），而工具回路照旧跑通 |
 //
-// ## C 线为什么钉住 `progress_enabled = false`
+// ## C 线为什么钉住两个对话面开关
 //
-// 它验的是**边界**（谁产出 / 挂在哪），而中途汇报会往同一轮里再加一条对话面节点
-// （`reason = progress`）。汇报自己见 `t23`；本线把开关关掉，让"恰有一条对话面节点"
-// 这个断言不依赖"本用例跑得比 `progress_interval_ms` 快"这种隐式前提。
+// 它验的是**边界**（谁产出 / 挂在哪）。「恰有一条对话面节点」要有**靶子**，而靶子
+// 就是那句 `Escalate` 首响 ⇒ `opening_enabled` 必须为 `true`（出厂默认是 `false`：
+// 机制化后前端按节点自身呈现「在跑什么」，那句旁白成了重复信息）。另一半是**排除**：
+// 中途汇报会往同一轮里再加一条对话面节点（`reason = progress`）⇒ `progress_enabled`
+// 关掉，断言就不依赖"本用例跑得比 `progress_interval_ms` 快"这种隐式前提。
+// 汇报自己见 `t23`，首响行为见 `t22`。
 //
 // ## B 线为什么只断言"不需要模型"的路径
 //
@@ -123,8 +126,9 @@ export default defineCase(
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
         gateway: gatewayConfig(GATEWAY_PORT),
-        // 判决与措辞用出厂默认（本线验的正是它们），汇报关掉（理由见文件头）。
-        session: { progress_enabled: false },
+        // 汇报关掉（它会给同一轮再加一条对话面节点），首响打开（它就是本线的靶子）；
+        // 判决与措辞用出厂默认——见文件头「C 线为什么钉住两个对话面开关」。
+        session: { progress_enabled: false, opening_enabled: true },
       },
     });
 

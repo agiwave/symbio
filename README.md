@@ -86,7 +86,7 @@ cargo clippy --lib --tests -- -D warnings
 symbio/
 ├── symbio/          # Rust 核心库：symbio_core（契约）· plugins（16 插件）· providers（嵌入 / 存储）
 ├── tauri/           # Vue 3 桌面端（src-tauri = 3 命令的薄适配层）
-├── cli/             # 纯 Rust CLI 前端（共享 symbio 的 target 缓存）
+├── cli/             # 纯 Rust CLI 前端（与其余成员共用仓库根的 target/）
 ├── docs/            # 系统级文档（架构 / 参考 / 指南 / 设计 / 归档）
 ├── e2e/             # 端到端用例（mock-llm / mock-mcp + 网关 WS）
 ├── examples/        # Agent 示例包

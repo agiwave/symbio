@@ -8,7 +8,7 @@
 //! 4. **中止不是失败**：生成被中止时**照落收束格**（`chat.assistant.final`，
 //!    载荷 `status: "aborted"` + `terminated`），上抛 `Aborted` 走独立出口——
 //!    不呈现「失败」也不进兜底分子；半截产出随出口带走（`partial`），由消费
-//!    循环双写进 `messages.json`。中止与失败的差别在**类型上**可见，不靠错误
+//!    循环收尾入格。中止与失败的差别在**类型上**可见，不靠错误
 //!    文本猜。
 
 use std::sync::{Arc, Mutex};
@@ -641,7 +641,7 @@ async fn tool_free_turn_abort_closes_the_cell_and_bubbles_aborted() {
 
 /// 事实完整性（T-052 判据）：**中止后那半句话还在**——模型说到一半（"让我想想
 /// 这个名词"）被打断，半截正文 / 半截思考（一）随出口带走（`Aborted { partial }`，
-/// 由消费循环 `persist_failure` 双写进 `messages.json`），（二）照原样入格
+/// 由消费循环 `persist_failure` 收尾入格），（二）照原样入格
 /// （收束格载荷 `text` / `reasoning`）。用户随后追问那个名词时，前置上下文
 /// （那半句 + 半截思考）在重建的历史里都在。
 #[tokio::test]
@@ -660,7 +660,7 @@ async fn aborted_half_sentence_survives_in_partial_and_grid() {
     .err()
     .expect("中止必须上抛（Aborted 出口）");
 
-    // ① 随出口带走：正文节点 + 推理节点都进 `partial`（落库镜像的双写源）。
+    // ① 随出口带走：正文节点 + 推理节点都进 `partial`（落库镜像的来源）。
     let PluginError::Aborted { partial } = &err else {
         panic!("上抛的是中止本体：{err:?}");
     };

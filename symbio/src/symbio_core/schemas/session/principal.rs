@@ -15,9 +15,9 @@ use serde_json::Value;
 
 /// **主体族**（[ADR-069 §决策 1]）——四值闭集。
 ///
-/// `kind` 是主体身份在协议顶层的唯一承载点：[T-147] 起 `NodeRole::User` ↔
-/// `PrincipalKind::Person`，`Assistant` ↔ `Agent`，`Tool` ↔ `Tool`，`System` ↔ `System`；
-/// 读侧一次性别名靠这套映射把旧消息里的 role 补进 kind。
+/// `role` 已退出协议顶层，`kind` 是主体族的唯一承载点。
+/// 因此 [T-147] 里 `NodeRole::User` ↔ `PrincipalKind::Person`，`Assistant` ↔ `Agent`，
+/// `Tool` ↔ `Tool`，`System` ↔ `System`；读侧一次性别名靠这套映射把旧消息里的 role 补进 kind。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum PrincipalKind {
@@ -133,7 +133,7 @@ impl Principal {
     /// - 已带 `/` 段的限定名（`local/todo_write`、`mcp/github/create_issue`）原样；
     /// - MCP 双下划线拼接名（`mcp__server__tool`）⇒ `mcp/server/tool`；
     /// - 首段是归属插件（vdfs / web / local / agent）⇒ `ns/其余`
-    ///   （`vdfs_write` → `vdfs/write`，与 `authz` 登记的主体行逐一对齐）；
+    ///   （`vdfs_write` → `vdfs/write`，与 [`crate::symbio_core::authz`] 登记的主体行逐一对齐）；
     /// - 其余只名工具 ⇒ `legacy/<name>`——地址是合成的，族不变。
     ///
     /// 产出对 [`Principal::from_legacy`] **幂等**（这些 namespace 都读回 Tool 族）。

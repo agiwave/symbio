@@ -1013,8 +1013,8 @@ export function messageStatusTone(f: MessageFacets): MessageStatusTone {
 export interface MessageHeadModifier {
   user: boolean
   sub: boolean
-  tool: boolean
-  reasoning: boolean
+  skeleton: boolean
+  notice: boolean
   /** 标题呼吸动效：思考中**与工具执行中**共用——两者都是「正在进行、内容尚未成形」的行 */
   thinking: boolean
 }
@@ -1024,9 +1024,9 @@ export function messageHeadModifier(f: MessageFacets): MessageHeadModifier {
   return {
     user: f.role === CHAT_ROLE_USER,
     sub: f.subSession,
-    // 头部色调钩子按形态给：骨架像「动作」、折叠叶像「思考」——纯形状，不认业务名
-    tool: f.type === NODE_KIND_SKELETON,
-    reasoning: f.type === NODE_KIND_NOTICE,
+    // 头部色调钩子按形态给：容器格与折叠叶各一色——纯形状，不认业务名
+    skeleton: f.type === NODE_KIND_SKELETON,
+    notice: f.type === NODE_KIND_NOTICE,
     // 标题呼吸动效：凡是「正在进行、内容尚未成形」的行（折叠叶思考 / 容器运行中）
     thinking:
       Boolean(p.thinkingWhenRunning || p.runningAction) && isStreamingStatus(f.status),

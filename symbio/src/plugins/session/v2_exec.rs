@@ -61,7 +61,7 @@
 //! `chat.assistant.final`——中止是事实的**状态**，不是另一种事实；载荷
 //! `status: "aborted"` + `terminated: { reason, at }`），本函数上抛
 //! `Aborted { partial }`——chat_loop 走独立出口，会话结局 `aborted`
-//! （**不是** `failed`），半截产出随 `partial` 双写进 `messages.json`。
+//! （**不是** `failed`），半截产出随 `partial` 入格。
 //! 中止与失败在**类型上**分开（`AdapterError` / `TurnOutcome.aborted`），
 //! 不靠错误文本猜；两者出口因此可各自演化。
 //!
@@ -406,7 +406,7 @@ impl UiBridge {
     /// 当前正文节点 `(id, 累积正文)`（未定格的最后一轮正文；本轮无正文 ⇒ `None`）。
     ///
     /// 累积正文的消费点有两个：`chat_loop` 的 `finalize_assistant_turn`（收口末轮）
-    /// 与中止出口（半截正文入格 + 双写 `messages.json`，见 [`execute_turn`]）。
+    /// 与中止出口（半截正文入格，见 [`execute_turn`]）。
     pub(crate) fn current_node(&self) -> Option<(String, String)> {
         self.node.lock().unwrap().clone()
     }
@@ -1029,8 +1029,8 @@ pub(crate) async fn execute_final_reply_turn(
     user_meta: Option<serde_json::Value>,
     reply: &str,
     // 答话**对话面节点**的身份与标记（`id` / `reason` / `exclude_from_context`）：
-    // 收束格据它复刻那条根级节点（`Answered` 答话 `exclude = false`）；双写期它随
-    // `messages.json` 落盘，切源后必须随事实入格（见 `TurnInput::dialog`）。
+    // 收束格据它复刻那条根级节点（`Answered` 答话 `exclude = false`）；必须随
+    // 事实入格（WAL 为唯一事实源，见 `TurnInput::dialog`）。
     dialog: super::turn_runner::DialogFacts,
     // 生成这次答话的**思考事实**（`(reasoning_id, reasoning)`）：措辞产线的模型
     // 往回是这条轮次里唯一一次真实推理，不入格则 `Reason` 节点对普通答话轮从未
@@ -1611,7 +1611,7 @@ inject: super::round_hook::round_hook(supplements, on_round).map(|(drain, report
     // 记忆与学习也**不写**——中止的轮次没有定稿产出，没有可固化的东西。
     //
     // **半截产出随出口带走**（`partial`）：末轮正文 / 思考此刻还只攒在桥上，丢了它们
-    // 用户中断前看到的那半句话就消失。消费循环把 `partial` 双写进 `messages.json`
+    // 用户中断前看到的那半句话就消失。消费循环把 `partial` 收尾入格
     // （按 id 去重、整条覆盖、孤儿丢弃，见 `persist_failure`）；工具轮已定格的节点
     // （`produced`）同走这条通道——中止出口不再回灌 `V2TurnResult`，不带上就没了。
     if outcome.aborted {

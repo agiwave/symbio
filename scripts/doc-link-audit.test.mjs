@@ -546,6 +546,60 @@ test('D-008：不给豁免——头部 `doc-link-allow` 注释也照样判', () 
   assert.equal(r.status, 1, r.stdout)
 })
 
+// ── D-013：本机绝对路径 ─────────────────────────────────────────────────
+test('D-013：盘符反斜杠路径 → 失败（只对写它的那台机器成立）', () => {
+  const r = audit({ 'docs/a.md': '# A\n\n产物在 `D:\\Bing\\symbio\\target`。\n' })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D-013 本机绝对路径/)
+  assert.match(r.stdout, /D:\\Bing\\symbio\\target/)
+})
+
+test('D-013：正斜杠盘符路径同样判（形态不分分隔符）', () => {
+  const r = audit({ 'docs/a.md': '# A\n\n见 D:/tmp/a.txt。\n' })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /D:\/tmp\/a\.txt/)
+})
+
+test('D-013：登记条目照判（本机盘符不是「当时的事实」，是换台机器就失效的写法）', () => {
+  const r = audit({
+    'docs/a.md': '# A\n',
+    'docs/009-task/001.md': '---\nkind: task\nid: T-001\n---\n\n实测 C:\\Users\\someone\\symbio 可用。\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /docs\/009-task\/001\.md/)
+  assert.match(r.stdout, /C:\\Users\\someone\\symbio/)
+})
+
+test('D-013：front-matter（evidence / where）也判——它是文档的一部分', () => {
+  const r = audit({
+    'docs/a.md': '# A\n',
+    'docs/009-task/001.md':
+      '---\nkind: task\nid: T-001\nevidence: 实测 D:\\work\\repo\\target 可跑\n---\n\n正文。\n',
+  })
+  assert.equal(r.status, 1, r.stdout)
+  assert.match(r.stdout, /docs\/009-task\/001\.md:4/)
+})
+
+test('D-013：占位式写法通过（`<盘符>` / `<仓库根>` 不指向任何人的机器）', () => {
+  const r = audit({
+    'docs/a.md': '# A\n\n产物在 `<仓库根>\\target`，日志形如 `<盘符>:\\Users\\…`。\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-013：URL 协议段不误判（`https://` 的 `s:/` 不是盘符）', () => {
+  const r = audit({ 'docs/a.md': '# A\n\n见 https://example.com/x 与 ftp://example.com。\n' })
+  assert.equal(r.status, 0, r.stdout)
+})
+
+test('D-013：docs/archive/ 历史归档不判（同整体豁免）', () => {
+  const r = audit({
+    'docs/a.md': '# A\n',
+    'docs/archive/old.md': '当时在 D:\\Bing\\symbio 下跑。\n',
+  })
+  assert.equal(r.status, 0, r.stdout)
+})
+
 // ── 空树 ────────────────────────────────────────────────────────────────
 test('空树通过（守卫不是空转即红）', () => {
   assert.equal(audit({}).status, 0)

@@ -92,11 +92,11 @@ pub fn legacy_shape_to_style_tag(word: &str) -> Option<(NodeKind, Option<&'stati
 /// （`is_run` / `is_tool_call` / `is_reasoning` / `is_compression`）与 LLM 请求重建。
 /// 后端认识业务天经地义；前端不认。加一个业务变体 = 加一行常量 + 后端填 `title`/`icon`，前端零改动。
 pub const CHAT_STYLE_TAG_REASONING: &str = "reasoning";
-/// 用于 `Skeleton`：一整轮助手响应。
+/// `Skeleton` 的一种：一整轮助手响应。
 pub const CHAT_STYLE_TAG_RUN: &str = "run";
-/// 用于 `Skeleton`：一次工具调用。
+/// `Skeleton` 的一种：一次工具调用。
 pub const CHAT_STYLE_TAG_TOOL: &str = "tool";
-/// 用于 `Notice`：上下文压缩记录。
+/// `Notice` 的一种：上下文压缩记录。
 pub const CHAT_STYLE_TAG_COMPRESSION: &str = "compression";
 
 /// 消息状态
@@ -421,8 +421,8 @@ pub struct ChatNode {
 pub enum ResumeAction {
     /// LLM 失败重试：删除靶子节点及其所有子孙节点，重新走 LLM 请求。
     ///
-    /// [ADR-070 §决策 1]：靶子是**任一骨架节点**（`Skeleton`，含 `style_tag = "run"` 的
-    /// 助手响应），动词覆盖整棵子树。
+    /// 「删除整棵子树并重跑」，靶子是**任一骨架节点**（[ADR-070 §决策 1]）——
+    /// 动词不绑某一格业务：一轮响应与一次工具调用都是骨架，都能当靶子。
     RetrySubtree,
     /// 工具失败重试：删除 Failed 工具结果子节点，重新执行工具（用原 args）
     Retry,

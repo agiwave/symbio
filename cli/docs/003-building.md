@@ -18,7 +18,9 @@ node scripts/build-cli.mjs -- --release   # `--` 之后原样透传给 cargo
 cd cli && cargo test                  # 参数解析单测（4 个用例）
 ```
 
-产物：`../symbio/target/debug/symbio-cli.exe`（CLI 共享 `symbio/` 的 target 缓存，不另起炉灶）。
+产物：`../target/debug/symbio-cli.exe`（相对 `cli/`）。**没有第二个 target 目录**——`cli` 是仓库根
+workspace 的成员（根 `Cargo.toml` 的 `members`），cargo 把所有成员的产物写进同一个 `<仓库根>/target/`，
+依赖缓存因此天然共享；构建成功后脚本把这一行原样打印出来。
 
 ---
 
@@ -40,7 +42,8 @@ cmake，也不需要安装 nasm**，只要有 `cl.exe` + `INCLUDE`/`LIB` 即可�
 ### ② `INCLUDE`/`LIB` 必须归一化成 `/`，否则每次全量重编
 
 cc-rs 把这两个变量记进构建指纹（`rerun-if-env-changed`），值一变就判定整棵 C 依赖树过期。而 Git
-Bash 的 MSYS 在 spawn 原生 `.exe` 时会重写 `;` 分隔的路径列表，把 `D:\Apps\...` 变成 `D:/Apps\...`。
+Bash 的 MSYS 在 spawn 原生 `.exe` 时会重写 `;` 分隔的路径列表，把反斜杠形式（`…\Apps\…`）改写成
+正斜杠形式（`…/Apps/…`）。
 于是「一次用脚本构建、一次用 shell 构建」得到两种字符串交替 ⇒ `aws-lc-sys` 反复全量重编（每次约 9
 分钟）。
 
@@ -50,30 +53,31 @@ Bash 的 MSYS 在 spawn 原生 `.exe` 时会重写 `;` 分隔的路径列表，�
 **排查手法**：
 ```bash
 CARGO_LOG=cargo::core::compiler::fingerprint=info cargo build 2>&1 | grep -i dirty
-# 会直接点名：dirty: EnvVarChanged { name: "LIB", old_value: "D:\\..." (反斜杠), new_value: "D:/..." (正斜杠) }
+# 会直接点名：dirty: EnvVarChanged { name: "LIB", old_value: "<盘符>:\\..." (反斜杠), new_value: "<盘符>:/..." (正斜杠) }
 ```
 
-### ③ `build.target-dir` 必须写绝对路径
+### ③ target 目录只有一个：仓库根的 `target/`
 
-写成 `../symbio/target` 时 cargo **不会归一化**，会原样拼成 `D:\Bing\symbio\cli\../symbio\target`。
-这个字符串进入构建脚本的 `OUT_DIR` / `CARGO_TARGET_DIR` 等环境后，与 `symbio` 自身构建
-（`D:\Bing\symbio\symbio\target`）不一致，于是 `aws-lc-sys` / `ring` / `onig_sys` /
-`libsqlite3-sys` / `ort-sys` 全部被判定过期强制重编 → 在缺 C 工具链的环境挂死。
+`cli` 是仓库根 workspace 的成员（根 `Cargo.toml` 的 `members`），cargo 因此把所有成员的产物
+写进**同一个** `<仓库根>/target/`——缓存天然共享，不需要任何 target-dir 配置。
 
-绝对路径保证与 `symbio` 原生构建逐字节一致，直接复用其缓存。见 `cli/.cargo/config.toml` 内的注释。
+不要为本机另设 `build.target-dir`，尤其不要设成相对路径：cargo **不归一化**它，
+`../symbio/target` 会原样拼成 `<仓库根>\cli\../symbio\target`，而这个字符串进入构建脚本的
+`OUT_DIR` / `CARGO_TARGET_DIR` 环境后，与另一路构建用的绝对写法不等价，于是 `aws-lc-sys` /
+`ring` / `onig_sys` / `libsqlite3-sys` / `ort-sys` 全部被判定过期强制重编 → 在缺 C 工具链的环境挂死。
+另需注意 `.cargo*/` 在本仓是 **gitignore** 的：本机那份覆盖在仓库里看不见，而它一存在，产物就
+离开规范位置——`scripts/cli-binary.mjs` 按多个候选位置探测，正是为了不把「找不到」当成「缺失」。
 
 ---
 
 ## 其余必须对齐的两点
 
-- **`net.offline = true`**：与 `symbio/.cargo/config.toml` 同一策略，构建永不触网。cargo 配置是按
-  **当前工作目录向上**发现的（不是按依赖包位置），所以 `cli/` 需要自己的一份，否则从 `cli/` 下构建
-  会去联网拉索引（离线环境直接挂起）。
-- **`cli/rust-toolchain.toml` 锁 `1.93.1`**：与 `symbio/rust-toolchain.toml` 对齐。`cli/` 与
-  `symbio/` 是兄弟目录，rustup 不会把子目录的 toolchain 应用到兄弟目录；不锁的话 `cli/` 会退回系统
-  `stable`，与 `symbio` 的 1.93.1 产物混进同一个 target 目录，报
-  `E0514: found crate X compiled by an incompatible version of rustc`（产物文件名**不含**编译器版本，
-  所以 cargo 会把异版本产物当成新鲜的直接复用）。
+- **离线由脚本显式给**：`build-cli.mjs` 传 `--offline`，构建永不触网（不依赖 cargo 配置文件）。
+  新增或升级依赖后要跑一次 `node scripts/cargo-offline-refresh.mjs` 把新 crate 拉进本地缓存，
+  否则下一次离线构建直接报「缺少 crate」。
+- **工具链只有一个来源**：根 `rust-toolchain.toml` 锁 `1.93.1`，成员目录不再各放一份。理由仍是
+  `E0514: found crate X compiled by an incompatible version of rustc`——产物文件名**不含**编译器
+  版本，两个 rustc 的产物混进同一个 target 目录时，cargo 会把异版本产物当成新鲜的直接复用。
 
 ---
 
@@ -90,7 +94,7 @@ CARGO_LOG=cargo::core::compiler::fingerprint=info cargo build 2>&1 | grep -i dir
 
 ```bash
 node scripts/build-cli.mjs --check                    # 先看当前是否干净
-node scripts/repair-target-cache.mjs --target ../symbio/target --fix
+node scripts/repair-target-cache.mjs --fix
 ```
 
 > 该修复思路已沉淀为通用 skill `cargo-target-cache-repair`（`~/.workbuddy/skills/`），可跨项目复用。

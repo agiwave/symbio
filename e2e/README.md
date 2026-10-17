@@ -47,10 +47,11 @@ E2E_DEBUG=1 node e2e/run-tests.mjs    # 失败时输出错误堆栈
 `undefined`），排查方向被引到源码上——而真因只是产物旧。二进制是构建产物的函数，
 产物比输入旧就是不可信的。
 
-构建必须在 `cli/` 下跑（仓库根没有 `Cargo.toml`；`cli/.cargo/config.toml` 会把
-target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/symbio-cli.exe`）。
-机制按「两个候选取最新的那份」解析，所以两种布局都对。手工 `cargo build --release`
-也可以，代价只是下次使用时会多跑一次 cargo（戳没更新）。
+产物只有一个去处：`cli` 是根 workspace（根 `Cargo.toml` 的 `members`）的成员，cargo 把所有
+成员的产物写进同一个 `<仓库根>/target/`，所以二进制就在 `target/release/symbio-cli.exe`。
+机制按「候选位置取最新的那份」解析（`scripts/cli-binary.mjs`），过渡期残留在 `symbio/target/`、
+`cli/target/` 的旧产物因此不会被当成「缺失」——但**指路只指第一候选**。手工
+`cargo build --release` 也可以，代价只是下次使用时会多跑一次 cargo（戳没更新）。
 
 `E2E_CLI_EXE=<path>` 指向外部二进制会**绕过**新鲜度判定——外部产物无法用本仓源码
 指纹衡量，这是知情选择。
@@ -94,6 +95,10 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
 | `malformed` + `malformedAfter` | 第 N 个事件后混入一帧不规范内容再正常收尾：`badJson` / `truncated` / `garbage` |
 | plan 级 `rateLimit: {limit, windowMs}` | 429 限流语义：滑动窗口配额（账号级），超额 429 + `retry-after` + `x-ratelimit-*`；被拒不占配额，冷却自动恢复。`MockLlm` 构造器第三选项 `rateLimit` 可传 |
 
+管控面另有 `POST /_plan`（`MockLlm.setPlan(scenarios, fallback?)`）：**整张场景表换掉并清游标**。
+需要「坏一段时间 → 在某个明确的时刻转好」的用例用它，而不是 `failTimes` 的指纹名额——后者按
+请求体计，切分边界重复的编排会烧不满名额，「下一次就成功」就成了运气（参考 `t18`）。
+
 ## 用例与不变量
 
 <!-- list:e2e-cases owner -->
@@ -117,7 +122,7 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
 | T15 | `t15-subagent-inbox` | 子智能体空间**自驱动**：往 `<根>/agent/<id>/session/<sid>/inbox` 写即发消息（无调用方）；空间自己消费成完会话（FIFO、忙则排队、排队中可取消）；子空间带自己的 `AGENTS.md` 与自己的模型服务 |
 | T16 | `t16-live-order` | 实时顺序与存储一致：`seq` 是唯一权威顺序锚点（ADR-025），在途节点带 `INFLIGHT_SEQ_BASE` 高位序 |
 | T17 | `t17-plugin-assembly` | 装配全链路：homedir → 装配（清单落位、二进制落位）→ 工具 → 会话收尾 → 停止生效 |
-| T18 | `t18-compression-streaming` | 压缩的六条契约：流式身份帧（摘要逐帧改道到压缩节点、无旁路节点）、结构化 meta（失败节点不带 `after_tokens`）、transcript 转存、失败纪律（failed + `failure_kind=llm_error` + 历史原封不动）、熔断（连续 3 次失败后跳过自动压缩）、`retry_compaction` 重试恢复（删除-重建 → 成功 → 水位回落后不再压缩）；摘要请求按**逻辑请求**计数（HTTP 退避重发不重复计） |
+| T18 | `t18-compression-streaming` | 压缩的六条契约：流式身份帧（摘要逐帧改道到压缩节点、无旁路节点）、结构化 meta（失败节点不带 `after_tokens`）、transcript 转存、失败纪律（failed + `failure_kind=llm_error` + 历史原封不动）、熔断（连续 3 个失败压缩节点后跳过自动压缩）、`retry_compaction` 重试恢复（删除-重建 → 成功 → 水位回落后不再压缩）；故障注入用静态 500，恢复由 `MockLlm.setPlan()` 在重试前明确触发 |
 
 每个用例共享的不变量断言（`assertTranscriptInvariants`）：
 

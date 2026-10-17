@@ -10,7 +10,7 @@
 //!   （chat_loop）在本轮结束时将会话置于 `AwaitingInput(user)`；用户答案以一条普通
 //!   `user` 消息回填后，新一轮会重跑该工具。详见 USER_INPUT_MECHANISM 设计文档。
 
-use super::super::message_build::llm_build_tool_message;
+use super::super::message_build::{llm_build_tool_message, tool_call_args_text};
 use super::super::transcript::llm_emit_state;
 use crate::symbio_core::{llm_emit_message, llm_short_id, TurnToolCallInfo};
 
@@ -41,6 +41,35 @@ pub use self::task_decl::{note_tasks, TaskDeclaration, TaskItem, TaskStatus};
 pub use self::task_table::{is_task_table_tool, TaskTableInputs};
 
 // 工具结果提取
+
+/// 同参重复调用的判据键：`(工具名, 参数文本)`。
+///
+/// 参数取 `Value::to_string()`（serde_json 对象按键序规范化），于是模型两次发出
+/// 的同一调用——空白与键序不同也无妨——落到同一个键上。
+fn call_signature(name: &str, args: &str) -> String {
+    format!("{name}\u{1}{args}")
+}
+
+/// 上下文里**本批之外**已出现过的工具调用签名（按出现顺序）。
+///
+/// 读的是**工具调用请求节点**（骨架 + tag `tool`，正文即定稿参数文本）：
+/// 长跑里模型跨请求原样重发同一条调用时，前一次就在这些节点里。
+/// `current_ids` 是本批调用的节点 id——转写在执行前**就已含**本轮这一批 ToolCall
+/// 节点，不排除的话每条调用都会把自己数成「重复」。
+fn prior_call_signatures(context_messages: &[ChatNode], current_ids: &[String]) -> Vec<String> {
+    context_messages
+        .iter()
+        .filter(|m| m.is_tool_call() && !current_ids.contains(&m.id))
+        .filter_map(|m| {
+            let name = m.tool_name()?;
+            let args = match m.content.as_ref()? {
+                MessageContent::Text(s) => s.as_str(),
+                MessageContent::Parts(_) => return None,
+            };
+            Some(call_signature(name, args))
+        })
+        .collect()
+}
 
 /// 参数摘要：截断到 max_chars，用于日志打印（避免超长参数刷屏）。
 ///
@@ -856,6 +885,12 @@ pub async fn process_tool_calls_async(
         })
         .collect();
 
+    // 同参重复调用的**台账**（[T-140] 步 2）：批首收进本批之外已出现过的调用签名，
+    // 之后每处理一条调用就登记一条。登记以**模型发出的调用**为准，被闸门拒掉的也算
+    // ——「绕圈」是模型侧的事实，与本次执行成败无关。
+    let current_call_ids: Vec<String> = tool_calls.iter().filter_map(|tc| tc.id.clone()).collect();
+    let mut seen_calls: Vec<String> = prior_call_signatures(context_messages, &current_call_ids);
+
     for tc in tool_calls {
         if abort.is_aborted() {
             break;
@@ -931,6 +966,26 @@ pub async fn process_tool_calls_async(
                 continue;
             }
         };
+
+        // 同参重复调用的判据（[T-140] 步 2）：签名与落库节点里的参数文本同源
+        // （[`tool_call_args_text`]），于是「上下文里的那一次」与「这一次」可比。
+        // 只登记、只回报——不拦截、不改执行结果。
+        let signature = call_signature(&name, &tool_call_args_text(&tc));
+        let repeat_note = seen_calls
+            .iter()
+            .position(|seen| *seen == signature)
+            .map(|first| {
+                format!(
+                    "[重复调用] 与本次会话第 {} 次工具调用同工具同参数（{name}），结果相同。原样重发不会带来新信息：\
+                     需要后续结果请用 offset 翻页，需要缩小范围请换 pattern 或限定目录。",
+                    first + 1
+                )
+            });
+        seen_calls.push(signature);
+        if repeat_note.is_some() {
+            // 「要不要真的拦」留给实际数据判（见 T-140），先把绕圈的次数记进日志。
+            plugin_warn!("session", "[Tool] 同参重复调用：{name}（调用 id={id}）");
+        }
 
         // 参数 JSON 非空却解析失败（典型：被 max_tokens 截断）→ **拒绝执行**。
         // 旧行为是带着占位 `{}` 继续执行，工具必然报「缺少必填参数」，而这条错误
@@ -1310,6 +1365,16 @@ pub async fn process_tool_calls_async(
             }
             tool_msg
         };
+        // 重复调用的提示挂在**结果正文末尾**（待用户动作的交互节点不挂——它不是结果）。
+        // 放在 L0 守卫之后：超长结果被截断存档时，这条提示仍然完整可见。
+        if !tool_msg.is_interaction() {
+            if let Some(note) = repeat_note.as_deref() {
+                if let Some(MessageContent::Text(text)) = tool_msg.content.as_mut() {
+                    text.push('\n');
+                    text.push_str(note);
+                }
+            }
+        }
         // 任何模式：工具失败属"信息性"，结果仍以合法 tool 结果（Completed）留在上下文，
         // 让 LLM 看到错误并继续；其父节点在下方也标 Completed（不暂停会话）。
         // 若此处仍标 Failed，则会被 get_context_messages 过滤，导致"孤儿 tool 结果"

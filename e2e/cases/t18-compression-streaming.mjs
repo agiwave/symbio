@@ -9,7 +9,7 @@ import './_selfrun.mjs';
 // | A | **流式身份帧**：摘要以 `delta` 逐帧追加到 compression 节点（占位正文之后、终态之前），且不产生任何旁路节点 | compression 节点的流上出现 ≥1 帧纯窄增量；拼接结果 == mock 摘要去掉首个分片（首分片走「全量首帧」被吞）；除此之外没有任何节点收到过摘要增量 |
 // | B | **结构化 meta**：compact_trigger / context_limit / before_tokens / after_tokens / dropped 按字段下发 | 成功节点终态帧的 meta 逐字段核对；失败节点**没有** after_tokens（没有可信的后水位，编 0 是谎报） |
 // | D | **失败分支**：压缩 LLM 500 ⇒ failed 节点 + failure_kind=llm_error + 历史原封不动 | 节点 failed、meta.failure_kind；读出口读回的历史里早期消息仍在 |
-// | E | **触发纪律**：连续失败触发**熔断**——开闸后的轮次直接跳过自动压缩，不再重发注定失败的摘要请求 | 连续 3 次失败后，再跑一轮水位超阈值的对话：摘要请求数不增、无新压缩节点、回复照常 |
+// | E | **触发纪律**：连续失败触发**熔断**——开闸后的轮次直接跳过自动压缩，不再重发注定失败的摘要请求 | 连续 3 个失败压缩节点后（计数口径见「计量口径」），再跑一轮水位超阈值的对话：摘要请求的 HTTP 命中数不增、无新压缩节点、回复照常 |
 // | F | **重试恢复**：`action(<sid>/message/<失败压缩节点 id>, "retry_compaction")` ⇒ 删除旧失败节点（removed 帧）→ 绕过熔断重新压缩 → 成功 → 快照落库 → 后续轮恢复正常 | 旧 mid 收到 removed 帧；新节点 Completed；读出口读回：失败节点消失、快照出现；之后水位低不再压缩 |
 //
 // 触发参数**刻意不同于** T8/T11（它们只需「压缩发生一次」；本用例要让连续 3 次
@@ -27,33 +27,46 @@ import './_selfrun.mjs';
 // 3.9k 字符，但**水位按校准后的估算值推进**——mock 固定回报 usage
 // （`prompt_tokens: 64`，见 `mock-llm.mjs`）⇒ `CalibratedTokenizer` 的比值压在
 // 下限 0.2 ⇒ 估算每轮只涨约 0.5k tokens。于是 0.3L ≈ 3.7k tokens 的窗口容得下
-// 3 次失败 + 观察轮 + 重试：失败落在第 9/10/11 轮，重试仍在线内。T8/T11 的 600
-// 倍填充把增速放大 2.4 倍，实测一次 llm_error 后紧接 input_over_limit，契约 F
-// 无从谈起。
+// 3 次失败 + 观察轮 + 重试。T8/T11 的 600 倍填充把增速放大 2.4 倍，实测一次
+// llm_error 后紧接 input_over_limit，契约 F 无从谈起。
 //
 // ## 触发线两侧必须留余量，不是「卡着线走」
 //
 // 触发轮 = 第一个让「历史估算 + 请求级开销」越过 `0.7 × L` 的轮次，而估算里的
 // 请求级开销 = system prompt + **全部工具定义**（`estimate_overhead_with_tools`）
 // ——工具定义长一截，触发就整体前移一轮；system prompt 带时间戳，其 token 数每
-// 秒还会抖 1–2。**卡在线上**的后果不是「偶尔早一轮」这么轻：压缩请求按 User
-// 边界切分（`find_compress_split_point` 只在 User 处落刀），触发前移会换一组切分
-// 相位，头两次压缩可能命中同一个边界 ⇒ 两个请求体**字节相同** ⇒ 两个 500 同时
-// 烧掉 `failTimes` 的一个名额与熔断的一个额度，于是熔断开闸时只观测到 2 个不同
-// 请求体（「3 次失败」那步断言拿不到），第 4 次重试也因名额没烧够而拿到 500。
-// 上限取 12400，就是把触发轮两侧的间距从「几十」拉到「两百以上」。
+// 秒还会抖 1–2。**卡在线上**的后果不是「偶尔早一轮」这么轻：切分点只在 User
+// 边界落刀（`find_compress_split_point`）并按字符分数推进目标，触发轮一动整个
+// 切分相位跟着动，窗口两侧的轮次余量会被一起吃掉——先红的会是重试那步的超限
+// 预判。上限取 12400，就是把触发轮两侧的间距从「几十」拉到「两百以上」。
 //
 // **这份参数与 mock 的 usage 口径绑定**：若 mock 改成回报真实 usage，估算会贴回
 // 原始字符数，触发轮与窗口一起前移，本用例需重新标定（轮次推进本身自适应，
 // 先红的会是重试那步的超限预判）。轮次推进**不硬编码「第几轮触发」**：逐轮发送
-// 直到观测到 3 次失败摘要请求（熔断阈值，见 `active.rs::COMPRESS_CIRCUIT_LIMIT`），
-// 再进熔断观察轮。
+// 直到观测到 `CIRCUIT_LIMIT` 个失败压缩节点（熔断阈值，见
+// `active.rs::COMPRESS_CIRCUIT_LIMIT`），再进熔断观察轮。
 //
-// 「3 次失败」按**逻辑摘要请求**计，不是 HTTP 命中：LLM 层对 5xx 会退避重发
-// （`model/http.rs` 的 `MAX_RETRIES`，重发复用同一份序列化字节），一次逻辑失败会
-// 打到 mock 5 次。mock 因此按请求体指纹扣 `failTimes` 名额（见 `mock-llm.mjs`
-// 文件头），本用例也按同一口径数摘要请求——否则第 1 次压缩就会把 3 个名额烧光，
-// 「连续 3 次失败触发熔断」这条契约根本没有被执行到。
+// ## 计量口径：数「压缩分幕」，不数请求体也不数 HTTP 命中
+//
+// 契约 E「连续 3 次失败触发熔断」需要一个可靠的计数器，而两个现成口径都不对：
+//
+// - **HTTP 命中数**高估：LLM 层对 5xx 退避重发（`model/http.rs` 的 `MAX_RETRIES`，
+//   重发复用同一份序列化字节），一次逻辑失败打到 mock 5 次；
+// - **不同请求体的个数**低估：切分边界每若干轮才前进一次 ⇒ 相邻两次自动压缩
+//   可能提交**同一份历史**，请求体逐字节相同（实测 3 次失败只有 2 个不同请求体）。
+//
+// 被测系统自己的计数单位恰好是第三个：一次压缩 = 转写上的一个节点分幕，而熔断
+// 按**逻辑失败**计数（`active.rs`）⇒ 失败压缩节点数就是同一口径。于是「3 次失败」
+// 按分幕数判定；E/F 两段「不得重发摘要请求」仍按 HTTP 命中数（那一轮应一个都不
+// 增加，两个口径在这条断言下同向）。
+//
+// ## 恢复由用例触发，不由指纹名额顺带发生
+//
+// 故障注入因此用**静态 500**（这段时间里每次摘要请求都失败），而不是
+// `failTimes: 3`：后者按「场景 id + 请求体指纹」扣名额，于是边界重复时 3 次失败
+// 只烧掉 2 个名额，「下一次请求成功」就成了指纹运气而不是本用例的事件。契约 F 要
+// 的是「服务恢复后，绕过熔断重压一次会成功」——那个「后」必须由用例明确触发，
+// 这里就是重试前的 `llm.setPlan()`（mock 的 `POST /_plan`，换场景表并清游标）。
 //
 // mock 摘要场景用 `chunks` 分片：**首个分片**走 model 流循环的「全量首帧」（被
 // 白名单吞掉），其余分片走窄增量——这正是 A 要验收的改道路径；若回归成「全帧
@@ -114,8 +127,16 @@ const SNAPSHOT_CHUNKS = SNAPSHOT_XML.map((line, i) =>
 
 export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试恢复', async () => {
   const llm = await new MockLlm([
-    // failTimes=3：前 3 次摘要请求 500（连续失败 → 熔断开闸），第 4 次（用户重试）成功
-    { id: 'snapshot', match: 'Distill the conversation above', failTimes: 3, chunks: SNAPSHOT_CHUNKS },
+    // 静态注入：这段时间里**每一次**摘要请求都失败（恢复由重试前的 `setPlan` 触发，
+    // 见文件头「恢复由用例触发」）。`retryAfterSec: 0` 让客户端的 5xx 退避立即重试，
+    // 否则 3 次失败要空等整段指数退避。
+    {
+      id: 'snapshot',
+      match: 'Distill the conversation above',
+      status: 500,
+      retryAfterSec: 0,
+      error: 'mock 注入的摘要服务故障',
+    },
     { id: 'big', match: '轮问题', content: REPLY },
   ]).start();
   const GATEWAY_PORT = nextPort();
@@ -145,18 +166,16 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
   });
   let rt = null;
   /**
-   * **逻辑**摘要请求数：同一请求体的 5xx 退避重发只算一次（`model/http.rs` 的
-   * 重发复用同一份序列化字节）。熔断按**逻辑失败**计数（`active.rs`），判据必须
-   * 同口径——按 HTTP 命中数，一次压缩失败会被数成 5 次，熔断看起来「提前开闸」。
+   * 摘要请求的 **HTTP 命中数**。只用于「这一轮不得重发摘要请求」（契约 E、恢复后
+   * 的正常轮）——那一轮应当一个命中都没有，两个口径同向。数「失败了几次」不用它：
+   * 一次逻辑失败会被客户端退避重发放大成 5 次命中（见文件头「计量口径」）。
    */
-  const snapshotReqCount = async () => {
-    const hits = (await llm.requests()).filter((q) =>
+  const snapshotHitCount = async () =>
+    (await llm.requests()).filter((q) =>
       (q.body?.messages ?? []).some(
         (m) => m.role === 'user' && String(m.content ?? '').includes('Distill the conversation above'),
       ),
-    );
-    return new Set(hits.map((q) => JSON.stringify(q.body))).size;
-  };
+    ).length;
 
   try {
     await cli.waitGatewayReady();
@@ -179,40 +198,30 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
       await waitFor(() => doneTurns() > before, { what: `第 ${i + 1} 轮 turn 终态`, timeoutMs: 60_000 });
     };
 
-    // ── 阶段 1：自适应逐轮推进，直到观测到 CIRCUIT_LIMIT 次失败的摘要请求 ──
+    // ── 阶段 1：自适应逐轮推进，直到观测到 CIRCUIT_LIMIT 个失败压缩分幕 ──
+    // 计「分幕」而不是「不同请求体」：切分边界每若干轮才前进一次，相邻两次自动压缩
+    // 可以提交同一份历史（理由见文件头「计量口径」）。
     let rounds = 0;
-    let attempts = 0;
-    while (attempts < CIRCUIT_LIMIT && rounds < 22) {
-      const before = await snapshotReqCount();
+    while (failedEpisodes().length < CIRCUIT_LIMIT && rounds < 22) {
       await sendRound(rounds, `第${rounds + 1}轮问题`);
       rounds += 1;
-      attempts = await snapshotReqCount();
-      assert(attempts >= before, `摘要请求数不得回退（${before} → ${attempts}）`);
       // 每轮的失败压缩都必须原样保留历史（失败的硬不变式，读出口核对在阶段 4 位置由
       // 各段落内的读回断言覆盖——历史经生产读出口读，与前端 loadMessages 同一出口）
       const msgs = await readSessionMessages(cli, 'e2e-t18');
       assertTranscriptInvariants(msgs, `T18 第 ${rounds} 轮后`);
     }
+    const fails = failedEpisodes();
     assertEq(
-      attempts,
+      fails.length,
       CIRCUIT_LIMIT,
-      `应观测到 ${CIRCUIT_LIMIT} 次摘要请求（全部失败——水位超阈值而摘要 500）`,
+      `应观测到 ${CIRCUIT_LIMIT} 个失败压缩节点（水位超阈值而摘要 500；实际 ${rounds} 轮内 ${fails.length} 个）`,
     );
     assert(rounds >= 3, `阈值触发应发生在第 3 轮或之后（实际第 ${rounds} 轮前已达）`);
 
     // ── 阶段 2：失败分支（D）+ 结构化 meta 的失败形态（B）────────────────
-    const compFrames = rt.messages().filter(({ data }) => msgTypeOf(data) === 'compression');
-    /** @type {Map<string, Array<{mid:string, data:any, arrival:number}>>} */
-    const episodes = new Map();
-    for (const f of compFrames) {
-      const list = episodes.get(f.mid) ?? [];
-      list.push(f);
-      episodes.set(f.mid, list);
-    }
-    const failedEpisodes = [...episodes.entries()].filter(([, fs]) => fs[fs.length - 1].data.status === 'failed');
-    assertEq(failedEpisodes.length, CIRCUIT_LIMIT, `每次失败的摘要请求都应留下一个 failed 压缩节点`);
+    // 重试只针对**最后**一个失败节点（契约 F 的入口是用户点在某条失败交代上的动作）。
     let failId = null;
-    for (const [id, frames] of failedEpisodes) {
+    for (const [id, frames] of fails) {
       failId = id;
       const final = frames[frames.length - 1].data;
       assertEq(final.status, 'failed', `压缩节点 ${id.slice(0, 8)} 应以 failed 收场`);
@@ -232,10 +241,10 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
     }
 
     // ── 阶段 3：熔断纪律（E）——开闸后的轮次不再重发注定失败的摘要请求 ──
-    const beforeSkip = await snapshotReqCount();
+    const beforeSkip = await snapshotHitCount();
     await sendRound(rounds, `第${rounds + 1}轮问题`);
     rounds += 1;
-    assertEq(await snapshotReqCount(), beforeSkip, '熔断开闸后的自动压缩必须被跳过（不得重发摘要请求）');
+    assertEq(await snapshotHitCount(), beforeSkip, '熔断开闸后的自动压缩必须被跳过（不得重发摘要请求）');
     // 熔断跳过路径**不产生任何新压缩节点**——这正是被验的语义；
     // 之前的 failed 节点原样留在原地（等待用户重试，而不是被静默清理）。
     const afterSkipMsgs = await readSessionMessages(cli, 'e2e-t18');
@@ -247,6 +256,16 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
       doneTurns() > 0,
       '熔断轮的对话本身必须照常完成',
     );
+
+    // ── 阶段 4：服务恢复——把「摘要这次是好的」这件事明确地做出来 ────────
+    //
+    // 换一份 plan（`POST /_plan`：场景表 + 游标一起换），而不是依赖 `failTimes`
+    // 名额恰好烧完：后者按请求体指纹扣，切分边界重复时 3 次失败只烧掉 2 个名额，
+    // 「下一次请求成功」就成了运气。契约 F 的「恢复之后」归用例控制（文件头）。
+    await llm.setPlan([
+      { id: 'snapshot', match: 'Distill the conversation above', chunks: SNAPSHOT_CHUNKS },
+      { id: 'big', match: '轮问题', content: REPLY },
+    ]);
 
     // ── 阶段 5：重试恢复（F）——绕过熔断、删除-重建、成功 ──
     //
@@ -270,7 +289,7 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
       () => rt.framesOf(failId).some((f) => f.data?.status === 'removed' && f.arrival >= retryAnchor),
       { what: '旧失败压缩节点的 removed 帧', timeoutMs: 30_000 },
     );
-    // 新压缩节点出现并终态 completed（第 4 次命中 = failTimes 之外 = 成功）
+    // 新压缩节点出现并终态 completed（重试请求落在换好后的 plan 上 = 成功）
     await waitFor(
       () => [...episodesSnapshot().entries()].some(([, fs]) => fs[fs.length - 1].data.status === 'completed'),
       { what: '重试产生的 completed 压缩节点', timeoutMs: 30_000 },
@@ -355,10 +374,10 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
     );
 
     // ── 阶段 6：恢复后的正常轮——水位已低，不再触发压缩 ──
-    const beforeCalm = await snapshotReqCount();
+    const beforeCalm = await snapshotHitCount();
     await sendRound(rounds, `第${rounds + 1}轮问题`);
     rounds += 1;
-    assertEq(await snapshotReqCount(), beforeCalm, '恢复后的正常轮不得再触发压缩（水位已降）');
+    assertEq(await snapshotHitCount(), beforeCalm, '恢复后的正常轮不得再触发压缩（水位已降）');
     const calmMsgs = await readSessionMessages(cli, 'e2e-t18');
     assertTranscriptInvariants(calmMsgs, 'T18 恢复后');
   } finally {
@@ -380,6 +399,16 @@ export default defineCase('T18 压缩实时流式预览 + 失败纪律 + 重试�
       }
     }
     return map;
+  }
+  /**
+   * 已以 failed 收场的压缩分幕：`[节点 id, 该分幕的全部帧]`。
+   *
+   * 这就是本用例的「逻辑摘要请求」计数器——一次压缩 = 一个分幕 = 熔断扣的一个额度
+   * （`active.rs` 按逻辑失败计数），既不受客户端 5xx 退避重发放大，也不受切分边界
+   * 重复（两次压缩提交同一份历史）影响。
+   */
+  function failedEpisodes() {
+    return [...episodesSnapshot().entries()].filter(([, fs]) => fs[fs.length - 1].data.status === 'failed');
   }
   /** 一个分幕内：除 removed/终态外，位置序号必须是节点属性（复用 T11 的形状判据） */
   function assertSeqShapeOk(frames) {

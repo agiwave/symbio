@@ -287,9 +287,9 @@ fn user_node(e: &Event) -> ChatNode {
         role: Some(NodeRole::User),
         msg_type: Some(NodeKind::Body),
         content: Some(MessageContent::Text(text_of(e, "text"))),
-        // `meta` 随载荷复刻（折进的合并补充带 `meta.supplement*`）：双写期它随整份
-        // `messages.json` 落盘，切源后必须随用户格事实入格，否则同一条发言在实时面与
-        // 重建面是两个身份。载荷没有该键 ⇒ `None`（普通发言），与落库那份同形。
+        // `meta` 随载荷复刻（折进的合并补充带 `meta.supplement*`）：必须随用户格
+        // 事实入格，否则同一条发言在实时面与重建面是两个身份。载荷没有该键 ⇒
+        // `None`（普通发言），与落库那份同形。
         meta: e.payload.get("meta").filter(|m| !m.is_null()).cloned(),
         timestamp: Some(e.ts),
         ..Default::default()

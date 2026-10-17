@@ -350,7 +350,7 @@ describe('MessageNode：折叠叶内的压缩动作（notice + 统计字段）',
   it('旧后端（无统计字段）⇒ 不算压缩动作，落 Markdown；不编事实行', async () => {
     const w = mountNode(msg({ id: 'cp1', type: 'notice', status: 'completed', content: '压缩上下文' }))
     await w.find('.node-head').trigger('click')
-    expect(w.find('.notice-compaction').exists()).toBe(false)
+    expect(w.find('.notice-note').exists()).toBe(false)
     expect(w.find('.notice-facts').exists()).toBe(false)
     expect(w.find('.markdown-body').exists()).toBe(true)
   })

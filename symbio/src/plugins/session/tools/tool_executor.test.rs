@@ -278,6 +278,142 @@ async fn unparseable_arguments_are_refused_not_executed() {
     assert_eq!(updates[0].status, Some(NodeStatus::Completed));
 }
 
+/// [T-140] 步 2 判据：**第二次同参调用不再静默**。
+///
+/// 事故现场（会话 `cli1a14222066f0`）：模型要的是「一共多少处命中」，而截断结果里
+/// 没有一个字的总数，它唯一的动作就是原样重发 ⇒ 同一份结果执行两次、白跑一轮。
+/// 这里不要求拦截，只要求**结果里看得见**「这是重复调用」。
+fn tc(id: &str, name: &str, args: Value) -> TurnToolCallInfo {
+    TurnToolCallInfo {
+        id: Some(id.into()),
+        wire_id: None,
+        name: Some(name.into()),
+        arguments: args,
+        parse_error: None,
+        overflow_notice: None,
+    }
+}
+
+fn result_text(msg: &ChatNode) -> String {
+    msg.content
+        .as_ref()
+        .map(|c| c.to_text())
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn a_repeat_in_the_same_batch_says_so_on_the_result() {
+    let sink = ExecEventSink::silent();
+    let abort = ExecAbortSignal::new();
+    let tcs = vec![
+        tc("tc-a", "vdfs_list", json!({ "path": "." })),
+        tc("tc-b", "vdfs_list", json!({ "path": "." })),
+    ];
+
+    let (msgs, _updates) = process_tool_calls_async(
+        tcs,
+        &None,
+        &sink,
+        &abort,
+        test_ctx(),
+        &tc_context(&["tc-a", "tc-b"]),
+        &test_dir(),
+        &mut Vec::new(),
+        &mut Vec::new(),
+        &mut Vec::new(),
+    )
+    .await;
+
+    assert_eq!(msgs.len(), 2);
+    let first = result_text(&msgs[0]);
+    let second = result_text(&msgs[1]);
+    assert!(
+        !first.contains("重复调用"),
+        "第一次调用不该被说成重复，实际：{first}"
+    );
+    assert!(
+        second.contains("重复调用") && second.contains("vdfs_list"),
+        "同批第二次同参调用必须带重复提示，实际：{second}"
+    );
+}
+
+/// 跨请求的重发才是事故的主形态：上一条调用早已落进转写，本轮请求原样再发一次。
+#[tokio::test]
+async fn a_repeat_from_the_transcript_says_so_on_the_result() {
+    let sink = ExecEventSink::silent();
+    let abort = ExecAbortSignal::new();
+    // 转写里已有一条 vdfs_list{"path":"."} 的请求节点（id 不在本批 ⇒ 是「之前那次」）
+    let mut context = tc_context(&["tc-old"]);
+    context[0].content = Some(MessageContent::Text(r#"{"path":"."}"#.into()));
+
+    let (msgs, _updates) = process_tool_calls_async(
+        vec![tc("tc-new", "vdfs_list", json!({ "path": "." }))],
+        &None,
+        &sink,
+        &abort,
+        test_ctx(),
+        &context,
+        &test_dir(),
+        &mut Vec::new(),
+        &mut Vec::new(),
+        &mut Vec::new(),
+    )
+    .await;
+
+    let text = result_text(&msgs[0]);
+    assert!(
+        text.contains("重复调用"),
+        "与转写里既有调用同参 ⇒ 提示重复，实际：{text}"
+    );
+}
+
+/// 反向保险：名字相同、参数不同 ⇒ 不是重复（否则每次分页都挨一句冤枉）。
+#[tokio::test]
+async fn a_different_argument_is_not_a_repeat() {
+    let sink = ExecEventSink::silent();
+    let abort = ExecAbortSignal::new();
+    let mut context = tc_context(&["tc-old"]);
+    context[0].content = Some(MessageContent::Text(r#"{"path":"a"}"#.into()));
+
+    let (msgs, _updates) = process_tool_calls_async(
+        vec![tc("tc-new", "vdfs_list", json!({ "path": "b" }))],
+        &None,
+        &sink,
+        &abort,
+        test_ctx(),
+        &context,
+        &test_dir(),
+        &mut Vec::new(),
+        &mut Vec::new(),
+        &mut Vec::new(),
+    )
+    .await;
+
+    let text = result_text(&msgs[0]);
+    assert!(
+        !text.contains("重复调用"),
+        "换了参数就不是重复，实际：{text}"
+    );
+}
+
+/// 键序与空白是同一个调用：签名取 `Value::to_string()`（对象按键序规范化），
+/// 否则「模型重发同一条、序列化差一个空格」就数不出来。
+#[test]
+fn call_signature_normalizes_key_order() {
+    let a = json!({ "pattern": "x", "path": "." }).to_string();
+    let b = json!({ "path": ".", "pattern": "x" }).to_string();
+    assert_eq!(a, b, "serde_json 按键序规范化——签名判据依赖它");
+    assert_eq!(
+        call_signature("content_search", &a),
+        call_signature("content_search", &b)
+    );
+    assert_ne!(
+        call_signature("content_search", &a),
+        call_signature("vdfs_list", &a),
+        "同名不同参不是重复，同参不同名也不是重复"
+    );
+}
+
 /// 回归（真实事故）：中文参数摘要不得在字节边界上 panic。
 ///
 /// 事故现场：`write_file` 传入含中文的 `content`，`args_summary(.., 200)`

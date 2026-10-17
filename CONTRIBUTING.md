@@ -173,9 +173,9 @@ CI 侧另有 `commit-msg-check` job，用 `--range` 把本次引入的提交逐�
 ### 本机操作陷阱（都踩过）
 
 - ⚠️ **cargo / git 一律不接管道**（`| tail` / `| head`）：输出到 EOF 才刷 ⇒ 看着像卡死；且管道**吞掉退出码** ⇒ 失败的命令看起来是成功的。要看长输出就用 `gate.mjs`（它落日志、只信退出码）。
-- ⚠️ **`git commit -F /c/Temp/msg.txt` 会失败**（Windows git 不认 MSYS 路径）⇒ 写 `-F "C:/Temp/msg.txt"`。
+- ⚠️ **`git commit -F /c/…/msg.txt` 会失败**（Windows git 不认 MSYS 路径）⇒ 改成 `<盘符>:…/msg.txt` 这类 Windows 盘符写法。
 - ⚠️⚠️ **批量改名绝不用 `git rm` / `git mv`**：它们写索引，被 SIGTERM 中断后留下 0 字节 `.git/index.lock` 并写坏索引 ⇒ 上百文件误报「已删除」。正解 = 纯文件系统改名 + 最后一次 `git add -A`。**恢复**：`rm -f .git/index.lock` → `git checkout -- .`（索引损坏时 `reset --hard` 不可靠）。单个文件用 `git mv` 无妨。
-- ⚠️ **无备份绝不 `git checkout -- .` / 大范围删除**。回滚先 `stash push` 或 `git diff > /c/Temp/x.patch`。
+- ⚠️ **无备份绝不 `git checkout -- .` / 大范围删除**。回滚先 `stash push` 或 `git diff > <临时目录>/x.patch`。
 - ⚠️ **rustfmt 只用 `cargo fmt`**，绝不裸跑 `rustfmt`（工具链锁定版本不同 ⇒ 格式漂移）。
 - ⚠️ 改 `.github/workflows/*.yml` 后**先自检语法**：YAML 错了 CI 会直接不触发（而非报错），
   很容易误判成"没跑"。本机若无 `js-yaml`，可用 `python -c "import yaml; yaml.safe_load(open(...))"`

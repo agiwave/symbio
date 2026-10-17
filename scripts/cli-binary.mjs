@@ -68,12 +68,25 @@ const STAMP_NAME = '.symbio-cli.build-stamp'
  * 写死单一位置会让「二进制找不到 ⇒ 每次都判定缺失」与「e2e 拿不到二进制 ⇒
  * 全用例失败（且失败形态是 -1 + 空 stderr，与崩溃无法区分）」同时发生。
  */
-export function cliBinaryCandidates(repoRoot) {
+export function cliBinaryCandidates(repoRoot, profile = 'release') {
   return [
-    path.join(repoRoot, 'target', 'release', EXE),
-    path.join(repoRoot, 'symbio', 'target', 'release', EXE),
-    path.join(repoRoot, 'cli', 'target', 'release', EXE),
+    path.join(repoRoot, 'target', profile, EXE),
+    path.join(repoRoot, 'symbio', 'target', profile, EXE),
+    path.join(repoRoot, 'cli', 'target', profile, EXE),
   ]
+}
+
+/**
+ * CLI 产物的**规范**路径（相对仓库根、正斜杠）——文档指路只认这一条。
+ *
+ * 为什么单列一个出口：[`cliBinaryCandidates`] 为了「找不到即判定缺失」这个假失败，
+ * 容忍过渡期的旧位置（见其文档），而**指路的文档不能容忍**——写着旧位置的那一刻
+ * 它就把读者送去用一份过期二进制（[T-134] 实测：照 `../symbio/target/debug/…` 找产物，
+ * 一整批结论都跑在旧产物上）。所以 doc 侧判据（`doc-symbol-audit` D-012）只比
+ * 这里给的第一候选，且用相对写法——文档里能直接照抄。
+ */
+export function cliArtifactRelPath(profile = 'debug') {
+  return `target/${profile}/${EXE}`
 }
 
 /**

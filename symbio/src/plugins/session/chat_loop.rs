@@ -592,8 +592,8 @@ pub async fn run_chat_loop(
                     // 能产出 `Spoke` 的判决就是 `Escalate`（`Report` 不在轮首产生，
                     // 见上方注释与步骤 2d）。
                     //
-                    // 双写期这句随整份 `messages.json` 落盘；切源（WAL 为唯一真源）
-                    // 后若不入格，重建折不出这条根级对话面节点 ⇒ t20 / t22 的
+                    // 这句开场白是事实（T-052）：随收束格入格（WAL 为唯一事实源，
+                    // ADR-049），不入格则重建折不出这条根级对话面节点 ⇒ t20 / t22 的
                     // 「恰有一条对话面节点」全部落空。落格在 `execute_turn`（唯一持
                     // 写者令牌处）——这里只把「说了什么 / 节点身份」递过去，与缺口 5
                     // 的答话同一条分割（判定与措辞在 chat_loop，落格在 v2_exec）。
@@ -835,8 +835,8 @@ pub async fn run_chat_loop(
             Err(PluginError::Aborted { partial }) => {
                 // 中止：在途 Turn 交消费循环落库为 `NodeStatus::Aborted` +
                 // 会话结局 `aborted`（**不是** `failed`——中止不是错误）。半截产出
-                // （正文 / 思考 / 工具节点）随 `partial` 一路带到 `persist_failure`，
-                // 双写进 `messages.json`——它们是事实，不因没说完就不记。
+                // （正文 / 思考 / 工具节点）随 `partial` 一路带到 `persist_failure`
+                // 并入格——它们是事实，不因没说完就不记。
                 return finish_turn(
                     orchestrator,
                     &context,
@@ -994,7 +994,7 @@ async fn finish_turn(
 
     // 返回语义：中止与失败向上冒泡，由消费循环统一收尾（在途 Turn 落 `Aborted`
     // 或 `Failed`，各自结局分明 + 可重试）。中止携带的半截产出一路带到
-    // `persist_failure`（双写 `messages.json`：它们是事实，不因没说完就不记）。
+    // `persist_failure`（随收尾入格：它们是事实，不因没说完就不记）。
     match exit {
         TurnExit::Aborted(partial) => Err(PluginError::Aborted { partial }),
         TurnExit::Failed(e) => Err(e),

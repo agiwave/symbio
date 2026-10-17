@@ -124,6 +124,14 @@ pub(crate) async fn apply_verdict(
             (VerdictEffect::Finish, Some(reply))
         }
         Verdict::Escalate { reason } => {
+            // 首响开关关掉 ⇒ 不写那句开场白，本轮照旧进工具循环干活。
+            // 与 `compose_enabled` 关掉的区别：那个连真实答复（`Answered`）一起没，
+            // 本开关只削派活前的这一句旁白（机制化前端的 Typing 占位已接管"有动静"
+            // 的职责，这句模板话与执行过程信息重复）。
+            if !orchestrator.opening_enabled {
+                crate::plugin_debug!("session", "[Compose] 开场白未启用，Escalate 本轮不写首响");
+                return (VerdictEffect::Silent, None);
+            }
             // 首响：拿不到就只是少一句开场白，本轮照旧干活。
             match compose_text(orchestrator, ctx, context, &verdict, snapshot).await {
                 Some(reply) => {
