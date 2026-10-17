@@ -161,10 +161,10 @@ export function isInProgressMessage(msg: Pick<ChatNode, 'status'>): boolean {
 }
 
 /**
- * 「这条节点自身是不是一个**空壳**」——文字类节点的空内容判据。
+ * 「这条节点自身是不是一个**空壳**」——正文 / 折叠叶（`body` / `notice`）格节点的空内容判据。
  *
- * 流模式下后端会先发一个 `content` 为空（如 `"\n\n"`）的 Text / Reasoning 占位
- * 节点（reasoning 与 tool_call 之间），它**不落库**，但前端会短暂收到。两处需要
+ * 流模式下后端会先发一个 `content` 为空（如 `"\n\n"`）的占位叶子（落地折叠为 `body` /
+ * `notice`，常夹在容器子流之间），它**不落库**，但前端会短暂收到。两处需要
  * 同一条判据，且必须**同源**：
  *
  * 1. 树构建（`useChatConnection.messageTree`）：空壳叶子不渲染，否则会话流里

@@ -110,7 +110,7 @@ const emit = defineEmits<{
 // 记忆**：不能按用户消息对待——右对齐的气泡、头像「你」、悬停可编辑/删除都会把
 // 「系统替你说了一句话」坐实。这里排掉它，`memory` 渲染器只是同一份判定的消费方。
 const isUser = computed(() => isUserFacet(props.facets) && !props.facets.compacted)
-/** 分形层级：仅 depth ≥ 2 施加缩进 + 左侧引导竖线（depth=1 与主回合左缘齐平） */
+/** 分形层级：仅 depth ≥ 2 施加缩进 + 左侧引导竖线（depth=1 与根级头部左缘齐平） */
 const nested = computed(() => (props.depth ?? 0) > 1)
 const typeClass = computed(() => `type-${props.facets.type}`)
 const statusClass = computed(() => `status-${props.facets.status}`)
@@ -195,7 +195,7 @@ const runningDuration = computed(() => {
 /* 分形层级：仅用「缩进 + 左侧引导竖线」表达嵌套深度（类邮件/论坛主题串），
    不再叠加任何外框，彻底避免「竖线 + 外框」的视觉冲突。
    注意：缩进只作用于 depth>=2 的层级（见 nested 判定）。depth=1 的子步骤（思考过程 /
-   工具调用）保持与主回合头部（AI 头像）左边缘齐平 —— 这是「头像与思考过程左对齐」的关键：
+   工具调用）保持与根级头部（AI 头像）左边缘齐平 —— 这是「头像与思考过程左对齐」的关键：
    顶层骨架头部 icon 位于 msg 容器左缘（x=0），depth=1 子节点不再缩进，故内容左缘同样为 x=0，
    二者天然对齐；更深层级才施加统一缩进并绘制引导竖线。 */
 .msg.nested {

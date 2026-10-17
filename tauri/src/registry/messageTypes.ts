@@ -660,31 +660,32 @@ export function isStreamingStatus(status?: NodeStatus | null): boolean {
 // ==================== Typing 占位合成（[T-151]，纯函数） ====================
 //
 // 后端**从不发** typing 帧（见 T-151 exit）；「生成中」的即时反馈由前端按一条规则
-// 合成：一个**助手回合骨架**（`turn` = skeleton+run）正在 streaming、且**还没有任何
-// 真实子节点**时，给它挂一个 typing 占位当第一个孩子。三条状态都由这一个谓词推出：
+// 合成：一个**根级骨架容器**（`type = skeleton` 且无父节点）正在 streaming、且**还没有
+// 任何真实子节点**时，给它挂一个 typing 占位当第一个孩子。三条状态都由这一个谓词推出：
 //
-// - **合成**：回合 streaming 且无真实子 ⇒ 产一条 typing；
-// - **替换**：该回合第一个真实子到达 ⇒ 不再是「无子」，下一帧起不产 typing
+// - **合成**：根级骨架 streaming 且无真实子 ⇒ 产一条 typing；
+// - **替换**：它的第一个真实子到达 ⇒ 不再是「无子」，下一帧起不产 typing
 //   （真实子就是那句里的「非-typing 兄弟」，到达即顶掉占位）；
-// - **父收束**：回合不再 streaming ⇒ 谓词不成立，typing 消失。
+// - **父收束**：根级骨架不再 streaming ⇒ 谓词不成立，typing 消失。
 //
 // 之所以能靠「不再合成」实现移除，是因为 typing 是**派生节点**、从不落地——它没有
 // 需要在 store 里就地标 `status=removed` 的持久身；移除 ⟺ 谓词转假。合成节点带稳定
 // 前缀 id（`typingIdOf`），永不与后端 id 相撞。
 //
-// **只认回合（run），不认 tool**：工具行有它自己的在途信号（「运行中 / 秒数」），
-// 给它挂「生成中」占位是错位的呈现；回合才是「等 LLM 吐出第一个节点」这个语义的宿主——
-// 与 `SkeletonNode` 既有的等待态判据同一 scope。
+// **只认根级骨架，不认挂在父节点下的子骨架**：后者有它自己的在途信号（「运行中 / 秒数」），
+// 给它挂「生成中」占位是错位的呈现；「等 LLM 吐出第一个节点」这个语义只属于会话流的根
+// ——与 `SkeletonNode` 既有的等待态判据同一 scope。全程只按形状（形态 + 有无父）判定，
+// 不引入任何「一整轮」的业务概念。
 
 /** typing 占位的稳定合成 id——以宿主为键，跨帧不变（缓存/键控都靠它）。 */
 export function typingIdOf(hostId: string): string {
   return `__typing__${hostId}`
 }
 
-/** 该节点是否是 typing 的宿主——根级、正在 streaming 的骨架（一整轮）。 */
+/** 该节点是否是 typing 的宿主——正在 streaming 的**根级骨架**（`skeleton` 且无父节点）。 */
 export function isTypingHost(node: ChatNode): boolean {
-  // 骨架格同时容纳「整轮」与「工具」：工具挂在父节点下、有自己的「运行中/秒数」信号，
-  // 不该再挂「生成中」占位。用「无父 = 根级整轮」把两者分开——纯形状判据，不读 style_tag。
+  // 骨架格同时容纳会话流的根与挂在父节点下的子骨架：后者有它自己的「运行中 / 秒数」信号，
+  // 不该再挂「生成中」占位。用「无父」把两者分开——纯形状判据，不读 style_tag、不认业务名。
   return (
     isStreamingStatus(node.status) &&
     messageTypeOf(node) === NODE_KIND_SKELETON &&
@@ -692,7 +693,7 @@ export function isTypingHost(node: ChatNode): boolean {
   )
 }
 
-/** 从可见节点扁平表合成 typing 占位子节点（宿主 = streaming 且无真实子的回合）。 */
+/** 从可见节点扁平表合成 typing 占位子节点（宿主 = streaming 且无真实子的根级骨架）。 */
 export function synthesizeTypingChildren(visible: ChatNode[]): ChatNode[] {
   // 只数**真实子**：已有的 typing 派生节点不能反过来让宿主显得「有子」。
   const parentsWithRealChild = new Set<string>()

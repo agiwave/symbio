@@ -281,10 +281,10 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     const removed = getRemovedSet()
     const filtered = all.filter(m => !removed.has(m.id))
 
-    // 识别「空内容叶子节点」：流模式下后端会先发一个 content 为空（如 "\n\n"）的
-    // Text / Reasoning 节点（例如 reasoning 与 tool_call 之间的占位空节点），
-    // 该节点并不持久化，但前端会短暂收到；渲染时直接过滤掉，避免对话流出现空白块。
-    // 仅过滤"无子节点"的节点——带子节点的节点是容器（skeleton），须保留。
+    // 识别「空内容叶子节点」：流模式下后端会先发一个 content 为空（如 "\n\n"）的占位叶子
+    // ——落地折叠后就是 `body` / `notice` 格、常夹在容器子流之间。该节点并不持久化，
+    // 但前端会短暂收到；渲染时直接过滤掉，避免对话流出现空白块。
+    // 仅过滤"无子节点"的节点——带子节点的节点是容器（`skeleton`），须保留。
     // 「空内容」判据走 `sessionTranscript.isBlankContentNode`（唯一实现）：
     // 等待骨架的兜底判定也要用它，两处不能各写一份。
     const rawChildren: Record<string, ChatNode[]> = {}

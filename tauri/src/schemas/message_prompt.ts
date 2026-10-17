@@ -8,7 +8,7 @@
  * - `confirm` ：工具执行前的确认，带工具名 / 参数 / 风险等级
  *
  * 本文件是**数据契约层**：零组件知识、零文案。渲染在
- * `components/message/UserPromptNode.vue`。
+ * `components/message/InteractionNode.vue`。
  */
 
 /** 提问的可选项 */
