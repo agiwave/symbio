@@ -91,11 +91,6 @@ pub(crate) const PRINCIPAL_TOOL_WEB_FETCH: &str = "web/fetch";
 /// **本地检索工具**的身份。
 pub(crate) const PRINCIPAL_TOOL_CONTENT_SEARCH: &str = "local/content_search";
 
-/// **压缩器**系统主体（[ADR-069 §决策 2]）——compaction 事件的将来发言方。
-/// 本批**不授权**——今天压缩节点由会话主体落，[T-147] 一并把「压缩由谁写」的判据换掉。
-#[allow(dead_code)] // T-146 只登记常量与授权表；[T-147] 起在写侧使用
-pub(crate) const PRINCIPAL_SYSTEM_COMPACTOR: &str = "system/compactor";
-
 /// 自主发起者的身份（[roadmap/S12 §3](../../../docs/009-task/132-自主层与长期目标.md "T-132-自主层与长期目标")）
 /// ——表里那一行的名字与 `AutonomousInitiator` 四个事件的 `actor` 是同一个常量。
 ///

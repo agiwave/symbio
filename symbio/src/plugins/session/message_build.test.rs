@@ -450,9 +450,9 @@ fn flatten_whole_tree_detaches_run_children_keeps_tool_results() {
     flatten_whole_tree(&mut tree, PresentationTree::Flat);
     // 骨架自身留在根；它的直接子节点（含工具调用骨架）升根 + 打记号。
     assert_eq!(tree[0].parent_id, None);
-    for i in 1..=3 {
-        assert_eq!(tree[i].parent_id, None, "本轮直接子节点升根");
-        assert_eq!(turn_root_of(&tree[i]), Some("run-1"));
+    for row in tree.iter().skip(1).take(3) {
+        assert_eq!(row.parent_id, None, "本轮直接子节点升根");
+        assert_eq!(turn_root_of(row), Some("run-1"));
     }
     // 工具结果挂在工具调用骨架下——与建树策略正交，flat 不碰。
     assert_eq!(tree[4].parent_id.as_deref(), Some("tool-1"));

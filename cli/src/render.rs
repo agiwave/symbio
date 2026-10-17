@@ -47,6 +47,24 @@ enum Surface {
     Silent,
 }
 
+/// 一帧并入本地快照后，回显判定要读的**事实包**（见 [`Renderer::on_message`]）。
+///
+/// 这些字段同源——都来自这一帧与它落下的快照；`render` 与 `announce_failure`
+/// 读的是同一批。散着传八个参数时，签名先于关系出现，关系本身反而看不见。
+struct FrameFacts {
+    id: String,
+    surface: Surface,
+    role: Option<NodeRole>,
+    /// 本帧新增的那一段（思考面打印它）
+    delta: String,
+    /// 还没打印过的那一段（正文面打印它，见 [`Renderer::on_message`]）
+    tail: String,
+    name: Option<String>,
+    progress: bool,
+    failed: bool,
+    error: Option<String>,
+}
+
 fn write_stdout(s: &str) {
     let mut out = io::stdout().lock();
     let _ = out.write_all(s.as_bytes());
@@ -132,7 +150,7 @@ impl Renderer {
         }
 
         let mut rewritten_to = None;
-        let (delta, surface, role, failed, error, name, progress) = {
+        let mut facts = {
             let merged = self.msgs.entry(message.id.clone()).or_default();
             // 身份字段：有则覆盖（首帧建立身份；重复携带以最后到达为准）。
             if message.parent_id.is_some() {
@@ -144,7 +162,7 @@ impl Renderer {
                 merged.role = Some(r);
             }
             if message.msg_type.is_some() {
-                merged.msg_type = message.msg_type.clone();
+                merged.msg_type = message.msg_type;
             }
             if message.tool_call_id.is_some() {
                 merged.tool_call_id = message.tool_call_id.clone();
@@ -198,15 +216,17 @@ impl Renderer {
             } else {
                 Surface::Silent
             };
-            (
-                delta,
+            FrameFacts {
+                id: message.id.clone(),
                 surface,
-                merged.node_role(),
-                merged.status == Some(NodeStatus::Failed),
-                merged.error.clone(),
-                merged.tool_name().map(str::to_string),
+                role: merged.node_role(),
+                delta,
+                tail: String::new(),
+                name: merged.tool_name().map(str::to_string),
                 progress,
-            )
+                failed: merged.status == Some(NodeStatus::Failed),
+                error: merged.error.clone(),
+            }
         };
 
         // 正文回显的依据：**还没打印过的那一段**，而不是「本帧新到达的增量」。
@@ -214,20 +234,20 @@ impl Renderer {
         // （同一个节点 id 换类型）——按增量算它是「无新增」，于是永远打不出来：
         // reasoning 模型「只思考不作答」的那一轮，CLI 什么都不输出还以失败退出，
         // 而模型明明答了（落库与网格重建里那段就是正文）。
-        let tail = if surface == Surface::Text {
+        facts.tail = if facts.surface == Surface::Text {
             self.msgs
-                .get(&message.id)
+                .get(&facts.id)
                 .and_then(|m| m.content.as_ref())
                 .map(MessageContent::to_text)
                 .unwrap_or_default()
                 .chars()
-                .skip(self.printed.get(&message.id).copied().unwrap_or(0))
+                .skip(self.printed.get(&facts.id).copied().unwrap_or(0))
                 .collect::<String>()
         } else {
-            delta.clone()
+            facts.delta.clone()
         };
-        if self.render(&message.id, surface, role, &delta, &tail, name, progress) {
-            *self.printed.entry(message.id.clone()).or_insert(0) += tail.chars().count();
+        if self.render(&facts) {
+            *self.printed.entry(facts.id.clone()).or_insert(0) += facts.tail.chars().count();
         }
         if let Some(next) = rewritten_to {
             self.warn(&format!(
@@ -235,29 +255,20 @@ impl Renderer {
                 next.chars().count()
             ));
         }
-        self.announce_failure(&message.id, failed, error);
+        self.announce_failure(&facts.id, facts.failed, facts.error);
     }
 
     /// 正文与工具播报的统一呈现：按 [`Surface`] / `role` 决定回显什么。
     ///
     /// 失败提示不在这一层——那是消息级终态的一部分，与"正文是否该回显"没有
     /// 共同依据，见 [`Self::announce_failure`]。
-    fn render(
-        &mut self,
-        id: &str,
-        surface: Surface,
-        role: Option<NodeRole>,
-        delta: &str,
-        tail: &str,
-        name: Option<String>,
-        progress: bool,
-    ) -> bool {
-        match surface {
+    fn render(&mut self, frame: &FrameFacts) -> bool {
+        match frame.surface {
             Surface::Text => {
                 // 只回显模型正文：用户消息由 CLI 自己输出，工具结果文本不回显
                 // （role 尚未到达的早期增量按"助手"处理，避免漏字）。
                 let suppress = matches!(
-                    role,
+                    frame.role,
                     Some(NodeRole::User) | Some(NodeRole::Tool) | Some(NodeRole::System)
                 );
                 if suppress {
@@ -267,28 +278,28 @@ impl Renderer {
                 // 「我在干活」的一句，不是本轮答案——非交互模式的 stdout 要交给下游
                 // 程序，那句进去就是噪声（每条回答末尾粘一句「我先看一下。」）。
                 // 仍按已打印长度记账，避免它分段到达时重复播报。
-                if progress {
-                    if !tail.is_empty() && !self.quiet {
-                        write_stderr(&format!("\x1b[2m… {tail}\x1b[0m"));
+                if frame.progress {
+                    if !frame.tail.is_empty() && !self.quiet {
+                        write_stderr(&format!("\x1b[2m… {}\x1b[0m", frame.tail));
                     }
-                    return !tail.is_empty();
+                    return !frame.tail.is_empty();
                 }
                 // 打印的是 `tail`（未打印过的正文尾巴），`delta` 在这里用不上：
                 // 增量早已并进快照，尾巴从快照算起——两者对流式正文逐字相同。
-                if !tail.is_empty() {
-                    write_stdout(tail);
+                if !frame.tail.is_empty() {
+                    write_stdout(&frame.tail);
                     self.wrote_text = true;
                     return true;
                 }
                 false
             }
-            Surface::Reasoning if self.verbose && !delta.is_empty() && !self.quiet => {
+            Surface::Reasoning if self.verbose && !frame.delta.is_empty() && !self.quiet => {
                 // 推理内容走 stderr，避免污染 stdout 的正文流
-                write_stderr(&format!("\x1b[2m{delta}\x1b[0m"));
+                write_stderr(&format!("\x1b[2m{}\x1b[0m", frame.delta));
                 false
             }
-            Surface::ToolCall if self.tools_announced.insert(id.to_string()) => {
-                let name = name.unwrap_or_else(|| "tool".to_string());
+            Surface::ToolCall if self.tools_announced.insert(frame.id.clone()) => {
+                let name = frame.name.clone().unwrap_or_else(|| "tool".to_string());
                 if !self.quiet {
                     if self.wrote_text {
                         write_stdout("\n");

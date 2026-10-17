@@ -23,7 +23,7 @@ impl SkillCompiler {
             crate::symbio_core::event::Entity::Memory,
             crate::symbio_core::event::Verb::Opened,
             0,
-            "session/main",
+            crate::symbio_core::authz::PRINCIPAL_MAIN,
         )
         .with_produced_by(source_seq) // 溯源 100%：指向源轨迹
         .with_payload(serde_json::json!({

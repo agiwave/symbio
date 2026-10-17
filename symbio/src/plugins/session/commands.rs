@@ -269,7 +269,7 @@ impl SessionPlugin {
             existing.set_legacy_role(role);
         }
         if let Some(t) = &patch.msg_type {
-            existing.msg_type = Some(t.clone());
+            existing.msg_type = Some(*t);
         }
         if let Some(p) = &patch.parent_id {
             existing.parent_id = Some(p.clone());
