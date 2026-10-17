@@ -29,16 +29,18 @@ use std::sync::Arc;
 use super::tool_result_guard::{guard_tool_result, DEFAULT_TOOL_RESULT_TOKEN_CAP};
 
 mod breaker;
+mod decls;
 mod delegation;
 mod elimination;
 mod task_decl;
 mod task_table;
 
 pub use self::breaker::BreakerInputs;
-pub use self::delegation::{note_delegation, Delegation, AGENT_RUN_TOOL};
+pub use self::decls::ToolDecls;
+pub use self::delegation::{note_delegation, Delegation};
 pub use self::elimination::EliminationInputs;
 pub use self::task_decl::{note_tasks, TaskDeclaration, TaskItem, TaskStatus};
-pub use self::task_table::{is_task_table_tool, TaskTableInputs};
+pub use self::task_table::TaskTableInputs;
 
 // 工具结果提取
 
@@ -868,6 +870,10 @@ pub async fn process_tool_calls_async(
     // 任务表写侧闸的判据同批首读一次（见 `TaskTableInputs`，S03 §3 / T-107）：
     // 只问本会话主体那一行——任务表是会话自己的工作跟踪，写它的资格随主体走。
     let task_table = TaskTableInputs::of(&ctx);
+    // 工具自声明的行为位同批首读一次（见 `ToolDecls`，T-158）：淘汰闸 / 承诺
+    // 记账 / 任务表三族的管辖对象从能力注册表读，不按名字判。没有 visitor ⇒
+    // 三个集合皆空 ⇒ 三道闸都不命中（缺声明与漏声明同形，e2e 兜行为）。
+    let decls = ToolDecls::of(&ctx).await;
 
     // 本批留底 `(id, name, args)`：循环按值消费 `tool_calls`，而「哪些没被执行」
     // 要在循环**之后**才知道（break 出口）——末尾收口既要补节点，也要把
@@ -1016,6 +1022,7 @@ pub async fn process_tool_calls_async(
             // 约还没落地就执行不了 = 没履约（`agent_run` 记账见 `note_delegation`）。
             note_delegation(
                 delegations,
+                &decls,
                 &id,
                 &name,
                 &tc.arguments,
@@ -1069,6 +1076,7 @@ pub async fn process_tool_calls_async(
             // 没跑 = 没履约（`agent_run` 的承诺记账见 `note_delegation`）。
             note_delegation(
                 delegations,
+                &decls,
                 &id,
                 &name,
                 &tc.arguments,
@@ -1146,22 +1154,31 @@ pub async fn process_tool_calls_async(
                 parent_updates.push(parent_update);
             }
             // 没跑 = 没履约（`agent_run` 的承诺记账见 `note_delegation`）。
-            note_delegation(delegations, &id, &name, &tc.arguments, false, &reason);
+            note_delegation(
+                delegations,
+                &decls,
+                &id,
+                &name,
+                &tc.arguments,
+                false,
+                &reason,
+            );
             continue;
         }
 
         // ── 淘汰闸（S13 §3，T-073）──────────────────────────────────────────
         //
-        // **只拦 `agent_run`**：被收回的是 `assign.work`（派活）这一项能力，别的
-        // 工具与本主体的这项撤销无关。位置与外部执行闸同一条理由——紧贴执行窗口
-        // 之前、先于钩子：对一通马上要被拒的调用先跑一遍钩子，等于让拒绝白白付
-        // 一次钩子往返。
+        // **只拦声明了 `provides_assign_work` 的工具**（今天 = `agent_run`，判据的
+        // 住址在工具自己的元数据上，T-158）：被收回的是 `assign.work`（派活）这一项
+        // 能力，别的工具与本主体的这项撤销无关。位置与外部执行闸同一条理由——紧贴
+        // 执行窗口之前、先于钩子：对一通马上要被拒的调用先跑一遍钩子，等于让拒绝
+        // 白白付一次钩子往返。
         //
         // 出口判据与熔断闸**不对称**（同一形态）：淘汰是**可审计的拒绝**——
         // `verdict.asserted` 已经在事实源里（闸门只是它的读侧），本层不再产事件；
         // 工具结果上的 `Refused: …` 与随收束入格的那条**违约承诺**（note_delegation
         // ok=false）就是它的两面——「约了却没派成」诚实记账，声誉投影据此再降。
-        if name.trim() == AGENT_RUN_TOOL && elimination.delegation_revoked {
+        if decls.provides_assign_work(&name) && elimination.delegation_revoked {
             let reason = format!(
                 "主体 {} 的 assign.work 已被淘汰回路收回（verdict.asserted，声誉低于阈值），本次委派未执行",
                 elimination.principal
@@ -1189,22 +1206,32 @@ pub async fn process_tool_calls_async(
                 parent_updates.push(parent_update);
             }
             // 没派 = 没履约（`agent_run` 的承诺记账见 `note_delegation`）。
-            note_delegation(delegations, &id, &name, &tc.arguments, false, &reason);
+            note_delegation(
+                delegations,
+                &decls,
+                &id,
+                &name,
+                &tc.arguments,
+                false,
+                &reason,
+            );
             continue;
         }
 
         // ── 任务表写侧闸（S03 §3，T-107）──────────────────────────────────────
         //
-        // **只拦 `todo_write`**：判的是「本主体有没有资格写任务表」——立任务
-        // （`define.work`）或独立判定（`assert.verification`）二居其一（C15 两者
-        // 互不可写 ⇒ 没有任何主体能同时自己立自己验）。纯产出主体（工人 / 对等体）
-        // 与纯派活主体（市场）被拒：工人的交付物是产物格，立与验归工作权威。
+        // **只拦声明了 `owns_task_table` 的工具**（今天 = `local/todo_write`，
+        // 判据的住址在工具自己的元数据上，T-158）：判的是「本主体有没有资格写
+        // 任务表」——立任务（`define.work`）或独立判定（`assert.verification`）
+        // 二居其一（C15 两者互不可写 ⇒ 没有任何主体能同时自己立自己验）。纯产出
+        // 主体（工人 / 对等体）与纯派活主体（市场）被拒：工人的交付物是产物格，
+        // 立与验归工作权威。
         //
         // 位置与外部执行闸 / 淘汰闸同一条理由——紧贴执行窗口之前、先于钩子。
         // 出口判据是**可审计的拒绝**（`Refused: …` 回灌模型 + 父节点收敛 +
         // `PERMISSION_DENIED`），且**不产事件、不记任务声明**：工具没跑，
         // 「声明过什么」就无从说起（`note_tasks` 只在跑完后记成功调用）。
-        if is_task_table_tool(&name) && !task_table.may_write {
+        if decls.owns_task_table(&name) && !task_table.may_write {
             let reason = format!(
                 "主体 {} 不持 define.work / assert.verification，不得写任务表（todo_write）",
                 task_table.principal
@@ -1276,6 +1303,7 @@ pub async fn process_tool_calls_async(
             }
             note_delegation(
                 delegations,
+                &decls,
                 &id,
                 &name,
                 &tc.arguments,
@@ -1308,10 +1336,18 @@ pub async fn process_tool_calls_async(
         // 承诺还没到可判时刻，抢跑记成履约或违约都是假事实（审批结束后随
         // resume 那一轮再记）。
         if pending_user_prompt.is_none() {
-            note_delegation(delegations, &id, &name, &tc.arguments, success, &final_res);
+            note_delegation(
+                delegations,
+                &decls,
+                &id,
+                &name,
+                &tc.arguments,
+                success,
+                &final_res,
+            );
             // 任务表声明（批⑨）：同一条「跑完了才判」的口径。`note_tasks` 自己
             // 过滤工具名与成败，非 `todo_write` / 失败的调用在这里一并被挡掉。
-            note_tasks(tasks, &name, &tc.arguments, success);
+            note_tasks(tasks, &decls, &name, &tc.arguments, success);
         }
 
         let tool_output = if success {
@@ -1486,6 +1522,7 @@ pub async fn process_tool_calls_async(
         // 没跑到同样是没履约（`agent_run` 的约不能因为"没执行"就查无此约）。
         note_delegation(
             delegations,
+            &decls,
             id,
             name,
             args,

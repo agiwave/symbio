@@ -1,10 +1,12 @@
 //! 任务表写侧闸判据（S03 §3，T-107）——批首读一次的主体资格。
 //!
-//! 四条判据：**立任务者放行**（`define.work` 三持有者逐一）、**独立判定者放行**
+//! 五条判据：**立任务者放行**（`define.work` 三持有者逐一）、**独立判定者放行**
 //! （`assert.verification` 两持有者）、**纯产出 / 纯派活主体拒**（工人 / 对等体 / 市场）、
-//! **工具名判据**（`local/todo_write` 认、`local/shell` 不认）。
+//! **未登记子智能体派生放行**、以及平凡值主体照常放行。
+//! 「谁是任务表写入」不在这里判——它在工具自己的 `owns_task_table` 声明上
+//! （T-158），见 `decls.test.rs` 的匹配口径用例。
 
-use super::{is_task_table_tool, TaskTableInputs};
+use super::TaskTableInputs;
 use crate::symbio_core::{authz, PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest};
 
 /// 带 `AGENT_ID` 的请求上下文：闸门按它派生主体（同 `EliminationInputs` 的取值口径）。
@@ -95,17 +97,4 @@ fn an_unregistered_subagent_keeps_the_derived_set() {
         inputs.may_write,
         "未登记子智能体派生主智能体整套（含 define.work）⇒ 照常放行"
     );
-}
-
-/// 工具名判据：线上全名取末段（`local/todo_write` ⇒ `todo_write`），别的工具不拦。
-///
-/// 与 `note_tasks` 认名的口径逐字一致——出参见短名、闸门认全名就会漂移成
-/// 「声明记了、闸门没拦」。
-#[test]
-fn the_tool_name_judgment_matches_the_declaration_reader() {
-    assert!(is_task_table_tool("todo_write"));
-    assert!(is_task_table_tool("local/todo_write"));
-    assert!(!is_task_table_tool("local/shell"));
-    assert!(!is_task_table_tool("todo_writer"));
-    assert!(!is_task_table_tool(""));
 }

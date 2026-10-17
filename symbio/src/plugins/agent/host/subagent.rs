@@ -110,6 +110,11 @@ impl crate::symbio_core::Capability for AgentRunCapability {
         crate::symbio_core::CapabilityMeta {
             name: NAME.to_string(),
             context_retention: None,
+            // 行为位自声明（T-158）：本工具提供 `assign.work`（淘汰闸的管辖对象），
+            // 且是跨主体立约型工具（承诺记账对象）。执行器读这两个位判，不认名字——
+            // 作用域投影只换名字、原样透传两位（改名包装器不重判风险的同一条纪律）。
+            provides_assign_work: true,
+            records_delegation_promise: true,
             description: format!(
                 "将任务委托给一个独立的子智能体会话：在其独立会话中执行任务，\
                  完成后返回其最终答复；子智能体拥有自己的提示词与工具集。\n\n\

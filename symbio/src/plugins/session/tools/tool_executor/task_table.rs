@@ -58,15 +58,10 @@ impl TaskTableInputs {
     }
 }
 
-/// 任务表工具名（LLM 可见短名）——`note_tasks` 认的是同一个名字
-/// （`local/todo_write` 的线上全名取末段），两处各判一遍迟早漂移成
-/// 「出参见短名、闸门认全名」。
-pub const TODO_WRITE_TOOL: &str = "todo_write";
-
-/// 该调用是否是任务表写入（`todo_write`，含 `local/` 等线上前缀）。
-pub fn is_task_table_tool(name: &str) -> bool {
-    name.trim().rsplit('/').next().unwrap_or_default() == TODO_WRITE_TOOL
-}
+// 「谁是任务表写入」这个判据不在本文件：它在工具自己的
+// `CapabilityMeta::owns_task_table` 上自声明（T-158），执行器经
+// [`ToolDecls`](super::ToolDecls) 读声明——把名字抄进闸门的那份副本
+// （`TODO_WRITE_TOOL` / `is_task_table_tool`）随机制化一并退役。
 
 #[cfg(test)]
 #[path = "task_table.test.rs"]

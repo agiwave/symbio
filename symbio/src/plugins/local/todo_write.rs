@@ -170,6 +170,9 @@ impl Capability for TodoWriteTool {
             // 推理无参考价值 → 仅保留最近一次调用的完整参数/结果。
             // 会话压缩层按 meta 通用执行，不对具体工具名特殊化。
             context_retention: Some(crate::symbio_core::CapabilityToolContextRetention::LastOnly),
+            // 行为位自声明（T-158）：任务表写侧资格闸与任务声明记账的管辖对象。
+            // 执行器读这一位判，不认名字——与风险 / 保留策略同一条自声明纪律。
+            owns_task_table: true,
             ..Default::default()
         }
     }

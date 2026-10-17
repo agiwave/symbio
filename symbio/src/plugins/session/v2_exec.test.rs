@@ -14,10 +14,14 @@
 use std::sync::{Arc, Mutex};
 
 use super::*;
+use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::{
     check_all, CapabilityMeta, ExecTranscriptWriter, PluginSimpleRequest, EVENT_ASSISTANT_FALLBACK,
     EVENT_ASSISTANT_FINAL,
+};
+use crate::symbio_core::{
+    Capability, CapabilityVisitor, ExecEnv, PluginError, PluginInvokeRequestExt, CAPABILITY_VISITOR,
 };
 
 use super::super::config::SessionConfig;
@@ -27,6 +31,46 @@ use super::super::types::Session;
 /// 测试请求上下文（工具轮才需要能力注册表；无工具轮一个空信封足够）。
 fn test_ctx() -> Arc<dyn crate::symbio_core::PluginInvokeRequest> {
     Arc::new(PluginSimpleRequest::new(None, None))
+}
+
+/// 带**注册面**的请求上下文（T-158）：把 `tools` 注册进 `CAPABILITY_VISITOR`。
+///
+/// 三道按名闸门（淘汰 / 承诺记账 / 任务表）的管辖判据现在从注册面读自声明位，
+/// ctx 里没有注册面 = 「没有任何工具声明过任何位」。生产里这个注册面由会话
+/// 插件的能力收集装上（`capabilities.rs`），测试照同一形状喂——`tools` 传什么，
+/// 注册面就是什么，两边不会漂。
+async fn test_ctx_declaring(
+    tools: &[CapabilityMeta],
+) -> Arc<dyn crate::symbio_core::PluginInvokeRequest> {
+    let ctx = test_ctx();
+    let visitor = Arc::new(DefaultToolVisitor::new());
+    for t in tools {
+        visitor
+            .register(Arc::new(DeclOnlyTool(t.clone())) as Arc<dyn Capability>)
+            .await;
+    }
+    ctx.set(CAPABILITY_VISITOR, visitor as Arc<dyn CapabilityVisitor>);
+    ctx
+}
+
+/// 只带元数据的假工具：注册面只读 `meta()`，执行永不到达（这些用例的调用都
+/// 止步于闸门 / 诚实失败，不真的 invoke）。
+struct DeclOnlyTool(CapabilityMeta);
+
+#[async_trait::async_trait]
+impl Capability for DeclOnlyTool {
+    fn meta(&self) -> CapabilityMeta {
+        self.0.clone()
+    }
+
+    async fn execute(
+        &self,
+        _args: serde_json::Value,
+        _env: &ExecEnv,
+        _ctx: Arc<dyn crate::symbio_core::PluginInvokeRequest>,
+    ) -> Result<serde_json::Value, PluginError> {
+        Ok(serde_json::Value::Null)
+    }
 }
 
 /// **轮次事实**（这一轮说了什么 / 跑出了什么）——记忆与学习是**派生副作用**，
@@ -1156,6 +1200,21 @@ async fn full_turn_lands_derived_commitment_facts() {
     let sink = crate::symbio_core::ExecEventSink::direct(frames.clone());
     let (provider, _prompts) = FaithfulProvider::new(Behavior::ToolThenAgentRun);
 
+    // 注册面与模型面同一份元数据（T-158）：`agent_run` 自声明「派活 + 立约」两位，
+    // 承诺记账只认声明——与生产（`plugins/agent/host/subagent.rs`）逐字同形。
+    let tool_meta = CapabilityMeta {
+        name: "agent_run".into(),
+        description: "派生一个子智能体".into(),
+        input_schema: serde_json::json!({ "type": "object" }),
+        keywords: vec![],
+        category: None,
+        examples: None,
+        context_retention: None,
+        provides_assign_work: true,
+        records_delegation_promise: true,
+        ..Default::default()
+    };
+
     let res = execute_turn(V2Turn {
         session: &session,
         provider: Arc::new(provider),
@@ -1163,7 +1222,7 @@ async fn full_turn_lands_derived_commitment_facts() {
         // **没履约**——立约与违约都要入格（S08 §5：违约可被观测是 T5 的前提）。
         parent: None,
         session_dir: super::super::test_dir(),
-        ctx: test_ctx(),
+        ctx: test_ctx_declaring(std::slice::from_ref(&tool_meta)).await,
         system_prompt: "system",
         abort: crate::symbio_core::ExecAbortSignal::new(),
         root_id: "r-1",
@@ -1171,16 +1230,7 @@ async fn full_turn_lands_derived_commitment_facts() {
         user_text: "请委托评审",
         user_node_id: None,
         window_turns: 6,
-        tools: &[CapabilityMeta {
-            name: "agent_run".into(),
-            description: "派生一个子智能体".into(),
-            input_schema: serde_json::json!({ "type": "object" }),
-            keywords: vec![],
-            category: None,
-            examples: None,
-            context_retention: None,
-            ..Default::default()
-        }],
+        tools: std::slice::from_ref(&tool_meta),
         resume: None,
         recalled: None,
         skill_obs: &[],

@@ -11,6 +11,10 @@ use crate::symbio_core::Store;
 // `EventWalStore` / `LatencyTier` 同由：它们只被父模块里的熔断段用到，那段已按域
 // 拆去 `tool_executor/breaker.rs`（[plan/13 C3](../../../../../docs/archive/13-质量改进总纲.md)），
 // 父模块顶层不再导入，`use super::*` 便带不过来——测试自己拿。
+use crate::providers::DefaultToolVisitor;
+use crate::symbio_core::{
+    Capability, CapabilityMeta, CapabilityVisitor, ExecEnv, PluginError, PluginInvokeRequestExt,
+};
 use crate::symbio_core::{EventWalStore, LatencyTier};
 
 fn test_ctx() -> Arc<dyn PluginInvokeRequest> {
@@ -21,6 +25,58 @@ fn test_ctx() -> Arc<dyn PluginInvokeRequest> {
 /// 与生产态一致：它是**本插件自己的目录**，不是任何全局系统根。
 fn test_dir() -> std::path::PathBuf {
     std::env::temp_dir().join("symbio-test/session-tool-executor")
+}
+
+// ── T-158 注册面：闸门问声明，测试喂一份与生产同形的声明 ────────────────
+//
+// 机制化之前这些用例直接写工具名调 `note_*`；判据搬到 `CapabilityMeta` 的
+// 自声明位之后，同一批用例经 `ToolDecls` 喂注册面——生产三件套各 declare 各的
+// 位（`agent_run` 派活 + 立约、`todo_write` 任务表），外加一个什么都不声明的
+// 普通工具（生产里绝大多数工具的形态）。
+
+/// 只带元数据的假工具：注册表怎么读，测试就怎么喂。
+struct DeclTool(CapabilityMeta);
+
+#[async_trait::async_trait]
+impl crate::symbio_core::Capability for DeclTool {
+    fn meta(&self) -> CapabilityMeta {
+        self.0.clone()
+    }
+
+    async fn execute(
+        &self,
+        _args: serde_json::Value,
+        _env: &ExecEnv,
+        _ctx: Arc<dyn PluginInvokeRequest>,
+    ) -> Result<serde_json::Value, PluginError> {
+        Ok(serde_json::Value::Null)
+    }
+}
+
+/// 生产三件套的注册面（`ToolDecls` 批首读的同一来源）。
+async fn factory_decls() -> ToolDecls {
+    let ctx = test_ctx();
+    let visitor = Arc::new(DefaultToolVisitor::new());
+    for (name, assign_work, promise, task_table) in [
+        ("agent_run", true, true, false),
+        ("todo_write", false, false, true),
+        ("shell", false, false, false),
+    ] {
+        visitor
+            .register(Arc::new(DeclTool(CapabilityMeta {
+                name: name.to_string(),
+                provides_assign_work: assign_work,
+                records_delegation_promise: promise,
+                owns_task_table: task_table,
+                ..Default::default()
+            })) as Arc<dyn Capability>)
+            .await;
+    }
+    ctx.set(
+        crate::symbio_core::CAPABILITY_VISITOR,
+        visitor as Arc<dyn CapabilityVisitor>,
+    );
+    ToolDecls::of(&ctx).await
 }
 
 // ==================== extract_result：判定顺序即约定 ====================
@@ -879,16 +935,17 @@ fn subagent_pending_payload_is_recognized_as_pending_intent() {
 // ==================== note_delegation：代际立约的唯一观察点 ====================
 
 /// 只有 `agent_run` 立约——别的工具是本会话自办，办没办成是执行结果不是承诺。
-#[test]
-fn note_delegation_ignores_non_delegating_tools() {
+#[tokio::test]
+async fn note_delegation_ignores_non_delegating_tools() {
+    let decls = factory_decls().await;
     let mut out = Vec::new();
     let args = json!({ "prompt": "让 reviewer 复查这段", "agent_id": "reviewer" });
 
-    note_delegation(&mut out, "c1", "vdfs_read", &args, true, "");
-    note_delegation(&mut out, "c2", "read", &args, true, "");
+    note_delegation(&mut out, &decls, "c1", "vdfs_read", &args, true, "");
+    note_delegation(&mut out, &decls, "c2", "read", &args, true, "");
     assert!(out.is_empty(), "非 `agent_run` 不产生承诺记录：{out:?}");
 
-    note_delegation(&mut out, "c3", "agent_run", &args, true, "");
+    note_delegation(&mut out, &decls, "c3", "agent_run", &args, true, "");
     assert_eq!(out.len(), 1);
     assert_eq!(
         out[0].id, "c3",
@@ -904,14 +961,16 @@ fn note_delegation_ignores_non_delegating_tools() {
 
 /// **先到先得**：同一次调用可能在两个分支各记一笔（终态广播找不到节点 ⇒ 末尾
 /// 收口会再记一次「未执行」），后到的收口不许把跑成功的改写成没跑。
-#[test]
-fn note_delegation_never_overwrites_an_earlier_judgement() {
+#[tokio::test]
+async fn note_delegation_never_overwrites_an_earlier_judgement() {
+    let decls = factory_decls().await;
     let mut out = Vec::new();
     let args = json!({ "prompt": "交给子智能体" });
 
-    note_delegation(&mut out, "c1", "agent_run", &args, true, "");
+    note_delegation(&mut out, &decls, "c1", "agent_run", &args, true, "");
     note_delegation(
         &mut out,
+        &decls,
         "c1",
         "agent_run",
         &args,
@@ -923,6 +982,7 @@ fn note_delegation_never_overwrites_an_earlier_judgement() {
 
     note_delegation(
         &mut out,
+        &decls,
         "c1",
         "agent_run",
         &args,
@@ -935,6 +995,7 @@ fn note_delegation_never_overwrites_an_earlier_judgement() {
     // 没跑到的那一次（一次都没记过）照常入账，且带得出违约原因。
     note_delegation(
         &mut out,
+        &decls,
         "c2",
         "agent_run",
         &args,
@@ -952,8 +1013,9 @@ fn note_delegation_never_overwrites_an_earlier_judgement() {
 // （失败的调用没改清单）、**id 缺席按位次兜底**（与 local/todo_write 同一条格式——
 // 两处各写一次是跨插件契约，改名必须一起改）。
 
-#[test]
-fn note_tasks_records_a_successful_todo_write() {
+#[tokio::test]
+async fn note_tasks_records_a_successful_todo_write() {
+    let decls = factory_decls().await;
     let mut out = Vec::new();
     let args = json!({
         "todos": [
@@ -963,7 +1025,7 @@ fn note_tasks_records_a_successful_todo_write() {
         ],
         "merge": false
     });
-    note_tasks(&mut out, "local/todo_write", &args, true);
+    note_tasks(&mut out, &decls, "local/todo_write", &args, true);
 
     assert_eq!(out.len(), 1, "一次成功调用 = 一条声明");
     let items = &out[0].items;
@@ -977,29 +1039,32 @@ fn note_tasks_records_a_successful_todo_write() {
     assert_eq!(out[0].items[0].goal, "分析架构");
 }
 
-#[test]
-fn note_tasks_ignores_failures_and_other_tools() {
+#[tokio::test]
+async fn note_tasks_ignores_failures_and_other_tools() {
+    let decls = factory_decls().await;
     let mut out = Vec::new();
     let args = json!({ "todos": [{ "content": "甲" }] });
 
     // 失败的调用没改清单 ⇒ 不记（记它等于替工具编一条事实）。
-    note_tasks(&mut out, "local/todo_write", &args, false);
+    note_tasks(&mut out, &decls, "local/todo_write", &args, false);
     // 别的工具：短名判据只认 todo_write。
-    note_tasks(&mut out, "local/shell", &args, true);
+    note_tasks(&mut out, &decls, "local/shell", &args, true);
     // MCP 的同名工具走 `mcp__srv__todo_write` 线上名，短名判据**不反演** ⇒ 不误吃。
-    note_tasks(&mut out, "mcp__srv__todo_write", &args, true);
+    note_tasks(&mut out, &decls, "mcp__srv__todo_write", &args, true);
     // 裸 `todo_write`（无挂载点前缀）同样要认。
-    note_tasks(&mut out, "todo_write", &args, true);
+    note_tasks(&mut out, &decls, "todo_write", &args, true);
 
     assert_eq!(out.len(), 1, "只有成功的 todo_write 被记账");
 }
 
-#[test]
-fn note_tasks_skips_payloads_that_cannot_be_a_task_list() {
+#[tokio::test]
+async fn note_tasks_skips_payloads_that_cannot_be_a_task_list() {
+    let decls = factory_decls().await;
     let mut out = Vec::new();
-    note_tasks(&mut out, "local/todo_write", &json!({}), true);
+    note_tasks(&mut out, &decls, "local/todo_write", &json!({}), true);
     note_tasks(
         &mut out,
+        &decls,
         "local/todo_write",
         &json!({ "todos": [{ "content": "" }] }),
         true,
@@ -1248,6 +1313,11 @@ async fn ledger_is_read_from_the_session_wal_not_the_plugin_dir() {
 // 钉的是**闸门的接线**（判据本身在 `task_table.test.rs`）：`todo_write` 到达执行窗口
 // 之前被拒——`Refused:` 回灌模型、父节点收敛、工具没有执行（没有路由往返）、
 // **不记任务声明**（`note_tasks` 只在跑完后记成功调用）。
+//
+// T-158 之后这道闸的判据是**注册面**：ctx 的 `CAPABILITY_VISITOR` 里要有一位
+// 自声明 `owns_task_table` 的 `todo_write`（生产即如此）——本用例的 ctx 因此带
+// 一份与生产同形的注册面，否则闸「看不见」这次调用（无声明 = 不命中，由 e2e
+// 兜真实行为）。
 
 /// 工人主体（只持 `produce.artifact`）调 `todo_write` ⇒ 拒止。
 ///
@@ -1263,6 +1333,19 @@ async fn a_producer_only_principal_is_refused_the_task_table() {
     let worker_ctx = {
         let req = PluginSimpleRequest::new(None, None);
         req.set(crate::symbio_core::AGENT_ID, "worker".to_string());
+        // 注册面：`todo_write` 自声明任务表位（生产同形；T-158 后闸问声明）。
+        let visitor = Arc::new(DefaultToolVisitor::new());
+        visitor
+            .register(Arc::new(DeclTool(CapabilityMeta {
+                name: "todo_write".to_string(),
+                owns_task_table: true,
+                ..Default::default()
+            })) as Arc<dyn Capability>)
+            .await;
+        req.set(
+            crate::symbio_core::CAPABILITY_VISITOR,
+            visitor as Arc<dyn CapabilityVisitor>,
+        );
         Arc::new(req) as Arc<dyn PluginInvokeRequest>
     };
 

@@ -1,21 +1,14 @@
 //! 代际立约出参（`agent_run` 的承诺记录）：工具执行层把「向上游承诺了什么、
 //! 履行了没有」交出来，由轮末收束的 `v2_facts::record_derived` 落成 `commitment.*` 格。
 
-/// 派活工具名（`agent_run` 的线上短名）——闸门侧字面量的**唯一住址**。
-///
-/// 两个消费点（[`note_delegation`] 与淘汰闸 `tool_executor.rs`）此前各写一遍
-/// 裸字面量；工具侧的自有常量住 `plugins/agent/host/subagent.rs` 的 `NAME`
-/// （`CapabilityMeta.name` 与审批载荷的 `tool_name` 必须同源，那是它的理由）。
-/// 两侧各持一份同值常量，与 `TODO_WRITE_TOOL` / `CONTEXT_COMPACT_TOOL_NAME`
-/// 同形——收敛字面量是这一步的全部，不改任何判据口径。
-pub const AGENT_RUN_TOOL: &str = "agent_run";
-
 /// 本轮的**代际立约记录**（[04 §3.1 批⑧](../../../../../../docs/004-plan/004-工程落地.md "PL-004-工程落地")，S08 §3）：
 /// 工具执行层把「我向上游承诺了什么、履行了没有」交出来，由轮末收束的
 /// `v2_facts::record_derived` 落成 `commitment.*` 格。
 ///
-/// 只认 `agent_run`——它是**跨主体**的那一次调用：本会话向上游承诺「会有另一个
-/// 智能体接手这件事」。别的工具是本会话自办，办没办成是执行结果，不是承诺。
+/// 只认**声明了 `records_delegation_promise` 的工具**（`agent_run` 即是；T-158 改了
+/// 判据的住址，没改这条语义）——它是**跨主体**的那一次调用：本会话向上游承诺
+/// 「会有另一个智能体接手这件事」。别的工具是本会话自办，办没办成是执行结果，
+/// 不是承诺。
 ///
 /// 工具执行层**没有事实源**（它只写节点、不碰 WAL），所以这里是纯出参：
 /// 谁负责把承诺入格，谁负责开那扇门（轮末收束的 `v2_facts::record_derived`）。
@@ -34,18 +27,20 @@ pub struct Delegation {
     pub why: String,
 }
 
-/// 承诺出参的**唯一写入点**（见 [`Delegation`]）：只有 `agent_run` 会被记账，
-/// 且在每个终态分支各记一次——没跑到的（协议错 / 被拦 / 批次跳过）同样是**没履约**，
-/// 记成违约比"查无此约"诚实（S08 §5：违约可被观测是 T5 的全部前提）。
+/// 承诺出参的**唯一写入点**（见 [`Delegation`]）：只有声明了
+/// `records_delegation_promise` 的工具会被记账（T-158），且在每个终态分支各记
+/// 一次——没跑到的（协议错 / 被拦 / 批次跳过）同样是**没履约**，记成违约比
+/// "查无此约"诚实（S08 §5：违约可被观测是 T5 的全部前提）。
 pub fn note_delegation(
     out: &mut Vec<Delegation>,
+    decls: &super::ToolDecls,
     id: &str,
     name: &str,
     args: &serde_json::Value,
     ok: bool,
     why: &str,
 ) {
-    if name.trim() != AGENT_RUN_TOOL {
+    if !decls.records_delegation_promise(name) {
         return;
     }
     let record = Delegation {

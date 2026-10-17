@@ -50,9 +50,11 @@ pub enum TaskStatus {
     Completed,
 }
 
-/// 任务表出参的**唯一写入点**（见 [`TaskDeclaration`]）：只认 `todo_write`。
+/// 任务表出参的**唯一写入点**（见 [`TaskDeclaration`]）：只认**声明了
+/// `owns_task_table` 的工具**（`local/todo_write` 即是；T-158 改了判据的住址，
+/// 没改这条语义）。
 ///
-/// 判据取**短名**（最后一个 `/` 之后的部分）：LLM 可见全名是 `<挂载点>/<短名>`
+/// 匹配口径取**短名**（最后一个 `/` 之后的部分）：LLM 可见全名是 `<挂载点>/<短名>`
 /// （`local/todo_write`），而 `CapabilityMeta.name` 是短名——与上下文治理层的
 /// 骨架化匹配（`context::window::apply_layered_sliding_window`）同一条口径，
 /// 不反演字符串、不硬编码前缀。
@@ -60,13 +62,17 @@ pub enum TaskStatus {
 /// `success = false` 不记：失败的调用没有改变清单，记它等于替工具编一条事实
 /// （`note_delegation` 反过来——没履约同样要记，因为「约」本身已经存在；任务不同，
 /// 清单没被改就是没被改）。
-pub fn note_tasks(out: &mut Vec<TaskDeclaration>, name: &str, args: &Value, success: bool) {
+pub fn note_tasks(
+    out: &mut Vec<TaskDeclaration>,
+    decls: &super::ToolDecls,
+    name: &str,
+    args: &Value,
+    success: bool,
+) {
     if !success {
         return;
     }
-    // 判据与任务表写侧闸同源（[`is_task_table_tool`](super::task_table::is_task_table_tool)）：
-    // 此前这里把「取末段比短名」又写了一遍，与那位助手迟早漂移成两套口径。
-    if !super::task_table::is_task_table_tool(name) {
+    if !decls.owns_task_table(name) {
         return;
     }
     let Some(todos) = args.get("todos").and_then(Value::as_array) else {
