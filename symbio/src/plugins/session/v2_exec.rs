@@ -1293,10 +1293,19 @@ pub(crate) async fn execute_turn(req: V2Turn<'_>) -> Result<V2TurnResult, Plugin
     //   （`AppendError::Duplicate` → Failed 出口），既完不成收束、也把本轮变成错误。
     //   语义上同样说不通：续写要跑的是**刚被用户批准的那次工具**，不是拿技能顶掉它。
     //   故 `resume_anchor` 非空时一律不走快路（判定根本不算，不是算了再丢）。
-    let hit = resume_anchor
-        .is_none()
-        .then(|| super::v2_skills::take_match(skill_hits, user_text))
-        .flatten();
+    // 先做**一次**匹配，再问表"这一格要不要走快路"。判据在
+    // `loop_registry` 的 `policy.reflex`（`resume_allowed ∧ has_match`），
+    // 本处只提供两个布尔并执行命中结果——`hit` 全程留在本地，表不接触它。
+    let matched = super::v2_skills::take_match(skill_hits, user_text);
+    let reflex_state =
+        super::loop_registry::LoopState::reflex(resume_anchor.is_none(), matched.is_some());
+    let hit = match super::loop_registry::builtin()
+        .decide(&reflex_state)
+        .map(|h| h.capsule)
+    {
+        Some(super::loop_registry::Capsule::REFLEX) => matched,
+        _ => None,
+    };
 
     // 档位：命中 ⇒ 反射（`budget_ms = 80`、开轮格的 `tier = reflex`），未命中 ⇒ 深度。
     // `tier` 与 `actor.budget_ms` 是**同一个事实**（一个入格、一个随主体走），

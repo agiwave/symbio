@@ -63,12 +63,16 @@
 //! `policy.memory` / `policy.skill` 两行（区分它们的量「本轮已召回否」在 drive 里
 //! 自然存在，在直线代码里只能靠代码位置隐含）。那一步属步骤 5。
 //!
-//! ## 反射档为什么不在此表
+//! ## 反射档为什么只判「走不走」，不判「走哪条」
 //!
-//! `policy.reflex`（命中已编译技能 ⇒ 一次模型调用都不发生）的 Step 必须携带
-//! **命中了哪条技能**，而本批的 [`Capsule`] 只有一个名字。等步骤 4 让 `Capsule`
-//! 长出带类型的载荷再挂——现在挂上来只能返回"要不要走快路"，把"走哪条"留给
-//! 调用方重算一遍，正是「一次判定、两个出口」要避免的漂移。
+//! `policy.reflex` 的判据是 `resume_allowed ∧ has_match`，命中后返回
+//! [`Capsule::REFLEX`]——**胶囊不携带命中的那条技能**。这不是漏了载荷：
+//! 技能对象留在调用方手里（`v2_exec` 的 `hit`），表只回答"这一格要不要走快路"。
+//!
+//! 两者不会漂移，因为 `has_match` 就是**同一个** `hit` 派生出来的布尔：判的是它、
+//! 用的也是它，中间没有第二次匹配。把技能对象塞进胶囊只会在表里多一份可变借用，
+//! 换不来任何一致性——`Capsule` 长出带类型载荷是步骤 4 为**能力行**准备的，
+//! 不是为了这一格。
 
 use std::sync::LazyLock;
 
@@ -104,6 +108,9 @@ impl Capsule {
     /// 「这一步做完了吗」这个簿记量，而它只在 drive 循环里才自然存在——见
     /// 模块文档「本批的过渡形态」。
     pub(crate) const RECALL: Self = Self("recall");
+
+    /// 反射档（快路）：命中已编译技能 ⇒ 以技能正文收束，一次模型调用都不发生。
+    pub(crate) const REFLEX: Self = Self("reflex");
 }
 
 /// 策略行看到的**全部世界**（PL-014 §3 硬规则 a：只携带引用/值，不带句柄）。
@@ -123,6 +130,8 @@ impl Capsule {
 /// | `nudged` | 本轮是否已提醒过（`TurnState::nudged_this_request`） |
 /// | `over_watermark` | `context::should_emit_context_nudge` 的结论 |
 /// | `has_session_dir` | `session.session_dir().is_some()` |
+/// | `resume_allowed` | 续写锚点为空（续写轮不走快路，见 `v2_exec`） |
+/// | `has_match` | `v2_skills::take_match` 的结论（同一次查询，判它用的就是它） |
 ///
 /// 构造器按**决策点**分，每个只填自己那几格：一格不会因为另一格的字段恰好
 /// 默认成真而误命中。代价是构造器随决策点增长——这是过渡形态，见模块文档。
@@ -139,6 +148,8 @@ pub(crate) struct LoopState {
     pub(crate) nudged: bool,
     pub(crate) over_watermark: bool,
     pub(crate) has_session_dir: bool,
+    pub(crate) resume_allowed: bool,
+    pub(crate) has_match: bool,
 }
 
 impl LoopState {
@@ -212,6 +223,18 @@ impl LoopState {
         }
     }
 
+    /// 反射档格（步骤 3 ④）：两个条件都是布尔，都是同一次查询的结果。
+    ///
+    /// `has_match` 由调用方在**同一次** `take_match` 结果上取——判的是它、用的也是
+    /// 它，中间没有第二次匹配（S11 §2「一次判定、两个出口」）。
+    pub(crate) fn reflex(resume_allowed: bool, has_match: bool) -> Self {
+        Self {
+            resume_allowed,
+            has_match,
+            ..Self::blank()
+        }
+    }
+
     /// 全零状态：只给上面几个构造器做基底，不对外。
     fn blank() -> Self {
         Self {
@@ -226,6 +249,8 @@ impl LoopState {
             nudged: false,
             over_watermark: false,
             has_session_dir: false,
+            resume_allowed: false,
+            has_match: false,
         }
     }
 }
@@ -381,6 +406,11 @@ impl Registry {
                 prio: 50,
                 decide: policy_recall,
             },
+            Row {
+                name: "policy.reflex",
+                prio: 60,
+                decide: policy_reflex,
+            },
         ] {
             if let Err(e) = reg.put(row) {
                 crate::plugin_warn!("session", "[Loop] 内建策略行注册失败（CI 应已拦下）：{e}");
@@ -466,6 +496,17 @@ fn policy_nudge(state: &LoopState) -> Option<Capsule> {
 /// - `has_session_dir`：临时会话没有落盘目录——没有事实源就没有记忆，不读不写。
 fn policy_recall(state: &LoopState) -> Option<Capsule> {
     (state.tool_rounds == 0 && state.has_session_dir).then_some(Capsule::RECALL)
+}
+
+/// 反射档的判据（步骤 3 ④）。两关缺一不可：
+///
+/// - `resume_allowed`：**续写轮不走快路**。续写轮不新开用户格（运行器复用
+///   `resume.user_seq`），而反射档的落格形状就是新开一轮 ⇒ 走它会撞幂等键
+///   （`AppendError::Duplicate` → Failed 出口）。语义上同样说不通：续写要跑的是
+///   刚被用户批准的那次工具，不是拿技能顶掉它。
+/// - `has_match`：逐字命中一条已编译技能（判据是数据，见 `v2_skills::take_match`）。
+fn policy_reflex(state: &LoopState) -> Option<Capsule> {
+    (state.resume_allowed && state.has_match).then_some(Capsule::REFLEX)
 }
 
 #[cfg(test)]

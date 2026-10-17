@@ -47,6 +47,7 @@ fn builtin_rows_are_listed_in_prio_order() {
             "policy.compress",
             "policy.nudge",
             "policy.recall",
+            "policy.reflex",
         ],
         "内建行必须按 (prio, name) 升序——顺序是数据，不是插入顺序"
     );
@@ -62,8 +63,8 @@ fn builtin_rows_are_conflict_free_and_ordered() {
     let reg = Registry::with_builtin_rows();
     assert_eq!(
         reg.list().len(),
-        5,
-        "五行都得注册成功（撞名 / 撞 prio 会少一行）"
+        6,
+        "六行都得注册成功（撞名 / 撞 prio 会少一行）"
     );
     let prios: Vec<u32> = reg.list().iter().map(|r| r.prio).collect();
     // 严格升序 = 已排序且无重复，一条断言盖住两件事。
@@ -317,6 +318,20 @@ fn nudge_requires_all_three_conditions() {
 }
 
 #[test]
+fn reflex_requires_a_fresh_turn_and_a_match() {
+    assert_eq!(
+        builtin()
+            .decide(&LoopState::reflex(true, true))
+            .map(|h| h.capsule),
+        Some(Capsule::REFLEX)
+    );
+    // 续写轮不走快路：它会撞幂等键（复用 `resume.user_seq` 却新开一轮）。
+    assert_eq!(builtin().decide(&LoopState::reflex(false, true)), None);
+    // 没命中技能就没什么可快。
+    assert_eq!(builtin().decide(&LoopState::reflex(true, false)), None);
+}
+
+#[test]
 fn recall_requires_first_round_and_a_session_dir() {
     assert_eq!(
         builtin()
@@ -336,7 +351,7 @@ fn recall_requires_first_round_and_a_session_dir() {
 fn each_grid_point_hits_only_its_own_row() {
     // 每个构造器只填自己那几格，因此任何一格都不会命中别人的行。
     // 这条一旦破了，`decide` 的"先命中者胜"就会把另一格的动作顶掉。
-    let cases: [(&str, LoopState, Capsule); 5] = [
+    let cases: [(&str, LoopState, Capsule); 6] = [
         ("policy.classify", head(), Capsule::DECIDE),
         ("policy.report", boundary(), Capsule::REPORT),
         (
@@ -353,6 +368,11 @@ fn each_grid_point_hits_only_its_own_row() {
             "policy.recall",
             LoopState::turn_prepare(0, true),
             Capsule::RECALL,
+        ),
+        (
+            "policy.reflex",
+            LoopState::reflex(true, true),
+            Capsule::REFLEX,
         ),
     ];
     for (row, state, capsule) in cases {
