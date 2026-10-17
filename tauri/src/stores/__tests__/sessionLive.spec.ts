@@ -172,53 +172,53 @@ describe('needsTypingRow：流尾等待骨架（根级骨架帧丢失时的兜�
 
   it('会话没在跑 → 不补（哪怕流里一条消息都没有）', () => {
     expect(needsTypingRow(false, [])).toBe(false)
-    expect(needsTypingRow(false, [msg({ status: 'streaming', type: 'text', content: '半截' })])).toBe(
+    expect(needsTypingRow(false, [msg({ status: 'streaming', type: 'body', content: '半截' })])).toBe(
       false,
     )
   })
 
-  it('会话在跑、流里什么都没有 → 补（Turn 的 created 还没到 / 丢了一次）', () => {
+  it('会话在跑、流里什么都没有 → 补（根级骨架的 created 还没到 / 丢了一次）', () => {
     expect(needsTypingRow(true, [])).toBe(true)
-    expect(needsTypingRow(true, [msg({ status: 'completed', type: 'text', content: '上一轮' })])).toBe(
+    expect(needsTypingRow(true, [msg({ status: 'completed', type: 'body', content: '上一轮' })])).toBe(
       true,
     )
   })
 
-  it('会话在跑、有在途正文 → 不补（正文本身在说话，Turn 骨架也已在位）', () => {
-    expect(needsTypingRow(true, [msg({ status: 'streaming', type: 'text', content: '正在写' })])).toBe(
+  it('会话在跑、有在途正文 → 不补（正文本身在说话，根级骨架也已在位）', () => {
+    expect(needsTypingRow(true, [msg({ status: 'streaming', type: 'body', content: '正在写' })])).toBe(
       false,
     )
     expect(
-      needsTypingRow(true, [msg({ status: 'waiting_user_action', type: 'text', content: '选一个' })]),
+      needsTypingRow(true, [msg({ status: 'waiting_user_action', type: 'body', content: '选一个' })]),
     ).toBe(false)
   })
 
   it('会话在跑、只有**空壳**流式节点 → 补（空壳渲染不出任何东西）', () => {
-    expect(needsTypingRow(true, [msg({ status: 'streaming', type: 'reasoning', content: '' })])).toBe(
+    expect(needsTypingRow(true, [msg({ status: 'streaming', type: 'notice', content: '' })])).toBe(
       true,
     )
-    expect(needsTypingRow(true, [msg({ status: 'streaming', type: 'text', content: '\n\n' })])).toBe(
+    expect(needsTypingRow(true, [msg({ status: 'streaming', type: 'body', content: '\n\n' })])).toBe(
       true,
     )
     // 多模态形状的空壳同样算空壳（取值走契约层的 messageTextOf）
     expect(
       needsTypingRow(true, [
-        msg({ status: 'streaming', type: 'text', content: [{ type: 'text', text: '  ' }] }),
+        msg({ status: 'streaming', type: 'body', content: [{ type: 'text', text: '  ' }] }),
       ]),
     ).toBe(true)
   })
 
-  it('空壳判据只对文字类节点生效：streaming 的工具调用即便无参数也占一张卡片', () => {
+  it('空壳判据只对文字类节点生效：streaming 的工具子骨架即便无参数也占一张卡片', () => {
     expect(
-      needsTypingRow(true, [msg({ status: 'streaming', type: 'tool_call', content: '' })]),
+      needsTypingRow(true, [msg({ status: 'streaming', type: 'skeleton', content: '' })]),
     ).toBe(false)
   })
 
   it('空壳 + 真内容并存 → 不补（真内容已经把这一轮的存在说清楚了）', () => {
     expect(
       needsTypingRow(true, [
-        msg({ status: 'streaming', type: 'reasoning', content: '' }),
-        msg({ status: 'streaming', type: 'text', content: '答' }),
+        msg({ status: 'streaming', type: 'notice', content: '' }),
+        msg({ status: 'streaming', type: 'body', content: '答' }),
       ]),
     ).toBe(false)
   })

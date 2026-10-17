@@ -337,12 +337,12 @@ describe('sessions store — 删除消息的级联（目标 + 其后全部）', 
   /** 一段线性转写：u1 → t1 → a1 → u2 → t2 → a2（`seq` 即顺序，与后端同源） */
   function seed(store: ReturnType<typeof useSessionsStore>) {
     store.hydrateFromHistory(SID, [
-      { id: 'u1', role: 'user', type: 'user_prompt', seq: 1, content: '问题一' },
-      { id: 't1', type: 'turn', seq: 2 },
-      { id: 'a1', role: 'assistant', type: 'text', seq: 3, content: '回答一' },
-      { id: 'u2', role: 'user', type: 'user_prompt', seq: 4, content: '问题二' },
-      { id: 't2', type: 'turn', seq: 5 },
-      { id: 'a2', role: 'assistant', type: 'text', seq: 6, content: '回答二' },
+      { id: 'u1', role: 'user', type: 'body', seq: 1, content: '问题一' },
+      { id: 't1', type: 'skeleton', seq: 2 },
+      { id: 'a1', role: 'assistant', type: 'body', seq: 3, content: '回答一' },
+      { id: 'u2', role: 'user', type: 'body', seq: 4, content: '问题二' },
+      { id: 't2', type: 'skeleton', seq: 5 },
+      { id: 'a2', role: 'assistant', type: 'body', seq: 6, content: '回答二' },
     ] as never)
   }
 
@@ -371,7 +371,7 @@ describe('sessions store — 删除消息的级联（目标 + 其后全部）', 
     ])
   })
 
-  it('从 Turn 起截断：该 Turn 及其全部子节点一并消失', () => {
+  it('从根级骨架起截断：该骨架及其全部子节点一并消失', () => {
     const store = useSessionsStore()
     seed(store)
 
@@ -462,16 +462,16 @@ describe('sessions store — 历史水合是快照直载', () => {
   it('快照即权威：本地不在快照里的节点不保留（在途节点由增量通道继续收敛）', async () => {
     const store = useSessionsStore()
     store.hydrateFromHistory(SID, [
-      { id: 'u1', role: 'user', type: 'user_prompt', seq: 1, content: '问题' },
+      { id: 'u1', role: 'user', type: 'body', seq: 1, content: '问题' },
     ] as never)
     store.applyTranscriptMessage(SID, {
-      id: 'turn-live',
-      type: 'turn',
+      id: 'skel-live',
+      type: 'skeleton',
       status: 'streaming',
       content: '半截',
     } as never)
 
-    snapshot([{ id: 'u1', role: 'user', type: 'user_prompt', seq: 1, content: '问题' }])
+    snapshot([{ id: 'u1', role: 'user', type: 'body', seq: 1, content: '问题' }])
     await store.loadMessages(SID)
 
     expect(ids(store)).toEqual(['u1'])
@@ -479,9 +479,9 @@ describe('sessions store — 历史水合是快照直载', () => {
 
   it('终态且不在快照里的本地节点被丢弃（被删除的陈旧副本不得复活）', async () => {
     const store = useSessionsStore()
-    store.applyTranscriptMessage(SID, { id: 'ghost', type: 'text', status: 'completed' } as never)
+    store.applyTranscriptMessage(SID, { id: 'ghost', type: 'body', status: 'completed' } as never)
 
-    snapshot([{ id: 'h1', type: 'text', seq: 1 }])
+    snapshot([{ id: 'h1', type: 'body', seq: 1 }])
     await store.loadMessages(SID)
 
     expect(ids(store)).toEqual(['h1'])
@@ -491,12 +491,12 @@ describe('sessions store — 历史水合是快照直载', () => {
     const store = useSessionsStore()
     store.applyTranscriptMessage(SID, {
       id: 'a1',
-      type: 'text',
+      type: 'body',
       status: 'streaming',
       content: '半截',
     } as never)
 
-    snapshot([{ id: 'a1', type: 'text', seq: 3, status: 'completed', content: '完整' }])
+    snapshot([{ id: 'a1', type: 'body', seq: 3, status: 'completed', content: '完整' }])
     await store.loadMessages(SID)
 
     const [a1] = store.getSessionMessages(SID)
@@ -530,7 +530,7 @@ describe('sessions store — 会话节点状态收敛（零回读）', () => {
     const store = useSessionsStore()
     store.applyTranscriptMessage(SID, {
       id: 'tc1',
-      type: 'tool_call',
+      type: 'skeleton',
       status: 'streaming',
       content: '{}',
     } as never)
@@ -545,7 +545,7 @@ describe('sessions store — 会话节点状态收敛（零回读）', () => {
     const store = useSessionsStore()
     store.applyTranscriptMessage(SID, {
       id: 'tc1',
-      type: 'tool_call',
+      type: 'skeleton',
       status: 'streaming',
     } as never)
 
@@ -587,14 +587,14 @@ describe('sessions store — 存储号就地落定，不回读', () => {
     const store = useSessionsStore()
     // 上一轮的产物：存储号 5 / 6，本地游标因此被抬到 6
     store.hydrateFromHistory(SID, [
-      { id: 'h1', type: 'text', seq: 5, status: 'completed', content: '旧的' },
-      { id: 'h2', type: 'text', seq: 6, status: 'completed', content: '旧的' },
+      { id: 'h1', type: 'body', seq: 5, status: 'completed', content: '旧的' },
+      { id: 'h2', type: 'body', seq: 6, status: 'completed', content: '旧的' },
     ] as never)
     // 用户发送：本地游标发号 7（此刻存储还没落库）
     store.applyTranscriptMessage(SID, {
       id: 'u1',
       role: 'user',
-      type: 'user_prompt',
+      type: 'body',
       status: 'completed',
       content: '问题',
     } as never)
@@ -608,7 +608,7 @@ describe('sessions store — 存储号就地落定，不回读', () => {
     store.applyTranscriptMessage(SID, {
       id: 'u1',
       role: 'user',
-      type: 'user_prompt',
+      type: 'body',
       seq: 4,
       status: 'completed',
       content: '问题',
@@ -628,13 +628,13 @@ describe('sessions store — 存储号就地落定，不回读', () => {
   it('权威号与本地号一致 ⇒ 无变化（幂等）', async () => {
     const store = useSessionsStore()
     store.hydrateFromHistory(SID, [
-      { id: 'h1', type: 'text', seq: 1, status: 'completed', content: '旧的' },
+      { id: 'h1', type: 'body', seq: 1, status: 'completed', content: '旧的' },
     ] as never)
     // 本地游标发号 2，随后存储也说是 2 —— 两套号没有分叉
-    store.applyTranscriptMessage(SID, { id: 'u1', type: 'user_prompt', status: 'completed' } as never)
+    store.applyTranscriptMessage(SID, { id: 'u1', type: 'body', status: 'completed' } as never)
     store.applyTranscriptMessage(SID, {
       id: 'u1',
-      type: 'user_prompt',
+      type: 'body',
       seq: 2,
       status: 'completed',
     } as never)
@@ -681,7 +681,7 @@ describe('sessions store — 实时状态的唯一变更通道', () => {
     store.applyTranscriptMessage(SID, {
       id: 'a1',
       role: 'assistant',
-      type: 'text',
+      type: 'body',
       content: '回答',
     } as never)
 
