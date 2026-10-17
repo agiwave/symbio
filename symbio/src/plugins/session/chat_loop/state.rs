@@ -333,7 +333,7 @@ pub(crate) enum TurnExit {
     /// 用户中止且**在途 Turn 尚未定稿**：冒泡 `Err(Aborted)`，由消费循环落库为
     /// `NodeStatus::Aborted` + 会话结局 `aborted`（**不是** `failed`），
     /// 前端渲染错误条与重试入口。携带**半截产出**（正文 / 思考 / 工具节点）——
-    /// 它们是事实，随收尾双写进 `messages.json`（`persist_failure` 的 `partial`）。
+    /// 它们是事实，随收尾入格（`persist_failure` 的 `partial`）。
     Aborted(Vec<ChatNode>),
     /// LLM / 编排失败：冒泡原始错误。
     Failed(PluginError),

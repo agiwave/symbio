@@ -360,7 +360,7 @@ impl SessionPlugin {
                         // 重试入口的出现与否取决于 abort 信号落在哪个检查点）。
                         //
                         // `partial` = 中止时**已产出的半截消息**（正文 / 思考 / 工具节点）：
-                        // 它们是事实，随 `persist_failure` 双写进 `messages.json`——
+                        // 它们是事实，随 `persist_failure` 收尾入格——
                         // 用户中断后重建的历史里那半句话还在。
                         self.persist_failure(
                             &session_id,
