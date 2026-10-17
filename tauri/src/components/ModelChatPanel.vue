@@ -186,10 +186,10 @@ const chat = useChatConnection({
   onSendComplete: props.onSendComplete,
 })
 
-// 向下级组件（MessageNode 内联 user_prompt 表单 / 失败工具骨架重试/补充）提供
+// 向下级组件（MessageNode 内联交互卡提问 / 失败工具骨架重试/补充）提供
 // 会话恢复接口（retry_subtree/retry/approve/reject/supply/answer 统一入口）。
 // 内部走统一 chat/send 接口的 resume 分支：target_id 为稳定锚点（失败根级骨架或工具骨架），
-// targetSessionId 用于子会话工具调用的恢复路由（子智能体的 user_prompt 通过
+// targetSessionId 用于子会话工具调用的恢复路由（子智能体的交互卡提问通过
 // parent_session_id 指回子会话）。
 // 智能体 / 模型 / 运行模式 / 风险等级等会话参数由后端按 session.metadata 解析
 // （写入统一经会话选项栏落库），故此处不再透传任何前端业务选择。

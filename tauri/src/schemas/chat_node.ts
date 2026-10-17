@@ -326,13 +326,13 @@ export function isUnsettledNodeStatus(status?: NodeStatus | null): boolean {
  * `scripts/protocol-mirror-audit.mjs` 的 C 组（后端枚举取值 ↔ 本词表）。
  */
 
-/** 整轮重试：删除靶子节点及其子树 → 重新走 LLM 请求（[ADR-070 §决策 5]，曾经的 `retry_turn`） */
+/** 子树重试：删除靶子节点及其子树 → 重新走 LLM 请求（[ADR-070 §决策 5]） */
 export const RESUME_ACTION_RETRY_SUBTREE = 'retry_subtree'
 /** **单工具**重试：删除该工具的失败结果 → 用原参数重新执行 */
 export const RESUME_ACTION_RETRY = 'retry'
-/** 工具审批通过：删除 user_prompt → 带 approved=true 重新执行 */
+/** 工具审批通过：删除交互节点 → 带 approved=true 重新执行 */
 export const RESUME_ACTION_APPROVE = 'approve'
-/** 工具审批拒绝：删除 user_prompt → 生成拒绝结果 */
+/** 工具审批拒绝：删除交互节点 → 生成拒绝结果 */
 export const RESUME_ACTION_REJECT = 'reject'
 /** 补充参数后重跑工具（与原 args 浅合并） */
 export const RESUME_ACTION_SUPPLY = 'supply'

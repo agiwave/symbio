@@ -883,7 +883,7 @@ const TYPE_PRESENTATION: Record<NodeKind, TypePresentation> = {
   // 容器：一整轮与一次工具调用结构同构——一个可折叠头部 + 一条子流。
   // 工具名 / 图标由后端 title/icon 给出；参数住骨架自身 content（SkeletonNode 当首条正文渲染）。
   [NODE_KIND_SKELETON]: {
-    // 根级整轮用 AI，子会话过程段用 ↳
+    // 根级骨架用 AI，子会话过程段用 ↳
     icon: (f) => (f.subSession ? '↳' : 'AI'),
     title: (_f, agentName) => agentName,
     renderer: 'skeleton',

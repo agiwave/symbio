@@ -239,7 +239,7 @@ function messageOfNode(node: VdfsNode, text: string): ChatNode | null {
   // 一律经 `nodeKindOf` 在读边界一次性归一成五值——折叠幂等，落地口再折一次不会漂移。
   const folded = typeof v.type === 'string' ? nodeKindOf(v.type) : undefined
 
-  // 容器节点（骨架：整轮或工具调用）的正文是整条消息 JSON：结构字段以它为准（比 attributes 全）。
+  // 容器节点（`skeleton`）的正文是整条消息 JSON：结构字段以它为准（比 attributes 全）。
   if (folded === NODE_KIND_SKELETON) {
     try {
       const parsed = JSON.parse(text) as ChatNode

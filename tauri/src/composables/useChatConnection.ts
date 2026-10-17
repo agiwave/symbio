@@ -229,8 +229,8 @@ export function useChatConnection(options: UseChatConnectionOptions): UseChatCon
     children: ChatNode[] | undefined,
   ): string {
     // type / name 必须进签名：同一条消息在流式过程中可能出现 type 迁移
-    // （reasoning → text）或工具名补全，漏掉它们会让缓存的旧节点对象
-    // 被复用，渲染器按旧 type 分派（Reason 块不渲染 / 工具名缺失）。
+    // （notice → body）或工具名补全，漏掉它们会让缓存的旧节点对象
+    // 被复用，渲染器按旧 type 分派（折叠叶不渲染 / 工具名缺失）。
     // id 也在签名里：子节点签名以其 id 打头，「换成一个同内容的子节点」同样
     // 必须使祖先签名变化（否则被换掉的子节点在界面上永远不出现）。
     //

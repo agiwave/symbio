@@ -224,8 +224,8 @@ export function workdirOf(it: SessionListItem): string | undefined {
  *
  * ## 判据为什么要排除「空壳节点」
  *
- * 后半句「没有在途节点」不能按 `status` 一眼看过去：流式占位节点（`text` /
- * `reasoning`，`content` 为空）也是 `streaming`，却**渲染不出任何东西**。把它算作
+ * 后半句「没有在途节点」不能按 `status` 一眼看过去：流式占位叶子（`body` / `notice`
+ * 格、`content` 为空）也是 `streaming`，却**渲染不出任何东西**。把它算作
  * 「已有内容」，正好在最需要骨架的那个瞬间（骨架节点的 `created` 丢了、只到了一个
  * 空壳）判成「不用补」——用户看到的就是一片空白。因此可见性判据走
  * `sessionTranscript.isBlankContentNode`，与树构建**同源**（两处只差「是否有子节点」）。

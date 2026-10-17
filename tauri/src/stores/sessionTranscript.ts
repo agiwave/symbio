@@ -66,14 +66,12 @@ export function previewOf(msg: Pick<ChatNode, 'role' | 'principal' | 'content'>)
 /**
  * 把一段增量追加到消息正文尾部（**帧携带 `delta` 时**的唯一内容落点）。
  *
- * ## 为什么不再按节点类型猜"追加还是替换"
+ * ## 为什么按字段而非节点类型判定「追加还是替换」
  *
- * 这里原本是 `mergeMessagePatch`：它从 `type` / `role` 反推语义——`tool_call` 与
- * `role = tool` 被判成"流式帧全量重发"因而**整条替换**，其余才追加。那条规则赖以
- * 成立的前提已经不存在：帧的语义由**字段**给出（`delta` = 尾部追加，
- * `content` = 整条替换），后端对工具参数与工具响应发的都是窄增量。
- * 继续按类型猜的代价是实测过的事故：**流式工具响应的增量被当成全量重发**，
- * 正文被最后一片覆盖——工具卡片有请求、响应是空的。
+ * 帧的语义由**字段**给出（`delta` = 尾部追加，`content` = 整条替换），后端对工具参数
+ * 与工具响应发的都是窄增量。若反过来按 `type` / `role` 猜（把 `tool_call` /
+ * `role = tool` 判成"全量重发"因而整条替换），代价是实测过的事故：**流式工具响应的
+ * 增量被当成全量重发**，正文被最后一片覆盖——工具卡片有请求、响应是空的。
  *
  * 取值走契约层的唯一实现（`messageTextOf`）：增量帧的目标是文本正文，多模态形状
  * 不该被静默丢成空串。
@@ -177,7 +175,7 @@ export function isInProgressMessage(msg: Pick<ChatNode, 'status'>): boolean {
  * 不报错、不被测试拦住，只是偶尔转一下圈。
  *
  * 只对 `body` / `notice` 判定——`skeleton` 的 `content` 是参数 JSON，即便为空
- * 也有一张容器要显示（工具名在 title 上）；容器类节点（整轮 / 工具调用）
+ * 也有一张容器要显示（工具名在 title 上）；容器类节点（`skeleton`）
  * 靠子节点呈现，不适用本条。
  */
 export function isBlankContentNode(msg: Pick<ChatNode, 'type' | 'content'>): boolean {

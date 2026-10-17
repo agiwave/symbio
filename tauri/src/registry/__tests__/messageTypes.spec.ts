@@ -626,7 +626,7 @@ describe('messageRendererKey：渲染形态分派', () => {
 
   // 既有的**有意分歧**：图标/标题是「角色优先于类型」，渲染器是「骨架最先」。
   // 两者对 `role=user + type=skeleton` 这种（实际不可达的）组合给出不同答案。
-  // 之所以钉住而不是统一：骨架节点带 children，必须走分组渲染器，否则整轮内容
+  // 之所以钉住而不是统一：骨架节点带 children，必须走分组渲染器，否则骨架内容
   // 会塌成一条用户气泡；而图标侧让「用户」胜出更符合直觉。统一任何一边都会
   // 改掉一处既有语义，故保留分歧并在此显式记录——改动它必须是有意的。
   it('role=user + type=skeleton：图标按角色、渲染器按骨架（有意分歧，勿静默统一）', () => {
@@ -638,7 +638,7 @@ describe('messageRendererKey：渲染形态分派', () => {
 })
 
 describe('synthesizeTypingChildren：Typing 占位合成（[T-151] 三态）', () => {
-  // 一个根级骨架（skeleton + 无父 → 一整轮），是 typing 的宿主
+  // 一个根级骨架（skeleton + 无父），是 typing 的宿主
   const runHost = (status: ChatNode['status'], id = 'run1'): ChatNode => ({
     id,
     type: NODE_KIND_SKELETON,
@@ -676,7 +676,7 @@ describe('synthesizeTypingChildren：Typing 占位合成（[T-151] 三态）', (
   })
 
   it('子级骨架不合成——工具有自己的在途信号（「运行中 / 秒数」），挂「生成中」是错位', () => {
-    // 宿主判据是「无父 = 根级整轮」：带 parent_id 的骨架（工具调用）不当 typing 宿主。
+    // 宿主判据是「无父 = 根级骨架」：带 parent_id 的骨架（工具子骨架）不当 typing 宿主。
     const out = synthesizeTypingChildren([
       {
         id: 'tool1',

@@ -11,27 +11,27 @@
  * 真实 store 的落地口，然后断言终态：
  *
  *   1. 结果子节点（role=tool）必须在 store 里；
- *   2. ToolCall 父节点终态必须是 completed；
- *   3. 树上 ToolCall 必须挂上结果子节点。
+ *   2. 工具子骨架父节点终态必须是 completed；
+ *   3. 树上工具子骨架必须挂上结果子节点。
  *
  * 落地语义（**语义全在字段上**）：`delta` 追加 / `content` 替换 /
- * `status=removed` 移除 / 其余字段合并。变更序（一轮「思考 → 工具调用 → 结果」）：
+ * `status=removed` 移除 / 其余字段合并。变更序（一轮「折叠叶 → 工具子骨架 → 结果」）：
  *
- * | # | 落地帧                                             | 后端发射点                  |
+ * | # | 落地帧（形状）                                  | 后端发射点                  |
  * |---|---------------------------------------------------|-----------------------------|
- * | 1 | Turn root（streaming + meta.turn）                | `emit_streaming_start`      |
- * | 2 | Reasoning（身份 + 首段正文）                      | 首条 `apply`                |
- * | 3 | Reasoning `delta` ×N                              | `delta` → `updated`+`delta` |
- * | 4 | ToolCall（身份 + 首段参数）                       | `apply`                     |
- * | 5 | ToolCall `delta`（参数增量）                      | 同上（与 Text 同构）        |
- * | 6 | Reasoning `status=completed`                      | `finalize_assistant_turn`   |
- * | 7 | ToolCall（+meta.started_at）                      | `emit_tool_running`         |
+ * | 1 | 根级骨架（streaming + meta.turn）                 | `emit_streaming_start`      |
+ * | 2 | 折叠叶（身份 + 首段正文）                         | 首条 `apply`                |
+ * | 3 | 折叠叶 `delta` ×N                                 | `delta` → `updated`+`delta` |
+ * | 4 | 工具子骨架（身份 + 首段参数）                     | `apply`                     |
+ * | 5 | 工具子骨架 `delta`（参数增量）                    | 同上（与正文叶同构）        |
+ * | 6 | 折叠叶 `status=completed`                         | `finalize_assistant_turn`   |
+ * | 7 | 工具子骨架（+meta.started_at）                    | `emit_tool_running`         |
  * | 8 | 结果子节点（completed，非流式一次给全）           | `process_tool_calls_async`  |
- * | 9 | ToolCall（completed）                             | `emit_parent_finalized`     |
- * |10 | Turn root `status=completed`                      | `finalize_turn_root`        |
+ * | 9 | 工具子骨架（completed）                           | `emit_parent_finalized`     |
+ * |10 | 根级骨架 `status=completed`                       | `finalize_turn_root`        |
  *
  * 两条结构约束（都由本文件的断言钉住，勿再退回）：
- * - **Turn root 的终态在最后**：它是组合节点，终态必须**跟随子树**（#9 之后），
+ * - **根级骨架的终态在最后**：它是组合节点，终态必须**跟随子树**（#9 之后），
  *   不得出现在 LLM 流结束那一刻（那样容器会先于其中的工具调用完成）；
  * - **工具参数是窄增量**：只有首条（身份字段出现）带正文，之后是 `delta` 追加。
  *
@@ -57,7 +57,7 @@ import {
 const SID = 'sess1'
 const TURN = 'turn1'
 const REASON = 'reason1'
-const TC = 'tc1' // ToolCall 节点 id（accumulator 的 node_id，8 字符 llm_short_id 形态）
+const TC = 'tc1' // 工具子骨架节点 id（accumulator 的 node_id，8 字符 llm_short_id 形态）
 const RESULT = 'r1' // 结果子节点 id（uuid）
 
 /** 驱动一条落地帧：与 `sessionTranscriptSync` 消费端交给 store 的形状一致 */
@@ -70,11 +70,11 @@ beforeEach(() => {
 })
 
 describe('工具轮实时帧序列 → store 终态', () => {
-  it('结果子节点落 store、ToolCall 父节点终态 completed', () => {
-    // ── 1. Turn root（emit_streaming_start：streaming + meta.turn）──
+  it('结果子节点落 store、工具子骨架父节点终态 completed', () => {
+    // ── 1. 根级骨架（emit_streaming_start：streaming + meta.turn）──
     feed({ id: TURN, role: 'assistant', type: NODE_KIND_SKELETON, status: 'streaming', meta: { turn: 0 } })
 
-    // ── 2. Reasoning 首帧（身份 + 首段正文）──
+    // ── 2. 折叠叶首帧（身份 + 首段正文）──
     feed({
       id: REASON,
       role: 'assistant',
@@ -84,11 +84,11 @@ describe('工具轮实时帧序列 → store 终态', () => {
       content: '第一段思考',
     })
 
-    // ── 3. Reasoning 增量 ×2（窄载荷）──
+    // ── 3. 折叠叶增量 ×2（窄载荷）──
     feed({ id: REASON, delta: '，继续' })
     feed({ id: REASON, delta: '思考。' })
 
-    // ── 4. ToolCall 首帧（身份字段 + 首个参数片段）──
+    // ── 4. 工具子骨架首帧（身份字段 + 首个参数片段）──
     feed({
       id: TC,
       role: 'assistant',
@@ -99,10 +99,10 @@ describe('工具轮实时帧序列 → store 终态', () => {
       content: '{"path":"',
     })
 
-    // ── 5. ToolCall 参数渐增（**窄增量**：与 Text / Reasoning 同构）──
+    // ── 5. 工具子骨架参数渐增（**窄增量**：与正文叶 / 折叠叶同构）──
     feed({ id: TC, delta: 'a.md"}' })
 
-    // ── 6. Reasoning 终态（finalize：状态帧，不带正文）──
+    // ── 6. 折叠叶终态（finalize：状态帧，不带正文）──
     feed({
       id: REASON,
       role: 'assistant',
@@ -111,7 +111,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
       status: 'completed',
     })
 
-    // ── 7. ToolCall 进入执行（emit_tool_running：状态帧 + meta）──
+    // ── 7. 工具子骨架进入执行（emit_tool_running：状态帧 + meta）──
     feed({
       id: TC,
       role: 'assistant',
@@ -131,7 +131,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
       content: '文件内容……',
     })
 
-    // ── 9. ToolCall 终态（emit_parent_finalized：状态帧 + 结果 meta）──
+    // ── 9. 工具子骨架终态（emit_parent_finalized：状态帧 + 结果 meta）──
     feed({
       id: TC,
       role: 'assistant',
@@ -141,7 +141,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
       meta: { started_at: 1726900000000, success: true, tool_name: 'local/read' },
     })
 
-    // ── 10. Turn root 终态（finalize_turn_root：**子树收敛之后**才发出）──
+    // ── 10. 根级骨架终态（finalize_turn_root：**子树收敛之后**才发出）──
     // 此前它在 `finalize_assistant_turn`（LLM 流结束那一刻）发出，比子树早整整
     // 一个执行窗口——容器"已完成"而其中的工具调用仍在运行。现在移到 `close_turn`
     // 归来之后；发出的即 `llm_build_assistant_messages` 构建的那条（pending 落库的
@@ -154,10 +154,10 @@ describe('工具轮实时帧序列 → store 终态', () => {
     const result = msgs.find((m) => m.id === RESULT)
     const reason = msgs.find((m) => m.id === REASON)
 
-    expect(tc, 'ToolCall 父节点必须在 store').toBeTruthy()
-    expect(tc!.status, 'ToolCall 父节点必须收到终态').toBe('completed')
+    expect(tc, '工具子骨架父节点必须在 store').toBeTruthy()
+    expect(tc!.status, '工具子骨架父节点必须收到终态').toBe('completed')
     expect(tc!.meta?.success, '执行结果标记必须落到节点上').toBe(true)
-    expect(tc!.content, 'ToolCall 参数必须由 delta 拼出完整 JSON').toBe('{"path":"a.md"}')
+    expect(tc!.content, '工具子骨架参数必须由 delta 拼出完整 JSON').toBe('{"path":"a.md"}')
     expect(result, '结果子节点必须落 store（症状：一直缺失）').toBeTruthy()
     expect(result!.parent_id).toBe(TC)
     expect(result!.role).toBe('tool')
@@ -166,7 +166,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
   })
 
   it('流式工具响应：增量追加到 role=tool 节点（不得被覆盖成最后一片）', () => {
-    // ToolCall 已成形（调用子智能体的工具）
+    // 工具子骨架已成形（调用子智能体的工具）
     feed({
       id: TC,
       role: 'assistant',
@@ -177,7 +177,7 @@ describe('工具轮实时帧序列 → store 终态', () => {
       content: '{}',
     })
 
-    // 子会话顶层节点：`tool_executor` 把 parent 锚定到 ToolCall、role 归 Tool 后转发
+    // 子会话顶层节点：`tool_executor` 把 parent 锚定到工具子骨架、role 归 tool 后转发
     feed({ id: RESULT, role: 'tool', type: NODE_KIND_SKELETON, parent_id: TC, status: 'streaming' })
 
     // 响应逐片到达（后端透传子会话的 `delta`，不是全量重发）

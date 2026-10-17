@@ -7,7 +7,7 @@
  * 都是可断言的假实现。
  *
  * 钉住的约定：
- * 1. **消息树**：空内容叶子（流式的占位空 Text / Reasoning）不渲染，
+ * 1. **消息树**：空内容叶子（流式的占位空 body / notice）不渲染，
  *    但**带子节点的容器必须保留**；`removeMessage` 是**本地覆盖**、不污染 store；
  *    parent 不可见的悬挂节点升为根（不丢消息）。
  * 2. **乐观置位**：send 立刻置 working 并清会话级错误——这是「零回读」的前提，
@@ -213,7 +213,7 @@ describe('messageTree — 从 store 派生', () => {
 })
 
 describe('typing 占位合成（[T-151] 端到端：合成挂进 messageTree）', () => {
-  // 根级、正在 streaming 的骨架就是一整轮——typing 的宿主（形状判据：无父 + skeleton）
+  // 根级、正在 streaming 的骨架就是 typing 的宿主（形状判据：无父 + skeleton）
   const runHost = (status: ChatNode['status']): ChatNode => ({
     id: 'run1',
     type: NODE_KIND_SKELETON,

@@ -8,8 +8,7 @@
  * - `reasoning` / `compression` → `notice`（同一个折叠叶）
  * - `text` → `body`
  *
- * 因此本文件断言的是**折叠后各格的可见行为**，不再是旧的「Turn 分组 / 工具三段式 /
- * WorkerProgress 状态行」——那些是塌缩前每格自带业务逻辑时的产物，现已不存在。
+ * 因此本文件断言的是**折叠后各格的可见行为**：每格只按形状渲染，不含任何业务分支。
  * 类名钩子来自 `NodeShell` 的 `type-${facets.type}`（故只会出现 `type-skeleton` 等
  * 五值，绝不会出现 `type-tool_call`）。
  */

@@ -3,7 +3,7 @@
  * 流式端到端复现测试：真实 store → 实时变更收敛 → 树构建（复刻
  * useChatConnection.messageTree 的分形逻辑）→ MessageNode 渲染。
  *
- * 目的：复现"长会话流模式下 Reason 块不结束 / 后续内容显示进 Reason / Turn 不显示"
+ * 目的：复现"长会话流模式下折叠叶不结束 / 后续内容显示进折叠叶 / 根级骨架不显示"
  * 的纯前端可见结果，并作为修复的回归锚。
  *
  * 帧按**现行语义**驱动（语义全在字段上：`delta` 追加 / `content` 替换 /
@@ -142,14 +142,14 @@ function mountTree(tree: ChatNode[]) {
   )
 }
 
-describe('流式端到端：Turn/Reason 在多轮工具场景的可见性', () => {
+describe('流式端到端：根级骨架 / 折叠叶在多轮工具场景的可见性', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
   })
 
-  it('多轮工具：每轮 Turn 最终 Completed，无残留「正在思考」骨架', () => {
+  it('多轮工具：每轮根级骨架最终 Completed，无残留「正在思考」等待骨架', () => {
     
-    // ── Turn 1：思考 → 文本 → 工具（结果在下一轮前）──
+    // ── 根级骨架 1：折叠叶 → 正文 → 工具（结果在下一轮前）──
     const t1 = turn('T1')
     const r1 = reasoning('r1', 'T1', '想法')
     const x1 = text('x1', 'T1', '正文')
@@ -161,12 +161,12 @@ describe('流式端到端：Turn/Reason 在多轮工具场景的可见性', () =
     feed(settled(x1))
     feed(tc1)
 
-    // ── 工具结果 + Turn1 完成（后端 finalize 顺序：先子节点后根）──
+    // ── 工具结果 + 根级骨架 1 完成（后端 finalize 顺序：先子节点后根）──
     feed({ id: 'res1', parent_id: 'tc1', role: 'tool', type: 'text', status: 'completed', content: '"ok"' })
     feed(settled(tc1))
     feed(settled(t1))
 
-    // ── Turn 2：纯文本收尾 ──
+    // ── 根级骨架 2：纯正文收尾 ──
     const t2 = turn('T2')
     const r2 = reasoning('r2', 'T2', '再想')
     const x2 = text('x2', 'T2', '结论')
@@ -183,14 +183,14 @@ describe('流式端到端：Turn/Reason 在多轮工具场景的可见性', () =
 
     // 1) 无任何等待骨架残留（每轮根级骨架均已有子节点）
     expect(w.findAll('.skeleton-pending').length).toBe(0)
-    // 2) 两轮整轮 + 一次工具调用都以骨架容器呈现（`.type-skeleton`）
+    // 2) 两个根级骨架 + 一个工具子骨架都以骨架容器呈现（`.type-skeleton`）
     expect(w.findAll('.type-skeleton').length).toBe(3)
     // 3) 正文可见
     expect(w.text()).toContain('正文')
     expect(w.text()).toContain('结论')
   })
 
-  it('流式中途（Reasoning streaming）：骨架消失、思考折叠叶单行显示「处理中…」', () => {
+  it('流式中途（折叠叶 streaming）：等待骨架消失、折叠叶单行显示「处理中…」', () => {
     feed(turn('T1'))
     feed(reasoning('r1', 'T1', '部分思考'))
 
@@ -199,7 +199,7 @@ describe('流式端到端：Turn/Reason 在多轮工具场景的可见性', () =
     const w = mountTree(tree)
     // 根级骨架已有子节点 → 不显示等待骨架
     expect(w.findAll('.skeleton-pending').length).toBe(0)
-    // 思考折叠叶头部存在且是"处理中…"态
+    // 折叠叶头部存在且是"处理中…"态
     const head = w.find('.type-notice .node-head')
     expect(head.exists()).toBe(true)
     expect(head.text()).toContain('处理中')
@@ -239,7 +239,7 @@ describe('流式端到端：Turn/Reason 在多轮工具场景的可见性', () =
     feed(x0)
     feed(settled(x0))
     feed(settled(t0))
-    // 新一轮整轮骨架已广播、尚无子节点
+    // 新一轮根级骨架已广播、尚无子节点
     feed(turn('T1'))
 
     const store = useSessionsStore()
@@ -255,9 +255,9 @@ describe('流式端到端：Turn/Reason 在多轮工具场景的可见性', () =
  * 上面那些用例只断言 store 里的消息（`getSessionMessages`），因此
  * `messageTree` 的节点复用签名若只看「自身字段 + 直接子节点 id」，这个缺陷
  * 完全逃得过测试网：store 里内容是对的，界面却停在旧内容。用户实测症状正是
- * 「增量始终不刷新；正文结束后（根 Turn 状态迁移那一刻）才突然完整」。
+ * 「增量始终不刷新；正文结束后（根级骨架状态迁移那一刻）才突然完整」。
  *
- * 根因是**渲染失效口径不完整**：容器的渲染结果全部来自子树（Turn / ToolCall
+ * 根因是**渲染失效口径不完整**：容器的渲染结果全部来自子树（根级骨架 / 工具子骨架
  * 自身无正文），所以「已有子节点的正文增长」也必须使祖先的节点对象换新；
  * 否则 `:node` 引用不变 ⇒ Vue 判定 props 未变 ⇒ 整棵子树跳过更新。
  * 下面用**真实 composable + 真实渲染**（挂载方式与 `ModelChatPanel` 同构）钉住。
@@ -307,7 +307,7 @@ describe('渲染层回归：增量必须进 DOM（不只进 store）', () => {
     expect(w.text(), '子节点增量必须进 DOM').toContain('正文继续')
   })
 
-  it('思考（Reasoning）是独立节点，其增量同样必须重渲染', async () => {
+  it('折叠叶（notice）是独立节点，其增量同样必须重渲染', async () => {
     const w = mount(Panel, { props: { sessionId: SID } })
     feed({ id: 'T1', role: 'assistant', type: 'turn', status: 'streaming' })
     feed({
@@ -354,8 +354,8 @@ describe('渲染层回归：增量必须进 DOM（不只进 store）', () => {
  * e2e 抓到的真实帧序（相对时刻，mock `chunkDelayMs: 400`）：
  *
  * ```
- * +168ms  turn        streaming            ← Turn 根
- * +170ms  tool_call   streaming content="" ← 工具调用节点首帧（名字已知，参数尚无）
+ * +168ms  turn        streaming            ← 根级骨架（wire 旧词 `turn`）
+ * +170ms  tool_call   streaming content="" ← 工具子骨架首帧（名字已知，参数尚无）
  * +570ms  delta       {"text":"m           ← 参数窄增量
  * +984ms  delta       ock 回显内容"}       ← 参数窄增量（至此参数完整）
  * +1798ms tool_call   streaming meta.started_at ← **只改 meta 的状态帧**
@@ -365,7 +365,7 @@ describe('渲染层回归：增量必须进 DOM（不只进 store）', () => {
  *
  * 三条钉住的约定：
  * 1. 工具行**在首帧即出现**（不等参数、不等执行完）——这是"流模式"的直接体现；
- * 2. 运行中参数**在收起态就能看到**（`ToolCall` 的参数在自身 content 里，回落自身
+ * 2. 运行中参数**在收起态就能看到**（工具子骨架的参数在自身 content 里，回落自身
  *    正文作单行摘要）——否则运行中一行空白，看起来像"跑完才显示"；
  * 3. **只改 `meta` 的帧必须进 DOM**（`started_at` ⇒ 「运行中 5s」的秒数）——
  *    节点复用签名若不含 `meta`，"还在跑"与"卡死了"就无从区分。
@@ -399,12 +399,12 @@ describe('渲染层回归：工具调用按帧即时可见（对照 e2e 实测�
     // 首帧：工具骨架到达（title 给出名字），参数为空
     feed(toolCall('TC1', 'T1', 'mcp__mockserv__echo', ''))
     await nextTick()
-    // 根级整轮 + 工具子骨架 = 2 个骨架容器
+    // 根级骨架 + 工具子骨架 = 2 个骨架容器
     expect(w.findAll('.type-skeleton').length, '工具骨架必须在首帧就出现').toBe(2)
     expect(w.text()).toContain('mcp__mockserv__echo')
-    // 整轮的等待骨架已消失（它有了子节点），但工具骨架自身仍在等结果子节点——
+    // 根级骨架的等待骨架已消失（它有了子节点），但工具骨架自身仍在等结果子节点——
     // 骨架格一视同仁：streaming 且无真实子就脉冲。全树仍只有 1 个等待态。
-    expect(w.findAll('.skeleton-pending').length, '等待态由整轮接棒到工具骨架').toBe(1)
+    expect(w.findAll('.skeleton-pending').length, '等待态由根级骨架接棒到工具骨架').toBe(1)
 
     // 参数窄增量：骨架默认展开，参数作首条正文（`pre.json.req`）必须跟着长
     feed({ id: 'TC1', delta: '{"text":"m' })
