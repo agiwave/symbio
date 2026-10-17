@@ -23,7 +23,7 @@ desc: 现在是什么样——系统结构 / 设计规范 / 模块机制
 
 `arch`（架构）的条目**在位存放**：文件本身就是登记，`title` 逐字等于正文首个 H1（RG-021 两面对账）。
 
-**计数**：active 48 · draft 0 · retired 0（共 48）
+**计数**：active 49 · draft 0 · retired 0（共 49）
 
 ## 现行文档（active）
 
@@ -54,6 +54,7 @@ desc: 现在是什么样——系统结构 / 设计规范 / 模块机制
 | [`AR-022-vdfs-session-messages`](../../symbio/src/plugins/session/docs/022-vdfs-session-messages.md) | 会话消息的 VDFS 化 —— 转写即列表，流式即追加 |
 | [`AR-023-FRONTEND`](../../tauri/docs/023-FRONTEND.md) | 前端架构 |
 | [`AR-024-INTERACTION`](../../tauri/docs/024-INTERACTION.md) | 前端交互面（用户视角） |
+| [`AR-025-capability-registry`](025-capability-registry.md) | 能力统一注册表——CapabilityVisitor 六族 → 一个 Registry（3 方法） |
 | [`scripts/facts/README`](../../scripts/facts/README.md) | `scripts/facts/` —— 事实生成器目录 |
 | [`symbio/src/plugins/agent/README`](../../symbio/src/plugins/agent/README.md) | Agent 插件 |
 | [`symbio/src/plugins/classify/README`](../../symbio/src/plugins/classify/README.md) | Classify 插件（对话面：判决） |
