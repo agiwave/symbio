@@ -3,7 +3,7 @@ use crate::plugins::skill::loader::{load_skills_from_dirs_with_budget, LoadBudge
 use crate::plugins::skill::skill_tool::SkillExecuteTool;
 use crate::plugins::skill::types::{Skill, SkillConfig};
 use crate::symbio_core::{
-    plugin_dir_from_ctx, Plugin, PluginDir, PluginError, PluginInvokeRequest,
+    plugin_dir_from_ctx, CapabilityRow, Plugin, PluginDir, PluginError, PluginInvokeRequest,
     PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PLUGIN_ID_SKILL,
     TRAVERSE_AVAILABLE_TOOLS,
 };
@@ -552,7 +552,7 @@ impl Plugin for SkillPlugin {
             if !skills.is_empty() {
                 if let Some(tool_visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
                     let skill_tool = Arc::new(SkillExecuteTool::new(skills));
-                    tool_visitor.register(skill_tool).await;
+                    tool_visitor.put(CapabilityRow::tool(skill_tool)).await;
                 }
             }
 

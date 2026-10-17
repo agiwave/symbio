@@ -25,9 +25,9 @@ use super::types::{Session, SessionSummary};
 use crate::providers::MemoryFile;
 use crate::symbio_core::{chat_node as cm, session_chat};
 use crate::symbio_core::{
-    plugin_dir_from_ctx, ExecEventSink, Plugin, PluginConfigFile, PluginDir, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
-    PLUGIN_FILE, PLUGIN_ID_SESSION, SESSION_ID,
+    plugin_dir_from_ctx, CapabilityRow, ExecEventSink, Plugin, PluginConfigFile, PluginDir,
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
+    PluginPayload, PLUGIN_FILE, PLUGIN_ID_SESSION, SESSION_ID,
 };
 use crate::symbio_core::{
     DetailDefinition, DetailField, DetailOption, DetailSection, DynVdfsProvider, VdfsAccess,
@@ -601,9 +601,9 @@ impl Plugin for SessionPlugin {
         {
             if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
                 visitor
-                    .register(Arc::new(super::tools::HeartbeatTool::new(Arc::downgrade(
-                        &self,
-                    ))))
+                    .put(CapabilityRow::tool(Arc::new(
+                        super::tools::HeartbeatTool::new(Arc::downgrade(&self)),
+                    )))
                     .await;
             }
         }

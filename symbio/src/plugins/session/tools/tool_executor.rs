@@ -335,15 +335,13 @@ pub async fn execute_tool_async(
     // 4 个协议要把名字发出去，本处要把它认回来。而「认回来」这一步（下面的
     // 解析）只有本模块需要，故留在本模块，不上 trait、不进 core。
     let tool_visitor = ctx.get(crate::symbio_core::CAPABILITY_VISITOR);
-    let known_names: Vec<String> = match tool_visitor.as_ref() {
-        Some(v) => v
-            .list_capability()
-            .await
-            .into_iter()
-            .map(|m| m.name)
-            .collect(),
-        None => Vec::new(),
-    };
+    // 线上名解析的候选集 = 注册表给出的全名清单（收集管线的读侧助手，与 inputs /
+    // context / decls 同一入口——收敛前这里自己写一遍 `list_capability()`）。
+    let known_names: Vec<String> = super::super::capabilities::tool_metas(&ctx)
+        .await
+        .into_iter()
+        .map(|m| m.name)
+        .collect();
     let resolved_name =
         crate::symbio_core::capability_resolve(tool_name, known_names.iter().map(String::as_str))
             .map(str::to_string);
@@ -402,7 +400,18 @@ pub async fn execute_tool_async(
             let visitor = tool_visitor.clone();
             let tool_ctx2 = tool_ctx.clone();
             let canonical = invoke_name.clone();
-            Box::pin(async move { visitor.invoke(&canonical, tool_ctx2.clone()).await })
+            // 执行不在表上（AR-025 §3）：按名取行 + capability_invoke；查不到即
+            // 诚实的 NotFound（文案与机制化之前逐字一致）。
+            Box::pin(async move {
+                match visitor.get(&canonical).await.and_then(|r| r.cap().cloned()) {
+                    Some(cap) => {
+                        crate::symbio_core::capability_invoke(cap.as_ref(), tool_ctx2).await
+                    }
+                    None => Err(PluginError::NotFound(format!(
+                        "Tool not found: {canonical}"
+                    ))),
+                }
+            })
         } else {
             plugin_info!(
                 "session",

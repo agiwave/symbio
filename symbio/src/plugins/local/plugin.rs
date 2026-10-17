@@ -10,9 +10,9 @@ use super::{
 // 本插件的 `route` 兜底也调它——两条路径**判定只有一份**（T-138）。
 use crate::providers::approval_gate;
 use crate::symbio_core::{
-    plugin_dir_from_ctx, Capability, Plugin, PluginConfigFile, PluginDir, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
-    PLUGIN_ID_LOCAL,
+    plugin_dir_from_ctx, Capability, CapabilityRow, Plugin, PluginConfigFile, PluginDir,
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
+    PluginPayload, PLUGIN_ID_LOCAL,
 };
 use crate::symbio_core::{DetailDefinition, DetailField, DetailOption, DynVdfsProvider};
 use async_trait::async_trait;
@@ -241,11 +241,11 @@ impl Plugin for LocalPlugin {
         }
 
         if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
-            // 审批闸门由收口点（`DefaultToolVisitor::register`）统一加壳，
+            // 审批闸门由收口点（`DefaultToolVisitor::put`）统一加壳，
             // 本处只交裸工具——过去在这里手工 `SecureToolWrapper::new` 的做法
             // 让闸门长在插件的注册循环里，`vdfs` 等别的注册入口就漏了（T-138）。
             for tool in self.tool_impls.iter() {
-                visitor.register(tool.clone()).await;
+                visitor.put(CapabilityRow::tool(tool.clone())).await;
             }
             // 与工具共用同一次能力广播：本插件在 VDFS 上的全部内容 = 一个配置文档
             let me: DynVdfsProvider = self.clone();

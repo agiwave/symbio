@@ -1,6 +1,7 @@
 mod configurable;
 mod error;
 mod option;
+mod row;
 mod tool_name;
 
 pub use error::{
@@ -15,6 +16,7 @@ pub use configurable::{
     capability_announce_configurable, capability_entry_of, ConfigurableVisitor,
 };
 pub use option::OptionVisitor;
+pub use row::{CapabilityRow, CapabilityRowKind};
 pub use tool_name::{capability_resolve, capability_to_wire};
 
 use crate::symbio_core::{
@@ -309,25 +311,46 @@ pub mod failure_kind {
     }
 }
 
+/// 收集口：**一张表，三个方法**（AR-025）。
+///
+/// 收敛前这里是十六个方法的形态：`register` / `register_batch` /
+/// `list_capability` / `invoke` / `has_capability` 五个方法专服工具一族，
+/// 模型 / 提示词 / 挂载又各有一套同形的方法。收敛后全部通道共用同一张表——
+/// 写走 [`Self::put`]，按名读走 [`Self::get`]，按族读走 [`Self::list`]。
+///
+/// ## 为什么 `invoke` 不在表上
+///
+/// 执行不是表的职责：表答「这一行是什么、怎么找到它」，
+/// [`Capability::execute`] 答「跑起来是什么」。按名执行是 `get(name)` +
+/// [`capability_invoke`](crate::symbio_core::capability_invoke) 两步——拆开之后，
+/// 这三个方法在 4b–4e（模型 / 提示词 / 挂载 / 选项各族）全部复用，一个都不再变形。
+///
+/// ## 顺序是表的一部分
+///
+/// [`Self::list`] 返回的顺序 = 注册顺序（工具族直接决定送给模型的 `tools` 数组
+/// 顺序，见 ADR-057）。族内**不**按名字重排：重排等于每起一个进程换一次工具面
+/// 前缀。策略行的先命中者胜排序（`(prio, name)`）住在 session 的 `loop_registry`，
+/// 与表内注册序是两件事。
 #[async_trait]
 pub trait CapabilityVisitor: Send + Sync + 'static {
-    async fn register(&self, tool: Arc<dyn Capability>);
+    /// 入表一行（**工具族的唯一写入入口**）。
+    ///
+    /// 实现必须把每条进表的能力裹上审批闸
+    /// （`providers/collectors/approval.rs`）：闸门住在收口点，`meta` /
+    /// `risk_for` 原样透传，故 `get` / `list` 都不受影响，执行那一步才判定（T-138）。
+    async fn put(&self, row: CapabilityRow);
 
-    async fn register_batch(&self, tools: Vec<Arc<dyn Capability>>) {
-        for tool in tools {
-            self.register(tool).await;
-        }
-    }
+    /// 按名取一行（**取代了 `has_capability` 与 `invoke` 的查找**）。
+    ///
+    /// 名字是线上全名（工具族含挂载点前缀）。查不到返回 `None`，不猜、不回落
+    /// ——调用方给诚实的 `Tool not found`。
+    async fn get(&self, name: &str) -> Option<Arc<CapabilityRow>>;
 
-    async fn list_capability(&self) -> Vec<CapabilityMeta>;
-
-    async fn invoke(
-        &self,
-        name: &str,
-        ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> PluginInvokeResponse<PluginPayload>;
-
-    async fn has_capability(&self, name: &str) -> bool;
+    /// 按族列行（**取代了 `list_capability`**）。
+    ///
+    /// 顺序 = 注册顺序（见 trait 文档）。返回的是**行**而不是元数据：元数据经
+    /// [`CapabilityRow::meta`] 现取（T-158 的三个声明位同样在 meta 上）。
+    async fn list(&self, kind: CapabilityRowKind) -> Vec<Arc<CapabilityRow>>;
 
     /// 注册模型服务：**当次生效者** + 本次可见的**全部已启用者**。
     ///

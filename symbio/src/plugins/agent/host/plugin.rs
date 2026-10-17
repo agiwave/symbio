@@ -48,9 +48,9 @@ use crate::plugins::agent::host::manifest;
 use crate::plugins::agent::host::store::AgentDirStore;
 use crate::symbio_core::{
     capability_report_error, creator_create_object, descend_addr, plugin_dir_from_ctx, Capability,
-    CapabilityVisitor, Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, AGENT_ID,
-    ASSEMBLY_SUB_AGENT_PLUGINS, CAPABILITY_VISITOR, PATH, PLUGIN_DIR, PLUGIN_ID_AGENT,
+    CapabilityRow, CapabilityVisitor, Plugin, PluginDir, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest,
+    AGENT_ID, ASSEMBLY_SUB_AGENT_PLUGINS, CAPABILITY_VISITOR, PATH, PLUGIN_DIR, PLUGIN_ID_AGENT,
     PLUGIN_ID_COMPOSITE, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
     VDFS_PARENT_ADDR, WORKDIR,
 };
@@ -358,14 +358,16 @@ impl Plugin for AgentPlugin {
 
         // ── agent_run：无条件注册 ──
         let store = AgentDirStore::new(self.dir().dir());
-        tool_visitor
-            .register_batch(vec![super::subagent::AgentRunCapability::new(
-                workdir.clone(),
-                self.dir().dir().to_path_buf(),
-                super::subagent::format_agent_dirs_brief(&store.list()),
-                self.router.clone(),
-            ) as Arc<dyn Capability>])
-            .await;
+        // `register_batch(vec![一个元素])` 随 Tool 族收敛为 put（AR-025 4a）：
+        // 其实这里从来只有一个能力，批入口本无存在理由。
+        // （`new` 自己返回 `Arc<Self>`，此处只做最后一次 trait object 收窄。）
+        let agent_run: Arc<dyn Capability> = super::subagent::AgentRunCapability::new(
+            workdir.clone(),
+            self.dir().dir().to_path_buf(),
+            super::subagent::format_agent_dirs_brief(&store.list()),
+            self.router.clone(),
+        );
+        tool_visitor.put(CapabilityRow::tool(agent_run)).await;
 
         // ── 已选择智能体 → 装配它的能力 ──
         if let Some(agent_id) = agent_id {

@@ -5,7 +5,8 @@
 use super::*;
 
 use crate::symbio_core::{
-    TurnOutput, VdfsContent, VdfsContext, VdfsError, VdfsRequest, VdfsResponse, VdfsResult,
+    CapabilityRow, TurnOutput, VdfsContent, VdfsContext, VdfsError, VdfsRequest, VdfsResponse,
+    VdfsResult,
 };
 use async_trait::async_trait;
 
@@ -218,7 +219,9 @@ async fn sub_agent_multi_slot_registrations_join_parent_with_prefix() {
     let inner: Arc<dyn CapabilityVisitor> = Arc::new(crate::providers::DefaultToolVisitor::new());
     let scoped = SubAgentVisitor::new(Arc::clone(&inner), "reviewer");
 
-    scoped.register(Arc::new(EchoTool("read_skill"))).await;
+    scoped
+        .put(CapabilityRow::tool(Arc::new(EchoTool("read_skill"))))
+        .await;
     scoped
         .register_system_prompt("persona", "你是评审子智能体".to_string())
         .await;
@@ -228,7 +231,10 @@ async fn sub_agent_multi_slot_registrations_join_parent_with_prefix() {
 
     // 工具：前缀进 function-calling 协议允许的字符集
     assert!(
-        inner.has_capability("agent_reviewer_read_skill").await,
+        inner
+            .get("agent_reviewer_read_skill")
+            .await
+            .is_some_and(|row| row.name() == "agent_reviewer_read_skill"),
         "子 Agent 的工具应带前缀进内层（并集，两份都生效）"
     );
     // 系统提示词：前缀在 `agent/<id>/` 段下

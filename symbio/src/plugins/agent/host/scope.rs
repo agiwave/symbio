@@ -31,8 +31,8 @@
 
 use crate::symbio_core::VdfsProvider;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, CapabilityVisitor, ExecEnv, ModelProvider, PluginError,
-    PluginInvokeRequest, PluginInvokeResponse, PluginPayload,
+    Capability, CapabilityMeta, CapabilityRow, CapabilityRowKind, CapabilityVisitor, ExecEnv,
+    ModelProvider, PluginError, PluginInvokeRequest,
 };
 use async_trait::async_trait;
 use serde_json::Value;
@@ -114,27 +114,28 @@ impl Capability for PrefixedCapability {
 
 #[async_trait]
 impl CapabilityVisitor for SubAgentVisitor {
-    async fn register(&self, tool: Arc<dyn Capability>) {
-        let name = self.tool(&tool.name());
+    async fn put(&self, row: CapabilityRow) {
+        // 子作用域的工具加名前缀再入内表（`agent_<safe_id>_<name>`）：
+        // 行的构造走词汇自己的 `tool()`，名前缀由改名装饰器承载——与机制化之前
+        // 「包一层 PrefixedCapability 再 register」同一条路，只是入口从 register
+        // 换成 put（AR-025 4a）。
+        let Some(cap) = row.cap().cloned() else {
+            return;
+        };
+        let name = self.tool(&cap.name());
         self.inner
-            .register(Arc::new(PrefixedCapability { inner: tool, name }) as Arc<dyn Capability>)
+            .put(CapabilityRow::tool(
+                Arc::new(PrefixedCapability { inner: cap, name }) as Arc<dyn Capability>,
+            ))
             .await
     }
 
-    async fn list_capability(&self) -> Vec<CapabilityMeta> {
-        self.inner.list_capability().await
+    async fn list(&self, kind: CapabilityRowKind) -> Vec<Arc<CapabilityRow>> {
+        self.inner.list(kind).await
     }
 
-    async fn invoke(
-        &self,
-        name: &str,
-        ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> PluginInvokeResponse<PluginPayload> {
-        self.inner.invoke(name, ctx).await
-    }
-
-    async fn has_capability(&self, name: &str) -> bool {
-        self.inner.has_capability(name).await
+    async fn get(&self, name: &str) -> Option<Arc<CapabilityRow>> {
+        self.inner.get(name).await
     }
 
     /// 子 Agent **不得**决定用哪个模型服务（生效者是单槽，被劫持等于整个会话换模型）

@@ -30,8 +30,9 @@
 
 use super::{fs::VDFS_ADDR_ROOT, host, protocol as p, provider::ToolVdfs, tools};
 use crate::symbio_core::{
-    Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
-    PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH, PLUGIN_ID_VDFS, TRAVERSE_AVAILABLE_TOOLS,
+    CapabilityRow, Plugin, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginInvokeResponse, PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH, PLUGIN_ID_VDFS,
+    TRAVERSE_AVAILABLE_TOOLS,
 };
 use std::sync::{Arc, Weak};
 use tokio::sync::RwLock;
@@ -123,7 +124,7 @@ impl Plugin for VdfsPlugin {
             // 执行时其中已注册好全部挂载 provider（容器同时注册的组合根供前端链路用）。
             let provider = Arc::new(ToolVdfs::new(visitor.clone()));
             for tool in tools::vdfs_tools(provider) {
-                visitor.register(tool).await;
+                visitor.put(CapabilityRow::tool(tool)).await;
             }
         }
 

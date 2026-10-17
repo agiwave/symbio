@@ -7,9 +7,9 @@ use super::{http_request::HttpRequestTool, web_fetch::WebFetchTool, web_search::
 // 声明 `High` 却经这条路径直接跑，正是「风险只是宣传语」的第二个洞）。
 use crate::providers::approval_gate;
 use crate::symbio_core::{
-    plugin_dir_from_ctx, Capability, Plugin, PluginConfigFile, PluginDir, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
-    PLUGIN_ID_WEB,
+    plugin_dir_from_ctx, Capability, CapabilityRow, Plugin, PluginConfigFile, PluginDir,
+    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
+    PluginPayload, PLUGIN_ID_WEB,
 };
 use crate::symbio_core::{DetailDefinition, DetailField, DynVdfsProvider};
 use async_trait::async_trait;
@@ -172,7 +172,7 @@ impl Plugin for WebPlugin {
 
         if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
             for tool in self.tool_impls.iter() {
-                visitor.register(tool.clone()).await;
+                visitor.put(CapabilityRow::tool(tool.clone())).await;
             }
             // 与工具共用同一次能力广播：本插件在 VDFS 上的全部内容 = 一个配置文档
             let me: DynVdfsProvider = self.clone();

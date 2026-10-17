@@ -13,7 +13,8 @@ use crate::symbio_core::Store;
 // 父模块顶层不再导入，`use super::*` 便带不过来——测试自己拿。
 use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, CapabilityVisitor, ExecEnv, PluginError, PluginInvokeRequestExt,
+    Capability, CapabilityMeta, CapabilityRow, CapabilityVisitor, ExecEnv, PluginError,
+    PluginInvokeRequestExt,
 };
 use crate::symbio_core::{EventWalStore, LatencyTier};
 
@@ -63,13 +64,13 @@ async fn factory_decls() -> ToolDecls {
         ("shell", false, false, false),
     ] {
         visitor
-            .register(Arc::new(DeclTool(CapabilityMeta {
+            .put(CapabilityRow::tool(Arc::new(DeclTool(CapabilityMeta {
                 name: name.to_string(),
                 provides_assign_work: assign_work,
                 records_delegation_promise: promise,
                 owns_task_table: task_table,
                 ..Default::default()
-            })) as Arc<dyn Capability>)
+            })) as Arc<dyn Capability>))
             .await;
     }
     ctx.set(
@@ -1336,11 +1337,11 @@ async fn a_producer_only_principal_is_refused_the_task_table() {
         // 注册面：`todo_write` 自声明任务表位（生产同形；T-158 后闸问声明）。
         let visitor = Arc::new(DefaultToolVisitor::new());
         visitor
-            .register(Arc::new(DeclTool(CapabilityMeta {
+            .put(CapabilityRow::tool(Arc::new(DeclTool(CapabilityMeta {
                 name: "todo_write".to_string(),
                 owns_task_table: true,
                 ..Default::default()
-            })) as Arc<dyn Capability>)
+            })) as Arc<dyn Capability>))
             .await;
         req.set(
             crate::symbio_core::CAPABILITY_VISITOR,

@@ -14,12 +14,23 @@ use super::store::AgentDirStore;
 use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{vdfs_context, VdfsProvider};
 use crate::symbio_core::{
-    CapabilityVisitor, Plugin, PluginDir, PluginInvokeRequest, PluginInvokeRequestExt,
-    PluginSimpleRequest, AGENT_ID, CAPABILITY_VISITOR, PATH, PLUGIN_ID_AGENT,
-    TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
+    CapabilityMeta, CapabilityRowKind, CapabilityVisitor, Plugin, PluginDir, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginSimpleRequest, AGENT_ID, CAPABILITY_VISITOR, PATH,
+    PLUGIN_ID_AGENT, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
 };
 use std::path::Path;
 use std::sync::Arc;
+
+/// 收集器的工具元数据（AR-025 4a 后 `list_capability` 收敛为 `list(kind)`）——
+/// 本文件的断言一律按名字说话，经这个小助手读，免得每个断言点各写一遍展开。
+async fn tool_metas_of(manager: &DefaultToolVisitor) -> Vec<CapabilityMeta> {
+    manager
+        .list(CapabilityRowKind::Tool)
+        .await
+        .into_iter()
+        .map(|row| row.meta())
+        .collect()
+}
 
 /// 在内存中生成一个 v2 布局的 Agent zip。
 ///
@@ -133,7 +144,7 @@ async fn agent_import_traverse_and_export() {
     assert!(errors.is_empty(), "不应有收集期错误: {errors:?}");
 
     // agent_run 无条件注册；子 Agent 的技能工具带来源前缀进来
-    let caps = manager.list_capability().await;
+    let caps = tool_metas_of(&manager).await;
     assert!(
         caps.iter().any(|c| c.name == "agent_run"),
         "agent_run 应始终注册: {caps:?}"
@@ -204,7 +215,7 @@ async fn version_mismatch_agent_is_rejected_and_unbound_session_is_silent() {
     plugin.traverse(String::new(), ctx.clone()).await.unwrap();
     let errors = crate::symbio_core::capability_take_errors(&ctx).await;
     assert!(errors.is_empty(), "未绑定会话不应有收集期错误: {errors:?}");
-    let caps = manager.list_capability().await;
+    let caps = tool_metas_of(&manager).await;
     assert_eq!(caps.len(), 1, "仅注册 agent_run: {caps:?}");
     assert_eq!(caps[0].name, "agent_run");
     // 没选智能体 → 不注入任何人格 / 记忆片段（这是作用域闸门，不是优化）
@@ -317,10 +328,10 @@ async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
 
     // 2) 子 Agent 的 skill 实例注册的工具被代理层改名，不与系统的 `read_skill` 撞名
     let tools: Vec<String> = manager
-        .list_capability()
+        .list(crate::symbio_core::CapabilityRowKind::Tool)
         .await
         .into_iter()
-        .map(|t| t.name)
+        .map(|row| row.name().to_string())
         .collect();
     assert!(
         tools.iter().any(|t| t.starts_with("agent_reviewer_")),

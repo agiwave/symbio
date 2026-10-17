@@ -42,9 +42,9 @@
 
 use crate::providers::{DefaultOptionVisitor, DefaultToolVisitor};
 use crate::symbio_core::{
-    capability_init_error_bucket, CapabilityVisitor, OptionVisitor, Plugin, PluginInvokeRequest,
-    PluginInvokeRequestExt, CAPABILITY_ERRORS, OPTION_VISITOR, PATH, TRAVERSE_AVAILABLE_OPTIONS,
-    TRAVERSE_AVAILABLE_TOOLS,
+    capability_init_error_bucket, CapabilityMeta, CapabilityRowKind, CapabilityVisitor,
+    OptionVisitor, Plugin, PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_ERRORS,
+    OPTION_VISITOR, PATH, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
 use std::sync::Arc;
 
@@ -112,6 +112,22 @@ pub fn attach_capabilities(
     manager: Arc<dyn CapabilityVisitor>,
 ) {
     ctx.set(crate::symbio_core::CAPABILITY_VISITOR, manager);
+}
+
+/// **读侧**助手：按 ctx 取工具元数据清单（收集管线的另一半）。
+///
+/// 四个读点共用（LLM 工具面 / 请求级开销估算 / 闸门声明位 / 线上名解析）。
+/// 顺序 = 注册顺序（ADR-057），调用方不得重排；取不到收集器落空表。
+pub async fn tool_metas(ctx: &Arc<dyn PluginInvokeRequest>) -> Vec<CapabilityMeta> {
+    match ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
+        Some(visitor) => visitor
+            .list(CapabilityRowKind::Tool)
+            .await
+            .into_iter()
+            .map(|row| row.meta())
+            .collect(),
+        None => Vec::new(),
+    }
 }
 
 // ==================== 选项收集机制（宿主侧） ====================

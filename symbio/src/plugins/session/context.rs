@@ -19,7 +19,7 @@
 use std::sync::Arc;
 
 use crate::symbio_core::chat_node::{ChatNode, NodeKind, NodeRole};
-use crate::symbio_core::{PluginInvokeRequest, PluginInvokeRequestExt};
+use crate::symbio_core::PluginInvokeRequest;
 
 mod conversation_view;
 mod pipeline;
@@ -250,12 +250,7 @@ pub async fn estimate_request_overhead(
     system_prompt: &str,
     ctx: &Arc<dyn PluginInvokeRequest>,
 ) -> usize {
-    use crate::symbio_core::CAPABILITY_VISITOR;
-
-    let tools = match ctx.get(CAPABILITY_VISITOR) {
-        Some(tool_visitor) => tool_visitor.list_capability().await,
-        None => Vec::new(),
-    };
+    let tools = super::capabilities::tool_metas(ctx).await;
     estimate_overhead_with_tools(system_prompt, &tools)
 }
 

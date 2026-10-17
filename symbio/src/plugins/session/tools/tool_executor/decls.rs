@@ -8,7 +8,8 @@
 //!
 //! ## 读的时机与来源
 //!
-//! 批首从 `ctx` 的 `CAPABILITY_VISITOR` 读一次 `list_capability()`——与
+//! 批首经收集管线的读侧助手 [`tool_metas`](super::super::super::capabilities::tool_metas)
+//! 读一次工具元数据——与
 //! [`execute_tool_async`](super::execute_tool_async) 解析线上名同一来源；一次读给
 //! 整批复用，与 `BreakerInputs` / `EliminationInputs` 的批首读同口径（每个调用点
 //! 各重放一次事实源，闸门自己就变成时延源了）。
@@ -25,9 +26,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::symbio_core::{
-    CapabilityMeta, PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_VISITOR,
-};
+use crate::symbio_core::{CapabilityMeta, PluginInvokeRequest};
 
 /// 三类按名闸门的管辖集合（键 = 注册表里的 `meta.name`）。
 #[derive(Debug, Default)]
@@ -46,10 +45,8 @@ impl ToolDecls {
     /// 声明」同一形态，由 e2e（T74 / 任务表闸场景）兜行为。
     pub async fn of(ctx: &Arc<dyn PluginInvokeRequest>) -> Self {
         let mut decls = Self::default();
-        if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
-            for meta in visitor.list_capability().await {
-                decls.absorb(&meta);
-            }
+        for meta in super::super::super::capabilities::tool_metas(ctx).await {
+            decls.absorb(&meta);
         }
         decls
     }

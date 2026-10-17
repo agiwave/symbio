@@ -21,7 +21,8 @@ use crate::symbio_core::{
     EVENT_ASSISTANT_FINAL,
 };
 use crate::symbio_core::{
-    Capability, CapabilityVisitor, ExecEnv, PluginError, PluginInvokeRequestExt, CAPABILITY_VISITOR,
+    Capability, CapabilityRow, CapabilityVisitor, ExecEnv, PluginError, PluginInvokeRequestExt,
+    CAPABILITY_VISITOR,
 };
 
 use super::super::config::SessionConfig;
@@ -46,7 +47,9 @@ async fn test_ctx_declaring(
     let visitor = Arc::new(DefaultToolVisitor::new());
     for t in tools {
         visitor
-            .register(Arc::new(DeclOnlyTool(t.clone())) as Arc<dyn Capability>)
+            .put(CapabilityRow::tool(
+                Arc::new(DeclOnlyTool(t.clone())) as Arc<dyn Capability>
+            ))
             .await;
     }
     ctx.set(CAPABILITY_VISITOR, visitor as Arc<dyn CapabilityVisitor>);

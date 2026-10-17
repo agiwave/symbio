@@ -142,10 +142,7 @@ pub(crate) async fn prepare_turn_inputs(
     // ── ① 系统提示词 + 工具：同一函数、同一时刻、同一 CapabilityVisitor ──────
     let system_prompt = resolve_system_prompt(req.system_prompt.as_deref(), ctx).await;
 
-    let tools = match ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
-        Some(visitor) => visitor.list_capability().await,
-        None => Vec::new(),
-    };
+    let tools = super::super::capabilities::tool_metas(ctx).await;
 
     // ── ② 请求级固定开销：一轮只算一次，供下方压缩（阈值与提醒）共用
     //        （收口前两处各算一次，且各自要重新取一遍工具清单）────────────────

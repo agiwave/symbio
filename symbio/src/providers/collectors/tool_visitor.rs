@@ -9,8 +9,7 @@
 
 use super::approval::ApprovalGate;
 use crate::symbio_core::{
-    capability_invoke, Capability, CapabilityMeta, CapabilityVisitor, ModelProvider, PluginError,
-    PluginInvokeRequest, PluginInvokeResponse, PluginPayload, VdfsProvider,
+    CapabilityRow, CapabilityRowKind, CapabilityVisitor, ModelProvider, VdfsProvider,
 };
 use async_trait::async_trait;
 use indexmap::IndexMap;
@@ -26,10 +25,13 @@ use tokio::sync::RwLock;
 ///   两者由 model 插件在**同一次** `register_model_providers` 里交来：生效者必然
 ///   是目录里的一员，拆成两次注册就会允许"生效者不在目录里"这个没有错误信号的
 ///   非法状态（见 `CapabilityVisitor::register_model_providers`）。
-/// - `tools`：能力表，**按注册顺序**保序。这条顺序就是送给模型的 `tools` 数组顺序：
-///   注册序来自能力收集的广播序，写成哈希表时**每起一个进程重洗一次**，而工具面是
-///   prompt 里最大的一段（`docs/006-ref/PROMPT_SHAPE.md` 实测 18KB 对正文 1.1KB），
-///   换序等于每轮把这段前缀作废——这也是 ADR-057 一度记下「数组顺序每次不同」的根因。
+/// - `rows`：**统一行表**（AR-025 §3）——本批装工具一族，按注册顺序保序。这条
+///   顺序就是送给模型的 `tools` 数组顺序：注册序来自能力收集的广播序，写成哈希表时
+///   **每起一个进程重洗一次**，而工具面是 prompt 里最大的一段
+///   （`docs/006-ref/PROMPT_SHAPE.md` 实测 18KB 对正文 1.1KB），换序等于每轮把这段
+///   前缀作废——这也是 ADR-057 一度记下「数组顺序每次不同」的根因。
+///   模型 / 提示词 / 挂载 / 选项各族随 4b–4e 陆续入这张表（每族一个 payload 变体，
+///   trait 三方法不变），目前仍住下方各自的槽位。
 /// - `system_prompts`：系统提示词（按名称保序；**全部**送达模型，不做竞争）
 /// - `vdfs_providers`：VDFS 挂载点（按挂载名去重，`order` 升序对外）。
 ///   这是 **LLM 可控挂载机制**的清单（子智能体经 `SubAgentVisitor` 在此加
@@ -38,7 +40,7 @@ use tokio::sync::RwLock;
 ///   `vdfs_*` 工具取根走 `vdfs_root` 单槽，本清单暂无消费方——**预留，勿删**。
 /// - `vdfs_root`：VDFS 根 provider（单槽；组合容器注册，访问层据此转发）
 pub struct DefaultToolVisitor {
-    tools: Arc<RwLock<IndexMap<String, Arc<dyn Capability>>>>,
+    rows: Arc<RwLock<IndexMap<String, Arc<CapabilityRow>>>>,
     provider: Arc<RwLock<Option<Arc<dyn ModelProvider>>>>,
     model_catalog: Arc<RwLock<IndexMap<String, Arc<dyn ModelProvider>>>>,
     system_prompts: Arc<RwLock<IndexMap<String, String>>>,
@@ -49,7 +51,7 @@ pub struct DefaultToolVisitor {
 impl DefaultToolVisitor {
     pub fn new() -> Self {
         Self {
-            tools: Arc::new(RwLock::new(IndexMap::new())),
+            rows: Arc::new(RwLock::new(IndexMap::new())),
             provider: Arc::new(RwLock::new(None)),
             model_catalog: Arc::new(RwLock::new(IndexMap::new())),
             system_prompts: Arc::new(RwLock::new(IndexMap::new())),
@@ -67,40 +69,32 @@ impl Default for DefaultToolVisitor {
 
 #[async_trait]
 impl CapabilityVisitor for DefaultToolVisitor {
-    async fn register(&self, tool: Arc<dyn Capability>) {
-        let name = tool.name();
-        // 闸门住在收口点：每条进表的能力都裹一层 [`ApprovalGate`]——`meta` / `name` /
-        // `risk_for` 原样透传（见 `approval.rs`），故 `list_capability` 与按名查表
-        // 都不受影响；`invoke` 走 `execute` 那一路时经闸门判定（T-138）。
-        let gated: Arc<dyn Capability> = Arc::new(ApprovalGate::new(tool));
-        let mut tools = self.tools.write().await;
-        tools.insert(name, gated);
-    }
-
-    async fn list_capability(&self) -> Vec<CapabilityMeta> {
-        let tools = self.tools.read().await;
-        tools.values().map(|t| t.meta()).collect()
-    }
-
-    async fn invoke(
-        &self,
-        name: &str,
-        ctx: Arc<dyn PluginInvokeRequest>,
-    ) -> PluginInvokeResponse<PluginPayload> {
-        let tool = {
-            let tools = self.tools.read().await;
-            tools.get(name).cloned()
+    async fn put(&self, row: CapabilityRow) {
+        // 闸门住在收口点：每条进表的**工具**能力都裹一层 [`ApprovalGate`]——
+        // `meta` / `name` / `risk_for` 原样透传（见 `approval.rs`），故 `get` 与
+        // `list` 看到的名字、声明位（T-158 三位）与风险档都不变；判定只发生在
+        // 执行那一步（`capability_invoke` → `Capability::execute`，T-138）。
+        // 非工具行（4b–4e 落位的各族）不裹，原样入表。
+        let row = match row.cap().cloned() {
+            Some(cap) => CapabilityRow::tool(Arc::new(ApprovalGate::new(cap))),
+            None => row,
         };
-
-        match tool {
-            Some(tool) => capability_invoke(tool.as_ref(), ctx).await,
-            None => Err(PluginError::NotFound(format!("Tool not found: {name}"))),
-        }
+        // 同目录名覆盖（保留先注册槽位，IndexMap 语义与机制化之前逐字一致）
+        let name = row.name().to_string();
+        self.rows.write().await.insert(name, Arc::new(row));
     }
 
-    async fn has_capability(&self, name: &str) -> bool {
-        let tools = self.tools.read().await;
-        tools.contains_key(name)
+    async fn get(&self, name: &str) -> Option<Arc<CapabilityRow>> {
+        let rows = self.rows.read().await;
+        rows.get(name).cloned()
+    }
+
+    async fn list(&self, kind: CapabilityRowKind) -> Vec<Arc<CapabilityRow>> {
+        let rows = self.rows.read().await;
+        rows.values()
+            .filter(|row| row.kind() == kind)
+            .cloned()
+            .collect()
     }
 
     async fn register_model_providers(

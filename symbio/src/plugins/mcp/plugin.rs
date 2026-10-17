@@ -26,7 +26,7 @@
 pub use crate::plugins::mcp::schemas::mcp_config::{McpConfig, McpServerConfig};
 use crate::providers::DirVdfs;
 use crate::symbio_core::{
-    plugin_dir_from_ctx, Capability, CapabilityMeta, Plugin, PluginDir, PluginError,
+    plugin_dir_from_ctx, Capability, CapabilityMeta, CapabilityRow, Plugin, PluginDir, PluginError,
     PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
     PLUGIN_ID_MCP,
 };
@@ -601,7 +601,7 @@ impl Plugin for McpPlugin {
                             server_cfg.clone(),
                             self.manager.clone(),
                         ));
-                        tool_visitor.register(cap).await;
+                        tool_visitor.put(CapabilityRow::tool(cap)).await;
                     }
                 }
                 Err(e) => {

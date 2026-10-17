@@ -12,8 +12,8 @@
 use super::ToolDecls;
 use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, CapabilityVisitor, ExecEnv, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginSimpleRequest,
+    Capability, CapabilityMeta, CapabilityRow, CapabilityVisitor, ExecEnv, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
 };
 use async_trait::async_trait;
 use serde_json::Value;
@@ -57,7 +57,9 @@ async fn ctx_with(metas: Vec<CapabilityMeta>) -> Arc<dyn PluginInvokeRequest> {
     let visitor = Arc::new(DefaultToolVisitor::new());
     for m in metas {
         visitor
-            .register(Arc::new(FakeTool { meta: m }) as Arc<dyn Capability>)
+            .put(CapabilityRow::tool(
+                Arc::new(FakeTool { meta: m }) as Arc<dyn Capability>
+            ))
             .await;
     }
     ctx.set(

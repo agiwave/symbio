@@ -117,7 +117,7 @@ const SHAPE_BASELINE = process.env.CORE_SHAPE_BASELINE
       const [traits, methods, defaults] = process.env.CORE_SHAPE_BASELINE.split(':').map((n) => Number(n))
       return { traits, methods, defaults }
     })()
-  : { traits: 20, methods: 73, defaults: 25 }
+  : { traits: 20, methods: 71, defaults: 24 }
 
 const CELL_LABEL = {
   traits: '`pub trait` 数（接缝数）',
