@@ -1,12 +1,12 @@
-//! `session/config.rs` 的单元测试 —— 记忆两道闸门 + 三个能力开关的取值与下界。
+//! `session/config.rs` 的单元测试 —— 记忆两道闸门 + 四个能力开关的取值与下界。
 //!
 //! 与实现**同级**分文件（约定：`X.rs` + `X.test.rs`）。
 //!
 //! 缺省值 / 向后兼容 / 「面板默认值与 serde 同源」的不变式由 `plugin.test.rs`
 //! 的 `config_definition_defaults_come_from_session_config` 锁定，这里**刻意不重复**。
 //! 本文件只回答「取值与出厂决定」这一件事——「出厂决定」指那些一旦翻转就会改变
-//! 用户可见行为的默认值（`classify_enabled` / `compose_enabled` / `progress_enabled`），
-//! 它们必须被断言钉住。
+//! 用户可见行为的默认值（`classify_enabled` / `compose_enabled` / `opening_enabled`
+//! / `progress_enabled`），它们必须被断言钉住。
 
 use super::*;
 
@@ -101,24 +101,71 @@ fn classify_and_compose_switches_are_independent() {
     assert!(!only_reply.classify_enabled && only_reply.compose_enabled);
 }
 
-/// 出厂**打开**中途汇报，且三个上界都不是"关掉它"的取值。
+/// 出厂**关闭**中途汇报，但三个上界仍是"打开即生效"的有意义取值。
 ///
-/// 断言三个上界一起，是因为单看总开关不够：`progress_enabled = true` 配上
-/// `progress_max_per_turn = 0`（或 `progress_min_rounds` 大得离谱）同样一次都不汇报
-/// ——那样"默认开启"就成了一句空话。三个数各自要有意义：
-/// 间隔足够长（不打扰短任务）、最少轮次 > 0（第一轮不算进展）、每轮配额 > 0。
+/// 关掉它的理由：机制化前端已按节点自身呈现「在跑什么 / 跑了多久」（工具子骨架运行态）
+/// 与「还没出声」（Typing 占位），轮边界那句"已完成 N 轮"与执行过程信息重复、反而干扰。
+///
+/// 仍断言三个上界，是因为总开关关掉不代表这三个数可以乱配：用户把 `progress_enabled`
+/// 打开时，若 `progress_max_per_turn = 0`（或 `progress_min_rounds` 大得离谱），
+/// "打开"仍成一句空话。三个数各自要有意义：间隔足够长（不打扰短任务）、
+/// 最少轮次 > 0（第一轮不算进展）、每轮配额 > 0。
 #[test]
-fn progress_reporting_is_on_by_default_with_meaningful_bounds() {
+fn progress_reporting_is_off_by_default_but_bounds_stay_meaningful() {
     let c = SessionConfig::default();
-    assert!(c.progress_enabled);
-    assert!(default_progress_enabled());
+    assert!(!c.progress_enabled);
+    assert!(!default_progress_enabled());
     assert!(
         c.progress_interval_ms >= 10_000,
         "间隔太短会让长任务反复刷屏（实得 {}）",
         c.progress_interval_ms
     );
     assert!(c.progress_min_rounds >= 1, "至少要走过一轮才有进展可言");
-    assert!(c.progress_max_per_turn >= 1, "配额为 0 等于关掉了这个特性");
+    assert!(
+        c.progress_max_per_turn >= 1,
+        "配额为 0 会让重新打开变成空话"
+    );
+}
+
+/// 出厂**关闭**对话面开场白（`Escalate` 首响）。
+///
+/// 与 `progress_enabled` 同一条理由：机制化前端的 Typing 占位已接管「点发送后立刻有动静」
+/// 这一职责，那句模板旁白（"我先看一下" / "好，我来处理"）与执行过程信息重复。
+/// 关掉后本轮照旧进工具循环干活，只是不说这句；真实答复（`Answered`）不受影响——
+/// 那是 `compose_enabled` 管的另一句话。
+#[test]
+fn opening_remark_is_off_by_default() {
+    let c = SessionConfig::default();
+    assert!(!c.opening_enabled);
+    assert!(!default_opening_enabled());
+}
+
+/// 存量 `PLUGIN.yml` 没有这个键时按缺省补齐（`#[serde(default)]` 的意义）
+#[test]
+fn missing_opening_key_falls_back_to_default() {
+    let c: SessionConfig = serde_json::from_str(r#"{"max_messages": 42}"#).unwrap();
+    assert_eq!(c.opening_enabled, SessionConfig::default().opening_enabled);
+}
+
+/// 开场白开关与措辞**相互独立**：关掉开场白不牵连真实答复，反之亦然。
+///
+/// 这是本开关存在的核心理由——`compose_enabled` 一关会连 `Answered` 的答复一起没，
+/// 而"只想去掉派活前那句旁白、答复照常"必须是可表达的。合并成一个开关就做不到。
+#[test]
+fn the_opening_switch_is_independent_of_compose() {
+    let only_answer = SessionConfig {
+        compose_enabled: true,
+        opening_enabled: false,
+        ..SessionConfig::default()
+    };
+    assert!(only_answer.compose_enabled && !only_answer.opening_enabled);
+
+    let only_opening = SessionConfig {
+        compose_enabled: false,
+        opening_enabled: true,
+        ..SessionConfig::default()
+    };
+    assert!(!only_opening.compose_enabled && only_opening.opening_enabled);
 }
 
 /// 存量 `PLUGIN.yml` 没有这四个键时按缺省补齐（`#[serde(default)]` 的意义）

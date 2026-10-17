@@ -225,6 +225,29 @@ pub struct SessionConfig {
     /// 用模板还是用模型、用哪个提示词，都是 `compose` 自己的策略，归它自己的配置面。
     #[serde(default = "default_compose_enabled")]
     pub compose_enabled: bool,
+    /// 对话面开场白（`Escalate` 首响）总开关（**出厂默认：`false`**）。
+    ///
+    /// ## 它控制什么
+    ///
+    /// 判决为 `Escalate`（要派活）时，是否在干活前先写一句根级对话面开场白
+    /// （"我先看一下" / "好，我来处理"，见 `compose/templates.rs`）。
+    ///
+    /// - `true`：本轮干活前说一句开场白（与引入本开关之前逐字一致）；
+    /// - `false`：**不写开场白**，本轮照旧进工具循环。
+    ///
+    /// ## 为什么出厂关
+    ///
+    /// 那句开场白的历史职责是「点发送后立刻给用户一个动静」，而机制化前端已用
+    /// Typing 占位 + 节点自身运行态覆盖了这个需求；留着它只会与执行过程信息抢视线。
+    /// 真实答复（`Answered`）不走本开关，因此关掉它不会让任何**答复**消失。
+    ///
+    /// ## 为什么它是独立的一格
+    ///
+    /// 它与 `compose_enabled` 不合并：后者关掉会连真实答复一起没了（`Answered` 降级
+    /// 进工具循环），而本开关只削掉派活前的那句旁白。判据见 `ChatOrchestrator` 的
+    /// 两级独立开关说明。
+    #[serde(default = "default_opening_enabled")]
+    pub opening_enabled: bool,
     /// 中途汇报总开关（**J2 平凡值：`false`**）。
     ///
     /// ## 它控制什么
@@ -238,12 +261,13 @@ pub struct SessionConfig {
     ///   [`Self::progress_max_per_turn`] 次）；
     /// - `false`：**不判定**，一次都不汇报——与引入汇报之前逐字一致。
     ///
-    /// ## 为什么出厂默认为 `true`
+    /// ## 为什么出厂默认为 `false`
     ///
-    /// 它是**用户可见层面**的一部分（与 `classify_enabled` / `compose_enabled` 同一条
-    /// 判据）：一个跑了几分钟的任务，界面上什么都不说，用户无法区分"在干活"与
-    /// "卡死了"。而它的代价被三个上界钉住（间隔 / 最少轮次 / 每轮次数），
-    /// 不会变成噪声源。
+    /// 机制化前端已经按节点自身呈现「在跑什么 / 跑了多久」（工具子骨架的运行态 +
+    /// 已运行秒数）与「还没出声」（Typing 占位），轮边界那句"已完成 N 轮"与执行过程
+    /// 信息重复、反而干扰视线。它的历史职责（让用户区分"在干活"与"卡死了"）已由
+    /// 前端承担。代价被三个上界钉住（间隔 / 最少轮次 / 每轮次数），要恢复打断式
+    /// 汇报把本开关打开即可——判定与措辞的代码路径都在。
     ///
     /// ## 为什么它在 session 的配置面
     ///
@@ -462,8 +486,19 @@ pub fn default_compose_enabled() -> bool {
     true
 }
 pub fn default_progress_enabled() -> bool {
-    // 用户可见层面的一部分：一个跑了几分钟的任务不该在界面上什么都不说。
-    true
+    // 出厂**关闭**：机制化前端已按节点自身呈现「在跑什么 / 跑了多久」（工具子骨架的
+    // 运行态 + 已运行秒数）与「还没出声」（Typing 占位），轮边界那句"已完成 N 轮"
+    // 与执行过程信息重复、反而干扰。要恢复打断式汇报，把本开关打开即可（代码路径与
+    // 判定都在）。
+    false
+}
+/// 对话面开场白（`Escalate` 首响）总开关（**出厂默认：`false`**）。
+///
+/// 关掉后本轮**照旧干活**，只是不写那句开场白（"我先看一下" / "好，我来处理"）——
+/// 它曾是「点发送后立刻有个动静」的唯一手段，而机制化前端的 Typing 占位已接管这个
+/// 职责，那句模板旁白于是与执行过程信息重复。真实答复（`Answered`）不受本开关影响。
+pub fn default_opening_enabled() -> bool {
+    false
 }
 pub fn default_progress_interval_ms() -> u64 {
     // 60s：短于它的任务本来就快，用户不需要被打断；长于它的才值得说一句。
@@ -555,6 +590,7 @@ impl Default for SessionConfig {
             supplements_max_per_drain: default_supplements_max_per_drain(),
             classify_enabled: default_classify_enabled(),
             compose_enabled: default_compose_enabled(),
+            opening_enabled: default_opening_enabled(),
             progress_enabled: default_progress_enabled(),
             progress_interval_ms: default_progress_interval_ms(),
             progress_min_rounds: default_progress_min_rounds(),

@@ -157,9 +157,11 @@ export default defineCase(
       providers: [{ id: PROVIDER_ID, config: providerConfig(llm.port) }],
       pluginConfigs: {
         gateway: gatewayConfig(GATEWAY_PORT),
-        // 两个开关出厂默认都已是 `true`（S3 起）。这里仍**显式**写出，是让本用例的
-        // 前提自证——不依赖默认值，翻转默认值不会悄悄改变本用例验的是什么。
-        session: { classify_enabled: true, compose_enabled: true },
+        // 判决 / 措辞出厂默认 `true`（S3 起），开场白出厂默认 `false`（机制化前端后）。
+        // 这里仍**显式**写出三个值，是让本用例的前提自证——不依赖默认值，翻转默认值
+        // 不会悄悄改变本用例验的是什么：`opening_enabled: true` 正是 B 线第 2 步
+        // 那句 `Escalate` 首响（OPENING_NEEDS_WORK）能出现的前提。
+        session: { classify_enabled: true, compose_enabled: true, opening_enabled: true },
       },
     });
 
@@ -371,7 +373,7 @@ export default defineCase(
           gateway: gatewayConfig(unmountedPort),
           // 与 A/B 线**同一个完整值**：差别只有"挂不挂 compose"这一项，
           // 否则验的就不是"卸载"而是"两个变量一起变"。
-          session: { classify_enabled: true, compose_enabled: true },
+          session: { classify_enabled: true, compose_enabled: true, opening_enabled: true },
           compose: { plugin_enabled: false },
         },
       });

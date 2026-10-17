@@ -854,6 +854,13 @@ pub struct ChatOrchestrator {
     /// 就没有 `Answered`，措辞只剩 `Escalate` 首响——本批 `Escalate` 由 `classify`
     /// 产出，故该组合退化为"不生效"，但**结构上合法**，不是需要拦的错误）。
     pub compose_enabled: bool,
+    /// 对话面开场白（`Escalate` 首响）的**请求级开关快照**（`SessionConfig::opening_enabled`）。
+    ///
+    /// 与 `classify_enabled` / `compose_enabled` 同一条取值纪律（一次请求生命周期内不变，
+    /// 取一个布尔）。`false` ⇒ [`super::compose::apply_verdict`] 的 `Escalate` 分支**不写**
+    /// 那句开场白（本轮照旧进工具循环），真实答复（`Answered`）不受影响。为什么独立于
+    /// `compose_enabled`：后者关掉会连答复一起没，本开关只削派活前的旁白。
+    pub opening_enabled: bool,
     /// 中途汇报的策略快照（`SessionConfig` 的四个旋钮，见 [`ProgressPolicy`]）。
     ///
     /// 与 `classify_enabled` / `compose_enabled` 同形（取**值快照**），但这里是一个结构体

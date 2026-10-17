@@ -807,6 +807,12 @@ fn config_definition() -> DetailDefinition {
                         d.compose_enabled,
                     ),
                     DetailField::toggle(
+                        "opening_enabled",
+                        "对话面开场白",
+                        "「派活」时在轮首先说一句开场白（如「我先看一下」）；关闭后本轮照旧干活、只是不说这句（真实答复不受影响）",
+                        d.opening_enabled,
+                    ),
+                    DetailField::toggle(
                         "progress_enabled",
                         "中途汇报",
                         "长任务在轮边界主动说一句进度；关闭后一次都不判定、不汇报",
