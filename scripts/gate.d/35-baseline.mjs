@@ -278,15 +278,29 @@ export default {
         const bases = await baseVersions(ctx, ratchet)
         if (bases.length === 0) return 'skipped'
 
-        const unreadable = bases.filter((b) => b.unreadable)
-        if (unreadable.length) {
+        // 「基准里读不出」有两种成因，把它们并成一判红会把第一种当成第二种：
+        //  - **提取函数与落点形状脱节** ⇒ 判据真的失效，必须红（这正是原来那条注释要的）；
+        //  - **这一格比基准新**：棘轮是在那条基准提交里引入的，它的父提交里根本没有这处
+        //    基线（`git show` 取得到文件，但文件里还没有这格）。
+        // 两者分得开：形状脱节时**每一条**基准都读不出，而「比基准新」时引入它的那条读得出、
+        // 只有更早的那条读不出。于是前者红，后者跳过那一版继续比其余基准——不豁免、不静默。
+        const readable = bases.filter((b) => !b.unreadable)
+        if (readable.length === 0) {
           console.log(
             red(
-              `      ↳ 基准 ${unreadable.map((b) => b.ref).join(' / ')} 里读不出 ${ratchet.file} 的基线格` +
+              `      ↳ 基准 ${bases.map((b) => b.ref).join(' / ')} 里都读不出 ${ratchet.file} 的基线格` +
                 ` ⇒ 提取函数与这处落点的形状脱节，本项判据已失效（不是「没基准可判」）`,
             ),
           )
           return { ok: false, note: `提取函数读不出 ${ratchet.file} 的基线格，判据失效` }
+        }
+        if (readable.length < bases.length) {
+          console.log(
+            yellow(
+              `      ↳ 基准 ${bases.filter((b) => b.unreadable).map((b) => b.ref).join(' / ')} ` +
+                `早于这处基线（棘轮在更晚的提交里才引入）⇒ 不与它们比`,
+            ),
+          )
         }
 
         const current = fs.readFileSync(path.join(repoRoot, ratchet.file), 'utf8')
@@ -298,7 +312,7 @@ export default {
         }
 
         const problems = []
-        const erosion = ratchetErosion({ dir: ratchet.dir }, ratchet.cellsOf, current, bases, ratchet.waivers(current))
+        const erosion = ratchetErosion({ dir: ratchet.dir }, ratchet.cellsOf, current, readable, ratchet.waivers(current))
         for (const e of erosion) {
           const line = `      ↳ ${e.key}: ${e.from} → ${e.to ?? '整格被删'}（基准 ${e.source}）${e.waived ? ' · 已登记豁免' : ''}`
           console.log(e.waived ? yellow(line) : red(line))
@@ -324,7 +338,7 @@ export default {
         if (problems.length) return { ok: false, note: problems.join('；') }
         console.log(
           green(
-            `      ↳ ${cells.size} 格与 ${bases.map((b) => b.ref).join(' / ')} 逐格比对：无放松` +
+            `      ↳ ${cells.size} 格与 ${readable.map((b) => b.ref).join(' / ')} 逐格比对：无放松` +
               (ratchet.envVar ? `（${ratchet.envVar} 未被更松地覆盖）` : ''),
           ),
         )

@@ -655,6 +655,9 @@ console.log()
 // 范围：`.rs` 源码根（同 S-012），测试文件同样参与；**不含** `chat_node.rs`
 // （字段定义、折叠与入口的本体在那里）。注释行不判（doc 示例会复述被禁形状）。
 // 豁免：`// grep-audit-allow S-014: 理由`（本行或紧邻上一行，理由不可为空，同 S-010）。
+// 单测跑在临时 fixture 树里：那里没有 166 处存量债务，棘轮一比就报「基线该收紧」，
+// 把每条无关用例一起拖红。`LEGACY_ROLE_WRITE_BASELINE` 把基线搬到 fixture 上；扫描根
+// 由下面那条「cwd 下有 `symbio/`」的判定搬运。真实仓库两者都不动 ⇒ 照旧扫全仓。
 console.log('--- S-014: ChatNode 存量 role 格直写棘轮 ---')
 
 const S014_ROOTS = ['symbio/src', 'cli/src', 'tauri/src-tauri/src', 'docs/004-plan/verify']
