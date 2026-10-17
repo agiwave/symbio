@@ -124,6 +124,26 @@ export class MockLlm {
     await fetchJson(`${this.base}/_reset`, { method: 'POST' });
   }
 
+  /**
+   * 运行中换场景表（`POST /_plan`）——用例用它表达**服务恢复了**：坏的那段时间
+   * 用静态 `status` 注入，恢复时刻换成正常应答场景。
+   *
+   * 为什么不用 `failTimes` 的名额来定"什么时候好"：名额按**请求体指纹**消耗，而
+   * 相邻两次自动压缩很可能压的是同一段前缀（切分点只在 User 边界落刀，边界每
+   * 若干轮才前移一次）⇒ 两次压缩共用一个指纹、只烧一个名额。于是"第 N 次逻辑
+   * 请求起正常"这条编排在跨轮重发时**对不上次数**（T18 的熔断/重试判据曾因此飘）。
+   */
+  async setPlan(scenarios, fallback = null) {
+    const { status, body } = await fetchJson(`${this.base}/_plan`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scenarios, fallback }),
+    });
+    assert(status === 200, `mock-llm /_plan 应受理（${status}：${JSON.stringify(body)?.slice(0, 200)}）`);
+    this.plan = { scenarios, fallback };
+    return body;
+  }
+
   stop() {
     this.proc?.kill();
   }
@@ -906,13 +926,16 @@ export function turnFacts(events) {
 }
 
 /**
- * wire 形态词 → 旧类型词的折叠（镜像前端 `messageTypes.messageTypeOf` 的判据）。
+ * wire 形态词 → 断言用的**旧类型词**折叠（e2e 侧判据，与前端分派轴无关）。
  *
  * [T-147c-ii-s3/s4] 之后 ChatNode 的 `type` 只有五值
  * （body/notice/skeleton/interaction/typing），呈现变体住 `meta.style_tag`。
  * e2e 若继续拿 `m.type === 'tool_call'` 这类**旧词**比较，条件永远不成立——
  * 断言不报错、只是不再命中靶子（静默跳过），这比失败更危险。
  * 所有对消息节点 / 实时帧 `type` 的判据一律经本函数折叠回旧词再比。
+ *
+ * 前端不认这些旧词（[T-155] 它只按五值分派）；这里保留旧词是因为**用例断言的就是
+ * 后端标注的事实**——`style_tag` 是后端随节点下发的注解，读它正当。
  *
  * 旧词与未知值原样透传（存量 fixture 与未来新词都不会被误判成别的）。
  */
@@ -921,7 +944,9 @@ export function msgTypeOf(m) {
   const tag = m?.meta?.style_tag;
   if (t === 'skeleton') return tag === 'tool' ? 'tool_call' : 'turn';
   if (t === 'body') return tag === 'reasoning' ? 'reasoning' : 'text';
-  if (t === 'notice') return 'compression';
+  // [T-155]：思考事实从 `body + tag` 归位到 `notice`（折叠叶），与压缩同格——
+  // 两格共用一个 type，变体只在 style_tag 上分。
+  if (t === 'notice') return tag === 'reasoning' ? 'reasoning' : 'compression';
   if (t === 'interaction') return 'user_prompt';
   return t;
 }

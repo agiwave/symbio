@@ -94,6 +94,10 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
 | `malformed` + `malformedAfter` | 第 N 个事件后混入一帧不规范内容再正常收尾：`badJson` / `truncated` / `garbage` |
 | plan 级 `rateLimit: {limit, windowMs}` | 429 限流语义：滑动窗口配额（账号级），超额 429 + `retry-after` + `x-ratelimit-*`；被拒不占配额，冷却自动恢复。`MockLlm` 构造器第三选项 `rateLimit` 可传 |
 
+管控面另有 `POST /_plan`（`MockLlm.setPlan(scenarios, fallback?)`）：**整张场景表换掉并清游标**。
+需要「坏一段时间 → 在某个明确的时刻转好」的用例用它，而不是 `failTimes` 的指纹名额——后者按
+请求体计，切分边界重复的编排会烧不满名额，「下一次就成功」就成了运气（参考 `t18`）。
+
 ## 用例与不变量
 
 <!-- list:e2e-cases owner -->
@@ -117,7 +121,7 @@ target-dir 指向 `../symbio/target`，二进制落在 `symbio/target/release/sy
 | T15 | `t15-subagent-inbox` | 子智能体空间**自驱动**：往 `<根>/agent/<id>/session/<sid>/inbox` 写即发消息（无调用方）；空间自己消费成完会话（FIFO、忙则排队、排队中可取消）；子空间带自己的 `AGENTS.md` 与自己的模型服务 |
 | T16 | `t16-live-order` | 实时顺序与存储一致：`seq` 是唯一权威顺序锚点（ADR-025），在途节点带 `INFLIGHT_SEQ_BASE` 高位序 |
 | T17 | `t17-plugin-assembly` | 装配全链路：homedir → 装配（清单落位、二进制落位）→ 工具 → 会话收尾 → 停止生效 |
-| T18 | `t18-compression-streaming` | 压缩的六条契约：流式身份帧（摘要逐帧改道到压缩节点、无旁路节点）、结构化 meta（失败节点不带 `after_tokens`）、transcript 转存、失败纪律（failed + `failure_kind=llm_error` + 历史原封不动）、熔断（连续 3 次失败后跳过自动压缩）、`retry_compaction` 重试恢复（删除-重建 → 成功 → 水位回落后不再压缩）；摘要请求按**逻辑请求**计数（HTTP 退避重发不重复计） |
+| T18 | `t18-compression-streaming` | 压缩的六条契约：流式身份帧（摘要逐帧改道到压缩节点、无旁路节点）、结构化 meta（失败节点不带 `after_tokens`）、transcript 转存、失败纪律（failed + `failure_kind=llm_error` + 历史原封不动）、熔断（连续 3 个失败压缩节点后跳过自动压缩）、`retry_compaction` 重试恢复（删除-重建 → 成功 → 水位回落后不再压缩）；故障注入用静态 500，恢复由 `MockLlm.setPlan()` 在重试前明确触发 |
 
 每个用例共享的不变量断言（`assertTranscriptInvariants`）：
 
