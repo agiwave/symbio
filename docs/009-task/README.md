@@ -60,15 +60,25 @@ board.columns: [rank, deps, evidence, reason]
 > ⚠️ **本区块由 `node scripts/registry-audit.mjs --write` 维护（标记之间），请勿手改标记区内内容。**
 > 状态的唯一登记处是各条目文件本身，本区块是投影。字段规范见 [SP-001](../008-spec/001.md)，机制见 [PL-011 · 登记与汇总机制](../004-plan/011-登记与汇总机制.md "PL-011-登记与汇总机制")。
 
-**计数**：☐ todo 0 · 🟡 doing 0 · ☑ done 149 · ❌ wont 3（共 152）
+**计数**：☐ todo 7 · 🟡 doing 1 · ☑ done 150 · ❌ wont 3（共 161）
 
 ## 待处理（按依赖顺序）
 
-（无）
+| 编号 | 任务 | 优先 | 轨 | 依赖 |
+|---|---|---|---|---|
+| `T-157-ActorSpec-pattern死字段接线` | ActorSpec.pattern 生产零读取——三模式是数据存在、行为未分叉，Decider 语义长在三处特判里 | now | plan | — |
+| `T-158-工具名硬编码归一为能力元数据` | 工具执行器按名硬编码 agent_run——淘汰闸 / 任务表闸 / 收束拦截三处按字面量判定，改为工具自声明 | now | session | — |
+| `T-160-v2文件前缀退役` | session 内 8 个实现文件 + 7 个测试文件带 v2_ 版本号前缀——终态命名不该带版本号 | next | 登记卫生 | — |
+| `T-161-模型供应商参数档案表化` | 三协议各自硬编码 max_tokens 下限与 reasoning 字段名——供应商差异从 if 特判收成一张数据表 | next | plan | — |
+| `T-162-ClassifyOnly快速档路径裁决` | 令牌闸门的快速档（ClassifyOnly / issue_fast）零生产调用——接线，或显式退役并从 F3 论证划界 | next | plan | — |
+| `T-163-插件层特判审计守卫` | core 有 5 个可执行审计、插件层零个——把「按名硬编码」与「供应商散落」的守卫平移过来防回流 | next | 门禁与CI | — |
+| `T-164-v2_messages落格失败升级裁决` | v2_messages 落格失败仍静默——头部注释承诺「b3 之后升级为错误」而 b3 批漏做，主读切 WAL 后该次编辑重建即丢 | next | 登记卫生 | — |
 
 ## 进行中
 
-（无）
+| 编号 | 任务 | 优先 | 轨 | 依赖 |
+|---|---|---|---|---|
+| `T-156-架构机制化与旧代码清理批` | 架构机制化与旧代码清理批——把「假机制」接活、把「特殊化」降为数据、清掉过时注释与版本号前缀 | now | plan | — |
 
 ## 已完成
 
@@ -99,6 +109,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-147-ChatNode协议改名与字段瘦身` | ChatMessage → ChatNode 一次原子改——Turn 退役、role 删除、tool_call_id 沉 meta、principal 升级为结构体 | 会话与输入 |
 | `T-148-前端注册表按kind与style_tag分派` | 呈现分派从 MessageType 枚举换成 (kind, style_tag, principal) 三元组 | frontend |
 | `T-155-机制化批` | 前端机制化收敛批——NodeKind 唯一分派轴、style_tag 降级、reasoning 归 Notice | 会话与输入 |
+| `T-159-messages.json过时双写注释清理` | messages.json 写侧已停（ADR-049）而 10+ 处注释仍声称「双写进 messages.json」——假事实注释清理 | 登记卫生 |
 | `T-011` | 五轴的外部效标：每条轴挂一个可复现的读数，而不是形容词 | plan |
 | `T-012` | 能力名册 ↔ 代码锚点：名册的每一条能力都要指到实现它的地方 | plan |
 | `T-015` | 出厂 prompt 在线上是两条 system 消息，部分 provider 直接 400 拒收——full 档在那类 provider 上第一轮就失败 | S |
@@ -389,6 +400,15 @@ board.columns: [rank, deps, evidence, reason]
   - [`T-152-协议顶层字段消费守卫`](152-协议顶层字段消费守卫.md) `protocol-mirror-audit.mjs` 加 G 组——ChatNode 顶层每字段须有前端/CLI 不依赖 meta 语义的消费者（done）
   - [`T-153-旧文档与注释清理`](153-旧文档与注释清理.md) 扫「一轮 / Turn」措辞——ADR-052/055 作废标注、docs/005-rev 归档、代码注释同步（done）
 - [`T-155-机制化批`](155-机制化批.md) 前端机制化收敛批——NodeKind 唯一分派轴、style_tag 降级、reasoning 归 Notice（done）
+- [`T-156-架构机制化与旧代码清理批`](156-架构机制化与旧代码清理批.md) 架构机制化与旧代码清理批——把「假机制」接活、把「特殊化」降为数据、清掉过时注释与版本号前缀（doing） · 子项 todo 7 / done 1
+  - [`T-157-ActorSpec-pattern死字段接线`](157-ActorSpec-pattern死字段接线.md) ActorSpec.pattern 生产零读取——三模式是数据存在、行为未分叉，Decider 语义长在三处特判里（todo）
+  - [`T-158-工具名硬编码归一为能力元数据`](158-工具名硬编码归一为能力元数据.md) 工具执行器按名硬编码 agent_run——淘汰闸 / 任务表闸 / 收束拦截三处按字面量判定，改为工具自声明（todo）
+  - [`T-159-messages.json过时双写注释清理`](159-messages.json过时双写注释清理.md) messages.json 写侧已停（ADR-049）而 10+ 处注释仍声称「双写进 messages.json」——假事实注释清理（done）
+  - [`T-160-v2文件前缀退役`](160-v2文件前缀退役.md) session 内 8 个实现文件 + 7 个测试文件带 v2_ 版本号前缀——终态命名不该带版本号（todo）
+  - [`T-161-模型供应商参数档案表化`](161-模型供应商参数档案表化.md) 三协议各自硬编码 max_tokens 下限与 reasoning 字段名——供应商差异从 if 特判收成一张数据表（todo）
+  - [`T-162-ClassifyOnly快速档路径裁决`](162-ClassifyOnly快速档路径裁决.md) 令牌闸门的快速档（ClassifyOnly / issue_fast）零生产调用——接线，或显式退役并从 F3 论证划界（todo）
+  - [`T-163-插件层特判审计守卫`](163-插件层特判审计守卫.md) core 有 5 个可执行审计、插件层零个——把「按名硬编码」与「供应商散落」的守卫平移过来防回流（todo）
+  - [`T-164-v2_messages落格失败升级裁决`](164-v2_messages落格失败升级裁决.md) v2_messages 落格失败仍静默——头部注释承诺「b3 之后升级为错误」而 b3 批漏做，主读切 WAL 后该次编辑重建即丢（todo）
 
 <!-- registry:summary end -->
 
