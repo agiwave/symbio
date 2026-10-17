@@ -23,7 +23,7 @@ desc: 现在是什么样——系统结构 / 设计规范 / 模块机制
 
 `arch`（架构）的条目**在位存放**：文件本身就是登记，`title` 逐字等于正文首个 H1（RG-021 两面对账）。
 
-**计数**：active 47 · draft 0 · retired 0（共 47）
+**计数**：active 48 · draft 0 · retired 0（共 48）
 
 ## 现行文档（active）
 
@@ -45,6 +45,7 @@ desc: 现在是什么样——系统结构 / 设计规范 / 模块机制
 | [`AR-014-context-compression-design`](../../symbio/src/plugins/session/docs/014-context-compression-design.md) | 会话上下文压缩设计 |
 | [`AR-015-core-loop`](../../symbio/src/plugins/session/docs/015-core-loop.md) | Session 核心循环（LLM × 工具） |
 | [`AR-016-heartbeat-mechanism`](../../symbio/src/plugins/session/docs/016-heartbeat-mechanism.md) | 会话心跳机制（heartbeat） |
+| [`AR-016-turn-runner-steps`](../../symbio/src/plugins/session/docs/016-turn-runner-steps.md) | 016 · `run_with_tools` 的 Step 施工图（PL-014 步骤 1） |
 | [`AR-017-module-layout`](../../symbio/src/plugins/session/docs/017-module-layout.md) | Session 插件模块分工 |
 | [`AR-018-node-state-streaming`](../../symbio/src/plugins/session/docs/018-node-state-streaming.md) | 节点状态流（Node-State Streaming）—— 实时面即节点状态 |
 | [`AR-019-perf`](../../symbio/src/plugins/session/docs/019-perf.md) | 会话 / 转写的前端性能设计 |

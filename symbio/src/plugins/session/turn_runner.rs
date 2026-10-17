@@ -31,7 +31,7 @@
 
 use crate::symbio_core::{
     visible_to, ActorSpec, AdapterError, Entity, Event, FullModel, LatencyTier, LlmAdapter,
-    PromptToolCall, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
+    LlmTurn, PromptToolCall, Seq, Store, Verb, EVENT_ASSISTANT_FALLBACK, EVENT_ASSISTANT_FINAL,
     EVENT_ASSISTANT_OPENING, EVENT_ASSISTANT_PROGRESS, EVENT_SESSION_CONSOLIDATED,
     EVENT_USER_MESSAGE,
 };
@@ -292,6 +292,53 @@ pub struct ToolCallFact {
 /// 取此刻的流式节点事实（无桥 ⇒ 空事实，不是错误）。
 fn node_facts(nodes: &Option<NodeFactsFn>) -> StreamNodeFacts {
     nodes.as_ref().map(|f| f()).unwrap_or_default()
+}
+
+/// 一次响应之后环要做什么——PL-014 §3 五值里的**两个决策值**。
+///
+/// `Ask` 是环头（每次迭代都做，不是决策），`Emit` / `Wait` 由执行段产生，
+/// 所以环里真正需要「选下一步」的只有本枚举。抽成纯函数不是为了少一行 `if`，
+/// 而是因为它是环**唯一**的决策点：它可单测之后，Step 化剩下的就只是执行段搬家
+/// （见 `docs/016-turn-runner-steps.md` §2）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RoundDecision {
+    /// 收束：本轮不再请求工具（落 final，或空答话落兜底）。
+    Halt,
+    /// 派发：模型请求了工具，且本轮有分发通道。
+    Act,
+    /// 配置缺口：请求了工具却没有分发通道——按失败诚实回报，不是「正常收束」。
+    ConfigGap,
+}
+
+/// 纯决策：只看响应与「有没有分发通道」，不读任何外部状态。
+fn classify_round(rt: &LlmTurn, has_dispatch: bool) -> RoundDecision {
+    match (rt.tool_calls.is_empty(), has_dispatch) {
+        (true, _) => RoundDecision::Halt,
+        (false, true) => RoundDecision::Act,
+        (false, false) => RoundDecision::ConfigGap,
+    }
+}
+
+/// 末轮答话的取值：正文 → （截断则空）→ 端口思考 → 桥上的思考。
+///
+/// 四条顺序都是**判据**，不是偏好（T-142 实测：`finish=length`、正文 0 字符的一轮，
+/// 13045 字的思考草稿被原样当答话交付，退出码还是 0）：
+///
+/// 1. 正文非空 ⇒ 正文（半截正文照常交付，自动续写在 v2 未接上）；
+/// 2. `finish = length` ⇒ **空**：被 `max_tokens` 掐断的半段思考是草稿，
+///    既不是答案也不是写完的思考，提升它就是「草稿当答案」；
+/// 3. 端口思考非空 ⇒ 思考即正文（reasoning 模型常常想清楚但不复述）；
+/// 4. 桥上那份思考 ⇒ 端口没带思考的适配器（默认实现只转正文）只能靠它。
+fn final_answer(rt: &LlmTurn, round_facts: &StreamNodeFacts) -> String {
+    if !rt.text.trim().is_empty() {
+        rt.text.clone()
+    } else if rt.finish.is_length() {
+        String::new()
+    } else if !rt.reasoning.trim().is_empty() {
+        rt.reasoning.clone()
+    } else {
+        round_facts.reasoning.clone().unwrap_or_default()
+    }
 }
 
 /// 产出部分的载荷（收束 / 进展 / 兜底格共用的形状）。
@@ -1072,36 +1119,12 @@ impl TurnRunner {
                     let round_facts = node_facts(&nodes);
 
                     // 2a. 本轮不再请求工具 ⇒ 收束（落 final）。
-                    if rt.tool_calls.is_empty() {
-                        // 本轮的回答 = 正文，正文空则取**思考**（v1 的
-                        // `TurnOutput::effective_text` 同一语义）。
-                        //
-                        // ⚠️ 判据不能只看 `rt.text`：reasoning 模型常常「想清楚了但不
-                        // 复述」——末轮只有 `reasoning_content`、`content` 为空，那是
-                        // **一句回答**（思考即正文）而不是「没答」。此前这里读不到思考
-                        // （思考只经流式桥走另一条路），于是整轮被判失败、真答案连同全部
-                        // 思考落进兜底格，界面上表现为「一串连续思考，没有正文」。
-                        // 桥上那一份是第三选择：端口没带思考的适配器（默认实现只转正文）
-                        // 只能靠它。
-                        //
-                        // ⚠️ 但「思考即正文」的前提是那段思考**写完了**。`finish = length`
-                        // 时它是被 `max_tokens` 掐断的半段草稿——既不是答案、也不是写完的
-                        // 思考，提升它就是把草稿原样当答话交付（实测正文 0 字符、思考
-                        // 13045 字那一轮：13KB 草稿进了 stdout，退出码还是 0，T-142）。
-                        // 因此截断时**两条提升路都关**（端口的思考与桥上的思考同判）：
-                        // 空答话自此落既有兜底形状，草稿仍作为思考事实入格可查。
-                        // 正文非空时照旧交付——半截正文被截断是另一条缺口（自动续写
-                        // 在 v2 尚未接上），不在本判据内。
+                    if classify_round(&rt, dispatch.is_some()) == RoundDecision::Halt {
+                        // 答话取值（正文 / 截断 / 端口思考 / 桥上思考）见 [`final_answer`]：
+                        // 四条顺序都是判据，理由随函数一起（T-142 的 13KB 草稿）。
+                        // `truncated` 另有用处：兜底话术要说清「是截断」还是「空答」。
                         let truncated = rt.finish.is_length();
-                        let answer = if !rt.text.trim().is_empty() {
-                            rt.text.clone()
-                        } else if truncated {
-                            String::new()
-                        } else if !rt.reasoning.trim().is_empty() {
-                            rt.reasoning.clone()
-                        } else {
-                            round_facts.reasoning.clone().unwrap_or_default()
-                        };
+                        let answer = final_answer(&rt, &round_facts);
                         if answer.trim().is_empty() {
                             // 正文与思考**都**空 + 无工具调用 = 模型什么也没答。这是
                             // **失败**：落成 final 会把「没答」记成「答了空话」（I3 的

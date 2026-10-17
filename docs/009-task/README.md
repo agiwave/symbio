@@ -69,7 +69,7 @@ board.columns: [rank, deps, evidence, reason]
 | `T-155-机制化批` | 前端机制化收敛批——NodeKind 唯一分派轴、style_tag 降级、reasoning 归 Notice | now | 会话与输入 | PL-013-前端机制化、ADR-070 |
 | `T-140-大结果检索的聚合口径` | 检索结果截断只说「限制了」不说「一共多少」——聚合型问题逼出重复调用 | next | local | — |
 | `T-141-开机噪声与文档漂移` | 每次开机一条假异常 WARN（`.symbio/projection` 孤儿目录）+ 文档里几处与运行事实不符的指路 | later | 登记卫生 | — |
-| `T-156-控制面收敛` | 控制面收敛——单环驱动器 + 策略表 + 能力表（PL-014 落地） | later | 架构收敛 | PL-014-单环两表收敛、PL-012-高阶智能体平台v2 |
+| `T-156-控制面收敛` | 控制面收敛——单环驱动器 + 统一注册表（PL-014 落地） | later | 架构收敛 | PL-014-单环一表收敛、PL-012-高阶智能体平台v2 |
 
 ## 进行中
 
@@ -391,7 +391,7 @@ board.columns: [rank, deps, evidence, reason]
   - [`T-152-协议顶层字段消费守卫`](152-协议顶层字段消费守卫.md) `protocol-mirror-audit.mjs` 加 G 组——ChatNode 顶层每字段须有前端/CLI 不依赖 meta 语义的消费者（done）
   - [`T-153-旧文档与注释清理`](153-旧文档与注释清理.md) 扫「一轮 / Turn」措辞——ADR-052/055 作废标注、docs/005-rev 归档、代码注释同步（done）
 - [`T-155-机制化批`](155-机制化批.md) 前端机制化收敛批——NodeKind 唯一分派轴、style_tag 降级、reasoning 归 Notice（todo）
-- [`T-156-控制面收敛`](156-控制面收敛.md) 控制面收敛——单环驱动器 + 策略表 + 能力表（PL-014 落地）（todo）
+- [`T-156-控制面收敛`](156-控制面收敛.md) 控制面收敛——单环驱动器 + 统一注册表（PL-014 落地）（todo）
 
 <!-- registry:summary end -->
 

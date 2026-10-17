@@ -2983,3 +2983,109 @@ mod scope_ceiling_tests {
         assert!(closure_granted(&spec, ClosureKind::Artifact));
     }
 }
+
+// ── 纯决策与答话取值（PL-014 步骤 1）─────────────────────────────────────
+//
+// 这两个函数是 768 行环体里**唯一可脱离 store / sink 单测**的部分：决策只看
+// 「有没有工具调用 + 有没有分发通道」，答话取值只看「正文 / 截断 / 两处思考」。
+// 钉住它们，步骤 1 剩下的就只是执行段搬家（见 `docs/016-turn-runner-steps.md`）。
+
+mod round_decision_tests {
+    use super::super::{classify_round, final_answer, RoundDecision, StreamNodeFacts};
+    use crate::symbio_core::{LlmTurn, ModelFinishReason, TurnToolCallInfo};
+
+    fn one_tool_call() -> TurnToolCallInfo {
+        TurnToolCallInfo {
+            id: Some("c1".to_string()),
+            wire_id: Some("w1".to_string()),
+            name: Some("vdfs_read".to_string()),
+            arguments: serde_json::json!({}),
+            parse_error: None,
+            overflow_notice: None,
+        }
+    }
+
+    /// 四种组合逐一钉住——环的**唯一**决策点，错一格就是「该收束时去派发」。
+    #[test]
+    fn classify_round_covers_all_four_combinations() {
+        let mut rt = LlmTurn::default();
+        assert_eq!(
+            classify_round(&rt, true),
+            RoundDecision::Halt,
+            "无工具调用 ⇒ 收束"
+        );
+        assert_eq!(
+            classify_round(&rt, false),
+            RoundDecision::Halt,
+            "无工具调用时通道有无都不影响收束"
+        );
+        rt.tool_calls.push(one_tool_call());
+        assert_eq!(
+            classify_round(&rt, true),
+            RoundDecision::Act,
+            "有调用且有通道 ⇒ 派发"
+        );
+        assert_eq!(
+            classify_round(&rt, false),
+            RoundDecision::ConfigGap,
+            "有调用无通道 ⇒ 配置缺口（不是正常收束）"
+        );
+    }
+
+    /// 答话取值的四条顺序：正文 → 截断 → 端口思考 → 桥上思考。
+    #[test]
+    fn final_answer_prefers_text_then_reasoning_and_refuses_truncated_draft() {
+        let empty = StreamNodeFacts::default();
+
+        let with_text = LlmTurn {
+            text: "答案".to_string(),
+            reasoning: "思考".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(final_answer(&with_text, &empty), "答案", "正文优先于思考");
+
+        let reasoning_only = LlmTurn {
+            text: "   ".to_string(),
+            reasoning: "思考".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            final_answer(&reasoning_only, &empty),
+            "思考",
+            "正文空 ⇒ 思考即正文"
+        );
+
+        let truncated = LlmTurn {
+            text: String::new(),
+            reasoning: "被掐断的草稿".to_string(),
+            finish: ModelFinishReason::Length,
+            ..Default::default()
+        };
+        assert_eq!(
+            final_answer(&truncated, &empty),
+            "",
+            "finish=length 时草稿不得提升为答案（T-142）"
+        );
+
+        let bridged = StreamNodeFacts {
+            reasoning: Some("桥上的思考".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            final_answer(&LlmTurn::default(), &bridged),
+            "桥上的思考",
+            "端口没带思考 ⇒ 用流式桥那一份"
+        );
+    }
+
+    /// 截断但正文非空：半截正文照常交付（另一条缺口，不在本判据内）。
+    #[test]
+    fn truncated_text_is_still_delivered() {
+        let rt = LlmTurn {
+            text: "半截正文".to_string(),
+            finish: ModelFinishReason::Length,
+            ..Default::default()
+        };
+        assert_eq!(final_answer(&rt, &StreamNodeFacts::default()), "半截正文");
+    }
+}
