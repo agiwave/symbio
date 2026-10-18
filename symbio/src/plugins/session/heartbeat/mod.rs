@@ -158,7 +158,17 @@ impl SessionPlugin {
         );
 
         loop {
-            ticker.tick().await;
+            // 停机（见 `SessionPlugin::stop_gate`）：每个 tick 之前重新挂一次唤醒，
+            // 因此 `stop` 之后本循环最多再走**半圈**（扫描已开始则走完这一轮扫描，
+            // 但不再触发新一轮——`fire` 的判定在扫描体内，退出判据在它之前）。
+            let (wake, stopping) = self.stop_gate();
+            if stopping {
+                break;
+            }
+            tokio::select! {
+                _ = ticker.tick() => {}
+                _ = wake => break,
+            }
 
             let sessions = match self.list_sessions().await {
                 Ok(s) => s,
@@ -174,6 +184,11 @@ impl SessionPlugin {
             let mut fired = 0usize;
             for s in sessions {
                 if fired >= HEARTBEAT_MAX_PER_TICK {
+                    break;
+                }
+                // 停机位可能在扫描途中才置上：此后**一条也不触发**。已触发出去的
+                // 回合不归这里管——它由会话自己收尾（停机砍的是"起新回合"这件事）。
+                if self.is_stopping() {
                     break;
                 }
 

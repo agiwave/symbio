@@ -456,6 +456,17 @@ impl WorkdirWatchManager {
         });
     }
 
+    /// 停机时一次性交还全部监听（[ADR-075](../../../../../docs/010-adr/075.md) 的前置 P1，由 `Plugin::stop` 调用）。
+    ///
+    /// 与 `release_watch` 的区别只有**不等宽限期**：宽限防的是「离开→返回」期间
+    /// 迟到的 unwatch 误杀刚重建的订阅，而停机之后不再有重建，晚一步交还就是
+    /// 把 OS 句柄多留一份。
+    pub fn close_all(&self) {
+        self.watchers.clear();
+        self.containers.clear();
+        self.generations.clear();
+    }
+
     /// 测试辅助：该 workdir 是否当前持有监听器
     #[cfg(test)]
     pub fn is_watched(&self, workdir: &str) -> bool {

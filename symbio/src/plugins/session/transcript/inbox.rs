@@ -164,28 +164,39 @@ impl SessionPlugin {
         inner.inbox.iter().cloned().collect()
     }
 
-    /// 启动本实例的**收件箱消费者**（常驻，见模块头「为什么是每插件实例一个」）。
+    /// 启动本实例的**收件箱消费者**（常驻，见模块头「为什么是每插件实例一个」），
+    /// 交出句柄由调用方登记（[`Self::start_resident_tasks`]）——`Plugin::stop` 据此等它退。
     ///
-    /// 无 Tokio runtime 时静默跳过：那种场景（部分单测）没有真实会话要跑，调用方
-    /// 不因此失败；单测要验证消费顺序时直接调 [`Self::drain_inbox_once`]。
-    pub(crate) fn spawn_inbox_consumer(self: Arc<Self>) {
-        if tokio::runtime::Handle::try_current().is_err() {
-            return;
-        }
+    /// 调用点必须在 runtime 内（那里已做过 `try_current` 检查）；单测要验证消费顺序时
+    /// 直接调 [`Self::drain_inbox_once`]，不需要起这条循环。
+    pub(crate) fn spawn_inbox_consumer(self: Arc<Self>) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             loop {
+                // 停机门（见 `SessionPlugin::stop_gate`）：唤醒在**本轮一开始**就挂好，
+                // 下面两次 `await` 期间它一直活着，因此 `stop` 落在任何一处都能把
+                // 本循环叫住；即使它落在两轮之间，下一轮读到的位也已经置上了。
+                let (wake, stopping) = self.stop_gate();
+                if stopping {
+                    break;
+                }
                 let started = self.clone().drain_inbox_once().await;
                 if started {
                     continue;
                 }
                 // 没有可启动的：有活（排队被占着 / 挂起待收）就短轮询，否则等入队唤醒
                 if self.has_pending_work().await {
-                    tokio::time::sleep(BUSY_POLL).await;
+                    tokio::select! {
+                        _ = tokio::time::sleep(BUSY_POLL) => {}
+                        _ = wake => break,
+                    }
                 } else {
-                    self.inbox_wake.notified().await;
+                    tokio::select! {
+                        _ = self.inbox_wake.notified() => {}
+                        _ = wake => break,
+                    }
                 }
             }
-        });
+        })
     }
 
     /// 还有活没干完吗（决定"空转"还是"等唤醒"）——两个来源，缺一个都会睡死：
