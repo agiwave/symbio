@@ -105,7 +105,7 @@ async fn handle_abort_signals_registered_turn_and_converges() {
         state_for_guard.inner.write().await.abort_signal = None;
     });
 
-    p.handle_abort(&state).await;
+    p.turn.handle_abort(&state).await;
 
     assert!(
         signal.is_aborted(),

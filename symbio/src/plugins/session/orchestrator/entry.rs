@@ -79,7 +79,7 @@ impl SessionSnapshot {
     }
 }
 
-impl SessionPlugin {
+impl TurnRunner {
     // ============ One-off 模式（统一事件总线场景）============
 
     /// 统一解析**元数据派生**的会话参数（mode / risk_level / provider_id）。
@@ -101,7 +101,7 @@ impl SessionPlugin {
         req: &session_chat::Request,
     ) -> SessionSnapshot {
         // 本请求**唯一一次**会话读取：三个回退值 + 下面两处回退共用这一份。
-        let session = self.get_or_create_session(session_id).await;
+        let session = self.load_session(session_id).await;
         let meta = session.as_ref().ok().and_then(|s| s.metadata.as_object());
 
         let mode = req
@@ -181,7 +181,7 @@ impl SessionPlugin {
     /// resume），此处只剩与"真的开跑"有关的准备：参数解析、忙碌守卫、工作目录、
     /// 能力收集、派发。
     pub(crate) async fn start_turn(
-        self: Arc<Self>,
+        &self,
         ctx: Arc<dyn PluginInvokeRequest>,
     ) -> PluginInvokeResponse<PluginPayload> {
         let req: session_chat::Request = ctx.payload()?;
@@ -308,7 +308,7 @@ impl SessionPlugin {
         let parent_spawn = Arc::clone(&parent);
         let state_spawn = Arc::clone(&state);
         let sid_spawn = session_id.clone();
-        let this_spawn = self.clone();
+        let runner_spawn = self.clone();
         let w_clone = workdir.clone();
         let ctx_spawn = ctx.fork();
         let pid_clone = provider_id.clone();
@@ -319,7 +319,7 @@ impl SessionPlugin {
         let user_msg_spawn = user_msg;
 
         tokio::spawn(async move {
-            this_spawn
+            runner_spawn
                 .convergence
                 .emit_session_state(&state_spawn, SessionStateChange::Working)
                 .await;
@@ -356,13 +356,16 @@ impl SessionPlugin {
                     // 这一点。此处再落一条 `message.added` 就是第二个 owner。本处只做
                     // 「落库 + 回包」，把存储分配的权威 `seq` 换进实时面。
                     let appended = async {
-                        let session = this_spawn.open_chat_session(&sid_spawn).await?;
+                        let session = runner_spawn
+                            .convergence
+                            .open_chat_session(&sid_spawn)
+                            .await?;
                         append_and_publish(
                             &session,
                             vec![msg.clone()],
                             Carrier::Runner,
                             PublishTarget::Transcript {
-                                mgr: &this_spawn.active_mgr,
+                                mgr: &runner_spawn.active_mgr,
                                 session_id: &sid_spawn,
                             },
                             // 用户发言的 `principal` 是 `user`（不看会话主体），
@@ -376,7 +379,7 @@ impl SessionPlugin {
                     if let Err(e) = appended {
                         let msg = format!("追加用户消息到存储失败: {}", e);
                         crate::plugin_error!("session", "{}", &msg);
-                        this_spawn
+                        runner_spawn
                             .convergence
                             .broadcast_error_with_idle(&state_spawn, msg)
                             .await;
@@ -386,14 +389,14 @@ impl SessionPlugin {
                     // 快照里已有标题 ⇒ 整趟跳过（`ensure_auto_title` 此时唯一的动作
                     // 是"读一遍会话 → 发现已有标题 → 返回"，见 `SessionSnapshot::has_title`）。
                     if !has_title_spawn {
-                        this_spawn.ensure_auto_title(&sid_spawn).await;
+                        runner_spawn.ensure_auto_title(&sid_spawn).await;
                     }
                 }
             }
 
             // agent_id 已在派发前解析（与 workdir 共用那一次会话读取），此处直接用。
             let agent_id = agent_id_spawn;
-            let session_cfg = this_spawn.config.read().await.clone();
+            let session_cfg = runner_spawn.config.read().await.clone();
 
             // ── 会话编排核心：收集全部插件的工具（统一 traverse 机制）──
             // local / web / mcp / skill / agent 全部在同一机制下贡献工具；
@@ -411,7 +414,7 @@ impl SessionPlugin {
             // （`PersistentChatSession::detached`，同一引擎逻辑 + `SessionStore::ephemeral`，
             // 审计 B1）
             // （与原路由失败路径等价，不阻断会话）。
-            if let Ok(session) = this_spawn
+            if let Ok(session) = runner_spawn
                 .open_session_handle(Some(sid_spawn.clone()))
                 .await
             {
@@ -432,7 +435,7 @@ impl SessionPlugin {
             if let Some(first) = capability_take_errors(&chat_ctx).await.into_iter().next() {
                 let msg = format!("[{}] {}", first.plugin, first.message);
                 crate::plugin_error!("session", "能力收集失败: {}", &msg);
-                this_spawn
+                runner_spawn
                     .convergence
                     .broadcast_error_with_idle(&state_spawn, msg)
                     .await;
@@ -504,8 +507,7 @@ impl SessionPlugin {
 
             // 调用统一的 chat_loop 任务执行器（内部：entry 解析 + 限流 + spawn）
             // run_chat_loop 内部会区分 resume（turn 前处理）与 single_message（正常 turn）
-            this_spawn
-                .clone()
+            runner_spawn
                 .run_chat_loop_task(
                     state_spawn,
                     chat_ctx,
@@ -533,7 +535,7 @@ impl SessionPlugin {
     /// 不同链路。VDFS 变更同时到达两类订阅者：会话清单 store 与左栏导航，二者都
     /// 按 path 重读 `vdfs/stat` 取得最新标题，因此这里无需（也无法）在事件里携带载荷。
     pub(crate) async fn ensure_auto_title(&self, session_id: &str) {
-        let Ok(mut session) = self.get_or_create_session(session_id).await else {
+        let Ok(mut session) = self.load_session(session_id).await else {
             return;
         };
         let has_title = session

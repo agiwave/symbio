@@ -11,12 +11,15 @@
 //! | 本文件 | 装配 + RAII 守卫（`AbortGuard` / `WorkingGuard`）+ `resolve_required_session_id` |
 //! | [`broadcast`] | 三个广播出口：错误 + 收敛 / 帧投递 / 忙闲状态 |
 //! | [`consume`] | 消费循环：`fail_before_loop` / `run_chat_loop_task` / `handle_abort` |
-//! | [`entry`] | 两个 one-off 入口：`chat/send` / `chat/abort` + `ensure_auto_title` |
+//! | [`entry`] | 一轮执行的装配：`start_turn` + `resolve_session_params` + 会话引擎句柄 / 自动命名 |
 //! | [`failure`] | 失败降级持久化：`persist_failure` + `subtree_of` |
+//! | [`runner`] | 「开跑一轮」端口 `TurnRunner`：一轮执行所需的宿主切片 |
 //! | [`sink`] | 执行期事件出口（`TranscriptSink`）：直连转写唯一写入点 |
 //!
-//! `impl SessionPlugin` 按职责分块分散在子模块（Rust 允许多个 inherent impl，
-//! 方法声明顺序无语义）。
+//! `impl` 块按职责分块分散在子模块（Rust 允许多个 inherent impl，方法声明顺序无语义）：
+//! 请求装配与消费循环在 [`TurnRunner`] 上（[`entry`] / [`consume`]），失败收口与广播在
+//! [`Convergence`] 上（[`broadcast`] / [`failure`]），插件本体只剩**门面**（`get_store` 等
+//! 高扇入访问器）。
 
 use super::active::{ActiveSessionState, REQUEST_ID_COUNTER};
 use super::capabilities::{attach_capabilities, collect_capabilities};
@@ -24,7 +27,7 @@ use super::chat_loop::StopSignal;
 use super::model_chat;
 // 运行态的结局常量与变更类型：子模块经 `use super::*;` 取用（`consume` / `entry`
 // / 本文件都要用），因此在这里导入一次，而不是各子模块各导一遍。
-use super::plugin::{SessionPlugin, OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED};
+use super::plugin::{OUTCOME_ABORTED, OUTCOME_COMPLETED, OUTCOME_FAILED};
 use crate::plugin_debug;
 use crate::symbio_core::{
     capability_take_errors, ExecAbortSignal, ExecEventSink, Plugin, PluginError,
@@ -33,6 +36,7 @@ use crate::symbio_core::{
 };
 use crate::symbio_core::{chat_node as cm, session_chat};
 pub(crate) use broadcast::{Convergence, SessionStateChange};
+pub(crate) use runner::TurnRunner;
 use serde_json::json;
 use std::sync::atomic::Ordering;
 
@@ -220,12 +224,13 @@ impl Drop for WorkingGuard {
     }
 }
 
-// 子模块：`impl SessionPlugin` 按职责分块（Rust 允许多个 inherent impl，方法声明顺序无语义）。
+// 子模块：两个手柄的 `impl` 块按职责分块（Rust 允许多个 inherent impl，方法声明顺序无语义）。
 mod broadcast;
 mod consume;
 mod entry;
 mod failure;
 mod rate_limit;
+mod runner;
 mod sink;
 
 #[cfg(test)]

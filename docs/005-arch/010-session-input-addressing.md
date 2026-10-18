@@ -324,7 +324,8 @@ id**，所以是「换位置」不是「多一条」。
 - [x] `abort_turn`——路由版与动作版**同一份实现**
 - [x] `inbox_at` 收 `ctx`、入队带 `WORKDIR`
 - [x] `drain_inbox_once` 出队发无载荷变更
-- [x] `SessionPlugin::self_ref` / `me()`（provider 拿 `&self`，「开一轮」要 `Arc<Self>`）
+- [x] `orchestrator::TurnRunner`（provider 拿 `&self`，「开一轮」要交给后台任务的句柄——
+      给的是这一轮用得着的那几样，不是整个插件）
 
 前端（§6.1–6.5）：
 

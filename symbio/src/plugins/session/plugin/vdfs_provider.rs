@@ -210,7 +210,7 @@ impl SessionPlugin {
                 VDFS_ACTION_ABORT => {
                     // 存在性校验：会话不在就没有「它的一轮」可谈
                     self.session_of(id).await?;
-                    let stopped = self.abort_turn(id).await;
+                    let stopped = self.turn.abort_turn(id).await;
                     Ok(VdfsResponse::Action(VdfsActionResult {
                         action: action.clone(),
                         ok: stopped,
@@ -520,8 +520,7 @@ impl SessionPlugin {
                             ..session_chat::Request::default()
                         });
                         let resp = self
-                            .me()
-                            .map_err(vdfs_from_plugin_error)?
+                            .turn
                             .start_turn(req_ctx)
                             .await
                             .map_err(vdfs_from_plugin_error)?;

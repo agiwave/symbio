@@ -50,14 +50,22 @@ pub struct SessionPlugin {
     pub(crate) parent: Option<Weak<dyn Plugin>>,
     /// 活跃会话管理器 (V2 整合版：处理长连接与广播)
     pub(crate) active_mgr: Arc<super::active::ActiveSessionManager>,
-    /// 会话收敛手柄：存储格子 / 存储目录 / 活跃名册——把运行态与终态落到一个会话上
-    /// 所需的那三样。
+    /// 会话收敛手柄：存储格子 / 存储目录 / 配置 / 活跃名册——把运行态与终态落到一个
+    /// 会话上所需的那四样。
     ///
     /// 存储的 `OnceCell` **住在手柄上**而不是插件上：后台任务里的两个调用方
     /// （`TranscriptSink` / `WorkingGuard`）拿它而不是整个插件
     /// （[ADR-075](../../../../docs/010-adr/075.md) 前置 P2），而「卸载后任务还在收尾」
     /// 恰恰需要这份存储比插件活得更久。
     pub(crate) convergence: Convergence,
+    /// 「开跑一轮」端口：一个 Turn 从装配到收尾所读的宿主切片（字段与用途见
+    /// [`TurnRunner`] 的模块文档）。
+    ///
+    /// 插件在这里的贡献只是**把同一批 Arc 交出去**：provider 侧的 `dispatch` 只有 `&self`，
+    /// 而一轮执行要 `tokio::spawn` 一个自带句柄的任务。那个句柄若是插件本身
+    /// （`Arc<SessionPlugin>`），provider 注册、路由、订阅表、监听器与常驻任务册就一起
+    /// 被一个 Turn 钉住（[ADR-075](../../../../docs/010-adr/075.md) 前置 P2 第五处）。
+    pub(crate) turn: TurnRunner,
     /// 工作目录监听管理器（目录树场景的实时数据变更通知）
     pub(crate) workdir_watches: super::workdir::WorkdirWatchManager,
     /// VDFS 实时：变更订阅表（引用计数 + 恰好一次投递）。
@@ -84,11 +92,9 @@ pub struct SessionPlugin {
     pub(crate) shutdown_wake: tokio::sync::Notify,
     /// 两条常驻 loop 的句柄册（心跳调度器 + 收件箱消费者），`stop` 据此**等它们真的退**。
     pub(crate) resident_tasks: resident::ResidentTasks,
-    /// 自身的弱引用（在 [`Self::build`] 里回填；见 [`Self::me`]）。
-    self_ref: OnceCell<std::sync::Weak<SessionPlugin>>,
 }
 
-use super::orchestrator::Convergence;
+use super::orchestrator::{Convergence, TurnRunner};
 use super::store::SessionStore;
 
 // ==================== 落库回包（§3.4 的唯一落地点） ====================
@@ -237,11 +243,22 @@ impl SessionPlugin {
             change_subs.as_ref().clone(),
         ));
         let config = Arc::new(RwLock::new(config));
+        let convergence = Convergence::new(store, store_dir, config.clone(), active_mgr.clone());
+        // 「开跑一轮」端口：一轮执行真正读到的那几样宿主切片（字段与插件同源同 Arc，
+        // 不是第二份状态；为什么收成端口见 [`TurnRunner`] 的模块文档）。
+        let turn = TurnRunner::new(
+            convergence.clone(),
+            active_mgr.clone(),
+            config.clone(),
+            change_subs.clone(),
+            config_file.dir().clone(),
+            parent.clone(),
+        );
         Self {
-            config: config.clone(),
+            config,
             config_file,
             parent,
-            convergence: Convergence::new(store, store_dir, config, active_mgr.clone()),
+            convergence,
             active_mgr,
             workdir_watches,
             change_subs,
@@ -249,24 +266,8 @@ impl SessionPlugin {
             stopping: std::sync::atomic::AtomicBool::new(false),
             shutdown_wake: tokio::sync::Notify::new(),
             resident_tasks: resident::ResidentTasks::default(),
-            self_ref: OnceCell::new(),
+            turn,
         }
-    }
-
-    /// 取回 `Arc<Self>`（装配完成后恒可用）。
-    ///
-    /// ## 为什么需要它
-    ///
-    /// `VdfsProvider::dispatch` 拿到的是 `&self`，而「开跑一轮」（`start_turn`）要把
-    /// `Arc<Self>` 移进后台任务。没有这条自引用，provider 侧想触发运行就只能绕道
-    /// **路由**——而路由是 address-less 的（恒落根实例），那正是子智能体空间的消息
-    /// 被投到父空间的成因。有了它，「一次节点动作 → 本空间开跑」在 provider 内部
-    /// 就闭合了，不需要任何跨插件调用。
-    pub(crate) fn me(&self) -> Result<Arc<Self>, PluginError> {
-        self.self_ref
-            .get()
-            .and_then(|w| w.upgrade())
-            .ok_or_else(|| PluginError::InternalError("会话插件未完成装配（缺少自引用）".into()))
     }
 
     /// 广播一次会话变更（VDFS 实时链路的数据源）。
@@ -341,9 +342,6 @@ impl SessionPlugin {
         let parent = ctx.parent();
 
         let plugin = Arc::new(SessionPlugin::new(parent, config, dir));
-        // 自引用：provider 侧的「开跑一轮」需要 `Arc<Self>`（见 [`SessionPlugin::me`]）
-        let _ = plugin.self_ref.set(Arc::downgrade(&plugin));
-
         plugin.start_resident_tasks();
 
         plugin

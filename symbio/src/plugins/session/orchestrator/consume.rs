@@ -51,7 +51,7 @@ async fn wait_state_superseded(state: &Arc<ActiveSessionState>, rid: u64) {
     }
 }
 
-impl SessionPlugin {
+impl TurnRunner {
     /// 进入 chat_loop **之前**就失败的统一收尾（provider 解析 / 能力访问器缺失等）。
     ///
     /// 与正常出口一样保证 Working → Stop 严格配对：这里**显式**补发一次 Stop，
@@ -132,7 +132,7 @@ impl SessionPlugin {
     ///
     /// `chat_ctx` 应已设置好 PATH/SESSION_ID/AGENT_ID/WORKDIR/payload 等所有字段。
     pub(super) async fn run_chat_loop_task(
-        self: Arc<Self>,
+        &self,
         state: Arc<ActiveSessionState>,
         chat_ctx: Arc<dyn PluginInvokeRequest>,
         session_id: String,
@@ -308,7 +308,7 @@ impl SessionPlugin {
             presentation_tree,
             // 会话目录 = **本插件自己的目录**（装配期由父插件经 `PLUGIN_DIR` 告知），
             // 不是任何全局系统根——子智能体下它指向子树，这正是作用域正确性的来源。
-            session_dir: self.config_file.dir().clone(),
+            session_dir: self.dir.clone(),
         });
 
         let ctx_clone = chat_ctx.fork();

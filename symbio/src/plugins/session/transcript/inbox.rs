@@ -614,7 +614,7 @@ impl SessionPlugin {
         };
         ctx.set_payload(req)?;
         // 直呼**执行**而非入口：入口会把 message 再次入队（无限循环）
-        self.start_turn(ctx).await?;
+        self.turn.start_turn(ctx).await?;
         Ok(())
     }
 }
