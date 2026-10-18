@@ -40,9 +40,9 @@
 //! 什么时候写无关。
 
 use super::super::active::{ActiveSessionState, InboxItem, PreemptPending};
-use super::super::plugin::{inbox_item_node, inbox_item_path, SessionPlugin};
+use super::super::plugin::{inbox_item_node, inbox_item_path, SessionConfig, SessionPlugin};
 use super::supplements;
-use crate::symbio_core::{chat_node as cm, session_chat, VdfsChange};
+use crate::symbio_core::{chat_node as cm, session_chat, VdfsChange, VdfsChangeSubscriptions};
 use crate::symbio_core::{
     Event, EventWalStore, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, Preemption,
     PreemptionDecider, Store, SESSION_ID, SOURCE_PRINCIPAL, WORKDIR,
@@ -67,6 +67,64 @@ use std::sync::Arc;
 /// 消息说得出为什么（S07 §5 的静默失效）。代价同样是**有界的**：只在挂起未结清期间
 /// 存在，恢复落格即停止。
 const BUSY_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// 抽干上界：一次取几条。
+///
+/// `supplements_enabled = false` 时退化为「取一条」——与下游的合并叠加后恰好等于
+/// 「一条消息 = 一轮」的今天行为。
+///
+/// 两个抽干点（收件箱消费者的异步取批、轮边界的同步取批）共用这一个判定：
+/// 各写一遍必然在「上界取谁」上漂移。
+fn drain_limit(cfg: &SessionConfig) -> usize {
+    if cfg.supplements_enabled {
+        cfg.supplements_max_per_drain.max(1)
+    } else {
+        1
+    }
+}
+
+/// 抽干之后逐条发删除变更——**抽干与通知成对**：分开写就会出现「抽了没通知」
+/// （前端以为条目还在）或「通知了没抽」（条目凭空消失）两种静默不一致。
+fn announce_drained(change_subs: &VdfsChangeSubscriptions, session_id: &str, batch: &[InboxItem]) {
+    for item in batch {
+        change_subs.notify(&VdfsChange::bare(inbox_item_path(session_id, &item.id)));
+    }
+}
+
+/// [`SessionPlugin::take_inbox_batch`] 的**同步**孪生（缺口 3：v2 工具循环的轮边界注入挂点用它）。
+///
+/// ## 为什么是自由函数、为什么收这三样
+///
+/// 取一个会话的队首只需要：**上界从哪来**（`config`）、**队列在哪**（`state.inner.inbox`）、
+/// **通知投给谁**（`change_subs`）——插件本身在这一步没有贡献。于是它不住在
+/// `impl SessionPlugin` 上，需要它的一方（`chat_loop::SupplementDrain`）拿的就是这三样，
+/// 而不是整个插件（[ADR-075](../../../../../docs/010-adr/075.md "ADR-075") 前置 P2）。
+///
+/// ## 上界与通知都不另写一份
+///
+/// 走的是 [`drain_limit`] 与 [`announce_drained`]——与异步孪生同一条判定，两条路不可能漂。
+///
+/// ⚠️ 调用方负责 `block_in_place`（见 `SupplementDrain::take_inbox_batch_sync` 的说明）：
+/// 单线程 runtime 的 async 上下文里 `blocking_read` 会 panic。
+pub(crate) fn take_inbox_batch_sync(
+    config: &tokio::sync::RwLock<SessionConfig>,
+    change_subs: &VdfsChangeSubscriptions,
+    state: &Arc<ActiveSessionState>,
+) -> Vec<InboxItem> {
+    let limit = {
+        let cfg = config.blocking_read();
+        drain_limit(&cfg)
+    };
+
+    let batch: Vec<InboxItem> = {
+        let mut inner = state.inner.blocking_write();
+        let n = inner.inbox.len().min(limit);
+        inner.inbox.drain(..n).collect()
+    };
+
+    announce_drained(change_subs, &state.session_id, &batch);
+    batch
+}
 
 impl SessionPlugin {
     /// **入队**一条用户消息（收件箱集合的唯一写入口）。
@@ -491,20 +549,17 @@ impl SessionPlugin {
 
     /// 取走该会话队首的一批条目（至多 `supplements_max_per_drain` 条），并逐条发删除变更。
     ///
-    /// 抽干与变更通知必须成对：分开写就会出现"抽了没通知"（前端以为条目还在）
-    /// 或"通知了没抽"（条目凭空消失）两种静默不一致。
+    /// 抽干与变更通知必须成对（[`announce_drained`]）：分开写就会出现"抽了没通知"
+    /// （前端以为条目还在）或"通知了没抽"（条目凭空消失）两种静默不一致。
     ///
-    /// `pub(crate)`：轮边界抽干（[`super::super::chat_loop::SupplementDrain`]）经它取批，
-    /// 再交给 [`super::supplements::merge_supplements`] 合并。两个抽干点共用同一个取批
-    /// 实现——各写一遍必然在"上界取谁""变更发几次"上漂移。
+    /// `pub(crate)`：轮边界抽干（[`super::super::chat_loop::SupplementDrain`]）经它的
+    /// 同步孪生 [`take_inbox_batch_sync`] 取批，再交给
+    /// [`super::supplements::merge_supplements`] 合并。两个抽干点共用同一个上界判定与
+    /// 同一份通知出口——各写一遍必然在"上界取谁""变更发几次"上漂移。
     pub(crate) async fn take_inbox_batch(&self, state: &Arc<ActiveSessionState>) -> Vec<InboxItem> {
         let limit = {
             let cfg = self.config.read().await;
-            if cfg.supplements_enabled {
-                cfg.supplements_max_per_drain.max(1)
-            } else {
-                1
-            }
+            drain_limit(&cfg)
         };
 
         let batch: Vec<InboxItem> = {
@@ -513,44 +568,7 @@ impl SessionPlugin {
             inner.inbox.drain(..n).collect()
         };
 
-        for item in &batch {
-            self.change_subs.notify(&VdfsChange::bare(inbox_item_path(
-                &state.session_id,
-                &item.id,
-            )));
-        }
-        batch
-    }
-
-    /// 同上，但走 `blocking_read`（同步调用方用，见下条）。
-    /// [`Self::take_inbox_batch`] 的**同步**孪生（缺口 3 的注入挂点用它）。
-    ///
-    /// **判定与取件逻辑只有这一份**——异步版直接委托过来，两条路不可能漂。
-    ///
-    /// ⚠️ 调用方负责 `block_in_place`（见 `SupplementDrain::take_inbox_batch_sync`
-    /// 的说明）：单线程 runtime 的 async 上下文里 `blocking_read` 会 panic。
-    pub(crate) fn take_inbox_batch_sync(&self, state: &Arc<ActiveSessionState>) -> Vec<InboxItem> {
-        let limit = {
-            let cfg = self.config.blocking_read();
-            if cfg.supplements_enabled {
-                cfg.supplements_max_per_drain.max(1)
-            } else {
-                1
-            }
-        };
-
-        let batch: Vec<InboxItem> = {
-            let mut inner = state.inner.blocking_write();
-            let n = inner.inbox.len().min(limit);
-            inner.inbox.drain(..n).collect()
-        };
-
-        for item in &batch {
-            self.change_subs.notify(&VdfsChange::bare(inbox_item_path(
-                &state.session_id,
-                &item.id,
-            )));
-        }
+        announce_drained(&self.change_subs, &state.session_id, &batch);
         batch
     }
 

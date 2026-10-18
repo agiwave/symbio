@@ -588,21 +588,28 @@ impl CompressionEmitter {
 
 /// 补充整合在**批次边界**的落点：抽干整队并合并成一条补充。
 ///
-/// ## 为什么需要它（与 [`CompressionEmitter`] 同一个理由）
+/// ## 为什么需要它
 ///
-/// `run_chat_loop` 是自由函数，拿不到插件实例；而"抽干"要读两样都在插件上的东西：
-/// `active_mgr`（会话队列）与 `config`（`supplements_enabled` / `supplements_max_per_drain`）。
+/// `run_chat_loop` 是自由函数，拿不到插件实例；而"抽干"要读**取批那三样**（上界、
+/// 队列、通知表，见 [`super::super::transcript::inbox::take_inbox_batch_sync`]）。
 /// 所以由调用方（`orchestrator::consume`）在构造 `ChatOrchestrator` 时把这个持有者
-/// 一并交进来——与 `compression` 字段同形，不新增第二种注入手法。
+/// 一并交进来。
+///
+/// ## 为什么收的是 `config` + `change_subs` 而不是插件
+///
+/// 与 [`CompressionEmitter`] 收名册是同一条判据：**只拿实际用到的那件事**
+/// （[ADR-075](../../../../../docs/010-adr/075.md "ADR-075") 前置 P2）。取批这一步
+/// 插件没有额外贡献，于是这里就不背整个插件。
 ///
 /// ## 它只做一件事
 ///
-/// 取批（[`SessionPlugin::take_inbox_batch_sync`]）+ 合并（`merge_supplements`），
-/// **不写任何地址、不落格、不落库**：抽干发生在工具循环的**批次边界**，落格与
-/// 「进下一次请求」都在 `v2_exec.rs` 的 `supplement_into_request`（由 `turn_runner.rs`
-/// 的 2f 触发）。
+/// 取批（[`super::super::transcript::inbox::take_inbox_batch_sync`]）+ 合并
+/// （`merge_supplements`），**不写任何地址、不落格、不落库**：抽干发生在工具循环的
+/// **批次边界**，落格与「进下一次请求」都在 `v2_exec.rs` 的 `supplement_into_request`
+/// （由 `turn_runner.rs` 的 2f 触发）。
 pub struct SupplementDrain {
-    plugin: Arc<crate::plugins::session::plugin::SessionPlugin>,
+    config: Arc<tokio::sync::RwLock<crate::plugins::session::config::SessionConfig>>,
+    change_subs: Arc<crate::symbio_core::VdfsChangeSubscriptions>,
     pub(crate) state: Arc<crate::plugins::session::active::ActiveSessionState>,
 }
 
@@ -637,10 +644,15 @@ pub(crate) struct DrainedSupplement {
 
 impl SupplementDrain {
     pub fn new(
-        plugin: Arc<crate::plugins::session::plugin::SessionPlugin>,
+        config: Arc<tokio::sync::RwLock<crate::plugins::session::config::SessionConfig>>,
+        change_subs: Arc<crate::symbio_core::VdfsChangeSubscriptions>,
         state: Arc<crate::plugins::session::active::ActiveSessionState>,
     ) -> Self {
-        Self { plugin, state }
+        Self {
+            config,
+            change_subs,
+            state,
+        }
     }
 
     /// 抽干该会话队首的一批补充并合并成**一条**用户消息（缺口 3：v2 工具循环里的
@@ -653,8 +665,8 @@ impl SupplementDrain {
     /// 的接口面染成 async（它现在是同步调 LLM 适配器的）。
     ///
     /// 于是取件这一步在插件侧桥成同步。**判定与取件逻辑不复制**：真源是
-    /// `SessionPlugin::take_inbox_batch_sync`（`supplements_enabled = false` 时它退化
-    /// 为"取一条"，与本函数的合并叠加后恰好等于"一条消息 = 一轮"的今天行为）。
+    /// [`super::super::transcript::inbox::take_inbox_batch_sync`]（`supplements_enabled = false`
+    /// 时它退化为"取一条"，与本函数的合并叠加后恰好等于"一条消息 = 一轮"的今天行为）。
     ///
     /// 返回 `None` = 队列为空（或合并结果为空批次）——调用方据此**什么都不做**，
     /// 不推进 `last_saved`、不落库。
@@ -663,7 +675,11 @@ impl SupplementDrain {
     /// 单线程 runtime 的 async 上下文里直接调会 panic。`v2_exec` 的注入闭包里有
     /// flavor 判定（多线程才 `block_in_place`，否则裸调）。
     pub fn take_inbox_batch_sync(&self) -> Option<DrainedSupplement> {
-        let batch = self.plugin.take_inbox_batch_sync(&self.state);
+        let batch = crate::plugins::session::transcript::inbox::take_inbox_batch_sync(
+            &self.config,
+            &self.change_subs,
+            &self.state,
+        );
         let merged = crate::plugins::session::transcript::supplements::merge_supplements(&batch)?;
         let count = merged
             .meta

@@ -231,10 +231,14 @@ impl SessionPlugin {
             ),
         ));
 
-        // 轮边界补充整合的落点：抽干队列要读 `active_mgr` 与 `config`，两者都在插件上
-        // ——按构造注入，与 `phase` 用的是同一条通道（见 `SupplementDrain` 的文档）。
+        // 轮边界补充整合的落点：取批要的是上界（`config`）、队列（会话状态）与通知表
+        // （`change_subs`）三样，按构造注入（见 `SupplementDrain` 的文档）。
         let drain = Some(std::sync::Arc::new(
-            super::super::chat_loop::SupplementDrain::new(self.clone(), state.clone()),
+            super::super::chat_loop::SupplementDrain::new(
+                self.config.clone(),
+                self.change_subs.clone(),
+                state.clone(),
+            ),
         ));
 
         // ── 本 Turn 的两个执行期原语 ────────────────────────────────────────

@@ -590,7 +590,7 @@ impl DeltaSink for UiBridge {
 /// 之后，单测不必造一个完整编排器。
 /// 抽干口：返回一批补充（正文 + 原条数），或 `None` = 没有。
 ///
-/// 由 `chat_loop` 从 `SupplementDrain` 适配而来（它要插件宿主 + 会话状态，那个
+/// 由 `chat_loop` 从 `SupplementDrain` 适配而来（它要 config / change_subs / 会话状态，那个
 /// 类型不进 `V2Turn`）。测试直接给闭包，于是能造「只返回一次」这种形状。
 pub(crate) type SupplementFn =
     Arc<dyn Fn() -> Option<super::chat_loop::state::DrainedSupplement> + Send + Sync>;
@@ -646,7 +646,7 @@ pub(crate) struct V2Turn<'a> {
     /// 补充抽干口（缺口 3）：工具循环每跑完一轮问一次「用户有没有中途插话」。
     /// 有就折进**本轮**——落一格 `turn.supplemented` 事实 + 进下一次请求。
     ///
-    /// **闭包而不是具体类型**：抽干的实现是 `SupplementDrain`（要插件宿主 + 会话
+    /// **闭包而不是具体类型**：抽干的实现是 `SupplementDrain`（要 config / change_subs / 会话
     /// 状态），而这里只需要「取一批」这一个动作。绑具体类型的话，**测试造不出假件**
     /// ——那等于这条链路没法在单测里验，只能靠 e2e，而 e2e 照不出「落格带没带溯源」
     /// 「`count` 对不对」这种细节。
