@@ -11,7 +11,9 @@
 
 use super::*;
 use crate::providers::DefaultToolVisitor;
-use crate::symbio_core::{CapabilityVisitor, PluginInvokeRequestExt, VDFS_PARENT_ADDR};
+use crate::symbio_core::{
+    capability_prompts, CapabilityVisitor, PluginInvokeRequestExt, VDFS_PARENT_ADDR,
+};
 use std::path::Path;
 use tempfile::TempDir;
 
@@ -56,7 +58,7 @@ async fn system_instance_injects_the_host_memory() {
     let (ctx, visitor) = ctx(None, "@vfs/memory");
     p.traverse(String::new(), ctx).await.unwrap();
 
-    let segs = visitor.list_system_prompts().await;
+    let segs = capability_prompts(&*visitor).await;
     assert_eq!(
         segs.len(),
         1,
@@ -85,7 +87,7 @@ async fn sub_agent_instance_injects_its_own_memory() {
     let (ctx, visitor) = ctx(None, "@vfs/agent/reviewer/memory");
     p.traverse(String::new(), ctx).await.unwrap();
 
-    let segs = visitor.list_system_prompts().await;
+    let segs = capability_prompts(&*visitor).await;
     assert_eq!(segs.len(), 1);
     assert!(segs[0].1.contains("评审时先读测试。"));
     assert!(
@@ -106,7 +108,7 @@ async fn empty_memory_injects_nothing_but_keeps_the_mount() {
     let (ctx, visitor) = ctx(None, "@vfs/memory");
     p.traverse(String::new(), ctx).await.unwrap();
 
-    assert!(visitor.list_system_prompts().await.is_empty());
+    assert!(capability_prompts(&*visitor).await.is_empty());
     assert!(
         visitor.get_vdfs_provider(PLUGIN_ID_MEMORY).await.is_some(),
         "挂载点的存在不依赖「有没有写过」"
@@ -125,7 +127,7 @@ async fn no_workspace_injects_no_workspace_memory() {
     let (ctx, visitor) = ctx(None, "@vfs/memory");
     p.traverse(String::new(), ctx).await.unwrap();
 
-    let segs = visitor.list_system_prompts().await;
+    let segs = capability_prompts(&*visitor).await;
     assert_eq!(
         segs.len(),
         1,
@@ -145,7 +147,7 @@ async fn empty_workspace_still_injects_the_empty_hint() {
     let (ctx, visitor) = ctx(Some(ws.path().to_string_lossy().as_ref()), "@vfs/memory");
     p.traverse(String::new(), ctx).await.unwrap();
 
-    let segs = visitor.list_system_prompts().await;
+    let segs = capability_prompts(&*visitor).await;
     assert_eq!(segs.len(), 1, "智能体记忆为空省略，工作区腿空文件也注入");
     assert_eq!(segs[0].0, workspace::SEGMENT_NAME);
     assert!(
@@ -175,7 +177,7 @@ async fn workspace_memory_is_injected_verbatim() {
     let (ctx, visitor) = ctx(Some(ws.path().to_string_lossy().as_ref()), "@vfs/memory");
     p.traverse(String::new(), ctx).await.unwrap();
 
-    let segs = visitor.list_system_prompts().await;
+    let segs = capability_prompts(&*visitor).await;
     assert_eq!(segs.len(), 1);
     assert_eq!(segs[0].0, workspace::SEGMENT_NAME);
     assert!(segs[0].1.contains("本仓库用中文提交信息。"));
@@ -204,7 +206,7 @@ async fn both_legs_inject_together() {
     let (ctx, visitor) = ctx(Some(ws.path().to_string_lossy().as_ref()), "@vfs/memory");
     p.traverse(String::new(), ctx).await.unwrap();
 
-    let segs = visitor.list_system_prompts().await;
+    let segs = capability_prompts(&*visitor).await;
     assert_eq!(
         segs.len(),
         2,
@@ -249,7 +251,7 @@ async fn disabled_workspace_skips_injection_but_keeps_the_mount() {
     let (ctx, visitor) = ctx(Some(ws.path().to_string_lossy().as_ref()), "@vfs/memory");
     p.traverse(String::new(), ctx).await.unwrap();
 
-    assert!(visitor.list_system_prompts().await.is_empty());
+    assert!(capability_prompts(&*visitor).await.is_empty());
     assert!(
         visitor.get_vdfs_provider(PLUGIN_ID_MEMORY).await.is_some(),
         "关掉注入不等于关掉编辑面"

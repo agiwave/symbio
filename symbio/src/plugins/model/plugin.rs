@@ -833,10 +833,10 @@ impl Plugin for ModelPlugin {
             // 人格在**注册期**就已选定（上面按 `PROVIDER_ID` 解析出生效 provider），
             // 因此这里只注册一个条目。历史上曾同时注册 `provider_id` 与 `"default"`
             // 两个键——值完全相同，而消费侧早已不再按 key 挑选，属于纯粹冗余
-            // （见 `CapabilityVisitor::register_system_prompt`）。
+            // （见 `capability/prompt.rs` 的模块文档）。
             if let Some(sp) = active.as_ref().and_then(|p| p.system_prompt.as_ref()) {
                 tool_visitor
-                    .register_system_prompt(PLUGIN_ID_MODEL, sp.clone())
+                    .put(CapabilityRow::prompt(PLUGIN_ID_MODEL, sp.clone()))
                     .await;
             }
         }

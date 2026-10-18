@@ -3,7 +3,7 @@
 //! 本插件只有一件事：**把「我是谁、我怎么说话」交给模型看，并让用户改得动它**。
 //! 因此它在 `traverse` 里交出两样东西——
 //!
-//! 1. **系统提示词**（`register_system_prompt`）：[`segment`] 拼出的【本智能体】段；
+//! 1. **系统提示词**（`CapabilityRow::prompt`）：[`segment`] 拼出的【本智能体】段；
 //! 2. **VDFS 挂载点**（`<根>/setting`）：配置文档本身，用户在设置页 / 该地址上编辑。
 //!
 //! 挂载点不自己写 `VdfsProvider`：它是**纯配置挂载点**，四臂 dispatch 由
@@ -19,7 +19,7 @@
 use super::config::{config_definition, SettingConfig};
 use super::segment;
 use crate::symbio_core::{
-    capability_announce_configurable, plugin_dir_from_ctx, Plugin, PluginConfigFile,
+    capability_announce_configurable, plugin_dir_from_ctx, CapabilityRow, Plugin, PluginConfigFile,
     PluginConfigMount, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
     PluginInvokeResponse, PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH, PLUGIN_ID_SETTING,
     TRAVERSE_AVAILABLE_TOOLS,
@@ -76,7 +76,7 @@ impl SettingPlugin {
         let cfg = self.config.read().await;
         if let Some(text) = segment::segment(&cfg) {
             visitor
-                .register_system_prompt(segment::SEGMENT_NAME, text)
+                .put(CapabilityRow::prompt(segment::SEGMENT_NAME, text))
                 .await;
         }
     }

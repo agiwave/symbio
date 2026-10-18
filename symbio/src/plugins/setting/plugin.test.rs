@@ -4,7 +4,9 @@
 
 use super::*;
 use crate::providers::DefaultToolVisitor;
-use crate::symbio_core::{CapabilityVisitor, PluginInvokeRequestExt, VDFS_PARENT_ADDR};
+use crate::symbio_core::{
+    capability_prompts, CapabilityVisitor, PluginInvokeRequestExt, VDFS_PARENT_ADDR,
+};
 use tempfile::TempDir;
 
 /// 构造带能力收集器的上下文
@@ -38,7 +40,7 @@ async fn default_settings_inject_nothing_but_keep_the_mount() {
     p.traverse(String::new(), ctx).await.unwrap();
 
     assert!(
-        visitor.list_system_prompts().await.is_empty(),
+        capability_prompts(&*visitor).await.is_empty(),
         "缺省状态不该改变任何一轮的提示词"
     );
     assert!(visitor.get_vdfs_provider(PLUGIN_ID_SETTING).await.is_some());
@@ -60,7 +62,7 @@ async fn filled_profile_is_injected() {
 
     p.traverse(String::new(), ctx).await.unwrap();
 
-    let segs = visitor.list_system_prompts().await;
+    let segs = capability_prompts(&*visitor).await;
     assert_eq!(segs.len(), 1);
     assert_eq!(segs[0].0, segment::SEGMENT_NAME);
     assert!(segs[0].1.contains("名称：评审官"), "{}", segs[0].1);

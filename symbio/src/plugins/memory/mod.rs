@@ -41,7 +41,7 @@
 //!
 //! | 交出什么 | 机制 | 缺了会怎样 |
 //! |---|---|---|
-//! | 系统提示词（两段） | `CapabilityVisitor::register_system_prompt` | 模型不知道记忆存在，等于没有 |
+//! | 系统提示词（两段） | `put(CapabilityRow::prompt(…))` | 模型不知道记忆存在，等于没有 |
 //! | VDFS 挂载点 `<根>/memory` | `CapabilityVisitor::register_vdfs_provider` | 只能读不能改，记忆永远长不大 |
 //!
 //! 两者都在 `traverse(TRAVERSE_AVAILABLE_TOOLS)` 这一次广播里交出——与工具、模型服务、

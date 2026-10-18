@@ -20,7 +20,7 @@ deps: [PL-014-单环一表收敛, AR-016-turn-runner-steps]
 
 | 判据 | 表达 | 现有棘轮 |
 |---|---|---|
-| core 形状只降不升 | `pub trait` 20 · `fn` 成员 67 · 默认体 23（4b 后实测） | `core-shape-audit.mjs`（CS-001） |
+| core 形状只降不升 | `pub trait` 20 · `fn` 成员 65 · 默认体 23（4c 后实测） | `core-shape-audit.mjs`（CS-001） |
 | 收集口收敛 | `CapabilityVisitor` 16 方法 + `OptionVisitor` 2 + `ConfigurableVisitor` 3 ⇒ **1 个 trait，3 个方法** | 本文档 §2 的账 |
 | session 不增 | 每步 `session` 非测试行数 ≤ 搬入前 | `find` + `wc -l` |
 | 行为不变 | 工具清单逐条比对 + schema 导出比对 + e2e 77 条 | 现有 e2e |
@@ -47,7 +47,8 @@ trait 改名（`CapabilityVisitor` → `Registry`）是最后一步的纯重命�
 > 基线修正：[T-165-控制面收敛](../009-task/165-控制面收敛.md "T-165-控制面收敛") 原记「14 方法」，
 > 实测 16（含 3 个默认体）。已随本文订正。**4a 之后 trait 余 14 方法**（Tool 3 + Model 4 +
 > Prompt 2 + Mount 5；默认体 3 → 2，`register_batch` 那个随 Tool 族一起退场）；
-> **4b 之后余 10 方法**（put / get / list 3 + Prompt 2 + Mount 5，默认体 5）。
+> **4b 之后余 10 方法**（put / get / list 3 + Prompt 2 + Mount 5，默认体 5）；
+> **4c 之后余 8 方法**（put / get / list 3 + Mount 5，默认体 5）。
 
 收集器有**两个实现方**，这是迁移的真正成本所在：
 
@@ -198,6 +199,23 @@ PL-014 §4 写的是 `Fn(Capsule, &Store) -> BoxFuture<Result<Vec<Fact>, ExecErr
   `SHAPE_BASELINE` 同步至 **20/67/23**，`CapabilityVisitor` 余 **10** 方法（5 个默认体）。
 - **session 非测试行数不变**（唯一改动是 `consume.rs` 里一行调用的写法）：本步没有
   任何 session 侧的新逻辑，只有调用点换名。
+
+### 4c 落地形态（2026-10-18）
+
+- **提示词行 = 一段文字**：`CapabilityRowPayload::Prompt { text }`（`CapabilityRow::prompt(段名, 正文)`，
+  行名 = 段名）。段名的两条语义原样搬进 `capability/prompt.rs` 的模块文档：**注册在这里的
+  一定会送达模型**（没有「取一个」的竞争）、**段名是覆盖键不是分类**。
+- **写侧是 `put`，没有新函数**：四个注册点（model 的 persona、setting 的自述段、
+  memory 的两段、session 的会话记忆）各自 `put(CapabilityRow::prompt(…))`；
+  作用域前缀（`agent/<id>/<段名>`）改在 `SubAgentVisitor::put` 上按族判——与工具/
+  模型同一处规则，写入口仍然只有一个。
+- **读侧落到一处**：`capability_prompts`（`(段名, 正文)`，保注册顺序）。两处消费方
+  （会话装配系统提示词、`compose` 拼自己的提示词）都不再各写一遍行到对的映射。
+  空段**不在这里**过滤：那是拼接方的判断，两处各自跳过。
+- **core 三格**：方法 67 → **65**（两个必填方法退场）、默认体 23 不变、`pub trait` 20 不变；
+  `SHAPE_BASELINE` 同步至 **20/65/23**，`CapabilityVisitor` 余 **8** 方法。
+- **session 非测试行数不变**：三处涉及（`inputs.rs` 读点、`plugin.rs` 注册点、`entry.rs` 一行注释）
+  都只换了一行写法；四个注册点里三个在别的插件（model / setting / memory）。
 
 每一步的守门人：**同一份工具清单以两种口径导出逐条相等**（走表的 `list(Tool)` 与
 `CapabilityMeta` 全量转储），加 e2e 77 条全过。任何一格漂移即停。

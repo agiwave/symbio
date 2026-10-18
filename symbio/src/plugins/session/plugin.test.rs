@@ -13,7 +13,8 @@ use super::*;
 use crate::plugins::session::test_dir;
 use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{
-    CapabilityVisitor, CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR,
+    capability_prompts, CapabilityVisitor, CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS,
+    VDFS_PARENT_ADDR,
 };
 
 /// 会话存储根**只**来自构造时父插件经 `PLUGIN_DIR` 告知的插件目录——
@@ -227,8 +228,7 @@ fn scratch_id(tag: &str) -> String {
 
 /// 取本插件注册的那一段系统提示词
 async fn memory_segment(visitor: &Arc<DefaultToolVisitor>) -> Option<String> {
-    visitor
-        .list_system_prompts()
+    capability_prompts(&**visitor)
         .await
         .into_iter()
         .find(|(n, _)| n == crate::plugins::session::memory::SEGMENT_NAME)

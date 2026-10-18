@@ -441,7 +441,7 @@ impl SessionPlugin {
 
             // ── 基础提示词：**不在这里拼** ──
             // 各层指令与记忆（智能体自身目录归 `agent`，工作区归 `work`，会话归本插件）
-            // 都由插件在能力收集期经 `register_system_prompt` 注册，由
+            // 都由插件在能力收集期经 `CapabilityRow::prompt` 入表，由
             // `chat_loop::inputs::resolve_system_prompt` 统一拼接。这里不把
             // `{homedir}/AGENTS.md` 装配成 `req.system_prompt` 传入，后果有二：
             // ① 同一份工作区 AGENTS.md 被 work 插件再注入一次（进两次上下文）；

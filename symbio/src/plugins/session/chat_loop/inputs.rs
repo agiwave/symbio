@@ -33,7 +33,7 @@ fn last_user_text(context: &SessionContext) -> String {
 ///
 /// ## 只有一个集合，没有竞争
 ///
-/// 插件经 `CapabilityVisitor::register_system_prompt` 注册的每一段都**一定会送达
+/// 插件经 `put(CapabilityRow::prompt(…))` 注册的每一段都**一定会送达
 /// 模型**——不存在「按优先级链取一个」的竞争，因此也没有「谁把谁挤掉」这类事故。
 /// 人格的选择发生在**注册期**（model 插件按 `PROVIDER_ID` 解析出唯一生效 provider
 /// 后才注册），消费侧不需要也不应该再选一次。
@@ -62,7 +62,7 @@ pub(crate) async fn resolve_system_prompt(
     }
 
     if let Some(visitor) = ctx.get(crate::symbio_core::CAPABILITY_VISITOR) {
-        for (_, text) in visitor.list_system_prompts().await {
+        for (_, text) in crate::symbio_core::capability_prompts(&*visitor).await {
             if text.trim().is_empty() {
                 continue;
             }
@@ -113,7 +113,7 @@ pub(crate) struct TurnInputs {
 ///
 /// ## 时机：每轮 Turn 开头（循环内），**不**提升到前步骤
 ///
-/// `list_capability` / `list_system_prompts` 都是纯内存读 visitor 注册表、不触发
+/// `capability_prompts` / 工具表的 `list` 都是纯内存读聚合表、不触发
 /// I/O，相对一次 LLM 推理可忽略；换来的是"每轮可动态调整人格与工具集"（例如中途
 /// 新连上的 MCP 工具，下一轮即可见）。若将来要提升到循环外（例如单轮工具轮次极多
 /// 使查询成为可观开销，或需要"一次请求内人格与工具集冻结"），**必须两者一起提升**，

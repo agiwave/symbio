@@ -10,14 +10,16 @@
 
 use super::*;
 use crate::providers::DefaultToolVisitor;
-use crate::symbio_core::{CapabilityVisitor, PluginSimpleRequest};
+use crate::symbio_core::{CapabilityRow, CapabilityVisitor, PluginSimpleRequest};
 
 /// 构造带 CAPABILITY_VISITOR 的上下文，按顺序注册 `prompts`
 async fn ctx_prompts(prompts: &[(&str, &str)]) -> Arc<dyn PluginInvokeRequest> {
     let ctx: Arc<dyn PluginInvokeRequest> = Arc::new(PluginSimpleRequest::new(None, None));
     let visitor = Arc::new(DefaultToolVisitor::new());
     for (name, text) in prompts {
-        visitor.register_system_prompt(name, text.to_string()).await;
+        visitor
+            .put(CapabilityRow::prompt(name, text.to_string()))
+            .await;
     }
     ctx.set(
         crate::symbio_core::CAPABILITY_VISITOR,

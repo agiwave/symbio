@@ -2,6 +2,7 @@ mod configurable;
 mod error;
 mod model;
 mod option;
+mod prompt;
 mod row;
 mod tool_name;
 
@@ -18,6 +19,7 @@ pub use configurable::{
 };
 pub use model::{capability_model_active, capability_model_resolve};
 pub use option::OptionVisitor;
+pub use prompt::capability_prompts;
 pub use row::{CapabilityRow, CapabilityRowKind};
 pub use tool_name::{capability_resolve, capability_to_wire};
 
@@ -374,37 +376,10 @@ pub trait CapabilityVisitor: Send + Sync + 'static {
     /// [`CapabilityRow::meta`] 现取（T-158 的三个声明位同样在 meta 上）。
     async fn list(&self, kind: CapabilityRowKind) -> Vec<Arc<CapabilityRow>>;
 
-    // 模型族（4 方法）已改走表：写入是 model 插件的逐行 `put`（生效位长在目录行上），
-    // 读取是 `capability_model_active` / `capability_model_resolve` 两个自由函数——
-    // 理由（「生效者必然是目录里的一员」如何从签名搬到结构）见 `capability/model.rs`。
-
-    /// 注册系统提示词（按名称保序；同名覆盖）。
-    ///
-    /// 语义只有一条：**注册在这里的东西一定会送达模型**——全部条目按注册顺序
-    /// 拼接，不做「取一个」的竞争。
-    ///
-    /// ## 为什么没有「基座 / 片段」两条通道
-    ///
-    /// `register_system_prompt`（人格基座，按优先级链取一个）与
-    /// `register_system_prompt_segment`（机制级片段，全部追加）做的是**同一件事**
-    /// ——往一个命名有序集合里塞一段文字——差异只在消费侧「取一个」还是「取全部」。
-    ///
-    /// 而「取一个」这个需求本身站不住：人格的**选择**发生在**注册期**（model 插件已按
-    /// `PROVIDER_ID` 解析出唯一生效 provider，注册的就是当次该用的那一份），消费侧
-    /// 再按 key 选一次是空动作。实测那两处「双键注册」（`provider_id` 与 `"default"`）
-    /// 写的还是**同一份内容**。
-    ///
-    /// 于是合并成一个方法：一个注册入口、一个有序集合、一个 [`Self::list_system_prompts`]
-    /// 出口。「谁在前谁在后」= 注册顺序 = 遍历顺序；要控制顺序就控制注册时机。
-    ///
-    /// ## 名字是覆盖键，不是分类
-    ///
-    /// 同名覆盖（`IndexMap` 语义）用于「同一段文字注册两次时取后者」，不承担任何
-    /// 分类职责——不要用命名前缀去表达「这是人格」「这是记忆」。
-    async fn register_system_prompt(&self, name: &str, prompt: String);
-
-    /// 列出已注册的系统提示词（(name, prompt)，保注册顺序）
-    async fn list_system_prompts(&self) -> Vec<(String, String)>;
+    // 模型族（4 方法，4b）与系统提示词族（2 方法，4c）已改走表：写入是在表的
+    // 提示词行 / 模型行上 `put`，读取是 `capability_model_*` / `capability_prompts`
+    // 这些自由函数。道理（写入语义与不变量如何从签名搬进结构与行词汇）各见
+    // `capability/model.rs` 与 `capability/prompt.rs`。
 
     // ==================== VDFS provider（统一文件系统） ====================
 
@@ -437,7 +412,8 @@ pub trait CapabilityVisitor: Send + Sync + 'static {
     }
 
     /// 列出已注册的 VDFS provider：`(目录名, 实现)`，按 `order` 升序稳定排序
-    /// （语义与 [`Self::list_system_prompts`] 的 `(name, prompt)` 一致）
+    /// （语义与 [`capability_prompts`](crate::symbio_core::capability_prompts) 的
+    /// `(name, prompt)` 一致）
     async fn list_vdfs_providers(
         &self,
     ) -> Vec<(String, Arc<dyn crate::symbio_core::VdfsProvider>)> {

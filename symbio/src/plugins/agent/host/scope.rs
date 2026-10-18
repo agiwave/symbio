@@ -129,6 +129,15 @@ impl CapabilityVisitor for SubAgentVisitor {
             );
             return;
         }
+        // 提示词段（4c）走**段名前缀**再入内表（`agent/<id>/<段名>`）：
+        // 与机制化之前「拼好前缀再 register」逐字一致，只是入口从 register 换成 put。
+        if let Some(text) = row.prompt_text() {
+            let name = self.seg(row.name());
+            self.inner
+                .put(CapabilityRow::prompt(&name, text.to_string()))
+                .await;
+            return;
+        }
         // 子作用域的工具加名前缀再入内表（`agent_<safe_id>_<name>`）：
         // 行的构造走词汇自己的 `tool()`，名前缀由改名装饰器承载——与机制化之前
         // 「包一层 PrefixedCapability 再 register」同一条路，只是入口从 register
@@ -155,16 +164,6 @@ impl CapabilityVisitor for SubAgentVisitor {
     // 模型族读写不再是 trait 上的方法（4b）：写侧在 `put` 上按族丢弃，读侧经下面的
     // `get` / `list` 原样透传内层——子 Agent 作用域内的插件照常按 id 取自己的模型
     // （目录是只读的，写侧已被挡住），而会话的生效者归系统 Agent。
-
-    async fn register_system_prompt(&self, name: &str, prompt: String) {
-        self.inner
-            .register_system_prompt(&self.seg(name), prompt)
-            .await
-    }
-
-    async fn list_system_prompts(&self) -> Vec<(String, String)> {
-        self.inner.list_system_prompts().await
-    }
 
     async fn register_vdfs_provider(&self, name: &str, provider: Arc<dyn VdfsProvider>) {
         self.inner

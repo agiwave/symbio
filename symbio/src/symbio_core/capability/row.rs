@@ -1,7 +1,7 @@
 //! 能力表的**行词汇**——收集口 trait 收敛为 `put` / `get` / `list` 三方法后，
 //! 一张表装下全部收集通道（AR-025 §3 的目标形状）。
 //!
-//! ## 族是**一个一个**落位的（Tool → Model → Prompt → Mount → Option）
+//! ## 族是**一个一个**落位的（Tool ✓ → Model ✓ → Prompt ✓ → Mount → Option）
 //!
 //! [`CapabilityRowKind`] 有六个值，但 [`CapabilityRowPayload`] 只随各族落地长变体：
 //! 4a 是 `Tool`，4b 加 `Model`，其余随 4c–4e；`Policy` 随步骤 6（表搬进 core）
@@ -72,6 +72,11 @@ pub enum CapabilityRowPayload {
         provider: Arc<dyn ModelProvider>,
         active: bool,
     },
+    /// 系统提示词：一段文字，行名就是段名。
+    ///
+    /// 段名是**覆盖键**，不是分类——不要用命名前缀去表达「这是人格」「这是记忆」
+    /// （`capability/prompt.rs` 的模块文档展开这条）。
+    Prompt { text: String },
 }
 
 /// 表里的一行。
@@ -80,8 +85,9 @@ pub enum CapabilityRowPayload {
 /// 族别不单独存——[`Self::kind`] 从载荷派生，结构上不存在「两种答案」（若另存
 /// 一格，就得防它俩哪天不一致，而那正是不一致的定义）。
 ///
-/// 构造只走 [`CapabilityRow::tool`] / [`CapabilityRow::model`]：行的名字从载荷自述
-/// 派生（能力的 `meta().name` / provider 的 `provider_id()`），调用方没有机会填错。
+/// 构造只走 [`CapabilityRow::tool`] / [`CapabilityRow::model`] / [`CapabilityRow::prompt`]：
+/// 工具与模型行的名字从载荷自述派生（能力的 `meta().name` / provider 的 `provider_id()`），
+/// 提示词行的名字是调用方给的**覆盖键**，调用方没有别的口子可填。
 /// 读取侧三件套——[`Self::kind`] / [`Self::meta`] / [`Self::cap`] 覆盖工具族的
 /// 全部现行消费形态（列表喂模型、按名执行、声明位读取），模型族走 [`Self::provider`]。
 #[derive(Clone)]
@@ -112,11 +118,20 @@ impl CapabilityRow {
         }
     }
 
+    /// 系统提示词行：名字 = 段名（覆盖键）。
+    pub fn prompt(name: &str, text: String) -> Self {
+        Self {
+            name: name.to_string(),
+            payload: CapabilityRowPayload::Prompt { text },
+        }
+    }
+
     /// 这一行属于哪个族（与载荷同源，不存在两种答案）。
     pub fn kind(&self) -> CapabilityRowKind {
         match &self.payload {
             CapabilityRowPayload::Tool(_) => CapabilityRowKind::Tool,
             CapabilityRowPayload::Model { .. } => CapabilityRowKind::Model,
+            CapabilityRowPayload::Prompt { .. } => CapabilityRowKind::Prompt,
         }
     }
 
@@ -134,7 +149,7 @@ impl CapabilityRow {
     pub fn cap(&self) -> Option<&Arc<dyn Capability>> {
         match &self.payload {
             CapabilityRowPayload::Tool(cap) => Some(cap),
-            CapabilityRowPayload::Model { .. } => None,
+            CapabilityRowPayload::Model { .. } | CapabilityRowPayload::Prompt { .. } => None,
         }
     }
 
@@ -142,17 +157,25 @@ impl CapabilityRow {
     pub fn provider(&self) -> Option<&Arc<dyn ModelProvider>> {
         match &self.payload {
             CapabilityRowPayload::Model { provider, .. } => Some(provider),
-            CapabilityRowPayload::Tool(_) => None,
+            CapabilityRowPayload::Tool(_) | CapabilityRowPayload::Prompt { .. } => None,
+        }
+    }
+
+    /// 取系统提示词正文；非提示词族为 `None`。
+    pub fn prompt_text(&self) -> Option<&str> {
+        match &self.payload {
+            CapabilityRowPayload::Prompt { text } => Some(text),
+            CapabilityRowPayload::Tool(_) | CapabilityRowPayload::Model { .. } => None,
         }
     }
 
     /// 这一行是否占着**生效位**（单槽族的「谁在槽里」）。
     ///
-    /// 无槽的族恒 `false`：本批只有模型族有位（挂载根的槽随 4d 落位）。
+    /// 无槽的族恒 `false`：目前只有模型族有位（挂载根的槽随 4d 落位）。
     pub fn active(&self) -> bool {
         match &self.payload {
             CapabilityRowPayload::Model { active, .. } => *active,
-            CapabilityRowPayload::Tool(_) => false,
+            CapabilityRowPayload::Tool(_) | CapabilityRowPayload::Prompt { .. } => false,
         }
     }
 
@@ -169,7 +192,7 @@ impl CapabilityRow {
                     active: false,
                 },
             },
-            CapabilityRowPayload::Tool(_) => self.clone(),
+            CapabilityRowPayload::Tool(_) | CapabilityRowPayload::Prompt { .. } => self.clone(),
         }
     }
 }

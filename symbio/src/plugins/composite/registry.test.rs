@@ -226,7 +226,7 @@ async fn installable_excludes_mounted_and_system_level() {
 /// `snapshot()` 的次序是**挂载次序**，不是哈希迭代序。
 ///
 /// 消费方是 `Composite::traverse`：它按这张表的次序向子插件广播收集，而
-/// `CapabilityVisitor::register_system_prompt` 的「谁在前谁在后 = 注册顺序」直接吃这条序。
+/// 系统提示词行的「谁在前谁在后 = 注册顺序」直接吃这条序。
 /// 表写成 `HashMap` 时迭代序按进程随机化 ⇒ **系统提示词里各记忆小节的相对顺序每起一个进程
 /// 重洗一次**（`e2e/cases/t46` 的形状基线实测：同一份装配跑 20 次，13 次是另一种顺序）。
 ///

@@ -16,7 +16,7 @@
 //!
 //! 生成的这句话是**助手本人**在对用户说话，人格（`setting`）与记忆（`session` /
 //! `memory`）必须参与——否则同一个人在两处口吻不同。注册段经
-//! `list_system_prompts()` 取（与 session 取的是同一条通道、同一组键，各取各的，
+//! `capability_prompts()` 取（与 session 取的是同一条通道、同一组键，各取各的，
 //! 不共享状态）。
 //!
 //! ## 失败方向：退回模板
@@ -29,8 +29,9 @@ use std::sync::Arc;
 use super::config::ComposeConfig;
 use crate::symbio_core::chat_node::{ChatNode, NodeRole};
 use crate::symbio_core::{
-    capability_model_resolve, llm_short_id, CapabilityVisitor, ExecAbortSignal, ExecEnv,
-    ExecEventSink, ModelProvider, PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_VISITOR,
+    capability_model_resolve, capability_prompts, llm_short_id, CapabilityVisitor, ExecAbortSignal,
+    ExecEnv, ExecEventSink, ModelProvider, PluginInvokeRequest, PluginInvokeRequestExt,
+    CAPABILITY_VISITOR,
 };
 use crate::symbio_core::{ComposeRequest, WordingReply};
 
@@ -134,8 +135,7 @@ async fn build_system_prompt(
     visitor: &Arc<dyn CapabilityVisitor>,
     config: &ComposeConfig,
 ) -> String {
-    let mut parts: Vec<String> = visitor
-        .list_system_prompts()
+    let mut parts: Vec<String> = capability_prompts(&**visitor)
         .await
         .into_iter()
         .map(|(_, prompt)| prompt)

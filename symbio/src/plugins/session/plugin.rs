@@ -524,7 +524,7 @@ impl SessionPlugin {
         match store.segment(&super::memory::segment_spec(&address)) {
             Ok(Some(segment)) => {
                 visitor
-                    .register_system_prompt(super::memory::SEGMENT_NAME, segment)
+                    .put(CapabilityRow::prompt(super::memory::SEGMENT_NAME, segment))
                     .await;
             }
             Ok(None) => {}

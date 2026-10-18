@@ -4,7 +4,7 @@
 //! 本插件只有一件事：让模型**记得住**长期有效的东西（智能体自己的 + 所在工作区的），
 //! 并且**改得动**它们。因此它在 `traverse` 里同时交出——
 //!
-//! 1. **系统提示词**（`register_system_prompt`，两段）：智能体记忆与工作区记忆的
+//! 1. **系统提示词**（`CapabilityRow::prompt`，两段）：智能体记忆与工作区记忆的
 //!    正文 + 文件地址 + 容量与写法，由会话侧按注册顺序拼接后送达模型；
 //! 2. **VDFS 挂载点**（`<根>/memory`）：两份记忆文件本体（`AGENTS.md` /
 //!    `WORKSPACE.md`），模型用 `vdfs_read` / `vdfs_write` 读写，用户在界面上也能
@@ -35,9 +35,10 @@ use super::workspace;
 use crate::providers::MemoryFile;
 use crate::symbio_core::VdfsAccess;
 use crate::symbio_core::{
-    capability_announce_configurable, plugin_dir_from_ctx, Plugin, PluginConfigFile, PluginDir,
-    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
-    PluginPayload, CAPABILITY_VISITOR, PATH, PLUGIN_ID_MEMORY, TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
+    capability_announce_configurable, plugin_dir_from_ctx, CapabilityRow, Plugin, PluginConfigFile,
+    PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
+    PluginMeta, PluginPayload, CAPABILITY_VISITOR, PATH, PLUGIN_ID_MEMORY,
+    TRAVERSE_AVAILABLE_TOOLS, WORKDIR,
 };
 use crate::symbio_core::{DetailDefinition, DetailField};
 use async_trait::async_trait;
@@ -199,7 +200,11 @@ impl MemoryPlugin {
         // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
         let address = crate::symbio_core::absolute_addr(ctx, memory::rel_path());
         match memory::segment(&store, &address) {
-            Ok(Some(segment)) => visitor.register_system_prompt(SEGMENT_NAME, segment).await,
+            Ok(Some(segment)) => {
+                visitor
+                    .put(CapabilityRow::prompt(SEGMENT_NAME, segment))
+                    .await
+            }
             Ok(None) => {}
             Err(e) => crate::plugin_warn!("memory", "读取智能体记忆失败，本轮不注入：{e}"),
         }
@@ -228,7 +233,7 @@ impl MemoryPlugin {
         match store.segment(&workspace::segment_spec(&address)) {
             Ok(Some(segment)) => {
                 visitor
-                    .register_system_prompt(workspace::SEGMENT_NAME, segment)
+                    .put(CapabilityRow::prompt(workspace::SEGMENT_NAME, segment))
                     .await;
             }
             // 无工作区：不注入（正常状态，不报错）

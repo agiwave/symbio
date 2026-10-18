@@ -8,8 +8,8 @@ use super::*;
 use crate::symbio_core::chat_node::ChatNode;
 use crate::symbio_core::TurnOutput;
 use crate::symbio_core::{
-    capability_model_active, capability_model_resolve, Capability, CapabilityMeta, ExecEnv,
-    ModelProvider, PluginError,
+    capability_model_active, capability_model_resolve, capability_prompts, Capability,
+    CapabilityMeta, ExecEnv, ModelProvider, PluginError,
 };
 use async_trait::async_trait;
 
@@ -213,16 +213,20 @@ async fn key_space_is_shared_across_kinds() {
 #[tokio::test]
 async fn system_prompt_overwrite_keeps_first_registration_slot() {
     let mgr = DefaultToolVisitor::new();
-    mgr.register_system_prompt("persona", "默认提示词".to_string())
+    mgr.put(CapabilityRow::prompt("persona", "默认提示词".to_string()))
         .await;
-    mgr.register_system_prompt("work", "记忆".to_string()).await;
-    mgr.register_system_prompt("persona", "默认提示词（覆盖）".to_string())
+    mgr.put(CapabilityRow::prompt("work", "记忆".to_string()))
         .await;
-    mgr.register_system_prompt("agent", "人格".to_string())
+    mgr.put(CapabilityRow::prompt(
+        "persona",
+        "默认提示词（覆盖）".to_string(),
+    ))
+    .await;
+    mgr.put(CapabilityRow::prompt("agent", "人格".to_string()))
         .await;
 
     assert_eq!(
-        mgr.list_system_prompts().await,
+        capability_prompts(&mgr).await,
         vec![
             ("persona".to_string(), "默认提示词（覆盖）".to_string()),
             ("work".to_string(), "记忆".to_string()),

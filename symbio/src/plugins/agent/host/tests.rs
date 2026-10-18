@@ -12,12 +12,12 @@
 use super::plugin::AgentPlugin;
 use super::store::AgentDirStore;
 use crate::providers::DefaultToolVisitor;
-use crate::symbio_core::{vdfs_context, VdfsProvider};
 use crate::symbio_core::{
-    CapabilityMeta, CapabilityRowKind, CapabilityVisitor, Plugin, PluginDir, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginSimpleRequest, AGENT_ID, CAPABILITY_VISITOR, PATH,
-    PLUGIN_ID_AGENT, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
+    capability_prompts, CapabilityMeta, CapabilityRowKind, CapabilityVisitor, Plugin, PluginDir,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, AGENT_ID, CAPABILITY_VISITOR,
+    PATH, PLUGIN_ID_AGENT, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
 };
+use crate::symbio_core::{vdfs_context, VdfsProvider};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -159,7 +159,7 @@ async fn agent_import_traverse_and_export() {
     // ── 3. 系统提示词：子 Agent 自身的 AGENTS.md 由**子树里的 memory 实例**注入 ──
     // 本插件不再兼管智能体自身的记忆（那是 `memory` 插件，分形）：段名经作用域
     // visitor 加 `agent/<id>/` 前缀，与系统侧的 `memory` 条目并集且不撞名。
-    let segments = manager.list_system_prompts().await;
+    let segments = capability_prompts(&*manager).await;
     let names: Vec<&str> = segments.iter().map(|(n, _)| n.as_str()).collect();
     const OWN_SEGMENT: &str = "agent/com.symbio.test-fixture/memory";
     assert!(
@@ -220,7 +220,7 @@ async fn version_mismatch_agent_is_rejected_and_unbound_session_is_silent() {
     assert_eq!(caps[0].name, "agent_run");
     // 没选智能体 → 不注入任何人格 / 记忆片段（这是作用域闸门，不是优化）
     assert!(
-        manager.list_system_prompts().await.is_empty(),
+        capability_prompts(&*manager).await.is_empty(),
         "未选择智能体时不得注入任何人格 / 记忆片段"
     );
 }
@@ -301,7 +301,7 @@ async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
 
     // 1) 子 Agent 的 AGENTS.md 由子树里的 `memory` 实例注入，段名带来源前缀
     //    （`memory` 在系统树里也有一份，前缀正是两者并集且不撞名的原因）
-    let prompts = manager.list_system_prompts().await;
+    let prompts = capability_prompts(&*manager).await;
     let names: Vec<String> = prompts.iter().map(|(n, _)| n.clone()).collect();
     const OWN_SEGMENT: &str = "agent/reviewer/memory";
     assert!(

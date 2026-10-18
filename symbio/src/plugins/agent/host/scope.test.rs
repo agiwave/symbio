@@ -5,9 +5,9 @@
 use super::*;
 
 use crate::symbio_core::{
-    capability_model_active, capability_model_resolve, CapabilityRow, CapabilityRowKind,
-    ModelProvider, TurnOutput, VdfsContent, VdfsContext, VdfsError, VdfsRequest, VdfsResponse,
-    VdfsResult,
+    capability_model_active, capability_model_resolve, capability_prompts, CapabilityRow,
+    CapabilityRowKind, ModelProvider, TurnOutput, VdfsContent, VdfsContext, VdfsError, VdfsRequest,
+    VdfsResponse, VdfsResult,
 };
 use async_trait::async_trait;
 
@@ -225,7 +225,10 @@ async fn sub_agent_multi_slot_registrations_join_parent_with_prefix() {
         .put(CapabilityRow::tool(Arc::new(EchoTool("read_skill"))))
         .await;
     scoped
-        .register_system_prompt("persona", "你是评审子智能体".to_string())
+        .put(CapabilityRow::prompt(
+            "persona",
+            "你是评审子智能体".to_string(),
+        ))
         .await;
     scoped
         .register_vdfs_provider("work", Arc::new(LabeledRoot("子 Agent 工作区")))
@@ -240,7 +243,7 @@ async fn sub_agent_multi_slot_registrations_join_parent_with_prefix() {
         "子 Agent 的工具应带前缀进内层（并集，两份都生效）"
     );
     // 系统提示词：前缀在 `agent/<id>/` 段下
-    let prompts = inner.list_system_prompts().await;
+    let prompts = capability_prompts(&*inner).await;
     assert!(
         prompts
             .iter()

@@ -16,16 +16,16 @@ use tokio::sync::RwLock;
 
 /// 默认能力管理器：内存注册表实现，一次会话请求一个实例
 ///
-/// 除工具行外，同时承载三组单族注册（与工具同一 traverse 收集机制）：
-/// - `rows`：**统一行表**（AR-025 §3）——装**工具族与模型族**，按注册顺序保序。这条
-///   顺序就是送给模型的 `tools` 数组顺序：注册序来自能力收集的广播序，写成哈希表时
-///   **每起一个进程重洗一次**，而工具面是 prompt 里最大的一段
+/// 除行表外，同时承载两组单族注册（与工具同一 traverse 收集机制）：
+/// - `rows`：**统一行表**（AR-025 §3）——装**工具族 / 模型族 / 提示词族**，按注册
+///   顺序保序。这条顺序就是送给模型的 `tools` 数组顺序：注册序来自能力收集的广播序，
+///   写成哈希表时**每起一个进程重洗一次**，而工具面是 prompt 里最大的一段
 ///   （`docs/006-ref/PROMPT_SHAPE.md` 实测 18KB 对正文 1.1KB），换序等于每轮把这段
 ///   前缀作废——这也是 ADR-057 一度记下「数组顺序每次不同」的根因。
 ///   模型行（4b）一行一个已启用 provider，**当次生效者带生效位**——生效者是目录里的
-///   一员不再是纪律而是结构（见 `capability/model.rs`）。提示词 / 挂载 / 选项各族随
-///   4c–4e 陆续入这张表（每族一个 payload 变体， trait 三方法不变），目前仍住下方槽位。
-/// - `system_prompts`：系统提示词（按名称保序；**全部**送达模型，不做竞争）
+///   一员不再是纪律而是结构（见 `capability/model.rs`）；提示词行（4c）一行一段文字，
+///   表序即送达顺序（见 `capability/prompt.rs`）。挂载 / 选项各族随 4d–4e 陆续入这张表
+///   （每族一个 payload 变体，trait 三方法不变），目前仍住下方槽位。
 /// - `vdfs_providers`：VDFS 挂载点（按挂载名去重，`order` 升序对外）。
 ///   这是 **LLM 可控挂载机制**的清单（子智能体经 `SubAgentVisitor` 在此加
 ///   `agent/<id>/` 作用域前缀，预留按作用域 / 白名单裁剪 LLM 可见资源）；
@@ -34,7 +34,6 @@ use tokio::sync::RwLock;
 /// - `vdfs_root`：VDFS 根 provider（单槽；组合容器注册，访问层据此转发）
 pub struct DefaultToolVisitor {
     rows: Arc<RwLock<IndexMap<String, Arc<CapabilityRow>>>>,
-    system_prompts: Arc<RwLock<IndexMap<String, String>>>,
     vdfs_providers: Arc<RwLock<IndexMap<String, Arc<dyn VdfsProvider>>>>,
     vdfs_root: Arc<RwLock<Option<Arc<dyn VdfsProvider>>>>,
 }
@@ -43,7 +42,6 @@ impl DefaultToolVisitor {
     pub fn new() -> Self {
         Self {
             rows: Arc::new(RwLock::new(IndexMap::new())),
-            system_prompts: Arc::new(RwLock::new(IndexMap::new())),
             vdfs_providers: Arc::new(RwLock::new(IndexMap::new())),
             vdfs_root: Arc::new(RwLock::new(None)),
         }
@@ -110,19 +108,6 @@ impl CapabilityVisitor for DefaultToolVisitor {
         rows.values()
             .filter(|row| row.kind() == kind)
             .cloned()
-            .collect()
-    }
-
-    async fn register_system_prompt(&self, name: &str, prompt: String) {
-        let mut prompts = self.system_prompts.write().await;
-        prompts.insert(name.to_string(), prompt);
-    }
-
-    async fn list_system_prompts(&self) -> Vec<(String, String)> {
-        let prompts = self.system_prompts.read().await;
-        prompts
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
             .collect()
     }
 

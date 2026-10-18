@@ -75,8 +75,8 @@ pub struct PluginRegistry {
     /// `.await`。同一个锁两种上下文都能用，才不必把装配拆成两份实现。
     ///
     /// 表型是 **`IndexMap`（保插入序）而不是 `HashMap`**：`snapshot()` 的次序就是
-    /// 能力收集 `traverse` 的广播次序，而 `CapabilityVisitor::register_system_prompt`
-    /// 的「谁在前谁在后 = 注册顺序」直接消费它——写成哈希表时迭代序按进程随机化，
+    /// 能力收集 `traverse` 的广播次序，而系统提示词行的「谁在前谁在后 = 注册顺序」
+    /// 直接消费它（`put(CapabilityRow::prompt(…))`）——写成哈希表时迭代序按进程随机化，
     /// 于是**系统提示词里各记忆小节的相对顺序每起一个进程重洗一次**
     /// （`e2e/cases/t46` 的形状基线实测：同一份装配跑 20 次，13 次是另一种顺序）。
     /// 挂载序本身由装配扫描给出（见 `dir_names` 的 `names.sort()`），所以这张表
