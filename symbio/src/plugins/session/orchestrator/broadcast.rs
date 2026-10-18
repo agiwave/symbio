@@ -1,9 +1,12 @@
 //! 广播出口：把「状态收敛 + 变更投递」集中到一处。
 //!
 //! 只有一个出口，只做**投递**，不含业务判定：
-//! - `emit_session_state`：**会话运行态的唯一出口**——写运行态 → 发一条 VDFS 变更
-//!   （`<sid>` 上 `data` = 全量节点视图，与 `stat` 同源构造 → 消费端零回读）；
-//! - `broadcast_error_with_idle`：可恢复错误路径的唯一出口（收敛为「失败」结局）。
+//! - [`Convergence::emit_session_state`]：**会话运行态的唯一出口**——写运行态 → 发一条
+//!   VDFS 变更（`<sid>` 上 `data` = 全量节点视图，与 `stat` 同源构造 → 消费端零回读）；
+//! - [`Convergence::broadcast_error_with_idle`]：可恢复错误路径的唯一出口（收敛为「失败」结局）。
+//!
+//! 两者都住在 [`Convergence`]（收敛手柄）上而不是 `SessionPlugin` 上：调用方有写在
+//! 后台任务里的（`TranscriptSink` / `WorkingGuard`），它们要的是收敛能力，不是整个插件。
 //!
 //! ## 为什么运行态要经 VDFS 变更而不是事件
 //!
@@ -20,7 +23,8 @@
 //! 后端只发 VDFS 一条频道，`event_bus` 退化为「VDFS 变更的传输层」。
 //! 漏掉这条的人会重新长出一条与 VDFS 并行的第二真相——那正是本次要废除的东西。
 //!
-//! 可见性：`broadcast_error_with_idle` 被 `consume.rs` 调用，标 `pub(super)`。
+//! 可见性：两个出口都在 [`Convergence`] 上，`pub(crate)`（宿主与执行期出口都是同一插件内
+//! 的持有者）。
 
 use super::*;
 use crate::plugins::session::plugin::session_node;
@@ -69,7 +73,40 @@ impl SessionStateChange {
     }
 }
 
-impl SessionPlugin {
+/// 会话**收敛**手柄：把一个会话的运行态与终态落到它身上所需的那三样。
+///
+/// ## 为什么是手柄而不是插件（[ADR-075](../../../../../docs/010-adr/075.md "ADR-075") 前置 P2）
+///
+/// 收敛这件事有两个写在**后台任务**里的调用方：执行期出口的告警
+/// （`TranscriptSink::warn`）与崩溃兜底（`WorkingGuard::drop`）。任务比插件活得久
+/// 是卸载路径上的常态——它们要的就是「取会话摘要（存储）+ 取运行态（名册）+ 写进
+/// 这一份会话状态并发一帧」，把整个插件背进来既多于所需，又把 provider 注册、
+/// 路由与订阅表一起钉住。
+///
+/// `store` 是**同一个** `OnceCell`（不是解析好的 store）：存储的懒初始化只有一条路，
+/// 由 [`super::super::store::resolve_store`] 承载，插件与手柄共用这一个格子。
+#[derive(Clone)]
+pub(crate) struct Convergence {
+    store: Arc<tokio::sync::OnceCell<Arc<super::super::store::SessionStore>>>,
+    dir: std::path::PathBuf,
+    active: Arc<super::super::active::ActiveSessionManager>,
+}
+
+impl Convergence {
+    pub(crate) fn new(
+        store: Arc<tokio::sync::OnceCell<Arc<super::super::store::SessionStore>>>,
+        dir: std::path::PathBuf,
+        active: Arc<super::super::active::ActiveSessionManager>,
+    ) -> Self {
+        Self { store, dir, active }
+    }
+
+    pub(crate) async fn get_store(
+        &self,
+    ) -> Result<Arc<super::super::store::SessionStore>, PluginError> {
+        super::super::store::resolve_store(&self.store, &self.dir).await
+    }
+
     /// 集中收敛"业务错误 + 状态收敛"：收敛为「失败」结局。
     ///
     /// **目的**：所有可恢复错误路径都必须保证运行态收敛到"不在跑"，
@@ -78,7 +115,7 @@ impl SessionPlugin {
     ///
     /// 错误的**呈现**不是另一条通道：它随会话节点视图（`status = failed` +
     /// `attributes.error`）下发，与状态走同一个出口——这正是「一处判据」的含义。
-    pub(super) async fn broadcast_error_with_idle(
+    pub(crate) async fn broadcast_error_with_idle(
         &self,
         state: &Arc<ActiveSessionState>,
         error: impl Into<String>,
@@ -121,7 +158,7 @@ impl SessionPlugin {
     /// 调用时机（由两条收尾路径保证，都在本轮**最后一条**消息帧之后）：
     /// 正常收尾「清在途 → 复位 `is_working` → 本函数」，
     /// 中止收尾「`converge_inflight` 广播节点终态 → 本函数」。
-    pub async fn emit_session_state(
+    pub(crate) async fn emit_session_state(
         &self,
         state: &Arc<ActiveSessionState>,
         change: SessionStateChange,
@@ -151,11 +188,14 @@ impl SessionPlugin {
         // 运行态变更挂在会话叶子 `<sid>` 上，`data` = 全量节点视图（与 `stat`
         // 同一构造点 `session_node`）。会话已被删时取不到视图——退化为无载荷
         // 变更，消费端回读 `stat` 得到 `NotFound` 即自然收敛。
-        let node = match self.session_of(&state.session_id).await {
-            Ok(session) => {
-                let rt = self.session_runtime(&state.session_id).await;
-                Some(session_node(&SessionSummary::of(&session), &rt))
-            }
+        let node = match self.get_store().await {
+            Ok(store) => match store.load_session_checked(&state.session_id).await {
+                Ok(Some(session)) => {
+                    let rt = self.active.runtime_of(&state.session_id).await;
+                    Some(session_node(&SessionSummary::of(&session), &rt))
+                }
+                _ => None,
+            },
             Err(_) => None,
         };
         state.transcript.lock().await.emit_session_state(node);

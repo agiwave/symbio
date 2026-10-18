@@ -31,14 +31,17 @@ use crate::symbio_core::ExecTranscriptWriter;
 use async_trait::async_trait;
 
 /// 执行期事件出口：直连转写唯一写入点 + 会话级状态分派。
+///
+/// 告警走 [`Convergence`] 而不是整个插件：本出口活在 `run_chat_loop` 的后台任务里，
+/// 它要的就是一帧会话级告警（[ADR-075](../../../../../docs/010-adr/075.md "ADR-075") 前置 P2）。
 pub(crate) struct TranscriptSink {
-    plugin: Arc<SessionPlugin>,
+    convergence: Convergence,
     state: Arc<ActiveSessionState>,
 }
 
 impl TranscriptSink {
-    pub(crate) fn new(plugin: Arc<SessionPlugin>, state: Arc<ActiveSessionState>) -> Self {
-        Self { plugin, state }
+    pub(crate) fn new(convergence: Convergence, state: Arc<ActiveSessionState>) -> Self {
+        Self { convergence, state }
     }
 }
 
@@ -52,7 +55,7 @@ impl ExecTranscriptWriter for TranscriptSink {
     async fn warn(&self, warning: Option<String>) {
         // 会话级告警（持久化失败 / 长度截断）：直通会话节点
         // `attributes.warning`（VDFS watch 域，状态非事件），**不进转写**。
-        self.plugin
+        self.convergence
             .emit_session_state(&self.state, SessionStateChange::Warning(warning))
             .await;
     }

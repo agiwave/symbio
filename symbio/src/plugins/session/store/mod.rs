@@ -711,5 +711,31 @@ fn tmp_path_for(target: &Path) -> PathBuf {
     target.with_file_name(name)
 }
 
+/// 取（或首次建）存储单例——**slot 上的懒初始化，owner 是这个自由函数**。
+///
+/// `slot` 是共享的 `OnceCell`，`dir` 是本插件目录（存储根）。住在插件上的
+/// `SessionPlugin::get_store` 与住在收敛手柄上的那份（`orchestrator::Convergence`）
+/// 都必须走这里：初始化只有一条路，迁移只跑一次，两个持有者不会各建一个 store。
+///
+/// 一次性迁移（旧布局 → 元数据 / 消息两个文件）在首次建时跑；读路径本来就有兜底，
+/// 迁移失败不影响可用性，因此只告警不上抛。
+pub(crate) async fn resolve_store(
+    slot: &tokio::sync::OnceCell<Arc<SessionStore>>,
+    dir: &Path,
+) -> Result<Arc<SessionStore>, PluginError> {
+    if let Some(store) = slot.get() {
+        return Ok(Arc::clone(store));
+    }
+
+    let store = Arc::new(SessionStore::new(dir.to_path_buf()));
+    if let Err(e) = store.migrate_split_messages().await {
+        crate::plugin_warn!("session", "会话存储迁移失败（读路径有兜底）: {}", e);
+    }
+
+    // OnceCell::set 在多 writer 竞争时可能失败，但失败时另一线程已成功，直接拿
+    let _ = slot.set(Arc::clone(&store));
+    Ok(slot.get().cloned().unwrap_or_else(|| Arc::clone(&store)))
+}
+
 #[cfg(test)]
 mod tests;

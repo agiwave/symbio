@@ -41,7 +41,8 @@ async fn aborted_and_completed_outcomes_are_distinct() {
         VdfsChangeSubscriptions::default(),
     ));
 
-    p.emit_session_state(&state, SessionStateChange::aborted())
+    p.convergence
+        .emit_session_state(&state, SessionStateChange::aborted())
         .await;
     {
         let inner = state.inner.read().await;
@@ -49,7 +50,8 @@ async fn aborted_and_completed_outcomes_are_distinct() {
         assert!(!inner.is_working, "中止后必须收敛为空闲");
     }
 
-    p.emit_session_state(&state, SessionStateChange::completed())
+    p.convergence
+        .emit_session_state(&state, SessionStateChange::completed())
         .await;
     assert_eq!(
         state.inner.read().await.last_outcome.as_deref(),

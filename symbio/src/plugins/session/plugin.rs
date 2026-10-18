@@ -50,8 +50,14 @@ pub struct SessionPlugin {
     pub(crate) parent: Option<Weak<dyn Plugin>>,
     /// 活跃会话管理器 (V2 整合版：处理长连接与广播)
     pub(crate) active_mgr: Arc<super::active::ActiveSessionManager>,
-    /// 存储单例（全局共享，初始化一次后跨 workdir / 跨会话复用）
-    pub(crate) store: OnceCell<Arc<SessionStore>>,
+    /// 会话收敛手柄：存储格子 / 存储目录 / 活跃名册——把运行态与终态落到一个会话上
+    /// 所需的那三样。
+    ///
+    /// 存储的 `OnceCell` **住在手柄上**而不是插件上：后台任务里的两个调用方
+    /// （`TranscriptSink` / `WorkingGuard`）拿它而不是整个插件
+    /// （[ADR-075](../../../../docs/010-adr/075.md) 前置 P2），而「卸载后任务还在收尾」
+    /// 恰恰需要这份存储比插件活得更久。
+    pub(crate) convergence: Convergence,
     /// 工作目录监听管理器（目录树场景的实时数据变更通知）
     pub(crate) workdir_watches: super::workdir::WorkdirWatchManager,
     /// VDFS 实时：变更订阅表（引用计数 + 恰好一次投递）。
@@ -82,6 +88,7 @@ pub struct SessionPlugin {
     self_ref: OnceCell<std::sync::Weak<SessionPlugin>>,
 }
 
+use super::orchestrator::Convergence;
 use super::store::SessionStore;
 
 // ==================== 落库回包（§3.4 的唯一落地点） ====================
@@ -222,14 +229,19 @@ impl SessionPlugin {
         // 订阅方，VDFS 侧不必另开一套监听（实时链路在机制层合流）。
         let workdir_watches = super::workdir::WorkdirWatchManager::default();
         workdir_watches.set_vdfs_subs(change_subs.clone());
+        let config_file = PluginConfigFile::new(dir, "会话设置", config_definition());
+        // 存储根 = 本插件目录（`storage_dir` 的唯一来源，见 [`Self::storage_dir`]）
+        let store_dir = config_file.dir().dir().to_path_buf();
+        let store: Arc<tokio::sync::OnceCell<Arc<SessionStore>>> = Arc::new(OnceCell::new());
+        let active_mgr = Arc::new(super::active::ActiveSessionManager::new(
+            change_subs.as_ref().clone(),
+        ));
         Self {
             config: Arc::new(RwLock::new(config)),
-            config_file: PluginConfigFile::new(dir, "会话设置", config_definition()),
+            config_file,
             parent,
-            active_mgr: Arc::new(super::active::ActiveSessionManager::new(
-                change_subs.as_ref().clone(),
-            )),
-            store: OnceCell::new(),
+            convergence: Convergence::new(store, store_dir, active_mgr.clone()),
+            active_mgr,
             workdir_watches,
             change_subs,
             inbox_wake: tokio::sync::Notify::new(),
@@ -395,27 +407,11 @@ impl SessionPlugin {
     }
 
     /// 获取（或初始化）存储后端。全局单例，首次调用时创建。
+    ///
+    /// 实现在收敛手柄上（它与这里共用**同一个** `OnceCell`，见
+    /// [`super::store::resolve_store`]）——插件这里只是门面，不是第二个初始化路径。
     pub(crate) async fn get_store(&self) -> Result<Arc<SessionStore>, PluginError> {
-        if let Some(store) = self.store.get() {
-            return Ok(Arc::clone(store));
-        }
-
-        let store = Arc::new(SessionStore::new(self.storage_dir()));
-
-        // 一次性迁移：旧布局（消息内联）→ 元数据 / 消息两个文件，并补写清单投影。
-        // 放在 store 构造之后、首次发布之前——每个进程只跑一次；读路径本来就有
-        // 兜底，迁移失败也不影响可用性。
-        if let Err(e) = store.migrate_split_messages().await {
-            crate::plugin_warn!("session", "会话存储迁移失败（读路径有兜底）: {}", e);
-        }
-
-        // OnceCell::set 在多 writer 竞争时可能失败，但失败时另一线程已成功，直接拿
-        let _ = self.store.set(Arc::clone(&store));
-        Ok(self
-            .store
-            .get()
-            .cloned()
-            .unwrap_or_else(|| Arc::clone(&store)))
+        self.convergence.get_store().await
     }
 
     pub(crate) async fn get_or_create_session(

@@ -333,6 +333,35 @@ impl ActiveSessionManager {
         state
     }
 
+    /// 单个会话的**运行态**（节点状态的唯一来源，见 [`SessionRuntime`](crate::plugins::session::plugin::SessionRuntime)）。
+    ///
+    /// 住在名册上是因为它读的就是这张 `sessions` 表。无活跃状态（进程内从未跑过该
+    /// 会话）⇒ 空闲。读的是同一份 `ActiveSessionStateInner`，因此 `list` / `stat` /
+    /// 变更发射三处口径必然一致——不存在"列表说空闲、变更说运行中"这种分叉。
+    pub(crate) async fn runtime_of(
+        &self,
+        id: &str,
+    ) -> crate::plugins::session::plugin::SessionRuntime {
+        use crate::plugins::session::plugin::SessionRuntime;
+        let active = self.sessions.read().await;
+        let Some(st) = active.get(id) else {
+            return SessionRuntime::idle(None);
+        };
+        // `try_read` 失败（正被写者持有）时按"运行中"回答：运行态的写入都是
+        // 瞬时操作，读不到就说明此刻正在变更——宁可多报一次运行中（前端会
+        // 在下一次变更收敛），也不要凭空把正在跑的会话报成空闲（那会让停止
+        // 按钮消失、用户无法中止）。
+        let Ok(inner) = st.inner.try_read() else {
+            return SessionRuntime::working();
+        };
+        SessionRuntime::from_state(
+            inner.is_working,
+            inner.last_outcome.clone(),
+            inner.last_error.clone(),
+            inner.last_warning.clone(),
+        )
+    }
+
     // ==================== 转写发布（消息变更的唯一出口）====================
     //
     // 一切消息级变更（压缩节点 / 前端 CRUD 动作 / 用户消息定稿 / 失败与中止的

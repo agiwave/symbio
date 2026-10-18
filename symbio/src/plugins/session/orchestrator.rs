@@ -32,7 +32,7 @@ use crate::symbio_core::{
     PROVIDER_ID, RISK_LEVEL, SESSION_ID, WORKDIR,
 };
 use crate::symbio_core::{chat_node as cm, session_chat};
-use broadcast::SessionStateChange;
+pub(crate) use broadcast::{Convergence, SessionStateChange};
 use serde_json::json;
 use std::sync::atomic::Ordering;
 
@@ -212,7 +212,10 @@ impl Drop for WorkingGuard {
                 // 这也就是「崩溃后 UI 立即看到错误」的全部机制（没有第二条 Error 事件）。
                 // 与消费循环的失败支路同一个出口（`broadcast_error_with_idle`），
                 // 不在这里手写一份 `Finished { outcome: failed }`。
-                plugin.broadcast_error_with_idle(&state, crash_msg).await;
+                plugin
+                    .convergence
+                    .broadcast_error_with_idle(&state, crash_msg)
+                    .await;
             });
         }
     }

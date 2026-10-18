@@ -164,7 +164,7 @@ impl SessionPlugin {
                 // 会话内部不支持新建 / 建目录。
                 let mut n = session_node(
                     &SessionSummary::of(&session),
-                    &self.session_runtime(id).await,
+                    &self.active_mgr.runtime_of(id).await,
                 );
                 n.access = VdfsAccess::LIST;
                 Ok(VdfsResponse::Stat(n))
@@ -817,7 +817,7 @@ impl SessionPlugin {
                 let session = self.sub_session_of(id, sub).await?;
                 Ok(VdfsResponse::Stat(session_node(
                     &SessionSummary::of(&session),
-                    &self.session_runtime(sub).await,
+                    &self.active_mgr.runtime_of(sub).await,
                 )))
             }
             VdfsRequest::Read => {
@@ -1028,31 +1028,6 @@ impl SessionPlugin {
             .await
             .map_err(vdfs_from_plugin_error)?
             .ok_or_else(|| VdfsError::not_found(format!("会话不存在：{id}")))
-    }
-
-    /// 单个会话的**运行态**（节点状态的唯一来源，见 [`SessionRuntime`]）。
-    ///
-    /// 无活跃状态（进程内从未跑过该会话）⇒ 空闲。读的是同一份
-    /// `ActiveSessionStateInner`，因此 `list` / `stat` / 变更发射三处口径必然一致
-    /// ——不存在"列表说空闲、变更说运行中"这种分叉。
-    pub(crate) async fn session_runtime(&self, id: &str) -> SessionRuntime {
-        let active = self.active_mgr.sessions.read().await;
-        let Some(st) = active.get(id) else {
-            return SessionRuntime::idle(None);
-        };
-        // `try_read` 失败（正被写者持有）时按"运行中"回答：运行态的写入都是
-        // 瞬时操作，读不到就说明此刻正在变更——宁可多报一次运行中（前端会
-        // 在下一次变更收敛），也不要凭空把正在跑的会话报成空闲（那会让停止
-        // 按钮消失、用户无法中止）。
-        let Ok(inner) = st.inner.try_read() else {
-            return SessionRuntime::working();
-        };
-        SessionRuntime::from_state(
-            inner.is_working,
-            inner.last_outcome.clone(),
-            inner.last_error.clone(),
-            inner.last_warning.clone(),
-        )
     }
 
     /// 会话清单 → VDFS 节点（携带实时运行态）

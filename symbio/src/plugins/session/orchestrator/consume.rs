@@ -80,7 +80,7 @@ impl SessionPlugin {
         .await;
         // 本轮无 transcript（loop 未产生任何消息）→ last_message 为空串
         stop.fire(&[]).await;
-        self.broadcast_error_with_idle(state, err).await;
+        self.convergence.broadcast_error_with_idle(state, err).await;
     }
 
     /// Turn 任务三条**失败出口**（业务错误 / panic·取消 / 看门狗）的统一收尾。
@@ -114,7 +114,9 @@ impl SessionPlugin {
             Vec::new(),
         )
         .await;
-        self.broadcast_error_with_idle(state, error).await;
+        self.convergence
+            .broadcast_error_with_idle(state, error)
+            .await;
         guard.done = true;
         abort_guard.disarm().await;
     }
@@ -246,8 +248,10 @@ impl SessionPlugin {
         // 出口：进程内直连转写唯一写入点。执行期的每一次节点变更直接落进
         // `Transcript::apply`（内存图 → seq → 一行核心日志 → 发布），不再经过
         // 「序列化成帧 → 反序列化回来」的往返。
-        let sink =
-            ExecEventSink::direct(Arc::new(TranscriptSink::new(self.clone(), state.clone())));
+        let sink = ExecEventSink::direct(Arc::new(TranscriptSink::new(
+            self.convergence.clone(),
+            state.clone(),
+        )));
         // 中止：本 Turn 唯一的入方向原语。登记进会话状态后，`handle_abort` 直接
         // 置位（无帧、无轮询）；守卫注销时一并置位——这正是收口前「消费循环
         // drop 掉通道 ⇒ 执行方中止」那条隐式语义的显式化。
@@ -465,7 +469,9 @@ impl SessionPlugin {
         abort_guard.disarm().await;
         // 正常收尾：运行态收敛为「上一轮结束」。结局由 `exit_state` 决定——
         // 中止出口是 `aborted`（不是 `completed`），与 `handle_abort` 同一构造点。
-        self.emit_session_state(&state, exit_state).await;
+        self.convergence
+            .emit_session_state(&state, exit_state)
+            .await;
     }
 
     pub async fn handle_abort(&self, state: &Arc<ActiveSessionState>) {
@@ -546,7 +552,8 @@ impl SessionPlugin {
             "[Abort] 收口完成：{} 个在途节点定稿为 Completed",
             converged
         );
-        self.emit_session_state(state, SessionStateChange::aborted())
+        self.convergence
+            .emit_session_state(state, SessionStateChange::aborted())
             .await;
     }
 

@@ -247,7 +247,9 @@ impl SessionPlugin {
                         Ok(_) => "会话未绑定工作目录，且上下文未提供".to_string(),
                     };
                     crate::plugin_error!("session", &msg);
-                    self.broadcast_error_with_idle(&state, msg).await;
+                    self.convergence
+                        .broadcast_error_with_idle(&state, msg)
+                        .await;
                     return Ok(PluginPayload::new(&json!({
                         "status": "accepted",
                         "session_id": session_id
@@ -318,6 +320,7 @@ impl SessionPlugin {
 
         tokio::spawn(async move {
             this_spawn
+                .convergence
                 .emit_session_state(&state_spawn, SessionStateChange::Working)
                 .await;
 
@@ -374,6 +377,7 @@ impl SessionPlugin {
                         let msg = format!("追加用户消息到存储失败: {}", e);
                         crate::plugin_error!("session", "{}", &msg);
                         this_spawn
+                            .convergence
                             .broadcast_error_with_idle(&state_spawn, msg)
                             .await;
                         return;
@@ -429,6 +433,7 @@ impl SessionPlugin {
                 let msg = format!("[{}] {}", first.plugin, first.message);
                 crate::plugin_error!("session", "能力收集失败: {}", &msg);
                 this_spawn
+                    .convergence
                     .broadcast_error_with_idle(&state_spawn, msg)
                     .await;
                 return;
