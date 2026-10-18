@@ -142,7 +142,7 @@ export const GUARDS = [
   // ③ 注释没剥 ⇒ 注释里提一句 `agent_run` 就红。近邻形态（`unwrap_or("ask_user")`、
   // `.get("heartbeat")`、`match` 别名臂、`anthropic-version` 头名）都逐条断言不误报。
   'plugin-special-case-audit',
-  // `internal-model-audit`（IM-001…003）判**档位闸门的覆盖范围有没有被悄悄扩大**：
+  // `internal-model-audit`（IM-001…004）判**档位闸门的覆盖范围有没有被悄悄扩大**：
   // 闸门只有一个挂点 `LlmAdapter::generate(&FullModel, …)`，而 `ModelProvider::execute_turn`
   // 对所有插件开放——直调它就绕过闸门（[T-168](../../docs/009-task/168-模型档位闸门对内部请求无效.md "T-168-模型档位闸门对内部请求无效")）。
   //
@@ -153,7 +153,10 @@ export const GUARDS = [
   // 与 SC 族同一立场，**不用数字基线**：逐处豁免（`// internal-model-allow IM-001: 理由`），
   // 空理由单独报 IM-002（写了像登记、实际不算，不显式报出来人会以为登记过），
   // 悬空报 IM-003（代码搬走而标记还在 ⇒ 判据对这一处永久失效）。
-  // 失效形态三种，回归测试各钉一头：扫描根读空、注释没剥、测试模块没排除。
+  //
+  // IM-004 判**形状**（[ADR-080](../../docs/010-adr/080.md "ADR-080-内部请求显式脱离档位闸门") 裁决四）：登记为
+  // 内部请求的点 `tools` 必须是 `&[]`，登记为 `IM-001/gate`（闸门本体）的必须**转发**调用方的
+  // 工具集。声明腐烂（某处长出工具调用）时变红，而不是烂在文档里。失效形态五种，回归测试各钉一头。
   // 存量四处逐处登记（provider_adapter 的闸门本体 + 三个已裁决的内部请求）。
   'internal-model-audit',
 ]

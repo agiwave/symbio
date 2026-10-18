@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * internal-model-audit — 「内部请求」绕过档位闸门的审计（IM-001…IM-003）
+ * internal-model-audit — 「内部请求」绕过档位闸门的审计（IM-001…IM-004）
  *
  * ## 为什么需要它
  *
@@ -19,7 +19,8 @@
  * |---|---|---|
  * | IM-001 | 生产代码里 `\.execute_turn\(` 未带豁免标记 | 新增一个绕过点必须当场写理由；只写代码不写理由，闸门的边界就没人说得清 |
  * | IM-002 | 豁免标记**空理由**（`// internal-model-allow IM-001:` 后面没字） | 写了像登记、实际不算 ⇒ 不单独报出来的话，人以为已经登记过 |
- * | IM-003 | 豁免标记**悬空**（本行与上一行都没有对应调用点） | 代码搬走而标记还在 ⇒ 判据对这一处永久失效（`plugin-special-case-audit` 的 SC-005 同族） |
+ * | IM-003 | 豁免标记**悬空**（本行与下一行都没有对应调用点） | 代码搬走而标记还在 ⇒ 判据对这一处永久失效（`plugin-special-case-audit` 的 SC-005 同族） |
+ * | IM-004 | 登记的形状与 [ADR-080](../docs/010-adr/080.md "ADR-080-内部请求显式脱离档位闸门") 裁决一的定义不符 | ADR-080 把「内部请求」定成**形状**（tools 空切片 + `silent()` 出口 + 就地构造 system prompt + 调用方中止）；只有第一条能机械核，就核这一条——声明悄悄腐烂时门禁变红，而不是烂在文档里 |
  *
  * ## 为什么逐处豁免，不用数字基线
  *
@@ -29,13 +30,14 @@
  * ## 存量（2026-10-19，四处，逐处登记）
  *
  * 1. `symbio_core/adapters/provider_adapter.rs` —— 它就是闸门自己的方法体
- *    （`LlmAdapter::generate` 拿到 `&FullModel` 之后才调它）。
+ *    （`LlmAdapter::generate` 拿到 `&FullModel` 之后才调它）。记为 `IM-001/gate`：
+ *    它**转发调用方的工具集**，这正是 IM-004 允许（且要求）它唯一拥有的形状。
  * 2. `plugins/classify/decide.rs` —— 快速档判决（内部请求）。
  * 3. `plugins/compose/wording.rs` —— 答话措辞（内部请求）。
  * 4. `session/context/pipeline.rs::run_compression_llm` —— 压缩摘要（内部请求）。
  *
- * 后三处**不是**缺陷，是已裁决的内部请求（归 T-168 裁 A/B）；本守卫不判它们该不该在，
- * 只判「在，且有人说过为什么」。
+ * 后三处**不是**缺陷，是已裁决的内部请求（[ADR-080](../docs/010-adr/080.md "ADR-080-内部请求显式脱离档位闸门") 裁决一/二）；
+ * 本守卫不判它们该不该在，只判「在，且有人说过为什么」，外加 IM-004 那一刀**形状**。
  *
  * ## 判据自身的失效形态（回归测试钉的就是这几条）
  *
@@ -44,6 +46,10 @@
  * - **测试模块没排除** ⇒ 测试本来就按名造 provider，红线画错了地方。
  *   （两层：`*.test.rs` / `tests.rs` 文件 + 文件内的 `#[cfg(test)] mod`。）
  * - **豁免只认本行** ⇒ 「代码在上、理由在下」的写法会全红，逼出满屏多余空行。
+ * - **IM-004 取实参取了别的文件的文本** ⇒ 形状判成绿的（或判错人）。实参表必须跟着
+ *   每一处调用点自己存（存 `stem`），不能设模块级缓存——跑判据时缓存里只剩最后一个文件。
+ * - **实参按单行切** ⇒ 实参表一换行就切出半个表。故 `callArgs` 从 `(` 起做括号配平，
+ *   顶层逗号切分（回归测试 ⑭ 钉）。
  *
  * 用法：
  *   node scripts/internal-model-audit.mjs
@@ -55,7 +61,7 @@
 
 // 判据码命名空间（登记表 docs/006-ref/GATE_CODES.md 由这些行生成，判据见 gate-codes-audit.mjs）
 // @ns IM 内部请求模型调用（档位闸门的覆盖范围）
-// @codes IM-001 IM-002 IM-003
+// @codes IM-001 IM-002 IM-003 IM-004
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -69,12 +75,16 @@ const repoRoot = path.resolve(scriptDir, '..')
 /** 扫描根：整个 crate。绕过点可能出现在任何插件，也包括 core（闸门自己就在 core）。 */
 const DEFAULT_SRC = path.join('symbio', 'src')
 
-/** 豁免标记：`// internal-model-allow IM-001: 理由`。 */
-const ALLOW_RE = /\/\/\s*internal-model-allow\s+(IM-\d{3})\s*(:|$)/g
+/**
+ * 豁免标记：`// internal-model-allow IM-001: 理由`。
+ * 可带限定 `IM-001/gate`（闸门本体——它要透传调用方的工具集，见 IM-004）。
+ * 理由单独切出来判空：空理由不算登记，且要**显式报出来**（否则人会以为登记过）。
+ */
+const MARKER_RE = /\/\/\s*internal-model-allow\s+(IM-\d{3})(\/gate)?\s*:/
 /** 调用点（剥注释与测试模块之后）。 */
 const CALL_RE = /\.execute_turn\s*\(/
-
-const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/** 空工具切片的规范化形状（`&[]` / `& []` 都算）。 */
+const EMPTY_TOOLS = /^&\s*\[\s*\]$/
 
 /** 递归收集 `.rs`（测试文件排除）。 */
 function walk(dir, out = []) {
@@ -158,9 +168,9 @@ export function audit(srcRoot) {
     return { violations: [], allowed: new Map(), usedAllows: new Set(), fatal: '扫描根下没有 .rs 文件', registered: 0 }
   }
 
-  /** 调用点清单：`rel:line` → 该行原文。 */
+  /** 调用点清单：`rel:line` → {text, offset, stem}（offset = `.execute_turn(` 在 stem 里的下标）。 */
   const calls = new Map()
-  /** 扫描期看到的豁免标记（含空理由），`rel:line` → {code, reason}。 */
+  /** 扫描期看到的豁免标记（含空理由），`rel:line` → {code, gate, reason}。 */
   const seenAllows = new Map()
   const dangling = []
 
@@ -171,8 +181,7 @@ export function audit(srcRoot) {
 
     // ① 先收标记（在**原文**上收——理由就在注释里，剥了就没了）
     lines.forEach((l, i) => {
-      ALLOW_RE.lastIndex = 0
-      const m = ALLOW_RE.exec(l)
+      const m = MARKER_RE.exec(l)
       if (!m) return
       const rest = l.slice(l.indexOf(m[0]) + m[0].length).trim()
       if (!rest) {
@@ -187,14 +196,22 @@ export function audit(srcRoot) {
         })
         return
       }
-      seenAllows.set(`${rel}:${i + 1}`, { code: m[1], reason: rest })
+      seenAllows.set(`${rel}:${i + 1}`, { code: m[1], gate: m[2] === '/gate', reason: rest })
     })
 
     // ② 再找调用点（剥注释与测试模块，行号保留）
-    const stripped = blankTestModules(blankComments(raw))
-    stripped.split('\n').forEach((l, i) => {
-      if (!CALL_RE.test(l)) return
-      calls.set(`${rel}:${i + 1}`, lines[i].trim())
+    const stem = blankTestModules(blankComments(raw))
+    let offset = 0
+    stem.split('\n').forEach((l, i) => {
+      const at = l.indexOf('.execute_turn(')
+      if (at < 0) {
+        offset += l.length + 1
+        return
+      }
+      // stem 跟着每一处调用点存（不能设模块级缓存：等 IM-004 跑到时，
+      // 缓存里只剩**最后一个文件**的 stem，前面文件的实参会按别人的文本切）。
+      calls.set(`${rel}:${i + 1}`, { text: lines[i].trim(), offset: offset + at, stem })
+      offset += l.length + 1
     })
   }
 
@@ -221,21 +238,80 @@ export function audit(srcRoot) {
   }
 
   const violations = []
-  for (const [key, text] of calls) {
-    if (allowed.has(key)) continue
-    violations.push({
-      code: 'IM-001',
-      key,
-      text:
-        `绕过档位闸门的模型调用未登记：\n        ${text}\n` +
-        '        直调 `ModelProvider::execute_turn` 不经 `LlmAdapter::generate(&FullModel, …)`。' +
-        '要么改走 `ProviderLlmAdapter::for_turn`，要么在本行或上一行写 `// internal-model-allow IM-001: 理由`（标记写在调用点上方）',
-    })
+  for (const [key, site] of calls) {
+    if (!allowed.has(key)) {
+      violations.push({
+        code: 'IM-001',
+        key,
+        text:
+          `绕过档位闸门的模型调用未登记：\n        ${site.text}\n` +
+          '        直调 `ModelProvider::execute_turn` 不经 `LlmAdapter::generate(&FullModel, …)`。' +
+          '要么改走 `ProviderLlmAdapter::for_turn`，要么在上一行写 `// internal-model-allow IM-001: 理由`（标记写在调用点上方）',
+      })
+      continue
+    }
+    // ④ IM-004 形状判据：ADR-080 裁决一定义的「内部请求」四条里，`tools` 空切片
+    //    是唯一能机械核的一条（其余三条要跨函数读）。内部请求点必须是 `&[]`；
+    //    闸门本体（`/gate`）必须**转发**调用方的工具集，而不是自己造一个空的。
+    const args = callArgs(site.stem, site.offset)
+    const tools = args[2] ?? ''
+    const shapeOk = allowed.get(key).gate ? !EMPTY_TOOLS.test(tools) : EMPTY_TOOLS.test(tools)
+    if (!shapeOk) {
+      violations.push({
+        code: 'IM-004',
+        key,
+        text:
+          `登记的形状与 ADR-080 裁决一不符（tools 实参 = ${tokens(tools)}）：\n        ${site.text}\n` +
+          (allowed.get(key).gate
+            ? '        闸门本体要**透传**调用方的工具集；自己造一个空的说明它不再是闸门'
+            : '        内部请求必须把 tools 传空切片——不空就不是内部请求，得重新裁'),
+      })
+    }
   }
   violations.push(...dangling)
 
   return { violations, allowed, usedAllows, fatal: null, registered: calls.size }
 }
+
+/**
+ * 从 `.execute_turn(` 起取出**完整实参表**（括号可跨行），按顶层逗号切分。
+ *
+ * 为什么必须配平而不是切一行：**豁免标记自己就可能落在方法链中间**（`provider_adapter.rs`
+ * 那处就是 `self.provider` 与 `.execute_turn(` 之间夹一条注释），而实参表一旦换行写就跨出
+ * 调用点所在行——按单行切会切出半个表，形状判成「空」或判成别人的实参。
+ */
+function callArgs(stem, offset) {
+  const open = stem.indexOf('(', offset)
+  if (open < 0) return []
+  let depth = 0
+  let i = open
+  for (; i < stem.length; i++) {
+    const c = stem[i]
+    if (c === '(' || c === '[' || c === '{') depth++
+    else if (c === ')' || c === ']' || c === '}') {
+      depth--
+      if (depth === 0) break
+    }
+  }
+  const inner = stem.slice(open + 1, i)
+  const args = []
+  let buf = ''
+  let d = 0
+  for (const c of inner) {
+    if (c === '(' || c === '[' || c === '{') d++
+    if (c === ')' || c === ']' || c === '}') d--
+    if (c === ',' && d === 0) {
+      args.push(buf.trim())
+      buf = ''
+      continue
+    }
+    buf += c
+  }
+  if (buf.trim()) args.push(buf.trim())
+  return args
+}
+
+const tokens = (s) => s.replace(/\s+/g, ' ')
 
 /** `rel:line` ⇒ `rel:(line+1)`（下一行——标记写在代码上方）。 */
 function nextKeyLine(key) {
@@ -264,7 +340,7 @@ if (violations.length > 0) {
 }
 console.log(
   green(
-    `✓ 内部请求模型调用审计：直调 execute_turn 的 ${registered} 处全部登记过理由` +
+    `✓ 内部请求模型调用审计：直调 execute_turn 的 ${registered} 处全部登记过理由、形状核过` +
       `（口径：生产代码，测试文件与 #[cfg(test)] 模块不判）`,
   ),
 )

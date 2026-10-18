@@ -491,7 +491,7 @@ impl LlmAdapter for ProviderLlmAdapter {
         );
         let output = self
             .provider
-            // internal-model-allow IM-001: 这里是闸门自己的方法体——`LlmAdapter::generate` 拿到 `&FullModel` 之后才走到这一步，它要守的正是这一处
+            // internal-model-allow IM-001/gate: 这里是闸门自己的方法体——`LlmAdapter::generate` 拿到 `&FullModel` 之后才走到这一步，它要守的正是这一处；`tools` 是**转发**调用方的形参，不是这里造的空切片（IM-004 的形状因此与内部请求相反）
             .execute_turn(self.system_prompt(), &wire, tools, &llm_short_id(), &env)
             .await
             .map_err(|e| match e {

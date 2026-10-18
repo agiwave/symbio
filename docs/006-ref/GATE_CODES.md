@@ -29,7 +29,7 @@ lists: [gate-codes=owner]
 | **E** | 插件入口与门面 | `scripts/plugin-entry-audit.mjs` | E-001–009、E-011–012 | `E-013` |
 | **GC** | 判据码命名空间本身 | `scripts/gate-codes-audit.mjs` | GC-001–006 | `GC-007` |
 | **GW** | 门禁接线（测试文件与门禁名单的对账） | `scripts/gate-wiring-audit.mjs` | GW-001–005 | `GW-006` |
-| **IM** | 内部请求模型调用（档位闸门的覆盖范围） | `scripts/internal-model-audit.mjs` | IM-001–003 | `IM-004` |
+| **IM** | 内部请求模型调用（档位闸门的覆盖范围） | `scripts/internal-model-audit.mjs` | IM-001–004 | `IM-005` |
 | **LWF** | 列表写入口事实 | `scripts/list-write-fact-audit.mjs` | LWF-001–002 | `LWF-003` |
 | **M** | 机制表 | `scripts/mechanism-audit.mjs` | M-001–008 | `M-009` |
 | **N** | core 命名 | `scripts/core-naming-audit.mjs` | N-001–005 | `N-006` |
@@ -94,6 +94,7 @@ lists: [gate-codes=owner]
 | **IM-001** | `scripts/internal-model-audit.mjs` |
 | **IM-002** | `scripts/internal-model-audit.mjs` |
 | **IM-003** | `scripts/internal-model-audit.mjs` |
+| **IM-004** | `scripts/internal-model-audit.mjs` |
 | **LWF-001** | `scripts/list-write-fact-audit.mjs` |
 | **LWF-002** | `scripts/list-write-fact-audit.mjs` |
 | **M-001** | `scripts/mechanism-audit.mjs` |
