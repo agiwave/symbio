@@ -16,7 +16,7 @@
 //! 3. **零相关**：不 import、不持有任何兄弟插件（`plugin-entry-audit` 的 E-007 / E-009）。
 //!
 //! 「无工具」是**结构保证**：本插件不注册任何 `Capability`，而模型能调用的工具来自
-//! `traverse(TRAVERSE_AVAILABLE_TOOLS)` → `CapabilityVisitor::register`——因此工具集里
+//! `traverse(TRAVERSE_AVAILABLE_TOOLS)` → 能力行经 `Registry::put`——因此工具集里
 //! **在结构上不可能**出现本插件。不需要一条 CI 断言来补偿。
 //!
 //! ## 两条产线（S2）
@@ -169,10 +169,10 @@ impl Plugin for ClassifyPlugin {
     ///
     /// ⚠️ 「不注册 `Capability`」与「不调用模型」是**两件事**：本插件确实会发起一次
     /// 静默的模型请求（快速档分类），但那次请求不向模型暴露任何工具，本插件也从不
-    /// 出现在模型的工具清单里——工具集来自 `CapabilityVisitor::register`，而这里
+    /// 出现在模型的工具清单里——工具集来自 `Registry::put` 的能力行，而这里
     /// 一个也没注册。
     ///
-    /// 它参与的是**另一条通道**（`ConfigurableVisitor`）：声明「本插件有一份配置
+    /// 它参与的是**另一条通道**（`CONFIGURABLE_VISITOR`）：声明「本插件有一份配置
     /// 文档」，设置页据此列出并指路 `<根>/classify/PLUGIN.yml`。缺了它插件照常工作，
     /// 只是那份配置在界面上改不到。
     async fn traverse(

@@ -162,7 +162,7 @@ async fn label_of(root: &Arc<dyn VdfsProvider>) -> String {
 /// （子树的根只认得子树里的插件）。
 #[tokio::test]
 async fn sub_agent_root_registration_is_discarded() {
-    let inner: Arc<dyn CapabilityVisitor> = Arc::new(crate::providers::DefaultToolVisitor::new());
+    let inner: Arc<dyn Registry> = Arc::new(crate::providers::DefaultToolVisitor::new());
     inner
         .put(CapabilityRow::mount_root(Arc::new(LabeledRoot("系统根"))))
         .await;
@@ -191,7 +191,7 @@ async fn sub_agent_root_registration_is_discarded() {
 /// 插件按 id 就能取到子 Agent 塞进来的实例（`scope.rs` 的文档明写这一条）。
 #[tokio::test]
 async fn sub_agent_model_registration_is_discarded() {
-    let inner: Arc<dyn CapabilityVisitor> = Arc::new(crate::providers::DefaultToolVisitor::new());
+    let inner: Arc<dyn Registry> = Arc::new(crate::providers::DefaultToolVisitor::new());
     inner.put(CapabilityRow::model(provider("sys"), true)).await;
 
     let scoped = SubAgentVisitor::new(Arc::clone(&inner), "reviewer");
@@ -222,7 +222,7 @@ async fn sub_agent_model_registration_is_discarded() {
 /// 与上面两条是一对：缺了它，「代理什么都不转发」也能让那两条通过。
 #[tokio::test]
 async fn sub_agent_multi_slot_registrations_join_parent_with_prefix() {
-    let inner: Arc<dyn CapabilityVisitor> = Arc::new(crate::providers::DefaultToolVisitor::new());
+    let inner: Arc<dyn Registry> = Arc::new(crate::providers::DefaultToolVisitor::new());
     let scoped = SubAgentVisitor::new(Arc::clone(&inner), "reviewer");
 
     scoped
@@ -274,7 +274,7 @@ async fn sub_agent_multi_slot_registrations_join_parent_with_prefix() {
 /// 上一条的写侧丢弃就白做了：**劫持改从读侧发生**。
 #[tokio::test]
 async fn read_side_forwards_to_inner_unchanged() {
-    let inner: Arc<dyn CapabilityVisitor> = Arc::new(crate::providers::DefaultToolVisitor::new());
+    let inner: Arc<dyn Registry> = Arc::new(crate::providers::DefaultToolVisitor::new());
     inner.put(CapabilityRow::model(provider("sys"), true)).await;
     inner
         .put(CapabilityRow::mount_root(Arc::new(LabeledRoot("系统根"))))

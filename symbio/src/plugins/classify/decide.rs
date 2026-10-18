@@ -27,9 +27,9 @@ use std::sync::Arc;
 use crate::symbio_core::chat_node::{ChatNode, MessageContent, NodeRole};
 use crate::symbio_core::Verdict;
 use crate::symbio_core::{
-    capability_model_resolve, llm_short_id, CapabilityVisitor, ExecAbortSignal, ExecEnv,
-    ExecEventSink, ModelProvider, PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_VISITOR,
-    REASON_CLARIFY, REASON_FROM_CONTEXT, REASON_NEEDS_WORK, REASON_REFUSE,
+    capability_model_resolve, llm_short_id, ExecAbortSignal, ExecEnv, ExecEventSink, ModelProvider,
+    PluginInvokeRequest, PluginInvokeRequestExt, Registry, CAPABILITY_VISITOR, REASON_CLARIFY,
+    REASON_FROM_CONTEXT, REASON_NEEDS_WORK, REASON_REFUSE,
 };
 
 use super::config::ClassifyConfig;
@@ -122,7 +122,7 @@ pub(crate) async fn decide(
     // 模型服务从**调用方带来的能力访问器**里取。优先本插件配置的那个 provider id
     // （model 插件在 traverse 广播里把**全部已启用**的 provider 一并交来），
     // 取不到就落回当次生效的那个——降级而不失效。
-    let visitor: Arc<dyn CapabilityVisitor> = ctx.get(CAPABILITY_VISITOR)?;
+    let visitor: Arc<dyn Registry> = ctx.get(CAPABILITY_VISITOR)?;
     let provider: Arc<dyn ModelProvider> =
         capability_model_resolve(&*visitor, config.model_id()).await?;
 

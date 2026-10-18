@@ -14,7 +14,7 @@ use crate::plugins::session::test_dir;
 use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::capability_mount;
 use crate::symbio_core::{
-    capability_prompts, CapabilityVisitor, CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS,
+    capability_prompts, Registry, CAPABILITY_VISITOR, PATH, TRAVERSE_AVAILABLE_TOOLS,
     VDFS_PARENT_ADDR,
 };
 
@@ -215,7 +215,7 @@ fn collect_ctx(
     let visitor = Arc::new(DefaultToolVisitor::new());
     ctx.set(
         CAPABILITY_VISITOR,
-        Arc::clone(&visitor) as Arc<dyn CapabilityVisitor>,
+        Arc::clone(&visitor) as Arc<dyn Registry>,
     );
     (ctx, visitor)
 }

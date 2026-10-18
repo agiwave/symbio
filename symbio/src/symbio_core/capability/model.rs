@@ -1,4 +1,4 @@
-//! 模型族的**读写协议**——表（`CapabilityVisitor` 的 `put` / `get` / `list`）之上的
+//! 模型族的**读写协议**——表（`Registry` 的 `put` / `get` / `list`）之上的
 //! 模型专用词法（AR-025 §5 步 4b）。
 //!
 //! ## 写侧：只剩 `put`，不变量改由**结构**承载
@@ -11,7 +11,7 @@
 //! `put` 即可（`plugins/model/plugin.rs` 的 traverse 分支）。
 //!
 //! 唯一生效由表的写入实现维持：带生效位的行入表时先把同族旧生效行降位
-//! （见 [`CapabilityVisitor::put`] 文档与 `CapabilityRow::demote`）。
+//! （见 [`Registry::put`] 文档与 `CapabilityRow::demote`）。
 //!
 //! ## 读侧：两个问题，两条口径
 //!
@@ -26,7 +26,7 @@
 //! 判决退回 `Escalate`、措辞退回模板虽然都「还能工作」，但那是功能没了。故降级方向
 //! **只有这一处定义**：判决与措辞各写一遍，就会有一天两处不一致。
 
-use super::{CapabilityRowKind, CapabilityVisitor};
+use super::{CapabilityRowKind, Registry};
 use crate::symbio_core::ModelProvider;
 use std::sync::Arc;
 
@@ -37,9 +37,7 @@ use std::sync::Arc;
 /// 一个生效行都没有（没有可用 provider / 生效者未进目录）⇒ `None`：调用方各走自己的
 /// 降级路径（会话报「未找到可用的 Model Provider」、两个插件退回模板），**不**替它挑
 /// 一个别的——静默换模型比没有模型更难查。
-pub async fn capability_model_active(
-    visitor: &dyn CapabilityVisitor,
-) -> Option<Arc<dyn ModelProvider>> {
+pub async fn capability_model_active(visitor: &dyn Registry) -> Option<Arc<dyn ModelProvider>> {
     visitor
         .list(CapabilityRowKind::Model)
         .await
@@ -53,12 +51,12 @@ pub async fn capability_model_active(
 /// 这是「插件选自己的模型」的唯一形态（`classify` 的判决模型 / `compose` 的措辞模型）。
 /// 严格查找 + 单点降级，两条理由见模块文档。
 pub async fn capability_model_resolve(
-    visitor: &dyn CapabilityVisitor,
+    visitor: &dyn Registry,
     preferred: Option<&str>,
 ) -> Option<Arc<dyn ModelProvider>> {
     if let Some(id) = preferred {
         // 严格查找：名字撞上工具行时 `get` 会取回那一行，而它没有 provider ⇒ 同样落空
-        // （表键是全表唯一的名字空间，跨族同名 = 覆盖，见 `CapabilityVisitor::put`）
+        // （表键是全表唯一的名字空间，跨族同名 = 覆盖，见 `Registry::put`）
         if let Some(provider) = visitor
             .get(id)
             .await

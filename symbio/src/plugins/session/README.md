@@ -8,7 +8,7 @@ created: 2026-07-20
 
 # Unified Session & Memory Orchestration Architecture (会话与记忆系统化管理架构说明书)
 
-Session 插件是 Symbio 架构中的**会话持久化与编排中心**，也是**唯一的会话编排入口**：加载历史、**解析**系统提示词（收集各插件经 `register_system_prompt` 注册的段，本层不自己拼）、经 CapabilityVisitor 汇集工具、直接获取 model 插件注册的唯一生效 `ModelProvider`（core 纯 trait，`Arc<dyn ModelProvider>` 单一契约；协议适配细节内化于 model 插件）并在进程内驱动会话循环；Model 插件是**无状态 LLM 网关**（按上下文注册 Provider + 协议适配），对 session 零依赖。
+Session 插件是 Symbio 架构中的**会话持久化与编排中心**，也是**唯一的会话编排入口**：加载历史、**解析**系统提示词（收集各插件经提示词段行注册的段，本层不自己拼）、经 `Registry`（收集口，put/get/list 三方法）汇集工具、直接获取 model 插件注册的唯一生效 `ModelProvider`（core 纯 trait，`Arc<dyn ModelProvider>` 单一契约；协议适配细节内化于 model 插件）并在进程内驱动会话循环；Model 插件是**无状态 LLM 网关**（按上下文注册 Provider + 协议适配），对 session 零依赖。
 
 本文档将系统性地阐述 Symbio 的会话保存、内容压缩、工具迭代限制以及发送过滤策略，说明其具体规则、参数配置及 Rust 底层实现策略。
 
@@ -391,7 +391,7 @@ S5 的**事件记忆**是另一层：`v2_memory.rs` 把每轮用户发言编码�
 
 ### 系统提示词：只有一个注册通道
 
-`CapabilityVisitor::register_system_prompt` 是**唯一**注册入口：注册的每一段都按注册顺序送达模型，**不存在「按优先级链取一个」的竞争**。`resolve_system_prompt` 的结果 = **请求显式段（若有）** + **全部注册段**，全空时才用兜底常量。
+`Registry::put`（提示词段行 `CapabilityRow::prompt`）是**唯一**注册入口：注册的每一段都按注册顺序送达模型，**不存在「按优先级链取一个」的竞争**。`resolve_system_prompt` 的结果 = **请求显式段（若有）** + **全部注册段**，全空时才用兜底常量。
 
 「取一个」这个需求本身站不住：人格的**选择**发生在**注册期**（model 插件已按 `PROVIDER_ID` 解析出唯一生效 provider 后才注册），消费侧再按 key 选一次是空动作。
 

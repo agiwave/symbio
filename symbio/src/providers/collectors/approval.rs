@@ -12,7 +12,8 @@
 //!
 //! ## 两处入口，判定一份
 //!
-//! 分发有两条真实路径：`CapabilityVisitor::invoke`（注册表命中）与 `Plugin::route`
+//! 分发有两条真实路径：按名执行（`Registry::get` + `capability_invoke`，注册表命中）与
+//! `Plugin::route`
 //! 兜底（未命中）。前者经过本模块的 [`ApprovalGate`] 装饰器，后者经
 //! [`approval_gate`] 这个自由函数——**判定只有 [`approval_gate`] 一份**，
 //! 装饰器只是它的注册面投影。
@@ -111,7 +112,7 @@ fn confirm_prompt_payload(
     })
 }
 
-/// 注册面投影：`DefaultToolVisitor::register` 用它把每条能力裹一层闸门。
+/// 注册面投影：`DefaultToolVisitor::put` 用它把每条能力裹一层闸门。
 ///
 /// `meta` / `name` / `risk_for` 原样透传——装饰器**不重判风险**，否则「谁的风险」
 /// 就成了包装层的事：闸门拿到 wrapper 的默认档，真实档（shell 的按命令分级）就丢了。

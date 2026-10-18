@@ -213,7 +213,7 @@ impl AgentPlugin {
     /// 而不是裸磁盘目录。
     ///
     /// 取回方式走 **core 查询接口 `Plugin::get_vfs_provider`**，不依赖 composite 插件的
-    /// 具体类型、也不走 `CapabilityVisitor`（`CapabilityVisitor` 是 LLM 链路的能力收集
+    /// 具体类型、也不走 `Registry`（`Registry` 是 LLM 链路的能力收集
     /// 通道，与系统 VDFS 发现无关）。`agent` 与 `composite` 之间因此没有类型耦合。
     ///
     /// 返回 `Err` = 该 `<id>` 不在挂载根清单里（目录缺失 / manifest 缺失 / 未过 §10
@@ -242,7 +242,7 @@ impl AgentPlugin {
             .sub_agent(id, &host)
             .await
             .ok_or_else(|| VdfsError::not_found(format!("未找到{LABEL}「{id}」")))?;
-        // 系统链路：直接经 core 查询接口取子 composite 暴露的 VDFS provider（无 CapabilityVisitor）。
+        // 系统链路：直接经 core 查询接口取子 composite 暴露的 VDFS provider（无 Registry）。
         let provider = tree
             .get_vfs_provider()
             .ok_or_else(|| VdfsError::internal(format!("子智能体「{id}」未暴露 VDFS 根")))?;

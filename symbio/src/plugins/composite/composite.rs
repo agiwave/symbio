@@ -177,7 +177,7 @@ impl Plugin for Composite {
         // 装配安排：容器把自己的 vdfs 视图登记进访问层的单槽位（LLM 链路用）。
         // 这不是「容器是根」——composite 只是恰好包含若干子目录的 provider，
         // 能否出现在那里取决于装配，不是本模块的属性。系统链路取同一个根走的是
-        // `Plugin::get_vfs_provider`（见下），与 `CapabilityVisitor` 无关。
+        // `Plugin::get_vfs_provider`（见下），与 `Registry` 无关。
         if ctx.get(PATH).as_deref() == Some(TRAVERSE_AVAILABLE_TOOLS) {
             if let Some(visitor) = ctx.get(CAPABILITY_VISITOR) {
                 let root: Arc<dyn VdfsProvider> = self.vdfs.clone();

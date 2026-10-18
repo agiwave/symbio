@@ -13,9 +13,9 @@ use super::plugin::AgentPlugin;
 use super::store::AgentDirStore;
 use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{
-    capability_prompts, CapabilityMeta, CapabilityRowKind, CapabilityVisitor, Plugin, PluginDir,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest, AGENT_ID, CAPABILITY_VISITOR,
-    PATH, PLUGIN_ID_AGENT, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
+    capability_prompts, CapabilityMeta, CapabilityRowKind, Plugin, PluginDir, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginSimpleRequest, Registry, AGENT_ID, CAPABILITY_VISITOR, PATH,
+    PLUGIN_ID_AGENT, TRAVERSE_AVAILABLE_TOOLS, VDFS_PARENT_ADDR, WORKDIR,
 };
 use crate::symbio_core::{vdfs_context, VdfsProvider};
 use std::path::Path;
@@ -103,7 +103,7 @@ fn ctx_with(
     let manager: Arc<DefaultToolVisitor> = Arc::new(DefaultToolVisitor::new());
     ctx.set(
         CAPABILITY_VISITOR,
-        Arc::clone(&manager) as Arc<dyn crate::symbio_core::CapabilityVisitor>,
+        Arc::clone(&manager) as Arc<dyn crate::symbio_core::Registry>,
     );
     (ctx, manager)
 }
@@ -294,7 +294,7 @@ async fn v2_sub_agent_tree_is_assembled_and_prefixed() {
     let manager: Arc<DefaultToolVisitor> = Arc::new(DefaultToolVisitor::new());
     ctx.set(
         CAPABILITY_VISITOR,
-        Arc::clone(&manager) as Arc<dyn CapabilityVisitor>,
+        Arc::clone(&manager) as Arc<dyn Registry>,
     );
 
     plugin.traverse(String::new(), ctx).await.unwrap();

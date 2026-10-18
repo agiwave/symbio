@@ -48,9 +48,9 @@ use crate::plugins::agent::host::manifest;
 use crate::plugins::agent::host::store::AgentDirStore;
 use crate::symbio_core::{
     capability_report_error, creator_create_object, descend_addr, plugin_dir_from_ctx, Capability,
-    CapabilityRow, CapabilityVisitor, Plugin, PluginDir, PluginError, PluginInvokeRequest,
-    PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest,
-    AGENT_ID, ASSEMBLY_SUB_AGENT_PLUGINS, CAPABILITY_VISITOR, PATH, PLUGIN_DIR, PLUGIN_ID_AGENT,
+    CapabilityRow, Plugin, PluginDir, PluginError, PluginInvokeRequest, PluginInvokeRequestExt,
+    PluginInvokeResponse, PluginMeta, PluginPayload, PluginSimpleRequest, Registry, AGENT_ID,
+    ASSEMBLY_SUB_AGENT_PLUGINS, CAPABILITY_VISITOR, PATH, PLUGIN_DIR, PLUGIN_ID_AGENT,
     PLUGIN_ID_COMPOSITE, REQUIRED_PLUGINS, TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
     VDFS_PARENT_ADDR, WORKDIR,
 };
@@ -200,7 +200,7 @@ impl AgentPlugin {
         tree: &Arc<dyn Plugin>,
         id: &str,
         ctx: &Arc<dyn PluginInvokeRequest>,
-        visitor: &Arc<dyn CapabilityVisitor>,
+        visitor: &Arc<dyn Registry>,
     ) {
         let sub = ctx.fork();
         sub.set(PATH, TRAVERSE_AVAILABLE_TOOLS.to_string());
@@ -212,7 +212,7 @@ impl AgentPlugin {
             VDFS_PARENT_ADDR,
             descend_addr(&ctx.get(VDFS_PARENT_ADDR).unwrap_or_default(), id),
         );
-        let scoped: Arc<dyn CapabilityVisitor> =
+        let scoped: Arc<dyn Registry> =
             Arc::new(super::scope::SubAgentVisitor::new(Arc::clone(visitor), id));
         sub.set(CAPABILITY_VISITOR, scoped.clone());
 

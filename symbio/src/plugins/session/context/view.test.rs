@@ -53,7 +53,7 @@ fn view_result(parent: &str, text: &str) -> ChatNode {
     }
 }
 
-/// 构建短工具名 → 保留策略映射（模拟 chat_loop 运行时从 CapabilityVisitor 动态解析）
+/// 构建短工具名 → 保留策略映射（模拟 chat_loop 运行时从 Registry 动态解析）
 fn view_retention(
     entries: &[(&str, crate::symbio_core::CapabilityToolContextRetention)],
 ) -> std::collections::HashMap<String, crate::symbio_core::CapabilityToolContextRetention> {

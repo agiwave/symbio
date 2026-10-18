@@ -425,7 +425,7 @@ pub trait Plugin: Send + Sync + 'static {
 
     /// 取本插件直接暴露的虚拟文件系统 provider（**系统链路 / 文件系统视角**）。
     ///
-    /// 与 `CapabilityVisitor`（LLM 链路的能力收集，含 `capability_vdfs_root`）**无关**：
+    /// 与 `Registry`（LLM 链路的能力收集，含 `capability_vdfs_root`）**无关**：
     /// 这里是「这个插件自己暴露的 VDFS 视图」的直接查询接口——容器经它把子插件的
     /// provider 聚合进组合视图，子智能体经它穿过 `agent/<id>` 挂载点。两条链路拿到的
     /// 是同一个 provider 实例，只是发现通道不同。

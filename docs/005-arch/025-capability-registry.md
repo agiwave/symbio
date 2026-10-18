@@ -9,7 +9,7 @@ deps: [PL-014-单环一表收敛, AR-016-turn-runner-steps]
 
 # 能力统一注册表——CapabilityVisitor 六族 → 一个 Registry（3 方法）
 
-状态：**施工中**——[步骤 4](../009-task/165-控制面收敛.md "T-165-控制面收敛") 的施工图，4a–4e 已落地（各步「落地形态」见 §5），余 4f（trait 纯重命名）。
+状态：**已落地**——[步骤 4](../009-task/165-控制面收敛.md "T-165-控制面收敛") 的施工图整体实施完毕（4a–4f，各步「落地形态」见 §5；4f = 收集口 trait 纯重命名）。
 回答开工前必须先答的三个问题，并把 PL-014 §4 里两处与现网契约不符的签名修正掉。
 
 范围：`symbio_core` 的收集口（`CapabilityVisitor` / `OptionVisitor` / `ConfigurableVisitor`）+
@@ -21,7 +21,7 @@ deps: [PL-014-单环一表收敛, AR-016-turn-runner-steps]
 | 判据 | 表达 | 现有棘轮 |
 |---|---|---|
 | core 形状只降不升 | `pub trait` 18 · `fn` 成员 56 · 默认体 18（4e 后实测） | `core-shape-audit.mjs`（CS-001） |
-| 收集口收敛 | `CapabilityVisitor` 16 方法 + `OptionVisitor` 2 + `ConfigurableVisitor` 2 ⇒ **1 个 trait，3 个方法**（4e 达成） | 本文档 §2 的账 |
+| 收集口收敛 | `CapabilityVisitor` 16 方法 + `OptionVisitor` 2 + `ConfigurableVisitor` 2 ⇒ **1 个 trait，3 个方法**（4e 收敛、4f 名实相符） | 本文档 §2 的账 |
 | session 不增 | 每步 `session` 非测试行数 ≤ 搬入前 | `find` + `wc -l` |
 | 行为不变 | 工具清单逐条比对 + schema 导出比对 + e2e 77 条 | 现有 e2e |
 | 零新增机制键 | --- | `verify/mechanism_growth` |
@@ -271,6 +271,24 @@ PL-014 §4 写的是 `Fn(Capsule, &Store) -> BoxFuture<Result<Vec<Fact>, ExecErr
   可配置保注册序且同名覆盖 / 空表两族皆空；`session` 非测试行数 32,505 → **32,508**
   （+3：`collect_options` 签名换型带来的注释与 use 行重排，无新逻辑——量到就记账，§6 口径）。
 
+### 4f 落地形态（2026-10-18）
+
+- **纯重命名**：`CapabilityVisitor` → `Registry`（54 个 `.rs`、134 处，签名与语义零改动）——
+  §1 预告的「最后一步的纯重命名，单独成提交」由此兑现；名字追上事实，收集口只剩
+  **1 个 trait 3 方法**这件事第一次可从**名字**读出来。core 三格 18/56/18 不变（CS-001 数形不数名）。
+- **改的是收集口名，不改通道名**：`CAPABILITY_VISITOR` / `OPTION_VISITOR` / `CONFIGURABLE_VISITOR`
+  三个键与键类型 `…VisitorKey` 保留——它们命名的是**广播通道**（与 `TRAVERSE_AVAILABLE_*`
+  端点成对），不是收集口 trait；实现名 `DefaultToolVisitor` 同此理由保留（属 collectors 层，
+  归 PL-014 步骤 6 清算）。这是 4f 「纯度」的边界。
+- **裸名进表**：`Registry` 无域前缀，登记进 core README §1.2 的 `capability` 域类型格
+  （N-001 按表核对，注册即入册，不是豁免）。
+- **顺带修的文档腐点**（「现行文档即登记」，发现即处理）：004-工程落地 `list_capability()` ×2、
+  007-对话面拆分 `CapabilityVisitor::register`、015-core-loop 引名 `resolve`（实为
+  `capability_resolve`）、013-vdfs / 020-session-options / 019-perf / 插件 README 的现行词汇
+  改指 `Registry` + 行词汇；AR-025 / T-165 / PL-014 / ADR 中的历史名按台账性质保留。
+- **记账**：`session` 非测试行数 32,508 → **32,505**（−3：`Registry` 更短使部分 `use` 块被
+  rustfmt 并回单行，无逻辑删减——量到就记账，§6 口径）。
+
 每一步的守门人：**同一份工具清单以两种口径导出逐条相等**（走表的 `list(Tool)` 与
 `CapabilityMeta` 全量转储），加 e2e 77 条全过。任何一格漂移即停。
 
@@ -311,8 +329,9 @@ PL-014 §4 写的是 `Fn(Capsule, &Store) -> BoxFuture<Result<Vec<Fact>, ExecErr
 ## §9 出口条件
 
 1. `symbio_core` 只剩 1 个收集口 trait，3 个方法；`pub trait` ≤ 18，`fn` 成员 ≤ 56
-   （4e 时按实测修订：`ConfigurableVisitor` 是 2 方法不是 3，且三方法要计入「加」）。
+   （4e 时按实测修订：`ConfigurableVisitor` 是 2 方法不是 3，且三方法要计入「加」）。**已达成**（4e/4f，实测 18/56/18）。
 2. `providers/collectors/` 三个 visitor 收敛为一个 registry 实现；
-   `SubAgentVisitor` 改为对同一张表的作用域投影。
-3. 工具清单两种口径逐条相等，e2e 77 条全过，core 三格棘轮不升。
+   `SubAgentVisitor` 改为对同一张表的作用域投影。**已达成**（4e 单实现；投影在 `put` 上按族判，4b–4d）。
+3. 工具清单两种口径逐条相等，e2e 77 条全过，core 三格棘轮不升。**已达成**（4f 批全量门禁 109/109，含 e2e）。
 4. `session/loop_registry.rs` 从策略表长成策略 + 能力同表，行数不含工具实现体。
+   ——本条属 PL-014 步骤 5/6 的账面，不是步骤 4 的收口前置。

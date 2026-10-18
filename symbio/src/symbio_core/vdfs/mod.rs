@@ -23,7 +23,7 @@
 //!
 //! 虚拟根之下没有 root 级 provider 的概念——只有一个**恰好包含若干子目录的
 //! provider**（当前是 composite：它的目录内容 = 实现了该接口的子插件名）。容器
-//! 在 `traverse` 里经 `CapabilityVisitor::put` 的根行（`CapabilityRow::mount_root`）
+//! 在 `traverse` 里经 `Registry::put` 的根行（`CapabilityRow::mount_root`）
 //! 把自己登记进能力表的根位；vdfs 插件只取这个登记项再转发（`capability_vdfs_root`），因此**拓扑知识
 //! 不在访问层**。composite 可被别的目录包含、子插件也可以是另一个 composite
 //! （嵌套时同样只是普通 provider）——登记进单槽只是装配安排，不是 composite 的

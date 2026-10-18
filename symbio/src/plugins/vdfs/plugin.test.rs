@@ -51,7 +51,7 @@ async fn list_unknown_dir_errors() {
 /// 工具集：每个 VDFS 操作恰好一个工具（无 `vdfs_move`——移动已整条下线）
 #[test]
 fn tools_cover_all_ops() {
-    let visitor: Arc<dyn crate::symbio_core::CapabilityVisitor> =
+    let visitor: Arc<dyn crate::symbio_core::Registry> =
         Arc::new(crate::providers::DefaultToolVisitor::new());
     let names: Vec<String> = tools::vdfs_tools(Arc::new(ToolVdfs::new(visitor)))
         .iter()

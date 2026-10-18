@@ -607,11 +607,11 @@ async fn missing_container_view_reports_internal_but_sections_still_work() {
 async fn ctx_with_configs() -> VdfsContext {
     use crate::providers::DefaultToolVisitor;
     use crate::symbio_core::{
-        capability_entry_of, vdfs_context, CapabilityRow, CapabilityVisitor, PluginConfigFile,
-        PluginDir, PluginSimpleRequest, CONFIGURABLE_VISITOR,
+        capability_entry_of, vdfs_context, CapabilityRow, PluginConfigFile, PluginDir,
+        PluginSimpleRequest, Registry, CONFIGURABLE_VISITOR,
     };
 
-    let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
+    let visitor: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
     visitor
         .put(CapabilityRow::configurable(capability_entry_of(
             &PluginConfigFile::new(

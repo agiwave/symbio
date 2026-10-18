@@ -175,7 +175,7 @@ impl Plugin for ComposePlugin {
     /// 不参与**能力**收集：本插件不注册 `Capability`，也没有挂载视图
     /// （它无状态、不持有地址，因此不实现 `VdfsProvider`）。
     ///
-    /// 它参与的是**另一条通道**（`ConfigurableVisitor`）：声明「本插件有一份配置
+    /// 它参与的是**另一条通道**（`CONFIGURABLE_VISITOR`）：声明「本插件有一份配置
     /// 文档」，设置页据此列出并指路 `<根>/compose/PLUGIN.yml`——「可 A/B」要能操作，
     /// 靠的就是这一条。
     async fn traverse(

@@ -1,4 +1,4 @@
-//! 系统提示词族的**读写协议**——表（`CapabilityVisitor` 的 `put` / `get` / `list`）
+//! 系统提示词族的**读写协议**——表（`Registry` 的 `put` / `get` / `list`）
 //! 之上的提示词专用词法（AR-025 §5 步 4c）。
 //!
 //! ## 写：`put(CapabilityRow::prompt(段名, 正文))`
@@ -31,14 +31,14 @@
 //! 消费侧两处（会话装配系统提示词、`compose` 拼自己的提示词）都要「按注册序的全部
 //! 段」；口径在这一处定义，两处各自过滤（空段跳过）是消费侧的判断。
 
-use super::{CapabilityRowKind, CapabilityVisitor};
+use super::{CapabilityRowKind, Registry};
 
 /// 列出已注册的系统提示词：`(段名, 正文)`，保注册顺序。
 ///
 /// 空段**不在这里**过滤：注册了空串也照常列出来——「这一段是空的」是注册方给的事实，
 /// 消费侧（拼接）才有资格说「跳过它」（会话侧的 `resolve_system_prompt` 与 `compose`
 /// 各自都要跳，两处判断一致是因为它们各自都写了那三行，不是因为这里替它们决定）。
-pub async fn capability_prompts(visitor: &dyn CapabilityVisitor) -> Vec<(String, String)> {
+pub async fn capability_prompts(visitor: &dyn Registry) -> Vec<(String, String)> {
     visitor
         .list(CapabilityRowKind::Prompt)
         .await

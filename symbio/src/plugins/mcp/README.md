@@ -39,5 +39,5 @@ Model Context Protocol 工具扩展插件。
 
 MCP 工具通过 `traverse` 动态发现并注册，而非独立路由：
 1. 经 `<根>/mcp` 写入 server 配置（`vdfs/write`）。
-2. `McpPlugin::traverse(TRAVERSE_AVAILABLE_TOOLS, …)` 把启用的 server 工具注册到 `CapabilityVisitor`（三段式命名 `mcp.<server>.<tool>`）。
+2. `McpPlugin::traverse(TRAVERSE_AVAILABLE_TOOLS, …)` 把启用的 server 工具注册进 `Registry`（工具行，三段式命名 `mcp.<server>.<tool>`）。
 3. LLM 调用工具时，由宿主统一经 `traverse` 分发到对应 MCP server 执行（无独立的 `call` 路由）。

@@ -150,7 +150,7 @@ impl LocalPlugin {
         let shell = Arc::new(ShellTool::new(Arc::clone(&security), shell_timeout));
         let content_search = Arc::new(ContentSearchTool::new(Arc::clone(&security)));
         // 下面两个**不持策略**（与 `ask_user` 同类的「没有可判的路径」）：审批闸门由
-        // 收口点 `DefaultToolVisitor::register` 统一加壳（见 `providers/collectors/approval.rs`），
+        // 收口点 `DefaultToolVisitor::put` 统一加壳（见 `providers/collectors/approval.rs`），
         // 理由见各自结构体文档。
         let todo_write = Arc::new(TodoWriteTool);
         let codebase_search = Arc::new(CodebaseSearchTool);
@@ -212,7 +212,7 @@ impl Plugin for LocalPlugin {
 
         let payload = ctx.payload::<serde_json::Value>()?;
         if let Some(tool) = self.tool_impls.iter().find(|t| t.name() == path) {
-            // 审批闸门住在能力进表的收口点（`DefaultToolVisitor::register` 的
+            // 审批闸门住在能力进表的收口点（`DefaultToolVisitor::put` 的
             // `ApprovalGate` 装饰器）；`route` 是本插件的注册表未命中回落，
             // 拿到的是**未包壳**的裸工具，判定只能在这里自己走一遍——
             // 但判定与装饰器共用同一份真源 [`crate::providers::collectors::approval_gate`]。
@@ -220,8 +220,8 @@ impl Plugin for LocalPlugin {
                 return Ok(PluginPayload::new(&payload));
             }
 
-            // 信封 ↔ 结果换算收口在 `capability_invoke`：本处与
-            // `CapabilityVisitor::invoke` 走同一条拆信封路径。
+            // 信封 ↔ 结果换算收口在 `capability_invoke`：本处与按名执行
+            // （`Registry::get` + `capability_invoke`）走同一条拆信封路径。
             return crate::symbio_core::capability_invoke(tool.as_ref(), ctx).await;
         }
         Err(PluginError::NotFound(format!("路径不存在: {path}")))

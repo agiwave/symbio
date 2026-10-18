@@ -12,9 +12,7 @@
 use super::*;
 use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::capability_mount;
-use crate::symbio_core::{
-    capability_prompts, CapabilityVisitor, PluginInvokeRequestExt, VDFS_PARENT_ADDR,
-};
+use crate::symbio_core::{capability_prompts, PluginInvokeRequestExt, Registry, VDFS_PARENT_ADDR};
 use std::path::Path;
 use tempfile::TempDir;
 
@@ -34,7 +32,7 @@ fn ctx(
     let visitor = Arc::new(DefaultToolVisitor::new());
     ctx.set(
         CAPABILITY_VISITOR,
-        Arc::clone(&visitor) as Arc<dyn CapabilityVisitor>,
+        Arc::clone(&visitor) as Arc<dyn Registry>,
     );
     (ctx, visitor)
 }

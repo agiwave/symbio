@@ -247,7 +247,7 @@ pub const REQUIRED_PLUGINS: RequiredPluginsKey = RequiredPluginsKey;
 
 pub struct CapabilityVisitorKey;
 impl SymbioKey for CapabilityVisitorKey {
-    type Value = Arc<dyn crate::symbio_core::CapabilityVisitor>;
+    type Value = Arc<dyn crate::symbio_core::Registry>;
     /// 进程内专用：trait object，无字符串 / JSON 形态
     const WIRE: bool = false;
     fn name(&self) -> &'static str {
@@ -265,11 +265,11 @@ pub const CAPABILITY_VISITOR: CapabilityVisitorKey = CapabilityVisitorKey;
 /// 选项收集器 Key —— 与 [`CAPABILITY_VISITOR`] 平行的第二条收集**通道**
 /// （能力 = 可调用对象；选项 = 可展示的数据节点，见 `symbio_core::capability::option`）。
 ///
-/// 4e 之后值类型是统一的 [`CapabilityVisitor`]：选项是同一张表里的行，
+/// 4e 之后值类型是统一的 [`Registry`]：选项是同一张表里的行，
 /// 通道（广播与收集器实例）仍是独立的一条——键没变，变的是行住哪张表。
 pub struct OptionVisitorKey;
 impl SymbioKey for OptionVisitorKey {
-    type Value = Arc<dyn crate::symbio_core::CapabilityVisitor>;
+    type Value = Arc<dyn crate::symbio_core::Registry>;
     /// 进程内专用：trait object，无字符串 / JSON 形态
     const WIRE: bool = false;
     fn name(&self) -> &'static str {
@@ -286,10 +286,10 @@ pub const OPTION_VISITOR: OptionVisitorKey = OptionVisitorKey;
 
 /// 可配置声明收集器 Key —— 第三条收集**通道**
 /// （能力 = 可调用对象；选项 = 可展示的数据节点；可配置 = 「我有配置文档」这一句话，
-/// 见 `symbio_core::capability::configurable`）。4e 之后值类型是统一的 [`CapabilityVisitor`]。
+/// 见 `symbio_core::capability::configurable`）。4e 之后值类型是统一的 [`Registry`]。
 pub struct ConfigurableVisitorKey;
 impl SymbioKey for ConfigurableVisitorKey {
-    type Value = Arc<dyn crate::symbio_core::CapabilityVisitor>;
+    type Value = Arc<dyn crate::symbio_core::Registry>;
     /// 进程内专用：trait object，无字符串 / JSON 形态
     const WIRE: bool = false;
     fn name(&self) -> &'static str {

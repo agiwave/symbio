@@ -15,7 +15,7 @@ created: 2026-09-09
 
 | 交出什么 | 机制 |
 |---|---|
-| 系统提示词【本智能体】 | `CapabilityVisitor::register_system_prompt`（`segment.rs`） |
+| 系统提示词【本智能体】 | `Registry::put`（提示词段行 `CapabilityRow::prompt`，`segment.rs`） |
 | 配置文档 `<根>/setting/PLUGIN.yml` | `PluginConfigMount`（四臂 dispatch 由机制提供）+ `capability_announce_configurable` |
 
 ## 与相邻插件的分工

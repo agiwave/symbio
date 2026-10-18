@@ -1,4 +1,4 @@
-//! 默认能力收集器 —— [`CapabilityVisitor`] 的内存实现
+//! 默认能力收集器 —— [`Registry`] 的内存实现
 //!
 //! ## 为什么在 `providers/` 而不是 `symbio_core`
 //!
@@ -8,7 +8,7 @@
 //! 落在实现层——完整判据见 [`crate::providers::collectors`] 的模块文档。
 
 use super::approval::ApprovalGate;
-use crate::symbio_core::{CapabilityRow, CapabilityRowKind, CapabilityVisitor};
+use crate::symbio_core::{CapabilityRow, CapabilityRowKind, Registry};
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use std::sync::Arc;
@@ -45,7 +45,7 @@ impl Default for DefaultToolVisitor {
 }
 
 #[async_trait]
-impl CapabilityVisitor for DefaultToolVisitor {
+impl Registry for DefaultToolVisitor {
     async fn put(&self, row: CapabilityRow) {
         // 闸门住在收口点：每条进表的**工具**能力都裹一层 [`ApprovalGate`]——
         // `meta` / `name` / `risk_for` 原样透传（见 `approval.rs`），故 `get` 与
@@ -59,13 +59,13 @@ impl CapabilityVisitor for DefaultToolVisitor {
         let name = row.name().to_string();
         let mut rows = self.rows.write().await;
         // 跨族同名的覆盖是**记账错误**而不是正常覆盖（表键是全表唯一的名字空间，
-        // 见 `CapabilityVisitor::put`）：后写者胜——但静默被顶掉的那一族不会以任何
+        // 见 `Registry::put`）：后写者胜——但静默被顶掉的那一族不会以任何
         // 别的方式表现出来，所以这里留一条告警再覆盖。
         if let Some(old) = rows.get(&name) {
             if old.kind() != row.kind() {
                 crate::plugin_warn!(
                     "core",
-                    "能力表键 `{name}` 跨族同名覆盖：{:?} 行被 {:?} 行顶掉（族不参与键，见 CapabilityVisitor::put）",
+                    "能力表键 `{name}` 跨族同名覆盖：{:?} 行被 {:?} 行顶掉（族不参与键，见 Registry::put）",
                     old.kind(),
                     row.kind()
                 );

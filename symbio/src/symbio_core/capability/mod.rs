@@ -345,7 +345,7 @@ pub mod failure_kind {
 /// 前缀。策略行的先命中者胜排序（`(prio, name)`）住在 session 的 `loop_registry`，
 /// 与表内注册序是两件事。
 #[async_trait]
-pub trait CapabilityVisitor: Send + Sync + 'static {
+pub trait Registry: Send + Sync + 'static {
     /// 入表一行（**全族的唯一写入入口**）。
     ///
     /// 实现必须把每条进表的能力裹上审批闸

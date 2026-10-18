@@ -41,7 +41,7 @@ fn text(content: &str) -> ChatNode {
     }
 }
 
-/// 构建 短工具名 → 保留策略 映射（模拟会话循环运行时从 CapabilityVisitor 动态解析）
+/// 构建 短工具名 → 保留策略 映射（模拟会话循环运行时从 Registry 动态解析）
 fn retention_map(
     entries: &[(&str, CapabilityToolContextRetention)],
 ) -> HashMap<String, CapabilityToolContextRetention> {

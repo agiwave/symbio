@@ -6,9 +6,7 @@ use super::*;
 
 use super::super::physical::PhysicalFs;
 use crate::providers::DefaultToolVisitor;
-use crate::symbio_core::{
-    CapabilityRow, CapabilityVisitor, PluginError, PluginMeta, PluginSimpleRequest,
-};
+use crate::symbio_core::{CapabilityRow, PluginError, PluginMeta, PluginSimpleRequest, Registry};
 use crate::symbio_core::{VdfsActionResult, VdfsValidationError, VDFS_KIND_DIR};
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -647,7 +645,7 @@ async fn resolve_fs_degrades_to_empty_vfs() {
 #[tokio::test]
 async fn resolve_fs_prefers_visitor_slot() {
     let rec = Rec::new();
-    let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
+    let visitor: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
     visitor
         .put(CapabilityRow::mount_root(root_with(&rec)))
         .await;

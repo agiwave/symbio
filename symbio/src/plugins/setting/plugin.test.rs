@@ -5,9 +5,7 @@
 use super::*;
 use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::capability_mount;
-use crate::symbio_core::{
-    capability_prompts, CapabilityVisitor, PluginInvokeRequestExt, VDFS_PARENT_ADDR,
-};
+use crate::symbio_core::{capability_prompts, PluginInvokeRequestExt, Registry, VDFS_PARENT_ADDR};
 use tempfile::TempDir;
 
 /// 构造带能力收集器的上下文
@@ -19,7 +17,7 @@ fn ctx(parent_addr: &str) -> (Arc<dyn PluginInvokeRequest>, Arc<DefaultToolVisit
     let visitor = Arc::new(DefaultToolVisitor::new());
     ctx.set(
         CAPABILITY_VISITOR,
-        Arc::clone(&visitor) as Arc<dyn CapabilityVisitor>,
+        Arc::clone(&visitor) as Arc<dyn Registry>,
     );
     (ctx, visitor)
 }

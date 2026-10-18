@@ -29,8 +29,8 @@ use std::sync::Arc;
 use super::config::ComposeConfig;
 use crate::symbio_core::chat_node::{ChatNode, NodeRole};
 use crate::symbio_core::{
-    capability_model_resolve, capability_prompts, llm_short_id, CapabilityVisitor, ExecAbortSignal,
-    ExecEnv, ExecEventSink, ModelProvider, PluginInvokeRequest, PluginInvokeRequestExt,
+    capability_model_resolve, capability_prompts, llm_short_id, ExecAbortSignal, ExecEnv,
+    ExecEventSink, ModelProvider, PluginInvokeRequest, PluginInvokeRequestExt, Registry,
     CAPABILITY_VISITOR,
 };
 use crate::symbio_core::{ComposeRequest, WordingReply};
@@ -82,7 +82,7 @@ pub(crate) async fn generate(
     // 模型服务从**调用方带来的能力访问器**里取。优先本插件配置的那个 provider id
     // （model 插件在 traverse 广播里把**全部已启用**的 provider 一并交来），
     // 取不到就落回当次生效的那个——降级而不失效。
-    let visitor: Arc<dyn CapabilityVisitor> = ctx.get(CAPABILITY_VISITOR)?;
+    let visitor: Arc<dyn Registry> = ctx.get(CAPABILITY_VISITOR)?;
     let provider: Arc<dyn ModelProvider> =
         capability_model_resolve(&*visitor, config.model_id()).await?;
 
@@ -131,10 +131,7 @@ pub(crate) async fn generate(
 ///
 /// 可覆盖的只有**指令段**：注册段不属于本插件（它由 `setting` / `session` /
 /// `memory` 各自注册），在这里也拿不到"改它"的资格。
-async fn build_system_prompt(
-    visitor: &Arc<dyn CapabilityVisitor>,
-    config: &ComposeConfig,
-) -> String {
+async fn build_system_prompt(visitor: &Arc<dyn Registry>, config: &ComposeConfig) -> String {
     let mut parts: Vec<String> = capability_prompts(&**visitor)
         .await
         .into_iter()

@@ -232,10 +232,10 @@ async fn traverse_contributes_no_tools() {
 async fn traverse_announces_its_own_config() {
     use crate::providers::DefaultToolVisitor;
     use crate::symbio_core::{
-        capability_configurables, CapabilityVisitor, PluginInvokeRequestExt, CONFIGURABLE_VISITOR,
+        capability_configurables, PluginInvokeRequestExt, Registry, CONFIGURABLE_VISITOR,
     };
 
-    let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
+    let visitor: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
     let req = PluginSimpleRequest::new(None, None);
     req.set(PATH, String::new());
     req.set(CONFIGURABLE_VISITOR, visitor.clone());

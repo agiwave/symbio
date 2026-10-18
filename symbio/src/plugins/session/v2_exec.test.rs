@@ -21,7 +21,7 @@ use crate::symbio_core::{
     EVENT_ASSISTANT_FINAL,
 };
 use crate::symbio_core::{
-    Capability, CapabilityRow, CapabilityVisitor, ExecEnv, PluginError, PluginInvokeRequestExt,
+    Capability, CapabilityRow, ExecEnv, PluginError, PluginInvokeRequestExt, Registry,
     CAPABILITY_VISITOR,
 };
 
@@ -52,7 +52,7 @@ async fn test_ctx_declaring(
             ))
             .await;
     }
-    ctx.set(CAPABILITY_VISITOR, visitor as Arc<dyn CapabilityVisitor>);
+    ctx.set(CAPABILITY_VISITOR, visitor as Arc<dyn Registry>);
     ctx
 }
 

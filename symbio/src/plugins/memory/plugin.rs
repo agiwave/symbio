@@ -194,7 +194,7 @@ impl MemoryPlugin {
     async fn contribute_prompt(
         &self,
         ctx: &Arc<dyn PluginInvokeRequest>,
-        visitor: &Arc<dyn crate::symbio_core::CapabilityVisitor>,
+        visitor: &Arc<dyn crate::symbio_core::Registry>,
     ) {
         let store = self.store().await;
         // 绝对地址 = 上下文父地址 + 相对地址（容器转发时已写入父地址）
@@ -221,7 +221,7 @@ impl MemoryPlugin {
     async fn contribute_workspace_prompt(
         &self,
         ctx: &Arc<dyn PluginInvokeRequest>,
-        visitor: &Arc<dyn crate::symbio_core::CapabilityVisitor>,
+        visitor: &Arc<dyn crate::symbio_core::Registry>,
     ) {
         let cfg = self.config.read().await.clone();
         if !cfg.workspace_enabled {

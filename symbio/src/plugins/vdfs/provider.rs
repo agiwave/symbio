@@ -9,7 +9,7 @@
 //!
 //! ## 本层只做两件事
 //!
-//! 1. **取虚拟层根**：从持有的 `CapabilityVisitor` 里取容器注册的组合根
+//! 1. **取虚拟层根**：从持有的 `Registry` 里取容器注册的组合根
 //!    （[`host::root_of`]），与前端链路取到的是**同一个根**；
 //! 2. **透传调用级参数**：把请求 ctx 的运行时状态（workdir）翻译成 provider 的
 //!    约定键（[`call_params`]），两条链路共用同一份翻译。
@@ -25,11 +25,11 @@ use super::fs::UnifiedFs;
 use super::host::call_params;
 use super::protocol::{VdfsEditResponse, VdfsSearchResult};
 use crate::symbio_core::vdfs_context;
-use crate::symbio_core::{CapabilityVisitor, PluginInvokeRequest};
 use crate::symbio_core::{
     DynVdfsProvider, VdfsContent, VdfsContext, VdfsError, VdfsItem, VdfsNode, VdfsRequest,
     VdfsResult, VdfsWriteResponse,
 };
+use crate::symbio_core::{PluginInvokeRequest, Registry};
 use std::sync::Arc;
 
 /// VDFS 工具链路的封装 provider。
@@ -37,12 +37,12 @@ use std::sync::Arc;
 /// 工具构造时持有 `Arc<Self>`；执行时它把操作交给统一文件系统，工具因此不必
 /// 感知能力管理器与目录拓扑。
 pub struct ToolVdfs {
-    visitor: Arc<dyn CapabilityVisitor>,
+    visitor: Arc<dyn Registry>,
 }
 
 impl ToolVdfs {
     /// 持有能力管理器构造（工具注册广播的 ctx 中取到的即是它）
-    pub fn new(visitor: Arc<dyn CapabilityVisitor>) -> Self {
+    pub fn new(visitor: Arc<dyn Registry>) -> Self {
         Self { visitor }
     }
 

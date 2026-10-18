@@ -51,7 +51,7 @@ created: 2026-09-13
               │ composite 组合 │   │ PhysicalFs（磁盘） │
               │ 视图           │   │ 工作目录相对地址    │
               └───────┬───────┘   └───────────────────┘
-                      │ put(CapabilityRow::mount(插件名, provider))   ← LLM 链路（CapabilityVisitor）
+                      │ put(CapabilityRow::mount(插件名, provider))   ← LLM 链路（Registry）
       ┌───────────────┬─────────────┼─────────────┬───────────────┐
  plugin_manager provider  session provider  model provider   …（各模块自持）
 ```
@@ -165,9 +165,9 @@ trait 上收拢全部操作（列 / 读 / 写 / 删 / 建 / 移 / 订阅），�
 
 - **系统 / 前端链路**（取子插件视图、穿过挂载点委托）：容器实现 core trait
   `Plugin::get_vfs_provider`（默认 `None`）返回 `self.vdfs`。这是系统链路的**唯一**
-  查询接口——**不经** `CapabilityVisitor`、不驱动任何 `traverse` 广播。
+  查询接口——**不经** `Registry`、不驱动任何 `traverse` 广播。
 - **LLM 链路**（LLM 读写挂接）：容器在 `traverse(TRAVERSE_AVAILABLE_TOOLS)` 中把
-  视图登记进 `CapabilityVisitor` 的挂载族根位（`put(CapabilityRow::mount_root(…))`），供 `vdfs_*`
+  视图登记进 `Registry` 的挂载族根位（`put(CapabilityRow::mount_root(…))`），供 `vdfs_*`
   工具经 `capability_vdfs_root` 取根。
 
 拓扑角色划分：
@@ -179,7 +179,7 @@ trait 上收拢全部操作（列 / 读 / 写 / 删 / 建 / 移 / 订阅），�
 - **provider**（各插件）＝ 只认自身子树内相对路径。
 
 于是拓扑知识的落点**有且只有一处**（容器），且容器不依赖访问层、访问层与门面
-不依赖任何具体资源——四者可以独立替换（§10.3）。`CapabilityVisitor` 与
+不依赖任何具体资源——四者可以独立替换（§10.3）。`Registry` 与
 `Plugin::get_vfs_provider` **不是同一回事**：前者是 LLM 能力挂接通道，后者是
 系统链路的查询接口，二者不可混用（详见 §6）。
 
@@ -465,10 +465,10 @@ core 不暴露**）；操作闭集见 [CURRENT.md](../006-ref/006-当前事实�
 ### 6.1 provider 注册（两条链路，两套通道）
 
 > ⚠️ **两套发现通道不可混用**：
-> - **LLM 链路**经 `CapabilityVisitor`（`traverse` 广播中注册 / 查询）；
-> - **系统 / 前端链路**经 core trait `Plugin::get_vfs_provider`（直接查询，**不**走 `CapabilityVisitor`、不驱动 `traverse`）。
+> - **LLM 链路**经 `Registry`（`traverse` 广播中注册 / 查询）；
+> - **系统 / 前端链路**经 core trait `Plugin::get_vfs_provider`（直接查询，**不**走 `Registry`、不驱动 `traverse`）。
 
-**LLM 链路**——写口是 `CapabilityVisitor::put` 上的挂载行 / 根行，读口是三个自由函数：
+**LLM 链路**——写口是 `Registry::put` 上的挂载行 / 根行，读口是三个自由函数：
 
 ```rust
 // 目录名 = 使用方选定（约定 = 插件名），provider 自身不含此概念
@@ -513,7 +513,7 @@ LLM 链路：插件在 `traverse` 的 `TRAVERSE_AVAILABLE_TOOLS` 分支里，**�
   ```
 - **系统 / 前端链路**：容器实现 `Plugin::get_vfs_provider` 返回 `self.vdfs`，前端
   `resolve_fs` 直接 `parent.get_vfs_provider().unwrap_or_else(empty_root)` 取根。
-  此路径**不**经过 `CapabilityVisitor`、不驱动 `traverse`。
+  此路径**不**经过 `Registry`、不驱动 `traverse`。
 
 **这不是「根级 provider」概念**：槽位 / 查询接口只是装配点——谁被登记 / 返回，
 谁的子树就成为 `<根>` 之下的内容。composite 可被别的目录包含、子插件也可以是另一个
@@ -760,9 +760,9 @@ composite；登记本身不改变 composite 的任何行为与代码（见 §2.5
   规则见 [vdfs/README.md](../../symbio/src/plugins/vdfs/README.md "symbio/src/plugins/vdfs/README")）。裸地址（无 `<根>`
   前缀）**直接**落在物理层，相对路径从工作目录开始；行号分页、`ignore` 过滤、精确
   字符串替换（保持换行符风格）、文件名 Glob 均由访问层组合操作对齐。
-- **三条收集通道**：`CapabilityVisitor` 与 `OptionVisitor`、`ConfigurableVisitor`
-  搭同一次 `traverse` 广播的便车，各有自己的 ctx 键与降级行为（收集器缺席 = 当作
-  没人声明），不新造广播、也不互相依赖。
+- **三条收集通道**：通道键 `CAPABILITY_VISITOR` / `OPTION_VISITOR` / `CONFIGURABLE_VISITOR`
+  搭同一次 `traverse` 广播的便车，值都是同一个 `Registry`（put/get/list 收集口），
+  各有自己的降级行为（收集器缺席 = 当作没人声明），不新造广播、也不互相依赖。
 - **容器**：实现 `VdfsProvider` 并被装配为 `<根>` 的服务者，只逐子插件收集；子目录
   内部层级由各 provider 的 `list` 表达（§2.5）。
 - **资源存储（`providers/vdfs_service`）**：属**宿主实现层**，**不在** §2.1 / §2.2 的

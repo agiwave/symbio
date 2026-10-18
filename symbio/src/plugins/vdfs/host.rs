@@ -13,7 +13,7 @@
 //! ## 本层不认识目录拓扑
 //!
 //! 虚拟层根归**组合容器**所有：容器把自己的组合视图注册为 VDFS 根
-//! （`CapabilityVisitor::put` 上的挂载族根行 `CapabilityRow::mount_root`，
+//! （`Registry::put` 上的挂载族根行 `CapabilityRow::mount_root`，
 //! 见 `plugins/composite/vdfs.rs`）。
 //! 本层只取这个根、交给门面，把**规范化后的地址**原样递过去——
 //! 根之下有多少类别、叫什么，本层完全不知道、也不必知道。
@@ -46,8 +46,8 @@ use crate::symbio_core::{
     VDFS_PARAM_WORKDIR,
 };
 use crate::symbio_core::{
-    CapabilityVisitor, Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse,
-    PluginPayload, CAPABILITY_VISITOR, WORKDIR,
+    Plugin, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginPayload,
+    Registry, CAPABILITY_VISITOR, WORKDIR,
 };
 use crate::symbio_core::{VdfsRequest, VdfsResponse};
 use crate::symbio_core::{ROUTE_VDFS_ROOT, ROUTE_VDFS_UNWATCH, ROUTE_VDFS_WATCH};
@@ -106,22 +106,22 @@ pub fn empty_root() -> DynVdfsProvider {
 /// 从能力管理器取容器注册的虚拟层根；未注册时降级为空根。
 ///
 /// 调用方需已确保 `visitor` 存在（LLM 链路里它是硬前提，缺失应显式报错）。
-pub async fn root_of(visitor: &Arc<dyn CapabilityVisitor>) -> DynVdfsProvider {
+pub async fn root_of(visitor: &Arc<dyn Registry>) -> DynVdfsProvider {
     crate::symbio_core::capability_vdfs_root(&**visitor)
         .await
         .unwrap_or_else(empty_root)
 }
 
 /// 构造本次调用的统一文件系统（虚拟层 + 物理层）。
-pub async fn unified_fs(visitor: &Arc<dyn CapabilityVisitor>) -> DynVdfsProvider {
+pub async fn unified_fs(visitor: &Arc<dyn Registry>) -> DynVdfsProvider {
     Arc::new(UnifiedFs::new(root_of(visitor).await))
 }
 
 /// 取本次调用的统一文件系统（前端链路入口）。
 ///
-/// - `ctx` 已带能力管理器（LLM 链路）→ 直接用其中的根（`CapabilityVisitor` 收集）；
+/// - `ctx` 已带能力管理器（LLM 链路）→ 直接用其中的根（`Registry` 收集）；
 /// - 否则（前端链路）→ 经 core 的 `Plugin::get_vfs_provider` **直接取**父插件暴露的
-///   虚拟层根，不广播、不依赖 `CapabilityVisitor`。两条链路拿到的是同一个根实例。
+///   虚拟层根，不广播、不依赖 `Registry`。两条链路拿到的是同一个根实例。
 pub async fn resolve_fs(
     parent: Option<&Arc<dyn Plugin>>,
     ctx: &Arc<dyn PluginInvokeRequest>,
@@ -131,7 +131,7 @@ pub async fn resolve_fs(
     }
 
     // 前端链路：系统 vfs provider 经 `Plugin` 接口直接取（与 LLM 链路的
-    // `CapabilityVisitor` 无关），取不到时降级为空根。
+    // `Registry` 无关），取不到时降级为空根。
     let root = match parent {
         Some(p) => Arc::clone(p).get_vfs_provider().unwrap_or_else(empty_root),
         None => empty_root(),

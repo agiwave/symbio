@@ -80,7 +80,7 @@ impl SessionPlugin {
             VdfsRequest::List { .. } => {
                 let (limit, before) = window_params(ctx);
                 // 清单里**只有会话**——配置文件是文档，它进设置菜单走的是
-                // ConfigurableVisitor 那条通道，不该在会话清单里再出现一次
+                // CONFIGURABLE_VISITOR 那条通道，不该在会话清单里再出现一次
                 // （否则列表底部会多一个「设置」项）。
                 let sessions = self
                     .list_sessions_window(limit, before)

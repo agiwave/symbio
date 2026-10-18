@@ -208,14 +208,14 @@ async fn option_definition_without_container_degrades_to_empty() {
 async fn session_contributes_option_fields_to_the_visitor() {
     use crate::providers::DefaultToolVisitor;
     use crate::symbio_core::{
-        capability_option_fields, CapabilityVisitor, PluginSimpleRequest, OPTION_VISITOR, PATH,
+        capability_option_fields, PluginSimpleRequest, Registry, OPTION_VISITOR, PATH,
         TRAVERSE_AVAILABLE_OPTIONS,
     };
 
     let p = Arc::new(plugin());
     let ctx = Arc::new(PluginSimpleRequest::new(None, None)).fork();
     ctx.set(PATH, TRAVERSE_AVAILABLE_OPTIONS.to_string());
-    let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
+    let visitor: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
     ctx.set(OPTION_VISITOR, visitor.clone());
 
     p.traverse(String::new(), ctx).await.expect("traverse 成功");

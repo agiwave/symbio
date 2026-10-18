@@ -7,7 +7,7 @@
 //!
 //! | 通道 | 写法 | 产物 |
 //! |---|---|---|
-//! | 能力 | `CapabilityVisitor::put`（工具 / 模型 / 提示词 / 挂载行） | 可调用对象与目录成员 |
+//! | 能力 | `Registry::put`（工具 / 模型 / 提示词 / 挂载行） | 可调用对象与目录成员 |
 //! | 选项 | `put(CapabilityRow::option(order, 字段))` | 可展示的数据节点（会话输入区的可选项） |
 //! | 可配置 | `put(CapabilityRow::configurable(条目))`（4e，原 `ConfigurableVisitor` 退场） | 「设置页里该怎么列这一份配置」的**条目** |
 //!
@@ -51,8 +51,8 @@
 
 use crate::symbio_core::VdfsItem;
 use crate::symbio_core::{
-    CapabilityRow, CapabilityRowKind, CapabilityVisitor, PluginInvokeRequest,
-    PluginInvokeRequestExt, CONFIGURABLE_VISITOR,
+    CapabilityRow, CapabilityRowKind, PluginInvokeRequest, PluginInvokeRequestExt, Registry,
+    CONFIGURABLE_VISITOR,
 };
 use crate::symbio_core::{PluginConfigFile, PLUGIN_FILE};
 use std::sync::Arc;
@@ -60,7 +60,7 @@ use std::sync::Arc;
 /// 列出已声明的设置页条目（按注册顺序）——读侧唯一入口。
 ///
 /// 同条目名覆盖（行名 = `item.node.name`）是表语义；取不到收集器返回空表。
-pub async fn capability_configurables(visitor: &dyn CapabilityVisitor) -> Vec<VdfsItem> {
+pub async fn capability_configurables(visitor: &dyn Registry) -> Vec<VdfsItem> {
     visitor
         .list(CapabilityRowKind::Configurable)
         .await

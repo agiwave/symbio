@@ -19,7 +19,7 @@ created: 2026-07-20
 |---|---|
 | agent 目录管理 | `impl VdfsProvider`（`<根>/agent`：浏览 / 整包导入 / 导出 / 删除），目录自管（`AgentDirStore`：工作区级 + 全局级双层） |
 | 子树装配 | 会话选定智能体（`ctx[AGENT_ID]`）时构造该目录的插件树并转发能力收集；注册经 `SubAgentVisitor` 加来源前缀（`agent/<id>/…`），与系统树**并集**且不撞名 |
-| 智能体自身的 `AGENTS.md` | `CapabilityVisitor::register_system_prompt`（注入）+ `<根>/agent/…`（编辑） |
+| 智能体自身的 `AGENTS.md` | `Registry::put`（提示词段行 `CapabilityRow::prompt`，注入）+ `<根>/agent/…`（编辑） |
 | 工具贡献 | `traverse(agent/available_tools)` 把 `agent_run`（子智能体委托）加入会话工具集 |
 | 选项贡献 | `traverse(agent/available_options)` 提供会话页的「智能体」选择项 |
 

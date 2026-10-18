@@ -8,7 +8,7 @@
 //! 不需要认识任何具体资源。
 //!
 //! `get_vfs_provider` / `vdfs_dispatch` 都是 **core 的 `Plugin` 查询接口**，与 LLM
-//! 链路的 `CapabilityVisitor`（收集 vfs 根供工具使用）无关——系统视角下「这个插件
+//! 链路的 `Registry`（收集 vfs 根供工具使用）无关——系统视角下「这个插件
 //! 自己暴露的 VDFS 视图」由它直接回答，容器与子插件之间因此没有类型耦合。
 //!
 //! 本模块自身实现 [`VdfsProvider`]（唯一接口 `dispatch`）：
@@ -63,7 +63,7 @@
 //! ## 访问层
 //!
 //! 本视图是 `<根>` 的服务者，由两条通道暴露给访问层：
-//! - **LLM 链路**：容器在 `traverse` 里经 `CapabilityVisitor::put` 的根行
+//! - **LLM 链路**：容器在 `traverse` 里经 `Registry::put` 的根行
 //!   （`CapabilityRow::mount_root`）登记；
 //! - **系统 / 前端链路**：容器经 `Plugin::get_vfs_provider` 直接返回（见
 //!   `composite.rs` 的 `impl Plugin`），访问层 `resolve_fs` 直接取。
@@ -73,11 +73,11 @@
 use super::composite::broadcast_collect;
 use super::registry::PluginRegistry;
 use crate::symbio_core::{descend_addr, vdfs_host_ctx};
+use crate::symbio_core::{DetailDefinition, DetailField, DetailOption};
 use crate::symbio_core::{
-    CapabilityVisitor, Plugin, PluginInvokeRequestExt, PluginMeta, CONFIGURABLE_VISITOR, PATH,
+    Plugin, PluginInvokeRequestExt, PluginMeta, Registry, CONFIGURABLE_VISITOR, PATH,
     PLUGIN_ID_MANAGER, TRAVERSE_AVAILABLE_TOOLS,
 };
-use crate::symbio_core::{DetailDefinition, DetailField, DetailOption};
 use crate::symbio_core::{
     VdfsAccess, VdfsActionResult, VdfsChange, VdfsChangeSink, VdfsContent, VdfsContext, VdfsError,
     VdfsNewType, VdfsNode, VdfsProvider, VdfsRequest, VdfsResponse, VdfsResult, VdfsWriteResponse,
@@ -135,7 +135,7 @@ impl CompositeVdfs {
     ///
     /// - **VDFS 子目录**：经 core 的 [`Plugin::get_vfs_provider`] /
     ///   [`Plugin::vdfs_dispatch`] 直接查询——这是系统链路的视角，目录名 = 子插件在
-    ///   容器实例表里的挂载名（约定 = 插件名）。**不走 `CapabilityVisitor`**。
+    ///   容器实例表里的挂载名（约定 = 插件名）。**不走 `Registry`**。
     /// - **配置声明**：仍是独立的 `CONFIGURABLE_VISITOR` 通道——逐子插件广播一次 `traverse`，
     ///   子插件把各自的配置文档声明写回本次请求 ctx，插件管理插件据此知道「哪些
     ///   插件有配置文档」。
@@ -146,17 +146,17 @@ impl CompositeVdfs {
 
         // 可配置声明通道：与 VDFS 无关，仍逐子插件广播一次 `traverse`，但只挂
         // `CONFIGURABLE_VISITOR`——配置声明自带目录名，不存在归属歧义。
-        let configs: Arc<dyn CapabilityVisitor> = match host.get(CONFIGURABLE_VISITOR) {
+        let configs: Arc<dyn Registry> = match host.get(CONFIGURABLE_VISITOR) {
             Some(v) => v,
             None => {
-                let v: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
+                let v: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
                 host.set(CONFIGURABLE_VISITOR, v.clone());
                 v
             }
         };
 
         // VDFS 子目录：经 `Plugin::get_vfs_provider` 判定暴露与否（系统链路，
-        // 无 CapabilityVisitor）。目录名 = 实例表里的挂载名（约定 = 插件名），
+        // 无 Registry）。目录名 = 实例表里的挂载名（约定 = 插件名），
         // 与 `resolve` 的首段键一致。
         let mut collected: Vec<(String, Arc<dyn Plugin>)> = Vec::new();
         for (name, child) in children {

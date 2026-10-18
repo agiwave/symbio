@@ -94,7 +94,7 @@ owner）。取不到（写错 / 该条目已禁用）⇒ **落回会话选定值
 代价是 typo **没有错误信号**，因此 `compose` 把"选中了哪个模型"记进 `plugin_debug!`。
 
 **`instruction` 只覆盖指令段**：`build_system_prompt` 里排在前面的是**注册段**
-（`register_system_prompt` 收的段，与 worker 共用），它在任何时候都在。这条**不对称是有意的**：
+（提示词段行收的段——`Registry::put`，与 worker 共用），它在任何时候都在。这条**不对称是有意的**：
 覆盖整段会让本插件悄悄丢掉人格 / 记忆等全部上下文。
 
 **空串与缺席同义**（`non_empty` 归一）：设置页清空输入框得到的是 `""`。这条对 `instruction`
@@ -126,7 +126,7 @@ owner）。取不到（写错 / 该条目已禁用）⇒ **落回会话选定值
 ## 机制
 
 - **无工具**是结构保证：本插件不注册任何 `Capability`，而模型的工具集来自
-  `traverse(TRAVERSE_AVAILABLE_TOOLS)` → `CapabilityVisitor::register` ——
+  `traverse(TRAVERSE_AVAILABLE_TOOLS)` → `Registry::put`（工具行）——
   因此工具集里**在结构上不可能**出现本插件（不需要 CI 断言补偿）。
 - **会调用模型，但不暴露工具**：生成是一次**内部请求**（静默出口，与上下文压缩摘要
   同款形状）——不注册 `Capability` 与不调用模型是两件事。

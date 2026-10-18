@@ -164,7 +164,7 @@ async fn vdfs_watch_forwards_session_changes() {
 /// 配置文件是 `ext = form` 的可写文档，**但它不在会话清单里**。
 ///
 /// 「清单 = 业务列表」：`<根>/session` 下应当只有会话。配置文件进设置菜单走
-/// 的是 ConfigurableVisitor 那条通道（`capability_announce_configurable`），不靠清单并列
+/// 的是 CONFIGURABLE_VISITOR 那条通道（`capability_announce_configurable`），不靠清单并列
 /// ——否则列表底部会多出一个「设置」项。可达性不受影响：`stat` / `read` 照常。
 #[tokio::test]
 async fn config_document_is_reachable_but_not_a_session_list_item() {

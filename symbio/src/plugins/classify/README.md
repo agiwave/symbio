@@ -74,7 +74,7 @@ decide(utterance)
 ## 机制
 
 - **无工具**是结构保证：本插件不注册任何 `Capability`，而模型的工具集来自
-  `traverse(TRAVERSE_AVAILABLE_TOOLS)` → `CapabilityVisitor::register` ——
+  `traverse(TRAVERSE_AVAILABLE_TOOLS)` → `Registry::put`（工具行）——
   因此工具集里**在结构上不可能**出现本插件（不需要 CI 断言补偿）。
 - **会调用模型，但不暴露工具**：快速档分类是一次**内部请求**（静默出口，
   与上下文压缩摘要同款形状）——不注册 `Capability` 与不调用模型是两件事。

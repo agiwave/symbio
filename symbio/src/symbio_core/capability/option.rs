@@ -2,7 +2,7 @@
 //!
 //! ## 与能力收集机制的关系
 //!
-//! 会话能力（工具 / 模型服务 / 系统提示词）经 `CapabilityVisitor` +
+//! 会话能力（工具 / 模型服务 / 系统提示词）经 `Registry` +
 //! `Plugin::traverse(TRAVERSE_AVAILABLE_TOOLS)` 收集；选项本是**平行第二通道**
 //! （经 `OPTION_VISITOR` 键 + `Plugin::traverse(TRAVERSE_AVAILABLE_OPTIONS)` 广播），
 //! **写入落位到同一张表**（4e）：选项是 `CapabilityRow::option(order, 字段)` 一行，
@@ -26,7 +26,7 @@
 //! | [`capability_option_fields`] | session（读产物拼表单） | 选项行住全插件共用的能力表，读法是跨插件协议 |
 //!
 //! 写侧是 `put(CapabilityRow::option(order, 字段))`（写入者 = agent / model / session
-//! 各自在 `traverse` 里注册字段），键 `OPTION_VISITOR` 的值类型是 `CapabilityVisitor`。
+//! 各自在 `traverse` 里注册字段），键 `OPTION_VISITOR` 的值类型是 `Registry`。
 //!
 //! 端点字面量
 //! [`TRAVERSE_AVAILABLE_OPTIONS`](crate::symbio_core::TRAVERSE_AVAILABLE_OPTIONS)
@@ -71,14 +71,14 @@
 //! - 单插件失败只记日志，不中断收集。
 
 use crate::symbio_core::schemas::detail::DetailField;
-use crate::symbio_core::{CapabilityRowKind, CapabilityVisitor};
+use crate::symbio_core::{CapabilityRowKind, Registry};
 
 /// 列出已注册的选项字段：按 `order` 升序稳定排序（同号保持注册顺序），`order` 不下发。
 ///
 /// - **同键覆盖**是表语义（行名 = `field.key`，后写者胜、保留先注册槽位）；
 /// - 排序是**读侧**的事：`order` 不进产物数组——前端收到的数组序 = 展示序，
 ///   比「前端按 order 再排一次」是更强的保证。
-pub async fn capability_option_fields(visitor: &dyn CapabilityVisitor) -> Vec<DetailField> {
+pub async fn capability_option_fields(visitor: &dyn Registry) -> Vec<DetailField> {
     let mut rows = visitor.list(CapabilityRowKind::Option).await;
     // 稳定排序：`sort_by_key` 是稳定的，order 相同者保持注册顺序（表序 = 广播序）
     rows.sort_by_key(|row| {

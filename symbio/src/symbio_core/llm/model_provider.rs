@@ -26,7 +26,7 @@
 //! 依赖关系：
 //! - model 插件在 traverse 中按上下文（用户选中的模型）注册唯一生效的
 //!   `Arc<dyn ModelProvider>` 进 `CAPABILITY_VISITOR`；
-//! - session 从 `CapabilityVisitor` 直接取得该实例并驱动对话；
+//! - session 从 `Registry` 直接取得该实例并驱动对话；
 //! - 上下文窗口等参数经 trait 方法自含地暴露（`max_context_tokens` /
 //!   `effective_context_tokens`）。
 

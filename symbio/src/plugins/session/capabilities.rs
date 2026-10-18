@@ -2,7 +2,7 @@
 //!
 //! 两个收集器是**同一件事的两半**（`collect_capabilities` 收工具、
 //! `collect_options` 收选项字段），同处本文件；「收集机制」的契约
-//! （`CapabilityVisitor` 收集口三方法与端点字面量）留在 `symbio_core`。
+//! （`Registry` 收集口三方法与端点字面量）留在 `symbio_core`。
 //!
 //! ## 背景
 //!
@@ -42,8 +42,8 @@
 
 use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{
-    capability_init_error_bucket, CapabilityMeta, CapabilityRowKind, CapabilityVisitor, Plugin,
-    PluginInvokeRequest, PluginInvokeRequestExt, CAPABILITY_ERRORS, OPTION_VISITOR, PATH,
+    capability_init_error_bucket, CapabilityMeta, CapabilityRowKind, Plugin, PluginInvokeRequest,
+    PluginInvokeRequestExt, Registry, CAPABILITY_ERRORS, OPTION_VISITOR, PATH,
     TRAVERSE_AVAILABLE_OPTIONS, TRAVERSE_AVAILABLE_TOOLS,
 };
 use std::sync::Arc;
@@ -66,8 +66,8 @@ use std::sync::Arc;
 pub async fn collect_capabilities(
     parent: Option<&Arc<dyn Plugin>>,
     ctx: &Arc<dyn PluginInvokeRequest>,
-) -> Arc<dyn CapabilityVisitor> {
-    let manager: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
+) -> Arc<dyn Registry> {
+    let manager: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
 
     let Some(parent) = parent else {
         return manager;
@@ -107,10 +107,7 @@ pub async fn collect_capabilities(
 ///
 /// 单独抽出的意义：让"收集"与"挂载"两件事在调用点显式成对出现，
 /// 避免漏挂导致 `Tool not found` 这类只在运行期才暴露的问题。
-pub fn attach_capabilities(
-    ctx: &Arc<dyn PluginInvokeRequest>,
-    manager: Arc<dyn CapabilityVisitor>,
-) {
+pub fn attach_capabilities(ctx: &Arc<dyn PluginInvokeRequest>, manager: Arc<dyn Registry>) {
     ctx.set(crate::symbio_core::CAPABILITY_VISITOR, manager);
 }
 
@@ -156,10 +153,10 @@ pub async fn tool_metas(ctx: &Arc<dyn PluginInvokeRequest>) -> Vec<CapabilityMet
 pub async fn collect_options(
     parent: Option<&Arc<dyn Plugin>>,
     ctx: &Arc<dyn PluginInvokeRequest>,
-) -> Arc<dyn CapabilityVisitor> {
+) -> Arc<dyn Registry> {
     // 4e：选项与能力同表——收集器就是全表共用的 `DefaultToolVisitor`，
     // 选项行（`CapabilityRow::option`）与工具行同一 `put` / `list`，只是通道独立。
-    let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
+    let visitor: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
 
     let Some(parent) = parent else {
         return visitor;

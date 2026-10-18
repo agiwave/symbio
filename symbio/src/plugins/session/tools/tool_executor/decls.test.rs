@@ -12,8 +12,8 @@
 use super::ToolDecls;
 use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, CapabilityRow, CapabilityVisitor, ExecEnv, PluginError,
-    PluginInvokeRequest, PluginInvokeRequestExt, PluginSimpleRequest,
+    Capability, CapabilityMeta, CapabilityRow, ExecEnv, PluginError, PluginInvokeRequest,
+    PluginInvokeRequestExt, PluginSimpleRequest, Registry,
 };
 use async_trait::async_trait;
 use serde_json::Value;
@@ -64,7 +64,7 @@ async fn ctx_with(metas: Vec<CapabilityMeta>) -> Arc<dyn PluginInvokeRequest> {
     }
     ctx.set(
         crate::symbio_core::CAPABILITY_VISITOR,
-        visitor as Arc<dyn CapabilityVisitor>,
+        visitor as Arc<dyn Registry>,
     );
     ctx
 }

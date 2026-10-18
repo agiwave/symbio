@@ -714,7 +714,7 @@ pub async fn run_chat_loop(
         );
 
         // ── 步骤 3：本轮输入准备（收口 ②，唯一准备点）────────────────────────
-        // 系统提示词与工具在同一函数内、同一时刻收集（同一个 CapabilityVisitor），
+        // 系统提示词与工具在同一函数内、同一时刻收集（同一个 Registry），
         // 并由此派生请求级开销与请求视图；自动压缩、水位提醒一并收口在该函数内。
         let inputs = match prepare_turn_inputs(
             orchestrator,

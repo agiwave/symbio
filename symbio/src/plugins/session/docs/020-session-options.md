@@ -12,7 +12,7 @@ created: 2026-09-23
 范围：会话页输入区下方的「选项栏」与会话详情页的可修改项（**同一批字段、两种渲染形态**）
 关联：`docs/005-arch/013-vdfs.md`（`node.schema` 详情方言）、
 `symbio/src/symbio_core/schemas/detail.rs`（`DetailDefinition` / `DetailField` 方言权威定义）、
-`symbio/src/symbio_core/capability/option.rs`（收集机制 `OptionVisitor` / `collect_options`）、
+`symbio/src/symbio_core/capability/option.rs`（选项读协议 `capability_option_fields`；收集管线 `collect_options` 在 `plugins/session/capabilities.rs`）、
 `symbio/src/plugins/session/options/mod.rs`（选项宿主：会话自有字段的声明）、
 `tauri/src/schemas/vdfs-form.ts`（前端方言 + 条件求值 / 紧凑取值规则）、
 `tauri/src/composables/useSessionOptionBar.ts` + `tauri/src/components/chat/ChatOptionBar.vue`
@@ -136,12 +136,13 @@ created: 2026-09-23
 候选菜单的选中态用同一份「生效值」判定（`isSelected`），保证「按钮文本」与
 「菜单勾选」永远同源。
 
-## 5. 收集机制（`OptionVisitor` + `Plugin::traverse`）
+## 5. 收集机制（`Registry` + `Plugin::traverse`）
 
-### 5.1 与 `CapabilityVisitor` 的关系
+### 5.1 与能力收集的关系
 
-选项收集是能力收集（`CapabilityVisitor` + `traverse(available_tools)`）的
-**平行第二通道**：
+选项行与能力行自 4e 起住**同一张表**（`Registry` 的 put/get/list，行种类
+`CapabilityRowKind::Option`）；变的只是「行住哪张表」，**广播通道仍各走各的**
+（选项走 `TRAVERSE_AVAILABLE_OPTIONS`）：
 
 ```
 session ──collect_options(parent, ctx)──▶ parent.traverse(available_options)
@@ -153,9 +154,10 @@ session ──collect_options(parent, ctx)──▶ parent.traverse(available_op
 - 共享的是**收集机制**：traverse 广播、上下文键（`PATH` + `OPTION_VISITOR`）、
   失败降级（父插件缺失返回空收集器；单插件失败仅记日志）。
 - 不复用的是**产物语义**：能力是「可调用对象」，选项是「字段声明」。
-  混装会让 `list_capability` 的消费方（LLM 工具协议）被迫理解选项结构。
-- 收集器接口 `OptionVisitor`（`register_option_field(order, field)` /
-  `list_option_fields()`）：按 `key` 去重（后者覆盖、保留先注册槽位），
+  区分靠表的**行种分族**——`list(CapabilityRowKind::Tool)`（LLM 工具协议）根本
+  看不见选项行，混装的代价在载荷类型上就挡住了。
+- 收集接口：写入是 `Registry::put`（选项行 `CapabilityRow::option(order, field)`），
+  读侧是 `capability_option_fields`：按 `key` 去重（后者覆盖、保留先注册槽位），
   按 `order` 稳定排序。
 - `order` **不下发**：它只是收集层排序用的号段，前端收到的是已排好序的数组
   ——数组序 = 展示序，比「各自按 order 再排一次」是更强的保证。
@@ -184,8 +186,8 @@ session ──collect_options(parent, ctx)──▶ parent.traverse(available_op
 
 1. 算出**候选集**（枚举运行期数据源，如 agent 目录 / provider 表）；
 2. 构造 `DetailField`（推荐用 `DetailOption` 造候选项，`icon` 给图标名）；
-3. `ctx.get::<Arc<dyn OptionVisitor>>(OPTION_VISITOR)` 后
-   `register_option_field(order, field)`。
+3. `ctx.get::<Arc<dyn Registry>>(OPTION_VISITOR)` 后
+   `put(CapabilityRow::option(order, field))`。
 
 ⚠️ **不要回填「当前选中值」**：值随节点 `attributes.metadata` 下发，前端按
 `field.key` 自取；「值 → 标签」由 `field.options` 承担。贡献方读会话状态来算当前值
@@ -318,7 +320,7 @@ session ──collect_options(parent, ctx)──▶ parent.traverse(available_op
 |---|---|
 | `symbio_core/schemas/options.rs`（`OptionNode` / `OptionAction` / `OptionType` / `OptionDisplay` / `OptionsRequest` / `OptionsResponse` / `OPTIONS_LIST` / `SESSION_STATE_ENDPOINT` / `OPTION_PICK_*`） | **已删除**（`OPTION_PICK_*` 迁 `detail.rs` 的 `DETAIL_PICK_*`；节点类型由 `DetailField` 取代） |
 | `worker/session/options/list` 路由与 `handle_list_options` | **已删除**（子层懒加载一并取消：候选只有一层） |
-| `OptionVisitor::register_option` / `register_batch` / `list_options` | **已删除**（只剩 `register_option_field` / `list_option_fields`） |
+| 选项收集器 `OptionVisitor` 的 `register_option` / `register_batch` / `list_options` | **已删除**（曾只剩 `register_option_field` / `list_option_fields`；4e 起整个 trait 退场，读写统一走 `Registry`） |
 | `plugins/session/options/mod.rs` 的 `*_option()` 节点构造器、`apply_chat_bar_display_defaults`、`inject_session_scope`、`find_node` | **已删除** |
 | agent / model 的 `contribute_options` 旧节点分支与 `current_label` 回填 | **已删除** |
 | 前端 `schemas/options.ts` / `services/options.ts` / `composables/useSessionOptions.ts` / `registry/optionIcons.ts` | **已删除**（图标并入 `registry/vdfsIcons.ts`） |

@@ -512,7 +512,7 @@ impl SessionPlugin {
     async fn contribute_memory(
         &self,
         ctx: &Arc<dyn PluginInvokeRequest>,
-        visitor: &Arc<dyn crate::symbio_core::CapabilityVisitor>,
+        visitor: &Arc<dyn crate::symbio_core::Registry>,
     ) {
         let sid = ctx.get(SESSION_ID).unwrap_or_default();
         let store = self.memory_store(&sid).await;

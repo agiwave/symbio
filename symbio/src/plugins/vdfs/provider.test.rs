@@ -76,7 +76,7 @@ impl VdfsProvider for Rec {
 /// 把替身登记为 **`.vdfsv2` 的服务者**（工具链路取根的唯一途径），
 /// 收到的路径一律是树内相对路径（`""`、`<子目录>/…`）。
 async fn tool_with_root(root: Arc<Rec>) -> ToolVdfs {
-    let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
+    let visitor: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
     visitor.put(CapabilityRow::mount_root(root)).await;
     ToolVdfs::new(visitor)
 }
@@ -211,7 +211,7 @@ async fn search_composes_list_walk() {
 /// 无容器注册根时降级为空文件系统（而非报错），物理层照常可用
 #[tokio::test]
 async fn missing_root_degrades_to_empty_virtual_layer() {
-    let visitor: Arc<dyn CapabilityVisitor> = Arc::new(DefaultToolVisitor::new());
+    let visitor: Arc<dyn Registry> = Arc::new(DefaultToolVisitor::new());
     let vdfs = ToolVdfs::new(visitor);
     let items = vdfs.list(&ctx(), ".vdfsv2").await.unwrap();
     assert!(items.is_empty(), "无容器 = 无资源类别，但仍是一棵合法的树");

@@ -10,7 +10,7 @@
 
 use super::*;
 use crate::providers::DefaultToolVisitor;
-use crate::symbio_core::{CapabilityRow, CapabilityVisitor, PluginSimpleRequest};
+use crate::symbio_core::{CapabilityRow, PluginSimpleRequest, Registry};
 
 /// 构造带 CAPABILITY_VISITOR 的上下文，按顺序注册 `prompts`
 async fn ctx_prompts(prompts: &[(&str, &str)]) -> Arc<dyn PluginInvokeRequest> {
@@ -23,7 +23,7 @@ async fn ctx_prompts(prompts: &[(&str, &str)]) -> Arc<dyn PluginInvokeRequest> {
     }
     ctx.set(
         crate::symbio_core::CAPABILITY_VISITOR,
-        visitor as Arc<dyn CapabilityVisitor>,
+        visitor as Arc<dyn Registry>,
     );
     ctx
 }

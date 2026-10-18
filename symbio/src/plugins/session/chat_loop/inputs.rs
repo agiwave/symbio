@@ -89,7 +89,7 @@ pub(crate) const FALLBACK_SYSTEM_PROMPT: &str = "You are a helpful MODEL assista
 /// 一次 LLM 请求所需的全部输入（收口 ② 的产物）。
 ///
 /// **唯一收集点**：系统提示词与工具在同一函数（[`prepare_turn_inputs`]）内依次取得
-/// ——同一个 `CapabilityVisitor`、同一个时刻；下游（推理 / 收尾）只读本结构，
+/// ——同一个 `Registry`、同一个时刻；下游（推理 / 收尾）只读本结构，
 /// 不再各自去 visitor 取值。
 pub(crate) struct TurnInputs {
     /// Turn 根节点 id（本步内创建，供流式占位与推理产物挂载）
@@ -106,7 +106,7 @@ pub(crate) struct TurnInputs {
 ///
 /// ## 硬约束：系统提示词与工具必须同机制、同时机、始终一起收集
 ///
-/// 两者都由插件经 `CapabilityVisitor` 注册、经同一次 `traverse` 汇集到同一个
+/// 两者都由插件经 `Registry` 注册、经同一次 `traverse` 汇集到同一个
 /// visitor 上——来源与生命周期完全一致。拆成两处、两个时机收集，会让"这一轮模型
 /// 看到的人格"与"这一轮模型能调的工具"出现不一致窗口。故本函数是它们的唯一取值
 /// 点，且两步紧邻、中间不插入任何其它动作。
@@ -139,7 +139,7 @@ pub(crate) async fn prepare_turn_inputs(
     turn: &mut TurnState,
     req: &TurnRequest,
 ) -> Result<TurnInputs, TurnExit> {
-    // ── ① 系统提示词 + 工具：同一函数、同一时刻、同一 CapabilityVisitor ──────
+    // ── ① 系统提示词 + 工具：同一函数、同一时刻、同一 Registry ──────
     let system_prompt = resolve_system_prompt(req.system_prompt.as_deref(), ctx).await;
 
     let tools = super::super::capabilities::tool_metas(ctx).await;
@@ -228,7 +228,7 @@ pub(crate) async fn prepare_turn_inputs(
     // 1) 内容节点淡化：B1 保护窗口（末条 + 最近 N 个内容节点）外的超大正文/思考
     //    做 head/tail 摘要（阈值取会话配置 line_threshold / token 上限 2048）；
     // 2) fade：轮次过多时淡化较早的工具结果（存储保留全文，视图每轮重建，天然幂等）；
-    // 3) 工具级骨架化：从 CapabilityVisitor 的能力声明（context_retention）动态解析
+    // 3) 工具级骨架化：从 Registry 的能力声明（context_retention）动态解析
     //    保留策略，LastOnly/LastN → 更早调用的参数与结果替换为占位文案
     //    （ToolCall↔Tool 配对完整保留，不会造成大模型逻辑断联）；
     // 4) nudge：水位提醒请求级注入（不落库、不占轮次窗口的 User 计数）；

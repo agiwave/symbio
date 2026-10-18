@@ -27,7 +27,7 @@
 //!
 //! | 部分 | 住哪 |
 //! |---|---|
-//! | 收集口（`CapabilityVisitor` 三方法）· 上下文键（`*_VISITOR`）· 遍历端点字面量 | `symbio_core::capability` |
+//! | 收集口（`Registry` 三方法）· 上下文键（`*_VISITOR`）· 遍历端点字面量 | `symbio_core::capability` |
 //! | 收集管线（`collect_capabilities` / `collect_options`） | 各自的宿主（session / composite） |
 //! | **内存版收集器**（本目录） | `providers/` |
 //!

@@ -13,8 +13,8 @@ use crate::symbio_core::Store;
 // 父模块顶层不再导入，`use super::*` 便带不过来——测试自己拿。
 use crate::providers::DefaultToolVisitor;
 use crate::symbio_core::{
-    Capability, CapabilityMeta, CapabilityRow, CapabilityVisitor, ExecEnv, PluginError,
-    PluginInvokeRequestExt,
+    Capability, CapabilityMeta, CapabilityRow, ExecEnv, PluginError, PluginInvokeRequestExt,
+    Registry,
 };
 use crate::symbio_core::{EventWalStore, LatencyTier};
 
@@ -75,7 +75,7 @@ async fn factory_decls() -> ToolDecls {
     }
     ctx.set(
         crate::symbio_core::CAPABILITY_VISITOR,
-        visitor as Arc<dyn CapabilityVisitor>,
+        visitor as Arc<dyn Registry>,
     );
     ToolDecls::of(&ctx).await
 }
@@ -1345,7 +1345,7 @@ async fn a_producer_only_principal_is_refused_the_task_table() {
             .await;
         req.set(
             crate::symbio_core::CAPABILITY_VISITOR,
-            visitor as Arc<dyn CapabilityVisitor>,
+            visitor as Arc<dyn Registry>,
         );
         Arc::new(req) as Arc<dyn PluginInvokeRequest>
     };

@@ -5,7 +5,7 @@
 //!    `mode=auto` 走 `PERMISSION_DENIED`（无人可授权时**不产卡**），其余产卡。
 //! 2. **注册面投影 [`ApprovalGate`]**——`meta` / `name` / `risk_for` 原样透传；
 //!    `execute` 只在闸门放行时才落到内层。这条是 vdfs / web / mcp / skill 都受益的
-//!    那条唯一路径（`DefaultToolVisitor::register`）。
+//!    那条唯一路径（`DefaultToolVisitor::put`）。
 
 use super::*;
 use crate::symbio_core::{failure_kind, ExecAbortSignal, ExecEventSink, PluginSimpleRequest};

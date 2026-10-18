@@ -847,7 +847,7 @@ impl VdfsProvider for EchoProvider {
 }
 
 /// 子插件的 provider 经 `Plugin::get_vfs_provider` 直接取回（系统链路），
-/// 目录名 = 实例表的挂载名；与 LLM 链路经 `CapabilityVisitor` 收集互不干扰。
+/// 目录名 = 实例表的挂载名；与 LLM 链路经 `Registry` 收集互不干扰。
 #[tokio::test]
 async fn sub_provider_fetched_via_trait_method() {
     let mut map: IndexMap<String, Arc<dyn Plugin>> = IndexMap::new();

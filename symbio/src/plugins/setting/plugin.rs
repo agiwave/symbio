@@ -72,7 +72,7 @@ impl SettingPlugin {
     /// 参与能力收集：交出**系统提示词**（本智能体的自述与偏好）。
     ///
     /// 全空 → 静默跳过：缺省状态不该往提示词里塞一个空标题，也不该进收集期错误桶。
-    async fn contribute_prompt(&self, visitor: &Arc<dyn crate::symbio_core::CapabilityVisitor>) {
+    async fn contribute_prompt(&self, visitor: &Arc<dyn crate::symbio_core::Registry>) {
         let cfg = self.config.read().await;
         if let Some(text) = segment::segment(&cfg) {
             visitor

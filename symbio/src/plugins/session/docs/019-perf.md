@@ -143,7 +143,7 @@ vdfs/list { path: "<id>/message", limit: 30, before: "<id>/message/<mid>" }
 | 3 | 删除归一 | 推迟 |
 
 另：`<根>/session` 清单**只列会话**——插件配置文件不再并列其中（可达性不变，
-进设置菜单走 ConfigurableVisitor 通道）。
+进设置菜单走可配置声明通道（`CONFIGURABLE_VISITOR`）。
 
 **当前基线**：`cargo test --lib` **528 用例**（原 518）；前端 vitest **18 文件 / 146 用例**。
 

@@ -114,7 +114,7 @@ created: 2026-09-16
   每个出口只负责构造 `TurnExit`。
 - **压缩判定与执行**同处 `apply_compaction`，顺序由函数内代码行序保证；
   内核 `compress_with_snapshot_core` 是唯一实现。
-- **提示词与工具**必须同机制、同时机收集：两者都经 `CapabilityVisitor` 注册、经 `traverse`
+- **提示词与工具**必须同机制、同时机收集：两者都经 `Registry`（收集口）注册、经 `traverse`
   汇集到同一个 visitor 的「会话输入」，来源与生命周期一致。
 - **启动条件**是显式判据（`TurnState::in_flight_tools`），不是「同步阻塞的隐式结果」。
 - **工具执行**归第 4 步的 v2 运行器（`execute_turn` 内部经 `DispatchPort` 分发）；
@@ -164,7 +164,7 @@ fn gate_turn(req: &TurnRequest, turn: &TurnState) -> Gate
 
 ```rust
 /// 一次 LLM 请求所需的全部输入。**唯一收集点**：系统提示词与工具在同一函数内
-/// 依次取得（同一个 CapabilityVisitor、同一个时刻），下游只读产物。
+/// 依次取得（同一个 `Registry`、同一个时刻），下游只读产物。
 struct TurnInputs {
     root_id: String,                    // Turn 根节点 id（本步内创建）
     system_prompt: String,              // resolve_system_prompt 唯一真源
@@ -188,7 +188,7 @@ async fn prepare_turn_inputs(
   **一轮只算一次**（`context::estimate_overhead_with_tools(system_prompt, &tools)`
   复用已收集的工具清单，不让 visitor 注册表被查三遍）。
 
-每轮收集本身**不触发 I/O**（`list_capability` / `list_system_prompts` 均为纯内存读
+每轮收集本身**不触发 I/O**（`Registry::list` 的工具行 / 提示词行读取均为纯内存读
 visitor 注册表），因此「每轮动态可调」是净收益：人格与工具集始终反映**当轮**注册表，
 中途新增的能力（如 MCP 新连上服务端）下一轮即可见。
 
@@ -322,7 +322,7 @@ pub async fn run_chat_loop(
         }
 
         // 步骤 3 · 本轮输入（收口 ②③，唯一准备点）
-        //   系统提示词 + 工具在同一函数内、同一时刻收集（同一 CapabilityVisitor）；
+        //   系统提示词 + 工具在同一函数内、同一时刻收集（同一 `Registry`）；
         //   派生 overhead（一轮一次）；压缩（apply_compaction）与视图重建亦在其内。
         let inputs = match prepare_turn_inputs(orch, &ctx, &mut context, &sink,
                                               &mut turn, &turn_req).await {
@@ -723,15 +723,15 @@ gemini           ["candidates","content","parts","text"]                -> 内�
 `http_request` / `heartbeat` / `agent_run` / `mcp.<server>.<tool>`（带**点**）/ `agent_<safe_id>_<tool>`）里
 **没有一个含 `/`**，真正违反协议字符集的是 MCP 的 `.`（OpenAI / Anthropic 只接受 `[A-Za-z0-9_-]`）。
 因此名字的线上形态由**一对具名函数**定义（`symbio_core/capability/tool_name.rs`）——`capability_to_wire`
-（`model` 出）与 `resolve`（`session` 入）是同一份契约的两半，两个插件互相不可见，core 是唯一共同可见处：
+（`model` 出）与 `capability_resolve`（`session` 入）是同一份契约的两半，两个插件互相不可见，core 是唯一共同可见处：
 
 ```rust
 pub fn capability_to_wire(canonical: &str) -> String            // 字符集之外的字符一律 → "__"
-pub fn resolve<'a>(wire: &str, known: impl IntoIterator<Item = &'a str>) -> Option<&'a str>
+pub fn capability_resolve<'a>(wire: &str, known: impl IntoIterator<Item = &'a str>) -> Option<&'a str>
 ```
 
 - 出方向：**一个具名函数**，字符集定义只有一份；入方向：**查注册表**
-  （`visitor.list_capability()` 的名字集合），不反演。**字面名优先**——`mcp__fs__read` 既可能是
+  （`visitor.list(CapabilityRowKind::Tool)` 工具行的名字集合），不反演。**字面名优先**——`mcp__fs__read` 既可能是
   `mcp.fs.read` 的线上形态、也可能本身就是这个名字，只有集合能回答；
 - 解析失败 → **不猜**，按原样交给路由，由它给出诚实的 `NotFound`（反演猜错会调起**另一个工具**）。
   命中判据是「解析成功」而不是「按线上名查表」——带非法字符的名字按线上名永远查不到。

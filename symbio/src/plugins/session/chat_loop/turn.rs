@@ -41,7 +41,7 @@ pub(crate) async fn settle_reasoning(
         detach_if_flat(n, root_id, orchestrator.presentation_tree);
     }
     // 工具上下文保留策略：策略不 Stamp 到节点 meta 持久化，
-    // 由 run_chat_loop 在构建 LLM 请求前从 CapabilityVisitor 动态解析，
+    // 由 run_chat_loop 在构建 LLM 请求前从 Registry 动态解析，
     // 节点 name 即 LLM 可见工具名，与声明名直接匹配。
     context.messages.extend(new_msgs);
 
@@ -132,7 +132,7 @@ pub(crate) async fn close_turn(
     }
 
     // ── 主动压缩工具拦截 ─────────────────────────────────────────────
-    // context_compact 不走 CapabilityVisitor 分发：它需要编排器内部的
+    // context_compact 不走 Registry 分发：它需要编排器内部的
     // 压缩链路（LLM 摘要 + 上下文替换 + 会话持久化）。
     // 在此拆分：压缩调用就地执行并生成合成工具结果；其余工具正常分发。
     // 门控：仅当工具压缩开关开启时拦截。

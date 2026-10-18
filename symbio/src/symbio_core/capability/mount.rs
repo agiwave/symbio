@@ -1,4 +1,4 @@
-//! VDFS 挂载族的**读写协议**——表（`CapabilityVisitor` 的 `put` / `get` / `list`）
+//! VDFS 挂载族的**读写协议**——表（`Registry` 的 `put` / `get` / `list`）
 //! 之上的挂载专用词法（AR-025 §5 步 4d）。
 //!
 //! ## 一族两形：挂载点（多行）与根（单槽）
@@ -31,7 +31,7 @@
 //! 与工具 / 模型 / 提示词**共用同一次 `traverse(TRAVERSE_AVAILABLE_TOOLS)` 广播**：
 //! 插件在注册自己挂载点的同时顺带注册工具，会话链路与前端链路因此拿到同一份集合。
 
-use super::{CapabilityRowKind, CapabilityVisitor};
+use super::{CapabilityRowKind, Registry};
 use crate::symbio_core::VdfsProvider;
 use std::sync::Arc;
 
@@ -39,9 +39,7 @@ use std::sync::Arc;
 ///
 /// 无容器注册时为 `None`（等价于「系统里没有资源」）——调用方给空根降级
 /// （`plugins/vdfs/host.rs::root_of`），不在这里替它造一个。
-pub async fn capability_vdfs_root(
-    visitor: &dyn CapabilityVisitor,
-) -> Option<Arc<dyn VdfsProvider>> {
+pub async fn capability_vdfs_root(visitor: &dyn Registry) -> Option<Arc<dyn VdfsProvider>> {
     visitor
         .list(CapabilityRowKind::Mount)
         .await
@@ -53,9 +51,7 @@ pub async fn capability_vdfs_root(
 /// 列出已注册的挂载点：`(目录名, 实现)`，按注册顺序（= 广播序）。
 ///
 /// 根**不在**这张清单里：它不是「一个挂载点」，是服务整棵子树的那一个（见模块文档）。
-pub async fn capability_mounts(
-    visitor: &dyn CapabilityVisitor,
-) -> Vec<(String, Arc<dyn VdfsProvider>)> {
+pub async fn capability_mounts(visitor: &dyn Registry) -> Vec<(String, Arc<dyn VdfsProvider>)> {
     visitor
         .list(CapabilityRowKind::Mount)
         .await
@@ -69,10 +65,7 @@ pub async fn capability_mounts(
 }
 
 /// 按目录名查挂载点（根不可按名查：它的行名是保留值，不对外）。
-pub async fn capability_mount(
-    visitor: &dyn CapabilityVisitor,
-    name: &str,
-) -> Option<Arc<dyn VdfsProvider>> {
+pub async fn capability_mount(visitor: &dyn Registry, name: &str) -> Option<Arc<dyn VdfsProvider>> {
     let row = visitor.get(name).await?;
     if row.active() {
         return None;

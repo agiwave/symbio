@@ -26,7 +26,7 @@
 //! 与 model 插件实例，原样转发会让子 Agent **劫持**整个 `<根>` 与模型服务——
 //! 系统侧的全部挂载点瞬间消失。因此这两项**丢弃**（记 debug）。
 //!
-//! 模型族的丢弃写在 [`CapabilityVisitor::put`] 上（按行的族别判），因为 4b 之后
+//! 模型族的丢弃写在 [`Registry::put`] 上（按行的族别判），因为 4b 之后
 //! 模型服务**不再是另一套方法**：model 插件逐行 `put` 写入，作用域这一层拦在同一个
 //! 入口上——写入口只有一个，作用域规则也就只有一处（见 `capability/model.rs`）。
 //!
@@ -34,8 +34,8 @@
 //! 若盖掉系统的 `work`，用户就改不到工作区记忆了——那是回归。
 
 use crate::symbio_core::{
-    Capability, CapabilityMeta, CapabilityRow, CapabilityRowKind, CapabilityVisitor, ExecEnv,
-    PluginError, PluginInvokeRequest,
+    Capability, CapabilityMeta, CapabilityRow, CapabilityRowKind, ExecEnv, PluginError,
+    PluginInvokeRequest, Registry,
 };
 use async_trait::async_trait;
 use serde_json::Value;
@@ -43,13 +43,13 @@ use std::sync::Arc;
 
 /// 子 Agent 插件树的注册代理
 pub struct SubAgentVisitor {
-    inner: Arc<dyn CapabilityVisitor>,
+    inner: Arc<dyn Registry>,
     /// 智能体 id（目录名）
     agent_id: String,
 }
 
 impl SubAgentVisitor {
-    pub fn new(inner: Arc<dyn CapabilityVisitor>, agent_id: impl Into<String>) -> Self {
+    pub fn new(inner: Arc<dyn Registry>, agent_id: impl Into<String>) -> Self {
         Self {
             inner,
             agent_id: agent_id.into(),
@@ -116,7 +116,7 @@ impl Capability for PrefixedCapability {
 }
 
 #[async_trait]
-impl CapabilityVisitor for SubAgentVisitor {
+impl Registry for SubAgentVisitor {
     async fn put(&self, row: CapabilityRow) {
         // 模型族**整体丢弃**（生效者与目录都归系统 Agent，见模块文档）：
         // 写入方（model 插件的 traverse）逐行 put，规则只需在这一个入口上挡一次。
