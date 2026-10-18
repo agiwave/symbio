@@ -11,6 +11,7 @@
 //!   删除），再把变更投进订阅表。「谁能改会话」的答案在 `commands` 一处。
 
 use super::*;
+use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::{
     vdfs_from_plugin_error, vdfs_host_ctx, VdfsAccess, VdfsActionResult, VdfsChange,
     VdfsChangeSink, VdfsContent, VdfsContext, VdfsError, VdfsNewType, VdfsNode, VdfsProvider,

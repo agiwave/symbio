@@ -12,7 +12,7 @@
 //! `start_turn` 的调用方因此只剩收件箱消费者与恢复动作，二者都不经路由。
 
 use super::super::chat_session::Carrier;
-use super::super::plugin::{append_and_publish, PublishTarget};
+use super::super::transcript::{append_and_publish, PublishTarget};
 use super::super::types::Session;
 use super::*;
 

@@ -19,15 +19,15 @@
 //! 本文件保留：插件结构体与构造、内部能力（`impl SessionPlugin`）、协议路由与
 //! 能力注册（`impl Plugin`）、配置定义，以及各子模块的**共享面重导出**。
 
-use super::chat_session::{Carrier, MessageChange, PersistentChatSession};
+use super::chat_session::PersistentChatSession;
 pub use super::config::{PresentationTree, SessionConfig};
 use super::types::{Session, SessionSummary};
 use crate::providers::MemoryFile;
-use crate::symbio_core::{chat_node as cm, session_chat};
+use crate::symbio_core::session_chat;
 use crate::symbio_core::{
-    plugin_dir_from_ctx, CapabilityRow, ExecEventSink, Plugin, PluginConfigFile, PluginDir,
-    PluginError, PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta,
-    PluginPayload, PluginStopReason, PLUGIN_FILE, PLUGIN_ID_SESSION, SESSION_ID,
+    plugin_dir_from_ctx, CapabilityRow, Plugin, PluginConfigFile, PluginDir, PluginError,
+    PluginInvokeRequest, PluginInvokeRequestExt, PluginInvokeResponse, PluginMeta, PluginPayload,
+    PluginStopReason, PLUGIN_FILE, PLUGIN_ID_SESSION, SESSION_ID,
 };
 use crate::symbio_core::{
     DetailDefinition, DetailField, DetailOption, DetailSection, DynVdfsProvider, VdfsAccess,
@@ -96,135 +96,6 @@ pub struct SessionPlugin {
 
 use super::orchestrator::{Convergence, TurnLauncher};
 use super::store::SessionStore;
-
-// ==================== 落库回包（§3.4 的唯一落地点） ====================
-//
-// 「谁落库、谁发帧」这条硬不变量（`docs/022-vdfs-session-messages.md` §3.4）原先由三个
-// 落库调用点各自记住，于是各写各的：帧套不套 `llm_message_frame`、按捕获的 sink 发
-// 还是按会话 id 现场解析转写，全都不同。漏发一次的后果是**静默的**（节点永持在途号、
-// 下一条用户消息跳到它前面），因此把「落库 → 逐条下发权威副本」收成一个函数，
-// 调用点只声明**走哪条通道**。
-
-/// 落库回包的**发布通道**：拿到转写的方式有两种，帧怎么发只有一种。
-///
-/// | 通道 | 用在哪 | 落点 |
-/// |---|---|---|
-/// | [`Self::Sink`] | 执行期（chat_loop 主循环） | `ExecEventSink`（生产形态 `TranscriptSink` → `Transcript::apply`） |
-/// | [`Self::Transcript`] | 编排入口与压缩域 | [`super::active::ActiveSessionManager::transcript_apply`]（按会话 id 现场解析） |
-///
-/// 两条通道的差别只在**怎么拿到转写**；帧的构造与逐条下发都在
-/// [`append_and_publish`] 里，不允许在调用点再写一份。
-pub(crate) enum PublishTarget<'a> {
-    /// 执行期出口：帧直投 sink。
-    Sink(&'a ExecEventSink),
-    /// 插件出口：按会话 id 解析转写后逐条应用。
-    Transcript {
-        mgr: &'a super::active::ActiveSessionManager,
-        session_id: &'a str,
-    },
-}
-
-impl PublishTarget<'_> {
-    async fn publish(&self, message: cm::ChatNode) {
-        match self {
-            Self::Sink(sink) => sink.emit(message).await,
-            Self::Transcript { mgr, session_id } => {
-                mgr.transcript_apply(session_id, crate::symbio_core::llm_message_frame(&message))
-                    .await
-            }
-        }
-    }
-}
-
-/// 落库 + **落库回包**的唯一实现（`docs/022-vdfs-session-messages.md` §3.4）。
-///
-/// 两步顺序写死在这里：`apply(Born)` 落库（存储在临界区内给消息补权威 `seq` /
-/// `timestamp`，交回**权威副本**），随即把权威副本逐条下发——权威号由此换入实时面。
-///
-/// ## 为什么发的是交回的那份，而不是入参那份
-///
-/// 号是**临界区内补在存储自己的副本上**的，调用方手里那条没有号——发它等于把「没有
-/// 号」写进前端（这也是 `append_messages` 返回消息而非条数的唯一原因）。因此这里
-/// 下发的是它交回的权威副本，不必再从存储读回来找。
-///
-/// 正文以 `content`（整条替换）而非 `delta` 下发，正是为了这里：持有乐观副本 / 在途
-/// 副本的消费端要**替换**成权威正文，而不是往自己那份后面再拼一遍。这也是 `delta` /
-/// `content` 两个字段必须分开的原因——同一个消费端既可能需要追加（流式），也可能
-/// 需要替换（权威副本对齐），而帧必须自证是哪一种。
-///
-/// ## 落库补身份在这里，不在别处（[plan/11 批 1](../../../../docs/004-plan/009-多执行器与多主体加固实施方案.md "PL-009-多执行器与多主体加固实施方案") ②）
-///
-/// 本函数是**唯一的**消息追加写点（生产代码里没有第二处往列表里追加节点），
-/// 所以 [`attributed`] 补在这里就等于「每条持久化消息都带身份」——补在各处建消息
-/// 的地方则必然漏：建消息的写点有七八处（用户发言 / 助手正文 / 工具结果 / 压缩
-/// 记录 / 系统说明），漏一处就造出「有身份、没有身份」两种同义消息。
-///
-/// `session_principal` 是**本会话主体**，谁说话按 role 分：人（`user`）不随会话变，
-/// 其余都是本会话主体说的。
-///
-/// ## 用户发言那条为什么也在这个出口里
-///
-/// 它由 `orchestrator/entry.rs` 直连存储追加——前端手里只有自己的**乐观副本**，
-/// 其 `seq` 是本地游标发的号，永远拿不到存储分配的那个；不回包就是两套序号空间并存。
-///
-/// 只在**成功**时下发；落库失败原样返回 `Err`，错误怎么呈现交给调用方——三条路径的
-/// 降级策略各不相同（chat_loop 发 `Warn` 继续、编排广播失败结局并中断、压缩只记日志），
-/// 那是各自的领域判定，不该被这个出口统一掉。
-pub(crate) async fn append_and_publish(
-    session: &PersistentChatSession,
-    messages: Vec<cm::ChatNode>,
-    carrier: Carrier,
-    to: PublishTarget<'_>,
-    session_principal: &str,
-) -> Result<(), PluginError> {
-    // 事实落格收在 `apply` 里（[ADR-054] 决策 2 的顺序反转）：`carrier` 声明
-    // 「这条节点的诞生事实由谁落」——运行器承载的（用户发言 / 助手正文 / 工具结果）
-    // 不另落，没有承载格的（压缩记录）落 `message.added`。
-    let persisted = session
-        .apply(MessageChange::Born {
-            nodes: messages
-                .into_iter()
-                .map(|m| attributed(m, session_principal))
-                .collect(),
-            carrier,
-        })
-        .await?;
-    for message in persisted {
-        to.publish(message).await;
-    }
-    Ok(())
-}
-
-/// 落库前补身份的**唯一执行点**：写方知道这一轮是谁在说话，只补**没标过**的——
-/// 转播进来的别的会话 / 子智能体消息带着自己的主体，不得被本会话覆盖（那是串主体）。
-///
-/// 人说的话是 `user`（会话外的一方，不随会话变），其余（助手正文、工具结果、
-/// 压缩记录、系统说明）都是本会话主体说的。见 [`append_and_publish`]：为什么补
-/// 在落库这一个点上、而不是各处建消息时。
-fn attributed(m: cm::ChatNode, session_principal: &str) -> cm::ChatNode {
-    if m.principal.is_some() {
-        return m;
-    }
-    use crate::symbio_core::principal::Principal;
-    let mut out = m;
-    // 归属判据与 [T-146] 的字符串主体一致，这里只把它折成 `Principal` 结构体：
-    // `person/local` ⇒ Person 一族，`session/*` ⇒ Agent 一族（`from_legacy` 按 namespace 派生）。
-    //
-    // [T-147d-iii] `role = tool` 的结果节点归**工具自己**（Tool 一族，地址由
-    // `meta.tool_name` 合成）——authz 登记的主体行（`vdfs/write`…）就是这批值。
-    // 没有工具名的（协议级失败调用）退回本会话主体，与字段删除前的今天同格。
-    out.principal = Some(match out.node_role() {
-        Some(cm::NodeRole::User) => {
-            Principal::from_legacy(crate::symbio_core::authz::PRINCIPAL_USER)
-        }
-        Some(cm::NodeRole::Tool) => match out.tool_name() {
-            Some(name) => Principal::tool_principal(name),
-            None => Principal::from_legacy(session_principal),
-        },
-        _ => Principal::from_legacy(session_principal),
-    });
-    out
-}
 
 impl SessionPlugin {
     /// 主构造函数（Factory 机制使用）
@@ -310,8 +181,8 @@ impl SessionPlugin {
     // 通道上的消息喂给同一个 `Transcript`——上游有多少个发射点都无所谓，
     // 到写入点只剩一个。
     //
-    // 落库之后的**回包**（权威 `seq` 换入）另有唯一出口：模块级 `append_and_publish`，
-    // 三条落库路径（主循环增量 / 用户发言 / 压缩节点）都经它逐条下发权威副本。
+    // 落库之后的**回包**（权威 `seq` 换入）另有唯一出口：`transcript::publish` 的
+    // `append_and_publish`，三条落库路径（主循环增量 / 用户发言 / 压缩节点）都经它逐条下发权威副本。
 
     pub fn metadata() -> PluginMeta {
         PluginMeta::new("session", "会话")

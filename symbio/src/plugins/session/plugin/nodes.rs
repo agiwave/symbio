@@ -17,6 +17,7 @@
 //! `pub(crate)`，由 `plugin.rs` 统一重导出；只在本文件内部使用的保持私有。
 
 use super::*;
+use crate::symbio_core::chat_node as cm;
 use crate::symbio_core::{
     VdfsAccess, VdfsContent, VdfsContext, VdfsError, VdfsNode, VdfsResult, VDFS_STATUS_ACTIVE,
     VDFS_STATUS_FAILED, VDFS_STATUS_WORKING,

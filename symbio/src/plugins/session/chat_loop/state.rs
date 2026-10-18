@@ -7,7 +7,7 @@
 //! `resume.rs` 经 `chat_loop::X` 引用）故为 `pub`；其余为 `pub(super)`——
 //! 只在 `chat_loop` 及其子模块内可见。
 
-use super::super::plugin::PublishTarget;
+use super::super::transcript::PublishTarget;
 use super::progress::ProgressPolicy;
 use super::*;
 use crate::symbio_core::chat_node::{CHAT_STYLE_TAG_COMPRESSION, CHAT_STYLE_TAG_REASONING};
@@ -568,7 +568,7 @@ impl CompressionEmitter {
 
     /// 落库回包用的**发布通道**（[`PublishTarget::Transcript`]：按会话 id 现场解析转写）。
     ///
-    /// 「落库 → 逐条下发权威副本」整段动作在 `plugin::append_and_publish`（§3.4 的
+    /// 「落库 → 逐条下发权威副本」整段动作在 `transcript::publish::append_and_publish`（§3.4 的
     /// 唯一落地点）里，这里只负责给出通道——压缩域没有自己的 `ExecEventSink`，
     /// 压缩期的出帧是被静音的（见模块头）。
     ///

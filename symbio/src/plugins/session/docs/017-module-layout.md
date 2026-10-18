@@ -52,7 +52,7 @@ created: 2026-09-16
 | 上下文治理 | `context.rs` + `context/{pipeline,view,window,prompt}.rs` | 「发给大模型之前」的全部处理：压缩策略与执行流水线（压缩内核 `compress_with_snapshot_core` 的唯一落点是 `context/pipeline.rs`）、请求视图四步剪裁、工具骨架化、压缩提示词协议 |
 | 会话读写 | `chat_session.rs` + `chat_session/{read,write}.rs` | 读路径：三层清理与 `User` 轮次对齐的上下文装配；写路径：保存边界（轮数对齐裁剪 / 历史工具链裁剪 / 归档配对清理） |
 | 变更入口 | `commands.rs` | 会话与消息的**写语义**：新建 / 覆盖 / 删除会话，改写 / 截断 / 清空消息。VDFS（`write` / `delete` / `action`）与编排入口都只是它的调用方——「谁能改会话」的答案只在这一处（模块头说明它为什么仍在 `impl SessionPlugin` 上） |
-| 转写 | `transcript.rs` + `transcript/{frames,deliver,inbox,supplements,autonomous}.rs` | 消息级变更的**唯一写入点与发射器**、帧构造 / 日志合并 / 合帧窗口（`deliver.rs`）、状态帧与删除帧出口、收件箱入队与消费挑选、轮边界把 n 条补充并成**一条** `User` 消息（`supplements.rs`——存储裁剪按 User 轮次计数，逐条追加会多吃掉保留预算）、自主开轮的落格窗口（`autonomous.rs`，写臂识别 `meta.trigger` 后经它开这一轮） |
+| 转写 | `transcript.rs` + `transcript/{frames,deliver,publish,inbox,supplements,autonomous}.rs` | 消息级变更的**唯一写入点与发射器**、帧构造 / 日志合并 / 合帧窗口（`deliver.rs`）、**落库回包的唯一出口**（`publish.rs`——「谁落库、谁发帧」那条 §3.4 硬不变量，原先住在 `plugin.rs` 里，被切的两片因此反过来引用汇编层，归位理由见该文件头）、状态帧与删除帧出口、收件箱入队与消费挑选、轮边界把 n 条补充并成**一条** `User` 消息（`supplements.rs`——存储裁剪按 User 轮次计数，逐条追加会多吃掉保留预算）、自主开轮的落格窗口（`autonomous.rs`，写臂识别 `meta.trigger` 后经它开这一轮） |
 | 持久化 | `store/mod.rs` | 一种磁盘布局、两种驻留方式；没有可切换的存储后端 |
 | 工具执行 | `tools.rs` + `tools/{tool_executor,tool_result_guard}.rs` | 模型侧工具从分发到结果处理的全链路、L0 结果守卫与滚动存档；域根 `tools.rs` 是对编排层的门面 |
 | 能力与选项收集 | `capabilities.rs` | `collect_capabilities`（工具）与 `collect_options`（选项字段）两个 traverse 收集器，同处一地 |
@@ -91,7 +91,7 @@ created: 2026-09-16
 
 | 文件 | 符号 | 归位方向 |
 |---|---|---|
-| `context/pipeline.rs` | `append_and_publish`、`ChatOrchestrator`、`SessionContext` | 落库回包出口并入 commands 域；压缩流水线与主循环的循环依赖改签名 |
+| `context/pipeline.rs` | `ChatOrchestrator`、`SessionContext` | 压缩流水线与主循环的循环依赖改签名（同批的 `append_and_publish` 已归位转写域，见 `transcript/publish.rs`） |
 | `resume.rs` | `ChatOrchestrator` | 恢复入口由编排层注入回调，领域层不再命名编排类型 |
 | `transcript.rs` | `message_path` | 归位 paths 域（寻址规则同源） |
 | `transcript/inbox.rs` | `inbox_item_node`、`inbox_item_path` | inbox 域自持（条目的地址与节点视图） |

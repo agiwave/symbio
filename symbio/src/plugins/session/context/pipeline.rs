@@ -11,8 +11,8 @@ use super::*;
 
 use super::super::chat_loop::{ChatOrchestrator, SessionContext};
 use super::super::chat_session::{Carrier, MessageChange, PersistentChatSession};
-use super::super::plugin::append_and_publish;
 use super::super::tools::fire_hook;
+use super::super::transcript::append_and_publish;
 use super::super::transcript::llm_emit_removed;
 use crate::plugin_warn;
 use crate::symbio_core::chat_node::{MessageContent, NodeStatus};

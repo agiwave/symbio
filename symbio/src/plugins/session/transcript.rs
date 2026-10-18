@@ -57,6 +57,10 @@ pub(crate) mod supplements;
 
 // 帧构造 / 日志合并 / 合帧窗口（纯机械；状态机仍在根）
 mod deliver;
+/// 落库回包（§3.4 的唯一落地点）：`append_and_publish` 与它的两条发布通道。
+/// 原先住在 `plugin.rs`，被切的两片因此反过来引用宿主外壳——[ADR-075](../../../../docs/010-adr/075.md "ADR-075")
+/// 前置 P3 的第一处归位，理由写在 `publish.rs` 模块头。
+pub(crate) mod publish;
 // 域内共享面：状态机（`impl Transcript`）与本域测试经 `super::*` 取用。
 use self::deliver::{
     frame_log_of, render_frame_line, DeltaLogCoalescer, FrameLog, FrameLogLevel, PendingDelta,
@@ -66,6 +70,7 @@ use self::deliver::{
 // 域内门面：状态帧 / 删除帧的构造与发射经 `transcript::X` 取用，调用方不感知
 // 域内文件划分（域内子模块经 `use super::*` 取用门面）。
 pub use self::frames::{llm_emit_removed, llm_emit_state, llm_state_frame};
+pub(crate) use self::publish::{append_and_publish, PublishTarget};
 
 /// 在途消息**位置序号**的起点。
 ///

@@ -3,7 +3,7 @@
 //! 集中在此的目的：让主循环与单轮逻辑只表达"做什么"，把"写到哪里"收在一处。
 
 use super::super::chat_session::Carrier;
-use super::super::plugin::{append_and_publish, PublishTarget};
+use super::super::transcript::{append_and_publish, PublishTarget};
 use super::*;
 use crate::symbio_core::chat_node::CHAT_STYLE_TAG_RUN;
 
@@ -42,7 +42,7 @@ pub(crate) async fn finalize_turn_root(
 ///
 /// `seq` 只在存储写入时分配；助手侧节点的号是转写建节点时发的**在途号**
 /// （`INFLIGHT_SEQ_BASE = 1 << 50`）。落库后若不回包，这些节点就**永远持在途号**：
-/// 用户消息经 `append_and_publish`（`plugin.rs`）拿到的是小存储号（1、2、3…），助手侧却是
+/// 用户消息经 `append_and_publish`（`transcript/publish.rs`）拿到的是小存储号（1、2、3…），助手侧却是
 /// 1e15 量级——两套序号空间并存在同一棵树上，下一条用户消息会排到上一轮助手消息
 /// **之前**，前端于是显示 `user-user-assistant-assistant`（重开会话才恢复，因为整份
 /// 回读只走存储号）。这就是 §3.4 那条硬不变量「每一条被落库的消息都必须发一次变更
